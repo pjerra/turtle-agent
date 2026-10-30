@@ -102,6 +102,31 @@ type walkFakeAgent struct {
 
 	// hireCap is the server's hire limit (0: raidwalk.HireCap, the 39 of onyxia-kill-plan C6).
 	hireCap int
+
+	// The fault injector's fakes (raid_walk_inject_test.go): the server's selection (target/gps), the per-bot
+	// positions the frames carry, and the P0 finding 4 lag (a selection takes effect one command later).
+	ownGUID              packet.GUID // the commander's GUID when a test sets one
+	ownPos               [3]float32  // the commander's own position (.go xyz updates it)
+	pos                  map[string][3]float32
+	selGUID              packet.GUID  // the selection the server has in force
+	queuedSel            *packet.GUID // a target RPC the server applies after the next .gps (lagTargets)
+	lagTargets           bool
+	noSelect             bool // .gps always reports the commander (a server that never applies the select)
+	statusTargetMismatch bool
+	noPartyFrames        bool        // bot_view frames without a party (an injector with no bot positions)
+	gmAt                 []time.Time // when each gm line was sent
+	targetCalls          []packet.GUID
+	targetAt             []time.Time // when each target RPC arrived
+
+	// The identity read-back (`.pinfo`): pinfoGUID names that unit instead of the server's selection,
+	// pinfoLagTargets reports the selection one target RPC behind, prevSel is the selection before the newest
+	// target, and gmFail fails one gm line's RPC without its game side effect.
+	pinfoGUID       packet.GUID
+	pinfoName       string // names an untracked player instead of the selection's party record
+	noPInfo         bool   // .pinfo never answers (the reply waits out its own deadline)
+	pinfoLagTargets bool
+	prevSel         packet.GUID
+	gmFail          func(line string) error
 }
 
 func newFakeAgent(t *testing.T, clock *fakeClock) *walkFakeAgent {
@@ -135,10 +160,17 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		_ = json.Unmarshal(raw, &p)
 		f.mu.Lock()
 		f.gm = append(f.gm, p.Text)
+		f.gmAt = append(f.gmAt, f.clock.now())
 		f.gmUnits = append(f.gmUnits, f.unitsN)
 		f.timeline = append(f.timeline, timelineEntry{Text: p.Text, Targeted: f.targeted})
 		onGM := f.onGM
+		fail := f.gmFail
 		f.mu.Unlock()
+		if fail != nil {
+			if err := fail(p.Text); err != nil {
+				return err
+			}
+		}
 		f.gmSide(p.Text)
 		if onGM != nil {
 			onGM(p.Text)
@@ -159,6 +191,32 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		} else {
 			v = fn(n)
 		}
+	case "target":
+		var p struct {
+			GUID string `json:"guid"`
+		}
+		_ = json.Unmarshal(raw, &p)
+		g, err := packet.ParseGUID(p.GUID)
+		if err != nil {
+			f.t.Errorf("target %q: %v", p.GUID, err)
+		}
+		f.mu.Lock()
+		if f.statusTargetMismatch {
+			f.status.Target = 0
+		} else {
+			f.status.Target = g
+		}
+		f.prevSel = f.selGUID
+		if f.lagTargets {
+			queued := g
+			f.queuedSel = &queued
+		} else {
+			f.selGUID = g
+		}
+		f.targetCalls = append(f.targetCalls, g)
+		f.targetAt = append(f.targetAt, f.clock.now())
+		f.mu.Unlock()
+		v = objects.Unit{GUID: g}
 	case "commander":
 		var p commanderReq
 		_ = json.Unmarshal(raw, &p)
@@ -211,10 +269,111 @@ func (f *walkFakeAgent) gmSide(line string) {
 			m, err := strconv.Atoi(fields[5])
 			f.mu.Lock()
 			f.x, f.y, f.z = float32(x), float32(y), float32(z)
+			f.ownPos = [3]float32{f.x, f.y, f.z}
+			f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
 			if err == nil {
 				f.status.Map = uint32(m)
 			}
 			f.mu.Unlock()
+		}
+	case line == ".gps":
+		f.gpsSide()
+	case line == ".pinfo":
+		f.pinfoSide()
+	case line == ".die":
+		f.dieSide()
+	case strings.HasPrefix(line, ".summon "):
+		name := strings.TrimPrefix(line, ".summon ")
+		f.mu.Lock()
+		if f.pos == nil {
+			f.pos = map[string][3]float32{}
+		}
+		f.pos[name] = [3]float32{f.x, f.y, f.z}
+		f.mu.Unlock()
+	}
+}
+
+// gpsSide pushes the `.gps` reply for the selection the server has in force (P0: the reply lists the SELECTED unit,
+// and a target RPC takes effect one command later when lagTargets is set).
+func (f *walkFakeAgent) gpsSide() {
+	f.mu.Lock()
+	sel, own := f.selGUID, f.ownGUID
+	pos := f.ownPos
+	mapID := f.status.Map
+	if !f.noSelect && sel != 0 && sel != own {
+		for i, n := range f.party {
+			if packet.GUID(1000+i) == sel {
+				if p, ok := f.pos[n]; ok {
+					pos = p
+				}
+			}
+		}
+	}
+	if f.queuedSel != nil {
+		f.selGUID = *f.queuedSel
+		f.queuedSel = nil
+	}
+	f.mu.Unlock()
+	// The reply is the next events on the wire (the queued run lines are older), so it goes in front.
+	reply := []queuedEvent{
+		{raw: fmt.Sprintf("X: %.6f Y: %.6f Z: %.6f Orientation: 0.000000", pos[0], pos[1], pos[2])},
+		{raw: fmt.Sprintf("GroundZ: 0.000000 FloorZ: 0.000000 Have height data (Map: %d VMap: 1)", mapID)},
+	}
+	f.mu.Lock()
+	f.lines = append(reply, f.lines...)
+	f.mu.Unlock()
+}
+
+// pinfoSide pushes a `.pinfo` (no name) reply for the selected player, in the core's
+// LANG_PINFO_ACCOUNT shape: the first line names the character with a player link and its
+// guid counter. pinfoGUID / pinfoName model a read that names another unit (or an untracked
+// player), pinfoLagTargets a read one target RPC behind, noPInfo one that never answers.
+func (f *walkFakeAgent) pinfoSide() {
+	f.mu.Lock()
+	if f.noPInfo {
+		f.mu.Unlock()
+		return
+	}
+	sel := f.selGUID
+	if f.noSelect { // the server never applied a selection: the previous one (the commander) still stands
+		sel = f.ownGUID
+	}
+	if f.pinfoLagTargets {
+		sel = f.prevSel
+	}
+	if f.pinfoGUID != 0 {
+		sel = f.pinfoGUID
+	}
+	name := f.pinfoName
+	if name == "" && sel != 0 && sel == f.ownGUID {
+		name = f.status.Character
+	} else if name == "" && sel != 0 {
+		for i, n := range f.party {
+			if packet.GUID(1000+i) == sel {
+				name = n
+			}
+		}
+	}
+	f.mu.Unlock()
+	line := "There is no such player."
+	if name != "" {
+		line = fmt.Sprintf("Human Warrior |cffffffff|Hplayer:%s|h[%s]|h|r (guid: %d) Account: acct (id: 1) GMLevel: 3",
+			name, name, uint64(uint32(sel)))
+	}
+	// The reply is the next events on the wire (the queued run lines are older), so it goes in front.
+	f.mu.Lock()
+	f.lines = append([]queuedEvent{{raw: line}}, f.lines...)
+	f.mu.Unlock()
+}
+
+// dieSide kills the unit the server has selected, as `.die` does (P0: the selected unit only).
+func (f *walkFakeAgent) dieSide() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, n := range f.party {
+		if packet.GUID(1000+i) == f.selGUID {
+			f.dead[n] = true
+			return
 		}
 	}
 }
@@ -280,6 +439,11 @@ func (f *walkFakeAgent) viewPage() any {
 	for k, v := range f.dead {
 		dead[k] = v
 	}
+	pos := map[string][3]float32{}
+	for k, v := range f.pos {
+		pos[k] = v
+	}
+	noParty := f.noPartyFrames
 	fn := f.hostilesFn
 	f.mu.Unlock()
 	frame := &tbm.ViewFrame{Seq: uint64(n)}
@@ -288,7 +452,12 @@ func (f *walkFakeAgent) viewPage() any {
 		if dead[name] {
 			state = "d"
 		}
-		frame.Party = append(frame.Party, tbm.PartyRec{GUID: packet.GUID(1000 + i), Name: name, HP: 1, MaxHP: 1, Map: m, Dead: dead[name], State: state})
+		p := pos[name]
+		frame.Party = append(frame.Party, tbm.PartyRec{GUID: packet.GUID(1000 + i), Name: name, HP: 1, MaxHP: 1, Map: m, Dead: dead[name], State: state,
+			X: p[0], Y: p[1], Z: p[2]})
+	}
+	if noParty {
+		frame.Party = nil
 	}
 	if fn != nil {
 		frame.Hostiles = fn(n)
@@ -1156,6 +1325,9 @@ func (f *fakeInjector) Tick(ctx context.Context, now time.Time) error {
 	f.afterNs = append(f.afterNs, f.w.afterN)
 	f.notes = append(f.notes, f.w.newNotes...)
 	f.w.newNotes = nil // the injector drains them, as I2 will
+	if testFakeInjectorPanicOnTick {
+		panic("fake injector tick")
+	}
 	return nil
 }
 
@@ -1170,6 +1342,13 @@ func (f *fakeInjector) Results() ([]raidwalk.InjectSummary, int) {
 }
 
 func (f *fakeInjector) Failed() bool { return f.fail }
+
+// testFakeInjectorPanicOnTick makes the fake Tick panic, for the panic exit path's cleanup test.
+var testFakeInjectorPanicOnTick bool
+
+func (f *fakeInjector) Incidents() []raidwalk.InjectIncident { return nil }
+
+func (f *fakeInjector) Blocking() bool { return false }
 
 func (f *fakeInjector) PrintPlan(out io.Writer) {
 	fmt.Fprintln(out, "faults: 1 (kill-mt)")
@@ -1196,6 +1375,10 @@ func installFakeInjector(t *testing.T, fail bool) func() *fakeInjector {
 }
 
 func TestRaidWalkInjectFlagWithoutHookIsUsage(t *testing.T) {
+	// I2's init() installs the real injector; this pins T0's nil path for a build without it.
+	old := newWalkInjector
+	newWalkInjector = nil
+	t.Cleanup(func() { newWalkInjector = old })
 	var stdout, stderr bytes.Buffer
 	code := raidWalkCmd(context.Background(), []string{"--dry-run", "--dir", "../../dungeons", "--inject", "kill-mt", "onyxias_lair"}, &stdout, &stderr)
 	if code != exitUsage {

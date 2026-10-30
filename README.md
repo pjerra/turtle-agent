@@ -2003,18 +2003,90 @@ The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused
 | `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key |
 | `frames.jsonl` | one `bot_view` frame per 10 s (positions, hp, dead, hostiles; every line carries the walk's `tier`) |
 | `slot-setup.txt`, `teardown.json` | what slot setup printed, and teardown's report |
-| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, boss, pauses, fights, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison` |
+| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison` |
 
 Exit codes: 0 the run ended by its `until` (or the hold); 18 a phase failed or was refused (setup, login, hire, bind,
 enter, start, the server has no `until`, a stall, the ceiling, an interrupt, `lease lost`); 19 the walk ran and was
-torn down but a wipe or a boss engagement happened, or a hire was still listed as online; 15 the lease was refused
-(incl. slot 3); 14 teardown failed; 2 usage.
+torn down but a wipe or a boss engagement happened, or a hire was still listed as online; 23 a fault verdict failed or
+a cleanup left a bot frozen (at least 23, even over 18/19); 15 the lease was refused (incl. slot 3); 14 teardown
+failed; 2 usage.
 
 Dashboard capture is optional: `--dash-url` (or `TBDASH_URL`) plus `--dash-pass-file` (or `TBDASH_PASS_FILE`);
 `--dash-user`/`TBDASH_USER` default `TADASH`. The password is read only from the given file (it must be 0600 and not a
 symlink, `privfile.Read`), never printed and never written to the output; a failed login is a warning
 (`dashboard: login failed (HTTP 401)`) and the walk goes on. Without a URL and a password file the capture is off and
 the summary says so.
+
+### Fault injection
+
+`--inject SPEC` (repeatable, at most 4, each of the four kinds at most once) makes the walk inject a controlled fault
+and measure what the raid does about it. The grammar is `<kind>[@from=<N>][,<key>=<int>]...`:
+
+| kind | keys (range, default) | victim |
+|---|---|---|
+| `kill-mt` | none | the roster's main tank; refused at parse time when the roster has no `ot` batch |
+| `runaway` | `dist` (110-250 yd, 150), `hold` (30-180 s, 90) | the last `rest` hire alive and out of combat |
+| `add-pack` | `max` (30-80 yd, 60) | the extra pack; the puller is the nearest rest hire |
+| `lag` | `secs` (10-90 s, 30) | the last rest hire within 30 yd of the lead bot |
+
+`@from=N` holds a fault until step N. Anything else (an unknown kind or key, a key of another kind, an out-of-range
+value, a fifth spec, a repeated kind) is a usage error naming the spec; `--dry-run` prints the fault plan.
+
+```
+turtle-agent raid-walk --slot 2 --inject kill-mt --inject 'runaway,dist=150,hold=90' --inject add-pack onyxias_lair
+```
+
+At most one fault is active; the first not-yet-fired fault in command-line order that is eligible fires, and the next
+may fire only 60 s after the previous one ended and with no fight on. A fault never fires while paused, on a `boss`
+step, with a boss engaged, in the last two steps before the `until` stop, before the watch's prepare, or after the
+watch ended. Fight on means a hostile the frames show targeting a party GUID (seen in the last 4 s) or a hire in combat.
+
+- **`kill-mt`** fires on a `pull` step with a fight on for 6 s, 2+ hostiles on the party, the MT targeted, their mean
+  health 20-90 % and an OT alive. It selects the MT, kills it with `.die`, selects itself again, and measures the
+  attackers' retarget (`pickup_s`/`pickup_by`), non-tank switches, deaths after the kill and the fight's end. Pass:
+  a tank picks the attackers up within 10 s, no wipe, the fight over within 180 s; a wipe is `fail`.
+- **`runaway`** fires on a `move`/`move_direct` step with no fight for 10 s: it moves the commander to a plan point
+  120-200 yd behind the lead bot (row x/y/z, closest to `dist`), summons the victim there and freezes it. It measures
+  when the run leader's runaway summon (F4) names the victim and when the victim is back; pass: the F4 note and back
+  within 15 s of it. A summon by the straggler ladder first is `fail`.
+- **`add-pack`** fires on a `pull` step with a fight on for 3 s and an idle hostile 20-`max` yd from the lead: it
+  orders the nearest rest hire to `attack` that pack. Pass: the pack engages, no wipe, the fight over within 240 s and
+  the run not stopped by a pause.
+- **`lag`** fires on a `move`/`move_direct` step with no fight for 10 s: it freezes a hire for `secs`, then releases
+  it. Pass: it rejoins within 120 s and no pause stopped the walk.
+
+**The selection rule.** `.freeze`, `.unfreeze` and `.die` act on the unit the *server* has selected, and the `.freeze`
+/`.unfreeze` name is used only when the selection is the GM itself. A `target` RPC's `status.target` read-back is not
+proof (a selection sent right before a chat line is not in force yet: the core handles the two on different threads).
+So after every `target` the walk waits 2 s and reads `.gps` (the selected unit's coordinates) as an observation only:
+coordinates cannot tell the intended unit from a stale selection of a nearby neighbour, and they gate nothing. Every
+selection a line acts on then needs the identity read-back: `.pinfo` with no name uses the selected player, and its
+reply must name the intended unit exactly (the `LANG_PINFO_ACCOUNT` line: player link and `(guid: N)`) — the hire for
+`.die` and the victim's `.freeze`/`.unfreeze`, the commander for the self selection whose name the line then applies.
+Anything else — another name, another guid, no player, no reply — ends the fault `inconclusive` with
+`selection not proven` and the line is never sent; a wrong identity is not retried. Only the `target` and
+`status.target` read-backs keep their one retry, for a server that applies a selection late.
+
+`.gps` and `.pinfo` are the only extra GM lines the fault allow-list carries; every other line is `.gm visible off`
+(prepare), `.go xyz` (the plan's map, within 260 yd of the lead while a fault is active), `.summon <victim>`,
+`.freeze <victim>`, `.unfreeze <hire>` and `.die` (kill-mt).
+
+**Cleanup** runs on every exit path — the end of the watch, `stop`'s `.bot run stop`, an interrupt, an error and a panic
+— before the hold and before teardown: for every bot the injector froze and has not unfrozen it selects itself and
+sends `.unfreeze <hire>`, then selects itself once. It loops with a fresh context per attempt and 3 s between tries
+until no frozen bot is left or the 60 s recovery deadline expires; each attempt and each retry wait is bounded by the
+time left, so no attempt runs past the deadline. Exhaustion is not silent: `<out>/inject.json` and
+the summary carry a `blocking` incident (`cleanup_incomplete`) that names the bot(s) still frozen and the exact manual
+command (`.unfreeze <hire>`, with no other unit selected), and the walk exits **23**.
+
+`<out>/inject.json` (format `tb-raid-inject` v1, 0600) holds every fault's verdict, reason, fire step/leg, victim, its
+GM/order/select lines with times, the measured keys (`placed_yd`, `f4_at_s`, `pickup_s`, `max_gap_yd`, ...) and, when
+cleanup ran out of time, `incidents[]` (`severity` `blocking`, `kind` `cleanup_incomplete`, `bots`, `reason`,
+`manual`). `summary.json` gains `injections[]` (kind, verdict, reason, step, victim), `incidents[]` (the same blocking
+findings) and `deaths.injected` (kill-mt's MT, which is not a death of the run). A walk that would exit 0 with at least
+one fault in `fail` exits **23**; 18 and 19 keep their meaning and win over 23. A blocking cleanup incident raises any
+lower exit code to **23** as well. A fault that never fired is `not-fired`; one that could not be caused or measured is
+`inconclusive`; neither changes the exit code.
 
 ## Remote leader
 

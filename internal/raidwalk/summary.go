@@ -9,38 +9,39 @@ import (
 
 // Summary is the tb-raid-walk v1 file written to <out>/summary.json.
 type Summary struct {
-	Format       string          `json:"format"`
-	Version      int             `json:"version"`
-	Plan         string          `json:"plan"`
-	Map          uint32          `json:"map"`
-	Server       string          `json:"server"`
-	Slot         int             `json:"slot"`
-	Character    string          `json:"character"`
-	Until        string          `json:"until"`
-	From         string          `json:"from"`
-	Speed        float64         `json:"speed"`
-	TestSpeed    bool            `json:"test_speed"`
-	RowsSHA256   string          `json:"rows_sha256"`
-	UntilStep    int             `json:"until_step"`
-	Roster       RosterSummary   `json:"roster"`
-	Layout       LayoutSummary   `json:"layout"`
-	Started      time.Time       `json:"started"`
-	Ended        time.Time       `json:"ended"`
-	EndReason    string          `json:"end_reason"`
-	StepsReached int             `json:"steps_reached"`
-	StepsTotal   int             `json:"steps_total"`
-	StepTimeline []StepSummary   `json:"step_timeline"`
-	Legs         []LegSummary    `json:"legs"`
-	Deaths       DeathSummary    `json:"deaths"`
-	Injections   []InjectSummary `json:"injections"`
-	Wipes        []int           `json:"wipes"`
-	BossEngaged  *BossSummary    `json:"boss_engaged"`
-	Pauses       []PauseSummary  `json:"pauses"`
-	Fights       []FightSummary  `json:"fights"`
-	Dashboard    string          `json:"dashboard"`
-	Teardown     TeardownSummary `json:"teardown"`
-	ExitCode     int             `json:"exit_code"`
-	Notes        []string        `json:"notes"`
+	Format       string           `json:"format"`
+	Version      int              `json:"version"`
+	Plan         string           `json:"plan"`
+	Map          uint32           `json:"map"`
+	Server       string           `json:"server"`
+	Slot         int              `json:"slot"`
+	Character    string           `json:"character"`
+	Until        string           `json:"until"`
+	From         string           `json:"from"`
+	Speed        float64          `json:"speed"`
+	TestSpeed    bool             `json:"test_speed"`
+	RowsSHA256   string           `json:"rows_sha256"`
+	UntilStep    int              `json:"until_step"`
+	Roster       RosterSummary    `json:"roster"`
+	Layout       LayoutSummary    `json:"layout"`
+	Started      time.Time        `json:"started"`
+	Ended        time.Time        `json:"ended"`
+	EndReason    string           `json:"end_reason"`
+	StepsReached int              `json:"steps_reached"`
+	StepsTotal   int              `json:"steps_total"`
+	StepTimeline []StepSummary    `json:"step_timeline"`
+	Legs         []LegSummary     `json:"legs"`
+	Deaths       DeathSummary     `json:"deaths"`
+	Injections   []InjectSummary  `json:"injections"`
+	Incidents    []InjectIncident `json:"incidents"`
+	Wipes        []int            `json:"wipes"`
+	BossEngaged  *BossSummary     `json:"boss_engaged"`
+	Pauses       []PauseSummary   `json:"pauses"`
+	Fights       []FightSummary   `json:"fights"`
+	Dashboard    string           `json:"dashboard"`
+	Teardown     TeardownSummary  `json:"teardown"`
+	ExitCode     int              `json:"exit_code"`
+	Notes        []string         `json:"notes"`
 }
 
 // RosterSummary is the roster as hired.
@@ -152,6 +153,7 @@ type SummaryMeta struct {
 	Fights         []FightSummary
 	Injections     []InjectSummary
 	InjectedDeaths int
+	Incidents      []InjectIncident
 	Dashboard      string
 	Teardown       TeardownSummary
 	ExitCode       int
@@ -180,6 +182,7 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		EndReason:    m.EndReason,
 		Fights:       nonNilFights(m.Fights),
 		Injections:   nonNilInjections(m.Injections),
+		Incidents:    nonNilIncidents(m.Incidents),
 		Roster:       RosterSummary{OT: []string{}, Rest: []string{}},
 		Dashboard:    m.Dashboard,
 		Teardown:     m.Teardown,
@@ -269,6 +272,13 @@ func nonNilInjections(in []InjectSummary) []InjectSummary {
 	return in
 }
 
+func nonNilIncidents(in []InjectIncident) []InjectIncident {
+	if in == nil {
+		return []InjectIncident{}
+	}
+	return in
+}
+
 func round1(v float64) float64 { return math.Round(v*10) / 10 }
 
 // comparisonWord marks a run whose tier is not the raid's minimum.
@@ -327,6 +337,10 @@ func (s *Summary) Text() string {
 			parts = append(parts, fmt.Sprintf("%s (step %d)", part, f.Step))
 		}
 		fmt.Fprintf(&b, "faults: %s\n", strings.Join(parts, "; "))
+	}
+	for _, inc := range s.Incidents {
+		fmt.Fprintf(&b, "%s incident: %s; frozen: %s; manual: %s\n",
+			strings.ToUpper(inc.Severity), inc.Kind, strings.Join(inc.Bots, ", "), inc.Manual)
 	}
 	fmt.Fprintf(&b, "dashboard: %s\n", s.Dashboard)
 	if s.Teardown.Failed {

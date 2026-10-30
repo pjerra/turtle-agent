@@ -1094,3 +1094,29 @@ tools' slot setup. What the first live use has to settle:
 8. **The 40th seat.** A 40-man plan's default roster asks for 40; the server hires 39 (its cap) and the summary notes
    `hire cap 39:` with exit 0, the raid layout 39 tanks/bots as the server reports them. A hire that comes up short
    below 39 is exit 18. Settle whether `TBM:HIRE_RAID`'s hired field counts the order or the seats on the capped batch.
+
+## raid-walk --inject: fault injection (tested against fakes only, never run live until L1)
+
+README "Raid walks", "Fault injection". Needs a server where `.freeze`/`.unfreeze`/`.die` and `.gps` behave as the P0
+probe found (2026-10-29, `tests/raid-inject-probe-20261029-042517/probe.md`). What L1 has to settle:
+
+1. **Prepare.** `.gm visible off` and the `.go xyz` to step 1 leave the commander in its own instance copy (P0: bot
+   lines work by GUID selection across copies); the readiness check passes within 20 s because `bot_view` names the
+   lead bot with a position, and no `units` read is used. If it fails, every fault is `inconclusive` and no
+   `.freeze`/`.die`/`.summon` goes out.
+2. **Selection.** Every `target` is followed 2 s later by `.gps`, and `.die`/`.freeze`/`.unfreeze` act on the right
+   unit: record the `.gps` coordinates against the target's frame position, including a deliberate back-to-back target
+   change (P0 run 1 killed the previously selected bot). The 3 yd tolerance must hold for a tanking MT.
+3. **kill-mt.** The MT dies; the OTs pick its attackers up within 10 s (`pickup_by`); no wipe; the fight ends within
+   180 s; `mt_revived_s` and the pauses after the kill. Exit 23 if the verdict is `fail`.
+4. **runaway.** `.go xyz` to the plan point, `.summon <victim>`, `.freeze <victim>` (no chat reply: confirm the freeze
+   by the victim's position), then the run leader's F4 note `"<victim> is <yd> yd from the lead bot (<s> s out of
+   reach): summoned"` and the victim back within 15 s. `.revive` clears a freeze if one is left; cleanup unfreezes it.
+5. **add-pack.** The `cmd attack <guid> <puller>` ACK, the extra pack engaging, the fight end and whether the run
+   leader's own targeting supersedes the order (then the verdict is `inconclusive: the extra pack did not engage`).
+6. **lag.** The victim stays put while frozen (P0: `.freeze` holds against follow orders), rejoins within 120 s of
+   `.unfreeze`, and no pause names it.
+7. **Cleanup.** `inject.json` and `summary.json` `injections[]` agree; teardown's report and a last `bot_view` show no
+   bot left frozen; a SIGINT while a bot is frozen still sends `.unfreeze` before `.bot run stop`.
+8. **Exit codes.** A `fail` turns a clean walk into 23; a wipe during a fault stays 19 and the fault reads `fail` in
+   the summary; `not-fired`/`inconclusive` keep exit 0.

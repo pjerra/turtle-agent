@@ -33,6 +33,15 @@ func (w *walk) phases(ctx context.Context) int {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	w.cancel = cancel
+	// A panic anywhere in the walk still releases the injector's frozen bots before it propagates.
+	defer func() {
+		if rec := recover(); rec != nil {
+			if w.inj != nil {
+				w.inj.Cleanup(context.Background())
+			}
+			panic(rec)
+		}
+	}()
 
 	if err := w.phaseLease(ctx); err != nil {
 		return w.stop(err, false)

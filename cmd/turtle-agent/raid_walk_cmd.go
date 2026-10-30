@@ -133,6 +133,8 @@ type walkInjector interface {
 	Tick(ctx context.Context, now time.Time) error
 	Cleanup(ctx context.Context)
 	Results() ([]raidwalk.InjectSummary, int)
+	Incidents() []raidwalk.InjectIncident
+	Blocking() bool
 	Failed() bool
 	PrintPlan(io.Writer)
 }
@@ -1087,6 +1089,10 @@ func (w *walk) finish(code int) {
 	if code == exitOK && w.inj != nil && w.inj.Failed() {
 		code = exitRaidWalkInjectFailed
 	}
+	// A bot the cleanup could not free is a blocking incident: 23 at least, whatever the walk's own reason.
+	if w.inj != nil && w.inj.Blocking() && code < exitRaidWalkInjectFailed {
+		code = exitRaidWalkInjectFailed
+	}
 	w.exitCode = code
 	meta := raidwalk.SummaryMeta{
 		Plan: w.plan.Name, Map: w.plan.Map, Server: w.opts.server, Slot: w.slotNumber(), Character: w.manifest.Character,
@@ -1098,6 +1104,7 @@ func (w *walk) finish(code int) {
 	}
 	if w.inj != nil {
 		meta.Injections, meta.InjectedDeaths = w.inj.Results()
+		meta.Incidents = w.inj.Incidents()
 	}
 	if w.roster != nil {
 		r := *w.roster
