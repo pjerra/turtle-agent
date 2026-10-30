@@ -525,6 +525,9 @@ func (d *RemoteDriver) startRunLeader(ctx context.Context) error {
 		if why := d.startMatchesStatus(o.last); why != "" {
 			return fmt.Errorf("run start refused: %s", why)
 		}
+		if d.until.Label != "" && !linesShow(sr.Lines, d.until.Label+" (step ") {
+			return fmt.Errorf("run start refused: busy: the run going shows no `%s (step N)`, so it would not stop where observe.until asks: stop it (.bot run stop) and start again", d.until.Label)
+		}
 		d.rep.note(fmt.Sprintf("observe mode: a run of %s was already going (%s); watching it", o.spec.Plan, o.last.Text()))
 	case r.Kind == tbm.KindErr:
 		return fmt.Errorf("run start refused: %s", runLeaderRefusal("start", o.spec.Plan, r.Err))
@@ -544,16 +547,24 @@ func (d *RemoteDriver) startRunLeader(ctx context.Context) error {
 	return nil
 }
 
+// linesShow says whether any of the lines holds text.
+func linesShow(lines []string, text string) bool {
+	for _, l := range lines {
+		if strings.Contains(l, text) {
+			return true
+		}
+	}
+	return false
+}
+
 // verifyUntilLabel proves the run leader took the until clause: its start reply shows "until <clause> (step N)". A run leader without
 // `until` would walk the plan to its end, so the run is stopped at once and the watch refused (as raid-walk does).
 func (d *RemoteDriver) verifyUntilLabel(lines []string) error {
 	if d.until.Label == "" {
 		return nil
 	}
-	for _, l := range lines {
-		if strings.Contains(l, d.until.Label+" (step ") {
-			return nil
-		}
+	if linesShow(lines, d.until.Label+" (step ") {
+		return nil
 	}
 	d.stopRunLeader("the start line shows no until", "")
 	return fmt.Errorf("observe mode: run start: the run leader's start line does not show `%s (step N)`: this server's run leader has no `until` (TortoiseBots feat/run-until); the run was stopped and is not watched", d.until.Label)

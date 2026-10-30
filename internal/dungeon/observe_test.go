@@ -1952,3 +1952,27 @@ func TestObserveUntilRefusedAtTheProbe(t *testing.T) {
 		t.Fatalf("%v %v", err, g.orders)
 	}
 }
+
+// A run already going is adopted for an observe.until only when its status shows the same until clause: else it would walk past the
+// stop the caller asked for.
+func TestObserveBusyRunMustShowTheUntil(t *testing.T) {
+	busy := func(note string) *fakeLeader {
+		g := newFakeLeader(t, untilScript()...)
+		g.running = true
+		g.emit(rs("running", 1, 5, "first", "move", "walk", note))
+		g.progress, g.next = s(5), 1
+		return g
+	}
+	o := observeOpts(ObserveSpec{})
+	o.Until = func(int) (UntilClause, error) {
+		return UntilClause{Words: []string{"until", "step", "4"}, Label: "until step 4"}, nil
+	}
+	_, err := runRemote(t, busy("walking"), observePlan(), o, nil)
+	if err == nil || !strings.Contains(err.Error(), "shows no `until step 4 (step N)`") {
+		t.Fatalf("a busy run without the until: %v", err)
+	}
+	rep, err := runRemote(t, busy("walking until step 4 (step 4)"), observePlan(), o, nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("a busy run with the until: %v %s", err, rep.State)
+	}
+}
