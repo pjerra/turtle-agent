@@ -57,7 +57,7 @@ func TestPlanKindStatusAndParty(t *testing.T) {
 // drafts. A plan leaves the list when its status moves on: TestOfflineMappedPlansAreStillDrafts fails for one that does not.
 // ruins_of_ahnqiraj: the raid's legs, merged packs, approach stands, Andorov's gossip and Rajaxx's hold were written offline in the
 // B1 prep from the map 509 census, the core's instance and boss scripts and the map 509 navmesh (~/TortoiseBots-audit/RAID-PREP-aq20.md).
-var offlineMapped = map[string]bool{"deadmines": true, "ruins_of_ahnqiraj": true, "wailing_caverns-extra": true}
+var offlineMapped = map[string]bool{"deadmines": true, "ruins_of_ahnqiraj": true, "wailing_caverns-extra": true, "lower_karazhan_halls": true, "emerald_sanctum": true}
 
 // Ragefire Chasm is the one plan with measured hire data: 800 is the issue's tank floor for its level band (#266).
 func TestRagefireChasmPlanCarriesTheTankFloor(t *testing.T) {

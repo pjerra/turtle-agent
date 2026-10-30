@@ -1216,6 +1216,7 @@
   },
   {
    "name": "lower_karazhan_halls",
+   "handwritten": true,
    "title": "Lower Karazhan Halls",
    "map": 532,
    "kind": "raid",
@@ -1236,9 +1237,10 @@
     61225
    ],
    "special": [
-    "Moroes carries npc_flags (gossip) and is fought after a dialogue",
-    "Blackwald II (script boss_blackwald_ii) has no export row of the rank-3 kind: his entry is unverified"
-   ]
+  "Lord Blackwald II (61222) has no spawn row: the instance summons him when the Dark Rider Champion (61204) is DONE",
+  "Moroes carries npc_flags (gossip) and is fought after a dialogue; his menu opens only once the other four bosses are DONE",
+  "the map's doors are all open and no lever or key gates the route"
+ ]
   },
   {
    "name": "upper_karazhan_halls",
@@ -1290,17 +1292,22 @@
     60748
    ],
    "size": 40,
+   "route": true,
+   "handwritten": true,
    "entrance_tele": "sanctumraid",
    "outside_tele": "EmeraldSanctuary",
    "scripted": [
     60748
    ],
    "special": [
-    "Erennius (patrol) is fought before Solnius; Solnius carries npc_flags (gossip) and is awakened by dialogue",
-    "Errenius' chest (GO_ERRENIUS_CHEST), the portal (GO_PORTAL)"
+    "Erennius (60747) is killed before Solnius (60748): Solnius' EnterCombat sets hard mode while Erennius lives and puts every living trash unit of the map in combat with the attacker (instance_emerald_sanctum.cpp)",
+    "Solnius carries npc_flags (gossip): he is friendly (faction 35) until the one option of his menu (92950) is taken, so the leg talks to him (menu index 0) then fights",
+    "The 85 hostile trash spawns are 10 creature_linking groups plus 3 lone waypoint patrols; the 44 Deer (883) and 27 Toads (1420) are critters and in no pull",
+    "Erennius patrols a 1323.5 yd loop that crosses the east hall's packs; a boss has no patrol block, so the mapping walk measures where he meets the raid",
+    "Solnius' chest (2020042) and portals (177243) are script objects; the map's 3 game objects are entrance 'Ghost Gate' visuals and gate nothing"
    ],
    "notes": [
-    "Only two bosses are in the data (Erennius 60747, Solnius 60748)."
+    "Only two bosses are in the data (Erennius 60747, Solnius 60748). The plan is handwritten from the world DB, the core's emerald_sanctum scripts and the map 807 navmesh (task B1, RAID-PREP-es)."
    ]
   },
   {
