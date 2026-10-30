@@ -1,0 +1,114 @@
+{
+  "class": "druid",
+  "specs": [
+    {
+      "spec": "balance",
+      "role": "ranged-dps",
+      "rotation": "kb_balance_druid",
+      "core": [
+        "Moonfire",
+        "Starfire",
+        "Wrath",
+        "Insect Swarm"
+      ],
+      "situational": [
+        "Hurricane",
+        "Innervate",
+        "Moonkin Form",
+        "Barkskin",
+        "Entangling Roots",
+        "Tranquility"
+      ],
+      "never": [],
+      "signature": [
+        "Starfire",
+        "Moonkin Form"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "feral_bear",
+      "role": "tank",
+      "rotation": "kb_feral_bear_druid",
+      "core": [
+        "Maul",
+        "Savage Bite",
+        "Swipe"
+      ],
+      "situational": [
+        "Faerie Fire (Feral)",
+        "Demoralizing Roar",
+        "Enrage",
+        "Berserk",
+        "Barkskin",
+        "Barkskin (Feral)",
+        "Frenzied Regeneration",
+        "Growl",
+        "Challenging Roar",
+        "Hurricane"
+      ],
+      "never": [],
+      "signature": [
+        "Maul",
+        "Savage Bite"
+      ],
+      "taunt": [
+        "Growl",
+        "Challenging Roar"
+      ]
+    },
+    {
+      "spec": "feral_cat",
+      "role": "melee-dps",
+      "rotation": "kb_feral_cat_druid",
+      "core": [
+        "Ferocious Bite",
+        "Rip",
+        "Rake",
+        "Claw",
+        "Shred"
+      ],
+      "situational": [
+        "Tiger's Fury",
+        "Faerie Fire (Feral)",
+        "Berserk",
+        "Prowl",
+        "Pounce",
+        "Swipe",
+        "Hurricane"
+      ],
+      "never": [],
+      "signature": [
+        "Shred",
+        "Ferocious Bite",
+        "Tiger's Fury"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "restoration",
+      "role": "healer",
+      "rotation": "kb_restoration_druid",
+      "core": [
+        "Rejuvenation",
+        "Regrowth",
+        "Healing Touch"
+      ],
+      "situational": [
+        "Swiftmend",
+        "Nature's Swiftness",
+        "Tranquility",
+        "Innervate",
+        "Abolish Poison",
+        "Cure Poison",
+        "Remove Curse"
+      ],
+      "never": [],
+      "signature": [
+        "Swiftmend",
+        "Nature's Swiftness"
+      ],
+      "taunt": []
+    }
+  ]
+}

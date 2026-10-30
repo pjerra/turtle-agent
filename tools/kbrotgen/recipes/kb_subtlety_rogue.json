@@ -1,0 +1,234 @@
+{
+  "name": "kb_subtlety_rogue",
+  "class": "rogue",
+  "spec": "subtlety",
+  "role": "melee-dps",
+  "kb_file": "classes/yaml/rogue/subtlety-melee-dps.yaml",
+  "preset": "subtlety_rogue",
+  "replaces": [
+    "rogue_combat"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's Subtlety list: Hemorrhage as the only builder, Expose Armor at five points while it is missing, Slice and Dice at low points and Rupture at five (Taste for Blood), Eviscerate as the spare finisher, Mark for Death at two points into Shadow of Death at five. Garrote opens from stealth, which is outside the brain's fight; Tricks of the Trade needs a party target, Blade Flurry is the KB's no, Preparation's 'after the first Mark', the burst call and Vanish are named in kb.unexpressed.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 0,
+      "text": "Garrote (Hemorrhage if bleed-immune) | opener; always",
+      "text_sha": "a5eb1402c032",
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 1,
+      "text": "Improved Expose Armor (5 points) | missing or < ~10 s left; only one rogue per raid runs it",
+      "text_sha": "f72d969e667b",
+      "entries": [
+        {
+          "id": "expose_armor",
+          "spell": "Expose Armor",
+          "level": 10,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "combo_points_min": 5,
+            "no_mob_aura": [
+              "Expose Armor"
+            ]
+          }
+        }
+      ],
+      "unexpressed": "raid assignment/marking"
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 2,
+      "text": "any 5-point finisher | about every 11 s to keep Tricks of the Trade up; do not spam 1-point Eviscerates for it",
+      "text_sha": "e67030bd966b",
+      "unexpressed": "a party target (Tricks of the Trade) is not a target of the rotation"
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 3,
+      "text": "Slice and Dice (low points) and Rupture (5 points, Taste for Blood) | missing; with 5 points Rupture first",
+      "text_sha": "189733896fe2",
+      "entries": [
+        {
+          "id": "rupture",
+          "spell": "Rupture",
+          "level": 20,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "combo_points_min": 5,
+            "no_mob_aura": [
+              "Rupture"
+            ]
+          }
+        },
+        {
+          "id": "slice_and_dice",
+          "spell": "Slice and Dice",
+          "level": 10,
+          "target": "fight",
+          "harmful": false,
+          "threat": "none",
+          "when": {
+            "mob_in_reach": true,
+            "combo_points_min": 1,
+            "no_self_aura": [
+              "Slice and Dice"
+            ]
+          },
+          "note": "no_self_aura, not self_aura_missing: the buff lasts under a minute (6 s per combo point), so the under-a-minute rule would spend every combo point on it."
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 4,
+      "text": "Mark for Death at 2 points -> Shadow of Death at 5 | burst window (call it out); Preparation resets Mark for a second use",
+      "text_sha": "8d22060dcc37",
+      "entries": [
+        {
+          "id": "mark_for_death",
+          "spell": "Mark for Death",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "combo_points_min": 2
+          }
+        },
+        {
+          "id": "shadow_of_death",
+          "spell": "Shadow of Death",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "combo_points_min": 5
+          }
+        }
+      ],
+      "unexpressed": "raid assignment/marking"
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 5,
+      "text": "Eviscerate | spare 5-point finisher",
+      "text_sha": "927583e95dfe",
+      "entries": [
+        {
+          "id": "eviscerate",
+          "spell": "Eviscerate",
+          "level": 1,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "combo_points_min": 5
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 6,
+      "text": "Hemorrhage | builder; never Backstab or Sinister Strike",
+      "text_sha": "a47dbf8169d0",
+      "entries": [
+        {
+          "id": "auto_attack",
+          "kind": "attack",
+          "note": "The swing is the base every entry waits on: it goes first in the order, as in the Go rotation (rogue_combat)."
+        },
+        {
+          "id": "hemorrhage",
+          "spell": "Hemorrhage",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true
+          }
+        }
+      ],
+      "unexpressed": "a \"never\" rule: in the oracle's never list"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "no Blade Flurry; Mark + Shadow of Death only on a big pack at raid start",
+      "text_sha": "628d460bbede",
+      "unexpressed": "a \"never\" rule: in the oracle's never list"
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Mark for Death | burst window, party 30% of your AP as AP for 16 s [[d:rogue#1490442703958446232]]",
+      "text_sha": "014666fd657e",
+      "unexpressed": "raid assignment/marking"
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "Preparation | after the first Mark/Shadow of Death; 7-minute cooldown [[d:rogue#1468425398747402240]]",
+      "text_sha": "46e8e9a1cb8a",
+      "unexpressed": "the first Mark is not a condition"
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": null,
+      "text": "Vanish | Garrote reopen and trinket swap [[d:rogue#1492117624568680489]]",
+      "text_sha": "6718dac36ef2",
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    }
+  ],
+  "order": [
+    "auto_attack",
+    "expose_armor",
+    "rupture",
+    "slice_and_dice",
+    "mark_for_death",
+    "shadow_of_death",
+    "eviscerate",
+    "hemorrhage"
+  ],
+  "oracle": {
+    "core": [
+      "Hemorrhage",
+      "Slice and Dice",
+      "Rupture",
+      "Eviscerate"
+    ],
+    "situational": [
+      "Expose Armor",
+      "Mark for Death",
+      "Shadow of Death",
+      "Preparation",
+      "Garrote",
+      "Vanish"
+    ],
+    "never": [
+      "Blade Flurry",
+      "Backstab",
+      "Sinister Strike"
+    ],
+    "signature": [
+      "Hemorrhage",
+      "Preparation"
+    ],
+    "taunt": []
+  }
+}
