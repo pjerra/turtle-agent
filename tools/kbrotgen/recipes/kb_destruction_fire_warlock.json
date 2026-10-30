@@ -1,0 +1,328 @@
+{
+  "name": "kb_destruction_fire_warlock",
+  "class": "warlock",
+  "spec": "destruction_fire",
+  "role": "ranged-dps",
+  "kb_file": "classes/yaml/warlock/destruction-fire-ranged-dps.yaml",
+  "preset": "destruction_fire_warlock",
+  "replaces": [
+    "warlock_affliction"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's fire destruction raid list: Soul Fire while the Improved Soul Fire buff is missing, Immolate kept up, Conflagrate on an Immolated target, Shadowburn, Searing Pain as the filler, Corruption as the contested filler, Life Tap when the mana runs out, and Hellfire/Rain of Fire on five or more stacked mobs. The opener order, the assigned curse and the Thaddius exception are not conditions (kb.unexpressed).",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 0,
+      "text": "pre-cast Soul Fire -> Immolate -> Conflagrate | opener [[d:warlock#1496147940673196062]], [[d:warlock#1496031075112062996]]",
+      "text_sha": "22babbaf948c",
+      "entries": [],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 1,
+      "text": "Soul Fire | Improved Soul Fire buff missing and Soul Fire ready [[d:warlock#1485580656120565841]]",
+      "text_sha": "87a4ae1771c5",
+      "entries": [
+        {
+          "id": "soul_fire",
+          "spell": "Soul Fire",
+          "level": 30,
+          "target": "fight",
+          "when": {
+            "moving": false,
+            "no_self_aura": [
+              "Improved Soul Fire"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 2,
+      "text": "Immolate | missing and target lives >9 s [[d:warlock#1465226534221512756]]",
+      "text_sha": "4c7790f11690",
+      "entries": [
+        {
+          "id": "immolate",
+          "spell": "Immolate",
+          "level": 1,
+          "target": "fight",
+          "when": {
+            "no_mob_aura": [
+              "Immolate"
+            ]
+          }
+        }
+      ],
+      "unexpressed": "\"the target lives > 9 s\" is not a condition"
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 3,
+      "text": "Conflagrate | ready and Immolate up",
+      "text_sha": "005eee5931f2",
+      "entries": [
+        {
+          "id": "conflagrate",
+          "spell": "Conflagrate",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_aura": [
+              "Immolate"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 4,
+      "text": "Shadowburn | ready and mana allows [[d:warlock#1496147940673196062]]",
+      "text_sha": "c8af169554bf",
+      "entries": [
+        {
+          "id": "shadowburn",
+          "spell": "Shadowburn",
+          "talent": true,
+          "target": "fight",
+          "when": {}
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 5,
+      "text": "assigned curse | missing (1 s GCD)",
+      "text_sha": "328946987513",
+      "entries": [],
+      "unexpressed": "raid assignment/marking (which curse the raid assigned)"
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 6,
+      "text": "Searing Pain | filler (~151 mana at 60 with 5/5 Cataclysm) [[d:warlock#1465226771694616801]]",
+      "text_sha": "72aedf40cae4",
+      "entries": [
+        {
+          "id": "searing_pain",
+          "spell": "Searing Pain",
+          "level": 18,
+          "target": "fight",
+          "when": {
+            "moving": false
+          },
+          "note": "Moved after the AoE entries: the filler has no cooldown, so as a rule it would starve every entry the KB lists after it."
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 7,
+      "priority": 7,
+      "text": "Corruption | contested: L-star keeps it as a filler [[d:warlock#1467326093831704861]], Twospooky drops it [[d:warlock#1496147940673196062]]",
+      "text_sha": "b436e4eab195",
+      "entries": [
+        {
+          "id": "corruption",
+          "spell": "Corruption",
+          "level": 4,
+          "target": "fight",
+          "when": {
+            "no_mob_aura": [
+              "Corruption"
+            ]
+          },
+          "note": "the KB's sources disagree (L-star keeps Corruption, Twospooky drops it); kept as the KB's pinned source has it."
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 8,
+      "priority": 8,
+      "text": "Life Tap / mana potion / tea | mana low",
+      "text_sha": "4fe7ca482404",
+      "entries": [
+        {
+          "id": "life_tap",
+          "spell": "Life Tap",
+          "level": 6,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "power_below": 25
+          },
+          "note": "the KB gives no number: 25% is this recipe's."
+        }
+      ],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Immolate each, kill in mark order with Searing Pain",
+      "text_sha": "ab644e8b3cc0",
+      "entries": [],
+      "unexpressed": "the Immolate and Searing Pain entries are the single-target list applied to one mob at a time; raid assignment/marking (the mark order)"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 2,
+      "text": "Hellfire (Wrathstone; warn healers)",
+      "text_sha": "89836aaf0230",
+      "entries": [
+        {
+          "id": "hellfire",
+          "spell": "Hellfire",
+          "level": 30,
+          "target": "self",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "mob_distance_max": 10,
+            "mobs_near_mob_min": 5
+          },
+          "note": "mob_distance_max 10 is Hellfire's radius."
+        }
+      ],
+      "unexpressed": "consumable or item (combat_consumables owns items) (Wrathstone); the warning to the healers is not a condition"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 3,
+      "text": "Rain of Fire",
+      "text_sha": "7fb1f0e816b0",
+      "entries": [
+        {
+          "id": "rain_of_fire",
+          "spell": "Rain of Fire",
+          "level": 20,
+          "target": "fight",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "mob_distance_min": 10,
+            "moving": false,
+            "mobs_near_mob_min": 5
+          },
+          "note": "the KB's \"needs range\": Rain of Fire when the pack is beyond Hellfire's radius (the cleave half of the row is not a condition)."
+        }
+      ],
+      "unexpressed": "\"the pack cleaves\" is not a condition; Hellfire (rotation_aoe[1]) is the row's other option"
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Soul Fire | 30 s CD, keep the Improved Soul Fire buff up",
+      "text_sha": "886dd0c0c618",
+      "entries": [
+        {
+          "id": "soul_fire_cd",
+          "spell": "Soul Fire",
+          "level": 30,
+          "target": "fight",
+          "band": "high",
+          "when": {
+            "moving": false,
+            "no_self_aura": [
+              "Improved Soul Fire"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "Conflagrate | on cooldown with Immolate up; on Thaddius only with a Polarity Charge stack [[d:warlock#1496149965825904764]]",
+      "text_sha": "359dc6b2fb66",
+      "entries": [
+        {
+          "id": "conflagrate_cd",
+          "spell": "Conflagrate",
+          "talent": true,
+          "target": "fight",
+          "band": "high",
+          "when": {
+            "mob_aura": [
+              "Immolate"
+            ]
+          }
+        }
+      ],
+      "unexpressed": "the Thaddius Polarity Charge exception is not a condition"
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": null,
+      "text": "Shadowburn | on cooldown unless mana-limited [[d:warlock#1496147940673196062]]",
+      "text_sha": "b29a356a4601",
+      "entries": [
+        {
+          "id": "shadowburn_cd",
+          "spell": "Shadowburn",
+          "talent": true,
+          "target": "fight",
+          "band": "high",
+          "when": {}
+        }
+      ]
+    }
+  ],
+  "order": [
+    "soul_fire",
+    "immolate",
+    "conflagrate",
+    "shadowburn",
+    "corruption",
+    "life_tap",
+    "hellfire",
+    "rain_of_fire",
+    "searing_pain",
+    "soul_fire_cd",
+    "conflagrate_cd",
+    "shadowburn_cd"
+  ],
+  "oracle": {
+    "core": [
+      "Soul Fire",
+      "Immolate",
+      "Conflagrate",
+      "Searing Pain"
+    ],
+    "situational": [
+      "Shadowburn",
+      "Corruption",
+      "Life Tap",
+      "Hellfire",
+      "Rain of Fire",
+      "Curse of Agony",
+      "Curse of the Elements",
+      "Curse of Shadow",
+      "Curse of Recklessness"
+    ],
+    "never": [],
+    "signature": [
+      "Conflagrate"
+    ],
+    "taunt": []
+  }
+}

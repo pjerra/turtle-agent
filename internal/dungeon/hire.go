@@ -48,6 +48,11 @@ type HireSpec struct {
 	NoFix bool `json:"no_fix,omitempty"`
 	// WaitS is the longest wait for a hire to show up in the group, in seconds (default 30, at most 120).
 	WaitS int `json:"wait_s,omitempty"`
+	// GearPreset is the `.bot gear raid <agent> preset <name>` name the raid hire flow gears the raid with (hire_raid.go);
+	// empty: the plan name's preset (lkh, zg, aq20, timbermaw, ...). Tier is the `.bot hire raid` tier word t<tier>, 0:
+	// the preset's tier, else 2. Raids only; the 5-man flow ignores both.
+	GearPreset string `json:"gear_preset,omitempty"`
+	Tier       int    `json:"tier,omitempty"`
 }
 
 // Limits and defaults of the hire step.
@@ -152,10 +157,16 @@ func hireClassList() []string {
 	return []string{"warrior", "paladin", "hunter", "rogue", "priest", "shaman", "mage", "warlock", "druid"}
 }
 
-// Validate checks the block; the level is checked against the plan when the step runs.
+// Validate checks the block; the level is checked against the plan when the step runs. Tier is 0-7, the preset a plan name.
 func (h *HireSpec) Validate() error {
 	if h == nil {
 		return nil
+	}
+	if h.Tier < 0 || h.Tier > 7 {
+		return errors.New("prepare.hire.tier must be 0 (the preset's tier, else 2) or 1 to 7")
+	}
+	if h.GearPreset != "" && !regexp.MustCompile(`^[a-z0-9_-]{1,32}$`).MatchString(strings.ToLower(h.GearPreset)) {
+		return fmt.Errorf("prepare.hire.gear_preset %q: use a plan name (a-z, 0-9, _ and -, at most 32)", h.GearPreset)
 	}
 	if h.Level < 0 || h.Level > 60 {
 		return errors.New("prepare.hire.level must be 0 (the middle of the plan's level band) or 1 to 60")
@@ -372,7 +383,6 @@ type hireFlow struct {
 	noLevel bool // the server refused level=<n>, or ignored it: the hires come at the commander's level
 	lowered bool // the server lowered a level to the commander's limit
 	bots    []*hireBot
-	dropped []string
 	problem []string
 	who     map[string]tbm.Who // the bots' own `who` answers
 	kept    map[string]bool    // the hires (lower case) of a kept binding: bound bots answer no `.bot` line (taken from the memory of the run that left it)

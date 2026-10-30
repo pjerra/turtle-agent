@@ -1,0 +1,111 @@
+{
+  "class": "shaman",
+  "specs": [
+    {
+      "spec": "elemental",
+      "role": "ranged-dps",
+      "rotation": "kb_elemental_shaman",
+      "core": [
+        "Flame Shock",
+        "Molten Blast",
+        "Chain Lightning",
+        "Lightning Bolt"
+      ],
+      "situational": [
+        "Earthquake",
+        "Earth Shock",
+        "Elemental Mastery",
+        "Fire Nova Totem",
+        "Searing Totem",
+        "Flametongue Totem"
+      ],
+      "never": [],
+      "signature": [
+        "Elemental Mastery",
+        "Chain Lightning"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "enhancement",
+      "role": "melee-dps",
+      "rotation": "kb_enhancement_shaman",
+      "core": [
+        "Stormstrike",
+        "Lightning Strike",
+        "Flame Shock",
+        "Earth Shock"
+      ],
+      "situational": [
+        "Fire Nova Totem",
+        "Chain Lightning",
+        "Magma Totem",
+        "Lightning Shield",
+        "Water Shield",
+        "Bloodlust",
+        "Windfury Weapon",
+        "Rockbiter Weapon"
+      ],
+      "never": [],
+      "signature": [
+        "Stormstrike",
+        "Lightning Strike"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "enhancement_tank",
+      "role": "tank",
+      "rotation": "kb_enhancement_tank_shaman",
+      "core": [
+        "Earth Shock",
+        "Stormstrike",
+        "Lightning Strike"
+      ],
+      "situational": [
+        "Water Shield",
+        "Lightning Shield",
+        "Fire Nova Totem",
+        "Magma Totem",
+        "Stoneclaw Totem",
+        "Chain Lightning",
+        "Rockbiter Weapon",
+        "Bloodlust",
+        "Earthshaker Slam"
+      ],
+      "never": [],
+      "signature": [
+        "Earthshaker Slam",
+        "Rockbiter Weapon"
+      ],
+      "taunt": [
+        "Earthshaker Slam"
+      ]
+    },
+    {
+      "spec": "restoration",
+      "role": "healer",
+      "rotation": "kb_restoration_shaman",
+      "core": [
+        "Chain Heal",
+        "Healing Wave",
+        "Lesser Healing Wave"
+      ],
+      "situational": [
+        "Ancestral Swiftness",
+        "Spirit Link",
+        "Water Shield",
+        "Healing Stream Totem",
+        "Mana Spring Totem",
+        "Cure Poison",
+        "Cure Disease"
+      ],
+      "never": [],
+      "signature": [
+        "Chain Heal",
+        "Spirit Link"
+      ],
+      "taunt": []
+    }
+  ]
+}

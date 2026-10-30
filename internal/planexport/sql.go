@@ -73,9 +73,114 @@ func WriteSQL(plans []Rows) string {
 	return b.String()
 }
 
+// planTables are the tables a migration's plan rows live in; ParseMigration reads no other.
+var planTables = map[string]bool{"ai_dungeon_plan": true, "ai_dungeon_leg": true, "ai_dungeon_step": true}
+
+// ParseMigration reads a deployed migration like Parse, but skips whole the statements of tables other than the plan's three, each
+// skipped table named once in notes: the plan rows are what turtle-agent exports and what the server runs, while the hand edits
+// around them (an ai_dungeon_boss or ai_boss_tactic block) are not rows Parse can read and must not stop it.
+func ParseMigration(sql string) ([]Rows, []string, error) { return parse(sql, true) }
+
+// parse is Parse, and with lenient also ParseMigration's skip of the other tables.
+func parse(sql string, lenient bool) ([]Rows, []string, error) {
+	var notes []string
+	if lenient {
+		sql, notes = skipOtherTables(sql)
+	}
+	out, err := parseRows(sql)
+	return out, notes, err
+}
+
+// skipOtherTables blanks the statements of the tables planTables does not hold, line for line so every error keeps the file's line
+// numbers, and names each skipped table once. A statement runs from its INSERT INTO / REPLACE INTO / DELETE FROM / UPDATE / SET
+// line to the line that ends it with a `;` outside quotes; a comment line inside it does not end it.
+func skipOtherTables(sql string) (string, []string) {
+	lines := strings.SplitAfter(sql, "\n")
+	var notes []string
+	seen := map[string]bool{}
+	skipping := false
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		if !skipping {
+			name, ok := statementTable(t)
+			if !ok || planTables[name] {
+				continue
+			}
+			if !seen[name] {
+				seen[name] = true
+				notes = append(notes, fmt.Sprintf("skipped %s: only ai_dungeon_plan, ai_dungeon_leg and ai_dungeon_step are read", name))
+			}
+			skipping = true
+		}
+		if strings.HasPrefix(t, "--") {
+			continue
+		}
+		if strings.HasSuffix(l, "\n") {
+			lines[i] = "\n"
+		} else {
+			lines[i] = ""
+		}
+		if endsStatement(t) {
+			skipping = false
+		}
+	}
+	return strings.Join(lines, ""), notes
+}
+
+// statementTable names the table a statement's first line writes, for the statements a migration may hold around the rows; a SET
+// names no table and is its own name.
+func statementTable(t string) (string, bool) {
+	for _, kw := range []string{"INSERT INTO", "REPLACE INTO", "DELETE FROM", "UPDATE"} {
+		if len(t) <= len(kw) || !strings.EqualFold(t[:len(kw)], kw) || (t[len(kw)] != ' ' && t[len(kw)] != '\t') {
+			continue
+		}
+		name := strings.TrimSpace(t[len(kw):])
+		if strings.HasPrefix(name, "`") {
+			if i := strings.IndexByte(name[1:], '`'); i >= 0 {
+				name = name[1 : 1+i]
+			}
+		} else if i := strings.IndexAny(name, " \t(,"); i >= 0 {
+			name = name[:i]
+		}
+		return name, name != ""
+	}
+	if len(t) > 3 && strings.EqualFold(t[:3], "SET") && (t[3] == ' ' || t[3] == '\t') {
+		return "SET", true
+	}
+	return "", false
+}
+
+// endsStatement reports whether the line ends its statement: a `;` as its last byte outside a quoted string.
+func endsStatement(t string) bool {
+	t = strings.TrimSpace(t)
+	if !strings.HasSuffix(t, ";") {
+		return false
+	}
+	in := false
+	for i := 0; i < len(t); i++ {
+		switch c := t[i]; {
+		case c == '\\' && in:
+			i++
+		case c == '\'':
+			if in && i+1 < len(t) && t[i+1] == '\'' {
+				i++
+			} else {
+				in = !in
+			}
+		}
+	}
+	return !in
+}
+
 // Parse reads a migration WriteSQL wrote back into rows, one Rows per plan in the order of the file. It is the round-trip check of
 // the exporter's tests and of `plan-export --check`; it reads only the statements WriteSQL writes.
 func Parse(sql string) ([]Rows, error) {
+	out, _, err := parse(sql, false)
+	return out, err
+}
+
+// parseRows is the line reader of a migration's plan rows.
+func parseRows(sql string) ([]Rows, error) {
 	var out []Rows
 	byPlan := map[string]int{}
 	table := ""

@@ -305,3 +305,18 @@ func TestTeardownUsesManifestSlotsPath(t *testing.T) {
 		t.Fatal("lease kept without --slots")
 	}
 }
+
+// A follow step "ending" (the agent's follow loop did not exit in time) is a game-side failure: exit 14, the lease kept.
+func TestTeardownCLIFollowEndingIsAFailure(t *testing.T) {
+	steps := []teardownCLIStep{{Step: "follow", Status: "ending", Detail: "the player follow loop did not end"}}
+	dir, slotsPath, _, _, restore := teardownCLIFixture(t, steps, false)
+	defer restore()
+	teardownProbe = &teardownCLIFakeProbe{pid: os.Getpid(), alive: true, ports: map[int]bool{}}
+	code, out, _ := runCLI("teardown", dir, "--slots", slotsPath)
+	if code != exitTeardownFailed {
+		t.Fatalf("code %d stdout %q", code, out)
+	}
+	if !teardownCLILeaseHeld(t, slotsPath) {
+		t.Fatalf("lease released despite the follow still ending")
+	}
+}

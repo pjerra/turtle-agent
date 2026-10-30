@@ -7,15 +7,6 @@ import (
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 )
 
-func near(t *testing.T, pts []Vec3, p Vec3) NearPoint {
-	t.Helper()
-	n := NearestPolyline(pts, p)
-	if n.Dist3D < 0 {
-		t.Fatalf("NearestPolyline of %v: empty polyline", p)
-	}
-	return n
-}
-
 func TestNearestPolyline(t *testing.T) {
 	cases := []struct {
 		name string

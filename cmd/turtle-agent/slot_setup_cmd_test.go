@@ -335,3 +335,103 @@ func TestSlotSetupDirSwapBeforeWriteRefused(t *testing.T) {
 		t.Fatalf("settings written through the swapped symlink: %v", entries)
 	}
 }
+
+// --mmaps-dir writes the settings key the agent uses for its navmesh folder
+// (mmaps_dir) into the private settings.json. Read back through the settings
+// loader, not by grepping text. Mutation: falling back to the source value
+// when the flag is set fails the MmapsDir check.
+func TestSlotSetupMmapsDirWritesKey(t *testing.T) {
+	slotsPath, _, _ := slotSetupTestEnv(t)
+	slotSetupAcquire(t, slotsPath, "w-a")
+	bin := filepath.Join(t.TempDir(), "turtle-agent")
+	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mmaps := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "client")
+	code, out, errOut := runCLI("slot", "setup", "m910q", "1", "--holder", "w-a", "--dir", dir, "--binary", bin, "--mmaps-dir", mmaps, "--slots", slotsPath)
+	if code != exitOK {
+		t.Fatalf("code %d stderr %q", code, errOut)
+	}
+	if n := len(strings.Split(strings.TrimRight(out, "\n"), "\n")); n != 6 {
+		t.Fatalf("want 6 lines, got %q", out)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(out), "mmaps: "+mmaps) {
+		t.Fatalf("no mmaps line: %q", out)
+	}
+	got, err := config.Load(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MmapsDir != mmaps {
+		t.Fatalf("mmaps_dir = %q, want %q", got.MmapsDir, mmaps)
+	}
+}
+
+// A missing --mmaps-dir refuses with exit 15 and leaves nothing behind
+// (the setup cleanup rules). Mutation: returning exitUsage, or checking the
+// dir after creating the client dir, leaves traces or the wrong code.
+func TestSlotSetupMmapsDirMissingRefused(t *testing.T) {
+	slotsPath, _, _ := slotSetupTestEnv(t)
+	slotSetupAcquire(t, slotsPath, "w-a")
+	bin := filepath.Join(t.TempDir(), "turtle-agent")
+	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "client")
+	missing := filepath.Join(t.TempDir(), "no-such-mmaps")
+	code, _, errOut := runCLI("slot", "setup", "m910q", "1", "--holder", "w-a", "--dir", dir, "--binary", bin, "--mmaps-dir", missing, "--slots", slotsPath)
+	if code != exitSlotRefused {
+		t.Fatalf("code %d stderr %q, want %d", code, errOut, exitSlotRefused)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("client dir left behind: %v", err)
+	}
+}
+
+// --dungeons-from copies every *.json plan into the slot's dungeons/ dir,
+// skips non-json files, and refuses a symlink and a bad name (the copy, not
+// a text match, is what the test reads). Mutation: copying the skip files,
+// or following the symlink, fails here.
+func TestSlotSetupDungeonsFromCopiesPlans(t *testing.T) {
+	slotsPath, _, _ := slotSetupTestEnv(t)
+	slotSetupAcquire(t, slotsPath, "w-a")
+	bin := filepath.Join(t.TempDir(), "turtle-agent")
+	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "uldaman.json"), []byte(`{"version":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "notes.txt"), []byte("skip me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(src, "uldaman.json"), filepath.Join(src, "link.json")); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "client")
+	code, out, errOut := runCLI("slot", "setup", "m910q", "1", "--holder", "w-a", "--dir", dir, "--binary", bin, "--dungeons-from", src, "--slots", slotsPath)
+	if code == exitOK {
+		t.Fatalf("symlink followed: %q", out)
+	}
+	if code != exitUsage || !strings.Contains(errOut, "symlink") {
+		t.Fatalf("code %d stderr %q, want a symlink refusal", code, errOut)
+	}
+	if err := os.Remove(filepath.Join(src, "link.json")); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut = runCLI("slot", "setup", "m910q", "1", "--holder", "w-a", "--dir", dir, "--binary", bin, "--dungeons-from", src, "--slots", slotsPath)
+	if code != exitOK {
+		t.Fatalf("code %d stderr %q", code, errOut)
+	}
+	if !strings.Contains(out, "dungeons: 1 plans copied from "+src) {
+		t.Fatalf("no dungeons line: %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dungeons", "uldaman.json")); err != nil {
+		t.Fatalf("plan not copied: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dungeons", "notes.txt")); !os.IsNotExist(err) {
+		t.Fatalf("non-json copied: %v", err)
+	}
+}

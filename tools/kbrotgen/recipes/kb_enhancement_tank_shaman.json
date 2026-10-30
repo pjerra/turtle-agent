@@ -1,0 +1,306 @@
+{
+  "name": "kb_enhancement_tank_shaman",
+  "class": "shaman",
+  "spec": "enhancement_tank",
+  "role": "tank",
+  "kb_file": "classes/yaml/shaman/enhancement-tank.yaml",
+  "preset": "tank_shaman",
+  "replaces": [
+    "shaman_enhancement"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's enhancement tank list: Earth Shock and the strikes on cooldown, the auto attack that builds Earthen Bulwark, Water Shield below two thirds mana and the AoE totems on packs. The taunt and the pull stay with role_tank and the preset; the attack is queued first because the KB's Bulwark builds from white hits.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 1,
+      "text": "Rockbiter on a slow one-hander + shield; Lightning Shield for the pull | before pull",
+      "text_sha": "3b250871b319",
+      "entries": [],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 2,
+      "text": "Pull with Chain Lightning (or Molten Blast -> Chain Lightning) | pull [[d:shaman#1486563067511963648]] [[d:shaman#1438950665572450448]]",
+      "text_sha": "7908fc1383c6",
+      "entries": [],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 3,
+      "text": "Earth Shock | on cooldown (~40% of threat) [[d:shaman#1453500008375521330]]",
+      "text_sha": "c5b6b2dbfb87",
+      "entries": [
+        {
+          "id": "earth_shock",
+          "spell": "Earth Shock",
+          "level": 4,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 4,
+      "text": "Stormstrike | on cooldown",
+      "text_sha": "8af69b980a85",
+      "entries": [
+        {
+          "id": "stormstrike",
+          "spell": "Stormstrike",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 5,
+      "text": "Lightning Strike (Rank 3) | on cooldown [[d:shaman#1489000281315475559]]",
+      "text_sha": "8592319474b3",
+      "entries": [
+        {
+          "id": "lightning_strike",
+          "spell": "Lightning Strike",
+          "talent": true,
+          "target": "fight",
+          "note": "Rank 3 is the ability's highest rank. The KB's own enhancement row requires the Lightning Shield, and the Water Shield swap below rules the strike out, as in the KB.",
+          "when": {
+            "mob_in_reach": true,
+            "self_aura": [
+              "Lightning Shield"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 6,
+      "text": "Auto-attack | always (builds Earthen Bulwark)",
+      "text_sha": "d5f2fc326c7e",
+      "entries": [
+        {
+          "id": "auto_attack",
+          "kind": "attack",
+          "note": "Attached to the auto-attack row and queued first: Earthen Bulwark builds from white swings.",
+          "when": {}
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 7,
+      "text": "Swap to Water Shield | mana below ~66% [[d:shaman#1457483435806294106]]",
+      "text_sha": "5701fb6e91dc",
+      "entries": [
+        {
+          "id": "water_shield",
+          "spell": "Water Shield",
+          "level": 26,
+          "target": "self",
+          "band": "high",
+          "note": "The KB's '~66%' is taken as written.",
+          "when": {
+            "state": "combat",
+            "power_below": 66,
+            "no_self_aura": [
+              "Water Shield"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 7,
+      "priority": 8,
+      "text": "Earthshaker Slam (taunt) | target not on you; call out resists [[d:shaman#1481752700486942720]]",
+      "text_sha": "781f84e2cbe9",
+      "entries": [],
+      "unexpressed": "taunt: role_tank owns taunting"
+    },
+    {
+      "from": "rotation_single",
+      "index": 8,
+      "priority": 9,
+      "text": "Never hard-cast while being hit | always [[d:shaman#1445658999881207950]]",
+      "text_sha": "e30e900d1fbb",
+      "entries": [],
+      "unexpressed": "hit-taking is not a condition"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Chain Lightning pull + Stoneclaw Totem + Totem of the Tides (Water Shield up); tab Earth Shock and strikes",
+      "text_sha": "f1adb965cfe8",
+      "entries": [
+        {
+          "id": "chain_lightning_cleave",
+          "spell": "Chain Lightning",
+          "level": 32,
+          "target": "fight",
+          "threat": "aoe",
+          "harmful": true,
+          "note": "The KB's Chain Lightning on a pack; the tab target switching is not a condition.",
+          "when": {
+            "mobs_near_mob_min": 2,
+            "moving": false
+          }
+        }
+      ],
+      "unexpressed": "totems: the preset's totem strategy owns them"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 2,
+      "text": "Fire Nova Totem",
+      "text_sha": "d8a7f6cf59a4",
+      "entries": [
+        {
+          "id": "fire_nova_totem",
+          "spell": "Fire Nova Totem",
+          "level": 12,
+          "target": "self",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "mobs_near_mob_min": 3
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 3,
+      "text": "Magma Totem after Nova",
+      "text_sha": "df4d1425011c",
+      "entries": [
+        {
+          "id": "magma_totem",
+          "spell": "Magma Totem",
+          "level": 26,
+          "target": "self",
+          "band": "low",
+          "threat": "aoe",
+          "harmful": true,
+          "note": "The KB's last resort: band low, behind the Fire Nova entry and the strikes.",
+          "when": {
+            "mobs_near_mob_min": 3
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 3,
+      "priority": 4,
+      "text": "Goblin Sapper Charge + Stoneclaw, plus Fire Nova on a free GCD",
+      "text_sha": "d710e083acb6",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": 0,
+      "text": "Earthshaker Slam | taunt; can be resisted with no backup",
+      "text_sha": "cb7384d7b1e0",
+      "entries": [],
+      "unexpressed": "taunt: role_tank owns taunting"
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": 0,
+      "text": "Bloodlust | pull, with haste potion / Kiss / Juju for a threat lead [[d:shaman#1453829313412468816]]",
+      "text_sha": "d704c1bf7793",
+      "entries": [
+        {
+          "id": "bloodlust",
+          "spell": "Bloodlust",
+          "level": 40,
+          "target": "self",
+          "band": "high",
+          "note": "The haste potion and trinkets the KB stacks it with are consumables.",
+          "when": {
+            "state": "combat"
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": 0,
+      "text": "Stoneshield Potion / healthstone / tea | no defensive cooldown exists [[d:shaman#1480080749754450022]]",
+      "text_sha": "619428519abc",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 3,
+      "priority": 0,
+      "text": "Zandalari Hero Badge | longest-lasting defensive trinket [[d:shaman#1465051820907958425]]",
+      "text_sha": "b77fc82421b3",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    }
+  ],
+  "order": [
+    "auto_attack",
+    "earth_shock",
+    "stormstrike",
+    "lightning_strike",
+    "water_shield",
+    "chain_lightning_cleave",
+    "fire_nova_totem",
+    "magma_totem",
+    "bloodlust"
+  ],
+  "oracle": {
+    "core": [
+      "Earth Shock",
+      "Stormstrike",
+      "Lightning Strike"
+    ],
+    "situational": [
+      "Water Shield",
+      "Lightning Shield",
+      "Fire Nova Totem",
+      "Magma Totem",
+      "Stoneclaw Totem",
+      "Chain Lightning",
+      "Rockbiter Weapon",
+      "Bloodlust",
+      "Earthshaker Slam"
+    ],
+    "never": [],
+    "signature": [
+      "Earthshaker Slam",
+      "Rockbiter Weapon"
+    ],
+    "taunt": [
+      "Earthshaker Slam"
+    ]
+  }
+}

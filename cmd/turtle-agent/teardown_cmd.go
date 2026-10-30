@@ -132,7 +132,7 @@ func teardownCmd(args []string, stdout, stderr io.Writer) int {
 	failed := 0
 	add := func(step, status, detail string) {
 		steps = append(steps, teardownCLIStep{Step: step, Status: status, Detail: detail})
-		if status == "fail" {
+		if status == "fail" || status == "ending" { // ending: the agent's player follow loop did not exit in time
 			failed++
 		}
 	}
@@ -149,7 +149,7 @@ func teardownCmd(args []string, stdout, stderr io.Writer) int {
 		} else {
 			for _, s := range rpcSteps {
 				add(s.Step, s.Status, s.Detail)
-				if s.Status == "fail" {
+				if s.Status == "fail" || s.Status == "ending" {
 					gameFailed = true
 				}
 			}
