@@ -1,0 +1,395 @@
+{
+  "name": "kb_arms_warrior",
+  "class": "warrior",
+  "spec": "arms",
+  "role": "melee-dps",
+  "kb_file": "classes/yaml/warrior/arms-melee-dps.yaml",
+  "preset": "arms_warrior",
+  "replaces": [
+    "warrior_melee",
+    "warrior_arms"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's Arms list: Mortal Strike on cooldown, Slam as the standing-still filler, Overpower after the mob dodges in Battle Stance, Execute below 20%, the opener's Sunder and Bloodrage, Heroic Strike once rage would cap, and the AoE rows (Sweeping Strikes, Mortal Strike, Cleave). Whirlwind needs Berserker Stance, which this file leaves to the preset's stance strategy; the swing timer it asks Slam to wait for is not a condition. Stance and taunt stay with the preset.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 0,
+      "text": "Charge -> Sunder Armor -> Bloodrage (Enrage) | opener",
+      "text_sha": "d0aa34761768",
+      "entries": [
+        {
+          "id": "charge",
+          "spell": "Charge",
+          "level": 4,
+          "target": "fight",
+          "band": "move",
+          "when": {
+            "in_combat": false,
+            "stance": [
+              "Battle Stance"
+            ],
+            "mob_distance_min": 8,
+            "mob_distance_max": 25,
+            "tank_holds": true
+          }
+        },
+        {
+          "id": "sunder_armor",
+          "spell": "Sunder Armor",
+          "level": 10,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "mob_stacks_below": {
+              "aura": "Sunder Armor",
+              "stacks": 1
+            }
+          },
+          "note": "The KB's opener Sunder: one application, while the mob carries no Sunder yet (the Arms list sunder beyond the opener only in the rage-capped rows of other specs)."
+        },
+        {
+          "id": "bloodrage",
+          "spell": "Bloodrage",
+          "level": 10,
+          "target": "self",
+          "when": {
+            "state": "combat",
+            "mob_distance_max": 12,
+            "power_below": 20,
+            "self_hp_above": 50,
+            "no_self_aura": [
+              "Bloodrage"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 1,
+      "text": "Execute | target <= 20%; bank rage first; Precision Cut adds 25/50/75% per extra rage; Deathcute: Death Wish + Bloodrage then spam Execute",
+      "text_sha": "a016d3943b27",
+      "entries": [
+        {
+          "id": "execute",
+          "spell": "Execute",
+          "level": 24,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "mob_hp_below": 20,
+            "stance": [
+              "Battle Stance",
+              "Berserker Stance"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 2,
+      "text": "Mortal Strike | off cooldown (MS build)",
+      "text_sha": "b2fa70ec73a3",
+      "entries": [
+        {
+          "id": "mortal_strike",
+          "spell": "Mortal Strike",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 3,
+      "text": "Slam | right after each auto lands; 3.6-3.8 speed weapon",
+      "text_sha": "fc1206d42f46",
+      "entries": [
+        {
+          "id": "slam",
+          "spell": "Slam",
+          "level": 14,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "moving": false
+          }
+        }
+      ],
+      "unexpressed": "swing timer not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 4,
+      "text": "Whirlwind | off cooldown",
+      "text_sha": "41074c004c7d",
+      "unexpressed": "stance/form: the preset's stance strategy owns it"
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 5,
+      "text": "Overpower | on proc; avoid stance swaps that waste 50+ rage",
+      "text_sha": "1c970fc4ad2d",
+      "entries": [
+        {
+          "id": "overpower",
+          "spell": "Overpower",
+          "level": 12,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "after": "dodge",
+            "stance": [
+              "Battle Stance"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 6,
+      "text": "Hamstring | cheap filler GCD (no cooldown)",
+      "text_sha": "0f76f5825538",
+      "entries": [
+        {
+          "id": "hamstring",
+          "spell": "Hamstring",
+          "level": 8,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "stance": [
+              "Battle Stance",
+              "Berserker Stance"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 7,
+      "priority": 7,
+      "text": "Heroic Strike | only when rage would cap",
+      "text_sha": "a1ba694df81d",
+      "entries": [
+        {
+          "id": "auto_attack",
+          "kind": "attack",
+          "note": "The swing is the base every entry waits on: it goes first in the order, as in the Go rotation (warrior_melee)."
+        },
+        {
+          "id": "heroic_strike",
+          "kind": "next_swing",
+          "spell": "Heroic Strike",
+          "level": 1,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "power_above": 79
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Sweeping Strikes",
+      "text_sha": "b3260d09b576",
+      "entries": [
+        {
+          "id": "sweeping_strikes",
+          "spell": "Sweeping Strikes",
+          "talent": true,
+          "target": "self",
+          "harmful": true,
+          "threat": "aoe",
+          "when": {
+            "mobs_in_reach_min": 2,
+            "stance": [
+              "Battle Stance"
+            ],
+            "no_self_aura": [
+              "Sweeping Strikes"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 2,
+      "text": "Mortal Strike / Whirlwind",
+      "text_sha": "8ad65af0d82f",
+      "entries": [
+        {
+          "id": "mortal_strike_aoe",
+          "spell": "Mortal Strike",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "mobs_in_reach_min": 2
+          },
+          "note": "The single-target Mortal Strike entry has no mob-count condition, so it already plays on a pack; the row stands as the KB's AoE restatement, and the Whirlwind half is the stance part."
+        }
+      ],
+      "unexpressed": "stance/form: the preset's stance strategy owns it"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 3,
+      "text": "Cleave",
+      "text_sha": "e946abd159c3",
+      "entries": [
+        {
+          "id": "cleave",
+          "kind": "next_swing",
+          "spell": "Cleave",
+          "level": 20,
+          "target": "fight",
+          "threat": "aoe",
+          "when": {
+            "mob_in_reach": true,
+            "mobs_in_reach_min": 2,
+            "power_above": 49
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Death Wish | Deathcute only: Execute phase",
+      "text_sha": "14993932ce17",
+      "entries": [
+        {
+          "id": "death_wish",
+          "spell": "Death Wish",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "mob_hp_below": 20
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "Recklessness | Execute phase; shared 30-min CD with Shield Wall/Retaliation",
+      "text_sha": "19fe42c0ca3f",
+      "entries": [
+        {
+          "id": "recklessness",
+          "spell": "Recklessness",
+          "level": 50,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "mob_hp_below": 20
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": null,
+      "text": "Bloodrage | pull, and into Execute on fights >= 1:15",
+      "text_sha": "e68819d76717",
+      "entries": [
+        {
+          "id": "bloodrage_execute",
+          "spell": "Bloodrage",
+          "level": 10,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "mob_hp_below": 20,
+            "self_hp_above": 50,
+            "no_self_aura": [
+              "Bloodrage"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 3,
+      "priority": null,
+      "text": "Kiss of the Spider | when the Execute phase matters most",
+      "text_sha": "12f911c16eea",
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    }
+  ],
+  "order": [
+    "charge",
+    "auto_attack",
+    "sunder_armor",
+    "bloodrage",
+    "execute",
+    "mortal_strike",
+    "slam",
+    "overpower",
+    "hamstring",
+    "heroic_strike",
+    "sweeping_strikes",
+    "mortal_strike_aoe",
+    "cleave",
+    "death_wish",
+    "recklessness",
+    "bloodrage_execute"
+  ],
+  "oracle": {
+    "core": [
+      "Mortal Strike",
+      "Slam",
+      "Execute"
+    ],
+    "situational": [
+      "Overpower",
+      "Whirlwind",
+      "Sweeping Strikes",
+      "Cleave",
+      "Hamstring",
+      "Heroic Strike",
+      "Sunder Armor",
+      "Charge",
+      "Bloodrage",
+      "Battle Shout",
+      "Death Wish",
+      "Recklessness",
+      "Pummel"
+    ],
+    "never": [],
+    "signature": [
+      "Mortal Strike",
+      "Sweeping Strikes"
+    ],
+    "taunt": []
+  }
+}

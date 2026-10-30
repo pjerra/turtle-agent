@@ -178,9 +178,7 @@ func (d *RemoteDriver) noteFleeing() {
 				f.running[h.GUID] = h // still running, or out of breath at a distance: the sample stays
 			}
 		}
-		if _, back := f.fled[h.GUID]; back {
-			delete(f.fled, h.GUID) // it is back in view: the normal fight takes it
-		}
+		delete(f.fled, h.GUID) // it is back in view: the normal fight takes it
 	}
 	if d.fr.Truncated || d.fr.AllDead() {
 		return // an absence says nothing

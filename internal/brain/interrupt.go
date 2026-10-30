@@ -55,17 +55,7 @@ func castPriority(c *Ctx, caster *objects.Unit, cast *objects.Cast) int {
 	return 0
 }
 
-// interruptTarget finds the enemy cast to interrupt with the named spell: in the spell's range, the highest priority, the soonest
-// to end among those.
-func interruptTarget(c *Ctx, spell string) *objects.Unit {
-	id, ok := c.Spells.Highest(spell)
-	if !ok {
-		return nil
-	}
-	return interruptTargetID(c, id)
-}
-
-// interruptTargetID is interruptTarget for a spell id.
+// interruptTargetID finds the enemy cast to interrupt with a spell id.
 func interruptTargetID(c *Ctx, id uint32) *objects.Unit {
 	meta, ok := spells.Lookup(id)
 	if !ok {

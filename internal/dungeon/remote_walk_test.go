@@ -202,7 +202,7 @@ func TestStepperResumeAt(t *testing.T) {
 		t.Fatalf("%+v", a)
 	}
 	// The same spot with hostiles listed at the groups: the pack behind is alive and is pulled.
-	r, ok, s = at(170, 0, 2, true)
+	r, ok, _ = at(170, 0, 2, true)
 	if !ok || r.SkippedGroups != 0 {
 		t.Fatalf("%+v", r)
 	}

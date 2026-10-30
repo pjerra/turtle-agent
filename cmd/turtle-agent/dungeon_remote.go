@@ -217,7 +217,8 @@ func remoteRecoverWipe(p dungeonRunParams) bool {
 	return recoverWipeOn(p.RecoverWipe, mode != modeObserve)
 }
 
-// startRemote starts a run in remote mode. The caller holds r.mu and has checked that no run goes.
+// startRemote starts a run in remote mode. The caller holds r.mu, has checked that no run goes and has claimed the movement mode
+// (r.moves): the run's goroutine releases it.
 func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, plan *dungeon.Plan, planPath, tunePath string, setup []string, from int, names []string) (dungeonRunResult, error) {
 	if r.remote == nil {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "the remote commander is not available"}
@@ -275,8 +276,9 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 	r.drv, r.cancel, r.done = drv, cancel, done
 	go func() {
 		defer close(done)
+		defer r.moves.release(moveOwnerRun) // the caller claimed it; released once the run has exited, just before done closes
 		defer cancel()
-		_ = drv.Run(ctx, from)
+		_ = r.runDriver(ctx, drv, from)
 		r.keptFrom(drv.Report()) // the outcome is in the report and the events; the unbind is deferred inside Run
 	}()
 	res := dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, FromPullGroup: opt.FromPullGroup, Legs: names, Buffs: []string{}, LeaderGM: "false", Mode: "remote", RunMode: modeCommander, LeadBot: p.LeadBot}

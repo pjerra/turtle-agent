@@ -37,6 +37,7 @@ func TestRunDispatchesEveryUsageCommand(t *testing.T) {
 		"lease":           {"bogus-subcommand"},
 		"slot":            {"setup"},
 		"teardown":        {},
+		"rpc":             {},
 	} {
 		var out, errOut bytes.Buffer
 		code := run(context.Background(), append([]string{cmd}, args...), &out, &errOut)
