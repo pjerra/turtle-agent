@@ -39,6 +39,13 @@ jobs:
       - name: gofmt, go vet, no-cgo build, go test -race
         run: make GOROOT_LOCAL="$(go env GOROOT)" fmt-check vet test
 
+      # Pinned: a new staticcheck release must not turn an unrelated PR red. No checks are disabled; a false positive
+      # is a single `-check` in a commented staticcheck.conf, never a whole category.
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@2026.2.2
+          "$(go env GOPATH)/bin/staticcheck" ./...
+
       # `make test` builds the navmesh engine through cgo (the runner has g++) and runs the navmesh tests, which
       # skip without mmaps. This builds the real binary with cgo explicitly.
       - name: cgo build

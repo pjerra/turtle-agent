@@ -33,7 +33,7 @@ func traceScoreCmd(args []string, stdout, stderr io.Writer) int {
 	asJSON := fs.Bool("json", false, "print the verdicts as JSON (one object per trace)")
 	summary := fs.Bool("summary", false, "write <run_id>.summary.json beside each trace")
 	var sets thresholdFlags
-	fs.Var(&sets, "set", "change a threshold: check=value (rest_share, stale_party, walk_stops, threat_off_tank, order_refusals, feed_stalls, stuck, facing, and the spell warnings idle_share, interrupt_cover, taunt_latency, cc_hold, pet_threat)")
+	fs.Var(&sets, "set", "change a threshold: check=value (rest_share, stale_party, walk_stops, threat_off_tank, order_refusals, feed_stalls, stuck, facing, and the spell warnings idle_share, interrupt_cover, taunt_latency, cc_hold, pet_threat, spell_oracle, oom_in_fight)")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(stderr, traceScoreUsage)
 		return exitUsage
@@ -97,7 +97,7 @@ func describeCheck(c trace.Check) string {
 	if c.Verdict == trace.NA {
 		return "n/a: " + c.Detail
 	}
-	if c.ID == tracecheck.IDSpells { // report only: the detail is the line, the section below has the tables
+	if c.ID == tracecheck.IDSpells || c.ID == tracecheck.IDSpellOracle || c.ID == tracecheck.IDOOMInFight { // report only: the detail is the line
 		return "report: " + c.Detail
 	}
 	return fmt.Sprintf("%g %s (limit %g): %s", c.Value, c.Unit, c.Threshold, c.Detail)

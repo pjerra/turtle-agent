@@ -171,7 +171,6 @@ var (
 	moveRe   = regexp.MustCompile(`^cmd move (-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)`)
 	gatherRe = regexp.MustCompile(`(?i)\bgathers?\b`)
 	legNumRe = regexp.MustCompile(`\bleg (\d+)\b`)
-	stepNoRe = regexp.MustCompile(`step (\d+)`)
 )
 
 // plane maps a game position to the drawing's plane, rounded to a tenth of a yard (and never a negative zero, which JSON would print as -0).

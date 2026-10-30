@@ -29,8 +29,7 @@ const (
 )
 
 var (
-	drCasterForms = []uint32{drCat, drBear, drDire, drTree, drTravel, drAquatic}
-	drRestoKnown  = []uint32{drHT1, 5186, 5187, drHT4, drHT5, drHT6, drHT7, drRegrowth1, 8938, 8939, 8940, drRegrowth5, drRejuv1, 1058, 1430, 2090, 2091, 3627, drRejuv7,
+	drRestoKnown = []uint32{drHT1, 5186, 5187, drHT4, drHT5, drHT6, drHT7, drRegrowth1, 8938, 8939, 8940, drRegrowth5, drRejuv1, 1058, 1430, 2090, 2091, 3627, drRejuv7,
 		drRemoveCurse, drAbolish, drCurePoison, drInnervate, drMotw1, 5232, 6756, 5234, drMotw5, 467, 782, 1075, drThorns4}
 	drBalanceKnown = []uint32{drMoonfire, drWrath, 5177, 5178, 5179, 5180, 6780, drStarfire, 8949, 8950, drSwarm, drRoots, drHibernate, drMotw5, drThorns4, drInnervate}
 	drCatKnown     = []uint32{drCat, drClaw, 3029, drShred, drRake, drRip, drBite, drFury, drFFF, drMotw5, drBear, drDire}
