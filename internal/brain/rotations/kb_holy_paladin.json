@@ -1,0 +1,220 @@
+{
+  "version": 1,
+  "name": "kb_holy_paladin",
+  "class": "paladin",
+  "spec": "holy",
+  "mode": "add",
+  "replaces": [],
+  "notes": "The knowledge base's holy paladin, added after role_healer: Seal of Wisdom, Holy Shock for a dying target, Holy Light on a tank that just dropped, Holy Strike when three or more are hurt in melee, Flash of Light as the filler, Judgement with a seal in melee, Crusader Strike while moving, a rank-1 Flash of Light in downtime and a rank-1 Consecration. Cleanse is role_healer's, and Divine Intervention, Hand of Protection and the passive Divine Favor are listed in kb.unexpressed.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/paladin/holy-healer.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=170300#p170300 (Ellifta, player, 2026-03-07)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=139090#p139090 (Ellifta, player, 2025-07-14)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=139025#p139025 (Soymage, player, 2025-07-14)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=139095#p139095 (Atreidon, player, 2025-07-14)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=144592#p144592 (Atreidon, player, 2025-08-11)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=140887#p140887 (Azcron, player, 2025-07-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=150949#p150949 (Tankmeister, player, 2025-09-09)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=161979#p161979 (Beardozer, player, 2025-12-08)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=148042#p148042 (Elisleris, player, 2025-08-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=170509#p170509 (Elisleris, player, 2026-03-10)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=136662#p136662 (Elisleris, player, 2025-06-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=151365#p151365 (Crake, player, 2025-09-11)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=27457#p27457 (Unchallenged, player (guide writer), 2024-12-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102969#p102969 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172139#p172139 (Torta, staff, 2026-03-24)",
+    " (Mithreon, player (Holy raider, channel expert), 2026-04-17)",
+    " (Grey, player (theorycrafter), 2026-04-04)",
+    " (PraylorSwift, player, 2026-04-12)",
+    " (Lhian, staff (paladin developer), 2026-03-22)",
+    " (Mithreon, player, 2026-04-12)",
+    " (Mithreon, player, 2026-04-09)"
+  ],
+  "priorities": [
+    {
+      "id": "seal_of_wisdom",
+      "spell": "Seal of Wisdom",
+      "level": 18,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "no_self_aura": [
+          "Seal of Righteousness",
+          "Seal of Command",
+          "Seal of Wisdom",
+          "Seal of Light",
+          "Seal of the Crusader",
+          "Seal of Justice"
+        ]
+      }
+    },
+    {
+      "id": "holy_shock",
+      "spell": "Holy Shock",
+      "talent": true,
+      "target": "heal",
+      "band": "high",
+      "when": {
+        "heal_hp_below": 20
+      }
+    },
+    {
+      "id": "holy_light",
+      "spell": "Holy Light",
+      "level": 1,
+      "target": "heal",
+      "band": "high",
+      "when": {
+        "heal_hp_below": 65,
+        "heal_is_tank": true
+      }
+    },
+    {
+      "id": "holy_strike",
+      "spell": "Holy Strike",
+      "level": 4,
+      "target": "fight",
+      "band": "high",
+      "when": {
+        "mob_in_reach": true,
+        "members_hurt_min": 3
+      }
+    },
+    {
+      "id": "flash_of_light",
+      "spell": "Flash of Light",
+      "level": 20,
+      "target": "heal",
+      "band": "high",
+      "when": {}
+    },
+    {
+      "id": "judgement",
+      "spell": "Judgement",
+      "level": 4,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "self_aura": [
+          "Seal of Righteousness",
+          "Seal of Command",
+          "Seal of Wisdom",
+          "Seal of Light",
+          "Seal of the Crusader",
+          "Seal of Justice"
+        ]
+      }
+    },
+    {
+      "id": "crusader_strike",
+      "spell": "Crusader Strike",
+      "level": 10,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "moving": true
+      }
+    },
+    {
+      "id": "flash_of_light_rank1",
+      "spell": "Flash of Light",
+      "level": 20,
+      "rank": 1,
+      "target": "heal",
+      "band": "low",
+      "when": {
+        "state": "rest",
+        "heal_is_tank": true
+      }
+    },
+    {
+      "id": "consecration_rank1",
+      "spell": "Consecration",
+      "level": 20,
+      "rank": 1,
+      "target": "fight",
+      "band": "low",
+      "threat": "aoe",
+      "when": {
+        "mobs_in_reach_min": 3
+      }
+    },
+    {
+      "id": "lay_on_hands_kb",
+      "spell": "Lay on Hands",
+      "level": 10,
+      "target": "heal",
+      "band": "emergency",
+      "when": {
+        "heal_hp_below": 15,
+        "heal_is_tank": true
+      }
+    },
+    {
+      "id": "divine_shield_kb",
+      "spell": "Divine Shield",
+      "level": 34,
+      "target": "self",
+      "band": "emergency",
+      "when": {
+        "feared": true
+      }
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/paladin/holy-healer.yaml",
+    "sha256": "2de4a423580e520f476cb99d64c82ff5da1434764c109fc3300e2b464028f973",
+    "preset": "holy_paladin",
+    "recipe": "tools/kbrotgen/recipes/kb_holy_paladin.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Setup: Seal of Wisdom on self, Judgement of Wisdom on the boss/pack, Concentration Aura when meleeing | pre-pull [[d:paladin#1492813841057448060]]",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[5]",
+        "text": "Judgement + re-seal Wisdom | after using the 1.5 s Holy Light or when the judgement is about to drop [[d:paladin#1446997676200820840]]",
+        "why": "swing timer not in the conditions"
+      },
+      {
+        "row": "rotation_single[8]",
+        "text": "Cleanse | magic/poison/disease on an ally; pre-cast before Naxx spider-wing poison [[d:paladin#1461076668021211320]]",
+        "why": "role_healer owns dispels (the class heal kit)"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "Holy Strike on cooldown in melee range (heals you + 4 wounded allies, semi-smart)",
+        "why": "covered by rotation_single[3]: Holy Strike with three hurt members in reach"
+      },
+      {
+        "row": "rotation_aoe[1]",
+        "text": "Flash of Light between Holy Strikes, max 3 per Holy Strike",
+        "why": "covered by rotation_single[3-4]: the Holy Strike and Flash of Light entries"
+      },
+      {
+        "row": "rotation_aoe[2]",
+        "text": "3 FoL + 1 Holy Strike loop",
+        "why": "cancel/stop casting not expressible"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "Divine Intervention | Maexxna: pre-DI a healer for each Web Wrap [[d:paladin#1466097683629342991]]",
+        "why": "friendly target not in the conditions"
+      },
+      {
+        "row": "cooldowns[3]",
+        "text": "Blessing of Protection | DPS pulled aggro; bubble casters during AoE [[d:paladin#1484938782292840551]]",
+        "why": "friendly target not in the conditions"
+      },
+      {
+        "row": "cooldowns[4]",
+        "text": "Divine Favor | passive (+10..50% Holy Shock crit), not a button",
+        "why": "passive (never a cast)"
+      }
+    ]
+  }
+}

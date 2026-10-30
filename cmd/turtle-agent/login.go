@@ -181,12 +181,19 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	createSpec := fs.String("create", "", "create the character at login when the account lacks it: race,class[,gender] (numbers)")
 	tuneFile := fs.String("tune", "", "tunables file of remote dungeon runs that name none (default: <plan>.tune.json beside the plan; README \"Live tuning\")")
 	budgetAddr := fs.String("login-budget", "", "loopback address of the fleet's shared login budget (set by `fleet`; its token is in the environment)")
+	followLead := fs.String("follow", "", "follow the lead bot of a bot-led run as a player (with --follow-plan)")
+	followPlan := fs.String("follow-plan", "", "plan file of the follow (its map, portal and entrance trigger)")
+	followAssist := fs.Bool("follow-assist", false, "attack the lead bot's target while following (melee auto-attack only)")
 	pidPath := fs.String("pid-file", "", "write this process's pid here (0600) and remove it at exit; slot setup's start line passes it")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
 	if fs.NArg() != 1 && fs.NArg() != 2 {
 		fmt.Fprintln(stderr, "usage: turtle-agent login [flags] [<account>] <character>")
+		return exitUsage
+	}
+	if err := checkFollowFlags(*followLead, *followPlan, *followAssist); err != nil {
+		fmt.Fprintln(stderr, err)
 		return exitUsage
 	}
 	if *reconnects < 0 {
@@ -389,7 +396,11 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	} else {
 		srv.SetToken(rpcToken)
 	}
-	closeMethods := registerMethodsFor(srv, cur.Load, methodOptions{AddonDir: st.TBMAddonDir, DungeonsDir: st.DungeonsDir, TunePath: *tuneFile, TracesDir: st.TracesDir, RunMeta: runMetaOf(st), Planner: planner, EntryLedgerPath: ledgerPath(st, account)})
+	var follow *followStartParams
+	if *followLead != "" {
+		follow = &followStartParams{Plan: *followPlan, Lead: *followLead, Assist: *followAssist}
+	}
+	closeMethods := registerMethodsFor(srv, cur.Load, methodOptions{AddonDir: st.TBMAddonDir, DungeonsDir: st.DungeonsDir, TunePath: *tuneFile, TracesDir: st.TracesDir, RunMeta: runMetaOf(st), Planner: planner, EntryLedgerPath: ledgerPath(st, account), Follow: follow, Stderr: stderr})
 	rctx, stopRPC := context.WithCancel(context.Background())
 	served := make(chan error, 1)
 	go func() { served <- rpc.Serve(rctx, ln, srv.Handler()) }()

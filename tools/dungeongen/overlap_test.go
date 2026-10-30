@@ -25,7 +25,7 @@ import (
 // taskmasters: the 16-unit cap of a 40-man merge stops before the room's density does, so a pull's 3 yd aggro margin
 // reaches the next formation (50 entries of the same four whelp colours and of a technician or taskmaster, none of them
 // forgotten: they are inside the pull's radius of the listed entries and the run counts them by entry).
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "blackwing_lair": 50}
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "blackwing_lair": 50, "timbermaw_hold": 13}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {

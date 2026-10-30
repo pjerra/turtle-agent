@@ -171,7 +171,7 @@ func Run(o Options) ([]Result, error) {
 	logf("archives: %s", strings.Join(baseNames(set.Archives()), " "))
 	dbc, err := set.Read(`DBFilesClient\Map.dbc`)
 	if err != nil {
-		return nil, fmt.Errorf("Map.dbc: %w", err)
+		return nil, fmt.Errorf("reading Map.dbc: %w", err)
 	}
 	rows, err := ParseMaps(dbc)
 	if err != nil {

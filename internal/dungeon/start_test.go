@@ -28,7 +28,6 @@ type startFake struct {
 	botLines  []string
 	respawns  int
 	respawnFn func(g *startFake) // what a .respawn brings back
-	respawnOK bool               // the account may .respawn (a developer): level >= 3 is enough, this is for a Respawner-less game
 
 	apart     map[string]bool      // bots that stand far from the lead bot until a `cmd summon` lands
 	arrive    map[string]time.Time // when a summoned bot lands

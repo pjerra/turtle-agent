@@ -18,6 +18,7 @@ import (
 	"sync"
 
 	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/spells"
 )
 
@@ -48,6 +49,12 @@ import (
 // this one cannot run), when (conditions, all must hold; see Conditions).
 //
 // The conditions are a closed set, each a function of what the agent sees: so a file cannot do more than a player's eyes can.
+//
+// The knowledge-base additions (docs/ROTATIONS.md, "KB rotations"): when may hold a level band (level_min, level_max on the character's
+// level) and mobs_near_mob_min (hostile mobs in combat within 8 yd of the fight's mob); target "heal" casts on the member the healer's
+// triage picked, with when.heal_hp_below, when.heal_is_tank and when.heal_no_aura looking at that member (members_hurt_min works with
+// any target); rank casts exactly that rank of the spell's name; mode "add" puts the entries right after role_healer instead of
+// replacing strategies (a healer's extra casts); kb names the knowledge-base file the file was generated from.
 
 // RotationVersion is the format this build reads.
 const RotationVersion = 1
@@ -89,6 +96,17 @@ type Conditions struct {
 	NoMobAura       []string `json:"no_mob_aura,omitempty"`
 	MobStacksBelow  *Stacks  `json:"mob_stacks_below,omitempty"`  // the mob carries fewer stacks of the aura
 	MobsLacking     string   `json:"mobs_lacking_aura,omitempty"` // a mob in melee reach lacks the aura
+
+	LevelMin *int `json:"level_min,omitempty"` // the character's level: at least, and at most (a KB's leveling-only advice)
+	LevelMax *int `json:"level_max,omitempty"`
+
+	MobsNearMobMin int `json:"mobs_near_mob_min,omitempty"` // hostile mobs in combat within 8 yd of the fight's mob, at least this many (a ranged AoE row's "3+ targets")
+
+	// The healer's triage (target "heal"): the member HealPlan picked, and no member at all when it picked none.
+	HealHPBelow    *int     `json:"heal_hp_below,omitempty"` // that member's health in percent, counting heals in flight
+	HealIsTank     *bool    `json:"heal_is_tank,omitempty"`
+	HealNoAura     []string `json:"heal_no_aura,omitempty"`     // none of these on that member (e.g. Renew)
+	MembersHurtMin int      `json:"members_hurt_min,omitempty"` // members in reach below the heal threshold, at least this many
 }
 
 // Stacks is an aura and a number of stacks.
@@ -105,6 +123,7 @@ type Priority struct {
 	SpellID uint32     `json:"spell_id,omitempty"`
 	Level   int        `json:"level,omitempty"`
 	Talent  bool       `json:"talent,omitempty"`
+	Rank    int        `json:"rank,omitempty"` // cast exactly this rank of the spell's name (a KB's "Renew (rank 1)"); a rank the spellbook lacks means the entry cannot run
 	Target  string     `json:"target,omitempty"`
 	Band    string     `json:"band,omitempty"`
 	Threat  string     `json:"threat,omitempty"`
@@ -121,12 +140,31 @@ type Rotation struct {
 	Name       string     `json:"name"`
 	Class      string     `json:"class"`
 	Spec       string     `json:"spec,omitempty"`
+	Mode       string     `json:"mode,omitempty"` // add: no replaces; the entries play right after role_healer (a healer's extra casts)
 	Replaces   []string   `json:"replaces"`
 	Notes      string     `json:"notes,omitempty"`
 	Sources    []string   `json:"sources,omitempty"`
 	Priorities []Priority `json:"priorities"`
+	KB         *KBRef     `json:"kb,omitempty"`
 
 	sha string // of the file's bytes, for the report
+}
+
+// KBRef names the knowledge-base file and the recipe a rotation was generated from (tools/kbrotgen), and the rows the rotation cannot
+// express: "rotation show" points at them, so that a silent drop is impossible.
+type KBRef struct {
+	File        string  `json:"file"`
+	SHA256      string  `json:"sha256"`
+	Preset      string  `json:"preset"`
+	Recipe      string  `json:"recipe"`
+	Unexpressed []KBRow `json:"unexpressed,omitempty"`
+}
+
+// KBRow is one row of a KB file that a rotation does not express, and why.
+type KBRow struct {
+	Row  string `json:"row"`
+	Text string `json:"text"`
+	Why  string `json:"why"`
 }
 
 // Rotation limits.
@@ -178,12 +216,29 @@ func (r *Rotation) Validate() error {
 	if r.Class != "" && !knownClassName(r.Class) {
 		return bad("class", "%q is not a class", r.Class)
 	}
-	if len(r.Replaces) == 0 {
-		return bad("replaces", "name the strategies of the preset this takes the place of")
+	switch r.Mode {
+	case "":
+		if len(r.Replaces) == 0 {
+			return bad("replaces", "name the strategies of the preset this takes the place of")
+		}
+		for _, s := range r.Replaces {
+			if _, ok := strategyBuilders[s]; !ok || strings.HasPrefix(s, "rot:") {
+				return bad("replaces", "%q is not a strategy", s)
+			}
+		}
+	case "add":
+		if len(r.Replaces) > 0 {
+			return bad("mode", "add: the file replaces nothing, so replaces must be empty")
+		}
+		if !classHeals(r.Class) {
+			return bad("mode", "add: the file plays right after role_healer, and the class %q does not heal", r.Class)
+		}
+	default:
+		return bad("mode", "%q: use add", r.Mode)
 	}
-	for _, s := range r.Replaces {
-		if _, ok := strategyBuilders[s]; !ok || strings.HasPrefix(s, "rot:") {
-			return bad("replaces", "%q is not a strategy", s)
+	if r.KB != nil {
+		if _, ok := presets[r.KB.Preset]; !ok {
+			return bad("kb.preset", "%q is not a preset", r.KB.Preset)
 		}
 	}
 	if n := len(r.Priorities); n == 0 || n > maxPriorities {
@@ -236,9 +291,18 @@ func (p *Priority) validate(class string) error {
 		return fmt.Errorf("kind %q: use cast, attack, next_swing or stance", p.Kind)
 	}
 	switch p.Target {
-	case "", "fight", "melee_mob", "self":
+	case "", "fight", "melee_mob", "self", "heal":
 	default:
-		return fmt.Errorf("target %q: use fight, melee_mob or self", p.Target)
+		return fmt.Errorf("target %q: use fight, melee_mob, self or heal", p.Target)
+	}
+	if p.Rank < 0 {
+		return errors.New("rank: 1 or above")
+	}
+	if p.Rank > 0 && p.Spell == "" {
+		return errors.New("rank: name the spell (a rank of a name), not a spell_id")
+	}
+	if p.When.heal() && p.Target != "heal" {
+		return errors.New("when.heal_hp_below, heal_is_tank and heal_no_aura: only with target heal")
 	}
 	if p.Band != "" {
 		if _, ok := bands[p.Band]; !ok {
@@ -266,6 +330,18 @@ func (p *Priority) validate(class string) error {
 		}
 		if p.Level == 0 && !p.Talent && p.SpellID == 0 {
 			return fmt.Errorf("%s: say the level of its first rank (level), or talent true", name)
+		}
+		if p.Rank > 0 {
+			found := false
+			for _, id := range ids {
+				if m, ok := spellMeta(id); ok && int(m.Rank) == p.Rank {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("%s: no rank %d in the spell data", name, p.Rank)
+			}
 		}
 	}
 	return p.When.validate()
@@ -315,7 +391,7 @@ func (w *Conditions) validate() error {
 			return fmt.Errorf("when.stance %q is not a warrior stance", s)
 		}
 	}
-	auras := [][]string{w.SelfAura, w.NoSelfAura, w.SelfAuraMissing, w.MobAura, w.NoMobAura}
+	auras := [][]string{w.SelfAura, w.NoSelfAura, w.SelfAuraMissing, w.MobAura, w.NoMobAura, w.HealNoAura}
 	if w.MobStacksBelow != nil {
 		auras = append(auras, []string{w.MobStacksBelow.Aura})
 		if w.MobStacksBelow.Stacks < 1 || w.MobStacksBelow.Stacks > 20 {
@@ -333,10 +409,25 @@ func (w *Conditions) validate() error {
 		}
 	}
 	for name, v := range map[string]*int{"self_hp_below": w.SelfHPBelow, "self_hp_above": w.SelfHPAbove, "power_below": w.PowerBelow,
-		"power_above": w.PowerAbove, "mob_hp_below": w.MobHPBelow, "mob_hp_above": w.MobHPAbove} {
+		"power_above": w.PowerAbove, "mob_hp_below": w.MobHPBelow, "mob_hp_above": w.MobHPAbove, "heal_hp_below": w.HealHPBelow} {
 		if v != nil && (*v < 0 || *v > 100) {
 			return fmt.Errorf("when.%s: a percent, 0-100", name)
 		}
+	}
+	if w.LevelMin != nil && (*w.LevelMin < 1 || *w.LevelMin > 60) {
+		return errors.New("when.level_min: a character level, 1-60")
+	}
+	if w.LevelMax != nil && (*w.LevelMax < 1 || *w.LevelMax > 60) {
+		return errors.New("when.level_max: a character level, 1-60")
+	}
+	if w.LevelMin != nil && w.LevelMax != nil && *w.LevelMin > *w.LevelMax {
+		return errors.New("when.level_max: below level_min")
+	}
+	if w.MobsNearMobMin < 0 || w.MobsNearMobMin > 40 {
+		return errors.New("when.mobs_near_mob_min: use 0-40")
+	}
+	if w.MembersHurtMin < 0 || w.MembersHurtMin > 40 {
+		return errors.New("when.members_hurt_min: use 1-40")
 	}
 	if w.MobsInReach < 0 || w.MobsInCone < 0 || w.ComboMin < 0 || w.ComboMin > 5 || w.MobDistMin < 0 || w.MobDistMax < 0 {
 		return errors.New("when: a count or a distance below zero (combo points go to 5)")
@@ -355,6 +446,17 @@ func knownClassName(n string) bool {
 	for _, ci := range classTable {
 		if ci.Name == n {
 			return true
+		}
+	}
+	return false
+}
+
+// classHeals says the class has a heal kit (the healer role's heals): an add-mode file plays after role_healer, so only such a class
+// can carry one.
+func classHeals(n string) bool {
+	for _, ci := range classTable {
+		if ci.Name == n {
+			return ci.Heals != nil
 		}
 	}
 	return false
@@ -469,8 +571,16 @@ func (r *Rotation) SHA() string { return r.sha }
 // apply takes the strategies the rotation replaces out of the list and puts its own in the place of the first of them. Another rotation
 // file of the preset that replaces the same strategies goes the same way (fire_mage is a preset with a rotation file in it, and
 // `rotation: frost_mage` takes its place). A rotation that replaces nothing of the preset is refused: it would play next to the
-// preset's own class rotation.
+// preset's own class rotation. An add-mode file replaces nothing: it is inserted right after role_healer, so its entries (band high)
+// pre-empt the generic heal, and a preset without role_healer is refused.
 func (r *Rotation) apply(flat []string) ([]string, error) {
+	if r.Mode == "add" {
+		i := slices.Index(flat, "role_healer")
+		if i < 0 {
+			return nil, fmt.Errorf("rotation %q is an add-mode file: its entries play right after role_healer, and this preset has none", r.Name)
+		}
+		return slices.Insert(slices.Clone(flat), i+1, "rot:"+r.Name), nil
+	}
 	out := make([]string, 0, len(flat)+1)
 	at := -1
 	for _, s := range flat {
@@ -539,6 +649,9 @@ func (p *Priority) action(swings []string) *Action {
 			threat = ThreatSingle
 		}
 	}
+	if p.Target == "heal" { // a heal goes to a friend: never harmful, no threat
+		harmful, threat = false, ThreatNone
+	}
 	switch p.Kind {
 	case "attack":
 		return swingAction(p.ID, fightMob)
@@ -549,17 +662,33 @@ func (p *Priority) action(swings []string) *Action {
 	if p.SpellID != 0 {
 		id := p.SpellID
 		a.Resolve = func(c *Ctx) (uint32, bool) { return id, c.Spells.Known(id) }
+	} else if p.Rank > 0 {
+		name, rank := p.Spell, p.Rank
+		a.Resolve = func(c *Ctx) (uint32, bool) { return knownRank(c, name, rank) }
 	}
 	switch p.Target {
 	case "", "fight":
 		a.Target = fightTarget
 	case "melee_mob":
 		a.Target = meleeMobGUID
+	case "heal":
+		a.Target = func(c *Ctx) packet.GUID { return targetGUID(ValHealPlan.Get(c).Target) }
+		a.Do = func(ctx context.Context, c *Ctx) error {
+			plan := ValHealPlan.Get(c)
+			if plan.Target == nil {
+				return nil
+			}
+			sid, ok := a.spell(c)
+			if !ok {
+				return nil
+			}
+			return healCast(ctx, c, sid, plan.Target.GUID)
+		}
 	}
 	if !p.selfTarget() && harmful {
 		a.Pre = []string{"face_target"}
 	}
-	if p.Kind == "next_swing" {
+	if p.Kind == "next_swing" && a.Do == nil {
 		id := p.ID
 		a.Do = func(ctx context.Context, c *Ctx) error {
 			sid, ok := a.spell(c)
@@ -583,7 +712,7 @@ func (p *Priority) trigger() func(*Ctx) bool {
 	state := w.State
 	if state == "" {
 		state = "combat"
-		if p.selfTarget() {
+		if p.selfTarget() || p.Target == "heal" {
 			state = "any"
 		}
 	}
@@ -592,13 +721,18 @@ func (p *Priority) trigger() func(*Ctx) bool {
 		return func(c *Ctx) bool { return off(c) && w.holds(c) }
 	}
 	melee := p.Kind == "attack" || p.Kind == "next_swing" || p.Target == "melee_mob"
+	heal := p.Target == "heal"
 	return func(c *Ctx) bool {
 		if !c.SelfOK {
 			return false
 		}
 		switch state {
 		case "combat":
-			if fightMob(c) == nil && !(p.Target == "melee_mob" && ValMeleeMob.Get(c) != nil) {
+			if heal {
+				if !healCombat(c) {
+					return false
+				}
+			} else if fightMob(c) == nil && !(p.Target == "melee_mob" && ValMeleeMob.Get(c) != nil) {
 				return false
 			}
 		case "rest":
@@ -607,6 +741,9 @@ func (p *Priority) trigger() func(*Ctx) bool {
 			}
 		}
 		if melee && p.Target != "melee_mob" && !mobInReach(c) {
+			return false
+		}
+		if heal && (!healAllowed(c) || ValHealPlan.Get(c).Target == nil) {
 			return false
 		}
 		return w.holds(c)
@@ -622,6 +759,12 @@ func (w *Conditions) mobOf(c *Ctx) *objects.Unit {
 }
 
 func (w *Conditions) holds(c *Ctx) bool {
+	if w.LevelMin != nil && int(c.Self.Level) < *w.LevelMin {
+		return false
+	}
+	if w.LevelMax != nil && int(c.Self.Level) > *w.LevelMax {
+		return false
+	}
 	mob := w.mobOf(c)
 	if w.MeleeMob && mob == nil {
 		return false
@@ -630,6 +773,9 @@ func (w *Conditions) holds(c *Ctx) bool {
 		return false
 	}
 	if w.MobsInReach > 0 && ValMeleeMobs.Get(c) < w.MobsInReach {
+		return false
+	}
+	if w.MobsNearMobMin > 0 && mobsNear(c, fightMob(c), 8) < w.MobsNearMobMin {
 		return false
 	}
 	if w.MobsInCone > 0 && ValConeMobs.Get(c) < w.MobsInCone {
@@ -712,7 +858,41 @@ func (w *Conditions) holds(c *Ctx) bool {
 	if w.MobsLacking != "" && mobsLacking(c, w.MobsLacking) == 0 {
 		return false
 	}
+	if w.MembersHurtMin > 0 && membersHurt(c) < w.MembersHurtMin {
+		return false
+	}
+	if w.heal() {
+		plan := ValHealPlan.Get(c)
+		if plan.Target == nil {
+			return false
+		}
+		if w.HealHPBelow != nil && plan.Pct >= float64(*w.HealHPBelow) {
+			return false
+		}
+		if w.HealIsTank != nil && plan.Tank != *w.HealIsTank {
+			return false
+		}
+		if len(w.HealNoAura) > 0 && HasAura(plan.Target, w.HealNoAura...) {
+			return false
+		}
+	}
 	return true
+}
+
+// heal reports a condition that looks at the healer's triage.
+func (w *Conditions) heal() bool {
+	return w.HealHPBelow != nil || w.HealIsTank != nil || len(w.HealNoAura) > 0
+}
+
+// knownRank is the spell id of a rank the spellbook knows (a KB row's "Renew (rank 1)"): a rank the spellbook lacks means the entry
+// cannot run, with no fallback to the highest rank (the KB asks for that rank deliberately).
+func knownRank(c *Ctx, name string, rank int) (uint32, bool) {
+	for _, id := range c.Spells.Ranks(name) {
+		if m, ok := spellMeta(id); ok && int(m.Rank) == rank {
+			return id, true
+		}
+	}
+	return 0, false
 }
 
 // stacksOn is how many stacks of the aura the unit carries.
@@ -794,6 +974,12 @@ func RankAt(name string, level int) uint32 {
 func (r *Rotation) Describe(level int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "rotation %s (%s %s) sha %s, replaces %s\n", r.Name, r.Class, r.Spec, r.sha, strings.Join(r.Replaces, ", "))
+	if r.Mode == "add" {
+		b.WriteString("mode add: the entries play right after role_healer\n")
+	}
+	if r.KB != nil {
+		fmt.Fprintf(&b, "kb: %s, %d rows not expressed (see the file's kb.unexpressed)\n", r.KB.File, len(r.KB.Unexpressed))
+	}
 	for i, p := range r.Priorities {
 		spell := p.Spell
 		if p.SpellID != 0 {
