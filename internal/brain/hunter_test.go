@@ -351,7 +351,7 @@ func TestHunterStepsOutOfTheDeadZone(t *testing.T) {
 		t.Fatalf("walked %v", mf.walkList())
 	}
 	// Too far for the shots (34 yards): closer. In a mob's front within 14 yards: out of it.
-	r, mf = newHunterRig(t, Params{})
+	r, _ = newHunterRig(t, Params{})
 	tankFights(r.g, 30, 36, 0)
 	if d := r.tick(100 * time.Millisecond); d == nil || d.Action != "hunter_reposition" {
 		t.Fatalf("a mob at 36 yards: %+v idle %q", d, r.idle())

@@ -1,0 +1,200 @@
+{
+  "version": 1,
+  "name": "kb_survival_hunter",
+  "class": "hunter",
+  "spec": "survival",
+  "replaces": [
+    "hunter_marksman"
+  ],
+  "notes": "The Turtle knowledge base's survival melee list: the swing with Raptor Strike in front of it, Immolation Trap, Mongoose Bite, Lacerate, Carve and Wing Clip as the last button, and Explosive Trap with the same list on 2+ targets. The side bonus of Lacerate, the fire immunity of a target and the proximity rules of Feign Death are not conditions (kb.unexpressed).",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/hunter/survival-melee-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=131245#p131245 (zer0g3, player, 2025-05-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=125834#p125834 (Barwat1, player, 2025-04-07)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=143785#p143785 (Bigsmerf, player, 2025-08-08)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=127584#p127584 (Steakhouse, player, 2025-04-19)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141781#p141781 (Cabum, player, 2025-07-27)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=147658#p147658 (Sarthrethal, player, 2025-08-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=153885#p153885 (Grawerok, player, 2025-10-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=173875#p173875 (SvenS2, player, 2026-04-03)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=158027#p158027 (Thricew, player, 2025-11-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=159405#p159405 (Kerbees, player, 2025-11-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102967#p102967 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=108776#p108776 (Jamey, staff, 2024-11-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=124504#p124504 (Torta, staff, 2025-03-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=143781#p143781 (Vladis, player, 2025-08-08)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=132001#p132001 (Bigsmerf, player, 2025-05-19)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=104588#p104588 (Juzam, player, 2024-10-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=134728#p134728 (Cabum, player, 2025-06-08)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=137032#p137032 (Gildark, player, 2025-06-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172610#p172610 (Ahinevich, player, 2026-03-26)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=87692#p87692 (Ihavenoclothes, player, 2024-02-13)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=142264#p142264 (Bigsmerf, player, 2025-07-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=126982#p126982 (FrankFankledank, player, 2025-04-16)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=105276#p105276 (Dragunovi, staff, 2024-10-30)",
+    " (Hakuna, player, 2026-03-23)",
+    " (Sofie, player, 2026-03-22)",
+    " (Barwat, player, 2026-04-02)"
+  ],
+  "priorities": [
+    {
+      "id": "auto_attack",
+      "kind": "attack",
+      "when": {}
+    },
+    {
+      "id": "raptor_strike",
+      "kind": "next_swing",
+      "spell": "Raptor Strike",
+      "level": 1,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true
+      },
+      "note": "the swing and the strike the KB's melee list assumes; Raptor Strike replaces the next swing, so it is queued once per swing."
+    },
+    {
+      "id": "immolation_trap",
+      "spell": "Immolation Trap",
+      "level": 16,
+      "target": "self",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mob_hp_above": 30
+      },
+      "note": "\"not about to die\": 30% is this recipe's number; the trap is placed at the hunter's feet."
+    },
+    {
+      "id": "mongoose_bite",
+      "spell": "Mongoose Bite",
+      "level": 16,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true
+      }
+    },
+    {
+      "id": "lacerate",
+      "spell": "Lacerate",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true
+      }
+    },
+    {
+      "id": "explosive_trap",
+      "spell": "Explosive Trap",
+      "level": 34,
+      "target": "self",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mobs_in_reach_min": 2
+      }
+    },
+    {
+      "id": "carve_aoe",
+      "spell": "Carve",
+      "talent": true,
+      "target": "self",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mobs_in_reach_min": 2
+      }
+    },
+    {
+      "id": "carve",
+      "spell": "Carve",
+      "talent": true,
+      "target": "self",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mob_in_reach": true
+      },
+      "note": "Moved after the AoE entries: Carve has no cooldown of its own (a 10 s category), so as a rule it would starve the trap and the 2+ Carve."
+    },
+    {
+      "id": "wing_clip",
+      "spell": "Wing Clip",
+      "level": 12,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true
+      },
+      "note": "The KB's own last button (\"only if nothing else is ready\"), so it is the last of the reach entries."
+    },
+    {
+      "id": "rapid_fire",
+      "spell": "Rapid Fire",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat"
+      }
+    },
+    {
+      "id": "deterrence",
+      "spell": "Deterrence",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "self_hp_below": 50
+      },
+      "note": "\"emergency\": 50% is the phrase table's default where the KB gives no number."
+    },
+    {
+      "id": "feign_death",
+      "spell": "Feign Death",
+      "level": 30,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "mob_on_me": true
+      }
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/hunter/survival-melee-dps.yaml",
+    "sha256": "c4c49466f16ee602ce5e7a92f15c7401676c1813ad91334e0bd8da59429fda18",
+    "preset": "survival_hunter",
+    "recipe": "tools/kbrotgen/recipes/kb_survival_hunter.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[1]",
+        "text": "Immolation Trap | target not fire-immune and not about to die [[d:hunter#1451997607705444677]]",
+        "why": "a fire-immune target is not a condition"
+      },
+      {
+        "row": "rotation_single[3]",
+        "text": "Lacerate | off cooldown; from the side (+15%)",
+        "why": "positional (from the side) not in the conditions"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "Explosive Trap > Carve > Raptor Strike > Mongoose Bite > Lacerate > Wing Clip",
+        "why": "a fire-immune target is not a condition; the other steps are the single-target entries"
+      },
+      {
+        "row": "cooldowns[0]",
+        "text": "Rapid Fire / on-use trinkets / Blood Fury | on pull; Blood Fury does not stack with Molten Emberstone [[d:hunter#1456621926540644466]]",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[2]",
+        "text": "Feign Death | threat drop; resist chance grows with proximity; cannot fail out of line of sight [[d:hunter#1494689825419165921]], [[d:hunter#1445841760583680000]]",
+        "why": "the resist chance's proximity and line-of-sight rules are not conditions"
+      }
+    ]
+  }
+}

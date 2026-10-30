@@ -372,7 +372,6 @@ type hireFlow struct {
 	noLevel bool // the server refused level=<n>, or ignored it: the hires come at the commander's level
 	lowered bool // the server lowered a level to the commander's limit
 	bots    []*hireBot
-	dropped []string
 	problem []string
 	who     map[string]tbm.Who // the bots' own `who` answers
 	kept    map[string]bool    // the hires (lower case) of a kept binding: bound bots answer no `.bot` line (taken from the memory of the run that left it)

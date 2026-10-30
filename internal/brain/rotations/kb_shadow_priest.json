@@ -1,0 +1,206 @@
+{
+  "version": 1,
+  "name": "kb_shadow_priest",
+  "class": "priest",
+  "spec": "shadow",
+  "replaces": [
+    "priest_shadow"
+  ],
+  "notes": "The knowledge base's shadow priest: Shadowform, Shadow Word: Pain on a mob that will live, Mind Blast on cooldown, Mind Flay as the filler, Vampiric Embrace only when members are hurt, Pain Spike and Devouring Plague as extra fillers, Holy Nova at five or more targets. Cooldown and gear rows that need an observation the conditions lack (T3.5 set, raid mechanics, trinket timing) are listed in kb.unexpressed.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/priest/shadow-ranged-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=2080#p2080 (Jcarrill0, guide writer (2019 vanilla-era), 2019-02-13)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=133782#p133782 (Zitronenhaze, player, 2025-05-31)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=151267#p151267 (Keds, player, 2025-09-11)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=150785#p150785 (Keds, player, 2025-09-08)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113536#p113536 (Caracole, player, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=73757#p73757 (Quidoba, player, 2023-10-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=103227#p103227 (Svercalirin, player, 2024-10-16)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=151635#p151635 (Nemetth1, player, 2025-09-14)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=133959#p133959 (Drubarrymooer, player, 2025-06-02)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=98901#p98901 (Atreidon, player, 2024-07-08)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102970#p102970 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=168272#p168272 (Dragunovi, staff, 2026-02-15)",
+    " (irotos, player (endgame Shadow raider), 2026-03-29)",
+    " (Zitronenhaze, player (top Shadow raider, pinned guide), 2026-04-09)",
+    " (Zitronenhaze, player (top Shadow raider, pinned guide), 2026-04-14)"
+  ],
+  "priorities": [
+    {
+      "id": "shadowform",
+      "spell": "Shadowform",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "no_self_aura": [
+          "Shadowform"
+        ]
+      }
+    },
+    {
+      "id": "shadow_word_pain",
+      "spell": "Shadow Word: Pain",
+      "level": 4,
+      "target": "fight",
+      "when": {
+        "mob_hp_above": 30,
+        "no_mob_aura": [
+          "Shadow Word: Pain"
+        ]
+      }
+    },
+    {
+      "id": "mind_blast",
+      "spell": "Mind Blast",
+      "level": 10,
+      "target": "fight",
+      "when": {}
+    },
+    {
+      "id": "vampiric_embrace",
+      "spell": "Vampiric Embrace",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "mob_hp_above": 30,
+        "no_self_aura": [
+          "Fade"
+        ],
+        "no_mob_aura": [
+          "Vampiric Embrace"
+        ],
+        "members_hurt_min": 2
+      },
+      "note": "moved ahead of the Mind Flay filler (KB priority 5): the filler would win every tick"
+    },
+    {
+      "id": "mind_flay",
+      "spell": "Mind Flay",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "moving": false
+      }
+    },
+    {
+      "id": "pain_spike",
+      "spell": "Pain Spike",
+      "level": 30,
+      "target": "fight",
+      "when": {}
+    },
+    {
+      "id": "devouring_plague",
+      "spell": "Devouring Plague",
+      "level": 20,
+      "target": "fight",
+      "when": {
+        "power_above": 30,
+        "no_mob_aura": [
+          "Devouring Plague"
+        ]
+      }
+    },
+    {
+      "id": "holy_nova",
+      "spell": "Holy Nova",
+      "level": 20,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "tank_holds": true,
+        "mobs_near_mob_min": 5
+      }
+    },
+    {
+      "id": "inner_focus",
+      "spell": "Inner Focus",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "no_self_aura": [
+          "Inner Focus"
+        ]
+      }
+    },
+    {
+      "id": "berserking",
+      "spell": "Berserking",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat"
+      }
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/priest/shadow-ranged-dps.yaml",
+    "sha256": "446cd7a27baf9eaa52bc8931ed6e97e54d095a0387a9767424c97bb51b562033",
+    "preset": "shadow_priest",
+    "recipe": "tools/kbrotgen/recipes/kb_shadow_priest.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Pre-pull: Shadowform, Inner Fire, PW:S if pushback expected |",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[1]",
+        "text": "Opener: Shadow Word: Pain -> Mind Blast -> Mind Flay x2 (VE first only if mana/healing needed) |",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[4]",
+        "text": "Mind Flay (2 per Mind Blast cooldown) | filler; clip manually right after the last wanted tick; never stop it by moving",
+        "why": "cancel/stop casting not expressible"
+      },
+      {
+        "row": "rotation_single[6]",
+        "text": "Fade then Shadow Word: Pain refresh | wearing T3.5 3-set (+15% shadow dmg 10 s) with Improved Fade; best with snapshot trinket (Eye of Dormant Corruption)",
+        "why": "gear or set bonus not in the conditions"
+      },
+      {
+        "row": "rotation_single[9]",
+        "text": "Mana: tea + Major Mana Potion on cooldown, VE when mana needed | mana dropping",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "single-target the kill target; SW:P extra mobs only if they live >= 3 ticks",
+        "why": "covered by rotation_single[2-4]: the single-target strikes; Consecration waits for two or more mobs"
+      },
+      {
+        "row": "rotation_aoe[2]",
+        "text": "Garr/Rupturan adds: AoE evenly, swap to fire-immunity trinket before they die",
+        "why": "fight knowledge (named bosses) not in the conditions"
+      },
+      {
+        "row": "cooldowns[0]",
+        "text": "Vampiric Embrace | only when mana/healing is needed; not with Fade; not through the Nefarian priest class call",
+        "why": "covered by rotation_single[5]: the same spell carries its conditions"
+      },
+      {
+        "row": "cooldowns[2]",
+        "text": "Fade | before a SW:P refresh with T3.5 3-set; 1.18.1 Fade -15% threat while active but threat returns",
+        "why": "priest_defense owns Fade"
+      },
+      {
+        "row": "cooldowns[3]",
+        "text": "Trinkets | passive-CD trinket ~30 s pre-pull, Essence on pull, then Scythe (order matters for shared CDs)",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[4]",
+        "text": "Power Word: Shield (self) | before pushback/AoE phases",
+        "why": "pre-pull/opener outside the brain's fight"
+      }
+    ]
+  }
+}

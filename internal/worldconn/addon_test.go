@@ -18,11 +18,10 @@ import (
 )
 
 type addonEntry struct {
-	name     string
-	flags    uint8
-	modCRC   uint32
-	urlCRC   uint32
-	wantSize int
+	name   string
+	flags  uint8
+	modCRC uint32
+	urlCRC uint32
 }
 
 // decodeBlock reads an addon block the way the core does (AddonHandler.cpp:114-139).

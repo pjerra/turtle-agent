@@ -181,7 +181,7 @@ func Generate(src Sources, commit string) ([]byte, error) {
 	need := func(name string) (float64, error) {
 		v, ok := nums[name]
 		if !ok {
-			return 0, fmt.Errorf("Constants.lua has no TB.C.%s", name)
+			return 0, fmt.Errorf("the Constants.lua has no TB.C.%s", name)
 		}
 		return v, nil
 	}
@@ -289,7 +289,7 @@ func Generate(src Sources, commit string) ([]byte, error) {
 		}
 		label := labels[intent]
 		if label == "" {
-			return nil, fmt.Errorf("Constants.lua: no ACTION_LABELS entry for %q", intent)
+			return nil, fmt.Errorf("the Constants.lua has no ACTION_LABELS entry for %q", intent)
 		}
 		if intent == "hold" {
 			continue
