@@ -1953,7 +1953,10 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
    right after the start must report the requested step (and its leg);
    if neither source proves it, the newly started run is stopped and the watch refused — no unverified run is watched, and the failed run's unbind leaves
    no hire bound. The party's place is checked before `run start`: the lead bot must stand within 80 yd of the start step's point (the step's coordinates,
-   or the leg's first point), and a start whose point or whose lead position is not known is refused too, since the place cannot be checked;
+   or, for `from_leg`, the run leader's first row of the leg in the rebuilt rows that match the server's step count; the plan file's first point of the
+   leg only when the server lists no count), and a start whose point or whose lead position is not known is refused too, since the place cannot be checked;
+   a `from_leg` start moves the party (the GM start) to that same point, and moves nobody when it is not known (a plan file whose rows do not match the
+   deployed ones: its legs are not the run leader's);
    `observe.allow_far_start` turns each of these refusals into a note. Adopting a run that is already going (`busy`) happens only when its status proves it
    is at the requested step (or in the leg, for a leg sent by name); a leg sent as a number is never adopted.
 4. **Watch.** From here the agent sends **no order**: any `.bot cmd` order but `state`, and any `.bot action`, pauses the run leader. It reads the

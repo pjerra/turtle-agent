@@ -808,6 +808,18 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		if err = d.probeRunLeader(ctx); err != nil {
 			return err
 		}
+		// The unsafe-start gate of an observed from_leg start, now that the probe knows the run leader's start step: still before the
+		// prepare step, the bind and the enter phase, so a refused start sends nothing past the probe.
+		if at, have, ok := d.observedLegStart(); ok && have && !d.opt.StartHere && fromLeg > 0 {
+			if err = d.observedStartSafety(fromLeg, at); err != nil {
+				return err
+			}
+		} else if ok && !have && !d.opt.StartHere && fromLeg > 0 {
+			// An unknown start point is refused at once as well (unless observe.allow_far_start), not after the party is prepared and bound.
+			if err = d.checkStartPlace(); err != nil {
+				return err
+			}
+		}
 	}
 	err = d.begin(ctx, fromLeg)
 	setupS := d.clk.Now().Sub(setupAt).Seconds()

@@ -47,6 +47,8 @@ const (
 	StartEntrance = "entrance"
 	StartLeg      = "leg_start"
 	StartGather   = "pull_gather"
+	// StartStep is an observed run's partway start: the run leader's own start step (PartialStart.Point).
+	StartStep = "run_leader_step"
 )
 
 // StartReport is what a run that starts inside the dungeon did to get there (Report.Start; absent for a run from the first leg's start).
@@ -273,6 +275,10 @@ func (d *RemoteDriver) checkStartSafety(ctx context.Context, fromLeg int) error 
 		at, _ = d.plan.GatherSpot(fromLeg, d.startGroup(), d.planPath(ctx))
 		what = fmt.Sprintf("from_pull_group %d: the gather spot %.0f %.0f %.0f", d.startGroup(), at.X, at.Y, at.Z)
 		near = d.plan.nearestEarlier(fromLeg, d.startGroup(), at)
+	case fromLeg > 0 && d.opt.Observe != nil && d.opt.StartFrom != nil:
+		// An observed from_leg start goes to the run leader's start step, which is known only after the probe (`.bot run list`):
+		// run gates that point (observedStartSafety) right after the probe, before the prepare step and the bind.
+		return nil
 	case fromLeg > 0:
 		at, _ = d.plan.LegStart(fromLeg)
 		what = fmt.Sprintf("from_leg %d: the start point %.0f %.0f %.0f", fromLeg, at.X, at.Y, at.Z)
@@ -280,6 +286,17 @@ func (d *RemoteDriver) checkStartSafety(ctx context.Context, fromLeg int) error 
 	default:
 		return nil
 	}
+	return d.startSafety(fromLeg, at, what, near)
+}
+
+// observedStartSafety is the unsafe-start gate of an observed from_leg start, at the run leader's start step.
+func (d *RemoteDriver) observedStartSafety(fromLeg int, at Point) error {
+	what := fmt.Sprintf("from_leg %d: the run leader's start step %.0f %.0f %.0f", fromLeg, at.X, at.Y, at.Z)
+	return d.startSafety(fromLeg, at, what, d.plan.nearestEarlier(fromLeg, 0, at))
+}
+
+// startSafety refuses (or notes) a start point under gatherSafe from a pack or boss of a skipped step.
+func (d *RemoteDriver) startSafety(fromLeg int, at Point, what string, near earlierPack) error {
 	if near.dist >= gatherSafe {
 		return nil
 	}
@@ -401,8 +418,21 @@ func (d *RemoteDriver) planPath(ctx context.Context) func(from, to Point) []Poin
 	}
 }
 
+// observedLegStart is an observed run's from_leg start (no pull group): the run leader starts at its own first row of the leg
+// (PartialStart.Point, from the deployed rows), not where the plan file's leg before it ended. have says the point is known; ok says the
+// run is such a start at all.
+func (d *RemoteDriver) observedLegStart() (at Point, have, ok bool) {
+	if d.opt.Observe == nil || d.start == nil || d.start.Words == "" || d.startGroup() >= 0 {
+		return Point{}, false, false
+	}
+	return d.start.Point, d.start.HavePoint, true
+}
+
 // startPoint is the point the run starts at and what it is.
 func (d *RemoteDriver) startPoint(ctx context.Context, fromLeg int) (Point, string, string) {
+	if at, have, ok := d.observedLegStart(); ok && have {
+		return at, StartStep, ""
+	}
 	if g := d.startGroup(); g >= 0 {
 		at, warn := d.plan.GatherSpot(fromLeg, g, d.planPath(ctx))
 		return at, StartGather, warn
@@ -488,6 +518,13 @@ func (d *RemoteDriver) startAnywhere(ctx context.Context, fromLeg int) error {
 	if err := d.checkStart(fromLeg); err != nil {
 		return err
 	}
+	if _, have, ok := d.observedLegStart(); ok && !have && !d.opt.StartHere {
+		// No point of the plan file is the run leader's start when its rows were not reproduced: the party stays, and the place check
+		// refuses the start (observe.allow_far_start: the run leader walks from where the party stands).
+		d.skippedLegs(fromLeg)
+		d.startNote(fmt.Sprintf("leg %d%s: the run leader's start step has no known point, so the party is not moved", fromLeg, nameSuffix(d.plan.Legs[fromLeg].Name)))
+		return nil
+	}
 	began := d.clk.Now()
 	at, kind, warn := d.startPoint(ctx, fromLeg)
 	sr := &StartReport{Leg: fromLeg, LegName: d.plan.Legs[fromLeg].Name, Kind: kind, Point: at, Map: d.plan.Map, Method: "gm", GMCommands: []string{}, Skipped: []string{}, Warning: warn}
@@ -514,7 +551,7 @@ func (d *RemoteDriver) startAnywhere(ctx context.Context, fromLeg int) error {
 		d.startNote("the party is at the start point already: no GM move")
 		return nil
 	}
-	if d.startGroup() < 0 && d.partyInLeg(fromLeg) {
+	if d.startGroup() < 0 && kind != StartStep && d.partyInLeg(fromLeg) {
 		// A resume into a leg whose party already stands in the leg's own ground (the Zum'rah room after the trigger, 1.9 min lost live when
 		// it was sent back to the courtyard at the previous leg's end): it stays, and the leg starts from where it is.
 		d.startReport(func(s *StartReport) { s.Method, s.Seconds = "already in the leg", d.clk.Now().Sub(began).Seconds() })
@@ -830,6 +867,10 @@ func (d *RemoteDriver) startSummon(ctx context.Context, name string) error {
 		if slices.Contains([]string{"denied", "no-bot", "invalid"}, ref.Code) {
 			break
 		}
+	}
+	if strings.HasPrefix(last, "unavailable") {
+		// Live 2026-10-30 (dmr fix 9): two followers were still fighting at the entry spot, so the summon was refused three times.
+		return fmt.Errorf("cmd summon %s was refused (%s); a bot that is dead, in combat, on a taxi or teleporting cannot be summoned: let the fight end (or revive it) and start the run again", name, last)
 	}
 	return fmt.Errorf("cmd summon %s was refused (%s)", name, last)
 }
