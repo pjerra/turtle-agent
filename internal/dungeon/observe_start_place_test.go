@@ -90,6 +90,10 @@ func TestObserveFromLegWithoutAStartPointMovesNobody(t *testing.T) {
 	if g.indexOf("run start") >= 0 {
 		t.Fatalf("the run was started: %v", g.orders)
 	}
+	// Refused right after the probe: no prepare, bind or entry past `run list` (Codex adversarial review 2026-10-30).
+	if fmt.Sprint(g.orders) != "[run list]" {
+		t.Fatalf("sent past the probe: %v", g.orders)
+	}
 }
 
 // The unsafe-start gate of an observed from_leg start measures the run leader's start step, the point the party is moved to, not the
