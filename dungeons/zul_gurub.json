@@ -23,6 +23,7 @@
   "notes": [
     "DRAFT: prep from the world database export of map 309 (tools/dungeongen) and the server mesh: 168 merged packs (L22: one floor, 15 yd, cap 12), runts/triggers/boss adds/friendly NPCs out, 17 off-mesh or look-stand spawns and 6 unreachable packs dropped. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run; dungeon_run refuses it without allow_draft.",
     "WALK 1 (2026-10-29, leg 0 only): the two first-terrace pairs and the z 130 plateau are pulled in turn now. The 125 yd split group (radius 2.8: its pull row could not reach its own units) is gone: the -12152 cluster joined the -12153 pack (8 units) and the -12276 cluster the -12277 pack (8 units). Every plateau pull has a rest stand and a pull stand of its own, out of the next pack's aggro; a stand before the first-terrace pull keeps it out of both pairs' aggro; and an off-water via point at the canal rim (-11928.5 -1364.5) keeps the walk back after a wipe out of the water at -11944 -1355. Legs 1-8 are unchanged.",
+    "WALK 2 (2026-10-30, leg 0 only): the plateau rests and stands moved out of the patrol lanes and each other's aggro. Three units patrol the z 130 plateau (creature_movement): Gurubashi Headhunter 11351 guid 49135 (28 points, 249 yd, the east spur to -12117 -1471), Hakkari Witch Doctor 11831 guid 49131 (21 points, 195 yd, the west loop) and Bat Rider 14750 guid 49130 (7 points, 227 yd); the 11351 pulled the run on a move hop 15.9 yd from the -12102 -1465 climb row in walk 2. The bat pack (11368/14750 at -12054 -1438) now has a rest stand at -12084 -1441 (25.4 yd from its nearest unit, aggro 21; 40.4 yd from the headhunter's path, aggro 20) before the stair pull stand -12066.938 -1439.884. The stands after it: cluster 1 (-12152 -1485) at -12114 -1494 (38.9 yd from its pack, 23.6 from the headhunter's path); the patrolling headhunter and the 8-unit pack west of it from -12185 -1495 (28.9 and 45.7 yd, 22.3 from the headhunter's path); the north bat pack at -12239 -1386 (22.6 yd from it, 27.2 from the -12236 -1415 pack, 29.3 from the witch doctor's path); the -12236 -1415 pack at -12268 -1376 (47.4 yd, 49.8 from the north bat pack, 39.6 from the bat rider's path); and cluster 2 (-12276 -1451) from -12307 -1411 (40.7 yd back, 32.3 from the bat rider's path). The climb rows at -12102 -1465 stay: the mesh has no other way up and the headhunter's path passes 15.1 yd from them, inside the run leader's 15-yd hop pull. Legs 1-8 are unchanged.",
     "Raid plan: 20 players (3 tanks, 5 healers, 12 damage). Boss order: Jeklik, Venoxis, Mar'li, Thekal, Arlokk, Mandokir, Jin'do, Hakkar. Gahz'ranka (15114) is optional and has no step: his summon is fishing Muddy Churning Waters (180369) with Zulian Mudskunk (17321), which the plan format cannot express. Edge of Madness (15082-15085) has no spawn and instance_zulgurub::SpawnRandomBoss is deactivated: no leg.",
     "Arlokk (14515) has no spawn row. The gong go_gong_of_bethekk (180526 at -11569.2 -1627.87 41.28) runs event script 9066 and summons her at -11540.7 -1627.71 41.27; the gong step is open for the mapping walk: the server path from the Arlokk terrace ends 9-10 yd above the gong (a drop the mesh does not link), so no use_object stand passes plan-check.",
     "Thekal (14599) is fought with his Zealots Lor'Khan 11347 and Zath 11348 and two Zulian Tigers 11361 (boss.first); Mar'li with the Witherbark Speaker 11388 and Venoxis with his four Razzashi Cobras 11373 (boss.first). They resurrect each other (boss_thekal.cpp), so the live run must kill the three within 7 s."
@@ -78,6 +79,7 @@
           ],
           "radius": 11.9,
           "approach": [
+            {"x": -12084, "y": -1441, "z": 130.85},
             {"x": -12066.938, "y": -1439.884, "z": 130.24419}
           ]
         },
@@ -95,8 +97,7 @@
           ],
           "radius": 20.5,
           "approach": [
-            {"x": -12112, "y": -1486, "z": 130.65},
-            {"x": -12165, "y": -1478, "z": 130.77}
+            {"x": -12114, "y": -1494, "z": 132.48}
           ]
         },
         {
@@ -106,7 +107,7 @@
           ],
           "radius": 1,
           "approach": [
-            {"x": -12199.351, "y": -1467.1476, "z": 131.15826}
+            {"x": -12185, "y": -1495, "z": 132}
           ]
         },
         {
@@ -136,7 +137,7 @@
           ],
           "radius": 5,
           "approach": [
-            {"x": -12219.585, "y": -1447.4061, "z": 130.65147}
+            {"x": -12239, "y": -1386, "z": 131.68}
           ]
         },
         {
@@ -148,7 +149,7 @@
           ],
           "radius": 1.2,
           "approach": [
-            {"x": -12227.675, "y": -1431.8448, "z": 130.67358}
+            {"x": -12268, "y": -1376, "z": 132.54}
           ]
         },
         {
@@ -165,8 +166,7 @@
           ],
           "radius": 18.5,
           "approach": [
-            {"x": -12255, "y": -1438, "z": 131.21},
-            {"x": -12268, "y": -1448, "z": 130.7}
+            {"x": -12307, "y": -1411, "z": 130.76}
           ]
         }
       ],
