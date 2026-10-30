@@ -20,7 +20,11 @@ import (
 // added on 2026-10-16 (world guids 30084 and 30089): each lone basilisk's group has scorpids of the pit and the ledge within its 25 yd; and the
 // Sentinel's camp split of 2026-10-17 (the lone Hunter's group has the east trio and the west ledge Hunters within its 25 yd). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
 // member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "upper_karazhan_halls": 6, "naxxramas": 104, "blackwing_lair": 50, "timbermaw_hold": 13, "temple_of_ahnqiraj": 128, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6}
+// molten_core's 10 are the 30-Flame-Imp block of Lucifron's room (three 16-cap pulls cannot be cut so that no pull reaches a
+// neighbour), Lucifron and his two Protectors in the reach of the room's last trash pack, two Lava Surger patrols inside a trash
+// pack's reach, and the two Shadowforge trash packs of the corridor: a boss, a patrol or a linked add is never merged into trash,
+// so the room sends them with the pull whether the plan lists them or not.
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "molten_core": 10, "blackwing_lair": 50, "timbermaw_hold": 13, "temple_of_ahnqiraj": 128, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6, "upper_karazhan_halls": 6, "naxxramas": 104}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {
