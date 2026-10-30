@@ -112,7 +112,13 @@ func TestObserveFromLegGatesTheStartStep(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "the run leader's start step 170 0 0 is 2 yd from pull group 1") {
 		t.Fatalf("%v", err)
 	}
-	if len(g.gos) != 0 || g.indexOf("run start") >= 0 {
-		t.Fatalf("moved or started: gos %v orders %v", g.gos, g.orders)
+	// Nothing past the probe: no bind, no instance entry, no GM line, no move (Codex adversarial review 2026-10-30).
+	if len(g.gos) != 0 || len(g.appears) != 0 || fmt.Sprint(g.orders) != "[run list]" {
+		t.Fatalf("sent past the probe: gos %v appears %v orders %v", g.gos, g.appears, g.orders)
+	}
+	for _, c := range g.calls {
+		if !strings.HasPrefix(c, "command run list") {
+			t.Fatalf("a call past the probe: %v", g.calls)
+		}
 	}
 }

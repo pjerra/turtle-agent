@@ -277,7 +277,7 @@ func (d *RemoteDriver) checkStartSafety(ctx context.Context, fromLeg int) error 
 		near = d.plan.nearestEarlier(fromLeg, d.startGroup(), at)
 	case fromLeg > 0 && d.opt.Observe != nil && d.opt.StartFrom != nil:
 		// An observed from_leg start goes to the run leader's start step, which is known only after the probe (`.bot run list`):
-		// startAnywhere gates that point (observedStartSafety) before it moves anyone.
+		// run gates that point (observedStartSafety) right after the probe, before the prepare step and the bind.
 		return nil
 	case fromLeg > 0:
 		at, _ = d.plan.LegStart(fromLeg)
@@ -524,11 +524,6 @@ func (d *RemoteDriver) startAnywhere(ctx context.Context, fromLeg int) error {
 		d.skippedLegs(fromLeg)
 		d.startNote(fmt.Sprintf("leg %d%s: the run leader's start step has no known point, so the party is not moved", fromLeg, nameSuffix(d.plan.Legs[fromLeg].Name)))
 		return nil
-	}
-	if at, have, ok := d.observedLegStart(); ok && have && !d.opt.StartHere {
-		if err := d.observedStartSafety(fromLeg, at); err != nil {
-			return err
-		}
 	}
 	began := d.clk.Now()
 	at, kind, warn := d.startPoint(ctx, fromLeg)
