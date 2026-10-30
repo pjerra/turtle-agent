@@ -20,6 +20,7 @@ const (
 )
 
 type wcSpawn struct {
+	guid  string
 	entry uint32
 	pos   Point
 }
@@ -48,9 +49,59 @@ func wcSpawns(t *testing.T) []wcSpawn {
 		x, _ := strconv.ParseFloat(rec[col["x"]], 32)
 		y, _ := strconv.ParseFloat(rec[col["y"]], 32)
 		z, _ := strconv.ParseFloat(rec[col["z"]], 32)
-		out = append(out, wcSpawn{uint32(e), Point{float32(x), float32(y), float32(z)}})
+		out = append(out, wcSpawn{rec[col["guid"]], uint32(e), Point{float32(x), float32(y), float32(z)}})
 	}
 	return out
+}
+
+// wcOnPatrol: p is a waypoint of the movement of a spawn row of entry (the spot a patrolling boss is met at, instead of his
+// spawn row).
+func wcOnPatrol(ss []wcSpawn, paths map[string][]Point, entry uint32, p Point) bool {
+	for _, s := range ss {
+		if s.entry != entry {
+			continue
+		}
+		for _, q := range paths[s.guid] {
+			if math.Hypot(float64(q.X-p.X), float64(q.Y-p.Y)) <= 1 && math.Abs(float64(q.Z-p.Z)) <= 1 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// wcPatrolGapS: the longest time a patrol is farther than radius from p while it walks its waypoints in order (the core's
+// waypoint movement goes on from the last to the first), at the export's walk speed (2.5 yd/s).
+func wcPatrolGapS(path []Point, p Point, radius float64) float64 {
+	if len(path) < 2 {
+		return 0
+	}
+	walk := append(append([]Point{}, path...), path[0])
+	gap, worst := 0.0, 0.0
+	for i := 0; i+1 < len(walk); i++ {
+		a, b := walk[i], walk[i+1]
+		d := math.Hypot(float64(b.X-a.X), float64(b.Y-a.Y))
+		n := int(math.Ceil(d / 0.5))
+		if n < 1 {
+			n = 1
+		}
+		for k := 0; k < n; k++ {
+			f := float64(k) / float64(n)
+			q := Point{float32(float64(a.X) + float64(b.X-a.X)*f), float32(float64(a.Y) + float64(b.Y-a.Y)*f), 0}
+			if math.Hypot(float64(q.X-p.X), float64(q.Y-p.Y)) <= radius {
+				if gap > worst {
+					worst = gap
+				}
+				gap = 0
+			} else {
+				gap += d / float64(n) / 2.5
+			}
+		}
+	}
+	if gap > worst {
+		worst = gap
+	}
+	return worst
 }
 
 // wcPatrolPaths reads movement.tsv (export.sh): the waypoints of each patrolling spawn by guid.
@@ -86,7 +137,8 @@ func wcNear(ss []wcSpawn, entry uint32, p Point, yd float64) bool {
 	return false
 }
 
-// The plan is what the export and the instance script say: the five bosses in route order, Lady Anacondra's four spawn spots (spawn pool
+// The plan is what the export and the instance script say: the seven bosses in route order (the five of the script and the two Turtle
+// bosses of the west wing and the east spur, added 2026-10-26), Lady Anacondra's four spawn spots (spawn pool
 // 10004) as one-member groups, every group member a spawn row of its entry, the one hop of the route a plain direct step with a check_skip (no GM).
 func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 	p := loadPlan(t, wailingPlan)
@@ -100,6 +152,7 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 	paths := wcPatrolPaths(t)
 	var bosses []uint32
 	ana := 0
+	kresh := 0
 	hops := 0
 	for i, l := range p.Legs {
 		if len(l.Steps) != 0 || len(l.AfterBoss) != 0 {
@@ -107,8 +160,10 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 		}
 		if l.Boss != nil {
 			bosses = append(bosses, l.Boss.Entry)
-			if !wcNear(ss, l.Boss.Entry, l.Boss.Position, 1) {
-				t.Errorf("legs[%d] (%s): boss %d is not at a spawn row of the export: %v", i, l.Name, l.Boss.Entry, l.Boss.Position)
+			// The point is a spawn row, or a waypoint of the boss's own patrol: a patroller is fought where the step's
+			// wait meets him (Kresh), not where he spawns.
+			if !wcNear(ss, l.Boss.Entry, l.Boss.Position, 1) && !wcOnPatrol(ss, paths, l.Boss.Entry, l.Boss.Position) {
+				t.Errorf("legs[%d] (%s): boss %d is not at a spawn row or a waypoint of his own patrol: %v", i, l.Name, l.Boss.Entry, l.Boss.Position)
 			}
 		}
 		for gi, g := range l.PullGroups {
@@ -122,8 +177,13 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 					t.Errorf("legs[%d] (%s) pull_groups[%d]: no spawn row of entry %d near %v", i, l.Name, gi, e, g.Positions[k])
 				}
 				switch e {
-				case 2914, 3835, 3653, 3678, 3679, 5912, 3669, 3670, 3673, 3674, 5775:
-					t.Errorf("legs[%d] (%s) pull_groups[%d]: entry %d is a critter, a neutral, a friendly, the rare or a boss", i, l.Name, gi, e)
+				case 2914, 3835, 3678, 3679, 5912, 3669, 3670, 3673, 3674, 5775:
+					t.Errorf("legs[%d] (%s) pull_groups[%d]: entry %d is a critter, a friendly, the rare or a boss", i, l.Name, gi, e)
+				case 3653:
+					// Kresh is the neutral turtle of the river: a boss row of the kresh leg (a neutral mob is fought
+					// only when a step makes the party attack it), never a pull member of any leg.
+					kresh++
+					t.Errorf("legs[%d] (%s) pull_groups[%d]: Kresh is the kresh leg's boss, not a pull member: %+v", i, l.Name, gi, g)
 				}
 			}
 			for _, e := range g.Entries {
@@ -219,8 +279,9 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 	if !via[1].Direct || via[1].GMCross {
 		t.Errorf("legs[%d] (serpentis) via[1] %v: want the plain direct landing after the exact foot", serp, via[1].Point)
 	}
-	// The four Fanglords open the Disciple's second menu (instance_wailing_caverns.cpp): Cobrahn, Pythas and Serpentis are bosses of the plan.
-	want := []uint32{3669, 3670, 3674, 3673, 5775}
+	// The four Fanglords open the Disciple's second menu (instance_wailing_caverns.cpp): Cobrahn, Pythas and Serpentis are bosses of the
+	// plan; Skum and Verdan follow the script; Vangros (west wing) and Zandara (east spur) are Turtle's, added 2026-10-26.
+	want := []uint32{3653, 3669, 3670, 61968, 3674, 61965, 3673, 5775}
 	if len(bosses) != len(want) {
 		t.Fatalf("bosses %v, want %v", bosses, want)
 	}
@@ -228,6 +289,32 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 		if bosses[i] != want[i] {
 			t.Fatalf("bosses %v, want %v", bosses, want)
 		}
+	}
+	if kresh != 0 {
+		t.Errorf("%d pull groups with Kresh, want none (the kresh leg's boss)", kresh)
+	}
+	// Kresh: his own leg where the river road passes the middle of his beat, a boss row (the step that makes the party
+	// attack a neutral), and a wait that covers his round: the run leader stands at the boss point for the row's
+	// timeout_s, so wait_s must be longer than the longest he is out of the row's 30 yd radius.
+	kl := -1
+	for i, l := range p.Legs {
+		if l.Name == "kresh" {
+			kl = i
+		}
+	}
+	if kl < 0 {
+		t.Fatalf("no kresh leg")
+	}
+	if kl != 3 || p.Legs[kl].Boss == nil || p.Legs[kl].Boss.Entry != 3653 || len(p.Legs[kl].PullGroups) != 0 ||
+		dist3(p.Legs[kl].To, Point{X: 4, Y: 254, Z: -105.5}) > 0.1 || p.Legs[kl].Boss.WaitS != 300 {
+		t.Fatalf("legs[%d] (%s): want the kresh boss leg (3653, no pulls, wait_s 300) at 4 254 -105.5: %+v", kl, p.Legs[kl].Name, p.Legs[kl])
+	}
+	wp := Point{X: -3.64081, Y: 229.268, Z: -106.189}
+	if dist3(p.Legs[kl].Boss.Position, wp) > 0.1 {
+		t.Errorf("the kresh boss point %v is not his third waypoint %v", p.Legs[kl].Boss.Position, wp)
+	}
+	if gap := wcPatrolGapS(paths["27368"], p.Legs[kl].Boss.Position, 30); float64(p.Legs[kl].Boss.WaitS) < math.Ceil(gap)+30 {
+		t.Errorf("wait_s %d does not cover the %.0f s Kresh is out of the boss row's 30 yd radius", p.Legs[kl].Boss.WaitS, gap)
 	}
 	if ana != 4 {
 		t.Errorf("%d groups with Lady Anacondra as a member, want one per spawn spot (four)", ana)
@@ -356,8 +443,42 @@ func TestWailingCavernsExtraPlanLoads(t *testing.T) {
 	}
 }
 
+// A boss who stands beside a pack is fought as one encounter: no pull group of his own leg may stand within 20 yd (3-D) of him (the pack
+// would drag him in and his row would end as "pack cleared"), and the leg before the next boss stops far enough short that the walk cannot
+// pull him. Serpentis's Druid and Venomwing are his `first`; Verdan's leg stops at least 25 yd short (live 2026-10-20, #250).
+func TestWailingCavernsBossesAreEncounters(t *testing.T) {
+	p := loadPlan(t, wailingPlan)
+	for _, name := range []string{"serpentis", "verdan"} {
+		l := zfLeg(t, p, name)
+		if l.Boss == nil {
+			t.Fatalf("leg %q has no boss", name)
+		}
+		for gi, g := range l.PullGroups {
+			for k, q := range g.Positions {
+				if d := dist3(q, l.Boss.Position); d < 20 {
+					t.Errorf("leg %q pull_groups[%d] member %d (%v) is %.1f yd from boss %d: a pack beside a boss is his first, not a pull group",
+						name, gi, k, q, d, l.Boss.Entry)
+				}
+			}
+		}
+	}
+	serp := zfLeg(t, p, "serpentis")
+	if b := serp.Boss; b == nil || len(b.First) != 2 || b.First[0] != 3840 || b.First[1] != 5756 {
+		t.Errorf("serpentis boss.first = %+v, want [3840 5756] (the Druid and the Venomwing beside him)", serp.Boss)
+	}
+	verdan := zfLeg(t, p, "verdan")
+	if verdan.Boss == nil {
+		t.Fatalf("verdan leg has no boss")
+	}
+	if d := dist3(verdan.To, verdan.Boss.Position); d < 25 {
+		t.Errorf("verdan.to %v is %.1f yd from Verdan %v: want at least 25 yd (the walk to it pulled him at 11.6 yd)", verdan.To, d, verdan.Boss.Position)
+	}
+}
+
 // The route is one complete navmesh walk from the entrance to Verdan: every plain waypoint is reached by a complete path from the one before,
-// the hop is the only break, and the whole walk to every member position is about 6240 yd (a change of route moves this number: update it with the plan's notes).
+// the hop is the only break, and the whole walk to every member position is about 8189 yd (8223 before the Serpentis pack became the
+// boss's first on 2026-10-29, 8195 before the kresh leg of 2026-10-28, 6240 before the vangros and zandara legs of 2026-10-26; a change
+// of route moves this number: update it with the plan's notes).
 func TestWailingCavernsOnNavmesh(t *testing.T) {
 	dir := mapMmaps(43)
 	if dir == "" {
@@ -399,8 +520,8 @@ func TestWailingCavernsOnNavmesh(t *testing.T) {
 			}
 		}
 		t.Logf("%s: %.0f yd of path, %d direct hops", p.Name, total, hops)
-		if p.Name == "wailing_caverns" && (total < 6150 || total > 6350 || hops != 1) {
-			t.Errorf("%s: %.0f yd and %d hops, expected about 6240 yd and one hop", p.Name, total, hops)
+		if p.Name == "wailing_caverns" && (total < 8160 || total > 8290 || hops != 1) {
+			t.Errorf("%s: %.0f yd and %d hops, expected about 8189 yd and one hop", p.Name, total, hops)
 		}
 	}
 }
