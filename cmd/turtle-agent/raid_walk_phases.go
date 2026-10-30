@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,10 @@ import (
 
 // noUntilText is the refusal of a server whose run leader has no `until` (spec 3.3 phase 9).
 const noUntilText = "the server's run leader has no `until` (TortoiseBots feat/run-until); raid-walk never walks without it"
+
+// walkUntilStepRe is the step number right after the until label of a start line ("until boss (step 29)");
+// anything before the label, e.g. a note's own "(step 5)", is not the until step (spec raid-walk-addons 1.7).
+var walkUntilStepRe = regexp.MustCompile(`^ \(step ([0-9]+)\)`)
 
 // phases runs the walk's phases in order (spec 3.3). It always ends in a summary and a teardown.
 func (w *walk) phases(ctx context.Context) int {
@@ -57,11 +62,19 @@ func (w *walk) phases(ctx context.Context) int {
 	if err := w.phaseStart(ctx); err != nil {
 		return w.stop(err, true)
 	}
+	if w.inj != nil {
+		if err := w.inj.Prepare(ctx); err != nil {
+			return w.stop(err, true)
+		}
+	}
 	if err := w.phaseWatch(ctx); err != nil {
 		return w.stop(err, true)
 	}
 	w.endReason = w.tracker.End().Reason()
 	w.ended = w.env.now()
+	if w.inj != nil {
+		w.inj.Cleanup(ctx)
+	}
 	_ = w.phaseHold(ctx)
 	w.ended = w.env.now()
 	w.phaseTeardown()
@@ -70,13 +83,16 @@ func (w *walk) phases(ctx context.Context) int {
 		code = exitRaidWalkIncident
 	}
 	w.finish(code)
-	return code
+	return w.exitCode
 }
 
 // stop ends a failed or incident walk: it stops the run, tears down (when a slot exists), writes the summary.
 func (w *walk) stop(err error, teardown bool) int {
 	code, reason := stopInfo(err)
 	w.endReason = reason
+	if w.inj != nil {
+		w.inj.Cleanup(context.Background())
+	}
 	_ = w.stopRun(context.Background(), "")
 	if teardown {
 		w.phaseTeardown()
@@ -86,7 +102,7 @@ func (w *walk) stop(err error, teardown bool) int {
 	}
 	w.ended = w.env.now()
 	w.finish(code)
-	return code
+	return w.exitCode
 }
 
 // phaseLease is phase 2: the slot lease, renewed every 30 minutes.
@@ -666,13 +682,19 @@ func (w *walk) checkStartLine(ctx context.Context, line string) error {
 	if len(w.untilWords) == 0 {
 		return nil
 	}
-	if !strings.Contains(raidwalk.CleanLine(line), w.untilLabel+" (step ") {
+	clean := raidwalk.CleanLine(line)
+	if !strings.Contains(clean, w.untilLabel+" (step ") {
 		// A run without the label is a run without until: stop it at once, no poll guard (spec phase 9).
 		if err := w.gm(ctx, ".bot run stop"); err != nil {
 			return err
 		}
 		w.runStopped = true
 		return stopf(exitRaidWalkFailed, "%s", noUntilText)
+	}
+	if i := strings.Index(clean, w.untilLabel); i >= 0 {
+		if m := walkUntilStepRe.FindStringSubmatch(clean[i+len(w.untilLabel):]); m != nil {
+			w.untilStep, _ = strconv.Atoi(m[1])
+		}
 	}
 	return nil
 }
@@ -718,6 +740,11 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 			}
 		}
 		now = w.env.now()
+		if w.inj != nil {
+			if err := w.inj.Tick(ctx, now); err != nil {
+				return err
+			}
+		}
 		if w.haveStatus && w.lastStatus.State == tbm.RunPaused {
 			if !ps.armed || ps.note != w.lastStatus.Note || ps.step != w.lastStatus.Step {
 				ps.armed, ps.at, ps.note, ps.step, ps.lastTry = true, now, w.lastStatus.Note, w.lastStatus.Step, now
@@ -767,6 +794,9 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 		}
 		w.tracker.Feed(now, st)
 		w.lastStatus, w.haveStatus = st, true
+		if st.Note != "" {
+			w.newNotes = append(w.newNotes, st.Note)
+		}
 	}
 	if n, frame, err := w.view(ctx, w.afterN, 2000); err == nil && frame != nil {
 		w.afterN = n
@@ -884,15 +914,17 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 		if p.Name == "" {
 			continue
 		}
-		w.botAt[p.Name] = botPos{mapID: p.Map, dead: p.Dead || p.State == "d", at: now}
+		w.botAt[p.Name] = botPos{guid: p.GUID, x: p.X, y: p.Y, z: p.Z, inCombat: p.InCombat(), mapID: p.Map, dead: p.Dead || p.State == "d", at: now}
 	}
 	for _, h := range f.Hostiles {
 		if h.GUID != 0 {
-			w.hostiles[h.GUID.String()] = hostileState{hppct: h.HPPct, target: uint64(h.Target), at: now}
+			w.hostiles[h.GUID.String()] = hostileState{entry: h.Entry, x: h.X, y: h.Y, z: h.Z, kind: h.Kind, reaction: h.Reaction, flags: h.Flags,
+				hppct: h.HPPct, target: uint64(h.Target), at: now}
 		}
 		if w.bossSet[h.Entry] {
 			w.bossSeenAt = now
-			w.bossRows[h.Entry] = hostileState{hppct: h.HPPct, target: uint64(h.Target), at: now}
+			w.bossRows[h.Entry] = hostileState{entry: h.Entry, x: h.X, y: h.Y, z: h.Z, kind: h.Kind, reaction: h.Reaction, flags: h.Flags,
+				hppct: h.HPPct, target: uint64(h.Target), at: now}
 			if h.Target != 0 {
 				w.bossTargetAt = now
 			}
