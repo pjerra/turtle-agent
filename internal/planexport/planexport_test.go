@@ -1250,3 +1250,33 @@ func TestCutterLeavesTheExactHopAlone(t *testing.T) {
 		}
 	}
 }
+
+// A `run start <plan> from leg <name>` starts the run leader at the leg's first row: LegFirstStep is that row's 1-based step, after an
+// optional leg the exporter left out (it has no rows), and nothing for a leg the rows do not have.
+func TestLegFirstStep(t *testing.T) {
+	p := parsePlan(t, `{"version":1,"name":"Legs","status":"live-checked (test)","map":43,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	 {"name":"first","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":20,"y":0,"z":0}]}]},
+	 {"name":"gong","to":{"x":0,"y":0,"z":0},"optional":{"item":9240,"name":"Mallet"},"steps":[{"use_object":{"entry":900,"near":{"x":2,"y":0,"z":0},"requires_item":{"entry":9240}}}],"boss":{"entry":7,"position":{"x":5,"y":0,"z":0}}},
+	 {"name":"third","via":[{"x":25,"y":5,"z":0}],"to":{"x":30,"y":0,"z":0},"pull_groups":[{"entries":[102],"positions":[{"x":40,"y":0,"z":0}]}]}]}`)
+	res, err := Build(p, Options{Source: "test", GMCrossDirect: true, DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := res.Rows
+	n, ok := r.LegFirstStep(p, 2)
+	if !ok || r.Steps[n-1].Leg != 1 || (n > 1 && r.Steps[n-2].Leg == 1) {
+		t.Fatalf("leg 2 (row leg 1): step %d ok %v in %+v", n, ok, r.Steps)
+	}
+	if at, ok := r.StepPoint(n); !ok || at != (dungeon.Point{X: 25, Y: 5, Z: 0}) {
+		t.Fatalf("leg 2's first row is its via point, got %+v %v", at, ok)
+	}
+	if n, ok := r.LegFirstStep(p, 0); !ok || n != 1 {
+		t.Fatalf("leg 0: %d %v", n, ok)
+	}
+	if _, ok := r.LegFirstStep(p, 1); ok {
+		t.Fatal("the optional leg has a first step")
+	}
+	if _, ok := r.LegFirstStep(p, 7); ok {
+		t.Fatal("a leg the plan does not have has a first step")
+	}
+}

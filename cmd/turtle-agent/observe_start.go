@@ -77,6 +77,12 @@ func observeStartFrom(plan *dungeon.Plan, leg int, group *int, step int, planner
 				ps.Words = "from " + strconv.Itoa(rowLeg)
 			}
 			ps.Point, ps.HavePoint = legStartPoint(plan, leg)
+			if serverSteps > 0 {
+				// The run leader starts at the leg's first row of its own rows, which is where the party must stand. When no rebuilt row
+				// set has the server's step count the plan file and the deployed rows differ (other legs, other rows), so no point of
+				// the plan file is the start: unknown, and the place check refuses rather than the start moving the party there.
+				ps.Point, ps.HavePoint = observeLegStep(plan, leg, planner, serverSteps)
+			}
 			return ps, nil
 		}
 	}
@@ -143,6 +149,33 @@ func observeGroupStep(plan *dungeon.Plan, leg, group int, planner *navmesh.Plann
 		return 0, dungeon.Point{}, false, fmt.Errorf("from_pull_group %d (leg %d): the exporter's option sets that match the server's %d steps put the group at steps %v: too ambiguous to pick one; pass observe.from_step", group, leg, serverSteps, distinctSteps(steps))
 	}
 	return steps[0], at, haveAt, nil
+}
+
+// observeLegStep is the point of the run leader's first row of plan leg leg, from the rebuilt row sets whose step count is the server's;
+// not known when none has that count or two of them put the row in different places.
+func observeLegStep(plan *dungeon.Plan, leg int, planner *navmesh.Planner, serverSteps int) (dungeon.Point, bool) {
+	cands, _ := observePlanRows(plan, planner)
+	var at dungeon.Point
+	have := false
+	for _, r := range cands {
+		if r.StepCount() != serverSteps {
+			continue
+		}
+		n, ok := r.LegFirstStep(plan, leg)
+		if !ok {
+			continue
+		}
+		p, ok := r.StepPoint(n)
+		if !ok {
+			continue
+		}
+		if !have {
+			at, have = p, true
+		} else if pointDist(at, p) > 1 {
+			return dungeon.Point{}, false
+		}
+	}
+	return at, have
 }
 
 // observeStepInfo is the point of the module's step step and the plan leg it belongs to, when an exporter option set reproduces the

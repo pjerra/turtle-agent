@@ -127,3 +127,28 @@ func TestObserveStartFromStepKnowsItsLeg(t *testing.T) {
 		t.Fatalf("no count: %+v %v", ps, err)
 	}
 }
+
+// from_leg with the server's step count: the start point is the run leader's own first row of the leg in the rows the agent rebuilds
+// with that count. A count no rebuilt row set has is a drifted deployment (a plan file of other legs than the migration on the server:
+// dragonmaw_retreat's 5-leg draft against the 10-leg rows, 2026-10-30): the point is then unknown, so the run moves nobody to a point
+// of the wrong plan and the place check refuses (observe.allow_far_start overrides), instead of a GM move to the plan file's leg.
+func TestObserveStartFromLegTakesTheRunLeadersFirstRow(t *testing.T) {
+	p := startTestPlan(t)
+	res, err := planexport.Build(p, planexport.Options{Source: "test", GMCrossDirect: true, DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, ok := res.Rows.LegFirstStep(p, 2)
+	if !ok {
+		t.Fatal("leg 2 has no first step")
+	}
+	want, _ := res.Rows.StepPoint(n)
+	ps, err := observeStartFrom(p, 2, nil, 0, nil)(res.Rows.StepCount())
+	if err != nil || ps.Words != "from leg third" || !ps.HavePoint || ps.Point != want {
+		t.Fatalf("matching count: %+v (want point %+v) %v", ps, want, err)
+	}
+	ps, err = observeStartFrom(p, 2, nil, 0, nil)(res.Rows.StepCount() + 7)
+	if err != nil || ps.Words != "from leg third" || ps.HavePoint {
+		t.Fatalf("drifted count: %+v %v (want the words, and no point)", ps, err)
+	}
+}

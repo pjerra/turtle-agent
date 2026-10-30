@@ -974,6 +974,21 @@ func (r Rows) StepPoint(step int) (dungeon.Point, bool) {
 	return dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}, true
 }
 
+// LegFirstStep is the 1-based step number, as the run leader counts its own plan, of the first row of the plan leg leg: the step a
+// `.bot run start <plan> from leg <name>` starts at. ok is false for an optional leg (no rows) and a leg the rows do not have.
+func (r Rows) LegFirstStep(p *dungeon.Plan, leg int) (int, bool) {
+	rowLeg, ok := r.LegNumber(p, leg)
+	if !ok {
+		return 0, false
+	}
+	for i, s := range r.Steps {
+		if s.Leg == rowLeg {
+			return i + 1, true
+		}
+	}
+	return 0, false
+}
+
 // GroupStep is the 1-based step number, as the run leader counts its own plan, of the plan leg's pull group group: its first row (the
 // group's approach move, else its pull or hold row). ok is false when the rows have no such group (an optional leg, a cut plan, a group
 // number the leg does not have).

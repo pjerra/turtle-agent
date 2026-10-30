@@ -47,6 +47,8 @@ const (
 	StartEntrance = "entrance"
 	StartLeg      = "leg_start"
 	StartGather   = "pull_gather"
+	// StartStep is an observed run's partway start: the run leader's own start step (PartialStart.Point).
+	StartStep = "run_leader_step"
 )
 
 // StartReport is what a run that starts inside the dungeon did to get there (Report.Start; absent for a run from the first leg's start).
@@ -401,8 +403,21 @@ func (d *RemoteDriver) planPath(ctx context.Context) func(from, to Point) []Poin
 	}
 }
 
+// observedLegStart is an observed run's from_leg start (no pull group): the run leader starts at its own first row of the leg
+// (PartialStart.Point, from the deployed rows), not where the plan file's leg before it ended. have says the point is known; ok says the
+// run is such a start at all.
+func (d *RemoteDriver) observedLegStart() (at Point, have, ok bool) {
+	if d.opt.Observe == nil || d.start == nil || d.start.Words == "" || d.startGroup() >= 0 {
+		return Point{}, false, false
+	}
+	return d.start.Point, d.start.HavePoint, true
+}
+
 // startPoint is the point the run starts at and what it is.
 func (d *RemoteDriver) startPoint(ctx context.Context, fromLeg int) (Point, string, string) {
+	if at, have, ok := d.observedLegStart(); ok && have {
+		return at, StartStep, ""
+	}
 	if g := d.startGroup(); g >= 0 {
 		at, warn := d.plan.GatherSpot(fromLeg, g, d.planPath(ctx))
 		return at, StartGather, warn
@@ -488,6 +503,13 @@ func (d *RemoteDriver) startAnywhere(ctx context.Context, fromLeg int) error {
 	if err := d.checkStart(fromLeg); err != nil {
 		return err
 	}
+	if _, have, ok := d.observedLegStart(); ok && !have && !d.opt.StartHere {
+		// No point of the plan file is the run leader's start when its rows were not reproduced: the party stays, and the place check
+		// refuses the start (observe.allow_far_start: the run leader walks from where the party stands).
+		d.skippedLegs(fromLeg)
+		d.startNote(fmt.Sprintf("leg %d%s: the run leader's start step has no known point, so the party is not moved", fromLeg, nameSuffix(d.plan.Legs[fromLeg].Name)))
+		return nil
+	}
 	began := d.clk.Now()
 	at, kind, warn := d.startPoint(ctx, fromLeg)
 	sr := &StartReport{Leg: fromLeg, LegName: d.plan.Legs[fromLeg].Name, Kind: kind, Point: at, Map: d.plan.Map, Method: "gm", GMCommands: []string{}, Skipped: []string{}, Warning: warn}
@@ -514,7 +536,7 @@ func (d *RemoteDriver) startAnywhere(ctx context.Context, fromLeg int) error {
 		d.startNote("the party is at the start point already: no GM move")
 		return nil
 	}
-	if d.startGroup() < 0 && d.partyInLeg(fromLeg) {
+	if d.startGroup() < 0 && kind != StartStep && d.partyInLeg(fromLeg) {
 		// A resume into a leg whose party already stands in the leg's own ground (the Zum'rah room after the trigger, 1.9 min lost live when
 		// it was sent back to the courtyard at the previous leg's end): it stays, and the leg starts from where it is.
 		d.startReport(func(s *StartReport) { s.Method, s.Seconds = "already in the leg", d.clk.Now().Sub(began).Seconds() })
