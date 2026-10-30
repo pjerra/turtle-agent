@@ -21,7 +21,7 @@
    "kind": "dungeon",
    "handwritten": true,
    "special": [
-    "Mutanus the Devourer (3654) has no spawn row: the Disciple of Naralex event (gossip with the Disciple 3678 once the four Fanglords are dead, escort, ritual waves) summons him; see dungeons/wailing_caverns-extra.json",
+    "Mutanus the Devourer (3654) has no spawn row: the Disciple of Naralex event summons him; the event is the segment dungeons/wailing_caverns-extra.json (gossip at menu 202 option 0, the escort stops of script_waypoint 3678, the summoned waves, Mutanus held by instance data 4 reading DONE): its return from Verdan is the Serpentis hop taken the other way (the ramp lip, then a move_hop_exact to the foot; live-probed 3 of 3 on 2026-10-22, no GM), because the navmesh has no walk back",
     "Lady Anacondra has four spawn rows in one pool (one up per reset)",
     "the ramp to Lord Serpentis and Verdan is across a 3.9 yd gap with no floor (a jump down, no way up): crossed by a plain direct step with a check_skip (no GM; the foot is an exact waypoint held to 1.5 yd with a stationary proof, and the step was taken live three times from that foot on 2026-10-18, tests/wc-hop-probe-2, while the driver has not been run on this hop and the run leader side is open)"
    ]
@@ -1288,17 +1288,22 @@
     60748
    ],
    "size": 40,
+   "route": true,
+   "handwritten": true,
    "entrance_tele": "sanctumraid",
    "outside_tele": "EmeraldSanctuary",
    "scripted": [
     60748
    ],
    "special": [
-    "Erennius (patrol) is fought before Solnius; Solnius carries npc_flags (gossip) and is awakened by dialogue",
-    "Errenius' chest (GO_ERRENIUS_CHEST), the portal (GO_PORTAL)"
+    "Erennius (60747) is killed before Solnius (60748): Solnius' EnterCombat sets hard mode while Erennius lives and puts every living trash unit of the map in combat with the attacker (instance_emerald_sanctum.cpp)",
+    "Solnius carries npc_flags (gossip): he is friendly (faction 35) until the one option of his menu (92950) is taken, so the leg talks to him (menu index 0) then fights",
+    "The 85 hostile trash spawns are 10 creature_linking groups plus 3 lone waypoint patrols; the 44 Deer (883) and 27 Toads (1420) are critters and in no pull",
+    "Erennius patrols a 1323.5 yd loop that crosses the east hall's packs; a boss has no patrol block, so the mapping walk measures where he meets the raid",
+    "Solnius' chest (2020042) and portals (177243) are script objects; the map's 3 game objects are entrance 'Ghost Gate' visuals and gate nothing"
    ],
    "notes": [
-    "Only two bosses are in the data (Erennius 60747, Solnius 60748)."
+    "Only two bosses are in the data (Erennius 60747, Solnius 60748). The plan is handwritten from the world DB, the core's emerald_sanctum scripts and the map 807 navmesh (task B1, RAID-PREP-es)."
    ]
   },
   {
@@ -1309,25 +1314,35 @@
    "data": "map819",
    "trigger": 5613,
    "bosses": [
-    62935,
-    62941,
-    62938,
-    2139,
-    62946,
+    62934,
     {
      "entry": 62936,
      "first": [
       62937
      ]
-    }
+    },
+    2139,
+    62935,
+    62940,
+    62946,
+    62938,
+    62941
    ],
    "route": true,
    "size": 20,
    "scripted": [
     62938
    ],
+   "handwritten": true,
+   "special": [
+    "hand-written offline from the map 819 export and the server mesh (task B1, RAID-PREP-tmh.md): 9 legs, 93 packs, 208 units; Karrsh the Sentinel (62934) and Selenaxx Foulheart (62940) are boss steps although the hire unlock list does not count them",
+    "Ursol (62947) and Peroth'arn (60686) have templates but no spawn row: the final boss area (z 310-364, behind the Barrier of Ursol 300606) has no navmesh route from the rest of the map and is not a leg",
+    "the upper ledge at -7500..-7370 -3590..-3370 z 270-281 (17 units, two patrols) is a navmesh island: no route to or from the map, not in the pulls",
+    "no instance script and no EventAI or spell list on any boss but Loktanag the Vile: combat initialization is missing in this core (the 2026-07-02 Timbermaw migration says so); Chieftain Partath (62941) is faction 370 (Timbermaw Hold, friendly) and cannot be attacked until a script makes him hostile",
+    "62874 Vile Skitterer is neutral wildlife (faction template 15, hostile_mask 0) and is in every leg's skip list, not in pulls"
+   ],
    "notes": [
-    "Turtle custom, no instance script in the core. The 20-man size and the boss list are guesses from the data (six bosses with 500k-700k health, comparable to Zul'Gurub); Archdruid Kronn carries npc_flags (gossip)."
+    "Turtle custom, no instance script in the core. The 20-man size and the tank/healer/dps split are placeholders."
    ]
   }
  ]

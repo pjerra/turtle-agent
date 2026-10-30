@@ -3,9 +3,10 @@ package main
 import (
 	"context"
 	"errors"
-	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"io"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/objects"
@@ -138,6 +139,10 @@ type methodOptions struct {
 	// EntryLedgerPath is the file that keeps the account's instance entries of the last hour (a remote run's enter phase refuses a 6th);
 	// empty keeps them in memory only.
 	EntryLedgerPath string
+	// Follow starts the player follow at once (login --follow); nil starts nothing.
+	Follow *followStartParams
+	// Stderr is where the at-once follow start reports; nil discards it.
+	Stderr io.Writer
 }
 
 // registerMethodsFor wires the spec's JSON-RPC methods, and every later milestone's, to whatever
@@ -249,6 +254,7 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 		return it, rpcErr(err)
 	}))
 	registerSocialMethods(srv, cur)
+	stopLFG := registerLFGMethods(srv, cur)
 	registerGroupMethods(srv, cur)
 	registerItemMethods(srv, cur)
 	registerTradeMethods(srv, cur)
@@ -267,12 +273,16 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	dungeonRun.checkNav = opts.PlanCheckNav
 	stopMap := registerMapMethods(srv, cur, opts.Planner, opts.DungeonsDir, dungeonRun)
 	registerStageMethods(srv, cmdrSvc, dungeonRun, opts.Planner)
-	registerTeardownMethods(srv, cur, cmdrSvc, dungeonRun, brainCtl, lease)
+	// The follow service shares the runner's movement mode (dungeonRun.moves): dungeon_run and follow_start refuse each other.
+	followSvc, stopFollow := registerFollowMethods(srv, cur, opts.DungeonsDir, opts.Planner != nil, brainCtl, dungeonRun, followOptions{Follow: opts.Follow, Stderr: opts.Stderr})
+	registerTeardownMethods(srv, cur, cmdrSvc, dungeonRun, brainCtl, lease, followSvc)
 	return func() {
+		stopFollow()
 		stopMap()
 		stopDungeon()
 		stopCommander()
 		stopBrain()
+		stopLFG()
 		stopAddons()
 	}
 }

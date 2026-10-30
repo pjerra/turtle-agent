@@ -1,0 +1,90 @@
+{
+  "class": "priest",
+  "specs": [
+    {
+      "spec": "discipline",
+      "role": "ranged-dps",
+      "rotation": "kb_discipline_priest",
+      "core": [
+        "Holy Fire",
+        "Smite"
+      ],
+      "situational": [
+        "Chastise",
+        "Shadow Word: Pain",
+        "Pain Spike",
+        "Holy Nova",
+        "Inner Focus",
+        "Enlighten",
+        "Fade",
+        "Fear Ward",
+        "Berserking",
+        "Grace of the Sunwell",
+        "Sun's Embrace"
+      ],
+      "never": [],
+      "signature": [
+        "Chastise",
+        "Enlighten"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "holy",
+      "role": "healer",
+      "rotation": "kb_holy_priest",
+      "core": [
+        "Flash Heal",
+        "Greater Heal",
+        "Renew"
+      ],
+      "situational": [
+        "Power Word: Shield",
+        "Prayer of Healing",
+        "Ascendance",
+        "Inner Focus",
+        "Fade",
+        "Fear Ward",
+        "Desperate Prayer",
+        "Avatar",
+        "Lightwell"
+      ],
+      "never": [],
+      "signature": [
+        "Holy Nova",
+        "Lightwell",
+        "Ascendance"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "shadow",
+      "role": "ranged-dps",
+      "rotation": "kb_shadow_priest",
+      "core": [
+        "Shadow Word: Pain",
+        "Mind Blast",
+        "Mind Flay"
+      ],
+      "situational": [
+        "Vampiric Embrace",
+        "Pain Spike",
+        "Devouring Plague",
+        "Holy Nova",
+        "Smite",
+        "Fade",
+        "Inner Focus",
+        "Power Word: Shield",
+        "Berserking",
+        "Shadowform"
+      ],
+      "never": [],
+      "signature": [
+        "Shadowform",
+        "Vampiric Embrace",
+        "Mind Flay"
+      ],
+      "taunt": []
+    }
+  ]
+}

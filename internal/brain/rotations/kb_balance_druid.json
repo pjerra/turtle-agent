@@ -1,0 +1,195 @@
+{
+  "version": 1,
+  "name": "kb_balance_druid",
+  "class": "druid",
+  "spec": "balance",
+  "replaces": [
+    "druid_balance"
+  ],
+  "notes": "The Turtle knowledge base's balance list: keep Moonfire and Insect Swarm on the mob, cast Starfire under Arcane Eclipse and Wrath under Nature Eclipse, fish with Starfire when neither is up, Hurricane at four mobs, and Innervate itself when the mana runs low. The set-piece upkeep and the leveler's Starfire-first opener stay with the preset's own strategies.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/druid/balance-ranged-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=159149#p159149 (Scattyau, player, 2025-11-11)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=131905#p131905 (Halfgeek9, player, 2025-05-19)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=134706#p134706 (Noobikscube, player, 2025-06-08)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=134911#p134911 (kierova, player, 2025-06-09)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=110618#p110618 (Dalijon, player, 2024-11-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=135108#p135108 (kierova, player, 2025-06-10)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172020#p172020 (Auralys, player, 2026-03-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172180#p172180 (Froghijab420, player, 2026-03-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=173102#p173102 (Noephix, player, 2026-03-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=135044#p135044 (Tarsis, player, 2025-06-10)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=135251#p135251 (Tarsis, player, 2025-06-11)",
+    " (Kangaraxxus, player (sim author), 2026-03-22)",
+    " (Micro Jackson, player, 2026-04-04)",
+    " (Habu, player (top boomkin), 2026-04-15)",
+    " (Krokat, player (sim author), 2026-03-31)",
+    " (Hotverdomme-Nord, player (top boomkin), 2026-04-10)"
+  ],
+  "priorities": [
+    {
+      "id": "moonfire",
+      "spell": "Moonfire",
+      "level": 4,
+      "target": "fight",
+      "when": {
+        "no_mob_aura": [
+          "Moonfire"
+        ]
+      }
+    },
+    {
+      "id": "insect_swarm",
+      "spell": "Insect Swarm",
+      "level": 20,
+      "target": "fight",
+      "when": {
+        "no_mob_aura": [
+          "Insect Swarm"
+        ]
+      }
+    },
+    {
+      "id": "hurricane",
+      "spell": "Hurricane",
+      "level": 40,
+      "target": "fight",
+      "band": "high",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "moving": false,
+        "mobs_near_mob_min": 4
+      },
+      "note": "The KB's pre-cast Starfire before the Hurricane is the starfire_fish entry. Band high and first of the AoE rows: a filler with no condition would otherwise take the tick at four mobs."
+    },
+    {
+      "id": "moonfire_low",
+      "spell": "Moonfire",
+      "level": 4,
+      "target": "fight",
+      "when": {
+        "mob_hp_below": 2
+      },
+      "note": "Moved ahead of the fillers (the KB lists them last): a filler with no condition would take every tick, so the execute and the moving cast would never play."
+    },
+    {
+      "id": "moonfire_moving",
+      "spell": "Moonfire",
+      "level": 4,
+      "target": "fight",
+      "when": {
+        "moving": true
+      },
+      "note": "Same move; the fillers also wait for the player to stand still."
+    },
+    {
+      "id": "starfire",
+      "spell": "Starfire",
+      "level": 20,
+      "target": "fight",
+      "when": {
+        "moving": false,
+        "self_aura": [
+          "Arcane Eclipse"
+        ]
+      },
+      "note": "The KB also reapplies Moonfire when less Eclipse remains than one Starfire cast; a condition cannot time an aura, so Moonfire's own entry refreshes it once it is gone."
+    },
+    {
+      "id": "wrath",
+      "spell": "Wrath",
+      "level": 1,
+      "target": "fight",
+      "when": {
+        "moving": false,
+        "self_aura": [
+          "Nature Eclipse"
+        ]
+      },
+      "note": "Insect Swarm is refreshed by its own entry once it is missing; the KB's last-GCD refresh needs the debuff's remaining time, which is not a condition."
+    },
+    {
+      "id": "starfire_fish",
+      "spell": "Starfire",
+      "level": 20,
+      "target": "fight",
+      "when": {
+        "moving": false,
+        "no_self_aura": [
+          "Arcane Eclipse",
+          "Nature Eclipse"
+        ]
+      },
+      "note": "The engine has no alternation state: with no Eclipse up Starfire (the KB's own pre-cast fisher) goes first, and Wrath follows when Starfire is not in the book."
+    },
+    {
+      "id": "wrath_fish",
+      "spell": "Wrath",
+      "level": 1,
+      "target": "fight",
+      "when": {
+        "moving": false,
+        "no_self_aura": [
+          "Arcane Eclipse",
+          "Nature Eclipse"
+        ]
+      },
+      "note": "The second half of the KB's alternation; it plays when Starfire cannot (a low level)."
+    },
+    {
+      "id": "innervate_kb",
+      "spell": "Innervate",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "power_below": 40,
+        "no_self_aura": [
+          "Innervate"
+        ]
+      },
+      "note": "The KB gives no number for 'low mana': 40% is the healer engine's mana-save threshold. The preset's druid_innervate strategy keeps its own rule as well."
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/druid/balance-ranged-dps.yaml",
+    "sha256": "cab7ae381fa36185f8aa26b068e42629bbfa950cf78d154b9083d3a7d1dcf4e7",
+    "preset": "balance_druid",
+    "recipe": "tools/kbrotgen/recipes/kb_balance_druid.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Opener: pre-cast Starfire on kill target; if Nature Eclipse -> Wrath; else Insect Swarm (fresh tank: first) -> Moonfire |",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[6]",
+        "text": "let an in-progress cast finish | Eclipse procs mid-cast of opposing spell",
+        "why": "cancel/stop casting not expressible"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "Moonfire only",
+        "why": "how long a mob lives is not in the conditions"
+      },
+      {
+        "row": "rotation_aoe[1]",
+        "text": "DoT targets that will live the DoT duration; Eclipse spells on them",
+        "why": "how long a mob lives is not in the conditions"
+      },
+      {
+        "row": "cooldowns[0]",
+        "text": "none (structural gap) | no burst cooldown; use trinkets on the first crit of a window [[d:druid#1369235779762655325]]",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[2]",
+        "text": "Hurricane | interrupted channels still trigger the 10 s cooldown [[d:druid#1482975539810533446]]",
+        "why": "nothing to add: the row names no cast the list does not already have"
+      }
+    ]
+  }
+}

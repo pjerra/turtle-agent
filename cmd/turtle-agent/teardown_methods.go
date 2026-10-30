@@ -60,6 +60,10 @@ type teardownGame interface {
 	StopAgentRun() string
 	BrainFree() bool
 	StopBrain()
+	// FollowActive is a player follow loop going; StopFollow stops it and waits for the loop (follow_stop), ended false when
+	// it did not exit in time (it then still owns the movement mode).
+	FollowActive() bool
+	StopFollow() (reason string, ended bool)
 }
 
 var tdBotNameRe = regexp.MustCompile(`^[A-Za-z]{2,12}$`)
@@ -73,6 +77,7 @@ type sessionTeardownGame struct {
 	runner *dungeonRunner
 	brain  *brain.Controller
 	lease  *brainLease
+	follow *followService
 }
 
 func (g sessionTeardownGame) Character() string { return g.cur().Status().Character }
@@ -151,6 +156,13 @@ func (g sessionTeardownGame) BrainFree() bool {
 
 func (g sessionTeardownGame) StopBrain() { g.brain.Stop() }
 
+func (g sessionTeardownGame) FollowActive() bool { return g.follow != nil && g.follow.Running() }
+
+func (g sessionTeardownGame) StopFollow() (string, bool) {
+	st := g.follow.Stop()
+	return st.StoppedReason, st.State != "ending"
+}
+
 // tdRunStatus is the TBM:RUN line of a reply, or state none.
 func tdRunStatus(r tbm.Reply) tbm.RunStatus {
 	for _, l := range r.Lines {
@@ -190,7 +202,7 @@ func runTeardown(ctx context.Context, g teardownGame, p teardownParams, sleep fu
 	res := teardownResult{DryRun: p.DryRun}
 	add := func(step, status, detail string) {
 		res.Steps = append(res.Steps, teardownStep{Step: step, Status: status, Detail: detail})
-		if status == "fail" {
+		if status == "fail" || status == "ending" {
 			res.Failed++
 		}
 	}
@@ -245,7 +257,21 @@ func runTeardown(ctx context.Context, g teardownGame, p teardownParams, sleep fu
 	dry := p.DryRun
 	plan := func(step, detail string) { add(step, "plan", detail) }
 
-	// 2. agent_run
+	// 2. follow: the player follow walks the character by itself; it is stopped first of the stop steps, and its loop is
+	// waited for (it holds the movement mode shared with dungeon_run until it has exited).
+	if g.FollowActive() {
+		if dry {
+			plan("follow", "would stop the player follow")
+		} else if reason, ended := g.StopFollow(); ended {
+			add("follow", "ok", fmt.Sprintf("player follow stopped (%s)", reason))
+		} else {
+			add("follow", "ending", "the player follow loop did not end within follow_stop's wait: it still owns the movement (dungeon_run and follow_start refuse until it has)")
+		}
+	} else {
+		add("follow", "skip", "no player follow")
+	}
+
+	// 2b. agent_run
 	if g.AgentRunActive() {
 		if dry {
 			plan("agent_run", "would stop the agent-side dungeon_run")
@@ -502,7 +528,7 @@ func runTeardown(ctx context.Context, g teardownGame, p teardownParams, sleep fu
 
 var tdMu sync.Mutex
 
-func registerTeardownMethods(srv *rpc.Server, cur func() *session.Session, cmdrSvc *commanderService, dungeonRun *dungeonRunner, brainCtl *brain.Controller, lease *brainLease) {
+func registerTeardownMethods(srv *rpc.Server, cur func() *session.Session, cmdrSvc *commanderService, dungeonRun *dungeonRunner, brainCtl *brain.Controller, lease *brainLease, follow *followService) {
 	srv.Register("teardown", rpc.Typed(func(ctx context.Context, p teardownParams) (teardownResult, error) {
 		gm := p.GM
 		if gm == "" {
@@ -524,7 +550,7 @@ func registerTeardownMethods(srv *rpc.Server, cur func() *session.Session, cmdrS
 			return teardownResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a teardown is going"}
 		}
 		defer tdMu.Unlock()
-		g := sessionTeardownGame{cur: cur, c: cmdrSvc, runner: dungeonRun, brain: brainCtl, lease: lease}
+		g := sessionTeardownGame{cur: cur, c: cmdrSvc, runner: dungeonRun, brain: brainCtl, lease: lease, follow: follow}
 		return runTeardown(ctx, g, teardownParams{DryRun: p.DryRun, GM: gm, WaitMS: wait}, time.Sleep)
 	}))
 }

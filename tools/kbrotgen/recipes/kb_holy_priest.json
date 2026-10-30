@@ -1,0 +1,380 @@
+{
+  "name": "kb_holy_priest",
+  "class": "priest",
+  "spec": "holy",
+  "role": "healer",
+  "kb_file": "classes/yaml/priest/holy-healer.yaml",
+  "preset": "holy_priest",
+  "replaces": [],
+  "mode": "add",
+  "notes": "The knowledge base's holy priest, added after role_healer: an emergency shield, Flash Heal rank 7 below half, a precast Greater Heal rank 1 on the tank, Renew kept on the tank, a rank-1 Flash Heal and rank-1 Renew for small deficits, Prayer of Healing for three or more hurt, Ascendance and Inner Focus, Desperate Prayer on itself. Cancel-casting, Lightwell placement, Fear Ward and Avatar need observations the conditions lack and are listed in kb.unexpressed.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 1,
+      "text": "Power Word: Shield | target about to die and no time to cast; NOT on warrior/bear tanks except pre-pull or true emergency (~12 rage lost per 1k absorbed)",
+      "text_sha": "243fb67f211f",
+      "entries": [
+        {
+          "id": "power_word_shield",
+          "spell": "Power Word: Shield",
+          "level": 6,
+          "target": "heal",
+          "band": "high",
+          "when": {
+            "heal_hp_below": 25,
+            "heal_is_tank": false
+          }
+        },
+        {
+          "id": "power_word_shield_tank",
+          "spell": "Power Word: Shield",
+          "level": 6,
+          "target": "heal",
+          "band": "high",
+          "when": {
+            "heal_hp_below": 10,
+            "heal_is_tank": true
+          }
+        }
+      ],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 2,
+      "text": "Flash Heal (rank 7) | tank taking heavy damage or anyone near 50% HP",
+      "text_sha": "4cc5e3f32b86",
+      "entries": [
+        {
+          "id": "flash_heal_7",
+          "spell": "Flash Heal",
+          "level": 20,
+          "rank": 7,
+          "target": "heal",
+          "band": "high",
+          "when": {
+            "heal_hp_below": 50
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 3,
+      "text": "Greater Heal (rank 1) precast | known big damage incoming (tank buster, enrage); with 8/8 T2 also for steady raid damage",
+      "text_sha": "453fe54658d5",
+      "entries": [
+        {
+          "id": "greater_heal_1",
+          "spell": "Greater Heal",
+          "level": 40,
+          "rank": 1,
+          "target": "heal",
+          "band": "high",
+          "when": {
+            "heal_is_tank": true,
+            "heal_hp_below": 60
+          },
+          "note": "the brain cannot see incoming damage: the tank heal fires below 60% instead of precasting"
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 4,
+      "text": "Renew (max rank) | tank without Renew or <3 s left",
+      "text_sha": "810f0eaa3dd6",
+      "entries": [
+        {
+          "id": "renew",
+          "spell": "Renew",
+          "level": 8,
+          "target": "heal",
+          "band": "high",
+          "when": {
+            "heal_is_tank": true,
+            "heal_no_aura": [
+              "Renew"
+            ]
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 5,
+      "text": "Flash Heal (rank 1) | anyone missing a small amount of HP",
+      "text_sha": "6be0736bb2f6",
+      "entries": [
+        {
+          "id": "flash_heal_1",
+          "spell": "Flash Heal",
+          "level": 20,
+          "rank": 1,
+          "target": "heal",
+          "band": "high",
+          "when": {
+            "heal_hp_below": 80
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 6,
+      "text": "Renew (rank 1) | weave between every other heal so the next cast is a different spell (Book of Prayer refund); on self if nobody needs it",
+      "text_sha": "bb96534719b8",
+      "entries": [
+        {
+          "id": "renew_rank1",
+          "spell": "Renew",
+          "level": 8,
+          "rank": 1,
+          "target": "heal",
+          "band": "high",
+          "when": {
+            "heal_no_aura": [
+              "Renew"
+            ]
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 7,
+      "text": "cancel cast | precast heal on tank no longer needed at ~2/3 cast bar (preserve 5-second-rule regen)",
+      "text_sha": "ca05fde2b020",
+      "entries": [],
+      "unexpressed": "cancel/stop casting not expressible"
+    },
+    {
+      "from": "rotation_single",
+      "index": 7,
+      "priority": 8,
+      "text": "stop casting | all targets at 80-90% HP (do not top to 100%)",
+      "text_sha": "7fbda2543759",
+      "entries": [],
+      "unexpressed": "cancel/stop casting not expressible"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Prayer of Healing rank 2 on a member of the damaged party (any party since 1.18.1)",
+      "text_sha": "19f6ca095d37",
+      "entries": [
+        {
+          "id": "prayer_of_healing_2",
+          "spell": "Prayer of Healing",
+          "level": 30,
+          "rank": 2,
+          "target": "heal",
+          "band": "high",
+          "when": {
+            "members_hurt_min": 3
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 2,
+      "text": "Prayer of Healing rank 4 (Inner Focus if available)",
+      "text_sha": "ab97e727359f",
+      "entries": [
+        {
+          "id": "prayer_of_healing_4",
+          "spell": "Prayer of Healing",
+          "level": 30,
+          "rank": 4,
+          "target": "heal",
+          "band": "high",
+          "when": {
+            "members_hurt_min": 3,
+            "heal_hp_below": 40
+          },
+          "note": "ahead of rank 2 (KB priority 2): a member below 40% gets the bigger heal"
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 3,
+      "text": "Lightwell",
+      "text_sha": "346324acf9cd",
+      "entries": [],
+      "unexpressed": "macro/addon (Nampower etc.)"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 3,
+      "priority": 4,
+      "text": "Renew each + Flash Heal the lower",
+      "text_sha": "1801bca5e982",
+      "entries": [],
+      "unexpressed": "covered by rotation_single[3-5]: the Renew and Flash Heal entries heal the lowest member"
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Ascendance | just before boss enrage / burst window (30 s: -33% cost, +20% cast speed, +15% healing taken on targets); also to break CC",
+      "text_sha": "a7aadabc2239",
+      "entries": [
+        {
+          "id": "ascendance",
+          "spell": "Ascendance",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "no_self_aura": [
+              "Ascendance"
+            ]
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "Inner Focus | free max-rank Prayer of Healing or Greater Heal",
+      "text_sha": "27bb30a828a2",
+      "entries": [
+        {
+          "id": "inner_focus",
+          "spell": "Inner Focus",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "no_self_aura": [
+              "Inner Focus"
+            ]
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": null,
+      "text": "Lightwell | before pull / burst phase (5 min); /cast Lightwell + CameraOrSelectOrMoveStart/Stop macro places it at cursor",
+      "text_sha": "b2d17de9fa21",
+      "entries": [],
+      "unexpressed": "macro/addon (Nampower etc.)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 3,
+      "priority": null,
+      "text": "Fade | on aggro; 1.18.1 -15% threat while active, threat returns",
+      "text_sha": "5b8ec19a4bc0",
+      "entries": [],
+      "unexpressed": "priest_defense owns Fade"
+    },
+    {
+      "from": "cooldowns",
+      "index": 4,
+      "priority": null,
+      "text": "Fear Ward | tank before fear mechanics (baseline all races)",
+      "text_sha": "aca2f7438177",
+      "entries": [],
+      "unexpressed": "friendly target not in the conditions"
+    },
+    {
+      "from": "cooldowns",
+      "index": 5,
+      "priority": null,
+      "text": "Desperate Prayer | Human/Dwarf self emergency (needs GCD, not while silenced)",
+      "text_sha": "98afc5695b87",
+      "entries": [
+        {
+          "id": "desperate_prayer",
+          "spell": "Desperate Prayer",
+          "level": 10,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "self_hp_below": 30,
+            "no_self_aura": [
+              "Desperate Prayer"
+            ]
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "cooldowns",
+      "index": 6,
+      "priority": null,
+      "text": "Avatar | Dwarf: on tank for heavy physical/magic damage (5 min)",
+      "text_sha": "b27fe5f69548",
+      "entries": [],
+      "unexpressed": "friendly target not in the conditions"
+    }
+  ],
+  "order": [
+    "power_word_shield",
+    "power_word_shield_tank",
+    "flash_heal_7",
+    "greater_heal_1",
+    "renew",
+    "flash_heal_1",
+    "renew_rank1",
+    "prayer_of_healing_4",
+    "prayer_of_healing_2",
+    "ascendance",
+    "inner_focus",
+    "desperate_prayer"
+  ],
+  "oracle": {
+    "core": [
+      "Flash Heal",
+      "Greater Heal",
+      "Renew"
+    ],
+    "situational": [
+      "Power Word: Shield",
+      "Prayer of Healing",
+      "Ascendance",
+      "Inner Focus",
+      "Fade",
+      "Fear Ward",
+      "Desperate Prayer",
+      "Avatar",
+      "Lightwell"
+    ],
+    "never": [],
+    "signature": [
+      "Holy Nova",
+      "Lightwell",
+      "Ascendance"
+    ],
+    "taunt": []
+  }
+}
