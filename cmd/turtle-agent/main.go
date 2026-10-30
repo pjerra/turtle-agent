@@ -86,6 +86,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return rotationCmd(args[1:], stdout, stderr)
 	case "dashboard":
 		return dashboardCmd(ctx, args[1:], stdout, stderr)
+	case "dashboard-replay":
+		return dashboardReplayCmd(ctx, args[1:], stdout, stderr)
 	case "minimap-extract":
 		return minimapCmd(args[1:], stdout, stderr)
 	case "plan-export":
@@ -116,6 +118,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return rpcCmd(args[1:], stdout, stderr)
 	case "raid-walk":
 		return raidWalkCmd(ctx, args[1:], stdout, stderr)
+	case "plan-diff":
+		return planDiffCmd(args[1:], stdout, stderr)
+	case "raid-suite":
+		return raidSuiteCmd(ctx, args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, "turtle-agent", version)
 		return exitOK
@@ -139,11 +145,14 @@ func usage(w io.Writer) {
   turtle-agent pulltest [--json] <result.json> | --compare <a.json> <b.json>
   turtle-agent rotation list | show [--level N] <name|file> | check <file>...
   turtle-agent dashboard [--listen 127.0.0.1:8790] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--edit --mmaps-dir DIR]
+  turtle-agent dashboard-replay <recording-dir|file.jsonl> [--to host:port] [--speed N] [--max-gap D] [--loop] [--dry-run] [--i-know] | convert <api-dump-dir> [--out <dir>]
   turtle-agent minimap-extract --client DIR --out DIR [--maps 70,209|all-instances] [--mmaps DIR] [--list]
   turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
   turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
   turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
   turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
+  turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
+  turtle-agent raid-suite (--suite FILE | --dir DIR) --history DIR [--server m910q] [--slot N] [--only p1,p2] [--speed X] [--gap 60s] [--out DIR] [--dash-url URL] [--dash-user U] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--compare-only] [--dry-run] [--json]
   turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
   turtle-agent scenario check [--var NAME=VALUE]... <file>
   turtle-agent scenario run [--out DIR] [--force] [--quiet] [--var NAME=VALUE]... [--session NAME=ADDR[@TOKENFILE]]... <file>

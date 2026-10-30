@@ -95,7 +95,7 @@ func TestDefaultRosterFromPlanRaid(t *testing.T) {
 	}{
 		// Every raid slot: the plan's tank count and healers, the dps make up the rest (amendment G2).
 		{"onyxias_lair", 40, "3t", "10h 26d", 2},
-		{"zul_gurub", 20, "2t", "5h 12d", 0},
+		{"zul_gurub", 20, "2t", "5h 12d", 1},
 		{"lower_karazhan_halls", 10, "1t", "3h 5d", 0},
 	}
 	for _, c := range cases {
