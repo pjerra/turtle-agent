@@ -1090,3 +1090,70 @@ the page:
 3. Once the daemon has the replay guard (TortoiseBots task R4): the same replay without `-accept-replay` must leave the
    cards empty and log `[UDP] dropped replayed datagram (start with -accept-replay to take them)` at most once a
    minute. Not run: the daemon build used above predates the guard and took the datagrams either way.
+
+## raid-walk: the whole walk as one command (tested against fakes only, never run live until E2)
+
+README "Raid walks". Needs a server image with TortoiseBots `feat/run-until` (the run start's `until`) and the raid
+tools' slot setup. What the first live use has to settle:
+
+1. **Start and label.** `raid-walk onyxias_lair --hold-minutes 5` reaches `running 1/29` and the status line's trailing
+   label reads `until boss (step 29)`; a build without run-until is refused (exit 18, "has no `until`") and nothing is
+   sent after `run start`.
+2. **Hire diff.** Each `.bot hire raid ...` reply's hired count equals the party growth; the MT and OT names are the
+   batch's own names and `TBM:RAID_LAYOUT`'s first tank is the roster's MT.
+3. **Entry.** `cmd enter near` (Onyxia's amulet) puts every hire on map 249 within 60 s; check the frames' maps and
+   whether a straggler needed the `cmd summon`.
+4. **The stop.** `done|28/29|...|stopped before step 29 (until boss)` within 1-3 s of step 28; Onyxia at 100 % and no
+   victim 60 s later (dashboard snapshot); five trash fights in `combat-fights.json`.
+5. **The summary.** `summary.json` says `end_reason: until`, `steps_reached 28`, `steps_total 29`, and `hires_left`
+   is empty; teardown's `teardown.json` has no failed step.
+6. **Wipe and boss rules.** Not expected on a normal walk: a forced wipe must wait for a reset, revive only when the
+   quiet check passes, and never revive while a boss row has a target; the exit code is 19.
+7. **Tier and refit.** The hires carry `t2` in each `.bot hire raid` line and the walk sends
+   `.bot gear raid <commander> tier 2`; the `TBM:GEAR` line's tier field reads 2 and the kits are the Zul'Gurub set (no
+   Molten Core pieces above the kit). `summary.json` says `roster.tier 2`, `tier_source "table"`; with
+   `--tier-override 3` it says `tier_comparison true` and the notes carry "comparison, not a tier proof". A raid the
+   table leaves unknown refuses to start without `--tier`.
+8. **The 40th seat.** A 40-man plan's default roster asks for 40; the server hires 39 (its cap) and the summary notes
+   `hire cap 39:` with exit 0, the raid layout 39 tanks/bots as the server reports them. A hire that comes up short
+   below 39 is exit 18. Settle whether `TBM:HIRE_RAID`'s hired field counts the order or the seats on the capped batch.
+
+## raid-walk --inject: fault injection (tested against fakes only, never run live until L1)
+
+README "Raid walks", "Fault injection". Needs a server where `.freeze`/`.unfreeze`/`.die` and `.gps` behave as the P0
+probe found (2026-10-29, `tests/raid-inject-probe-20261029-042517/probe.md`). What L1 has to settle:
+
+1. **Prepare.** `.gm visible off` and the `.go xyz` to step 1 leave the commander in its own instance copy (P0: bot
+   lines work by GUID selection across copies); the readiness check passes within 20 s because `bot_view` names the
+   lead bot with a position, and no `units` read is used. If it fails, every fault is `inconclusive` and no
+   `.freeze`/`.die`/`.summon` goes out.
+2. **Selection.** Every `target` is followed 2 s later by `.gps`, and `.die`/`.freeze`/`.unfreeze` act on the right
+   unit: record the `.gps` coordinates against the target's frame position, including a deliberate back-to-back target
+   change (P0 run 1 killed the previously selected bot). The 3 yd tolerance must hold for a tanking MT.
+3. **kill-mt.** The MT dies; the OTs pick its attackers up within 10 s (`pickup_by`); no wipe; the fight ends within
+   180 s; `mt_revived_s` and the pauses after the kill. Exit 23 if the verdict is `fail`.
+4. **runaway.** `.go xyz` to the plan point, `.summon <victim>`, `.freeze <victim>` (no chat reply: confirm the freeze
+   by the victim's position), then the run leader's F4 note `"<victim> is <yd> yd from the lead bot (<s> s out of
+   reach): summoned"` and the victim back within 15 s. `.revive` clears a freeze if one is left; cleanup unfreezes it.
+5. **add-pack.** The `cmd attack <guid> <puller>` ACK, the extra pack engaging, the fight end and whether the run
+   leader's own targeting supersedes the order (then the verdict is `inconclusive: the extra pack did not engage`).
+6. **lag.** The victim stays put while frozen (P0: `.freeze` holds against follow orders), rejoins within 120 s of
+   `.unfreeze`, and no pause names it.
+7. **Cleanup.** `inject.json` and `summary.json` `injections[]` agree; teardown's report and a last `bot_view` show no
+   bot left frozen; a SIGINT while a bot is frozen still sends `.unfreeze` before `.bot run stop`.
+8. **Exit codes.** A `fail` turns a clean walk into 23; a wipe during a fault stays 19 and the fault reads `fail` in
+   the summary; `not-fired`/`inconclusive` keep exit 0.
+## raid-suite: one walk per raid, judged against the history (tested against fakes only, never run live until L2)
+
+README "Raid suite". Needs `raid-walk` (the `until` clause, `feat/run-until` on the server) and at least one raid whose tier
+is sourced in `internal/raidwalk/tiers.go` (onyxias_lair, tier 2). What the first live use has to settle:
+
+1. **Dry run.** `raid-suite --dir <the 11 prep plans> --history <dir> --dry-run` prints onyxias_lair as `tier 2 (table) until
+   boss` and each 0-row raid as `refused: raid <plan> has no minimum hire tier`; no lease is taken and no out dir is made.
+2. **First walk is new.** The first `raid-suite` on onyxias_lair walks it to its boss and writes `<history>/onyxias_lair/<stamp>/`;
+   the verdict is `new`, exit 0, and `suite.json` names the walk's out dir.
+3. **Second walk compares.** A second walk on the same server and settings is `ok` (or `regression` with a reason that names both
+   values); the baseline's `out` and `started` are the first walk's.
+4. **Refusals never walk.** Only onyxias_lair gets a walk dir under `<history>/`; a refused raid leaves no dir there.
+5. **Teardown between raids.** Each walk's `teardown.json` has no hire left online before the next raid starts (the `--gap`
+   sleep sits between two walks).
