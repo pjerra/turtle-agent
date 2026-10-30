@@ -1096,16 +1096,34 @@ func (w *walk) saveFights() {
 		if r.ID == "" || r.Live || w.seenFights[r.ID] {
 			continue
 		}
-		w.seenFights[r.ID] = true
 		fs := raidwalk.FightSummary{ID: r.ID, Step: int(r.Step), Leg: r.Leg, DurMS: int64(r.Dur),
 			Deaths: r.Deaths, Outcome: r.Outcome, BossName: r.BossName, Warnings: r.Warnings}
+		idx, pending := w.pendingFights[r.ID]
+		if pending {
+			fs = w.fights[idx]
+		}
+		// A fight whose detail could not be loaded or read is kept without it and fetched again on the next poll (and at teardown),
+		// so one dashboard timeout does not lose its death recap for good.
+		got := false
 		if detail, derr := w.dash.Fight(ctx, r.Key); derr == nil {
 			_ = w.writeOut("combat-fight-"+fightFileID(r.ID)+".json", detail)
 			if d, ok := raidwalk.FightDetailOf(detail); ok {
 				fs.Detail = &d
+				got = true
 			}
 		}
-		w.fights = append(w.fights, fs)
+		if pending {
+			w.fights[idx] = fs
+		} else {
+			w.fights = append(w.fights, fs)
+			idx = len(w.fights) - 1
+		}
+		if got {
+			w.seenFights[r.ID] = true
+			delete(w.pendingFights, r.ID)
+		} else {
+			w.pendingFights[r.ID] = idx
+		}
 	}
 }
 

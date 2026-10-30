@@ -482,12 +482,14 @@ type walk struct {
 	fights   []raidwalk.FightSummary
 
 	seenFights map[string]bool
-	hostiles   map[string]hostileState
-	botAt      map[string]botPos
-	partyG     map[uint64]bool
-	resetSince time.Time
-	afterN     uint64
-	eventsAt   uint64
+	// pendingFights are fights listed but whose detail is not loaded yet: fight id to its index in fights.
+	pendingFights map[string]int
+	hostiles      map[string]hostileState
+	botAt         map[string]botPos
+	partyG        map[uint64]bool
+	resetSince    time.Time
+	afterN        uint64
+	eventsAt      uint64
 
 	bossSet      map[uint32]bool
 	bossRows     map[uint32]hostileState
@@ -552,7 +554,7 @@ func raidWalkRun(ctx context.Context, o raidWalkOptions, env walkEnv, deps walkD
 	env.fillDefaults()
 	deps.fillDefaults()
 	w := &walk{opts: o, env: env, deps: deps, stdout: stdout, stderr: stderr,
-		seenFights: map[string]bool{}, hostiles: map[string]hostileState{}, botAt: map[string]botPos{},
+		seenFights: map[string]bool{}, pendingFights: map[string]int{}, hostiles: map[string]hostileState{}, botAt: map[string]botPos{},
 		partyG: map[uint64]bool{}, bossSet: map[uint32]bool{}, bossRows: map[uint32]hostileState{}, hires: map[string]bool{}}
 	return w.main(ctx)
 }
