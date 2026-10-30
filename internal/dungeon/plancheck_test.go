@@ -546,7 +546,6 @@ var planCheckKnownFailing = map[string]bool{
 	"temple_of_ahnqiraj":    true,
 	"stratholme_undead":     true,
 	"scarlet_graveyard":     true,
-	"ruins_of_ahnqiraj":     true,
 	"razorfen_downs":        true,
 	"blackfathom_deeps":     true,
 	"black_morass":          true,
