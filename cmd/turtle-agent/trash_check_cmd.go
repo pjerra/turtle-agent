@@ -86,9 +86,7 @@ func trashCheckCmd(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return fail("%v", err)
 		}
-		for _, n := range notes {
-			planNotes = append(planNotes, n)
-		}
+		planNotes = append(planNotes, notes...)
 		switch {
 		case *planFlag != "":
 			found := false
