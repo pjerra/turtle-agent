@@ -2312,10 +2312,9 @@ turtle-agent raid-suite --dir ~/ta-wt-raid-ony/dungeons --history ~/TortoiseBots
   including `--slot A,B` (`raid-suite` walks one raid at a time).
 ### Two raids at once
 
-`turtle-agent raid-walk <plan> [<plan2>] --slot A,B` walks two raids at the same time, one per slot. Two raids take
+`turtle-agent raid-walk <plan> [<plan2>] --slot A,B` walks two raids at the same time, one per slot (three or more: below). Two raids take
 `--slot 1,2` because `--slots FILE` is already the slot config path: the pair form is the same `--slot` flag with a
-list of two distinct ids. Slot `3` is refused before anything for any server (exit 15); a third id or a repeated one
-is a usage error (exit 2). One plan walks that plan on both slots (two instances of it); two plans walk `plan1` on A
+list of two distinct ids. Slot `3` is refused before anything for any server (exit 15); a repeated id is a usage error (exit 2). One plan walks that plan on both slots (two instances of it); two plans walk `plan1` on A
 and `plan2` on B.
 
 Each half is an ordinary raid-walk with its own lease, `slot setup`, agent process, dashboard client and output dir:
@@ -2347,6 +2346,18 @@ are up to 80 hires on one server: plan the slots and the worldserver's memory.
 
 `--dry-run` prints both phase plans, every line prefixed `[s<N> <plan>] `, without leasing or writing.
 
+**Three or more raids at once.** `--slot A,B,C[,...]` (up to 8 distinct ids, never `3`, anywhere in the list) walks one raid per
+slot, each its own commander, lease, group and instance: `turtle-agent raid-walk onyxias_lair --slot 1,2,4` walks Onyxia on three
+slots (three instances), `raid-walk onyxias_lair molten_core zul_gurub --slot 1,2,4` one plan per slot in the slots' order (any other
+plan count is a usage error). Everything above holds per walk (flags with a slot prefix, `--holder SLOT=...` when two default holders
+would collide, the cleanup, SIGINT stopping all walks). The walks start `--stagger` apart in the slots' order (the second
+`--stagger` after the first, the third `--stagger` after the second), so the hire bursts do not meet. The combined files are
+`<out>/multi.json` (format `tb-raid-walk-multi` v1) and `<out>/multi.txt`; a two-slot run keeps `pair.json`/`pair.txt` unchanged.
+`multi.json` has the pair's `walks[]`, `overlap_s` (seconds all walks ran together), `dashboard_all_listed` (one commanders dump
+names every character; `null` with the dashboard off), `exit_code`, `notes` and `totals`: `walks`, `ended_by_until`, `failed`
+(exit code not 0), `steps_reached`, `deaths`, `fights`, `pauses`. `multi.txt` is one line per walk, the `note:` lines, a
+`total:` line and `multi: exit <c>`; the exit code is picked by the same order as the pair's. N full raids are N times the hires:
+plan the worldserver's memory (two 40-man raids are already up to 80 bots).
 
 ## Remote leader
 
