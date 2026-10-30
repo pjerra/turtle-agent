@@ -50,7 +50,7 @@ const (
 )
 
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
-    [--until boss|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--tier N|--tier-override N]
+    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
     [--reset-wait 5m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--dry-run]`
@@ -187,7 +187,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.holder, "holder", "", "the lease holder (default raid-walk-<plan>)")
 	fs.StringVar(&o.dir, "dir", "dungeons", "the folder of plan files")
 	fs.StringVar(&o.sql, "sql", "", "the deployed migration: step numbers and the first point come from it")
-	fs.StringVar(&o.until, "until", "boss", "boss, none, \"step N\" or \"leg L\"")
+	fs.StringVar(&o.until, "until", "boss", "boss (stops before it), boss-done (after the boss step), none, \"step N\" or \"leg L\"")
 	fs.StringVar(&o.from, "from", "", "\"leg L\" or \"step N\" for the run leader")
 	fs.StringVar(&speed, "speed", "1.0", "the run's test speed, 1.0 to 3.0")
 	fs.StringVar(&o.hires, "hires", "", "the tb-raid-roster v1 file (default: from the plan's raid block)")
@@ -457,7 +457,10 @@ type walk struct {
 	untilWords []string
 	untilLabel string
 	untilStep  int // the step of the start line's until label (0: unknown)
-	fromWords  []string
+	// bossDoneStep is the boss step --until boss-done resolved to (0: not asked). The server must show the step count of w.rows, else the
+	// step numbers are not the ones the clause was computed from.
+	bossDoneStep int
+	fromWords    []string
 
 	agent    walkAgent
 	manifest teardownSlotManifest
@@ -630,11 +633,13 @@ func (w *walk) validate() error {
 		}
 	}
 
-	words, label, err := raidwalk.ParseUntil(w.opts.until)
-	if err != nil {
-		return stopf(exitUsage, "%v", err)
+	if !raidwalk.IsBossDone(w.opts.until) { // boss-done is resolved against the rows, below
+		words, label, err := raidwalk.ParseUntil(w.opts.until)
+		if err != nil {
+			return stopf(exitUsage, "%v", err)
+		}
+		w.untilWords, w.untilLabel = words, label
 	}
-	w.untilWords, w.untilLabel = words, label
 	if w.opts.from != "" {
 		fw, err := raidwalk.ParseFrom(w.opts.from)
 		if err != nil {
@@ -679,6 +684,18 @@ func (w *walk) validate() error {
 		w.note("step points from the plan JSON, not the deployed rows")
 	}
 	w.stepFirst = firstStepPoint(w.rows)
+	if raidwalk.IsBossDone(w.opts.until) {
+		clause, boss, err := raidwalk.BossDoneUntil(w.rows)
+		if err != nil {
+			return stopf(exitUsage, "%v", err)
+		}
+		words, label, err := raidwalk.ParseUntil(clause)
+		if err != nil {
+			return stopf(exitUsage, "%v", err)
+		}
+		w.untilWords, w.untilLabel, w.bossDoneStep = words, label, boss
+		w.note("--until boss-done: the boss is step %d of %d, the walk goes with %q", boss, len(w.rows.Steps), clause)
+	}
 
 	if len(w.opts.injects) > 0 {
 		if newWalkInjector == nil {

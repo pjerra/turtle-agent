@@ -11,6 +11,7 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/rpc"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 	"github.com/pjerra/turtle-agent/internal/tracerun"
@@ -168,6 +169,11 @@ func checkObserve(p dungeonRunParams, bad func(string, ...any) error) error {
 				return bad("observe.%s: %v is outside 0-86400 seconds (0: the default)", v.name, v.s)
 			}
 		}
+		if u := strings.TrimSpace(o.Until); u != "" && !raidwalk.IsBossDone(u) {
+			if _, _, err := raidwalk.ParseUntil(u); err != nil {
+				return bad("observe.until: %v", err)
+			}
+		}
 		if o.AutoResume < 0 || o.AutoResume > 3 {
 			return bad("observe.auto_resume: %d is outside 0-3 (at most 3 auto resumes a step, 0: off)", o.AutoResume)
 		}
@@ -233,6 +239,7 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 	var observe *dungeon.ObserveSpec
 	mode, _, _ := runMode(p.Mode)
 	var startFrom dungeon.StartFromResolver
+	var untilFn dungeon.UntilResolver
 	if mode == modeObserve {
 		observe = observeSpec(p.Observe)
 		var planner *navmesh.Planner
@@ -244,11 +251,14 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 			step = *p.FromStep
 		}
 		startFrom = observeStartFrom(plan, from, p.FromPullGroup, step, planner)
+		if p.Observe != nil {
+			untilFn = observeUntil(plan, p.Observe.Until, planner)
+		}
 	}
 	// recover_wipe is on by default in a commander run only: an observed run steers nothing (and refuses the option), so its trace
 	// options say off.
 	cfg.RecoverWipe = remoteRecoverWipe(p)
-	opt := dungeon.RemoteOptions{RunMeta: resolveRunMeta(p.RunMeta, r.runMeta), ForceStart: p.ForceStart, Observe: observe, StartFrom: startFrom, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, GiveItems: p.GiveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, CCBot: p.CCBot, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, GravesBatch: p.GravesBatch, GravesRamp: p.GravesRamp, GravesOpenBy: strings.ToLower(p.GravesOpenBy), Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), ClassMemory: maps.Clone(r.classes), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
+	opt := dungeon.RemoteOptions{RunMeta: resolveRunMeta(p.RunMeta, r.runMeta), ForceStart: p.ForceStart, Observe: observe, StartFrom: startFrom, Until: untilFn, PlanPath: planPath, TunePath: tunePath, NoReload: p.LiveReload != nil && !*p.LiveReload, StartHere: p.StartHere, HaveItems: p.HaveItems, GiveItems: p.GiveItems, Lead: p.LeadBot, Bots: p.Bots, Tank: p.Tank, Healer: p.Healer, Carrier: p.Carrier, CCBot: p.CCBot, LootRestore: p.LootRestore, ObjectFallback: p.ObjectFallback, GravesBatch: p.GravesBatch, GravesRamp: p.GravesRamp, GravesOpenBy: strings.ToLower(p.GravesOpenBy), Team: p.Team, Preflight: p.Preflight, OnEnd: p.OnEnd, KeepOnFail: p.KeepOnFail, HireMemory: r.keptHires(), ClassMemory: maps.Clone(r.classes), Enter: p.Enter, IgnoreEntryLimit: p.IgnoreEntryLimit}
 	if p.Prepare != nil {
 		opt.Prepare = *p.Prepare
 	}

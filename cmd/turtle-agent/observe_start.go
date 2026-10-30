@@ -10,6 +10,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -79,6 +80,50 @@ func observeStartFrom(plan *dungeon.Plan, leg int, group *int, step int, planner
 			ps.Point, ps.HavePoint = legStartPoint(plan, leg)
 			return ps, nil
 		}
+	}
+}
+
+// observeUntil is the RemoteOptions.Until of an observed run (observe.until); nil when the run goes to the plan's end. The words boss,
+// step N, leg L and none go to the run leader as they are; boss-done is the step after the first boss row, in the numbering of the rows
+// the server runs: the exporter option set whose step count equals the one the server listed gives it, and the option sets that match
+// must agree (else the clause cannot be told offline and the run is refused before a bot is hired).
+func observeUntil(plan *dungeon.Plan, until string, planner *navmesh.Planner) dungeon.UntilResolver {
+	until = strings.TrimSpace(until)
+	if until == "" {
+		return nil
+	}
+	return func(serverSteps int) (dungeon.UntilClause, error) {
+		if !raidwalk.IsBossDone(until) {
+			words, label, err := raidwalk.ParseUntil(until)
+			return dungeon.UntilClause{Words: words, Label: label}, err
+		}
+		if serverSteps <= 0 {
+			return dungeon.UntilClause{}, fmt.Errorf("observe.until boss-done: the server did not list the plan's step count for %s (.bot run list), so the step after the boss cannot be mapped; use observe.until \"step N\"", plan.Name)
+		}
+		cands, buildErrs := observePlanRows(plan, planner)
+		clauses := map[string]bool{}
+		var counts []int
+		var clause string
+		for _, r := range cands {
+			counts = append(counts, r.StepCount())
+			if r.StepCount() != serverSteps {
+				continue
+			}
+			c, _, err := raidwalk.BossDoneUntil(r)
+			if err != nil {
+				return dungeon.UntilClause{}, fmt.Errorf("observe.until: %w", err)
+			}
+			clause = c
+			clauses[c] = true
+		}
+		switch {
+		case len(clauses) == 0:
+			return dungeon.UntilClause{}, fmt.Errorf("observe.until boss-done: the server's plan %s has %d steps, and the plan file's exported rows give %s steps (%s): the rows on the server were exported with other options, so the step after the boss cannot be computed offline; use observe.until \"step N\" or \"leg L\"", plan.Name, serverSteps, distinctSteps(counts), strings.Join(buildErrs, "; "))
+		case len(clauses) > 1:
+			return dungeon.UntilClause{}, fmt.Errorf("observe.until boss-done: the exporter's option sets that match the server's %d steps put the boss at different steps; use observe.until \"step N\"", serverSteps)
+		}
+		words, label, err := raidwalk.ParseUntil(clause)
+		return dungeon.UntilClause{Words: words, Label: label}, err
 	}
 }
 

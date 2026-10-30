@@ -295,6 +295,10 @@ type observeParam struct {
 	// KeepLootSetting leaves the bots' corpse looting as the operator set it: the start sends no `.bot behavior <bot> loot on` (the undo
 	// of a boss `loot off` a crashed run left in place). Off by default. Observe only; a driven run always sends the undo.
 	KeepLootSetting bool `json:"keep_loot_setting,omitempty"`
+	// Until stops the run at a point of the plan instead of its end: `boss` (before the first boss step), `boss-done` (after it), `step N`
+	// (before step N, the run leader's numbering), `leg L` (when leg L starts: a name or a number) or `none`. It goes to the run start as
+	// `until ...`; the run then ends done with a note when the run leader stops there. Needs a run leader with `until` (feat/run-until).
+	Until string `json:"until,omitempty"`
 }
 
 type dungeonRunResult struct {

@@ -127,6 +127,18 @@ type PartialStart struct {
 // run before a bot is hired.
 type StartFromResolver func(serverSteps int) (PartialStart, error)
 
+// UntilClause is the `until ...` the run start of an observed run carries: the words, and the clause as the run leader writes it in the
+// status ("until step 29"). The zero value is no until.
+type UntilClause struct {
+	Words []string
+	Label string
+}
+
+// UntilResolver maps an observed run's until (observe.until) to its clause once the server's step count for the plan is known (boss-done
+// is the step after the first boss row, which only the step count tells apart from other exports). An error refuses the run before a bot
+// is hired.
+type UntilResolver func(serverSteps int) (UntilClause, error)
+
 // RunLeaderWatcher is the optional part of a RemoteGame that has read the TBM:RUN lines the module pushes: the newest one and how
 // many have been read. Without it the observer relies on the replies to `.bot run start` and `.bot run status`.
 type RunLeaderWatcher interface {
@@ -175,6 +187,8 @@ type ObserveReport struct {
 	Controls         []string `json:"controls,omitempty"`
 	// PlayerOrders are the pauses the module made for a player's order (the observer's `cmd summon`, a move), each with the step and the order.
 	PlayerOrders []string `json:"player_orders,omitempty"`
+	// Until is the until clause the run was started with ("until step 29"; empty: none).
+	Until string `json:"until,omitempty"`
 	// Ended is how the watch ended: done, or the reason of a failure or stop.
 	Ended string `json:"ended,omitempty"`
 	// Changes are the status changes, oldest first (the newest MaxRunChanges).
@@ -317,6 +331,16 @@ func (d *RemoteDriver) probeRunLeader(ctx context.Context) error {
 		d.start = &start
 		if start.Words != "" {
 			d.rep.note(fmt.Sprintf("observe mode: the run leader starts partway (`run start %s %s`; the server lists %d steps)", spec.Plan, start.Words, d.planSteps))
+		}
+	}
+	if d.opt.Until != nil {
+		u, err := d.opt.Until(d.planSteps)
+		if err != nil {
+			return fmt.Errorf("observe mode: %w", err)
+		}
+		d.until = u
+		if u.Label != "" {
+			d.rep.note(fmt.Sprintf("observe mode: the run stops at `%s` (the server lists %d steps)", u.Label, d.planSteps))
 		}
 	}
 	d.rep.note("observe mode: the server's run leader answered; plans: " + nonEmpty(list, "(not listed)"))
@@ -478,6 +502,9 @@ func (d *RemoteDriver) startRunLeader(ctx context.Context) error {
 	if d.start != nil && d.start.Words != "" {
 		line += " " + d.start.Words
 	}
+	if len(d.until.Words) > 0 {
+		line += " " + strings.Join(d.until.Words, " ")
+	}
 	r, err := d.g.Command(ctx, line)
 	if err != nil {
 		return fmt.Errorf("run start: %w", err)
@@ -507,11 +534,29 @@ func (d *RemoteDriver) startRunLeader(ctx context.Context) error {
 		if err := d.verifyStartReply(ctx, r.Lines); err != nil {
 			return err
 		}
+		if err := d.verifyUntilLabel(r.Lines); err != nil {
+			return err
+		}
 	}
 	o.started = true
-	d.remote(func(rr *RemoteReport) { rr.Observe.Started = true })
+	d.remote(func(rr *RemoteReport) { rr.Observe.Started, rr.Observe.Until = true, d.until.Label })
 	d.rep.note("observe mode: run leader started plan " + o.spec.Plan)
 	return nil
+}
+
+// verifyUntilLabel proves the run leader took the until clause: its start reply shows "until <clause> (step N)". A run leader without
+// `until` would walk the plan to its end, so the run is stopped at once and the watch refused (as raid-walk does).
+func (d *RemoteDriver) verifyUntilLabel(lines []string) error {
+	if d.until.Label == "" {
+		return nil
+	}
+	for _, l := range lines {
+		if strings.Contains(l, d.until.Label+" (step ") {
+			return nil
+		}
+	}
+	d.stopRunLeader("the start line shows no until", "")
+	return fmt.Errorf("observe mode: run start: the run leader's start line does not show `%s (step N)`: this server's run leader has no `until` (TortoiseBots feat/run-until); the run was stopped and is not watched", d.until.Label)
 }
 
 // startMatchesStatus says why a run already going cannot stand for the requested partial start ("" when it can). A step start needs the
@@ -1121,6 +1166,10 @@ func (d *RemoteDriver) runVerdict() (done bool, err error) {
 		d.endLeg("done")
 		if st.Steps > 0 && st.Step >= st.Steps && !strings.HasPrefix(st.Note, "stopped") {
 			d.rep.note(fmt.Sprintf("observe mode: the run leader finished plan %s (%d steps)", o.spec.Plan, st.Steps))
+			return true, nil
+		}
+		if d.until.Label != "" && strings.HasPrefix(st.Note, "stopped before step") {
+			d.rep.note(fmt.Sprintf("observe mode: the run leader reached its `%s` stop (%s)", d.until.Label, st.Note))
 			return true, nil
 		}
 		return true, fmt.Errorf("the run leader ended the run at step %d/%d (%s): %s", st.Step, st.Steps, st.Leg, nonEmpty(st.Note, "no reason given"))

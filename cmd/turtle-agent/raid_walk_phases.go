@@ -688,6 +688,14 @@ func (w *walk) checkStartLine(ctx context.Context, line string) error {
 	if st.State != tbm.RunRunning {
 		return stopf(exitRaidWalkFailed, "run start: the run is %s: %s", st.State, line)
 	}
+	if w.bossDoneStep > 0 && st.Steps != len(w.rows.Steps) {
+		// boss-done is "the step after the boss" in the rows' numbering: another step count means other rows on the server.
+		if err := w.gm(ctx, ".bot run stop"); err != nil {
+			return err
+		}
+		w.runStopped = true
+		return stopf(exitRaidWalkFailed, "--until boss-done: the server's plan has %d steps, the rows the boss step was found in have %d (pass --sql with the deployed migration, or use --until leg L)", st.Steps, len(w.rows.Steps))
+	}
 	if len(w.untilWords) == 0 {
 		return nil
 	}

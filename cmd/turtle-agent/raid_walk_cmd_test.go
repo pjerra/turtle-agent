@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
@@ -66,8 +67,9 @@ type timelineEntry struct {
 }
 
 type walkFakeAgent struct {
-	t     *testing.T
-	clock *fakeClock
+	instMap uint32 // the map the entered party stands on (0: Onyxia's 249)
+	t       *testing.T
+	clock   *fakeClock
 
 	mu        sync.Mutex
 	calls     []string
@@ -444,6 +446,9 @@ func (f *walkFakeAgent) viewPage() any {
 	m := uint32(1)
 	if f.entered {
 		m = 249
+		if f.instMap != 0 {
+			m = f.instMap
+		}
 	}
 	party := append([]string{}, f.party...)
 	dead := map[string]bool{}
@@ -1660,5 +1665,90 @@ func TestSummaryCarriesRowsShaAndUntilStep(t *testing.T) {
 	}
 	if sum.Injections == nil || len(sum.Injections) != 0 {
 		t.Fatalf("injections %+v, want an empty list", sum.Injections)
+	}
+}
+
+// bossDoneFixture is a walk of the Molten Core plan JSON with --until boss-done, with the clause it must send and the plan's step count.
+func bossDoneFixture(t *testing.T) (*fixture, int, int) {
+	t.Helper()
+	f := newFixture(t)
+	f.opts.plan, f.opts.holder = "molten_core", "raid-walk-molten_core"
+	f.opts.until, f.opts.tier = "boss-done", 1
+	p, err := dungeon.Load(filepath.Join(f.opts.dir, "molten_core.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.agent.instMap = p.Map
+	res, err := planexport.Build(p, planexport.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clause, boss, err := raidwalk.BossDoneUntil(res.Rows)
+	if err != nil || boss < 1 || !strings.HasPrefix(clause, "step ") {
+		t.Fatalf("clause %q boss %d: %v", clause, boss, err)
+	}
+	n, _ := strconv.Atoi(strings.TrimPrefix(clause, "step "))
+	return f, n, len(res.Rows.Steps)
+}
+
+func zgStart(total, next int) *commanderReply {
+	return &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: "TBM:ACTION_ACK|run start|party|1|-",
+		Lines: []string{
+			fmt.Sprintf("TBM:RUN|molten_core|running|1/%d|lucifron|move|walk|walking|until step %d (step %d)", total, next, next),
+			"TBM:ACTION_ACK|run start|party|1|-",
+		}}}
+}
+
+// --until boss-done sends "until step <the step after the boss>" and the run ends with the boss step done.
+func TestRaidWalkUntilBossDone(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)},
+	}
+	f.agent.mu.Unlock()
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if want := fmt.Sprintf("molten_core|until|step|%d", next); f.agent.startArgs != want {
+		t.Fatalf("run start args %q, want %q", f.agent.startArgs, want)
+	}
+	sum := f.summary()
+	if sum.EndReason != "until" || sum.Until != "boss-done" || sum.UntilStep != next {
+		t.Fatalf("summary end %q until %q until_step %d", sum.EndReason, sum.Until, sum.UntilStep)
+	}
+	if !hasNote(sum, "--until boss-done: the boss is step") {
+		t.Fatalf("notes %q", sum.Notes)
+	}
+}
+
+// Rows that are not the server's (a plan of another step count) refuse the walk and stop the run: the step after the boss would be
+// another step.
+func TestRaidWalkBossDoneRefusesOtherRows(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total+40, next)
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
+		t.Fatalf("%d run stops, want exactly 1", n)
+	}
+	if !strings.Contains(f.summary().EndReason, fmt.Sprintf("boss-done: the server's plan has %d steps", total+40)) {
+		t.Fatalf("summary reason %q", f.summary().EndReason)
+	}
+}
+
+func TestRaidWalkBossDoneDryRun(t *testing.T) {
+	f, next, _ := bossDoneFixture(t)
+	f.opts.dryRun = true
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	if want := fmt.Sprintf("run start molten_core until step %d", next); !strings.Contains(f.stdout.String(), want) {
+		t.Fatalf("dry run lacks %q:\n%s", want, f.stdout.String())
 	}
 }
