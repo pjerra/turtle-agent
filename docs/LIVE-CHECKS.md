@@ -1040,6 +1040,15 @@ README "Run modes", "Rotations as data" and "Boss tactics". Use a Glacienne-like
    `power_spent` against the mana the unit rows show; `casts_failed_by_reason` against the `spell_failed` events; `idle_pct` against a watched fight; `mobs_on_me` against who the mobs target in `units`.
    Run the same arm twice: the spread is the noise `--compare` has to beat (it says "the noise" when both sides name the same brain).
 
+## KB rotations: one A/B pull test per role (tested against fakes only, never run live)
+
+The `kb_*` rotations written from the Turtle WoW knowledge base (stevemcqueenz), https://stevemcqueenz.github.io/turtle-knowledge-base/#/ are generated from recipes and played like any rotation file (README "Rotations as data"; `docs/ROTATIONS.md`, "Rotations from the Turtle knowledge base"). None has played live, and which one - if any - becomes a preset's default is the maintainer's decision after these tests. Use the pull-test mechanics of item 7 above (leader mode, hired or named party, Uldaman leg 0, `--pulltest 0:0:5`, three or more tries per arm, the same pull and party, `.respawn` between tries) and change only the rotation: arm A the preset with no `--rotation`, arm B the same preset with `--rotation kb_<spec>_<class>`. When the preset itself already names the KB list (`protection_paladin`, `tank_shaman`, the hunter, rogue and warlock specs), arm A is the sibling preset it was cloned from, whose class strategy is still in Go. One item per role:
+
+1. **Tank**: `tank_warrior` with `--rotation kb_protection_warrior` against no rotation (the Go `warrior_tank`), and the same with `--rotation kb_fury_tank_warrior` on the second try set. The KB's tank list is a threat rotation (Shield Slam on cooldown, Sunder upkeep, Revenge/Shield Block); taunting still belongs to the preset's `role_tank`: check `mobs_on_me` and the party's mobs taken off the tank against the Go arm, damage per power, deaths, and whether the pull holds when a mob leaves the tank; `off_tank_s` for the fury-tank arm. On a paladin, `kb_protection_paladin` on the `protection_paladin` preset against `ret_paladin` (the preset it clones): the KB list's `Consecration`, `Holy Shield` and seal upkeep against the retribution list, `role_tank` taunting in both.
+2. **Healer**: `holy_priest` with `--rotation kb_holy_priest`, `holy_paladin` with `kb_holy_paladin`, `resto_druid` with `kb_restoration_druid` and `resto_shaman` with `kb_restoration_shaman` (all `mode: "add"`: the entries play right after `role_healer`), each against the preset without the rotation. Check healing per second and per power, mana left at the end, the tank's lowest health, deaths, and that the rank-1 entries fire only where the KB says (`renew_rank1` on the picked member while it has no Renew): `brain_decision` names the entry id.
+3. **Melee**: `arms_warrior` with `--rotation kb_arms_warrior` and `combat_rogue` with `--rotation kb_combat_rogue`, against the Go class strategy in the same preset. Check damage per power, `time_to_kill_s`, casts refused by reason (an arms list that waits for Overpower after a dodge may show more refused casts), idle in combat, and that the KB's opener shows (`sunder_armor` on a mob with no Sunder before the fillers); record the spread of two runs of the same arm.
+4. **Caster**: the `frost_mage` preset with `--rotation kb_frost_mage` against no rotation (the Go `mage_frost`), then the same arm against `--rotation frost_mage` (the older file); and `arcane_mage` with `--rotation kb_arcane_mage` against no rotation (the `arcane_mage` file). Check damage per power, mana left, time to kill, the AoE rows (`mobs_near_mob_min`: Blizzard or Arcane Explosion fires on a 3-pack, not on a single mob) and that a fire-immune mob falls back as the KB says.
+
 ## Observe mode: the agent watches a TortoiseBots run leader (`mode: "observe"`, `plan-export`; tested against fakes only, never run live)
 
 README "Observe mode" and "Exporting plans for the TortoiseBots run leader". Needs a server build with TortoiseBots PRs #962 and #963 (the run leader and the plan tables),
@@ -1058,3 +1067,93 @@ README "Observe mode" and "Exporting plans for the TortoiseBots run leader". Nee
 9. **Partial start (#248).** From a party standing inside the instance, `dungeon_run {"mode":"observe", "from_leg": 10, ...}` must send `.bot run start wailing_caverns from leg serpentis` (a one-word, unique leg name; else `from 10`-style number) and the run leader's first status line must show the leg's first step (Wailing Caverns leg 10: step 207 of 226; `from 207` was the hand-started run of 2026-10-20). With `from_pull_group`, check that the server's listed step count matched the agent's rebuilt rows (the report's "starts partway" note names the step): when it did not, the probe must refuse before hiring and name `observe.from_step`. Then check the start is proven: the start message's step and leg are compared with the request (a reply at another step for `from_step`/`from_pull_group`, another leg, or a planted deployment of another plan version must stop the run and refuse the watch — only the module's documented "moved back to the step that starts the event" may differ, and is noted); an ACK-only start (no message) is proven by `run status` or, at another step, the run is stopped and the watch refused; a busy run at another step is not adopted. Check the party-placed start: a start elsewhere must pause/refuse as the module's `not-in-instance`/`party-scattered`; a lead bot more than 80 yd from the step's point, a step whose point is not known and a start without the lead's position are refused before `run start` (`observe.allow_far_start` turns each into a note).
 10. **Server trace (#249).** With `run_meta.server_trace: true` the start must go out and be acknowledged: the report has no "server trace state unknown", `.bot trace status` shows the run's id while it runs, and `.bot trace stop` ends it at the end (the server's summary joins the agent's trace on the run id). Before this fix the agent's own CheckCommand refused the whole `trace` group.
 11. **No maintenance at the observe start (#253).** With `prepare.party "hire"` (hires autogeared a moment before), the preflight must show `maintenance: "not sent (observe mode: observe.maintenance is off)"` for every bot, the hire check must not send `.bot maintenance` to a reused hire or one short of drinks or ammo (its warning says so), and no hire must leave the instance's map: the run leader must not pause with "the lead bot is not on the plan's map". `observe.maintenance: true` brings the `.bot maintenance` lines back in both places.
+
+## Dashboard replay: walk 2 through a local daemon
+
+`turtle-agent dashboard-replay` feeds a recording to the observability daemon's real UDP port (README "Dashboard
+replay"). The walk-2 recording replays without a server, but its views were only fetched as JSON here, not looked at in
+the page:
+
+1. From `tools/observability`: `go run ./cmd/server -udp-port 9195 -http-port 8095 -accept-replay -dev-no-auth`, then
+   `turtle-agent dashboard-replay ~/TortoiseBots-audit/tests/raid-ony-walk2 --speed 10` (`--loop` leaves time to look).
+   Observed 2026-10-28 on `origin/feat/fight-debugger` @ `3c909e75` without a database: `GET /api/v1/commanders` holds
+   two cards, Glacienne with 39 bots and Gbmage with 5, and `GET /api/v1/combat/fights?commander=Glacienne` lists 5-5
+   to 5-1 newest first (5-4 with 2 deaths, Irelanthe twice).
+2. The Fight debugger's verdicts for 5-5, 5-4, 5-3, 5-2, 5-1 must read `warn, fail, warn, warn, ok`
+   (commander-fight-debugger.md §2). Judged here on the replayed `{fight, warnings}` with the page's own
+   `web/static/js/fightdebug.js` under node: exactly those verdicts, with `tank_death` failing 5-4,
+   `debuff:expose_armor` warning 5-5 and `mt_sunder` + `ot_taunt:Irelanthe` warning 5-3. Still to see in the browser:
+   the card, the map overlay, the rail and the death recaps on that data.
+   The walk-2 dumps carry **no `layout`**, so the debugger's fallback takes the first tank in `fight.bots` order;
+   Ragemeister is first in all five fights, which is why the pinned numbers hold without a layout. A card that shows a
+   Layout row means the recording came from a newer module.
+3. Once the daemon has the replay guard (TortoiseBots task R4): the same replay without `-accept-replay` must leave the
+   cards empty and log `[UDP] dropped replayed datagram (start with -accept-replay to take them)` at most once a
+   minute. Not run: the daemon build used above predates the guard and took the datagrams either way.
+
+## raid-walk: the whole walk as one command (tested against fakes only, never run live until E2)
+
+README "Raid walks". Needs a server image with TortoiseBots `feat/run-until` (the run start's `until`) and the raid
+tools' slot setup. What the first live use has to settle:
+
+1. **Start and label.** `raid-walk onyxias_lair --hold-minutes 5` reaches `running 1/29` and the status line's trailing
+   label reads `until boss (step 29)`; a build without run-until is refused (exit 18, "has no `until`") and nothing is
+   sent after `run start`.
+2. **Hire diff.** Each `.bot hire raid ...` reply's hired count equals the party growth; the MT and OT names are the
+   batch's own names and `TBM:RAID_LAYOUT`'s first tank is the roster's MT.
+3. **Entry.** `cmd enter near` (Onyxia's amulet) puts every hire on map 249 within 60 s; check the frames' maps and
+   whether a straggler needed the `cmd summon`.
+4. **The stop.** `done|28/29|...|stopped before step 29 (until boss)` within 1-3 s of step 28; Onyxia at 100 % and no
+   victim 60 s later (dashboard snapshot); five trash fights in `combat-fights.json`.
+5. **The summary.** `summary.json` says `end_reason: until`, `steps_reached 28`, `steps_total 29`, and `hires_left`
+   is empty; teardown's `teardown.json` has no failed step.
+6. **Wipe and boss rules.** Not expected on a normal walk: a forced wipe must wait for a reset, revive only when the
+   quiet check passes, and never revive while a boss row has a target; the exit code is 19.
+7. **Tier and refit.** The hires carry `t2` in each `.bot hire raid` line and the walk sends
+   `.bot gear raid <commander> tier 2`; the `TBM:GEAR` line's tier field reads 2 and the kits are the Zul'Gurub set (no
+   Molten Core pieces above the kit). `summary.json` says `roster.tier 2`, `tier_source "table"`; with
+   `--tier-override 3` it says `tier_comparison true` and the notes carry "comparison, not a tier proof". A raid the
+   table leaves unknown refuses to start without `--tier`.
+8. **The 40th seat.** A 40-man plan's default roster asks for 40; the server hires 39 (its cap) and the summary notes
+   `hire cap 39:` with exit 0, the raid layout 39 tanks/bots as the server reports them. A hire that comes up short
+   below 39 is exit 18. Settle whether `TBM:HIRE_RAID`'s hired field counts the order or the seats on the capped batch.
+
+## raid-walk --inject: fault injection (tested against fakes only, never run live until L1)
+
+README "Raid walks", "Fault injection". Needs a server where `.freeze`/`.unfreeze`/`.die` and `.gps` behave as the P0
+probe found (2026-10-29, `tests/raid-inject-probe-20261029-042517/probe.md`). What L1 has to settle:
+
+1. **Prepare.** `.gm visible off` and the `.go xyz` to step 1 leave the commander in its own instance copy (P0: bot
+   lines work by GUID selection across copies); the readiness check passes within 20 s because `bot_view` names the
+   lead bot with a position, and no `units` read is used. If it fails, every fault is `inconclusive` and no
+   `.freeze`/`.die`/`.summon` goes out.
+2. **Selection.** Every `target` is followed 2 s later by `.gps`, and `.die`/`.freeze`/`.unfreeze` act on the right
+   unit: record the `.gps` coordinates against the target's frame position, including a deliberate back-to-back target
+   change (P0 run 1 killed the previously selected bot). The 3 yd tolerance must hold for a tanking MT.
+3. **kill-mt.** The MT dies; the OTs pick its attackers up within 10 s (`pickup_by`); no wipe; the fight ends within
+   180 s; `mt_revived_s` and the pauses after the kill. Exit 23 if the verdict is `fail`.
+4. **runaway.** `.go xyz` to the plan point, `.summon <victim>`, `.freeze <victim>` (no chat reply: confirm the freeze
+   by the victim's position), then the run leader's F4 note `"<victim> is <yd> yd from the lead bot (<s> s out of
+   reach): summoned"` and the victim back within 15 s. `.revive` clears a freeze if one is left; cleanup unfreezes it.
+5. **add-pack.** The `cmd attack <guid> <puller>` ACK, the extra pack engaging, the fight end and whether the run
+   leader's own targeting supersedes the order (then the verdict is `inconclusive: the extra pack did not engage`).
+6. **lag.** The victim stays put while frozen (P0: `.freeze` holds against follow orders), rejoins within 120 s of
+   `.unfreeze`, and no pause names it.
+7. **Cleanup.** `inject.json` and `summary.json` `injections[]` agree; teardown's report and a last `bot_view` show no
+   bot left frozen; a SIGINT while a bot is frozen still sends `.unfreeze` before `.bot run stop`.
+8. **Exit codes.** A `fail` turns a clean walk into 23; a wipe during a fault stays 19 and the fault reads `fail` in
+   the summary; `not-fired`/`inconclusive` keep exit 0.
+## raid-suite: one walk per raid, judged against the history (tested against fakes only, never run live until L2)
+
+README "Raid suite". Needs `raid-walk` (the `until` clause, `feat/run-until` on the server) and at least one raid whose tier
+is sourced in `internal/raidwalk/tiers.go` (onyxias_lair, tier 2). What the first live use has to settle:
+
+1. **Dry run.** `raid-suite --dir <the 11 prep plans> --history <dir> --dry-run` prints onyxias_lair as `tier 2 (table) until
+   boss` and each 0-row raid as `refused: raid <plan> has no minimum hire tier`; no lease is taken and no out dir is made.
+2. **First walk is new.** The first `raid-suite` on onyxias_lair walks it to its boss and writes `<history>/onyxias_lair/<stamp>/`;
+   the verdict is `new`, exit 0, and `suite.json` names the walk's out dir.
+3. **Second walk compares.** A second walk on the same server and settings is `ok` (or `regression` with a reason that names both
+   values); the baseline's `out` and `started` are the first walk's.
+4. **Refusals never walk.** Only onyxias_lair gets a walk dir under `<history>/`; a refused raid leaves no dir there.
+5. **Teardown between raids.** Each walk's `teardown.json` has no hire left online before the next raid starts (the `--gap`
+   sleep sits between two walks).

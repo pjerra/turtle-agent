@@ -158,17 +158,17 @@ func TestLeaseListFlagOrderSameOptions(t *testing.T) {
 }
 
 func TestSlotSetupFlagOrderSameOptions(t *testing.T) {
-	full := slotSetupOptions{server: "m910q", slot: "1", holder: "w-a", dir: "D", binary: "B", dungeonsDir: "G", character: "C", slotsPath: "F"}
+	full := slotSetupOptions{server: "m910q", slot: "1", holder: "w-a", dir: "D", binary: "B", dungeonsDir: "G", mmapsDir: "M", dungeonsFrom: "P", character: "C", slotsPath: "F"}
 	for _, r := range []struct {
 		name string
 		args []string
 		want slotSetupOptions
 		code int
 	}{
-		{"positionals first", []string{"m910q", "1", "--holder", "w-a", "--dir", "D", "--binary", "B", "--dungeons-dir", "G", "--character", "C", "--slots", "F"}, full, exitOK},
-		{"positionals last", []string{"--holder", "w-a", "--dir", "D", "--binary", "B", "--dungeons-dir", "G", "--character", "C", "--slots", "F", "m910q", "1"}, full, exitOK},
-		{"positionals split", []string{"m910q", "--holder", "w-a", "1", "--dir", "D", "--binary", "B", "--dungeons-dir", "G", "--character", "C", "--slots", "F"}, full, exitOK},
-		{"equals form", []string{"--holder=w-a", "--dir=D", "--binary=B", "--dungeons-dir=G", "--character=C", "--slots=F", "m910q", "1"}, full, exitOK},
+		{"positionals first", []string{"m910q", "1", "--holder", "w-a", "--dir", "D", "--binary", "B", "--dungeons-dir", "G", "--mmaps-dir", "M", "--dungeons-from", "P", "--character", "C", "--slots", "F"}, full, exitOK},
+		{"positionals last", []string{"--holder", "w-a", "--dir", "D", "--binary", "B", "--dungeons-dir", "G", "--mmaps-dir", "M", "--dungeons-from", "P", "--character", "C", "--slots", "F", "m910q", "1"}, full, exitOK},
+		{"positionals split", []string{"m910q", "--holder", "w-a", "1", "--dir", "D", "--binary", "B", "--dungeons-dir", "G", "--mmaps-dir", "M", "--dungeons-from", "P", "--character", "C", "--slots", "F"}, full, exitOK},
+		{"equals form", []string{"--holder=w-a", "--dir=D", "--binary=B", "--dungeons-dir=G", "--mmaps-dir=M", "--dungeons-from=P", "--character=C", "--slots=F", "m910q", "1"}, full, exitOK},
 		{"no holder", []string{"m910q", "1", "--dir", "D"}, slotSetupOptions{}, exitUsage},
 	} {
 		got, code := parseSlotSetupArgs(r.args, io.Discard)

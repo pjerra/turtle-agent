@@ -118,6 +118,16 @@ func TestOnlyAccount(t *testing.T) {
 	}
 }
 
+func TestTBDashboardURL(t *testing.T) {
+	s, err := Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"},"tb_dashboard_url":"http://tb:8095"}`))
+	if err != nil || s.TBDashboardURL != "http://tb:8095" {
+		t.Fatalf("%q %v", s.TBDashboardURL, err)
+	}
+	if s, err = Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"}}`)); err != nil || s.TBDashboardURL != "" {
+		t.Fatalf("%q %v", s.TBDashboardURL, err)
+	}
+}
+
 func TestDungeonsDir(t *testing.T) {
 	s, err := Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"},"dungeons_dir":"~/plans"}`))
 	home, _ := os.UserHomeDir()

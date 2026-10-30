@@ -1,0 +1,223 @@
+{
+  "version": 1,
+  "name": "kb_retribution_paladin",
+  "class": "paladin",
+  "spec": "retribution",
+  "replaces": [
+    "paladin_retribution"
+  ],
+  "notes": "The knowledge base's retribution paladin: a seal before any auto attack, Holy Strike when Holy Might is missing or expiring, Crusader Strike to keep Zeal up, Judgement on cooldown, Hammer of Wrath below 20%, a Crusader Strike filler, Repentance, Consecration at two or more targets. Exorcism's Undead/Demon gate, the Windfury wait and fight-specific rows are listed in kb.unexpressed.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/paladin/retribution-melee-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=169915#p169915 (Scootiesana, player, 2026-03-03)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=169921#p169921 (Snadileoboy, player, 2026-03-03)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=169927#p169927 (Kerenis, player, 2026-03-03)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=169165#p169165 (Ellifta, player, 2026-02-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=169188#p169188 (Kord2998, player, 2026-02-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=122631#p122631 (excin, player, 2025-03-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=122789#p122789 (Cheruscan, player, 2025-03-17)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=138117#p138117 (Icedcream, player, 2025-07-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=138939#p138939 (Noephix, player, 2025-07-13)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=134690#p134690 (Gildark, player, 2025-06-07)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=139413#p139413 (Elisleris, player, 2025-07-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=139403#p139403 (excin, player, 2025-07-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113215#p113215 (Aalena, player, 2024-12-18)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=106958#p106958 (Eulogy, player, 2024-11-07)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=133826#p133826 (Bigsmerf, player, 2025-06-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=160800#p160800 (Atreidon, player, 2025-11-26)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=164504#p164504 (Atreidon, player, 2026-01-06)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=150776#p150776 (Cheruscan, player, 2025-09-08)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=27457#p27457 (Unchallenged, player (guide writer), 2024-12-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=118876#p118876 (Akalix, staff, 2025-02-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102969#p102969 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=124504#p124504 (Torta, staff, 2025-03-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=168272#p168272 (Dragunovi, staff, 2026-02-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172139#p172139 (Torta, staff, 2026-03-24)",
+    " (Mithreon, player (build curator), 2026-04-10)",
+    " (Aljeron, player (dummy test), 2026-03-26)",
+    " (Jesse Potter, player (top SoC Ret), 2026-04-13)",
+    " (Grey, player (theorycrafter), 2026-03-27)",
+    " (Beldrin, player, 2026-03-23)",
+    " (Grey, player (theorycrafter), 2026-03-16)",
+    " (Jesse Potter, player, 2026-04-16)"
+  ],
+  "priorities": [
+    {
+      "id": "seal_of_righteousness",
+      "spell": "Seal of Righteousness",
+      "level": 1,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "no_self_aura": [
+          "Seal of Righteousness",
+          "Seal of Command",
+          "Seal of Wisdom",
+          "Seal of Light",
+          "Seal of the Crusader",
+          "Seal of Justice"
+        ]
+      },
+      "note": "the Seal of Command build casts Seal of Command here instead"
+    },
+    {
+      "id": "auto_attack",
+      "kind": "attack",
+      "when": {}
+    },
+    {
+      "id": "holy_strike",
+      "spell": "Holy Strike",
+      "level": 4,
+      "target": "fight",
+      "band": "high",
+      "when": {
+        "self_aura_missing": [
+          "Holy Might"
+        ]
+      }
+    },
+    {
+      "id": "crusader_strike",
+      "spell": "Crusader Strike",
+      "level": 10,
+      "target": "fight",
+      "when": {
+        "self_aura_missing": [
+          "Zeal"
+        ]
+      }
+    },
+    {
+      "id": "judgement",
+      "spell": "Judgement",
+      "level": 4,
+      "target": "fight",
+      "when": {}
+    },
+    {
+      "id": "hammer_of_wrath",
+      "spell": "Hammer of Wrath",
+      "level": 44,
+      "target": "fight",
+      "when": {
+        "mob_hp_below": 20
+      }
+    },
+    {
+      "id": "crusader_strike_filler",
+      "spell": "Crusader Strike",
+      "level": 10,
+      "target": "fight",
+      "when": {},
+      "note": "Crusader Strike usually wins on sundered bosses; which strike hits harder is not a condition"
+    },
+    {
+      "id": "repentance",
+      "spell": "Repentance",
+      "talent": true,
+      "target": "fight",
+      "when": {}
+    },
+    {
+      "id": "consecration_rank1",
+      "spell": "Consecration",
+      "level": 20,
+      "rank": 1,
+      "target": "fight",
+      "threat": "aoe",
+      "when": {
+        "mobs_in_reach_min": 4,
+        "power_below": 40
+      },
+      "note": "moved ahead of the full-rank Consecration: at low mana the rank-1 cast is the row"
+    },
+    {
+      "id": "consecration",
+      "spell": "Consecration",
+      "level": 20,
+      "target": "fight",
+      "threat": "aoe",
+      "when": {
+        "mobs_in_reach_min": 2
+      }
+    },
+    {
+      "id": "perception",
+      "spell": "Perception",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat"
+      }
+    },
+    {
+      "id": "divine_shield",
+      "spell": "Divine Shield",
+      "level": 34,
+      "target": "self",
+      "band": "emergency",
+      "when": {
+        "self_hp_below": 20
+      }
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/paladin/retribution-melee-dps.yaml",
+    "sha256": "9fd176d1e35148d70cc5ec70d3049bd6cb9aef80d8f8365ac5d2c09e3ed180cf",
+    "preset": "ret_paladin",
+    "recipe": "tools/kbrotgen/recipes/kb_retribution_paladin.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[3]",
+        "text": "Judgement (Righteousness/Command, or assigned Crusader/Wisdom) then re-seal | right after an auto lands and no strike is about to come off cooldown [[d:paladin#1485694441124659462]] [[d:paladin#1471558463229526216]]",
+        "why": "swing timer not in the conditions"
+      },
+      {
+        "row": "rotation_single[4]",
+        "text": "Exorcism | target is Undead or Demon",
+        "why": "creature type not in the conditions"
+      },
+      {
+        "row": "rotation_single[9]",
+        "text": "Wait ~2 s after a Windfury proc before the next strike/Judgement | Windfury Totem present [[d:paladin#1483022433265913865]]",
+        "why": "swing timer not in the conditions"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "single-target loop on the Judgement of Wisdom target; Consecration if mana allows",
+        "why": "covered by rotation_single[2-4]: the single-target strikes; Consecration waits for two or more mobs"
+      },
+      {
+        "row": "rotation_aoe[2]",
+        "text": "Goblin Sapper Charge",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "rotation_aoe[3]",
+        "text": "Holy Wrath",
+        "why": "creature type not in the conditions"
+      },
+      {
+        "row": "cooldowns[0]",
+        "text": "Trinkets / Juju Flurry / Potion of Quickness | 2-3 GCDs into the fight with Zeal and Vengeance up [[d:paladin#1455493072661250152]] [[d:paladin#1484608557075660910]]",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[2]",
+        "text": "Repentance | 60 s cooldown; free damage on immune bosses, CC on others",
+        "why": "covered by rotation_single[7]: the same Repentance entry"
+      },
+      {
+        "row": "cooldowns[4]",
+        "text": "Zeal / Holy Might upkeep | always; Zeal is 3 x 5% haste stacks for 30 s, Holy Might +20% Strength [[d:paladin#1436340559315734589]] [[d:paladin#1436321352041627648]]",
+        "why": "covered by rotation_single[1-2]: the strikes keep Zeal and Holy Might up"
+      }
+    ]
+  }
+}

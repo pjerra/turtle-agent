@@ -60,7 +60,7 @@
    "kind": "dungeon",
    "handwritten": true,
    "special": [
-    "Mutanus the Devourer (3654) has no spawn row: the Disciple of Naralex event (gossip with the Disciple 3678 once the four Fanglords are dead, escort, ritual waves) summons him; see dungeons/wailing_caverns-extra.json",
+    "Mutanus the Devourer (3654) has no spawn row: the Disciple of Naralex event summons him; the event is the segment dungeons/wailing_caverns-extra.json (gossip at menu 202 option 0, the escort stops of script_waypoint 3678, the summoned waves, Mutanus held by instance data 4 reading DONE): its return from Verdan is the Serpentis hop taken the other way (the ramp lip, then a move_hop_exact to the foot; live-probed 3 of 3 on 2026-10-22, no GM), because the navmesh has no walk back",
     "Lady Anacondra has four spawn rows in one pool (one up per reset)",
     "the ramp to Lord Serpentis and Verdan is across a 3.9 yd gap with no floor (a jump down, no way up): crossed by a plain direct step with a check_skip (no GM; the foot is an exact waypoint held to 1.5 yd with a stationary proof, and the step was taken live three times from that foot on 2026-10-18, tests/wc-hop-probe-2, while the driver has not been run on this hop and the run leader side is open)"
    ]
@@ -1070,18 +1070,22 @@
     14601,
     11981,
     14020,
-    10162
+    11583
    ],
    "size": 40,
+   "entrance_tele": "BlackwingLair",
    "outside_tele": "BlackwingLair",
    "scripted": [
-    13020
+    13020,
+    10162
    ],
    "special": [
-    "Razorgore's Orb of Domination (GO_ORBE_DOMINATION) and eggs (GO_OEUF_RAZ); Vaelastrasz carries npc_flags (gossip) to start his fight",
-    "Chromaggus' side lever (GO_LEVER_CHROMAGGUS_SIDE) and doors; suppression devices (GO_SUPPRESSION_ENGINE)",
-    "Nefarian (11583) has no spawn row: Lord Victor Nefarius (10162) summons him; Onyxia Scale Cloak attunement (class check, not a step)"
-   ]
+    "Razorgore's Orb of Domination (177808) and eggs (177807): the eggs are destroyed only by the possessed Razorgore, so the encounter needs a player at the orb",
+    "Vaelastrasz (13020) and Lord Victor Nefarius (10162) are gossip-started NPCs: Vael's fight needs two menu levels, Nefarius' three",
+    "Nefarian (11583) has no spawn row: Lord Victor Nefarius summons him; the plan's boss row is Nefarian at his landing point",
+    "The Suppression Room's devices (179784) are disarmed by the bots' own strategy; the Chromaggus side lever (179148) has no script in the core"
+   ],
+   "handwritten": true
   },
   {
    "name": "zul_gurub",
@@ -1109,6 +1113,7 @@
   },
   {
    "name": "ruins_of_ahnqiraj",
+   "handwritten": true,
    "title": "Ruins of Ahn'Qiraj",
    "map": 509,
    "kind": "raid",
@@ -1125,15 +1130,19 @@
    "size": 20,
    "entrance_tele": "aq20",
    "special": [
-    "General Rajaxx's waves (Captain Qeez and the Andorov escort)",
-    "Ossirian's crystals (GO_OSSIRIAN_CRYSTAL)"
+    "General Rajaxx is an event: Andorov's gossip (15471, menu 0) starts the seven waves, and the raid holds on the spot until instance data 2 reads 3 (Rajaxx's death)",
+    "Ossirian's crystals (GO_OSSIRIAN_CRYSTAL 180619) are summoned two at a time during the fight: the bots' own fight strategy clicks them, no plan step",
+    "the map has no static door, lever or key: its 7 game objects are Scarab Coffers, and door 176149 is summoned in combat and deleted after",
+    "the 49 Rajaxx event units (the captains and their escorts) are no pulls; Andorov and the four Kaldorei Elite are friendly",
+    "the 19 Canal Frenzy sit in the sunken water channel below the Moam corridor and are in no pull"
    ],
    "notes": [
-    "Captain Tuubid (15392) is Turtle's addition and not a leg."
+    "Captain Tuubid (15392) is Turtle's addition and the second captain of Rajaxx's waves, not a leg."
    ]
   },
   {
    "name": "temple_of_ahnqiraj",
+   "handwritten": true,
    "title": "Temple of Ahn'Qiraj",
    "map": 531,
    "kind": "raid",
@@ -1158,17 +1167,20 @@
       15275
      ]
     },
-    15727
+    15727,
+    15517
    ],
    "size": 40,
    "entrance_tele": "aq40",
    "special": [
-    "Ouro (15517) has no spawn row: summoned from the mound (SPELL_SUMMON_OURO)",
-    "Skeram's gate (GO_SKERAM_GATE), the twin emperors' doors (GO_TWINS_ENTER_DOOR, GO_TWINS_EXIT_DOOR)",
-    "C'Thun's eye and grasp (GO_GRASP_OF_CTHUN)"
+    "Ouro (15517) has no spawn row: the Ouro Spawner (15957) at -9188 2092 -64 summons him (spell 26061) when a non-GM player stands within 25 yd, so the optional last leg walks to a stand within 25 yd and waits for him to turn hostile",
+    "the instance opens the doors on the kill before them: 180636 (the gate above Skeram's room) on TYPE_SKERAM DONE, 180634 (the Twin Emperors' entry) on TYPE_HUHURAN DONE, 180635 (their exit, to C'Thun's corridor) on TYPE_TWINS DONE",
+    "the three Silithid Royalty bosses are one boss step (Vem's entry, Kri and Yauj first); Sartura is pulled by area trigger 4052 and the Twins' intro is dialogue on 4047, neither a step",
+    "C'Thun's chamber is an island on map 531's navmesh: no server path reaches it from the Twins' exit corridor or the upper terrace, so the boss point is needs_walk until the mapping walk finds the ramp"
    ],
    "notes": [
-    "Merithra (15378), Caelestrasz (15379) and Arygos (15380) stand in C'Thun's antechamber, the Master's Eye (15963) is a mob; none is a leg."
+    "Merithra (15378), Caelestrasz (15379) and Arygos (15380) stand in C'Thun's antechamber, the Master's Eye (15963) is a scripted mob, the Beetle (15475) is a level 1 critter and the C'Thun Portal (15896) is spawned with C'Thun; none is a leg",
+    "the bosses' trash entries are the instance's own groups, each despawned after the boss before it: Anubisath Sentinel and Obsidian Eradicator after Skeram, Vekniss Guardian, Vekniss Warrior and Qiraji Brainwasher after Sartura, Vekniss Drone and Vekniss Soldier after Fankriss, Vekniss Hive Crawler, Vekniss Wasp, Qiraji Lasher and Vekniss Stinger after Huhuran, Anubisath Defender and Qiraji Scarab/Scorpion after the Twins, Qiraji Mindslayer/Slayer/Champion and Anubisath Warder/Obsidian Nullifier after C'Thun"
    ]
   },
   {
@@ -1253,6 +1265,7 @@
   },
   {
    "name": "lower_karazhan_halls",
+   "handwritten": true,
    "title": "Lower Karazhan Halls",
    "map": 532,
    "kind": "raid",
@@ -1273,9 +1286,10 @@
     61225
    ],
    "special": [
-    "Moroes carries npc_flags (gossip) and is fought after a dialogue",
-    "Blackwald II (script boss_blackwald_ii) has no export row of the rank-3 kind: his entry is unverified"
-   ]
+  "Lord Blackwald II (61222) has no spawn row: the instance summons him when the Dark Rider Champion (61204) is DONE",
+  "Moroes carries npc_flags (gossip) and is fought after a dialogue; his menu opens only once the other four bosses are DONE",
+  "the map's doors are all open and no lever or key gates the route"
+ ]
   },
   {
    "name": "upper_karazhan_halls",
@@ -1327,17 +1341,22 @@
     60748
    ],
    "size": 40,
+   "route": true,
+   "handwritten": true,
    "entrance_tele": "sanctumraid",
    "outside_tele": "EmeraldSanctuary",
    "scripted": [
     60748
    ],
    "special": [
-    "Erennius (patrol) is fought before Solnius; Solnius carries npc_flags (gossip) and is awakened by dialogue",
-    "Errenius' chest (GO_ERRENIUS_CHEST), the portal (GO_PORTAL)"
+    "Erennius (60747) is killed before Solnius (60748): Solnius' EnterCombat sets hard mode while Erennius lives and puts every living trash unit of the map in combat with the attacker (instance_emerald_sanctum.cpp)",
+    "Solnius carries npc_flags (gossip): he is friendly (faction 35) until the one option of his menu (92950) is taken, so the leg talks to him (menu index 0) then fights",
+    "The 85 hostile trash spawns are 10 creature_linking groups plus 3 lone waypoint patrols; the 44 Deer (883) and 27 Toads (1420) are critters and in no pull",
+    "Erennius patrols a 1323.5 yd loop that crosses the east hall's packs; a boss has no patrol block, so the mapping walk measures where he meets the raid",
+    "Solnius' chest (2020042) and portals (177243) are script objects; the map's 3 game objects are entrance 'Ghost Gate' visuals and gate nothing"
    ],
    "notes": [
-    "Only two bosses are in the data (Erennius 60747, Solnius 60748)."
+    "Only two bosses are in the data (Erennius 60747, Solnius 60748). The plan is handwritten from the world DB, the core's emerald_sanctum scripts and the map 807 navmesh (task B1, RAID-PREP-es)."
    ]
   },
   {
@@ -1348,25 +1367,35 @@
    "data": "map819",
    "trigger": 5613,
    "bosses": [
-    62935,
-    62941,
-    62938,
-    2139,
-    62946,
+    62934,
     {
      "entry": 62936,
      "first": [
       62937
      ]
-    }
+    },
+    2139,
+    62935,
+    62940,
+    62946,
+    62938,
+    62941
    ],
    "route": true,
    "size": 20,
    "scripted": [
     62938
    ],
+   "handwritten": true,
+   "special": [
+    "hand-written offline from the map 819 export and the server mesh (task B1, RAID-PREP-tmh.md): 9 legs, 93 packs, 208 units; Karrsh the Sentinel (62934) and Selenaxx Foulheart (62940) are boss steps although the hire unlock list does not count them",
+    "Ursol (62947) and Peroth'arn (60686) have templates but no spawn row: the final boss area (z 310-364, behind the Barrier of Ursol 300606) has no navmesh route from the rest of the map and is not a leg",
+    "the upper ledge at -7500..-7370 -3590..-3370 z 270-281 (17 units, two patrols) is a navmesh island: no route to or from the map, not in the pulls",
+    "no instance script and no EventAI or spell list on any boss but Loktanag the Vile: combat initialization is missing in this core (the 2026-07-02 Timbermaw migration says so); Chieftain Partath (62941) is faction 370 (Timbermaw Hold, friendly) and cannot be attacked until a script makes him hostile",
+    "62874 Vile Skitterer is neutral wildlife (faction template 15, hostile_mask 0) and is in every leg's skip list, not in pulls"
+   ],
    "notes": [
-    "Turtle custom, no instance script in the core. The 20-man size and the boss list are guesses from the data (six bosses with 500k-700k health, comparable to Zul'Gurub); Archdruid Kronn carries npc_flags (gossip)."
+    "Turtle custom, no instance script in the core. The 20-man size and the tank/healer/dps split are placeholders."
    ]
   }
  ]

@@ -20,7 +20,7 @@ var unexpressedWhy = map[string]string{
 	"fleers":                    "no column; the bots' own AI chases or lets go a fleeing mob",
 	"no_cc":                     "no column; the run leader's crowd control picks only from cc_priority and cc_always",
 	"summoned_kill_first":       "no column; only kill_first is focused",
-	"raid":                      "no column; the run leader leads one party",
+	"raid":                      "the size and role split are the hire recipe of dungeon_run (prepare.hire); the run leader leads the bound raid",
 	"watchdog":                  "the agent's watchdog; the run leader has its own ceilings",
 	"avoid":                     "the run leader does not know avoid boxes; export with --mmaps to route its hops around them (a fight can still drag the party in)",
 	"skip":                      "no skip list column: the run leader pulls a hostile within 15 yd of a hop point that no later step owns, a skipped unit too",

@@ -66,8 +66,16 @@ func TestDraftPlansAreWhatTheGeneratorWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) < 40 {
-		t.Fatalf("only %d plans generated", len(files))
+	// Exactly the spec's generated (not handwritten) plans: a prepped plan leaves the generated set on purpose, so a fixed
+	// floor broke with every prep; an exact count still catches a generator that silently writes fewer (or none).
+	generated := 0
+	for _, ps := range sf.Plans {
+		if !ps.Handwritten {
+			generated++
+		}
+	}
+	if generated == 0 || len(files) != generated {
+		t.Fatalf("%d plans generated, want the spec's %d generated plans", len(files), generated)
 	}
 	for _, f := range files {
 		want, err := os.ReadFile(f)
