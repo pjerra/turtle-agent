@@ -1,7 +1,46 @@
 {
  "vm_mmaps": [
-  1, 33, 34, 35, 36, 43, 47, 48, 70, 90, 109, 129, 189, 209, 229, 230, 249, 269, 289, 309, 329, 349, 389, 409, 429, 469, 509, 531, 532, 533,
-  800, 802, 807, 808, 814, 815, 816, 818, 819, 820, 822
+  1,
+  33,
+  34,
+  35,
+  36,
+  43,
+  47,
+  48,
+  70,
+  90,
+  109,
+  129,
+  189,
+  209,
+  229,
+  230,
+  249,
+  269,
+  289,
+  309,
+  329,
+  349,
+  389,
+  409,
+  429,
+  469,
+  509,
+  531,
+  532,
+  533,
+  800,
+  802,
+  807,
+  808,
+  814,
+  815,
+  816,
+  818,
+  819,
+  820,
+  822
  ],
  "plans": [
   {
@@ -1178,10 +1217,12 @@
    "size": 40,
    "entrance_tele": "nax",
    "special": [
-    "each quarter's eye-boss ramp and portal (GO_ARAC_*, GO_PLAG_*, GO_MILI_*, GO_CONS_*), Gothik's gates (GO_MILI_GOTH_*), the four horsemen door (GO_MILI_HORSEMEN_DOOR)",
-    "Thaddius' tesla coils (GO_CONS_NOX_TESLA_FEUGEN/STALAGG); Kel'Thuzad's windows and door (GO_KT_WINDOW_1-4, GO_KELTHUZAD_DOOR)",
-    "Sapphiron's icy room"
-   ]
+    "the four quarters are gated by the instance's own doors: 181126 (Anub'Rekhan's door, shut at spawn, a use opens it), 181195, 194022 and 181119 (unlocked by a kill, still shut, a use opens them), 181201, 181209, 181496, 181241, 181125, 181123, 181120, 181225 and 181228 (opened by the kill before, a wait_for)",
+    "the construct tail (Gluth 15932, Thaddius 15928) and the frostwyrm lair (Sapphiron 15989, Kel'Thuzad 15990) are separate navmesh islands: no walk from Grobbulus to Gluth, and the lair is entered by area trigger 4156 only",
+    "Gothik 16060 runs only with more than 10 living players on each side of the gate 181170; Kel'Thuzad starts only from area trigger 4112; the garrisons' wing-exit portals (181575-181578) have no script in the core",
+    "Thaddius is summoned from Stalagg 15929 and Feugen 15930; the four horsemen are one encounter of 16062/16063/16064/16065"
+   ],
+   "handwritten": true
   },
   {
    "name": "upper_blackrock_spire",
