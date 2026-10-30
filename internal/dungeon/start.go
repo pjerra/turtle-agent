@@ -868,5 +868,9 @@ func (d *RemoteDriver) startSummon(ctx context.Context, name string) error {
 			break
 		}
 	}
+	if strings.HasPrefix(last, "unavailable") {
+		// Live 2026-10-30 (dmr fix 9): two followers were still fighting at the entry spot, so the summon was refused three times.
+		return fmt.Errorf("cmd summon %s was refused (%s); a bot that is dead, in combat, on a taxi or teleporting cannot be summoned: let the fight end (or revive it) and start the run again", name, last)
+	}
 	return fmt.Errorf("cmd summon %s was refused (%s)", name, last)
 }
