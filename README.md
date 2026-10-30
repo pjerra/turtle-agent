@@ -1504,7 +1504,7 @@ whole and atomically, when it ends and is scored: `v`, `schema`, `run`, `src`, `
 
 `turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...` reads trace files and prints each check's verdict with
 its measured value and the threshold; `--json` prints one object per trace; `--summary` also writes `<run_id>.summary.json` beside the
-trace; `--set rest_share=30` changes a threshold. Exit code 11 when any check failed. The scorer reads nothing but the file, so a trace
+trace; `--set rest_share=30` changes a threshold (the oracle's `spell_oracle` is the seconds a bot must be active before its missing core spells are judged, default 60; `oom_in_fight` is the seconds under 5 % mana, default 10). Exit code 11 when any check failed. The scorer reads nothing but the file, so a trace
 can be scored again after a threshold or a check changes. A dungeon run scores its own trace when it ends and appends the `oracle` records.
 
 Each check has an `id`, a `name`, a `verdict` (`pass`, `fail`, or `na` when the trace lacks what it needs), the `count` of times it
@@ -1525,10 +1525,27 @@ the others look at what only the agent sees (orders, rest gates, walks, the feed
 | `stuck` | a member that should be moving (the lead in a walk of the plan, or a member more than 10 yd from the lead in one; alive and out of combat) did not move 1 yd for this long; the detail lists where, for a per-dungeon stuck-spot map | 5 s, any stall | no walk of the plan, or no frames |
 | `facing` | a bot in combat stands (no movement) within 6 yd of its hostile target for longer than this while its `fa` is over 90 degrees (the server rule, without its casting case: the agent does not see casts) | 2 s | the header lacks the `facing` capability, or no frame has a bot in melee range of its target |
 | `spells` | **report only, never fails**: what each class cast and did, as readings of 1 Hz samples, not facts. Cast episodes per class from `cs` (a run of frames with the same spell is `ceil(duration / base cast time)` casts, at most one per frame; a spell with no known cast time counts once per run, so that number is a lower bound), action mix, verdict letters and reasons, idle share, power at death, taunts, and two proximity/observation readings: **interrupts** (each interrupt action is matched to at most one enemy cast, from 1 s before its first frame to its last frame, and the interrupter's target must be the casting mob when both are known; an action in the frame right after the cast's last is counted apart, because an interrupt that worked and a kick that came too late look the same at 1 Hz; "confirmed cut short" is a cast seen for under 80 % of its cast time) and **crowd control** (an observation, not a success rate: some mob shows a new cc flag within 4 s of a single-target action; it is not tied to the caster or the spell, and a new flag on the caster's own target is counted apart), **taunt latency** (seconds from a hostile's top victim becoming a party member that is not the tank to the tank's taunt or the hostile going back to the tank; the frames are the resolution, about 1 s), **cc hold** (a cc episode is a run of consecutive frames with the mob flagged: only an episode that starts within 4 s of a single-target cc action is joined, and only long crowd control is joined (polymorph, sap, shackle undead, freezing trap, banish, hibernate, entangling roots, seduction, blind, fear, turn undead: the short stuns and disorients are left out); a joined episode under 5 s that ends with the mob still in view and unflagged, alive, was broken; the party's targeting of the mark is not measured) and **pet threat** (the share of mob-frames whose top threat holder's guid starts `0xf140`). A verdict is *unknown* where that bot sent no verdict letter (`res`) within 10 s: it is left out of the idle share and not counted as executed, so an older or mixed trace says `unknown`/`not recorded` instead of guessing. `trace-score` prints the tables under the checks; `--json` has them as `spells` | warnings only: `idle_share` over 15 % of engaged mana-user frames with a verdict and no executed (`O`) action for 4 s; `interrupt_cover` under 30 % of enemy casts (from 5) with an interrupt action during or just after them (the favourable reading is held to the limit); `taunt_latency` over 3 s median (from 3 episodes); `cc_hold` under 50 % held (from 3 episodes); `pet_threat` over 5 % of mob-frames (from 30); `--set idle_share=20`, `--set interrupt_cover=20`, `--set taunt_latency=4`, `--set cc_hold=40`, `--set pet_threat=10`. The uncorrelated crowd-control flag observation has no limit | no bot frame has a `cs` or an `act` |
+| `spell_oracle` | **report only, never fails**: every party bot's casts judged against its Turtle WoW knowledge-base spec (the core spells it should press every fight and the spells its file says never to cast). The spec is inferred: a tank or healer role picks that class's role spec, a dps bot the spec whose signature talent was cast most, and no signature or a tie judges the class's common core (the dps specs' intersection). A missing core spell warns once the bot was in combat for `spell_oracle` seconds, unless its first rank is above the bot's level; a `never` spell warns always. Spells outside every list are off-list information, not a warning. | `spell_oracle` 60 s (fight data 20 s) | no party bot with casts, or none active long enough |
+| `oom_in_fight` | **report only, never fails**: a mana user that sat under 5 % mana for this long while in combat | `oom_in_fight` 10 s | no mana user in combat |
 
 Not verified live: the traces were built and tested against the fake game, the fake feed and hand-made traces only. Open: whether a
 group run's party list stays fresh in a long fight (`stale_party` is there to find out), the feed's facing values, and what the frame
 rate costs on a long run.
+
+### fight-score
+
+`turtle-agent fight-score [--json] [--mt NAME] [--ot A,B] [--set spell_oracle=S] <combat-fight.json>...` reads finished fights
+the way the dashboard's fight debugger does: `{fight, warnings}` as `GET /api/v1/combat/fight/<key>` returns it, or a bare fight.
+It prints the debugger's two tank readings with its exact rules — `mt_sunder` (a warrior main tank's Sunder Armor casts per 10 s:
+ok at 1.5 or more, warn at 0.8, else fail; a fight under 10 s is not judged) and one `ot_taunt` per off-tank (warn when it never
+taunted) — then one line per bot the spells oracle above warns about, and the count of bots judged ok.
+
+`--mt` and `--ot` are the debugger's layout; without them the main tank is the first tank in the fight and the other tanks are the
+off-tanks. A fight's spell list is capped at 8 lines per bot, so a core spell that is not in it is `unknown`, not missing, and a bot
+is judged after 20 s of the fight (the trace check waits 60 s). The debugger's rules and limits (`TAUNTS`, Sunder 1.5/0.8, the 10 s
+minimum) are in the oracle's `_common.json`, so the two agree. The oracle data is derived from the Turtle WoW knowledge base
+(stevemcqueenz), https://stevemcqueenz.github.io/turtle-knowledge-base-/#/, and the sources each KB file lists. Exit 0 whatever
+the warnings say, 2 on usage.
 
 ## Scenarios
 

@@ -78,6 +78,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return statsCmd(args[1:], stdout, stderr)
 	case "trace-score":
 		return traceScoreCmd(args[1:], stdout, stderr)
+	case "fight-score":
+		return fightScoreCmd(args[1:], stdout, stderr)
 	case "pulltest":
 		return pulltestCmd(args[1:], stdout, stderr)
 	case "rotation":
@@ -131,6 +133,7 @@ func usage(w io.Writer) {
   turtle-agent capture events [--from RFC3339] [--to RFC3339] [--kinds a,b] [--out FILE [--force]] <capture>
   turtle-agent tune-diff <trace.jsonl>
   turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...
+  turtle-agent fight-score [--json] [--mt NAME] [--ot A,B] [--set spell_oracle=S] <combat-fight.json>...
   turtle-agent pulltest [--json] <result.json> | --compare <a.json> <b.json>
   turtle-agent rotation list | show [--level N] <name|file> | check <file>...
   turtle-agent dashboard [--listen 127.0.0.1:8790] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--edit --mmaps-dir DIR]
