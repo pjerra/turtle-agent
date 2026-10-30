@@ -502,11 +502,10 @@ type walk struct {
 
 	tierSource string // where the roster's tier came from (raidwalk.TierSource*)
 
-	hires    map[string]bool
-	mt       string
-	ots      []string
-	rest     []string
-	hiresSet bool
+	hires map[string]bool
+	mt    string
+	ots   []string
+	rest  []string
 
 	quietPatrols []raidwalk.QuietPatrol
 	patrolGUIDS  []map[string]bool

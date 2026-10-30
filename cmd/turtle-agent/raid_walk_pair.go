@@ -468,6 +468,8 @@ func pairSafeTeardown(teardown func(args []string, stdout, stderr io.Writer) int
 }
 
 // pairSafeRelease is one guarded release attempt for cleanup: a panic becomes a message.
+//
+//lint:ignore ST1008 the panic text rides second so callers keep `err, panicked :=`; changing the order touches every call site
 func pairSafeRelease(release func(server, slot, holder, leaseID string, force bool) (slots.Lease, error), l slots.Lease) (err error, panicked string) {
 	defer func() {
 		if r := recover(); r != nil {
