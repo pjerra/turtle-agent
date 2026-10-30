@@ -235,9 +235,7 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		plansSource = src
 		plansCopied = len(copied)
-		for _, p := range copied {
-			created = append(created, p)
-		}
+		created = append(created, copied...)
 	}
 	tracesDir := filepath.Join(dir, "traces")
 	tracesMade, err := slotSetupEnsureDir(tracesDir, 0o755)

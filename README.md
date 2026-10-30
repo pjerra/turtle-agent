@@ -21,8 +21,10 @@ and the rules for agents in [AGENTS.md](AGENTS.md).
 ## Branches and CI
 
 Work goes feature branch -> `dev` -> `main`. Open PRs against **`dev`**; `main` only takes `dev` after the owner's review.
-The `test` check (gofmt, `go vet`, a no-cgo build, `go test -race ./...`, and a cgo build) must be green to merge into
-either branch. The navmesh tests skip without mmaps.
+The `test` check (gofmt, `go vet`, a no-cgo build, `go test -race ./...`, a cgo build, and `staticcheck ./...`) must be
+green to merge into either branch. The navmesh tests skip without mmaps; the `navmesh` job runs them with the server's
+files, `plan-drift` compares the plans with their newest TortoiseBots export (report-only), and `fuzz` fuzzes the SMSG
+parsers nightly (see [docs/CI.md](docs/CI.md), which also documents the `TB_DATA_TOKEN` secret).
 
 ## Quick start
 
