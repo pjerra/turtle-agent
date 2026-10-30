@@ -199,7 +199,9 @@ type observeState struct {
 	startedAt  time.Time
 	last       tbm.RunStatus
 	haveLast   bool
-	lastAt     time.Time // when the status last changed
+	lastAt     time.Time           // when the status last changed, or a fight was last seen to progress (noteFightProgress)
+	fight      map[packet.GUID]int // engaged hostile -> hp % in the previous frame (nil: no fight seen yet)
+	fightDead  int                 // members dead in the previous frame
 	pausedAt   time.Time
 	seenN      uint64
 	baseN      uint64 // lines read before the start: older ones are another run's
@@ -419,6 +421,7 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 		} else if deadCount(d.fr) < wipeDeadReArm {
 			o.wiped = false
 		}
+		d.noteFightProgress(d.clk.Now())
 		d.autoResumeTick()
 		d.serveRunRequests(ctx)
 		d.readRunLines()
@@ -429,6 +432,42 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 			return err
 		}
 	}
+}
+
+// noteFightProgress keeps a fight that is going on from counting as a stall. The run leader's status line does not change during a
+// boss fight that runs past the stall time (the fix 9 Dragonmaw run: 29 minutes on one status, killed by the watchdog at 15), so the
+// frames speak for it: when the engaged hostiles' hp changed, one joined or died (left the list), or a member died or came back, the
+// fight is moving and the stall clock restarts. A frozen fight (the same hostiles at the same hp, nobody dying) is still a stall, and
+// so are hostiles that are evading back to their spawn.
+func (d *RemoteDriver) noteFightProgress(now time.Time) {
+	o := d.obs
+	if !d.haveFr || !o.haveLast || o.last.State != tbm.RunRunning {
+		o.fight, o.fightDead = nil, 0
+		return
+	}
+	cur := map[packet.GUID]int{}
+	for _, h := range d.fr.EngagedHostiles() {
+		if !h.Evading() {
+			cur[h.GUID] = h.HPPct
+		}
+	}
+	dead := deadCount(d.fr)
+	moved := o.fight != nil && (len(cur) != len(o.fight) || dead != o.fightDead)
+	if o.fight != nil && !moved {
+		for g, hp := range cur {
+			if prev, ok := o.fight[g]; !ok || prev != hp {
+				moved = true
+				break
+			}
+		}
+	}
+	if o.fight == nil && len(cur) > 0 {
+		moved = true // a fight began
+	}
+	if moved && now.After(o.lastAt) {
+		o.lastAt = now
+	}
+	o.fight, o.fightDead = cur, dead
 }
 
 // startRunLeader sends `.bot run start <plan> [from ...]` and takes its answer. The `from ...` words are the probe's resolution of a

@@ -1842,3 +1842,48 @@ func TestObserveExposesTheInstanceId(t *testing.T) {
 		t.Fatalf("%d instance events in the trace (want none)", len(insts))
 	}
 }
+
+// longFightScript is one status for ten minutes (a boss fight past the stall time), then done.
+func longFightScript() []leaderStep {
+	return []leaderStep{
+		{0, rs("running", 3, 5, "first", "boss", "pull", "pulling boss")},
+		{s(600), rs("done", 5, 5, "first", "move", "walk", "plan done")},
+	}
+}
+
+// engagedBoss puts one engaged mob in the fake world whose hp the test sets on every tick of the watch (hp(tick) in percent, 0 < hp).
+func engagedBoss(g *fakeLeader, hp func(tick int) float64) {
+	m := g.addMob(299, Point{5, 0, 0})
+	m.pulled, m.engaged = true, true
+	base := g.onTick
+	tick := 0
+	g.onTick = func(fr *fakeRemote) {
+		base(fr)
+		if !g.running {
+			return
+		}
+		tick++
+		m.hp = hp(tick)
+	}
+}
+
+// A fight whose hostiles lose hp is progressing, although the run leader's status line is the same for ten minutes: the stall watchdog
+// leaves it alone (the fix 9 Dragonmaw run was stopped 15 minutes into a 29 minute boss fight).
+func TestObserveAProgressingFightIsNotStalled(t *testing.T) {
+	g := newFakeLeader(t, longFightScript()...)
+	engagedBoss(g, func(tick int) float64 { return 100 - float64(tick%90)/1.0 })
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{Stall: s(120)}), nil)
+	if err != nil || rep.State != "done" || g.stopped != 0 {
+		t.Fatalf("%v stopped %d %s", err, g.stopped, rep.State)
+	}
+}
+
+// A fight that stands still (the same hostile at the same hp, nobody dying) is a stall like any other.
+func TestObserveAFrozenFightIsStillStalled(t *testing.T) {
+	g := newFakeLeader(t, longFightScript()...)
+	engagedBoss(g, func(int) float64 { return 60 })
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{Stall: s(120)}), nil)
+	if err == nil || !strings.Contains(err.Error(), "stalled") || g.stopped != 1 || rep.State != "failed" {
+		t.Fatalf("%v stopped %d %s", err, g.stopped, rep.State)
+	}
+}

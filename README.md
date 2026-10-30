@@ -1969,7 +1969,7 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
 | Field | Default | Ends the watch when |
 | :--- | :--- | :--- |
 | `max_run_s` | 3 h | the whole run, from `run start`, takes longer (a longer dungeon sets it: Uldaman needs more than 3 h). The stop it sends is `.bot run stop time limit reached (<N>h)`, so the server logs the reason (TortoiseBots #1070) instead of "stopped by .bot run stop"; the other endings send the plain `.bot run stop` |
-| `stall_s` | 10 min | a `running` run shows the very same status line this long (the module's longest own ceiling is a boss at 7 min) |
+| `stall_s` | 10 min | a `running` run shows the very same status line this long and no fight is moving (the module's longest own ceiling is a boss at 7 min). A fight counts as moving while the engaged hostiles' hp changes, one joins or dies, or a bot dies or revives, as the feed's frames show it: a boss fight past `stall_s` on one status line is not a stall |
 | `paused_wait_s` | 10 min | a `paused` run is not resumed this long. The run leader pauses itself at 3 dead, an unsupported step (`ritual`) or a ceiling and never goes on alone |
 | `auto_resume` | 0 (off) | not a ceiling: resumes the run leader by itself 15 s after its "regroups by itself ... did not hold" pause, at most this many times a step (0-3) and 6 per run; round scripts with nobody watching turn it on |
 | none | 20 s | no `TBM:RUN` line came after the start, or the module says "no run" |
