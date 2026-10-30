@@ -40,7 +40,7 @@ positions are the creatures' own, so one up to 4 yd off the floor or 2.5 yd to t
 | 34 | `stormwind_stockade`: The Stockade | 23-28 | 5 | draft | yes | none known |
 | 820 | `windhorn_canyon`: Windhorn Canyon | 24-29 | 7 | draft | yes | Champion Rotag (62785) is summoned (SPELL_SUMMON_ROTAG) by Bonespeaker Narlgom's event |
 | 47 | `razorfen_kraul`: Razorfen Kraul | 26-31 | 7 | draft | yes | Agathelos' Ward (GO_AGATHELOS_WARD) is opened by the keep script before Agathelos the Raging; Willix the Importer escort (optional) |
-| 816 | `dragonmaw_retreat`: Dragonmaw Retreat | 26-31 | 10 | draft | yes | none known |
+| 816 | `dragonmaw_retreat`: Dragonmaw Retreat | 26-31 | 11 | draft | yes | none known |
 | 90 | `gnomeregan`: Gnomeregan | 27-33 | 5 | draft | yes | the gnome-face doors and their six buttons (GO_GNOME_FACE_1-6, GO_BUTTON_1-6) and the bomb faces before Thermaplugg; Explosive Charges (GO_EXPLOSIVE_CHARGE) to open the north and south cave-ins (GO_CAVE_IN_NORTH/SOUTH) on the way in; Grubbis (7361) has no spawn row |
 | 189 | `scarlet_graveyard`: Scarlet Monastery: Graveyard | 30-35 | 4 | draft | yes | none known |
 | 802 | `crescent_grove`: Crescent Grove | 31-36 | 5 | draft | yes | Keeper Ranathos carries npc_flags (questgiver): a gossip or dialogue starts his fight |
