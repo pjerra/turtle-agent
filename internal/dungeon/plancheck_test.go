@@ -567,7 +567,6 @@ var planCheckKnownFailing = map[string]bool{
 	"shadowfang_keep":       true,
 	"stormwrought_ruins":    true,
 	"sunken_temple":         true,
-	"timbermaw_hold":        true,
 	"upper_blackrock_spire": true,
 	"upper_karazhan_halls":  true,
 	"wailing_caverns-extra": true,
