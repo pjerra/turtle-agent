@@ -53,7 +53,8 @@ const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--
     [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
     [--reset-wait 5m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
-    [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--dry-run]`
+    [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--dry-run]
+       turtle-agent raid-walk report <dir> [--spell ID] [--clock-offset 1h] [--md FILE] [--json FILE] [--out DIR]`
 
 // raidWalkPlanRe is the plan name as the server knows it (spec 3.1).
 var raidWalkPlanRe = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
@@ -144,6 +145,10 @@ var newWalkInjector func(w *walk, specs []string) (walkInjector, error)
 
 // raidWalkCmd is the command line entry.
 func raidWalkCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	// `raid-walk report <dir>` reads a finished walk's folder; it sends nothing.
+	if len(args) > 0 && args[0] == "report" {
+		return raidWalkReportCmd(args[1:], stdout, stderr)
+	}
 	// Two raids at once: a --slot list is the pair form, handled before anything is parsed (spec 1.7.5).
 	if _, ok := raidWalkSlotList(args); ok {
 		if raidWalkPairEntry == nil {

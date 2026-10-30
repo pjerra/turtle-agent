@@ -98,7 +98,7 @@ turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loo
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
-turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
+turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent scenario check [--var NAME=VALUE]... <file>
 turtle-agent scenario run [--out DIR] [--force] [--quiet] [--var NAME=VALUE]... [--session NAME=ADDR[@TOKENFILE]]... <file>
@@ -2171,6 +2171,36 @@ symlink, `privfile.Read`), never printed and never written to the output; a fail
 (`dashboard: login failed (HTTP 401)`) and the walk goes on. Without a URL and a password file the capture is off and
 the summary says so.
 
+### Walk report
+
+`turtle-agent raid-walk report <dir>` turns a finished walk's folder into the per-pull table the walks otherwise build by hand. It
+reads files only (no server, no login, no settings or token file): `<dir>/combat-fight-*.json` (or `<dir>/fights-full.json`, or
+`--fights FILE`: an object id -> fight or a list) and `<dir>/run.log` (`--log FILE`; the table still comes without one, with the
+status columns empty). A hand-made event log (`HH:MM:SS <seq> TBM:RUN|...`) reads too.
+
+```
+turtle-agent raid-walk report ~/walks/zg10 --spell 24024 --clock-offset 1h --out ~/walks/zg10/report
+```
+
+- `--clock-offset 1h` says the run log's clock is UTC plus an hour (the servers run UTC+1); every time in the report is UTC. The
+  fights carry unix times already. A log has no date: the day is the latest one that puts its first line within 5 minutes of the
+  first fight.
+- `--spell ID[,ID]` (repeatable) lists every cast of an enemy spell (for example 24024, the Bat Rider's blast) with the deaths
+  within `--window` (default 5 s) of it.
+- Markdown goes to stdout unless `--md FILE`, `--json FILE` or `--out DIR` (writes `report.md` and `report.json`) name files;
+  `--json -` prints the JSON instead.
+
+One row per fight: step, fight id, kind and boss, start, duration, outcome, the engaged units by name and count, the deaths (name,
+seconds into the fight), **contact before pull** (`YES` when a status line of the step says the tank engages a unit "on arrival"
+before any `pulling` line of the step; `no` when a `pulling` line came first or neither did), **joined mid-fight** (the `a new unit
+joined` status lines inside the fight, with the seconds into the fight, and the `N joiners expected` text), and the **stand wait**
+(from the first stand-pull status line of the pull to its `pulling` line, or to the fight's start). Below the table: the stand-pull
+status lines of each pull merged by text with digits and guids as `#` (first and last time, span, lines and runs; the lines of a
+step with no fight go last), the pauses, resumes (with how long the pause lasted), stops and the end of the run, and the watched
+casts. `report.json` (format `tb-raid-walk-report` v1) carries the same rows: `pulls[]` (`engaged`, `deaths`,
+`contact_before_pull`, `contact_text`, `neighbour_joins`, `stand_pull`, `stand_wait_s`, `casts`), `control[]`, `casts[]`,
+`stand_pull_unattached[]` and `totals`.
+
 ### Fault injection
 
 `--inject SPEC` (repeatable, at most 4, each of the four kinds at most once) makes the walk inject a controlled fault
@@ -2316,6 +2346,7 @@ commander, so the dashboard's `/api/v1/commanders` lists both and the raid tabs 
 are up to 80 hires on one server: plan the slots and the worldserver's memory.
 
 `--dry-run` prints both phase plans, every line prefixed `[s<N> <plan>] `, without leasing or writing.
+
 
 ## Remote leader
 
