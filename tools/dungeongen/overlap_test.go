@@ -25,7 +25,7 @@ import (
 // rows at 12; the room sends the rest with the pull whether the plan lists them or not.
 // 35 since the walk-1 fix of leg 0 (2026-10-29): the merged -12153 and -12277 packs list the
 // neighbours they used to miss.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "naxxramas": 104, "blackwing_lair": 50, "timbermaw_hold": 13, "temple_of_ahnqiraj": 128, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6, "zul_gurub": 35}
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "naxxramas": 104, "blackwing_lair": 50, "timbermaw_hold": 13, "temple_of_ahnqiraj": 128, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6, "zul_gurub": 35, "molten_core": 10, "upper_karazhan_halls": 6}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {

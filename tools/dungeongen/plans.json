@@ -1042,18 +1042,24 @@
      ]
     },
     57642,
-    52145
+    52145,
+    12018,
+    11502
    ],
    "size": 40,
    "entrance_tele": "mc",
    "outside_tele": "MoltenCore",
    "special": [
-    "Majordomo Executus (12018) and Ragnaros (11502) have no spawn row: Majordomo appears after the bosses, Ragnaros is summoned (SPELL_SUMMON_RAGNAROS) by talking to Majordomo",
-    "the rune douse of the Core Hounds and lava bursts (GO_LAVA_BURST)"
+    "Majordomo Executus (12018) has no spawn row: the seventh rune douse summons him at 758.089 -1176.71 -118.640 (instance_molten_core.cpp GOHello_go_rune_MC); the seven runes 176951-176957 are doused after their bosses (Sulfuron, Geddon, Shazzrah, Golemagg, Garr, Magmadar, Gehennas)",
+    "Ragnaros (11502) has no spawn row: three gossip options on the friendly Majordomo in his chamber (847.103 -816.153 -229.775) run the dialogue and summon him at 842.237 -833.683 -231.916 (boss_majordomo_executus.cpp)",
+    "the rune douse of the Core Hounds (they die at Magmadar) and lava bursts (GO_LAVA_BURST) are the bots' own actions",
+    "Sorcerer-Thane Thaurissan's room (Old Shadowforge) has no server path from the map 409 mesh (every path stops at 1036 -1275 -195, 64 yd short): the leg is last and open for the mapping walk"
    ],
    "notes": [
-    "Incindis (52145), Sorcerer-Thane Thaurissan (57642) and the Twin Golems (65020, 65021) are Turtle's additions; their place in the order is a guess."
-   ]
+    "Incindis (52145), Sorcerer-Thane Thaurissan (57642) and the Twin Golems (65020, 65021) are Turtle's 1.18 additions; Gehennas (12259) is still in the world data although the wiki says 1.18 removed him",
+    "route: the draft's order, Incindis' Lair after the twin golems, Majordomo + Ragnaros before the unreachable Thaurissan room"
+   ],
+   "handwritten": true
   },
   {
    "name": "blackwing_lair",
@@ -1294,6 +1300,7 @@
   },
   {
    "name": "upper_karazhan_halls",
+   "handwritten": true,
    "title": "Upper Karazhan Halls",
    "map": 814,
    "kind": "raid",
@@ -1305,6 +1312,7 @@
    ],
    "bosses": [
     61939,
+    61946,
     61951,
     61958,
     {
@@ -1315,7 +1323,6 @@
       59968
      ]
     },
-    61946,
     59981,
     59961,
     59991
@@ -1323,11 +1330,14 @@
    "size": 40,
    "entrance_tele": "karaforty",
    "special": [
-    "the Kings Council is the chess event (npc_kara_king/bishop/rook/knight), Echo of Medivh is the chess board",
-    "Anomalus, Keeper Gnarlmoon and Ley-Watcher Incantagos are script-driven; Sanv Tas'dal, Rupturan and Kruul stand in an Outland-like part of the map (tele karaoutland)"
+    "the chess event is the Kings Council: King 59967 is invulnerable until Bishop 59971, Rook 59970 and Knight 59968 are dead; the pawns are summoned",
+    "Anomalus, Keeper Gnarlmoon, Ley-Watcher Incantagos and Echo of Medivh are script-driven; Incantagos' four Ley Seekers 59989 channel a 4-stack damage reduction around him",
+    "Sanv Tas'dal, Rupturan the Broken and Kruul stand in an Outland-like part of the map, a separate navmesh island reached only by the karaoutland teleport (the plan's gm_cross)",
+    "Rupturan 59961 has no script or EventAI; Mephistroth has no creature data in this core",
+    "no entrance trigger row for map 814: the entrance is the 'karaforty' teleport (game_tele 921)"
    ],
    "notes": [
-    "No entrance trigger row for map 814: the entrance is the 'karaforty' teleport (game_tele 921). The boss order is a guess."
+    "Upper Karazhan Halls (Turtle custom raid): 8 boss steps in the guide's and the spiral route's order; the draft's boss order (Incantagos after the chess event) was a guess."
    ]
   },
   {
