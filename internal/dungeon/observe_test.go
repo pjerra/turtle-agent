@@ -1842,3 +1842,16 @@ func TestObserveExposesTheInstanceId(t *testing.T) {
 		t.Fatalf("%d instance events in the trace (want none)", len(insts))
 	}
 }
+
+// TestSamePauseNoteWithRunLabel: an until or test-speed run's status lines carry a trailing label; the parser takes it
+// off the note, so a pause the module extends with an aside is still the latched pause.
+func TestSamePauseNoteWithRunLabel(t *testing.T) {
+	a, _ := tbm.ParseRunLine("TBM:RUN|zul_gurub|paused|29/1104|j|pull|pull|15 dead: regroup (cmd revive party), then .bot run resume|until boss (step 41)")
+	b, _ := tbm.ParseRunLine("TBM:RUN|zul_gurub|paused|29/1104|j|pull|pull|15 dead: regroup (cmd revive party), then .bot run resume; boss meanwhile: x|until boss (step 41)")
+	if !samePauseNote(a.Note, b.Note) {
+		t.Fatalf("%q then %q: a new pause", a.Note, b.Note)
+	}
+	if a.Label != "until boss (step 41)" {
+		t.Fatalf("label %q", a.Label)
+	}
+}
