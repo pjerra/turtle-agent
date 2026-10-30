@@ -63,15 +63,20 @@ type Config struct {
 	TauntLatencyS     float64 // median seconds from a non-tank victim to a taunt or a return (a warning above this)
 	CCHoldPct         float64 // percent of cc episodes that held (a warning below this)
 	PetThreatPct      float64 // percent of mob-frames with a pet on top threat (a warning above this)
+
+	// The oracle checks only warn: a bot is judged once it was active this long, and a mana user is dry after this long under
+	// 5 % mana in combat.
+	SpellOracleActiveS float64 // seconds of combat a bot needs before its missing core spells are a warning
+	OomFightS          float64 // seconds under 5 % mana in combat before the mana user gets a warning
 }
 
 // Defaults are the thresholds of the first set of checks.
 func Defaults() Config {
 	return Config{RestShareMax: 40, StaleSeconds: 60, StopsPer100Max: 4, ThreatOffTankS: 4, RefusalRateMax: 20, FeedGapMax: 10, StuckSeconds: 5, FacingHoldS: 2, IdleSharePct: 15, InterruptCoverPct: 30,
-		TauntLatencyS: 3, CCHoldPct: 50, PetThreatPct: 5}
+		TauntLatencyS: 3, CCHoldPct: 50, PetThreatPct: 5, SpellOracleActiveS: 60, OomFightS: 10}
 }
 
-var thresholdIDs = []string{IDRestShare, IDStaleParty, IDWalkStops, IDThreat, IDRefusals, IDFeedStalls, IDStuck, IDFacing, IDIdleShare, IDInterruptCover, IDTauntLatency, IDCCHold, IDPetThreat}
+var thresholdIDs = []string{IDRestShare, IDStaleParty, IDWalkStops, IDThreat, IDRefusals, IDFeedStalls, IDStuck, IDFacing, IDIdleShare, IDInterruptCover, IDTauntLatency, IDCCHold, IDPetThreat, IDSpellOracle, IDOOMInFight}
 
 // Set changes the threshold of the check with the given id (the CLI's --set id=value). deaths and gm_shortcuts have none.
 func (c *Config) Set(id string, v float64) error {
@@ -102,6 +107,10 @@ func (c *Config) Set(id string, v float64) error {
 		c.CCHoldPct = v
 	case IDPetThreat:
 		c.PetThreatPct = v
+	case IDSpellOracle:
+		c.SpellOracleActiveS = v
+	case IDOOMInFight:
+		c.OomFightS = v
 	default:
 		return fmt.Errorf("no threshold for check %q (have %s)", id, strings.Join(thresholdIDs, ", "))
 	}
@@ -110,7 +119,7 @@ func (c *Config) Set(id string, v float64) error {
 
 // Score runs every check over the trace.
 func Score(f *trace.File, c Config) []trace.Check {
-	cs := []trace.Check{restShare(f, c), staleParty(f, c), walkStops(f, c), threatOffTank(f, c), deathsWipes(f), orderRefusals(f, c), feedStalls(f, c), gmShortcuts(f), stuck(f, c), facing(f, c), spellsCheck(f, c)}
+	cs := []trace.Check{restShare(f, c), staleParty(f, c), walkStops(f, c), threatOffTank(f, c), deathsWipes(f), orderRefusals(f, c), feedStalls(f, c), gmShortcuts(f), stuck(f, c), facing(f, c), spellsCheck(f, c), spellOracleCheck(f, c), oomCheck(f, c)}
 	for i := range cs {
 		if cs[i].FirstMS == 0 && len(cs[i].Evidence) > 0 {
 			cs[i].FirstMS = cs[i].Evidence[0]

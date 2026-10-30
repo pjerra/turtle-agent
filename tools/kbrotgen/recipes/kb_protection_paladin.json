@@ -1,0 +1,389 @@
+{
+  "name": "kb_protection_paladin",
+  "class": "paladin",
+  "spec": "protection",
+  "role": "tank",
+  "kb_file": "classes/yaml/paladin/protection-tank.yaml",
+  "preset": "protection_paladin",
+  "replaces": [
+    "paladin_retribution"
+  ],
+  "mode": "",
+  "notes": "The knowledge base's protection paladin: Righteous Fury and Sanctity Aura, a seal, Holy Strike and Judgement on cooldown with a re-seal after each judgement, Holy Shield when mana permits, Consecration at full rank above 30% mana and rank 1 below, Seal of Wisdom when the mana runs low. Taunting stays with role_tank; Exorcism's creature gate and the fight-timeline rows are listed in kb.unexpressed.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 1,
+      "text": "Righteous Fury (re-apply after death; toggle after respec), Sanctity Aura (Retribution Aura if someone else has Sanctity), blessing, Seal of Righteousness | pre-pull [[d:paladin#1487898897144877108]] [[d:paladin#1469723489400262698]]",
+      "text_sha": "71019441a4f0",
+      "entries": [
+        {
+          "id": "righteous_fury",
+          "spell": "Righteous Fury",
+          "level": 16,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "no_self_aura": [
+              "Righteous Fury"
+            ]
+          }
+        },
+        {
+          "id": "sanctity_aura",
+          "spell": "Sanctity Aura",
+          "level": 30,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "no_self_aura": [
+              "Sanctity Aura"
+            ]
+          }
+        }
+      ],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 2,
+      "text": "Pre-cast Holy Shield, run in, active SP trinket, Judgement of Righteousness, Holy Strike, reseal SoR | opener [[d:paladin#1479624488675971323]] [[d:paladin#1474054737547497583]]",
+      "text_sha": "cedcdac1b10c",
+      "entries": [],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 3,
+      "text": "Holy Strike | the moment it is off cooldown; never delay [[d:paladin#1479624488675971323]]",
+      "text_sha": "5959922783c7",
+      "entries": [
+        {
+          "id": "holy_strike",
+          "spell": "Holy Strike",
+          "level": 4,
+          "target": "fight",
+          "band": "high"
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 4,
+      "text": "Judgement (of Righteousness) | on cooldown, ~2 s after Holy Strike, woven into another GCD (off-GCD) [[d:paladin#1479624488675971323]] [[d:paladin#1463240147930841219]]",
+      "text_sha": "c045820f4489",
+      "entries": [
+        {
+          "id": "judgement",
+          "spell": "Judgement",
+          "level": 4,
+          "target": "fight",
+          "band": "high"
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 5,
+      "text": "Seal of Righteousness | next GCD after judging; never another seal on a boss [[d:paladin#1475773657925161033]]",
+      "text_sha": "fa986098d641",
+      "entries": [
+        {
+          "id": "seal_of_righteousness",
+          "spell": "Seal of Righteousness",
+          "level": 1,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "power_above": 20,
+            "no_self_aura": [
+              "Seal of Righteousness",
+              "Seal of Command",
+              "Seal of Wisdom",
+              "Seal of Light",
+              "Seal of the Crusader",
+              "Seal of Justice"
+            ]
+          },
+          "note": "the power gate hands the seal to Seal of Wisdom below 20% mana (rotation_aoe[6])"
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 6,
+      "text": "Holy Shield (rank 1 on long fights) | when mana permits [[d:paladin#1485641256586444910]] [[d:paladin#1450898726074847345]]",
+      "text_sha": "669f3beb39b1",
+      "entries": [
+        {
+          "id": "holy_shield",
+          "spell": "Holy Shield",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "no_self_aura": [
+              "Holy Shield"
+            ],
+            "power_above": 30
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 7,
+      "text": "Consecration rank 5, then rank 1 once threat is established or mana < 30% | remaining GCDs [[d:paladin#1479624488675971323]] [[d:paladin#1470119581581312222]]",
+      "text_sha": "74b6af2b926a",
+      "entries": [
+        {
+          "id": "consecration",
+          "spell": "Consecration",
+          "level": 20,
+          "target": "fight",
+          "threat": "aoe",
+          "when": {
+            "power_above": 30
+          }
+        },
+        {
+          "id": "consecration_rank1",
+          "spell": "Consecration",
+          "level": 20,
+          "rank": 1,
+          "target": "fight",
+          "threat": "aoe",
+          "when": {
+            "power_below": 30
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 7,
+      "priority": 8,
+      "text": "Exorcism | Undead/Demon, nothing else ready; Consecration first if both ready [[d:paladin#1462761249325711431]]",
+      "text_sha": "98bb936977df",
+      "entries": [],
+      "unexpressed": "creature type not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 8,
+      "priority": 9,
+      "text": "Hand of Reckoning | mob not targeting you",
+      "text_sha": "528c6e7decb7",
+      "entries": [],
+      "unexpressed": "taunt: role_tank owns taunting"
+    },
+    {
+      "from": "rotation_single",
+      "index": 9,
+      "priority": 10,
+      "text": "Crusader Strike (Zealous Defence) | ONLY before a planned big hit / tank swap (Patchwerk, Twins, Knight); never for threat [[d:paladin#1484833025177944206]] [[d:paladin#1487459563707044021]]",
+      "text_sha": "624e60632ea1",
+      "entries": [],
+      "unexpressed": "fight timeline (a planned big hit or a tank swap) not in the conditions"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "No Consecration; Holy Strike skull, Judgement the second, tab",
+      "text_sha": "ff21700a00ec",
+      "entries": [],
+      "unexpressed": "covered by rotation_single[2-4]: the single-target strikes and judgement; Consecration waits for three or more mobs"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 1,
+      "text": "Pre-cast Consecration where mobs meet you (front-load triggers on mob entry)",
+      "text_sha": "007bddce2dcb",
+      "entries": [],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 2,
+      "text": "Single-target priority on skull; tab Judgement/Holy Strike/taunt onto others; lock mobs one by one",
+      "text_sha": "9c0627f0ad6f",
+      "entries": [],
+      "unexpressed": "raid assignment/marking"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 3,
+      "priority": 3,
+      "text": "Rank-5 Consecration at most 1-2 casts per pack",
+      "text_sha": "a1167b286b24",
+      "entries": [],
+      "unexpressed": "covered by rotation_single[6]: the mana-gated Consecration ranks"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 4,
+      "priority": 4,
+      "text": "Goblin Sapper Charge on the pull",
+      "text_sha": "0e11a4990400",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 5,
+      "priority": 5,
+      "text": "Greater Blessing spam (not Wisdom)",
+      "text_sha": "3319f741caee",
+      "entries": [],
+      "unexpressed": "friendly target not in the conditions"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 6,
+      "priority": 6,
+      "text": "Seal of Wisdom + Consecration",
+      "text_sha": "7c31bd6c4bf3",
+      "entries": [
+        {
+          "id": "seal_of_wisdom",
+          "spell": "Seal of Wisdom",
+          "level": 18,
+          "target": "self",
+          "when": {
+            "mobs_in_reach_min": 3,
+            "power_below": 20,
+            "no_self_aura": [
+              "Seal of Righteousness",
+              "Seal of Command",
+              "Seal of Wisdom",
+              "Seal of Light",
+              "Seal of the Crusader",
+              "Seal of Justice"
+            ]
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Bulwark of the Righteous | Maexxna, Gothik; Anomalus at 30+ stacks with a GAPP [[d:paladin#1462761249325711431]] [[d:paladin#1446932033933934622]]",
+      "text_sha": "036bf4fe8f1b",
+      "entries": [],
+      "unexpressed": "fight knowledge (named bosses) not in the conditions"
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "Holy Shield | pre-cast before every pull; needed for the avoidance cap",
+      "text_sha": "10b35b977e66",
+      "entries": [],
+      "unexpressed": "covered by rotation_single[5]: the Holy Shield entry"
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": null,
+      "text": "Greater Stoneshield Potion | Patchwerk, Kel'Thuzad, Sapphiron, Loatheb, Faerlina [[d:paladin#1462761249325711431]]",
+      "text_sha": "1cfc3939fe70",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 3,
+      "priority": null,
+      "text": "Active SP trinket | on pull before the first Holy Strike (Draconic Infused Emblem / ToEP / Essence of Sapphiron) [[d:paladin#1450071115706794114]]",
+      "text_sha": "9a4889a46679",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 4,
+      "priority": null,
+      "text": "Divine Shield | mechanics (Firemaw stacks) or imminent death; drops threat",
+      "text_sha": "9644879346a7",
+      "entries": [
+        {
+          "id": "divine_shield",
+          "spell": "Divine Shield",
+          "level": 34,
+          "target": "self",
+          "band": "emergency",
+          "when": {
+            "self_hp_below": 20
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "cooldowns",
+      "index": 5,
+      "priority": null,
+      "text": "Blessing of Protection | on the other tank to take the boss back; on a DPS with aggro [[d:paladin#1448374029227528273]]",
+      "text_sha": "83f984ad492f",
+      "entries": [],
+      "unexpressed": "friendly target not in the conditions"
+    }
+  ],
+  "order": [
+    "righteous_fury",
+    "sanctity_aura",
+    "seal_of_righteousness",
+    "holy_strike",
+    "judgement",
+    "holy_shield",
+    "consecration",
+    "consecration_rank1",
+    "seal_of_wisdom",
+    "divine_shield"
+  ],
+  "oracle": {
+    "core": [
+      "Holy Strike",
+      "Judgement",
+      "Consecration"
+    ],
+    "situational": [
+      "Seal of Righteousness",
+      "Seal of Wisdom",
+      "Holy Shield",
+      "Exorcism",
+      "Hand of Reckoning",
+      "Righteous Fury",
+      "Sanctity Aura",
+      "Divine Shield",
+      "Hammer of Justice",
+      "Bulwark of the Righteous"
+    ],
+    "never": [],
+    "signature": [
+      "Holy Shield",
+      "Bulwark of the Righteous"
+    ],
+    "taunt": [
+      "Hand of Reckoning"
+    ]
+  }
+}

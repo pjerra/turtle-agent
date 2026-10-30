@@ -50,8 +50,6 @@ const (
 	elements
 )
 
-var elementNames = [elements]string{"fire", "earth", "water", "air"}
-
 // totemTools are the totem items each element's spells need (Spell.cpp CheckItems; item_template 5175 to 5178).
 var totemTools = [elements]uint32{5176, 5175, 5177, 5178}
 
@@ -131,12 +129,6 @@ func (s *shamMem) totem(el int) totemRec {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.totems[el]
-}
-
-func (s *shamMem) setTotem(el int, r totemRec) {
-	s.mu.Lock()
-	s.totems[el] = r
-	s.mu.Unlock()
 }
 
 // pending says a totem cast into the slot is on its way.

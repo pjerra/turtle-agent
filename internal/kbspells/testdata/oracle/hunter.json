@@ -1,0 +1,25 @@
+{
+  "class": "hunter",
+  "specs": [
+    {
+      "spec": "beast_mastery",
+      "role": "dps",
+      "rotation": "kb_beast_mastery_hunter",
+      "core": ["Steady Shot", "Arcane Shot", "Kill Command"],
+      "situational": ["Bestial Wrath", "Multi-Shot", "Volley", "Intimidation", "Rapid Fire", "Feign Death", "Aspect of the Viper", "Hunter's Mark"],
+      "never": ["Aimed Shot", "Serpent Sting"],
+      "signature": ["Bestial Wrath", "Intimidation"],
+      "taunt": []
+    },
+    {
+      "spec": "marksmanship",
+      "role": "dps",
+      "rotation": "kb_marksmanship_hunter",
+      "core": ["Aimed Shot", "Steady Shot", "Arcane Shot"],
+      "situational": ["Serpent Sting", "Multi-Shot", "Volley", "Rapid Fire", "Feign Death", "Aspect of the Viper", "Hunter's Mark"],
+      "never": [],
+      "signature": ["Aimed Shot", "Trueshot Aura"],
+      "taunt": []
+    }
+  ]
+}

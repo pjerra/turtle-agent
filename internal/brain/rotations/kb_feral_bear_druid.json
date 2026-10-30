@@ -1,0 +1,217 @@
+{
+  "version": 1,
+  "name": "kb_feral_bear_druid",
+  "class": "druid",
+  "spec": "feral_bear",
+  "replaces": [
+    "druid_bear"
+  ],
+  "notes": "The Turtle knowledge base's feral bear list: Maul always queued, Savage Bite on Clearcasting or above 50 rage, Swipe on two mobs or with the rage full, Faerie Fire (Feral) when no other GCD is needed, Demoralizing Roar spam on ten mobs, Barkskin (Feral) as the panic button, Enrage as the rage comes back and Berserk. The pull preparation, Reshift and taunting are not the file's; the attack that starts the swing is queued first.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/druid/feral-tank.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=58705#p58705 (Elesion, player, 2023-08-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=58715#p58715 (Bigsmerf, player, 2023-08-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=64890#p64890 (Drubarrymooer, player, 2023-09-17)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=60018#p60018 (Elesion, player, 2023-08-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=64887#p64887 (Drubarrymooer, player, 2023-09-17)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=115691#p115691 (Drubarrymooer, player, 2025-01-07)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=115706#p115706 (Reploidrocsa, player, 2025-01-07)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=117477#p117477 (Inovatu, player, 2025-01-21)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=117585#p117585 (Sunken, player, 2025-01-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=121590#p121590 (Inovatu, player, 2025-03-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=121689#p121689 (Eyeburn, player, 2025-03-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=112876#p112876 (Xudo, player, 2024-12-16)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=112877#p112877 (Jammyzz, player, 2024-12-16)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113723#p113723 (Jammyzz, player, 2024-12-21)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=165907#p165907 (Captain4k, player, 2026-01-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=173102#p173102 (Noephix, player, 2026-03-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=173162#p173162 (Velanyr, player, 2026-03-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171995#p171995 (Grizb37, player, 2026-03-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=26875#p26875 (Geojak, player, 2022-10-06)",
+    " (Micro Jackson, player, 2025-12-01)",
+    " (TowelDruid, player, 2025-12-18)",
+    " (Micro Jackson, player, 2026-04-08)",
+    " (Micro Jackson, player, 2026-02-15)",
+    " (Holydruid, player (main tank), 2026-03-20)"
+  ],
+  "priorities": [
+    {
+      "id": "auto_attack",
+      "kind": "attack",
+      "when": {},
+      "note": "Attached to the Maul row: a melee rotation has no white swings without it, and the KB queues Maul on every swing."
+    },
+    {
+      "id": "savage_bite_clearcasting",
+      "spell": "Savage Bite",
+      "level": 58,
+      "target": "fight",
+      "when": {
+        "self_aura": [
+          "Clearcasting"
+        ]
+      },
+      "note": "The KB's two triggers (Clearcasting OR more than 50 rage) are two entries: the conditions are all-must-hold. Ahead of the always-queued Maul: one action runs per tick, so a gated cast must be able to win it; Maul takes the ticks they leave."
+    },
+    {
+      "id": "savage_bite",
+      "spell": "Savage Bite",
+      "level": 58,
+      "target": "fight",
+      "when": {
+        "power_above": 50
+      },
+      "note": "'Some say 35': the KB's higher threshold is taken; rage is a percent of the bar."
+    },
+    {
+      "id": "swipe",
+      "spell": "Swipe",
+      "level": 16,
+      "target": "fight",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mobs_in_reach_min": 2
+      },
+      "note": "Ahead of the always-queued Maul for the same reason as the Bite: the AoE branch must win the tick at two mobs."
+    },
+    {
+      "id": "swipe_rage",
+      "spell": "Swipe",
+      "level": 16,
+      "target": "fight",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "power_above": 75
+      }
+    },
+    {
+      "id": "maul",
+      "kind": "next_swing",
+      "spell": "Maul",
+      "level": 10,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true
+      },
+      "note": "'Always queued' is the next-swing kind: one Maul per swing."
+    },
+    {
+      "id": "faerie_fire_feral",
+      "spell": "Faerie Fire (Feral)",
+      "level": 25,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "no_mob_aura": [
+          "Faerie Fire (Feral)"
+        ]
+      },
+      "note": "'No other GCD needed' is the entry's place after the attacks; the KB does not say 'missing', but the debuff is the cast's point."
+    },
+    {
+      "id": "demoralizing_roar",
+      "spell": "Demoralizing Roar",
+      "level": 10,
+      "target": "self",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mobs_in_reach_min": 10,
+        "mobs_lacking_aura": "Demoralizing Roar"
+      },
+      "note": "The KB's Idol of Evergrowth and T1+T2 Thorns are gear; the roar itself is the row."
+    },
+    {
+      "id": "barkskin_feral",
+      "spell": "Barkskin (Feral)",
+      "level": 44,
+      "target": "self",
+      "band": "emergency",
+      "when": {
+        "state": "combat",
+        "self_hp_below": 35,
+        "no_self_aura": [
+          "Barkskin (Feral)"
+        ]
+      },
+      "note": "The KB's panic button: emergency band, so it also breaks the swing."
+    },
+    {
+      "id": "enrage",
+      "spell_id": 5229,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "self_hp_above": 50,
+        "power_below": 20,
+        "no_self_aura": [
+          "Enrage"
+        ]
+      },
+      "note": "The player's Enrage by id: the data's other Enrage copies leave the name without one first-rank level. The KB's trigger (the Tiger's Fury proc ending) is not an aura condition; rage starvation above half health is the proxy, and Enrage's armor cost is why health gates it."
+    },
+    {
+      "id": "berserk",
+      "spell": "Berserk",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat"
+      },
+      "note": "Fear breaking is the one trigger a condition can see (when.feared); the second haste window is not, so the six-minute cooldown decides."
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/druid/feral-tank.yaml",
+    "sha256": "1b21c0b259fe2c14a611bad7a006befc8bf1dca73997a819630a7ab80a76b008",
+    "preset": "bear_tank_druid",
+    "recipe": "tools/kbrotgen/recipes/kb_feral_bear_druid.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Pre-pull (~10 s): Regrowth -> Rejuvenation -> Cat Form -> Tiger's Fury -> Bear Form (Furor + head enchant ~15 rage) |",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[1]",
+        "text": "Pull: Faerie Fire (Feral) or ranged pull, Mighty Rage Potion, Maul + Savage Bite; Enrage/Berserk when TF Blood Frenzy ends; never open with Growl or Feral Charge |",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[6]",
+        "text": "Growl | mob loose or double dodge/parry at pull; off GCD",
+        "why": "taunt: role_tank owns taunting"
+      },
+      {
+        "row": "rotation_single[7]",
+        "text": "Reshift (Bear) | rage-starved; not overused",
+        "why": "cancel/stop casting not expressible"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "Maul kill target, tab + Swipe others, FF (Feral) loose adds; pre-HoT self for healing threat",
+        "why": "nothing to add: the row names no cast the list does not already have"
+      },
+      {
+        "row": "rotation_aoe[1]",
+        "text": "split 2-3 mobs per tank; pre-cast Hurricane on front mob",
+        "why": "raid assignment/marking (the Hurricane needs caster form, which the preset's form strategy owns)"
+      },
+      {
+        "row": "cooldowns[0]",
+        "text": "Barkskin | 60 s; cast in caster form before shifting, persists in Bear [[d:druid#1488905914017906758]]",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "cooldowns[4]",
+        "text": "Mighty Rage Potion / Kiss of the Spider / Juju Flurry | boss pull [[d:druid#1472409131196616948]]",
+        "why": "consumable or item (combat_consumables owns items)"
+      }
+    ]
+  }
+}

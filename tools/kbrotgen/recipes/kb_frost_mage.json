@@ -1,0 +1,316 @@
+{
+  "name": "kb_frost_mage",
+  "class": "mage",
+  "spec": "frost",
+  "role": "ranged-dps",
+  "kb_file": "classes/yaml/mage/frost-ranged-dps.yaml",
+  "preset": "frost_mage",
+  "replaces": [
+    "mage_frost"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's frost raid list: Icicles only on a Flash Freeze proc, Ice Barrier on cooldown for its damage buff, Frost Nova and Cone of Cold on a boss in melee range, Cold Snap after a Nova, Frostbolt as the filler, and the AoE loop (Cone of Cold, Frost Nova, Arcane Explosion, rank-1 Blizzard). The KB's opener order, the freeze immunity of a raid boss and the pack sizes are not conditions (kb.unexpressed).",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 0,
+      "text": "Pre-pull Ice Barrier; opener Frostbolt -> Icicles -> Frost Nova -> Icicles (or Frostbolt -> Cone of Cold -> Icicles -> Frost Nova -> Icicles) | freeze-immune boss",
+      "text_sha": "d3fc1327f60e",
+      "entries": [],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 1,
+      "text": "Icicles | Flash Freeze active ONLY (never raw)",
+      "text_sha": "8305f7d6813e",
+      "entries": [
+        {
+          "id": "icicles",
+          "spell": "Icicles",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "moving": false,
+            "self_aura": [
+              "Flash Freeze"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 2,
+      "text": "Ice Barrier | off cooldown (+10% Frost damage for 60 s on cast)",
+      "text_sha": "3aa9e36d8cbe",
+      "entries": [
+        {
+          "id": "ice_barrier",
+          "spell": "Ice Barrier",
+          "talent": true,
+          "target": "self",
+          "when": {
+            "no_self_aura": [
+              "Ice Barrier"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 3,
+      "text": "Frost Nova | off cooldown AND in melee range of a freeze-immune boss",
+      "text_sha": "72afde748592",
+      "entries": [
+        {
+          "id": "frost_nova",
+          "spell": "Frost Nova",
+          "level": 10,
+          "target": "self",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "mob_distance_max": 10
+          },
+          "note": "mob_distance_max 10 is Frost Nova's radius; the KB's \"freeze-immune\" is not a condition."
+        }
+      ],
+      "unexpressed": "a freeze-immune target is not a condition"
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 4,
+      "text": "Cone of Cold | in range (Frostbite can proc Flash Freeze)",
+      "text_sha": "b16bc82dc4b1",
+      "entries": [
+        {
+          "id": "cone_of_cold",
+          "spell": "Cone of Cold",
+          "level": 26,
+          "target": "self",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "mob_distance_max": 10
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 5,
+      "text": "Cold Snap | Nova on cooldown and a burst window is wanted",
+      "text_sha": "13e072620b36",
+      "entries": [
+        {
+          "id": "cold_snap",
+          "spell": "Cold Snap",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "mob_aura": [
+              "Frost Nova"
+            ]
+          },
+          "note": "mob_aura Frost Nova stands in for \"Nova on cooldown\": the debuff means a Nova just landed."
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 6,
+      "text": "Frostbolt | default; macro /cast [mybuff:Flash_Freeze] Icicles; Frostbolt",
+      "text_sha": "999f143d60c3",
+      "entries": [
+        {
+          "id": "frostbolt",
+          "spell": "Frostbolt",
+          "level": 4,
+          "target": "fight",
+          "when": {
+            "moving": false
+          },
+          "note": "Moved after the AoE entries: the filler has no cooldown, so as a rule it would starve every entry the KB lists after it."
+        }
+      ],
+      "unexpressed": "macro/addon (Nampower etc.)"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Cone of Cold -> Icicles (if proc) -> Frost Nova -> Icicles -> Arcane Explosion",
+      "text_sha": "9998deb0d94c",
+      "entries": [
+        {
+          "id": "cone_of_cold_aoe",
+          "spell": "Cone of Cold",
+          "level": 26,
+          "target": "self",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "mob_distance_max": 10,
+            "mobs_near_mob_min": 2
+          }
+        },
+        {
+          "id": "frost_nova_aoe",
+          "spell": "Frost Nova",
+          "level": 10,
+          "target": "self",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "mob_distance_max": 10,
+            "mobs_near_mob_min": 2
+          }
+        },
+        {
+          "id": "arcane_explosion_aoe",
+          "spell": "Arcane Explosion",
+          "level": 14,
+          "target": "self",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "mob_distance_max": 10,
+            "mobs_near_mob_min": 2
+          }
+        }
+      ],
+      "unexpressed": "the Icicles steps are rotation_single[1] (Flash Freeze only); the pack's freeze immunity is not a condition"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 1,
+      "text": "Cone of Cold -> Arcane Explosion spam -> Icicles on a survivor",
+      "text_sha": "acb9e52ba031",
+      "entries": [],
+      "unexpressed": "the same casts as rotation_aoe[0] (its 2+ gate covers more than 5 targets; only the spam order differs); the Icicles step is rotation_single[1]"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 2,
+      "text": "Alternate rank-1 Blizzard (fish Flash Freeze) with Icicles on skull",
+      "text_sha": "dc3cb9e4a435",
+      "entries": [
+        {
+          "id": "blizzard_rank1",
+          "spell": "Blizzard",
+          "level": 20,
+          "rank": 1,
+          "target": "fight",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "moving": false,
+            "mobs_near_mob_min": 3
+          }
+        }
+      ],
+      "unexpressed": "marking the skull is raid assignment/marking; the alternation with Icicles is the entry order"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 3,
+      "priority": 9,
+      "text": "Never Nova/CoC freezable raid mobs (roots them off the tank)",
+      "text_sha": "6ec70b89ef0c",
+      "entries": [],
+      "unexpressed": "the row keeps Nova and Cone of Cold off freezable packs: a creature's freeze immunity is not a condition"
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Ice Barrier | on cooldown for the on-cast damage buff",
+      "text_sha": "77d132a9ff60",
+      "entries": [
+        {
+          "id": "ice_barrier_cooldown",
+          "spell": "Ice Barrier",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "no_self_aura": [
+              "Ice Barrier"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "Ice Block / Cold Snap | survival; Cold Snap also resets Nova for another Icicles pair; Ice Block keeps threat",
+      "text_sha": "eb6a3bead202",
+      "entries": [
+        {
+          "id": "ice_block_kb",
+          "spell": "Ice Block",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "self_hp_below": 50
+          },
+          "note": "\"survival\": 50% is the phrase table's default where the KB gives no number."
+        }
+      ],
+      "unexpressed": "Cold Snap is rotation_single[5]; \"Ice Block keeps threat\" is not a condition"
+    }
+  ],
+  "order": [
+    "icicles",
+    "ice_barrier",
+    "frost_nova",
+    "cone_of_cold",
+    "cold_snap",
+    "cone_of_cold_aoe",
+    "frost_nova_aoe",
+    "arcane_explosion_aoe",
+    "blizzard_rank1",
+    "frostbolt",
+    "ice_barrier_cooldown",
+    "ice_block_kb"
+  ],
+  "oracle": {
+    "core": [
+      "Frostbolt",
+      "Icicles",
+      "Ice Barrier"
+    ],
+    "situational": [
+      "Frost Nova",
+      "Cone of Cold",
+      "Cold Snap",
+      "Blizzard",
+      "Arcane Explosion",
+      "Ice Block"
+    ],
+    "never": [],
+    "signature": [
+      "Icicles",
+      "Ice Barrier",
+      "Cold Snap"
+    ],
+    "taunt": []
+  }
+}

@@ -267,7 +267,7 @@ func TestDungeonStatusShowsTheWatchdog(t *testing.T) {
 	}
 }
 
-// A draft plan (unmapped skeleton) and a raid plan are not run by dungeon_run: the draft needs allow_draft, the raid plan has no driver.
+// A draft plan needs allow_draft; a raid plan runs in observe mode with prepare.party "hire".
 func TestPlanRunRefusal(t *testing.T) {
 	load := func(status, kind, extra string) *dungeon.Plan {
 		doc := `{"version":1,"name":"p","map":1,` + status + kind + `"entrance":{"x":0,"y":0,"z":0},` + extra + `"legs":[{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":0,"y":0,"z":0}]}]}]}`
@@ -278,19 +278,28 @@ func TestPlanRunRefusal(t *testing.T) {
 		return p
 	}
 	draft := load(`"status":"draft (not mapped, not live-checked)",`, "", "")
-	if m := planRunRefusal(draft, false); !strings.Contains(m, "is a draft") || !strings.Contains(m, "allow_draft") {
+	if m := planRunRefusal(draft, dungeonRunParams{}); !strings.Contains(m, "is a draft") || !strings.Contains(m, "allow_draft") {
 		t.Errorf("a draft without allow_draft: %q", m)
 	}
-	if m := planRunRefusal(draft, true); m != "" {
+	if m := planRunRefusal(draft, dungeonRunParams{AllowDraft: true}); m != "" {
 		t.Errorf("a draft with allow_draft: %q", m)
 	}
 	for _, status := range []string{``, `"status":"mapped",`, `"status":"live-checked",`} {
-		if m := planRunRefusal(load(status, "", ""), false); m != "" {
+		if m := planRunRefusal(load(status, "", ""), dungeonRunParams{}); m != "" {
 			t.Errorf("%q: %q", status, m)
 		}
 	}
 	raid := load(`"status":"live-checked",`, `"kind":"raid",`, `"raid":{"size":10,"tanks":2,"healers":3,"dps":5},`)
-	if m := planRunRefusal(raid, true); !strings.Contains(m, "raid plan") {
-		t.Errorf("a raid plan: %q", m)
+	if m := planRunRefusal(raid, dungeonRunParams{AllowDraft: true}); !strings.Contains(m, "raid plan") ||
+		!strings.Contains(m, `mode "observe"`) || !strings.Contains(m, `prepare.party "hire"`) {
+		t.Errorf("a raid plan without observe+hire: %q", m)
+	}
+	raidObserveHire := dungeonRunParams{Mode: "observe", AllowDraft: true, Prepare: &dungeon.PrepareSpec{Party: "hire"}}
+	if m := planRunRefusal(raid, raidObserveHire); m != "" {
+		t.Errorf("a raid plan in observe with party hire: %q", m)
+	}
+	raidRemoteHire := dungeonRunParams{Mode: "remote", Prepare: &dungeon.PrepareSpec{Party: "hire"}}
+	if m := planRunRefusal(raid, raidRemoteHire); !strings.Contains(m, "raid plan") {
+		t.Errorf("a raid plan in remote: %q", m)
 	}
 }

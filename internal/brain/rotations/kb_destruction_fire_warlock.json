@@ -1,0 +1,211 @@
+{
+  "version": 1,
+  "name": "kb_destruction_fire_warlock",
+  "class": "warlock",
+  "spec": "destruction_fire",
+  "replaces": [
+    "warlock_affliction"
+  ],
+  "notes": "The Turtle knowledge base's fire destruction raid list: Soul Fire while the Improved Soul Fire buff is missing, Immolate kept up, Conflagrate on an Immolated target, Shadowburn, Searing Pain as the filler, Corruption as the contested filler, Life Tap when the mana runs out, and Hellfire/Rain of Fire on five or more stacked mobs. The opener order, the assigned curse and the Thaddius exception are not conditions (kb.unexpressed).",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/warlock/destruction-fire-ranged-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=107778#p107778 (LastyK, player, 2024-11-13)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=174180#p174180 (Momohomo, player, 2026-04-06)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=108198#p108198 (Jervy, player, 2024-11-16)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=169207#p169207 (Spritzbube, player, 2026-02-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=105313#p105313 (Xudo, player, 2024-10-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102973#p102973 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141827#p141827 (Kord2998, player, 2025-07-28)",
+    " (Afraido, player, 2026-03-19)",
+    " (Fauxnetic, player, 2026-04-13)",
+    " (Twospooky, player, 2026-04-21)"
+  ],
+  "priorities": [
+    {
+      "id": "soul_fire",
+      "spell": "Soul Fire",
+      "level": 30,
+      "target": "fight",
+      "when": {
+        "moving": false,
+        "no_self_aura": [
+          "Improved Soul Fire"
+        ]
+      }
+    },
+    {
+      "id": "immolate",
+      "spell": "Immolate",
+      "level": 1,
+      "target": "fight",
+      "when": {
+        "no_mob_aura": [
+          "Immolate"
+        ]
+      }
+    },
+    {
+      "id": "conflagrate",
+      "spell": "Conflagrate",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "mob_aura": [
+          "Immolate"
+        ]
+      }
+    },
+    {
+      "id": "shadowburn",
+      "spell": "Shadowburn",
+      "talent": true,
+      "target": "fight",
+      "when": {}
+    },
+    {
+      "id": "corruption",
+      "spell": "Corruption",
+      "level": 4,
+      "target": "fight",
+      "when": {
+        "no_mob_aura": [
+          "Corruption"
+        ]
+      },
+      "note": "the KB's sources disagree (L-star keeps Corruption, Twospooky drops it); kept as the KB's pinned source has it."
+    },
+    {
+      "id": "life_tap",
+      "spell": "Life Tap",
+      "level": 6,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "power_below": 25
+      },
+      "note": "the KB gives no number: 25% is this recipe's."
+    },
+    {
+      "id": "hellfire",
+      "spell": "Hellfire",
+      "level": 30,
+      "target": "self",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mob_distance_max": 10,
+        "mobs_near_mob_min": 5
+      },
+      "note": "mob_distance_max 10 is Hellfire's radius."
+    },
+    {
+      "id": "rain_of_fire",
+      "spell": "Rain of Fire",
+      "level": 20,
+      "target": "fight",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mob_distance_min": 10,
+        "moving": false,
+        "mobs_near_mob_min": 5
+      },
+      "note": "the KB's \"needs range\": Rain of Fire when the pack is beyond Hellfire's radius (the cleave half of the row is not a condition)."
+    },
+    {
+      "id": "searing_pain",
+      "spell": "Searing Pain",
+      "level": 18,
+      "target": "fight",
+      "when": {
+        "moving": false
+      },
+      "note": "Moved after the AoE entries: the filler has no cooldown, so as a rule it would starve every entry the KB lists after it."
+    },
+    {
+      "id": "soul_fire_cd",
+      "spell": "Soul Fire",
+      "level": 30,
+      "target": "fight",
+      "band": "high",
+      "when": {
+        "moving": false,
+        "no_self_aura": [
+          "Improved Soul Fire"
+        ]
+      }
+    },
+    {
+      "id": "conflagrate_cd",
+      "spell": "Conflagrate",
+      "talent": true,
+      "target": "fight",
+      "band": "high",
+      "when": {
+        "mob_aura": [
+          "Immolate"
+        ]
+      }
+    },
+    {
+      "id": "shadowburn_cd",
+      "spell": "Shadowburn",
+      "talent": true,
+      "target": "fight",
+      "band": "high",
+      "when": {}
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/warlock/destruction-fire-ranged-dps.yaml",
+    "sha256": "b715e5bcea4a6e3d8ebc096ead357caf4e6f527b6454bdc60570cbeaddadead0",
+    "preset": "destruction_fire_warlock",
+    "recipe": "tools/kbrotgen/recipes/kb_destruction_fire_warlock.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "pre-cast Soul Fire -> Immolate -> Conflagrate | opener [[d:warlock#1496147940673196062]], [[d:warlock#1496031075112062996]]",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[2]",
+        "text": "Immolate | missing and target lives >9 s [[d:warlock#1465226534221512756]]",
+        "why": "\"the target lives > 9 s\" is not a condition"
+      },
+      {
+        "row": "rotation_single[5]",
+        "text": "assigned curse | missing (1 s GCD)",
+        "why": "raid assignment/marking (which curse the raid assigned)"
+      },
+      {
+        "row": "rotation_single[8]",
+        "text": "Life Tap / mana potion / tea | mana low",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "Immolate each, kill in mark order with Searing Pain",
+        "why": "the Immolate and Searing Pain entries are the single-target list applied to one mob at a time; raid assignment/marking (the mark order)"
+      },
+      {
+        "row": "rotation_aoe[1]",
+        "text": "Hellfire (Wrathstone; warn healers)",
+        "why": "consumable or item (combat_consumables owns items) (Wrathstone); the warning to the healers is not a condition"
+      },
+      {
+        "row": "rotation_aoe[2]",
+        "text": "Rain of Fire",
+        "why": "\"the pack cleaves\" is not a condition; Hellfire (rotation_aoe[1]) is the row's other option"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "Conflagrate | on cooldown with Immolate up; on Thaddius only with a Polarity Charge stack [[d:warlock#1496149965825904764]]",
+        "why": "the Thaddius Polarity Charge exception is not a condition"
+      }
+    ]
+  }
+}

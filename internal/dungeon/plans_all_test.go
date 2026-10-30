@@ -55,7 +55,9 @@ func TestPlanKindStatusAndParty(t *testing.T) {
 
 // offlineMapped are the plans whose legs, doors and steps were written by hand offline (no live walk yet), so they carry steps and are still
 // drafts. A plan leaves the list when its status moves on: TestOfflineMappedPlansAreStillDrafts fails for one that does not.
-var offlineMapped = map[string]bool{"deadmines": true}
+// lower_karazhan_halls: the raid's legs, packs, approach stands and Moroes' gossip step were written offline in the B1 prep from
+// the world DB, the core's instance and boss scripts and the map 532 navmesh (~/TortoiseBots-audit/RAID-PREP-lkh.md).
+var offlineMapped = map[string]bool{"deadmines": true, "lower_karazhan_halls": true, "emerald_sanctum": true, "wailing_caverns-extra": true}
 
 // Ragefire Chasm is the one plan with measured hire data: 800 is the issue's tank floor for its level band (#266).
 func TestRagefireChasmPlanCarriesTheTankFloor(t *testing.T) {

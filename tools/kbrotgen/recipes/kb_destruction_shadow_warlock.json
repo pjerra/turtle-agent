@@ -1,0 +1,213 @@
+{
+  "name": "kb_destruction_shadow_warlock",
+  "class": "warlock",
+  "spec": "destruction_shadow",
+  "role": "ranged-dps",
+  "kb_file": "classes/yaml/warlock/destruction-shadow-ranged-dps.yaml",
+  "preset": "destruction_shadow_warlock",
+  "replaces": [
+    "warlock_affliction"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's SM/Ruin list: Corruption kept up, Shadow Bolt as the filler (instant on a Nightfall/Shadow Trance proc), Shadowburn on a low target, Siphon Life and Drain Soul on a long-lived target, Hellfire or Rain of Fire on five or more stacked mobs. The assigned curse and the 5-man exception are not conditions (kb.unexpressed).",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 1,
+      "text": "assigned curse (+Malediction Curse of Agony) | missing [[d:warlock#1476505618654302291]]",
+      "text_sha": "7c4d03d8c4ac",
+      "entries": [],
+      "unexpressed": "raid assignment/marking (which curse the raid assigned)"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 2,
+      "text": "Corruption | missing",
+      "text_sha": "72a7e0ea44d7",
+      "entries": [
+        {
+          "id": "corruption",
+          "spell": "Corruption",
+          "level": 4,
+          "target": "fight",
+          "when": {
+            "no_mob_aura": [
+              "Corruption"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 3,
+      "text": "Shadow Bolt (instant on Nightfall) | filler",
+      "text_sha": "6c3a216bfd4b",
+      "entries": [
+        {
+          "id": "shadow_bolt_nightfall",
+          "spell": "Shadow Bolt",
+          "level": 1,
+          "target": "fight",
+          "when": {
+            "moving": false,
+            "self_aura": [
+              "Shadow Trance"
+            ]
+          }
+        },
+        {
+          "id": "shadow_bolt",
+          "spell": "Shadow Bolt",
+          "level": 1,
+          "target": "fight",
+          "when": {
+            "moving": false
+          },
+          "note": "Moved after the AoE entry: the filler has no cooldown, so as a rule it would starve every entry the KB lists after it."
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 4,
+      "text": "Shadowburn | target low and no time for a Shadow Bolt [[d:warlock#1476505618654302291]]",
+      "text_sha": "31457cea0826",
+      "entries": [
+        {
+          "id": "shadowburn",
+          "spell": "Shadowburn",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_hp_below": 20
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 5,
+      "text": "Siphon Life | long fights (Patchwerk)",
+      "text_sha": "a43c1947ad0e",
+      "entries": [
+        {
+          "id": "siphon_life",
+          "spell": "Siphon Life",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "no_mob_aura": [
+              "Siphon Life"
+            ]
+          }
+        }
+      ],
+      "unexpressed": "\"long fights\" is not a condition"
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 6,
+      "text": "Drain Soul | long-lived target while Shadowburn on cooldown",
+      "text_sha": "9f5f174f4e85",
+      "entries": [],
+      "unexpressed": "another spell's cooldown (Shadowburn) is not a condition"
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 7,
+      "text": "skip DoTs, pure Shadow Bolt | 5-man dungeons [[d:warlock#1486106500270395473]]",
+      "text_sha": "93453d2ac075",
+      "entries": [],
+      "unexpressed": "the instance type (a 5-man dungeon) is not a condition"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Hellfire or Rain of Fire",
+      "text_sha": "9afb7a0e0e0d",
+      "entries": [
+        {
+          "id": "rain_of_fire",
+          "spell": "Rain of Fire",
+          "level": 20,
+          "target": "fight",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "moving": false,
+            "mobs_near_mob_min": 5
+          }
+        }
+      ],
+      "unexpressed": "Hellfire is the row's other option (nothing in the conditions tells the two apart)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Shadowburn | finisher",
+      "text_sha": "749cec4006ef",
+      "entries": [
+        {
+          "id": "shadowburn_cd",
+          "spell": "Shadowburn",
+          "talent": true,
+          "target": "fight",
+          "band": "high",
+          "when": {
+            "mob_hp_below": 20
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "on-use trinkets | with DoT reapplication",
+      "text_sha": "1b09689ae493",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    }
+  ],
+  "order": [
+    "corruption",
+    "shadow_bolt_nightfall",
+    "shadowburn",
+    "siphon_life",
+    "rain_of_fire",
+    "shadow_bolt",
+    "shadowburn_cd"
+  ],
+  "oracle": {
+    "core": [
+      "Shadow Bolt",
+      "Corruption"
+    ],
+    "situational": [
+      "Shadowburn",
+      "Siphon Life",
+      "Drain Soul",
+      "Hellfire",
+      "Rain of Fire",
+      "Curse of Agony",
+      "Curse of the Elements",
+      "Curse of Shadow",
+      "Curse of Recklessness"
+    ],
+    "never": [],
+    "signature": [
+      "Shadowburn"
+    ],
+    "taunt": []
+  }
+}

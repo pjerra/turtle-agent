@@ -1,0 +1,175 @@
+{
+  "version": 1,
+  "name": "kb_combat_rogue",
+  "class": "rogue",
+  "spec": "combat",
+  "replaces": [
+    "rogue_combat"
+  ],
+  "notes": "The Turtle knowledge base's Combat list (Combat Envenom daggers): Envenom at one combo point before Slice and Dice, Eviscerate at five, Surprise Attack after the mob dodges and below 80 energy, Sinister Strike as the builder, Blade Flurry on with two or more mobs. Backstab waits for a dagger and for the position behind the mob, which the conditions cannot see; the Adrenaline Rush build, the cancelled Blade Flurry, Vanish's threat reset and the items are named in kb.unexpressed.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/rogue/combat-melee-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102971#p102971 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=153716#p153716 (Bayanni, player, 2025-09-29)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=153721#p153721 (Bayanni, player, 2025-09-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=149395#p149395 (Shananagans, player (guide writer), 2025-08-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=149434#p149434 (Shananagans, player (guide writer), 2025-08-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=151497#p151497 (Shananagans, player (guide writer), 2025-09-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=151559#p151559 (Shananagans, player (guide writer), 2025-09-13)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=55498#p55498 (Hctwowfan, player, 2023-08-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=108703#p108703 (Yasara, player, 2024-11-19)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=43985#p43985 (Nightmonster, player, 2023-05-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=96625#p96625 (Poxfox, player, 2024-06-09)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=151549#p151549 (Rachdingue, player, 2025-09-13)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=128331#p128331 (Atreidon, player, 2025-04-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=128330#p128330 (Stealiebones, player, 2025-04-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=95023#p95023 (Gantulga, player, 2024-05-17)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172282#p172282 (Crake, player, 2026-03-25)"
+  ],
+  "priorities": [
+    {
+      "id": "auto_attack",
+      "kind": "attack",
+      "when": {},
+      "note": "The swing is the base every entry waits on: it goes first in the order, as in the Go rotation (rogue_combat)."
+    },
+    {
+      "id": "envenom",
+      "spell": "Envenom",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "combo_points_min": 1,
+        "no_mob_aura": [
+          "Envenom"
+        ]
+      }
+    },
+    {
+      "id": "slice_and_dice",
+      "spell": "Slice and Dice",
+      "level": 10,
+      "target": "fight",
+      "threat": "none",
+      "harmful": false,
+      "when": {
+        "mob_in_reach": true,
+        "combo_points_min": 1,
+        "no_self_aura": [
+          "Slice and Dice"
+        ]
+      },
+      "note": "no_self_aura, not self_aura_missing: the buff lasts under a minute (6 s per combo point), so the under-a-minute rule would spend every combo point on it."
+    },
+    {
+      "id": "eviscerate",
+      "spell": "Eviscerate",
+      "level": 1,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "combo_points_min": 5
+      }
+    },
+    {
+      "id": "surprise_attack",
+      "spell": "Surprise Attack",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "after": "dodge",
+        "power_below": 81
+      }
+    },
+    {
+      "id": "sinister_strike",
+      "spell": "Sinister Strike",
+      "level": 1,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true
+      }
+    },
+    {
+      "id": "blade_flurry",
+      "spell": "Blade Flurry",
+      "level": 30,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "mobs_in_reach_min": 2,
+        "no_self_aura": [
+          "Blade Flurry"
+        ]
+      }
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/rogue/combat-melee-dps.yaml",
+    "sha256": "2c8dab65466bf38325caf17532e595320279c5fdbee6e90089439f5d48479a4a",
+    "preset": "combat_rogue",
+    "recipe": "tools/kbrotgen/recipes/kb_combat_rogue.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[4]",
+        "text": "Backstab | main hand is a dagger AND behind target",
+        "why": "positional (behind the target) not in the conditions"
+      },
+      {
+        "row": "rotation_single[5]",
+        "text": "Sinister Strike | main hand is a sword/axe/mace/fist; never with a dagger main hand (swap weapons instead when you cannot be behind)",
+        "why": "weapon type not in the conditions"
+      },
+      {
+        "row": "rotation_single[6]",
+        "text": "Adrenaline Rush build only: keep Slice and Dice + 5-point Rupture (Taste for Blood); Adrenaline Rush right after a 5-point Rupture; Eviscerate only if both buffs have 20+ s left | talents include Adrenaline Rush; no Envenom",
+        "why": "talents are not a condition: the Adrenaline Rush build only"
+      },
+      {
+        "row": "rotation_single[7]",
+        "text": "Opener: pre-load a combo point on a critter and carry it with Slice and Dice; open with Backstab/Sinister Strike, not stealth | pull",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_aoe[1]",
+        "text": "toggle Blade Flurry off",
+        "why": "cancel/stop casting not expressible"
+      },
+      {
+        "row": "rotation_aoe[2]",
+        "text": "keep Instant Poison on both weapons through mixed trash instead of swapping",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[0]",
+        "text": "Adrenaline Rush (AR build) | after a 5-point Rupture; once at pull if kill < ~3 min, twice if longer [[d:rogue#1424148190663278846]], [[d:rogue#1446573952553058305]]",
+        "why": "talents are not a condition: the Adrenaline Rush build only"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "Blade Flurry | toggle on at 2+ targets, off at 1",
+        "why": "cancel/stop casting not expressible"
+      },
+      {
+        "row": "cooldowns[2]",
+        "text": "Vanish | threat reset when approaching the tank; swap active trinket to passive (new active needs 30 s before use) [[d:rogue#1465825152125374744]], [[d:rogue#1465825846521626935]], [[d:rogue#1494011328833261689]]",
+        "why": "threat is not a condition"
+      },
+      {
+        "row": "cooldowns[3]",
+        "text": "Thistle Tea | energy starved, e.g. in burst windows",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[4]",
+        "text": "Active trinkets / Badge of the Swarmguard | boss burst (with AR); passives such as DFT on trash [[d:rogue#1487230426148765727]]",
+        "why": "consumable or item (combat_consumables owns items)"
+      }
+    ]
+  }
+}

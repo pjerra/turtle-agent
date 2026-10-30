@@ -1,0 +1,211 @@
+{
+  "name": "kb_beast_mastery_hunter",
+  "class": "hunter",
+  "spec": "beast_mastery",
+  "role": "ranged-dps",
+  "kb_file": "classes/yaml/hunter/beast-mastery-ranged-dps.yaml",
+  "preset": "beast_mastery_hunter",
+  "replaces": [
+    "hunter_marksman"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's beast mastery raid list as far as a rotation can say it: Bestial Wrath on cooldown, Steady Shot as the loop, Arcane Shot, Multi-Shot and Volley on packs. Kill Command, the pet's Felstorm/Thunderstomp and the pet trinkets are pet state; the swing timer is not a condition. Aimed Shot and Serpent Sting are the oracle's never list.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 1,
+      "text": "Kill Command | usable AND pet in melee range of the target AND Steady Shot not casting (no GCD; castable up to 4 s into its cooldown window) [[d:hunter#1490812124006711457]], [[d:hunter#1492650379727605830]], [[d:hunter#1484783149413171350]]",
+      "text_sha": "04ef5373d485",
+      "entries": [],
+      "unexpressed": "pet state not in the conditions (the pet in melee range of the target); swing timer not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 2,
+      "text": "Bestial Wrath | off cooldown, with trinkets/Rapid Fire",
+      "text_sha": "a4d33a469345",
+      "entries": [
+        {
+          "id": "bestial_wrath",
+          "spell": "Bestial Wrath",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat"
+          }
+        }
+      ],
+      "unexpressed": "consumable or item (combat_consumables owns items) (the trinkets)"
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 3,
+      "text": "Steady Shot | after each Auto Shot without clipping",
+      "text_sha": "35a4d71d5193",
+      "entries": [
+        {
+          "id": "steady_shot",
+          "spell": "Steady Shot",
+          "level": 4,
+          "target": "fight",
+          "when": {
+            "moving": false
+          },
+          "note": "Moved after the AoE entries: the filler has no cooldown, so as a rule it would starve Arcane Shot and Multi-Shot."
+        }
+      ],
+      "unexpressed": "swing timer not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 4,
+      "text": "Arcane Shot | after Steady when it fits (single target) [[d:hunter#1493031293343236346]]",
+      "text_sha": "7ab6e72a45e4",
+      "entries": [
+        {
+          "id": "arcane_shot",
+          "spell": "Arcane Shot",
+          "level": 6,
+          "target": "fight",
+          "when": {}
+        }
+      ],
+      "unexpressed": "swing timer not in the conditions (the \"after Steady\" part)"
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 5,
+      "text": "never Aimed Shot or Serpent Sting | BM [[d:hunter#1488783178050306048]], [[d:hunter#1490968215290118215]]",
+      "text_sha": "ae769525b0c7",
+      "entries": [],
+      "unexpressed": "a \"never\" rule: in the oracle's never list"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Multi-Shot instead of Arcane Shot in the loop",
+      "text_sha": "499d9451968b",
+      "entries": [
+        {
+          "id": "multi_shot",
+          "spell": "Multi-Shot",
+          "level": 18,
+          "target": "fight",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "mobs_near_mob_min": 2
+          }
+        }
+      ],
+      "unexpressed": "swing timer not in the conditions (the loop position)"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 1,
+      "text": "Volley opener; Gorilla Thunderstomp pet for packs",
+      "text_sha": "ee5a919f0869",
+      "entries": [
+        {
+          "id": "volley",
+          "spell": "Volley",
+          "level": 40,
+          "target": "fight",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "moving": false,
+            "mobs_near_mob_min": 3
+          }
+        }
+      ],
+      "unexpressed": "pet state not in the conditions (the Gorilla's Thunderstomp is the pet's)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Bestial Wrath | on cooldown (18 s enrage, 1.5 min) with trinkets",
+      "text_sha": "877d559a0d39",
+      "entries": [
+        {
+          "id": "bestial_wrath_cd",
+          "spell": "Bestial Wrath",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat"
+          }
+        }
+      ],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "Kill Command | whenever usable; macro into every shot (\"/cast Kill Command /cast Arcane Shot /cast Steady Shot\") [[d:hunter#1493050238653435955]]",
+      "text_sha": "55daf28fe40a",
+      "entries": [],
+      "unexpressed": "pet state not in the conditions; macro/addon (Nampower etc.)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": null,
+      "text": "Devilsaur Tooth | pre-pull, then again after the first pet crit (guarantees a pet crit incl. Kill Command) [[d:hunter#1492033139961368637]]",
+      "text_sha": "5cdd9a006cab",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 3,
+      "priority": null,
+      "text": "Molten Emberstone | on pull; save Blood Fury (no stack) [[d:hunter#1461363355867676672]]",
+      "text_sha": "e7df9ada516d",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    }
+  ],
+  "order": [
+    "bestial_wrath",
+    "arcane_shot",
+    "multi_shot",
+    "volley",
+    "steady_shot",
+    "bestial_wrath_cd"
+  ],
+  "oracle": {
+    "core": [
+      "Kill Command",
+      "Steady Shot",
+      "Arcane Shot"
+    ],
+    "situational": [
+      "Bestial Wrath",
+      "Multi-Shot",
+      "Volley",
+      "Rapid Fire",
+      "Auto Shot"
+    ],
+    "never": [
+      "Aimed Shot",
+      "Serpent Sting"
+    ],
+    "signature": [
+      "Bestial Wrath",
+      "Kill Command"
+    ],
+    "taunt": []
+  }
+}

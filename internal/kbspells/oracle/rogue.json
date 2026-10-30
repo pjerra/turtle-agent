@@ -1,0 +1,83 @@
+{
+  "class": "rogue",
+  "specs": [
+    {
+      "spec": "assassination",
+      "role": "melee-dps",
+      "rotation": "kb_assassination_rogue",
+      "core": [
+        "Envenom",
+        "Slice and Dice",
+        "Noxious Assault",
+        "Eviscerate"
+      ],
+      "situational": [
+        "Cold Blood",
+        "Blade Flurry"
+      ],
+      "never": [
+        "Rupture",
+        "Backstab",
+        "Sinister Strike"
+      ],
+      "signature": [
+        "Cold Blood",
+        "Envenom"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "combat",
+      "role": "melee-dps",
+      "rotation": "kb_combat_rogue",
+      "core": [
+        "Envenom",
+        "Slice and Dice",
+        "Eviscerate",
+        "Sinister Strike"
+      ],
+      "situational": [
+        "Surprise Attack",
+        "Blade Flurry",
+        "Backstab",
+        "Rupture",
+        "Adrenaline Rush",
+        "Vanish"
+      ],
+      "never": [],
+      "signature": [
+        "Blade Flurry"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "subtlety",
+      "role": "melee-dps",
+      "rotation": "kb_subtlety_rogue",
+      "core": [
+        "Hemorrhage",
+        "Slice and Dice",
+        "Rupture",
+        "Eviscerate"
+      ],
+      "situational": [
+        "Expose Armor",
+        "Mark for Death",
+        "Shadow of Death",
+        "Preparation",
+        "Garrote",
+        "Vanish"
+      ],
+      "never": [
+        "Blade Flurry",
+        "Backstab",
+        "Sinister Strike"
+      ],
+      "signature": [
+        "Hemorrhage",
+        "Preparation"
+      ],
+      "taunt": []
+    }
+  ]
+}

@@ -254,8 +254,8 @@ type Waypoint struct {
 	// GMCross says the party does not walk to this point: a GM account moves it there (remote driver, gmCross): the commander's own
 	// character goes to the point (`.appear <lead bot>` when it is not near, then `.go xyz`), `.bot summon <lead bot>` brings the lead
 	// bot, `cmd summon <bot>` the others, and the run goes on once every living member stands within GMCrossRadius yards of the point.
-	// It is for a gap no walk crosses (Wailing Caverns' ramp was the case until 2026-10-18, when that hop became a plain direct step with a
-	// check_skip; the Disciple hop of dungeons/wailing_caverns-extra.json is one). It is a direct waypoint (the file says
+	// It is for a gap no walk crosses (Wailing Caverns' ramp was the case until 2026-10-18, and the Disciple's return of dungeons/wailing_caverns-extra.json until 2026-10-22:
+	// both became a plain direct step with a check_skip). It is a direct waypoint (the file says
 	// "direct": true too) but is not held to the direct limits: the point may be anywhere on the map. The plan check does not walk to it
 	// (the point itself must be on the mesh). Only the remote driver can do it, with a GM account that may .go xyz (level 1 and up, read with `.account`): without
 	// one the run is refused before anything is sent, and the group driver refuses the plan. In the file:
@@ -431,6 +431,11 @@ type Boss struct {
 	Approach []Point `json:"approach,omitempty"`
 	// Hold is PullGroup.Hold for the boss: the run leader's row for the fight is the event's hold (Archaedas).
 	Hold *Hold `json:"hold,omitempty"`
+	// WaitS is how long the run leader waits at the boss's point for him to come before its instance search and pause
+	// (seconds, 1-MaxTimeoutS; the row's `timeout_s`; 0: the run leader's own 60 s). Only a boss who patrols needs it:
+	// the rows carry no patrol path, so the party stands at his point and waits for him, and a round longer than the
+	// default is missed (Wailing Caverns' Kresh walks 525.9 yd at 2.5 yd/s, about 210 s a round: 300).
+	WaitS int `json:"wait_s,omitempty"`
 }
 
 // The two teams a Team field can name. The driver learns the leader's from its race (session.Team).
@@ -853,6 +858,8 @@ type rawBoss struct {
 	NeedsWalk bool             `json:"needs_walk"`
 	Approach  []rawPoint       `json:"approach"`
 	Hold      *rawHold         `json:"hold"`
+	// WaitS is Boss.WaitS.
+	WaitS int `json:"wait_s"`
 }
 
 type rawStep struct {
@@ -1374,6 +1381,10 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 				b.Tactics = r.Boss.Tactics
 			}
 		}
+		if r.Boss.WaitS < 0 || r.Boss.WaitS > MaxTimeoutS {
+			c.fail(bp+".wait_s", "%d s is outside 1-%d (omit it for the run leader's 60 s)", r.Boss.WaitS, MaxTimeoutS)
+		}
+		b.WaitS = r.Boss.WaitS
 		b.Approach = c.approach(bp+".approach", r.Boss.Approach)
 		b.Hold = c.hold(bp+".hold", r.Boss.Hold, false)
 		if b.Hold != nil && b.LootItem != nil {

@@ -1,0 +1,199 @@
+{
+  "version": 1,
+  "name": "kb_elemental_shaman",
+  "class": "shaman",
+  "spec": "elemental",
+  "replaces": [
+    "shaman_elemental"
+  ],
+  "notes": "The Turtle knowledge base's elemental list: Elemental Mastery before a fresh Flame Shock, Flame Shock kept up, Chain Lightning on cooldown, Lightning Bolt as the filler, Earthquake at two mobs and the shocks' instant cases. Molten Blast's refresh needs the debuff's remaining time, which a condition cannot see; the totems and the trinkets stay with the preset and combat_consumables.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/shaman/elemental-ranged-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102972#p102972 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=145822#p145822 (Torta, staff, 2025-08-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=148454#p148454 (Torta, staff, 2025-08-26)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=124504#p124504 (Torta, staff, 2025-03-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=154168#p154168 (Torta, staff, 2025-10-03)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=173490#p173490 (Torta, staff, 2026-03-31)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=134625#p134625 (Agentsmith, player, 2025-06-07)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=117662#p117662 (Akos1896, player, 2025-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=174001#p174001 (Atreidon, player, 2026-04-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172156#p172156 (Atreidon, player, 2026-03-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=174156#p174156 (pagu, player, 2026-04-06)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=175015#p175015 (Mdzielak, player, 2026-04-13)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=135886#p135886 (Bigsmerf, player, 2025-06-16)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=174801#p174801 (Atreidon, player, 2026-04-11)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=151552#p151552 (pagu, player, 2025-09-13)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=170416#p170416 (Kokuyoo, player, 2026-03-09)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171503#p171503 (Kokuyoo, player, 2026-03-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171699#p171699 (Duids, player, 2026-03-21)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172687#p172687 (Mdzielak, player, 2026-03-27)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=174373#p174373 (Mdzielak, player, 2026-04-07)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=152498#p152498 (Elisleris, player, 2025-09-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=153164#p153164 (Duids, player, 2025-09-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166819#p166819 (pagu, player, 2026-01-29)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=149715#p149715 (Skegg, player (guide writer), 2025-09-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=110875#p110875 (Mimiwarmini, player (guide writer), 2024-12-02)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=175219#p175219 (Atreidon, player, 2026-04-14)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=153069#p153069 (Duids, player, 2025-09-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=136616#p136616 (Agentsmith, player, 2025-06-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=150999#p150999 (Skegg, player, 2025-09-09)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=175273#p175273 (Mdzielak, player, 2026-04-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=151369#p151369 (Duids, player, 2025-09-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=152504#p152504 (Duids, player, 2025-09-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=167850#p167850 (Mimiwarmini, player, 2026-02-10)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=168359#p168359 (Atreidon, player, 2026-02-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=159080#p159080 (Ironbob, player, 2025-11-10)",
+    " (Not Normal, player, 2026-04-01)",
+    " (Not Normal, player, 2026-03-23)",
+    " (Ordinary Joe, player, 2026-04-06)",
+    " (Ordinary Joe, player, 2026-03-25)",
+    " (Not Normal, player, 2026-03-12)",
+    " (Aest, player, 2026-03-22)"
+  ],
+  "priorities": [
+    {
+      "id": "elemental_mastery",
+      "spell": "Elemental Mastery",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "no_mob_aura": [
+          "Flame Shock"
+        ]
+      },
+      "note": "The KB's snapshot order: Elemental Mastery, then the fresh Flame Shock."
+    },
+    {
+      "id": "flame_shock",
+      "spell": "Flame Shock",
+      "level": 10,
+      "target": "fight",
+      "when": {
+        "no_mob_aura": [
+          "Flame Shock"
+        ]
+      }
+    },
+    {
+      "id": "chain_lightning",
+      "spell": "Chain Lightning",
+      "level": 32,
+      "target": "fight",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "moving": false
+      },
+      "note": "The KB's 'on cooldown when mana allows'; the KB's Clearcasting case is the same cast, and the mana floor is the spell's own cost."
+    },
+    {
+      "id": "earthquake",
+      "spell": "Earthquake",
+      "level": 40,
+      "target": "fight",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "moving": false,
+        "mobs_near_mob_min": 2
+      },
+      "note": "The KB's 'while bugged' note says its single-target damage is neutral: two mobs is its threshold here. Moved ahead of the Lightning Bolt filler, which would take every tick."
+    },
+    {
+      "id": "fire_nova_totem",
+      "spell": "Fire Nova Totem",
+      "level": 12,
+      "target": "self",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mobs_near_mob_min": 4
+      },
+      "note": "The KB's fire-slot totem on big packs; the totem manager drops the standing totems. It sits after Earthquake and Chain Lightning and above the filler, as the KB says."
+    },
+    {
+      "id": "lightning_bolt",
+      "spell": "Lightning Bolt",
+      "level": 1,
+      "target": "fight",
+      "when": {
+        "moving": false
+      },
+      "note": "The filler waits for the player to stand still; Earth Shock covers the moving case."
+    },
+    {
+      "id": "earth_shock_moving",
+      "spell": "Earth Shock",
+      "level": 4,
+      "target": "fight",
+      "when": {
+        "moving": true
+      },
+      "note": "The class_interrupt strategy owns the interrupt case (Earth Shock)."
+    },
+    {
+      "id": "earth_shock_low",
+      "spell": "Earth Shock",
+      "level": 4,
+      "target": "fight",
+      "when": {
+        "mob_hp_below": 20
+      },
+      "note": "'Never as filler': it takes a moving player or a nearly dead mob, not the filler slot."
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/shaman/elemental-ranged-dps.yaml",
+    "sha256": "000d1038deea73d3a5fdbb544a31c12b37b15c3d9b2e2ae966c1d275a9850964",
+    "preset": "elemental_shaman",
+    "recipe": "tools/kbrotgen/recipes/kb_elemental_shaman.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Searing Totem (Flametongue Totem in a melee group); other totems | before pull",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[1]",
+        "text": "Elemental Mastery / trinkets, then Flame Shock | target not fire-immune; Flame Shock snapshots [[d:shaman#1420830381762154628]]",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "rotation_single[2]",
+        "text": "Molten Blast | Flame Shock about to expire (~every 10-12 s); refreshes to full [[d:shaman#1482850420484210790]] [[d:shaman#1492517323838460035]]",
+        "why": "time left on an aura is not in the conditions"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "Earthquake and Chain Lightning on cooldown, Lightning Bolt filler",
+        "why": "nothing to add: the row names no cast the list does not already have"
+      },
+      {
+        "row": "rotation_aoe[1]",
+        "text": "Flame Shock several targets and refresh with Molten Blast",
+        "why": "a debuff on several targets is not in the conditions"
+      },
+      {
+        "row": "rotation_aoe[3]",
+        "text": "Oil of Immolation",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[0]",
+        "text": "Elemental Mastery | right before a fresh Flame Shock (snapshot); weak otherwise [[d:shaman#1485731517710860439]]",
+        "why": "nothing to add: the row names no cast the list does not already have"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "Blood Fury (Orc) | with Elemental Mastery; beats Berserking [[d:shaman#1471895235184295960]]",
+        "why": "not in the Turtle spell data"
+      }
+    ]
+  }
+}

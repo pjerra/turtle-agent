@@ -103,14 +103,6 @@ var (
 	bNormDecGUID = regexp.MustCompile(`\b\d{17,20}\b`)
 )
 
-// builtinRules is the normaliser's fixed first layer (spec section 5).
-var builtinRules = []NormRule{
-	{Match: `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})`, Replace: "<TIME>"},
-	{Match: `\b\d{2}:\d{2}:\d{2}\b`, Replace: "<CLOCK>"},
-	{Match: `\b0x[0-9A-Fa-f]{16}\b`, Replace: "<GUID>"},
-	{Match: `\b\d{17,20}\b`, Replace: "<GUID>"},
-}
-
 // normaliseOne applies the builtins then the file rules, in order, to one line.
 func normaliseOne(line string, rules []NormRule) string {
 	line = bNormTime.ReplaceAllString(line, "<TIME>")

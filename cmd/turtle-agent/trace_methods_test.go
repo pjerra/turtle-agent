@@ -202,7 +202,7 @@ func TestBrainSessionHasARunIDAndATrace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.Header.Source != "brain" || f.Header.Run != "r-brain-1" || f.End == nil || f.End.Reason != "stopped" || len(f.Oracles) != 11 || len(f.Party) != 1 || !f.Party[0].Lead {
+	if f.Header.Source != "brain" || f.Header.Run != "r-brain-1" || f.End == nil || f.End.Reason != "stopped" || len(f.Oracles) != 13 || len(f.Party) != 1 || !f.Party[0].Lead {
 		t.Fatalf("%+v", f.Header)
 	}
 	var states []string
@@ -273,7 +273,7 @@ func TestTraceScoreCommand(t *testing.T) {
 		Failed  []string
 		Checks  []trace.Check
 	}
-	if err := json.Unmarshal([]byte(lines[1]), &v); err != nil || v.Run != "r-dead" || v.Verdict != "fail" || len(v.Failed) != 1 || v.Failed[0] != "deaths" || len(v.Checks) != 11 {
+	if err := json.Unmarshal([]byte(lines[1]), &v); err != nil || v.Run != "r-dead" || v.Verdict != "fail" || len(v.Failed) != 1 || v.Failed[0] != "deaths" || len(v.Checks) != 13 {
 		t.Fatalf("%v %+v", err, v)
 	}
 	// --summary writes the summary beside the trace.
@@ -282,7 +282,7 @@ func TestTraceScoreCommand(t *testing.T) {
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "r-clean.summary.json"))
 	var s trace.Summary
-	if err != nil || json.Unmarshal(b, &s) != nil || s.Run != "r-clean" || s.Status != "complete" || s.Verdict != "pass" || len(s.Oracles) != 11 || s.Bytes == 0 || s.Src != "agent" || s.Scorer == "" {
+	if err != nil || json.Unmarshal(b, &s) != nil || s.Run != "r-clean" || s.Status != "complete" || s.Verdict != "pass" || len(s.Oracles) != 13 || s.Bytes == 0 || s.Src != "agent" || s.Scorer == "" {
 		t.Fatalf("%v %s", err, b)
 	}
 	// Usage errors.
@@ -310,7 +310,7 @@ func TestBrainTraceFinishEndsASessionThatStoppedEarly(t *testing.T) {
 		t.Fatal("still listed as live")
 	}
 	f, err := trace.Read(filepath.Join(dir, "r-early.jsonl"))
-	if err != nil || f.End == nil || f.End.Reason != "stopped" || len(f.Oracles) != 11 || f.Party[0].G != "0x2a" {
+	if err != nil || f.End == nil || f.End.Reason != "stopped" || len(f.Oracles) != 13 || f.Party[0].G != "0x2a" {
 		t.Fatalf("%v %+v", err, f)
 	}
 	bt.finish("r-early") // a second call is harmless

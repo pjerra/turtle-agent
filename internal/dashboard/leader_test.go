@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/pjerra/turtle-agent/internal/dungeon"
 )
 
 func observedDungeon(state string, step int, leg, kind, phase, note, runState string) string {
@@ -65,5 +67,49 @@ func TestCardWithoutRunLeader(t *testing.T) {
 	c := BuildCard(Inputs{Agent: Agent{ID: "1"}, Now: t0, Status: json.RawMessage(statusJSON), Dungeon: json.RawMessage(dungeonJSON("leg 0 (one): walk to 1 2 3", 0))})
 	if c.Run.Leader != nil || c.Run.Phase == "leader" {
 		t.Fatalf("%+v", c.Run)
+	}
+}
+
+// A raid run's card shows the ready block as subgroup-less rows (name, class, role, level, item level),
+// the plan's raid size, and the dashboard link when the slot carries tb_dashboard_url.
+func TestCardShowsARaidRun(t *testing.T) {
+	raid := func() *dungeon.Plan {
+		p, err := dungeon.Parse("lkh.json", []byte(`{"version":1,"name":"lower_karazhan_halls","kind":"raid","status":"live-checked","map":532,
+ "entrance":{"x":0,"y":0,"z":0},"raid":{"size":10,"tanks":2,"healers":3,"dps":5},"legs":[{"to":{"x":0,"y":0,"z":0},
+ "pull_groups":[{"entries":[1],"positions":[{"x":0,"y":0,"z":0}]}]}]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	dungeonBody := `{"running":true,"state":"running","last_progress_at":"2026-10-14T16:40:00Z","stall_level":"none",
+ "report":{"plan":"lower_karazhan_halls","map":532,"state":"running","started":"2026-10-14T16:35:00Z","seconds":300,"current":"run leader: x",
+  "legs":[{"leg":0,"name":"a","result":"running","pulls":0}],"run_id":"r-9",
+  "remote":{"mode":"observe","lead_bot":"Rtank","bots":["Rheala","Rdpsa"],"tank":"Rtank",
+   "observe":{"started":true,"state":"running","step":1,"steps":41,"leg":"a","kind":"pull","phase":"pull","note":"pulling","lines":9}},
+  "ready":{"bots":[{"name":"Rtank","class":"warrior","role":"tank","level":60,"ilvl":63.5},{"name":"Rheala","class":"priest","role":"healer","level":60},{"name":"Rdpsa","class":"mage","role":"dps","level":60,"ilvl":61}]}}}`
+	in := Inputs{Agent: Agent{ID: "1", TBDashboardURL: "http://tb:8095"}, Now: t0,
+		Status: json.RawMessage(statusJSON), Dungeon: json.RawMessage(dungeonBody), Plan: raid()}
+	c := BuildCard(in)
+	if c.Run.Raid != 10 {
+		t.Fatalf("raid size: %+v", c.Run)
+	}
+	if c.Run.RaidView != "http://tb:8095/#commanders" {
+		t.Fatalf("raid view: %+v", c.Run)
+	}
+	if len(c.Bots) != 3 || c.Bots[0].Name != "Rtank" || !c.Bots[0].Lead || c.Bots[0].Level != 60 || c.Bots[0].ItemLevel != 63.5 {
+		t.Fatalf("bots: %+v", c.Bots)
+	}
+	if c.Bots[1].Role != "healer" || c.Bots[1].ItemLevel != 0 || c.Bots[2].Class != "mage" || c.Bots[2].Level != 60 {
+		t.Fatalf("bots: %+v", c.Bots)
+	}
+	// Without the settings key there is no link, and without a raid plan there is no raid size.
+	in.Agent.TBDashboardURL = ""
+	if c := BuildCard(in); c.Run.RaidView != "" || c.Run.Raid != 10 {
+		t.Fatalf("link without the key: %+v", c.Run)
+	}
+	in.Plan = nil
+	if c := BuildCard(in); c.Run.Raid != 0 {
+		t.Fatalf("raid without a raid plan: %+v", c.Run)
 	}
 }

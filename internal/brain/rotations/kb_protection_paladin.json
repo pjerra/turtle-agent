@@ -1,0 +1,251 @@
+{
+  "version": 1,
+  "name": "kb_protection_paladin",
+  "class": "paladin",
+  "spec": "protection",
+  "replaces": [
+    "paladin_retribution"
+  ],
+  "notes": "The knowledge base's protection paladin: Righteous Fury and Sanctity Aura, a seal, Holy Strike and Judgement on cooldown with a re-seal after each judgement, Holy Shield when mana permits, Consecration at full rank above 30% mana and rank 1 below, Seal of Wisdom when the mana runs low. Taunting stays with role_tank; Exorcism's creature gate and the fight-timeline rows are listed in kb.unexpressed.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/paladin/protection-tank.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=52649#p52649 (Getplucked, player, 2023-07-08)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=27457#p27457 (Unchallenged, player (guide writer), 2024-12-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166176#p166176 (Akos1896, player, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166168#p166168 (Reploidrocsa, player, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=165909#p165909 (Reploidrocsa, player, 2026-01-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=165936#p165936 (Captain4k, player, 2026-01-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=143606#p143606 (Everran, player, 2025-08-07)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=153809#p153809 (Azcron, player, 2025-09-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=153945#p153945 (Schlaechter, player, 2025-10-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=138797#p138797 (Atreidon, player, 2025-07-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=147010#p147010 (Atreidon, player, 2025-08-19)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=123491#p123491 (excin, player, 2025-03-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=157229#p157229 (Crake, player, 2025-10-27)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=148436#p148436 (Jendaille, player, 2025-08-26)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102969#p102969 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=124504#p124504 (Torta, staff, 2025-03-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171608#p171608 (Torta, staff, 2026-03-21)",
+    " (Mithreon, player (channel expert), 2026-04-10)",
+    " (Grey, player (MT, theorycrafter), 2026-03-07)",
+    " (Grey, player (MT, theorycrafter), 2026-03-23)",
+    " (Proph, player (threat-sim author), 2026-03-23)",
+    " (Grey, player (MT, theorycrafter), 2026-03-19)",
+    " (Istenneveben, player, 2026-04-11)"
+  ],
+  "priorities": [
+    {
+      "id": "righteous_fury",
+      "spell": "Righteous Fury",
+      "level": 16,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "no_self_aura": [
+          "Righteous Fury"
+        ]
+      }
+    },
+    {
+      "id": "sanctity_aura",
+      "spell": "Sanctity Aura",
+      "level": 30,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "no_self_aura": [
+          "Sanctity Aura"
+        ]
+      }
+    },
+    {
+      "id": "seal_of_righteousness",
+      "spell": "Seal of Righteousness",
+      "level": 1,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "power_above": 20,
+        "no_self_aura": [
+          "Seal of Righteousness",
+          "Seal of Command",
+          "Seal of Wisdom",
+          "Seal of Light",
+          "Seal of the Crusader",
+          "Seal of Justice"
+        ]
+      },
+      "note": "the power gate hands the seal to Seal of Wisdom below 20% mana (rotation_aoe[6])"
+    },
+    {
+      "id": "holy_strike",
+      "spell": "Holy Strike",
+      "level": 4,
+      "target": "fight",
+      "band": "high",
+      "when": {}
+    },
+    {
+      "id": "judgement",
+      "spell": "Judgement",
+      "level": 4,
+      "target": "fight",
+      "band": "high",
+      "when": {}
+    },
+    {
+      "id": "holy_shield",
+      "spell": "Holy Shield",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "power_above": 30,
+        "no_self_aura": [
+          "Holy Shield"
+        ]
+      }
+    },
+    {
+      "id": "consecration",
+      "spell": "Consecration",
+      "level": 20,
+      "target": "fight",
+      "threat": "aoe",
+      "when": {
+        "power_above": 30
+      }
+    },
+    {
+      "id": "consecration_rank1",
+      "spell": "Consecration",
+      "level": 20,
+      "rank": 1,
+      "target": "fight",
+      "threat": "aoe",
+      "when": {
+        "power_below": 30
+      }
+    },
+    {
+      "id": "seal_of_wisdom",
+      "spell": "Seal of Wisdom",
+      "level": 18,
+      "target": "self",
+      "when": {
+        "mobs_in_reach_min": 3,
+        "power_below": 20,
+        "no_self_aura": [
+          "Seal of Righteousness",
+          "Seal of Command",
+          "Seal of Wisdom",
+          "Seal of Light",
+          "Seal of the Crusader",
+          "Seal of Justice"
+        ]
+      }
+    },
+    {
+      "id": "divine_shield",
+      "spell": "Divine Shield",
+      "level": 34,
+      "target": "self",
+      "band": "emergency",
+      "when": {
+        "self_hp_below": 20
+      }
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/paladin/protection-tank.yaml",
+    "sha256": "71ae6b6813c01b37945f12b0ecdc74c716f7408efebc277ae1ceea2e465b28ab",
+    "preset": "protection_paladin",
+    "recipe": "tools/kbrotgen/recipes/kb_protection_paladin.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Righteous Fury (re-apply after death; toggle after respec), Sanctity Aura (Retribution Aura if someone else has Sanctity), blessing, Seal of Righteousness | pre-pull [[d:paladin#1487898897144877108]] [[d:paladin#1469723489400262698]]",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[1]",
+        "text": "Pre-cast Holy Shield, run in, active SP trinket, Judgement of Righteousness, Holy Strike, reseal SoR | opener [[d:paladin#1479624488675971323]] [[d:paladin#1474054737547497583]]",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[7]",
+        "text": "Exorcism | Undead/Demon, nothing else ready; Consecration first if both ready [[d:paladin#1462761249325711431]]",
+        "why": "creature type not in the conditions"
+      },
+      {
+        "row": "rotation_single[8]",
+        "text": "Hand of Reckoning | mob not targeting you",
+        "why": "taunt: role_tank owns taunting"
+      },
+      {
+        "row": "rotation_single[9]",
+        "text": "Crusader Strike (Zealous Defence) | ONLY before a planned big hit / tank swap (Patchwerk, Twins, Knight); never for threat [[d:paladin#1484833025177944206]] [[d:paladin#1487459563707044021]]",
+        "why": "fight timeline (a planned big hit or a tank swap) not in the conditions"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "No Consecration; Holy Strike skull, Judgement the second, tab",
+        "why": "covered by rotation_single[2-4]: the single-target strikes and judgement; Consecration waits for three or more mobs"
+      },
+      {
+        "row": "rotation_aoe[1]",
+        "text": "Pre-cast Consecration where mobs meet you (front-load triggers on mob entry)",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_aoe[2]",
+        "text": "Single-target priority on skull; tab Judgement/Holy Strike/taunt onto others; lock mobs one by one",
+        "why": "raid assignment/marking"
+      },
+      {
+        "row": "rotation_aoe[3]",
+        "text": "Rank-5 Consecration at most 1-2 casts per pack",
+        "why": "covered by rotation_single[6]: the mana-gated Consecration ranks"
+      },
+      {
+        "row": "rotation_aoe[4]",
+        "text": "Goblin Sapper Charge on the pull",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "rotation_aoe[5]",
+        "text": "Greater Blessing spam (not Wisdom)",
+        "why": "friendly target not in the conditions"
+      },
+      {
+        "row": "cooldowns[0]",
+        "text": "Bulwark of the Righteous | Maexxna, Gothik; Anomalus at 30+ stacks with a GAPP [[d:paladin#1462761249325711431]] [[d:paladin#1446932033933934622]]",
+        "why": "fight knowledge (named bosses) not in the conditions"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "Holy Shield | pre-cast before every pull; needed for the avoidance cap",
+        "why": "covered by rotation_single[5]: the Holy Shield entry"
+      },
+      {
+        "row": "cooldowns[2]",
+        "text": "Greater Stoneshield Potion | Patchwerk, Kel'Thuzad, Sapphiron, Loatheb, Faerlina [[d:paladin#1462761249325711431]]",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[3]",
+        "text": "Active SP trinket | on pull before the first Holy Strike (Draconic Infused Emblem / ToEP / Essence of Sapphiron) [[d:paladin#1450071115706794114]]",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[5]",
+        "text": "Blessing of Protection | on the other tank to take the boss back; on a DPS with aggro [[d:paladin#1448374029227528273]]",
+        "why": "friendly target not in the conditions"
+      }
+    ]
+  }
+}

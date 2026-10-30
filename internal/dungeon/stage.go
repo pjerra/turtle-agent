@@ -615,15 +615,4 @@ func isOffMeshFault(nav Navmesh, mapID uint32, at Point) bool {
 	return math.Abs(float64(n[2]-at.Z)) > 3.0 || math.Hypot(float64(n[0]-at.X), float64(n[1]-at.Y)) > 2.5
 }
 
-func containsRefusal(s, sub string) bool {
-	return len(s) >= len(sub) && (func() bool {
-		for i := 0; i+len(sub) <= len(s); i++ {
-			if s[i:i+len(sub)] == sub {
-				return true
-			}
-		}
-		return false
-	})()
-}
-
 func toVec(p Point) navmesh.Vec3 { return navmesh.Vec3{p.X, p.Y, p.Z} }

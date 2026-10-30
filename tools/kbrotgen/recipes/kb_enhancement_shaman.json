@@ -1,0 +1,305 @@
+{
+  "name": "kb_enhancement_shaman",
+  "class": "shaman",
+  "spec": "enhancement",
+  "role": "melee-dps",
+  "kb_file": "classes/yaml/shaman/enhancement-melee-dps.yaml",
+  "preset": "enhancement_shaman",
+  "replaces": [
+    "shaman_enhancement"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's enhancement list: Stormstrike on cooldown, Lightning Strike with a Lightning Shield up, the Flame Shock / Earth Shock loop, the auto attack and the shield upkeep with Water Shield when the mana is short. The pre-pull imbue and totems, the first-swing opener and the shock loop's alternation are not the file's.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 1,
+      "text": "Pre-pull: Windfury Weapon, Lightning Shield, totems Strength of Earth / Windfury / Flametongue / Mana Spring | before pull",
+      "text_sha": "5ab4e108b76d",
+      "entries": [],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 2,
+      "text": "Let the first white swing land before the first Stormstrike | opener [[d:shaman#1434594354118524958]]",
+      "text_sha": "2952cbf49c47",
+      "entries": [],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 3,
+      "text": "Stormstrike | on cooldown [[d:shaman#1450924897978023976]]",
+      "text_sha": "11404e926873",
+      "entries": [
+        {
+          "id": "stormstrike",
+          "spell": "Stormstrike",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 4,
+      "text": "Lightning Strike (Rank 3) | on cooldown with Lightning Shield up; macros must call Rank 3 [[d:shaman#1484940392347734207]]",
+      "text_sha": "134b8b117ffb",
+      "entries": [
+        {
+          "id": "lightning_strike",
+          "spell": "Lightning Strike",
+          "talent": true,
+          "target": "fight",
+          "note": "The KB's Rank 3 is this ability's highest rank: the engine casts the highest rank the book has.",
+          "when": {
+            "mob_in_reach": true,
+            "self_aura": [
+              "Lightning Shield"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 5,
+      "text": "Shock loop: Flame Shock -> Earth Shock -> Earth Shock | shock off cooldown; Stormstrike before Earth Shock; skip Flame Shock on fire-immune or short-lived targets [[d:shaman#1489381819735605390]]",
+      "text_sha": "79b9d889fd9a",
+      "entries": [
+        {
+          "id": "flame_shock",
+          "spell": "Flame Shock",
+          "level": 10,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "no_mob_aura": [
+              "Flame Shock"
+            ]
+          }
+        },
+        {
+          "id": "earth_shock",
+          "spell": "Earth Shock",
+          "level": 4,
+          "target": "fight",
+          "note": "The KB's loop Flame Shock -> Earth Shock -> Earth Shock: the alternation is not a condition, so Flame Shock refreshes on its own entry and Earth Shock fills.",
+          "when": {
+            "mob_in_reach": true
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 6,
+      "text": "Auto-attack (/startattack) | always",
+      "text_sha": "f4acef6504bd",
+      "entries": [
+        {
+          "id": "auto_attack",
+          "kind": "attack",
+          "note": "Queued first: the KB's opener lets the first white swing land before Stormstrike.",
+          "when": {}
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 7,
+      "text": "Lightning Shield; Water Shield when mana is short | charges 0 or mana low [[d:shaman#1457507332471783485]]",
+      "text_sha": "f0e2e1621e1d",
+      "entries": [
+        {
+          "id": "lightning_shield",
+          "spell": "Lightning Shield",
+          "level": 8,
+          "target": "self",
+          "note": "Charges are not a condition: the shield goes back up when it is gone.",
+          "when": {
+            "state": "combat",
+            "no_self_aura": [
+              "Lightning Shield",
+              "Water Shield"
+            ]
+          }
+        },
+        {
+          "id": "water_shield",
+          "spell": "Water Shield",
+          "level": 26,
+          "target": "self",
+          "band": "high",
+          "note": "The KB's 'mana low' has no number: 40% is the healer engine's mana-save threshold.",
+          "when": {
+            "state": "combat",
+            "power_below": 40,
+            "no_self_aura": [
+              "Water Shield"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Single-target rotation on the kill target",
+      "text_sha": "58cf09d1fb65",
+      "entries": [],
+      "unexpressed": "nothing to add: the row names no cast the list does not already have"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 1,
+      "text": "Fire Nova Totem (Flametongue raises fire totem damage 30%)",
+      "text_sha": "cb3bab487723",
+      "entries": [
+        {
+          "id": "fire_nova_totem",
+          "spell": "Fire Nova Totem",
+          "level": 12,
+          "target": "self",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "mobs_near_mob_min": 3
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 2,
+      "text": "Chain Lightning",
+      "text_sha": "36951c674a8d",
+      "entries": [
+        {
+          "id": "chain_lightning",
+          "spell": "Chain Lightning",
+          "level": 32,
+          "target": "fight",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "mobs_near_mob_min": 3,
+            "self_aura": [
+              "Clearcasting"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 3,
+      "priority": 1,
+      "text": "Fire Nova again when Chain Lightning is on cooldown; Magma only if mana allows",
+      "text_sha": "e5e6b67b530a",
+      "entries": [
+        {
+          "id": "magma_totem",
+          "spell": "Magma Totem",
+          "level": 26,
+          "target": "self",
+          "threat": "aoe",
+          "harmful": true,
+          "note": "Moved after the Fire Nova entry: the KB's last-resort totem on large packs. Fire Nova again is the same entry's cooldown.",
+          "when": {
+            "mobs_near_mob_min": 5
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": 0,
+      "text": "Bloodlust | 5-min CD; at fight start once Stormstrike and a shock are rolling, stacked with Juju Flurry / Potion of Quickness / Kiss of the Spider",
+      "text_sha": "c88ad088fa6a",
+      "entries": [
+        {
+          "id": "bloodlust",
+          "spell": "Bloodlust",
+          "level": 40,
+          "target": "self",
+          "band": "high",
+          "note": "The KB's stack (Juju Flurry, Potion of Quickness, Kiss of the Spider) is consumables.",
+          "when": {
+            "state": "combat"
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": 0,
+      "text": "Blood Fury (Orc) | with Bloodlust; 120 AP + 60 SP, lowers healing received [[d:shaman#1439185343772360704]]",
+      "text_sha": "e90ddd30134f",
+      "entries": [],
+      "unexpressed": "not in the Turtle spell data"
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": 0,
+      "text": "Limited Invulnerability Potion | emergency threat escape [[d:shaman#1489323335161614478]]",
+      "text_sha": "d5311fab1846",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    }
+  ],
+  "order": [
+    "auto_attack",
+    "stormstrike",
+    "lightning_strike",
+    "flame_shock",
+    "earth_shock",
+    "lightning_shield",
+    "water_shield",
+    "fire_nova_totem",
+    "chain_lightning",
+    "magma_totem",
+    "bloodlust"
+  ],
+  "oracle": {
+    "core": [
+      "Stormstrike",
+      "Lightning Strike",
+      "Flame Shock",
+      "Earth Shock"
+    ],
+    "situational": [
+      "Fire Nova Totem",
+      "Chain Lightning",
+      "Magma Totem",
+      "Lightning Shield",
+      "Water Shield",
+      "Bloodlust",
+      "Windfury Weapon",
+      "Rockbiter Weapon"
+    ],
+    "never": [],
+    "signature": [
+      "Stormstrike",
+      "Lightning Strike"
+    ],
+    "taunt": []
+  }
+}

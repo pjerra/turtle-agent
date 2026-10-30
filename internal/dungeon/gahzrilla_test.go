@@ -230,7 +230,6 @@ type giveFake struct {
 	bags     map[string]map[uint32]int
 	gave     []string // "<bot> <guid> <entry>"
 	loseGive bool     // the GM line runs but the item never arrives
-	noGUID   bool
 }
 
 func newGiveFake(t *testing.T) *giveFake {

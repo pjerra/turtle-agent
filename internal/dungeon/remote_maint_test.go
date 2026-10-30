@@ -34,7 +34,6 @@ type maintSend struct {
 	bot    string
 	x      float32
 	combat bool
-	leg    int
 }
 
 func (g *maintFake) BotLines(ctx context.Context, command string, wait time.Duration, done func(string) bool) ([]string, bool, error) {
@@ -50,7 +49,7 @@ func newMaintFake(t *testing.T) *maintFake {
 	return g
 }
 
-func runMaint(t *testing.T, g RemoteGame, plan *Plan, o RemoteOptions, dir string, mod func(*Config, *RemoteDriver)) (Report, error, *RemoteDriver) {
+func runMaint(t *testing.T, g RemoteGame, plan *Plan, o RemoteOptions, dir string, mod func(*Config, *RemoteDriver)) (Report, *RemoteDriver, error) {
 	t.Helper()
 	cfg := DefaultConfig()
 	cfg.PostFight, cfg.AddsWait = 2*time.Second, 4*time.Second
@@ -67,7 +66,7 @@ func runMaint(t *testing.T, g RemoteGame, plan *Plan, o RemoteOptions, dir strin
 	if !ended {
 		t.Fatal("the report does not say the run ended")
 	}
-	return rep, err, d
+	return rep, d, err
 }
 
 func maintEvents(t *testing.T, dir string) []trace.Event {
@@ -90,7 +89,7 @@ func maintEvents(t *testing.T, dir string) []trace.Event {
 func TestMaintenanceFiresOnLegs3And6(t *testing.T) {
 	g := newMaintFake(t)
 	dir := t.TempDir()
-	rep, err, _ := runMaint(t, g, maintPlan(8), kitOpts(), dir, nil)
+	rep, _, err := runMaint(t, g, maintPlan(8), kitOpts(), dir, nil)
 	if err != nil || rep.State != "done" {
 		t.Fatalf("%v %v", err, rep.Notes)
 	}
@@ -123,18 +122,18 @@ func TestMaintenanceFiresOnLegs3And6(t *testing.T) {
 // 0 turns it off, in the tunable and in the config; fewer than 4 legs never reach leg 3.
 func TestMaintenanceOffAndShortRuns(t *testing.T) {
 	g := newMaintFake(t)
-	rep, err, _ := runMaint(t, g, maintPlan(8), kitOpts(), "", func(c *Config, d *RemoteDriver) { d.cfg.MaintenanceEveryLegs = 0 })
+	rep, _, err := runMaint(t, g, maintPlan(8), kitOpts(), "", func(c *Config, d *RemoteDriver) { d.cfg.MaintenanceEveryLegs = 0 })
 	if err != nil || rep.Remote.MaintenanceRuns != 0 || len(g.sent("maintenance Tanky")) != 1 {
 		t.Fatalf("%v %+v %v", err, rep.Remote, g.lines)
 	}
 	g = newMaintFake(t)
-	rep, err, _ = runMaint(t, g, maintPlan(3), kitOpts(), "", nil)
+	rep, _, err = runMaint(t, g, maintPlan(3), kitOpts(), "", nil)
 	if err != nil || rep.Remote.MaintenanceRuns != 0 || len(g.sent("maintenance Tanky")) != 1 {
 		t.Fatalf("%v %+v %v", err, rep.Remote, g.lines)
 	}
 	// Every 2 legs: legs 2, 4 and 6 of eight.
 	g = newMaintFake(t)
-	rep, err, _ = runMaint(t, g, maintPlan(8), kitOpts(), "", func(c *Config, d *RemoteDriver) { d.cfg.MaintenanceEveryLegs = 2 })
+	rep, _, err = runMaint(t, g, maintPlan(8), kitOpts(), "", func(c *Config, d *RemoteDriver) { d.cfg.MaintenanceEveryLegs = 2 })
 	if err != nil || rep.Remote.MaintenanceRuns != 3 {
 		t.Fatalf("%v %+v", err, rep.Remote)
 	}
@@ -144,7 +143,7 @@ func TestMaintenanceOffAndShortRuns(t *testing.T) {
 func TestMaintenanceWaitsForCalmWithinTheLeg(t *testing.T) {
 	g := newMaintFake(t)
 	dir := t.TempDir()
-	rep, err, _ := runMaint(t, g, maintPlan(5), kitOpts(), dir, func(c *Config, d *RemoteDriver) {
+	rep, _, err := runMaint(t, g, maintPlan(5), kitOpts(), dir, func(c *Config, d *RemoteDriver) {
 		g.onTick = func(g *fakeRemote) {
 			if (d.curLeg == 2 && g.lead().X >= 170) || (d.curLeg == 3 && g.lead().X < 235) {
 				g.combatUntil = g.now.Add(5 * time.Second)
@@ -178,7 +177,7 @@ func TestMaintenanceWaitsForCalmWithinTheLeg(t *testing.T) {
 func TestMaintenanceGivesUpWhenTheLegEnds(t *testing.T) {
 	g := newMaintFake(t)
 	dir := t.TempDir()
-	rep, err, _ := runMaint(t, g, maintPlan(8), kitOpts(), dir, func(c *Config, d *RemoteDriver) {
+	rep, _, err := runMaint(t, g, maintPlan(8), kitOpts(), dir, func(c *Config, d *RemoteDriver) {
 		g.onTick = func(g *fakeRemote) {
 			if (d.curLeg == 2 && g.lead().X >= 170) || d.curLeg == 3 {
 				g.combatUntil = g.now.Add(5 * time.Second)
@@ -222,7 +221,7 @@ func TestMaintenanceAfterAWipeRecovery(t *testing.T) {
 		}
 	}
 	dir := t.TempDir()
-	rep, err, _ := runMaint(t, g, plan1(), kitOpts(), dir, func(c *Config, d *RemoteDriver) { d.cfg.RecoverWipe = true })
+	rep, _, err := runMaint(t, g, plan1(), kitOpts(), dir, func(c *Config, d *RemoteDriver) { d.cfg.RecoverWipe = true })
 	if err != nil || rep.Wipes != 1 || rep.State != "done" {
 		t.Fatalf("%v wipes %d %v", err, rep.Wipes, rep.Notes)
 	}
@@ -257,7 +256,7 @@ func TestMaintenanceAfterAWipeRecovery(t *testing.T) {
 			}
 		}
 	}
-	rep, err, _ = runMaint(t, g2, plan1(), kitOpts(), "", func(c *Config, d *RemoteDriver) { d.cfg.RecoverWipe, d.cfg.MaintenanceEveryLegs = true, 0 })
+	rep, _, err = runMaint(t, g2, plan1(), kitOpts(), "", func(c *Config, d *RemoteDriver) { d.cfg.RecoverWipe, d.cfg.MaintenanceEveryLegs = true, 0 })
 	if err != nil || rep.Wipes != 1 || rep.Remote.MaintenanceRuns != 0 || len(g2.sentAt) != 3 {
 		t.Fatalf("%v %+v", err, rep.Remote)
 	}
@@ -269,13 +268,13 @@ func TestMaintenanceDisabledKit(t *testing.T) {
 	off := []string{"Owned-bot maintenance is disabled (AiPlayerbot.OwnedBotMaintenanceEnabled = 0)."}
 	g := newMaintFake(t)
 	g.replies["maintenance Tanky"] = off
-	rep, err, _ := runMaint(t, g, maintPlan(8), kitOpts(), "", nil)
+	rep, _, err := runMaint(t, g, maintPlan(8), kitOpts(), "", nil)
 	if err != nil || rep.Remote.MaintenanceRuns != 0 || rep.Remote.MaintenanceSkips["disabled"] != 2 || len(g.sent("maintenance")) != 1 {
 		t.Fatalf("%v %+v %v", err, rep.Remote, g.lines)
 	}
 	// Off only from leg 3 on: the round of leg 3 gets the verdict and stops; leg 6 sends nothing.
 	g = newMaintFake(t)
-	rep, err, _ = runMaint(t, g, maintPlan(8), kitOpts(), "", func(c *Config, d *RemoteDriver) {
+	rep, _, err = runMaint(t, g, maintPlan(8), kitOpts(), "", func(c *Config, d *RemoteDriver) {
 		g.onTick = func(*fakeRemote) {
 			if d.curLeg >= 2 {
 				g.replies["maintenance Tanky"] = off

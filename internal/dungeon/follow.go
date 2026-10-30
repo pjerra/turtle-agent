@@ -1041,7 +1041,6 @@ func (f *PlayerFollower) zoneTick(now time.Time, self Point) string {
 		f.zoneNote = true
 	}
 	zs := f.zoneAt
-	zn := f.zoneN
 	note := f.zoneNote
 	f.zoneNote = false
 	f.mu.Unlock()
@@ -1069,7 +1068,7 @@ func (f *PlayerFollower) zoneTick(now time.Time, self Point) string {
 	}
 	f.mu.Lock()
 	f.zoneN++
-	zn = f.zoneN
+	zn := f.zoneN
 	f.mu.Unlock()
 	// The map is looked at every FollowTick until it changes or ZoneTriggerWait has passed (the injected clock).
 	end := f.clk.Now().Add(ZoneTriggerWait)

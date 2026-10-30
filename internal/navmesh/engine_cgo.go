@@ -63,7 +63,7 @@ func (e *engine) addTile(data []byte) (uint64, error) {
 
 func (e *engine) removeTile(ref uint64) error {
 	if C.nd_remove_tile(e.h, C.ulonglong(ref)) != 0 {
-		return errors.New("Detour refused to unload the tile")
+		return errors.New("detour refused to unload the tile")
 	}
 	return nil
 }

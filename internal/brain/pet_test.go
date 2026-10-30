@@ -99,12 +99,6 @@ func (f *petFake) addGrowl() {
 	})
 }
 
-func (f *petFake) noPet() {
-	f.pmu.Lock()
-	f.pet = nil
-	f.pmu.Unlock()
-}
-
 // newPetRig is a brain of the preset on a fake game with a pet half, the player as the class on the power with its full pool.
 func newPetRig(t *testing.T, preset string, class uint8, level uint32, power uint8, pool uint32, p Params, known []uint32, tune func(*objects.Unit)) (*rig, *petFake) {
 	t.Helper()
@@ -417,7 +411,8 @@ func TestPetTauntAutocastGoesOffWithATankAndStaysOnSolo(t *testing.T) {
 
 func TestHunterCallsReviveAndMendsThePet(t *testing.T) {
 	// No pet out: Call Pet, once.
-	r, pf := newPetHunter(t, Params{})
+	r, _ := newPetHunter(t, Params{})
+	var pf *petFake
 	d := r.tick(100 * time.Millisecond)
 	if d == nil || d.Action != "pet_summon" || d.Spell != spCallPet || d.Target != selfG {
 		t.Fatalf("%+v idle %q", d, r.idle())
@@ -495,7 +490,6 @@ func TestHunterCallsReviveAndMendsThePet(t *testing.T) {
 			t.Fatalf("mended out of reach: %v", casts(r.g))
 		}
 	}
-	_ = pf
 }
 
 func TestHunterWithoutAPetGameStillPlays(t *testing.T) {

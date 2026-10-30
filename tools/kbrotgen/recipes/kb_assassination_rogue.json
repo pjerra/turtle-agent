@@ -1,0 +1,186 @@
+{
+  "name": "kb_assassination_rogue",
+  "class": "rogue",
+  "spec": "assassination",
+  "role": "melee-dps",
+  "kb_file": "classes/yaml/rogue/assassination-melee-dps.yaml",
+  "preset": "assassination_rogue",
+  "replaces": [
+    "rogue_combat"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's Assassination list: Envenom at one combo point, then Slice and Dice at one, Eviscerate at five with Cold Blood first, Noxious Assault as the only builder. Rupture, Backstab and Sinister Strike are the KB's never-list; its AoE advice stays single target, the opener and Vanish's threat reset and Thistle Tea are named in kb.unexpressed. The preset is the combat rogue's list with this file in place of rogue_combat.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 0,
+      "text": "Opener: pre-loaded combo point carried with Slice and Dice, or Noxious Assault | pull",
+      "text_sha": "14165f44438d",
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 1,
+      "text": "Envenom (1 combo point), then Slice and Dice (1 combo point) | buff missing or about to expire; Envenom first",
+      "text_sha": "b8199e191e03",
+      "entries": [
+        {
+          "id": "envenom",
+          "spell": "Envenom",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "combo_points_min": 1,
+            "no_mob_aura": [
+              "Envenom"
+            ]
+          }
+        },
+        {
+          "id": "slice_and_dice",
+          "spell": "Slice and Dice",
+          "level": 10,
+          "target": "fight",
+          "harmful": false,
+          "threat": "none",
+          "when": {
+            "mob_in_reach": true,
+            "combo_points_min": 1,
+            "no_self_aura": [
+              "Slice and Dice"
+            ]
+          },
+          "note": "no_self_aura, not self_aura_missing: the buff lasts under a minute (6 s per combo point), so the under-a-minute rule would spend every combo point on it."
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 2,
+      "text": "Eviscerate (Cold Blood first if ready) | combo points == 5",
+      "text_sha": "82649e73fede",
+      "entries": [
+        {
+          "id": "eviscerate",
+          "spell": "Eviscerate",
+          "level": 1,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "combo_points_min": 5
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 3,
+      "text": "Noxious Assault | always the builder; never Backstab or Sinister Strike",
+      "text_sha": "039b78f03793",
+      "entries": [
+        {
+          "id": "auto_attack",
+          "kind": "attack",
+          "note": "The swing is the base every entry waits on: it goes first in the order, as in the Go rotation (rogue_combat)."
+        },
+        {
+          "id": "noxious_assault",
+          "spell": "Noxious Assault",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true
+          }
+        }
+      ],
+      "unexpressed": "a \"never\" rule: in the oracle's never list"
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 9,
+      "text": "Do not cast Rupture | 1.18.1: skipping Rupture/Taste for Blood sims ~20 DPS higher",
+      "text_sha": "b52f59dfe951",
+      "unexpressed": "a \"never\" rule: in the oracle's never list"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "stay single target; Blade Flurry only if your sim shows a gain (contested)",
+      "text_sha": "5c743ea88ea3",
+      "unexpressed": "contested: the KB's sources disagree, so the file has no AoE entry"
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Cold Blood | on a 5-point Eviscerate, or on Noxious Assault to reach 5 faster with Seal Fate [[d:rogue#1480513960317943900]]",
+      "text_sha": "784a0c15d76f",
+      "entries": [
+        {
+          "id": "cold_blood",
+          "spell": "Cold Blood",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "combo_points_min": 5
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "Vanish | threat reset and trinket swap [[d:rogue#1465825846521626935]]",
+      "text_sha": "8c1bc4b694db",
+      "unexpressed": "threat is not a condition"
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": null,
+      "text": "Thistle Tea | opener burst or energy starvation",
+      "text_sha": "5d0f13a45bae",
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    }
+  ],
+  "order": [
+    "auto_attack",
+    "envenom",
+    "slice_and_dice",
+    "eviscerate",
+    "noxious_assault",
+    "cold_blood"
+  ],
+  "oracle": {
+    "core": [
+      "Envenom",
+      "Slice and Dice",
+      "Noxious Assault",
+      "Eviscerate"
+    ],
+    "situational": [
+      "Cold Blood",
+      "Blade Flurry"
+    ],
+    "never": [
+      "Rupture",
+      "Backstab",
+      "Sinister Strike"
+    ],
+    "signature": [
+      "Cold Blood",
+      "Envenom"
+    ],
+    "taunt": []
+  }
+}

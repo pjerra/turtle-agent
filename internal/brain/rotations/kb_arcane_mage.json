@@ -1,0 +1,284 @@
+{
+  "version": 1,
+  "name": "kb_arcane_mage",
+  "class": "mage",
+  "spec": "arcane",
+  "replaces": [
+    "mage_frost"
+  ],
+  "notes": "The Turtle knowledge base's arcane raid list: Arcane Rupture whenever its debuff is down and inside Arcane Power, Arcane Missiles as the filler and on a Clearcasting proc, Arcane Surge only outside Arcane Power and outside the Rupture debuff, Fire Blast while moving, Arcane Explosion on 3+ mobs. The KB's opener order, the trinket/haste stacking, the Surge haste cutoff and the resist that makes Arcane Surge usable are not conditions (kb.unexpressed).",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/mage/arcane-ranged-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102968#p102968 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=124504#p124504 (Torta, staff, 2025-03-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=154168#p154168 (Torta, staff, 2025-10-03)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=118168#p118168 (Torta, staff, 2025-01-28)",
+    "https://turtle-wow.fandom.com/wiki/Mage_Arcane_FAQ (community wiki, wiki, 2026-03-24)",
+    "https://turtle-wow.fandom.com/wiki/Mage_General_FAQ (community wiki, wiki, 2026-09-09)",
+    "https://turtle-wow.fandom.com/wiki/Mage_Levelling_FAQ (community wiki, wiki, 2025-10-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=160732#p160732 (Eluaria, player, 2025-11-26)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=167923#p167923 (Eluaria, player, 2026-02-11)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=174946#p174946 (Eluaria, player, 2026-04-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=162161#p162161 (Ashafares, player, 2025-12-09)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=145255#p145255 (Guldred, player, 2025-08-13)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=137409#p137409 (Avalok, player, 2025-06-29)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=107572#p107572 (Schoop123, player, 2024-11-11)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=107183#p107183 (Kibuum, player, 2024-11-09)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=107097#p107097 (Bahamutxd, player, 2024-11-08)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=134745#p134745 (Bahamutxd, player, 2025-06-08)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=87218#p87218 (Trismegistos, player, 2024-02-07)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=87224#p87224 (Gantulga, player, 2024-02-07)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=122736#p122736 (Bigsmerf, player, 2025-03-16)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=158193#p158193 (Cheruscan, player, 2025-11-03)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=34165#p34165 (Massie2, player, 2023-02-06)",
+    " (Bruh, player, 2026-03-21)",
+    " (Luden TA, player, 2026-03-25)",
+    " (Jûun Amelie, player, 2026-03-24)",
+    " (Pepopo, player, 2026-02-09)"
+  ],
+  "priorities": [
+    {
+      "id": "arcane_rupture_ap",
+      "spell": "Arcane Rupture",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "self_aura": [
+          "Arcane Power"
+        ],
+        "no_mob_aura": [
+          "Arcane Rupture"
+        ]
+      }
+    },
+    {
+      "id": "arcane_missiles_ap",
+      "spell": "Arcane Missiles",
+      "level": 8,
+      "target": "fight",
+      "when": {
+        "moving": false,
+        "self_aura": [
+          "Arcane Power"
+        ]
+      }
+    },
+    {
+      "id": "arcane_missiles_clearcasting",
+      "spell": "Arcane Missiles",
+      "level": 8,
+      "target": "fight",
+      "when": {
+        "moving": false,
+        "self_aura": [
+          "Clearcasting"
+        ],
+        "no_self_aura": [
+          "Arcane Power"
+        ]
+      }
+    },
+    {
+      "id": "arcane_rupture",
+      "spell": "Arcane Rupture",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "no_mob_aura": [
+          "Arcane Rupture"
+        ]
+      }
+    },
+    {
+      "id": "arcane_surge",
+      "spell": "Arcane Surge",
+      "level": 32,
+      "target": "fight",
+      "when": {
+        "power_above": 50,
+        "no_self_aura": [
+          "Arcane Power"
+        ],
+        "no_mob_aura": [
+          "Arcane Rupture"
+        ]
+      }
+    },
+    {
+      "id": "fire_blast_moving",
+      "spell": "Fire Blast",
+      "level": 6,
+      "target": "fight",
+      "when": {
+        "moving": true
+      }
+    },
+    {
+      "id": "arcane_explosion_aoe",
+      "spell": "Arcane Explosion",
+      "level": 14,
+      "target": "self",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mob_distance_max": 10,
+        "mobs_near_mob_min": 3
+      },
+      "note": "mob_distance_max 10 is Arcane Explosion's own radius: a self-targeted area spell has no range check otherwise."
+    },
+    {
+      "id": "arcane_missiles",
+      "spell": "Arcane Missiles",
+      "level": 8,
+      "target": "fight",
+      "when": {
+        "moving": false
+      },
+      "note": "Moved after the AoE entry: a channel with no cooldown as a rule would starve every entry the KB lists after it (the filler is last)."
+    },
+    {
+      "id": "arcane_power",
+      "spell": "Arcane Power",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "power_above": 99
+      },
+      "note": "power_above 99 is the KB's \"at full mana only\"; the 10% mana death is the spell's own rule."
+    },
+    {
+      "id": "presence_of_mind",
+      "spell": "Presence of Mind",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "no_self_aura": [
+          "Presence of Mind",
+          "Arcane Power"
+        ],
+        "no_mob_aura": [
+          "Arcane Rupture"
+        ]
+      }
+    },
+    {
+      "id": "evocation_kb",
+      "spell": "Evocation",
+      "level": 20,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "moving": false,
+        "power_below": 20
+      },
+      "note": "the KB gives no mana number: 20% is this recipe's; the server mana tick is not a condition."
+    },
+    {
+      "id": "berserking",
+      "spell": "Berserking",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat"
+      },
+      "note": "a racial: level-independent in the data, so marked talent (no level check); cast only when the spellbook has it."
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/mage/arcane-ranged-dps.yaml",
+    "sha256": "740d3be2c813318e9f380aa5108c76befe987aa2920ee7419e8838bd5c86a13e",
+    "preset": "arcane_mage",
+    "recipe": "tools/kbrotgen/recipes/kb_arcane_mage.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Opener: on-use SP trinket -> Arcane Rupture -> Arcane Missiles -> (Surge proc: Arcane Surge + Presence of Mind in its GCD) -> Missiles -> Rupture -> Mind Quickening Gem + Arcane Power during the GCD -> Missiles | pull, full mana",
+        "why": "pre-pull/opener outside the brain's fight; consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "rotation_single[1]",
+        "text": "Arcane Rupture | Arcane Power (or big haste window) active AND Rupture debuff not on target",
+        "why": "a haste window that is not Arcane Power is not a condition"
+      },
+      {
+        "row": "rotation_single[2]",
+        "text": "Arcane Missiles | Arcane Power active; never Surge or PoM inside AP/MQG",
+        "why": "the Mind Quickening Gem is consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "rotation_single[4]",
+        "text": "Arcane Rupture | Rupture debuff not active (cancel Missiles right after a tick)",
+        "why": "cancel/stop casting not expressible"
+      },
+      {
+        "row": "rotation_single[5]",
+        "text": "Arcane Surge | usable (a spell of yours was resisted) AND total haste below the Surge cutoff; cast in the last second of the Rupture debuff or with no debuff; >50% mana cancel Missiles at once, <50% wait until the last moment",
+        "why": "the resist that makes Arcane Surge usable and the total-haste cutoff are not conditions; cancel/stop casting not expressible"
+      },
+      {
+        "row": "rotation_single[6]",
+        "text": "Arcane Missiles | default filler; never re-press mid-channel without Nampower",
+        "why": "macro/addon (Nampower etc.)"
+      },
+      {
+        "row": "rotation_single[7]",
+        "text": "Fire Blast (reactive Surge macro) | moving",
+        "why": "macro/addon (Nampower etc.)"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "Pre-stack Sigil of Ancient Accord with rank-1 Arcane Explosion before the pull",
+        "why": "pre-pull/opener outside the brain's fight; consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "rotation_aoe[2]",
+        "text": "Downrank Arcane Explosion / Eye of Diminution / Fetish of the Sand Reaver / LIP",
+        "why": "consumable or item (combat_consumables owns items); the tank's threat is not a condition"
+      },
+      {
+        "row": "rotation_aoe[3]",
+        "text": "Goblin Sapper Charge + Arcane Jewel of Wild Magics + Arcane Explosion",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "rotation_aoe[4]",
+        "text": "no source states 2-target handling",
+        "why": "a gap in the KB (no source states 2-target handling): there is nothing to express"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "Mind Quickening Gem | first; Arcane Power near the end of MQG (snapshots haste, shortens AP cooldown); low gear haste (~7%): both together is fine; stack everything only on <30 s fights",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[2]",
+        "text": "Juju Flurry / Potion of Quickness | during Arcane Power unless at a hard cap; Juju up to ~12% gear haste, Quickness ~10%, both ~7%",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[3]",
+        "text": "Presence of Mind | instant Arcane Rupture; cast standalone (macro bug); not in AP",
+        "why": "macro/addon (Nampower etc.)"
+      },
+      {
+        "row": "cooldowns[4]",
+        "text": "Evocation | start just before a server mana tick, cancel after the 4th tick",
+        "why": "cancel/stop casting not expressible; the server mana tick is not a condition"
+      },
+      {
+        "row": "cooldowns[5]",
+        "text": "Berserking (Troll) | haste cooldown, same spread/stack rules",
+        "why": "haste stacking is not a condition"
+      }
+    ]
+  }
+}

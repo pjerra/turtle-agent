@@ -1,0 +1,214 @@
+{
+  "name": "kb_restoration_shaman",
+  "class": "shaman",
+  "spec": "restoration",
+  "role": "healer",
+  "kb_file": "classes/yaml/shaman/restoration-healer.yaml",
+  "preset": "resto_shaman",
+  "replaces": [],
+  "mode": "add",
+  "notes": "The Turtle knowledge base's restoration shaman casts, added after role_healer: Chain Heal rank 3 on heavy damage and rank 1 otherwise, the max-rank Healing Wave emergency and the rank-4 top-up, the Lesser Healing Wave, Spirit Link on a dying tank. The routine entries run in band high, above role_healer's medium and light heals; the heavy-damage and tank-near-death casts in band emergency, above its own emergency heal. The narrower conditions come first, which is the one departure from the KB's numeric order.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 1,
+      "text": "Totems for the group, Water Shield, mana oil | before pull",
+      "text_sha": "d2b6031b149c",
+      "entries": [],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 2,
+      "text": "Chain Heal rank 1 | 3+ injured in a clump; the workhorse [[d:shaman#1487131843328213013]]",
+      "text_sha": "6a21fa803428",
+      "entries": [
+        {
+          "id": "chain_heal",
+          "spell": "Chain Heal",
+          "level": 40,
+          "rank": 1,
+          "target": "heal",
+          "band": "high",
+          "note": "The KB's rank-1 workhorse for three or more hurt members.",
+          "when": {
+            "members_hurt_min": 3
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 3,
+      "text": "Chain Heal rank 3 | heavy raid damage [[d:shaman#1472590831775912169]]",
+      "text_sha": "dd882a13449e",
+      "entries": [
+        {
+          "id": "chain_heal_3",
+          "spell": "Chain Heal",
+          "level": 40,
+          "rank": 3,
+          "target": "heal",
+          "band": "emergency",
+          "note": "Moved ahead of rank 1 and in band emergency (not high): the KB's heavy-damage rank would never be reached behind the rank-1 entry, and role_healer's low band outranks the high one; 'heavy' is the KB's own bot rule of three members under 50%.",
+          "when": {
+            "members_hurt_min": 3,
+            "heal_hp_below": 50
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 4,
+      "text": "Healing Wave rank 3-4 (rank 6+ with good healing power) | single-target top-up [[d:shaman#1487131827796836525]] [[d:shaman#1464792806097682655]]",
+      "text_sha": "b1c309b10282",
+      "entries": [
+        {
+          "id": "healing_wave_topup",
+          "spell": "Healing Wave",
+          "level": 1,
+          "rank": 4,
+          "target": "heal",
+          "band": "high",
+          "note": "The KB's rank 3-4 top-up: rank 4 is its upper end, the one with full scaling. 'Rank 6+ with good healing power' is gear, not a condition.",
+          "when": {
+            "heal_hp_below": 60
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 5,
+      "text": "Lesser Healing Wave (max rank) | emergency; never downrank [[d:shaman#1458535191810408539]]",
+      "text_sha": "23022be2bc91",
+      "entries": [
+        {
+          "id": "lesser_healing_wave",
+          "spell": "Lesser Healing Wave",
+          "level": 20,
+          "target": "heal",
+          "band": "high",
+          "note": "Max rank, never downranked, as the KB says.",
+          "when": {
+            "heal_hp_below": 70
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 6,
+      "text": "Ancestral Swiftness + max-rank Healing Wave | instant emergency heal [[d:shaman#1490128865564037250]]",
+      "text_sha": "703a022f9c41",
+      "entries": [
+        {
+          "id": "swiftness_healing_wave",
+          "spell": "Healing Wave",
+          "level": 1,
+          "target": "heal",
+          "band": "emergency",
+          "note": "Moved ahead of the healing: the KB's emergency heal. Its instant comes from Ancestral Swiftness, which is self-cast and cannot read the tank's health.",
+          "when": {
+            "heal_hp_below": 35
+          }
+        }
+      ],
+      "unexpressed": "a self-cast cooldown cannot read the heal target (the heal conditions need target heal)"
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 7,
+      "text": "Spirit Link | tank near death in a burst phase",
+      "text_sha": "1ead7b72ccdf",
+      "entries": [
+        {
+          "id": "spirit_link",
+          "spell": "Spirit Link",
+          "talent": true,
+          "target": "heal",
+          "band": "emergency",
+          "note": "Moved ahead of the top-ups and in band emergency: the KB's tank-near-death cast. It is a party-targeted spell, cast here through the healer's cast path on the plan's member.",
+          "when": {
+            "heal_is_tank": true,
+            "heal_hp_below": 30
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Drop totem, Chain Heal until the pack dies, recall totems, move",
+      "text_sha": "aede588f1ade",
+      "entries": [],
+      "unexpressed": "nothing to add: the row names no cast the list does not already have"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 2,
+      "text": "Healing Wave over Chain Heal unless the group is stacked",
+      "text_sha": "3896cf741749",
+      "entries": [],
+      "unexpressed": "party size is not in the conditions"
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": 0,
+      "text": "Spirit Link | raid-wide, 30 yd; burn/enrage phases; weak where the raid avoids the tank (Twins) [[d:shaman#1443112634785337405]] [[d:shaman#1443116541779378226]]",
+      "text_sha": "303e8a733eb9",
+      "entries": [],
+      "unexpressed": "nothing to add: the row names no cast the list does not already have"
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": 0,
+      "text": "Ancestral Swiftness | instant max-rank Healing Wave",
+      "text_sha": "4e0d2763c685",
+      "entries": [],
+      "unexpressed": "a self-cast cooldown cannot read the heal target (the heal conditions need target heal)"
+    }
+  ],
+  "order": [
+    "swiftness_healing_wave",
+    "spirit_link",
+    "chain_heal_3",
+    "chain_heal",
+    "healing_wave_topup",
+    "lesser_healing_wave"
+  ],
+  "oracle": {
+    "core": [
+      "Chain Heal",
+      "Healing Wave",
+      "Lesser Healing Wave"
+    ],
+    "situational": [
+      "Ancestral Swiftness",
+      "Spirit Link",
+      "Water Shield",
+      "Healing Stream Totem",
+      "Mana Spring Totem",
+      "Cure Poison",
+      "Cure Disease"
+    ],
+    "never": [],
+    "signature": [
+      "Chain Heal",
+      "Spirit Link"
+    ],
+    "taunt": []
+  }
+}

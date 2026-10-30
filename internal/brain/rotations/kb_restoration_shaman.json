@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "name": "kb_restoration_shaman",
+  "class": "shaman",
+  "spec": "restoration",
+  "mode": "add",
+  "replaces": [],
+  "notes": "The Turtle knowledge base's restoration shaman casts, added after role_healer: Chain Heal rank 3 on heavy damage and rank 1 otherwise, the max-rank Healing Wave emergency and the rank-4 top-up, the Lesser Healing Wave, Spirit Link on a dying tank. The routine entries run in band high, above role_healer's medium and light heals; the heavy-damage and tank-near-death casts in band emergency, above its own emergency heal. The narrower conditions come first, which is the one departure from the KB's numeric order.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/shaman/restoration-healer.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102972#p102972 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=161356#p161356 (Torta, staff, 2025-12-02)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166084#p166084 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=168272#p168272 (Dragunovi, staff, 2026-02-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=173490#p173490 (Torta, staff, 2026-03-31)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=154168#p154168 (Torta, staff, 2025-10-03)",
+    "https://forum.turtlecraft.gg/viewtopic.php?t=13178 (Torta, staff, 2024-02-21)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=117662#p117662 (Akos1896, player, 2025-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=115605#p115605 (amanagor, player, 2025-01-06)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=94005#p94005 (Grubi450, player, 2024-05-03)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=117470#p117470 (Templar85, player, 2025-01-21)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172162#p172162 (Travoltino, player, 2026-03-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166553#p166553 (Atreidon, player, 2026-01-26)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=147242#p147242 (amanagor, player, 2025-08-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=134240#p134240 (Atreidon, player, 2025-06-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=134265#p134265 (Atreidon, player, 2025-06-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=115603#p115603 (Akos1896, player, 2025-01-06)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=134190#p134190 (Voodoochile, player, 2025-06-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=134238#p134238 (Winckler91, player, 2025-06-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=142251#p142251 (Yourik5, player, 2025-07-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=149715#p149715 (Skegg, player (guide writer), 2025-09-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166121#p166121 (Burunduk, player, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=92081#p92081 (Akos1896, player, 2024-04-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=170395#p170395 (Travoltino, player, 2026-03-09)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=175219#p175219 (Atreidon, player, 2026-04-14)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=87618#p87618 (Akos1896, player, 2024-02-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=126280#p126280 (Akos1896, player, 2025-04-10)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=16518#p16518 (Mcnair, player, 2022-01-31)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=126350#p126350 (Voodoochile, player, 2025-04-10)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=170419#p170419 (Kokuyoo, player, 2026-03-09)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=82330#p82330 (Gdawg45, player, 2023-12-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=37141#p37141 (Healingrain, player, 2023-03-08)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=117487#p117487 (Evilchocolate, player, 2025-01-22)",
+    " (Nick, player, 2026-02-09)",
+    " (Not Normal, player, 2026-04-03)",
+    " (peter_hammer, player, 2026-02-15)",
+    " (Not Normal, player, 2026-01-06)",
+    " (Not Normal, player, 2026-04-08)",
+    " (Lhian, staff, 2026-03-22)"
+  ],
+  "priorities": [
+    {
+      "id": "swiftness_healing_wave",
+      "spell": "Healing Wave",
+      "level": 1,
+      "target": "heal",
+      "band": "emergency",
+      "when": {
+        "heal_hp_below": 35
+      },
+      "note": "Moved ahead of the healing: the KB's emergency heal. Its instant comes from Ancestral Swiftness, which is self-cast and cannot read the tank's health."
+    },
+    {
+      "id": "spirit_link",
+      "spell": "Spirit Link",
+      "talent": true,
+      "target": "heal",
+      "band": "emergency",
+      "when": {
+        "heal_hp_below": 30,
+        "heal_is_tank": true
+      },
+      "note": "Moved ahead of the top-ups and in band emergency: the KB's tank-near-death cast. It is a party-targeted spell, cast here through the healer's cast path on the plan's member."
+    },
+    {
+      "id": "chain_heal_3",
+      "spell": "Chain Heal",
+      "level": 40,
+      "rank": 3,
+      "target": "heal",
+      "band": "emergency",
+      "when": {
+        "heal_hp_below": 50,
+        "members_hurt_min": 3
+      },
+      "note": "Moved ahead of rank 1 and in band emergency (not high): the KB's heavy-damage rank would never be reached behind the rank-1 entry, and role_healer's low band outranks the high one; 'heavy' is the KB's own bot rule of three members under 50%."
+    },
+    {
+      "id": "chain_heal",
+      "spell": "Chain Heal",
+      "level": 40,
+      "rank": 1,
+      "target": "heal",
+      "band": "high",
+      "when": {
+        "members_hurt_min": 3
+      },
+      "note": "The KB's rank-1 workhorse for three or more hurt members."
+    },
+    {
+      "id": "healing_wave_topup",
+      "spell": "Healing Wave",
+      "level": 1,
+      "rank": 4,
+      "target": "heal",
+      "band": "high",
+      "when": {
+        "heal_hp_below": 60
+      },
+      "note": "The KB's rank 3-4 top-up: rank 4 is its upper end, the one with full scaling. 'Rank 6+ with good healing power' is gear, not a condition."
+    },
+    {
+      "id": "lesser_healing_wave",
+      "spell": "Lesser Healing Wave",
+      "level": 20,
+      "target": "heal",
+      "band": "high",
+      "when": {
+        "heal_hp_below": 70
+      },
+      "note": "Max rank, never downranked, as the KB says."
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/shaman/restoration-healer.yaml",
+    "sha256": "1cc4b4b22e3f887870eaa6d7508f9a37af9aabcb04f61b36972917daf95b8fc7",
+    "preset": "resto_shaman",
+    "recipe": "tools/kbrotgen/recipes/kb_restoration_shaman.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Totems for the group, Water Shield, mana oil | before pull",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[5]",
+        "text": "Ancestral Swiftness + max-rank Healing Wave | instant emergency heal [[d:shaman#1490128865564037250]]",
+        "why": "a self-cast cooldown cannot read the heal target (the heal conditions need target heal)"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "Drop totem, Chain Heal until the pack dies, recall totems, move",
+        "why": "nothing to add: the row names no cast the list does not already have"
+      },
+      {
+        "row": "rotation_aoe[1]",
+        "text": "Healing Wave over Chain Heal unless the group is stacked",
+        "why": "party size is not in the conditions"
+      },
+      {
+        "row": "cooldowns[0]",
+        "text": "Spirit Link | raid-wide, 30 yd; burn/enrage phases; weak where the raid avoids the tank (Twins) [[d:shaman#1443112634785337405]] [[d:shaman#1443116541779378226]]",
+        "why": "nothing to add: the row names no cast the list does not already have"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "Ancestral Swiftness | instant max-rank Healing Wave",
+        "why": "a self-cast cooldown cannot read the heal target (the heal conditions need target heal)"
+      }
+    ]
+  }
+}

@@ -8,10 +8,9 @@ import (
 )
 
 // slopeFake is a fakeRemote whose game plans the straight path and knows a floor: the plain 100 yd walk of the test below runs along
-// z = 0, the floor rises 0.05 per yd of x. withFloors turns on the floor lookup, withSnap the nearest-floor snap.
+// z = 0, the floor rises 0.05 per yd of x.
 type slopeFake struct {
 	*fakeRemote
-	withFloors, withSnap bool
 }
 
 func slopeZ(x float32) float32 { return x * 0.05 }

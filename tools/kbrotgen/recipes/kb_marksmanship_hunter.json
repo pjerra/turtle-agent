@@ -1,0 +1,315 @@
+{
+  "name": "kb_marksmanship_hunter",
+  "class": "hunter",
+  "spec": "marksmanship",
+  "role": "ranged-dps",
+  "kb_file": "classes/yaml/hunter/marksmanship-ranged-dps.yaml",
+  "preset": "marksman_hunter",
+  "replaces": [
+    "hunter_marksman"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's marksmanship raid list: Aimed Shot on a Lock and Load proc and on cooldown, Arcane Shot, Steady Shot as the loop, Serpent Sting when the raid wants the armour debuff, Multi-Shot and Volley on packs, Rapid Fire, Feign Death and the two aspects. The swing timer (Auto Shot and the 0.5 s rule) is not a condition: the file does not start Auto Shot itself (kb.unexpressed).",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 1,
+      "text": "Keep Auto Shot running; never start a cast in the last 0.5 s before an auto | always [[d:hunter#1471459155179995167]]",
+      "text_sha": "59cf2035a6c7",
+      "entries": [],
+      "unexpressed": "swing timer not in the conditions (the file does not start Auto Shot: the rotation format has no action for an auto-repeat spell)"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 2,
+      "text": "Aimed Shot | Lock and Load buff up (10 s, -1 s cast)",
+      "text_sha": "23766c88f672",
+      "entries": [
+        {
+          "id": "aimed_shot_locked",
+          "spell": "Aimed Shot",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "moving": false,
+            "self_aura": [
+              "Lock and Load"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 3,
+      "text": "Aimed Shot | off cooldown",
+      "text_sha": "fe46f10e200f",
+      "entries": [
+        {
+          "id": "aimed_shot",
+          "spell": "Aimed Shot",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "moving": false
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 4,
+      "text": "Arcane Shot | Enchanted (Arcane) Ammunition up AND the Aimed Shot has already landed (cast after the next Steady) [[d:hunter#1484610058904928467]], [[d:hunter#1485089214046539917]]",
+      "text_sha": "db1c6dfa425c",
+      "entries": [
+        {
+          "id": "arcane_shot",
+          "spell": "Arcane Shot",
+          "level": 6,
+          "target": "fight",
+          "when": {}
+        }
+      ],
+      "unexpressed": "weapon type not in the conditions (the ammunition); \"after the next Steady, once Aimed has landed\" is not a condition"
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 5,
+      "text": "Steady Shot | after each Auto Shot, if it will not clip",
+      "text_sha": "3a55ccf0e1c7",
+      "entries": [
+        {
+          "id": "steady_shot",
+          "spell": "Steady Shot",
+          "level": 4,
+          "target": "fight",
+          "when": {
+            "moving": false
+          },
+          "note": "Moved after the AoE entries: the filler has no cooldown, so as a rule it would starve every entry the KB lists after it."
+        }
+      ],
+      "unexpressed": "swing timer not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 6,
+      "text": "Arcane Shot | after Steady if it fits without clipping, or while moving (crit roll for Lock and Load) [[d:hunter#1488527231008641095]]",
+      "text_sha": "36bb470ca6db",
+      "entries": [
+        {
+          "id": "arcane_shot_moving",
+          "spell": "Arcane Shot",
+          "level": 6,
+          "target": "fight",
+          "when": {
+            "moving": true
+          }
+        }
+      ],
+      "unexpressed": "swing timer not in the conditions (the \"after Steady if it fits\" part)"
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 7,
+      "text": "Serpent Sting | only if the raid wants the Nature Ammunition -240 armor debuff [[d:hunter#1488876111252160624]]",
+      "text_sha": "dde48470c72f",
+      "entries": [],
+      "unexpressed": "raid assignment/marking (whether the raid wants the armour debuff: the KB casts the sting only when it does); weapon type not in the conditions (Nature Ammunition)"
+    },
+    {
+      "from": "rotation_single",
+      "index": 7,
+      "priority": 8,
+      "text": "skip Multi-Shot | single target: cannot proc Lock and Load; Fire ammo explosion bugged ~50 dmg [[d:hunter#1486698734736642089]], [[d:hunter#1484664003497300118]]",
+      "text_sha": "a9d5f1793fc4",
+      "entries": [],
+      "unexpressed": "the AoE entry casts Multi-Shot only on 2+ targets, which is the single-target skip"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Multi-Shot when it fits; spend Fire Ammunition on it",
+      "text_sha": "69e1e0ee23cd",
+      "entries": [
+        {
+          "id": "multi_shot",
+          "spell": "Multi-Shot",
+          "level": 18,
+          "target": "fight",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "mobs_near_mob_min": 2
+          }
+        }
+      ],
+      "unexpressed": "swing timer not in the conditions; weapon type not in the conditions (Fire Ammunition)"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 1,
+      "text": "Volley opener (1 s cast with Barrage 3/3), Multi-Shot, then Lock and Load Aimed Shot down a line of mobs",
+      "text_sha": "7da5f3961549",
+      "entries": [
+        {
+          "id": "volley",
+          "spell": "Volley",
+          "level": 40,
+          "target": "fight",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "moving": false,
+            "mobs_near_mob_min": 3
+          }
+        }
+      ],
+      "unexpressed": "positional (a line of mobs) not in the conditions; swing timer not in the conditions"
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Rapid Fire | on pull / with Bloodlust; also -40% Aimed/Steady cast; shares category with Juju Flurry [[d:hunter#1489692709550817407]], [[d:hunter#1489794704836137140]]",
+      "text_sha": "e0868ec37362",
+      "entries": [
+        {
+          "id": "rapid_fire",
+          "spell": "Rapid Fire",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat"
+          }
+        }
+      ],
+      "unexpressed": "consumable or item (combat_consumables owns items) (Juju Flurry shares its category)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "On-use trinkets | Badge of the Swarmguard + Jom Gabbar opener, then swap to Heart of Hakkar + Slayer's Crest [[d:hunter#1482615147359895697]]",
+      "text_sha": "d892c816a2e5",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": null,
+      "text": "Feign Death | threat drop (MM rips threat without cooldowns); Improved Feign Death mandatory [[d:hunter#1486215019384541225]], [[d:hunter#1484218976014831677]]",
+      "text_sha": "f458ed674bb7",
+      "entries": [
+        {
+          "id": "feign_death",
+          "spell": "Feign Death",
+          "level": 30,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "mob_on_me": true
+          }
+        }
+      ],
+      "unexpressed": "the Improved Feign Death talent is not a condition"
+    },
+    {
+      "from": "cooldowns",
+      "index": 3,
+      "priority": null,
+      "text": "Aspect of the Viper | Hawk until low mana, then Viper to the end of the fight; Viper ticks generate threat [[d:hunter#1478128745838674021]], [[d:hunter#1491714117369724928]]",
+      "text_sha": "1eaf4b8a816a",
+      "entries": [
+        {
+          "id": "aspect_of_the_viper",
+          "spell": "Aspect of the Viper",
+          "level": 56,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "power_below": 20,
+            "no_self_aura": [
+              "Aspect of the Viper"
+            ]
+          },
+          "note": "20% is the number the shipped hunter uses for the switch to Viper."
+        },
+        {
+          "id": "aspect_of_the_hawk",
+          "spell": "Aspect of the Hawk",
+          "level": 10,
+          "target": "self",
+          "band": "low",
+          "when": {
+            "state": "combat",
+            "power_above": 60,
+            "no_self_aura": [
+              "Aspect of the Hawk",
+              "Aspect of the Viper"
+            ]
+          },
+          "note": "60% is the number the shipped hunter uses for the switch back to the Hawk."
+        }
+      ],
+      "unexpressed": "\"Viper to the end of the fight\" is not a condition; the threat of Viper's ticks is not a condition"
+    },
+    {
+      "from": "cooldowns",
+      "index": 4,
+      "priority": null,
+      "text": "ZG Renataki trinket | trash; resets Volley [[d:hunter#1484688430268022955]]",
+      "text_sha": "caf648e20be3",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    }
+  ],
+  "order": [
+    "aimed_shot_locked",
+    "aimed_shot",
+    "arcane_shot",
+    "arcane_shot_moving",
+    "multi_shot",
+    "volley",
+    "steady_shot",
+    "rapid_fire",
+    "feign_death",
+    "aspect_of_the_viper",
+    "aspect_of_the_hawk"
+  ],
+  "oracle": {
+    "core": [
+      "Aimed Shot",
+      "Steady Shot",
+      "Arcane Shot"
+    ],
+    "situational": [
+      "Multi-Shot",
+      "Volley",
+      "Serpent Sting",
+      "Rapid Fire",
+      "Feign Death",
+      "Aspect of the Viper",
+      "Aspect of the Hawk",
+      "Auto Shot"
+    ],
+    "never": [],
+    "signature": [
+      "Aimed Shot"
+    ],
+    "taunt": []
+  }
+}

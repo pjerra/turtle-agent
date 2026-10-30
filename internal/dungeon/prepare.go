@@ -337,7 +337,8 @@ func runPrepare(ctx context.Context, e *prepEnv) (*PrepareReport, error) {
 		run  func(context.Context) (string, error)
 	}
 	for _, s := range []step{
-		{"hire", e.spec.HiredParty(), e.hire},
+		{"hire", e.spec.HiredParty() && (e.plan == nil || !e.plan.IsRaid()), e.hire},
+		{"hire", e.spec.HiredParty() && e.plan != nil && e.plan.IsRaid(), e.raidHire},
 		{"online", e.spec.Online, e.online},
 		{"fresh", e.spec.Fresh, e.fresh},
 		{"gm_setup", len(e.spec.GMSetup) > 0, e.gmSetup},

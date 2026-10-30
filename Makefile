@@ -56,3 +56,11 @@ tbm-contract:
 # is cached and lua5.1 is installed; this target fetches the addon first and fails instead of skipping.
 addon-host:
 	TBM_ADDON_DIR="$$(tools/tbmcontract/fetch.sh)" TBM_ADDON_HOST_STRICT=1 $(GO) test -race -count=1 -run 'AddonHost|TestHost' ./cmd/turtle-agent ./internal/addonhost
+
+# Regenerate the knowledge-base rotations and the spells oracle from tools/kbrotgen/recipes and the KB. Needs PyYAML and
+# the KB checkout; not part of `make test` (the committed files and recipes are checked by TestKBRotationsMatchRecipes).
+KB ?= $(HOME)/TortoiseBots-audit/turtle-kb
+.PHONY: kb-rotations
+kb-rotations:
+	python3 -I tools/kbrotgen/kbrotgen.py --kb $(KB)
+

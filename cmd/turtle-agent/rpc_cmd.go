@@ -10,18 +10,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/pjerra/turtle-agent/internal/privfile"
-	"github.com/pjerra/turtle-agent/internal/rpc"
 )
 
 // exitRPCError is the exit code when the agent answers with a JSON-RPC
@@ -47,62 +44,41 @@ func rpcCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	// Slot manifest loading follows teardownCmd: read slot.json, assert
 	// the paths, use only the derived token file, never the strings.
-	absDir, err := filepath.Abs(o.dir)
+	// openSlotClient holds those checks for every command that talks to a
+	// slot agent; its refusals keep the lines rpc always printed.
+	c, err := openSlotClient(o.dir)
 	if err != nil {
+		var opened *slotOpenError
+		if errors.As(err, &opened) {
+			fmt.Fprintln(stderr, opened.msg)
+			return opened.code
+		}
 		fmt.Fprintf(stderr, "rpc: %v\n", err)
 		return exitUsage
-	}
-	dir := absDir
-	raw, err := privfile.Read(filepath.Join(dir, "slot.json"), 64*1024)
-	if err != nil {
-		fmt.Fprintf(stderr, "rpc: %s/slot.json missing or unreadable: rpc works on a dir made by slot setup\n", dir)
-		return exitUsage
-	}
-	var manifest teardownSlotManifest
-	if err := json.Unmarshal(raw, &manifest); err != nil ||
-		manifest.Server == "" || manifest.Slot == "" || manifest.Holder == "" || manifest.Port == 0 {
-		fmt.Fprintf(stderr, "rpc: %s/slot.json missing or unreadable: rpc works on a dir made by slot setup\n", dir)
-		return exitUsage
-	}
-	if err := teardownCheckManifest(dir, &manifest); err != nil {
-		fmt.Fprintf(stderr, "%v\n", err)
-		return exitUsage
-	}
-	token, err := rpc.ReadTokenFile(filepath.Join(dir, fmt.Sprintf("rpc-%d.token", manifest.Port)))
-	if err != nil {
-		fmt.Fprintf(stderr, "rpc: token file: %v\n", rpcScrub(err.Error(), ""))
-		return exitSlotRefused
-	}
-	// The file must hold a token the agent generates (rpc.NewToken: 32
-	// random bytes as 43 base64url characters): anything else (quotes, a
-	// backslash, markup, an inner newline, the wrong length) is refused
-	// before use, without printing it. The rpcScrub calls below stay as a
-	// second line of defence.
-	if !rpcValidToken(token) {
-		fmt.Fprintln(stderr, "rpc: the token file is not an agent token")
-		return exitSlotRefused
 	}
 	params, err := rpcReadParams(o.params, o.paramsFromStdin)
 	if err != nil {
 		fmt.Fprintf(stderr, "rpc: %v\n", err)
 		return exitUsage
 	}
-	result, rpcErr, err := rpcPostCall(manifest.Port, token, o.method, params, o.timeout)
+	var result json.RawMessage
+	err = c.Call(context.Background(), o.method, params, &result, o.timeout)
 	if err != nil {
+		var rpcErr *slotRPCError
+		if errors.As(err, &rpcErr) {
+			fmt.Fprintf(stderr, "error: %d %s\n", rpcErr.Code, rpcErr.Message)
+			return exitRPCError
+		}
 		// A bad envelope keeps its own "bad reply" line; only transport
 		// failures (agent not running, connection refused) use the
 		// lease/session wording, matching teardown's own.
 		var bad *rpcBadReplyError
 		if errors.As(err, &bad) {
-			fmt.Fprintf(stderr, "rpc: %s\n", rpcScrub(err.Error(), token))
+			fmt.Fprintf(stderr, "rpc: %s\n", rpcScrub(err.Error(), c.token))
 			return exitSlotRefused
 		}
-		fmt.Fprintf(stderr, "rpc: cannot reach the agent at 127.0.0.1:%d: %s\n", manifest.Port, rpcScrub(err.Error(), token))
+		fmt.Fprintf(stderr, "rpc: cannot reach the agent at 127.0.0.1:%d: %s\n", c.manifest.Port, rpcScrub(err.Error(), c.token))
 		return exitSlotRefused
-	}
-	if rpcErr != nil {
-		fmt.Fprintf(stderr, "error: %d %s\n", rpcErr.Code, rpcScrub(rpcErr.Message, token))
-		return exitRPCError
 	}
 	var out []byte
 	if o.raw {
@@ -111,10 +87,10 @@ func rpcCmd(args []string, stdout, stderr io.Writer) int {
 		out, err = json.MarshalIndent(result, "", "  ")
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "rpc: %v\n", rpcScrub(err.Error(), token))
+		fmt.Fprintf(stderr, "rpc: %v\n", rpcScrub(err.Error(), c.token))
 		return exitUsage
 	}
-	out = []byte(rpcScrub(string(out), token))
+	out = []byte(rpcScrub(string(out), c.token))
 	fmt.Fprintln(stdout, string(out))
 	return exitOK
 }

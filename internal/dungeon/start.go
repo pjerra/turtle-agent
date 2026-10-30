@@ -321,13 +321,6 @@ func (d *RemoteDriver) freshStart() bool {
 	return rehire || d.opt.HireMemory == nil
 }
 
-// itemNeed is a step that needs an item (or the item the step uses itself).
-type itemNeed struct {
-	leg  int
-	what string
-	item ItemRef
-}
-
 // SkippedNeeds fails when a step of the legs from `from` on needs an item that only a leg before `from` produces (a boss's loot_item, a
 // loot_object's or a use_item's expect_item): those legs are skipped, nothing of theirs happened, and the step would wait out its timeout
 // for the item (Uldaman leg 2's keystone needs the Staff of Prehistoria that leg 1's use_item makes, then a 60 s wait). haveItems are

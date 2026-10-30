@@ -1,0 +1,137 @@
+{
+  "class": "warrior",
+  "specs": [
+    {
+      "spec": "arms",
+      "role": "melee-dps",
+      "rotation": "kb_arms_warrior",
+      "core": [
+        "Mortal Strike",
+        "Slam",
+        "Execute"
+      ],
+      "situational": [
+        "Overpower",
+        "Whirlwind",
+        "Sweeping Strikes",
+        "Cleave",
+        "Hamstring",
+        "Heroic Strike",
+        "Sunder Armor",
+        "Charge",
+        "Bloodrage",
+        "Battle Shout",
+        "Death Wish",
+        "Recklessness",
+        "Pummel"
+      ],
+      "never": [],
+      "signature": [
+        "Mortal Strike",
+        "Sweeping Strikes"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "fury",
+      "role": "melee-dps",
+      "rotation": "kb_fury_warrior",
+      "core": [
+        "Bloodthirst",
+        "Whirlwind",
+        "Heroic Strike",
+        "Execute"
+      ],
+      "situational": [
+        "Slam",
+        "Cleave",
+        "Master Strike",
+        "Hamstring",
+        "Sunder Armor",
+        "Pummel",
+        "Battle Shout",
+        "Bloodrage",
+        "Death Wish",
+        "Recklessness",
+        "Berserker Rage",
+        "Sweeping Strikes",
+        "Perception"
+      ],
+      "never": [],
+      "signature": [
+        "Bloodthirst"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "fury_tank",
+      "role": "tank",
+      "rotation": "kb_fury_tank_warrior",
+      "core": [
+        "Bloodthirst",
+        "Revenge",
+        "Heroic Strike",
+        "Sunder Armor"
+      ],
+      "situational": [
+        "Cleave",
+        "Thunder Clap",
+        "Whirlwind",
+        "Challenging Shout",
+        "Death Wish",
+        "Shield Wall",
+        "Bloodrage",
+        "Demoralizing Shout"
+      ],
+      "never": [],
+      "signature": [
+        "Death Wish"
+      ],
+      "taunt": [
+        "Taunt",
+        "Mocking Blow",
+        "Challenging Shout"
+      ]
+    },
+    {
+      "spec": "protection",
+      "role": "tank",
+      "rotation": "kb_protection_warrior",
+      "core": [
+        "Shield Slam",
+        "Sunder Armor",
+        "Heroic Strike"
+      ],
+      "situational": [
+        "Overpower",
+        "Concussion Blow",
+        "Revenge",
+        "Shield Block",
+        "Demoralizing Shout",
+        "Cleave",
+        "Thunder Clap",
+        "Last Stand",
+        "Shield Wall",
+        "Whirlwind",
+        "Berserker Rage",
+        "Enrage",
+        "Death Wish",
+        "Recklessness",
+        "Bloodrage",
+        "Battle Shout",
+        "Execute",
+        "Charge"
+      ],
+      "never": [],
+      "signature": [
+        "Shield Slam",
+        "Concussion Blow"
+      ],
+      "taunt": [
+        "Taunt",
+        "Mocking Blow",
+        "Challenging Shout"
+      ]
+    }
+  ]
+}

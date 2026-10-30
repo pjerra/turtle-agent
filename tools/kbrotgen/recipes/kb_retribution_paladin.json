@@ -1,0 +1,351 @@
+{
+  "name": "kb_retribution_paladin",
+  "class": "paladin",
+  "spec": "retribution",
+  "role": "melee-dps",
+  "kb_file": "classes/yaml/paladin/retribution-melee-dps.yaml",
+  "preset": "ret_paladin",
+  "replaces": [
+    "paladin_retribution"
+  ],
+  "mode": "",
+  "notes": "The knowledge base's retribution paladin: a seal before any auto attack, Holy Strike when Holy Might is missing or expiring, Crusader Strike to keep Zeal up, Judgement on cooldown, Hammer of Wrath below 20%, a Crusader Strike filler, Repentance, Consecration at two or more targets. Exorcism's Undead/Demon gate, the Windfury wait and fight-specific rows are listed in kb.unexpressed.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 1,
+      "text": "Seal of Righteousness (SoC build: Seal of Command) | seal missing and an auto will land within the GCD; never auto-attack without a seal [[d:paladin#1485694401534496800]]",
+      "text_sha": "d754892dc5c0",
+      "entries": [
+        {
+          "id": "seal_of_righteousness",
+          "spell": "Seal of Righteousness",
+          "level": 1,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "no_self_aura": [
+              "Seal of Righteousness",
+              "Seal of Command",
+              "Seal of Wisdom",
+              "Seal of Light",
+              "Seal of the Crusader",
+              "Seal of Justice"
+            ]
+          },
+          "note": "the Seal of Command build casts Seal of Command here instead"
+        },
+        {
+          "id": "auto_attack",
+          "kind": "attack"
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 2,
+      "text": "Holy Strike | Zeal 3 stacks and Holy Might <= 6 s or missing; also the opener (no Sunders yet) [[d:paladin#1483566674870534344]] [[d:paladin#1483567863577968650]]",
+      "text_sha": "4a6819a67285",
+      "entries": [
+        {
+          "id": "holy_strike",
+          "spell": "Holy Strike",
+          "level": 4,
+          "target": "fight",
+          "band": "high",
+          "when": {
+            "self_aura_missing": [
+              "Holy Might"
+            ]
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 3,
+      "text": "Crusader Strike | Zeal < 3 stacks or expiring within 4 s [[d:paladin#1483566674870534344]]",
+      "text_sha": "2e4cd8caa935",
+      "entries": [
+        {
+          "id": "crusader_strike",
+          "spell": "Crusader Strike",
+          "level": 10,
+          "target": "fight",
+          "when": {
+            "self_aura_missing": [
+              "Zeal"
+            ]
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 4,
+      "text": "Judgement (Righteousness/Command, or assigned Crusader/Wisdom) then re-seal | right after an auto lands and no strike is about to come off cooldown [[d:paladin#1485694441124659462]] [[d:paladin#1471558463229526216]]",
+      "text_sha": "e14555a199b8",
+      "entries": [
+        {
+          "id": "judgement",
+          "spell": "Judgement",
+          "level": 4,
+          "target": "fight"
+        }
+      ],
+      "unexpressed": "swing timer not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 5,
+      "text": "Exorcism | target is Undead or Demon",
+      "text_sha": "be3965a1928e",
+      "entries": [],
+      "unexpressed": "creature type not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 6,
+      "text": "Hammer of Wrath | target < 20% and no strike delayed; optional (low value) [[d:paladin#1441422778774454365]]",
+      "text_sha": "dba23394402a",
+      "entries": [
+        {
+          "id": "hammer_of_wrath",
+          "spell": "Hammer of Wrath",
+          "level": 44,
+          "target": "fight",
+          "when": {
+            "mob_hp_below": 20
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 7,
+      "text": "Crusader Strike or Holy Strike (whichever hits harder) | keep both Zeal and Holy Might up; CS usually wins vs sundered bosses, HS on unsundered trash; SoC prioritises Holy Might, SoR prioritises Zeal [[d:paladin#1494198526383751270]] [[d:paladin#1482302289338433606]]",
+      "text_sha": "4900d9d2c943",
+      "entries": [
+        {
+          "id": "crusader_strike_filler",
+          "spell": "Crusader Strike",
+          "level": 10,
+          "target": "fight",
+          "note": "Crusader Strike usually wins on sundered bosses; which strike hits harder is not a condition"
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 7,
+      "priority": 8,
+      "text": "Repentance | on cooldown on stun-immune bosses (free damage) [[d:paladin#1438268353134465074]]",
+      "text_sha": "a503f1470109",
+      "entries": [
+        {
+          "id": "repentance",
+          "spell": "Repentance",
+          "talent": true,
+          "target": "fight"
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 8,
+      "priority": 9,
+      "text": "Consecration | 2+ targets or spare mana; single target only in high-tier gear [[d:paladin#1492066318159970314]]",
+      "text_sha": "a7af31baddf3",
+      "entries": [
+        {
+          "id": "consecration",
+          "spell": "Consecration",
+          "level": 20,
+          "target": "fight",
+          "threat": "aoe",
+          "when": {
+            "mobs_in_reach_min": 2
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 9,
+      "priority": 10,
+      "text": "Wait ~2 s after a Windfury proc before the next strike/Judgement | Windfury Totem present [[d:paladin#1483022433265913865]]",
+      "text_sha": "cac9180b3a0e",
+      "entries": [],
+      "unexpressed": "swing timer not in the conditions"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "single-target loop on the Judgement of Wisdom target; Consecration if mana allows",
+      "text_sha": "7a536e26cbb5",
+      "entries": [],
+      "unexpressed": "covered by rotation_single[2-4]: the single-target strikes; Consecration waits for two or more mobs"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 1,
+      "text": "Consecration on cooldown (rank 1 when mana is short)",
+      "text_sha": "3b7a1edc2787",
+      "entries": [
+        {
+          "id": "consecration_rank1",
+          "spell": "Consecration",
+          "level": 20,
+          "rank": 1,
+          "target": "fight",
+          "threat": "aoe",
+          "when": {
+            "mobs_in_reach_min": 4,
+            "power_below": 40
+          },
+          "note": "moved ahead of the full-rank Consecration: at low mana the rank-1 cast is the row"
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 2,
+      "text": "Goblin Sapper Charge",
+      "text_sha": "bf3191e1c8e1",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 3,
+      "priority": 3,
+      "text": "Holy Wrath",
+      "text_sha": "ca4461f03bf4",
+      "entries": [],
+      "unexpressed": "creature type not in the conditions"
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Trinkets / Juju Flurry / Potion of Quickness | 2-3 GCDs into the fight with Zeal and Vengeance up [[d:paladin#1455493072661250152]] [[d:paladin#1484608557075660910]]",
+      "text_sha": "7f508a25651c",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "Perception (Human) | with the other cooldowns",
+      "text_sha": "b83b19a0f79f",
+      "entries": [
+        {
+          "id": "perception",
+          "spell": "Perception",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat"
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": null,
+      "text": "Repentance | 60 s cooldown; free damage on immune bosses, CC on others",
+      "text_sha": "30b575819c08",
+      "entries": [],
+      "unexpressed": "covered by rotation_single[7]: the same Repentance entry"
+    },
+    {
+      "from": "cooldowns",
+      "index": 3,
+      "priority": null,
+      "text": "Divine Shield | survival or threat drop only; halves healing done and taken [[d:paladin#1467173434726547698]]",
+      "text_sha": "9d8ef09b50f0",
+      "entries": [
+        {
+          "id": "divine_shield",
+          "spell": "Divine Shield",
+          "level": 34,
+          "target": "self",
+          "band": "emergency",
+          "when": {
+            "self_hp_below": 20
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "cooldowns",
+      "index": 4,
+      "priority": null,
+      "text": "Zeal / Holy Might upkeep | always; Zeal is 3 x 5% haste stacks for 30 s, Holy Might +20% Strength [[d:paladin#1436340559315734589]] [[d:paladin#1436321352041627648]]",
+      "text_sha": "219463db156e",
+      "entries": [],
+      "unexpressed": "covered by rotation_single[1-2]: the strikes keep Zeal and Holy Might up"
+    }
+  ],
+  "order": [
+    "seal_of_righteousness",
+    "auto_attack",
+    "holy_strike",
+    "crusader_strike",
+    "judgement",
+    "hammer_of_wrath",
+    "crusader_strike_filler",
+    "repentance",
+    "consecration_rank1",
+    "consecration",
+    "perception",
+    "divine_shield"
+  ],
+  "oracle": {
+    "core": [
+      "Holy Strike",
+      "Crusader Strike",
+      "Judgement"
+    ],
+    "situational": [
+      "Seal of Righteousness",
+      "Seal of Command",
+      "Consecration",
+      "Hammer of Wrath",
+      "Exorcism",
+      "Repentance",
+      "Divine Shield",
+      "Lay on Hands"
+    ],
+    "never": [],
+    "signature": [
+      "Repentance",
+      "Sanctity Aura"
+    ],
+    "taunt": []
+  }
+}

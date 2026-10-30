@@ -34,6 +34,8 @@ const (
 	toolWater, toolAir            = 5177, 5178
 )
 
+var elementNames = [elements]string{"fire", "earth", "water", "air"}
+
 var (
 	shHealKnown = []uint32{shHW1, 332, 547, 913, 939, 959, shHW7, shLHW1, 8008, shLHW3, shChainHeal, shCurePoison, shCureDisease}
 	shShields   = []uint32{324, 325, 905, 945, shLShield5, shWShield1, shWShield2}

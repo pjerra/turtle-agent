@@ -1,0 +1,193 @@
+{
+  "version": 1,
+  "name": "kb_fire_mage",
+  "class": "mage",
+  "spec": "fire",
+  "replaces": [
+    "mage_frost"
+  ],
+  "notes": "The Turtle knowledge base's fire raid list: Pyroblast on a Hot Streak stack, Fire Blast on cooldown, Scorch until Fire Vulnerability is at five stacks on a long-lived target, Fireball as the filler, and the AoE list (Flamestrike rank 6 then rank 5, Blast Wave, Arcane Explosion). The opener order, the fireball counting between Fire Blasts, the Ignite management and the Flarecore set are not conditions (kb.unexpressed).",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/mage/fire-ranged-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102968#p102968 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=108776#p108776 (Jamey, staff, 2024-11-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=124504#p124504 (Torta, staff, 2025-03-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-26)",
+    "https://forum.turtlecraft.gg/viewtopic.php?t=20103 (Dragunovi, staff, 2025)",
+    "https://turtle-wow.fandom.com/wiki/Mage_Fire_FAQ (community wiki, wiki, 2026-03-04)",
+    "https://turtle-wow.fandom.com/wiki/Mage_General_FAQ (community wiki, wiki, 2026-09-09)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=167923#p167923 (Eluaria, player, 2026-02-11)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=160732#p160732 (Eluaria, player, 2025-11-26)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=167406#p167406 (Cheruscan, player, 2026-02-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=108772#p108772 (Rethon, player, 2024-11-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=110663#p110663 (Bahamutxd, player, 2024-11-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=91574#p91574 (Sauceman89, player, 2024-03-28)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171412#p171412 (Wsta, player, 2026-03-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=83404#p83404 (Xudo, player, 2024-01-02)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=76091#p76091 (Mativh, player, 2023-11-06)",
+    " (Supermongo, player, 2025-09-17)",
+    " (Luden TA, player, 2026-03-28)",
+    " (biloen, player, 2026-03-04)"
+  ],
+  "priorities": [
+    {
+      "id": "pyroblast",
+      "spell": "Pyroblast",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "moving": false,
+        "self_aura": [
+          "Hot Streak"
+        ]
+      }
+    },
+    {
+      "id": "fire_blast",
+      "spell": "Fire Blast",
+      "level": 6,
+      "target": "fight",
+      "when": {}
+    },
+    {
+      "id": "scorch",
+      "spell": "Scorch",
+      "level": 22,
+      "target": "fight",
+      "when": {
+        "moving": false,
+        "mob_hp_above": 70,
+        "mob_stacks_below": {
+          "aura": "Fire Vulnerability",
+          "stacks": 5
+        }
+      },
+      "note": "mob_hp_above 70 stands in for \"target lives > ~1 min\", as the shipped fire_mage file does; the \"never extend Ignite\" rule is a note, not an entry."
+    },
+    {
+      "id": "flamestrike_rank6",
+      "spell": "Flamestrike",
+      "level": 16,
+      "rank": 6,
+      "target": "fight",
+      "when": {
+        "moving": false,
+        "mobs_near_mob_min": 3
+      },
+      "note": "The rank-6 cast; the rank-5 one of the KB's pair is not an entry (see kb.unexpressed)."
+    },
+    {
+      "id": "blast_wave",
+      "spell": "Blast Wave",
+      "talent": true,
+      "target": "self",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mob_distance_max": 10,
+        "mobs_near_mob_min": 3
+      },
+      "note": "mob_distance_max 10 is Blast Wave's radius."
+    },
+    {
+      "id": "arcane_explosion",
+      "spell": "Arcane Explosion",
+      "level": 14,
+      "target": "self",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mob_distance_max": 10,
+        "mobs_near_mob_min": 3
+      },
+      "note": "mob_distance_max 10 is Arcane Explosion's own radius."
+    },
+    {
+      "id": "fireball",
+      "spell": "Fireball",
+      "level": 1,
+      "target": "fight",
+      "when": {
+        "moving": false
+      },
+      "note": "Moved after the AoE entries: the filler has no cooldown, so as a rule it would starve every entry the KB lists after it."
+    },
+    {
+      "id": "combustion",
+      "spell": "Combustion",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "mob_aura": [
+          "Fire Vulnerability"
+        ]
+      },
+      "note": "mob_aura stands in for \"stacked\": the stack count of Fire Vulnerability is not read."
+    },
+    {
+      "id": "blast_wave_cooldown",
+      "spell": "Blast Wave",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mob_distance_max": 10,
+        "mobs_near_mob_min": 3
+      }
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/mage/fire-ranged-dps.yaml",
+    "sha256": "40f60e799496923fe30be83eccf32be6b0102a65bbbe04de67c83044e73391d6",
+    "preset": "fire_mage",
+    "recipe": "tools/kbrotgen/recipes/kb_fire_mage.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Opener: Fire Blast -> Scorch x3 -> Fireball -> Fire Blast (Fire Blast while a Fireball is in flight banks a Fire Vulnerability stack) | pull",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[1]",
+        "text": "Pyroblast | 5 Hot Streak stacks (4 only if the boss is about to die)",
+        "why": "the five-stack count is not a condition (self stacks are not read); \"the boss is about to die\" is not a condition"
+      },
+      {
+        "row": "rotation_single[2]",
+        "text": "Fire Blast | off cooldown: after 2 Fireballs with no haste, after a 3rd Fireball with small haste",
+        "why": "the fireball count between two blasts (2, or 3 with haste) is not a condition"
+      },
+      {
+        "row": "rotation_single[5]",
+        "text": "Let a weak (partially resisted) Ignite drop and rebuild; signal other Fire mages via /bw extra magetools ignitedroptrigger | weak Ignite rolling",
+        "why": "the Ignite's strength is not a condition; macro/addon (Nampower etc.)"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "Rank-1 Arcane Explosion (pre-proc trinkets, low threat)",
+        "why": "pre-pull/opener outside the brain's fight; consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "rotation_aoe[1]",
+        "text": "Flamestrike rank 6 -> Flamestrike rank 5 (two DoTs tick)",
+        "why": "the rank-5 Flamestrike that makes the second DoT tick needs a cast-alternation condition the format does not have; \"mobs stay grouped and alive\" is not a condition"
+      },
+      {
+        "row": "rotation_aoe[4]",
+        "text": "Flarecore 6-piece Flamestrike play",
+        "why": "an item set bonus is not a condition (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "Mind Quickening Gem | save for chosen fights (Medivh, Faerlina, Heigan); best on short fights given its ~5 min cooldown, or pre-summon and swap to it right before the pull for a longer fight",
+        "why": "consumable or item (combat_consumables owns items)"
+      }
+    ]
+  }
+}

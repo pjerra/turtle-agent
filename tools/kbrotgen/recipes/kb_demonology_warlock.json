@@ -1,0 +1,269 @@
+{
+  "name": "kb_demonology_warlock",
+  "class": "warlock",
+  "spec": "demonology",
+  "role": "ranged-dps",
+  "kb_file": "classes/yaml/warlock/demonology-ranged-dps.yaml",
+  "preset": "demonology_warlock",
+  "replaces": [
+    "warlock_affliction"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's demonology raid list, as far as a rotation can say it: Curse of Recklessness on a mob that carries no curse, Corruption, Shadow Bolt as the filler (Searing Pain and Shadowburn on short fights) and Hellfire on three or more stacked mobs. Every row about the greater demon, the pet's Felstorm, Power Overwhelming, Health Funnel and the summon cooldowns is pet state, which the rotation cannot read (kb.unexpressed).",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 0,
+      "text": "summon the boss greater demon pre-pull; set Felguard Cleave autocast, Felstorm manual; Doomguard Infernal Blade on | pre-pull [[d:warlock#1491048996846698547]]",
+      "text_sha": "bd94a6f7c024",
+      "entries": [],
+      "unexpressed": "pet state not in the conditions; pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 1,
+      "text": "pet attack (/script PetAttack()) | pet idle; re-issue after Take Position [[d:warlock#1465463647894765712]]",
+      "text_sha": "801aedc78d14",
+      "entries": [],
+      "unexpressed": "pet state not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 2,
+      "text": "on-use trinket (Black Book) + Power Overwhelming + Felstorm | on the 3rd Unleashed Potential stack [[d:warlock#1473595062918185033]]",
+      "text_sha": "5056d698db50",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items); the third Unleashed Potential stack is not a condition; pet state not in the conditions (Felstorm)"
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 3,
+      "text": "Power Overwhelming (no GCD) | off cooldown and demon can afford 40% of base health; tell healers [[d:warlock#1491048996846698547]], [[d:warlock#1442919256663789711]]",
+      "text_sha": "0cfc0244e644",
+      "entries": [],
+      "unexpressed": "pet state not in the conditions (the cast targets the demon); telling the healers is not a condition"
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 4,
+      "text": "direct-damage spell or rank-1 Health/Mana Funnel tick | Unleashed Potential about to expire [[d:warlock#1458913059501506673]]",
+      "text_sha": "2ebf1f5c2d99",
+      "entries": [],
+      "unexpressed": "the stack's expiry is not a condition; pet state not in the conditions (Health Funnel)"
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 5,
+      "text": "curse (Curse of Recklessness if free choice) | missing [[d:warlock#1487040479907287240]]",
+      "text_sha": "0058a2c1a64a",
+      "entries": [
+        {
+          "id": "curse_of_recklessness",
+          "spell": "Curse of Recklessness",
+          "level": 14,
+          "target": "fight",
+          "when": {
+            "no_mob_aura": [
+              "Curse of Agony",
+              "Curse of the Elements",
+              "Curse of Shadow",
+              "Curse of Recklessness"
+            ]
+          }
+        }
+      ],
+      "unexpressed": "the raid's curse assignment is not a condition (the entry takes the KB's free-choice default, Recklessness)"
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 6,
+      "text": "Corruption | only if it will last full duration; on trash only if mobs live >18 s [[d:warlock#1483907298123448390]]",
+      "text_sha": "b349489f9c6a",
+      "entries": [
+        {
+          "id": "corruption",
+          "spell": "Corruption",
+          "level": 4,
+          "target": "fight",
+          "when": {
+            "no_mob_aura": [
+              "Corruption"
+            ]
+          }
+        }
+      ],
+      "unexpressed": "\"it will last its full duration\" (mobs live > 18 s) is not a condition"
+    },
+    {
+      "from": "rotation_single",
+      "index": 7,
+      "priority": 7,
+      "text": "Shadow Bolt | default filler; short fights: 2x Searing Pain + Shadowburn or 3x Searing Pain [[d:warlock#1491048996846698547]]",
+      "text_sha": "b9446dd183a9",
+      "entries": [
+        {
+          "id": "shadow_bolt",
+          "spell": "Shadow Bolt",
+          "level": 1,
+          "target": "fight",
+          "when": {
+            "moving": false
+          },
+          "note": "Moved after the AoE entry: the filler has no cooldown, so as a rule it would starve the AoE cast the KB lists after it."
+        }
+      ],
+      "unexpressed": "\"short fight\" counting (2x Searing Pain + Shadowburn) is not a condition"
+    },
+    {
+      "from": "rotation_single",
+      "index": 8,
+      "priority": 8,
+      "text": "Health Funnel | demon below ~50% and no AoE imminent [[d:warlock#1448706339974025398]]",
+      "text_sha": "5c9972e03b95",
+      "entries": [],
+      "unexpressed": "pet state not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 9,
+      "priority": 9,
+      "text": "finish the greater demon with Power Overwhelming before its 3-minute timer ends | timer near end [[d:warlock#1475217712006434837]]",
+      "text_sha": "b89dcfb1b1fd",
+      "entries": [],
+      "unexpressed": "pet state not in the conditions; the summon's timer is not a condition"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Felstorm (after tank AoE threat), then Hellfire",
+      "text_sha": "5659a6d56c4c",
+      "entries": [
+        {
+          "id": "hellfire",
+          "spell": "Hellfire",
+          "level": 30,
+          "target": "self",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "mob_distance_max": 10,
+            "mobs_near_mob_min": 3
+          },
+          "note": "mob_distance_max 10 is Hellfire's radius."
+        }
+      ],
+      "unexpressed": "pet state not in the conditions (Felstorm is the pet's); the tank's threat is not a condition"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 2,
+      "text": "Infernal + Power Overwhelming + 3-stack UP + Hellfire",
+      "text_sha": "f759b4da35f1",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items); pet state not in the conditions"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 3,
+      "text": "curse of Recklessness then Shadow Bolt; add Immolate/Corruption only if mobs live >18 s",
+      "text_sha": "a1df2f18041d",
+      "entries": [],
+      "unexpressed": "the curse and Shadow Bolt are the single-target entries; \"mobs live > 18 s\" is not a condition"
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Inferno (Infernal) | 5 min with Master Summoner; lowest CD, fire immune, physical punches [[d:warlock#1464562452476723223]], [[d:warlock#1424158415739027640]]",
+      "text_sha": "ad8bc7102d0d",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items); pet state not in the conditions"
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "Demon Gate (Felguard) | 15 min; AoE and single-target burst; Felguard spawns 4 s after cast [[d:warlock#1485736529501491250]]",
+      "text_sha": "9721ab9b8165",
+      "entries": [],
+      "unexpressed": "pet state not in the conditions"
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": null,
+      "text": "Ritual of Doom (Doomguard) | 30 min; 3 s cast, 1 helper since 1.18.1; single-target [[d:warlock#1491589394480627833]], [[d:warlock#1485736529501491250]]",
+      "text_sha": "3a5902f42ee0",
+      "entries": [],
+      "unexpressed": "pet state not in the conditions"
+    },
+    {
+      "from": "cooldowns",
+      "index": 3,
+      "priority": null,
+      "text": "Power Overwhelming | on cooldown when demon health allows; removes CC from the demon [[d:warlock#1440858777116086273]]",
+      "text_sha": "f6ab0266ccff",
+      "entries": [],
+      "unexpressed": "pet state not in the conditions"
+    },
+    {
+      "from": "cooldowns",
+      "index": 4,
+      "priority": null,
+      "text": "Fel Domination | instant re-summon when the pet dies mid-combat [[d:warlock#1475587639188000959]]",
+      "text_sha": "e059e12e0d4b",
+      "entries": [],
+      "unexpressed": "pet state not in the conditions"
+    },
+    {
+      "from": "cooldowns",
+      "index": 5,
+      "priority": null,
+      "text": "The Black Book | on the 3rd UP stack with PO/greater demon [[d:warlock#1446169503003185325]]",
+      "text_sha": "7b7fdc550e87",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    }
+  ],
+  "order": [
+    "curse_of_recklessness",
+    "corruption",
+    "hellfire",
+    "shadow_bolt"
+  ],
+  "oracle": {
+    "core": [
+      "Shadow Bolt",
+      "Corruption",
+      "Curse of Recklessness"
+    ],
+    "situational": [
+      "Searing Pain",
+      "Shadowburn",
+      "Hellfire",
+      "Immolate",
+      "Power Overwhelming",
+      "Fel Domination",
+      "Felstorm",
+      "Inferno",
+      "Summon Felguard",
+      "Summon Doomguard"
+    ],
+    "never": [],
+    "signature": [
+      "Power Overwhelming",
+      "Fel Domination"
+    ],
+    "taunt": []
+  }
+}

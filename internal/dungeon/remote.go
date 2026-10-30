@@ -568,7 +568,6 @@ type RemoteDriver struct {
 	healerCapped     int        // leg+1 of the leg whose rest gates stopped waiting for the healer's mana alone
 	floorCapped      int        // leg+1 of the leg whose rest gates stopped waiting for the pull floors (Config.RestPullExtra ran out)
 	bossFight        bool       // a boss fight (doKill) is on
-	recoveries       int
 
 	tank        packet.GUID
 	engagedAt   map[packet.GUID]time.Time // when a mob was first seen fighting the party
@@ -1199,7 +1198,11 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 	d.g.ResetView()
 	d.setStats0(d.g.ViewStats())
 	d.endsAtBind = len(d.g.BindingEnds())
-	r, err := d.g.Command(ctx, bindCommand(d.opt.Lead, d.opt.Bots))
+	bindLine := bindCommand(d.opt.Lead, d.opt.Bots)
+	if d.plan.IsRaid() {
+		bindLine += " raid"
+	}
+	r, err := d.g.Command(ctx, bindLine)
 	if err != nil {
 		return fmt.Errorf("commander bind: %w", err)
 	}
@@ -1421,7 +1424,11 @@ func (d *RemoteDriver) adoptBinding(ctx context.Context, refusal *tbm.Err) error
 		return fmt.Errorf("commander bind refused: %s (and commander status gave no answer to compare it with)", describeBindErr(refusal))
 	}
 	lead, n, want := strings.TrimSpace(sr.Ack.Executor), sr.Ack.Count, 1+len(d.opt.Bots)
-	if !strings.EqualFold(lead, d.opt.Lead) || (len(d.opt.Bots) > 0 && n != want) {
+	mismatch := !strings.EqualFold(lead, d.opt.Lead) || (len(d.opt.Bots) > 0 && n != want)
+	if d.plan.IsRaid() && d.plan.Raid != nil {
+		mismatch = !strings.EqualFold(lead, d.opt.Lead) || n != d.plan.Raid.Size
+	}
+	if mismatch {
 		return fmt.Errorf("the commander is already bound to another group: lead bot %s with %d bots, not %s%s; unbind it first (commander op unbind)", lead, n, d.opt.Lead, botsSuffix(d.opt.Bots))
 	}
 	d.rep.note(fmt.Sprintf("commander bind: already bound to %s with %d bots, the same group; reusing the binding", lead, n))
@@ -2389,23 +2396,17 @@ func (d *RemoteDriver) tightenTo(ctx context.Context, p Point) error {
 			continue
 		}
 		rounds++
-		expired := false
-		var err error
+		target := p
 		if hdist(here, p) < tightenBack {
 			b, ok := d.trailBack(here, p)
 			if !ok {
 				continue // nothing of the walked path is far enough back: the cap ends this, not a step from short
 			}
 			d.rep.note(fmt.Sprintf("leg %d: launch waypoint %.1f %.1f %.1f: the lead bot stood %.1f yd away (the module carries out no move under %g yd on the ground plane); it is walked back to %.1f %.1f %.1f on the path it came, then onto the point", d.curLeg, p.X, p.Y, p.Z, last, float64(MinMove), b.X, b.Y, b.Z))
-			expired, err = d.tightenGo(ctx, b, &meter, &until)
-		} else {
-			expired, err = d.tightenGo(ctx, p, &meter, &until)
+			target = b
 		}
-		if err != nil {
+		if err := d.tightenGo(ctx, target, &meter, &until); err != nil {
 			return err
-		}
-		if expired {
-			continue // the next look judges the movement for the failure, on frames from after the wait
 		}
 	}
 }
@@ -2432,29 +2433,26 @@ func (d *RemoteDriver) tightenFail(p Point, last float64, seen, moving bool) err
 // tightenGo sends `cmd move q` and waits for the lead bot to come within directArrive yards of it, as a walk waits — but never past the
 // tighten's own deadline: a wait left to its own bounds (MoveStall for a bot that stands still, moveTimeout for one that walks and never
 // arrives, no bound at all for a quiet feed) would let the six moves of a full tighten far exceed the cap, so the wait is given until and ends
-// there. expired says the wait ended at that cap, so that the caller fails the step rather than order again. A pack that aggroes is
-// fought on the way (as a walk does) and the fight's time is given back to the cap, which is not an expiry.
-func (d *RemoteDriver) tightenGo(ctx context.Context, q Point, meter *walkMeter, until *time.Time) (expired bool, err error) {
+// there. A pack that aggroes is fought on the way (as a walk does) and the fight's time is given back to the cap.
+func (d *RemoteDriver) tightenGo(ctx context.Context, q Point, meter *walkMeter, until *time.Time) error {
 	if err := d.moveGap(ctx); err != nil {
-		return false, err
+		return err
 	}
 	if _, err := d.order(ctx, "move", moveArgs(q)...); err != nil {
-		return false, err
+		return err
 	}
 	res, err := d.waitArrival(ctx, q, directArrive, false, meter, *until)
 	if err != nil {
-		return false, err
+		return err
 	}
-	expired = res == deadlineAt
 	if res == fightAt || (d.fr.PartyInCombat() && len(d.fr.EngagedHostiles()) > 0 && !d.batchOpening()) {
 		fight := d.clk.Now()
 		if err := d.walkAggro(ctx); err != nil {
-			return false, err
+			return err
 		}
 		*until = until.Add(d.clk.Now().Sub(fight))
-		expired = false // the cap was given the fight's time back
 	}
-	return expired, nil
+	return nil
 }
 
 // trailBack is the point of the walk's own trail to send the lead bot back to before the move onto the launch point: the nearest trail point
