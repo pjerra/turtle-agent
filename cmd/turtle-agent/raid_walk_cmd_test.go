@@ -98,8 +98,12 @@ type walkFakeAgent struct {
 	bindLayout string
 	enterReply *commanderReply
 	enterBusy  int // the first enterBusy enter orders answer ERR busy
-	enterCalls int
-	onGM       func(line string)
+	// settleReads: a hire after the first batch shows its home zone for that many party reads (its join summon).
+	settleReads     int
+	unsettled       map[string]int
+	unsettledAtGear int
+	enterCalls      int
+	onGM            func(line string)
 
 	// pos is where the commander's last .go put it; the quiet-check fakes place units around it.
 	x, y, z float32
@@ -159,7 +163,12 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		f.mu.Lock()
 		members := make([]session.PartyMember, 0, len(f.party))
 		for i, n := range f.party {
-			members = append(members, session.PartyMember{Name: n, GUID: packet.GUID(1000 + i), Online: true})
+			zone := uint16(33)
+			if f.unsettled[n] > 0 {
+				f.unsettled[n]--
+				zone = 1
+			}
+			members = append(members, session.PartyMember{Name: n, GUID: packet.GUID(1000 + i), Online: true, Zone: zone})
 		}
 		f.mu.Unlock()
 		v = session.PartyInfo{InGroup: len(members) > 0, Members: members}
@@ -270,10 +279,25 @@ func (f *walkFakeAgent) gmSide(line string) {
 			f.nameSeq++
 			names = append(names, fmt.Sprintf("Bot%02d", f.nameSeq))
 		}
+		if len(f.party) > 0 && f.settleReads > 0 {
+			if f.unsettled == nil {
+				f.unsettled = map[string]int{}
+			}
+			for _, n := range names {
+				f.unsettled[n] = f.settleReads
+			}
+		}
 		f.party = append(f.party, names...)
 		f.mu.Unlock()
 		f.push("TBM:HIRE_RAID|ok|"+strconv.Itoa(n)+"|"+strconv.Itoa(n)+"|0|0|0|3|0|", "")
 	case strings.HasPrefix(line, ".bot gear raid "):
+		f.mu.Lock()
+		for _, left := range f.unsettled {
+			if left > 0 {
+				f.unsettledAtGear++
+			}
+		}
+		f.mu.Unlock()
 		f.push("TBM:GEAR|ok|39|39|3|60|-|-|-|0|-|0", "")
 	case strings.HasPrefix(line, ".go xyz "):
 		fields := strings.Fields(line)
@@ -1283,6 +1307,32 @@ func TestRaidWalkEnterGivesUpOnAHireBusyTooLong(t *testing.T) {
 	}
 	if f.agent.enterCalls != enterBusyTries || !strings.Contains(f.summary().EndReason, "busy") {
 		t.Fatalf("enter sent %d times, reason %q", f.agent.enterCalls, f.summary().EndReason)
+	}
+}
+
+// Walk 12: the walk bound the raid while the last hires were still on their join summon, and the server removed
+// every hire that joined after the bind. The walk waits until every hire shows the MT's zone.
+func TestRaidWalkWaitsForHiresToSettle(t *testing.T) {
+	f := newFixture(t)
+	f.defaultRun("onyxias_lair")
+	f.agent.settleReads = 3
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	if f.agent.unsettledAtGear != 0 {
+		t.Fatalf("the refit and bind went out with %d hires still on their join summon", f.agent.unsettledAtGear)
+	}
+}
+
+func TestRaidWalkStopsWhenHiresNeverSettle(t *testing.T) {
+	f := newFixture(t)
+	f.agent.settleReads = 100000
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	if !strings.Contains(f.summary().EndReason, "hires not settled") {
+		t.Fatalf("summary reason %q", f.summary().EndReason)
 	}
 }
 
