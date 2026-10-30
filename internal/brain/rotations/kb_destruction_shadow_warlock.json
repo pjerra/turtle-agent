@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "name": "kb_destruction_shadow_warlock",
+  "class": "warlock",
+  "spec": "destruction_shadow",
+  "replaces": [
+    "warlock_affliction"
+  ],
+  "notes": "The Turtle knowledge base's SM/Ruin list: Corruption kept up, Shadow Bolt as the filler (instant on a Nightfall/Shadow Trance proc), Shadowburn on a low target, Siphon Life and Drain Soul on a long-lived target, Hellfire or Rain of Fire on five or more stacked mobs. The assigned curse and the 5-man exception are not conditions (kb.unexpressed).",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/warlock/destruction-shadow-ranged-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=107778#p107778 (LastyK, player, 2024-11-13)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=107592#p107592 (Delalama, player, 2024-11-11)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=169207#p169207 (Spritzbube, player, 2026-02-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=168196#p168196 (Guiltyhaomarush, player, 2026-02-14)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102973#p102973 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=81271#p81271 (Volkyte, player, 2023-12-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=94521#p94521 (Akos1896, player, 2024-05-10)",
+    " (TowelDruid, player, 2026-03-25)",
+    " (biloen, player, 2026-01-24)"
+  ],
+  "priorities": [
+    {
+      "id": "corruption",
+      "spell": "Corruption",
+      "level": 4,
+      "target": "fight",
+      "when": {
+        "no_mob_aura": [
+          "Corruption"
+        ]
+      }
+    },
+    {
+      "id": "shadow_bolt_nightfall",
+      "spell": "Shadow Bolt",
+      "level": 1,
+      "target": "fight",
+      "when": {
+        "moving": false,
+        "self_aura": [
+          "Shadow Trance"
+        ]
+      }
+    },
+    {
+      "id": "shadowburn",
+      "spell": "Shadowburn",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "mob_hp_below": 20
+      }
+    },
+    {
+      "id": "siphon_life",
+      "spell": "Siphon Life",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "no_mob_aura": [
+          "Siphon Life"
+        ]
+      }
+    },
+    {
+      "id": "rain_of_fire",
+      "spell": "Rain of Fire",
+      "level": 20,
+      "target": "fight",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "moving": false,
+        "mobs_near_mob_min": 5
+      }
+    },
+    {
+      "id": "shadow_bolt",
+      "spell": "Shadow Bolt",
+      "level": 1,
+      "target": "fight",
+      "when": {
+        "moving": false
+      },
+      "note": "Moved after the AoE entry: the filler has no cooldown, so as a rule it would starve every entry the KB lists after it."
+    },
+    {
+      "id": "shadowburn_cd",
+      "spell": "Shadowburn",
+      "talent": true,
+      "target": "fight",
+      "band": "high",
+      "when": {
+        "mob_hp_below": 20
+      }
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/warlock/destruction-shadow-ranged-dps.yaml",
+    "sha256": "fafb6eb9e6fc67c139125e19648b32f838ce25dbadb33331bbbb810f8a71f3ad",
+    "preset": "destruction_shadow_warlock",
+    "recipe": "tools/kbrotgen/recipes/kb_destruction_shadow_warlock.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "assigned curse (+Malediction Curse of Agony) | missing [[d:warlock#1476505618654302291]]",
+        "why": "raid assignment/marking (which curse the raid assigned)"
+      },
+      {
+        "row": "rotation_single[4]",
+        "text": "Siphon Life | long fights (Patchwerk)",
+        "why": "\"long fights\" is not a condition"
+      },
+      {
+        "row": "rotation_single[5]",
+        "text": "Drain Soul | long-lived target while Shadowburn on cooldown",
+        "why": "another spell's cooldown (Shadowburn) is not a condition"
+      },
+      {
+        "row": "rotation_single[6]",
+        "text": "skip DoTs, pure Shadow Bolt | 5-man dungeons [[d:warlock#1486106500270395473]]",
+        "why": "the instance type (a 5-man dungeon) is not a condition"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "Hellfire or Rain of Fire",
+        "why": "Hellfire is the row's other option (nothing in the conditions tells the two apart)"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "on-use trinkets | with DoT reapplication",
+        "why": "consumable or item (combat_consumables owns items)"
+      }
+    ]
+  }
+}

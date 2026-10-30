@@ -1,0 +1,90 @@
+{
+  "class": "paladin",
+  "specs": [
+    {
+      "spec": "holy",
+      "role": "healer",
+      "rotation": "kb_holy_paladin",
+      "core": [
+        "Flash of Light",
+        "Holy Light",
+        "Holy Shock"
+      ],
+      "situational": [
+        "Holy Strike",
+        "Judgement",
+        "Consecration",
+        "Cleanse",
+        "Lay on Hands",
+        "Divine Shield",
+        "Hand of Protection",
+        "Seal of Wisdom",
+        "Divine Favor",
+        "Divine Intervention",
+        "Lightwell"
+      ],
+      "never": [],
+      "signature": [
+        "Holy Shock",
+        "Lightwell"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "protection",
+      "role": "tank",
+      "rotation": "kb_protection_paladin",
+      "core": [
+        "Holy Strike",
+        "Judgement",
+        "Consecration"
+      ],
+      "situational": [
+        "Seal of Righteousness",
+        "Seal of Wisdom",
+        "Holy Shield",
+        "Exorcism",
+        "Hand of Reckoning",
+        "Righteous Fury",
+        "Sanctity Aura",
+        "Divine Shield",
+        "Hammer of Justice",
+        "Bulwark of the Righteous"
+      ],
+      "never": [],
+      "signature": [
+        "Holy Shield",
+        "Bulwark of the Righteous"
+      ],
+      "taunt": [
+        "Hand of Reckoning"
+      ]
+    },
+    {
+      "spec": "retribution",
+      "role": "melee-dps",
+      "rotation": "kb_retribution_paladin",
+      "core": [
+        "Holy Strike",
+        "Crusader Strike",
+        "Judgement"
+      ],
+      "situational": [
+        "Seal of Righteousness",
+        "Seal of Command",
+        "Consecration",
+        "Hammer of Wrath",
+        "Exorcism",
+        "Repentance",
+        "Divine Shield",
+        "Lay on Hands"
+      ],
+      "never": [],
+      "signature": [
+        "Repentance",
+        "Sanctity Aura"
+      ],
+      "taunt": []
+    }
+  ]
+}

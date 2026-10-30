@@ -97,7 +97,7 @@ func TestGameObjectChangesAndNoUnitConfusion(t *testing.T) {
 		t.Fatalf("%+v", ch)
 	}
 	// Values that arrive before the create block (a create we missed) still belong to a game object.
-	ch = s.Apply([]Block{{Type: BlockValues, GUID: chest, Values: map[uint16]uint32{GOState: 1}}})
+	_ = s.Apply([]Block{{Type: BlockValues, GUID: chest, Values: map[uint16]uint32{GOState: 1}}})
 	ch = s.Apply([]Block{{Type: BlockValues, GUID: chest, Values: map[uint16]uint32{GOState: 0}}})
 	if len(ch) != 1 || ch[0].Kind != ChangeGOState {
 		t.Fatalf("%+v", ch)

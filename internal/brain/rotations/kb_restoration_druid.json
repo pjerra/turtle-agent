@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "name": "kb_restoration_druid",
+  "class": "druid",
+  "spec": "restoration",
+  "mode": "add",
+  "replaces": [],
+  "notes": "The Turtle knowledge base's restoration druid casts, added after role_healer: the max-rank Healing Touch emergency, Rejuvenation kept on the hurt, Regrowth on the tank, the rank-3 Rejuvenation blanket and Tranquility at ten hurt, and Innervate itself when the mana runs low. Entries run in band high, so they pre-empt the generic heal; the narrower conditions come first, which is the one departure from the KB's numeric order.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/druid/restoration-healer.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=153729#p153729 (Mastrshake, player, 2025-09-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=153757#p153757 (Reploidrocsa, player, 2025-09-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=155593#p155593 (Lynxkitten, player, 2025-10-14)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=155621#p155621 (Bayanni, player, 2025-10-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=156226#p156226 (Bayanni, player, 2025-10-19)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=147488#p147488 (Skyfont, player, 2025-08-21)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=168231#p168231 (Bikicsunaj, player, 2026-02-14)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102966#p102966 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=105927#p105927 (Zend, player, 2024-11-02)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=120862#p120862 (Syndraela, player, 2025-02-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172927#p172927 (Froizerk, player, 2026-03-28)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=173102#p173102 (Noephix, player, 2026-03-30)",
+    " (Discord #druid (pinned build), players, 2025-11-10)",
+    " (Micro Jackson, player (resto main), 2026-03-29)",
+    " (Habu (relaying Bapi guide), player, 2026-03-08)",
+    " (Valarya, player, 2026-03-28)"
+  ],
+  "priorities": [
+    {
+      "id": "nature_healing_touch",
+      "spell": "Healing Touch",
+      "level": 1,
+      "target": "heal",
+      "band": "emergency",
+      "when": {
+        "heal_hp_below": 30,
+        "heal_is_tank": true
+      },
+      "note": "Moved ahead of the KB's order and in band emergency (not high): the KB puts it above the routine heals, and role_healer's own emergency rule would otherwise take the tick."
+    },
+    {
+      "id": "tranquility",
+      "spell": "Tranquility",
+      "level": 30,
+      "target": "self",
+      "band": "emergency",
+      "when": {
+        "state": "combat",
+        "members_hurt_min": 10
+      },
+      "note": "Tree Form is the preset's druid_caster strategy's business: it cancels the form above a heal."
+    },
+    {
+      "id": "rejuv_blanket",
+      "spell": "Rejuvenation",
+      "level": 4,
+      "rank": 3,
+      "target": "heal",
+      "band": "high",
+      "when": {
+        "heal_no_aura": [
+          "Rejuvenation"
+        ],
+        "members_hurt_min": 3
+      },
+      "note": "Moved ahead of the single-target Rejuvenation: at three hurt the KB's blanket is the cast, and the conditions are all-must-hold. The rank is the KB's low-healing-power one."
+    },
+    {
+      "id": "rejuvenation",
+      "spell": "Rejuvenation",
+      "level": 4,
+      "target": "heal",
+      "band": "high",
+      "when": {
+        "heal_no_aura": [
+          "Rejuvenation"
+        ]
+      },
+      "note": "The KB's rank 11 (highest) is the default; the rank-5-for-rogues concession is gear, not a condition."
+    },
+    {
+      "id": "regrowth",
+      "spell": "Regrowth",
+      "level": 12,
+      "target": "heal",
+      "band": "high",
+      "when": {
+        "heal_is_tank": true
+      },
+      "note": "The KB's ranks by target armor class (R9 melee, R4 casters) are not conditions; the highest known rank goes."
+    },
+    {
+      "id": "rejuv_self",
+      "spell": "Rejuvenation",
+      "level": 4,
+      "rank": 1,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "power_below": 40,
+        "no_self_aura": [
+          "Rejuvenation"
+        ]
+      },
+      "note": "The KB's T3 2-piece trick: rank 1 on itself, mana back through the set bonus."
+    },
+    {
+      "id": "innervate_kb",
+      "spell": "Innervate",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "power_below": 40,
+        "no_self_aura": [
+          "Innervate"
+        ]
+      },
+      "note": "The Spirit-staff swap the KB asks for first is gear; 40% for 'about 600 Spirit' is the healer engine's mana-save threshold. The preset's druid_innervate keeps its own rule."
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/druid/restoration-healer.yaml",
+    "sha256": "4c2621b1d0f6b0971c15cd452f143e9376c742c8d4f6995c556c5a53eec1f833",
+    "preset": "resto_druid",
+    "recipe": "tools/kbrotgen/recipes/kb_restoration_druid.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Pre-pull: Rejuvenation then Regrowth on the tank |",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[1]",
+        "text": "Nature's Swiftness -> max-rank Healing Touch (two presses) or Swiftmend | tank below ~30%",
+        "why": "a self-cast cooldown cannot read the heal target (the heal conditions need target heal)"
+      },
+      {
+        "row": "rotation_single[2]",
+        "text": "Swiftmend | target HoT about to expire",
+        "why": "time left on an aura is not in the conditions"
+      },
+      {
+        "row": "rotation_single[6]",
+        "text": "no HoT on full-health targets | always",
+        "why": "a \"never\" rule the healer triage keeps (it heals nobody above its threshold)"
+      },
+      {
+        "row": "cooldowns[0]",
+        "text": "Tranquility | 1-2 casts per raid; interrupted by Sapphiron's aura [[d:druid#1476245899612131513]] [[d:druid#1302718473369030768]]",
+        "why": "nothing to add: the row names no cast the list does not already have"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "Swiftmend | consumes the HoT with the fewest ticks left [[d:druid#1476571037243019437]]",
+        "why": "time left on an aura is not in the conditions"
+      },
+      {
+        "row": "cooldowns[2]",
+        "text": "Nature's Swiftness | instant max-rank Healing Touch emergency",
+        "why": "a self-cast cooldown cannot read the heal target (the heal conditions need target heal)"
+      }
+    ]
+  }
+}

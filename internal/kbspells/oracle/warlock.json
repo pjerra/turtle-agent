@@ -1,0 +1,115 @@
+{
+  "class": "warlock",
+  "specs": [
+    {
+      "spec": "affliction",
+      "role": "ranged-dps",
+      "rotation": "kb_affliction_warlock",
+      "core": [
+        "Corruption",
+        "Curse of Agony",
+        "Drain Soul"
+      ],
+      "situational": [
+        "Shadow Bolt",
+        "Siphon Life",
+        "Dark Harvest",
+        "Life Tap",
+        "Death Coil",
+        "Hellfire",
+        "Rain of Fire",
+        "Curse of the Elements",
+        "Curse of Recklessness",
+        "Curse of Shadow"
+      ],
+      "never": [
+        "Immolate"
+      ],
+      "signature": [
+        "Siphon Life",
+        "Dark Harvest"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "demonology",
+      "role": "ranged-dps",
+      "rotation": "kb_demonology_warlock",
+      "core": [
+        "Shadow Bolt",
+        "Corruption",
+        "Curse of Recklessness"
+      ],
+      "situational": [
+        "Searing Pain",
+        "Shadowburn",
+        "Hellfire",
+        "Immolate",
+        "Power Overwhelming",
+        "Fel Domination",
+        "Felstorm",
+        "Inferno",
+        "Summon Felguard",
+        "Summon Doomguard"
+      ],
+      "never": [],
+      "signature": [
+        "Power Overwhelming",
+        "Fel Domination"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "destruction_fire",
+      "role": "ranged-dps",
+      "rotation": "kb_destruction_fire_warlock",
+      "core": [
+        "Soul Fire",
+        "Immolate",
+        "Conflagrate",
+        "Searing Pain"
+      ],
+      "situational": [
+        "Shadowburn",
+        "Corruption",
+        "Life Tap",
+        "Hellfire",
+        "Rain of Fire",
+        "Curse of Agony",
+        "Curse of the Elements",
+        "Curse of Shadow",
+        "Curse of Recklessness"
+      ],
+      "never": [],
+      "signature": [
+        "Conflagrate"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "destruction_shadow",
+      "role": "ranged-dps",
+      "rotation": "kb_destruction_shadow_warlock",
+      "core": [
+        "Shadow Bolt",
+        "Corruption"
+      ],
+      "situational": [
+        "Shadowburn",
+        "Siphon Life",
+        "Drain Soul",
+        "Hellfire",
+        "Rain of Fire",
+        "Curse of Agony",
+        "Curse of the Elements",
+        "Curse of Shadow",
+        "Curse of Recklessness"
+      ],
+      "never": [],
+      "signature": [
+        "Shadowburn"
+      ],
+      "taunt": []
+    }
+  ]
+}
