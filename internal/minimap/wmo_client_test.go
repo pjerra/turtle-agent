@@ -106,13 +106,6 @@ func (f alignFixture) composeFull(t *testing.T, set *mpq.Set, trs Translate, id 
 	return l, info, polys
 }
 
-// compose calls composeFull when the polygons are not needed.
-func (f alignFixture) compose(t *testing.T, set *mpq.Set, trs Translate, id uint32) (Layer, wmoInfo) {
-	t.Helper()
-	l, info, _ := f.composeFull(t, set, trs, id)
-	return l, info
-}
-
 // zBandNav renders the navmesh polygons of a map whose mean height lies within the WMO groups' z range, so the picture
 // is compared with the dungeon floors, not the outdoor terrain of an ADT map.
 func (f alignFixture) zBandNav(t *testing.T, id uint32, info wmoInfo, polys []NavPoly) (image.Image, Meta) {

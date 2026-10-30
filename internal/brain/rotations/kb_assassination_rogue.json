@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "name": "kb_assassination_rogue",
+  "class": "rogue",
+  "spec": "assassination",
+  "replaces": [
+    "rogue_combat"
+  ],
+  "notes": "The Turtle knowledge base's Assassination list: Envenom at one combo point, then Slice and Dice at one, Eviscerate at five with Cold Blood first, Noxious Assault as the only builder. Rupture, Backstab and Sinister Strike are the KB's never-list; its AoE advice stays single target, the opener and Vanish's threat reset and Thistle Tea are named in kb.unexpressed. The preset is the combat rogue's list with this file in place of rogue_combat.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/rogue/assassination-melee-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102971#p102971 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=124504#p124504 (Torta, staff, 2025-03-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=154168#p154168 (Torta, staff, 2025-10-03)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=149679#p149679 (Shananagans, player (guide writer), 2025-09-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=162667#p162667 (Shananagans, player (guide writer), 2025-12-13)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=158547#p158547 (Sslushee, player, 2025-11-06)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=159106#p159106 (Sslushee, player, 2025-11-10)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=159151#p159151 (Crake, player, 2025-11-11)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=157229#p157229 (Crake, player, 2025-10-27)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=148372#p148372 (Jinkarasu, player, 2025-08-26)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=127477#p127477 (Finpin, player, 2025-04-19)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171651#p171651 (Microtwist, player, 2026-03-21)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172282#p172282 (Crake, player, 2026-03-25)"
+  ],
+  "priorities": [
+    {
+      "id": "auto_attack",
+      "kind": "attack",
+      "when": {},
+      "note": "The swing is the base every entry waits on: it goes first in the order, as in the Go rotation (rogue_combat)."
+    },
+    {
+      "id": "envenom",
+      "spell": "Envenom",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "combo_points_min": 1,
+        "no_mob_aura": [
+          "Envenom"
+        ]
+      }
+    },
+    {
+      "id": "slice_and_dice",
+      "spell": "Slice and Dice",
+      "level": 10,
+      "target": "fight",
+      "threat": "none",
+      "harmful": false,
+      "when": {
+        "mob_in_reach": true,
+        "combo_points_min": 1,
+        "no_self_aura": [
+          "Slice and Dice"
+        ]
+      },
+      "note": "no_self_aura, not self_aura_missing: the buff lasts under a minute (6 s per combo point), so the under-a-minute rule would spend every combo point on it."
+    },
+    {
+      "id": "eviscerate",
+      "spell": "Eviscerate",
+      "level": 1,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "combo_points_min": 5
+      }
+    },
+    {
+      "id": "noxious_assault",
+      "spell": "Noxious Assault",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true
+      }
+    },
+    {
+      "id": "cold_blood",
+      "spell": "Cold Blood",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "combo_points_min": 5
+      }
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/rogue/assassination-melee-dps.yaml",
+    "sha256": "a42991e523df18976286bdca218cda17ddcee0d492f9c82c901645805094848a",
+    "preset": "assassination_rogue",
+    "recipe": "tools/kbrotgen/recipes/kb_assassination_rogue.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Opener: pre-loaded combo point carried with Slice and Dice, or Noxious Assault | pull",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[3]",
+        "text": "Noxious Assault | always the builder; never Backstab or Sinister Strike",
+        "why": "a \"never\" rule: in the oracle's never list"
+      },
+      {
+        "row": "rotation_single[4]",
+        "text": "Do not cast Rupture | 1.18.1: skipping Rupture/Taste for Blood sims ~20 DPS higher",
+        "why": "a \"never\" rule: in the oracle's never list"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "stay single target; Blade Flurry only if your sim shows a gain (contested)",
+        "why": "contested: the KB's sources disagree, so the file has no AoE entry"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "Vanish | threat reset and trinket swap [[d:rogue#1465825846521626935]]",
+        "why": "threat is not a condition"
+      },
+      {
+        "row": "cooldowns[2]",
+        "text": "Thistle Tea | opener burst or energy starvation",
+        "why": "consumable or item (combat_consumables owns items)"
+      }
+    ]
+  }
+}

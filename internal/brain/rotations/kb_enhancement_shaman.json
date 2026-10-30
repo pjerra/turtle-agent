@@ -1,0 +1,228 @@
+{
+  "version": 1,
+  "name": "kb_enhancement_shaman",
+  "class": "shaman",
+  "spec": "enhancement",
+  "replaces": [
+    "shaman_enhancement"
+  ],
+  "notes": "The Turtle knowledge base's enhancement list: Stormstrike on cooldown, Lightning Strike with a Lightning Shield up, the Flame Shock / Earth Shock loop, the auto attack and the shield upkeep with Water Shield when the mana is short. The pre-pull imbue and totems, the first-swing opener and the shock loop's alternation are not the file's.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/shaman/enhancement-melee-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102972#p102972 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=105804#p105804 (Dragunovi, staff, 2024-11-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=108776#p108776 (Jamey, staff, 2024-11-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=124504#p124504 (Torta, staff, 2025-03-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171608#p171608 (Torta, staff, 2026-03-21)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172139#p172139 (Torta, staff, 2026-03-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=173490#p173490 (Torta, staff, 2026-03-31)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=169701#p169701 (Jamey, staff, 2026-03-02)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=149715#p149715 (Skegg, player (guide writer), 2025-09-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=121471#p121471 (Atreidon, player, 2025-03-03)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141835#p141835 (Atreidon, player, 2025-07-28)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=135891#p135891 (Atreidon, player, 2025-06-16)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=173712#p173712 (Atreidon, player, 2026-04-02)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=174801#p174801 (Atreidon, player, 2026-04-11)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=115650#p115650 (Drubarrymooer, player, 2025-01-06)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=174156#p174156 (pagu, player, 2026-04-06)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=173707#p173707 (Mdzielak, player, 2026-04-02)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=115753#p115753 (amanagor, player, 2025-01-07)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=173678#p173678 (Phx, player, 2026-04-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=115603#p115603 (Akos1896, player, 2025-01-06)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=115643#p115643 (Akos1896, player, 2025-01-06)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=117662#p117662 (Akos1896, player, 2025-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=126159#p126159 (Taralej90, player, 2025-04-09)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=130407#p130407 (pagu, player, 2025-05-10)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=121897#p121897 (Studbucket, player, 2025-03-06)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171655#p171655 (Splitsec, player, 2026-03-21)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171740#p171740 (Volth, player, 2026-03-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172153#p172153 (Travoltino, player, 2026-03-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=124808#p124808 (Franktank, player, 2025-04-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=112575#p112575 (Akos1896, player, 2024-12-13)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=149742#p149742 (Akos1896, player, 2025-09-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141504#p141504 (Voodoochile, player, 2025-07-26)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=106681#p106681 (Dezhan, player, 2024-11-06)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=168008#p168008 (Mimiwarmini, player, 2026-02-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=168045#p168045 (Elesion, player, 2026-02-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=129436#p129436 (Evolve, player, 2025-05-02)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=129441#p129441 (Forumdweller, player, 2025-05-02)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=130405#p130405 (pagu, player, 2025-05-10)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=110894#p110894 (Staywhimsy, player, 2024-12-02)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=131960#p131960 (amanagor, player, 2025-05-19)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=130038#p130038 (Springboards, player, 2025-05-07)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171418#p171418 (Terrydavis, player, 2026-03-20)",
+    " (Not Normal, player, 2026-04-13)",
+    " (Serow, player, 2026-03-20)",
+    " (Not Normal, player, 2025-12-17)",
+    " (Not Normal, player, 2026-04-03)",
+    " (Not Normal, player, 2026-01-15)",
+    " (Zeruel, player, 2026-03-13)",
+    " (Not Normal, player, 2026-03-23)",
+    " (Not Normal, player, 2026-04-08)"
+  ],
+  "priorities": [
+    {
+      "id": "auto_attack",
+      "kind": "attack",
+      "when": {},
+      "note": "Queued first: the KB's opener lets the first white swing land before Stormstrike."
+    },
+    {
+      "id": "stormstrike",
+      "spell": "Stormstrike",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true
+      }
+    },
+    {
+      "id": "lightning_strike",
+      "spell": "Lightning Strike",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "self_aura": [
+          "Lightning Shield"
+        ]
+      },
+      "note": "The KB's Rank 3 is this ability's highest rank: the engine casts the highest rank the book has."
+    },
+    {
+      "id": "flame_shock",
+      "spell": "Flame Shock",
+      "level": 10,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "no_mob_aura": [
+          "Flame Shock"
+        ]
+      }
+    },
+    {
+      "id": "earth_shock",
+      "spell": "Earth Shock",
+      "level": 4,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true
+      },
+      "note": "The KB's loop Flame Shock -> Earth Shock -> Earth Shock: the alternation is not a condition, so Flame Shock refreshes on its own entry and Earth Shock fills."
+    },
+    {
+      "id": "lightning_shield",
+      "spell": "Lightning Shield",
+      "level": 8,
+      "target": "self",
+      "when": {
+        "state": "combat",
+        "no_self_aura": [
+          "Lightning Shield",
+          "Water Shield"
+        ]
+      },
+      "note": "Charges are not a condition: the shield goes back up when it is gone."
+    },
+    {
+      "id": "water_shield",
+      "spell": "Water Shield",
+      "level": 26,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "power_below": 40,
+        "no_self_aura": [
+          "Water Shield"
+        ]
+      },
+      "note": "The KB's 'mana low' has no number: 40% is the healer engine's mana-save threshold."
+    },
+    {
+      "id": "fire_nova_totem",
+      "spell": "Fire Nova Totem",
+      "level": 12,
+      "target": "self",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mobs_near_mob_min": 3
+      }
+    },
+    {
+      "id": "chain_lightning",
+      "spell": "Chain Lightning",
+      "level": 32,
+      "target": "fight",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "self_aura": [
+          "Clearcasting"
+        ],
+        "mobs_near_mob_min": 3
+      }
+    },
+    {
+      "id": "magma_totem",
+      "spell": "Magma Totem",
+      "level": 26,
+      "target": "self",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mobs_near_mob_min": 5
+      },
+      "note": "Moved after the Fire Nova entry: the KB's last-resort totem on large packs. Fire Nova again is the same entry's cooldown."
+    },
+    {
+      "id": "bloodlust",
+      "spell": "Bloodlust",
+      "level": 40,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat"
+      },
+      "note": "The KB's stack (Juju Flurry, Potion of Quickness, Kiss of the Spider) is consumables."
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/shaman/enhancement-melee-dps.yaml",
+    "sha256": "5ea441c76b0e1643174c51574776323e1b0441d673bec3d1d44eaea08a97b0a3",
+    "preset": "enhancement_shaman",
+    "recipe": "tools/kbrotgen/recipes/kb_enhancement_shaman.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Pre-pull: Windfury Weapon, Lightning Shield, totems Strength of Earth / Windfury / Flametongue / Mana Spring | before pull",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[1]",
+        "text": "Let the first white swing land before the first Stormstrike | opener [[d:shaman#1434594354118524958]]",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "Single-target rotation on the kill target",
+        "why": "nothing to add: the row names no cast the list does not already have"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "Blood Fury (Orc) | with Bloodlust; 120 AP + 60 SP, lowers healing received [[d:shaman#1439185343772360704]]",
+        "why": "not in the Turtle spell data"
+      },
+      {
+        "row": "cooldowns[2]",
+        "text": "Limited Invulnerability Potion | emergency threat escape [[d:shaman#1489323335161614478]]",
+        "why": "consumable or item (combat_consumables owns items)"
+      }
+    ]
+  }
+}

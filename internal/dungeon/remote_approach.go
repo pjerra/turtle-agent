@@ -84,7 +84,7 @@ func (d *RemoteDriver) approachObject(ctx context.Context, rec *objRec, carrier 
 		return false, nil
 	}
 	began := d.clk.Now()
-	to := *at
+	var to Point
 	if stand != nil {
 		to = *stand
 	} else {

@@ -192,6 +192,164 @@ func TestTwoRotationFilesAreToldApartByTheirDigest(t *testing.T) {
 	}
 }
 
+// ---- the format additions of the KB work (task K0) ----
+
+// testRotationFile parses and registers a file of these tests; the registry keeps it for the rest of the package's run.
+func testRotationFile(t *testing.T, body string) *Rotation {
+	t.Helper()
+	r, err := ParseRotation([]byte(body))
+	if err != nil {
+		t.Fatalf("test rotation: %v", err)
+	}
+	if err := RegisterRotation(r); err != nil {
+		t.Fatalf("test rotation: %v", err)
+	}
+	return r
+}
+
+const testLevelBand = `{"version":1,"name":"test_level_band","class":"mage","replaces":["mage_frost"],
+ "sources":["rotation_test.go"],"notes":"the level band of an entry",
+ "priorities":[{"id":"max_29","spell":"Frostbolt","level":4,"when":{"level_max":29}},
+  {"id":"min_30","spell":"Frostbolt","level":4,"when":{"level_min":30}}]}`
+
+func TestLevelBand(t *testing.T) {
+	r := testRotationFile(t, testLevelBand)
+	g := newFake(spFrostbolt)
+	buffUp(g)
+	g.partyWithTank()
+	g.addUnit(mob(mobA, tankG), 28, 0)
+	rig := newRig(t, g, Params{Strategies: []string{"frost_mage"}, Rotation: r.Name})
+	got := actions(rig, 100*time.Millisecond, 2200*time.Millisecond)
+	if slices.Contains(got, "max_29") {
+		t.Fatalf("level_max 29 fired at level 30: %v (%s)", got, rig.idle())
+	}
+	if !slices.Contains(got, "min_30") {
+		t.Fatalf("level_min 30 did not fire at level 30: %v (%s)", got, rig.idle())
+	}
+}
+
+const testMobsNearMob = `{"version":1,"name":"test_mobs_near_mob","class":"mage","replaces":["mage_frost"],
+ "sources":["rotation_test.go"],"notes":"the mobs near the fight's mob",
+ "priorities":[{"id":"near_three","spell":"Frostbolt","level":4,"when":{"mobs_near_mob_min":3}}]}`
+
+func TestMobsNearMob(t *testing.T) {
+	r := testRotationFile(t, testMobsNearMob)
+	g := newFake(spFrostbolt)
+	buffUp(g)
+	tankFights(g, 5, 8, 0)                         // the tank at 5 yd, its mob at 8
+	g.addUnit(mob(packet.GUID(101), tankG), 11, 0) // 3 yd off the fight's mob
+	g.addUnit(mob(packet.GUID(102), tankG), 17, 0) // 9 yd off it: out of the 8 yd count
+	rig := newRig(t, g, Params{Strategies: []string{"frost_mage"}, Rotation: r.Name})
+	if got := actions(rig, 100*time.Millisecond, 2200*time.Millisecond); slices.Contains(got, "near_three") {
+		t.Fatalf("two mobs within 8 yd and one at 9 yd fired it: %v", got)
+	}
+	if c := g.castList(); len(c) != 0 {
+		t.Fatalf("casts: %v", c)
+	}
+	g.addUnit(mob(packet.GUID(103), tankG), 6, 0) // 2 yd off the fight's mob: three within 8
+	if got := actions(rig, 2200*time.Millisecond); !slices.Contains(got, "near_three") {
+		t.Fatalf("three mobs within 8 yd did not fire it: %v", got)
+	}
+}
+
+const testHealAdd = `{"version":1,"name":"test_heal_add","class":"priest","mode":"add","replaces":[],
+ "sources":["rotation_test.go"],"notes":"a heal-target entry of the add mode",
+ "priorities":[{"id":"renew_tank","spell":"Renew","level":8,"target":"heal","band":"high",
+  "when":{"heal_is_tank":true,"heal_no_aura":["Renew"]}}]}`
+
+func TestHealTargetEntry(t *testing.T) {
+	file := testRotationFile(t, testHealAdd)
+	g := priestFake(holyKnown...)
+	rig := newRig(t, g, Params{Strategies: []string{"holy_priest"}, Rotation: file.Name})
+	g.member(tankG, "Tankard", 1, 700, 1000, 5, 0) // the tank at 70%
+	if got := actions(rig, 100*time.Millisecond, 2200*time.Millisecond); !slices.Contains(got, "renew_tank") {
+		t.Fatalf("the tank without Renew did not get it: %v (%s)", got, rig.idle())
+	}
+	want := castCall{prRenew1, tankG}
+	if c := g.castList(); len(c) == 0 || c[0] != want {
+		t.Fatalf("casts %v, want %v first", c, want)
+	}
+	g.addAura(tankG, objects.Aura{Name: "Renew", SpellID: prRenew1})
+	if got := actions(rig, 2200*time.Millisecond, 2200*time.Millisecond); slices.Contains(got, "renew_tank") {
+		t.Fatalf("the tank carries Renew and got it again: %v", got)
+	}
+}
+
+const testRankRenew = `{"version":1,"name":"test_rank_renew","class":"priest","replaces":["priest_holy"],
+ "sources":["rotation_test.go"],"notes":"a rank-1 entry",
+ "priorities":[{"id":"renew_one","spell":"Renew","level":8,"rank":1,"target":"self"}]}`
+
+func TestRankEntry(t *testing.T) {
+	file := testRotationFile(t, testRankRenew)
+	g := priestFake(prRenew1, 6075, prInnerFire, prFort1) // Renew ranks 1 and 3
+	rig := newRig(t, g, Params{Strategies: []string{"holy_priest"}, Rotation: file.Name})
+	if got := actions(rig, 100*time.Millisecond, 2200*time.Millisecond); !slices.Contains(got, "renew_one") {
+		t.Fatalf("rank 1 did not fire: %v", got)
+	}
+	if c := g.castList(); len(c) == 0 || c[0].spell != prRenew1 {
+		t.Fatalf("casts %v, want Renew rank 1 (%d)", c, prRenew1)
+	}
+	g3 := priestFake(6075, prInnerFire, prFort1) // rank 3 only
+	rig3 := newRig(t, g3, Params{Strategies: []string{"holy_priest"}, Rotation: file.Name})
+	if got := actions(rig3, 100*time.Millisecond, 2200*time.Millisecond, 2200*time.Millisecond); slices.Contains(got, "renew_one") {
+		t.Fatalf("rank 1 is not known and the entry ran anyway: %v", got)
+	}
+	for _, c := range g3.castList() {
+		if c.spell == 6075 {
+			t.Fatalf("the rank-3 id was cast as a fallback: %v", c)
+		}
+	}
+}
+
+func TestAddModeInsertsAfterRoleHealer(t *testing.T) {
+	file := testRotationFile(t, strings.Replace(testHealAdd, `"test_heal_add"`, `"test_add_order"`, 1))
+	_, names, err := ResolveFor([]string{"holy_priest"}, ResolveOpts{Rotation: file.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.Index(names, "role_healer")
+	if i < 0 || i+1 >= len(names) || names[i+1] != "rot:"+file.Name {
+		t.Fatalf("the add-mode file is not right after role_healer: %v", names)
+	}
+}
+
+func TestAddModeRefusedWithoutRoleHealer(t *testing.T) {
+	file := testRotationFile(t, strings.Replace(testHealAdd, `"test_heal_add"`, `"test_add_no_healer"`, 1))
+	if _, _, err := ResolveFor([]string{"frost_mage"}, ResolveOpts{Rotation: file.Name}); err == nil || !strings.Contains(err.Error(), "role_healer") {
+		t.Fatalf("an add-mode file in a preset without role_healer: %v", err)
+	}
+}
+
+func TestHealConditionsNeedHealTarget(t *testing.T) {
+	for _, cond := range []string{`{"heal_hp_below":50}`, `{"heal_is_tank":true}`, `{"heal_no_aura":["Renew"]}`} {
+		body := `{"version":1,"name":"test_heal_wrong_target","class":"priest","replaces":["priest_holy"],
+		 "sources":["rotation_test.go"],"notes":"t",
+		 "priorities":[{"id":"x","spell":"Renew","level":8,"target":"fight","when":` + cond + `}]}`
+		if _, err := ParseRotation([]byte(body)); err == nil || !strings.Contains(err.Error(), "target heal") {
+			t.Errorf("%s with target fight: %v", cond, err)
+		}
+	}
+}
+
+const testUnknownSpell = `{"version":1,"name":"test_unknown_spell","class":"mage","replaces":["mage_frost"],
+ "sources":["rotation_test.go"],"notes":"a spell the spellbook lacks",
+ "priorities":[{"id":"blizzard_missing","spell":"Blizzard","level":20}]}`
+
+func TestUnknownSpellNeverCast(t *testing.T) {
+	file := testRotationFile(t, testUnknownSpell)
+	g := newFake(spFrostbolt) // Blizzard is not in the spellbook
+	buffUp(g)
+	g.partyWithTank()
+	g.addUnit(mob(mobA, tankG), 28, 0)
+	rig := newRig(t, g, Params{Strategies: []string{"frost_mage"}, Rotation: file.Name})
+	if got := actions(rig, 100*time.Millisecond, 2200*time.Millisecond, 2200*time.Millisecond); slices.Contains(got, "blizzard_missing") {
+		t.Fatalf("a spell the spellbook lacks was cast: %v", got)
+	}
+	if c := g.castList(); len(c) != 0 {
+		t.Fatalf("casts: %v", c)
+	}
+}
+
 // ---- the rotations play ----
 
 // actions runs one tick per step and lists the actions that ran ("-" for a tick that did nothing).

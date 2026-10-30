@@ -122,13 +122,6 @@ func readGPSRaw(ctx context.Context, h floorHands, hk floorHooks) (reply GPSRepl
 	return reply, true, nil
 }
 
-// readGPS sends `.gps` (booked as a GM start line) and parses the reply. ok is false (with a nil error, and one note per driver) when the
-// check cannot be made: the line failed, the reply has no X/Y, GroundZ and FloorZ, or it is about another unit (its X/Y is more than startNear
-// from the commander, e.g. a mob the commander has selected). The error is the context's.
-func (d *RemoteDriver) readGPS(ctx context.Context, h StartHands) (reply GPSReply, ok bool, err error) {
-	return readGPSWith(ctx, h, floorHooks{gm: d.startGM, note: d.startNote, warned: &d.gpsWarned})
-}
-
 // settleGPSDelayYd is how close a `.gps` X/Y must be to the point of the `.go xyz` to be about it: a stale reply (the race right
 // after the move) describes the old spot, far from the point. settleGPSDelayTries re-reads that many times, settleGPSDelayWait apart,
 // waiting through the floor hooks' wait (the stage passes its sleep; nil waits nothing and the check is one read, as before).
@@ -184,7 +177,7 @@ func floorCheck(ctx context.Context, h floorHands, mapID uint32, at Point, hk fl
 	var ok bool
 	if hk.wait != nil {
 		var serr error
-		r, ok, serr = settleGPSDelay(ctx, h, at, hk, hk.wait)
+		r, _, serr = settleGPSDelay(ctx, h, at, hk, hk.wait)
 		if serr != nil {
 			return 0, false, serr
 		}

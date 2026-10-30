@@ -1,0 +1,186 @@
+{
+  "version": 1,
+  "name": "kb_feral_cat_druid",
+  "class": "druid",
+  "spec": "feral_cat",
+  "replaces": [
+    "druid_cat"
+  ],
+  "notes": "The Turtle knowledge base's feral cat list: Faerie Fire (Feral) on a new mob, Tiger's Fury kept up, Rake and Rip bleeding, Ferocious Bite at five points once Rip is up, Shred on Clearcasting and Claw as the filler. The prowl opener, Reshift and the bleed-immune exceptions are not expressible; the attack that starts the swing is queued first, as the KB's opener assumes white swings.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/druid/feral-melee-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172912#p172912 (Gorlocktheglock, player, 2026-03-28)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=123857#p123857 (Slade1994, player, 2025-03-26)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=120217#p120217 (Zulnam, player, 2025-02-17)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=128297#p128297 (Noephix, player, 2025-04-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=134389#p134389 (Grizb37, player, 2025-06-05)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172923#p172923 (Noephix, player, 2026-03-28)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=173102#p173102 (Noephix, player, 2026-03-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=121590#p121590 (Inovatu, player, 2025-03-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=121689#p121689 (Eyeburn, player, 2025-03-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=121385#p121385 (Atreidon, player, 2025-03-02)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172655#p172655 (Noephix, player, 2026-03-27)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=132929#p132929 (Noephix, player, 2025-05-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=128296#p128296 (Snkx, player, 2025-04-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=132703#p132703 (Rmoruser, player, 2025-05-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=132807#p132807 (Inovatu, player, 2025-05-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171608#p171608 (Torta, staff, 2026-03-21)",
+    " (Micro Jackson, player (most prolific answerer), 2026-01-14)",
+    " (Gustafssonz, player, 2026-02-06)",
+    " (Ash, player (veteran raider), 2026-04-11)",
+    " (Discord #druid, players, 2026-03-12)",
+    " (Fat Pibble with Air Pods, staff (class designer), 2026-02-07)"
+  ],
+  "priorities": [
+    {
+      "id": "auto_attack",
+      "kind": "attack",
+      "when": {},
+      "note": "Attached to the filler row: a melee rotation has no white swings without it, and the KB's opener and Tiger's Fury rows assume them."
+    },
+    {
+      "id": "faerie_fire_feral",
+      "spell": "Faerie Fire (Feral)",
+      "level": 25,
+      "target": "fight",
+      "when": {
+        "no_mob_aura": [
+          "Faerie Fire (Feral)"
+        ]
+      }
+    },
+    {
+      "id": "tigers_fury",
+      "spell": "Tiger's Fury",
+      "level": 24,
+      "target": "self",
+      "when": {
+        "state": "combat",
+        "no_self_aura": [
+          "Tiger's Fury"
+        ]
+      }
+    },
+    {
+      "id": "rip",
+      "spell": "Rip",
+      "level": 20,
+      "target": "fight",
+      "when": {
+        "combo_points_min": 5,
+        "no_mob_aura": [
+          "Rip"
+        ]
+      },
+      "note": "The KB's bleed-immunity and 'Rip at 1-3 points in a short fight' cases are creature properties the conditions cannot see; the entry takes five points."
+    },
+    {
+      "id": "ferocious_bite",
+      "spell": "Ferocious Bite",
+      "level": 24,
+      "target": "fight",
+      "when": {
+        "combo_points_min": 5,
+        "mob_aura": [
+          "Rip"
+        ]
+      },
+      "note": "The KB's 4-point trash concession is not a condition; the list takes five points and Rip up (Carnage refreshes it)."
+    },
+    {
+      "id": "rake",
+      "spell": "Rake",
+      "level": 24,
+      "target": "fight",
+      "when": {
+        "no_mob_aura": [
+          "Rake"
+        ]
+      },
+      "note": "'Bleedable' is a creature property, not a condition."
+    },
+    {
+      "id": "shred",
+      "spell": "Shred",
+      "level": 22,
+      "target": "fight",
+      "when": {
+        "self_aura": [
+          "Clearcasting"
+        ]
+      },
+      "note": "The KB's 'behind the target' is melee_position's business: the preset stands the cat behind the mob."
+    },
+    {
+      "id": "claw",
+      "spell": "Claw",
+      "level": 20,
+      "target": "fight",
+      "when": {}
+    },
+    {
+      "id": "berserk",
+      "spell": "Berserk",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat"
+      },
+      "note": "'Long bleedable bosses' is not a condition; the six-minute cooldown decides."
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/druid/feral-melee-dps.yaml",
+    "sha256": "3f3f2cb11e45816a666f60c82c7e1e92095f7e09fa5abd5cc33923873c79e611",
+    "preset": "feral_cat_druid",
+    "recipe": "tools/kbrotgen/recipes/kb_feral_cat_druid.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Opener: Prowl -> Tiger's Fury (before an energy tick) -> Pounce -> Rake -> Rip -> Claw to 5 -> Ferocious Bite; no stealth: Faerie Fire (Feral) |",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[7]",
+        "text": "Reshift | energy < 28-32 AND Tiger's Fury < 3 s left AND no energy tick imminent; recast TF after (Reshift drops TF)",
+        "why": "cancel/stop casting not expressible"
+      },
+      {
+        "row": "rotation_single[8]",
+        "text": "Bleed-immune target: Tiger's Fury; Ferocious Bite at 5 CP; Shred from behind; Reshift below 28 energy | target bleed-immune (Kara40 Anomalus/Medivh/Chess/Rupturan, Kruul P2, some MC bosses)",
+        "why": "creature type not in the conditions"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "keep single-target rotation on kill target",
+        "why": "nothing to add: the row names no cast the list does not already have"
+      },
+      {
+        "row": "rotation_aoe[1]",
+        "text": "shift to Bear and Swipe (3-target cap)",
+        "why": "stance/form: the preset's stance strategy owns it"
+      },
+      {
+        "row": "rotation_aoe[2]",
+        "text": "Hurricane from caster form",
+        "why": "stance/form: the preset's stance strategy owns it"
+      },
+      {
+        "row": "cooldowns[0]",
+        "text": "Tiger's Fury | keep 100% uptime; off GCD; 18 s, +attack speed, 10 energy/3 s [[d:druid#1468957031791591573]]",
+        "why": "nothing to add: the row names no cast the list does not already have"
+      },
+      {
+        "row": "cooldowns[2]",
+        "text": "Reshift | level-60 spell: re-enter Cat Form for up to 60 energy with Furor + Wolfshead enchant; only when TF is about to expire [[d:druid#1459798058324725914]]",
+        "why": "cancel/stop casting not expressible"
+      },
+      {
+        "row": "cooldowns[3]",
+        "text": "On-use trinkets (ZHC, ToEP, KotS) | pull and last 20% of the fight [[d:druid#1426991920953036942]]",
+        "why": "consumable or item (combat_consumables owns items)"
+      }
+    ]
+  }
+}
