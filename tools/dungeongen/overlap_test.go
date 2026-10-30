@@ -24,8 +24,10 @@ import (
 // troll/panther/bat clusters of the Arlokk, Jindo and Hakkar terraces). The 20-man cap keeps the
 // rows at 12; the room sends the rest with the pull whether the plan lists them or not.
 // 35 since the walk-1 fix of leg 0 (2026-10-29): the merged -12153 and -12277 packs list the
-// neighbours they used to miss.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "naxxramas": 104, "blackwing_lair": 50, "timbermaw_hold": 13, "temple_of_ahnqiraj": 128, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6, "zul_gurub": 35, "molten_core": 10, "upper_karazhan_halls": 6}
+// neighbours they used to miss. 32 since the walk-5 fix (2026-10-30): leg 0's west rows are keyed
+// on single points of the formations' loops; the Witch Doctor row (radius 15) and the Headhunter
+// row (radius 60, its whole loop) have bat spawns in range, all pulled by earlier rows.
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "naxxramas": 104, "blackwing_lair": 50, "timbermaw_hold": 13, "temple_of_ahnqiraj": 128, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6, "zul_gurub": 32, "molten_core": 10, "upper_karazhan_halls": 6}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {
