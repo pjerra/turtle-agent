@@ -1,0 +1,199 @@
+{
+  "version": 1,
+  "name": "kb_fury_tank_warrior",
+  "class": "warrior",
+  "spec": "fury_tank",
+  "replaces": [
+    "warrior_melee",
+    "warrior_tank"
+  ],
+  "notes": "The Turtle knowledge base's FuryProt main-tank list: stay in Defensive Stance, Bloodrage on the pull, Bloodthirst on cooldown above Revenge, Revenge on its proc, Heroic Strike to keep rage around 50-60, Sunder Armor as the rage-capped filler, then the AoE rows (Cleave, tab Sunder, Thunder Clap, Whirlwind in Berserker Stance, Challenging Shout as the emergency). Death Wish before a boss; Shield Wall needs a shield. Taunt stays with role_tank, the stance the KB names is the file's own stance entry.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/warrior/fury-tank.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102974#p102974 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=105804#p105804 (Dragunovi, staff, 2024-11-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=11727#p11727 (Velite, player, 2021-08-19)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=40901#p40901 (Xudo, player, 2023-04-09)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=64561#p64561 (Bigsmerf, player, 2023-09-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=77951#p77951 (Wilsonsds, player, 2023-11-18)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=85578#p85578 (Grizb37, player, 2024-01-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=89968#p89968 (Xronisf79, player, 2024-03-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=89995#p89995 (Calli, player, 2024-03-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=108893#p108893 (Atreidon, player, 2024-11-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=108957#p108957 (Atreidon, player, 2024-11-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=114018#p114018 (Xudo, player, 2024-12-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=115882#p115882 (Ellifta, player, 2025-01-08)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=118658#p118658 (Arkaris, player, 2025-02-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=135727#p135727 (Herods, player, 2025-06-14)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=164933#p164933 (Ellifta, player, 2026-01-11)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=167684#p167684 (Ellifta, player, 2026-02-07)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=170891#p170891 (Eyeburn, player, 2026-03-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=170960#p170960 (Cheruscan, player, 2026-03-16)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=170985#p170985 (Xudo, player, 2026-03-16)"
+  ],
+  "priorities": [
+    {
+      "id": "stay_defensive",
+      "kind": "stance",
+      "stances": [
+        "Defensive Stance"
+      ],
+      "when": {},
+      "note": "The KB's pull stance: the file keeps the tank in Defensive Stance (the preset's stance strategy is warrior_tank, which this file replaces)."
+    },
+    {
+      "id": "bloodrage",
+      "spell": "Bloodrage",
+      "level": 10,
+      "target": "self",
+      "when": {
+        "state": "combat",
+        "mob_distance_max": 12,
+        "self_hp_above": 50,
+        "power_below": 20,
+        "no_self_aura": [
+          "Bloodrage"
+        ]
+      }
+    },
+    {
+      "id": "bloodthirst",
+      "spell": "Bloodthirst",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true
+      }
+    },
+    {
+      "id": "revenge",
+      "spell": "Revenge",
+      "level": 14,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "after": "avoided",
+        "stance": [
+          "Defensive Stance"
+        ]
+      }
+    },
+    {
+      "id": "heroic_strike",
+      "kind": "next_swing",
+      "spell": "Heroic Strike",
+      "level": 1,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "power_above": 49
+      }
+    },
+    {
+      "id": "sunder_armor",
+      "spell": "Sunder Armor",
+      "level": 10,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "power_above": 79,
+        "mob_stacks_below": {
+          "aura": "Sunder Armor",
+          "stacks": 5
+        }
+      },
+      "note": "The KB says rage-capped; 80 percent is the point where Heroic Strike has the rage it keeps and the next swings would only waste the gain."
+    },
+    {
+      "id": "cleave",
+      "kind": "next_swing",
+      "spell": "Cleave",
+      "level": 20,
+      "target": "fight",
+      "threat": "aoe",
+      "when": {
+        "mob_in_reach": true,
+        "mobs_in_reach_min": 2,
+        "power_above": 49
+      }
+    },
+    {
+      "id": "sunder_armor_aoe",
+      "spell": "Sunder Armor",
+      "level": 10,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "mobs_in_reach_min": 2,
+        "mob_stacks_below": {
+          "aura": "Sunder Armor",
+          "stacks": 5
+        }
+      }
+    },
+    {
+      "id": "thunder_clap",
+      "spell": "Thunder Clap",
+      "level": 6,
+      "target": "self",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mob_in_reach": true,
+        "mobs_in_reach_min": 2,
+        "stance": [
+          "Defensive Stance"
+        ],
+        "mobs_lacking_aura": "Thunder Clap"
+      }
+    },
+    {
+      "id": "challenging_shout",
+      "spell": "Challenging Shout",
+      "level": 26,
+      "target": "self",
+      "band": "emergency",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mobs_in_reach_min": 4
+      }
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/warrior/fury-tank.yaml",
+    "sha256": "a516902f77ce7ba0ab3b8fac40b46a9cbc4dd0b79d2d830d467323c4f8bd6f31",
+    "preset": "tank_warrior",
+    "recipe": "tools/kbrotgen/recipes/kb_fury_tank_warrior.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[5]",
+        "text": "Stay in Defensive Stance in Execute phase |",
+        "why": "stance/form: the preset's stance strategy owns it"
+      },
+      {
+        "row": "rotation_aoe[1]",
+        "text": "Sunder Armor",
+        "why": "target switching is not a condition"
+      },
+      {
+        "row": "rotation_aoe[3]",
+        "text": "Whirlwind",
+        "why": "stance/form: the preset's stance strategy owns it"
+      },
+      {
+        "row": "cooldowns[0]",
+        "text": "Death Wish | before the pull",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "Shield Wall | unavailable without shield; annoying on ~4 fights",
+        "why": "weapon type not in the conditions"
+      }
+    ]
+  }
+}

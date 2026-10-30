@@ -1,0 +1,243 @@
+{
+  "version": 1,
+  "name": "kb_marksmanship_hunter",
+  "class": "hunter",
+  "spec": "marksmanship",
+  "replaces": [
+    "hunter_marksman"
+  ],
+  "notes": "The Turtle knowledge base's marksmanship raid list: Aimed Shot on a Lock and Load proc and on cooldown, Arcane Shot, Steady Shot as the loop, Serpent Sting when the raid wants the armour debuff, Multi-Shot and Volley on packs, Rapid Fire, Feign Death and the two aspects. The swing timer (Auto Shot and the 0.5 s rule) is not a condition: the file does not start Auto Shot itself (kb.unexpressed).",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/hunter/marksmanship-ranged-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=83337#p83337 (Steakhouse, player, 2024-01-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=104588#p104588 (Juzam, player (guild theorycrafter), 2024-10-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=125834#p125834 (Barwat1, player, 2025-04-07)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141781#p141781 (Cabum, player, 2025-07-27)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=114199#p114199 (Bigsmerf, player, 2024-12-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=158027#p158027 (Thricew, player, 2025-11-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=160904#p160904 (Skurridizo, player, 2025-11-27)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=164321#p164321 (Kerenis, player, 2026-01-03)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171538#p171538 (Baek, player, 2026-03-21)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171649#p171649 (SvenS2, player, 2026-03-21)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102967#p102967 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=105804#p105804 (Dragunovi, staff, 2024-11-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=108776#p108776 (Jamey, staff, 2024-11-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=149066#p149066 (Jiav, player, 2025-08-29)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=131377#p131377 (SvenS2, player, 2025-05-16)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=115058#p115058 (ajax_808, player, 2024-12-31)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=107692#p107692 (Juzam, player, 2024-11-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=117570#p117570 (Bgnome, player, 2025-01-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=140872#p140872 (Calli, player, 2025-07-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=140730#p140730 (Atreidon, player, 2025-07-21)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171531#p171531 (Lane13, player, 2026-03-21)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171502#p171502 (Baek, player, 2026-03-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166255#p166255 (Atreidon, player, 2026-01-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166287#p166287 (Cheruscan, player, 2026-01-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=105276#p105276 (Dragunovi, staff, 2024-10-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=91592#p91592 (Likaleo, player, 2024-03-28)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=119747#p119747 (Carns, player, 2025-02-12)",
+    " (Dresche, player, 2026-03-20)",
+    " (Sofie, player, 2026-04-01)",
+    " (Sofie, player, 2026-04-18)"
+  ],
+  "priorities": [
+    {
+      "id": "aimed_shot_locked",
+      "spell": "Aimed Shot",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "moving": false,
+        "self_aura": [
+          "Lock and Load"
+        ]
+      }
+    },
+    {
+      "id": "aimed_shot",
+      "spell": "Aimed Shot",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "moving": false
+      }
+    },
+    {
+      "id": "arcane_shot",
+      "spell": "Arcane Shot",
+      "level": 6,
+      "target": "fight",
+      "when": {}
+    },
+    {
+      "id": "arcane_shot_moving",
+      "spell": "Arcane Shot",
+      "level": 6,
+      "target": "fight",
+      "when": {
+        "moving": true
+      }
+    },
+    {
+      "id": "multi_shot",
+      "spell": "Multi-Shot",
+      "level": 18,
+      "target": "fight",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mobs_near_mob_min": 2
+      }
+    },
+    {
+      "id": "volley",
+      "spell": "Volley",
+      "level": 40,
+      "target": "fight",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "moving": false,
+        "mobs_near_mob_min": 3
+      }
+    },
+    {
+      "id": "steady_shot",
+      "spell": "Steady Shot",
+      "level": 4,
+      "target": "fight",
+      "when": {
+        "moving": false
+      },
+      "note": "Moved after the AoE entries: the filler has no cooldown, so as a rule it would starve every entry the KB lists after it."
+    },
+    {
+      "id": "rapid_fire",
+      "spell": "Rapid Fire",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat"
+      }
+    },
+    {
+      "id": "feign_death",
+      "spell": "Feign Death",
+      "level": 30,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "mob_on_me": true
+      }
+    },
+    {
+      "id": "aspect_of_the_viper",
+      "spell": "Aspect of the Viper",
+      "level": 56,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "power_below": 20,
+        "no_self_aura": [
+          "Aspect of the Viper"
+        ]
+      },
+      "note": "20% is the number the shipped hunter uses for the switch to Viper."
+    },
+    {
+      "id": "aspect_of_the_hawk",
+      "spell": "Aspect of the Hawk",
+      "level": 10,
+      "target": "self",
+      "band": "low",
+      "when": {
+        "state": "combat",
+        "power_above": 60,
+        "no_self_aura": [
+          "Aspect of the Hawk",
+          "Aspect of the Viper"
+        ]
+      },
+      "note": "60% is the number the shipped hunter uses for the switch back to the Hawk."
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/hunter/marksmanship-ranged-dps.yaml",
+    "sha256": "b318063ac82e7b702724e6c4b476f62ef918f5c32b51cd7363e1561bfc0e1fc1",
+    "preset": "marksman_hunter",
+    "recipe": "tools/kbrotgen/recipes/kb_marksmanship_hunter.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Keep Auto Shot running; never start a cast in the last 0.5 s before an auto | always [[d:hunter#1471459155179995167]]",
+        "why": "swing timer not in the conditions (the file does not start Auto Shot: the rotation format has no action for an auto-repeat spell)"
+      },
+      {
+        "row": "rotation_single[3]",
+        "text": "Arcane Shot | Enchanted (Arcane) Ammunition up AND the Aimed Shot has already landed (cast after the next Steady) [[d:hunter#1484610058904928467]], [[d:hunter#1485089214046539917]]",
+        "why": "weapon type not in the conditions (the ammunition); \"after the next Steady, once Aimed has landed\" is not a condition"
+      },
+      {
+        "row": "rotation_single[4]",
+        "text": "Steady Shot | after each Auto Shot, if it will not clip",
+        "why": "swing timer not in the conditions"
+      },
+      {
+        "row": "rotation_single[5]",
+        "text": "Arcane Shot | after Steady if it fits without clipping, or while moving (crit roll for Lock and Load) [[d:hunter#1488527231008641095]]",
+        "why": "swing timer not in the conditions (the \"after Steady if it fits\" part)"
+      },
+      {
+        "row": "rotation_single[6]",
+        "text": "Serpent Sting | only if the raid wants the Nature Ammunition -240 armor debuff [[d:hunter#1488876111252160624]]",
+        "why": "raid assignment/marking (whether the raid wants the armour debuff: the KB casts the sting only when it does); weapon type not in the conditions (Nature Ammunition)"
+      },
+      {
+        "row": "rotation_single[7]",
+        "text": "skip Multi-Shot | single target: cannot proc Lock and Load; Fire ammo explosion bugged ~50 dmg [[d:hunter#1486698734736642089]], [[d:hunter#1484664003497300118]]",
+        "why": "the AoE entry casts Multi-Shot only on 2+ targets, which is the single-target skip"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "Multi-Shot when it fits; spend Fire Ammunition on it",
+        "why": "swing timer not in the conditions; weapon type not in the conditions (Fire Ammunition)"
+      },
+      {
+        "row": "rotation_aoe[1]",
+        "text": "Volley opener (1 s cast with Barrage 3/3), Multi-Shot, then Lock and Load Aimed Shot down a line of mobs",
+        "why": "positional (a line of mobs) not in the conditions; swing timer not in the conditions"
+      },
+      {
+        "row": "cooldowns[0]",
+        "text": "Rapid Fire | on pull / with Bloodlust; also -40% Aimed/Steady cast; shares category with Juju Flurry [[d:hunter#1489692709550817407]], [[d:hunter#1489794704836137140]]",
+        "why": "consumable or item (combat_consumables owns items) (Juju Flurry shares its category)"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "On-use trinkets | Badge of the Swarmguard + Jom Gabbar opener, then swap to Heart of Hakkar + Slayer's Crest [[d:hunter#1482615147359895697]]",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[2]",
+        "text": "Feign Death | threat drop (MM rips threat without cooldowns); Improved Feign Death mandatory [[d:hunter#1486215019384541225]], [[d:hunter#1484218976014831677]]",
+        "why": "the Improved Feign Death talent is not a condition"
+      },
+      {
+        "row": "cooldowns[3]",
+        "text": "Aspect of the Viper | Hawk until low mana, then Viper to the end of the fight; Viper ticks generate threat [[d:hunter#1478128745838674021]], [[d:hunter#1491714117369724928]]",
+        "why": "\"Viper to the end of the fight\" is not a condition; the threat of Viper's ticks is not a condition"
+      },
+      {
+        "row": "cooldowns[4]",
+        "text": "ZG Renataki trinket | trash; resets Volley [[d:hunter#1484688430268022955]]",
+        "why": "consumable or item (combat_consumables owns items)"
+      }
+    ]
+  }
+}

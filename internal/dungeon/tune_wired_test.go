@@ -141,34 +141,34 @@ func TestTunedCarefulHop(t *testing.T) {
 // aggro_guard and ahead_max_dz say which hostile near the way is pulled before the hop; max_ahead_pulls bounds the pulls of one walk.
 func TestTunedAheadPulls(t *testing.T) {
 	walk := func() *Plan { return remotePlan(Leg{Name: "first", To: Point{120, 0, 0}}) }
-	run := func(tune string, mobs ...Point) (Report, error, *fakeRemote) {
+	run := func(tune string, mobs ...Point) (Report, *fakeRemote, error) {
 		g := newFakeRemote(t)
 		for _, p := range mobs {
 			g.addMob(77, p)
 		}
 		rep, err := tuneRun(t, g, walk(), tune, nil)
-		return rep, err, g
+		return rep, g, err
 	}
-	if rep, err, _ := run("", Point{60, 8, 0}); err != nil || rep.Remote.AheadPulls != 1 {
+	if rep, _, err := run("", Point{60, 8, 0}); err != nil || rep.Remote.AheadPulls != 1 {
 		t.Fatalf("untuned: %v %+v", err, rep.Remote)
 	}
-	if rep, err, _ := run(`{"aggro_guard": 8, "gather_clear": 10}`, Point{60, 20, 0}); err != nil || rep.Remote.AheadPulls != 0 {
+	if rep, _, err := run(`{"aggro_guard": 8, "gather_clear": 10}`, Point{60, 20, 0}); err != nil || rep.Remote.AheadPulls != 0 {
 		t.Fatalf("a mob 20 yd off the way with aggro_guard 8 and gather_clear 10: %v %+v", err, rep.Remote)
 	}
-	if rep, err, _ := run("", Point{60, 20, 0}); err != nil || rep.Remote.AheadPulls != 1 {
+	if rep, _, err := run("", Point{60, 20, 0}); err != nil || rep.Remote.AheadPulls != 1 {
 		t.Fatalf("a mob 20 yd off the way, untuned: %v %+v", err, rep.Remote)
 	}
-	if rep, err, _ := run(`{"ahead_max_dz": 2}`, Point{60, 0, -5}); err != nil || rep.Remote.AheadPulls != 0 {
+	if rep, _, err := run(`{"ahead_max_dz": 2}`, Point{60, 0, -5}); err != nil || rep.Remote.AheadPulls != 0 {
 		t.Fatalf("a mob 5 yd below with ahead_max_dz 2: %v %+v", err, rep.Remote)
 	}
-	if rep, err, _ := run("", Point{60, 0, -5}); err != nil || rep.Remote.AheadPulls != 1 {
+	if rep, _, err := run("", Point{60, 0, -5}); err != nil || rep.Remote.AheadPulls != 1 {
 		t.Fatalf("a mob 5 yd below, untuned: %v %+v", err, rep.Remote)
 	}
-	_, err, _ := run(`{"max_ahead_pulls": 1}`, Point{50, 8, 0}, Point{80, 8, 0})
+	_, _, err := run(`{"max_ahead_pulls": 1}`, Point{50, 8, 0}, Point{80, 8, 0})
 	if err == nil || !strings.Contains(err.Error(), "hostiles near the way were pulled") {
 		t.Fatalf("max_ahead_pulls 1 with two packs on the way: %v", err)
 	}
-	if rep, err, _ := run("", Point{50, 8, 0}, Point{80, 8, 0}); err != nil || rep.Remote.AheadPulls != 2 {
+	if rep, _, err := run("", Point{50, 8, 0}, Point{80, 8, 0}); err != nil || rep.Remote.AheadPulls != 2 {
 		t.Fatalf("two packs untuned: %v %+v", err, rep.Remote)
 	}
 }
