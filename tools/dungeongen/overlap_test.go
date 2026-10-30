@@ -21,6 +21,7 @@ import (
 // Sentinel's camp split of 2026-10-17 (the lone Hunter's group has the east trio and the west ledge Hunters within its 25 yd). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
 // member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
 var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "ruins_of_ahnqiraj": 21, "timbermaw_hold": 13}
+
 // ruins_of_ahnqiraj's 21 (B1 prep, RAID-PREP-aq20.md): the raid merge of the spawns within 15 yd on one floor, the radius at the pack's
 // own spread + 5 yd (L22) and every lone spawn within that radius + 3 pulled in up to the 12-unit cap. What is left stands with a
 // creature group's 50-70 yd spread (the Hive'Zara scarab swarms of the Moam corridor and the Hive'Zara packs of Ayamiss' hive, radius
