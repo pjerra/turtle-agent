@@ -20,14 +20,14 @@ import (
 // added on 2026-10-16 (world guids 30084 and 30089): each lone basilisk's group has scorpids of the pit and the ledge within its 25 yd; and the
 // Sentinel's camp split of 2026-10-17 (the lone Hunter's group has the east trio and the west ledge Hunters within its 25 yd). Wailing Caverns passes: its radii are cut to stay short of the nearest mob that is not a
 // member (generator rule in the plan notes), and the adds that stand with a boss are the boss's first.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "ruins_of_ahnqiraj": 21, "timbermaw_hold": 13, "lower_karazhan_halls": 6}
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "temple_of_ahnqiraj": 128, "timbermaw_hold": 13, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6}
 
-// ruins_of_ahnqiraj's 21 (B1 prep, RAID-PREP-aq20.md): the raid merge of the spawns within 15 yd on one floor, the radius at the pack's
-// own spread + 5 yd (L22) and every lone spawn within that radius + 3 pulled in up to the 12-unit cap. What is left stands with a
-// creature group's 50-70 yd spread (the Hive'Zara scarab swarms of the Moam corridor and the Hive'Zara packs of Ayamiss' hive, radius
-// 35) or with a patrol of another entry passing a pull's reach (the Qiraji Swarmguard patrols on the entrance terrace, the Flesh Hunter
-// and Obsidian Destroyer patrols of the corridor, the Anubisath Guardian on the Buru plateau): the room sends them with the pull whether
-// the row lists them or not.
+// temple_of_ahnqiraj's 128 (B1 prep, RAID-PREP-aq40.md): the raid merge chains lone spawns within 15 yd on one floor into packs of up to
+// 16 units whose radius is the pack's own spread + 5 yd (at most 35), and the pull-reach closure takes the packs standing in it. What is
+// left is the raid's swarm rooms: the Qiraji Scarab/Scorpion hives of the Twin Emperors' hall and their corridor overlap the C'Thun
+// corridor's Mindslayer/Slayer/Champion packs, the Vekniss Drone swarms of the Fankriss hive stand within one reach of each other, and
+// the patrols of another entry cross a pull's reach. Those rooms send the extra units with the pull whether a row lists them or not;
+// the packing rule would merge them into 20-40 unit pulls, past the raid cap.
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {
