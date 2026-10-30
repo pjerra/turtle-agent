@@ -568,7 +568,6 @@ var planCheckKnownFailing = map[string]bool{
 	"upper_blackrock_spire": true,
 	"wailing_caverns-extra": true,
 	"windhorn_canyon":       true,
-	"zul_gurub":             true,
 }
 
 // Every shipped plan whose map has navmesh files here passes the plan check, except the ones listed in planCheckKnownFailing.
