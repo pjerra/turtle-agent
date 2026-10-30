@@ -63,8 +63,9 @@ const (
 	// Eldermaw 62661; DungeonPlanPolicy.h kPlanFlagSkipUnreachable): where the step would pause on him alive it ends
 	// "not cleared" with a note instead.
 	FlagSkipUnreachable = 4096
-	// FlagStandPull marks a boss row the party pulls from its stand: the move row right before it in the same leg
-	// (Stormwrought Ruins' Eldermaw 62661; DungeonPlanPolicy.h kPlanFlagStandPull).
+	// FlagStandPull marks a boss or pull row the party pulls from its stand: the move row right before it in the same leg
+	// (Stormwrought Ruins' Eldermaw 62661; Zul'Gurub's plateau bat formations, where the pull row's param is the clearance
+	// from other patrols in yd; DungeonPlanPolicy.h kPlanFlagStandPull, specs/rl-patrol-timed-pull.md).
 	FlagStandPull = 8192
 	// EncounterDone is the encounter state DONE: a hold's param.
 	EncounterDone = 3
@@ -481,6 +482,17 @@ func (b *builder) pull(gi int, g dungeon.PullGroup) error {
 	if g.Ambush {
 		flags |= FlagAmbush
 	}
+	if g.StandPull && (len(g.Approach) == 0 || g.Hold != nil || g.Ambush) {
+		return fmt.Errorf("a stand_pull group needs an approach point and no hold or ambush")
+	}
+	if g.ClearYd < 0 || g.ClearYd > dungeon.MaxStandPullClearYd || (g.ClearYd != 0 && !g.StandPull) {
+		return fmt.Errorf("clear_yd %d: 0-%d, and only with stand_pull", g.ClearYd, dungeon.MaxStandPullClearYd)
+	}
+	var param uint32
+	if g.StandPull {
+		flags |= FlagStandPull
+		param = uint32(g.ClearYd)
+	}
 	c := fmt.Sprintf("pull group %d", gi)
 	for _, a := range g.Approach {
 		b.move(a, false, c+" approach")
@@ -489,8 +501,14 @@ func (b *builder) pull(gi int, g dungeon.PullGroup) error {
 		b.hold(g.Hold, uniq(g.Entries), c+" hold")
 		return nil
 	}
-	b.add(StepRow{Kind: KindPull, X: f32(cx), Y: f32(cy), Z: f32(cz), Radius: radius, Flags: flags, Entries: uniq(g.Entries), Comment: c})
+	if g.StandPull {
+		c += "; stand pull"
+	}
+	b.add(StepRow{Kind: KindPull, X: f32(cx), Y: f32(cy), Z: f32(cz), Radius: radius, Flags: flags, Param: param, Entries: uniq(g.Entries), Comment: c})
 	b.last, b.haveLast = dungeon.Point{X: f32(cx), Y: f32(cy), Z: f32(cz)}, true
+	if g.StandPull {
+		b.last = g.Approach[len(g.Approach)-1] // the party fights from its stand: the next move's hop is measured from there
+	}
 	return nil
 }
 
@@ -850,7 +868,7 @@ func (b *builder) cutLongHops() error {
 			// leg before's last move and forth again: Uldaman's legs 6 and 7, export of dd05724). A stand-pull boss is fought from
 			// its stand (the move row right before it), while its point stands in deep water: the next hop is measured from the stand.
 			cp := StepRow{Plan: s.Plan, Leg: s.Leg, Kind: s.Kind, X: s.X, Y: s.Y, Z: s.Z}
-			if s.Kind == KindBoss && s.Flags&FlagStandPull != 0 && prev.Kind == KindMove {
+			if (s.Kind == KindBoss || s.Kind == KindPull) && s.Flags&FlagStandPull != 0 && prev.Kind == KindMove {
 				cp.X, cp.Y, cp.Z = prev.X, prev.Y, prev.Z
 			}
 			prev = &cp

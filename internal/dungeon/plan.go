@@ -339,6 +339,14 @@ type PullGroup struct {
 	Approach []Point `json:"approach,omitempty"`
 	// Hold makes the run leader's row for the group a scripted event's hold (see Hold) instead of a pull; nil: a pull.
 	Hold *Hold `json:"hold,omitempty"`
+	// StandPull says the run leader's party holds at the group's last approach point (its stand, the move row right before the
+	// pull row) and pulls the pack from there once one of its units is in the tank's shot and no other patrol stands within
+	// ClearYd of the lead bot (TortoiseBots kPlanFlagStandPull on a pull, specs/rl-patrol-timed-pull.md): for a formation
+	// that walks a loop near other formations. Needs an approach point; never with a hold.
+	StandPull bool `json:"stand_pull,omitempty"`
+	// ClearYd is how far from the lead bot another patrol must be for a StandPull group's pull to go out (yards, 1-60, the
+	// pull row's param; 0: the run leader's 40). Only with StandPull.
+	ClearYd int `json:"clear_yd,omitempty"`
 }
 
 // Hold is a scripted event that the TortoiseBots run leader fights out on one spot (its `hold` step, TortoiseBots #1041): the party
@@ -372,6 +380,9 @@ type Hold struct {
 const (
 	// HoldDoorWaitS is the most a game object wait straight after a hold waits in the run leader's rows.
 	HoldDoorWaitS = 60
+	// MaxStandPullClearYd is the most a stand_pull group's clear_yd may say (TortoiseBots kStandPullClearMaxYd: the glue lists
+	// other patrols that far from the lead bot).
+	MaxStandPullClearYd = 60
 	// MaxApproach is the most approach points a pull group or boss has.
 	MaxApproach = 4
 	// RunLeaderSeeYd is how far the TortoiseBots run leader sees a pack, a boss or a move point from its lead bot (DungeonRunPolicy.h kSeeYd);
@@ -836,6 +847,10 @@ type rawPullGroup struct {
 	Patrol    *rawPatrol `json:"patrol"`
 	Approach  []rawPoint `json:"approach"`
 	Hold      *rawHold   `json:"hold"`
+	// StandPull is PullGroup.StandPull.
+	StandPull bool `json:"stand_pull"`
+	// ClearYd is PullGroup.ClearYd.
+	ClearYd int `json:"clear_yd"`
 }
 
 type rawHold struct {
@@ -1338,6 +1353,22 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		pg.Approach = c.approach(gp+".approach", g.Approach)
 		pg.Hold = c.hold(gp+".hold", g.Hold, false)
+		pg.StandPull, pg.ClearYd = g.StandPull, g.ClearYd
+		if g.StandPull && len(g.Approach) == 0 {
+			c.fail(gp+".stand_pull", "a stand_pull group needs an approach point (its stand)")
+		}
+		if g.StandPull && g.Hold != nil {
+			c.fail(gp+".stand_pull", "a stand_pull group with a hold is an error")
+		}
+		if g.StandPull && g.Ambush {
+			c.fail(gp+".stand_pull", "a stand_pull group cannot be an ambush (a stealthed pack is walked through, not shot)")
+		}
+		if g.ClearYd != 0 && !g.StandPull {
+			c.fail(gp+".clear_yd", "only with stand_pull")
+		}
+		if g.ClearYd < 0 || g.ClearYd > MaxStandPullClearYd {
+			c.fail(gp+".clear_yd", "%d: use 0 (the run leader's 40) or 1-%d yards", g.ClearYd, MaxStandPullClearYd)
+		}
 		l.PullGroups = append(l.PullGroups, pg)
 	}
 	for i, lv := range r.Leave {
