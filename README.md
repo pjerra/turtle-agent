@@ -96,6 +96,7 @@ turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FI
 turtle-agent tune-diff <trace.jsonl>
 turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
+turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
 turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
@@ -966,6 +967,33 @@ waypoint does the same and can be sent again from wherever a fight leaves the le
 that only the server's own pathing gives (a tank with no firing position), so a pass is no promise that a run finishes. `TestShippedPlansPassPlanCheck` runs it on every shipped plan whose map
 has navmesh files here (`$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle<map>` or `~/tortoise-wow-server/data/mmaps`); the plans that fail today are listed in `planCheckKnownFailing` (issue #187; most are drafts, which only warn);
 a listed plan that passes fails the test until it is taken off. The gate itself is tested with a stub navmesh, so it runs in CI without map files.
+
+### Plan diff
+
+`turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]` compares two exports of one
+plan: the rows the TortoiseBots run leader reads (`ai_dungeon_plan`, `ai_dungeon_leg`, `ai_dungeon_step`), as a migration or as rows built from the plan file. Each input is a
+`.sql` migration read with `planexport.ParseMigration` (so a hand edit around the rows, an `ai_dungeon_boss` block, is skipped) or a `.json` plan built with `planexport.Build` (the
+summary says `rows built from the plan JSON (no navmesh cut)`); mixed inputs are fine. `--plan` picks the plan of a migration that holds several (one plan: taken; a name that is not in
+the file is an error). Two maps are a usage error; two plan names are a note. It is offline: it reads the two inputs and, for the picture, the minimaps folder.
+
+**What is compared.** Legs are matched by `ai_dungeon_leg.name` (a leg inserted before another keeps the later legs together), then the rest by leg number; an unmatched leg is
+`leg added` or `leg removed`, and its steps are listed with it. Inside a matched leg the steps are matched by a key of the fields the run leader acts on: kind, entry, entries,
+radius, item, param, flags, timeout_s and the position rounded to 0.1 yd (so the export's float32 noise does not count). The key-equal steps are paired by a longest common
+subsequence; a pair whose comment differs is a `comment` change (the only change `--fail-on-change` ignores). Between two key-equal pairs the unmatched old and new rows are paired in
+order while their kinds match: a 3D distance over 0.05 yd is `moved` (with the distance and both points) and lists any other field that differs; a smaller one is `changed` with its
+field list; the rest are `removed` and `added`. Every step carries its global number on both sides (its index in (leg, seq) order + 1), so an insertion shows as one `added` and
+`renumbered` counts the key-equal steps whose number moved (the first five are named in the notes). The plan row's `cc_priority`, `cc_always`, `kill_first`, `source` and `comment`
+differences are listed under `plan:` in the summary line.
+
+**Output.** The text is one line per change, e.g. `step 26 (leg 0 seq 25) move: moved 7.92 yd (-149.46 -210.48 -74.62 -> -149.46 -210.48 -66.70); comment 'path' -> 'boss approach'`, then
+`onyxias_lair: 29 -> 29 steps: 2 moved, 0 changed, 0 added, 0 removed, 0 comment; 0 renumbered; plan: source`, then the notes. `--json` prints the `tb-plan-diff` v1 file instead
+(the diff, floats at two decimals). `--out DIR` writes `diff-<plan>.txt`, `diff-<plan>.json` and `diff-<plan>.svg` (0700 dir, 0600 files); `--svg FILE` writes the SVG there as well; an existing output file is refused (exit 2). The SVG draws the old route dashed grey and the new route solid over the picture, with a green circle for an added step,
+a red cross for a removed one, an orange arrow old -> new for a moved one, a purple ring for a changed one and a label with the step number and z; hovering a marker shows the
+change line. `--minimaps DIR` (default `~/turtle-agent-minimaps`) and `--picture` choose the picture (`worldmap` = `<map>.json`/`<map>.png`, `minimap` = `<map>.minimap.*`,
+`navmesh` = `<map>.navmesh.*`); a missing picture is a blank canvas with a note, and when the folder has `<map>.worldmap-2f.json` the SVG says the overlay is 2D and z decides on a
+multi-floor map.
+
+Exit: 0 (also when only comments differ), 25 with `--fail-on-change` and any change other than a comment, 2 a usage error or an existing output file, 1 an unreadable input.
 
 ### Route oracle
 
@@ -2085,8 +2113,83 @@ cleanup ran out of time, `incidents[]` (`severity` `blocking`, `kind` `cleanup_i
 `manual`). `summary.json` gains `injections[]` (kind, verdict, reason, step, victim), `incidents[]` (the same blocking
 findings) and `deaths.injected` (kill-mt's MT, which is not a death of the run). A walk that would exit 0 with at least
 one fault in `fail` exits **23**; 18 and 19 keep their meaning and win over 23. A blocking cleanup incident raises any
-lower exit code to **23** as well. A fault that never fired is `not-fired`; one that could not be caused or measured is
+lower exit code to **23** as well, and that 23 outranks 18 and 19 too (a bot left frozen must never hide). A fault
+that never fired is `not-fired`; one that could not be caused or measured is
 `inconclusive`; neither changes the exit code.
+### Raid suite
+
+`turtle-agent raid-suite` walks a list of raid plans one after another, each with `raid-walk`, and judges each walk
+against the last good walk of the same plan in a history dir. It is the regression check for the raid plans.
+
+turtle-agent raid-suite --suite suite.json --history ~/TortoiseBots-audit/raid-walks --server m910q --gap 60s
+turtle-agent raid-suite --dir ~/ta-wt-raid-ony/dungeons --history ~/TortoiseBots-audit/raid-walks --dry-run
+turtle-agent raid-suite --dir ~/ta-wt-raid-ony/dungeons --history ~/TortoiseBots-audit/raid-walks --compare-only
+
+- **Inputs.** `--suite FILE` is a `tb-raid-suite` v1 file: `{"format":"tb-raid-suite","version":1,"raids":[{"plan":
+  "onyxias_lair","dir":"~/ta-wt-raid-ony/dungeons","sql":"~/wt-plan-raid-ony/data/sql/world/20261029130000_world.sql",
+  "hires":""}]}`, walked in file order (`dir` is required, `sql` and `hires` are optional). `--dir DIR` takes every raid plan
+  in the folder, sorted by plan name. `--only p1,p2` filters by plan name; an unknown name is a usage error. A plan listed
+  twice is a usage error (one history dir per plan).
+- **Tier.** The suite never takes `--tier`. A raid's tier comes from the committed table (`internal/raidwalk/tiers.go`) or
+  from its `hires` file. A raid with no sourced tier is **refused** with the reason and is not walked.
+- **Until.** Each raid is walked to its first leg's end (`raidwalk.FirstLegUntil`): a boss in leg 0 stops at the boss, else
+  the walk stops when leg 2 starts, else it runs to the end.
+- **History.** Each walk writes to `<history>/<plan>/<YYYYmmdd-HHMMSS>/` (its own `summary.json`). Walks put there by hand
+  count as history too.
+- **Rules.** A walk that did not exit 0 is `failed`. Otherwise it is compared with the newest good walk of its plan (exit 0,
+  ended by its `until` or `plan done`, no tier comparison, the same tier, until, speed and test speed, no injected fault):
+  - `regression` when run time is more than 20 % and more than 60 s above the baseline, deaths are above
+    `base + max(2, 25 % of base)`, pauses or stops are above the baseline, the end reason changed, or fights are more than
+    one above it. `faster` and `fewer fights` are info.
+  - `ok` when no rule fires; `new` when there is no baseline (exit 0).
+  - Rows that changed since the baseline (`rows_sha256`) are a note; the rules still apply.
+- **Verdicts.** `ok`, `regression`, `new`, `failed`, `refused`, `skipped` (after a Ctrl-C the rest are skipped with
+  `interrupted`; the walk that was running tears down by itself).
+- **Compare only.** `--compare-only` walks nothing: each plan's newest walk in the history is compared with the last good
+  one before it. A plan with no walk is `skipped`.
+- **Dry run.** `--dry-run` prints `plan tier (source) until out` per raid, or `plan: refused: <reason>`; nothing is sent
+  and no out dir is made.
+- **Output.** `--out DIR` (default `./raid-suite-<stamp>`, refused if it exists; 0700) gets `suite.json` (format
+  `tb-raid-suite-report` v1) and `suite.txt` (0600). `--json` prints the JSON on stdout instead of the text. The walks'
+  own output goes to stderr, so stdout stays the report.
+- **Exit codes.** 0 when no raid regressed or failed; 24 when one did; 15 for `--slot 3` (refused before anything); 2 usage,
+  including `--slot A,B` (`raid-suite` walks one raid at a time).
+### Two raids at once
+
+`turtle-agent raid-walk <plan> [<plan2>] --slot A,B` walks two raids at the same time, one per slot. Two raids take
+`--slot 1,2` because `--slots FILE` is already the slot config path: the pair form is the same `--slot` flag with a
+list of two distinct ids. Slot `3` is refused before anything for any server (exit 15); a third id or a repeated one
+is a usage error (exit 2). One plan walks that plan on both slots (two instances of it); two plans walk `plan1` on A
+and `plan2` on B.
+
+Each half is an ordinary raid-walk with its own lease, `slot setup`, agent process, dashboard client and output dir:
+`<out>/s<A>-<plan1>/` and `<out>/s<B>-<plan2>/` (each the normal `summary.json`, `run.log`, frames, ...), plus
+`<out>/pair.json` and `<out>/pair.txt` (`--out` default `./raid-walk-pair-<YYYYmmdd-HHMMSS>`, refused if it exists).
+The default holder is `raid-walk-<plan>-s<slot>`; two equal holders are refused. Walk B starts 30 s after walk A
+(`--stagger 0-600s`) so the two hire bursts (up to 40 bots each) do not hit the server at once. The walks are
+independent: one failing does not stop the other; SIGINT stops both and each tears down its own slot. A panic in
+either half (a bug, not a failed walk) is caught at the pair boundary: it is recorded as that half's failed walk,
+cancels the other half, and both halves still run their teardown and lease release before `pair.json` is written.
+A cleanup step counts as done only when it succeeded (release returned no error; teardown exited 0 with a readable
+`--json` report); when it panics or fails, the deferred cleanup retries it once, and a lease it still could not give
+back is named in the pair's notes.
+
+Per-walk flags may carry the slot id as a prefix: `--sql 1=a.sql --sql 2=b.sql`, `--inject 2=lag`. An unprefixed
+`--sql --hires --dir --patrols --until --from --tier --tier-override --holder --inject` applies to both walks (a
+repeated `--inject` stays per walk). Every other flag is global and refuses a slot prefix (exit 2).
+
+`pair.json` (format `tb-raid-walk-pair` v1) has one entry per walk (slot, the id as given, e.g. `"1"` or `"A"`;
+plan, character, out, exit code, end reason, steps, deaths, fights, pauses, tier, and the dashboard tab
+`#/commanders/<name>`), `overlap_s` (seconds both runs were between their start and their end, from the two
+summaries), `dashboard_both_listed` (true when one `/api/v1/commanders` dump of either walk names both characters;
+`null` with the dashboard off) and `notes`.
+`pair.txt` is one line per walk, one `note:` line per note, then `pair: exit <c>`. The pair's exit is the first code that occurs in the order
+2, 15, 18, 19, 23, 0 over the two walks, so a wipe (19) wins over a failed fault (23); a blocking incident (a bot
+left frozen, 23) ranks ahead of 18 and 19 in both walks, so it never hides. Each walk binds its own
+commander, so the dashboard's `/api/v1/commanders` lists both and the raid tabs show one tab each. Two 40-man raids
+are up to 80 hires on one server: plan the slots and the worldserver's memory.
+
+`--dry-run` prints both phase plans, every line prefixed `[s<N> <plan>] `, without leasing or writing.
 
 ## Remote leader
 

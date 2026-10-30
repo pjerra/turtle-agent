@@ -1120,3 +1120,17 @@ probe found (2026-10-29, `tests/raid-inject-probe-20261029-042517/probe.md`). Wh
    bot left frozen; a SIGINT while a bot is frozen still sends `.unfreeze` before `.bot run stop`.
 8. **Exit codes.** A `fail` turns a clean walk into 23; a wipe during a fault stays 19 and the fault reads `fail` in
    the summary; `not-fired`/`inconclusive` keep exit 0.
+## raid-suite: one walk per raid, judged against the history (tested against fakes only, never run live until L2)
+
+README "Raid suite". Needs `raid-walk` (the `until` clause, `feat/run-until` on the server) and at least one raid whose tier
+is sourced in `internal/raidwalk/tiers.go` (onyxias_lair, tier 2). What the first live use has to settle:
+
+1. **Dry run.** `raid-suite --dir <the 11 prep plans> --history <dir> --dry-run` prints onyxias_lair as `tier 2 (table) until
+   boss` and each 0-row raid as `refused: raid <plan> has no minimum hire tier`; no lease is taken and no out dir is made.
+2. **First walk is new.** The first `raid-suite` on onyxias_lair walks it to its boss and writes `<history>/onyxias_lair/<stamp>/`;
+   the verdict is `new`, exit 0, and `suite.json` names the walk's out dir.
+3. **Second walk compares.** A second walk on the same server and settings is `ok` (or `regression` with a reason that names both
+   values); the baseline's `out` and `started` are the first walk's.
+4. **Refusals never walk.** Only onyxias_lair gets a walk dir under `<history>/`; a refused raid leaves no dir there.
+5. **Teardown between raids.** Each walk's `teardown.json` has no hire left online before the next raid starts (the `--gap`
+   sleep sits between two walks).

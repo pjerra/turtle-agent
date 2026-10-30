@@ -1590,6 +1590,11 @@ func (in *Injector) Ack(a InjectAction, ctx InjectCtx, err error) {
 	if f == nil || f.state != injectActive {
 		return
 	}
+	// A freeze line that fails may still have landed (the GM command took effect and only the call failed): mark
+	// the victim maybe-frozen so Cleanup releases it. The verdict stays inconclusive.
+	if a.Kind == ActGM && f.phase == "freezing" && a.Line == ".freeze "+f.victim {
+		f.frozen = true
+	}
 	if err != nil {
 		in.endFault(f, VerdictInconclusive, err.Error(), p.at)
 		return
