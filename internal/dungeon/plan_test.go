@@ -83,6 +83,8 @@ func TestParseErrors(t *testing.T) {
 		{"boss no position", leg(`{"to":{"x":0,"y":0,"z":0},"boss":{"entry":4}}`), "legs[1].boss.position: required"},
 		{"first holds boss", leg(`{"to":{"x":0,"y":0,"z":0},"boss":{"entry":4,"first":[4],"position":{"x":0,"y":0,"z":0}}}`), "legs[1].boss.first[0]: the boss (4) is killed last"},
 		{"skip holds boss", leg(`{"to":{"x":0,"y":0,"z":0},"skip":[4],"boss":{"entry":4,"position":{"x":0,"y":0,"z":0}}}`), "legs[1].skip[0]: skips the boss (4)"},
+		{"boss wait over the row limit", leg(`{"to":{"x":0,"y":0,"z":0},"boss":{"entry":4,"position":{"x":0,"y":0,"z":0},"wait_s":601}}`), "legs[1].boss.wait_s: 601 s is outside 1-600"},
+		{"boss wait negative", leg(`{"to":{"x":0,"y":0,"z":0},"boss":{"entry":4,"position":{"x":0,"y":0,"z":0},"wait_s":-1}}`), "legs[1].boss.wait_s: -1 s is outside 1-600"},
 		{"skip also pulled", leg(`{"to":{"x":0,"y":0,"z":0},"skip":[1],"pull_groups":[{"entries":[1],"positions":[{"x":0,"y":0,"z":0}]}]}`), "legs[1].skip[0]: 1 is also in pull_groups[0].entries"},
 		{"leave no entry", leg(`{"to":{"x":0,"y":0,"z":0},"leave":[{"at":{"x":5,"y":5,"z":0},"why":"island"}],"pull_groups":[{"entries":[5],"positions":[{"x":0,"y":0,"z":0}]}]}`), "legs[1].leave[0].entry: required"},
 		{"leave no why", leg(`{"to":{"x":0,"y":0,"z":0},"leave":[{"entry":9,"at":{"x":5,"y":5,"z":0}}],"pull_groups":[{"entries":[5],"positions":[{"x":0,"y":0,"z":0}]}]}`), "legs[1].leave[0].why: required"},

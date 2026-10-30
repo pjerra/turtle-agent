@@ -202,14 +202,16 @@ func parseLeaseListArgs(args []string, stderr io.Writer) (leaseListOptions, int)
 
 // slotSetupOptions is the parsed `slot setup` command line.
 type slotSetupOptions struct {
-	server      string
-	slot        string
-	holder      string
-	dir         string
-	binary      string
-	dungeonsDir string
-	character   string
-	slotsPath   string
+	server       string
+	slot         string
+	holder       string
+	dir          string
+	binary       string
+	dungeonsDir  string
+	mmapsDir     string
+	dungeonsFrom string
+	character    string
+	slotsPath    string
 }
 
 // parseSlotSetupArgs parses slot setup flags in any position (before,
@@ -223,6 +225,8 @@ func parseSlotSetupArgs(args []string, stderr io.Writer) (slotSetupOptions, int)
 	fs.StringVar(&o.dir, "dir", "", "client dir (default ~/ta-<holder>)")
 	fs.StringVar(&o.binary, "binary", "", "turtle-agent binary to install (default os.Executable())")
 	fs.StringVar(&o.dungeonsDir, "dungeons-dir", "", "dungeons dir (default <dir>/dungeons)")
+	fs.StringVar(&o.mmapsDir, "mmaps-dir", "", "navmesh folder written to settings.json mmaps_dir (must exist)")
+	fs.StringVar(&o.dungeonsFrom, "dungeons-from", "", "folder of *.json plans copied into the slot's dungeons dir")
 	fs.StringVar(&o.character, "character", "", "character to play (default the slot's)")
 	fs.StringVar(&o.slotsPath, "slots", "", "slot table file")
 	pos, rest := splitPositionals(fs, args, 2)

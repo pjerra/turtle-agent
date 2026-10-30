@@ -33,9 +33,7 @@ func (rr *run) drain(ctx context.Context, step int) error {
 					Raw:  fmt.Sprintf("  note: events of session %s were dropped by the agent's ring: a check may miss lines", name),
 					Norm: fmt.Sprintf("  note: events of session %s were dropped by the agent's ring: a check may miss lines", name)})
 			}
-			for _, e := range page.Events {
-				st.buf = append(st.buf, e)
-			}
+			st.buf = append(st.buf, page.Events...)
 			if len(st.buf) > 20000 {
 				st.buf = append([]events.Event(nil), st.buf[len(st.buf)-20000:]...)
 			}

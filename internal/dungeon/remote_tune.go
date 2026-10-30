@@ -62,7 +62,6 @@ type liveTune struct {
 	tunePath  string
 	tuneStamp fileStamp
 	tuneGone  bool
-	planPath  string
 	planStamp fileStamp
 	planHash  [sha256.Size]byte
 }
