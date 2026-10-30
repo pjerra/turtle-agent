@@ -781,6 +781,11 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 			case raidwalk.IncidentWipe:
 				return w.handleWipe(ctx, v.Step)
 			case raidwalk.IncidentBossEngaged:
+				if w.runFightsBoss() {
+					w.note("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, w.untilLabel)
+					w.logLine(now, fmt.Sprintf("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, w.untilLabel))
+					continue
+				}
 				return w.handleBoss(ctx, v)
 			}
 		}
@@ -1189,6 +1194,15 @@ func (w *walk) bossState(now time.Time, entry uint32) bossPhase {
 		return bossReset
 	}
 	return bossWaiting
+}
+
+// runFightsBoss says whether the run leader itself is on a boss step and its
+// until goes past it (walk 12: Jeklik engaged at step 40 with --until "step
+// 41", and raid-walk stopped the run from under the fight). True only when the
+// run's own status kind is boss; the default --until boss (a trash walk that
+// wakes a boss) and an early boss wake during a trash step both stop as now.
+func (w *walk) runFightsBoss() bool {
+	return w.opts.until != "boss" && w.haveStatus && w.lastStatus.Kind == "boss"
 }
 
 // handleBoss stops the run at once and waits for the fight to end: a wipe (then the revive), a kill or a reset.

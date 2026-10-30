@@ -1785,6 +1785,77 @@ func TestRaidWalkUntilBossDone(t *testing.T) {
 	}
 }
 
+// Walk 12: --until "step 41" reached step 40 (Jeklik) and raid-walk sent `.bot
+// run stop` the moment the boss was engaged, so the fight ran with no run
+// leader. The run stays on its boss step and its until goes past it, so the
+// run leader fights it: no run stop, the walk ends at its until.
+func TestRaidWalkUntilPastBossLetsTheRunFightIt(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 100, Target: packet.GUID(1000)}}
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want 0: the run leader fights its boss step", n)
+	}
+	if sum := f.summary(); sum.EndReason != "until" {
+		t.Fatalf("summary end %q, want until", sum.EndReason)
+	}
+	if !hasNote(f.summary(), "so the run leader fights it") {
+		t.Fatalf("notes %q", f.summary().Notes)
+	}
+}
+
+// The default --until boss still stops at a boss: a trash walk that wakes a
+// boss is not a run the leader fights.
+func TestRaidWalkDefaultUntilStillStopsAtABoss(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 9, Entry: 10184, HPPct: 100, Target: packet.GUID(1000)}}
+	}
+	f.allDeadFromHires()
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s", code, f.stderr.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
+		t.Fatalf("%d run stops, want exactly 1", n)
+	}
+}
+
+// An early boss wake during a trash step still stops: the run is not on its
+// boss step even though its until goes past the boss.
+func TestRaidWalkEarlyBossWakeStillStops(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.opts.until = fmt.Sprintf("step %d", next)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|walking", next-1, total)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 100, Target: packet.GUID(1000)}}
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s", code, f.stderr.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
+		t.Fatalf("%d run stops, want exactly 1", n)
+	}
+}
+
 // Rows that are not the server's (a plan of another step count) refuse the walk and stop the run: the step after the boss would be
 // another step.
 func TestRaidWalkBossDoneRefusesOtherRows(t *testing.T) {
