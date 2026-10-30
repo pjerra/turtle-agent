@@ -373,6 +373,8 @@ const (
 	// MaxStandPullClearYd is the most a stand_pull group's clear_yd may say (TortoiseBots kStandPullClearMaxYd: the glue lists
 	// other patrols that far from the lead bot).
 	MaxStandPullClearYd = 60
+	// MaxStandPullRadius is the most a boss radius may say (the run leader's row radius cap, kPlanMaxRadius).
+	MaxStandPullRadius = 100
 	// MaxApproach is the most approach points a pull group or boss has.
 	MaxApproach = 4
 	// RunLeaderSeeYd is how far the TortoiseBots run leader sees a pack, a boss or a move point from its lead bot (DungeonRunPolicy.h kSeeYd);
@@ -1422,6 +1424,12 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		if b.StandPull && b.Hold != nil {
 			c.fail(bp+".stand_pull", "a stand_pull boss with a hold is an error (like hold + skip_unreachable)")
+		}
+		if b.StandPull && len(b.Approach) == 0 {
+			c.fail(bp+".stand_pull", "a stand_pull boss needs an approach point (its stand)")
+		}
+		if b.Radius < 0 || b.Radius > MaxStandPullRadius {
+			c.fail(bp+".radius", "%g is outside 0-%d yards", b.Radius, MaxStandPullRadius)
 		}
 		if r.Boss.SkipUnreachable != "" && strings.TrimSpace(r.Boss.SkipUnreachable) == "" {
 			c.fail(bp+".skip_unreachable", "required to be non-empty when set (why the boss may stand out of the party's reach)")
