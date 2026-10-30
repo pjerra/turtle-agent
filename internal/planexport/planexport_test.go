@@ -1308,8 +1308,12 @@ func TestBossRadiusExported(t *testing.T) {
 	if b.Kind != KindBoss || b.Radius != 95 {
 		t.Fatalf("boss row %+v (want radius 95)", b)
 	}
-	if _, err := Build(parsePlan(t, leg("101")), Options{Source: "test"}); err == nil || !strings.Contains(err.Error(), "boss 62661") {
-		t.Fatalf("radius 101 error %v (want the named boss and its range)", err)
+	// Over MaxRadius the plan is refused when it is parsed, and the builder refuses it too (a plan built by hand).
+	if _, err := dungeon.Parse("test.json", []byte(leg("101"))); err == nil || !strings.Contains(err.Error(), "boss.radius") {
+		t.Fatalf("radius 101 parse error %v (want the boss radius range)", err)
+	}
+	if err := (&builder{}).boss(&dungeon.Boss{Entry: 62661, Radius: 101}); err == nil || !strings.Contains(err.Error(), "boss 62661") {
+		t.Fatalf("radius 101 builder error %v (want the named boss and its range)", err)
 	}
 }
 
@@ -1340,8 +1344,11 @@ func TestBossStandPullFlagAndApproach(t *testing.T) {
 	const bare = `{"version":1,"name":"sw","status":"live-checked (test)","map":818,"entrance":{"x":0,"y":0,"z":0},
 	 "legs":[{"name":"eldermaw_the_primordial","to":{"x":-5845.08,"y":-3744.63,"z":217.926},
 	  "boss":{"entry":62661,"position":{"x":-5820.0,"y":-3797.19,"z":201.241},"stand_pull":true}}]}`
-	if _, err := Build(parsePlan(t, bare), Options{Source: "test"}); err == nil || !strings.Contains(err.Error(), "needs an approach point") {
-		t.Fatalf("stand_pull without an approach error %v (want the no-approach refusal)", err)
+	if _, err := dungeon.Parse("test.json", []byte(bare)); err == nil || !strings.Contains(err.Error(), "needs an approach point") {
+		t.Fatalf("stand_pull without an approach parse error %v (want the no-approach refusal)", err)
+	}
+	if err := (&builder{}).boss(&dungeon.Boss{Entry: 62661, StandPull: true}); err == nil || !strings.Contains(err.Error(), "needs an approach point") {
+		t.Fatalf("stand_pull without an approach builder error %v (want the no-approach refusal)", err)
 	}
 	// stand_pull together with hold is an error (like hold + skip_unreachable): the run leader's row for the
 	// group is the event's hold, never a pulled boss.

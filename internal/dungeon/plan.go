@@ -1465,6 +1465,12 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		if b.StandPull && b.Hold != nil {
 			c.fail(bp+".stand_pull", "a stand_pull boss with a hold is an error (like hold + skip_unreachable)")
 		}
+		if b.StandPull && len(b.Approach) == 0 {
+			c.fail(bp+".stand_pull", "a stand_pull boss needs an approach point (its stand)")
+		}
+		if b.Radius < 0 || b.Radius > MaxStandPullRadius {
+			c.fail(bp+".radius", "%g is outside 0-%d yards", b.Radius, MaxStandPullRadius)
+		}
 		if r.Boss.SkipUnreachable != "" && strings.TrimSpace(r.Boss.SkipUnreachable) == "" {
 			c.fail(bp+".skip_unreachable", "required to be non-empty when set (why the boss may stand out of the party's reach)")
 		}
