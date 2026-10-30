@@ -1113,7 +1113,7 @@
    "size": 20,
    "entrance_tele": "zg",
    "special": [
-    "Handwritten prep: 168 merged packs (L22; leg 0 re-spaced after walks 1, 2 and 3), boss order Jeklik, Venoxis, Mar'li, Thekal, Arlokk, Mandokir, Jin'do, Hakkar; Gahz'ranka is optional and has no step (fishing summon not expressible); Edge of Madness has no spawn (SpawnRandomBoss deactivated).",
+    "Handwritten prep: 168 merged packs (L22; leg 0 re-spaced after walks 1 to 4), boss order Jeklik, Venoxis, Mar'li, Thekal, Arlokk, Mandokir, Jin'do, Hakkar; Gahz'ranka is optional and has no step (fishing summon not expressible); Edge of Madness has no spawn (SpawnRandomBoss deactivated).",
     "Arlokk (14515) has no spawn row; the gong 180526 runs event script 9066 and summons her at -11540.7 -1627.71 41.27. The gong step is open for the mapping walk (no walkable server path to it)."
    ],
    "handwritten": true
