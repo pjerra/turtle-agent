@@ -1067,3 +1067,30 @@ README "Observe mode" and "Exporting plans for the TortoiseBots run leader". Nee
 9. **Partial start (#248).** From a party standing inside the instance, `dungeon_run {"mode":"observe", "from_leg": 10, ...}` must send `.bot run start wailing_caverns from leg serpentis` (a one-word, unique leg name; else `from 10`-style number) and the run leader's first status line must show the leg's first step (Wailing Caverns leg 10: step 207 of 226; `from 207` was the hand-started run of 2026-10-20). With `from_pull_group`, check that the server's listed step count matched the agent's rebuilt rows (the report's "starts partway" note names the step): when it did not, the probe must refuse before hiring and name `observe.from_step`. Then check the start is proven: the start message's step and leg are compared with the request (a reply at another step for `from_step`/`from_pull_group`, another leg, or a planted deployment of another plan version must stop the run and refuse the watch — only the module's documented "moved back to the step that starts the event" may differ, and is noted); an ACK-only start (no message) is proven by `run status` or, at another step, the run is stopped and the watch refused; a busy run at another step is not adopted. Check the party-placed start: a start elsewhere must pause/refuse as the module's `not-in-instance`/`party-scattered`; a lead bot more than 80 yd from the step's point, a step whose point is not known and a start without the lead's position are refused before `run start` (`observe.allow_far_start` turns each into a note).
 10. **Server trace (#249).** With `run_meta.server_trace: true` the start must go out and be acknowledged: the report has no "server trace state unknown", `.bot trace status` shows the run's id while it runs, and `.bot trace stop` ends it at the end (the server's summary joins the agent's trace on the run id). Before this fix the agent's own CheckCommand refused the whole `trace` group.
 11. **No maintenance at the observe start (#253).** With `prepare.party "hire"` (hires autogeared a moment before), the preflight must show `maintenance: "not sent (observe mode: observe.maintenance is off)"` for every bot, the hire check must not send `.bot maintenance` to a reused hire or one short of drinks or ammo (its warning says so), and no hire must leave the instance's map: the run leader must not pause with "the lead bot is not on the plan's map". `observe.maintenance: true` brings the `.bot maintenance` lines back in both places.
+
+## raid-walk: the whole walk as one command (tested against fakes only, never run live until E2)
+
+README "Raid walks". Needs a server image with TortoiseBots `feat/run-until` (the run start's `until`) and the raid
+tools' slot setup. What the first live use has to settle:
+
+1. **Start and label.** `raid-walk onyxias_lair --hold-minutes 5` reaches `running 1/29` and the status line's trailing
+   label reads `until boss (step 29)`; a build without run-until is refused (exit 18, "has no `until`") and nothing is
+   sent after `run start`.
+2. **Hire diff.** Each `.bot hire raid ...` reply's hired count equals the party growth; the MT and OT names are the
+   batch's own names and `TBM:RAID_LAYOUT`'s first tank is the roster's MT.
+3. **Entry.** `cmd enter near` (Onyxia's amulet) puts every hire on map 249 within 60 s; check the frames' maps and
+   whether a straggler needed the `cmd summon`.
+4. **The stop.** `done|28/29|...|stopped before step 29 (until boss)` within 1-3 s of step 28; Onyxia at 100 % and no
+   victim 60 s later (dashboard snapshot); five trash fights in `combat-fights.json`.
+5. **The summary.** `summary.json` says `end_reason: until`, `steps_reached 28`, `steps_total 29`, and `hires_left`
+   is empty; teardown's `teardown.json` has no failed step.
+6. **Wipe and boss rules.** Not expected on a normal walk: a forced wipe must wait for a reset, revive only when the
+   quiet check passes, and never revive while a boss row has a target; the exit code is 19.
+7. **Tier and refit.** The hires carry `t2` in each `.bot hire raid` line and the walk sends
+   `.bot gear raid <commander> tier 2`; the `TBM:GEAR` line's tier field reads 2 and the kits are the Zul'Gurub set (no
+   Molten Core pieces above the kit). `summary.json` says `roster.tier 2`, `tier_source "table"`; with
+   `--tier-override 3` it says `tier_comparison true` and the notes carry "comparison, not a tier proof". A raid the
+   table leaves unknown refuses to start without `--tier`.
+8. **The 40th seat.** A 40-man plan's default roster asks for 40; the server hires 39 (its cap) and the summary notes
+   `hire cap 39:` with exit 0, the raid layout 39 tanks/bots as the server reports them. A hire that comes up short
+   below 39 is exit 18. Settle whether `TBM:HIRE_RAID`'s hired field counts the order or the seats on the capped batch.
