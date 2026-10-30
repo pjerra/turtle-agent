@@ -58,7 +58,7 @@ realm list returns; `rpc_token` and `rpc_auth` set the [RPC authentication](#rpc
 copies of the server's navmesh files, for `path_to` and `walk_path` (see [Navmesh walking](#navmesh-walking)), and to
 land falls and knockbacks on the ground (see [Falling](#falling-and-knockbacks)). `addons` replaces the addon list sent
 at world login (see [What the server sees](#what-the-server-sees)). `tbm_addon_dir` is the TortoiseBotsManager checkout
-the [addon host](#addon-host) runs (default: the pinned copy `tools/tbmcontract/fetch.sh` keeps in `.cache/`). `rotations_dir` is a folder of extra [rotation files](#rotations-as-data) (the built-in ones need none; a bad file stops the login). `dungeons_dir` is the folder `dungeon_run` reads plans from (default `dungeons` under the working directory; see [Dungeon runs](#dungeon-runs)). `traces_dir` is the folder run traces go to (default `traces`, or `$TURTLE_AGENT_TRACES_DIR`; see [Run traces and checks](#run-traces-and-checks)). `run_meta` (`{"model", "effort", "run", "server_trace"}`) is the slot's default AI driver of its runs: `dungeon_run`'s `run_meta` wins when it names one (see [Run traces and checks](#run-traces-and-checks); `server_trace` is off by default). `state_dir` is where the addon fingerprint and the instance-entry ledger are kept (default: the settings file's folder); `slot setup` points it at the account's usual folder.
+the [addon host](#addon-host) runs (default: the pinned copy `tools/tbmcontract/fetch.sh` keeps in `.cache/`). `rotations_dir` is a folder of extra [rotation files](#rotations-as-data) (the built-in ones need none; a bad file stops the login). `dungeons_dir` is the folder `dungeon_run` reads plans from (default `dungeons` under the working directory; see [Dungeon runs](#dungeon-runs)). `tb_dashboard_url` is the TortoiseBots observability dashboard a raid run links its card to (`Raid view: <url>/#commanders`, see [Raids](#raids)); absent: no link. `traces_dir` is the folder run traces go to (default `traces`, or `$TURTLE_AGENT_TRACES_DIR`; see [Run traces and checks](#run-traces-and-checks)). `run_meta` (`{"model", "effort", "run", "server_trace"}`) is the slot's default AI driver of its runs: `dungeon_run`'s `run_meta` wins when it names one (see [Run traces and checks](#run-traces-and-checks); `server_trace` is off by default). `state_dir` is where the addon fingerprint and the instance-entry ledger are kept (default: the settings file's folder); `slot setup` points it at the account's usual folder.
 
 Log a character in and keep it online with the RPC server running:
 
@@ -135,6 +135,8 @@ turtle-agent version
 | 14 | `teardown`: a game-side or CLI step failed |
 | 15 | `lease` or `slot setup` refused (slot held, reserved, or not leased by the holder); `rpc` cannot reach the agent, its reply fails the 2.0 envelope check, or its token file is not an agent token |
 | 16 | `rpc`: the agent answered with a JSON-RPC error |
+| 20 | `plan-probe` found a bad segment |
+
 | 17 | `dashboard-replay` refused its target: not a loopback address (`--i-know` vouches for a test dashboard), or a bad port |
 
 `--capture` records every decrypted packet to a file (opened exclusively, mode 0600). The auth session body and
@@ -673,7 +675,7 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   (a dungeon's party, `class:role` each, the same rules as `prepare.hire.composition`; the [hired party](#hired-party-prepare-party-hire) takes it when the prepare block gives none), `fleers`
   (creature entries that run at low health, EventAI "flee at 15 % HP"; remote mode kills them before they are out of reach and waits for one that got away, see *Runners* under tank first) and `raid`
   (`{"size": 40, "tanks": 4, "healers": 10, "dps": 26}`, required for a raid plan, size 10, 20 or 40, the roles a placeholder). A **draft** is the skeleton `tools/dungeongen` writes from the world export
-  (`"status": "draft (not mapped, not live-checked)"`): `dungeon_run` refuses it unless `allow_draft` is passed (the plan has had no mapping walk) and refuses every raid plan (no raid driver yet).
+  (`"status": "draft (not mapped, not live-checked)"`): `dungeon_run` refuses it unless `allow_draft` is passed (the plan has had no mapping walk). A raid plan runs in observe mode with `prepare.party "hire"` (the server's run leader leads the bound raid; see [Raids](#raids)); any other mode or party is refused.
   Every dungeon and raid of the server has a draft or better; see [docs/PLANS.md](docs/PLANS.md) for the table (level band, status, mmaps, the events, rituals, gossip and keys each needs).
 - `version` is 1 (a file of another version is refused), `map` the instance map id, `entrance` where the party stands after the
   portal. `notes` (plan and leg) are free text for people.
@@ -969,6 +971,42 @@ waypoint does the same and can be sent again from wherever a fight leaves the le
 that only the server's own pathing gives (a tank with no firing position), so a pass is no promise that a run finishes. `TestShippedPlansPassPlanCheck` runs it on every shipped plan whose map
 has navmesh files here (`$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle<map>` or `~/tortoise-wow-server/data/mmaps`); the plans that fail today are listed in `planCheckKnownFailing` (issue #187; most are drafts, which only warn);
 a listed plan that passes fails the test until it is taken off. The gate itself is tested with a stub navmesh, so it runs in CI without map files.
+
+### Patrol recorder
+
+`turtle-agent patrol-record <slot-dir> --map M --area x,y,r [--z Z] --minutes N [--sample-ms 1000] [--out FILE] [--spawns DIR] [--mmaps DIR] [--entries e1,e2]`
+records the patrol loops around a point. It uses an **already logged-in** slot (`slot setup`): it never leases, sets up, logs in or tears down.
+The account needs GM rights and the character must not be in a group (the recording lands in the GM's own instance, never in a bound raid's);
+a grouped agent is refused with exit 15.
+
+The stance is the whole of what it sends: `.gm on`, `.gm visible off`, one `.go xyz x y z M` to the area, and `.gm visible on` when the
+recording ends (also after a safety stop). It never attacks, casts, targets or moves the character; a test pins the method set.
+
+Every `--sample-ms` (500-5000) for `--minutes` (1-60) it reads `status`, the agent's own row (`unit`) and `units {within: r+60}` (creatures
+only, alive, and with `--entries` only those entries). A creature is recorded once it has been seen within `r` (2D) of the centre; it is
+sampled from then on while it is in range. Recording stops at once — exit 22, the file still written with `"stopped": "<reason>"` — on
+combat, death, a unit targeting the agent (`targeted by <name>`), a map change or a lost world.
+
+`--z` picks the floor. Without it, `--mmaps` must show exactly one navmesh floor at (x, y); several floors are a usage error naming them
+(multi-floor raids need `--z`). `--spawns DIR` (a world export with `creatures.tsv`) names each patrol after the nearest spawn of one of its
+entries within 40 yd of its path (`id` and `spawn_guids`); an unmatched patrol keeps the lead member's hex guid. `--out` defaults to
+`./patrols-<map>-<YYYYmmdd-HHMMSS>.json`, and an existing file is refused.
+
+The file is `tb-patrols` v1 (`internal/patrols`): per patrol the measured path, `period_s`, `period_estimate`, `cycles_seen`, `waits_ms`,
+`phase_epoch_ms` and `complete`, plus `static` units and `wanderers`. `trash-check --patrols FILE` uses a recorded patrol instead of the DB
+estimate, and raid-walk's revive quiet check (`--patrols`) keeps the revive point clear of patrol paths. A complete recording prints one line
+per patrol (`52050 Onyxian Warder: period 33.4 s (3 cycles), 7 points, matches spawn 52050`) and exits 0. Exit 15 is a refused slot, a
+grouped agent or an agent that is not in the world; 16 is an RPC error, 2 a usage error and 22 a safety stop.
+
+### Plan probe
+
+`turtle-agent plan-probe --mmaps DIR onyxias_lair` measures the TortoiseBots **run leader's rows** of one plan (what `.bot run` walks), not the agent's driver route: every hop between two consecutive positioned rows (`from` and `to` are the run leader's step numbers, 1-based, as `TBM:RUN` lists them; a row with `0 0 0` is no end). The input is exactly one of a plan name (`<dir>/<plan>.json`), a `.json` path, or `--sql FILE` — a deployed world migration. **Use `--sql`**: it is the exact rows the server runs, hand edits and cut rows included (the lenient reader skips the migration's other tables, such as the `ai_dungeon_boss` block, and names each in the report's notes); `--plan NAME` picks the plan when the file holds several. A JSON input rebuilds the rows with `planexport.Build` and cuts long hops along the navmesh exactly as `plan-export --mmaps` does, and the report says `rows rebuilt from the plan JSON (cut like plan-export --mmaps)`.
+
+Per segment the report (`tb-plan-probe` v1, `probe-<plan>.json`/`.txt` with `--out DIR`, else text or `--json` on stdout) holds the straight-line distance, the server's own query (type, `CheckMove` verdict, length, distance of its end from the row, each end's distance to its walk poly), the offline planner's status and length (a second opinion; a disagreement is noted), the ratio of server length to the straight line, the floors over the end's (x, y) with the height gap to the nearest (`floor_dz`) and the distance to the nearest walkable point (`snap`), the water and lava/slime yards, the largest climb and drop, a steep flag, the floor index each end falls on (`mapview.SplitHeights` over the plan's bounding box), a `hop` flag for a straight line over 60 yd, and the verdict with its reasons.
+
+The verdict is **bad** for: the server answers `NOPATH` (or the run leader's verdict is `unreachable`/`off-mesh`); or the end row lies more than 5 yd from any floor over it (`no floor within 5 yd (row z …, floor …)`) — a pull or boss row is exempt from the floor rule, because the party walks to within pull range and not onto the pack, and an `off-mesh` end within the row's radius + 5 yd is the pull working (radius 0 means the module's 15 yd pull / 30 yd boss). **Warnings**: ratio over 1.6; any water or lava; a steep step or a drop of 6 yd or more (14 yd or more is an approximate 1.12 fall); more than 2 yd from the nearest walkable point; the two ends on different floors; two floors or more over the row's (x, y) (`multi-floor x,y: the row's z picks floor z=…`); the offline and server queries disagreeing on whether the hop completes; a hop over 60 yd. A plan note says `multi-floor map: 2D overlays mislead; z decides` when the map has floor cuts, and the notes list the worst ten segments.
+
+The exit status is 20 when a segment is bad, 0 otherwise, 2 for a usage error, and 1 when the navmesh cannot answer (a build without cgo, no files for the map). Distance units are yards, 3D unless a measurement says otherwise; floats are rounded to two decimals. The probe reads plan/migration files and the mmaps folder and nothing else.
 
 ### Plan diff
 
@@ -1987,6 +2025,26 @@ needs `cleared_through` or `force` for legs past the first patrols, since every 
 from `velratha_b`). The offline check knows only plan packs, not patrols: a point the check passes can still fail the live
 quiet check when a patrol walks by (then clear the patrol or stage with `force`). Call with a client timeout of 120 s.
 
+## Raids
+
+`dungeon_run {"name": "lower_karazhan_halls", "mode": "observe", "prepare": {"party": "hire"}, "from_leg": 0}` leads a raid in observe mode
+(the server's run leader drives the bound raid; the agent hires, gears, binds, starts and watches). A raid plan (`"kind": "raid"`,
+`"raid": {"size": 10, "tanks": 2, "healers": 3, "dps": 5}`) is refused in any other mode or without `prepare.party "hire"`.
+`prepare.hire` carries `tier` (the `.bot hire raid` tier, default the preset's tier, else 2) and `gear_preset` (default the plan
+name's preset: `lower_karazhan_halls`->`lkh`, `zul_gurub`->`zg`, `ruins_of_ahnqiraj`->`aq20`, `timbermaw_hold`->`timbermaw`,
+`onyxias_lair`->`onyxia`, `molten_core`->`mc`, `blackwing_lair`->`bwl`, `emerald_sanctum`->`es`, `temple_of_ahnqiraj`->`aq40`,
+`naxxramas`->`naxx`, `upper_karazhan_halls`->`kara40`).
+
+The raid hire flow, in order: the commander must be 60; the old binding is unbound and every current hire dismissed on
+`rehire` (else kept only when the count by role equals the plan's split exactly); `.bot hire raid <tanks>t <healers>h <dps>d
+t<tier>` (then wait for `size` online bots, 120 s + 3 s per bot); the lead bot is the first tank-read member of a tank class
+(warrior, paladin, druid; at most 6 talent reads); `.bot gear raid <agent> preset <p>` (90 s; `none` fails, `partial` warns);
+`.bot commander bind <Lead> raid` and then the commander-outside check; one ready row per member (name, class, role, level,
+item level). `.bot maintenance` is never sent; the observe run then starts `.bot run start <plan>` as for a party.
+
+A raid run's card shows the ready block as subgroup-less rows (name, class, role, level, item level), the plan's `raid`
+size, and `Raid view: <TB dashboard URL>/#commanders` when the settings carry `tb_dashboard_url` (absent: no link).
+
 ### Following the lead bot as a player
 
 A real player in a bot-led TortoiseBots run: the run leader holds pulls beyond 60 yd and a regroup waits 60 s for every
@@ -2593,6 +2651,7 @@ with it (a new hire has no saved instance and is online). `hire` is optional and
   (no class in its view) does not match.
 - **`no_fix`:** report what is wrong and fail, instead of `.bot autogear` and `.bot maintenance`.
 - **`wait_s`:** the longest wait for a hire to show in the group (default 30, at most 120).
+- **`tier`, `gear_preset`:** raids only. The `.bot hire raid` tier word (`t<tier>`, 1-7; 0 takes the gear preset's tier, else 2) and the `.bot gear raid` preset name (default the plan name's preset). The 5-man flow ignores both.
 
 **What the step does,** in order, all with the commander's own `.bot` commands (no GM line):
 

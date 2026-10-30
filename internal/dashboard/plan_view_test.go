@@ -108,7 +108,7 @@ func TestGeometryOfAPlanWithoutMarksHasNone(t *testing.T) {
 func TestDiscoverAgentsReadsOnlyRPCAndDungeonsDir(t *testing.T) {
 	dir := t.TempDir()
 	home, _ := os.UserHomeDir()
-	must(t, os.WriteFile(filepath.Join(dir, "settings-1.json"), []byte(`{"rpc":"127.0.0.1:8765","dungeons_dir":"~/ta-x/dungeons","accounts":{"BOB":"hunter2"},"mmaps_dir":"/m"}`), 0o600))
+	must(t, os.WriteFile(filepath.Join(dir, "settings-1.json"), []byte(`{"rpc":"127.0.0.1:8765","dungeons_dir":"~/ta-x/dungeons","tb_dashboard_url":"http://tb:8095","accounts":{"BOB":"hunter2"},"mmaps_dir":"/m"}`), 0o600))
 	must(t, os.WriteFile(filepath.Join(dir, "settings-2.json"), []byte(`{"rpc":"127.0.0.1:8766"}`), 0o600))
 	as, err := DiscoverAgents(dir, "auto")
 	if err != nil || len(as) != 2 {
@@ -116,6 +116,9 @@ func TestDiscoverAgentsReadsOnlyRPCAndDungeonsDir(t *testing.T) {
 	}
 	if as[0].DungeonsDir != filepath.Join(home, "ta-x", "dungeons") || as[1].DungeonsDir != "" {
 		t.Errorf("dungeons_dir: %q and %q", as[0].DungeonsDir, as[1].DungeonsDir)
+	}
+	if as[0].TBDashboardURL != "http://tb:8095" || as[1].TBDashboardURL != "" {
+		t.Errorf("tb_dashboard_url: %q and %q", as[0].TBDashboardURL, as[1].TBDashboardURL)
 	}
 	if s := fmt.Sprintf("%+v", as); strings.Contains(s, "hunter2") || strings.Contains(s, "/m") {
 		t.Errorf("another field of the settings reached the agent record: %s", s)

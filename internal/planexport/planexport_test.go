@@ -1175,6 +1175,21 @@ func TestUnexpressedAttributesAreWarned(t *testing.T) {
 	}
 }
 
+// A raid plan's raid block exports as the hire recipe: the run leader leads the bound raid.
+func TestRaidBlockIsTheHireRecipe(t *testing.T) {
+	const js = `{"version":1,"name":"r","kind":"raid","status":"live-checked","map":532,"entrance":{"x":0,"y":0,"z":0},
+ "raid":{"size":10,"tanks":2,"healers":3,"dps":5},
+ "legs":[{"name":"a","to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":0,"y":0,"z":0}]}]}]}`
+	res, err := Build(parsePlan(t, js), Options{Source: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := strings.Join(res.Warnings, "\n")
+	if !strings.Contains(w, "raid (plan): not in the rows: the size and role split are the hire recipe of dungeon_run (prepare.hire); the run leader leads the bound raid") {
+		t.Fatalf("warnings: %v", res.Warnings)
+	}
+}
+
 // TestRouteLeavesTheExactHopAlone: the avoid-box router puts no via point before a move_hop_exact (it is a straight line, like a
 // move_direct): the exact foot stays right before its hop.
 func TestRouteLeavesTheExactHopAlone(t *testing.T) {
