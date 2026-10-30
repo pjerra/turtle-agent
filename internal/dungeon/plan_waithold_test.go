@@ -77,3 +77,18 @@ func TestHoldValueIsRefusedWhereItCannotWork(t *testing.T) {
 		}
 	}
 }
+
+// A stand_pull pull group is pulled from its stand: the run leader holds there and only needs to see the row's point (60 yd),
+// so a pack 55 yd from the stand is no run leader hop; a plain group as far is one, and a stand_pull one past 60 yd too.
+func TestRunLeaderReachStandPullSeesFromTheStand(t *testing.T) {
+	plan := func(stand, x string) *Plan {
+		return mustPlan(t, `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[{"to":{"x":0,"y":0,"z":0},
+		 "pull_groups":[{"entries":[7],"positions":[{"x":`+x+`,"y":0,"z":0}],`+stand+`"approach":[{"x":0,"y":0,"z":0}]}]}]}`)
+	}
+	if w := plan(`"stand_pull":true,`, "55").RunLeaderReach(0); len(w) != 0 {
+		t.Fatalf("stand_pull 55 yd: %v", w)
+	}
+	if n := len(plan(``, "55").RunLeaderReach(0)); n != 1 {
+		t.Fatalf("plain 55 yd: %d warnings (want 1)", n)
+	}
+}

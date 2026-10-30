@@ -342,7 +342,9 @@ type PullGroup struct {
 	// StandPull says the run leader's party holds at the group's last approach point (its stand, the move row right before the
 	// pull row) and pulls the pack from there once one of its units is in the tank's shot and no other patrol stands within
 	// ClearYd of the lead bot (TortoiseBots kPlanFlagStandPull on a pull, specs/rl-patrol-timed-pull.md): for a formation
-	// that walks a loop near other formations. Needs an approach point; never with a hold.
+	// that walks a loop near other formations. The pack is then the formations with a unit whose DB spawn lies within Radius
+	// of the group's centre (the run leader drops every other formation's units), and Radius may go up to 100. Needs an
+	// approach point (within 60 yd of the centre, so the run leader sees the row's point from it); never with a hold.
 	StandPull bool `json:"stand_pull,omitempty"`
 	// ClearYd is how far from the lead bot another patrol must be for a StandPull group's pull to go out (yards, 1-60, the
 	// pull row's param; 0: the run leader's 40). Only with StandPull.
@@ -383,6 +385,8 @@ const (
 	// MaxStandPullClearYd is the most a stand_pull group's clear_yd may say (TortoiseBots kStandPullClearMaxYd: the glue lists
 	// other patrols that far from the lead bot).
 	MaxStandPullClearYd = 60
+	// MaxStandPullRadius is the most a stand_pull group's radius may say (the run leader's row radius cap, kPlanMaxRadius).
+	MaxStandPullRadius = 100
 	// MaxApproach is the most approach points a pull group or boss has.
 	MaxApproach = 4
 	// RunLeaderSeeYd is how far the TortoiseBots run leader sees a pack, a boss or a move point from its lead bot (DungeonRunPolicy.h kSeeYd);
@@ -1323,7 +1327,13 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		if len(g.Equiv) > MaxEquivLen || strings.TrimSpace(g.Equiv) != g.Equiv {
 			c.fail(gp+".equiv", "%q: a label of at most %d characters, with no space around it", g.Equiv, MaxEquivLen)
 		}
-		if g.Radius < 0 || g.Radius > 60 {
+		if maxR := float32(60); g.StandPull {
+			// A stand_pull group's radius marks its formations by their DB spawns (TortoiseBots ScopeStandPullFacts), and the
+			// run leader must see the row's point from the stand: a spawn far from the stand needs a wider one.
+			if g.Radius < 0 || g.Radius > MaxStandPullRadius {
+				c.fail(gp+".radius", "%g: use 0 (the default) or 1-%d yards on a stand_pull group", g.Radius, MaxStandPullRadius)
+			}
+		} else if g.Radius < 0 || g.Radius > maxR {
 			c.fail(gp+".radius", "%g: use 0 (the default) or 1-60 yards", g.Radius)
 		}
 		c.entries(gp+".entries", g.Entries, true)
@@ -1362,6 +1372,17 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		if g.StandPull && g.Ambush {
 			c.fail(gp+".stand_pull", "a stand_pull group cannot be an ambush (a stealthed pack is walked through, not shot)")
+		}
+		if g.StandPull && len(pg.Approach) > 0 && len(pg.Positions) > 0 {
+			var cx, cy, cz float64
+			for _, q := range pg.Positions {
+				cx, cy, cz = cx+float64(q.X), cy+float64(q.Y), cz+float64(q.Z)
+			}
+			n := float64(len(pg.Positions))
+			st := pg.Approach[len(pg.Approach)-1]
+			if d := math.Sqrt(sq64(float64(st.X)-cx/n) + sq64(float64(st.Y)-cy/n) + sq64(float64(st.Z)-cz/n)); d > RunLeaderSeeYd {
+				c.fail(gp+".stand_pull", "the stand (the last approach point) is %.1f yd from the pull row's point (the positions' mean): the run leader sees it from %g yd at most", d, float64(RunLeaderSeeYd))
+			}
 		}
 		if g.ClearYd != 0 && !g.StandPull {
 			c.fail(gp+".clear_yd", "only with stand_pull")
@@ -1924,3 +1945,5 @@ func (c *checker) batches(path string, steps []Step) {
 		i = j
 	}
 }
+
+func sq64(v float64) float64 { return v * v }
