@@ -10,7 +10,6 @@ import (
 	"math"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -320,8 +319,9 @@ func (w *walk) phaseHire(ctx context.Context) error {
 	default:
 		return stopf(exitRaidWalkFailed, "hire: asked for %d bots, the party has %d", requested, hired)
 	}
-	if err := w.waitHiresSettled(ctx); err != nil {
-		return err
+	w.logLine(w.env.now(), fmt.Sprintf("waiting %s for the last hires' join summons", durWords(hireSettleWait)))
+	if err := w.env.sleep(ctx, hireSettleWait); err != nil {
+		return stopf(exitRaidWalkFailed, "interrupted")
 	}
 	// The refit at the walk's tier (amendment G1): the hire wears the raid's minimum kit, and a comparison run its
 	// override. A failed refit is a failed walk: the tier is what the run is judged against.
@@ -343,59 +343,11 @@ func (w *walk) phaseHire(ctx context.Context) error {
 	return nil
 }
 
-// hireSettleTimeout bounds the wait for the last hires' join summons; hireSettleGrace follows it. A big hire answers
-// while its bots are still being summoned (about one a second), and a hire whose join lands after the bind is
-// removed from the group by the server (walk 12, ZG: every hire that joined after the bind was dismissed).
-const (
-	hireSettleTimeout = 90 * time.Second
-	hireSettleGrace   = 3 * time.Second
-)
-
-// waitHiresSettled waits until every hire is online in the main tank's zone: the zone a hire shows in the party
-// changes from where it was made to the commander's once its join summon has completed. The MT is hired alone,
-// first, so it has settled by the time the rest batch answers.
-func (w *walk) waitHiresSettled(ctx context.Context) error {
-	deadline := w.env.now().Add(hireSettleTimeout)
-	for {
-		p, err := w.party(ctx)
-		if err != nil {
-			return stopf(exitRaidWalkFailed, "party: %v", err)
-		}
-		pending := unsettledHires(p.Members, w.mt, w.hires)
-		if len(pending) == 0 {
-			return w.env.sleep(ctx, hireSettleGrace)
-		}
-		if !w.env.now().Before(deadline) {
-			return stopf(exitRaidWalkFailed, "hires not settled in %s (still on their join summon): %s",
-				durWords(hireSettleTimeout), strings.Join(pending, ", "))
-		}
-		if err := w.env.sleep(ctx, time.Second); err != nil {
-			return stopf(exitRaidWalkFailed, "interrupted")
-		}
-	}
-}
-
-// unsettledHires are the hires that are offline, missing, or not in the main tank's zone; all of them while the
-// MT's zone is unknown (0).
-func unsettledHires(members []session.PartyMember, mt string, hires map[string]bool) []string {
-	zone := uint16(0)
-	byName := make(map[string]session.PartyMember, len(members))
-	for _, m := range members {
-		byName[m.Name] = m
-		if m.Name == mt && m.Online {
-			zone = m.Zone
-		}
-	}
-	var out []string
-	for name := range hires {
-		m, ok := byName[name]
-		if zone == 0 || !ok || !m.Online || m.Zone != zone {
-			out = append(out, name)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
+// hireSettleWait follows the last hire batch before the refit and the bind. A big hire answers while its bots are
+// still on their join summon (about one a second), and a hire whose join lands after the bind is removed from the
+// group by the server. Walk 12 (ZG, 17-bot batches): the last join came 4-8 s after the answer. The party list is
+// no help: it names a hire before its join, and its zone there stays stale after it.
+const hireSettleWait = 20 * time.Second
 
 // parseHireLine reads TBM:HIRE_RAID|<ok|partial|refused>|<hired>|...; ok is false unless the first field is ok
 // and the hired count is above 0, and hired is always the count it read.
