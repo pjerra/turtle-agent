@@ -96,7 +96,9 @@ turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FI
 turtle-agent tune-diff <trace.jsonl>
 turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
+turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
+turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent scenario check [--var NAME=VALUE]... <file>
 turtle-agent scenario run [--out DIR] [--force] [--quiet] [--var NAME=VALUE]... [--session NAME=ADDR[@TOKENFILE]]... <file>
@@ -107,6 +109,7 @@ turtle-agent teardown [--keep-lease] [--release-anyway] [--gm off|on|keep] [--dr
 turtle-agent rpc [--timeout DUR] [--raw] <dir> <method> [<params-json>|-]
 turtle-agent route-oracle --plans DIR --mmaps DIR --out DIR [--mode walk|bosses] [--objectives plan|bosses] [--plan NAME]...
 turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--minimap-dir DIR] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]
+turtle-agent dashboard-replay <recording-dir|file.jsonl> [--to host:port] [--speed N] [--max-gap D] [--loop] [--dry-run] [--i-know] | convert <api-dump-dir> [--out <dir>] | record --out <dir> [--listen host:port] [--duration D] [--max-mb N]
 turtle-agent minimap-extract --client DIR --out DIR [--maps 70,209|all-instances] [--mmaps DIR[,DIR]] [--prefer worldmap,minimap,navmesh] [--list]
 turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...
 turtle-agent pulltest [--json] <result.json> | --compare <a.json> <b.json>
@@ -132,6 +135,7 @@ turtle-agent version
 | 14 | `teardown`: a game-side or CLI step failed |
 | 15 | `lease` or `slot setup` refused (slot held, reserved, or not leased by the holder); `rpc` cannot reach the agent, its reply fails the 2.0 envelope check, or its token file is not an agent token |
 | 16 | `rpc`: the agent answered with a JSON-RPC error |
+| 17 | `dashboard-replay` refused its target: not a loopback address (`--i-know` vouches for a test dashboard), or a bad port |
 
 `--capture` records every decrypted packet to a file (opened exclusively, mode 0600). The auth session body and
 Warden packets are never written, and any packet holding the account name, password or session key is redacted.
@@ -966,6 +970,33 @@ that only the server's own pathing gives (a tank with no firing position), so a 
 has navmesh files here (`$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle<map>` or `~/tortoise-wow-server/data/mmaps`); the plans that fail today are listed in `planCheckKnownFailing` (issue #187; most are drafts, which only warn);
 a listed plan that passes fails the test until it is taken off. The gate itself is tested with a stub navmesh, so it runs in CI without map files.
 
+### Plan diff
+
+`turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]` compares two exports of one
+plan: the rows the TortoiseBots run leader reads (`ai_dungeon_plan`, `ai_dungeon_leg`, `ai_dungeon_step`), as a migration or as rows built from the plan file. Each input is a
+`.sql` migration read with `planexport.ParseMigration` (so a hand edit around the rows, an `ai_dungeon_boss` block, is skipped) or a `.json` plan built with `planexport.Build` (the
+summary says `rows built from the plan JSON (no navmesh cut)`); mixed inputs are fine. `--plan` picks the plan of a migration that holds several (one plan: taken; a name that is not in
+the file is an error). Two maps are a usage error; two plan names are a note. It is offline: it reads the two inputs and, for the picture, the minimaps folder.
+
+**What is compared.** Legs are matched by `ai_dungeon_leg.name` (a leg inserted before another keeps the later legs together), then the rest by leg number; an unmatched leg is
+`leg added` or `leg removed`, and its steps are listed with it. Inside a matched leg the steps are matched by a key of the fields the run leader acts on: kind, entry, entries,
+radius, item, param, flags, timeout_s and the position rounded to 0.1 yd (so the export's float32 noise does not count). The key-equal steps are paired by a longest common
+subsequence; a pair whose comment differs is a `comment` change (the only change `--fail-on-change` ignores). Between two key-equal pairs the unmatched old and new rows are paired in
+order while their kinds match: a 3D distance over 0.05 yd is `moved` (with the distance and both points) and lists any other field that differs; a smaller one is `changed` with its
+field list; the rest are `removed` and `added`. Every step carries its global number on both sides (its index in (leg, seq) order + 1), so an insertion shows as one `added` and
+`renumbered` counts the key-equal steps whose number moved (the first five are named in the notes). The plan row's `cc_priority`, `cc_always`, `kill_first`, `source` and `comment`
+differences are listed under `plan:` in the summary line.
+
+**Output.** The text is one line per change, e.g. `step 26 (leg 0 seq 25) move: moved 7.92 yd (-149.46 -210.48 -74.62 -> -149.46 -210.48 -66.70); comment 'path' -> 'boss approach'`, then
+`onyxias_lair: 29 -> 29 steps: 2 moved, 0 changed, 0 added, 0 removed, 0 comment; 0 renumbered; plan: source`, then the notes. `--json` prints the `tb-plan-diff` v1 file instead
+(the diff, floats at two decimals). `--out DIR` writes `diff-<plan>.txt`, `diff-<plan>.json` and `diff-<plan>.svg` (0700 dir, 0600 files); `--svg FILE` writes the SVG there as well; an existing output file is refused (exit 2). The SVG draws the old route dashed grey and the new route solid over the picture, with a green circle for an added step,
+a red cross for a removed one, an orange arrow old -> new for a moved one, a purple ring for a changed one and a label with the step number and z; hovering a marker shows the
+change line. `--minimaps DIR` (default `~/turtle-agent-minimaps`) and `--picture` choose the picture (`worldmap` = `<map>.json`/`<map>.png`, `minimap` = `<map>.minimap.*`,
+`navmesh` = `<map>.navmesh.*`); a missing picture is a blank canvas with a note, and when the folder has `<map>.worldmap-2f.json` the SVG says the overlay is 2D and z decides on a
+multi-floor map.
+
+Exit: 0 (also when only comments differ), 25 with `--fail-on-change` and any change other than a comment, 2 a usage error or an existing output file, 1 an unreadable input.
+
 ### Route oracle
 
 `turtle-agent route-oracle --plans dungeons --mmaps DIR --out DIR` compares a plan's **stored route** with what the navmesh **plans live** for the same dungeon, and writes `<out>/<plan>.txt` (a human table) and `<out>/<plan>.json` (the machine report, Stage 1's fixture). It reads plan files and mmaps and nothing else; a plan's status, live or draft, changes nothing (the report is a measurement, not a gate). Without `--plan` it reports the five mapped plans: `wailing_caverns ragefire_chasm uldaman zulfarrak deadmines`.
@@ -1587,6 +1618,69 @@ Not verified live: the traces were built and tested against the fake game, the f
 group run's party list stays fresh in a long fight (`stale_party` is there to find out), the feed's facing values, and what the frame
 rate costs on a long run.
 
+## Dashboard replay
+
+`turtle-agent dashboard-replay` plays a recorded TortoiseBots run into the **observability dashboard daemon**'s real UDP
+port, so its Commanders tab and fight debugger can be exercised on a laptop with no server, no bots and no game client:
+every view they show comes from the datagrams the module sends, and a recording is those datagrams. It logs in to
+nothing and reads no settings, token or key file.
+
+```
+turtle-agent dashboard-replay <recording-dir|file.jsonl> [--to host:port] [--speed N] [--max-gap D] [--loop] [--dry-run] [--i-know]
+turtle-agent dashboard-replay convert <api-dump-dir> [--out <dir>]
+turtle-agent dashboard-replay record --out <dir> [--listen host:port] [--duration D] [--max-mb N]
+```
+
+**Play.** A folder holding `replay.jsonl` (or the file itself) is sent one datagram per line, at the recorded pace
+divided by `--speed` (default 1), the pause between two datagrams capped at `--max-gap` (default 10 s, under the
+daemon's 12 s commanders staleness). A progress line appears every 10 s of played time; `--loop` starts over with a new
+session after the last datagram (Ctrl-C ends it), without it the command exits 0 at the end. `--dry-run` checks the
+target, prints `N datagrams over T s at speed S: COMMANDERS a, ...` and sends nothing.
+
+**Convert.** A folder holding only API dumps (`commanders-*.json` from `GET /api/v1/commanders`, `combat-fight-*.json`
+from `GET /api/v1/combat/fight/<key>`) is converted in memory first: a COMMANDERS snapshot and a synthetic HEARTBEAT
+every 2 s (the module's cadence), and each fight once when the module would have sent it. That is approximate, because
+the API output has already been through the daemon's caps and its nil-to-empty fixes; stderr says
+`converted from API dumps: N datagrams`. `convert` writes the same timeline to `<dir>/replay.jsonl` (mode 0600) so a
+dump folder can be replayed as a recording later.
+
+**Record.** `-forward-udp 127.0.0.1:9296` on the daemon copies every datagram it receives, byte for byte, before
+processing; `record` listens there (default `127.0.0.1:9296`), appends the datagram lines to `replay.jsonl.part`, and on
+Ctrl-C (or `--duration`, or `--max-mb`) writes `replay.jsonl` = header + those lines and removes the part file. That
+file is the better source: it holds what the module really sent, not the daemon's answer.
+
+```sh
+# on the daemon host, once per run you want on record
+./tbdash -forward-udp 127.0.0.1:9296
+turtle-agent dashboard-replay record --out ~/TortoiseBots-audit/tests/<run>/
+```
+
+**Safety rules.** The target is `127.0.0.1:9195` unless `--to` says otherwise, and anything whose host does not resolve
+only to a loopback address is refused with exit code 17 and
+`refusing to replay to <host:port>: not a loopback address; pass --i-know if this daemon is a test dashboard`.
+`--i-know` allows it and prints `WARNING: replaying to non-loopback <addr>`. Every datagram is rewritten on the way out:
+`session` = the replay's (a newer one per loop, so a second pass is not deduped away), `ts` = now, `seq` = the recorded
+seq minus the file's smallest plus 1 (a shared recorded seq stays shared, so a BOT_BATCH snapshot cycle still
+assembles), and `"replay": true` is added. The daemon's receive-side guard drops a `replay: true` datagram unless it
+was started with `-accept-replay` (env `TBDASH_ACCEPT_REPLAY=1`), so once that guard is deployed (TortoiseBots task R4)
+a replay that reaches a production daemon by mistake changes nothing there; until then only the sender's refusal stands
+between a wrong `--to` and a live dashboard. Note that a replay session is **newer** than a running module's session, so a daemon that also receives
+a live module shows the replay until the module restarts: another reason to replay only into a test daemon.
+
+**A test daemon.** From the TortoiseBots `tools/observability`:
+
+```sh
+go run ./cmd/server -udp-port 9195 -http-port 8095 -accept-replay -dev-no-auth
+turtle-agent dashboard-replay ~/TortoiseBots-audit/tests/raid-ony-walk2 --speed 10
+```
+
+Then open `http://127.0.0.1:8095` and the Commanders tab (`-accept-replay` is the daemon guard of the paragraph
+above). Checked on 2026-10-28 against
+`origin/feat/fight-debugger` @ `3c909e75` with no database: the daemon does start without one (its MySQL connections
+open lazily and the background DB sweeps only log their failures), but its page and API sit behind the GM login, which
+reads the realmd database, so a machine without a database needs `-dev-no-auth`; with a database and a GM account,
+drop it. If a daemon build does refuse to start without a database, use the docker compose the dashboard README names.
+
 ### fight-score
 
 `turtle-agent fight-score [--json] [--mt NAME] [--ot A,B] [--set spell_oracle=S] <combat-fight.json>...` reads finished fights
@@ -1930,6 +2024,257 @@ follows from there. It zones in after a lead last seen within 40 yd of the plan'
 when the lead is not in view for `lost_s`, the lead left the party, it is not in a group, 5 walks in a row did not
 arrive while over 60 yd, a fallback way stayed blocked 60 s, or after 10 deaths. It sends no chat and no GM line (no
 `.bot`, no `.appear`), and `dungeon_run` and `follow_start` refuse each other. Events `player_follow` (`data.phase`).
+
+## Raid walks
+
+`turtle-agent raid-walk <plan>` walks a raid plan with hired bots and the TortoiseBots run leader (`feat/run-until`): it
+leases a slot, sets it up, logs the slot agent in, puts the commander outside the entrance, hires the roster, binds the
+raid to its main tank, enters, starts the run with an `until` clause, watches it and tears everything down. It never
+takes slot 3 (owner rule) and it never walks without `until` (a server without feat/run-until is refused, exit 18).
+
+```
+turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
+    --sql ~/wt-plan-raid-ony/data/sql/world/20261029130000_world.sql --speed 3.0 --hold-minutes 5
+```
+
+- `<plan>` is the plan name the server knows (`a-z0-9_-`, at most 32). The plan JSON is `<--dir>/<plan>.json` (default
+  `dungeons`) and is copied into the slot by `slot setup --dungeons-from`. `--sql` is a deployed migration: its step
+  numbers and the first point (the revive point) are what the walk uses; without it they come from the plan JSON, and
+  the summary says so.
+- `--until` is `boss` (default: a trash walk never wakes a boss), `none` (a full clear), `step N` or `leg L`; the word
+  goes to `run start` and the server's status label must show `until <clause> (step N)`. `--from leg L|step N` is only
+  for a raid already standing at that point (for example after a hold): raid-walk does not stage.
+- `--speed 1.0` sends nothing; `1.1` to `3.0` sends `speed=X` (a GM test run, marked `test speed` in the summary).
+- The hire gear tier comes from the committed table `raid -> minimum hire tier` in `internal/raidwalk/tiers.go`
+  (Sagiroth's rule: hire and refit at the kit a player holds when the raid is next, from the mercenary unlock quests).
+  `onyxias_lair` is **2**: the tier-3 quest is her own kill's reward, so a player fighting her holds the Zul'Gurub kit.
+  A raid with no sourced tier (the other eleven, a 0 row and a `TODO` each in that file) refuses to run without
+  `--tier N`. `--tier-override N` replaces a known tier and marks the run **comparison, not a tier proof** in the
+  notes and in `summary.json` (`roster.tier_comparison`). The walk refits after the hire with
+  `.bot gear raid <commander> tier <N>`.
+- `--enter auto|near|tele`: `auto` is `cmd enter near` and falls back to `.tele name <hire> <entrance_tele>` once when
+  the server answers `requirement`; `tele` needs the plan's `entrance_tele`.
+- `--max-run-minutes` (90) is the ceiling from `run start`; `--hold-minutes` keeps the raid bound afterwards;
+  `--paused-wait` (10m) stops a pause that is not a regroup; `--auto-resume K` (0-3) resumes a "did not hold" regroup
+  pause 15 s after it starts, at most K times per step and 6 per run; `--reset-wait` (5m) bounds the wait for a wipe's
+  reset. `--patrols FILE` (a tb-patrols file) feeds the revive quiet check. `--dry-run` validates everything and prints
+  every line the walk would send, with `<hire>` placeholders, without leasing or writing anything.
+- The lease lasts `max-run-minutes + hold-minutes + 30` and is renewed every 30 minutes; a refused renewal stops the
+  run, tears down and exits 18 (`lease lost`). SIGINT/SIGTERM stops the run, tears down and exits 18 (`interrupted`);
+  during the hold it exits 0.
+
+The roster (`--hires FILE`, format `tb-raid-roster` v1) hires batches in order and learns the names of each batch by
+diffing `party` before and after the hire:
+
+```json
+{"format":"tb-raid-roster","version":1,"level":60,"tier":2,
+ "batches":[{"role":"mt","hire":"1 warrior:tank"},
+            {"role":"ot","hire":"1 druid:tank 1 paladin:tank"},
+            {"role":"rest","hire":"10h 27d"}]}
+```
+
+`hire` is `<n>t`, `<n>h`, `<n>d` or `<n> <class>[:<role>]`; a preset (`onyxia`, `mc`, ...) is refused because it fills
+the raid in one go and leaves no way to know the MT. Exactly one `mt` batch comes first and hires exactly one tank; at
+most one `ot` batch (tanks only); one or more `rest` batches; 1 to 40 bots and at most the plan's raid size (the
+commander stands outside the group, so every raid seat is a hire). `level` defaults to the plan's band maximum; `tier`
+(1-3) is optional — absent, the walk takes the committed table's row, and a tier that differs from that row needs
+`--tier-override`. Without `--hires` the roster comes from the plan's `raid {size, tanks, healers, dps}`:
+`1 warrior:tank`, `<tanks-1>t`, `<healers>h <size-tanks-healers>d` (Onyxia's plan gives `1 warrior:tank`, `3t`,
+`10h 26d` = 40) and the table's tier (2 for Onyxia; 0, "no tier sourced yet", for the other eleven raids until
+their unlock quests are written into `tiers.go`).
+
+The server's hire cap is 39 bots (TortoiseBots `HireMaxBotsPerPlayer`, onyxia-kill-plan C6), so a 40-man roster asks
+for all 40 and gets 39: the summary notes `hire cap 39` and the walk goes on. A shortfall below the cap is a failed
+walk (exit 18).
+
+The phases, in order: validate (no network), lease, `slot setup`, `login` (a detached process group, `status` until
+`in_world`, 90 s), GM `.go xyz` to the plan's portal and wait for its map, hire and gear, `commander bind <MT> raid`
+(plus `commander view on`) with the `TBM:RAID_LAYOUT` check (its first tank must be the roster's MT), enter and wait
+until every hire's newest frame is on the plan's map (one re-teleport or one `cmd summon` for stragglers), `run start`,
+watch, hold, `commander status` and `teardown --json`, summary.
+
+While watching, the walk reads the run's `TBM:RUN` lines (always through the raw event text, never the colour-stripped
+one), the `bot_view` frames every 2 s and the dashboard every 10/15 s. A wipe (every hire dead with fresh states) stops
+the run, waits for the instance to reset (5m at most: nothing with a party target, every hostile seen in the last
+minute at 100 % or gone, held 20 s), then revives: GM to step 1's point, a quiet check (no living hostile within 45 yd,
+no moving hostile within 80 yd, no patrol path within 45 yd, rechecked every 5 s for 120 s) and the plan's entrance
+once, `.summon` then `.revive` every hire. It never revives while a boss row has a target: a boss engagement stops the
+run at once and waits up to 15 minutes for a kill, a reset or a wipe. A wipe or a boss engagement ends the walk with
+exit 19.
+
+Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
+`.bot gear raid <commander> tier <N>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,
+`.bot run stop[ time limit reached (raid-walk <n>m)]`); everything else goes through the `commander` RPC. Nothing names
+a creature or changes the world for others.
+
+The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused if it exists; 0700, files 0600):
+
+| file | content |
+|---|---|
+| `run.log` | every `TBM:RUN` line (control bytes escaped) and the walk's own notes, `HH:MM:SS.mmm <text>` |
+| `commanders-<NNNN>-<reason>.json` | GET `/api/v1/commanders` (`reason`: walk, pause, wipe, boss, hold) |
+| `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key |
+| `frames.jsonl` | one `bot_view` frame per 10 s (positions, hp, dead, hostiles; every line carries the walk's `tier`) |
+| `slot-setup.txt`, `teardown.json` | what slot setup printed, and teardown's report |
+| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison` |
+
+Exit codes: 0 the run ended by its `until` (or the hold); 18 a phase failed or was refused (setup, login, hire, bind,
+enter, start, the server has no `until`, a stall, the ceiling, an interrupt, `lease lost`); 19 the walk ran and was
+torn down but a wipe or a boss engagement happened, or a hire was still listed as online; 23 a fault verdict failed or
+a cleanup left a bot frozen (at least 23, even over 18/19); 15 the lease was refused (incl. slot 3); 14 teardown
+failed; 2 usage.
+
+Dashboard capture is optional: `--dash-url` (or `TBDASH_URL`) plus `--dash-pass-file` (or `TBDASH_PASS_FILE`);
+`--dash-user`/`TBDASH_USER` default `TADASH`. The password is read only from the given file (it must be 0600 and not a
+symlink, `privfile.Read`), never printed and never written to the output; a failed login is a warning
+(`dashboard: login failed (HTTP 401)`) and the walk goes on. Without a URL and a password file the capture is off and
+the summary says so.
+
+### Fault injection
+
+`--inject SPEC` (repeatable, at most 4, each of the four kinds at most once) makes the walk inject a controlled fault
+and measure what the raid does about it. The grammar is `<kind>[@from=<N>][,<key>=<int>]...`:
+
+| kind | keys (range, default) | victim |
+|---|---|---|
+| `kill-mt` | none | the roster's main tank; refused at parse time when the roster has no `ot` batch |
+| `runaway` | `dist` (110-250 yd, 150), `hold` (30-180 s, 90) | the last `rest` hire alive and out of combat |
+| `add-pack` | `max` (30-80 yd, 60) | the extra pack; the puller is the nearest rest hire |
+| `lag` | `secs` (10-90 s, 30) | the last rest hire within 30 yd of the lead bot |
+
+`@from=N` holds a fault until step N. Anything else (an unknown kind or key, a key of another kind, an out-of-range
+value, a fifth spec, a repeated kind) is a usage error naming the spec; `--dry-run` prints the fault plan.
+
+```
+turtle-agent raid-walk --slot 2 --inject kill-mt --inject 'runaway,dist=150,hold=90' --inject add-pack onyxias_lair
+```
+
+At most one fault is active; the first not-yet-fired fault in command-line order that is eligible fires, and the next
+may fire only 60 s after the previous one ended and with no fight on. A fault never fires while paused, on a `boss`
+step, with a boss engaged, in the last two steps before the `until` stop, before the watch's prepare, or after the
+watch ended. Fight on means a hostile the frames show targeting a party GUID (seen in the last 4 s) or a hire in combat.
+
+- **`kill-mt`** fires on a `pull` step with a fight on for 6 s, 2+ hostiles on the party, the MT targeted, their mean
+  health 20-90 % and an OT alive. It selects the MT, kills it with `.die`, selects itself again, and measures the
+  attackers' retarget (`pickup_s`/`pickup_by`), non-tank switches, deaths after the kill and the fight's end. Pass:
+  a tank picks the attackers up within 10 s, no wipe, the fight over within 180 s; a wipe is `fail`.
+- **`runaway`** fires on a `move`/`move_direct` step with no fight for 10 s: it moves the commander to a plan point
+  120-200 yd behind the lead bot (row x/y/z, closest to `dist`), summons the victim there and freezes it. It measures
+  when the run leader's runaway summon (F4) names the victim and when the victim is back; pass: the F4 note and back
+  within 15 s of it. A summon by the straggler ladder first is `fail`.
+- **`add-pack`** fires on a `pull` step with a fight on for 3 s and an idle hostile 20-`max` yd from the lead: it
+  orders the nearest rest hire to `attack` that pack. Pass: the pack engages, no wipe, the fight over within 240 s and
+  the run not stopped by a pause.
+- **`lag`** fires on a `move`/`move_direct` step with no fight for 10 s: it freezes a hire for `secs`, then releases
+  it. Pass: it rejoins within 120 s and no pause stopped the walk.
+
+**The selection rule.** `.freeze`, `.unfreeze` and `.die` act on the unit the *server* has selected, and the `.freeze`
+/`.unfreeze` name is used only when the selection is the GM itself. A `target` RPC's `status.target` read-back is not
+proof (a selection sent right before a chat line is not in force yet: the core handles the two on different threads).
+So after every `target` the walk waits 2 s and reads `.gps` (the selected unit's coordinates) as an observation only:
+coordinates cannot tell the intended unit from a stale selection of a nearby neighbour, and they gate nothing. Every
+selection a line acts on then needs the identity read-back: `.pinfo` with no name uses the selected player, and its
+reply must name the intended unit exactly (the `LANG_PINFO_ACCOUNT` line: player link and `(guid: N)`) — the hire for
+`.die` and the victim's `.freeze`/`.unfreeze`, the commander for the self selection whose name the line then applies.
+Anything else — another name, another guid, no player, no reply — ends the fault `inconclusive` with
+`selection not proven` and the line is never sent; a wrong identity is not retried. Only the `target` and
+`status.target` read-backs keep their one retry, for a server that applies a selection late.
+
+`.gps` and `.pinfo` are the only extra GM lines the fault allow-list carries; every other line is `.gm visible off`
+(prepare), `.go xyz` (the plan's map, within 260 yd of the lead while a fault is active), `.summon <victim>`,
+`.freeze <victim>`, `.unfreeze <hire>` and `.die` (kill-mt).
+
+**Cleanup** runs on every exit path — the end of the watch, `stop`'s `.bot run stop`, an interrupt, an error and a panic
+— before the hold and before teardown: for every bot the injector froze and has not unfrozen it selects itself and
+sends `.unfreeze <hire>`, then selects itself once. It loops with a fresh context per attempt and 3 s between tries
+until no frozen bot is left or the 60 s recovery deadline expires; each attempt and each retry wait is bounded by the
+time left, so no attempt runs past the deadline. Exhaustion is not silent: `<out>/inject.json` and
+the summary carry a `blocking` incident (`cleanup_incomplete`) that names the bot(s) still frozen and the exact manual
+command (`.unfreeze <hire>`, with no other unit selected), and the walk exits **23**.
+
+`<out>/inject.json` (format `tb-raid-inject` v1, 0600) holds every fault's verdict, reason, fire step/leg, victim, its
+GM/order/select lines with times, the measured keys (`placed_yd`, `f4_at_s`, `pickup_s`, `max_gap_yd`, ...) and, when
+cleanup ran out of time, `incidents[]` (`severity` `blocking`, `kind` `cleanup_incomplete`, `bots`, `reason`,
+`manual`). `summary.json` gains `injections[]` (kind, verdict, reason, step, victim), `incidents[]` (the same blocking
+findings) and `deaths.injected` (kill-mt's MT, which is not a death of the run). A walk that would exit 0 with at least
+one fault in `fail` exits **23**; 18 and 19 keep their meaning and win over 23. A blocking cleanup incident raises any
+lower exit code to **23** as well, and that 23 outranks 18 and 19 too (a bot left frozen must never hide). A fault
+that never fired is `not-fired`; one that could not be caused or measured is
+`inconclusive`; neither changes the exit code.
+### Raid suite
+
+`turtle-agent raid-suite` walks a list of raid plans one after another, each with `raid-walk`, and judges each walk
+against the last good walk of the same plan in a history dir. It is the regression check for the raid plans.
+
+turtle-agent raid-suite --suite suite.json --history ~/TortoiseBots-audit/raid-walks --server m910q --gap 60s
+turtle-agent raid-suite --dir ~/ta-wt-raid-ony/dungeons --history ~/TortoiseBots-audit/raid-walks --dry-run
+turtle-agent raid-suite --dir ~/ta-wt-raid-ony/dungeons --history ~/TortoiseBots-audit/raid-walks --compare-only
+
+- **Inputs.** `--suite FILE` is a `tb-raid-suite` v1 file: `{"format":"tb-raid-suite","version":1,"raids":[{"plan":
+  "onyxias_lair","dir":"~/ta-wt-raid-ony/dungeons","sql":"~/wt-plan-raid-ony/data/sql/world/20261029130000_world.sql",
+  "hires":""}]}`, walked in file order (`dir` is required, `sql` and `hires` are optional). `--dir DIR` takes every raid plan
+  in the folder, sorted by plan name. `--only p1,p2` filters by plan name; an unknown name is a usage error. A plan listed
+  twice is a usage error (one history dir per plan).
+- **Tier.** The suite never takes `--tier`. A raid's tier comes from the committed table (`internal/raidwalk/tiers.go`) or
+  from its `hires` file. A raid with no sourced tier is **refused** with the reason and is not walked.
+- **Until.** Each raid is walked to its first leg's end (`raidwalk.FirstLegUntil`): a boss in leg 0 stops at the boss, else
+  the walk stops when leg 2 starts, else it runs to the end.
+- **History.** Each walk writes to `<history>/<plan>/<YYYYmmdd-HHMMSS>/` (its own `summary.json`). Walks put there by hand
+  count as history too.
+- **Rules.** A walk that did not exit 0 is `failed`. Otherwise it is compared with the newest good walk of its plan (exit 0,
+  ended by its `until` or `plan done`, no tier comparison, the same tier, until, speed and test speed, no injected fault):
+  - `regression` when run time is more than 20 % and more than 60 s above the baseline, deaths are above
+    `base + max(2, 25 % of base)`, pauses or stops are above the baseline, the end reason changed, or fights are more than
+    one above it. `faster` and `fewer fights` are info.
+  - `ok` when no rule fires; `new` when there is no baseline (exit 0).
+  - Rows that changed since the baseline (`rows_sha256`) are a note; the rules still apply.
+- **Verdicts.** `ok`, `regression`, `new`, `failed`, `refused`, `skipped` (after a Ctrl-C the rest are skipped with
+  `interrupted`; the walk that was running tears down by itself).
+- **Compare only.** `--compare-only` walks nothing: each plan's newest walk in the history is compared with the last good
+  one before it. A plan with no walk is `skipped`.
+- **Dry run.** `--dry-run` prints `plan tier (source) until out` per raid, or `plan: refused: <reason>`; nothing is sent
+  and no out dir is made.
+- **Output.** `--out DIR` (default `./raid-suite-<stamp>`, refused if it exists; 0700) gets `suite.json` (format
+  `tb-raid-suite-report` v1) and `suite.txt` (0600). `--json` prints the JSON on stdout instead of the text. The walks'
+  own output goes to stderr, so stdout stays the report.
+- **Exit codes.** 0 when no raid regressed or failed; 24 when one did; 15 for `--slot 3` (refused before anything); 2 usage,
+  including `--slot A,B` (`raid-suite` walks one raid at a time).
+### Two raids at once
+
+`turtle-agent raid-walk <plan> [<plan2>] --slot A,B` walks two raids at the same time, one per slot. Two raids take
+`--slot 1,2` because `--slots FILE` is already the slot config path: the pair form is the same `--slot` flag with a
+list of two distinct ids. Slot `3` is refused before anything for any server (exit 15); a third id or a repeated one
+is a usage error (exit 2). One plan walks that plan on both slots (two instances of it); two plans walk `plan1` on A
+and `plan2` on B.
+
+Each half is an ordinary raid-walk with its own lease, `slot setup`, agent process, dashboard client and output dir:
+`<out>/s<A>-<plan1>/` and `<out>/s<B>-<plan2>/` (each the normal `summary.json`, `run.log`, frames, ...), plus
+`<out>/pair.json` and `<out>/pair.txt` (`--out` default `./raid-walk-pair-<YYYYmmdd-HHMMSS>`, refused if it exists).
+The default holder is `raid-walk-<plan>-s<slot>`; two equal holders are refused. Walk B starts 30 s after walk A
+(`--stagger 0-600s`) so the two hire bursts (up to 40 bots each) do not hit the server at once. The walks are
+independent: one failing does not stop the other; SIGINT stops both and each tears down its own slot. A panic in
+either half (a bug, not a failed walk) is caught at the pair boundary: it is recorded as that half's failed walk,
+cancels the other half, and both halves still run their teardown and lease release before `pair.json` is written.
+A cleanup step counts as done only when it succeeded (release returned no error; teardown exited 0 with a readable
+`--json` report); when it panics or fails, the deferred cleanup retries it once, and a lease it still could not give
+back is named in the pair's notes.
+
+Per-walk flags may carry the slot id as a prefix: `--sql 1=a.sql --sql 2=b.sql`, `--inject 2=lag`. An unprefixed
+`--sql --hires --dir --patrols --until --from --tier --tier-override --holder --inject` applies to both walks (a
+repeated `--inject` stays per walk). Every other flag is global and refuses a slot prefix (exit 2).
+
+`pair.json` (format `tb-raid-walk-pair` v1) has one entry per walk (slot, the id as given, e.g. `"1"` or `"A"`;
+plan, character, out, exit code, end reason, steps, deaths, fights, pauses, tier, and the dashboard tab
+`#/commanders/<name>`), `overlap_s` (seconds both runs were between their start and their end, from the two
+summaries), `dashboard_both_listed` (true when one `/api/v1/commanders` dump of either walk names both characters;
+`null` with the dashboard off) and `notes`.
+`pair.txt` is one line per walk, one `note:` line per note, then `pair: exit <c>`. The pair's exit is the first code that occurs in the order
+2, 15, 18, 19, 23, 0 over the two walks, so a wipe (19) wins over a failed fault (23); a blocking incident (a bot
+left frozen, 23) ranks ahead of 18 and 19 in both walks, so it never hides. Each walk binds its own
+commander, so the dashboard's `/api/v1/commanders` lists both and the raid tabs show one tab each. Two 40-man raids
+are up to 80 hires on one server: plan the slots and the worldserver's memory.
+
+`--dry-run` prints both phase plans, every line prefixed `[s<N> <plan>] `, without leasing or writing.
 
 ## Remote leader
 
