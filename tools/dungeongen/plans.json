@@ -1293,6 +1293,7 @@
   },
   {
    "name": "upper_karazhan_halls",
+   "handwritten": true,
    "title": "Upper Karazhan Halls",
    "map": 814,
    "kind": "raid",
@@ -1304,6 +1305,7 @@
    ],
    "bosses": [
     61939,
+    61946,
     61951,
     61958,
     {
@@ -1314,7 +1316,6 @@
       59968
      ]
     },
-    61946,
     59981,
     59961,
     59991
@@ -1322,11 +1323,14 @@
    "size": 40,
    "entrance_tele": "karaforty",
    "special": [
-    "the Kings Council is the chess event (npc_kara_king/bishop/rook/knight), Echo of Medivh is the chess board",
-    "Anomalus, Keeper Gnarlmoon and Ley-Watcher Incantagos are script-driven; Sanv Tas'dal, Rupturan and Kruul stand in an Outland-like part of the map (tele karaoutland)"
+    "the chess event is the Kings Council: King 59967 is invulnerable until Bishop 59971, Rook 59970 and Knight 59968 are dead; the pawns are summoned",
+    "Anomalus, Keeper Gnarlmoon, Ley-Watcher Incantagos and Echo of Medivh are script-driven; Incantagos' four Ley Seekers 59989 channel a 4-stack damage reduction around him",
+    "Sanv Tas'dal, Rupturan the Broken and Kruul stand in an Outland-like part of the map, a separate navmesh island reached only by the karaoutland teleport (the plan's gm_cross)",
+    "Rupturan 59961 has no script or EventAI; Mephistroth has no creature data in this core",
+    "no entrance trigger row for map 814: the entrance is the 'karaforty' teleport (game_tele 921)"
    ],
    "notes": [
-    "No entrance trigger row for map 814: the entrance is the 'karaforty' teleport (game_tele 921). The boss order is a guess."
+    "Upper Karazhan Halls (Turtle custom raid): 8 boss steps in the guide's and the spiral route's order; the draft's boss order (Incantagos after the chess event) was a guess."
    ]
   },
   {
