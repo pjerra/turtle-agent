@@ -135,6 +135,8 @@ turtle-agent version
 | 14 | `teardown`: a game-side or CLI step failed |
 | 15 | `lease` or `slot setup` refused (slot held, reserved, or not leased by the holder); `rpc` cannot reach the agent, its reply fails the 2.0 envelope check, or its token file is not an agent token |
 | 16 | `rpc`: the agent answered with a JSON-RPC error |
+| 20 | `plan-probe` found a bad segment |
+
 | 17 | `dashboard-replay` refused its target: not a loopback address (`--i-know` vouches for a test dashboard), or a bad port |
 
 `--capture` records every decrypted packet to a file (opened exclusively, mode 0600). The auth session body and
@@ -995,6 +997,16 @@ The file is `tb-patrols` v1 (`internal/patrols`): per patrol the measured path, 
 estimate, and raid-walk's revive quiet check (`--patrols`) keeps the revive point clear of patrol paths. A complete recording prints one line
 per patrol (`52050 Onyxian Warder: period 33.4 s (3 cycles), 7 points, matches spawn 52050`) and exits 0. Exit 15 is a refused slot, a
 grouped agent or an agent that is not in the world; 16 is an RPC error, 2 a usage error and 22 a safety stop.
+
+### Plan probe
+
+`turtle-agent plan-probe --mmaps DIR onyxias_lair` measures the TortoiseBots **run leader's rows** of one plan (what `.bot run` walks), not the agent's driver route: every hop between two consecutive positioned rows (`from` and `to` are the run leader's step numbers, 1-based, as `TBM:RUN` lists them; a row with `0 0 0` is no end). The input is exactly one of a plan name (`<dir>/<plan>.json`), a `.json` path, or `--sql FILE` — a deployed world migration. **Use `--sql`**: it is the exact rows the server runs, hand edits and cut rows included (the lenient reader skips the migration's other tables, such as the `ai_dungeon_boss` block, and names each in the report's notes); `--plan NAME` picks the plan when the file holds several. A JSON input rebuilds the rows with `planexport.Build` and cuts long hops along the navmesh exactly as `plan-export --mmaps` does, and the report says `rows rebuilt from the plan JSON (cut like plan-export --mmaps)`.
+
+Per segment the report (`tb-plan-probe` v1, `probe-<plan>.json`/`.txt` with `--out DIR`, else text or `--json` on stdout) holds the straight-line distance, the server's own query (type, `CheckMove` verdict, length, distance of its end from the row, each end's distance to its walk poly), the offline planner's status and length (a second opinion; a disagreement is noted), the ratio of server length to the straight line, the floors over the end's (x, y) with the height gap to the nearest (`floor_dz`) and the distance to the nearest walkable point (`snap`), the water and lava/slime yards, the largest climb and drop, a steep flag, the floor index each end falls on (`mapview.SplitHeights` over the plan's bounding box), a `hop` flag for a straight line over 60 yd, and the verdict with its reasons.
+
+The verdict is **bad** for: the server answers `NOPATH` (or the run leader's verdict is `unreachable`/`off-mesh`); or the end row lies more than 5 yd from any floor over it (`no floor within 5 yd (row z …, floor …)`) — a pull or boss row is exempt from the floor rule, because the party walks to within pull range and not onto the pack, and an `off-mesh` end within the row's radius + 5 yd is the pull working (radius 0 means the module's 15 yd pull / 30 yd boss). **Warnings**: ratio over 1.6; any water or lava; a steep step or a drop of 6 yd or more (14 yd or more is an approximate 1.12 fall); more than 2 yd from the nearest walkable point; the two ends on different floors; two floors or more over the row's (x, y) (`multi-floor x,y: the row's z picks floor z=…`); the offline and server queries disagreeing on whether the hop completes; a hop over 60 yd. A plan note says `multi-floor map: 2D overlays mislead; z decides` when the map has floor cuts, and the notes list the worst ten segments.
+
+The exit status is 20 when a segment is bad, 0 otherwise, 2 for a usage error, and 1 when the navmesh cannot answer (a build without cgo, no files for the map). Distance units are yards, 3D unless a measurement says otherwise; floats are rounded to two decimals. The probe reads plan/migration files and the mmaps folder and nothing else.
 
 ### Plan diff
 
