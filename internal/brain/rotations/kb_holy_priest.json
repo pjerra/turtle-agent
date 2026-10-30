@@ -1,0 +1,230 @@
+{
+  "version": 1,
+  "name": "kb_holy_priest",
+  "class": "priest",
+  "spec": "holy",
+  "mode": "add",
+  "replaces": [],
+  "notes": "The knowledge base's holy priest, added after role_healer: an emergency shield, Flash Heal rank 7 below half, a precast Greater Heal rank 1 on the tank, Renew kept on the tank, a rank-1 Flash Heal and rank-1 Renew for small deficits, Prayer of Healing for three or more hurt, Ascendance and Inner Focus, Desperate Prayer on itself. Cancel-casting, Lightwell placement, Fear Ward and Avatar need observations the conditions lack and are listed in kb.unexpressed.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/priest/holy-healer.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=152325#p152325 (Langorn, guide writer, 2025-09-19)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=161280#p161280 (Sharmaine, player, 2025-12-02)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=155346#p155346 (Sharmaine, player, 2025-10-13)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=124792#p124792 (Hawkbutt, player, 2025-03-31)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=125153#p125153 (Hawkbutt, player, 2025-04-03)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=153172#p153172 (Azcron, player, 2025-09-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=153177#p153177 (Akos1896, player, 2025-09-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=127580#p127580 (Akos1896, player, 2025-04-19)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=162360#p162360 (Blubbsy, player, 2025-12-10)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=92978#p92978 (Thexdylldolan, player, 2024-04-17)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=168272#p168272 (Dragunovi, staff, 2026-02-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102970#p102970 (Dragunovi, staff, 2024-10-12)",
+    " (Bluefear, player (Holy raider), 2026-03-30)",
+    " (Istrefi, player (Holy raider), 2026-04-10)",
+    " (Lirya, player (Holy raider), 2026-03-27)",
+    " (Bluefear, player (tested), 2026-03-20)"
+  ],
+  "priorities": [
+    {
+      "id": "power_word_shield",
+      "spell": "Power Word: Shield",
+      "level": 6,
+      "target": "heal",
+      "band": "high",
+      "when": {
+        "heal_hp_below": 25,
+        "heal_is_tank": false
+      }
+    },
+    {
+      "id": "power_word_shield_tank",
+      "spell": "Power Word: Shield",
+      "level": 6,
+      "target": "heal",
+      "band": "high",
+      "when": {
+        "heal_hp_below": 10,
+        "heal_is_tank": true
+      }
+    },
+    {
+      "id": "flash_heal_7",
+      "spell": "Flash Heal",
+      "level": 20,
+      "rank": 7,
+      "target": "heal",
+      "band": "high",
+      "when": {
+        "heal_hp_below": 50
+      }
+    },
+    {
+      "id": "greater_heal_1",
+      "spell": "Greater Heal",
+      "level": 40,
+      "rank": 1,
+      "target": "heal",
+      "band": "high",
+      "when": {
+        "heal_hp_below": 60,
+        "heal_is_tank": true
+      },
+      "note": "the brain cannot see incoming damage: the tank heal fires below 60% instead of precasting"
+    },
+    {
+      "id": "renew",
+      "spell": "Renew",
+      "level": 8,
+      "target": "heal",
+      "band": "high",
+      "when": {
+        "heal_is_tank": true,
+        "heal_no_aura": [
+          "Renew"
+        ]
+      }
+    },
+    {
+      "id": "flash_heal_1",
+      "spell": "Flash Heal",
+      "level": 20,
+      "rank": 1,
+      "target": "heal",
+      "band": "high",
+      "when": {
+        "heal_hp_below": 80
+      }
+    },
+    {
+      "id": "renew_rank1",
+      "spell": "Renew",
+      "level": 8,
+      "rank": 1,
+      "target": "heal",
+      "band": "high",
+      "when": {
+        "heal_no_aura": [
+          "Renew"
+        ]
+      }
+    },
+    {
+      "id": "prayer_of_healing_4",
+      "spell": "Prayer of Healing",
+      "level": 30,
+      "rank": 4,
+      "target": "heal",
+      "band": "high",
+      "when": {
+        "heal_hp_below": 40,
+        "members_hurt_min": 3
+      },
+      "note": "ahead of rank 2 (KB priority 2): a member below 40% gets the bigger heal"
+    },
+    {
+      "id": "prayer_of_healing_2",
+      "spell": "Prayer of Healing",
+      "level": 30,
+      "rank": 2,
+      "target": "heal",
+      "band": "high",
+      "when": {
+        "members_hurt_min": 3
+      }
+    },
+    {
+      "id": "ascendance",
+      "spell": "Ascendance",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "no_self_aura": [
+          "Ascendance"
+        ]
+      }
+    },
+    {
+      "id": "inner_focus",
+      "spell": "Inner Focus",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "no_self_aura": [
+          "Inner Focus"
+        ]
+      }
+    },
+    {
+      "id": "desperate_prayer",
+      "spell": "Desperate Prayer",
+      "level": 10,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "self_hp_below": 30,
+        "no_self_aura": [
+          "Desperate Prayer"
+        ]
+      }
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/priest/holy-healer.yaml",
+    "sha256": "d4fd297a3b8cafbd6ea66f2413620a4457ae5d4a83ce6487487ba09a9aebebaa",
+    "preset": "holy_priest",
+    "recipe": "tools/kbrotgen/recipes/kb_holy_priest.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Power Word: Shield | target about to die and no time to cast; NOT on warrior/bear tanks except pre-pull or true emergency (~12 rage lost per 1k absorbed)",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[6]",
+        "text": "cancel cast | precast heal on tank no longer needed at ~2/3 cast bar (preserve 5-second-rule regen)",
+        "why": "cancel/stop casting not expressible"
+      },
+      {
+        "row": "rotation_single[7]",
+        "text": "stop casting | all targets at 80-90% HP (do not top to 100%)",
+        "why": "cancel/stop casting not expressible"
+      },
+      {
+        "row": "rotation_aoe[2]",
+        "text": "Lightwell",
+        "why": "macro/addon (Nampower etc.)"
+      },
+      {
+        "row": "rotation_aoe[3]",
+        "text": "Renew each + Flash Heal the lower",
+        "why": "covered by rotation_single[3-5]: the Renew and Flash Heal entries heal the lowest member"
+      },
+      {
+        "row": "cooldowns[2]",
+        "text": "Lightwell | before pull / burst phase (5 min); /cast Lightwell + CameraOrSelectOrMoveStart/Stop macro places it at cursor",
+        "why": "macro/addon (Nampower etc.)"
+      },
+      {
+        "row": "cooldowns[3]",
+        "text": "Fade | on aggro; 1.18.1 -15% threat while active, threat returns",
+        "why": "priest_defense owns Fade"
+      },
+      {
+        "row": "cooldowns[4]",
+        "text": "Fear Ward | tank before fear mechanics (baseline all races)",
+        "why": "friendly target not in the conditions"
+      },
+      {
+        "row": "cooldowns[6]",
+        "text": "Avatar | Dwarf: on tank for heavy physical/magic damage (5 min)",
+        "why": "friendly target not in the conditions"
+      }
+    ]
+  }
+}

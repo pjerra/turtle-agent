@@ -127,6 +127,11 @@ type RunInfo struct {
 	PrepareS float64 `json:"prepare_s,omitempty"`
 	// Leader is the TortoiseBots run leader's own status in an observed run (mode observe); nil in any other.
 	Leader *LeaderInfo `json:"leader,omitempty"`
+	// Raid is the raid size of a raid run (10, 20, 40); 0 when the plan is not a raid.
+	Raid int `json:"raid,omitempty"`
+	// RaidView is the TortoiseBots dashboard's Commanders tab the raid is watched on (`Raid view: <url>/#commanders`),
+	// from the agent's settings key tb_dashboard_url; absent without it.
+	RaidView string `json:"raid_view,omitempty"`
 }
 
 // LeaderInfo is the TBM:RUN status of an observed run: what the run leader on the server is doing, as the agent last read it.
@@ -202,6 +207,8 @@ type BotView struct {
 	Class      string   `json:"class,omitempty"`
 	Role       string   `json:"role,omitempty"`
 	Lead       bool     `json:"lead,omitempty"`
+	Level      int      `json:"level,omitempty"`
+	ItemLevel  float64  `json:"ilvl,omitempty"`
 	HPPct      int      `json:"hp_pct"`
 	PowerPct   int      `json:"power_pct"`
 	PowerType  string   `json:"power_type,omitempty"`
@@ -338,9 +345,11 @@ type rawReport struct {
 	} `json:"remote"`
 	Ready *struct {
 		Bots []struct {
-			Name  string `json:"name"`
-			Class string `json:"class"`
-			Role  string `json:"role"`
+			Name      string  `json:"name"`
+			Class     string  `json:"class"`
+			Role      string  `json:"role"`
+			Level     int     `json:"level"`
+			ItemLevel float64 `json:"ilvl"`
 		} `json:"bots"`
 	} `json:"ready"`
 }
@@ -483,6 +492,12 @@ func fillRun(c *Card, rep *rawReport, ds rawDungeon, in Inputs) {
 	c.Run.PrepareS = rep.SetupS
 	if in.Plan != nil {
 		c.Run.LegCount = len(in.Plan.Legs)
+		if in.Plan.Raid != nil {
+			c.Run.Raid = in.Plan.Raid.Size
+		}
+		if u := strings.TrimSpace(in.Agent.TBDashboardURL); u != "" {
+			c.Run.RaidView = u + "/#commanders"
+		}
 	}
 	c.PlanCopy = in.PlanCopy
 	if m := legRe.FindStringSubmatch(rep.Current); m != nil {
@@ -631,13 +646,15 @@ func fillStall(c *Card, ds rawDungeon, rep *rawReport, now time.Time) {
 func fillView(c *Card, rep *rawReport, in Inputs) {
 	var v rawView
 	haveView := len(in.View) > 0 && json.Unmarshal(in.View, &v) == nil && v.Have && v.Frame != nil
-	class, role := map[string]string{}, map[string]string{}
+	class, role, level := map[string]string{}, map[string]string{}, map[string]int{}
+	ilvl := map[string]float64{}
 	var lead, tank string
 	var names []string
 	if rep != nil {
 		if rep.Ready != nil {
 			for _, b := range rep.Ready.Bots {
 				class[b.Name], role[b.Name] = b.Class, b.Role
+				level[b.Name], ilvl[b.Name] = b.Level, b.ItemLevel
 			}
 		}
 		if r := rep.Remote; r != nil {
@@ -671,7 +688,7 @@ func fillView(c *Card, rep *rawReport, in Inputs) {
 	if !haveView {
 		for _, n := range names {
 			if n != "" {
-				c.Bots = append(c.Bots, BotView{Name: n, Class: class[n], Role: role[n], Lead: n == lead, Alive: true})
+				c.Bots = append(c.Bots, BotView{Name: n, Class: class[n], Role: role[n], Lead: n == lead, Alive: true, Level: level[n], ItemLevel: ilvl[n]})
 			}
 		}
 		return
@@ -701,6 +718,14 @@ func fillView(c *Card, rep *rawReport, in Inputs) {
 			b.DistTank = &d
 		}
 		c.Bots = append(c.Bots, b)
+	}
+	for i := range c.Bots {
+		if c.Bots[i].Level == 0 {
+			c.Bots[i].Level = level[c.Bots[i].Name]
+		}
+		if c.Bots[i].ItemLevel == 0 {
+			c.Bots[i].ItemLevel = ilvl[c.Bots[i].Name]
+		}
 	}
 	sort.SliceStable(c.Bots, func(i, j int) bool { return c.Bots[i].Lead && !c.Bots[j].Lead })
 	for _, h := range f.Hostiles {

@@ -79,7 +79,7 @@ var classTable = map[uint8]ClassInfo{
 	ClassPriest: {ID: ClassPriest, Name: "priest", Power: powerMana, Drinks: true, ManaPotions: true, Heals: &priestHeals, Band: [2]float64{14, 19},
 		Interrupts: []InterruptSpell{{Spell: "Silence"}}}, // a talent (spell 15487): the spellbook has it or it is skipped
 	ClassShaman: {ID: ClassShaman, Name: "shaman", Power: powerMana, Drinks: true, ManaPotions: true, Heals: &shamanHeals, Band: [2]float64{14, 19}, // the shocks reach 20 yd
-		Interrupts: []InterruptSpell{{Spell: "Earth Shock"}}},
+		Taunt: "Earthshaker Slam", Interrupts: []InterruptSpell{{Spell: "Earth Shock"}}},
 	ClassMage: {ID: ClassMage, Name: "mage", Power: powerMana, Drinks: true, ConjuredDrinks: true, ManaPotions: true,
 		Interrupts: []InterruptSpell{{Spell: "Counterspell"}}},
 	ClassWarlock: {ID: ClassWarlock, Name: "warlock", Power: powerMana, Drinks: true, ManaPotions: true, Band: [2]float64{18, 26}}, // Drain Life and Fear reach 20 yd, Shadow Bolt 30

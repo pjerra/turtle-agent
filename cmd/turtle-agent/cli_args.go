@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 )
 
 // isFlagArg reports whether s looks like a flag (as opposed to a
@@ -201,14 +202,16 @@ func parseLeaseListArgs(args []string, stderr io.Writer) (leaseListOptions, int)
 
 // slotSetupOptions is the parsed `slot setup` command line.
 type slotSetupOptions struct {
-	server      string
-	slot        string
-	holder      string
-	dir         string
-	binary      string
-	dungeonsDir string
-	character   string
-	slotsPath   string
+	server       string
+	slot         string
+	holder       string
+	dir          string
+	binary       string
+	dungeonsDir  string
+	mmapsDir     string
+	dungeonsFrom string
+	character    string
+	slotsPath    string
 }
 
 // parseSlotSetupArgs parses slot setup flags in any position (before,
@@ -222,6 +225,8 @@ func parseSlotSetupArgs(args []string, stderr io.Writer) (slotSetupOptions, int)
 	fs.StringVar(&o.dir, "dir", "", "client dir (default ~/ta-<holder>)")
 	fs.StringVar(&o.binary, "binary", "", "turtle-agent binary to install (default os.Executable())")
 	fs.StringVar(&o.dungeonsDir, "dungeons-dir", "", "dungeons dir (default <dir>/dungeons)")
+	fs.StringVar(&o.mmapsDir, "mmaps-dir", "", "navmesh folder written to settings.json mmaps_dir (must exist)")
+	fs.StringVar(&o.dungeonsFrom, "dungeons-from", "", "folder of *.json plans copied into the slot's dungeons dir")
 	fs.StringVar(&o.character, "character", "", "character to play (default the slot's)")
 	fs.StringVar(&o.slotsPath, "slots", "", "slot table file")
 	pos, rest := splitPositionals(fs, args, 2)
@@ -269,5 +274,54 @@ func parseTeardownArgs(args []string, stderr io.Writer) (teardownOptions, int) {
 		return o, exitUsage
 	}
 	o.dir = pos[0]
+	return o, exitOK
+}
+
+// rpcOptions is the parsed `rpc` command line.
+type rpcOptions struct {
+	dir             string
+	method          string
+	params          string
+	paramsFromStdin bool
+	timeout         time.Duration
+	raw             bool
+}
+
+// parseRPCArgs parses rpc flags in any position (before, between or after
+// the positionals). Failures are reported to stderr; the result is exitOK
+// with the options, or exitUsage.
+func parseRPCArgs(args []string, stderr io.Writer) (rpcOptions, int) {
+	var o rpcOptions
+	var timeoutStr string
+	fs := flag.NewFlagSet("rpc", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.StringVar(&timeoutStr, "timeout", "30s", "per-call timeout (Go duration)")
+	fs.BoolVar(&o.raw, "raw", false, "print the result compactly")
+	pos, rest := splitPositionals(fs, args, 3)
+	if err := fs.Parse(rest); err != nil {
+		return o, exitUsage
+	}
+	if len(pos) < 2 || len(pos) > 3 || fs.NArg() != 0 {
+		fmt.Fprintln(stderr, rpcUsage)
+		return o, exitUsage
+	}
+	o.dir, o.method = pos[0], pos[1]
+	if len(pos) == 3 {
+		if pos[2] == "-" {
+			o.paramsFromStdin = true
+		} else {
+			o.params = pos[2]
+		}
+	}
+	if o.method == "" {
+		fmt.Fprintln(stderr, rpcUsage)
+		return o, exitUsage
+	}
+	timeout, err := time.ParseDuration(timeoutStr)
+	if err != nil || timeout <= 0 {
+		fmt.Fprintf(stderr, "rpc: bad --timeout %q: want a positive Go duration like 5s\n", timeoutStr)
+		return o, exitUsage
+	}
+	o.timeout = timeout
 	return o, exitOK
 }

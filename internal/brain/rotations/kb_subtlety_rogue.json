@@ -1,0 +1,168 @@
+{
+  "version": 1,
+  "name": "kb_subtlety_rogue",
+  "class": "rogue",
+  "spec": "subtlety",
+  "replaces": [
+    "rogue_combat"
+  ],
+  "notes": "The Turtle knowledge base's Subtlety list: Hemorrhage as the only builder, Expose Armor at five points while it is missing, Slice and Dice at low points and Rupture at five (Taste for Blood), Eviscerate as the spare finisher, Mark for Death at two points into Shadow of Death at five. Garrote opens from stealth, which is outside the brain's fight; Tricks of the Trade needs a party target, Blade Flurry is the KB's no, Preparation's 'after the first Mark', the burst call and Vanish are named in kb.unexpressed.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/rogue/subtlety-melee-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102971#p102971 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=124504#p124504 (Torta, staff, 2025-03-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=148542#p148542 (Jinkarasu, player (plays the spec), 2025-08-27)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=146058#p146058 (Jinkarasu, player (plays the spec), 2025-08-16)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=150991#p150991 (Shananagans, player (guide writer, self-declared no Subtlety experience), 2025-09-09)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=152935#p152935 (Asystol, player, 2025-09-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=152399#p152399 (Rachdingue, player, 2025-09-19)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=148397#p148397 (Crake, player, 2025-08-26)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=126500#p126500 (Gantulga, player, 2025-04-12)"
+  ],
+  "priorities": [
+    {
+      "id": "auto_attack",
+      "kind": "attack",
+      "when": {},
+      "note": "The swing is the base every entry waits on: it goes first in the order, as in the Go rotation (rogue_combat)."
+    },
+    {
+      "id": "expose_armor",
+      "spell": "Expose Armor",
+      "level": 10,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "combo_points_min": 5,
+        "no_mob_aura": [
+          "Expose Armor"
+        ]
+      }
+    },
+    {
+      "id": "rupture",
+      "spell": "Rupture",
+      "level": 20,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "combo_points_min": 5,
+        "no_mob_aura": [
+          "Rupture"
+        ]
+      }
+    },
+    {
+      "id": "slice_and_dice",
+      "spell": "Slice and Dice",
+      "level": 10,
+      "target": "fight",
+      "threat": "none",
+      "harmful": false,
+      "when": {
+        "mob_in_reach": true,
+        "combo_points_min": 1,
+        "no_self_aura": [
+          "Slice and Dice"
+        ]
+      },
+      "note": "no_self_aura, not self_aura_missing: the buff lasts under a minute (6 s per combo point), so the under-a-minute rule would spend every combo point on it."
+    },
+    {
+      "id": "mark_for_death",
+      "spell": "Mark for Death",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "combo_points_min": 2
+      }
+    },
+    {
+      "id": "shadow_of_death",
+      "spell": "Shadow of Death",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "combo_points_min": 5
+      }
+    },
+    {
+      "id": "eviscerate",
+      "spell": "Eviscerate",
+      "level": 1,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "combo_points_min": 5
+      }
+    },
+    {
+      "id": "hemorrhage",
+      "spell": "Hemorrhage",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true
+      }
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/rogue/subtlety-melee-dps.yaml",
+    "sha256": "5377ad1ae74eecd5510316828627cc34df19062e85a182f6a0920498fe9a573d",
+    "preset": "subtlety_rogue",
+    "recipe": "tools/kbrotgen/recipes/kb_subtlety_rogue.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Garrote (Hemorrhage if bleed-immune) | opener; always",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[1]",
+        "text": "Improved Expose Armor (5 points) | missing or < ~10 s left; only one rogue per raid runs it",
+        "why": "raid assignment/marking"
+      },
+      {
+        "row": "rotation_single[2]",
+        "text": "any 5-point finisher | about every 11 s to keep Tricks of the Trade up; do not spam 1-point Eviscerates for it",
+        "why": "a party target (Tricks of the Trade) is not a target of the rotation"
+      },
+      {
+        "row": "rotation_single[4]",
+        "text": "Mark for Death at 2 points -> Shadow of Death at 5 | burst window (call it out); Preparation resets Mark for a second use",
+        "why": "raid assignment/marking"
+      },
+      {
+        "row": "rotation_single[6]",
+        "text": "Hemorrhage | builder; never Backstab or Sinister Strike",
+        "why": "a \"never\" rule: in the oracle's never list"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "no Blade Flurry; Mark + Shadow of Death only on a big pack at raid start",
+        "why": "a \"never\" rule: in the oracle's never list"
+      },
+      {
+        "row": "cooldowns[0]",
+        "text": "Mark for Death | burst window, party 30% of your AP as AP for 16 s [[d:rogue#1490442703958446232]]",
+        "why": "raid assignment/marking"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "Preparation | after the first Mark/Shadow of Death; 7-minute cooldown [[d:rogue#1468425398747402240]]",
+        "why": "the first Mark is not a condition"
+      },
+      {
+        "row": "cooldowns[2]",
+        "text": "Vanish | Garrote reopen and trinket swap [[d:rogue#1492117624568680489]]",
+        "why": "pre-pull/opener outside the brain's fight"
+      }
+    ]
+  }
+}
