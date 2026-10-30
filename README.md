@@ -58,7 +58,7 @@ realm list returns; `rpc_token` and `rpc_auth` set the [RPC authentication](#rpc
 copies of the server's navmesh files, for `path_to` and `walk_path` (see [Navmesh walking](#navmesh-walking)), and to
 land falls and knockbacks on the ground (see [Falling](#falling-and-knockbacks)). `addons` replaces the addon list sent
 at world login (see [What the server sees](#what-the-server-sees)). `tbm_addon_dir` is the TortoiseBotsManager checkout
-the [addon host](#addon-host) runs (default: the pinned copy `tools/tbmcontract/fetch.sh` keeps in `.cache/`). `rotations_dir` is a folder of extra [rotation files](#rotations-as-data) (the built-in ones need none; a bad file stops the login). `dungeons_dir` is the folder `dungeon_run` reads plans from (default `dungeons` under the working directory; see [Dungeon runs](#dungeon-runs)). `traces_dir` is the folder run traces go to (default `traces`, or `$TURTLE_AGENT_TRACES_DIR`; see [Run traces and checks](#run-traces-and-checks)). `run_meta` (`{"model", "effort", "run", "server_trace"}`) is the slot's default AI driver of its runs: `dungeon_run`'s `run_meta` wins when it names one (see [Run traces and checks](#run-traces-and-checks); `server_trace` is off by default). `state_dir` is where the addon fingerprint and the instance-entry ledger are kept (default: the settings file's folder); `slot setup` points it at the account's usual folder.
+the [addon host](#addon-host) runs (default: the pinned copy `tools/tbmcontract/fetch.sh` keeps in `.cache/`). `rotations_dir` is a folder of extra [rotation files](#rotations-as-data) (the built-in ones need none; a bad file stops the login). `dungeons_dir` is the folder `dungeon_run` reads plans from (default `dungeons` under the working directory; see [Dungeon runs](#dungeon-runs)). `tb_dashboard_url` is the TortoiseBots observability dashboard a raid run links its card to (`Raid view: <url>/#commanders`, see [Raids](#raids)); absent: no link. `traces_dir` is the folder run traces go to (default `traces`, or `$TURTLE_AGENT_TRACES_DIR`; see [Run traces and checks](#run-traces-and-checks)). `run_meta` (`{"model", "effort", "run", "server_trace"}`) is the slot's default AI driver of its runs: `dungeon_run`'s `run_meta` wins when it names one (see [Run traces and checks](#run-traces-and-checks); `server_trace` is off by default). `state_dir` is where the addon fingerprint and the instance-entry ledger are kept (default: the settings file's folder); `slot setup` points it at the account's usual folder.
 
 Log a character in and keep it online with the RPC server running:
 
@@ -673,7 +673,7 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   (a dungeon's party, `class:role` each, the same rules as `prepare.hire.composition`; the [hired party](#hired-party-prepare-party-hire) takes it when the prepare block gives none), `fleers`
   (creature entries that run at low health, EventAI "flee at 15 % HP"; remote mode kills them before they are out of reach and waits for one that got away, see *Runners* under tank first) and `raid`
   (`{"size": 40, "tanks": 4, "healers": 10, "dps": 26}`, required for a raid plan, size 10, 20 or 40, the roles a placeholder). A **draft** is the skeleton `tools/dungeongen` writes from the world export
-  (`"status": "draft (not mapped, not live-checked)"`): `dungeon_run` refuses it unless `allow_draft` is passed (the plan has had no mapping walk) and refuses every raid plan (no raid driver yet).
+  (`"status": "draft (not mapped, not live-checked)"`): `dungeon_run` refuses it unless `allow_draft` is passed (the plan has had no mapping walk). A raid plan runs in observe mode with `prepare.party "hire"` (the server's run leader leads the bound raid; see [Raids](#raids)); any other mode or party is refused.
   Every dungeon and raid of the server has a draft or better; see [docs/PLANS.md](docs/PLANS.md) for the table (level band, status, mmaps, the events, rituals, gossip and keys each needs).
 - `version` is 1 (a file of another version is refused), `map` the instance map id, `entrance` where the party stands after the
   portal. `notes` (plan and leg) are free text for people.
@@ -1987,6 +1987,26 @@ needs `cleared_through` or `force` for legs past the first patrols, since every 
 from `velratha_b`). The offline check knows only plan packs, not patrols: a point the check passes can still fail the live
 quiet check when a patrol walks by (then clear the patrol or stage with `force`). Call with a client timeout of 120 s.
 
+## Raids
+
+`dungeon_run {"name": "lower_karazhan_halls", "mode": "observe", "prepare": {"party": "hire"}, "from_leg": 0}` leads a raid in observe mode
+(the server's run leader drives the bound raid; the agent hires, gears, binds, starts and watches). A raid plan (`"kind": "raid"`,
+`"raid": {"size": 10, "tanks": 2, "healers": 3, "dps": 5}`) is refused in any other mode or without `prepare.party "hire"`.
+`prepare.hire` carries `tier` (the `.bot hire raid` tier, default the preset's tier, else 2) and `gear_preset` (default the plan
+name's preset: `lower_karazhan_halls`->`lkh`, `zul_gurub`->`zg`, `ruins_of_ahnqiraj`->`aq20`, `timbermaw_hold`->`timbermaw`,
+`onyxias_lair`->`onyxia`, `molten_core`->`mc`, `blackwing_lair`->`bwl`, `emerald_sanctum`->`es`, `temple_of_ahnqiraj`->`aq40`,
+`naxxramas`->`naxx`, `upper_karazhan_halls`->`kara40`).
+
+The raid hire flow, in order: the commander must be 60; the old binding is unbound and every current hire dismissed on
+`rehire` (else kept only when the count by role equals the plan's split exactly); `.bot hire raid <tanks>t <healers>h <dps>d
+t<tier>` (then wait for `size` online bots, 120 s + 3 s per bot); the lead bot is the first tank-read member of a tank class
+(warrior, paladin, druid; at most 6 talent reads); `.bot gear raid <agent> preset <p>` (90 s; `none` fails, `partial` warns);
+`.bot commander bind <Lead> raid` and then the commander-outside check; one ready row per member (name, class, role, level,
+item level). `.bot maintenance` is never sent; the observe run then starts `.bot run start <plan>` as for a party.
+
+A raid run's card shows the ready block as subgroup-less rows (name, class, role, level, item level), the plan's `raid`
+size, and `Raid view: <TB dashboard URL>/#commanders` when the settings carry `tb_dashboard_url` (absent: no link).
+
 ### Following the lead bot as a player
 
 A real player in a bot-led TortoiseBots run: the run leader holds pulls beyond 60 yd and a regroup waits 60 s for every
@@ -2593,6 +2613,7 @@ with it (a new hire has no saved instance and is online). `hire` is optional and
   (no class in its view) does not match.
 - **`no_fix`:** report what is wrong and fail, instead of `.bot autogear` and `.bot maintenance`.
 - **`wait_s`:** the longest wait for a hire to show in the group (default 30, at most 120).
+- **`tier`, `gear_preset`:** raids only. The `.bot hire raid` tier word (`t<tier>`, 1-7; 0 takes the gear preset's tier, else 2) and the `.bot gear raid` preset name (default the plan name's preset). The 5-man flow ignores both.
 
 **What the step does,** in order, all with the commander's own `.bot` commands (no GM line):
 
