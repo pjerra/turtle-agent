@@ -550,7 +550,6 @@ var planCheckKnownFailing = map[string]bool{
 	"blackfathom_deeps":     true,
 	"black_morass":          true,
 	"blackrock_depths":      true,
-	"blackwing_lair":        true,
 	"crescent_grove":        true,
 	"dire_maul_east":        true,
 	"dire_maul_west":        true,
