@@ -556,9 +556,27 @@ func replyProblem(rep commanderReply, err error) string {
 	return "no reply"
 }
 
+// enterBusyTries bounds the wait for hires still busy with their join summon: a late joiner of a
+// big hire is summoned to the commander a few seconds after the hire answers (walk 12, ZG).
+const enterBusyTries = 12
+
 // enterNear sends the module's own entry order; the ERR code is returned so auto can fall back.
+// A "busy" refusal is retried every 5 s, at most enterBusyTries times.
 func (w *walk) enterNear(ctx context.Context) (string, error) {
-	rep, err := w.commander(ctx, commanderReq{Op: "cmd", Verb: "enter", Args: []string{"near"}, WaitMS: 15000})
+	var rep commanderReply
+	var err error
+	for try := 1; ; try++ {
+		rep, err = w.commander(ctx, commanderReq{Op: "cmd", Verb: "enter", Args: []string{"near"}, WaitMS: 15000})
+		if err != nil || rep.Reply.Err == nil || rep.Reply.Err.Code != "busy" || try >= enterBusyTries {
+			break
+		}
+		if try == 1 {
+			w.note("cmd enter near: a hire is busy (%s); retrying every 5 s", rep.Reply.Err.Message)
+		}
+		if err := w.env.sleep(ctx, 5*time.Second); err != nil {
+			return "", err
+		}
+	}
 	if err != nil {
 		return "", stopf(exitRaidWalkFailed, "enter near: %v", err)
 	}

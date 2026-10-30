@@ -97,6 +97,8 @@ type walkFakeAgent struct {
 	startQueue []queuedEvent
 	bindLayout string
 	enterReply *commanderReply
+	enterBusy  int // the first enterBusy enter orders answer ERR busy
+	enterCalls int
 	onGM       func(line string)
 
 	// pos is where the commander's last .go put it; the quiet-check fakes place units around it.
@@ -509,6 +511,16 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 	case "view":
 		return ack("commander view")
 	case "cmd":
+		if p.Verb == "enter" {
+			f.mu.Lock()
+			f.enterCalls++
+			busy := f.enterCalls <= f.enterBusy
+			f.mu.Unlock()
+			if busy {
+				return commanderReply{Reply: tbm.Reply{Kind: "err", Err: &tbm.Err{Intent: "enter", Code: "busy",
+					Message: "That bot is busy with an earlier order (or a pending summon)."}}}
+			}
+		}
 		if p.Verb == "enter" && f.enterReply != nil {
 			return *f.enterReply
 		}
@@ -1246,6 +1258,31 @@ func TestRaidWalkLayoutMainTankMismatchFails(t *testing.T) {
 	}
 	if len(f.rec.teardown) == 0 {
 		t.Fatal("no teardown after the layout refusal")
+	}
+}
+
+// Walk 12: the enter order came while late joiners were still on their join summon and the walk stopped.
+func TestRaidWalkEnterRetriesABusyHire(t *testing.T) {
+	f := newFixture(t)
+	f.defaultRun("onyxias_lair")
+	f.agent.enterBusy = 2
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	if f.agent.enterCalls != 3 {
+		t.Fatalf("enter sent %d times, want 3", f.agent.enterCalls)
+	}
+}
+
+func TestRaidWalkEnterGivesUpOnAHireBusyTooLong(t *testing.T) {
+	f := newFixture(t)
+	f.agent.enterBusy = 100
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	if f.agent.enterCalls != enterBusyTries || !strings.Contains(f.summary().EndReason, "busy") {
+		t.Fatalf("enter sent %d times, reason %q", f.agent.enterCalls, f.summary().EndReason)
 	}
 }
 
