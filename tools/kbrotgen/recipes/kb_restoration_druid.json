@@ -1,0 +1,256 @@
+{
+  "name": "kb_restoration_druid",
+  "class": "druid",
+  "spec": "restoration",
+  "role": "healer",
+  "kb_file": "classes/yaml/druid/restoration-healer.yaml",
+  "preset": "resto_druid",
+  "replaces": [],
+  "mode": "add",
+  "notes": "The Turtle knowledge base's restoration druid casts, added after role_healer: the max-rank Healing Touch emergency, Rejuvenation kept on the hurt, Regrowth on the tank, the rank-3 Rejuvenation blanket and Tranquility at ten hurt, and Innervate itself when the mana runs low. Entries run in band high, so they pre-empt the generic heal; the narrower conditions come first, which is the one departure from the KB's numeric order.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 0,
+      "text": "Pre-pull: Rejuvenation then Regrowth on the tank |",
+      "text_sha": "6f3ef293b51b",
+      "entries": [],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 1,
+      "text": "Nature's Swiftness -> max-rank Healing Touch (two presses) or Swiftmend | tank below ~30%",
+      "text_sha": "0592550ed127",
+      "entries": [
+        {
+          "id": "nature_healing_touch",
+          "spell": "Healing Touch",
+          "level": 1,
+          "target": "heal",
+          "band": "emergency",
+          "note": "Moved ahead of the KB's order and in band emergency (not high): the KB puts it above the routine heals, and role_healer's own emergency rule would otherwise take the tick.",
+          "when": {
+            "heal_is_tank": true,
+            "heal_hp_below": 30
+          }
+        }
+      ],
+      "unexpressed": "a self-cast cooldown cannot read the heal target (the heal conditions need target heal)"
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 2,
+      "text": "Swiftmend | target HoT about to expire",
+      "text_sha": "26ccde22533e",
+      "entries": [],
+      "unexpressed": "time left on an aura is not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 3,
+      "text": "Rejuvenation (R11; R5 on rogues/ferals for T3 2-piece) | damaged target without it; before Regrowth (Preservation)",
+      "text_sha": "2c17b7df9af0",
+      "entries": [
+        {
+          "id": "rejuvenation",
+          "spell": "Rejuvenation",
+          "level": 4,
+          "target": "heal",
+          "band": "high",
+          "note": "The KB's rank 11 (highest) is the default; the rank-5-for-rogues concession is gear, not a condition.",
+          "when": {
+            "heal_no_aura": [
+              "Rejuvenation"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 4,
+      "text": "Regrowth (R9 tanks/melee, R4 casters) | tank and spiky damage (~60-70% of casts)",
+      "text_sha": "6c851a7c2db8",
+      "entries": [
+        {
+          "id": "regrowth",
+          "spell": "Regrowth",
+          "level": 12,
+          "target": "heal",
+          "band": "high",
+          "note": "The KB's ranks by target armor class (R9 melee, R4 casters) are not conditions; the highest known rank goes.",
+          "when": {
+            "heal_is_tank": true
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 5,
+      "text": "Rejuvenation R1 on self | mana needed and wearing T3 2-piece (~180 mana/12 s)",
+      "text_sha": "8227eb56d36d",
+      "entries": [
+        {
+          "id": "rejuv_self",
+          "spell": "Rejuvenation",
+          "level": 4,
+          "rank": 1,
+          "target": "self",
+          "band": "high",
+          "note": "The KB's T3 2-piece trick: rank 1 on itself, mana back through the set bonus.",
+          "when": {
+            "state": "combat",
+            "power_below": 40,
+            "no_self_aura": [
+              "Rejuvenation"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 6,
+      "text": "no HoT on full-health targets | always",
+      "text_sha": "25232e54a3fe",
+      "entries": [],
+      "unexpressed": "a \"never\" rule the healer triage keeps (it heals nobody above its threshold)"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Tranquility (leave Tree Form)",
+      "text_sha": "de218198fcf7",
+      "entries": [
+        {
+          "id": "tranquility",
+          "spell": "Tranquility",
+          "level": 30,
+          "target": "self",
+          "band": "emergency",
+          "note": "Tree Form is the preset's druid_caster strategy's business: it cancels the form above a heal.",
+          "when": {
+            "state": "combat",
+            "members_hurt_min": 10
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 2,
+      "text": "Rejuvenation blanket (rank 3 at low healing power)",
+      "text_sha": "d7e0b422035c",
+      "entries": [
+        {
+          "id": "rejuv_blanket",
+          "spell": "Rejuvenation",
+          "level": 4,
+          "rank": 3,
+          "target": "heal",
+          "band": "high",
+          "note": "Moved ahead of the single-target Rejuvenation: at three hurt the KB's blanket is the cast, and the conditions are all-must-hold. The rank is the KB's low-healing-power one.",
+          "when": {
+            "members_hurt_min": 3,
+            "heal_no_aura": [
+              "Rejuvenation"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": 0,
+      "text": "Tranquility | 1-2 casts per raid; interrupted by Sapphiron's aura [[d:druid#1476245899612131513]] [[d:druid#1302718473369030768]]",
+      "text_sha": "34ffae9ceb8f",
+      "entries": [],
+      "unexpressed": "nothing to add: the row names no cast the list does not already have"
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": 0,
+      "text": "Swiftmend | consumes the HoT with the fewest ticks left [[d:druid#1476571037243019437]]",
+      "text_sha": "c75eda3a07f0",
+      "entries": [],
+      "unexpressed": "time left on an aura is not in the conditions"
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": 0,
+      "text": "Nature's Swiftness | instant max-rank Healing Touch emergency",
+      "text_sha": "77f7daa0c34e",
+      "entries": [],
+      "unexpressed": "a self-cast cooldown cannot read the heal target (the heal conditions need target heal)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 3,
+      "priority": 0,
+      "text": "Innervate | self at ~600 Spirit = 100% regen 15 s; swap to a Spirit staff first [[d:druid#1465410896120643595]] [[d:druid#1464971421745807653]]",
+      "text_sha": "406b82378718",
+      "entries": [
+        {
+          "id": "innervate_kb",
+          "spell": "Innervate",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "note": "The Spirit-staff swap the KB asks for first is gear; 40% for 'about 600 Spirit' is the healer engine's mana-save threshold. The preset's druid_innervate keeps its own rule.",
+          "when": {
+            "state": "combat",
+            "power_below": 40,
+            "no_self_aura": [
+              "Innervate"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "order": [
+    "nature_healing_touch",
+    "tranquility",
+    "rejuv_blanket",
+    "rejuvenation",
+    "regrowth",
+    "rejuv_self",
+    "innervate_kb"
+  ],
+  "oracle": {
+    "core": [
+      "Rejuvenation",
+      "Regrowth",
+      "Healing Touch"
+    ],
+    "situational": [
+      "Swiftmend",
+      "Nature's Swiftness",
+      "Tranquility",
+      "Innervate",
+      "Abolish Poison",
+      "Cure Poison",
+      "Remove Curse"
+    ],
+    "never": [],
+    "signature": [
+      "Swiftmend",
+      "Nature's Swiftness"
+    ],
+    "taunt": []
+  }
+}

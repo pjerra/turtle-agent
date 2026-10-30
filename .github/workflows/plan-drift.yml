@@ -1,0 +1,43 @@
+name: plan-drift
+
+# Compare the dungeon plans in this repo with their newest exports in TortoiseBots' world migrations. This is not a PR
+# gate: the plan file is the source and an export lags it by design (a plan edited after its export differs until the
+# next export). The first version is report-only: it writes a per-plan summary to the job's step summary and never
+# fails the run. The tool is tools/plandrift (its tests run in `make test`).
+on:
+  push:
+    branches: [main, dev]
+  schedule:
+    - cron: "17 4 * * *" # nightly, after the fuzz job (03:17 UTC)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # The public TortoiseBots repository is only read: `dev` holds data/sql/world, the migrations the run leader loads.
+      - uses: actions/checkout@v4
+        with:
+          repository: Sagiroth/TortoiseBots
+          ref: dev
+          path: tb
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.mod
+
+      - name: plans vs TortoiseBots dev exports
+        run: |
+          set -euo pipefail
+          go run ./tools/plandrift --plans dungeons --sql tb/data/sql/world | tee -a "$GITHUB_STEP_SUMMARY"

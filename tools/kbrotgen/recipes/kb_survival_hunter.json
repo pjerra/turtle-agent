@@ -1,0 +1,269 @@
+{
+  "name": "kb_survival_hunter",
+  "class": "hunter",
+  "spec": "survival",
+  "role": "melee-dps",
+  "kb_file": "classes/yaml/hunter/survival-melee-dps.yaml",
+  "preset": "survival_hunter",
+  "replaces": [
+    "hunter_marksman"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's survival melee list: the swing with Raptor Strike in front of it, Immolation Trap, Mongoose Bite, Lacerate, Carve and Wing Clip as the last button, and Explosive Trap with the same list on 2+ targets. The side bonus of Lacerate, the fire immunity of a target and the proximity rules of Feign Death are not conditions (kb.unexpressed).",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 1,
+      "text": "Raptor Strike | off cooldown (contested order with Mongoose Bite) [[d:hunter#1485147064102031453]], [[d:hunter#1488178738528124948]]",
+      "text_sha": "9286b3d47c6d",
+      "entries": [
+        {
+          "id": "auto_attack",
+          "kind": "attack",
+          "when": {}
+        },
+        {
+          "id": "raptor_strike",
+          "kind": "next_swing",
+          "spell": "Raptor Strike",
+          "level": 1,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true
+          },
+          "note": "the swing and the strike the KB's melee list assumes; Raptor Strike replaces the next swing, so it is queued once per swing."
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 2,
+      "text": "Immolation Trap | target not fire-immune and not about to die [[d:hunter#1451997607705444677]]",
+      "text_sha": "e51056ed58a5",
+      "entries": [
+        {
+          "id": "immolation_trap",
+          "spell": "Immolation Trap",
+          "level": 16,
+          "target": "self",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "mob_hp_above": 30
+          },
+          "note": "\"not about to die\": 30% is this recipe's number; the trap is placed at the hunter's feet."
+        }
+      ],
+      "unexpressed": "a fire-immune target is not a condition"
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 3,
+      "text": "Mongoose Bite | off cooldown",
+      "text_sha": "26db7009ae8c",
+      "entries": [
+        {
+          "id": "mongoose_bite",
+          "spell": "Mongoose Bite",
+          "level": 16,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 4,
+      "text": "Lacerate | off cooldown; from the side (+15%)",
+      "text_sha": "ec857f55475f",
+      "entries": [
+        {
+          "id": "lacerate",
+          "spell": "Lacerate",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true
+          }
+        }
+      ],
+      "unexpressed": "positional (from the side) not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 5,
+      "text": "Carve | off cooldown [[d:hunter#1448546351657914440]]",
+      "text_sha": "f955311f3378",
+      "entries": [
+        {
+          "id": "carve",
+          "spell": "Carve",
+          "talent": true,
+          "target": "self",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "mob_in_reach": true
+          },
+          "note": "Moved after the AoE entries: Carve has no cooldown of its own (a 10 s category), so as a rule it would starve the trap and the 2+ Carve."
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 6,
+      "text": "Wing Clip | only if nothing else is ready or about to be ready [[d:hunter#1488178991918485585]]",
+      "text_sha": "f1b199c38878",
+      "entries": [
+        {
+          "id": "wing_clip",
+          "spell": "Wing Clip",
+          "level": 12,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true
+          },
+          "note": "The KB's own last button (\"only if nothing else is ready\"), so it is the last of the reach entries."
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Explosive Trap > Carve > Raptor Strike > Mongoose Bite > Lacerate > Wing Clip",
+      "text_sha": "4ad589f432e3",
+      "entries": [
+        {
+          "id": "explosive_trap",
+          "spell": "Explosive Trap",
+          "level": 34,
+          "target": "self",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "mobs_in_reach_min": 2
+          }
+        },
+        {
+          "id": "carve_aoe",
+          "spell": "Carve",
+          "talent": true,
+          "target": "self",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "mobs_in_reach_min": 2
+          }
+        }
+      ],
+      "unexpressed": "a fire-immune target is not a condition; the other steps are the single-target entries"
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Rapid Fire / on-use trinkets / Blood Fury | on pull; Blood Fury does not stack with Molten Emberstone [[d:hunter#1456621926540644466]]",
+      "text_sha": "dbd4de38cf64",
+      "entries": [
+        {
+          "id": "rapid_fire",
+          "spell": "Rapid Fire",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat"
+          }
+        }
+      ],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "Deterrence | emergency; ~90% avoidance with Improved Aspect of the Monkey [[d:hunter#1408483316390428682]]",
+      "text_sha": "e92c43ea1a18",
+      "entries": [
+        {
+          "id": "deterrence",
+          "spell": "Deterrence",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "self_hp_below": 50
+          },
+          "note": "\"emergency\": 50% is the phrase table's default where the KB gives no number."
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": null,
+      "text": "Feign Death | threat drop; resist chance grows with proximity; cannot fail out of line of sight [[d:hunter#1494689825419165921]], [[d:hunter#1445841760583680000]]",
+      "text_sha": "c14d189cdd59",
+      "entries": [
+        {
+          "id": "feign_death",
+          "spell": "Feign Death",
+          "level": 30,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "mob_on_me": true
+          }
+        }
+      ],
+      "unexpressed": "the resist chance's proximity and line-of-sight rules are not conditions"
+    }
+  ],
+  "order": [
+    "auto_attack",
+    "raptor_strike",
+    "immolation_trap",
+    "mongoose_bite",
+    "lacerate",
+    "explosive_trap",
+    "carve_aoe",
+    "carve",
+    "wing_clip",
+    "rapid_fire",
+    "deterrence",
+    "feign_death"
+  ],
+  "oracle": {
+    "core": [
+      "Raptor Strike",
+      "Mongoose Bite",
+      "Lacerate"
+    ],
+    "situational": [
+      "Carve",
+      "Wing Clip",
+      "Immolation Trap",
+      "Explosive Trap",
+      "Rapid Fire",
+      "Deterrence",
+      "Feign Death"
+    ],
+    "never": [],
+    "signature": [
+      "Lacerate",
+      "Carve"
+    ],
+    "taunt": []
+  }
+}
