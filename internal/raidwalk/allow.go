@@ -44,8 +44,8 @@ func AllowedLine(line string, hires map[string]bool) bool {
 				return false
 			}
 		}
-		m, err := strconv.ParseUint(f[5], 10, 32)
-		return err == nil && m > 0
+		_, err := strconv.ParseUint(f[5], 10, 32)
+		return err == nil
 	case ".tele":
 		if len(f) != 4 || f[1] != "name" || !hires[f[2]] {
 			return false
