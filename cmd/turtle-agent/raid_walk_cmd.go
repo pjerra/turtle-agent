@@ -456,8 +456,11 @@ type walk struct {
 
 	untilWords []string
 	untilLabel string
-	untilStep  int // the step of the start line's until label (0: unknown)
-	fromWords  []string
+	// runLabel and speedFellBack are the status lines' label facts for the summary (noteLabel).
+	runLabel      string
+	speedFellBack bool
+	untilStep     int // the step of the start line's until label (0: unknown)
+	fromWords     []string
 
 	agent    walkAgent
 	manifest teardownSlotManifest
@@ -1096,7 +1099,7 @@ func (w *walk) finish(code int) {
 	meta := raidwalk.SummaryMeta{
 		Plan: w.plan.Name, Map: w.plan.Map, Server: w.opts.server, Slot: w.slotNumber(), Character: w.manifest.Character,
 		Until: w.opts.until, From: w.opts.from, Speed: w.opts.speed, TestSpeed: w.opts.speed != 1.0,
-		RowsSHA256: rowsSHA256(w.rows), UntilStep: w.untilStep,
+		RowsSHA256: rowsSHA256(w.rows), UntilStep: w.untilStep, RunLabel: w.runLabel, SpeedFellBack: w.speedFellBack,
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
 		TierSource: w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,

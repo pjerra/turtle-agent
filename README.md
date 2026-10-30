@@ -1960,6 +1960,10 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
    `TBM:RUN|<plan>|<state>|<step>/<steps>|<leg>|<kind>|<phase>|<note>` line the module pushes on every change (through the view feed), asks
    `.bot run status` every `poll_s` (15 s) as a safety net, and ignores a line of another plan. Per change the report, the trace (`run_leader`
    event), the dungeon events (`dungeon_leg`, `dungeon_step`, mode `observe`) and the card take in state, step, leg, kind, phase and note.
+   Optional trailing fields are read off the note: `|left <K>` (packs left alive) and, last, the speed/until label of a test-speed or
+   `until` run (`speed 2.0 (test)`, `speed 2.0 (test; 1.0 since a real player joined)`, `until boss (step 38)`, joined with `; `), which the
+   report and the card show as `label`; a trailing field of any other shape stays note text. A hold step's phase `hold <d>/<s> down` or
+   `fight <d>/<s> down` (an event's units down of those seen) reads in words on the card.
 5. **End.** `done` at the last step ends the run `done` (the agent then sends `cmd stay`, as in any run, and unbinds). `done` before the last step, or with
    a note "stopped...", ends it `failed` with the module's note. When the watch ends any other way (a failure, a ceiling, `dungeon_stop`) a run that is
    still alive on the server gets `.bot run stop` first.
@@ -2151,10 +2155,10 @@ The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused
 |---|---|
 | `run.log` | every `TBM:RUN` line (control bytes escaped) and the walk's own notes, `HH:MM:SS.mmm <text>` |
 | `commanders-<NNNN>-<reason>.json` | GET `/api/v1/commanders` (`reason`: walk, pause, wipe, boss, hold) |
-| `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key |
+| `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key (a `live` row, a fight still running, is left for the next read: its finished fight comes back under the same id) |
 | `frames.jsonl` | one `bot_view` frame per 10 s (positions, hp, dead, hostiles; every line carries the walk's `tier`) |
 | `slot-setup.txt`, `teardown.json` | what slot setup printed, and teardown's report |
-| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison` |
+| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison`; `run_label` (the newest speed/until label of the status lines, e.g. `until boss (step 41)`) and `speed_fell_back` (the server's test speed went back to 1.0 once a real player joined); per fight `warnings` (the dashboard's rule warnings) and `detail` read from its detail file: `kind`, `engaged`, `death_recap[]` (name, `t_ms`, killer, `last_hit`, `burst`: the recap's hits summed; at most 8), `top_taken`/`top_taken_amount`, `damage`, `healing`, `debuff_pct` (uptime % on the fought unit) and `red` (red rule warnings). `summary.txt` lists the fights with deaths or red warnings |
 
 Exit codes: 0 the run ended by its `until` (or the hold); 18 a phase failed or was refused (setup, login, hire, bind,
 enter, start, the server has no `until`, a stall, the ceiling, an interrupt, `lease lost`); 19 the walk ran and was

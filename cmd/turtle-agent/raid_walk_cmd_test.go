@@ -1280,6 +1280,35 @@ func TestRaidWalkSavesFightsOncePerKey(t *testing.T) {
 	}
 }
 
+// TestRaidWalkSkipsLiveFightRows: a fight still running (live row, no detail yet) is not taken as seen, so the finished
+// fight under the same id is fetched and digested once it is filed.
+func TestRaidWalkSkipsLiveFightRows(t *testing.T) {
+	f := newFixture(t)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "k", Live: true}}
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	if sum := f.summary(); len(sum.Fights) != 0 || len(f.dash.fightKeys) != 0 {
+		t.Fatalf("a live row was taken: fights %+v keys %q", sum.Fights, f.dash.fightKeys)
+	}
+	f = newFixture(t)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "k", Dur: 1200, Outcome: "win", Step: 3, Deaths: 1, Warnings: 2}}
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	sum := f.summary()
+	if len(sum.Fights) != 1 || sum.Fights[0].Warnings != 2 || sum.Fights[0].Detail == nil {
+		t.Fatalf("fights %+v", sum.Fights)
+	}
+	if sum.RunLabel != "until boss (step 29)" || sum.SpeedFellBack {
+		t.Fatalf("run label %q, fell back %v", sum.RunLabel, sum.SpeedFellBack)
+	}
+}
+
 func TestRaidWalkInterruptStopsRunAndTearsDown(t *testing.T) {
 	f := newFixture(t)
 	var q []queuedEvent
