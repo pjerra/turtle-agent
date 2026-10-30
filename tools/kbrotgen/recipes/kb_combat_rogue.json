@@ -1,0 +1,257 @@
+{
+  "name": "kb_combat_rogue",
+  "class": "rogue",
+  "spec": "combat",
+  "role": "melee-dps",
+  "kb_file": "classes/yaml/rogue/combat-melee-dps.yaml",
+  "preset": "combat_rogue",
+  "replaces": [
+    "rogue_combat"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's Combat list (Combat Envenom daggers): Envenom at one combo point before Slice and Dice, Eviscerate at five, Surprise Attack after the mob dodges and below 80 energy, Sinister Strike as the builder, Blade Flurry on with two or more mobs. Backstab waits for a dagger and for the position behind the mob, which the conditions cannot see; the Adrenaline Rush build, the cancelled Blade Flurry, Vanish's threat reset and the items are named in kb.unexpressed.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 1,
+      "text": "Envenom (1 combo point) | Envenom missing or about to expire; cast Envenom before Slice and Dice (~50 DPS)",
+      "text_sha": "e7a8eb8e6244",
+      "entries": [
+        {
+          "id": "envenom",
+          "spell": "Envenom",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "combo_points_min": 1,
+            "no_mob_aura": [
+              "Envenom"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 2,
+      "text": "Slice and Dice (1 combo point) | Slice and Dice missing or about to expire",
+      "text_sha": "fdad9b773beb",
+      "entries": [
+        {
+          "id": "slice_and_dice",
+          "spell": "Slice and Dice",
+          "level": 10,
+          "target": "fight",
+          "harmful": false,
+          "threat": "none",
+          "when": {
+            "mob_in_reach": true,
+            "combo_points_min": 1,
+            "no_self_aura": [
+              "Slice and Dice"
+            ]
+          },
+          "note": "no_self_aura, not self_aura_missing: the buff lasts under a minute (6 s per combo point), so the under-a-minute rule would spend every combo point on it."
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 3,
+      "text": "Eviscerate | combo points == 5 (not 1-point spam); optional: 2-4 point Eviscerate when a buff is about to drop and points > 1",
+      "text_sha": "de61d04de8c8",
+      "entries": [
+        {
+          "id": "eviscerate",
+          "spell": "Eviscerate",
+          "level": 1,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "combo_points_min": 5
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 4,
+      "text": "Surprise Attack | usable (after a dodge) AND energy <= 80",
+      "text_sha": "6ac74f4cbee9",
+      "entries": [
+        {
+          "id": "surprise_attack",
+          "spell": "Surprise Attack",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "after": "dodge",
+            "power_below": 81
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 5,
+      "text": "Backstab | main hand is a dagger AND behind target",
+      "text_sha": "ca979b8b6715",
+      "unexpressed": "positional (behind the target) not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 6,
+      "text": "Sinister Strike | main hand is a sword/axe/mace/fist; never with a dagger main hand (swap weapons instead when you cannot be behind)",
+      "text_sha": "5676ca67ac64",
+      "entries": [
+        {
+          "id": "auto_attack",
+          "kind": "attack",
+          "note": "The swing is the base every entry waits on: it goes first in the order, as in the Go rotation (rogue_combat)."
+        },
+        {
+          "id": "sinister_strike",
+          "spell": "Sinister Strike",
+          "level": 1,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true
+          }
+        }
+      ],
+      "unexpressed": "weapon type not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 7,
+      "text": "Adrenaline Rush build only: keep Slice and Dice + 5-point Rupture (Taste for Blood); Adrenaline Rush right after a 5-point Rupture; Eviscerate only if both buffs have 20+ s left | talents include Adrenaline Rush; no Envenom",
+      "text_sha": "bff9668d8207",
+      "unexpressed": "talents are not a condition: the Adrenaline Rush build only"
+    },
+    {
+      "from": "rotation_single",
+      "index": 7,
+      "priority": 0,
+      "text": "Opener: pre-load a combo point on a critter and carry it with Slice and Dice; open with Backstab/Sinister Strike, not stealth | pull",
+      "text_sha": "734534556b15",
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "toggle Blade Flurry on (hits exactly one extra target; -20% energy regen)",
+      "text_sha": "f9778ce849ce",
+      "entries": [
+        {
+          "id": "blade_flurry",
+          "spell": "Blade Flurry",
+          "level": 30,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "mobs_in_reach_min": 2,
+            "no_self_aura": [
+              "Blade Flurry"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 1,
+      "text": "toggle Blade Flurry off",
+      "text_sha": "622062abe101",
+      "unexpressed": "cancel/stop casting not expressible"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 2,
+      "text": "keep Instant Poison on both weapons through mixed trash instead of swapping",
+      "text_sha": "0fb84100edad",
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Adrenaline Rush (AR build) | after a 5-point Rupture; once at pull if kill < ~3 min, twice if longer [[d:rogue#1424148190663278846]], [[d:rogue#1446573952553058305]]",
+      "text_sha": "771fce694582",
+      "unexpressed": "talents are not a condition: the Adrenaline Rush build only"
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "Blade Flurry | toggle on at 2+ targets, off at 1",
+      "text_sha": "579340d2e8b4",
+      "unexpressed": "cancel/stop casting not expressible"
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": null,
+      "text": "Vanish | threat reset when approaching the tank; swap active trinket to passive (new active needs 30 s before use) [[d:rogue#1465825152125374744]], [[d:rogue#1465825846521626935]], [[d:rogue#1494011328833261689]]",
+      "text_sha": "f5dab9779779",
+      "unexpressed": "threat is not a condition"
+    },
+    {
+      "from": "cooldowns",
+      "index": 3,
+      "priority": null,
+      "text": "Thistle Tea | energy starved, e.g. in burst windows",
+      "text_sha": "cf308c329fb1",
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 4,
+      "priority": null,
+      "text": "Active trinkets / Badge of the Swarmguard | boss burst (with AR); passives such as DFT on trash [[d:rogue#1487230426148765727]]",
+      "text_sha": "4cda1b8fdeca",
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    }
+  ],
+  "order": [
+    "auto_attack",
+    "envenom",
+    "slice_and_dice",
+    "eviscerate",
+    "surprise_attack",
+    "sinister_strike",
+    "blade_flurry"
+  ],
+  "oracle": {
+    "core": [
+      "Envenom",
+      "Slice and Dice",
+      "Eviscerate",
+      "Sinister Strike"
+    ],
+    "situational": [
+      "Surprise Attack",
+      "Blade Flurry",
+      "Backstab",
+      "Rupture",
+      "Adrenaline Rush",
+      "Vanish"
+    ],
+    "never": [],
+    "signature": [
+      "Blade Flurry"
+    ],
+    "taunt": []
+  }
+}

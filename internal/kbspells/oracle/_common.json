@@ -1,0 +1,87 @@
+{
+  "taunts": [
+    "Taunt",
+    "Growl",
+    "Hand of Reckoning",
+    "Mocking Blow",
+    "Challenging Shout",
+    "Challenging Roar"
+  ],
+  "ignore": [
+    "Food",
+    "Drink",
+    "First Aid",
+    "Restore Mana",
+    "Major Healthstone",
+    "Dark Rune",
+    "Demonic Rune",
+    "Rejuvenation Potion",
+    "Shimmer Stout",
+    "Ephemeral Power"
+  ],
+  "generic": {
+    "warrior": [
+      "Battle Shout",
+      "Bloodrage",
+      "Berserker Rage",
+      "Battle Stance",
+      "Defensive Stance",
+      "Berserker Stance"
+    ],
+    "priest": [
+      "Inner Fire",
+      "Power Word: Fortitude",
+      "Prayer of Fortitude",
+      "Divine Spirit",
+      "Inner Focus",
+      "Fear Ward"
+    ],
+    "mage": [
+      "Arcane Intellect",
+      "Frost Armor",
+      "Ice Armor",
+      "Mage Armor",
+      "Evocation"
+    ],
+    "warlock": [
+      "Demon Skin",
+      "Demon Armor",
+      "Create Healthstone",
+      "Create Soulstone"
+    ],
+    "hunter": [
+      "Aspect of the Hawk",
+      "Aspect of the Monkey",
+      "Aspect of the Viper",
+      "Hunter's Mark"
+    ],
+    "rogue": [
+      "Stealth",
+      "Sprint"
+    ],
+    "shaman": [
+      "Lightning Shield",
+      "Water Walking"
+    ],
+    "paladin": [
+      "Seal of Wisdom",
+      "Seal of Light",
+      "Blessing of Might",
+      "Blessing of Wisdom",
+      "Devotion Aura"
+    ],
+    "druid": [
+      "Mark of the Wild",
+      "Gift of the Wild",
+      "Thorns",
+      "Bear Form",
+      "Cat Form",
+      "Dire Bear Form"
+    ]
+  },
+  "limits": {
+    "sunder_ok_per_10s": 1.5,
+    "sunder_warn_per_10s": 0.8,
+    "min_fight_ms": 10000
+  }
+}

@@ -99,6 +99,9 @@ const (
 // leaderEvent sends a dungeon_leader event of phase for the current leg.
 func (d *Driver) leaderEvent(phase string, extra map[string]any) {
 	data := map[string]any{"phase": phase, "leg": max(d.curLeg, 0)}
+	if d.cfg.EventMode != "" {
+		data["mode"] = d.cfg.EventMode
+	}
 	for k, v := range extra {
 		data[k] = v
 	}
@@ -172,6 +175,20 @@ func (d *Driver) recoverLeader(ctx context.Context) error {
 	return d.afterBack(ctx)
 }
 
+// RecoverSelf brings the agent's own dead character back outside a run, for the player follow mode: the leader mode's way (bringBack,
+// without its orders): a resurrection a living healer of the party offers within ResWait, else the release and the corpse run, through
+// the plan's entrance_trigger when the corpse lies inside. It sends nothing to the party (no ".bot action follow": afterBack is not
+// called), and a dead party is no wipe here: the bots' recovery is the run leader's. how is "resurrected" or "corpse_run".
+func (d *Driver) RecoverSelf(ctx context.Context) (how string, err error) {
+	prevWipe := d.inWipe
+	d.inWipe = true // look() counts deaths only and never returns errWipe
+	defer func() { d.inWipe = prevWipe }()
+	if err := d.bringBack(ctx, nil); err != nil {
+		return "", err
+	}
+	return d.lastHow, nil
+}
+
 // bringBack is recoverLeader and the leader's part of every other recovery (a wipe's, the dead members'): each death of the leader
 // is counted here, once, against MaxLeaderDeaths. orders, when set, is called at every poll to keep the members' own recovery going
 // (recoverWipe).
@@ -206,6 +223,7 @@ func (d *Driver) bringBack(ctx context.Context, orders func(context.Context) err
 		return fmt.Errorf("the leader could not come back: %w", err)
 	}
 	d.recoveries++
+	d.lastHow = how
 	d.deathCounted = false
 	switch how {
 	case "resurrected":

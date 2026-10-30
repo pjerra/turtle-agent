@@ -1,0 +1,378 @@
+{
+  "name": "kb_discipline_priest",
+  "class": "priest",
+  "spec": "discipline",
+  "role": "ranged-dps",
+  "kb_file": "classes/yaml/priest/discipline-ranged-dps.yaml",
+  "preset": "discipline_priest",
+  "replaces": [
+    "priest_shadow"
+  ],
+  "mode": "",
+  "notes": "The knowledge base's discipline (Smite) priest: Enlighten and Inner Focus upkeep, Holy Fire to keep the Purifying Flames debuff up (four Smites fit one cycle), Smite as the filler, Shadow Word: Pain while moving, Pain Spike on a dying mob, rank-1 Holy Fire when mana is low, Holy Nova at four or more targets. Chastise and the tier-set cycles need a friendly target or a gear check the conditions lack and are listed in kb.unexpressed.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 0,
+      "text": "Pre-pull: Inner Fire; Enlighten on self (+15%) or one non-Smite DPS (+10%); Chastise the tank on pull |",
+      "text_sha": "6b236641ecbe",
+      "entries": [],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 1,
+      "text": "Opener: Inner Focus -> Holy Fire -> 4x Smite -> Holy Fire | boss pull",
+      "text_sha": "d621b8f5479b",
+      "entries": [],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 2,
+      "text": "Holy Fire | start of each cycle (after 4 Smites) to refresh Purifying Flames; if it misses, recast it",
+      "text_sha": "c2d3db1217f3",
+      "entries": [
+        {
+          "id": "holy_fire",
+          "spell": "Holy Fire",
+          "level": 20,
+          "target": "fight",
+          "when": {
+            "no_mob_aura": [
+              "Holy Fire"
+            ]
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 3,
+      "text": "Smite x4 | cast instantly when Searing Light is up",
+      "text_sha": "48035ff2c51b",
+      "entries": [
+        {
+          "id": "smite",
+          "spell": "Smite",
+          "level": 1,
+          "target": "fight",
+          "when": {
+            "moving": false
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 4,
+      "text": "Smite + Chastise instead of Holy Fire | boss dies before the next cycle completes",
+      "text_sha": "a8f6a018db76",
+      "entries": [],
+      "unexpressed": "creature type not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 5,
+      "text": "Chastise (friendly arcane mage / affliction warlock / top DPS) | off cooldown (40 s); costs one Smite; never on self in raid",
+      "text_sha": "b4ab37927cbf",
+      "entries": [],
+      "unexpressed": "friendly target not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 6,
+      "text": "Shadow Word: Pain | only while moving (without T3.5 5-set)",
+      "text_sha": "8cb57371eba8",
+      "entries": [
+        {
+          "id": "shadow_word_pain",
+          "spell": "Shadow Word: Pain",
+          "level": 4,
+          "target": "fight",
+          "when": {
+            "moving": true,
+            "no_mob_aura": [
+              "Shadow Word: Pain"
+            ]
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 7,
+      "priority": 7,
+      "text": "T3.5 5-set cycle: 4x Smite -> Holy Fire -> 2x Smite -> Shadow Word: Pain (18.01 s) | wearing T3.5 5-set (lets Burning Zeal tick out); if the set DoT is resisted recast SW:P + Holy Fire",
+      "text_sha": "3c63b16e842e",
+      "entries": [],
+      "unexpressed": "gear or set bonus not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 8,
+      "priority": 8,
+      "text": "T3 8-set opener: Chastise -> Holy Fire -> PW:S -> 2x Smite -> Holy Fire | wearing full T3",
+      "text_sha": "f16037c3c4e8",
+      "entries": [],
+      "unexpressed": "gear or set bonus not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 9,
+      "priority": 9,
+      "text": "Pain Spike | trash mob dies within ~2 s",
+      "text_sha": "f7aa410696dd",
+      "entries": [
+        {
+          "id": "pain_spike",
+          "spell": "Pain Spike",
+          "level": 30,
+          "target": "fight",
+          "when": {
+            "mob_hp_below": 30
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 10,
+      "priority": 10,
+      "text": "Holy Fire rank 1 / downranked Smite | mana low",
+      "text_sha": "57617ba53b49",
+      "entries": [
+        {
+          "id": "holy_fire_rank1",
+          "spell": "Holy Fire",
+          "level": 20,
+          "rank": 1,
+          "target": "fight",
+          "when": {
+            "power_below": 30,
+            "no_mob_aura": [
+              "Holy Fire"
+            ]
+          },
+          "note": "moved ahead of the full-rank entry (KB priority 10): at low mana the rank-1 cast is the row"
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "single-target rotation",
+      "text_sha": "7afa01d4c194",
+      "entries": [],
+      "unexpressed": "covered by rotation_single: the same single-target entries play below the Nova threshold"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 1,
+      "text": "Holy Nova spam",
+      "text_sha": "fc1bc844e95e",
+      "entries": [
+        {
+          "id": "holy_nova",
+          "spell": "Holy Nova",
+          "level": 20,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "mobs_near_mob_min": 4,
+            "tank_holds": true
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 2,
+      "text": "alternate rank-1 Holy Nova and instant Smite (Searing Light)",
+      "text_sha": "67b84e8bb76b",
+      "entries": [
+        {
+          "id": "holy_nova_rank1",
+          "spell": "Holy Nova",
+          "level": 20,
+          "rank": 1,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "mobs_near_mob_min": 4,
+            "power_below": 50
+          },
+          "note": "ahead of the full-rank Nova (KB priority 2) so the cheap cast wins below half mana"
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Inner Focus | free Holy Fire opener (3 min)",
+      "text_sha": "1bcc04a2d669",
+      "entries": [
+        {
+          "id": "inner_focus",
+          "spell": "Inner Focus",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "no_self_aura": [
+              "Inner Focus"
+            ]
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "Chastise | tank on pull, then top DPS every 40 s",
+      "text_sha": "3cd204add5ed",
+      "entries": [],
+      "unexpressed": "friendly target not in the conditions"
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": null,
+      "text": "Enlighten | 30 min buff: self or one non-Smite DPS; re-apply after death",
+      "text_sha": "0618805c577b",
+      "entries": [
+        {
+          "id": "enlighten",
+          "spell": "Enlighten",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "no_self_aura": [
+              "Enlighten"
+            ]
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "cooldowns",
+      "index": 3,
+      "priority": null,
+      "text": "Fear Ward | tank before fears",
+      "text_sha": "4597a9b95ebe",
+      "entries": [],
+      "unexpressed": "friendly target not in the conditions"
+    },
+    {
+      "from": "cooldowns",
+      "index": 4,
+      "priority": null,
+      "text": "Berserking / Grace of the Sunwell / Sun's Embrace | racial, on cooldown",
+      "text_sha": "d2e187978a10",
+      "entries": [
+        {
+          "id": "berserking",
+          "spell": "Berserking",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat"
+          }
+        },
+        {
+          "id": "grace_of_the_sunwell",
+          "spell": "Grace of the Sunwell",
+          "level": 10,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat"
+          }
+        },
+        {
+          "id": "suns_embrace",
+          "spell": "Sun's Embrace",
+          "level": 20,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat"
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "cooldowns",
+      "index": 5,
+      "priority": null,
+      "text": "Fade | threat near tank (delays, does not prevent, a pull)",
+      "text_sha": "4c6b7bf71fab",
+      "entries": [],
+      "unexpressed": "priest_defense owns Fade"
+    }
+  ],
+  "order": [
+    "holy_fire_rank1",
+    "holy_fire",
+    "smite",
+    "shadow_word_pain",
+    "pain_spike",
+    "holy_nova_rank1",
+    "holy_nova",
+    "enlighten",
+    "inner_focus",
+    "berserking",
+    "grace_of_the_sunwell",
+    "suns_embrace"
+  ],
+  "oracle": {
+    "core": [
+      "Holy Fire",
+      "Smite"
+    ],
+    "situational": [
+      "Chastise",
+      "Shadow Word: Pain",
+      "Pain Spike",
+      "Holy Nova",
+      "Inner Focus",
+      "Enlighten",
+      "Fade",
+      "Fear Ward",
+      "Berserking",
+      "Grace of the Sunwell",
+      "Sun's Embrace"
+    ],
+    "never": [],
+    "signature": [
+      "Chastise",
+      "Enlighten"
+    ],
+    "taunt": []
+  }
+}

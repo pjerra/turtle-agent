@@ -1,0 +1,293 @@
+{
+  "name": "kb_feral_cat_druid",
+  "class": "druid",
+  "spec": "feral_cat",
+  "role": "melee-dps",
+  "kb_file": "classes/yaml/druid/feral-melee-dps.yaml",
+  "preset": "feral_cat_druid",
+  "replaces": [
+    "druid_cat"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's feral cat list: Faerie Fire (Feral) on a new mob, Tiger's Fury kept up, Rake and Rip bleeding, Ferocious Bite at five points once Rip is up, Shred on Clearcasting and Claw as the filler. The prowl opener, Reshift and the bleed-immune exceptions are not expressible; the attack that starts the swing is queued first, as the KB's opener assumes white swings.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 0,
+      "text": "Opener: Prowl -> Tiger's Fury (before an energy tick) -> Pounce -> Rake -> Rip -> Claw to 5 -> Ferocious Bite; no stealth: Faerie Fire (Feral) |",
+      "text_sha": "eaf37b100177",
+      "entries": [
+        {
+          "id": "faerie_fire_feral",
+          "spell": "Faerie Fire (Feral)",
+          "level": 25,
+          "target": "fight",
+          "when": {
+            "no_mob_aura": [
+              "Faerie Fire (Feral)"
+            ]
+          }
+        }
+      ],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 1,
+      "text": "Tiger's Fury | buff (Blood Frenzy/TF) missing; off GCD",
+      "text_sha": "6e1be885c9a0",
+      "entries": [
+        {
+          "id": "tigers_fury",
+          "spell": "Tiger's Fury",
+          "level": 24,
+          "target": "self",
+          "when": {
+            "state": "combat",
+            "no_self_aura": [
+              "Tiger's Fury"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 2,
+      "text": "Rip | target bleedable AND Rip missing AND combo_points==5 (fight <30s: Rip at 1-3 CP)",
+      "text_sha": "67c440ff8dd8",
+      "entries": [
+        {
+          "id": "rip",
+          "spell": "Rip",
+          "level": 20,
+          "target": "fight",
+          "note": "The KB's bleed-immunity and 'Rip at 1-3 points in a short fight' cases are creature properties the conditions cannot see; the entry takes five points.",
+          "when": {
+            "combo_points_min": 5,
+            "no_mob_aura": [
+              "Rip"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 3,
+      "text": "Ferocious Bite | combo_points==5 AND Rip up (Carnage refreshes Rip+Rake); on fast trash 4 CP ok; never <5 on bosses",
+      "text_sha": "9f65254121e6",
+      "entries": [
+        {
+          "id": "ferocious_bite",
+          "spell": "Ferocious Bite",
+          "level": 24,
+          "target": "fight",
+          "note": "The KB's 4-point trash concession is not a condition; the list takes five points and Rip up (Carnage refreshes it).",
+          "when": {
+            "combo_points_min": 5,
+            "mob_aura": [
+              "Rip"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 4,
+      "text": "Rake | target bleedable AND Rake missing",
+      "text_sha": "ada45393400a",
+      "entries": [
+        {
+          "id": "rake",
+          "spell": "Rake",
+          "level": 24,
+          "target": "fight",
+          "note": "'Bleedable' is a creature property, not a condition.",
+          "when": {
+            "no_mob_aura": [
+              "Rake"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 5,
+      "text": "Shred | Clearcasting AND behind target",
+      "text_sha": "0f782f7ae435",
+      "entries": [
+        {
+          "id": "shred",
+          "spell": "Shred",
+          "level": 22,
+          "target": "fight",
+          "note": "The KB's 'behind the target' is melee_position's business: the preset stands the cat behind the mob.",
+          "when": {
+            "self_aura": [
+              "Clearcasting"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 6,
+      "text": "Claw | filler on bleedable targets",
+      "text_sha": "2f80030a7aa7",
+      "entries": [
+        {
+          "id": "auto_attack",
+          "kind": "attack",
+          "note": "Attached to the filler row: a melee rotation has no white swings without it, and the KB's opener and Tiger's Fury rows assume them.",
+          "when": {}
+        },
+        {
+          "id": "claw",
+          "spell": "Claw",
+          "level": 20,
+          "target": "fight",
+          "when": {}
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 7,
+      "priority": 7,
+      "text": "Reshift | energy < 28-32 AND Tiger's Fury < 3 s left AND no energy tick imminent; recast TF after (Reshift drops TF)",
+      "text_sha": "43d2ff62e60e",
+      "entries": [],
+      "unexpressed": "cancel/stop casting not expressible"
+    },
+    {
+      "from": "rotation_single",
+      "index": 8,
+      "priority": 8,
+      "text": "Bleed-immune target: Tiger's Fury; Ferocious Bite at 5 CP; Shred from behind; Reshift below 28 energy | target bleed-immune (Kara40 Anomalus/Medivh/Chess/Rupturan, Kruul P2, some MC bosses)",
+      "text_sha": "f9cdcdfb150a",
+      "entries": [],
+      "unexpressed": "creature type not in the conditions"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "keep single-target rotation on kill target",
+      "text_sha": "d50c8d4f6456",
+      "entries": [],
+      "unexpressed": "nothing to add: the row names no cast the list does not already have"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 2,
+      "text": "shift to Bear and Swipe (3-target cap)",
+      "text_sha": "e0301dc8bbc6",
+      "entries": [],
+      "unexpressed": "stance/form: the preset's stance strategy owns it"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 3,
+      "text": "Hurricane from caster form",
+      "text_sha": "aa7e69fabaaf",
+      "entries": [],
+      "unexpressed": "stance/form: the preset's stance strategy owns it"
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": 0,
+      "text": "Tiger's Fury | keep 100% uptime; off GCD; 18 s, +attack speed, 10 energy/3 s [[d:druid#1468957031791591573]]",
+      "text_sha": "8fe7eabb14d3",
+      "entries": [],
+      "unexpressed": "nothing to add: the row names no cast the list does not already have"
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": 0,
+      "text": "Berserk | 6-minute cooldown; long bleedable bosses [[d:druid#1465511791173042258]]",
+      "text_sha": "814e9ccef826",
+      "entries": [
+        {
+          "id": "berserk",
+          "spell": "Berserk",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "note": "'Long bleedable bosses' is not a condition; the six-minute cooldown decides.",
+          "when": {
+            "state": "combat"
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": 0,
+      "text": "Reshift | level-60 spell: re-enter Cat Form for up to 60 energy with Furor + Wolfshead enchant; only when TF is about to expire [[d:druid#1459798058324725914]]",
+      "text_sha": "a3ed6989f897",
+      "entries": [],
+      "unexpressed": "cancel/stop casting not expressible"
+    },
+    {
+      "from": "cooldowns",
+      "index": 3,
+      "priority": 0,
+      "text": "On-use trinkets (ZHC, ToEP, KotS) | pull and last 20% of the fight [[d:druid#1426991920953036942]]",
+      "text_sha": "f41919b3a69c",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    }
+  ],
+  "order": [
+    "auto_attack",
+    "faerie_fire_feral",
+    "tigers_fury",
+    "rip",
+    "ferocious_bite",
+    "rake",
+    "shred",
+    "claw",
+    "berserk"
+  ],
+  "oracle": {
+    "core": [
+      "Ferocious Bite",
+      "Rip",
+      "Rake",
+      "Claw",
+      "Shred"
+    ],
+    "situational": [
+      "Tiger's Fury",
+      "Faerie Fire (Feral)",
+      "Berserk",
+      "Prowl",
+      "Pounce",
+      "Swipe",
+      "Hurricane"
+    ],
+    "never": [],
+    "signature": [
+      "Shred",
+      "Ferocious Bite",
+      "Tiger's Fury"
+    ],
+    "taunt": []
+  }
+}

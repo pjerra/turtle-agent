@@ -75,4 +75,14 @@ FROM creature_movement m JOIN creature c ON c.guid = m.id
 WHERE c.map = $map ORDER BY m.id, m.point;
 SQL
 } > "$out/movement.tsv"
+# The scripted paths of the map's escort NPC (script_waypoint; entry is the creature's entry, e.g. the Disciple of Naralex 3678,
+# 32 waypoints): a plan's escort follow legs are walked to these stops. Empty for most maps.
+{
+  printf 'entry\tpoint\tx\ty\tz\twaittime\tcomment\n'
+  query <<SQL
+SELECT m.entry, m.pointid, m.location_x, m.location_y, m.location_z, m.waittime, m.point_comment
+FROM script_waypoint m JOIN creature c ON c.id = m.entry
+WHERE c.map = $map ORDER BY m.entry, m.pointid;
+SQL
+} > "$out/script_waypoint.tsv"
 wc -l "$out"/*.tsv

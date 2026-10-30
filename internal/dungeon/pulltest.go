@@ -73,7 +73,7 @@ func (s PulltestSpec) Validate(p *Plan) error {
 		return fmt.Errorf("pulltest.leg %d: the plan has legs 0-%d", s.Leg, len(p.Legs)-1)
 	}
 	if n := len(p.Legs[s.Leg].PullGroups); s.PullGroup < 0 || s.PullGroup >= n {
-		return fmt.Errorf("pulltest.pull_group %d: leg %d (%s) has %d pull groups (numbers 0-%d)", s.PullGroup, s.Leg, p.Legs[s.Leg].Name, n, n-1)
+		return fmt.Errorf("pulltest.pull_group %d: leg %d (%s) has %d pull groups (from_pull_group 0-%d; dungeon_status numbers them 1-%d)", s.PullGroup, s.Leg, p.Legs[s.Leg].Name, n, n-1, n)
 	}
 	if s.Tries < 1 || s.Tries > MaxPulltestTries {
 		return fmt.Errorf("pulltest.tries %d: use 1-%d (default %d)", s.Tries, MaxPulltestTries, DefaultPulltestTries)
@@ -82,7 +82,7 @@ func (s PulltestSpec) Validate(p *Plan) error {
 		return fmt.Errorf("pulltest.reset %q: use %s, %s, %s or %s", s.Reset, ResetAuto, ResetEquivalent, ResetRespawn, ResetNone)
 	}
 	if g := p.Legs[s.Leg].PullGroups[s.PullGroup]; g.Ambush {
-		return fmt.Errorf("pulltest: pull group %d of leg %d is an ambush (stealthed): it is walked through, not pulled", s.PullGroup, s.Leg)
+		return fmt.Errorf("pulltest: %s of leg %d is an ambush (stealthed): it is walked through, not pulled", PullGroupRef(s.PullGroup, 0), s.Leg)
 	}
 	return nil
 }
@@ -181,7 +181,7 @@ func (d *RemoteDriver) runPulltest(ctx context.Context) (err error) {
 	leg := d.plan.Legs[spec.Leg]
 	pg := leg.PullGroups[spec.PullGroup]
 	if pg.Team != "" && d.team != "" && !strings.EqualFold(pg.Team, d.team) {
-		return fmt.Errorf("pulltest: pull group %d of leg %d is for team %s, the party is %s", spec.PullGroup, spec.Leg, pg.Team, d.team)
+		return fmt.Errorf("pulltest: %s of leg %d is for team %s, the party is %s", PullGroupRef(spec.PullGroup, 0), spec.Leg, pg.Team, d.team)
 	}
 	healer := d.opt.Healer
 	pr := &PulltestReport{Version: PulltestVersion, Plan: d.plan.Name, Leg: spec.Leg, LegName: leg.Name, PullGroup: spec.PullGroup, Entries: slices.Clone(pg.Entries),
@@ -259,7 +259,7 @@ func (d *RemoteDriver) ptAction(leg, group, try int) Action {
 	l := d.plan.Legs[leg]
 	g := l.PullGroups[group]
 	return Action{Kind: ActPull, Leg: leg, Step: -1, Entries: g.Entries, Positions: g.Positions, Ambush: g.Ambush, Radius: g.Radius, Patrol: g.Patrol, Skip: l.Skip,
-		Label: fmt.Sprintf("leg %d%s: pulltest try %d, pull group %d of %d", leg, nameSuffix(l.Name), try, group+1, len(l.PullGroups))}
+		Label: fmt.Sprintf("leg %d%s: pulltest try %d, %s", leg, nameSuffix(l.Name), try, PullGroupRef(group, len(l.PullGroups)))}
 }
 
 // ptTry is one try: the ordinary pull of the group (gather at the rest gate, pullback, fight), then the rest gate the next pull would wait

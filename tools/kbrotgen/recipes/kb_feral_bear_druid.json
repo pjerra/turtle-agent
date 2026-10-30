@@ -1,0 +1,329 @@
+{
+  "name": "kb_feral_bear_druid",
+  "class": "druid",
+  "spec": "feral_bear",
+  "role": "tank",
+  "kb_file": "classes/yaml/druid/feral-tank.yaml",
+  "preset": "bear_tank_druid",
+  "replaces": [
+    "druid_bear"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's feral bear list: Maul always queued, Savage Bite on Clearcasting or above 50 rage, Swipe on two mobs or with the rage full, Faerie Fire (Feral) when no other GCD is needed, Demoralizing Roar spam on ten mobs, Barkskin (Feral) as the panic button, Enrage as the rage comes back and Berserk. The pull preparation, Reshift and taunting are not the file's; the attack that starts the swing is queued first.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 0,
+      "text": "Pre-pull (~10 s): Regrowth -> Rejuvenation -> Cat Form -> Tiger's Fury -> Bear Form (Furor + head enchant ~15 rage) |",
+      "text_sha": "f3c43fee21e3",
+      "entries": [],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 0,
+      "text": "Pull: Faerie Fire (Feral) or ranged pull, Mighty Rage Potion, Maul + Savage Bite; Enrage/Berserk when TF Blood Frenzy ends; never open with Growl or Feral Charge |",
+      "text_sha": "d5c1518caa4f",
+      "entries": [],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 1,
+      "text": "Maul | always queued",
+      "text_sha": "3e5711308566",
+      "entries": [
+        {
+          "id": "auto_attack",
+          "kind": "attack",
+          "note": "Attached to the Maul row: a melee rotation has no white swings without it, and the KB queues Maul on every swing.",
+          "when": {}
+        },
+        {
+          "id": "maul",
+          "kind": "next_swing",
+          "spell": "Maul",
+          "level": 10,
+          "target": "fight",
+          "note": "'Always queued' is the next-swing kind: one Maul per swing.",
+          "when": {
+            "mob_in_reach": true
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 2,
+      "text": "Savage Bite | Clearcasting OR rage > 50 (some 35); with T3 8-piece on every cooldown",
+      "text_sha": "b8dbf219ae08",
+      "entries": [
+        {
+          "id": "savage_bite_clearcasting",
+          "spell": "Savage Bite",
+          "level": 58,
+          "target": "fight",
+          "note": "The KB's two triggers (Clearcasting OR more than 50 rage) are two entries: the conditions are all-must-hold. Ahead of the always-queued Maul: one action runs per tick, so a gated cast must be able to win it; Maul takes the ticks they leave.",
+          "when": {
+            "self_aura": [
+              "Clearcasting"
+            ]
+          }
+        },
+        {
+          "id": "savage_bite",
+          "spell": "Savage Bite",
+          "level": 58,
+          "target": "fight",
+          "note": "'Some say 35': the KB's higher threshold is taken; rage is a percent of the bar.",
+          "when": {
+            "power_above": 50
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 3,
+      "text": "Swipe | 2+ mobs OR rage full (>75)",
+      "text_sha": "b5afcda0fb0f",
+      "entries": [
+        {
+          "id": "swipe",
+          "spell": "Swipe",
+          "level": 16,
+          "target": "fight",
+          "threat": "aoe",
+          "harmful": true,
+          "note": "Ahead of the always-queued Maul for the same reason as the Bite: the AoE branch must win the tick at two mobs.",
+          "when": {
+            "mobs_in_reach_min": 2
+          }
+        },
+        {
+          "id": "swipe_rage",
+          "spell": "Swipe",
+          "level": 16,
+          "target": "fight",
+          "threat": "aoe",
+          "harmful": true,
+          "when": {
+            "power_above": 75
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 4,
+      "text": "Faerie Fire (Feral) | no other GCD needed",
+      "text_sha": "f0c9e2a10f0d",
+      "entries": [
+        {
+          "id": "faerie_fire_feral",
+          "spell": "Faerie Fire (Feral)",
+          "level": 25,
+          "target": "fight",
+          "note": "'No other GCD needed' is the entry's place after the attacks; the KB does not say 'missing', but the debuff is the cast's point.",
+          "when": {
+            "mob_in_reach": true,
+            "no_mob_aura": [
+              "Faerie Fire (Feral)"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 5,
+      "text": "Growl | mob loose or double dodge/parry at pull; off GCD",
+      "text_sha": "ae90c6dbe458",
+      "entries": [],
+      "unexpressed": "taunt: role_tank owns taunting"
+    },
+    {
+      "from": "rotation_single",
+      "index": 7,
+      "priority": 6,
+      "text": "Reshift (Bear) | rage-starved; not overused",
+      "text_sha": "c93c8d42d410",
+      "entries": [],
+      "unexpressed": "cancel/stop casting not expressible"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Maul kill target, tab + Swipe others, FF (Feral) loose adds; pre-HoT self for healing threat",
+      "text_sha": "918185149cfb",
+      "entries": [],
+      "unexpressed": "nothing to add: the row names no cast the list does not already have"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 2,
+      "text": "split 2-3 mobs per tank; pre-cast Hurricane on front mob",
+      "text_sha": "caf9db48e0dd",
+      "entries": [],
+      "unexpressed": "raid assignment/marking (the Hurricane needs caster form, which the preset's form strategy owns)"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 3,
+      "text": "Idol of Evergrowth + Demoralizing Roar spam with T1+T2 Thorns (44)",
+      "text_sha": "eed6b52bb69f",
+      "entries": [
+        {
+          "id": "demoralizing_roar",
+          "spell": "Demoralizing Roar",
+          "level": 10,
+          "target": "self",
+          "threat": "aoe",
+          "harmful": true,
+          "note": "The KB's Idol of Evergrowth and T1+T2 Thorns are gear; the roar itself is the row.",
+          "when": {
+            "mobs_in_reach_min": 10,
+            "mobs_lacking_aura": "Demoralizing Roar"
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": 0,
+      "text": "Barkskin | 60 s; cast in caster form before shifting, persists in Bear [[d:druid#1488905914017906758]]",
+      "text_sha": "dad35c63b375",
+      "entries": [],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": 0,
+      "text": "Barkskin (Feral) | 10-minute cooldown panic button [[d:druid#1465653427081187378]]",
+      "text_sha": "834b46c68f8f",
+      "entries": [
+        {
+          "id": "barkskin_feral",
+          "spell": "Barkskin (Feral)",
+          "level": 44,
+          "target": "self",
+          "band": "emergency",
+          "note": "The KB's panic button: emergency band, so it also breaks the swing.",
+          "when": {
+            "state": "combat",
+            "self_hp_below": 35,
+            "no_self_aura": [
+              "Barkskin (Feral)"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": 0,
+      "text": "Enrage | after Tiger's Fury Blood Frenzy ends; not when healers struggle [[d:druid#1477368423267696690]]",
+      "text_sha": "247d458a4bc5",
+      "entries": [
+        {
+          "id": "enrage",
+          "spell_id": 5229,
+          "target": "self",
+          "band": "high",
+          "note": "The player's Enrage by id: the data's other Enrage copies leave the name without one first-rank level. The KB's trigger (the Tiger's Fury proc ending) is not an aura condition; rage starvation above half health is the proxy, and Enrage's armor cost is why health gates it.",
+          "when": {
+            "state": "combat",
+            "power_below": 20,
+            "self_hp_above": 50,
+            "no_self_aura": [
+              "Enrage"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 3,
+      "priority": 0,
+      "text": "Berserk | fear break or second haste window [[d:druid#1462684604111519827]]",
+      "text_sha": "0e4d9a17acf6",
+      "entries": [
+        {
+          "id": "berserk",
+          "spell": "Berserk",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "note": "Fear breaking is the one trigger a condition can see (when.feared); the second haste window is not, so the six-minute cooldown decides.",
+          "when": {
+            "state": "combat"
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 4,
+      "priority": 0,
+      "text": "Mighty Rage Potion / Kiss of the Spider / Juju Flurry | boss pull [[d:druid#1472409131196616948]]",
+      "text_sha": "a852f4a6db3a",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    }
+  ],
+  "order": [
+    "auto_attack",
+    "savage_bite_clearcasting",
+    "savage_bite",
+    "swipe",
+    "swipe_rage",
+    "maul",
+    "faerie_fire_feral",
+    "demoralizing_roar",
+    "barkskin_feral",
+    "enrage",
+    "berserk"
+  ],
+  "oracle": {
+    "core": [
+      "Maul",
+      "Savage Bite",
+      "Swipe"
+    ],
+    "situational": [
+      "Faerie Fire (Feral)",
+      "Demoralizing Roar",
+      "Enrage",
+      "Berserk",
+      "Barkskin",
+      "Barkskin (Feral)",
+      "Frenzied Regeneration",
+      "Growl",
+      "Challenging Roar",
+      "Hurricane"
+    ],
+    "never": [],
+    "signature": [
+      "Maul",
+      "Savage Bite"
+    ],
+    "taunt": [
+      "Growl",
+      "Challenging Roar"
+    ]
+  }
+}

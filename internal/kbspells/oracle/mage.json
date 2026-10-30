@@ -1,0 +1,78 @@
+{
+  "class": "mage",
+  "specs": [
+    {
+      "spec": "arcane",
+      "role": "ranged-dps",
+      "rotation": "kb_arcane_mage",
+      "core": [
+        "Arcane Missiles",
+        "Arcane Rupture"
+      ],
+      "situational": [
+        "Arcane Surge",
+        "Fire Blast",
+        "Arcane Explosion",
+        "Arcane Power",
+        "Presence of Mind",
+        "Evocation",
+        "Berserking"
+      ],
+      "never": [],
+      "signature": [
+        "Arcane Rupture",
+        "Arcane Power"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "fire",
+      "role": "ranged-dps",
+      "rotation": "kb_fire_mage",
+      "core": [
+        "Fireball",
+        "Scorch",
+        "Fire Blast"
+      ],
+      "situational": [
+        "Pyroblast",
+        "Combustion",
+        "Blast Wave",
+        "Flamestrike",
+        "Arcane Explosion"
+      ],
+      "never": [],
+      "signature": [
+        "Pyroblast",
+        "Combustion",
+        "Blast Wave"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "frost",
+      "role": "ranged-dps",
+      "rotation": "kb_frost_mage",
+      "core": [
+        "Frostbolt",
+        "Icicles",
+        "Ice Barrier"
+      ],
+      "situational": [
+        "Frost Nova",
+        "Cone of Cold",
+        "Cold Snap",
+        "Blizzard",
+        "Arcane Explosion",
+        "Ice Block"
+      ],
+      "never": [],
+      "signature": [
+        "Icicles",
+        "Ice Barrier",
+        "Cold Snap"
+      ],
+      "taunt": []
+    }
+  ]
+}

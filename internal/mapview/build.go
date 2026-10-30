@@ -132,7 +132,6 @@ type Builder struct {
 	first     time.Time
 	last      time.Time
 	mapVotes  map[uint32]int
-	maxSample int
 }
 
 // NewBuilder returns an empty Builder.
@@ -486,8 +485,7 @@ func groupPacks(cs []Creature, radius float64) {
 	for i := range parent {
 		parent[i] = i
 	}
-	var find func(int) int
-	find = func(i int) int {
+	find := func(i int) int {
 		for parent[i] != i {
 			parent[i] = parent[parent[i]]
 			i = parent[i]

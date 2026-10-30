@@ -1,0 +1,411 @@
+{
+  "name": "kb_protection_warrior",
+  "class": "warrior",
+  "spec": "protection",
+  "role": "tank",
+  "kb_file": "classes/yaml/warrior/protection-tank.yaml",
+  "preset": "tank_warrior",
+  "replaces": [
+    "warrior_melee",
+    "warrior_tank"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's protection tank list (the DefTac build it recommends): Shield Slam and Concussion Blow on cooldown, Overpower after a dodge in Battle Stance, Sunder Armor as the filler, Heroic Strike as the rage dump, Shield Block when its buff is down, Revenge after an avoided attack, then the AoE rows. Stance and taunting stay with the preset and role_tank.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 0,
+      "text": "Pre-pull Battle Shout + Bloodrage; Mighty Rage Potion on pull | opener",
+      "text_sha": "461e0af8292e",
+      "entries": [
+        {
+          "id": "battle_shout",
+          "spell": "Battle Shout",
+          "level": 1,
+          "target": "self",
+          "when": {
+            "state": "rest",
+            "self_aura_missing": [
+              "Battle Shout"
+            ]
+          }
+        },
+        {
+          "id": "bloodrage",
+          "spell": "Bloodrage",
+          "level": 10,
+          "target": "self",
+          "when": {
+            "state": "rest",
+            "power_below": 20,
+            "self_hp_above": 50,
+            "no_self_aura": [
+              "Bloodrage"
+            ]
+          }
+        }
+      ],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 1,
+      "text": "Tank in Battle Stance | DefTac, every pull you safely can; Defensive to taunt/block-dance",
+      "text_sha": "d1f8b5fe6e71",
+      "entries": [],
+      "unexpressed": "stance/form: the preset's stance strategy owns it"
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 2,
+      "text": "Shield Slam | on cooldown; opener with Shield Slam or Concussion Blow",
+      "text_sha": "da559be225bd",
+      "entries": [
+        {
+          "id": "shield_slam",
+          "spell": "Shield Slam",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 3,
+      "text": "Overpower | on dodge",
+      "text_sha": "ddea814f6eac",
+      "entries": [
+        {
+          "id": "overpower",
+          "spell": "Overpower",
+          "level": 12,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "after": "dodge",
+            "stance": [
+              "Battle Stance"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 4,
+      "text": "Concussion Blow | on cooldown (generates rage)",
+      "text_sha": "b21c24c39a5f",
+      "entries": [
+        {
+          "id": "concussion_blow",
+          "spell": "Concussion Blow",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 5,
+      "text": "Heroic Strike | rage dump every affordable swing",
+      "text_sha": "9f9d97482d42",
+      "entries": [
+        {
+          "id": "auto_attack",
+          "kind": "attack"
+        },
+        {
+          "id": "heroic_strike",
+          "kind": "next_swing",
+          "spell": "Heroic Strike",
+          "level": 1,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "power_above": 49
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 6,
+      "text": "Sunder Armor | filler (10 rage)",
+      "text_sha": "8923263fea53",
+      "entries": [
+        {
+          "id": "sunder_armor",
+          "spell": "Sunder Armor",
+          "level": 10,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "mob_stacks_below": {
+              "aura": "Sunder Armor",
+              "stacks": 5
+            }
+          },
+          "note": "Moved ahead of Heroic Strike: the durable filler is what the KB's list plays while the stacks are not full; the pilot's play test pins it as the second cast after Shield Slam at 60 rage."
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 7,
+      "priority": 7,
+      "text": "Shield Block | after a hit consumed the Shield Slam buff (they overwrite)",
+      "text_sha": "aa94d58a35ac",
+      "entries": [
+        {
+          "id": "shield_block",
+          "spell": "Shield Block",
+          "level": 16,
+          "target": "self",
+          "when": {
+            "state": "combat",
+            "mob_on_me": true,
+            "no_self_aura": [
+              "Shield Block"
+            ],
+            "stance": [
+              "Defensive Stance"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 8,
+      "priority": 8,
+      "text": "Revenge | Revenge builds only",
+      "text_sha": "f619349718f5",
+      "entries": [
+        {
+          "id": "revenge",
+          "spell": "Revenge",
+          "level": 14,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "after": "avoided",
+            "stance": [
+              "Defensive Stance"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Mark kill order",
+      "text_sha": "dbdcbe635c43",
+      "entries": [],
+      "unexpressed": "raid assignment/marking"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 2,
+      "text": "Demoralizing Shout (spam; uncapped)",
+      "text_sha": "9b3fea2b3964",
+      "entries": [
+        {
+          "id": "demoralizing_shout",
+          "spell": "Demoralizing Shout",
+          "level": 14,
+          "target": "self",
+          "harmful": true,
+          "threat": "aoe",
+          "when": {
+            "mob_in_reach": true,
+            "mobs_in_reach_min": 2,
+            "mobs_lacking_aura": "Demoralizing Shout"
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 3,
+      "text": "Tab-Cleave",
+      "text_sha": "1c9a85d8f525",
+      "entries": [
+        {
+          "id": "cleave",
+          "kind": "next_swing",
+          "spell": "Cleave",
+          "level": 20,
+          "target": "fight",
+          "threat": "aoe",
+          "when": {
+            "mob_in_reach": true,
+            "power_above": 49,
+            "mobs_in_reach_min": 2
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 3,
+      "priority": 4,
+      "text": "Thunder Clap (max 4 targets, spell, no AP scaling)",
+      "text_sha": "1d91a71ffc61",
+      "entries": [
+        {
+          "id": "thunder_clap",
+          "spell": "Thunder Clap",
+          "level": 6,
+          "target": "self",
+          "harmful": true,
+          "threat": "aoe",
+          "when": {
+            "mob_in_reach": true,
+            "mobs_in_reach_min": 2,
+            "mobs_lacking_aura": "Thunder Clap",
+            "stance": [
+              "Battle Stance",
+              "Defensive Stance"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 4,
+      "priority": 5,
+      "text": "Berserker Stance Whirlwind: tclap whirlwind tclap",
+      "text_sha": "5e48d7c5b4c2",
+      "entries": [],
+      "unexpressed": "stance/form: the preset's stance strategy owns it"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 5,
+      "priority": 6,
+      "text": "Sappers / Dense Dynamite / Oil of Immolation / Force Reactive Disk; Challenging Shout emergency",
+      "text_sha": "55559620294e",
+      "entries": [],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": 1,
+      "text": "Shield Wall | needs shield; shared 30-min CD with Recklessness/Retaliation",
+      "text_sha": "ee653a164c83",
+      "entries": [],
+      "unexpressed": "weapon type not in the conditions"
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": 2,
+      "text": "Last Stand + healthstone + Nordanaar Herbal Tea | low HP",
+      "text_sha": "9f3c4b6ea616",
+      "entries": [
+        {
+          "id": "last_stand",
+          "spell": "Last Stand",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "self_hp_below": 50
+          }
+        }
+      ],
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": 3,
+      "text": "Improved Berserker Rage | roots/slows; never in Sanv Tas'dal add phase",
+      "text_sha": "ed6e849c2a9f",
+      "entries": [],
+      "unexpressed": "stance/form: the preset's stance strategy owns it"
+    },
+    {
+      "from": "cooldowns",
+      "index": 3,
+      "priority": 4,
+      "text": "Recklessness + Enrage + Death Wish + Mighty Rage Potion | burst pull threat",
+      "text_sha": "43f2743bdedc",
+      "entries": [],
+      "unexpressed": "stance/form: the preset's stance strategy owns it"
+    }
+  ],
+  "order": [
+    "shield_slam",
+    "auto_attack",
+    "overpower",
+    "concussion_blow",
+    "sunder_armor",
+    "heroic_strike",
+    "shield_block",
+    "revenge",
+    "demoralizing_shout",
+    "cleave",
+    "thunder_clap",
+    "last_stand",
+    "battle_shout",
+    "bloodrage"
+  ],
+  "oracle": {
+    "core": [
+      "Shield Slam",
+      "Sunder Armor",
+      "Heroic Strike"
+    ],
+    "situational": [
+      "Overpower",
+      "Concussion Blow",
+      "Revenge",
+      "Shield Block",
+      "Demoralizing Shout",
+      "Cleave",
+      "Thunder Clap",
+      "Last Stand",
+      "Shield Wall",
+      "Whirlwind",
+      "Berserker Rage",
+      "Enrage",
+      "Death Wish",
+      "Recklessness",
+      "Bloodrage",
+      "Battle Shout",
+      "Execute",
+      "Charge"
+    ],
+    "never": [],
+    "signature": [
+      "Shield Slam",
+      "Concussion Blow"
+    ],
+    "taunt": [
+      "Taunt",
+      "Mocking Blow",
+      "Challenging Shout"
+    ]
+  }
+}

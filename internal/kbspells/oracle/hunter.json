@@ -1,0 +1,81 @@
+{
+  "class": "hunter",
+  "specs": [
+    {
+      "spec": "beast_mastery",
+      "role": "ranged-dps",
+      "rotation": "kb_beast_mastery_hunter",
+      "core": [
+        "Kill Command",
+        "Steady Shot",
+        "Arcane Shot"
+      ],
+      "situational": [
+        "Bestial Wrath",
+        "Multi-Shot",
+        "Volley",
+        "Rapid Fire",
+        "Auto Shot"
+      ],
+      "never": [
+        "Aimed Shot",
+        "Serpent Sting"
+      ],
+      "signature": [
+        "Bestial Wrath",
+        "Kill Command"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "marksmanship",
+      "role": "ranged-dps",
+      "rotation": "kb_marksmanship_hunter",
+      "core": [
+        "Aimed Shot",
+        "Steady Shot",
+        "Arcane Shot"
+      ],
+      "situational": [
+        "Multi-Shot",
+        "Volley",
+        "Serpent Sting",
+        "Rapid Fire",
+        "Feign Death",
+        "Aspect of the Viper",
+        "Aspect of the Hawk",
+        "Auto Shot"
+      ],
+      "never": [],
+      "signature": [
+        "Aimed Shot"
+      ],
+      "taunt": []
+    },
+    {
+      "spec": "survival",
+      "role": "melee-dps",
+      "rotation": "kb_survival_hunter",
+      "core": [
+        "Raptor Strike",
+        "Mongoose Bite",
+        "Lacerate"
+      ],
+      "situational": [
+        "Carve",
+        "Wing Clip",
+        "Immolation Trap",
+        "Explosive Trap",
+        "Rapid Fire",
+        "Deterrence",
+        "Feign Death"
+      ],
+      "never": [],
+      "signature": [
+        "Lacerate",
+        "Carve"
+      ],
+      "taunt": []
+    }
+  ]
+}

@@ -731,6 +731,123 @@ func TestObserveNoSecondWipeFromALoneDeathAfterAWindowWipe(t *testing.T) {
 	}
 }
 
+// TestModuleCountsParse reads the run leader's counts from its notes: the wipes, near wipes and lead deaths its
+// DoneNote and self-regroup notes name. The wipes regexp needs digits directly before "wipe(s)", so "5 near wipes"
+// is never also read as 5 wipes (no blank-out needed).
+func TestModuleCountsParse(t *testing.T) {
+	cases := []struct {
+		note        string
+		wipes, near int
+		lead        int
+		ok          bool
+	}{
+		{"plan done (speed 3.0 (test); 5 wipes, 5 near wipes)", 5, 5, 0, true},
+		{"4 dead (1 wipe, 2 near wipes this run): regrouping by itself (1 of 2 at this step)", 1, 2, 0, true},
+		{"plan done (1 near wipe)", 0, 1, 0, true},
+		{"plan done (2 wipes, 1 near wipe, 4 lead deaths)", 2, 1, 4, true},
+		{"fighting", 0, 0, 0, false},
+	}
+	for _, c := range cases {
+		wipes, near, lead, ok := moduleCounts(c.note)
+		if wipes != c.wipes || near != c.near || lead != c.lead || ok != c.ok {
+			t.Errorf("moduleCounts(%q) = %d, %d, %d, %v (want %d, %d, %d, %v)", c.note, wipes, near, lead, ok, c.wipes, c.near, c.lead, c.ok)
+		}
+	}
+}
+
+// TestObserveReportCarriesTheModuleCounts: the observe report carries the run leader's own counts, the highest its
+// notes named (the final done note here).
+func TestObserveReportCarriesTheModuleCounts(t *testing.T) {
+	script := observeRunScript()
+	script[len(script)-1] = leaderStep{s(200), rs("done", 5, 5, "first", "move", "walk", "plan done (2 wipes, 1 near wipe, 4 lead deaths)")}
+	g := fiveBotLeader(t, script...)
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	ob := rep.Remote.Observe
+	if ob == nil || ob.ModuleWipes != 2 || ob.ModuleNearWipes != 1 || ob.ModuleLeadDeaths != 4 {
+		t.Fatalf("module counts %+v (want 2, 1, 4)", ob)
+	}
+}
+
+// deadIntervals converts per-bot [start, end) dead seconds of the RFC trace to the tick table deathsOnTickTable
+// reads: one tick is one poll (5 s). Tick 1 is the watch's baseline frame (countDeaths and trackObservedDeaths take
+// it as the reference, as in the window tests above whose tables start at tick 2), so the first live sample is tick
+// 2: tick = (t-370)/5 + 2, and [a,b) covers ta..tb-1.
+func deadIntervals(m map[int][][2]int) map[int][]int {
+	out := map[int][]int{}
+	for idx, ivs := range m {
+		for _, iv := range ivs {
+			ta, tb := (iv[0]-370)/5+2, (iv[1]-370)/5+2
+			for tick := ta; tick < tb; tick++ {
+				out[tick] = append(out[tick], idx)
+			}
+		}
+	}
+	return out
+}
+
+// TestObserveRfc19z16Run2bCountsOneWipeAndFourLeadDeaths replays the real RFC 2026-10-20 run 2b dead edges (the Part A
+// test 1 intervals; 0x2e3 is the lead at index 0, 0x2e5 the heal at 2, 0x2e4 at 1, 0x2e6 at 3, 0x2e7 at 4 from the
+// 999-1062 edge order). The lead dies at 374, 592, 999 and 2370 and is back up 10-14 s later; the others die at
+// 406-463, 1007-1072, 1034-1072, 1035-1072, 1062-1072, 2402-2423, 2573-2614, 2584-2614, 2592-2614 and 2605-2616. All
+// five died within 999-1062 (63 s): one window wipe although the party is never all dead in one frame. The 2370 death
+// is 235 s older than the 2605 one, so the second collapse is no second wipe. It pins #294 against the real collapse.
+func TestObserveRfc19z16Run2bCountsOneWipeAndFourLeadDeaths(t *testing.T) {
+	table := deadIntervals(map[int][][2]int{
+		0: {{374, 384}, {592, 604}, {999, 1009}, {2370, 2384}},
+		1: {{1034, 1072}, {2573, 2614}},
+		2: {{406, 463}, {1007, 1072}, {2592, 2614}},
+		3: {{1062, 1072}, {2584, 2614}},
+		4: {{1035, 1072}, {2402, 2423}, {2605, 2616}},
+	})
+	var script []leaderStep
+	script = append(script, leaderStep{0, rs("running", 1, 28, "first", "move", "walk", "walking")})
+	for i := 1; i <= 26; i++ {
+		script = append(script, leaderStep{s(i * 100), rs("running", i+1, 28, "first", "move", "walk", fmt.Sprintf("walking %d", i))})
+	}
+	script = append(script, leaderStep{s(2700), rs("done", 28, 28, "first", "move", "walk", "plan done")})
+	g := fiveBotLeader(t, script...)
+	deathsOnTickTable(g, table)
+	dir := t.TempDir()
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), func(c *Config) {
+		c.Poll = 5 * time.Second
+		c.Trace = tracerun.Config{On: true, Dir: dir, RunID: "r-rfc-2b"}
+	})
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if rep.Wipes != 1 {
+		t.Fatalf("wipes %d (want 1)\n%s", rep.Wipes, notesOf(rep))
+	}
+	if len(rep.Deaths) != 14 {
+		t.Fatalf("deaths %d (want 14: the second collapse's 2402-2616 deaths are replayed too): %+v", len(rep.Deaths), rep.Deaths)
+	}
+	if rep.LeaderDeaths != 4 {
+		t.Fatalf("leader deaths %d (want 4)\n%s", rep.LeaderDeaths, notesOf(rep))
+	}
+	if rep.Resurrections != 4 {
+		t.Fatalf("resurrections %d (want 4)\n%s", rep.Resurrections, notesOf(rep))
+	}
+	f, err := trace.Read(filepath.Join(dir, "r-rfc-2b.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wipes := 0
+	for _, e := range f.Events {
+		if e.Ev == "wipe" {
+			wipes++
+			if e.D["window"] != true {
+				t.Fatalf("the wipe event is not a window wipe: %+v", e.D)
+			}
+		}
+	}
+	if wipes != 1 {
+		t.Fatalf("%d wipe events in the trace (want 1)", wipes)
+	}
+}
+
 func TestObserveRefusesAServerWithoutTheRunLeaderBeforeHiring(t *testing.T) {
 	g := newFakeLeader(t)
 	g.listText = ""

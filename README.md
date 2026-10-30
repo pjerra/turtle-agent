@@ -21,8 +21,10 @@ and the rules for agents in [AGENTS.md](AGENTS.md).
 ## Branches and CI
 
 Work goes feature branch -> `dev` -> `main`. Open PRs against **`dev`**; `main` only takes `dev` after the owner's review.
-The `test` check (gofmt, `go vet`, a no-cgo build, `go test -race ./...`, and a cgo build) must be green to merge into
-either branch. The navmesh tests skip without mmaps.
+The `test` check (gofmt, `go vet`, a no-cgo build, `go test -race ./...`, a cgo build, and `staticcheck ./...`) must be
+green to merge into either branch. The navmesh tests skip without mmaps; the `navmesh` job runs them with the server's
+files, `plan-drift` compares the plans with their newest TortoiseBots export (report-only), and `fuzz` fuzzes the SMSG
+parsers nightly (see [docs/CI.md](docs/CI.md), which also documents the `TB_DATA_TOKEN` secret).
 
 ## Quick start
 
@@ -56,8 +58,7 @@ realm list returns; `rpc_token` and `rpc_auth` set the [RPC authentication](#rpc
 copies of the server's navmesh files, for `path_to` and `walk_path` (see [Navmesh walking](#navmesh-walking)), and to
 land falls and knockbacks on the ground (see [Falling](#falling-and-knockbacks)). `addons` replaces the addon list sent
 at world login (see [What the server sees](#what-the-server-sees)). `tbm_addon_dir` is the TortoiseBotsManager checkout
-the [addon host](#addon-host) runs (default: the pinned copy `tools/tbmcontract/fetch.sh` keeps in `.cache/`). `rotations_dir` is a folder of extra [rotation files](#rotations-as-data) (the built-in ones need none; a bad file stops the login). `dungeons_dir` is the folder
-`dungeon_run` reads plans from (default `dungeons` under the working directory; see [Dungeon runs](#dungeon-runs)). `traces_dir` is the folder run traces go to (default `traces`, or `$TURTLE_AGENT_TRACES_DIR`; see [Run traces and checks](#run-traces-and-checks)). `run_meta` (`{"model", "effort", "run", "server_trace"}`) is the slot's default AI driver of its runs: `dungeon_run`'s `run_meta` wins when it names one (see [Run traces and checks](#run-traces-and-checks); `server_trace` is off by default).
+the [addon host](#addon-host) runs (default: the pinned copy `tools/tbmcontract/fetch.sh` keeps in `.cache/`). `rotations_dir` is a folder of extra [rotation files](#rotations-as-data) (the built-in ones need none; a bad file stops the login). `dungeons_dir` is the folder `dungeon_run` reads plans from (default `dungeons` under the working directory; see [Dungeon runs](#dungeon-runs)). `traces_dir` is the folder run traces go to (default `traces`, or `$TURTLE_AGENT_TRACES_DIR`; see [Run traces and checks](#run-traces-and-checks)). `run_meta` (`{"model", "effort", "run", "server_trace"}`) is the slot's default AI driver of its runs: `dungeon_run`'s `run_meta` wins when it names one (see [Run traces and checks](#run-traces-and-checks); `server_trace` is off by default). `state_dir` is where the addon fingerprint and the instance-entry ledger are kept (default: the settings file's folder); `slot setup` points it at the account's usual folder.
 
 Log a character in and keep it online with the RPC server running:
 
@@ -86,7 +87,7 @@ recorded a normal logout each time it was checked.
 ## CLI
 
 ```
-turtle-agent login [--config FILE] [--capture FILE] [--stay DURATION] [--rpc ADDR] [--reconnect N] [--create race,class[,gender]] [--tune FILE] [<account>] <character>
+turtle-agent login [--config FILE] [--capture FILE] [--stay DURATION] [--rpc ADDR] [--reconnect N] [--create race,class[,gender]] [--tune FILE] [--pid-file FILE] [--follow LEAD --follow-plan PLAN [--follow-assist]] [<account>] <character>
 turtle-agent fleet --config FILE [--settings FILE] [--stagger DURATION] [--wait DURATION] [--reconnect N] [--stop-on-failure]
 turtle-agent scrub-check [--config FILE] <capture>...
 turtle-agent capture-stats <capture>
@@ -95,6 +96,15 @@ turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FI
 turtle-agent tune-diff <trace.jsonl>
 turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
+turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
+turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
+turtle-agent scenario check [--var NAME=VALUE]... <file>
+turtle-agent scenario run [--out DIR] [--force] [--quiet] [--var NAME=VALUE]... [--session NAME=ADDR[@TOKENFILE]]... <file>
+turtle-agent scenario norm <file> <dir>
+turtle-agent lease acquire <server> (--slot ID | --any) --holder NAME [--ttl MIN] | renew <server> <slot> --holder NAME --lease-id ID [--ttl MIN] | release <server> <slot> --holder NAME [--lease-id ID] [--force] | list [<server>] [--json]   [--slots FILE]
+turtle-agent slot setup <server> <slot> --holder NAME [--dir DIR] [--binary PATH] [--dungeons-dir DIR] [--character NAME] [--slots FILE]
+turtle-agent teardown [--keep-lease] [--release-anyway] [--gm off|on|keep] [--dry-run] [--json] [--slots FILE] <dir>
+turtle-agent rpc [--timeout DUR] [--raw] <dir> <method> [<params-json>|-]
 turtle-agent route-oracle --plans DIR --mmaps DIR --out DIR [--mode walk|bosses] [--objectives plan|bosses] [--plan NAME]...
 turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--minimap-dir DIR] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR]
 turtle-agent minimap-extract --client DIR --out DIR [--maps 70,209|all-instances] [--mmaps DIR[,DIR]] [--prefer worldmap,minimap,navmesh] [--list]
@@ -116,7 +126,12 @@ turtle-agent version
 | 8 | the server kept refusing the logout |
 | 9 | `fleet`: a child exited non-zero (the others kept running unless `--stop-on-failure`), or not every character reached the world in time |
 | 10 | a logout did not complete (`lost` or `timeout`); in a fleet, the other characters keep running |
-| 11 | `trace-score` found a failed check (see [Run traces and checks](#run-traces-and-checks)) |
+| 11 | `trace-score` found a failed check (see [Run traces and checks](#run-traces-and-checks)); `plan-check` found a point the navmesh cannot take |
+| 12 | `route-oracle` could not report every plan |
+| 13 | `stage-check` refused the leg |
+| 14 | `teardown`: a game-side or CLI step failed |
+| 15 | `lease` or `slot setup` refused (slot held, reserved, or not leased by the holder); `rpc` cannot reach the agent, its reply fails the 2.0 envelope check, or its token file is not an agent token |
+| 16 | `rpc`: the agent answered with a JSON-RPC error |
 
 `--capture` records every decrypted packet to a file (opened exclusively, mode 0600). The auth session body and
 Warden packets are never written, and any packet holding the account name, password or session key is redacted.
@@ -201,6 +216,29 @@ Set `"addons": [...]` in the settings file to send another list; it must contain
 A real Tortoise 1.18.1 client may also list `Turtle_General` and `Turtle_GroupUI` (the core accepts them when built
 with `ALLOW_TURTLE_ADDONS`); add them there if you want to look like that. This was not checked against a real client.
 
+## Test slots, leases and teardown
+
+One slot per worker. The slot table (`~/.config/turtle-agent/slots.json`, `--slots FILE`) names each server's slots with their account, character, laptop RPC port and the `settings_from` file that holds the account's password; it holds no passwords itself. `lease acquire --any` (or `--slot N`, never 3) takes a free slot for a holder name and a ttl (default 180 min); a lease is stale only when it is expired AND its client dir has no live agent, and `acquire` refuses a port that already has a listener. `slot setup` copies no settings file: it builds `<dir>/settings.json` from scratch (one account, a fresh token file per run) plus `slot.json`, the binary and the `dungeons/`/`traces/` folders, and prints the login line. `teardown <dir>` runs the RPC `teardown` first (snapshot, the player follow, `agent_run`, brain, `run stop`, unbind, `.bot remove` of listed hires, leave, gone, `.gm off`, logout), then ends the agent by its pid file, closes the port, deletes only the secrets and releases the lease (exit 14 on any fail, 15 on a refused lease). m910q slot 3 (and tortoise-test2 slot 3) is never leasable on either server. A group holding a real player (any member the `commander status` listing does not name) gets no `.bot remove` at all: a GM's remove reaches any bot, so leaving the group — which ends only your own hires — does the cleanup instead. Known limit: a classic bind (commander outside the lead's group) with a real player inside the lead's group is not detectable from the client; bot-only test runs never have that shape.
+
+`rpc <dir> <method> [<params-json>]` drives the agent of a slot dir with one JSON-RPC call, for live-test workers that must never read its token file: the command reads `slot.json`, checks it like `teardown` does (the dir must match, the port must be valid, outside paths are refused), reads the token file derived from the port itself, refuses it unless it has exactly the shape the agent generates (32 random bytes as 43 base64url characters; anything else gets `rpc: the token file is not an agent token`, exit 15, with the content never printed), and posts to `127.0.0.1:<port>` with the token as `Authorization: Bearer` and `Content-Type: application/json`. It prints only the `result` as JSON (pretty; `--raw` for one line), a JSON-RPC error as `error: <code> <message>` on stderr (exit 16), an unreachable agent as exit 15, usage errors as exit 2. A reply that is not a 2.0 envelope for the request (any non-200 status; a body that is not an object with `"jsonrpc":"2.0"`, `"id"` 1 and exactly one of a present `"result"` or an `"error"` object with a numeric code and a string message) is `rpc: bad reply from the agent: <reason>` on stderr, exit 15, never 0. `params-json` is an object or an array; `-` reads it from stdin; omitted means no params; `--timeout DUR` (default 30 s) bounds the call. The token never appears in output, errors or help: it is redacted from every printed line. Examples:
+
+```sh
+turtle-agent rpc ~/ta-w status
+turtle-agent rpc ~/ta-w gm '{"text": ".bot run list"}'
+turtle-agent rpc ~/ta-w commander '{"op": "status"}' --timeout 10s
+echo '{"text": ".bot follow start"}' | turtle-agent rpc ~/ta-w gm -
+```
+
+How a brief uses it (workers never open or edit settings files):
+
+```sh
+turtle-agent lease acquire m910q --slot 1 --holder w-a
+turtle-agent slot setup m910q 1 --holder w-a --mmaps-dir ~/turtle-agent-mmaps --dungeons-from dungeons
+turtle-agent teardown ~/ta-w-a
+```
+
+`slot setup` also takes `--mmaps-dir DIR` and `--dungeons-from DIR` (not in the usage line above). `--mmaps-dir DIR` writes `mmaps_dir` into the private `settings.json` it creates (the navmesh folder the agent walks on); DIR must exist and be a directory (a leading `~` is the home folder), else setup refuses with exit 15. `--dungeons-from DIR` copies every `*.json` plan file from DIR into the slot's `dungeons/` folder (plain files only: a symlink is refused, other files are skipped, a bad plan name is refused); workers pass the checked-out `dungeons/` folder so `follow_start`/`dungeon_run` find their plans. Without the flags, behaviour is unchanged: the 5 printed lines stay the same, plus one `mmaps: <dir>` line when `--mmaps-dir` was given and one `dungeons: <n> plans copied from <dir>` line when `--dungeons-from` was given; settings contents are never printed.
+
 ## JSON-RPC API
 
 JSON-RPC 2.0 over HTTP POST on the loopback address (`Content-Type: application/json`, no batches). Requests from a
@@ -275,6 +313,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `pet` | | The player's pet, from `UNIT_FIELD_SUMMON` of the player and the pet's own unit row: `present` (false: no pet), `guid`, `entry`, `name`, `level`, `dead`, `health`, `max_health`, `power_type` (2 focus for a hunter's pet, 0 mana for a demon), `power`, `max_power`, `happiness` (the pet's POWER5, 0 to 1,000,000) and `happiness_state` (1 unhappy, 2 content, 3 happy; absent for a demon), `loyalty`, `in_combat`, `target` (what it attacks), `distance`, `moving`; and its action bar, from `SMSG_PET_SPELLS`: `bar` (the session has it), `react` (`passive`, `defensive`, `aggressive`), `command` (`stay`, `follow`), `enabled` (false while the bar is off, e.g. mounted), `spells[]` (`spell_id`, `name`, `slot` 3 to 6 or -1 off the bar, `autocast`, `passive`), `refused` (the reason of its last refused cast). See [Pets](#pets) |
 | `pet_action` | `action` (`attack`, `follow`, `stay`, `passive`, `defensive`, `aggressive`, `cast`, `autocast_on`, `autocast_off`), `target` (guid; `attack` and `cast` default to the player's target), `slot` / `spell_id` / `name` (which spell, for `cast` and the autocast actions; it must be on the pet's bar) | CMSG_PET_ACTION (or CMSG_PET_SPELL_AUTOCAST for the autocast actions), as a client sends them from the pet bar; returns the `pet` result with the order applied. Errors without a pet, with a dead pet, while the bar is off, and for a spell not on the bar. The server drops what it refuses (a target the player may not attack: `pet_error` event with `data.feedback`) |
 | `plan_check` | `name` (a plan in `dungeons_dir`), `from_leg` (as `dungeon_run`), `from_pull_group` (with it; 0-based) | `checked` (false: `skipped` says why, no navmesh files or planner), `plan`, `map`, `points`, `issues` (each `leg`, `leg_name`, `part`, `pull_group` / `pull_groups`, `point`, `from`, `reason`, `detail`), `warnings`, `exempt`, `run_leader` (the same rows); see [Plan check](#plan-check) |
+| `dungeon_stage` | `name`, `leg` (number from 0 or name), `cleared_through`, `use_safe_point`, `force`, `dry_run`, `start`, `resume`, `speed` (with start, 1.0-3.0), `quiet_wait_s` (0-60, default 20) | `staged`, `started`, `dry_run`, `plan`, `map`, `leg`, `leg_name`, `first`, `first_source`, `point`, `kind` (`leg_first`, `before_leg`, `forced`), `back_yd`, `floor_z`, `refusal`, `proposal` (`kind` `before_leg` or `earlier_leg`, `leg`, `leg_name`, `point`, `back_yd`), `warnings`, `notes`, `gm_commands`, `party[]`, `run` (`sent`, `start_step`, `steps`, `leg`, `line`), `seconds`; see [Staging a leg](#staging-a-leg-for-the-run-leader) |
 | `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report`, and the [run watchdog](#run-watchdog)'s view for a poller: `last_progress_at`, `stalled_for_s`, `stall_level` (`none`, `warn`, `recover`, `fail`) |
 | `dungeon_stop` | | the same as `dungeon_status`, after the run has ended |
 | `dungeon_pause`, `dungeon_resume`, `dungeon_skip` | | One set of commands that acts on the active run by its mode. In a **commander** run (`mode: "remote"`) only `dungeon_pause` exists: it halts the run so that it can be resumed: the run ends `stopped` with the bots stood still (`cmd stay`) and the **commander binding kept**, so the next `dungeon_run` (`resume`, `from_leg`) re-enters the same group and instance; `report.remote.unbind_via` says `kept (the run was paused ...)`. `dungeon_stop` unbinds, which returns the hires to the commander's raid and loses the instance (ZF-2 run 3b). With no run going `dungeon_pause` changes nothing; a group-mode run has no binding and is refused (`dungeon_stop` ends it). `on_end: "logout"` still unbinds. In an **observe** run ([Observe mode](#observe-mode)) the three ask the TortoiseBots run leader for `.bot run pause`, `resume` or `skip`; the watch sends it on its next look (within a second) and the answer is in `report.remote.observe.controls`. `dungeon_resume` and `dungeon_skip` are refused when no run goes or the run is a commander one (a paused commander run goes on with `dungeon_run`). Same result as `dungeon_status` |
@@ -286,6 +325,9 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `brain_start` (run id) | `run_id`, `trace`, `trace_meta` as for `dungeon_run` | the status also carries `run_id`; every brain event has `data.run_id` |
 | `brain_stop` | | the `brain_status` result, after the brain has ended |
 | `brain_status` | | `running`, `strategies[]`, `role`, `tank`, `no_move`, `move_held` (the dungeon driver holds the move lock), `rest_ok`, `ticks`, `actions`, `idle` (why the newest tick did nothing), `last_decisions[]` (newest first), `holds[]` (spells backed off, with `reason` and `left_ms`) |
+| `follow_start` | `plan`, `lead`, `near` (3-30, default 8), `far` (near+2 to 45, default 15), `assist`, `lost_s` (10-120, default 30) | the `follow_status` result; a second call with another `lead` switches the lead bot (its `near`, `far`, `assist` and `lost_s` are ignored: follow_stop and start again to change them); see [Following the lead bot as a player](#following-the-lead-bot-as-a-player) |
+| `follow_stop` | | the final `follow_status`; `state` `ending` when the loop did not end within 10 s (it still owns the movement: `dungeon_run` stays refused until it has) |
+| `follow_status` | | `running`, `state`, `plan`, `lead`, `assist`, `near`, `far`, `lost_s`, `lead_seen`, `lead_yd`, `lead_at`, `self_at`, `map`, `trail_yd`, `walks`, `walk_fails`, `deaths`, `resurrections`, `corpse_runs`, `zone_ins`, `assists`, `max_lead_yd`, `seconds_over_60`, `stopped_reason`, `notes[]`, `started`, `seconds` |
 | `map_snapshot` | `floor` (from 0), `plan` (a plan name, drawn over the run), `floors` (`auto`, `off` or heights `"-30,-10"`), `background` (false: no navmesh), `html` (also return the replay), `pad` (yards) | `svg` (one floor as a string), `html`, `map`, `floor`, `floors[]` (names), `seconds`, `members`, `creatures`, `events`, `background`, `notes[]`: the run so far as a top-down map, see [Map images](#map-images) |
 | `attack` / `stop_attack` | | |
 | `cast` | `spell_id`, `target` | |
@@ -336,6 +378,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `quest_abandon` | `quest_id`, `wait_ms` | `since`, `event` (`quest_abandoned`) |
 | `quest_log` | | `quests[]` from the character's own quest log: `slot`, `quest_id`, `complete`, `failed`, `counts[4]` |
 | `logout` | | `outcome` (`complete` or `closed_by_server`); `lost` (-32002) and `timeout` (-32004) are errors with `data.outcome`; the reply is written before the process exits |
+| `teardown` | `dry_run`, `gm` (`off` default, `on`, `keep`), `wait_ms` (1000-10000) | `character`, `bound`, `lead`, `listed`, `steps[]` (`step`, `status` ok/skip/fail/plan, or `ending` for the `follow` step when its loop did not end within 10 s, counted as failed; `detail`), `failed`, `dry_run`, `seconds`; the agent logs out at the end (see [Test slots](#test-slots-leases-and-teardown)) |
 
 Events have `seq`, `time`, `mono_ms` (ms since the agent started, from the monotonic clock, so it never jumps with the host clock; `time` stays the wall clock), `kind`, `source`, `target`, `spell_id`, `amount`, `crit`, `text`, `party` and `data`.
 Kinds cover chat, system, whispers, melee, spell damage, periodic ticks, heals, energize, spell start/go/miss/fail,
@@ -414,6 +457,61 @@ Addons, channels and NPCs:
 
 Text the server echoes back (for example the account name in a GM reply) is redacted before it reaches events, logs
 or replies.
+
+## LFG (Turtle group finder)
+
+Turtle's group finder (LFT) is an addon conversation, not a set of opcodes: the client writes
+`TW_LFG\t<line>` on the guild addon channel and the core answers as the player himself
+(`Player::SendAddonMessage`). These methods send exactly the lines the LFG addon sends, read the answers from the
+`addon` event log and fold them into one state. Each returns `since` (the log cursor before its send), `sent`
+(the text after the `TW_LFG` tab) and `state`; `wait_ms` defaults to 5000 and is capped at 25000.
+
+| method | params | sends | waits for |
+|---|---|---|---|
+| `lfg_join` | `instances[]` (1-10 core LFT codes, e.g. `ragefirechasm`, lowercase letters and digits), `roles` (`t`, `h`, `d`), `force`, `wait_ms` | `C2S_QUEUE_JOIN;<instances>;<roles>` | `S2C_ROLECHECK_START`, `S2C_QUEUE_ERROR` or `S2C_QUEUE_JOINED` |
+| `lfg_role_check_answer` | `roles`, `force`, `wait_ms` | `C2S_ROLECHECK_RESPONSE;<roles>` | `S2C_ROLECHECK_INFO` naming you, or `S2C_QUEUE_JOINED` |
+| `lfg_proposal_answer` | `accept`, `force`, `wait_ms` | accept: `C2S_OFFER_ACCEPT`; decline: `C2S_QUEUE_LEAVE` | `S2C_OFFER_UPDATE_COUNT`, `S2C_OFFER_COMPLETE` or `S2C_QUEUE_LEFT` |
+| `lfg_leave` | `wait_ms` | `C2S_QUEUE_LEAVE` | `S2C_QUEUE_LEFT` |
+| `lfg_status` | `refresh`, `wait_ms` | with `refresh`: `C2S_GET_QUEUE_STATUS` | `S2C_UPDATE_QUEUE_STATUS` (the core answers nothing when idle) |
+| `lfg_auto` | `roles`, `accept`, `delay_ms`, `off` | in the background, see below | nothing: returns at once with `auto` (`on`, `roles`, `accept`, `delay_ms`) |
+| `lfg_listings` | `refresh`, `id`, `wait_ms` | `C2S_GET_GROUPS_LIST`, `C2S_GET_GROUP_DETAILS;<id>`, or both (details last) | `S2C_GROUPS_LIST_UPDATE;end` / `S2C_UPDATE_GROUP;<id>;end` |
+| `lfg_listing_role` | `role` (`t`, `h`, `d`, or empty to remove), `wait_ms` | `C2C_ROLECHECK_RESPONSE;<role>` on **party** | `S2C_GROUPS_LIST_UPDATE` |
+
+The conversation, as the core runs it (`LFTQeueue.cpp`, `LFTUserGroups.cpp`):
+
+| line | meaning |
+|---|---|
+| `C2S_QUEUE_JOIN;<insts>;<roles>` | queue for instances; roles are masked by the class: druid, paladin and shaman `thd`, warrior `td`, priest `hd`, hunter, mage, rogue and warlock `d` |
+| `S2C_ROLECHECK_START;<insts>` | every non-bot member confirms a role (solo players too); the check times out after 90 s |
+| `C2S_ROLECHECK_RESPONSE;<roles>` | the answer; a mask of 0 is silently ignored, so the check times out |
+| `S2C_ROLECHECK_INFO;<name>;<roles>` | what each member answered |
+| `S2C_QUEUE_JOINED`, `S2C_UPDATE_QUEUE_STATUS;<phase>;<insts>;<joinTime>;<n>;<t>:<h>:<d>` | queued: phase `queued`, `pending_rolecheck` or `pending_offer` |
+| `S2C_OFFER_NEW;<inst>;<role>` | a group wants you; the offer times out after 90 s |
+| `S2C_OFFER_UPDATE_COUNT;<t>:<h>:<d>`, `S2C_OFFER_COMPLETE` | accepted counts, then the group formed |
+| `S2C_QUEUE_LEFT;<name>`, `S2C_QUEUE_ERROR;<reason>` | left or refused (`raid`, `not_leader`, `invalid`) |
+| `S2C_GROUPS_LIST_UPDATE;start`, `<listing json>`, `;end` | the listings; the JSON may hold `;` in a description, so only the leading fields are split |
+| `S2C_UPDATE_GROUP;<id>;start;<json>`, `;<1-3>;<signup json>`, `;end` | one listing's detail and its role rows |
+
+Decisions of the protocol worth knowing:
+
+- **Declining is leaving.** There is no decline message: `lfg_proposal_answer` with `accept: false` sends
+  `C2S_QUEUE_LEAVE`, which cancels the offer and re-queues the others, and `sent` says so.
+- **Spoof guard.** A `S2C_*` line counts only as an `addon` event on the guild channel, prefix `TW_LFG`, sent by
+  the agent's own GUID. The server sends its answers from the player himself, so a guild-mate's forged line is
+  ignored.
+- **Role mask.** A role answer naming a role the class cannot take is refused before sending (`roles "t" are not
+  allowed for a priest (allowed: hd)`) because the core would silently ignore it and the 90 s check would time out;
+  `force: true` sends it anyway for tests that want to see the core ignore it.
+- **Phase checks.** `lfg_role_check_answer` needs the `rolecheck` phase and `lfg_proposal_answer` the `offer`
+  phase; `force: true` overrides. `state.history` keeps the last 50 accepted lines, and `lfg_auto`'s sends appear
+  there as `auto: <line>` (sends are not events, so the log holds only the server's side).
+- **Auto answers.** `lfg_auto {roles:"d", accept:true}` answers the next `S2C_ROLECHECK_START` with `roles` and,
+  when `accept` is set, an `S2C_OFFER_NEW` with accept or leave, after `delay_ms` (default 1500, 0-30000, a
+  human-like pause). `lfg_auto {off:true}` stops it; so do a logout, a reconnect and agent exit.
+- `state` carries `phase` (`idle`, `rolecheck`, `queued`, `offer`, `grouped`, `left`, `error`), `instances`,
+  `rolecheck_since`/`rolecheck_deadline`, `offer_since`/`offer_deadline`, `responses` (name to roles),
+  `offer` (`instance`, `role`, `counts`), `queued_since`, `counts` (`[t,h,d]`), `last_error`, `listings` (by id,
+  with `signups` after a detail request) and `history`.
 
 ## Items, loot and mounts
 
@@ -651,7 +749,7 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   step** and **no direct step goes out**, with the error naming the waypoint, the distance and why (still moving, never still, no lead bot in
   the feed, a quiet feed): `launch waypoint x y z of the next direct step: N yd away and <why> after 25 s; the direct step is not sent`. The
   point may be refused by the module's own `no-los`/`no-ground` when the step is sent; there is no soft path from short of it.
-  **`"gm_cross": true`** (on a direct waypoint; the Disciple hop of `dungeons/wailing_caverns-extra.json`, a gap no walk crosses; Wailing Caverns' ramp was the example until 2026-10-18, when its hop became a plain direct step with a `check_skip`) is not walked: a GM account moves the party to the point (the commander's own character `.appear <lead bot>` when it is not near and `.go xyz`, then `.bot summon <lead bot>` with the lead bot held where it lands, `cmd summon <bot>` for each bot that stands apart, `cmd follow`; the same machinery as `from_leg`'s start), and the run goes on once every expected living member (the lead bot and the named bots; a bot a frame does not list is summoned by name and counts as not there) is listed by a frame published after the orders and stands within 10 yd of the point; `cmd follow` is sent up to three times and refused three times fails the step, and an empty or partial frame never counts as "already there" (a note `gm_cross: gm_cross at x y z: N bots moved`, `remote.gm_crosses`, each GM line in `setup_shortcuts` marked `(GM crossing)`). The point may be anywhere on the map (no direct limits, no via point before it). It needs a remote run with a GM account that may `.go xyz` (level 1 and up, read with `.account`: the same probe as keep-near's `.appear`, so a run that notes "the agent's account level is 3" passes; the group driver's `leader_gm` and `gm_caps` report fields stay false on a remote run and are not read): `dungeon_run` refuses a plan with a gm_cross from `from_leg` on before anything is sent when the account is not one (or the game cannot move the commander's character), and the group driver refuses the plan; `plan-export` refuses it (the TortoiseBots run leader has no such step). The plan check does not walk to it (it lists it as exempt) but wants mesh floor under it.
+  **`"gm_cross": true`** (on a direct waypoint; for a gap no walk crosses and no direct step can: no plan uses it now. Wailing Caverns' ramp was the example until 2026-10-18 and the Disciple's return from Verdan in `dungeons/wailing_caverns-extra.json` until 2026-10-22; both became a plain direct step with a `check_skip`) is not walked: a GM account moves the party to the point (the commander's own character `.appear <lead bot>` when it is not near and `.go xyz`, then `.bot summon <lead bot>` with the lead bot held where it lands, `cmd summon <bot>` for each bot that stands apart, `cmd follow`; the same machinery as `from_leg`'s start), and the run goes on once every expected living member (the lead bot and the named bots; a bot a frame does not list is summoned by name and counts as not there) is listed by a frame published after the orders and stands within 10 yd of the point; `cmd follow` is sent up to three times and refused three times fails the step, and an empty or partial frame never counts as "already there" (a note `gm_cross: gm_cross at x y z: N bots moved`, `remote.gm_crosses`, each GM line in `setup_shortcuts` marked `(GM crossing)`). The point may be anywhere on the map (no direct limits, no via point before it). It needs a remote run with a GM account that may `.go xyz` (level 1 and up, read with `.account`: the same probe as keep-near's `.appear`, so a run that notes "the agent's account level is 3" passes; the group driver's `leader_gm` and `gm_caps` report fields stay false on a remote run and are not read): `dungeon_run` refuses a plan with a gm_cross from `from_leg` on before anything is sent when the account is not one (or the game cannot move the commander's character), and the group driver refuses the plan; `plan-export` refuses it (the TortoiseBots run leader has no such step). The plan check does not walk to it (it lists it as exempt) but wants mesh floor under it.
 - A **leg** is done in this order: walk the `via` waypoints, then to `to`; pull each of `pull_groups` in order (`entries` are the creature entries, one
   position per member in `positions`, the first is the one to pull; `ambush: true` marks a pack of stealthed mobs, see
   [Dungeon runs](#dungeon-runs); `needs_walk` (set by tools/dungeongen on a pull group, a leg or a boss whose position has no navmesh floor within reach; the mapping walk replaces it); `equiv` (a label of up to 40 characters) marks packs of the leg that are equivalent for the [pull test](#start-anywhere-and-the-pull-test); `radius` (yards, 1-60, default 25) is how far from a position a unit of the entries may stand and still be
@@ -666,7 +764,10 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   event's mobs, the group's own and a boss's entry and `first` are always in); the agent's driver ignores it; run `steps` in order; walk to `boss.position` and kill the
   boss; run `after_boss` (steps of the same kinds, done once the boss is dead or skipped). Each part is optional, but a leg needs at least one of pull groups, steps, a boss and after_boss steps. `skip` lists creature entries the leg
   never waits for (rares, escorts, friendly NPCs, adds that die with the boss). `boss.first` lists entries to kill before the boss,
-  in order. `rest` overrides the leg's rest gates (all keys optional, `0` or absent keeps the default): `{"health": 90, "healer_mana": 50, "mana": 35, "max_s": 60}`
+  in order. `boss.wait_s` (seconds 1-600) is how long the TortoiseBots run leader waits at `boss.position` for a boss who
+  patrols before it searches the instance for him and pauses (written as the row's `timeout_s`; absent: the run leader's 60 s):
+  a round longer than that needs it (Wailing Caverns' Kresh walks 525.9 yd in the river, about 210 s, and passes his point within
+  the row's 30 yd radius at most 96 s apart; his row carries 300). `rest` overrides the leg's rest gates (all keys optional, `0` or absent keeps the default): `{"health": 90, "healer_mana": 50, "mana": 35, "max_s": 60}`
   (percentages 1-100; `max_s` 1-600 seconds; `walk_yd`, `walk_health`, `walk_healer_mana` and `walk_mana` set the walking rest, see **rest gate** under
   [Dungeon runs](#dungeon-runs)). `companions_loot: false` on the **leg** has the party's looting off for the whole leg, from its start to its end (`.bot behavior <bot> loot off` for every bot, `on` after; remote runs). A leg that cannot have it does not start: a game that cannot send behavior orders, or a bot that refuses, fails the leg before it moves, naming the bots (an empty party counts as a failure), and the bots already turned off are turned on again. A bot that joins the party during the leg is turned off too, before the next step (a bot that cannot be fails the step). At the leg's end each bot's looting is turned back on with up to 3 tries; a bot that still refuses, or a game that cannot send the order, ends the run **"done (degraded: looting left off on <bots>)"**: the state stays `done`, the report's `degraded` list and the `dungeon_done` event carry it, and the next run's start turns looting on for everyone. The same marks a run whose agent could not be put back at its safe point after an area trigger (a failed walk **and** a failed or ineffective `.go xyz`). Group mode refuses a leg with `companions_loot: false` at its start (only a remote run can enforce it for a whole leg), and the loader accepts it together with a `boss.loot_item` in the same leg (the remote run's `cmd loot` is an explicit order; the leg's mute is not turned back on by the boss; Zul'Farrak's stairs leg takes the Executioner's Key that way). the Zul'Farrak graveyard, where a bot that loots opens a Shallow Grave chest and wakes what lies in it. It is not the boss's `companions_loot` (below), which is only for the fight and the leader's loot; a boss in a leg that has it off does not turn the looting back on. Absent or true leaves the companions as they are.
 - `leave` on a **leg** (`[{"entry": 7246, "spawn": 81610, "at": {"x":..,"y":..,"z":..}, "why": ".."}]`; `entry`, `at` and `why` are required, `spawn` is the creature guid, optional) names spawns a run must not pull, fight or walk up to: Zul'Farrak's lone Shadowhunter on a navmesh island (zf-r6-19z24: the run leader's hop pull engaged it and the tank ended on the island, where every move was refused). A spawn stands for the whole run, so every leg's points are held to every leg's list. The loader refuses a leave that is a pull group position of its own leg. The plan check (`internal/dungeon/leave_clear_test.go`, runs with `go test`) fails a plan with an approach point, a computed or written stand, a `to` or a via point within `LeaveClearYd` (15 yd, the run leader's hop pull reach) of a leave, and walks each pull group's approach rows on the navmesh (`TURTLE_AGENT_MMAPS`) to check the walk keeps 15 yd too (shortest distance over every segment), and the run leader's own walk from each stand toward its pack and back; the Zul'Farrak walks that plan data cannot move (5.0, 5.0 and 13.6 yd) are recorded as known entries. The agent's driver does not read the list. **Deploy order:** the loader refuses unknown fields, so a binary older than this change refuses `dungeons/zulfarrak.json` with `unknown field "leave"` (and any plan with a `leave`): ship the loader (turtle-agent dev) before the plan file. **`plan-export`** has no row for it: the list is written as free text in the leg row's comment (`leave (not read by the run leader yet): 7246 spawn 81610 at 1591 1047.7: <why>`, cut to 255 characters) and is one warning (`leave`, not in the rows); a module that reads it would need a step kind or a flag on the leg's pull and hop rows (PLAN-ZF-LESSONS #3, TortoiseBots part).
@@ -845,9 +946,15 @@ What it checks:
   before them (the last `via`, `to`, step stand or approach point; part `run leader pull group 3 approach 0`). A separate list, `run_leader` (reason `run leader hop`; never a failure, not a warning of the agent's own run), names every pack (the centre its `pull` row
   gets) and boss that stands more than 50 yd from the run leader's last move row: the run leader sees 60 yd from its lead bot and walks toward anything farther in navmesh hops of its own
   (`kApproachYd`/`kApproachHopYd`), which is where its Uldaman test of 2026-10-16 stopped (a hop point under a low ceiling refused `off-mesh`, and long paths with no path at all). Give such a
-  pack `approach` points. The check does **not** model the server's own refusals: `cmd move` snaps a point to the vmap floor found from 8 yd above it (a ceiling 4-6 yd above the floor wins
-  and the point is refused `off-mesh`, more than 5 yd from where the path ends), and the server's path finder keeps 2048 search nodes and 256 polygons (here 65535 and 2048) and builds
-  a smoothed path of at most 256 points; neither the vmaps nor that path are here, so an approach point is checked against the vmaps offline (`lostool` on the test VM).
+  pack `approach` points. Every offline-complete `walk` hop above also runs the server's own path query (2048 search nodes, 256 polygons, ground|water included, steep included, a smoothed path of at most
+  256 points) and the run leader's `CheckMove` verdict on it: a hop the offline query takes but the server refuses fails as `server unreachable`, and the walk goes on from where the
+  server leaves the party (an incomplete path's end, or where it stood). An offline-partial hop keeps the established offline reason and never asks the server query. A `direct` hop within the arrival radius (`ArriveYd`, 3 yd: `DungeonRunPolicy.h kArriveYd`) of the point before it
+  fails as `hop inside the arrival radius`: the run leader counts it reached without sending an order, so the party stays behind. Replay one hop of a live refusal from the logged lead
+  position with `turtle-agent path-check --mmaps DIR --map N x y z x y z`: two lines, the offline `Plan` answer and the server's type, verdict, end and distances to each end's walk poly.
+Limits (what the check does not model): the bot's real z and the vmap floor snap of the goal (a ledge whose mesh floats 2-3 yd above the game floor still passes); swimming (underwater
+  shortcut paths, which need liquid data); tiles unloaded on the server (the core loads mmtiles per loaded grid; the check covers only the start and end); the module's 25 yd stand-in
+  search (`NearestReachablePoint`, `MoveFallbackYd`) and the `leadSpotGather` / `kMoveHereYd` branch, and a too-far refusal, are NOT modelled either: a `server unreachable` can still be
+  saved live when the run leader's ring point around the goal (up to 25 yd out) takes a path the direct hop's query refuses.
 
 A run that starts inside the plan is checked from where the driver puts the party (`Plan.LegStart` for `from_leg`, `Plan.GatherSpot` for `from_pull_group`; the part before is not walked).
 
@@ -1030,7 +1137,9 @@ the file hold the mechanics read from the data (EventAI rows, the Keepers' and A
 
 ### The Wailing Caverns plan
 
-`dungeons/wailing_caverns.json` (Wailing Caverns, map 43, level band 18-23) is **mapped, not live-checked** (`"status": "mapped (not live-checked)"`): written offline from the world export in `tools/dungeongen/testdata/map43` (`export.sh 43`; `movement.tsv` holds the patrol paths), the instance script (`src/scripts/dungeons/wailing_caverns`), the core's `creature_spells`, `creature_ai_events` and spawn pool tables, the map 43 navmesh and Wowhead Classic (zone 718, the strategy guide, the npc pages and their comments, read from the raw page with `tools/wowhead/wh.py`; data, the database and the script win, the differences are in the plan notes), then walked once by a GM-invisible character on 2026-10-15 (401 walk_path calls, 0 replans; every member of every pull group found at its plan position within 0 to 5 yd, worst 9; the eight patrol rounds timed; the water measured: shallow, max 0.95 yd). Twelve legs, 88 pull groups of 182 mobs, about 5360 yd of path (6240 yd to every member position) from the entrance to Verdan: `anacondra_a` and `anacondra_b` (the cave mouth and Lady Anacondra's spots), `cobrahn_a` to `cobrahn_c` (north to Lord Cobrahn, a dead end), `pythas_a` to `pythas_c` (back and down the south road to Lord Pythas), `skum` (a dead end), `west_column`, `serpentis` and `verdan`. **The hop onto the Serpentis ramp is a plain `direct` step with a `check_skip`** (no GM): the walk found a 3.9 yd gap with no floor at -293.3 0.5 -58 to -289.1 3.2 -64.1, the ramp side 6 yd lower (a running jump down, an impossible climb up, no mesh link), so a party cannot walk it; the plan steps down to -287.5 5.0 -63.6, 2.9 yd in from the edge (a `.go xyz` to the edge fell to the chasm, z -105.5, three times), and the plan check lists the hop as exempt. On 2026-10-18 a probe (tests/wc-hop-probe-2, a level-46 commander and four level-23 hires) took the step three times with the lead bot standing on the exact foot (-293.3 0.5 -58.4, 0.00 yd, placed there with GM summon tooling, not by a walk): `cmd move <L> direct` was acked three times and every member landed on the ramp within 3 s (the lead exactly on the landing, its z within 0.05 yd; the followers 0.9 to 7.3 yd away, their z 0.25 to 2.55 yd from the landing floor, the 2.55 one first sample of Jina at 14:38:27 and 0.25 at the next; no deaths, nobody below z -70, no GM move for the crossing). The foot is an `exact` waypoint (the driver change of PR 235): a run holds the lead bot within 1.5 yd of it with a fresh 2 s stationary proof, backing it up along the incoming path when the last stretch is too short for the module to carry a move out, and fails the step without sending a direct order when it cannot prove the stand. Still unproven: no live run has used the driver on this hop (the follower regather after a direct step, 5 yd / 1.5 yd up or down, is untested there); the TortoiseBots run leader side (the exported `move_direct` row, its own arrival tolerance and the SQL mirror re-export at the new landing) is Sagiroth's step; the probe is one group; and its instance question is open (the commander's `.gps` read 177 while the feed listed the party in 176). Lady Anacondra has four spawn rows in one pool (one is up per reset), so she is a member of the pack at each of the four spots (the walk found her at spot 2, in the pack the plan has there), and her kill order is in `kill_first`; the adds that stand with Cobrahn and Pythas are the boss's `first`. Kresh (neutral), the critters and the rare Deviate Faerie Dragon are in every leg's `skip`; the eight patrols the route meets are `patrol`s of the group they pass with their measured `period_s` (a patrol whose period is only an estimate carries `period_estimate`, see above); `fleers` are the Druids of the Fang and Skum, `cc_priority` the Druids (Sleep, Healing Touch) and `kill_first` Lady Anacondra (a kill_first entry is never crowd-controlled), the boss tactics carry the interrupts (Sleep 700, Druid's Slumber 8040, Lightning Bolt 9532, Healing Touch, Chained Bolt, Naralex's Nightmare). Each pull group's radius is cut to stay short of the nearest mob that is not a member. The Disciple of Naralex event (gossip once the four Fanglords are dead, escort, the waves, Mutanus) is in `dungeons/wailing_caverns-extra.json`, a record that is not for running: it needs the gossip step (pull request 194), a way to follow an escort NPC, a wait for a time or a summon, a boss with several spawn spots (its first leg starts with a `gm_cross` to the Disciple, the way back from behind Verdan). The tests (`TestWailingCavernsPlanMatchesTheExport`, `TestWailingCavernsNoUnclaimedMobNearAWalkPoint`, `TestWailingCavernsExtraPlanLoads`, `TestWailingCavernsOnNavmesh`, the general `TestNoMobStandsInAPullGroupsRangeUnlisted` in `tools/dungeongen`, which fails for a hand-written plan with a mob of another pack, a boss or a forgotten spawn within a group's radius + 3 yd that the group does not list, and the generic plan tests) need the map 43 tiles (`$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle043` or `~/tortoise-wow-server/data/mmaps`) for the navmesh ones and skip those without them. Next: the first run with a party.
+`dungeons/wailing_caverns.json` (Wailing Caverns, map 43, level band 18-23) is **mapped, not live-checked** (`"status": "mapped (not live-checked)"`): written offline from the world export in `tools/dungeongen/testdata/map43` (`export.sh 43`; `movement.tsv` holds the patrol paths), the instance script (`src/scripts/dungeons/wailing_caverns`), the core's `creature_spells`, `creature_ai_events` and spawn pool tables, the map 43 navmesh and Wowhead Classic (zone 718, the strategy guide, the npc pages and their comments, read from the raw page with `tools/wowhead/wh.py`; data, the database and the script win, the differences are in the plan notes), then walked once by a GM-invisible character on 2026-10-15 (401 walk_path calls, 0 replans; every member of every pull group found at its plan position within 0 to 5 yd, worst 9; the eight patrol rounds timed; the water measured: shallow, max 0.95 yd). Twelve legs, 88 pull groups of 182 mobs, about 5360 yd of path (6240 yd to every member position) from the entrance to Verdan: `anacondra_a` and `anacondra_b` (the cave mouth and Lady Anacondra's spots), `cobrahn_a` to `cobrahn_c` (north to Lord Cobrahn, a dead end), `pythas_a` to `pythas_c` (back and down the south road to Lord Pythas), `skum` (a dead end), `west_column`, `serpentis` and `verdan`. **The hop onto the Serpentis ramp is a plain `direct` step with a `check_skip`** (no GM): the walk found a 3.9 yd gap with no floor at -293.3 0.5 -58 to -289.1 3.2 -64.1, the ramp side 6 yd lower (a running jump down, an impossible climb up, no mesh link), so a party cannot walk it; the plan steps down to -287.5 5.0 -63.6, 2.9 yd in from the edge (a `.go xyz` to the edge fell to the chasm, z -105.5, three times), and the plan check lists the hop as exempt. On 2026-10-18 a probe (tests/wc-hop-probe-2, a level-46 commander and four level-23 hires) took the step three times with the lead bot standing on the exact foot (-293.3 0.5 -58.4, 0.00 yd, placed there with GM summon tooling, not by a walk): `cmd move <L> direct` was acked three times and every member landed on the ramp within 3 s (the lead exactly on the landing, its z within 0.05 yd; the followers 0.9 to 7.3 yd away, their z 0.25 to 2.55 yd from the landing floor, the 2.55 one first sample of Jina at 14:38:27 and 0.25 at the next; no deaths, nobody below z -70, no GM move for the crossing). The foot is an `exact` waypoint (the driver change of PR 235): a run holds the lead bot within 1.5 yd of it with a fresh 2 s stationary proof, backing it up along the incoming path when the last stretch is too short for the module to carry a move out, and fails the step without sending a direct order when it cannot prove the stand. Still unproven: no live run has used the driver on this hop (the follower regather after a direct step, 5 yd / 1.5 yd up or down, is untested there); the TortoiseBots run leader side (the exported `move_direct` row, its own arrival tolerance and the SQL mirror re-export at the new landing) is Sagiroth's step; the probe is one group; and its instance question is open (the commander's `.gps` read 177 while the feed listed the party in 176). Lady Anacondra has four spawn rows in one pool (one is up per reset), so she is a member of the pack at each of the four spots (the walk found her at spot 2, in the pack the plan has there), and her kill order is in `kill_first`; the adds that stand with Cobrahn and Pythas are the boss's `first`. Kresh (the neutral river turtle, who patrols along the road in the river) is a one-member pull group of `cobrahn_a` where the road passes his spawn, radius 12, and in the `skip` of every other leg; the critters and the rare Deviate Faerie Dragon are in every leg's `skip`; the eight patrols the route meets are `patrol`s of the group they pass with their measured `period_s` (a patrol whose period is only an estimate carries `period_estimate`, see above); `fleers` are the Druids of the Fang and Skum, `cc_priority` the Druids (Sleep, Healing Touch) and `kill_first` Lady Anacondra (a kill_first entry is never crowd-controlled), the boss tactics carry the interrupts (Sleep 700, Druid's Slumber 8040, Lightning Bolt 9532, Healing Touch, Chained Bolt, Naralex's Nightmare). Each pull group's radius is cut to stay short of the nearest mob that is not a member. The Disciple of Naralex event is a segment of its own in `dungeons/wailing_caverns-extra.json` (below), not part of this plan, so this plan needs no GM from any start leg and exports to the run leader without a cut. The tests (`TestWailingCavernsPlanMatchesTheExport`, `TestWailingCavernsBasePlanNeedsNoGM`, `TestNaralexEventSteps`, `TestNaralexEscortFollowsScriptWaypoints`, `TestNaralexFollowStretches`, `TestNaralexWaveWaitsNeedNoSighting`, `TestWailingCavernsNoUnclaimedMobNearAWalkPoint`, `TestWailingCavernsExtraPlanLoads`, `TestWailingCavernsOnNavmesh`, the general `TestNoMobStandsInAPullGroupsRangeUnlisted` in `tools/dungeongen`, which fails for a hand-written plan with a mob of another pack, a boss or a forgotten spawn within a group's radius + 3 yd that the group does not list, and the generic plan tests) need the map 43 tiles (`$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle043` or `~/tortoise-wow-server/data/mmaps`) for the navmesh ones and skip those without them. Serpentis's Druid and Venomwing are his `first`, not a pull group, and Verdan's leg stops 30 yd short of him. Next: the first run with a party.
+
+**The Naralex event** (`dungeons/wailing_caverns-extra.json`, 2026-10-20, an offline draft, never walked and never run live). **Naralex event: the return from Verdan is a live-probed hop pair, no GM: the navmesh on map 43 has two disconnected parts and the only join is the one-way Serpentis-foot jump, probed partial in both directions, so the first leg walks to the ramp lip (-287.5 5 -63.6, an `exact` waypoint) and jumps down to the foot (-293.3 0.5 -58, a `move_hop_exact`; the live probe of 2026-10-22 landed the lead on the foot 3 of 3), and walks on from there; the Naralex event is meant to run as its own segment starting at the Disciple.** That is why it is not legs 12-20 of the plan above: a `gm_cross` in `wailing_caverns.json` made the group driver refuse the dungeon from every start leg and a remote run with a non-GM commander refuse every leg up to it. `plan-export` refuses the extra plan (the event has unit waits and a gossip step the run leader lacks, from its first leg on); the dungeon tests load it and walk it on the navmesh so that it cannot rot. Its 12 legs are written from `script_waypoint` 3678 (`export.sh 43` also writes it as `script_waypoint.tsv`: 32 waypoints, points 0-31; the plan's stops are those rows), `wailing_caverns.cpp` and `instance_wailing_caverns.cpp`. Leg `return_gossip` starts with the **hop pair** (an `exact` waypoint at the ramp lip -287.5 5 -63.6, then a direct step to the foot -293.3 0.5 -58, both with a `check_skip`, written by `plan-export` as an exact move and a `move_hop_exact`, the rows of the Serpentis hop) and then walks the 1713 yd to the entrance hall; it targets the gossip's stand (-134 128.5), not the Disciple of Naralex 3678 himself (spawn point -134.965 125.402 -78.0945): the ramp cannot be climbed back (live 2026-10-18), the waterfall hole behind Verdan is a fall, and a plan from Verdan's room to the stand is partial on the navmesh (the nearest reachable point is 81 yd short), so the party takes the hop (live 2026-10-22: from the lip one direct move landed the lead on the foot, 0.0 yd, 3 of 3, the foot to lip direction too; only the lip area was probed, the followers took the lead's line). The plan needs the party on the upper part of the cave when it starts (after the `verdan` leg): from the entrance hall the lip cannot be walked to (`TestNaralexReturnHop`). The escort starts with the plan's **`gossip` step**: option 0 of the Disciple's menu 202, "Let the event begin!" (gossip_menu_option 202/0, action script 202 = command 85; the instance script sets that menu only when Anacondra 3671, Cobrahn 3669, Pythas 3670 and Serpentis 3673 are DONE in this instance, so `retry_s` 45 covers the menu lag and the failure text names the reason). The `follow_*` legs walk the escort road ahead of him (their `to` and `via` are script_waypoint rows) and **`wait_for` the Disciple himself** (`"state": "seen"`, radius 8-9 yd round the stop): the party stands where he pauses, which approximates following him (no step walks at his side). **The 100 yd escort rule**: core `ScriptedEscortAI` (`ScriptedEscortAI.cpp` lines 226-234 and 303-312) fails the escort when every member of the group is more than 100 yd from the Disciple while he is out of combat, and bots run ahead of a walking NPC, so the roads are split into stops no more than 80 yd apart in a straight line (the stand counts as the first stop): `follow_ravager_road` (point 5) and `follow_ravager` (point 7), `follow_viper` (point 15), `follow_ritual_a`, `follow_ritual_b` and `follow_ritual` (points 22, 25 and 30; the longest stretch is 71.9 yd), each waiting for the Disciple seen within its radius; `TestNaralexFollowStretches` pins the 80 yd and the navmesh test pins 90 yd along the walked paths. The waves the script summons have **no spawn rows**, so each is pulled in the leg after its wait: two Deviate Ravagers 3636 at waypoint 7 (-67.9 214.4 -93.5 and -69.8 211.3 -93.5), three Deviate Vipers 5755 after the Disciple's 15 s Serpentine Cleansing at waypoint 15 (Position[0..2]), three Deviate Moccasins 5762 twelve s after the Disciple starts the ritual at waypoint 30 (Position[7..9]), seven Nightmare Ectoplasm 5763 forty s later (Position[3..9]); a leg runs its pulls before its steps and the summons despawn when they die, so each wave leg waits for its summons to be **`dead`** (a corpse in view or a kill the run saw), never `gone` (which needs a living unit seen first and would time out the run: `TestNaralexWaveWaitsNeedNoSighting`). **`mutanus` is the last leg and the end of the dungeon**: Mutanus the Devourer (3654, level 22, 7944 hp) is summoned 102 s after the ritual starts at Position[3] = 142.7 254.0 -102.2 (the boss position is the summon point) and walks at the Disciple; his spells are Naralex's Nightmare 7967 (interruptible), Terrify 7399 and Thundercrack 8150, and his school_immune_mask 32 says shadow immunity. **No boss tactics**: `ai_boss_tactic` has no rows for him on map 43 (2026-10-20 read-only query; only Zandara Windhoof 61968 has some). The boss carries the event's own gate instead: a **`hold` on instance data 4 (TYPE_DISCIPLE) reading DONE (3)**, which the script sets only when Mutanus dies (his EventAI 1720976 sets data 5 DONE on death, 1720975 in progress on aggro, 1720974 back to 0 on evade), with the hold's 600 s as the ceiling. The after_boss wait is one `hostiles_gone` (radius 50 round the ritual stop): when Mutanus dies the script despawns the hostiles it knows, Naralex wakes and the two fly away (12 h respawn). Not in the plan: the Glowing Shard on his corpse (a quest item; the bot run does not loot it). What no step can do yet is in the file's notes: walk at his side, wait for a summon inside a leg, mark an NPC as one to protect. Open follow-up: a driver run of the return pair (the exact stationary proof at the lip, then the `move_hop_exact`) after the Serpentis fight, and the decision whether this segment joins `wailing_caverns.json` (the event is a draft nobody has walked, and `plan-export` would cut the joined plan at `return_gossip`).
 
 ### The Deadmines plan
 
@@ -1450,7 +1559,7 @@ whole and atomically, when it ends and is scored: `v`, `schema`, `run`, `src`, `
 
 `turtle-agent trace-score [--json] [--summary] [--set check=threshold]... <trace.jsonl>...` reads trace files and prints each check's verdict with
 its measured value and the threshold; `--json` prints one object per trace; `--summary` also writes `<run_id>.summary.json` beside the
-trace; `--set rest_share=30` changes a threshold. Exit code 11 when any check failed. The scorer reads nothing but the file, so a trace
+trace; `--set rest_share=30` changes a threshold (the oracle's `spell_oracle` is the seconds a bot must be active before its missing core spells are judged, default 60; `oom_in_fight` is the seconds under 5 % mana, default 10). Exit code 11 when any check failed. The scorer reads nothing but the file, so a trace
 can be scored again after a threshold or a check changes. A dungeon run scores its own trace when it ends and appends the `oracle` records.
 
 Each check has an `id`, a `name`, a `verdict` (`pass`, `fail`, or `na` when the trace lacks what it needs), the `count` of times it
@@ -1471,10 +1580,60 @@ the others look at what only the agent sees (orders, rest gates, walks, the feed
 | `stuck` | a member that should be moving (the lead in a walk of the plan, or a member more than 10 yd from the lead in one; alive and out of combat) did not move 1 yd for this long; the detail lists where, for a per-dungeon stuck-spot map | 5 s, any stall | no walk of the plan, or no frames |
 | `facing` | a bot in combat stands (no movement) within 6 yd of its hostile target for longer than this while its `fa` is over 90 degrees (the server rule, without its casting case: the agent does not see casts) | 2 s | the header lacks the `facing` capability, or no frame has a bot in melee range of its target |
 | `spells` | **report only, never fails**: what each class cast and did, as readings of 1 Hz samples, not facts. Cast episodes per class from `cs` (a run of frames with the same spell is `ceil(duration / base cast time)` casts, at most one per frame; a spell with no known cast time counts once per run, so that number is a lower bound), action mix, verdict letters and reasons, idle share, power at death, taunts, and two proximity/observation readings: **interrupts** (each interrupt action is matched to at most one enemy cast, from 1 s before its first frame to its last frame, and the interrupter's target must be the casting mob when both are known; an action in the frame right after the cast's last is counted apart, because an interrupt that worked and a kick that came too late look the same at 1 Hz; "confirmed cut short" is a cast seen for under 80 % of its cast time) and **crowd control** (an observation, not a success rate: some mob shows a new cc flag within 4 s of a single-target action; it is not tied to the caster or the spell, and a new flag on the caster's own target is counted apart), **taunt latency** (seconds from a hostile's top victim becoming a party member that is not the tank to the tank's taunt or the hostile going back to the tank; the frames are the resolution, about 1 s), **cc hold** (a cc episode is a run of consecutive frames with the mob flagged: only an episode that starts within 4 s of a single-target cc action is joined, and only long crowd control is joined (polymorph, sap, shackle undead, freezing trap, banish, hibernate, entangling roots, seduction, blind, fear, turn undead: the short stuns and disorients are left out); a joined episode under 5 s that ends with the mob still in view and unflagged, alive, was broken; the party's targeting of the mark is not measured) and **pet threat** (the share of mob-frames whose top threat holder's guid starts `0xf140`). A verdict is *unknown* where that bot sent no verdict letter (`res`) within 10 s: it is left out of the idle share and not counted as executed, so an older or mixed trace says `unknown`/`not recorded` instead of guessing. `trace-score` prints the tables under the checks; `--json` has them as `spells` | warnings only: `idle_share` over 15 % of engaged mana-user frames with a verdict and no executed (`O`) action for 4 s; `interrupt_cover` under 30 % of enemy casts (from 5) with an interrupt action during or just after them (the favourable reading is held to the limit); `taunt_latency` over 3 s median (from 3 episodes); `cc_hold` under 50 % held (from 3 episodes); `pet_threat` over 5 % of mob-frames (from 30); `--set idle_share=20`, `--set interrupt_cover=20`, `--set taunt_latency=4`, `--set cc_hold=40`, `--set pet_threat=10`. The uncorrelated crowd-control flag observation has no limit | no bot frame has a `cs` or an `act` |
+| `spell_oracle` | **report only, never fails**: every party bot's casts judged against its Turtle WoW knowledge-base spec (the core spells it should press every fight and the spells its file says never to cast). The spec is inferred: a tank or healer role picks that class's role spec, a dps bot the spec whose signature talent was cast most, and no signature or a tie judges the class's common core (the dps specs' intersection). A missing core spell warns once the bot was in combat for `spell_oracle` seconds, unless its first rank is above the bot's level; a `never` spell warns always. Spells outside every list are off-list information, not a warning. | `spell_oracle` 60 s (fight data 20 s) | no party bot with casts, or none active long enough |
+| `oom_in_fight` | **report only, never fails**: a mana user that sat under 5 % mana for this long while in combat | `oom_in_fight` 10 s | no mana user in combat |
 
 Not verified live: the traces were built and tested against the fake game, the fake feed and hand-made traces only. Open: whether a
 group run's party list stays fresh in a long fight (`stale_party` is there to find out), the feed's facing values, and what the frame
 rate costs on a long run.
+
+### fight-score
+
+`turtle-agent fight-score [--json] [--mt NAME] [--ot A,B] [--set spell_oracle=S] <combat-fight.json>...` reads finished fights
+the way the dashboard's fight debugger does: `{fight, warnings}` as `GET /api/v1/combat/fight/<key>` returns it, or a bare fight.
+It prints the debugger's two tank readings with its exact rules — `mt_sunder` (a warrior main tank's Sunder Armor casts per 10 s:
+ok at 1.5 or more, warn at 0.8, else fail; a fight under 10 s is not judged) and one `ot_taunt` per off-tank (warn when it never
+taunted) — then one line per bot the spells oracle above warns about, and the count of bots judged ok.
+
+`--mt` and `--ot` are the debugger's layout; without them the main tank is the first tank in the fight and the other tanks are the
+off-tanks. A fight's spell list is capped at 8 lines per bot, so a core spell that is not in it is `unknown`, not missing, and a bot
+is judged after 20 s of the fight (the trace check waits 60 s). The debugger's rules and limits (`TAUNTS`, Sunder 1.5/0.8, the 10 s
+minimum) are in the oracle's `_common.json`, so the two agree. The oracle data is derived from the Turtle WoW knowledge base
+(stevemcqueenz), https://stevemcqueenz.github.io/turtle-knowledge-base-/#/, and the sources each KB file lists. Exit 0 whatever
+the warnings say, 2 on usage.
+
+## Scenarios
+
+A repeatable live test: steps drive one or more running agents over RPC, built-in checks print PASS/FAIL, and
+`raw.txt` plus `norm.txt` diff cleanly before/after a deploy. `scenarios/lft-addon-path.json` (the core LFT listing
+API over addon messages) and `scenarios/itemleg3-g1-items.json` (a bot-only Zul'Farrak run: Mallets given, soulbound,
+used on the gong, taken back at stop) are the examples.
+
+The file is strict JSON (no comments; every step has an optional `note`): `scenario`, `sessions` (1-8,
+loopback RPC only — a token file is read per call, `rpc_token` settings are not supported), optional `db`
+(`host` ssh alias, `container`), `vars`, `addon_prefix`, `settle_s`, `timeout_s`, `on_fail`, `max_minutes`,
+`record` matchers, `normalise` rules, `steps` (1-500) and `finally` (actions only: `gm`, `bot`, `addon_send`,
+`rpc`, `sleep`).
+
+Step kinds: `section` (prints `=== STEP n:` and marks), `mark` (moves the window), `gm` (a `.`-command), `bot` (a
+`.bot` command without `.bot`), `addon_send`, `rpc` (any agent method, with `params`, `save`, `record_result`,
+`ignore_error`), `sleep`, `wait` (an `expect` that aborts on timeout), `expect`, `expect_not`, `check_db` (two
+no-free-SQL forms: table row counts and item counts) and `check_rpc` (`equals`, `match` or `len` over a result path).
+
+System lines are matched raw (colour stripping eats `|r`; the addon also reads them raw). Matching is ordered per
+session (`section`/`mark` set the window and the match cursor; each `expect` only sees later lines), while
+`expect_not` scans everything since the window. Variables: `${S.character}` built-ins, file `vars` (overridden by
+`--var`), `capture` groups and `save` paths; regex-quoted inside `match`. A check that fails is FAIL (`on_fail`
+`continue` or `stop`); anything unevaluatable — an RPC or DB error, an unset var, a denied GM command, the deadline,
+an interrupt — is ERROR and aborts. Exit codes 0/14/15/2.
+
+`scenario run` writes `raw.txt` (seq, times, expanded text), `norm.txt` (templates, no seq/times/durations, DB counts
+kept), `transcript.jsonl` (one object per line) and `result.json`. The normaliser applies the built-ins (RFC3339
+times, clock times, hex and long decimal guids) then the file's rules; captured values and ids are not replaced
+automatically — normalise them with rules. An event arriving after `settle_s` lands in the next step's block; use
+`mark` plus an `expect` to pin order. DB checks run `SELECT COUNT(*)` over ssh in a read-only transaction, allowlisted
+tables only, and only the count comes back (BatchMode, no password on any command line). The GM deny list refuses
+world-changing commands (AGENTS.md) at load and again at run time.
 
 ## Unit positions
 
@@ -1642,7 +1801,7 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
    **`.bot maintenance` is off in observe mode** unless `observe.maintenance` is true — in the kit check and in the hire check's top-up of
    a reused hire or one short of drinks or ammo: maintenance walks each bot to a vendor, bank or mailbox, and a party scattered over the maps
    right after the hires' autogear pauses the run leader ("the lead bot is not on the plan's map", #253). The inventory and talent reads still
-   run; a hired party already gets its autogear in `prepare`, and a hire still short of supplies is reported (and fails the step).
+   run; a hired party already gets its autogear in `prepare`, and a hire still short of supplies is reported (and fails the step). The talents ask reuses what the hire read a few minutes earlier (a `0/5/31 (hire)` in the report): the in-instance ask gets no answer.
    The start also undoes a boss `loot off` a crashed run left in place (`.bot behavior <bot> loot on` for every bot) unless
    `observe.keep_loot_setting` is true: then the bots' corpse looting stays as the operator set it, as a dungeon whose legs need looting off
    does. A driven run always sends the undo.
@@ -1680,6 +1839,7 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
 | `max_run_s` | 3 h | the whole run, from `run start`, takes longer (a longer dungeon sets it: Uldaman needs more than 3 h). The stop it sends is `.bot run stop time limit reached (<N>h)`, so the server logs the reason (TortoiseBots #1070) instead of "stopped by .bot run stop"; the other endings send the plain `.bot run stop` |
 | `stall_s` | 10 min | a `running` run shows the very same status line this long (the module's longest own ceiling is a boss at 7 min) |
 | `paused_wait_s` | 10 min | a `paused` run is not resumed this long. The run leader pauses itself at 3 dead, an unsupported step (`ritual`) or a ceiling and never goes on alone |
+| `auto_resume` | 0 (off) | not a ceiling: resumes the run leader by itself 15 s after its "regroups by itself ... did not hold" pause, at most this many times a step (0-3) and 6 per run; round scripts with nobody watching turn it on |
 | none | 20 s | no `TBM:RUN` line came after the start, or the module says "no run" |
 | none | | the binding ended: the view feed's end-of-binding line fails the run as in commander mode |
 | `maintenance` | false | not a ceiling: sends `.bot maintenance` to every bot at the kit check (off: it walks them to vendors and can scatter the party) |
@@ -1714,6 +1874,42 @@ move or equip the party (`start_here`, `have_items`, `pulltest`, `give_items`) a
 the card JSON: `Run leader: Sentinel · pull 7/41 · pulling`, `Run leader paused: Sentinel · boss 12/41 · 3 dead: regroup ...`, `Run leader: finished all 41 steps`.
 
 `tools/run-uldaman.sh --mode observe [--hire] [--no-fresh] [--keep-loot-setting]` builds the params of an observed Uldaman run.
+
+### Staging a leg for the run leader
+
+`dungeon_stage` puts the party at a leg's safe start for a targeted test of one leg with the TortoiseBots run leader
+(`from leg <name>`). The stage point is the leg's first row (else its first via/To) when that stands clear: 30 yd from a
+skipped leg's pack, boss or patrol point, 20 yd from the leg's own and later packs, and the walk to the first point 20 yd
+clear of skipped packs; the server-exact reach runs to the leg's first point and on to its next point. When the first
+point is unsafe the search backs off in 5 yd steps up to 120 yd along the way in, and an earlier leg (up to 3 back) is
+proposed; `cleared_through` counts legs as cleared, `force` stages anyway. Live it walks the commander there (`.appear`,
+`.go xyz`, `.gps` floor check), applies the quiet rule (no living hostile within 20 yd, none within 30 yd that is not a
+pack of the leg or later, no roamer within 80 yd except the staged leg's own boss and own packs, from two reads
+`quiet_wait_s` apart), summons every bot with GM `.summon`
+in one burst (the commander's own character and own bots only, per AGENTS.md; the commander should be `.gm on` and
+invisible), waits for arrival within 10 yd and 2 yd of the floor, retries once, settles 5 s, then optionally `start`s
+(`from leg <name>`, with `speed=`) or `resume`s. `stage-check` checks a leg offline before login (a fresh instance usually
+needs `cleared_through` or `force` for legs past the first patrols, since every skipped pack stands alive; Gahzrilla stages
+from `velratha_b`). The offline check knows only plan packs, not patrols: a point the check passes can still fail the live
+quiet check when a patrol walks by (then clear the patrol or stage with `force`). Call with a client timeout of 120 s.
+
+### Following the lead bot as a player
+
+A real player in a bot-led TortoiseBots run: the run leader holds pulls beyond 60 yd and a regroup waits 60 s for every
+living player within 20 yd. `follow_start` walks the agent behind the lead bot on its own trail (2 yd points, 300 yd
+kept, reset on a 30 yd jump): when the lead is over `far` yd away it walks to the trail point halfway between `near`
+and `far` behind the lead; a player ahead of the lead walks back behind it; it never walks toward anything else. While
+the lead's heading is not known (it has moved less than 6 yd since the follow began, the player came back from a death,
+zoned, or the lead was switched or jumped) the player stands still (`holding`), and a way toward the lead that passes in
+front of it is not walked; a lead 20 yd or more away (a regroup waits for players within 20 yd) that gives no heading for
+20 s is walked to directly (note `no heading: direct walk`). In a fight it does not walk unless the lead is over 40 yd away, then to 25 yd (the same front rules); `assist` swings at the lead's target when it
+is within 8 yd of the lead (melee auto-attack only, a caster or hunter gets no damage from it), never with the brain
+running. A sitting player gets up at 45 yd. On death it comes back the leader mode's way (see [Death and the corpse
+run](#death-and-the-corpse-run)), without its `.bot action follow`; then it waits for the lead bot to be in view and
+follows from there. It zones in after a lead last seen within 40 yd of the plan's portal (3 triggers, 180 s). It stops
+when the lead is not in view for `lost_s`, the lead left the party, it is not in a group, 5 walks in a row did not
+arrive while over 60 yd, a fallback way stayed blocked 60 s, or after 10 deaths. It sends no chat and no GM line (no
+`.bot`, no `.appear`), and `dungeon_run` and `follow_start` refuse each other. Events `player_follow` (`data.phase`).
 
 ## Remote leader
 
@@ -2410,7 +2606,8 @@ packets are the ones a 1.12 client sends (layouts checked against the core, `int
 | --- | --- |
 | `resurrect_request` | the caster; `caster`, `name` (when the server sent one), `sickness` (accepting costs resurrection sickness: a spirit healer), `timer`. SMSG_RESURRECT_REQUEST |
 | `corpse_reclaim_delay` | the player; `ms`. SMSG_CORPSE_RECLAIM_DELAY |
-| `dungeon_leader` | the run; `phase` (see below), `leg`, and per phase `how`, `seconds`, `error`, `trigger`, `ms` |
+| `dungeon_leader` | the run; `phase` (see below), `leg`, and per phase `how`, `seconds`, `error`, `trigger`, `ms`; `mode` `follow` when the player follow mode recovers its own death (see `player_follow`) |
+| `player_follow` | the follow mode; `phase` (`started`, `walk`, `ahead`, `lost`, `zoning`, `zoned`, `dead`, `back`, `stopped`), `lead`, `reason`, `how`, `seconds`. The follow mode's own death recovery also sends `dungeon_leader` events, with `mode` `follow` |
 
 Bounds: a corpse run longer than 10 min fails the run (`corpse run: gave up after 10 min`), the leader may die 5 times a run (every death
 counts, also one during a wipe's recovery or while dead members are brought back), and an
@@ -3174,14 +3371,27 @@ Healer rotations stay Go: the healer triage (`heal.go`) is not a priority list.
 The list is read **top to bottom**: within a band an earlier entry beats a later one (the engine casts the most relevant action that can run). Entry fields:
 `id` (the action's name in `brain_decision`), `kind` (`cast`, the default; `attack`, the auto attack at the fight's mob; `next_swing`, a spell that
 replaces the next swing and is sent once per swing; `stance`, back to a home stance from `stances`), `spell` (a name: the highest known rank is cast) or
-`spell_id`, `level` (the character level of the first rank, checked against the spell data; `talent: true` for a talent), `target` (`fight`, `melee_mob`, `self`), `band`
-(`low` 5, `normal` 10, `high` 20, `move` 30, `emergency` 43; the engine's relevance bands, so movement and interrupts still outrank a rotation), `threat`
-(`single`, `aoe`, `none`: an `aoe` entry is vetoed while a mob is loose), `harmful`, `alt` (other ids to try when this one cannot run), `when`.
+`spell_id`, `level` (the character level of the first rank, checked against the spell data; `talent: true` for a talent), `rank` (cast exactly that rank of the
+name, never falling back: a guide's "Renew (rank 1)"), `target` (`fight`, `melee_mob`, `self`, and `heal`: the member the healer's triage picked, for a healer
+rotation's extra cast), `band` (`low` 5, `normal` 10, `high` 20, `move` 30, `emergency` 43; the engine's relevance bands, so movement and interrupts still
+outrank a rotation), `threat` (`single`, `aoe`, `none`: an `aoe` entry is vetoed while a mob is loose), `harmful`, `alt` (other ids to try when this one cannot
+run), `when`.
 `when` is a closed set of conditions that all must hold, each a function of what the agent sees: `state` (`combat`, `rest`, `any`), `melee_mob`,
 `mob_in_reach`, `mobs_in_reach_min`, `mobs_in_cone_min`, `mob_distance_min`/`max`, `mob_on_me`, `tank_holds`, `feared`, `mob_fleeing`, `moving`, `in_combat`, `after`
-(`dodge`, `avoided`), `combo_points_min`, `stance`, `self_hp_below`/`above`, `power_below`/`above`, `mob_hp_below`/`above` (percent),
-`self_aura`, `no_self_aura`, `self_aura_missing` (absent or under a minute left), `mob_aura`, `no_mob_aura`, `mob_stacks_below`, `mobs_lacking_aura`. Unknown
+(`dodge`, `avoided`), `combo_points_min`, `stance`, `level_min`/`level_max` (a character level, 1-60: advice that only holds in a level band), `self_hp_below`/`above`, `power_below`/`above`, `mob_hp_below`/`above` (percent),
+`mobs_near_mob_min` (hostile mobs in combat within 8 yd of the fight's mob: the ranged "3+ targets"), `members_hurt_min` (members below the heal threshold),
+`self_aura`, `no_self_aura`, `self_aura_missing` (absent or under a minute left), `mob_aura`, `no_mob_aura`, `mob_stacks_below`, `mobs_lacking_aura`, and, only with `target: heal`, `heal_hp_below` (percent), `heal_is_tank` and
+`heal_no_aura` (none of these auras on the member). Unknown
 fields are refused. Costs, cooldowns, range and the global cooldown are the spell data's and the engine's, not the file's.
+
+**From the knowledge base.** The 31 `kb_<spec>_<class>` rotations, one per PvE spec of the [Turtle WoW knowledge base
+(stevemcqueenz)](https://stevemcqueenz.github.io/turtle-knowledge-base/#/), are built in too (their sources and the rows they do
+not express are in each file). They are generated by `tools/kbrotgen` from committed recipes; a healer's file uses
+`"mode": "add"` with an empty `replaces` (its entries play right after `role_healer` instead of replacing a strategy), and every
+KB file carries the optional `kb` block `{"file", "sha256", "preset", "recipe", "unexpressed"}`: the guide file with its hash,
+the preset it plays in, the recipe, and every guide row the rotation cannot express with the reason. `rotation show` prints
+`kb: <file>, N rows not expressed (see the file's kb.unexpressed)`. The recipe/generator flow and the A/B recipe (`kb_*` against
+the class strategy, in the same preset) are in `docs/ROTATIONS.md`, "Rotations from the Turtle knowledge base".
 
 **Checks.** `turtle-agent rotation check <file>...` reads files and checks every spell and aura name against the core's spell data, the level of the first
 rank, the ids, the bands and the conditions; `rotation show [--level N] <name|file>` prints the list with the rank cast at level N. The same checks run at load,

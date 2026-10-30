@@ -85,7 +85,7 @@ func ParseMaps(b []byte) ([]MapRow, error) {
 		return nil, err
 	}
 	if d.Fields < mapMinFields {
-		return nil, fmt.Errorf("Map.dbc has %d fields; expected a 1.12 layout", d.Fields)
+		return nil, fmt.Errorf("the Map.dbc has %d fields; expected a 1.12 layout", d.Fields)
 	}
 	rows := make([]MapRow, d.Records)
 	for i := range rows {

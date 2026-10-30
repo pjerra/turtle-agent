@@ -1,0 +1,295 @@
+{
+  "name": "kb_fury_tank_warrior",
+  "class": "warrior",
+  "spec": "fury_tank",
+  "role": "tank",
+  "kb_file": "classes/yaml/warrior/fury-tank.yaml",
+  "preset": "tank_warrior",
+  "replaces": [
+    "warrior_melee",
+    "warrior_tank"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's FuryProt main-tank list: stay in Defensive Stance, Bloodrage on the pull, Bloodthirst on cooldown above Revenge, Revenge on its proc, Heroic Strike to keep rage around 50-60, Sunder Armor as the rage-capped filler, then the AoE rows (Cleave, tab Sunder, Thunder Clap, Whirlwind in Berserker Stance, Challenging Shout as the emergency). Death Wish before a boss; Shield Wall needs a shield. Taunt stays with role_tank, the stance the KB names is the file's own stance entry.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 0,
+      "text": "Defensive Stance, max rage, Bloodrage, Bloodthirst + Heroic Strike first GCD; Death Wish just before bosses | pull",
+      "text_sha": "316abfe40653",
+      "entries": [
+        {
+          "id": "stay_defensive",
+          "kind": "stance",
+          "stances": [
+            "Defensive Stance"
+          ],
+          "note": "The KB's pull stance: the file keeps the tank in Defensive Stance (the preset's stance strategy is warrior_tank, which this file replaces)."
+        },
+        {
+          "id": "bloodrage",
+          "spell": "Bloodrage",
+          "level": 10,
+          "target": "self",
+          "when": {
+            "state": "combat",
+            "mob_distance_max": 12,
+            "power_below": 20,
+            "self_hp_above": 50,
+            "no_self_aura": [
+              "Bloodrage"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 1,
+      "text": "Bloodthirst | on cooldown; above Revenge",
+      "text_sha": "364f796133d8",
+      "entries": [
+        {
+          "id": "bloodthirst",
+          "spell": "Bloodthirst",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 2,
+      "text": "Revenge | on proc",
+      "text_sha": "9c3a5c5552a6",
+      "entries": [
+        {
+          "id": "revenge",
+          "spell": "Revenge",
+          "level": 14,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "after": "avoided",
+            "stance": [
+              "Defensive Stance"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 3,
+      "text": "Heroic Strike | keep rage ~50-60",
+      "text_sha": "750107b7f53a",
+      "entries": [
+        {
+          "id": "heroic_strike",
+          "kind": "next_swing",
+          "spell": "Heroic Strike",
+          "level": 1,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "power_above": 49
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 4,
+      "text": "Sunder Armor | when rage-capped",
+      "text_sha": "5c10f3b77fd1",
+      "entries": [
+        {
+          "id": "sunder_armor",
+          "spell": "Sunder Armor",
+          "level": 10,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "power_above": 79,
+            "mob_stacks_below": {
+              "aura": "Sunder Armor",
+              "stacks": 5
+            }
+          },
+          "note": "The KB says rage-capped; 80 percent is the point where Heroic Strike has the rage it keeps and the next swings would only waste the gain."
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 5,
+      "text": "Stay in Defensive Stance in Execute phase |",
+      "text_sha": "09474aabbc6d",
+      "unexpressed": "stance/form: the preset's stance strategy owns it"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Cleave",
+      "text_sha": "e946abd159c3",
+      "entries": [
+        {
+          "id": "cleave",
+          "kind": "next_swing",
+          "spell": "Cleave",
+          "level": 20,
+          "target": "fight",
+          "threat": "aoe",
+          "when": {
+            "mob_in_reach": true,
+            "mobs_in_reach_min": 2,
+            "power_above": 49
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 2,
+      "text": "Sunder Armor",
+      "text_sha": "14e0824a08b0",
+      "entries": [
+        {
+          "id": "sunder_armor_aoe",
+          "spell": "Sunder Armor",
+          "level": 10,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "mobs_in_reach_min": 2,
+            "mob_stacks_below": {
+              "aura": "Sunder Armor",
+              "stacks": 5
+            }
+          }
+        }
+      ],
+      "unexpressed": "target switching is not a condition"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 3,
+      "text": "Thunder Clap",
+      "text_sha": "80317fc30d1d",
+      "entries": [
+        {
+          "id": "thunder_clap",
+          "spell": "Thunder Clap",
+          "level": 6,
+          "target": "self",
+          "harmful": true,
+          "threat": "aoe",
+          "when": {
+            "mob_in_reach": true,
+            "mobs_in_reach_min": 2,
+            "mobs_lacking_aura": "Thunder Clap",
+            "stance": [
+              "Defensive Stance"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 3,
+      "priority": 1,
+      "text": "Whirlwind",
+      "text_sha": "c976afe00288",
+      "unexpressed": "stance/form: the preset's stance strategy owns it"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 4,
+      "priority": 2,
+      "text": "Challenging Shout",
+      "text_sha": "8190ac987961",
+      "entries": [
+        {
+          "id": "challenging_shout",
+          "spell": "Challenging Shout",
+          "level": 26,
+          "target": "self",
+          "harmful": true,
+          "threat": "aoe",
+          "band": "emergency",
+          "when": {
+            "mobs_in_reach_min": 4
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Death Wish | before the pull",
+      "text_sha": "b387be95eea2",
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "Shield Wall | unavailable without shield; annoying on ~4 fights",
+      "text_sha": "4d82dc52160e",
+      "unexpressed": "weapon type not in the conditions"
+    }
+  ],
+  "order": [
+    "stay_defensive",
+    "bloodrage",
+    "bloodthirst",
+    "revenge",
+    "heroic_strike",
+    "sunder_armor",
+    "cleave",
+    "sunder_armor_aoe",
+    "thunder_clap",
+    "challenging_shout"
+  ],
+  "oracle": {
+    "core": [
+      "Bloodthirst",
+      "Revenge",
+      "Heroic Strike",
+      "Sunder Armor"
+    ],
+    "situational": [
+      "Cleave",
+      "Thunder Clap",
+      "Whirlwind",
+      "Challenging Shout",
+      "Death Wish",
+      "Shield Wall",
+      "Bloodrage",
+      "Demoralizing Shout"
+    ],
+    "never": [],
+    "signature": [
+      "Death Wish"
+    ],
+    "taunt": [
+      "Taunt",
+      "Mocking Blow",
+      "Challenging Shout"
+    ]
+  }
+}

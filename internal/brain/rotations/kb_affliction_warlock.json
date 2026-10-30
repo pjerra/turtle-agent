@@ -1,0 +1,244 @@
+{
+  "version": 1,
+  "name": "kb_affliction_warlock",
+  "class": "warlock",
+  "spec": "affliction",
+  "replaces": [
+    "warlock_affliction"
+  ],
+  "notes": "The Turtle knowledge base's affliction raid list: Curse of Agony, Corruption and Siphon Life kept up, Dark Harvest only under Shadow Vulnerability, Shadow Bolt on a Nightfall (Shadow Trance) proc, Drain Soul as the filler, Life Tap when the mana runs out, and Hellfire/Rain of Fire on five or more stacked mobs. The assigned raid curse, the DoT snapshotting and the opener order are not conditions (kb.unexpressed). Immolate and a hard-cast Shadow Bolt are the oracle's never list.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/warlock/affliction-ranged-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166748#p166748 (Nuninho32 (quoting chappelles), player, 2026-01-28)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=159958#p159958 (Justgreens123, player, 2025-11-18)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=169207#p169207 (Spritzbube, player, 2026-02-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=168196#p168196 (Guiltyhaomarush, player, 2026-02-14)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=107778#p107778 (LastyK, player, 2024-11-13)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=153453#p153453 (Akarui, player, 2025-09-27)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=155815#p155815 (Horcos, player, 2025-10-16)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=174185#p174185 (Grizb37, player, 2026-04-06)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102973#p102973 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=124504#p124504 (Torta, staff, 2025-03-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    " (Afraido, player, 2026-03-19)",
+    " (Sehnsucht, player, 2026-03-20)",
+    " (biloen, player, 2026-04-18)",
+    " (biloen, player, 2026-02-18)",
+    " (Taffy, player, 2026-04-04)",
+    " (Nezu/Papaverine/Mooncrazed, player, 2026-03-19)"
+  ],
+  "priorities": [
+    {
+      "id": "shadow_bolt_nightfall",
+      "spell": "Shadow Bolt",
+      "level": 1,
+      "target": "fight",
+      "when": {
+        "moving": false,
+        "self_aura": [
+          "Shadow Trance"
+        ]
+      }
+    },
+    {
+      "id": "curse_of_agony",
+      "spell": "Curse of Agony",
+      "level": 8,
+      "target": "fight",
+      "when": {
+        "no_mob_aura": [
+          "Curse of Agony"
+        ]
+      }
+    },
+    {
+      "id": "corruption",
+      "spell": "Corruption",
+      "level": 4,
+      "target": "fight",
+      "when": {
+        "no_mob_aura": [
+          "Corruption"
+        ]
+      }
+    },
+    {
+      "id": "siphon_life",
+      "spell": "Siphon Life",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "no_mob_aura": [
+          "Siphon Life"
+        ]
+      }
+    },
+    {
+      "id": "dark_harvest",
+      "spell": "Dark Harvest",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "moving": false,
+        "mob_aura": [
+          "Shadow Vulnerability"
+        ]
+      }
+    },
+    {
+      "id": "life_tap",
+      "spell": "Life Tap",
+      "level": 6,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "power_below": 25
+      },
+      "note": "the KB gives no number: 25% is this recipe's (the shipped warlock uses 25% in combat)."
+    },
+    {
+      "id": "rain_of_fire",
+      "spell": "Rain of Fire",
+      "level": 20,
+      "target": "fight",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "moving": false,
+        "mobs_near_mob_min": 5
+      }
+    },
+    {
+      "id": "drain_soul",
+      "spell": "Drain Soul",
+      "level": 10,
+      "target": "fight",
+      "when": {
+        "moving": false
+      },
+      "note": "Moved after the AoE entry: the filler has no cooldown, so as a rule it would starve the AoE casts the KB lists after it."
+    },
+    {
+      "id": "dark_harvest_cd",
+      "spell": "Dark Harvest",
+      "talent": true,
+      "target": "fight",
+      "band": "high",
+      "when": {
+        "moving": false,
+        "mob_aura": [
+          "Shadow Vulnerability"
+        ]
+      }
+    },
+    {
+      "id": "death_coil",
+      "spell": "Death Coil",
+      "level": 42,
+      "target": "fight",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "mob_on_me": true,
+        "self_hp_below": 50
+      },
+      "note": "\"emergency self-heal\": 50% is the phrase table's default where the KB gives no number."
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/warlock/affliction-ranged-dps.yaml",
+    "sha256": "becf07fc6562436a0801448cea0a1a8563d2a11687d0192155df803904b206d5",
+    "preset": "affliction_warlock",
+    "recipe": "tools/kbrotgen/recipes/kb_affliction_warlock.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "pop haste/SP cooldowns (Potion of Quickness, Juju Flurry, racial, trinket) then apply DoTs | opener or when a trinket comes up; DoTs keep the buffs they were cast with [[d:warlock#1450450192775123024]], [[d:warlock#1433432574406955119]]",
+        "why": "pre-pull/opener outside the brain's fight; consumable or item (combat_consumables owns items); DoTs keep the buffs they were cast with is not a condition"
+      },
+      {
+        "row": "rotation_single[1]",
+        "text": "Shadow Bolt | Nightfall (Shadow Trance) proc up; break Drain Soul for it, never break Dark Harvest [[d:warlock#1443543987255251007]], [[d:warlock#1489735044296736778]]",
+        "why": "cancel/stop casting not expressible (breaking Drain Soul or Dark Harvest)"
+      },
+      {
+        "row": "rotation_single[2]",
+        "text": "assigned curse (Shadows/Elements/Recklessness, 1 s GCD) | missing; Malediction also applies Curse of Agony",
+        "why": "raid assignment/marking (which curse the raid assigned)"
+      },
+      {
+        "row": "rotation_single[5]",
+        "text": "Siphon Life | missing and target lives its full duration [[d:warlock#1471139622703726806]]",
+        "why": "\"the target lives its full duration\" is not a condition"
+      },
+      {
+        "row": "rotation_single[6]",
+        "text": "Dark Harvest | Shadow Vulnerability up AND every DoT has >=~10 s left AND no interruption, or as a finisher; with T2.5 5-piece use it more freely [[d:warlock#1495058358875590898]], [[d:warlock#1480626773212397658]], [[d:warlock#1480617902515425378]]",
+        "why": "the remaining DoT time (>= 10 s) and \"no interruption\" are not conditions; the T2.5 set bonus is not a condition"
+      },
+      {
+        "row": "rotation_single[7]",
+        "text": "Drain Soul | default filler; cancel only right after a tick (Nampower) [[d:warlock#1433442818235564052]]",
+        "why": "cancel/stop casting not expressible (the tick cancel); macro/addon (Nampower etc.)"
+      },
+      {
+        "row": "rotation_single[8]",
+        "text": "Life Tap (or Demonic/Dark Rune) | mana below next cycle [[d:warlock#1437144597846425671]]",
+        "why": "the Demonic/Dark Rune alternatives are consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "rotation_single[9]",
+        "text": "never Immolate, never hard-cast Shadow Bolt | always [[d:warlock#1478873883200323767]]",
+        "why": "a \"never\" rule: in the oracle's never list"
+      },
+      {
+        "row": "rotation_single[10]",
+        "text": "threat-safe opener: Siphon Life > Corruption > Curse > Drain Soul | tank struggling on threat [[d:warlock#1483664616130347188]]",
+        "why": "pre-pull/opener outside the brain's fight; the tank's threat is not a condition"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "curse (+Malediction Curse of Agony) on each, Corruption on 2-3, Drain Soul/Dark Harvest the kill target",
+        "why": "Corruption on each mob is the single-target entry applied one mob at a time; raid assignment/marking (which curse, which mob is the kill target)"
+      },
+      {
+        "row": "rotation_aoe[1]",
+        "text": "one Corruption + Drain Soul, or just the raid curse",
+        "why": "\"trash dies in under 10 s\" is not a condition; raid assignment/marking (the raid curse)"
+      },
+      {
+        "row": "rotation_aoe[2]",
+        "text": "stop multi-dotting beyond 3 targets",
+        "why": "a cap on how many mobs carry the dots is not a condition"
+      },
+      {
+        "row": "rotation_aoe[3]",
+        "text": "spread Siphon Life, then Hellfire or Rain of Fire (warn tank/healers)",
+        "why": "Hellfire is the row's other option (nothing in the conditions tells the two apart, and Hellfire hurts the caster); spreading Siphon Life on each mob is not a condition (one target per cast)"
+      },
+      {
+        "row": "cooldowns[0]",
+        "text": "Dark Harvest | 30 s CD; only with Shadow Vulnerability up and >=10 s on all DoTs, or as a finisher; reset-on-kill reported not working [[d:warlock#1463553707974332500]]",
+        "why": "the remaining DoT time (>= 10 s) is not a condition; the reset-on-kill report is not a condition"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "Potion of Quickness / Juju Flurry / racial / on-use trinket | right before (re)applying DoTs so they snapshot the buff [[d:warlock#1450474907686273055]]",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[3]",
+        "text": "Demonic Sacrifice | pre-pull: Imp (+4% spell damage) by default; Succubus (-10% threat) if threat-capped [[d:warlock#1404709089526677505]]; resummon and re-sacrifice after any greater demon/enslave [[d:warlock#1489967871290380401]]",
+        "why": "pet state not in the conditions (the cast sacrifices the demon); pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "cooldowns[4]",
+        "text": "Limited Invulnerability Potion | threat emergency [[d:warlock#1437144597846425671]]",
+        "why": "consumable or item (combat_consumables owns items)"
+      }
+    ]
+  }
+}

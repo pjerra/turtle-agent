@@ -1,0 +1,273 @@
+{
+  "scenario": "itemleg3-g1-items",
+  "description": "Item leg skip, G1: a bot-only Zul'Farrak run from leg gahzrilla gives every bot a Mallet of Zul'Farrak (9240), soulbound, used on the gong, taken back at stop (RUN-LESSONS itemleg3 G1)",
+  "sessions": {
+    "C": {
+      "rpc": "127.0.0.1:8771"
+    }
+  },
+  "db": {
+    "host": "m910q",
+    "container": "tortoise-db"
+  },
+  "vars": {
+    "plan": "zulfarrak",
+    "leg": "gahzrilla",
+    "lead": "Ragnar",
+    "b1": "Beardmeister",
+    "b2": "Darrickk",
+    "b3": "Bo",
+    "b4": "Wolfshield",
+    "give_bag": "255",
+    "give_slot": "38"
+  },
+  "settle_s": 2,
+  "timeout_s": 15,
+  "on_fail": "continue",
+  "max_minutes": 60,
+  "record": [
+    {
+      "session": "C",
+      "kind": "system",
+      "match": "^(TBM:RUN\\|[^|]+\\|(done|failed|paused)\\||TBM:ACTION_(ACK|ERR)\\|(run|item) |The run starts at )"
+    }
+  ],
+  "steps": [
+    {
+      "do": "check_db",
+      "name": "no Mallet before the start",
+      "item": {
+        "chars": [
+          "${lead}",
+          "${b1}",
+          "${b2}",
+          "${b3}",
+          "${b4}"
+        ],
+        "entry": 9240
+      },
+      "count": 0,
+      "on_fail": "stop"
+    },
+    {
+      "do": "check_db",
+      "name": "ledger empty before the start",
+      "table": "tw_char.ai_run_given_item",
+      "where": {
+        "item": 9240
+      },
+      "rows": 0,
+      "on_fail": "stop"
+    },
+    {
+      "do": "section",
+      "title": "(a) the start gives one Mallet to every bot"
+    },
+    {
+      "do": "bot",
+      "session": "C",
+      "command": "run start ${plan} from leg ${leg} speed=3.0"
+    },
+    {
+      "do": "expect",
+      "session": "C",
+      "kind": "system",
+      "match": "^The run starts at step \\d+ of \\d+ \\(leg ${leg}\\)",
+      "on_fail": "stop"
+    },
+    {
+      "do": "expect",
+      "session": "C",
+      "kind": "system",
+      "match": "^TBM:RUN\\|${plan}\\|running\\|\\d+/\\d+\\|${leg}\\|",
+      "timeout_s": 20,
+      "on_fail": "stop"
+    },
+    {
+      "do": "check_db",
+      "name": "ledger: one row per bot",
+      "table": "tw_char.ai_run_given_item",
+      "where": {
+        "item": 9240
+      },
+      "rows": 5,
+      "within_s": 15
+    },
+    {
+      "do": "check_db",
+      "item": {
+        "char": "${lead}",
+        "entry": 9240
+      },
+      "count": 1,
+      "within_s": 120
+    },
+    {
+      "do": "check_db",
+      "item": {
+        "char": "${b1}",
+        "entry": 9240
+      },
+      "count": 1,
+      "within_s": 30
+    },
+    {
+      "do": "check_db",
+      "item": {
+        "char": "${b2}",
+        "entry": 9240
+      },
+      "count": 1,
+      "within_s": 30
+    },
+    {
+      "do": "check_db",
+      "item": {
+        "char": "${b3}",
+        "entry": 9240
+      },
+      "count": 1,
+      "within_s": 30
+    },
+    {
+      "do": "check_db",
+      "item": {
+        "char": "${b4}",
+        "entry": 9240
+      },
+      "count": 1,
+      "within_s": 30
+    },
+    {
+      "do": "section",
+      "title": "(b) the Mallets are soulbound and cannot be traded"
+    },
+    {
+      "do": "check_db",
+      "name": "flags 65 (bound) on all five",
+      "item": {
+        "chars": [
+          "${lead}",
+          "${b1}",
+          "${b2}",
+          "${b3}",
+          "${b4}"
+        ],
+        "entry": 9240,
+        "flags": 65
+      },
+      "count": 5
+    },
+    {
+      "do": "bot",
+      "session": "C",
+      "command": "item ${b1} trade"
+    },
+    {
+      "do": "expect",
+      "session": "C",
+      "kind": "system",
+      "match": "^TBM:ACTION_ACK\\|item trade\\|bot:${b1}\\|1\\|open$"
+    },
+    {
+      "do": "bot",
+      "session": "C",
+      "command": "item ${b1} give ${give_bag} ${give_slot}"
+    },
+    {
+      "do": "expect",
+      "session": "C",
+      "kind": "system",
+      "match": "^TBM:ACTION_ERR\\|item give\\|no-trade\\|"
+    },
+    {
+      "do": "section",
+      "title": "(c) the Mallet is used on the gong and Gahz'rilla dies"
+    },
+    {
+      "do": "wait",
+      "session": "C",
+      "kind": "system",
+      "match": "^TBM:RUN\\|${plan}\\|running\\|\\d+/\\d+\\|${leg}\\|use_on\\|task\\|use_on 141832 with item 9240 by ",
+      "timeout_s": 2400
+    },
+    {
+      "do": "expect",
+      "session": "C",
+      "kind": "system",
+      "match": "^TBM:RUN\\|${plan}\\|running\\|\\d+/\\d+\\|${leg}\\|boss\\|begin\\|use_on 141832 with item 9240 done",
+      "timeout_s": 30
+    },
+    {
+      "do": "expect",
+      "session": "C",
+      "kind": "system",
+      "match": "^TBM:RUN\\|${plan}\\|running\\|\\d+/\\d+\\|[^|]+\\|[^|]+\\|[^|]+\\|boss down\\|",
+      "timeout_s": 600
+    },
+    {
+      "do": "check_db",
+      "name": "the use does not consume the Mallet",
+      "item": {
+        "chars": [
+          "${lead}",
+          "${b1}",
+          "${b2}",
+          "${b3}",
+          "${b4}"
+        ],
+        "entry": 9240
+      },
+      "count": 5
+    },
+    {
+      "do": "section",
+      "title": "(d) .bot run stop takes the Mallets back"
+    },
+    {
+      "do": "bot",
+      "session": "C",
+      "command": "run stop"
+    },
+    {
+      "do": "expect",
+      "session": "C",
+      "kind": "system",
+      "match": "^TBM:RUN\\|${plan}\\|done\\|.*\\|stopped by \\.bot run stop"
+    },
+    {
+      "do": "check_db",
+      "name": "ledger empty at once",
+      "table": "tw_char.ai_run_given_item",
+      "where": {
+        "item": 9240
+      },
+      "rows": 0,
+      "within_s": 10
+    },
+    {
+      "do": "check_db",
+      "name": "no Mallet left (bags, bank, keyring, mail)",
+      "item": {
+        "chars": [
+          "${lead}",
+          "${b1}",
+          "${b2}",
+          "${b3}",
+          "${b4}"
+        ],
+        "entry": 9240
+      },
+      "count": 0,
+      "within_s": 90
+    }
+  ],
+  "finally": [
+    {
+      "do": "bot",
+      "session": "C",
+      "command": "run stop",
+      "settle_s": 0
+    }
+  ]
+}

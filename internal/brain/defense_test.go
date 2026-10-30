@@ -10,6 +10,16 @@ import (
 
 // ---- aggro: a mob that has picked the leader ----
 
+// interruptTarget finds the enemy cast to interrupt with the named spell: in the spell's range, the highest priority, the soonest
+// to end among those.
+func interruptTarget(c *Ctx, spell string) *objects.Unit {
+	id, ok := c.Spells.Highest(spell)
+	if !ok {
+		return nil
+	}
+	return interruptTargetID(c, id)
+}
+
 func TestRootedMobOnTheMageMakesItStepBackOutOfReach(t *testing.T) {
 	r, pf := newPosRig(t, Params{})
 	r.g.addUnit(mob(mobA, selfG), 5, 0)
@@ -250,7 +260,8 @@ func TestAnInterruptedCastIsNotInterruptedAgainAndAFailedCallIsBackedOff(t *test
 		r.g.clk.advance(d)
 		return interruptTarget(r.b.newCtx(r.g.clk.Now()), "Counterspell")
 	}
-	if at(time.Second) != nil || at(time.Second) != nil {
+	first, second := at(time.Second), at(time.Second)
+	if first != nil || second != nil {
 		t.Fatal("the same cast was tried again within 3 s")
 	}
 	if at(1500*time.Millisecond) == nil {

@@ -53,6 +53,30 @@ func TestCheckCommand(t *testing.T) {
 	}
 }
 
+// dungeon_stage appends speed= to the run start it sends: the one `=` word
+// the run grammar takes (1.0 to 3.0, one decimal). No other `=` word passes,
+// and resume takes none.
+func TestCheckCommandRunStartSpeed(t *testing.T) {
+	for _, ok := range []string{
+		"run start zulfarrak from leg gahzrilla speed=3.0",
+		"run start zulfarrak from leg gahzrilla speed=2",
+	} {
+		if err := CheckCommand(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{
+		"run start zulfarrak from leg gahzrilla speed=9.0",
+		"run start zulfarrak from leg gahzrilla speed=3.0x",
+		"run resume zulfarrak speed=3.0",
+		"run start zulfarrak foo=1",
+	} {
+		if err := CheckCommand(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
 // The server's run recorder is the one `.bot` group outside commander/cmd/run that a run sends (run_meta.server_trace): exactly its
 // start, its stop and the status the stop's retries read. Every other `.bot` line is still refused.
 func TestCheckCommandTrace(t *testing.T) {

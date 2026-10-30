@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "name": "kb_beast_mastery_hunter",
+  "class": "hunter",
+  "spec": "beast_mastery",
+  "replaces": [
+    "hunter_marksman"
+  ],
+  "notes": "The Turtle knowledge base's beast mastery raid list as far as a rotation can say it: Bestial Wrath on cooldown, Steady Shot as the loop, Arcane Shot, Multi-Shot and Volley on packs. Kill Command, the pet's Felstorm/Thunderstomp and the pet trinkets are pet state; the swing timer is not a condition. Aimed Shot and Serpent Sting are the oracle's never list.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/hunter/beast-mastery-ranged-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=170748#p170748 (Skurridizo, player (guide writer; four 60 hunters, two hunter YouTube channels), 2026-03-13)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=170469#p170469 (Skurridizo, player, 2026-03-09)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=148472#p148472 (Toxo, player, 2025-08-26)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=106305#p106305 (Ragetto, player, 2024-11-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=173875#p173875 (SvenS2, player, 2026-04-03)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141850#p141850 (Calli, player, 2025-07-28)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=170490#p170490 (Lane13, player, 2026-03-10)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=111060#p111060 (amanagor, player, 2024-12-03)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=114199#p114199 (Bigsmerf, player, 2024-12-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=146762#p146762 (Jiav, player, 2025-08-18)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=160458#p160458 (Nalos, player, 2025-11-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=175410#p175410 (Halfgeek9, player, 2026-04-16)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102967#p102967 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172139#p172139 (Torta, staff, 2026-03-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=172191#p172191 (Topmoo, player, 2026-03-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=150349#p150349 (Thule, player, 2025-09-05)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=170980#p170980 (Plagues2, player, 2026-03-16)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=107692#p107692 (Juzam, player, 2024-11-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=108662#p108662 (Bob022, player, 2024-11-19)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171462#p171462 (Sylvestro1, player, 2026-03-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171478#p171478 (Gorlocktheglock, player, 2026-03-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171530#p171530 (Tomogwarrior, player, 2026-03-21)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102664#p102664 (Arcanex Ota, player, 2024-10-06)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=146300#p146300 (kalevala206, player, 2025-08-16)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=151184#p151184 (Kerenis, player, 2025-09-10)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=169581#p169581 (Tortusenjoyer, player, 2026-02-28)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=169590#p169590 (Mdzielak, player, 2026-02-28)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=143068#p143068 (Atreidon, player, 2025-08-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=174014#p174014 (Atreidon, player, 2026-04-04)",
+    " (Santa Bear, player, 2026-03-25)",
+    " (yaboikeenser, player, 2026-04-07)"
+  ],
+  "priorities": [
+    {
+      "id": "bestial_wrath",
+      "spell": "Bestial Wrath",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat"
+      }
+    },
+    {
+      "id": "arcane_shot",
+      "spell": "Arcane Shot",
+      "level": 6,
+      "target": "fight",
+      "when": {}
+    },
+    {
+      "id": "multi_shot",
+      "spell": "Multi-Shot",
+      "level": 18,
+      "target": "fight",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mobs_near_mob_min": 2
+      }
+    },
+    {
+      "id": "volley",
+      "spell": "Volley",
+      "level": 40,
+      "target": "fight",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "moving": false,
+        "mobs_near_mob_min": 3
+      }
+    },
+    {
+      "id": "steady_shot",
+      "spell": "Steady Shot",
+      "level": 4,
+      "target": "fight",
+      "when": {
+        "moving": false
+      },
+      "note": "Moved after the AoE entries: the filler has no cooldown, so as a rule it would starve Arcane Shot and Multi-Shot."
+    },
+    {
+      "id": "bestial_wrath_cd",
+      "spell": "Bestial Wrath",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat"
+      }
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/hunter/beast-mastery-ranged-dps.yaml",
+    "sha256": "9258d1575a7af29a3f16fdc6df58c147a482aaeec48118ff45d8a56e9bb79714",
+    "preset": "beast_mastery_hunter",
+    "recipe": "tools/kbrotgen/recipes/kb_beast_mastery_hunter.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Kill Command | usable AND pet in melee range of the target AND Steady Shot not casting (no GCD; castable up to 4 s into its cooldown window) [[d:hunter#1490812124006711457]], [[d:hunter#1492650379727605830]], [[d:hunter#1484783149413171350]]",
+        "why": "pet state not in the conditions (the pet in melee range of the target); swing timer not in the conditions"
+      },
+      {
+        "row": "rotation_single[1]",
+        "text": "Bestial Wrath | off cooldown, with trinkets/Rapid Fire",
+        "why": "consumable or item (combat_consumables owns items) (the trinkets)"
+      },
+      {
+        "row": "rotation_single[2]",
+        "text": "Steady Shot | after each Auto Shot without clipping",
+        "why": "swing timer not in the conditions"
+      },
+      {
+        "row": "rotation_single[3]",
+        "text": "Arcane Shot | after Steady when it fits (single target) [[d:hunter#1493031293343236346]]",
+        "why": "swing timer not in the conditions (the \"after Steady\" part)"
+      },
+      {
+        "row": "rotation_single[4]",
+        "text": "never Aimed Shot or Serpent Sting | BM [[d:hunter#1488783178050306048]], [[d:hunter#1490968215290118215]]",
+        "why": "a \"never\" rule: in the oracle's never list"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "Multi-Shot instead of Arcane Shot in the loop",
+        "why": "swing timer not in the conditions (the loop position)"
+      },
+      {
+        "row": "rotation_aoe[1]",
+        "text": "Volley opener; Gorilla Thunderstomp pet for packs",
+        "why": "pet state not in the conditions (the Gorilla's Thunderstomp is the pet's)"
+      },
+      {
+        "row": "cooldowns[0]",
+        "text": "Bestial Wrath | on cooldown (18 s enrage, 1.5 min) with trinkets",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "Kill Command | whenever usable; macro into every shot (\"/cast Kill Command /cast Arcane Shot /cast Steady Shot\") [[d:hunter#1493050238653435955]]",
+        "why": "pet state not in the conditions; macro/addon (Nampower etc.)"
+      },
+      {
+        "row": "cooldowns[2]",
+        "text": "Devilsaur Tooth | pre-pull, then again after the first pet crit (guarantees a pet crit incl. Kill Command) [[d:hunter#1492033139961368637]]",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[3]",
+        "text": "Molten Emberstone | on pull; save Blood Fury (no stack) [[d:hunter#1461363355867676672]]",
+        "why": "consumable or item (combat_consumables owns items)"
+      }
+    ]
+  }
+}

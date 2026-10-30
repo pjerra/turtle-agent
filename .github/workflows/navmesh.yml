@@ -1,0 +1,100 @@
+name: navmesh
+
+# Navmesh checks with the server's own map files: the tests in internal/navmesh, internal/dungeon and
+# internal/dashboard that skip without mmaps, and `plan-check` on every live or mapped plan. The files come from the
+# private pjerra/tb-server-data release; the TB_DATA_TOKEN secret is a fine-grained token with read access to that
+# repository's contents only (docs/CI.md). Without the secret (forks, a fresh clone) the job says so and does nothing.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+concurrency:
+  group: navmesh-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  TB_DATA_REPO: pjerra/tb-server-data
+  TB_DATA_TAG: data-2026-10-29
+
+jobs:
+  navmesh:
+    # Draft PRs are work in progress; the checks run when the PR is marked ready.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.mod
+
+      - name: TB_DATA_TOKEN
+        id: token
+        env:
+          TB_DATA_TOKEN: ${{ secrets.TB_DATA_TOKEN }}
+        run: |
+          if [ -z "$TB_DATA_TOKEN" ]; then
+            echo "navmesh checks skipped: TB_DATA_TOKEN not set"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The cache key needs the release's checksum file, so fetch only that first. The mmaps are 500+ MB; a cache hit
+      # skips the whole download.
+      - name: download SHA256SUMS
+        if: steps.token.outputs.skip != 'true'
+        id: sums
+        env:
+          GH_TOKEN: ${{ secrets.TB_DATA_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tb-data"
+          gh release download "$TB_DATA_TAG" --repo "$TB_DATA_REPO" --pattern SHA256SUMS --dir "$RUNNER_TEMP/tb-data" --clobber
+          echo "hash=$(sha256sum "$RUNNER_TEMP/tb-data/SHA256SUMS" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: restore mmaps
+        if: steps.token.outputs.skip != 'true'
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/mmaps
+          key: navmesh-${{ env.TB_DATA_TAG }}-${{ steps.sums.outputs.hash }}
+
+      - name: download, verify and unpack mmaps
+        if: steps.token.outputs.skip != 'true' && steps.cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.TB_DATA_TOKEN }}
+        run: tools/ci/fetch-mmaps.sh "$TB_DATA_TAG" "$TB_DATA_REPO" "$RUNNER_TEMP/tb-data" "$RUNNER_TEMP/mmaps"
+
+      # Every test file that skips without navmesh files (grep "TURTLE_AGENT_MMAPS" or the skip message): the navmesh
+      # planner and server-path tests, the dungeon plan/zulfarrak/uldaman/deadmines/ragefire/wailing-caverns/leave
+      # tests, and the commanded path/stage/plan checks in cmd/turtle-agent. internal/dashboard has no navmesh test of
+      # its own; it is listed because its dashboards read the same plans and routes.
+      - name: navmesh tests
+        if: steps.token.outputs.skip != 'true'
+        env:
+          TURTLE_AGENT_MMAPS: ${{ runner.temp }}/mmaps
+          CGO_ENABLED: "1"
+        run: go test -count=1 ./internal/navmesh/ ./internal/dungeon/ ./internal/dashboard/
+
+      - name: plan-check every live or mapped plan
+        if: steps.token.outputs.skip != 'true'
+        env:
+          TURTLE_AGENT_MMAPS: ${{ runner.temp }}/mmaps
+          CGO_ENABLED: "1"
+        run: |
+          set -euo pipefail
+          go build -o "$RUNNER_TEMP/turtle-agent" ./cmd/turtle-agent
+          tools/ci/plan-check-all.sh --bin "$RUNNER_TEMP/turtle-agent" --dir dungeons --mmaps "$TURTLE_AGENT_MMAPS"

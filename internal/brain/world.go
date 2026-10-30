@@ -222,8 +222,6 @@ type spotSpec struct {
 	base   float64       // bearing of the first candidate
 	target *objects.Unit // when set: the spot has sight of it, and stays within the ranged band of it
 	extra  func(p Vec3) bool
-	// others are the mobs the spot must keep away from besides target (nil: every hostile mob in view).
-	others bool
 	// keepAway and busyAway override mobKeepAway and mobBusyAway (0: the default). A negative busyAway lets the spot be anywhere
 	// near mobs that are fighting, as a melee fighter's is.
 	keepAway, busyAway float64

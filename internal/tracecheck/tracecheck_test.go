@@ -62,7 +62,7 @@ func bot(g string, lead bool, x float32) trace.Bot {
 
 func TestEveryCheckHasAnIDNameAndAVerdictOnAnEmptyTrace(t *testing.T) {
 	cs := Score(newTrace(0).f, Defaults())
-	if len(cs) != 11 {
+	if len(cs) != 13 {
 		t.Fatalf("%d checks", len(cs))
 	}
 	seen := map[string]bool{}

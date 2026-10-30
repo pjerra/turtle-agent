@@ -51,7 +51,7 @@ const small = `{"version":1,"name":"Tiny_Cave","status":"live-checked (test)","m
    {"loot_object":{"entry":902,"near":{"x":62,"y":0,"z":0},"expect_item":{"entry":7740,"name":"Gni'kiv Medallion"}}},
    {"use_item":{"entry":7740,"name":"Gni'kiv Medallion","requires_item":{"entry":7741},"expect_item":{"entry":7733}}},
    {"ritual":{"entry":903,"position":{"x":63,"y":0,"z":0},"participants":3}}],
-  "boss":{"entry":6906,"position":{"x":70,"y":0,"z":0},"first":[6907,6908],"team":"horde","loot_item":{"entry":5555,"name":"Prize"}},
+  "boss":{"entry":6906,"position":{"x":70,"y":0,"z":0},"first":[6907,6908],"team":"horde","loot_item":{"entry":5555,"name":"Prize"},"wait_s":300},
   "after_boss":[{"loot_object":{"entry":904,"near":{"x":71,"y":0,"z":0}}}]},
  {"name":"second","to":{"x":80,"y":0,"z":0},"boss":{"entry":7000,"position":{"x":90,"y":0,"z":0}}}]}`
 
@@ -69,6 +69,10 @@ func TestMappingFollowsTheGuide(t *testing.T) {
 	}
 	if got := kinds(r, 1); strings.Join(got, " ") != "move boss" {
 		t.Fatalf("leg 1 kinds %v", got)
+	}
+	// a boss without wait_s keeps the row's timeout 0 (the run leader's own default)
+	if b := r.Steps[len(r.Steps)-1]; b.Kind != KindBoss || b.TimeoutS != 0 {
+		t.Fatalf("leg 1 boss %+v", b)
 	}
 	for i, s := range r.Steps { // seq counts from 0 in each leg, without gaps
 		if s.Leg == 0 && s.Seq != i {
@@ -116,8 +120,9 @@ func TestMappingFollowsTheGuide(t *testing.T) {
 	if rt := at(12); rt.Kind != KindRitual || rt.Entry != 903 || rt.X != 63 {
 		t.Fatalf("ritual %+v", rt)
 	}
-	// the boss: entries = first, team gate; its loot_item is a loot row of the boss entry right after it; after_boss steps follow
-	if b := at(13); b.Entry != 6906 || entriesText(b.Entries) != "6907,6908" || b.Flags != FlagHorde || b.Radius != 0 {
+	// the boss: entries = first, team gate, and the plan's wait_s as the row's timeout_s (the run leader's wait for a
+	// patrolling boss at his point); its loot_item is a loot row of the boss entry right after it; after_boss steps follow
+	if b := at(13); b.Entry != 6906 || entriesText(b.Entries) != "6907,6908" || b.Flags != FlagHorde || b.Radius != 0 || b.TimeoutS != 300 {
 		t.Fatalf("boss %+v", b)
 	}
 	if l := at(14); l.Kind != KindLoot || l.Entry != 6906 || l.Item != 5555 {

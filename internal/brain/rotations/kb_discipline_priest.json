@@ -1,0 +1,225 @@
+{
+  "version": 1,
+  "name": "kb_discipline_priest",
+  "class": "priest",
+  "spec": "discipline",
+  "replaces": [
+    "priest_shadow"
+  ],
+  "notes": "The knowledge base's discipline (Smite) priest: Enlighten and Inner Focus upkeep, Holy Fire to keep the Purifying Flames debuff up (four Smites fit one cycle), Smite as the filler, Shadow Word: Pain while moving, Pain Spike on a dying mob, rank-1 Holy Fire when mana is low, Holy Nova at four or more targets. Chastise and the tier-set cycles need a friendly target or a gear check the conditions lack and are listed in kb.unexpressed.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/priest/discipline-ranged-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=152325#p152325 (Langorn, guide writer, 2025-09-19)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=131166#p131166 (Tess322, player, 2025-05-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=157662#p157662 (Tscosomaz, player, 2025-10-29)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=111323#p111323 (Caracole, player, 2024-12-04)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=174655#p174655 (Zvyrhol, player, 2026-04-10)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=162703#p162703 (Quidoba, player, 2025-12-13)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=140895#p140895 (Darkest1024, player, 2025-07-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=106433#p106433 (Ulukay, player, 2024-11-05)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102970#p102970 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=108776#p108776 (Jamey, staff, 2024-11-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=124504#p124504 (Torta, staff, 2025-03-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=168272#p168272 (Dragunovi, staff, 2026-02-15)",
+    " (DemonBoyJr, player, 2025-03-27)",
+    " (Snackz, player (maintains Smite sim), 2026-02-27)",
+    " (Snackz, player (maintains Smite sim), 2026-03-21)",
+    " (HolyScheiss, player (guide author), 2026-05-15)"
+  ],
+  "priorities": [
+    {
+      "id": "holy_fire_rank1",
+      "spell": "Holy Fire",
+      "level": 20,
+      "rank": 1,
+      "target": "fight",
+      "when": {
+        "power_below": 30,
+        "no_mob_aura": [
+          "Holy Fire"
+        ]
+      },
+      "note": "moved ahead of the full-rank entry (KB priority 10): at low mana the rank-1 cast is the row"
+    },
+    {
+      "id": "holy_fire",
+      "spell": "Holy Fire",
+      "level": 20,
+      "target": "fight",
+      "when": {
+        "no_mob_aura": [
+          "Holy Fire"
+        ]
+      }
+    },
+    {
+      "id": "smite",
+      "spell": "Smite",
+      "level": 1,
+      "target": "fight",
+      "when": {
+        "moving": false
+      }
+    },
+    {
+      "id": "shadow_word_pain",
+      "spell": "Shadow Word: Pain",
+      "level": 4,
+      "target": "fight",
+      "when": {
+        "moving": true,
+        "no_mob_aura": [
+          "Shadow Word: Pain"
+        ]
+      }
+    },
+    {
+      "id": "pain_spike",
+      "spell": "Pain Spike",
+      "level": 30,
+      "target": "fight",
+      "when": {
+        "mob_hp_below": 30
+      }
+    },
+    {
+      "id": "holy_nova_rank1",
+      "spell": "Holy Nova",
+      "level": 20,
+      "rank": 1,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "power_below": 50,
+        "mobs_near_mob_min": 4
+      },
+      "note": "ahead of the full-rank Nova (KB priority 2) so the cheap cast wins below half mana"
+    },
+    {
+      "id": "holy_nova",
+      "spell": "Holy Nova",
+      "level": 20,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "tank_holds": true,
+        "mobs_near_mob_min": 4
+      }
+    },
+    {
+      "id": "enlighten",
+      "spell": "Enlighten",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "no_self_aura": [
+          "Enlighten"
+        ]
+      }
+    },
+    {
+      "id": "inner_focus",
+      "spell": "Inner Focus",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "no_self_aura": [
+          "Inner Focus"
+        ]
+      }
+    },
+    {
+      "id": "berserking",
+      "spell": "Berserking",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat"
+      }
+    },
+    {
+      "id": "grace_of_the_sunwell",
+      "spell": "Grace of the Sunwell",
+      "level": 10,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat"
+      }
+    },
+    {
+      "id": "suns_embrace",
+      "spell": "Sun's Embrace",
+      "level": 20,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat"
+      }
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/priest/discipline-ranged-dps.yaml",
+    "sha256": "968fe1fdcc4e6424afc9b2fc35dd43f2ab7f715f3c743e61859857a668d72671",
+    "preset": "discipline_priest",
+    "recipe": "tools/kbrotgen/recipes/kb_discipline_priest.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Pre-pull: Inner Fire; Enlighten on self (+15%) or one non-Smite DPS (+10%); Chastise the tank on pull |",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[1]",
+        "text": "Opener: Inner Focus -> Holy Fire -> 4x Smite -> Holy Fire | boss pull",
+        "why": "pre-pull/opener outside the brain's fight"
+      },
+      {
+        "row": "rotation_single[4]",
+        "text": "Smite + Chastise instead of Holy Fire | boss dies before the next cycle completes",
+        "why": "creature type not in the conditions"
+      },
+      {
+        "row": "rotation_single[5]",
+        "text": "Chastise (friendly arcane mage / affliction warlock / top DPS) | off cooldown (40 s); costs one Smite; never on self in raid",
+        "why": "friendly target not in the conditions"
+      },
+      {
+        "row": "rotation_single[7]",
+        "text": "T3.5 5-set cycle: 4x Smite -> Holy Fire -> 2x Smite -> Shadow Word: Pain (18.01 s) | wearing T3.5 5-set (lets Burning Zeal tick out); if the set DoT is resisted recast SW:P + Holy Fire",
+        "why": "gear or set bonus not in the conditions"
+      },
+      {
+        "row": "rotation_single[8]",
+        "text": "T3 8-set opener: Chastise -> Holy Fire -> PW:S -> 2x Smite -> Holy Fire | wearing full T3",
+        "why": "gear or set bonus not in the conditions"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "single-target rotation",
+        "why": "covered by rotation_single: the same single-target entries play below the Nova threshold"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "Chastise | tank on pull, then top DPS every 40 s",
+        "why": "friendly target not in the conditions"
+      },
+      {
+        "row": "cooldowns[3]",
+        "text": "Fear Ward | tank before fears",
+        "why": "friendly target not in the conditions"
+      },
+      {
+        "row": "cooldowns[5]",
+        "text": "Fade | threat near tank (delays, does not prevent, a pull)",
+        "why": "priest_defense owns Fade"
+      }
+    ]
+  }
+}

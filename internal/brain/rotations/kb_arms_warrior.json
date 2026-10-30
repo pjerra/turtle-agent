@@ -1,0 +1,260 @@
+{
+  "version": 1,
+  "name": "kb_arms_warrior",
+  "class": "warrior",
+  "spec": "arms",
+  "replaces": [
+    "warrior_melee",
+    "warrior_arms"
+  ],
+  "notes": "The Turtle knowledge base's Arms list: Mortal Strike on cooldown, Slam as the standing-still filler, Overpower after the mob dodges in Battle Stance, Execute below 20%, the opener's Sunder and Bloodrage, Heroic Strike once rage would cap, and the AoE rows (Sweeping Strikes, Mortal Strike, Cleave). Whirlwind needs Berserker Stance, which this file leaves to the preset's stance strategy; the swing timer it asks Slam to wait for is not a condition. Stance and taunt stay with the preset.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/warrior/arms-melee-dps.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102974#p102974 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=122609#p122609 (Wolf of Rage, player, 2025-03-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=122809#p122809 (Atreidon, player, 2025-03-17)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=122819#p122819 (Wolf of Rage, player, 2025-03-17)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=122923#p122923 (Wolf of Rage, player, 2025-03-18)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=125218#p125218 (Wolf of Rage, player, 2025-04-03)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166667#p166667 (Licata, player, 2026-01-27)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=171710#p171710 (Berettadin, player, 2026-03-22)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=156442#p156442 (Cheruscan, player, 2025-10-21)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=157920#p157920 (armsgirl, player, 2025-10-31)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=139087#p139087 (Ellifta, player, 2025-07-14)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=64562#p64562 (Shaman111, player, 2023-09-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=101831#p101831 (Atreidon, player, 2024-09-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=100433#p100433 (Tacticalnelf, player, 2024-08-30)"
+  ],
+  "priorities": [
+    {
+      "id": "charge",
+      "spell": "Charge",
+      "level": 4,
+      "target": "fight",
+      "band": "move",
+      "when": {
+        "mob_distance_min": 8,
+        "mob_distance_max": 25,
+        "tank_holds": true,
+        "in_combat": false,
+        "stance": [
+          "Battle Stance"
+        ]
+      }
+    },
+    {
+      "id": "auto_attack",
+      "kind": "attack",
+      "when": {},
+      "note": "The swing is the base every entry waits on: it goes first in the order, as in the Go rotation (warrior_melee)."
+    },
+    {
+      "id": "sunder_armor",
+      "spell": "Sunder Armor",
+      "level": 10,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "mob_stacks_below": {
+          "aura": "Sunder Armor",
+          "stacks": 1
+        }
+      },
+      "note": "The KB's opener Sunder: one application, while the mob carries no Sunder yet (the Arms list sunder beyond the opener only in the rage-capped rows of other specs)."
+    },
+    {
+      "id": "bloodrage",
+      "spell": "Bloodrage",
+      "level": 10,
+      "target": "self",
+      "when": {
+        "state": "combat",
+        "mob_distance_max": 12,
+        "self_hp_above": 50,
+        "power_below": 20,
+        "no_self_aura": [
+          "Bloodrage"
+        ]
+      }
+    },
+    {
+      "id": "execute",
+      "spell": "Execute",
+      "level": 24,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "stance": [
+          "Battle Stance",
+          "Berserker Stance"
+        ],
+        "mob_hp_below": 20
+      }
+    },
+    {
+      "id": "mortal_strike",
+      "spell": "Mortal Strike",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true
+      }
+    },
+    {
+      "id": "slam",
+      "spell": "Slam",
+      "level": 14,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "moving": false
+      }
+    },
+    {
+      "id": "overpower",
+      "spell": "Overpower",
+      "level": 12,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "after": "dodge",
+        "stance": [
+          "Battle Stance"
+        ]
+      }
+    },
+    {
+      "id": "hamstring",
+      "spell": "Hamstring",
+      "level": 8,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "stance": [
+          "Battle Stance",
+          "Berserker Stance"
+        ]
+      }
+    },
+    {
+      "id": "heroic_strike",
+      "kind": "next_swing",
+      "spell": "Heroic Strike",
+      "level": 1,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "power_above": 79
+      }
+    },
+    {
+      "id": "sweeping_strikes",
+      "spell": "Sweeping Strikes",
+      "talent": true,
+      "target": "self",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mobs_in_reach_min": 2,
+        "stance": [
+          "Battle Stance"
+        ],
+        "no_self_aura": [
+          "Sweeping Strikes"
+        ]
+      }
+    },
+    {
+      "id": "mortal_strike_aoe",
+      "spell": "Mortal Strike",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "mobs_in_reach_min": 2
+      },
+      "note": "The single-target Mortal Strike entry has no mob-count condition, so it already plays on a pack; the row stands as the KB's AoE restatement, and the Whirlwind half is the stance part."
+    },
+    {
+      "id": "cleave",
+      "kind": "next_swing",
+      "spell": "Cleave",
+      "level": 20,
+      "target": "fight",
+      "threat": "aoe",
+      "when": {
+        "mob_in_reach": true,
+        "mobs_in_reach_min": 2,
+        "power_above": 49
+      }
+    },
+    {
+      "id": "death_wish",
+      "spell": "Death Wish",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "mob_hp_below": 20
+      }
+    },
+    {
+      "id": "recklessness",
+      "spell": "Recklessness",
+      "level": 50,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "mob_hp_below": 20
+      }
+    },
+    {
+      "id": "bloodrage_execute",
+      "spell": "Bloodrage",
+      "level": 10,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "self_hp_above": 50,
+        "mob_hp_below": 20,
+        "no_self_aura": [
+          "Bloodrage"
+        ]
+      }
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/warrior/arms-melee-dps.yaml",
+    "sha256": "0e443c8fab667ff5a213bfd7a08408f09ba1c3e0daa547a4af0dd1a9ab76958f",
+    "preset": "arms_warrior",
+    "recipe": "tools/kbrotgen/recipes/kb_arms_warrior.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[3]",
+        "text": "Slam | right after each auto lands; 3.6-3.8 speed weapon",
+        "why": "swing timer not in the conditions"
+      },
+      {
+        "row": "rotation_single[4]",
+        "text": "Whirlwind | off cooldown",
+        "why": "stance/form: the preset's stance strategy owns it"
+      },
+      {
+        "row": "rotation_aoe[1]",
+        "text": "Mortal Strike / Whirlwind",
+        "why": "stance/form: the preset's stance strategy owns it"
+      },
+      {
+        "row": "cooldowns[3]",
+        "text": "Kiss of the Spider | when the Execute phase matters most",
+        "why": "consumable or item (combat_consumables owns items)"
+      }
+    ]
+  }
+}

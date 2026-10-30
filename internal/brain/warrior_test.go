@@ -196,7 +196,7 @@ func TestRageDecidesWhatTheWarriorCanDo(t *testing.T) {
 			noBloodrage = append(noBloodrage, id)
 		}
 	}
-	r, mf = newWarriorRig(t, "arms_warrior", stanceBattle, Params{}, noBloodrage...)
+	r, _ = newWarriorRig(t, "arms_warrior", stanceBattle, Params{}, noBloodrage...)
 	tankFights(r.g, 7, 4, 0)
 	r.tick(100 * time.Millisecond)
 	if d := open(r); d == nil || d.Action != "auto_attack" {

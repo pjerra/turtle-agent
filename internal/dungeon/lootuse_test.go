@@ -118,7 +118,7 @@ func TestLootObjectStepForTheAlliance(t *testing.T) {
 		t.Fatalf("opened %v walks %v", g.opened, g.walks)
 	}
 	notes := strings.Join(d.Report().Notes, "\n")
-	if !strings.Contains(notes, "pull group 1 of 1 ([1]) is for team horde, the leader is alliance: skipped") ||
+	if !strings.Contains(notes, "pull group 1 of 1 (from_pull_group 0) ([1]) is for team horde, the leader is alliance: skipped") ||
 		!strings.Contains(notes, "boss 7 is for team horde, the leader is alliance: skipped") || !strings.Contains(notes, "took 1 x item 7740") {
 		t.Fatalf("notes:\n%s", notes)
 	}

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/pjerra/turtle-agent/internal/kbspells"
 	"github.com/pjerra/turtle-agent/internal/spells"
 	"github.com/pjerra/turtle-agent/internal/trace"
 )
@@ -34,21 +35,22 @@ const (
 
 // SpellReport is the report; Lines prints it. Fields are exported for --json.
 type SpellReport struct {
-	Frames       int          `json:"frames"`       // frames with bots
-	CastsSeen    bool         `json:"casts_seen"`   // any bot frame has a cs
-	ActsSeen     bool         `json:"acts_seen"`    // any bot frame has an act
-	VerdictSeen  bool         `json:"verdict_seen"` // any bot frame has the verdict letter (res)
-	Classes      []ClassSpell `json:"classes"`
-	Idle         IdleShare    `json:"idle"`
-	Deaths       []DeathMana  `json:"deaths,omitempty"`
-	DryBots      int          `json:"dry_bots"` // mana users that went under 10 % mana in combat
-	Interrupt    InterruptUse `json:"interrupt"`
-	Taunts       TauntUse     `json:"taunts"`
-	CC           CCUse        `json:"cc"`
-	TauntLatency TauntLatency `json:"taunt_latency"`
-	CCHold       CCHold       `json:"cc_hold"`
-	PetThreat    PetThreat    `json:"pet_threat"`
-	Warnings     []string     `json:"warnings,omitempty"`
+	Frames       int                `json:"frames"`       // frames with bots
+	CastsSeen    bool               `json:"casts_seen"`   // any bot frame has a cs
+	ActsSeen     bool               `json:"acts_seen"`    // any bot frame has an act
+	VerdictSeen  bool               `json:"verdict_seen"` // any bot frame has the verdict letter (res)
+	Classes      []ClassSpell       `json:"classes"`
+	Idle         IdleShare          `json:"idle"`
+	Deaths       []DeathMana        `json:"deaths,omitempty"`
+	DryBots      int                `json:"dry_bots"` // mana users that went under 10 % mana in combat
+	Interrupt    InterruptUse       `json:"interrupt"`
+	Taunts       TauntUse           `json:"taunts"`
+	CC           CCUse              `json:"cc"`
+	TauntLatency TauntLatency       `json:"taunt_latency"`
+	CCHold       CCHold             `json:"cc_hold"`
+	PetThreat    PetThreat          `json:"pet_threat"`
+	Oracle       []kbspells.Finding `json:"oracle,omitempty"`
+	Warnings     []string           `json:"warnings,omitempty"`
 }
 
 // ClassSpell is one class's casts, action mix and verdicts.
@@ -894,6 +896,7 @@ func Spells(f *trace.File, c Config) SpellReport {
 	r.TauntLatency = tauntLatency(f, acts, ivS)
 	r.CCHold = ccHold(f, ccs, ivS)
 	r.PetThreat = petThreat(f)
+	r.Oracle = SpellOracle(f, c)
 
 	r.warn(c)
 	return r
@@ -1084,6 +1087,20 @@ func (r SpellReport) Lines() []string {
 		out = append(out, fmt.Sprintf("  cc hold: %d joined episodes; %d broken under %.0f s; %.1f %% held; median length %.1f s; flags are not tied to the caster (1 Hz samples)", h.Joined, h.Broken, ccBrokenS, h.HeldPct, h.MedianS))
 	}
 	out = append(out, fmt.Sprintf("  pet threat: a pet (guid 0xf140...) held the top threat in %d of %d mob-frames (%.1f %%) (1 Hz samples)", r.PetThreat.PetTop, r.PetThreat.MobFrames, r.PetThreat.Pct))
+	if len(r.Oracle) > 0 {
+		warns := 0
+		for _, f := range r.Oracle {
+			if f.Level == "warn" {
+				warns++
+			}
+		}
+		out = append(out, fmt.Sprintf("  Spell oracle: %d warning(s) of %d bots judged against their KB spec (spec inferred from signatures; 1 Hz frames miss instants)", warns, len(r.Oracle)))
+		for _, f := range r.Oracle {
+			if f.Level == "warn" {
+				out = append(out, "    WARN "+oracleText(f))
+			}
+		}
+	}
 	for _, w := range r.Warnings {
 		out = append(out, "  WARN "+w)
 	}

@@ -44,7 +44,27 @@ const (
 	WarnNeedlessDirect = "needless direct"
 	// WarnEstimatedPatrol is the reason of the warning on a patrol whose period_s is an estimate (Patrol.PeriodEstimate).
 	WarnEstimatedPatrol = "estimated patrol period"
+
+	// ReasonServerUnreachable is a hop the server's own path query refuses: the run
+	// leader's CheckMove answers "unreachable" (or the path's end is short after 3
+	// incomplete legs) from where the party stands, although the offline query has a
+	// complete path.
+	ReasonServerUnreachable = "server unreachable"
+	// ReasonArriveSwallowed is a direct hop the run leader never sends: it lies within
+	// the arrival radius (DungeonRunPolicy.h kArriveYd) of the point before it, so the
+	// run counts it reached (WalkTo returns "arrived") and the party stays behind.
+	ReasonArriveSwallowed = "hop inside the arrival radius"
 )
+
+// ArriveYd is the run leader's arrival radius: within it of its point a move counts as
+// reached without sending an order (TortoiseBots DungeonRunPolicy.h kArriveYd, WalkTo).
+const ArriveYd = 3.0
+
+// ServerQuerier is the optional part of a Navmesh that replays the server's own path
+// query; *navmesh.Planner implements it. The test fakes compile without it.
+type ServerQuerier interface {
+	ServerPath(mapID uint32, from, to navmesh.Vec3) (navmesh.ServerPath, error)
+}
 
 // Navmesh is what the plan check asks of the navmesh; navmesh.Planner is one.
 type Navmesh interface {
@@ -154,6 +174,7 @@ type PlanIssue struct {
 	// Part says what the point is: "via 2", "direct via 1", "to", "pull group look" or "boss look".
 	Part string `json:"part"`
 	// PullGroup and PullGroups number the pack the way dungeon_status does ("pull group 9 of 12"); 0 for a point that is not a pack's.
+	// Every text shows both numberings (PullGroupRef: "pull group 9 of 12 (from_pull_group 8)").
 	PullGroup  int   `json:"pull_group,omitempty"`
 	PullGroups int   `json:"pull_groups,omitempty"`
 	Point      Point `json:"point"`
@@ -171,7 +192,7 @@ func (i PlanIssue) String() string {
 		where += " (" + i.LegName + ")"
 	}
 	if i.PullGroup > 0 {
-		where += fmt.Sprintf(" pull group %d of %d", i.PullGroup, i.PullGroups)
+		where += " " + PullGroupRef(i.PullGroup-1, i.PullGroups)
 	}
 	if i.Team != "" {
 		where += " [" + i.Team + " only]"
@@ -246,7 +267,7 @@ func (o CheckOptions) Validate(p *Plan) error {
 	}
 	if g := o.FromPullGroup; g != nil {
 		if n := len(p.Legs[o.FromLeg].PullGroups); *g < 0 || *g >= n {
-			return fmt.Errorf("%w: pull group %d: leg %d (%s) has %d pull groups (numbers 0-%d)", ErrCheckStart, *g, o.FromLeg, p.Legs[o.FromLeg].Name, n, n-1)
+			return fmt.Errorf("%w: leg %d (%s) has %d pull groups (from_pull_group 0-%d; dungeon_status numbers them 1-%d)", ErrCheckStart, o.FromLeg, p.Legs[o.FromLeg].Name, n, n-1, n)
 		}
 	}
 	return nil
@@ -283,7 +304,7 @@ func checkPlanRec(p *Plan, nav Navmesh, opt CheckOptions, look lookFunc, rec *ro
 	if a, ok := nav.(AvoidSetter); ok {
 		a.SetAvoid(p.Map, NavBoxes(p.Avoid))
 	}
-	c := &planChecker{p: p, nav: nav, lookAt: look, opt: opt, rec: rec, res: &PlanCheck{Plan: p.Name, Map: p.Map, Issues: []PlanIssue{}, Warnings: []PlanIssue{}, Exempt: []PlanIssue{}, RunLeader: []PlanIssue{}}}
+	c := &planChecker{p: p, nav: nav, lookAt: look, opt: opt, rec: rec, res: &PlanCheck{Plan: p.Name, Map: p.Map, Issues: []PlanIssue{}, Warnings: []PlanIssue{}, Exempt: []PlanIssue{}, RunLeader: []PlanIssue{}}, ends: map[string]Point{}}
 	cur, group := p.Entrance, -1
 	switch {
 	case opt.FromPullGroup != nil:
@@ -328,13 +349,19 @@ func (c *planChecker) runLeader(from int) error {
 			return
 		}
 		if !strings.Contains(m.Part, "approach") && !strings.Contains(m.Part, "hold spot") {
-			prev = m.Point // checked by checkLeg already
+			// Checked by checkLeg already: the approach pass starts from where
+			// its walk left the party (the arrival rule or the server walk may
+			// have kept it behind), not from the plan's point.
+			prev = m.Point
+			if at, ok := c.ends[endKey(m.Leg, m.Part)]; ok {
+				prev = at
+			}
 			return
 		}
 		c.leg, c.l = m.Leg, c.p.Legs[m.Leg]
 		var at Point
-		if at, err = c.walk("run leader "+m.Part, m.Point, prev); err == nil && at == m.Point {
-			prev = m.Point
+		if at, err = c.walk("run leader "+m.Part, m.Point, prev); err == nil {
+			prev = at
 		}
 	}, func(int, string, Point, int, string) {})
 	if err != nil {
@@ -377,7 +404,14 @@ type planChecker struct {
 	res *PlanCheck
 	leg int
 	l   Leg
+	// ends is where checkLeg's walk left the party after each move row of the
+	// plan, keyed "leg/part" with runLeaderWalk's part names: the run leader's
+	// approach pass starts from there, not from the plan's point.
+	ends map[string]Point
 }
+
+// endKey keys ends: the leg and the runLeaderWalk part name of the move row.
+func endKey(leg int, part string) string { return fmt.Sprintf("%d/%s", leg, part) }
 
 func vec(p Point) navmesh.Vec3 { return navmesh.Vec3{p.X, p.Y, p.Z} }
 
@@ -416,6 +450,20 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 		for vi, w := range l.Via {
 			var err error
 			c.rec.stop("via", fmt.Sprintf("via %d", vi), 0, w.Point, "")
+			if !w.GMCross && dist3(cur, w.Point) <= ArriveYd && dist3(cur, w.Point) > 0.05 {
+				// Within the run leader's arrival radius the point counts as
+				// reached: WalkTo returns "arrived" without sending an order,
+				// so the party stays where it was (kArriveYd, WalkTo).
+				part := fmt.Sprintf("via %d", vi)
+				if w.Direct {
+					part = fmt.Sprintf("direct via %d", vi)
+				}
+				c.ends[endKey(c.leg, part)] = cur
+				if w.Direct {
+					c.fail(part, 0, w.Point, cur, ReasonArriveSwallowed, "%.1f yd from the point before it: the run leader counts it reached (kArriveYd %g) and never sends the hop; the party stays at %.1f %.1f %.1f", dist3(cur, w.Point), ArriveYd, cur.X, cur.Y, cur.Z)
+				}
+				continue
+			}
 			switch {
 			case w.GMCross:
 				cur, err = c.gmCross(fmt.Sprintf("gm_cross via %d", vi), w.Point, cur)
@@ -430,6 +478,7 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 			if err != nil {
 				return cur, err
 			}
+			c.ends[endKey(c.leg, fmt.Sprintf("via %d", vi))] = cur
 		}
 		c.rec.stop("stage", "to", 0, l.To, "")
 		if !l.NeedsWalk {
@@ -437,6 +486,7 @@ func (c *planChecker) checkLeg(l Leg, cur Point, group int) (Point, error) {
 			if cur, err = c.walk("to", l.To, cur); err != nil {
 				return cur, err
 			}
+			c.ends[endKey(c.leg, "to")] = cur
 		} else {
 			c.needsWalk("to", 0, "", l.To, cur)
 			cur = l.To
@@ -559,6 +609,7 @@ func (c *planChecker) steps(kind string, steps []Step, cur Point) (Point, error)
 		if st.Gossip != nil && st.Gossip.Talker() == GossipByAgent {
 			cur = prev // the agent's own character walks to it: the party stays where it was
 		}
+		c.ends[endKey(c.leg, label)] = cur
 	}
 	return cur, nil
 }
@@ -583,7 +634,6 @@ func (c *planChecker) count() {
 	c.res.Points++
 }
 
-// walk checks a plain waypoint: mesh floor under it and a complete navmesh path to it. It returns the point the party is at afterwards.
 func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 	c.count()
 	c.rec.begin("", part, from, to)
@@ -608,6 +658,9 @@ func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 		return from, err
 	}
 	c.rec.path(path)
+	// The offline query judges the hop first: when it answers anything but
+	// complete the run never sends the hop, so the run leader's own query is
+	// not asked. The route-trace exception stays for the Plan failure only.
 	if path.Status != navmesh.Complete {
 		err := c.failPath(part, 0, to, from, path)
 		if c.rec != nil && err == nil && pathReason(path) == ReasonUnreachable {
@@ -617,7 +670,52 @@ func (c *planChecker) walk(part string, to, from Point) (Point, error) {
 		}
 		return from, err
 	}
+	// The offline query takes the hop: the run leader's own query judges it
+	// next (it answers 'arrived' inside the arrival radius: the run leader
+	// sends NO order, so the modelled position stays where it was).
+	if at, ok, err := c.serverWalk(part, 0, to, from); err != nil {
+		return at, err
+	} else if !ok {
+		return at, nil
+	} else if at != to {
+		// The server answered 'arrived': the party stays where it was.
+		return at, nil
+	}
 	return to, nil
+}
+
+// serverWalk simulates the run leader's walk of one hop with the server's own path
+// query: from cur toward to, at most 3 legs (kWalkTries, DungeonRunPolicy.h:155). It
+// returns where the party ends: to when the server takes it, cur (or a pocket the
+// incomplete path ends in) when the server refuses it. When the navmesh is not a
+// ServerQuerier, there is no server check and the hop passes.
+func (c *planChecker) serverWalk(part string, group int, to, from Point) (Point, bool, error) {
+	q, ok := c.nav.(ServerQuerier)
+	if !ok {
+		return to, true, nil
+	}
+	cur := from
+	for range 3 {
+		if dist3(cur, to) <= ArriveYd {
+			// Inside the arrival radius the run leader sends NO order
+			// (WalkTo returns "arrived"): the party stays where it was.
+			return from, true, nil
+		}
+		sp, err := q.ServerPath(c.p.Map, vec(cur), vec(to))
+		if err != nil {
+			return cur, false, err
+		}
+		if v := navmesh.ServerMoveVerdict(sp, vec(cur), vec(to), 0); v != "ok" {
+			c.fail(part, group, to, from, ReasonServerUnreachable, "the server's PathFinder (2048 nodes, 256 polys, smooth path, ground|water incl. steep) from %.1f %.1f %.1f answers type 0x%x: cmd move %s", cur.X, cur.Y, cur.Z, sp.Type, v)
+			return cur, false, nil
+		}
+		if sp.Type&navmesh.PathNormal != 0 {
+			return to, true, nil
+		}
+		cur = point(sp.ActualEnd)
+	}
+	c.fail(part, group, to, from, ReasonServerUnreachable, "after 3 incomplete legs the lead stands at %.1f %.1f %.1f, %.1f yd short", cur.X, cur.Y, cur.Z, dist3(cur, to))
+	return cur, false, nil
 }
 
 // pathReason is the reason a path that is not complete gives: the goal off the mesh, else unreachable.

@@ -495,11 +495,8 @@ func (d *RemoteDriver) traceOrder(verb, cmd string, r tbm.Reply, ms int64) {
 	d.tr.Event("order", ev)
 }
 
-func (d *RemoteDriver) tracedWalk(ctx context.Context, p Point) error {
-	return d.tracedWalkAs(ctx, p, false)
-}
-
-// tracedWalkAs is tracedWalk, as a direct step (straight line, `cmd move ... direct`) when direct is set.
+// tracedWalkAs is doWalk for a walk of the plan, with its start and end in the trace; it is a direct step (straight line,
+// `cmd move ... direct`) when direct is set.
 func (d *RemoteDriver) tracedWalkAs(ctx context.Context, p Point, direct bool) error {
 	began := d.clk.Now()
 	start := map[string]any{"leg": d.curLeg, "x": p.X, "y": p.Y, "z": p.Z}
@@ -542,5 +539,3 @@ func (d *RemoteDriver) traceRest(began time.Time) {
 	d.wd.softProgress("rest gate finished")
 	d.tr.Event("rest", map[string]any{"leg": d.curLeg, "seconds": d.clk.Now().Sub(began).Seconds()})
 }
-
-func facingOf(o float32) *float32 { return &o }

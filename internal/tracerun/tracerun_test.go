@@ -88,7 +88,7 @@ func TestRecorderWritesScoresAndSummarises(t *testing.T) {
 	r.Event("death", map[string]any{"name": "A"})
 	c.t = c.t.Add(time.Second)
 	info := r.Finish("done", "", map[string]float64{"pulls": 2})
-	if info.Frames != 5 || info.Events != 1 || len(info.Checks) != 11 || info.Verdict != trace.Fail || len(info.Failed) != 1 || info.Failed[0] != "deaths" || info.Error != "" {
+	if info.Frames != 5 || info.Events != 1 || len(info.Checks) != 13 || info.Verdict != trace.Fail || len(info.Failed) != 1 || info.Failed[0] != "deaths" || info.Error != "" {
 		t.Fatalf("%+v", info)
 	}
 	if Find("r-rec") != nil || r.On() {
@@ -102,11 +102,11 @@ func TestRecorderWritesScoresAndSummarises(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.Header.Mode != "remote" || f.Header.Src != "agent" || f.Header.Start.IsZero() || f.Header.StartUnix == 0 || f.End.Counter("pulls") != 2 || f.End.Seconds != 6 || len(f.Oracles) != 11 || len(f.Events) != 1 || f.Header.ScopeName != "A" {
+	if f.Header.Mode != "remote" || f.Header.Src != "agent" || f.Header.Start.IsZero() || f.Header.StartUnix == 0 || f.End.Counter("pulls") != 2 || f.End.Seconds != 6 || len(f.Oracles) != 13 || len(f.Events) != 1 || f.Header.ScopeName != "A" {
 		t.Fatalf("%+v end %+v", f.Header, f.End)
 	}
 	readJSON(t, filepath.Join(dir, "r-rec.summary.json"), &s)
-	if s.Status != "complete" || s.EndReason != "done" || s.Verdict != trace.Fail || s.EndUnix == 0 || s.Counters["frames"] != float64(5) || s.Counters["pulls"] != float64(2) || s.TraceFile != "r-rec.jsonl" || len(s.Oracles) != 11 || s.ScoredUnix == 0 || !s.TraceComplete {
+	if s.Status != "complete" || s.EndReason != "done" || s.Verdict != trace.Fail || s.EndUnix == 0 || s.Counters["frames"] != float64(5) || s.Counters["pulls"] != float64(2) || s.TraceFile != "r-rec.jsonl" || len(s.Oracles) != 13 || s.ScoredUnix == 0 || !s.TraceComplete {
 		t.Fatalf("%+v", s)
 	}
 }
@@ -234,7 +234,7 @@ func TestNothingIsWrittenAfterTheEndRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.Events) != 0 || len(f.Frames) != 0 || f.End == nil || len(f.Oracles) != 11 {
+	if len(f.Events) != 0 || len(f.Frames) != 0 || f.End == nil || len(f.Oracles) != 13 {
 		t.Fatalf("%+v", f)
 	}
 }

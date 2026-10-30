@@ -189,12 +189,6 @@ func newFakeRemote(t *testing.T) *fakeRemote {
 
 func (g *fakeRemote) lead() *tbm.PartyRec { return g.party[0] }
 
-// leadDist is how far the mob stands from the lead bot.
-func (g *fakeRemote) leadDist(m *rmob) float64 {
-	dx, dy := float64(m.pos.X-g.lead().X), float64(m.pos.Y-g.lead().Y)
-	return sqrt(dx*dx + dy*dy)
-}
-
 func (g *fakeRemote) clock() Clock {
 	return Clock{Now: func() time.Time { return g.now }, Sleep: func(ctx context.Context, d time.Duration) error {
 		if err := ctx.Err(); err != nil {

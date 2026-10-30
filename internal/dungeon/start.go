@@ -180,7 +180,7 @@ func (e earlierPack) String() string {
 	if e.group < 0 {
 		return fmt.Sprintf("the boss of leg %d (entry %d)", e.leg, e.entry)
 	}
-	return fmt.Sprintf("pull group %d of leg %d", e.group, e.leg)
+	return PullGroupRef(e.group, 0) + fmt.Sprintf(" of leg %d", e.leg)
 }
 
 // nearestEarlier is nearestOther limited to the steps a start at pull group `group` of leg `leg` skips: every pull group
@@ -234,7 +234,7 @@ func (d *RemoteDriver) checkStart(fromLeg int) error {
 			return fmt.Errorf("from_pull_group: leg %d is not in the plan (legs 0-%d)", fromLeg, len(d.plan.Legs)-1)
 		}
 		if n := len(d.plan.Legs[fromLeg].PullGroups); g < 0 || g >= n {
-			return fmt.Errorf("from_pull_group %d: leg %d (%s) has %d pull groups (numbers 0-%d)", g, fromLeg, d.plan.Legs[fromLeg].Name, n, n-1)
+			return fmt.Errorf("from_pull_group %d: leg %d (%s) has %d pull groups (from_pull_group 0-%d; dungeon_status numbers them 1-%d)", g, fromLeg, d.plan.Legs[fromLeg].Name, n, n-1, n)
 		}
 	}
 	if d.opt.Pulltest != nil {
@@ -319,13 +319,6 @@ func (d *RemoteDriver) freshStart() bool {
 	}
 	rehire := d.opt.Prepare.Hire != nil && d.opt.Prepare.Hire.Rehire
 	return rehire || d.opt.HireMemory == nil
-}
-
-// itemNeed is a step that needs an item (or the item the step uses itself).
-type itemNeed struct {
-	leg  int
-	what string
-	item ItemRef
 }
 
 // SkippedNeeds fails when a step of the legs from `from` on needs an item that only a leg before `from` produces (a boss's loot_item, a

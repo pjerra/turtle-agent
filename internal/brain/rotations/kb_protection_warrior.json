@@ -1,0 +1,266 @@
+{
+  "version": 1,
+  "name": "kb_protection_warrior",
+  "class": "warrior",
+  "spec": "protection",
+  "replaces": [
+    "warrior_melee",
+    "warrior_tank"
+  ],
+  "notes": "The Turtle knowledge base's protection tank list (the DefTac build it recommends): Shield Slam and Concussion Blow on cooldown, Overpower after a dodge in Battle Stance, Sunder Armor as the filler, Heroic Strike as the rage dump, Shield Block when its buff is down, Revenge after an avoided attack, then the AoE rows. Stance and taunting stay with the preset and role_tank.",
+  "sources": [
+    "Turtle WoW knowledge base (stevemcqueenz), classes/yaml/warrior/protection-tank.yaml, https://stevemcqueenz.github.io/turtle-knowledge-base-/#/",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=102974#p102974 (Dragunovi, staff, 2024-10-12)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=104207#p104207 (Jamey, staff, 2024-10-21)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=105804#p105804 (Dragunovi, staff, 2024-11-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=113460#p113460 (Jamey, staff, 2024-12-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=124504#p124504 (Torta, staff, 2025-03-30)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=141159#p141159 (Jamey, staff, 2025-07-25)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=166071#p166071 (Jamey, staff, 2026-01-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=115882#p115882 (Ellifta, player, 2025-01-08)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=156473#p156473 (Ellifta, player, 2025-10-21)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=164933#p164933 (Ellifta, player, 2026-01-11)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=167684#p167684 (Ellifta, player, 2026-02-07)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=108893#p108893 (Atreidon, player, 2024-11-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=108957#p108957 (Atreidon, player, 2024-11-20)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=114018#p114018 (Xudo, player, 2024-12-23)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=115711#p115711 (Xudo, player, 2025-01-07)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=135727#p135727 (Herods, player, 2025-06-14)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=146132#p146132 (Taralej90, player, 2025-08-16)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=146364#p146364 (Eyeburn, player, 2025-08-17)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=118658#p118658 (Arkaris, player, 2025-02-01)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=118692#p118692 (Inovatu, player, 2025-02-02)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=103539#p103539 (Ademar, player, 2024-10-18)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=40901#p40901 (Xudo, player, 2023-04-09)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=41025#p41025 (Sixgun, player, 2023-04-10)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=47322#p47322 (Syrathegreat, player, 2023-05-24)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=62793#p62793 (Reploidrocsa, player, 2023-09-11)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=170891#p170891 (Eyeburn, player, 2026-03-15)",
+    "https://forum.turtlecraft.gg/viewtopic.php?p=170985#p170985 (Xudo, player, 2026-03-16)"
+  ],
+  "priorities": [
+    {
+      "id": "shield_slam",
+      "spell": "Shield Slam",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true
+      }
+    },
+    {
+      "id": "auto_attack",
+      "kind": "attack",
+      "when": {}
+    },
+    {
+      "id": "overpower",
+      "spell": "Overpower",
+      "level": 12,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "after": "dodge",
+        "stance": [
+          "Battle Stance"
+        ]
+      }
+    },
+    {
+      "id": "concussion_blow",
+      "spell": "Concussion Blow",
+      "talent": true,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true
+      }
+    },
+    {
+      "id": "sunder_armor",
+      "spell": "Sunder Armor",
+      "level": 10,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "mob_stacks_below": {
+          "aura": "Sunder Armor",
+          "stacks": 5
+        }
+      },
+      "note": "Moved ahead of Heroic Strike: the durable filler is what the KB's list plays while the stacks are not full; the pilot's play test pins it as the second cast after Shield Slam at 60 rage."
+    },
+    {
+      "id": "heroic_strike",
+      "kind": "next_swing",
+      "spell": "Heroic Strike",
+      "level": 1,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "power_above": 49
+      }
+    },
+    {
+      "id": "shield_block",
+      "spell": "Shield Block",
+      "level": 16,
+      "target": "self",
+      "when": {
+        "state": "combat",
+        "mob_on_me": true,
+        "stance": [
+          "Defensive Stance"
+        ],
+        "no_self_aura": [
+          "Shield Block"
+        ]
+      }
+    },
+    {
+      "id": "revenge",
+      "spell": "Revenge",
+      "level": 14,
+      "target": "fight",
+      "when": {
+        "mob_in_reach": true,
+        "after": "avoided",
+        "stance": [
+          "Defensive Stance"
+        ]
+      }
+    },
+    {
+      "id": "demoralizing_shout",
+      "spell": "Demoralizing Shout",
+      "level": 14,
+      "target": "self",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mob_in_reach": true,
+        "mobs_in_reach_min": 2,
+        "mobs_lacking_aura": "Demoralizing Shout"
+      }
+    },
+    {
+      "id": "cleave",
+      "kind": "next_swing",
+      "spell": "Cleave",
+      "level": 20,
+      "target": "fight",
+      "threat": "aoe",
+      "when": {
+        "mob_in_reach": true,
+        "mobs_in_reach_min": 2,
+        "power_above": 49
+      }
+    },
+    {
+      "id": "thunder_clap",
+      "spell": "Thunder Clap",
+      "level": 6,
+      "target": "self",
+      "threat": "aoe",
+      "harmful": true,
+      "when": {
+        "mob_in_reach": true,
+        "mobs_in_reach_min": 2,
+        "stance": [
+          "Battle Stance",
+          "Defensive Stance"
+        ],
+        "mobs_lacking_aura": "Thunder Clap"
+      }
+    },
+    {
+      "id": "last_stand",
+      "spell": "Last Stand",
+      "talent": true,
+      "target": "self",
+      "band": "high",
+      "when": {
+        "state": "combat",
+        "self_hp_below": 50
+      }
+    },
+    {
+      "id": "battle_shout",
+      "spell": "Battle Shout",
+      "level": 1,
+      "target": "self",
+      "when": {
+        "state": "rest",
+        "self_aura_missing": [
+          "Battle Shout"
+        ]
+      }
+    },
+    {
+      "id": "bloodrage",
+      "spell": "Bloodrage",
+      "level": 10,
+      "target": "self",
+      "when": {
+        "state": "rest",
+        "self_hp_above": 50,
+        "power_below": 20,
+        "no_self_aura": [
+          "Bloodrage"
+        ]
+      }
+    }
+  ],
+  "kb": {
+    "file": "classes/yaml/warrior/protection-tank.yaml",
+    "sha256": "d632b89936c0bf37c9a77e32538a9db3aaac01225482cd5728d6449f268b93ed",
+    "preset": "tank_warrior",
+    "recipe": "tools/kbrotgen/recipes/kb_protection_warrior.json",
+    "unexpressed": [
+      {
+        "row": "rotation_single[0]",
+        "text": "Pre-pull Battle Shout + Bloodrage; Mighty Rage Potion on pull | opener",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "rotation_single[1]",
+        "text": "Tank in Battle Stance | DefTac, every pull you safely can; Defensive to taunt/block-dance",
+        "why": "stance/form: the preset's stance strategy owns it"
+      },
+      {
+        "row": "rotation_aoe[0]",
+        "text": "Mark kill order",
+        "why": "raid assignment/marking"
+      },
+      {
+        "row": "rotation_aoe[4]",
+        "text": "Berserker Stance Whirlwind: tclap whirlwind tclap",
+        "why": "stance/form: the preset's stance strategy owns it"
+      },
+      {
+        "row": "rotation_aoe[5]",
+        "text": "Sappers / Dense Dynamite / Oil of Immolation / Force Reactive Disk; Challenging Shout emergency",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[0]",
+        "text": "Shield Wall | needs shield; shared 30-min CD with Recklessness/Retaliation",
+        "why": "weapon type not in the conditions"
+      },
+      {
+        "row": "cooldowns[1]",
+        "text": "Last Stand + healthstone + Nordanaar Herbal Tea | low HP",
+        "why": "consumable or item (combat_consumables owns items)"
+      },
+      {
+        "row": "cooldowns[2]",
+        "text": "Improved Berserker Rage | roots/slows; never in Sanv Tas'dal add phase",
+        "why": "stance/form: the preset's stance strategy owns it"
+      },
+      {
+        "row": "cooldowns[3]",
+        "text": "Recklessness + Enrage + Death Wish + Mighty Rage Potion | burst pull threat",
+        "why": "stance/form: the preset's stance strategy owns it"
+      }
+    ]
+  }
+}

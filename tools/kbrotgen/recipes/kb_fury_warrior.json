@@ -1,0 +1,523 @@
+{
+  "name": "kb_fury_warrior",
+  "class": "warrior",
+  "spec": "fury",
+  "role": "melee-dps",
+  "kb_file": "classes/yaml/warrior/fury-melee-dps.yaml",
+  "preset": "fury_warrior",
+  "replaces": [
+    "warrior_melee",
+    "warrior_fury"
+  ],
+  "mode": "",
+  "notes": "The Turtle knowledge base's Fury list: Bloodthirst and Whirlwind on cooldown, Execute below 20%, Slam only standing still with Flurry up, the on-next-swing Heroic Strike above 70 rage (not in the Execute phase), the dual-wield fillers (Master Strike, Hamstring, Sunder), Battle Shout, and the AoE rows (Sweeping Strikes, Whirlwind, Cleave, Bloodthirst/Slam, Execute). Its cooldowns: Death Wish and Recklessness in the Execute phase, Bloodrage into Execute. Berserker Rage's roots and slows, the Lawnmower build and a few item and opener rows are named in kb.unexpressed.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 0,
+      "text": "Charge -> Sunder Armor -> Bloodrage (Enrage) | opener; DW: Bloodrage just before Bloodthirst so two BTs fit in Enrage",
+      "text_sha": "9c9d61072316",
+      "entries": [
+        {
+          "id": "charge",
+          "spell": "Charge",
+          "level": 4,
+          "target": "fight",
+          "band": "move",
+          "when": {
+            "in_combat": false,
+            "stance": [
+              "Battle Stance"
+            ],
+            "mob_distance_min": 8,
+            "mob_distance_max": 25,
+            "tank_holds": true
+          }
+        },
+        {
+          "id": "sunder_armor",
+          "spell": "Sunder Armor",
+          "level": 10,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "mob_stacks_below": {
+              "aura": "Sunder Armor",
+              "stacks": 1
+            }
+          },
+          "note": "The KB's opener Sunder: one application, while the mob carries no Sunder yet."
+        },
+        {
+          "id": "bloodrage",
+          "spell": "Bloodrage",
+          "level": 10,
+          "target": "self",
+          "when": {
+            "state": "combat",
+            "mob_distance_max": 12,
+            "power_below": 20,
+            "self_hp_above": 50,
+            "no_self_aura": [
+              "Bloodrage"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 1,
+      "text": "Execute | target <= 20%; bank rage before 20%; costs 10 rage",
+      "text_sha": "db4ff0b26e6d",
+      "entries": [
+        {
+          "id": "execute",
+          "spell": "Execute",
+          "level": 24,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "mob_hp_below": 20,
+            "stance": [
+              "Battle Stance",
+              "Berserker Stance"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 2,
+      "text": "Bloodthirst | off cooldown; never delay it for Slam",
+      "text_sha": "141dd3b6387f",
+      "entries": [
+        {
+          "id": "bloodthirst",
+          "spell": "Bloodthirst",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 3,
+      "text": "Whirlwind | off cooldown, also on single target; press instead of Slam if next auto < ~1 s",
+      "text_sha": "ca41aa3766d6",
+      "entries": [
+        {
+          "id": "whirlwind",
+          "spell": "Whirlwind",
+          "level": 36,
+          "target": "fight",
+          "threat": "aoe",
+          "when": {
+            "mob_in_reach": true,
+            "stance": [
+              "Berserker Stance"
+            ]
+          }
+        }
+      ],
+      "unexpressed": "swing timer not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 4,
+      "text": "Slam | 2H only: Flurry up and the cast lands before the next auto (5/5 Flurry: 1.92 s cast)",
+      "text_sha": "9084a4a70087",
+      "entries": [
+        {
+          "id": "slam",
+          "spell": "Slam",
+          "level": 14,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "moving": false,
+            "self_aura": [
+              "Flurry"
+            ]
+          }
+        }
+      ],
+      "unexpressed": "weapon type not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 5,
+      "text": "Heroic Strike (queue) | rage >= ~70; queued swing generates no rage; skip during Execute phase",
+      "text_sha": "db54e6da079f",
+      "entries": [
+        {
+          "id": "auto_attack",
+          "kind": "attack",
+          "note": "The swing is the base every entry waits on: it goes first in the order, as in the Go rotation (warrior_melee)."
+        },
+        {
+          "id": "heroic_strike",
+          "kind": "next_swing",
+          "spell": "Heroic Strike",
+          "level": 1,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "power_above": 69,
+            "mob_hp_above": 20
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 6,
+      "text": "Filler: Master Strike > Pummel > Hamstring > Sunder Armor | DW, when BT and WW are on cooldown (fish Windfury/Crusader)",
+      "text_sha": "12edc0478845",
+      "entries": [
+        {
+          "id": "master_strike",
+          "spell": "Master Strike",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true
+          }
+        },
+        {
+          "id": "hamstring",
+          "spell": "Hamstring",
+          "level": 8,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "stance": [
+              "Battle Stance",
+              "Berserker Stance"
+            ]
+          }
+        },
+        {
+          "id": "sunder_armor_filler",
+          "spell": "Sunder Armor",
+          "level": 10,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "mob_stacks_below": {
+              "aura": "Sunder Armor",
+              "stacks": 2
+            }
+          }
+        }
+      ],
+      "unexpressed": "interrupt: class_interrupt owns it"
+    },
+    {
+      "from": "rotation_single",
+      "index": 7,
+      "priority": 7,
+      "text": "Lawnmower: Whirlwind > Slam, HS/Cleave dump | Lawnmower build (no Bloodthirst)",
+      "text_sha": "74c528bafa00",
+      "unexpressed": "talents are not a condition: the Lawnmower build (no Bloodthirst) only"
+    },
+    {
+      "from": "rotation_single",
+      "index": 8,
+      "priority": 8,
+      "text": "Battle Shout | buff missing",
+      "text_sha": "1ec5af389fc2",
+      "entries": [
+        {
+          "id": "battle_shout",
+          "spell": "Battle Shout",
+          "level": 1,
+          "target": "self",
+          "when": {
+            "state": "any",
+            "self_aura_missing": [
+              "Battle Shout"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Sweeping Strikes",
+      "text_sha": "b3260d09b576",
+      "entries": [
+        {
+          "id": "sweeping_strikes",
+          "spell": "Sweeping Strikes",
+          "talent": true,
+          "target": "self",
+          "harmful": true,
+          "threat": "aoe",
+          "when": {
+            "mobs_in_reach_min": 2,
+            "stance": [
+              "Battle Stance"
+            ],
+            "no_self_aura": [
+              "Sweeping Strikes"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 2,
+      "text": "Whirlwind",
+      "text_sha": "c976afe00288",
+      "entries": [
+        {
+          "id": "whirlwind_aoe",
+          "spell": "Whirlwind",
+          "level": 36,
+          "target": "fight",
+          "threat": "aoe",
+          "when": {
+            "mob_in_reach": true,
+            "mobs_in_reach_min": 2,
+            "stance": [
+              "Berserker Stance"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 3,
+      "text": "Cleave",
+      "text_sha": "e946abd159c3",
+      "entries": [
+        {
+          "id": "cleave",
+          "kind": "next_swing",
+          "spell": "Cleave",
+          "level": 20,
+          "target": "fight",
+          "threat": "aoe",
+          "when": {
+            "mob_in_reach": true,
+            "mobs_in_reach_min": 2,
+            "power_above": 49
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 3,
+      "priority": 4,
+      "text": "Bloodthirst / Slam",
+      "text_sha": "71f685106239",
+      "entries": [
+        {
+          "id": "bloodthirst_aoe",
+          "spell": "Bloodthirst",
+          "talent": true,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "mobs_in_reach_min": 2
+          },
+          "note": "The single-target Bloodthirst (and Slam, which is narrower here) already play on a pack; the row stands as the KB's between-Whirlwinds restatement."
+        },
+        {
+          "id": "slam_aoe",
+          "spell": "Slam",
+          "level": 14,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "mobs_in_reach_min": 2,
+            "moving": false
+          }
+        }
+      ]
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 4,
+      "priority": 5,
+      "text": "Execute low mobs",
+      "text_sha": "b9efac13849c",
+      "entries": [
+        {
+          "id": "execute_aoe",
+          "spell": "Execute",
+          "level": 24,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "mobs_in_reach_min": 2,
+            "mob_hp_below": 20,
+            "stance": [
+              "Battle Stance",
+              "Berserker Stance"
+            ]
+          },
+          "note": "The single-target Execute already plays on a pack; the row's 'slow pulls where rage would decay' is not a condition."
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Death Wish | last ~30 s of fight or Execute phase; twice on long fights",
+      "text_sha": "77eb9fd3abf8",
+      "entries": [
+        {
+          "id": "death_wish",
+          "spell": "Death Wish",
+          "talent": true,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "mob_hp_below": 20
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "Recklessness | almost any time; on pull in DPS races; shares 30-min CD with Shield Wall/Retaliation",
+      "text_sha": "449572bdaf25",
+      "entries": [
+        {
+          "id": "recklessness",
+          "spell": "Recklessness",
+          "level": 50,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat"
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": null,
+      "text": "Bloodrage | pull, again into Execute on fights >= 1:15 (procs Enrage)",
+      "text_sha": "802342dc29d4",
+      "entries": [
+        {
+          "id": "bloodrage_execute",
+          "spell": "Bloodrage",
+          "level": 10,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "state": "combat",
+            "mob_hp_below": 20,
+            "self_hp_above": 50,
+            "no_self_aura": [
+              "Bloodrage"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "from": "cooldowns",
+      "index": 3,
+      "priority": null,
+      "text": "Juju Flurry + Mighty Rage Potion + Bloodrage | one off-GCD macro in Execute phase",
+      "text_sha": "4e26f5a6f34d",
+      "unexpressed": "consumable or item (combat_consumables owns items)"
+    },
+    {
+      "from": "cooldowns",
+      "index": 4,
+      "priority": null,
+      "text": "Berserker Rage (Improved) | break roots/slows (Kara40 curses, Noth, Gothik); NEVER in Sanv Tas'dal add phase",
+      "text_sha": "1bbddff53e15",
+      "unexpressed": "roots/slows are not a condition"
+    },
+    {
+      "from": "cooldowns",
+      "index": 5,
+      "priority": null,
+      "text": "Perception (Human) | pre-pull, not Execute phase",
+      "text_sha": "e596eb2ed892",
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    }
+  ],
+  "order": [
+    "charge",
+    "auto_attack",
+    "sunder_armor",
+    "bloodrage",
+    "execute",
+    "bloodthirst",
+    "whirlwind",
+    "slam",
+    "heroic_strike",
+    "master_strike",
+    "hamstring",
+    "sunder_armor_filler",
+    "battle_shout",
+    "sweeping_strikes",
+    "whirlwind_aoe",
+    "cleave",
+    "bloodthirst_aoe",
+    "slam_aoe",
+    "execute_aoe",
+    "death_wish",
+    "recklessness",
+    "bloodrage_execute"
+  ],
+  "oracle": {
+    "core": [
+      "Bloodthirst",
+      "Whirlwind",
+      "Heroic Strike",
+      "Execute"
+    ],
+    "situational": [
+      "Slam",
+      "Cleave",
+      "Master Strike",
+      "Hamstring",
+      "Sunder Armor",
+      "Pummel",
+      "Battle Shout",
+      "Bloodrage",
+      "Death Wish",
+      "Recklessness",
+      "Berserker Rage",
+      "Sweeping Strikes",
+      "Perception"
+    ],
+    "never": [],
+    "signature": [
+      "Bloodthirst"
+    ],
+    "taunt": []
+  }
+}

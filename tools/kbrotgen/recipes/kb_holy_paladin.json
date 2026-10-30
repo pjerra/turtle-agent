@@ -1,0 +1,353 @@
+{
+  "name": "kb_holy_paladin",
+  "class": "paladin",
+  "spec": "holy",
+  "role": "healer",
+  "kb_file": "classes/yaml/paladin/holy-healer.yaml",
+  "preset": "holy_paladin",
+  "replaces": [],
+  "mode": "add",
+  "notes": "The knowledge base's holy paladin, added after role_healer: Seal of Wisdom, Holy Shock for a dying target, Holy Light on a tank that just dropped, Holy Strike when three or more are hurt in melee, Flash of Light as the filler, Judgement with a seal in melee, Crusader Strike while moving, a rank-1 Flash of Light in downtime and a rank-1 Consecration. Cleanse is role_healer's, and Divine Intervention, Hand of Protection and the passive Divine Favor are listed in kb.unexpressed.",
+  "rows": [
+    {
+      "from": "rotation_single",
+      "index": 0,
+      "priority": 1,
+      "text": "Setup: Seal of Wisdom on self, Judgement of Wisdom on the boss/pack, Concentration Aura when meleeing | pre-pull [[d:paladin#1492813841057448060]]",
+      "text_sha": "b4fe2525e20c",
+      "entries": [
+        {
+          "id": "seal_of_wisdom",
+          "spell": "Seal of Wisdom",
+          "level": 18,
+          "target": "self",
+          "band": "high",
+          "when": {
+            "no_self_aura": [
+              "Seal of Righteousness",
+              "Seal of Command",
+              "Seal of Wisdom",
+              "Seal of Light",
+              "Seal of the Crusader",
+              "Seal of Justice"
+            ]
+          }
+        }
+      ],
+      "unexpressed": "pre-pull/opener outside the brain's fight"
+    },
+    {
+      "from": "rotation_single",
+      "index": 1,
+      "priority": 2,
+      "text": "Holy Shock | target about to die and cannot wait for a Flash of Light [[d:paladin#1489753379583557704]]",
+      "text_sha": "d79d288694ae",
+      "entries": [
+        {
+          "id": "holy_shock",
+          "spell": "Holy Shock",
+          "talent": true,
+          "target": "heal",
+          "band": "high",
+          "when": {
+            "heal_hp_below": 20
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 2,
+      "priority": 3,
+      "text": "Holy Light (1.5 s with the Holy Judgement buff) | tank just took a big hit (1.5-2k) or haste window; buff up [[d:paladin#1446996276322369546]] [[d:paladin#1425074584926949426]]",
+      "text_sha": "64ad03dee29a",
+      "entries": [
+        {
+          "id": "holy_light",
+          "spell": "Holy Light",
+          "level": 1,
+          "target": "heal",
+          "band": "high",
+          "when": {
+            "heal_is_tank": true,
+            "heal_hp_below": 65
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 3,
+      "priority": 4,
+      "text": "Holy Strike on a melee target | in melee, off cooldown, 3+ injured allies within ~7 yd, none about to die [[d:paladin#1399695295524110427]]",
+      "text_sha": "6a323f95805c",
+      "entries": [
+        {
+          "id": "holy_strike",
+          "spell": "Holy Strike",
+          "level": 4,
+          "target": "fight",
+          "band": "high",
+          "when": {
+            "members_hurt_min": 3,
+            "mob_in_reach": true
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 4,
+      "priority": 5,
+      "text": "Flash of Light (max rank) on the tank/lowest | default filler - most of your casts [[d:paladin#1489753323253923850]]",
+      "text_sha": "ba2e89d6508f",
+      "entries": [
+        {
+          "id": "flash_of_light",
+          "spell": "Flash of Light",
+          "level": 20,
+          "target": "heal",
+          "band": "high"
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 5,
+      "priority": 6,
+      "text": "Judgement + re-seal Wisdom | after using the 1.5 s Holy Light or when the judgement is about to drop [[d:paladin#1446997676200820840]]",
+      "text_sha": "a1b22078e907",
+      "entries": [
+        {
+          "id": "judgement",
+          "spell": "Judgement",
+          "level": 4,
+          "target": "fight",
+          "when": {
+            "mob_in_reach": true,
+            "self_aura": [
+              "Seal of Righteousness",
+              "Seal of Command",
+              "Seal of Wisdom",
+              "Seal of Light",
+              "Seal of the Crusader",
+              "Seal of Justice"
+            ]
+          }
+        }
+      ],
+      "unexpressed": "swing timer not in the conditions"
+    },
+    {
+      "from": "rotation_single",
+      "index": 6,
+      "priority": 7,
+      "text": "Crusader Strike -> Holy Shock | only while moving and a single-target burst is needed; never during raid AoE [[d:paladin#1488534279020482730]]",
+      "text_sha": "80a4e1959d96",
+      "entries": [
+        {
+          "id": "crusader_strike",
+          "spell": "Crusader Strike",
+          "level": 10,
+          "target": "fight",
+          "when": {
+            "moving": true,
+            "mob_in_reach": true
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 7,
+      "priority": 8,
+      "text": "Rank-1 Flash of Light on the tank | trash downtime, to leave Daybreak via crits [[d:paladin#1425107644166701136]]",
+      "text_sha": "e162f371599c",
+      "entries": [
+        {
+          "id": "flash_of_light_rank1",
+          "spell": "Flash of Light",
+          "level": 20,
+          "rank": 1,
+          "target": "heal",
+          "band": "low",
+          "when": {
+            "state": "rest",
+            "heal_is_tank": true
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "rotation_single",
+      "index": 8,
+      "priority": 9,
+      "text": "Cleanse | magic/poison/disease on an ally; pre-cast before Naxx spider-wing poison [[d:paladin#1461076668021211320]]",
+      "text_sha": "f36bce22e5a0",
+      "entries": [],
+      "unexpressed": "role_healer owns dispels (the class heal kit)"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 0,
+      "priority": 1,
+      "text": "Holy Strike on cooldown in melee range (heals you + 4 wounded allies, semi-smart)",
+      "text_sha": "2dd5b3bf41d4",
+      "entries": [],
+      "unexpressed": "covered by rotation_single[3]: Holy Strike with three hurt members in reach"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 1,
+      "priority": 2,
+      "text": "Flash of Light between Holy Strikes, max 3 per Holy Strike",
+      "text_sha": "f293c869a29e",
+      "entries": [],
+      "unexpressed": "covered by rotation_single[3-4]: the Holy Strike and Flash of Light entries"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 2,
+      "priority": 3,
+      "text": "3 FoL + 1 Holy Strike loop",
+      "text_sha": "93ecbd1ec99b",
+      "entries": [],
+      "unexpressed": "cancel/stop casting not expressible"
+    },
+    {
+      "from": "rotation_aoe",
+      "index": 3,
+      "priority": 4,
+      "text": "Rank-1 Consecration (Kara10 libram) + keep a Judgement up",
+      "text_sha": "c6625574a103",
+      "entries": [
+        {
+          "id": "consecration_rank1",
+          "spell": "Consecration",
+          "level": 20,
+          "rank": 1,
+          "target": "fight",
+          "threat": "aoe",
+          "band": "low",
+          "when": {
+            "mobs_in_reach_min": 3
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "cooldowns",
+      "index": 0,
+      "priority": null,
+      "text": "Lay on Hands | tank emergency; with Improved LoH on Maexxna just before Web Wrap for +30% armor through Web/Enrage [[d:paladin#1466097719415410709]]",
+      "text_sha": "f1832a3a6e04",
+      "entries": [
+        {
+          "id": "lay_on_hands_kb",
+          "spell": "Lay on Hands",
+          "level": 10,
+          "target": "heal",
+          "band": "emergency",
+          "when": {
+            "heal_is_tank": true,
+            "heal_hp_below": 15
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "cooldowns",
+      "index": 1,
+      "priority": null,
+      "text": "Divine Intervention | Maexxna: pre-DI a healer for each Web Wrap [[d:paladin#1466097683629342991]]",
+      "text_sha": "99288d831a8a",
+      "entries": [],
+      "unexpressed": "friendly target not in the conditions"
+    },
+    {
+      "from": "cooldowns",
+      "index": 2,
+      "priority": null,
+      "text": "Divine Shield | Nefarian fear, Razorgore stun; heals continue; does NOT stop Vael Adrenaline [[d:paladin#1465429349154160784]]",
+      "text_sha": "b319bf452343",
+      "entries": [
+        {
+          "id": "divine_shield_kb",
+          "spell": "Divine Shield",
+          "level": 34,
+          "target": "self",
+          "band": "emergency",
+          "when": {
+            "feared": true
+          }
+        }
+      ],
+      "unexpressed": ""
+    },
+    {
+      "from": "cooldowns",
+      "index": 3,
+      "priority": null,
+      "text": "Blessing of Protection | DPS pulled aggro; bubble casters during AoE [[d:paladin#1484938782292840551]]",
+      "text_sha": "3ce1d4c3018d",
+      "entries": [],
+      "unexpressed": "friendly target not in the conditions"
+    },
+    {
+      "from": "cooldowns",
+      "index": 4,
+      "priority": null,
+      "text": "Divine Favor | passive (+10..50% Holy Shock crit), not a button",
+      "text_sha": "24ce65bbe3a5",
+      "entries": [],
+      "unexpressed": "passive (never a cast)"
+    }
+  ],
+  "order": [
+    "seal_of_wisdom",
+    "holy_shock",
+    "holy_light",
+    "holy_strike",
+    "flash_of_light",
+    "judgement",
+    "crusader_strike",
+    "flash_of_light_rank1",
+    "consecration_rank1",
+    "lay_on_hands_kb",
+    "divine_shield_kb"
+  ],
+  "oracle": {
+    "core": [
+      "Flash of Light",
+      "Holy Light",
+      "Holy Shock"
+    ],
+    "situational": [
+      "Holy Strike",
+      "Judgement",
+      "Consecration",
+      "Cleanse",
+      "Lay on Hands",
+      "Divine Shield",
+      "Hand of Protection",
+      "Seal of Wisdom",
+      "Divine Favor",
+      "Divine Intervention",
+      "Lightwell"
+    ],
+    "never": [],
+    "signature": [
+      "Holy Shock",
+      "Lightwell"
+    ],
+    "taunt": []
+  }
+}
