@@ -109,7 +109,7 @@ func TestRemoteBossBehindAnUnclearedLaterPackIsNotTaken(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "boss 777 not found") || len(g.ordersOf("cmd pullback")) != 0 {
 		t.Fatalf("%v\n%s", err, notesOf(rep))
 	}
-	if !strings.Contains(notesOf(rep), "the way passes pull group 0 of leg 1 (next), not cleared") {
+	if !strings.Contains(notesOf(rep), "the way passes pull group 1 of 1 (from_pull_group 0) of leg 1 (next), not cleared") {
 		t.Fatalf("%s", notesOf(rep))
 	}
 	g = newFakeRemote(t)
@@ -203,7 +203,7 @@ func TestBossWayChecksTheCurrentLegsPacks(t *testing.T) {
 		_, why := d.bossWay(context.Background(), sp, boss, 100)
 		return why
 	}
-	if why := look(boss, pack); !strings.Contains(why, "pull group 0 of leg 0") {
+	if why := look(boss, pack); !strings.Contains(why, "pull group 1 of 1 (from_pull_group 0) of leg 0") {
 		t.Fatalf("a living member of this leg's pack is on the way: %q", why)
 	}
 	if why := look(boss); why != "" {

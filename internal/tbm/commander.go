@@ -38,6 +38,10 @@ var argRe = regexp.MustCompile(`^[A-Za-z0-9_,:+\-][A-Za-z0-9_.,:+@\-]{0,63}$`)
 // grammar: the server stores up to 96 characters there (dungeon.RunMeta.Check), so the word allows 1-96.
 var traceDriverRe = regexp.MustCompile(`^driver=[A-Za-z0-9_.+\-:]{1,96}$`)
 
+// speedArgRe is the `speed=` word of a run start (`speed=1.0` to `speed=3.0`, one decimal): the one `=` argument the
+// run grammar takes besides the trace recorder's (dungeon_stage appends it to `.bot run start ... from leg <name>`).
+var speedArgRe = regexp.MustCompile(`^speed=[1-3](\.[0-9])?$`)
+
 // BadOrderWords says why a text cannot be the tail of one command line: every whitespace-separated word has to be an argument the
 // commander accepts (argRe). It returns "" for a text that can, else the first word that cannot, with the reason.
 func BadOrderWords(text string) string {
@@ -140,7 +144,11 @@ func CheckCommand(command string) error {
 		}
 		return nil
 	}
-	for _, a := range f[2:] {
+	args := f[2:]
+	if group == "run" && verb == "start" && len(args) > 0 && speedArgRe.MatchString(args[len(args)-1]) {
+		args = args[:len(args)-1]
+	}
+	for _, a := range args {
 		if !argRe.MatchString(a) {
 			return fmt.Errorf("argument %q: letters, digits and _ . , : + - only, not starting with a dot", a)
 		}

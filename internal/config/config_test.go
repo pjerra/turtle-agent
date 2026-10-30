@@ -118,6 +118,16 @@ func TestOnlyAccount(t *testing.T) {
 	}
 }
 
+func TestTBDashboardURL(t *testing.T) {
+	s, err := Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"},"tb_dashboard_url":"http://tb:8095"}`))
+	if err != nil || s.TBDashboardURL != "http://tb:8095" {
+		t.Fatalf("%q %v", s.TBDashboardURL, err)
+	}
+	if s, err = Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"}}`)); err != nil || s.TBDashboardURL != "" {
+		t.Fatalf("%q %v", s.TBDashboardURL, err)
+	}
+}
+
 func TestDungeonsDir(t *testing.T) {
 	s, err := Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"},"dungeons_dir":"~/plans"}`))
 	home, _ := os.UserHomeDir()
@@ -203,5 +213,35 @@ func TestAddonsOverride(t *testing.T) {
 	}
 	if _, err := Load(writeSettings(t, 0o600, `{"realmd":"h:1","accounts":{"a":"b"},"addons":["Blizzard_TalentUI"]}`)); err == nil {
 		t.Fatal(`an "addons" list without the fingerprint addons was accepted`)
+	}
+}
+func TestStateDirSetsFingerprintDir(t *testing.T) {
+	st := t.TempDir()
+	p := filepath.Join(t.TempDir(), "settings.json")
+	body := fmt.Sprintf(`{"realmd":"h:1","accounts":{"a":"b"},"state_dir":%q}`, st)
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.FingerprintDir != st {
+		t.Fatalf("fingerprint dir %q, want %q", s.FingerprintDir, st)
+	}
+}
+
+func TestStateDirMustBePrivate(t *testing.T) {
+	loose := t.TempDir()
+	if err := os.Chmod(loose, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), "settings.json")
+	body := fmt.Sprintf(`{"realmd":"h:1","accounts":{"a":"b"},"state_dir":%q}`, loose)
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "only you can write") {
+		t.Fatalf("err %v", err)
 	}
 }

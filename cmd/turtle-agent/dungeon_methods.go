@@ -282,6 +282,9 @@ type observeParam struct {
 	MaxRunS     float64 `json:"max_run_s,omitempty"`
 	StallS      float64 `json:"stall_s,omitempty"`
 	PausedWaitS float64 `json:"paused_wait_s,omitempty"`
+	// AutoResume resumes the run leader by itself after its "regroups by itself ... did not hold" pause, at most this many times a
+	// step (0-3, default 0: off). Round scripts with nobody watching turn it on.
+	AutoResume int `json:"auto_resume,omitempty"`
 	// Maintenance sends `.bot maintenance <bot>` to every bot at the preflight (and at the hire check); off by default. Maintenance
 	// walks a bot to a vendor for repairs and supplies: right after the autogear of a hire that scatters the party across the maps, and
 	// the run leader pauses with "the lead bot is not on the plan's map". The kit check's inventory and talent reads run either way.
@@ -364,6 +367,11 @@ type dungeonRunner struct {
 	classes map[string]string
 	cancel  context.CancelFunc
 	done    chan struct{}
+	// moves is the movement mode shared with the player follow: a run claims it before its goroutine starts and the goroutine
+	// releases it when it has exited (follow_start and dungeon_run refuse each other through it).
+	moves *moveMode
+	// testRun replaces the driver's Run in a test (nil: drv.Run).
+	testRun func(ctx context.Context, drv dungeon.Runner, from int) error
 }
 
 // registerDungeonMethods wires dungeon_run, dungeon_status and dungeon_stop to the session cur returns at each
@@ -374,7 +382,7 @@ func registerDungeonMethods(srv *rpc.Server, cur func() *session.Session, dir st
 		dir = "dungeons"
 	}
 	root, cancel := context.WithCancel(context.Background())
-	r := &dungeonRunner{cur: cur, dir: dir, root: root, brain: brainCtl, lease: lease, probeWindow: probeWindow, remote: remote}
+	r := &dungeonRunner{cur: cur, dir: dir, root: root, brain: brainCtl, lease: lease, probeWindow: probeWindow, remote: remote, moves: &moveMode{}}
 	srv.Register("dungeon_run", rpc.Typed(func(ctx context.Context, p dungeonRunParams) (dungeonRunResult, error) {
 		res, err := r.run(p)
 		if err == nil {
@@ -417,13 +425,17 @@ func planCheckApplies(p dungeonRunParams) bool {
 	return p.Pulltest == nil && mode == modeCommander
 }
 
-// planRunRefusal says why dungeon_run will not take the plan, or "" when it will. A raid plan is data only (no raid driver yet); a
-// draft plan has had no mapping walk, so it runs only when the caller says allow_draft.
-func planRunRefusal(plan *dungeon.Plan, allowDraft bool) string {
+// planRunRefusal says why dungeon_run will not take the plan, or "" when it will. A raid plan runs in observe mode only,
+// with prepare.party "hire" (the server's run leader leads the bound raid); a draft plan has had no mapping walk, so it
+// runs only when the caller says allow_draft.
+func planRunRefusal(plan *dungeon.Plan, p dungeonRunParams) string {
 	switch {
 	case plan.IsRaid():
-		return fmt.Sprintf("plan %s is a raid plan: dungeon_run leads a 5-man party and has no raid driver yet", plan.Name)
-	case strings.HasPrefix(plan.Status, dungeon.StatusDraft) && !allowDraft:
+		if mode, _, _ := runMode(p.Mode); mode != modeObserve || p.Prepare == nil || !p.Prepare.HiredParty() {
+			return fmt.Sprintf("plan %s is a raid plan: run it with mode \"observe\" and prepare.party \"hire\" (the server's run leader leads raids; the agent hires, gears and binds)", plan.Name)
+		}
+		return ""
+	case strings.HasPrefix(plan.Status, dungeon.StatusDraft) && !p.AllowDraft:
 		return fmt.Sprintf("plan %s is a draft (%s): its route is a skeleton from the world database that has not had its mapping walk; walk it first, or pass allow_draft to run it anyway", plan.Name, plan.Status)
 	}
 	return ""
@@ -478,6 +490,14 @@ func (r *dungeonRunner) busy() error {
 	return nil
 }
 
+// runDriver runs drv (testRun instead, when a test set it).
+func (r *dungeonRunner) runDriver(ctx context.Context, drv dungeon.Runner, from int) error {
+	if r.testRun != nil {
+		return r.testRun(ctx, drv, from)
+	}
+	return drv.Run(ctx, from)
+}
+
 func (r *dungeonRunner) running() bool {
 	if r.done == nil {
 		return false
@@ -491,6 +511,10 @@ func (r *dungeonRunner) running() bool {
 }
 
 func (r *dungeonRunner) run(p dungeonRunParams) (res dungeonRunResult, err error) {
+	// An early answer only (a run refused here pays for no plan check); the claim below, under r.mu, decides.
+	if err := r.moves.refusal(moveOwnerRun); err != nil {
+		return dungeonRunResult{}, err
+	}
 	if !planName.MatchString(p.Name) {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: `name must be a plan file name such as "uldaman" (a-z, 0-9, _ and -)`}
 	}
@@ -499,7 +523,7 @@ func (r *dungeonRunner) run(p dungeonRunParams) (res dungeonRunResult, err error
 	if err != nil {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "dungeon plan: " + err.Error()}
 	}
-	if msg := planRunRefusal(plan, p.AllowDraft); msg != "" {
+	if msg := planRunRefusal(plan, p); msg != "" {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: msg}
 	}
 	setup, err := cleanSetup(p.Setup)
@@ -615,12 +639,25 @@ func (r *dungeonRunner) run(p dungeonRunParams) (res dungeonRunResult, err error
 	if r.running() {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "a dungeon run is going (" + r.drv.Report().Plan + "): dungeon_stop it first"}
 	}
+	// The movement mode is checked and claimed in one step; the run's goroutine releases it when it has exited, and every return
+	// before that goroutine starts releases it here.
+	if err := r.moves.acquire(moveOwnerRun); err != nil {
+		return dungeonRunResult{}, err
+	}
+	started := false
+	defer func() {
+		if !started {
+			r.moves.release(moveOwnerRun)
+		}
+	}()
 	if remote {
 		tunePath, err := r.tuneFile(p, planPath)
 		if err != nil {
 			return dungeonRunResult{}, err
 		}
-		return r.startRemote(p, tcfg, plan, planPath, tunePath, setup, from, names)
+		res, err := r.startRemote(p, tcfg, plan, planPath, tunePath, setup, from, names)
+		started = err == nil
+		return res, err
 	}
 	cfg := dungeon.DefaultConfig()
 	cfg.Trace = tcfg
@@ -665,14 +702,16 @@ func (r *dungeonRunner) run(p dungeonRunParams) (res dungeonRunResult, err error
 	ctx, cancel := context.WithCancel(r.root)
 	done := make(chan struct{})
 	r.drv, r.cancel, r.done = drv, cancel, done
+	started = true
 	go func() {
 		defer close(done)
+		defer r.moves.release(moveOwnerRun) // after everything below, just before done closes
 		defer cancel()
 		if hook != nil {
 			defer r.lease.release()
 			defer hook.Stop() // whatever the run left on
 		}
-		_ = drv.Run(ctx, from) // the outcome is in the report and the events
+		_ = r.runDriver(ctx, drv, from) // the outcome is in the report and the events
 	}()
 	buffNames := []string{}
 	for _, b := range buffs {
@@ -700,7 +739,7 @@ func checkStartParams(p dungeonRunParams, plan *dungeon.Plan, from int) error {
 	}
 	if g := p.FromPullGroup; g != nil {
 		if n := len(plan.Legs[from].PullGroups); *g < 0 || *g >= n {
-			return bad("from_pull_group %d: leg %d (%s) has %d pull groups (numbers 0-%d)", *g, from, plan.Legs[from].Name, n, n-1)
+			return bad("from_pull_group %d: leg %d (%s) has %d pull groups (from_pull_group 0-%d; dungeon_status numbers them 1-%d)", *g, from, plan.Legs[from].Name, n, n-1, n)
 		}
 		if p.StartHere {
 			return bad("from_pull_group and start_here exclude each other: start_here does not move the party")

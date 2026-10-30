@@ -28,7 +28,6 @@ type startFake struct {
 	botLines  []string
 	respawns  int
 	respawnFn func(g *startFake) // what a .respawn brings back
-	respawnOK bool               // the account may .respawn (a developer): level >= 3 is enough, this is for a Respawner-less game
 
 	apart     map[string]bool      // bots that stand far from the lead bot until a `cmd summon` lands
 	arrive    map[string]time.Time // when a summoned bot lands
@@ -566,7 +565,7 @@ func crowdPlan() *Plan {
 // died there twice). force_start runs it anyway. In a non-fresh instance the same start only warns. A clear spot, or a
 // near pack of a later step (the run's own fight), is neither refused nor warned about.
 func TestStartRefusesAGatherSpotNearAnEarlierPack(t *testing.T) {
-	const want = "from_pull_group 1: the gather spot 145 0 0 is 15 yd from pull group 0 of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway"
+	const want = "from_pull_group 1: the gather spot 145 0 0 is 15 yd from pull group 1 (from_pull_group 0) of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway"
 	g := newStartFake(t)
 	rep, err := runFrom(t, g, crowdPlan(), freshOpts(1), 0)
 	nothingSent(t, g, rep, err, want)
@@ -578,7 +577,7 @@ func TestStartRefusesAGatherSpotNearAnEarlierPack(t *testing.T) {
 	if err != nil || rep.State != "done" {
 		t.Fatalf("force_start: %v %s\n%s", err, rep.State, notesOf(rep))
 	}
-	if notes := notesOf(rep); !strings.Contains(notes, "start: warning: from_pull_group 1: the gather spot 145 0 0 is 15 yd from pull group 0 of leg 0 (a safe spot needs 30), alive in a fresh instance; force_start: starting there anyway") {
+	if notes := notesOf(rep); !strings.Contains(notes, "start: warning: from_pull_group 1: the gather spot 145 0 0 is 15 yd from pull group 1 (from_pull_group 0) of leg 0 (a safe spot needs 30), alive in a fresh instance; force_start: starting there anyway") {
 		t.Fatalf("no force_start note:\n%s", notes)
 	}
 	if !slices.ContainsFunc(g.calls, func(c string) bool { return strings.HasPrefix(c, "instance unbind all ") }) {
@@ -592,7 +591,7 @@ func TestStartRefusesAGatherSpotNearAnEarlierPack(t *testing.T) {
 	if err != nil || rep3.State != "done" {
 		t.Fatalf("non-fresh start refused: %v %s", err, rep3.State)
 	}
-	if notes := notesOf(rep3); !strings.Contains(notes, "start: warning: from_pull_group 1: the gather spot 145 0 0 is 15 yd from pull group 0 of leg 0 (a safe spot needs 30); the instance is not known fresh") {
+	if notes := notesOf(rep3); !strings.Contains(notes, "start: warning: from_pull_group 1: the gather spot 145 0 0 is 15 yd from pull group 1 (from_pull_group 0) of leg 0 (a safe spot needs 30); the instance is not known fresh") {
 		t.Fatalf("no warning in notes:\n%s", notes)
 	}
 	// A clear spot: no refusal.
@@ -627,7 +626,7 @@ func TestStartRefusesAFromLegNearAnEarlierPack(t *testing.T) {
 		Leg{Name: "b", To: Point{100, 0, 0}},
 	)
 	p.OutsideTele = "uldaman"
-	const want = "from_leg 1: the start point 10 0 0 is 2 yd from pull group 0 of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway"
+	const want = "from_leg 1: the start point 10 0 0 is 2 yd from pull group 1 (from_pull_group 0) of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway"
 	o := startOpts()
 	o.Prepare = PrepareSpec{Fresh: true}
 	g := newStartFake(t)
@@ -646,7 +645,7 @@ func TestStartRefusesAFromLegNearAnEarlierPack(t *testing.T) {
 		if err != nil || rep2.State != "done" {
 			t.Fatalf("resume (fresh %v) refused: %v %s", fresh, err, rep2.State)
 		}
-		if notes := notesOf(rep2); !strings.Contains(notes, "start: warning: from_leg 1: the start point 10 0 0 is 2 yd from pull group 0 of leg 0") || !strings.Contains(notes, "not known fresh") {
+		if notes := notesOf(rep2); !strings.Contains(notes, "start: warning: from_leg 1: the start point 10 0 0 is 2 yd from pull group 1 (from_pull_group 0) of leg 0") || !strings.Contains(notes, "not known fresh") {
 			t.Fatalf("no warning in notes:\n%s", notes)
 		}
 	}
@@ -678,7 +677,7 @@ func TestStartRefusesAFromLegOnTheLiveBossOfTheLegBefore(t *testing.T) {
 // still in its instance, so the start only warns.
 func TestStartGateTreatsAHiredPartyAsFresh(t *testing.T) {
 	p := crowdPlan()
-	const want = "from_pull_group 1: the gather spot 145 0 0 is 15 yd from pull group 0 of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway"
+	const want = "from_pull_group 1: the gather spot 145 0 0 is 15 yd from pull group 1 (from_pull_group 0) of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway"
 	hired := func(rehire bool, kept map[string]tbm.Who) RemoteOptions {
 		one := 1
 		o := startOpts()
@@ -701,7 +700,7 @@ func TestStartGateTreatsAHiredPartyAsFresh(t *testing.T) {
 	// A kept binding taken over without rehire: not known fresh, a warning only (the run then fails on this fake, which
 	// cannot hire, but not at the gate).
 	rep, err = runFrom(t, newStartFake(t), p, hired(false, kept), 0)
-	if err == nil || strings.Contains(err.Error(), "force_start") || !strings.Contains(notesOf(rep), "start: warning: from_pull_group 1: the gather spot 145 0 0 is 15 yd from pull group 0 of leg 0 (a safe spot needs 30); the instance is not known fresh") {
+	if err == nil || strings.Contains(err.Error(), "force_start") || !strings.Contains(notesOf(rep), "start: warning: from_pull_group 1: the gather spot 145 0 0 is 15 yd from pull group 1 (from_pull_group 0) of leg 0 (a safe spot needs 30); the instance is not known fresh") {
 		t.Fatalf("kept binding: %v\n%s", err, notesOf(rep))
 	}
 }
@@ -726,7 +725,7 @@ func TestStartGateReadsTheNavmeshPath(t *testing.T) {
 	p.OutsideTele = "uldaman"
 	g := newStartFake(t)
 	rep, err := runFrom(t, bentFake{g}, p, freshOpts(1), 0)
-	nothingSent(t, g, rep, err, "from_pull_group 1: the gather spot 200 55 0 is 25 yd from pull group 0 of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway")
+	nothingSent(t, g, rep, err, "from_pull_group 1: the gather spot 200 55 0 is 25 yd from pull group 1 (from_pull_group 0) of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway")
 	// The straight line (no planner) gathers at 145 0 0: clear, not refused.
 	if _, err := runFrom(t, newStartFake(t), p, freshOpts(1), 0); err != nil && strings.Contains(err.Error(), "force_start") {
 		t.Fatalf("the straight-line start was refused: %v", err)
@@ -738,7 +737,7 @@ func TestStartGateReadsTheNavmeshPath(t *testing.T) {
 func TestPulltestRefusesAGatherSpotNearAnEarlierPack(t *testing.T) {
 	o := ptOpts(PulltestSpec{Leg: 0, PullGroup: 1, Tries: 1})
 	o.Prepare = PrepareSpec{Fresh: true}
-	const want = "pulltest: the gather spot 145 0 0 is 15 yd from pull group 0 of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway"
+	const want = "pulltest: the gather spot 145 0 0 is 15 yd from pull group 1 (from_pull_group 0) of leg 0 (a safe spot needs 30), alive in a fresh instance: pass force_start to start there anyway"
 	g := newStartFake(t)
 	rep, err := runFrom(t, g, crowdPlan(), o, 0)
 	nothingSent(t, g, rep, err, want)

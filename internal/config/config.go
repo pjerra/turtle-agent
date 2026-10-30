@@ -54,6 +54,9 @@ type Settings struct {
 	// TracesDir is where run traces and their summaries are written (<run_id>.jsonl, <run_id>.summary.json; default "traces"
 	// under the working directory). A leading ~/ is the home folder.
 	TracesDir string `json:"traces_dir,omitempty"`
+	// TBDashboardURL is the TortoiseBots observability dashboard this slot's raids are watched on: a raid run's card
+	// shows `Raid view: <url>/#commanders`. Absent: no link (a 5-man run shows none anyway).
+	TBDashboardURL string `json:"tb_dashboard_url,omitempty"`
 	// Addons overrides the addon list sent at world login (default: a stock 1.12.1 client's
 	// Blizzard_* set). It must include the four fingerprint addons, see worldconn.StockAddons.
 	Addons []string `json:"addons,omitempty"`
@@ -65,6 +68,10 @@ type Settings struct {
 	// one real PC). Off by default: the core's anticheat bans by a hash of fingerprint and IP,
 	// so a shared print marked on one account would reach all of them.
 	SharedFingerprint bool `json:"shared_fingerprint,omitempty"`
+	// StateDir is where the addon fingerprint and the instance-entry ledger are kept
+	// (default: the settings file's folder). A leading ~/ is the home folder. When
+	// set, Load requires it to be an existing folder only the user can write.
+	StateDir string `json:"state_dir,omitempty"`
 	// FingerprintDir is where the server-issued addon fingerprints are kept between runs: the
 	// folder of the settings file. Set by Load, not read from JSON.
 	FingerprintDir string `json:"-"`
@@ -111,7 +118,7 @@ func Load(path string) (Settings, error) {
 	if s.RPC == "" {
 		s.RPC = DefaultRPC
 	}
-	for _, p := range []*string{&s.MmapsDir, &s.TBMAddonDir, &s.DungeonsDir, &s.RotationsDir, &s.TracesDir} {
+	for _, p := range []*string{&s.MmapsDir, &s.TBMAddonDir, &s.DungeonsDir, &s.RotationsDir, &s.TracesDir, &s.StateDir} {
 		if rest, ok := strings.CutPrefix(*p, "~/"); ok {
 			if home, err := os.UserHomeDir(); err == nil {
 				*p = filepath.Join(home, rest)
@@ -120,6 +127,17 @@ func Load(path string) (Settings, error) {
 	}
 	if err := s.validate(); err != nil {
 		return Settings{}, fmt.Errorf("settings %s: %w", path, err)
+	}
+	if s.StateDir != "" {
+		info, err := os.Stat(s.StateDir)
+		if err != nil || !info.IsDir() {
+			return Settings{}, fmt.Errorf("settings %s: state_dir %s must be an existing folder that only you can write", path, s.StateDir)
+		}
+		if perm := info.Mode().Perm(); perm&0o022 != 0 {
+			return Settings{}, fmt.Errorf("settings %s: state_dir %s must be an existing folder that only you can write", path, s.StateDir)
+		}
+		s.FingerprintDir = s.StateDir
+		return s, nil
 	}
 	s.FingerprintDir = filepath.Dir(path)
 	return s, nil

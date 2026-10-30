@@ -3,6 +3,7 @@ package dungeon
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -231,37 +232,106 @@ func (d *RemoteDriver) maintain(ctx context.Context, bl BotLiner, name string) s
 	return verdict
 }
 
-// checkAllTalents asks every bot of the first frame for its talents at once and reads the answers in one wait of preflightTalentsWait.
-// A game that cannot send several lines at once is asked bot by bot, as before.
+// talentsRe reads a "a/b/c" talents string (the hire report's and memory's form).
+var treesRe = regexp.MustCompile(`^(\d+)/(\d+)/(\d+)$`)
+
+// parseTrees reads "a/b/c" spent points; ok is false for anything else ("no answer", "error: ...").
+func parseTrees(s string) (tbm.Talents, bool) {
+	m := treesRe.FindStringSubmatch(s)
+	if m == nil {
+		return tbm.Talents{}, false
+	}
+	var t tbm.Talents
+	for i := range t.Trees {
+		n := 0
+		for _, c := range m[i+1] {
+			n = n*10 + int(c-'0')
+		}
+		t.Trees[i], t.Total = n, t.Total+n
+	}
+	return t, true
+}
+
+// knownTalents are a bot's spent points when the hire already read them: first the ready block's entry for a name
+// matching case-insensitively (a hire of this run), else the hire memory of a kept binding (name in lower case). An
+// unknown ready entry ("no answer", malformed, 0/0/0) falls through to the memory; unknown in both places, the bot is
+// asked as before.
+func knownTalents(ready *ReadyReport, memory map[string]tbm.Who, name string) (string, bool) {
+	if ready != nil {
+		for _, b := range ready.Bots {
+			if !strings.EqualFold(b.Name, name) {
+				continue
+			}
+			if t, ok := parseTrees(b.Talents); ok && t.Total > 0 {
+				return b.Talents, true
+			}
+			break
+		}
+	}
+	if w, ok := memory[strings.ToLower(name)]; ok {
+		if s := w.Trees[0] + w.Trees[1] + w.Trees[2]; s > 0 {
+			return fmt.Sprintf("%d/%d/%d", w.Trees[0], w.Trees[1], w.Trees[2]), true
+		}
+	}
+	return "", false
+}
+
+// hireTalents fills in the talents the hire already read: for every bot with known talents it sets "a/b/c (hire)" and
+// runs the zero-points rule, and it says which bots still need asking. It sends no request itself.
+func (d *RemoteDriver) hireTalents(pf *Preflight) (ask []int) {
+	ready := d.rep.snapshot().Ready
+	for i, m := range d.fr.Party {
+		t, ok := knownTalents(ready, d.opt.HireMemory, m.Name)
+		if !ok {
+			ask = append(ask, i)
+			continue
+		}
+		b := &pf.Bots[i]
+		b.Talents = t + " (hire)"
+		if got, ok := parseTrees(t); ok && got.Total == 0 {
+			pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: no talent points spent (%s): a reset spec?", m.Name, b.Talents))
+		}
+	}
+	return ask
+}
+
+// checkAllTalents fills in the talents the hire already read and asks the rest at once, in one wait of
+// preflightTalentsWait. A game that cannot send several lines at once is asked bot by bot, as before. Bots with no
+// known talents keep today's ask and today's "no answer" warning.
 func (d *RemoteDriver) checkAllTalents(ctx context.Context, bl BotLiner, pf *Preflight) {
+	ask := d.hireTalents(pf)
+	if len(ask) == 0 {
+		return
+	}
 	multi, ok := bl.(BotLinesAller)
 	if !ok {
-		for i, m := range d.fr.Party {
-			d.checkTalents(ctx, bl, pf, &pf.Bots[i], m)
+		for _, i := range ask {
+			d.checkTalents(ctx, bl, pf, &pf.Bots[i], d.fr.Party[i])
 		}
 		return
 	}
-	got := make([]tbm.Talents, len(d.fr.Party))
-	reqs := make([]BotLineRequest, len(d.fr.Party))
-	for i, m := range d.fr.Party {
-		reqs[i] = BotLineRequest{Command: "command " + m.Name + " talents", Done: func(line string) bool {
+	got := make([]tbm.Talents, len(ask))
+	reqs := make([]BotLineRequest, len(ask))
+	for j, i := range ask {
+		m := d.fr.Party[i]
+		reqs[j] = BotLineRequest{Command: "command " + m.Name + " talents", Done: func(line string) bool {
 			t, ok := tbm.ParseTalents([]string{line})
 			if ok {
-				got[i] = t
+				got[j] = t
 			}
 			return ok
 		}}
 	}
 	_, settled, err := multi.BotLinesAll(ctx, reqs, preflightTalentsWait)
-	for i, m := range d.fr.Party {
-		b := &pf.Bots[i]
+	for j, i := range ask {
+		m, b := d.fr.Party[i], &pf.Bots[i]
 		switch {
 		case err != nil:
 			b.Talents = "error: " + err.Error()
-		case i >= len(settled) || !settled[i]:
+		case j >= len(settled) || !settled[j]:
 			b.Talents = "no answer"
 		default:
-			d.talentsVerdict(pf, b, m, got[i])
+			d.talentsVerdict(pf, b, m, got[j])
 			continue
 		}
 		pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: talents: %s", m.Name, b.Talents))

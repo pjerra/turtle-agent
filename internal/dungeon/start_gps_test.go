@@ -37,8 +37,8 @@ func TestParseGPS(t *testing.T) {
 		{"other player's chat before", "[World] hi\n" + gpsText(3, 3), GPSReply{X: 100, GroundZ: 3, FloorZ: 3}, true},
 		{"integers", "X: 5 Y: 6\nGroundZ: 5 FloorZ: 6", GPSReply{X: 5, Y: 6, GroundZ: 5, FloorZ: 6}, true},
 		{"no height data (-200000)", gpsText(-200000, -200000), GPSReply{}, false},
-		{"floor only invalid", gpsText(10, -200000), GPSReply{}, false},
-		{"no FloorZ", "X: 1 Y: 2\nGroundZ: 5.0", GPSReply{}, false},
+		{"indoor GroundZ missing uses FloorZ", "X: 10.000000 Y: 20.000000 Z: 0.000000 Orientation: 0.000000\nGroundZ: -200000.000000 FloorZ: -62.260399 Have height data (Map: 1 VMap: 1)", GPSReply{X: 10, Y: 20, GroundZ: -62.260399, FloorZ: -62.260399}, true},
+		{"GroundZ above the missing mark stays", "X: 10.000000 Y: 20.000000 Z: 0.000000 Orientation: 0.000000\nGroundZ: -50000.000000 FloorZ: -62.260399 Have height data (Map: 1 VMap: 1)", GPSReply{X: 10, Y: 20, GroundZ: -50000, FloorZ: -62.260399}, true},
 		{"no X and Y", "GroundZ: 12.000000 FloorZ: 11.750000 Have height data (Map: 1 VMap: 1)", GPSReply{}, false},
 		{"ZoneX and ZoneY are not X and Y", "ZoneX: 10.500000 ZoneY: 20.250000\nGroundZ: 1.0 FloorZ: 2.0", GPSReply{}, false},
 		{"empty", "", GPSReply{}, false},
@@ -127,13 +127,32 @@ func TestStartRefusesAFloorFarFromTheTarget(t *testing.T) {
 	}
 }
 
+// An indoor `.gps` (`GroundZ: -200000`, BRD) uses FloorZ: a commander sunk 15 yd is re-sent at FloorZ+0.3 and refused with FloorZ's
+// numbers, exactly as outdoors.
+func TestStartUsesFloorZWhenGroundZIsMissing(t *testing.T) {
+	g := newStartFake(t)
+	g.addMob(300, Point{250, 5, 0})
+	g.sink = 15
+	g.gpsFn = func(*startFake) (string, error) {
+		return gpsTextAt(100, 0, -200000, 0), nil
+	}
+	_, err := runFrom(t, g, twoLegPlan(), startOpts(), 1)
+	if err == nil || !strings.Contains(err.Error(), "GroundZ 0.0") || !strings.Contains(err.Error(), "FloorZ 0.0") {
+		t.Fatalf("no indoor refusal with FloorZ numbers: %v", err)
+	}
+	if len(g.goPts) != 2 || g.goPts[1].Z < 0.29 || g.goPts[1].Z > 0.31 {
+		t.Fatalf("go xyz points %v (want a re-send at z 0.3): the missing GroundZ was not replaced by FloorZ", g.goPts)
+	}
+}
+
 // A .gps that fails or cannot be read never blocks the start (older servers, commanders without GM): one note says the check is best effort.
 func TestStartGPSIsBestEffort(t *testing.T) {
 	for name, fn := range map[string]func(*startFake) (string, error){
-		"no reply":    func(*startFake) (string, error) { return "", errors.New("timeout") },
-		"unparseable": func(*startFake) (string, error) { return "There is no such command", nil },
-		"no map data": gpsConst(-200000, -200000),
-		"empty reply": func(*startFake) (string, error) { return "", nil },
+		"no reply":           func(*startFake) (string, error) { return "", errors.New("timeout") },
+		"unparseable":        func(*startFake) (string, error) { return "There is no such command", nil },
+		"no map data":        gpsConst(-200000, -200000),
+		"empty reply":        func(*startFake) (string, error) { return "", nil },
+		"floor only invalid": gpsConst(10, -200000),
 	} {
 		g := newStartFake(t)
 		g.addMob(300, Point{250, 5, 0})

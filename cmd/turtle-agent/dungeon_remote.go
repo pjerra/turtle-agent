@@ -168,6 +168,9 @@ func checkObserve(p dungeonRunParams, bad func(string, ...any) error) error {
 				return bad("observe.%s: %v is outside 0-86400 seconds (0: the default)", v.name, v.s)
 			}
 		}
+		if o.AutoResume < 0 || o.AutoResume > 3 {
+			return bad("observe.auto_resume: %d is outside 0-3 (at most 3 auto resumes a step, 0: off)", o.AutoResume)
+		}
 	}
 	return nil
 }
@@ -178,6 +181,7 @@ func observeSpec(o *observeParam) *dungeon.ObserveSpec {
 	if o != nil {
 		sec := func(s float64) time.Duration { return time.Duration(s * float64(time.Second)) }
 		spec.Plan, spec.Poll, spec.MaxRun, spec.Stall, spec.PausedWait, spec.Maintenance, spec.AllowFarStart, spec.KeepLootSetting = o.Plan, sec(o.PollS), sec(o.MaxRunS), sec(o.StallS), sec(o.PausedWaitS), o.Maintenance, o.AllowFarStart, o.KeepLootSetting
+		spec.AutoResume = o.AutoResume
 	}
 	return spec
 }
@@ -213,7 +217,8 @@ func remoteRecoverWipe(p dungeonRunParams) bool {
 	return recoverWipeOn(p.RecoverWipe, mode != modeObserve)
 }
 
-// startRemote starts a run in remote mode. The caller holds r.mu and has checked that no run goes.
+// startRemote starts a run in remote mode. The caller holds r.mu, has checked that no run goes and has claimed the movement mode
+// (r.moves): the run's goroutine releases it.
 func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, plan *dungeon.Plan, planPath, tunePath string, setup []string, from int, names []string) (dungeonRunResult, error) {
 	if r.remote == nil {
 		return dungeonRunResult{}, &rpc.Error{Code: rpc.CodeGame, Message: "the remote commander is not available"}
@@ -271,8 +276,9 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 	r.drv, r.cancel, r.done = drv, cancel, done
 	go func() {
 		defer close(done)
+		defer r.moves.release(moveOwnerRun) // the caller claimed it; released once the run has exited, just before done closes
 		defer cancel()
-		_ = drv.Run(ctx, from)
+		_ = r.runDriver(ctx, drv, from)
 		r.keptFrom(drv.Report()) // the outcome is in the report and the events; the unbind is deferred inside Run
 	}()
 	res := dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, FromPullGroup: opt.FromPullGroup, Legs: names, Buffs: []string{}, LeaderGM: "false", Mode: "remote", RunMode: modeCommander, LeadBot: p.LeadBot}

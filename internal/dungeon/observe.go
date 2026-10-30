@@ -38,16 +38,19 @@ type ObserveSpec struct {
 	// PausedWait is how long a paused run waits for a resume (by a person on the server, or dungeon_resume) before the watch stops it and
 	// fails (default 10 min). The run leader pauses itself at 3 dead, an unsupported step or a ceiling and never goes on alone.
 	PausedWait time.Duration
+	// AutoResume resumes the run leader by itself after its "regroups by itself ... did not hold" pause, at most this many times a step
+	// (0-3, default 0: off). An unattended run otherwise stops when PausedWait runs out after such a pause.
+	AutoResume int
 	// Maintenance sends `.bot maintenance <bot>` for every bot at the preflight, as a driven run does. Off by default: maintenance
-	// walks each bot to a vendor, bank or mailbox, and a party scattered over the maps right after autogear pauses the run leader ("the
+	// walks each bot to a vendor, bank or mailbox, and a party scattered over the maps right after the hire's autogear pauses the run leader ("the
 	// lead bot is not on the plan's map"). The inventory and talent reads still run.
 	Maintenance bool
 	// AllowFarStart lets a partway start go on although the lead bot stands more than farStartYd from the start step's point: the note
 	// says so and the run leader walks there (or pauses) on its own. Off by default: a party in the wrong place is refused.
 	AllowFarStart bool
-	// KeepLootSetting leaves the bots' corpse looting as the operator set it: the start sends no `.bot behavior <bot> loot on` (the
-	// run start's undo of a crashed run's boss `loot off`). Off by default. Observe only: a driven run always sends the undo, since
-	// its legs turn looting off and on themselves and a crashed run may have left it off.
+	// KeepLootSetting leaves the bots' corpse looting as the operator set it: the start sends no `.bot behavior <bot> loot on` (the run
+	// start's undo of a crashed run's boss `loot off`). Off by default. Observe only: a driven run always sends the undo, since its legs
+	// turn looting off and on themselves and a crashed run may have left it off.
 	KeepLootSetting bool
 }
 
@@ -57,6 +60,11 @@ const (
 	DefaultObserveMaxRun     = 3 * time.Hour
 	DefaultObserveStall      = 10 * time.Minute
 	DefaultObservePausedWait = 10 * time.Minute
+	// observeAutoResumeDelay is how long the did-not-hold pause stands before the observer resumes it by itself: a person watching the
+	// run gets the first chance.
+	observeAutoResumeDelay = 15 * time.Second
+	// observeAutoResumeRunMax bounds auto resumes over the whole run; ObserveSpec.AutoResume bounds them per step.
+	observeAutoResumeRunMax = 6
 	// observeGone is how long a "none" status (no run on the server) is tolerated right after the start before the run counts as gone.
 	observeGone = 20 * time.Second
 	// MaxRunChanges bounds the changes kept in the report.
@@ -84,6 +92,12 @@ func (s ObserveSpec) withDefaults(plan *Plan) ObserveSpec {
 	}
 	if s.PausedWait <= 0 {
 		s.PausedWait = DefaultObservePausedWait
+	}
+	if s.AutoResume < 0 {
+		s.AutoResume = 0
+	}
+	if s.AutoResume > 3 {
+		s.AutoResume = 3
 	}
 	return s
 }
@@ -153,8 +167,12 @@ type ObserveReport struct {
 	Lines  int `json:"lines"`
 	Polls  int `json:"polls"`
 	Pauses int `json:"pauses"`
-	// Controls are the pause, resume, skip and stop requests sent, in order, each with its answer.
-	Controls []string `json:"controls,omitempty"`
+	// ModuleWipes, ModuleNearWipes and ModuleLeadDeaths are the run leader's own counts, read from its notes
+	// ("N wipes, M near wipes" in a self-regroup note, "plan done (..., K lead deaths)"): the highest seen.
+	ModuleWipes      int      `json:"module_wipes,omitempty"`
+	ModuleNearWipes  int      `json:"module_near_wipes,omitempty"`
+	ModuleLeadDeaths int      `json:"module_lead_deaths,omitempty"`
+	Controls         []string `json:"controls,omitempty"`
 	// PlayerOrders are the pauses the module made for a player's order (the observer's `cmd summon`, a move), each with the step and the order.
 	PlayerOrders []string `json:"player_orders,omitempty"`
 	// Ended is how the watch ended: done, or the reason of a failure or stop.
@@ -193,11 +211,20 @@ type observeState struct {
 	leadDownAt time.Time                 // when the lead bot last went dead
 	leadDown   bool
 	lastWipeAt time.Time // when the last wipe was counted
-	// The run leader's own rest (observe mode has no gate of the agent's): the phase rest of its status is the gate.
-	restSince time.Time // when the run leader's current rest phase began
-	restOpen  bool
+	restSince  time.Time // when the run leader's current rest phase began
+	restOpen   bool
 	// playerPaused: the run is paused for a player's order (the module's pause for a `cmd`), so the status says why it waits.
 	playerPaused bool
+	// autoResumed counts the resumes the observer sent by itself per step; autoResumes counts them over the run. Both bound
+	// observe.auto_resume (0: off). autoResumeSent marks that this pause was already tried, with autoResumeStep and autoResumeNote
+	// naming the pause's identity (step, pause note text): only a non-paused status proves the resume worked, so a refused or
+	// dropped resume does not renew the PausedWait ceiling; a paused status with a different identity is a new pause, which
+	// re-arms the latch and restarts pausedAt.
+	autoResumed    map[int]int
+	autoResumes    int
+	autoResumeSent bool
+	autoResumeStep int
+	autoResumeNote string
 
 	mu   sync.Mutex
 	reqs []string // pause, resume, skip requests from the RPC
@@ -392,6 +419,7 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 		} else if deadCount(d.fr) < wipeDeadReArm {
 			o.wiped = false
 		}
+		d.autoResumeTick()
 		d.serveRunRequests(ctx)
 		d.readRunLines()
 		if d.clk.Now().Sub(o.lastPoll) >= spec.Poll {
@@ -661,7 +689,82 @@ func (d *RemoteDriver) control(text string) {
 	})
 }
 
-// serveRunRequests sends the pause, resume and skip requests of the RPC.
+// autoResumeNote matches the run leader's pause after its regroups by themselves did not hold: with or without the step count ("2
+// regroups by itself at this step did not hold" / "2 regroups by itself did not hold").
+var autoResumeNote = regexp.MustCompile(`regroups by itself( at this step)? did not hold`)
+
+// autoResumable says whether the observer resumes this pause by itself (observe.auto_resume). A player-order pause is never resumed: it
+// waits for the person whose order it was.
+func autoResumable(note string) bool {
+	if _, ok := playerOrderOf(note); ok {
+		return false
+	}
+	return autoResumeNote.MatchString(note)
+}
+
+// samePauseNote says whether a paused status still names the latched pause: the module appends asides to the note of a pause it
+// already made ("; boss meanwhile: ..."), so the note grows by "; " sections while the pause stays the same. A note that is not
+// such an extension — shortened, replaced, or different before the first ";" — is a new pause.
+func samePauseNote(latched, cur string) bool {
+	if cur == latched {
+		return true
+	}
+	rest, ok := strings.CutPrefix(cur, latched)
+	return ok && strings.HasPrefix(rest, "; ")
+}
+
+// autoResumeTick resumes the run leader by itself after its "did not hold" pause (observe.auto_resume): the same one regroup per step
+// the hand resume the workers sent until now. It queues the same "resume" RunControl sends and records it the same three ways; a person
+// resuming first wins, since the pause is then gone. The attempt is marked apart from pausedAt: only a non-paused status proves the
+// resume worked, so a refused or dropped one still ends the run at PausedWait. The agent sends only `run resume`: the module's own
+// regroup sends `revive party`.
+func (d *RemoteDriver) autoResumeTick() {
+	o := d.obs
+	spec := o.spec
+	if spec.AutoResume <= 0 {
+		return
+	}
+	if !o.haveLast || o.last.State != tbm.RunPaused || !autoResumable(o.last.Note) {
+		return
+	}
+	if o.pausedAt.IsZero() || d.clk.Now().Sub(o.pausedAt) < observeAutoResumeDelay {
+		return
+	}
+	if o.autoResumeSent {
+		return
+	}
+	if d.haveFr && d.fr.PartyInCombat() {
+		return
+	}
+	if o.autoResumed[o.last.Step] >= spec.AutoResume || o.autoResumes >= observeAutoResumeRunMax {
+		return
+	}
+	if o.autoResumed == nil {
+		o.autoResumed = map[int]int{}
+	}
+	o.autoResumed[o.last.Step]++
+	o.autoResumes++
+	o.mu.Lock()
+	queued := len(o.reqs) < 8
+	if queued {
+		o.reqs = append(o.reqs, "resume")
+	}
+	o.mu.Unlock()
+	if !queued {
+		o.autoResumed[o.last.Step]--
+		o.autoResumes--
+		return
+	}
+	n := o.autoResumed[o.last.Step]
+	st := o.last
+	text := fmt.Sprintf("auto resume %d of %d at step %d/%d: %s", n, spec.AutoResume, st.Step, st.Steps, shortText(st.Note, 120))
+	d.control(text)
+	d.rep.note("observe mode: auto resume: " + text)
+	d.tr.Event("auto_resume", map[string]any{"step": st.Step, "note": st.Note, "n": n})
+	o.autoResumeSent = true
+	o.autoResumeStep, o.autoResumeNote = st.Step, st.Note
+}
+
 func (d *RemoteDriver) serveRunRequests(ctx context.Context) {
 	o := d.obs
 	o.mu.Lock()
@@ -738,7 +841,37 @@ func playerOrderOf(note string) (order string, ok bool) {
 	return "", false
 }
 
+var (
+	moduleWipeRe = regexp.MustCompile(`(?:^|[^a-z])(\d+) wipes?\b`)
+	moduleNearRe = regexp.MustCompile(`(\d+) near wipes?\b`)
+	moduleLeadRe = regexp.MustCompile(`(\d+) lead deaths?\b`)
+)
+
+// moduleCounts reads the run leader's counts from a note: "2 wipes", "1 wipe", "3 near wipes", "4 lead deaths"; ok is false
+// when the note names none.
+func moduleCounts(note string) (wipes, near, lead int, ok bool) {
+	for _, m := range moduleNearRe.FindAllStringSubmatch(note, -1) {
+		near = max(near, atoi(m[1]))
+		ok = true
+	}
+	for _, m := range moduleWipeRe.FindAllStringSubmatch(note, -1) {
+		wipes = max(wipes, atoi(m[1]))
+		ok = true
+	}
+	for _, m := range moduleLeadRe.FindAllStringSubmatch(note, -1) {
+		lead = max(lead, atoi(m[1]))
+		ok = true
+	}
+	return wipes, near, lead, ok
+}
+
+func atoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}
+
 // takeStatus folds one status into the observer, the report, the trace, the events and the current-step label.
+
 func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	o := d.obs
 	now := d.clk.Now()
@@ -762,11 +895,20 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	} else if o.restOpen {
 		d.endObservedRest(now)
 	}
-	if st.State == tbm.RunPaused && (!had || prev.State != tbm.RunPaused) {
-		o.pausedAt = now
-	}
-	if st.State != tbm.RunPaused {
+	// A pause's identity is its step and pause note text: a paused status with a different step or note than the latched one is a
+	// new pause (resume OK -> running -> a new pause arrives as paused -> paused, and the watcher keeps only the newest status),
+	// so the latch re-arms and pausedAt restarts. The module appends asides to the note of a pause it already made ("; X
+	// meanwhile: ..."), so a note that only extends the latched one is the same pause. A refused or dropped resume of the same
+	// pause keeps the old rule: pausedAt is kept and PausedWait still ends it.
+	if st.State == tbm.RunPaused {
+		if o.autoResumeSent && (st.Step != o.autoResumeStep || !samePauseNote(o.autoResumeNote, st.Note)) {
+			o.pausedAt, o.autoResumeSent = now, false
+		} else if !had || prev.State != tbm.RunPaused {
+			o.pausedAt = now
+		}
+	} else {
 		o.pausedAt = time.Time{}
+		o.autoResumeSent = false
 	}
 	if st.State == tbm.RunDone {
 		o.serverEnd = true
@@ -782,6 +924,11 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 		ob.Changes = append(ob.Changes, ch)
 		if n := len(ob.Changes); n > MaxRunChanges {
 			ob.Changes = append([]RunChange{}, ob.Changes[n-MaxRunChanges:]...)
+		}
+		if wipes, near, lead, ok := moduleCounts(st.Note); ok {
+			ob.ModuleWipes = max(ob.ModuleWipes, wipes)
+			ob.ModuleNearWipes = max(ob.ModuleNearWipes, near)
+			ob.ModuleLeadDeaths = max(ob.ModuleLeadDeaths, lead)
 		}
 	})
 	// A pause the module made for a player's order (the observer's own `cmd summon`, a move) is the observer's doing: the report names the
