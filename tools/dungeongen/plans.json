@@ -1,7 +1,46 @@
 {
  "vm_mmaps": [
-  1, 33, 34, 35, 36, 43, 47, 48, 70, 90, 109, 129, 189, 209, 229, 230, 249, 269, 289, 309, 329, 349, 389, 409, 429, 469, 509, 531, 532, 533,
-  800, 802, 807, 808, 814, 815, 816, 818, 819, 820, 822
+  1,
+  33,
+  34,
+  35,
+  36,
+  43,
+  47,
+  48,
+  70,
+  90,
+  109,
+  129,
+  189,
+  209,
+  229,
+  230,
+  249,
+  269,
+  289,
+  309,
+  329,
+  349,
+  389,
+  409,
+  429,
+  469,
+  509,
+  531,
+  532,
+  533,
+  800,
+  802,
+  807,
+  808,
+  814,
+  815,
+  816,
+  818,
+  819,
+  820,
+  822
  ],
  "plans": [
   {
@@ -1184,10 +1223,12 @@
    "size": 40,
    "entrance_tele": "nax",
    "special": [
-    "each quarter's eye-boss ramp and portal (GO_ARAC_*, GO_PLAG_*, GO_MILI_*, GO_CONS_*), Gothik's gates (GO_MILI_GOTH_*), the four horsemen door (GO_MILI_HORSEMEN_DOOR)",
-    "Thaddius' tesla coils (GO_CONS_NOX_TESLA_FEUGEN/STALAGG); Kel'Thuzad's windows and door (GO_KT_WINDOW_1-4, GO_KELTHUZAD_DOOR)",
-    "Sapphiron's icy room"
-   ]
+    "the four quarters are gated by the instance's own doors: 181126 (Anub'Rekhan's door, shut at spawn, a use opens it), 181195, 194022 and 181119 (unlocked by a kill, still shut, a use opens them), 181201, 181209, 181496, 181241, 181125, 181123, 181120, 181225 and 181228 (opened by the kill before, a wait_for)",
+    "the construct tail (Gluth 15932, Thaddius 15928) and the frostwyrm lair (Sapphiron 15989, Kel'Thuzad 15990) are separate navmesh islands: no walk from Grobbulus to Gluth, and the lair is entered by area trigger 4156 only",
+    "Gothik 16060 runs only with more than 10 living players on each side of the gate 181170; Kel'Thuzad starts only from area trigger 4112; the garrisons' wing-exit portals (181575-181578) have no script in the core",
+    "Thaddius is summoned from Stalagg 15929 and Feugen 15930; the four horsemen are one encounter of 16062/16063/16064/16065"
+   ],
+   "handwritten": true
   },
   {
    "name": "upper_blackrock_spire",
@@ -1258,6 +1299,7 @@
   },
   {
    "name": "upper_karazhan_halls",
+   "handwritten": true,
    "title": "Upper Karazhan Halls",
    "map": 814,
    "kind": "raid",
@@ -1269,6 +1311,7 @@
    ],
    "bosses": [
     61939,
+    61946,
     61951,
     61958,
     {
@@ -1279,7 +1322,6 @@
       59968
      ]
     },
-    61946,
     59981,
     59961,
     59991
@@ -1287,11 +1329,14 @@
    "size": 40,
    "entrance_tele": "karaforty",
    "special": [
-    "the Kings Council is the chess event (npc_kara_king/bishop/rook/knight), Echo of Medivh is the chess board",
-    "Anomalus, Keeper Gnarlmoon and Ley-Watcher Incantagos are script-driven; Sanv Tas'dal, Rupturan and Kruul stand in an Outland-like part of the map (tele karaoutland)"
+    "the chess event is the Kings Council: King 59967 is invulnerable until Bishop 59971, Rook 59970 and Knight 59968 are dead; the pawns are summoned",
+    "Anomalus, Keeper Gnarlmoon, Ley-Watcher Incantagos and Echo of Medivh are script-driven; Incantagos' four Ley Seekers 59989 channel a 4-stack damage reduction around him",
+    "Sanv Tas'dal, Rupturan the Broken and Kruul stand in an Outland-like part of the map, a separate navmesh island reached only by the karaoutland teleport (the plan's gm_cross)",
+    "Rupturan 59961 has no script or EventAI; Mephistroth has no creature data in this core",
+    "no entrance trigger row for map 814: the entrance is the 'karaforty' teleport (game_tele 921)"
    ],
    "notes": [
-    "No entrance trigger row for map 814: the entrance is the 'karaforty' teleport (game_tele 921). The boss order is a guess."
+    "Upper Karazhan Halls (Turtle custom raid): 8 boss steps in the guide's and the spiral route's order; the draft's boss order (Incantagos after the chess event) was a guess."
    ]
   },
   {

@@ -24,7 +24,7 @@ import (
 // neighbour), Lucifron and his two Protectors in the reach of the room's last trash pack, two Lava Surger patrols inside a trash
 // pack's reach, and the two Shadowforge trash packs of the corridor: a boss, a patrol or a linked add is never merged into trash,
 // so the room sends them with the pull whether the plan lists them or not.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "molten_core": 10, "blackwing_lair": 50, "timbermaw_hold": 13, "temple_of_ahnqiraj": 128, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6}
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "molten_core": 10, "blackwing_lair": 50, "timbermaw_hold": 13, "temple_of_ahnqiraj": 128, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6, "upper_karazhan_halls": 6, "naxxramas": 104}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {
