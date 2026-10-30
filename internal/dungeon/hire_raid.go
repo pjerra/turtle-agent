@@ -205,9 +205,7 @@ func (f *raidHireFlow) run(ctx context.Context) (string, error) {
 	if err := f.awaitMembers(ctx); err != nil {
 		return "", err
 	}
-	for _, n := range kept {
-		f.rdy.Reused = append(f.rdy.Reused, n)
-	}
+	f.rdy.Reused = append(f.rdy.Reused, kept...)
 
 	// 4. The lead: the first tank-read member of a tank class, in group order.
 	lead, err := f.pickLead(ctx)
@@ -280,9 +278,7 @@ func (f *raidHireFlow) run(ctx context.Context) (string, error) {
 // re-geared, and a raid hire is 60); anything else is dismissed.
 func (f *raidHireFlow) reconcile(ctx context.Context) (dismissed, kept []string, err error) {
 	var held []HireMember
-	for _, m := range f.hg.Members() {
-		held = append(held, m)
-	}
+	held = append(held, f.hg.Members()...)
 	names := func(ms []HireMember) []string {
 		var out []string
 		for _, m := range ms {
