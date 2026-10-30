@@ -143,7 +143,8 @@ type RunChange struct {
 	Kind  string    `json:"kind,omitempty"`
 	Phase string    `json:"phase,omitempty"`
 	Note  string    `json:"note,omitempty"`
-	Left  int       `json:"left,omitempty"` // packs the run leader left alive
+	Left  int       `json:"left,omitempty"`  // packs the run leader left alive
+	Label string    `json:"label,omitempty"` // the speed/until label ("speed 2.0 (test); until boss (step 38)")
 }
 
 // ObserveReport is the report's part for an observed run (Report.Remote.Observe).
@@ -158,7 +159,8 @@ type ObserveReport struct {
 	Kind  string `json:"kind,omitempty"`
 	Phase string `json:"phase,omitempty"`
 	Note  string `json:"note,omitempty"`
-	Left  int    `json:"left,omitempty"` // packs the run leader left alive
+	Left  int    `json:"left,omitempty"`  // packs the run leader left alive
+	Label string `json:"label,omitempty"` // the status line's speed/until label, as sent
 	// Text is the status in plain words ("sentinel · pull 7/41 · pulling").
 	Text string `json:"text,omitempty"`
 	// Started: `.bot run start` was acknowledged (or an own run of the plan was adopted).
@@ -913,10 +915,10 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	if st.State == tbm.RunDone {
 		o.serverEnd = true
 	}
-	ch := RunChange{At: now, State: st.State, Step: st.Step, Steps: st.Steps, Leg: st.Leg, Kind: st.Kind, Phase: st.Phase, Note: st.Note, Left: st.Left}
+	ch := RunChange{At: now, State: st.State, Step: st.Step, Steps: st.Steps, Leg: st.Leg, Kind: st.Kind, Phase: st.Phase, Note: st.Note, Left: st.Left, Label: st.Label}
 	d.remote(func(r *RemoteReport) {
 		ob := r.Observe
-		ob.State, ob.Step, ob.Steps, ob.Leg, ob.Kind, ob.Phase, ob.Note, ob.Left, ob.Text = st.State, st.Step, st.Steps, st.Leg, st.Kind, st.Phase, st.Note, st.Left, st.Text()
+		ob.State, ob.Step, ob.Steps, ob.Leg, ob.Kind, ob.Phase, ob.Note, ob.Left, ob.Label, ob.Text = st.State, st.Step, st.Steps, st.Leg, st.Kind, st.Phase, st.Note, st.Left, st.Label, st.Text()
 		ob.Lines++
 		if st.State == tbm.RunPaused && (!had || prev.State != tbm.RunPaused) {
 			ob.Pauses++

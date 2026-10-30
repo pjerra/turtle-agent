@@ -456,8 +456,11 @@ type walk struct {
 
 	untilWords []string
 	untilLabel string
-	untilStep  int // the step of the start line's until label (0: unknown)
-	fromWords  []string
+	// runLabel and speedFellBack are the status lines' label facts for the summary (noteLabel).
+	runLabel      string
+	speedFellBack bool
+	untilStep     int // the step of the start line's until label (0: unknown)
+	fromWords     []string
 
 	agent    walkAgent
 	manifest teardownSlotManifest
@@ -479,12 +482,14 @@ type walk struct {
 	fights   []raidwalk.FightSummary
 
 	seenFights map[string]bool
-	hostiles   map[string]hostileState
-	botAt      map[string]botPos
-	partyG     map[uint64]bool
-	resetSince time.Time
-	afterN     uint64
-	eventsAt   uint64
+	// pendingFights are fights listed but whose detail is not loaded yet: fight id to its index in fights.
+	pendingFights map[string]int
+	hostiles      map[string]hostileState
+	botAt         map[string]botPos
+	partyG        map[uint64]bool
+	resetSince    time.Time
+	afterN        uint64
+	eventsAt      uint64
 
 	bossSet      map[uint32]bool
 	bossRows     map[uint32]hostileState
@@ -549,7 +554,7 @@ func raidWalkRun(ctx context.Context, o raidWalkOptions, env walkEnv, deps walkD
 	env.fillDefaults()
 	deps.fillDefaults()
 	w := &walk{opts: o, env: env, deps: deps, stdout: stdout, stderr: stderr,
-		seenFights: map[string]bool{}, hostiles: map[string]hostileState{}, botAt: map[string]botPos{},
+		seenFights: map[string]bool{}, pendingFights: map[string]int{}, hostiles: map[string]hostileState{}, botAt: map[string]botPos{},
 		partyG: map[uint64]bool{}, bossSet: map[uint32]bool{}, bossRows: map[uint32]hostileState{}, hires: map[string]bool{}}
 	return w.main(ctx)
 }
@@ -1096,7 +1101,7 @@ func (w *walk) finish(code int) {
 	meta := raidwalk.SummaryMeta{
 		Plan: w.plan.Name, Map: w.plan.Map, Server: w.opts.server, Slot: w.slotNumber(), Character: w.manifest.Character,
 		Until: w.opts.until, From: w.opts.from, Speed: w.opts.speed, TestSpeed: w.opts.speed != 1.0,
-		RowsSHA256: rowsSHA256(w.rows), UntilStep: w.untilStep,
+		RowsSHA256: rowsSHA256(w.rows), UntilStep: w.untilStep, RunLabel: w.runLabel, SpeedFellBack: w.speedFellBack,
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
 		TierSource: w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,

@@ -685,6 +685,7 @@ func (w *walk) checkStartLine(ctx context.Context, line string) error {
 		w.tracker.Feed(w.env.now(), st)
 	}
 	w.lastStatus, w.haveStatus = st, true
+	w.noteLabel(st)
 	if st.State != tbm.RunRunning {
 		return stopf(exitRaidWalkFailed, "run start: the run is %s: %s", st.State, line)
 	}
@@ -706,6 +707,17 @@ func (w *walk) checkStartLine(ctx context.Context, line string) error {
 		}
 	}
 	return nil
+}
+
+// noteLabel keeps the newest speed/until label of the run's status lines for the summary (the label drops once the run
+// stopped at its until step, so the last line alone does not have it) and whether the test speed ever fell back.
+func (w *walk) noteLabel(st tbm.RunStatus) {
+	if st.Label != "" {
+		w.runLabel = st.Label
+	}
+	if st.SpeedFellBack {
+		w.speedFellBack = true
+	}
 }
 
 // phaseWatch is phase 10: the run's status, the frames and the dashboard until the run ends or something stops it.
@@ -803,6 +815,7 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 		}
 		w.tracker.Feed(now, st)
 		w.lastStatus, w.haveStatus = st, true
+		w.noteLabel(st)
 		if st.Note != "" {
 			w.newNotes = append(w.newNotes, st.Note)
 		}
@@ -1056,6 +1069,10 @@ type walkFightRow struct {
 	Leg      string `json:"leg"`
 	Step     uint32 `json:"step"`
 	Deaths   int    `json:"deaths"`
+	Warnings int    `json:"warnings"`
+	// Live marks a fight still running (COMBAT_EVENTS opened it, no COMBAT_FIGHT yet): it has no detail to load, and
+	// the finished fight comes back under the same id.
+	Live bool `json:"live"`
 }
 
 // saveFights saves the fights list and one detail file per new key.
@@ -1076,15 +1093,34 @@ func (w *walk) saveFights() {
 		return
 	}
 	for _, r := range rows {
-		if r.ID == "" || w.seenFights[r.ID] {
+		if r.ID == "" || r.Live || w.seenFights[r.ID] {
 			continue
 		}
-		w.seenFights[r.ID] = true
+		fs := raidwalk.FightSummary{ID: r.ID, Step: int(r.Step), Leg: r.Leg, DurMS: int64(r.Dur),
+			Deaths: r.Deaths, Outcome: r.Outcome, BossName: r.BossName, Warnings: r.Warnings}
+		idx, pending := w.pendingFights[r.ID] // the row's fields are read fresh on every poll
+		// A fight whose detail could not be loaded or read is kept without it and fetched again on the next poll (and at teardown),
+		// so one dashboard timeout does not lose its death recap for good.
+		got := false
 		if detail, derr := w.dash.Fight(ctx, r.Key); derr == nil {
 			_ = w.writeOut("combat-fight-"+fightFileID(r.ID)+".json", detail)
+			if d, ok := raidwalk.FightDetailOf(detail); ok {
+				fs.Detail = &d
+				got = true
+			}
 		}
-		w.fights = append(w.fights, raidwalk.FightSummary{ID: r.ID, Step: int(r.Step), Leg: r.Leg, DurMS: int64(r.Dur),
-			Deaths: r.Deaths, Outcome: r.Outcome, BossName: r.BossName})
+		if pending {
+			w.fights[idx] = fs
+		} else {
+			w.fights = append(w.fights, fs)
+			idx = len(w.fights) - 1
+		}
+		if got {
+			w.seenFights[r.ID] = true
+			delete(w.pendingFights, r.ID)
+		} else {
+			w.pendingFights[r.ID] = idx
+		}
 	}
 }
 
