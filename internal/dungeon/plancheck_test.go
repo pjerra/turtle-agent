@@ -538,7 +538,7 @@ func TestZulfarrakOldPlanFailsCheck(t *testing.T) {
 }
 
 // planCheckKnownFailing lists the shipped plans that fail the plan check today, with the failing points counted when the check came in. Issue #187
-// follows them up one by one (most are drafts from the world export, whose points were never walked; blackfathom_deeps, razorfen_downs, ruins_of_ahnqiraj, scarlet_graveyard, stratholme_undead and temple_of_ahnqiraj fail only on their needs_walk points; Uldaman's two direct hops over the scorpid pit are exempt in the plan itself (check_skip)). Take a plan off the list when it is fixed;
+// follows them up one by one (most are drafts from the world export, whose points were never walked; blackfathom_deeps, razorfen_downs, scarlet_graveyard, stratholme_undead and temple_of_ahnqiraj fail only on their needs_walk points; Uldaman's two direct hops over the scorpid pit are exempt in the plan itself (check_skip)). Take a plan off the list when it is fixed;
 // Zul'Farrak is not on it. wailing_caverns-extra is the Naralex event draft (#276): the offline walk from the foot to the gossip stand is
 // complete and pinned (TestNaralexReturnHop), but the server's PathFinder stops 205 yd short on the lower mesh, and the draft is not
 // exported to the run leader.
