@@ -1074,6 +1074,7 @@
   },
   {
    "name": "ruins_of_ahnqiraj",
+   "handwritten": true,
    "title": "Ruins of Ahn'Qiraj",
    "map": 509,
    "kind": "raid",
@@ -1090,15 +1091,19 @@
    "size": 20,
    "entrance_tele": "aq20",
    "special": [
-    "General Rajaxx's waves (Captain Qeez and the Andorov escort)",
-    "Ossirian's crystals (GO_OSSIRIAN_CRYSTAL)"
+    "General Rajaxx is an event: Andorov's gossip (15471, menu 0) starts the seven waves, and the raid holds on the spot until instance data 2 reads 3 (Rajaxx's death)",
+    "Ossirian's crystals (GO_OSSIRIAN_CRYSTAL 180619) are summoned two at a time during the fight: the bots' own fight strategy clicks them, no plan step",
+    "the map has no static door, lever or key: its 7 game objects are Scarab Coffers, and door 176149 is summoned in combat and deleted after",
+    "the 49 Rajaxx event units (the captains and their escorts) are no pulls; Andorov and the four Kaldorei Elite are friendly",
+    "the 19 Canal Frenzy sit in the sunken water channel below the Moam corridor and are in no pull"
    ],
    "notes": [
-    "Captain Tuubid (15392) is Turtle's addition and not a leg."
+    "Captain Tuubid (15392) is Turtle's addition and the second captain of Rajaxx's waves, not a leg."
    ]
   },
   {
    "name": "temple_of_ahnqiraj",
+   "handwritten": true,
    "title": "Temple of Ahn'Qiraj",
    "map": 531,
    "kind": "raid",
@@ -1123,17 +1128,20 @@
       15275
      ]
     },
-    15727
+    15727,
+    15517
    ],
    "size": 40,
    "entrance_tele": "aq40",
    "special": [
-    "Ouro (15517) has no spawn row: summoned from the mound (SPELL_SUMMON_OURO)",
-    "Skeram's gate (GO_SKERAM_GATE), the twin emperors' doors (GO_TWINS_ENTER_DOOR, GO_TWINS_EXIT_DOOR)",
-    "C'Thun's eye and grasp (GO_GRASP_OF_CTHUN)"
+    "Ouro (15517) has no spawn row: the Ouro Spawner (15957) at -9188 2092 -64 summons him (spell 26061) when a non-GM player stands within 25 yd, so the optional last leg walks to a stand within 25 yd and waits for him to turn hostile",
+    "the instance opens the doors on the kill before them: 180636 (the gate above Skeram's room) on TYPE_SKERAM DONE, 180634 (the Twin Emperors' entry) on TYPE_HUHURAN DONE, 180635 (their exit, to C'Thun's corridor) on TYPE_TWINS DONE",
+    "the three Silithid Royalty bosses are one boss step (Vem's entry, Kri and Yauj first); Sartura is pulled by area trigger 4052 and the Twins' intro is dialogue on 4047, neither a step",
+    "C'Thun's chamber is an island on map 531's navmesh: no server path reaches it from the Twins' exit corridor or the upper terrace, so the boss point is needs_walk until the mapping walk finds the ramp"
    ],
    "notes": [
-    "Merithra (15378), Caelestrasz (15379) and Arygos (15380) stand in C'Thun's antechamber, the Master's Eye (15963) is a mob; none is a leg."
+    "Merithra (15378), Caelestrasz (15379) and Arygos (15380) stand in C'Thun's antechamber, the Master's Eye (15963) is a scripted mob, the Beetle (15475) is a level 1 critter and the C'Thun Portal (15896) is spawned with C'Thun; none is a leg",
+    "the bosses' trash entries are the instance's own groups, each despawned after the boss before it: Anubisath Sentinel and Obsidian Eradicator after Skeram, Vekniss Guardian, Vekniss Warrior and Qiraji Brainwasher after Sartura, Vekniss Drone and Vekniss Soldier after Fankriss, Vekniss Hive Crawler, Vekniss Wasp, Qiraji Lasher and Vekniss Stinger after Huhuran, Anubisath Defender and Qiraji Scarab/Scorpion after the Twins, Qiraji Mindslayer/Slayer/Champion and Anubisath Warder/Obsidian Nullifier after C'Thun"
    ]
   },
   {
@@ -1216,6 +1224,7 @@
   },
   {
    "name": "lower_karazhan_halls",
+   "handwritten": true,
    "title": "Lower Karazhan Halls",
    "map": 532,
    "kind": "raid",
@@ -1236,9 +1245,10 @@
     61225
    ],
    "special": [
-    "Moroes carries npc_flags (gossip) and is fought after a dialogue",
-    "Blackwald II (script boss_blackwald_ii) has no export row of the rank-3 kind: his entry is unverified"
-   ]
+  "Lord Blackwald II (61222) has no spawn row: the instance summons him when the Dark Rider Champion (61204) is DONE",
+  "Moroes carries npc_flags (gossip) and is fought after a dialogue; his menu opens only once the other four bosses are DONE",
+  "the map's doors are all open and no lever or key gates the route"
+ ]
   },
   {
    "name": "upper_karazhan_halls",
@@ -1290,17 +1300,22 @@
     60748
    ],
    "size": 40,
+   "route": true,
+   "handwritten": true,
    "entrance_tele": "sanctumraid",
    "outside_tele": "EmeraldSanctuary",
    "scripted": [
     60748
    ],
    "special": [
-    "Erennius (patrol) is fought before Solnius; Solnius carries npc_flags (gossip) and is awakened by dialogue",
-    "Errenius' chest (GO_ERRENIUS_CHEST), the portal (GO_PORTAL)"
+    "Erennius (60747) is killed before Solnius (60748): Solnius' EnterCombat sets hard mode while Erennius lives and puts every living trash unit of the map in combat with the attacker (instance_emerald_sanctum.cpp)",
+    "Solnius carries npc_flags (gossip): he is friendly (faction 35) until the one option of his menu (92950) is taken, so the leg talks to him (menu index 0) then fights",
+    "The 85 hostile trash spawns are 10 creature_linking groups plus 3 lone waypoint patrols; the 44 Deer (883) and 27 Toads (1420) are critters and in no pull",
+    "Erennius patrols a 1323.5 yd loop that crosses the east hall's packs; a boss has no patrol block, so the mapping walk measures where he meets the raid",
+    "Solnius' chest (2020042) and portals (177243) are script objects; the map's 3 game objects are entrance 'Ghost Gate' visuals and gate nothing"
    ],
    "notes": [
-    "Only two bosses are in the data (Erennius 60747, Solnius 60748)."
+    "Only two bosses are in the data (Erennius 60747, Solnius 60748). The plan is handwritten from the world DB, the core's emerald_sanctum scripts and the map 807 navmesh (task B1, RAID-PREP-es)."
    ]
   },
   {
