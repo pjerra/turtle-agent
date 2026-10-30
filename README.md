@@ -972,6 +972,32 @@ that only the server's own pathing gives (a tank with no firing position), so a 
 has navmesh files here (`$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle<map>` or `~/tortoise-wow-server/data/mmaps`); the plans that fail today are listed in `planCheckKnownFailing` (issue #187; most are drafts, which only warn);
 a listed plan that passes fails the test until it is taken off. The gate itself is tested with a stub navmesh, so it runs in CI without map files.
 
+### Patrol recorder
+
+`turtle-agent patrol-record <slot-dir> --map M --area x,y,r [--z Z] --minutes N [--sample-ms 1000] [--out FILE] [--spawns DIR] [--mmaps DIR] [--entries e1,e2]`
+records the patrol loops around a point. It uses an **already logged-in** slot (`slot setup`): it never leases, sets up, logs in or tears down.
+The account needs GM rights and the character must not be in a group (the recording lands in the GM's own instance, never in a bound raid's);
+a grouped agent is refused with exit 15.
+
+The stance is the whole of what it sends: `.gm on`, `.gm visible off`, one `.go xyz x y z M` to the area, and `.gm visible on` when the
+recording ends (also after a safety stop). It never attacks, casts, targets or moves the character; a test pins the method set.
+
+Every `--sample-ms` (500-5000) for `--minutes` (1-60) it reads `status`, the agent's own row (`unit`) and `units {within: r+60}` (creatures
+only, alive, and with `--entries` only those entries). A creature is recorded once it has been seen within `r` (2D) of the centre; it is
+sampled from then on while it is in range. Recording stops at once — exit 22, the file still written with `"stopped": "<reason>"` — on
+combat, death, a unit targeting the agent (`targeted by <name>`), a map change or a lost world.
+
+`--z` picks the floor. Without it, `--mmaps` must show exactly one navmesh floor at (x, y); several floors are a usage error naming them
+(multi-floor raids need `--z`). `--spawns DIR` (a world export with `creatures.tsv`) names each patrol after the nearest spawn of one of its
+entries within 40 yd of its path (`id` and `spawn_guids`); an unmatched patrol keeps the lead member's hex guid. `--out` defaults to
+`./patrols-<map>-<YYYYmmdd-HHMMSS>.json`, and an existing file is refused.
+
+The file is `tb-patrols` v1 (`internal/patrols`): per patrol the measured path, `period_s`, `period_estimate`, `cycles_seen`, `waits_ms`,
+`phase_epoch_ms` and `complete`, plus `static` units and `wanderers`. `trash-check --patrols FILE` uses a recorded patrol instead of the DB
+estimate, and raid-walk's revive quiet check (`--patrols`) keeps the revive point clear of patrol paths. A complete recording prints one line
+per patrol (`52050 Onyxian Warder: period 33.4 s (3 cycles), 7 points, matches spawn 52050`) and exits 0. Exit 15 is a refused slot, a
+grouped agent or an agent that is not in the world; 16 is an RPC error, 2 a usage error and 22 a safety stop.
+
 ### Plan probe
 
 `turtle-agent plan-probe --mmaps DIR onyxias_lair` measures the TortoiseBots **run leader's rows** of one plan (what `.bot run` walks), not the agent's driver route: every hop between two consecutive positioned rows (`from` and `to` are the run leader's step numbers, 1-based, as `TBM:RUN` lists them; a row with `0 0 0` is no end). The input is exactly one of a plan name (`<dir>/<plan>.json`), a `.json` path, or `--sql FILE` — a deployed world migration. **Use `--sql`**: it is the exact rows the server runs, hand edits and cut rows included (the lenient reader skips the migration's other tables, such as the `ai_dungeon_boss` block, and names each in the report's notes); `--plan NAME` picks the plan when the file holds several. A JSON input rebuilds the rows with `planexport.Build` and cuts long hops along the navmesh exactly as `plan-export --mmaps` does, and the report says `rows rebuilt from the plan JSON (cut like plan-export --mmaps)`.
