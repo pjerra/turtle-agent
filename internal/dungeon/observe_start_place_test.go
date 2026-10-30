@@ -91,3 +91,28 @@ func TestObserveFromLegWithoutAStartPointMovesNobody(t *testing.T) {
 		t.Fatalf("the run was started: %v", g.orders)
 	}
 }
+
+// The unsafe-start gate of an observed from_leg start measures the run leader's start step, the point the party is moved to, not the
+// plan file's LegStart: a step 2 yd from a pack of a skipped leg in a fresh instance is refused before any GM move (Codex review
+// 2026-10-30), though the leg before's end (100 0 0) is 72 yd from that pack.
+func TestObserveFromLegGatesTheStartStep(t *testing.T) {
+	p := remotePlan(
+		Leg{Name: "first", To: Point{100, 0, 0}, PullGroups: []PullGroup{{Entries: []uint32{1}, Positions: []Point{{172, 0, 0}}}}},
+		Leg{Name: "second", To: Point{200, 0, 0}},
+	)
+	p.OutsideTele = "uldaman"
+	g := newObserveStartFake(t, happyScript()...)
+	o := observeOpts(ObserveSpec{})
+	o.Preflight = PreflightOff
+	o.Prepare = PrepareSpec{Fresh: true}
+	o.StartFrom = func(int) (PartialStart, error) {
+		return PartialStart{Words: "from leg second", Leg: 1, LegNumber: 1, LegName: "second", Point: Point{170, 0, 0}, HavePoint: true}, nil
+	}
+	_, err := runFrom(t, g, p, o, 1)
+	if err == nil || !strings.Contains(err.Error(), "the run leader's start step 170 0 0 is 2 yd from pull group 1") {
+		t.Fatalf("%v", err)
+	}
+	if len(g.gos) != 0 || g.indexOf("run start") >= 0 {
+		t.Fatalf("moved or started: gos %v orders %v", g.gos, g.orders)
+	}
+}

@@ -275,6 +275,10 @@ func (d *RemoteDriver) checkStartSafety(ctx context.Context, fromLeg int) error 
 		at, _ = d.plan.GatherSpot(fromLeg, d.startGroup(), d.planPath(ctx))
 		what = fmt.Sprintf("from_pull_group %d: the gather spot %.0f %.0f %.0f", d.startGroup(), at.X, at.Y, at.Z)
 		near = d.plan.nearestEarlier(fromLeg, d.startGroup(), at)
+	case fromLeg > 0 && d.opt.Observe != nil && d.opt.StartFrom != nil:
+		// An observed from_leg start goes to the run leader's start step, which is known only after the probe (`.bot run list`):
+		// startAnywhere gates that point (observedStartSafety) before it moves anyone.
+		return nil
 	case fromLeg > 0:
 		at, _ = d.plan.LegStart(fromLeg)
 		what = fmt.Sprintf("from_leg %d: the start point %.0f %.0f %.0f", fromLeg, at.X, at.Y, at.Z)
@@ -282,6 +286,17 @@ func (d *RemoteDriver) checkStartSafety(ctx context.Context, fromLeg int) error 
 	default:
 		return nil
 	}
+	return d.startSafety(fromLeg, at, what, near)
+}
+
+// observedStartSafety is the unsafe-start gate of an observed from_leg start, at the run leader's start step.
+func (d *RemoteDriver) observedStartSafety(fromLeg int, at Point) error {
+	what := fmt.Sprintf("from_leg %d: the run leader's start step %.0f %.0f %.0f", fromLeg, at.X, at.Y, at.Z)
+	return d.startSafety(fromLeg, at, what, d.plan.nearestEarlier(fromLeg, 0, at))
+}
+
+// startSafety refuses (or notes) a start point under gatherSafe from a pack or boss of a skipped step.
+func (d *RemoteDriver) startSafety(fromLeg int, at Point, what string, near earlierPack) error {
 	if near.dist >= gatherSafe {
 		return nil
 	}
@@ -509,6 +524,11 @@ func (d *RemoteDriver) startAnywhere(ctx context.Context, fromLeg int) error {
 		d.skippedLegs(fromLeg)
 		d.startNote(fmt.Sprintf("leg %d%s: the run leader's start step has no known point, so the party is not moved", fromLeg, nameSuffix(d.plan.Legs[fromLeg].Name)))
 		return nil
+	}
+	if at, have, ok := d.observedLegStart(); ok && have && !d.opt.StartHere {
+		if err := d.observedStartSafety(fromLeg, at); err != nil {
+			return err
+		}
 	}
 	began := d.clk.Now()
 	at, kind, warn := d.startPoint(ctx, fromLeg)
