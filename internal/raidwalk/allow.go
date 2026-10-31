@@ -8,11 +8,12 @@ import (
 )
 
 var (
-	gmNameRe   = regexp.MustCompile(`^[A-Za-z]{2,12}$`)
-	teleWordRe = regexp.MustCompile(`^[A-Za-z0-9_]{1,40}$`)
-	runStopRe  = regexp.MustCompile(`^\.bot run stop(?: time limit reached \(raid-walk ([0-9]{1,3})m\))?$`)
-	tierWordRe = regexp.MustCompile(`^(?:t|tier)([1-3])$`)
-	gearTierRe = regexp.MustCompile(`^[1-3]$`)
+	gmNameRe    = regexp.MustCompile(`^[A-Za-z]{2,12}$`)
+	teleWordRe  = regexp.MustCompile(`^[A-Za-z0-9_]{1,40}$`)
+	runStopRe   = regexp.MustCompile(`^\.bot run stop(?: time limit reached \(raid-walk ([0-9]{1,3})m\))?$`)
+	runResumeRe = regexp.MustCompile(`^\.bot run resume$`)
+	tierWordRe  = regexp.MustCompile(`^(?:t|tier)([1-3])$`)
+	gearTierRe  = regexp.MustCompile(`^[1-3]$`)
 )
 
 // AllowedLine says whether raid-walk may send line through the gm RPC (spec 3.6): every line must match one of
@@ -21,6 +22,9 @@ var (
 func AllowedLine(line string, hires map[string]bool) bool {
 	if strings.ContainsAny(line, "\r\n") {
 		return false
+	}
+	if runResumeRe.MatchString(line) {
+		return true
 	}
 	if m := runStopRe.FindStringSubmatch(line); m != nil {
 		if m[1] == "" {

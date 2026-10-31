@@ -52,7 +52,7 @@ const (
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
     [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
-    [--reset-wait 5m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
+    [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--dry-run]
        turtle-agent raid-walk report <dir> [--spell ID] [--clock-offset 1h] [--md FILE] [--json FILE] [--out DIR]`
 
@@ -82,6 +82,8 @@ type raidWalkOptions struct {
 	pausedWait    time.Duration
 	autoResume    int
 	resetWait     time.Duration
+	wipeResume    int
+	wipeRest      time.Duration
 	patrols       string
 	out           string
 	dashURL       string
@@ -214,8 +216,10 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.IntVar(&o.holdMinutes, "hold-minutes", 0, "keep the raid bound for this many minutes after the run")
 	fs.IntVar(&o.maxRunMinutes, "max-run-minutes", 90, "the ceiling from run start to the end")
 	fs.DurationVar(&o.pausedWait, "paused-wait", 10*time.Minute, "how long a pause that is not a regroup may last")
+	fs.IntVar(&o.wipeResume, "wipe-resume", 1, "revive, rest and resume a wipe or near-wipe stop this many times per walk (0-3)")
 	fs.IntVar(&o.autoResume, "auto-resume", 0, "resume a regroup pause this many times per step (0-3)")
 	fs.DurationVar(&o.resetWait, "reset-wait", 5*time.Minute, "how long a wipe may wait for the instance to reset")
+	fs.DurationVar(&o.wipeRest, "wipe-rest", 10*time.Minute, "how long a revived raid rests out of combat before the run resumes")
 	fs.StringVar(&o.patrols, "patrols", "", "a tb-patrols file for the revive quiet check")
 	fs.StringVar(&o.out, "out", "", "the output dir (default ./raid-walk-<plan>-<stamp>)")
 	fs.StringVar(&o.dashURL, "dash-url", "", "the dashboard URL (or TBDASH_URL)")
@@ -298,6 +302,14 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	}
 	if o.resetWait <= 0 {
 		fmt.Fprintf(stderr, "raid-walk: --reset-wait must be above 0\n")
+		return o, exitUsage
+	}
+	if o.wipeResume < 0 || o.wipeResume > 3 {
+		fmt.Fprintf(stderr, "raid-walk: --wipe-resume wants 0 to 3\n")
+		return o, exitUsage
+	}
+	if o.wipeRest <= 0 {
+		fmt.Fprintf(stderr, "raid-walk: --wipe-rest must be above 0\n")
 		return o, exitUsage
 	}
 	if o.autoResume < 0 || o.autoResume > 3 {
@@ -540,13 +552,14 @@ type walk struct {
 	quietPatrols []raidwalk.QuietPatrol
 	patrolGUIDS  []map[string]bool
 
-	started    time.Time
-	ended      time.Time
-	runStarted bool
-	runStopped bool
-	lease      slots.Lease
-	leaseLost  atomic.Bool
-	cancel     context.CancelFunc
+	started     time.Time
+	ended       time.Time
+	runStarted  bool
+	runStopped  bool
+	wipeResumes int // wipes and near-wipe stops recovered so far (--wipe-resume bounds them)
+	lease       slots.Lease
+	leaseLost   atomic.Bool
+	cancel      context.CancelFunc
 
 	endReason  string
 	exitCode   int
@@ -1086,8 +1099,8 @@ func (w *walk) printPlan(out io.Writer) {
 		start = append(start, fmt.Sprintf("speed=%.1f", w.opts.speed))
 	}
 	fmt.Fprintf(out, "  9 commander: run start %s\n", strings.Join(start, " "))
-	fmt.Fprintf(out, " 10 watch: events 5s, bot_view 2s, dashboard %s, ceiling %dm, paused wait %s, auto-resume %d\n",
-		w.dashNoteOrOff(), w.opts.maxRunMinutes, w.opts.pausedWait, w.opts.autoResume)
+	fmt.Fprintf(out, " 10 watch: events 5s, bot_view 2s, dashboard %s, ceiling %dm, paused wait %s, auto-resume %d, wipe-resume %d, wipe rest %s\n",
+		w.dashNoteOrOff(), w.opts.maxRunMinutes, w.opts.pausedWait, w.opts.autoResume, w.opts.wipeResume, w.opts.wipeRest)
 	fmt.Fprintf(out, " 11 hold: %dm\n", w.opts.holdMinutes)
 	fmt.Fprintf(out, " 12 commander: status; teardown --json %s/slot\n", outDir)
 	fmt.Fprintf(out, " 13 summary: %s/summary.json, %s/summary.txt\n", outDir, outDir)
@@ -1144,6 +1157,7 @@ func (w *walk) finish(code int) {
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
 		TierSource: w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
+		WipeResumes: w.wipeResumes,
 	}
 	if w.inj != nil {
 		meta.Injections, meta.InjectedDeaths = w.inj.Results()

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -885,7 +886,9 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 				_ = w.stopRun(context.Background(), "")
 				return stopf(exitRaidWalkFailed, "stalled at step %d (the same status line for 10 min)", v.Step)
 			case raidwalk.IncidentWipe:
-				return w.handleWipe(ctx, v.Step)
+				if err := w.handleWipe(ctx, v.Step); err != errWipeRecovered {
+					return err
+				}
 			case raidwalk.IncidentBossEngaged:
 				if w.runFightsBoss() {
 					w.note("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, w.untilLabel)
@@ -910,6 +913,7 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 				}
 			}
 			regroup := strings.Contains(ps.note, "did not hold")
+			nearWipe := nearWipeStop(ps.note)
 			switch {
 			case regroup && perStep[ps.step] < w.opts.autoResume && autoTotal < 6 && now.Sub(ps.lastTry) >= 15*time.Second:
 				if _, err := w.commander(ctx, commanderReq{Op: "run", Verb: "resume", WaitMS: 5000}); err != nil {
@@ -919,6 +923,12 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 				autoTotal++
 				ps.lastTry = now
 				w.note("auto-resumed the regroup at step %d (%d/%d)", ps.step, perStep[ps.step], w.opts.autoResume)
+			case nearWipe && !w.bossEngagedNow() && w.wipeResumes < w.opts.wipeResume && now.Sub(ps.at) >= 15*time.Second:
+				w.logLine(now, "near-wipe stop: recovering instead of ending the walk")
+				if err := w.recoverNearWipe(ctx, ps.step); err != errWipeRecovered {
+					return err
+				}
+				ps.armed = false
 			case now.Sub(ps.at) >= w.opts.pausedWait:
 				return stopf(exitRaidWalkFailed, "paused: %s", ps.note)
 			}
@@ -1248,10 +1258,55 @@ func fightFileID(id string) string {
 	return b.String()
 }
 
-// wipe handling (spec 3.5): stop, wait for a reset, revive only when quiet.
+// wipe handling (spec 3.5): stop, wait for a reset, revive only when quiet. A wipe or a near-wipe stop outside a
+// boss fight recovers while recoveries are left (--wipe-resume): the dead raid is revived, rested out of combat
+// and the run is resumed, and the watch keeps going (errWipeRecovered tells the two callers to carry on).
+//
+// errWipeRecovered is the recovery's success: handleWipe and the watch loop's near-wipe branch swallow it and keep
+// watching. Anything else out of the recovery ends the walk with its own reason.
+var errWipeRecovered = errors.New("wipe recovered")
 
-// handleWipe is an all-dead party with no boss engaged.
+// handleWipe is an all-dead party with no boss engaged. Inside a boss fight, or with no recovery left, it ends the
+// walk as before (walk 13 s7: a near-wipe stop ended the walk after the raid was already revived and rested by
+// hand). Otherwise it revives, rests and resumes and the watch goes on.
 func (w *walk) handleWipe(ctx context.Context, step int) error {
+	if w.bossEngagedNow() {
+		return w.endWipe(ctx, step)
+	}
+	if w.wipeResumes >= w.opts.wipeResume {
+		return w.endWipe(ctx, step)
+	}
+	return w.recoverWipe(ctx, step)
+}
+
+// bossEngagedNow is the "not a boss wipe" gate: handleBoss owns the engaged path, so a boss row the frames still
+// hold (seen in the last 15 s, hp left, a target, or gone from the frames less than 10 s ago) ends the wipe as
+// before. A row gone 10 s or lost 15 s with no live target is a reset, and the recovery may run.
+func (w *walk) bossEngagedNow() bool {
+	now := w.env.now()
+	if w.bossSeenAt.IsZero() {
+		return false
+	}
+	if now.Sub(w.bossSeenAt) >= 10*time.Second {
+		return !w.bossTargetAt.IsZero() && now.Sub(w.bossTargetAt) < 30*time.Second
+	}
+	for _, row := range w.bossRows {
+		if now.Sub(row.at) > 15*time.Second {
+			continue
+		}
+		if row.hppct == 0 {
+			continue
+		}
+		if row.target == 0 && row.hppct == 100 && !w.bossTargetAt.IsZero() && now.Sub(w.bossTargetAt) >= 30*time.Second {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// endWipe is the walk-4 recipe's ending: stop, wait for a reset, revive only when quiet, exit 19.
+func (w *walk) endWipe(ctx context.Context, step int) error {
 	_ = w.stopRun(context.Background(), "")
 	w.note("wipe at step %d", step)
 	if w.dash != nil {
@@ -1440,9 +1495,18 @@ func (w *walk) resetReady(now time.Time) bool {
 	return now.Sub(w.resetSince) >= 20*time.Second
 }
 
-// revive is the walk-4 recipe, made safe (spec 3.5): the revive point, the quiet check (then the entrance once),
-// summon and revive, and a look for bots attacked after the revive. It always ends the walk with exit 19.
+// revive is the walk-4 recipe's ending: revive and always end the walk with exit 19.
 func (w *walk) revive(ctx context.Context, step int) error {
+	if err := w.reviveHires(ctx); err != nil {
+		return err
+	}
+	return stopf(exitRaidWalkIncident, "wipe at step %d", step)
+}
+
+// reviveHires is the walk-4 recipe's revive half, made safe (spec 3.5): the revive point, the quiet check (then the
+// entrance once), summon and revive, and a look for bots attacked after the revive. revive ends the walk with it;
+// recoverWipe rests and resumes with it.
+func (w *walk) reviveHires(ctx context.Context) error {
 	if w.stepFirst == nil {
 		return stopf(exitRaidWalkIncident, "not revived: the plan's rows give no first point")
 	}
@@ -1502,7 +1566,211 @@ func (w *walk) revive(ctx context.Context, step int) error {
 			w.note("attacked after revive: %d bots in combat", inCombat)
 		}
 	}
-	return stopf(exitRaidWalkIncident, "wipe at step %d", step)
+	return nil
+}
+
+// recoverWipe revives the dead raid after a wipe, rests it out of combat and resumes the run instead of ending the
+// walk (walk 13 s7: the hand-revived, rested run went on). It returns errWipeRecovered when the run is running
+// again: the watch loop keeps going and the summary's end stays truthful. Any failure ends the walk with the
+// failure's own reason, exactly as endWipe would.
+func (w *walk) recoverWipe(ctx context.Context, step int) error {
+	_, _, hadBoss := w.tracker.BossEngaged()
+	if err := w.reviveHires(ctx); err != nil {
+		return err
+	}
+	revived := len(w.hireList())
+	if err := w.restOutOfCombat(ctx, w.opts.wipeRest); err != nil {
+		return err
+	}
+	if err := w.resumeRun(ctx); err != nil {
+		return err
+	}
+	if err := w.recoveredBoss(ctx, hadBoss); err != nil {
+		return err
+	}
+	w.wipeResumes++
+	w.note("wipe-resume %d/%d at step %d: revived %d, rested %s, resumed", w.wipeResumes, w.opts.wipeResume, step, revived, durWords(w.opts.wipeRest))
+	return errWipeRecovered
+}
+
+// recoverNearWipe resumes after a near-wipe stop: someone is still alive (or the raid was revived by hand, walk
+// 11), so there is no reset wait and no revive — only the out-of-combat rest and the resume. Dead hires found on
+// the way are revived with the same recipe; revived counts only the hires this walk revived.
+func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
+	_, _, hadBoss := w.tracker.BossEngaged()
+	revived := 0
+	if w.allDead(w.env.now()) {
+		if err := w.reviveHires(ctx); err != nil {
+			return err
+		}
+		revived = len(w.hireList())
+	} else {
+		now := w.env.now()
+		var dead []string
+		for _, name := range w.hireList() {
+			if p, ok := w.botAt[name]; ok && now.Sub(p.at) <= 10*time.Second && p.dead {
+				dead = append(dead, name)
+			}
+		}
+		for _, name := range dead {
+			if err := w.gm(ctx, ".revive "+name); err != nil {
+				return err
+			}
+			if err := w.env.sleep(ctx, 100*time.Millisecond); err != nil {
+				return stopf(exitRaidWalkFailed, "interrupted")
+			}
+		}
+		revived = len(dead)
+	}
+	if err := w.restOutOfCombat(ctx, w.opts.wipeRest); err != nil {
+		return err
+	}
+	if err := w.resumeRun(ctx); err != nil {
+		return err
+	}
+	if err := w.recoveredBoss(ctx, hadBoss); err != nil {
+		return err
+	}
+	w.wipeResumes++
+	w.note("wipe-resume %d/%d at step %d: revived %d, rested %s, resumed", w.wipeResumes, w.opts.wipeResume, step, revived, durWords(w.opts.wipeRest))
+	return errWipeRecovered
+}
+
+// recoveredBoss routes a boss engaged during the recovery to the boss path: the rest and the resume wait drain the
+// tracker's incidents, so without this a boss the revived raid woke would never reach handleBoss. A boss latched
+// before the recovery cannot be unhandled (the watch dispatches it at once), so only a fresh latch routes.
+func (w *walk) recoveredBoss(ctx context.Context, hadBoss bool) error {
+	entry, step, ok := w.tracker.BossEngaged()
+	if !ok || hadBoss {
+		return nil
+	}
+	return w.handleBoss(ctx, raidwalk.IncidentBossEngaged{Entry: entry, Step: step, At: w.env.now()})
+}
+
+// restOutOfCombat waits d with no hire in combat: any hire fighting holds the wait, and a second wipe (every hire
+// dead with fresh states) fails the recovery exit 19, exactly like a second wipe during the next leg. The quiet
+// check already proved the spot safe; the rest only proves the revived raid is not fighting before the run resumes.
+func (w *walk) restOutOfCombat(ctx context.Context, d time.Duration) error {
+	end := w.env.now().Add(d)
+	for w.env.now().Before(end) {
+		if w.leaseLost.Load() {
+			return stopf(exitRaidWalkFailed, "lease lost")
+		}
+		if err := ctx.Err(); err != nil {
+			return stopf(exitRaidWalkFailed, "interrupted")
+		}
+		incs, err := w.pollOnce(ctx, false)
+		if err != nil {
+			return err
+		}
+		for _, inc := range incs {
+			if wipe, ok := inc.(raidwalk.IncidentWipe); ok {
+				return stopf(exitRaidWalkIncident, "wipe at step %d", wipe.Step)
+			}
+		}
+		now := w.env.now()
+		fighting := 0
+		for _, name := range w.hireList() {
+			if p, ok := w.botAt[name]; ok && now.Sub(p.at) <= 10*time.Second && p.inCombat {
+				fighting++
+			}
+		}
+		if fighting > 0 {
+			if err := w.env.sleep(ctx, 2*time.Second); err != nil {
+				return stopf(exitRaidWalkFailed, "interrupted")
+			}
+			end = w.env.now().Add(d)
+			continue
+		}
+		// Out of combat: the rest is one quiet block of d (it restarts whenever a fight shows).
+		if err := w.env.sleep(ctx, end.Sub(now)); err != nil {
+			return stopf(exitRaidWalkFailed, "interrupted")
+		}
+		incs2, err := w.pollOnce(ctx, false)
+		if err != nil {
+			return err
+		}
+		now = w.env.now()
+		stillQuiet := true
+		for _, name := range w.hireList() {
+			if p, ok := w.botAt[name]; ok && now.Sub(p.at) <= 10*time.Second && p.inCombat {
+				stillQuiet = false
+			}
+		}
+		for _, inc := range incs2 {
+			if wipe, ok := inc.(raidwalk.IncidentWipe); ok {
+				return stopf(exitRaidWalkIncident, "wipe at step %d", wipe.Step)
+			}
+			stillQuiet = false
+		}
+		if stillQuiet {
+			return nil
+		}
+		end = now.Add(d)
+	}
+	return nil
+}
+
+// resumeRun sends `run resume` through the commander RPC and waits up to 60 s for the server to show the run
+// running again. Anything else fails the recovery: no resume ACK, or no running line in 60 s, ends the walk the
+// way a failed phase does. A wipe during the wait ends 19 like a second wipe.
+func (w *walk) resumeRun(ctx context.Context) error {
+	rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "resume", WaitMS: 5000})
+	if err != nil {
+		return err
+	}
+	if rep.Reply.Err != nil {
+		return stopf(exitRaidWalkFailed, "run resume: %s", rep.Reply.Err.Message)
+	}
+	if !rep.Reply.OK && rep.Reply.Kind != tbm.KindAck {
+		return stopf(exitRaidWalkFailed, "run resume: no ACK (%s)", rep.Reply.Line)
+	}
+	w.logLine(w.env.now(), "> .bot run resume")
+	deadline := w.env.now().Add(60 * time.Second)
+	for {
+		if w.leaseLost.Load() {
+			return stopf(exitRaidWalkFailed, "lease lost")
+		}
+		if err := ctx.Err(); err != nil {
+			return stopf(exitRaidWalkFailed, "interrupted")
+		}
+		running, err := w.pollRunRunning(ctx)
+		if err != nil {
+			return err
+		}
+		if running {
+			return nil
+		}
+		if !w.env.now().Before(deadline) {
+			return stopf(exitRaidWalkFailed, "run resume: the run is not running 60 s after the resume")
+		}
+		if err := w.env.sleep(ctx, 2*time.Second); err != nil {
+			return stopf(exitRaidWalkFailed, "interrupted")
+		}
+	}
+}
+
+// pollRunRunning reads one events page and the frames, feeding the tracker like pollOnce but without the dashboard:
+// true once the walk's plan shows running again. A wipe during the wait is the second wipe and ends 19.
+func (w *walk) pollRunRunning(ctx context.Context) (bool, error) {
+	incs, err := w.pollOnce(ctx, false)
+	if err != nil {
+		return false, err
+	}
+	for _, inc := range incs {
+		if wipe, ok := inc.(raidwalk.IncidentWipe); ok {
+			return false, stopf(exitRaidWalkIncident, "wipe at step %d", wipe.Step)
+		}
+	}
+	return w.haveStatus && w.lastStatus.State == tbm.RunRunning && w.lastStatus.Plan == w.plan.Name, nil
+}
+
+// nearWipeStop says whether a paused note is the run stopping after a wipe or a near wipe (walk 13 s7: "19 dead:
+// 3 near wipes within 10 min (...): the run stops here. Regroup (c..."). Only that stop recovers; a regroup pause
+// ("did not hold") keeps its --auto-resume path and everything else stops as now.
+func nearWipeStop(note string) bool {
+	lower := strings.ToLower(note)
+	return strings.Contains(lower, "near wipe") || strings.Contains(lower, "the run stops here")
 }
 
 // quietCheck is the revive point's quiet check (spec 3.5): every 5 s up to 120 s, with a patrol exempt when one

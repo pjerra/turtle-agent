@@ -16,7 +16,7 @@ func TestAllowedLine(t *testing.T) {
 		".summon Tankbot",
 		".revive Tankbot",
 		".bot run stop",
-		".bot run stop time limit reached (raid-walk 90m)",
+		".bot run resume",
 	}
 	for _, line := range ok {
 		if !AllowedLine(line, hires) {
@@ -50,6 +50,8 @@ func TestAllowedLine(t *testing.T) {
 		".summon Tankbot extra",
 		".bot run stop now",
 		".bot run stop time limit reached (raid-walk 0m)",
+		".bot run resume now",
+		".bot run resume x",
 	}
 	for _, line := range bad {
 		if AllowedLine(line, hires) {

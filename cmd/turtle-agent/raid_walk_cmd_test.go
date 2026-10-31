@@ -101,6 +101,8 @@ type walkFakeAgent struct {
 	enterBusy  int // the first enterBusy enter orders answer ERR busy
 	enterCalls int
 	onGM       func(line string)
+	// onResume runs when the walk sends `run resume` through the commander RPC (nil: ACK only).
+	onResume func()
 
 	// pos is where the commander's last .go put it; the quiet-check fakes place units around it.
 	x, y, z float32
@@ -320,6 +322,13 @@ func (f *walkFakeAgent) gmSide(line string) {
 			f.pos = map[string][3]float32{}
 		}
 		f.pos[name] = [3]float32{f.x, f.y, f.z}
+		f.mu.Unlock()
+	case strings.HasPrefix(line, ".revive "):
+		// The server's revive brings the hire back: later frames show it alive, so a recovered walk
+		// does not re-fire the wipe it just revived.
+		name := strings.TrimPrefix(line, ".revive ")
+		f.mu.Lock()
+		delete(f.dead, name)
 		f.mu.Unlock()
 	}
 }
@@ -686,6 +695,14 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 			rep.Reply.Lines = append([]string{fmt.Sprintf("You command Bot01's group: %s.", names)}, rep.Reply.Lines...)
 			return rep
 		}
+		if p.Verb == "resume" {
+			f.mu.Lock()
+			hook := f.onResume
+			f.mu.Unlock()
+			if hook != nil {
+				hook()
+			}
+		}
 		return ack("run " + p.Verb)
 	}
 	return ack(p.Op)
@@ -768,7 +785,7 @@ func newFixture(t *testing.T) *fixture {
 	f.opts = raidWalkOptions{
 		plan: "onyxias_lair", server: "m910q", holder: "raid-walk-onyxias_lair", dir: "../../dungeons",
 		until: "boss", speed: 1.0, enter: "auto", maxRunMinutes: 90, pausedWait: 10 * time.Minute,
-		resetWait: 5 * time.Minute, out: out,
+		resetWait: 5 * time.Minute, wipeResume: 1, wipeRest: 10 * time.Minute, out: out,
 	}
 	f.env = walkEnv{
 		now:   clock.now,
@@ -922,7 +939,7 @@ phases:
   7 commander: view on
   8 commander: cmd enter near
   9 commander: run start onyxias_lair until boss
- 10 watch: events 5s, bot_view 2s, dashboard off (no --dash-url/--dash-pass-file), ceiling 90m, paused wait 10m0s, auto-resume 0
+ 10 watch: events 5s, bot_view 2s, dashboard off (no --dash-url/--dash-pass-file), ceiling 90m, paused wait 10m0s, auto-resume 0, wipe-resume 1, wipe rest 10m0s
  11 hold: 0m
  12 commander: status; teardown --json ` + f.out + `/slot
  13 summary: ` + f.out + `/summary.json, ` + f.out + `/summary.txt
@@ -1299,9 +1316,18 @@ func TestRaidWalkWipeRevivesOnlyWhenQuiet(t *testing.T) {
 			return []objects.Unit{}
 		}
 		f.allDeadFromHires()
+		if !neverQuiet {
+			// The wipe recovers (--wipe-resume 1): the run goes on, so the server must show it going.
+			var resumeAt time.Time
+			resumeHook(f, 24, 28, &resumeAt)
+		}
 		code := f.run(context.Background())
-		if code != exitRaidWalkIncident {
-			t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+		if neverQuiet {
+			if code != exitRaidWalkIncident {
+				t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+			}
+		} else if code != exitOK {
+			t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
 		}
 		return f, f.summary()
 	}
@@ -1326,8 +1352,8 @@ func TestRaidWalkWipeRevivesOnlyWhenQuiet(t *testing.T) {
 		if unitsAtSummon < 3 {
 			t.Fatalf("the first summon came after %d units calls, before the warder left", unitsAtSummon)
 		}
-		if sum.EndReason != "wipe at step 23" || sum.ExitCode != exitRaidWalkIncident {
-			t.Fatalf("summary end %q exit %d", sum.EndReason, sum.ExitCode)
+		if sum.EndReason != "until" || sum.ExitCode != exitOK || sum.WipeResumes != 1 {
+			t.Fatalf("summary end %q exit %d wipe_resumes %d, want until 0 1", sum.EndReason, sum.ExitCode, sum.WipeResumes)
 		}
 	})
 	t.Run("never quiet", func(t *testing.T) {
@@ -1339,6 +1365,21 @@ func TestRaidWalkWipeRevivesOnlyWhenQuiet(t *testing.T) {
 			t.Fatalf("summary end %q", sum.EndReason)
 		}
 	})
+}
+
+// resumeHook re-queues one running line at step once the walk sends `run resume` through the commander
+// RPC: the server shows the run going again, so resumeRun's 60 s wait sees it. doneStep appends the until done
+// line right after, so the walk ends at its goal once the watch loop polls again. resumeAt records the fake
+// clock when the resume went out, for the rest-length assert.
+func resumeHook(f *fixture, step, doneStep int, resumeAt *time.Time) {
+	f.agent.onResume = func() {
+		*resumeAt = f.clock.now()
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|" + strconv.Itoa(step) + "/29|onyxia|move|walk|resumed"},
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|done|" + strconv.Itoa(doneStep) + "/29|onyxia|move|walk|stopped before step " + strconv.Itoa(doneStep+1) + " (until boss): the party stays where it stands"})
+	}
 }
 
 func TestRaidWalkNeverRevivesWhileTheBossHasATarget(t *testing.T) {
@@ -1373,6 +1414,180 @@ func TestRaidWalkNeverRevivesWhileTheBossHasATarget(t *testing.T) {
 	}
 	if revives == 0 {
 		t.Fatalf("the wipe at the boss was never revived after the reset")
+	}
+}
+
+// TestRaidWalkNearWipePauseResumes: the walk-13 paused line (a near-wipe stop outside a boss fight) recovers the
+// same way: revive, rest, resume, and the run reaches until with wipe_resumes 1 and no run stop.
+func TestRaidWalkNearWipePauseResumes(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	var resumeAt time.Time
+	resumeHook(f, 11, 28, &resumeAt)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|onyxias_lair|paused|10/29|onyxia|move|walk|19 dead: 3 near wipes within 10 min (54): the run stops here. Regroup (c...)"},
+	}
+	f.agent.mu.Unlock()
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops before the end, want none (the walk resumes, it never stops)", n)
+	}
+	if resumeAt.IsZero() {
+		t.Fatal("no run resume went out")
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)
+	}
+	if !hasNote(sum, "wipe-resume 1/1 at step 10: revived") || !hasNote(sum, "resumed") {
+		t.Fatalf("notes %q, want the recovery note", sum.Notes)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until (the run went on after the recovery)", sum.EndReason)
+	}
+}
+
+// TestRaidWalkSecondWipeEndsTheWalk: K=1 and two wipes. The first recovers; the second ends as today (exit 19,
+// run stop sent).
+func TestRaidWalkSecondWipeEndsTheWalk(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	var resumeAt time.Time
+	resumeHook(f, 11, 28, &resumeAt)
+	f.allDeadFromHires()
+	// The second wipe: after the resume succeeds, every hire dies again two frames later, so the resumed
+	// watch (not the resume wait) sees it and ends the walk as today.
+	f.agent.onResume = func() {
+		resumeAt = f.clock.now()
+		f.agent.mu.Lock()
+		killAt := f.agent.views + 2
+		f.agent.mu.Unlock()
+		f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+			if n >= killAt {
+				f.agent.mu.Lock()
+				defer f.agent.mu.Unlock()
+				for _, name := range f.agent.party {
+					f.agent.dead[name] = true
+				}
+			}
+			return nil
+		}
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|11/29|onyxia|move|walk|resumed"})
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
+		t.Fatalf("%d run stops, want exactly 1 (the second wipe stops the run)", n)
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (only the first wipe recovered)", sum.WipeResumes)
+	}
+	if !strings.Contains(sum.EndReason, "wipe at step") {
+		t.Fatalf("end %q, want the second wipe's ending", sum.EndReason)
+	}
+}
+
+// TestRaidWalkWipeResumeZeroKeepsOldBehaviour: K=0 recovers nothing — a wipe ends exactly as today (exit 19,
+// revive only when quiet, run stop sent).
+func TestRaidWalkWipeResumeZeroKeepsOldBehaviour(t *testing.T) {
+	f := newFixture(t)
+	f.opts.wipeResume = 0
+	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.allDeadFromHires()
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	gm := f.agent.gmLines()
+	var summons, revives int
+	for _, line := range gm {
+		if strings.HasPrefix(line, ".summon ") {
+			summons++
+		}
+		if strings.HasPrefix(line, ".revive ") {
+			revives++
+		}
+	}
+	if summons == 0 || revives == 0 {
+		t.Fatalf("no revive with K=0: %q", gm)
+	}
+	if n := countPrefix(gm, ".bot run stop"); n != 1 {
+		t.Fatalf("%d run stops, want exactly 1 (the wipe stops the run as today)", n)
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 0 {
+		t.Fatalf("wipe_resumes %d, want 0", sum.WipeResumes)
+	}
+	if sum.EndReason != "wipe at step 23" {
+		t.Fatalf("end %q, want the wipe ending", sum.EndReason)
+	}
+}
+
+// TestRaidWalkWipeResumesOnce: all hires die at step 10, then quiet. The walk revives every dead hire, rests at
+// least --wipe-rest with no `.bot run stop` before the end, resumes, and the run reaches until: exit 0,
+// wipe_resumes 1.
+func TestRaidWalkWipeResumesOnce(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	var resumeAt time.Time
+	resumeHook(f, 11, 28, &resumeAt)
+	f.allDeadFromHires()
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	gm := f.agent.gmLines()
+	var summons, revives int
+	for _, line := range gm {
+		if strings.HasPrefix(line, ".summon ") {
+			summons++
+		}
+		if strings.HasPrefix(line, ".revive ") {
+			revives++
+		}
+	}
+	if summons != len(f.agent.party) || revives != len(f.agent.party) {
+		t.Fatalf("summoned %d revived %d of %d hires: %q", summons, revives, len(f.agent.party), gm)
+	}
+	if n := countPrefix(gm, ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops before the end, want none (the walk resumes, it never stops)", n)
+	}
+	// The rest is at least --wipe-rest: the resume goes out only after the revived raid rested out of combat.
+	var lastRevive time.Time
+	for i, line := range gm {
+		if strings.HasPrefix(line, ".revive ") {
+			lastRevive = f.agent.gmAt[i]
+		}
+	}
+	if resumeAt.IsZero() {
+		t.Fatal("no run resume went out")
+	}
+	if resumeAt.Sub(lastRevive) < f.opts.wipeRest {
+		t.Fatalf("the resume went out %s after the last revive, want at least %s", resumeAt.Sub(lastRevive), f.opts.wipeRest)
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)
+	}
+	if !hasNote(sum, "wipe-resume 1/1 at step 10: revived") || !hasNote(sum, "resumed") {
+		t.Fatalf("notes %q, want the recovery note", sum.Notes)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until (the run went on after the recovery)", sum.EndReason)
 	}
 }
 
@@ -1808,6 +2023,8 @@ func TestRaidWalkInjectorHookOrder(t *testing.T) {
 	t.Run("wipe keeps exit 19", func(t *testing.T) {
 		inj := installFakeInjector(t, true)
 		f := newFixture(t)
+		// No recoveries left: the wipe ends the walk as before (with --wipe-resume it would recover).
+		f.opts.wipeResume = 0
 		f.opts.injects = stringList{"kill-mt"}
 		f.agent.startReply = startAt("onyxias_lair", 23)
 		f.allDeadFromHires()

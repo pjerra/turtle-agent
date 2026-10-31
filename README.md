@@ -98,7 +98,7 @@ turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loo
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
-turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
+turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent scenario check [--var NAME=VALUE]... <file>
 turtle-agent scenario run [--out DIR] [--force] [--quiet] [--var NAME=VALUE]... [--session NAME=ADDR[@TOKENFILE]]... <file>
@@ -2098,7 +2098,9 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
 - `--max-run-minutes` (90) is the ceiling from `run start`; `--hold-minutes` keeps the raid bound afterwards;
   `--paused-wait` (10m) stops a pause that is not a regroup; `--auto-resume K` (0-3) resumes a "did not hold" regroup
   pause 15 s after it starts, at most K times per step and 6 per run; `--reset-wait` (5m) bounds the wait for a wipe's
-  reset. `--patrols FILE` (a tb-patrols file) feeds the revive quiet check. `--dry-run` validates everything and prints
+  reset; `--wipe-resume K` (0-3, default 1) revives a wipe or a near-wipe stop, rests `--wipe-rest` (default 10m) out of
+  combat and resumes the run instead of ending the walk, at most K times per walk; a boss fight keeps its own path.
+  `--patrols FILE` (a tb-patrols file) feeds the revive quiet check. `--dry-run` validates everything and prints
   every line the walk would send, with `<hire>` placeholders, without leasing or writing anything.
 - The lease lasts `max-run-minutes + hold-minutes + 30` and is renewed every 30 minutes; a refused renewal stops the
   run, tears down and exits 18 (`lease lost`). SIGINT/SIGTERM stops the run, tears down and exits 18 (`interrupted`);
@@ -2139,8 +2141,12 @@ one), the `bot_view` frames every 2 s and the dashboard every 10/15 s. A wipe (e
 the run, waits for the instance to reset (5m at most: nothing with a party target, every hostile seen in the last
 minute at 100 % or gone, held 20 s), then revives: GM to step 1's point, a quiet check (no living hostile within 45 yd,
 no moving hostile within 80 yd, no patrol path within 45 yd, rechecked every 5 s for 120 s) and the plan's entrance
-once, `.summon` then `.revive` every hire. It never revives while a boss row has a target: a boss engagement stops the
-run at once and waits up to 15 minutes for a kill, a reset or a wipe. A wipe or a boss engagement ends the walk with
+once, `.summon` then `.revive` every hire. A wipe or a near-wipe stop outside a boss fight recovers while
+`--wipe-resume` has recoveries left: no `run stop`, the dead raid is revived, it rests `--wipe-rest` out of combat
+and the run resumes (the server must show running again within 60 s); the summary notes each recovery
+(`wipe-resume <n>/<K> at step <s>: revived <d>, rested <m>, resumed`) and counts them in `wipe_resumes`, and the end
+stays truthful. It never revives while a boss row has a target: a boss engagement stops the run at once and waits up
+to 15 minutes for a kill, a reset or a wipe. A wipe or a boss engagement with no recovery left ends the walk with
 exit 19.
 
 Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
@@ -2157,7 +2163,7 @@ The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused
 | `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key |
 | `frames.jsonl` | one `bot_view` frame per 10 s (positions, hp, dead, hostiles; every line carries the walk's `tier`) |
 | `slot-setup.txt`, `teardown.json` | what slot setup printed, and teardown's report |
-| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison` |
+| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, `wipe_resumes`, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison` |
 
 Exit codes: 0 the run ended by its `until` (or the hold); 18 a phase failed or was refused (setup, login, hire, bind,
 enter, start, the server has no `until`, a stall, the ceiling, an interrupt, `lease lost`); 19 the walk ran and was
