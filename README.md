@@ -2147,7 +2147,12 @@ and the run resumes (the server must show running again within 60 s); the summar
 (`wipe-resume <n>/<K> at step <s>: revived <d>, rested <m>, resumed`) and counts them in `wipe_resumes`, and the end
 stays truthful. It never revives while a boss row has a target: a boss engagement stops the run at once and waits up
 to 15 minutes for a kill, a reset or a wipe. A wipe or a boss engagement with no recovery left ends the walk with
-exit 19.
+exit 19. Recovery fails closed on unknown boss state (no dashboard, a stale or errored fights read, or a boss
+latched in the last 120 s: the old ending with the note `wipe resume skipped: boss state unknown`); the rest needs
+a complete quiet view (every roster hire present, fresh, out of combat and alive in `bot_view`, polled every 5 s —
+any gap restarts the window); and the recovery has an absolute deadline (the walk ceiling or start + 3 x
+`--wipe-rest`, whichever is sooner — combat restarts the quiet window but never moves it, and past it the walk ends
+with the original incident's exit and `wipe recovery timed out after <dur>`).
 
 Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
 `.bot gear raid <commander> tier <N>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,

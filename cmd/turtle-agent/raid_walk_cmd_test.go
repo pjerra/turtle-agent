@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -68,9 +69,11 @@ type timelineEntry struct {
 }
 
 type walkFakeAgent struct {
-	instMap uint32 // the map the entered party stands on (0: Onyxia's 249)
-	t       *testing.T
-	clock   *fakeClock
+	runStarted bool   // the walk sent `run start` (wipe-fault tests gate on it)
+	recoveryGo bool   // a `.go xyz` went out after run start (the recovery teleport)
+	instMap    uint32 // the map the entered party stands on (0: Onyxia's 249)
+	t          *testing.T
+	clock      *fakeClock
 
 	mu        sync.Mutex
 	calls     []string
@@ -134,12 +137,16 @@ type walkFakeAgent struct {
 	statusTargetMismatch bool
 	noPartyFrames        bool        // bot_view frames without a party (an injector with no bot positions)
 	gmAt                 []time.Time // when each gm line was sent
-	targetCalls          []packet.GUID
-	targetAt             []time.Time // when each target RPC arrived
+	// Review-round-2 fault hooks: bot_view failure/omission (viewFn), combat during the
+	// quiet rest (combatAllFn), and the dashboard fights read (fightsErr).
+	viewFn      func(n int) (fail bool, omit string)
+	combatAllFn func(n int) bool // frame n shows every hire in combat
+	fightsErr   error            // fakeDash.Fights answers with this error
+	targetCalls []packet.GUID
+	targetAt    []time.Time // when each target RPC arrived
 
 	// The identity read-back (`.pinfo`): pinfoGUID names that unit instead of the server's selection,
 	// pinfoLagTargets reports the selection one target RPC behind, prevSel is the selection before the newest
-	// target, and gmFail fails one gm line's RPC without its game side effect.
 	pinfoGUID       packet.GUID
 	pinfoName       string // names an untracked player instead of the selection's party record
 	noPInfo         bool   // .pinfo never answers (the reply waits out its own deadline)
@@ -294,6 +301,11 @@ func (f *walkFakeAgent) gmSide(line string) {
 	case strings.HasPrefix(line, ".bot gear raid "):
 		f.push("TBM:GEAR|ok|39|39|3|60|-|-|-|0|-|0", "")
 	case strings.HasPrefix(line, ".go xyz "):
+		f.mu.Lock()
+		if f.runStarted {
+			f.recoveryGo = true
+		}
+		f.mu.Unlock()
 		fields := strings.Fields(line)
 		if len(fields) == 6 {
 			x, _ := strconv.ParseFloat(fields[2], 32)
@@ -582,9 +594,11 @@ type viewReply struct {
 func (f *walkFakeAgent) viewPage() any {
 	f.mu.Lock()
 	f.viewN++
-	f.views++
 	n := f.viewN
+	f.views++
 	m := uint32(1)
+	viewHook := f.viewFn
+	combatAll := f.combatAllFn
 	if f.entered {
 		m = 249
 		if f.instMap != 0 {
@@ -603,11 +617,24 @@ func (f *walkFakeAgent) viewPage() any {
 	noParty := f.noPartyFrames
 	fn := f.hostilesFn
 	f.mu.Unlock()
+	if viewHook != nil {
+		if fail, _ := viewHook(n); fail {
+			return viewReply{Have: false, N: uint64(n)}
+		}
+	}
 	frame := &tbm.ViewFrame{Seq: uint64(n)}
 	for i, name := range party {
 		state := "n"
 		if dead[name] {
 			state = "d"
+		}
+		if combatAll != nil && combatAll(n) {
+			state = "c"
+		}
+		if viewHook != nil {
+			if _, omit := viewHook(n); omit == name {
+				continue
+			}
 		}
 		p := pos[name]
 		frame.Party = append(frame.Party, tbm.PartyRec{GUID: packet.GUID(1000 + i), Name: name, HP: 1, MaxHP: 1, Map: m, Dead: dead[name], State: state,
@@ -621,7 +648,6 @@ func (f *walkFakeAgent) viewPage() any {
 	}
 	return viewReply{Have: true, N: uint64(n), Frame: frame}
 }
-
 func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 	ack := func(intent string) commanderReply {
 		f.mu.Lock()
@@ -672,6 +698,7 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 	case "run":
 		if p.Verb == "start" {
 			f.mu.Lock()
+			f.runStarted = true
 			f.startArgs = strings.Join(p.Args, "|")
 			q := f.startQueue
 			f.startQueue = nil
@@ -726,6 +753,7 @@ type fakeDash struct {
 	mu        sync.Mutex
 	fights    []walkFightRow
 	fightKeys []string
+	fightsErr error
 }
 
 func (d *fakeDash) Login(ctx context.Context) error { return nil }
@@ -737,6 +765,9 @@ func (d *fakeDash) Commanders(ctx context.Context) (json.RawMessage, error) {
 func (d *fakeDash) Fights(ctx context.Context, commander string) (json.RawMessage, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.fightsErr != nil {
+		return nil, d.fightsErr
+	}
 	raw, err := json.Marshal(d.fights)
 	return raw, err
 }
@@ -1588,6 +1619,158 @@ func TestRaidWalkWipeResumesOnce(t *testing.T) {
 	}
 	if sum.EndReason != "until" {
 		t.Fatalf("end %q, want until (the run went on after the recovery)", sum.EndReason)
+	}
+}
+
+// TestRaidWalkWipeResumeBossUnknownEndsOld (review 1): a dashboard read that errors at wipe time
+// is unknown boss state, not "no boss". The walk must not recover: exit 19, wipe_resumes 0,
+// and the skipped note.
+func TestRaidWalkWipeResumeBossUnknownEndsOld(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fightsErr = errors.New("daemon down")
+	f.allDeadFromHires()
+	// If the walk wrongly recovered, the resume must be able to complete, so the test
+	// visibly flips (exit 0, wipe_resumes 1) instead of failing later in the resume wait.
+	var resumeAt time.Time
+	resumeHook(f, 11, 28, &resumeAt)
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 0 {
+		t.Fatalf("wipe_resumes %d, want 0 (an unknown boss is never recovered)", sum.WipeResumes)
+	}
+	if !hasNote(sum, "wipe resume skipped: boss state unknown") {
+		t.Fatalf("notes %q, want the skipped note", sum.Notes)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
+		t.Fatalf("%d run stops, want exactly 1 (the old wipe ending stops the run)", n)
+	}
+}
+
+// TestRaidWalkWipeResumeStaleViewRestartsQuiet (review 2): bot_view fails and drops a hire for
+// some polls of the rest. No `.bot run resume` may go out until a full window of complete views
+// has passed after the last bad poll.
+func TestRaidWalkWipeResumeStaleViewRestartsQuiet(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.wipeRest = 90 * time.Second
+	f.allDeadFromHires()
+	var resumeAt time.Time
+	resumes := 0
+	f.agent.onResume = func() {
+		resumes++
+		resumeAt = f.clock.now()
+		f.agent.push("TBM:RUN|onyxias_lair|running|11/29|onyxia|move|walk|resumed", "")
+		f.agent.push("TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands", "")
+	}
+	// Bad polls cover the first ~60 s of the rest (viewN+30 at 2 polls per rest poll... the
+	// rest polls bot_view every 5 s of fake time, one view call per poll plus watch-loop polls;
+	// badUntil in view calls is generous). Odd bad polls fail, even ones drop a hire; the
+	// last bad poll's fake time is recorded so the test can require a full 90 s of complete
+	// views AFTER it.
+	badUntil := -1
+	var badEndT time.Time
+	// The dropped hire is the roster's first name, but the party only exists after the hire
+	// phase: resolve it per poll, not once up front.
+	// The fault starts only once the wipe is on (every hire dead): the enter phase's own
+	// bot_view reads stay clean, so the walk reaches the watch before the bad polls begin.
+	f.agent.viewFn = func(n int) (bool, string) {
+		f.agent.mu.Lock()
+		wiping := len(f.agent.party) >= 39
+		if wiping {
+			for _, name := range f.agent.party {
+				if !f.agent.dead[name] {
+					wiping = false
+					break
+				}
+			}
+		}
+		rec := f.agent.recoveryGo
+		if badUntil < 0 && rec {
+			badUntil = n + 60
+		}
+		f.agent.mu.Unlock()
+		if badUntil >= 0 && n <= badUntil {
+			badEndT = f.clock.now()
+			rel := badUntil - n
+			if rel >= 20 {
+				return true, ""
+			}
+			f.agent.mu.Lock()
+			dropped := ""
+			if len(f.agent.party) > 0 {
+				dropped = f.agent.party[0]
+			}
+			f.agent.mu.Unlock()
+			return false, dropped
+		}
+		return false, ""
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if resumeAt.IsZero() {
+		t.Fatal("no run resume went out")
+	}
+	if resumes != 1 {
+		t.Fatalf("%d run resumes, want exactly 1 (no resume during the bad-view window)", resumes)
+	}
+	badEnd := time.Time{}
+	f.agent.mu.Lock()
+	for i, line := range f.agent.gm {
+		if strings.HasPrefix(line, ".revive ") {
+			badEnd = f.agent.gmAt[i]
+		}
+	}
+	f.agent.mu.Unlock()
+	gap := resumeAt.Sub(badEnd)
+	t.Logf("revive->resume gap %s; bad polls ended at %s, resume at %s", gap, badEndT.Format("15:04:05"), resumeAt.Format("15:04:05"))
+	if gap < 90*time.Second {
+		t.Fatalf("the resume went out %s after the revive, want a full 90 s quiet window after the bad polls", gap)
+	}
+	// The window must start AFTER the last bad poll: the resume goes out at least 90 s
+	// after the bad window ended. A mutant that counts failed views as quiet builds its
+	// window during the bad period and resumes too early.
+	if resumeAt.Sub(badEndT) < 90*time.Second {
+		t.Fatalf("the resume went out %s after the last bad poll, want a full 90 s of complete views after it", resumeAt.Sub(badEndT))
+	}
+	if sum := f.summary(); sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)
+	}
+}
+
+// TestRaidWalkWipeResumeDeadline (review 3): combat recurs every 4 min with --wipe-rest 5m, so
+// the deadline (recovery start + 15m) hits before the rest ever completes. The walk ends with
+// the wipe's exit 19 and the timed-out note, before the walk ceiling.
+func TestRaidWalkWipeResumeDeadline(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.wipeRest = 5 * time.Minute
+	f.allDeadFromHires()
+	f.agent.combatAllFn = func(n int) bool {
+		return n >= 30 && (n-30)%120 < 3
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 0 {
+		t.Fatalf("wipe_resumes %d, want 0 (the deadline hit before any resume)", sum.WipeResumes)
+	}
+	if !hasNote(sum, "wipe recovery timed out after 15m") {
+		t.Fatalf("notes %q, want the timed-out note", sum.Notes)
+	}
+	if !strings.Contains(sum.EndReason, "wipe at step") {
+		t.Fatalf("end %q, want the original wipe's ending", sum.EndReason)
 	}
 }
 
