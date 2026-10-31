@@ -137,11 +137,10 @@ type walkFakeAgent struct {
 	statusTargetMismatch bool
 	noPartyFrames        bool        // bot_view frames without a party (an injector with no bot positions)
 	gmAt                 []time.Time // when each gm line was sent
-	// Review-round-2 fault hooks: bot_view failure/omission (viewFn), combat during the
-	// quiet rest (combatAllFn), and the dashboard fights read (fightsErr).
+	// Review-round-2 fault hooks: bot_view failure/omission (viewFn) and combat during the
+	// quiet rest (combatAllFn); the dashboard fights read fails through fakeDash.fightsErr.
 	viewFn      func(n int) (fail bool, omit string)
 	combatAllFn func(n int) bool // frame n shows every hire in combat
-	fightsErr   error            // fakeDash.Fights answers with this error
 	targetCalls []packet.GUID
 	targetAt    []time.Time // when each target RPC arrived
 

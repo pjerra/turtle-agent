@@ -467,13 +467,6 @@ func hireShortfall(tanks, healers, dps int) string {
 	return strings.Join(parts, " ")
 }
 
-// parseHireLine reads TBM:HIRE_RAID|<ok|partial|refused>|<hired>|...; ok is false unless the first field is ok
-// and the hired count is above 0, and hired is always the count it read.
-func parseHireLine(line string) (hired int, ok bool) {
-	r := parseHireReply(line)
-	return r.hired, r.status == "ok" && r.hired > 0
-}
-
 // partyNames is the party's bot names.
 func (w *walk) partyNames(ctx context.Context) ([]string, error) {
 	p, err := w.party(ctx)
@@ -2034,35 +2027,6 @@ func (w *walk) completeQuietView(ctx context.Context) bool {
 			return false
 		}
 		if p.InCombat() || p.Dead || p.State == "d" {
-			return false
-		}
-	}
-	return true
-}
-
-// completeFreshView polls one complete fresh bot_view (review 2: the call succeeded AND every
-// roster hire is present with a row <= 10 s old) and feeds the tracker. No complete view means
-// no recovery.
-func (w *walk) completeFreshView(ctx context.Context) bool {
-	n, frame, err := w.view(ctx, w.afterN, 2000)
-	if err != nil || frame == nil {
-		return false
-	}
-	w.afterN = n
-	now := w.env.now()
-	w.trackFrame(now, frame)
-	w.tracker.Frame(now, *frame)
-	w.saveFrame(now, frame)
-	byName := map[string]bool{}
-	for _, p := range frame.Party {
-		byName[p.Name] = true
-	}
-	for _, name := range w.hireList() {
-		if !byName[name] {
-			return false
-		}
-		pos, ok := w.botAt[name]
-		if !ok || now.Sub(pos.at) > 10*time.Second {
 			return false
 		}
 	}
