@@ -332,7 +332,10 @@ func (w *walk) phaseHire(ctx context.Context) error {
 			}
 			return stopf(exitRaidWalkFailed, "hire %s: %s after %d retries", b.Hire, lastLine, retries)
 		}
-		want := len(before) + hired
+		// A capped retry's reply may count the requested order rather than the seats (its hired field can
+		// overshoot what the server fit under the cap), so the join wait is capped exactly like the observed
+		// growth check below: at most the seats the server can fill.
+		want := min(len(before)+hired, raidwalk.HireCap)
 		after, err := w.waitPartyNames(ctx, want, 30*time.Second)
 		if err != nil {
 			return err

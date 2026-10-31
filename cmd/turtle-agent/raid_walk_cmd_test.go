@@ -113,11 +113,14 @@ type walkFakeAgent struct {
 	hireBatches []hireBatchState
 	// hireShortAlways makes every retry of a short batch answer partial again (test b).
 	hireShortAlways bool
+	// hireRetryReportsOrder makes a retry's reply count the requested order in its hired field while the
+	// server hires only to the cap: the last seat fills but the reply says the full requested count.
+	// The join wait must stay cap-aware (the capped-retry finding).
+	hireRetryReportsOrder bool
 	// hireReply answers batch hireReply[batch] with this line verbatim (test c); the server hires nothing.
 	hireReply map[int]string
 
 	// The fault injector's fakes (raid_walk_inject_test.go): the server's selection (target/gps), the per-bot
-	// positions the frames carry, and the P0 finding 4 lag (a selection takes effect one command later).
 	ownGUID              packet.GUID // the commander's GUID when a test sets one
 	ownPos               [3]float32  // the commander's own position (.go xyz updates it)
 	pos                  map[string][3]float32
@@ -527,9 +530,13 @@ func (f *walkFakeAgent) hireSideShort(line string) {
 		names = append(names, fmt.Sprintf("Bot%02d", f.nameSeq))
 	}
 	f.party = append(f.party, names...)
+	reported := n
+	if f.hireRetryReportsOrder && batchIdx == len(f.hireBatches)-1 && b.attempt > 1 && status != "partial" {
+		reported = gotT + gotH + gotD + classN // the capped server counts the requested order, not the seats
+	}
 	planned := wantT + wantH + wantD
 	f.mu.Unlock()
-	f.push("TBM:HIRE_RAID|"+status+"|"+strconv.Itoa(n)+"|"+strconv.Itoa(planned)+"|"+
+	f.push("TBM:HIRE_RAID|"+status+"|"+strconv.Itoa(reported)+"|"+strconv.Itoa(planned)+"|"+
 		strconv.Itoa(gotT)+"|"+strconv.Itoa(gotH)+"|"+strconv.Itoa(gotD)+"|3|0|"+reason, "")
 }
 
@@ -1443,6 +1450,26 @@ func TestRaidWalkRetriesAPartialHire(t *testing.T) {
 	}
 	if !hasNote(sum, "hire 10h 26d: 28 of 36 hired (partial); retry 1 in 30 s for 8d") {
 		t.Fatalf("summary notes %q, want the retry note", sum.Notes)
+	}
+}
+
+// The rest batch's first reply is partial; the retry's reply counts the requested order while the server
+// hires only to the cap: the last seat fills, the join wait stays cap-aware, and the walk exits 0 with
+// the 40th seat's cap note and 39 hires.
+func TestRaidWalkCappedRetryReportsTheOrder(t *testing.T) {
+	f := newFixture(t)
+	f.agent.hireShort = map[int]int{2: 8}
+	f.agent.hireRetryReportsOrder = true
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.stderr.String())
+	}
+	sum := f.summary()
+	if len(f.agent.party) != raidwalk.HireCap {
+		t.Fatalf("party holds %d bots, want the capped roster of %d", len(f.agent.party), raidwalk.HireCap)
+	}
+	if !hasNote(sum, "hire cap 39: asked for 40 bots, the server hired 39") {
+		t.Fatalf("summary notes %q, want the hire cap note", sum.Notes)
 	}
 }
 
