@@ -1652,6 +1652,48 @@ func TestRaidWalkWipeResumeBossUnknownEndsOld(t *testing.T) {
 	}
 }
 
+// TestRaidWalkWipeResumeWithDashboardRecovers (review 3 HIGH): a dashboard that answers
+// (no engaged boss) keeps the boss evidence fresh through the normal poll, so a wipe
+// recovers: exactly one `run resume`, wipe_resumes 1, and the run reaches until.
+func TestRaidWalkWipeResumeWithDashboardRecovers(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	resumes := 0
+	var resumeAt time.Time
+	f.agent.onResume = func() {
+		resumes++
+		resumeAt = f.clock.now()
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|11/29|onyxia|move|walk|resumed"},
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands"})
+	}
+	f.allDeadFromHires()
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if resumes != 1 {
+		t.Fatalf("%d run resumes, want exactly 1", resumes)
+	}
+	if resumeAt.IsZero() {
+		t.Fatal("no run resume went out")
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops before the end, want none (the walk resumes, it never stops)", n)
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until (the run went on after the recovery)", sum.EndReason)
+	}
+}
+
 // TestRaidWalkWipeResumeStaleViewRestartsQuiet (review 2): bot_view fails and drops a hire for
 // some polls of the rest. No `.bot run resume` may go out until a full window of complete views
 // has passed after the last bad poll.
@@ -1767,6 +1809,64 @@ func TestRaidWalkWipeResumeDeadline(t *testing.T) {
 		t.Fatalf("wipe_resumes %d, want 0 (the deadline hit before any resume)", sum.WipeResumes)
 	}
 	if !hasNote(sum, "wipe recovery timed out after 15m") {
+		t.Fatalf("notes %q, want the timed-out note", sum.Notes)
+	}
+	if !strings.Contains(sum.EndReason, "wipe at step") {
+		t.Fatalf("end %q, want the original wipe's ending", sum.EndReason)
+	}
+}
+
+// TestRaidWalkWipeResumeDeadlineDuringRevive (review 3 MEDIUM): revive's quiet check never
+// gets quiet with --wipe-rest 1m, so the ENTRY deadline (start + 3m) bounds the revive
+// itself. The walk ends 19 with the timed-out note and never sends `run resume`.
+func TestRaidWalkWipeResumeDeadlineDuringRevive(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit {
+		f.agent.mu.Lock()
+		x, y, z := f.agent.x, f.agent.y, f.agent.z
+		f.agent.mu.Unlock()
+		return []objects.Unit{{Type: "creature", Name: "Onyxian Warder", Hostile: true, Moving: true, X: x + 60, Y: y, Z: z}}
+	}
+	f.opts.wipeRest = time.Minute
+	f.allDeadFromHires()
+	// The recovery starts at its first `.go xyz` after run start (the revive
+	// point, before the quiet check burns fake time): the deadline is entry + 3m.
+	var recStart time.Time
+	hireHook := f.agent.onGM
+	f.agent.onGM = func(line string) {
+		if hireHook != nil {
+			hireHook(line)
+		}
+		if recStart.IsZero() && strings.HasPrefix(line, ".go xyz") {
+			f.agent.mu.Lock()
+			started := f.agent.runStarted
+			f.agent.mu.Unlock()
+			if started {
+				recStart = f.clock.now()
+			}
+		}
+	}
+	resumes := 0
+	f.agent.onResume = func() { resumes++ }
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if resumes != 0 {
+		t.Fatalf("%d run resumes, want none (the deadline hit during the revive)", resumes)
+	}
+	if recStart.IsZero() {
+		t.Fatal("the recovery never teleported to the revive point")
+	}
+	if elapsed := f.clock.now().Sub(recStart); elapsed > 3*time.Minute {
+		t.Fatalf("the recovery ran %s past entry, past the entry+3m deadline", elapsed)
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 0 {
+		t.Fatalf("wipe_resumes %d, want 0 (the deadline hit before any resume)", sum.WipeResumes)
+	}
+	if !hasNote(sum, "wipe recovery timed out after 3m") {
 		t.Fatalf("notes %q, want the timed-out note", sum.Notes)
 	}
 	if !strings.Contains(sum.EndReason, "wipe at step") {

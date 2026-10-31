@@ -135,7 +135,7 @@ func (r *raidInjector) Prepare(ctx context.Context) error {
 		r.prepFail = "the commander did not move to the raid's map: " + err.Error()
 		return nil
 	}
-	if err := w.waitMap(ctx, w.plan.Map, 30*time.Second); err != nil {
+	if err := w.waitMap(ctx, w.plan.Map, 30*time.Second, time.Time{}); err != nil {
 		if ctx.Err() != nil {
 			return err
 		}

@@ -255,7 +255,7 @@ func (w *walk) phasePortal(ctx context.Context) error {
 	if err := w.gm(ctx, line); err != nil {
 		return err
 	}
-	return w.waitMap(ctx, p.Map, 30*time.Second)
+	return w.waitMap(ctx, p.Map, 30*time.Second, time.Time{})
 }
 
 // hireMaxRetries is how often a short t/h/d batch is retried before the walk fails (walk 12 s4: "no mercenary of
@@ -1057,22 +1057,28 @@ func (w *walk) stopRun(ctx context.Context, line string) error {
 	return nil
 }
 
-// waitMap waits until the agent reports mapID.
-func (w *walk) waitMap(ctx context.Context, mapID uint32, timeout time.Duration) error {
-	deadline := w.env.now().Add(timeout)
+// waitMap waits until the agent reports mapID. The deadline is a recovery entry deadline
+// (zero: no recovery bounds this wait): every loop turn and sleep checks it first, and
+// past it the wait fails with the timed-out recovery the caller turns into the
+// original incident's ending.
+func (w *walk) waitMap(ctx context.Context, mapID uint32, timeout time.Duration, deadline time.Time) error {
+	mapDue := w.env.now().Add(timeout)
 	for {
 		if err := ctx.Err(); err != nil {
 			return stopf(exitRaidWalkFailed, "interrupted")
+		}
+		if timeout := w.recoveryExpired(deadline); timeout != nil {
+			return timeout
 		}
 		st, err := w.status(ctx)
 		if err == nil && st.Map == mapID {
 			return nil
 		}
-		if !w.env.now().Before(deadline) {
+		if !w.env.now().Before(mapDue) {
 			return stopf(exitRaidWalkFailed, "the commander is not on map %d after %s", mapID, durWords(timeout))
 		}
-		if err := w.env.sleep(ctx, time.Second); err != nil {
-			return stopf(exitRaidWalkFailed, "interrupted")
+		if err := w.recoverySleep(ctx, time.Second, deadline); err != nil {
+			return err
 		}
 	}
 }
@@ -1222,12 +1228,16 @@ type walkFightRow struct {
 	Deaths   int    `json:"deaths"`
 }
 
-// saveFights saves the fights list and one detail file per new key.
+// saveFights saves the fights list and one detail file per new key. It also keeps
+// the review-1 boss evidence fresh (the same fields freshWipeRest and the
+// bossUnknown gate read): every attempt records its fetch/parse error (or nil),
+// and a success records the read time and the parsed rows.
 func (w *walk) saveFights() {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	raw, err := w.dash.Fights(ctx, w.manifest.Character)
 	if err != nil {
+		w.bossCheckErr = err
 		if !w.dashWarned {
 			w.note("dashboard: %v", err)
 			w.dashWarned = true
@@ -1236,9 +1246,14 @@ func (w *walk) saveFights() {
 	}
 	_ = w.writeOut("combat-fights.json", raw)
 	var rows []walkFightRow
-	if json.Unmarshal(raw, &rows) != nil {
+	if uerr := json.Unmarshal(raw, &rows); uerr != nil {
+		w.bossCheckErr = uerr
 		return
 	}
+	now := w.env.now()
+	w.bossCheckErr = nil
+	w.bossReadAt = now
+	w.fightRows = rows
 	for _, r := range rows {
 		if r.ID == "" || w.seenFights[r.ID] {
 			continue
@@ -1511,7 +1526,7 @@ func (w *walk) resetReady(now time.Time) bool {
 
 // revive is the walk-4 recipe's ending: revive and always end the walk with exit 19.
 func (w *walk) revive(ctx context.Context, step int) error {
-	if err := w.reviveHires(ctx); err != nil {
+	if err := w.reviveHires(ctx, time.Time{}); err != nil {
 		return err
 	}
 	return stopf(exitRaidWalkIncident, "wipe at step %d", step)
@@ -1519,8 +1534,10 @@ func (w *walk) revive(ctx context.Context, step int) error {
 
 // reviveHires is the walk-4 recipe's revive half, made safe (spec 3.5): the revive point, the quiet check (then the
 // entrance once), summon and revive, and a look for bots attacked after the revive. revive ends the walk with it;
-// recoverWipe rests and resumes with it.
-func (w *walk) reviveHires(ctx context.Context) error {
+// recoverWipe rests and resumes with it. The deadline is the recovery's entry deadline (zero: the old
+// unbounded path outside a recovery): every loop turn and sleep checks it, and past it the
+// revive fails with the timed-out recovery the caller turns into the original incident's ending.
+func (w *walk) reviveHires(ctx context.Context, deadline time.Time) error {
 	if w.stepFirst == nil {
 		return stopf(exitRaidWalkIncident, "not revived: the plan's rows give no first point")
 	}
@@ -1528,15 +1545,26 @@ func (w *walk) reviveHires(ctx context.Context) error {
 	if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(p.X), num32(p.Y), num32(p.Z), w.plan.Map)); err != nil {
 		return err
 	}
-	if err := w.waitMap(ctx, w.plan.Map, 30*time.Second); err != nil {
+	if err := w.waitMap(ctx, w.plan.Map, 30*time.Second, deadline); err != nil {
+		if timeout, ok := err.(*recoveryTimeout); ok {
+			return timeout
+		}
 		return stopf(exitRaidWalkIncident, "not revived: the commander did not reach map %d", w.plan.Map)
 	}
-	ok, why := w.quietCheck(ctx, p)
+	ok, why, terr := w.quietCheck(ctx, p, deadline)
+	if terr != nil {
+		return terr
+	}
 	if !ok {
 		e := w.plan.Entrance
 		if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(e.X), num32(e.Y), num32(e.Z), w.plan.Map)); err == nil {
-			if err := w.waitMap(ctx, w.plan.Map, 30*time.Second); err == nil {
-				ok, why = w.quietCheck(ctx, e)
+			if werr := w.waitMap(ctx, w.plan.Map, 30*time.Second, deadline); werr == nil {
+				ok, why, terr = w.quietCheck(ctx, e, deadline)
+				if terr != nil {
+					return terr
+				}
+			} else if timeout, isTimeout := werr.(*recoveryTimeout); isTimeout {
+				return timeout
 			}
 		}
 	}
@@ -1544,26 +1572,32 @@ func (w *walk) reviveHires(ctx context.Context) error {
 		return stopf(exitRaidWalkIncident, "not revived: %s", why)
 	}
 	for _, name := range w.hireList() {
+		if timeout := w.recoveryExpired(deadline); timeout != nil {
+			return timeout
+		}
 		if err := w.gm(ctx, ".summon "+name); err != nil {
 			return err
 		}
-		if err := w.env.sleep(ctx, 100*time.Millisecond); err != nil {
-			return stopf(exitRaidWalkFailed, "interrupted")
+		if err := w.recoverySleep(ctx, 100*time.Millisecond, deadline); err != nil {
+			return err
 		}
 	}
-	if err := w.env.sleep(ctx, 10*time.Second); err != nil {
-		return stopf(exitRaidWalkFailed, "interrupted")
+	if err := w.recoverySleep(ctx, 10*time.Second, deadline); err != nil {
+		return err
 	}
 	for _, name := range w.hireList() {
+		if timeout := w.recoveryExpired(deadline); timeout != nil {
+			return timeout
+		}
 		if err := w.gm(ctx, ".revive "+name); err != nil {
 			return err
 		}
-		if err := w.env.sleep(ctx, 100*time.Millisecond); err != nil {
-			return stopf(exitRaidWalkFailed, "interrupted")
+		if err := w.recoverySleep(ctx, 100*time.Millisecond, deadline); err != nil {
+			return err
 		}
 	}
-	if err := w.env.sleep(ctx, 15*time.Second); err != nil {
-		return stopf(exitRaidWalkFailed, "interrupted")
+	if err := w.recoverySleep(ctx, 15*time.Second, deadline); err != nil {
+		return err
 	}
 	if n, frame, err := w.view(ctx, w.afterN, 2000); err == nil && frame != nil {
 		w.afterN = n
@@ -1592,8 +1626,13 @@ func (w *walk) recoverWipe(ctx context.Context, step int) error {
 	if err := w.bossUnknown(ctx); err != nil {
 		return err
 	}
+	from := w.env.now()
+	deadline := recoveryDeadline(from, w.opts.wipeRest, w.opts.maxRunMinutes, w.started)
 	_, _, hadBoss := w.tracker.BossEngaged()
-	if err := w.reviveHires(ctx); err != nil {
+	if err := w.reviveHires(ctx, deadline); err != nil {
+		if timeout, ok := err.(*recoveryTimeout); ok {
+			return timeout.end(step)
+		}
 		return err
 	}
 	revived := len(w.hireList())
@@ -1601,8 +1640,7 @@ func (w *walk) recoverWipe(ctx context.Context, step int) error {
 	if err != nil {
 		return err
 	}
-	from := w.env.now()
-	if err := w.restOutOfCombat(ctx, rest, recoveryDeadline(from, rest, w.opts.maxRunMinutes, w.started)); err != nil {
+	if err := w.restOutOfCombat(ctx, rest, deadline); err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
 			return timeout.end(step)
 		}
@@ -1629,17 +1667,21 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 	if err := w.bossUnknown(ctx); err != nil {
 		return err
 	}
+	from := w.env.now()
+	deadline := recoveryDeadline(from, w.opts.wipeRest, w.opts.maxRunMinutes, w.started)
 	_, _, hadBoss := w.tracker.BossEngaged()
-	revived, err := w.recoverNearWipeRevive(ctx)
+	revived, err := w.recoverNearWipeRevive(ctx, deadline)
 	if err != nil {
+		if timeout, ok := err.(*recoveryTimeout); ok {
+			return timeout.pausedEnd(step)
+		}
 		return err
 	}
 	rest, err := w.freshWipeRest()
 	if err != nil {
 		return err
 	}
-	from := w.env.now()
-	if err := w.restOutOfCombat(ctx, rest, recoveryDeadline(from, rest, w.opts.maxRunMinutes, w.started)); err != nil {
+	if err := w.restOutOfCombat(ctx, rest, deadline); err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
 			return timeout.pausedEnd(step)
 		}
@@ -1661,10 +1703,11 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 
 // recoverNearWipeRevive revives what the near-wipe path revives: every hire when all are dead,
 // else only the dead hires of a complete fresh view (review 2: no complete view within 60 s is
-// no recovery, the old ending with the skipped note). It returns the revived count.
-func (w *walk) recoverNearWipeRevive(ctx context.Context) (int, error) {
+// no recovery, the old ending with the skipped note). It returns the revived count. The
+// deadline is the recovery's entry deadline: every loop turn and sleep checks it.
+func (w *walk) recoverNearWipeRevive(ctx context.Context, deadline time.Time) (int, error) {
 	if w.allDead(w.env.now()) {
-		if err := w.reviveHires(ctx); err != nil {
+		if err := w.reviveHires(ctx, deadline); err != nil {
 			return 0, err
 		}
 		return len(w.hireList()), nil
@@ -1674,11 +1717,14 @@ func (w *walk) recoverNearWipeRevive(ctx context.Context) (int, error) {
 		return 0, errWipeResumeSkipped
 	}
 	for _, name := range dead {
+		if timeout := w.recoveryExpired(deadline); timeout != nil {
+			return 0, timeout
+		}
 		if err := w.gm(ctx, ".revive "+name); err != nil {
 			return 0, err
 		}
-		if err := w.env.sleep(ctx, 100*time.Millisecond); err != nil {
-			return 0, stopf(exitRaidWalkFailed, "interrupted")
+		if err := w.recoverySleep(ctx, 100*time.Millisecond, deadline); err != nil {
+			return 0, err
 		}
 	}
 	return len(dead), nil
@@ -2044,13 +2090,18 @@ func nearWipeStop(note string) bool {
 
 // quietCheck is the revive point's quiet check (spec 3.5): every 5 s up to 120 s, with a patrol exempt when one
 // of its members is visible 80 yd out and its distance grew between two checks. 200 yd asks for the far members;
-// raidwalk.QuietAt still enforces its own 45/80 yd rules.
-func (w *walk) quietCheck(ctx context.Context, p dungeon.Point) (bool, string) {
+// raidwalk.QuietAt still enforces its own 45/80 yd rules. The deadline is the recovery's
+// entry deadline (zero: the old unbounded path): every loop turn and sleep checks it, and
+// past it the check fails with the timed-out recovery instead of true/false.
+func (w *walk) quietCheck(ctx context.Context, p dungeon.Point, deadline time.Time) (bool, string, *recoveryTimeout) {
 	prev := map[string]float64{}
 	for i := range 24 {
+		if timeout := w.recoveryExpired(deadline); timeout != nil {
+			return false, "", timeout
+		}
 		us, err := w.unitsAt(ctx, 200)
 		if err != nil {
-			return false, "units: " + err.Error()
+			return false, "units: " + err.Error(), nil
 		}
 		patrols := make([]raidwalk.QuietPatrol, len(w.quietPatrols))
 		copy(patrols, w.quietPatrols)
@@ -2076,16 +2127,41 @@ func (w *walk) quietCheck(ctx context.Context, p dungeon.Point) (bool, string) {
 		}
 		ok, why := raidwalk.QuietAt(us, patrols, p)
 		if ok {
-			return true, ""
+			return true, "", nil
 		}
 		if i == 23 {
-			return false, why
+			return false, why, nil
 		}
-		if err := w.env.sleep(ctx, 5*time.Second); err != nil {
-			return false, "interrupted"
+		if err := w.recoverySleep(ctx, 5*time.Second, deadline); err != nil {
+			if timeout, ok := err.(*recoveryTimeout); ok {
+				return false, "", timeout
+			}
+			return false, "interrupted", nil
 		}
 	}
-	return false, "the units never went quiet"
+	return false, "the units never went quiet", nil
+}
+
+// recoveryExpired reports the recovery's timed-out ending when the entry deadline
+// passed (nil while time is left or when there is no deadline). The duration is
+// the same 3 x rest the rest and resume waits report (deadline minus start).
+func (w *walk) recoveryExpired(deadline time.Time) *recoveryTimeout {
+	if deadline.IsZero() || w.env.now().Before(deadline) {
+		return nil
+	}
+	return &recoveryTimeout{dur: deadlineDuration(deadline, w.opts.wipeRest), paused: false}
+}
+
+// recoverySleep sleeps but fails with the timed-out recovery when the entry
+// deadline passes first (an interrupt keeps the old interrupted ending).
+func (w *walk) recoverySleep(ctx context.Context, d time.Duration, deadline time.Time) error {
+	if err := w.env.sleep(ctx, d); err != nil {
+		return stopf(exitRaidWalkFailed, "interrupted")
+	}
+	if timeout := w.recoveryExpired(deadline); timeout != nil {
+		return timeout
+	}
+	return nil
 }
 
 func raidDist3(p dungeon.Point, x, y, z float32) float64 {
