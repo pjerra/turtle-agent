@@ -64,10 +64,11 @@ func byGUID(t *testing.T, w *World, guid uint64) Spawn {
 	return Spawn{}
 }
 
-// TestLoadOldExportAssumesDefaults pins what Load does with an export from before C0: the five raid columns are missing,
+// TestLoadOldExportAssumesDefaults pins what Load does with an export from before C0 (testdata/map249-old: map 249 with the
+// five raid columns cut and no movement.tsv; the shared dungeongen fixture is a new export now): the five raid columns are missing,
 // so every spawn gets detection 20 yd, no extra flags, speed 1, no group flags and no pool, and a note says so.
 func TestLoadOldExportAssumesDefaults(t *testing.T) {
-	w, notes, err := Load(filepath.Join("..", "..", "tools", "dungeongen", "testdata", "map249"), 249)
+	w, notes, err := Load(filepath.Join("testdata", "map249-old"), 249)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}

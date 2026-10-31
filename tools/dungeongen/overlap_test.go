@@ -33,8 +33,10 @@ import (
 // spawns; none of them is pulled by those rows.
 // Karazhan Crypt's 8 are Skeletal Remains 91924: 7 never wake (no Remains Trigger within 30 yd of them, in the south wing and the
 // lower crypt, dead unselectable props) and 1 awake one stands 12.4 yd from a wandering pull - outside its 10 yd radius, inside the
-// check's 3 yd aggro margin.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "naxxramas": 104, "blackwing_lair": 50, "timbermaw_hold": 13, "temple_of_ahnqiraj": 128, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6, "zul_gurub": 39, "molten_core": 10, "upper_karazhan_halls": 6, "karazhan_crypt": 8}
+// check's 3 yd aggro margin. 27 since the Corpsemuncher leg (legs[6], PR #320): its radius-25 pull groups cover one packed crypt
+// room, so each group reaches the Skeletal Remains, Rotten Zombies, Strigoi and Forgotten Souls of the next ones (19 more); the room
+// is pulled group by group from the doorway and the run leader drops units another row owns. Draft plan, not live-checked yet.
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "naxxramas": 104, "blackwing_lair": 50, "timbermaw_hold": 13, "temple_of_ahnqiraj": 128, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6, "zul_gurub": 39, "molten_core": 10, "upper_karazhan_halls": 6, "karazhan_crypt": 27}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {
