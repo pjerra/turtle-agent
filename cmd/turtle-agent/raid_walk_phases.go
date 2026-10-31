@@ -257,6 +257,13 @@ func (w *walk) phasePortal(ctx context.Context) error {
 	return w.waitMap(ctx, p.Map, 30*time.Second)
 }
 
+// hireMaxRetries is how often a short t/h/d batch is retried before the walk fails (walk 12 s4: "no mercenary of
+// that kind is available right now. Try again shortly").
+const hireMaxRetries = 3
+
+// hireRetryWait is the rest between a short batch reply and its retry.
+const hireRetryWait = 30 * time.Second
+
 // phaseHire is phase 6: the batches, the party diff and the gear preset.
 func (w *walk) phaseHire(ctx context.Context) error {
 	lines := w.roster.HireLines()
@@ -275,12 +282,55 @@ func (w *walk) phaseHire(ctx context.Context) error {
 		if !ok {
 			return stopf(exitRaidWalkFailed, "hire %s: no TBM:HIRE_RAID line in 60 s", b.Hire)
 		}
-		hired, okLine := parseHireLine(line)
-		if !okLine {
+		reply := parseHireReply(line)
+		lastLine := line
+		// got counts the bots this batch hired so far, per role; missing is the batch's own t/h/d counts minus
+		// got. Only t/h/d batches are retried: a class batch ("1 warrior:tank") names one exact bot and fails as
+		// now.
+		wantT, wantH, wantD, countable := raidwalk.RoleCounts(b.Hire)
+		gotT, gotH, gotD := reply.tank, reply.healer, reply.dps
+		hired := reply.hired
+		retries := 0
+		for countable && reply.retryable() && retries < hireMaxRetries {
+			missing := hireShortfall(max(wantT-gotT, 0), max(wantH-gotH, 0), max(wantD-gotD, 0))
+			if missing == "" {
+				break
+			}
+			retries++
+			w.note("hire %s: %d of %d hired (%s); retry %d in 30 s for %s", b.Hire, reply.hired, reply.planned, reply.status, retries, missing)
+			if err := w.env.sleep(ctx, hireRetryWait); err != nil {
+				return stopf(exitRaidWalkFailed, "interrupted")
+			}
+			if err := w.gm(ctx, w.roster.HireLine(missing)); err != nil {
+				return err
+			}
+			line, ok, err = w.waitTBM(ctx, "TBM:HIRE_RAID|", 60*time.Second)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return stopf(exitRaidWalkFailed, "hire %s: no TBM:HIRE_RAID line in 60 s", b.Hire)
+			}
+			lastLine = line
+			reply = parseHireReply(line)
+			hired += reply.hired
+			gotT += reply.tank
+			gotH += reply.healer
+			gotD += reply.dps
+		}
+		// A partial that reaches the cap is answered ok by the happy-path rule below: the 40th-seat check
+		// owns it (amendment G2), so a capped retry loop still counts as a full hire.
+		if countable && hired > 0 && len(w.hires)+hired == raidwalk.HireCap {
+			reply.status = "ok"
+		}
+		if reply.status != "ok" || hired == 0 {
 			if hired == 0 {
 				w.note("check the commander's gold")
 			}
-			return stopf(exitRaidWalkFailed, "hire %s: %s", b.Hire, line)
+			if retries == 0 {
+				return stopf(exitRaidWalkFailed, "hire %s: %s", b.Hire, lastLine)
+			}
+			return stopf(exitRaidWalkFailed, "hire %s: %s after %d retries", b.Hire, lastLine, retries)
 		}
 		want := len(before) + hired
 		after, err := w.waitPartyNames(ctx, want, 30*time.Second)
@@ -349,22 +399,75 @@ func (w *walk) phaseHire(ctx context.Context) error {
 // no help: it names a hire before its join, and its zone there stays stale after it.
 const hireSettleWait = 20 * time.Second
 
-// parseHireLine reads TBM:HIRE_RAID|<ok|partial|refused>|<hired>|...; ok is false unless the first field is ok
-// and the hired count is above 0, and hired is always the count it read.
-func parseHireLine(line string) (hired int, ok bool) {
+// hireReply is one TBM:HIRE_RAID line read field by field (TortoiseBots commands/Hire.cpp:124):
+// TBM:HIRE_RAID|<ok|partial|refused>|<hired>|<planned>|<tank>|<healer>|<dps>|<tier>|<feeCopper>|<reason>.
+// The tank, healer and dps fields are the counts hired by this order.
+type hireReply struct {
+	status  string
+	hired   int
+	planned int
+	tank    int
+	healer  int
+	dps     int
+	reason  string
+}
+
+// parseHireReply reads a TBM:HIRE_RAID line into its fields. A line that does not parse reports the zero reply
+// with an empty status, which retries nothing and hires nothing.
+func parseHireReply(line string) hireReply {
+	var r hireReply
 	rest, found := strings.CutPrefix(raidwalk.CleanLine(line), "TBM:HIRE_RAID|")
 	if !found {
-		return 0, false
+		return r
 	}
 	f := strings.Split(rest, "|")
-	if len(f) < 2 {
-		return 0, false
+	if len(f) < 9 {
+		return r
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(f[1]))
 	if err != nil {
-		return 0, false
+		return hireReply{}
 	}
-	return n, f[0] == "ok" && n > 0
+	p, _ := strconv.Atoi(strings.TrimSpace(f[2]))
+	t, _ := strconv.Atoi(strings.TrimSpace(f[3]))
+	h, _ := strconv.Atoi(strings.TrimSpace(f[4]))
+	d, _ := strconv.Atoi(strings.TrimSpace(f[5]))
+	return hireReply{status: f[0], hired: n, planned: p, tank: t, healer: h, dps: d, reason: strings.Join(f[8:], "|")}
+}
+
+// retryable says whether a short batch reply may be retried: "partial" always, "refused" only when the reason asks
+// to try again shortly.
+func (r hireReply) retryable() bool {
+	switch r.status {
+	case "partial":
+		return true
+	case "refused":
+		return strings.Contains(r.reason, "Try again shortly")
+	default:
+		return false
+	}
+}
+
+// hireShortfall builds the "<n>t <n>h <n>d" retry grammar for what is still missing, zero parts left out.
+func hireShortfall(tanks, healers, dps int) string {
+	var parts []string
+	if tanks > 0 {
+		parts = append(parts, fmt.Sprintf("%dt", tanks))
+	}
+	if healers > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", healers))
+	}
+	if dps > 0 {
+		parts = append(parts, fmt.Sprintf("%dd", dps))
+	}
+	return strings.Join(parts, " ")
+}
+
+// parseHireLine reads TBM:HIRE_RAID|<ok|partial|refused>|<hired>|...; ok is false unless the first field is ok
+// and the hired count is above 0, and hired is always the count it read.
+func parseHireLine(line string) (hired int, ok bool) {
+	r := parseHireReply(line)
+	return r.hired, r.status == "ok" && r.hired > 0
 }
 
 // partyNames is the party's bot names.

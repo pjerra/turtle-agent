@@ -107,6 +107,15 @@ type walkFakeAgent struct {
 	// hireCap is the server's hire limit (0: raidwalk.HireCap, the 39 of onyxia-kill-plan C6).
 	hireCap int
 
+	// hireShort withholds hireShort[batch] bots on the batch's first reply (dps first, then healers,
+	// then tanks). The first answer is partial; the retry hires the rest.
+	hireShort   map[int]int
+	hireBatches []hireBatchState
+	// hireShortAlways makes every retry of a short batch answer partial again (test b).
+	hireShortAlways bool
+	// hireReply answers batch hireReply[batch] with this line verbatim (test c); the server hires nothing.
+	hireReply map[int]string
+
 	// The fault injector's fakes (raid_walk_inject_test.go): the server's selection (target/gps), the per-bot
 	// positions the frames carry, and the P0 finding 4 lag (a selection takes effect one command later).
 	ownGUID              packet.GUID // the commander's GUID when a test sets one
@@ -251,6 +260,9 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 // gmSide is what the game does for a GM line.
 func (f *walkFakeAgent) gmSide(line string) {
 	switch {
+	case strings.HasPrefix(line, ".bot hire raid ") && (len(f.hireShort) > 0 || len(f.hireReply) > 0):
+		f.hireSideShort(line)
+		return
 	case strings.HasPrefix(line, ".bot hire raid "):
 		hire := strings.TrimPrefix(line, ".bot hire raid ")
 		if i := strings.Index(hire, " level="); i >= 0 {
@@ -416,6 +428,116 @@ func (f *walkFakeAgent) push(raw, text string) {
 	f.mu.Lock()
 	f.lines = append(f.lines, queuedEvent{raw: raw, text: text})
 	f.mu.Unlock()
+}
+
+// hireSideShort is the game side for a hire when hireShort names short batches: the batch index counts
+// the walk's new batches (retries excluded: a retry asks for fewer bots than its batch's shortfall held
+// back), the first reply of a short batch withholds hireShort[batch] dps as a partial, and the retry
+// hires the missing dps ok.
+func (f *walkFakeAgent) hireSideShort(line string) {
+	hire := strings.TrimPrefix(line, ".bot hire raid ")
+	if i := strings.Index(hire, " level="); i >= 0 {
+		hire = hire[:i]
+	}
+	wantT, wantH, wantD := 0, 0, 0
+	for _, tok := range strings.Fields(hire) {
+		if strings.HasPrefix(tok, "t") && len(tok) == 2 {
+			continue // the tier word t1/t2/t3
+		}
+		i := 0
+		for i < len(tok) && tok[i] >= '0' && tok[i] <= '9' {
+			i++
+		}
+		if i == 0 {
+			continue
+		}
+		c, _ := strconv.Atoi(tok[:i])
+		switch {
+		case strings.HasSuffix(tok, "t"):
+			wantT += c
+		case strings.HasSuffix(tok, "h"):
+			wantH += c
+		case strings.HasSuffix(tok, "d"):
+			wantD += c
+		}
+	}
+	f.mu.Lock()
+	// The gm line is already appended (Call records it before gmSide). A retry asks for what its batch's
+	// partial held back (equal or a sub-grammar of it); a new batch does not fit inside the open miss.
+	batchIdx := len(f.hireBatches)
+	if batchIdx > 0 {
+		last := &f.hireBatches[batchIdx-1]
+		if last.missed && wantT <= last.missT && wantH <= last.missH && wantD <= last.missD {
+			batchIdx--
+		}
+	}
+	for len(f.hireBatches) <= batchIdx {
+		f.hireBatches = append(f.hireBatches, hireBatchState{})
+	}
+	b := &f.hireBatches[batchIdx]
+	b.attempt++
+	short := f.hireShort[batchIdx]
+	cap := f.hireCap
+	if cap == 0 {
+		cap = raidwalk.HireCap
+	}
+	classN := 0
+	if wantT+wantH+wantD == 0 {
+		classN = hireCount(hire)
+	}
+	status, reason := "ok", ""
+	gotT, gotH, gotD := wantT, wantH, wantD
+	if _, ok := f.hireReply[batchIdx]; ok && b.attempt == 1 {
+		f.mu.Unlock()
+		f.push(f.hireReply[batchIdx], "")
+		return
+	}
+	if short > 0 && (b.attempt == 1 || f.hireShortAlways) {
+		left := short
+		for _, grp := range []*int{&gotD, &gotH, &gotT} {
+			if left <= 0 {
+				break
+			}
+			if *grp < left {
+				left -= *grp
+				*grp = 0
+			} else {
+				*grp -= left
+				left = 0
+			}
+		}
+		status = "partial"
+		reason = "No mercenary of that kind is available right now. Try again shortly."
+	}
+	if status == "partial" {
+		b.missed = true
+		b.missT, b.missH, b.missD = wantT-gotT, wantH-gotH, wantD-gotD
+	} else if batchIdx == len(f.hireBatches)-1 && b.attempt > 1 {
+		// The retry refilled the batch: close the miss so a later equal-sized batch opens fresh.
+		// (A retry asks for exactly the miss, so it clears it.)
+		b.missed = false
+	}
+	n := gotT + gotH + gotD + classN
+	if room := cap - len(f.party); n > room {
+		n = room // the server's hire cap: it hires what fits and no more
+	}
+	names := make([]string, 0, n)
+	for range n {
+		f.nameSeq++
+		names = append(names, fmt.Sprintf("Bot%02d", f.nameSeq))
+	}
+	f.party = append(f.party, names...)
+	planned := wantT + wantH + wantD
+	f.mu.Unlock()
+	f.push("TBM:HIRE_RAID|"+status+"|"+strconv.Itoa(n)+"|"+strconv.Itoa(planned)+"|"+
+		strconv.Itoa(gotT)+"|"+strconv.Itoa(gotH)+"|"+strconv.Itoa(gotD)+"|3|0|"+reason, "")
+}
+
+// hireBatchState tracks one fake hire batch: its attempts and the shortfall its last partial held back.
+type hireBatchState struct {
+	attempt             int
+	missed              bool
+	missT, missH, missD int
 }
 
 func (f *walkFakeAgent) eventsPage() events.Page {
@@ -1288,6 +1410,102 @@ func TestRaidWalkEnterGivesUpOnAHireBusyTooLong(t *testing.T) {
 
 // Walk 12: the walk bound the raid while the last hires were still on their join summon, and the server removed
 // every hire that joined after the bind. The refit (and the bind after it) waits hireSettleWait after the last hire.
+
+// Walk 12 s4: the rest batch's first reply is partial (dps short by 8); the retry hires them and the walk
+// exits 0 with the full roster. The retry asks for exactly the shortfall ("8d").
+func TestRaidWalkRetriesAPartialHire(t *testing.T) {
+	f := newFixture(t)
+	f.agent.hireShort = map[int]int{2: 8}
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.stderr.String())
+	}
+	sum := f.summary()
+	// The roster totals 40 and the server cap owns the 40th seat (amendment G2): the retry refills the
+	// short batch, and the party holds 39 with the cap note.
+	if len(f.agent.party) != raidwalk.HireCap {
+		t.Fatalf("party holds %d bots, want the capped roster of %d", len(f.agent.party), raidwalk.HireCap)
+	}
+	if !hasNote(sum, "hire cap 39: asked for 40 bots, the server hired 39") {
+		t.Fatalf("summary notes %q, want the hire cap note", sum.Notes)
+	}
+	var hires []string
+	for _, line := range f.agent.gmLines() {
+		if strings.HasPrefix(line, ".bot hire raid ") {
+			hires = append(hires, line)
+		}
+	}
+	if len(hires) != 4 {
+		t.Fatalf("hire lines %q, want 4 (3 batches + 1 retry)", hires)
+	}
+	if !strings.HasPrefix(hires[3], ".bot hire raid 8d level=60 t2") {
+		t.Fatalf("retry line %q, want it to ask for \"8d\"", hires[3])
+	}
+	if !hasNote(sum, "hire 10h 26d: 28 of 36 hired (partial); retry 1 in 30 s for 8d") {
+		t.Fatalf("summary notes %q, want the retry note", sum.Notes)
+	}
+}
+
+// The retry comes up short three times: exit 18 with "after 3 retries" and exactly 4 hire lines for the batch.
+func TestRaidWalkPartialHireGivesUpAfter3Retries(t *testing.T) {
+	f := newFixture(t)
+	f.agent.hireShort = map[int]int{1: 1}
+	f.agent.hireShortAlways = true
+	f.defaultRun("onyxias_lair")
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	if !strings.Contains(f.summary().EndReason, "after 3 retries") {
+		t.Fatalf("end reason %q, want it to name the retries", f.summary().EndReason)
+	}
+	n := 0
+	for _, line := range f.agent.gmLines() {
+		if strings.HasPrefix(line, ".bot hire raid 1t") || strings.HasPrefix(line, ".bot hire raid 3t") {
+			n++
+		}
+	}
+	if n != 4 {
+		t.Fatalf("%d hire lines for the short batch, want 4 (1 + 3 retries)", n)
+	}
+}
+
+// An mt batch ("1 warrior:tank") that answers partial or refused is not retried: exit 18, 1 hire line.
+func TestRaidWalkNeverRetriesAClassBatch(t *testing.T) {
+	for _, reply := range []string{
+		"TBM:HIRE_RAID|partial|0|1|0|0|0|2|0|No mercenary of that kind is available right now. Try again shortly.",
+		"TBM:HIRE_RAID|refused|0|1|0|0|0|2|0|No mercenary of that kind is available right now. Try again shortly.",
+	} {
+		f := newFixture(t)
+		f.defaultRun("onyxias_lair")
+		f.agent.hireReply = map[int]string{0: reply}
+		code := f.run(context.Background())
+		if code != exitRaidWalkFailed {
+			t.Fatalf("reply %q: exit %d, want 18", reply, code)
+		}
+		n := 0
+		for _, line := range f.agent.gmLines() {
+			if strings.HasPrefix(line, ".bot hire raid ") {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Fatalf("reply %q: %d hire lines, want 1 (no retry)", reply, n)
+		}
+	}
+}
+
+// parseHireReply reads the walk 12 s4 line field by field.
+func TestParseHireReplyWalk12(t *testing.T) {
+	r := parseHireReply("TBM:HIRE_RAID|partial|9|17|0|5|4|1|0|No mercenary of that kind is available right now. Try again shortly.")
+	if r.status != "partial" || r.hired != 9 || r.planned != 17 || r.tank != 0 || r.healer != 5 || r.dps != 4 {
+		t.Fatalf("parsed %+v, want partial 9 17 0 5 4", r)
+	}
+	if r.reason != "No mercenary of that kind is available right now. Try again shortly." {
+		t.Fatalf("reason %q", r.reason)
+	}
+}
+
 func TestRaidWalkWaitsForHiresToSettle(t *testing.T) {
 	f := newFixture(t)
 	f.defaultRun("onyxias_lair")
