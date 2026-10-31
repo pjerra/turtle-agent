@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -562,6 +563,7 @@ type fakeDash struct {
 	mu        sync.Mutex
 	fights    []walkFightRow
 	fightKeys []string
+	failFight int // the first n Fight calls fail
 }
 
 func (d *fakeDash) Login(ctx context.Context) error { return nil }
@@ -580,7 +582,14 @@ func (d *fakeDash) Fights(ctx context.Context, commander string) (json.RawMessag
 func (d *fakeDash) Fight(ctx context.Context, key string) (json.RawMessage, error) {
 	d.mu.Lock()
 	d.fightKeys = append(d.fightKeys, key)
+	fail := d.failFight > 0
+	if fail {
+		d.failFight--
+	}
 	d.mu.Unlock()
+	if fail {
+		return nil, errors.New("dashboard timeout")
+	}
 	return json.RawMessage(`{"fight":{"id":"4-5"}}`), nil
 }
 
@@ -1277,6 +1286,51 @@ func TestRaidWalkSavesFightsOncePerKey(t *testing.T) {
 	matches, _ := filepath.Glob(filepath.Join(f.out, "commanders-0001-walk.json"))
 	if len(matches) != 1 {
 		t.Fatalf("no commanders snapshot: %v", matches)
+	}
+}
+
+// TestRaidWalkSkipsLiveFightRows: a fight still running (live row, no detail yet) is not taken as seen, so the finished
+// fight under the same id is fetched and digested once it is filed.
+func TestRaidWalkSkipsLiveFightRows(t *testing.T) {
+	f := newFixture(t)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "k", Live: true}}
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	if sum := f.summary(); len(sum.Fights) != 0 || len(f.dash.fightKeys) != 0 {
+		t.Fatalf("a live row was taken: fights %+v keys %q", sum.Fights, f.dash.fightKeys)
+	}
+	f = newFixture(t)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "k", Dur: 1200, Outcome: "win", Step: 3, Deaths: 1, Warnings: 2}}
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	sum := f.summary()
+	if len(sum.Fights) != 1 || sum.Fights[0].Warnings != 2 || sum.Fights[0].Detail == nil {
+		t.Fatalf("fights %+v", sum.Fights)
+	}
+	if sum.RunLabel != "until boss (step 29)" || sum.SpeedFellBack {
+		t.Fatalf("run label %q, fell back %v", sum.RunLabel, sum.SpeedFellBack)
+	}
+}
+
+// TestRaidWalkRetriesAFailedFightDetail: a detail request that fails once does not lose the fight's digest; a later poll fetches it.
+func TestRaidWalkRetriesAFailedFightDetail(t *testing.T) {
+	f := newFixture(t)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.failFight = 1
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "k", Dur: 1200, Outcome: "win", Step: 3, Deaths: 1}}
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	sum := f.summary()
+	if len(sum.Fights) != 1 || sum.Fights[0].Detail == nil || len(f.dash.fightKeys) < 2 {
+		t.Fatalf("fights %+v, detail requests %d", sum.Fights, len(f.dash.fightKeys))
 	}
 }
 

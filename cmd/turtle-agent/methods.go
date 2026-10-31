@@ -13,6 +13,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/rpc"
 	"github.com/pjerra/turtle-agent/internal/session"
+	"github.com/pjerra/turtle-agent/internal/tbm"
 	"github.com/pjerra/turtle-agent/internal/worldconn"
 )
 
@@ -53,6 +54,8 @@ type unitsParams struct {
 	Hostile *bool   `json:"hostile,omitempty"`
 	Name    string  `json:"name,omitempty"`
 	Limit   int     `json:"limit,omitempty"`
+	// Bound keeps only the bots of the commander's binding (the newest TBM:VIEW frame's party; see unitRow).
+	Bound bool `json:"bound,omitempty"`
 }
 
 type targetParams struct {
@@ -184,15 +187,27 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	srv.Register("party", rpc.Typed(func(ctx context.Context, _ empty) (session.PartyInfo, error) {
 		return cur().Party(), nil
 	}))
-	srv.Register("units", rpc.Typed(func(ctx context.Context, p unitsParams) ([]objects.Unit, error) {
+	// viewFrame is the commander service's newest TBM:VIEW frame; set once that service is registered below.
+	var viewFrame func() (tbm.ViewFrame, bool)
+	srv.Register("units", rpc.Typed(func(ctx context.Context, p unitsParams) ([]unitRow, error) {
 		if p.Within == 0 {
 			p.Within = p.Near
 		}
-		us := cur().Units(objects.Filter{Near: p.Within, Entry: p.Entry, Hostile: p.Hostile, Name: p.Name, Limit: p.Limit})
-		if us == nil {
-			us = []objects.Unit{}
+		limit := p.Limit
+		if p.Bound {
+			limit = 5000 // look past the nearest 100: the caller's limit applies to the bound rows, below
 		}
-		return us, nil
+		us := cur().Units(objects.Filter{Near: p.Within, Entry: p.Entry, Hostile: p.Hostile, Name: p.Name, Limit: limit})
+		var bound map[packet.GUID]bool
+		if viewFrame != nil {
+			fr, ok := viewFrame()
+			bound = boundGUIDs(fr, ok, time.Now())
+		}
+		rows := unitRows(us, bound, p.Bound)
+		if p.Bound && p.Limit > 0 && len(rows) > p.Limit {
+			rows = rows[:p.Limit]
+		}
+		return rows, nil
 	}))
 	srv.Register("unit", rpc.Typed(func(ctx context.Context, p targetParams) (objects.Unit, error) {
 		u, err := cur().Unit(p.GUID, p.Name)
@@ -266,6 +281,10 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	stopAddons := registerAddonHost(srv, cur, opts.AddonDir)
 	brainCtl, lease, stopBrain := registerBrainMethods(srv, cur, opts.TracesDir)
 	cmdrSvc, stopCommander := registerCommanderMethods(srv, cur, opts.Planner, opts.EntryLedgerPath, opts.AccountProbeWindow)
+	viewFrame = func() (tbm.ViewFrame, bool) {
+		fr, _, ok := cmdrSvc.feed.Latest()
+		return fr, ok
+	}
 	stopDungeon, dungeonRun := registerDungeonMethods(srv, cur, opts.DungeonsDir, brainCtl, lease, opts.AccountProbeWindow, cmdrSvc)
 	dungeonRun.tracesDir = opts.TracesDir
 	dungeonRun.runMeta = opts.RunMeta
