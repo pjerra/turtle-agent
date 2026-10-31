@@ -973,6 +973,7 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 		}
 		w.tracker.Feed(now, st)
 		w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
+		w.recordRunLine(st, now)
 		w.noteLabel(st)
 		if st.Note != "" {
 			w.newNotes = append(w.newNotes, st.Note)
@@ -1346,9 +1347,15 @@ var errRunWentOn = errors.New("the run went on by itself")
 func (w *walk) handleWipe(ctx context.Context, step int) error {
 	// The run may already be regrouping by itself after the wipe (TB "regrouping by itself"):
 	// it stays running, rests, gathers and walks back on its own, so the recovery must not rest
-	// or resume it (walk 17b m910q s4, test2 s2). Decided once, from the status the wipe fired on.
+	// or resume it (walk 17b m910q s4, test2 s2). The decision needs the latest status running at
+	// this step, but the note may not be on that line: live TB sends "regrouping by itself" and
+	// then "regroup: waiting for X (dead), ... reviving" for the same step in one poll, so the
+	// wipe's last line is the waiting one. selfRegroupSeen looks at every line of the poll.
+	now := w.env.now()
 	selfRegroup := w.haveStatus && w.lastStatus.State == tbm.RunRunning && w.lastStatus.Step == step &&
-		selfRegroupNote(w.lastStatus.Note)
+		(selfRegroupNote(w.lastStatus.Note) || w.selfRegroupSeen(step, now))
+	// The observations explained this wipe: a later wipe needs its own line since the last recovery.
+	w.runLines = nil
 	if w.bossEngagedNow() {
 		w.note("wipe resume skipped: %s engaged", w.engagedBossWords())
 		return w.endWipe(ctx, step)
@@ -2120,9 +2127,9 @@ func (w *walk) restOutOfCombat(ctx context.Context, step int, d time.Duration, d
 		}
 		// Defence in depth for a run that goes on without the walk: a status after the rest began
 		// that is running again and either says "regrouped" (TB's note when its own regroup
-		// finishes) or stands on a later step means the rest and the resume are pointless.
-		if w.statusSeq > seq0 && w.haveStatus && w.lastStatus.State == tbm.RunRunning &&
-			(strings.HasPrefix(w.lastStatus.Note, "regrouped") || w.lastStatus.Step > step) {
+		// finishes) or stands on a later step means the rest and the resume are pointless. Every
+		// line of the poll counts, not only the last (walk 18 r5).
+		if w.runWentOnAfter(seq0, step) {
 			return errRunWentOn
 		}
 		if w.completeQuietView(ctx) {
@@ -2271,6 +2278,63 @@ func nearWipeStop(note string) bool {
 // resume it (walk 17b m910q s4, test2 s2).
 func selfRegroupNote(note string) bool {
 	return strings.Contains(strings.ToLower(note), "regrouping by itself")
+}
+
+// selfRegroupWindow is how close a "regrouping by itself" status line must be to the wipe it
+// explains. Live TB sends the note and then "regroup: waiting for X (dead), ... reviving" for the
+// same step in one poll (walk 18 r5: m910q s4, test2 s2), so the note is at most one poll old.
+const selfRegroupWindow = 30 * time.Second
+
+// runObsKeep bounds w.runLines: a running status stays for the self-regroup window and well past a
+// rest turn, while a long watch still cannot grow the list without bound.
+const runObsKeep = 5 * time.Minute
+
+// recordRunLine keeps a running status line for the wipe's self-regroup rule and the rest's
+// went-on rule, so both see every line of a poll and not only the last one (walk 18 r5). Older
+// lines are dropped: nothing reads past runObsKeep.
+func (w *walk) recordRunLine(st tbm.RunStatus, now time.Time) {
+	if st.State != tbm.RunRunning {
+		return
+	}
+	w.runLines = append(w.runLines, runObs{seq: w.statusSeq, step: st.Step, note: st.Note, at: now})
+	cut := 0
+	for cut < len(w.runLines) && now.Sub(w.runLines[cut].at) > runObsKeep {
+		cut++
+	}
+	if cut > 0 {
+		w.runLines = w.runLines[cut:]
+	}
+}
+
+// selfRegroupSeen says a running status line that reported the run regrouping by itself arrived for
+// this step within selfRegroupWindow of now. pollOnce keeps every running line of a poll, so the
+// note still counts when a later line of the same poll ("regroup: waiting ... reviving") is the
+// last status the wipe fires on (walk 18 r5).
+func (w *walk) selfRegroupSeen(step int, now time.Time) bool {
+	for i := len(w.runLines) - 1; i >= 0; i-- {
+		o := w.runLines[i]
+		if o.step != step || !selfRegroupNote(o.note) {
+			continue
+		}
+		return now.Sub(o.at) <= selfRegroupWindow
+	}
+	return false
+}
+
+// runWentOnAfter says a running status line the rest read after it began (seq0) shows the run going
+// on by itself: it says "regrouped" (TB's note when its own regroup finishes) or stands on a later
+// step. Every line of a poll counts, not only the last (walk 18 r5).
+func (w *walk) runWentOnAfter(seq0 uint64, step int) bool {
+	for i := len(w.runLines) - 1; i >= 0; i-- {
+		o := w.runLines[i]
+		if o.seq <= seq0 {
+			break
+		}
+		if strings.HasPrefix(o.note, "regrouped") || o.step > step {
+			return true
+		}
+	}
+	return false
 }
 
 // quietCheck is the revive point's quiet check (spec 3.5): every 5 s up to 120 s, with a patrol exempt when one

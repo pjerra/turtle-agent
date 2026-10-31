@@ -92,6 +92,9 @@ type walkFakeAgent struct {
 	views    int // bot_view calls, for the fault hooks' one Tick per watch loop
 	dead     map[string]bool
 	targeted bool
+	// pageSize serves up to this many queued event lines in one events page (0: one, as before).
+	// Walk 18 r5: live TB sends several TBM:RUN status lines of the same incident in one poll.
+	pageSize int
 
 	hostilesFn func(viewN int) []tbm.HostileRec
 	unitsFn    func(n int) []objects.Unit
@@ -585,20 +588,33 @@ func (f *walkFakeAgent) eventsPage() events.Page {
 		f.mu.Unlock()
 		return events.Page{Next: next}
 	}
-	q := f.lines[0]
-	f.lines = f.lines[1:]
-	f.next++
-	ev := events.Event{Seq: f.next, Kind: events.KindSystem, Text: q.raw, Data: map[string]any{"raw": q.raw}}
-	if q.text != "" {
-		ev.Text = q.text
+	n := 1
+	if f.pageSize > n {
+		n = f.pageSize
+	}
+	if n > len(f.lines) {
+		n = len(f.lines)
+	}
+	batch := append([]queuedEvent{}, f.lines[:n]...)
+	f.lines = f.lines[n:]
+	evs := make([]events.Event, 0, n)
+	for _, q := range batch {
+		f.next++
+		ev := events.Event{Seq: f.next, Kind: events.KindSystem, Text: q.raw, Data: map[string]any{"raw": q.raw}}
+		if q.text != "" {
+			ev.Text = q.text
+		}
+		evs = append(evs, ev)
 	}
 	next := f.next
 	hook := f.eventsHook
 	f.mu.Unlock()
 	if hook != nil {
-		hook(q.raw)
+		for _, q := range batch {
+			hook(q.raw)
+		}
 	}
-	return events.Page{Events: []events.Event{ev}, Next: next}
+	return events.Page{Events: evs, Next: next}
 }
 
 type viewReply struct {
@@ -2537,6 +2553,30 @@ func selfRegroupArm(f *fixture, raw string, queue bool) {
 // selfRegroupKill is selfRegroupArm for a line queued right away.
 func selfRegroupKill(f *fixture, raw string) { selfRegroupArm(f, raw, true) }
 
+// selfRegroupPair queues two status lines of the same step in ONE events page (pageSize 2) and kills
+// every hire when the second line is served: exactly the live order, where "regrouping by itself" is
+// followed by "regroup: waiting for X (dead), ... reviving" in the same poll (walk 18 r5).
+func selfRegroupPair(f *fixture, first, second string) {
+	f.agent.pageSize = 2
+	f.agent.mu.Lock()
+	f.agent.startQueue = append(f.agent.startQueue, queuedEvent{raw: first}, queuedEvent{raw: second})
+	prev := f.agent.eventsHook
+	f.agent.eventsHook = func(served string) {
+		if prev != nil {
+			prev(served)
+		}
+		if served != second {
+			return
+		}
+		f.agent.mu.Lock()
+		for _, name := range f.agent.party {
+			f.agent.dead[name] = true
+		}
+		f.agent.mu.Unlock()
+	}
+	f.agent.mu.Unlock()
+}
+
 // mcWipeFights is the dashboard fights read a wipe lands on: a boss already killed, nothing live.
 func mcWipeFights() []walkFightRow {
 	return []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "kill", BossName: "Lucifron", Leg: "lucifron", Step: 3, Deaths: 1}}
@@ -2647,6 +2687,75 @@ func TestRaidWalkWipeSelfRegroupRecoversWithDashboard(t *testing.T) {
 			t.Fatalf("notes %q, want the rest-and-resume recovery note", sum.Notes)
 		}
 	})
+}
+
+// TestRaidWalkWipeSelfRegroupOrderedLines (walk 18 r5, live replay): TB sends the self-regroup note
+// and then "regroup: waiting for X (dead), ... reviving" for the SAME step in one events page, so the
+// wipe's last status line is the waiting one, not the note. The walk must still take the self-regroup
+// path (revive the raid, no rest, no `run resume`), not the fallback rest-and-resume which sits in the
+// rest while the run fights on and times out at 3 x --wipe-rest.
+func TestRaidWalkWipeSelfRegroupOrderedLines(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.opts.wipeResume = 2
+	f.agent.startReply = zgStart(total, next)
+	step := next - 2
+	regroup := fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|begin|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)", step, total)
+	waiting := fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|begin|regroup: waiting for Smashy (dead), Gorebrand (dead), reviving", step, total)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = mcWipeFights()
+	selfRegroupPair(f, regroup, waiting)
+	var reviveAt time.Time
+	commandersAtRevive := 0
+	f.agent.onGM = func(line string) {
+		if !strings.HasPrefix(line, ".revive ") {
+			return
+		}
+		reviveAt = f.clock.now()
+		commandersAtRevive = f.dash.commandersCalls()
+	}
+	resumes := 0
+	f.agent.onResume = func() { resumes++ }
+	// After its own regroup the run marches on with the raid in combat every second frame, so the
+	// rest never gets 10 min of quiet; the done line lands 15 min after the revive.
+	f.agent.combatAllFn = func(n int) bool { return !reviveAt.IsZero() && n%2 == 0 }
+	doneQueued := false
+	f.agent.viewHook = func() {
+		if reviveAt.IsZero() || doneQueued || f.clock.now().Sub(reviveAt) < 15*time.Minute {
+			return
+		}
+		doneQueued = true
+		f.agent.mu.Lock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+		f.agent.mu.Unlock()
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (a self-regroup recovery counts once)", sum.WipeResumes)
+	}
+	if !hasNote(sum, "the run regroups by itself") {
+		t.Fatalf("notes %q, want the self-regroup recovery note (the note line is not the last of the poll)", sum.Notes)
+	}
+	if hasNote(sum, "the run went on by itself") {
+		t.Fatalf("notes %q, the fallback rest path ran instead of the self-regroup path", sum.Notes)
+	}
+	if resumes != 0 {
+		t.Fatalf("%d run resumes, want none (the run regroups on its own)", resumes)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want none (the recovery never stops the run)", n)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until (the run went on after the recovery)", sum.EndReason)
+	}
+	if got := f.dash.commandersCalls(); got <= commandersAtRevive {
+		t.Fatalf("dashboard Commanders reads %d, want more than the %d at the last revive (the watch loop runs again)", got, commandersAtRevive)
+	}
 }
 
 // TestRaidWalkWipeSelfRegroupBudget: a self-regroup recovery counts against --wipe-resume like
@@ -2898,6 +3007,119 @@ func TestRaidWalkWipeResumeRunWentOnDuringRest(t *testing.T) {
 	}
 	if resumes != 0 {
 		t.Fatalf("%d run resumes, want none (the run resumed itself)", resumes)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until", sum.EndReason)
+	}
+}
+
+// TestRaidWalkWipeResumeRunWentOnMultipleLines (walk 18 r5): the run's own regroup finishes with a
+// "regrouped" status that is NOT the last line of its events page (a later line of the same step
+// follows). The rest must still see it and stop: the recovery counts and no `run resume` goes out.
+// Before the fix only the page's last line was read, so the rest ran on to the resume.
+func TestRaidWalkWipeResumeRunWentOnMultipleLines(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.allDeadFromHires()
+	var reviveAt time.Time
+	hireHook := f.agent.onGM
+	f.agent.onGM = func(line string) {
+		if hireHook != nil {
+			hireHook(line)
+		}
+		if strings.HasPrefix(line, ".revive ") {
+			reviveAt = f.clock.now()
+		}
+	}
+	f.agent.pageSize = 2
+	views, queued := 0, false
+	f.agent.viewHook = func() {
+		if reviveAt.IsZero() || queued {
+			return
+		}
+		views++
+		if views < 4 {
+			return
+		}
+		queued = true
+		f.agent.mu.Lock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|10/29|onyxia|move|walk|regrouped"},
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|10/29|onyxia|move|walk|walking"},
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands"})
+		f.agent.mu.Unlock()
+	}
+	resumes := 0
+	f.agent.onResume = func() { resumes++ }
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)
+	}
+	if !hasNote(sum, "the run went on by itself") {
+		t.Fatalf("notes %q, want the went-on recovery note (the page's last line is no regroup line)", sum.Notes)
+	}
+	if resumes != 0 {
+		t.Fatalf("%d run resumes, want none (the run resumed itself)", resumes)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until", sum.EndReason)
+	}
+}
+
+// TestRaidWalkWipeResumeRunWentOnLaterStep (walk 18 r5): the rest reads a running status on a LATER
+// step whose note does not start with "regrouped". The rest still ends and the recovery counts; the
+// `Step > step` half of the guard is what fires here.
+func TestRaidWalkWipeResumeRunWentOnLaterStep(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.allDeadFromHires()
+	var reviveAt time.Time
+	hireHook := f.agent.onGM
+	f.agent.onGM = func(line string) {
+		if hireHook != nil {
+			hireHook(line)
+		}
+		if strings.HasPrefix(line, ".revive ") {
+			reviveAt = f.clock.now()
+		}
+	}
+	views, queued := 0, false
+	f.agent.viewHook = func() {
+		if reviveAt.IsZero() || queued {
+			return
+		}
+		views++
+		if views < 4 {
+			return
+		}
+		queued = true
+		f.agent.mu.Lock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|11/29|onyxia|move|walk|walking"},
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands"})
+		f.agent.mu.Unlock()
+	}
+	resumes := 0
+	f.agent.onResume = func() { resumes++ }
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)
+	}
+	if !hasNote(sum, "the run went on by itself") {
+		t.Fatalf("notes %q, want the went-on recovery note (a later step with no regroup note)", sum.Notes)
+	}
+	if resumes != 0 {
+		t.Fatalf("%d run resumes, want none (the run went on by itself)", resumes)
 	}
 	if sum.EndReason != "until" {
 		t.Fatalf("end %q, want until", sum.EndReason)
@@ -3828,5 +4050,22 @@ func TestRaidWalkExtraArgumentNamesIt(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), `unexpected argument "extra"`) {
 		t.Fatalf("stderr does not name the extra argument: %q", stderr.String())
+	}
+}
+
+// TestRaidWalkWipeRestFloor: the rest's quiet window counts from the last non-quiet poll, so a
+// --wipe-rest below 30 s would end the window before the first quiet poll could ever close it.
+// The flag refuses it (walk 18 r5).
+func TestRaidWalkWipeRestFloor(t *testing.T) {
+	var stderr bytes.Buffer
+	if _, code := parseRaidWalkArgs([]string{"zul_gurub", "--wipe-rest", "20s"}, &stderr); code != exitUsage {
+		t.Fatalf("--wipe-rest 20s: exit %d, want %d", code, exitUsage)
+	}
+	if !strings.Contains(stderr.String(), "--wipe-rest must be 30s or more") {
+		t.Fatalf("stderr does not name the floor: %q", stderr.String())
+	}
+	var ok bytes.Buffer
+	if _, code := parseRaidWalkArgs([]string{"zul_gurub", "--wipe-rest", "30s"}, &ok); code != exitOK {
+		t.Fatalf("--wipe-rest 30s: exit %d, want %d (%q)", code, exitOK, ok.String())
 	}
 }

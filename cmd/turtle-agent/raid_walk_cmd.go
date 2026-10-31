@@ -308,8 +308,8 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 		fmt.Fprintf(stderr, "raid-walk: --wipe-resume wants 0 to 3\n")
 		return o, exitUsage
 	}
-	if o.wipeRest <= 0 {
-		fmt.Fprintf(stderr, "raid-walk: --wipe-rest must be above 0\n")
+	if o.wipeRest < 30*time.Second {
+		fmt.Fprintf(stderr, "raid-walk: --wipe-rest must be 30s or more\n")
 		return o, exitUsage
 	}
 	if o.autoResume < 0 || o.autoResume > 3 {
@@ -547,6 +547,11 @@ type walk struct {
 	// can tell a fresh post-resume status from a retained pre-resume one.
 	statusSeq       uint64
 	resumeStatusSeq uint64
+	// runLines are the recent running status lines pollOnce read (newest last). Walk 18 r5: a
+	// poll can carry several status lines of the same incident (live TB sends the "regrouping by
+	// itself" note and then "regroup: waiting ... reviving" for the same step in one page), so the
+	// wipe's self-regroup rule and the rest's went-on rule must see every line, not only the last.
+	runLines []runObs
 	dashAt          time.Time
 	fightAt         time.Time
 	lastFrameSave   time.Time
@@ -604,6 +609,15 @@ type botPos struct {
 	mapID    uint32
 	dead     bool
 	at       time.Time
+}
+
+// runObs is one running status line the walk read: its step, what it said and the status sequence
+// it arrived at (walk 18 r5).
+type runObs struct {
+	seq  uint64
+	step int
+	note string
+	at   time.Time
 }
 
 // raidWalkRun runs a parsed walk; tests call it directly with fakes.

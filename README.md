@@ -2209,7 +2209,8 @@ minute at 100 % or gone, held 20 s), then revives: GM to step 1's point, a quiet
 no moving hostile within 80 yd, no patrol path within 45 yd, rechecked every 5 s for 120 s) and the plan's entrance
 once, `.summon` then `.revive` every hire. A wipe or a near-wipe stop outside a boss fight recovers while
 `--wipe-resume` has recoveries left: no `run stop`, the dead raid is revived, it rests `--wipe-rest` out of combat
-(wall time: the quiet window is measured on the clock, not counted in poll turns) and the run resumes (the server must
+(wall time: the quiet window is measured on the clock, not counted in poll turns, and it counts from the last poll
+that was not quiet; `--wipe-rest` below 30s is refused) and the run resumes (the server must
 show running again within 60 s); the summary notes each recovery
 (`wipe-resume <n>/<K> at step <s>: revived <d>, rested <m>, resumed`) and counts them in `wipe_resumes`, and the end
 stays truthful. When the run regroups by itself after a wipe (`regrouping by itself`), the walk revives the raid and
@@ -2235,9 +2236,11 @@ does not check that the run is paused before reviving, and the 60 s running chec
 before the resume; the timeout note always names 3 x `--wipe-rest` even when the walk ceiling cut it shorter; a boss's
 `first` add that is engaged as ordinary trash (for example a Zulian Tiger pack in ZG) still counts as a boss for 120 s
 and blocks that wipe's recovery; a second wipe during the rest or the resume wait ends 19 without the old ending's
-reset-wait revive; the self-regroup match is TB's own note text (`regrouping by itself`), so a reworded note falls
-back on the rest's own `regrouped`/later-step guard; a near-wipe rest still drops `IncidentBossEngaged` and writes no
-dashboard saves (it is bounded, and the recovery re-checks the boss afterwards); and the tracker's boss latch fires
+reset-wait revive; the self-regroup match is TB's own note text (`regrouping by itself`), read from every status line
+of a poll (live TB sends the note and then "regroup: waiting ... reviving" for the same step together), so a reworded
+note falls back on the rest's own `regrouped`/later-step guard, which also reads every line of a poll; a near-wipe
+rest still drops `IncidentBossEngaged` and writes no dashboard saves (it is bounded, and the recovery re-checks the
+boss afterwards); and the tracker's boss latch fires
 once per walk, so a boss engaged after an earlier one reaches the walk only through the wipe gate.
 
 Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
