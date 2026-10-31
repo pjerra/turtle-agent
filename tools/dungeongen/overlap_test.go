@@ -31,7 +31,10 @@ import (
 // formations by spawn (the run leader drops every other formation's units), so the Headhunter row's 71 yd
 // reaches the static pack's and F3/F4's spawns, and the F3, F4, F7 and F5/F6 rows count their neighbours'
 // spawns; none of them is pulled by those rows.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "naxxramas": 104, "blackwing_lair": 50, "timbermaw_hold": 13, "temple_of_ahnqiraj": 128, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6, "zul_gurub": 39, "molten_core": 10, "upper_karazhan_halls": 6}
+// Karazhan Crypt's 8 are Skeletal Remains 91924: 7 never wake (no Remains Trigger within 30 yd of them, in the south wing and the
+// lower crypt, dead unselectable props) and 1 awake one stands 12.4 yd from a wandering pull - outside its 10 yd radius, inside the
+// check's 3 yd aggro margin.
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "naxxramas": 104, "blackwing_lair": 50, "timbermaw_hold": 13, "temple_of_ahnqiraj": 128, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6, "zul_gurub": 39, "molten_core": 10, "upper_karazhan_halls": 6, "karazhan_crypt": 8}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {
