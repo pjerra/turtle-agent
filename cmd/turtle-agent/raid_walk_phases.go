@@ -812,7 +812,7 @@ func (w *walk) checkStartLine(ctx context.Context, line string) error {
 	if w.tracker != nil {
 		w.tracker.Feed(w.env.now(), st)
 	}
-	w.lastStatus, w.haveStatus = st, true
+	w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
 	w.noteLabel(st)
 	if st.State != tbm.RunRunning {
 		return stopf(exitRaidWalkFailed, "run start: the run is %s: %s", st.State, line)
@@ -972,7 +972,7 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 			continue
 		}
 		w.tracker.Feed(now, st)
-		w.lastStatus, w.haveStatus = st, true
+		w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
 		w.noteLabel(st)
 		if st.Note != "" {
 			w.newNotes = append(w.newNotes, st.Note)
@@ -1666,7 +1666,6 @@ func (w *walk) recoverWipe(ctx context.Context, step int) error {
 	}
 	from := w.env.now()
 	deadline := recoveryDeadline(from, w.opts.wipeRest, w.opts.maxRunMinutes, w.started)
-	_, _, hadBoss := w.tracker.BossEngaged()
 	if err := w.reviveHires(ctx, deadline); err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
 			return timeout.end(step)
@@ -1690,7 +1689,7 @@ func (w *walk) recoverWipe(ctx context.Context, step int) error {
 		}
 		return err
 	}
-	if err := w.recoveredBoss(ctx, hadBoss); err != nil {
+	if err := w.recoveredBoss(ctx, step); err != nil {
 		return err
 	}
 	w.wipeResumes++
@@ -1707,7 +1706,6 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 	}
 	from := w.env.now()
 	deadline := recoveryDeadline(from, w.opts.wipeRest, w.opts.maxRunMinutes, w.started)
-	_, _, hadBoss := w.tracker.BossEngaged()
 	revived, err := w.recoverNearWipeRevive(ctx, deadline)
 	if err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
@@ -1731,7 +1729,7 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 		}
 		return err
 	}
-	if err := w.recoveredBoss(ctx, hadBoss); err != nil {
+	if err := w.recoveredBoss(ctx, step); err != nil {
 		return err
 	}
 	w.wipeResumes++
@@ -1775,15 +1773,11 @@ func (w *walk) recoverNearWipeRevive(ctx context.Context, deadline time.Time) (i
 func (w *walk) freshWipeRest() (time.Duration, error) {
 	if w.dash == nil {
 		now := w.env.now()
-		if _, _, ok := w.tracker.BossEngaged(); ok {
+		if w.bossEngagedNow() {
 			w.note("wipe resume skipped: boss state unknown")
 			return 0, errWipeResumeSkipped
 		}
 		if !w.bossLatchAt.IsZero() && now.Sub(w.bossLatchAt) < 120*time.Second {
-			w.note("wipe resume skipped: boss state unknown")
-			return 0, errWipeResumeSkipped
-		}
-		if w.bossEngagedNow() {
 			w.note("wipe resume skipped: boss state unknown")
 			return 0, errWipeResumeSkipped
 		}
@@ -1828,7 +1822,7 @@ func (w *walk) freshWipeRest() (time.Duration, error) {
 // for a wipe, the old paused ending for a near-wipe).
 func (w *walk) bossUnknown(ctx context.Context) error {
 	now := w.env.now()
-	if _, _, ok := w.tracker.BossEngaged(); ok {
+	if w.bossEngagedNow() {
 		w.note("wipe resume skipped: boss state unknown")
 		return errWipeResumeSkipped
 	}
@@ -1837,10 +1831,6 @@ func (w *walk) bossUnknown(ctx context.Context) error {
 		return errWipeResumeSkipped
 	}
 	if w.dash == nil {
-		if w.bossEngagedNow() {
-			w.note("wipe resume skipped: boss state unknown")
-			return errWipeResumeSkipped
-		}
 		return nil
 	}
 	if w.bossReadAt.IsZero() || now.Sub(w.bossReadAt) > 30*time.Second || w.bossCheckErr != nil {
@@ -1942,15 +1932,85 @@ func (w *walk) completeDeadView(ctx context.Context) ([]string, bool) {
 	return dead, true
 }
 
-// recoveredBoss routes a boss engaged during the recovery to the boss path: the rest and the resume wait drain the
-// tracker's incidents, so without this a boss the revived raid woke would never reach handleBoss. A boss latched
-// before the recovery cannot be unhandled (the watch dispatches it at once), so only a fresh latch routes.
-func (w *walk) recoveredBoss(ctx context.Context, hadBoss bool) error {
-	entry, step, ok := w.tracker.BossEngaged()
-	if !ok || hadBoss {
+// recoveredBoss routes a boss engaged during the recovery to the boss path, exactly as the
+// watch loop does: the rest and the resume wait drain the tracker's incidents, so without this
+// a boss the revived raid woke would never reach handleBoss. The tracker's latch cannot tell a
+// new boss from one engaged before the recovery (it fires once for life), so this decides from
+// what the frames say now — the same bossEngagedNow the non-recovery path gates on, with the
+// row's plan-boss identity from the frames — and reuses the watch loop's handleBoss call,
+// including its run-leader-fights-its-boss exception.
+func (w *walk) recoveredBoss(ctx context.Context, step int) error {
+	if !w.bossEngagedNow() {
+		return nil
+	}
+	entry, ok := w.engagedBossEntry()
+	if !ok {
+		// The gate holds on a fresh target whose rows left the frames: name the
+		// last plan-boss row seen so the boss path watches it settle.
+		entry, ok = w.lastBossRow()
+		if !ok {
+			return nil
+		}
+	}
+	// Review round 3: the exception needs a status received after the resume
+	// went out — pollRunRunning accepts the retained pre-resume line, and a
+	// stale boss-kind status must not hide a newly engaged boss. A fresh
+	// post-resume boss-kind status keeps the old behaviour: the run leader
+	// fights its boss step.
+	if w.statusSeq > w.resumeStatusSeq && w.runFightsBoss() {
+		w.note("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", entry, step, w.untilLabel)
 		return nil
 	}
 	return w.handleBoss(ctx, raidwalk.IncidentBossEngaged{Entry: entry, Step: step, At: w.env.now()})
+}
+
+// engagedBossEntry names the engaged plan boss the frames hold now: the freshest row (<= 15 s
+// old) with hp left that is not a reset (the same row filters bossEngagedNow gates on), so an
+// earlier boss that died, reset or left the frames is never named. Zero when no live row names
+// one — the rows-gone-but-target-fresh case the gate still calls engaged falls to lastBossRow.
+func (w *walk) engagedBossEntry() (uint32, bool) {
+	now := w.env.now()
+	var best uint32
+	var bestRow hostileState
+	bestAt := time.Time{}
+	for entry, row := range w.bossRows {
+		if !w.bossSet[entry] || now.Sub(row.at) > 15*time.Second {
+			continue
+		}
+		if row.hppct == 0 {
+			continue
+		}
+		if row.target == 0 && row.hppct == 100 && !w.bossTargetAt.IsZero() && now.Sub(w.bossTargetAt) >= 30*time.Second {
+			continue
+		}
+		if best == 0 || (row.target != 0 && bestRow.target == 0) ||
+			(row.target != 0) == (bestRow.target != 0) && (row.at.After(bestAt) ||
+				row.at.Equal(bestAt) && entry < best) {
+			best, bestRow, bestAt = entry, row, row.at
+		}
+	}
+	if best == 0 {
+		return 0, false
+	}
+	return best, true
+}
+
+// lastBossRow names the freshest plan-boss row the frames ever held (rows are never pruned).
+func (w *walk) lastBossRow() (uint32, bool) {
+	bestAt := time.Time{}
+	var best uint32
+	for entry, row := range w.bossRows {
+		if !w.bossSet[entry] {
+			continue
+		}
+		if best == 0 || row.at.After(bestAt) {
+			bestAt, best = row.at, entry
+		}
+	}
+	if best == 0 {
+		return 0, false
+	}
+	return best, true
 }
 
 // restOutOfCombat polls bot_view every 5 s and waits for d of continuous quiet (review 2: a poll
@@ -2049,6 +2109,10 @@ func (w *walk) resumeRun(ctx context.Context, from time.Time, rest time.Duration
 		return stopf(exitRaidWalkFailed, "run resume: no ACK (%s)", rep.Reply.Line)
 	}
 	w.logLine(w.env.now(), "> .bot run resume")
+	// Review round 3: only a status received after this point may route the
+	// frames' boss through the run-leader exception; a retained pre-resume
+	// boss-kind line must not hide a newly engaged boss.
+	w.resumeStatusSeq = w.statusSeq
 	deadline := recoveryDeadline(from, rest, w.opts.maxRunMinutes, w.started)
 	waitEnd := w.env.now().Add(60 * time.Second)
 	if waitEnd.After(deadline) {

@@ -540,12 +540,17 @@ type walk struct {
 
 	stepFirst *dungeon.Point
 
-	lastStatus    tbm.RunStatus
-	haveStatus    bool
-	dashAt        time.Time
-	fightAt       time.Time
-	lastFrameSave time.Time
-	dashWarned    bool
+	lastStatus tbm.RunStatus
+	haveStatus bool
+	// Review round 3: statusSeq counts every received run status; resumeRun
+	// captures it before issuing the resume (resumeStatusSeq) so recoveredBoss
+	// can tell a fresh post-resume status from a retained pre-resume one.
+	statusSeq       uint64
+	resumeStatusSeq uint64
+	dashAt          time.Time
+	fightAt         time.Time
+	lastFrameSave   time.Time
+	dashWarned      bool
 	// Review round 2: the boss evidence the recovery needs. bossReadAt is when the last
 	// dashboard fights/boss read succeeded (zero: never), bossEngagedAt when it last
 	// showed an engaged boss, bossLatchAt when the frames last latched one, bossCheckErr

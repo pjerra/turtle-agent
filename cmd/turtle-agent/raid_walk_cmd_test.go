@@ -1753,6 +1753,323 @@ func TestRaidWalkWipeResumeAfterBossWinRecovers(t *testing.T) {
 	}
 }
 
+// TestRaidWalkWipeResumeAfterEarlierBossKillRecovers (wipe-resume latch): the
+// frames engage the boss at an earlier step (the tracker latches the first
+// boss it sees and never forgets), the dashboard fight row says the boss died
+// ("kill"), and a trash wipe more than 120 s after the last boss frame
+// recovers: wipe_resumes 1 and no "boss state unknown" note. Before the fix
+// the tracker's latch blocked this recovery.
+func TestRaidWalkWipeResumeAfterEarlierBossKillRecovers(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "kill", BossName: "Lucifron", Leg: "lucifron", Step: 3, Deaths: 1}}
+	// The boss shows in the frames only at the start of the walk, then the
+	// raid wipes on trash 200 s of fake time later, past the 120 s
+	// bossLatchAt window. The kill runs inside the frame call, so the wipe
+	// lands late in the walk.
+	t0 := f.clock.now()
+	killed := false
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		now := f.clock.now()
+		if !killed && now.Sub(t0) > 200*time.Second {
+			killed = true
+			f.agent.mu.Lock()
+			for _, name := range f.agent.party {
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		if now.Sub(t0) < 45*time.Second {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	f.agent.onResume = func() {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|resumed", next-1, total)},
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, "so the run leader fights it") {
+		t.Fatalf("notes %q, want the boss-fight note (the early engagement must latch)", sum.Notes)
+	}
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (a boss killed long before the wipe does not block recovery)", sum.WipeResumes)
+	}
+	if hasNote(sum, "boss state unknown") {
+		t.Fatalf("notes %q, want no boss-unknown skip", sum.Notes)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until (the run went on after the recovery)", sum.EndReason)
+	}
+}
+
+// TestRaidWalkWipeResumeBossStillEngagedSkips: the same walk, but the boss is
+// still in the frames when the late trash wipe lands. The wipe still ends the
+// walk the old way (handleWipe's bossEngagedNow check fires before any
+// recovery: exit 19, wipe_resumes 0, no resume).
+func TestRaidWalkWipeResumeBossStillEngagedSkips(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "kill", BossName: "Lucifron", Leg: "lucifron", Step: 3, Deaths: 1}}
+	t0 := f.clock.now()
+	killed := false
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if now := f.clock.now(); !killed && now.Sub(t0) > 200*time.Second {
+			killed = true
+			f.agent.mu.Lock()
+			for _, name := range f.agent.party {
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 90, Target: packet.GUID(1000)}}
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, "so the run leader fights it") {
+		t.Fatalf("notes %q, want the boss-fight note (the engagement must latch)", sum.Notes)
+	}
+	if sum.WipeResumes != 0 {
+		t.Fatalf("wipe_resumes %d, want 0 (a boss still in the frames blocks recovery)", sum.WipeResumes)
+	}
+	if hasNote(sum, "wipe-resume ") {
+		t.Fatalf("notes %q, want no recovery note (the wipe ended as before, with no resume)", sum.Notes)
+	}
+}
+
+// TestRaidWalkWipeResumeRoutesNewBossToHandleBoss (review 2 HIGH): boss A is
+// engaged early (the tracker latches it for life) and the dashboard files it
+// as outcome "kill", so a trash wipe more than 120 s later recovers. Boss B
+// wakes during the resume wait: the walk must route it to handleBoss (exit 19
+// with the boss-B note and stop reason), not report a clean wipe-resume while
+// a boss fight is live. Before the fix the lifetime latch made recoveredBoss
+// always see hadBoss and skip the routing.
+func TestRaidWalkWipeResumeRoutesNewBossToHandleBoss(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "kill", BossName: "Lucifron", Leg: "lucifron", Step: 3, Deaths: 1}}
+	t0 := f.clock.now()
+	killed := false
+	resumed := false
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		now := f.clock.now()
+		if !killed && now.Sub(t0) > 200*time.Second {
+			killed = true
+			f.agent.mu.Lock()
+			for _, name := range f.agent.party {
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		if now.Sub(t0) < 45*time.Second {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		if resumed {
+			return []tbm.HostileRec{{GUID: 9, Entry: 11982, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	f.agent.onResume = func() {
+		resumed = true
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|resumed", next-1, total)},
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, "so the run leader fights it") {
+		t.Fatalf("notes %q, want the boss-fight note (the early engagement must latch)", sum.Notes)
+	}
+	if sum.WipeResumes != 0 {
+		t.Fatalf("wipe_resumes %d, want 0 (a boss engaged during the resume wait is not a recovery)", sum.WipeResumes)
+	}
+	if !hasNote(sum, "boss 11982 engaged") {
+		t.Fatalf("notes %q, want the handleBoss note for the new boss", sum.Notes)
+	}
+	if !strings.Contains(sum.EndReason, "boss 11982 engaged") {
+		t.Fatalf("end %q, want the boss stop reason for the new boss", sum.EndReason)
+	}
+	if hasNote(sum, "wipe-resume ") {
+		t.Fatalf("notes %q, want no recovery note (the walk routed to the boss path)", sum.Notes)
+	}
+}
+
+// TestRaidWalkWipeResumeStaleBossStatusRoutesNewBossToHandleBoss (review 3
+// HIGH): --until "step N" past the boss, and the retained status is an earlier
+// boss-kind line. A trash wipe recovers with NO fresh post-resume run line,
+// and a new boss is engaged in the current frames. The walk must route it to
+// handleBoss (exit 19 with the new boss's note and stop reason): the stale
+// pre-resume boss-kind status must not count as the run fighting its boss.
+// Before the fix recoveredBoss applied the runFightsBoss exception on the
+// retained status and reported a clean wipe-resume.
+func TestRaidWalkWipeResumeStaleBossStatusRoutesNewBossToHandleBoss(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "kill", BossName: "Lucifron", Leg: "lucifron", Step: 3, Deaths: 1}}
+	t0 := f.clock.now()
+	killed := false
+	resumed := false
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		now := f.clock.now()
+		if !killed && now.Sub(t0) > 200*time.Second {
+			killed = true
+			f.agent.mu.Lock()
+			for _, name := range f.agent.party {
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		if now.Sub(t0) < 45*time.Second {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		if resumed {
+			return []tbm.HostileRec{{GUID: 9, Entry: 11982, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	// No fresh post-resume run line: pollRunRunning passes on the retained
+	// pre-resume boss-kind status, so recoveredBoss must still route the
+	// frames' new boss to handleBoss.
+	f.agent.onResume = func() {
+		resumed = true
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, "so the run leader fights it") {
+		t.Fatalf("notes %q, want the boss-fight note (the early engagement must latch)", sum.Notes)
+	}
+	if sum.WipeResumes != 0 {
+		t.Fatalf("wipe_resumes %d, want 0 (a boss engaged after the resume is not a recovery)", sum.WipeResumes)
+	}
+	bossRouted := false
+	for _, n := range sum.Notes {
+		if strings.HasPrefix(n, "boss 11982 engaged at step") && !strings.Contains(n, "so the run leader fights it") {
+			bossRouted = true
+		}
+	}
+	if !bossRouted {
+		t.Fatalf("notes %q, want the handleBoss note for the new boss (not the run-leader exception)", sum.Notes)
+	}
+	if !strings.Contains(sum.EndReason, "boss 11982 engaged") {
+		t.Fatalf("end %q, want the boss stop reason for the new boss", sum.EndReason)
+	}
+	if hasNote(sum, "wipe-resume ") {
+		t.Fatalf("notes %q, want no recovery note (the walk routed to the boss path)", sum.Notes)
+	}
+}
+
+// TestRaidWalkWipeResumeFreshBossStatusKeepsTheFight (review 3): the same
+// walk, but a fresh post-resume run line says the run is on its boss step. The
+// run leader keeps the fight: no handleBoss run stop, the recovery completes
+// (wipe_resumes 1) and the walk ends at its until.
+func TestRaidWalkWipeResumeFreshBossStatusKeepsTheFight(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "kill", BossName: "Lucifron", Leg: "lucifron", Step: 3, Deaths: 1}}
+	t0 := f.clock.now()
+	killed := false
+	resumed := false
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		now := f.clock.now()
+		if !killed && now.Sub(t0) > 200*time.Second {
+			killed = true
+			f.agent.mu.Lock()
+			for _, name := range f.agent.party {
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		if now.Sub(t0) < 45*time.Second {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		if resumed {
+			return []tbm.HostileRec{{GUID: 9, Entry: 11982, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	f.agent.onResume = func() {
+		resumed = true
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting post-resume", next-1, total)},
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want 0: the run leader fights its boss step (no handleBoss)", n)
+	}
+	sum := f.summary()
+	if !hasNote(sum, "so the run leader fights it") {
+		t.Fatalf("notes %q, want the boss-fight note (the fresh post-resume status keeps the fight)", sum.Notes)
+	}
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (the fresh post-resume boss status keeps the fight)", sum.WipeResumes)
+	}
+	if !hasNote(sum, "wipe-resume ") {
+		t.Fatalf("notes %q, want the recovery note (the walk resumed, it never routed to the boss path)", sum.Notes)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until (the run went on after the recovery)", sum.EndReason)
+	}
+}
+
 // TestRaidWalkWipeResumeStaleViewRestartsQuiet (review 2): bot_view fails and drops a hire for
 // some polls of the rest. No `.bot run resume` may go out until a full window of complete views
 // has passed after the last bad poll.
