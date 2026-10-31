@@ -2758,6 +2758,96 @@ func TestRaidWalkWipeSelfRegroupOrderedLines(t *testing.T) {
 	}
 }
 
+// TestRaidWalkWipeSelfRegroupSameStepRegrouped (walk 19 r6): the wipe's page carries the self-regroup
+// note and then the run's own "regrouped" for the SAME step, so the note is not the last status line.
+// The self-regroup path must still be taken: revive, no rest, no `run resume`, one --wipe-resume.
+func TestRaidWalkWipeSelfRegroupSameStepRegrouped(t *testing.T) {
+	wipeSelfRegroupPage(t, func(step, total int) string {
+		return fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|begin|regrouped", step, total)
+	})
+}
+
+// TestRaidWalkWipeSelfRegroupAdvancedStep (walk 19 r6): the wipe's page carries the self-regroup note
+// and then a running line of the NEXT step — the run going on by itself, which also moves the step the
+// tracker fires the wipe on. The note still explains the wipe: the self-regroup path must be taken.
+// Before the fix selfRegroup was gated on lastStatus.Step == step, so this page's note was lost,
+// runLines was cleared and the walk sat out the fallback rest's 3 x --wipe-rest timeout.
+func TestRaidWalkWipeSelfRegroupAdvancedStep(t *testing.T) {
+	wipeSelfRegroupPage(t, func(step, total int) string {
+		return fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|begin|walking", step+1, total)
+	})
+}
+
+// wipeSelfRegroupPage runs the self-regroup page scenario of the two tests above: a two-line events
+// page whose first line is the self-regroup note at the wipe's step and whose second is second(step,
+// total), with every hire dying on the second line's delivery. The run then marches on in combat (never
+// 10 min of quiet) and a done line lands 15 min after the revive: only the self-regroup path (no rest,
+// no `run resume`) can reach the until ending. second's own step decides what the tracker makes of the
+// wipe (the run's step when it is the note's, the next one when the line moved it).
+func wipeSelfRegroupPage(t *testing.T, second func(step, total int) string) {
+	t.Helper()
+	f, next, total := bossDoneFixture(t)
+	f.opts.wipeResume = 2
+	f.agent.startReply = zgStart(total, next)
+	step := next - 2
+	regroup := fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|begin|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)", step, total)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = mcWipeFights()
+	selfRegroupPair(f, regroup, second(step, total))
+	var reviveAt time.Time
+	commandersAtRevive := 0
+	f.agent.onGM = func(line string) {
+		if !strings.HasPrefix(line, ".revive ") {
+			return
+		}
+		reviveAt = f.clock.now()
+		commandersAtRevive = f.dash.commandersCalls()
+	}
+	resumes := 0
+	f.agent.onResume = func() { resumes++ }
+	// After its own regroup the run marches on with the raid in combat every second frame: never
+	// 10 min of quiet. The done line lands 15 min after the revive.
+	f.agent.combatAllFn = func(n int) bool { return !reviveAt.IsZero() && n%2 == 0 }
+	doneQueued := false
+	f.agent.viewHook = func() {
+		if reviveAt.IsZero() || doneQueued || f.clock.now().Sub(reviveAt) < 15*time.Minute {
+			return
+		}
+		doneQueued = true
+		f.agent.mu.Lock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+		f.agent.mu.Unlock()
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (a self-regroup recovery counts once)", sum.WipeResumes)
+	}
+	if !hasNote(sum, "the run regroups by itself") {
+		t.Fatalf("notes %q, want the self-regroup recovery note (the note line is not the last of the page)", sum.Notes)
+	}
+	if hasNote(sum, "the run went on by itself") {
+		t.Fatalf("notes %q, the fallback rest path ran instead of the self-regroup path", sum.Notes)
+	}
+	if resumes != 0 {
+		t.Fatalf("%d run resumes, want none (the run regroups on its own)", resumes)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want none (the recovery never stops the run)", n)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until (the run went on after the recovery)", sum.EndReason)
+	}
+	if got := f.dash.commandersCalls(); got <= commandersAtRevive {
+		t.Fatalf("dashboard Commanders reads %d, want more than the %d at the last revive (the watch loop runs again)", got, commandersAtRevive)
+	}
+}
+
 // TestRaidWalkWipeSelfRegroupBudget: a self-regroup recovery counts against --wipe-resume like
 // every other one. With two recoveries left, two self-regroup wipes are both recovered; with one
 // left the second wipe ends the walk the old way and says why.
@@ -3123,6 +3213,241 @@ func TestRaidWalkWipeResumeRunWentOnLaterStep(t *testing.T) {
 	}
 	if sum.EndReason != "until" {
 		t.Fatalf("end %q, want until", sum.EndReason)
+	}
+}
+
+// TestRaidWalkWipeResumeRunWentOnBeforeNearWipe (walk 19 r6): the run's own "regrouped" line was read
+// BEFORE the near-wipe pause, so the rest never saw it (the guard reads only lines received after the
+// rest began, seq0). A pre-rest line must not stop the rest: the near-wipe recovery rests and resumes
+// normally. Pins runWentOnAfter's `seq <= seq0` stop.
+func TestRaidWalkWipeResumeRunWentOnBeforeNearWipe(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	var resumeAt time.Time
+	resumeHook(f, 11, 28, &resumeAt)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|onyxias_lair|running|10/29|onyxia|move|walk|regrouped"},
+		{raw: "TBM:RUN|onyxias_lair|paused|10/29|onyxia|move|walk|19 dead: 3 near wipes within 10 min (54): the run stops here. Regroup (c...)"},
+	}
+	f.agent.mu.Unlock()
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if resumeAt.IsZero() {
+		t.Fatal("no run resume went out: a pre-rest regroup line must not stop the rest")
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)
+	}
+	if hasNote(sum, "the run went on by itself") {
+		t.Fatalf("notes %q, the rest saw a regroup line read before it began", sum.Notes)
+	}
+	if !hasNote(sum, "resumed") {
+		t.Fatalf("notes %q, want the rest-and-resume recovery note", sum.Notes)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want none (the near-wipe recovery never stops the run)", n)
+	}
+}
+
+// TestRaidWalkWipeResumeStaleSelfRegroupNote (walk 19 r6): a self-regroup note at the wipe's own step
+// that is older than selfRegroupWindow (30 s) must not explain the wipe, even when it is the last
+// status line: the run stopped regrouping long ago, so the recovery rests and resumes as usual. Before
+// the fix selfRegroupNote(lastStatus.Note) ignored the window, so this wipe took the self-regroup path
+// and no resume ever went out.
+func TestRaidWalkWipeResumeStaleSelfRegroupNote(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	var resumeAt time.Time
+	resumeHook(f, 11, 28, &resumeAt)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|onyxias_lair|running|10/29|onyxia|move|walk|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)"},
+	}
+	f.agent.mu.Unlock()
+	// The wipe lands 45 s after the note: the run's frames die once the window has passed (once: the
+	// recovery's own revives must bring the raid back for the rest).
+	var noteAt time.Time
+	killed := false
+	f.agent.eventsHook = func(served string) {
+		if strings.Contains(served, "regrouping by itself") {
+			noteAt = f.clock.now()
+		}
+	}
+	f.agent.viewHook = func() {
+		if killed || noteAt.IsZero() || f.clock.now().Sub(noteAt) < 45*time.Second {
+			return
+		}
+		killed = true
+		f.agent.mu.Lock()
+		for _, name := range f.agent.party {
+			f.agent.dead[name] = true
+		}
+		f.agent.mu.Unlock()
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if resumeAt.IsZero() {
+		t.Fatal("no run resume went out (a note older than the window is no self-regroup)")
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)
+	}
+	if hasNote(sum, "the run regroups by itself") {
+		t.Fatalf("notes %q, a > 30 s old note decided the wipe", sum.Notes)
+	}
+	if !hasNote(sum, "resumed") {
+		t.Fatalf("notes %q, want the rest-and-resume recovery note", sum.Notes)
+	}
+}
+
+// TestRaidWalkWipeResumeNoteAtPreviousStep (walk 19 r6): the self-regroup note belongs to the step
+// BEFORE the wipe (a page of its own) and is still fresh, but the run stands on the wipe's step now:
+// the note does not explain this wipe, so the recovery rests and resumes. This is the step half of the
+// self-regroup match — a note whose own page carried the run on to the wipe's step IS a self-regroup
+// (TestRaidWalkWipeSelfRegroupAdvancedStep).
+func TestRaidWalkWipeResumeNoteAtPreviousStep(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 9)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	var resumeAt time.Time
+	resumeHook(f, 11, 28, &resumeAt)
+	note := "TBM:RUN|onyxias_lair|running|9/29|onyxia|move|walk|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)"
+	walk := "TBM:RUN|onyxias_lair|running|10/29|onyxia|move|walk|walking"
+	f.agent.mu.Lock()
+	f.agent.startQueue = append(f.agent.startQueue, queuedEvent{raw: note}, queuedEvent{raw: walk})
+	// One line per events page (pageSize 0), so the note's page is not the wipe's page. The wipe lands
+	// on the page that reads the next step's line, within the window.
+	prev := f.agent.eventsHook
+	f.agent.eventsHook = func(served string) {
+		if prev != nil {
+			prev(served)
+		}
+		if served != walk {
+			return
+		}
+		f.agent.mu.Lock()
+		for _, name := range f.agent.party {
+			f.agent.dead[name] = true
+		}
+		f.agent.mu.Unlock()
+	}
+	f.agent.mu.Unlock()
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if resumeAt.IsZero() {
+		t.Fatal("no run resume went out (a note of the previous step is no self-regroup)")
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)
+	}
+	if hasNote(sum, "the run regroups by itself") {
+		t.Fatalf("notes %q, a note of the previous step decided the wipe", sum.Notes)
+	}
+	if !hasNote(sum, "resumed") {
+		t.Fatalf("notes %q, want the rest-and-resume recovery note", sum.Notes)
+	}
+}
+
+// TestRaidWalkWipeResumeSecondWipeSameStep (walk 19 r6): a second wipe at the SAME step right after the
+// first self-regroup recovery — with no status line of its own — must not inherit the first wipe's
+// note: handleWipe clears runLines, so a note explains one wipe only. Without that clear the second
+// wipe looks like a self-regroup, no resume ever goes out and the walk runs to its ceiling.
+func TestRaidWalkWipeResumeSecondWipeSameStep(t *testing.T) {
+	// A ten-man raid (the smallest roster a raid plan has) keeps the recovery's per-hire waits small.
+	f := newFixture(t)
+	f.opts.plan, f.opts.holder = "lower_karazhan_halls", "raid-walk-lower_karazhan_halls"
+	p, err := dungeon.Load(filepath.Join(f.opts.dir, "lower_karazhan_halls.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.agent.instMap = p.Map
+	f.opts.tier = 1
+	f.opts.wipeResume = 2
+	// The recovery's fixed settle sleeps (10 s after the summons, 15 s after the revives) would put the
+	// second wipe past the 30 s window a self-regroup note can explain: even a ten-man recovery is 27 s,
+	// and the second wipe needs the drive's two polls past it (31 s). Freeze those two for this test;
+	// the 2 s polls, the per-hire waits, the rest's quiet window and the 30 s window stay untouched.
+	prevSleep := f.env.sleep
+	f.env.sleep = func(ctx context.Context, d time.Duration) error {
+		if d == 10*time.Second || d == 15*time.Second {
+			d = 0
+		}
+		return prevSleep(ctx, d)
+	}
+	const step, total = 3, 6
+	f.agent.startReply = startAt("lower_karazhan_halls", step)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = mcWipeFights()
+	selfRegroupKill(f, fmt.Sprintf("TBM:RUN|lower_karazhan_halls|running|%d/%d|rend|move|begin|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)", step, total))
+	partyN := 0
+	revived := 0
+	f.agent.onGM = func(line string) {
+		if !strings.HasPrefix(line, ".revive ") {
+			return
+		}
+		if partyN == 0 {
+			f.agent.mu.Lock()
+			partyN = len(f.agent.party)
+			f.agent.mu.Unlock()
+		}
+		revived++
+	}
+	var resumeAt time.Time
+	f.agent.onResume = func() {
+		resumeAt = f.clock.now()
+		f.agent.mu.Lock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|lower_karazhan_halls|running|%d/%d|rend|move|walk|resumed", step+1, total)},
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|lower_karazhan_halls|done|%d/%d|rend|move|walk|stopped before step %d (until step %d): the party stays where it stands", step+1, total, step+1, step+1)})
+		f.agent.mu.Unlock()
+	}
+	// The frames after the last .revive come in this order: the recovery's own post-revive view, then
+	// the watch loop's first poll (the alive frame that clears the tracker's wipe latch), then the poll
+	// whose frames die — the second wipe, still inside the first note's 30 s window.
+	views := 0
+	f.agent.viewHook = func() {
+		if partyN == 0 || revived < partyN {
+			return
+		}
+		views++
+		if views != 3 {
+			return
+		}
+		f.agent.mu.Lock()
+		for _, name := range f.agent.party {
+			f.agent.dead[name] = true
+		}
+		f.agent.mu.Unlock()
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s\nnotes %q", code, f.stderr.String(), f.stdout.String(), f.summary().Notes)
+	}
+	if resumeAt.IsZero() {
+		t.Fatal("no run resume went out (the second wipe must not reuse the first wipe's note)")
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 2 {
+		t.Fatalf("wipe_resumes %d, want 2 (notes %q)", sum.WipeResumes, sum.Notes)
+	}
+	if !hasNote(sum, "the run regroups by itself") {
+		t.Fatalf("notes %q, want the first wipe's self-regroup recovery note", sum.Notes)
+	}
+	if !hasNote(sum, "resumed") {
+		t.Fatalf("notes %q, want the second wipe's rest-and-resume recovery note", sum.Notes)
 	}
 }
 
@@ -4053,9 +4378,9 @@ func TestRaidWalkExtraArgumentNamesIt(t *testing.T) {
 	}
 }
 
-// TestRaidWalkWipeRestFloor: the rest's quiet window counts from the last non-quiet poll, so a
-// --wipe-rest below 30 s would end the window before the first quiet poll could ever close it.
-// The flag refuses it (walk 18 r5).
+// TestRaidWalkWipeRestFloor: the rest's quiet window counts from the last non-quiet poll, so a very
+// short --wipe-rest can already be met by the FIRST quiet poll — the rest would close without ever
+// seeing sustained quiet. The flag refuses anything below 30 s (walk 18 r5).
 func TestRaidWalkWipeRestFloor(t *testing.T) {
 	var stderr bytes.Buffer
 	if _, code := parseRaidWalkArgs([]string{"zul_gurub", "--wipe-rest", "20s"}, &stderr); code != exitUsage {

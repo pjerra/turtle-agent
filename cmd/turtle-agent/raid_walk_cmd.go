@@ -552,10 +552,13 @@ type walk struct {
 	// itself" note and then "regroup: waiting ... reviving" for the same step in one page), so the
 	// wipe's self-regroup rule and the rest's went-on rule must see every line, not only the last.
 	runLines []runObs
-	dashAt          time.Time
-	fightAt         time.Time
-	lastFrameSave   time.Time
-	dashWarned      bool
+	// pollSeq0 is statusSeq before the page pollOnce is reading (it sets it). Walk 19 r6: handleWipe's
+	// self-regroup rule reads it to tell a line of the wipe's own events page from an older one.
+	pollSeq0      uint64
+	dashAt        time.Time
+	fightAt       time.Time
+	lastFrameSave time.Time
+	dashWarned    bool
 	// Review round 2: the boss evidence the recovery needs. bossReadAt is when the last
 	// dashboard fights/boss read succeeded (zero: never), bossEngagedAt when it last
 	// showed an engaged boss, bossLatchAt when the frames last showed an ENGAGED plan-boss row (alive, and a target or below 100 %), bossCheckErr

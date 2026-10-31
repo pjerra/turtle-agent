@@ -961,6 +961,9 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 // pollOnce reads one events page, one bot_view frame and (on request) the dashboard, feeding the tracker.
 func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, error) {
 	now := w.env.now()
+	// The page's lines get sequence numbers above pollSeq0: handleWipe's self-regroup rule uses the
+	// watermark to tell a line of the wipe's own page from an older one (walk 19 r6).
+	w.pollSeq0 = w.statusSeq
 	lines, err := w.pump(ctx, 5000)
 	if err != nil {
 		return nil, err
@@ -1347,13 +1350,15 @@ var errRunWentOn = errors.New("the run went on by itself")
 func (w *walk) handleWipe(ctx context.Context, step int) error {
 	// The run may already be regrouping by itself after the wipe (TB "regrouping by itself"):
 	// it stays running, rests, gathers and walks back on its own, so the recovery must not rest
-	// or resume it (walk 17b m910q s4, test2 s2). The decision needs the latest status running at
-	// this step, but the note may not be on that line: live TB sends "regrouping by itself" and
-	// then "regroup: waiting for X (dead), ... reviving" for the same step in one poll, so the
-	// wipe's last line is the waiting one. selfRegroupSeen looks at every line of the poll.
+	// or resume it (walk 17b m910q s4, test2 s2). The note need not be the wipe's last status line:
+	// live TB sends "regrouping by itself" and then "regroup: waiting for X (dead), ... reviving" for
+	// the same step in one page, and it may even go on to its own "regrouped" or a line of the next
+	// step, which also moves the step the wipe fires on. So the decision reads the recorded running
+	// lines of this step (selfRegroupSeen, which also takes a note whose own page already carried the
+	// run past it) instead of the last status, and only the run's state still comes from that status:
+	// a paused or done last line is no self-regroup.
 	now := w.env.now()
-	selfRegroup := w.haveStatus && w.lastStatus.State == tbm.RunRunning && w.lastStatus.Step == step &&
-		(selfRegroupNote(w.lastStatus.Note) || w.selfRegroupSeen(step, now))
+	selfRegroup := w.haveStatus && w.lastStatus.State == tbm.RunRunning && w.selfRegroupSeen(step, now)
 	// The observations explained this wipe: a later wipe needs its own line since the last recovery.
 	w.runLines = nil
 	if w.bossEngagedNow() {
@@ -2306,17 +2311,21 @@ func (w *walk) recordRunLine(st tbm.RunStatus, now time.Time) {
 	}
 }
 
-// selfRegroupSeen says a running status line that reported the run regrouping by itself arrived for
-// this step within selfRegroupWindow of now. pollOnce keeps every running line of a poll, so the
-// note still counts when a later line of the same poll ("regroup: waiting ... reviving") is the
-// last status the wipe fires on (walk 18 r5).
+// selfRegroupSeen says a running status line recorded since the last recovery reports the run
+// regrouping by itself: its note arrived within selfRegroupWindow of now and either it is the line of
+// this step — pollOnce keeps every running line of a page, so the note still counts when a later line
+// of the same page ("regroup: waiting ... reviving", the run's own "regrouped") is the last status the
+// wipe fires on (walk 18 r5) — or its own page carried the run on to this step: the note's page holds
+// the note and the later line that moved the step, so the wipe explains the note (walk 19 r6).
 func (w *walk) selfRegroupSeen(step int, now time.Time) bool {
 	for i := len(w.runLines) - 1; i >= 0; i-- {
 		o := w.runLines[i]
-		if o.step != step || !selfRegroupNote(o.note) {
+		if !selfRegroupNote(o.note) || now.Sub(o.at) > selfRegroupWindow {
 			continue
 		}
-		return now.Sub(o.at) <= selfRegroupWindow
+		if o.step == step || (o.seq > w.pollSeq0 && step > o.step) {
+			return true
+		}
 	}
 	return false
 }

@@ -2237,9 +2237,11 @@ before the resume; the timeout note always names 3 x `--wipe-rest` even when the
 `first` add that is engaged as ordinary trash (for example a Zulian Tiger pack in ZG) still counts as a boss for 120 s
 and blocks that wipe's recovery; a second wipe during the rest or the resume wait ends 19 without the old ending's
 reset-wait revive; the self-regroup match is TB's own note text (`regrouping by itself`), read from every status line
-of a poll (live TB sends the note and then "regroup: waiting ... reviving" for the same step together), so a reworded
-note falls back on the rest's own `regrouped`/later-step guard, which also reads every line of a poll; a near-wipe
-rest still drops `IncidentBossEngaged` and writes no dashboard saves (it is bounded, and the recovery re-checks the
+of a poll (live TB sends the note and then "regroup: waiting ... reviving" for the same step together), and the note
+must be at most 30 s old and stand on the wipe's step or in the page whose later line carried the run past it (a
+later step moves the step the wipe fires on), so a reworded note falls back on the rest's own
+`regrouped`/later-step guard, which also reads every line of a poll and only the lines read after the rest began;
+a near-wipe rest still drops `IncidentBossEngaged` and writes no dashboard saves (it is bounded, and the recovery re-checks the
 boss afterwards); and the tracker's boss latch fires
 once per walk, so a boss engaged after an earlier one reaches the walk only through the wipe gate.
 
