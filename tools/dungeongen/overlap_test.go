@@ -30,7 +30,13 @@ import (
 // walk-7 fix (fix 6, 2026-10-30): leg 0's formation rows are stand_pull rows whose radius marks their
 // formations by spawn (the run leader drops every other formation's units), so the Headhunter row's 71 yd
 // reaches the static pack's and F3/F4's spawns, and the F3, F4, F7 and F5/F6 rows count their neighbours'
-// spawns; none of them is pulled by those rows.
+// spawns; none of them is pulled by those rows. 39 after the walk-18 Servant fix (2026-11-01): leg 1's
+// four Servant rows are stand pulls (radii 3, 2.6, 10, 10) and reach no unlisted spawn even with the 3 yd
+// margin (the D row's nearest other Servant, A's 49065, is 30.4 yd off; the A row's nearest, B's 49063,
+// 18.0 yd; the E row's 3 yd reaches only E's own 49056, the next nearest map-309 spawn being C's 49061 at
+// 19.0 yd), and leg 7 drops its old D group (radius 5: A 28 yd off, so it reached nothing either): the
+// findings are the same 39 as at walk 13. The walk-18 review round 2 (2026-11-01) leaves the count be: the
+// E row's radius 1 -> 3 and leg 7's tiger-pack dry-route approach points move no pull position.
 var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "naxxramas": 104, "blackwing_lair": 50, "timbermaw_hold": 13, "temple_of_ahnqiraj": 128, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6, "zul_gurub": 39, "molten_core": 10, "upper_karazhan_halls": 6}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.

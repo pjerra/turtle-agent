@@ -33,7 +33,8 @@
     "FIX 8 (2026-10-30/31, leg 0 only; TortoiseBots-audit tests/raid-zg-walk10 and raid-zg-walk11 a-c): from -12090 -1446 the Headhunter formation's nearest unit came no closer than 30.6-30.8 yd in all four walks (its followers walk almost in line with the leader), so the 28.5 yd shot never went out and the row paused at 600 s; the stand is back at walk 9's -12093 -1446 (lane 30.1; the shot went out there at 28.5-29 yd, no walk-in; F3 39.1, F4 42.8). The Witch Doctor formation's stand moves in to -12204 -1494 (lane 29.2; F5 40.2, F6 40.4) for the same reason (troll followers in line); the bat formations keep 32-34 yd (followers 6 yd round the leader: the near one comes within 27-28 yd). The static Bat Rider pack woke as the party walked to its stand 23.3 yd from bat 49138 once the row held the shot (walk 10 step 28): its stand is -12183 -1488, 27.5 yd from its nearest unit (bat 49138, still in the 28.5 yd shot; F7 40.4, F5 47.4, F6 46.9).",
     "Raid plan: 20 players (3 tanks, 5 healers, 12 damage). Boss order: Jeklik, Venoxis, Mar'li, Thekal, Arlokk, Mandokir, Jin'do, Hakkar. Gahz'ranka (15114) is optional and has no step: his summon is fishing Muddy Churning Waters (180369) with Zulian Mudskunk (17321), which the plan format cannot express. Edge of Madness (15082-15085) has no spawn and instance_zulgurub::SpawnRandomBoss is deactivated: no leg.",
     "Arlokk (14515) has no spawn row. The gong go_gong_of_bethekk (180526 at -11569.2 -1627.87 41.28) runs event script 9066 and summons her at -11540.7 -1627.71 41.27; the gong step is open for the mapping walk: the server path from the Arlokk terrace ends 9-10 yd above the gong (a drop the mesh does not link), so no use_object stand passes plan-check.",
-    "Thekal (14599) is fought with his Zealots Lor'Khan 11347 and Zath 11348 and two Zulian Tigers 11361 (boss.first); Mar'li with the Witherbark Speaker 11388 and Venoxis with his four Razzashi Cobras 11373 (boss.first). They resurrect each other (boss_thekal.cpp), so the live run must kill the three within 7 s."
+    "Thekal (14599) is fought with his Zealots Lor'Khan 11347 and Zath 11348 and two Zulian Tigers 11361 (boss.first); Mar'li with the Witherbark Speaker 11388 and Venoxis with his four Razzashi Cobras 11373 (boss.first). They resurrect each other (boss_thekal.cpp), so the live run must kill the three within 7 s.",
+    "WALK 18 (2026-11-01, leg 1 and leg 7; TortoiseBots-audit research/zg-steps93-96/SPEC.md, tests/raid-zg-walk15..18): the Venoxis guards (Mad Servant 15111) killed the raid at steps 93-97. The plan cleared packs C (49059-49061), the patroller E (49056) and A (49065-49067 + Blood Priest 49051) but not D (49053-49055, 49057, in leg 7 group 37 only): D stands 32 yd from the step-97 stand and wanders 5 yd, so every step-96/97 pull fought 7 Servants (3 A + 4 D) and their 6-9 Mad Voidwalkers (2 per dead Servant, Consuming Shadows 24614: 400 shadow a second to everything within 5 yd). Leg 1 now pulls the four packs one at a time from stands out of every other live pack's aggro, in the order E (the patroller first: its loop end is 17-20 yd from C), C, D, A. Each row is a stand_pull (flag 8192, pulled from the move before it): E stand -11937 -1818, C stand -11968 -1813, D stand -11898 -1838, A stand -11910 -1858; each stands within 28.5 yd of its own pack and 27.5 yd or more from every other live Servant pack (D-A 39.1, A-B 45.9), and A and D get radius 10 so their 5 yd wander keeps their units owned by the row, not hop units. D leaves leg 7 group 37 (a pack listed in two legs is pulled, or cleared, twice). 1104 steps become 1092 (leg 1 142 -\u003e 147, leg 7 290 -\u003e 273); the Venoxis boss row is now global step 188 (was 183), so the walks' --until \"step 184\" becomes \"step 189\". Review round 2 (2026-11-01): with D gone, the exporter re-cut leg 7's hop from group 36's pull row (-11900 -1622.39 -10.11) to the tiger pack (group 37) through the lake, 9.4 yd (flat) off the unowned elite Hooktooth Frenzy spawn 51444 (-11772.8 -1790.94), 9.7 off 49074 (-11795.1 -1754.62), 11.0 off 49730 (-11743.3 -1788.03) and 15.7 off 51443 (-11818.4 -1744.63); the tiger pack's approach now walks the pre-walk-18 export's dry route (the format caps approach at 4 points, so it carries the three corridor points -11943.2 -1823.2, -11920.8 -1821.07 and -11745.6 -1837.6 plus the stand -11605.213 -1770.5043; the exporter's own cut fills the old route's other points -11870.9 -1818.02, -11859.73 -1817.33, -11809.72 -1826.11, -11760.77 -1834.88, -11696.07 -1844.32, -11692.53 -1844.8, -11661.33 -1832 and -11627.63 -1795.07 as path rows), so no move row between the two pull rows passes within 15 yd of them (the nearest is 45.6 yd). E's row is radius 3 (was 1): the review's margin on the 61 yd patroller read; 3 yd reaches no other spawn of map 309 (the nearest other is C's 49061, 19.0 yd). Accepted risk: the Gurubashi Berserker patrols 49698 and 51947 (leg 8's) walk within 7.5-17 yd of the four stands; the live run's pass list includes \"a Berserker fought alone at a stand wakes no Servant pack\"."
   ],
   "legs": [
     {
@@ -343,6 +344,18 @@
           ]
         },
         {
+          "entries": [15111],
+          "positions": [
+            {"x": -11945.7, "y": -1841.13, "z": 56.11}
+          ],
+          "radius": 3,
+          "approach": [
+            {"x": -11941.333, "y": -1798.4, "z": 53.14},
+            {"x": -11937, "y": -1818, "z": 52.4}
+          ],
+          "stand_pull": true
+        },
+        {
           "entries": [15111, 15111, 15111],
           "positions": [
             {"x": -11965.3, "y": -1840.45, "z": 55.81},
@@ -351,18 +364,25 @@
           ],
           "radius": 2.6,
           "approach": [
-            {"x": -11970.2, "y": -1821.2416, "z": 56.31376}
-          ]
+            {"x": -11968, "y": -1813, "z": 57}
+          ],
+          "stand_pull": true
         },
         {
-          "entries": [15111],
+          "entries": [15111, 15111, 15111, 15111],
           "positions": [
-            {"x": -11945.7, "y": -1841.13, "z": 56.11}
+            {"x": -11876.2, "y": -1851.02, "z": 63.94},
+            {"x": -11875.8, "y": -1855.61, "z": 63.91},
+            {"x": -11874.2, "y": -1859.13, "z": 64.07},
+            {"x": -11871.2, "y": -1854.7, "z": 63.96}
           ],
-          "radius": 1,
+          "radius": 10,
           "approach": [
-            {"x": -11961.228, "y": -1828.5253, "z": 55.24085}
-          ]
+            {"x": -11942.933, "y": -1832.2667, "z": 55.84},
+            {"x": -11919.2, "y": -1843.6, "z": 58.8},
+            {"x": -11898, "y": -1838, "z": 61.4}
+          ],
+          "stand_pull": true
         },
         {
           "entries": [15111, 15111, 15111, 11340],
@@ -372,10 +392,11 @@
             {"x": -11889.1, "y": -1877.14, "z": 63.85},
             {"x": -11888.9, "y": -1881.35, "z": 63.58}
           ],
-          "radius": 4.2,
+          "radius": 10,
           "approach": [
-            {"x": -11904.901, "y": -1869.4314, "z": 64.46166}
-          ]
+            {"x": -11910, "y": -1858, "z": 63.1}
+          ],
+          "stand_pull": true
         },
         {
           "entries": [11361, 11350, 11831, 11361],
@@ -2017,19 +2038,6 @@
           ]
         },
         {
-          "entries": [15111, 15111, 15111, 15111],
-          "positions": [
-            {"x": -11876.2, "y": -1851.02, "z": 63.94},
-            {"x": -11875.8, "y": -1855.61, "z": 63.91},
-            {"x": -11874.2, "y": -1859.13, "z": 64.07},
-            {"x": -11871.2, "y": -1854.7, "z": 63.96}
-          ],
-          "radius": 5,
-          "approach": [
-            {"x": -11895.046, "y": -1844.7473, "z": 61.526554}
-          ]
-        },
-        {
           "entries": [11361, 11831, 11350, 11361, 11350, 11361, 11830, 11361],
           "positions": [
             {"x": -11598.9, "y": -1764.43, "z": 39.89},
@@ -2043,6 +2051,9 @@
           ],
           "radius": 18.9,
           "approach": [
+            {"x": -11943.2, "y": -1823.2, "z": 53.84},
+            {"x": -11920.8, "y": -1821.07, "z": 52.14},
+            {"x": -11745.6, "y": -1837.6, "z": 39.34},
             {"x": -11605.213, "y": -1770.5043, "z": 40.788986}
           ]
         }
