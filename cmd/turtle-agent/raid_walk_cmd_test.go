@@ -141,6 +141,9 @@ type walkFakeAgent struct {
 	// quiet rest (combatAllFn); the dashboard fights read fails through fakeDash.fightsErr.
 	viewFn      func(n int) (fail bool, omit string)
 	combatAllFn func(n int) bool // frame n shows every hire in combat
+	// viewHook runs inside the bot_view RPC (outside f.mu): a test's fake wall
+	// time passing during the call, like the live server's RPC waits.
+	viewHook    func()
 	targetCalls []packet.GUID
 	targetAt    []time.Time // when each target RPC arrived
 
@@ -215,6 +218,9 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 	case "events":
 		v = f.eventsPage()
 	case "bot_view":
+		if f.viewHook != nil {
+			f.viewHook()
+		}
 		v = f.viewPage()
 	case "units":
 		f.mu.Lock()
@@ -1861,6 +1867,277 @@ func TestRaidWalkWipeResumeBossStillEngagedSkips(t *testing.T) {
 	}
 }
 
+// TestRaidWalkWipeResumeVisibleBossAfterKillRecovers (walk 17 s4 replay): an
+// engaged boss early (the latch), killed and gone, then a plan `first` add in
+// view at full health with no target (standing as trash) while the raid wipes
+// on trash more than 200 s later. A row merely in view must not latch, so the
+// wipe recovers: exit 0, wipe_resumes 1, no boss-unknown skip, end until.
+func TestRaidWalkWipeResumeVisibleBossAfterKillRecovers(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+		{raw: "TBM:RUN|molten_core|running|35/235|lucifron|move|walk|walking"},
+	}
+	f.agent.mu.Unlock()
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "kill", BossName: "Lucifron", Leg: "lucifron", Step: 3, Deaths: 1}}
+	t0 := f.clock.now()
+	killed := false
+	// Wipe at 240 s: like the walk-17 s4 shape, but late enough that the
+	// run left the boss step for trash (so the watch never routes the
+	// visible rows to handleBoss).
+	wipeAt := t0.Add(240 * time.Second)
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		now := f.clock.now()
+		if !killed && !now.Before(wipeAt) {
+			killed = true
+			f.agent.mu.Lock()
+			for _, name := range f.agent.party {
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		if now.Sub(t0) < 45*time.Second {
+			// The boss row holds a target: engaged, latches, and notes the fight.
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		// The boss is killed and gone; from 150 s on a plan `first` add
+		// (Flamewaker Protector) stands as trash in view — alive, full
+		// health, no target — through the wipe (as in s4, where the row was
+		// last saved ~25 s before it).
+		if elapsed := now.Sub(t0); elapsed >= 150*time.Second {
+			return []tbm.HostileRec{{GUID: 11, Entry: 12119, HPPct: 100, Target: 0}}
+		}
+		return nil
+	}
+	f.agent.onResume = func() {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting resumed", next-1, total)},
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, "so the run leader fights it") {
+		t.Fatalf("notes %q, want the boss-fight note (the early engagement must latch)", sum.Notes)
+	}
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (a merely visible plan add does not block recovery)", sum.WipeResumes)
+	}
+	if hasNote(sum, "boss state unknown") {
+		t.Fatalf("notes %q, want no boss-unknown skip", sum.Notes)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until (the run went on after the recovery)", sum.EndReason)
+	}
+}
+
+// TestRaidWalkWipeResumeVisibleBossNeverTargetedRecovers: no plan boss row
+// ever holds a target; the boss shows at 100 % with no target (a plan boss
+// merely in view, never fought) while the raid wipes on trash more than
+// 200 s later. Nothing was ever engaged, so the wipe recovers — and the walk
+// must not route the visible row to handleBoss.
+func TestRaidWalkWipeResumeVisibleBossNeverTargetedRecovers(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|walking", next-2, total)},
+		{raw: "TBM:RUN|molten_core|running|35/235|lucifron|move|walk|walking"},
+	}
+	f.agent.mu.Unlock()
+	t0 := f.clock.now()
+	killed := false
+	// Wipe at 240 s: like the walk-17 s4 shape, but late enough that the
+	// run left the boss step for trash (so the watch never routes the
+	// visible row to handleBoss).
+	wipeAt := t0.Add(240 * time.Second)
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		now := f.clock.now()
+		if !killed && !now.Before(wipeAt) {
+			killed = true
+			f.agent.mu.Lock()
+			for _, name := range f.agent.party {
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		// Every frame holds the boss in view at full health with no target:
+		// never engaged, latching nothing. (Kept through the wipe: before
+		// the fix the fresh 100 %/no-target row counts as engaged.)
+		return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 100, Target: 0}}
+	}
+	f.agent.onResume = func() {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|resumed", next, total)},
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (a never-targeted visible row is no fight)", sum.WipeResumes)
+	}
+	if hasNote(sum, "boss state unknown") {
+		t.Fatalf("notes %q, want no boss-unknown skip", sum.Notes)
+	}
+	if hasNote(sum, "boss 12118 engaged") {
+		t.Fatalf("notes %q, want no handleBoss routing (nothing was ever engaged)", sum.Notes)
+	}
+	if !strings.Contains(sum.EndReason, "until") {
+		t.Fatalf("end %q, want until (the run went on after the recovery)", sum.EndReason)
+	}
+}
+
+// TestRaidWalkWipeResumeDashOffRecentBossSkips: the dash-off fail-safe. A
+// plan boss row engaged into the trash wipe (a fight in progress) ends the
+// wipe the old way and never recovers: exit 19, wipe_resumes 0, no recovery
+// note, the run stop before the reset-wait revive. Both an engaged shape the
+// HP-only predicate would miss (100 % with a target: the `target` case) and
+// one the target-only predicate would miss (hurt with no target: the `hurt`
+// case) end here; with either predicate arm dropped, the row no longer latches
+// and the wipe recovers instead (red).
+func TestRaidWalkWipeResumeDashOffRecentBossSkips(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		row  tbm.HostileRec
+	}{
+		{"target", tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 100, Target: packet.GUID(1000)}},
+		{"hurt", tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 60, Target: 0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, next, total := bossDoneFixture(t)
+			f.agent.startReply = zgStart(total, next)
+			f.agent.mu.Lock()
+			// Boss-kind status: the run is on its boss step, so the watch
+			// absorbs the tracker's engagement (run-leader-fights-it note)
+			// and the walk stays out until the trash wipe, like the model.
+			f.agent.startQueue = []queuedEvent{
+				{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+			}
+			f.agent.mu.Unlock()
+			f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+			killed := false
+			row := tc.row
+			// Wipe at 240 s: like the walk-17 s4 shape, the engaged row
+			// stays in the frames until 40 s before the wipe, then is gone
+			// (past the stale-row gate while the latch is inside its 120 s
+			// window), and stays gone through the recovery: only the latch
+			// blocks, via `bossUnknown`.
+			wipeAt := f.clock.now().Add(240 * time.Second)
+			f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+				now := f.clock.now()
+				if !killed && !now.Before(wipeAt) {
+					killed = true
+					f.agent.mu.Lock()
+					for _, name := range f.agent.party {
+						f.agent.dead[name] = true
+					}
+					f.agent.mu.Unlock()
+				}
+				if now.Before(wipeAt.Add(-40 * time.Second)) {
+					return []tbm.HostileRec{row}
+				}
+				return nil
+			}
+			code := f.run(context.Background())
+			if code != exitRaidWalkIncident {
+				t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+			}
+			sum := f.summary()
+			if sum.WipeResumes != 0 {
+				t.Fatalf("wipe_resumes %d, want 0 (an engaged boss ends the wipe the old way)", sum.WipeResumes)
+			}
+			if hasNote(sum, "wipe-resume ") {
+				t.Fatalf("notes %q, want no recovery note (the wipe ended as before, with no resume)", sum.Notes)
+			}
+			stopAt, reviveAt := -1, -1
+			for i, l := range f.agent.gmLines() {
+				if stopAt < 0 && strings.HasPrefix(l, ".bot run stop") {
+					stopAt = i
+				}
+				if reviveAt < 0 && (strings.HasPrefix(l, ".revive ") || strings.HasPrefix(l, ".summon ")) {
+					reviveAt = i
+				}
+			}
+			if reviveAt >= 0 && (stopAt < 0 || reviveAt < stopAt) {
+				t.Fatalf("revive/summon at gm line %d before the run stop (%d): an unknown boss was revived into", reviveAt, stopAt)
+			}
+		})
+	}
+}
+
+// TestRaidWalkWipeResumeBossCorpseRecovers: like the walk-17 s4 replay, but
+// the frames from 150 s on hold the boss's corpse (0 %). A corpse never
+// latches, so the wipe recovers: wipe_resumes 1, no boss-unknown skip.
+func TestRaidWalkWipeResumeBossCorpseRecovers(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "kill", BossName: "Lucifron", Leg: "lucifron", Step: 3, Deaths: 1}}
+	t0 := f.clock.now()
+	killed := false
+	// Wipe at 240 s: like the walk-17 s4 shape, but late enough that the
+	// run left the boss step for trash (so the watch never routes the
+	// engaged-then-dead rows to handleBoss).
+	wipeAt := t0.Add(240 * time.Second)
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		now := f.clock.now()
+		if !killed && !now.Before(wipeAt) {
+			killed = true
+			f.agent.mu.Lock()
+			for _, name := range f.agent.party {
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		if now.Sub(t0) < 45*time.Second {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		// The boss is killed (corpse in view) from 150 s on, through the wipe:
+		// a 0 % row never latches, so the wipe can recover.
+		if elapsed := now.Sub(t0); elapsed >= 150*time.Second {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 0, Target: 0}}
+		}
+		return nil
+	}
+	f.agent.onResume = func() {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting resumed", next-1, total)},
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (a boss corpse does not block recovery)", sum.WipeResumes)
+	}
+	if hasNote(sum, "boss state unknown") {
+		t.Fatalf("notes %q, want no boss-unknown skip", sum.Notes)
+	}
+}
+
 // TestRaidWalkWipeResumeRoutesNewBossToHandleBoss (review 2 HIGH): boss A is
 // engaged early (the tracker latches it for life) and the dashboard files it
 // as outcome "kill", so a trash wipe more than 120 s later recovers. Boss B
@@ -2158,6 +2435,50 @@ func TestRaidWalkWipeResumeStaleViewRestartsQuiet(t *testing.T) {
 	// window during the bad period and resumes too early.
 	if resumeAt.Sub(badEndT) < 90*time.Second {
 		t.Fatalf("the resume went out %s after the last bad poll, want a full 90 s of complete views after it", resumeAt.Sub(badEndT))
+	}
+	if sum := f.summary(); sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)
+	}
+}
+
+// TestRaidWalkWipeRestCountsWallTime: the rest measures its quiet window on
+// the clock, not in poll turns. The fake clock advances only in sleep, so a
+// bot_view hook advancing each call by 2.5 s (≈ 10 s per rest turn: pollOnce
+// view + quiet view + 5 s sleep, like the live run) doubles every turn's wall
+// time. The resume must go out between wipeRest and wipeRest + 30 s after the
+// last revive; before the fix the 5 s-per-turn count needed 120 turns ≈ 20 min.
+func TestRaidWalkWipeRestCountsWallTime(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	var resumeAt time.Time
+	resumeHook(f, 11, 28, &resumeAt)
+	f.allDeadFromHires()
+	f.agent.viewHook = func() {
+		f.clock.mu.Lock()
+		f.clock.t = f.clock.t.Add(2500 * time.Millisecond)
+		f.clock.mu.Unlock()
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	gm := f.agent.gmLines()
+	var lastRevive time.Time
+	for i, line := range gm {
+		if strings.HasPrefix(line, ".revive ") {
+			lastRevive = f.agent.gmAt[i]
+		}
+	}
+	if resumeAt.IsZero() {
+		t.Fatal("no run resume went out")
+	}
+	if lastRevive.IsZero() {
+		t.Fatal("no revive went out")
+	}
+	gap := resumeAt.Sub(lastRevive)
+	if gap < 10*time.Minute || gap > 10*time.Minute+30*time.Second {
+		t.Fatalf("resume %s after the last revive, want between 10m and 10m30s", gap)
 	}
 	if sum := f.summary(); sum.WipeResumes != 1 {
 		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)

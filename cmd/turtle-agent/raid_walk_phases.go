@@ -1091,6 +1091,14 @@ func (w *walk) waitMap(ctx context.Context, mapID uint32, timeout time.Duration,
 	}
 }
 
+// bossRowEngaged says a plan-boss row is in a fight: alive and either holding a target or hurt.
+// A row at full hp with no target is a boss (or a `first` add standing as trash) merely in view;
+// a 0 % row is a corpse. Neither latches (walk 17 s4: a Zulian Tiger 11361 at 100 %, no target,
+// 25 s before a trash wipe blocked the recovery).
+func bossRowEngaged(hppct int, target uint64) bool {
+	return hppct > 0 && (target != 0 || hppct < 100)
+}
+
 // trackFrame keeps the per-bot and per-hostile state the enter, reset and wipe rules read.
 func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 	for _, p := range f.Party {
@@ -1109,7 +1117,9 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 		}
 		if w.bossSet[h.Entry] {
 			w.bossSeenAt = now
-			w.bossLatchAt = now
+			if bossRowEngaged(h.HPPct, uint64(h.Target)) {
+				w.bossLatchAt = now
+			}
 			w.bossRows[h.Entry] = hostileState{entry: h.Entry, x: h.X, y: h.Y, z: h.Z, kind: h.Kind, reaction: h.Reaction, flags: h.Flags,
 				hppct: h.HPPct, target: uint64(h.Target), at: now}
 			if h.Target != 0 {
@@ -1364,7 +1374,7 @@ func (w *walk) bossEngagedNow() bool {
 		if row.hppct == 0 {
 			continue
 		}
-		if row.target == 0 && row.hppct == 100 && !w.bossTargetAt.IsZero() && now.Sub(w.bossTargetAt) >= 30*time.Second {
+		if row.target == 0 && row.hppct == 100 && (w.bossTargetAt.IsZero() || now.Sub(w.bossTargetAt) >= 30*time.Second) {
 			continue
 		}
 		return true
@@ -1980,7 +1990,7 @@ func (w *walk) engagedBossEntry() (uint32, bool) {
 		if row.hppct == 0 {
 			continue
 		}
-		if row.target == 0 && row.hppct == 100 && !w.bossTargetAt.IsZero() && now.Sub(w.bossTargetAt) >= 30*time.Second {
+		if row.target == 0 && row.hppct == 100 && (w.bossTargetAt.IsZero() || now.Sub(w.bossTargetAt) >= 30*time.Second) {
 			continue
 		}
 		if best == 0 || (row.target != 0 && bestRow.target == 0) ||
@@ -2020,7 +2030,7 @@ func (w *walk) lastBossRow() (uint32, bool) {
 // recovery exit 19, exactly like a second wipe during the next leg. The deadline bounds the whole
 // recovery: combat restarts the quiet window but never moves the deadline.
 func (w *walk) restOutOfCombat(ctx context.Context, d time.Duration, deadline time.Time) error {
-	window := time.Duration(0)
+	var quietSince, lastPoll time.Time
 	for {
 		if w.leaseLost.Load() {
 			return stopf(exitRaidWalkFailed, "lease lost")
@@ -2041,12 +2051,23 @@ func (w *walk) restOutOfCombat(ctx context.Context, d time.Duration, deadline ti
 			}
 		}
 		if w.completeQuietView(ctx) {
-			window += 5 * time.Second
-			if window >= d {
+			now := w.env.now()
+			if quietSince.IsZero() {
+				// The quiet began between the previous poll (which was not quiet) and this one:
+				// start the window there, so a poll every 5 s closes it after d, not d + one poll
+				// (the old `window += 5 s` credited that interval too).
+				quietSince = lastPoll
+				if quietSince.IsZero() {
+					quietSince = now
+				}
+			}
+			if now.Sub(quietSince) >= d {
 				return nil
 			}
+			lastPoll = now
 		} else {
-			window = 0
+			quietSince = time.Time{}
+			lastPoll = w.env.now()
 		}
 		if err := w.env.sleep(ctx, 5*time.Second); err != nil {
 			return stopf(exitRaidWalkFailed, "interrupted")
