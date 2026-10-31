@@ -2098,7 +2098,7 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
 - `--max-run-minutes` (90) is the ceiling from `run start`; `--hold-minutes` keeps the raid bound afterwards;
   `--paused-wait` (10m) stops a pause that is not a regroup; `--auto-resume K` (0-3) resumes a "did not hold" regroup
   pause 15 s after it starts, at most K times per step and 6 per run; `--reset-wait` (5m) bounds the wait for a wipe's
-  reset; `--wipe-resume K` (0-3, default 1) revives a wipe or a near-wipe stop, rests `--wipe-rest` (default 10m) out of
+  reset; `--wipe-resume K` (0-3, default 0 = end the walk as before) revives a wipe or a near-wipe stop, rests `--wipe-rest` (default 10m) out of
   combat and resumes the run instead of ending the walk, at most K times per walk; a boss fight keeps its own path.
   `--patrols FILE` (a tb-patrols file) feeds the revive quiet check. `--dry-run` validates everything and prints
   every line the walk would send, with `<hire>` placeholders, without leasing or writing anything.
@@ -2152,7 +2152,12 @@ latched in the last 120 s: the old ending with the note `wipe resume skipped: bo
 a complete quiet view (every roster hire present, fresh, out of combat and alive in `bot_view`, polled every 5 s —
 any gap restarts the window); and the recovery has an absolute deadline (the walk ceiling or start + 3 x
 `--wipe-rest`, whichever is sooner — combat restarts the quiet window but never moves it, and past it the walk ends
-with the original incident's exit and `wipe recovery timed out after <dur>`).
+with the original incident's exit and `wipe recovery timed out after <dur>`). A boss fight still `live` in the
+dashboard's fights list blocks recovery before any revive; finished boss fights in the list do not. A skipped
+near-wipe recovery is not retried for the same pause. Known limits: the wipe path does not check that the run is
+paused before reviving, and the 60 s running check can pass on a status line from before the resume; the timeout
+note always names 3 x `--wipe-rest` even when the walk ceiling cut it shorter; a second wipe during the rest or
+the resume wait ends 19 without the old ending's reset-wait revive.
 
 Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
 `.bot gear raid <commander> tier <N>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,

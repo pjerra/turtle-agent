@@ -860,6 +860,7 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 		note    string
 		step    int
 		lastTry time.Time
+		skipped bool // a near-wipe recovery was skipped for this pause: the old ending, once
 	}
 	perStep := map[int]int{}
 	autoTotal := 0
@@ -906,7 +907,7 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 		}
 		if w.haveStatus && w.lastStatus.State == tbm.RunPaused {
 			if !ps.armed || ps.note != w.lastStatus.Note || ps.step != w.lastStatus.Step {
-				ps.armed, ps.at, ps.note, ps.step, ps.lastTry = true, now, w.lastStatus.Note, w.lastStatus.Step, now
+				ps.armed, ps.at, ps.note, ps.step, ps.lastTry, ps.skipped = true, now, w.lastStatus.Note, w.lastStatus.Step, now, false
 				w.logLine(now, "paused: "+w.lastStatus.Note)
 				if w.dash != nil {
 					w.saveCommanders("pause")
@@ -923,10 +924,11 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 				autoTotal++
 				ps.lastTry = now
 				w.note("auto-resumed the regroup at step %d (%d/%d)", ps.step, perStep[ps.step], w.opts.autoResume)
-			case nearWipe && !w.bossEngagedNow() && w.wipeResumes < w.opts.wipeResume && now.Sub(ps.at) >= 15*time.Second:
+			case nearWipe && !ps.skipped && !w.bossEngagedNow() && w.wipeResumes < w.opts.wipeResume && now.Sub(ps.at) >= 15*time.Second:
 				w.logLine(now, "near-wipe stop: recovering instead of ending the walk")
 				if err := w.recoverNearWipe(ctx, ps.step); err == errWipeResumeSkipped {
-					// Unknown boss state: the old ending, not a recovery.
+					// Unknown boss state: the old ending, not a recovery, and not retried for this pause.
+					ps.skipped = true
 				} else if terr, ok := err.(*timeoutWalkStop); ok {
 					w.note("%s", terr.note)
 					return stopf(terr.code, "%s", terr.reason)
@@ -1226,6 +1228,13 @@ type walkFightRow struct {
 	Leg      string `json:"leg"`
 	Step     uint32 `json:"step"`
 	Deaths   int    `json:"deaths"`
+}
+
+// bossLive says whether the row is a boss fight still in progress. The fights list is the
+// run's history: a finished boss fight (win, wipe) stays in it and must not block recovery
+// from a later trash wipe. The dashboard files a running fight with outcome "live".
+func (r walkFightRow) bossLive() bool {
+	return r.BossName != "" && (r.Outcome == "" || r.Outcome == "live")
 }
 
 // saveFights saves the fights list and one detail file per new key. It also keeps
@@ -1761,8 +1770,8 @@ func (w *walk) freshWipeRest() (time.Duration, error) {
 		return 0, errWipeResumeSkipped
 	}
 	var rows []walkFightRow
-	if json.Unmarshal(raw, &rows) != nil {
-		w.bossCheckErr = err
+	if jerr := json.Unmarshal(raw, &rows); jerr != nil {
+		w.bossCheckErr = jerr
 		w.note("wipe resume skipped: boss state unknown")
 		return 0, errWipeResumeSkipped
 	}
@@ -1772,7 +1781,7 @@ func (w *walk) freshWipeRest() (time.Duration, error) {
 	_ = w.writeOut("combat-fights.json", raw)
 	w.bossEngagedAt = time.Time{}
 	for _, r := range rows {
-		if r.BossName != "" {
+		if r.bossLive() {
 			w.bossEngagedAt = now
 			break
 		}
@@ -1808,6 +1817,13 @@ func (w *walk) bossUnknown(ctx context.Context) error {
 	if w.bossReadAt.IsZero() || now.Sub(w.bossReadAt) > 30*time.Second || w.bossCheckErr != nil {
 		w.note("wipe resume skipped: boss state unknown")
 		return errWipeResumeSkipped
+	}
+	// A boss fight still live on the dashboard blocks recovery before anything is revived.
+	for _, r := range w.fightRows {
+		if r.bossLive() {
+			w.note("wipe resume skipped: boss state unknown")
+			return errWipeResumeSkipped
+		}
 	}
 	return nil
 }

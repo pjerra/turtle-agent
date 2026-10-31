@@ -216,7 +216,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.IntVar(&o.holdMinutes, "hold-minutes", 0, "keep the raid bound for this many minutes after the run")
 	fs.IntVar(&o.maxRunMinutes, "max-run-minutes", 90, "the ceiling from run start to the end")
 	fs.DurationVar(&o.pausedWait, "paused-wait", 10*time.Minute, "how long a pause that is not a regroup may last")
-	fs.IntVar(&o.wipeResume, "wipe-resume", 1, "revive, rest and resume a wipe or near-wipe stop this many times per walk (0-3)")
+	fs.IntVar(&o.wipeResume, "wipe-resume", 0, "revive, rest and resume a wipe or near-wipe stop this many times per walk (0-3; 0 ends the walk as before)")
 	fs.IntVar(&o.autoResume, "auto-resume", 0, "resume a regroup pause this many times per step (0-3)")
 	fs.DurationVar(&o.resetWait, "reset-wait", 5*time.Minute, "how long a wipe may wait for the instance to reset")
 	fs.DurationVar(&o.wipeRest, "wipe-rest", 10*time.Minute, "how long a revived raid rests out of combat before the run resumes")

@@ -1694,6 +1694,58 @@ func TestRaidWalkWipeResumeWithDashboardRecovers(t *testing.T) {
 	}
 }
 
+// TestRaidWalkWipeResumeAfterBossWinRecovers (final review): the fights list is the run's
+// history, so a boss fight already won (outcome "win") must not block recovery from a later
+// trash wipe; a boss row still "live" must.
+func TestRaidWalkWipeResumeAfterBossWinRecovers(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		outcome string
+		resumes int
+	}{
+		{"won boss in the history recovers", "win", 1},
+		{"live boss fight blocks recovery", "live", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.agent.startReply = startAt("onyxias_lair", 10)
+			f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+			f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+			f.dash.fights = []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: tc.outcome, BossName: "Onyxia", Leg: "onyxia", Step: 3, Deaths: 1}}
+			resumes := 0
+			f.agent.onResume = func() {
+				resumes++
+				f.agent.mu.Lock()
+				defer f.agent.mu.Unlock()
+				f.agent.lines = append(f.agent.lines,
+					queuedEvent{raw: "TBM:RUN|onyxias_lair|running|11/29|onyxia|move|walk|resumed"},
+					queuedEvent{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands"})
+			}
+			f.allDeadFromHires()
+			f.run(context.Background())
+			if resumes != tc.resumes {
+				t.Fatalf("%d run resumes, want %d (outcome %q)", resumes, tc.resumes, tc.outcome)
+			}
+			if tc.resumes == 0 {
+				// The live boss must block the recovery before anything is revived: the old
+				// ending stops the run first, and only then revives after the reset wait.
+				stopAt, reviveAt := -1, -1
+				for i, l := range f.agent.gmLines() {
+					if stopAt < 0 && strings.HasPrefix(l, ".bot run stop") {
+						stopAt = i
+					}
+					if reviveAt < 0 && (strings.HasPrefix(l, ".revive") || strings.HasPrefix(l, ".summon")) {
+						reviveAt = i
+					}
+				}
+				if reviveAt >= 0 && (stopAt < 0 || reviveAt < stopAt) {
+					t.Fatalf("revive/summon at gm line %d before the run stop (%d): a live boss fight was revived into", reviveAt, stopAt)
+				}
+			}
+		})
+	}
+}
+
 // TestRaidWalkWipeResumeStaleViewRestartsQuiet (review 2): bot_view fails and drops a hire for
 // some polls of the rest. No `.bot run resume` may go out until a full window of complete views
 // has passed after the last bad poll.
