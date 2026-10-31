@@ -24,8 +24,19 @@ import (
 // troll/panther/bat clusters of the Arlokk, Jindo and Hakkar terraces). The 20-man cap keeps the
 // rows at 12; the room sends the rest with the pull whether the plan lists them or not.
 // 35 since the walk-1 fix of leg 0 (2026-10-29): the merged -12153 and -12277 packs list the
-// neighbours they used to miss.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "naxxramas": 104, "blackwing_lair": 50, "timbermaw_hold": 13, "temple_of_ahnqiraj": 128, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6, "zul_gurub": 35, "molten_core": 10, "upper_karazhan_halls": 6}
+// neighbours they used to miss. 32 since the walk-5 fix (2026-10-30): leg 0's west rows are keyed
+// on single points of the formations' loops; the Witch Doctor row (radius 15) and the Headhunter
+// row (radius 60, its whole loop) have bat spawns in range, all pulled by earlier rows. 39 since the
+// walk-7 fix (fix 6, 2026-10-30): leg 0's formation rows are stand_pull rows whose radius marks their
+// formations by spawn (the run leader drops every other formation's units), so the Headhunter row's 71 yd
+// reaches the static pack's and F3/F4's spawns, and the F3, F4, F7 and F5/F6 rows count their neighbours'
+// spawns; none of them is pulled by those rows.
+// Karazhan Crypt's 8 are Skeletal Remains 91924: 7 never wake (no Remains Trigger within 30 yd of them, in the south wing and the
+// lower crypt, dead unselectable props) and 1 awake one stands 12.4 yd from a wandering pull - outside its 10 yd radius, inside the
+// check's 3 yd aggro margin. 27 since the Corpsemuncher leg (legs[6], PR #320): its radius-25 pull groups cover one packed crypt
+// room, so each group reaches the Skeletal Remains, Rotten Zombies, Strigoi and Forgotten Souls of the next ones (19 more); the room
+// is pulled group by group from the doorway and the run leader drops units another row owns. Draft plan, not live-checked yet.
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "naxxramas": 104, "blackwing_lair": 50, "timbermaw_hold": 13, "temple_of_ahnqiraj": 128, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6, "zul_gurub": 39, "molten_core": 10, "upper_karazhan_halls": 6, "karazhan_crypt": 27}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {

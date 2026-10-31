@@ -9,39 +9,44 @@ import (
 
 // Summary is the tb-raid-walk v1 file written to <out>/summary.json.
 type Summary struct {
-	Format       string           `json:"format"`
-	Version      int              `json:"version"`
-	Plan         string           `json:"plan"`
-	Map          uint32           `json:"map"`
-	Server       string           `json:"server"`
-	Slot         int              `json:"slot"`
-	Character    string           `json:"character"`
-	Until        string           `json:"until"`
-	From         string           `json:"from"`
-	Speed        float64          `json:"speed"`
-	TestSpeed    bool             `json:"test_speed"`
-	RowsSHA256   string           `json:"rows_sha256"`
-	UntilStep    int              `json:"until_step"`
-	Roster       RosterSummary    `json:"roster"`
-	Layout       LayoutSummary    `json:"layout"`
-	Started      time.Time        `json:"started"`
-	Ended        time.Time        `json:"ended"`
-	EndReason    string           `json:"end_reason"`
-	StepsReached int              `json:"steps_reached"`
-	StepsTotal   int              `json:"steps_total"`
-	StepTimeline []StepSummary    `json:"step_timeline"`
-	Legs         []LegSummary     `json:"legs"`
-	Deaths       DeathSummary     `json:"deaths"`
-	Injections   []InjectSummary  `json:"injections"`
-	Incidents    []InjectIncident `json:"incidents"`
-	Wipes        []int            `json:"wipes"`
-	BossEngaged  *BossSummary     `json:"boss_engaged"`
-	Pauses       []PauseSummary   `json:"pauses"`
-	Fights       []FightSummary   `json:"fights"`
-	Dashboard    string           `json:"dashboard"`
-	Teardown     TeardownSummary  `json:"teardown"`
-	ExitCode     int              `json:"exit_code"`
-	Notes        []string         `json:"notes"`
+	Format     string  `json:"format"`
+	Version    int     `json:"version"`
+	Plan       string  `json:"plan"`
+	Map        uint32  `json:"map"`
+	Server     string  `json:"server"`
+	Slot       int     `json:"slot"`
+	Character  string  `json:"character"`
+	Until      string  `json:"until"`
+	From       string  `json:"from"`
+	Speed      float64 `json:"speed"`
+	TestSpeed  bool    `json:"test_speed"`
+	RowsSHA256 string  `json:"rows_sha256"`
+	UntilStep  int     `json:"until_step"`
+	// RunLabel is the newest speed/until label the run's status lines carried ("speed 2.0 (test); until boss (step 41)");
+	// SpeedFellBack says the server's test speed went back to 1.0 once a real player joined.
+	RunLabel      string           `json:"run_label,omitempty"`
+	SpeedFellBack bool             `json:"speed_fell_back,omitempty"`
+	Roster        RosterSummary    `json:"roster"`
+	Layout        LayoutSummary    `json:"layout"`
+	Started       time.Time        `json:"started"`
+	Ended         time.Time        `json:"ended"`
+	EndReason     string           `json:"end_reason"`
+	StepsReached  int              `json:"steps_reached"`
+	StepsTotal    int              `json:"steps_total"`
+	StepTimeline  []StepSummary    `json:"step_timeline"`
+	Legs          []LegSummary     `json:"legs"`
+	Deaths        DeathSummary     `json:"deaths"`
+	Injections    []InjectSummary  `json:"injections"`
+	Incidents     []InjectIncident `json:"incidents"`
+	Wipes         []int            `json:"wipes"`
+	WipeResumes   int              `json:"wipe_resumes"`
+	BossEngaged   *BossSummary     `json:"boss_engaged"`
+	Pauses        []PauseSummary   `json:"pauses"`
+	Fights        []FightSummary   `json:"fights"`
+	Dashboard     string           `json:"dashboard"`
+	Teardown      TeardownSummary  `json:"teardown"`
+	ExitCode      int              `json:"exit_code"`
+	Notes         []string         `json:"notes"`
 }
 
 // RosterSummary is the roster as hired.
@@ -119,6 +124,10 @@ type FightSummary struct {
 	Deaths   int    `json:"deaths"`
 	Outcome  string `json:"outcome"`
 	BossName string `json:"boss_name"`
+	// Warnings is the dashboard's rule warning count of the fight (the list row's).
+	Warnings int `json:"warnings,omitempty"`
+	// Detail is the digest of the fight's detail file (fights.go); nil when it could not be read.
+	Detail *FightDetail `json:"detail,omitempty"`
 }
 
 // TeardownSummary is what teardown reported.
@@ -142,10 +151,15 @@ type SummaryMeta struct {
 	RowsSHA256 string
 	// UntilStep is the step of the start line's until label (0 when unknown or no until).
 	UntilStep int
-	Roster    *Roster
+	// RunLabel and SpeedFellBack are the status lines' label facts (Summary).
+	RunLabel      string
+	SpeedFellBack bool
+	Roster        *Roster
 	// TierSource and TierComparison qualify the roster's tier (tiers.go).
 	TierSource     string
 	TierComparison bool
+	// WipeResumes is the walk's recovered wipes and near-wipe stops (--wipe-resume).
+	WipeResumes    int
 	Layout         LayoutSummary
 	Started        time.Time
 	Ended          time.Time
@@ -163,36 +177,39 @@ type SummaryMeta struct {
 // BuildSummary fills the tb-raid-walk v1 summary from the tracker and the command's own facts.
 func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 	s := &Summary{
-		Format:       "tb-raid-walk",
-		Version:      1,
-		Plan:         m.Plan,
-		Map:          m.Map,
-		Server:       m.Server,
-		Slot:         m.Slot,
-		Character:    m.Character,
-		Until:        m.Until,
-		From:         m.From,
-		Speed:        m.Speed,
-		TestSpeed:    m.TestSpeed,
-		RowsSHA256:   m.RowsSHA256,
-		UntilStep:    m.UntilStep,
-		Layout:       m.Layout,
-		Started:      m.Started,
-		Ended:        m.Ended,
-		EndReason:    m.EndReason,
-		Fights:       nonNilFights(m.Fights),
-		Injections:   nonNilInjections(m.Injections),
-		Incidents:    nonNilIncidents(m.Incidents),
-		Roster:       RosterSummary{OT: []string{}, Rest: []string{}},
-		Dashboard:    m.Dashboard,
-		Teardown:     m.Teardown,
-		ExitCode:     m.ExitCode,
-		Notes:        nonNilStrings(m.Notes),
-		StepTimeline: []StepSummary{},
-		Legs:         []LegSummary{},
-		Wipes:        []int{},
-		Pauses:       []PauseSummary{},
-		Deaths:       DeathSummary{ByStep: map[int]int{}, ByBot: map[string]int{}},
+		Format:        "tb-raid-walk",
+		Version:       1,
+		Plan:          m.Plan,
+		Map:           m.Map,
+		Server:        m.Server,
+		Slot:          m.Slot,
+		Character:     m.Character,
+		Until:         m.Until,
+		From:          m.From,
+		Speed:         m.Speed,
+		TestSpeed:     m.TestSpeed,
+		RowsSHA256:    m.RowsSHA256,
+		UntilStep:     m.UntilStep,
+		RunLabel:      m.RunLabel,
+		SpeedFellBack: m.SpeedFellBack,
+		Layout:        m.Layout,
+		Started:       m.Started,
+		Ended:         m.Ended,
+		EndReason:     m.EndReason,
+		Fights:        nonNilFights(m.Fights),
+		Injections:    nonNilInjections(m.Injections),
+		Incidents:     nonNilIncidents(m.Incidents),
+		Roster:        RosterSummary{OT: []string{}, Rest: []string{}},
+		Dashboard:     m.Dashboard,
+		Teardown:      m.Teardown,
+		ExitCode:      m.ExitCode,
+		Notes:         nonNilStrings(m.Notes),
+		WipeResumes:   m.WipeResumes,
+		StepTimeline:  []StepSummary{},
+		Legs:          []LegSummary{},
+		Wipes:         []int{},
+		Pauses:        []PauseSummary{},
+		Deaths:        DeathSummary{ByStep: map[int]int{}, ByBot: map[string]int{}},
 	}
 	if s.Layout.Tanks == nil {
 		s.Layout.Tanks = []string{}
@@ -317,9 +334,16 @@ func (s *Summary) Text() string {
 		fmt.Fprintf(&b, "until %s\n", s.Until)
 	}
 	if s.TestSpeed {
-		fmt.Fprintf(&b, "speed %.1f (test)\n", s.Speed)
+		fmt.Fprintf(&b, "speed %.1f (test)", s.Speed)
+		if s.SpeedFellBack {
+			b.WriteString("; the server went back to 1.0 once a real player joined")
+		}
+		b.WriteString("\n")
 	} else if s.Speed > 0 {
 		fmt.Fprintf(&b, "speed %.1f\n", s.Speed)
+	}
+	if s.RunLabel != "" {
+		fmt.Fprintf(&b, "server label: %s\n", s.RunLabel)
 	}
 	if s.Roster.Tier > 0 {
 		fmt.Fprintf(&b, "tier %d (%s)%s\n", s.Roster.Tier, s.Roster.TierSource, comparisonWord(s.Roster.TierComparison))
@@ -341,6 +365,18 @@ func (s *Summary) Text() string {
 	for _, inc := range s.Incidents {
 		fmt.Fprintf(&b, "%s incident: %s; frozen: %s; manual: %s\n",
 			strings.ToUpper(inc.Severity), inc.Kind, strings.Join(inc.Bots, ", "), inc.Manual)
+	}
+	var fl []string
+	for _, f := range s.Fights {
+		if l := fightLine(f); l != "" {
+			fl = append(fl, l)
+		}
+	}
+	if len(fl) > 0 {
+		b.WriteString("fights with deaths or red warnings:\n")
+		for _, l := range fl {
+			fmt.Fprintf(&b, "  %s\n", l)
+		}
 	}
 	fmt.Fprintf(&b, "dashboard: %s\n", s.Dashboard)
 	if s.Teardown.Failed {

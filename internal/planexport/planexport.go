@@ -59,6 +59,14 @@ const (
 	// stands within 1.5 yd of it and has stood still there for 2 s, and only then sends the move_direct after it (TortoiseBots
 	// DungeonPlanPolicy.h kPlanFlagExact, DungeonRunPolicy.h ExactWalkTo). The loader refuses it on any other kind.
 	FlagExact = 64
+	// FlagSkipUnreachable marks a boss row whose boss may stand out of the party's reach by design (Stormwrought Ruins'
+	// Eldermaw 62661; DungeonPlanPolicy.h kPlanFlagSkipUnreachable): where the step would pause on him alive it ends
+	// "not cleared" with a note instead.
+	FlagSkipUnreachable = 4096
+	// FlagStandPull marks a boss or pull row the party pulls from its stand: the move row right before it in the same leg
+	// (Stormwrought Ruins' Eldermaw 62661; Zul'Gurub's plateau bat formations, where the pull row's param is the clearance
+	// from other patrols in yd; DungeonPlanPolicy.h kPlanFlagStandPull, specs/rl-patrol-timed-pull.md).
+	FlagStandPull = 8192
 	// EncounterDone is the encounter state DONE: a hold's param.
 	EncounterDone = 3
 )
@@ -474,6 +482,17 @@ func (b *builder) pull(gi int, g dungeon.PullGroup) error {
 	if g.Ambush {
 		flags |= FlagAmbush
 	}
+	if g.StandPull && (len(g.Approach) == 0 || g.Hold != nil || g.Ambush) {
+		return fmt.Errorf("a stand_pull group needs an approach point and no hold or ambush")
+	}
+	if g.ClearYd < 0 || g.ClearYd > dungeon.MaxStandPullClearYd || (g.ClearYd != 0 && !g.StandPull) {
+		return fmt.Errorf("clear_yd %d: 0-%d, and only with stand_pull", g.ClearYd, dungeon.MaxStandPullClearYd)
+	}
+	var param uint32
+	if g.StandPull {
+		flags |= FlagStandPull
+		param = uint32(g.ClearYd)
+	}
 	c := fmt.Sprintf("pull group %d", gi)
 	for _, a := range g.Approach {
 		b.move(a, false, c+" approach")
@@ -482,8 +501,14 @@ func (b *builder) pull(gi int, g dungeon.PullGroup) error {
 		b.hold(g.Hold, uniq(g.Entries), c+" hold")
 		return nil
 	}
-	b.add(StepRow{Kind: KindPull, X: f32(cx), Y: f32(cy), Z: f32(cz), Radius: radius, Flags: flags, Entries: uniq(g.Entries), Comment: c})
+	if g.StandPull {
+		c += "; stand pull"
+	}
+	b.add(StepRow{Kind: KindPull, X: f32(cx), Y: f32(cy), Z: f32(cz), Radius: radius, Flags: flags, Param: param, Entries: uniq(g.Entries), Comment: c})
 	b.last, b.haveLast = dungeon.Point{X: f32(cx), Y: f32(cy), Z: f32(cz)}, true
+	if g.StandPull {
+		b.last = g.Approach[len(g.Approach)-1] // the party fights from its stand: the next move's hop is measured from there
+	}
 	return nil
 }
 
@@ -513,6 +538,15 @@ func (b *builder) hold(h *dungeon.Hold, entries []uint32, comment string) {
 }
 
 func (b *builder) boss(bs *dungeon.Boss) error {
+	if bs.StandPull && len(bs.Approach) == 0 {
+		return fmt.Errorf("boss %d: a stand_pull boss needs an approach point (its stand)", bs.Entry)
+	}
+	if bs.StandPull && bs.Hold != nil {
+		return fmt.Errorf("boss %d: stand_pull together with hold is an error (like hold + skip_unreachable)", bs.Entry)
+	}
+	if bs.Radius < 0 || bs.Radius > MaxRadius {
+		return fmt.Errorf("boss %d: radius %.1f is outside 0-%d", bs.Entry, bs.Radius, MaxRadius)
+	}
 	for _, a := range bs.Approach {
 		b.move(a, false, "boss approach")
 	}
@@ -520,8 +554,21 @@ func (b *builder) boss(bs *dungeon.Boss) error {
 		b.hold(bs.Hold, uniq(append(append([]uint32{bs.Entry}, bs.First...), bs.Hold.Entries...)), "boss hold")
 		return nil
 	}
-	b.add(StepRow{Kind: KindBoss, Entry: bs.Entry, X: bs.Position.X, Y: bs.Position.Y, Z: bs.Position.Z, Flags: teamFlags(bs.Team), Entries: uniq(bs.First), TimeoutS: bs.WaitS, Comment: "boss"})
-	b.last, b.haveLast = bs.Position, true
+	flags, comment := teamFlags(bs.Team), "boss"
+	if bs.SkipUnreachable != "" {
+		flags |= FlagSkipUnreachable
+		comment = clip("boss; out of reach: "+bs.SkipUnreachable, MaxComment)
+	}
+	if bs.StandPull {
+		flags |= FlagStandPull
+	}
+	b.add(StepRow{Kind: KindBoss, Entry: bs.Entry, X: bs.Position.X, Y: bs.Position.Y, Z: bs.Position.Z, Radius: bs.Radius, Flags: flags, Entries: uniq(bs.First), TimeoutS: bs.WaitS, Comment: comment})
+	stand := bs.Position
+	if bs.StandPull {
+		// The party fought there, and P is in deep water: the next move's hop is measured from the stand.
+		stand = bs.Approach[len(bs.Approach)-1]
+	}
+	b.last, b.haveLast = stand, true
 	if bs.LootItem != nil {
 		b.add(StepRow{Kind: KindLoot, Entry: bs.Entry, X: bs.Position.X, Y: bs.Position.Y, Z: bs.Position.Z, Item: bs.LootItem.Entry, Comment: clip("boss loot: "+bs.LootItem.String(), MaxComment)})
 	}
@@ -800,7 +847,7 @@ func (b *builder) cutLongHops() error {
 	renumber := map[int]int{} // leg -> next seq
 	for i := range b.rows.Steps {
 		s := b.rows.Steps[i]
-		if b.opt.ApproachHops && b.opt.Cut != nil && prev != nil && (s.Kind == KindPull || s.Kind == KindBoss || s.Kind == KindHold) {
+		if b.opt.ApproachHops && b.opt.Cut != nil && prev != nil && (s.Kind == KindPull || s.Kind == KindBoss || s.Kind == KindHold) && s.Flags&FlagStandPull == 0 {
 			a, c := dungeon.Point{X: prev.X, Y: prev.Y, Z: prev.Z}, dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
 			if d := dist3(a, c); d > dungeon.RunLeaderReachYd {
 				via, err := b.opt.Cut(b.plan.Map, a, c)
@@ -818,8 +865,12 @@ func (b *builder) cutLongHops() error {
 		if (s.Kind == KindPull || s.Kind == KindBoss || s.Kind == KindHold) && prev != nil {
 			// The party fought there (a pull or boss it saw from its move point, a hold on its spot): the next move's hop is measured
 			// from it, not from the move before the fight (a leg's first move after a boss would otherwise be walked back from the
-			// leg before's last move and forth again: Uldaman's legs 6 and 7, export of dd05724).
+			// leg before's last move and forth again: Uldaman's legs 6 and 7, export of dd05724). A stand-pull boss is fought from
+			// its stand (the move row right before it), while its point stands in deep water: the next hop is measured from the stand.
 			cp := StepRow{Plan: s.Plan, Leg: s.Leg, Kind: s.Kind, X: s.X, Y: s.Y, Z: s.Z}
+			if (s.Kind == KindBoss || s.Kind == KindPull) && s.Flags&FlagStandPull != 0 && prev.Kind == KindMove {
+				cp.X, cp.Y, cp.Z = prev.X, prev.Y, prev.Z
+			}
 			prev = &cp
 		}
 		if s.Kind == KindMove || s.Kind == KindMoveDirect || s.Kind == KindMoveHopExact {

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/slots"
 )
 
@@ -68,7 +69,7 @@ func TestRaidWalkPairRefusesSlot3(t *testing.T) {
 }
 
 func TestRaidWalkPairSlotListShape(t *testing.T) {
-	for _, list := range []string{"1,1", "1,2,4", "1,", ",2", "1,2,3"} {
+	for _, list := range []string{"1,1", "1,", ",2", "1,2,1", "1,2,4,5,6,7,8,9,10"} {
 		var stdout, stderr bytes.Buffer
 		if code := raidWalkCmd(context.Background(), []string{"--slot", list, "onyxias_lair"}, &stdout, &stderr); code != exitUsage {
 			t.Fatalf("--slot %q: exit %d, want %d (stderr %q)", list, code, exitUsage, stderr.String())
@@ -76,6 +77,177 @@ func TestRaidWalkPairSlotListShape(t *testing.T) {
 		if stderr.Len() == 0 {
 			t.Fatalf("--slot %q: no message", list)
 		}
+	}
+}
+
+// Slot 3 is refused in any position of a longer list too, before any environment is built.
+func TestRaidWalkMultiRefusesSlot3(t *testing.T) {
+	envCalled := false
+	oldEnv := raidWalkPairEnv
+	raidWalkPairEnv = func(o *raidWalkOptions) (walkEnv, walkDeps, error) {
+		envCalled = true
+		return walkEnv{}, walkDeps{}, nil
+	}
+	t.Cleanup(func() { raidWalkPairEnv = oldEnv })
+	for _, list := range []string{"1,2,3", "3,1,2", "1,3,2,4"} {
+		var stdout, stderr bytes.Buffer
+		if code := raidWalkCmd(context.Background(), []string{"--slot", list, "onyxias_lair"}, &stdout, &stderr); code != exitSlotRefused {
+			t.Fatalf("--slot %s: exit %d, want %d (stderr %q)", list, code, exitSlotRefused, stderr.String())
+		}
+	}
+	if envCalled {
+		t.Fatal("slot 3 built a walk environment (a lease could follow)")
+	}
+}
+
+// multiFakeRun is pairFakeRun for walks that write a summary.json, so the combined report has something to add up.
+func multiFakeRun(t *testing.T, codes map[string]int) (*[]raidWalkOptions, *[]time.Duration) {
+	t.Helper()
+	var mu sync.Mutex
+	opts := []raidWalkOptions{}
+	sleeps := []time.Duration{}
+	oldRun, oldEnv, oldSleep := raidWalkPairRun, raidWalkPairEnv, raidWalkPairSleep
+	raidWalkPairEnv = func(o *raidWalkOptions) (walkEnv, walkDeps, error) { return walkEnv{}, walkDeps{}, nil }
+	raidWalkPairSleep = func(ctx context.Context, d time.Duration) error {
+		mu.Lock()
+		sleeps = append(sleeps, d)
+		mu.Unlock()
+		return nil
+	}
+	raidWalkPairRun = func(ctx context.Context, o raidWalkOptions, env walkEnv, deps walkDeps, stdout, stderr io.Writer) int {
+		mu.Lock()
+		opts = append(opts, o)
+		mu.Unlock()
+		code := codes[o.slot]
+		start := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+		sum := raidwalk.Summary{Format: "tb-raid-walk", Version: 1, Plan: o.plan, Character: "Cmd" + o.slot, EndReason: "until", StepsReached: 10, StepsTotal: 20,
+			Started: start.Add(time.Duration(len(o.slot)) * time.Minute), Ended: start.Add(30 * time.Minute), Dashboard: "off"}
+		sum.Deaths.Total = 2
+		if code != exitOK {
+			sum.EndReason = "stall"
+		}
+		raw, _ := json.Marshal(sum)
+		_ = os.MkdirAll(o.out, 0o700)
+		_ = os.WriteFile(filepath.Join(o.out, "summary.json"), raw, 0o600)
+		fmt.Fprintf(stdout, "walk %s\n", o.plan)
+		return code
+	}
+	t.Cleanup(func() { raidWalkPairRun, raidWalkPairEnv, raidWalkPairSleep = oldRun, oldEnv, oldSleep })
+	return &opts, &sleeps
+}
+
+// Three raids at once: one lease and one out dir per slot, a stagger between the starts, and a combined summary in multi.json.
+func TestRaidWalkMultiThreeWalks(t *testing.T) {
+	opts, sleeps := multiFakeRun(t, map[string]int{"4": exitRaidWalkFailed})
+	out := filepath.Join(t.TempDir(), "multi")
+	var stdout, stderr bytes.Buffer
+	code := raidWalkPairCmd(context.Background(), []string{"--slot", "1,2,4", "--out", out, "--sql", "4=c.sql", "--stagger", "20s", "onyxias_lair"}, &stdout, &stderr)
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want the failed walk's %d: %s", code, exitRaidWalkFailed, stderr.String())
+	}
+	got := *opts
+	if len(got) != 3 {
+		t.Fatalf("%d walks ran, want 3", len(got))
+	}
+	sort.Slice(got, func(i, j int) bool { return got[i].slot < got[j].slot })
+	holders := map[string]bool{}
+	for i, slot := range []string{"1", "2", "4"} {
+		o := got[i]
+		if o.slot != slot || o.out != filepath.Join(out, "s"+slot+"-onyxias_lair") || o.holder != "raid-walk-onyxias_lair-s"+slot {
+			t.Errorf("walk %d: %+v", i, o)
+		}
+		holders[o.holder] = true
+	}
+	if len(holders) != 3 || got[2].sql != "c.sql" || got[0].sql != "" {
+		t.Errorf("holders %v, sql %q/%q", holders, got[0].sql, got[2].sql)
+	}
+	if len(*sleeps) != 2 || (*sleeps)[0] != 20*time.Second {
+		t.Errorf("stagger sleeps %v, want two of 20 s", *sleeps)
+	}
+	if _, err := os.Stat(filepath.Join(out, "pair.json")); err == nil {
+		t.Error("a three-walk run wrote pair.json")
+	}
+	raw, err := os.ReadFile(filepath.Join(out, "multi.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rep multiReport
+	if err := json.Unmarshal(raw, &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Format != "tb-raid-walk-multi" || len(rep.Walks) != 3 || rep.ExitCode != exitRaidWalkFailed || rep.Totals == nil {
+		t.Fatalf("multi.json %+v", rep)
+	}
+	if rep.Totals.Walks != 3 || rep.Totals.Until != 2 || rep.Totals.Failed != 1 || rep.Totals.Deaths != 6 || rep.Totals.StepsReached != 30 {
+		t.Errorf("totals %+v", rep.Totals)
+	}
+	if rep.OverlapS <= 0 {
+		t.Errorf("overlap %v", rep.OverlapS)
+	}
+	text, err := os.ReadFile(filepath.Join(out, "multi.txt"))
+	if err != nil || !strings.Contains(string(text), "total: 3 walks; 2 ended by until; 1 failed") || !strings.Contains(string(text), "multi: exit 18") {
+		t.Fatalf("multi.txt %v\n%s", err, text)
+	}
+	for _, slot := range []string{"1", "2", "4"} {
+		if !strings.Contains(stdout.String(), "[s"+slot+" onyxias_lair] walk onyxias_lair") {
+			t.Errorf("no output of slot %s:\n%s", slot, stdout.String())
+		}
+	}
+}
+
+// One plan per slot, in the slots' order; a plan count that fits neither form is refused.
+func TestRaidWalkMultiPlansPerSlot(t *testing.T) {
+	opts, _ := multiFakeRun(t, nil)
+	out := filepath.Join(t.TempDir(), "multi")
+	var stdout, stderr bytes.Buffer
+	code := raidWalkPairCmd(context.Background(), []string{"--slot", "1,2,4", "--out", out, "--stagger", "0s", "onyxias_lair", "molten_core", "zul_gurub"}, &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	by := map[string]string{}
+	for _, o := range *opts {
+		by[o.slot] = o.plan
+	}
+	if by["1"] != "onyxias_lair" || by["2"] != "molten_core" || by["4"] != "zul_gurub" {
+		t.Errorf("plans by slot %v", by)
+	}
+	stderr.Reset()
+	code = raidWalkPairCmd(context.Background(), []string{"--slot", "1,2,4", "--out", filepath.Join(t.TempDir(), "m2"), "onyxias_lair", "molten_core"}, &stdout, &stderr)
+	if code != exitUsage || !strings.Contains(stderr.String(), "one plan per slot (3)") {
+		t.Fatalf("two plans for three slots: %d %s", code, stderr.String())
+	}
+	stderr.Reset()
+	code = raidWalkPairCmd(context.Background(), []string{"--slot", "1,2,4", "--out", filepath.Join(t.TempDir(), "m3"), "--holder", "2=x", "--holder", "4=x", "onyxias_lair"}, &stdout, &stderr)
+	if code != exitUsage || !strings.Contains(stderr.String(), `would hold the lease as "x"`) {
+		t.Fatalf("equal holders: %d %s", code, stderr.String())
+	}
+	stderr.Reset()
+	code = raidWalkPairCmd(context.Background(), []string{"--slot", "1,2,4", "--out", filepath.Join(t.TempDir(), "m4"), "--sql", "5=a.sql", "onyxias_lair"}, &stdout, &stderr)
+	if code != exitUsage || !strings.Contains(stderr.String(), "unknown slot prefix") {
+		t.Fatalf("a prefix of a slot not in the list: %d %s", code, stderr.String())
+	}
+}
+
+// An interrupt during the stagger leaves the walks after it unstarted, each noted.
+func TestRaidWalkMultiInterruptedStagger(t *testing.T) {
+	multiFakeRun(t, nil)
+	n := 0
+	raidWalkPairSleep = func(ctx context.Context, d time.Duration) error {
+		n++
+		if n == 2 {
+			return context.Canceled
+		}
+		return nil
+	}
+	out := filepath.Join(t.TempDir(), "multi")
+	var stdout, stderr bytes.Buffer
+	code := raidWalkPairCmd(context.Background(), []string{"--slot", "1,2,4,5", "--out", out, "onyxias_lair"}, &stdout, &stderr)
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	text, _ := os.ReadFile(filepath.Join(out, "multi.txt"))
+	if strings.Count(string(text), "not started (interrupted during the stagger)") != 2 {
+		t.Fatalf("multi.txt:\n%s", text)
 	}
 }
 

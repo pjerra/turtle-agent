@@ -211,11 +211,18 @@ func TestPlansOnNavmeshWhereTheMachineHasIt(t *testing.T) {
 	}
 }
 
-// needsWalkPoints are the points of a leg marked needs_walk: its To, a flagged pull group's positions, a flagged boss's position.
+// needsWalkPoints are the points of a leg marked needs_walk: its To, a flagged pull group's positions, a flagged boss's position,
+// and a via point with a check_skip reason (a hop the navmesh cannot judge on purpose, e.g. Karazhan Crypt's swim up the flooded
+// shaft: the mmaps have no swim volume).
 func needsWalkPoints(l Leg) map[Point]bool {
 	m := map[Point]bool{}
 	if l.NeedsWalk {
 		m[l.To] = true
+	}
+	for _, v := range l.Via {
+		if v.CheckSkip != "" {
+			m[v.Point] = true
+		}
 	}
 	for _, g := range l.PullGroups {
 		if g.NeedsWalk {

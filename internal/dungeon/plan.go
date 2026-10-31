@@ -339,6 +339,16 @@ type PullGroup struct {
 	Approach []Point `json:"approach,omitempty"`
 	// Hold makes the run leader's row for the group a scripted event's hold (see Hold) instead of a pull; nil: a pull.
 	Hold *Hold `json:"hold,omitempty"`
+	// StandPull says the run leader's party holds at the group's last approach point (its stand, the move row right before the
+	// pull row) and pulls the pack from there once one of its units is in the tank's shot and no other patrol stands within
+	// ClearYd of the lead bot (TortoiseBots kPlanFlagStandPull on a pull, specs/rl-patrol-timed-pull.md): for a formation
+	// that walks a loop near other formations. The pack is then the formations with a unit whose DB spawn lies within Radius
+	// of the group's centre (the run leader drops every other formation's units), and Radius may go up to 100. Needs an
+	// approach point (within 60 yd of the centre, so the run leader sees the row's point from it); never with a hold.
+	StandPull bool `json:"stand_pull,omitempty"`
+	// ClearYd is how far from the lead bot another patrol must be for a StandPull group's pull to go out (yards, 1-60, the
+	// pull row's param; 0: the run leader's 40). Only with StandPull.
+	ClearYd int `json:"clear_yd,omitempty"`
 }
 
 // Hold is a scripted event that the TortoiseBots run leader fights out on one spot (its `hold` step, TortoiseBots #1041): the party
@@ -372,6 +382,11 @@ type Hold struct {
 const (
 	// HoldDoorWaitS is the most a game object wait straight after a hold waits in the run leader's rows.
 	HoldDoorWaitS = 60
+	// MaxStandPullClearYd is the most a stand_pull group's clear_yd may say (TortoiseBots kStandPullClearMaxYd: the glue lists
+	// other patrols that far from the lead bot).
+	MaxStandPullClearYd = 60
+	// MaxStandPullRadius is the most a stand_pull group's radius may say (the run leader's row radius cap, kPlanMaxRadius).
+	MaxStandPullRadius = 100
 	// MaxApproach is the most approach points a pull group or boss has.
 	MaxApproach = 4
 	// RunLeaderSeeYd is how far the TortoiseBots run leader sees a pack, a boss or a move point from its lead bot (DungeonRunPolicy.h kSeeYd);
@@ -427,6 +442,13 @@ type Boss struct {
 	Tactics *tactics.Tactics `json:"tactics,omitempty"`
 	// NeedsWalk: the position is not on the navmesh and could not be snapped to it; see Leg.NeedsWalk.
 	NeedsWalk bool `json:"needs_walk,omitempty"`
+	// Radius is the yards around Position the run leader searches for a patrolling boss (Stormwrought Ruins' Eldermaw
+	// 62661 swims a 440 yd loop; specs/sw-eldermaw.md Spec B). Zero means the module's 30.
+	Radius float32 `json:"radius,omitempty"`
+	// StandPull says the party holds at the boss's last approach point (the move row right before the boss row) and the
+	// boss is pulled from there once in the tank's shot: no firing-stand search, no walk toward his spot
+	// (specs/sw-eldermaw.md Spec B).
+	StandPull bool `json:"stand_pull,omitempty"`
 	// Approach is PullGroup.Approach for the boss: where the run leader's party walks before the fight.
 	Approach []Point `json:"approach,omitempty"`
 	// Hold is PullGroup.Hold for the boss: the run leader's row for the fight is the event's hold (Archaedas).
@@ -436,6 +458,10 @@ type Boss struct {
 	// the rows carry no patrol path, so the party stands at his point and waits for him, and a round longer than the
 	// default is missed (Wailing Caverns' Kresh walks 525.9 yd at 2.5 yd/s, about 210 s a round: 300).
 	WaitS int `json:"wait_s,omitempty"`
+	// SkipUnreachable says the boss may stand out of the party's reach by design (Stormwrought Ruins' Eldermaw 62661
+	// swims a pool whose bed navmesh is cut off from the shore; specs/sw-eldermaw.md): plan-export sets the run leader's
+	// skip-unreachable flag on the boss row and carries the reason in its comment. Required to be non-empty when set.
+	SkipUnreachable string `json:"skip_unreachable,omitempty"`
 }
 
 // The two teams a Team field can name. The driver learns the leader's from its race (session.Team).
@@ -825,6 +851,10 @@ type rawPullGroup struct {
 	Patrol    *rawPatrol `json:"patrol"`
 	Approach  []rawPoint `json:"approach"`
 	Hold      *rawHold   `json:"hold"`
+	// StandPull is PullGroup.StandPull.
+	StandPull bool `json:"stand_pull"`
+	// ClearYd is PullGroup.ClearYd.
+	ClearYd int `json:"clear_yd"`
 }
 
 type rawHold struct {
@@ -856,10 +886,16 @@ type rawBoss struct {
 	// Tactics is Boss.Tactics.
 	Tactics   *tactics.Tactics `json:"tactics"`
 	NeedsWalk bool             `json:"needs_walk"`
-	Approach  []rawPoint       `json:"approach"`
-	Hold      *rawHold         `json:"hold"`
+	// Radius is Boss.Radius.
+	Radius float32 `json:"radius"`
+	// StandPull is Boss.StandPull.
+	StandPull bool       `json:"stand_pull"`
+	Approach  []rawPoint `json:"approach"`
+	Hold      *rawHold   `json:"hold"`
 	// WaitS is Boss.WaitS.
 	WaitS int `json:"wait_s"`
+	// SkipUnreachable is Boss.SkipUnreachable.
+	SkipUnreachable string `json:"skip_unreachable"`
 }
 
 type rawStep struct {
@@ -1291,7 +1327,13 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		if len(g.Equiv) > MaxEquivLen || strings.TrimSpace(g.Equiv) != g.Equiv {
 			c.fail(gp+".equiv", "%q: a label of at most %d characters, with no space around it", g.Equiv, MaxEquivLen)
 		}
-		if g.Radius < 0 || g.Radius > 60 {
+		if maxR := float32(60); g.StandPull {
+			// A stand_pull group's radius marks its formations by their DB spawns (TortoiseBots ScopeStandPullFacts), and the
+			// run leader must see the row's point from the stand: a spawn far from the stand needs a wider one.
+			if g.Radius < 0 || g.Radius > MaxStandPullRadius {
+				c.fail(gp+".radius", "%g: use 0 (the default) or 1-%d yards on a stand_pull group", g.Radius, MaxStandPullRadius)
+			}
+		} else if g.Radius < 0 || g.Radius > maxR {
 			c.fail(gp+".radius", "%g: use 0 (the default) or 1-60 yards", g.Radius)
 		}
 		c.entries(gp+".entries", g.Entries, true)
@@ -1321,6 +1363,33 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		pg.Approach = c.approach(gp+".approach", g.Approach)
 		pg.Hold = c.hold(gp+".hold", g.Hold, false)
+		pg.StandPull, pg.ClearYd = g.StandPull, g.ClearYd
+		if g.StandPull && len(g.Approach) == 0 {
+			c.fail(gp+".stand_pull", "a stand_pull group needs an approach point (its stand)")
+		}
+		if g.StandPull && g.Hold != nil {
+			c.fail(gp+".stand_pull", "a stand_pull group with a hold is an error")
+		}
+		if g.StandPull && g.Ambush {
+			c.fail(gp+".stand_pull", "a stand_pull group cannot be an ambush (a stealthed pack is walked through, not shot)")
+		}
+		if g.StandPull && len(pg.Approach) > 0 && len(pg.Positions) > 0 {
+			var cx, cy, cz float64
+			for _, q := range pg.Positions {
+				cx, cy, cz = cx+float64(q.X), cy+float64(q.Y), cz+float64(q.Z)
+			}
+			n := float64(len(pg.Positions))
+			st := pg.Approach[len(pg.Approach)-1]
+			if d := math.Sqrt(sq64(float64(st.X)-cx/n) + sq64(float64(st.Y)-cy/n) + sq64(float64(st.Z)-cz/n)); d > RunLeaderSeeYd {
+				c.fail(gp+".stand_pull", "the stand (the last approach point) is %.1f yd from the pull row's point (the positions' mean): the run leader sees it from %g yd at most", d, float64(RunLeaderSeeYd))
+			}
+		}
+		if g.ClearYd != 0 && !g.StandPull {
+			c.fail(gp+".clear_yd", "only with stand_pull")
+		}
+		if g.ClearYd < 0 || g.ClearYd > MaxStandPullClearYd {
+			c.fail(gp+".clear_yd", "%d: use 0 (the run leader's 40) or 1-%d yards", g.ClearYd, MaxStandPullClearYd)
+		}
 		l.PullGroups = append(l.PullGroups, pg)
 	}
 	for i, lv := range r.Leave {
@@ -1355,7 +1424,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	}
 	if r.Boss != nil {
 		bp := path + ".boss"
-		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot, NeedsWalk: r.Boss.NeedsWalk}
+		b := Boss{Entry: r.Boss.Entry, First: r.Boss.First, Team: r.Boss.Team, CompanionsLoot: r.Boss.CompanionsLoot, NeedsWalk: r.Boss.NeedsWalk, Radius: r.Boss.Radius, StandPull: r.Boss.StandPull, SkipUnreachable: r.Boss.SkipUnreachable}
 		c.team(bp+".team", r.Boss.Team)
 		b.LootItem = c.item(bp+".loot_item", r.Boss.LootItem)
 		if b.Entry == 0 {
@@ -1389,6 +1458,21 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		b.Hold = c.hold(bp+".hold", r.Boss.Hold, false)
 		if b.Hold != nil && b.LootItem != nil {
 			c.fail(bp+".hold", "a boss with a hold has no loot_item: the run leader's hold row has no loot")
+		}
+		if b.SkipUnreachable != "" && b.Hold != nil {
+			c.fail(bp+".skip_unreachable", "a boss with a hold cannot be skipped as out of reach: the hold fight needs him in reach")
+		}
+		if b.StandPull && b.Hold != nil {
+			c.fail(bp+".stand_pull", "a stand_pull boss with a hold is an error (like hold + skip_unreachable)")
+		}
+		if b.StandPull && len(b.Approach) == 0 {
+			c.fail(bp+".stand_pull", "a stand_pull boss needs an approach point (its stand)")
+		}
+		if b.Radius < 0 || b.Radius > MaxStandPullRadius {
+			c.fail(bp+".radius", "%g is outside 0-%d yards", b.Radius, MaxStandPullRadius)
+		}
+		if r.Boss.SkipUnreachable != "" && strings.TrimSpace(r.Boss.SkipUnreachable) == "" {
+			c.fail(bp+".skip_unreachable", "required to be non-empty when set (why the boss may stand out of the party's reach)")
 		}
 
 		l.Boss = &b
@@ -1867,3 +1951,5 @@ func (c *checker) batches(path string, steps []Step) {
 		i = j
 	}
 }
+
+func sq64(v float64) float64 { return v * v }

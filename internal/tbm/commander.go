@@ -389,6 +389,8 @@ func (f *ViewFeed) ProcessLine(line string) {
 	if a, ok := ParseAck(line); ok && strings.EqualFold(a.Intent, "commander unbind") {
 		f.mu.Lock()
 		f.ends = append(f.ends, BindingEnd{Reason: a.Executor, Count: a.Count, At: f.now()})
+		// The binding is over: its last frame must not go on describing a party (units' bound flag reads it).
+		f.have = false
 		f.wake()
 		f.mu.Unlock()
 		return

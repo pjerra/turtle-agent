@@ -1842,3 +1842,150 @@ func TestObserveExposesTheInstanceId(t *testing.T) {
 		t.Fatalf("%d instance events in the trace (want none)", len(insts))
 	}
 }
+
+// TestSamePauseNoteWithRunLabel: an until or test-speed run's status lines carry a trailing label; the parser takes it
+// off the note, so a pause the module extends with an aside is still the latched pause.
+func TestSamePauseNoteWithRunLabel(t *testing.T) {
+	a, _ := tbm.ParseRunLine("TBM:RUN|zul_gurub|paused|29/1104|j|pull|pull|15 dead: regroup (cmd revive party), then .bot run resume|until boss (step 41)")
+	b, _ := tbm.ParseRunLine("TBM:RUN|zul_gurub|paused|29/1104|j|pull|pull|15 dead: regroup (cmd revive party), then .bot run resume; boss meanwhile: x|until boss (step 41)")
+	if !samePauseNote(a.Note, b.Note) {
+		t.Fatalf("%q then %q: a new pause", a.Note, b.Note)
+	}
+	if a.Label != "until boss (step 41)" {
+		t.Fatalf("label %q", a.Label)
+	}
+}
+
+// longFightScript is one status for ten minutes (a boss fight past the stall time), then done.
+func longFightScript() []leaderStep {
+	return []leaderStep{
+		{0, rs("running", 3, 5, "first", "boss", "pull", "pulling boss")},
+		{s(600), rs("done", 5, 5, "first", "move", "walk", "plan done")},
+	}
+}
+
+// engagedBoss puts one engaged mob in the fake world whose hp the test sets on every tick of the watch (hp(tick) in percent, 0 < hp).
+func engagedBoss(g *fakeLeader, hp func(tick int) float64) {
+	m := g.addMob(299, Point{5, 0, 0})
+	m.pulled, m.engaged = true, true
+	base := g.onTick
+	tick := 0
+	g.onTick = func(fr *fakeRemote) {
+		base(fr)
+		if !g.running {
+			return
+		}
+		tick++
+		m.hp = hp(tick)
+	}
+}
+
+// A fight whose hostiles lose hp is progressing, although the run leader's status line is the same for ten minutes: the stall watchdog
+// leaves it alone (the fix 9 Dragonmaw run was stopped 15 minutes into a 29 minute boss fight).
+func TestObserveAProgressingFightIsNotStalled(t *testing.T) {
+	g := newFakeLeader(t, longFightScript()...)
+	engagedBoss(g, func(tick int) float64 { return 100 - float64(tick%90)/1.0 })
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{Stall: s(120)}), nil)
+	if err != nil || rep.State != "done" || g.stopped != 0 {
+		t.Fatalf("%v stopped %d %s", err, g.stopped, rep.State)
+	}
+}
+
+// A fight that stands still (the same hostile at the same hp, nobody dying) is a stall like any other.
+func TestObserveAFrozenFightIsStillStalled(t *testing.T) {
+	g := newFakeLeader(t, longFightScript()...)
+	engagedBoss(g, func(int) float64 { return 60 })
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{Stall: s(120)}), nil)
+	if err == nil || !strings.Contains(err.Error(), "stalled") || g.stopped != 1 || rep.State != "failed" {
+		t.Fatalf("%v stopped %d %s", err, g.stopped, rep.State)
+	}
+}
+
+// untilScript is a run that the run leader stops before step 4 (until step 4): the status line of the start shows the clause.
+func untilScript() []leaderStep {
+	return []leaderStep{
+		{0, rs("running", 1, 5, "first", "move", "walk", "walking until step 4 (step 4)")},
+		{s(10), rs("running", 3, 5, "first", "boss", "pull", "pulling boss")},
+		{s(30), rs("done", 3, 5, "first", "move", "walk", "stopped before step 4 (until step 4): the party stays where it stands")},
+	}
+}
+
+// observe.until goes to the run start as `until ...` and the run leader's "stopped before step" ending is the run's success.
+func TestObserveUntilStopsTheRunDone(t *testing.T) {
+	g := newFakeLeader(t, untilScript()...)
+	o := observeOpts(ObserveSpec{})
+	asked := -1
+	o.Until = func(serverSteps int) (UntilClause, error) {
+		asked = serverSteps
+		return UntilClause{Words: []string{"until", "step", "4"}, Label: "until step 4"}, nil
+	}
+	rep, err := runRemote(t, g, observePlan(), o, nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s %s", err, rep.State, rep.Error)
+	}
+	if asked != 5 || !slices.Contains(g.orders, "run start rt until step 4") {
+		t.Fatalf("asked %d, orders %v", asked, g.orders)
+	}
+	if rep.Remote.Observe.Until != "until step 4" || !strings.Contains(strings.Join(rep.Notes, "\n"), "reached its `until step 4` stop") {
+		t.Fatalf("until %q, notes %v", rep.Remote.Observe.Until, rep.Notes)
+	}
+}
+
+// Without the until in the plan the same ending is a failure: only an asked-for stop counts as done.
+func TestObserveStoppedBeforeStepWithoutUntilFails(t *testing.T) {
+	g := newFakeLeader(t, untilScript()...)
+	rep, err := runRemote(t, g, observePlan(), observeOpts(ObserveSpec{}), nil)
+	if err == nil || rep.State != "failed" {
+		t.Fatalf("%v %s", err, rep.State)
+	}
+}
+
+// A run leader that ignores the until (its start line shows no label) would walk to the plan's end: the run is stopped and refused.
+func TestObserveUntilIgnoredByTheServerIsRefused(t *testing.T) {
+	g := newFakeLeader(t, happyScript()...)
+	o := observeOpts(ObserveSpec{})
+	o.Until = func(int) (UntilClause, error) {
+		return UntilClause{Words: []string{"until", "boss"}, Label: "until boss"}, nil
+	}
+	_, err := runRemote(t, g, observePlan(), o, nil)
+	if err == nil || !strings.Contains(err.Error(), "has no `until`") || g.stopped != 1 {
+		t.Fatalf("%v stopped %d", err, g.stopped)
+	}
+}
+
+// An until the resolver cannot map is refused at the probe, before a bot is hired.
+func TestObserveUntilRefusedAtTheProbe(t *testing.T) {
+	g := newFakeLeader(t, happyScript()...)
+	o := observeOpts(ObserveSpec{})
+	o.Until = func(int) (UntilClause, error) {
+		return UntilClause{}, errors.New("observe.until boss-done: no step count")
+	}
+	_, err := runRemote(t, g, observePlan(), o, nil)
+	if err == nil || !strings.Contains(err.Error(), "observe mode: observe.until boss-done") || len(g.ordersOf("commander bind")) != 0 || len(g.ordersOf("run start")) != 0 {
+		t.Fatalf("%v %v", err, g.orders)
+	}
+}
+
+// A run already going is adopted for an observe.until only when its status shows the same until clause: else it would walk past the
+// stop the caller asked for.
+func TestObserveBusyRunMustShowTheUntil(t *testing.T) {
+	busy := func(note string) *fakeLeader {
+		g := newFakeLeader(t, untilScript()...)
+		g.running = true
+		g.emit(rs("running", 1, 5, "first", "move", "walk", note))
+		g.progress, g.next = s(5), 1
+		return g
+	}
+	o := observeOpts(ObserveSpec{})
+	o.Until = func(int) (UntilClause, error) {
+		return UntilClause{Words: []string{"until", "step", "4"}, Label: "until step 4"}, nil
+	}
+	_, err := runRemote(t, busy("walking"), observePlan(), o, nil)
+	if err == nil || !strings.Contains(err.Error(), "shows no `until step 4 (step N)`") {
+		t.Fatalf("a busy run without the until: %v", err)
+	}
+	rep, err := runRemote(t, busy("walking until step 4 (step 4)"), observePlan(), o, nil)
+	if err != nil || rep.State != "done" {
+		t.Fatalf("a busy run with the until: %v %s", err, rep.State)
+	}
+}

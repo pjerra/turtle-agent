@@ -127,6 +127,18 @@ type PartialStart struct {
 // run before a bot is hired.
 type StartFromResolver func(serverSteps int) (PartialStart, error)
 
+// UntilClause is the `until ...` the run start of an observed run carries: the words, and the clause as the run leader writes it in the
+// status ("until step 29"). The zero value is no until.
+type UntilClause struct {
+	Words []string
+	Label string
+}
+
+// UntilResolver maps an observed run's until (observe.until) to its clause once the server's step count for the plan is known (boss-done
+// is the step after the first boss row, which only the step count tells apart from other exports). An error refuses the run before a bot
+// is hired.
+type UntilResolver func(serverSteps int) (UntilClause, error)
+
 // RunLeaderWatcher is the optional part of a RemoteGame that has read the TBM:RUN lines the module pushes: the newest one and how
 // many have been read. Without it the observer relies on the replies to `.bot run start` and `.bot run status`.
 type RunLeaderWatcher interface {
@@ -143,7 +155,8 @@ type RunChange struct {
 	Kind  string    `json:"kind,omitempty"`
 	Phase string    `json:"phase,omitempty"`
 	Note  string    `json:"note,omitempty"`
-	Left  int       `json:"left,omitempty"` // packs the run leader left alive
+	Left  int       `json:"left,omitempty"`  // packs the run leader left alive
+	Label string    `json:"label,omitempty"` // the speed/until label ("speed 2.0 (test); until boss (step 38)")
 }
 
 // ObserveReport is the report's part for an observed run (Report.Remote.Observe).
@@ -158,7 +171,8 @@ type ObserveReport struct {
 	Kind  string `json:"kind,omitempty"`
 	Phase string `json:"phase,omitempty"`
 	Note  string `json:"note,omitempty"`
-	Left  int    `json:"left,omitempty"` // packs the run leader left alive
+	Left  int    `json:"left,omitempty"`  // packs the run leader left alive
+	Label string `json:"label,omitempty"` // the status line's speed/until label, as sent
 	// Text is the status in plain words ("sentinel · pull 7/41 · pulling").
 	Text string `json:"text,omitempty"`
 	// Started: `.bot run start` was acknowledged (or an own run of the plan was adopted).
@@ -175,6 +189,8 @@ type ObserveReport struct {
 	Controls         []string `json:"controls,omitempty"`
 	// PlayerOrders are the pauses the module made for a player's order (the observer's `cmd summon`, a move), each with the step and the order.
 	PlayerOrders []string `json:"player_orders,omitempty"`
+	// Until is the until clause the run was started with ("until step 29"; empty: none).
+	Until string `json:"until,omitempty"`
 	// Ended is how the watch ended: done, or the reason of a failure or stop.
 	Ended string `json:"ended,omitempty"`
 	// Changes are the status changes, oldest first (the newest MaxRunChanges).
@@ -199,7 +215,9 @@ type observeState struct {
 	startedAt  time.Time
 	last       tbm.RunStatus
 	haveLast   bool
-	lastAt     time.Time // when the status last changed
+	lastAt     time.Time           // when the status last changed, or a fight was last seen to progress (noteFightProgress)
+	fight      map[packet.GUID]int // engaged hostile -> hp % in the previous frame (nil: no fight seen yet)
+	fightDead  int                 // members dead in the previous frame
 	pausedAt   time.Time
 	seenN      uint64
 	baseN      uint64 // lines read before the start: older ones are another run's
@@ -317,6 +335,16 @@ func (d *RemoteDriver) probeRunLeader(ctx context.Context) error {
 			d.rep.note(fmt.Sprintf("observe mode: the run leader starts partway (`run start %s %s`; the server lists %d steps)", spec.Plan, start.Words, d.planSteps))
 		}
 	}
+	if d.opt.Until != nil {
+		u, err := d.opt.Until(d.planSteps)
+		if err != nil {
+			return fmt.Errorf("observe mode: %w", err)
+		}
+		d.until = u
+		if u.Label != "" {
+			d.rep.note(fmt.Sprintf("observe mode: the run stops at `%s` (the server lists %d steps)", u.Label, d.planSteps))
+		}
+	}
 	d.rep.note("observe mode: the server's run leader answered; plans: " + nonEmpty(list, "(not listed)"))
 	return nil
 }
@@ -419,6 +447,7 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 		} else if deadCount(d.fr) < wipeDeadReArm {
 			o.wiped = false
 		}
+		d.noteFightProgress(d.clk.Now())
 		d.autoResumeTick()
 		d.serveRunRequests(ctx)
 		d.readRunLines()
@@ -431,6 +460,42 @@ func (d *RemoteDriver) observe(ctx context.Context) (err error) {
 	}
 }
 
+// noteFightProgress keeps a fight that is going on from counting as a stall. The run leader's status line does not change during a
+// boss fight that runs past the stall time (the fix 9 Dragonmaw run: 29 minutes on one status, killed by the watchdog at 15), so the
+// frames speak for it: when the engaged hostiles' hp changed, one joined or died (left the list), or a member died or came back, the
+// fight is moving and the stall clock restarts. A frozen fight (the same hostiles at the same hp, nobody dying) is still a stall, and
+// so are hostiles that are evading back to their spawn.
+func (d *RemoteDriver) noteFightProgress(now time.Time) {
+	o := d.obs
+	if !d.haveFr || !o.haveLast || o.last.State != tbm.RunRunning {
+		o.fight, o.fightDead = nil, 0
+		return
+	}
+	cur := map[packet.GUID]int{}
+	for _, h := range d.fr.EngagedHostiles() {
+		if !h.Evading() {
+			cur[h.GUID] = h.HPPct
+		}
+	}
+	dead := deadCount(d.fr)
+	moved := o.fight != nil && (len(cur) != len(o.fight) || dead != o.fightDead)
+	if o.fight != nil && !moved {
+		for g, hp := range cur {
+			if prev, ok := o.fight[g]; !ok || prev != hp {
+				moved = true
+				break
+			}
+		}
+	}
+	if o.fight == nil && len(cur) > 0 {
+		moved = true // a fight began
+	}
+	if moved && now.After(o.lastAt) {
+		o.lastAt = now
+	}
+	o.fight, o.fightDead = cur, dead
+}
+
 // startRunLeader sends `.bot run start <plan> [from ...]` and takes its answer. The `from ...` words are the probe's resolution of a
 // partial start (from_leg, from_pull_group, from_step): the run leader begins at that step of its own plan (#248).
 func (d *RemoteDriver) startRunLeader(ctx context.Context) error {
@@ -438,6 +503,9 @@ func (d *RemoteDriver) startRunLeader(ctx context.Context) error {
 	line := "run start " + o.spec.Plan
 	if d.start != nil && d.start.Words != "" {
 		line += " " + d.start.Words
+	}
+	if len(d.until.Words) > 0 {
+		line += " " + strings.Join(d.until.Words, " ")
 	}
 	r, err := d.g.Command(ctx, line)
 	if err != nil {
@@ -459,6 +527,9 @@ func (d *RemoteDriver) startRunLeader(ctx context.Context) error {
 		if why := d.startMatchesStatus(o.last); why != "" {
 			return fmt.Errorf("run start refused: %s", why)
 		}
+		if d.until.Label != "" && !linesShow(sr.Lines, d.until.Label+" (step ") {
+			return fmt.Errorf("run start refused: busy: the run going shows no `%s (step N)`, so it would not stop where observe.until asks: stop it (.bot run stop) and start again", d.until.Label)
+		}
 		d.rep.note(fmt.Sprintf("observe mode: a run of %s was already going (%s); watching it", o.spec.Plan, o.last.Text()))
 	case r.Kind == tbm.KindErr:
 		return fmt.Errorf("run start refused: %s", runLeaderRefusal("start", o.spec.Plan, r.Err))
@@ -468,11 +539,37 @@ func (d *RemoteDriver) startRunLeader(ctx context.Context) error {
 		if err := d.verifyStartReply(ctx, r.Lines); err != nil {
 			return err
 		}
+		if err := d.verifyUntilLabel(r.Lines); err != nil {
+			return err
+		}
 	}
 	o.started = true
-	d.remote(func(rr *RemoteReport) { rr.Observe.Started = true })
+	d.remote(func(rr *RemoteReport) { rr.Observe.Started, rr.Observe.Until = true, d.until.Label })
 	d.rep.note("observe mode: run leader started plan " + o.spec.Plan)
 	return nil
+}
+
+// linesShow says whether any of the lines holds text.
+func linesShow(lines []string, text string) bool {
+	for _, l := range lines {
+		if strings.Contains(l, text) {
+			return true
+		}
+	}
+	return false
+}
+
+// verifyUntilLabel proves the run leader took the until clause: its start reply shows "until <clause> (step N)". A run leader without
+// `until` would walk the plan to its end, so the run is stopped at once and the watch refused (as raid-walk does).
+func (d *RemoteDriver) verifyUntilLabel(lines []string) error {
+	if d.until.Label == "" {
+		return nil
+	}
+	if linesShow(lines, d.until.Label+" (step ") {
+		return nil
+	}
+	d.stopRunLeader("the start line shows no until", "")
+	return fmt.Errorf("observe mode: run start: the run leader's start line does not show `%s (step N)`: this server's run leader has no `until` (TortoiseBots feat/run-until); the run was stopped and is not watched", d.until.Label)
 }
 
 // startMatchesStatus says why a run already going cannot stand for the requested partial start ("" when it can). A step start needs the
@@ -913,10 +1010,10 @@ func (d *RemoteDriver) takeStatus(st tbm.RunStatus) {
 	if st.State == tbm.RunDone {
 		o.serverEnd = true
 	}
-	ch := RunChange{At: now, State: st.State, Step: st.Step, Steps: st.Steps, Leg: st.Leg, Kind: st.Kind, Phase: st.Phase, Note: st.Note, Left: st.Left}
+	ch := RunChange{At: now, State: st.State, Step: st.Step, Steps: st.Steps, Leg: st.Leg, Kind: st.Kind, Phase: st.Phase, Note: st.Note, Left: st.Left, Label: st.Label}
 	d.remote(func(r *RemoteReport) {
 		ob := r.Observe
-		ob.State, ob.Step, ob.Steps, ob.Leg, ob.Kind, ob.Phase, ob.Note, ob.Left, ob.Text = st.State, st.Step, st.Steps, st.Leg, st.Kind, st.Phase, st.Note, st.Left, st.Text()
+		ob.State, ob.Step, ob.Steps, ob.Leg, ob.Kind, ob.Phase, ob.Note, ob.Left, ob.Label, ob.Text = st.State, st.Step, st.Steps, st.Leg, st.Kind, st.Phase, st.Note, st.Left, st.Label, st.Text()
 		ob.Lines++
 		if st.State == tbm.RunPaused && (!had || prev.State != tbm.RunPaused) {
 			ob.Pauses++
@@ -1082,6 +1179,10 @@ func (d *RemoteDriver) runVerdict() (done bool, err error) {
 		d.endLeg("done")
 		if st.Steps > 0 && st.Step >= st.Steps && !strings.HasPrefix(st.Note, "stopped") {
 			d.rep.note(fmt.Sprintf("observe mode: the run leader finished plan %s (%d steps)", o.spec.Plan, st.Steps))
+			return true, nil
+		}
+		if d.until.Label != "" && strings.HasPrefix(st.Note, "stopped before step") {
+			d.rep.note(fmt.Sprintf("observe mode: the run leader reached its `%s` stop (%s)", d.until.Label, st.Note))
 			return true, nil
 		}
 		return true, fmt.Errorf("the run leader ended the run at step %d/%d (%s): %s", st.Step, st.Steps, st.Leg, nonEmpty(st.Note, "no reason given"))
