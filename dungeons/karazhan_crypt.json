@@ -3624,7 +3624,8 @@
             {"x": -11237.8, "y": -1554.05, "z": -41.2229}
           ],
           "ambush": true,
-          "radius": 8
+          "radius": 8,
+          "needs_walk": true
         },
         {
           "entries": [91932],

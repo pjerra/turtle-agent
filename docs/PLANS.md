@@ -101,6 +101,7 @@ Points with no navmesh floor within reach (see mmaps above); each is marked `nee
 | `windhorn_canyon` | 1 | 0 | 0 |
 | `stormwrought_ruins` | 24 | 1 | 0 |
 | `gilneas_city` | 7 | 0 | 0 |
+| `karazhan_crypt` | 1 | 0 | 0 |
 | `temple_of_ahnqiraj` | 0 | 1 | 0 |
 
 ## Order of the mapping walks
