@@ -99,6 +99,7 @@ turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
 turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
+turtle-agent trash-check [--dir dungeons] [--sql FILE [--plan NAME]] [--spawns DIR] [--patrols FILE]... [--mmaps DIR] [--level N] [--spread YD] [--aggro-rate R] [--assist-yd 10] [--json] [--out DIR] [--dash-out FILE] [--fail-on danger|patrol|any] [<plan>|<path.json>]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent scenario check [--var NAME=VALUE]... <file>
 turtle-agent scenario run [--out DIR] [--force] [--quiet] [--var NAME=VALUE]... [--session NAME=ADDR[@TOKENFILE]]... <file>
@@ -1036,6 +1037,62 @@ change line. `--minimaps DIR` (default `~/turtle-agent-minimaps`) and `--picture
 multi-floor map.
 
 Exit: 0 (also when only comments differ), 25 with `--fail-on-change` and any change other than a comment, 2 a usage error or an existing output file, 1 an unreadable input.
+
+### Trash check
+
+`turtle-agent trash-check [--dir dungeons] [--sql FILE [--plan NAME]] [--spawns DIR] [--patrols FILE]... [--mmaps DIR] [--level N] [--spread YD] [--aggro-rate R] [--assist-yd 10] [--json] [--out DIR] [--dash-out FILE] [--fail-on danger|patrol|any] [<plan>|<path.json>]`
+reports what one walk of a plan wakes, before a raid runs it: the trash packs a body pull brings, and the windows in which a patrolling
+pack's loop crosses the route or a stand. No server, no login; it reads the plan rows, a world export and optionally the navmesh and
+patrol recordings.
+
+**Inputs.** One of `<plan>` (read as `<dir>/<plan>.json`), a path ending `.json`, or `--sql FILE` (a deployed migration; the rows the
+server runs are the recommended input, and `--plan NAME` picks the plan when the file holds several). A JSON input is rebuilt with the
+plan exporter and the report notes that. `--spawns DIR` is the world export of the plan's map (default
+`<--dir>/../tools/dungeongen/testdata/map<N>`); a missing one is refused with the path and the recipe. **The export**:
+`tools/dungeongen/export.sh <map> <outdir>` writes `creatures.tsv` (with `detection_range`, `flags_extra`, `speed_walk`, `group_flags`,
+`pool`), `links.tsv`, `link_templates.tsv`, `groups.tsv`, `movement.tsv` and `movement_template.tsv` over ssh `m910q`'s database
+container, read-only, and never puts a credential on the laptop. The 11 raid maps are checked in under
+`tools/dungeongen/testdata/map<id>`. `--patrols FILE` (repeatable, a `tb-patrols` recording of the patrol recorder) replaces the DB patrol
+whose id or any guid it carries and adds the others. `--mmaps DIR` makes the route the server's own path (`ServerPath`, what the lead
+bot walks); without it the route is the straight line between the rows and the report says so.
+
+**Knobs.** `--level` (default the plan's `level_band[0]`, the lowest level and so the widest aggro radius; required when the plan file is
+not there, e.g. a sweep over `--sql` only), `--spread` (default 10 yd for a raid plan, else 3: the party stands in a ring around the
+lead), `--aggro-rate` (1: the core's radius) and `--assist-yd` (10: `CreatureFamilyAssistanceRadius`).
+
+**The model** is the TortoiseBots run leader's `PullAggroEstimatePolicy`, rules 1-3, over the world export:
+
+- **wake** (rule 2): a spawn wakes when its aggro radius (`Creature::GetAttackDistance`: detection minus the level difference, floored
+  at 25 levels, never below `min(detection, 5)`, times the rate) plus the spread plus its wander reaches a route sample. `NO_AGGRO`
+  never wakes. A patrolling spawn is taken at every point of its loop and reported as windows instead of a hit.
+- **assist** (rule 3): one hop from each waker: same-faction hostile spawns within `--assist-yd`, never `NO_ASSIST` or `NO_AGGRO`.
+- **brings** (rule 1): the whole packs of the wakers and the assisted — a `creature_groups` group with `AGGRO_TOGETHER`, or a chain of
+  `creature_linking` / `creature_linking_template` edges (either direction), from `internal/worldspawn`.
+- **clearing**: a pack is *targeted* by the first `pull`/`boss`/`hold` row whose entries hold one of its members' entries and whose
+  point is within the row's radius + 5 yd (radius 0: 15 yd for a pull or hold, 30 for a boss) of a member's spawn or of any point of
+  its loop. Before that step the pack is alive; after it, dead (respawns are ignored). A pack no row targets is **unplanned** and alive
+  all walk. A segment that ends at the targeting row, or at the stand right before it (a move row followed by a pull or boss row in the
+  same leg; step 1, the revive point, is a stand too), is the plan's own pull and not a finding.
+- **stands** are checked with 5 yd more reach (the party stands still there): a patrol window at the revive point or the pull stand.
+- **verdict** per segment, worst first: `danger` (a pack wakes that the plan does not pull here), `patrol` (a live loop's window; not
+  for a loop pulled here), `own` (only the intended pack), `clear`.
+- **floors**: all distances are 3D; a spawn more than 15 yd above or below every sample within its 2D reach is on another floor and is
+  ignored, with a count note.
+
+**Limits** (in every report): no vmap line of sight, so through-wall aggro is over-counted; spawn positions are the DB's, not where a
+fight drags a pack; a DB loop's phase is unknown, so its windows are relative to the loop's start point (a recording carries
+`phase_epoch_ms`); a pooled spawn may not be there at all.
+
+**Output.** Text: one line per finding (`step 12->13 (move 'path') DANGER: body pull: step 13 walks within 21.0 yd of Onyxian Warder
+(aggro 32.0, pack of 1, targeted at step 17)` / `... PATROL: patrol 52050 (Onyxian Warder): 29% of 36.2 s in 62.8-81.2 s, at start`),
+then `onyxias_lair: 29 steps, 28 segments: 16 clear, 10 own, 2 patrol, 0 danger`, then the notes. `--json` prints the `tb-trash-check`
+v1 report (segments with their packs, wakers, assisted guids, brings and linked packs; the map's packs and patrols; counts). `--out DIR`
+also writes `trash-<plan>.json` and `trash-<plan>.txt`. `--dash-out FILE` writes the patrols as the dashboard's patrol data file (the
+plan layer's `wake.json` shape keyed by patrol id: `entries`, `path`, `period_s`, `estimate`, `why`, `src`) for the phase-A backlog's
+patrol-aware rings.
+
+**Exit** 0; 21 with `--fail-on danger|patrol|any` when a finding of that class exists; 2 usage (including a missing export or level);
+1 when `--mmaps` gives a navmesh that cannot answer (no cgo, no tiles), as `plan-check` does.
 
 ### Route oracle
 
