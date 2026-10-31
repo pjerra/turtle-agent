@@ -39,6 +39,7 @@ type Summary struct {
 	Injections    []InjectSummary  `json:"injections"`
 	Incidents     []InjectIncident `json:"incidents"`
 	Wipes         []int            `json:"wipes"`
+	WipeResumes   int              `json:"wipe_resumes"`
 	BossEngaged   *BossSummary     `json:"boss_engaged"`
 	Pauses        []PauseSummary   `json:"pauses"`
 	Fights        []FightSummary   `json:"fights"`
@@ -157,6 +158,8 @@ type SummaryMeta struct {
 	// TierSource and TierComparison qualify the roster's tier (tiers.go).
 	TierSource     string
 	TierComparison bool
+	// WipeResumes is the walk's recovered wipes and near-wipe stops (--wipe-resume).
+	WipeResumes    int
 	Layout         LayoutSummary
 	Started        time.Time
 	Ended          time.Time
@@ -201,6 +204,7 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		Teardown:      m.Teardown,
 		ExitCode:      m.ExitCode,
 		Notes:         nonNilStrings(m.Notes),
+		WipeResumes:   m.WipeResumes,
 		StepTimeline:  []StepSummary{},
 		Legs:          []LegSummary{},
 		Wipes:         []int{},

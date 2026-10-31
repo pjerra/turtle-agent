@@ -7,6 +7,7 @@ func TestAllowedLine(t *testing.T) {
 	ok := []string{
 		".go xyz 1 2 3 249",
 		".go xyz -4768.61 -3752.11 53.43 1",
+		".go xyz -11915.8 -1236.43 96.1502 0",
 		".bot hire raid 1 warrior:tank level=60 t3",
 		".bot hire raid 10h 26d level=60",
 		".bot hire raid 3t 10h 26d level=60",
@@ -15,7 +16,7 @@ func TestAllowedLine(t *testing.T) {
 		".summon Tankbot",
 		".revive Tankbot",
 		".bot run stop",
-		".bot run stop time limit reached (raid-walk 90m)",
+		".bot run resume",
 	}
 	for _, line := range ok {
 		if !AllowedLine(line, hires) {
@@ -29,7 +30,7 @@ func TestAllowedLine(t *testing.T) {
 		".kick X",
 		".go xyz 1 2",
 		".go xyz 1 2 3",
-		".go xyz 1 2 3 0",
+		".go xyz 1 2 3 -1",
 		".go xyz NaN 2 3 249",
 		".go xyz 1 2 3 249 extra",
 		".bot hire raid onyxia level=60",
@@ -49,6 +50,8 @@ func TestAllowedLine(t *testing.T) {
 		".summon Tankbot extra",
 		".bot run stop now",
 		".bot run stop time limit reached (raid-walk 0m)",
+		".bot run resume now",
+		".bot run resume x",
 	}
 	for _, line := range bad {
 		if AllowedLine(line, hires) {

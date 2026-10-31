@@ -98,7 +98,7 @@ turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loo
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
-turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
+turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent scenario check [--var NAME=VALUE]... <file>
 turtle-agent scenario run [--out DIR] [--force] [--quiet] [--var NAME=VALUE]... [--session NAME=ADDR[@TOKENFILE]]... <file>
@@ -309,7 +309,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `gameobjects` | `within` (yards, 3D; `radius` is the same), `entry`, `type` (a name such as `door`, `button`, `chest`, `goober`, `spell_focus` or its number 0-30), `name`, `limit` | nearby game objects, nearest first: `guid`, `entry`, `name`, `type`, `type_name`, `x`/`y`/`z`/`o`, `distance`, `distance_2d`, `state` (`ready`, `active`, `active_alt`), `flags`, `dyn_flags`, `locked`, `usable`, `display_id`, `created_by` (see [Game objects](#game-objects)) |
 | `use_object` | `guid`, `wait_ms` (default 3000) | `since`, `object` (as a `gameobjects` row), `outcome` (the kind of the first answering event, or `none`), `event`, `hint` (why nothing came back, when likely). Sends `CMSG_GAMEOBJ_USE`; see [Game objects](#game-objects) |
 | `open_object` | `guid`, `spell_id` (one Opening spell; omitted: 6477, then 3365, 6247, 6478, 22810 as far as the spell book has them, the next after a bad-targets or low-skill refusal), `take` (take everything and close the window), `wait_ms` (default 15000, at most 25000: the cast takes about 5 s) | `window` (as `loot`), `taken` (the slots now in the bags, with `take`), `money`, `left`. Casts an Opening spell at a chest or node in view and waits for its loot window; see [Game objects](#game-objects) |
-| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `allow_draft` (run a plan whose status is `draft`; refused without it, see [Dungeon plans](#dungeon-plans)), `from_leg` (a leg number from 0 or its name), `from_step` (an observed run only: the run leader's own step number, from 1, in place of from_leg/from_pull_group), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server and a probe with no answer counts as a player, see [Dungeon runs](#dungeon-runs)), `gm_level` (with `gm: true`: the account level, 1 to 6, default 3; it gates teleport, `.gm visible on`, revive and buffs), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; **on by default in a commander run** (`mode "commander"`, the bots are revived with `.bot cmd revive`; a recovered wipe retries the same step, at most twice per run, and the run goes on after a refused revive), off by default in a group run; `false` turns it off in a commander run; an **observe** run refuses any `recover_wipe` value, true or false, and its trace options say off), `wait_sickness` (wait resurrection sickness out after the leader's corpse run), `resume` (`true`: skip what the party has already passed when it starts inside the leg, off by default, see **Resume** under [Dungeon runs](#dungeon-runs)), `from_pull_group` (remote mode: start inside `from_leg`, at that pull group), `start_here` (remote mode: `from_leg` without the move, the old behaviour) and `pulltest` (`{"leg": 2, "pull_group": 1, "tries": 3, "reset": "auto"}` runs one pull as a scored scenario, in commander mode scoring the party, in leader mode the character, see [Start anywhere and the pull test](#start-anywhere-and-the-pull-test)), `mode` (the [run mode](#run-modes): `"commander"` (the older `"remote"`): lead a bot group from outside it, see [Remote leader](#remote-leader); `"leader"` (the older `"group"`, the default without a brain): the agent's character is in the group, leads it and plays; `"observe"`: a TortoiseBots run leader clears the dungeon and the agent only watches, see [Observe mode](#observe-mode)), `observe` (observe mode: `{"plan":"uldaman","poll_s":15,"max_run_s":10800,"stall_s":600,"paused_wait_s":600}`, all optional), `rotation` (leader and group mode: a [rotation file](#rotations-as-data) that takes the place of the brain preset's class rotation), `role` (leader and group mode: the brain's role, `dps`, `tank` or `healer`; with `mode: "leader"` and no `brain` it also picks the preset of the character's class) and, for commander mode, `lead_bot`, `bots`, `tank`, `healer`, `cc`, `carrier` (the bot that does the object steps), `loot_restore` (`group`, `rr`, `master` or `nbg`: the loot method put back after its free-for-all loot), `object_fallback` (`agent`, the default, or `off`: whether the agent's own character takes an object step over when the carrier's order fails twice, see [Remote leader](#remote-leader)), `team` (`alliance` or `horde`: the party's side for the team gate; omitted: the agent's own), `preflight` (`warn`, the default, `strict` or `off`: the kit check before the run), `on_end` (`stay`, the default, `logout` or `none`), `keep_on_fail` (remote: a failed run keeps its binding so a resume re-enters the same instance; default off, `dungeon_stop` lets it go), `enter` (`auto`, the default, `gm`, `cmd`, `walk` or `off`: how the run gets a party that is outside the plan's map in, see [Remote leader](#remote-leader)), `ignore_entry_limit` (try a 6th new instance within the hour) and `prepare` (`{"online":true,"fresh":true,"gm_setup":["gm visible off"],"online_wait_s":45}`: log the bots in, get a fresh instance, send the GM setup lines, all before the bind, see [Prepare](#prepare-one-step-before-the-bind); `{"party":"hire","hire":{...}}` instead hires, checks and binds the party and takes `lead_bot`, `bots`, `tank` and `healer` out of the call, see [Hired party](#hired-party-prepare-party-hire)) for it, and in either mode `watchdog` (`{"warn_s":120,"recover_s":240,"fail_s":420}`: the stall levels of the [run watchdog](#run-watchdog), seconds without progress; a field left out takes the plan's or the default, a negative one turns its level off) | `started`, `plan`, `map`, `from_leg`, `from_pull_group`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain` (with a rotation: `preset+rot:<name>@<digest of the file>`), `leader_gm` (`true`, `false` or `probe`), `mode` (`group`, `remote` or `observe`), `run_mode` (`leader`, `commander` or `observe`), `lead_bot`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) A commander-mode run first walks the plan on the navmesh ([Plan check](#plan-check)): a live-checked plan with a failing point, or one that cannot be checked, is refused unless `force` is given; any other status runs with the findings as a warning. `force_start` (commander mode only: leader and observe mode refuse it) runs a `from_leg` / `from_pull_group` / `pulltest` start that is under 30 yd from a live pack or boss of a skipped step in a fresh instance ([Start anywhere](#start-anywhere-and-the-pull-test)); `force` does not pass that gate and `force_start` does not pass the plan check. The result carries `plan_check` (`passed: ...`, `forced past plan check ...`, `warning (...)`) |
+| `dungeon_run` | `name` (a plan in `dungeons_dir`, `a-z0-9_-`), `allow_draft` (run a plan whose status is `draft`; refused without it, see [Dungeon plans](#dungeon-plans)), `from_leg` (a leg number from 0 or its name), `from_step` (an observed run only: the run leader's own step number, from 1, in place of from_leg/from_pull_group), `teleport` (GM-teleport to the start and summon the party), `no_shortcuts` (no GM revive), `setup` (the GM commands you ran to set the run up, as a list of text such as `["go entrance", "levelup -15"]`; they go into the report's `setup_shortcuts`, the run sends none of them), `buffs` (optional GM boost for the companions: a spell id, a preset name or a list of both, `"world"` being the classic world buffs; see [Dungeon runs](#dungeon-runs)), `brain` (a [bot brain](#bot-brain) preset such as `"frost_mage"`: it plays the leader's character during the run's fights; off by default), `gm` (`false`: the leader's account is a player's and the run sends no GM command at all; `true`: a GM, no probe; omitted: the run asks the server and a probe with no answer counts as a player, see [Dungeon runs](#dungeon-runs)), `gm_level` (with `gm: true`: the account level, 1 to 6, default 3; it gates teleport, `.gm visible on`, revive and buffs), `recover_wipe` (the party, all dead, runs back to its corpses and the run goes on; **on by default in a commander run** (`mode "commander"`, the bots are revived with `.bot cmd revive`; a recovered wipe retries the same step, at most twice per run, and the run goes on after a refused revive), off by default in a group run; `false` turns it off in a commander run; an **observe** run refuses any `recover_wipe` value, true or false, and its trace options say off), `wait_sickness` (wait resurrection sickness out after the leader's corpse run), `resume` (`true`: skip what the party has already passed when it starts inside the leg, off by default, see **Resume** under [Dungeon runs](#dungeon-runs)), `from_pull_group` (remote mode: start inside `from_leg`, at that pull group), `start_here` (remote mode: `from_leg` without the move, the old behaviour) and `pulltest` (`{"leg": 2, "pull_group": 1, "tries": 3, "reset": "auto"}` runs one pull as a scored scenario, in commander mode scoring the party, in leader mode the character, see [Start anywhere and the pull test](#start-anywhere-and-the-pull-test)), `mode` (the [run mode](#run-modes): `"commander"` (the older `"remote"`): lead a bot group from outside it, see [Remote leader](#remote-leader); `"leader"` (the older `"group"`, the default without a brain): the agent's character is in the group, leads it and plays; `"observe"`: a TortoiseBots run leader clears the dungeon and the agent only watches, see [Observe mode](#observe-mode)), `observe` (observe mode: `{"plan":"uldaman","poll_s":15,"max_run_s":10800,"stall_s":600,"paused_wait_s":600,"until":"boss-done"}`, all optional), `rotation` (leader and group mode: a [rotation file](#rotations-as-data) that takes the place of the brain preset's class rotation), `role` (leader and group mode: the brain's role, `dps`, `tank` or `healer`; with `mode: "leader"` and no `brain` it also picks the preset of the character's class) and, for commander mode, `lead_bot`, `bots`, `tank`, `healer`, `cc`, `carrier` (the bot that does the object steps), `loot_restore` (`group`, `rr`, `master` or `nbg`: the loot method put back after its free-for-all loot), `object_fallback` (`agent`, the default, or `off`: whether the agent's own character takes an object step over when the carrier's order fails twice, see [Remote leader](#remote-leader)), `team` (`alliance` or `horde`: the party's side for the team gate; omitted: the agent's own), `preflight` (`warn`, the default, `strict` or `off`: the kit check before the run), `on_end` (`stay`, the default, `logout` or `none`), `keep_on_fail` (remote: a failed run keeps its binding so a resume re-enters the same instance; default off, `dungeon_stop` lets it go), `enter` (`auto`, the default, `gm`, `cmd`, `walk` or `off`: how the run gets a party that is outside the plan's map in, see [Remote leader](#remote-leader)), `ignore_entry_limit` (try a 6th new instance within the hour) and `prepare` (`{"online":true,"fresh":true,"gm_setup":["gm visible off"],"online_wait_s":45}`: log the bots in, get a fresh instance, send the GM setup lines, all before the bind, see [Prepare](#prepare-one-step-before-the-bind); `{"party":"hire","hire":{...}}` instead hires, checks and binds the party and takes `lead_bot`, `bots`, `tank` and `healer` out of the call, see [Hired party](#hired-party-prepare-party-hire)) for it, and in either mode `watchdog` (`{"warn_s":120,"recover_s":240,"fail_s":420}`: the stall levels of the [run watchdog](#run-watchdog), seconds without progress; a field left out takes the plan's or the default, a negative one turns its level off) | `started`, `plan`, `map`, `from_leg`, `from_pull_group`, `legs[]`, `buffs[]` (the spells the run will apply, `Name (id)`), `brain` (with a rotation: `preset+rot:<name>@<digest of the file>`), `leader_gm` (`true`, `false` or `probe`), `mode` (`group`, `remote` or `observe`), `run_mode` (`leader`, `commander` or `observe`), `lead_bot`; the run goes on in the background, see [Dungeon runs](#dungeon-runs) A commander-mode run first walks the plan on the navmesh ([Plan check](#plan-check)): a live-checked plan with a failing point, or one that cannot be checked, is refused unless `force` is given; any other status runs with the findings as a warning. `force_start` (commander mode only: leader and observe mode refuse it) runs a `from_leg` / `from_pull_group` / `pulltest` start that is under 30 yd from a live pack or boss of a skipped step in a fresh instance ([Start anywhere](#start-anywhere-and-the-pull-test)); `force` does not pass that gate and `force_start` does not pass the plan check. The result carries `plan_check` (`passed: ...`, `forced past plan check ...`, `warning (...)`) |
 | `death_status` | | `dead` (health 0, spirit not released), `ghost` (released), `resurrect` (an open offer: `caster`, `name`, `sickness`, `timer`; null for none), `reclaim_in_ms` (the corpse may be reclaimed then); see [Death and the corpse run](#death-and-the-corpse-run) |
 | `accept_resurrect` | | Answers the open offer with yes (CMSG_RESURRECT_RESPONSE) and returns it. Errors when the player is alive or nothing is on offer |
 | `release_spirit` | | CMSG_REPOP_REQUEST: the dead player becomes a ghost at the graveyard. Errors when alive or already a ghost |
@@ -1978,13 +1978,14 @@ The server needs `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteComma
 | Field | Default | Ends the watch when |
 | :--- | :--- | :--- |
 | `max_run_s` | 3 h | the whole run, from `run start`, takes longer (a longer dungeon sets it: Uldaman needs more than 3 h). The stop it sends is `.bot run stop time limit reached (<N>h)`, so the server logs the reason (TortoiseBots #1070) instead of "stopped by .bot run stop"; the other endings send the plain `.bot run stop` |
-| `stall_s` | 10 min | a `running` run shows the very same status line this long (the module's longest own ceiling is a boss at 7 min) |
+| `stall_s` | 10 min | a `running` run shows the very same status line this long and no fight is moving (the module's longest own ceiling is a boss at 7 min). A fight counts as moving while the engaged hostiles' hp changes, one joins or dies, or a bot dies or revives, as the feed's frames show it: a boss fight past `stall_s` on one status line is not a stall |
 | `paused_wait_s` | 10 min | a `paused` run is not resumed this long. The run leader pauses itself at 3 dead, an unsupported step (`ritual`) or a ceiling and never goes on alone |
 | `auto_resume` | 0 (off) | not a ceiling: resumes the run leader by itself 15 s after its "regroups by itself ... did not hold" pause, at most this many times a step (0-3) and 6 per run; round scripts with nobody watching turn it on |
 | none | 20 s | no `TBM:RUN` line came after the start, or the module says "no run" |
 | none | | the binding ended: the view feed's end-of-binding line fails the run as in commander mode |
 | `maintenance` | false | not a ceiling: sends `.bot maintenance` to every bot at the kit check (off: it walks them to vendors and can scatter the party) |
 | `allow_far_start` | false | not a ceiling: lets a partway start go on although the lead bot stands more than 80 yd from the start step's point, or the point or the lead's position is not known (a note says so; off: the run is refused before `run start`) |
+| `until` | none | not a ceiling: stops the run at a point of the plan, sent to the run leader as `.bot run start <plan> until ...`: `boss` (before the first boss step), `boss-done` (after it: `until step <the step after the boss>`, worked out from the plan's exported rows that have the step count `.bot run list` shows; refused when no export reproduces the count, then use `step N`), `step N`, `leg L` or `none`. The start line must show `until <clause> (step N)`, else the run is stopped and refused (a run leader without `until`). The run leader's `stopped before step N` ending is the run's success: state `done`, a note, `remote.observe.until` |
 | `keep_loot_setting` | false | not a ceiling: leaves the bots' corpse looting as the operator set it (the start sends no `.bot behavior <bot> loot on`, the undo of a boss `loot off` a crashed run left); a driven run always sends the undo |
 
 **Controls.** `dungeon_stop` stops the run (`.bot run stop`, then the unbind). In an observed run `dungeon_pause`, `dungeon_resume` and `dungeon_skip` send the run leader's own
@@ -2088,7 +2089,9 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   `dungeons`) and is copied into the slot by `slot setup --dungeons-from`. `--sql` is a deployed migration: its step
   numbers and the first point (the revive point) are what the walk uses; without it they come from the plan JSON, and
   the summary says so.
-- `--until` is `boss` (default: a trash walk never wakes a boss), `none` (a full clear), `step N` or `leg L`; the word
+- `--until` is `boss` (default: a trash walk never wakes a boss: it stops before the first boss step), `boss-done` (stops after the
+  first boss step has completed: resolved to `step <the step after the boss>` from the rows, so it needs `--sql` or a plan JSON whose export has the
+  server's step count, else the walk stops the run and exits 18), `none` (a full clear), `step N` or `leg L`; the word
   goes to `run start` and the server's status label must show `until <clause> (step N)`. `--from leg L|step N` is only
   for a raid already standing at that point (for example after a hold): raid-walk does not stage.
 - `--speed 1.0` sends nothing; `1.1` to `3.0` sends `speed=X` (a GM test run, marked `test speed` in the summary).
@@ -2104,7 +2107,9 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
 - `--max-run-minutes` (90) is the ceiling from `run start`; `--hold-minutes` keeps the raid bound afterwards;
   `--paused-wait` (10m) stops a pause that is not a regroup; `--auto-resume K` (0-3) resumes a "did not hold" regroup
   pause 15 s after it starts, at most K times per step and 6 per run; `--reset-wait` (5m) bounds the wait for a wipe's
-  reset. `--patrols FILE` (a tb-patrols file) feeds the revive quiet check. `--dry-run` validates everything and prints
+  reset; `--wipe-resume K` (0-3, default 0 = end the walk as before) revives a wipe or a near-wipe stop, rests `--wipe-rest` (default 10m) out of
+  combat and resumes the run instead of ending the walk, at most K times per walk; a boss fight keeps its own path.
+  `--patrols FILE` (a tb-patrols file) feeds the revive quiet check. `--dry-run` validates everything and prints
   every line the walk would send, with `<hire>` placeholders, without leasing or writing anything.
 - The lease lasts `max-run-minutes + hold-minutes + 30` and is renewed every 30 minutes; a refused renewal stops the
   run, tears down and exits 18 (`lease lost`). SIGINT/SIGTERM stops the run, tears down and exits 18 (`interrupted`);
@@ -2145,9 +2150,23 @@ one), the `bot_view` frames every 2 s and the dashboard every 10/15 s. A wipe (e
 the run, waits for the instance to reset (5m at most: nothing with a party target, every hostile seen in the last
 minute at 100 % or gone, held 20 s), then revives: GM to step 1's point, a quiet check (no living hostile within 45 yd,
 no moving hostile within 80 yd, no patrol path within 45 yd, rechecked every 5 s for 120 s) and the plan's entrance
-once, `.summon` then `.revive` every hire. It never revives while a boss row has a target: a boss engagement stops the
-run at once and waits up to 15 minutes for a kill, a reset or a wipe. A wipe or a boss engagement ends the walk with
-exit 19.
+once, `.summon` then `.revive` every hire. A wipe or a near-wipe stop outside a boss fight recovers while
+`--wipe-resume` has recoveries left: no `run stop`, the dead raid is revived, it rests `--wipe-rest` out of combat
+and the run resumes (the server must show running again within 60 s); the summary notes each recovery
+(`wipe-resume <n>/<K> at step <s>: revived <d>, rested <m>, resumed`) and counts them in `wipe_resumes`, and the end
+stays truthful. It never revives while a boss row has a target: a boss engagement stops the run at once and waits up
+to 15 minutes for a kill, a reset or a wipe. A wipe or a boss engagement with no recovery left ends the walk with
+exit 19. Recovery fails closed on unknown boss state (no dashboard, a stale or errored fights read, or a boss
+latched in the last 120 s: the old ending with the note `wipe resume skipped: boss state unknown`); the rest needs
+a complete quiet view (every roster hire present, fresh, out of combat and alive in `bot_view`, polled every 5 s —
+any gap restarts the window); and the recovery has an absolute deadline (the walk ceiling or start + 3 x
+`--wipe-rest`, whichever is sooner — combat restarts the quiet window but never moves it, and past it the walk ends
+with the original incident's exit and `wipe recovery timed out after <dur>`). A boss fight still `live` in the
+dashboard's fights list blocks recovery before any revive; finished boss fights in the list do not. A skipped
+near-wipe recovery is not retried for the same pause. Known limits: the wipe path does not check that the run is
+paused before reviving, and the 60 s running check can pass on a status line from before the resume; the timeout
+note always names 3 x `--wipe-rest` even when the walk ceiling cut it shorter; a second wipe during the rest or
+the resume wait ends 19 without the old ending's reset-wait revive.
 
 Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
 `.bot gear raid <commander> tier <N>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,
@@ -2163,7 +2182,7 @@ The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused
 | `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key (a `live` row, a fight still running, is left for the next read: its finished fight comes back under the same id) |
 | `frames.jsonl` | one `bot_view` frame per 10 s (positions, hp, dead, hostiles; every line carries the walk's `tier`) |
 | `slot-setup.txt`, `teardown.json` | what slot setup printed, and teardown's report |
-| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison`; `run_label` (the newest speed/until label of the status lines, e.g. `until boss (step 41)`) and `speed_fell_back` (the server's test speed went back to 1.0 once a real player joined); per fight `warnings` (the dashboard's rule warnings) and `detail` read from its detail file: `kind`, `engaged`, `death_recap[]` (name, `t_ms`, killer, `last_hit`, `burst`: the recap's hits summed; at most 8), `top_taken`/`top_taken_amount`, `damage`, `healing`, `debuff_pct` (uptime % on the fought unit) and `red` (red rule warnings). `summary.txt` lists the fights with deaths or red warnings |
+| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, `wipe_resumes`, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison` |
 
 Exit codes: 0 the run ended by its `until` (or the hold); 18 a phase failed or was refused (setup, login, hire, bind,
 enter, start, the server has no `until`, a stall, the ceiling, an interrupt, `lease lost`); 19 the walk ran and was
@@ -2176,6 +2195,36 @@ Dashboard capture is optional: `--dash-url` (or `TBDASH_URL`) plus `--dash-pass-
 symlink, `privfile.Read`), never printed and never written to the output; a failed login is a warning
 (`dashboard: login failed (HTTP 401)`) and the walk goes on. Without a URL and a password file the capture is off and
 the summary says so.
+
+### Walk report
+
+`turtle-agent raid-walk report <dir>` turns a finished walk's folder into the per-pull table the walks otherwise build by hand. It
+reads files only (no server, no login, no settings or token file): `<dir>/combat-fight-*.json` (or `<dir>/fights-full.json`, or
+`--fights FILE`: an object id -> fight or a list) and `<dir>/run.log` (`--log FILE`; the table still comes without one, with the
+status columns empty). A hand-made event log (`HH:MM:SS <seq> TBM:RUN|...`) reads too.
+
+```
+turtle-agent raid-walk report ~/walks/zg10 --spell 24024 --clock-offset 1h --out ~/walks/zg10/report
+```
+
+- `--clock-offset 1h` says the run log's clock is UTC plus an hour (the servers run UTC+1); every time in the report is UTC. The
+  fights carry unix times already. A log has no date: the day is the latest one that puts its first line within 5 minutes of the
+  first fight.
+- `--spell ID[,ID]` (repeatable) lists every cast of an enemy spell (for example 24024, the Bat Rider's blast) with the deaths
+  within `--window` (default 5 s) of it.
+- Markdown goes to stdout unless `--md FILE`, `--json FILE` or `--out DIR` (writes `report.md` and `report.json`) name files;
+  `--json -` prints the JSON instead.
+
+One row per fight: step, fight id, kind and boss, start, duration, outcome, the engaged units by name and count, the deaths (name,
+seconds into the fight), **contact before pull** (`YES` when a status line of the step says the tank engages a unit "on arrival"
+before any `pulling` line of the step; `no` when a `pulling` line came first or neither did), **joined mid-fight** (the `a new unit
+joined` status lines inside the fight, with the seconds into the fight, and the `N joiners expected` text), and the **stand wait**
+(from the first stand-pull status line of the pull to its `pulling` line, or to the fight's start). Below the table: the stand-pull
+status lines of each pull merged by text with digits and guids as `#` (first and last time, span, lines and runs; the lines of a
+step with no fight go last), the pauses, resumes (with how long the pause lasted), stops and the end of the run, and the watched
+casts. `report.json` (format `tb-raid-walk-report` v1) carries the same rows: `pulls[]` (`engaged`, `deaths`,
+`contact_before_pull`, `contact_text`, `neighbour_joins`, `stand_pull`, `stand_wait_s`, `casts`), `control[]`, `casts[]`,
+`stand_pull_unattached[]` and `totals`.
 
 ### Fault injection
 
@@ -2288,10 +2337,9 @@ turtle-agent raid-suite --dir ~/ta-wt-raid-ony/dungeons --history ~/TortoiseBots
   including `--slot A,B` (`raid-suite` walks one raid at a time).
 ### Two raids at once
 
-`turtle-agent raid-walk <plan> [<plan2>] --slot A,B` walks two raids at the same time, one per slot. Two raids take
+`turtle-agent raid-walk <plan> [<plan2>] --slot A,B` walks two raids at the same time, one per slot (three or more: below). Two raids take
 `--slot 1,2` because `--slots FILE` is already the slot config path: the pair form is the same `--slot` flag with a
-list of two distinct ids. Slot `3` is refused before anything for any server (exit 15); a third id or a repeated one
-is a usage error (exit 2). One plan walks that plan on both slots (two instances of it); two plans walk `plan1` on A
+list of two distinct ids. Slot `3` is refused before anything for any server (exit 15); a repeated id is a usage error (exit 2). One plan walks that plan on both slots (two instances of it); two plans walk `plan1` on A
 and `plan2` on B.
 
 Each half is an ordinary raid-walk with its own lease, `slot setup`, agent process, dashboard client and output dir:
@@ -2322,6 +2370,19 @@ commander, so the dashboard's `/api/v1/commanders` lists both and the raid tabs 
 are up to 80 hires on one server: plan the slots and the worldserver's memory.
 
 `--dry-run` prints both phase plans, every line prefixed `[s<N> <plan>] `, without leasing or writing.
+
+**Three or more raids at once.** `--slot A,B,C[,...]` (up to 8 distinct ids, never `3`, anywhere in the list) walks one raid per
+slot, each its own commander, lease, group and instance: `turtle-agent raid-walk onyxias_lair --slot 1,2,4` walks Onyxia on three
+slots (three instances), `raid-walk onyxias_lair molten_core zul_gurub --slot 1,2,4` one plan per slot in the slots' order (any other
+plan count is a usage error). Everything above holds per walk (flags with a slot prefix, `--holder SLOT=...` when two default holders
+would collide, the cleanup, SIGINT stopping all walks). The walks start `--stagger` apart in the slots' order (the second
+`--stagger` after the first, the third `--stagger` after the second), so the hire bursts do not meet. The combined files are
+`<out>/multi.json` (format `tb-raid-walk-multi` v1) and `<out>/multi.txt`; a two-slot run keeps `pair.json`/`pair.txt` unchanged.
+`multi.json` has the pair's `walks[]`, `overlap_s` (seconds all walks ran together), `dashboard_all_listed` (one commanders dump
+names every character; `null` with the dashboard off), `exit_code`, `notes` and `totals`: `walks`, `ended_by_until`, `failed`
+(exit code not 0), `steps_reached`, `deaths`, `fights`, `pauses`. `multi.txt` is one line per walk, the `note:` lines, a
+`total:` line and `multi: exit <c>`; the exit code is picked by the same order as the pair's. N full raids are N times the hires:
+plan the worldserver's memory (two 40-man raids are already up to 80 bots).
 
 ## Remote leader
 

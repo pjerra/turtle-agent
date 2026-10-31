@@ -50,10 +50,11 @@ const (
 )
 
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
-    [--until boss|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--tier N|--tier-override N]
+    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
-    [--reset-wait 5m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
-    [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--dry-run]`
+    [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
+    [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--dry-run]
+       turtle-agent raid-walk report <dir> [--spell ID] [--clock-offset 1h] [--md FILE] [--json FILE] [--out DIR]`
 
 // raidWalkPlanRe is the plan name as the server knows it (spec 3.1).
 var raidWalkPlanRe = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
@@ -81,6 +82,8 @@ type raidWalkOptions struct {
 	pausedWait    time.Duration
 	autoResume    int
 	resetWait     time.Duration
+	wipeResume    int
+	wipeRest      time.Duration
 	patrols       string
 	out           string
 	dashURL       string
@@ -144,6 +147,10 @@ var newWalkInjector func(w *walk, specs []string) (walkInjector, error)
 
 // raidWalkCmd is the command line entry.
 func raidWalkCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	// `raid-walk report <dir>` reads a finished walk's folder; it sends nothing.
+	if len(args) > 0 && args[0] == "report" {
+		return raidWalkReportCmd(args[1:], stdout, stderr)
+	}
 	// Two raids at once: a --slot list is the pair form, handled before anything is parsed (spec 1.7.5).
 	if _, ok := raidWalkSlotList(args); ok {
 		if raidWalkPairEntry == nil {
@@ -178,6 +185,18 @@ func raidWalkCmd(ctx context.Context, args []string, stdout, stderr io.Writer) i
 // parseRaidWalkArgs reads the flags and checks their shape (no file or network access).
 func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	o := raidWalkOptions{}
+	// The single-slot form takes the plan before its flags too (walks 12/13: Go's flag package stops
+	// at the first non-flag, so the plan would strand every flag after it as a positional). A leading
+	// non-flag moves to the end before parsing; flags-first callers (raid-suite, pair) start with a
+	// flag and parse as before.
+	var planFirst string
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		planFirst = args[0]
+		moved := make([]string, 0, len(args))
+		moved = append(moved, args[1:]...)
+		moved = append(moved, args[0])
+		args = moved
+	}
 	fs := flag.NewFlagSet("raid-walk", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { fmt.Fprintln(stderr, raidWalkUsage) }
@@ -187,7 +206,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.holder, "holder", "", "the lease holder (default raid-walk-<plan>)")
 	fs.StringVar(&o.dir, "dir", "dungeons", "the folder of plan files")
 	fs.StringVar(&o.sql, "sql", "", "the deployed migration: step numbers and the first point come from it")
-	fs.StringVar(&o.until, "until", "boss", "boss, none, \"step N\" or \"leg L\"")
+	fs.StringVar(&o.until, "until", "boss", "boss (stops before it), boss-done (after the boss step), none, \"step N\" or \"leg L\"")
 	fs.StringVar(&o.from, "from", "", "\"leg L\" or \"step N\" for the run leader")
 	fs.StringVar(&speed, "speed", "1.0", "the run's test speed, 1.0 to 3.0")
 	fs.StringVar(&o.hires, "hires", "", "the tb-raid-roster v1 file (default: from the plan's raid block)")
@@ -197,8 +216,10 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.IntVar(&o.holdMinutes, "hold-minutes", 0, "keep the raid bound for this many minutes after the run")
 	fs.IntVar(&o.maxRunMinutes, "max-run-minutes", 90, "the ceiling from run start to the end")
 	fs.DurationVar(&o.pausedWait, "paused-wait", 10*time.Minute, "how long a pause that is not a regroup may last")
+	fs.IntVar(&o.wipeResume, "wipe-resume", 0, "revive, rest and resume a wipe or near-wipe stop this many times per walk (0-3; 0 ends the walk as before)")
 	fs.IntVar(&o.autoResume, "auto-resume", 0, "resume a regroup pause this many times per step (0-3)")
 	fs.DurationVar(&o.resetWait, "reset-wait", 5*time.Minute, "how long a wipe may wait for the instance to reset")
+	fs.DurationVar(&o.wipeRest, "wipe-rest", 10*time.Minute, "how long a revived raid rests out of combat before the run resumes")
 	fs.StringVar(&o.patrols, "patrols", "", "a tb-patrols file for the revive quiet check")
 	fs.StringVar(&o.out, "out", "", "the output dir (default ./raid-walk-<plan>-<stamp>)")
 	fs.StringVar(&o.dashURL, "dash-url", "", "the dashboard URL (or TBDASH_URL)")
@@ -212,7 +233,17 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	if err := fs.Parse(args); err != nil {
 		return o, exitUsage
 	}
-	if fs.NArg() != 1 {
+	if fs.NArg() == 0 {
+		fmt.Fprintln(stderr, raidWalkUsage)
+		return o, exitUsage
+	}
+	if fs.NArg() > 1 {
+		extra := fs.Arg(1)
+		if planFirst != "" {
+			// The plan moved to the end, so parsing stopped at the first extra: it is Arg(0).
+			extra = fs.Arg(0)
+		}
+		fmt.Fprintf(stderr, "raid-walk: unexpected argument %q\n", extra)
 		fmt.Fprintln(stderr, raidWalkUsage)
 		return o, exitUsage
 	}
@@ -271,6 +302,14 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	}
 	if o.resetWait <= 0 {
 		fmt.Fprintf(stderr, "raid-walk: --reset-wait must be above 0\n")
+		return o, exitUsage
+	}
+	if o.wipeResume < 0 || o.wipeResume > 3 {
+		fmt.Fprintf(stderr, "raid-walk: --wipe-resume wants 0 to 3\n")
+		return o, exitUsage
+	}
+	if o.wipeRest <= 0 {
+		fmt.Fprintf(stderr, "raid-walk: --wipe-rest must be above 0\n")
 		return o, exitUsage
 	}
 	if o.autoResume < 0 || o.autoResume > 3 {
@@ -460,7 +499,10 @@ type walk struct {
 	runLabel      string
 	speedFellBack bool
 	untilStep     int // the step of the start line's until label (0: unknown)
-	fromWords     []string
+	// bossDoneStep is the boss step --until boss-done resolved to (0: not asked). The server must show the step count of w.rows, else the
+	// step numbers are not the ones the clause was computed from.
+	bossDoneStep int
+	fromWords    []string
 
 	agent    walkAgent
 	manifest teardownSlotManifest
@@ -504,6 +546,15 @@ type walk struct {
 	fightAt       time.Time
 	lastFrameSave time.Time
 	dashWarned    bool
+	// Review round 2: the boss evidence the recovery needs. bossReadAt is when the last
+	// dashboard fights/boss read succeeded (zero: never), bossEngagedAt when it last
+	// showed an engaged boss, bossLatchAt when the frames last latched one, bossCheckErr
+	// the last read's error (nil: the read worked). fightRows is the last good read.
+	bossReadAt    time.Time
+	bossEngagedAt time.Time
+	bossLatchAt   time.Time
+	bossCheckErr  error
+	fightRows     []walkFightRow
 
 	tierSource string // where the roster's tier came from (raidwalk.TierSource*)
 
@@ -515,13 +566,14 @@ type walk struct {
 	quietPatrols []raidwalk.QuietPatrol
 	patrolGUIDS  []map[string]bool
 
-	started    time.Time
-	ended      time.Time
-	runStarted bool
-	runStopped bool
-	lease      slots.Lease
-	leaseLost  atomic.Bool
-	cancel     context.CancelFunc
+	started     time.Time
+	ended       time.Time
+	runStarted  bool
+	runStopped  bool
+	wipeResumes int // wipes and near-wipe stops recovered so far (--wipe-resume bounds them)
+	lease       slots.Lease
+	leaseLost   atomic.Bool
+	cancel      context.CancelFunc
 
 	endReason  string
 	exitCode   int
@@ -635,11 +687,13 @@ func (w *walk) validate() error {
 		}
 	}
 
-	words, label, err := raidwalk.ParseUntil(w.opts.until)
-	if err != nil {
-		return stopf(exitUsage, "%v", err)
+	if !raidwalk.IsBossDone(w.opts.until) { // boss-done is resolved against the rows, below
+		words, label, err := raidwalk.ParseUntil(w.opts.until)
+		if err != nil {
+			return stopf(exitUsage, "%v", err)
+		}
+		w.untilWords, w.untilLabel = words, label
 	}
-	w.untilWords, w.untilLabel = words, label
 	if w.opts.from != "" {
 		fw, err := raidwalk.ParseFrom(w.opts.from)
 		if err != nil {
@@ -684,6 +738,18 @@ func (w *walk) validate() error {
 		w.note("step points from the plan JSON, not the deployed rows")
 	}
 	w.stepFirst = firstStepPoint(w.rows)
+	if raidwalk.IsBossDone(w.opts.until) {
+		clause, boss, err := raidwalk.BossDoneUntil(w.rows)
+		if err != nil {
+			return stopf(exitUsage, "%v", err)
+		}
+		words, label, err := raidwalk.ParseUntil(clause)
+		if err != nil {
+			return stopf(exitUsage, "%v", err)
+		}
+		w.untilWords, w.untilLabel, w.bossDoneStep = words, label, boss
+		w.note("--until boss-done: the boss is step %d of %d, the walk goes with %q", boss, len(w.rows.Steps), clause)
+	}
 
 	if len(w.opts.injects) > 0 {
 		if newWalkInjector == nil {
@@ -1047,8 +1113,8 @@ func (w *walk) printPlan(out io.Writer) {
 		start = append(start, fmt.Sprintf("speed=%.1f", w.opts.speed))
 	}
 	fmt.Fprintf(out, "  9 commander: run start %s\n", strings.Join(start, " "))
-	fmt.Fprintf(out, " 10 watch: events 5s, bot_view 2s, dashboard %s, ceiling %dm, paused wait %s, auto-resume %d\n",
-		w.dashNoteOrOff(), w.opts.maxRunMinutes, w.opts.pausedWait, w.opts.autoResume)
+	fmt.Fprintf(out, " 10 watch: events 5s, bot_view 2s, dashboard %s, ceiling %dm, paused wait %s, auto-resume %d, wipe-resume %d, wipe rest %s\n",
+		w.dashNoteOrOff(), w.opts.maxRunMinutes, w.opts.pausedWait, w.opts.autoResume, w.opts.wipeResume, w.opts.wipeRest)
 	fmt.Fprintf(out, " 11 hold: %dm\n", w.opts.holdMinutes)
 	fmt.Fprintf(out, " 12 commander: status; teardown --json %s/slot\n", outDir)
 	fmt.Fprintf(out, " 13 summary: %s/summary.json, %s/summary.txt\n", outDir, outDir)
@@ -1105,6 +1171,7 @@ func (w *walk) finish(code int) {
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
 		TierSource: w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
+		WipeResumes: w.wipeResumes,
 	}
 	if w.inj != nil {
 		meta.Injections, meta.InjectedDeaths = w.inj.Results()

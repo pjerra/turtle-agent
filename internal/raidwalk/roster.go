@@ -245,13 +245,45 @@ func (r *Roster) Total() int {
 func (r *Roster) HireLines() []string {
 	out := make([]string, 0, len(r.Batches))
 	for _, b := range r.Batches {
-		line := fmt.Sprintf(".bot hire raid %s level=%d", b.Hire, r.Level)
-		if r.Tier > 0 {
-			line += fmt.Sprintf(" t%d", r.Tier)
-		}
-		out = append(out, line)
+		out = append(out, r.HireLine(b.Hire))
 	}
 	return out
+}
+
+// HireLine is the hire command for one batch string, in HireLines' form: the
+// retry of a short batch rebuilds its line the same way.
+func (r *Roster) HireLine(hire string) string {
+	line := fmt.Sprintf(".bot hire raid %s level=%d", hire, r.Level)
+	if r.Tier > 0 {
+		line += fmt.Sprintf(" t%d", r.Tier)
+	}
+	return line
+}
+
+// RoleCounts reads a t/h/d batch hire string ("5h 12d") into per-role counts. A
+// class batch ("1 warrior:tank") reports false: it names exact bots and is never
+// retried piecemeal.
+func RoleCounts(hire string) (tanks, healers, dps int, ok bool) {
+	tokens, _, err := validateHire(hire)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	for _, t := range tokens {
+		if t.Class != "" {
+			return 0, 0, 0, false
+		}
+		switch t.Role {
+		case "tank":
+			tanks += t.Count
+		case "healer":
+			healers += t.Count
+		case "dps":
+			dps += t.Count
+		default:
+			return 0, 0, 0, false
+		}
+	}
+	return tanks, healers, dps, true
 }
 
 // DefaultRoster builds the roster of spec 3.2 from the plan's raid block: an mt of one warrior tank, the other
