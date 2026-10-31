@@ -14,6 +14,7 @@
     "z": 96.1502
   },
   "level_band": [58, 60],
+  "kill_first": [14750],
   "raid": {
     "size": 20,
     "tanks": 3,
@@ -24,6 +25,11 @@
     "DRAFT: prep from the world database export of map 309 (tools/dungeongen) and the server mesh: 168 merged packs (L22: one floor, 15 yd, cap 12), runts/triggers/boss adds/friendly NPCs out, 17 off-mesh or look-stand spawns and 6 unreachable packs dropped. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run; dungeon_run refuses it without allow_draft.",
     "WALK 1 (2026-10-29, leg 0 only): the two first-terrace pairs and the z 130 plateau are pulled in turn now. The 125 yd split group (radius 2.8: its pull row could not reach its own units) is gone: the -12152 cluster joined the -12153 pack (8 units) and the -12276 cluster the -12277 pack (8 units). Every plateau pull has a rest stand and a pull stand of its own, out of the next pack's aggro; a stand before the first-terrace pull keeps it out of both pairs' aggro; and an off-water via point at the canal rim (-11928.5 -1364.5) keeps the walk back after a wipe out of the water at -11944 -1355. Legs 1-8 are unchanged.",
     "WALK 2 (2026-10-30, leg 0 only): the plateau rests and stands moved out of the patrol lanes and each other's aggro. Three units patrol the z 130 plateau (creature_movement): Gurubashi Headhunter 11351 guid 49135 (28 points, 249 yd, the east spur to -12117 -1471), Hakkari Witch Doctor 11831 guid 49131 (21 points, 195 yd, the west loop) and Bat Rider 14750 guid 49130 (7 points, 227 yd); the 11351 pulled the run on a move hop 15.9 yd from the -12102 -1465 climb row in walk 2. The bat pack (11368/14750 at -12054 -1438) now has a rest stand at -12084 -1441 (25.4 yd from its nearest unit, aggro 21; 40.4 yd from the headhunter's path, aggro 20) before the stair pull stand -12066.938 -1439.884. The stands after it: cluster 1 (-12152 -1485) at -12114 -1494 (38.9 yd from its pack, 23.6 from the headhunter's path); the patrolling headhunter and the 8-unit pack west of it from -12185 -1495 (28.9 and 45.7 yd, 22.3 from the headhunter's path); the north bat pack at -12239 -1386 (22.6 yd from it, 27.2 from the -12236 -1415 pack, 29.3 from the witch doctor's path); the -12236 -1415 pack at -12268 -1376 (47.4 yd, 49.8 from the north bat pack, 39.6 from the bat rider's path); and cluster 2 (-12276 -1451) from -12307 -1411 (40.7 yd back, 32.3 from the bat rider's path). The climb rows at -12102 -1465 stay: the mesh has no other way up and the headhunter's path passes 15.1 yd from them, inside the run leader's 15-yd hop pull. Legs 1-8 are unchanged.",
+    "WALK 4 (2026-10-30, leg 0 only; TortoiseBots-audit tests/raid-zg-walk4): the z 130 plateau holds seven moving formations (creature_groups led along creature_movement loops, about 2.5 yd/s) and one static pack. F1 the bat pack (Bat Rider 49147 + 4 bats, -12056 -1442 to a 20 s wait at -12098.7 -1451.7), F2 the Headhunter formation (49135, 49134, Witch Doctor 49136; 249 yd, east end -12117 -1468), F3 (Bat Riders 49155, 49154 + 4 bats), F4 (Bat Rider 49189 + 4 bats; F3 and F4 walk the same lane -12125 to -12211), F5 (Bat Riders 49185, 49167 + 4 bats), F6 (Bat Riders 49130, 49129 + 5 bats) and F7 (Witch Doctors 49131, 49132, Headhunter 49133) in the west, and S5, two Bat Riders 49141, 49142 and three bats standing at -12217 -1481. The plan's kill_first is the Bat Rider (14750): the run leader's pull target is then the one rider of the bat pack instead of the nearest of five moving units, whose change from tick to tick dropped the firing stand read and broke the stand walk with a gather in walk 4, so the stand was read when the pack had walked west and the tank fired from the top of the stairs, 8 yd from the Headhunter formation's path. Pull group 4 is S5 alone, from -12192 -1490 (23.5 yd from its nearest rider, in sight: the shot goes from the stand), pull group 5 the Headhunter formation alone after it; walk 4 fought S5 with the formation's two followers as one row.",
+    "WALK 5 (2026-10-30, leg 0 only; TortoiseBots-audit tests/raid-zg-walk5): the bat formations walk at about 4.6 yd/s (F1 loops in 38 s with its 20 s wait, F3 in 36 s, F5 in 35 s, F6 in 46 s; walk 5 poll), so every plateau loop comes round within a minute. The stair pull fired with the tank at the top of the stairs: F1, walking west to its wait, met the party there and F4 and F3 came in from their east turns 22-29 yd away (12 bats and 4 riders, 19 dead). F1 is now pulled from the plateau's east end, reached by the slope at -12041 -1466 (steep polygons the server path takes) instead of the stairs; its spawns stay the row, so the pack-cleared gate waits for it. S5's old stand -12192 -1490 was 20.3 yd from its bat 49138: the walk there pulled it, and its row's 19.6 yd band then re-pulled F5. S5 is now pulled from -12188 -1489 (23.3 yd from 49138, 27 from the riders) by a row on 49138 alone (radius 5.5, the rest residue). The walk to -12203 -1414 crossed the F5/F6/F7 ring: the party now walks the south edge (y -1495 to -1497.5), waits for F6 at -12250 -1497.5 (row on F6's south turn, radius 4), takes F5 from -12285 -1490 (row on 49186's spawn, radius 3.5, clear of ledge bat 91553), F7 from -12233 -1390 (radius 15) and the Headhunter formation F2 last by a 60 yd row over its whole loop.",
+    "FIX 6 (2026-10-30, leg 0 only; TortoiseBots-audit tests/raid-zg-walk6 and raid-zg-walk7, specs/rl-patrol-timed-pull.md): walks 6 and 7 fired no bad pull: every near wipe began with formations walking into the party at a stand or on the route, because the stands sat 11-24 yd from other formations' lanes (aggro ~20 yd, followers 6 yd off the leader, the party 5-7 yd around the lead bot). The bat and troll formations are now pulled one at a time with stand_pull (TortoiseBots 8192: hold at the stand, pull once a unit is in the tank's 28.5 yd shot and no other patrol is within 40 yd; the pack is the formations with a spawn in the row's radius), each from a navmesh-checked stand 34+ yd from every other living formation's lane, in an order that kills each formation's lane neighbour first: F1 (east end, as before); F2, the Headhunter formation, from -12093 -1446 (its lane 30.1 yd, F3 39, F4 43; row radius 71 so the row's point is in sight of the stand and its spawns are in the radius); F3 from the stair top -12097.2 -1483.1, reached down the east slope and up the stairs (F3 31.6, F4 38.8; the plateau corridor at -12104 -1465 passes 27.7 yd from F4's east turn), its row on rider 49155's spawn (radius 2, so F4's bats spawned beside it stay out); F4 alone from -12108 -1479 (27.4, its row on bat 49151's spawn); S5 as before; F7, the Witch Doctor formation, from -12201 -1494 (30.8; F5 41.9, F6 41.6), its row radius 33 on its three spawns; F5 from -12183 -1446 (30.5; F6 34.9), walked to along x -12177 (F6 40+), its row on bat 49140's spawn (radius 10); F6 alone from -12186 -1458 (31.0), its row on bat 49123's spawn (radius 9; ledge bat 91551 at z 143.5 stays out). F4 has no stand 34 yd from F3's lane: it is pulled after F3 is dead.",
+    "FIX 7 (2026-10-30, leg 0 only; TortoiseBots-audit tests/raid-zg-walk8 and raid-zg-walk9, specs/rl-patrol-timed-pull.md section 6): walk 9's Headhunter pull (step 22) was a timed pull with F3 45-51 yd from the lead bot but 19-24 yd from the pulled Witch Doctor: F3 came 3-5 s later with no bot near it, then F4 (8 bats, 3 riders); walk 8's same row took F3 too. The static pack's pull (step 33) drew F5 22 s into the fight (walk 8: F7), F7 walked into its stand (30.8 yd) with F6 35.7 yd off (walk 9 step 35), and walk 8's F5 row took F6. The run leader now also holds a stand pull while another patrol is within 30 yd of the pulled unit or its way to the party; the static pack is a stand_pull row too (held while F5/F7 pass by), and the stands move out of walk-in range of their own target (32-34 yd, the near follower still in the tank's 28.5 yd shot): F2 from -12090 -1446 (32.6; F3 41.6, F4 45.5), F3 from -12093 -1464 on the plateau (32.4; F4 38.4; the stairs detour is gone), F7 from -12198 -1494 (32.6; F5 43.6, F6 42.8), F5 from -12180 -1452 (33.0; F6 37.1).",
+    "FIX 8 (2026-10-30/31, leg 0 only; TortoiseBots-audit tests/raid-zg-walk10 and raid-zg-walk11 a-c): from -12090 -1446 the Headhunter formation's nearest unit came no closer than 30.6-30.8 yd in all four walks (its followers walk almost in line with the leader), so the 28.5 yd shot never went out and the row paused at 600 s; the stand is back at walk 9's -12093 -1446 (lane 30.1; the shot went out there at 28.5-29 yd, no walk-in; F3 39.1, F4 42.8). The Witch Doctor formation's stand moves in to -12204 -1494 (lane 29.2; F5 40.2, F6 40.4) for the same reason (troll followers in line); the bat formations keep 32-34 yd (followers 6 yd round the leader: the near one comes within 27-28 yd). The static Bat Rider pack woke as the party walked to its stand 23.3 yd from bat 49138 once the row held the shot (walk 10 step 28): its stand is -12183 -1488, 27.5 yd from its nearest unit (bat 49138, still in the 28.5 yd shot; F7 40.4, F5 47.4, F6 46.9).",
     "Raid plan: 20 players (3 tanks, 5 healers, 12 damage). Boss order: Jeklik, Venoxis, Mar'li, Thekal, Arlokk, Mandokir, Jin'do, Hakkar. Gahz'ranka (15114) is optional and has no step: his summon is fishing Muddy Churning Waters (180369) with Zulian Mudskunk (17321), which the plan format cannot express. Edge of Madness (15082-15085) has no spawn and instance_zulgurub::SpawnRandomBoss is deactivated: no leg.",
     "Arlokk (14515) has no spawn row. The gong go_gong_of_bethekk (180526 at -11569.2 -1627.87 41.28) runs event script 9066 and summons her at -11540.7 -1627.71 41.27; the gong step is open for the mapping walk: the server path from the Arlokk terrace ends 9-10 yd above the gong (a drop the mesh does not link), so no use_object stand passes plan-check.",
     "Thekal (14599) is fought with his Zealots Lor'Khan 11347 and Zath 11348 and two Zulian Tigers 11361 (boss.first); Mar'li with the Witherbark Speaker 11388 and Venoxis with his four Razzashi Cobras 11373 (boss.first). They resurrect each other (boss_thekal.cpp), so the live run must kill the three within 7 s."
@@ -79,95 +85,90 @@
           ],
           "radius": 11.9,
           "approach": [
-            {"x": -12084, "y": -1441, "z": 130.85},
-            {"x": -12066.938, "y": -1439.884, "z": 130.24419}
+            {"x": -12038.936, "y": -1474.1852, "z": 80.84469},
+            {"x": -12040.8, "y": -1466.1334, "z": 83.051476},
+            {"x": -12054, "y": -1449.8667, "z": 128.23486},
+            {"x": -12057, "y": -1448, "z": 129.13219}
           ]
         },
         {
-          "entries": [11368, 11368, 11368, 14750, 11368, 14750, 14750, 11368],
+          "entries": [11351, 11351, 11831],
           "positions": [
-            {"x": -12153.8, "y": -1482.52, "z": 130.8},
-            {"x": -12153.9, "y": -1489.43, "z": 131.62},
-            {"x": -12166.8, "y": -1463.59, "z": 130.74},
-            {"x": -12170.5, "y": -1467.25, "z": 130.71},
-            {"x": -12171.8, "y": -1462.23, "z": 130.72},
-            {"x": -12152.5, "y": -1484.64, "z": 130.8},
-            {"x": -12152.1, "y": -1486.58, "z": 130.85},
-            {"x": -12155.9, "y": -1487.27, "z": 131.06}
+            {"x": -12148, "y": -1458, "z": 131.3}
           ],
-          "radius": 20.5,
+          "radius": 72,
           "approach": [
-            {"x": -12114, "y": -1494, "z": 132.48}
-          ]
+            {"x": -12093, "y": -1446, "z": 131.5}
+          ],
+          "stand_pull": true
         },
         {
-          "entries": [11351],
+          "entries": [11368, 14750],
           "positions": [
-            {"x": -12219.2, "y": -1464.7, "z": 130.65}
+            {"x": -12148, "y": -1485, "z": 130.8}
+          ],
+          "radius": 4.6,
+          "approach": [
+            {"x": -12093, "y": -1464, "z": 131.5}
+          ],
+          "stand_pull": true
+        },
+        {
+          "entries": [11368, 14750],
+          "positions": [
+            {"x": -12153.9, "y": -1489.43, "z": 130.725}
           ],
           "radius": 1,
           "approach": [
-            {"x": -12185, "y": -1495, "z": 132}
-          ]
+            {"x": -12108, "y": -1479, "z": 130.9}
+          ],
+          "stand_pull": true
         },
         {
-          "entries": [11368, 11351, 11831, 11368, 14750, 14750, 11368, 11368],
+          "entries": [11368, 11368, 14750, 14750, 11368],
           "positions": [
-            {"x": -12208.9, "y": -1478.72, "z": 131.26},
-            {"x": -12215.5, "y": -1465.09, "z": 130.77},
-            {"x": -12218.4, "y": -1467.39, "z": 130.73},
-            {"x": -12217.9, "y": -1480.52, "z": 131.06},
-            {"x": -12214.8, "y": -1484.34, "z": 131.67},
-            {"x": -12221.5, "y": -1477.08, "z": 130.8},
-            {"x": -12222.8, "y": -1485.23, "z": 131.46},
-            {"x": -12233.1, "y": -1486.77, "z": 132.57}
+            {"x": -12208.9, "y": -1478.72, "z": 131.26}
           ],
-          "radius": 13.4
-        },
-        {
-          "entries": [11368, 11368, 11368, 11368, 14750, 14750, 11368],
-          "positions": [
-            {"x": -12233.9, "y": -1433.44, "z": 130.69},
-            {"x": -12243.6, "y": -1424.56, "z": 130.69},
-            {"x": -12245.2, "y": -1425.05, "z": 130.65},
-            {"x": -12240.5, "y": -1420.28, "z": 130.77},
-            {"x": -12244.3, "y": -1422.24, "z": 130.68},
-            {"x": -12237.4, "y": -1413.4, "z": 130.86},
-            {"x": -12230.7, "y": -1407, "z": 131.62}
-          ],
-          "radius": 5,
+          "radius": 5.5,
           "approach": [
-            {"x": -12239, "y": -1386, "z": 131.68}
-          ]
+            {"x": -12183, "y": -1488, "z": 131.2}
+          ],
+          "stand_pull": true
         },
         {
           "entries": [11351, 11831, 11831],
           "positions": [
-            {"x": -12238.1, "y": -1416.02, "z": 130.83},
-            {"x": -12236.9, "y": -1414.1, "z": 130.91},
-            {"x": -12238.7, "y": -1413.23, "z": 130.82}
+            {"x": -12218, "y": -1440, "z": 131.2}
           ],
-          "radius": 1.2,
+          "radius": 33,
           "approach": [
-            {"x": -12268, "y": -1376, "z": 132.54}
-          ]
+            {"x": -12204, "y": -1494, "z": 133.3}
+          ],
+          "stand_pull": true
         },
         {
-          "entries": [14750, 11368, 14750, 11368, 11368, 14750, 14750, 11368],
+          "entries": [11368, 14750],
           "positions": [
-            {"x": -12277.5, "y": -1444.66, "z": 130.7},
-            {"x": -12279.2, "y": -1446.06, "z": 130.7},
-            {"x": -12281.9, "y": -1443, "z": 130.7},
-            {"x": -12265.8, "y": -1463.01, "z": 131.17},
-            {"x": -12281.7, "y": -1451.19, "z": 130.7},
-            {"x": -12276.2, "y": -1451.29, "z": 130.7},
-            {"x": -12277.5, "y": -1450.48, "z": 130.7},
-            {"x": -12281.2, "y": -1451.64, "z": 130.7}
+            {"x": -12228, "y": -1478, "z": 131.4}
           ],
-          "radius": 18.5,
+          "radius": 10,
           "approach": [
-            {"x": -12307, "y": -1411, "z": 130.76}
-          ]
+            {"x": -12177, "y": -1479, "z": 131.2},
+            {"x": -12177, "y": -1461, "z": 131.2},
+            {"x": -12180, "y": -1452, "z": 131.2}
+          ],
+          "stand_pull": true
+        },
+        {
+          "entries": [11368, 14750],
+          "positions": [
+            {"x": -12228, "y": -1440, "z": 131.2}
+          ],
+          "radius": 9,
+          "approach": [
+            {"x": -12186, "y": -1458, "z": 131.7}
+          ],
+          "stand_pull": true
         }
       ],
       "skip": [14758, 15091],
@@ -175,7 +176,8 @@
         "entry": 14517,
         "position": {"x": -12289.1, "y": -1384.13, "z": 134.27},
         "approach": [
-          {"x": -12272.397, "y": -1390.805, "z": 131.0874}
+          {"x": -12225, "y": -1445, "z": 130.66219},
+          {"x": -12241.56, "y": -1399.14, "z": 131.58357}
         ]
       }
     },

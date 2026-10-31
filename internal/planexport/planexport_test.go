@@ -1280,3 +1280,267 @@ func TestLegFirstStep(t *testing.T) {
 		t.Fatal("a leg the plan does not have has a first step")
 	}
 }
+
+// TestBossSkipUnreachableExportsTheFlag: a boss with skip_unreachable exports Flags 4096 (or'd with the team gate)
+// and carries the reason in its comment (Stormwrought Ruins' Eldermaw 62661, specs/sw-eldermaw.md Spec A).
+func TestBossSkipUnreachableExportsTheFlag(t *testing.T) {
+	const js = `{"version":1,"name":"sw","status":"live-checked (test)","map":818,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"eldermaw_the_primordial","to":{"x":-5845.08,"y":-3744.63,"z":217.926},
+  "boss":{"entry":62661,"position":{"x":-5798.46,"y":-3742.97,"z":201.241},
+   "team":"horde","skip_unreachable":"swims a pool (WMO water 202.2, bed 191-196); bed navmesh cut off from the shore"}}]}`
+	r := build(t, parsePlan(t, js))
+	if len(r.Steps) < 2 {
+		t.Fatalf("%d steps", len(r.Steps))
+	}
+	b := r.Steps[len(r.Steps)-1]
+	if b.Kind != KindBoss || b.Entry != 62661 {
+		t.Fatalf("last row %+v", b)
+	}
+	if b.Flags != FlagSkipUnreachable|FlagHorde {
+		t.Fatalf("boss flags %d (want %d)", b.Flags, FlagSkipUnreachable|FlagHorde)
+	}
+	if !strings.Contains(b.Comment, "out of reach: swims a pool") {
+		t.Fatalf("boss comment %q", b.Comment)
+	}
+}
+
+// TestBossSkipUnreachableFlagValues: the spec's literal cases — no team exports 4096, alliance exports 4096 | 2.
+func TestBossSkipUnreachableFlagValues(t *testing.T) {
+	leg := func(team string) string {
+		tm := ""
+		if team != "" {
+			tm = `"team":"` + team + `",`
+		}
+		return `{"version":1,"name":"sw","status":"live-checked (test)","map":818,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"eldermaw_the_primordial","to":{"x":-5845.08,"y":-3744.63,"z":217.926},
+  "boss":{"entry":62661,"position":{"x":-5798.46,"y":-3742.97,"z":201.241},` + tm + `"skip_unreachable":"deep water"}}]}`
+	}
+	bare := build(t, parsePlan(t, leg("")))
+	if got := bare.Steps[len(bare.Steps)-1].Flags; got != 4096 {
+		t.Fatalf("no team: flags %d (want 4096)", got)
+	}
+	ally := build(t, parsePlan(t, leg("alliance")))
+	if got := ally.Steps[len(ally.Steps)-1].Flags; got != 4096|2 {
+		t.Fatalf("alliance: flags %d (want %d)", got, 4096|2)
+	}
+}
+
+// TestBossRadiusExported: a boss radius exports onto the row; over MaxRadius the export fails (Stormwrought Ruins'
+// Eldermaw 62661, specs/sw-eldermaw.md Spec B).
+func TestBossRadiusExported(t *testing.T) {
+	leg := func(radius string) string {
+		return `{"version":1,"name":"sw","status":"live-checked (test)","map":818,"entrance":{"x":0,"y":0,"z":0},
+	 "legs":[{"name":"eldermaw_the_primordial","to":{"x":-5845.08,"y":-3744.63,"z":217.926},
+	  "boss":{"entry":62661,"position":{"x":-5820.0,"y":-3797.19,"z":201.241},"radius":` + radius + `}}]}`
+	}
+	r := build(t, parsePlan(t, leg("95")))
+	b := r.Steps[len(r.Steps)-1]
+	if b.Kind != KindBoss || b.Radius != 95 {
+		t.Fatalf("boss row %+v (want radius 95)", b)
+	}
+	// Over MaxRadius the plan is refused when it is parsed, and the builder refuses it too (a plan built by hand).
+	if _, err := dungeon.Parse("test.json", []byte(leg("101"))); err == nil || !strings.Contains(err.Error(), "boss.radius") {
+		t.Fatalf("radius 101 parse error %v (want the boss radius range)", err)
+	}
+	if err := (&builder{}).boss(&dungeon.Boss{Entry: 62661, Radius: 101}); err == nil || !strings.Contains(err.Error(), "boss 62661") {
+		t.Fatalf("radius 101 builder error %v (want the named boss and its range)", err)
+	}
+}
+
+// TestBossStandPullFlagAndApproach: a stand_pull boss exports flag 8192 with the move to its stand right before it;
+// without an approach the export fails (Stormwrought Ruins' Eldermaw 62661, specs/sw-eldermaw.md Spec B).
+func TestBossStandPullFlagAndApproach(t *testing.T) {
+	const js = `{"version":1,"name":"sw","status":"live-checked (test)","map":818,"entrance":{"x":0,"y":0,"z":0},
+	 "legs":[{"name":"eldermaw_the_primordial","to":{"x":-5845.08,"y":-3744.63,"z":217.926},
+	  "boss":{"entry":62661,"position":{"x":-5820.0,"y":-3797.19,"z":201.241},"radius":95,"stand_pull":true,
+	   "approach":[{"x":-5842.0,"y":-3807.0,"z":200.7}]}}]}`
+	r := build(t, parsePlan(t, js))
+	var bi = -1
+	for i, s := range r.Steps {
+		if s.Kind == KindBoss {
+			bi = i
+		}
+	}
+	if bi < 0 {
+		t.Fatalf("no boss row in %d steps", len(r.Steps))
+	}
+	if got := r.Steps[bi].Flags; got&FlagStandPull == 0 {
+		t.Fatalf("boss flags %d (want flag %d)", got, FlagStandPull)
+	}
+	prev := r.Steps[bi-1]
+	if prev.Kind != KindMove || prev.X != -5842 || prev.Y != -3807 || prev.Z != 200.7 {
+		t.Fatalf("row before the boss %+v (want the move to the stand)", prev)
+	}
+	const bare = `{"version":1,"name":"sw","status":"live-checked (test)","map":818,"entrance":{"x":0,"y":0,"z":0},
+	 "legs":[{"name":"eldermaw_the_primordial","to":{"x":-5845.08,"y":-3744.63,"z":217.926},
+	  "boss":{"entry":62661,"position":{"x":-5820.0,"y":-3797.19,"z":201.241},"stand_pull":true}}]}`
+	if _, err := dungeon.Parse("test.json", []byte(bare)); err == nil || !strings.Contains(err.Error(), "needs an approach point") {
+		t.Fatalf("stand_pull without an approach parse error %v (want the no-approach refusal)", err)
+	}
+	if err := (&builder{}).boss(&dungeon.Boss{Entry: 62661, StandPull: true}); err == nil || !strings.Contains(err.Error(), "needs an approach point") {
+		t.Fatalf("stand_pull without an approach builder error %v (want the no-approach refusal)", err)
+	}
+	// stand_pull together with hold is an error (like hold + skip_unreachable): the run leader's row for the
+	// group is the event's hold, never a pulled boss.
+	const held = `{"version":1,"name":"sw","status":"live-checked (test)","map":818,"entrance":{"x":0,"y":0,"z":0},
+	 "legs":[{"name":"eldermaw_the_primordial","to":{"x":-5845.08,"y":-3744.63,"z":217.926},
+	  "boss":{"entry":62661,"position":{"x":-5820.0,"y":-3797.19,"z":201.241},"stand_pull":true,
+	   "approach":[{"x":-5842.0,"y":-3807.0,"z":200.7}],
+	   "hold":{"instance_data":1,"spot":{"x":1,"y":0,"z":0},"radius":30,"timeout_s":600}}}]}`
+	if _, err := dungeon.Parse("test.json", []byte(held)); err == nil || !strings.Contains(err.Error(), "stand_pull") || !strings.Contains(err.Error(), "hold") {
+		t.Fatalf("stand_pull with a hold error %v (want the hold refusal)", err)
+	}
+	if err := (&builder{}).boss(&dungeon.Boss{Entry: 62661, StandPull: true, Approach: []dungeon.Point{{X: 10}}, Hold: &dungeon.Hold{}}); err == nil || !strings.Contains(err.Error(), "together with hold") {
+		t.Fatalf("stand_pull with a hold builder error %v (want the hold refusal)", err)
+	}
+}
+
+// TestBossStandPullKeepsLastAtTheStand: with a stand_pull boss, b.last is the stand (the move row right before
+// the boss), not P in deep water: a centerless hostiles_gone step right after the boss is centered on the stand.
+func TestBossStandPullKeepsLastAtTheStand(t *testing.T) {
+	const js = `{"version":1,"name":"sw","status":"live-checked (test)","map":818,"entrance":{"x":0,"y":0,"z":0},
+	 "legs":[{"name":"eldermaw_the_primordial","to":{"x":0,"y":0,"z":0},
+	  "boss":{"entry":62661,"position":{"x":200,"y":0,"z":0},"stand_pull":true,
+	   "approach":[{"x":10,"y":0,"z":0}]},
+	  "after_boss":[{"wait_for":{"hostiles_gone":{"radius":20}}}]}]}`
+	r := build(t, parsePlan(t, js))
+	var boss, wait *StepRow
+	for i := range r.Steps {
+		s := &r.Steps[i]
+		if s.Kind == KindBoss && s.Entry == 62661 {
+			boss = s
+		} else if s.Kind == KindWaitClear && boss != nil {
+			wait = s
+			break
+		}
+	}
+	if boss == nil || wait == nil {
+		t.Fatalf("boss %+v wait %+v in %+v", boss, wait, r.Steps)
+	}
+	// The wait is centered on the stand (10,0,0), not on P (200,0,0) in deep water.
+	if wait.X != 10 || wait.Y != 0 || wait.Z != 0 {
+		t.Fatalf("wait after the boss %+v (want the stand 10,0,0)", *wait)
+	}
+}
+
+// TestBossStandPullNoApproachHops: with a cutter, no "approach path" row comes between the stand and a stand_pull
+// boss, and the first move after the boss is cut from the stand, not from P (Stormwrought Ruins' Eldermaw 62661,
+// specs/sw-eldermaw.md Spec B).
+func TestBossStandPullNoApproachHops(t *testing.T) {
+	const js = `{"version":1,"name":"sw","status":"live-checked (test)","map":818,"entrance":{"x":0,"y":0,"z":0},
+	 "legs":[{"name":"eldermaw_the_primordial","to":{"x":0,"y":0,"z":0},
+	  "boss":{"entry":62661,"position":{"x":200,"y":0,"z":0},"stand_pull":true,
+	   "approach":[{"x":10,"y":0,"z":0}]}},
+	  {"name":"next","to":{"x":400,"y":0,"z":0},"boss":{"entry":62662,"position":{"x":410,"y":0,"z":0}}}]}`
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 999, Z: 0}}, nil
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bi = -1
+	for i, s := range res.Rows.Steps {
+		if s.Kind == KindBoss {
+			bi = i
+			break
+		}
+	}
+	if bi < 0 {
+		t.Fatalf("no boss row in %d steps", len(res.Rows.Steps))
+	}
+	if prev := res.Rows.Steps[bi-1]; prev.Kind != KindMove || prev.Y == 999 {
+		t.Fatalf("row before the boss %+v (want the stand move, no approach path)", prev)
+	}
+	for _, s := range res.Rows.Steps[:bi] {
+		if s.Kind == KindMove && s.Comment == "approach path" {
+			t.Fatalf("approach-path row before the stand-pull boss: %+v", s)
+		}
+	}
+	var after *StepRow
+	for i := bi + 1; i < len(res.Rows.Steps); i++ {
+		if s := res.Rows.Steps[i]; s.Kind == KindMove {
+			after = &res.Rows.Steps[i]
+			break
+		}
+	}
+	if after == nil {
+		t.Fatalf("no move row after the boss: %+v", res.Rows.Steps)
+	}
+	if after.Y != 999 || after.X != 205 {
+		t.Fatalf("first cut after the boss %+v (want the stand-to-next midpoint 205,999)", *after)
+	}
+}
+
+// TestPullGroupStandPullFlagParamAndStand: a stand_pull pull group (a patrolling formation, specs/rl-patrol-timed-pull.md)
+// exports flag 8192 and its clear_yd as the row's param, its stand right before the pull row with no approach-path row
+// between them, and the next move's hop is cut from the stand. Without an approach, with a hold or an ambush, clear_yd
+// without stand_pull or past 60, the plan is refused.
+func TestPullGroupStandPullFlagParamAndStand(t *testing.T) {
+	plan := func(group string) string {
+		return `{"version":1,"name":"zg","status":"live-checked (test)","map":309,"entrance":{"x":0,"y":0,"z":0},
+	 "legs":[{"name":"jeklik","to":{"x":300,"y":0,"z":0},"pull_groups":[` + group + `]},
+	  {"name":"next","to":{"x":400,"y":0,"z":0},"boss":{"entry":62662,"position":{"x":410,"y":0,"z":0}}}]}`
+	}
+	const good = `{"entries":[11368,14750],"positions":[{"x":200,"y":0,"z":0}],"radius":4,"stand_pull":true,"clear_yd":35,
+	  "approach":[{"x":150,"y":0,"z":0}]}`
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 999, Z: 0}}, nil
+	}
+	res, err := Build(parsePlan(t, plan(good)), Options{Source: "test", Cut: cut, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pi := -1
+	for i, s := range res.Rows.Steps {
+		if s.Kind == KindPull {
+			pi = i
+			break
+		}
+	}
+	if pi < 1 {
+		t.Fatalf("no pull row in %+v", res.Rows.Steps)
+	}
+	p := res.Rows.Steps[pi]
+	if p.Flags&FlagStandPull == 0 || p.Param != 35 || p.Radius != 4 || !strings.Contains(p.Comment, "stand pull") {
+		t.Fatalf("pull row %+v (want flag %d, param 35, radius 4, the stand-pull comment)", p, FlagStandPull)
+	}
+	if prev := res.Rows.Steps[pi-1]; prev.Kind != KindMove || prev.X != 150 || prev.Y != 0 {
+		t.Fatalf("row before the pull %+v (want the move to the stand 150,0,0)", prev)
+	}
+	// The next leg's 400,0,0 is cut from the stand (midpoint 275), not from the pack's centre 200,0,0 (midpoint 300).
+	if next := res.Rows.Steps[pi+1]; next.Kind != KindMove || next.Y != 999 || next.X != (150+400)/2 {
+		t.Fatalf("first hop after the stand pull %+v (want it cut from the stand 150,0,0)", next)
+	}
+	// A plain pull group exports no stand-pull flag and no param.
+	plain := `{"entries":[11368],"positions":[{"x":200,"y":0,"z":0}],"radius":4,"approach":[{"x":150,"y":0,"z":0}]}`
+	for _, s := range build(t, parsePlan(t, plan(plain))).Steps {
+		if s.Kind == KindPull && (s.Flags&FlagStandPull != 0 || s.Param != 0) {
+			t.Fatalf("plain pull row %+v", s)
+		}
+	}
+	for name, bad := range map[string]string{
+		"no approach":   `{"entries":[11368],"positions":[{"x":200,"y":0,"z":0}],"stand_pull":true}`,
+		"hold":          `{"entries":[11368],"positions":[{"x":200,"y":0,"z":0}],"stand_pull":true,"approach":[{"x":150,"y":0,"z":0}],"hold":{"instance_data":1,"spot":{"x":1,"y":0,"z":0},"radius":30,"timeout_s":600}}`,
+		"ambush":        `{"entries":[11368],"positions":[{"x":200,"y":0,"z":0}],"stand_pull":true,"ambush":true,"approach":[{"x":150,"y":0,"z":0}]}`,
+		"clear alone":   `{"entries":[11368],"positions":[{"x":200,"y":0,"z":0}],"clear_yd":30,"approach":[{"x":150,"y":0,"z":0}]}`,
+		"clear too far": `{"entries":[11368],"positions":[{"x":200,"y":0,"z":0}],"stand_pull":true,"clear_yd":61,"approach":[{"x":150,"y":0,"z":0}]}`,
+		"stand far":     `{"entries":[11368],"positions":[{"x":200,"y":0,"z":0}],"stand_pull":true,"approach":[{"x":139,"y":0,"z":0}]}`,
+		"radius 101":    `{"entries":[11368],"positions":[{"x":200,"y":0,"z":0}],"stand_pull":true,"radius":101,"approach":[{"x":150,"y":0,"z":0}]}`,
+	} {
+		if _, err := dungeon.Parse("test.json", []byte(plan(bad))); err == nil || (!strings.Contains(err.Error(), "stand_pull") && !strings.Contains(err.Error(), "clear_yd") && !strings.Contains(err.Error(), "radius")) {
+			t.Errorf("%s: parse error %v (want the stand_pull / clear_yd / radius refusal)", name, err)
+		}
+	}
+	// A stand_pull group may carry a radius past the plain 60 (up to 100: its formations are marked by their spawns); a
+	// plain group may not.
+	if _, err := dungeon.Parse("test.json", []byte(plan(`{"entries":[11368],"positions":[{"x":200,"y":0,"z":0}],"stand_pull":true,"radius":71,"approach":[{"x":150,"y":0,"z":0}]}`))); err != nil {
+		t.Fatalf("stand_pull radius 71: %v", err)
+	}
+	if _, err := dungeon.Parse("test.json", []byte(plan(`{"entries":[11368],"positions":[{"x":200,"y":0,"z":0}],"radius":71,"approach":[{"x":150,"y":0,"z":0}]}`))); err == nil || !strings.Contains(err.Error(), "radius") {
+		t.Fatalf("plain radius 71 error %v (want the 1-60 refusal)", err)
+	}
+	if err := (&builder{}).pull(0, dungeon.PullGroup{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 1}}, StandPull: true}); err == nil {
+		t.Fatal("builder: a stand_pull group with no approach was exported")
+	}
+}
