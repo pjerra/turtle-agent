@@ -1336,17 +1336,31 @@ func fightFileID(id string) string {
 // watching. Anything else out of the recovery ends the walk with its own reason.
 var errWipeRecovered = errors.New("wipe recovered")
 
+// errRunWentOn is the rest's defence-in-depth signal: a status after the rest began shows the run
+// running again and either "regrouped" or on a later step, so the rest and the resume are skipped.
+var errRunWentOn = errors.New("the run went on by itself")
+
 // handleWipe is an all-dead party with no boss engaged. Inside a boss fight, or with no recovery left, it ends the
 // walk as before (walk 13 s7: a near-wipe stop ended the walk after the raid was already revived and rested by
 // hand). Otherwise it revives, rests and resumes and the watch goes on.
 func (w *walk) handleWipe(ctx context.Context, step int) error {
+	// The run may already be regrouping by itself after the wipe (TB "regrouping by itself"):
+	// it stays running, rests, gathers and walks back on its own, so the recovery must not rest
+	// or resume it (walk 17b m910q s4, test2 s2). Decided once, from the status the wipe fired on.
+	selfRegroup := w.haveStatus && w.lastStatus.State == tbm.RunRunning && w.lastStatus.Step == step &&
+		selfRegroupNote(w.lastStatus.Note)
 	if w.bossEngagedNow() {
+		w.note("wipe resume skipped: %s engaged", w.engagedBossWords())
 		return w.endWipe(ctx, step)
 	}
-	if w.wipeResumes >= w.opts.wipeResume {
+	if w.opts.wipeResume > 0 && w.wipeResumes >= w.opts.wipeResume {
+		w.note("wipe resume skipped: no recoveries left (%d/%d)", w.wipeResumes, w.opts.wipeResume)
 		return w.endWipe(ctx, step)
 	}
-	if err := w.recoverWipe(ctx, step); err == errWipeResumeSkipped {
+	if w.wipeResumes >= w.opts.wipeResume { // --wipe-resume 0: the old ending, no note
+		return w.endWipe(ctx, step)
+	}
+	if err := w.recoverWipe(ctx, step, selfRegroup); err == errWipeResumeSkipped {
 		return w.endWipe(ctx, step)
 	} else if terr, ok := err.(*timeoutWalkStop); ok {
 		w.note("%s", terr.note)
@@ -1670,7 +1684,7 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time) error {
 // again: the watch loop keeps going and the summary's end stays truthful. Any failure ends the walk with the
 // failure's own reason, exactly as endWipe would. Review round 2: the boss evidence must be fresh, the rest
 // needs a complete quiet view, and the whole recovery has an absolute deadline.
-func (w *walk) recoverWipe(ctx context.Context, step int) error {
+func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) error {
 	if err := w.bossUnknown(ctx); err != nil {
 		return err
 	}
@@ -1683,17 +1697,44 @@ func (w *walk) recoverWipe(ctx context.Context, step int) error {
 		return err
 	}
 	revived := len(w.hireList())
+	if selfRegroup {
+		// The run is running and regroups by itself: it rests, gathers and walks back on its own.
+		// No out-of-combat rest and no run resume (walk 17b: the rest never got quiet while the
+		// run marched on). The post-revive boss re-check still runs; a boss it names ends the walk.
+		if _, err := w.freshWipeRest(); err != nil {
+			return err
+		}
+		w.resumeStatusSeq = w.statusSeq // recoveredBoss's run-leader exception needs a status after this point
+		if err := w.recoveredBoss(ctx, step); err != nil {
+			return err
+		}
+		w.wipeResumes++
+		w.note("wipe-resume %d/%d at step %d: revived %d; the run regroups by itself (no rest, no resume)", w.wipeResumes, w.opts.wipeResume, step, revived)
+		return errWipeRecovered
+	}
 	rest, err := w.freshWipeRest()
 	if err != nil {
 		return err
 	}
-	if err := w.restOutOfCombat(ctx, rest, deadline); err != nil {
+	seq0 := w.statusSeq
+	if err := w.restOutOfCombat(ctx, step, rest, deadline); err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
 			return timeout.end(step)
 		}
+		if err == errRunWentOn {
+			// The run went on by itself while the walk rested (defence in depth: usually the
+			// self-regroup note decided this before the rest). Skip the resume and count it.
+			w.resumeStatusSeq = seq0
+			if rerr := w.recoveredBoss(ctx, step); rerr != nil {
+				return rerr
+			}
+			w.wipeResumes++
+			w.note("wipe-resume %d/%d at step %d: revived %d; the run went on by itself during the rest (no resume)", w.wipeResumes, w.opts.wipeResume, step, revived)
+			return errWipeRecovered
+		}
 		return err
 	}
-	if err := w.resumeRun(ctx, from, rest); err != nil {
+	if err := w.resumeRun(ctx, step, from, rest); err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
 			return timeout.end(step)
 		}
@@ -1727,13 +1768,25 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 	if err != nil {
 		return err
 	}
-	if err := w.restOutOfCombat(ctx, rest, deadline); err != nil {
+	seq0 := w.statusSeq
+	if err := w.restOutOfCombat(ctx, step, rest, deadline); err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
 			return timeout.pausedEnd(step)
 		}
+		if err == errRunWentOn {
+			// The run went on by itself while the walk rested (a hand resume, or a regroup the
+			// status line reported): skip the resume and count it.
+			w.resumeStatusSeq = seq0
+			if rerr := w.recoveredBoss(ctx, step); rerr != nil {
+				return rerr
+			}
+			w.wipeResumes++
+			w.note("wipe-resume %d/%d at step %d: revived %d; the run went on by itself during the rest (no resume)", w.wipeResumes, w.opts.wipeResume, step, revived)
+			return errWipeRecovered
+		}
 		return err
 	}
-	if err := w.resumeRun(ctx, from, rest); err != nil {
+	if err := w.resumeRun(ctx, step, from, rest); err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
 			return timeout.pausedEnd(step)
 		}
@@ -1760,6 +1813,7 @@ func (w *walk) recoverNearWipeRevive(ctx context.Context, deadline time.Time) (i
 	}
 	dead, ok := w.completeDeadView(ctx)
 	if !ok {
+		w.note("wipe resume skipped: no complete view of the hires")
 		return 0, errWipeResumeSkipped
 	}
 	for _, name := range dead {
@@ -2023,13 +2077,26 @@ func (w *walk) lastBossRow() (uint32, bool) {
 	return best, true
 }
 
+// engagedBossWords names the engaged boss for a skip note: the engaged row the frames hold now,
+// falling back to the freshest plan-boss row ever seen (the rows-gone target case), then "a boss".
+func (w *walk) engagedBossWords() string {
+	if entry, ok := w.engagedBossEntry(); ok {
+		return fmt.Sprintf("boss %d", entry)
+	}
+	if entry, ok := w.lastBossRow(); ok {
+		return fmt.Sprintf("boss %d", entry)
+	}
+	return "a boss"
+}
+
 // restOutOfCombat polls bot_view every 5 s and waits for d of continuous quiet (review 2: a poll
 // counts as quiet only when the call succeeded AND every roster hire is present with a row <= 10 s
 // old AND none is in combat AND none is dead; any failed call, missing/stale hire, combat or dead
 // restarts the window from zero). A second wipe (every hire dead with fresh states) fails the
 // recovery exit 19, exactly like a second wipe during the next leg. The deadline bounds the whole
 // recovery: combat restarts the quiet window but never moves the deadline.
-func (w *walk) restOutOfCombat(ctx context.Context, d time.Duration, deadline time.Time) error {
+func (w *walk) restOutOfCombat(ctx context.Context, step int, d time.Duration, deadline time.Time) error {
+	seq0 := w.statusSeq
 	var quietSince, lastPoll time.Time
 	for {
 		if w.leaseLost.Load() {
@@ -2047,8 +2114,16 @@ func (w *walk) restOutOfCombat(ctx context.Context, d time.Duration, deadline ti
 		}
 		for _, inc := range incs {
 			if wipe, ok := inc.(raidwalk.IncidentWipe); ok {
+				w.note("second wipe at step %d during the wipe-resume of step %d (rest or resume not finished)", wipe.Step, step)
 				return stopf(exitRaidWalkIncident, "wipe at step %d", wipe.Step)
 			}
+		}
+		// Defence in depth for a run that goes on without the walk: a status after the rest began
+		// that is running again and either says "regrouped" (TB's note when its own regroup
+		// finishes) or stands on a later step means the rest and the resume are pointless.
+		if w.statusSeq > seq0 && w.haveStatus && w.lastStatus.State == tbm.RunRunning &&
+			(strings.HasPrefix(w.lastStatus.Note, "regrouped") || w.lastStatus.Step > step) {
+			return errRunWentOn
 		}
 		if w.completeQuietView(ctx) {
 			now := w.env.now()
@@ -2118,7 +2193,7 @@ func (w *walk) completeQuietView(ctx context.Context) bool {
 // running again. Anything else fails the recovery: no resume ACK, or no running line in 60 s, ends the walk the
 // way a failed phase does. A wipe during the wait ends 19 like a second wipe. The wait stays inside the
 // recovery deadline: past it the walk ends with the original incident's exit and the timed-out note.
-func (w *walk) resumeRun(ctx context.Context, from time.Time, rest time.Duration) error {
+func (w *walk) resumeRun(ctx context.Context, step int, from time.Time, rest time.Duration) error {
 	rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "resume", WaitMS: 5000})
 	if err != nil {
 		return err
@@ -2146,7 +2221,7 @@ func (w *walk) resumeRun(ctx context.Context, from time.Time, rest time.Duration
 		if err := ctx.Err(); err != nil {
 			return stopf(exitRaidWalkFailed, "interrupted")
 		}
-		running, err := w.pollRunRunning(ctx)
+		running, err := w.pollRunRunning(ctx, step)
 		if err != nil {
 			return err
 		}
@@ -2168,13 +2243,14 @@ func (w *walk) resumeRun(ctx context.Context, from time.Time, rest time.Duration
 
 // pollRunRunning reads one events page and the frames, feeding the tracker like pollOnce but without the dashboard:
 // true once the walk's plan shows running again. A wipe during the wait is the second wipe and ends 19.
-func (w *walk) pollRunRunning(ctx context.Context) (bool, error) {
+func (w *walk) pollRunRunning(ctx context.Context, step int) (bool, error) {
 	incs, err := w.pollOnce(ctx, false)
 	if err != nil {
 		return false, err
 	}
 	for _, inc := range incs {
 		if wipe, ok := inc.(raidwalk.IncidentWipe); ok {
+			w.note("second wipe at step %d during the wipe-resume of step %d (rest or resume not finished)", wipe.Step, step)
 			return false, stopf(exitRaidWalkIncident, "wipe at step %d", wipe.Step)
 		}
 	}
@@ -2187,6 +2263,14 @@ func (w *walk) pollRunRunning(ctx context.Context) (bool, error) {
 func nearWipeStop(note string) bool {
 	lower := strings.ToLower(note)
 	return strings.Contains(lower, "near wipe") || strings.Contains(lower, "the run stops here")
+}
+
+// selfRegroupNote says the run is regrouping by itself after a wipe (TB DungeonRunPolicy: "19 dead (...):
+// regrouping by itself (1 of 2 at this step)", also "... dead and the fight went past N s (...): regrouping by
+// itself ..."). The run stays running and rests, gathers and walks back on its own: a recovery must not rest or
+// resume it (walk 17b m910q s4, test2 s2).
+func selfRegroupNote(note string) bool {
+	return strings.Contains(strings.ToLower(note), "regrouping by itself")
 }
 
 // quietCheck is the revive point's quiet check (spec 3.5): every 5 s up to 120 s, with a patrol exempt when one
