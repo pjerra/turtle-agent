@@ -183,6 +183,18 @@ func raidWalkCmd(ctx context.Context, args []string, stdout, stderr io.Writer) i
 // parseRaidWalkArgs reads the flags and checks their shape (no file or network access).
 func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	o := raidWalkOptions{}
+	// The single-slot form takes the plan before its flags too (walks 12/13: Go's flag package stops
+	// at the first non-flag, so the plan would strand every flag after it as a positional). A leading
+	// non-flag moves to the end before parsing; flags-first callers (raid-suite, pair) start with a
+	// flag and parse as before.
+	var planFirst string
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		planFirst = args[0]
+		moved := make([]string, 0, len(args))
+		moved = append(moved, args[1:]...)
+		moved = append(moved, args[0])
+		args = moved
+	}
 	fs := flag.NewFlagSet("raid-walk", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { fmt.Fprintln(stderr, raidWalkUsage) }
@@ -217,7 +229,17 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	if err := fs.Parse(args); err != nil {
 		return o, exitUsage
 	}
-	if fs.NArg() != 1 {
+	if fs.NArg() == 0 {
+		fmt.Fprintln(stderr, raidWalkUsage)
+		return o, exitUsage
+	}
+	if fs.NArg() > 1 {
+		extra := fs.Arg(1)
+		if planFirst != "" {
+			// The plan moved to the end, so parsing stopped at the first extra: it is Arg(0).
+			extra = fs.Arg(0)
+		}
+		fmt.Fprintf(stderr, "raid-walk: unexpected argument %q\n", extra)
 		fmt.Fprintln(stderr, raidWalkUsage)
 		return o, exitUsage
 	}

@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -2125,5 +2126,46 @@ func TestRaidWalkBossDoneDryRun(t *testing.T) {
 	}
 	if want := fmt.Sprintf("run start molten_core until step %d", next); !strings.Contains(f.stdout.String(), want) {
 		t.Fatalf("dry run lacks %q:\n%s", want, f.stdout.String())
+	}
+}
+
+// Walks 12/13: the single-slot form takes the plan before its flags, as the README documents.
+func TestRaidWalkPlanFirstSingleSlot(t *testing.T) {
+	flagsFirst := []string{"--server", "m910q", "--slot", "6", "--dry-run", "--until", "step 41", "zul_gurub"}
+	planFirst := []string{"zul_gurub", "--server", "m910q", "--slot", "6", "--dry-run", "--until", "step 41"}
+	var discard bytes.Buffer
+	want, code := parseRaidWalkArgs(flagsFirst, &discard)
+	if code != exitOK {
+		t.Fatalf("flags-first: exit %d, want %d (stderr %q)", code, exitOK, discard.String())
+	}
+	var stderr bytes.Buffer
+	got, code := parseRaidWalkArgs(planFirst, &stderr)
+	if code != exitOK {
+		t.Fatalf("plan-first: exit %d, want %d (stderr %q)", code, exitOK, stderr.String())
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("plan-first parsed to %+v, want %+v", got, want)
+	}
+}
+
+func TestRaidWalkPlanFirstWithSql(t *testing.T) {
+	var stderr bytes.Buffer
+	o, code := parseRaidWalkArgs([]string{"zul_gurub", "--server", "m910q", "--slot", "6", "--sql", "walk.sql"}, &stderr)
+	if code != exitOK {
+		t.Fatalf("plan-first with --sql: exit %d, want %d (stderr %q)", code, exitOK, stderr.String())
+	}
+	if o.plan != "zul_gurub" || o.sql != "walk.sql" {
+		t.Fatalf("plan-first with --sql parsed to plan %q sql %q", o.plan, o.sql)
+	}
+}
+
+func TestRaidWalkExtraArgumentNamesIt(t *testing.T) {
+	var stderr bytes.Buffer
+	_, code := parseRaidWalkArgs([]string{"zul_gurub", "extra", "--slot", "6"}, &stderr)
+	if code != exitUsage {
+		t.Fatalf("extra argument: exit %d, want %d", code, exitUsage)
+	}
+	if !strings.Contains(stderr.String(), `unexpected argument "extra"`) {
+		t.Fatalf("stderr does not name the extra argument: %q", stderr.String())
 	}
 }
