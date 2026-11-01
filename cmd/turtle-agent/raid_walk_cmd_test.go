@@ -1745,6 +1745,221 @@ func TestRaidWalkWipeRevivesOnlyWhenQuiet(t *testing.T) {
 	})
 }
 
+// placedIdleBlocker returns the unitsFn of a placed walk whose revive point is blocked by entry at yd out (place
+// point + yd in x, same z), with the given state on the unit.
+func placedIdleBlocker(t *testing.T, yd float32, entry uint32, name string, inCombat bool) func(int) []objects.Unit {
+	t.Helper()
+	_, place := placePlanRows(t)
+	return func(int) []objects.Unit {
+		return []objects.Unit{{Type: "creature", Name: name, Entry: entry, Hostile: true, InCombat: inCombat,
+			X: place.Point.X + yd, Y: place.Point.Y, Z: place.Point.Z}}
+	}
+}
+
+// wipeOnceAfterStart is wipeAfterStart for a test whose run goes on after the recovery: the raid dies once, on the
+// first running line, so the running line the resume hook queues does not kill the revived party again.
+func wipeOnceAfterStart(f *fixture) {
+	wipeAfterStart(f)
+	hook := f.agent.eventsHook
+	killed := false
+	f.agent.eventsHook = func(raw string) {
+		if killed || !strings.Contains(raw, "|running|") {
+			return
+		}
+		killed = true
+		hook(raw)
+	}
+}
+
+// resumePlacedRun answers `run resume` with the placed ZG run going on and stopping at its until: the same server
+// behaviour resumeHook fakes for the Onyxia fixture, whose line format is hard-coded to onyxia.
+func resumePlacedRun(f *fixture) {
+	n := zgPlaceSteps(f.t)
+	f.agent.onResume = func() {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|thekal|move|walk|resumed", n.start+1, n.total)},
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|thekal|move|walk|stopped before step %d (until boss): the party stays where it stands", n.start+1, n.total, n.until)})
+	}
+}
+
+// walk 25: every refusal was a mob standing at its own spawn about 44.6 yd from the revive point, not fighting. D-A
+// lets an idle unit beyond the placement's 25 yd landing reach through, so the wipe recovers instead of ending at 19.
+func TestRaidWalkWipeRevivesPastIdleHomeMob(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	f.agent.startReply = zgPlaceReply(t)
+	f.agent.unitsFn = placedIdleBlocker(t, 44.6, 14532, "Razzashi Venombrood", false)
+	wipeOnceAfterStart(f)
+	resumePlacedRun(f)
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s\n%s", code, f.stderr.String(), f.stdout.String(), f.summaryText())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 || sum.EndReason != "until" {
+		t.Fatalf("wipe_resumes %d end %q, want 1 and until", sum.WipeResumes, sum.EndReason)
+	}
+	if sum.ReviveRefusal != nil {
+		t.Fatalf("the revive was refused with the idle blocker in place: %+v", sum.ReviveRefusal)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".summon "); n == 0 {
+		t.Fatalf("no summons: the revive never reached its summon stage: %q", f.agent.gmLines())
+	}
+}
+
+// D-C: the 120 s check gives up after 24 reads, so a blocker that leaves later still gets the revive: the walk
+// re-reads every 10 s until waitEnd.
+func TestRaidWalkReviveWaitsForBlockerToLeave(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	f.agent.startReply = zgPlaceReply(t)
+	// An in-combat unit at 30 yd: not idle (D-A does not exempt it), so the check runs its full 24 reads. It leaves
+	// after 30 reads, a few of which are the D-C wait's.
+	const leaves = 30
+	_, place := placePlanRows(t)
+	f.agent.unitsFn = func(reads int) []objects.Unit {
+		if reads > leaves {
+			return []objects.Unit{}
+		}
+		return []objects.Unit{{Type: "creature", Name: "Razzashi Skitterer", Entry: 11338, Hostile: true, InCombat: true,
+			X: place.Point.X + 30, Y: place.Point.Y, Z: place.Point.Z}}
+	}
+	wipeOnceAfterStart(f)
+	resumePlacedRun(f)
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s\n%s", code, f.stderr.String(), f.stdout.String(), f.summaryText())
+	}
+	f.agent.mu.Lock()
+	gm, gmAt := append([]string{}, f.agent.gm...), append([]time.Time{}, f.agent.gmAt...)
+	f.agent.mu.Unlock()
+	visibleOff, firstSummon := -1, -1
+	for i, line := range gm {
+		if visibleOff < 0 && line == ".gm visible off" {
+			visibleOff = i
+		}
+		if firstSummon < 0 && strings.HasPrefix(line, ".summon ") {
+			firstSummon = i
+		}
+	}
+	if visibleOff < 0 || firstSummon < 0 {
+		t.Fatalf("no revive: visible off %d, first summon %d: %q", visibleOff, firstSummon, gm)
+	}
+	if gap := gmAt[firstSummon].Sub(gmAt[visibleOff]); gap <= 120*time.Second {
+		t.Fatalf("the summons left %s after the revive began, want past the 120 s quiet check (the D-C wait)", gap)
+	}
+	if sum := f.summary(); sum.ReviveRefusal != nil {
+		t.Fatalf("the revive was refused with the blocker gone: %+v", sum.ReviveRefusal)
+	}
+}
+
+// D-C's waitEnd leaves the rest and the resume that follow inside the recovery deadline: the walk then ends with the
+// revive refusal (exit 19, "not revived"), and not with "wipe recovery timed out".
+func TestRaidWalkReviveWaitEndsBeforeRest(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	f.opts.wipeRest = 5 * time.Minute
+	f.agent.startReply = zgPlaceReply(t)
+	f.agent.unitsFn = placedIdleBlocker(t, 30, 14532, "Razzashi Venombrood", true)
+	wipeAfterStart(f)
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !strings.Contains(sum.EndReason, "not revived") {
+		t.Fatalf("end reason %q, want the revive refusal itself", sum.EndReason)
+	}
+	rr := sum.ReviveRefusal
+	if rr == nil {
+		t.Fatalf("no revive_refusal with the point never quiet: %q", sum.EndReason)
+	}
+	// The recovery's deadline is 3 x --wipe-rest from its entry, and the wait ends rest + 30 s before it, so the wait
+	// is 2 x rest - 30 s less the few seconds the revive needs before its first read.
+	full := int((2*f.opts.wipeRest - 30*time.Second) / time.Second)
+	if rr.WaitedS > full || rr.WaitedS < full-60 {
+		t.Fatalf("waited %ds, want the D-C end at %ds less the revive's own seconds", rr.WaitedS, full)
+	}
+}
+
+// D-D: a point that never goes quiet ends the walk with the refusal in the summary, its blockers and all.
+func TestRaidWalkReviveRefusalSummary(t *testing.T) {
+	t.Run("in combat", func(t *testing.T) {
+		f, _ := newPlaceFixture(t)
+		f.opts.wipeRest = time.Minute
+		n := zgPlaceSteps(t)
+		_, place := placePlanRows(t)
+		f.agent.startReply = zgPlaceReply(t)
+		// Two blockers, both fighting: the summary and the reason name the nearest, and the run.log line lists both.
+		f.agent.unitsFn = func(int) []objects.Unit {
+			return []objects.Unit{
+				{Type: "creature", Name: "Razzashi Skitterer", Entry: 11338, Hostile: true, InCombat: true,
+					X: place.Point.X + 30, Y: place.Point.Y, Z: place.Point.Z},
+				{Type: "creature", Name: "Razzashi Venombrood", Entry: 14532, Hostile: true, InCombat: true,
+					X: place.Point.X + 44.6, Y: place.Point.Y, Z: place.Point.Z},
+			}
+		}
+		wipeAfterStart(f)
+		if code := f.run(context.Background()); code != exitRaidWalkIncident {
+			t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+		}
+		sum := f.summary()
+		rr := sum.ReviveRefusal
+		if rr == nil {
+			t.Fatalf("no revive_refusal: end %q", sum.EndReason)
+		}
+		if rr.WipeStep != n.start || rr.StartStep != n.start || len(rr.TriedSteps) != 1 || rr.TriedSteps[0] != n.start {
+			t.Fatalf("refusal %+v, want wipe step and start step %d", rr, n.start)
+		}
+		if rr.AllIdle {
+			t.Fatalf("all_idle true with in-combat blockers: %+v", rr)
+		}
+		if len(rr.Blockers) != 2 {
+			t.Fatalf("blockers %+v, want both", rr.Blockers)
+		}
+		if b := rr.Blockers[0]; b.Entry != 11338 || b.Idle || !b.InCombat || b.Dist < 29 || b.Dist > 31 {
+			t.Fatalf("nearest blocker %+v, want entry 11338 in combat 30 yd out", b)
+		}
+		if b := rr.Blockers[1]; b.Entry != 14532 || b.Name != "Razzashi Venombrood" || b.Idle || !b.InCombat {
+			t.Fatalf("second blocker %+v, want entry 14532 in combat", b)
+		}
+		if !strings.Contains(sum.EndReason, "Razzashi Skitterer 30.0 yd from the revive point") {
+			t.Fatalf("end reason %q, want the nearest blocker named", sum.EndReason)
+		}
+		want := fmt.Sprintf("revive refusal: wipe step %d, tried %d, waited ", n.start, n.start)
+		if txt := f.summaryText(); !strings.Contains(txt, want) || !strings.Contains(txt, "Razzashi Skitterer") {
+			t.Fatalf("summary.txt:\n%s\nwant %q with the blocker", txt, want)
+		}
+		// D-E: the failed reads left a run.log line with both blockers' entry, name, distance and state.
+		raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+		if err != nil {
+			t.Fatalf("run.log: %v", err)
+		}
+		log := string(raw)
+		if !strings.Contains(log, "quiet read at") || !strings.Contains(log, "11338") || !strings.Contains(log, "14532") ||
+			!strings.Contains(log, "Razzashi Skitterer") || !strings.Contains(log, "in_combat=true") {
+			t.Fatalf("run.log has no quiet-read line with both blockers:\n%s", log)
+		}
+	})
+	t.Run("idle inside the reach", func(t *testing.T) {
+		f, _ := newPlaceFixture(t)
+		f.opts.wipeRest = time.Minute
+		f.agent.startReply = zgPlaceReply(t)
+		// Idle at 20 yd: inside the landing reach, so D-A still lets it block, and waiting cannot help.
+		f.agent.unitsFn = placedIdleBlocker(t, 20, 14532, "Razzashi Venombrood", false)
+		wipeAfterStart(f)
+		if code := f.run(context.Background()); code != exitRaidWalkIncident {
+			t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+		}
+		rr := f.summary().ReviveRefusal
+		if rr == nil || !rr.AllIdle {
+			t.Fatalf("refusal %+v, want an all-idle one", rr)
+		}
+		if b := rr.Blockers[0]; !b.Idle || b.InCombat || b.Dist < 19 || b.Dist > 21 {
+			t.Fatalf("blocker %+v, want an idle one 20 yd out", b)
+		}
+	})
+}
+
 // resumeHook re-queues one running line at step once the walk sends `run resume` through the commander
 // RPC: the server shows the run going again, so resumeRun's 60 s wait sees it. doneStep appends the until done
 // line right after, so the walk ends at its goal once the watch loop polls again. resumeAt records the fake

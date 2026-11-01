@@ -621,6 +621,12 @@ type walk struct {
 	bossAttemptAt map[uint32]time.Time
 
 	stepFirst *dungeon.Point
+	// startStep is the step the run starts at (the placement's staged start, else the --from step): the revive's own
+	// step, and the start_step of a revive refusal (D-D).
+	startStep int
+	// reviveRefusal is the refused revive (D-D): set when the revive point never went quiet and the walk ends with
+	// "not revived"; nil otherwise.
+	reviveRefusal *raidwalk.ReviveRefusal
 
 	lastStatus tbm.RunStatus
 	haveStatus bool
@@ -877,6 +883,7 @@ func (w *walk) validate() error {
 		startStep = step
 		w.place = &raidwalk.PlacePlan{Start: step, Leg: leg, Point: p, Skips: raidwalk.PlaceSkips(w.plan)}
 	}
+	w.startStep = startStep
 	if raidwalk.IsBossDone(w.opts.until) {
 		clause, boss, err := raidwalk.BossDoneUntil(w.rows, startStep)
 		if err != nil {
@@ -1397,8 +1404,9 @@ func (w *walk) finish(code int) {
 		RowsSHA256: rowsSHA256(w.rows), UntilStep: w.untilStep, RunLabel: w.runLabel, SpeedFellBack: w.speedFellBack,
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
-		Place:      w.placeSum,
-		TierSource: w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
+		Place:         w.placeSum,
+		ReviveRefusal: w.reviveRefusal,
+		TierSource:    w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
 		WipeResumes: w.wipeResumes,
 	}
 	if w.inj != nil {

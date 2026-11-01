@@ -2313,7 +2313,7 @@ func (w *walk) resetReady(now time.Time) bool {
 // revive is the walk-4 recipe's ending: revive and always end the walk with exit 19.
 func (w *walk) revive(ctx context.Context, step int) error {
 	// false: this is the boss-wipe ending, with the walk ending here anyway and no run regrouping itself.
-	if err := w.reviveHires(ctx, time.Time{}, false); err != nil {
+	if err := w.reviveHires(ctx, step, time.Time{}, false); err != nil {
 		return err
 	}
 	return stopf(exitRaidWalkIncident, "wipe at step %d", step)
@@ -2341,7 +2341,7 @@ const reviveTeleportWait = 30 * time.Second
 // (walk 22 test2 s4, Q3). selfRegroup says the run is regrouping by itself: TB then moves the lead and the party
 // itself, so the revive sends no summons at all (the lead, living and dead hires alike): every hire is `.revive`d
 // where it lies and TB's regroup gathers them.
-func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup bool) error {
+func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, selfRegroup bool) error {
 	revive := w.revivePoint()
 	if revive == nil {
 		return stopf(exitRaidWalkIncident, "not revived: the plan's rows give no revive point")
@@ -2399,10 +2399,16 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 		st, _ := w.status(ctx)
 		return stopf(exitRaidWalkIncident, "not revived: the commander did not land at the revive point on map %d (last read: map %d %.1f %.1f %.1f, z unknown %v, falling %v, teleports %d -> %d)", w.plan.Map, st.Map, st.X, st.Y, st.Z, st.ZUnknown, st.Falling, beforeSeq, st.TeleportSeq)
 	}
-	ok, why, terr := w.quietCheck(ctx, p, deadline)
-	if terr != nil {
-		return terr
+	qs := newQuietState()
+	waitFrom := w.env.now()
+	q := w.quietCheck(ctx, qs, p, deadline)
+	if q.timeout != nil {
+		return q.timeout
 	}
+	ok, why, blockers := q.ok, q.why, q.blockers
+	// cur is the point the commander stands at: p, or the entrance once the fallback's go went out. The D-C wait
+	// re-reads that one.
+	cur := p
 	if !ok && w.place == nil {
 		// A door-to-end walk falls back to the entrance; a placed one does not: the entrance is behind the legs the
 		// placement skipped, and the run leader's walk back would cross them (spec 6).
@@ -2425,17 +2431,31 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 			w.logLine(w.env.now(), fmt.Sprintf("revive go from map %d (%.1f %.1f %.1f, z unknown %v, teleports %d)", st.Map, st.X, st.Y, st.Z, st.ZUnknown, st.TeleportSeq))
 		}
 		if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(e.X), num32(e.Y), num32(e.Z), w.plan.Map)); err == nil {
+			cur = e
 			if werr := w.waitRevivePoint(ctx, e, from, eSeq, eHave, deadline); werr == nil {
-				ok, why, terr = w.quietCheck(ctx, e, deadline)
-				if terr != nil {
-					return terr
+				eq := w.quietCheck(ctx, qs, e, deadline)
+				if eq.timeout != nil {
+					return eq.timeout
 				}
+				ok, why, blockers = eq.ok, eq.why, eq.blockers
 			} else if timeout, isTimeout := werr.(*recoveryTimeout); isTimeout {
 				return timeout
 			}
 		}
 	}
 	if !ok {
+		// D-C (walk 25): the point may still go quiet, so re-read every 10 s while the rest and resume that follow still
+		// fit before the recovery's deadline. The boss-wipe ending has no deadline and does not wait.
+		if end := w.quietWaitEnd(deadline, selfRegroup); !end.IsZero() && w.env.now().Before(end) {
+			wq := w.quietWait(ctx, qs, cur, quietRead{why: why, blockers: blockers}, end, deadline)
+			if wq.timeout != nil {
+				return wq.timeout
+			}
+			ok, why, blockers = wq.ok, wq.why, wq.blockers
+		}
+	}
+	if !ok {
+		w.reviveRefusal = w.refusal(step, blockers, w.env.now().Sub(waitFrom))
 		return stopf(exitRaidWalkIncident, "not revived: %s", why)
 	}
 	if w.place != nil {
@@ -2524,7 +2544,7 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 	clear(w.bossAttemptAt)
 	from := w.env.now()
 	deadline := recoveryDeadline(from, w.opts.wipeRest, w.opts.maxRunMinutes, w.started)
-	if err := w.reviveHires(ctx, deadline, selfRegroup); err != nil {
+	if err := w.reviveHires(ctx, step, deadline, selfRegroup); err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
 			return timeout.end(step)
 		}
@@ -2593,7 +2613,7 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 	clear(w.bossAttemptAt)
 	from := w.env.now()
 	deadline := recoveryDeadline(from, w.opts.wipeRest, w.opts.maxRunMinutes, w.started)
-	revived, err := w.recoverNearWipeRevive(ctx, deadline)
+	revived, err := w.recoverNearWipeRevive(ctx, step, deadline)
 	if err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
 			return timeout.pausedEnd(step)
@@ -2640,10 +2660,10 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 // else only the dead hires of a complete fresh view (review 2: no complete view within 60 s is
 // no recovery, the old ending with the skipped note). It returns the revived count. The
 // deadline is the recovery's entry deadline: every loop turn and sleep checks it.
-func (w *walk) recoverNearWipeRevive(ctx context.Context, deadline time.Time) (int, error) {
+func (w *walk) recoverNearWipeRevive(ctx context.Context, step int, deadline time.Time) (int, error) {
 	if w.allDead(w.env.now()) {
 		// false: a near-wipe stop is a PAUSED run (never a self-regroup), so the old summon recipe stands.
-		if err := w.reviveHires(ctx, deadline, false); err != nil {
+		if err := w.reviveHires(ctx, step, deadline, false); err != nil {
 			return 0, err
 		}
 		return len(w.hireList()), nil
@@ -3196,58 +3216,185 @@ func (w *walk) runWentOnAfter(seq0 uint64, step int) bool {
 	return false
 }
 
-// quietCheck is the revive point's quiet check (spec 3.5): every 5 s up to 120 s, with a patrol exempt when one
-// of its members is visible 80 yd out and its distance grew between two checks. 200 yd asks for the far members;
-// raidwalk.QuietAt still enforces its own 45/80 yd rules. The deadline is the recovery's
-// entry deadline (zero: the old unbounded path): every loop turn and sleep checks it, and
-// past it the check fails with the timed-out recovery instead of true/false.
-func (w *walk) quietCheck(ctx context.Context, p dungeon.Point, deadline time.Time) (bool, string, *recoveryTimeout) {
-	prev := map[string]float64{}
-	for i := range 24 {
-		if timeout := w.recoveryExpired(deadline); timeout != nil {
-			return false, "", timeout
-		}
-		us, err := w.unitsAt(ctx, 200)
-		if err != nil {
-			return false, "units: " + err.Error(), nil
-		}
-		patrols := make([]raidwalk.QuietPatrol, len(w.quietPatrols))
-		copy(patrols, w.quietPatrols)
-		for j := range patrols {
-			best := -1.0
-			for _, u := range us {
-				key := strings.ToUpper(u.GUID.String())
-				if !w.patrolGUIDS[j][key] && !w.patrolGUIDS[j][fmt.Sprintf("0X%016X", uint64(u.GUID))] {
-					continue
-				}
-				if d := raidDist3(p, u.X, u.Y, u.Z); d > best {
-					best = d
-				}
-			}
-			if best < 0 {
-				delete(prev, patrols[j].ID)
+// quietState is what one revive's run of quiet reads remembers: the patrols' last distances (the exemption needs two
+// reads) and the blocker set the last failed read logged (D-E logs a change of blockers, not the same ones every 5 s).
+type quietState struct {
+	prev   map[string]float64
+	logged string
+}
+
+func newQuietState() *quietState { return &quietState{prev: map[string]float64{}} }
+
+// quietRead is one quiet pass's outcome: the point is quiet (ok), or the last failed read's reason and blockers. A
+// timeout says the recovery's deadline passed mid-pass: the caller returns it as the timed-out ending, as before.
+type quietRead struct {
+	ok       bool
+	why      string
+	blockers []raidwalk.QuietBlocker
+	timeout  *recoveryTimeout
+}
+
+// quietOnce is one quiet read of p: the hostile units within 200 yd, the patrol exemptions, raidwalk's own quiet rules,
+// and (D-E) one run.log line naming every blocker when the blocker set changed since the last failed read.
+func (w *walk) quietOnce(ctx context.Context, st *quietState, p dungeon.Point) (bool, string, []raidwalk.QuietBlocker) {
+	us, err := w.unitsAt(ctx, 200)
+	if err != nil {
+		return false, "units: " + err.Error(), nil
+	}
+	patrols := make([]raidwalk.QuietPatrol, len(w.quietPatrols))
+	copy(patrols, w.quietPatrols)
+	for j := range patrols {
+		best := -1.0
+		for _, u := range us {
+			key := strings.ToUpper(u.GUID.String())
+			if !w.patrolGUIDS[j][key] && !w.patrolGUIDS[j][fmt.Sprintf("0X%016X", uint64(u.GUID))] {
 				continue
 			}
-			if old, ok := prev[patrols[j].ID]; ok && best >= 80 && best > old {
-				patrols[j].Exempt = true
+			if d := raidDist3(p, u.X, u.Y, u.Z); d > best {
+				best = d
 			}
-			prev[patrols[j].ID] = best
 		}
-		ok, why := raidwalk.QuietAt(us, patrols, p)
+		if best < 0 {
+			delete(st.prev, patrols[j].ID)
+			continue
+		}
+		if old, ok := st.prev[patrols[j].ID]; ok && best >= 80 && best > old {
+			patrols[j].Exempt = true
+		}
+		st.prev[patrols[j].ID] = best
+	}
+	bs := raidwalk.QuietBlockers(us, patrols, p)
+	if len(bs) == 0 {
+		st.logged = ""
+		return true, "", nil
+	}
+	// D-E: the next walk then shows whether the blockers leash or leave.
+	if key := blockerKey(bs); key != st.logged {
+		st.logged = key
+		w.logLine(w.env.now(), fmt.Sprintf("quiet read at (%s %s %s): %s", num32(p.X), num32(p.Y), num32(p.Z), blockerWords(bs)))
+	}
+	return false, bs[0].Reason(), bs
+}
+
+// blockerKey identifies a blocker set for D-E's log-on-a-change rule: the units and patrols by identity and state,
+// without their distances, so a mob moving about at home does not write a line on every read.
+func blockerKey(bs []raidwalk.QuietBlocker) string {
+	parts := make([]string, 0, len(bs))
+	for _, b := range bs {
+		if b.Patrol {
+			parts = append(parts, "patrol:"+b.Name)
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("unit:%s:%v:%v:%d", b.GUID, b.Moving, b.InCombat, b.Target))
+	}
+	return strings.Join(parts, "|")
+}
+
+// blockerWords is the D-E run.log line's blocker list: each blocker's entry, GUID, name, distance and state.
+func blockerWords(bs []raidwalk.QuietBlocker) string {
+	parts := make([]string, 0, len(bs))
+	for _, b := range bs {
+		if b.Patrol {
+			parts = append(parts, fmt.Sprintf("patrol %s %.1f yd", b.Name, b.Dist))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s entry %d guid %s %.1f yd moving=%v in_combat=%v target=%d",
+			b.Name, b.Entry, b.GUID, b.Dist, b.Moving, b.InCombat, b.Target))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// quietCheck is the revive point's quiet check (spec 3.5): every 5 s up to 120 s, with a patrol exempt when one
+// of its members is visible 80 yd out and its distance grew between two checks. 200 yd asks for the far members;
+// raidwalk.QuietBlockers still enforces its own 45/80 yd rules and D-A's idle exemption. The deadline is the
+// recovery's entry deadline (zero: the old unbounded path): every loop turn and sleep checks it, and
+// past it the check fails with the timed-out recovery instead of true/false.
+func (w *walk) quietCheck(ctx context.Context, st *quietState, p dungeon.Point, deadline time.Time) quietRead {
+	for i := range 24 {
+		if timeout := w.recoveryExpired(deadline); timeout != nil {
+			return quietRead{timeout: timeout}
+		}
+		ok, why, bs := w.quietOnce(ctx, st, p)
 		if ok {
-			return true, "", nil
+			return quietRead{ok: true}
 		}
 		if i == 23 {
-			return false, why, nil
+			return quietRead{why: why, blockers: bs}
 		}
 		if err := w.recoverySleep(ctx, 5*time.Second, deadline); err != nil {
 			if timeout, ok := err.(*recoveryTimeout); ok {
-				return false, "", timeout
+				return quietRead{timeout: timeout}
 			}
-			return false, "interrupted", nil
+			return quietRead{why: "interrupted"}
 		}
 	}
-	return false, "the units never went quiet", nil
+	return quietRead{why: "the units never went quiet"}
+}
+
+// quietWait is D-C (walk 25): the 120 s check found the point blocked, so re-read it every 10 s until end, until it
+// goes quiet, or until the recovery's deadline ends the walk. A blocker that is only passing (a real chaser, a summoned
+// add that despawns) turns it quiet here; an idle mob at home does not (D-A already let those through). end is
+// quietWaitEnd, always before deadline, and the last sleep is cut short so the wait ends on end itself.
+func (w *walk) quietWait(ctx context.Context, st *quietState, p dungeon.Point, from quietRead, end, deadline time.Time) quietRead {
+	out := from
+	for {
+		// The check just read the point: the wait sleeps first.
+		d := 10 * time.Second
+		if rem := end.Sub(w.env.now()); rem < d {
+			if rem <= 0 {
+				return out
+			}
+			d = rem
+		}
+		if err := w.recoverySleep(ctx, d, deadline); err != nil {
+			if timeout, ok := err.(*recoveryTimeout); ok {
+				return quietRead{timeout: timeout}
+			}
+			return quietRead{why: "interrupted"}
+		}
+		ok, why, bs := w.quietOnce(ctx, st, p)
+		if ok {
+			return quietRead{ok: true}
+		}
+		out = quietRead{why: why, blockers: bs}
+		if !w.env.now().Before(end) {
+			return out
+		}
+	}
+}
+
+// quietWaitEnd is D-C's wait end: the recovery's deadline less the rest and the 30 s that follow the wait, so the rest
+// and the resume still fit before it. Zero when there is no deadline (the boss-wipe ending, where nothing follows the
+// revive): that revive does not wait.
+func (w *walk) quietWaitEnd(deadline time.Time, selfRegroup bool) time.Time {
+	if deadline.IsZero() {
+		return time.Time{}
+	}
+	end := deadline.Add(-30 * time.Second)
+	if !selfRegroup {
+		end = end.Add(-w.opts.wipeRest)
+	}
+	return end
+}
+
+// refusal is the summary's revive_refusal (D-D, walk 25): waited is how long the revive waited for its point to go
+// quiet, from its first read. all_idle says every blocker of the last read was idle, which is what makes waiting
+// pointless; a read that named no unit blocker at all (a failed RPC, say) does not claim that.
+func (w *walk) refusal(step int, blockers []raidwalk.QuietBlocker, waited time.Duration) *raidwalk.ReviveRefusal {
+	r := &raidwalk.ReviveRefusal{
+		WipeStep: step, StartStep: w.startStep, TriedSteps: []int{w.startStep},
+		WaitedS: int(waited / time.Second), Blockers: make([]raidwalk.ReviveBlocker, 0, len(blockers)),
+		AllIdle: len(blockers) > 0,
+	}
+	for _, b := range blockers {
+		idle := !b.Patrol && !b.InCombat && b.Target == 0 && !b.Moving
+		r.Blockers = append(r.Blockers, raidwalk.ReviveBlocker{Entry: b.Entry, Name: b.Name, Dist: b.Dist,
+			Idle: idle, InCombat: b.InCombat, Patrol: b.Patrol})
+		if !idle {
+			r.AllIdle = false
+		}
+	}
+	return r
 }
 
 // recoveryExpired reports the recovery's timed-out ending when the entry deadline

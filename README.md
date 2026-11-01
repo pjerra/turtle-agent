@@ -2261,9 +2261,17 @@ watch, hold, `commander status` and `teardown --json`, summary.
 While watching, the walk reads the run's `TBM:RUN` lines (always through the raw event text, never the colour-stripped
 one), the `bot_view` frames every 2 s and the dashboard every 10/15 s. A wipe (every hire dead with fresh states) stops
 the run, waits for the instance to reset (5m at most: nothing with a party target, every hostile seen in the last
-minute at 100 % or gone, held 20 s), then revives: GM to step 1's point, a quiet check (no living hostile within 45 yd,
-no moving hostile within 80 yd, no patrol path within 45 yd, rechecked every 5 s for 120 s) and the plan's entrance
-once, `.summon` then `.revive` every hire. A wipe or a near-wipe stop outside a boss fight recovers while
+minute at 100 % or gone, held 20 s), then revives: GM to the revive point (step 1's, or with `--place` the start point the raid was put at), a quiet check
+(no living hostile within 45 yd, no moving hostile within 80 yd, no patrol path within 45 yd, rechecked every 5 s for
+120 s; a hostile that is **idle** — not in combat, no target, not moving — and farther out than the placement's own
+25 yd landing reach does not block it: it stands at its own spawn, where a run from the door has it alive at this step
+too (walk 25)) and the plan's entrance once, and, when the point is still not quiet, a re-read every 10 s until
+`deadline - --wipe-rest - 30 s`, so the rest and the resume that follow still fit before the recovery's deadline (a
+revive outside a recovery, the wipe's own ending, has no deadline and does not wait). Then `.summon` then `.revive`
+every hire. A revive that never finds a quiet point ends the walk with exit 19 (`not revived: <why>` as before),
+writes a `run.log` line per failed read whose blocker set changed, naming each blocker's entry, guid, name, distance,
+`moving`, `in_combat` and target (walk 25: the evidence for whether a blocking mob leashes), and records
+`revive_refusal` in the summary. A wipe or a near-wipe stop outside a boss fight recovers while
 `--wipe-resume` has recoveries left: no `run stop`, the dead raid is revived, it rests `--wipe-rest` out of combat
 (wall time: the quiet window is measured on the clock, not counted in poll turns, and it counts from the last poll
 that was not quiet; `--wipe-rest` below 30s is refused) and the run resumes (the server must
@@ -2344,7 +2352,7 @@ The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused
 | `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key (a `live` row, a fight still running, is left for the next read: its finished fight comes back under the same id) |
 | `frames.jsonl` | one `bot_view` frame every 10 s, and every 2 s while a party member is in combat (positions, hp, dead, state, and each bot's `target`, `spell`, `action` and `result`; hostiles; every line carries the walk's `tier`) |
 | `slot-setup.txt`, `teardown.json` | what slot setup printed, and teardown's report |
-| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, `wipe_resumes`, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison`; `place` (a `--place` walk only: `start_step`, `leg`, `point`, `until_step`, `instance`, `circles[]` with their removed counts, `not_cleared[]`, `quiet`, `placed`, `hires`, `summoned[]`); `until_effective` (a `--place` walk whose route guard shortened the `until`: the clause the run actually walked, `until` staying the one asked for) |
+| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, `wipe_resumes`, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison`; `place` (a `--place` walk only: `start_step`, `leg`, `point`, `until_step`, `instance`, `circles[]` with their removed counts, `not_cleared[]`, `quiet`, `placed`, `hires`, `summoned[]`); `until_effective` (a `--place` walk whose route guard shortened the `until`: the clause the run actually walked, `until` staying the one asked for); `revive_refusal` (a revive the walk refused: `wipe_step`, `start_step`, `tried_steps`, `waited_s`, `blockers[]` with `entry`, `name`, `dist`, `idle`, `in_combat` and `all_idle`; `summary.txt` carries one `revive refusal: ...` line for it) |
 
 Exit codes: 0 the run ended by its `until` (or the hold); 18 a phase failed or was refused (setup, login, hire, bind,
 enter, start, the server has no `until`, a stall, the ceiling, an interrupt, `lease lost`); 19 the walk ran and was
