@@ -43,12 +43,31 @@ func IsTailnetAddr(a netip.Addr) bool {
 	return tailnet4.Contains(a) || tailnet6.Contains(a)
 }
 
+// localTrust is the check a --*-trust-local flag turns on: the TCP peer, never anything the client writes, and the page's own nonce on top of it
+// (trust.go's header says what is trusted). One is made per feature (the route editor, the controls), each with its own nonce and header.
 type localTrust struct {
 	label string
 	peers map[netip.Addr]bool
-	nonce string                                     // the page's CSRF capability: a trusted save must echo it in nonceHeader (random per process, never derived from a token)
+	nonce string                                     // the page's CSRF capability: a trusted request must echo it (random per process, never derived from a token)
 	uid   uint32                                     // the user the dashboard runs as: a local caller's socket must be this user's
 	owner func(client netip.AddrPort) (uint32, bool) // the user a local TCP client socket belongs to (socketOwner; replaced in tests)
+}
+
+// newLocalTrust makes the check for a trusted label and its Tailscale peers: a per-process nonce, this user's uid and the kernel's socket lookup.
+// The caller checks the label is in its token file.
+func newLocalTrust(label string, peers []netip.Addr) (*localTrust, error) {
+	nb := make([]byte, 32)
+	if _, err := rand.Read(nb); err != nil {
+		return nil, err
+	}
+	t := &localTrust{nonce: hex.EncodeToString(nb), label: label, peers: map[netip.Addr]bool{}, uid: uint32(os.Getuid()), owner: socketOwner}
+	for _, p := range peers {
+		if !IsTailnetAddr(p) {
+			return nil, errors.New("only Tailscale addresses can be trusted peers")
+		}
+		t.peers[p.Unmap()] = true
+	}
+	return t, nil
 }
 
 // TrustPeers picks, from the dashboard's allowed Host list (AllowedHosts), the entries that can be trusted as callers: the literal Tailscale
@@ -76,18 +95,25 @@ func (e *Editor) EnableTrustLocal(label string, peers []netip.Addr) error {
 	if !e.cfg.Tokens.Has(label) {
 		return fmt.Errorf("--edit-trust-label %q is not a label in the token file", label)
 	}
-	nb := make([]byte, 32)
-	if _, err := rand.Read(nb); err != nil {
+	t, err := newLocalTrust(label, peers)
+	if err != nil {
 		return err
 	}
-	t := &localTrust{nonce: hex.EncodeToString(nb), label: label, peers: map[netip.Addr]bool{}, uid: uint32(os.Getuid()), owner: socketOwner}
-	for _, p := range peers {
-		if !IsTailnetAddr(p) {
-			return errors.New("only Tailscale addresses can be trusted peers")
-		}
-		t.peers[p.Unmap()] = true
-	}
 	e.trust = t
+	return nil
+}
+
+// EnableTrustLocal turns --control-trust-local on: a control request from loopback or from one of peers (Tailscale addresses) that sends no token
+// is made as the token label. The label must be in the control token file. Call it before the handler serves.
+func (c *Controller) EnableTrustLocal(label string, peers []netip.Addr) error {
+	if !c.cfg.Tokens.Has(label) {
+		return fmt.Errorf("--control-trust-label %q is not a label in the token file", label)
+	}
+	t, err := newLocalTrust(label, peers)
+	if err != nil {
+		return err
+	}
+	c.trust = t
 	return nil
 }
 
@@ -97,10 +123,11 @@ var forwardingHeaders = []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Forwa
 
 // trustedRequest reports whether r is made by the owner's own machine or device under --edit-trust-local.
 func (e *Editor) trustedRequest(r *http.Request) bool {
-	t := e.trust
-	if t == nil {
-		return false
-	}
+	return e.trust != nil && e.trust.request(r)
+}
+
+// request reports whether r is made by the owner's own machine or device (trust.go's header has the rules).
+func (t *localTrust) request(r *http.Request) bool {
 	ap, err := netip.ParseAddrPort(r.RemoteAddr)
 	if err != nil {
 		return false
@@ -133,6 +160,13 @@ func (e *Editor) trustedRequest(r *http.Request) bool {
 			return false
 		}
 	}
+	return csrfOK(r)
+}
+
+// csrfOK is the same-origin half of the guard's demand on a write, for a trusted caller and for a token one alike: an Origin, if there is one,
+// must name the host the request was made to, and a Sec-Fetch-Site must be same-origin or none (a cross-site form cannot send a JSON body; a
+// cross-site fetch must pre-flight, which the guard answers 405).
+func csrfOK(r *http.Request) bool {
 	if o := r.Header.Values("Origin"); len(o) > 1 || (len(o) == 1 && !sameOrigin(o[0], r.Host)) {
 		return false
 	}
@@ -145,13 +179,21 @@ func (e *Editor) trustedRequest(r *http.Request) bool {
 // nonceHeader carries the page's capability on a trusted save.
 const nonceHeader = "X-Route-Edit-Nonce"
 
+// controlNonceHeader carries the page's capability on a trusted control post (its own header, its own nonce).
+const controlNonceHeader = "X-Control-Nonce"
+
 // trustedSave is trustedRequest plus the page's capability: the nonce GET /api/edit/status hands to a trusted caller must come back in the header.
 func (e *Editor) trustedSave(r *http.Request) bool {
-	if !e.trustedRequest(r) {
+	return e.trust != nil && e.trust.withNonce(r, nonceHeader)
+}
+
+// withNonce is request plus the page's capability: the nonce the status answer hands to a trusted caller must come back in header.
+func (t *localTrust) withNonce(r *http.Request, header string) bool {
+	if !t.request(r) {
 		return false
 	}
-	got := r.Header.Values(nonceHeader)
-	return len(got) == 1 && subtle.ConstantTimeCompare([]byte(got[0]), []byte(e.trust.nonce)) == 1
+	got := r.Header.Values(header)
+	return len(got) == 1 && subtle.ConstantTimeCompare([]byte(got[0]), []byte(t.nonce)) == 1
 }
 
 // literalHost parses a Host header that is a literal IP address (with or without a port, an IPv6 one in brackets), unmapped.
