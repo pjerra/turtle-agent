@@ -88,7 +88,8 @@ func (f *fixture) killAllButFromHires(keep int) {
 // recovery is already moving the party — the lead and the off-tanks stand alive at the regroup point, while the
 // dashboard the agent reads still reports the wipe. The agent's revive then sent `.summon <lead>` 2 ms after its
 // own `.go xyz` and dropped the lead 560 yd back at the entrance, its Voidwalker in tow. During a self-regroup the
-// agent must never summon the lead, nor a hire its freshest view shows alive; the dead keep the old recipe.
+// agent must never summon the lead, nor a hire the fresh complete view does not report dead; the dead keep the old
+// recipe.
 func TestRaidWalkSelfRegroupNeverSummonsTheLiving(t *testing.T) {
 	t.Run("TB has already revived the lead", func(t *testing.T) {
 		const keep = 5 // the lead and the four tanks TB revived first
@@ -221,31 +222,30 @@ func TestRaidWalkSelfRegroupNeverSummonsTheLiving(t *testing.T) {
 	})
 }
 
-// TestRaidWalkReviveSummonsGuard pins the guard the revive uses during a self-regroup: the lead never (TB moves it
-// itself, wherever it stands), a hire the freshest view shows alive never, a dead hire as before, and one too
-// stale to say anything about as before (its state is older than reviveFresh, so the summon-and-revive recipe is
-// the only thing that gets it back up).
+// TestRaidWalkReviveSummonsGuard pins the guard the revive uses during a self-regroup (walk 22 F4 round 2): the
+// lead is never summoned (TB moves it itself, wherever it stands), and no hire is summoned unless the ONE fresh
+// complete view taken just before the summons reports it dead. A hire whose freshest frame is merely old, or
+// missing, is NOT summoned any more: the old > 10 s fallback was a licence to drag a living hire (or the lead)
+// back to wherever the agent stood (walk 22 test2 s4, Q3). No complete view at all (nil set) summons nobody.
 func TestRaidWalkReviveSummonsGuard(t *testing.T) {
-	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
-	w := &walk{mt: "Lead", botAt: map[string]botPos{
-		"Lead":  {dead: false, at: now},
-		"Alive": {dead: false, at: now},
-		"Dead":  {dead: true, at: now},
-		"Stale": {dead: false, at: now.Add(-time.Minute)},
-	}}
+	w := &walk{mt: "Lead"}
 	for _, c := range []struct {
 		name        string
 		selfRegroup bool
+		dead        map[string]bool
 		want        bool
 	}{
-		{"Lead", true, false}, {"Lead", false, true}, // the lead: TB moves it, so the agent never summons it
-		{"Alive", true, false}, {"Alive", false, true}, // a living hire: left where it stands
-		{"Dead", true, true}, {"Dead", false, true}, // the dead: the old recipe
-		{"Stale", true, true},   // no fresh state: the dead-hire recipe
-		{"Unknown", true, true}, // no state at all: the dead-hire recipe
+		{"Lead", true, map[string]bool{"Lead": true, "Dead": true}, false}, // the lead: TB moves it, so the agent never summons it
+		{"Lead", false, nil, true},                              // outside a self-regroup the old recipe stands
+		{"Dead", true, map[string]bool{"Dead": true}, true},     // the fresh view reports it dead
+		{"Alive", true, map[string]bool{"Dead": true}, false},   // the fresh view shows it alive: left where it stands
+		{"Stale", true, map[string]bool{"Dead": true}, false},   // an old frame is no licence to summon (the fallback is gone)
+		{"Unknown", true, map[string]bool{"Dead": true}, false}, // no row at all: no licence either
+		{"Dead", true, nil, false},                              // no complete fresh view: nobody is summoned
+		{"Dead", false, nil, true},                              // the old recipe needs no view
 	} {
-		if got := w.reviveSummons(c.name, c.selfRegroup, now); got != c.want {
-			t.Fatalf("reviveSummons(%q, selfRegroup=%v) = %v, want %v", c.name, c.selfRegroup, got, c.want)
+		if got := w.reviveSummons(c.name, c.selfRegroup, c.dead); got != c.want {
+			t.Fatalf("reviveSummons(%q, selfRegroup=%v, dead=%v) = %v, want %v", c.name, c.selfRegroup, c.dead, got, c.want)
 		}
 	}
 }
@@ -329,4 +329,152 @@ func TestRaidWalkFramesEveryTwoSecondsInCombat(t *testing.T) {
 			t.Fatalf("frames %d and %d are %d ms apart: want <= 4000 in combat, got %v", i-1, i, gap, ts)
 		}
 	}
+}
+
+// selfRegroupWipe runs the self-regroup wipe the fresh-view tests share and returns the fixture and the hire
+// order. live names the hires TB's own regroup has up by the time the agent's summons would leave (nil: nobody,
+// every hire still down in the frames); it is called with the roster once the hires exist, and those hires count
+// as alive in every frame the agent reads after its own `.go xyz`. noView makes the FIRST bot_view call after
+// that `.go xyz` fail, so the recovery gets no complete fresh view at all. The quiet check sees a warder 60 yd
+// out for its first three turns (>= 15 s of fake time between the wipe's poll and the summons: the hires' last
+// frames are stale by then, the state the old > 10 s fallback turned into a licence to summon), and the run's
+// done line lands 15 min after the revives so the walk ends at its until.
+func selfRegroupWipe(t *testing.T, live func(party []string) []string, noView bool) (*fixture, []string) {
+	t.Helper()
+	f, next, total := bossDoneFixture(t)
+	f.opts.wipeResume = 2
+	f.agent.startReply = zgStart(total, next)
+	step := next - 2
+	regroup := fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|begin|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)", step, total)
+	f.agent.unitsFn = func(n int) []objects.Unit {
+		if n > 3 {
+			return []objects.Unit{}
+		}
+		f.agent.mu.Lock()
+		x, y, z := f.agent.x, f.agent.y, f.agent.z
+		f.agent.mu.Unlock()
+		return []objects.Unit{{Type: "creature", Name: "Onyxian Warder", Hostile: true, Moving: true, X: x + 60, Y: y, Z: z}}
+	}
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = mcWipeFights()
+	selfRegroupKill(f, regroup)
+
+	// goSeen is set when the recovery's own teleport goes out. From the wipe's poll on the agent's frames of
+	// the hires are the all-dead ones, and nothing reads a frame again before the summons (waitRevivePoint
+	// reads the status, quietCheck the units): the state the old stale-state fallback summoned on.
+	var goSeen, viewFailed bool
+	var reviveAt time.Time
+	f.agent.onGM = func(line string) {
+		switch {
+		case strings.HasPrefix(line, ".revive ") && reviveAt.IsZero():
+			reviveAt = f.clock.now()
+		case strings.HasPrefix(line, ".go xyz"):
+			// The recovery's own teleport is the go that goes out with the whole raid down: the enter
+			// teleport (and the portal one) precede the wipe.
+			f.agent.mu.Lock()
+			down := len(f.agent.party) > 0
+			for _, n := range f.agent.party {
+				if !f.agent.dead[n] {
+					down = false
+					break
+				}
+			}
+			f.agent.mu.Unlock()
+			if down {
+				goSeen = true
+			}
+		}
+	}
+	doneRaw := fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)
+	doneQueued := false
+	f.agent.viewHook = func() {
+		if goSeen && live != nil {
+			f.agent.mu.Lock()
+			for _, n := range live(f.agent.party) {
+				f.agent.dead[n] = false
+			}
+			f.agent.mu.Unlock()
+		}
+		if reviveAt.IsZero() || doneQueued || f.clock.now().Sub(reviveAt) < 15*time.Minute {
+			return
+		}
+		doneQueued = true
+		f.agent.mu.Lock()
+		f.agent.lines = append(f.agent.lines, queuedEvent{raw: doneRaw})
+		f.agent.mu.Unlock()
+	}
+	if noView {
+		f.agent.viewFn = func(n int) (bool, string) {
+			if goSeen && !viewFailed {
+				viewFailed = true
+				return true, ""
+			}
+			return false, ""
+		}
+	}
+	f.agent.combatAllFn = func(n int) bool { return !reviveAt.IsZero() && n%2 == 0 }
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	party := append([]string{}, f.agent.party...)
+	f.agent.mu.Unlock()
+	return f, party
+}
+
+// TestRaidWalkSelfRegroupSummonsOnlyTheFreshView (walk 22 F4 round 2, Codex HIGH): during a self-regroup the
+// revive may summon only what ONE fresh complete bot view taken just before the summons reports dead. The old
+// rule summoned a hire whose freshest frame was merely older than 10 s (or missing), so the revive's own
+// quiet-check delay could turn a dead frame stale while TB had the hire up and running: the `.summon` then
+// dragged a living hire — or the lead itself — back to wherever the agent stood (Q3, walk 22 test2 s4). No
+// complete fresh view summons nobody (the regroup owns the movement), and the revive still raises the dead
+// where they lie.
+func TestRaidWalkSelfRegroupSummonsOnlyTheFreshView(t *testing.T) {
+	t.Run("a stale dead frame is no licence to summon", func(t *testing.T) {
+		f, party := selfRegroupWipe(t, func(p []string) []string { return p }, false)
+		gm := f.agent.gmLines()
+		if n := countPrefix(gm, ".summon "); n != 0 {
+			t.Fatalf("%d summons, want none: the fresh view shows every hire alive (TB's own regroup has them up), and a stale dead frame is no licence to summon: %q", n, gm)
+		}
+		if got := countPrefix(gm, ".revive "); got != len(party) {
+			t.Fatalf("%d revives, want %d (the revive half is unchanged)", got, len(party))
+		}
+		sum := f.summary()
+		if hasNote(sum, "self-regroup: no fresh view, no summons") {
+			t.Fatalf("notes %q, want no fresh-view note: the complete view was there", sum.Notes)
+		}
+		if !hasNote(sum, "the run regroups by itself") {
+			t.Fatalf("notes %q, want the self-regroup recovery note", sum.Notes)
+		}
+	})
+
+	t.Run("no complete fresh view summons nobody", func(t *testing.T) {
+		f, party := selfRegroupWipe(t, nil, true)
+		gm := f.agent.gmLines()
+		if n := countPrefix(gm, ".summon "); n != 0 {
+			t.Fatalf("%d summons, want none: the recovery had no complete fresh view, so nobody may be summoned: %q", n, gm)
+		}
+		if got := countPrefix(gm, ".revive "); got != len(party) {
+			t.Fatalf("%d revives, want %d (the revive half is unchanged)", got, len(party))
+		}
+		sum := f.summary()
+		if !hasNote(sum, "self-regroup: no fresh view, no summons") {
+			t.Fatalf("notes %q, want the no-fresh-view note", sum.Notes)
+		}
+	})
+
+	t.Run("a bot dead in the fresh view is summoned once", func(t *testing.T) {
+		f, party := selfRegroupWipe(t, func(p []string) []string { return p[:len(p)-1] }, false)
+		last := party[len(party)-1]
+		gm := f.agent.gmLines()
+		if n := countPrefix(gm, ".summon "); n != 1 {
+			t.Fatalf("%d summons, want exactly 1 (only the hire the fresh view reports dead): %q", n, gm)
+		}
+		if got := countPrefix(gm, ".summon "+last); got != 1 {
+			t.Fatalf(".summon %s x%d, want 1 (the one the fresh view reports dead): %q", last, got, gm)
+		}
+		if got := countPrefix(gm, ".revive "); got != len(party) {
+			t.Fatalf("%d revives, want %d (the revive half is unchanged)", got, len(party))
+		}
+	})
 }

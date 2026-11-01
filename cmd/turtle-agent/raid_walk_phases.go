@@ -1658,10 +1658,6 @@ const reviveLandingYd = 10
 // reviveTeleportWait is how long a revive teleport gets to land on its point.
 const reviveTeleportWait = 30 * time.Second
 
-// reviveFresh is how fresh a hire's view state must be for the revive to call it alive (the 10 s the walk's other
-// liveness rules, anyAlive and allDead, use).
-const reviveFresh = 10 * time.Second
-
 // reviveHires is the walk-4 recipe's revive half, made safe (spec 3.5): the revive point, the quiet check (then the
 // entrance once), summon and revive, and a look for bots attacked after the revive. revive ends the walk with it;
 // recoverWipe rests and resumes with it. The deadline is the recovery's entry deadline (zero: the old
@@ -1671,8 +1667,8 @@ const reviveFresh = 10 * time.Second
 // Every `.go xyz` must have landed (waitRevivePoint) before a summon leaves: waitMap alone saw only the map id,
 // which is already right when the agent stands in the instance, so the summons dropped the party at the OLD spot
 // (walk 22 test2 s4, Q3). selfRegroup says the run is regrouping by itself: TB then moves the lead and the party
-// itself, so the summons skip the lead and every hire the frames still show alive (reviveSummons) — the revive
-// brings the dead back where they lie.
+// itself, so the revive takes ONE fresh complete bot view just before the summons and summons only the hires it
+// reports dead (reviveSummons) — the revive that follows brings the dead back where they lie.
 func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup bool) error {
 	if w.stepFirst == nil {
 		return stopf(exitRaidWalkIncident, "not revived: the plan's rows give no first point")
@@ -1707,11 +1703,28 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 	if !ok {
 		return stopf(exitRaidWalkIncident, "not revived: %s", why)
 	}
+	// Codex HIGH, walk 22 F4 round 2: during a self-regroup a summon may only take a hire that ONE fresh
+	// complete bot view (the near-wipe path's completeDeadView) reports dead. A stale or missing frame is no
+	// licence to summon — the old > 10 s fallback summoned a hire merely because its last frame was old, and
+	// the revive's own quiet-check delay makes every frame old (walk 22 test2 s4, Q3: `.summon <lead>` 2 ms
+	// after the agent's own `.go xyz` dragged the lead 560 yd back). No complete fresh view means no summons at
+	// all: the regroup owns the movement, and the revive still raises the dead where they lie.
+	var deadSummons map[string]bool
+	if selfRegroup {
+		if dead, ok := w.completeDeadView(ctx); ok {
+			deadSummons = make(map[string]bool, len(dead))
+			for _, name := range dead {
+				deadSummons[name] = true
+			}
+		} else {
+			w.note("self-regroup: no fresh view, no summons")
+		}
+	}
 	for _, name := range w.hireList() {
 		if timeout := w.recoveryExpired(deadline); timeout != nil {
 			return timeout
 		}
-		if !w.reviveSummons(name, selfRegroup, w.env.now()) {
+		if !w.reviveSummons(name, selfRegroup, deadSummons) {
 			continue
 		}
 		if err := w.gm(ctx, ".summon "+name); err != nil {
@@ -1758,18 +1771,17 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 
 // reviveSummons says whether the revive may `.summon` name. Outside a self-regroup every hire is summoned, as
 // before. During a self-regroup the run stays running and TB rests, gathers and walks back on its own: it moves
-// the lead itself, so the agent never summons the lead — dead, alive or unknown — nor a hire whose freshest view
-// still shows it alive (a summon would drag it back to wherever the agent stands; walk 22 test2 s4, Q3). The dead
-// hires keep the old recipe: the revive that follows brings them back where they lie.
-func (w *walk) reviveSummons(name string, selfRegroup bool, now time.Time) bool {
+// the lead itself, so the agent never summons the lead, and it summons only a hire the ONE fresh complete view
+// taken just before the summons reports dead (dead). A hire that view does not report — alive, or no fresh state
+// at all (dead nil: no complete view came) — stays where it stands: a stale or missing frame is no licence to
+// summon, or the revive's own quiet-check delay would turn the wipe's all-dead frame into one and drag a living
+// hire, or the lead, back to wherever the agent stands (walk 22 test2 s4, Q3). The revive that follows brings the
+// dead back where they lie.
+func (w *walk) reviveSummons(name string, selfRegroup bool, dead map[string]bool) bool {
 	if !selfRegroup {
 		return true
 	}
-	if name == w.mt {
-		return false
-	}
-	p, ok := w.botAt[name]
-	return !ok || now.Sub(p.at) > reviveFresh || p.dead
+	return name != w.mt && dead[name]
 }
 
 // recoverWipe revives the dead raid after a wipe, rests it out of combat and resumes the run instead of ending the

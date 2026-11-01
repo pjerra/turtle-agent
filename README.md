@@ -2214,7 +2214,11 @@ that was not quiet; `--wipe-rest` below 30s is refused) and the run resumes (the
 show running again within 60 s); the summary notes each recovery
 (`wipe-resume <n>/<K> at step <s>: revived <d>, rested <m>, resumed`) and counts them in `wipe_resumes`, and the end
 stays truthful. When the run regroups by itself after a wipe (`regrouping by itself`), the walk revives the raid and
-lets the run go on: no rest, no `run resume`; it still counts as one `--wipe-resume`. Every wipe that does not recover
+lets the run go on: no rest, no `run resume`; it still counts as one `--wipe-resume`. Such a revive summons only what
+ONE fresh complete `bot_view` taken just before its summons reports dead (and never the lead): a stale or missing
+frame is no licence to summon, and no complete fresh view summons nobody and notes
+`self-regroup: no fresh view, no summons` — the regroup owns the movement, and the `.revive`s still raise the dead
+where they lie. Every wipe that does not recover
 says why in the notes (`wipe resume skipped: ...`, `second wipe at step N during the wipe-resume of step M`). It never
 revives while a boss row has a target: a boss engagement stops the run at once and waits up to 15 minutes for a kill,
 a reset or a wipe. A wipe or a boss engagement with no recovery left ends the walk with exit 19. Recovery fails closed
