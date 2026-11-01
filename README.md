@@ -2165,8 +2165,12 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   GM command. The walk then clears the corridor of the legs it skips — every pull row before the start whose circle
   comes within 45 yd of the route to the `until` stop, despawned with `.tt clearto ... all=1` after a pre-read of the
   units there (never `kill`, never `boss`; a boss or hold row within 30 yd of the route refuses the placement) — quiets
-  the start point (`.tt quiet`, with one extra guarded clear round for a named unit that stands by a BEHIND row),
-  moves the raid onto it (`.tt place ... of=<mt>`), verifies it by the walk's own frames
+  the start point — the walk judges the quiet itself, not the toolkit's flag: a unit blocks only when it is not a skip
+  entry, not a rank-0 critter of at most 100 HP and either stands within 25 yd of the point or belongs to a BEHIND row's
+  circle by its **home** (the spawn point the toolkit sends with every unit), which one extra guarded clear round then
+  takes; the roamers (units that moved between the quiet's two reads, which the toolkit lists without a position) are
+  joined to one `q units` read of 80 yd, and a roamer that read misses blocks — moves the raid onto it
+  (`.tt place ... of=<mt>`), verifies it by the walk's own frames
   (one `.summon` per hire the frames miss) and only then starts the run, whose status line must show exactly that step
   and step count. Before the first teleport the commander must be in GM mode: `.gm on` is sent and the walk refuses the
   placement when its reply is not `GM mode is ON`. The commander stays inside the raid's copy for the whole walk (his own `.instance unbind` before the
@@ -2177,7 +2181,11 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   between them can be despawned along with the row's own. Hence test servers only; the quiet check and the placed-start
   check catch a broken run, and the walk report lists every clear (`place.circles[]`, the `place:` notes). The quiet
   step's one extra round keeps away from any circle the corridor refused (a unit within that circle's radius + 6 yd is
-  not cleared) and clears only a unit a BEHIND row owns by entry and by distance.
+  not cleared) and clears only a unit a BEHIND row owns by entry and by its home (or, when the reply carries no `home`,
+  by where it stands). AHEAD rows of later legs and unowned units beyond those 25 yd never block: a run from the door has
+  them alive at this step too. When the only units left inside the 25 yd are ones the toolkit listed as roamers (patrols
+  walking through), the quiet is read again twice, 20 s apart, and the placement then fails. Every unit the quiet acts
+  on or refuses is noted with its spawn guid (`db`), where it stands and its home.
 - `--speed 1.0` sends nothing; `1.1` to `3.0` sends `speed=X` (a GM test run, marked `test speed` in the summary).
 - The hire gear tier comes from the committed table `raid -> minimum hire tier` in `internal/raidwalk/tiers.go`
   (Sagiroth's rule: hire and refit at the kit a player holds when the raid is next, from the mercenary unlock quests).

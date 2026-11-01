@@ -139,7 +139,9 @@ func AllowedTT(cmd string, hires map[string]bool, mapID uint32) bool {
 		case "group":
 			return len(f) == 3 && ttHire(f[2], hires)
 		case "units":
-			return len(f) == 7 && ttRadius(f[2], 40) && ttNumbers(f[3:6]) && f[6] == "all"
+			// The radius cap is the quiet's roamer scope (80): the walk joins the quiet's roamers to a `q units` read of
+			// their own (item 4). The corridor's pre-reads stay far inside it.
+			return len(f) == 7 && ttRadius(f[2], 80) && ttNumbers(f[3:6]) && f[6] == "all"
 		}
 	case "quiet":
 		// quiet <r<=50> <x> <y> <z> w=<0..30> dz=<1..15> [skip=<ids>]

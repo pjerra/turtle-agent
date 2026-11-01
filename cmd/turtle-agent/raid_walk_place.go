@@ -42,6 +42,18 @@ const (
 	placeQuietWaitS = 20
 	// placeQuietR is the quiet's radius around the start point (spec 5 step 7).
 	placeQuietR = 50
+	// placeReachYd is how close to the start point any unit blocks the placement: the reach of `.tt place` with its
+	// spread-5 ring. Beyond it only a BEHIND-owned unit matters (item 3 of the proof findings).
+	placeReachYd = 25
+	// placeRoamScopeYd is the radius of the join read that gives the quiet's roamers a position: the toolkit's own
+	// roamer scope (CFG quiet_roam_r 80), so every roamer the toolkit names can be found (item 4).
+	placeRoamScopeYd = 80
+	// placeQuietRereads is how many times the quiet is read again (placeQuietWaitS apart) when the only units blocking
+	// it are moving patrols, before the placement fails (item 5).
+	placeQuietRereads = 2
+	// placeCritterHP is the top of a critter's max-HP band: a rank-0 unit with at most this many hit points (a level-1
+	// critter) never blocks the clear or the quiet (item 2).
+	placeCritterHP = 100
 )
 
 // ttBody is one toolkit reply's fields.
@@ -121,7 +133,9 @@ func posOf(m map[string]json.RawMessage, key string) (x, y, z float32, ok bool) 
 	return p[0], p[1], p[2], true
 }
 
-// ttUnit is one unit of a `q units` reply, reduced to what the pre-read needs.
+// ttUnit is one unit of a `q units` or `quiet` reply, reduced to what the place decisions need. The toolkit sends the
+// unit's home (its spawn point, `home`), its spawn guid (`db`), its health pair (`hpv`) and its rank (`rk`) for every
+// creature (tt_lib.ext unitSnap), and `d`/`dz` when it was asked about a point.
 type ttUnit struct {
 	GUID  string
 	Entry uint32
@@ -131,6 +145,79 @@ type ttUnit struct {
 	Z     float32
 	Dz    float32
 	Dist  float32
+	// Home is the unit's home position (its spawn point) and HomeOK says the reply carried one: the owner checks use it
+	// and fall back to the current position when it is missing (item 1 of the proof findings).
+	Home   [3]float32
+	HomeOK bool
+	// Spawn is the spawn's guid low (`db`): the notes carry it so a live run can match a unit against the spawn export.
+	Spawn uint32
+	MaxHP float64
+	Rank  int
+}
+
+// ttUnitOf reduces one element of a reply's unit list.
+func ttUnitOf(m map[string]json.RawMessage) ttUnit {
+	u := ttUnit{GUID: strOf(m, "g"), Name: strOf(m, "n")}
+	if e, ok := numOf(m, "e"); ok {
+		u.Entry = uint32(e)
+	}
+	if dz, ok := numOf(m, "dz"); ok {
+		u.Dz = float32(dz)
+	}
+	if d, ok := numOf(m, "d"); ok {
+		u.Dist = float32(d)
+	}
+	if db, ok := numOf(m, "db"); ok {
+		u.Spawn = uint32(db)
+	}
+	if rk, ok := numOf(m, "rk"); ok {
+		u.Rank = int(rk)
+	}
+	if hpv := numList(m, "hpv"); len(hpv) >= 2 {
+		u.MaxHP = hpv[1]
+	}
+	u.X, u.Y, u.Z, _ = posOf(m, "p")
+	u.Home[0], u.Home[1], u.Home[2], u.HomeOK = posOf(m, "home")
+	return u
+}
+
+// numList reads a list-of-numbers field of a reply element (the toolkit's `hpv` is {hp, maxhp}).
+func numList(m map[string]json.RawMessage, key string) []float64 {
+	raw, found := m[key]
+	if !found {
+		return nil
+	}
+	var out []float64
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+// critter says the unit is a level-1 critter: rank 0 with at most placeCritterHP hit points. A critter never blocks the
+// clear or the quiet (item 2): it is not what the toolkit's quiet rule means to protect. A reply without `hpv` is never
+// a critter.
+func (u ttUnit) critter() bool {
+	return u.MaxHP > 0 && u.MaxHP <= placeCritterHP && u.Rank == 0
+}
+
+// placeHome is the position the owner checks use: the unit's home (its spawn point) when the reply carried one, else
+// where it stands (the pre-fix behaviour).
+func (u ttUnit) placeHome() (x, y, z float32) {
+	if u.HomeOK {
+		return u.Home[0], u.Home[1], u.Home[2]
+	}
+	return u.X, u.Y, u.Z
+}
+
+// placeWhere describes a unit for the notes: the spawn guid the reply carried, where it stands now and, when it carried
+// one, its home. The first live run confirms `home` is the spawn point by matching these against the spawn export.
+func (u ttUnit) placeWhere() string {
+	where := fmt.Sprintf("db %d at %s %s %s, ", u.Spawn, num32(u.X), num32(u.Y), num32(u.Z))
+	if !u.HomeOK {
+		return where + "home none"
+	}
+	return where + fmt.Sprintf("home %s %s %s", num32(u.Home[0]), num32(u.Home[1]), num32(u.Home[2]))
 }
 
 // tt is one Eluna test toolkit command (spec 5): the line passes raidwalk.AllowedTT first, and the answer is the `tt`
@@ -329,15 +416,7 @@ func (w *walk) placeUnits(ctx context.Context, r, x, y, z float32) ([]ttUnit, bo
 	}
 	var units []ttUnit
 	for _, m := range body.list("units") {
-		u := ttUnit{GUID: strOf(m, "g"), Name: strOf(m, "n")}
-		if e, ok := numOf(m, "e"); ok {
-			u.Entry = uint32(e)
-		}
-		if dz, ok := numOf(m, "dz"); ok {
-			u.Dz = float32(dz)
-		}
-		u.X, u.Y, u.Z, _ = posOf(m, "p")
-		units = append(units, u)
+		units = append(units, ttUnitOf(m))
 	}
 	return units, body.flag("trunc"), nil
 }
@@ -357,11 +436,16 @@ func (w *walk) placeCircleBlocked(c raidwalk.ClearCircle, units []ttUnit, trunc 
 			// cannot block the clear (review round 1, item 2).
 			continue
 		}
+		if u.critter() {
+			// A level-1 critter is not what the corridor protects (item 2): the clear may take it along, as it would
+			// have before the toolkit listed it.
+			continue
+		}
 		if !inEntries(c.Entries, u.Entry) {
-			return fmt.Sprintf("unit %d %s stands in the circle", u.Entry, u.Name)
+			return fmt.Sprintf("unit %d %s stands in the circle (%s)", u.Entry, u.Name, u.placeWhere())
 		}
 		if k, inside := w.place.AheadIn(u.X, u.Y, u.Z); inside {
-			return fmt.Sprintf("unit %d %s stands in AHEAD row %d", u.Entry, u.Name, k)
+			return fmt.Sprintf("unit %d %s stands in AHEAD row %d (%s)", u.Entry, u.Name, k, u.placeWhere())
 		}
 	}
 	return ""
@@ -459,145 +543,324 @@ func skipArg(ids []uint32) string {
 	return ""
 }
 
-// placeQuiet is spec 5 step 7: the toolkit's quiet rule around the start point, with one extra clear round for a named
-// unit that stands by a BEHIND circle, then a refusal.
+// placeQuiet is spec 5 step 7: the area around the start point must be clear before the raid lands in it. The walk
+// judges it itself (item 3): the toolkit's `quiet` reply is the raw material, not the verdict. A unit blocks the
+// placement when it is not a skip entry, not a critter and
+//
+//	(a) it stands within placeReachYd of the start point (the opening the raid lands in), or
+//	(b) its home lies in a BEHIND row's circle (then the one extra clear round takes it).
+//
+// AHEAD-owned and unowned units beyond placeReachYd never block: a door-to-end run at this step has them alive too, so
+// counting them would make the test stricter than the walk it stands in for. When only moving patrols are left, the
+// quiet is read again up to placeQuietRereads times (item 5) before the placement fails.
 func (w *walk) placeQuiet(ctx context.Context) error {
 	p := w.place.Point
 	skip := skipArg(w.place.Skips)
-	quiet, why, near, roamers, err := w.placeQuietOnce(ctx, p, skip)
-	if err != nil {
-		return err
-	}
-	if !quiet {
-		cleared := 0
-		for _, u := range near {
-			if !w.placeRogue(u) {
-				continue
-			}
-			// The extra round is a clear like any other (review round 1, item 1): it keeps the pre-read's answer and
-			// runs the same guard before it acts. A unit no BEHIND row owns is never cleared, and a circle holding a
-			// unit of another row, a unit in an AHEAD circle, or a truncated reply is not cleared at all. A unit
-			// within a skipped corridor circle's radius + placeRogueYd is not cleared either (review round 2,
-			// MEDIUM-A): the corridor refused that circle for a reason the extra round cannot see from its r 3 read.
-			if sc, near := w.placeNearSkipped(u); near {
-				w.note("place: not cleared %d %s in the extra round: it stands within %d yd of the skipped circle of row %d",
-					u.Entry, u.Name, placeRogueYd, sc.Step)
-				continue
-			}
-			owner, ok := w.placeRogueOwner(u)
-			if !ok {
-				w.note("place: not cleared %d %s in the extra round: no BEHIND row owns the unit", u.Entry, u.Name)
-				continue
-			}
-			c := raidwalk.ClearCircle{Step: owner.Step, Leg: owner.Leg, X: u.X, Y: u.Y, Z: u.Z,
-				Radius: placeExtraRadius, Entries: owner.Entries}
-			units, trunc, err := w.placeUnits(ctx, placeExtraRadius, u.X, u.Y, u.Z)
-			if err != nil {
-				return err
-			}
-			if why := w.placeCircleBlocked(c, units, trunc); why != "" {
-				w.note("place: not cleared %d %s in the extra round: %s", u.Entry, u.Name, why)
-				continue
-			}
-			cmd := fmt.Sprintf("clearto %d %s %s %s %d dz=%s all=1%s", w.plan.Map, num32(u.X), num32(u.Y), num32(u.Z), placeExtraRadius, num32(placeClearDz), skip)
-			if _, err := w.tt(ctx, cmd); err != nil {
-				w.note("place: the extra clear of %d %s: %v", u.Entry, u.Name, err)
-				continue
-			}
-			cleared++
+	var j placeQuietJudge
+	extraSpent, rereads := false, 0
+	for {
+		read, err := w.placeQuietOnce(ctx, p, skip)
+		if err != nil {
+			return err
 		}
-		if len(roamers) > 0 {
-			w.note("place: the quiet read lists %d roamer(s) with no position in the reply: %s", len(roamers), strings.Join(roamers, ", "))
-		}
-		if cleared > 0 {
-			quiet, why, _, _, err = w.placeQuietOnce(ctx, p, skip)
-			if err != nil {
-				return err
+		j = w.placeQuietJudge(read, p)
+		if len(j.Clear) > 0 {
+			if extraSpent {
+				// The one extra round is spent: nothing more will be cleared, so these units block.
+				j.Block = append(j.Block, j.Clear...)
+				j.Clear = nil
+			} else {
+				extraSpent = true
+				cleared := 0
+				for _, u := range j.Clear {
+					took, err := w.placeQuietClear(ctx, u, skip)
+					if err != nil {
+						return err
+					}
+					if took {
+						cleared++
+					} else {
+						j.Block = append(j.Block, u)
+					}
+				}
+				if cleared > 0 {
+					w.note("place: the extra round cleared %d unit(s); reading the quiet again", cleared)
+					continue
+				}
 			}
 		}
+		if len(j.Block) == 0 {
+			w.placeSum.Quiet = true
+			if !read.Toolkit {
+				w.note("place: the toolkit's own quiet flag is false, but every unit it listed is a critter, a skip entry, "+
+					"a BEHIND leftover the extra round took, or beyond %.0f yd: the walk places the raid", float64(placeReachYd))
+			}
+			return nil
+		}
+		if rereads >= placeQuietRereads || !read.roamersOnly(j.Block) {
+			w.placeSum.Quiet = false
+			return stopf(exitRaidWalkFailed, "place: the area is not quiet: %s", strings.Join(placeQuietNames(j.Block), ", "))
+		}
+		rereads++
+		w.note("place: the quiet's only blockers are moving patrols; reading it again (%d of %d)", rereads, placeQuietRereads)
+		if err := w.placeSleep(ctx, placeQuietWaitS*time.Second); err != nil {
+			return err
+		}
 	}
-	w.placeSum.Quiet = quiet
-	if !quiet {
-		return stopf(exitRaidWalkFailed, "place: the area is not quiet: %s", why)
-	}
-	return nil
 }
 
-// placeQuietOnce runs one `quiet` and answers with its near list and roamers (the extra round reads them).
-func (w *walk) placeQuietOnce(ctx context.Context, p dungeon.Point, skip string) (bool, string, []ttUnit, []string, error) {
+// placeQuietNames names the units that block the quiet, as the refusal and the notes read them.
+func placeQuietNames(units []ttUnit) []string {
+	out := make([]string, 0, len(units))
+	for _, u := range units {
+		name := u.Name
+		if name == "" {
+			name = "roamer"
+		}
+		out = append(out, fmt.Sprintf("%d %s %.1f yd", u.Entry, name, u.Dist))
+	}
+	return out
+}
+
+// placeQuietRead is one `quiet` answer: the toolkit's own verdict, its near list, and its roamers joined to their
+// positions (item 4). The walk judges the near list and the join itself; the toolkit's flag is not the verdict.
+type placeQuietRead struct {
+	// Toolkit is the toolkit's own quiet flag (`#near1 == 0 and #near2 == 0 and #roamers == 0`), kept for the notes only.
+	Toolkit bool
+	// Near is the near list of the final read followed by read 1's (placeQuietR yd, the clear's dz window): both are
+	// judged, a unit of both keeps the final read's position.
+	Near    []ttUnit
+	Roam    []ttUnit   // the roamers, with the position, home and vitals the join read gave them
+	Missing []ttRoamer // roamers the join read did not list (they block: the walk cannot judge them)
+	JoinCut bool       // the join read was truncated: it may have missed roamers
+}
+
+// ttRoamer is one element of a quiet reply's `roamers` list: the toolkit sends g, e, why, d and moved, and no position
+// (tt_commands.lua's quiet).
+type ttRoamer struct {
+	GUID  string
+	Entry uint32
+	Why   string
+	Moved float32
+	Dist  float32
+}
+
+// roamersOnly says every blocker is one of the read's roamers: a unit that moved between the two reads (a patrol walking
+// through), which a re-read may find gone (item 5).
+func (r *placeQuietRead) roamersOnly(block []ttUnit) bool {
+	if len(block) == 0 {
+		return false
+	}
+	moved := map[string]bool{}
+	for _, u := range r.Roam {
+		moved[strings.ToUpper(u.GUID)] = true
+	}
+	for _, u := range block {
+		if !moved[strings.ToUpper(u.GUID)] {
+			return false
+		}
+	}
+	return true
+}
+
+// placeQuietOnce runs one `quiet` and, when it names roamers, one `q units` read around the start point that gives them
+// the position, home and vitals the toolkit's roamer list leaves out (item 4).
+func (w *walk) placeQuietOnce(ctx context.Context, p dungeon.Point, skip string) (*placeQuietRead, error) {
 	cmd := fmt.Sprintf("quiet %d %s %s %s w=%d dz=%s%s", placeQuietR, num32(p.X), num32(p.Y), num32(p.Z), placeQuietWaitS, num32(placeClearDz), skip)
 	out, err := w.tt(ctx, cmd)
 	if err != nil {
-		return false, "", nil, nil, stopf(exitRaidWalkFailed, "place: quiet: %v", err)
+		return nil, stopf(exitRaidWalkFailed, "place: quiet: %v", err)
 	}
 	body, ok := ttLast(out)
 	if !ok {
-		return false, "", nil, nil, stopf(exitRaidWalkFailed, "place: quiet gave no reply")
+		return nil, stopf(exitRaidWalkFailed, "place: quiet gave no reply")
 	}
-	var near []ttUnit
-	var names []string
+	read := &placeQuietRead{Toolkit: body.flag("quiet")}
 	for _, m := range body.list("near") {
-		u := ttUnit{GUID: strOf(m, "g"), Name: strOf(m, "n")}
-		if e, ok := numOf(m, "e"); ok {
-			u.Entry = uint32(e)
-		}
-		if d, ok := numOf(m, "d"); ok {
-			u.Dist = float32(d)
-		}
-		u.X, u.Y, u.Z, _ = posOf(m, "p")
-		near = append(near, u)
-		names = append(names, fmt.Sprintf("%d %s %.1f yd", u.Entry, u.Name, u.Dist))
+		read.Near = append(read.Near, ttUnitOf(m))
 	}
-	var roamers []string
-	for _, m := range body.list("roamers") {
-		e, _ := numOf(m, "e")
-		names = append(names, fmt.Sprintf("%d (%s)", uint32(e), strOf(m, "why")))
-		roamers = append(roamers, fmt.Sprintf("%d %s", uint32(e), strOf(m, "why")))
-	}
-	if body.flag("quiet") {
-		return true, "", near, roamers, nil
-	}
-	if len(names) == 0 {
-		names = append(names, "the toolkit named no unit")
-	}
-	return false, strings.Join(names, ", "), near, roamers, nil
-}
-
-// placeRogue says whether a unit of the quiet list gets the one extra clear round: it stands within placeRogueYd of a
-// BEHIND circle, or its entry is one of the --patrols file's.
-func (w *walk) placeRogue(u ttUnit) bool {
-	for _, c := range w.place.Circles {
-		if d := placeDist3(u.X, u.Y, u.Z, c.X, c.Y, c.Z); d <= placeRogueYd {
-			return true
-		}
-	}
-	for _, set := range w.patrolGUIDS {
-		if set[u.GUID] || set[strings.ToUpper(u.GUID)] {
-			return true
-		}
-	}
-	for _, pat := range w.quietPatrols {
-		for _, p := range pat.Path {
-			if placeDist3(u.X, u.Y, u.Z, p.X, p.Y, p.Z) <= placeRogueYd {
-				return true
+	// A `quiet w=20` answers twice: read 1 (the state at the command) and read 2 (placeQuietWaitS later, the final
+	// reply). The walk judges the units of both reads, as the toolkit's own rule counts both: a unit that stood in the
+	// landing reach 20 s before the raid lands is judged by read 1's position (a unit of both reads keeps the fresher,
+	// final one: the judgement dedupes by guid).
+	if len(out.Replies) > 1 {
+		var first map[string]json.RawMessage
+		if err := json.Unmarshal(out.Replies[0], &first); err == nil && first != nil {
+			for _, m := range (ttBody{raw: first}).list("near") {
+				read.Near = append(read.Near, ttUnitOf(m))
 			}
 		}
 	}
-	return false
+	var roamers []ttRoamer
+	for _, m := range body.list("roamers") {
+		r := ttRoamer{GUID: strOf(m, "g"), Why: strOf(m, "why")}
+		if e, ok := numOf(m, "e"); ok {
+			r.Entry = uint32(e)
+		}
+		if d, ok := numOf(m, "d"); ok {
+			r.Dist = float32(d)
+		}
+		if mv, ok := numOf(m, "moved"); ok {
+			r.Moved = float32(mv)
+		}
+		roamers = append(roamers, r)
+	}
+	if len(roamers) == 0 {
+		return read, nil
+	}
+	units, cut, err := w.placeUnits(ctx, placeRoamScopeYd, p.X, p.Y, p.Z)
+	if err != nil {
+		return nil, err
+	}
+	byGUID := make(map[string]ttUnit, len(units))
+	for _, u := range units {
+		byGUID[strings.ToUpper(u.GUID)] = u
+	}
+	read.JoinCut = cut
+	for _, r := range roamers {
+		if u, ok := byGUID[strings.ToUpper(r.GUID)]; ok {
+			read.Roam = append(read.Roam, u)
+			continue
+		}
+		read.Missing = append(read.Missing, r)
+	}
+	return read, nil
+}
+
+// placeQuietJudge is the walk's own verdict over one quiet read (item 3): the units the one extra clear round may take
+// (their home lies in a BEHIND row's circle) and the units that block the placement.
+type placeQuietJudge struct {
+	Clear []ttUnit
+	Block []ttUnit
+}
+
+// placeQuietSight is one unit the judgement sees: a unit of the read's near list or a roamer, with the distance the walk
+// measured itself and whether the toolkit listed it as one that moved.
+type placeQuietSight struct {
+	unit ttUnit
+	dist float64
+	roam bool
+}
+
+// placeQuietJudge decides which units block the placement and which the extra round may clear (item 3). Every unit it
+// acts on or refuses is logged with its home and where it stands, so the next live run can confirm `home` is the unit's
+// spawn point; a roamer the join read did not list blocks (the walk cannot judge it: item 4).
+func (w *walk) placeQuietJudge(read *placeQuietRead, p dungeon.Point) placeQuietJudge {
+	var j placeQuietJudge
+	if read.JoinCut {
+		w.note("place: the quiet's join read (r %d) was cut: it may have missed roamers", placeRoamScopeYd)
+	}
+	for _, r := range read.Missing {
+		w.note("place: the quiet's roamer %d (%s, %.1f yd out, moved %.1f) is not in the join read: it blocks",
+			r.Entry, r.Why, r.Dist, r.Moved)
+		j.Block = append(j.Block, ttUnit{GUID: r.GUID, Entry: r.Entry, Dist: r.Dist})
+	}
+	var sights []placeQuietSight
+	at := map[string]int{}
+	add := func(u ttUnit, roam bool) {
+		key := strings.ToUpper(u.GUID)
+		if i, ok := at[key]; ok {
+			sights[i].roam = sights[i].roam || roam
+			return
+		}
+		at[key] = len(sights)
+		sights = append(sights, placeQuietSight{unit: u, dist: placeDist2(u.X, u.Y, p.X, p.Y), roam: roam})
+	}
+	for _, u := range read.Near {
+		add(u, false)
+	}
+	for _, u := range read.Roam {
+		add(u, true)
+	}
+	for _, s := range sights {
+		u := s.unit
+		u.Dist = float32(s.dist)
+		switch {
+		case inEntries(w.place.Skips, u.Entry):
+			// The quiet and every clearto carry skip=<those entries>: the toolkit neither counts nor touches them.
+		case u.critter():
+			w.note("place: the quiet ignores the critter %d %s (%s)", u.Entry, u.Name, u.placeWhere())
+		default:
+			if _, owned := w.placeRogueOwner(u); owned {
+				w.note("place: the quiet's extra round takes %d %s (%.1f yd%s, %s)", u.Entry, u.Name, s.dist, roamWords(s.roam), u.placeWhere())
+				j.Clear = append(j.Clear, u)
+				continue
+			}
+			if s.dist <= placeReachYd {
+				w.note("place: the quiet refuses %d %s: %s (%s)", u.Entry, u.Name, w.placeQuietBlock(u, s.dist), u.placeWhere())
+				j.Block = append(j.Block, u)
+			}
+		}
+	}
+	return j
+}
+
+// roamWords says how the toolkit reported a unit of the quiet list that moved between the two reads.
+func roamWords(roam bool) string {
+	if roam {
+		return ", moved between the reads"
+	}
+	return ""
+}
+
+// placeQuietBlock is the refusal's reason for a unit inside the landing reach: the row its home lies in, so the live run
+// can tell an AHEAD pack (a risk the door-to-end run takes too) from a leftover of a leg the raid skips.
+func (w *walk) placeQuietBlock(u ttUnit, dist float64) string {
+	hx, hy, hz := u.placeHome()
+	if k, own := w.place.AheadOwns(u.Entry, hx, hy, hz); own {
+		return fmt.Sprintf("it stands %.1f yd from the start point and its home is in AHEAD row %d", dist, k)
+	}
+	return fmt.Sprintf("it stands %.1f yd from the start point and no BEHIND row owns the unit", dist)
+}
+
+// placeQuietClear is the quiet's one extra clear round for a BEHIND-owned unit (review round 1, item 1). It is a clear
+// like any other: it keeps the pre-read's answer and runs the same guard before it acts. A unit within a skipped
+// corridor circle's radius + placeRogueYd is not cleared (review round 2, MEDIUM-A): the corridor refused that circle
+// for a reason the extra round cannot see from its r 3 read. took says the clearto went out.
+func (w *walk) placeQuietClear(ctx context.Context, u ttUnit, skip string) (took bool, err error) {
+	owner, ok := w.placeRogueOwner(u)
+	if !ok {
+		w.note("place: not cleared %d %s in the extra round: no BEHIND row owns the unit (%s)", u.Entry, u.Name, u.placeWhere())
+		return false, nil
+	}
+	if sc, near := w.placeNearSkipped(u); near {
+		w.note("place: not cleared %d %s in the extra round: it stands within %d yd of the skipped circle of row %d (%s)",
+			u.Entry, u.Name, placeRogueYd, sc.Step, u.placeWhere())
+		return false, nil
+	}
+	c := raidwalk.ClearCircle{Step: owner.Step, Leg: owner.Leg, X: u.X, Y: u.Y, Z: u.Z,
+		Radius: placeExtraRadius, Entries: owner.Entries}
+	units, trunc, err := w.placeUnits(ctx, placeExtraRadius, u.X, u.Y, u.Z)
+	if err != nil {
+		return false, err
+	}
+	if why := w.placeCircleBlocked(c, units, trunc); why != "" {
+		w.note("place: not cleared %d %s in the extra round: %s", u.Entry, u.Name, why)
+		return false, nil
+	}
+	cmd := fmt.Sprintf("clearto %d %s %s %s %d dz=%s all=1%s", w.plan.Map, num32(u.X), num32(u.Y), num32(u.Z), placeExtraRadius, num32(placeClearDz), skip)
+	if _, err := w.tt(ctx, cmd); err != nil {
+		w.note("place: the extra clear of %d %s: %v", u.Entry, u.Name, err)
+		return false, nil
+	}
+	w.note("place: cleared %d %s in the extra round: its home is in the circle of row %d (%s)", u.Entry, u.Name, owner.Step, u.placeWhere())
+	return true, nil
 }
 
 // placeRogueOwner is the BEHIND circle that owns a unit of the quiet list (review round 1, item 1): among the circles
-// whose entries hold the unit's entry and whose area (radius + placeRogueYd) holds the unit (review round 2, LOW-1),
-// the nearest to it. A unit whose entry no BEHIND row owns, or that stands far from every circle that does, gets no
-// owner, and the extra clear never runs for it; the quiet then fails and the placement stops cleanly.
+// whose entries hold the unit's entry and whose area (radius + placeRogueYd) holds the unit's home (item 1: the spawn
+// point, or where it stands when the reply carried no home), the nearest to it. A unit whose entry no BEHIND row owns,
+// or whose home lies outside every circle that does, gets no owner: the extra clear never runs for it, and the quiet
+// then fails unless the unit is beyond the landing reach.
 func (w *walk) placeRogueOwner(u ttUnit) (raidwalk.ClearCircle, bool) {
+	hx, hy, hz := u.placeHome()
 	var best raidwalk.ClearCircle
 	bestD := math.Inf(1)
 	for _, c := range w.place.Circles {
 		if !inEntries(c.Entries, u.Entry) {
 			continue
 		}
-		d := placeDist3(u.X, u.Y, u.Z, c.X, c.Y, c.Z)
+		d := placeDist3(hx, hy, hz, c.X, c.Y, c.Z)
 		if d > float64(c.Radius)+placeRogueYd {
 			continue
 		}
@@ -606,6 +869,12 @@ func (w *walk) placeRogueOwner(u ttUnit) (raidwalk.ClearCircle, bool) {
 		}
 	}
 	return best, bestD < math.Inf(1)
+}
+
+// placeDist2 is the 2D distance between two points.
+func placeDist2(ax, ay, bx, by float32) float64 {
+	dx, dy := float64(ax-bx), float64(ay-by)
+	return math.Sqrt(dx*dx + dy*dy)
 }
 
 // placeNearSkipped says whether a unit stands within a skipped corridor circle's radius + placeRogueYd, and which one.
@@ -942,6 +1211,7 @@ func placeTTLines(p *raidwalk.PlacePlan, planMap uint32) []string {
 	}
 	if len(p.Circles) > 0 {
 		out = append(out,
+			fmt.Sprintf("q units %d %s %s %s all", placeRoamScopeYd, px, py, pz), // the quiet's roamer join (item 4)
 			fmt.Sprintf("q units %d %s %s %s all", placeExtraRadius, exLong, exLong, exLong),
 			fmt.Sprintf("clearto %d %s %s %s %d dz=%d all=1%s", planMap, exLong, exLong, exLong, placeExtraRadius, placeClearDz, tail),
 		)

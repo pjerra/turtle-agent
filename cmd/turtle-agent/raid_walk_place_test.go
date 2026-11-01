@@ -21,11 +21,17 @@ import (
 // ttReplyOf is a one-reply toolkit answer out of a body object.
 func ttReplyOf(t *testing.T, body map[string]any) ttResult {
 	t.Helper()
+	return ttResult{Replies: []json.RawMessage{ttRaw(t, body)}}
+}
+
+// ttRaw is one reply of a toolkit answer, as the walk's reader sees it.
+func ttRaw(t *testing.T, body map[string]any) json.RawMessage {
+	t.Helper()
 	raw, err := json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ttResult{Replies: []json.RawMessage{raw}}
+	return raw
 }
 
 // ttPointOf reads the x y z of a `place x y z spread=.. of=..` command.
@@ -74,6 +80,9 @@ type placeToolkit struct {
 	quiet func(n int) bool
 	// quietNear is the `near` list a not-quiet read reports (nil: none): the extra clear round's input.
 	quietNear []any
+	// quietRoamers is the `roamers` list a not-quiet read reports (nil: none). The toolkit sends no position for them:
+	// the walk joins them to a `q units` read of its own (item 4).
+	quietRoamers []any
 	// clearto, when set, answers a `clearto` (n removed, or an error).
 	clearto func(cmd string) (int, error)
 	// place, when set, replaces the default place handler.
@@ -132,7 +141,11 @@ func (p *placeToolkit) answer(cmd string) (ttResult, error) {
 		if !q && p.quietNear != nil {
 			near = p.quietNear
 		}
-		return ttReplyOf(p.t, map[string]any{"map": 309, "read": 2, "final": true, "quiet": q, "near": near, "roamers": []any{}}), nil
+		roamers := []any{}
+		if !q && p.quietRoamers != nil {
+			roamers = p.quietRoamers
+		}
+		return ttReplyOf(p.t, map[string]any{"map": 309, "read": 2, "final": true, "quiet": q, "near": near, "roamers": roamers}), nil
 	case strings.HasPrefix(cmd, "place "):
 		p.places = append(p.places, cmd)
 		if p.place != nil {
@@ -991,13 +1004,13 @@ func TestQuietExtraClearSendsSafeClearto(t *testing.T) {
 	}
 }
 
-// A unit no BEHIND row owns is never cleared by the extra round (review round 2, MEDIUM-A (b)).
+// A unit no BEHIND row owns is never cleared by the extra round (review round 2, MEDIUM-A (b)); inside the landing
+// reach it blocks the placement, and the refusal says why (item 3: beyond that reach it never blocks).
 func TestQuietExtraClearRefusesUnownedUnit(t *testing.T) {
 	f, p := newPlaceFixture(t)
 	rows, plan := placePlanRows(t)
-	owner := plan.Circles[0]
 	p.quiet = func(int) bool { return false }
-	p.quietNear = []any{quietUnitAt(999999, owner.X, owner.Y, owner.Z)}
+	p.quietNear = []any{quietUnitAt(999999, plan.Point.X+10, plan.Point.Y, plan.Point.Z)}
 	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
 	if code := f.run(context.Background()); code != exitRaidWalkFailed {
 		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
@@ -1007,6 +1020,14 @@ func TestQuietExtraClearRefusesUnownedUnit(t *testing.T) {
 	}
 	if !hasNote(f.summary(), "no BEHIND row owns the unit") {
 		t.Fatalf("notes %v", f.summary().Notes)
+	}
+	// The same unit 40 yd out from a circle no row owns is not the circle's business: it never blocked the quiet.
+	f2, p2 := newPlaceFixture(t)
+	p2.quiet = func(int) bool { return false }
+	p2.quietNear = []any{quietUnitAt(999999, plan.Point.X+40, plan.Point.Y, plan.Point.Z)}
+	f2.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f2.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 for an unowned unit 40 yd out: %s", code, f2.summary().EndReason)
 	}
 }
 
@@ -1037,6 +1058,298 @@ func TestQuietExtraClearRefusesUnitNearSkippedCircle(t *testing.T) {
 		t.Fatalf("the extra round cleared next to a skipped circle: %v", p.cleartos)
 	}
 	if !hasNote(f.summary(), "skipped circle of row") {
+		t.Fatalf("notes %v", f.summary().Notes)
+	}
+}
+
+// placeCircleNear is the plan's clear circle nearest a point (fatal when none is within a yard).
+func placeCircleNear(t *testing.T, plan raidwalk.PlacePlan, x, y, z float32) raidwalk.ClearCircle {
+	t.Helper()
+	best, bestD := raidwalk.ClearCircle{}, 1e9
+	for _, c := range plan.Circles {
+		if d := placeDist3(c.X, c.Y, c.Z, x, y, z); d < bestD {
+			best, bestD = c, d
+		}
+	}
+	if bestD > 1 {
+		t.Fatalf("the fixture plan has no clear circle at %.2f %.2f %.2f (the nearest is %.1f yd off)", x, y, z, bestD)
+	}
+	return best
+}
+
+// placeAheadNear is the plan's AHEAD circle nearest a point (fatal when none is within a yard).
+func placeAheadNear(t *testing.T, plan raidwalk.PlacePlan, x, y, z float32) raidwalk.AheadCircle {
+	t.Helper()
+	best, bestD := raidwalk.AheadCircle{}, 1e9
+	for _, a := range plan.Ahead {
+		if d := placeDist3(a.X, a.Y, a.Z, x, y, z); d < bestD {
+			best, bestD = a, d
+		}
+	}
+	if bestD > 1 {
+		t.Fatalf("the fixture plan has no AHEAD circle at %.2f %.2f %.2f (the nearest is %.1f yd off)", x, y, z, bestD)
+	}
+	return best
+}
+
+// placeAheadB is leg 3's first pull (the deployed rows' step 234: 15111 + 11340 at -11873.62 -1891.77 64.10; the plan
+// JSON's own export numbers it 110).
+func placeAheadB(t *testing.T, plan raidwalk.PlacePlan) (raidwalk.AheadCircle, [3]float32) {
+	t.Helper()
+	b := placeAheadNear(t, plan, -11873.62, -1891.77, 64.1)
+	return b, [3]float32{b.X, b.Y, b.Z}
+}
+
+// placeRow96Circle is the deployed row 96's circle (15111 at -11965.97 -1842.25 55.98), the one the snake 49037 stood in.
+func placeRow96Circle(t *testing.T, plan raidwalk.PlacePlan) raidwalk.ClearCircle {
+	t.Helper()
+	return placeCircleNear(t, plan, -11965.97, -1842.25, 55.98)
+}
+
+// placeRow94Circle is the deployed row 94's circle (15111 at -11945.70 -1841.13 56.11), the E patroller's home.
+func placeRow94Circle(t *testing.T, plan raidwalk.PlacePlan) raidwalk.ClearCircle {
+	t.Helper()
+	return placeCircleNear(t, plan, -11945.70, -1841.13, 56.11)
+}
+
+// quietUnitHome is a quiet read's `near` entry with the unit's home (its spawn point) and its vitals.
+func quietUnitHome(guid string, entry uint32, x, y, z float32, home [3]float32) map[string]any {
+	return map[string]any{"g": guid, "e": entry, "n": "Mad Servant", "p": []float32{x, y, z}, "d": 3.0,
+		"hpv": []float64{4000, 4000}, "rk": 0, "db": 49062, "home": []float32{home[0], home[1], home[2]}}
+}
+
+// quietRoamAt is a quiet read's `roamers` entry: the toolkit sends g, e, why, d and moved, and no position.
+func quietRoamAt(guid string, entry uint32, why string, d, moved float32) map[string]any {
+	return map[string]any{"g": guid, "e": entry, "why": why, "d": d, "moved": moved}
+}
+
+// joinUnitAt is one unit of the quiet's join read (`q units` around the start point): where the roamer stands, where its
+// home is, and its vitals.
+func joinUnitAt(guid string, entry uint32, x, y, z float32, home [3]float32, maxHP float64, rank int) map[string]any {
+	return map[string]any{"g": guid, "e": entry, "n": "Mad Servant", "p": []float32{x, y, z}, "dz": 0.0, "d": 0.0,
+		"hpv": []float64{maxHP, maxHP}, "rk": rank, "db": 49062, "home": []float32{home[0], home[1], home[2]}}
+}
+
+// joinHook answers the quiet's join read (radius placeRoamScopeYd) with units, and every other `q units` (the corridor's
+// pre-reads and the extra round's) with nothing.
+func joinHook(units []any) func(string) ([]any, bool) {
+	return func(cmd string) ([]any, bool) {
+		if fl := strings.Fields(cmd); len(fl) > 2 && fl[2] == fmt.Sprintf("%d", placeRoamScopeYd) {
+			return units, false
+		}
+		return nil, false
+	}
+}
+
+// The walk judges the quiet itself (item 3): three 15111 wanderers the toolkit counts as roamers, whose home lies in
+// leg 3's first pull 54-61 yd out, never block the placement (today: exit 18 "not quiet").
+func TestPlaceQuietIgnoresAheadWanderersBeyondReach(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	b, home := placeAheadB(t, plan)
+	var roamers, units []any
+	for i, d := range []float32{54, 57.5, 61} {
+		guid := fmt.Sprintf("0xF130000000100%d", i+1)
+		roamers = append(roamers, quietRoamAt(guid, 15111, "moved", d, float32(i)+3))
+		units = append(units, joinUnitAt(guid, 15111, plan.Point.X+d, plan.Point.Y, plan.Point.Z, home, 4000, 0))
+	}
+	p.quiet = func(int) bool { return false }
+	p.quietRoamers = roamers
+	p.units = joinHook(units)
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (AHEAD wanderers %d yd out block): %s", code, b.Step, f.summary().EndReason)
+	}
+	if len(p.places) != 1 {
+		t.Fatalf("%d place commands, want one", len(p.places))
+	}
+	if n := extraClearCount(p); n != 0 {
+		t.Fatalf("the extra round ran for AHEAD-owned wanderers: %v", p.cleartos)
+	}
+	if !f.summary().Place.Quiet {
+		t.Fatalf("the place summary does not report the quiet")
+	}
+}
+
+// An AHEAD-owned unit inside the landing reach blocks the quiet (item 3, rule a); the refusal names it and its row.
+func TestPlaceQuietBlocksAheadUnitWithinReach(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	_, home := placeAheadB(t, plan)
+	p.quiet = func(int) bool { return false }
+	p.quietNear = []any{quietUnitHome("0xF1300000002001", 15111, plan.Point.X+18, plan.Point.Y, plan.Point.Z, home)}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.summary().EndReason)
+	}
+	if len(p.places) != 0 {
+		t.Fatalf("the walk placed with an AHEAD unit at 18 yd: %v", p.places)
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, "not quiet") || !strings.Contains(sum.EndReason, "15111") {
+		t.Fatalf("end reason %q", sum.EndReason)
+	}
+	if !hasNote(f.summary(), "its home is in AHEAD row") {
+		t.Fatalf("notes %v", f.summary().Notes)
+	}
+}
+
+// A critter (rank 0, at most 100 max HP) never blocks a circle's clear (item 2): row 96 is cleared with the snake in it
+// (today: "not cleared row 96: unit 2914 Snake stands in the circle").
+func TestPlacePreReadIgnoresCritter(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	row96 := placeRow96Circle(t, plan)
+	if len(row96.Entries) != 1 || row96.Entries[0] != 15111 {
+		t.Fatalf("the fixture's row-96 circle holds %v, want [15111]", row96.Entries)
+	}
+	at := []float32{row96.X, row96.Y, row96.Z}
+	p.units = func(cmd string) ([]any, bool) {
+		fl := strings.Fields(cmd)
+		if len(fl) != 7 || fl[3] != num32(row96.X) || fl[4] != num32(row96.Y) {
+			return nil, false
+		}
+		units := []any{}
+		for i := range 3 {
+			units = append(units, map[string]any{"g": fmt.Sprintf("0xF130000000300%d", i+1), "e": 15111, "n": "Mad Servant",
+				"p": at, "dz": 0.5, "d": 1.0, "hpv": []float64{4000, 4000}})
+		}
+		return append(units, map[string]any{"g": "0xF1300000003004", "e": 2914, "n": "Snake", "p": at, "dz": 0.5, "d": 1.0,
+			"hpv": []float64{8, 8}, "rk": 0}), false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.summary().EndReason)
+	}
+	want := fmt.Sprintf("clearto 309 %s %s %s %s dz=8 all=1", num32(row96.X), num32(row96.Y), num32(row96.Z), num32(row96.Radius))
+	var found bool
+	for _, c := range p.cleartos {
+		if strings.HasPrefix(c, want) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("row 96 was not cleared: cleartos %v, not_cleared %v", p.cleartos, f.summary().Place.NotCleared)
+	}
+	for _, s := range f.summary().Place.NotCleared {
+		if strings.Contains(s, "2914") {
+			t.Fatalf("the critter still blocked a circle: %v", s)
+		}
+	}
+}
+
+// The extra round owns a unit by its home (its spawn point) and clears it where it stands (item 1): a 15111 25 yd out
+// from row 94's circle, whose home is that circle, is cleared at its current position.
+func TestQuietExtraClearOwnsByHome(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	row94 := placeRow94Circle(t, plan)
+	if len(row94.Entries) != 1 || row94.Entries[0] != 15111 {
+		t.Fatalf("the fixture's row-94 circle holds %v, want [15111]", row94.Entries)
+	}
+	home := [3]float32{row94.X, row94.Y, row94.Z}
+	at := [3]float32{row94.X + 25, row94.Y, row94.Z}
+	if d := placeDist3(at[0], at[1], at[2], home[0], home[1], home[2]); d <= float64(row94.Radius)+placeRogueYd {
+		t.Fatalf("the fixture unit is %.1f yd from its circle: it must stand beyond radius + %d", d, placeRogueYd)
+	}
+	p.quiet = func(n int) bool { return n >= 2 }
+	p.quietNear = []any{quietUnitHome("0xF1300000004001", 15111, at[0], at[1], at[2], home)}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.summary().EndReason)
+	}
+	if n := extraClearCount(p); n != 1 {
+		t.Fatalf("%d extra cleartos, want one: %v", n, p.cleartos)
+	}
+	want := fmt.Sprintf("clearto 309 %s %s %s 3 dz=8 all=1", num32(at[0]), num32(at[1]), num32(at[2]))
+	var found bool
+	for _, c := range p.cleartos {
+		if strings.HasPrefix(c, want) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the extra clear did not run at the unit's own position: %v", p.cleartos)
+	}
+	if p.quietCalls != 2 {
+		t.Fatalf("%d quiet reads, want 2 (one before the extra clear, one after)", p.quietCalls)
+	}
+}
+
+// A reply without a home falls back to where the unit stands (the pre-fix behaviour), and the note says the home was
+// missing, so the live run can tell the two apart.
+func TestPlaceQuietMissingHomeUsesPosition(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	row94 := placeRow94Circle(t, plan)
+	p.quiet = func(n int) bool { return n >= 2 }
+	p.quietNear = []any{quietUnitAt(15111, row94.X, row94.Y, row94.Z)} // no home in the reply
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.summary().EndReason)
+	}
+	if n := extraClearCount(p); n != 1 {
+		t.Fatalf("%d extra cleartos, want one: %v", n, p.cleartos)
+	}
+	if !hasNote(f.summary(), "home none") {
+		t.Fatalf("the note does not say the home was missing: %v", f.summary().Notes)
+	}
+}
+
+// A `quiet w=20` answers twice, and the walk judges read 1 as well (item 3): a unit that stood inside the landing reach
+// when the first read was taken blocks the placement even though the final read (20 s later) no longer lists it.
+func TestPlaceQuietJudgesReadOne(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if strings.HasPrefix(cmd, "quiet") {
+			p.quietCalls++
+			near1 := map[string]any{"g": "0xF1300000006001", "e": 999999, "n": "Stranger", "d": 10.0,
+				"p": []float32{plan.Point.X + 10, plan.Point.Y, plan.Point.Z}}
+			return ttResult{Replies: []json.RawMessage{
+				ttRaw(t, map[string]any{"map": 309, "read": 1, "final": false, "quiet_now": false, "near": []any{near1}}),
+				ttRaw(t, map[string]any{"map": 309, "read": 2, "final": true, "quiet": false, "near": []any{}, "roamers": []any{}}),
+			}}, nil
+		}
+		return p.answer(cmd)
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.summary().EndReason)
+	}
+	if len(p.places) != 0 {
+		t.Fatalf("the walk placed although read 1 listed a unit at 10 yd: %v", p.places)
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, "not quiet") || !strings.Contains(sum.EndReason, "999999") {
+		t.Fatalf("end reason %q", sum.EndReason)
+	}
+}
+
+// Item 5: when the only blockers are moving patrols (here a Berserker at 18 yd that the toolkit lists as a roamer) the
+// quiet is read again, at most twice, and the placement then fails.
+func TestPlaceQuietRereadsMovingPatrolsTwiceThenFails(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	_, home := placeAheadB(t, plan)
+	const guid = "0xF1300000005001"
+	at := [3]float32{plan.Point.X + 18, plan.Point.Y, plan.Point.Z}
+	p.quiet = func(int) bool { return false }
+	p.quietNear = []any{quietUnitHome(guid, 11352, at[0], at[1], at[2], home)}
+	p.quietRoamers = []any{quietRoamAt(guid, 11352, "moved", 18.0, 4.2)}
+	p.units = joinHook([]any{joinUnitAt(guid, 11352, at[0], at[1], at[2], home, 3000, 0)})
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.summary().EndReason)
+	}
+	if want := 1 + placeQuietRereads; p.quietCalls != want {
+		t.Fatalf("%d quiet reads, want %d", p.quietCalls, want)
+	}
+	if len(p.places) != 0 {
+		t.Fatalf("the walk placed with a patrol in the landing reach: %v", p.places)
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, "11352") {
+		t.Fatalf("end reason %q", sum.EndReason)
+	}
+	if !hasNote(f.summary(), "reading it again") {
 		t.Fatalf("notes %v", f.summary().Notes)
 	}
 }

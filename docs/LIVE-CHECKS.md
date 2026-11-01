@@ -1144,11 +1144,14 @@ probe found (2026-10-29, `tests/raid-inject-probe-20261029-042517/probe.md`). Wh
 8. **Exit codes.** A `fail` turns a clean walk into 23; a wipe during a fault stays 19 and the fault reads `fail` in
    the summary; `not-fired`/`inconclusive` keep exit 0.
 
-## raid-walk --place: a raid that starts partway into its instance (tested against fakes only, never run live until P1)
+## raid-walk --place: a raid that starts partway into its instance (P1 2026-11-01: refused in the quiet step, exit 18; re-run open)
 
 README "Raid walks", `--place`. Needs a test server (m910q or tortoise-test2) whose image carries the Eluna test
-toolkit (`.tt place`, `clearto`, `quiet`, `q inst|group|units|floor`) and TortoiseBots with `feat/run-until`. The
-planned proof is Zul'Gurub leg 3 (`zul_gurub --slot 2 --from "leg high_priest_thekal" --place --until boss --sql <the
+toolkit (`.tt place`, `clearto`, `quiet`, `q inst|group|units|floor`) and TortoiseBots with `feat/run-until`. The first
+live run (Zul'Gurub leg 3, slot 2, 2026-11-01) reached the quiet step and stopped there: the toolkit's own quiet rule
+counted units a door-to-end run has alive at this step too, so the walk now judges the quiet itself (item 4; the
+evidence is `tests/zg-place-proof/` of the audit folder). The proof is Zul'Gurub leg 3
+(`zul_gurub --slot 2 --from "leg high_priest_thekal" --place --until boss --sql <the
 deployed migration> --wipe-resume 1 --max-run-minutes 60`), first with `--dry-run`. `--sql` is required with `--place`
 (the start step and the corridor are checked against the deployed rows; the refusal comes before the lease), and the
 probe step asserts the commander is in GM mode (`.gm on`, refused unless the reply is `GM mode is ON`), before the first
@@ -1161,16 +1164,30 @@ teleport. What it has to settle:
    `above_floor` < 1.5). Without the unbind the commander keeps his own copy (the probe saw 104 vs the bots' 103).
 3. **The clear.** The note lines `place: cleared row K: n removed (skipped: ...)` for every circle, no `kill` and no
    `boss` in any `.tt` line, and a pre-read that lists a unit the row does not own leaves that circle uncleared with a
-   note instead of clearing it. Watch the pack at ZG step 99: with the corridor rule its circle overlaps step 234's, so
-   it is split into per-unit circles (r 4) and some units may be reported `not cleared: unit E ... lies in AHEAD row`.
+   note instead of clearing it — a rank-0 critter of at most 100 max HP never counts (ZG: the snake 2914 stood 7 yd
+   from row 96's point and skipped that row on the first run; row 96 must be cleared now). Watch the pack at ZG step 99:
+   with the corridor rule its circle overlaps step 234's, so it is split into per-unit circles (r 4) and some units may
+   be reported `not cleared: unit E ... lies in AHEAD row`.
    **Known limit:** the pre-read (`q units`) and the `clearto` are two commands, so a unit that walks into a circle
    between them can be despawned with the row's own. This is acceptable on test servers only: the quiet check and the
    placed-start check catch a broken run, and the walk report lists every clear (`place.circles[]`, the `place:` notes)
    so it can be read afterwards.
-4. **Quiet and place.** `tt quiet 50 ... w=20` answers `quiet:true` before the place (one extra round is allowed for a
-   named unit that a BEHIND circle owns by entry and stands within its radius + 6 yd, and never within 6 yd of a circle
-   the corridor skipped); `tt place ... of=<mt>` answers `placed:true` and the frames show every hire on map
-   309, alive, within 12 yd of the point; the summary's `place.placed` equals `place.hires`.
+4. **Quiet and place.** The walk judges the quiet itself (the first live run, 2026-11-01, was refused here: the toolkit
+   counted leg 3's own pull 54-61 yd out, a patrolling Berserker at 18 yd, BEHIND leftovers and critters). From the
+   `quiet` reply it takes the near list and the roamers, which it joins to one `q units` read of 80 yd for a position;
+   it ignores skip entries and critters (rank 0, at most 100 max HP), clears a BEHIND-owned unit once — owned by its
+   **home** (the spawn point the toolkit sends), not by where it stands — and refuses the placement for any other unit
+   inside 25 yd of the point. AHEAD-owned and unowned units beyond those 25 yd must not block (ZG leg 3: the B pack at
+   54-61 yd, the leg-8 Berserker patrols, the snakes). A roamer the join read misses blocks, and when only roamers (a
+   patrol walking through) are left inside the 25 yd the quiet is read again twice, 20 s apart, before the failure.
+   **The ownership premise is the first thing to confirm on the re-run:** `.tt q units 40 <P> all` on a fresh copy must
+   show a waypoint patroller's `home` at its spawn (ZG: 49056, row 94, spawn 30.5 yd from P), not at its current
+   waypoint. The place notes carry `db` (spawn guid), the current position and `home` for every unit the phase acts on
+   or refuses, so the reply and the export can be compared line by line. If the core moves `home` along the waypoints,
+   own by `db` against the spawn export instead (item 1 of the proof findings). On the re-run, rows 94 and 96 must be
+   cleared (a patrol owned by home; a critter ignored), and the B pack, the Berserkers and the snakes must not block.
+   `tt place ... of=<mt>` answers `placed:true` and the frames show every hire on map 309, alive, within 12 yd of the
+   point; the summary's `place.placed` equals `place.hires` and `place.quiet` is the walk's own verdict.
 5. **The start.** The run's status line reads `running 231/1097` and the until label `until boss (step 274)`; the
    walk's own text `The run starts at step 231 of 1097 (leg high_priest_thekal)` is in `run.log`. No fight and no death
    before leg 3's first pull row (234), and the run reaches the until stop before the Thekal boss row.

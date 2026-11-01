@@ -240,6 +240,23 @@ func TestPlaceClearZGLeg3(t *testing.T) {
 			t.Fatalf("circles from steps %v, want %v", steps, want)
 		}
 	}
+	// The AHEAD circles carry their row's entries: the quiet's own judgement tells a unit of a later leg (which stays)
+	// from a leftover of a leg the raid skips (which must go).
+	var entries []uint32
+	for _, a := range cp.Ahead {
+		if a.Step == 234 {
+			entries = a.Entries
+		}
+	}
+	if len(entries) != 2 || entries[0] != 15111 || entries[1] != 11340 {
+		t.Fatalf("the AHEAD circle of step 234 carries %v, want [15111 11340]", entries)
+	}
+	if k, own := (PlacePlan{Ahead: cp.Ahead}).AheadOwns(15111, -11873.62, -1891.77, 64.1); !own || k != 234 {
+		t.Fatalf("AheadOwns(15111 at step 234's point) = %d, %v", k, own)
+	}
+	if _, own := (PlacePlan{Ahead: cp.Ahead}).AheadOwns(2914, -11873.62, -1891.77, 64.1); own {
+		t.Fatal("AheadOwns owns an entry no AHEAD row holds")
+	}
 }
 
 func TestPlaceStartZGLeg3Stages(t *testing.T) {

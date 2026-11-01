@@ -64,11 +64,13 @@ type ClearPlan struct {
 	Refusal string
 }
 
-// AheadCircle is one AHEAD creature row's circle (its radius plus PlaceAheadSlack).
+// AheadCircle is one AHEAD creature row's circle (its radius plus PlaceAheadSlack) with the row's entries, so the quiet
+// can tell a unit of a later leg (which stays) from a unit of a leg the raid skips (which must go).
 type AheadCircle struct {
 	Step    int
 	X, Y, Z float32
 	Radius  float32
+	Entries []uint32
 }
 
 // AheadIn says whether a point lies in an AHEAD creature row's circle (spec 5 step 6).
@@ -82,6 +84,34 @@ func (p PlacePlan) AheadIn(x, y, z float32) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// AheadOwns says whether a unit of an AHEAD row stands in that row's own area: its entry is one of the row's and the
+// point lies within the row's radius plus PlaceAheadSlack, within placeAheadDz (the same test aheadInside makes). The
+// quiet uses it to name the row a unit beyond the landing reach belongs to.
+func (p PlacePlan) AheadOwns(entry uint32, x, y, z float32) (int, bool) {
+	for _, a := range p.Ahead {
+		if !holdsEntry(a.Entries, entry) {
+			continue
+		}
+		if math.Abs(float64(a.Z)-float64(z)) > placeAheadDz {
+			continue
+		}
+		if dist2f(x, y, a.X, a.Y) <= float64(a.Radius)+PlaceAheadSlack {
+			return a.Step, true
+		}
+	}
+	return 0, false
+}
+
+// holdsEntry says a row's entry list holds an entry.
+func holdsEntry(entries []uint32, e uint32) bool {
+	for _, x := range entries {
+		if x == e {
+			return true
+		}
+	}
+	return false
 }
 
 // PlacePlan is the place phase's plan (spec 4): the start step and its point, the until stop the corridor ends at, the
@@ -539,7 +569,8 @@ func PlaceClear(rows planexport.Rows, plan *dungeon.Plan, start, stop int) Clear
 	for i := start - 1; i < len(rows.Steps); i++ {
 		if creatureRow(rows.Steps[i]) && placedRow(rows.Steps[i]) {
 			ahead = append(ahead, aheadRow{step: i + 1, s: rows.Steps[i]})
-			out.Ahead = append(out.Ahead, AheadCircle{Step: i + 1, X: rows.Steps[i].X, Y: rows.Steps[i].Y, Z: rows.Steps[i].Z, Radius: rows.Steps[i].Radius})
+			out.Ahead = append(out.Ahead, AheadCircle{Step: i + 1, X: rows.Steps[i].X, Y: rows.Steps[i].Y, Z: rows.Steps[i].Z,
+				Radius: rows.Steps[i].Radius, Entries: append([]uint32{}, rows.Steps[i].Entries...)})
 		}
 	}
 	for i := 0; i < start-1 && i < len(rows.Steps); i++ {
