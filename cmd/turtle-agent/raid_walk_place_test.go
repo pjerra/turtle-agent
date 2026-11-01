@@ -195,10 +195,11 @@ func newPlaceFixture(t *testing.T) (*fixture, *placeToolkit) {
 	f.agent.ttFn = p.answer
 	// The run's own status lines: the placed run walks two steps and stops at its until. A test that needs the raid to
 	// die (or the run to go on) replaces this queue.
+	n := zgPlaceSteps(t)
 	f.agent.startQueue = []queuedEvent{
-		{raw: "TBM:RUN|zul_gurub|running|105/397|thekal|move|walk|walking"},
-		{raw: "TBM:RUN|zul_gurub|running|106/397|thekal|move|walk|walking"},
-		{raw: "TBM:RUN|zul_gurub|done|106/397|thekal|move|walk|stopped before step 124 (until boss): the party stays where it stands"},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|thekal|move|walk|walking", n.start, n.total)},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|thekal|move|walk|walking", n.start+1, n.total)},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|thekal|move|walk|stopped before step %d (until boss): the party stays where it stands", n.start+1, n.total, n.until)},
 	}
 	return f, p
 }
@@ -244,6 +245,25 @@ func zgPlan(t *testing.T) *dungeon.Plan {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// zgPlaceNums are the placed ZG walk's step numbers: the start step, the rows' step count and the until-boss stop.
+type zgPlaceNums struct{ start, total, until int }
+
+// zgPlaceSteps derives zgPlaceNums from the plan the fixture loads, through placePlanRows (planexport.Build,
+// raidwalk.PlaceStart, raidwalk.PlaceStop: the functions the walk itself uses), so a plan change (#356 grew ZG from 397
+// to 401 rows) cannot leave the tests' numbers behind.
+func zgPlaceSteps(t *testing.T) zgPlaceNums {
+	t.Helper()
+	rows, plan := placePlanRows(t)
+	return zgPlaceNums{start: plan.Start, total: len(rows.Steps), until: plan.Stop}
+}
+
+// zgPlaceReply is placeStartReply for the placed ZG walk: the server starts exactly the placed step.
+func zgPlaceReply(t *testing.T) *commanderReply {
+	t.Helper()
+	n := zgPlaceSteps(t)
+	return placeStartReply("zul_gurub", n.start, n.total, n.until)
 }
 
 func TestParsePlaceNeedsFrom(t *testing.T) {
@@ -318,7 +338,11 @@ func TestPhasePlaceOrder(t *testing.T) {
 		t.Fatalf("the dry run named no start step:\n%s", f.stdout.String())
 	}
 	f.opts.dryRun = false
-	f.agent.startReply = placeStartReply("zul_gurub", step, 397, 124)
+	zg := zgPlaceSteps(t)
+	if step != zg.start {
+		t.Fatalf("the dry run starts step %d, the plan's place start is %d", step, zg.start)
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", step, zg.total, zg.until)
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
 	}
@@ -351,7 +375,7 @@ func TestPhasePlaceOrder(t *testing.T) {
 	if sum.Place == nil {
 		t.Fatal("the summary has no place object")
 	}
-	if sum.Place.Start != step || sum.Place.Stop != 124 || !sum.Place.Quiet {
+	if sum.Place.Start != step || sum.Place.Stop != zg.until || !sum.Place.Quiet {
 		t.Fatalf("place summary %+v", sum.Place)
 	}
 	if sum.Place.Instance != 103 || sum.Place.Placed != sum.Place.Hires || sum.Place.Hires == 0 {
@@ -375,7 +399,7 @@ func TestPhasePlaceOrder(t *testing.T) {
 func TestPlaceInstanceMismatchClearsNothing(t *testing.T) {
 	f, p := newPlaceFixture(t)
 	p.cmdInst = 104 // the commander is in another copy
-	f.agent.startReply = placeStartReply("zul_gurub", 105, 397, 124)
+	f.agent.startReply = zgPlaceReply(t)
 	code := f.run(context.Background())
 	if code != exitRaidWalkFailed {
 		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
@@ -394,7 +418,7 @@ func TestPlacePreReadForeignUnitSkipsCircle(t *testing.T) {
 		// A unit the row does not own stands in the circle.
 		return []any{map[string]any{"g": "0xF1300000000009", "e": 999999, "n": "Stranger", "p": []float32{0, 0, 0}, "dz": 0.5, "d": 1.0}}, false
 	}
-	f.agent.startReply = placeStartReply("zul_gurub", 105, 397, 124)
+	f.agent.startReply = zgPlaceReply(t)
 	code := f.run(context.Background())
 	if code != exitOK {
 		t.Fatalf("exit %d: %s", code, f.stderr.String())
@@ -414,7 +438,7 @@ func TestPlacePreReadForeignUnitSkipsCircle(t *testing.T) {
 func TestPlaceVerifyByFramesSummonsMissingOnce(t *testing.T) {
 	f, p := newPlaceFixture(t)
 	p.placeAll = false // one hire is left behind: the frames catch it, one summon fixes it
-	f.agent.startReply = placeStartReply("zul_gurub", 105, 397, 124)
+	f.agent.startReply = zgPlaceReply(t)
 	code := f.run(context.Background())
 	if code != exitOK {
 		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
@@ -445,7 +469,7 @@ func TestPlaceVerifyFailsWhenStillMissing(t *testing.T) {
 			f.agent.mu.Unlock()
 		}
 	}
-	f.agent.startReply = placeStartReply("zul_gurub", 105, 397, 124)
+	f.agent.startReply = zgPlaceReply(t)
 	code := f.run(context.Background())
 	if code != exitRaidWalkFailed {
 		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
@@ -458,7 +482,7 @@ func TestPlaceVerifyFailsWhenStillMissing(t *testing.T) {
 // The walk judges the place by its own frames, never by the toolkit's member lists (which truncate near a full raid).
 func TestPlaceIgnoresTruncatedRead2(t *testing.T) {
 	f, p := newPlaceFixture(t)
-	f.agent.startReply = placeStartReply("zul_gurub", 105, 397, 124)
+	f.agent.startReply = zgPlaceReply(t)
 	f.agent.ttFn = func(cmd string) (ttResult, error) {
 		if strings.HasPrefix(cmd, "place ") {
 			p.places = append(p.places, cmd)
@@ -485,7 +509,8 @@ func TestPlaceIgnoresTruncatedRead2(t *testing.T) {
 
 func TestPlaceStartLineMismatchStops(t *testing.T) {
 	f, _ := newPlaceFixture(t)
-	f.agent.startReply = placeStartReply("zul_gurub", 230, 397, 124) // the server starts another step
+	zg := zgPlaceSteps(t)
+	f.agent.startReply = placeStartReply("zul_gurub", zg.start+1, zg.total, zg.until) // the server starts another step
 	code := f.run(context.Background())
 	if code != exitRaidWalkFailed {
 		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
@@ -506,7 +531,8 @@ func TestPlaceStartLineMismatchStops(t *testing.T) {
 
 // wipeAfterStart kills the raid as soon as the walk reads a running status line (after the place).
 func wipeAfterStart(f *fixture) {
-	f.agent.startQueue = []queuedEvent{{raw: "TBM:RUN|zul_gurub|running|105/397|thekal|move|walk|walking"}}
+	n := zgPlaceSteps(f.t)
+	f.agent.startQueue = []queuedEvent{{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|thekal|move|walk|walking", n.start, n.total)}}
 	f.agent.eventsHook = func(raw string) {
 		if !strings.Contains(raw, "|running|") {
 			return
@@ -523,7 +549,7 @@ func wipeAfterStart(f *fixture) {
 func TestReviveUsesPlacePointNoEntranceFallback(t *testing.T) {
 	f, _ := newPlaceFixture(t)
 	f.opts.wipeResume = 0
-	f.agent.startReply = placeStartReply("zul_gurub", 105, 397, 124)
+	f.agent.startReply = zgPlaceReply(t)
 	// A hostile unit that follows the commander: the place point is never quiet, so the entrance fallback would run
 	// if the placed walk kept it (review round 1, item 5): the test's entrance assertion is what turns red.
 	f.agent.unitsFn = func(int) []objects.Unit {
@@ -570,7 +596,7 @@ func TestReviveUsesPlacePointNoEntranceFallback(t *testing.T) {
 func TestReviveInstanceCheckBeforeSummon(t *testing.T) {
 	f, p := newPlaceFixture(t)
 	f.opts.wipeResume = 0
-	f.agent.startReply = placeStartReply("zul_gurub", 105, 397, 124)
+	f.agent.startReply = zgPlaceReply(t)
 	wipeAfterStart(f)
 	p.movedInst = 104 // the commander is back in his own copy by the revive
 	code := f.run(context.Background())
