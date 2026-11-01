@@ -334,3 +334,36 @@ func TestUldamanRunLeaderReach(t *testing.T) {
 		}
 	}
 }
+
+// A boss's phase_entries may not clash with any other field of the plan: each clash names the entry, the boss's
+// leg and the clashing field; a clean list loads.
+func TestParsePhaseEntriesClashes(t *testing.T) {
+	// Leg a: pull group 10, skip 20, boss 30 first 31 hold 32 phase <A>. Leg b: boss 40 first 41 phase <B>.
+	plan := func(phaseA, phaseB string) string {
+		return `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[
+		  {"name":"a","to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[10],"positions":[{"x":0,"y":0,"z":0}]}],"skip":[20],
+		   "boss":{"entry":30,"position":{"x":0,"y":0,"z":0},"first":[31],"phase_entries":` + phaseA + `,
+		     "hold":{"instance_data":1,"spot":{"x":1,"y":0,"z":0},"radius":30,"timeout_s":600,"entries":[32]}}},
+		  {"name":"b","to":{"x":0,"y":0,"z":0},"boss":{"entry":40,"position":{"x":0,"y":0,"z":0},"first":[41],"phase_entries":` + phaseB + `}}]}`
+	}
+	if p, err := Parse("ok.json", []byte(plan(`[50, 51]`, `[52]`))); err != nil || !slices.Equal(p.Legs[0].Boss.PhaseEntries, []uint32{50, 51}) {
+		t.Fatalf("a clean phase list: %v %+v", err, p)
+	}
+	for _, tc := range []struct{ name, a, b, want string }{
+		{"repeats", `[50, 50]`, `[]`, "legs[0].boss.phase_entries[1]: phase entry 50 of the boss of legs[0] (a) is also its phase_entries[0]"},
+		{"pull group", `[10]`, `[]`, "phase entry 10 of the boss of legs[0] (a) is also in legs[0] (a).pull_groups[0].entries"},
+		{"skip", `[20]`, `[]`, "phase entry 20 of the boss of legs[0] (a) is also in legs[0] (a).skip"},
+		{"own first", `[31]`, `[]`, "phase entry 31 of the boss of legs[0] (a) is also in legs[0] (a).boss.first"},
+		{"own hold", `[32]`, `[]`, "phase entry 32 of the boss of legs[0] (a) is also in legs[0] (a).boss.hold.entries"},
+		{"own boss", `[30]`, `[]`, "the boss (30) is already a boss entry"},
+		{"other boss entry", `[40]`, `[]`, "phase entry 40 of the boss of legs[0] (a) is also the boss entry of legs[1] (b)"},
+		{"other first", `[41]`, `[]`, "phase entry 41 of the boss of legs[0] (a) is also in legs[1] (b).boss.first"},
+		{"other phase", `[52]`, `[52]`, "phase entry 52 of the boss of legs[0] (a) is also in legs[1] (b).boss.phase_entries"},
+		{"other hold", `[]`, `[32]`, "phase entry 32 of the boss of legs[1] (b) is also in legs[0] (a).boss.hold.entries"},
+	} {
+		_, err := Parse("t.json", []byte(plan(tc.a, tc.b)))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}

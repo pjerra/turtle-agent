@@ -533,7 +533,11 @@ type walk struct {
 	afterN        uint64
 	eventsAt      uint64
 
-	bossSet      map[uint32]bool
+	bossSet map[uint32]bool
+	// bossRule decides which frame rows are boss evidence (raidwalk.BossRows: a `first`-only entry counts within
+	// raidwalk.FirstAddBossRadius of its boss's plan position; walk 19 test2 s4: trash Zulian Tigers 11361 on
+	// Venoxis's leg latched bossLatchAt and blocked the wipe recovery).
+	bossRule     *raidwalk.BossRows
 	bossRows     map[uint32]hostileState
 	bossSeenAt   time.Time
 	bossTargetAt time.Time
@@ -566,6 +570,7 @@ type walk struct {
 	bossReadAt    time.Time
 	bossEngagedAt time.Time
 	bossLatchAt   time.Time
+	bossLatchHit  uint32 // the entry of the row that last set bossLatchAt (for the skip note)
 	bossCheckErr  error
 	fightRows     []walkFightRow
 
@@ -741,6 +746,7 @@ func (w *walk) validate() error {
 			}
 		}
 	}
+	w.bossRule = raidwalk.NewBossRows(p)
 
 	if w.opts.sql != "" {
 		rows, notes, err := readRaidMigration(slots.ExpandTilde(w.opts.sql), w.plan.Name)
