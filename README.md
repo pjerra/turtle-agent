@@ -2167,7 +2167,9 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   units there (never `kill`, never `boss`; a boss or hold row of an earlier leg within 30 yd of the route refuses the
   placement when the route passes it in the start step's own leg; when it passes in a later leg the walk shortens its
   `until` to stop before that segment, the corridor ending one positioned step earlier — a placed run is a fresh copy,
-  so those bosses are alive) — quiets
+  so those bosses are alive; every segment of the route is tested, not only its closest point, so a hit on the last
+  segment shortens an `--until none` run too, and the dry run's header and the summary print the asked-for until and
+  the effective one) — quiets
   the start point — the walk judges the quiet itself, not the toolkit's flag: a unit blocks only when it is not a skip
   entry, not a rank-0 critter of at most 100 HP and either stands within 25 yd of the point or belongs to a BEHIND row's
   circle by its **home** (the spawn point the toolkit sends with the unit; without one the unit has no owner), which the
@@ -2175,7 +2177,9 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   whose home lies outside every AHEAD row and that is not boss evidence); the roamers (units that moved between the
   quiet's two reads, which the toolkit lists without a position) are joined to one `q units` read of 80 yd, and a roamer
   that read misses is looked up in the quiet's own near lists (which carry its position and home) and blocks only inside
-  the 25 yd landing reach; a unit no extra round could take that stands beyond those 25 yd is left alive — moves the
+  the 25 yd landing reach; a near list the toolkit cut short (`n_near` above the units it listed) refuses the placement
+  when its last listed unit stands at those 25 yd or nearer, since the dropped ones may stand where the raid lands; a
+  unit no extra round could take that stands beyond those 25 yd is left alive — moves the
   raid onto it
   (`.tt place ... of=<mt>`), verifies it by the walk's own frames
   (one `.summon` per hire the frames miss) and only then starts the run, whose status line must show exactly that step
@@ -2188,7 +2192,10 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   between them can be despawned along with the row's own. Hence test servers only; the quiet check and the placed-start
   check catch a broken run, and the walk report lists every clear (`place.circles[]`, the `place:` notes). The corridor
   pre-read does not refuse a circle for a BEHIND-trash unit of another corridor row (its entry is a corridor row's, its
-  home lies outside every AHEAD row and it is not boss evidence). The quiet
+  home lies outside every AHEAD row and it is not boss evidence). The clear is by entry and area, so a later leg's
+  patrol or spread pack that walks into a cleared circle can be thinned with it. A walk-super restart that starts inside
+  the leg a shortened `until` stopped in is refused with exit 2: its own route reaches the guarded segment in the start
+  step's own leg, so restart before that leg or walk from the door. The quiet
   step's two extra rounds keep away from any circle the corridor refused (a unit within that circle's radius + 6 yd is
   not cleared) and clear a unit a BEHIND row owns by entry and by its home, or BEHIND trash; a reply without a `home`
   gives no owner (fail closed): the unit is never cleared, and inside those 25 yd the walk refuses the placement. AHEAD
@@ -2312,7 +2319,7 @@ The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused
 | `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key (a `live` row, a fight still running, is left for the next read: its finished fight comes back under the same id) |
 | `frames.jsonl` | one `bot_view` frame every 10 s, and every 2 s while a party member is in combat (positions, hp, dead, state, and each bot's `target`, `spell`, `action` and `result`; hostiles; every line carries the walk's `tier`) |
 | `slot-setup.txt`, `teardown.json` | what slot setup printed, and teardown's report |
-| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, `wipe_resumes`, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison`; `place` (a `--place` walk only: `start_step`, `leg`, `point`, `until_step`, `instance`, `circles[]` with their removed counts, `not_cleared[]`, `quiet`, `placed`, `hires`, `summoned[]`) |
+| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, `wipe_resumes`, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison`; `place` (a `--place` walk only: `start_step`, `leg`, `point`, `until_step`, `instance`, `circles[]` with their removed counts, `not_cleared[]`, `quiet`, `placed`, `hires`, `summoned[]`); `until_effective` (a `--place` walk whose route guard shortened the `until`: the clause the run actually walked, `until` staying the one asked for) |
 
 Exit codes: 0 the run ended by its `until` (or the hold); 18 a phase failed or was refused (setup, login, hire, bind,
 enter, start, the server has no `until`, a stall, the ceiling, an interrupt, `lease lost`); 19 the walk ran and was

@@ -703,7 +703,8 @@ func nearUnitsOf(b ttBody) []ttUnit {
 
 // nearCutOf records a cut near list (F2, D3): n_near is the toolkit's own count before its line cap dropped the far
 // end. The near list is distance-sorted, so the last listed unit is the nearest of the dropped ones; when it stands
-// inside the landing reach the placement is refused (the dropped units may stand where the raid lands).
+// inside the landing reach (placeReachYd itself counts as inside) the placement is refused (the dropped units may
+// stand where the raid lands).
 func (r *placeQuietRead) nearCutOf(b ttBody, units []ttUnit) {
 	n, ok := b.num("n_near")
 	if !ok || n <= float64(len(units)) {
@@ -713,7 +714,8 @@ func (r *placeQuietRead) nearCutOf(b ttBody, units []ttUnit) {
 	if len(units) > 0 {
 		d = float64(units[len(units)-1].Dist)
 	}
-	if d >= placeReachYd {
+	// The reach itself counts as inside: a unit listed at exactly placeReachYd still stands where the raid lands.
+	if d > placeReachYd {
 		return
 	}
 	if !r.NearCut || d < r.NearCutYd {

@@ -394,9 +394,12 @@ func TestPlaceBossGuardShortensInLaterLeg(t *testing.T) {
 		{Plan: "t", Leg: 0, Name: "one"}, {Plan: "t", Leg: 1, Name: "two"}, {Plan: "t", Leg: 2, Name: "three"},
 	}, steps...)
 	start, stop := 5, len(rows.Steps)
-	until, routeEnd, note, refusal := PlaceBossGuard(rows, start, stop)
+	until, routeEnd, note, refusal, hit := PlaceBossGuard(rows, start, stop)
 	if refusal != "" {
 		t.Fatalf("refused: %q", refusal)
+	}
+	if !hit {
+		t.Fatal("the guard did not report the segment")
 	}
 	if until != 12 || routeEnd != 11 {
 		t.Fatalf("until %d, routeEnd %d, want 12 and 11", until, routeEnd)
@@ -413,6 +416,40 @@ func TestPlaceBossGuardShortensInLaterLeg(t *testing.T) {
 	}
 }
 
+// H1 (D8): the guard's hit is on the LAST segment (the stop step itself), so until stays the stop: the caller needs
+// hit to shorten an `--until none` run to `until step <stop>`, and to refuse a boss-done run it would cut before.
+// The reviewer's fixture: leg 0's boss at (20,150), leg 1's moves, and leg 2's last row at (20,140).
+func TestPlaceBossGuardShortensAHitOnTheLastSegment(t *testing.T) {
+	steps := []planexport.StepRow{placeRow(planexport.KindBoss, 0, 20, 150, 0, 0, 12345)} // step 1
+	steps = append(steps, placeRoute(1, 10)...)                                           // steps 2..11: leg 1, (0,10)..(0,100)
+	steps = append(steps, placeMove(2, 20, 140, 0))                                       // step 12: leg 2's last row, 10 yd from the boss
+	rows := placeRows([]planexport.LegRow{
+		{Plan: "t", Leg: 0, Name: "one"}, {Plan: "t", Leg: 1, Name: "two"}, {Plan: "t", Leg: 2, Name: "three"},
+	}, steps...)
+	start, stop := 5, len(rows.Steps)
+	until, routeEnd, note, refusal, hit := PlaceBossGuard(rows, start, stop)
+	if refusal != "" {
+		t.Fatalf("refused: %q", refusal)
+	}
+	if !hit {
+		t.Fatal("the guard did not report the hit on the last segment")
+	}
+	if until != stop || routeEnd != stop-1 {
+		t.Fatalf("until %d, routeEnd %d, want the stop %d and the step before it %d", until, routeEnd, stop, stop-1)
+	}
+	if !strings.Contains(note, "row 1 of leg 0") || !strings.Contains(note, "stops before step 12") {
+		t.Fatalf("note %q", note)
+	}
+	// The caller's shortening (`until step 12`) stops the run before step 12; the corridor ends at step 11. Without
+	// that, the final segment is walked and PlaceClear(until) refuses.
+	if cp := PlaceClear(rows, nil, start, routeEnd); cp.Refusal != "" {
+		t.Fatalf("PlaceClear(routeEnd) refused: %q", cp.Refusal)
+	}
+	if cp := PlaceClear(rows, nil, start, until); cp.Refusal == "" {
+		t.Fatal("PlaceClear(until) did not refuse: the last segment is within the guard")
+	}
+}
+
 // F5 (D8): a BEHIND boss row next to a segment of the start step's own leg refuses as before (no shortening).
 func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 	steps := []planexport.StepRow{
@@ -424,7 +461,10 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 	}
 	rows := placeRows(nil, steps...)
 	start, stop := 4, len(rows.Steps)
-	until, routeEnd, _, refusal := PlaceBossGuard(rows, start, stop)
+	until, routeEnd, _, refusal, hit := PlaceBossGuard(rows, start, stop)
+	if !hit {
+		t.Fatal("the guard did not report the segment")
+	}
 	if until != stop || routeEnd != stop {
 		t.Fatalf("until %d, routeEnd %d, want %d (no shortening)", until, routeEnd, stop)
 	}
@@ -454,9 +494,12 @@ func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	stop := len(rows.Steps)
-	until, routeEnd, note, refusal := PlaceBossGuard(rows, start, stop)
+	until, routeEnd, note, refusal, hit := PlaceBossGuard(rows, start, stop)
 	if refusal != "" {
 		t.Fatalf("refused: %q", refusal)
+	}
+	if !hit {
+		t.Fatal("the guard did not report the segment")
 	}
 	if until <= start {
 		t.Fatalf("until %d is not past the start %d", until, start)

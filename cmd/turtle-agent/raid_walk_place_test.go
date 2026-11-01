@@ -1066,40 +1066,56 @@ func TestQuietExtraClearRefusesUnownedUnit(t *testing.T) {
 	}
 }
 
-// A unit near a circle the corridor skipped is never cleared by the extra round (review round 2, MEDIUM-A (c)); beyond
-// the landing reach the walk no longer fails over it: it is left alive (D6).
+// A unit near a circle the corridor skipped is never cleared by the extra round (review round 2, MEDIUM-A (c)). Inside
+// the landing reach the leftover fails the placement (the old case); beyond it the walk leaves the unit alive with a
+// note (D6, F4) — row 94's circle stands about 100 yd from the start.
 func TestQuietExtraClearRefusesUnitNearSkippedCircle(t *testing.T) {
-	f, p := newPlaceFixture(t)
-	rows, plan := placePlanRows(t)
-	// Row 94's circle stands about 100 yd from the start: beyond the landing reach, so the leftover is left alive (a
-	// unit inside the reach cannot also stand near this skipped circle).
-	target := placeRow94Circle(t, plan)
-	p.units = func(cmd string) ([]any, bool) {
-		if fl := strings.Fields(cmd); len(fl) > 2 && fl[2] == "3" { // the extra round's read: nothing there
-			return nil, false
-		}
-		if fl := strings.Fields(cmd); len(fl) == 7 && fl[3] == num32(target.X) && fl[4] == num32(target.Y) {
-			// A unit the row does not own stands in the circle: the corridor skips it.
-			return []any{map[string]any{"g": "0xF1300000000008", "e": 999999, "n": "Stranger",
-				"p": []float32{target.X, target.Y, target.Z}, "dz": 0.5, "d": 1.0}}, false
-		}
-		return nil, false
-	}
-	home := [3]float32{target.X, target.Y, target.Z}
-	p.quiet = func(int) bool { return false }
-	p.quietNear = []any{quietHomedAt(target.Entries[0], target.X, target.Y, target.Z, home)}
-	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
-	if code := f.run(context.Background()); code != exitOK {
-		t.Fatalf("exit %d, want 0: %s", code, f.summary().EndReason)
-	}
-	if n := extraClearCount(p); n != 0 {
-		t.Fatalf("the extra round cleared next to a skipped circle: %v", p.cleartos)
-	}
-	if !hasNote(f.summary(), "skipped circle of row") {
-		t.Fatalf("notes %v", f.summary().Notes)
-	}
-	if !hasNote(f.summary(), "leaves") || !hasNote(f.summary(), "alive") {
-		t.Fatalf("the walk did not leave the unit alive: %v", f.summary().Notes)
+	for _, tc := range []struct {
+		name   string
+		target func(t *testing.T, plan raidwalk.PlacePlan) raidwalk.ClearCircle
+		want   int
+	}{
+		{"inside the reach", func(_ *testing.T, plan raidwalk.PlacePlan) raidwalk.ClearCircle { return plan.Circles[0] }, exitRaidWalkFailed},
+		{"beyond the reach", placeRow94Circle, exitOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, p := newPlaceFixture(t)
+			rows, plan := placePlanRows(t)
+			target := tc.target(t, plan)
+			p.units = func(cmd string) ([]any, bool) {
+				if fl := strings.Fields(cmd); len(fl) > 2 && fl[2] == "3" { // the extra round's read: nothing there
+					return nil, false
+				}
+				if fl := strings.Fields(cmd); len(fl) == 7 && fl[3] == num32(target.X) && fl[4] == num32(target.Y) {
+					// A unit the row does not own stands in the circle: the corridor skips it.
+					return []any{map[string]any{"g": "0xF1300000000008", "e": 999999, "n": "Stranger",
+						"p": []float32{target.X, target.Y, target.Z}, "dz": 0.5, "d": 1.0}}, false
+				}
+				return nil, false
+			}
+			home := [3]float32{target.X, target.Y, target.Z}
+			p.quiet = func(int) bool { return false }
+			p.quietNear = []any{quietHomedAt(target.Entries[0], target.X, target.Y, target.Z, home)}
+			f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+			if code := f.run(context.Background()); code != tc.want {
+				t.Fatalf("exit %d, want %d: %s", code, tc.want, f.summary().EndReason)
+			}
+			if n := extraClearCount(p); n != 0 {
+				t.Fatalf("the extra round cleared next to a skipped circle: %v", p.cleartos)
+			}
+			if !hasNote(f.summary(), "skipped circle of row") {
+				t.Fatalf("notes %v", f.summary().Notes)
+			}
+			if tc.want == exitOK {
+				if !hasNote(f.summary(), "leaves") || !hasNote(f.summary(), "alive") {
+					t.Fatalf("the walk did not leave the unit alive: %v", f.summary().Notes)
+				}
+				return
+			}
+			if len(p.places) != 0 {
+				t.Fatalf("the walk placed with a unit in the reach: %v", p.places)
+			}
+		})
 	}
 }
 
@@ -1536,6 +1552,30 @@ func TestPlaceQuietCutNearListBeyondReachIsJudged(t *testing.T) {
 	}
 }
 
+// L2 (F2): the reach's own limit is inside. A cut near list whose farthest listed unit stands at exactly 25 yd refuses
+// the placement; at 25.1 yd it is judged as before (the unit is beyond where the raid lands).
+func TestPlaceQuietCutNearListAtTheReach(t *testing.T) {
+	cut := func(t *testing.T, d float32) *placeQuietRead {
+		t.Helper()
+		body, ok := ttLast(ttReplyOf(t, map[string]any{"n_near": 30, "near": []any{
+			map[string]any{"g": "0xF130000000C001", "e": 999001, "n": "Roamer", "p": []float32{5, 0, 0}, "d": 5.0},
+			map[string]any{"g": "0xF130000000C002", "e": 999002, "n": "Roamer", "p": []float32{d, 0, 0}, "d": d},
+		}}))
+		if !ok {
+			t.Fatal("the reply has no body")
+		}
+		r := &placeQuietRead{}
+		r.nearCutOf(body, nearUnitsOf(body))
+		return r
+	}
+	if r := cut(t, placeReachYd); !r.NearCut || r.NearCutYd != placeReachYd {
+		t.Fatalf("a cut list at exactly %v yd is not refused: %+v", placeReachYd, r)
+	}
+	if r := cut(t, placeReachYd+0.1); r.NearCut {
+		t.Fatalf("a cut list at %v yd is refused: %+v", placeReachYd+0.1, r)
+	}
+}
+
 // placeCircleWithEntry is the plan's first clear circle whose entries hold an entry.
 func placeCircleWithEntry(t *testing.T, plan raidwalk.PlacePlan, entry uint32) raidwalk.ClearCircle {
 	t.Helper()
@@ -1805,9 +1845,12 @@ func TestPlaceShortenedUntilReachesRunStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	until, _, _, refusal := raidwalk.PlaceBossGuard(rows, start, len(rows.Steps))
+	until, _, _, refusal, hit := raidwalk.PlaceBossGuard(rows, start, len(rows.Steps))
 	if refusal != "" {
 		t.Fatalf("the guard refused: %q", refusal)
+	}
+	if !hit {
+		t.Fatal("the guard did not report the segment")
 	}
 	if until == len(rows.Steps) {
 		t.Fatal("the guard did not shorten the until")
@@ -1835,6 +1878,124 @@ func TestPlaceShortenedUntilReachesRunStart(t *testing.T) {
 	}
 	if !hasNote(f.summary(), "the run stops before step") {
 		t.Fatalf("notes %v", f.summary().Notes)
+	}
+}
+
+// placeLastSegmentRows is the H1 fixture (F5, D8) as rows of plan zul_gurub: leg 0's boss at (20,150), leg 1's moves
+// along +y at (0,10)..(0,100), and leg 2's last row at (20,140), 10 yd from the boss. From step 5 the guard's hit is
+// on the final segment (11 -> 12), so until stays the stop and only hit tells the caller to shorten.
+// The last row is a move, or with bossLast the plan's boss at the same point (so `--until boss-done` resolves to
+// `none`: the boss is the plan's last step).
+func placeLastSegmentRows(bossLast bool) planexport.Rows {
+	const name = "zul_gurub"
+	rows := planexport.Rows{Plan: planexport.PlanRow{Plan: name, Map: 309}, Legs: []planexport.LegRow{
+		{Plan: name, Leg: 0, Name: "one"}, {Plan: name, Leg: 1, Name: "two"}, {Plan: name, Leg: 2, Name: "three"},
+	}}
+	add := func(s planexport.StepRow) {
+		s.Plan, s.Seq = name, len(rows.Steps)+1
+		rows.Steps = append(rows.Steps, s)
+	}
+	add(planexport.StepRow{Kind: planexport.KindBoss, Leg: 0, X: 20, Y: 150, Entries: []uint32{12345}}) // step 1
+	for i := range 10 {                                                                                 // steps 2..11
+		add(planexport.StepRow{Kind: planexport.KindMove, Leg: 1, Y: float32(10 + i*10)})
+	}
+	last := planexport.KindMove
+	if bossLast {
+		last = planexport.KindBoss
+	}
+	add(planexport.StepRow{Kind: last, Leg: 2, X: 20, Y: 140, Entries: []uint32{12345}}) // step 12: the last row
+	return rows
+}
+
+// placeSQLFile writes rows as a migration file for the walk's --sql (planexport's own writer and reader).
+func placeSQLFile(t *testing.T, rows planexport.Rows) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "walk.sql")
+	if err := os.WriteFile(path, []byte(planexport.WriteSQL([]planexport.Rows{rows})), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// H1 (D8): with `--until none` the guard's hit is on the last segment, where until already equals the stop. The walk
+// must shorten to `until step 12` all the same: the run never walks 11 -> 12 past the BEHIND boss of leg 0.
+func TestPlaceShortensAnUntilNoneHitOnTheLastSegment(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	rows := placeLastSegmentRows(false)
+	f.opts.dryRun = true
+	f.opts.from, f.opts.until, f.opts.sql = "step 5", "none", placeSQLFile(t, rows)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	out := f.stdout.String()
+	for _, want := range []string{
+		"until none (the place shortens it to until step 12)",
+		"8b place: start step 5 at 0 40 0; until step 12;",
+		"9 commander: run start zul_gurub from step 5 until step 12",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("the dry run misses %q:\n%s", want, out)
+		}
+	}
+}
+
+// H1 (D8): a boss-done run whose boss is the plan's last step resolves to `none`, and the guard's hit on the last
+// segment would stop the run before that boss: the placement must be refused (exit 2), not shortened past the boss.
+func TestPlaceRefusesAShortenedBossDoneOnTheLastSegment(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	rows := placeLastSegmentRows(true)
+	f.opts.dryRun = true
+	f.opts.from, f.opts.until, f.opts.sql = "step 5", "boss-done", placeSQLFile(t, rows)
+	if code := f.run(context.Background()); code != exitUsage {
+		t.Fatalf("exit %d, want %d: %s", code, exitUsage, f.stderr.String())
+	}
+	if !strings.Contains(f.stderr.String(), "that is before the boss-done step 12") {
+		t.Fatalf("stderr %q", f.stderr.String())
+	}
+}
+
+// L5 (F5): a shortened until is printed next to the one the user asked for, in the dry run's header and in the
+// summary, so the log never says `until none` for a run that walked `until step 12`.
+func TestPlaceShortenedUntilIsPrinted(t *testing.T) {
+	rows := placeLastSegmentRows(false)
+	const want = "until none (the place shortens it to until step 12)"
+	f, _ := newPlaceFixture(t)
+	f.opts.dryRun = true
+	f.opts.from, f.opts.until, f.opts.sql = "step 5", "none", placeSQLFile(t, rows)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("dry run exit %d: %s", code, f.stderr.String())
+	}
+	if out := f.stdout.String(); !strings.Contains(out, want) {
+		t.Fatalf("the dry run's header misses %q:\n%s", want, out)
+	}
+
+	f2, _ := newPlaceFixture(t)
+	f2.opts.from, f2.opts.until, f2.opts.sql = "step 5", "none", placeSQLFile(t, rows)
+	status := "TBM:RUN|zul_gurub|running|5/12|thekal|move|walk|walking|until step 12 (step 12)"
+	f2.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: status,
+		Lines: []string{
+			status,
+			"The run starts at step 5 of 12 (leg one)",
+			"TBM:ACTION_ACK|run start|party|1|-",
+		}}}
+	f2.agent.startQueue = []queuedEvent{
+		{raw: status},
+		{raw: "TBM:RUN|zul_gurub|done|5/12|thekal|move|walk|stopped before step 12 (until step 12): the party stays where it stands"},
+	}
+	if code := f2.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f2.stderr.String(), f2.stdout.String())
+	}
+	text, err := os.ReadFile(filepath.Join(f2.out, "summary.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(text), want) {
+		t.Fatalf("the summary misses %q:\n%s", want, text)
+	}
+	if sum := f2.summary(); sum.UntilEffective != "until step 12" || sum.Until != "none" {
+		t.Fatalf("summary.json until %q, until_effective %q", sum.Until, sum.UntilEffective)
 	}
 }
 

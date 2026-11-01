@@ -441,17 +441,18 @@ func routeSteps(rows planexport.Rows, start, stop int) []int {
 // A placed run is a fresh copy, so those bosses are alive. For the first segment a -> b that comes within the guard:
 //   - b in the start step's own leg (or a == start): refusal, the message PlaceClear gives today;
 //   - b in a later leg: until = b (`until step b` stops before b, so the run never walks a -> b), routeEnd = a (the
-//     corridor's route end), and a note naming the row, its leg, the distance and the two steps.
+//     corridor's route end), and a note naming the row, its leg, the distance and the two steps. When b is the stop
+//     itself, until == stop: the caller must still shorten, so hit says a segment came within the guard at all.
 //
-// With no segment within the guard: until = routeEnd = stop, no note.
-func PlaceBossGuard(rows planexport.Rows, start, stop int) (until, routeEnd int, note, refusal string) {
+// With no segment within the guard: until = routeEnd = stop, no note, hit false.
+func PlaceBossGuard(rows planexport.Rows, start, stop int) (until, routeEnd int, note, refusal string, hit bool) {
 	until, routeEnd = stop, stop
 	if start < 1 {
-		return until, routeEnd, "", ""
+		return until, routeEnd, "", "", false
 	}
 	steps := routeSteps(rows, start, stop)
 	if len(steps) < 2 {
-		return until, routeEnd, "", ""
+		return until, routeEnd, "", "", false
 	}
 	startLeg := rows.Steps[start-1].Leg
 	for i := 0; i+1 < len(steps); i++ {
@@ -470,7 +471,7 @@ func PlaceBossGuard(rows planexport.Rows, start, stop int) (until, routeEnd int,
 				continue
 			}
 			if steps[i] == start || b.Leg == startLeg {
-				return stop, stop, "", fmt.Sprintf("boss/event row %d of leg %d is within %.0f yd of the route: start later or walk from the door", j+1, s.Leg, d)
+				return stop, stop, "", fmt.Sprintf("boss/event row %d of leg %d is within %.0f yd of the route: start later or walk from the door", j+1, s.Leg, d), true
 			}
 			kind := "boss"
 			if s.Kind == planexport.KindHold {
@@ -478,10 +479,10 @@ func PlaceBossGuard(rows planexport.Rows, start, stop int) (until, routeEnd int,
 			}
 			note = fmt.Sprintf("the run stops before step %d (until step %d): the route from step %d to %d passes %.0f yd from BEHIND %s row %d of leg %d, which a placed run leaves alive",
 				steps[i+1], steps[i+1], steps[i], steps[i+1], d, kind, j+1, s.Leg)
-			return steps[i+1], steps[i], note, ""
+			return steps[i+1], steps[i], note, "", true
 		}
 	}
-	return until, routeEnd, "", ""
+	return until, routeEnd, "", "", false
 }
 
 // circleRadius is a BEHIND pull row's circle radius (spec 4.3).

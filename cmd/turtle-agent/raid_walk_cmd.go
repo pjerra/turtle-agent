@@ -565,7 +565,10 @@ type walk struct {
 	// bossDoneStep is the boss step --until boss-done resolved to (0: not asked). The server must show the step count of w.rows, else the
 	// step numbers are not the ones the clause was computed from.
 	bossDoneStep int
-	fromWords    []string
+	// placeShortened says the --place route guard shortened the until (F5, D8): untilLabel is then the effective
+	// clause and opts.until the one the user asked for, and the dry run and the summary print both.
+	placeShortened bool
+	fromWords      []string
 
 	agent    walkAgent
 	manifest teardownSlotManifest
@@ -886,12 +889,14 @@ func (w *walk) validate() error {
 		}
 		// A BEHIND boss or hold row of an earlier leg on the route is alive in the raid's fresh copy: when the route
 		// passes one in a later leg, the run shortens its until to stop before that segment (D8). In the start step's
-		// own leg the placement is refused, as PlaceClear's own guard does.
-		until, routeEnd, gnote, refusal := raidwalk.PlaceBossGuard(w.rows, startStep, stop)
+		// own leg the placement is refused, as PlaceClear's own guard does. A hit on the last segment leaves until at
+		// the stop, so hit says the run must shorten anyway (an `--until none` run, or a boss-done that became none:
+		// its walk would otherwise walk into that segment).
+		until, routeEnd, gnote, refusal, hit := raidwalk.PlaceBossGuard(w.rows, startStep, stop)
 		if refusal != "" {
 			return stopf(exitUsage, "%v", refusal)
 		}
-		if until != stop {
+		if hit && (until != stop || len(w.untilWords) == 0) {
 			if w.bossDoneStep != 0 && until <= w.bossDoneStep {
 				return stopf(exitUsage, "--place: %s; that is before the boss-done step %d", gnote, w.bossDoneStep)
 			}
@@ -900,6 +905,7 @@ func (w *walk) validate() error {
 				return stopf(exitUsage, "%v", err)
 			}
 			w.untilWords, w.untilLabel = words, label
+			w.placeShortened = true
 			w.note("place: %s", gnote)
 		}
 		clear := raidwalk.PlaceClear(w.rows, w.plan, startStep, routeEnd)
@@ -1242,7 +1248,11 @@ func (w *walk) printPlan(out io.Writer) {
 	if slot == "" {
 		slot = "any"
 	}
-	fmt.Fprintf(out, "until %s; from %s; enter %s; server %s slot %s holder %s\n", w.opts.until, from, w.opts.enter, w.opts.server, slot, w.opts.holder)
+	untilLine := w.opts.until
+	if w.placeShortened {
+		untilLine = fmt.Sprintf("%s (the place shortens it to %s)", untilLine, w.untilLabel)
+	}
+	fmt.Fprintf(out, "until %s; from %s; enter %s; server %s slot %s holder %s\n", untilLine, from, w.opts.enter, w.opts.server, slot, w.opts.holder)
 	outDir := slots.ExpandTilde(w.opts.out)
 	if outDir == "" {
 		outDir = "<out>"
@@ -1364,9 +1374,13 @@ func (w *walk) finish(code int) {
 		code = exitRaidWalkInjectFailed
 	}
 	w.exitCode = code
+	untilEffective := ""
+	if w.placeShortened {
+		untilEffective = w.untilLabel
+	}
 	meta := raidwalk.SummaryMeta{
 		Plan: w.plan.Name, Map: w.plan.Map, Server: w.opts.server, Slot: w.slotNumber(), Character: w.manifest.Character,
-		Until: w.opts.until, From: w.opts.from, Speed: w.opts.speed, TestSpeed: w.opts.speed != 1.0,
+		Until: w.opts.until, UntilEffective: untilEffective, From: w.opts.from, Speed: w.opts.speed, TestSpeed: w.opts.speed != 1.0,
 		RowsSHA256: rowsSHA256(w.rows), UntilStep: w.untilStep, RunLabel: w.runLabel, SpeedFellBack: w.speedFellBack,
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
