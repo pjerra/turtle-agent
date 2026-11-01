@@ -1103,16 +1103,27 @@ func (w *walk) waitStatus(ctx context.Context, timeout time.Duration, deadline t
 	}
 }
 
-// waitRevivePoint waits until the commander's OWN position is within reviveLandingYd of p on the plan's map. The
-// map id alone is not enough: a `.go xyz` answers at once, but the server lands the character a moment later, and
-// a summon that leaves before the landing drops the whole party at the OLD spot (walk 22 test2 s4, Q3: the lead
-// landed 560 yd back at the ZG entrance and its Voidwalker followed).
+// waitRevivePoint waits until the commander has LANDED at p on the plan's map: the server has settled its position
+// (reviveLanded). The map id alone is not enough: a `.go xyz` answers at once, but the server lands the character a
+// moment later, and a summon that leaves before the landing drops the whole party at the OLD spot (walk 22 test2
+// s4, Q3: the lead landed 560 yd back at the ZG entrance and its Voidwalker followed). The session also reports the
+// `.go` destination itself at once, flagged ZUnknown until the server sends a position, so a position match alone
+// is no landing either (Codex HIGH, F4 round 2).
 func (w *walk) waitRevivePoint(ctx context.Context, p dungeon.Point, deadline time.Time) error {
 	return w.waitStatus(ctx, reviveTeleportWait, deadline,
 		fmt.Sprintf("the commander is not within %d yd of the revive point on map %d", reviveLandingYd, w.plan.Map),
-		func(st session.StatusInfo) bool {
-			return st.Map == w.plan.Map && raidDist3(p, st.X, st.Y, st.Z) <= reviveLandingYd
-		})
+		func(st session.StatusInfo) bool { return reviveLanded(p, w.plan.Map, st) })
+}
+
+// reviveLanded says the status is a SETTLED landing at p on mapID: the server has sent a position (not ZUnknown, the
+// session's guess after a GM teleport) and the character is not falling, x/y are within reviveLandingYd of p and z
+// within reviveLandingZYd (a landing may drop to the floor, so z gets more room than x/y).
+func reviveLanded(p dungeon.Point, mapID uint32, st session.StatusInfo) bool {
+	if st.Map != mapID || st.ZUnknown || st.Falling {
+		return false
+	}
+	dx, dy := float64(p.X-st.X), float64(p.Y-st.Y)
+	return math.Hypot(dx, dy) <= reviveLandingYd && math.Abs(float64(p.Z-st.Z)) <= reviveLandingZYd
 }
 
 // bossRowEngaged says a plan-boss row is in a fight: alive and either holding a target or hurt.
@@ -1232,7 +1243,10 @@ func (w *walk) saveFrame(now time.Time, f *tbm.ViewFrame) {
 	if err != nil {
 		return
 	}
-	_, _ = w.framesF.Write(append(raw, '\n'))
+	if _, err := w.framesF.Write(append(raw, '\n')); err != nil && !w.framesWarned {
+		w.note("frames.jsonl: %v", err)
+		w.framesWarned = true
+	}
 }
 
 // saveCommanders GETs /api/v1/commanders, saves it and feeds the tracker's wipe rule.
@@ -1651,9 +1665,13 @@ func (w *walk) revive(ctx context.Context, step int) error {
 	return stopf(exitRaidWalkIncident, "wipe at step %d", step)
 }
 
-// reviveLandingYd is how close the commander's own position must come to a revive teleport's target before the
-// summons may leave (F4: a `.go xyz` answers at once, the server lands the character a moment later).
-const reviveLandingYd = 10
+// reviveLandingYd is how close (x/y) the commander's own position must come to a revive teleport's target before
+// the summons may leave (F4: a `.go xyz` answers at once, the server lands the character a moment later);
+// reviveLandingZYd is the z room, because a landing may drop to the floor.
+const (
+	reviveLandingYd  = 10
+	reviveLandingZYd = 30
+)
 
 // reviveTeleportWait is how long a revive teleport gets to land on its point.
 const reviveTeleportWait = 30 * time.Second
@@ -1667,8 +1685,8 @@ const reviveTeleportWait = 30 * time.Second
 // Every `.go xyz` must have landed (waitRevivePoint) before a summon leaves: waitMap alone saw only the map id,
 // which is already right when the agent stands in the instance, so the summons dropped the party at the OLD spot
 // (walk 22 test2 s4, Q3). selfRegroup says the run is regrouping by itself: TB then moves the lead and the party
-// itself, so the revive takes ONE fresh complete bot view just before the summons and summons only the hires it
-// reports dead (reviveSummons) — the revive that follows brings the dead back where they lie.
+// itself, so the revive sends no summons at all (the lead, living and dead hires alike): every hire is `.revive`d
+// where it lies and TB's regroup gathers them.
 func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup bool) error {
 	if w.stepFirst == nil {
 		return stopf(exitRaidWalkIncident, "not revived: the plan's rows give no first point")
@@ -1703,35 +1721,23 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 	if !ok {
 		return stopf(exitRaidWalkIncident, "not revived: %s", why)
 	}
-	// Codex HIGH, walk 22 F4 round 2: during a self-regroup a summon may only take a hire that ONE fresh
-	// complete bot view (the near-wipe path's completeDeadView) reports dead. A stale or missing frame is no
-	// licence to summon — the old > 10 s fallback summoned a hire merely because its last frame was old, and
-	// the revive's own quiet-check delay makes every frame old (walk 22 test2 s4, Q3: `.summon <lead>` 2 ms
-	// after the agent's own `.go xyz` dragged the lead 560 yd back). No complete fresh view means no summons at
-	// all: the regroup owns the movement, and the revive still raises the dead where they lie.
-	var deadSummons map[string]bool
+	// Walk 22 F4 (lead ruling, round 2): during a self-regroup the agent summons NOBODY, not the lead and not a dead
+	// hire. The run regroups by itself (TB moves the lead and gathers the party), and any `.summon` from where the
+	// agent stands would drag a hire back there (walk 22 test2 s4, Q3: `.summon <lead>` 2 ms after the agent's own
+	// `.go xyz` dropped the lead 560 yd back). Every hire is `.revive`d where it lies, below.
 	if selfRegroup {
-		if dead, ok := w.completeDeadView(ctx); ok {
-			deadSummons = make(map[string]bool, len(dead))
-			for _, name := range dead {
-				deadSummons[name] = true
+		w.note("self-regroup: no summons, revived in place")
+	} else {
+		for _, name := range w.hireList() {
+			if timeout := w.recoveryExpired(deadline); timeout != nil {
+				return timeout
 			}
-		} else {
-			w.note("self-regroup: no fresh view, no summons")
-		}
-	}
-	for _, name := range w.hireList() {
-		if timeout := w.recoveryExpired(deadline); timeout != nil {
-			return timeout
-		}
-		if !w.reviveSummons(name, selfRegroup, deadSummons) {
-			continue
-		}
-		if err := w.gm(ctx, ".summon "+name); err != nil {
-			return err
-		}
-		if err := w.recoverySleep(ctx, 100*time.Millisecond, deadline); err != nil {
-			return err
+			if err := w.gm(ctx, ".summon "+name); err != nil {
+				return err
+			}
+			if err := w.recoverySleep(ctx, 100*time.Millisecond, deadline); err != nil {
+				return err
+			}
 		}
 	}
 	if err := w.recoverySleep(ctx, 10*time.Second, deadline); err != nil {
@@ -1767,21 +1773,6 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 		}
 	}
 	return nil
-}
-
-// reviveSummons says whether the revive may `.summon` name. Outside a self-regroup every hire is summoned, as
-// before. During a self-regroup the run stays running and TB rests, gathers and walks back on its own: it moves
-// the lead itself, so the agent never summons the lead, and it summons only a hire the ONE fresh complete view
-// taken just before the summons reports dead (dead). A hire that view does not report — alive, or no fresh state
-// at all (dead nil: no complete view came) — stays where it stands: a stale or missing frame is no licence to
-// summon, or the revive's own quiet-check delay would turn the wipe's all-dead frame into one and drag a living
-// hire, or the lead, back to wherever the agent stands (walk 22 test2 s4, Q3). The revive that follows brings the
-// dead back where they lie.
-func (w *walk) reviveSummons(name string, selfRegroup bool, dead map[string]bool) bool {
-	if !selfRegroup {
-		return true
-	}
-	return name != w.mt && dead[name]
 }
 
 // recoverWipe revives the dead raid after a wipe, rests it out of combat and resumes the run instead of ending the
@@ -1916,6 +1907,9 @@ func (w *walk) recoverNearWipeRevive(ctx context.Context, deadline time.Time) (i
 			return 0, err
 		}
 		return len(w.hireList()), nil
+	}
+	if timeout := w.recoveryExpired(deadline); timeout != nil {
+		return 0, timeout
 	}
 	dead, ok := w.completeDeadView(ctx)
 	if !ok {

@@ -137,11 +137,21 @@ type walkFakeAgent struct {
 	// status polls, while the map id takes effect at once: the live server answers the go at once and lands the
 	// character a moment later (walk 22 test2 s4, Q3: the summons left 2 ms after the go). 0: every go lands at
 	// once, as the enter phase's own go does (it precedes the run start).
-	goLag      int
-	goPend     [3]float32
-	goPendOK   bool
-	goTarget   [3]float32 // the last `.go xyz` target: the revive point a `.summon` must wait for
-	goTargetOK bool
+	goLag int
+	// goLagEvery re-arms goLag for EVERY recovery go (the entrance fallback's go lags like the first), not only the first.
+	goLagEvery int
+	// goUnsettled makes the status report the recovery go's destination AT ONCE but flagged ZUnknown (or Falling when
+	// goUnsettledFalling) for that many polls, the live session's state until the server sends a position.
+	goUnsettled        int
+	goUnsettledFalling bool
+	unsettledLeft      int
+	lastUnsettled      bool // the last status served was flagged unsettled
+	// summonUnsettled counts the summons that left right after a status flagged unsettled.
+	summonUnsettled int
+	goPend          [3]float32
+	goPendOK        bool
+	goTarget        [3]float32 // the last `.go xyz` target: the revive point a `.summon` must wait for
+	goTargetOK      bool
 	// summonDist records, per `.summon`, the distance from the commander's own reported position to that target:
 	// a summon before the landing shows the race the wait closes.
 	summonDist []float64
@@ -207,7 +217,18 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 				f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
 			}
 		}
-		v = f.status
+		st := f.status
+		f.lastUnsettled = false
+		if f.unsettledLeft > 0 {
+			f.unsettledLeft--
+			f.lastUnsettled = true
+			if f.goUnsettledFalling {
+				st.Falling = true
+			} else {
+				st.ZUnknown = true
+			}
+		}
+		v = st
 		f.mu.Unlock()
 	case "party":
 		f.mu.Lock()
@@ -353,6 +374,12 @@ func (f *walkFakeAgent) gmSide(line string) {
 			if err == nil {
 				f.status.Map = uint32(m) // the go's map id takes effect at once; only a goLag test holds the position back
 			}
+			if started && f.goLagEvery > 0 {
+				f.goLag = f.goLagEvery
+			}
+			if started && f.goUnsettled > 0 {
+				f.unsettledLeft = f.goUnsettled
+			}
 			if started && f.goLag > 0 {
 				// The recovery's go: the position lands a few status polls later (the live server's landing).
 				f.goPend, f.goPendOK = f.goTarget, true
@@ -376,6 +403,9 @@ func (f *walkFakeAgent) gmSide(line string) {
 			f.pos = map[string][3]float32{}
 		}
 		f.pos[name] = [3]float32{f.x, f.y, f.z}
+		if f.lastUnsettled {
+			f.summonUnsettled++
+		}
 		if f.goTargetOK {
 			f.summonDist = append(f.summonDist, dist3([3]float32{f.status.X, f.status.Y, f.status.Z}, f.goTarget))
 		}
