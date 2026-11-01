@@ -1,12 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/pjerra/turtle-agent/internal/raidwalk"
 )
 
 // startPlan is three legs, the middle one optional: the run leader's leg numbers skip it.
@@ -125,5 +127,88 @@ func TestObserveStartFromStepKnowsItsLeg(t *testing.T) {
 	ps, err = observeStartFrom(p, 0, nil, n, nil)(0)
 	if err != nil || ps.ExpectLeg != "" || ps.HavePoint {
 		t.Fatalf("no count: %+v %v", ps, err)
+	}
+}
+
+// from_leg with the server's step count: the start point is the run leader's own first row of the leg in the rows the agent rebuilds
+// with that count. A count no rebuilt row set has is a drifted deployment (a plan file of other legs than the migration on the server:
+// dragonmaw_retreat's 5-leg draft against the 10-leg rows, 2026-10-30): the point is then unknown, so the run moves nobody to a point
+// of the wrong plan and the place check refuses (observe.allow_far_start overrides), instead of a GM move to the plan file's leg.
+func TestObserveStartFromLegTakesTheRunLeadersFirstRow(t *testing.T) {
+	p := startTestPlan(t)
+	res, err := planexport.Build(p, planexport.Options{Source: "test", GMCrossDirect: true, DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, ok := res.Rows.LegFirstStep(p, 2)
+	if !ok {
+		t.Fatal("leg 2 has no first step")
+	}
+	want, _ := res.Rows.StepPoint(n)
+	ps, err := observeStartFrom(p, 2, nil, 0, nil)(res.Rows.StepCount())
+	if err != nil || ps.Words != "from leg third" || !ps.HavePoint || ps.Point != want {
+		t.Fatalf("matching count: %+v (want point %+v) %v", ps, want, err)
+	}
+	ps, err = observeStartFrom(p, 2, nil, 0, nil)(res.Rows.StepCount() + 7)
+	if err != nil || ps.Words != "from leg third" || ps.HavePoint {
+		t.Fatalf("drifted count: %+v %v (want the words, and no point)", ps, err)
+	}
+}
+
+const untilPlan = `{"version":1,"name":"Until","status":"mapped (test)","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"first","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":20,"y":0,"z":0}]}],"boss":{"entry":7,"position":{"x":25,"y":0,"z":0}}},
+ {"name":"second","to":{"x":30,"y":0,"z":0},"pull_groups":[{"entries":[102],"positions":[{"x":40,"y":0,"z":0}]}]}]}`
+
+// observe.until: the plain words go as they are; boss-done is the step after the first boss row of the rows that have the server's step
+// count, and a plan the agent cannot reproduce is refused.
+func TestObserveUntil(t *testing.T) {
+	p, err := dungeon.Parse("until.json", []byte(untilPlan))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observeUntil(p, "", nil) != nil {
+		t.Fatal("no until has a resolver")
+	}
+	u, err := observeUntil(p, "boss", nil)(0)
+	if err != nil || strings.Join(u.Words, " ") != "until boss" || u.Label != "until boss" {
+		t.Fatalf("boss: %+v %v", u, err)
+	}
+	if u, err := observeUntil(p, "none", nil)(0); err != nil || len(u.Words) != 0 || u.Label != "" {
+		t.Fatalf("none: %+v %v", u, err)
+	}
+	res, err := planexport.Build(p, planexport.Options{Source: "observe mode step mapping", GMCrossDirect: true, DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clause, boss, err := raidwalk.BossDoneUntil(res.Rows)
+	if err != nil || boss < 1 || !strings.HasPrefix(clause, "step ") {
+		t.Fatalf("%q %d %v", clause, boss, err)
+	}
+	u, err = observeUntil(p, "boss-done", nil)(res.Rows.StepCount())
+	if err != nil || strings.Join(u.Words, " ") != "until "+clause || u.Label != "until "+clause {
+		t.Fatalf("boss-done: %+v %v, want %q", u, err, clause)
+	}
+	if _, err := observeUntil(p, "boss-done", nil)(res.Rows.StepCount() + 7); err == nil || !strings.Contains(err.Error(), "step N") {
+		t.Fatalf("other rows: %v", err)
+	}
+	if _, err := observeUntil(p, "boss-done", nil)(0); err == nil || !strings.Contains(err.Error(), "did not list") {
+		t.Fatalf("no listed count: %v", err)
+	}
+	if _, err := observeUntil(p, "sideways", nil)(10); err == nil {
+		t.Fatal("a bad word was taken")
+	}
+}
+
+func TestCheckObserveUntil(t *testing.T) {
+	bad := func(f string, a ...any) error { return fmt.Errorf(f, a...) }
+	for _, ok := range []string{"", "boss", "boss-done", "none", "step 29", "leg gehennas"} {
+		if err := checkObserve(dungeonRunParams{Observe: &observeParam{Until: ok}}, bad); err != nil {
+			t.Errorf("until %q refused: %v", ok, err)
+		}
+	}
+	for _, no := range []string{"boss-dne", "step", "step 0", "leg Go"} {
+		if err := checkObserve(dungeonRunParams{Observe: &observeParam{Until: no}}, bad); err == nil || !strings.Contains(err.Error(), "observe.until") {
+			t.Errorf("until %q: %v", no, err)
+		}
 	}
 }

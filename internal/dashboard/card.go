@@ -141,7 +141,8 @@ type LeaderInfo struct {
 	Kind  string `json:"kind,omitempty"`
 	Phase string `json:"phase,omitempty"`
 	Note  string `json:"note,omitempty"`
-	Left  int    `json:"left,omitempty"` // packs the run leader left alive
+	Left  int    `json:"left,omitempty"`  // packs the run leader left alive
+	Label string `json:"label,omitempty"` // the speed/until label of the status line
 	Step  int    `json:"step"`
 	Steps int    `json:"steps"`
 	// Text is the status in plain words: "Run leader: Sentinel · pull 7/41 · pulling".
@@ -331,6 +332,7 @@ type rawReport struct {
 			Phase   string `json:"phase"`
 			Note    string `json:"note"`
 			Left    int    `json:"left,omitempty"`
+			Label   string `json:"label,omitempty"`
 			Lines   int    `json:"lines"`
 		} `json:"observe"`
 		PlanReloads []struct {
@@ -527,7 +529,7 @@ func fillRun(c *Card, rep *rawReport, ds rawDungeon, in Inputs) {
 		c.Counters.OrdersSent, c.Counters.OrdersRefused, c.Counters.OrdersUnanswered = r.OrdersSent, r.OrdersRefused, r.OrdersUnanswered
 		c.Counters.Unreachable = r.Unreachable
 		if o := r.Observe; o != nil && o.Lines > 0 {
-			c.Run.Leader = leaderInfo(tbm.RunStatus{State: o.State, Step: o.Step, Steps: o.Steps, Leg: o.Leg, Kind: o.Kind, Phase: o.Phase, Note: o.Note, Left: o.Left})
+			c.Run.Leader = leaderInfo(tbm.RunStatus{State: o.State, Step: o.Step, Steps: o.Steps, Leg: o.Leg, Kind: o.Kind, Phase: o.Phase, Note: o.Note, Left: o.Left, Label: o.Label})
 			if c.Run.State == "running" {
 				c.Run.Phase = "leader"
 			}
@@ -558,7 +560,7 @@ func fillRun(c *Card, rep *rawReport, ds rawDungeon, in Inputs) {
 
 // leaderInfo is the card's view of a run leader status, with its plain-words line.
 func leaderInfo(st tbm.RunStatus) *LeaderInfo {
-	li := &LeaderInfo{State: st.State, Leg: st.Leg, Kind: st.Kind, Phase: st.Phase, Note: st.Note, Left: st.Left, Step: st.Step, Steps: st.Steps}
+	li := &LeaderInfo{State: st.State, Leg: st.Leg, Kind: st.Kind, Phase: st.Phase, Note: st.Note, Left: st.Left, Label: st.Label, Step: st.Step, Steps: st.Steps}
 	text := st.Text()
 	if text != "" {
 		text = strings.ToUpper(text[:1]) + text[1:]
@@ -584,6 +586,9 @@ func leaderInfo(st tbm.RunStatus) *LeaderInfo {
 		li.Text += ", 1 pack left"
 	} else if st.Left > 1 {
 		li.Text += fmt.Sprintf(", %d packs left", st.Left)
+	}
+	if st.Label != "" {
+		li.Text += " (" + st.Label + ")"
 	}
 	return li
 }

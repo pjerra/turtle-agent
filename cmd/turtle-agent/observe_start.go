@@ -10,6 +10,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -77,8 +78,58 @@ func observeStartFrom(plan *dungeon.Plan, leg int, group *int, step int, planner
 				ps.Words = "from " + strconv.Itoa(rowLeg)
 			}
 			ps.Point, ps.HavePoint = legStartPoint(plan, leg)
+			if serverSteps > 0 {
+				// The run leader starts at the leg's first row of its own rows, which is where the party must stand. When no rebuilt row
+				// set has the server's step count the plan file and the deployed rows differ (other legs, other rows), so no point of
+				// the plan file is the start: unknown, and the place check refuses rather than the start moving the party there.
+				ps.Point, ps.HavePoint = observeLegStep(plan, leg, planner, serverSteps)
+			}
 			return ps, nil
 		}
+	}
+}
+
+// observeUntil is the RemoteOptions.Until of an observed run (observe.until); nil when the run goes to the plan's end. The words boss,
+// step N, leg L and none go to the run leader as they are; boss-done is the step after the first boss row, in the numbering of the rows
+// the server runs: the exporter option set whose step count equals the one the server listed gives it, and the option sets that match
+// must agree (else the clause cannot be told offline and the run is refused before a bot is hired).
+func observeUntil(plan *dungeon.Plan, until string, planner *navmesh.Planner) dungeon.UntilResolver {
+	until = strings.TrimSpace(until)
+	if until == "" {
+		return nil
+	}
+	return func(serverSteps int) (dungeon.UntilClause, error) {
+		if !raidwalk.IsBossDone(until) {
+			words, label, err := raidwalk.ParseUntil(until)
+			return dungeon.UntilClause{Words: words, Label: label}, err
+		}
+		if serverSteps <= 0 {
+			return dungeon.UntilClause{}, fmt.Errorf("observe.until boss-done: the server did not list the plan's step count for %s (.bot run list), so the step after the boss cannot be mapped; use observe.until \"step N\"", plan.Name)
+		}
+		cands, buildErrs := observePlanRows(plan, planner)
+		clauses := map[string]bool{}
+		var counts []int
+		var clause string
+		for _, r := range cands {
+			counts = append(counts, r.StepCount())
+			if r.StepCount() != serverSteps {
+				continue
+			}
+			c, _, err := raidwalk.BossDoneUntil(r)
+			if err != nil {
+				return dungeon.UntilClause{}, fmt.Errorf("observe.until: %w", err)
+			}
+			clause = c
+			clauses[c] = true
+		}
+		switch {
+		case len(clauses) == 0:
+			return dungeon.UntilClause{}, fmt.Errorf("observe.until boss-done: the server's plan %s has %d steps, and the plan file's exported rows give %s steps (%s): the rows on the server were exported with other options, so the step after the boss cannot be computed offline; use observe.until \"step N\" or \"leg L\"", plan.Name, serverSteps, distinctSteps(counts), strings.Join(buildErrs, "; "))
+		case len(clauses) > 1:
+			return dungeon.UntilClause{}, fmt.Errorf("observe.until boss-done: the exporter's option sets that match the server's %d steps put the boss at different steps; use observe.until \"step N\"", serverSteps)
+		}
+		words, label, err := raidwalk.ParseUntil(clause)
+		return dungeon.UntilClause{Words: words, Label: label}, err
 	}
 }
 
@@ -143,6 +194,33 @@ func observeGroupStep(plan *dungeon.Plan, leg, group int, planner *navmesh.Plann
 		return 0, dungeon.Point{}, false, fmt.Errorf("from_pull_group %d (leg %d): the exporter's option sets that match the server's %d steps put the group at steps %v: too ambiguous to pick one; pass observe.from_step", group, leg, serverSteps, distinctSteps(steps))
 	}
 	return steps[0], at, haveAt, nil
+}
+
+// observeLegStep is the point of the run leader's first row of plan leg leg, from the rebuilt row sets whose step count is the server's;
+// not known when none has that count or two of them put the row in different places.
+func observeLegStep(plan *dungeon.Plan, leg int, planner *navmesh.Planner, serverSteps int) (dungeon.Point, bool) {
+	cands, _ := observePlanRows(plan, planner)
+	var at dungeon.Point
+	have := false
+	for _, r := range cands {
+		if r.StepCount() != serverSteps {
+			continue
+		}
+		n, ok := r.LegFirstStep(plan, leg)
+		if !ok {
+			continue
+		}
+		p, ok := r.StepPoint(n)
+		if !ok {
+			continue
+		}
+		if !have {
+			at, have = p, true
+		} else if pointDist(at, p) > 1 {
+			return dungeon.Point{}, false
+		}
+	}
+	return at, have
 }
 
 // observeStepInfo is the point of the module's step step and the plan leg it belongs to, when an exporter option set reproduces the

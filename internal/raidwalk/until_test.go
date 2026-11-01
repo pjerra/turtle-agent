@@ -2,7 +2,10 @@ package raidwalk
 
 import (
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/pjerra/turtle-agent/internal/planexport"
 )
 
 func TestParseUntil(t *testing.T) {
@@ -57,5 +60,38 @@ func TestParseFrom(t *testing.T) {
 		if _, err := ParseFrom(in); err == nil {
 			t.Errorf("ParseFrom(%q) accepted", in)
 		}
+	}
+}
+
+func TestBossDoneUntil(t *testing.T) {
+	step := func(kind string) planexport.StepRow { return planexport.StepRow{Kind: kind} }
+	cases := []struct {
+		name  string
+		steps []planexport.StepRow
+		want  string
+		boss  int
+	}{
+		{"boss then more", []planexport.StepRow{step("move"), step("pull"), step(planexport.KindBoss), step("move")}, "step 4", 3},
+		{"first boss counts", []planexport.StepRow{step(planexport.KindBoss), step("move"), step(planexport.KindBoss)}, "step 2", 1},
+		{"boss last", []planexport.StepRow{step("move"), step(planexport.KindBoss)}, "none", 2},
+	}
+	for _, c := range cases {
+		got, boss, err := BossDoneUntil(planexport.Rows{Steps: c.steps})
+		if err != nil || got != c.want || boss != c.boss {
+			t.Errorf("%s: %q, %d, %v; want %q, %d", c.name, got, boss, err, c.want, c.boss)
+		}
+		// the clause is one ParseUntil takes
+		if _, _, err := ParseUntil(got); err != nil {
+			t.Errorf("%s: ParseUntil(%q): %v", c.name, got, err)
+		}
+	}
+	if _, _, err := BossDoneUntil(planexport.Rows{Steps: []planexport.StepRow{step("move")}}); err == nil || !strings.Contains(err.Error(), "no boss step") {
+		t.Errorf("a plan without a boss: %v", err)
+	}
+	if _, _, err := ParseUntil("boss-done"); err == nil || !strings.Contains(err.Error(), "BossDoneUntil") {
+		t.Errorf("ParseUntil takes boss-done unresolved: %v", err)
+	}
+	if !IsBossDone(" boss-done ") || IsBossDone("boss") {
+		t.Error("IsBossDone")
 	}
 }

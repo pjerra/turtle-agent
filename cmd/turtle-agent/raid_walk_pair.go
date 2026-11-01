@@ -1,7 +1,9 @@
-// raid_walk_pair.go: two raids at once, `raid-walk <plan> [<plan2>] --slot A,B` (spec raid-walk-addons 4). It splits
-// --slot A,B into two ordinary walks, each with its own slot, lease, agent, dashboard client and output dir, and runs
-// them in two goroutines under one context. Nothing here is a second walk implementation: both halves call
-// raidWalkRun (the package var, so tests fake it) with the same raidWalkOptions the single walk parses.
+// raid_walk_pair.go: raids at once, `raid-walk <plan> [<plan2> ...] --slot A,B[,C...]` (spec raid-walk-addons 4; more than two
+// slots are the multi form). It splits --slot into ordinary walks, each with its own slot, lease, agent, commander, dashboard
+// client and output dir (so each raid is its own group and its own instance), and runs them in goroutines under one context.
+// Nothing here is a second walk implementation: every walk calls raidWalkRun (the package var, so tests fake it) with the same
+// raidWalkOptions the single walk parses. Two slots write pair.json and pair.txt (format tb-raid-walk-pair); three or more write
+// multi.json and multi.txt (format tb-raid-walk-multi) with the same rows plus combined totals.
 package main
 
 import (
@@ -36,10 +38,14 @@ var raidWalkPairEnv = defaultWalkEnv
 // raidWalkPairSleep is the stagger wait between the two starts; tests replace it to record the wait.
 var raidWalkPairSleep = sleepCtx
 
+// pairMaxSlots is how many raids one command walks at once (the slots a server config has are fewer).
+const pairMaxSlots = 8
+
 // pairUsage is the pair form's own usage line.
-const pairUsage = `usage: turtle-agent raid-walk <plan> [<plan2>] --slot A,B [--stagger 30s] [--out DIR] [walk flags]
-    per-walk flags take a slot prefix: --sql A=a.sql --sql B=b.sql (--sql --hires --dir --patrols --until --from
-    --tier --tier-override --holder --inject); every other raid-walk flag is global`
+const pairUsage = `usage: turtle-agent raid-walk <plan> [<plan2> ...] --slot A,B[,C...] [--stagger 30s] [--out DIR] [walk flags]
+    two to 8 slots, never slot 3; one plan for every slot, or one plan per slot, in the slots' order. Each slot is its
+    own commander, group and instance. Per-walk flags take a slot prefix: --sql A=a.sql --sql B=b.sql (--sql --hires
+    --dir --patrols --until --from --tier --tier-override --holder --inject); every other raid-walk flag is global`
 
 // pairSlotRe is a slot id: the slots config's own shape.
 var pairSlotRe = regexp.MustCompile(`^[A-Za-z0-9]{1,8}$`)
@@ -229,18 +235,20 @@ func raidWalkPairCmd(ctx context.Context, args []string, stdout, stderr io.Write
 
 	wg.Add(1)
 	go run(0)
-	skipSecond := false
-	if o.stagger > 0 {
-		if err := raidWalkPairSleep(ctx, o.stagger); err != nil {
-			skipSecond = true
-			results[1].code = exitRaidWalkFailed
-			results[1].reason = "interrupted"
-			addNote("s%s %s: not started (interrupted during the stagger)", entries[1].slot, entries[1].plan)
+	for i := 1; i < len(entries); i++ {
+		if o.stagger > 0 {
+			if err := raidWalkPairSleep(ctx, o.stagger); err != nil {
+				// An interrupt in the stagger: this walk and the ones after it never start.
+				for j := i; j < len(entries); j++ {
+					results[j].code = exitRaidWalkFailed
+					results[j].reason = "interrupted"
+					addNote("s%s %s: not started (interrupted during the stagger)", entries[j].slot, entries[j].plan)
+				}
+				break
+			}
 		}
-	}
-	if !skipSecond {
 		wg.Add(1)
-		go run(1)
+		go run(i)
 	}
 	wg.Wait()
 	for i := range outW {
@@ -266,17 +274,30 @@ func raidWalkPairCmd(ctx context.Context, args []string, stdout, stderr io.Write
 	for i, w := range entries {
 		rep.Walks = append(rep.Walks, pairWalkReportOf(w, results[i]))
 	}
-	rep.OverlapS = pairOverlap(results[0].sum, results[1].sum)
-	rep.DashboardBothListed = pairDashboardBoth(rep.Walks, entries)
-
+	sums := make([]*raidwalk.Summary, len(results))
+	for i := range results {
+		sums[i] = results[i].sum
+	}
+	rep.OverlapS = pairOverlap(sums...)
+	listed := pairDashboardAll(rep.Walks, entries)
+	base := "pair"
+	var doc any = &rep
 	text := rep.Text()
-	if raw, err := json.MarshalIndent(rep, "", "  "); err == nil {
-		if err := os.WriteFile(filepath.Join(out, "pair.json"), append(raw, '\n'), 0o600); err != nil {
-			fmt.Fprintf(stderr, "raid-walk: pair.json: %v\n", err)
+	if len(entries) > 2 {
+		base = "multi"
+		m := multiReport{Format: "tb-raid-walk-multi", Version: 1, Started: rep.Started, Ended: rep.Ended, StaggerS: rep.StaggerS,
+			Walks: rep.Walks, OverlapS: rep.OverlapS, DashboardAllListed: listed, Totals: multiTotalsOf(rep.Walks), ExitCode: code, Notes: rep.Notes}
+		doc, text = &m, m.Text()
+	} else {
+		rep.DashboardBothListed = listed
+	}
+	if raw, err := json.MarshalIndent(doc, "", "  "); err == nil {
+		if err := os.WriteFile(filepath.Join(out, base+".json"), append(raw, '\n'), 0o600); err != nil {
+			fmt.Fprintf(stderr, "raid-walk: %s.json: %v\n", base, err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(out, "pair.txt"), []byte(text), 0o600); err != nil {
-		fmt.Fprintf(stderr, "raid-walk: pair.txt: %v\n", err)
+	if err := os.WriteFile(filepath.Join(out, base+".txt"), []byte(text), 0o600); err != nil {
+		fmt.Fprintf(stderr, "raid-walk: %s.txt: %v\n", base, err)
 	}
 	fmt.Fprint(stdout, text)
 	return code
@@ -535,20 +556,25 @@ func parsePairArgs(args []string, stderr io.Writer) (pairOptions, int) {
 		}
 	}
 	if !haveSlot {
-		return usage("the pair form needs --slot A,B")
+		return usage("the multi-raid form needs --slot A,B[,C...]")
 	}
 	oa := pairOptions{out: outVal, dryRun: dryRun, stagger: 30 * time.Second}
 	if !haveOut {
 		oa.out = fmt.Sprintf("raid-walk-pair-%s", time.Now().Format("20060102-150405"))
 	}
-	parts := strings.Split(slotVal, ",")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || parts[0] == parts[1] ||
-		!pairSlotRe.MatchString(parts[0]) || !pairSlotRe.MatchString(parts[1]) {
-		return usage("--slot wants exactly two distinct slot ids, not %q", slotVal)
+	slotIDs := strings.Split(slotVal, ",")
+	if len(slotIDs) < 2 || len(slotIDs) > pairMaxSlots {
+		return usage("--slot wants two to %d distinct slot ids, not %q", pairMaxSlots, slotVal)
 	}
-	slotA, slotB := parts[0], parts[1]
+	seenSlot := map[string]bool{}
+	for _, id := range slotIDs {
+		if id == "" || seenSlot[id] || !pairSlotRe.MatchString(id) {
+			return usage("--slot wants two to %d distinct slot ids, not %q", pairMaxSlots, slotVal)
+		}
+		seenSlot[id] = true
+	}
 	// The owner rule, before anything else (raid-walk never uses slot 3).
-	if slotA == "3" || slotB == "3" {
+	if seenSlot["3"] {
 		fmt.Fprintln(stderr, "raid-walk never uses slot 3 (owner rule)")
 		return pairOptions{}, exitSlotRefused
 	}
@@ -559,27 +585,30 @@ func parsePairArgs(args []string, stderr io.Writer) (pairOptions, int) {
 		}
 		oa.stagger = d
 	}
-	if len(positionals) < 1 || len(positionals) > 2 {
-		return usage("the pair form takes one plan (both slots) or two plans, not %d", len(positionals))
+	if len(positionals) != 1 && len(positionals) != len(slotIDs) {
+		return usage("this form takes one plan (for every slot) or one plan per slot (%d), not %d", len(slotIDs), len(positionals))
 	}
-	plans := []string{positionals[0], positionals[0]}
-	if len(positionals) == 2 {
-		plans[1] = positionals[1]
+	plans := make([]string, len(slotIDs))
+	for i := range plans {
+		plans[i] = positionals[0]
+		if len(positionals) > 1 {
+			plans[i] = positionals[i]
+		}
 	}
 
 	// Distribute the flags: a slot prefix narrows a per-walk flag to that walk, an unprefixed one applies to both.
-	perWalk := [2][]pairFlag{}
+	perWalk := make([][]pairFlag, len(slotIDs))
 	var global []pairFlag
 	for _, f := range flags {
 		value := f.value
 		prefix := ""
 		if i := strings.IndexByte(value, '='); i > 0 {
 			cand := value[:i]
-			if cand == slotA || cand == slotB {
+			if seenSlot[cand] {
 				prefix = cand
 				value = value[i+1:]
 			} else if pairDigitsRe.MatchString(cand) {
-				return usage("--%s carries an unknown slot prefix %q (the slots are %s and %s)", f.name, cand, slotA, slotB)
+				return usage("--%s carries an unknown slot prefix %q (the slots are %s)", f.name, cand, strings.Join(slotIDs, ", "))
 			}
 		}
 		if !pairPerWalkFlags[f.name] {
@@ -590,16 +619,15 @@ func parsePairArgs(args []string, stderr io.Writer) (pairOptions, int) {
 			continue
 		}
 		g := pairFlag{name: f.name, value: value}
-		if prefix == "" || prefix == slotA {
-			perWalk[0] = append(perWalk[0], g)
-		}
-		if prefix == "" || prefix == slotB {
-			perWalk[1] = append(perWalk[1], g)
+		for i, id := range slotIDs {
+			if prefix == "" || prefix == id {
+				perWalk[i] = append(perWalk[i], g)
+			}
 		}
 	}
 
-	oa.walks = make([]*pairWalk, 2)
-	for i, slot := range []string{slotA, slotB} {
+	oa.walks = make([]*pairWalk, len(slotIDs))
+	for i, slot := range slotIDs {
 		plan := plans[i]
 		walkArgs := []string{"--slot", slot, "--out", filepath.Join(oa.out, fmt.Sprintf("s%s-%s", slot, plan))}
 		if dryRun {
@@ -621,8 +649,12 @@ func parsePairArgs(args []string, stderr io.Writer) (pairOptions, int) {
 		}
 		oa.walks[i] = &pairWalk{slot: slot, plan: plan, prefix: fmt.Sprintf("[s%s %s] ", slot, plan), opts: opts}
 	}
-	if oa.walks[0].opts.holder == oa.walks[1].opts.holder {
-		return usage("both walks would hold the lease as %q: give --holder A=... and --holder B=...", oa.walks[0].opts.holder)
+	holders := map[string]bool{}
+	for _, w := range oa.walks {
+		if holders[w.opts.holder] {
+			return usage("two walks would hold the lease as %q: give each slot its own --holder SLOT=...", w.opts.holder)
+		}
+		holders[w.opts.holder] = true
 	}
 	return oa, exitOK
 }
@@ -705,6 +737,52 @@ type pairReport struct {
 	Notes               []string         `json:"notes"`
 }
 
+// multiReport is multi.json (format tb-raid-walk-multi v1): the pair report's rows for three or more walks, one commanders dump that
+// names every character, and the combined sums.
+type multiReport struct {
+	Format             string           `json:"format"`
+	Version            int              `json:"version"`
+	Started            time.Time        `json:"started"`
+	Ended              time.Time        `json:"ended"`
+	StaggerS           float64          `json:"stagger_s"`
+	Walks              []pairWalkReport `json:"walks"`
+	OverlapS           float64          `json:"overlap_s"`
+	DashboardAllListed *bool            `json:"dashboard_all_listed"`
+	Totals             *multiTotals     `json:"totals"`
+	ExitCode           int              `json:"exit_code"`
+	Notes              []string         `json:"notes"`
+}
+
+// multiTotals is the combined summary of a multi-raid walk.
+type multiTotals struct {
+	Walks        int `json:"walks"`
+	Until        int `json:"ended_by_until"`
+	Failed       int `json:"failed"`
+	StepsReached int `json:"steps_reached"`
+	Deaths       int `json:"deaths"`
+	Fights       int `json:"fights"`
+	Pauses       int `json:"pauses"`
+}
+
+// multiTotalsOf sums the walks of a multi-raid run: a walk counts as ended by its until when its end reason says so, as failed when
+// its exit code is not 0.
+func multiTotalsOf(walks []pairWalkReport) *multiTotals {
+	t := &multiTotals{Walks: len(walks)}
+	for _, w := range walks {
+		if w.EndReason == "until" {
+			t.Until++
+		}
+		if w.ExitCode != exitOK {
+			t.Failed++
+		}
+		t.StepsReached += w.StepsReached
+		t.Deaths += w.Deaths
+		t.Fights += w.Fights
+		t.Pauses += w.Pauses
+	}
+	return t
+}
+
 // pairWalkReportOf fills one walk's line from its summary (or its fallback when the walk wrote none).
 func pairWalkReportOf(w *pairWalk, r pairResult) pairWalkReport {
 	rep := pairWalkReport{
@@ -726,18 +804,23 @@ func pairWalkReportOf(w *pairWalk, r pairResult) pairWalkReport {
 	return rep
 }
 
-// pairOverlap is how long both walks were between their start and their end, from the two summaries.
-func pairOverlap(a, b *raidwalk.Summary) float64 {
-	if a == nil || b == nil {
+// pairOverlap is how long all the walks were running together, from their summaries: the latest start to the earliest end. A walk
+// that wrote no summary makes it 0.
+func pairOverlap(sums ...*raidwalk.Summary) float64 {
+	if len(sums) == 0 {
 		return 0
 	}
-	start := a.Started
-	if b.Started.After(start) {
-		start = b.Started
-	}
-	end := a.Ended
-	if b.Ended.Before(end) {
-		end = b.Ended
+	var start, end time.Time
+	for i, s := range sums {
+		if s == nil {
+			return 0
+		}
+		if i == 0 || s.Started.After(start) {
+			start = s.Started
+		}
+		if i == 0 || s.Ended.Before(end) {
+			end = s.Ended
+		}
 	}
 	if !end.After(start) {
 		return 0
@@ -745,9 +828,9 @@ func pairOverlap(a, b *raidwalk.Summary) float64 {
 	return math.Round(end.Sub(start).Seconds()*10) / 10
 }
 
-// pairDashboardBothListed is true when one commanders dump of either walk names both characters; null with the
-// dashboard off (spec 4.1).
-func pairDashboardBoth(walks []pairWalkReport, entries []*pairWalk) *bool {
+// pairDashboardAll is true when one commanders dump of any walk names every character of the walks; null with the dashboard off
+// (spec 4.1). With two walks it is the pair's dashboard_both_listed.
+func pairDashboardAll(walks []pairWalkReport, entries []*pairWalk) *bool {
 	on := false
 	for _, w := range entries {
 		if s := readPairSummary(w.outDir); s != nil && !strings.HasPrefix(s.Dashboard, "off") {
@@ -764,7 +847,7 @@ func pairDashboardBoth(walks []pairWalkReport, entries []*pairWalk) *bool {
 		}
 	}
 	for _, w := range walks {
-		if len(names) == 2 && pairDumpNamesBoth(w.Out, names[0], names[1]) {
+		if len(names) == len(walks) && pairDumpNamesAll(w.Out, names) {
 			yes := true
 			return &yes
 		}
@@ -773,8 +856,8 @@ func pairDashboardBoth(walks []pairWalkReport, entries []*pairWalk) *bool {
 	return &no
 }
 
-// pairDumpNamesBoth reports whether one commanders-*.json dump of dir names both characters.
-func pairDumpNamesBoth(dir, a, b string) bool {
+// pairDumpNamesAll reports whether one commanders-*.json dump of dir names every one of names.
+func pairDumpNamesAll(dir string, names []string) bool {
 	files, err := filepath.Glob(filepath.Join(dir, "commanders-*.json"))
 	if err != nil {
 		return false
@@ -793,16 +876,21 @@ func pairDumpNamesBoth(dir, a, b string) bool {
 		if json.Unmarshal(raw, &v) != nil {
 			continue
 		}
-		haveA, haveB := false, false
-		for _, c := range v.Commanders {
-			if strings.EqualFold(c.Commander, a) {
-				haveA = true
+		all := true
+		for _, n := range names {
+			found := false
+			for _, c := range v.Commanders {
+				if strings.EqualFold(c.Commander, n) {
+					found = true
+					break
+				}
 			}
-			if strings.EqualFold(c.Commander, b) {
-				haveB = true
+			if !found {
+				all = false
+				break
 			}
 		}
-		if haveA && haveB {
+		if all {
 			return true
 		}
 	}
@@ -837,5 +925,27 @@ func (r pairReport) Text() string {
 		fmt.Fprintf(&b, "note: %s\n", n)
 	}
 	fmt.Fprintf(&b, "pair: exit %d\n", r.ExitCode)
+	return b.String()
+}
+
+// Text is multi.txt: one line per walk, the combined totals and the exit.
+func (r multiReport) Text() string {
+	var b strings.Builder
+	for _, w := range r.Walks {
+		reason := w.EndReason
+		if reason == "" {
+			reason = "?"
+		}
+		fmt.Fprintf(&b, "s%s %s: %s; steps %d/%d; deaths %d; fights %d; pauses %d; out %s; exit %d\n",
+			w.Slot, w.Plan, reason, w.StepsReached, w.StepsTotal, w.Deaths, w.Fights, w.Pauses, w.Out, w.ExitCode)
+	}
+	for _, n := range r.Notes {
+		fmt.Fprintf(&b, "note: %s\n", n)
+	}
+	if t := r.Totals; t != nil {
+		fmt.Fprintf(&b, "total: %d walks; %d ended by until; %d failed; deaths %d; fights %d; pauses %d; overlap %.1f s\n",
+			t.Walks, t.Until, t.Failed, t.Deaths, t.Fights, t.Pauses, r.OverlapS)
+	}
+	fmt.Fprintf(&b, "multi: exit %d\n", r.ExitCode)
 	return b.String()
 }

@@ -163,6 +163,9 @@ type RemoteOptions struct {
 	// pull groups are not: the resolver gets the step count the server listed for the plan and returns the words ("" for the first step).
 	// Nil: the run starts at the plan's first step. It is checked before anything is hired.
 	StartFrom StartFromResolver
+	// Until resolves the `until ...` words of an observed run's `.bot run start` (observe.until). It is asked with the same step count as
+	// StartFrom, before anything is hired. Nil: the run goes to the plan's end.
+	Until UntilResolver
 	// RezWait is how long a dead bot waits for a living caster's resurrection, out of combat, before it is released with `cmd revive`.
 	// 0: 30 s; negative: no wait.
 	RezWait time.Duration
@@ -642,6 +645,7 @@ type RemoteDriver struct {
 	// is how the run leader starts (probeRunLeader asks RemoteOptions.StartFrom with that count). Nil: the first step.
 	planSteps int
 	start     *PartialStart
+	until     UntilClause // the observed run's until (RemoteOptions.Until)
 
 	fl   fleeState // the mobs that run at low health and the ones that got away (remote_flee.go)
 	tx   tuneExtra // the thresholds that were constants (tune.go)
@@ -807,6 +811,18 @@ func (d *RemoteDriver) run(ctx context.Context, fromLeg int) (err error) {
 		// A server without the run leader (or without the plan) is refused before a single bot is hired.
 		if err = d.probeRunLeader(ctx); err != nil {
 			return err
+		}
+		// The unsafe-start gate of an observed from_leg start, now that the probe knows the run leader's start step: still before the
+		// prepare step, the bind and the enter phase, so a refused start sends nothing past the probe.
+		if at, have, ok := d.observedLegStart(); ok && have && !d.opt.StartHere && fromLeg > 0 {
+			if err = d.observedStartSafety(fromLeg, at); err != nil {
+				return err
+			}
+		} else if ok && !have && !d.opt.StartHere && fromLeg > 0 {
+			// An unknown start point is refused at once as well (unless observe.allow_far_start), not after the party is prepared and bound.
+			if err = d.checkStartPlace(); err != nil {
+				return err
+			}
 		}
 	}
 	err = d.begin(ctx, fromLeg)

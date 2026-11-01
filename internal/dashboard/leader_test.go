@@ -62,6 +62,15 @@ func TestCardShowsPacksLeftByTheRunLeader(t *testing.T) {
 	}
 }
 
+// A test-speed or until run says so on the card, from the status line's label.
+func TestCardShowsTheRunLabel(t *testing.T) {
+	d := strings.Replace(observedDungeon("running", 7, "sentinel", "pull", "pull", "pulling 4851", "running"), `"lines":9}`, `"label":"speed 2.0 (test); until boss (step 38)","lines":9}`, 1)
+	c := BuildCard(Inputs{Agent: Agent{ID: "1"}, Now: t0, Status: json.RawMessage(statusJSON), Dungeon: json.RawMessage(d)})
+	if l := c.Run.Leader; l == nil || l.Label != "speed 2.0 (test); until boss (step 38)" || l.Text != "Run leader: Sentinel · pull 7/41 · pulling (speed 2.0 (test); until boss (step 38))" {
+		t.Fatalf("%+v", l)
+	}
+}
+
 // A driven run's card has no run leader.
 func TestCardWithoutRunLeader(t *testing.T) {
 	c := BuildCard(Inputs{Agent: Agent{ID: "1"}, Now: t0, Status: json.RawMessage(statusJSON), Dungeon: json.RawMessage(dungeonJSON("leg 0 (one): walk to 1 2 3", 0))})

@@ -930,6 +930,7 @@
    "map": 800,
    "kind": "dungeon",
    "data": "map800",
+   "handwritten": true,
    "trigger": 5008,
    "bosses": [
     91920,
@@ -943,10 +944,13 @@
    "entrance_tele": "instancedkarazhancrypt",
    "outside_tele": "karazhancrypt",
    "special": [
-    "door events (GO_STATE_ACTIVE doors in instance_karazhan_crypt.cpp, four GO hooks)"
+    "the shaft dive (rebuilt tile 8005334) is the only way into the lower crypt and it is one-way down for the bots (r40: the old plan's walk back up the shaft made no way); hand-written 2026-10-24/25: critters and 31 never-waking Remains out, the spider room split, the Archlich's guard pack folded (first 91927), the upper floors first and the lower crypt last, the Hivaxxis room walked east to west with a stand on the server floor before every pack (r40 slot5b: the pair first, then the off-mesh ledge pocket, Hivaxxis never fought); Corpsemuncher 91917 out (his wing is a navmesh island behind a water-to-water swim the mover refuses); doors spawn ACTIVE, Alarus 91928 is a script summon not in the plan; the lower-crypt pool crossings are dry stands (2026-10-26: pull group 23 walks around the -11138 -1742 pool, the Hivaxxis leg's first hop around the -11216 -1744 basin, both after proof20d2 steps 248/254 were refused in water)"
    ],
    "notes": [
-    "Turtle custom 5-man at level 60-62."
+    "Turtle custom 5-man at level 60-62 (plan band 59-60, trash 60-61, bosses 62-63).",
+    "Plan-check 2026-10-25 on the rebuilt tile 8005334 (the two off-mesh links): 0 of 193 points fail (173 of 191 failed on the 2026-10-11 tiles). r40 (2026-10-25, slot5): the dive and the first lower-crypt pulls worked (0 deaths, Enkhraz, Marrowspike and Hivaxxis down); the run stopped only where the old order walked back up the shaft. r40 slot5b (the reordered plan): the whole plan ran (0 deaths, 0 wipes, Enkhraz/Gort/Andreon/Marrowspike down) except Hivaxxis: its leg pulled the Tomb Creeper pair first and the leader then searched a stand in the off-mesh ledge pocket at -11245.7 -1747.3 -15.0, where the exporter's two cut points (z -15.27/-15.29, under the -14.8 floor) and every corridor point were unreachable. The leg now walks the room east to west with a stand given for every pack and the boss. The reorder is exported in 20261025001400, the leg in 20261025001500.",
+    "proof20d2 (2026-10-26, RUN-LESSONS): the whole plan ran (265/265, 0 deaths, 0 wipes) except two pauses, both `cmd move` refused 'unreachable' at water-level points after the dive: step 248 (marrowspike, the exporter's cut -11138.4 -1733.6 -31.4 in the pool at -11138 -1742) and step 254 (hivaxxis, -11215.8 -1743.7 -31.4 in the flooded basin, the lead already on the point). Fix (2026-10-26): pull group 23's approach walks around the pool west and south (-11152 -1710, -11152 -1758, -11154 -1790, -11150 -1800) and the hivaxxis leg's first hop around the basin west and north (-11233 -1755, -11233 -1706), so no row stands on a water polygon. Plan-check (the same tile 6a8168b1): `--from-leg 4 --from-pull-group 23` ok, 28 points; `--from-leg 5` ok, 18 points. Strict row replay from the run's real positions ('pulls move nobody'): 0 refused. Export: 6 legs, 266 steps, 273 rows.",
+    "Skeletal Remains 91924 wake only near a Remains Trigger 177310 (30 yd); Alarus 91928 is summoned by the six Necrotic Runes (they spawn ACTIVE) at the entrance-hall Crypt Watcher and has no spawn row."
    ]
   },
   {

@@ -66,6 +66,71 @@ func TestParseRunLineLeftPacks(t *testing.T) {
 	}
 }
 
+// TestParseRunLineLabel is the trailing speed/until label (dungeon-run-leader.md): taken off the note, after `left`,
+// read into its parts; a field that only looks like one stays note text.
+func TestParseRunLineLabel(t *testing.T) {
+	// ZG walk 4's start line (tortoise-test2, 2026-10-30)
+	st, ok := ParseRunLine("TBM:RUN|zul_gurub|running|1/1104|high_priestess_jeklik|move|begin|started|until boss (step 41)")
+	if !ok || st.Note != "started" || st.Label != "until boss (step 41)" || st.Until != "until boss" || st.UntilStep != 41 || st.Speed != 0 {
+		t.Fatalf("%+v %v", st, ok)
+	}
+	st, ok = ParseRunLine("TBM:RUN|windhorn_canyon|done|1890/1890|x|boss|pull|plan done (1 pack left alive)|left 1|speed 2.0 (test)")
+	if !ok || st.Left != 1 || st.Note != "plan done (1 pack left alive)" || st.Speed != 2.0 || st.SpeedFellBack || st.Until != "" {
+		t.Fatalf("left before the label: %+v %v", st, ok)
+	}
+	st, ok = ParseRunLine("TBM:RUN|molten_core|running|3/90|magmadar|pull|walk|walking|speed 3.0 (test); until boss (step 38)")
+	if !ok || st.Speed != 3.0 || st.Until != "until boss" || st.UntilStep != 38 || st.Note != "walking" {
+		t.Fatalf("both parts: %+v %v", st, ok)
+	}
+	st, ok = ParseRunLine("TBM:RUN|molten_core|running|3/90|magmadar|pull|walk|walking|speed 2.0 (test; 1.0 since a real player joined); until leg gehennas (step 29)")
+	if !ok || st.Speed != 2.0 || !st.SpeedFellBack || st.Until != "until leg gehennas" || st.UntilStep != 29 {
+		t.Fatalf("fell back: %+v %v", st, ok)
+	}
+	st, ok = ParseRunLine("TBM:RUN|molten_core|done|38/90|magmadar|boss|begin|stopped before step 38 (until boss): the party stays where it stands")
+	if !ok || st.Label != "" || st.Note != "stopped before step 38 (until boss): the party stays where it stands" {
+		t.Fatalf("label dropped at the stop: %+v %v", st, ok)
+	}
+	// a field the parser does not know stays note text, and so does a label-like field with an unknown part
+	for _, line := range []string{
+		"TBM:RUN|zul_gurub|paused|29/1104|j|pull|pull|15 dead: 2 near wipes within 10 min|the run stops here",
+		"TBM:RUN|zul_gurub|paused|29/1104|j|pull|pull|15 dead|until boss (step 41); something new",
+		"TBM:RUN|zul_gurub|paused|29/1104|j|pull|pull|15 dead|speed fast",
+	} {
+		st, ok = ParseRunLine(line)
+		want := line[strings.Index(line, "pull|pull|")+len("pull|pull|"):]
+		if !ok || st.Label != "" || st.Note != want {
+			t.Errorf("%q: note %q label %q", line, st.Note, st.Label)
+		}
+	}
+	a, _ := ParseRunLine("TBM:RUN|p|running|3/9|l|pull|walk|walking|speed 2.0 (test)")
+	b, _ := ParseRunLine("TBM:RUN|p|running|3/9|l|pull|walk|walking|speed 2.0 (test; 1.0 since a real player joined)")
+	if a.Same(b) {
+		t.Error("a label change is a new status")
+	}
+}
+
+// TestParseRunLineEventPhase is a hold step's event count in the phase field.
+func TestParseRunLineEventPhase(t *testing.T) {
+	st, ok := ParseRunLine("TBM:RUN|uldaman|running|30/41|archaedas|hold|fight 1/4 down|event: fighting (1 of 4 down, 1 awake)")
+	if !ok || st.Phase != "fight 1/4 down" || st.EventDown != 1 || st.EventSeen != 4 || !st.EventFight {
+		t.Fatalf("%+v %v", st, ok)
+	}
+	if got := st.Text(); got != "archaedas · hold 30/41 · event fight (1 of 4 down)" {
+		t.Errorf("text %q", got)
+	}
+	st, _ = ParseRunLine("TBM:RUN|uldaman|running|30/41|archaedas|hold|hold 0/4 down|event: waiting")
+	if !st.EventPhase() || st.EventFight || st.EventDown != 0 || st.EventSeen != 4 {
+		t.Fatalf("%+v", st)
+	}
+	if got := st.Text(); got != "archaedas · hold 30/41 · holding for the event (0 of 4 down)" {
+		t.Errorf("text %q", got)
+	}
+	st, _ = ParseRunLine("TBM:RUN|uldaman|running|7/41|baelog|pull|pull|pulling")
+	if st.EventPhase() {
+		t.Error("a pull phase is no event count")
+	}
+}
+
 func TestRunCommandsPassTheCheck(t *testing.T) {
 	for _, c := range []string{"run start uldaman", "run start", "run pause", "run resume", "run skip", "run stop", "run status", "run list"} {
 		if err := CheckCommand(c); err != nil {

@@ -424,6 +424,10 @@ type Boss struct {
 	Entry    uint32   `json:"entry"`
 	Position Point    `json:"position"`
 	First    []uint32 `json:"first,omitempty"`
+	// PhaseEntries are entries the encounter turns into or summons that no other field names (Zul'Gurub's Thekal:
+	// 14509 Thekal reborn, boss_thekal.cpp:358, and 15068 Zulian Guardian, :41/:413). Only raid-walk's boss gates
+	// read them (always boss rows, like hold entries); the driver ignores them and plan-export does not carry them.
+	PhaseEntries []uint32 `json:"phase_entries,omitempty"`
 	// Team limits the fight to a leader of that team ("alliance" or "horde"): the driver skips the boss, with its First entries,
 	// for the other one, and the leg goes on without it. Uldaman's Baelog, Eric and Olaf are friendly to the Alliance (faction 122,
 	// quest givers) and hostile to the Horde only.
@@ -879,8 +883,10 @@ type rawBoss struct {
 	Entry    uint32    `json:"entry"`
 	Position *rawPoint `json:"position"`
 	First    []uint32  `json:"first"`
-	Team     string    `json:"team"`
-	LootItem *rawItem  `json:"loot_item"`
+	// PhaseEntries is Boss.PhaseEntries.
+	PhaseEntries []uint32 `json:"phase_entries"`
+	Team         string   `json:"team"`
+	LootItem     *rawItem `json:"loot_item"`
 	// CompanionsLoot is Boss.CompanionsLoot.
 	CompanionsLoot *bool `json:"companions_loot"`
 	// Tactics is Boss.Tactics.
@@ -1160,12 +1166,69 @@ func Parse(name string, data []byte) (*Plan, error) {
 		}
 		p.Legs = append(p.Legs, c.leg(path, &l))
 	}
+	c.phaseEntries(p)
 	p.Avoid = c.avoid(rp.Avoid)
 	c.offAvoid(p)
 	if len(c.errs) > 0 {
 		return nil, errors.Join(c.errs...)
 	}
 	return p, nil
+}
+
+// phaseEntries refuses a boss.phase_entries entry that clashes with another field of the plan: a phase entry is an
+// always-on boss row for raid-walk's gates, so one that repeats, is pulled or skipped as trash, or is already some
+// boss's entry, first, hold or phase entry would make a gate read the plan two ways.
+func (c *checker) phaseEntries(p *Plan) {
+	legName := func(i int) string {
+		if n := p.Legs[i].Name; n != "" {
+			return fmt.Sprintf("legs[%d] (%s)", i, n)
+		}
+		return fmt.Sprintf("legs[%d]", i)
+	}
+	for li, l := range p.Legs {
+		if l.Boss == nil {
+			continue
+		}
+		bp := fmt.Sprintf("legs[%d].boss", li)
+		for i, e := range l.Boss.PhaseEntries {
+			if e == 0 || e == l.Boss.Entry {
+				continue // reported by the leg's own check
+			}
+			at := fmt.Sprintf("%s.phase_entries[%d]", bp, i)
+			clash := func(where string) {
+				c.fail(at, "phase entry %d of the boss of %s is also %s", e, legName(li), where)
+			}
+			if j := slices.Index(l.Boss.PhaseEntries, e); j < i {
+				clash(fmt.Sprintf("its phase_entries[%d]", j))
+			}
+			for lj, o := range p.Legs {
+				for gi, g := range o.PullGroups {
+					if slices.Contains(g.Entries, e) {
+						clash(fmt.Sprintf("in %s.pull_groups[%d].entries", legName(lj), gi))
+					}
+				}
+				if slices.Contains(o.Skip, e) {
+					clash(fmt.Sprintf("in %s.skip", legName(lj)))
+				}
+				ob := o.Boss
+				if ob == nil {
+					continue
+				}
+				if lj != li && ob.Entry == e {
+					clash(fmt.Sprintf("the boss entry of %s", legName(lj)))
+				}
+				if slices.Contains(ob.First, e) {
+					clash(fmt.Sprintf("in %s.boss.first", legName(lj)))
+				}
+				if ob.Hold != nil && slices.Contains(ob.Hold.Entries, e) {
+					clash(fmt.Sprintf("in %s.boss.hold.entries", legName(lj)))
+				}
+				if lj != li && slices.Contains(ob.PhaseEntries, e) {
+					clash(fmt.Sprintf("in %s.boss.phase_entries", legName(lj)))
+				}
+			}
+		}
+	}
 }
 
 // kindStatus checks and copies the kind, status, hire_composition and raid fields.
@@ -1432,6 +1495,13 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		b.Position = c.point(bp+".position", r.Boss.Position)
 		c.entries(bp+".first", b.First, false)
+		b.PhaseEntries = r.Boss.PhaseEntries
+		c.entries(bp+".phase_entries", b.PhaseEntries, false)
+		for i, e := range b.PhaseEntries {
+			if e == b.Entry && e != 0 {
+				c.fail(fmt.Sprintf("%s.phase_entries[%d]", bp, i), "the boss (%d) is already a boss entry", e)
+			}
+		}
 		for i, e := range b.First {
 			if e == b.Entry && e != 0 {
 				c.fail(fmt.Sprintf("%s.first[%d]", bp, i), "the boss (%d) is killed last; leave it out of first", e)

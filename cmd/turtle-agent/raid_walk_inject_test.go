@@ -366,6 +366,9 @@ func TestRaidWalkInjectFailSetsExit23(t *testing.T) {
 
 func TestRaidWalkInjectWipeKeepsExit19(t *testing.T) {
 	f := newFixture(t)
+	// No recoveries left: a fault wipe ends the walk exactly as without the fault (decision 3). With
+	// --wipe-resume left the wipe would recover and the run would go on.
+	f.opts.wipeResume = 0
 	f.setupInject()
 	f.injFight()
 	f.injectRun("pull", 20)

@@ -135,7 +135,7 @@ func (r *raidInjector) Prepare(ctx context.Context) error {
 		r.prepFail = "the commander did not move to the raid's map: " + err.Error()
 		return nil
 	}
-	if err := w.waitMap(ctx, w.plan.Map, 30*time.Second); err != nil {
+	if err := w.waitMap(ctx, w.plan.Map, 30*time.Second, time.Time{}); err != nil {
 		if ctx.Err() != nil {
 			return err
 		}
@@ -411,7 +411,7 @@ func (r *raidInjector) readEventsPage(page events.Page) injectPageRead {
 				if w.tracker != nil {
 					w.tracker.Feed(w.env.now(), st)
 				}
-				w.lastStatus, w.haveStatus = st, true
+				w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
 				if st.Note != "" {
 					w.newNotes = append(w.newNotes, st.Note)
 				}
