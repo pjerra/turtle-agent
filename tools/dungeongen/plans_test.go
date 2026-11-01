@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 )
 
 const (
@@ -299,6 +301,19 @@ func TestClosestInPoly(t *testing.T) {
 // detection range (a bot at ~20 yd wakes the pack, and the party spreads round the stand), the bound of SPEC 1.
 const marliStandYd = 40
 
+// marliPatrollerSpawnYd is the one exception to marliStandYd: pack 0's patroller 49202 belongs to the very pack group
+// 0's plain pull wakes (the pull walks the gathered party to a firing stand in the pack's shot), so its SPAWN is inside
+// the pack this row pulls by design. The approach only has to keep the spawn out of the band that woke the pack in
+// walk 25 (20 yd detection plus the 5 yd wander, with the party spread round the stand): 30 yd, and the cut row that
+// was 14.1 yd out is what this bounds.
+const marliPatrollerSpawnYd = 30
+
+// marliCutRowYd is how near a pack-0 spawn an exported leg-2 row may stand before group 0's pull row: the packs detect
+// at 20 yd (with a 5 yd wander) and the walk-25 approach-hop cut put a MOVE row 14.1 yd from the patroller's spawn,
+// waking the pack with no pull line and no CC. 25 yd keeps every row out of the band, and the pull row's own firing
+// stand (~23.5 yd) covers the fight.
+const marliCutRowYd = 25
+
 // marliPatrolReachYd is the farthest a stand-pull pack's patroller may be from its stand at the closest point of its
 // loop: the stand-pull gate holds the party at the stand until the patroller is in the tank's shot (leadShotYd 28.5
 // minus kStandPullMarginYd 1 -> 27.5 yd) and in sight, and after kStandPullWaitMs (600 s) a patroller that never
@@ -316,7 +331,11 @@ const marliPatrolReachYd = 26.5
 // never comes within 43.8 yd of S0, so the gate would wait 600 s for it and pause the run; the plain pull instead
 // walks the gathered party to a firing stand in the pack's own shot. Pack 1's row stays a stand pull (it is for the
 // patrol clearance; its 12 units are all static and take the plain pull's firing-stand walk either way), so every
-// stand-pull row of the leg has to reach its patrollers.
+// stand-pull row of the leg has to reach its patrollers. S0's clearance is the 40 yd rule for every STATIC pack-0
+// unit and for pack 1, with one reasoned exception: the patroller 49202's own spawn need only be 30 yd out, because it
+// belongs to the very pack this plain pull wakes. S0's hop to the row centre also has to stay inside the exporter's
+// 50 yd approach-hop reach: walk 25's S0 was 55.16 yd out, so the cut left a move row 14.1 yd from 49202's spawn and
+// the pack woke with no pull line; assert (e) pins that no exported leg-2 row stands that near a pack-0 spawn.
 func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
 	p, err := dungeon.Load(filepath.Join(plansDirT, "zul_gurub.json"))
 	if err != nil {
@@ -361,8 +380,8 @@ func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
 	if len(leg.PullGroups) < 2 {
 		t.Fatalf("%d pull groups", len(leg.PullGroups))
 	}
-	// (b) raid clearance: S0 (pack 0's stand, its last approach point) clears every unit of both packs, S1 (pack 1's)
-	// clears pack 1. Both rows have an approach.
+	// (b) raid clearance: S0 (pack 0's approach point) clears every STATIC unit of pack 0 and every unit of pack 1,
+	// and S1 (pack 1's stand) clears pack 1. Both rows have an approach.
 	stands := make([]dungeon.Point, 2)
 	for i, g := range leg.PullGroups[:2] {
 		if len(g.Approach) == 0 {
@@ -371,16 +390,31 @@ func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
 		}
 		stands[i] = g.Approach[len(g.Approach)-1]
 	}
-	check := func(i int, targets []creature) {
+	check := func(i int, targets []creature, min float64) {
 		for _, c := range targets {
-			if d := dist(stands[i], c.Pos); d < marliStandYd {
-				t.Errorf("pull_groups[%d] stand %.1f %.1f %.1f is %.1f yd from %s %d, want >= %d", i, stands[i].X, stands[i].Y, stands[i].Z, d, c.Name, c.GUID, marliStandYd)
+			if d := dist(stands[i], c.Pos); d < min {
+				t.Errorf("pull_groups[%d] approach %.1f %.1f %.1f is %.1f yd from %s %d, want >= %g", i, stands[i].X, stands[i].Y, stands[i].Z, d, c.Name, c.GUID, min)
 			}
 		}
 	}
-	both := append(append([]creature{}, pack0...), pack1...)
-	check(0, both)
-	check(1, pack1)
+	var static0 []creature
+	for _, c := range pack0 {
+		if !c.Patrol {
+			static0 = append(static0, c)
+		}
+	}
+	check(0, append(append([]creature{}, static0...), pack1...), marliStandYd)
+	// The patroller 49202's own SPAWN is the one exception to marliStandYd for S0: the patroller belongs to the very
+	// pack group 0's plain pull wakes (the pull walks the gathered party to a firing stand in the pack's shot), so its
+	// spawn is inside the pack this row pulls by design, and only has to stay out of the band that woke it in walk 25.
+	for _, c := range pack0 {
+		if c.Patrol {
+			if d := dist(stands[0], c.Pos); d < marliPatrollerSpawnYd {
+				t.Errorf("pull_groups[0] approach %.1f %.1f %.1f is %.1f yd from the patroller %s %d's spawn, want >= %d", stands[0].X, stands[0].Y, stands[0].Z, d, c.Name, c.GUID, marliPatrollerSpawnYd)
+			}
+		}
+	}
+	check(1, pack1, marliStandYd)
 	// (c) pull reachability: every stand-pull row of the leg reaches its pack's patrollers from the stand.
 	for i, g := range leg.PullGroups {
 		if !g.StandPull {
@@ -401,9 +435,100 @@ func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
 		t.Errorf("pull_groups[0] is a stand pull: its leader 49202 walks a loop that never comes within the gate's 27.5 yd of S0, so the gate would wait 600 s and pause the run; the pack is a plain pull from the stand")
 	}
 	if !leg.PullGroups[1].StandPull {
-		t.Errorf("pull_groups[1] is not a stand pull: it keeps one for its patrol clearance (keep_yd)")
+		t.Errorf("pull_groups[1] is not a stand pull: it keeps one for its patrol clearance (a stand pull carries the row's clear_yd in its param)")
+	}
+	// (e) the exporter's own --approach-hops cut must not put a row of leg 2 inside pack 0's aggro before group 0's
+	// pull row. With the old S0 -12245.333 -1685.3334 the hop to the row centre -12300.49 -1685.68 was 55.16 yd, past
+	// the run leader's 50 yd reach (dungeon.RunLeaderReachYd), so cutLongHops walked the navmesh and left a row at
+	// -12275.199 -1686.1334, 14.1 yd from the patroller 49202's spawn and 17.1 from the static Venombrood 49771: the
+	// party walked into pack 0 on a MOVE row, before the pull step, so no pull line and no Polymorph went out. The new
+	// S0 is 48.99 yd from the centre, inside the reach, so nothing is cut there. The check runs the exporter with the
+	// server's navmesh (the cut walks the mesh); it skips without one.
+	planner := marliMmapsPlanner(t)
+	res, err := planexport.Build(p, planexport.Options{ApproachHops: true, Cut: marliExportCut(planner)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var leg2 []planexport.StepRow
+	for _, s := range res.Rows.Steps {
+		if s.Leg == 2 {
+			leg2 = append(leg2, s)
+		}
+	}
+	g0row := -1
+	for i, s := range leg2 {
+		if s.Kind == planexport.KindPull && strings.HasPrefix(s.Comment, "pull group 0") {
+			g0row = i
+			break
+		}
+	}
+	if g0row < 0 {
+		t.Fatal("no pull row for group 0 in the exported leg 2")
+	}
+	for i, s := range leg2[:g0row] {
+		for _, c := range pack0 {
+			if d := math.Hypot(float64(s.X-c.Pos.X), float64(s.Y-c.Pos.Y)); d < marliCutRowYd {
+				t.Errorf("exported leg 2 row %d (%s %.1f %.1f) is %.1f yd from %s %d, want >= %d: the exporter cut S0's hop into pack 0's aggro, so the pack wakes on a MOVE row before the pull step",
+					i, s.Comment, s.X, s.Y, d, c.Name, c.GUID, marliCutRowYd)
+			}
+		}
 	}
 }
+
+// marliMmapsPlanner is the server's navmesh for the leg-2 export check ($TURTLE_AGENT_MMAPS or
+// ~/turtle-agent-mmaps, as planprobe and navmesh's own real tests use); the test skips without it.
+func marliMmapsPlanner(t *testing.T) *navmesh.Planner {
+	t.Helper()
+	home, _ := os.UserHomeDir()
+	for _, dir := range []string{os.Getenv("TURTLE_AGENT_MMAPS"), filepath.Join(home, "turtle-agent-mmaps")} {
+		if dir == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, "309.mmap")); err != nil {
+			continue
+		}
+		if tiles, _ := filepath.Glob(filepath.Join(dir, "309*.mmtile")); len(tiles) == 0 {
+			continue
+		}
+		p := navmesh.NewPlanner(dir)
+		t.Cleanup(p.Close)
+		return p
+	}
+	t.Skip("no map 309 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its tiles")
+	return nil
+}
+
+// marliExportCut is plan-export's own cutter (cmd/turtle-agent plan_export_cmd.go cutWith, kept in step with it): the
+// navmesh path from a to b, a point at each corner and equal hops of MoveGapCutYd along the long stretches. The
+// exporter trims the points within approachStandoffYd of the target itself.
+func marliExportCut(pl *navmesh.Planner) func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
+	return func(mapID uint32, from, to dungeon.Point) ([]dungeon.Point, error) {
+		path, err := pl.Plan(mapID, navmesh.Vec3{from.X, from.Y, from.Z}, navmesh.Vec3{to.X, to.Y, to.Z})
+		if err != nil {
+			return nil, err
+		}
+		if path.Status != navmesh.Complete || len(path.Points) < 2 {
+			return nil, fmt.Errorf("no complete path (%s %s)", path.Status, path.Reason)
+		}
+		var via []dungeon.Point
+		prev := path.Points[0]
+		for i := 1; i < len(path.Points); i++ {
+			p := path.Points[i]
+			d := math.Sqrt(float64(sq32(p[0]-prev[0]) + sq32(p[1]-prev[1]) + sq32(p[2]-prev[2])))
+			for k := 1; float64(k)*planexport.MoveGapCutYd < d; k++ {
+				f := float32(float64(k) * planexport.MoveGapCutYd / d)
+				via = append(via, dungeon.Point{X: prev[0] + (p[0]-prev[0])*f, Y: prev[1] + (p[1]-prev[1])*f, Z: prev[2] + (p[2]-prev[2])*f})
+			}
+			if i < len(path.Points)-1 {
+				via = append(via, dungeon.Point{X: p[0], Y: p[1], Z: p[2]})
+			}
+			prev = p
+		}
+		return via, nil
+	}
+}
+
+func sq32(v float32) float32 { return v * v }
 
 // TestStandPullPatrolReach is the reach check on a synthetic square loop (20 yd sides at x,y 0..20): a stand 20 yd
 // from the loop is reached, one 30 yd away is not, and a pack without a patroller is always fine (its static units
