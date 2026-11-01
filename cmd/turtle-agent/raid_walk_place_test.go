@@ -1480,6 +1480,56 @@ func TestPlaceQuietFindsRoamerInNearList(t *testing.T) {
 	}
 }
 
+// F2 (D3): when the quiet reply cut its near list (len(near) < n_near) and the farthest unit it still lists stands
+// inside the landing reach, the placement is refused at once: the units the cut dropped may stand where the raid lands.
+func TestPlaceQuietCutNearListInsideReachRefuses(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if strings.HasPrefix(cmd, "quiet") {
+			var near []any
+			for i, d := range []float32{10.0, 11.0, 12.0} {
+				near = append(near, map[string]any{"g": fmt.Sprintf("0xF130000000A%03d", i+1), "e": uint32(999000 + i),
+					"n": "Roamer", "p": []float32{plan.Point.X + d, plan.Point.Y, plan.Point.Z}, "d": d})
+			}
+			return ttReplyOf(t, map[string]any{"map": 309, "read": 2, "final": true, "quiet": false, "near": near, "n_near": 30, "roamers": []any{}}), nil
+		}
+		return p.answer(cmd)
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.summary().EndReason)
+	}
+	if len(p.places) != 0 {
+		t.Fatalf("the walk placed with a near list cut inside the reach: %v", p.places)
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, "near list was cut at 12.0 yd") {
+		t.Fatalf("end reason %q", sum.EndReason)
+	}
+}
+
+// F2 (D3): a cut near list whose farthest listed unit stands beyond the landing reach is judged as before (guards
+// against F2 refusing too much).
+func TestPlaceQuietCutNearListBeyondReachIsJudged(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if strings.HasPrefix(cmd, "quiet") {
+			var near []any
+			for i, d := range []float32{29.0, 30.0, 31.0} {
+				near = append(near, map[string]any{"g": fmt.Sprintf("0xF130000000B%03d", i+1), "e": uint32(999000 + i),
+					"n": "Roamer", "p": []float32{plan.Point.X + d, plan.Point.Y, plan.Point.Z}, "d": d})
+			}
+			return ttReplyOf(t, map[string]any{"map": 309, "read": 2, "final": true, "quiet": false, "near": near, "n_near": 30, "roamers": []any{}}), nil
+		}
+		return p.answer(cmd)
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.summary().EndReason)
+	}
+}
+
 // A unit is owned only by a BEHIND circle whose area holds its home (review round 2, LOW-1): the same entry, far away,
 // is not, and a reply without a home gives no owner even where the unit stands (fail closed).
 func TestPlaceRogueOwnerNeedsNearCircle(t *testing.T) {

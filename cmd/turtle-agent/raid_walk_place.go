@@ -551,7 +551,8 @@ func skipArg(ids []uint32) string {
 //	(b) its home lies in a BEHIND row's circle (then the one extra clear round takes it).
 //
 // AHEAD-owned and unowned units beyond placeReachYd never block: a door-to-end run at this step has them alive too, so
-// counting them would make the test stricter than the walk it stands in for. When only moving patrols are left, the
+// counting them would make the test stricter than the walk it stands in for. A cut near list whose farthest listed unit
+// still stands inside placeReachYd refuses at once (D3). When only moving patrols are left, the
 // quiet is read again up to placeQuietRereads times (item 5) before the placement fails.
 func (w *walk) placeQuiet(ctx context.Context) error {
 	p := w.place.Point
@@ -562,6 +563,10 @@ func (w *walk) placeQuiet(ctx context.Context) error {
 		read, err := w.placeQuietOnce(ctx, p, skip)
 		if err != nil {
 			return err
+		}
+		if read.NearCut {
+			w.placeSum.Quiet = false
+			return stopf(exitRaidWalkFailed, "place: the area is not quiet: the quiet's near list was cut at %.1f yd, inside the %d yd landing reach", read.NearCutYd, placeReachYd)
 		}
 		j = w.placeQuietJudge(read, p)
 		if len(j.Clear) > 0 {
@@ -634,6 +639,11 @@ type placeQuietRead struct {
 	Roam    []ttUnit   // the roamers, with the position, home and vitals the join read gave them
 	Missing []ttRoamer // roamers the join read did not list (they block: the walk cannot judge them)
 	JoinCut bool       // the join read was truncated: it may have missed roamers
+	// NearCut says the quiet's near list was cut (len(near) < n_near) and the farthest unit still listed stood inside
+	// the landing reach: the units it dropped may stand where the raid lands, so the placement is refused (D3).
+	NearCut bool
+	// NearCutYd is the toolkit's own distance of that farthest listed unit (0 when the cut list was empty).
+	NearCutYd float64
 }
 
 // ttRoamer is one element of a quiet reply's `roamers` list: the toolkit sends g, e, why, d and moved, and no position
@@ -669,6 +679,36 @@ func (r *placeQuietRead) roamersOnly(block []ttUnit) bool {
 	return true
 }
 
+// nearUnitsOf reduces a reply's near list to the units the judgement sees.
+func nearUnitsOf(b ttBody) []ttUnit {
+	var out []ttUnit
+	for _, m := range b.list("near") {
+		out = append(out, ttUnitOf(m))
+	}
+	return out
+}
+
+// nearCutOf records a cut near list (F2, D3): n_near is the toolkit's own count before its line cap dropped the far
+// end. The near list is distance-sorted, so the last listed unit is the nearest of the dropped ones; when it stands
+// inside the landing reach the placement is refused (the dropped units may stand where the raid lands).
+func (r *placeQuietRead) nearCutOf(b ttBody, units []ttUnit) {
+	n, ok := b.num("n_near")
+	if !ok || n <= float64(len(units)) {
+		return
+	}
+	d := 0.0
+	if len(units) > 0 {
+		d = float64(units[len(units)-1].Dist)
+	}
+	if d >= placeReachYd {
+		return
+	}
+	if !r.NearCut || d < r.NearCutYd {
+		r.NearCutYd = d
+	}
+	r.NearCut = true
+}
+
 // placeQuietOnce runs one `quiet` and, when it names roamers, one `q units` read around the start point that gives them
 // the position, home and vitals the toolkit's roamer list leaves out (item 4). A roamer the join read missed is also
 // looked up in the quiet's own near lists (D2): only one found in neither is Missing.
@@ -683,9 +723,9 @@ func (w *walk) placeQuietOnce(ctx context.Context, p dungeon.Point, skip string)
 		return nil, stopf(exitRaidWalkFailed, "place: quiet gave no reply")
 	}
 	read := &placeQuietRead{Toolkit: body.flag("quiet")}
-	for _, m := range body.list("near") {
-		read.Near = append(read.Near, ttUnitOf(m))
-	}
+	final := nearUnitsOf(body)
+	read.Near = append(read.Near, final...)
+	read.nearCutOf(body, final)
 	// A `quiet w=20` answers twice: read 1 (the state at the command) and read 2 (placeQuietWaitS later, the final
 	// reply). The walk judges the units of both reads, as the toolkit's own rule counts both: a unit that stood in the
 	// landing reach 20 s before the raid lands is judged by read 1's position (a unit of both reads keeps the fresher,
@@ -693,9 +733,10 @@ func (w *walk) placeQuietOnce(ctx context.Context, p dungeon.Point, skip string)
 	if len(out.Replies) > 1 {
 		var first map[string]json.RawMessage
 		if err := json.Unmarshal(out.Replies[0], &first); err == nil && first != nil {
-			for _, m := range (ttBody{raw: first}).list("near") {
-				read.Near = append(read.Near, ttUnitOf(m))
-			}
+			fb := ttBody{raw: first}
+			one := nearUnitsOf(fb)
+			read.Near = append(read.Near, one...)
+			read.nearCutOf(fb, one)
 		}
 	}
 	var roamers []ttRoamer
