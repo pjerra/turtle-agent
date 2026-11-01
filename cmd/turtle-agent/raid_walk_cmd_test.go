@@ -5304,6 +5304,75 @@ func TestRaidWalkBossNotFoundLateEvidenceSkips(t *testing.T) {
 	}
 }
 
+// Review round 3 (Codex HIGH): a 0 % row in w.hostiles carries no freshness of its own, so a corpse an EARLIER
+// attempt left behind counted as kill evidence on a later pause. The boss dies (a 0 % row), the encounter resets
+// and he respawns (the family is seen alive at 100 % afterwards), the party loses sight of him for 15 s and the
+// run leader pauses with "boss 12118 not found": the corpse's row predates a live sighting of the family, so it is
+// no evidence and the toolkit read decides — no corpse there, no skip, the pause stays (exit 18).
+func TestRaidWalkBossNotFoundRespawnedBossStillPauses(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	boss := next - 1
+	f.opts.pausedWait = 4 * time.Second
+	f.agent.startReply = zgStart(total, next)
+	f.agent.ttFn = ttUnitsFn(t) // no corpse of a boss unit at the boss row
+	var q []queuedEvent
+	for range 12 {
+		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|begin|boss 12118 not at his spot: waiting for him|until step %d (step %d)", boss, total, next, next)})
+	}
+	q = append(q, queuedEvent{raw: bossNotFoundLine("molten_core", boss, total, 12118, next)})
+	f.agent.mu.Lock()
+	f.agent.startQueue = q
+	f.agent.mu.Unlock()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		switch {
+		case n <= 1:
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 0}} // the kill, this walk's first sighting
+		case n <= 3:
+			return []tbm.HostileRec{{GUID: 10, Entry: 12118, HPPct: 100}} // the respawn: alive, and out of view afterwards
+		}
+		return nil
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if !strings.Contains(f.summary().EndReason, "paused: boss 12118 not found") {
+		t.Fatalf("end %q, want the pause", f.summary().EndReason)
+	}
+	f.agent.mu.Lock()
+	verbs, tt := append([]string{}, f.agent.runVerbs...), append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	if countPrefix(verbs, "skip") != 0 {
+		t.Fatalf("run verbs %v, want no skip: the corpse predates a live sighting of the boss", verbs)
+	}
+	if len(tt) == 0 || !strings.Contains(tt[0], "all dead e=12118") {
+		t.Fatalf("toolkit calls %q, want the corpse read (a stale row must not bypass it)", tt)
+	}
+}
+
+// Review round 3: the attempt bound itself. A 0 % row the frames saw before the CURRENT attempt's engagement is
+// another attempt's corpse (the frames are never pruned, so a wipe recovery leaves it in w.hostiles), and a 0 %
+// row inside the attempt is evidence. Without the bound the stale row alone would be a kill.
+func TestBossKilledDeadRowBoundToTheAttempt(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	start := func(deadAt time.Time) *walk {
+		return &walk{
+			mt:            "Tank",
+			botAt:         map[string]botPos{"Tank": {at: now}},
+			hostiles:      map[string]hostileState{"0x9": {entry: 12118, hppct: 0, at: deadAt}},
+			bossAttemptAt: map[uint32]time.Time{12118: now.Add(-60 * time.Second)},
+		}
+	}
+	ok, ev := start(now.Add(-90*time.Second)).bossKilled(context.Background(), 12118, now)
+	if ok || ev != "no boss unit dead in the frames and no corpse at the boss row" {
+		t.Fatalf("bossKilled = %v (%q), want no evidence: the 0 %% row predates the attempt", ok, ev)
+	}
+	ok, ev = start(now.Add(-30*time.Second)).bossKilled(context.Background(), 12118, now)
+	if !ok || !strings.Contains(ev, "seen dead in the frames") {
+		t.Fatalf("bossKilled = %v (%q), want the frame row inside the attempt as the evidence", ok, ev)
+	}
+}
+
 // Rows that are not the server's (a plan of another step count) refuse the walk and stop the run: the step after the boss would be
 // another step.
 func TestRaidWalkBossDoneRefusesOtherRows(t *testing.T) {

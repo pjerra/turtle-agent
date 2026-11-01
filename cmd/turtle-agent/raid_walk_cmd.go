@@ -610,6 +610,12 @@ type walk struct {
 	// bossAdds are the entries the frames have shown more than one live unit of at once (trackFrame): adds that
 	// exist several at a time, never the boss reborn, so bossUnits leaves them out of the kill evidence.
 	bossAdds map[uint32]bool
+	// bossAttemptAt is when the current boss attempt began, per unit entry: the first time the frames showed
+	// that unit engaged in this attempt (trackFrame, the tracker's own latch judgement). bossKilled accepts a
+	// dead frame row of the family only at or after it, so a 0 % row an EARLIER attempt left in w.hostiles
+	// (never pruned: a reset or a respawn leaves it there) is no evidence on a later pause (review round 3).
+	// A wipe recovery clears it; a new attempt's first sighting sets it.
+	bossAttemptAt map[uint32]time.Time
 
 	stepFirst *dungeon.Point
 
@@ -716,7 +722,8 @@ func raidWalkRun(ctx context.Context, o raidWalkOptions, env walkEnv, deps walkD
 	deps.fillDefaults()
 	w := &walk{opts: o, env: env, deps: deps, stdout: stdout, stderr: stderr,
 		seenFights: map[string]bool{}, pendingFights: map[string]int{}, hostiles: map[string]hostileState{}, botAt: map[string]botPos{},
-		partyG: map[uint64]bool{}, bossSet: map[uint32]bool{}, bossRows: map[uint32]hostileState{}, hires: map[string]bool{}}
+		partyG: map[uint64]bool{}, bossSet: map[uint32]bool{}, bossRows: map[uint32]hostileState{}, hires: map[string]bool{},
+		bossAttemptAt: map[uint32]time.Time{}}
 	return w.main(ctx)
 }
 

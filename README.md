@@ -2297,9 +2297,13 @@ in a fake death and TB finds no corpse of 14599), the walk reads the frames for 
 boss's own entry or a phase entry that is the boss reborn, judged per guid — never an add that exists several at
 once, such as Thekal's two Zulian Guardians 15068, nor a `first` add), or a corpse the toolkit sees within 40 yd of
 the boss row (`.tt q units 40 <x> <y> <z> all dead e=<entry>`, for a boss that died out of the party's sight and so
-left no frame row). A stale low-hp sighting alone is NEVER a kill, no boss unit may be seen alive in the last 15 s,
-and a hire must be alive. With that evidence the walk sends one `.bot run skip` (retried once if the send fails); the
-evidence is re-read on every tick while the pause lasts, and without it the pause path is unchanged.
+left no frame row). A stale low-hp sighting alone is NEVER a kill: a 0 % frame row counts only when it was seen at
+or after the current attempt began (the frames' first sighting of a boss unit of that family engaged, judged like
+the tracker's own latch: below 100 % or holding a party target, cleared by a wipe recovery) and no boss unit of the
+family was seen alive after it (the frames are never pruned, so an earlier attempt's corpse stays in them after a
+reset or a respawn), no boss unit may be seen alive in the last 15 s, and a hire must be alive. With that evidence
+the walk sends one `.bot run skip` (retried once if the send fails); the evidence is re-read on every tick while the
+pause lasts, and without it the pause path is unchanged.
 
 Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
 `.bot gear raid <commander> tier <N>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,

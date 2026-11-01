@@ -1411,6 +1411,25 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 			}
 		}
 	}
+	// The attempt start (after bossAdds, so an add several at a time is already out): the first time the frames
+	// showed a boss unit engaged, judged like the tracker's one-shot latch (checkBoss). bossKilled reads it to
+	// keep a 0 % row an earlier attempt left behind out of the kill evidence (review round 3), so it is recorded
+	// per unit entry and only the first sighting counts.
+	for _, h := range f.Hostiles {
+		if h.GUID == 0 || !w.bossUnit(h.Entry) || !bossAttemptEngaged(h.HPPct, uint64(h.Target), w.partyG) {
+			continue
+		}
+		if w.bossAttemptAt[h.Entry].IsZero() {
+			w.bossAttemptAt[h.Entry] = now
+		}
+	}
+}
+
+// bossAttemptEngaged is the tracker's one-shot boss latch judgement (checkBoss): a plan-boss row starts the
+// attempt when it is hurt (below 100 %) or holds a party target. A 0 % row counts too, as it does there: the
+// frames' own 0 % sighting of a fresh corpse is the kill bossKilled reads.
+func bossAttemptEngaged(hppct int, target uint64, partyG map[uint64]bool) bool {
+	return hppct < 100 || (target != 0 && partyG[target])
 }
 
 // savedFrame is one frames.jsonl line (compact: positions, hp, dead, hostiles).
@@ -1819,16 +1838,20 @@ func (w *walk) bossNotFoundAtBossStep(step int, note string) (uint32, bool) {
 // units (bossUnits).
 //
 // The evidence holds when ALL of:
-//   - a boss unit is affirmatively dead: a frame row at 0 % for its GUID, or the toolkit sees a corpse of a
-//     boss-unit entry within bossKillYd of the boss row (TB's own search reads the live view, so a boss that died
-//     out of the party's sight leaves no row at all);
+//   - a boss unit is affirmatively dead: a frame row at 0 % for its GUID seen at or after this attempt's start
+//     (bossAttemptStart), with no boss unit of the family seen alive after that row, or the toolkit sees a corpse
+//     of a boss-unit entry within bossKillYd of the boss row (TB's own search reads the live view, so a boss that
+//     died out of the party's sight leaves no row at all);
 //   - no boss unit is seen alive: no frame row fresher than 15 s with hp left;
 //   - a hire is alive (a wipe is no kill).
 //
 // A stale low-hp sighting alone is NEVER a kill: a boss that evades at 20 % and leaves the frames is not a corpse.
-// The returned string is the evidence for the note.
+// w.hostiles is never pruned, so a dead row alone says nothing about when it died: it counts only inside the
+// current attempt, and a live sighting after it (a reset or a respawn left the boss out of view for the pause)
+// voids it — then the toolkit read decides (review round 3). The returned string is the evidence for the note.
 func (w *walk) bossKilled(ctx context.Context, entry uint32, now time.Time) (bool, string) {
 	units := w.bossUnits(entry)
+	attemptAt := w.bossAttemptStart(units)
 	var alive, dead hostileState
 	haveAlive, haveDead := false, false
 	for _, h := range w.hostiles {
@@ -1836,17 +1859,25 @@ func (w *walk) bossKilled(ctx context.Context, entry uint32, now time.Time) (boo
 			continue
 		}
 		if h.hppct == 0 {
+			if attemptAt.IsZero() || h.at.Before(attemptAt) {
+				continue // an earlier attempt's corpse
+			}
 			if !haveDead || dead.at.Before(h.at) {
 				dead, haveDead = h, true
 			}
 			continue
 		}
-		if now.Sub(h.at) <= 15*time.Second && (!haveAlive || alive.at.Before(h.at)) {
+		if !haveAlive || alive.at.Before(h.at) {
 			alive, haveAlive = h, true
 		}
 	}
-	if haveAlive {
+	if haveAlive && now.Sub(alive.at) <= 15*time.Second {
 		return false, fmt.Sprintf("%d is alive in the frames (%d %%)", alive.entry, alive.hppct)
+	}
+	if haveDead && haveAlive && alive.at.After(dead.at) {
+		// A boss unit was seen alive after that corpse: the encounter reset or the boss respawned, and the row is
+		// another attempt's (the live unit is out of view for the pause, so nothing later supersedes it).
+		haveDead = false
 	}
 	ev := ""
 	if haveDead {
@@ -1880,14 +1911,64 @@ func (w *walk) bossUnits(boss uint32) []uint32 {
 			continue
 		}
 		for _, e := range l.Boss.PhaseEntries {
-			if inEntries(l.Boss.First, e) || inHold(l.Boss.Hold, e) || w.bossAdds[e] {
-				continue
+			if w.bossPhaseUnit(l.Boss, e) {
+				units = append(units, e)
 			}
-			units = append(units, e)
 		}
 		return units
 	}
 	return units
+}
+
+// bossPhaseUnit says the entry is a boss unit among b's phase entries: the boss's own entry is not a phase
+// unit, and a phase entry that is a `first` add, a hold entry or an add the frames showed several live units
+// of at once (w.bossAdds, trackFrame) is not one either (bossUnits).
+func (w *walk) bossPhaseUnit(b *dungeon.Boss, entry uint32) bool {
+	if b == nil || entry == b.Entry {
+		return false
+	}
+	for _, e := range b.PhaseEntries {
+		if e == entry {
+			return !inEntries(b.First, e) && !inHold(b.Hold, e) && !w.bossAdds[e]
+		}
+	}
+	return false
+}
+
+// bossUnit says the entry can be a boss unit of a plan boss: a leg's boss entry or one of its phase units
+// (bossUnits, bossPhaseUnit). It is what trackFrame records the attempt start for, so an add that exists
+// several at a time never starts or bounds an attempt.
+func (w *walk) bossUnit(entry uint32) bool {
+	if w.plan == nil {
+		return false
+	}
+	for i := range w.plan.Legs {
+		b := w.plan.Legs[i].Boss
+		if b == nil {
+			continue
+		}
+		if entry == b.Entry || w.bossPhaseUnit(b, entry) {
+			return true
+		}
+	}
+	return false
+}
+
+// bossAttemptStart is when the current attempt of these units began: the earliest engagement the frames
+// recorded (w.bossAttemptAt, trackFrame). Zero when no unit was seen engaged since the last wipe recovery or
+// the watch began, and then bossKilled accepts no dead row at all.
+func (w *walk) bossAttemptStart(units []uint32) time.Time {
+	var first time.Time
+	for _, u := range units {
+		at := w.bossAttemptAt[u]
+		if at.IsZero() {
+			continue
+		}
+		if first.IsZero() || at.Before(first) {
+			first = at
+		}
+	}
+	return first
 }
 
 // inHold says the entry is one of the hold's own entries (nil hold: none).
@@ -2435,6 +2516,9 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 	if err := w.bossUnknown(ctx); err != nil {
 		return err
 	}
+	// The recovery ends the boss attempt that wiped: nothing the frames showed before it bounds the next
+	// attempt's kill evidence (review round 3).
+	clear(w.bossAttemptAt)
 	from := w.env.now()
 	deadline := recoveryDeadline(from, w.opts.wipeRest, w.opts.maxRunMinutes, w.started)
 	if err := w.reviveHires(ctx, deadline, selfRegroup); err != nil {
@@ -2502,6 +2586,8 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 	if err := w.bossUnknown(ctx); err != nil {
 		return err
 	}
+	// As in recoverWipe: the recovery ends the attempt whose frames it woke on.
+	clear(w.bossAttemptAt)
 	from := w.env.now()
 	deadline := recoveryDeadline(from, w.opts.wipeRest, w.opts.maxRunMinutes, w.started)
 	revived, err := w.recoverNearWipeRevive(ctx, deadline)
