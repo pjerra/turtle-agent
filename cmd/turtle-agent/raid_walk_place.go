@@ -121,6 +121,15 @@ func strOf(m map[string]json.RawMessage, key string) string {
 	return s
 }
 
+// flagOf reads a boolean field of a list element (absent or not a bool: false).
+func flagOf(m map[string]json.RawMessage, key string) bool {
+	var v bool
+	if raw, ok := m[key]; ok {
+		_ = json.Unmarshal(raw, &v)
+	}
+	return v
+}
+
 func posOf(m map[string]json.RawMessage, key string) (x, y, z float32, ok bool) {
 	raw, found := m[key]
 	if !found {
@@ -151,6 +160,8 @@ type ttUnit struct {
 	HomeOK bool
 	// Spawn is the spawn's guid low (`db`): the notes carry it so a live run can match a unit against the spawn export.
 	Spawn uint32
+	// Dead is the toolkit's `dead` field: a corpse (bossKilled's toolkit read asks for the dead units too).
+	Dead  bool
 	MaxHP float64
 	Rank  int
 }
@@ -173,6 +184,7 @@ func ttUnitOf(m map[string]json.RawMessage) ttUnit {
 	if rk, ok := numOf(m, "rk"); ok {
 		u.Rank = int(rk)
 	}
+	u.Dead = flagOf(m, "dead")
 	if hpv := numList(m, "hpv"); len(hpv) >= 2 {
 		u.MaxHP = hpv[1]
 	}

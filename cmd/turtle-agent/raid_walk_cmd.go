@@ -604,6 +604,12 @@ type walk struct {
 	bossRows     map[uint32]hostileState
 	bossSeenAt   time.Time
 	bossTargetAt time.Time
+	// bossToolkitOff says the toolkit corpse read (bossCorpse) failed once: the walk stops asking, so a server
+	// without the toolkit costs one bounded read and not a timeout on every pause tick.
+	bossToolkitOff bool
+	// bossAdds are the entries the frames have shown more than one live unit of at once (trackFrame): adds that
+	// exist several at a time, never the boss reborn, so bossUnits leaves them out of the kill evidence.
+	bossAdds map[uint32]bool
 
 	stepFirst *dungeon.Point
 

@@ -894,9 +894,11 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 		step    int
 		lastTry time.Time
 		skipped bool // a near-wipe recovery was skipped for this pause: the old ending, once
-		// bossSkip says this pause's boss-not-found decision was already taken: one `.bot run skip`
-		// per pause, never more (walk 24 B).
-		bossSkip bool
+		// bossSkip says this pause's boss-not-found skip is settled: a `.bot run skip` went out, or its two tries
+		// failed (then the pause path takes over). Until then the kill evidence is re-read on every tick (review
+		// round 1, item 2). bossNoKill notes the first tick without evidence once, not every tick.
+		bossSkip   bool
+		bossNoKill bool
 	}
 	perStep := map[int]int{}
 	autoTotal := 0
@@ -949,7 +951,7 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 		if w.haveStatus && w.lastStatus.State == tbm.RunPaused {
 			if !ps.armed || ps.note != w.lastStatus.Note || ps.step != w.lastStatus.Step {
 				ps.armed, ps.at, ps.note, ps.step, ps.lastTry, ps.skipped = true, now, w.lastStatus.Note, w.lastStatus.Step, now, false
-				ps.bossSkip = false
+				ps.bossSkip, ps.bossNoKill = false, false
 				w.logLine(now, "paused: "+w.lastStatus.Note)
 				if w.dash != nil {
 					w.saveCommanders("pause")
@@ -958,26 +960,22 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 			regroup := strings.Contains(ps.note, "did not hold")
 			nearWipe := nearWipeStop(ps.note)
 			bossEntry, bossNotFound := w.bossNotFoundAtBossStep(ps.step, ps.note)
-			switch {
-			case !ps.bossSkip && bossNotFound:
-				// The run leader paused with "boss <N> not found" on that boss's own step. The frames are
-				// the evidence: when they show the boss's family killed, the walk skips the step once and
-				// the run goes on to its until (walk 24 test2 r2). One decision per pause, either way.
-				ps.bossSkip = true
-				if ok, ev := w.bossKilled(bossEntry, now); ok {
-					rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "skip", WaitMS: 5000})
-					switch {
-					case err != nil:
-						w.note("boss %d killed (%s), but the run skip failed (%s): waiting as a pause", bossEntry, ev, err)
-					case rep.Reply.Err != nil:
-						w.note("boss %d killed (%s), but the run skip failed (%s): waiting as a pause", bossEntry, ev, rep.Reply.Err.Message)
-					default:
-						w.note("boss %d killed (%s); the run leader did not find his corpse: .bot run skip of step %d", bossEntry, ev, ps.step)
-						w.logLine(now, fmt.Sprintf("boss %d killed (%s); the run leader did not find his corpse: .bot run skip of step %d", bossEntry, ev, ps.step))
-					}
-				} else {
-					w.note("boss %d not found and no kill in the frames (%s): waiting as a pause", bossEntry, ev)
+			if bossNotFound && !ps.bossSkip {
+				// The run leader paused with "boss <N> not found" on that boss's own step. The frames are the
+				// evidence: when they show a boss unit killed, the walk skips the step and the run goes on to its
+				// until (walk 24 test2 r2). The evidence is re-read on every tick while the pause lasts (review
+				// round 1, item 2: the kill can land after the pause arrived), and the skip is latched only once it
+				// went out: a tick without evidence changes nothing (the pause path below still ends the walk), and
+				// a failed send is retried once.
+				if ok, ev := w.bossKilled(ctx, bossEntry, now); ok {
+					ps.bossSkip = true
+					w.bossSkipStep(ctx, bossEntry, ev, ps.step, now)
+				} else if !ps.bossNoKill {
+					ps.bossNoKill = true
+					w.note("boss %d not found and no kill in the frames yet (%s): re-reading while the pause lasts", bossEntry, ev)
 				}
+			}
+			switch {
 			case regroup && perStep[ps.step] < w.opts.autoResume && autoTotal < 6 && now.Sub(ps.lastTry) >= 15*time.Second:
 				if _, err := w.commander(ctx, commanderReq{Op: "run", Verb: "resume", WaitMS: 5000}); err != nil {
 					return err
@@ -1396,6 +1394,23 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 			}
 		}
 	}
+	// An entry the frame shows more than one LIVE unit of at once exists several at a time: it is an add, not a
+	// boss reborn, and its corpse proves nothing (bossUnits). Thekal's two Zulian Guardians 15068 are summoned
+	// together (boss_thekal.cpp:41/:413) while Thekal reborn 14509 stands alone.
+	for i := range f.Hostiles {
+		if f.Hostiles[i].HPPct <= 0 || w.bossAdds[f.Hostiles[i].Entry] {
+			continue
+		}
+		for j := range f.Hostiles {
+			if j != i && f.Hostiles[j].Entry == f.Hostiles[i].Entry && f.Hostiles[j].HPPct > 0 {
+				if w.bossAdds == nil {
+					w.bossAdds = map[uint32]bool{}
+				}
+				w.bossAdds[f.Hostiles[i].Entry] = true
+				break
+			}
+		}
+	}
 }
 
 // savedFrame is one frames.jsonl line (compact: positions, hp, dead, hostiles).
@@ -1764,10 +1779,16 @@ func nextBossStep(rows planexport.Rows, from int) int {
 	return 0
 }
 
-// bossKillPct is the hp percentage at or below which a boss family's last sighting counts as nearly dead:
-// a boss that left the frames at higher health (an evade, out of view range) is not a kill. Walk 24 test2 r2
-// killed Thekal reborn down to 5 %.
-const bossKillPct = 25
+const (
+	// bossKillYd is the radius around the boss row the toolkit's corpse read searches: TB's own boss step wants a
+	// dead creature of the step's entry within 30 yd of the spot, so a corpse a little further out is still the
+	// boss that died there.
+	bossKillYd = 40
+	// bossCorpseWait bounds one toolkit corpse read. The toolkit answers at once; a server without the toolkit
+	// answers nothing at all, so the read is bounded rather than waited out (the first failure turns the reads
+	// off for the rest of the walk).
+	bossCorpseWait = 10 * time.Second
+)
 
 // bossNotFoundAtBossStep says the pause's note names a boss that is not found and the pause stands on that
 // boss's OWN row of the server's rows (walk 24 B, decision B-D4): only then may the walk consider the skip.
@@ -1787,78 +1808,178 @@ func (w *walk) bossNotFoundAtBossStep(step int, note string) (uint32, bool) {
 	return entry, true
 }
 
-// bossKilled says the frames show the boss's family killed in this walk: the evidence that the run leader's
-// "boss <N> not found" is a kill whose corpse it cannot see (walk 24 test2 r2: Thekal 14599 comes back as 14509,
-// and TB needs a dead creature of the boss entry itself, so it pauses). The evidence holds when ALL of:
-//   - the family's last sighting (w.bossRows, the entry's newest row) was nearly dead (hppct <= bossKillPct);
-//   - that sighting is gone from the frames (0 %, or older than 10 s, as bossState's bossGone);
-//   - no family row is alive in the frames now (fresh, hp left);
+// bossKilled says the frames show a boss unit of this step killed in this walk: the evidence that the run
+// leader's "boss <N> not found" is a kill whose corpse it cannot see (walk 24 test2 r2: Thekal 14599 comes back as
+// 14509, and TB needs a dead creature of the boss entry itself, so it pauses).
+//
+// It judges per UNIT (w.hostiles is keyed by GUID): an entry's newest row can be one unit's while another unit of
+// the same entry still stands, so a per-entry last sighting reads a live boss's row off an add's corpse (review
+// round 1, item 1). The boss units are the step's boss entry and the phase entries that are the boss reborn; an
+// add that exists several at a time (Thekal's Zulian Guardians 15068), a hold entry and a `first` add are not boss
+// units (bossUnits).
+//
+// The evidence holds when ALL of:
+//   - a boss unit is affirmatively dead: a frame row at 0 % for its GUID, or the toolkit sees a corpse of a
+//     boss-unit entry within bossKillYd of the boss row (TB's own search reads the live view, so a boss that died
+//     out of the party's sight leaves no row at all);
+//   - no boss unit is seen alive: no frame row fresher than 15 s with hp left;
 //   - a hire is alive (a wipe is no kill).
 //
-// The family is bossFamily minus the `first` adds: an add dying is no boss kill. The returned string is the
-// evidence for the note.
-func (w *walk) bossKilled(entry uint32, now time.Time) (bool, string) {
-	first := map[uint32]bool{}
-	fam := w.bossFamily(entry)
-	for _, e := range w.familyFirst(entry) {
-		first[e] = true
-	}
-	var last hostileState
-	seen := false
-	for e := range fam {
-		if first[e] {
+// A stale low-hp sighting alone is NEVER a kill: a boss that evades at 20 % and leaves the frames is not a corpse.
+// The returned string is the evidence for the note.
+func (w *walk) bossKilled(ctx context.Context, entry uint32, now time.Time) (bool, string) {
+	units := w.bossUnits(entry)
+	var alive, dead hostileState
+	haveAlive, haveDead := false, false
+	for _, h := range w.hostiles {
+		if !inEntries(units, h.entry) {
 			continue
 		}
-		row, ok := w.bossRows[e]
-		if !ok {
+		if h.hppct == 0 {
+			if !haveDead || dead.at.Before(h.at) {
+				dead, haveDead = h, true
+			}
 			continue
 		}
-		if !seen || row.at.After(last.at) {
-			last, seen = row, true
+		if now.Sub(h.at) <= 15*time.Second && (!haveAlive || alive.at.Before(h.at)) {
+			alive, haveAlive = h, true
 		}
 	}
-	if !seen {
-		return false, "no family row in the frames"
+	if haveAlive {
+		return false, fmt.Sprintf("%d is alive in the frames (%d %%)", alive.entry, alive.hppct)
 	}
-	if last.hppct > bossKillPct {
-		return false, fmt.Sprintf("%d last seen at %d %%", last.entry, last.hppct)
+	ev := ""
+	if haveDead {
+		ev = fmt.Sprintf("%d seen dead in the frames (0 %%, %s ago)", dead.entry, durWords(now.Sub(dead.at)))
+	} else if ok, s := w.bossCorpse(ctx, entry, units); ok {
+		ev = s
 	}
-	if last.hppct != 0 && now.Sub(last.at) < 10*time.Second {
-		return false, fmt.Sprintf("%d last seen at %d %%, still in the frames", last.entry, last.hppct)
-	}
-	for e := range fam {
-		if first[e] {
-			continue
-		}
-		if row, ok := w.bossRows[e]; ok && now.Sub(row.at) <= 15*time.Second && row.hppct > 0 {
-			return false, fmt.Sprintf("%d is alive in the frames (%d %%)", e, row.hppct)
-		}
+	if ev == "" {
+		return false, "no boss unit dead in the frames and no corpse at the boss row"
 	}
 	if !w.anyAlive(now) {
 		return false, "no hire alive (a wipe, not a kill)"
 	}
-	return true, fmt.Sprintf("%d last seen at %d %% %s ago, gone from the frames; %d hires alive", last.entry, last.hppct, durWords(now.Sub(last.at)), len(w.hireList()))
+	return true, fmt.Sprintf("%s; %d hires alive", ev, len(w.hireList()))
 }
 
-// familyFirst is the boss's `first` adds (plan.Legs, the leg whose Boss.Entry is boss).
-func (w *walk) familyFirst(boss uint32) []uint32 {
+// bossUnits is the boss's units for the kill evidence: the step's boss entry and the phase entries that are the
+// boss reborn (plan.Legs, the leg whose Boss.Entry is boss; Zul'Gurub's Thekal 14599 -> 14509). The `first` adds
+// and the hold entries are not boss units, and neither is a phase entry the frames have shown more than one live
+// unit of at once (w.bossAdds, trackFrame): an add that exists several at a time, such as Thekal's two Zulian
+// Guardians 15068, leaves corpses that prove nothing (review round 1, item 1). Looked up by the boss entry, not by
+// a StepRow.Leg index, so a 0/1-based mix-up cannot bite.
+func (w *walk) bossUnits(boss uint32) []uint32 {
+	units := []uint32{boss}
 	if w.plan == nil {
-		return nil
+		return units
 	}
 	for i := range w.plan.Legs {
-		if l := &w.plan.Legs[i]; l.Boss != nil && l.Boss.Entry == boss {
-			return l.Boss.First
+		l := &w.plan.Legs[i]
+		if l.Boss == nil || l.Boss.Entry != boss {
+			continue
 		}
+		for _, e := range l.Boss.PhaseEntries {
+			if inEntries(l.Boss.First, e) || inHold(l.Boss.Hold, e) || w.bossAdds[e] {
+				continue
+			}
+			units = append(units, e)
+		}
+		return units
 	}
-	return nil
+	return units
 }
 
-// bossFamily is the plan's entries that belong to a boss: its own entry, its phase entries and
-// its hold entries (plan.Legs, the leg whose Boss.Entry is boss). The `first` adds are NOT part
-// of it here: runFightsBoss adds them for the early rule (they can wake the encounter early),
-// while bossKilled (walk 24 B) leaves them out (an add dying is no boss kill). No such leg ->
-// just {boss}. Looked up by the boss entry, not by a StepRow.Leg index, so a 0/1-based mix-up
-// cannot bite.
+// inHold says the entry is one of the hold's own entries (nil hold: none).
+func inHold(h *dungeon.Hold, e uint32) bool { return h != nil && inEntries(h.Entries, e) }
+
+// bossCorpse asks the toolkit whether one of the boss units lies dead near the boss row. TB's boss step wants a
+// dead creature of the step's entry within 30 yd of the spot and reads the live view only, so a boss killed while
+// the party was dead or away leaves no frame row at all; the toolkit's
+// `q units <r> <x> <y> <z> all dead e=<entry>` reads the map's creatures, corpses included (TortoiseBots
+// tools/eluna/test-toolkit tt_commands.lua Q.units: the `dead` flag asks for both, and TT.unitSnap carries
+// `dead`). A refused line, no reply or an error is no evidence: the walk waits as a pause, and the first failure
+// turns the reads off for the rest of the walk (a server without the toolkit must not cost the watch loop a
+// timeout on every tick).
+func (w *walk) bossCorpse(ctx context.Context, boss uint32, units []uint32) (bool, string) {
+	if w.bossToolkitOff {
+		return false, ""
+	}
+	spot, ok := w.bossSpot(boss)
+	if !ok {
+		return false, ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, bossCorpseWait)
+	defer cancel()
+	for _, e := range units {
+		out, err := w.tt(ctx, fmt.Sprintf("q units %s %s %s %s all dead e=%d", num32(bossKillYd), num32(spot.X), num32(spot.Y), num32(spot.Z), e))
+		if err != nil {
+			if ctx.Err() != nil {
+				return false, "" // interrupted: no verdict, and no latch on a cancelled read
+			}
+			w.bossToolkitOff = true
+			w.note("boss %d: the toolkit corpse read failed (%v): the frames alone decide from here", boss, err)
+			return false, ""
+		}
+		body, ok := ttLast(out)
+		if !ok {
+			w.bossToolkitOff = true
+			w.note("boss %d: the toolkit corpse read gave no reply: the frames alone decide from here", boss)
+			return false, ""
+		}
+		for _, m := range body.list("units") {
+			u := ttUnitOf(m)
+			if u.Entry != e || !u.Dead {
+				continue
+			}
+			return true, fmt.Sprintf("the toolkit sees %d dead %s yd from the boss row", e, num32(u.Dist))
+		}
+	}
+	return false, ""
+}
+
+// bossSkipStep sends the pause's `.bot run skip` for the boss step whose kill the frames show. The commander RPC
+// can be busy, so a failed send is retried once; after that the pause path takes over (the walk waits out
+// pausedWait and ends 18, as before). It returns whether the skip went out.
+func (w *walk) bossSkipStep(ctx context.Context, bossEntry uint32, ev string, step int, now time.Time) bool {
+	for try := range 2 {
+		rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "skip", WaitMS: 5000})
+		var why string
+		switch {
+		case err != nil:
+			why = err.Error()
+		case rep.Reply.Err != nil:
+			why = rep.Reply.Err.Message
+		default:
+			w.note("boss %d killed (%s); the run leader did not find his corpse: .bot run skip of step %d", bossEntry, ev, step)
+			w.logLine(now, fmt.Sprintf("boss %d killed (%s); the run leader did not find his corpse: .bot run skip of step %d", bossEntry, ev, step))
+			return true
+		}
+		if try == 0 {
+			w.note("boss %d killed (%s), but the run skip failed (%s): retrying once", bossEntry, ev, why)
+		} else {
+			w.note("boss %d killed (%s), but the run skip failed (%s): waiting as a pause", bossEntry, ev, why)
+		}
+	}
+	return false
+}
+
+// bossSpot is the plan boss row's position: the spot the run leader's own boss step searches around (30 yd) and
+// the point the toolkit's corpse read is made at.
+func (w *walk) bossSpot(boss uint32) (dungeon.Point, bool) {
+	for _, s := range w.rows.Steps {
+		if s.Kind == planexport.KindBoss && s.Entry == boss {
+			return dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}, true
+		}
+	}
+	return dungeon.Point{}, false
+}
+
+// bossFamily is the plan's entries that belong to a boss: its own entry, its phase entries and its hold entries
+// (plan.Legs, the leg whose Boss.Entry is boss). The `first` adds are NOT part of it here: runFightsBoss adds them
+// for the early rule (they can wake the encounter early), while bossKilled reads bossUnits instead (the boss's own
+// entry and its phase entries: a hold add's or a first add's corpse is no boss kill). No such leg -> just {boss}.
+// Looked up by the boss entry, not by a StepRow.Leg index, so a 0/1-based mix-up cannot bite.
 func (w *walk) bossFamily(boss uint32) map[uint32]bool {
 	fam := map[uint32]bool{boss: true}
 	if w.plan == nil {
