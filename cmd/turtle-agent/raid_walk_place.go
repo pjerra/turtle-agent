@@ -844,6 +844,12 @@ func (w *walk) placeQuietJudge(read *placeQuietRead, p dungeon.Point) placeQuiet
 		key := strings.ToUpper(u.GUID)
 		if i, ok := at[key]; ok {
 			sights[i].roam = sights[i].roam || roam
+			if roam {
+				// The join read is fresher than the quiet's near list: a roamer that moved into the landing
+				// reach between the reads is judged at its new position.
+				sights[i].unit = u
+				sights[i].dist = placeDist2(u.X, u.Y, p.X, p.Y)
+			}
 			return
 		}
 		at[key] = len(sights)

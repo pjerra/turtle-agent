@@ -1591,6 +1591,32 @@ func TestPlaceQuietFindsRoamerInNearList(t *testing.T) {
 	}
 }
 
+// The join read is fresher than the quiet's own near list: a roamer the quiet lists 40 yd out that the join read
+// finds 10 yd out blocks the placement at its 10 yd position (the judge kept the stale near-list position and placed).
+func TestPlaceQuietJoinsFresherRoamerPosition(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	const guid = "0xF1300000009401"
+	home := placeFarHome(t, plan, plan.Circles[0])
+	p.quiet = func(int) bool { return false }
+	p.quietNear = []any{quietUnitHome(guid, 999999, plan.Point.X+40, plan.Point.Y, plan.Point.Z, home)}
+	p.quietRoamers = []any{quietRoamAt(guid, 999999, "moved", 40.0, 3.0)}
+	p.units = joinHook([]any{joinUnitAt(guid, 999999, plan.Point.X+10, plan.Point.Y, plan.Point.Z, home, 4000, 0)})
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.summary().EndReason)
+	}
+	if len(p.places) != 0 {
+		t.Fatalf("the walk placed with a roamer 10 yd out: %v", p.places)
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, "999999") || !strings.Contains(sum.EndReason, "10.0 yd") {
+		t.Fatalf("end reason %q", sum.EndReason)
+	}
+	if !hasNote(f.summary(), "10.0 yd") {
+		t.Fatalf("notes %v", f.summary().Notes)
+	}
+}
+
 // F2 (D3): when the quiet reply cut its near list (len(near) < n_near) and the farthest unit it still lists stands
 // inside the landing reach, the placement is refused at once: the units the cut dropped may stand where the raid lands.
 func TestPlaceQuietCutNearListInsideReachRefuses(t *testing.T) {
