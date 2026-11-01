@@ -1684,6 +1684,7 @@ func (w *walk) handleWipe(ctx context.Context, step int) error {
 	// run past it) instead of the last status, and only the run's state still comes from that status:
 	// a paused or done last line is no self-regroup.
 	now := w.env.now()
+	w.wipeAt = now
 	selfRegroup := w.haveStatus && w.lastStatus.State == tbm.RunRunning && w.selfRegroupSeen(step, now)
 	// The observations explained this wipe: a later wipe needs its own line since the last recovery.
 	w.runLines = nil
@@ -2405,10 +2406,14 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 	if q.timeout != nil {
 		return q.timeout
 	}
+	if q.err != nil {
+		return q.err
+	}
 	ok, why, blockers := q.ok, q.why, q.blockers
-	// cur is the point the commander stands at: p, or the entrance once the fallback's go went out. The D-C wait
-	// re-reads that one.
+	// cur is the point the commander stands at: p, or the entrance once the fallback's go has LANDED. The D-C wait
+	// re-reads that one. entranceTried says the fallback's `.go xyz` went out at all (the refusal's entrance_tried).
 	cur := p
+	entranceTried, entranceLanded := false, true
 	if !ok && w.place == nil {
 		// A door-to-end walk falls back to the entrance; a placed one does not: the entrance is behind the legs the
 		// placement skipped, and the run leader's walk back would cross them (spec 6).
@@ -2431,17 +2436,35 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 			w.logLine(w.env.now(), fmt.Sprintf("revive go from map %d (%.1f %.1f %.1f, z unknown %v, teleports %d)", st.Map, st.X, st.Y, st.Z, st.ZUnknown, st.TeleportSeq))
 		}
 		if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(e.X), num32(e.Y), num32(e.Z), w.plan.Map)); err == nil {
-			cur = e
-			if werr := w.waitRevivePoint(ctx, e, from, eSeq, eHave, deadline); werr == nil {
+			entranceTried = true
+			werr := w.waitRevivePoint(ctx, e, from, eSeq, eHave, deadline)
+			if timeout, isTimeout := werr.(*recoveryTimeout); isTimeout {
+				return timeout
+			}
+			if werr != nil {
+				// The go was accepted but never landed: the commander still stands at p, so a quiet read of e would
+				// judge a point its own character is nowhere near (quietOnce's own reach rule) and D-C would wait on
+				// nothing. Refuse (review round 1, Codex/Opus H1).
+				entranceLanded = false
+			} else {
+				// Only a LANDED go makes the entrance the checked point, and a point switch needs a fresh quiet state
+				// (Codex H2): p's patrol distances must not exempt a stationary patrol at e whose distance grew for
+				// no reason but the point moving.
+				cur, qs = e, newQuietState()
 				eq := w.quietCheck(ctx, qs, e, deadline)
 				if eq.timeout != nil {
 					return eq.timeout
 				}
+				if eq.err != nil {
+					return eq.err
+				}
 				ok, why, blockers = eq.ok, eq.why, eq.blockers
-			} else if timeout, isTimeout := werr.(*recoveryTimeout); isTimeout {
-				return timeout
 			}
 		}
+	}
+	if !entranceLanded {
+		w.reviveRefusal = w.refusal(step, blockers, w.env.now().Sub(waitFrom), entranceTried)
+		return stopf(exitRaidWalkIncident, "not revived: the entrance go never landed (the commander is not within %d yd of the revive point on map %d)", reviveLandingYd, w.plan.Map)
 	}
 	if !ok {
 		// D-C (walk 25): the point may still go quiet, so re-read every 10 s while the rest and resume that follow still
@@ -2451,11 +2474,21 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 			if wq.timeout != nil {
 				return wq.timeout
 			}
+			if wq.err != nil {
+				return wq.err
+			}
 			ok, why, blockers = wq.ok, wq.why, wq.blockers
+			// The wait is long, so the hires may have been released to the graveyard meanwhile: re-read their maps
+			// and take the ghosts path when any is off the plan's map, so the late join is skipped (review round 1,
+			// Opus M2).
+			if ok && !ghosts && w.hiresOffMap() > 0 {
+				ghosts = true
+				w.note("revive: %d hire(s) are on another map after the wait (released): no late join, the summons resolve to each hire's own copy", w.hiresOffMap())
+			}
 		}
 	}
 	if !ok {
-		w.reviveRefusal = w.refusal(step, blockers, w.env.now().Sub(waitFrom))
+		w.reviveRefusal = w.refusal(step, blockers, w.env.now().Sub(waitFrom), entranceTried)
 		return stopf(exitRaidWalkIncident, "not revived: %s", why)
 	}
 	if w.place != nil {
@@ -2612,6 +2645,7 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 	// As in recoverWipe: the recovery ends the attempt whose frames it woke on.
 	clear(w.bossAttemptAt)
 	from := w.env.now()
+	w.wipeAt = from
 	deadline := recoveryDeadline(from, w.opts.wipeRest, w.opts.maxRunMinutes, w.started)
 	revived, err := w.recoverNearWipeRevive(ctx, step, deadline)
 	if err != nil {
@@ -3217,26 +3251,42 @@ func (w *walk) runWentOnAfter(seq0 uint64, step int) bool {
 }
 
 // quietState is what one revive's run of quiet reads remembers: the patrols' last distances (the exemption needs two
-// reads) and the blocker set the last failed read logged (D-E logs a change of blockers, not the same ones every 5 s).
+// reads), the units' last idle-at-home reads (D-A's two-read rule, review round 1 Opus M1), and the blocker set the
+// last failed read logged (D-E logs a change of blockers, not the same ones every 5 s). One state belongs to ONE
+// checked point: a fresh one whenever the point changes (Codex H2).
 type quietState struct {
 	prev   map[string]float64
+	idle   *raidwalk.QuietIdleReads
 	logged string
 }
 
-func newQuietState() *quietState { return &quietState{prev: map[string]float64{}} }
+func newQuietState() *quietState {
+	return &quietState{prev: map[string]float64{}, idle: raidwalk.NewQuietIdleReads()}
+}
 
 // quietRead is one quiet pass's outcome: the point is quiet (ok), or the last failed read's reason and blockers. A
-// timeout says the recovery's deadline passed mid-pass: the caller returns it as the timed-out ending, as before.
+// timeout says the recovery's deadline passed mid-pass: the caller returns it as the timed-out ending, as before. An
+// err is the interrupt a sleep hit: the caller ends the walk with it (exit 18), never as a refusal.
 type quietRead struct {
 	ok       bool
 	why      string
 	blockers []raidwalk.QuietBlocker
 	timeout  *recoveryTimeout
+	err      error
 }
 
-// quietOnce is one quiet read of p: the hostile units within 200 yd, the patrol exemptions, raidwalk's own quiet rules,
-// and (D-E) one run.log line naming every blocker when the blocker set changed since the last failed read.
+// quietOnce is one quiet read of p: the commander's own position (H1: a read of a point its character is nowhere near
+// proves nothing), the hostile units within 200 yd, the patrol exemptions, raidwalk's own quiet rules, and (D-E) one
+// run.log line naming every blocker when the blocker set changed since the last failed read.
 func (w *walk) quietOnce(ctx context.Context, st *quietState, p dungeon.Point) (bool, string, []raidwalk.QuietBlocker) {
+	// The commander must stand at the point this read judges (review round 1, Codex/Opus H1): a `.go xyz` the server
+	// accepted but never landed leaves the commander where it was, and a read of a point its own character is nowhere
+	// near judges a copy it cannot see. placeReachYd is the reach the placement accepts the same point within.
+	if stx, serr := w.status(ctx); serr != nil {
+		return false, "status: " + serr.Error(), nil
+	} else if d := math.Hypot(float64(stx.X-p.X), float64(stx.Y-p.Y)); d > placeReachYd {
+		return false, fmt.Sprintf("the commander stands %.1f yd from the read point (over the %d yd reach)", d, placeReachYd), nil
+	}
 	us, err := w.unitsAt(ctx, 200)
 	if err != nil {
 		return false, "units: " + err.Error(), nil
@@ -3263,7 +3313,7 @@ func (w *walk) quietOnce(ctx context.Context, st *quietState, p dungeon.Point) (
 		}
 		st.prev[patrols[j].ID] = best
 	}
-	bs := raidwalk.QuietBlockers(us, patrols, p)
+	bs := raidwalk.QuietBlockers(us, patrols, p, st.idle, w.env.now())
 	if len(bs) == 0 {
 		st.logged = ""
 		return true, "", nil
@@ -3325,7 +3375,8 @@ func (w *walk) quietCheck(ctx context.Context, st *quietState, p dungeon.Point, 
 			if timeout, ok := err.(*recoveryTimeout); ok {
 				return quietRead{timeout: timeout}
 			}
-			return quietRead{why: "interrupted"}
+			// An interrupt is not a refusal (review round 1, Opus L2): the caller ends the walk with it.
+			return quietRead{err: err}
 		}
 	}
 	return quietRead{why: "the units never went quiet"}
@@ -3350,7 +3401,8 @@ func (w *walk) quietWait(ctx context.Context, st *quietState, p dungeon.Point, f
 			if timeout, ok := err.(*recoveryTimeout); ok {
 				return quietRead{timeout: timeout}
 			}
-			return quietRead{why: "interrupted"}
+			// An interrupt during D-C is the interrupted ending (review round 1, Opus L2), not a "not revived" refusal.
+			return quietRead{err: err}
 		}
 		ok, why, bs := w.quietOnce(ctx, st, p)
 		if ok {
@@ -3365,24 +3417,37 @@ func (w *walk) quietWait(ctx context.Context, st *quietState, p dungeon.Point, f
 
 // quietWaitEnd is D-C's wait end: the recovery's deadline less the rest and the 30 s that follow the wait, so the rest
 // and the resume still fit before it. Zero when there is no deadline (the boss-wipe ending, where nothing follows the
-// revive): that revive does not wait.
+// revive): that revive does not wait. A self-regroup gets a second cap (review round 1, Opus M2): the run regroups by
+// itself, so a wait longer than selfRegroupQuietCap past the wipe is a wait on a regroup that has failed.
 func (w *walk) quietWaitEnd(deadline time.Time, selfRegroup bool) time.Time {
 	if deadline.IsZero() {
 		return time.Time{}
 	}
 	end := deadline.Add(-30 * time.Second)
-	if !selfRegroup {
+	if selfRegroup {
+		if !w.wipeAt.IsZero() {
+			if cap := w.wipeAt.Add(selfRegroupQuietCap); cap.Before(end) {
+				end = cap
+			}
+		}
+	} else {
 		end = end.Add(-w.opts.wipeRest)
 	}
 	return end
 }
 
+// selfRegroupQuietCap is how long a self-regroup's D-C wait may run past the wipe (review round 1, Opus M2): TB's own
+// regroup takes a minute or two, so a point still blocked five minutes on is not going to be freed by it.
+const selfRegroupQuietCap = 5 * time.Minute
+
 // refusal is the summary's revive_refusal (D-D, walk 25): waited is how long the revive waited for its point to go
 // quiet, from its first read. all_idle says every blocker of the last read was idle, which is what makes waiting
-// pointless; a read that named no unit blocker at all (a failed RPC, say) does not claim that.
-func (w *walk) refusal(step int, blockers []raidwalk.QuietBlocker, waited time.Duration) *raidwalk.ReviveRefusal {
+// pointless; a read that named no unit blocker at all (a failed RPC, say) does not claim that. entrance_tried says the
+// entrance fallback's go went out (review round 1, Opus L3).
+func (w *walk) refusal(step int, blockers []raidwalk.QuietBlocker, waited time.Duration, entranceTried bool) *raidwalk.ReviveRefusal {
+	at := w.reviveStep()
 	r := &raidwalk.ReviveRefusal{
-		WipeStep: step, StartStep: w.startStep, TriedSteps: []int{w.startStep},
+		WipeStep: step, StartStep: at, TriedSteps: []int{at}, EntranceTried: entranceTried,
 		WaitedS: int(waited / time.Second), Blockers: make([]raidwalk.ReviveBlocker, 0, len(blockers)),
 		AllIdle: len(blockers) > 0,
 	}
@@ -3395,6 +3460,23 @@ func (w *walk) refusal(step int, blockers []raidwalk.QuietBlocker, waited time.D
 		}
 	}
 	return r
+}
+
+// reviveStep is the step of the revive point the walk actually uses (the refusal's start_step, review round 1, Opus
+// L3): the placement's staged start with --place, else the first positioned row (firstStepPoint) — step 1 unless step
+// 1 is a point-less rest row. It is not the resolved --from step: a plain --from walk revives at the plan's own first
+// point, whatever step the run is started on.
+func (w *walk) reviveStep() int {
+	if w.place != nil {
+		return w.place.Start
+	}
+	for i, s := range w.rows.Steps {
+		if s.X == 0 && s.Y == 0 && s.Z == 0 {
+			continue
+		}
+		return i + 1
+	}
+	return 1
 }
 
 // recoveryExpired reports the recovery's timed-out ending when the entry deadline

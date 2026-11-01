@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/objects"
@@ -11,17 +13,55 @@ import (
 
 // The quiet distances of the revive procedure (spec 3.5): nothing alive and hostile within 45 yd, nothing alive
 // hostile and moving within 80 yd, no patrol whose path comes within 45 yd. quietIdleYd is D-A (walk 25): a hostile
-// that is IDLE (not in combat, no target, not moving) and stands farther out than this never blocks the revive. The 25
-// matches the walk command's landing reach (placeReachYd), the reach the placement's own quiet accepted for the same
-// point: an idle mob at home beyond it is exactly what the run faced when it started there, and a door-to-end run has
-// it alive at the same distance. An idle unit at 25 yd or closer still blocks, and every unit in combat, holding a
-// target or moving keeps the 45/80 yd rules below.
+// that is IDLE (not in combat, no target, not moving) and stands farther out than this never blocks the revive, the
+// same idea as the placement's landing reach (placeReachYd) but a little wider: an idle mob at home far enough out is
+// exactly what the run faced when it started there, and a door-to-end run has it alive at the same distance. An idle
+// unit at 30 yd or closer still blocks, and every unit in combat, holding a target or moving keeps the 45/80 yd rules
+// below.
+//
+// The exemption needs TWO reads (review round 1, Opus M1): quietIdleHold is how far apart they must be and
+// quietIdleMoveYd how close to the same spot, so a mob that was idle once and starts to move is not waved through on
+// the strength of one stale sighting.
 const (
 	quietStillYd  = 45
 	quietMovingYd = 80
 	quietPatrolYd = 45
-	quietIdleYd   = 25
+	quietIdleYd   = 30
+	// quietIdleHold / quietIdleMoveYd are D-A's two-read rule.
+	quietIdleHold   = 5 * time.Second
+	quietIdleMoveYd = 1
 )
+
+// QuietIdleReads is the revive's memory of the last read that saw each hostile idle at home: D-A's exemption needs the
+// unit seen idle twice, quietIdleHold apart and within quietIdleMoveYd of the same position (review round 1, Opus M1).
+type QuietIdleReads struct {
+	prev map[string]quietIdleAt
+}
+
+type quietIdleAt struct {
+	at   time.Time
+	x, y float32
+}
+
+// NewQuietIdleReads makes the per-revive read memory.
+func NewQuietIdleReads() *QuietIdleReads { return &QuietIdleReads{prev: map[string]quietIdleAt{}} }
+
+// idleHome records this read of u and says whether it is the second of two reads quietIdleHold apart that both saw u
+// idle within quietIdleMoveYd of the same spot (x/y: an idle mob's z does not wander). A read that does not see u idle
+// forgets the earlier one.
+func (r *QuietIdleReads) idleHome(u *objects.Unit, now time.Time) bool {
+	key := strings.ToUpper(u.GUID.String())
+	if u.InCombat || u.Target != 0 || u.Moving {
+		delete(r.prev, key)
+		return false
+	}
+	prev, ok := r.prev[key]
+	r.prev[key] = quietIdleAt{at: now, x: u.X, y: u.Y}
+	if !ok || now.Sub(prev.at) < quietIdleHold {
+		return false
+	}
+	return math.Hypot(float64(prev.x-u.X), float64(prev.y-u.Y)) <= quietIdleMoveYd
+}
 
 // QuietPatrol is one patrol of the --patrols file, reduced to what the quiet check needs. Exempt is set by the
 // caller when it found a member visible far off whose distance grew over the last two checks (spec 3.5).
@@ -56,7 +96,7 @@ func (b QuietBlocker) Reason() string {
 // QuietBlockers lists every blocker of the revive point p, the nearest first within its own rule (a unit inside the
 // 45 yd still rule before a moving one, units before patrols, so the first one is the one QuietAt names). QuietAt uses
 // it for its answer; the revive's run.log line and its summary refusal (D-E) use the whole list.
-func QuietBlockers(units []objects.Unit, patrols []QuietPatrol, p dungeon.Point) []QuietBlocker {
+func QuietBlockers(units []objects.Unit, patrols []QuietPatrol, p dungeon.Point, idle *QuietIdleReads, now time.Time) []QuietBlocker {
 	// rank orders the list the way QuietAt reports: still units (0), then moving ones (1), then patrols (2). The key is
 	// the distance within a rank; a patrol keeps its file order (key 0 with a stable sort).
 	type ranked struct {
@@ -71,8 +111,11 @@ func QuietBlockers(units []objects.Unit, patrols []QuietPatrol, p dungeon.Point)
 			continue
 		}
 		d := dist3(p, dungeon.Point{X: u.X, Y: u.Y, Z: u.Z})
-		// D-A (walk 25): an idle unit beyond the landing reach never blocks the revive.
-		if !u.InCombat && u.Target == 0 && !u.Moving && d > quietIdleYd {
+		// D-A (walk 25, two reads since review round 1): an idle unit beyond the landing reach never blocks the revive,
+		// but only once two reads quietIdleHold apart saw it idle at the same spot. idleHome records this read either
+		// way; a nil tracker exempts nothing.
+		home := idle != nil && idle.idleHome(u, now)
+		if home && d > quietIdleYd {
 			continue
 		}
 		switch {
@@ -113,9 +156,10 @@ func unitBlocker(u *objects.Unit, d float64) QuietBlocker {
 		Moving: u.Moving, InCombat: u.InCombat, Target: uint64(u.Target)}
 }
 
-// QuietAt says whether the revive point p is clear of hosts and patrols.
-func QuietAt(units []objects.Unit, patrols []QuietPatrol, p dungeon.Point) (bool, string) {
-	bs := QuietBlockers(units, patrols, p)
+// QuietAt says whether the revive point p is clear of hosts and patrols. idle is the read memory D-A's two-read
+// exemption needs; a nil one exempts no idle unit.
+func QuietAt(units []objects.Unit, patrols []QuietPatrol, p dungeon.Point, idle *QuietIdleReads, now time.Time) (bool, string) {
+	bs := QuietBlockers(units, patrols, p, idle, now)
 	if len(bs) == 0 {
 		return true, ""
 	}

@@ -63,12 +63,16 @@ type Summary struct {
 // there (exit 19, "not revived: <why>"), and this says what blocked it and for how long.
 type ReviveRefusal struct {
 	WipeStep int `json:"wipe_step"`
-	// StartStep is the step the walk resolved as its start: the placement's staged start, the --from step when the
-	// walk resolves it against the rows (--place or --until boss-done), else 1.
+	// StartStep is the step of the revive point the walk actually used: the placement's staged start with --place,
+	// else the first positioned row of the plan (review round 1, Opus L3: a plain --from walk revives at the plan's
+	// own first point, whatever step the run is started on).
 	StartStep int `json:"start_step"`
 	// TriedSteps are the revive points the walk read, in order. It is the start step alone: D-B's passed steps are not
 	// implemented (the walk revives at the start, or at the placement's point).
 	TriedSteps []int `json:"tried_steps"`
+	// EntranceTried says the entrance fallback's `.go xyz` went out (review round 1, Opus L3): true while the walk
+	// refused at the entrance, whether its go landed or not.
+	EntranceTried bool `json:"entrance_tried"`
 	// WaitedS is how long the revive waited for the point to go quiet: the 120 s check plus the D-C re-reads, in
 	// seconds, from the first read.
 	WaitedS  int             `json:"waited_s"`
@@ -117,8 +121,12 @@ func (r *ReviveRefusal) Line() string {
 	if len(bs) == 0 {
 		bs = append(bs, "none")
 	}
-	return fmt.Sprintf("revive refusal: wipe step %d, tried %s, waited %d:%02d, blockers %s",
-		r.WipeStep, strings.Join(steps, "/"), r.WaitedS/60, r.WaitedS%60, strings.Join(bs, "; "))
+	entrance := ""
+	if r.EntranceTried {
+		entrance = ", entrance tried"
+	}
+	return fmt.Sprintf("revive refusal: wipe step %d, tried %s%s, waited %d:%02d, blockers %s",
+		r.WipeStep, strings.Join(steps, "/"), entrance, r.WaitedS/60, r.WaitedS%60, strings.Join(bs, "; "))
 }
 
 // PlaceSummary is the summary's `place` object (spec 5.11).

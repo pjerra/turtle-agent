@@ -627,6 +627,9 @@ type walk struct {
 	// reviveRefusal is the refused revive (D-D): set when the revive point never went quiet and the walk ends with
 	// "not revived"; nil otherwise.
 	reviveRefusal *raidwalk.ReviveRefusal
+	// wipeAt is when the last wipe (or near-wipe stop) was seen: the anchor of a self-regroup's D-C cap (review round
+	// 1, Opus M2).
+	wipeAt time.Time
 
 	lastStatus tbm.RunStatus
 	haveStatus bool

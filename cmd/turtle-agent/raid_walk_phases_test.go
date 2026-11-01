@@ -16,6 +16,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/tbm"
@@ -1035,5 +1036,260 @@ func TestRaidWalkNoteFramesWriteErrorOnce(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("%d frames.jsonl notes in %q, want exactly 1", n, w.notes)
+	}
+}
+
+// TestRaidWalkEntranceGoNeverLands (review round 1, Codex/Opus H1): the entrance fallback's `.go xyz` is accepted
+// (the map id follows) but the server never lands it, so the commander still stands at the revive point. The old code
+// set cur = e before the landing wait and then let D-C read e, whose units the walk could see from p said quiet: a
+// "not revived" refusal became a summon with the commander still at p. Now only a LANDED go makes the entrance the
+// checked point, a failed landing skips D-C and refuses, and the refusal records entrance_tried.
+func TestRaidWalkEntranceGoNeverLands(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 23)
+	// An in-combat unit 30 yd from the revive point keeps it loud through the 120 s check; from the entrance go on
+	// the units are quiet, so the read the old code ran at the entrance would have said quiet.
+	f.agent.unitsFn = func(n int) []objects.Unit {
+		f.agent.mu.Lock()
+		x, y, z, gos := f.agent.x, f.agent.y, f.agent.z, f.agent.recoveryGos
+		f.agent.mu.Unlock()
+		if gos >= 2 {
+			return []objects.Unit{}
+		}
+		return []objects.Unit{{Type: "creature", Name: "Razzashi Skitterer", Entry: 11338, Hostile: true, InCombat: true, X: x + 30, Y: y, Z: z}}
+	}
+	f.allDeadFromHires()
+	f.agent.mu.Lock()
+	f.agent.goStuckFrom = 2 // the entrance go (the second recovery go) is accepted but never lands
+	f.agent.mu.Unlock()
+	if code := f.run(context.Background()); code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !strings.Contains(sum.EndReason, "not revived") {
+		t.Fatalf("end %q, want a not-revived ending", sum.EndReason)
+	}
+	gm := f.agent.gmLines()
+	if n := countPrefix(gm, ".summon "); n != 0 {
+		t.Fatalf("%d summons, want none: the commander never landed at the entrance: %q", n, gm)
+	}
+	if n := countPrefix(gm, ".revive "); n != 0 {
+		t.Fatalf("%d revives, want none: the commander never landed at the entrance", n)
+	}
+	rr := sum.ReviveRefusal
+	if rr == nil {
+		t.Fatalf("no revive_refusal: end %q", sum.EndReason)
+	}
+	if !rr.EntranceTried {
+		t.Fatalf("refusal %+v, want entrance_tried", rr)
+	}
+	// Without the skip-D-C fix the wait would run at the entrance until the recovery's own end (many minutes): this
+	// refusal is the 120 s check plus the 30 s landing wait and nothing else.
+	if rr.WaitedS > 600 {
+		t.Fatalf("waited %ds, want the check and the landing wait only (D-C must not run at a point the commander never reached)", rr.WaitedS)
+	}
+}
+
+// TestRaidWalkQuietPatrolExemptionIsPerPoint (review round 1, Codex H2): the patrol exemption is "its visible member
+// is 80 yd out and leaving", measured from the checked point. A stationary member whose distance grows only because
+// the walk switched its point (p -> entrance) is not leaving, so the entrance's read must start from a fresh quiet
+// state. With p's distances kept, the entrance read would wrongly exempt the patrol and revive into it.
+func TestRaidWalkQuietPatrolExemptionIsPerPoint(t *testing.T) {
+	plan, err := dungeon.Load("../../dungeons/onyxias_lair.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := planexport.Build(plan, planexport.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev := firstStepPoint(res.Rows)
+	if rev == nil {
+		t.Fatal("the plan has no first positioned step")
+	}
+	e := plan.Entrance
+	// The patrol's one member stands 60 yd beyond the revive point, away from the entrance: 60 yd from p (< 80, so
+	// p's reads never exempt it) and ~126 yd from the entrance (>= 80, and farther than p's 60).
+	dx, dy, dz := float64(rev.X-e.X), float64(rev.Y-e.Y), float64(rev.Z-e.Z)
+	norm := math.Sqrt(dx*dx + dy*dy + dz*dz)
+	member := objects.Unit{Type: "creature", Name: "Zulian Patrolman", Hostile: true, GUID: packet.GUID(0x52050),
+		X: rev.X + float32(dx/norm*60), Y: rev.Y + float32(dy/norm*60), Z: rev.Z + float32(dz/norm*60)}
+	pat := filepath.Join(t.TempDir(), "patrols.json")
+	content := fmt.Sprintf(`{"format":"tb-patrols","version":1,"map":%d,"source":"db","patrols":[{"id":"52050","spawn_guids":[335952],"path":[{"x":%v,"y":%v,"z":%v},{"x":%v,"y":%v,"z":%v}],"period_s":60}]}`,
+		plan.Map, rev.X, rev.Y, rev.Z, e.X, e.Y, e.Z)
+	if err := os.WriteFile(pat, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := newFixture(t)
+	f.opts.patrols = pat
+	f.opts.wipeResume = 0 // the boss-wipe ending: no D-C, so the refusal follows the reads themselves
+	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{member} }
+	f.allDeadFromHires()
+	if code := f.run(context.Background()); code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	gm := f.agent.gmLines()
+	if n := countPrefix(gm, ".summon "); n != 0 {
+		t.Fatalf("%d summons, want none: the stationary patrol was exempted by the distance the point switch gave it: %q", n, gm)
+	}
+	sum := f.summary()
+	if !strings.Contains(sum.EndReason, "not revived") {
+		t.Fatalf("end %q, want a not-revived ending", sum.EndReason)
+	}
+	if !strings.Contains(sum.EndReason, "52050") {
+		t.Fatalf("end %q, want the patrol named", sum.EndReason)
+	}
+}
+
+// TestRaidWalkReviveStepIsThePointUsed (review round 1, Opus L3): the refusal's start_step is the step of the revive
+// point the walk actually used, not the --from step it resolved: a plain walk revives at the plan's first positioned
+// row, whatever step the run starts on.
+func TestRaidWalkReviveStepIsThePointUsed(t *testing.T) {
+	rows := planexport.Rows{Steps: []planexport.StepRow{{Seq: 1, Kind: "rest"}, {Seq: 2, Kind: "move", X: 10, Y: 20, Z: 30}}}
+	w := &walk{rows: rows, startStep: 11}
+	if got := w.reviveStep(); got != 2 {
+		t.Fatalf("reviveStep = %d, want 2 (step 1 is a point-less rest row)", got)
+	}
+	r := w.refusal(204, nil, 90*time.Second, true)
+	if r.StartStep != 2 || len(r.TriedSteps) != 1 || r.TriedSteps[0] != 2 || !r.EntranceTried {
+		t.Fatalf("refusal %+v, want start/tried 2 and entrance_tried", r)
+	}
+	if !strings.Contains(r.Line(), "tried 2, entrance tried") {
+		t.Fatalf("summary line %q, want the entrance noted", r.Line())
+	}
+	// A placed walk revives at the staged start, and that is its step.
+	placed := &walk{rows: rows, startStep: 31, place: &raidwalk.PlacePlan{Start: 31}}
+	if got := placed.reviveStep(); got != 31 {
+		t.Fatalf("placed reviveStep = %d, want 31", got)
+	}
+	if rr := placed.refusal(204, nil, 0, false); rr.StartStep != 31 || rr.EntranceTried {
+		t.Fatalf("placed refusal %+v, want start 31 without entrance_tried", rr)
+	}
+}
+
+// TestRaidWalkQuietWaitInterrupt (review round 1, Opus L2): an operator's interrupt during the D-C wait is the
+// interrupted ending (exit 18, "interrupted"), never a "not revived" refusal with a revive_refusal: the walk did not
+// lose the revive, it was stopped.
+func TestRaidWalkQuietWaitInterrupt(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 23)
+	ctx, cancel := context.WithCancel(context.Background())
+	// The point never goes quiet, so the checks run out and D-C starts; the 50th units read is well inside the wait
+	// (the checks are 24 reads each, and the wait runs for many minutes).
+	f.agent.unitsFn = func(n int) []objects.Unit {
+		if n >= 50 {
+			cancel()
+		}
+		f.agent.mu.Lock()
+		x, y, z := f.agent.x, f.agent.y, f.agent.z
+		f.agent.mu.Unlock()
+		return []objects.Unit{{Type: "creature", Name: "Razzashi Skitterer", Entry: 11338, Hostile: true, InCombat: true, X: x + 30, Y: y, Z: z}}
+	}
+	f.allDeadFromHires()
+	if code := f.run(ctx); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.EndReason != "interrupted" {
+		t.Fatalf("end %q, want interrupted", sum.EndReason)
+	}
+	if sum.ReviveRefusal != nil {
+		t.Fatalf("revive_refusal %+v, want none on an interrupt", sum.ReviveRefusal)
+	}
+}
+
+// TestRaidWalkSelfRegroupQuietWaitIsCapped (review round 1, Opus M2): a self-regroup's D-C wait ends no later than
+// selfRegroupQuietCap past the wipe. TB's own regroup is long over by then, so a point still blocked is not about to
+// be freed by it, and the walk refuses instead of waiting the recovery out.
+func TestRaidWalkSelfRegroupQuietWaitIsCapped(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.opts.wipeResume = 2
+	f.agent.startReply = zgStart(total, next)
+	step := next - 2
+	regroup := fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|begin|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)", step, total)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = mcWipeFights()
+	selfRegroupKill(f, regroup)
+	// The point never goes quiet: an in-combat unit 30 yd out on every read.
+	f.agent.unitsFn = func(int) []objects.Unit {
+		f.agent.mu.Lock()
+		x, y, z := f.agent.x, f.agent.y, f.agent.z
+		f.agent.mu.Unlock()
+		return []objects.Unit{{Type: "creature", Name: "Razzashi Skitterer", Entry: 11338, Hostile: true, InCombat: true, X: x + 30, Y: y, Z: z}}
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !strings.Contains(sum.EndReason, "not revived") {
+		t.Fatalf("end %q, want a not-revived ending", sum.EndReason)
+	}
+	rr := sum.ReviveRefusal
+	if rr == nil {
+		t.Fatalf("no revive_refusal: end %q", sum.EndReason)
+	}
+	if rr.WaitedS < 180 || rr.WaitedS > 400 {
+		t.Fatalf("waited %ds, want about %d (the 120 s check plus D-C to the %s cap past the wipe)",
+			rr.WaitedS, int(selfRegroupQuietCap/time.Second), durWords(selfRegroupQuietCap))
+	}
+}
+
+// TestRaidWalkGhostsRecheckAfterTheWait (review round 1, Opus M2): the D-C wait is long, so the hires' maps are
+// re-read when it is over. With one hire released to the graveyard during the wait the walk takes the ghosts path: it
+// skips the late join, which would `.appear` at a hire that is no longer on the plan's map.
+func TestRaidWalkGhostsRecheckAfterTheWait(t *testing.T) {
+	f, _ := selfRegroupWipeWith(t, func(p []string) []string {
+		if len(p) == 0 {
+			return nil
+		}
+		return p[1:] // the first hire stays dead (and off the map), the rest come up on the plan's map
+	}, func(f *fixture) {
+		f.agent.mu.Lock()
+		f.agent.ghostsOffN = 1
+		f.agent.appearRefusedUntilRevive = true
+		f.agent.mu.Unlock()
+		var entranceAt time.Time
+		prev := f.agent.onGM
+		f.agent.onGM = func(line string) {
+			prev(line)
+			f.agent.mu.Lock()
+			gos := f.agent.recoveryGos
+			f.agent.mu.Unlock()
+			if strings.HasPrefix(line, ".go xyz") && gos == 2 && entranceAt.IsZero() {
+				entranceAt = f.clock.now()
+			}
+		}
+		// The revive point AND the entrance stay loud through their own 120 s checks, then go quiet so that the D-C
+		// wait finds quiet: what happens at the END of that wait is the point of this test.
+		f.agent.unitsFn = func(int) []objects.Unit {
+			if entranceAt.IsZero() || f.clock.now().Sub(entranceAt) < 125*time.Second {
+				f.agent.mu.Lock()
+				x, y, z := f.agent.x, f.agent.y, f.agent.z
+				f.agent.mu.Unlock()
+				return []objects.Unit{{Type: "creature", Name: "Razzashi Skitterer", Entry: 11338, Hostile: true, InCombat: true, X: x + 30, Y: y, Z: z}}
+			}
+			return []objects.Unit{}
+		}
+	})
+	gm := f.agent.gmLines()
+	firstRevive, lateAppear := -1, -1
+	for i, l := range gm {
+		if strings.HasPrefix(l, ".revive ") && firstRevive < 0 {
+			firstRevive = i
+		}
+		if strings.HasPrefix(l, ".appear ") && firstRevive >= 0 && lateAppear < 0 {
+			lateAppear = i
+		}
+	}
+	sum := f.summary()
+	if lateAppear >= 0 {
+		t.Fatalf("a late .appear went out (line %d) although a hire is off the map: %q", lateAppear, gm)
+	}
+	if hasNote(sum, "joined the hires' instance after the self-regroup revives") {
+		t.Fatalf("notes %q, want no late-join note", sum.Notes)
+	}
+	if !hasNote(sum, "are on another map after the wait") {
+		t.Fatalf("notes %q, want the post-wait ghosts note", sum.Notes)
 	}
 }

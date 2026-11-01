@@ -145,6 +145,11 @@ type walkFakeAgent struct {
 	goLag int
 	// goLagEvery re-arms goLag for EVERY recovery go (the entrance fallback's go lags like the first), not only the first.
 	goLagEvery int
+	// recoveryGos counts the recovery's `.go xyz` lines (the first one after `run start` is 1). goStuckFrom makes
+	// that go and every later one accepted but never landed (the status keeps the commander's old position): the
+	// hole a wait on the landing can never pass, for the H1 review case.
+	recoveryGos int
+	goStuckFrom int
 	// goUnsettled makes the status report the recovery go's destination AT ONCE but flagged ZUnknown (or Falling when
 	// goUnsettledFalling) for that many polls, the live session's state until the server sends a position.
 	goUnsettled        int
@@ -175,8 +180,11 @@ type walkFakeAgent struct {
 	// teleport lands a moment after the chat line); goBeforeAppear counts recovery gos sent while it had not landed.
 	// statusFailNext fails that many status reads (an RPC error); ghostsOff reports dead hires on map 0 (released to
 	// the graveyard, once the run has started); appearRefusedUntilRevive refuses every `.appear` until the first `.revive` went out.
-	statusFailNext           int
-	ghostsOff                bool
+	statusFailNext int
+	ghostsOff      bool
+	// ghostsOffN is a PARTIAL release: the first N dead hires show on map 0 (the rest keep the plan's map), so a
+	// walk has a hire off the map and one still to appear at (the post-wait ghosts re-check, review round 1 M2).
+	ghostsOffN               int
 	appearRefusedUntilRevive bool
 	revived                  bool
 	appearLag                int
@@ -478,6 +486,7 @@ func (f *walkFakeAgent) gmSide(line string) {
 		started := f.runStarted
 		if started {
 			f.recoveryGo = true
+			f.recoveryGos++
 			if f.appearPend != nil {
 				f.goBeforeAppear++
 			}
@@ -497,26 +506,32 @@ func (f *walkFakeAgent) gmSide(line string) {
 					f.commanderInst = "fresh"
 				}
 				f.status.Map = uint32(m) // the go's map id takes effect at once; only a goLag test holds the position back
-				if started && f.goLagEvery > 0 {
-					f.goLag = f.goLagEvery
-				}
-				if started && f.goUnsettled > 0 {
-					f.unsettledLeft = f.goUnsettled
-				}
-				if started && f.goLag > 0 {
-					// The recovery's go: the position lands a few status polls later (the live server's landing).
-					f.goPend, f.goPendOK = f.goTarget, true
-				} else {
-					f.x, f.y, f.z = float32(x), float32(y), float32(z)
-					f.ownPos = [3]float32{f.x, f.y, f.z}
-					f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
-					if started && f.unsettledLeft == 0 {
-						// The destination is reported, and the server's teleport has landed: only then does the
-						// session ack it (TeleportSeq). While goUnsettled reports the destination for a few polls
-						// (the live Q3 window), the seq has not advanced yet.
-						f.goArrive(fromMap)
-					} else if started && uint32(m) != fromMap {
-						f.zStuck = true // a far teleport before the seq is acked still never settles z
+				switch {
+				case started && f.goStuckFrom > 0 && f.recoveryGos >= f.goStuckFrom:
+					// Accepted but never landed (the H1 review case): the map id follows and the position does not,
+					// so every wait on the landing times out.
+				default:
+					if started && f.goLagEvery > 0 {
+						f.goLag = f.goLagEvery
+					}
+					if started && f.goUnsettled > 0 {
+						f.unsettledLeft = f.goUnsettled
+					}
+					if started && f.goLag > 0 {
+						// The recovery's go: the position lands a few status polls later (the live server's landing).
+						f.goPend, f.goPendOK = f.goTarget, true
+					} else {
+						f.x, f.y, f.z = float32(x), float32(y), float32(z)
+						f.ownPos = [3]float32{f.x, f.y, f.z}
+						f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
+						if started && f.unsettledLeft == 0 {
+							// The destination is reported, and the server's teleport has landed: only then does the
+							// session ack it (TeleportSeq). While goUnsettled reports the destination for a few polls
+							// (the live Q3 window), the seq has not advanced yet.
+							f.goArrive(fromMap)
+						} else if started && uint32(m) != fromMap {
+							f.zStuck = true // a far teleport before the seq is acked still never settles z
+						}
 					}
 				}
 			}
@@ -898,6 +913,10 @@ func (f *walkFakeAgent) viewPage() any {
 	}
 	noParty := f.noPartyFrames
 	ghostsOff := f.ghostsOff && f.runStarted // released once the run is under way
+	ghostsOffN := 0
+	if f.runStarted {
+		ghostsOffN = f.ghostsOffN // a partial release: only the first N dead hires show on map 0
+	}
 	fn := f.hostilesFn
 	f.mu.Unlock()
 	if viewHook != nil {
@@ -921,7 +940,7 @@ func (f *walkFakeAgent) viewPage() any {
 		}
 		p := pos[name]
 		hm := m
-		if ghostsOff && dead[name] {
+		if (ghostsOff && dead[name]) || (ghostsOffN > 0 && dead[name] && i < ghostsOffN) {
 			hm = 0
 		}
 		rec := tbm.PartyRec{GUID: packet.GUID(1000 + i), Name: name, HP: 1, MaxHP: 1, Map: hm, Dead: dead[name], State: state,
