@@ -37,7 +37,16 @@ import (
 // 19.0 yd), and leg 7 drops its old D group (radius 5: A 28 yd off, so it reached nothing either): the
 // findings are the same 39 as at walk 13. The walk-18 review round 2 (2026-11-01) leaves the count be: the
 // E row's radius 1 -> 3 and leg 7's tiger-pack dry-route approach points move no pull position.
-var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "naxxramas": 104, "blackwing_lair": 50, "timbermaw_hold": 13, "temple_of_ahnqiraj": 128, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6, "zul_gurub": 39, "molten_core": 10, "upper_karazhan_halls": 6}
+// 41 after the walk-20 D+A merge (2026-11-01): leg 1's D row (4 positions, radius 10) and A row (3
+// positions + the Blood Priest's, radius 10) become one stand pull (radius 17, 8 positions), the radius the
+// export's own row needs to own all eight spawns 49053/54/55/57, 49065/66/67 and the priest 49051 from its
+// mean centre (-11882.36 -1866.66): 17 yd owns exactly those eight (the furthest is 49053 at 16.8 yd) and no
+// other spawn (the nearest is B's 49063 at 22.4 yd); the brief's radius 10 owns none of them (the mean
+// centre is 11.1-16.8 yd from the eight). The 3 yd margin then reaches two B-pack spawns the group does not
+// list: the Servant 49063 (18.5 yd from A's -11889.4 -1876.12) and the Blood Priest 49052 (17.0 yd from the
+// priest's own position -11888.9 -1881.35). Both are leg 3 (Thekal) spawns, pulled 45+ yd away, and
+// neither is inside the exported row's radius.
+var packOverlapKnownFailing = map[string]int{"uldaman": 150, "zulfarrak": 38, "naxxramas": 104, "blackwing_lair": 50, "timbermaw_hold": 13, "temple_of_ahnqiraj": 128, "ruins_of_ahnqiraj": 21, "lower_karazhan_halls": 6, "zul_gurub": 41, "molten_core": 10, "upper_karazhan_halls": 6}
 
 // exportDir is the folder of a plan's creature export under testdata: the spec's data folder, map<id>, or the plan's name.
 func exportDir(ps PlanSpec) string {
