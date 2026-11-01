@@ -1803,11 +1803,12 @@ const (
 	// dead creature of the step's entry within 30 yd of the spot, so a corpse a little further out is still the
 	// boss that died there.
 	bossKillYd = 40
-	// bossCorpseWait bounds one toolkit corpse read. The toolkit answers at once; a server without the toolkit
-	// answers nothing at all, so the read is bounded rather than waited out (the first failure turns the reads
-	// off for the rest of the walk).
-	bossCorpseWait = 10 * time.Second
 )
+
+// bossCorpseWait bounds one toolkit corpse read. The toolkit answers at once; a server without the toolkit
+// answers nothing at all, so the read is bounded rather than waited out (the first failure, the deadline
+// included, turns the reads off for the rest of the walk). A var so a test can shorten it.
+var bossCorpseWait = 10 * time.Second
 
 // bossNotFoundAtBossStep says the pause's note names a boss that is not found and the pause stands on that
 // boss's OWN row of the server's rows (walk 24 B, decision B-D4): only then may the walk consider the skip.
@@ -1990,14 +1991,16 @@ func (w *walk) bossCorpse(ctx context.Context, boss uint32, units []uint32) (boo
 	if !ok {
 		return false, ""
 	}
-	ctx, cancel := context.WithTimeout(ctx, bossCorpseWait)
+	readCtx, cancel := context.WithTimeout(ctx, bossCorpseWait)
 	defer cancel()
 	for _, e := range units {
-		out, err := w.tt(ctx, fmt.Sprintf("q units %s %s %s %s all dead e=%d", num32(bossKillYd), num32(spot.X), num32(spot.Y), num32(spot.Z), e))
+		out, err := w.tt(readCtx, fmt.Sprintf("q units %s %s %s %s all dead e=%d", num32(bossKillYd), num32(spot.X), num32(spot.Y), num32(spot.Z), e))
 		if err != nil {
 			if ctx.Err() != nil {
-				return false, "" // interrupted: no verdict, and no latch on a cancelled read
+				return false, "" // the walk itself was interrupted: no verdict, and no latch on a cancelled read
 			}
+			// The read's own deadline (bossCorpseWait) is a toolkit failure like any other: latch it, so a toolkit
+			// that never answers costs the watch loop one bounded wait, not one per tick.
 			w.bossToolkitOff = true
 			w.note("boss %d: the toolkit corpse read failed (%v): the frames alone decide from here", boss, err)
 			return false, ""

@@ -5257,6 +5257,53 @@ func TestRaidWalkBossNotFoundToolkitFailureStillPauses(t *testing.T) {
 	}
 }
 
+// The toolkit read runs into its own deadline: that is a failure, latched once (Codex, round 3).
+func TestRaidWalkBossNotFoundToolkitTimeoutLatchesOnce(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	boss := next - 1
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgStart(total, next)
+	old := bossCorpseWait
+	bossCorpseWait = 100 * time.Millisecond
+	t.Cleanup(func() { bossCorpseWait = old })
+	// A toolkit that never answers in time: each read runs into the read's own deadline, which must latch the
+	// reads off like any other failure (one read for the whole pause, not one per tick).
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		time.Sleep(400 * time.Millisecond)
+		return ttResult{}, errors.New("late")
+	}
+	var q []queuedEvent
+	for range 12 {
+		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|begin|boss 12118 not at his spot: waiting for him|until step %d (step %d)", boss, total, next, next)})
+	}
+	q = append(q, queuedEvent{raw: bossNotFoundLine("molten_core", boss, total, 12118, next)})
+	f.agent.mu.Lock()
+	f.agent.startQueue = q
+	f.agent.mu.Unlock()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	f.agent.mu.Lock()
+	verbs, tt := append([]string{}, f.agent.runVerbs...), append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	if countPrefix(verbs, "skip") != 0 {
+		t.Fatalf("run verbs %v, want no skip: a failed read is no evidence", verbs)
+	}
+	if len(tt) != 1 {
+		t.Fatalf("toolkit calls %v, want exactly one (the read that timed out)", tt)
+	}
+	if !hasNote(f.summary(), "the toolkit corpse read failed") {
+		t.Fatalf("notes %q, want the failed-read note", f.summary().Notes)
+	}
+}
+
 // The pause arrives before the evidence: the first ticks of the pause see no corpse (the frames hold nothing and
 // the toolkit sees none), and a later frame shows 14509 at 0 %. The evidence is re-read on every tick while the
 // pause lasts, and the skip latches only once it went out (review round 1, item 2): exactly one `.bot run skip`.
