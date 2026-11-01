@@ -293,3 +293,78 @@ func TestClosestInPoly(t *testing.T) {
 		}
 	}
 }
+
+// TestZulGurubMarliStandsOutOfSpiderAggro: walk 25's Mar'li leg walked the raid onto the spawn of the patrolling
+// Skitterer 49202 (pack 0's leader) and, with the fight drifting west, onto pack 1 (leader 49201) as well: 20-21
+// elites at once, 6 of 7 wipes (TortoiseBots-audit research/zg-w25/MARLI-PULL.md sections 0-2). The fix pulls both
+// spider packs as stand pulls from the east, so the leg's `to` and the two stands must be out of both packs' aggro:
+// every creature of pack 0 (group_leader 49202) and pack 1 (group_leader 49201 plus the loose Venombrood 49246)
+// stays at least marliStandYd away. 40 is twice the 20 yd detection range (a bot at ~20 yd wakes the pack); the
+// leg 2 packs' members are the only ones listed, and a pack is aggro-together (creature_groups flags 14).
+func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
+	p, err := dungeon.Load(filepath.Join(plansDirT, "zul_gurub.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, err := readCreatures(filepath.Join("testdata", "map309", "creatures.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// pack0 and pack1 are the spawns of each pack: its own members and the loose Venombrood 49246 beside pack 1.
+	var pack0, pack1 []creature
+	for _, c := range cs {
+		switch {
+		case c.GroupLeader == 49202:
+			pack0 = append(pack0, c)
+		case c.GroupLeader == 49201 || c.GUID == 49246:
+			pack1 = append(pack1, c)
+		}
+	}
+	if len(pack0) != 9 || len(pack1) != 12 {
+		t.Fatalf("pack 0 has %d spawns (want 9), pack 1 %d (want 12)", len(pack0), len(pack1))
+	}
+	var leg *dungeon.Leg
+	for i := range p.Legs {
+		if p.Legs[i].Name == "high_priestess_marli" {
+			leg = &p.Legs[i]
+		}
+	}
+	if leg == nil {
+		t.Fatal("no high_priestess_marli leg")
+	}
+	// (a) the leg's `to` stands clear of both packs (today it is 0.1 yd from 49202's spawn).
+	const marliStandYd = 40
+	for _, c := range append(append([]creature{}, pack0...), pack1...) {
+		if d := dist(leg.To, c.Pos); d < marliStandYd {
+			t.Errorf("to %.1f %.1f %.1f is %.1f yd from %s %d, want >= %d", leg.To.X, leg.To.Y, leg.To.Z, d, c.Name, c.GUID, marliStandYd)
+		}
+	}
+	if len(leg.PullGroups) < 2 {
+		t.Fatalf("%d pull groups", len(leg.PullGroups))
+	}
+	// (b) both spider rows are stand pulls with a stand (their last approach point).
+	stands := make([]dungeon.Point, 2)
+	for i, g := range leg.PullGroups[:2] {
+		if !g.StandPull {
+			t.Errorf("pull_groups[%d] is not a stand pull", i)
+		}
+		if len(g.Approach) == 0 {
+			t.Errorf("pull_groups[%d] has no stand (approach point)", i)
+			continue
+		}
+		stands[i] = g.Approach[len(g.Approach)-1]
+	}
+	// (c) pack 0's stand clears every unit of both packs; (d) pack 1's stand clears pack 1.
+	// If plan-check refuses S1 (-12250 -1683) for sight or range, the fallback -12256 -1680 is 35.5 yd from
+	// pack 1, so (d)'s bound is 35 then (the brief's fallback); 40 is the bound with the S1 stand.
+	check := func(i int, targets []creature, want float64) {
+		for _, c := range targets {
+			if d := dist(stands[i], c.Pos); d < want {
+				t.Errorf("pull_groups[%d] stand %.1f %.1f %.1f is %.1f yd from %s %d, want >= %g", i, stands[i].X, stands[i].Y, stands[i].Z, d, c.Name, c.GUID, want)
+			}
+		}
+	}
+	both := append(append([]creature{}, pack0...), pack1...)
+	check(0, both, marliStandYd)
+	check(1, pack1, marliStandYd)
+}
