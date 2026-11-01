@@ -418,6 +418,72 @@ func routeDistance(route []dungeon.Point, x, y float32) (d float64, z float64) {
 	return best, z
 }
 
+// routeSteps is the step numbers of the positioned rows from start to stop, in order (the same filter as routePoints).
+func routeSteps(rows planexport.Rows, start, stop int) []int {
+	if start < 1 {
+		start = 1
+	}
+	if stop > len(rows.Steps) {
+		stop = len(rows.Steps)
+	}
+	var out []int
+	for i := start - 1; i < stop; i++ {
+		if !placedRow(rows.Steps[i]) {
+			continue
+		}
+		out = append(out, i+1)
+	}
+	return out
+}
+
+// PlaceBossGuard walks the route from start to stop segment by segment against every BEHIND boss or hold row (the same
+// test as PlaceClear's guard: route distance minus the row's radius <= PlaceBossGuardYd and dz <= PlaceCorridorZ).
+// A placed run is a fresh copy, so those bosses are alive. For the first segment a -> b that comes within the guard:
+//   - b in the start step's own leg (or a == start): refusal, the message PlaceClear gives today;
+//   - b in a later leg: until = b (`until step b` stops before b, so the run never walks a -> b), routeEnd = a (the
+//     corridor's route end), and a note naming the row, its leg, the distance and the two steps.
+//
+// With no segment within the guard: until = routeEnd = stop, no note.
+func PlaceBossGuard(rows planexport.Rows, start, stop int) (until, routeEnd int, note, refusal string) {
+	until, routeEnd = stop, stop
+	if start < 1 {
+		return until, routeEnd, "", ""
+	}
+	steps := routeSteps(rows, start, stop)
+	if len(steps) < 2 {
+		return until, routeEnd, "", ""
+	}
+	startLeg := rows.Steps[start-1].Leg
+	for i := 0; i+1 < len(steps); i++ {
+		a, b := rows.Steps[steps[i]-1], rows.Steps[steps[i+1]-1]
+		seg := []dungeon.Point{{X: a.X, Y: a.Y, Z: a.Z}, {X: b.X, Y: b.Y, Z: b.Z}}
+		for j := 0; j < start-1 && j < len(rows.Steps); j++ {
+			s := rows.Steps[j]
+			if !creatureRow(s) || !placedRow(s) {
+				continue
+			}
+			if s.Kind != planexport.KindBoss && s.Kind != planexport.KindHold {
+				continue
+			}
+			d, z := routeDistance(seg, s.X, s.Y)
+			if d-float64(s.Radius) > PlaceBossGuardYd || math.Abs(float64(s.Z)-z) > PlaceCorridorZ {
+				continue
+			}
+			if steps[i] == start || b.Leg == startLeg {
+				return stop, stop, "", fmt.Sprintf("boss/event row %d of leg %d is within %.0f yd of the route: start later or walk from the door", j+1, s.Leg, d)
+			}
+			kind := "boss"
+			if s.Kind == planexport.KindHold {
+				kind = "hold"
+			}
+			note = fmt.Sprintf("the run stops before step %d (until step %d): the route from step %d to %d passes %.0f yd from BEHIND %s row %d of leg %d, which a placed run leaves alive",
+				steps[i+1], steps[i+1], steps[i], steps[i+1], d, kind, j+1, s.Leg)
+			return steps[i+1], steps[i], note, ""
+		}
+	}
+	return until, routeEnd, "", ""
+}
+
 // circleRadius is a BEHIND pull row's circle radius (spec 4.3).
 func circleRadius(row float32) float32 {
 	r := row + PlaceCircleSlack

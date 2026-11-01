@@ -1789,6 +1789,55 @@ func TestPlaceQuietThirdOwnedUnitInReachBlocks(t *testing.T) {
 	}
 }
 
+// F5 (D8): a placed `--until none` run from Marli shortens its until to stop before the segment that passes Venoxis,
+// and the run start carries the shortened clause (walk 24 m910q-reach: the restart refused with "boss/event row 185").
+func TestPlaceShortenedUntilReachesRunStart(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	f.opts.from = "leg high_priestess_marli"
+	f.opts.until = "none"
+	plan := zgPlan(t)
+	res, err := planexport.Build(plan, planexport.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := res.Rows
+	start, _, err := raidwalk.PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	until, _, _, refusal := raidwalk.PlaceBossGuard(rows, start, len(rows.Steps))
+	if refusal != "" {
+		t.Fatalf("the guard refused: %q", refusal)
+	}
+	if until == len(rows.Steps) {
+		t.Fatal("the guard did not shorten the until")
+	}
+	label := fmt.Sprintf("until step %d", until)
+	status := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|marli|move|walk|walking|%s (step %d)", start, len(rows.Steps), label, until)
+	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: status,
+		Lines: []string{
+			status,
+			fmt.Sprintf("The run starts at step %d of %d (leg high_priestess_marli)", start, len(rows.Steps)),
+			"TBM:ACTION_ACK|run start|party|1|-",
+		}}}
+	f.agent.startQueue = []queuedEvent{
+		{raw: status},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|marli|move|walk|stopped before step %d (%s): the party stays where it stands", start, len(rows.Steps), until, label)},
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if want := fmt.Sprintf("until|step|%d", until); !strings.HasSuffix(f.agent.startArgs, want) {
+		t.Fatalf("run start args %q, want the suffix %q", f.agent.startArgs, want)
+	}
+	if !hasNote(f.summary(), "the run stops before step") {
+		t.Fatalf("notes %v", f.summary().Notes)
+	}
+}
+
 // A unit is owned only by a BEHIND circle whose area holds its home (review round 2, LOW-1): the same entry, far away,
 // is not, and a reply without a home gives no owner even where the unit stands (fail closed).
 func TestPlaceRogueOwnerNeedsNearCircle(t *testing.T) {

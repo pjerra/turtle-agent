@@ -2164,12 +2164,19 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   than the toolkit's 16 entries or whose longest toolkit line would overflow the toolkit's 200-char cap, both before any
   GM command. The walk then clears the corridor of the legs it skips — every pull row before the start whose circle
   comes within 45 yd of the route to the `until` stop, despawned with `.tt clearto ... all=1` after a pre-read of the
-  units there (never `kill`, never `boss`; a boss or hold row within 30 yd of the route refuses the placement) — quiets
+  units there (never `kill`, never `boss`; a boss or hold row of an earlier leg within 30 yd of the route refuses the
+  placement when the route passes it in the start step's own leg; when it passes in a later leg the walk shortens its
+  `until` to stop before that segment, the corridor ending one positioned step earlier — a placed run is a fresh copy,
+  so those bosses are alive) — quiets
   the start point — the walk judges the quiet itself, not the toolkit's flag: a unit blocks only when it is not a skip
   entry, not a rank-0 critter of at most 100 HP and either stands within 25 yd of the point or belongs to a BEHIND row's
-  circle by its **home** (the spawn point the toolkit sends with the unit; without one the unit has no owner), which one
-  takes; the roamers (units that moved between the quiet's two reads, which the toolkit lists without a position) are
-  joined to one `q units` read of 80 yd, and a roamer that read misses blocks — moves the raid onto it
+  circle by its **home** (the spawn point the toolkit sends with the unit; without one the unit has no owner), which the
+  extra rounds take (they also take BEHIND trash inside the quiet's 50 yd: a unit whose entry a corridor row pulls,
+  whose home lies outside every AHEAD row and that is not boss evidence); the roamers (units that moved between the
+  quiet's two reads, which the toolkit lists without a position) are joined to one `q units` read of 80 yd, and a roamer
+  that read misses is looked up in the quiet's own near lists (which carry its position and home) and blocks only inside
+  the 25 yd landing reach; a unit no extra round could take that stands beyond those 25 yd is left alive — moves the
+  raid onto it
   (`.tt place ... of=<mt>`), verifies it by the walk's own frames
   (one `.summon` per hire the frames miss) and only then starts the run, whose status line must show exactly that step
   and step count. Before the first teleport the commander must be in GM mode: `.gm on` is sent and the walk refuses the
@@ -2179,12 +2186,16 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   the instance, the circles with their removed counts, the not-cleared list, the quiet result and the placed count.
   **Known limit:** the pre-read (`q units`) and the `clearto` are two commands, so a unit that walks into a circle
   between them can be despawned along with the row's own. Hence test servers only; the quiet check and the placed-start
-  check catch a broken run, and the walk report lists every clear (`place.circles[]`, the `place:` notes). The quiet
-  step's one extra round keeps away from any circle the corridor refused (a unit within that circle's radius + 6 yd is
-  not cleared) and clears only a unit a BEHIND row owns by entry and by its home; a reply without a `home` gives no
-  owner (fail closed): the unit is never cleared, and inside those 25 yd the walk refuses the placement. AHEAD rows of later legs and unowned units beyond those 25 yd never block: a run from the door has
-  them alive at this step too. When the only units left inside the 25 yd are ones the toolkit listed as roamers (patrols
-  walking through), the quiet is read again twice, 20 s apart, and the placement then fails. Every unit the quiet acts
+  check catch a broken run, and the walk report lists every clear (`place.circles[]`, the `place:` notes). The corridor
+  pre-read does not refuse a circle for a BEHIND-trash unit of another corridor row (its entry is a corridor row's, its
+  home lies outside every AHEAD row and it is not boss evidence). The quiet
+  step's two extra rounds keep away from any circle the corridor refused (a unit within that circle's radius + 6 yd is
+  not cleared) and clear a unit a BEHIND row owns by entry and by its home, or BEHIND trash; a reply without a `home`
+  gives no owner (fail closed): the unit is never cleared, and inside those 25 yd the walk refuses the placement. AHEAD
+  rows of later legs and unowned units beyond those 25 yd never block: a run from the door has them alive at this step
+  too, and a unit no extra round could take and that stands beyond those 25 yd is left alive with a note. When the only
+  units left inside the 25 yd are ones the toolkit listed as roamers (patrols walking through), the quiet is read again
+  twice, 20 s apart, and the placement then fails. Every unit the quiet acts
   on or refuses is noted with its spawn guid (`db`), where it stands and its home.
 - `--speed 1.0` sends nothing; `1.1` to `3.0` sends `speed=X` (a GM test run, marked `test speed` in the summary).
 - The hire gear tier comes from the committed table `raid -> minimum hire tier` in `internal/raidwalk/tiers.go`

@@ -2,6 +2,7 @@ package raidwalk
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -377,6 +378,116 @@ func TestPlaceClearAheadBeyondStop(t *testing.T) {
 	}
 	if len(cp.Circles) != 1 || !cp.Circles[0].PerUnit {
 		t.Fatalf("circles %+v", cp.Circles)
+	}
+}
+
+// F5 (D8): a later leg's route comes within the guard of a BEHIND boss row: the run shortens its until to stop before
+// the offending segment, and the corridor's route ends one positioned step earlier.
+func TestPlaceBossGuardShortensInLaterLeg(t *testing.T) {
+	steps := []planexport.StepRow{placeRow(planexport.KindBoss, 0, 20, 150, 0, 0, 12345)} // step 1
+	steps = append(steps, placeRoute(1, 10)...)                                           // steps 2..11: leg 1, (0,10)..(0,100)
+	steps = append(steps, placeMove(2, 20, 140, 0))                                       // step 12: leg 2 starts near the boss
+	for i := 1; i <= 4; i++ {
+		steps = append(steps, placeMove(2, 20, float32(140+i*10), 0)) // steps 13..16: along +y past the boss
+	}
+	rows := placeRows([]planexport.LegRow{
+		{Plan: "t", Leg: 0, Name: "one"}, {Plan: "t", Leg: 1, Name: "two"}, {Plan: "t", Leg: 2, Name: "three"},
+	}, steps...)
+	start, stop := 5, len(rows.Steps)
+	until, routeEnd, note, refusal := PlaceBossGuard(rows, start, stop)
+	if refusal != "" {
+		t.Fatalf("refused: %q", refusal)
+	}
+	if until != 12 || routeEnd != 11 {
+		t.Fatalf("until %d, routeEnd %d, want 12 and 11", until, routeEnd)
+	}
+	if !strings.Contains(note, "row 1 of leg 0") {
+		t.Fatalf("note %q", note)
+	}
+	// The corridor ends before the offending segment: PlaceClear accepts routeEnd and refuses until.
+	if cp := PlaceClear(rows, nil, start, routeEnd); cp.Refusal != "" {
+		t.Fatalf("PlaceClear(routeEnd) refused: %q", cp.Refusal)
+	}
+	if cp := PlaceClear(rows, nil, start, until); cp.Refusal == "" {
+		t.Fatal("PlaceClear(until) did not refuse")
+	}
+}
+
+// F5 (D8): a BEHIND boss row next to a segment of the start step's own leg refuses as before (no shortening).
+func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
+	steps := []planexport.StepRow{
+		placeRow(planexport.KindBoss, 0, 0, 30, 0, 0, 12345), // step 1: on the route
+		placeMove(0, 0, 10, 0),
+		placeMove(0, 0, 20, 0),
+		placeMove(0, 0, 30, 0), // step 4: the start, at the boss's point
+		placeMove(0, 0, 40, 0),
+	}
+	rows := placeRows(nil, steps...)
+	start, stop := 4, len(rows.Steps)
+	until, routeEnd, _, refusal := PlaceBossGuard(rows, start, stop)
+	if until != stop || routeEnd != stop {
+		t.Fatalf("until %d, routeEnd %d, want %d (no shortening)", until, routeEnd, stop)
+	}
+	want := PlaceClear(rows, nil, start, stop).Refusal
+	if want == "" {
+		t.Fatal("the fixture's PlaceClear does not refuse")
+	}
+	if refusal != want {
+		t.Fatalf("refusal %q, want the PlaceClear text %q", refusal, want)
+	}
+}
+
+// F5 (D8): with the deployed-style ZG rows (401 steps from planexport.Build), a placed `--until none` run from Marli
+// stops before the segment on leg 6 that passes Venoxis, and the shortened corridor clears clean.
+func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
+	plan := zgPlacePlan(t)
+	res, err := planexport.Build(plan, planexport.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := res.Rows
+	if len(rows.Steps) != 401 {
+		t.Fatalf("the fixture has %d steps, want 401", len(rows.Steps))
+	}
+	start, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := len(rows.Steps)
+	until, routeEnd, note, refusal := PlaceBossGuard(rows, start, stop)
+	if refusal != "" {
+		t.Fatalf("refused: %q", refusal)
+	}
+	if until <= start {
+		t.Fatalf("until %d is not past the start %d", until, start)
+	}
+	jindo := 0
+	for _, l := range rows.Legs {
+		if l.Name == "jindo_the_hexxer" {
+			jindo = l.Leg
+		}
+	}
+	if jindo == 0 {
+		t.Fatal("the rows have no jindo_the_hexxer leg")
+	}
+	if rows.Steps[until-1].Leg != jindo {
+		t.Fatalf("until step %d is leg %d, want the jindo_the_hexxer leg %d", until, rows.Steps[until-1].Leg, jindo)
+	}
+	ven, venLeg := 0, 0
+	for i, s := range rows.Steps {
+		if s.Kind == planexport.KindBoss && s.Entry == 14507 {
+			ven, venLeg = i+1, s.Leg
+			break
+		}
+	}
+	if ven == 0 {
+		t.Fatal("the rows have no Venoxis (14507) boss row")
+	}
+	if !strings.Contains(note, fmt.Sprintf("row %d of leg %d", ven, venLeg)) {
+		t.Fatalf("the note %q does not name the Venoxis row %d of leg %d", note, ven, venLeg)
+	}
+	if cp := PlaceClear(rows, plan, start, routeEnd); cp.Refusal != "" {
+		t.Fatalf("PlaceClear(routeEnd=%d) refused: %q", routeEnd, cp.Refusal)
 	}
 }
 

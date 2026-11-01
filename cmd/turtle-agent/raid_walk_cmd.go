@@ -884,11 +884,30 @@ func (w *walk) validate() error {
 		if err != nil {
 			return stopf(exitUsage, "%v", err)
 		}
-		clear := raidwalk.PlaceClear(w.rows, w.plan, startStep, stop)
+		// A BEHIND boss or hold row of an earlier leg on the route is alive in the raid's fresh copy: when the route
+		// passes one in a later leg, the run shortens its until to stop before that segment (D8). In the start step's
+		// own leg the placement is refused, as PlaceClear's own guard does.
+		until, routeEnd, gnote, refusal := raidwalk.PlaceBossGuard(w.rows, startStep, stop)
+		if refusal != "" {
+			return stopf(exitUsage, "%v", refusal)
+		}
+		if until != stop {
+			if w.bossDoneStep != 0 && until <= w.bossDoneStep {
+				return stopf(exitUsage, "--place: %s; that is before the boss-done step %d", gnote, w.bossDoneStep)
+			}
+			words, label, err := raidwalk.ParseUntil(fmt.Sprintf("step %d", until))
+			if err != nil {
+				return stopf(exitUsage, "%v", err)
+			}
+			w.untilWords, w.untilLabel = words, label
+			w.note("place: %s", gnote)
+		}
+		clear := raidwalk.PlaceClear(w.rows, w.plan, startStep, routeEnd)
 		if clear.Refusal != "" {
 			return stopf(exitUsage, "%v", clear.Refusal)
 		}
-		w.place.Stop, w.place.Circles, w.place.Notes, w.place.Ahead = stop, clear.Circles, clear.Notes, clear.Ahead
+		// Stop is the until the dry run and the summary print; the corridor ended at routeEnd.
+		w.place.Stop, w.place.Circles, w.place.Notes, w.place.Ahead = until, clear.Circles, clear.Notes, clear.Ahead
 		for _, n := range clear.Notes {
 			w.note("place: %s", n)
 		}
