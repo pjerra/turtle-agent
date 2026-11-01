@@ -421,8 +421,8 @@ func (w *walk) placeUnits(ctx context.Context, r, x, y, z float32) ([]ttUnit, bo
 	return units, body.flag("trunc"), nil
 }
 
-// placeCircleBlocked says why a circle must not be cleared ("" when it may): a unit the row does not own, a unit that
-// stands in an AHEAD row's circle, or a pre-read the toolkit had to cut.
+// placeCircleBlocked says why a circle must not be cleared ("" when it may): a unit the row does not own (unless it is
+// BEHIND trash, D5), a unit that stands in an AHEAD row's circle, or a pre-read the toolkit had to cut.
 func (w *walk) placeCircleBlocked(c raidwalk.ClearCircle, units []ttUnit, trunc bool) string {
 	if trunc {
 		return "the reply lists more units than it can carry (trunc)"
@@ -441,7 +441,7 @@ func (w *walk) placeCircleBlocked(c raidwalk.ClearCircle, units []ttUnit, trunc 
 			// have before the toolkit listed it.
 			continue
 		}
-		if !inEntries(c.Entries, u.Entry) {
+		if !inEntries(c.Entries, u.Entry) && !w.placeBehindTrash(u) {
 			return fmt.Sprintf("unit %d %s stands in the circle (%s)", u.Entry, u.Name, u.placeWhere())
 		}
 		if k, inside := w.place.AheadIn(u.X, u.Y, u.Z); inside {
@@ -852,6 +852,13 @@ func (w *walk) placeQuietJudge(read *placeQuietRead, p dungeon.Point) placeQuiet
 				j.Clear = append(j.Clear, u)
 				continue
 			}
+			if w.placeBehindTrash(u) && s.dist <= placeQuietR {
+				// D5: trash of a skipped leg inside the quiet's own radius: the extra round may take it (walk 24
+				// test2-arlokk's Cub and Tiger, m910q-ven's bats).
+				w.note("place: the quiet's extra round takes %d %s (%.1f yd%s, trash of a skipped leg, %s)", u.Entry, u.Name, s.dist, roamWords(s.roam), u.placeWhere())
+				j.Clear = append(j.Clear, u)
+				continue
+			}
 			if s.dist <= placeReachYd {
 				w.note("place: the quiet refuses %d %s: %s (%s)", u.Entry, u.Name, w.placeQuietBlock(u, s.dist), u.placeWhere())
 				j.Block = append(j.Block, u)
@@ -887,12 +894,19 @@ func (w *walk) placeQuietBlock(u ttUnit, dist float64) string {
 // placeQuietClear is the quiet's one extra clear round for a BEHIND-owned unit (review round 1, item 1). It is a clear
 // like any other: it keeps the pre-read's answer and runs the same guard before it acts. A unit within a skipped
 // corridor circle's radius + placeRogueYd is not cleared (review round 2, MEDIUM-A): the corridor refused that circle
-// for a reason the extra round cannot see from its r 3 read. took says the clearto went out.
+// for a reason the extra round cannot see from its r 3 read. A unit no circle owns by home but that is BEHIND trash
+// (D5) is cleared where it stands. took says the clearto went out.
 func (w *walk) placeQuietClear(ctx context.Context, u ttUnit, skip string) (took bool, err error) {
-	owner, ok := w.placeRogueOwner(u)
-	if !ok {
-		w.note("place: not cleared %d %s in the extra round: no BEHIND row owns the unit (%s)", u.Entry, u.Name, u.placeWhere())
-		return false, nil
+	owner, owned := w.placeRogueOwner(u)
+	trash := false
+	if !owned {
+		if !w.placeBehindTrash(u) {
+			w.note("place: not cleared %d %s in the extra round: no BEHIND row owns the unit (%s)", u.Entry, u.Name, u.placeWhere())
+			return false, nil
+		}
+		// D5: BEHIND trash no circle owns by home: the extra round clears it where it stands, its entry held by a
+		// corridor row and its home outside every AHEAD row.
+		trash = true
 	}
 	if sc, near := w.placeNearSkipped(u); near {
 		w.note("place: not cleared %d %s in the extra round: it stands within %d yd of the skipped circle of row %d (%s)",
@@ -901,6 +915,9 @@ func (w *walk) placeQuietClear(ctx context.Context, u ttUnit, skip string) (took
 	}
 	c := raidwalk.ClearCircle{Step: owner.Step, Leg: owner.Leg, X: u.X, Y: u.Y, Z: u.Z,
 		Radius: placeExtraRadius, Entries: owner.Entries}
+	if trash {
+		c = raidwalk.ClearCircle{Step: 0, X: u.X, Y: u.Y, Z: u.Z, Radius: placeExtraRadius, Entries: []uint32{u.Entry}}
+	}
 	units, trunc, err := w.placeUnits(ctx, placeExtraRadius, u.X, u.Y, u.Z)
 	if err != nil {
 		return false, err
@@ -914,8 +931,43 @@ func (w *walk) placeQuietClear(ctx context.Context, u ttUnit, skip string) (took
 		w.note("place: the extra clear of %d %s: %v", u.Entry, u.Name, err)
 		return false, nil
 	}
-	w.note("place: cleared %d %s in the extra round: its home is in the circle of row %d (%s)", u.Entry, u.Name, owner.Step, u.placeWhere())
+	if trash {
+		w.note("place: cleared %d %s in the extra round: trash of a skipped leg (its entry is a corridor row's, its home outside every AHEAD row) (%s)", u.Entry, u.Name, u.placeWhere())
+	} else {
+		w.note("place: cleared %d %s in the extra round: its home is in the circle of row %d (%s)", u.Entry, u.Name, owner.Step, u.placeWhere())
+	}
 	return true, nil
+}
+
+// placeBehindTrash says the unit is trash of a leg the raid skips (walk 24, Venoxis and Arlokk). All four must hold:
+//   - the reply carried its home (fail closed without one);
+//   - one of the corridor's clear circles holds its entry;
+//   - it is not boss evidence where it stands or at its home (BossRows.Counts: Thekal's 11361 tigers count only within
+//     40 yd of Thekal);
+//   - its home lies in no AHEAD row's area (PlacePlan.AheadIn): a wanderer of the packs the run fights next is never trash.
+//
+// A door-to-end run has killed such a unit, or meets it on the way to the start point.
+func (w *walk) placeBehindTrash(u ttUnit) bool {
+	if !u.HomeOK || w.place == nil {
+		return false
+	}
+	held := false
+	for _, c := range w.place.Circles {
+		if inEntries(c.Entries, u.Entry) {
+			held = true
+			break
+		}
+	}
+	if !held {
+		return false
+	}
+	if w.bossRule != nil && (w.bossRule.Counts(u.Entry, u.X, u.Y) || w.bossRule.Counts(u.Entry, u.Home[0], u.Home[1])) {
+		return false
+	}
+	if _, in := w.place.AheadIn(u.Home[0], u.Home[1], u.Home[2]); in {
+		return false
+	}
+	return true
 }
 
 // placeRogueOwner is the BEHIND circle that owns a unit of the quiet list (review round 1, item 1): among the circles

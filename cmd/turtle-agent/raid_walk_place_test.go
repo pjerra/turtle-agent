@@ -1530,6 +1530,161 @@ func TestPlaceQuietCutNearListBeyondReachIsJudged(t *testing.T) {
 	}
 }
 
+// placeCircleWithEntry is the plan's first clear circle whose entries hold an entry.
+func placeCircleWithEntry(t *testing.T, plan raidwalk.PlacePlan, entry uint32) raidwalk.ClearCircle {
+	t.Helper()
+	for _, c := range plan.Circles {
+		if inEntries(c.Entries, entry) {
+			return c
+		}
+	}
+	t.Fatalf("the fixture plan has no clear circle holding %d", entry)
+	return raidwalk.ClearCircle{}
+}
+
+// F3 (D5): the pre-read does not refuse a circle for BEHIND trash whose entry belongs to another corridor row and whose
+// home lies outside every AHEAD row (walk 24 test2-arlokk: row 264 skipped for the Axe Thrower 11350 of rows 266/268).
+func TestPlacePreReadClearsTrashOfAnotherCorridorRow(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	row94 := placeRow94Circle(t, plan)
+	owner := placeCircleWithEntry(t, plan, 11371)
+	home := [3]float32{owner.X, owner.Y, owner.Z}
+	at := []float32{row94.X, row94.Y, row94.Z}
+	p.units = func(cmd string) ([]any, bool) {
+		if fl := strings.Fields(cmd); len(fl) == 7 && fl[3] == num32(row94.X) && fl[4] == num32(row94.Y) {
+			return []any{map[string]any{"g": "0xF130000000C001", "e": 11371, "n": "Trash of another row",
+				"p": at, "dz": 0.5, "d": 1.0, "hpv": []float64{4000, 4000}, "rk": 0, "db": 49001,
+				"home": []float32{home[0], home[1], home[2]}}}, false
+		}
+		return nil, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.summary().EndReason)
+	}
+	want := fmt.Sprintf("clearto 309 %s %s %s %s dz=8 all=1", num32(row94.X), num32(row94.Y), num32(row94.Z), num32(row94.Radius))
+	var found bool
+	for _, c := range p.cleartos {
+		if strings.HasPrefix(c, want) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("row 94 was not cleared: cleartos %v, not_cleared %v", p.cleartos, f.summary().Place.NotCleared)
+	}
+	for _, s := range f.summary().Place.NotCleared {
+		if strings.Contains(s, fmt.Sprintf("row %d", row94.Step)) {
+			t.Fatalf("row %d still refused: %v", row94.Step, s)
+		}
+	}
+}
+
+// F3 (D5): the same unit stays a refusal when its home lies in an AHEAD row's area (pins the AHEAD exclusion).
+func TestPlacePreReadKeepsForeignUnitWithAheadHome(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	row94 := placeRow94Circle(t, plan)
+	_, aheadHome := placeAheadB(t, plan)
+	at := []float32{row94.X, row94.Y, row94.Z}
+	p.units = func(cmd string) ([]any, bool) {
+		if fl := strings.Fields(cmd); len(fl) == 7 && fl[3] == num32(row94.X) && fl[4] == num32(row94.Y) {
+			return []any{map[string]any{"g": "0xF130000000C101", "e": 11371, "n": "Wanderer of a later leg",
+				"p": at, "dz": 0.5, "d": 1.0, "hpv": []float64{4000, 4000}, "rk": 0, "db": 49002,
+				"home": []float32{aheadHome[0], aheadHome[1], aheadHome[2]}}}, false
+		}
+		return nil, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.summary().EndReason)
+	}
+	var found bool
+	for _, s := range f.summary().Place.NotCleared {
+		if strings.Contains(s, fmt.Sprintf("row %d", row94.Step)) && strings.Contains(s, "stands in the circle") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("row %d was not refused for an AHEAD-home unit: not_cleared %v", row94.Step, f.summary().Place.NotCleared)
+	}
+}
+
+// F3 (D5): placeBehindTrash. All four conditions hold: the reply carried a home, a corridor circle holds the entry,
+// the unit is not boss evidence where it stands or at its home, and its home lies in no AHEAD row's area.
+func TestPlaceBehindTrash(t *testing.T) {
+	plan := &dungeon.Plan{Legs: []dungeon.Leg{{
+		Name: "one",
+		Boss: &dungeon.Boss{Entry: 8, Position: dungeon.Point{X: 200, Y: 0, Z: 0}},
+	}}}
+	w := &walk{
+		place: &raidwalk.PlacePlan{
+			// Entry 8 is also a circle entry, so the "entry 8 (boss)" case exercises the BossRows check (not the
+			// circle-entry check).
+			Circles: []raidwalk.ClearCircle{{Step: 90, X: 0, Y: 0, Z: 0, Radius: 10, Entries: []uint32{7, 8}}},
+			Ahead:   []raidwalk.AheadCircle{{Step: 200, X: 100, Y: 0, Z: 0, Radius: 5, Entries: []uint32{9}}},
+		},
+		bossRule: raidwalk.NewBossRows(plan),
+	}
+	hom := func(entry uint32, home [3]float32) ttUnit {
+		return ttUnit{Entry: entry, X: 0, Y: 0, Home: home, HomeOK: true}
+	}
+	if !w.placeBehindTrash(hom(7, [3]float32{0, 0, 0})) {
+		t.Fatal("entry 7 held by a circle with a home outside every AHEAD area is not trash")
+	}
+	if w.placeBehindTrash(ttUnit{Entry: 7}) {
+		t.Fatal("a unit with no home is trash")
+	}
+	if w.placeBehindTrash(hom(6, [3]float32{0, 0, 0})) {
+		t.Fatal("an entry no circle holds is trash")
+	}
+	if w.placeBehindTrash(hom(7, [3]float32{100, 0, 0})) {
+		t.Fatal("a unit whose home lies in an AHEAD row is trash")
+	}
+	if w.placeBehindTrash(hom(8, [3]float32{0, 0, 0})) {
+		t.Fatal("a boss entry is trash")
+	}
+}
+
+// F3 (D5): the quiet's extra round takes BEHIND trash within the quiet radius even when no corridor circle owns its
+// home; beyond that radius it is never taken (the quiet's own reach).
+func TestQuietExtraClearTakesTrashWithinQuietRadius(t *testing.T) {
+	t.Run("within the quiet radius", func(t *testing.T) {
+		f, p := newPlaceFixture(t)
+		rows, plan := placePlanRows(t)
+		home := [3]float32{plan.Point.X + 15, plan.Point.Y, plan.Point.Z}
+		p.quiet = func(n int) bool { return n >= 2 }
+		p.quietNear = []any{quietUnitHome("0xF130000000D001", 15111, plan.Point.X+10, plan.Point.Y, plan.Point.Z, home)}
+		f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("exit %d: %s", code, f.summary().EndReason)
+		}
+		if n := extraClearCount(p); n != 1 {
+			t.Fatalf("%d extra cleartos, want 1: %v", n, p.cleartos)
+		}
+		if !hasNote(f.summary(), "trash of a skipped leg") {
+			t.Fatalf("notes %v", f.summary().Notes)
+		}
+	})
+	t.Run("beyond the quiet radius", func(t *testing.T) {
+		f, p := newPlaceFixture(t)
+		rows, plan := placePlanRows(t)
+		const guid = "0xF130000000D002"
+		at := [3]float32{plan.Point.X + 60, plan.Point.Y, plan.Point.Z}
+		home := [3]float32{plan.Point.X + 65, plan.Point.Y, plan.Point.Z}
+		p.quiet = func(int) bool { return false }
+		p.quietRoamers = []any{quietRoamAt(guid, 15111, "moved", 60, 3)}
+		p.units = joinHook([]any{joinUnitAt(guid, 15111, at[0], at[1], at[2], home, 4000, 0)})
+		f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("exit %d: %s", code, f.summary().EndReason)
+		}
+		if n := extraClearCount(p); n != 0 {
+			t.Fatalf("the extra round took a unit 60 yd out, beyond the quiet's %d yd radius: %v", placeQuietR, p.cleartos)
+		}
+	})
+}
+
 // A unit is owned only by a BEHIND circle whose area holds its home (review round 2, LOW-1): the same entry, far away,
 // is not, and a reply without a home gives no owner even where the unit stands (fail closed).
 func TestPlaceRogueOwnerNeedsNearCircle(t *testing.T) {
