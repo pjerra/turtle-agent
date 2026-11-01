@@ -1,0 +1,580 @@
+// place.go: the pure decisions of `raid-walk --place` (spec ~/TortoiseBots-audit/research/raid-walk-place/SPEC.md): the
+// staged start step, the until stop, the corridor clear of the legs the raid skips, and the toolkit's skip entries.
+// No network, no session: the command computes all of it in validate() and the place phase only runs it.
+package raidwalk
+
+import (
+	"errors"
+	"fmt"
+	"math"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/planexport"
+)
+
+// The place decisions' numbers (spec 4.3).
+const (
+	// PlaceStartClearYd is how far a staged start must stand from every AHEAD creature row.
+	PlaceStartClearYd = 50
+	// PlaceCorridorYd and PlaceCorridorZ bound the corridor: a BEHIND creature row farther than PlaceCorridorYd (its own
+	// radius taken off) from the route, or more than PlaceCorridorZ above or below it, is not cleared.
+	PlaceCorridorYd = 45
+	PlaceCorridorZ  = 15
+	// PlaceBossGuardYd refuses the placement when a BEHIND boss or hold row comes within it (plus its radius) of the route.
+	PlaceBossGuardYd = 30
+	// PlaceCircleSlack is added to a BEHIND pull row's radius for its circle, capped at PlaceCircleMax.
+	PlaceCircleSlack = 5
+	PlaceCircleMax   = 30
+	// PlaceAheadSlack is added to an AHEAD creature row's radius for the overlap test.
+	PlaceAheadSlack = 3
+	// PlaceUnitYd is the radius of a per-unit circle a split row becomes.
+	PlaceUnitYd = 4
+	// PlaceMaxCircles bounds one walk's clear: more circles than this refuse the placement.
+	PlaceMaxCircles = 40
+	// PlaceReviveYd is how close a hire's frame must be to the place point to count as placed.
+	PlaceReviveYd = 12
+	// PlaceMTYd is how close the main tank's frame must be to the start point before `run start`.
+	PlaceMTYd = 15
+	// PlaceFloorYd is how far the toolkit's floor may be from the start point's z.
+	PlaceFloorYd = 3
+)
+
+// ClearCircle is one despawn circle of the place clear (spec 4.3): a BEHIND creature row's circle, or, for a row whose
+// circle overlaps an AHEAD row's, one circle per unit of the plan's pull group (PerUnit, PlaceUnitYd).
+type ClearCircle struct {
+	Step    int
+	Leg     int
+	X, Y, Z float32
+	Radius  float32
+	Entries []uint32
+	PerUnit bool
+	Unit    uint32 // the unit's entry (PerUnit only)
+}
+
+// ClearPlan is PlaceClear's answer: the circles to despawn in route order, the per-unit circles it dropped and why, the
+// AHEAD creature rows' circles (the runtime pre-read's guard), and the refusal (a BEHIND boss or hold row near the
+// route; the circles are then nil).
+type ClearPlan struct {
+	Circles []ClearCircle
+	Notes   []string
+	Ahead   []AheadCircle
+	Refusal string
+}
+
+// AheadCircle is one AHEAD creature row's circle (its radius plus PlaceAheadSlack).
+type AheadCircle struct {
+	Step    int
+	X, Y, Z float32
+	Radius  float32
+}
+
+// AheadIn says whether a point lies in an AHEAD creature row's circle (spec 5 step 6).
+func (p PlacePlan) AheadIn(x, y, z float32) (int, bool) {
+	for _, a := range p.Ahead {
+		if math.Abs(float64(a.Z)-float64(z)) > placeAheadDz {
+			continue
+		}
+		if dist2f(x, y, a.X, a.Y) <= float64(a.Radius)+PlaceAheadSlack {
+			return a.Step, true
+		}
+	}
+	return 0, false
+}
+
+// PlacePlan is the place phase's plan (spec 4): the start step and its point, the until stop the corridor ends at, the
+// circles, the notes and the toolkit's skip entries.
+type PlacePlan struct {
+	Start   int
+	Leg     string // the leg the start came from ("" for --from "step N")
+	Point   dungeon.Point
+	Stop    int
+	Circles []ClearCircle
+	Notes   []string
+	Ahead   []AheadCircle
+	Skips   []uint32
+}
+
+// creatureRow says a row holds a unit.
+func creatureRow(s planexport.StepRow) bool {
+	switch s.Kind {
+	case planexport.KindPull, planexport.KindBoss, planexport.KindHold:
+		return true
+	}
+	return false
+}
+
+// moveRow says a row is a walk the raid can be placed on.
+func moveRow(s planexport.StepRow) bool {
+	switch s.Kind {
+	case planexport.KindMove, planexport.KindMoveDirect, planexport.KindMoveHopExact:
+		return true
+	}
+	return false
+}
+
+// placedRow says a row carries a point (the same rule as firstStepPoint).
+func placedRow(s planexport.StepRow) bool { return s.X != 0 || s.Y != 0 || s.Z != 0 }
+
+// legName is the leg as the messages name it: its name, else its number.
+func legName(l planexport.LegRow) string {
+	if l.Name != "" {
+		return l.Name
+	}
+	return strconv.Itoa(l.Leg)
+}
+
+// findLeg finds a leg by its row number or, case-insensitively, by its name (spec 4.2).
+func findLeg(rows planexport.Rows, word string) (int, string, error) {
+	if n, err := strconv.Atoi(word); err == nil {
+		for _, l := range rows.Legs {
+			if l.Leg == n {
+				return l.Leg, legName(l), nil
+			}
+		}
+		return 0, "", fmt.Errorf("the plan has no leg %d", n)
+	}
+	for _, l := range rows.Legs {
+		if strings.EqualFold(l.Name, word) {
+			return l.Leg, legName(l), nil
+		}
+	}
+	return 0, "", fmt.Errorf("the plan has no leg %s", word)
+}
+
+// legSpan is the first and last step index of a leg (-1, -1 when the leg has no step).
+func legSpan(rows planexport.Rows, leg int) (int, int) {
+	lo, hi := -1, -1
+	for i, s := range rows.Steps {
+		if s.Leg != leg {
+			continue
+		}
+		if lo < 0 {
+			lo = i
+		}
+		hi = i
+	}
+	return lo, hi
+}
+
+// aheadCreatureWithin says whether a creature row after i stands within yd (2D) of row i.
+func aheadCreatureWithin(rows planexport.Rows, i int, yd float64) bool {
+	p := rows.Steps[i]
+	for j := i + 1; j < len(rows.Steps); j++ {
+		s := rows.Steps[j]
+		if !creatureRow(s) || !placedRow(s) {
+			continue
+		}
+		if dist2f(p.X, p.Y, s.X, s.Y) <= yd {
+			return true
+		}
+	}
+	return false
+}
+
+// eventStep says whether row i lies in a scripted event the run leader would move the start back out of (spec 4.2): the
+// row is a hold, or a move leading into one. The step returned is the hold's.
+func eventStep(rows planexport.Rows, i int) (int, bool) {
+	if rows.Steps[i].Kind == planexport.KindHold {
+		return i + 1, true
+	}
+	if moveRow(rows.Steps[i]) && i+1 < len(rows.Steps) && rows.Steps[i+1].Kind == planexport.KindHold {
+		return i + 2, true
+	}
+	return 0, false
+}
+
+// PlaceStart is the start step of a placed walk (spec 4.2): --from "step N" as given (a positioned move row), or
+// --from "leg L" staged at the highest move row before the leg's first creature row that has no AHEAD creature row
+// within PlaceStartClearYd. The second answer names the leg the start came from ("" for an explicit step).
+func PlaceStart(rows planexport.Rows, from []string) (int, string, error) {
+	if len(from) != 3 || from[0] != "from" {
+		return 0, "", errors.New("place: the start needs the words of --from (ParseFrom)")
+	}
+	switch from[1] {
+	case "step":
+		n, err := strconv.Atoi(from[2])
+		if err != nil || n < 1 || n > len(rows.Steps) {
+			return 0, "", fmt.Errorf("--place --from step %s: the rows have %d steps", from[2], len(rows.Steps))
+		}
+		s := rows.Steps[n-1]
+		if !moveRow(s) || !placedRow(s) {
+			return 0, "", fmt.Errorf("--place --from step %d: step %d is a %s row; place at a move row before it", n, n, s.Kind)
+		}
+		if k, ok := eventStep(rows, n-1); ok {
+			return 0, "", fmt.Errorf("--place --from step %d: the start would fall into the event at step %d", n, k)
+		}
+		return n, "", nil
+	case "leg":
+		leg, name, err := findLeg(rows, from[2])
+		if err != nil {
+			return 0, "", fmt.Errorf("--place --from leg %s: %v", from[2], err)
+		}
+		lo, hi := legSpan(rows, leg)
+		first := -1
+		for i := lo; i >= 0 && i <= hi; i++ {
+			if creatureRow(rows.Steps[i]) {
+				first = i
+				break
+			}
+		}
+		if first < 0 {
+			return 0, "", fmt.Errorf("--place --from leg %s: the leg has no pull, boss or hold row", name)
+		}
+		for i := first - 1; i >= lo && i >= 0; i-- {
+			s := rows.Steps[i]
+			if !moveRow(s) || !placedRow(s) {
+				continue
+			}
+			if aheadCreatureWithin(rows, i, PlaceStartClearYd) {
+				continue
+			}
+			if k, ok := eventStep(rows, i); ok {
+				return 0, "", fmt.Errorf("--place --from leg %s: the start would fall into the event at step %d", name, k)
+			}
+			return i + 1, name, nil
+		}
+		return 0, "", fmt.Errorf("--place --from leg %s: leg %s has no quiet move row before its first pull: pass --from \"step N\"", name, name)
+	}
+	return 0, "", fmt.Errorf("--place: --from wants \"leg L\" or \"step N\", not %q", strings.Join(from, " "))
+}
+
+// FromStartStep is the step a --from clause starts the run leader at without --place (spec 5.2): N for "step N", the
+// leg's first row for "leg L", and 1 with no clause. It is the step `--until boss-done` is resolved from.
+func FromStartStep(rows planexport.Rows, from []string) (int, error) {
+	if len(from) == 0 {
+		return 1, nil
+	}
+	if len(from) != 3 || from[0] != "from" {
+		return 0, errors.New("place: the start needs the words of --from (ParseFrom)")
+	}
+	switch from[1] {
+	case "step":
+		n, err := strconv.Atoi(from[2])
+		if err != nil || n < 1 || n > len(rows.Steps) {
+			return 0, fmt.Errorf("--from step %s: the rows have %d steps", from[2], len(rows.Steps))
+		}
+		return n, nil
+	case "leg":
+		leg, name, err := findLeg(rows, from[2])
+		if err != nil {
+			return 0, fmt.Errorf("--from leg %s: %v", from[2], err)
+		}
+		lo, _ := legSpan(rows, leg)
+		if lo < 0 {
+			return 0, fmt.Errorf("--from leg %s: the leg has no row", name)
+		}
+		return lo + 1, nil
+	}
+	return 0, fmt.Errorf("--from wants \"leg L\" or \"step N\", not %q", strings.Join(from, " "))
+}
+
+// PlaceStop is the row the corridor's route ends at (spec 4.3): "until step N" is N, "until leg L" the leg's first row,
+// "until boss" the first boss row at or after the start, and no clause the last row.
+func PlaceStop(rows planexport.Rows, until []string, start int) (int, error) {
+	if len(until) == 0 {
+		return len(rows.Steps), nil
+	}
+	if len(until) != 2 && len(until) != 3 {
+		return 0, fmt.Errorf("place: the until clause is %q", strings.Join(until, " "))
+	}
+	if until[0] != "until" {
+		return 0, fmt.Errorf("place: the until clause is %q", strings.Join(until, " "))
+	}
+	switch until[1] {
+	case "step":
+		n, err := strconv.Atoi(until[2])
+		if err != nil || n < 1 || n > len(rows.Steps) {
+			return 0, fmt.Errorf("--until step %s: the rows have %d steps", until[2], len(rows.Steps))
+		}
+		return n, nil
+	case "leg":
+		leg, name, err := findLeg(rows, until[2])
+		if err != nil {
+			return 0, fmt.Errorf("--until leg %s: %v", until[2], err)
+		}
+		lo, _ := legSpan(rows, leg)
+		if lo < 0 {
+			return 0, fmt.Errorf("--until leg %s: the leg has no row", name)
+		}
+		return lo + 1, nil
+	case "boss":
+		for i := start - 1; i >= 0 && i < len(rows.Steps); i++ {
+			if rows.Steps[i].Kind == planexport.KindBoss {
+				return i + 1, nil
+			}
+		}
+		return 0, errors.New("--place: no boss row at or after the start step")
+	}
+	return 0, fmt.Errorf("place: the until clause is %q", strings.Join(until, " "))
+}
+
+// PlacePoint is the point of a step (false when the row carries none).
+func PlacePoint(rows planexport.Rows, step int) (dungeon.Point, bool) {
+	if step < 1 || step > len(rows.Steps) {
+		return dungeon.Point{}, false
+	}
+	s := rows.Steps[step-1]
+	if !placedRow(s) {
+		return dungeon.Point{}, false
+	}
+	return dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}, true
+}
+
+// routePoints is the route of the corridor: the positioned rows from start to stop, in order (spec 4.3).
+func routePoints(rows planexport.Rows, start, stop int) []dungeon.Point {
+	if start < 1 {
+		start = 1
+	}
+	if stop > len(rows.Steps) {
+		stop = len(rows.Steps)
+	}
+	var out []dungeon.Point
+	for i := start - 1; i < stop; i++ {
+		s := rows.Steps[i]
+		if !placedRow(s) {
+			continue
+		}
+		out = append(out, dungeon.Point{X: s.X, Y: s.Y, Z: s.Z})
+	}
+	return out
+}
+
+// routeDistance is the 2D distance from a point to the route polyline, and the route's z at the closest point.
+func routeDistance(route []dungeon.Point, x, y float32) (d float64, z float64) {
+	if len(route) == 0 {
+		return math.Inf(1), 0
+	}
+	if len(route) == 1 {
+		p := route[0]
+		return dist2f(x, y, p.X, p.Y), float64(p.Z)
+	}
+	best := math.Inf(1)
+	for i := 0; i+1 < len(route); i++ {
+		a, b := route[i], route[i+1]
+		ax, ay := float64(a.X), float64(a.Y)
+		dx, dy := float64(b.X)-ax, float64(b.Y)-ay
+		t := 0.0
+		if l2 := dx*dx + dy*dy; l2 > 0 {
+			t = ((float64(x)-ax)*dx + (float64(y)-ay)*dy) / l2
+			if t < 0 {
+				t = 0
+			} else if t > 1 {
+				t = 1
+			}
+		}
+		px, py := ax+t*dx, ay+t*dy
+		d := math.Hypot(float64(x)-px, float64(y)-py)
+		if d < best {
+			best = d
+			z = float64(a.Z) + t*(float64(b.Z)-float64(a.Z))
+		}
+	}
+	return best, z
+}
+
+// circleRadius is a BEHIND pull row's circle radius (spec 4.3).
+func circleRadius(row float32) float32 {
+	r := row + PlaceCircleSlack
+	if r > PlaceCircleMax {
+		r = PlaceCircleMax
+	}
+	return r
+}
+
+// unitPos is one member position of a plan pull group.
+type unitPos struct {
+	Entry   uint32
+	X, Y, Z float32
+}
+
+// groupPositions is the plan's member positions of the row's pull group (spec 4.3): among the groups of the row's leg
+// whose entries meet the row's, the one whose positions stand nearest the row (a leg has several groups of the same
+// trash entries), each position with the entry of its index.
+func groupPositions(plan *dungeon.Plan, s planexport.StepRow) []unitPos {
+	if plan == nil || s.Leg < 0 || s.Leg >= len(plan.Legs) {
+		return nil
+	}
+	var bestG *dungeon.PullGroup
+	bestD := 0.0
+	for i := range plan.Legs[s.Leg].PullGroups {
+		g := plan.Legs[s.Leg].PullGroups[i]
+		if len(g.Positions) == 0 || !entriesMeet(g.Entries, s.Entries) {
+			continue
+		}
+		var mx, my float32
+		for _, p := range g.Positions {
+			mx += p.X
+			my += p.Y
+		}
+		n := float32(len(g.Positions))
+		if d := dist2f(s.X, s.Y, mx/n, my/n); bestG == nil || d < bestD {
+			bestD, bestG = d, &g
+		}
+	}
+	if bestG == nil {
+		return nil
+	}
+	out := make([]unitPos, 0, len(bestG.Positions))
+	for i, p := range bestG.Positions {
+		e := uint32(0)
+		if i < len(bestG.Entries) {
+			e = bestG.Entries[i]
+		} else if len(bestG.Entries) > 0 {
+			e = bestG.Entries[0]
+		}
+		out = append(out, unitPos{Entry: e, X: p.X, Y: p.Y, Z: p.Z})
+	}
+	return out
+}
+
+// entriesMeet says whether two entry lists share one entry.
+func entriesMeet(a, b []uint32) bool {
+	for _, x := range a {
+		for _, y := range b {
+			if x == y {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// aheadRow is one creature row at or after the start, for the overlap test.
+type aheadRow struct {
+	step int
+	s    planexport.StepRow
+}
+
+// aheadHit is the AHEAD row whose circle (radius + PlaceAheadSlack, within placeAheadDz) overlaps a circle (0: none).
+func aheadHit(ahead []aheadRow, x, y, z, r float32) (int, bool) {
+	for _, a := range ahead {
+		if math.Abs(float64(a.s.Z)-float64(z)) > placeAheadDz {
+			continue
+		}
+		if dist2f(x, y, a.s.X, a.s.Y) <= float64(r)+float64(a.s.Radius)+PlaceAheadSlack {
+			return a.step, true
+		}
+	}
+	return 0, false
+}
+
+// aheadInside is the AHEAD row a point lies in (its circle is radius + PlaceAheadSlack): a unit of a split row that
+// stands in one is not cleared at all (spec 4.3).
+func aheadInside(ahead []aheadRow, x, y, z float32) (int, bool) {
+	for _, a := range ahead {
+		if math.Abs(float64(a.s.Z)-float64(z)) > placeAheadDz {
+			continue
+		}
+		if dist2f(x, y, a.s.X, a.s.Y) <= float64(a.s.Radius)+PlaceAheadSlack {
+			return a.step, true
+		}
+	}
+	return 0, false
+}
+
+// placeAheadDz is the vertical window of the overlap test (spec 4.3).
+const placeAheadDz = 8
+
+// PlaceClear is the corridor clear (spec 4.3). One circle per BEHIND pull row whose circle comes within
+// PlaceCorridorYd of the route from start to stop and within PlaceCorridorZ of the route's height; a row whose circle
+// overlaps an AHEAD creature row's is split into per-unit circles (PlaceUnitYd), and a unit that still lies inside the
+// AHEAD circle is dropped and named. A BEHIND boss or hold row within PlaceBossGuardYd of the route refuses the
+// placement: no `boss` flag is ever sent.
+func PlaceClear(rows planexport.Rows, plan *dungeon.Plan, start, stop int) ClearPlan {
+	var out ClearPlan
+	route := routePoints(rows, start, stop)
+	if len(route) == 0 {
+		return out
+	}
+	var ahead []aheadRow
+	for i := start - 1; i < len(rows.Steps) && i < stop; i++ {
+		if creatureRow(rows.Steps[i]) && placedRow(rows.Steps[i]) {
+			ahead = append(ahead, aheadRow{step: i + 1, s: rows.Steps[i]})
+			out.Ahead = append(out.Ahead, AheadCircle{Step: i + 1, X: rows.Steps[i].X, Y: rows.Steps[i].Y, Z: rows.Steps[i].Z, Radius: rows.Steps[i].Radius})
+		}
+	}
+	for i := 0; i < start-1 && i < len(rows.Steps); i++ {
+		s := rows.Steps[i]
+		if !creatureRow(s) || !placedRow(s) {
+			continue
+		}
+		d, z := routeDistance(route, s.X, s.Y)
+		dz := math.Abs(float64(s.Z) - z)
+		if s.Kind == planexport.KindBoss || s.Kind == planexport.KindHold {
+			if d-float64(s.Radius) <= PlaceBossGuardYd && dz <= PlaceCorridorZ {
+				out.Refusal = fmt.Sprintf("boss/event row %d of leg %d is within %.0f yd of the route: start later or walk from the door", i+1, s.Leg, d)
+				out.Circles, out.Notes = nil, nil
+				return out
+			}
+			continue
+		}
+		if d-float64(s.Radius) > PlaceCorridorYd || dz > PlaceCorridorZ {
+			continue
+		}
+		if hit, ok := aheadHit(ahead, s.X, s.Y, s.Z, circleRadius(s.Radius)); ok {
+			units := groupPositions(plan, s)
+			if len(units) == 0 {
+				out.Notes = append(out.Notes, fmt.Sprintf("not cleared: row %d has no pull group positions and its circle overlaps AHEAD row %d", i+1, hit))
+				continue
+			}
+			for _, u := range units {
+				if k, inside := aheadInside(ahead, u.X, u.Y, u.Z); inside {
+					out.Notes = append(out.Notes, fmt.Sprintf("not cleared: unit %d at %.0f %.0f %.0f lies in AHEAD row %d", u.Entry, u.X, u.Y, u.Z, k))
+					continue
+				}
+				out.Circles = append(out.Circles, ClearCircle{Step: i + 1, Leg: s.Leg, X: u.X, Y: u.Y, Z: u.Z,
+					Radius: PlaceUnitYd, Entries: []uint32{u.Entry}, PerUnit: true, Unit: u.Entry})
+			}
+			continue
+		}
+		out.Circles = append(out.Circles, ClearCircle{Step: i + 1, Leg: s.Leg, X: s.X, Y: s.Y, Z: s.Z,
+			Radius: circleRadius(s.Radius), Entries: append([]uint32{}, s.Entries...)})
+	}
+	if len(out.Circles) > PlaceMaxCircles {
+		out.Refusal = fmt.Sprintf("the route passes %d packs of earlier legs: use --until to shorten it", len(out.Circles))
+		out.Circles = nil
+	}
+	return out
+}
+
+// PlaceSkips is the union of every leg's skip list, sorted (spec 4.3): the entries the toolkit's quiet and clearto
+// never count and never touch.
+func PlaceSkips(plan *dungeon.Plan) []uint32 {
+	if plan == nil {
+		return nil
+	}
+	seen := map[uint32]bool{}
+	var out []uint32
+	for _, l := range plan.Legs {
+		for _, e := range l.Skip {
+			if seen[e] {
+				continue
+			}
+			seen[e] = true
+			out = append(out, e)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+// SkipWords is a skip list as the toolkit's `skip=` argument ("" for none).
+func SkipWords(ids []uint32) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	parts := make([]string, len(ids))
+	for i, e := range ids {
+		parts[i] = strconv.FormatUint(uint64(e), 10)
+	}
+	return strings.Join(parts, ",")
+}
+
+// dist2f is the 2D distance between two points.
+func dist2f(ax, ay, bx, by float32) float64 {
+	dx, dy := float64(ax-bx), float64(ay-by)
+	return math.Sqrt(dx*dx + dy*dy)
+}

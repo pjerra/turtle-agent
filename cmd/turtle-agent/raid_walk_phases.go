@@ -60,6 +60,9 @@ func (w *walk) phases(ctx context.Context) int {
 	if err := w.phasePortal(ctx); err != nil {
 		return w.stop(err, true)
 	}
+	if err := w.phaseUnbindSelf(ctx); err != nil {
+		return w.stop(err, true)
+	}
 	if err := w.phaseHire(ctx); err != nil {
 		return w.stop(err, true)
 	}
@@ -67,6 +70,9 @@ func (w *walk) phases(ctx context.Context) int {
 		return w.stop(err, true)
 	}
 	if err := w.phaseEnter(ctx); err != nil {
+		return w.stop(err, true)
+	}
+	if err := w.phasePlace(ctx); err != nil {
 		return w.stop(err, true)
 	}
 	if err := w.phaseStart(ctx); err != nil {
@@ -749,6 +755,11 @@ func (w *walk) missingHires(now time.Time) []string {
 
 // phaseStart is phase 9: run start, and the until label the server must show.
 func (w *walk) phaseStart(ctx context.Context) error {
+	if w.place != nil {
+		if err := w.placeMTReady(ctx); err != nil {
+			return err
+		}
+	}
 	args := []string{w.plan.Name}
 	args = append(args, w.fromWords...)
 	args = append(args, w.untilWords...)
@@ -770,6 +781,12 @@ func (w *walk) phaseStart(ctx context.Context) error {
 	w.runStarted = true
 	if !rep.Reply.OK && rep.Reply.Kind != tbm.KindAck {
 		return stopf(exitRaidWalkFailed, "run start: no ACK (%s)", rep.Reply.Line)
+	}
+	// The server's own start text ("The run starts at step N of S (leg L)") is logged for the summary and the run.log.
+	for _, l := range rep.Reply.Lines {
+		if strings.Contains(l, "run starts at step") {
+			w.note("place: %s", strings.TrimSpace(raidwalk.CleanLine(l)))
+		}
 	}
 	line, ok := firstRunLine(rep.Reply.Lines, w.plan.Name)
 	if !ok {
@@ -816,6 +833,15 @@ func (w *walk) checkStartLine(ctx context.Context, line string) error {
 	w.noteLabel(st)
 	if st.State != tbm.RunRunning {
 		return stopf(exitRaidWalkFailed, "run start: the run is %s: %s", st.State, line)
+	}
+	if w.place != nil && (st.Step != w.place.Start || st.Steps != len(w.rows.Steps)) {
+		// The placement is only worth its hire when the server starts exactly the step it was placed for, in the rows
+		// the place was computed from (spec 5.2).
+		if err := w.gm(ctx, ".bot run stop"); err != nil {
+			return err
+		}
+		w.runStopped = true
+		return stopf(exitRaidWalkFailed, "place: placed for step %d of %d rows, the server starts step %d of %d", w.place.Start, len(w.rows.Steps), st.Step, st.Steps)
 	}
 	if w.bossDoneStep > 0 && st.Steps != len(w.rows.Steps) {
 		// boss-done is "the step after the boss" in the rows' numbering: another step count means other rows on the server.
@@ -1612,10 +1638,11 @@ func (w *walk) revive(ctx context.Context, step int) error {
 // unbounded path outside a recovery): every loop turn and sleep checks it, and past it the
 // revive fails with the timed-out recovery the caller turns into the original incident's ending.
 func (w *walk) reviveHires(ctx context.Context, deadline time.Time) error {
-	if w.stepFirst == nil {
-		return stopf(exitRaidWalkIncident, "not revived: the plan's rows give no first point")
+	revive := w.revivePoint()
+	if revive == nil {
+		return stopf(exitRaidWalkIncident, "not revived: the plan's rows give no revive point")
 	}
-	p := *w.stepFirst
+	p := *revive
 	if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(p.X), num32(p.Y), num32(p.Z), w.plan.Map)); err != nil {
 		return err
 	}
@@ -1629,7 +1656,9 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time) error {
 	if terr != nil {
 		return terr
 	}
-	if !ok {
+	if !ok && w.place == nil {
+		// A door-to-end walk falls back to the entrance; a placed one does not: the entrance is behind the legs the
+		// placement skipped, and the run leader's walk back would cross them (spec 6).
 		e := w.plan.Entrance
 		if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(e.X), num32(e.Y), num32(e.Z), w.plan.Map)); err == nil {
 			if werr := w.waitMap(ctx, w.plan.Map, 30*time.Second, deadline); werr == nil {
@@ -1644,6 +1673,11 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time) error {
 	}
 	if !ok {
 		return stopf(exitRaidWalkIncident, "not revived: %s", why)
+	}
+	if w.place != nil {
+		if err := w.placeReviveInstance(ctx); err != nil {
+			return err
+		}
 	}
 	for _, name := range w.hireList() {
 		if timeout := w.recoveryExpired(deadline); timeout != nil {
@@ -2501,6 +2535,13 @@ func (w *walk) phaseTeardown() {
 				w.hiresLeft = sortedNames(missing)
 			}
 		}
+		cancel()
+	}
+	if w.place != nil && w.agent != nil {
+		// Out to the portal and `.instance unbind <plan map>` (spec 5.1). The external teardown ends the commander's
+		// agent, so these lines go out before it, not after.
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		w.placeLeave(ctx)
 		cancel()
 	}
 	var buf bytes.Buffer

@@ -1143,6 +1143,42 @@ probe found (2026-10-29, `tests/raid-inject-probe-20261029-042517/probe.md`). Wh
    bot left frozen; a SIGINT while a bot is frozen still sends `.unfreeze` before `.bot run stop`.
 8. **Exit codes.** A `fail` turns a clean walk into 23; a wipe during a fault stays 19 and the fault reads `fail` in
    the summary; `not-fired`/`inconclusive` keep exit 0.
+
+## raid-walk --place: a raid that starts partway into its instance (tested against fakes only, never run live until P1)
+
+README "Raid walks", `--place`. Needs a test server (m910q or tortoise-test2) whose image carries the Eluna test
+toolkit (`.tt place`, `clearto`, `quiet`, `q inst|group|units|floor`) and TortoiseBots with `feat/run-until`. The
+planned proof is Zul'Gurub leg 3 (`zul_gurub --slot 2 --from "leg high_priest_thekal" --place --until boss --sql <the
+deployed migration> --wipe-resume 1 --max-run-minutes 60`), first with `--dry-run`. What it has to settle:
+
+1. **The dry run.** It prints the staged start step (231 in the 1095-step export; whatever the deployed rows give), its
+   point and the circles (steps 89, 91, 94, 96, 99 in the export), and sends nothing.
+2. **The unbind and the copy.** `.instance unbind 309` right after the portal, then `.appear <mt>` lands the commander in
+   the raid's copy: `tt q inst` and `tt q group of=<mt>` agree (`inst` equal, every listed member on map 309, alive,
+   `above_floor` < 1.5). Without the unbind the commander keeps his own copy (the probe saw 104 vs the bots' 103).
+3. **The clear.** The note lines `place: cleared row K: n removed (skipped: ...)` for every circle, no `kill` and no
+   `boss` in any `.tt` line, and a pre-read that lists a unit the row does not own leaves that circle uncleared with a
+   note instead of clearing it. Watch the pack at ZG step 99: with the corridor rule its circle overlaps step 234's, so
+   it is split into per-unit circles (r 4) and some units may be reported `not cleared: unit E ... lies in AHEAD row`.
+4. **Quiet and place.** `tt quiet 50 ... w=20` answers `quiet:true` before the place (one extra round is allowed for a
+   named unit by a BEHIND circle); `tt place ... of=<mt>` answers `placed:true` and the frames show every hire on map
+   309, alive, within 12 yd of the point; the summary's `place.placed` equals `place.hires`.
+5. **The start.** The run's status line reads `running 231/1097` and the until label `until boss (step 274)`; the
+   walk's own text `The run starts at step 231 of 1097 (leg high_priest_thekal)` is in `run.log`. No fight and no death
+   before leg 3's first pull row (234), and the run reaches the until stop before the Thekal boss row.
+6. **The commander stays inside.** After a stay/follow no hire drifts more than 10 yd in 10 s; the commander's own
+   `bot_view`-independent position (`.gps`) stays within a few yards of the place point while the run walks away.
+7. **Pets.** `tt q units 15 <P> all` right after the place: do hunter/warlock pets come along with `NearTeleport`? A pet
+   left at the door that then runs 600 yd through trash is its own ticket (dismiss before the place, or a GM teleport).
+8. **Respawn.** Read `creature.spawntimesecs` for the cleared GUIDs before the proof; a pack that returns within
+   `--max-run-minutes` is only an add for the run leader, but it must be noted.
+9. **Wipe resume.** A forced wipe revives at the place point (not step 1) with no entrance fallback, and the summons go
+   out only after `tt q inst` still names the raid's instance (exit 19 when it does not).
+10. **Teardown.** `teardown.json` has no failed step and no hire left; the commander's `.go xyz` to the portal and
+    `.instance unbind 309` go out before the teardown (its report ends the agent).
+11. **The pair.** `--slot 2,4 --place 2=on --from 2="leg high_priest_thekal" --place 4=on --from 4="leg
+    bloodlord_mandokir"`: two groups, two instances, two commanders, each with its own start step.
+
 ## raid-suite: one walk per raid, judged against the history (tested against fakes only, never run live until L2)
 
 README "Raid suite". Needs `raid-walk` (the `until` clause, `feat/run-until` on the server) and at least one raid whose tier

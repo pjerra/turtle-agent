@@ -1,0 +1,300 @@
+package raidwalk
+
+import (
+	"encoding/json"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/planexport"
+)
+
+// placeRow is one creature step row of a place fixture: its point, the pull's radius and its entries.
+func placeRow(kind string, leg int, x, y, z, radius float32, entries ...uint32) planexport.StepRow {
+	return planexport.StepRow{Kind: kind, Leg: leg, X: x, Y: y, Z: z, Radius: radius, Entries: entries}
+}
+
+// placeMove is a positioned move row.
+func placeMove(leg int, x, y, z float32) planexport.StepRow {
+	return planexport.StepRow{Kind: planexport.KindMove, Leg: leg, X: x, Y: y, Z: z}
+}
+
+// placeRows numbers the rows of a fixture and wraps them in a plan named t (map 309).
+func placeRows(legs []planexport.LegRow, steps ...planexport.StepRow) planexport.Rows {
+	for i := range steps {
+		steps[i].Seq = i + 1
+		steps[i].Plan = "t"
+	}
+	return planexport.Rows{Plan: planexport.PlanRow{Plan: "t", Map: 309}, Legs: legs, Steps: steps}
+}
+
+// placeRoute is n move rows along +y from (0,10,0), the corridor's route. No point of a fixture may sit at the origin:
+// the rows treat (0,0,0) as a row without a position (planexport's own rule).
+func placeRoute(leg, n int) []planexport.StepRow {
+	out := make([]planexport.StepRow, 0, n)
+	for i := range n {
+		out = append(out, placeMove(leg, 0, float32(10+i*10), 0))
+	}
+	return out
+}
+
+func TestPlaceStartStagesBeforeFirstPull(t *testing.T) {
+	// leg 0: steps 1-9; leg 1: moves 10-14 at (0,40)..(0,100), then its first pull at (0,140): 40 yd from step 14 and
+	// 55 yd from step 13, so the staged start is 13 and not 14.
+	steps := []planexport.StepRow{placeMove(0, 0, -200, 0)}
+	for i := range 8 {
+		steps = append(steps, placeMove(0, 0, float32(-180+i*10), 0))
+	}
+	for _, y := range []float32{40, 55, 70, 85, 100} {
+		steps = append(steps, placeMove(1, 0, y, 0))
+	}
+	steps = append(steps, placeRow(planexport.KindPull, 1, 0, 140, 0, 0, 15111))
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}, {Plan: "t", Leg: 1, Name: "two"}}, steps...)
+	if len(rows.Steps) != 15 {
+		t.Fatalf("fixture has %d steps", len(rows.Steps))
+	}
+	got, leg, err := PlaceStart(rows, []string{"from", "leg", "two"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 13 || leg != "two" {
+		t.Fatalf("start %d (%q), want 13 (two)", got, leg)
+	}
+	// the leg number finds the same leg
+	if got, _, err := PlaceStart(rows, []string{"from", "leg", "1"}); err != nil || got != 13 {
+		t.Fatalf("by number: %d, %v", got, err)
+	}
+}
+
+func TestPlaceStartRefusesNoQuietMove(t *testing.T) {
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}},
+		placeMove(0, 0, 100, 0),
+		placeMove(0, 0, 105, 0),
+		placeRow(planexport.KindPull, 0, 0, 110, 0, 0, 15111),
+	)
+	_, _, err := PlaceStart(rows, []string{"from", "leg", "one"})
+	if err == nil || !strings.Contains(err.Error(), "no quiet move row") {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestPlaceStartRefusesPullRow(t *testing.T) {
+	rows := placeRows(nil,
+		placeMove(0, 0, 100, 0),
+		placeRow(planexport.KindPull, 0, 0, 110, 0, 0, 15111),
+		placeRow(planexport.KindBoss, 0, 0, 120, 0, 0, 11347),
+	)
+	if _, _, err := PlaceStart(rows, []string{"from", "step", "2"}); err == nil || !strings.Contains(err.Error(), "is a pull row") {
+		t.Fatalf("pull row: %v", err)
+	}
+	if _, _, err := PlaceStart(rows, []string{"from", "step", "3"}); err == nil || !strings.Contains(err.Error(), "is a boss row") {
+		t.Fatalf("boss row: %v", err)
+	}
+	if _, _, err := PlaceStart(rows, []string{"from", "step", "9"}); err == nil || !strings.Contains(err.Error(), "3 steps") {
+		t.Fatalf("out of range: %v", err)
+	}
+}
+
+func TestPlaceStartRefusesEventHold(t *testing.T) {
+	rows := placeRows(nil,
+		placeMove(0, 0, 100, 0),
+		placeMove(0, 0, 105, 0),
+		placeRow(planexport.KindHold, 0, 0, 110, 0, 0),
+	)
+	// step 2 is the move leading into the hold at step 3: the server would move the start back.
+	if _, _, err := PlaceStart(rows, []string{"from", "step", "2"}); err == nil || !strings.Contains(err.Error(), "event at step 3") {
+		t.Fatalf("err %v", err)
+	}
+	if _, _, err := PlaceStart(rows, []string{"from", "step", "3"}); err == nil || !strings.Contains(err.Error(), "is a hold row") {
+		t.Fatalf("hold row: %v", err)
+	}
+}
+
+func TestPlaceClearCorridorPicksBehindOnly(t *testing.T) {
+	steps := []planexport.StepRow{
+		placeMove(0, 0, -100, 0),
+		placeRow(planexport.KindPull, 0, 20, 50, 0, 2, 15111),  // 20 yd from the route: in
+		placeRow(planexport.KindPull, 0, 60, 50, 0, 2, 15112),  // 60 yd out
+		placeRow(planexport.KindPull, 0, 20, 50, 20, 2, 15113), // 20 yd above the route
+	}
+	steps = append(steps, placeRoute(0, 11)...)                                  // steps 5..15: the route
+	steps = append(steps, placeRow(planexport.KindPull, 0, 10, 60, 0, 2, 15114)) // step 16: AHEAD
+	rows := placeRows(nil, steps...)
+	cp := PlaceClear(rows, nil, 5, 16)
+	if cp.Refusal != "" {
+		t.Fatalf("refused: %q", cp.Refusal)
+	}
+	if len(cp.Circles) != 1 {
+		t.Fatalf("circles %+v", cp.Circles)
+	}
+	if c := cp.Circles[0]; c.Step != 2 || c.Radius != 7 || c.X != 20 || c.Y != 50 {
+		t.Fatalf("circle %+v", c)
+	}
+	if len(cp.Notes) != 0 {
+		t.Fatalf("notes %v", cp.Notes)
+	}
+}
+
+func TestPlaceClearSplitsOnAheadOverlap(t *testing.T) {
+	rows := placeRows(nil,
+		placeRow(planexport.KindPull, 0, 0, 100, 0, 17, 15111, 11340), // 1: BEHIND, circle r 22
+		placeMove(0, 0, 108, 0), // 2: the start
+		placeRow(planexport.KindPull, 0, 0, 116, 0, 10, 15111, 11340), // 3: AHEAD, circle r 13 at 16 yd
+	)
+	plan := &dungeon.Plan{Legs: []dungeon.Leg{{Name: "one", PullGroups: []dungeon.PullGroup{
+		{Entries: []uint32{15111, 11340}, Positions: []dungeon.Point{{X: 0, Y: 100, Z: 0}, {X: 0, Y: 108, Z: 0}}},
+	}}}}
+	cp := PlaceClear(rows, plan, 2, 3)
+	if cp.Refusal != "" {
+		t.Fatalf("refused: %q", cp.Refusal)
+	}
+	if len(cp.Circles) != 1 {
+		t.Fatalf("circles %+v", cp.Circles)
+	}
+	c := cp.Circles[0]
+	if !c.PerUnit || c.Radius != PlaceUnitYd || c.Unit != 15111 || c.Step != 1 || c.X != 0 || c.Y != 100 {
+		t.Fatalf("circle %+v", c)
+	}
+	if len(cp.Notes) != 1 || !strings.Contains(cp.Notes[0], "lies in AHEAD row 3") || !strings.Contains(cp.Notes[0], "11340") {
+		t.Fatalf("notes %v", cp.Notes)
+	}
+}
+
+func TestPlaceClearRefusesBossNearRoute(t *testing.T) {
+	steps := []planexport.StepRow{placeRow(planexport.KindBoss, 0, 20, 50, 0, 5, 12345)}
+	steps = append(steps, placeRoute(0, 11)...)
+	rows := placeRows(nil, steps...)
+	cp := PlaceClear(rows, nil, 2, 12)
+	if cp.Refusal == "" || !strings.Contains(cp.Refusal, "boss/event row 1 of leg 0") {
+		t.Fatalf("refusal %q", cp.Refusal)
+	}
+	if len(cp.Circles) != 0 {
+		t.Fatalf("circles %+v", cp.Circles)
+	}
+}
+
+func TestPlaceClearNeverBossRows(t *testing.T) {
+	// Inside the 45-yd corridor but beyond the 30-yd guard (40 yd out, r 2): neither cleared nor a refusal.
+	steps := []planexport.StepRow{
+		placeRow(planexport.KindBoss, 0, 40, 50, 0, 2, 12345),
+		placeRow(planexport.KindHold, 0, -40, 50, 0, 2),
+	}
+	steps = append(steps, placeRoute(0, 11)...)
+	rows := placeRows(nil, steps...)
+	cp := PlaceClear(rows, nil, 3, 13)
+	if cp.Refusal != "" {
+		t.Fatalf("refused: %q", cp.Refusal)
+	}
+	if len(cp.Circles) != 0 {
+		t.Fatalf("circles %+v", cp.Circles)
+	}
+}
+
+// zgPlaceRows is the ZG fixture: the deployed plan's rows cut to the steps the place of leg 3 needs (1..274 of the
+// 1095-step export of dungeons/zul_gurub.json, exported for the spec with --approach-hops).
+func zgPlaceRows(t *testing.T) planexport.Rows {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/zg-place-rows.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows planexport.Rows
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows.Steps) != 274 {
+		t.Fatalf("the fixture has %d steps", len(rows.Steps))
+	}
+	return rows
+}
+
+func zgPlacePlan(t *testing.T) *dungeon.Plan {
+	t.Helper()
+	p, err := dungeon.Load("../../dungeons/zul_gurub.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestPlaceClearZGLeg3(t *testing.T) {
+	rows := zgPlaceRows(t)
+	plan := zgPlacePlan(t)
+	cp := PlaceClear(rows, plan, 231, 274)
+	if cp.Refusal != "" {
+		t.Fatalf("refused: %q", cp.Refusal)
+	}
+	var steps []int
+	for _, c := range cp.Circles {
+		if len(steps) == 0 || steps[len(steps)-1] != c.Step {
+			steps = append(steps, c.Step)
+		}
+	}
+	want := []int{89, 91, 94, 96, 99}
+	if len(steps) != len(want) {
+		t.Fatalf("circles from steps %v, want %v (notes %v)", steps, want, cp.Notes)
+	}
+	for i := range want {
+		if steps[i] != want[i] {
+			t.Fatalf("circles from steps %v, want %v", steps, want)
+		}
+	}
+}
+
+func TestPlaceStartZGLeg3Stages(t *testing.T) {
+	rows := zgPlaceRows(t)
+	step, leg, err := PlaceStart(rows, []string{"from", "leg", "high_priest_thekal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if step != 231 || leg != "high_priest_thekal" {
+		t.Fatalf("start %d (%q), want 231", step, leg)
+	}
+	if p, ok := PlacePoint(rows, step); !ok || p.X != -11919.999 || p.Z != 61.340786 {
+		t.Fatalf("point %+v %v", p, ok)
+	}
+	// the leg's own first creature row is step 234: the staged start stands 50+ yd from it
+	if d := dist2f(rows.Steps[230].X, rows.Steps[230].Y, rows.Steps[233].X, rows.Steps[233].Y); d < PlaceStartClearYd {
+		t.Fatalf("step 231 is %.1f yd from step 234", d)
+	}
+}
+
+func TestPlaceStopClauses(t *testing.T) {
+	rows := placeRows(nil,
+		placeMove(0, 0, 0, 0),
+		placeRow(planexport.KindBoss, 0, 0, 10, 0, 0, 11347),
+		placeMove(1, 0, 20, 0),
+		placeRow(planexport.KindPull, 1, 0, 30, 0, 0, 15111),
+	)
+	if n, err := PlaceStop(rows, []string{"until", "boss"}, 1); err != nil || n != 2 {
+		t.Fatalf("until boss: %d, %v", n, err)
+	}
+	if n, err := PlaceStop(rows, []string{"until", "boss"}, 3); err == nil {
+		t.Fatalf("until boss past the boss: %d, %v", n, err)
+	}
+	if n, err := PlaceStop(rows, []string{"until", "step", "3"}, 1); err != nil || n != 3 {
+		t.Fatalf("until step: %d, %v", n, err)
+	}
+	if n, err := PlaceStop(rows, nil, 1); err != nil || n != 4 {
+		t.Fatalf("none: %d, %v", n, err)
+	}
+	rows.Legs = []planexport.LegRow{{Plan: "t", Leg: 1, Name: "two"}}
+	if n, err := PlaceStop(rows, []string{"until", "leg", "two"}, 1); err != nil || n != 3 {
+		t.Fatalf("until leg: %d, %v", n, err)
+	}
+}
+
+func TestPlaceSkipsUnionsTheLegs(t *testing.T) {
+	plan := &dungeon.Plan{Legs: []dungeon.Leg{
+		{Skip: []uint32{14758, 15091}},
+		{Skip: []uint32{15091, 14758}},
+		{Skip: []uint32{962}},
+	}}
+	if got := SkipWords(PlaceSkips(plan)); got != "962,14758,15091" {
+		t.Fatalf("skips %q", got)
+	}
+	if SkipWords(PlaceSkips(nil)) != "" {
+		t.Fatal("a nil plan gives skips")
+	}
+}

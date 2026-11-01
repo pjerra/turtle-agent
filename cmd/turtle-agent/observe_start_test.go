@@ -180,7 +180,7 @@ func TestObserveUntil(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clause, boss, err := raidwalk.BossDoneUntil(res.Rows)
+	clause, boss, err := raidwalk.BossDoneUntil(res.Rows, 1)
 	if err != nil || boss < 1 || !strings.HasPrefix(clause, "step ") {
 		t.Fatalf("%q %d %v", clause, boss, err)
 	}
