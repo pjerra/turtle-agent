@@ -1163,8 +1163,13 @@ teleport. What it has to settle:
    `boss` in any `.tt` line, and a pre-read that lists a unit the row does not own leaves that circle uncleared with a
    note instead of clearing it. Watch the pack at ZG step 99: with the corridor rule its circle overlaps step 234's, so
    it is split into per-unit circles (r 4) and some units may be reported `not cleared: unit E ... lies in AHEAD row`.
+   **Known limit:** the pre-read (`q units`) and the `clearto` are two commands, so a unit that walks into a circle
+   between them can be despawned with the row's own. This is acceptable on test servers only: the quiet check and the
+   placed-start check catch a broken run, and the walk report lists every clear (`place.circles[]`, the `place:` notes)
+   so it can be read afterwards.
 4. **Quiet and place.** `tt quiet 50 ... w=20` answers `quiet:true` before the place (one extra round is allowed for a
-   named unit by a BEHIND circle); `tt place ... of=<mt>` answers `placed:true` and the frames show every hire on map
+   named unit that a BEHIND circle owns by entry and stands within its radius + 6 yd, and never within 6 yd of a circle
+   the corridor skipped); `tt place ... of=<mt>` answers `placed:true` and the frames show every hire on map
    309, alive, within 12 yd of the point; the summary's `place.placed` equals `place.hires`.
 5. **The start.** The run's status line reads `running 231/1097` and the until label `until boss (step 274)`; the
    walk's own text `The run starts at step 231 of 1097 (leg high_priest_thekal)` is in `run.log`. No fight and no death

@@ -2173,6 +2173,11 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   hire, and again at teardown, drops a stale personal bind), so a wipe revives at the place point, not at the entrance.
   `--dry-run` prints the staged step, the point and every circle. `summary.json`'s `place` object carries the start step,
   the instance, the circles with their removed counts, the not-cleared list, the quiet result and the placed count.
+  **Known limit:** the pre-read (`q units`) and the `clearto` are two commands, so a unit that walks into a circle
+  between them can be despawned along with the row's own. Hence test servers only; the quiet check and the placed-start
+  check catch a broken run, and the walk report lists every clear (`place.circles[]`, the `place:` notes). The quiet
+  step's one extra round keeps away from any circle the corridor refused (a unit within that circle's radius + 6 yd is
+  not cleared) and clears only a unit a BEHIND row owns by entry and by distance.
 - `--speed 1.0` sends nothing; `1.1` to `3.0` sends `speed=X` (a GM test run, marked `test speed` in the summary).
 - The hire gear tier comes from the committed table `raid -> minimum hire tier` in `internal/raidwalk/tiers.go`
   (Sagiroth's rule: hire and refit at the kit a player holds when the raid is next, from the mercenary unlock quests).

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/objects"
@@ -928,5 +929,253 @@ func TestPlainFromStepNotResolvedAgainstRows(t *testing.T) {
 	}
 	if !strings.Contains(f.stdout.String(), "from step 500") {
 		t.Fatalf("the dry run does not carry the from clause:\n%s", f.stdout.String())
+	}
+}
+
+// quietUnitAt is a quiet read's `near` entry for a unit standing at a point.
+func quietUnitAt(entry uint32, x, y, z float32) map[string]any {
+	return map[string]any{"g": "0xF1300000000009", "e": entry, "n": "Roamer", "p": []float32{x, y, z}, "w": 1.0, "d": 3.0}
+}
+
+// extraClearCount is the number of extra-round cleartos (radius 3) among the toolkit lines.
+func extraClearCount(p *placeToolkit) int {
+	n := 0
+	for _, c := range p.cleartos {
+		if strings.Contains(c, " 3 dz=") {
+			n++
+		}
+	}
+	return n
+}
+
+// A safe extra round really sends its clearto, and the quiet is read again after it (review round 2, MEDIUM-A (a)).
+func TestQuietExtraClearSendsSafeClearto(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	owner := plan.Circles[0]
+	p.quiet = func(n int) bool { return n >= 2 }
+	p.quietNear = []any{quietUnitAt(owner.Entries[0], owner.X, owner.Y, owner.Z)}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	if n := extraClearCount(p); n != 1 {
+		t.Fatalf("%d extra cleartos, want 1: %v", n, p.cleartos)
+	}
+	want := fmt.Sprintf("clearto 309 %s %s %s 3 dz=8 all=1", num32(owner.X), num32(owner.Y), num32(owner.Z))
+	var found bool
+	for _, c := range p.cleartos {
+		if strings.HasPrefix(c, want) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no %q among %v", want, p.cleartos)
+	}
+	if p.quietCalls != 2 {
+		t.Fatalf("%d quiet reads, want 2 (one before the extra clear, one after)", p.quietCalls)
+	}
+	// The re-read comes after the extra clear.
+	log := f.agentLog()
+	extraAt, lastQuiet := -1, -1
+	for i, l := range log {
+		if strings.HasPrefix(l, "tt clearto ") && strings.Contains(l, " 3 dz=") {
+			extraAt = i
+		}
+		if strings.HasPrefix(l, "tt quiet ") {
+			lastQuiet = i
+		}
+	}
+	if extraAt < 0 || lastQuiet < extraAt {
+		t.Fatalf("the quiet was not read again after the extra clear (clear at %d, last quiet at %d)", extraAt, lastQuiet)
+	}
+}
+
+// A unit no BEHIND row owns is never cleared by the extra round (review round 2, MEDIUM-A (b)).
+func TestQuietExtraClearRefusesUnownedUnit(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	owner := plan.Circles[0]
+	p.quiet = func(int) bool { return false }
+	p.quietNear = []any{quietUnitAt(999999, owner.X, owner.Y, owner.Z)}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	if n := extraClearCount(p); n != 0 {
+		t.Fatalf("the extra round cleared a unit no BEHIND row owns: %v", p.cleartos)
+	}
+	if !hasNote(f.summary(), "no BEHIND row owns the unit") {
+		t.Fatalf("notes %v", f.summary().Notes)
+	}
+}
+
+// A unit near a circle the corridor skipped is never cleared by the extra round (review round 2, MEDIUM-A (c)).
+func TestQuietExtraClearRefusesUnitNearSkippedCircle(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	first := plan.Circles[0]
+	corridorReads := 0
+	p.units = func(cmd string) ([]any, bool) {
+		if fl := strings.Fields(cmd); len(fl) > 2 && fl[2] == "3" { // the extra round's read: nothing there
+			return nil, false
+		}
+		corridorReads++
+		if corridorReads == 1 { // the first corridor circle holds a unit its row does not own: skipped
+			return []any{map[string]any{"g": "0xF1300000000008", "e": 999999, "n": "Stranger",
+				"p": []float32{first.X, first.Y, first.Z}, "dz": 0.5, "d": 1.0}}, false
+		}
+		return nil, false
+	}
+	p.quiet = func(int) bool { return false }
+	p.quietNear = []any{quietUnitAt(first.Entries[0], first.X, first.Y, first.Z)}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	if n := extraClearCount(p); n != 0 {
+		t.Fatalf("the extra round cleared next to a skipped circle: %v", p.cleartos)
+	}
+	if !hasNote(f.summary(), "skipped circle of row") {
+		t.Fatalf("notes %v", f.summary().Notes)
+	}
+}
+
+// A unit is owned only by a BEHIND circle whose area holds it (review round 2, LOW-1): the same entry, far away, is not.
+func TestPlaceRogueOwnerNeedsNearCircle(t *testing.T) {
+	w := &walk{place: &raidwalk.PlacePlan{Circles: []raidwalk.ClearCircle{
+		{Step: 90, X: 0, Y: 0, Z: 0, Radius: 10, Entries: []uint32{7}},
+	}}}
+	if c, ok := w.placeRogueOwner(ttUnit{Entry: 7, X: 10 + placeRogueYd - 1}); !ok || c.Step != 90 {
+		t.Fatalf("a unit inside radius + %d yd is not owned: %+v %v", placeRogueYd, c, ok)
+	}
+	if _, ok := w.placeRogueOwner(ttUnit{Entry: 7, X: 200}); ok {
+		t.Fatal("a unit far from the only circle that has its entry is owned")
+	}
+	if _, ok := w.placeRogueOwner(ttUnit{Entry: 8}); ok {
+		t.Fatal("a unit with an entry no circle holds is owned")
+	}
+}
+
+// placeGM reads system and addon events, so no TBM line is skipped unlogged (review round 2, LOW-2).
+func TestPlaceGMReadsAddonEvents(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	f.agent.mu.Lock()
+	kinds := strings.Join(f.agent.gmOnKinds, ",")
+	f.agent.mu.Unlock()
+	if kinds != "system,addon" {
+		t.Fatalf("the GM-mode probe read event kinds %q, want system,addon", kinds)
+	}
+}
+
+// leaveWalk is a walk with just what placeLeave needs, over the fixture's fake agent and clock.
+func leaveWalk(t *testing.T, f *fixture, sleep func(context.Context, time.Duration) error) *walk {
+	t.Helper()
+	return &walk{plan: zgPlan(t), agent: f.agent, env: walkEnv{now: f.clock.now, sleep: sleep}}
+}
+
+// The teardown's unbind waits for the portal map to land (review round 2, LOW-3).
+func TestPlaceLeaveUnbindsAfterPortalMapLands(t *testing.T) {
+	f := newFixture(t)
+	portal := zgPlan(t).Portal
+	sleeps := 0
+	w := leaveWalk(t, f, func(ctx context.Context, d time.Duration) error {
+		sleeps++
+		if sleeps == 3 {
+			f.agent.mu.Lock()
+			f.agent.status.Map = portal.Map
+			f.agent.mu.Unlock()
+		}
+		return f.clock.sleep(ctx, d)
+	})
+	mapAtUnbind := uint32(0)
+	f.agent.onGM = func(line string) {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		switch {
+		case strings.HasPrefix(line, ".go xyz "):
+			f.agent.status.Map = 309 // the landing is slow: the status still shows the raid's copy
+		case strings.HasPrefix(line, ".instance unbind"):
+			mapAtUnbind = f.agent.status.Map
+		}
+	}
+	w.placeLeave(context.Background())
+	if mapAtUnbind != portal.Map {
+		t.Fatalf("the unbind went out with the commander on map %d, not the portal's %d (slept %d times)", mapAtUnbind, portal.Map, sleeps)
+	}
+	if sleeps < 3 {
+		t.Fatalf("slept %d times: the wait did not poll", sleeps)
+	}
+}
+
+// The unbind has a context of its own: a wait that used up the caller's context does not cancel it (review round 2,
+// LOW-3).
+func TestPlaceLeaveUnbindHasOwnContext(t *testing.T) {
+	f := newFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := leaveWalk(t, f, f.clock.sleep)
+	f.agent.onGM = func(line string) {
+		if strings.HasPrefix(line, ".go xyz ") {
+			cancel() // the landing took the whole context
+		}
+	}
+	w.placeLeave(ctx)
+	lines := f.agent.gmLines()
+	if len(lines) == 0 || lines[len(lines)-1] != ".instance unbind 309" {
+		t.Fatalf("the unbind did not go out: %v", lines)
+	}
+	f.agent.mu.Lock()
+	err := f.agent.gmCtxErr[len(f.agent.gmCtxErr)-1]
+	f.agent.mu.Unlock()
+	if err != nil {
+		t.Fatalf("the unbind was sent on a dead context: %v", err)
+	}
+}
+
+// The server's start text is a note only for a placed walk (review round 2, LOW-3; round 1, item 10).
+func TestStartTextNoteOnlyForPlacedWalk(t *testing.T) {
+	t.Run("plain walk", func(t *testing.T) {
+		f := newFixture(t)
+		rep := startAt("onyxias_lair", 1)
+		rep.Reply.Lines = append([]string{rep.Reply.Lines[0], "The run starts at step 1 of 29 (leg lair)"}, rep.Reply.Lines[1:]...)
+		f.agent.startReply = rep
+		f.defaultRun("onyxias_lair")
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("exit %d: %s", code, f.stderr.String())
+		}
+		for _, n := range f.summary().Notes {
+			if strings.Contains(n, "run starts at step") {
+				t.Fatalf("a plain walk noted the server's start text: %q", n)
+			}
+		}
+	})
+	t.Run("placed walk", func(t *testing.T) {
+		f, _ := newPlaceFixture(t)
+		rows, plan := placePlanRows(t)
+		f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("exit %d: %s", code, f.stderr.String())
+		}
+		if !hasNote(f.summary(), "place: The run starts at step") {
+			t.Fatalf("notes %v", f.summary().Notes)
+		}
+	})
+}
+
+// The longest-line check counts the extra clear round's lines (review round 2, LOW-4).
+func TestPlaceTTMaxCountsExtraRound(t *testing.T) {
+	p := &raidwalk.PlacePlan{
+		Point:   dungeon.Point{X: 1, Y: 2, Z: 3},
+		Circles: []raidwalk.ClearCircle{{X: 1, Y: 2, Z: 3, Radius: 5}},
+	}
+	long, _ := placeTTMax(p, 309)
+	if !strings.HasPrefix(long, "clearto 309 -0.123456789 ") || !strings.Contains(long, " 3 dz=") {
+		t.Fatalf("the longest line is %q, not the extra round's clearto", long)
 	}
 }

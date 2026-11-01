@@ -183,7 +183,7 @@ func (w *walk) placeGM(ctx context.Context) error {
 	deadline := w.env.now().Add(placeGMTimeout)
 	for {
 		var page events.Page
-		params := map[string]any{"since": w.eventsAt, "kinds": []string{"system"}, "wait_ms": 1000}
+		params := map[string]any{"since": w.eventsAt, "kinds": []string{"system", "addon"}, "wait_ms": 1000}
 		if err := w.agent.Call(ctx, "events", params, &page, 15*time.Second); err != nil {
 			return stopf(exitRaidWalkFailed, "place: the GM-mode check: events: %v", err)
 		}
@@ -404,6 +404,8 @@ func (w *walk) placeClear(ctx context.Context) error {
 			w.note("place: not cleared row %d: %s", c.Step, why)
 			w.placeSum.NotCleared = append(w.placeSum.NotCleared, fmt.Sprintf("row %d: %s", c.Step, why))
 			w.placeSum.Circles = append(w.placeSum.Circles, summary)
+			// The quiet step's extra round must not act near a circle the corridor refused (review round 2, MEDIUM-A).
+			w.placeSkipped = append(w.placeSkipped, c)
 			continue
 		}
 		cmd := fmt.Sprintf("clearto %d %s %s %s %s dz=%s all=1%s", w.plan.Map, num32(c.X), num32(c.Y), num32(c.Z), num32(c.Radius), num32(placeClearDz), skip)
@@ -474,7 +476,14 @@ func (w *walk) placeQuiet(ctx context.Context) error {
 			}
 			// The extra round is a clear like any other (review round 1, item 1): it keeps the pre-read's answer and
 			// runs the same guard before it acts. A unit no BEHIND row owns is never cleared, and a circle holding a
-			// unit of another row, a unit in an AHEAD circle, or a truncated reply is not cleared at all.
+			// unit of another row, a unit in an AHEAD circle, or a truncated reply is not cleared at all. A unit
+			// within a skipped corridor circle's radius + placeRogueYd is not cleared either (review round 2,
+			// MEDIUM-A): the corridor refused that circle for a reason the extra round cannot see from its r 3 read.
+			if sc, near := w.placeNearSkipped(u); near {
+				w.note("place: not cleared %d %s in the extra round: it stands within %d yd of the skipped circle of row %d",
+					u.Entry, u.Name, placeRogueYd, sc.Step)
+				continue
+			}
 			owner, ok := w.placeRogueOwner(u)
 			if !ok {
 				w.note("place: not cleared %d %s in the extra round: no BEHIND row owns the unit", u.Entry, u.Name)
@@ -578,8 +587,9 @@ func (w *walk) placeRogue(u ttUnit) bool {
 }
 
 // placeRogueOwner is the BEHIND circle that owns a unit of the quiet list (review round 1, item 1): among the circles
-// whose entries hold the unit's entry, the nearest to it. A patrol unit whose entry no BEHIND row owns gets no owner,
-// and the extra clear never runs for it; the quiet then fails and the placement stops cleanly.
+// whose entries hold the unit's entry and whose area (radius + placeRogueYd) holds the unit (review round 2, LOW-1),
+// the nearest to it. A unit whose entry no BEHIND row owns, or that stands far from every circle that does, gets no
+// owner, and the extra clear never runs for it; the quiet then fails and the placement stops cleanly.
 func (w *walk) placeRogueOwner(u ttUnit) (raidwalk.ClearCircle, bool) {
 	var best raidwalk.ClearCircle
 	bestD := math.Inf(1)
@@ -587,11 +597,25 @@ func (w *walk) placeRogueOwner(u ttUnit) (raidwalk.ClearCircle, bool) {
 		if !inEntries(c.Entries, u.Entry) {
 			continue
 		}
-		if d := placeDist3(u.X, u.Y, u.Z, c.X, c.Y, c.Z); d < bestD {
+		d := placeDist3(u.X, u.Y, u.Z, c.X, c.Y, c.Z)
+		if d > float64(c.Radius)+placeRogueYd {
+			continue
+		}
+		if d < bestD {
 			best, bestD = c, d
 		}
 	}
 	return best, bestD < math.Inf(1)
+}
+
+// placeNearSkipped says whether a unit stands within a skipped corridor circle's radius + placeRogueYd, and which one.
+func (w *walk) placeNearSkipped(u ttUnit) (raidwalk.ClearCircle, bool) {
+	for _, c := range w.placeSkipped {
+		if placeDist3(u.X, u.Y, u.Z, c.X, c.Y, c.Z) <= float64(c.Radius)+placeRogueYd {
+			return c, true
+		}
+	}
+	return raidwalk.ClearCircle{}, false
 }
 
 // placeMove is spec 5 step 8: the toolkit moves the raid's group onto the point.
@@ -874,7 +898,11 @@ func (w *walk) placeLeave(ctx context.Context) {
 	if err := w.waitMap(ctx, w.plan.Portal.Map, 30*time.Second, time.Time{}); err != nil {
 		w.note("place: the teardown's wait for the portal map: %v", err)
 	}
-	if err := w.gm(ctx, fmt.Sprintf(".instance unbind %d", w.plan.Map)); err != nil {
+	// The unbind gets a context of its own: a slow landing may have used up (or cancelled) the one the wait ran in, and
+	// the unbind is the line the commander's next walk depends on (review round 2, LOW-3).
+	unbindCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	if err := w.gm(unbindCtx, fmt.Sprintf(".instance unbind %d", w.plan.Map)); err != nil {
 		w.note("place: the teardown's .instance unbind: %v", err)
 	}
 }
@@ -893,7 +921,10 @@ func placeTTMax(p *raidwalk.PlacePlan, planMap uint32) (string, int) {
 }
 
 // placeTTLines is every toolkit line the place phase sends, with a placeholder main-tank name (a hire's name is at most
-// 12 characters, gmNameRe), so the check is a true upper bound.
+// 12 characters, gmNameRe). The extra clear round of the quiet step (review round 2, LOW-4) is counted with a
+// placeholder position of the longest text a float32 coordinate of 0.1 or more takes (nine significant digits), so the
+// check is an upper bound for every line the phase builds from the plan; a unit sitting at a coordinate under 0.1
+// could print a longer text, and the toolkit's own cap then refuses that one line.
 func placeTTLines(p *raidwalk.PlacePlan, planMap uint32) []string {
 	const mt = "MMMMMMMMMMMM"
 	tail := ""
@@ -901,12 +932,19 @@ func placeTTLines(p *raidwalk.PlacePlan, planMap uint32) []string {
 		tail = " skip=" + w
 	}
 	px, py, pz := num32(p.Point.X), num32(p.Point.Y), num32(p.Point.Z)
+	const exLong = "-0.123456789" // nine significant digits with a sign (the longest a float32 of 0.1 or more prints)
 	out := []string{
 		"q inst",
 		"q group of=" + mt,
 		fmt.Sprintf("q floor %s %s %s", px, py, pz),
 		fmt.Sprintf("quiet %d %s %s %s w=%d dz=%d%s", placeQuietR, px, py, pz, placeQuietWaitS, placeClearDz, tail),
 		fmt.Sprintf("place %s %s %s spread=5 of=%s", px, py, pz, mt),
+	}
+	if len(p.Circles) > 0 {
+		out = append(out,
+			fmt.Sprintf("q units %d %s %s %s all", placeExtraRadius, exLong, exLong, exLong),
+			fmt.Sprintf("clearto %d %s %s %s %d dz=%d all=1%s", planMap, exLong, exLong, exLong, placeExtraRadius, placeClearDz, tail),
+		)
 	}
 	for _, c := range p.Circles {
 		out = append(out,

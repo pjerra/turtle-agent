@@ -177,6 +177,12 @@ type walkFakeAgent struct {
 	injectCtx func() (raidwalk.InjectCtx, bool)
 	gmCtx     []raidwalk.InjectCtx
 	gmCtxOK   []bool
+	// gmCtxErr is the context error each gm line was sent under (review round 2, LOW-3: the teardown's unbind must
+	// not go out on a cancelled context). gmOnSeen and gmOnKinds are the kinds the first events read after `.gm on`
+	// asked for (review round 2, LOW-2).
+	gmCtxErr  []error
+	gmOnSeen  bool
+	gmOnKinds []string
 }
 
 func newFakeAgent(t *testing.T, clock *fakeClock) *walkFakeAgent {
@@ -214,6 +220,10 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		f.gmAt = append(f.gmAt, f.clock.now())
 		f.gmUnits = append(f.gmUnits, f.unitsN)
 		f.timeline = append(f.timeline, timelineEntry{Text: p.Text, Targeted: f.targeted})
+		f.gmCtxErr = append(f.gmCtxErr, ctx.Err())
+		if p.Text == ".gm on" {
+			f.gmOnSeen = true
+		}
 		if f.injectCtx != nil {
 			c, ok := f.injectCtx()
 			f.gmCtx = append(f.gmCtx, c)
@@ -233,6 +243,15 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		}
 		v = struct{}{}
 	case "events":
+		f.mu.Lock()
+		if f.gmOnSeen && f.gmOnKinds == nil {
+			var ep struct {
+				Kinds []string `json:"kinds"`
+			}
+			_ = json.Unmarshal(raw, &ep)
+			f.gmOnKinds = append([]string{}, ep.Kinds...)
+		}
+		f.mu.Unlock()
 		v = f.eventsPage()
 	case "bot_view":
 		if f.viewHook != nil {

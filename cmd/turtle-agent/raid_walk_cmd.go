@@ -656,6 +656,7 @@ type walk struct {
 	placeStayed   bool
 	placeSum      *raidwalk.PlaceSummary
 	placeRemoved  int
+	placeSkipped  []raidwalk.ClearCircle // the corridor circles placeClear refused (the extra round keeps away from them)
 	placeSummoned []string
 
 	started     time.Time
