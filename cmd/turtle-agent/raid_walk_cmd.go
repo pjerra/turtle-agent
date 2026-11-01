@@ -533,7 +533,15 @@ type walk struct {
 	afterN        uint64
 	eventsAt      uint64
 
-	bossSet      map[uint32]bool
+	bossSet map[uint32]bool
+	// bossCore holds the plan's boss entries and hold entries: always boss rows. A bossSet entry that is
+	// only a `first` add counts as a boss row only on its own boss's leg (firstLegs: the legs that list it)
+	// or when the run's leg is unknown (walk 19 test2 s4: Zulian Tigers 11361, Thekal's adds, fought as
+	// trash on Venoxis's leg latched bossLatchAt and blocked the wipe recovery). legNames are the plan's
+	// leg names, to tell a known other leg from an unknown one.
+	bossCore     map[uint32]bool
+	firstLegs    map[uint32][]string
+	legNames     map[string]bool
 	bossRows     map[uint32]hostileState
 	bossSeenAt   time.Time
 	bossTargetAt time.Time
@@ -566,6 +574,7 @@ type walk struct {
 	bossReadAt    time.Time
 	bossEngagedAt time.Time
 	bossLatchAt   time.Time
+	bossLatchHit  uint32 // the entry of the row that last set bossLatchAt (for the skip note)
 	bossCheckErr  error
 	fightRows     []walkFightRow
 
@@ -734,10 +743,22 @@ func (w *walk) validate() error {
 	for _, e := range mapview.BossEntries(p) {
 		w.bossSet[e] = true
 	}
+	w.bossCore, w.firstLegs, w.legNames = map[uint32]bool{}, map[uint32][]string{}, map[string]bool{}
 	for _, leg := range p.Legs {
-		if leg.Boss != nil && leg.Boss.Hold != nil {
+		if leg.Name != "" {
+			w.legNames[leg.Name] = true
+		}
+		if leg.Boss == nil {
+			continue
+		}
+		w.bossCore[leg.Boss.Entry] = true
+		for _, e := range leg.Boss.First {
+			w.firstLegs[e] = append(w.firstLegs[e], leg.Name)
+		}
+		if leg.Boss.Hold != nil {
 			for _, e := range leg.Boss.Hold.Entries {
 				w.bossSet[e] = true
+				w.bossCore[e] = true
 			}
 		}
 	}

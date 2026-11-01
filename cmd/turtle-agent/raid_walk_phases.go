@@ -1103,6 +1103,34 @@ func bossRowEngaged(hppct int, target uint64) bool {
 	return hppct > 0 && (target != 0 || hppct < 100)
 }
 
+// bossRowCounts says whether a frame row of this entry is boss evidence (bossSeenAt, bossLatchAt, bossRows,
+// bossTargetAt). A plan boss or hold entry always is. An entry that is only a `first` add is evidence on its own
+// boss's leg, and whenever the run's leg is unknown (no status yet, "-", a number, a name the plan does not
+// have): fail closed. On another known leg it is trash (walk 19 test2 s4: Zulian Tigers 11361, Thekal's adds,
+// fought on Venoxis's leg, latched the boss gate 88 s before a trash wipe and blocked its recovery).
+func (w *walk) bossRowCounts(entry uint32) bool {
+	if !w.bossSet[entry] {
+		return false
+	}
+	if w.bossCore[entry] {
+		return true
+	}
+	legs := w.firstLegs[entry]
+	if len(legs) == 0 || !w.haveStatus {
+		return true
+	}
+	cur := w.lastStatus.Leg
+	if cur == "" || !w.legNames[cur] {
+		return true
+	}
+	for _, l := range legs {
+		if l == "" || l == cur {
+			return true
+		}
+	}
+	return false
+}
+
 // trackFrame keeps the per-bot and per-hostile state the enter, reset and wipe rules read.
 func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 	for _, p := range f.Party {
@@ -1119,10 +1147,10 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 			w.hostiles[h.GUID.String()] = hostileState{entry: h.Entry, x: h.X, y: h.Y, z: h.Z, kind: h.Kind, reaction: h.Reaction, flags: h.Flags,
 				hppct: h.HPPct, target: uint64(h.Target), at: now}
 		}
-		if w.bossSet[h.Entry] {
+		if w.bossRowCounts(h.Entry) {
 			w.bossSeenAt = now
 			if bossRowEngaged(h.HPPct, uint64(h.Target)) {
-				w.bossLatchAt = now
+				w.bossLatchAt, w.bossLatchHit = now, h.Entry
 			}
 			w.bossRows[h.Entry] = hostileState{entry: h.Entry, x: h.X, y: h.Y, z: h.Z, kind: h.Kind, reaction: h.Reaction, flags: h.Flags,
 				hppct: h.HPPct, target: uint64(h.Target), at: now}
@@ -1850,11 +1878,11 @@ func (w *walk) freshWipeRest() (time.Duration, error) {
 	if w.dash == nil {
 		now := w.env.now()
 		if w.bossEngagedNow() {
-			w.note("wipe resume skipped: boss state unknown")
+			w.note("wipe resume skipped: boss state unknown (after the revive: %s engaged in the frames)", w.engagedBossWords())
 			return 0, errWipeResumeSkipped
 		}
 		if !w.bossLatchAt.IsZero() && now.Sub(w.bossLatchAt) < 120*time.Second {
-			w.note("wipe resume skipped: boss state unknown")
+			w.note("wipe resume skipped: boss state unknown (after the revive: %s)", w.latchWords(now))
 			return 0, errWipeResumeSkipped
 		}
 		return w.opts.wipeRest, nil
@@ -1865,13 +1893,13 @@ func (w *walk) freshWipeRest() (time.Duration, error) {
 	now := w.env.now()
 	if err != nil {
 		w.bossCheckErr = err
-		w.note("wipe resume skipped: boss state unknown")
+		w.note("wipe resume skipped: boss state unknown (after the revive: dashboard fights read failed: %v)", err)
 		return 0, errWipeResumeSkipped
 	}
 	var rows []walkFightRow
 	if jerr := json.Unmarshal(raw, &rows); jerr != nil {
 		w.bossCheckErr = jerr
-		w.note("wipe resume skipped: boss state unknown")
+		w.note("wipe resume skipped: boss state unknown (after the revive: dashboard fights unreadable: %v)", jerr)
 		return 0, errWipeResumeSkipped
 	}
 	w.bossCheckErr = nil
@@ -1886,7 +1914,7 @@ func (w *walk) freshWipeRest() (time.Duration, error) {
 		}
 	}
 	if !w.bossEngagedAt.IsZero() {
-		w.note("wipe resume skipped: boss state unknown")
+		w.note("wipe resume skipped: boss state unknown (after the revive: live boss fight row on the dashboard)")
 		return 0, errWipeResumeSkipped
 	}
 	return w.opts.wipeRest, nil
@@ -1899,28 +1927,44 @@ func (w *walk) freshWipeRest() (time.Duration, error) {
 func (w *walk) bossUnknown(ctx context.Context) error {
 	now := w.env.now()
 	if w.bossEngagedNow() {
-		w.note("wipe resume skipped: boss state unknown")
+		w.note("wipe resume skipped: boss state unknown (%s engaged in the frames)", w.engagedBossWords())
 		return errWipeResumeSkipped
 	}
 	if !w.bossLatchAt.IsZero() && now.Sub(w.bossLatchAt) < 120*time.Second {
-		w.note("wipe resume skipped: boss state unknown")
+		w.note("wipe resume skipped: boss state unknown (%s)", w.latchWords(now))
 		return errWipeResumeSkipped
 	}
 	if w.dash == nil {
 		return nil
 	}
-	if w.bossReadAt.IsZero() || now.Sub(w.bossReadAt) > 30*time.Second || w.bossCheckErr != nil {
-		w.note("wipe resume skipped: boss state unknown")
+	switch {
+	case w.bossCheckErr != nil:
+		w.note("wipe resume skipped: boss state unknown (dashboard fights read failed: %v)", w.bossCheckErr)
+		return errWipeResumeSkipped
+	case w.bossReadAt.IsZero():
+		w.note("wipe resume skipped: boss state unknown (no dashboard fights read yet)")
+		return errWipeResumeSkipped
+	case now.Sub(w.bossReadAt) > 30*time.Second:
+		w.note("wipe resume skipped: boss state unknown (dashboard fights read stale %ds)", int(now.Sub(w.bossReadAt)/time.Second))
 		return errWipeResumeSkipped
 	}
 	// A boss fight still live on the dashboard blocks recovery before anything is revived.
 	for _, r := range w.fightRows {
 		if r.bossLive() {
-			w.note("wipe resume skipped: boss state unknown")
+			w.note("wipe resume skipped: boss state unknown (live boss fight row on the dashboard)")
 			return errWipeResumeSkipped
 		}
 	}
 	return nil
+}
+
+// latchWords names the bossLatchAt skip: which boss row latched and how long ago.
+func (w *walk) latchWords(now time.Time) string {
+	who := "a boss row"
+	if w.bossLatchHit != 0 {
+		who = fmt.Sprintf("boss %d", w.bossLatchHit)
+	}
+	return fmt.Sprintf("%s latched %ds ago, under 120 s", who, int(now.Sub(w.bossLatchAt)/time.Second))
 }
 
 // recoveryDeadline is the absolute deadline of a recovery starting at from: the walk's max-run
