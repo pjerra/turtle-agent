@@ -269,6 +269,7 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 		return it, rpcErr(err)
 	}))
 	registerSocialMethods(srv, cur)
+	registerElunaMethods(srv, cur)
 	stopLFG := registerLFGMethods(srv, cur)
 	registerGroupMethods(srv, cur)
 	registerItemMethods(srv, cur)

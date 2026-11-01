@@ -213,12 +213,27 @@ type walkFakeAgent struct {
 	pinfoLagTargets bool
 	prevSel         packet.GUID
 	gmFail          func(line string) error
+	// noGMOn makes the `.gm on` probe answer "GM mode is OFF": the place phase must refuse (review round 1, item 12).
+	noGMOn bool
+
+	// The place phase's toolkit: ttFn answers one `.tt` command (nil: the test does not use the toolkit), ttCalls
+	// records every command in order.
+	ttFn    func(cmd string) (ttResult, error)
+	ttCalls []string
+	// log is every gm line, toolkit command and commander call in send order, as "gm ...", "tt ...", "cmdr ...".
+	log []string
 
 	// injectCtx is the injector's allow-list context at a gm send (nil: the walk's own gm line); gmCtx and gmCtxOK
 	// hold it per line, so a test checks every line against the context it was really sent with.
 	injectCtx func() (raidwalk.InjectCtx, bool)
 	gmCtx     []raidwalk.InjectCtx
 	gmCtxOK   []bool
+	// gmCtxErr is the context error each gm line was sent under (review round 2, LOW-3: the teardown's unbind must
+	// not go out on a cancelled context). gmOnSeen and gmOnKinds are the kinds the first events read after `.gm on`
+	// asked for (review round 2, LOW-2).
+	gmCtxErr  []error
+	gmOnSeen  bool
+	gmOnKinds []string
 }
 
 func newFakeAgent(t *testing.T, clock *fakeClock) *walkFakeAgent {
@@ -289,9 +304,14 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		_ = json.Unmarshal(raw, &p)
 		f.mu.Lock()
 		f.gm = append(f.gm, p.Text)
+		f.log = append(f.log, "gm "+p.Text)
 		f.gmAt = append(f.gmAt, f.clock.now())
 		f.gmUnits = append(f.gmUnits, f.unitsN)
 		f.timeline = append(f.timeline, timelineEntry{Text: p.Text, Targeted: f.targeted})
+		f.gmCtxErr = append(f.gmCtxErr, ctx.Err())
+		if p.Text == ".gm on" {
+			f.gmOnSeen = true
+		}
 		if f.injectCtx != nil {
 			c, ok := f.injectCtx()
 			f.gmCtx = append(f.gmCtx, c)
@@ -311,6 +331,15 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		}
 		v = struct{}{}
 	case "events":
+		f.mu.Lock()
+		if f.gmOnSeen && f.gmOnKinds == nil {
+			var ep struct {
+				Kinds []string `json:"kinds"`
+			}
+			_ = json.Unmarshal(raw, &ep)
+			f.gmOnKinds = append([]string{}, ep.Kinds...)
+		}
+		f.mu.Unlock()
 		v = f.eventsPage()
 	case "bot_view":
 		if f.viewHook != nil {
@@ -358,6 +387,23 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		var p commanderReq
 		_ = json.Unmarshal(raw, &p)
 		v = f.commander(&p)
+	case "tt":
+		var p ttParams
+		_ = json.Unmarshal(raw, &p)
+		f.mu.Lock()
+		f.ttCalls = append(f.ttCalls, p.Cmd)
+		f.log = append(f.log, "tt "+p.Cmd)
+		fn := f.ttFn
+		f.mu.Unlock()
+		if fn == nil {
+			f.t.Errorf("unexpected RPC tt (%q)", p.Cmd)
+			return nil
+		}
+		out, err := fn(p.Cmd)
+		if err != nil {
+			return err
+		}
+		v = out
 	default:
 		f.t.Errorf("unexpected RPC %s", method)
 	}
@@ -450,7 +496,17 @@ func (f *walkFakeAgent) gmSide(line string) {
 		for _, n := range f.party {
 			known = known || n == name
 		}
-		if known && f.entered && !f.appearRefused && !(f.appearRefusedUntilRevive && !f.revived) {
+		accepted := !f.appearRefused && !(f.appearRefusedUntilRevive && !f.revived)
+		if accepted && !(known && f.entered) {
+			// The place phase's appear (dev, #354): the GM appears in the named player's copy, and only the status's
+			// map follows (its waitMap).
+			m := f.instMap
+			if m == 0 {
+				m = 249
+			}
+			f.status.Map = m
+		}
+		if accepted && known && f.entered {
 			hm := uint32(249)
 			if f.instMap != 0 {
 				hm = f.instMap
@@ -472,6 +528,13 @@ func (f *walkFakeAgent) gmSide(line string) {
 			}
 		}
 		f.mu.Unlock()
+	case line == ".gm on":
+		// The place phase's GM-mode probe (review round 1, item 12): the server answers a notification.
+		if f.noGMOn {
+			f.push("GM mode is OFF", "")
+		} else {
+			f.push("GM mode is ON", "")
+		}
 	case line == ".gps":
 		f.gpsSide()
 	case line == ".pinfo":
@@ -845,6 +908,9 @@ func (f *walkFakeAgent) viewPage() any {
 	return viewReply{Have: true, N: uint64(n), Frame: frame}
 }
 func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
+	f.mu.Lock()
+	f.log = append(f.log, strings.TrimSpace("cmdr "+p.Op+" "+p.Verb+" "+strings.Join(p.Args, " ")))
+	f.mu.Unlock()
 	ack := func(intent string) commanderReply {
 		f.mu.Lock()
 		count := len(f.party)
@@ -1243,7 +1309,7 @@ func TestRaidWalkHappyPathOnyxia(t *testing.T) {
 	}
 	f.agent.mu.Unlock()
 	for _, line := range gm {
-		if !raidwalk.AllowedLine(line, hires) {
+		if !raidwalk.AllowedLine(line, hires, 249) {
 			t.Fatalf("a GM line fails the allow-list: %q", line)
 		}
 	}
@@ -4379,7 +4445,7 @@ func bossDoneFixture(t *testing.T) (*fixture, int, int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clause, boss, err := raidwalk.BossDoneUntil(res.Rows)
+	clause, boss, err := raidwalk.BossDoneUntil(res.Rows, 1)
 	if err != nil || boss < 1 || !strings.HasPrefix(clause, "step ") {
 		t.Fatalf("clause %q boss %d: %v", clause, boss, err)
 	}

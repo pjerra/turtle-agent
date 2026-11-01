@@ -115,7 +115,7 @@ func observeUntil(plan *dungeon.Plan, until string, planner *navmesh.Planner) du
 			if r.StepCount() != serverSteps {
 				continue
 			}
-			c, _, err := raidwalk.BossDoneUntil(r)
+			c, _, err := raidwalk.BossDoneUntil(r, 1)
 			if err != nil {
 				return dungeon.UntilClause{}, fmt.Errorf("observe.until: %w", err)
 			}

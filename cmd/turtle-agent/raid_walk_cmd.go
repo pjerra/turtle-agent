@@ -50,7 +50,7 @@ const (
 )
 
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
-    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--tier N|--tier-override N]
+    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
     [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--dry-run]
@@ -72,6 +72,7 @@ type raidWalkOptions struct {
 	sql           string
 	until         string
 	from          string
+	place         bool // --place: start the raid partway into its instance, at the --from start (spec 3)
 	speed         float64
 	hires         string
 	tier          int // --tier: the kit of a raid the committed table leaves unknown
@@ -208,6 +209,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.sql, "sql", "", "the deployed migration: step numbers and the first point come from it")
 	fs.StringVar(&o.until, "until", "boss", "boss (stops before it), boss-done (after the boss step), none, \"step N\" or \"leg L\"")
 	fs.StringVar(&o.from, "from", "", "\"leg L\" or \"step N\" for the run leader")
+	fs.Var(onOffFlag{&o.place}, "place", "with --from: put the raid at that start inside the instance, clearing the legs it skips (Eluna test toolkit: m910q or tortoise-test2 only)")
 	fs.StringVar(&speed, "speed", "1.0", "the run's test speed, 1.0 to 3.0")
 	fs.StringVar(&o.hires, "hires", "", "the tb-raid-roster v1 file (default: from the plan's raid block)")
 	fs.IntVar(&o.tier, "tier", 0, "the hire gear tier (1-3) of a raid the committed table leaves unknown")
@@ -320,8 +322,69 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 		fmt.Fprintf(stderr, "raid-walk: the lease would last %d min (max-run + hold + 30); the limit is 720: lower --max-run-minutes or --hold-minutes\n", ttl)
 		return o, exitUsage
 	}
+	// --place (spec 3): it needs a start, it is not combined with the fault injector, and it is for the test servers
+	// whose Eluna toolkit can move a raid.
+	if o.place {
+		if o.from == "" {
+			fmt.Fprintf(stderr, "raid-walk: --place needs --from (\"leg L\" or \"step N\"): it places the raid at that start\n")
+			return o, exitUsage
+		}
+		if len(o.injects) > 0 {
+			fmt.Fprintf(stderr, "raid-walk: --place and --inject are not combined yet (the injector assumes the commander in another copy)\n")
+			return o, exitUsage
+		}
+		if !placeServers[o.server] {
+			fmt.Fprintf(stderr, "raid-walk: --place uses the Eluna test toolkit: test servers only (%s)\n", strings.Join(placeServerList(), ", "))
+			return o, exitUsage
+		}
+		if o.sql == "" {
+			// Q1 changed by the lead (review round 1, item 9): the placed start and the corridor must be the deployed
+			// rows, or a step-count mismatch fails the walk after a placement has cost a hire.
+			fmt.Fprintf(stderr, "raid-walk: --place needs --sql (the deployed migration): the start step and the corridor are checked against those rows\n")
+			return o, exitUsage
+		}
+	}
 	return o, exitOK
 }
+
+// placeServers are the servers whose Eluna test toolkit can move a raid (spec 3). --place refuses every other one.
+var placeServers = map[string]bool{"m910q": true, "tortoise-test2": true}
+
+// placeServerList is the place servers, sorted, for the refusal.
+func placeServerList() []string {
+	out := make([]string, 0, len(placeServers))
+	for s := range placeServers {
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// onOffFlag is --place: a bare `--place` turns it on, `--place=off` turns it off. The pair form writes the word after
+// a slot prefix (--place 2=on), which the half then receives as --place=on.
+type onOffFlag struct{ v *bool }
+
+func (f onOffFlag) String() string {
+	if f.v != nil && *f.v {
+		return "on"
+	}
+	return "off"
+}
+
+func (f onOffFlag) Set(s string) error {
+	switch strings.ToLower(s) {
+	case "", "on", "true", "1":
+		*f.v = true
+	case "off", "false", "0":
+		*f.v = false
+	default:
+		return fmt.Errorf("--place wants on or off, not %q", s)
+	}
+	return nil
+}
+
+// IsBoolFlag lets a bare `--place` stand without a value.
+func (f onOffFlag) IsBoolFlag() bool { return true }
 
 // ttlMinutes is the lease's length: the run ceiling, the hold and 30 minutes (spec 3.3 phase 2).
 func (o *raidWalkOptions) ttlMinutes() int { return o.maxRunMinutes + o.holdMinutes + 30 }
@@ -585,6 +648,18 @@ type walk struct {
 	quietPatrols []raidwalk.QuietPatrol
 	patrolGUIDS  []map[string]bool
 
+	// The --place start (spec 4/5): the plan from validate, the raid's instance id read at the place, the commander's
+	// last `.go xyz` in the copy (the clear's distance rule), the quiet read's near list, and what the phase reports.
+	place         *raidwalk.PlacePlan
+	placeInst     float64
+	placePos      [3]float32
+	placeHavePos  bool
+	placeStayed   bool
+	placeSum      *raidwalk.PlaceSummary
+	placeRemoved  int
+	placeSkipped  []raidwalk.ClearCircle // the corridor circles placeClear refused (the extra round keeps away from them)
+	placeSummoned []string
+
 	started     time.Time
 	ended       time.Time
 	runStarted  bool
@@ -715,13 +790,7 @@ func (w *walk) validate() error {
 		}
 	}
 
-	if !raidwalk.IsBossDone(w.opts.until) { // boss-done is resolved against the rows, below
-		words, label, err := raidwalk.ParseUntil(w.opts.until)
-		if err != nil {
-			return stopf(exitUsage, "%v", err)
-		}
-		w.untilWords, w.untilLabel = words, label
-	}
+	// The rows come before the until clause: `boss-done` and `--place` are resolved against them (spec 4/5.2).
 	if w.opts.from != "" {
 		fw, err := raidwalk.ParseFrom(w.opts.from)
 		if err != nil {
@@ -767,8 +836,33 @@ func (w *walk) validate() error {
 		w.note("step points from the plan JSON, not the deployed rows")
 	}
 	w.stepFirst = firstStepPoint(w.rows)
+	// The step the run starts at: with --place the staged start (spec 4.2), else the --from step. It is what
+	// `--until boss-done` is resolved from (spec 5.2). A plain --from (no --place, no boss-done) is NOT resolved
+	// against the rows: it goes to the server exactly as before, so a step past the plan's own export is not refused
+	// here (review round 1, item 3).
+	startStep := 1
+	if w.opts.from != "" && (w.opts.place || raidwalk.IsBossDone(w.opts.until)) {
+		n, err := raidwalk.FromStartStep(w.rows, w.fromWords)
+		if err != nil {
+			return stopf(exitUsage, "%v", err)
+		}
+		startStep = n
+	}
+	if w.opts.place {
+		step, leg, err := raidwalk.PlaceStart(w.rows, w.fromWords)
+		if err != nil {
+			return stopf(exitUsage, "%v", err)
+		}
+		p, ok := raidwalk.PlacePoint(w.rows, step)
+		if !ok {
+			return stopf(exitUsage, "--place: step %d of %s has no point", step, w.plan.Name)
+		}
+		w.fromWords = []string{"from", "step", strconv.Itoa(step)}
+		startStep = step
+		w.place = &raidwalk.PlacePlan{Start: step, Leg: leg, Point: p, Skips: raidwalk.PlaceSkips(w.plan)}
+	}
 	if raidwalk.IsBossDone(w.opts.until) {
-		clause, boss, err := raidwalk.BossDoneUntil(w.rows)
+		clause, boss, err := raidwalk.BossDoneUntil(w.rows, startStep)
 		if err != nil {
 			return stopf(exitUsage, "%v", err)
 		}
@@ -778,6 +872,34 @@ func (w *walk) validate() error {
 		}
 		w.untilWords, w.untilLabel, w.bossDoneStep = words, label, boss
 		w.note("--until boss-done: the boss is step %d of %d, the walk goes with %q", boss, len(w.rows.Steps), clause)
+	} else {
+		words, label, err := raidwalk.ParseUntil(w.opts.until)
+		if err != nil {
+			return stopf(exitUsage, "%v", err)
+		}
+		w.untilWords, w.untilLabel = words, label
+	}
+	if w.place != nil {
+		stop, err := raidwalk.PlaceStop(w.rows, w.untilWords, startStep)
+		if err != nil {
+			return stopf(exitUsage, "%v", err)
+		}
+		clear := raidwalk.PlaceClear(w.rows, w.plan, startStep, stop)
+		if clear.Refusal != "" {
+			return stopf(exitUsage, "%v", clear.Refusal)
+		}
+		w.place.Stop, w.place.Circles, w.place.Notes, w.place.Ahead = stop, clear.Circles, clear.Notes, clear.Ahead
+		for _, n := range clear.Notes {
+			w.note("place: %s", n)
+		}
+		// Before any GM command: the toolkit's skip= cap and its 200-char line cap (review round 1, item 11). A plan
+		// that overflows either would be refused by AllowedTT at the first clearto, deep inside the place phase.
+		if len(w.place.Skips) > raidwalk.MaxSkipEntries {
+			return stopf(exitUsage, "--place: the plan's legs' skip lists hold %d entries; the toolkit's skip= takes at most %d", len(w.place.Skips), raidwalk.MaxSkipEntries)
+		}
+		if long, n := placeTTMax(w.place, w.plan.Map); n > raidwalk.AllowedTTMax {
+			return stopf(exitUsage, "--place: the longest toolkit line is %d chars, over the toolkit's %d: %s", n, raidwalk.AllowedTTMax, long)
+		}
 	}
 
 	if len(w.opts.injects) > 0 {
@@ -935,7 +1057,7 @@ func dashboardWarning(err error) string {
 // gm sends one GM line, but only after raidwalk.AllowedLine passes it: a refusal is a programming
 // error that stops the walk and prints the line (spec 3.6).
 func (w *walk) gm(ctx context.Context, line string) error {
-	if !raidwalk.AllowedLine(line, w.hires) {
+	if !raidwalk.AllowedLine(line, w.hires, w.plan.Map) {
 		return stopf(exitRaidWalkFailed, "raid-walk refused to send a GM line outside the allow-list: %s", line)
 	}
 	w.logLine(w.env.now(), "> "+line)
@@ -1118,6 +1240,9 @@ func (w *walk) printPlan(out io.Writer) {
 		w.opts.server, w.opts.holder, outDir, bin, w.opts.dir)
 	fmt.Fprintf(out, "  4 login: %s/slot/turtle-agent login --config %s/slot/settings.json --pid-file %s/slot/agent.pid <commander>\n", outDir, outDir, outDir)
 	fmt.Fprintf(out, "  5 gm: .go xyz %s %s %s %d\n", num32(w.plan.Portal.X), num32(w.plan.Portal.Y), num32(w.plan.Portal.Z), w.plan.Portal.Map)
+	if w.place != nil {
+		fmt.Fprintf(out, "  5b gm: .instance unbind %d\n", w.plan.Map)
+	}
 	for _, line := range w.roster.HireLines() {
 		fmt.Fprintf(out, "  6 gm: %s\n", line)
 	}
@@ -1134,6 +1259,23 @@ func (w *walk) printPlan(out io.Writer) {
 		fmt.Fprintf(out, "  8 gm: .tele name <hire> %s (each hire)\n", w.plan.EntranceTele)
 	default:
 		fmt.Fprintf(out, "  8 commander: cmd enter near\n")
+	}
+	if w.place != nil {
+		p := w.place.Point
+		fmt.Fprintf(out, "  8b place: start step %d%s at %s %s %s; until step %d; %d circles; skip %s\n",
+			w.place.Start, legWords(w.place.Leg), num32(p.X), num32(p.Y), num32(p.Z), w.place.Stop,
+			len(w.place.Circles), raidwalk.SkipWords(w.place.Skips))
+		for _, c := range w.place.Circles {
+			unit := ""
+			if c.PerUnit {
+				unit = fmt.Sprintf(" unit %d", c.Unit)
+			}
+			fmt.Fprintf(out, "  8b clear: row %d at %s %s %s r %s%s\n", c.Step, num32(c.X), num32(c.Y), num32(c.Z), num32(c.Radius), unit)
+		}
+		for _, n := range w.place.Notes {
+			fmt.Fprintf(out, "  8b note: %s\n", n)
+		}
+		fmt.Fprintf(out, "  8b commander: .gm on; .appear <mt>; q inst, q group, q floor, q units, clearto, quiet, place <x> <y> <z> spread=5 of=<mt>; frames; cmd stay; cmd follow\n")
 	}
 	start := []string{w.plan.Name}
 	start = append(start, w.fromWords...)
@@ -1173,6 +1315,16 @@ func firstStepPoint(rows planexport.Rows) *dungeon.Point {
 	return nil
 }
 
+// revivePoint is where a revive puts the raid: the place point with --place (spec 4.4), else the plan's first point.
+// The entrance fallback is dropped with --place: it is behind the legs the placement skipped.
+func (w *walk) revivePoint() *dungeon.Point {
+	if w.place != nil {
+		p := w.place.Point
+		return &p
+	}
+	return w.stepFirst
+}
+
 // num32 prints a plan coordinate the way planexport does.
 func num32(v float32) string { return strconv.FormatFloat(float64(v), 'f', -1, 32) }
 
@@ -1199,6 +1351,7 @@ func (w *walk) finish(code int) {
 		RowsSHA256: rowsSHA256(w.rows), UntilStep: w.untilStep, RunLabel: w.runLabel, SpeedFellBack: w.speedFellBack,
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
+		Place:      w.placeSum,
 		TierSource: w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
 		WipeResumes: w.wipeResumes,
 	}

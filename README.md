@@ -98,7 +98,7 @@ turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loo
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
-turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
+turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
 turtle-agent trash-check [--dir dungeons] [--sql FILE [--plan NAME]] [--spawns DIR] [--patrols FILE]... [--mmaps DIR] [--level N] [--spread YD] [--aggro-rate R] [--assist-yd 10] [--json] [--out DIR] [--dash-out FILE] [--fail-on danger|patrol|any] [<plan>|<path.json>]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent scenario check [--var NAME=VALUE]... <file>
@@ -2151,6 +2151,41 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   server's step count, else the walk stops the run and exits 18), `none` (a full clear), `step N` or `leg L`; the word
   goes to `run start` and the server's status label must show `until <clause> (step N)`. `--from leg L|step N` is only
   for a raid already standing at that point (for example after a hold): raid-walk does not stage.
+- `--place` (needs `--from` and `--sql`, and only on `m910q`/`tortoise-test2`) starts the raid **partway into its
+  instance** instead of at the door: several raids on one server can then each work a different boss leg (`--slot 2,4`
+  with `--from 2="leg L" --place 2=on` in the pair form). It uses the Eluna test toolkit (`.tt`) on the slot agent, so
+  it is refused with `--inject` (the injector assumes the commander in another copy) and on any other server. `--sql` is
+  required: the placed start step and the corridor are checked against the deployed rows, so a plan JSON whose export
+  numbers the steps differently cannot fail the walk after a placement has cost a hire. `--from "leg L"` is staged: the
+  walk starts at the highest move row before the leg's first pull that has no later creature row within 50 yd of it
+  (Zul'Gurub leg 3: step 231 of the deployed rows, not the leg's first row 214, which stands inside Marli's room);
+  `--from "step N"` is taken as given and must be a positioned move row (a plain `--from`, without `--place` or
+  `--until boss-done`, still goes to the server unresolved). `validate` refuses a plan whose legs' skip lists hold more
+  than the toolkit's 16 entries or whose longest toolkit line would overflow the toolkit's 200-char cap, both before any
+  GM command. The walk then clears the corridor of the legs it skips — every pull row before the start whose circle
+  comes within 45 yd of the route to the `until` stop, despawned with `.tt clearto ... all=1` after a pre-read of the
+  units there (never `kill`, never `boss`; a boss or hold row within 30 yd of the route refuses the placement) — quiets
+  the start point — the walk judges the quiet itself, not the toolkit's flag: a unit blocks only when it is not a skip
+  entry, not a rank-0 critter of at most 100 HP and either stands within 25 yd of the point or belongs to a BEHIND row's
+  circle by its **home** (the spawn point the toolkit sends with the unit; without one the unit has no owner), which one
+  takes; the roamers (units that moved between the quiet's two reads, which the toolkit lists without a position) are
+  joined to one `q units` read of 80 yd, and a roamer that read misses blocks — moves the raid onto it
+  (`.tt place ... of=<mt>`), verifies it by the walk's own frames
+  (one `.summon` per hire the frames miss) and only then starts the run, whose status line must show exactly that step
+  and step count. Before the first teleport the commander must be in GM mode: `.gm on` is sent and the walk refuses the
+  placement when its reply is not `GM mode is ON`. The commander stays inside the raid's copy for the whole walk (his own `.instance unbind` before the
+  hire, and again at teardown, drops a stale personal bind), so a wipe revives at the place point, not at the entrance.
+  `--dry-run` prints the staged step, the point and every circle. `summary.json`'s `place` object carries the start step,
+  the instance, the circles with their removed counts, the not-cleared list, the quiet result and the placed count.
+  **Known limit:** the pre-read (`q units`) and the `clearto` are two commands, so a unit that walks into a circle
+  between them can be despawned along with the row's own. Hence test servers only; the quiet check and the placed-start
+  check catch a broken run, and the walk report lists every clear (`place.circles[]`, the `place:` notes). The quiet
+  step's one extra round keeps away from any circle the corridor refused (a unit within that circle's radius + 6 yd is
+  not cleared) and clears only a unit a BEHIND row owns by entry and by its home; a reply without a `home` gives no
+  owner (fail closed): the unit is never cleared, and inside those 25 yd the walk refuses the placement. AHEAD rows of later legs and unowned units beyond those 25 yd never block: a run from the door has
+  them alive at this step too. When the only units left inside the 25 yd are ones the toolkit listed as roamers (patrols
+  walking through), the quiet is read again twice, 20 s apart, and the placement then fails. Every unit the quiet acts
+  on or refuses is noted with its spawn guid (`db`), where it stands and its home.
 - `--speed 1.0` sends nothing; `1.1` to `3.0` sends `speed=X` (a GM test run, marked `test speed` in the summary).
 - The hire gear tier comes from the committed table `raid -> minimum hire tier` in `internal/raidwalk/tiers.go`
   (Sagiroth's rule: hire and refit at the kit a player holds when the raid is next, from the mercenary unlock quests).
@@ -2251,8 +2286,11 @@ once per walk, so a boss engaged after an earlier one reaches the walk only thro
 
 Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
 `.bot gear raid <commander> tier <N>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,
-`.bot run stop[ time limit reached (raid-walk <n>m)]`); everything else goes through the `commander` RPC. Nothing names
-a creature or changes the world for others.
+`.bot run stop[ time limit reached (raid-walk <n>m)]`, and, with `--place`, `.appear <hire>` and
+`.instance unbind <the plan's map>`); everything else goes through the `commander` RPC. With `--place` the Eluna test
+toolkit's `.tt` lines go through a second allow-list of their own (`q inst|floor|group|units`, `quiet`, `place`,
+`clearto`, with the radius, `dz=` and `all=1` bounds; never `kill`, `boss`, `force`, `me`, `reset` or another map).
+Nothing names a creature or changes the world for others.
 
 The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused if it exists; 0700, files 0600):
 
@@ -2263,7 +2301,7 @@ The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused
 | `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key (a `live` row, a fight still running, is left for the next read: its finished fight comes back under the same id) |
 | `frames.jsonl` | one `bot_view` frame every 10 s, and every 2 s while a party member is in combat (positions, hp, dead, state, and each bot's `target`, `spell`, `action` and `result`; hostiles; every line carries the walk's `tier`) |
 | `slot-setup.txt`, `teardown.json` | what slot setup printed, and teardown's report |
-| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, `wipe_resumes`, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison` |
+| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, `wipe_resumes`, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison`; `place` (a `--place` walk only: `start_step`, `leg`, `point`, `until_step`, `instance`, `circles[]` with their removed counts, `not_cleared[]`, `quiet`, `placed`, `hires`, `summoned[]`) |
 
 Exit codes: 0 the run ended by its `until` (or the hold); 18 a phase failed or was refused (setup, login, hire, bind,
 enter, start, the server has no `until`, a stall, the ceiling, an interrupt, `lease lost`); 19 the walk ran and was
@@ -2436,8 +2474,10 @@ A cleanup step counts as done only when it succeeded (release returned no error;
 back is named in the pair's notes.
 
 Per-walk flags may carry the slot id as a prefix: `--sql 1=a.sql --sql 2=b.sql`, `--inject 2=lag`. An unprefixed
-`--sql --hires --dir --patrols --until --from --tier --tier-override --holder --inject` applies to both walks (a
-repeated `--inject` stays per walk). Every other flag is global and refuses a slot prefix (exit 2).
+`--sql --hires --dir --patrols --until --from --place --tier --tier-override --holder --inject` applies to both walks (a
+repeated `--inject` stays per walk). `--place` is a switch: a bare `--place` turns it on for every walk, `--place 2=on`
+(or `2=off`) for one of them, and each placed walk needs its own `--from` (`--from 2="leg L"`). Every other flag is
+global and refuses a slot prefix (exit 2).
 
 `pair.json` (format `tb-raid-walk-pair` v1) has one entry per walk (slot, the id as given, e.g. `"1"` or `"A"`;
 plan, character, out, exit code, end reason, steps, deaths, fights, pauses, tier, and the dashboard tab
