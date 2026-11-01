@@ -160,6 +160,12 @@ type walkFakeAgent struct {
 	commanderInst string
 	instAtRevive  string
 	appearRefused bool
+	// appearLag serves that many status reads with the pre-appear state before an accepted `.appear` lands (the live
+	// teleport lands a moment after the chat line); goBeforeAppear counts recovery gos sent while it had not landed.
+	appearLag      int
+	appearPend     func()
+	appearPendLeft int
+	goBeforeAppear int
 	// enterMap puts the commander on this map once `cmd enter` is acked (0: it stays where its last go put it):
 	// the live walk-22 agent stood inside the instance, so its recovery go was a near one.
 	enterMap   uint32
@@ -230,6 +236,14 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 				f.x, f.y, f.z = f.goPend[0], f.goPend[1], f.goPend[2]
 				f.ownPos = [3]float32{f.x, f.y, f.z}
 				f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
+			}
+		}
+		if f.appearPend != nil {
+			if f.appearPendLeft > 0 {
+				f.appearPendLeft--
+			} else {
+				f.appearPend()
+				f.appearPend = nil
 			}
 		}
 		st := f.status
@@ -380,6 +394,9 @@ func (f *walkFakeAgent) gmSide(line string) {
 		started := f.runStarted
 		if started {
 			f.recoveryGo = true
+			if f.appearPend != nil {
+				f.goBeforeAppear++
+			}
 		}
 		f.mu.Unlock()
 		fields := strings.Fields(line)
@@ -427,14 +444,21 @@ func (f *walkFakeAgent) gmSide(line string) {
 			if f.instMap != 0 {
 				hm = f.instMap
 			}
-			if f.farZUnknown {
-				f.zStuck = hm != f.status.Map // the appear itself is a far teleport from the portal
-			}
 			p := f.pos[name]
-			f.status.Map, f.commanderInst = hm, "hires"
-			f.x, f.y, f.z = p[0], p[1], p[2]+2
-			f.ownPos = [3]float32{f.x, f.y, f.z}
-			f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
+			land := func() { // f.mu held
+				if f.farZUnknown {
+					f.zStuck = hm != f.status.Map // the appear itself is a far teleport from the portal
+				}
+				f.status.Map, f.commanderInst = hm, "hires"
+				f.x, f.y, f.z = p[0], p[1], p[2]+2
+				f.ownPos = [3]float32{f.x, f.y, f.z}
+				f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
+			}
+			if f.appearLag > 0 {
+				f.appearPend, f.appearPendLeft = land, f.appearLag
+			} else {
+				land()
+			}
 		}
 		f.mu.Unlock()
 	case line == ".gps":

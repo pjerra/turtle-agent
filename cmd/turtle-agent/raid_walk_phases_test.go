@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -310,6 +311,12 @@ func TestRaidWalkFramesEveryTwoSecondsInCombat(t *testing.T) {
 // done line lands 15 min after the revives so the walk ends at its until.
 func selfRegroupWipe(t *testing.T, live func(party []string) []string) (*fixture, []string) {
 	t.Helper()
+	return selfRegroupWipeWith(t, live, nil)
+}
+
+// selfRegroupWipeWith is selfRegroupWipe with setup run on the fixture just before the walk starts.
+func selfRegroupWipeWith(t *testing.T, live func(party []string) []string, setup func(f *fixture)) (*fixture, []string) {
+	t.Helper()
 	f, next, total := bossDoneFixture(t)
 	f.opts.wipeResume = 2
 	f.agent.startReply = zgStart(total, next)
@@ -373,6 +380,9 @@ func selfRegroupWipe(t *testing.T, live func(party []string) []string) (*fixture
 		f.agent.mu.Unlock()
 	}
 	f.agent.combatAllFn = func(n int) bool { return !reviveAt.IsZero() && n%2 == 0 }
+	if setup != nil {
+		setup(f)
+	}
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
 	}
@@ -559,37 +569,6 @@ func TestRaidWalkEntranceFallbackWaitsForTheLanding(t *testing.T) {
 	}
 }
 
-// TestRaidWalkReviveLandsAfterAFarTeleport (walk 23, 6 runs exit 19): the commander waits at the portal on the
-// continent for the whole walk, so the revive's `.go xyz <point> 309` is a FAR teleport. The session lands it through
-// SMSG_NEW_WORLD, sends MSG_MOVE_WORLDPORT_ACK at once and reports the point on the plan's map, but leaves ZUnknown
-// set for good (only a near teleport drops to the navmesh floor). The map change itself is the landing (the server
-// places the player when it reads that ack, before any later chat line), so the revive must go on and summon.
-func TestRaidWalkReviveLandsAfterAFarTeleport(t *testing.T) {
-	f := newFixture(t)
-	f.agent.startReply = startAt("onyxias_lair", 23)
-	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
-	f.allDeadFromHires()
-	var resumeAt time.Time
-	resumeHook(f, 24, 28, &resumeAt)
-	f.agent.mu.Lock()
-	f.agent.farZUnknown = true // the commander stays on the portal's map 1; the plan's map is 249
-	f.agent.mu.Unlock()
-	if code := f.run(context.Background()); code != exitOK {
-		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
-	}
-	f.agent.mu.Lock()
-	dists := append([]float64{}, f.agent.summonDist...)
-	f.agent.mu.Unlock()
-	if len(dists) == 0 {
-		t.Fatal("no summons went out: the far teleport never counted as landed")
-	}
-	for i, d := range dists {
-		if d > reviveLandingYd {
-			t.Fatalf("summon %d left %.1f yd from the revive point (want <= %d)", i, d, reviveLandingYd)
-		}
-	}
-}
-
 // TestRaidWalkReviveAppearsAtAHireFirst (walk 23, second finding): the revive's `.go xyz` from the portal put the
 // commander into a NEW instance copy (m910q: hires in 101, commander in 104; test2: 106 vs 107), so the quiet check
 // looked at an empty copy and a summon would drag the hires into a fresh, respawned one. The revive must first
@@ -642,9 +621,33 @@ func TestRaidWalkReviveAppearsAtAHireFirst(t *testing.T) {
 	}
 }
 
-// TestRaidWalkReviveAppearRefusedKeepsTheFarGo: a `.appear` the server refuses (the commander in another group, say)
-// moves nobody; the revive keeps today's far `.go xyz` and its map-change landing, and notes the miss.
-func TestRaidWalkReviveAppearRefusedKeepsTheFarGo(t *testing.T) {
+// TestRaidWalkReviveLandsAfterAFarTeleport (walk 23, 6 runs exit 19): the commander waits at the portal on the
+// continent, so a revive `.go xyz <point> 309` it sends without having joined the hires is a FAR teleport. The session
+// lands it through SMSG_NEW_WORLD and reports the point on the plan's map, but leaves ZUnknown set for good (only a near
+// teleport drops to the navmesh floor). The map change itself is the landing. Pinned in a self-regroup whose `.appear`
+// is refused: the one path that still sends the far go.
+func TestRaidWalkReviveLandsAfterAFarTeleport(t *testing.T) {
+	f, party := selfRegroupWipeWith(t, nil, func(f *fixture) {
+		f.agent.mu.Lock()
+		f.agent.farZUnknown, f.agent.appearRefused = true, true
+		f.agent.mu.Unlock()
+	})
+	gm := f.agent.gmLines()
+	f.agent.mu.Lock()
+	far := f.agent.recoveryGo && f.agent.commanderInst == "fresh"
+	f.agent.mu.Unlock()
+	if !far {
+		t.Fatalf("no far recovery go into a fresh copy: %q", gm)
+	}
+	if got := countPrefix(gm, ".revive "); got != len(party) {
+		t.Fatalf("%d revives, want %d: the far go never counted as landed", got, len(party))
+	}
+}
+
+// TestRaidWalkReviveWaitsForTheFreshAppearLanding (review round 1, Codex HIGH): the commander may already stand on the
+// plan's map (in a copy of its own), so the map id proves nothing about an `.appear`. The `.go xyz` may leave only
+// after a FRESH landing next to the hire; here the appear lands 3 status reads late.
+func TestRaidWalkReviveWaitsForTheFreshAppearLanding(t *testing.T) {
 	f := newFixture(t)
 	f.agent.startReply = startAt("onyxias_lair", 23)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
@@ -652,42 +655,120 @@ func TestRaidWalkReviveAppearRefusedKeepsTheFarGo(t *testing.T) {
 	var resumeAt time.Time
 	resumeHook(f, 24, 28, &resumeAt)
 	f.agent.mu.Lock()
-	f.agent.farZUnknown, f.agent.appearRefused = true, true
+	f.agent.enterMap, f.agent.appearLag = 249, 3
 	f.agent.mu.Unlock()
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
 	}
-	if !strings.Contains(f.summaryText(), "appear") {
-		t.Fatalf("no note about the refused appear: %q", f.summaryText())
-	}
 	f.agent.mu.Lock()
-	n := len(f.agent.summonDist)
+	early, inst, summons := f.agent.goBeforeAppear, f.agent.instAtRevive, len(f.agent.summonDist)
 	f.agent.mu.Unlock()
-	if n == 0 {
-		t.Fatal("no summons went out: the far go after a refused appear never landed")
+	if early != 0 {
+		t.Fatalf("%d recovery gos left before the appear landed: the map id alone is no proof", early)
+	}
+	if inst != "hires" || summons == 0 {
+		t.Fatalf("copy at the revive %q, %d summons; want the hires' copy and summons", inst, summons)
 	}
 }
 
-// TestRaidWalkAppearHire pins the hire the revive appears at: the lead (MT) when it is known on the plan's map,
-// else the first hire in roster order known there, else none.
+// TestRaidWalkReviveUnverifiedAppearStops (review round 1): a normal revive (summons follow) whose `.appear` never
+// lands would quiet-check an empty copy, so it stops with exit 19 and sends no go, summon or revive.
+func TestRaidWalkReviveUnverifiedAppearStops(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.allDeadFromHires()
+	f.agent.mu.Lock()
+	f.agent.appearRefused = true
+	f.agent.mu.Unlock()
+	if code := f.run(context.Background()); code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if end := f.summary().EndReason; !strings.Contains(end, "not revived: could not join the hires' instance (") {
+		t.Fatalf("end %q, want the could-not-join reason", end)
+	}
+	gm := f.agent.gmLines()
+	f.agent.mu.Lock()
+	recGo := f.agent.recoveryGo
+	f.agent.mu.Unlock()
+	if recGo || countPrefix(gm, ".summon ") != 0 || countPrefix(gm, ".revive ") != 0 {
+		t.Fatalf("recovery go %v, %d summons, %d revives; want none: %q", recGo, countPrefix(gm, ".summon "), countPrefix(gm, ".revive "), gm)
+	}
+}
+
+// TestRaidWalkSelfRegroupUnverifiedAppearCarriesOn (review round 1): in a self-regroup nobody is summoned and `.revive`
+// works by name, so a failed `.appear` (here the gm line itself fails) keeps today's far go and notes it.
+func TestRaidWalkSelfRegroupUnverifiedAppearCarriesOn(t *testing.T) {
+	f, party := selfRegroupWipeWith(t, nil, func(f *fixture) {
+		f.agent.mu.Lock()
+		f.agent.gmFail = func(line string) error {
+			if strings.HasPrefix(line, ".appear ") {
+				return errors.New("no such player")
+			}
+			return nil
+		}
+		f.agent.mu.Unlock()
+	})
+	gm := f.agent.gmLines()
+	if got := countPrefix(gm, ".revive "); got != len(party) {
+		t.Fatalf("%d revives, want %d", got, len(party))
+	}
+	if !hasNote(f.summary(), "could not join the hires' instance") {
+		t.Fatalf("notes %q, want the could-not-join note", f.summary().Notes)
+	}
+}
+
+// TestRaidWalkAppearLandedCheck pins the fresh-landing predicate of a revive `.appear` (review round 1, Codex HIGH):
+// on the plan's map, within 15 yd (x/y) of the hire's last frame position, and moved since the read before the appear.
+func TestRaidWalkAppearLandedCheck(t *testing.T) {
+	hire := botPos{mapID: 309, x: 100, y: 100, z: 10}
+	at := func(m uint32, x, y, z float32) session.StatusInfo {
+		return session.StatusInfo{State: session.StatusInWorld, Map: m, X: x, Y: y, Z: z}
+	}
+	portal := at(0, -11915.8, -1236.43, 96.15)
+	for _, c := range []struct {
+		name   string
+		st     session.StatusInfo
+		before session.StatusInfo
+		want   bool
+	}{
+		{"landed next to the hire", at(309, 101, 100, 12), portal, true},
+		{"14 yd off", at(309, 114, 100, 12), portal, true},
+		{"16 yd off", at(309, 116, 100, 12), portal, false},
+		{"on the map but far from the hire (an own copy)", at(309, -11926, -1283, 85), at(309, -11926, -1283, 85), false},
+		{"moved on the map, far from the hire", at(309, 300, 300, 10), at(309, 0, 0, 0), false},
+		{"wrong map", at(0, 101, 100, 12), portal, false},
+		{"already next to the hire, not moved (stale)", at(309, 101, 100, 12), at(309, 101, 100, 12), false},
+		{"near go on the map next to the hire", at(309, 101, 100, 12), at(309, 105, 100, 12), true},
+	} {
+		if got := appearLanded(c.st, 309, hire, c.before); got != c.want {
+			t.Fatalf("%s: appearLanded = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestRaidWalkAppearHire pins the hire the revive appears at (review round 1, M2): among the hires last seen on the
+// plan's map, the living one nearest the revive point; a dead one only when none lives there; none otherwise.
 func TestRaidWalkAppearHire(t *testing.T) {
+	p := dungeon.Point{X: 100, Y: 100, Z: 0}
 	w := &walk{plan: &dungeon.Plan{Map: 309}, mt: "Nack", ots: []string{"Lius"}, rest: []string{"Faellara", "Melis"},
 		botAt: map[string]botPos{}}
-	if got := w.appearHire(); got != "" {
+	if got := w.appearHire(p); got != "" {
 		t.Fatalf("no hire known: got %q, want none", got)
 	}
-	w.botAt["Melis"] = botPos{mapID: 309, dead: true}
-	w.botAt["Lius"] = botPos{mapID: 0}
-	if got := w.appearHire(); got != "Melis" {
-		t.Fatalf("got %q, want Melis (the only hire known on map 309, dead or not)", got)
+	w.botAt["Lius"] = botPos{mapID: 0, x: 100, y: 100}
+	w.botAt["Melis"] = botPos{mapID: 309, x: 900, y: 900, dead: true}
+	w.botAt["Faellara"] = botPos{mapID: 309, x: 101, y: 100, dead: true}
+	if got := w.appearHire(p); got != "Faellara" {
+		t.Fatalf("got %q, want Faellara (only dead hires on 309: the nearest)", got)
 	}
-	w.botAt["Faellara"] = botPos{mapID: 309}
-	if got := w.appearHire(); got != "Faellara" {
-		t.Fatalf("got %q, want Faellara (roster order)", got)
+	w.botAt["Nack"] = botPos{mapID: 309, x: 400, y: 100}
+	if got := w.appearHire(p); got != "Nack" {
+		t.Fatalf("got %q, want Nack (a living hire before a nearer dead one)", got)
 	}
-	w.botAt["Nack"] = botPos{mapID: 309}
-	if got := w.appearHire(); got != "Nack" {
-		t.Fatalf("got %q, want the lead Nack", got)
+	w.botAt["Melis"] = botPos{mapID: 309, x: 150, y: 100}
+	if got := w.appearHire(p); got != "Melis" {
+		t.Fatalf("got %q, want Melis (the nearest living hire, not the lead)", got)
 	}
 }
 
