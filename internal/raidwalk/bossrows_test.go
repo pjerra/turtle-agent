@@ -69,13 +69,18 @@ func TestBossRowsCounts(t *testing.T) {
 
 // TestBossRowsAmbiguousRealPlans pins the ambiguous first entries of the real plans: Zul'Gurub's is exactly the
 // Zulian Tiger 11361 (Thekal's add, also ZG trash), and Naxxramas has none (the Horsemen, Stalagg/Feugen and the
-// crypt guards count wherever they stand). Thekal's phase entries are core boss rows.
+// crypt guards count wherever they stand). Thekal's phase entries are core boss rows. A new ambiguous entry must be
+// a deliberate change: a summoned encounter add listed in a pull group gets the 40 yd radius and could fail open
+// (the walk would revive into its fight), so update this list only after checking the add really is also trash.
 func TestBossRowsAmbiguousRealPlans(t *testing.T) {
 	for _, tc := range []struct {
 		plan string
 		want []uint32
 	}{
 		{"zul_gurub", []uint32{11361}},
+		{"deadmines", []uint32{657, 1731, 3450}},
+		{"uldaman", []uint32{4847, 4853, 4855, 4863, 7030}},
+		{"wailing_caverns", []uint32{3840, 5053, 5056, 5756, 5761, 8886, 61966, 61967}},
 		{"naxxramas", nil},
 		{"temple_of_ahnqiraj", nil},
 		{"zulfarrak", nil},

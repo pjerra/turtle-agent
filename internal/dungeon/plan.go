@@ -1166,12 +1166,69 @@ func Parse(name string, data []byte) (*Plan, error) {
 		}
 		p.Legs = append(p.Legs, c.leg(path, &l))
 	}
+	c.phaseEntries(p)
 	p.Avoid = c.avoid(rp.Avoid)
 	c.offAvoid(p)
 	if len(c.errs) > 0 {
 		return nil, errors.Join(c.errs...)
 	}
 	return p, nil
+}
+
+// phaseEntries refuses a boss.phase_entries entry that clashes with another field of the plan: a phase entry is an
+// always-on boss row for raid-walk's gates, so one that repeats, is pulled or skipped as trash, or is already some
+// boss's entry, first, hold or phase entry would make a gate read the plan two ways.
+func (c *checker) phaseEntries(p *Plan) {
+	legName := func(i int) string {
+		if n := p.Legs[i].Name; n != "" {
+			return fmt.Sprintf("legs[%d] (%s)", i, n)
+		}
+		return fmt.Sprintf("legs[%d]", i)
+	}
+	for li, l := range p.Legs {
+		if l.Boss == nil {
+			continue
+		}
+		bp := fmt.Sprintf("legs[%d].boss", li)
+		for i, e := range l.Boss.PhaseEntries {
+			if e == 0 || e == l.Boss.Entry {
+				continue // reported by the leg's own check
+			}
+			at := fmt.Sprintf("%s.phase_entries[%d]", bp, i)
+			clash := func(where string) {
+				c.fail(at, "phase entry %d of the boss of %s is also %s", e, legName(li), where)
+			}
+			if j := slices.Index(l.Boss.PhaseEntries, e); j < i {
+				clash(fmt.Sprintf("its phase_entries[%d]", j))
+			}
+			for lj, o := range p.Legs {
+				for gi, g := range o.PullGroups {
+					if slices.Contains(g.Entries, e) {
+						clash(fmt.Sprintf("in %s.pull_groups[%d].entries", legName(lj), gi))
+					}
+				}
+				if slices.Contains(o.Skip, e) {
+					clash(fmt.Sprintf("in %s.skip", legName(lj)))
+				}
+				ob := o.Boss
+				if ob == nil {
+					continue
+				}
+				if lj != li && ob.Entry == e {
+					clash(fmt.Sprintf("the boss entry of %s", legName(lj)))
+				}
+				if slices.Contains(ob.First, e) {
+					clash(fmt.Sprintf("in %s.boss.first", legName(lj)))
+				}
+				if ob.Hold != nil && slices.Contains(ob.Hold.Entries, e) {
+					clash(fmt.Sprintf("in %s.boss.hold.entries", legName(lj)))
+				}
+				if lj != li && slices.Contains(ob.PhaseEntries, e) {
+					clash(fmt.Sprintf("in %s.boss.phase_entries", legName(lj)))
+				}
+			}
+		}
+	}
 }
 
 // kindStatus checks and copies the kind, status, hire_composition and raid fields.
