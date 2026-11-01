@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -294,19 +295,38 @@ func TestClosestInPoly(t *testing.T) {
 	}
 }
 
+// marliStandYd is how far the Mar'li leg's `to` and its stands stay from the two spider packs: twice the 20 yd
+// detection range (a bot at ~20 yd wakes the pack, and the party spreads round the stand), the bound of SPEC 1.
+const marliStandYd = 40
+
+// marliPatrolReachYd is the farthest a stand-pull pack's patroller may be from its stand at the closest point of its
+// loop: the stand-pull gate holds the party at the stand until the patroller is in the tank's shot (leadShotYd 28.5
+// minus kStandPullMarginYd 1 -> 27.5 yd) and in sight, and after kStandPullWaitMs (600 s) a patroller that never
+// comes is a pause (SPEC-1-AMEND, DungeonRunPolicy.h PatrolStandPullGate). The extra yard keeps the check off the
+// gate's own edge.
+const marliPatrolReachYd = 26.5
+
 // TestZulGurubMarliStandsOutOfSpiderAggro: walk 25's Mar'li leg walked the raid onto the spawn of the patrolling
 // Skitterer 49202 (pack 0's leader) and, with the fight drifting west, onto pack 1 (leader 49201) as well: 20-21
-// elites at once, 6 of 7 wipes (TortoiseBots-audit research/zg-w25/MARLI-PULL.md sections 0-2). The fix pulls both
-// spider packs as stand pulls from the east, so the leg's `to` and the two stands must be out of both packs' aggro:
-// every creature of pack 0 (group_leader 49202) and pack 1 (group_leader 49201 plus the loose Venombrood 49246)
-// stays at least marliStandYd away. 40 is twice the 20 yd detection range (a bot at ~20 yd wakes the pack); the
-// leg 2 packs' members are the only ones listed, and a pack is aggro-together (creature_groups flags 14).
+// elites at once, 6 of 7 wipes (TortoiseBots-audit research/zg-w25/MARLI-PULL.md sections 0-2). The leg's `to` and
+// the stands must be out of both packs' aggro: every creature of pack 0 (group_leader 49202) and pack 1
+// (group_leader 49201 plus the loose Venombrood 49246) stays at least marliStandYd away; the leg 2 packs' members
+// are the only ones listed, and a pack is aggro-together (creature_groups flags 14). Walk 25's other half
+// (SPEC-1-AMEND, Codex's HIGH): pack 0's row must NOT be a stand pull. Its leader 49202 walks a 13-point loop that
+// never comes within 43.8 yd of S0, so the gate would wait 600 s for it and pause the run; the plain pull instead
+// walks the gathered party to a firing stand in the pack's own shot. Pack 1's row stays a stand pull (it is for the
+// patrol clearance; its 12 units are all static and take the plain pull's firing-stand walk either way), so every
+// stand-pull row of the leg has to reach its patrollers.
 func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
 	p, err := dungeon.Load(filepath.Join(plansDirT, "zul_gurub.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	cs, err := readCreatures(filepath.Join("testdata", "map309", "creatures.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	movement, err := readMovementPaths(filepath.Join("testdata", "map309", "movement.tsv"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,8 +352,7 @@ func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
 	if leg == nil {
 		t.Fatal("no high_priestess_marli leg")
 	}
-	// (a) the leg's `to` stands clear of both packs (today it is 0.1 yd from 49202's spawn).
-	const marliStandYd = 40
+	// (a) the leg's `to` stands clear of both packs.
 	for _, c := range append(append([]creature{}, pack0...), pack1...) {
 		if d := dist(leg.To, c.Pos); d < marliStandYd {
 			t.Errorf("to %.1f %.1f %.1f is %.1f yd from %s %d, want >= %d", leg.To.X, leg.To.Y, leg.To.Z, d, c.Name, c.GUID, marliStandYd)
@@ -342,29 +361,180 @@ func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
 	if len(leg.PullGroups) < 2 {
 		t.Fatalf("%d pull groups", len(leg.PullGroups))
 	}
-	// (b) both spider rows are stand pulls with a stand (their last approach point).
+	// (b) raid clearance: S0 (pack 0's stand, its last approach point) clears every unit of both packs, S1 (pack 1's)
+	// clears pack 1. Both rows have an approach.
 	stands := make([]dungeon.Point, 2)
 	for i, g := range leg.PullGroups[:2] {
-		if !g.StandPull {
-			t.Errorf("pull_groups[%d] is not a stand pull", i)
-		}
 		if len(g.Approach) == 0 {
 			t.Errorf("pull_groups[%d] has no stand (approach point)", i)
 			continue
 		}
 		stands[i] = g.Approach[len(g.Approach)-1]
 	}
-	// (c) pack 0's stand clears every unit of both packs; (d) pack 1's stand clears pack 1.
-	// If plan-check refuses S1 (-12250 -1683) for sight or range, the fallback -12256 -1680 is 35.5 yd from
-	// pack 1, so (d)'s bound is 35 then (the brief's fallback); 40 is the bound with the S1 stand.
-	check := func(i int, targets []creature, want float64) {
+	check := func(i int, targets []creature) {
 		for _, c := range targets {
-			if d := dist(stands[i], c.Pos); d < want {
-				t.Errorf("pull_groups[%d] stand %.1f %.1f %.1f is %.1f yd from %s %d, want >= %g", i, stands[i].X, stands[i].Y, stands[i].Z, d, c.Name, c.GUID, want)
+			if d := dist(stands[i], c.Pos); d < marliStandYd {
+				t.Errorf("pull_groups[%d] stand %.1f %.1f %.1f is %.1f yd from %s %d, want >= %d", i, stands[i].X, stands[i].Y, stands[i].Z, d, c.Name, c.GUID, marliStandYd)
 			}
 		}
 	}
 	both := append(append([]creature{}, pack0...), pack1...)
-	check(0, both, marliStandYd)
-	check(1, pack1, marliStandYd)
+	check(0, both)
+	check(1, pack1)
+	// (c) pull reachability: every stand-pull row of the leg reaches its pack's patrollers from the stand.
+	for i, g := range leg.PullGroups {
+		if !g.StandPull {
+			continue
+		}
+		if len(g.Approach) == 0 {
+			t.Errorf("pull_groups[%d]: a stand pull with no stand (approach point)", i)
+			continue
+		}
+		stand := g.Approach[len(g.Approach)-1]
+		if worst, ok := standPullPatrolReach(stand, standPullPack(g, cs), movement); !ok {
+			t.Errorf("pull_groups[%d] stand %.1f %.1f %.1f: the worst patroller's loop comes within %.1f yd of it, want <= %g (the stand-pull gate would wait 600 s for it and pause)",
+				i, stand.X, stand.Y, stand.Z, worst, marliPatrolReachYd)
+		}
+	}
+	// (d) the kinds of the two rows (SPEC-1-AMEND): pack 0 is a plain pull from S0, pack 1 keeps the stand pull.
+	if leg.PullGroups[0].StandPull {
+		t.Errorf("pull_groups[0] is a stand pull: its leader 49202 walks a loop that never comes within the gate's 27.5 yd of S0, so the gate would wait 600 s and pause the run; the pack is a plain pull from the stand")
+	}
+	if !leg.PullGroups[1].StandPull {
+		t.Errorf("pull_groups[1] is not a stand pull: it keeps one for its patrol clearance (keep_yd)")
+	}
+}
+
+// TestStandPullPatrolReach is the reach check on a synthetic square loop (20 yd sides at x,y 0..20): a stand 20 yd
+// from the loop is reached, one 30 yd away is not, and a pack without a patroller is always fine (its static units
+// go to the plain pull's firing-stand walk).
+func TestStandPullPatrolReach(t *testing.T) {
+	const guid = 500
+	square := []dungeon.Point{{X: 0, Y: 0}, {X: 0, Y: 20}, {X: 20, Y: 20}, {X: 20, Y: 0}}
+	movement := map[uint64][]dungeon.Point{guid: square}
+	patroller := []creature{{GUID: guid, Patrol: true}}
+	static := []creature{{GUID: guid, Patrol: false}}
+	for _, c := range []struct {
+		name  string
+		stand dungeon.Point
+		pack  []creature
+		worst float64
+		ok    bool
+	}{
+		{"20 yd from the loop", dungeon.Point{X: 10, Y: -20}, patroller, 20, true},
+		{"30 yd from the loop", dungeon.Point{X: 10, Y: -30}, patroller, 30, false},
+		{"no patroller", dungeon.Point{X: 10, Y: -30}, static, 0, true},
+	} {
+		worst, ok := standPullPatrolReach(c.stand, c.pack, movement)
+		if ok != c.ok || math.Abs(worst-c.worst) > 0.01 {
+			t.Errorf("%s: standPullPatrolReach = %g, %v; want %g, %v", c.name, worst, ok, c.worst, c.ok)
+		}
+	}
+}
+
+// standPullPatrolReach is what the stand-pull gate needs of a stand (see marliPatrolReachYd): the worst of the pack's
+// patrolling members' closest approaches to the stand, 2-D with the loop closed, and whether that is within
+// marliPatrolReachYd. A pack with no patroller is 0, true. A patroller named in the pack but absent from movement.tsv
+// counts as unreachable (no loop to wait for).
+func standPullPatrolReach(stand dungeon.Point, pack []creature, movement map[uint64][]dungeon.Point) (worstYd float64, ok bool) {
+	ok = true
+	for _, c := range pack {
+		if !c.Patrol {
+			continue
+		}
+		loop, have := movement[c.GUID]
+		var d float64
+		if !have || len(loop) == 0 {
+			d = math.Inf(1)
+		} else {
+			d = closestOnLoop(stand, loop)
+		}
+		if d > worstYd {
+			worstYd = d
+		}
+		if d > marliPatrolReachYd {
+			ok = false
+		}
+	}
+	return worstYd, ok
+}
+
+// standPullPack is the pack a stand-pull row pulls (DungeonRunPolicy.h ScopeStandPullFacts): every formation with a
+// spawn within the row's radius of the row's centre (the mean of the plan's own positions), plus, since a linked pack
+// is aggro-together (creature_groups flags 14), every creature of a member's group_leader.
+func standPullPack(g dungeon.PullGroup, cs []creature) []creature {
+	var c dungeon.Point
+	for _, p := range g.Positions {
+		c.X += p.X
+		c.Y += p.Y
+		c.Z += p.Z
+	}
+	n := float32(len(g.Positions))
+	if n == 0 {
+		return nil
+	}
+	c = dungeon.Point{X: c.X / n, Y: c.Y / n, Z: c.Z / n}
+	in := map[uint64]bool{}
+	var leaders []uint64
+	for _, x := range cs {
+		if math.Hypot(float64(x.Pos.X-c.X), float64(x.Pos.Y-c.Y)) <= float64(g.Radius) {
+			in[x.GUID] = true
+			if x.GroupLeader != 0 && !slices.Contains(leaders, x.GroupLeader) {
+				leaders = append(leaders, x.GroupLeader)
+			}
+		}
+	}
+	for _, x := range cs {
+		if !in[x.GUID] && slices.Contains(leaders, x.GroupLeader) {
+			in[x.GUID] = true
+		}
+	}
+	var out []creature
+	for _, x := range cs {
+		if in[x.GUID] {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+// closestOnLoop is the smallest 2-D distance from p to a patrol's waypoints taken as a closed loop (the last point
+// back to the first), movement.tsv's point order.
+func closestOnLoop(p dungeon.Point, loop []dungeon.Point) float64 {
+	if len(loop) == 1 {
+		return math.Hypot(float64(p.X-loop[0].X), float64(p.Y-loop[0].Y))
+	}
+	best := math.Inf(1)
+	for i := range loop {
+		if d := pointSeg2D(p, loop[i], loop[(i+1)%len(loop)]); d < best {
+			best = d
+		}
+	}
+	return best
+}
+
+// pointSeg2D is the 2-D distance from p to the segment a-b.
+func pointSeg2D(p, a, b dungeon.Point) float64 {
+	dx, dy := float64(b.X-a.X), float64(b.Y-a.Y)
+	l := dx*dx + dy*dy
+	t := 0.0
+	if l != 0 {
+		t = ((float64(p.X-a.X))*dx + (float64(p.Y-a.Y))*dy) / l
+		t = math.Max(0, math.Min(1, t))
+	}
+	return math.Hypot(float64(p.X)-(float64(a.X)+t*dx), float64(p.Y)-(float64(a.Y)+t*dy))
+}
+
+// readMovementPaths reads movement.tsv (export.sh): the waypoints of each patrolling spawn by guid, in point order.
+func readMovementPaths(path string) (map[uint64][]dungeon.Point, error) {
+	rs, err := rows(path, "guid", "point", "x", "y", "z")
+	if err != nil {
+		return nil, err
+	}
+	r := &reader{path: path}
+	out := map[uint64][]dungeon.Point{}
+	for _, m := range rs {
+		out[uint64(r.num(m, "guid"))] = append(out[uint64(r.num(m, "guid"))], r.pos(m))
+	}
+	return out, r.err
 }
