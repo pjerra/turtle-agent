@@ -4583,40 +4583,106 @@ func TestRaidWalkUntilPastBossLetsTheRunFightIt(t *testing.T) {
 	}
 }
 
-// Walk 24 (Thekal's shape, Molten Core): the run is on the step BEFORE its boss step, in the same
-// leg, its until goes past that boss step, and the engaged entry belongs to the plan boss (its entry,
-// phase entries, first adds or hold entries). The run leader fights it: no run stop.
-func TestRaidWalkBossDoneEarlyEngageLetsTheRunFightIt(t *testing.T) {
+// earlyEngageFixture is a Molten Core boss-done walk whose run stands on step with the boss engaged in the frames
+// (a target), and whose main tank stands mtYd 2D from the boss row (east of it). The engaged row is 12118, the boss
+// of the fixture's boss step; step must be in that boss's leg.
+func earlyEngageFixture(t *testing.T, step int, mtYd float32) (*fixture, int, int) {
+	t.Helper()
 	f, next, total := bossDoneFixture(t)
 	rows := mcRows(t)
 	boss := next - 1
-	if boss < 2 || rows.Steps[boss-2].Leg != rows.Steps[boss-1].Leg {
-		t.Fatalf("fixture rows: step %d and the boss step %d are not in the same leg", boss-1, boss)
+	if step < 1 || step > boss || rows.Steps[step-1].Leg != rows.Steps[boss-1].Leg {
+		t.Fatalf("fixture rows: step %d is not before the boss step %d in the same leg", step, boss)
 	}
 	f.agent.startReply = zgStart(total, next)
 	f.agent.mu.Lock()
 	f.agent.startQueue = []queuedEvent{
-		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|fighting", boss-1, total)},
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|fighting", step, total)},
 		{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)},
 	}
 	f.agent.mu.Unlock()
+	f.agent.pos = map[string][3]float32{"Bot01": {rows.Steps[boss-1].X + mtYd, rows.Steps[boss-1].Y, rows.Steps[boss-1].Z}}
 	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
 		return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 100, Target: packet.GUID(1000)}}
 	}
+	return f, next, total
+}
+
+// Walk 24 (Thekal's shape, Molten Core): the run is on the step BEFORE its boss step, in the same leg, its until
+// goes past that boss step, the engaged entry belongs to the plan boss (its entry, phase entries, first adds or
+// hold entries) and the main tank stands at the boss row. The run leader fights it: no run stop.
+func TestRaidWalkBossDoneEarlyEngageLetsTheRunFightIt(t *testing.T) {
+	rows := mcRows(t)
+	_, next, _ := bossDoneFixture(t)
+	boss := next - 1
+	if boss < 2 || rows.Steps[boss-2].Leg != rows.Steps[boss-1].Leg {
+		t.Fatalf("fixture rows: step %d and the boss step %d are not in the same leg", boss-1, boss)
+	}
+	fx, _, _ := earlyEngageFixture(t, boss-1, 10)
+	if code := fx.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, fx.stderr.String(), fx.stdout.String())
+	}
+	if n := countPrefix(fx.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want 0: the run leader fights its boss one step early", n)
+	}
+	if sum := fx.summary(); sum.EndReason != "until" {
+		t.Fatalf("summary end %q, want until", sum.EndReason)
+	}
+	if !hasNote(fx.summary(), "before its boss step") {
+		t.Fatalf("notes %q, want the early-engage note", fx.summary().Notes)
+	}
+	if !hasNote(fx.summary(), "so the run leader fights it") {
+		t.Fatalf("notes %q", fx.summary().Notes)
+	}
+}
+
+// The hand-over reaches two steps back, the walk-24 approach case (Thekal's approach point sits inside the pull):
+// the party is at the boss row, so the run leader fights it.
+func TestRaidWalkBossDoneEarlyEngageTwoStepsBackLetsTheRunFightIt(t *testing.T) {
+	_, next, _ := bossDoneFixture(t)
+	f, _, _ := earlyEngageFixture(t, next-1-2, 10)
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
 	}
 	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
-		t.Fatalf("%d run stops, want 0: the run leader fights its boss one step early", n)
-	}
-	if sum := f.summary(); sum.EndReason != "until" {
-		t.Fatalf("summary end %q, want until", sum.EndReason)
+		t.Fatalf("%d run stops, want 0: two steps back is still the boss's own pull", n)
 	}
 	if !hasNote(f.summary(), "before its boss step") {
 		t.Fatalf("notes %q, want the early-engage note", f.summary().Notes)
 	}
-	if !hasNote(f.summary(), "so the run leader fights it") {
-		t.Fatalf("notes %q", f.summary().Notes)
+}
+
+// Five steps back the boss is woken by something else (another leg's pull, a patrol), not by this party: the walk
+// stops the run as before, even with the lead bot at the boss row (review round 1, item 3).
+func TestRaidWalkBossDoneEarlyEngageFiveStepsBackStops(t *testing.T) {
+	_, next, _ := bossDoneFixture(t)
+	f, _, _ := earlyEngageFixture(t, next-1-5, 10)
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s", code, f.stderr.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
+		t.Fatalf("%d run stops, want exactly 1", n)
+	}
+	if hasNote(f.summary(), "before its boss step") {
+		t.Fatalf("notes %q, want no early-engage note", f.summary().Notes)
+	}
+}
+
+// A lead bot far from the boss row means the party is not at the pull at all: the hand-over does not fire and the
+// walk stops the run as before (review round 1, item 3).
+func TestRaidWalkBossDoneEarlyEngageLeadFarStops(t *testing.T) {
+	_, next, _ := bossDoneFixture(t)
+	f, _, _ := earlyEngageFixture(t, next-2, 1000)
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s", code, f.stderr.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
+		t.Fatalf("%d run stops, want exactly 1", n)
+	}
+	if hasNote(f.summary(), "before its boss step") {
+		t.Fatalf("notes %q, want no early-engage note", f.summary().Notes)
 	}
 }
 
@@ -4741,6 +4807,9 @@ func TestRaidWalkThekalEarlyEngageFirstAddLetsTheRunFightIt(t *testing.T) {
 	f := zgThekalFixture(t, "zul_gurub")
 	boss := zgBossStep(t)
 	total := len(zgRows(t).Steps)
+	// The party stands at Thekal's spot with the first add that woke him (the hand-over needs the main tank at
+	// the boss row).
+	f.agent.pos = map[string][3]float32{"Bot01": {zgRows(t).Steps[boss-1].X, zgRows(t).Steps[boss-1].Y, zgRows(t).Steps[boss-1].Z}}
 	f.agent.startReply = zgThekalStart(total, boss)
 	f.agent.mu.Lock()
 	f.agent.startQueue = []queuedEvent{

@@ -2022,6 +2022,17 @@ func (w *walk) bossFamilyWithFirst(boss uint32) map[uint32]bool {
 	return fam
 }
 
+const (
+	// earlyEngageSteps is how many steps before its boss step the run may stand for the hand-over: the boss's own
+	// approach point sits inside the pull, one or two steps back (walk 24).
+	earlyEngageSteps = 2
+	// earlyEngageYd is how close the main tank must stand to the boss row for the hand-over: the party has to be
+	// at the pull, not merely on a nearby step.
+	earlyEngageYd = 60
+	// earlyEngageFresh is how old the main tank's frame may be for the hand-over: a stale position says nothing.
+	earlyEngageFresh = 10 * time.Second
+)
+
 // runFightsBoss says whether the run leader itself fights the engaged boss: true when the run's
 // own status kind is boss and its until goes past that step (walk 12: Jeklik engaged at step 40
 // with --until "step 41", and raid-walk stopped the run from under the fight); or, for the walk-24
@@ -2031,9 +2042,12 @@ func (w *walk) bossFamilyWithFirst(boss uint32) map[uint32]bool {
 // boss.approach[0] 19.9 yd from him, walk 24) would otherwise stop the run under the fight.
 //
 // early is the boss step the early rule fired for (0: the status kind was boss). False when
-// --until boss (a trash walk that wakes a boss never fights one), when the run is not running,
-// when the rows are not the server's (step numbers mean nothing), when the next boss step is in
-// another leg, or when the until does not go past the boss step.
+// --until boss (a trash walk that wakes a boss never fights one), when the run is not running
+// (a boss that engages while the run is paused on its boss step still stops the walk), when the
+// rows are not the server's (step numbers mean nothing), when the next boss step is in another
+// leg, when the until does not go past the boss step, when the run stands more than
+// earlyEngageSteps steps before that boss step, or when the main tank is not within earlyEngageYd
+// of the boss row (review round 1, item 3).
 func (w *walk) runFightsBoss(entry uint32) (ok bool, early int) {
 	if w.opts.until == "boss" || !w.haveStatus || w.lastStatus.State != tbm.RunRunning {
 		return false, 0
@@ -2063,6 +2077,21 @@ func (w *walk) runFightsBoss(entry uint32) (ok bool, early int) {
 		return false, 0 // another leg's boss woken from this step still stops
 	}
 	if !w.bossFamilyWithFirst(w.rows.Steps[b-1].Entry)[entry] {
+		return false, 0
+	}
+	// The hand-over is for a boss pulled from the raid's own approach: further back than earlyEngageSteps the
+	// boss is woken by something else (another leg's pull, a patrol), and a main tank far from the boss row means
+	// the party is not standing at the pull at all (review round 1, item 3: walk 24's Thekal approach point sits
+	// inside the pull, so the step-back case is the common one).
+	if b-w.lastStatus.Step > earlyEngageSteps {
+		return false, 0
+	}
+	lead, ok := w.botAt[w.mt]
+	if !ok || w.env.now().Sub(lead.at) > earlyEngageFresh {
+		return false, 0
+	}
+	row := w.rows.Steps[b-1]
+	if math.Hypot(float64(lead.x-row.X), float64(lead.y-row.Y)) > earlyEngageYd {
 		return false, 0
 	}
 	return true, b

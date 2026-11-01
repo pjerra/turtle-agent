@@ -2284,6 +2284,14 @@ a near-wipe rest still drops `IncidentBossEngaged` and writes no dashboard saves
 boss afterwards); and the tracker's boss latch fires
 once per walk, so a boss engaged after an earlier one reaches the walk only through the wipe gate.
 
+A boss the frames show ENGAGED while the run is running stops the run and goes to the boss path (wipe, kill, reset),
+with one exception: when the run's own status is on its boss step and its `until` goes past it, or (walk 24) when the
+run stands at most two steps before its next boss step in the same leg, its `until` goes past that boss step, the
+engaged entry belongs to that boss (its entry, phase entries, `first` adds or hold entries), and the main tank stands
+within 60 yd (2D) of the boss row's plan position in a frame younger than 10 s, the run leader fights it and the walk
+only notes the hand-over. A boss that engages while the run is PAUSED on its boss step still stops the walk: the
+hand-over needs a running status.
+
 When the run leader pauses with `boss <N> not found` on that boss's own row (walk 24 test2 r2: Thekal's phase 1 ends
 in a fake death and TB finds no corpse of 14599), the walk reads the frames for the kill: a boss UNIT at 0 % (the
 boss's own entry or a phase entry that is the boss reborn, judged per guid — never an add that exists several at
