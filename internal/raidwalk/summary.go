@@ -45,8 +45,43 @@ type Summary struct {
 	Fights        []FightSummary   `json:"fights"`
 	Dashboard     string           `json:"dashboard"`
 	Teardown      TeardownSummary  `json:"teardown"`
-	ExitCode      int              `json:"exit_code"`
-	Notes         []string         `json:"notes"`
+	// Place is the `place` object of a `--place` walk (spec 5.11): the start step the raid was put at, the instance, the
+	// cleared circles and the result. Absent without --place.
+	Place    *PlaceSummary `json:"place,omitempty"`
+	ExitCode int           `json:"exit_code"`
+	Notes    []string      `json:"notes"`
+}
+
+// PlaceSummary is the summary's `place` object (spec 5.11).
+type PlaceSummary struct {
+	Start      int                  `json:"start_step"`
+	Leg        string               `json:"leg,omitempty"`
+	Point      []float32            `json:"point"`
+	Stop       int                  `json:"until_step"`
+	Instance   float64              `json:"instance"`
+	Circles    []PlaceCircleSummary `json:"circles"`
+	NotCleared []string             `json:"not_cleared"`
+	Quiet      bool                 `json:"quiet"`
+	Placed     int                  `json:"placed"`
+	Hires      int                  `json:"hires"`
+	Summoned   []string             `json:"summoned,omitempty"`
+	Notes      []string             `json:"notes,omitempty"`
+}
+
+// PlaceCircleSummary is one cleared circle of the summary's `place` object: the BEHIND row it came from and what the
+// toolkit removed there.
+type PlaceCircleSummary struct {
+	Step    int      `json:"step"`
+	Leg     int      `json:"leg"`
+	X       float32  `json:"x"`
+	Y       float32  `json:"y"`
+	Z       float32  `json:"z"`
+	Radius  float32  `json:"radius"`
+	Removed int      `json:"removed"`
+	Skipped []string `json:"skipped,omitempty"`
+	PerUnit bool     `json:"per_unit,omitempty"`
+	Unit    uint32   `json:"unit,omitempty"`
+	Moved   bool     `json:"moved,omitempty"`
 }
 
 // RosterSummary is the roster as hired.
@@ -170,8 +205,10 @@ type SummaryMeta struct {
 	Incidents      []InjectIncident
 	Dashboard      string
 	Teardown       TeardownSummary
-	ExitCode       int
-	Notes          []string
+	// Place is the --place walk's place object (nil without --place).
+	Place    *PlaceSummary
+	ExitCode int
+	Notes    []string
 }
 
 // BuildSummary fills the tb-raid-walk v1 summary from the tracker and the command's own facts.
@@ -202,6 +239,7 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		Roster:        RosterSummary{OT: []string{}, Rest: []string{}},
 		Dashboard:     m.Dashboard,
 		Teardown:      m.Teardown,
+		Place:         m.Place,
 		ExitCode:      m.ExitCode,
 		Notes:         nonNilStrings(m.Notes),
 		WipeResumes:   m.WipeResumes,

@@ -465,7 +465,7 @@ func TestRaidWalkInjectEveryLinePassesAnAllowList(t *testing.T) {
 			}
 			continue
 		}
-		if !raidwalk.AllowedLine(line, hires) {
+		if !raidwalk.AllowedLine(line, hires, 249) {
 			t.Fatalf("gm line %q (send %d) passes no allow-list", line, i)
 		}
 	}
