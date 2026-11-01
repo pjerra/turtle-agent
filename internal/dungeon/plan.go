@@ -424,6 +424,10 @@ type Boss struct {
 	Entry    uint32   `json:"entry"`
 	Position Point    `json:"position"`
 	First    []uint32 `json:"first,omitempty"`
+	// PhaseEntries are entries the encounter turns into or summons that no other field names (Zul'Gurub's Thekal:
+	// 14509 Thekal reborn, boss_thekal.cpp:358, and 15068 Zulian Guardian, :41/:413). Only raid-walk's boss gates
+	// read them (always boss rows, like hold entries); the driver ignores them and plan-export does not carry them.
+	PhaseEntries []uint32 `json:"phase_entries,omitempty"`
 	// Team limits the fight to a leader of that team ("alliance" or "horde"): the driver skips the boss, with its First entries,
 	// for the other one, and the leg goes on without it. Uldaman's Baelog, Eric and Olaf are friendly to the Alliance (faction 122,
 	// quest givers) and hostile to the Horde only.
@@ -879,8 +883,10 @@ type rawBoss struct {
 	Entry    uint32    `json:"entry"`
 	Position *rawPoint `json:"position"`
 	First    []uint32  `json:"first"`
-	Team     string    `json:"team"`
-	LootItem *rawItem  `json:"loot_item"`
+	// PhaseEntries is Boss.PhaseEntries.
+	PhaseEntries []uint32 `json:"phase_entries"`
+	Team         string   `json:"team"`
+	LootItem     *rawItem `json:"loot_item"`
 	// CompanionsLoot is Boss.CompanionsLoot.
 	CompanionsLoot *bool `json:"companions_loot"`
 	// Tactics is Boss.Tactics.
@@ -1432,6 +1438,13 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		b.Position = c.point(bp+".position", r.Boss.Position)
 		c.entries(bp+".first", b.First, false)
+		b.PhaseEntries = r.Boss.PhaseEntries
+		c.entries(bp+".phase_entries", b.PhaseEntries, false)
+		for i, e := range b.PhaseEntries {
+			if e == b.Entry && e != 0 {
+				c.fail(fmt.Sprintf("%s.phase_entries[%d]", bp, i), "the boss (%d) is already a boss entry", e)
+			}
+		}
 		for i, e := range b.First {
 			if e == b.Entry && e != 0 {
 				c.fail(fmt.Sprintf("%s.first[%d]", bp, i), "the boss (%d) is killed last; leave it out of first", e)

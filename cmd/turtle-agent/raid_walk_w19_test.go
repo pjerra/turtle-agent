@@ -186,13 +186,22 @@ func TestRaidWalkWipeResumeTigerTrashOnThekalLegRecovers(t *testing.T) {
 	wantRecovered(t, f, code, *resumes, "150")
 }
 
-// TestRaidWalkWipeResumeThekalPhase2TigersSkip: Thekal phase 2 - the status already moved on to arlokk (TB marked
-// Thekal's step done when 14599 died in phase 1), while tigers fight within 40 yd of Thekal's position. That is
-// boss evidence on any leg: the wipe 88 s later ends the old way, the note naming the latched first add.
-func TestRaidWalkWipeResumeThekalPhase2TigersSkip(t *testing.T) {
-	near := [2]float32{zgThekal[0] + 10, zgThekal[1] - 12}
-	f, resumes := w19Scenario(t, true, "TBM:RUN|zul_gurub|running|160/1104|high_priestess_arlokk|move|walk|walking|until step 184 (step 184)",
-		w19StepRows([][2]float32{near}))
+// TestRaidWalkWipeResumeThekalPhase2Skips: Thekal phase 2. Thekal 14599 died in phase 1 and came back as 14509
+// (Thekal reborn, boss_thekal.cpp:358) with Zulian Guardians 15068 (:41, :413); TB marked his step done
+// (bossDeadNearSpot) and the status is already on arlokk while phase 2 fights at his spot. The plan's
+// boss.phase_entries make both boss rows: the wipe 88 s later ends the old way, the note naming the latched row.
+// (f311f7e's version of this test used Zulian Tigers 11361 near the spot: the tigers are not the phase-2 units.)
+func TestRaidWalkWipeResumeThekalPhase2Skips(t *testing.T) {
+	phase2 := func(now, wipeAt time.Time) []tbm.HostileRec {
+		if !now.Before(wipeAt.Add(-150*time.Second)) && now.Before(wipeAt.Add(-88*time.Second)) {
+			return []tbm.HostileRec{
+				{GUID: 40, Entry: 14509, HPPct: 70, Target: packet.GUID(1000), X: zgThekal[0] + 3, Y: zgThekal[1] - 2},
+				{GUID: 41, Entry: 15068, HPPct: 90, Target: packet.GUID(1001), X: zgThekal[0] + 8, Y: zgThekal[1] + 5},
+			}
+		}
+		return nil
+	}
+	f, resumes := w19Scenario(t, true, "TBM:RUN|zul_gurub|running|160/1104|high_priestess_arlokk|move|walk|walking|until step 184 (step 184)", phase2)
 	code := f.run(context.Background())
 	if code != exitRaidWalkIncident {
 		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
@@ -201,14 +210,15 @@ func TestRaidWalkWipeResumeThekalPhase2TigersSkip(t *testing.T) {
 	if sum.WipeResumes != 0 || *resumes != 0 {
 		t.Fatalf("wipe_resumes %d, resumes %d, want 0", sum.WipeResumes, *resumes)
 	}
-	want := "wipe resume skipped: boss state unknown (boss row 11361 (first add of high_priest_thekal) latched "
 	found := false
 	for _, n := range sum.Notes {
-		if strings.HasPrefix(n, want) && strings.HasSuffix(n, "s ago, under 120 s)") {
-			found = true
+		for _, e := range []string{"14509", "15068"} {
+			if strings.HasPrefix(n, "wipe resume skipped: boss state unknown (boss "+e+" latched ") && strings.HasSuffix(n, "s ago, under 120 s)") {
+				found = true
+			}
 		}
 	}
 	if !found {
-		t.Fatalf("notes %q, want a note starting %q", sum.Notes, want)
+		t.Fatalf("notes %q, want the latch skip naming boss 14509 or 15068", sum.Notes)
 	}
 }
