@@ -1879,8 +1879,13 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 	// bound copy, so the revive keeps the far go and the summons, with a quiet check of the commander's own copy.
 	var joined bool
 	why := ""
-	ghosts := w.appearHire(p) == "" && w.hiresOffMap() > 0
-	if ghosts {
+	ghosts := w.place == nil && w.appearHire(p) == "" && w.hiresOffMap() > 0
+	if w.place != nil {
+		// A placed walk's commander joined the raid's copy at the placement (phasePlace: `.appear <mt>`, the toolkit's
+		// instance read), and placeReviveInstance checks that copy again before the summons; a second appear could not
+		// prove a fresh landing when the commander still stands where the first one put it.
+		joined = true
+	} else if ghosts {
 		w.note("revive: no hire on map %d, %d seen on another map (released): no appear, the far go and summons; the quiet check was blind (the commander's own copy)", w.plan.Map, w.hiresOffMap())
 	} else {
 		var err error
