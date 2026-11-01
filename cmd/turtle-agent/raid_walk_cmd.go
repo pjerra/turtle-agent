@@ -619,6 +619,18 @@ type walk struct {
 	// (never pruned: a reset or a respawn leaves it there) is no evidence on a later pause (review round 3).
 	// A wipe recovery clears it; a new attempt's first sighting sets it.
 	bossAttemptAt map[uint32]time.Time
+	// bossGUIDs is the guid -> plan boss entry of the units the frames showed with a plan boss's OWN entry
+	// (trackFrame): a script that changes a creature's entry (core UpdateEntry) keeps its guid, so a unit whose
+	// guid the frames showed as the boss entry is the boss whatever entry it now reads (spec 6, D5 b, #1453).
+	// A guid in it is never an add; bossForms keeps the entries that guid was seen with, one per change.
+	bossGUIDs map[string]uint32
+	bossForms map[string][]uint32
+	// bossTrack is the boss step the run's own statuses showed (observeBossStatus): the last note seen while the
+	// run stood there, and the `boss down` note that leaves it. bossSkipped is the kill evidence a successful
+	// `.bot run skip` recorded (bossSkipStep) for the old-module path, where no such note arrives.
+	bossTrack        bossStepTrack
+	bossSkipped      bool
+	bossSkipEvidence string
 
 	stepFirst *dungeon.Point
 	// startStep is the step the run starts at (the placement's staged start, else the --from step): the revive's own
@@ -699,6 +711,17 @@ type walk struct {
 	hiresLeft  []string
 }
 
+// bossStepTrack is the boss step the run's own statuses showed (spec 6, D5): the last note the run reported while
+// it stood on that step, and the `boss down` note that leaves it. killed/evidence are set once the note is seen.
+type bossStepTrack struct {
+	have     bool
+	entry    uint32
+	step     int
+	note     string
+	killed   bool
+	evidence string
+}
+
 type hostileState struct {
 	entry    uint32
 	x, y, z  float32
@@ -735,7 +758,7 @@ func raidWalkRun(ctx context.Context, o raidWalkOptions, env walkEnv, deps walkD
 	w := &walk{opts: o, env: env, deps: deps, stdout: stdout, stderr: stderr,
 		seenFights: map[string]bool{}, pendingFights: map[string]int{}, hostiles: map[string]hostileState{}, botAt: map[string]botPos{},
 		partyG: map[uint64]bool{}, bossSet: map[uint32]bool{}, bossRows: map[uint32]hostileState{}, hires: map[string]bool{},
-		bossAttemptAt: map[uint32]time.Time{}}
+		bossAttemptAt: map[uint32]time.Time{}, bossGUIDs: map[string]uint32{}, bossForms: map[string][]uint32{}}
 	return w.main(ctx)
 }
 
@@ -1408,6 +1431,7 @@ func (w *walk) finish(code int) {
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
 		Place:         w.placeSum,
+		BossKill:      w.bossKillSummary(),
 		ReviveRefusal: w.reviveRefusal,
 		TierSource:    w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
 		WipeResumes: w.wipeResumes,
