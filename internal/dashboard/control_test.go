@@ -547,6 +547,17 @@ func TestControlScrubsAgentToken(t *testing.T) {
 	} else if !strings.Contains(string(b), "[redacted]") {
 		t.Errorf("the log does not redact: %s", b)
 	}
+	// a successful answer that echoes the token is scrubbed too
+	r2 := newControlRig(t)
+	r2.fake.set("dungeon_status", `{"running":true,"state":"running","report":{"state":"running","remote":{"mode":"observe"}}}`)
+	r2.fake.set("dungeon_pause", `{"note":"the token is `+r2.agentToken+`"}`)
+	rec2 := r2.post("/api/control/"+r2.agent.ID+"/run", map[string]any{"verb": "pause"}, r2.token, nil)
+	if rec2.code != http.StatusOK {
+		t.Fatalf("a pause whose answer echoes the token: %d %s", rec2.code, rec2.body)
+	}
+	if strings.Contains(rec2.body, r2.agentToken) {
+		t.Errorf("the reply carries the agent token: %s", rec2.body)
+	}
 }
 
 // Test 11: the log endpoint answers one agent's last result lines only.
@@ -584,3 +595,6 @@ func TestControlLogEndpoint(t *testing.T) {
 		}
 	}
 }
+
+// Test 13: the run controls' button matrix, confirm texts and log lines (controls.js, run under node).
+func TestControlButtons(t *testing.T) { runCheck(t, "controls_check.js", "controls.js") }
