@@ -16,12 +16,19 @@ var (
 	gearTierRe  = regexp.MustCompile(`^[1-3]$`)
 )
 
+// GMVisibleOff is the one `.gm` line raid-walk may send, verbatim: the revive hides the commander before it appears
+// next to a hire (review round 2, L2). No other `.gm` form passes.
+const GMVisibleOff = ".gm visible off"
+
 // AllowedLine says whether raid-walk may send line through the gm RPC (spec 3.6): every line must match one of
 // the forms, with its arguments checked, and a bot name must be one of the walk's hires. The command checks every
 // gm line with it before sending; there is no second copy of the rule.
 func AllowedLine(line string, hires map[string]bool) bool {
 	if strings.ContainsAny(line, "\r\n") {
 		return false
+	}
+	if line == GMVisibleOff {
+		return true
 	}
 	if runResumeRe.MatchString(line) {
 		return true

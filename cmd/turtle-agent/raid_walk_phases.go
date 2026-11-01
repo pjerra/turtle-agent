@@ -1115,14 +1115,70 @@ func (w *walk) waitRevivePoint(ctx context.Context, p dungeon.Point, fromMap uin
 		func(st session.StatusInfo) bool { return reviveLanded(p, w.plan.Map, fromMap, st) })
 }
 
-// commanderMap is the commander's map before a revive `.go xyz`: what tells a far teleport from a near one. A failed
-// status read answers the plan's map, the strict (near) rule.
-func (w *walk) commanderMap(ctx context.Context) uint32 {
-	st, err := w.status(ctx)
-	if err != nil {
-		return w.plan.Map
+// commanderMap reads the commander's map before a revive `.go xyz`: what tells a far teleport from a near one. A failed
+// read is retried (commanderMapTries in all, 1 s apart, within the recovery deadline), never guessed: taking the plan's
+// map for it picks the near rule, and a far go then never lands (review round 2, Codex MEDIUM). ok is false when no
+// read answered.
+func (w *walk) commanderMap(ctx context.Context, deadline time.Time) (m uint32, ok bool, err error) {
+	for try := 0; try < commanderMapTries; try++ {
+		if try > 0 {
+			if err := w.recoverySleep(ctx, time.Second, deadline); err != nil {
+				return 0, false, err
+			}
+		}
+		if st, serr := w.status(ctx); serr == nil {
+			return st.Map, true, nil
+		}
 	}
-	return st.Map
+	return 0, false, nil
+}
+
+const commanderMapTries = 3
+
+// farFromMap stands for "the commander was not on the plan's map" when its map could not be read: a self-regroup's
+// commander starts at the portal (map 0 in every walk), so the far rule applies.
+const farFromMap = math.MaxUint32
+
+// reviveFrom is the fromMap a revive go's landing rule uses: the plan's map after a verified appear (its fresh landing
+// was read on it), else commanderMap. With no readable status a normal revive stops (exit 19) and a self-regroup goes on
+// under the far rule, noted.
+func (w *walk) reviveFrom(ctx context.Context, joined, selfRegroup bool, deadline time.Time) (uint32, error) {
+	if joined {
+		return w.plan.Map, nil
+	}
+	m, ok, err := w.commanderMap(ctx, deadline)
+	if err != nil {
+		return 0, err
+	}
+	if ok {
+		return m, nil
+	}
+	if !selfRegroup {
+		return 0, stopf(exitRaidWalkIncident, "not revived: commander status unreadable")
+	}
+	w.note("revive: commander status unreadable; self-regroup: the far landing rule (the commander starts at the portal)")
+	return farFromMap, nil
+}
+
+// hiresOffMap counts the hires the frames last saw on another map than the plan's (released to the graveyard).
+func (w *walk) hiresOffMap() int {
+	n := 0
+	for _, name := range w.hireList() {
+		if b, ok := w.botAt[name]; ok && b.mapID != w.plan.Map {
+			n++
+		}
+	}
+	return n
+}
+
+// hireUpOnMap says a hire was last seen alive on the plan's map.
+func (w *walk) hireUpOnMap() bool {
+	for _, name := range w.hireList() {
+		if b, ok := w.botAt[name]; ok && b.mapID == w.plan.Map && !b.dead {
+			return true
+		}
+	}
+	return false
 }
 
 // appearHire is the hire the revive appears at before its `.go xyz` to p: among the hires the frames last saw on the
@@ -1151,15 +1207,22 @@ func (w *walk) appearHire(p dungeon.Point) string {
 // DungeonPersistentState)), so the `.go xyz` after it is a near go, with the settled-z landing rule.
 //
 // The appear counts only on a FRESH landing (appearLanded): the commander may already stand on the plan's map in a copy
-// of its own, so the map id alone proves nothing. `.gm visible off` is not sent first: the walk's gm allow-list
-// (raidwalk.AllowedLine) does not hold it, and this fix does not widen it.
+// of its own, so the map id alone proves nothing. reviveHires sends `.gm visible off` once before it.
 func (w *walk) joinHires(ctx context.Context, p dungeon.Point, deadline time.Time) (joined bool, why string, err error) {
 	name := w.appearHire(p)
 	if name == "" {
 		return false, fmt.Sprintf("no hire seen on map %d", w.plan.Map), nil
 	}
 	hire := w.botAt[name]
-	before, _ := w.status(ctx) // a failed read leaves the zero status: any real landing differs from it
+	before, serr := w.status(ctx)
+	if serr != nil { // one retry (review round 2, L1): the freshness check needs the read
+		if err := w.recoverySleep(ctx, time.Second, deadline); err != nil {
+			return false, "", err
+		}
+		if before, serr = w.status(ctx); serr != nil {
+			return false, "commander status unreadable before the appear", nil
+		}
+	}
 	if err := w.gm(ctx, ".appear "+name); err != nil {
 		if ctx.Err() != nil {
 			return false, "", stopf(exitRaidWalkFailed, "interrupted")
@@ -1778,11 +1841,26 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 		return stopf(exitRaidWalkIncident, "not revived: the plan's rows give no first point")
 	}
 	p := *w.stepFirst
-	joined, why, err := w.joinHires(ctx, p, deadline)
-	if err != nil {
-		return err
+	if err := w.gm(ctx, raidwalk.GMVisibleOff); err != nil {
+		if ctx.Err() != nil {
+			return stopf(exitRaidWalkFailed, "interrupted")
+		}
+		w.note("revive: %s failed (%v)", raidwalk.GMVisibleOff, err)
 	}
-	if !joined {
+	// Hires released to the graveyard stand on another map: nobody to appear at. Their summons resolve to their own
+	// bound copy, so the revive keeps the far go and the summons, with a quiet check of the commander's own copy.
+	var joined bool
+	why := ""
+	ghosts := w.appearHire(p) == "" && w.hiresOffMap() > 0
+	if ghosts {
+		w.note("revive: no hire on map %d, %d seen on another map (released): no appear, the far go and summons; the quiet check was blind (the commander's own copy)", w.plan.Map, w.hiresOffMap())
+	} else {
+		var err error
+		if joined, why, err = w.joinHires(ctx, p, deadline); err != nil {
+			return err
+		}
+	}
+	if !joined && !ghosts {
 		// A normal revive quiet-checks and summons from where the commander stands: blind in a copy of its own. A
 		// self-regroup summons nobody and `.revive` works by name, so it keeps the far go (reviveLanded's far rule).
 		if !selfRegroup {
@@ -1790,7 +1868,10 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 		}
 		w.note("revive: could not join the hires' instance (%s); self-regroup: the go opens its own copy, the hires are revived by name", why)
 	}
-	from := w.commanderMap(ctx)
+	from, err := w.reviveFrom(ctx, joined, selfRegroup, deadline)
+	if err != nil {
+		return err
+	}
 	if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(p.X), num32(p.Y), num32(p.Z), w.plan.Map)); err != nil {
 		return err
 	}
@@ -1806,7 +1887,7 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 	}
 	if !ok {
 		e := w.plan.Entrance
-		if !joined { // only a self-regroup gets here unjoined: one more try, and the far go again when it fails
+		if !joined && !ghosts { // only a self-regroup gets here unjoined: one more try, and the far go again when it fails
 			var jerr error
 			if joined, why, jerr = w.joinHires(ctx, e, deadline); jerr != nil {
 				return jerr
@@ -1815,7 +1896,10 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 				w.note("revive: could not join the hires' instance at the entrance either (%s)", why)
 			}
 		}
-		from := w.commanderMap(ctx)
+		from, ferr := w.reviveFrom(ctx, joined, selfRegroup, deadline)
+		if ferr != nil {
+			return ferr
+		}
 		if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(e.X), num32(e.Y), num32(e.Z), w.plan.Map)); err == nil {
 			if werr := w.waitRevivePoint(ctx, e, from, deadline); werr == nil {
 				ok, why, terr = w.quietCheck(ctx, e, deadline)
@@ -1879,6 +1963,19 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 		}
 		if inCombat > 0 {
 			w.note("attacked after revive: %d bots in combat", inCombat)
+		}
+	}
+	// An unjoined self-regroup tries the join once more when its revives have a hire up on the plan's map (review
+	// round 2, L4): the next recovery then starts from the hires' copy.
+	if selfRegroup && !joined && !ghosts && w.hireUpOnMap() {
+		ok, why, err := w.joinHires(ctx, p, deadline)
+		if err != nil {
+			return err
+		}
+		if ok {
+			w.note("revive: joined the hires' instance after the self-regroup revives")
+		} else {
+			w.note("revive: still could not join the hires' instance after the self-regroup revives (%s)", why)
 		}
 	}
 	return nil

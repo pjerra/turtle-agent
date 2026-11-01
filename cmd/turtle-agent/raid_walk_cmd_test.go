@@ -162,10 +162,16 @@ type walkFakeAgent struct {
 	appearRefused bool
 	// appearLag serves that many status reads with the pre-appear state before an accepted `.appear` lands (the live
 	// teleport lands a moment after the chat line); goBeforeAppear counts recovery gos sent while it had not landed.
-	appearLag      int
-	appearPend     func()
-	appearPendLeft int
-	goBeforeAppear int
+	// statusFailNext fails that many status reads (an RPC error); ghostsOff reports dead hires on map 0 (released to
+	// the graveyard, once the run has started); appearRefusedUntilRevive refuses every `.appear` until the first `.revive` went out.
+	statusFailNext           int
+	ghostsOff                bool
+	appearRefusedUntilRevive bool
+	revived                  bool
+	appearLag                int
+	appearPend               func()
+	appearPendLeft           int
+	goBeforeAppear           int
 	// enterMap puts the commander on this map once `cmd enter` is acked (0: it stays where its last go put it):
 	// the live walk-22 agent stood inside the instance, so its recovery go was a near one.
 	enterMap   uint32
@@ -229,6 +235,11 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 	switch method {
 	case "status":
 		f.mu.Lock()
+		if f.statusFailNext > 0 {
+			f.statusFailNext--
+			f.mu.Unlock()
+			return errors.New("status: agent busy")
+		}
 		if f.goPendOK {
 			f.goLag--
 			if f.goLag <= 0 {
@@ -439,7 +450,7 @@ func (f *walkFakeAgent) gmSide(line string) {
 		for _, n := range f.party {
 			known = known || n == name
 		}
-		if known && f.entered && !f.appearRefused {
+		if known && f.entered && !f.appearRefused && !(f.appearRefusedUntilRevive && !f.revived) {
 			hm := uint32(249)
 			if f.instMap != 0 {
 				hm = f.instMap
@@ -486,6 +497,7 @@ func (f *walkFakeAgent) gmSide(line string) {
 		if f.instAtRevive == "" {
 			f.instAtRevive = f.commanderInst
 		}
+		f.revived = true
 		f.mu.Unlock()
 		// The server's revive brings the hire back: later frames show it alive, so a recovered walk
 		// does not re-fire the wipe it just revived.
@@ -790,6 +802,7 @@ func (f *walkFakeAgent) viewPage() any {
 		extra[k] = v
 	}
 	noParty := f.noPartyFrames
+	ghostsOff := f.ghostsOff && f.runStarted // released once the run is under way
 	fn := f.hostilesFn
 	f.mu.Unlock()
 	if viewHook != nil {
@@ -812,7 +825,11 @@ func (f *walkFakeAgent) viewPage() any {
 			}
 		}
 		p := pos[name]
-		rec := tbm.PartyRec{GUID: packet.GUID(1000 + i), Name: name, HP: 1, MaxHP: 1, Map: m, Dead: dead[name], State: state,
+		hm := m
+		if ghostsOff && dead[name] {
+			hm = 0
+		}
+		rec := tbm.PartyRec{GUID: packet.GUID(1000 + i), Name: name, HP: 1, MaxHP: 1, Map: hm, Dead: dead[name], State: state,
 			X: p[0], Y: p[1], Z: p[2]}
 		if ex, ok := extra[name]; ok { // the P-record fields the module sends beyond the fake's own
 			rec.Target, rec.Spell, rec.Action, rec.Result = ex.Target, ex.Spell, ex.Action, ex.Result

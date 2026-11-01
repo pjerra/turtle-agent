@@ -602,6 +602,16 @@ func TestRaidWalkReviveAppearsAtAHireFirst(t *testing.T) {
 	if recoveryGoAt < 0 {
 		t.Fatalf("no recovery go: %q", lines)
 	}
+	visAt := -1
+	for i, l := range lines {
+		if l == ".gm visible off" {
+			visAt = i
+			break
+		}
+	}
+	if visAt < 0 || visAt > appearAt || countPrefix(lines, ".gm visible off") != 1 {
+		t.Fatalf("want exactly one .gm visible off before the appear (at %d), got it at %d: %q", appearAt, visAt, lines)
+	}
 	if appearAt < 0 || appearAt > recoveryGoAt {
 		t.Fatalf("the recovery go (line %d) was not preceded by a .appear (first at %d): %q", recoveryGoAt, appearAt, lines)
 	}
@@ -715,6 +725,145 @@ func TestRaidWalkSelfRegroupUnverifiedAppearCarriesOn(t *testing.T) {
 	}
 	if !hasNote(f.summary(), "could not join the hires' instance") {
 		t.Fatalf("notes %q, want the could-not-join note", f.summary().Notes)
+	}
+}
+
+// armStatusFails fails the next n status reads once the revive's `.gm visible off` goes out (the first line of a
+// revive, before any status read of it).
+func armStatusFails(f *fixture, n int) {
+	prev := f.agent.onGM
+	f.agent.onGM = func(line string) {
+		if prev != nil {
+			prev(line)
+		}
+		if line == ".gm visible off" {
+			f.agent.mu.Lock()
+			f.agent.statusFailNext = n
+			f.agent.mu.Unlock()
+		}
+	}
+}
+
+// ghostRevive is a normal revive whose hires all died and show on map 0 (released to the graveyard): no hire stands on
+// the plan's map to appear at.
+func ghostRevive(t *testing.T, statusFails int) (*fixture, int) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.allDeadFromHires()
+	var resumeAt time.Time
+	resumeHook(f, 24, 28, &resumeAt)
+	f.agent.mu.Lock()
+	f.agent.farZUnknown, f.agent.ghostsOff = true, true
+	f.agent.mu.Unlock()
+	if statusFails > 0 {
+		armStatusFails(f, statusFails)
+	}
+	return f, f.run(context.Background())
+}
+
+// TestRaidWalkReviveGhostsOffTheMapKeepTheFarGo (review round 2, Opus M-new): hires released to the graveyard show on
+// another map, so there is nobody to appear at. The normal revive keeps the far go and its summons (each resolves to
+// the hire's own bound copy) and notes that its quiet check was blind.
+func TestRaidWalkReviveGhostsOffTheMapKeepTheFarGo(t *testing.T) {
+	f, code := ghostRevive(t, 0)
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	gm := f.agent.gmLines()
+	if n := countPrefix(gm, ".appear "); n != 0 {
+		t.Fatalf("%d appears, want none (no hire on the plan's map): %q", n, gm)
+	}
+	if countPrefix(gm, ".summon ") == 0 {
+		t.Fatalf("no summons: %q", gm)
+	}
+	if !hasNote(f.summary(), "quiet check was blind") {
+		t.Fatalf("notes %q, want the blind quiet check note", f.summary().Notes)
+	}
+}
+
+// TestRaidWalkReviveStatusRetriedBeforeTheGo (review round 2, Codex MEDIUM): a failed status read must not be taken
+// for the plan's map (that picks the near rule, and a far go then never lands). Two failed reads are retried and the
+// revive goes on; three end a normal revive with exit 19.
+func TestRaidWalkReviveStatusRetriedBeforeTheGo(t *testing.T) {
+	f, code := ghostRevive(t, 2)
+	if code != exitOK {
+		t.Fatalf("2 failed reads: exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if countPrefix(f.agent.gmLines(), ".summon ") == 0 {
+		t.Fatal("2 failed reads: no summons")
+	}
+	f, code = ghostRevive(t, 3)
+	if code != exitRaidWalkIncident {
+		t.Fatalf("3 failed reads: exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if end := f.summary().EndReason; !strings.Contains(end, "not revived: commander status unreadable") {
+		t.Fatalf("3 failed reads: end %q", end)
+	}
+	gm := f.agent.gmLines()
+	if countPrefix(gm, ".summon ") != 0 || countPrefix(gm, ".revive ") != 0 {
+		t.Fatalf("3 failed reads: summons or revives went out: %q", gm)
+	}
+}
+
+// TestRaidWalkReviveRetriesThePreAppearRead (review round 2, Opus L1): one failed status read before the appear is
+// retried and the appear still counts; two leave the commander unjoined, and a normal revive stops.
+func TestRaidWalkReviveRetriesThePreAppearRead(t *testing.T) {
+	for _, c := range []struct {
+		fails int
+		want  int
+	}{{1, exitOK}, {2, exitRaidWalkIncident}} {
+		f := newFixture(t)
+		f.agent.startReply = startAt("onyxias_lair", 23)
+		f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+		f.allDeadFromHires()
+		var resumeAt time.Time
+		resumeHook(f, 24, 28, &resumeAt)
+		armStatusFails(f, c.fails)
+		if code := f.run(context.Background()); code != c.want {
+			t.Fatalf("%d failed reads: exit %d, want %d: %s\n%s", c.fails, code, c.want, f.stderr.String(), f.stdout.String())
+		}
+		f.agent.mu.Lock()
+		inst := f.agent.instAtRevive
+		f.agent.mu.Unlock()
+		if c.want == exitOK && inst != "hires" {
+			t.Fatalf("1 failed read: copy at the revive %q, want the hires'", inst)
+		}
+		if c.want != exitOK && !strings.Contains(f.summary().EndReason, "could not join the hires' instance") {
+			t.Fatalf("2 failed reads: end %q", f.summary().EndReason)
+		}
+	}
+}
+
+// TestRaidWalkSelfRegroupJoinsAfterTheRevives (review round 2, Opus L4): an unjoined self-regroup retries the join once
+// its revives have the hires up on the plan's map, and notes the result.
+func TestRaidWalkSelfRegroupJoinsAfterTheRevives(t *testing.T) {
+	f, _ := selfRegroupWipeWith(t, nil, func(f *fixture) {
+		f.agent.mu.Lock()
+		f.agent.appearRefusedUntilRevive = true
+		f.agent.mu.Unlock()
+	})
+	gm := f.agent.gmLines()
+	firstRevive, lateAppear := -1, -1
+	for i, l := range gm {
+		if strings.HasPrefix(l, ".revive ") && firstRevive < 0 {
+			firstRevive = i
+		}
+		if strings.HasPrefix(l, ".appear ") && firstRevive >= 0 && lateAppear < 0 {
+			lateAppear = i
+		}
+	}
+	if lateAppear < 0 {
+		t.Fatalf("no appear after the revives: %q", gm)
+	}
+	if !hasNote(f.summary(), "joined the hires' instance after the self-regroup revives") {
+		t.Fatalf("notes %q, want the late-join note", f.summary().Notes)
+	}
+	f.agent.mu.Lock()
+	inst := f.agent.commanderInst
+	f.agent.mu.Unlock()
+	if inst != "hires" {
+		t.Fatalf("commander ends in the %q copy, want the hires'", inst)
 	}
 }
 
