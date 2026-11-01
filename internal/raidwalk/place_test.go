@@ -285,6 +285,84 @@ func TestPlaceStopClauses(t *testing.T) {
 	}
 }
 
+func TestPlaceStopRefusesBeforeStart(t *testing.T) {
+	rows := placeRows(
+		[]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}, {Plan: "t", Leg: 1, Name: "two"}},
+		placeMove(0, 0, 10, 0),
+		placeRow(planexport.KindPull, 0, 0, 20, 0, 2, 15111),
+		placeMove(1, 0, 30, 0),
+	)
+	if _, err := PlaceStop(rows, []string{"until", "step", "1"}, 3); err == nil || !strings.Contains(err.Error(), "before the start") {
+		t.Fatalf("a stop before the start: %v", err)
+	}
+	if _, err := PlaceStop(rows, []string{"until", "leg", "one"}, 3); err == nil || !strings.Contains(err.Error(), "before the start") {
+		t.Fatalf("an until leg before the start: %v", err)
+	}
+	if n, err := PlaceStop(rows, []string{"until", "step", "3"}, 3); err != nil || n != 3 {
+		t.Fatalf("a stop at the start: %d, %v", n, err)
+	}
+}
+
+// The rows renumber legs when an optional leg is left out of the export (planexport's outLeg counts only written legs):
+// leg "three" is row leg 1, but plan.Legs[1] is the optional leg "two". The split must find "three"'s pull groups by
+// NAME, never by the row number (review round 1, item 4).
+func TestPlaceClearGroupPositionsByLegName(t *testing.T) {
+	rows := placeRows(
+		[]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}, {Plan: "t", Leg: 1, Name: "three"}},
+		placeRow(planexport.KindPull, 1, 0, 100, 0, 17, 15111, 11340), // 1: BEHIND, circle r 22
+		placeMove(1, 0, 108, 0), // 2: the start
+		placeRow(planexport.KindPull, 1, 0, 116, 0, 10, 15111, 11340), // 3: AHEAD
+	)
+	plan := &dungeon.Plan{Legs: []dungeon.Leg{
+		{Name: "one"},
+		{Name: "two", PullGroups: []dungeon.PullGroup{ // the optional leg left out: same entry, one position
+			{Entries: []uint32{15111}, Positions: []dungeon.Point{{X: 0, Y: 100, Z: 0}}},
+		}},
+		{Name: "three", PullGroups: []dungeon.PullGroup{
+			{Entries: []uint32{15111, 11340}, Positions: []dungeon.Point{{X: 0, Y: 100, Z: 0}, {X: 0, Y: 108, Z: 0}}},
+		}},
+	}}
+	cp := PlaceClear(rows, plan, 2, 3)
+	if cp.Refusal != "" {
+		t.Fatalf("refused: %q", cp.Refusal)
+	}
+	if len(cp.Circles) != 1 {
+		t.Fatalf("circles %+v", cp.Circles)
+	}
+	if c := cp.Circles[0]; !c.PerUnit || c.Step != 1 || c.Unit != 15111 || c.X != 0 || c.Y != 100 {
+		t.Fatalf("circle %+v", c)
+	}
+	// "three" has two positions: the second (entry 11340 at 0,108) lies inside the AHEAD circle and is dropped. The
+	// leg "two" group would have produced no note at all.
+	if len(cp.Notes) != 1 || !strings.Contains(cp.Notes[0], "11340") || !strings.Contains(cp.Notes[0], "lies in AHEAD row 3") {
+		t.Fatalf("notes %v", cp.Notes)
+	}
+}
+
+// A BEHIND circle overlaps a creature row beyond the until stop: the AHEAD set runs to the LAST row of the plan, so
+// the row still splits the circle (review round 1, item 6).
+func TestPlaceClearAheadBeyondStop(t *testing.T) {
+	rows := placeRows(nil,
+		placeRow(planexport.KindPull, 0, 0, 100, 0, 17, 15111, 11340), // 1: BEHIND
+		placeMove(0, 0, 108, 0), // 2: the start
+		placeMove(0, 0, 112, 0), // 3: the stop
+		placeRow(planexport.KindPull, 0, 0, 116, 0, 10, 15111, 11340), // 4: AHEAD, beyond the stop
+	)
+	plan := &dungeon.Plan{Legs: []dungeon.Leg{{Name: "one", PullGroups: []dungeon.PullGroup{
+		{Entries: []uint32{15111, 11340}, Positions: []dungeon.Point{{X: 0, Y: 100, Z: 0}, {X: 0, Y: 108, Z: 0}}},
+	}}}}
+	cp := PlaceClear(rows, plan, 2, 3)
+	if cp.Refusal != "" {
+		t.Fatalf("refused: %q", cp.Refusal)
+	}
+	if len(cp.Ahead) != 1 || cp.Ahead[0].Step != 4 {
+		t.Fatalf("ahead %+v", cp.Ahead)
+	}
+	if len(cp.Circles) != 1 || !cp.Circles[0].PerUnit {
+		t.Fatalf("circles %+v", cp.Circles)
+	}
+}
+
 func TestPlaceSkipsUnionsTheLegs(t *testing.T) {
 	plan := &dungeon.Plan{Legs: []dungeon.Leg{
 		{Skip: []uint32{14758, 15091}},

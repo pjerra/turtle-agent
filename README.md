@@ -2151,19 +2151,25 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   server's step count, else the walk stops the run and exits 18), `none` (a full clear), `step N` or `leg L`; the word
   goes to `run start` and the server's status label must show `until <clause> (step N)`. `--from leg L|step N` is only
   for a raid already standing at that point (for example after a hold): raid-walk does not stage.
-- `--place` (needs `--from`, and only on `m910q`/`tortoise-test2`) starts the raid **partway into its instance** instead
-  of at the door: several raids on one server can then each work a different boss leg (`--slot 2,4` with
-  `--from 2="leg L" --place 2=on` in the pair form). It uses the Eluna test toolkit (`.tt`) on the slot agent, so it is
-  refused with `--inject` (the injector assumes the commander in another copy) and on any other server. `--from "leg L"`
-  is staged: the walk starts at the highest move row before the leg's first pull that has no later creature row within
-  50 yd of it (Zul'Gurub leg 3: step 231 of the deployed rows, not the leg's first row 214, which stands inside Marli's
-  room); `--from "step N"` is taken as given and must be a positioned move row. The walk then, with `--sql`'s rows (or
-  the plan JSON's, with a note), clears the corridor of the legs it skips — every pull row before the start whose circle
+- `--place` (needs `--from` and `--sql`, and only on `m910q`/`tortoise-test2`) starts the raid **partway into its
+  instance** instead of at the door: several raids on one server can then each work a different boss leg (`--slot 2,4`
+  with `--from 2="leg L" --place 2=on` in the pair form). It uses the Eluna test toolkit (`.tt`) on the slot agent, so
+  it is refused with `--inject` (the injector assumes the commander in another copy) and on any other server. `--sql` is
+  required: the placed start step and the corridor are checked against the deployed rows, so a plan JSON whose export
+  numbers the steps differently cannot fail the walk after a placement has cost a hire. `--from "leg L"` is staged: the
+  walk starts at the highest move row before the leg's first pull that has no later creature row within 50 yd of it
+  (Zul'Gurub leg 3: step 231 of the deployed rows, not the leg's first row 214, which stands inside Marli's room);
+  `--from "step N"` is taken as given and must be a positioned move row (a plain `--from`, without `--place` or
+  `--until boss-done`, still goes to the server unresolved). `validate` refuses a plan whose legs' skip lists hold more
+  than the toolkit's 16 entries or whose longest toolkit line would overflow the toolkit's 200-char cap, both before any
+  GM command. The walk then clears the corridor of the legs it skips — every pull row before the start whose circle
   comes within 45 yd of the route to the `until` stop, despawned with `.tt clearto ... all=1` after a pre-read of the
   units there (never `kill`, never `boss`; a boss or hold row within 30 yd of the route refuses the placement) — quiets
-  the start point (`.tt quiet`), moves the raid onto it (`.tt place ... of=<mt>`), verifies it by the walk's own frames
+  the start point (`.tt quiet`, with one extra guarded clear round for a named unit that stands by a BEHIND row),
+  moves the raid onto it (`.tt place ... of=<mt>`), verifies it by the walk's own frames
   (one `.summon` per hire the frames miss) and only then starts the run, whose status line must show exactly that step
-  and step count. The commander stays inside the raid's copy for the whole walk (his own `.instance unbind` before the
+  and step count. Before the first teleport the commander must be in GM mode: `.gm on` is sent and the walk refuses the
+  placement when its reply is not `GM mode is ON`. The commander stays inside the raid's copy for the whole walk (his own `.instance unbind` before the
   hire, and again at teardown, drops a stale personal bind), so a wipe revives at the place point, not at the entrance.
   `--dry-run` prints the staged step, the point and every circle. `summary.json`'s `place` object carries the start step,
   the instance, the circles with their removed counts, the not-cleared list, the quiet result and the placed count.

@@ -1149,7 +1149,10 @@ probe found (2026-10-29, `tests/raid-inject-probe-20261029-042517/probe.md`). Wh
 README "Raid walks", `--place`. Needs a test server (m910q or tortoise-test2) whose image carries the Eluna test
 toolkit (`.tt place`, `clearto`, `quiet`, `q inst|group|units|floor`) and TortoiseBots with `feat/run-until`. The
 planned proof is Zul'Gurub leg 3 (`zul_gurub --slot 2 --from "leg high_priest_thekal" --place --until boss --sql <the
-deployed migration> --wipe-resume 1 --max-run-minutes 60`), first with `--dry-run`. What it has to settle:
+deployed migration> --wipe-resume 1 --max-run-minutes 60`), first with `--dry-run`. `--sql` is required with `--place`
+(the start step and the corridor are checked against the deployed rows; the refusal comes before the lease), and the
+probe step asserts the commander is in GM mode (`.gm on`, refused unless the reply is `GM mode is ON`), before the first
+teleport. What it has to settle:
 
 1. **The dry run.** It prints the staged start step (231 in the 1095-step export; whatever the deployed rows give), its
    point and the circles (steps 89, 91, 94, 96, 99 in the export), and sends nothing.

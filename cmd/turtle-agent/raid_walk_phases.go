@@ -782,9 +782,10 @@ func (w *walk) phaseStart(ctx context.Context) error {
 	if !rep.Reply.OK && rep.Reply.Kind != tbm.KindAck {
 		return stopf(exitRaidWalkFailed, "run start: no ACK (%s)", rep.Reply.Line)
 	}
-	// The server's own start text ("The run starts at step N of S (leg L)") is logged for the summary and the run.log.
+	// The server's own start text ("The run starts at step N of S (leg L)") is logged for the summary and the run.log,
+	// but only for a placed walk: the note is labelled "place:" (review round 1, item 10).
 	for _, l := range rep.Reply.Lines {
-		if strings.Contains(l, "run starts at step") {
+		if w.place != nil && strings.Contains(l, "run starts at step") {
 			w.note("place: %s", strings.TrimSpace(raidwalk.CleanLine(l)))
 		}
 	}

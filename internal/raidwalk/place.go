@@ -272,8 +272,21 @@ func FromStartStep(rows planexport.Rows, from []string) (int, error) {
 }
 
 // PlaceStop is the row the corridor's route ends at (spec 4.3): "until step N" is N, "until leg L" the leg's first row,
-// "until boss" the first boss row at or after the start, and no clause the last row.
+// "until boss" the first boss row at or after the start, and no clause the last row. A stop before the start step is
+// refused: the corridor would be empty and the placed run would end at once (review round 1, item 8).
 func PlaceStop(rows planexport.Rows, until []string, start int) (int, error) {
+	stop, err := placeStopRow(rows, until, start)
+	if err != nil {
+		return 0, err
+	}
+	if stop < start {
+		return 0, fmt.Errorf("place: the until clause stops at step %d, before the start step %d", stop, start)
+	}
+	return stop, nil
+}
+
+// placeStopRow reads the until clause (PlaceStop's own work, before the "before the start" refusal).
+func placeStopRow(rows planexport.Rows, until []string, start int) (int, error) {
 	if len(until) == 0 {
 		return len(rows.Steps), nil
 	}
@@ -390,17 +403,47 @@ type unitPos struct {
 	X, Y, Z float32
 }
 
+// planLegOf is the plan leg a row's leg belongs to. The rows' leg numbers are renumbered when an optional leg is left
+// out of the export (planexport's outLeg counts only the legs it writes), so the plan leg is found by the rows leg's
+// NAME, never by the number; the number is used only when the rows carry no leg row (a synthetic fixture) or its name
+// is empty (review round 1, item 4).
+func planLegOf(plan *dungeon.Plan, rows planexport.Rows, leg int) *dungeon.Leg {
+	if plan == nil {
+		return nil
+	}
+	name, found := "", false
+	for _, l := range rows.Legs {
+		if l.Leg == leg {
+			name, found = l.Name, true
+			break
+		}
+	}
+	if found && name != "" {
+		for i := range plan.Legs {
+			if plan.Legs[i].Name == name {
+				return &plan.Legs[i]
+			}
+		}
+		return nil
+	}
+	if leg < 0 || leg >= len(plan.Legs) {
+		return nil
+	}
+	return &plan.Legs[leg]
+}
+
 // groupPositions is the plan's member positions of the row's pull group (spec 4.3): among the groups of the row's leg
 // whose entries meet the row's, the one whose positions stand nearest the row (a leg has several groups of the same
 // trash entries), each position with the entry of its index.
-func groupPositions(plan *dungeon.Plan, s planexport.StepRow) []unitPos {
-	if plan == nil || s.Leg < 0 || s.Leg >= len(plan.Legs) {
+func groupPositions(plan *dungeon.Plan, rows planexport.Rows, s planexport.StepRow) []unitPos {
+	leg := planLegOf(plan, rows, s.Leg)
+	if leg == nil {
 		return nil
 	}
 	var bestG *dungeon.PullGroup
 	bestD := 0.0
-	for i := range plan.Legs[s.Leg].PullGroups {
-		g := plan.Legs[s.Leg].PullGroups[i]
+	for i := range leg.PullGroups {
+		g := leg.PullGroups[i]
 		if len(g.Positions) == 0 || !entriesMeet(g.Entries, s.Entries) {
 			continue
 		}
@@ -489,8 +532,11 @@ func PlaceClear(rows planexport.Rows, plan *dungeon.Plan, start, stop int) Clear
 	if len(route) == 0 {
 		return out
 	}
+	// The AHEAD set is every creature row from the start step to the LAST row of the plan, not to the until stop: a
+	// BEHIND circle may overlap a pack of a later leg that the run reaches after the stop, and the split must see it
+	// (review round 1, item 6).
 	var ahead []aheadRow
-	for i := start - 1; i < len(rows.Steps) && i < stop; i++ {
+	for i := start - 1; i < len(rows.Steps); i++ {
 		if creatureRow(rows.Steps[i]) && placedRow(rows.Steps[i]) {
 			ahead = append(ahead, aheadRow{step: i + 1, s: rows.Steps[i]})
 			out.Ahead = append(out.Ahead, AheadCircle{Step: i + 1, X: rows.Steps[i].X, Y: rows.Steps[i].Y, Z: rows.Steps[i].Z, Radius: rows.Steps[i].Radius})
@@ -515,7 +561,7 @@ func PlaceClear(rows planexport.Rows, plan *dungeon.Plan, start, stop int) Clear
 			continue
 		}
 		if hit, ok := aheadHit(ahead, s.X, s.Y, s.Z, circleRadius(s.Radius)); ok {
-			units := groupPositions(plan, s)
+			units := groupPositions(plan, rows, s)
 			if len(units) == 0 {
 				out.Notes = append(out.Notes, fmt.Sprintf("not cleared: row %d has no pull group positions and its circle overlaps AHEAD row %d", i+1, hit))
 				continue

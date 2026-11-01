@@ -39,6 +39,11 @@ func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
 		return false
 	}
 	switch f[0] {
+	case ".gm":
+		// The place phase's GM-mode probe (spec 5 step 1, review round 1, item 12): the commander must be in GM mode
+		// before the first teleport, and `.gm on` is the only read of that state (it is a no-op already ON). Nothing
+		// else may be typed into the GM console.
+		return len(f) == 2 && f[1] == "on"
 	case ".go":
 		if len(f) != 6 || f[1] != "xyz" {
 			return false
@@ -200,14 +205,18 @@ func ttHire(s string, hires map[string]bool) bool {
 	return ok && hires[name]
 }
 
-// ttSkip says s is skip=<id,id,...>: at least one entry id, at most the toolkit's 16, digits only.
+// MaxSkipEntries is the toolkit's own skip= cap (ttSkip): a plan whose legs' skip union is longer would make every
+// clearto and quiet line unusable, so validate refuses it before any GM line (review round 1, item 11).
+const MaxSkipEntries = 16
+
+// ttSkip says s is skip=<id,id,...>: at least one entry id, at most the toolkit's MaxSkipEntries, digits only.
 func ttSkip(s string) bool {
 	rest, ok := strings.CutPrefix(s, "skip=")
 	if !ok || rest == "" {
 		return false
 	}
 	parts := strings.Split(rest, ",")
-	if len(parts) > 16 {
+	if len(parts) > MaxSkipEntries {
 		return false
 	}
 	for _, p := range parts {

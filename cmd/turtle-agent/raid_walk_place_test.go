@@ -11,6 +11,9 @@ import (
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -68,6 +71,8 @@ type placeToolkit struct {
 	units func(cmd string) (units []any, trunc bool)
 	// quiet is the answer of the n-th quiet read (nil: always quiet).
 	quiet func(n int) bool
+	// quietNear is the `near` list a not-quiet read reports (nil: none): the extra clear round's input.
+	quietNear []any
 	// clearto, when set, answers a `clearto` (n removed, or an error).
 	clearto func(cmd string) (int, error)
 	// place, when set, replaces the default place handler.
@@ -122,7 +127,11 @@ func (p *placeToolkit) answer(cmd string) (ttResult, error) {
 		if p.quiet != nil {
 			q = p.quiet(p.quietCalls)
 		}
-		return ttReplyOf(p.t, map[string]any{"map": 309, "read": 2, "final": true, "quiet": q, "near": []any{}, "roamers": []any{}}), nil
+		near := []any{}
+		if !q && p.quietNear != nil {
+			near = p.quietNear
+		}
+		return ttReplyOf(p.t, map[string]any{"map": 309, "read": 2, "final": true, "quiet": q, "near": near, "roamers": []any{}}), nil
 	case strings.HasPrefix(cmd, "place "):
 		p.places = append(p.places, cmd)
 		if p.place != nil {
@@ -230,13 +239,26 @@ func TestParsePlaceNeedsFrom(t *testing.T) {
 		t.Fatalf("exit %d, stderr %q", code, stderr.String())
 	}
 	stderr.Reset()
-	if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--place", "--from", "step 5"}, &stderr); code != exitOK {
+	if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--place", "--from", "step 5", "--sql", "walk.sql"}, &stderr); code != exitOK {
 		t.Fatalf("a placed walk with a start: exit %d, stderr %q", code, stderr.String())
 	}
 	// --place=off is a plain walk: it needs no --from.
 	stderr.Reset()
 	if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--place=off"}, &stderr); code != exitOK {
 		t.Fatalf("--place=off: exit %d, stderr %q", code, stderr.String())
+	}
+}
+
+// The placed start is checked against the deployed rows, so --place requires --sql (review round 1, item 9).
+func TestParsePlaceNeedsSQL(t *testing.T) {
+	var stderr bytes.Buffer
+	if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--place", "--from", "step 5"}, &stderr); code != exitUsage ||
+		!strings.Contains(stderr.String(), "--place needs --sql") {
+		t.Fatalf("exit %d, stderr %q", code, stderr.String())
+	}
+	stderr.Reset()
+	if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--place", "--from", "step 5", "--sql", "walk.sql"}, &stderr); code != exitOK {
+		t.Fatalf("with --sql: exit %d, stderr %q", code, stderr.String())
 	}
 }
 
@@ -253,12 +275,12 @@ func TestParsePlaceServerGuard(t *testing.T) {
 	var stderr bytes.Buffer
 	for _, server := range []string{"m910q", "tortoise-test2"} {
 		stderr.Reset()
-		if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--server", server, "--place", "--from", "step 5"}, &stderr); code != exitOK {
+		if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--server", server, "--place", "--from", "step 5", "--sql", "walk.sql"}, &stderr); code != exitOK {
 			t.Fatalf("%s: exit %d, stderr %q", server, code, stderr.String())
 		}
 	}
 	stderr.Reset()
-	if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--server", "tortoise", "--place", "--from", "step 5"}, &stderr); code != exitUsage ||
+	if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--server", "tortoise", "--place", "--from", "step 5", "--sql", "walk.sql"}, &stderr); code != exitUsage ||
 		!strings.Contains(stderr.String(), "test servers only") {
 		t.Fatalf("exit %d, stderr %q", code, stderr.String())
 	}
@@ -289,6 +311,7 @@ func TestPhasePlaceOrder(t *testing.T) {
 	orderedAt(t, f.agentLog(), []string{
 		"gm .instance unbind 309", // phase 5b
 		"tt q inst",               // the probe, before anything moves
+		"gm .gm on",               // the GM-mode probe, before the first teleport
 		"cmdr cmd stay",
 		"gm .appear Bot01",
 		"tt q inst",
@@ -487,6 +510,14 @@ func TestReviveUsesPlacePointNoEntranceFallback(t *testing.T) {
 	f, _ := newPlaceFixture(t)
 	f.opts.wipeResume = 0
 	f.agent.startReply = placeStartReply("zul_gurub", 105, 397, 124)
+	// A hostile unit that follows the commander: the place point is never quiet, so the entrance fallback would run
+	// if the placed walk kept it (review round 1, item 5): the test's entrance assertion is what turns red.
+	f.agent.unitsFn = func(int) []objects.Unit {
+		f.agent.mu.Lock()
+		x, y, z := f.agent.x, f.agent.y, f.agent.z
+		f.agent.mu.Unlock()
+		return []objects.Unit{{Type: "creature", Name: "Warder", Hostile: true, X: x + 10, Y: y, Z: z}}
+	}
 	wipeAfterStart(f)
 	code := f.run(context.Background())
 	if code != exitRaidWalkIncident {
@@ -546,7 +577,7 @@ func TestReviveInstanceCheckBeforeSummon(t *testing.T) {
 // The pair form narrows --place to one walk (spec 3, test 18).
 func TestPairPlacePerWalk(t *testing.T) {
 	var stderr bytes.Buffer
-	o, code := parsePairArgs([]string{"--slot", "2,4", "--place", "2=on", "--from", "2=leg high_priest_thekal", "zul_gurub"}, &stderr)
+	o, code := parsePairArgs([]string{"--slot", "2,4", "--place", "2=on", "--from", "2=leg high_priest_thekal", "--sql", "walk.sql", "zul_gurub"}, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
@@ -561,7 +592,7 @@ func TestPairPlacePerWalk(t *testing.T) {
 	}
 	// A bare --place turns it on for every walk; each placed walk needs its own --from.
 	stderr.Reset()
-	o, code = parsePairArgs([]string{"--slot", "2,4", "--place", "--from", "leg high_priest_thekal", "zul_gurub"}, &stderr)
+	o, code = parsePairArgs([]string{"--slot", "2,4", "--place", "--from", "leg high_priest_thekal", "--sql", "walk.sql", "zul_gurub"}, &stderr)
 	if code != exitOK {
 		t.Fatalf("bare --place: exit %d: %s", code, stderr.String())
 	}
@@ -589,5 +620,313 @@ func TestDryRunPrintsPlacePlan(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(f.out, "summary.json")); err == nil {
 		t.Fatal("the dry run wrote a summary")
+	}
+}
+
+// placePlanRows builds the rows and the place plan the fixture's validate builds (no --sql: the plan JSON's own
+// export), so a test can learn the start step, the circles and the AHEAD rows the walk computes.
+func placePlanRows(t *testing.T) (planexport.Rows, raidwalk.PlacePlan) {
+	t.Helper()
+	plan := zgPlan(t)
+	res, err := planexport.Build(plan, planexport.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := res.Rows
+	step, leg, err := raidwalk.PlaceStart(rows, []string{"from", "leg", "high_priest_thekal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	point, ok := raidwalk.PlacePoint(rows, step)
+	if !ok {
+		t.Fatal("the start step has no point")
+	}
+	stop, err := raidwalk.PlaceStop(rows, []string{"until", "boss"}, step)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clear := raidwalk.PlaceClear(rows, plan, step, stop)
+	if clear.Refusal != "" {
+		t.Fatal(clear.Refusal)
+	}
+	p := raidwalk.PlacePlan{Start: step, Leg: leg, Point: point, Stop: stop,
+		Circles: clear.Circles, Notes: clear.Notes, Ahead: clear.Ahead, Skips: raidwalk.PlaceSkips(plan)}
+	return rows, p
+}
+
+// The pre-read must not clear a circle that holds a unit standing in an AHEAD row's circle (review round 1, item 5).
+func TestPlacePreReadAheadUnitSkipsCircle(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	if len(plan.Circles) == 0 || len(plan.Ahead) == 0 {
+		t.Fatal("the fixture plan has no circles or no AHEAD rows")
+	}
+	entry := plan.Circles[0].Entries[0]
+	ahead := plan.Ahead[0]
+	p.units = func(string) ([]any, bool) {
+		return []any{map[string]any{"g": "0xF1300000000009", "e": entry, "n": "Roamer",
+			"p": []float32{ahead.X, ahead.Y, ahead.Z}, "dz": 0.5, "d": 1.0}}, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	var found bool
+	for _, s := range f.summary().Place.NotCleared {
+		if strings.Contains(s, "AHEAD row") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no AHEAD note; not_cleared %v", f.summary().Place.NotCleared)
+	}
+}
+
+// A truncated pre-read clears nothing in that circle (review round 1, item 5).
+func TestPlacePreReadTruncatedSkipsCircle(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	p.units = func(string) ([]any, bool) { return nil, true }
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	if len(p.cleartos) != 0 {
+		t.Fatalf("a truncated pre-read still cleared: %v", p.cleartos)
+	}
+	sum := f.summary()
+	if len(sum.Place.NotCleared) != len(plan.Circles) {
+		t.Fatalf("not_cleared %v", sum.Place.NotCleared)
+	}
+	for _, s := range sum.Place.NotCleared {
+		if !strings.Contains(s, "trunc") {
+			t.Fatalf("not_cleared %v", sum.Place.NotCleared)
+		}
+	}
+}
+
+// A unit beyond the clear's dz window is not the circle's business (review round 1, item 5).
+func TestPlacePreReadIgnoresFarDz(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	p.units = func(string) ([]any, bool) {
+		return []any{map[string]any{"g": "0xF1300000000009", "e": 999999, "n": "Far",
+			"p": []float32{0, 0, 0}, "dz": 12.0, "d": 1.0}}, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	if len(p.cleartos) == 0 {
+		t.Fatal("no clearto was sent")
+	}
+	if sum := f.summary(); len(sum.Place.NotCleared) != 0 {
+		t.Fatalf("not_cleared %v", sum.Place.NotCleared)
+	}
+}
+
+// A unit whose entry is in the clearto's skip list cannot block the circle (review round 1, item 2).
+func TestPlacePreReadIgnoresSkipEntry(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	if len(plan.Skips) == 0 {
+		t.Fatal("the fixture plan has no skip entries")
+	}
+	p.units = func(string) ([]any, bool) {
+		return []any{map[string]any{"g": "0xF1300000000009", "e": plan.Skips[0], "n": "Trigger",
+			"p": []float32{0, 0, 0}, "dz": 0.0, "d": 1.0}}, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	if len(p.cleartos) == 0 {
+		t.Fatal("no clearto was sent")
+	}
+	if sum := f.summary(); len(sum.Place.NotCleared) != 0 {
+		t.Fatalf("not_cleared %v", sum.Place.NotCleared)
+	}
+}
+
+// The placed-start check reads the step count too: a server with other rows stops the run (review round 1, item 5).
+func TestPlaceStartLineCountMismatchStops(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps)+2, plan.Stop)
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	var stopped bool
+	for _, line := range f.agent.gmLines() {
+		if line == ".bot run stop" {
+			stopped = true
+		}
+	}
+	if !stopped {
+		t.Fatalf("the walk did not stop the run: %v", f.agent.gmLines())
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, "place: placed for step") {
+		t.Fatalf("end reason %q", sum.EndReason)
+	}
+}
+
+// The quiet step's one extra clear round runs the same guard as the corridor: a circle holding a unit of another row,
+// a unit in an AHEAD circle, or a truncated reply is never cleared; the quiet then fails (review round 1, item 1).
+func TestQuietExtraClearRefusesUnsafeCircle(t *testing.T) {
+	cases := []struct {
+		name      string
+		extra     []any
+		trunc     bool
+		wantInSum string
+	}{
+		{"unrelated entry", []any{map[string]any{"g": "0xF1300000000009", "e": 999999, "n": "Stranger",
+			"p": []float32{0, 0, 0}, "dz": 0.0, "d": 1.0}}, false, "stands in the circle"},
+		{"ahead unit", nil, false, "AHEAD row"},
+		{"truncated", nil, true, "trunc"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f, p := newPlaceFixture(t)
+			rows, plan := placePlanRows(t)
+			if len(plan.Circles) == 0 || len(plan.Ahead) == 0 {
+				t.Fatal("the fixture plan has no circles or no AHEAD rows")
+			}
+			owner := plan.Circles[0]
+			p.quiet = func(int) bool { return false }
+			p.quietNear = []any{map[string]any{"g": "0xF1300000000009", "e": owner.Entries[0], "n": "Roamer",
+				"p": []float32{owner.X, owner.Y, owner.Z}, "w": 1.0, "d": 3.0}}
+			extra := tc.extra
+			if tc.name == "ahead unit" {
+				ahead := plan.Ahead[0]
+				extra = []any{map[string]any{"g": "0xF1300000000009", "e": owner.Entries[0], "n": "Roamer",
+					"p": []float32{ahead.X, ahead.Y, ahead.Z}, "dz": 0.0, "d": 1.0}}
+			}
+			p.units = func(cmd string) ([]any, bool) {
+				if f := strings.Fields(cmd); len(f) > 2 && f[2] == "3" { // the extra round's placeExtraRadius
+					return extra, tc.trunc
+				}
+				return nil, false
+			}
+			f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+			code := f.run(context.Background())
+			if code != exitRaidWalkFailed {
+				t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+			}
+			for _, c := range p.cleartos {
+				if strings.Contains(c, " 3 dz=") {
+					t.Fatalf("the extra clear ran in an unsafe circle: %q", c)
+				}
+			}
+			sum := f.summary()
+			if !strings.Contains(sum.EndReason, "not quiet") {
+				t.Fatalf("end reason %q", sum.EndReason)
+			}
+			var noted bool
+			for _, n := range sum.Notes {
+				if strings.Contains(n, "in the extra round") && strings.Contains(n, tc.wantInSum) {
+					noted = true
+				}
+			}
+			if !noted {
+				t.Fatalf("no %q note in the extra round: %v", tc.wantInSum, sum.Notes)
+			}
+		})
+	}
+}
+
+// Before the first teleport the commander must be in GM mode (review round 1, item 12).
+func TestPlaceRequiresGMMode(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	f.agent.noGMOn = true
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	for _, line := range f.agent.gmLines() {
+		if strings.HasPrefix(line, ".appear ") {
+			t.Fatalf("the commander appeared before the GM check: %q", line)
+		}
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, "not in GM mode") {
+		t.Fatalf("end reason %q", sum.EndReason)
+	}
+}
+
+// The longest-line check (review round 1, item 11): a plan whose skip list pushes a clearto over the toolkit's cap is
+// caught before any GM command.
+func TestPlaceTTMaxOverflow(t *testing.T) {
+	skip := make([]uint32, raidwalk.MaxSkipEntries)
+	for i := range skip {
+		skip[i] = uint32(4000000000 + i)
+	}
+	p := &raidwalk.PlacePlan{
+		Point:   dungeon.Point{X: -11920.5, Y: -1857.6, Z: 61.34},
+		Skips:   skip,
+		Circles: []raidwalk.ClearCircle{{X: -11920.5, Y: -1857.6, Z: 61.34, Radius: 22}},
+	}
+	long, n := placeTTMax(p, 309)
+	if n != len(long) || n <= raidwalk.AllowedTTMax {
+		t.Fatalf("longest line is %d chars (over %v): %q", n, n > raidwalk.AllowedTTMax, long)
+	}
+}
+
+// A plan whose skip union is over the toolkit's cap is refused in validate, before any GM command (review round 1,
+// item 11).
+func TestPlaceRefusesOverlongSkipList(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	raw, err := os.ReadFile("../../dungeons/zul_gurub.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	legs, _ := doc["legs"].([]any)
+	skip := make([]any, 20)
+	for i := range skip {
+		skip[i] = 90000 + i
+	}
+	for _, l := range legs {
+		if m, ok := l.(map[string]any); ok {
+			m["skip"] = skip
+		}
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "zul_gurub.json"), out, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.opts.dir = dir
+	code := f.run(context.Background())
+	if code != exitUsage {
+		t.Fatalf("exit %d, want %d: %s", code, exitUsage, f.stderr.String())
+	}
+	if !strings.Contains(f.stderr.String(), "skip lists hold") {
+		t.Fatalf("stderr %q", f.stderr.String())
+	}
+	if len(f.agent.gmLines()) != 0 {
+		t.Fatalf("a GM line went out before the refusal: %v", f.agent.gmLines())
+	}
+}
+
+// A plain --from (no --place, no boss-done) goes to the server exactly as before: a step number past the plan's own
+// export is not resolved against the rows, so it is not refused (review round 1, item 3).
+func TestPlainFromStepNotResolvedAgainstRows(t *testing.T) {
+	f := newFixture(t)
+	f.opts.from = "step 500"
+	f.opts.until = "none"
+	f.opts.dryRun = true
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	if !strings.Contains(f.stdout.String(), "from step 500") {
+		t.Fatalf("the dry run does not carry the from clause:\n%s", f.stdout.String())
 	}
 }

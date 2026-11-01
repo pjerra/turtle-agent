@@ -337,6 +337,12 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 			fmt.Fprintf(stderr, "raid-walk: --place uses the Eluna test toolkit: test servers only (%s)\n", strings.Join(placeServerList(), ", "))
 			return o, exitUsage
 		}
+		if o.sql == "" {
+			// Q1 changed by the lead (review round 1, item 9): the placed start and the corridor must be the deployed
+			// rows, or a step-count mismatch fails the walk after a placement has cost a hire.
+			fmt.Fprintf(stderr, "raid-walk: --place needs --sql (the deployed migration): the start step and the corridor are checked against those rows\n")
+			return o, exitUsage
+		}
 	}
 	return o, exitOK
 }
@@ -829,9 +835,11 @@ func (w *walk) validate() error {
 	}
 	w.stepFirst = firstStepPoint(w.rows)
 	// The step the run starts at: with --place the staged start (spec 4.2), else the --from step. It is what
-	// `--until boss-done` is resolved from (spec 5.2).
+	// `--until boss-done` is resolved from (spec 5.2). A plain --from (no --place, no boss-done) is NOT resolved
+	// against the rows: it goes to the server exactly as before, so a step past the plan's own export is not refused
+	// here (review round 1, item 3).
 	startStep := 1
-	if w.opts.from != "" {
+	if w.opts.from != "" && (w.opts.place || raidwalk.IsBossDone(w.opts.until)) {
 		n, err := raidwalk.FromStartStep(w.rows, w.fromWords)
 		if err != nil {
 			return stopf(exitUsage, "%v", err)
@@ -881,6 +889,14 @@ func (w *walk) validate() error {
 		w.place.Stop, w.place.Circles, w.place.Notes, w.place.Ahead = stop, clear.Circles, clear.Notes, clear.Ahead
 		for _, n := range clear.Notes {
 			w.note("place: %s", n)
+		}
+		// Before any GM command: the toolkit's skip= cap and its 200-char line cap (review round 1, item 11). A plan
+		// that overflows either would be refused by AllowedTT at the first clearto, deep inside the place phase.
+		if len(w.place.Skips) > raidwalk.MaxSkipEntries {
+			return stopf(exitUsage, "--place: the plan's legs' skip lists hold %d entries; the toolkit's skip= takes at most %d", len(w.place.Skips), raidwalk.MaxSkipEntries)
+		}
+		if long, n := placeTTMax(w.place, w.plan.Map); n > raidwalk.AllowedTTMax {
+			return stopf(exitUsage, "--place: the longest toolkit line is %d chars, over the toolkit's %d: %s", n, raidwalk.AllowedTTMax, long)
 		}
 	}
 
@@ -1257,7 +1273,7 @@ func (w *walk) printPlan(out io.Writer) {
 		for _, n := range w.place.Notes {
 			fmt.Fprintf(out, "  8b note: %s\n", n)
 		}
-		fmt.Fprintf(out, "  8b commander: .appear <mt>; q inst, q group, q floor, q units, clearto, quiet, place <x> <y> <z> spread=5 of=<mt>; frames; cmd stay; cmd follow\n")
+		fmt.Fprintf(out, "  8b commander: .gm on; .appear <mt>; q inst, q group, q floor, q units, clearto, quiet, place <x> <y> <z> spread=5 of=<mt>; frames; cmd stay; cmd follow\n")
 	}
 	start := []string{w.plan.Name}
 	start = append(start, w.fromWords...)

@@ -1,6 +1,7 @@
 package raidwalk
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -66,13 +67,14 @@ func TestAllowedLine(t *testing.T) {
 // The place phase's two added GM lines (spec 7): .appear of a hire, and .instance unbind of the walk's own map.
 func TestAllowedLineAppearUnbind(t *testing.T) {
 	hires := map[string]bool{"Tankbot": true, "Healbot": true}
-	for _, line := range []string{".appear Tankbot", ".appear Healbot", ".instance unbind 309"} {
+	for _, line := range []string{".appear Tankbot", ".appear Healbot", ".instance unbind 309", ".gm on"} {
 		if !AllowedLine(line, hires, 309) {
 			t.Errorf("refused an allowed line %q", line)
 		}
 	}
 	for _, line := range []string{".appear Stranger", ".appear", ".appear Tankbot extra", ".instance unbind all",
-		".instance unbind 409", ".instance unbind", ".instance listbinds", ".instance unbind 0309"} {
+		".instance unbind 409", ".instance unbind", ".instance listbinds", ".instance unbind 0309",
+		".gm", ".gm off", ".gm on extra", ".gm visible off", ".gm visible on"} {
 		if AllowedLine(line, hires, 309) {
 			t.Errorf("accepted a forbidden line %q", line)
 		}
@@ -147,5 +149,18 @@ func TestAllowedTT(t *testing.T) {
 	long := "q floor " + strings.Repeat("1", 200)
 	if AllowedTT(long, hires, 309) {
 		t.Error("accepted an over-long command")
+	}
+	// the skip cap: MaxSkipEntries entries pass, one more is refused (review round 1, item 11).
+	ids := make([]string, 0, MaxSkipEntries+1)
+	for i := range MaxSkipEntries + 1 {
+		ids = append(ids, strconv.Itoa(90000+i))
+	}
+	at := "clearto 309 1 2 3 8 dz=8 all=1 skip=" + strings.Join(ids[:MaxSkipEntries], ",")
+	over := "clearto 309 1 2 3 8 dz=8 all=1 skip=" + strings.Join(ids, ",")
+	if !AllowedTT(at, hires, 309) {
+		t.Errorf("refused %d skip entries", MaxSkipEntries)
+	}
+	if AllowedTT(over, hires, 309) {
+		t.Errorf("accepted %d skip entries", MaxSkipEntries+1)
 	}
 }

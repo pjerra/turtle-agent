@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
 const (
@@ -23,6 +25,8 @@ const (
 	ttCallTimeout = 45 * time.Second
 	// placeProbeTimeout is how long the toolkit probe waits before the walk calls the server not a test image.
 	placeProbeTimeout = 10 * time.Second
+	// placeGMTimeout is how long the GM-mode probe waits for the `.gm on` notification (review round 1, item 12).
+	placeGMTimeout = 10 * time.Second
 	// placeVerifyWait and placeSummonWait are the frame windows of the place verification (spec 5 step 9).
 	placeVerifyWait = 15 * time.Second
 	placeSummonWait = 10 * time.Second
@@ -168,6 +172,47 @@ func (w *walk) phaseUnbindSelf(ctx context.Context) error {
 	return w.gm(ctx, fmt.Sprintf(".instance unbind %d", w.plan.Map))
 }
 
+// placeGM is spec 5 step 1 (review round 1, item 12): before the first teleport the commander must be in GM mode, or
+// `.appear` and the clears would fail late, with a hire already spent. `.gm on` is a no-op when already on and its
+// reply (the server's notification "GM mode is ON", or an error for an account with no GM rights) is the only read of
+// that state the walk has. A refusal ends the walk before anything moves.
+func (w *walk) placeGM(ctx context.Context) error {
+	if err := w.gm(ctx, ".gm on"); err != nil {
+		return err
+	}
+	deadline := w.env.now().Add(placeGMTimeout)
+	for {
+		var page events.Page
+		params := map[string]any{"since": w.eventsAt, "kinds": []string{"system"}, "wait_ms": 1000}
+		if err := w.agent.Call(ctx, "events", params, &page, 15*time.Second); err != nil {
+			return stopf(exitRaidWalkFailed, "place: the GM-mode check: events: %v", err)
+		}
+		w.eventsAt = page.Next
+		for _, e := range page.Events {
+			if line, ok := tbm.Line(e); ok {
+				w.logLine(w.env.now(), line)
+				continue
+			}
+			if e.Kind != events.KindSystem || e.Text == "" {
+				continue
+			}
+			text := raidwalk.CleanLine(e.Text)
+			switch {
+			case strings.Contains(text, "GM mode is ON"):
+				return nil
+			case strings.Contains(text, "GM mode is OFF"), strings.Contains(text, "There is no such command"):
+				return stopf(exitRaidWalkFailed, "place: the commander is not in GM mode (%s)", text)
+			}
+		}
+		if !w.env.now().Before(deadline) {
+			return stopf(exitRaidWalkFailed, "place: no answer to .gm on in %s: the commander's GM mode is unknown", placeGMTimeout)
+		}
+		if err := w.env.sleep(ctx, 200*time.Millisecond); err != nil {
+			return stopf(exitRaidWalkFailed, "place: interrupted")
+		}
+	}
+}
+
 // placeSleep waits d, or ends the walk when the context does.
 func (w *walk) placeSleep(ctx context.Context, d time.Duration) error {
 	if err := w.env.sleep(ctx, d); err != nil {
@@ -307,6 +352,11 @@ func (w *walk) placeCircleBlocked(c raidwalk.ClearCircle, units []ttUnit, trunc 
 		if u.Dz > placeClearDz || u.Dz < -placeClearDz {
 			continue
 		}
+		if inEntries(w.place.Skips, u.Entry) {
+			// The clearto carries skip=<those entries>, so the toolkit never touches them: a skip entry in the circle
+			// cannot block the clear (review round 1, item 2).
+			continue
+		}
 		if !inEntries(c.Entries, u.Entry) {
 			return fmt.Sprintf("unit %d %s stands in the circle", u.Entry, u.Name)
 		}
@@ -422,8 +472,23 @@ func (w *walk) placeQuiet(ctx context.Context) error {
 			if !w.placeRogue(u) {
 				continue
 			}
-			if _, _, err := w.placeUnits(ctx, placeExtraRadius, u.X, u.Y, u.Z); err != nil {
+			// The extra round is a clear like any other (review round 1, item 1): it keeps the pre-read's answer and
+			// runs the same guard before it acts. A unit no BEHIND row owns is never cleared, and a circle holding a
+			// unit of another row, a unit in an AHEAD circle, or a truncated reply is not cleared at all.
+			owner, ok := w.placeRogueOwner(u)
+			if !ok {
+				w.note("place: not cleared %d %s in the extra round: no BEHIND row owns the unit", u.Entry, u.Name)
+				continue
+			}
+			c := raidwalk.ClearCircle{Step: owner.Step, Leg: owner.Leg, X: u.X, Y: u.Y, Z: u.Z,
+				Radius: placeExtraRadius, Entries: owner.Entries}
+			units, trunc, err := w.placeUnits(ctx, placeExtraRadius, u.X, u.Y, u.Z)
+			if err != nil {
 				return err
+			}
+			if why := w.placeCircleBlocked(c, units, trunc); why != "" {
+				w.note("place: not cleared %d %s in the extra round: %s", u.Entry, u.Name, why)
+				continue
 			}
 			cmd := fmt.Sprintf("clearto %d %s %s %s %d dz=%s all=1%s", w.plan.Map, num32(u.X), num32(u.Y), num32(u.Z), placeExtraRadius, num32(placeClearDz), skip)
 			if _, err := w.tt(ctx, cmd); err != nil {
@@ -510,6 +575,23 @@ func (w *walk) placeRogue(u ttUnit) bool {
 		}
 	}
 	return false
+}
+
+// placeRogueOwner is the BEHIND circle that owns a unit of the quiet list (review round 1, item 1): among the circles
+// whose entries hold the unit's entry, the nearest to it. A patrol unit whose entry no BEHIND row owns gets no owner,
+// and the extra clear never runs for it; the quiet then fails and the placement stops cleanly.
+func (w *walk) placeRogueOwner(u ttUnit) (raidwalk.ClearCircle, bool) {
+	var best raidwalk.ClearCircle
+	bestD := math.Inf(1)
+	for _, c := range w.place.Circles {
+		if !inEntries(c.Entries, u.Entry) {
+			continue
+		}
+		if d := placeDist3(u.X, u.Y, u.Z, c.X, c.Y, c.Z); d < bestD {
+			best, bestD = c, d
+		}
+	}
+	return best, bestD < math.Inf(1)
 }
 
 // placeMove is spec 5 step 8: the toolkit moves the raid's group onto the point.
@@ -700,6 +782,10 @@ func (w *walk) phasePlace(ctx context.Context) error {
 	if err != nil {
 		return stopf(exitRaidWalkFailed, "place: the Eluna test toolkit does not answer on %s (not a test image?): %v", w.opts.server, err)
 	}
+	// 1b. the commander must be in GM mode, before the first teleport (review round 1, item 12).
+	if err := w.placeGM(ctx); err != nil {
+		return err
+	}
 	// 2. hold the raid where it stands while the commander steps out.
 	w.placeStayed = w.placeHold(ctx)
 	// 3. into the raid's copy.
@@ -782,12 +868,53 @@ func (w *walk) placeLeave(ctx context.Context) {
 		w.note("place: the teardown's .go to the portal: %v", err)
 		return
 	}
-	if err := w.env.sleep(ctx, time.Second); err != nil {
-		return
+	// Wait for the portal map rather than sleeping a fixed second: the unbind is a GM line whose target is the
+	// commander's current position, and a `.go xyz` that has not landed yet would unbind in the instance
+	// (review round 1, item 7). A failure is only a note here, as the teardown still runs.
+	if err := w.waitMap(ctx, w.plan.Portal.Map, 30*time.Second, time.Time{}); err != nil {
+		w.note("place: the teardown's wait for the portal map: %v", err)
 	}
 	if err := w.gm(ctx, fmt.Sprintf(".instance unbind %d", w.plan.Map)); err != nil {
 		w.note("place: the teardown's .instance unbind: %v", err)
 	}
+}
+
+// placeTTMax is the longest toolkit line the place phase will build for this plan (with the plan's map), so validate
+// can refuse a plan whose skip list or geometry would overflow one chat line before any GM command runs
+// (review round 1, item 11).
+func placeTTMax(p *raidwalk.PlacePlan, planMap uint32) (string, int) {
+	long, n := "", 0
+	for _, l := range placeTTLines(p, planMap) {
+		if len(l) > n {
+			long, n = l, len(l)
+		}
+	}
+	return long, n
+}
+
+// placeTTLines is every toolkit line the place phase sends, with a placeholder main-tank name (a hire's name is at most
+// 12 characters, gmNameRe), so the check is a true upper bound.
+func placeTTLines(p *raidwalk.PlacePlan, planMap uint32) []string {
+	const mt = "MMMMMMMMMMMM"
+	tail := ""
+	if w := raidwalk.SkipWords(p.Skips); w != "" {
+		tail = " skip=" + w
+	}
+	px, py, pz := num32(p.Point.X), num32(p.Point.Y), num32(p.Point.Z)
+	out := []string{
+		"q inst",
+		"q group of=" + mt,
+		fmt.Sprintf("q floor %s %s %s", px, py, pz),
+		fmt.Sprintf("quiet %d %s %s %s w=%d dz=%d%s", placeQuietR, px, py, pz, placeQuietWaitS, placeClearDz, tail),
+		fmt.Sprintf("place %s %s %s spread=5 of=%s", px, py, pz, mt),
+	}
+	for _, c := range p.Circles {
+		out = append(out,
+			fmt.Sprintf("q units %s %s %s %s all", num32(c.Radius), num32(c.X), num32(c.Y), num32(c.Z)),
+			fmt.Sprintf("clearto %d %s %s %s %s dz=%d all=1%s", planMap, num32(c.X), num32(c.Y), num32(c.Z), num32(c.Radius), placeClearDz, tail),
+		)
+	}
+	return out
 }
 
 // placeDist3 is the 3D distance between two points.

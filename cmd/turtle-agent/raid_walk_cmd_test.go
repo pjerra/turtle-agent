@@ -162,6 +162,8 @@ type walkFakeAgent struct {
 	pinfoLagTargets bool
 	prevSel         packet.GUID
 	gmFail          func(line string) error
+	// noGMOn makes the `.gm on` probe answer "GM mode is OFF": the place phase must refuse (review round 1, item 12).
+	noGMOn bool
 
 	// The place phase's toolkit: ttFn answers one `.tt` command (nil: the test does not use the toolkit), ttCalls
 	// records every command in order.
@@ -357,6 +359,13 @@ func (f *walkFakeAgent) gmSide(line string) {
 				f.status.Map = uint32(m)
 			}
 			f.mu.Unlock()
+		}
+	case line == ".gm on":
+		// The place phase's GM-mode probe (review round 1, item 12): the server answers a notification.
+		if f.noGMOn {
+			f.push("GM mode is OFF", "")
+		} else {
+			f.push("GM mode is ON", "")
 		}
 	case line == ".gps":
 		f.gpsSide()
