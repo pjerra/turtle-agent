@@ -2167,7 +2167,7 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   units there (never `kill`, never `boss`; a boss or hold row within 30 yd of the route refuses the placement) — quiets
   the start point — the walk judges the quiet itself, not the toolkit's flag: a unit blocks only when it is not a skip
   entry, not a rank-0 critter of at most 100 HP and either stands within 25 yd of the point or belongs to a BEHIND row's
-  circle by its **home** (the spawn point the toolkit sends with every unit), which one extra guarded clear round then
+  circle by its **home** (the spawn point the toolkit sends with the unit; without one the unit has no owner), which one
   takes; the roamers (units that moved between the quiet's two reads, which the toolkit lists without a position) are
   joined to one `q units` read of 80 yd, and a roamer that read misses blocks — moves the raid onto it
   (`.tt place ... of=<mt>`), verifies it by the walk's own frames
@@ -2181,8 +2181,8 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   between them can be despawned along with the row's own. Hence test servers only; the quiet check and the placed-start
   check catch a broken run, and the walk report lists every clear (`place.circles[]`, the `place:` notes). The quiet
   step's one extra round keeps away from any circle the corridor refused (a unit within that circle's radius + 6 yd is
-  not cleared) and clears only a unit a BEHIND row owns by entry and by its home (or, when the reply carries no `home`,
-  by where it stands). AHEAD rows of later legs and unowned units beyond those 25 yd never block: a run from the door has
+  not cleared) and clears only a unit a BEHIND row owns by entry and by its home; a reply without a `home` gives no
+  owner (fail closed): the unit is never cleared, and inside those 25 yd the walk refuses the placement. AHEAD rows of later legs and unowned units beyond those 25 yd never block: a run from the door has
   them alive at this step too. When the only units left inside the 25 yd are ones the toolkit listed as roamers (patrols
   walking through), the quiet is read again twice, 20 s apart, and the placement then fails. Every unit the quiet acts
   on or refuses is noted with its spawn guid (`db`), where it stands and its home.

@@ -807,9 +807,9 @@ func TestQuietExtraClearRefusesUnsafeCircle(t *testing.T) {
 				t.Fatal("the fixture plan has no circles or no AHEAD rows")
 			}
 			owner := plan.Circles[0]
+			home := [3]float32{owner.X, owner.Y, owner.Z}
 			p.quiet = func(int) bool { return false }
-			p.quietNear = []any{map[string]any{"g": "0xF1300000000009", "e": owner.Entries[0], "n": "Roamer",
-				"p": []float32{owner.X, owner.Y, owner.Z}, "w": 1.0, "d": 3.0}}
+			p.quietNear = []any{quietHomedAt(owner.Entries[0], owner.X, owner.Y, owner.Z, home)}
 			extra := tc.extra
 			if tc.name == "ahead unit" {
 				ahead := plan.Ahead[0]
@@ -950,6 +950,13 @@ func quietUnitAt(entry uint32, x, y, z float32) map[string]any {
 	return map[string]any{"g": "0xF1300000000009", "e": entry, "n": "Roamer", "p": []float32{x, y, z}, "w": 1.0, "d": 3.0}
 }
 
+// quietHomedAt is a quiet read's `near` entry for a unit standing at a point whose home (its spawn point) the reply
+// carries: the extra round owns it by that home (a reply without one gives no owner: fail closed).
+func quietHomedAt(entry uint32, x, y, z float32, home [3]float32) map[string]any {
+	return map[string]any{"g": "0xF1300000000009", "e": entry, "n": "Roamer", "p": []float32{x, y, z}, "w": 1.0, "d": 3.0,
+		"home": []float32{home[0], home[1], home[2]}}
+}
+
 // extraClearCount is the number of extra-round cleartos (radius 3) among the toolkit lines.
 func extraClearCount(p *placeToolkit) int {
 	n := 0
@@ -966,8 +973,9 @@ func TestQuietExtraClearSendsSafeClearto(t *testing.T) {
 	f, p := newPlaceFixture(t)
 	rows, plan := placePlanRows(t)
 	owner := plan.Circles[0]
+	home := [3]float32{owner.X, owner.Y, owner.Z}
 	p.quiet = func(n int) bool { return n >= 2 }
-	p.quietNear = []any{quietUnitAt(owner.Entries[0], owner.X, owner.Y, owner.Z)}
+	p.quietNear = []any{quietHomedAt(owner.Entries[0], owner.X, owner.Y, owner.Z, home)}
 	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s", code, f.stderr.String())
@@ -1048,8 +1056,9 @@ func TestQuietExtraClearRefusesUnitNearSkippedCircle(t *testing.T) {
 		}
 		return nil, false
 	}
+	home := [3]float32{first.X, first.Y, first.Z}
 	p.quiet = func(int) bool { return false }
-	p.quietNear = []any{quietUnitAt(first.Entries[0], first.X, first.Y, first.Z)}
+	p.quietNear = []any{quietHomedAt(first.Entries[0], first.X, first.Y, first.Z, home)}
 	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
 	if code := f.run(context.Background()); code != exitRaidWalkFailed {
 		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
@@ -1275,9 +1284,9 @@ func TestQuietExtraClearOwnsByHome(t *testing.T) {
 	}
 }
 
-// A reply without a home falls back to where the unit stands (the pre-fix behaviour), and the note says the home was
-// missing, so the live run can tell the two apart.
-func TestPlaceQuietMissingHomeUsesPosition(t *testing.T) {
+// A reply without a home gives the unit no owner (fail closed): the extra round never clears it, and the note says the
+// home was missing, so the live run can tell the two apart.
+func TestPlaceQuietMissingHomeIsNotOwned(t *testing.T) {
 	f, p := newPlaceFixture(t)
 	rows, plan := placePlanRows(t)
 	row94 := placeRow94Circle(t, plan)
@@ -1287,8 +1296,8 @@ func TestPlaceQuietMissingHomeUsesPosition(t *testing.T) {
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s", code, f.summary().EndReason)
 	}
-	if n := extraClearCount(p); n != 1 {
-		t.Fatalf("%d extra cleartos, want one: %v", n, p.cleartos)
+	if n := extraClearCount(p); n != 0 {
+		t.Fatalf("%d extra cleartos for a unit with no home, want none (no owner without a spawn): %v", n, p.cleartos)
 	}
 	if !hasNote(f.summary(), "home none") {
 		t.Fatalf("the note does not say the home was missing: %v", f.summary().Notes)
@@ -1354,19 +1363,26 @@ func TestPlaceQuietRereadsMovingPatrolsTwiceThenFails(t *testing.T) {
 	}
 }
 
-// A unit is owned only by a BEHIND circle whose area holds it (review round 2, LOW-1): the same entry, far away, is not.
+// A unit is owned only by a BEHIND circle whose area holds its home (review round 2, LOW-1): the same entry, far away,
+// is not, and a reply without a home gives no owner even where the unit stands (fail closed).
 func TestPlaceRogueOwnerNeedsNearCircle(t *testing.T) {
 	w := &walk{place: &raidwalk.PlacePlan{Circles: []raidwalk.ClearCircle{
 		{Step: 90, X: 0, Y: 0, Z: 0, Radius: 10, Entries: []uint32{7}},
 	}}}
-	if c, ok := w.placeRogueOwner(ttUnit{Entry: 7, X: 10 + placeRogueYd - 1}); !ok || c.Step != 90 {
+	homed := func(entry uint32, x float32) ttUnit {
+		return ttUnit{Entry: entry, X: x, Home: [3]float32{x, 0, 0}, HomeOK: true}
+	}
+	if c, ok := w.placeRogueOwner(homed(7, 10+placeRogueYd-1)); !ok || c.Step != 90 {
 		t.Fatalf("a unit inside radius + %d yd is not owned: %+v %v", placeRogueYd, c, ok)
 	}
-	if _, ok := w.placeRogueOwner(ttUnit{Entry: 7, X: 200}); ok {
+	if _, ok := w.placeRogueOwner(homed(7, 200)); ok {
 		t.Fatal("a unit far from the only circle that has its entry is owned")
 	}
-	if _, ok := w.placeRogueOwner(ttUnit{Entry: 8}); ok {
+	if _, ok := w.placeRogueOwner(homed(8, 0)); ok {
 		t.Fatal("a unit with an entry no circle holds is owned")
+	}
+	if _, ok := w.placeRogueOwner(ttUnit{Entry: 7, X: 0}); ok {
+		t.Fatal("a unit with no home is owned")
 	}
 }
 

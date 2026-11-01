@@ -145,8 +145,8 @@ type ttUnit struct {
 	Z     float32
 	Dz    float32
 	Dist  float32
-	// Home is the unit's home position (its spawn point) and HomeOK says the reply carried one: the owner checks use it
-	// and fall back to the current position when it is missing (item 1 of the proof findings).
+	// Home is the unit's home position (its spawn point) and HomeOK says the reply carried one: the BEHIND owner check
+	// gives a unit without one no owner (fail closed).
 	Home   [3]float32
 	HomeOK bool
 	// Spawn is the spawn's guid low (`db`): the notes carry it so a live run can match a unit against the spawn export.
@@ -201,8 +201,8 @@ func (u ttUnit) critter() bool {
 	return u.MaxHP > 0 && u.MaxHP <= placeCritterHP && u.Rank == 0
 }
 
-// placeHome is the position the owner checks use: the unit's home (its spawn point) when the reply carried one, else
-// where it stands (the pre-fix behaviour).
+// placeHome is the position the refusal reason judges a unit by: the unit's home (its spawn point) when the reply
+// carried one, else where it stands. Ownership never falls back: a reply without a home gives no owner (fail closed).
 func (u ttUnit) placeHome() (x, y, z float32) {
 	if u.HomeOK {
 		return u.Home[0], u.Home[1], u.Home[2]
@@ -744,7 +744,8 @@ type placeQuietSight struct {
 
 // placeQuietJudge decides which units block the placement and which the extra round may clear (item 3). Every unit it
 // acts on or refuses is logged with its home and where it stands, so the next live run can confirm `home` is the unit's
-// spawn point; a roamer the join read did not list blocks (the walk cannot judge it: item 4).
+// spawn point; a roamer the join read did not list blocks (the walk cannot judge it: item 4). A unit without a home
+// beyond the landing reach is ignored but still logged, so a missing `home` shows in the notes.
 func (w *walk) placeQuietJudge(read *placeQuietRead, p dungeon.Point) placeQuietJudge {
 	var j placeQuietJudge
 	if read.JoinCut {
@@ -789,6 +790,11 @@ func (w *walk) placeQuietJudge(read *placeQuietRead, p dungeon.Point) placeQuiet
 			if s.dist <= placeReachYd {
 				w.note("place: the quiet refuses %d %s: %s (%s)", u.Entry, u.Name, w.placeQuietBlock(u, s.dist), u.placeWhere())
 				j.Block = append(j.Block, u)
+			} else if !u.HomeOK {
+				// Beyond the landing reach an unowned unit is ignored, but a missing home is still noted: the extra
+				// round never clears a unit without a spawn (fail closed), and the live run can tell the two apart.
+				w.note("place: the quiet ignores %d %s %.1f yd out: no BEHIND row owns a unit with no home (%s)",
+					u.Entry, u.Name, s.dist, u.placeWhere())
 			}
 		}
 	}
@@ -849,10 +855,15 @@ func (w *walk) placeQuietClear(ctx context.Context, u ttUnit, skip string) (took
 
 // placeRogueOwner is the BEHIND circle that owns a unit of the quiet list (review round 1, item 1): among the circles
 // whose entries hold the unit's entry and whose area (radius + placeRogueYd) holds the unit's home (item 1: the spawn
-// point, or where it stands when the reply carried no home), the nearest to it. A unit whose entry no BEHIND row owns,
+// point; a reply without a home gives no owner), the nearest to it. A unit whose entry no BEHIND row owns,
 // or whose home lies outside every circle that does, gets no owner: the extra clear never runs for it, and the quiet
 // then fails unless the unit is beyond the landing reach.
 func (w *walk) placeRogueOwner(u ttUnit) (raidwalk.ClearCircle, bool) {
+	// No home in the reply: the unit's spawn is unknown, so no BEHIND row owns it (fail closed). Its current position
+	// could be a later leg's patrol standing in a BEHIND circle, and ownership is what authorises a clearto.
+	if !u.HomeOK {
+		return raidwalk.ClearCircle{}, false
+	}
 	hx, hy, hz := u.placeHome()
 	var best raidwalk.ClearCircle
 	bestD := math.Inf(1)

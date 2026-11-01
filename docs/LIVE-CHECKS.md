@@ -1177,7 +1177,8 @@ teleport. What it has to settle:
    `quiet` reply it takes the near list and the roamers, which it joins to one `q units` read of 80 yd for a position;
    it ignores skip entries and critters (rank 0, at most 100 max HP), clears a BEHIND-owned unit once — owned by its
    **home** (the spawn point the toolkit sends), not by where it stands — and refuses the placement for any other unit
-   inside 25 yd of the point. AHEAD-owned and unowned units beyond those 25 yd must not block (ZG leg 3: the B pack at
+   inside 25 yd of the point. A reply without `home` gives no owner (fail closed): the extra round never clears that
+   unit. AHEAD-owned and unowned units beyond those 25 yd must not block (ZG leg 3: the B pack at
    54-61 yd, the leg-8 Berserker patrols, the snakes). A roamer the join read misses blocks, and when only roamers (a
    patrol walking through) are left inside the 25 yd the quiet is read again twice, 20 s apart, before the failure.
    **The ownership premise is the first thing to confirm on the re-run:** `.tt q units 40 <P> all` on a fresh copy must
