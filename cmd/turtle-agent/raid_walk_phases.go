@@ -894,6 +894,9 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 		step    int
 		lastTry time.Time
 		skipped bool // a near-wipe recovery was skipped for this pause: the old ending, once
+		// bossSkip says this pause's boss-not-found decision was already taken: one `.bot run skip`
+		// per pause, never more (walk 24 B).
+		bossSkip bool
 	}
 	perStep := map[int]int{}
 	autoTotal := 0
@@ -946,6 +949,7 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 		if w.haveStatus && w.lastStatus.State == tbm.RunPaused {
 			if !ps.armed || ps.note != w.lastStatus.Note || ps.step != w.lastStatus.Step {
 				ps.armed, ps.at, ps.note, ps.step, ps.lastTry, ps.skipped = true, now, w.lastStatus.Note, w.lastStatus.Step, now, false
+				ps.bossSkip = false
 				w.logLine(now, "paused: "+w.lastStatus.Note)
 				if w.dash != nil {
 					w.saveCommanders("pause")
@@ -953,7 +957,27 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 			}
 			regroup := strings.Contains(ps.note, "did not hold")
 			nearWipe := nearWipeStop(ps.note)
+			bossEntry, bossNotFound := w.bossNotFoundAtBossStep(ps.step, ps.note)
 			switch {
+			case !ps.bossSkip && bossNotFound:
+				// The run leader paused with "boss <N> not found" on that boss's own step. The frames are
+				// the evidence: when they show the boss's family killed, the walk skips the step once and
+				// the run goes on to its until (walk 24 test2 r2). One decision per pause, either way.
+				ps.bossSkip = true
+				if ok, ev := w.bossKilled(bossEntry, now); ok {
+					rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "skip", WaitMS: 5000})
+					switch {
+					case err != nil:
+						w.note("boss %d killed (%s), but the run skip failed (%s): waiting as a pause", bossEntry, ev, err)
+					case rep.Reply.Err != nil:
+						w.note("boss %d killed (%s), but the run skip failed (%s): waiting as a pause", bossEntry, ev, rep.Reply.Err.Message)
+					default:
+						w.note("boss %d killed (%s); the run leader did not find his corpse: .bot run skip of step %d", bossEntry, ev, ps.step)
+						w.logLine(now, fmt.Sprintf("boss %d killed (%s); the run leader did not find his corpse: .bot run skip of step %d", bossEntry, ev, ps.step))
+					}
+				} else {
+					w.note("boss %d not found and no kill in the frames (%s): waiting as a pause", bossEntry, ev)
+				}
 			case regroup && perStep[ps.step] < w.opts.autoResume && autoTotal < 6 && now.Sub(ps.lastTry) >= 15*time.Second:
 				if _, err := w.commander(ctx, commanderReq{Op: "run", Verb: "resume", WaitMS: 5000}); err != nil {
 					return err
@@ -1738,6 +1762,95 @@ func nextBossStep(rows planexport.Rows, from int) int {
 		}
 	}
 	return 0
+}
+
+// bossKillPct is the hp percentage at or below which a boss family's last sighting counts as nearly dead:
+// a boss that left the frames at higher health (an evade, out of view range) is not a kill. Walk 24 test2 r2
+// killed Thekal reborn down to 5 %.
+const bossKillPct = 25
+
+// bossNotFoundAtBossStep says the pause's note names a boss that is not found and the pause stands on that
+// boss's OWN row of the server's rows (walk 24 B, decision B-D4): only then may the walk consider the skip.
+// A "not found" on another step, or rows that are not the server's, is left to the old pause path.
+func (w *walk) bossNotFoundAtBossStep(step int, note string) (uint32, bool) {
+	entry, ok := raidwalk.BossNotFound(note)
+	if !ok {
+		return 0, false
+	}
+	if w.lastStatus.Steps != len(w.rows.Steps) || step < 1 || step > len(w.rows.Steps) {
+		return 0, false
+	}
+	row := w.rows.Steps[step-1]
+	if row.Kind != planexport.KindBoss || row.Entry != entry {
+		return 0, false
+	}
+	return entry, true
+}
+
+// bossKilled says the frames show the boss's family killed in this walk: the evidence that the run leader's
+// "boss <N> not found" is a kill whose corpse it cannot see (walk 24 test2 r2: Thekal 14599 comes back as 14509,
+// and TB needs a dead creature of the boss entry itself, so it pauses). The evidence holds when ALL of:
+//   - the family's last sighting (w.bossRows, the entry's newest row) was nearly dead (hppct <= bossKillPct);
+//   - that sighting is gone from the frames (0 %, or older than 10 s, as bossState's bossGone);
+//   - no family row is alive in the frames now (fresh, hp left);
+//   - a hire is alive (a wipe is no kill).
+//
+// The family is bossFamily minus the `first` adds: an add dying is no boss kill. The returned string is the
+// evidence for the note.
+func (w *walk) bossKilled(entry uint32, now time.Time) (bool, string) {
+	first := map[uint32]bool{}
+	fam := w.bossFamily(entry)
+	for _, e := range w.familyFirst(entry) {
+		first[e] = true
+	}
+	var last hostileState
+	seen := false
+	for e := range fam {
+		if first[e] {
+			continue
+		}
+		row, ok := w.bossRows[e]
+		if !ok {
+			continue
+		}
+		if !seen || row.at.After(last.at) {
+			last, seen = row, true
+		}
+	}
+	if !seen {
+		return false, "no family row in the frames"
+	}
+	if last.hppct > bossKillPct {
+		return false, fmt.Sprintf("%d last seen at %d %%", last.entry, last.hppct)
+	}
+	if last.hppct != 0 && now.Sub(last.at) < 10*time.Second {
+		return false, fmt.Sprintf("%d last seen at %d %%, still in the frames", last.entry, last.hppct)
+	}
+	for e := range fam {
+		if first[e] {
+			continue
+		}
+		if row, ok := w.bossRows[e]; ok && now.Sub(row.at) <= 15*time.Second && row.hppct > 0 {
+			return false, fmt.Sprintf("%d is alive in the frames (%d %%)", e, row.hppct)
+		}
+	}
+	if !w.anyAlive(now) {
+		return false, "no hire alive (a wipe, not a kill)"
+	}
+	return true, fmt.Sprintf("%d last seen at %d %% %s ago, gone from the frames; %d hires alive", last.entry, last.hppct, durWords(now.Sub(last.at)), len(w.hireList()))
+}
+
+// familyFirst is the boss's `first` adds (plan.Legs, the leg whose Boss.Entry is boss).
+func (w *walk) familyFirst(boss uint32) []uint32 {
+	if w.plan == nil {
+		return nil
+	}
+	for i := range w.plan.Legs {
+		if l := &w.plan.Legs[i]; l.Boss != nil && l.Boss.Entry == boss {
+			return l.Boss.First
+		}
+	}
+	return nil
 }
 
 // bossFamily is the plan's entries that belong to a boss: its own entry, its phase entries and

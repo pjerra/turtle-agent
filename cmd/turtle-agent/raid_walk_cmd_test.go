@@ -109,6 +109,12 @@ type walkFakeAgent struct {
 	onGM       func(line string)
 	// onResume runs when the walk sends `run resume` through the commander RPC (nil: ACK only).
 	onResume func()
+	// runVerbs records every `run` commander request's verb, in order, and onSkip runs for one whose verb is skip
+	// (walk 24 B: the boss-not-found skip). skipErr makes that skip answer an error (a refusal).
+	runVerbs []string
+	onSkip   func()
+	skipErr  bool
+
 	// pos is where the commander's last .go put it; the quiet-check fakes place units around it.
 	x, y, z float32
 
@@ -987,6 +993,21 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 		}
 		return ack("cmd " + p.Verb)
 	case "run":
+		f.mu.Lock()
+		f.runVerbs = append(f.runVerbs, p.Verb)
+		f.mu.Unlock()
+		if p.Verb == "skip" {
+			f.mu.Lock()
+			hook, refuse := f.onSkip, f.skipErr
+			f.mu.Unlock()
+			if refuse {
+				return commanderReply{Reply: tbm.Reply{Kind: "err", Err: &tbm.Err{Intent: "run skip", Code: "refused",
+					Message: "the step cannot be skipped"}}}
+			}
+			if hook != nil {
+				hook()
+			}
+		}
 		if p.Verb == "start" {
 			f.mu.Lock()
 			f.runStarted = true
@@ -4795,6 +4816,218 @@ func zgThekalFixture(t *testing.T, plan string) *fixture {
 	}
 	f.agent.instMap = p.Map
 	return f
+}
+
+// bossNotFoundLine is a paused status whose note is the run leader's "boss <N> not found" (walk 24 test2 r2):
+// TB's phase-1 fake death leaves no 14599 corpse, so it pauses instead of marking the step done.
+func bossNotFoundLine(plan string, step, total int, entry, next int) string {
+	return fmt.Sprintf("TBM:RUN|%s|paused|%d/%d|lucifron|boss|begin|boss %d not found: not alive or dead within 30.0 yd of -11703.2 -1996.8 62.1 for 60 s nor anywhere in the instance (.bot run skip if he is already dead)|until step %d (step %d)",
+		plan, step, total, entry, next, next)
+}
+
+// Walk 24 test2 r2: the boss died (last seen at 4 %), the run leader never finds his corpse and pauses with
+// "boss 12118 not found" on the boss's own step. The frames are the kill evidence: the walk sends `.bot run skip`
+// once and the run goes on to its until (exit 0), instead of waiting out pausedWait and exiting 18.
+func TestRaidWalkBossNotFoundAfterKillSkips(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	boss := next - 1
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgStart(total, next)
+	// Fill some polls between the kill and the pause, so the boss's last sighting is more than 10 s old.
+	var q []queuedEvent
+	for range 12 {
+		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|begin|boss 12118 not at his spot: waiting for him|until step %d (step %d)", boss, total, next, next)})
+	}
+	q = append(q, queuedEvent{raw: bossNotFoundLine("molten_core", boss, total, 12118, next)})
+	f.agent.mu.Lock()
+	f.agent.startQueue = q
+	f.agent.mu.Unlock()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 4, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	f.agent.onSkip = func() {
+		f.agent.mu.Lock()
+		f.agent.lines = append(f.agent.lines, queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+		f.agent.mu.Unlock()
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if countPrefix(verbs, "skip") != 1 {
+		t.Fatalf("run verbs %v, want exactly one skip", verbs)
+	}
+	sum := f.summary()
+	if sum.EndReason != "until" {
+		t.Fatalf("summary end %q, want until", sum.EndReason)
+	}
+	if !hasNote(sum, "killed") {
+		t.Fatalf("notes %q, want the kill note", sum.Notes)
+	}
+}
+
+// Walk 24 test2 r2 (Zul'Gurub, Thekal's phase 2): 14599 60 -> 22 % then gone, 14509 (Thekal reborn) 99 -> 5 %
+// then gone, hires alive, and the not-found pause on Thekal's boss row. The phase entry is the family evidence.
+func TestRaidWalkBossNotFoundAfterPhaseKillSkips(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgThekalStart(total, boss)
+	var q []queuedEvent
+	for range 12 {
+		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priest_thekal|boss|begin|boss 14599 not at his spot: waiting for him|until step %d (step %d)", boss, total, boss+1, boss+1)})
+	}
+	q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|paused|%d/%d|high_priest_thekal|boss|begin|boss 14599 not found: not alive or dead within 30.0 yd of -11703.2 -1996.8 62.1 for 60 s nor anywhere in the instance (.bot run skip if he is already dead)|until step %d (step %d)", boss, total, boss+1, boss+1)})
+	f.agent.mu.Lock()
+	f.agent.startQueue = q
+	f.agent.mu.Unlock()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		switch {
+		case n <= 1:
+			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		case n <= 2:
+			return []tbm.HostileRec{{GUID: 10, Entry: 14509, HPPct: 99, Target: packet.GUID(1000)}}
+		case n <= 3:
+			return []tbm.HostileRec{{GUID: 10, Entry: 14509, HPPct: 5, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	f.agent.onSkip = func() {
+		f.agent.mu.Lock()
+		f.agent.lines = append(f.agent.lines, queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priest_thekal|move|walk|stopped before step %d (until step %d): the party stays where it stands", boss+1, total, boss+1, boss+1)})
+		f.agent.mu.Unlock()
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if countPrefix(verbs, "skip") != 1 {
+		t.Fatalf("run verbs %v, want exactly one skip", verbs)
+	}
+	if !hasNote(f.summary(), "killed") {
+		t.Fatalf("notes %q, want the kill note", f.summary().Notes)
+	}
+}
+
+// The boss left the frames at 60 %: no kill evidence, so the pause path is unchanged (wait, exit 18).
+func TestRaidWalkBossNotFoundWithoutKillStillPauses(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	boss := next - 1
+	f.opts.pausedWait = 4 * time.Second
+	f.agent.startReply = zgStart(total, next)
+	var q []queuedEvent
+	for range 12 {
+		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|begin|boss 12118 not at his spot: waiting for him|until step %d (step %d)", boss, total, next, next)})
+	}
+	q = append(q, queuedEvent{raw: bossNotFoundLine("molten_core", boss, total, 12118, next)})
+	f.agent.mu.Lock()
+	f.agent.startQueue = q
+	f.agent.mu.Unlock()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	if !strings.Contains(f.summary().EndReason, "paused: boss 12118 not found") {
+		t.Fatalf("end %q, want the pause", f.summary().EndReason)
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if countPrefix(verbs, "skip") != 0 {
+		t.Fatalf("run verbs %v, want no skip: the boss left the frames at 60 %%", verbs)
+	}
+}
+
+// The party wiped: the last sighting was 4 %, but every hire is dead, so the boss's absence is no kill.
+func TestRaidWalkBossNotFoundAfterWipeStillPauses(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	boss := next - 1
+	f.opts.pausedWait = 4 * time.Second
+	f.agent.startReply = zgStart(total, next)
+	// The hires leave the frames once the run started (a wipe's aftermath without a running status line):
+	// their last sighting ages out, so no hire is alive, and the tracker's wipe rule sees nobody.
+	f.agent.eventsHook = func(raw string) {
+		if strings.Contains(raw, "|running|") {
+			f.agent.mu.Lock()
+			f.agent.noPartyFrames = true
+			f.agent.mu.Unlock()
+		}
+	}
+	var q []queuedEvent
+	for range 12 {
+		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|begin|boss 12118 not at his spot: waiting for him|until step %d (step %d)", boss, total, next, next)})
+	}
+	q = append(q, queuedEvent{raw: bossNotFoundLine("molten_core", boss, total, 12118, next)})
+	f.agent.mu.Lock()
+	f.agent.startQueue = q
+	f.agent.mu.Unlock()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 4, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if countPrefix(verbs, "skip") != 0 {
+		t.Fatalf("run verbs %v, want no skip: the party wiped", verbs)
+	}
+}
+
+// The kill evidence holds but the run leader refuses the skip: the walk waits as a pause (exit 18).
+func TestRaidWalkBossNotFoundSkipRefusedStillPauses(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	boss := next - 1
+	f.opts.pausedWait = 4 * time.Second
+	f.agent.startReply = zgStart(total, next)
+	var q []queuedEvent
+	for range 12 {
+		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|begin|boss 12118 not at his spot: waiting for him|until step %d (step %d)", boss, total, next, next)})
+	}
+	q = append(q, queuedEvent{raw: bossNotFoundLine("molten_core", boss, total, 12118, next)})
+	f.agent.mu.Lock()
+	f.agent.startQueue = q
+	f.agent.mu.Unlock()
+	f.agent.skipErr = true
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 4, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	if !hasNote(f.summary(), "run skip failed") {
+		t.Fatalf("notes %q, want the refused-skip note", f.summary().Notes)
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if countPrefix(verbs, "skip") != 1 {
+		t.Fatalf("run verbs %v, want exactly one skip (one decision per pause)", verbs)
+	}
 }
 
 // Rows that are not the server's (a plan of another step count) refuse the walk and stop the run: the step after the boss would be
