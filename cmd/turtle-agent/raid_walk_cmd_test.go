@@ -4480,13 +4480,31 @@ func bossDoneFixture(t *testing.T) (*fixture, int, int) {
 }
 
 func zgStart(total, next int) *commanderReply {
+	return zgStartUntil(total, next, next)
+}
+
+// zgStartUntil is zgStart with an until label naming untilStep: the until the run is given (the
+// tests that override --until pass their own step).
+func zgStartUntil(total, next, untilStep int) *commanderReply {
 	return &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
 		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
 		Line: "TBM:ACTION_ACK|run start|party|1|-",
 		Lines: []string{
-			fmt.Sprintf("TBM:RUN|molten_core|running|1/%d|lucifron|move|walk|walking|until step %d (step %d)", total, next, next),
+			fmt.Sprintf("TBM:RUN|molten_core|running|1/%d|lucifron|move|walk|walking|until step %d (step %d)", total, untilStep, untilStep),
 			"TBM:ACTION_ACK|run start|party|1|-",
 		}}}
+}
+
+// zgThekalStart is the run start's answer for the Thekal early hand-over: the run at the step
+// BEFORE the boss, with the until label the boss-done clause carries.
+func zgThekalStart(total, boss int) *commanderReply {
+	lines := []string{
+		fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priest_thekal|move|walk|walking|until step %d (step %d)", boss-1, total, boss+1, boss+1),
+		"TBM:ACTION_ACK|run start|party|1|-",
+	}
+	return &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: lines[0], Lines: lines}}
 }
 
 // --until boss-done sends "until step <the step after the boss>" and the run ends with the boss step done.
@@ -4544,6 +4562,43 @@ func TestRaidWalkUntilPastBossLetsTheRunFightIt(t *testing.T) {
 	}
 }
 
+// Walk 24 (Thekal's shape, Molten Core): the run is on the step BEFORE its boss step, in the same
+// leg, its until goes past that boss step, and the engaged entry belongs to the plan boss (its entry,
+// phase entries, first adds or hold entries). The run leader fights it: no run stop.
+func TestRaidWalkBossDoneEarlyEngageLetsTheRunFightIt(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	rows := mcRows(t)
+	boss := next - 1
+	if boss < 2 || rows.Steps[boss-2].Leg != rows.Steps[boss-1].Leg {
+		t.Fatalf("fixture rows: step %d and the boss step %d are not in the same leg", boss-1, boss)
+	}
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|fighting", boss-1, total)},
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 100, Target: packet.GUID(1000)}}
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want 0: the run leader fights its boss one step early", n)
+	}
+	if sum := f.summary(); sum.EndReason != "until" {
+		t.Fatalf("summary end %q, want until", sum.EndReason)
+	}
+	if !hasNote(f.summary(), "before its boss step") {
+		t.Fatalf("notes %q, want the early-engage note", f.summary().Notes)
+	}
+	if !hasNote(f.summary(), "so the run leader fights it") {
+		t.Fatalf("notes %q", f.summary().Notes)
+	}
+}
+
 // The default --until boss still stops at a boss: a trash walk that wakes a
 // boss is not a run the leader fights.
 func TestRaidWalkDefaultUntilStillStopsAtABoss(t *testing.T) {
@@ -4560,6 +4615,186 @@ func TestRaidWalkDefaultUntilStillStopsAtABoss(t *testing.T) {
 	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
 		t.Fatalf("%d run stops, want exactly 1", n)
 	}
+}
+
+// Another leg's boss woken from a trash step still stops: the same-leg rule keeps
+// the hand-over to the boss's own leg (walk 19: tigers 11361 on Venoxis's leg).
+func TestRaidWalkEarlyBossWakeOtherLegStillStops(t *testing.T) {
+	// The same-leg rule: the status stands on a step whose NEXT boss step is in ANOTHER leg (the rows
+	// below: the last step of a leg, then the next leg's boss), and the engaged entry belongs to that
+	// boss. Dropping the same-leg check would let the hand-over fire from the earlier leg.
+	f, next, total := bossDoneFixture(t)
+	rows := mcRows(t)
+	last, entryBoss := 0, uint32(0)
+	for s := 2; s <= len(rows.Steps); s++ {
+		if rows.Steps[s-1].Kind == planexport.KindBoss {
+			continue
+		}
+		b := nextBossStep(rows, s)
+		if b == 0 || rows.Steps[s-1].Leg == rows.Steps[b-1].Leg {
+			continue
+		}
+		last, entryBoss = s, rows.Steps[b-1].Entry
+		break
+	}
+	if last == 0 {
+		t.Fatalf("the fixture rows hold no step before a boss of another leg")
+	}
+	f.opts.until = "step 9999" // past the boss' step, so the until alone would let the run fight
+	f.agent.startReply = zgStartUntil(total, next, 9999)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|walking|until step 9999 (step 9999)", last, total)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 9, Entry: entryBoss, HPPct: 100, Target: packet.GUID(1000)}}
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: stderr=%s stdout=%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
+		t.Fatalf("%d run stops, want exactly 1", n)
+	}
+}
+
+// The early hand-over needs the until to go PAST the boss step: --until step <the boss step>
+// stops as before (the server stops BEFORE step N, so N must be > the boss step).
+func TestRaidWalkEarlyEngageUntilAtTheBossStillStops(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	boss := next - 1
+	f.opts.until = fmt.Sprintf("step %d", boss)
+	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: "TBM:ACTION_ACK|run start|party|1|-",
+		Lines: []string{
+			fmt.Sprintf("TBM:RUN|molten_core|running|1/%d|lucifron|move|walk|walking|until step %d (step %d)", total, boss, boss),
+			"TBM:ACTION_ACK|run start|party|1|-",
+		}}}
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|walking|until step %d (step %d)", boss-1, total, boss, boss)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 100, Target: packet.GUID(1000)}}
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: stderr=%s stdout=%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
+		t.Fatalf("%d run stops, want exactly 1", n)
+	}
+}
+
+// The early hand-over needs the engaged entry to belong to the plan boss of the next boss
+// step: another leg's boss engaged there stops as before.
+func TestRaidWalkEarlyEngageOtherBossStillStops(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	boss := next - 1
+	f.opts.until = "step 9999"
+	f.agent.startReply = zgStartUntil(total, next, 9999)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|walking|until step 9999 (step 9999)", boss-1, total)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 9, Entry: 11982, X: 1143.14, Y: -1016.66, Z: -185.75, HPPct: 100, Target: packet.GUID(1000)}}
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: stderr=%s stdout=%s gmlines=%q", code, f.stderr.String(), f.stdout.String(), f.agent.gmLines())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
+		t.Fatalf("%d run stops, want exactly 1", n)
+	}
+}
+
+// Walk 24 (Thekal): the run is on the step BEFORE his boss step, in the same leg, its until
+// (boss-done -> the step after the boss) goes past the boss step, and one of Thekal's `first`
+// adds (11348 Zath) wakes the encounter. The run leader fights it: no run stop.
+func TestRaidWalkThekalEarlyEngageFirstAddLetsTheRunFightIt(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.agent.startReply = zgThekalStart(total, boss)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priest_thekal|move|walk|fighting", boss-1, total)},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priest_thekal|move|walk|fighting", boss-1, total)},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priest_thekal|move|walk|stopped before step %d (until step %d): the party stays where it stands", boss+1, total, boss+1, boss+1)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 9, Entry: 11348, X: -11703.2, Y: -1996.8, Z: 62.1, HPPct: 100, Target: packet.GUID(1000)}}
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want 0: the run leader fights its boss's first add", n)
+	}
+	if !hasNote(f.summary(), "before its boss step") {
+		t.Fatalf("notes %q", f.summary().Notes)
+	}
+}
+
+// mcRows is the fixture's Molten Core rows through planexport.Build: the tests derive their step
+// numbers from them, never hard-coding the plan's numbering.
+func mcRows(t *testing.T) planexport.Rows {
+	t.Helper()
+	p, err := dungeon.Load("../../dungeons/molten_core.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := planexport.Build(p, planexport.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res.Rows
+}
+
+// zgRows is the fixture's Zul'Gurub rows through planexport.Build.
+func zgRows(t *testing.T) planexport.Rows {
+	t.Helper()
+	p, err := dungeon.Load("../../dungeons/zul_gurub.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := planexport.Build(p, planexport.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res.Rows
+}
+
+// zgBossStep is the step of Zul'Gurub's Thekal boss row (the plan's boss entry 14599).
+func zgBossStep(t *testing.T) int {
+	t.Helper()
+	for i, s := range zgRows(t).Steps {
+		if s.Kind == planexport.KindBoss && s.Entry == 14599 {
+			return i + 1
+		}
+	}
+	t.Fatal("no Thekal boss row in the ZG rows")
+	return 0
+}
+
+// zgThekalFixture is a Zul'Gurub walk with --until boss-done, as the ZG-placed tests do.
+func zgThekalFixture(t *testing.T, plan string) *fixture {
+	t.Helper()
+	f := newFixture(t)
+	f.opts.plan, f.opts.holder = plan, "raid-walk-"+plan
+	f.opts.until = fmt.Sprintf("step %d", zgBossStep(t)+1) // the boss-done clause's step: past the boss
+	p, err := dungeon.Load(filepath.Join(f.opts.dir, plan+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.agent.instMap = p.Map
+	return f
 }
 
 // Rows that are not the server's (a plan of another step count) refuse the walk and stop the run: the step after the boss would be

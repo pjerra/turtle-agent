@@ -17,6 +17,7 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/tbm"
@@ -923,9 +924,14 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 					return err
 				}
 			case raidwalk.IncidentBossEngaged:
-				if w.runFightsBoss() {
-					w.note("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, w.untilLabel)
-					w.logLine(now, fmt.Sprintf("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, w.untilLabel))
+				if ok, early := w.runFightsBoss(v.Entry); ok {
+					if early > 0 {
+						w.note("boss %d engaged at step %d, before its boss step %d in the same leg, and the until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, early, w.untilLabel)
+						w.logLine(now, fmt.Sprintf("boss %d engaged at step %d, before its boss step %d in the same leg, and the until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, early, w.untilLabel))
+					} else {
+						w.note("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, w.untilLabel)
+						w.logLine(now, fmt.Sprintf("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, w.untilLabel))
+					}
 					continue
 				}
 				return w.handleBoss(ctx, v)
@@ -1722,13 +1728,110 @@ func (w *walk) bossState(now time.Time, entry uint32) bossPhase {
 	return bossWaiting
 }
 
-// runFightsBoss says whether the run leader itself is on a boss step and its
-// until goes past it (walk 12: Jeklik engaged at step 40 with --until "step
-// 41", and raid-walk stopped the run from under the fight). True only when the
-// run's own status kind is boss; the default --until boss (a trash walk that
-// wakes a boss) and an early boss wake during a trash step both stop as now.
-func (w *walk) runFightsBoss() bool {
-	return w.opts.until != "boss" && w.haveStatus && w.lastStatus.Kind == "boss"
+// nextBossStep is the first 1-based step index at or after from whose row is a plan boss step
+// (planexport.KindBoss); 0 when the rows hold none there. It is what the boss-done hand-over
+// (runFightsBoss's early rule) compares the run's step against.
+func nextBossStep(rows planexport.Rows, from int) int {
+	for i := from; i >= 1 && i <= len(rows.Steps); i++ {
+		if rows.Steps[i-1].Kind == planexport.KindBoss {
+			return i
+		}
+	}
+	return 0
+}
+
+// bossFamily is the plan's entries that belong to a boss: its own entry, its phase entries and
+// its hold entries (plan.Legs, the leg whose Boss.Entry is boss). The `first` adds are NOT part
+// of it here: runFightsBoss adds them for the early rule (they can wake the encounter early),
+// while bossKilled (walk 24 B) leaves them out (an add dying is no boss kill). No such leg ->
+// just {boss}. Looked up by the boss entry, not by a StepRow.Leg index, so a 0/1-based mix-up
+// cannot bite.
+func (w *walk) bossFamily(boss uint32) map[uint32]bool {
+	fam := map[uint32]bool{boss: true}
+	if w.plan == nil {
+		return fam
+	}
+	for i := range w.plan.Legs {
+		l := &w.plan.Legs[i]
+		if l.Boss == nil || l.Boss.Entry != boss {
+			continue
+		}
+		for _, e := range l.Boss.PhaseEntries {
+			fam[e] = true
+		}
+		if l.Boss.Hold != nil {
+			for _, e := range l.Boss.Hold.Entries {
+				fam[e] = true
+			}
+		}
+		return fam
+	}
+	return fam
+}
+
+// bossFamilyWithFirst is bossFamily plus the boss's `first` adds: the entries that count as the
+// encounter being pulled (a first add waking the boss is the encounter starting).
+func (w *walk) bossFamilyWithFirst(boss uint32) map[uint32]bool {
+	fam := w.bossFamily(boss)
+	if w.plan == nil {
+		return fam
+	}
+	for i := range w.plan.Legs {
+		l := &w.plan.Legs[i]
+		if l.Boss != nil && l.Boss.Entry == boss {
+			for _, e := range l.Boss.First {
+				fam[e] = true
+			}
+			break
+		}
+	}
+	return fam
+}
+
+// runFightsBoss says whether the run leader itself fights the engaged boss: true when the run's
+// own status kind is boss and its until goes past that step (walk 12: Jeklik engaged at step 40
+// with --until "step 41", and raid-walk stopped the run from under the fight); or, for the walk-24
+// early rule, when the run is on a step BEFORE its next boss step in the SAME leg, its until goes
+// past that boss step, and the engaged entry belongs to that boss (its entry, phase entries,
+// first adds or hold entries): plans whose approach point sits inside the pull (Thekal's
+// boss.approach[0] 19.9 yd from him, walk 24) would otherwise stop the run under the fight.
+//
+// early is the boss step the early rule fired for (0: the status kind was boss). False when
+// --until boss (a trash walk that wakes a boss never fights one), when the run is not running,
+// when the rows are not the server's (step numbers mean nothing), when the next boss step is in
+// another leg, or when the until does not go past the boss step.
+func (w *walk) runFightsBoss(entry uint32) (ok bool, early int) {
+	if w.opts.until == "boss" || !w.haveStatus || w.lastStatus.State != tbm.RunRunning {
+		return false, 0
+	}
+	if w.lastStatus.Kind == "boss" {
+		return true, 0
+	}
+	if w.lastStatus.Steps != len(w.rows.Steps) {
+		return false, 0 // rows not the server's: step numbers mean nothing
+	}
+	b := nextBossStep(w.rows, w.lastStatus.Step)
+	if b == 0 {
+		return false, 0
+	}
+	switch {
+	case w.untilStep == 0 && len(w.untilWords) == 0:
+		// --until none: the run walks to the plan's end, past every boss step.
+	case w.untilStep > b:
+		// the until goes past the boss step (the server stops BEFORE step N, so N must be > b)
+	default:
+		return false, 0
+	}
+	if w.lastStatus.Step < 1 || w.lastStatus.Step > len(w.rows.Steps) {
+		return false, 0
+	}
+	if w.rows.Steps[w.lastStatus.Step-1].Leg != w.rows.Steps[b-1].Leg {
+		return false, 0 // another leg's boss woken from this step still stops
+	}
+	if !w.bossFamilyWithFirst(w.rows.Steps[b-1].Entry)[entry] {
+		return false, 0
+	}
+	return true, b
 }
 
 // handleBoss stops the run at once and waits for the fight to end: a wipe (then the revive), a kill or a reset.
@@ -2422,9 +2525,15 @@ func (w *walk) recoveredBoss(ctx context.Context, step int) error {
 	// stale boss-kind status must not hide a newly engaged boss. A fresh
 	// post-resume boss-kind status keeps the old behaviour: the run leader
 	// fights its boss step.
-	if w.statusSeq > w.resumeStatusSeq && w.runFightsBoss() {
-		w.note("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", entry, step, w.untilLabel)
-		return nil
+	if w.statusSeq > w.resumeStatusSeq {
+		if ok, early := w.runFightsBoss(entry); ok {
+			if early > 0 {
+				w.note("boss %d engaged at step %d, before its boss step %d in the same leg, and the until (%s) goes past it, so the run leader fights it", entry, step, early, w.untilLabel)
+			} else {
+				w.note("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", entry, step, w.untilLabel)
+			}
+			return nil
+		}
 	}
 	return w.handleBoss(ctx, raidwalk.IncidentBossEngaged{Entry: entry, Step: step, At: w.env.now()})
 }
