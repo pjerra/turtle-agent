@@ -135,6 +135,39 @@ func TestPlaceClearCorridorPicksBehindOnly(t *testing.T) {
 	if len(cp.Notes) != 0 {
 		t.Fatalf("notes %v", cp.Notes)
 	}
+	// Behind is every pull row before the start, not only the corridor's circles: the row 60 yd out and the one 20 yd
+	// above are BEHIND rows too, so a unit they spawn is owned there. The move and the AHEAD pull are not.
+	if len(cp.Behind) != 3 {
+		t.Fatalf("behind %+v", cp.Behind)
+	}
+	for i, want := range steps[1:4] {
+		b := cp.Behind[i]
+		if b.Step != i+2 || b.X != want.X || b.Y != want.Y || b.Z != want.Z || b.Radius != want.Radius ||
+			len(b.Entries) != 1 || b.Entries[0] != want.Entries[0] {
+			t.Fatalf("behind %d %+v, want row %d of %v", i, b, i+2, want)
+		}
+	}
+}
+
+// BehindOwns is the positive ownership test (review round 3): the row must hold the entry, and the home must lie within
+// its radius plus PlaceOwnYd, 2D, within placeAheadDz of its height.
+func TestPlaceBehindOwns(t *testing.T) {
+	p := PlacePlan{Behind: []BehindRow{{Step: 7, X: 0, Y: 0, Z: 10, Radius: 8, Entries: []uint32{15111}}}}
+	if k, ok := p.BehindOwns(15111, 8+PlaceOwnYd, 0, 10); !ok || k != 7 {
+		t.Fatalf("a home at the row's radius + %d yd: %d, %v", PlaceOwnYd, k, ok)
+	}
+	if _, ok := p.BehindOwns(15111, 8+PlaceOwnYd+0.5, 0, 10); ok {
+		t.Fatal("a home beyond the row's radius + 6 yd is owned")
+	}
+	if _, ok := p.BehindOwns(15111, 0, 0, 10+placeAheadDz); !ok {
+		t.Fatal("a home at the z window's edge is not owned")
+	}
+	if _, ok := p.BehindOwns(15111, 0, 0, 10+placeAheadDz+0.5); ok {
+		t.Fatal("a home above the z window is owned")
+	}
+	if _, ok := p.BehindOwns(15112, 0, 0, 10); ok {
+		t.Fatal("an entry the row does not hold is owned")
+	}
 }
 
 func TestPlaceClearSplitsOnAheadOverlap(t *testing.T) {

@@ -2173,8 +2173,9 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   the start point — the walk judges the quiet itself, not the toolkit's flag: a unit blocks only when it is not a skip
   entry, not a rank-0 critter of at most 100 HP and either stands within 25 yd of the point or belongs to a BEHIND row's
   circle by its **home** (the spawn point the toolkit sends with the unit; without one the unit has no owner), which the
-  extra rounds take (they also take BEHIND trash inside the quiet's 50 yd: a unit whose entry a corridor row pulls,
-  whose home lies outside every AHEAD row and that is not boss evidence); the roamers (units that moved between the
+  extra rounds take (they also take BEHIND trash inside the quiet's 50 yd: a unit whose entry a pull row before the
+  start holds and whose home that row owns, within its radius + 6 yd and outside every AHEAD row, provided it is not
+  boss evidence); the roamers (units that moved between the
   quiet's two reads, which the toolkit lists without a position) are joined to one `q units` read of 80 yd, and a roamer
   that read misses is looked up in the quiet's own near lists (which carry its position and home) and blocks only inside
   the 25 yd landing reach; a near list the toolkit cut short (`n_near` above the units it listed) refuses the placement
@@ -2191,9 +2192,11 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   **Known limit:** the pre-read (`q units`) and the `clearto` are two commands, so a unit that walks into a circle
   between them can be despawned along with the row's own. Hence test servers only; the quiet check and the placed-start
   check catch a broken run, and the walk report lists every clear (`place.circles[]`, the `place:` notes). The corridor
-  pre-read does not refuse a circle for a BEHIND-trash unit of another corridor row (its entry is a corridor row's, its
-  home lies outside every AHEAD row and it is not boss evidence). The clear is by entry and area, so a later leg's
-  patrol or spread pack that walks into a cleared circle can be thinned with it. A walk-super restart that starts inside
+  pre-read does not refuse a circle for a BEHIND-trash unit of another row: its entry is a pull row's (one before the
+  start, whether or not the corridor clears that row) and its home lies within that row's radius + 6 yd, outside every
+  AHEAD row, and it is not boss evidence. Ownership is positive but still inferred from the spawn: entries repeat
+  across legs, so a later leg's unit whose home lies inside a BEHIND pull row's own area and carries one of that row's
+  entries is taken as trash of the skipped leg and can be thinned with it. A walk-super restart that starts inside
   the leg a shortened `until` stopped in is refused with exit 2: its own route reaches the guarded segment in the start
   step's own leg, so restart before that leg or walk from the door. The quiet
   step's two extra rounds keep away from any circle the corridor refused (a unit within that circle's radius + 6 yd is

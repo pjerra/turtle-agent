@@ -913,7 +913,7 @@ func (w *walk) validate() error {
 			return stopf(exitUsage, "%v", clear.Refusal)
 		}
 		// Stop is the until the dry run and the summary print; the corridor ended at routeEnd.
-		w.place.Stop, w.place.Circles, w.place.Notes, w.place.Ahead = until, clear.Circles, clear.Notes, clear.Ahead
+		w.place.Stop, w.place.Circles, w.place.Notes, w.place.Ahead, w.place.Behind = until, clear.Circles, clear.Notes, clear.Ahead, clear.Behind
 		for _, n := range clear.Notes {
 			w.note("place: %s", n)
 		}

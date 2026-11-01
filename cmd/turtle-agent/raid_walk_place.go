@@ -32,8 +32,9 @@ const (
 	placeSummonWait = 10 * time.Second
 	// placeNearYd is how close the commander must stand to a circle's point to clear it without a move (spec 5 step 6).
 	placeNearYd = 140
-	// placeRogueYd is how close to a BEHIND circle a named unit must stand for the one extra clear round (spec 5 step 7).
-	placeRogueYd = 6
+	// placeRogueYd is how close to a BEHIND circle a named unit must stand for the one extra clear round (spec 5 step 7):
+	// the same slack a BEHIND pull row gives its own home (raidwalk.PlaceOwnYd).
+	placeRogueYd = raidwalk.PlaceOwnYd
 	// placeExtraRadius is the radius of that extra round.
 	placeExtraRadius = 3
 	// placeClearDz is the vertical window of the clear, its pre-read and the quiet (the toolkit's dz=).
@@ -551,8 +552,9 @@ func skipArg(ids []uint32) string {
 // placement when it is not a skip entry, not a critter and
 //
 //	(a) it stands within placeReachYd of the start point (the opening the raid lands in), or
-//	(b) its home lies in a BEHIND row's circle, or it is BEHIND trash inside placeQuietR (then the extra clear rounds
-//	    take it: placeQuietExtraRounds of them).
+//	(b) a BEHIND row owns its home: a corridor circle within its radius + placeRogueYd, or, as BEHIND trash inside
+//	    placeQuietR, a pull row before the start within its radius + 6 yd whose entries hold the unit (then the extra
+//	    clear rounds take it: placeQuietExtraRounds of them).
 //
 // AHEAD-owned and unowned units beyond placeReachYd never block: a door-to-end run at this step has them alive too, so
 // counting them would make the test stricter than the walk it stands in for. A cut near list whose farthest listed unit
@@ -919,8 +921,8 @@ func (w *walk) placeQuietClear(ctx context.Context, u ttUnit, skip string) (took
 			w.note("place: not cleared %d %s in the extra round: no BEHIND row owns the unit (%s)", u.Entry, u.Name, u.placeWhere())
 			return false, nil
 		}
-		// D5: BEHIND trash no circle owns by home: the extra round clears it where it stands, its entry held by a
-		// corridor row and its home outside every AHEAD row.
+		// D5: BEHIND trash no circle owns by home: the extra round clears it where it stands, a BEHIND pull row
+		// holding its entry and owning its home outside every AHEAD row (review round 3: positive ownership).
 		trash = true
 	}
 	if sc, near := w.placeNearSkipped(u); near {
@@ -947,7 +949,7 @@ func (w *walk) placeQuietClear(ctx context.Context, u ttUnit, skip string) (took
 		return false, nil
 	}
 	if trash {
-		w.note("place: cleared %d %s in the extra round: trash of a skipped leg (its entry is a corridor row's, its home outside every AHEAD row) (%s)", u.Entry, u.Name, u.placeWhere())
+		w.note("place: cleared %d %s in the extra round: trash of a skipped leg (a BEHIND row holds its entry and owns its home, outside every AHEAD row) (%s)", u.Entry, u.Name, u.placeWhere())
 	} else {
 		w.note("place: cleared %d %s in the extra round: its home is in the circle of row %d (%s)", u.Entry, u.Name, owner.Step, u.placeWhere())
 	}
@@ -956,7 +958,9 @@ func (w *walk) placeQuietClear(ctx context.Context, u ttUnit, skip string) (took
 
 // placeBehindTrash says the unit is trash of a leg the raid skips (walk 24, Venoxis and Arlokk). All four must hold:
 //   - the reply carried its home (fail closed without one);
-//   - one of the corridor's clear circles holds its entry;
+//   - a BEHIND pull row holds its entry AND owns that home (PlacePlan.BehindOwns: any pull row before the start step,
+//     within its radius + 6 yd, not only the corridor's circles). An entry alone is not ownership: entries are shared,
+//     so a later leg's patrol can carry a corridor row's entry while spawning outside every BEHIND row's area;
 //   - it is not boss evidence where it stands or at its home (BossRows.Counts: Thekal's 11361 tigers count only within
 //     40 yd of Thekal);
 //   - its home lies in no AHEAD row's area (PlacePlan.AheadIn): a wanderer of the packs the run fights next is never trash.
@@ -966,14 +970,7 @@ func (w *walk) placeBehindTrash(u ttUnit) bool {
 	if !u.HomeOK || w.place == nil {
 		return false
 	}
-	held := false
-	for _, c := range w.place.Circles {
-		if inEntries(c.Entries, u.Entry) {
-			held = true
-			break
-		}
-	}
-	if !held {
+	if _, owned := w.place.BehindOwns(u.Entry, u.Home[0], u.Home[1], u.Home[2]); !owned {
 		return false
 	}
 	if w.bossRule != nil && (w.bossRule.Counts(u.Entry, u.X, u.Y) || w.bossRule.Counts(u.Entry, u.Home[0], u.Home[1])) {

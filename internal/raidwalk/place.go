@@ -32,6 +32,9 @@ const (
 	PlaceAheadSlack = 3
 	// PlaceUnitYd is the radius of a per-unit circle a split row becomes.
 	PlaceUnitYd = 4
+	// PlaceOwnYd is how far beyond a BEHIND pull row's radius a unit's home may stand and still be owned by that row
+	// (the spawn-home ownership test: the same 6 yd the extra clear round allows around a corridor circle).
+	PlaceOwnYd = 6
 	// PlaceMaxCircles bounds one walk's clear: more circles than this refuse the placement.
 	PlaceMaxCircles = 40
 	// PlaceReviveYd is how close a hire's frame must be to the place point to count as placed.
@@ -61,6 +64,7 @@ type ClearPlan struct {
 	Circles []ClearCircle
 	Notes   []string
 	Ahead   []AheadCircle
+	Behind  []BehindRow
 	Refusal string
 }
 
@@ -71,6 +75,33 @@ type AheadCircle struct {
 	X, Y, Z float32
 	Radius  float32
 	Entries []uint32
+}
+
+// BehindRow is one BEHIND pull row: any pull row before the start step, whether or not its circle reaches the corridor.
+// A unit is only BEHIND trash when such a row holds its entry and owns its home (PlacePlan.BehindOwns), because entries
+// are shared: a later leg's patrol can carry a corridor row's entry.
+type BehindRow struct {
+	Step    int
+	X, Y, Z float32
+	Radius  float32
+	Entries []uint32
+}
+
+// BehindOwns says whether a BEHIND pull row that holds the entry owns a home: the point lies within the row's radius
+// plus PlaceOwnYd, 2D, within placeAheadDz of the row's height (the z rule the AHEAD ownership test uses).
+func (p PlacePlan) BehindOwns(entry uint32, x, y, z float32) (int, bool) {
+	for _, b := range p.Behind {
+		if !holdsEntry(b.Entries, entry) {
+			continue
+		}
+		if math.Abs(float64(b.Z)-float64(z)) > placeAheadDz {
+			continue
+		}
+		if dist2f(x, y, b.X, b.Y) <= float64(b.Radius)+PlaceOwnYd {
+			return b.Step, true
+		}
+	}
+	return 0, false
 }
 
 // AheadIn says whether a point lies in an AHEAD creature row's circle (spec 5 step 6).
@@ -124,6 +155,7 @@ type PlacePlan struct {
 	Circles []ClearCircle
 	Notes   []string
 	Ahead   []AheadCircle
+	Behind  []BehindRow
 	Skips   []uint32
 }
 
@@ -628,6 +660,16 @@ func PlaceClear(rows planexport.Rows, plan *dungeon.Plan, start, stop int) Clear
 	route := routePoints(rows, start, stop)
 	if len(route) == 0 {
 		return out
+	}
+	// Every BEHIND pull row, whether or not its circle reaches the corridor: the spawn-home ownership test reads the
+	// row's own area and entries, not only the corridor's circles.
+	for i := 0; i < start-1 && i < len(rows.Steps); i++ {
+		s := rows.Steps[i]
+		if s.Kind != planexport.KindPull || !placedRow(s) {
+			continue
+		}
+		out.Behind = append(out.Behind, BehindRow{Step: i + 1, X: s.X, Y: s.Y, Z: s.Z, Radius: s.Radius,
+			Entries: append([]uint32{}, s.Entries...)})
 	}
 	// The AHEAD set is every creature row from the start step to the LAST row of the plan, not to the until stop: a
 	// BEHIND circle may overlap a pack of a later leg that the run reaches after the stop, and the split must see it
