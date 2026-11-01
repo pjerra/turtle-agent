@@ -92,6 +92,9 @@ type walkFakeAgent struct {
 	views    int // bot_view calls, for the fault hooks' one Tick per watch loop
 	dead     map[string]bool
 	targeted bool
+	// pageSize serves up to this many queued event lines in one events page (0: one, as before).
+	// Walk 18 r5: live TB sends several TBM:RUN status lines of the same incident in one poll.
+	pageSize int
 
 	hostilesFn func(viewN int) []tbm.HostileRec
 	unitsFn    func(n int) []objects.Unit
@@ -141,6 +144,13 @@ type walkFakeAgent struct {
 	// quiet rest (combatAllFn); the dashboard fights read fails through fakeDash.fightsErr.
 	viewFn      func(n int) (fail bool, omit string)
 	combatAllFn func(n int) bool // frame n shows every hire in combat
+	// viewHook runs inside the bot_view RPC (outside f.mu): a test's fake wall
+	// time passing during the call, like the live server's RPC waits.
+	viewHook func()
+	// eventsHook runs when the events RPC serves a queued line (outside f.mu, before
+	// the frame of the same poll): a test's scripted reaction to the walk reading a
+	// line, so a status line and the frames it belongs with arrive in one poll.
+	eventsHook  func(raw string)
 	targetCalls []packet.GUID
 	targetAt    []time.Time // when each target RPC arrived
 
@@ -215,6 +225,9 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 	case "events":
 		v = f.eventsPage()
 	case "bot_view":
+		if f.viewHook != nil {
+			f.viewHook()
+		}
 		v = f.viewPage()
 	case "units":
 		f.mu.Lock()
@@ -570,18 +583,38 @@ type hireBatchState struct {
 
 func (f *walkFakeAgent) eventsPage() events.Page {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if len(f.lines) == 0 {
-		return events.Page{Next: f.next}
+		next := f.next
+		f.mu.Unlock()
+		return events.Page{Next: next}
 	}
-	q := f.lines[0]
-	f.lines = f.lines[1:]
-	f.next++
-	ev := events.Event{Seq: f.next, Kind: events.KindSystem, Text: q.raw, Data: map[string]any{"raw": q.raw}}
-	if q.text != "" {
-		ev.Text = q.text
+	n := 1
+	if f.pageSize > n {
+		n = f.pageSize
 	}
-	return events.Page{Events: []events.Event{ev}, Next: f.next}
+	if n > len(f.lines) {
+		n = len(f.lines)
+	}
+	batch := append([]queuedEvent{}, f.lines[:n]...)
+	f.lines = f.lines[n:]
+	evs := make([]events.Event, 0, n)
+	for _, q := range batch {
+		f.next++
+		ev := events.Event{Seq: f.next, Kind: events.KindSystem, Text: q.raw, Data: map[string]any{"raw": q.raw}}
+		if q.text != "" {
+			ev.Text = q.text
+		}
+		evs = append(evs, ev)
+	}
+	next := f.next
+	hook := f.eventsHook
+	f.mu.Unlock()
+	if hook != nil {
+		for _, q := range batch {
+			hook(q.raw)
+		}
+	}
+	return events.Page{Events: evs, Next: next}
 }
 
 type viewReply struct {
@@ -754,12 +787,24 @@ type fakeDash struct {
 	fightKeys []string
 	failFight int // the first n Fight calls fail
 	fightsErr error
+	// commanders counts the Commanders reads: a recovery's returned watch loop polls it again.
+	commanders int
 }
 
 func (d *fakeDash) Login(ctx context.Context) error { return nil }
 
 func (d *fakeDash) Commanders(ctx context.Context) (json.RawMessage, error) {
+	d.mu.Lock()
+	d.commanders++
+	d.mu.Unlock()
 	return json.RawMessage(`{"commanders":[]}`), nil
+}
+
+// commandersCalls is how many dashboard Commanders reads the walk made.
+func (d *fakeDash) commandersCalls() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.commanders
 }
 
 func (d *fakeDash) Fights(ctx context.Context, commander string) (json.RawMessage, error) {
@@ -1753,6 +1798,594 @@ func TestRaidWalkWipeResumeAfterBossWinRecovers(t *testing.T) {
 	}
 }
 
+// TestRaidWalkWipeResumeAfterEarlierBossKillRecovers (wipe-resume latch): the
+// frames engage the boss at an earlier step (the tracker latches the first
+// boss it sees and never forgets), the dashboard fight row says the boss died
+// ("kill"), and a trash wipe more than 120 s after the last boss frame
+// recovers: wipe_resumes 1 and no "boss state unknown" note. Before the fix
+// the tracker's latch blocked this recovery.
+func TestRaidWalkWipeResumeAfterEarlierBossKillRecovers(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "kill", BossName: "Lucifron", Leg: "lucifron", Step: 3, Deaths: 1}}
+	// The boss shows in the frames only at the start of the walk, then the
+	// raid wipes on trash 200 s of fake time later, past the 120 s
+	// bossLatchAt window. The kill runs inside the frame call, so the wipe
+	// lands late in the walk.
+	t0 := f.clock.now()
+	killed := false
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		now := f.clock.now()
+		if !killed && now.Sub(t0) > 200*time.Second {
+			killed = true
+			f.agent.mu.Lock()
+			for _, name := range f.agent.party {
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		if now.Sub(t0) < 45*time.Second {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	f.agent.onResume = func() {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|resumed", next-1, total)},
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, "so the run leader fights it") {
+		t.Fatalf("notes %q, want the boss-fight note (the early engagement must latch)", sum.Notes)
+	}
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (a boss killed long before the wipe does not block recovery)", sum.WipeResumes)
+	}
+	if hasNote(sum, "boss state unknown") {
+		t.Fatalf("notes %q, want no boss-unknown skip", sum.Notes)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until (the run went on after the recovery)", sum.EndReason)
+	}
+}
+
+// TestRaidWalkWipeResumeBossStillEngagedSkips: the same walk, but the boss is
+// still in the frames when the late trash wipe lands. The wipe still ends the
+// walk the old way (handleWipe's bossEngagedNow check fires before any
+// recovery: exit 19, wipe_resumes 0, no resume).
+func TestRaidWalkWipeResumeBossStillEngagedSkips(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "kill", BossName: "Lucifron", Leg: "lucifron", Step: 3, Deaths: 1}}
+	t0 := f.clock.now()
+	killed := false
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if now := f.clock.now(); !killed && now.Sub(t0) > 200*time.Second {
+			killed = true
+			f.agent.mu.Lock()
+			for _, name := range f.agent.party {
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 90, Target: packet.GUID(1000)}}
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, "so the run leader fights it") {
+		t.Fatalf("notes %q, want the boss-fight note (the engagement must latch)", sum.Notes)
+	}
+	if sum.WipeResumes != 0 {
+		t.Fatalf("wipe_resumes %d, want 0 (a boss still in the frames blocks recovery)", sum.WipeResumes)
+	}
+	if hasNote(sum, "wipe-resume ") {
+		t.Fatalf("notes %q, want no recovery note (the wipe ended as before, with no resume)", sum.Notes)
+	}
+}
+
+// TestRaidWalkWipeResumeVisibleBossAfterKillRecovers (walk 17 s4 replay): an
+// engaged boss early (the latch), killed and gone, then a plan `first` add in
+// view at full health with no target (standing as trash) while the raid wipes
+// on trash more than 200 s later. A row merely in view must not latch, so the
+// wipe recovers: exit 0, wipe_resumes 1, no boss-unknown skip, end until.
+func TestRaidWalkWipeResumeVisibleBossAfterKillRecovers(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+		{raw: "TBM:RUN|molten_core|running|35/235|lucifron|move|walk|walking"},
+	}
+	f.agent.mu.Unlock()
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "kill", BossName: "Lucifron", Leg: "lucifron", Step: 3, Deaths: 1}}
+	t0 := f.clock.now()
+	killed := false
+	// Wipe at 240 s: like the walk-17 s4 shape, but late enough that the
+	// run left the boss step for trash (so the watch never routes the
+	// visible rows to handleBoss).
+	wipeAt := t0.Add(240 * time.Second)
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		now := f.clock.now()
+		if !killed && !now.Before(wipeAt) {
+			killed = true
+			f.agent.mu.Lock()
+			for _, name := range f.agent.party {
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		if now.Sub(t0) < 45*time.Second {
+			// The boss row holds a target: engaged, latches, and notes the fight.
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		// The boss is killed and gone; from 150 s on a plan `first` add
+		// (Flamewaker Protector) stands as trash in view — alive, full
+		// health, no target — through the wipe (as in s4, where the row was
+		// last saved ~25 s before it).
+		if elapsed := now.Sub(t0); elapsed >= 150*time.Second {
+			return []tbm.HostileRec{{GUID: 11, Entry: 12119, HPPct: 100, Target: 0}}
+		}
+		return nil
+	}
+	f.agent.onResume = func() {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting resumed", next-1, total)},
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, "so the run leader fights it") {
+		t.Fatalf("notes %q, want the boss-fight note (the early engagement must latch)", sum.Notes)
+	}
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (a merely visible plan add does not block recovery)", sum.WipeResumes)
+	}
+	if hasNote(sum, "boss state unknown") {
+		t.Fatalf("notes %q, want no boss-unknown skip", sum.Notes)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until (the run went on after the recovery)", sum.EndReason)
+	}
+}
+
+// TestRaidWalkWipeResumeVisibleBossNeverTargetedRecovers: no plan boss row
+// ever holds a target; the boss shows at 100 % with no target (a plan boss
+// merely in view, never fought) while the raid wipes on trash more than
+// 200 s later. Nothing was ever engaged, so the wipe recovers — and the walk
+// must not route the visible row to handleBoss.
+func TestRaidWalkWipeResumeVisibleBossNeverTargetedRecovers(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|walking", next-2, total)},
+		{raw: "TBM:RUN|molten_core|running|35/235|lucifron|move|walk|walking"},
+	}
+	f.agent.mu.Unlock()
+	t0 := f.clock.now()
+	killed := false
+	// Wipe at 240 s: like the walk-17 s4 shape, but late enough that the
+	// run left the boss step for trash (so the watch never routes the
+	// visible row to handleBoss).
+	wipeAt := t0.Add(240 * time.Second)
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		now := f.clock.now()
+		if !killed && !now.Before(wipeAt) {
+			killed = true
+			f.agent.mu.Lock()
+			for _, name := range f.agent.party {
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		// Every frame holds the boss in view at full health with no target:
+		// never engaged, latching nothing. (Kept through the wipe: before
+		// the fix the fresh 100 %/no-target row counts as engaged.)
+		return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 100, Target: 0}}
+	}
+	f.agent.onResume = func() {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|resumed", next, total)},
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (a never-targeted visible row is no fight)", sum.WipeResumes)
+	}
+	if hasNote(sum, "boss state unknown") {
+		t.Fatalf("notes %q, want no boss-unknown skip", sum.Notes)
+	}
+	if hasNote(sum, "boss 12118 engaged") {
+		t.Fatalf("notes %q, want no handleBoss routing (nothing was ever engaged)", sum.Notes)
+	}
+	if !strings.Contains(sum.EndReason, "until") {
+		t.Fatalf("end %q, want until (the run went on after the recovery)", sum.EndReason)
+	}
+}
+
+// TestRaidWalkWipeResumeDashOffRecentBossSkips: the dash-off fail-safe. A
+// plan boss row engaged into the trash wipe (a fight in progress) ends the
+// wipe the old way and never recovers: exit 19, wipe_resumes 0, no recovery
+// note, the run stop before the reset-wait revive. Both an engaged shape the
+// HP-only predicate would miss (100 % with a target: the `target` case) and
+// one the target-only predicate would miss (hurt with no target: the `hurt`
+// case) end here; with either predicate arm dropped, the row no longer latches
+// and the wipe recovers instead (red).
+func TestRaidWalkWipeResumeDashOffRecentBossSkips(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		row  tbm.HostileRec
+	}{
+		{"target", tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 100, Target: packet.GUID(1000)}},
+		{"hurt", tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 60, Target: 0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, next, total := bossDoneFixture(t)
+			f.agent.startReply = zgStart(total, next)
+			f.agent.mu.Lock()
+			// Boss-kind status: the run is on its boss step, so the watch
+			// absorbs the tracker's engagement (run-leader-fights-it note)
+			// and the walk stays out until the trash wipe, like the model.
+			f.agent.startQueue = []queuedEvent{
+				{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+			}
+			f.agent.mu.Unlock()
+			f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+			killed := false
+			row := tc.row
+			// Wipe at 240 s: like the walk-17 s4 shape, the engaged row
+			// stays in the frames until 40 s before the wipe, then is gone
+			// (past the stale-row gate while the latch is inside its 120 s
+			// window), and stays gone through the recovery: only the latch
+			// blocks, via `bossUnknown`.
+			wipeAt := f.clock.now().Add(240 * time.Second)
+			f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+				now := f.clock.now()
+				if !killed && !now.Before(wipeAt) {
+					killed = true
+					f.agent.mu.Lock()
+					for _, name := range f.agent.party {
+						f.agent.dead[name] = true
+					}
+					f.agent.mu.Unlock()
+				}
+				if now.Before(wipeAt.Add(-40 * time.Second)) {
+					return []tbm.HostileRec{row}
+				}
+				return nil
+			}
+			code := f.run(context.Background())
+			if code != exitRaidWalkIncident {
+				t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+			}
+			sum := f.summary()
+			if sum.WipeResumes != 0 {
+				t.Fatalf("wipe_resumes %d, want 0 (an engaged boss ends the wipe the old way)", sum.WipeResumes)
+			}
+			if hasNote(sum, "wipe-resume ") {
+				t.Fatalf("notes %q, want no recovery note (the wipe ended as before, with no resume)", sum.Notes)
+			}
+			stopAt, reviveAt := -1, -1
+			for i, l := range f.agent.gmLines() {
+				if stopAt < 0 && strings.HasPrefix(l, ".bot run stop") {
+					stopAt = i
+				}
+				if reviveAt < 0 && (strings.HasPrefix(l, ".revive ") || strings.HasPrefix(l, ".summon ")) {
+					reviveAt = i
+				}
+			}
+			if reviveAt >= 0 && (stopAt < 0 || reviveAt < stopAt) {
+				t.Fatalf("revive/summon at gm line %d before the run stop (%d): an unknown boss was revived into", reviveAt, stopAt)
+			}
+		})
+	}
+}
+
+// TestRaidWalkWipeResumeBossCorpseRecovers: like the walk-17 s4 replay, but
+// the frames from 150 s on hold the boss's corpse (0 %). A corpse never
+// latches, so the wipe recovers: wipe_resumes 1, no boss-unknown skip.
+func TestRaidWalkWipeResumeBossCorpseRecovers(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "kill", BossName: "Lucifron", Leg: "lucifron", Step: 3, Deaths: 1}}
+	t0 := f.clock.now()
+	killed := false
+	// Wipe at 240 s: like the walk-17 s4 shape, but late enough that the
+	// run left the boss step for trash (so the watch never routes the
+	// engaged-then-dead rows to handleBoss).
+	wipeAt := t0.Add(240 * time.Second)
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		now := f.clock.now()
+		if !killed && !now.Before(wipeAt) {
+			killed = true
+			f.agent.mu.Lock()
+			for _, name := range f.agent.party {
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		if now.Sub(t0) < 45*time.Second {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		// The boss is killed (corpse in view) from 150 s on, through the wipe:
+		// a 0 % row never latches, so the wipe can recover.
+		if elapsed := now.Sub(t0); elapsed >= 150*time.Second {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 0, Target: 0}}
+		}
+		return nil
+	}
+	f.agent.onResume = func() {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting resumed", next-1, total)},
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (a boss corpse does not block recovery)", sum.WipeResumes)
+	}
+	if hasNote(sum, "boss state unknown") {
+		t.Fatalf("notes %q, want no boss-unknown skip", sum.Notes)
+	}
+}
+
+// TestRaidWalkWipeResumeRoutesNewBossToHandleBoss (review 2 HIGH): boss A is
+// engaged early (the tracker latches it for life) and the dashboard files it
+// as outcome "kill", so a trash wipe more than 120 s later recovers. Boss B
+// wakes during the resume wait: the walk must route it to handleBoss (exit 19
+// with the boss-B note and stop reason), not report a clean wipe-resume while
+// a boss fight is live. Before the fix the lifetime latch made recoveredBoss
+// always see hadBoss and skip the routing.
+func TestRaidWalkWipeResumeRoutesNewBossToHandleBoss(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "kill", BossName: "Lucifron", Leg: "lucifron", Step: 3, Deaths: 1}}
+	t0 := f.clock.now()
+	killed := false
+	resumed := false
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		now := f.clock.now()
+		if !killed && now.Sub(t0) > 200*time.Second {
+			killed = true
+			f.agent.mu.Lock()
+			for _, name := range f.agent.party {
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		if now.Sub(t0) < 45*time.Second {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		if resumed {
+			return []tbm.HostileRec{{GUID: 9, Entry: 11982, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	f.agent.onResume = func() {
+		resumed = true
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|resumed", next-1, total)},
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, "so the run leader fights it") {
+		t.Fatalf("notes %q, want the boss-fight note (the early engagement must latch)", sum.Notes)
+	}
+	if sum.WipeResumes != 0 {
+		t.Fatalf("wipe_resumes %d, want 0 (a boss engaged during the resume wait is not a recovery)", sum.WipeResumes)
+	}
+	if !hasNote(sum, "boss 11982 engaged") {
+		t.Fatalf("notes %q, want the handleBoss note for the new boss", sum.Notes)
+	}
+	if !strings.Contains(sum.EndReason, "boss 11982 engaged") {
+		t.Fatalf("end %q, want the boss stop reason for the new boss", sum.EndReason)
+	}
+	if hasNote(sum, "wipe-resume ") {
+		t.Fatalf("notes %q, want no recovery note (the walk routed to the boss path)", sum.Notes)
+	}
+}
+
+// TestRaidWalkWipeResumeStaleBossStatusRoutesNewBossToHandleBoss (review 3
+// HIGH): --until "step N" past the boss, and the retained status is an earlier
+// boss-kind line. A trash wipe recovers with NO fresh post-resume run line,
+// and a new boss is engaged in the current frames. The walk must route it to
+// handleBoss (exit 19 with the new boss's note and stop reason): the stale
+// pre-resume boss-kind status must not count as the run fighting its boss.
+// Before the fix recoveredBoss applied the runFightsBoss exception on the
+// retained status and reported a clean wipe-resume.
+func TestRaidWalkWipeResumeStaleBossStatusRoutesNewBossToHandleBoss(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "kill", BossName: "Lucifron", Leg: "lucifron", Step: 3, Deaths: 1}}
+	t0 := f.clock.now()
+	killed := false
+	resumed := false
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		now := f.clock.now()
+		if !killed && now.Sub(t0) > 200*time.Second {
+			killed = true
+			f.agent.mu.Lock()
+			for _, name := range f.agent.party {
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		if now.Sub(t0) < 45*time.Second {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		if resumed {
+			return []tbm.HostileRec{{GUID: 9, Entry: 11982, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	// No fresh post-resume run line: pollRunRunning passes on the retained
+	// pre-resume boss-kind status, so recoveredBoss must still route the
+	// frames' new boss to handleBoss.
+	f.agent.onResume = func() {
+		resumed = true
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, "so the run leader fights it") {
+		t.Fatalf("notes %q, want the boss-fight note (the early engagement must latch)", sum.Notes)
+	}
+	if sum.WipeResumes != 0 {
+		t.Fatalf("wipe_resumes %d, want 0 (a boss engaged after the resume is not a recovery)", sum.WipeResumes)
+	}
+	bossRouted := false
+	for _, n := range sum.Notes {
+		if strings.HasPrefix(n, "boss 11982 engaged at step") && !strings.Contains(n, "so the run leader fights it") {
+			bossRouted = true
+		}
+	}
+	if !bossRouted {
+		t.Fatalf("notes %q, want the handleBoss note for the new boss (not the run-leader exception)", sum.Notes)
+	}
+	if !strings.Contains(sum.EndReason, "boss 11982 engaged") {
+		t.Fatalf("end %q, want the boss stop reason for the new boss", sum.EndReason)
+	}
+	if hasNote(sum, "wipe-resume ") {
+		t.Fatalf("notes %q, want no recovery note (the walk routed to the boss path)", sum.Notes)
+	}
+}
+
+// TestRaidWalkWipeResumeFreshBossStatusKeepsTheFight (review 3): the same
+// walk, but a fresh post-resume run line says the run is on its boss step. The
+// run leader keeps the fight: no handleBoss run stop, the recovery completes
+// (wipe_resumes 1) and the walk ends at its until.
+func TestRaidWalkWipeResumeFreshBossStatusKeepsTheFight(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "kill", BossName: "Lucifron", Leg: "lucifron", Step: 3, Deaths: 1}}
+	t0 := f.clock.now()
+	killed := false
+	resumed := false
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		now := f.clock.now()
+		if !killed && now.Sub(t0) > 200*time.Second {
+			killed = true
+			f.agent.mu.Lock()
+			for _, name := range f.agent.party {
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		if now.Sub(t0) < 45*time.Second {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		if resumed {
+			return []tbm.HostileRec{{GUID: 9, Entry: 11982, HPPct: 90, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	f.agent.onResume = func() {
+		resumed = true
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting post-resume", next-1, total)},
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want 0: the run leader fights its boss step (no handleBoss)", n)
+	}
+	sum := f.summary()
+	if !hasNote(sum, "so the run leader fights it") {
+		t.Fatalf("notes %q, want the boss-fight note (the fresh post-resume status keeps the fight)", sum.Notes)
+	}
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (the fresh post-resume boss status keeps the fight)", sum.WipeResumes)
+	}
+	if !hasNote(sum, "wipe-resume ") {
+		t.Fatalf("notes %q, want the recovery note (the walk resumed, it never routed to the boss path)", sum.Notes)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until (the run went on after the recovery)", sum.EndReason)
+	}
+}
+
 // TestRaidWalkWipeResumeStaleViewRestartsQuiet (review 2): bot_view fails and drops a hire for
 // some polls of the rest. No `.bot run resume` may go out until a full window of complete views
 // has passed after the last bad poll.
@@ -1844,6 +2477,977 @@ func TestRaidWalkWipeResumeStaleViewRestartsQuiet(t *testing.T) {
 	}
 	if sum := f.summary(); sum.WipeResumes != 1 {
 		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)
+	}
+}
+
+// TestRaidWalkWipeRestCountsWallTime: the rest measures its quiet window on
+// the clock, not in poll turns. The fake clock advances only in sleep, so a
+// bot_view hook advancing each call by 2.5 s (≈ 10 s per rest turn: pollOnce
+// view + quiet view + 5 s sleep, like the live run) doubles every turn's wall
+// time. The resume must go out between wipeRest and wipeRest + 30 s after the
+// last revive; before the fix the 5 s-per-turn count needed 120 turns ≈ 20 min.
+func TestRaidWalkWipeRestCountsWallTime(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	var resumeAt time.Time
+	resumeHook(f, 11, 28, &resumeAt)
+	f.allDeadFromHires()
+	f.agent.viewHook = func() {
+		f.clock.mu.Lock()
+		f.clock.t = f.clock.t.Add(2500 * time.Millisecond)
+		f.clock.mu.Unlock()
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	gm := f.agent.gmLines()
+	var lastRevive time.Time
+	for i, line := range gm {
+		if strings.HasPrefix(line, ".revive ") {
+			lastRevive = f.agent.gmAt[i]
+		}
+	}
+	if resumeAt.IsZero() {
+		t.Fatal("no run resume went out")
+	}
+	if lastRevive.IsZero() {
+		t.Fatal("no revive went out")
+	}
+	gap := resumeAt.Sub(lastRevive)
+	if gap < 10*time.Minute || gap > 10*time.Minute+30*time.Second {
+		t.Fatalf("resume %s after the last revive, want between 10m and 10m30s", gap)
+	}
+	if sum := f.summary(); sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)
+	}
+}
+
+// selfRegroupArm arms a status line whose delivery kills every hire in that same poll, so the
+// poll that reads the status line also reads the all-dead frames — exactly as the live server
+// reports a run that is regrouping by itself after a wipe (walk 17b m910q s4, test2 s2: the
+// status line and the deaths arrive together). queue also puts the line in the events stream.
+func selfRegroupArm(f *fixture, raw string, queue bool) {
+	f.agent.mu.Lock()
+	if queue {
+		f.agent.startQueue = append(f.agent.startQueue, queuedEvent{raw: raw})
+	}
+	prev := f.agent.eventsHook
+	f.agent.eventsHook = func(served string) {
+		if prev != nil {
+			prev(served)
+		}
+		if served != raw {
+			return
+		}
+		f.agent.mu.Lock()
+		for _, name := range f.agent.party {
+			f.agent.dead[name] = true
+		}
+		f.agent.mu.Unlock()
+	}
+	f.agent.mu.Unlock()
+}
+
+// selfRegroupKill is selfRegroupArm for a line queued right away.
+func selfRegroupKill(f *fixture, raw string) { selfRegroupArm(f, raw, true) }
+
+// selfRegroupPair queues two status lines of the same step in ONE events page (pageSize 2) and kills
+// every hire when the second line is served: exactly the live order, where "regrouping by itself" is
+// followed by "regroup: waiting for X (dead), ... reviving" in the same poll (walk 18 r5).
+func selfRegroupPair(f *fixture, first, second string) {
+	f.agent.pageSize = 2
+	f.agent.mu.Lock()
+	f.agent.startQueue = append(f.agent.startQueue, queuedEvent{raw: first}, queuedEvent{raw: second})
+	prev := f.agent.eventsHook
+	f.agent.eventsHook = func(served string) {
+		if prev != nil {
+			prev(served)
+		}
+		if served != second {
+			return
+		}
+		f.agent.mu.Lock()
+		for _, name := range f.agent.party {
+			f.agent.dead[name] = true
+		}
+		f.agent.mu.Unlock()
+	}
+	f.agent.mu.Unlock()
+}
+
+// mcWipeFights is the dashboard fights read a wipe lands on: a boss already killed, nothing live.
+func mcWipeFights() []walkFightRow {
+	return []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "kill", BossName: "Lucifron", Leg: "lucifron", Step: 3, Deaths: 1}}
+}
+
+// TestRaidWalkWipeSelfRegroupRecoversWithDashboard (walk 17b m910q s4 replay): the run is still
+// running when the wipe lands and regroups by itself ("regrouping by itself (1 of 2 at this
+// step)"). The walk revives the raid and lets the run go on: no out-of-combat rest, no `run
+// resume`, one --wipe-resume spent, and the watch loop runs again. Before the fix the walk sits
+// in restOutOfCombat while the run fights on (never 10 min of quiet) and the recovery ends at
+// 3 x --wipe-rest as a timeout.
+func TestRaidWalkWipeSelfRegroupRecoversWithDashboard(t *testing.T) {
+	t.Run("running regroups by itself", func(t *testing.T) {
+		f, next, total := bossDoneFixture(t)
+		f.opts.wipeResume = 2
+		f.agent.startReply = zgStart(total, next)
+		step := next - 2
+		regroup := fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|begin|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)", step, total)
+		f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+		f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+		f.dash.fights = mcWipeFights()
+		selfRegroupKill(f, regroup)
+		var reviveAt time.Time
+		commandersAtRevive := 0
+		f.agent.onGM = func(line string) {
+			if !strings.HasPrefix(line, ".revive ") {
+				return
+			}
+			reviveAt = f.clock.now()
+			commandersAtRevive = f.dash.commandersCalls()
+		}
+		resumes := 0
+		f.agent.onResume = func() { resumes++ }
+		// After its own regroup the run marches on with the raid in combat every second frame:
+		// never 10 min of quiet. The done line lands 15 min after the revive.
+		f.agent.combatAllFn = func(n int) bool { return !reviveAt.IsZero() && n%2 == 0 }
+		doneQueued := false
+		f.agent.viewHook = func() {
+			if reviveAt.IsZero() || doneQueued || f.clock.now().Sub(reviveAt) < 15*time.Minute {
+				return
+			}
+			doneQueued = true
+			f.agent.mu.Lock()
+			f.agent.lines = append(f.agent.lines,
+				queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+			f.agent.mu.Unlock()
+		}
+		code := f.run(context.Background())
+		if code != exitOK {
+			t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+		}
+		sum := f.summary()
+		if sum.WipeResumes != 1 {
+			t.Fatalf("wipe_resumes %d, want 1 (a self-regroup recovery counts once)", sum.WipeResumes)
+		}
+		if !hasNote(sum, "the run regroups by itself") {
+			t.Fatalf("notes %q, want the self-regroup recovery note", sum.Notes)
+		}
+		if resumes != 0 {
+			t.Fatalf("%d run resumes, want none (the run regroups on its own)", resumes)
+		}
+		if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+			t.Fatalf("%d run stops, want none (the recovery never stops the run)", n)
+		}
+		if sum.EndReason != "until" {
+			t.Fatalf("end %q, want until (the run went on after the recovery)", sum.EndReason)
+		}
+		if got := f.dash.commandersCalls(); got <= commandersAtRevive {
+			t.Fatalf("dashboard Commanders reads %d, want more than the %d at the last revive (the watch loop runs again)", got, commandersAtRevive)
+		}
+	})
+	// Mutation guard (M14): the self-regroup decision needs the run's state. The same note on a
+	// PAUSED status is the old stopped-run shape and keeps the old rest-and-resume recovery.
+	t.Run("paused keeps the old rest path", func(t *testing.T) {
+		f, next, total := bossDoneFixture(t)
+		f.opts.wipeResume = 2
+		f.agent.startReply = zgStart(total, next)
+		step := next - 2
+		regroup := fmt.Sprintf("TBM:RUN|molten_core|paused|%d/%d|lucifron|move|begin|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)", step, total)
+		f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+		f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+		f.dash.fights = mcWipeFights()
+		selfRegroupKill(f, regroup)
+		var resumeAt time.Time
+		f.agent.onResume = func() {
+			resumeAt = f.clock.now()
+			f.agent.mu.Lock()
+			f.agent.lines = append(f.agent.lines,
+				queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|resumed", step+1, total)},
+				queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+			f.agent.mu.Unlock()
+		}
+		code := f.run(context.Background())
+		if code != exitOK {
+			t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+		}
+		sum := f.summary()
+		if sum.WipeResumes != 1 {
+			t.Fatalf("wipe_resumes %d, want 1 (the old path recovers too)", sum.WipeResumes)
+		}
+		if hasNote(sum, "the run regroups by itself") || hasNote(sum, "the run went on by itself") {
+			t.Fatalf("notes %q, want the old rest-and-resume recovery (a paused run is no self-regroup)", sum.Notes)
+		}
+		if resumeAt.IsZero() {
+			t.Fatal("no run resume went out: a paused run keeps the old rest and resume")
+		}
+		if !hasNote(sum, "resumed") {
+			t.Fatalf("notes %q, want the rest-and-resume recovery note", sum.Notes)
+		}
+	})
+}
+
+// TestRaidWalkWipeSelfRegroupOrderedLines (walk 18 r5, live replay): TB sends the self-regroup note
+// and then "regroup: waiting for X (dead), ... reviving" for the SAME step in one events page, so the
+// wipe's last status line is the waiting one, not the note. The walk must still take the self-regroup
+// path (revive the raid, no rest, no `run resume`), not the fallback rest-and-resume which sits in the
+// rest while the run fights on and times out at 3 x --wipe-rest.
+func TestRaidWalkWipeSelfRegroupOrderedLines(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.opts.wipeResume = 2
+	f.agent.startReply = zgStart(total, next)
+	step := next - 2
+	regroup := fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|begin|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)", step, total)
+	waiting := fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|begin|regroup: waiting for Smashy (dead), Gorebrand (dead), reviving", step, total)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = mcWipeFights()
+	selfRegroupPair(f, regroup, waiting)
+	var reviveAt time.Time
+	commandersAtRevive := 0
+	f.agent.onGM = func(line string) {
+		if !strings.HasPrefix(line, ".revive ") {
+			return
+		}
+		reviveAt = f.clock.now()
+		commandersAtRevive = f.dash.commandersCalls()
+	}
+	resumes := 0
+	f.agent.onResume = func() { resumes++ }
+	// After its own regroup the run marches on with the raid in combat every second frame, so the
+	// rest never gets 10 min of quiet; the done line lands 15 min after the revive.
+	f.agent.combatAllFn = func(n int) bool { return !reviveAt.IsZero() && n%2 == 0 }
+	doneQueued := false
+	f.agent.viewHook = func() {
+		if reviveAt.IsZero() || doneQueued || f.clock.now().Sub(reviveAt) < 15*time.Minute {
+			return
+		}
+		doneQueued = true
+		f.agent.mu.Lock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+		f.agent.mu.Unlock()
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (a self-regroup recovery counts once)", sum.WipeResumes)
+	}
+	if !hasNote(sum, "the run regroups by itself") {
+		t.Fatalf("notes %q, want the self-regroup recovery note (the note line is not the last of the poll)", sum.Notes)
+	}
+	if hasNote(sum, "the run went on by itself") {
+		t.Fatalf("notes %q, the fallback rest path ran instead of the self-regroup path", sum.Notes)
+	}
+	if resumes != 0 {
+		t.Fatalf("%d run resumes, want none (the run regroups on its own)", resumes)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want none (the recovery never stops the run)", n)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until (the run went on after the recovery)", sum.EndReason)
+	}
+	if got := f.dash.commandersCalls(); got <= commandersAtRevive {
+		t.Fatalf("dashboard Commanders reads %d, want more than the %d at the last revive (the watch loop runs again)", got, commandersAtRevive)
+	}
+}
+
+// TestRaidWalkWipeSelfRegroupSameStepRegrouped (walk 19 r6): the wipe's page carries the self-regroup
+// note and then the run's own "regrouped" for the SAME step, so the note is not the last status line.
+// The self-regroup path must still be taken: revive, no rest, no `run resume`, one --wipe-resume.
+func TestRaidWalkWipeSelfRegroupSameStepRegrouped(t *testing.T) {
+	wipeSelfRegroupPage(t, func(step, total int) string {
+		return fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|begin|regrouped", step, total)
+	})
+}
+
+// TestRaidWalkWipeSelfRegroupAdvancedStep (walk 19 r6): the wipe's page carries the self-regroup note
+// and then a running line of the NEXT step — the run going on by itself, which also moves the step the
+// tracker fires the wipe on. The note still explains the wipe: the self-regroup path must be taken.
+// Before the fix selfRegroup was gated on lastStatus.Step == step, so this page's note was lost,
+// runLines was cleared and the walk sat out the fallback rest's 3 x --wipe-rest timeout.
+func TestRaidWalkWipeSelfRegroupAdvancedStep(t *testing.T) {
+	wipeSelfRegroupPage(t, func(step, total int) string {
+		return fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|begin|walking", step+1, total)
+	})
+}
+
+// wipeSelfRegroupPage runs the self-regroup page scenario of the two tests above: a two-line events
+// page whose first line is the self-regroup note at the wipe's step and whose second is second(step,
+// total), with every hire dying on the second line's delivery. The run then marches on in combat (never
+// 10 min of quiet) and a done line lands 15 min after the revive: only the self-regroup path (no rest,
+// no `run resume`) can reach the until ending. second's own step decides what the tracker makes of the
+// wipe (the run's step when it is the note's, the next one when the line moved it).
+func wipeSelfRegroupPage(t *testing.T, second func(step, total int) string) {
+	t.Helper()
+	f, next, total := bossDoneFixture(t)
+	f.opts.wipeResume = 2
+	f.agent.startReply = zgStart(total, next)
+	step := next - 2
+	regroup := fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|begin|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)", step, total)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = mcWipeFights()
+	selfRegroupPair(f, regroup, second(step, total))
+	var reviveAt time.Time
+	commandersAtRevive := 0
+	f.agent.onGM = func(line string) {
+		if !strings.HasPrefix(line, ".revive ") {
+			return
+		}
+		reviveAt = f.clock.now()
+		commandersAtRevive = f.dash.commandersCalls()
+	}
+	resumes := 0
+	f.agent.onResume = func() { resumes++ }
+	// After its own regroup the run marches on with the raid in combat every second frame: never
+	// 10 min of quiet. The done line lands 15 min after the revive.
+	f.agent.combatAllFn = func(n int) bool { return !reviveAt.IsZero() && n%2 == 0 }
+	doneQueued := false
+	f.agent.viewHook = func() {
+		if reviveAt.IsZero() || doneQueued || f.clock.now().Sub(reviveAt) < 15*time.Minute {
+			return
+		}
+		doneQueued = true
+		f.agent.mu.Lock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+		f.agent.mu.Unlock()
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (a self-regroup recovery counts once)", sum.WipeResumes)
+	}
+	if !hasNote(sum, "the run regroups by itself") {
+		t.Fatalf("notes %q, want the self-regroup recovery note (the note line is not the last of the page)", sum.Notes)
+	}
+	if hasNote(sum, "the run went on by itself") {
+		t.Fatalf("notes %q, the fallback rest path ran instead of the self-regroup path", sum.Notes)
+	}
+	if resumes != 0 {
+		t.Fatalf("%d run resumes, want none (the run regroups on its own)", resumes)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want none (the recovery never stops the run)", n)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until (the run went on after the recovery)", sum.EndReason)
+	}
+	if got := f.dash.commandersCalls(); got <= commandersAtRevive {
+		t.Fatalf("dashboard Commanders reads %d, want more than the %d at the last revive (the watch loop runs again)", got, commandersAtRevive)
+	}
+}
+
+// TestRaidWalkWipeSelfRegroupBudget: a self-regroup recovery counts against --wipe-resume like
+// every other one. With two recoveries left, two self-regroup wipes are both recovered; with one
+// left the second wipe ends the walk the old way and says why.
+//
+// The second wipe is scripted only once the first recovery's revives are done and one more poll
+// has shown the raid alive again: the tracker's wipe rule latches until it sees the party up, so
+// a wipe scripted while the raid is still down would never fire.
+func TestRaidWalkWipeSelfRegroupBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		wipeResume int
+		want       int
+	}{
+		{"two", 2, 2},
+		{"one", 1, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, next, total := bossDoneFixture(t)
+			f.opts.wipeResume = tc.wipeResume
+			f.agent.startReply = zgStart(total, next)
+			step := next - 2
+			f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+			f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+			f.dash.fights = mcWipeFights()
+			second := fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|begin|19 dead (2 wipes, 2 near wipes this run): regrouping by itself (2 of 2 at this step)", step+2, total)
+			done := fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)
+			selfRegroupKill(f, fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|begin|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)", step, total))
+			// The second wipe's line is queued once the first recovery is done; its delivery kills.
+			selfRegroupArm(f, second, false)
+			// Recoveries whose revives have finished (each revives every hire once).
+			var revives, recoveries, sinceRecovery, queued int
+			var partyN int
+			f.agent.onGM = func(line string) {
+				if !strings.HasPrefix(line, ".revive ") {
+					return
+				}
+				if partyN == 0 {
+					f.agent.mu.Lock()
+					partyN = len(f.agent.party)
+					f.agent.mu.Unlock()
+				}
+				if partyN == 0 {
+					return
+				}
+				revives++
+				if revives == recoveries*partyN+partyN {
+					recoveries++
+				}
+			}
+			f.agent.viewHook = func() {
+				if recoveries <= queued {
+					return
+				}
+				// One alive poll after the revives, then the next script line: the tracker must
+				// see the party up again before the next wipe (its wipe rule latches otherwise).
+				sinceRecovery++
+				if sinceRecovery < 2 {
+					return
+				}
+				sinceRecovery = 0
+				queued++
+				line := done
+				if queued == 1 {
+					line = second
+				}
+				f.agent.mu.Lock()
+				f.agent.lines = append(f.agent.lines, queuedEvent{raw: line})
+				f.agent.mu.Unlock()
+			}
+			resumes := 0
+			f.agent.onResume = func() { resumes++ }
+			code := f.run(context.Background())
+			sum := f.summary()
+			if sum.WipeResumes != tc.want {
+				t.Fatalf("wipe_resumes %d, want %d (notes %q, exit %d)", sum.WipeResumes, tc.want, sum.Notes, code)
+			}
+			if resumes != 0 {
+				t.Fatalf("%d run resumes, want none (self-regroup recoveries never resume)", resumes)
+			}
+			if tc.want == 2 {
+				if code != exitOK {
+					t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+				}
+				if sum.EndReason != "until" {
+					t.Fatalf("end %q, want until", sum.EndReason)
+				}
+				if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+					t.Fatalf("%d run stops, want none (both wipes recovered)", n)
+				}
+				return
+			}
+			if code != exitRaidWalkIncident {
+				t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+			}
+			if !hasNote(sum, "wipe resume skipped: no recoveries left (1/1)") {
+				t.Fatalf("notes %q, want the no-recoveries-left skip", sum.Notes)
+			}
+			if !hasNote(sum, fmt.Sprintf("wipe at step %d", step+2)) {
+				t.Fatalf("notes %q, want the second wipe's ending", sum.Notes)
+			}
+			if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
+				t.Fatalf("%d run stops, want exactly 1 (the second wipe's old ending)", n)
+			}
+		})
+	}
+}
+
+// TestRaidWalkWipeSelfRegroupBossEngagedNotes (walk 17b m910q s2 replay): the frames still hold an
+// engaged plan boss (a party target, hp below full) when the self-regroup wipe lands, so the walk
+// ends the wipe the old way — and says why.
+func TestRaidWalkWipeSelfRegroupBossEngagedNotes(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	f.opts.wipeResume = 2
+	f.agent.startReply = zgStart(total, next)
+	step := next - 2
+	// The run is on its boss step and its kind is boss: the tracker's own engagement is absorbed
+	// by the run-leader exception, so the wipe is the incident that ends the walk.
+	regroup := fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|begin|19 dead (2 wipes, 2 near wipes this run): regrouping by itself (1 of 2 at this step)", step, total)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = mcWipeFights()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 80, Target: packet.GUID(1000)}}
+	}
+	selfRegroupKill(f, regroup)
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 0 {
+		t.Fatalf("wipe_resumes %d, want 0 (a boss engaged into the wipe ends it)", sum.WipeResumes)
+	}
+	if !hasNote(sum, "wipe resume skipped: boss 12118 engaged") {
+		t.Fatalf("notes %q, want the engaged-boss skip note", sum.Notes)
+	}
+	if !hasNote(sum, fmt.Sprintf("wipe at step %d", step)) {
+		t.Fatalf("notes %q, want the wipe ending", sum.Notes)
+	}
+	stopAt, summonAt := -1, -1
+	for i, l := range f.agent.gmLines() {
+		if stopAt < 0 && strings.HasPrefix(l, ".bot run stop") {
+			stopAt = i
+		}
+		if summonAt < 0 && (strings.HasPrefix(l, ".revive ") || strings.HasPrefix(l, ".summon ")) {
+			summonAt = i
+		}
+	}
+	if stopAt < 0 {
+		t.Fatal("no run stop went out")
+	}
+	if summonAt >= 0 && summonAt < stopAt {
+		t.Fatalf("revive/summon at gm line %d before the run stop (%d): the unknown boss was revived into", summonAt, stopAt)
+	}
+}
+
+// TestRaidWalkWipeResumeSecondWipeDuringRestNotes: a stopped run (no self-regroup note), so the
+// recovery rests; halfway through the rest every hire dies again. The walk ends 19 and the second
+// wipe leaves a note instead of the bare stop.
+func TestRaidWalkWipeResumeSecondWipeDuringRestNotes(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.allDeadFromHires()
+	var reviveAt time.Time
+	hireHook := f.agent.onGM
+	f.agent.onGM = func(line string) {
+		if hireHook != nil {
+			hireHook(line)
+		}
+		if strings.HasPrefix(line, ".revive ") {
+			reviveAt = f.clock.now()
+		}
+	}
+	killed := false
+	f.agent.viewHook = func() {
+		if killed || reviveAt.IsZero() || f.clock.now().Sub(reviveAt) < 5*time.Minute {
+			return
+		}
+		killed = true
+		f.agent.mu.Lock()
+		for _, name := range f.agent.party {
+			f.agent.dead[name] = true
+		}
+		f.agent.mu.Unlock()
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if sum := f.summary(); !hasNote(sum, "second wipe at step 10 during the wipe-resume of step 10") {
+		t.Fatalf("notes %q, want the second-wipe note (the rest's second wipe)", sum.Notes)
+	}
+}
+
+// TestRaidWalkWipeResumeRunWentOnDuringRest: a stopped run, so the recovery rests, but a status
+// the rest reads says the run regrouped and went on. The walk skips the resume, counts the
+// recovery and lets the run be.
+func TestRaidWalkWipeResumeRunWentOnDuringRest(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.allDeadFromHires()
+	var reviveAt time.Time
+	hireHook := f.agent.onGM
+	f.agent.onGM = func(line string) {
+		if hireHook != nil {
+			hireHook(line)
+		}
+		if strings.HasPrefix(line, ".revive ") {
+			reviveAt = f.clock.now()
+		}
+	}
+	// Two rest turns after the revive the run's own regroup is done and it walks on.
+	views, queued := 0, false
+	f.agent.viewHook = func() {
+		if reviveAt.IsZero() || queued {
+			return
+		}
+		views++
+		if views < 4 {
+			return
+		}
+		queued = true
+		f.agent.mu.Lock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|11/29|onyxia|move|walk|regrouped"},
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands"})
+		f.agent.mu.Unlock()
+	}
+	resumes := 0
+	f.agent.onResume = func() {
+		resumes++
+		f.agent.push("TBM:RUN|onyxias_lair|running|12/29|onyxia|move|walk|resumed", "")
+		f.agent.push("TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands", "")
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (the run going on still counts as recovered)", sum.WipeResumes)
+	}
+	if !hasNote(sum, "the run went on by itself") {
+		t.Fatalf("notes %q, want the went-on recovery note", sum.Notes)
+	}
+	if resumes != 0 {
+		t.Fatalf("%d run resumes, want none (the run resumed itself)", resumes)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until", sum.EndReason)
+	}
+}
+
+// TestRaidWalkWipeResumeRunWentOnMultipleLines (walk 18 r5): the run's own regroup finishes with a
+// "regrouped" status that is NOT the last line of its events page (a later line of the same step
+// follows). The rest must still see it and stop: the recovery counts and no `run resume` goes out.
+// Before the fix only the page's last line was read, so the rest ran on to the resume.
+func TestRaidWalkWipeResumeRunWentOnMultipleLines(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.allDeadFromHires()
+	var reviveAt time.Time
+	hireHook := f.agent.onGM
+	f.agent.onGM = func(line string) {
+		if hireHook != nil {
+			hireHook(line)
+		}
+		if strings.HasPrefix(line, ".revive ") {
+			reviveAt = f.clock.now()
+		}
+	}
+	f.agent.pageSize = 2
+	views, queued := 0, false
+	f.agent.viewHook = func() {
+		if reviveAt.IsZero() || queued {
+			return
+		}
+		views++
+		if views < 4 {
+			return
+		}
+		queued = true
+		f.agent.mu.Lock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|10/29|onyxia|move|walk|regrouped"},
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|10/29|onyxia|move|walk|walking"},
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands"})
+		f.agent.mu.Unlock()
+	}
+	resumes := 0
+	f.agent.onResume = func() { resumes++ }
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)
+	}
+	if !hasNote(sum, "the run went on by itself") {
+		t.Fatalf("notes %q, want the went-on recovery note (the page's last line is no regroup line)", sum.Notes)
+	}
+	if resumes != 0 {
+		t.Fatalf("%d run resumes, want none (the run resumed itself)", resumes)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until", sum.EndReason)
+	}
+}
+
+// TestRaidWalkWipeResumeRunWentOnLaterStep (walk 18 r5): the rest reads a running status on a LATER
+// step whose note does not start with "regrouped". The rest still ends and the recovery counts; the
+// `Step > step` half of the guard is what fires here.
+func TestRaidWalkWipeResumeRunWentOnLaterStep(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.allDeadFromHires()
+	var reviveAt time.Time
+	hireHook := f.agent.onGM
+	f.agent.onGM = func(line string) {
+		if hireHook != nil {
+			hireHook(line)
+		}
+		if strings.HasPrefix(line, ".revive ") {
+			reviveAt = f.clock.now()
+		}
+	}
+	views, queued := 0, false
+	f.agent.viewHook = func() {
+		if reviveAt.IsZero() || queued {
+			return
+		}
+		views++
+		if views < 4 {
+			return
+		}
+		queued = true
+		f.agent.mu.Lock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|11/29|onyxia|move|walk|walking"},
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands"})
+		f.agent.mu.Unlock()
+	}
+	resumes := 0
+	f.agent.onResume = func() { resumes++ }
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)
+	}
+	if !hasNote(sum, "the run went on by itself") {
+		t.Fatalf("notes %q, want the went-on recovery note (a later step with no regroup note)", sum.Notes)
+	}
+	if resumes != 0 {
+		t.Fatalf("%d run resumes, want none (the run went on by itself)", resumes)
+	}
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until", sum.EndReason)
+	}
+}
+
+// TestRaidWalkWipeResumeRunWentOnBeforeNearWipe (walk 19 r6): the run's own "regrouped" line was read
+// BEFORE the near-wipe pause, so the rest never saw it (the guard reads only lines received after the
+// rest began, seq0). A pre-rest line must not stop the rest: the near-wipe recovery rests and resumes
+// normally. Pins runWentOnAfter's `seq <= seq0` stop.
+func TestRaidWalkWipeResumeRunWentOnBeforeNearWipe(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	var resumeAt time.Time
+	resumeHook(f, 11, 28, &resumeAt)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|onyxias_lair|running|10/29|onyxia|move|walk|regrouped"},
+		{raw: "TBM:RUN|onyxias_lair|paused|10/29|onyxia|move|walk|19 dead: 3 near wipes within 10 min (54): the run stops here. Regroup (c...)"},
+	}
+	f.agent.mu.Unlock()
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if resumeAt.IsZero() {
+		t.Fatal("no run resume went out: a pre-rest regroup line must not stop the rest")
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)
+	}
+	if hasNote(sum, "the run went on by itself") {
+		t.Fatalf("notes %q, the rest saw a regroup line read before it began", sum.Notes)
+	}
+	if !hasNote(sum, "resumed") {
+		t.Fatalf("notes %q, want the rest-and-resume recovery note", sum.Notes)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want none (the near-wipe recovery never stops the run)", n)
+	}
+}
+
+// TestRaidWalkWipeResumeStaleSelfRegroupNote (walk 19 r6): a self-regroup note at the wipe's own step
+// that is older than selfRegroupWindow (30 s) must not explain the wipe, even when it is the last
+// status line: the run stopped regrouping long ago, so the recovery rests and resumes as usual. Before
+// the fix selfRegroupNote(lastStatus.Note) ignored the window, so this wipe took the self-regroup path
+// and no resume ever went out.
+func TestRaidWalkWipeResumeStaleSelfRegroupNote(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	var resumeAt time.Time
+	resumeHook(f, 11, 28, &resumeAt)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|onyxias_lair|running|10/29|onyxia|move|walk|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)"},
+	}
+	f.agent.mu.Unlock()
+	// The wipe lands 45 s after the note: the run's frames die once the window has passed (once: the
+	// recovery's own revives must bring the raid back for the rest).
+	var noteAt time.Time
+	killed := false
+	f.agent.eventsHook = func(served string) {
+		if strings.Contains(served, "regrouping by itself") {
+			noteAt = f.clock.now()
+		}
+	}
+	f.agent.viewHook = func() {
+		if killed || noteAt.IsZero() || f.clock.now().Sub(noteAt) < 45*time.Second {
+			return
+		}
+		killed = true
+		f.agent.mu.Lock()
+		for _, name := range f.agent.party {
+			f.agent.dead[name] = true
+		}
+		f.agent.mu.Unlock()
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if resumeAt.IsZero() {
+		t.Fatal("no run resume went out (a note older than the window is no self-regroup)")
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)
+	}
+	if hasNote(sum, "the run regroups by itself") {
+		t.Fatalf("notes %q, a > 30 s old note decided the wipe", sum.Notes)
+	}
+	if !hasNote(sum, "resumed") {
+		t.Fatalf("notes %q, want the rest-and-resume recovery note", sum.Notes)
+	}
+}
+
+// TestRaidWalkWipeResumeNoteAtPreviousStep (walk 19 r6): the self-regroup note belongs to the step
+// BEFORE the wipe (a page of its own) and is still fresh, but the run stands on the wipe's step now:
+// the note does not explain this wipe, so the recovery rests and resumes. This is the step half of the
+// self-regroup match — a note whose own page carried the run on to the wipe's step IS a self-regroup
+// (TestRaidWalkWipeSelfRegroupAdvancedStep).
+func TestRaidWalkWipeResumeNoteAtPreviousStep(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 9)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	var resumeAt time.Time
+	resumeHook(f, 11, 28, &resumeAt)
+	note := "TBM:RUN|onyxias_lair|running|9/29|onyxia|move|walk|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)"
+	walk := "TBM:RUN|onyxias_lair|running|10/29|onyxia|move|walk|walking"
+	f.agent.mu.Lock()
+	f.agent.startQueue = append(f.agent.startQueue, queuedEvent{raw: note}, queuedEvent{raw: walk})
+	// One line per events page (pageSize 0), so the note's page is not the wipe's page. The wipe lands
+	// on the page that reads the next step's line, within the window.
+	prev := f.agent.eventsHook
+	f.agent.eventsHook = func(served string) {
+		if prev != nil {
+			prev(served)
+		}
+		if served != walk {
+			return
+		}
+		f.agent.mu.Lock()
+		for _, name := range f.agent.party {
+			f.agent.dead[name] = true
+		}
+		f.agent.mu.Unlock()
+	}
+	f.agent.mu.Unlock()
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if resumeAt.IsZero() {
+		t.Fatal("no run resume went out (a note of the previous step is no self-regroup)")
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1", sum.WipeResumes)
+	}
+	if hasNote(sum, "the run regroups by itself") {
+		t.Fatalf("notes %q, a note of the previous step decided the wipe", sum.Notes)
+	}
+	if !hasNote(sum, "resumed") {
+		t.Fatalf("notes %q, want the rest-and-resume recovery note", sum.Notes)
+	}
+}
+
+// TestRaidWalkWipeResumeSecondWipeSameStep (walk 19 r6): a second wipe at the SAME step right after the
+// first self-regroup recovery — with no status line of its own — must not inherit the first wipe's
+// note: handleWipe clears runLines, so a note explains one wipe only. Without that clear the second
+// wipe looks like a self-regroup, no resume ever goes out and the walk runs to its ceiling.
+func TestRaidWalkWipeResumeSecondWipeSameStep(t *testing.T) {
+	// A ten-man raid (the smallest roster a raid plan has) keeps the recovery's per-hire waits small.
+	f := newFixture(t)
+	f.opts.plan, f.opts.holder = "lower_karazhan_halls", "raid-walk-lower_karazhan_halls"
+	p, err := dungeon.Load(filepath.Join(f.opts.dir, "lower_karazhan_halls.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.agent.instMap = p.Map
+	f.opts.tier = 1
+	f.opts.wipeResume = 2
+	// The recovery's fixed settle sleeps (10 s after the summons, 15 s after the revives) would put the
+	// second wipe past the 30 s window a self-regroup note can explain: even a ten-man recovery is 27 s,
+	// and the second wipe needs the drive's two polls past it (31 s). Freeze those two for this test;
+	// the 2 s polls, the per-hire waits, the rest's quiet window and the 30 s window stay untouched.
+	prevSleep := f.env.sleep
+	f.env.sleep = func(ctx context.Context, d time.Duration) error {
+		if d == 10*time.Second || d == 15*time.Second {
+			d = 0
+		}
+		return prevSleep(ctx, d)
+	}
+	const step, total = 3, 6
+	f.agent.startReply = startAt("lower_karazhan_halls", step)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fights = mcWipeFights()
+	selfRegroupKill(f, fmt.Sprintf("TBM:RUN|lower_karazhan_halls|running|%d/%d|rend|move|begin|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)", step, total))
+	partyN := 0
+	revived := 0
+	f.agent.onGM = func(line string) {
+		if !strings.HasPrefix(line, ".revive ") {
+			return
+		}
+		if partyN == 0 {
+			f.agent.mu.Lock()
+			partyN = len(f.agent.party)
+			f.agent.mu.Unlock()
+		}
+		revived++
+	}
+	var resumeAt time.Time
+	f.agent.onResume = func() {
+		resumeAt = f.clock.now()
+		f.agent.mu.Lock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|lower_karazhan_halls|running|%d/%d|rend|move|walk|resumed", step+1, total)},
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|lower_karazhan_halls|done|%d/%d|rend|move|walk|stopped before step %d (until step %d): the party stays where it stands", step+1, total, step+1, step+1)})
+		f.agent.mu.Unlock()
+	}
+	// The frames after the last .revive come in this order: the recovery's own post-revive view, then
+	// the watch loop's first poll (the alive frame that clears the tracker's wipe latch), then the poll
+	// whose frames die — the second wipe, still inside the first note's 30 s window.
+	views := 0
+	f.agent.viewHook = func() {
+		if partyN == 0 || revived < partyN {
+			return
+		}
+		views++
+		if views != 3 {
+			return
+		}
+		f.agent.mu.Lock()
+		for _, name := range f.agent.party {
+			f.agent.dead[name] = true
+		}
+		f.agent.mu.Unlock()
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s\nnotes %q", code, f.stderr.String(), f.stdout.String(), f.summary().Notes)
+	}
+	if resumeAt.IsZero() {
+		t.Fatal("no run resume went out (the second wipe must not reuse the first wipe's note)")
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 2 {
+		t.Fatalf("wipe_resumes %d, want 2 (notes %q)", sum.WipeResumes, sum.Notes)
+	}
+	if !hasNote(sum, "the run regroups by itself") {
+		t.Fatalf("notes %q, want the first wipe's self-regroup recovery note", sum.Notes)
+	}
+	if !hasNote(sum, "resumed") {
+		t.Fatalf("notes %q, want the second wipe's rest-and-resume recovery note", sum.Notes)
 	}
 }
 
@@ -2771,5 +4375,22 @@ func TestRaidWalkExtraArgumentNamesIt(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), `unexpected argument "extra"`) {
 		t.Fatalf("stderr does not name the extra argument: %q", stderr.String())
+	}
+}
+
+// TestRaidWalkWipeRestFloor: the rest's quiet window counts from the last non-quiet poll, so a very
+// short --wipe-rest can already be met by the FIRST quiet poll — the rest would close without ever
+// seeing sustained quiet. The flag refuses anything below 30 s (walk 18 r5).
+func TestRaidWalkWipeRestFloor(t *testing.T) {
+	var stderr bytes.Buffer
+	if _, code := parseRaidWalkArgs([]string{"zul_gurub", "--wipe-rest", "20s"}, &stderr); code != exitUsage {
+		t.Fatalf("--wipe-rest 20s: exit %d, want %d", code, exitUsage)
+	}
+	if !strings.Contains(stderr.String(), "--wipe-rest must be 30s or more") {
+		t.Fatalf("stderr does not name the floor: %q", stderr.String())
+	}
+	var ok bytes.Buffer
+	if _, code := parseRaidWalkArgs([]string{"zul_gurub", "--wipe-rest", "30s"}, &ok); code != exitOK {
+		t.Fatalf("--wipe-rest 30s: exit %d, want %d (%q)", code, exitOK, ok.String())
 	}
 }

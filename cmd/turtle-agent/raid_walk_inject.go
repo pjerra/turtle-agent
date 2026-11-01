@@ -411,7 +411,7 @@ func (r *raidInjector) readEventsPage(page events.Page) injectPageRead {
 				if w.tracker != nil {
 					w.tracker.Feed(w.env.now(), st)
 				}
-				w.lastStatus, w.haveStatus = st, true
+				w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
 				if st.Note != "" {
 					w.newNotes = append(w.newNotes, st.Note)
 				}

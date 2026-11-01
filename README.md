@@ -2209,21 +2209,41 @@ minute at 100 % or gone, held 20 s), then revives: GM to step 1's point, a quiet
 no moving hostile within 80 yd, no patrol path within 45 yd, rechecked every 5 s for 120 s) and the plan's entrance
 once, `.summon` then `.revive` every hire. A wipe or a near-wipe stop outside a boss fight recovers while
 `--wipe-resume` has recoveries left: no `run stop`, the dead raid is revived, it rests `--wipe-rest` out of combat
-and the run resumes (the server must show running again within 60 s); the summary notes each recovery
+(wall time: the quiet window is measured on the clock, not counted in poll turns, and it counts from the last poll
+that was not quiet; `--wipe-rest` below 30s is refused) and the run resumes (the server must
+show running again within 60 s); the summary notes each recovery
 (`wipe-resume <n>/<K> at step <s>: revived <d>, rested <m>, resumed`) and counts them in `wipe_resumes`, and the end
-stays truthful. It never revives while a boss row has a target: a boss engagement stops the run at once and waits up
-to 15 minutes for a kill, a reset or a wipe. A wipe or a boss engagement with no recovery left ends the walk with
-exit 19. Recovery fails closed on unknown boss state (no dashboard, a stale or errored fights read, or a boss
-latched in the last 120 s: the old ending with the note `wipe resume skipped: boss state unknown`); the rest needs
-a complete quiet view (every roster hire present, fresh, out of combat and alive in `bot_view`, polled every 5 s —
-any gap restarts the window); and the recovery has an absolute deadline (the walk ceiling or start + 3 x
-`--wipe-rest`, whichever is sooner — combat restarts the quiet window but never moves it, and past it the walk ends
-with the original incident's exit and `wipe recovery timed out after <dur>`). A boss fight still `live` in the
-dashboard's fights list blocks recovery before any revive; finished boss fights in the list do not. A skipped
-near-wipe recovery is not retried for the same pause. Known limits: the wipe path does not check that the run is
-paused before reviving, and the 60 s running check can pass on a status line from before the resume; the timeout
-note always names 3 x `--wipe-rest` even when the walk ceiling cut it shorter; a second wipe during the rest or
-the resume wait ends 19 without the old ending's reset-wait revive.
+stays truthful. When the run regroups by itself after a wipe (`regrouping by itself`), the walk revives the raid and
+lets the run go on: no rest, no `run resume`; it still counts as one `--wipe-resume`. Every wipe that does not recover
+says why in the notes (`wipe resume skipped: ...`, `second wipe at step N during the wipe-resume of step M`). It never
+revives while a boss row has a target: a boss engagement stops the run at once and waits up to 15 minutes for a kill,
+a reset or a wipe. A wipe or a boss engagement with no recovery left ends the walk with exit 19. Recovery fails closed
+on unknown boss state (no dashboard, a stale or errored fights read, or a boss latched in the last 120 s: the old
+ending with the note `wipe resume skipped: boss state unknown`); the rest needs a complete quiet view (every roster
+hire present, fresh, out of combat and alive in `bot_view`, polled every 5 s — any gap restarts the window); and the
+recovery has an absolute deadline (the walk ceiling or start + 3 x `--wipe-rest`, whichever is sooner — combat
+restarts the quiet window but never moves it, and past it the walk ends with the original incident's exit and
+`wipe recovery timed out after <dur>`). A boss fight still `live` in the dashboard's fights list blocks recovery
+before any revive; finished boss fights in the list do not, and a boss killed earlier in the walk does not block a
+later trash wipe's recovery, while a boss ENGAGED in the frames in the last 120 s (alive and holding a target or
+below 100 %) still blocks recovery; a plan boss or boss add merely in view at full health with no target, or a boss
+corpse, does not. After the rest and the resume the walk checks what the frames say now: a newly engaged boss routes
+to the boss path exactly as a watch-loop engagement does, so the run never reports a clean wipe-resume while a boss
+fight is live. The run-leader-fights-its-boss exception needs a run status received after the resume went out: a
+retained pre-resume boss-kind line does not hide a newly engaged boss, while a fresh post-resume boss-kind status
+keeps the old behaviour. A skipped near-wipe recovery is not retried for the same pause. Known limits: the wipe path
+does not check that the run is paused before reviving, and the 60 s running check can pass on a status line from
+before the resume; the timeout note always names 3 x `--wipe-rest` even when the walk ceiling cut it shorter; a boss's
+`first` add that is engaged as ordinary trash (for example a Zulian Tiger pack in ZG) still counts as a boss for 120 s
+and blocks that wipe's recovery; a second wipe during the rest or the resume wait ends 19 without the old ending's
+reset-wait revive; the self-regroup match is TB's own note text (`regrouping by itself`), read from every status line
+of a poll (live TB sends the note and then "regroup: waiting ... reviving" for the same step together), and the note
+must be at most 30 s old and stand on the wipe's step or in the page whose later line carried the run past it (a
+later step moves the step the wipe fires on), so a reworded note falls back on the rest's own
+`regrouped`/later-step guard, which also reads every line of a poll and only the lines read after the rest began;
+a near-wipe rest still drops `IncidentBossEngaged` and writes no dashboard saves (it is bounded, and the recovery re-checks the
+boss afterwards); and the tracker's boss latch fires
+once per walk, so a boss engaged after an earlier one reaches the walk only through the wipe gate.
 
 Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
 `.bot gear raid <commander> tier <N>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,

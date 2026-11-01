@@ -308,8 +308,8 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 		fmt.Fprintf(stderr, "raid-walk: --wipe-resume wants 0 to 3\n")
 		return o, exitUsage
 	}
-	if o.wipeRest <= 0 {
-		fmt.Fprintf(stderr, "raid-walk: --wipe-rest must be above 0\n")
+	if o.wipeRest < 30*time.Second {
+		fmt.Fprintf(stderr, "raid-walk: --wipe-rest must be 30s or more\n")
 		return o, exitUsage
 	}
 	if o.autoResume < 0 || o.autoResume > 3 {
@@ -540,15 +540,28 @@ type walk struct {
 
 	stepFirst *dungeon.Point
 
-	lastStatus    tbm.RunStatus
-	haveStatus    bool
+	lastStatus tbm.RunStatus
+	haveStatus bool
+	// Review round 3: statusSeq counts every received run status; resumeRun
+	// captures it before issuing the resume (resumeStatusSeq) so recoveredBoss
+	// can tell a fresh post-resume status from a retained pre-resume one.
+	statusSeq       uint64
+	resumeStatusSeq uint64
+	// runLines are the recent running status lines pollOnce read (newest last). Walk 18 r5: a
+	// poll can carry several status lines of the same incident (live TB sends the "regrouping by
+	// itself" note and then "regroup: waiting ... reviving" for the same step in one page), so the
+	// wipe's self-regroup rule and the rest's went-on rule must see every line, not only the last.
+	runLines []runObs
+	// pollSeq0 is statusSeq before the page pollOnce is reading (it sets it). Walk 19 r6: handleWipe's
+	// self-regroup rule reads it to tell a line of the wipe's own events page from an older one.
+	pollSeq0      uint64
 	dashAt        time.Time
 	fightAt       time.Time
 	lastFrameSave time.Time
 	dashWarned    bool
 	// Review round 2: the boss evidence the recovery needs. bossReadAt is when the last
 	// dashboard fights/boss read succeeded (zero: never), bossEngagedAt when it last
-	// showed an engaged boss, bossLatchAt when the frames last latched one, bossCheckErr
+	// showed an engaged boss, bossLatchAt when the frames last showed an ENGAGED plan-boss row (alive, and a target or below 100 %), bossCheckErr
 	// the last read's error (nil: the read worked). fightRows is the last good read.
 	bossReadAt    time.Time
 	bossEngagedAt time.Time
@@ -599,6 +612,15 @@ type botPos struct {
 	mapID    uint32
 	dead     bool
 	at       time.Time
+}
+
+// runObs is one running status line the walk read: its step, what it said and the status sequence
+// it arrived at (walk 18 r5).
+type runObs struct {
+	seq  uint64
+	step int
+	note string
+	at   time.Time
 }
 
 // raidWalkRun runs a parsed walk; tests call it directly with fakes.
