@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/mapview"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/tbm"
@@ -389,11 +388,11 @@ type injectFault struct {
 
 // Injector is one walk's faults.
 type Injector struct {
-	names       RosterNames
-	hires       map[string]bool
-	mapID       uint32
-	rows        []planexport.StepRow
-	bossEntries map[uint32]bool
+	names    RosterNames
+	hires    map[string]bool
+	mapID    uint32
+	rows     []planexport.StepRow
+	bossRows *BossRows
 
 	faults []*injectFault
 	active *injectFault
@@ -432,7 +431,7 @@ type pendingInject struct {
 
 // NewInjector builds the injector of one walk (spec 1.5).
 func NewInjector(specs []InjectSpec, names RosterNames, rows planexport.Rows, plan *dungeon.Plan) *Injector {
-	in := &Injector{names: names, hires: map[string]bool{}, bossEntries: map[uint32]bool{}}
+	in := &Injector{names: names, hires: map[string]bool{}, bossRows: NewBossRows(plan)}
 	for _, n := range append(append(append([]string{names.MT}, names.OT...), names.Rest...), names.Tanks...) {
 		if n != "" {
 			in.hires[n] = true
@@ -440,16 +439,6 @@ func NewInjector(specs []InjectSpec, names RosterNames, rows planexport.Rows, pl
 	}
 	if plan != nil {
 		in.mapID = plan.Map
-		for _, e := range mapview.BossEntries(plan) {
-			in.bossEntries[e] = true
-		}
-		for _, leg := range plan.Legs {
-			if leg.Boss != nil && leg.Boss.Hold != nil {
-				for _, e := range leg.Boss.Hold.Entries {
-					in.bossEntries[e] = true
-				}
-			}
-		}
 	}
 	steps := append([]planexport.StepRow(nil), rows.Steps...)
 	sort.SliceStable(steps, func(i, j int) bool {
@@ -859,7 +848,7 @@ func (in *Injector) addPackCandidate(f *injectFault, o InjectObs) (packet.GUID, 
 		if strings.ContainsAny(h.Kind, "ukvg") || strings.Contains(h.Flags, "e") {
 			continue
 		}
-		if in.bossEntries[h.Entry] {
+		if in.bossRows.Counts(h.Entry, h.Pos.X, h.Pos.Y) {
 			continue
 		}
 		tooClose := false

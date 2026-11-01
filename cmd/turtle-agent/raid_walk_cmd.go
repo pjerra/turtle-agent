@@ -534,14 +534,10 @@ type walk struct {
 	eventsAt      uint64
 
 	bossSet map[uint32]bool
-	// bossCore holds the plan's boss entries and hold entries: always boss rows. A bossSet entry that is
-	// only a `first` add counts as a boss row only on its own boss's leg (firstLegs: the legs that list it)
-	// or when the run's leg is unknown (walk 19 test2 s4: Zulian Tigers 11361, Thekal's adds, fought as
-	// trash on Venoxis's leg latched bossLatchAt and blocked the wipe recovery). legNames are the plan's
-	// leg names, to tell a known other leg from an unknown one.
-	bossCore     map[uint32]bool
-	firstLegs    map[uint32][]string
-	legNames     map[string]bool
+	// bossRule decides which frame rows are boss evidence (raidwalk.BossRows: a `first`-only entry counts within
+	// raidwalk.FirstAddBossRadius of its boss's plan position; walk 19 test2 s4: trash Zulian Tigers 11361 on
+	// Venoxis's leg latched bossLatchAt and blocked the wipe recovery).
+	bossRule     *raidwalk.BossRows
 	bossRows     map[uint32]hostileState
 	bossSeenAt   time.Time
 	bossTargetAt time.Time
@@ -743,25 +739,14 @@ func (w *walk) validate() error {
 	for _, e := range mapview.BossEntries(p) {
 		w.bossSet[e] = true
 	}
-	w.bossCore, w.firstLegs, w.legNames = map[uint32]bool{}, map[uint32][]string{}, map[string]bool{}
 	for _, leg := range p.Legs {
-		if leg.Name != "" {
-			w.legNames[leg.Name] = true
-		}
-		if leg.Boss == nil {
-			continue
-		}
-		w.bossCore[leg.Boss.Entry] = true
-		for _, e := range leg.Boss.First {
-			w.firstLegs[e] = append(w.firstLegs[e], leg.Name)
-		}
-		if leg.Boss.Hold != nil {
+		if leg.Boss != nil && leg.Boss.Hold != nil {
 			for _, e := range leg.Boss.Hold.Entries {
 				w.bossSet[e] = true
-				w.bossCore[e] = true
 			}
 		}
 	}
+	w.bossRule = raidwalk.NewBossRows(p)
 
 	if w.opts.sql != "" {
 		rows, notes, err := readRaidMigration(slots.ExpandTilde(w.opts.sql), w.plan.Name)

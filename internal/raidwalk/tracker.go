@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
-	"github.com/pjerra/turtle-agent/internal/mapview"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
@@ -118,7 +117,7 @@ const (
 // incidents. It is pure: the command supplies the clock. hires are the names the walk hired: the wipe rule needs
 // them, because a frame may be truncated and name only part of the party.
 type Tracker struct {
-	bossEntries map[uint32]bool
+	bossRows *BossRows // which frame rows are boss evidence (FirstAddBossRadius)
 
 	hires    map[string]bool // names the walk hired
 	expected int             // hire count when hires is nil: the plan's raid size - 1
@@ -162,7 +161,6 @@ type Tracker struct {
 // plan's raid size - 1 as the hire count and waits until that many bots have been seen.
 func NewTracker(plan *dungeon.Plan, hires []string) *Tracker {
 	t := &Tracker{
-		bossEntries: map[uint32]bool{},
 		guidName:    map[packet.GUID]string{},
 		state:       map[string]botState{},
 		stepOpen:    -1,
@@ -170,18 +168,7 @@ func NewTracker(plan *dungeon.Plan, hires []string) *Tracker {
 		deathByStep: map[int]int{},
 		deathByBot:  map[string]int{},
 	}
-	if plan != nil {
-		for _, e := range mapview.BossEntries(plan) {
-			t.bossEntries[e] = true
-		}
-		for _, leg := range plan.Legs {
-			if leg.Boss != nil && leg.Boss.Hold != nil {
-				for _, e := range leg.Boss.Hold.Entries {
-					t.bossEntries[e] = true
-				}
-			}
-		}
-	}
+	t.bossRows = NewBossRows(plan)
 	if len(hires) > 0 {
 		t.hires = make(map[string]bool, len(hires))
 		for _, name := range hires {
@@ -328,7 +315,8 @@ func (t *Tracker) checkBoss(f tbm.ViewFrame) {
 		party[p.GUID] = true
 	}
 	for _, h := range f.Hostiles {
-		if !t.bossEntries[h.Entry] {
+		// An off-spot `first` add (trash of the same entry) must not use up the one-shot latch (walk 19).
+		if !t.bossRows.Counts(h.Entry, h.X, h.Y) {
 			continue
 		}
 		targeted := h.Target != 0 && (party[h.Target] || t.guidName[h.Target] != "")

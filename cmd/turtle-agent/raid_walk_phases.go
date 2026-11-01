@@ -1103,34 +1103,6 @@ func bossRowEngaged(hppct int, target uint64) bool {
 	return hppct > 0 && (target != 0 || hppct < 100)
 }
 
-// bossRowCounts says whether a frame row of this entry is boss evidence (bossSeenAt, bossLatchAt, bossRows,
-// bossTargetAt). A plan boss or hold entry always is. An entry that is only a `first` add is evidence on its own
-// boss's leg, and whenever the run's leg is unknown (no status yet, "-", a number, a name the plan does not
-// have): fail closed. On another known leg it is trash (walk 19 test2 s4: Zulian Tigers 11361, Thekal's adds,
-// fought on Venoxis's leg, latched the boss gate 88 s before a trash wipe and blocked its recovery).
-func (w *walk) bossRowCounts(entry uint32) bool {
-	if !w.bossSet[entry] {
-		return false
-	}
-	if w.bossCore[entry] {
-		return true
-	}
-	legs := w.firstLegs[entry]
-	if len(legs) == 0 || !w.haveStatus {
-		return true
-	}
-	cur := w.lastStatus.Leg
-	if cur == "" || !w.legNames[cur] {
-		return true
-	}
-	for _, l := range legs {
-		if l == "" || l == cur {
-			return true
-		}
-	}
-	return false
-}
-
 // trackFrame keeps the per-bot and per-hostile state the enter, reset and wipe rules read.
 func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 	for _, p := range f.Party {
@@ -1147,7 +1119,7 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 			w.hostiles[h.GUID.String()] = hostileState{entry: h.Entry, x: h.X, y: h.Y, z: h.Z, kind: h.Kind, reaction: h.Reaction, flags: h.Flags,
 				hppct: h.HPPct, target: uint64(h.Target), at: now}
 		}
-		if w.bossRowCounts(h.Entry) {
+		if w.bossRule.Counts(h.Entry, h.X, h.Y) {
 			w.bossSeenAt = now
 			if bossRowEngaged(h.HPPct, uint64(h.Target)) {
 				w.bossLatchAt, w.bossLatchHit = now, h.Entry
@@ -1962,7 +1934,7 @@ func (w *walk) bossUnknown(ctx context.Context) error {
 func (w *walk) latchWords(now time.Time) string {
 	who := "a boss row"
 	if w.bossLatchHit != 0 {
-		who = fmt.Sprintf("boss %d", w.bossLatchHit)
+		who = w.bossRule.Words(w.bossLatchHit)
 	}
 	return fmt.Sprintf("%s latched %ds ago, under 120 s", who, int(now.Sub(w.bossLatchAt)/time.Second))
 }
@@ -2137,10 +2109,10 @@ func (w *walk) lastBossRow() (uint32, bool) {
 // falling back to the freshest plan-boss row ever seen (the rows-gone target case), then "a boss".
 func (w *walk) engagedBossWords() string {
 	if entry, ok := w.engagedBossEntry(); ok {
-		return fmt.Sprintf("boss %d", entry)
+		return w.bossRule.Words(entry)
 	}
 	if entry, ok := w.lastBossRow(); ok {
-		return fmt.Sprintf("boss %d", entry)
+		return w.bossRule.Words(entry)
 	}
 	return "a boss"
 }

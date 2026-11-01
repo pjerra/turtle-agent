@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"math"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,9 +14,21 @@ import (
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
-// zgWalk19Fixture is a Zul'Gurub walk with the dashboard off (walk 19 test2 had none), --until step 184 and
-// two recoveries, one already spent (wipe-resume 1/2 at step 29).
-func zgWalk19Fixture(t *testing.T) *fixture {
+// Positions from ZG walk 19 test2 s4 frames.jsonl and dungeons/zul_gurub.json.
+var (
+	w19TigerA = [2]float32{-11960.7, -1789.8} // trash Zulian Tiger 11361 at step 89, ~330 yd from Thekal
+	w19TigerB = [2]float32{-11968.7, -1777.8}
+	w19Venox  = [2]float32{-12029.8, -1707.9} // Venoxis 14507 at his plan position
+	w19Cobra  = [2]float32{-12021.2, -1719.7} // Razzashi Cobra 11373 next to him
+	zgThekal  = [2]float32{-11703.2, -1996.8} // Thekal 14599's plan position
+	// zgTigerPull is the 11361 trash pull group nearest Thekal in zul_gurub.json (leg high_priest_thekal, pull
+	// group index 4): 56.5 yd from his position.
+	zgTigerPull = [2]float32{-11717.4, -1942.1}
+)
+
+// zgWalk19Fixture is a Zul'Gurub walk with the dashboard off (walk 19 test2 had none), --until step 184 and one
+// recovery left (--wipe-resume 2; the live walk had spent one at step 29). The run starts on startLine.
+func zgWalk19Fixture(t *testing.T, startLine string) *fixture {
 	t.Helper()
 	f := newFixture(t)
 	f.opts.plan, f.opts.holder = "zul_gurub", "raid-walk-zul_gurub"
@@ -27,37 +40,40 @@ func zgWalk19Fixture(t *testing.T) *fixture {
 	}
 	f.agent.instMap = p.Map
 	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
-		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
-		Line: "TBM:ACTION_ACK|run start|party|1|-",
-		Lines: []string{
-			"TBM:RUN|zul_gurub|running|41/1104|high_priestess_jeklik|boss|fight|fighting|until step 184 (step 184)",
-			"TBM:ACTION_ACK|run start|party|1|-",
-		}}}
+		Ack:   &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line:  "TBM:ACTION_ACK|run start|party|1|-",
+		Lines: []string{startLine, "TBM:ACTION_ACK|run start|party|1|-"}}}
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	return f
 }
 
-// TestRaidWalkWipeResumeWalk19TrashTigerOffLegRecovers replays ZG walk 19 test2 s4 (frames.jsonl 02:36-02:40,
-// run.log step 89): Jeklik 14517 engaged and killed long before; at step 89 (leg high_priest_venoxis) the raid
-// fights Zulian Tigers 11361 as trash (60 %, a target) until 88 s before the wipe, while Venoxis 14507 and his
-// Razzashi Cobra 11373 stand in view at 100 % with no target until 38 s before it; then all 19 hires die
-// (TB's "2 near wipes" pause). 11361 is a `first` add of Thekal (another leg), so the tiger fight is trash: no
-// boss is engaged, no dashboard, one recovery left = the wipe recovers. On 9eb13bf the tiger rows latched
-// bossLatchAt and bossUnknown skipped ("wipe resume skipped: boss state unknown", exit 19).
-func TestRaidWalkWipeResumeWalk19TrashTigerOffLegRecovers(t *testing.T) {
-	f := zgWalk19Fixture(t)
-	f.opts.wipeResume = 2
+const (
+	w19JeklikStart = "TBM:RUN|zul_gurub|running|41/1104|high_priestess_jeklik|boss|fight|fighting|until step 184 (step 184)"
+	w19PlainStart  = "TBM:RUN|zul_gurub|running|88/1104|high_priest_venoxis|move|walk|walking|until step 184 (step 184)"
+	w19VenoxisLine = "TBM:RUN|zul_gurub|running|89/1104|high_priest_venoxis|pull|begin|fighting|until step 184 (step 184)"
+)
+
+// w19Scenario drives one walk-19 shaped walk: optionally Jeklik engaged on her boss step for the first 45 s (it
+// spends the tracker's one-shot boss latch, as in the live walk), the run's status moving to legLine at 300 s,
+// rows(now, wipeAt) in the frames from 310 s, and every hire dead at 800 s (with walk 19's "2 near wipes" pause
+// line). A resume is answered with a running line and the until stop.
+func w19Scenario(t *testing.T, jeklik bool, legLine string, rows func(now, wipeAt time.Time) []tbm.HostileRec) (*fixture, *int) {
+	t.Helper()
+	start := w19JeklikStart
+	if !jeklik {
+		start = w19PlainStart
+	}
+	f := zgWalk19Fixture(t, start)
 	t0 := f.clock.now()
-	onVenoxis, wiped := false, false
+	moved, wiped := false, false
 	wipeAt := t0.Add(800 * time.Second)
 	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
 		now := f.clock.now()
 		el := now.Sub(t0)
-		if !onVenoxis && el >= 300*time.Second {
-			onVenoxis = true
+		if !moved && el >= 300*time.Second {
+			moved = true
 			f.agent.mu.Lock()
-			f.agent.lines = append(f.agent.lines,
-				queuedEvent{raw: "TBM:RUN|zul_gurub|running|89/1104|high_priest_venoxis|pull|begin|fighting|until step 184 (step 184)"})
+			f.agent.lines = append(f.agent.lines, queuedEvent{raw: legLine})
 			f.agent.mu.Unlock()
 		}
 		if !wiped && !now.Before(wipeAt) {
@@ -67,25 +83,17 @@ func TestRaidWalkWipeResumeWalk19TrashTigerOffLegRecovers(t *testing.T) {
 				f.agent.dead[name] = true
 			}
 			f.agent.lines = append(f.agent.lines,
-				queuedEvent{raw: "TBM:RUN|zul_gurub|paused|89/1104|high_priest_venoxis|pull|begin|19 dead: 2 near wipes within 10 min (steps 89 and 89, 0 min 4 s apart; 2 wipes, 3 near wipes this run): the run stops here. Regroup (cmd revive party), then .bot run resume, or .bot run stop|until step 184 (step 184)"})
+				queuedEvent{raw: "TBM:RUN|zul_gurub|paused|" + strings.Join(strings.Split(legLine, "|")[3:5], "|") + "|pull|begin|19 dead: 2 near wipes within 10 min (steps 89 and 89, 0 min 4 s apart; 2 wipes, 3 near wipes this run): the run stops here. Regroup (cmd revive party), then .bot run resume, or .bot run stop|until step 184 (step 184)"})
 			f.agent.mu.Unlock()
 		}
-		var rows []tbm.HostileRec
-		if el < 45*time.Second {
-			// Jeklik's fight on her boss step: engaged, the run leader fights it.
-			rows = append(rows, tbm.HostileRec{GUID: 9, Entry: 14517, HPPct: 40, Target: packet.GUID(1000)})
+		var out []tbm.HostileRec
+		if jeklik && el < 45*time.Second {
+			out = append(out, tbm.HostileRec{GUID: 9, Entry: 14517, HPPct: 40, Target: packet.GUID(1000), X: -12289.1, Y: -1384.1})
 		}
-		if el >= 310*time.Second && now.Before(wipeAt.Add(-38*time.Second)) {
-			rows = append(rows,
-				tbm.HostileRec{GUID: 20, Entry: 14507, HPPct: 100, Target: 0},
-				tbm.HostileRec{GUID: 21, Entry: 11373, HPPct: 100, Target: 0})
+		if el >= 310*time.Second {
+			out = append(out, rows(now, wipeAt)...)
 		}
-		if !now.Before(wipeAt.Add(-150*time.Second)) && now.Before(wipeAt.Add(-88*time.Second)) {
-			rows = append(rows,
-				tbm.HostileRec{GUID: 30, Entry: 11361, HPPct: 60, Target: packet.GUID(1001)},
-				tbm.HostileRec{GUID: 31, Entry: 11361, HPPct: 27, Target: packet.GUID(1002)})
-		}
-		return rows
+		return out
 	}
 	resumes := 0
 	f.agent.onResume = func() {
@@ -96,10 +104,36 @@ func TestRaidWalkWipeResumeWalk19TrashTigerOffLegRecovers(t *testing.T) {
 			queuedEvent{raw: "TBM:RUN|zul_gurub|running|89/1104|high_priest_venoxis|pull|begin|resumed|until step 184 (step 184)"},
 			queuedEvent{raw: "TBM:RUN|zul_gurub|done|184/1104|high_priest_venoxis|move|walk|stopped before step 184 (until step 184): the party stays where it stands"})
 	}
-	code := f.run(context.Background())
+	return f, &resumes
+}
+
+// w19StepRows are the step-89 frames of walk 19: Venoxis and his cobra in view at 100 % with no target until 38 s
+// before the wipe, and tigers 11361 engaged (a target, hurt) at the given spots from 150 s to 88 s before it.
+func w19StepRows(tigers [][2]float32) func(now, wipeAt time.Time) []tbm.HostileRec {
+	return func(now, wipeAt time.Time) []tbm.HostileRec {
+		var out []tbm.HostileRec
+		if now.Before(wipeAt.Add(-38 * time.Second)) {
+			out = append(out,
+				tbm.HostileRec{GUID: 20, Entry: 14507, HPPct: 100, X: w19Venox[0], Y: w19Venox[1]},
+				tbm.HostileRec{GUID: 21, Entry: 11373, HPPct: 100, X: w19Cobra[0], Y: w19Cobra[1]})
+		}
+		if !now.Before(wipeAt.Add(-150*time.Second)) && now.Before(wipeAt.Add(-88*time.Second)) {
+			for i, p := range tigers {
+				out = append(out, tbm.HostileRec{GUID: packet.GUID(30 + i), Entry: 11361, HPPct: 60 - 30*i, Target: packet.GUID(1001 + i), X: p[0], Y: p[1]})
+			}
+		}
+		return out
+	}
+}
+
+func wantRecovered(t *testing.T, f *fixture, code, resumes int, step string) {
+	t.Helper()
 	sum := f.summary()
 	if hasNote(sum, "boss state unknown") {
-		t.Fatalf("notes %q, want no boss-unknown skip (a trash tiger of another leg is no boss)", sum.Notes)
+		t.Fatalf("notes %q, want no boss-unknown skip (a trash tiger off Thekal's spot is no boss)", sum.Notes)
+	}
+	if hasNote(sum, "boss 11361") || hasNote(sum, "boss row 11361") {
+		t.Fatalf("notes %q, want no boss handling of the trash tiger", sum.Notes)
 	}
 	if code != exitOK {
 		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
@@ -107,94 +141,74 @@ func TestRaidWalkWipeResumeWalk19TrashTigerOffLegRecovers(t *testing.T) {
 	if sum.WipeResumes != 1 || resumes != 1 {
 		t.Fatalf("wipe_resumes %d, resumes %d, want 1 and 1", sum.WipeResumes, resumes)
 	}
-	if !hasNote(sum, "wipe-resume 1/2 at step 89") {
-		t.Fatalf("notes %q, want the step-89 recovery note", sum.Notes)
+	if !hasNote(sum, "wipe-resume 1/2 at step "+step) {
+		t.Fatalf("notes %q, want the step-%s recovery note", sum.Notes, step)
 	}
 }
 
-// TestRaidWalkWipeResumeWalk19TigerOnThekalLegSkips: the same frames, but the run is on Thekal's leg, where
-// the Zulian Tigers are the boss's own `first` adds. An engaged tiger 88 s before the wipe still latches and
-// the wipe ends the old way, with the latch named in the note.
-func TestRaidWalkWipeResumeWalk19TigerOnThekalLegSkips(t *testing.T) {
-	f := zgWalk19Fixture(t)
-	t0 := f.clock.now()
-	onThekal, wiped := false, false
-	wipeAt := t0.Add(800 * time.Second)
-	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
-		now := f.clock.now()
-		el := now.Sub(t0)
-		if !onThekal && el >= 300*time.Second {
-			onThekal = true
-			f.agent.mu.Lock()
-			f.agent.lines = append(f.agent.lines,
-				queuedEvent{raw: "TBM:RUN|zul_gurub|running|150/1104|high_priest_thekal|pull|begin|fighting|until step 184 (step 184)"})
-			f.agent.mu.Unlock()
-		}
-		if !wiped && !now.Before(wipeAt) {
-			wiped = true
-			f.agent.mu.Lock()
-			for _, name := range f.agent.party {
-				f.agent.dead[name] = true
-			}
-			f.agent.mu.Unlock()
-		}
-		var rows []tbm.HostileRec
-		if el < 45*time.Second {
-			rows = append(rows, tbm.HostileRec{GUID: 9, Entry: 14517, HPPct: 40, Target: packet.GUID(1000)})
-		}
-		if !now.Before(wipeAt.Add(-150*time.Second)) && now.Before(wipeAt.Add(-88*time.Second)) {
-			rows = append(rows, tbm.HostileRec{GUID: 30, Entry: 11361, HPPct: 60, Target: packet.GUID(1001)})
-		}
-		return rows
+func dist2(a, b [2]float32) float64 {
+	dx, dy := float64(a[0]-b[0]), float64(a[1]-b[1])
+	return math.Sqrt(dx*dx + dy*dy)
+}
+
+// TestRaidWalkWipeResumeWalk19TrashTigerOffLegRecovers replays ZG walk 19 test2 s4 (frames.jsonl 02:36-02:40,
+// run.log step 89): Jeklik 14517 engaged and killed long before; at step 89 (leg high_priest_venoxis) the raid
+// fights Zulian Tigers 11361 as trash ~330 yd from Thekal's position until 88 s before the wipe, Venoxis and his
+// cobra stand in view at 100 % with no target, then all 19 hires die. No boss engaged, no dashboard, a recovery
+// left = the wipe recovers. On 9eb13bf the tiger rows latched bossLatchAt and bossUnknown skipped (exit 19).
+func TestRaidWalkWipeResumeWalk19TrashTigerOffLegRecovers(t *testing.T) {
+	if d := dist2(w19TigerA, zgThekal); d < 300 {
+		t.Fatalf("walk-19 tiger %.1f yd from Thekal, want ~330", d)
 	}
+	f, resumes := w19Scenario(t, true, w19VenoxisLine, w19StepRows([][2]float32{w19TigerA, w19TigerB}))
+	code := f.run(context.Background())
+	wantRecovered(t, f, code, *resumes, "89")
+}
+
+// TestRaidWalkWipeResumeWalk19NoJeklikTrackerRecovers is the same step-89 replay without Jeklik's fight, so the
+// tracker's one-shot boss latch is still unspent when the trash tigers fight: an off-spot tiger must neither use
+// it up nor send the walk into handleBoss (9d6535f: the tracker latched on 11361 and handleBoss ran).
+func TestRaidWalkWipeResumeWalk19NoJeklikTrackerRecovers(t *testing.T) {
+	f, resumes := w19Scenario(t, false, w19VenoxisLine, w19StepRows([][2]float32{w19TigerA, w19TigerB}))
+	code := f.run(context.Background())
+	wantRecovered(t, f, code, *resumes, "89")
+}
+
+// TestRaidWalkWipeResumeTigerTrashOnThekalLegRecovers: tiger trash on Thekal's own approach leg, at the plan's
+// nearest 11361 pull group (56.5 yd from Thekal's position, outside FirstAddBossRadius), is trash too.
+func TestRaidWalkWipeResumeTigerTrashOnThekalLegRecovers(t *testing.T) {
+	if d := dist2(zgTigerPull, zgThekal); d <= 40 || d > 60 {
+		t.Fatalf("pull group %.1f yd from Thekal, want 56.5", d)
+	}
+	f, resumes := w19Scenario(t, false, "TBM:RUN|zul_gurub|running|150/1104|high_priest_thekal|pull|begin|fighting|until step 184 (step 184)",
+		w19StepRows([][2]float32{zgTigerPull}))
+	code := f.run(context.Background())
+	wantRecovered(t, f, code, *resumes, "150")
+}
+
+// TestRaidWalkWipeResumeThekalPhase2TigersSkip: Thekal phase 2 - the status already moved on to arlokk (TB marked
+// Thekal's step done when 14599 died in phase 1), while tigers fight within 40 yd of Thekal's position. That is
+// boss evidence on any leg: the wipe 88 s later ends the old way, the note naming the latched first add.
+func TestRaidWalkWipeResumeThekalPhase2TigersSkip(t *testing.T) {
+	near := [2]float32{zgThekal[0] + 10, zgThekal[1] - 12}
+	f, resumes := w19Scenario(t, true, "TBM:RUN|zul_gurub|running|160/1104|high_priestess_arlokk|move|walk|walking|until step 184 (step 184)",
+		w19StepRows([][2]float32{near}))
 	code := f.run(context.Background())
 	if code != exitRaidWalkIncident {
 		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
 	}
 	sum := f.summary()
-	if sum.WipeResumes != 0 {
-		t.Fatalf("wipe_resumes %d, want 0", sum.WipeResumes)
+	if sum.WipeResumes != 0 || *resumes != 0 {
+		t.Fatalf("wipe_resumes %d, resumes %d, want 0", sum.WipeResumes, *resumes)
 	}
-	want := "wipe resume skipped: boss state unknown (boss 11361 latched"
+	want := "wipe resume skipped: boss state unknown (boss row 11361 (first add of high_priest_thekal) latched "
 	found := false
 	for _, n := range sum.Notes {
-		if strings.HasPrefix(n, want) {
+		if strings.HasPrefix(n, want) && strings.HasSuffix(n, "s ago, under 120 s)") {
 			found = true
 		}
 	}
 	if !found {
 		t.Fatalf("notes %q, want a note starting %q", sum.Notes, want)
-	}
-}
-
-// TestBossRowCountsFirstAddOnlyOnItsLeg pins the walk-19 rule: a boss or hold entry always counts, a `first`
-// add counts on its own boss's leg and whenever the run's leg is unknown (fail closed), never on another known leg.
-func TestBossRowCountsFirstAddOnlyOnItsLeg(t *testing.T) {
-	w := &walk{
-		bossSet:   map[uint32]bool{14599: true, 11361: true, 14507: true, 11373: true, 500: true},
-		bossCore:  map[uint32]bool{14599: true, 14507: true, 500: true},
-		firstLegs: map[uint32][]string{11361: {"high_priest_thekal"}, 11373: {"high_priest_venoxis"}},
-		legNames:  map[string]bool{"high_priest_thekal": true, "high_priest_venoxis": true},
-	}
-	for _, tc := range []struct {
-		name  string
-		have  bool
-		leg   string
-		entry uint32
-		want  bool
-	}{
-		{"not a plan entry", true, "high_priest_venoxis", 9999, false},
-		{"boss on another leg", true, "high_priest_venoxis", 14599, true},
-		{"hold entry", true, "high_priest_venoxis", 500, true},
-		{"first add on its own leg", true, "high_priest_venoxis", 11373, true},
-		{"first add on another known leg (walk 19)", true, "high_priest_venoxis", 11361, false},
-		{"first add before any status", false, "", 11361, true},
-		{"first add with no leg", true, "", 11361, true},
-		{"first add with a numbered leg", true, "3", 11361, true},
-	} {
-		w.haveStatus, w.lastStatus = tc.have, tbm.RunStatus{Leg: tc.leg}
-		if got := w.bossRowCounts(tc.entry); got != tc.want {
-			t.Errorf("%s: bossRowCounts(%d) = %v, want %v", tc.name, tc.entry, got, tc.want)
-		}
 	}
 }
