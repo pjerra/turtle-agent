@@ -140,6 +140,42 @@ func TestQuietAtIdleNeedsTwoReads(t *testing.T) {
 	}
 }
 
+// Codex round 3: the two reads must be consecutive evidence. A unit missing from a read, a read too long ago, or a
+// failed read in between starts the pair over.
+func TestQuietAtIdlePairNeedsFreshConsecutiveReads(t *testing.T) {
+	p := dungeon.Point{}
+	u := hostileAt("Razzashi Venombrood", 44.6, false, false)
+
+	gone := NewQuietIdleReads()
+	QuietAt([]objects.Unit{u}, nil, p, gone, quietNow)
+	QuietAt(nil, nil, p, gone, quietNow.Add(quietIdleHold)) // a complete read without the unit
+	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, gone, quietNow.Add(2*quietIdleHold)); ok {
+		t.Fatal("idle, absent, idle: quiet, want blocked (the absent read forgot the first sighting)")
+	}
+
+	dead := NewQuietIdleReads()
+	QuietAt([]objects.Unit{u}, nil, p, dead, quietNow)
+	corpse := u
+	corpse.Dead = true
+	QuietAt([]objects.Unit{corpse}, nil, p, dead, quietNow.Add(quietIdleHold))
+	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, dead, quietNow.Add(2*quietIdleHold)); ok {
+		t.Fatal("idle, dead, idle again: quiet, want blocked")
+	}
+
+	old := NewQuietIdleReads()
+	QuietAt([]objects.Unit{u}, nil, p, old, quietNow)
+	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, old, quietNow.Add(quietIdleMaxGap+time.Second)); ok {
+		t.Fatal("two idle reads over quietIdleMaxGap apart: quiet, want blocked")
+	}
+
+	failed := NewQuietIdleReads()
+	QuietAt([]objects.Unit{u}, nil, p, failed, quietNow)
+	failed.Reset() // what quietOnce does on a failed units read
+	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, failed, quietNow.Add(quietIdleHold)); ok {
+		t.Fatal("idle, failed read, idle: quiet, want blocked")
+	}
+}
+
 // An idle unit inside the landing reach still blocks, however many reads saw it idle: the revived raid lands right
 // there. The cut itself (30 yd since review round 1, L1) counts as inside, and just beyond it needs the two reads.
 func TestQuietAtIdleWithinReachBlocks(t *testing.T) {

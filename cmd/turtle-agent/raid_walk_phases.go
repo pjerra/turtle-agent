@@ -3295,6 +3295,7 @@ func (w *walk) quietOnce(ctx context.Context, st *quietState, p dungeon.Point) (
 	}
 	us, err := w.unitsAt(ctx, 200)
 	if err != nil {
+		st.idle.Reset() // a gap in the reads breaks the two-read idle rule (Codex round 3)
 		return false, "units: " + err.Error(), nil
 	}
 	patrols := make([]raidwalk.QuietPatrol, len(w.quietPatrols))

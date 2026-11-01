@@ -30,6 +30,9 @@ const (
 	// quietIdleHold / quietIdleMoveYd are D-A's two-read rule.
 	quietIdleHold   = 5 * time.Second
 	quietIdleMoveYd = 1
+	// quietIdleMaxGap bounds how old the first of the two reads may be (Codex round 3): a sighting from long ago,
+	// or from before a stretch of failed reads, is no evidence about the unit now.
+	quietIdleMaxGap = 30 * time.Second
 )
 
 // QuietIdleReads is the revive's memory of the last read that saw each hostile idle at home: D-A's exemption needs the
@@ -42,6 +45,9 @@ type quietIdleAt struct {
 	at   time.Time
 	x, y float32
 }
+
+// Reset forgets every sighting: a failed units read leaves a gap the two-read rule cannot see across.
+func (r *QuietIdleReads) Reset() { r.prev = map[string]quietIdleAt{} }
 
 // NewQuietIdleReads makes the per-revive read memory.
 func NewQuietIdleReads() *QuietIdleReads { return &QuietIdleReads{prev: map[string]quietIdleAt{}} }
@@ -57,7 +63,7 @@ func (r *QuietIdleReads) idleHome(u *objects.Unit, now time.Time) bool {
 	}
 	prev, ok := r.prev[key]
 	r.prev[key] = quietIdleAt{at: now, x: u.X, y: u.Y}
-	if !ok || now.Sub(prev.at) < quietIdleHold {
+	if !ok || now.Sub(prev.at) < quietIdleHold || now.Sub(prev.at) > quietIdleMaxGap {
 		return false
 	}
 	return math.Hypot(float64(prev.x-u.X), float64(prev.y-u.Y)) <= quietIdleMoveYd
@@ -105,11 +111,13 @@ func QuietBlockers(units []objects.Unit, patrols []QuietPatrol, p dungeon.Point,
 		key  float64
 	}
 	var rs []ranked
+	seen := map[string]bool{}
 	for i := range units {
 		u := &units[i]
 		if !u.Hostile || u.Dead || u.Type == "player" {
 			continue
 		}
+		seen[strings.ToUpper(u.GUID.String())] = true
 		d := dist3(p, dungeon.Point{X: u.X, Y: u.Y, Z: u.Z})
 		// D-A (walk 25, two reads since review round 1): an idle unit beyond the landing reach never blocks the revive,
 		// but only once two reads quietIdleHold apart saw it idle at the same spot. idleHome records this read either
@@ -123,6 +131,15 @@ func QuietBlockers(units []objects.Unit, patrols []QuietPatrol, p dungeon.Point,
 			rs = append(rs, ranked{b: unitBlocker(u, d), rank: 0, key: d})
 		case u.Moving && d <= quietMovingYd:
 			rs = append(rs, ranked{b: unitBlocker(u, d), rank: 1, key: d})
+		}
+	}
+	// Snapshot-aware (Codex round 3): a unit this complete read did not see as a live hostile loses its earlier
+	// sighting, so one that vanished, died or respawned needs two fresh reads again.
+	if idle != nil {
+		for k := range idle.prev {
+			if !seen[k] {
+				delete(idle.prev, k)
+			}
 		}
 	}
 	for _, pat := range patrols {
