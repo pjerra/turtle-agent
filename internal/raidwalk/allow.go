@@ -55,7 +55,7 @@ func AllowedLine(line string, hires map[string]bool) bool {
 			return false
 		}
 		return teleWordRe.MatchString(f[3])
-	case ".summon", ".revive":
+	case ".summon", ".revive", ".appear":
 		return len(f) == 2 && hires[f[1]]
 	case ".bot":
 		if len(f) < 3 {

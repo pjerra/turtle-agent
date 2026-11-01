@@ -15,6 +15,7 @@ func TestAllowedLine(t *testing.T) {
 		".tele name Tankbot onyxia",
 		".summon Tankbot",
 		".revive Tankbot",
+		".appear Tankbot",
 		".bot run stop",
 		".bot run resume",
 	}
@@ -48,6 +49,9 @@ func TestAllowedLine(t *testing.T) {
 		".tele name NotAHire onyxia",
 		".tele name Tankbot bad word",
 		".summon Tankbot extra",
+		".appear NotAHire",
+		".appear Tankbot extra",
+		".appear",
 		".bot run stop now",
 		".bot run stop time limit reached (raid-walk 0m)",
 		".bot run resume now",

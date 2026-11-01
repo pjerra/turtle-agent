@@ -590,6 +590,107 @@ func TestRaidWalkReviveLandsAfterAFarTeleport(t *testing.T) {
 	}
 }
 
+// TestRaidWalkReviveAppearsAtAHireFirst (walk 23, second finding): the revive's `.go xyz` from the portal put the
+// commander into a NEW instance copy (m910q: hires in 101, commander in 104; test2: 106 vs 107), so the quiet check
+// looked at an empty copy and a summon would drag the hires into a fresh, respawned one. The revive must first
+// `.appear <hire>` (the core binds a GM to the target's copy) so its `.go xyz` stays on the map and in the hires' copy.
+func TestRaidWalkReviveAppearsAtAHireFirst(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.allDeadFromHires()
+	var resumeAt time.Time
+	resumeHook(f, 24, 28, &resumeAt)
+	f.agent.mu.Lock()
+	f.agent.farZUnknown = true
+	f.agent.mu.Unlock()
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	lines := f.agent.gmLines()
+	gos, appearAt, recoveryGoAt := 0, -1, -1
+	for i, l := range lines {
+		if strings.HasPrefix(l, ".go xyz ") {
+			gos++
+			if gos == 2 && recoveryGoAt < 0 {
+				recoveryGoAt = i
+			}
+		}
+		if strings.HasPrefix(l, ".appear ") && appearAt < 0 {
+			appearAt = i
+		}
+	}
+	if recoveryGoAt < 0 {
+		t.Fatalf("no recovery go: %q", lines)
+	}
+	if appearAt < 0 || appearAt > recoveryGoAt {
+		t.Fatalf("the recovery go (line %d) was not preceded by a .appear (first at %d): %q", recoveryGoAt, appearAt, lines)
+	}
+	f.agent.mu.Lock()
+	inst, dists := f.agent.instAtRevive, append([]float64{}, f.agent.summonDist...)
+	f.agent.mu.Unlock()
+	if inst != "hires" {
+		t.Fatalf("the commander stood in the %q copy at the revive, want the hires' copy", inst)
+	}
+	if len(dists) == 0 {
+		t.Fatal("no summons went out")
+	}
+	for i, d := range dists {
+		if d > reviveLandingYd {
+			t.Fatalf("summon %d left %.1f yd from the revive point (want <= %d)", i, d, reviveLandingYd)
+		}
+	}
+}
+
+// TestRaidWalkReviveAppearRefusedKeepsTheFarGo: a `.appear` the server refuses (the commander in another group, say)
+// moves nobody; the revive keeps today's far `.go xyz` and its map-change landing, and notes the miss.
+func TestRaidWalkReviveAppearRefusedKeepsTheFarGo(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.allDeadFromHires()
+	var resumeAt time.Time
+	resumeHook(f, 24, 28, &resumeAt)
+	f.agent.mu.Lock()
+	f.agent.farZUnknown, f.agent.appearRefused = true, true
+	f.agent.mu.Unlock()
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if !strings.Contains(f.summaryText(), "appear") {
+		t.Fatalf("no note about the refused appear: %q", f.summaryText())
+	}
+	f.agent.mu.Lock()
+	n := len(f.agent.summonDist)
+	f.agent.mu.Unlock()
+	if n == 0 {
+		t.Fatal("no summons went out: the far go after a refused appear never landed")
+	}
+}
+
+// TestRaidWalkAppearHire pins the hire the revive appears at: the lead (MT) when it is known on the plan's map,
+// else the first hire in roster order known there, else none.
+func TestRaidWalkAppearHire(t *testing.T) {
+	w := &walk{plan: &dungeon.Plan{Map: 309}, mt: "Nack", ots: []string{"Lius"}, rest: []string{"Faellara", "Melis"},
+		botAt: map[string]botPos{}}
+	if got := w.appearHire(); got != "" {
+		t.Fatalf("no hire known: got %q, want none", got)
+	}
+	w.botAt["Melis"] = botPos{mapID: 309, dead: true}
+	w.botAt["Lius"] = botPos{mapID: 0}
+	if got := w.appearHire(); got != "Melis" {
+		t.Fatalf("got %q, want Melis (the only hire known on map 309, dead or not)", got)
+	}
+	w.botAt["Faellara"] = botPos{mapID: 309}
+	if got := w.appearHire(); got != "Faellara" {
+		t.Fatalf("got %q, want Faellara (roster order)", got)
+	}
+	w.botAt["Nack"] = botPos{mapID: 309}
+	if got := w.appearHire(); got != "Nack" {
+		t.Fatalf("got %q, want the lead Nack", got)
+	}
+}
+
 // neverLanding makes the recovery's `.go xyz` never land (the status keeps the old position).
 func neverLanding(f *fixture) {
 	f.agent.mu.Lock()

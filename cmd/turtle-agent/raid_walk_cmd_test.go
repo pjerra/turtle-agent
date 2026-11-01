@@ -153,6 +153,13 @@ type walkFakeAgent struct {
 	// never sends the player its own position). zStuck is that state; a near go clears it.
 	farZUnknown bool
 	zStuck      bool
+	// commanderInst is the instance copy the commander stands in (walk 23, mangosd TTEV enter events): "hires" after a
+	// `.appear <hire>` (the core binds a GM to the target's copy, Commands.cpp HandleGonameCommand), "fresh" after a
+	// recovery `.go xyz` from another map (the server opens a new copy), unchanged by a near go. instAtRevive is that
+	// copy at the first `.revive`; appearRefused makes `.appear` move nobody (a refused appear).
+	commanderInst string
+	instAtRevive  string
+	appearRefused bool
 	// enterMap puts the commander on this map once `cmd enter` is acked (0: it stays where its last go put it):
 	// the live walk-22 agent stood inside the instance, so its recovery go was a near one.
 	enterMap   uint32
@@ -387,6 +394,9 @@ func (f *walkFakeAgent) gmSide(line string) {
 				if started && f.farZUnknown {
 					f.zStuck = uint32(m) != f.status.Map // a far go leaves z unknown for good; a near go settles it
 				}
+				if started && uint32(m) != f.status.Map {
+					f.commanderInst = "fresh"
+				}
 				f.status.Map = uint32(m) // the go's map id takes effect at once; only a goLag test holds the position back
 			}
 			if started && f.goLagEvery > 0 {
@@ -405,6 +415,28 @@ func (f *walkFakeAgent) gmSide(line string) {
 			}
 			f.mu.Unlock()
 		}
+	case strings.HasPrefix(line, ".appear "):
+		name := strings.TrimPrefix(line, ".appear ")
+		f.mu.Lock()
+		known := false
+		for _, n := range f.party {
+			known = known || n == name
+		}
+		if known && f.entered && !f.appearRefused {
+			hm := uint32(249)
+			if f.instMap != 0 {
+				hm = f.instMap
+			}
+			if f.farZUnknown {
+				f.zStuck = hm != f.status.Map // the appear itself is a far teleport from the portal
+			}
+			p := f.pos[name]
+			f.status.Map, f.commanderInst = hm, "hires"
+			f.x, f.y, f.z = p[0], p[1], p[2]+2
+			f.ownPos = [3]float32{f.x, f.y, f.z}
+			f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
+		}
+		f.mu.Unlock()
 	case line == ".gps":
 		f.gpsSide()
 	case line == ".pinfo":
@@ -426,6 +458,11 @@ func (f *walkFakeAgent) gmSide(line string) {
 		}
 		f.mu.Unlock()
 	case strings.HasPrefix(line, ".revive "):
+		f.mu.Lock()
+		if f.instAtRevive == "" {
+			f.instAtRevive = f.commanderInst
+		}
+		f.mu.Unlock()
 		// The server's revive brings the hire back: later frames show it alive, so a recovered walk
 		// does not re-fire the wipe it just revived.
 		name := strings.TrimPrefix(line, ".revive ")

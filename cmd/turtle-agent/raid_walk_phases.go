@@ -1125,6 +1125,51 @@ func (w *walk) commanderMap(ctx context.Context) uint32 {
 	return st.Map
 }
 
+// appearHire is the hire the revive appears at before its `.go xyz`: the lead (MT) when the frames last saw it on the
+// plan's map, else the first hire in roster order seen there, living or dead; "" when none is known.
+func (w *walk) appearHire() string {
+	for _, name := range w.hireList() {
+		if b, ok := w.botAt[name]; ok && b.mapID == w.plan.Map {
+			return name
+		}
+	}
+	return ""
+}
+
+// appearAtHire puts the commander into the hires' instance copy before a revive `.go xyz`. A `.go xyz` from the
+// portal's map opens a NEW copy (walk 23 mangosd: hires in inst 101, commander in 104; test2 106 vs 107), where the
+// quiet check sees nothing and a summon drags the hires into a fresh, respawned copy. `.appear <hire>` binds a GM to
+// the target's copy (core Commands.cpp HandleGonameCommand: UnbindInstance, then BindToInstance(target's
+// DungeonPersistentState)), so the `.go xyz` after it stays on the map: a near go, with the settled-z landing rule.
+// No hire known, a failed gm line or no map change within appearWait: the note says so and today's far go follows.
+func (w *walk) appearAtHire(ctx context.Context, deadline time.Time) error {
+	name := w.appearHire()
+	if name == "" {
+		w.note("revive: no hire known on map %d to appear at; the go opens its own instance copy", w.plan.Map)
+		return nil
+	}
+	if err := w.gm(ctx, ".appear "+name); err != nil {
+		if ctx.Err() != nil {
+			return stopf(exitRaidWalkFailed, "interrupted")
+		}
+		w.note("revive: .appear %s failed (%v); the go opens its own instance copy", name, err)
+		return nil
+	}
+	if err := w.waitMap(ctx, w.plan.Map, appearWait, deadline); err != nil {
+		if timeout, ok := err.(*recoveryTimeout); ok {
+			return timeout
+		}
+		if ctx.Err() != nil {
+			return stopf(exitRaidWalkFailed, "interrupted")
+		}
+		w.note("revive: .appear %s did not reach map %d in %s; the go opens its own instance copy", name, w.plan.Map, durWords(appearWait))
+	}
+	return nil
+}
+
+// appearWait bounds the wait for a revive `.appear` to land on the plan's map.
+const appearWait = 10 * time.Second
+
 // reviveLanded says the status is a SETTLED landing at p on mapID: the character is not falling, x/y are within
 // reviveLandingYd of p and z within reviveLandingZYd (a landing may drop to the floor, so z gets more room than x/y).
 // After a NEAR teleport (fromMap == mapID) the server must also have sent a position: not ZUnknown, the session's
@@ -1707,6 +1752,9 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 		return stopf(exitRaidWalkIncident, "not revived: the plan's rows give no first point")
 	}
 	p := *w.stepFirst
+	if err := w.appearAtHire(ctx, deadline); err != nil {
+		return err
+	}
 	from := w.commanderMap(ctx)
 	if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(p.X), num32(p.Y), num32(p.Z), w.plan.Map)); err != nil {
 		return err
@@ -1723,6 +1771,9 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 	}
 	if !ok {
 		e := w.plan.Entrance
+		if err := w.appearAtHire(ctx, deadline); err != nil {
+			return err
+		}
 		from := w.commanderMap(ctx)
 		if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(e.X), num32(e.Y), num32(e.Z), w.plan.Map)); err == nil {
 			if werr := w.waitRevivePoint(ctx, e, from, deadline); werr == nil {
