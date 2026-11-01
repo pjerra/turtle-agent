@@ -593,7 +593,8 @@ func (w *walk) placeQuiet(ctx context.Context) error {
 			w.placeSum.Quiet = true
 			if !read.Toolkit {
 				w.note("place: the toolkit's own quiet flag is false, but every unit it listed is a critter, a skip entry, "+
-					"a BEHIND leftover the extra round took, or beyond %.0f yd: the walk places the raid", float64(placeReachYd))
+					"a BEHIND leftover the extra round took, or beyond %.0f yd, a roamer beyond it that the cut join read missed: "+
+					"the walk places the raid", float64(placeReachYd))
 			}
 			return nil
 		}
@@ -646,7 +647,7 @@ type ttRoamer struct {
 }
 
 // roamersOnly says every blocker is one of the read's roamers: a unit that moved between the two reads (a patrol walking
-// through), which a re-read may find gone (item 5).
+// through), which a re-read may find gone (item 5). A roamer the join read missed counts too (D4).
 func (r *placeQuietRead) roamersOnly(block []ttUnit) bool {
 	if len(block) == 0 {
 		return false
@@ -654,6 +655,11 @@ func (r *placeQuietRead) roamersOnly(block []ttUnit) bool {
 	moved := map[string]bool{}
 	for _, u := range r.Roam {
 		moved[strings.ToUpper(u.GUID)] = true
+	}
+	// D4: a roamer the join read missed counts as a roamer too: inside the reach it is a unit that moved, so it
+	// qualifies for the re-reads (a patrol walking through gets its two re-reads).
+	for _, m := range r.Missing {
+		moved[strings.ToUpper(m.GUID)] = true
 	}
 	for _, u := range block {
 		if !moved[strings.ToUpper(u.GUID)] {
@@ -664,7 +670,8 @@ func (r *placeQuietRead) roamersOnly(block []ttUnit) bool {
 }
 
 // placeQuietOnce runs one `quiet` and, when it names roamers, one `q units` read around the start point that gives them
-// the position, home and vitals the toolkit's roamer list leaves out (item 4).
+// the position, home and vitals the toolkit's roamer list leaves out (item 4). A roamer the join read missed is also
+// looked up in the quiet's own near lists (D2): only one found in neither is Missing.
 func (w *walk) placeQuietOnce(ctx context.Context, p dungeon.Point, skip string) (*placeQuietRead, error) {
 	cmd := fmt.Sprintf("quiet %d %s %s %s w=%d dz=%s%s", placeQuietR, num32(p.X), num32(p.Y), num32(p.Z), placeQuietWaitS, num32(placeClearDz), skip)
 	out, err := w.tt(ctx, cmd)
@@ -712,9 +719,19 @@ func (w *walk) placeQuietOnce(ctx context.Context, p dungeon.Point, skip string)
 	if err != nil {
 		return nil, err
 	}
-	byGUID := make(map[string]ttUnit, len(units))
+	byGUID := make(map[string]ttUnit, len(units)+len(read.Near))
+	// The join read first: its position, home and vitals are fresher than the quiet's own near list.
 	for _, u := range units {
 		byGUID[strings.ToUpper(u.GUID)] = u
+	}
+	// D2: a roamer the cut join read missed is also looked up in the quiet's own near lists (they carry position and
+	// home). Only a roamer found nowhere is Missing.
+	for _, u := range read.Near {
+		if k := strings.ToUpper(u.GUID); k != "" {
+			if _, ok := byGUID[k]; !ok {
+				byGUID[k] = u
+			}
+		}
 	}
 	read.JoinCut = cut
 	for _, r := range roamers {
@@ -752,6 +769,13 @@ func (w *walk) placeQuietJudge(read *placeQuietRead, p dungeon.Point) placeQuiet
 		w.note("place: the quiet's join read (r %d) was cut: it may have missed roamers", placeRoamScopeYd)
 	}
 	for _, r := range read.Missing {
+		if r.Dist > placeReachYd {
+			// D1: the cut join read dropped the farthest units; a missing roamer beyond the landing reach is ignored
+			// (a door-to-end run at this step would have it alive too), with a note.
+			w.note("place: the quiet ignores roamer %d %.1f yd out (%s, moved %.1f): the cut join read missed it, and it is beyond the %d yd landing reach",
+				r.Entry, r.Dist, r.Why, r.Moved, placeReachYd)
+			continue
+		}
 		w.note("place: the quiet's roamer %d (%s, %.1f yd out, moved %.1f) is not in the join read: it blocks",
 			r.Entry, r.Why, r.Dist, r.Moved)
 		j.Block = append(j.Block, ttUnit{GUID: r.GUID, Entry: r.Entry, Dist: r.Dist})

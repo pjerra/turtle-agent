@@ -1389,6 +1389,97 @@ func TestPlaceQuietRereadsMovingPatrolsTwiceThenFails(t *testing.T) {
 	}
 }
 
+// F1 (D1): a roamer the cut join read missed and that stands beyond the landing reach is ignored, with a note
+// (walk 24 m910q-marli: three roamers at 65.6 / 67.4 / 77.2 yd, none of them near the raid's landing).
+func TestPlaceQuietIgnoresMissingRoamerBeyondReach(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	entries := []uint32{11338, 14532, 14881}
+	guids := []string{"0xF1300000009001", "0xF1300000009002", "0xF1300000009003"}
+	var roamers []any
+	for i, d := range []float32{65.6, 67.4, 77.2} {
+		roamers = append(roamers, quietRoamAt(guids[i], entries[i], "moved", d, float32(i)+3.2))
+	}
+	p.quiet = func(int) bool { return false }
+	p.quietRoamers = roamers
+	p.units = func(cmd string) ([]any, bool) {
+		if fl := strings.Fields(cmd); len(fl) > 2 && fl[2] == fmt.Sprintf("%d", placeRoamScopeYd) {
+			return []any{
+				joinUnitAt("0xF1300000009101", 11338, plan.Point.X+90, plan.Point.Y, plan.Point.Z, [3]float32{plan.Point.X + 90, plan.Point.Y, plan.Point.Z}, 4000, 0),
+				joinUnitAt("0xF1300000009102", 14532, plan.Point.X+92, plan.Point.Y, plan.Point.Z, [3]float32{plan.Point.X + 92, plan.Point.Y, plan.Point.Z}, 4000, 0),
+			}, true
+		}
+		return nil, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.summary().EndReason)
+	}
+	if len(p.places) != 1 {
+		t.Fatalf("%d place commands, want one", len(p.places))
+	}
+	if !hasNote(f.summary(), "the cut join read missed it") {
+		t.Fatalf("notes %v", f.summary().Notes)
+	}
+}
+
+// F1 (D1, D4): a roamer the cut join read missed that stands inside the landing reach blocks (fail closed), and it
+// counts as a mover for the re-read rule: the walk makes its two re-reads before it fails.
+func TestPlaceQuietBlocksMissingRoamerWithinReach(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	const guid = "0xF1300000009201"
+	p.quiet = func(int) bool { return false }
+	p.quietRoamers = []any{quietRoamAt(guid, 11338, "moved", 18.0, 3.0)}
+	p.units = func(cmd string) ([]any, bool) {
+		if fl := strings.Fields(cmd); len(fl) > 2 && fl[2] == fmt.Sprintf("%d", placeRoamScopeYd) {
+			return nil, true
+		}
+		return nil, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.summary().EndReason)
+	}
+	if want := 1 + placeQuietRereads; p.quietCalls != want {
+		t.Fatalf("%d quiet reads, want %d", p.quietCalls, want)
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, "11338") {
+		t.Fatalf("end reason %q", sum.EndReason)
+	}
+}
+
+// F1 (D2): a roamer the cut join read missed but that the quiet's own near list carries is judged by that entry: the
+// walk does not refuse it as missing (walk 24 test2-ven: the 11368 roamer at 28.2 yd).
+func TestPlaceQuietFindsRoamerInNearList(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	_, home := placeAheadB(t, plan)
+	const guid = "0xF1300000009301"
+	at := [3]float32{plan.Point.X + 28.2, plan.Point.Y, plan.Point.Z}
+	p.quiet = func(int) bool { return false }
+	p.quietNear = []any{quietUnitHome(guid, 15111, at[0], at[1], at[2], home)}
+	p.quietRoamers = []any{quietRoamAt(guid, 15111, "moved", 28.2, 2.5)}
+	p.units = func(cmd string) ([]any, bool) {
+		if fl := strings.Fields(cmd); len(fl) > 2 && fl[2] == fmt.Sprintf("%d", placeRoamScopeYd) {
+			return []any{joinUnitAt("0xF1300000009302", 11338, plan.Point.X+90, plan.Point.Y, plan.Point.Z, [3]float32{plan.Point.X + 90, plan.Point.Y, plan.Point.Z}, 4000, 0)}, true
+		}
+		return nil, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.summary().EndReason)
+	}
+	for _, n := range f.summary().Notes {
+		if strings.Contains(n, "is not in the join read") {
+			t.Fatalf("the walk refused a roamer it found in the near list: %q", n)
+		}
+		if strings.Contains(n, "missed it") {
+			t.Fatalf("the walk treated a roamer its near list carries as missing: %q", n)
+		}
+	}
+}
+
 // A unit is owned only by a BEHIND circle whose area holds its home (review round 2, LOW-1): the same entry, far away,
 // is not, and a reply without a home gives no owner even where the unit stands (fail closed).
 func TestPlaceRogueOwnerNeedsNearCircle(t *testing.T) {
