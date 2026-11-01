@@ -3284,8 +3284,14 @@ func (w *walk) quietOnce(ctx context.Context, st *quietState, p dungeon.Point) (
 	// near judges a copy it cannot see. placeReachYd is the reach the placement accepts the same point within.
 	if stx, serr := w.status(ctx); serr != nil {
 		return false, "status: " + serr.Error(), nil
+	} else if stx.Map != w.plan.Map || stx.Falling {
+		// Codex round 2: the long quiet wait gives the commander time to be moved (a teleport, a fall, another map);
+		// a read from anywhere but the point's own map and floor judges surroundings the revive will not have.
+		return false, fmt.Sprintf("the commander is not standing on map %d (map %d, falling %v)", w.plan.Map, stx.Map, stx.Falling), nil
 	} else if d := math.Hypot(float64(stx.X-p.X), float64(stx.Y-p.Y)); d > placeReachYd {
 		return false, fmt.Sprintf("the commander stands %.1f yd from the read point (over the %d yd reach)", d, placeReachYd), nil
+	} else if !stx.ZUnknown && math.Abs(float64(stx.Z-p.Z)) > reviveLandingZYd {
+		return false, fmt.Sprintf("the commander stands %.1f yd above or below the read point", math.Abs(float64(stx.Z-p.Z))), nil
 	}
 	us, err := w.unitsAt(ctx, 200)
 	if err != nil {

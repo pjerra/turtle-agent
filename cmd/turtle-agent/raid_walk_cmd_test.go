@@ -1872,6 +1872,38 @@ func TestRaidWalkReviveWaitsForBlockerToLeave(t *testing.T) {
 	}
 }
 
+// Codex round 2: the commander is moved off the revive point's map during the D-C wait (a teleport, a graveyard
+// transfer): a read from there sees nothing, but it judges surroundings the revive will not have, so no summon goes out.
+func TestRaidWalkReviveQuietNeedsCommanderOnTheMap(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	f.agent.startReply = zgPlaceReply(t)
+	const moved = 26 // past the 24-read quiet check, inside the D-C wait
+	_, place := placePlanRows(t)
+	f.agent.unitsFn = func(reads int) []objects.Unit {
+		if reads > moved {
+			return []objects.Unit{} // the area reads empty from where the commander now stands
+		}
+		if reads == moved {
+			f.agent.mu.Lock()
+			f.agent.status.Map = 0 // moved off the map; the next read's status check sees it
+			f.agent.mu.Unlock()
+		}
+		return []objects.Unit{{Type: "creature", Name: "Razzashi Skitterer", Entry: 11338, Hostile: true, InCombat: true,
+			X: place.Point.X + 30, Y: place.Point.Y, Z: place.Point.Z}}
+	}
+	wipeOnceAfterStart(f)
+	resumePlacedRun(f)
+	f.run(context.Background())
+	f.agent.mu.Lock()
+	gm := append([]string{}, f.agent.gm...)
+	f.agent.mu.Unlock()
+	for _, line := range gm {
+		if strings.HasPrefix(line, ".summon ") || strings.HasPrefix(line, ".revive ") {
+			t.Fatalf("revived after the commander left the map: %q in %q", line, gm)
+		}
+	}
+}
+
 // D-C's waitEnd leaves the rest and the resume that follow inside the recovery deadline: the walk then ends with the
 // revive refusal (exit 19, "not revived"), and not with "wipe recovery timed out".
 func TestRaidWalkReviveWaitEndsBeforeRest(t *testing.T) {
