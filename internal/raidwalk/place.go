@@ -32,6 +32,9 @@ const (
 	PlaceAheadSlack = 3
 	// PlaceUnitYd is the radius of a per-unit circle a split row becomes.
 	PlaceUnitYd = 4
+	// PlaceOwnYd is how far beyond a BEHIND pull row's radius a unit's home may stand and still be owned by that row
+	// (the spawn-home ownership test: the same 6 yd the extra clear round allows around a corridor circle).
+	PlaceOwnYd = 6
 	// PlaceMaxCircles bounds one walk's clear: more circles than this refuse the placement.
 	PlaceMaxCircles = 40
 	// PlaceReviveYd is how close a hire's frame must be to the place point to count as placed.
@@ -61,6 +64,7 @@ type ClearPlan struct {
 	Circles []ClearCircle
 	Notes   []string
 	Ahead   []AheadCircle
+	Behind  []BehindRow
 	Refusal string
 }
 
@@ -71,6 +75,33 @@ type AheadCircle struct {
 	X, Y, Z float32
 	Radius  float32
 	Entries []uint32
+}
+
+// BehindRow is one BEHIND pull row: any pull row before the start step, whether or not its circle reaches the corridor.
+// A unit is only BEHIND trash when such a row holds its entry and owns its home (PlacePlan.BehindOwns), because entries
+// are shared: a later leg's patrol can carry a corridor row's entry.
+type BehindRow struct {
+	Step    int
+	X, Y, Z float32
+	Radius  float32
+	Entries []uint32
+}
+
+// BehindOwns says whether a BEHIND pull row that holds the entry owns a home: the point lies within the row's radius
+// plus PlaceOwnYd, 2D, within placeAheadDz of the row's height (the z rule the AHEAD ownership test uses).
+func (p PlacePlan) BehindOwns(entry uint32, x, y, z float32) (int, bool) {
+	for _, b := range p.Behind {
+		if !holdsEntry(b.Entries, entry) {
+			continue
+		}
+		if math.Abs(float64(b.Z)-float64(z)) > placeAheadDz {
+			continue
+		}
+		if dist2f(x, y, b.X, b.Y) <= float64(b.Radius)+PlaceOwnYd {
+			return b.Step, true
+		}
+	}
+	return 0, false
 }
 
 // AheadIn says whether a point lies in an AHEAD creature row's circle (spec 5 step 6).
@@ -124,6 +155,7 @@ type PlacePlan struct {
 	Circles []ClearCircle
 	Notes   []string
 	Ahead   []AheadCircle
+	Behind  []BehindRow
 	Skips   []uint32
 }
 
@@ -418,6 +450,73 @@ func routeDistance(route []dungeon.Point, x, y float32) (d float64, z float64) {
 	return best, z
 }
 
+// routeSteps is the step numbers of the positioned rows from start to stop, in order (the same filter as routePoints).
+func routeSteps(rows planexport.Rows, start, stop int) []int {
+	if start < 1 {
+		start = 1
+	}
+	if stop > len(rows.Steps) {
+		stop = len(rows.Steps)
+	}
+	var out []int
+	for i := start - 1; i < stop; i++ {
+		if !placedRow(rows.Steps[i]) {
+			continue
+		}
+		out = append(out, i+1)
+	}
+	return out
+}
+
+// PlaceBossGuard walks the route from start to stop segment by segment against every BEHIND boss or hold row (the same
+// test as PlaceClear's guard: route distance minus the row's radius <= PlaceBossGuardYd and dz <= PlaceCorridorZ).
+// A placed run is a fresh copy, so those bosses are alive. For the first segment a -> b that comes within the guard:
+//   - b in the start step's own leg (or a == start): refusal, the message PlaceClear gives today;
+//   - b in a later leg: until = b (`until step b` stops before b, so the run never walks a -> b), routeEnd = a (the
+//     corridor's route end), and a note naming the row, its leg, the distance and the two steps. When b is the stop
+//     itself, until == stop: the caller must still shorten, so hit says a segment came within the guard at all.
+//
+// With no segment within the guard: until = routeEnd = stop, no note, hit false.
+func PlaceBossGuard(rows planexport.Rows, start, stop int) (until, routeEnd int, note, refusal string, hit bool) {
+	until, routeEnd = stop, stop
+	if start < 1 {
+		return until, routeEnd, "", "", false
+	}
+	steps := routeSteps(rows, start, stop)
+	if len(steps) < 2 {
+		return until, routeEnd, "", "", false
+	}
+	startLeg := rows.Steps[start-1].Leg
+	for i := 0; i+1 < len(steps); i++ {
+		a, b := rows.Steps[steps[i]-1], rows.Steps[steps[i+1]-1]
+		seg := []dungeon.Point{{X: a.X, Y: a.Y, Z: a.Z}, {X: b.X, Y: b.Y, Z: b.Z}}
+		for j := 0; j < start-1 && j < len(rows.Steps); j++ {
+			s := rows.Steps[j]
+			if !creatureRow(s) || !placedRow(s) {
+				continue
+			}
+			if s.Kind != planexport.KindBoss && s.Kind != planexport.KindHold {
+				continue
+			}
+			d, z := routeDistance(seg, s.X, s.Y)
+			if d-float64(s.Radius) > PlaceBossGuardYd || math.Abs(float64(s.Z)-z) > PlaceCorridorZ {
+				continue
+			}
+			if steps[i] == start || b.Leg == startLeg {
+				return stop, stop, "", fmt.Sprintf("boss/event row %d of leg %d is within %.0f yd of the route: start later or walk from the door", j+1, s.Leg, d), true
+			}
+			kind := "boss"
+			if s.Kind == planexport.KindHold {
+				kind = "hold"
+			}
+			note = fmt.Sprintf("the run stops before step %d (until step %d): the route from step %d to %d passes %.0f yd from BEHIND %s row %d of leg %d, which a placed run leaves alive",
+				steps[i+1], steps[i+1], steps[i], steps[i+1], d, kind, j+1, s.Leg)
+			return steps[i+1], steps[i], note, "", true
+		}
+	}
+	return until, routeEnd, "", "", false
+}
+
 // circleRadius is a BEHIND pull row's circle radius (spec 4.3).
 func circleRadius(row float32) float32 {
 	r := row + PlaceCircleSlack
@@ -561,6 +660,16 @@ func PlaceClear(rows planexport.Rows, plan *dungeon.Plan, start, stop int) Clear
 	route := routePoints(rows, start, stop)
 	if len(route) == 0 {
 		return out
+	}
+	// Every BEHIND pull row, whether or not its circle reaches the corridor: the spawn-home ownership test reads the
+	// row's own area and entries, not only the corridor's circles.
+	for i := 0; i < start-1 && i < len(rows.Steps); i++ {
+		s := rows.Steps[i]
+		if s.Kind != planexport.KindPull || !placedRow(s) {
+			continue
+		}
+		out.Behind = append(out.Behind, BehindRow{Step: i + 1, X: s.X, Y: s.Y, Z: s.Z, Radius: s.Radius,
+			Entries: append([]uint32{}, s.Entries...)})
 	}
 	// The AHEAD set is every creature row from the start step to the LAST row of the plan, not to the until stop: a
 	// BEHIND circle may overlap a pack of a later leg that the run reaches after the stop, and the split must see it

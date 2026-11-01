@@ -9,19 +9,22 @@ import (
 
 // Summary is the tb-raid-walk v1 file written to <out>/summary.json.
 type Summary struct {
-	Format     string  `json:"format"`
-	Version    int     `json:"version"`
-	Plan       string  `json:"plan"`
-	Map        uint32  `json:"map"`
-	Server     string  `json:"server"`
-	Slot       int     `json:"slot"`
-	Character  string  `json:"character"`
-	Until      string  `json:"until"`
-	From       string  `json:"from"`
-	Speed      float64 `json:"speed"`
-	TestSpeed  bool    `json:"test_speed"`
-	RowsSHA256 string  `json:"rows_sha256"`
-	UntilStep  int     `json:"until_step"`
+	Format    string `json:"format"`
+	Version   int    `json:"version"`
+	Plan      string `json:"plan"`
+	Map       uint32 `json:"map"`
+	Server    string `json:"server"`
+	Slot      int    `json:"slot"`
+	Character string `json:"character"`
+	Until     string `json:"until"`
+	// UntilEffective is the until the --place route guard shortened to, when it shortened (empty otherwise): Until
+	// stays what the user asked for.
+	UntilEffective string  `json:"until_effective,omitempty"`
+	From           string  `json:"from"`
+	Speed          float64 `json:"speed"`
+	TestSpeed      bool    `json:"test_speed"`
+	RowsSHA256     string  `json:"rows_sha256"`
+	UntilStep      int     `json:"until_step"`
 	// RunLabel is the newest speed/until label the run's status lines carried ("speed 2.0 (test); until boss (step 41)");
 	// SpeedFellBack says the server's test speed went back to 1.0 once a real player joined.
 	RunLabel      string           `json:"run_label,omitempty"`
@@ -179,9 +182,11 @@ type SummaryMeta struct {
 	Slot      int
 	Character string
 	Until     string
-	From      string
-	Speed     float64
-	TestSpeed bool
+	// UntilEffective is the until a --place walk's route guard shortened to (F5, D8): empty when it did not shorten.
+	UntilEffective string
+	From           string
+	Speed          float64
+	TestSpeed      bool
 	// RowsSHA256 is the hex sha256 of planexport.WriteSQL of the walk's rows: the plan the run walked.
 	RowsSHA256 string
 	// UntilStep is the step of the start line's until label (0 when unknown or no until).
@@ -214,40 +219,41 @@ type SummaryMeta struct {
 // BuildSummary fills the tb-raid-walk v1 summary from the tracker and the command's own facts.
 func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 	s := &Summary{
-		Format:        "tb-raid-walk",
-		Version:       1,
-		Plan:          m.Plan,
-		Map:           m.Map,
-		Server:        m.Server,
-		Slot:          m.Slot,
-		Character:     m.Character,
-		Until:         m.Until,
-		From:          m.From,
-		Speed:         m.Speed,
-		TestSpeed:     m.TestSpeed,
-		RowsSHA256:    m.RowsSHA256,
-		UntilStep:     m.UntilStep,
-		RunLabel:      m.RunLabel,
-		SpeedFellBack: m.SpeedFellBack,
-		Layout:        m.Layout,
-		Started:       m.Started,
-		Ended:         m.Ended,
-		EndReason:     m.EndReason,
-		Fights:        nonNilFights(m.Fights),
-		Injections:    nonNilInjections(m.Injections),
-		Incidents:     nonNilIncidents(m.Incidents),
-		Roster:        RosterSummary{OT: []string{}, Rest: []string{}},
-		Dashboard:     m.Dashboard,
-		Teardown:      m.Teardown,
-		Place:         m.Place,
-		ExitCode:      m.ExitCode,
-		Notes:         nonNilStrings(m.Notes),
-		WipeResumes:   m.WipeResumes,
-		StepTimeline:  []StepSummary{},
-		Legs:          []LegSummary{},
-		Wipes:         []int{},
-		Pauses:        []PauseSummary{},
-		Deaths:        DeathSummary{ByStep: map[int]int{}, ByBot: map[string]int{}},
+		Format:         "tb-raid-walk",
+		Version:        1,
+		Plan:           m.Plan,
+		Map:            m.Map,
+		Server:         m.Server,
+		Slot:           m.Slot,
+		Character:      m.Character,
+		Until:          m.Until,
+		UntilEffective: m.UntilEffective,
+		From:           m.From,
+		Speed:          m.Speed,
+		TestSpeed:      m.TestSpeed,
+		RowsSHA256:     m.RowsSHA256,
+		UntilStep:      m.UntilStep,
+		RunLabel:       m.RunLabel,
+		SpeedFellBack:  m.SpeedFellBack,
+		Layout:         m.Layout,
+		Started:        m.Started,
+		Ended:          m.Ended,
+		EndReason:      m.EndReason,
+		Fights:         nonNilFights(m.Fights),
+		Injections:     nonNilInjections(m.Injections),
+		Incidents:      nonNilIncidents(m.Incidents),
+		Roster:         RosterSummary{OT: []string{}, Rest: []string{}},
+		Dashboard:      m.Dashboard,
+		Teardown:       m.Teardown,
+		Place:          m.Place,
+		ExitCode:       m.ExitCode,
+		Notes:          nonNilStrings(m.Notes),
+		WipeResumes:    m.WipeResumes,
+		StepTimeline:   []StepSummary{},
+		Legs:           []LegSummary{},
+		Wipes:          []int{},
+		Pauses:         []PauseSummary{},
+		Deaths:         DeathSummary{ByStep: map[int]int{}, ByBot: map[string]int{}},
 	}
 	if s.Layout.Tanks == nil {
 		s.Layout.Tanks = []string{}
@@ -366,10 +372,16 @@ func (s *Summary) Text() string {
 	}
 	b.WriteString("\n")
 	fmt.Fprintf(&b, "plan %s map %d; server %s slot %d as %s\n", s.Plan, s.Map, s.Server, s.Slot, s.Character)
+	// A --place walk whose route guard shortened the until shows both: what the user asked for and what the run
+	// actually walked (F5, D8).
+	shortened := ""
+	if s.UntilEffective != "" {
+		shortened = fmt.Sprintf(" (the place shortens it to %s)", s.UntilEffective)
+	}
 	if s.From != "" {
-		fmt.Fprintf(&b, "from %s; until %s\n", s.From, s.Until)
+		fmt.Fprintf(&b, "from %s; until %s%s\n", s.From, s.Until, shortened)
 	} else {
-		fmt.Fprintf(&b, "until %s\n", s.Until)
+		fmt.Fprintf(&b, "until %s%s\n", s.Until, shortened)
 	}
 	if s.TestSpeed {
 		fmt.Fprintf(&b, "speed %.1f (test)", s.Speed)
