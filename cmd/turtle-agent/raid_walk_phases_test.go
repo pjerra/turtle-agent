@@ -444,7 +444,25 @@ func TestRaidWalkReviveLandedCheck(t *testing.T) {
 		{"still falling", falling, false},
 		{"wrong map", otherMap, false},
 	} {
-		if got := reviveLanded(p, 309, c.st); got != c.want {
+		if got := reviveLanded(p, 309, 309, c.st); got != c.want {
+			t.Fatalf("near go: %s: reviveLanded = %v, want %v", c.name, got, c.want)
+		}
+	}
+	// A far go (from map 0, walk 23): ZUnknown stays set for good after SMSG_NEW_WORLD, so it no longer blocks the
+	// landing; every other rule still does.
+	for _, c := range []struct {
+		name string
+		st   session.StatusInfo
+		want bool
+	}{
+		{"destination reported with z unknown", zUnknown, true},
+		{"settled on the point", at(100, 200, 50), true},
+		{"still falling", falling, false},
+		{"wrong map", otherMap, false},
+		{"x/y 11 yd off", at(111, 200, 50), false},
+		{"z 40 yd off", at(100, 200, 90), false},
+	} {
+		if got := reviveLanded(p, 309, 0, c.st); got != c.want {
 			t.Fatalf("%s: reviveLanded = %v, want %v", c.name, got, c.want)
 		}
 	}
@@ -467,6 +485,7 @@ func TestRaidWalkReviveWaitsForTheSettledLanding(t *testing.T) {
 			resumeHook(f, 24, 28, &resumeAt)
 			f.agent.mu.Lock()
 			f.agent.goUnsettled, f.agent.goUnsettledFalling = 3, falling
+			f.agent.enterMap = 249 // the live Q3 agent stood in the instance: its go was a near one
 			f.agent.mu.Unlock()
 			if code := f.run(context.Background()); code != exitOK {
 				t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
@@ -536,6 +555,37 @@ func TestRaidWalkEntranceFallbackWaitsForTheLanding(t *testing.T) {
 	for i, d := range dists {
 		if d > reviveLandingYd {
 			t.Fatalf("summon %d left %.1f yd from the entrance (want <= %d): the entrance fallback summoned before its landing", i, d, reviveLandingYd)
+		}
+	}
+}
+
+// TestRaidWalkReviveLandsAfterAFarTeleport (walk 23, 6 runs exit 19): the commander waits at the portal on the
+// continent for the whole walk, so the revive's `.go xyz <point> 309` is a FAR teleport. The session lands it through
+// SMSG_NEW_WORLD, sends MSG_MOVE_WORLDPORT_ACK at once and reports the point on the plan's map, but leaves ZUnknown
+// set for good (only a near teleport drops to the navmesh floor). The map change itself is the landing (the server
+// places the player when it reads that ack, before any later chat line), so the revive must go on and summon.
+func TestRaidWalkReviveLandsAfterAFarTeleport(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.allDeadFromHires()
+	var resumeAt time.Time
+	resumeHook(f, 24, 28, &resumeAt)
+	f.agent.mu.Lock()
+	f.agent.farZUnknown = true // the commander stays on the portal's map 1; the plan's map is 249
+	f.agent.mu.Unlock()
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	dists := append([]float64{}, f.agent.summonDist...)
+	f.agent.mu.Unlock()
+	if len(dists) == 0 {
+		t.Fatal("no summons went out: the far teleport never counted as landed")
+	}
+	for i, d := range dists {
+		if d > reviveLandingYd {
+			t.Fatalf("summon %d left %.1f yd from the revive point (want <= %d)", i, d, reviveLandingYd)
 		}
 	}
 }

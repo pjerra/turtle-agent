@@ -148,10 +148,18 @@ type walkFakeAgent struct {
 	lastUnsettled      bool // the last status served was flagged unsettled
 	// summonUnsettled counts the summons that left right after a status flagged unsettled.
 	summonUnsettled int
-	goPend          [3]float32
-	goPendOK        bool
-	goTarget        [3]float32 // the last `.go xyz` target: the revive point a `.summon` must wait for
-	goTargetOK      bool
+	// farZUnknown models the live session after a FAR teleport (walk 23): a recovery `.go xyz` onto another map
+	// lands through SMSG_NEW_WORLD, which leaves ZUnknown set for good (no floor drop follows it, and the core
+	// never sends the player its own position). zStuck is that state; a near go clears it.
+	farZUnknown bool
+	zStuck      bool
+	// enterMap puts the commander on this map once `cmd enter` is acked (0: it stays where its last go put it):
+	// the live walk-22 agent stood inside the instance, so its recovery go was a near one.
+	enterMap   uint32
+	goPend     [3]float32
+	goPendOK   bool
+	goTarget   [3]float32 // the last `.go xyz` target: the revive point a `.summon` must wait for
+	goTargetOK bool
 	// summonDist records, per `.summon`, the distance from the commander's own reported position to that target:
 	// a summon before the landing shows the race the wait closes.
 	summonDist []float64
@@ -219,6 +227,10 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		}
 		st := f.status
 		f.lastUnsettled = false
+		if f.zStuck {
+			st.ZUnknown = true
+			f.lastUnsettled = true
+		}
 		if f.unsettledLeft > 0 {
 			f.unsettledLeft--
 			f.lastUnsettled = true
@@ -372,6 +384,9 @@ func (f *walkFakeAgent) gmSide(line string) {
 			f.mu.Lock()
 			f.goTarget, f.goTargetOK = [3]float32{float32(x), float32(y), float32(z)}, true
 			if err == nil {
+				if started && f.farZUnknown {
+					f.zStuck = uint32(m) != f.status.Map // a far go leaves z unknown for good; a near go settles it
+				}
 				f.status.Map = uint32(m) // the go's map id takes effect at once; only a goLag test holds the position back
 			}
 			if started && f.goLagEvery > 0 {
@@ -795,6 +810,9 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 		if p.Verb == "enter" {
 			f.mu.Lock()
 			f.entered = true
+			if f.enterMap != 0 {
+				f.status.Map = f.enterMap
+			}
 			f.mu.Unlock()
 		}
 		return ack("cmd " + p.Verb)

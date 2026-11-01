@@ -1108,18 +1108,33 @@ func (w *walk) waitStatus(ctx context.Context, timeout time.Duration, deadline t
 // moment later, and a summon that leaves before the landing drops the whole party at the OLD spot (walk 22 test2
 // s4, Q3: the lead landed 560 yd back at the ZG entrance and its Voidwalker followed). The session also reports the
 // `.go` destination itself at once, flagged ZUnknown until the server sends a position, so a position match alone
-// is no landing either (Codex HIGH, F4 round 2).
-func (w *walk) waitRevivePoint(ctx context.Context, p dungeon.Point, deadline time.Time) error {
+// is no landing either (Codex HIGH, F4 round 2). fromMap is the commander's map before the `.go` (see reviveLanded).
+func (w *walk) waitRevivePoint(ctx context.Context, p dungeon.Point, fromMap uint32, deadline time.Time) error {
 	return w.waitStatus(ctx, reviveTeleportWait, deadline,
 		fmt.Sprintf("the commander is not within %d yd of the revive point on map %d", reviveLandingYd, w.plan.Map),
-		func(st session.StatusInfo) bool { return reviveLanded(p, w.plan.Map, st) })
+		func(st session.StatusInfo) bool { return reviveLanded(p, w.plan.Map, fromMap, st) })
 }
 
-// reviveLanded says the status is a SETTLED landing at p on mapID: the server has sent a position (not ZUnknown, the
-// session's guess after a GM teleport) and the character is not falling, x/y are within reviveLandingYd of p and z
-// within reviveLandingZYd (a landing may drop to the floor, so z gets more room than x/y).
-func reviveLanded(p dungeon.Point, mapID uint32, st session.StatusInfo) bool {
-	if st.Map != mapID || st.ZUnknown || st.Falling {
+// commanderMap is the commander's map before a revive `.go xyz`: what tells a far teleport from a near one. A failed
+// status read answers the plan's map, the strict (near) rule.
+func (w *walk) commanderMap(ctx context.Context) uint32 {
+	st, err := w.status(ctx)
+	if err != nil {
+		return w.plan.Map
+	}
+	return st.Map
+}
+
+// reviveLanded says the status is a SETTLED landing at p on mapID: the character is not falling, x/y are within
+// reviveLandingYd of p and z within reviveLandingZYd (a landing may drop to the floor, so z gets more room than x/y).
+// After a NEAR teleport (fromMap == mapID) the server must also have sent a position: not ZUnknown, the session's
+// guess until the floor drop or a server position settles it. After a FAR teleport (fromMap != mapID) ZUnknown stays
+// set for good, as the session lands it through SMSG_NEW_WORLD with no floor drop and the core never sends the player
+// its own position (walk 23: 6 runs exit 19, the commander waited on map 0 at the portal); there the map change is
+// the landing itself, since the session acks the worldport at once and the server places the player on reading that
+// ack, before any later chat line.
+func reviveLanded(p dungeon.Point, mapID, fromMap uint32, st session.StatusInfo) bool {
+	if st.Map != mapID || st.Falling || (st.ZUnknown && fromMap == mapID) {
 		return false
 	}
 	dx, dy := float64(p.X-st.X), float64(p.Y-st.Y)
@@ -1692,10 +1707,11 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 		return stopf(exitRaidWalkIncident, "not revived: the plan's rows give no first point")
 	}
 	p := *w.stepFirst
+	from := w.commanderMap(ctx)
 	if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(p.X), num32(p.Y), num32(p.Z), w.plan.Map)); err != nil {
 		return err
 	}
-	if err := w.waitRevivePoint(ctx, p, deadline); err != nil {
+	if err := w.waitRevivePoint(ctx, p, from, deadline); err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
 			return timeout
 		}
@@ -1707,8 +1723,9 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 	}
 	if !ok {
 		e := w.plan.Entrance
+		from := w.commanderMap(ctx)
 		if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(e.X), num32(e.Y), num32(e.Z), w.plan.Map)); err == nil {
-			if werr := w.waitRevivePoint(ctx, e, deadline); werr == nil {
+			if werr := w.waitRevivePoint(ctx, e, from, deadline); werr == nil {
 				ok, why, terr = w.quietCheck(ctx, e, deadline)
 				if terr != nil {
 					return terr
