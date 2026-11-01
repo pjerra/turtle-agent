@@ -51,6 +51,9 @@ const (
 	// placeQuietRereads is how many times the quiet is read again (placeQuietWaitS apart) when the only units blocking
 	// it are moving patrols, before the placement fails (item 5).
 	placeQuietRereads = 2
+	// placeQuietExtraRounds is how many extra clear rounds the quiet may run (walk 24: one round left the bats that
+	// flew in after it).
+	placeQuietExtraRounds = 2
 	// placeCritterHP is the top of a critter's max-HP band: a rank-0 unit with at most this many hit points (a level-1
 	// critter) never blocks the clear or the quiet (item 2).
 	placeCritterHP = 100
@@ -548,17 +551,19 @@ func skipArg(ids []uint32) string {
 // placement when it is not a skip entry, not a critter and
 //
 //	(a) it stands within placeReachYd of the start point (the opening the raid lands in), or
-//	(b) its home lies in a BEHIND row's circle (then the one extra clear round takes it).
+//	(b) its home lies in a BEHIND row's circle, or it is BEHIND trash inside placeQuietR (then the extra clear rounds
+//	    take it: placeQuietExtraRounds of them).
 //
 // AHEAD-owned and unowned units beyond placeReachYd never block: a door-to-end run at this step has them alive too, so
 // counting them would make the test stricter than the walk it stands in for. A cut near list whose farthest listed unit
-// still stands inside placeReachYd refuses at once (D3). When only moving patrols are left, the
-// quiet is read again up to placeQuietRereads times (item 5) before the placement fails.
+// still stands inside placeReachYd refuses at once (D3). A unit no extra round could take and that stands beyond
+// placeReachYd is left alive with a note (D6): only one inside the reach still blocks. When only moving patrols are
+// left, the quiet is read again up to placeQuietRereads times (item 5) before the placement fails.
 func (w *walk) placeQuiet(ctx context.Context) error {
 	p := w.place.Point
 	skip := skipArg(w.place.Skips)
 	var j placeQuietJudge
-	extraSpent, rereads := false, 0
+	rounds, rereads := 0, 0
 	for {
 		read, err := w.placeQuietOnce(ctx, p, skip)
 		if err != nil {
@@ -569,30 +574,38 @@ func (w *walk) placeQuiet(ctx context.Context) error {
 			return stopf(exitRaidWalkFailed, "place: the area is not quiet: the quiet's near list was cut at %.1f yd, inside the %d yd landing reach", read.NearCutYd, placeReachYd)
 		}
 		j = w.placeQuietJudge(read, p)
-		if len(j.Clear) > 0 {
-			if extraSpent {
-				// The one extra round is spent: nothing more will be cleared, so these units block.
-				j.Block = append(j.Block, j.Clear...)
-				j.Clear = nil
-			} else {
-				extraSpent = true
-				cleared := 0
-				for _, u := range j.Clear {
-					took, err := w.placeQuietClear(ctx, u, skip)
-					if err != nil {
-						return err
-					}
-					if took {
-						cleared++
-					} else {
-						j.Block = append(j.Block, u)
-					}
+		var left []ttUnit // units a round could not take, or that no round is left for
+		if len(j.Clear) > 0 && rounds < placeQuietExtraRounds {
+			rounds++
+			cleared := 0
+			for _, u := range j.Clear {
+				took, err := w.placeQuietClear(ctx, u, skip)
+				if err != nil {
+					return err
 				}
-				if cleared > 0 {
-					w.note("place: the extra round cleared %d unit(s); reading the quiet again", cleared)
-					continue
+				if took {
+					cleared++
+				} else {
+					left = append(left, u)
 				}
 			}
+			if cleared > 0 {
+				w.note("place: the extra round (%d of %d) cleared %d unit(s); reading the quiet again", rounds, placeQuietExtraRounds, cleared)
+				continue
+			}
+		} else {
+			left = j.Clear
+		}
+		j.Clear = nil
+		for _, u := range left {
+			if float64(u.Dist) <= placeReachYd {
+				j.Block = append(j.Block, u)
+				continue
+			}
+			// D6: beyond the landing reach a unit no round could take is left alive (a door-to-end run at this step
+			// would have it alive too).
+			w.note("place: the quiet leaves %d %s %.1f yd out alive: no extra round can take it and it is beyond the %d yd landing reach (%s)",
+				u.Entry, u.Name, u.Dist, placeReachYd, u.placeWhere())
 		}
 		if len(j.Block) == 0 {
 			w.placeSum.Quiet = true
