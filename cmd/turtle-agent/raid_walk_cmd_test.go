@@ -130,9 +130,23 @@ type walkFakeAgent struct {
 	hireReply map[int]string
 
 	// The fault injector's fakes (raid_walk_inject_test.go): the server's selection (target/gps), the per-bot
-	ownGUID              packet.GUID // the commander's GUID when a test sets one
-	ownPos               [3]float32  // the commander's own position (.go xyz updates it)
-	pos                  map[string][3]float32
+	ownGUID packet.GUID // the commander's GUID when a test sets one
+	ownPos  [3]float32  // the commander's own position (.go xyz updates it)
+	pos     map[string][3]float32
+	// goLag holds back the position of the recovery's `.go xyz` (the first one after `run start`) for that many
+	// status polls, while the map id takes effect at once: the live server answers the go at once and lands the
+	// character a moment later (walk 22 test2 s4, Q3: the summons left 2 ms after the go). 0: every go lands at
+	// once, as the enter phase's own go does (it precedes the run start).
+	goLag      int
+	goPend     [3]float32
+	goPendOK   bool
+	goTarget   [3]float32 // the last `.go xyz` target: the revive point a `.summon` must wait for
+	goTargetOK bool
+	// summonDist records, per `.summon`, the distance from the commander's own reported position to that target:
+	// a summon before the landing shows the race the wait closes.
+	summonDist []float64
+	// partyExtra are the P-record fields the module sends beyond the fake's own (F3: target, spell, action, result).
+	partyExtra           map[string]tbm.PartyRec
 	selGUID              packet.GUID  // the selection the server has in force
 	queuedSel            *packet.GUID // a target RPC the server applies after the next .gps (lagTargets)
 	lagTargets           bool
@@ -184,6 +198,15 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 	switch method {
 	case "status":
 		f.mu.Lock()
+		if f.goPendOK {
+			f.goLag--
+			if f.goLag <= 0 {
+				f.goPendOK, f.goLag = false, 0
+				f.x, f.y, f.z = f.goPend[0], f.goPend[1], f.goPend[2]
+				f.ownPos = [3]float32{f.x, f.y, f.z}
+				f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
+			}
+		}
 		v = f.status
 		f.mu.Unlock()
 	case "party":
@@ -314,7 +337,8 @@ func (f *walkFakeAgent) gmSide(line string) {
 		f.push("TBM:GEAR|ok|39|39|3|60|-|-|-|0|-|0", "")
 	case strings.HasPrefix(line, ".go xyz "):
 		f.mu.Lock()
-		if f.runStarted {
+		started := f.runStarted
+		if started {
 			f.recoveryGo = true
 		}
 		f.mu.Unlock()
@@ -325,11 +349,17 @@ func (f *walkFakeAgent) gmSide(line string) {
 			z, _ := strconv.ParseFloat(fields[4], 32)
 			m, err := strconv.Atoi(fields[5])
 			f.mu.Lock()
-			f.x, f.y, f.z = float32(x), float32(y), float32(z)
-			f.ownPos = [3]float32{f.x, f.y, f.z}
-			f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
+			f.goTarget, f.goTargetOK = [3]float32{float32(x), float32(y), float32(z)}, true
 			if err == nil {
-				f.status.Map = uint32(m)
+				f.status.Map = uint32(m) // the go's map id takes effect at once; only a goLag test holds the position back
+			}
+			if started && f.goLag > 0 {
+				// The recovery's go: the position lands a few status polls later (the live server's landing).
+				f.goPend, f.goPendOK = f.goTarget, true
+			} else {
+				f.x, f.y, f.z = float32(x), float32(y), float32(z)
+				f.ownPos = [3]float32{f.x, f.y, f.z}
+				f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
 			}
 			f.mu.Unlock()
 		}
@@ -346,6 +376,9 @@ func (f *walkFakeAgent) gmSide(line string) {
 			f.pos = map[string][3]float32{}
 		}
 		f.pos[name] = [3]float32{f.x, f.y, f.z}
+		if f.goTargetOK {
+			f.summonDist = append(f.summonDist, dist3([3]float32{f.status.X, f.status.Y, f.status.Z}, f.goTarget))
+		}
 		f.mu.Unlock()
 	case strings.HasPrefix(line, ".revive "):
 		// The server's revive brings the hire back: later frames show it alive, so a recovered walk
@@ -646,6 +679,10 @@ func (f *walkFakeAgent) viewPage() any {
 	for k, v := range f.pos {
 		pos[k] = v
 	}
+	extra := map[string]tbm.PartyRec{}
+	for k, v := range f.partyExtra {
+		extra[k] = v
+	}
 	noParty := f.noPartyFrames
 	fn := f.hostilesFn
 	f.mu.Unlock()
@@ -669,8 +706,12 @@ func (f *walkFakeAgent) viewPage() any {
 			}
 		}
 		p := pos[name]
-		frame.Party = append(frame.Party, tbm.PartyRec{GUID: packet.GUID(1000 + i), Name: name, HP: 1, MaxHP: 1, Map: m, Dead: dead[name], State: state,
-			X: p[0], Y: p[1], Z: p[2]})
+		rec := tbm.PartyRec{GUID: packet.GUID(1000 + i), Name: name, HP: 1, MaxHP: 1, Map: m, Dead: dead[name], State: state,
+			X: p[0], Y: p[1], Z: p[2]}
+		if ex, ok := extra[name]; ok { // the P-record fields the module sends beyond the fake's own
+			rec.Target, rec.Spell, rec.Action, rec.Result = ex.Target, ex.Spell, ex.Action, ex.Result
+		}
+		frame.Party = append(frame.Party, rec)
 	}
 	if noParty {
 		frame.Party = nil
@@ -789,6 +830,11 @@ type fakeDash struct {
 	fightsErr error
 	// commanders counts the Commanders reads: a recovery's returned watch loop polls it again.
 	commanders int
+	// commandersRaw are the /api/v1/commanders answers in order, the last one repeating (nil: an empty list);
+	// commandersFn builds one from the test's own state (a dashboard view of the wipe, F4's self-regroup test)
+	// and wins over commandersRaw.
+	commandersRaw []json.RawMessage
+	commandersFn  func() json.RawMessage
 }
 
 func (d *fakeDash) Login(ctx context.Context) error { return nil }
@@ -796,7 +842,17 @@ func (d *fakeDash) Login(ctx context.Context) error { return nil }
 func (d *fakeDash) Commanders(ctx context.Context) (json.RawMessage, error) {
 	d.mu.Lock()
 	d.commanders++
+	fn, raws := d.commandersFn, d.commandersRaw
+	if len(raws) > 1 {
+		d.commandersRaw = raws[1:]
+	}
 	d.mu.Unlock()
+	if fn != nil {
+		return fn(), nil
+	}
+	if len(raws) > 0 {
+		return raws[0], nil
+	}
 	return json.RawMessage(`{"commanders":[]}`), nil
 }
 
