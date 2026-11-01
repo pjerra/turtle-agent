@@ -4095,9 +4095,11 @@ except through the movement packets it sent; and there are no textures or models
 ## Live dashboard
 
 `turtle-agent dashboard` serves one web page on the laptop that shows every running commander live: where its party is on
-the dungeon map, what the run is doing, and the numbers and orders behind it. It is for watching runs, so it is
+the dungeon map, what the run is doing, and the numbers and orders behind it. It is for watching runs, so by default it is
 **read-only**: it calls four RPC methods (`status`, `dungeon_status`, `tune_list`, `bot_view`, the last one without its
-`log_every` switch) and nothing else, and the client refuses every other method name. Plain Go standard library, the page
+`log_every` switch) and nothing else, and the read client refuses every other method name. Started with `--edit` or
+`--control` the page can write too — a checked version of a plan's route, or a run control — each an opt-in of its own with
+its own token file (below). Plain Go standard library, the page
 is embedded in the binary (no CDN, no build step). The header's "Refresh every" picker (1 / 2 / 5 / 10 / 30 s / paused, default 2 s —
 saved per browser) sets how often the page polls; "paused" freezes the map for a close look.
 
@@ -4257,10 +4259,49 @@ worktree for a PR and prints the commit message (who, when, what moved, what it 
 longer the one the edit started from. The brief rule for the lead: before copying plans for a run, `route-edits list <plan>`; when a checked
 version is newer than the golden or worktree copy, export it into the slot's fresh `dungeons_dir` instead.
 
+**Controls (`--control`).** Off by default: without `--control` the page is GET/HEAD only, exactly as above. With it every agent
+card gets a "Controls" box whose buttons pause, resume, skip a step or stop that agent's run through `POST
+/api/control/<agent id>/run`, with a control token of its own:
+
+```
+turtle-agent dashboard --listen 127.0.0.1:8790 --control --control-tokens ~/.config/turtle-agent/dashboard-control-tokens
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--control` | off | turns the run controls on. `--listen` must then be loopback or a literal Tailscale address: `0.0.0.0`, `::` and LAN addresses are refused at start-up, since a control token must not cross a LAN in plain HTTP |
+| `--control-tokens` | `~/.config/turtle-agent/dashboard-control-tokens` | lines of `label token`, mode 0600, owned by you: its own file, **never** `--edit-tokens` (an editing token must not press run buttons); the label is the `who` in the control log |
+| `--control-trust-local` | off | a control from this machine, or from a Tailscale address you named, needs no token typed (the rules are the route editor's, above; its own nonce, sent in `X-Control-Nonce`). Needs `--control` |
+| `--control-trust-label` | `owner` | with `--control-trust-local`: the label in the `--control-tokens` file the trusted controls are made as |
+| `--control-log` | `~/.local/state/turtle-agent/dashboard-control.jsonl` | every control appends two JSON lines (the request before the RPC, the result after); the folder is made 0700, the file 0600, and a log that cannot be opened stops `--control` |
+
+The contract: `GET /api/control/status` -> `200 {"enabled":true,"local_trusted":bool,"trust_nonce"?:string,"actions":["run"]}`
+(404 without `--control`); `POST /api/control/<id>/run` `{"verb":"pause"|"resume"|"skip"|"stop","confirm":bool}`; `GET
+/api/control/<id>/log?n=20` -> `{"lines":[...]}`, the last 1..50 result lines of that agent, newest last. `<id>` must be an
+agent the dashboard itself discovered (`auto`): an id it does not watch is 404. A success answers `200
+{"status":"ok","action","verb","rpc","result":<the agent's answer, scrubbed>}`; an error is `{"status":"error","message"}` with
+400 bad request (unknown verb, unknown field, trailing data), 401 auth, 403 Host / Origin / Sec-Fetch-Site, 404 agent or path,
+409 state, a missing confirm or another control for that agent still running, 413 body, 415 type, 429 more than 30 controls a
+minute per label, 500 the log could not be written, or 502 the agent's RPC failed (its message passed back).
+
+Every control first asks that agent a **fresh** `dungeon_status` (never the poller's cache) and decides from it: the page
+greys buttons, the server is the gate. `pause` on a run that is not in `observe` mode **ends** it (the party and the instance
+are kept), so it needs `"confirm": true`, and `stop` always does (it unbinds: the hires go back and the instance is lost).
+`resume` and `skip` are for observe runs; the agent refuses them on others and its message is passed back. What is **not**
+there: no way to start or resume a run (`dungeon_run` is never called), no live tuning and no party orders (later slices), and
+no GM verb of any kind.
+
+Safety: every control — token or trusted — must be `application/json`, at most 4 KiB, with an `Origin` (if present) equal to
+its Host and a `Sec-Fetch-Site` of `same-origin` or `none`; the token is in the `Authorization` header only (never a cookie or
+the URL), OPTIONS stays 405, and the Host check is the unchanged one. One control runs at a time per agent (a second is 409).
+The log holds who sent it, how (`token` or `trusted`), the peer, the agent, the verb and what the agent answered — never a
+token: the agent's token is blanked in a message and any JSON answer is scrubbed before it is logged or returned.
+
 **Over Tailscale.** Listen on the machine's tailnet address (`tailscale ip -4`) and open the page from another tailnet device at
 `http://100.101.102.103:8790/`: that IP is accepted as `Host` by itself. A name the page is opened by (the MagicDNS name,
-`<machine>.<tailnet>.ts.net`) is refused with 403 until it is listed in `--allow-host`. The page stays read-only, and the scrub
-and the file limits are unchanged. A wildcard `--listen` (`0.0.0.0`) takes no address by itself: name the hosts you open it by.
+`<machine>.<tailnet>.ts.net`) is refused with 403 until it is listed in `--allow-host`. The page stays as it was opted in
+(`--edit`, `--control` or neither), and the scrub and the file limits are unchanged. A wildcard `--listen` (`0.0.0.0`) takes
+no address by itself: name the hosts you open it by.
 
 **What it reads.** From a settings file only the `rpc` and `dungeons_dir` fields (accounts, passwords and every other field are skipped by the
 decoder). Each agent's bearer token comes from its `rpc-<port>.token` file and is used for the calls only. Every 1.5 s each
@@ -4308,7 +4349,7 @@ served (the state, the raw panel) is scrubbed: any JSON member whose name matche
 is dropped at any depth, and a string that contains the agent's token is replaced. A test walks the card model for such
 names and another runs a full poll against a fake agent whose replies are full of them. Files are served only from
 `--tests-dir`: dot-dot segments, absolute paths, backslashes, NUL bytes, symlinks that leave the folder and directories are
-refused (a 404 that does not say why). Only GET and HEAD are answered, a request whose `Host` is neither a loopback name nor one named with
+refused (a 404 that does not say why). Only GET and HEAD are answered (plus `POST /api/edit/*` and `POST /api/control/*` when those are on), a request whose `Host` is neither a loopback name nor one named with
 `--allow-host` (or the `--listen` IP) is refused (DNS rebinding), and the page may be framed only by a loopback page or an origin named with `--embed-from` (the TortoiseBots observability
 dashboard's Commanders tab embeds it that way when `TBDASH_COMMANDER_URL` points here; a dashboard on another machine, for
 example `--embed-from http://m910q:8095`, must be named).
@@ -4320,8 +4361,8 @@ to the middle of the party at every update and keeps the zoom (first the party p
 (a yellow "Following paused, click to resume" chip) and the toggle resumes it. A click on a bot's name in the party table centres the map
 on it. **Dim map** darkens the game picture under the drawing (0-80 %). The drawing's colours are fixed and bright with dark outlines
 (route cyan, current leg thicker, tank blue, healer green, damage orange, commander purple, hostile red, neutral grey, packs dashed yellow,
-bosses magenta, doors and objects white), and its labels keep one size at every zoom. The page is read-only and loads no outside script or
-font. The wording is plain: the state line reads "Sentinel · pack 4 of 5 · fighting Stone Steward", counters have a short name and a hover
+bosses magenta, doors and objects white), and its labels keep one size at every zoom. The page sends nothing unless it was started with
+`--edit` or `--control`, and it loads no outside script or font. The wording is plain: the state line reads "Sentinel · pack 4 of 5 · fighting Stone Steward", counters have a short name and a hover
 explanation, orders read "Attack Stone Steward -> OK" with the raw line on hover. The dashboard has no creature names of its own: it takes
 them from the "Name (entry)" mentions in the plan's notes and says "creature <id>" otherwise.
 
