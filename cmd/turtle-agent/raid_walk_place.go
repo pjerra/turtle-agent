@@ -1056,6 +1056,28 @@ func (w *walk) placeMTReady(ctx context.Context) error {
 	}
 }
 
+// placeStillJoined says the placed walk's commander is still in the raid's copy: map and toolkit instance both match
+// what the placement read (walk 24 C2). A read error, a moved map or a moved instance is a no. Any failure to prove
+// the copy counts as not joined: the appear path then runs and the landing rule is the near one, so an off-map or
+// other-copy commander is not assumed to be inside.
+func (w *walk) placeStillJoined(ctx context.Context) bool {
+	st, err := w.status(ctx)
+	if err != nil {
+		w.note("revive: the commander status is unreadable; the appear path")
+		return false
+	}
+	inst, err := w.ttInst(ctx, "the revive's copy check")
+	if err != nil {
+		w.note("revive: the instance check did not answer; the appear path")
+		return false
+	}
+	if st.Map != w.plan.Map || inst != w.placeInst {
+		w.note("revive: the commander is on map %d / in instance %.0f, not the raid's: the appear path", st.Map, inst)
+		return false
+	}
+	return true
+}
+
 // placeReviveInstance is the instance check before a revive's summons (spec 6): a commander in another copy would
 // summon the hires out of the raid's instance.
 func (w *walk) placeReviveInstance(ctx context.Context) error {

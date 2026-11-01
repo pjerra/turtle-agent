@@ -1135,11 +1135,28 @@ func (w *walk) waitStatus(ctx context.Context, timeout time.Duration, deadline t
 // moment later, and a summon that leaves before the landing drops the whole party at the OLD spot (walk 22 test2
 // s4, Q3: the lead landed 560 yd back at the ZG entrance and its Voidwalker followed). The session also reports the
 // `.go` destination itself at once, flagged ZUnknown until the server sends a position, so a position match alone
-// is no landing either (Codex HIGH, F4 round 2). fromMap is the commander's map before the `.go` (see reviveLanded).
-func (w *walk) waitRevivePoint(ctx context.Context, p dungeon.Point, fromMap uint32, deadline time.Time) error {
+// is no landing either (Codex HIGH, F4 round 2). fromMap is the commander's map before the `.go` (see reviveLanded);
+// beforeSeq is the session's acked-teleport count read just before the `.go` (haveSeq false when the read failed).
+func (w *walk) waitRevivePoint(ctx context.Context, p dungeon.Point, fromMap uint32, beforeSeq uint64, haveSeq bool, deadline time.Time) error {
 	return w.waitStatus(ctx, reviveTeleportWait, deadline,
 		fmt.Sprintf("the commander is not within %d yd of the revive point on map %d", reviveLandingYd, w.plan.Map),
-		func(st session.StatusInfo) bool { return reviveLanded(p, w.plan.Map, fromMap, st) })
+		func(st session.StatusInfo) bool { return reviveLanded(p, w.plan.Map, fromMap, st, beforeSeq, haveSeq) })
+}
+
+// reviveSeq reads the session's acked-teleport count just before a revive `.go xyz`, the landing signal that works
+// over a navmesh hole (reviveLanded's seq term). One retry, 1 s later, within the recovery deadline; have is false
+// when no read answered (the near rule then falls back to the settled z, as before).
+func (w *walk) reviveSeq(ctx context.Context, deadline time.Time) (seq uint64, have bool) {
+	if st, err := w.status(ctx); err == nil {
+		return st.TeleportSeq, true
+	}
+	if err := w.recoverySleep(ctx, time.Second, deadline); err != nil {
+		return 0, false
+	}
+	if st, err := w.status(ctx); err == nil {
+		return st.TeleportSeq, true
+	}
+	return 0, false
 }
 
 // commanderMap reads the commander's map before a revive `.go xyz`: what tells a far teleport from a near one. A failed
@@ -1250,6 +1267,7 @@ func (w *walk) joinHires(ctx context.Context, p dungeon.Point, deadline time.Tim
 			return false, "commander status unreadable before the appear", nil
 		}
 	}
+	beforeSeq := before.TeleportSeq
 	if err := w.gm(ctx, ".appear "+name); err != nil {
 		if ctx.Err() != nil {
 			return false, "", stopf(exitRaidWalkFailed, "interrupted")
@@ -1257,7 +1275,7 @@ func (w *walk) joinHires(ctx context.Context, p dungeon.Point, deadline time.Tim
 		return false, fmt.Sprintf(".appear %s failed: %v", name, err), nil
 	}
 	werr := w.waitStatus(ctx, appearWait, deadline, "the appear did not land",
-		func(st session.StatusInfo) bool { return appearLanded(st, w.plan.Map, hire, before) })
+		func(st session.StatusInfo) bool { return appearLanded(st, w.plan.Map, hire, before, beforeSeq) })
 	if werr == nil {
 		return true, "", nil
 	}
@@ -1271,10 +1289,15 @@ func (w *walk) joinHires(ctx context.Context, p dungeon.Point, deadline time.Tim
 }
 
 // appearLanded says st is a fresh landing of an `.appear` at hire: on mapID, x/y within appearLandingYd of where the
-// frames last saw the hire, and a position (or map) other than the read before the appear.
-func appearLanded(st session.StatusInfo, mapID uint32, hire botPos, before session.StatusInfo) bool {
+// frames last saw the hire, and a fresh teleport since the read before the appear (an ack the session counted in
+// TeleportSeq, or a moved position/map). The seq term covers an appear that lands the commander where it already
+// stands: the destination is right and the position does not change, but the server teleport has landed (walk 24 C2).
+func appearLanded(st session.StatusInfo, mapID uint32, hire botPos, before session.StatusInfo, beforeSeq uint64) bool {
 	if st.Map != mapID || math.Hypot(float64(st.X-hire.x), float64(st.Y-hire.y)) > appearLandingYd {
 		return false
+	}
+	if st.TeleportSeq > beforeSeq {
+		return true
 	}
 	return st.Map != before.Map || st.X != before.X || st.Y != before.Y || st.Z != before.Z
 }
@@ -1289,13 +1312,18 @@ const (
 // reviveLanded says the status is a SETTLED landing at p on mapID: the character is not falling, x/y are within
 // reviveLandingYd of p and z within reviveLandingZYd (a landing may drop to the floor, so z gets more room than x/y).
 // After a NEAR teleport (fromMap == mapID) the server must also have sent a position: not ZUnknown, the session's
-// guess until the floor drop or a server position settles it. After a FAR teleport (fromMap != mapID) ZUnknown stays
-// set for good, as the session lands it through SMSG_NEW_WORLD with no floor drop and the core never sends the player
-// its own position (walk 23: 6 runs exit 19, the commander waited on map 0 at the portal); there the map change is
-// the landing itself, since the session acks the worldport at once and the server places the player on reading that
-// ack, before any later chat line.
-func reviveLanded(p dungeon.Point, mapID, fromMap uint32, st session.StatusInfo) bool {
-	if st.Map != mapID || st.Falling || (st.ZUnknown && fromMap == mapID) {
+// guess until the floor drop or a server position settles it; or the session must have ACKED the teleport
+// (TeleportSeq > beforeSeq), which is the landing signal when a navmesh hole under p leaves the z guess unsettled
+// for good (walk 24 test2 r3). After a FAR teleport (fromMap != mapID) ZUnknown stays set for good, as the session
+// lands it through SMSG_NEW_WORLD with no floor drop and the core never sends the player its own position (walk 23:
+// 6 runs exit 19, the commander waited on map 0 at the portal); there the map change is the landing itself, since
+// the session acks the worldport at once and the server places the player on reading that ack, before any later
+// chat line. Falling still blocks: a dropToFloor fall must finish first.
+func reviveLanded(p dungeon.Point, mapID, fromMap uint32, st session.StatusInfo, beforeSeq uint64, haveSeq bool) bool {
+	if st.Map != mapID || st.Falling {
+		return false
+	}
+	if st.ZUnknown && fromMap == mapID && !(haveSeq && st.TeleportSeq > beforeSeq) {
 		return false
 	}
 	dx, dy := float64(p.X-st.X), float64(p.Y-st.Y)
@@ -1879,11 +1907,13 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 	// bound copy, so the revive keeps the far go and the summons, with a quiet check of the commander's own copy.
 	var joined bool
 	why := ""
-	ghosts := w.place == nil && w.appearHire(p) == "" && w.hiresOffMap() > 0
-	if w.place != nil {
+	placed := w.place != nil && w.placeStillJoined(ctx)
+	ghosts := !placed && w.appearHire(p) == "" && w.hiresOffMap() > 0
+	if placed {
 		// A placed walk's commander joined the raid's copy at the placement (phasePlace: `.appear <mt>`, the toolkit's
 		// instance read), and placeReviveInstance checks that copy again before the summons; a second appear could not
-		// prove a fresh landing when the commander still stands where the first one put it.
+		// prove a fresh landing when the commander still stands where the first one put it. placeStillJoined above
+		// proves the copy still holds: an off-map or other-copy commander takes the appear path instead (walk 24 C2).
 		joined = true
 	} else if ghosts {
 		w.note("revive: no hire on map %d, %d seen on another map (released): no appear, the far go and summons; the quiet check was blind (the commander's own copy)", w.plan.Map, w.hiresOffMap())
@@ -1905,14 +1935,19 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 	if err != nil {
 		return err
 	}
+	beforeSeq, haveSeq := w.reviveSeq(ctx, deadline)
+	if st, serr := w.status(ctx); serr == nil {
+		w.logLine(w.env.now(), fmt.Sprintf("revive go from map %d (%.1f %.1f %.1f, z unknown %v, teleports %d)", st.Map, st.X, st.Y, st.Z, st.ZUnknown, st.TeleportSeq))
+	}
 	if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(p.X), num32(p.Y), num32(p.Z), w.plan.Map)); err != nil {
 		return err
 	}
-	if err := w.waitRevivePoint(ctx, p, from, deadline); err != nil {
+	if err := w.waitRevivePoint(ctx, p, from, beforeSeq, haveSeq, deadline); err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
 			return timeout
 		}
-		return stopf(exitRaidWalkIncident, "not revived: the commander did not land at the revive point on map %d", w.plan.Map)
+		st, _ := w.status(ctx)
+		return stopf(exitRaidWalkIncident, "not revived: the commander did not land at the revive point on map %d (last read: map %d %.1f %.1f %.1f, z unknown %v, falling %v, teleports %d -> %d)", w.plan.Map, st.Map, st.X, st.Y, st.Z, st.ZUnknown, st.Falling, beforeSeq, st.TeleportSeq)
 	}
 	ok, why, terr := w.quietCheck(ctx, p, deadline)
 	if terr != nil {
@@ -1935,8 +1970,12 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup 
 		if ferr != nil {
 			return ferr
 		}
+		eSeq, eHave := w.reviveSeq(ctx, deadline)
+		if st, serr := w.status(ctx); serr == nil {
+			w.logLine(w.env.now(), fmt.Sprintf("revive go from map %d (%.1f %.1f %.1f, z unknown %v, teleports %d)", st.Map, st.X, st.Y, st.Z, st.ZUnknown, st.TeleportSeq))
+		}
 		if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(e.X), num32(e.Y), num32(e.Z), w.plan.Map)); err == nil {
-			if werr := w.waitRevivePoint(ctx, e, from, deadline); werr == nil {
+			if werr := w.waitRevivePoint(ctx, e, from, eSeq, eHave, deadline); werr == nil {
 				ok, why, terr = w.quietCheck(ctx, e, deadline)
 				if terr != nil {
 					return terr

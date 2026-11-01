@@ -700,6 +700,11 @@ func (s *Session) onTeleportAck(body []byte) error {
 	if err := s.conn.WritePacket(opcode.MSGMoveTeleportAck, game.BuildTeleportAck(self, a.Counter, s.clock())); err != nil {
 		return &fatalError{err}
 	}
+	// AFTER the ack write: the core relocates the player when it reads our ack (MovementHandler), before it reads
+	// any later chat line, so an advanced seq means the server has placed the player (StatusInfo.TeleportSeq).
+	s.mu.Lock()
+	s.teleportSeq++
+	s.mu.Unlock()
 	s.emit(events.Event{Kind: events.KindSession, Data: map[string]any{"state": "teleported", "x": a.Move.X, "y": a.Move.Y, "z": a.Move.Z}})
 	s.teleported()
 	s.dropToFloor()
@@ -743,6 +748,10 @@ func (s *Session) onNewWorld(body []byte) error {
 	if err := s.conn.WritePacket(opcode.MSGMoveWorldportAck, nil); err != nil { // MovementHandler.cpp:43-49
 		return &fatalError{err}
 	}
+	// AFTER the worldport ack write, as in onTeleportAck: the server places the player on reading it.
+	s.mu.Lock()
+	s.teleportSeq++
+	s.mu.Unlock()
 	if err := s.conn.WritePacket(opcode.CMSGSetActiveMover, packet.NewWriter().GUID(self).Bytes()); err != nil {
 		return &fatalError{err}
 	}

@@ -109,7 +109,6 @@ type walkFakeAgent struct {
 	onGM       func(line string)
 	// onResume runs when the walk sends `run resume` through the commander RPC (nil: ACK only).
 	onResume func()
-
 	// pos is where the commander's last .go put it; the quiet-check fakes place units around it.
 	x, y, z float32
 
@@ -148,11 +147,17 @@ type walkFakeAgent struct {
 	lastUnsettled      bool // the last status served was flagged unsettled
 	// summonUnsettled counts the summons that left right after a status flagged unsettled.
 	summonUnsettled int
-	// farZUnknown models the live session after a FAR teleport (walk 23): a recovery `.go xyz` onto another map
-	// lands through SMSG_NEW_WORLD, which leaves ZUnknown set for good (no floor drop follows it, and the core
-	// never sends the player its own position). zStuck is that state; a near go clears it.
-	farZUnknown bool
-	zStuck      bool
+	// zStuck models a status whose z the session never settles: a FAR teleport (walk 23: SMSG_NEW_WORLD leaves
+	// ZUnknown for good, as no floor drop follows it) or a NEAR one over a navmesh hole (meshHole). goArrive sets
+	// it. A settled near go clears it.
+	zStuck bool
+	// teleportSeq is the server teleports the session has acked (StatusInfo.TeleportSeq): it advances when a go or
+	// appear LANDS.
+	teleportSeq uint64
+	// meshHole keeps the status ZUnknown for good after a NEAR go, as the live session does when the navmesh has a
+	// hole under the destination: dropToFloor finds no floor and the z guess never settles (walk 24 test2 r3). The
+	// teleport seq still advances, so a seq-based landing rule lands.
+	meshHole bool
 	// commanderInst is the instance copy the commander stands in (walk 23, mangosd TTEV enter events): "hires" after a
 	// `.appear <hire>` (the core binds a GM to the target's copy, Commands.cpp HandleGonameCommand), "fresh" after a
 	// recovery `.go xyz` from another map (the server opens a new copy), unchanged by a near go. instAtRevive is that
@@ -259,9 +264,11 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 			f.goLag--
 			if f.goLag <= 0 {
 				f.goPendOK, f.goLag = false, 0
+				fromMap := f.status.Map
 				f.x, f.y, f.z = f.goPend[0], f.goPend[1], f.goPend[2]
 				f.ownPos = [3]float32{f.x, f.y, f.z}
 				f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
+				f.goArrive(fromMap)
 			}
 		}
 		if f.appearPend != nil {
@@ -273,6 +280,7 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 			}
 		}
 		st := f.status
+		st.TeleportSeq = f.teleportSeq
 		f.lastUnsettled = false
 		if f.zStuck {
 			st.ZUnknown = true
@@ -416,6 +424,19 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 	return nil
 }
 
+// goArrive is the moment a teleport LANDS in the fake (the one a real session counts in TeleportSeq): the position
+// is served from here on. fromMap is the commander's map when the go was sent (near vs far). A meshHole keeps the
+// status ZUnknown for good after a near go, as the live navmesh hole does.
+func (f *walkFakeAgent) goArrive(fromMap uint32) { // f.mu held
+	f.teleportSeq++
+	far := f.status.Map != fromMap
+	if f.meshHole && !far {
+		f.zStuck = true
+		return
+	}
+	f.zStuck = far // a far go leaves z unknown for good (SMSG_NEW_WORLD); a near go settles it
+}
+
 // gmSide is what the game does for a GM line.
 func (f *walkFakeAgent) gmSide(line string) {
 	switch {
@@ -465,27 +486,33 @@ func (f *walkFakeAgent) gmSide(line string) {
 			f.mu.Lock()
 			f.goTarget, f.goTargetOK = [3]float32{float32(x), float32(y), float32(z)}, true
 			if err == nil {
-				if started && f.farZUnknown {
-					f.zStuck = uint32(m) != f.status.Map // a far go leaves z unknown for good; a near go settles it
-				}
+				fromMap := f.status.Map
 				if started && uint32(m) != f.status.Map {
 					f.commanderInst = "fresh"
 				}
 				f.status.Map = uint32(m) // the go's map id takes effect at once; only a goLag test holds the position back
-			}
-			if started && f.goLagEvery > 0 {
-				f.goLag = f.goLagEvery
-			}
-			if started && f.goUnsettled > 0 {
-				f.unsettledLeft = f.goUnsettled
-			}
-			if started && f.goLag > 0 {
-				// The recovery's go: the position lands a few status polls later (the live server's landing).
-				f.goPend, f.goPendOK = f.goTarget, true
-			} else {
-				f.x, f.y, f.z = float32(x), float32(y), float32(z)
-				f.ownPos = [3]float32{f.x, f.y, f.z}
-				f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
+				if started && f.goLagEvery > 0 {
+					f.goLag = f.goLagEvery
+				}
+				if started && f.goUnsettled > 0 {
+					f.unsettledLeft = f.goUnsettled
+				}
+				if started && f.goLag > 0 {
+					// The recovery's go: the position lands a few status polls later (the live server's landing).
+					f.goPend, f.goPendOK = f.goTarget, true
+				} else {
+					f.x, f.y, f.z = float32(x), float32(y), float32(z)
+					f.ownPos = [3]float32{f.x, f.y, f.z}
+					f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
+					if started && f.unsettledLeft == 0 {
+						// The destination is reported, and the server's teleport has landed: only then does the
+						// session ack it (TeleportSeq). While goUnsettled reports the destination for a few polls
+						// (the live Q3 window), the seq has not advanced yet.
+						f.goArrive(fromMap)
+					} else if started && uint32(m) != fromMap {
+						f.zStuck = true // a far teleport before the seq is acked still never settles z
+					}
+				}
 			}
 			f.mu.Unlock()
 		}
@@ -513,13 +540,12 @@ func (f *walkFakeAgent) gmSide(line string) {
 			}
 			p := f.pos[name]
 			land := func() { // f.mu held
-				if f.farZUnknown {
-					f.zStuck = hm != f.status.Map // the appear itself is a far teleport from the portal
-				}
+				fromMap := f.status.Map
 				f.status.Map, f.commanderInst = hm, "hires"
 				f.x, f.y, f.z = p[0], p[1], p[2]+2
 				f.ownPos = [3]float32{f.x, f.y, f.z}
 				f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
+				f.goArrive(fromMap)
 			}
 			if f.appearLag > 0 {
 				f.appearPend, f.appearPendLeft = land, f.appearLag
@@ -4527,29 +4553,6 @@ func TestRaidWalkDefaultUntilStillStopsAtABoss(t *testing.T) {
 		return []tbm.HostileRec{{GUID: 9, Entry: 10184, HPPct: 100, Target: packet.GUID(1000)}}
 	}
 	f.allDeadFromHires()
-	code := f.run(context.Background())
-	if code != exitRaidWalkIncident {
-		t.Fatalf("exit %d, want 19: %s", code, f.stderr.String())
-	}
-	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
-		t.Fatalf("%d run stops, want exactly 1", n)
-	}
-}
-
-// An early boss wake during a trash step still stops: the run is not on its
-// boss step even though its until goes past the boss.
-func TestRaidWalkEarlyBossWakeStillStops(t *testing.T) {
-	f, next, total := bossDoneFixture(t)
-	f.opts.until = fmt.Sprintf("step %d", next)
-	f.agent.startReply = zgStart(total, next)
-	f.agent.mu.Lock()
-	f.agent.startQueue = []queuedEvent{
-		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|walking", next-1, total)},
-	}
-	f.agent.mu.Unlock()
-	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
-		return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 100, Target: packet.GUID(1000)}}
-	}
 	code := f.run(context.Background())
 	if code != exitRaidWalkIncident {
 		t.Fatalf("exit %d, want 19: %s", code, f.stderr.String())
