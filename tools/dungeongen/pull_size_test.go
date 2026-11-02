@@ -9,11 +9,14 @@ import (
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
-// The terrace rows (Arlokk leg) each estimate 27 bodies with the committed
-// fixture (mmaps-free path, LOS always seen): the G12/G13/G16/G17 packs joined
-// by the 20 yd ring (cross-pack gaps 11.0-19.5 yd) plus their pack closures.
-// Fails today (no lint). The ring-10 pin lives in the pure test
-// TestRingTwoHopsThenStops (a 10 yd ring stops the 18 yd chain at one body).
+// The terrace pull (Arlokk leg, pull 14: the row over the G13/G16 terrace at
+// -11496.4 -1626.5 60.4, step 29 of the export) estimates 27 bodies with the
+// committed fixture (mmaps-free path, LOS always seen): the G12/G13/G16/G17
+// packs joined by the 20 yd ring (cross-pack gaps 11.0-19.5 yd) plus their
+// pack closures. The neighbouring terrace rows (pulls 13, 16, 17) estimate the
+// same 27; the pin holds this one row by its number and bodies, so a ring or
+// reach change that breaks the set joins shows up here, not just in the
+// per-plan count.
 func TestZulGurubArlokkTerraceIsOneTwentySevenPull(t *testing.T) {
 	p, err := dungeon.Load("../../dungeons/zul_gurub.json")
 	if err != nil {
@@ -31,15 +34,22 @@ func TestZulGurubArlokkTerraceIsOneTwentySevenPull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	best := -1
 	for _, f := range found {
-		if f.Leg == 4 && f.Bodies == 27 {
-			best = f.Bodies
+		if f.Leg == 4 {
 			t.Logf("leg %d pull %d: %d bodies (ceiling %d): %s", f.Leg, f.Pull, f.Bodies, f.Ceiling, f.Summary)
 		}
 	}
-	if best != 27 {
-		t.Fatalf("no 27-body terrace pull on leg 4: %v", found)
+	terrace := -1
+	for i, f := range found {
+		if f.Leg == 4 && f.Pull == 14 {
+			terrace = i
+		}
+	}
+	if terrace < 0 {
+		t.Fatalf("no pull 14 on leg 4: %v", found)
+	}
+	if found[terrace].Bodies != 27 {
+		t.Fatalf("leg 4 pull 14 estimates %d bodies, want 27: %s", found[terrace].Bodies, found[terrace].Summary)
 	}
 }
 
