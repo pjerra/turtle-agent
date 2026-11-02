@@ -769,6 +769,7 @@ type bossStepTrack struct {
 type hostileState struct {
 	entry    uint32
 	x, y, z  float32
+	first    dungeon.Point // where the frames FIRST saw this unit: a plan patrol binds its members by it (round 4)
 	kind     string
 	reaction string
 	flags    string

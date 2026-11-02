@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
@@ -121,5 +122,73 @@ func TestPlanPatrolWithoutOneGroupKeepsBlockingAndSaysSo(t *testing.T) {
 	p := onlyPlanPatrol(t, w, plan)[0]
 	if p.Exempt || !strings.Contains(p.Note, "cannot be tied to its units") {
 		t.Fatalf("exempt %v note %q: a patrol with no pack must keep blocking and say so", p.Exempt, p.Note)
+	}
+}
+
+// Codex HIGH (round 4): a same-entry mob first seen far off, dead, must not retire a live patrol that the frames never saw.
+func TestPlanPatrolDeadSameEntryElsewhereKeepsBlocking(t *testing.T) {
+	plan := planPatrolPlan()
+	// The dead mob was first seen 500 yd out; its last row (at the path's centre) is no reason to bind it.
+	hostiles := map[string]hostileState{"far": {entry: 51344, hppct: 0, first: dungeon.Point{X: 500}}}
+	w := planPatrolWalk(plan, planPatrolRows(), 1, nil, hostiles)
+	p := onlyPlanPatrol(t, w, plan)[0]
+	if p.Exempt || !strings.Contains(p.Note, "0 of its 1 pack units are bound") {
+		t.Fatalf("exempt %v note %q: an unrelated dead mob must not retire the live patrol, and the reason must say so", p.Exempt, p.Note)
+	}
+}
+
+// A dead member first seen on the path (its corridor) still retires the pack.
+func TestPlanPatrolDeadMemberFirstSeenOnPathRetires(t *testing.T) {
+	plan := planPatrolPlan()
+	hostiles := map[string]hostileState{"a": {entry: 51344, hppct: 0, first: dungeon.Point{X: 10}}}
+	w := planPatrolWalk(plan, planPatrolRows(), 1, nil, hostiles)
+	if p := onlyPlanPatrol(t, w, plan)[0]; !p.Exempt {
+		t.Fatalf("a dead member bound to the path does not retire the pack (note %q)", p.Note)
+	}
+}
+
+// The pack has two units: one dead bound member is not all of them, so the path keeps blocking until both are bound and dead.
+func TestPlanPatrolNeedsEveryPackUnitBound(t *testing.T) {
+	plan := planPatrolPlan()
+	plan.Legs[0].PullGroups[0].Entries = []uint32{51344, 51344}
+	hostiles := map[string]hostileState{"a": {entry: 51344, hppct: 0, first: dungeon.Point{X: 10}}}
+	w := planPatrolWalk(plan, planPatrolRows(), 1, nil, hostiles)
+	p := onlyPlanPatrol(t, w, plan)[0]
+	if p.Exempt || !strings.Contains(p.Note, "1 of its 2 pack units are bound") {
+		t.Fatalf("exempt %v note %q: one bound unit of two must keep blocking and say so", p.Exempt, p.Note)
+	}
+	hostiles["b"] = hostileState{entry: 51344, hppct: 0, first: dungeon.Point{Y: -10}}
+	w = planPatrolWalk(plan, planPatrolRows(), 1, nil, hostiles)
+	if p := onlyPlanPatrol(t, w, plan)[0]; !p.Exempt {
+		t.Fatalf("both units bound and dead still block (note %q)", p.Note)
+	}
+}
+
+// A live bound member keeps the pack blocking (the reason stays the plain blocker, as before).
+func TestPlanPatrolBoundLiveMemberBlocks(t *testing.T) {
+	plan := planPatrolPlan()
+	hostiles := map[string]hostileState{"a": {entry: 51344, hppct: 60, first: dungeon.Point{X: 10}}}
+	w := planPatrolWalk(plan, planPatrolRows(), 1, nil, hostiles)
+	if p := onlyPlanPatrol(t, w, plan)[0]; p.Exempt {
+		t.Fatal("a bound live member is exempt")
+	}
+}
+
+// The first sighting is what binds: a unit first seen far off that walks onto the path later stays unbound, through trackFrame.
+func TestTrackFrameBindsPatrolMembersByFirstSighting(t *testing.T) {
+	now := newFakeClock().now()
+	w := &walk{partyG: map[uint64]bool{}, hostiles: map[string]hostileState{}, bossSet: map[uint32]bool{10184: true},
+		bossRule: raidwalk.NewBossRows(&dungeon.Plan{Legs: []dungeon.Leg{{Boss: &dungeon.Boss{Entry: 10184}}}}),
+		bossRows: map[uint32]hostileState{}, botAt: map[string]botPos{}}
+	w.trackFrame(now, &tbm.ViewFrame{Hostiles: []tbm.HostileRec{{GUID: 9, Entry: 51344, X: 500, HPPct: 100}}})
+	w.trackFrame(now.Add(time.Second), &tbm.ViewFrame{Hostiles: []tbm.HostileRec{{GUID: 9, Entry: 51344, X: 10, HPPct: 0}}})
+	h, ok := w.hostiles[packet.GUID(9).String()]
+	if !ok || h.first != (dungeon.Point{X: 500}) || h.hppct != 0 {
+		t.Fatalf("hostile %+v: want first seen at 500 yd and last seen dead", h)
+	}
+	plan := planPatrolPlan()
+	w.rows, w.pulledSteps, w.lastStatus, w.haveStatus = planPatrolRows(), map[int]bool{}, tbm.RunStatus{Plan: plan.Name, Step: 1}, true
+	if p := onlyPlanPatrol(t, w, plan)[0]; p.Exempt {
+		t.Fatal("a mob first seen far off, dead on the path now, retires the patrol")
 	}
 }

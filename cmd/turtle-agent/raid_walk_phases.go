@@ -1396,7 +1396,12 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 	}
 	for _, h := range f.Hostiles {
 		if h.GUID != 0 {
-			w.hostiles[h.GUID.String()] = hostileState{entry: h.Entry, x: h.X, y: h.Y, z: h.Z, kind: h.Kind, reaction: h.Reaction, flags: h.Flags,
+			// first keeps the position the frames first saw the unit at: a later one never changes the patrol binding (round 4).
+			first := dungeon.Point{X: h.X, Y: h.Y, Z: h.Z}
+			if prev, ok := w.hostiles[h.GUID.String()]; ok {
+				first = prev.first
+			}
+			w.hostiles[h.GUID.String()] = hostileState{entry: h.Entry, x: h.X, y: h.Y, z: h.Z, first: first, kind: h.Kind, reaction: h.Reaction, flags: h.Flags,
 				hppct: h.HPPct, target: uint64(h.Target), at: now}
 		}
 		if w.bossRule.Counts(h.Entry, h.X, h.Y) {
@@ -4081,9 +4086,9 @@ func (w *walk) quietOnce(ctx context.Context, st *quietState, p dungeon.Point) (
 }
 
 // applyPlanPatrolState sets each plan patrol's exemption and remark for this read. A plan patrol's pack is done
-// (raidwalk.PatrolPackDone: its pull step was pulled and the run is past it, or every unit of the pack the frames saw
-// is dead), and then its path stops blocking. A patrol whose pack cannot be tied to its units, or whose pull step is
-// not in the rows, keeps blocking and says so in its reason (fail safe).
+// (raidwalk.PatrolPackDone: its pull step was pulled and the run is past it, or its bound members are all dead, see
+// packMembersHP), and then its path stops blocking. A patrol whose pack cannot be tied to its units, whose pull step is
+// not in the rows, or whose members do not show it done keeps blocking and says so in its reason (fail safe).
 func (w *walk) applyPlanPatrolState(patrols []raidwalk.QuietPatrol) {
 	progress := 0
 	if w.haveStatus {
@@ -4098,22 +4103,61 @@ func (w *walk) applyPlanPatrolState(patrols []raidwalk.QuietPatrol) {
 		}
 		step := raidwalk.PullStepOf(w.rows, *p.Pack)
 		pulled := step > 0 && w.pulledSteps[step]
-		p.Exempt = raidwalk.PatrolPackDone(step, pulled, progress, w.packHostileHP(p.Pack.Members))
-		if !p.Exempt && step == 0 {
-			p.Note = "its pull row is not in the plan's rows: blocks by path"
+		hp, why := w.packMembersHP(p.Pack, p.Path)
+		p.Exempt = raidwalk.PatrolPackDone(step, pulled, progress, hp)
+		if p.Exempt {
+			continue
 		}
+		var notes []string
+		if step == 0 {
+			notes = append(notes, "its pull row is not in the plan's rows: blocks by path")
+		}
+		if why != "" {
+			notes = append(notes, why)
+		}
+		p.Note = strings.Join(notes, "; ")
 	}
 }
 
-// packHostileHP is the last frame health (percent, 0 dead) of every hostile of the entries the frames saw this run.
-func (w *walk) packHostileHP(entries []uint32) []int {
+// patrolCorridorYd is how close a pack unit's first sighting must stand to a plan patrol's path to be that patrol's member.
+const patrolCorridorYd = 15
+
+// patrolSpawnYd is how close a pack unit's first sighting must stand to one of the pack's spawns (its pull group's
+// positions) to be that pack's member: the raidwalk home-spawn tolerance (quietHomeYd).
+const patrolSpawnYd = 3
+
+// packMembersHP binds a plan patrol's members by guid (Codex HIGH, round 4). A hostile of the pack's members joins the
+// patrol only when the frames FIRST saw it within patrolCorridorYd of a path point or within patrolSpawnYd of a pack spawn,
+// so a same-entry mob first seen elsewhere never joins, dead or alive. It returns each bound member's last frame health.
+// The patrol can be retired only when at least the pack's unit count is bound (the set is then non-empty); with fewer,
+// it returns no health and a reason, so the caller's PatrolPackDone is false and the path keeps blocking (fail safe).
+func (w *walk) packMembersHP(pack *raidwalk.PatrolPack, path []dungeon.Point) ([]int, string) {
 	var hp []int
 	for _, h := range w.hostiles {
-		if inEntries(entries, h.entry) {
-			hp = append(hp, h.hppct)
+		if !inEntries(pack.Members, h.entry) || !patrolBinds(h.first, path, pack.Spawns) {
+			continue
+		}
+		hp = append(hp, h.hppct)
+	}
+	if want := len(pack.Entries); len(hp) < want {
+		return nil, fmt.Sprintf("%d of its %d pack units are bound to the path: blocks by path", len(hp), want)
+	}
+	return hp, ""
+}
+
+// patrolBinds says a unit first seen at first is a member of the patrol with this path and pack spawns (packMembersHP).
+func patrolBinds(first dungeon.Point, path, spawns []dungeon.Point) bool {
+	for _, pt := range path {
+		if raidDist3(pt, first.X, first.Y, first.Z) <= patrolCorridorYd {
+			return true
 		}
 	}
-	return hp
+	for _, s := range spawns {
+		if raidDist3(s, first.X, first.Y, first.Z) <= patrolSpawnYd {
+			return true
+		}
+	}
+	return false
 }
 
 // blockerKey identifies a blocker set for D-E's log-on-a-change rule: the units and patrols by identity and state,

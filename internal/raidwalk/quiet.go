@@ -140,15 +140,17 @@ func planPack(g dungeon.PullGroup, p *dungeon.Patrol) *PatrolPack {
 	n := float32(len(g.Positions))
 	c.X, c.Y, c.Z = c.X/n, c.Y/n, c.Z/n
 	members := append(append([]uint32{}, g.Entries...), p.Entries...)
-	return &PatrolPack{Entries: g.Entries, Members: members, Centre: c}
+	return &PatrolPack{Entries: g.Entries, Members: members, Centre: c, Spawns: g.Positions}
 }
 
-// PatrolPack is the plan pull group a plan patrol walks with. Entries are the group's entries (the pull row's), Centre
-// the point its pull row stands at, Members every entry the patrol's units may carry (the group's and the patrol's own).
+// PatrolPack is the plan pull group a plan patrol walks with. Entries are the group's entries (one per unit: its unit
+// count), Centre the point its pull row stands at, Members every entry the patrol's units may carry (the group's and
+// the patrol's own), Spawns the group's positions (where its units stand: a unit first seen there is the pack's).
 type PatrolPack struct {
 	Entries []uint32
 	Members []uint32
 	Centre  dungeon.Point
+	Spawns  []dungeon.Point
 }
 
 // pullRowTolYd is how far a pull row's point may stand from a pack's centre and still be that pack's row (the exporter
