@@ -5468,15 +5468,16 @@ func TestRaidWalkBossNotFoundAddCorpseStillPauses(t *testing.T) {
 
 // TB's own boss step reads the live view only: a boss killed while the party was dead or away leaves no 0 % row in
 // the frames at all. The toolkit's `q units ... all dead e=` reads the map's creatures, corpses included, so a dead
-// 12118 within 40 yd of the boss row is the kill evidence (review round 1, item 1).
+// 12118 within 40 yd of the boss row is the kill evidence (review round 1, item 1) — once the r6 rule holds:
+// the corpse's guid was seen alive in this attempt and a second read 15 s later still shows it dead.
 func TestRaidWalkBossNotFoundToolkitCorpseSkips(t *testing.T) {
 	f, next, total := bossDoneFixture(t)
 	boss := next - 1
-	f.opts.pausedWait = 30 * time.Second
+	f.opts.pausedWait = 60 * time.Second
 	f.agent.startReply = zgStart(total, next)
-	f.agent.ttFn = ttUnitsFn(t, map[string]any{"g": "0xF130000000000009", "e": 12118, "dead": true, "d": 12.5, "hp": 0})
+	f.agent.ttFn = ttUnitsFn(t, map[string]any{"g": "0xF130002F56000009", "e": 12118, "dead": true, "d": 12.5, "hp": 0})
 	var q []queuedEvent
-	for range 12 {
+	for range 24 {
 		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|begin|boss 12118 not at his spot: waiting for him|until step %d (step %d)", boss, total, next, next)})
 	}
 	q = append(q, queuedEvent{raw: bossNotFoundLine("molten_core", boss, total, 12118, next)})
@@ -5485,7 +5486,9 @@ func TestRaidWalkBossNotFoundToolkitCorpseSkips(t *testing.T) {
 	f.agent.mu.Unlock()
 	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
 		if n <= 1 {
-			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}}
+			// GUID 9 with the toolkit corpse's full unit guid: the frames saw this unit alive
+			// in this attempt, and the toolkit reports his corpse, 15 s apart.
+			return []tbm.HostileRec{{GUID: 0xF130002F56000009, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}}
 		}
 		return nil
 	}
@@ -5506,8 +5509,42 @@ func TestRaidWalkBossNotFoundToolkitCorpseSkips(t *testing.T) {
 	if !hasNote(f.summary(), "the toolkit sees 12118 dead") {
 		t.Fatalf("notes %q, want the toolkit's corpse evidence", f.summary().Notes)
 	}
-	if len(tt) == 0 || !strings.Contains(tt[0], "all dead e=12118") {
-		t.Fatalf("toolkit calls %q, want the corpse read of 12118", tt)
+	if len(tt) < 2 || !strings.Contains(tt[0], "all dead e=12118") {
+		t.Fatalf("toolkit calls %q, want the corpse read of 12118 twice (the 15 s confirmation)", tt)
+	}
+}
+
+// Revive r6: the first toolkit corpse sighting alone is no evidence yet (the kill needs the second
+// read 15 s later). A pause shorter than the wait never skips on the toolkit's word alone.
+func TestRaidWalkBossNotFoundToolkitCorpseNeedsConfirmation(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	boss := next - 1
+	f.opts.pausedWait = 4 * time.Second
+	f.agent.startReply = zgStart(total, next)
+	f.agent.ttFn = ttUnitsFn(t, map[string]any{"g": "0xF130002F56000009", "e": 12118, "dead": true, "d": 12.5, "hp": 0})
+	var q []queuedEvent
+	for range 12 {
+		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|begin|boss 12118 not at his spot: waiting for him|until step %d (step %d)", boss, total, next, next)})
+	}
+	q = append(q, queuedEvent{raw: bossNotFoundLine("molten_core", boss, total, 12118, next)})
+	f.agent.mu.Lock()
+	f.agent.startQueue = q
+	f.agent.mu.Unlock()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 0xF130002F56000009, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if countPrefix(verbs, "skip") != 0 {
+		t.Fatalf("run verbs %v, want no skip: the corpse wait never confirmed within the pause", verbs)
 	}
 }
 
@@ -5711,6 +5748,116 @@ func TestBossKilledDeadRowBoundToTheAttempt(t *testing.T) {
 	ok, ev = start(now.Add(-30*time.Second)).bossKilled(context.Background(), 12118, now)
 	if !ok || !strings.Contains(ev, "seen dead in the frames") {
 		t.Fatalf("bossKilled = %v (%q), want the frame row inside the attempt as the evidence", ok, ev)
+	}
+}
+
+// bossTTStub is a walkAgent that only answers toolkit reads (bossKilled's corpse read).
+type bossTTStub struct {
+	fn func(cmd string) (ttResult, error)
+}
+
+func (s *bossTTStub) Call(ctx context.Context, method string, params, out any, timeout time.Duration) error {
+	if method != "tt" {
+		return errors.New("unexpected RPC " + method)
+	}
+	raw, _ := json.Marshal(params)
+	var p ttParams
+	_ = json.Unmarshal(raw, &p)
+	res, err := s.fn(p.Cmd)
+	if err != nil {
+		return err
+	}
+	b, _ := json.Marshal(res)
+	return json.Unmarshal(b, out)
+}
+
+// bossCorpseGUID is the toolkit corpse's guid in the tests below: entry 12118 (0x2F56), counter 9.
+const bossCorpseGUID = "0xF130002F56000009"
+
+// bossCorpseWalk is a walk on a one-boss plan (entry 12118) whose toolkit always reports corpse:
+// it returns the walk and the corpse guid's canonical key for the frame maps.
+func bossCorpseWalk(t *testing.T, corpse map[string]any) (*walk, string) {
+	t.Helper()
+	g, err := packet.ParseGUID(bossCorpseGUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newFixture(t)
+	w := &walk{
+		plan:          &dungeon.Plan{Map: 230, Legs: []dungeon.Leg{{Boss: &dungeon.Boss{Entry: 12118}}}},
+		rows:          planexport.Rows{Steps: []planexport.StepRow{{Kind: planexport.KindBoss, Entry: 12118, X: 100, Y: 200, Z: 300}}},
+		agent:         &bossTTStub{fn: ttUnitsFn(t, corpse)},
+		env:           walkEnv{now: f.clock.now, sleep: f.clock.sleep},
+		mt:            "Tank",
+		hires:         map[string]bool{"Tank": true},
+		hostiles:      map[string]hostileState{},
+		bossAttemptAt: map[uint32]time.Time{},
+	}
+	setBossCorpseMaps(w)
+	return w, g.String()
+}
+
+// setBossCorpseMaps inits the corpse wait maps; a helper so the call sites read plainly.
+func setBossCorpseMaps(w *walk) {
+	w.bossAliveSeen = map[string]time.Time{}
+	w.bossCorpseSeen = map[string]time.Time{}
+}
+
+// Codex HIGH (r6): a toolkit corpse whose guid the frames never showed alive in this attempt is a
+// stale or foreign corpse, not kill evidence: no skip, even when the read repeats 16 s later.
+func TestBossKilledToolkitCorpseNeedsAttemptAliveGUID(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w, _ := bossCorpseWalk(t, map[string]any{"g": bossCorpseGUID, "e": 12118, "dead": true, "d": 12.5})
+	t1, t2 := now.Add(16*time.Second), now.Add(32*time.Second)
+	w.botAt = map[string]botPos{"Tank": {at: t2}}
+	w.bossAttemptAt[12118] = now // the attempt began, but this guid was never seen alive in it
+	if ok, ev := w.bossKilled(context.Background(), 12118, t1); ok {
+		t.Fatalf("bossKilled = true (%q), want no skip: the corpse guid was never alive this attempt", ev)
+	}
+	if ok, ev := w.bossKilled(context.Background(), 12118, t2); ok {
+		t.Fatalf("bossKilled = true (%q), want no skip even 16 s later: the guid link never held", ev)
+	}
+}
+
+// Codex HIGH (r6): the boss is seen alive, the toolkit reports his corpse, then the SAME guid is
+// alive again within 15 s (a fake death: Thekal phase 1 dies and is raised again). The
+// resurrection voids the corpse wait: no skip once the alive row goes stale either.
+func TestBossKilledToolkitCorpseFakeDeathStillPauses(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w, key := bossCorpseWalk(t, map[string]any{"g": bossCorpseGUID, "e": 12118, "dead": true, "d": 12.5})
+	t1 := now.Add(16 * time.Second)
+	w.botAt = map[string]botPos{"Tank": {at: t1.Add(21 * time.Second)}}
+	w.bossAttemptAt[12118] = now
+	w.bossAliveSeen[key] = now
+	w.hostiles[key] = hostileState{entry: 12118, hppct: 60, target: 1000, at: now} // stale at t1 (16 s)
+	if ok, ev := w.bossKilled(context.Background(), 12118, t1); ok {
+		t.Fatalf("bossKilled = true (%q), want no skip on the first corpse sighting: it starts the wait", ev)
+	}
+	// Raised again 5 s after the first sighting: the wait is void, not confirmed.
+	aliveAgain := t1.Add(5 * time.Second)
+	w.hostiles[key] = hostileState{entry: 12118, hppct: 100, at: aliveAgain}
+	w.bossAliveSeen[key] = aliveAgain
+	if ok, ev := w.bossKilled(context.Background(), 12118, t1.Add(21*time.Second)); ok {
+		t.Fatalf("bossKilled = true (%q), want no skip: the guid was alive again after the corpse", ev)
+	}
+}
+
+// Codex HIGH (r6): seen alive, toolkit corpse, still dead 16 s later with no alive frame for that
+// guid in between: the kill is proven, skip.
+func TestBossKilledToolkitCorpseConfirmedSkips(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w, key := bossCorpseWalk(t, map[string]any{"g": bossCorpseGUID, "e": 12118, "dead": true, "d": 12.5})
+	t1 := now.Add(16 * time.Second)
+	w.botAt = map[string]botPos{"Tank": {at: t1.Add(16 * time.Second)}}
+	w.bossAttemptAt[12118] = now
+	w.bossAliveSeen[key] = now
+	w.hostiles[key] = hostileState{entry: 12118, hppct: 60, target: 1000, at: now} // stale at t1 (16 s)
+	if ok, ev := w.bossKilled(context.Background(), 12118, t1); ok {
+		t.Fatalf("bossKilled = true (%q), want no skip on the first corpse sighting: it starts the wait", ev)
+	}
+	ok, ev := w.bossKilled(context.Background(), 12118, t1.Add(16*time.Second))
+	if !ok || !strings.Contains(ev, "the toolkit sees 12118 dead") {
+		t.Fatalf("bossKilled = %v (%q), want the confirmed toolkit corpse as the evidence", ok, ev)
 	}
 }
 

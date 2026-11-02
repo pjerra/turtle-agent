@@ -619,6 +619,17 @@ type walk struct {
 	// (never pruned: a reset or a respawn leaves it there) is no evidence on a later pause (review round 3).
 	// A wipe recovery clears it; a new attempt's first sighting sets it.
 	bossAttemptAt map[uint32]time.Time
+	// bossAliveSeen is when the frames last showed the boss unit GUID (key of w.hostiles) alive in the
+	// current attempt: trackFrame records every live boss-unit row here (revive r6). bossKilled's toolkit
+	// corpse counts only for a guid the frames showed alive since the attempt began, and only when a
+	// second toolkit read at least 15 s later still shows it dead with no alive frame for that guid in
+	// between (Thekal's fake death: phase 1 dies and is raised again). A wipe recovery clears it with
+	// the attempt.
+	bossAliveSeen map[string]time.Time
+	// bossCorpseSeen is when the toolkit first reported the boss unit GUID (key of w.hostiles) dead in
+	// the current attempt: the wait's first sighting (revive r6). A live frame for that guid clears it,
+	// as does a wipe recovery.
+	bossCorpseSeen map[string]time.Time
 
 	stepFirst *dungeon.Point
 	// startStep is the step the run starts at (the placement's staged start, else the --from step): the revive's own
@@ -735,7 +746,7 @@ func raidWalkRun(ctx context.Context, o raidWalkOptions, env walkEnv, deps walkD
 	w := &walk{opts: o, env: env, deps: deps, stdout: stdout, stderr: stderr,
 		seenFights: map[string]bool{}, pendingFights: map[string]int{}, hostiles: map[string]hostileState{}, botAt: map[string]botPos{},
 		partyG: map[uint64]bool{}, bossSet: map[uint32]bool{}, bossRows: map[uint32]hostileState{}, hires: map[string]bool{},
-		bossAttemptAt: map[uint32]time.Time{}}
+		bossAttemptAt: map[uint32]time.Time{}, bossAliveSeen: map[string]time.Time{}, bossCorpseSeen: map[string]time.Time{}}
 	return w.main(ctx)
 }
 

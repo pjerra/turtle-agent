@@ -17,6 +17,7 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/session"
@@ -1423,6 +1424,22 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 			w.bossAttemptAt[h.Entry] = now
 		}
 	}
+	// The GUIDs the current attempt showed alive (revive r6): every live boss-unit row by its frame key,
+	// latest wins. A live sighting after the toolkit's first corpse report voids that wait (a fake death
+	// raised the boss again), and a corpse the frames never showed alive is a stale or foreign one.
+	// A 0 % frame row is no sighting, so it neither starts the link nor voids the wait.
+	for _, h := range f.Hostiles {
+		if h.GUID == 0 || h.HPPct <= 0 || !w.bossUnit(h.Entry) {
+			continue
+		}
+		if w.bossAliveSeen == nil {
+			w.bossAliveSeen = map[string]time.Time{}
+		}
+		w.bossAliveSeen[h.GUID.String()] = now
+		if w.bossCorpseSeen != nil {
+			delete(w.bossCorpseSeen, h.GUID.String())
+		}
+	}
 }
 
 // bossAttemptEngaged is the tracker's one-shot boss latch judgement (checkBoss): a plan-boss row starts the
@@ -1841,9 +1858,9 @@ func (w *walk) bossNotFoundAtBossStep(step int, note string) (uint32, bool) {
 //
 // The evidence holds when ALL of:
 //   - a boss unit is affirmatively dead: a frame row at 0 % for its GUID seen at or after this attempt's start
-//     (bossAttemptStart), with no boss unit of the family seen alive after that row, or the toolkit sees a corpse
-//     of a boss-unit entry within bossKillYd of the boss row (TB's own search reads the live view, so a boss that
-//     died out of the party's sight leaves no row at all);
+//     (bossAttemptStart), with no boss unit of the family seen alive after that row, or the toolkit proves
+//     the kill (bossCorpse): TB's own search reads the live view, so a boss that died out of the party's
+//     sight leaves no row at all;
 //   - no boss unit is seen alive: no frame row fresher than 15 s with hp left;
 //   - a hire is alive (a wipe is no kill).
 //
@@ -1884,7 +1901,7 @@ func (w *walk) bossKilled(ctx context.Context, entry uint32, now time.Time) (boo
 	ev := ""
 	if haveDead {
 		ev = fmt.Sprintf("%d seen dead in the frames (0 %%, %s ago)", dead.entry, durWords(now.Sub(dead.at)))
-	} else if ok, s := w.bossCorpse(ctx, entry, units); ok {
+	} else if ok, s := w.bossCorpse(ctx, entry, units, now); ok {
 		ev = s
 	}
 	if ev == "" {
@@ -1976,15 +1993,26 @@ func (w *walk) bossAttemptStart(units []uint32) time.Time {
 // inHold says the entry is one of the hold's own entries (nil hold: none).
 func inHold(h *dungeon.Hold, e uint32) bool { return h != nil && inEntries(h.Entries, e) }
 
-// bossCorpse asks the toolkit whether one of the boss units lies dead near the boss row. TB's boss step wants a
-// dead creature of the step's entry within 30 yd of the spot and reads the live view only, so a boss killed while
-// the party was dead or away leaves no frame row at all; the toolkit's
-// `q units <r> <x> <y> <z> all dead e=<entry>` reads the map's creatures, corpses included (TortoiseBots
-// tools/eluna/test-toolkit tt_commands.lua Q.units: the `dead` flag asks for both, and TT.unitSnap carries
-// `dead`). A refused line, no reply or an error is no evidence: the walk waits as a pause, and the first failure
-// turns the reads off for the rest of the walk (a server without the toolkit must not cost the watch loop a
-// timeout on every tick).
-func (w *walk) bossCorpse(ctx context.Context, boss uint32, units []uint32) (bool, string) {
+// bossCorpseWaitS is how long the toolkit must keep reporting the corpse dead before it proves the kill:
+// the second read at least this far after the first still shows it dead, with no alive frame for that
+// guid in between (revive r6: Thekal's fake death dies and is raised again within seconds).
+const bossCorpseWaitS = 15
+
+// bossCorpse says the toolkit proves the kill: a corpse of a boss unit within bossKillYd of the boss row
+// whose guid the frames showed ALIVE in this attempt (w.bossAliveSeen, trackFrame), confirmed by a second
+// read at least 15 s after the first with no alive frame for that guid in between. TB's boss step reads
+// the live view only, so a boss killed while the party was dead or away leaves no frame row at all; the
+// toolkit's `q units <r> <x> <y> <z> all dead e=<entry>` reads the map's creatures, corpses included
+// (TortoiseBots tools/eluna/test-toolkit tt_commands.lua Q.units: the `dead` flag asks for both, and
+// TT.unitSnap carries `dead`). A refused line, no reply or an error is no evidence: the walk waits as a
+// pause, and the first failure turns the reads off for the rest of the walk (a server without the toolkit
+// must not cost the watch loop a timeout on every tick).
+//
+// The wait is per GUID (key of w.hostiles, the frame key): the first sighting starts it and returns no
+// evidence yet; a live frame for that guid in between voids it (trackFrame drops the wait); only the
+// second sighting 15 s later proves the kill. Without the frames' alive link the corpse is a stale or
+// foreign one and proves nothing (fail closed).
+func (w *walk) bossCorpse(ctx context.Context, boss uint32, units []uint32, now time.Time) (bool, string) {
 	if w.bossToolkitOff {
 		return false, ""
 	}
@@ -2014,13 +2042,52 @@ func (w *walk) bossCorpse(ctx context.Context, boss uint32, units []uint32) (boo
 		}
 		for _, m := range body.list("units") {
 			u := ttUnitOf(m)
-			if u.Entry != e || !u.Dead {
+			if u.Entry != e || !u.Dead || u.GUID == "" {
 				continue
 			}
-			return true, fmt.Sprintf("the toolkit sees %d dead %s yd from the boss row", e, num32(u.Dist))
+			key, err := bossCorpseKey(u.GUID)
+			if err != nil {
+				continue // a guid the frames could never name is no link to this attempt
+			}
+			seen, ok := w.bossAliveSeen[key]
+			if !ok {
+				continue // never seen alive in this attempt: a stale or foreign corpse
+			}
+			if alive, ok := w.hostiles[key]; ok && alive.hppct > 0 && alive.at.After(seen) {
+				seen = alive.at // a live row the frame maps hold but trackFrame never filed
+			}
+			first, waiting := w.bossCorpseSeen[key]
+			if !waiting {
+				if w.bossCorpseSeen == nil {
+					w.bossCorpseSeen = map[string]time.Time{}
+				}
+				w.bossCorpseSeen[key] = now
+				continue // the first sighting starts the wait; the kill needs the second read
+			}
+			if seen.After(first) {
+				// The guid was alive again after the first corpse sighting (a fake death raised
+				// the boss): the wait is void, not confirmed. Start over from this read.
+				w.bossCorpseSeen[key] = now
+				continue
+			}
+			if now.Sub(first) < bossCorpseWaitS*time.Second {
+				continue
+			}
+			return true, fmt.Sprintf("the toolkit sees %d dead %s yd from the boss row (guid %s, still dead %s later)", e, num32(u.Dist), u.GUID, durWords(now.Sub(first)))
 		}
 	}
 	return false, ""
+}
+
+// bossCorpseKey is the frame-map key of a toolkit corpse guid: the frames key w.hostiles by
+// packet.GUID.String ("0x%016X"), the toolkit sends the same hex (TT.guidHex). The key matches
+// only when the hex parses, so a malformed guid never links to the attempt.
+func bossCorpseKey(guid string) (string, error) {
+	g, err := packet.ParseGUID(guid)
+	if err != nil || g == 0 {
+		return "", fmt.Errorf("bad guid %q", guid)
+	}
+	return g.String(), nil
 }
 
 // bossSkipStep sends the pause's `.bot run skip` for the boss step whose kill the frames show. The commander RPC
@@ -2573,8 +2640,11 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 		return err
 	}
 	// The recovery ends the boss attempt that wiped: nothing the frames showed before it bounds the next
-	// attempt's kill evidence (review round 3).
+	// attempt's kill evidence (review round 3). The corpse wait's alive link and first sighting end with
+	// it too (revive r6).
 	clear(w.bossAttemptAt)
+	clear(w.bossAliveSeen)
+	clear(w.bossCorpseSeen)
 	from := w.env.now()
 	deadline := recoveryDeadline(from, w.opts.wipeRest, w.opts.maxRunMinutes, w.started)
 	if err := w.reviveHires(ctx, step, deadline, selfRegroup); err != nil {
@@ -2644,6 +2714,8 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 	}
 	// As in recoverWipe: the recovery ends the attempt whose frames it woke on.
 	clear(w.bossAttemptAt)
+	clear(w.bossAliveSeen)
+	clear(w.bossCorpseSeen)
 	from := w.env.now()
 	w.wipeAt = from
 	deadline := recoveryDeadline(from, w.opts.wipeRest, w.opts.maxRunMinutes, w.started)

@@ -2326,15 +2326,17 @@ hand-over needs a running status.
 When the run leader pauses with `boss <N> not found` on that boss's own row (walk 24 test2 r2: Thekal's phase 1 ends
 in a fake death and TB finds no corpse of 14599), the walk reads the frames for the kill: a boss UNIT at 0 % (the
 boss's own entry or a phase entry that is the boss reborn, judged per guid — never an add that exists several at
-once, such as Thekal's two Zulian Guardians 15068, nor a `first` add), or a corpse the toolkit sees within 40 yd of
-the boss row (`.tt q units 40 <x> <y> <z> all dead e=<entry>`, for a boss that died out of the party's sight and so
-left no frame row). A stale low-hp sighting alone is NEVER a kill: a 0 % frame row counts only when it was seen at
-or after the current attempt began (the frames' first sighting of a boss unit of that family engaged, judged like
-the tracker's own latch: below 100 % or holding a party target, cleared by a wipe recovery) and no boss unit of the
-family was seen alive after it (the frames are never pruned, so an earlier attempt's corpse stays in them after a
-reset or a respawn), no boss unit may be seen alive in the last 15 s, and a hire must be alive. With that evidence
-the walk sends one `.bot run skip` (retried once if the send fails); the evidence is re-read on every tick while the
-pause lasts, and without it the pause path is unchanged.
+once, such as Thekal's two Zulian Guardians 15068, nor a `first` add), or a corpse the toolkit proves within 40 yd
+of the boss row (`.tt q units 40 <x> <y> <z> all dead e=<entry>`, for a boss that died out of the party's sight and
+so left no frame row): the corpse's guid must equal a boss guid the frames showed alive in this attempt, and a
+second toolkit read at least 15 s later must still show it dead with no alive frame for that guid in between (a
+fake death raised again voids the wait; a wipe recovery clears it). A stale low-hp sighting alone is NEVER a kill:
+a 0 % frame row counts only when it was seen at or after the current attempt began (the frames' first sighting of
+a boss unit of that family engaged, judged like the tracker's own latch: below 100 % or holding a party target,
+cleared by a wipe recovery) and no boss unit of the family was seen alive after it (the frames are never pruned,
+so an earlier attempt's corpse stays in them after a reset or a respawn), no boss unit may be seen alive in the
+last 15 s, and a hire must be alive. With that evidence the walk sends one `.bot run skip` (retried once if the
+send fails); the evidence is re-read on every tick while the pause lasts, and without it the pause path is unchanged.
 
 Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
 `.bot gear raid <commander> tier <N>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,
