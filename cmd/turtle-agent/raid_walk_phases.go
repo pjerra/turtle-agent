@@ -1032,8 +1032,10 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 			continue
 		}
 		w.tracker.Feed(now, st)
-		w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
+		// pullStarted compares st with the status before it (the step-decrease latch reset): it runs before
+		// lastStatus takes st.
 		w.pullStarted(now, st)
+		w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
 		w.recordRunLine(st, now)
 		w.noteLabel(st)
 		if st.Note != "" {
@@ -1489,7 +1491,8 @@ func (w *walk) resetBossAliveSeen(entry uint32) {
 // within the row's radius of the pack centroid (w.pullRow), the row found
 // from the run's step or, on a move step, from the pulled unit's entry and
 // position. bossPullStarted arms the same window for a boss, which has no
-// pulling line.
+// pulling line. w.lastStatus must still be the status BEFORE st (the
+// step-decrease check reads it): call this before storing st.
 func (w *walk) pullStarted(now time.Time, st tbm.RunStatus) {
 	if w.haveStatus && st.State == tbm.RunRunning && st.Step < w.lastStatus.Step {
 		// The walk resumed at an earlier step: the boss latch belongs to the

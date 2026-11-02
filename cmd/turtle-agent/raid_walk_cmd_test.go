@@ -5169,6 +5169,82 @@ func TestRaidWalkBossLatchClearsOnStepDecrease(t *testing.T) {
 	if w.pullJoinsAt.IsZero() || w.pullJoinsStep != 1 {
 		t.Fatalf("no boss window after the step decrease (armed %+v, at %v)", w.bossPullArmed, w.pullJoinsAt)
 	}
+}
+
+// pollPageStub is a walkAgent that answers each events read with the next page of TBM run lines and fails any
+// other RPC, so one pollOnce call reads exactly its page and no frame.
+type pollPageStub struct {
+	pages [][]string
+	seq   uint64
+}
+
+func (s *pollPageStub) Call(ctx context.Context, method string, params, out any, timeout time.Duration) error {
+	if method != "events" {
+		return errors.New("unexpected RPC " + method)
+	}
+	page, ok := out.(*events.Page)
+	if !ok {
+		return errors.New("events: want *events.Page")
+	}
+	var next events.Page
+	if len(s.pages) > 0 {
+		for _, line := range s.pages[0] {
+			s.seq++
+			next.Events = append(next.Events, events.Event{Seq: s.seq, Kind: events.KindSystem, Text: line})
+		}
+		s.pages = s.pages[1:]
+	}
+	next.Next = s.seq
+	*page = next
+	return nil
+}
+
+// pollOnce hands pullStarted the status the walk held BEFORE the line it reads, so a step decrease clears the
+// boss latch and the same boss's next fighting line opens a fresh joiner window. pollOnce used to store the new
+// status first: the decrease then compared a status with itself and the latch stayed armed.
+func TestRaidWalkPollOnceReopensBossWindowAfterStepDecrease(t *testing.T) {
+	clock := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	plan := &dungeon.Plan{Name: "onyxias_lair", Map: 249, Legs: []dungeon.Leg{{Boss: &dungeon.Boss{Entry: 10184}}}}
+	rows := planexport.Rows{Steps: []planexport.StepRow{
+		{Kind: planexport.KindMove}, {Kind: planexport.KindMove}, {Kind: planexport.KindMove}, {Kind: planexport.KindMove},
+		{Kind: planexport.KindBoss, Entry: 10184, X: 0, Y: -212, Radius: 30},
+	}}
+	const fight = "TBM:RUN|onyxias_lair|running|5/5|onyxia|boss|walk|fighting: the tank engages 10184 on arrival (1.0 yd)|until step 5 (step 5)"
+	const back = "TBM:RUN|onyxias_lair|running|2/5|onyxia|move|walk|walking|until step 5 (step 5)"
+	w := &walk{
+		plan:    plan,
+		rows:    rows,
+		tracker: raidwalk.NewTracker(plan, nil),
+		agent:   &pollPageStub{pages: [][]string{{fight}, {back}, {fight}}},
+		env:     walkEnv{now: func() time.Time { return clock }},
+	}
+	poll := func(label string) {
+		t.Helper()
+		if _, err := w.pollOnce(context.Background(), false); err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+	}
+	// The first fight opens the boss window at t0.
+	poll("first fight")
+	if w.pullJoinsAt.IsZero() || w.pullJoinsStep != 5 {
+		t.Fatalf("no boss window on the first fight (at %v, step %d)", w.pullJoinsAt, w.pullJoinsStep)
+	}
+	// Eleven seconds on, the walk resumes at step 2: the decrease clears the latch and this poll's end closes the old window.
+	clock = clock.Add(11 * time.Second)
+	poll("step decrease")
+	if len(w.pullJoins) != 1 || w.pullJoins[0].Step != 5 {
+		t.Fatalf("records %+v, want the first window's step-5 record", w.pullJoins)
+	}
+	// The same boss fights again: a new window opens at that line.
+	clock = clock.Add(time.Second)
+	poll("second fight")
+	if !w.pullJoinsAt.Equal(clock) || w.pullJoinsStep != 5 {
+		t.Fatalf("no new boss window after the step decrease (at %v, step %d; want %v, step 5; armed %+v)",
+			w.pullJoinsAt, w.pullJoinsStep, clock, w.bossPullArmed)
+	}
+}
+
+func TestRaidWalkTeardownReasonNamesTheFailingStep(t *testing.T) {
 	f := newFixture(t)
 	f.defaultRun("onyxias_lair")
 	f.env.teardown = func(args []string, stdout, stderr io.Writer) int {
