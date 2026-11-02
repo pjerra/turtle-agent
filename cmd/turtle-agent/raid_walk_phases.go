@@ -1575,6 +1575,86 @@ func (w *walk) pullStarted(now time.Time, st tbm.RunStatus) {
 	w.bossPullStarted(now, st)
 }
 
+// bossAddsOf is the boss-encounter add set of the leg the step's boss row
+// belongs to: the row's own entries and the plan's hold/add entries for that
+// leg (its hold entries and its first adds). Summoned and arriving adds of
+// those entries join the fight as it runs: they are no other pack joining
+// the pull, so the boss window keeps them out of the joiner count and marks
+// them "boss add" in the record instead. With no plan or no boss row for the
+// step (a trash pull): nothing is a boss add.
+func (w *walk) bossAddsOf(step int) map[uint32]bool {
+	if w.plan == nil || step < 1 || step > len(w.rows.Steps) {
+		return nil
+	}
+	s := w.rows.Steps[step-1]
+	if s.Kind != planexport.KindBoss {
+		return nil
+	}
+	out := map[uint32]bool{}
+	for _, e := range s.Entries {
+		out[e] = true
+	}
+	for i := range w.plan.Legs {
+		l := &w.plan.Legs[i]
+		if l.Boss == nil || l.Boss.Entry != s.Entry {
+			continue
+		}
+		if l.Boss.Hold != nil {
+			for _, e := range l.Boss.Hold.Entries {
+				out[e] = true
+			}
+		}
+		for _, e := range l.Boss.First {
+			out[e] = true
+		}
+		break
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// bossPullStarted arms the joiner window of a boss pull: a boss has no
+// "pulling <entry> <guid>" line (the run leader walks to the firing stand and
+// the tank engages on arrival), so the first fighting line of its boss step is
+// its pull order. One window per boss step: the later fighting lines of the
+// same fight are not further pulls.
+func (w *walk) bossPullStarted(now time.Time, st tbm.RunStatus) {
+	if st.Kind != planexport.KindBoss || !strings.HasPrefix(strings.ToLower(st.Note), "fighting") {
+		return
+	}
+	if w.bossPullArmedOf()[st.Step] {
+		return
+	}
+	row := packRowOf(w.rows, st.Step)
+	if !row.HasRow {
+		return
+	}
+	if !w.pullJoinsAt.IsZero() && w.pullJoinsStep == st.Step {
+		// A stand pull of one of the boss's adds already counts this fight.
+		w.bossPullArmedOf()[st.Step] = true
+		return
+	}
+	// Another pull's window is still open (under 10 s old): write its record now,
+	// as its window end does, so the boss window can open.
+	if !w.pullJoinsAt.IsZero() {
+		w.pullJoinersFlush(time.Time{})
+	}
+	w.bossPullArmedOf()[st.Step] = true
+	w.pullPack = map[packet.GUID]bool{}
+	w.pullSeed = 0 // the row owns the boss and its adds by position
+	w.pullEntry = 0
+	w.pullRow = row
+	w.pullPackSeeded = false
+	w.pullSeedTries = 0
+	w.pullNoRow = false
+	w.pullBossAdds = w.bossAddsOf(st.Step)
+	w.pullJoinsAt, w.pullJoinsStep = now, st.Step
+	w.pullJoinsSeen = map[packet.GUID]bool{}
+	w.pullAddsSeen = map[packet.GUID]bool{}
+}
+
 func (w *walk) bossPullArmedOf() map[int]bool {
 	if w.bossPullArmed == nil {
 		w.bossPullArmed = map[int]bool{}
