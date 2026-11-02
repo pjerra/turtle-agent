@@ -4,7 +4,9 @@
 // spawns). planexport.Build gives the rows; ownership says which row pulls each spawn (its entry in the row's entries,
 // within its radius of the row's point, expanded to the spawn's whole formation by group_leader). Every spawn closer
 // (3D) to a sampled point than its detection_range (20 when 0) is a finding, one line per (row pair, guid). Sampling
-// every 2 yd on the straight segment is the approximation: the run leader's own navmesh hops are out of scope.
+// every 2 yd on the straight segment is the approximation: the run leader's own navmesh hops are out of scope. So is
+// the firing-stand walk of a plain pull row: its party point is the row's own point, not the firing stand the run
+// leader walks out to (a stand-pull row instead carries its stand, and the check walks from there).
 package main
 
 import (
@@ -23,12 +25,18 @@ const defaultDetectionYd = 20
 // routeAggroStep is how finely a row pair's segment is sampled (yards).
 const routeAggroStep = 2
 
-// routePoint is one row that puts the party somewhere (a move, or the fight point of a pull or boss row).
+// routePoint is one row that puts the party somewhere (a move, or the fight point of a pull or boss row). Each row
+// carries two positions: the OWNERSHIP point (x, y, z: the row's own point, used to own spawns in routeOwnerOf) and
+// the PARTY point (px, py, pz: where the party stands for that row, used to draw the walked segments). A stand-pull
+// pull or boss row (FlagStandPull) is fought from its stand, the move row right before it in the same leg, so its
+// party point is the stand's point while its ownership point stays the row's point. A plain pull row keeps the row's
+// point as its party point.
 type routePoint struct {
-	plan    string
-	leg     int
-	seq     int // the export's step number (1-based within the leg)
-	x, y, z float32
+	plan       string
+	leg        int
+	seq        int // the export's step number (1-based within the leg)
+	x, y, z    float32
+	px, py, pz float32
 	// entries and radius own the spawns this row pulls; idx is the row's absolute index in the route. ownerIdx is
 	// the same absolute index when the row pulls, -1 for a move row, which owns nothing: the segment check
 	// compares the owner's absolute index against the segment end's idx.
@@ -47,7 +55,7 @@ func routePoints(p *dungeon.Plan) ([]routePoint, error) {
 		return nil, err
 	}
 	var out []routePoint
-	for _, s := range res.Rows.Steps {
+	for si, s := range res.Rows.Steps {
 		switch s.Kind {
 		case planexport.KindMove, planexport.KindMoveDirect, planexport.KindMoveHopExact,
 			planexport.KindPull, planexport.KindBoss, planexport.KindHold:
@@ -55,7 +63,19 @@ func routePoints(p *dungeon.Plan) ([]routePoint, error) {
 			continue
 		}
 		rp := routePoint{plan: s.Plan, leg: s.Leg, seq: s.Seq,
-			x: s.X, y: s.Y, z: s.Z, entries: s.Entries, radius: s.Radius, idx: len(out), ownerIdx: -1}
+			x: s.X, y: s.Y, z: s.Z, px: s.X, py: s.Y, pz: s.Z,
+			entries: s.Entries, radius: s.Radius, idx: len(out), ownerIdx: -1}
+		if (s.Kind == planexport.KindPull || s.Kind == planexport.KindBoss) && s.Flags&planexport.FlagStandPull != 0 {
+			// The party never walks to the row's point (the pack centroid): it fights from its stand. The export
+			// writes the stand as the move row right before the pull row in the same leg (see FlagStandPull), so
+			// the party point is that move's point; anything else (a plan the export refused) keeps the row point.
+			if si > 0 {
+				if prev := res.Rows.Steps[si-1]; prev.Plan == s.Plan && prev.Leg == s.Leg &&
+					(prev.Kind == planexport.KindMove || prev.Kind == planexport.KindMoveDirect || prev.Kind == planexport.KindMoveHopExact) {
+					rp.px, rp.py, rp.pz = prev.X, prev.Y, prev.Z
+				}
+			}
+		}
 		out = append(out, rp)
 	}
 	for i := range out {
@@ -111,11 +131,11 @@ func aggroOf(c creature) float64 {
 }
 
 // RouteIntoLaterPacks lists every spawn within aggro of a straight route segment that a later row pulls (or that no
-// row pulls). For each pair of consecutive point rows (move, or the pull's approach: planexport writes each as a
-// row, with the fight point right after) the straight segment is sampled every 2 yd, and every spawn closer (3D)
-// than its detection_range (20 when 0) that is owned by a later row or by no row is one finding. Critters, friendly
-// factions and triggers use the same filter as PackOverlaps (reuse it). One line per (row pair, guid):
-// "<plan> leg <leg> rows <a>-><b>: passes <d> yd from <name> (guid <g>, entry <e>) owned by row <c>|no row".
+// row pulls). For each pair of consecutive point rows the straight segment between their PARTY points is sampled
+// every 2 yd (a stand-pull row's party point is its stand, the move row right before it; every other row's is its
+// own point), and every spawn closer (3D) than its detection_range (20 when 0) that is owned by a later row or by no
+// row is one finding. Critters, friendly factions and triggers use the same filter as PackOverlaps (reuse it). One
+// line per (row pair, guid):
 func RouteIntoLaterPacks(p *dungeon.Plan, cs []creature, ignore map[int]bool) []string {
 	pts, err := routePoints(p)
 	if err != nil {
@@ -159,7 +179,7 @@ func RouteIntoLaterPacks(p *dungeon.Plan, cs []creature, ignore map[int]bool) []
 	var out []string
 	for i := 0; i+1 < len(pts); i++ {
 		a, b := pts[i], pts[i+1]
-		dx, dy, dz := float64(b.x-a.x), float64(b.y-a.y), float64(b.z-a.z)
+		dx, dy, dz := float64(b.px-a.px), float64(b.py-a.py), float64(b.pz-a.pz)
 		n := int(math.Ceil(math.Sqrt(dx*dx+dy*dy+dz*dz) / routeAggroStep))
 		if n < 1 {
 			n = 1
@@ -181,7 +201,7 @@ func RouteIntoLaterPacks(p *dungeon.Plan, cs []creature, ignore map[int]bool) []
 			best := math.MaxFloat64
 			for k := 0; k <= n; k++ {
 				t := float64(k) / float64(n)
-				sx, sy, sz := float64(a.x)+t*dx, float64(a.y)+t*dy, float64(a.z)+t*dz
+				sx, sy, sz := float64(a.px)+t*dx, float64(a.py)+t*dy, float64(a.pz)+t*dz
 				ddx, ddy, ddz := float64(c.Pos.X)-sx, float64(c.Pos.Y)-sy, float64(c.Pos.Z)-sz
 				if d := math.Sqrt(ddx*ddx + ddy*ddy + ddz*ddz); d < best {
 					best = d

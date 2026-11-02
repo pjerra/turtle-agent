@@ -90,6 +90,47 @@ func TestRouteIntoLaterPacksIgnoresAlreadyPulledPack(t *testing.T) {
 	}
 }
 
+// A stand pull is fought from its stand: the segments around its row start and end at the stand (the move row right
+// before it), not at the row's own point (the pack centroid). Later sits 12 yd off the stand's outgoing segment but
+// 28 yd off every centroid line, and StrayQ sits 12 yd off the invented stand -> centroid hop but 50 yd off every
+// walked line: the check reports Later on rows 2->3 (the stand -> later segment) by the stand, and nothing by the
+// centroid.
+func TestRouteIntoLaterPacksStandPullWalksFromTheStand(t *testing.T) {
+	p := &dungeon.Plan{Name: "probe", Map: 1, Entrance: dungeon.Point{},
+		Legs: []dungeon.Leg{{
+			Name: "a",
+			To:   dungeon.Point{X: -100},
+			PullGroups: []dungeon.PullGroup{
+				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 50}}, Radius: 5,
+					Approach: []dungeon.Point{{X: 0}}, StandPull: true},
+				{Entries: []uint32{2}, Positions: []dungeon.Point{{X: 0, Y: 80}}, Radius: 55,
+					Approach: []dungeon.Point{{X: 0, Y: 60}}},
+			},
+		}}}
+	cs := []creature{
+		{GUID: 1, Entry: 1, Name: "Early", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 50}},
+		{GUID: 2, Entry: 2, Name: "Later", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: -12, Y: 30}, DetectionRange: 15},
+		{GUID: 3, Entry: 99, Name: "StrayQ", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 50, Y: 12}, DetectionRange: 15},
+	}
+	got := RouteIntoLaterPacks(p, cs, map[int]bool{35: true})
+	want := "probe leg 0 rows 2->3: passes 12.0 yd from Later (guid 2, entry 2) owned by row 4"
+	found := false
+	for _, s := range got {
+		if s == want {
+			found = true
+		}
+		if strings.Contains(s, "StrayQ") {
+			t.Fatalf("the invented stand -> centroid hop is not walked: %v", got)
+		}
+		if strings.Contains(s, "Early") {
+			t.Fatalf("an already-pulled pack near a later segment is no finding: %v", got)
+		}
+	}
+	if !found {
+		t.Fatalf("the stand's outgoing segment passes the later pack: want %q, got %v", want, got)
+	}
+}
+
 // The detection default is 20: a spawn the export carries no range for engages at 20 yd, not 0. Turning the default
 // off (the mutation) makes the walk past the later pack clean, so the test goes red.
 func TestRouteIntoLaterPacksDefaultsDetectionTo20(t *testing.T) {
@@ -116,10 +157,11 @@ func TestRouteIntoLaterPacksDefaultsDetectionTo20(t *testing.T) {
 }
 
 // routeAggroKnownFailing lists the hand-written plans whose route passes within aggro of a pack a later row pulls
-// (or of no row), with the number of findings counted after the move-row owner fix (each spawn's owning row keeps
-// its absolute route index, and a spawn counts only when its owner sits after the segment's end). A plan that
-// passes now fails the test until it is taken off; any other change in a count, up or down, fails too, so a drop
-// needs the pin updated with a one-line reason. Draft plans are not checked: skeletons have no mapped route.
+// (or of no row), with the number of findings counted after the stand-pull party-point fix (segments run between
+// party points: a FlagStandPull row's party point is its stand, and the row-point -> centroid steps of the
+// move-row owner fix's count are gone). A plan that passes now fails the test until it is taken off; any other
+// change in a count, up or down, fails too, so a drop needs the pin updated with a one-line reason. Draft plans
+// are not checked: skeletons have no mapped route.
 //
 // Counts are measured on origin/dev (the ZG count must drop when W25-1 lands: the Arlokk terrace reordering walks
 // each approach on its pack's level; the comment then says so).
@@ -132,7 +174,7 @@ var routeAggroKnownFailing = map[string]int{
 	"karazhan_crypt":       210, // was 336: the move-row owner fix clears already-pulled packs near later segments.
 	"molten_core":          83,  // was 534: the move-row owner fix clears already-pulled packs near later segments.
 	"blackwing_lair":       98,  // was 286: the move-row owner fix clears already-pulled packs near later segments.
-	"zul_gurub":            463, // was 1324: the move-row owner fix clears already-pulled packs near later segments.
+	"zul_gurub":            453, // was 463: segments run between party points, so a stand-pull row's invented stand -> centroid hop no longer counts (its own pack sits there) while its true stand -> next-row line does.
 	"ruins_of_ahnqiraj":    154, // was 465: the move-row owner fix clears already-pulled packs near later segments.
 	"temple_of_ahnqiraj":   419, // was 1305: the move-row owner fix clears already-pulled packs near later segments.
 	"naxxramas":            271, // was 584: the move-row owner fix clears already-pulled packs near later segments.
