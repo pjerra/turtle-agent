@@ -17,10 +17,20 @@ import (
 	"github.com/pjerra/turtle-agent/internal/netutil"
 )
 
-var (
-	agentID = regexp.MustCompile(`^\d{1,6}$`)
-	runID   = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
-)
+var runID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
+// validAgentID reports whether id has the shape of an agent id: a loopback host and port (IPv6 bracketed), as DiscoverAgents
+// normalizes it. Two agents that share a port on different hosts have distinct ids.
+func validAgentID(id string) bool {
+	host, port, err := net.SplitHostPort(id)
+	if err != nil || host == "" || port == "" {
+		return false
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return false
+	}
+	return netutil.IsLoopback(host)
+}
 
 //go:embed static
 var staticFS embed.FS
@@ -34,6 +44,12 @@ func Handler(p *Poller, testsDir string, allowHosts []string, embedFrom ...strin
 // HandlerWithEditor is Handler with the route editor on when ed is not nil: then, and only then, POST /api/edit/* is let through the
 // guard, and only with the editing token.
 func HandlerWithEditor(p *Poller, testsDir string, allowHosts, embedFrom []string, ed *Editor) http.Handler {
+	return HandlerFull(p, testsDir, allowHosts, embedFrom, ed, nil)
+}
+
+// HandlerFull is HandlerWithEditor with the run controls on when ctl is not nil: then, and only then, POST /api/control/* is let through the
+// guard, and only with a control token (or a trusted peer). Without ctl the page and the guard behave exactly as before.
+func HandlerFull(p *Poller, testsDir string, allowHosts, embedFrom []string, ed *Editor, ctl *Controller) http.Handler {
 	sub, _ := fs.Sub(staticFS, "static")
 	static := http.FileServer(http.FS(sub))
 	mux := http.NewServeMux()
@@ -56,7 +72,7 @@ func HandlerWithEditor(p *Poller, testsDir string, allowHosts, embedFrom []strin
 		}
 		var geo []byte
 		var errText string
-		if id := r.URL.Query().Get("agent"); id != "" && agentID.MatchString(id) {
+		if id := r.URL.Query().Get("agent"); id != "" && validAgentID(id) {
 			geo, errText = p.GeometryFor(name, id) // the copy that agent's runs read
 		} else {
 			geo, errText = p.Geometry(name)
@@ -82,7 +98,7 @@ func HandlerWithEditor(p *Poller, testsDir string, allowHosts, embedFrom []strin
 	})
 	mux.HandleFunc("/api/live/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/api/live/")
-		if !agentID.MatchString(id) {
+		if !validAgentID(id) {
 			http.NotFound(w, r)
 			return
 		}
@@ -124,8 +140,11 @@ func HandlerWithEditor(p *Poller, testsDir string, allowHosts, embedFrom []strin
 	if ed != nil {
 		ed.routes(mux)
 	}
+	if ctl != nil {
+		ctl.routes(mux)
+	}
 	mux.Handle("/", static)
-	return guard(mux, FrameAncestors(embedFrom), hostSet(allowHosts), ed)
+	return guard(mux, FrameAncestors(embedFrom), hostSet(allowHosts), ed, ctl)
 }
 
 func writeJSON(w http.ResponseWriter, b []byte) {
@@ -225,10 +244,11 @@ func hostSet(names []string) map[string]bool {
 // guard refuses what a read-only local page has no use for: other methods (but for the editor's POST /api/edit/*, when the editor is on, which
 // then needs the editing token), and requests whose Host is neither a loopback name
 // nor one of allowed (a page on the web cannot reach the dashboard by rebinding a name to 127.0.0.1: its Host is the name).
-func guard(next http.Handler, ancestors string, allowed map[string]bool, ed *Editor) http.Handler {
+func guard(next http.Handler, ancestors string, allowed map[string]bool, ed *Editor, ctl *Controller) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		editPost := ed != nil && r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/edit/")
-		if r.Method != http.MethodGet && r.Method != http.MethodHead && !editPost {
+		controlPost := ctl != nil && r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/control/")
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && !editPost && !controlPost {
 			w.Header().Set("Allow", "GET, HEAD")
 			http.Error(w, "read-only", http.StatusMethodNotAllowed)
 			return
@@ -249,6 +269,12 @@ func guard(next http.Handler, ancestors string, allowed map[string]bool, ed *Edi
 		if editPost {
 			var ok bool
 			if r, ok = ed.authorize(w, r); !ok {
+				return
+			}
+		}
+		if controlPost {
+			var ok bool
+			if r, ok = ctl.authorize(w, r); !ok {
 				return
 			}
 		}

@@ -134,7 +134,7 @@ func copyFixture(t *testing.T, slotBody string) (*planCache, Agent) {
 	if slotBody != "" {
 		must(t, os.WriteFile(filepath.Join(slot, "tiny.json"), []byte(slotBody), 0o644))
 	}
-	return newPlanCache([]string{dash}), Agent{ID: "8765", Addr: "127.0.0.1:8765", DungeonsDir: slot}
+	return newPlanCache([]string{dash}), Agent{ID: "127.0.0.1:8765", Addr: "127.0.0.1:8765", DungeonsDir: slot}
 }
 
 func TestPlanCopyNamesTheFileDrawnAndTheFileRead(t *testing.T) {
@@ -222,7 +222,7 @@ func TestPlanEndpointsServeTheCopyOfTheAskedAgent(t *testing.T) {
 	if code != 200 || json.Unmarshal([]byte(body), &dash) != nil || dash.Source == nil || dash.Source.Role != "dashboard" {
 		t.Fatalf("dashboard copy: %d %.200s", code, body)
 	}
-	code, body = get("/api/plan/tiny?agent=8765")
+	code, body = get("/api/plan/tiny?agent=127.0.0.1:8765")
 	if code != 200 || json.Unmarshal([]byte(body), &slot) != nil || slot.Source == nil || slot.Source.Role != "slot" || slot.Source.SHA256 == dash.Source.SHA256 {
 		t.Fatalf("slot copy: %d %.200s", code, body)
 	}
@@ -235,7 +235,7 @@ func TestPlanEndpointsServeTheCopyOfTheAskedAgent(t *testing.T) {
 	}
 	code, body = get("/api/plan-copies/tiny")
 	var rows []CopyRow
-	if code != 200 || json.Unmarshal([]byte(body), &rows) != nil || len(rows) != 1 || rows[0].Agent != "8765" || rows[0].Same || rows[0].Run == nil {
+	if code != 200 || json.Unmarshal([]byte(body), &rows) != nil || len(rows) != 1 || rows[0].Agent != "127.0.0.1:8765" || rows[0].Same || rows[0].Run == nil {
 		t.Fatalf("copies: %d %s", code, body)
 	}
 	if code, _ = get("/api/plan-copies/..%2Fetc"); code != 404 {

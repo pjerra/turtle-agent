@@ -4,6 +4,7 @@
 const SVGNS = "http://www.w3.org/2000/svg";
 const MV = window.MapView, PT = window.PlainText, ML = window.MapLayers, PS = window.PictureSlots, UI = window.UnitInfo, MP = window.MapPaths, PD = window.PathDraw, PV = window.PlanView, RE = window.RouteEdit, RR = window.RealRoute; // planview.js (the plan view and its leg switches), view.js (zoom and pan math), text.js (plain wording), layers.js (what a map can draw), picslots.js (the map picture slots), unitinfo.js (what a unit is doing, the hover box, events, progress)
 const RF = window.RefreshRate; // refresh.js (the refresh-rate picker: how often the page polls)
+const CTL = window.CTL; // controls.js (the run controls' buttons and control log; there only when the dashboard was started with --control)
 const $ = (id) => document.getElementById(id);
 const cards = new Map(); // id -> {el, parts, geo}
 const plans = new Map(); // name -> geometry | "loading" | null
@@ -39,6 +40,8 @@ function legSelFor(name, n) {
 function setLegSel(name, sel) { legSel.set(name, sel); store("legsel:" + name, JSON.stringify(sel)); }
 // The route editor (routeeditui.js): the panel of the plan view and the handles on its map. It is there only when the dashboard was started with --edit.
 const EU = window.RouteEditUI.create({ h, s, MV, rerender: () => scheduleRender(), applyViewBox: (rec) => applyViewBox(rec), geoOf: (name) => { const g = plans.get(name); return g && g.legs ? g : null; }, currentPlan: () => (route.kind === "plan" ? route.plan : ""), routeDoc: (name) => { const r = routes.get(name); return r && r.doc ? r.doc : null; } });
+// The run controls (controls.js): the buttons, the token field and the control log of each agent's card. Off unless GET /api/control/status says enabled.
+const CTLBOX = CTL ? CTL.create({ h, rerender: () => scheduleRender(), footer: (on) => { if (on) $("foot").textContent = "Controls are ON: the buttons send commands to the agents; each one is logged with who sent it."; } }) : null; // controls.js is loaded before this file; the box is just absent without it
 // The real route (realroute.js): the navmesh walk of a plan, traced by the dashboard (GET /api/plan/<name>/route). plan name -> {key, doc, state, msg, at}; state is
 // loading, refreshing (the drawing is the last route, the new one is on its way), ok, off (the dashboard has no --mmaps-dir) or error. While the editor is
 // on, the route is asked with the edits made so far (the editor's route), so it follows each drop.
@@ -181,6 +184,7 @@ function makeCard(c) {
   const parts = {}, rec = { geo: null, card: c, svg: null, layerName: null, layerApplied: null, pick: null,
     v: null, goal: null, fit: null, mode: "fit", followOn: followPref, paused: false, following: false, followScale: null, raf: 0, geoName: null, viewLoaded: null, avail: null };
   parts.head = h("div", { class: "chead" });
+  parts.controls = h("div", { class: "controls", hidden: true }); // the run controls' box (controls.js), hidden unless --control
   parts.stage = h("div", { class: "stage" });
   parts.map = h("div", { class: "map" });
   parts.info = h("div", { class: "info" });
@@ -234,7 +238,7 @@ function makeCard(c) {
   parts.legend.append(parts.layer, parts.picWhy);
   parts.debug = h("details", {}, h("summary", { text: "Debug: raw status and files" }), h("div", { class: "files" }), h("pre", { text: "(open to load)" }));
   parts.debug.addEventListener("toggle", () => { if (parts.debug.open) loadRaw(c.id, parts); });
-  const el = h("section", { class: "card", "data-id": c.id }, parts.head, h("div", { class: "cbody" }, parts.map, parts.info, parts.legend), parts.debug);
+  const el = h("section", { class: "card", "data-id": c.id }, parts.head, parts.controls, h("div", { class: "cbody" }, parts.map, parts.info, parts.legend), parts.debug);
   rec.el = el; rec.parts = parts;
   if (window.ResizeObserver) new ResizeObserver(() => { if (rec.svg && computeView(rec)) applyViewBox(rec); }).observe(parts.stage);
   updateFollowUi(rec);
@@ -1020,7 +1024,7 @@ function render(state) {
     if (!rec) { rec = makeCard(c); if (c.synthetic) rec.parts.debug.hidden = true; cards.set(c.id, rec); $("cards").append(rec.el); }
     rec.el.classList.toggle("offline", !c.online);
     rec.card = c;
-    renderHead(c, rec); renderInfo(c, rec); renderMap(c, rec);
+    renderHead(c, rec); renderInfo(c, rec); if (CTLBOX) CTLBOX.render(rec.parts.controls, c); renderMap(c, rec);
   }
   if (!activeTab || !ids.has(activeTab)) activeTab = list.length ? list[0].id : null;
   applyView(list);
