@@ -1530,10 +1530,17 @@ func (w *walk) bossPullStarted(now time.Time, st tbm.RunStatus) {
 	if !row.HasRow {
 		return
 	}
-	w.bossPullArmedOf()[st.Step] = true
-	if !w.pullJoinsAt.IsZero() {
-		return // a stand pull of one of the boss's adds already counts this fight
+	if !w.pullJoinsAt.IsZero() && w.pullJoinsStep == st.Step {
+		// A stand pull of one of the boss's adds already counts this fight.
+		w.bossPullArmedOf()[st.Step] = true
+		return
 	}
+	// Another pull's window is still open (under 10 s old): write its record now,
+	// as its window end does, so the boss window can open.
+	if !w.pullJoinsAt.IsZero() {
+		w.pullJoinersFlush(time.Time{})
+	}
+	w.bossPullArmedOf()[st.Step] = true
 	w.pullPack = map[packet.GUID]bool{}
 	w.pullSeed = 0 // the row owns the boss and its adds by position
 	w.pullEntry = 0
