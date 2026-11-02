@@ -9,11 +9,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
@@ -55,6 +57,11 @@ const (
 	// placeQuietExtraRounds is how many extra clear rounds the quiet may run (walk 24: one round left the bats that
 	// flew in after it).
 	placeQuietExtraRounds = 2
+	// placeLandingReadYd and placeLandingDz bound the M1b landing read (PLACE-W26): what `q units` radius the walk
+	// re-reads at the end of a clean quiet, and how far off the point's floor a unit may stand to be taken. On Mar'li
+	// at the end of the quiet (the `.go` +22 s) the Berserker is about 36 yd out and 13 yd below.
+	placeLandingReadYd = 45
+	placeLandingDz     = 30
 	// placeCritterHP is the top of a critter's max-HP band: a rank-0 unit with at most this many hit points (a level-1
 	// critter) never blocks the clear or the quiet (item 2).
 	placeCritterHP = 100
@@ -499,12 +506,17 @@ func (w *walk) placeClear(ctx context.Context) error {
 			return err
 		}
 		summary := raidwalk.PlaceCircleSummary{Step: c.Step, Leg: c.Leg, X: c.X, Y: c.Y, Z: c.Z, Radius: c.Radius,
-			PerUnit: c.PerUnit, Unit: c.Unit, Moved: moved}
+			PerUnit: c.PerUnit, Unit: c.Unit, Sweep: c.Sweep, Moved: moved}
 		if why := w.placeCircleBlocked(c, units, trunc); why != "" {
-			w.note("place: not cleared row %d: %s", c.Step, why)
+			sweep := ""
+			if c.Sweep {
+				sweep = " (sweep)"
+			}
+			w.note("place: not cleared row %d%s: %s", c.Step, sweep, why)
 			w.placeSum.NotCleared = append(w.placeSum.NotCleared, fmt.Sprintf("row %d: %s", c.Step, why))
 			w.placeSum.Circles = append(w.placeSum.Circles, summary)
 			// The quiet step's extra round must not act near a circle the corridor refused (review round 2, MEDIUM-A).
+			// A refused sweep circle blocks extra clears near it like a corridor circle.
 			w.placeSkipped = append(w.placeSkipped, c)
 			continue
 		}
@@ -527,7 +539,11 @@ func (w *walk) placeClear(ctx context.Context) error {
 		}
 		w.placeSum.Circles = append(w.placeSum.Circles, summary)
 		w.placeRemoved += int(removed)
-		w.note("place: cleared row %d: %d removed%s", c.Step, int(removed), skippedWords(summary.Skipped))
+		sweep := ""
+		if c.Sweep {
+			sweep = " (sweep)"
+		}
+		w.note("place: cleared row %d%s: %d removed%s", c.Step, sweep, int(removed), skippedWords(summary.Skipped))
 		if int(removed) < len(units) {
 			w.note("place: row %d removed %d of the %d units the pre-read listed", c.Step, int(removed), len(units))
 		}
@@ -628,7 +644,9 @@ func (w *walk) placeQuiet(ctx context.Context) error {
 					"a BEHIND leftover the extra round took, or beyond %.0f yd, a roamer beyond it that the cut join read missed: "+
 					"the walk places the raid", float64(placeReachYd))
 			}
-			return nil
+			// M1b: the quiet's window (dz 8) misses a patroller between its spawn and the landing. The landing read
+			// (r 45, no floor window) nets BEHIND trash off the floor after a clean quiet.
+			return w.placeLandingRead(ctx, p, skip)
 		}
 		if rereads >= placeQuietRereads || !read.roamersOnly(j.Block) {
 			w.placeSum.Quiet = false
@@ -640,6 +658,55 @@ func (w *walk) placeQuiet(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+// placeLandingRead is the M1b net for BEHIND trash off the quiet's floor window (PLACE-W26): a `q units 45 <p> all`
+// after a clean quiet. For each unit: skip it when the quiet judged it (|Dz| <= placeClearDz), when it stands
+// farther than placeLandingDz off the floor, skip entries/critters/dead units and anything beyond 45 yd. Otherwise,
+// when placeRogueOwner owns it or it is placeBehindTrash, run the existing extra clear (placeQuietClear), which
+// pre-reads, guards and clears 3 yd at the unit's position. Any other unit is left with no note (an AHEAD or unowned
+// unit off the floor is what a door run meets too). A cut read is fail-open: the quiet's own verdict stands. The read
+// does not count against placeQuietExtraRounds.
+func (w *walk) placeLandingRead(ctx context.Context, p dungeon.Point, skip string) error {
+	units, trunc, err := w.placeUnits(ctx, placeLandingReadYd, p.X, p.Y, p.Z)
+	if err != nil {
+		return err
+	}
+	if trunc {
+		w.note("place: the landing read (r %d) was cut", placeLandingReadYd)
+		return nil
+	}
+	for _, u := range units {
+		if math.Abs(float64(u.Dz)) <= placeClearDz {
+			continue
+		}
+		if math.Abs(float64(u.Dz)) > placeLandingDz {
+			continue
+		}
+		if placeDist3(u.X, u.Y, u.Z, p.X, p.Y, p.Z) > placeLandingReadYd {
+			continue
+		}
+		if inEntries(w.place.Skips, u.Entry) || u.critter() || u.Dead {
+			continue
+		}
+		if _, owned := w.placeRogueOwner(u); !owned && !w.placeBehindTrash(u) {
+			continue
+		}
+		took, err := w.placeQuietClear(ctx, u, skip)
+		if err != nil {
+			return err
+		}
+		if !took {
+			continue
+		}
+		below := "below"
+		if u.Dz > 0 {
+			below = "above"
+		}
+		w.note("place: the landing read takes %d %s (%.1f yd, %.1f yd %s, %s)", u.Entry, u.Name,
+			placeDist3(u.X, u.Y, u.Z, p.X, p.Y, p.Z), math.Abs(float64(u.Dz)), below, u.placeWhere())
+	}
+	return nil
 }
 
 // placeQuietNames names the units that block the quiet, as the refusal and the notes read them.
@@ -1095,11 +1162,13 @@ func (w *walk) placeFighting(now time.Time) []string {
 	return out
 }
 
-// placeView polls one frame into the walk's state (the same read waitEntered does).
+// placeView polls one frame into the walk's state (the same read waitEntered does), and saves it, so frames.jsonl
+// holds the place phase (M2: walk 26's place frames were empty, and the summary could only guess the fight).
 func (w *walk) placeView(ctx context.Context) {
 	if n, frame, err := w.view(ctx, w.afterN, 2000); err == nil && frame != nil {
 		w.afterN = n
 		w.trackFrame(w.env.now(), frame)
+		w.saveFrame(w.env.now(), frame)
 	}
 }
 
@@ -1151,12 +1220,79 @@ func (w *walk) placeVerify(ctx context.Context) error {
 	return stopf(exitRaidWalkFailed, "place: not at the start: %s", strings.Join(missing, ", "))
 }
 
-// placeCombatCheck fails when the frames show a hire fighting after the place (spec 5 step 9).
+// placeCombatCheck fails when the frames show a hire fighting after the place (spec 5 step 9). M2 names the enemy:
+// every hostile seen within 10 s that targets a hire (else every hostile with hppct < 100 or a target), with its
+// entry, spawn guid low and position, each with its BEHIND/AHEAD verdict by position (frames carry no home).
 func (w *walk) placeCombatCheck(now time.Time) error {
 	if fighting := w.placeFighting(now); len(fighting) > 0 {
-		return stopf(exitRaidWalkFailed, "place: fighting after the place: %s", strings.Join(fighting, ", "))
+		return stopf(exitRaidWalkFailed, "place: fighting after the place: %s%s", strings.Join(fighting, ", "), w.placeEnemy(now))
 	}
 	return nil
+}
+
+// placeEnemy names the hostiles the frames show around the post-place fight: those seen within 10 s that target a
+// hire, else those seen within 10 s with hppct < 100 or a target. Each reads "<entry> (db <guid low>) at <x> <y> <z>
+// (<verdict>)", where the verdict is the AHEAD/BEHIND judgement by position (frames carry no home). Unknown enemies
+// read "against an unknown unit (no hostile in the frames)".
+func (w *walk) placeEnemy(now time.Time) string {
+	hire := map[uint64]bool{}
+	for _, b := range w.botAt {
+		if b.guid != 0 {
+			hire[uint64(b.guid)] = true
+		}
+	}
+	type foe struct {
+		guid  string
+		state hostileState
+	}
+	var onHire, engaged []foe
+	for guid, h := range w.hostiles {
+		if now.Sub(h.at) > 10*time.Second {
+			continue
+		}
+		if h.target != 0 && hire[h.target] {
+			onHire = append(onHire, foe{guid, h})
+			continue
+		}
+		if h.target != 0 || h.hppct < 100 {
+			engaged = append(engaged, foe{guid, h})
+		}
+	}
+	foes := onHire
+	if len(foes) == 0 {
+		foes = engaged
+	}
+	if len(foes) == 0 {
+		return "; against an unknown unit (no hostile in the frames)"
+	}
+	sort.Slice(foes, func(i, j int) bool {
+		if foes[i].state.entry != foes[j].state.entry {
+			return foes[i].state.entry < foes[j].state.entry
+		}
+		return foes[i].guid < foes[j].guid
+	})
+	seen := map[string]bool{}
+	var out []string
+	for _, f := range foes {
+		low := uint32(0)
+		if g, err := packet.ParseGUID(f.guid); err == nil {
+			low = uint32(uint64(g) & 0xFFFFFF)
+		}
+		key := fmt.Sprintf("%d/%d", f.state.entry, low)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		verdict := "unowned"
+		if _, own := w.place.AheadOwns(f.state.entry, f.state.x, f.state.y, f.state.z); own {
+			verdict = "AHEAD"
+		} else if _, own := w.place.BehindOwns(f.state.entry, f.state.x, f.state.y, f.state.z); own {
+			verdict = "BEHIND"
+		}
+		out = append(out, fmt.Sprintf("%d (db %d) at %s %s %s (%s)", f.state.entry, low,
+			num32(f.state.x), num32(f.state.y), num32(f.state.z), verdict))
+	}
+	return "; against " + strings.Join(out, ", ")
 }
 
 // placeHold is the commander's own `cmd stay` (Q2). A refusal is not fatal: the place-to-start gap is a few seconds, so
@@ -1387,6 +1523,7 @@ func placeTTLines(p *raidwalk.PlacePlan, planMap uint32) []string {
 		"q group of=" + mt,
 		fmt.Sprintf("q floor %s %s %s", px, py, pz),
 		fmt.Sprintf("quiet %d %s %s %s w=%d dz=%d%s", placeQuietR, px, py, pz, placeQuietWaitS, placeClearDz, tail),
+		fmt.Sprintf("q units %d %s %s %s all", placeLandingReadYd, px, py, pz), // M1b: the landing read after a clean quiet
 		fmt.Sprintf("place %s %s %s spread=5 of=%s", px, py, pz, mt),
 	}
 	if len(p.Circles) > 0 {
