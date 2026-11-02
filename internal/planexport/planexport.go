@@ -283,7 +283,7 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 			return Result{}, fmt.Errorf("plan %s: with-legs names %q, which is no skip_export leg of the plan", name, n)
 		}
 	}
-	b := &builder{opt: opt, plan: p, name: name}
+	b := &builder{opt: opt, plan: p, name: name, legs: ExportedLegs(p, opt)}
 	b.rows.Plan = PlanRow{Plan: name, Map: p.Map, CCPriority: slices.Clone(p.CCPriority), CCAlways: slices.Clone(p.CCAlways), KillFirst: slices.Clone(p.KillFirst), Source: clip(source, MaxSource), Comment: clip(planComment(p), MaxComment)}
 	cut, cutLeg := "", 0
 	for li := range p.Legs {
@@ -302,6 +302,11 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 		}
 	}
 	if cut != "" {
+		for li := range b.legs {
+			if li >= cutLeg {
+				delete(b.legs, li) // the legs cut off have no rows
+			}
+		}
 		b.warnings = append(b.warnings, cut)
 		b.rows.Plan.Comment = clip(planComment(p)+"; cut before leg "+strconv.Itoa(len(b.rows.Legs))+" ("+p.Legs[cutLeg].Name+"): a step the run leader cannot do", MaxComment)
 	}
@@ -359,8 +364,9 @@ type builder struct {
 	name        string
 	rows        Rows
 	warnings    []string
-	leg_        int // the plan's leg being built
-	outLeg      int // the row number of the next leg written (an optional leg left out takes none)
+	legs        LegMap // the plan's legs the export writes -> their row leg numbers (ExportedLegs; cut legs removed)
+	leg_        int    // the plan's leg being built
+	outLeg      int    // the row number of the next leg written (an optional leg left out takes none)
 	seq         int
 	skippedLoot int           // loot_object steps of a companions_loot false leg left out of the leg being built
 	last        dungeon.Point // the last point a step of the leg put the party at
@@ -957,14 +963,14 @@ func Validate(r Rows) error {
 }
 
 // firstLeaveConflict returns the current leg's first Leave spawn the walk from a to c, cut at via, comes within dungeon.LeaveClearYd of
-// (ground distance). rowLeg is the row leg the cut hop belongs to: only that row leg's own leave spawns count (the plan leg the rows
-// wrote for it). A spawn another leg leaves alone is that leg's own stretch: the plan check holds every leg's points to every leg's
+// (ground distance). rowLeg is the row leg the cut hop belongs to: only that row leg's own leave spawns count (the plan leg the map m,
+// the builder's LegMap of the legs it exports, gives that row leg). A spawn another leg leaves alone is that leg's own stretch: the plan check holds every leg's points to every leg's
 // list already, and a cut hop's walk is one leg's walk. The walk is the polyline a, via..., c, so each segment is measured, not only
 // the via points: a straight run between two far vertices can pass a spawn. A cut hop is the exporter's walk, not the plan's: the run
 // leader would hop it itself (as before --approach-hops), so a hop whose cut path comes that near a spawn the plan leaves alone is not
 // cut at all.
-func (b *builder) firstLeaveConflict(rowLeg int, a, c dungeon.Point, via []dungeon.Point) (dungeon.Leave, bool) {
-	li, ok := PlanLeg(b.plan, rowLeg)
+func (b *builder) firstLeaveConflict(m LegMap, rowLeg int, a, c dungeon.Point, via []dungeon.Point) (dungeon.Leave, bool) {
+	li, ok := PlanLeg(m, rowLeg)
 	if !ok {
 		return dungeon.Leave{}, false
 	}
@@ -1009,7 +1015,7 @@ func (b *builder) cutLongHops() error {
 				for len(via) > 0 && dist3(via[len(via)-1], c) < approachStandoffYd {
 					via = via[:len(via)-1]
 				}
-				if lv, near := b.firstLeaveConflict(s.Leg, a, c, via); near {
+				if lv, near := b.firstLeaveConflict(b.legs, s.Leg, a, c, via); near {
 					b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the %s approach path would pass within %.0f yd of the left-alone %d (spawn %d) at %.1f %.1f: the hop is not cut, the run leader walks it itself", s.Leg, s.Seq, s.Kind, dungeon.LeaveClearYd, lv.Entry, lv.Spawn, lv.At.X, lv.At.Y))
 					via = nil
 				}
@@ -1042,7 +1048,7 @@ func (b *builder) cutLongHops() error {
 						if err != nil {
 							b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the move is %.0f yd from the one before it and could not be cut: %v", s.Leg, s.Seq, d, err))
 						}
-						if lv, near := b.firstLeaveConflict(s.Leg, a, c, via); near {
+						if lv, near := b.firstLeaveConflict(b.legs, s.Leg, a, c, via); near {
 							b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the hop's path would pass within %.0f yd of the left-alone %d (spawn %d) at %.1f %.1f: the hop is not cut, the run leader walks it itself", s.Leg, s.Seq, dungeon.LeaveClearYd, lv.Entry, lv.Spawn, lv.At.X, lv.At.Y))
 							via = nil
 						}
@@ -1141,39 +1147,69 @@ func clip(s string, n int) string {
 // StepCount is the number of ai_dungeon_step rows: the step count the run leader lists for this plan (`.bot run list`).
 func (r Rows) StepCount() int { return len(r.Steps) }
 
-// LegNumber is the ai_dungeon_leg.leg number the export gives the plan's leg leg. An optional leg is left out and the legs after it
-// close up, so this is not the plan's own index. ok is false for a leg outside the plan and for an optional leg (which has no rows).
-// A skip_export leg left out (without --with-legs) takes no number either; with --with-legs it does.
-func LegNumber(p *dungeon.Plan, leg int) (int, bool) {
-	if leg < 0 || leg >= len(p.Legs) || p.Legs[leg].Optional != nil || p.Legs[leg].SkipExport {
-		return 0, false
+// LegMap maps a plan leg index to the ai_dungeon_leg.leg number the export gives it. Only the legs the export writes are in it: an
+// optional leg, a skip_export leg and a skip-legs leg left out take no number, and the legs after them close up, so the number is not the
+// plan's own index. A leg the options write (--with-optional, --with-legs) takes its number like any other.
+type LegMap map[int]int
+
+// legExported is the one rule of which legs an export with opt writes; ExportedLegs and the builder both follow it. Legs are named, so an
+// option names the leg it means.
+func legExported(l dungeon.Leg, opt Options) bool {
+	if slices.Contains(opt.SkipLegs, l.Name) {
+		return false
 	}
-	row := 0
-	for i := range leg {
-		if p.Legs[i].Optional == nil && !p.Legs[i].SkipExport {
-			row++
+	if l.SkipExport {
+		return slices.Contains(opt.WithLegs, l.Name)
+	}
+	return l.Optional == nil || slices.Contains(opt.WithOptional, l.Name)
+}
+
+// ExportedLegs is the LegMap of an export of p with opt: the legs it writes, numbered in plan order. Export builds it once and gives it
+// to the builder; a caller that has no rows (an observer, the route aggro) asks it for the export it reads.
+func ExportedLegs(p *dungeon.Plan, opt Options) LegMap {
+	m := LegMap{}
+	for i, l := range p.Legs {
+		if legExported(l, opt) {
+			m[i] = len(m)
 		}
 	}
-	return row, true
+	return m
 }
 
-// LegNumber is LegNumber(p, leg), and false also when these rows were cut before that leg (it has no rows at all).
-func (r Rows) LegNumber(p *dungeon.Plan, leg int) (int, bool) {
-	row, ok := LegNumber(p, leg)
-	if !ok || row >= len(r.Legs) {
-		return 0, false
-	}
-	return row, true
+// LegNumber is the ai_dungeon_leg.leg number the map gives the plan's leg leg. ok is false for a leg the map does not have (left out, or
+// outside the plan).
+func LegNumber(m LegMap, leg int) (int, bool) {
+	row, ok := m[leg]
+	return row, ok
 }
 
-// PlanLeg is the plan leg index of the exported row leg rowLeg (false when no leg has that number: a cut plan, or a leg outside it).
-func PlanLeg(p *dungeon.Plan, rowLeg int) (int, bool) {
-	for i := range p.Legs {
-		if n, ok := LegNumber(p, i); ok && n == rowLeg {
+// PlanLeg is the plan leg index the map gives the exported row leg rowLeg (false when no leg has that number: a cut plan, or a leg outside it).
+func PlanLeg(m LegMap, rowLeg int) (int, bool) {
+	for i, n := range m {
+		if n == rowLeg {
 			return i, true
 		}
 	}
 	return 0, false
+}
+
+// LegMap is the LegMap of these rows: the plan's legs the rows carry, matched to the rows' leg rows by name in plan order (the rows
+// keep the plan's order and only drop legs). A leg the rows were cut before has no row, so it is not in the map.
+func (r Rows) LegMap(p *dungeon.Plan) LegMap {
+	m := LegMap{}
+	next := 0
+	for i, l := range p.Legs {
+		if next < len(r.Legs) && r.Legs[next].Name == clip(l.Name, MaxLegName) {
+			m[i] = r.Legs[next].Leg
+			next++
+		}
+	}
+	return m
+}
+
+// LegNumber is LegNumber(r.LegMap(p), leg): the row leg number of the plan's leg leg, false when these rows have no such leg.
+func (r Rows) LegNumber(p *dungeon.Plan, leg int) (int, bool) {
+	return LegNumber(r.LegMap(p), leg)
 }
 
 // StepPoint is the point of the rows' step step (1-based), and false when the rows have no such step. A pull or boss step's point is

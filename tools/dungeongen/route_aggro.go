@@ -203,10 +203,8 @@ func RouteIntoLaterPacks(p *dungeon.Plan, cs []creature, ignore map[int]bool) ([
 	// legSkip is keyed by the plan leg index, but the route carries export legs: optional (or skipped) legs before it
 	// take no export number, so the legs after close up. Map each export leg back to its plan leg.
 	planOfExport := map[int]int{}
-	for li := range p.Legs {
-		if n, ok := planexport.LegNumber(p, li); ok {
-			planOfExport[n] = li
-		}
+	for li, n := range planexport.ExportedLegs(p, planexport.Options{}) {
+		planOfExport[n] = li
 	}
 	var owners []routePoint
 	for _, q := range pts {

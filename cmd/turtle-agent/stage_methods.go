@@ -135,7 +135,7 @@ func stageFirstRow(plan *dungeon.Plan, leg int, planner *navmesh.Planner, server
 	if plan.Legs[leg].Optional != nil || plan.Legs[leg].SkipExport {
 		return dungeon.Point{}, false, fmt.Sprintf("leg %s is skipped by default (optional or skip_export): the exporter of this build leaves it out of the rows; the leg's first plan point is used", plan.Legs[leg].Name)
 	}
-	rowLeg, ok := planexport.LegNumber(plan, leg)
+	rowLeg, ok := planexport.LegNumber(planexport.ExportedLegs(plan, planexport.Options{}), leg)
 	if !ok {
 		return dungeon.Point{}, false, fmt.Sprintf("leg %s has no rows here; the leg's first plan point is used", plan.Legs[leg].Name)
 	}
