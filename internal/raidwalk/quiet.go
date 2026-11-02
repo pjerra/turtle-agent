@@ -5,6 +5,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 	"math"
 	"sort"
 	"strings"
@@ -90,13 +91,14 @@ func PlanHomeSpawns(plan *dungeon.Plan) QuietHomeSpawns {
 
 // PlanQuietPatrols is the plan's patrol blocks as the revive quiet check reads them: every pull group's Patrol path,
 // once per patrol. The ID names the patrol in the refusal: the block's source when it has one (the world export's
-// "creature_movement <guid>"), else its entries. A plan with no patrol block returns nil.
+// "creature_movement <guid>"), else its entries. A plan with no patrol block returns nil. Each patrol carries the pack
+// it walks with (Pack); a patrol two pull groups walk with has none, so it can never be retired (fail safe).
 func PlanQuietPatrols(plan *dungeon.Plan) []QuietPatrol {
 	if plan == nil {
 		return nil
 	}
 	var out []QuietPatrol
-	seen := map[string]bool{}
+	seen := map[string]int{} // patrol key -> its index in out
 	for _, l := range plan.Legs {
 		for _, g := range l.PullGroups {
 			p := g.Patrol
@@ -114,14 +116,101 @@ func PlanQuietPatrols(plan *dungeon.Plan) []QuietPatrol {
 				}
 				key = b.String()
 			}
-			if seen[key] {
+			if i, ok := seen[key]; ok {
+				out[i].Pack = nil // a second pack walks this path: no one pack's units stand for it
 				continue
 			}
-			seen[key] = true
-			out = append(out, QuietPatrol{ID: id, Path: p.Path})
+			seen[key] = len(out)
+			out = append(out, QuietPatrol{ID: id, Path: p.Path, Pack: planPack(g, p)})
 		}
 	}
 	return out
+}
+
+// planPack is the pack a plan patrol walks with: the pull group's entries (the pull row's entries), its members (those
+// plus the patrol's own entries) and the centre its pull row stands at. Nil when the group names no entries.
+func planPack(g dungeon.PullGroup, p *dungeon.Patrol) *PatrolPack {
+	if len(g.Entries) == 0 || len(g.Positions) == 0 {
+		return nil
+	}
+	var c dungeon.Point
+	for _, pt := range g.Positions {
+		c.X, c.Y, c.Z = c.X+pt.X, c.Y+pt.Y, c.Z+pt.Z
+	}
+	n := float32(len(g.Positions))
+	c.X, c.Y, c.Z = c.X/n, c.Y/n, c.Z/n
+	members := append(append([]uint32{}, g.Entries...), p.Entries...)
+	return &PatrolPack{Entries: g.Entries, Members: members, Centre: c}
+}
+
+// PatrolPack is the plan pull group a plan patrol walks with. Entries are the group's entries (the pull row's), Centre
+// the point its pull row stands at, Members every entry the patrol's units may carry (the group's and the patrol's own).
+type PatrolPack struct {
+	Entries []uint32
+	Members []uint32
+	Centre  dungeon.Point
+}
+
+// pullRowTolYd is how far a pull row's point may stand from a pack's centre and still be that pack's row (the exporter
+// rounds the centre to float32).
+const pullRowTolYd = 0.5
+
+// PullStepOf is the step (counting from 1) of the one pull row of rows that pulls pack: its entries are the pack's and
+// its point its centre. 0 when no row or more than one matches, so the pack cannot be tied to a step.
+func PullStepOf(rows planexport.Rows, pack PatrolPack) int {
+	step := 0
+	for i, s := range rows.Steps {
+		if s.Kind != planexport.KindPull || !sameEntrySet(s.Entries, pack.Entries) {
+			continue
+		}
+		if dist3(dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}, pack.Centre) > pullRowTolYd {
+			continue
+		}
+		if step != 0 {
+			return 0
+		}
+		step = i + 1
+	}
+	return step
+}
+
+// sameEntrySet says two entry lists name the same entries, each counted once.
+func sameEntrySet(a, b []uint32) bool {
+	sa, sb := map[uint32]bool{}, map[uint32]bool{}
+	for _, e := range a {
+		sa[e] = true
+	}
+	for _, e := range b {
+		sb[e] = true
+	}
+	if len(sa) != len(sb) {
+		return false
+	}
+	for e := range sa {
+		if !sb[e] {
+			return false
+		}
+	}
+	return true
+}
+
+// PatrolPackDone says a plan patrol's pack is done, so its path no longer blocks the revive point: the pack's pull row
+// was pulled in this run and the run is past it (step > 0, pulled, progress beyond step), or the frames saw units of
+// the pack and every one is dead. hostileHP is the last frame health (percent, 0 dead) of each unit of the pack's
+// members that the frames saw this run; none seen is no evidence of death.
+func PatrolPackDone(step int, pulled bool, progress int, hostileHP []int) bool {
+	if step > 0 && pulled && progress > step {
+		return true
+	}
+	if len(hostileHP) == 0 {
+		return false
+	}
+	for _, hp := range hostileHP {
+		if hp != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // spawnLow is the spawn guid low a creature unit's GUID carries (bits 0-23): 0 when the GUID has no creature form.
@@ -200,12 +289,17 @@ func (r *QuietIdleReads) idleHome(u *objects.Unit, now time.Time) bool {
 	return math.Hypot(float64(prev.x-u.X), float64(prev.y-u.Y)) <= quietIdleMoveYd
 }
 
-// QuietPatrol is one patrol of the --patrols file, reduced to what the quiet check needs. Exempt is set by the
-// caller when it found a member visible far off whose distance grew over the last two checks (spec 3.5).
+// QuietPatrol is one patrol of the --patrols file or the plan, reduced to what the quiet check needs. Exempt is set by
+// the caller when it found a member visible far off whose distance grew over the last two checks (spec 3.5), or, for a
+// plan patrol, when its pack is done (PatrolPackDone). Pack is the plan pack a plan patrol walks with (nil for a
+// --patrols patrol, and for a plan patrol no one pack stands for). Note is the caller's remark on a patrol that still
+// blocks, said in its reason.
 type QuietPatrol struct {
 	ID     string
 	Path   []dungeon.Point
 	Exempt bool
+	Pack   *PatrolPack
+	Note   string
 }
 
 // QuietBlocker is one thing that keeps a revive point from being quiet: a hostile unit, by its own 45/80 yd rule (and
@@ -213,6 +307,7 @@ type QuietPatrol struct {
 type QuietBlocker struct {
 	// Patrol says this blocker is a patrol, not a unit: only Name and Dist are set.
 	Patrol   bool
+	Note     string // a patrol's remark (QuietPatrol.Note), said after its distance
 	GUID     string
 	Entry    uint32
 	Name     string
@@ -225,6 +320,9 @@ type QuietBlocker struct {
 // Reason is the blocker as QuietAt's reason names it.
 func (b QuietBlocker) Reason() string {
 	if b.Patrol {
+		if b.Note != "" {
+			return fmt.Sprintf("%s passes %.1f yd from the revive point (%s)", b.Name, b.Dist, b.Note)
+		}
 		return fmt.Sprintf("%s passes %.1f yd from the revive point", b.Name, b.Dist)
 	}
 	return fmt.Sprintf("%s %.1f yd from the revive point", b.Name, b.Dist)
@@ -283,7 +381,7 @@ func QuietBlockers(units []objects.Unit, patrols []QuietPatrol, p dungeon.Point,
 			if id == "" {
 				id = "patrol"
 			}
-			rs = append(rs, ranked{b: QuietBlocker{Patrol: true, Name: id, Dist: d}, rank: 2})
+			rs = append(rs, ranked{b: QuietBlocker{Patrol: true, Name: id, Dist: d, Note: pat.Note}, rank: 2})
 		}
 	}
 	sort.SliceStable(rs, func(i, j int) bool {

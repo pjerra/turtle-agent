@@ -1527,6 +1527,10 @@ func (w *walk) pullStarted(now time.Time, st tbm.RunStatus) {
 	}
 	w.pullPack = map[packet.GUID]bool{guid: true}
 	w.pullSeed = guid
+	if w.pulledSteps == nil {
+		w.pulledSteps = map[int]bool{}
+	}
+	w.pulledSteps[st.Step] = true
 	w.pullRow = packRowOf(w.rows, st.Step)
 	w.pullPackSeeded = false
 	w.pullJoinsAt, w.pullJoinsStep = now, st.Step
@@ -4038,9 +4042,10 @@ func (w *walk) quietOnce(ctx context.Context, st *quietState, p dungeon.Point) (
 	patrols := make([]raidwalk.QuietPatrol, 0, len(w.quietPatrols)+len(st.patrols))
 	patrols = append(patrols, w.quietPatrols...)
 	patrols = append(patrols, st.patrols...)
+	w.applyPlanPatrolState(patrols)
 	for j := range patrols {
 		if j >= len(w.patrolGUIDS) {
-			// A plan patrol has no member guids: it is never exempt, only its path blocks.
+			// A plan patrol has no member guids: the run's state decides it (applyPlanPatrolState), never the units' distances.
 			continue
 		}
 		best := -1.0
@@ -4073,6 +4078,42 @@ func (w *walk) quietOnce(ctx context.Context, st *quietState, p dungeon.Point) (
 		w.logLine(w.env.now(), fmt.Sprintf("quiet read at (%s %s %s): %s", num32(p.X), num32(p.Y), num32(p.Z), blockerWords(bs)))
 	}
 	return false, bs[0].Reason(), bs
+}
+
+// applyPlanPatrolState sets each plan patrol's exemption and remark for this read. A plan patrol's pack is done
+// (raidwalk.PatrolPackDone: its pull step was pulled and the run is past it, or every unit of the pack the frames saw
+// is dead), and then its path stops blocking. A patrol whose pack cannot be tied to its units, or whose pull step is
+// not in the rows, keeps blocking and says so in its reason (fail safe).
+func (w *walk) applyPlanPatrolState(patrols []raidwalk.QuietPatrol) {
+	progress := 0
+	if w.haveStatus {
+		progress = w.lastStatus.Step
+	}
+	for j := len(w.quietPatrols); j < len(patrols); j++ {
+		p := &patrols[j]
+		p.Exempt, p.Note = false, ""
+		if p.Pack == nil {
+			p.Note = "its pull group cannot be tied to its units: blocks by path"
+			continue
+		}
+		step := raidwalk.PullStepOf(w.rows, *p.Pack)
+		pulled := step > 0 && w.pulledSteps[step]
+		p.Exempt = raidwalk.PatrolPackDone(step, pulled, progress, w.packHostileHP(p.Pack.Members))
+		if !p.Exempt && step == 0 {
+			p.Note = "its pull row is not in the plan's rows: blocks by path"
+		}
+	}
+}
+
+// packHostileHP is the last frame health (percent, 0 dead) of every hostile of the entries the frames saw this run.
+func (w *walk) packHostileHP(entries []uint32) []int {
+	var hp []int
+	for _, h := range w.hostiles {
+		if inEntries(entries, h.entry) {
+			hp = append(hp, h.hppct)
+		}
+	}
+	return hp
 }
 
 // blockerKey identifies a blocker set for D-E's log-on-a-change rule: the units and patrols by identity and state,
