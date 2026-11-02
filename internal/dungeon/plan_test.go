@@ -389,7 +389,7 @@ func TestCampValidation(t *testing.T) {
 		"hold":        `,"camp":{"x":0,"y":0,"z":0},"approach":[{"x":40,"y":0,"z":0}],"hold":{"instance_data":1,"spot":{"x":1,"y":0,"z":0},"radius":30,"timeout_s":600}`,
 		"ambush":      `,"camp":{"x":0,"y":0,"z":0},"approach":[{"x":40,"y":0,"z":0}],"ambush":true`,
 		"no approach": `,"camp":{"x":0,"y":0,"z":0}`,
-		"drag 51":     `,"camp":{"x":0,"y":0,"z":0},"approach":[{"x":-11,"y":0,"z":0}]`,
+		"drag 51":     `,"camp":{"x":0,"y":0,"z":0},"approach":[{"x":51,"y":0,"z":0}]`,
 		"tag far":     `,"camp":{"x":100,"y":0,"z":0},"approach":[{"x":111,"y":0,"z":0}]`,
 	} {
 		if _, err := Parse("t.json", []byte(fmt.Sprintf(base, bad))); err == nil || !strings.Contains(err.Error(), "camp") {
