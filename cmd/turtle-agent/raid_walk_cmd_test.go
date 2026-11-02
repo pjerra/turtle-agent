@@ -1117,7 +1117,7 @@ func newFixture(t *testing.T) *fixture {
 	f.opts = raidWalkOptions{
 		plan: "onyxias_lair", server: "m910q", holder: "raid-walk-onyxias_lair", dir: "../../dungeons",
 		until: "boss", speed: 1.0, enter: "auto", maxRunMinutes: 90, pausedWait: 10 * time.Minute,
-		resetWait: 5 * time.Minute, wipeResume: 1, wipeRest: 10 * time.Minute, out: out,
+		resetWait: 5 * time.Minute, wipeResume: 1, wipeRest: 10 * time.Minute, hireSettle: hireSettleWait, out: out,
 	}
 	f.env = walkEnv{
 		now:   clock.now,
@@ -3962,6 +3962,63 @@ func TestRaidWalkWaitsForHiresToSettle(t *testing.T) {
 	if gear.IsZero() || gear.Sub(lastHire) < hireSettleWait {
 		t.Fatalf("the refit went out %s after the last hire, want at least %s", gear.Sub(lastHire), hireSettleWait)
 	}
+}
+
+// TestRaidWalkHireSettleFlag (TortoiseBots#1367 proof): --hire-settle 0 sends the refit straight after the last
+// hire with no sleep, so one live walk can prove the bind keeps its late joiners; the default is the 20 s settle,
+// and a negative value is a usage error.
+func TestRaidWalkHireSettleFlag(t *testing.T) {
+	t.Run("0 skips the wait", func(t *testing.T) {
+		f := newFixture(t)
+		f.opts.hireSettle = 0
+		var slept []time.Duration
+		f.env.sleep = func(ctx context.Context, d time.Duration) error { // the fake env records every sleep
+			slept = append(slept, d)
+			return f.clock.sleep(ctx, d)
+		}
+		f.defaultRun("onyxias_lair")
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+		}
+		var lastHire, gear time.Time
+		for i, line := range f.agent.gm {
+			switch {
+			case strings.HasPrefix(line, ".bot hire raid "):
+				lastHire = f.agent.gmAt[i]
+			case strings.HasPrefix(line, ".bot gear raid "):
+				gear = f.agent.gmAt[i]
+			}
+		}
+		if gear.IsZero() || !gear.Equal(lastHire) {
+			t.Fatalf("the refit went out %s after the last hire, want no wait at all", gear.Sub(lastHire))
+		}
+		for _, d := range slept {
+			if d == hireSettleWait {
+				t.Fatalf("the walk slept the %s settle with --hire-settle 0: %v", hireSettleWait, slept)
+			}
+		}
+		log, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(log), "no wait for the hires' join summons (--hire-settle 0)") {
+			t.Fatalf("run.log carries no --hire-settle 0 line: %s", log)
+		}
+	})
+	t.Run("default is hireSettleWait", func(t *testing.T) {
+		o, code := parseRaidWalkArgs([]string{"onyxias_lair"}, io.Discard)
+		if code != exitOK {
+			t.Fatalf("parse exit %d, want 0", code)
+		}
+		if o.hireSettle != hireSettleWait {
+			t.Fatalf("--hire-settle default %s, want %s", o.hireSettle, hireSettleWait)
+		}
+	})
+	t.Run("a negative value is a usage error", func(t *testing.T) {
+		if _, code := parseRaidWalkArgs([]string{"--hire-settle", "-1s", "onyxias_lair"}, io.Discard); code != exitUsage {
+			t.Fatalf("--hire-settle -1s: exit %d, want %d", code, exitUsage)
+		}
+	})
 }
 
 func TestRaidWalkDashboardOffStillWalks(t *testing.T) {

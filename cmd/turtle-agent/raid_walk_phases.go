@@ -379,9 +379,13 @@ func (w *walk) phaseHire(ctx context.Context) error {
 	default:
 		return stopf(exitRaidWalkFailed, "hire: asked for %d bots, the party has %d", requested, hired)
 	}
-	w.logLine(w.env.now(), fmt.Sprintf("waiting %s for the last hires' join summons", durWords(hireSettleWait)))
-	if err := w.env.sleep(ctx, hireSettleWait); err != nil {
-		return stopf(exitRaidWalkFailed, "interrupted")
+	if w.opts.hireSettle == 0 {
+		w.logLine(w.env.now(), "no wait for the hires' join summons (--hire-settle 0)")
+	} else {
+		w.logLine(w.env.now(), fmt.Sprintf("waiting %s for the last hires' join summons", durWords(w.opts.hireSettle)))
+		if err := w.env.sleep(ctx, w.opts.hireSettle); err != nil {
+			return stopf(exitRaidWalkFailed, "interrupted")
+		}
 	}
 	// The refit at the walk's tier (amendment G1): the hire wears the raid's minimum kit, and a comparison run its
 	// override. A failed refit is a failed walk: the tier is what the run is judged against.
@@ -406,7 +410,8 @@ func (w *walk) phaseHire(ctx context.Context) error {
 // hireSettleWait follows the last hire batch before the refit and the bind. A big hire answers while its bots are
 // still on their join summon (about one a second), and a hire whose join lands after the bind is removed from the
 // group by the server. Walk 12 (ZG, 17-bot batches): the last join came 4-8 s after the answer. The party list is
-// no help: it names a hire before its join, and its zone there stays stale after it.
+// no help: it names a hire before its join, and its zone there stays stale after it. This is the default of
+// --hire-settle; 0 skips the wait, which is how a walk proves TortoiseBots#1367's bind keeps its late joiners.
 const hireSettleWait = 20 * time.Second
 
 // hireReply is one TBM:HIRE_RAID line read field by field (TortoiseBots commands/Hire.cpp:124):
