@@ -122,6 +122,9 @@ func TestParseErrors(t *testing.T) {
 		{"bad boss team", leg(`{"to":{"x":0,"y":0,"z":0},"boss":{"entry":4,"team":"Horde","position":{"x":0,"y":0,"z":0}}}`), `legs[1].boss.team: "Horde" is neither`},
 		{"boss loot item no entry", leg(`{"to":{"x":0,"y":0,"z":0},"boss":{"entry":4,"loot_item":{"name":"x"},"position":{"x":0,"y":0,"z":0}}}`), "legs[1].boss.loot_item.entry: required"},
 		{"timeout", step(`{"wait_for":{"timeout_s":9999,"hostiles_gone":{"radius":5}}}`), "legs[0].steps[0].wait_for.timeout_s: 9999 s is outside 1-600"},
+		{"group max_bodies zero", leg(`{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[5],"positions":[{"x":0,"y":0,"z":0}],"max_bodies":0}]}`), "legs[1].pull_groups[0].max_bodies: 0: use 1-80"},
+		{"group max_bodies past 80", leg(`{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[5],"positions":[{"x":0,"y":0,"z":0}],"max_bodies":81}]}`), "legs[1].pull_groups[0].max_bodies: 81: use 1-80"},
+		{"plan pull_ceiling past 80", `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"pull_ceiling":81,"legs":[{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[5],"positions":[{"x":0,"y":0,"z":0}]}]}]}`, "pull_ceiling: 81: use 1-80"},
 	}
 	for _, c := range cases {
 		_, err := Parse("t.json", []byte(c.in))
