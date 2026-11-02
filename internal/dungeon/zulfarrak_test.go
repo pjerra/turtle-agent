@@ -114,7 +114,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 	}
 	// The hired party brings a mage for the big packs (owner decision 2026-10-14). Its Polymorph goes on a Sandfury Shadowhunter in any
 	// pack (Hex on the tank; owner rule), then Witch Doctors, then Shadowcasters.
-	if fmt.Sprint(p.HireComposition) != "[warrior:tank priest:healer mage:dps hunter:dps warlock:dps]" || fmt.Sprint(p.CCPriority) != "[7246 5648]" || fmt.Sprint(p.CCAlways) != "[7246]" || fmt.Sprint(p.KillFirst) != "[7785 8179 5650 7247]" || fmt.Sprint(p.SummonedKillFirst) != "[7785 8179]" {
+	if fmt.Sprint(p.HireComposition) != "[warrior:tank priest:healer mage:dps hunter:dps warlock:dps]" || fmt.Sprint(p.CCPriority) != "[7246 5648]" || fmt.Sprint(p.CCAlways) != "[7246]" || fmt.Sprint(p.KillFirst) != "[7785 8179 5650 7247 7608 7606 7605]" || fmt.Sprint(p.SummonedKillFirst) != "[7785 8179]" {
 		t.Errorf("hire %v cc_priority %v cc_always %v kill_first %v", p.HireComposition, p.CCPriority, p.CCAlways, p.KillFirst)
 	}
 	// Entry: no game_tele inside the instance, so the plan names the portal only (area trigger 924 on map 1) and the outside tele.
@@ -179,7 +179,8 @@ func TestZulfarrakStairsEventOrder(t *testing.T) {
 	w := zfLeg(t, p, "weegli_door")
 	if len(w.Steps) != 3 || w.Steps[0].WaitFor == nil || w.Steps[0].WaitFor.Unit == nil || w.Steps[0].WaitFor.Unit.State != "seen" ||
 		w.Steps[1].Gossip == nil || w.Steps[1].Gossip.NPC != 7607 || w.Steps[1].Gossip.By != "tank" ||
-		w.Steps[2].WaitFor == nil || w.Steps[2].WaitFor.GameObject == nil || w.Steps[2].WaitFor.GameObject.Entry != 146084 {
+		w.Steps[2].WaitFor == nil || w.Steps[2].WaitFor.GameObject == nil || w.Steps[2].WaitFor.GameObject.Entry != 146084 ||
+		w.Steps[2].WaitFor.GameObject.State != "active_alt" { // Weegli's blast opens the End Door with the alternative state (zulfarrak.cpp:423; r8)
 		t.Errorf("weegli_door: %+v", w.Steps)
 	}
 	// Weegli's menu has one line (zulfarrak.cpp:497): option 0, by number so that the run leader can send it; the wait before it carries the
@@ -197,6 +198,30 @@ func TestZulfarrakStairsEventOrder(t *testing.T) {
 	}
 	if y.Steps[2].Gossip == nil || y.Steps[2].Gossip.NPC != 7604 || y.Boss == nil || y.Boss.Entry != 7604 || fmt.Sprint(y.Boss.First) != "[7608 7606 7605]" {
 		t.Errorf("bly: %+v %+v", y.Steps, y.Boss)
+	}
+	// The run leader's form of the leg (2026-10-21): Bly's menu has one line (zulfarrak.cpp:184), so option 0 by number; the three unit waits
+	// are agent_only (no rows); the boss's hold has no instance data, so it is done by its units on the leg's own spot, 11 yd north of Bly,
+	// with every crew place (1874-1895 1199-1206) inside its radius. The hold has no kill order: the crew is in the plan's kill_first, in
+	// boss.first's order, after the units the plan focused before.
+	if g := y.Steps[2].Gossip; g.Option == nil || *g.Option != 0 || g.Text != "" || g.Talker() != GossipByTank {
+		t.Errorf("Bly's gossip is option 0 by the tank, not a text: %+v", g)
+	}
+	for _, i := range []int{0, 1, 3} {
+		if w := y.Steps[i].WaitFor; w == nil || w.Unit == nil || w.AgentOnly == "" || w.Hold != nil {
+			t.Errorf("bly steps[%d] is an agent_only unit wait: %+v", i, w)
+		}
+	}
+	h := y.Boss.Hold
+	if h == nil || h.Data != 0 || h.Value != nil || h.Spot != y.To || h.Radius != 25 || h.TimeoutS != 300 || len(h.Entries) != 0 {
+		t.Fatalf("bly's boss hold: %+v (to %+v)", h, y.To)
+	}
+	for _, place := range []Point{{X: 1874, Y: 1199}, {X: 1895, Y: 1199}, {X: 1874, Y: 1206}, {X: 1895, Y: 1206}, y.Boss.Position} {
+		if d := float32(math.Hypot(float64(h.Spot.X-place.X), float64(h.Spot.Y-place.Y))); d > h.Radius {
+			t.Errorf("crew place %+v is %.1f yd from the hold spot (radius %g)", place, d, h.Radius)
+		}
+	}
+	if fmt.Sprint(p.KillFirst[len(p.KillFirst)-3:]) != fmt.Sprint(y.Boss.First) {
+		t.Errorf("kill_first %v does not end with bly's first %v", p.KillFirst, y.Boss.First)
 	}
 	if u := zfLeg(t, p, "ukorz").Boss; u == nil || u.Entry != 7267 || fmt.Sprint(u.First) != "[7797]" {
 		t.Errorf("ukorz: %+v", u)

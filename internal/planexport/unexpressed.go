@@ -36,6 +36,8 @@ var unexpressedWhy = map[string]string{
 	"stand (loot_object, ritual)": "no stand point in the row: the bots walk to the object themselves",
 	"object spawn/range":          "the row names the object by entry near its point only (the module's own search range)",
 	"loot_object batch":           "no batches: the chests are opened one step at a time",
+	"wait_for agent_only":         "no row: the plan says why the run leader needs none (quoted); the agent's driver runs the wait",
+	"boss.first under a hold":     "the hold row lists them as the event's units, not as a kill order; only the plan's kill_first is focused",
 	"wait_for with a hold":        "the row is the wait's hold (the event's spot, fought until its instance data value); the wait's own condition (a unit, an object, hostiles gone) and its fail_text are the agent's only",
 	"gossip stand/by/retry_s":     "the row is the order `cmd gossip <npc> <lead bot> <option>`: the lead bot talks (the tank or carrier of a plan is the same bot), walks to the NPC itself, asks once (no retry), and ends on the order's ACK; the stand point, the talker and retry_s are the agent's only (fail_text is in the row's comment)",
 	"area_trigger expect/timeout": "only the walk into the zone is a row (a move to the stand point); the expect check and its timeout are not run (the comment names the expect)",
@@ -96,7 +98,7 @@ func unexpressed(p *dungeon.Plan, opt Options, upto int) []string {
 		if li >= upto {
 			break
 		}
-		if l.Optional != nil || slices.Contains(opt.SkipLegs, l.Name) {
+		if (l.Optional != nil && !slices.Contains(opt.WithOptional, l.Name)) || slices.Contains(opt.SkipLegs, l.Name) {
 			continue // left out of the export, with its own warning
 		}
 		leg := fmt.Sprintf("leg %d (%s)", li, l.Name)
@@ -141,6 +143,9 @@ func unexpressed(p *dungeon.Plan, opt Options, upto int) []string {
 			if b.NeedsWalk {
 				add("needs_walk", fmt.Sprintf("%s boss %d", leg, b.Entry))
 			}
+			if b.Hold != nil && len(b.First) > 0 {
+				add("boss.first under a hold", fmt.Sprintf("%s boss %d first %v", leg, b.Entry, b.First))
+			}
 		}
 		steps := func(list string, ss []dungeon.Step) {
 			for si, st := range ss {
@@ -163,6 +168,8 @@ func unexpressed(p *dungeon.Plan, opt Options, upto int) []string {
 					}
 				case st.WaitFor != nil && st.WaitFor.Hold != nil:
 					add("wait_for with a hold", at)
+				case st.WaitFor != nil && st.WaitFor.AgentOnly != "":
+					add("wait_for agent_only", fmt.Sprintf("%s %q", at, st.WaitFor.AgentOnly))
 				case st.WaitFor != nil && st.WaitFor.GameObject != nil:
 					ref(st.WaitFor.GameObject.ObjectRef)
 				case st.Ritual != nil:
