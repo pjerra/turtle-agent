@@ -28,6 +28,29 @@ func TestConstantsMirrorTheRunLeader(t *testing.T) {
 	}
 }
 
+// A spawn with no detection range never wakes (worldspawn.AggroRadius: 0 for
+// it): a mob with DetectionYd 0 next to the walk is not counted, while one
+// with DetectionYd 20 at the same spot wakes (Walk).
+func TestNoDetectionRangeNeverWakes(t *testing.T) {
+	mk := func(det float32) Result {
+		mobs := []Mob{
+			{Guid: 1, Pos: pt(0, 0, 0), Level: 60, DetectionYd: 20, Faction: 14},
+			{Guid: 2, Pos: pt(100, 0, 0), Level: 60, DetectionYd: det, Faction: 15},
+		}
+		g := Geometry{
+			Walk: []MobPoint{pt(79, 0, 0)}, WalkSpreadYd: 3,
+			Stand: pt(140, 0, 0), StandSpreadYd: 3,
+		}
+		return Estimate(mobs, 0, g, Params{PartyLevel: 60, Rate: 1, RingYd: 20, RingHops: 2, FloorDz: 12, Sees: alwaysSees})
+	}
+	if got := mk(0); got.Bodies != 1 {
+		t.Fatalf("detection 0: bodies %d, want 1 (never wakes)", got.Bodies)
+	}
+	if got := mk(20); got.Bodies != 2 {
+		t.Fatalf("detection 20: bodies %d, want 2 (the walk wakes it)", got.Bodies)
+	}
+}
+
 func TestSharedFixtureListsTheNineCases(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("testdata", "aggroest_cases.json"))
 	if err != nil {
