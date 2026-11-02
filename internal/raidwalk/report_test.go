@@ -239,3 +239,13 @@ func TestParseFightSet(t *testing.T) {
 		t.Error("a file without an id was taken as a fight")
 	}
 }
+
+func TestPullingTarget(t *testing.T) {
+	e, g, ok := PullingTarget("pulling 11368 0xf130002c6800bffa (order 1; shot from where it stands); joiners not read")
+	if !ok || e != 11368 || g.String() != "0xF130002C6800BFFA" {
+		t.Fatalf("pulling note: %d %v %v", e, g, ok)
+	}
+	if _, _, ok := PullingTarget("fighting: the tank engages 11372 on arrival"); ok {
+		t.Fatal("a non-pull note parsed as a pull")
+	}
+}

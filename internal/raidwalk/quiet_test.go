@@ -7,6 +7,7 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/pjerra/turtle-agent/internal/packet"
 )
 
 // quietNow is the read time the quiet tests use.
@@ -14,14 +15,147 @@ var quietNow = time.Unix(1700000000, 0)
 
 // quietAt is QuietAt with a fresh read memory: one read, so D-A's two-read idle exemption exempts nothing.
 func quietAt(units []objects.Unit, patrols []QuietPatrol, p dungeon.Point) (bool, string) {
-	return QuietAt(units, patrols, p, NewQuietIdleReads(), quietNow)
+	return QuietAt(units, patrols, p, NewQuietIdleReads(), nil, quietNow)
 }
 
 // quietHome is QuietAt after the two reads D-A's exemption needs: the same units, quietIdleHold apart at the same spot.
 func quietHome(units []objects.Unit, patrols []QuietPatrol, p dungeon.Point) (bool, string) {
-	idle := NewQuietIdleReads()
-	QuietAt(units, patrols, p, idle, quietNow)
-	return QuietAt(units, patrols, p, idle, quietNow.Add(quietIdleHold))
+	return quietProvenAt(units, patrols, p, nil, atHomeAll(units))
+}
+
+// atHomeAll is the home list that proves every given unit at home: a spawn of
+// its entry where it stands. Nil units: nil (no plan data, no exemption).
+func atHomeAll(units []objects.Unit) QuietHomeSpawns {
+	if units == nil {
+		return nil
+	}
+	homes := make(QuietHomeSpawns, 0, len(units))
+	for _, u := range units {
+		homes = append(homes, QuietHomeSpawn{Entry: u.Entry, At: dungeon.Point{X: u.X, Y: u.Y, Z: u.Z}})
+	}
+	return homes
+}
+
+// quietProvenAt is QuietAt after the two reads D-A's exemption needs, with the
+// given plan spawns: the same units, quietIdleHold apart at the same spot.
+func quietProvenAt(units []objects.Unit, patrols []QuietPatrol, p dungeon.Point, idle *QuietIdleReads, homes QuietHomeSpawns) (bool, string) {
+	if idle == nil {
+		idle = NewQuietIdleReads()
+	}
+	QuietAt(units, patrols, p, idle, homes, quietNow)
+	return QuietAt(units, patrols, p, idle, homes, quietNow.Add(quietIdleHold))
+}
+
+// quietProven is quietProvenAt with a fresh read memory.
+func quietProven(units []objects.Unit, patrols []QuietPatrol, p dungeon.Point, homes QuietHomeSpawns) (bool, string) {
+	return quietProvenAt(units, patrols, p, nil, homes)
+}
+
+// Codex HIGH (turtle-agent#360): stillness is not proof of home. A paused
+// patrol at 31-45 yd passed the old stillness check, and the raid could be
+// summoned next to it. The idle exemption now needs a proven home: a plan
+// spawn (by spawn guid when the plan names one, else by entry) within 3 yd of
+// where the unit stands, and never for a patrol group's unit. No plan spawn
+// data: no exemption (the strict 45 yd rule).
+func TestQuietAtIdleNeedsProvenHome(t *testing.T) {
+	p := dungeon.Point{}
+	const entry = 14532
+	at := func(x float32) objects.Unit {
+		u := hostileAt("Razzashi Venombrood", x, false, false)
+		u.Entry = entry
+		return u
+	}
+	spawn := func(x float32, patrol bool) QuietHomeSpawns {
+		return QuietHomeSpawns{{Entry: entry, At: dungeon.Point{X: x}, Patrol: patrol}}
+	}
+	// (a) still and calm at 35 yd, but 8 yd from its plan spawn: blocks.
+	if ok, reason := quietProven([]objects.Unit{at(35)}, nil, p, spawn(43, false)); ok {
+		t.Fatalf("(a) idle 35 yd out but 8 yd from its spawn: quiet, want blocked (%s)", reason)
+	}
+	// (b) the same unit within 2 yd of its spawn: exempt after the two reads.
+	if ok, reason := quietProven([]objects.Unit{at(35)}, nil, p, spawn(36.5, false)); !ok {
+		t.Fatalf("(b) idle 35 yd out at its spawn: not quiet (%s)", reason)
+	}
+	// One read is still no proof, even at home.
+	if ok, _ := QuietAt([]objects.Unit{at(35)}, nil, p, NewQuietIdleReads(), spawn(36.5, false), quietNow); ok {
+		t.Fatal("idle at home on one read: quiet, want blocked")
+	}
+	// (c) a patrol group's unit at its own spawn: never exempt.
+	if ok, reason := quietProven([]objects.Unit{at(35)}, nil, p, spawn(35, true)); ok {
+		t.Fatalf("(c) a patrol-group unit at its spawn: quiet, want blocked (%s)", reason)
+	}
+	// (d) no plan spawn data: no exemption.
+	if ok, reason := quietProven([]objects.Unit{at(35)}, nil, p, nil); ok {
+		t.Fatalf("(d) idle 35 yd out with no plan data: quiet, want blocked (%s)", reason)
+	}
+}
+
+// QuietHomeSpawns marks the plan's patrol groups: their units are never
+// exempt, even standing at the group's own positions. The boss and the
+// left-alone spawns count as homes.
+func TestQuietHomeSpawnsMarksPatrolGroups(t *testing.T) {
+	plan := &dungeon.Plan{Legs: []dungeon.Leg{{
+		PullGroups: []dungeon.PullGroup{
+			{Entries: []uint32{7}, Positions: []dungeon.Point{{X: 40}}},
+			{Entries: []uint32{9}, Positions: []dungeon.Point{{X: 35}}, Patrol: &dungeon.Patrol{Entries: []uint32{9}}},
+		},
+		Boss:  &dungeon.Boss{Entry: 11, Position: dungeon.Point{X: 36}},
+		Leave: []dungeon.Leave{{Entry: 12, Spawn: 77, At: dungeon.Point{X: 38}}},
+	}}}
+	homes := PlanHomeSpawns(plan)
+	byEntry := map[uint32]QuietHomeSpawn{}
+	for _, h := range homes {
+		byEntry[h.Entry] = h
+	}
+	if h := byEntry[7]; h.Patrol {
+		t.Fatal("a stationary group's spawn is marked patrol")
+	}
+	if h := byEntry[9]; !h.Patrol {
+		t.Fatal("a patrol group's spawn is not marked patrol")
+	}
+	if h := byEntry[11]; h.Patrol || h.At.X != 36 {
+		t.Fatalf("the boss is not a home spawn at its position: %+v", h)
+	}
+	if h := byEntry[12]; h.Patrol || h.Spawn != 77 || h.At.X != 38 {
+		t.Fatalf("a left-alone spawn is not a home spawn with its guid: %+v", h)
+	}
+	p := dungeon.Point{}
+	steady := func(x float32, entry uint32) objects.Unit {
+		u := hostileAt("mob", x, false, false)
+		u.Entry = entry
+		return u
+	}
+	// End to end: the patrol-group unit at its own position still blocks.
+	if ok, reason := quietProven([]objects.Unit{steady(35, 9)}, nil, p, homes); ok {
+		t.Fatalf("a patrol-group unit at its position: quiet, want blocked (%s)", reason)
+	}
+	// The stationary-group unit at its own position is exempt.
+	if ok, reason := quietProven([]objects.Unit{steady(40, 7)}, nil, p, homes); !ok {
+		t.Fatalf("a stationary-group unit at its position: not quiet (%s)", reason)
+	}
+	// The boss at his position is exempt too.
+	if ok, reason := quietProven([]objects.Unit{steady(36, 11)}, nil, p, homes); !ok {
+		t.Fatalf("the boss at his position: not quiet (%s)", reason)
+	}
+}
+
+// A spawn guid pins the spawn: a unit carrying another spawn's guid is not at
+// this one, even with the same entry and within 3 yd of its point.
+func TestQuietHomeSpawnMatchesByGuid(t *testing.T) {
+	p := dungeon.Point{}
+	homes := QuietHomeSpawns{{Entry: 14532, Spawn: 1234, At: dungeon.Point{X: 35}}}
+	withGUID := func(low uint32) objects.Unit {
+		u := hostileAt("Razzashi Venombrood", 35, false, false)
+		u.Entry = 14532
+		u.GUID = packet.GUID(uint64(packet.HighUnit)<<48 | uint64(14532)<<24 | uint64(low))
+		return u
+	}
+	if ok, reason := quietProven([]objects.Unit{withGUID(1234)}, nil, p, homes); !ok {
+		t.Fatalf("the unit of spawn 1234 at its point: not quiet (%s)", reason)
+	}
+	if ok, reason := quietProven([]objects.Unit{withGUID(5678)}, nil, p, homes); ok {
+		t.Fatalf("the unit of spawn 5678 at spawn 1234's point: quiet, want blocked (%s)", reason)
+	}
 }
 
 func hostileAt(name string, x float32, moving, dead bool) objects.Unit {
@@ -97,45 +231,46 @@ func TestQuietAtIgnoresIdleUnitBeyondReach(t *testing.T) {
 func TestQuietAtIdleNeedsTwoReads(t *testing.T) {
 	p := dungeon.Point{}
 	u := hostileAt("Razzashi Venombrood", 44.6, false, false)
+	homes := atHomeAll([]objects.Unit{u})
 	idle := NewQuietIdleReads()
-	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, idle, quietNow); ok {
+	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, idle, homes, quietNow); ok {
 		t.Fatal("idle on read 1: quiet, want blocked (no earlier read saw it idle)")
 	}
 	moving := hostileAt("Razzashi Venombrood", 44.6, true, false)
-	if ok, _ := QuietAt([]objects.Unit{moving}, nil, p, idle, quietNow.Add(quietIdleHold)); ok {
+	if ok, _ := QuietAt([]objects.Unit{moving}, nil, p, idle, homes, quietNow.Add(quietIdleHold)); ok {
 		t.Fatal("idle on read 1, moving on read 2: quiet, want blocked")
 	}
 	// Read 2 did not see it idle, so read 3 starts the pair over: a single idle read again.
-	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, idle, quietNow.Add(2*quietIdleHold)); ok {
+	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, idle, homes, quietNow.Add(2*quietIdleHold)); ok {
 		t.Fatal("an idle read after a moving one: quiet, want blocked (the moving read forgot the pair)")
 	}
 	// Read 4, quietIdleHold after read 3 at the same spot: the pair is complete.
-	if ok, reason := QuietAt([]objects.Unit{u}, nil, p, idle, quietNow.Add(3*quietIdleHold)); !ok {
+	if ok, reason := QuietAt([]objects.Unit{u}, nil, p, idle, homes, quietNow.Add(3*quietIdleHold)); !ok {
 		t.Fatalf("two idle reads quietIdleHold apart at the same spot: not quiet (%s)", reason)
 	}
 
 	// The two reads must be quietIdleHold apart: a second read too soon is no pair.
 	soon := NewQuietIdleReads()
-	QuietAt([]objects.Unit{u}, nil, p, soon, quietNow)
-	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, soon, quietNow.Add(quietIdleHold-time.Second)); ok {
+	QuietAt([]objects.Unit{u}, nil, p, soon, homes, quietNow)
+	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, soon, homes, quietNow.Add(quietIdleHold-time.Second)); ok {
 		t.Fatal("two idle reads 4 s apart: quiet, want blocked")
 	}
 
 	// And within quietIdleMoveYd of the SAME position: a unit idle at two spots is a wanderer, not at home.
 	near := NewQuietIdleReads()
-	QuietAt([]objects.Unit{u}, nil, p, near, quietNow)
+	QuietAt([]objects.Unit{u}, nil, p, near, homes, quietNow)
 	shifted := hostileAt("Razzashi Venombrood", 44.9, false, false)
-	if ok, reason := QuietAt([]objects.Unit{shifted}, nil, p, near, quietNow.Add(quietIdleHold)); !ok {
+	if ok, reason := QuietAt([]objects.Unit{shifted}, nil, p, near, atHomeAll([]objects.Unit{shifted}), quietNow.Add(quietIdleHold)); !ok {
 		t.Fatalf("idle 0.3 yd apart: not quiet (%s)", reason)
 	}
 	far := NewQuietIdleReads()
-	QuietAt([]objects.Unit{u}, nil, p, far, quietNow)
+	QuietAt([]objects.Unit{u}, nil, p, far, homes, quietNow)
 	moved := hostileAt("Razzashi Venombrood", 43.0, false, false)
-	if ok, _ := QuietAt([]objects.Unit{moved}, nil, p, far, quietNow.Add(quietIdleHold)); ok {
+	if ok, _ := QuietAt([]objects.Unit{moved}, nil, p, far, atHomeAll([]objects.Unit{moved}), quietNow.Add(quietIdleHold)); ok {
 		t.Fatal("idle at two spots over 1 yd apart: quiet, want blocked")
 	}
 	// The same spot twice again, quietIdleHold later: the pair completes there.
-	if ok, reason := QuietAt([]objects.Unit{moved}, nil, p, far, quietNow.Add(2*quietIdleHold)); !ok {
+	if ok, reason := QuietAt([]objects.Unit{moved}, nil, p, far, atHomeAll([]objects.Unit{moved}), quietNow.Add(2*quietIdleHold)); !ok {
 		t.Fatalf("idle at the same spot on two reads: not quiet (%s)", reason)
 	}
 }
@@ -145,33 +280,34 @@ func TestQuietAtIdleNeedsTwoReads(t *testing.T) {
 func TestQuietAtIdlePairNeedsFreshConsecutiveReads(t *testing.T) {
 	p := dungeon.Point{}
 	u := hostileAt("Razzashi Venombrood", 44.6, false, false)
+	homes := atHomeAll([]objects.Unit{u})
 
 	gone := NewQuietIdleReads()
-	QuietAt([]objects.Unit{u}, nil, p, gone, quietNow)
-	QuietAt(nil, nil, p, gone, quietNow.Add(quietIdleHold)) // a complete read without the unit
-	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, gone, quietNow.Add(2*quietIdleHold)); ok {
+	QuietAt([]objects.Unit{u}, nil, p, gone, homes, quietNow)
+	QuietAt(nil, nil, p, gone, homes, quietNow.Add(quietIdleHold)) // a complete read without the unit
+	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, gone, homes, quietNow.Add(2*quietIdleHold)); ok {
 		t.Fatal("idle, absent, idle: quiet, want blocked (the absent read forgot the first sighting)")
 	}
 
 	dead := NewQuietIdleReads()
-	QuietAt([]objects.Unit{u}, nil, p, dead, quietNow)
+	QuietAt([]objects.Unit{u}, nil, p, dead, homes, quietNow)
 	corpse := u
 	corpse.Dead = true
-	QuietAt([]objects.Unit{corpse}, nil, p, dead, quietNow.Add(quietIdleHold))
-	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, dead, quietNow.Add(2*quietIdleHold)); ok {
+	QuietAt([]objects.Unit{corpse}, nil, p, dead, homes, quietNow.Add(quietIdleHold))
+	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, dead, homes, quietNow.Add(2*quietIdleHold)); ok {
 		t.Fatal("idle, dead, idle again: quiet, want blocked")
 	}
 
 	old := NewQuietIdleReads()
-	QuietAt([]objects.Unit{u}, nil, p, old, quietNow)
-	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, old, quietNow.Add(quietIdleMaxGap+time.Second)); ok {
+	QuietAt([]objects.Unit{u}, nil, p, old, homes, quietNow)
+	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, old, homes, quietNow.Add(quietIdleMaxGap+time.Second)); ok {
 		t.Fatal("two idle reads over quietIdleMaxGap apart: quiet, want blocked")
 	}
 
 	failed := NewQuietIdleReads()
-	QuietAt([]objects.Unit{u}, nil, p, failed, quietNow)
+	QuietAt([]objects.Unit{u}, nil, p, failed, homes, quietNow)
 	failed.Reset() // what quietOnce does on a failed units read
-	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, failed, quietNow.Add(quietIdleHold)); ok {
+	if ok, _ := QuietAt([]objects.Unit{u}, nil, p, failed, homes, quietNow.Add(quietIdleHold)); ok {
 		t.Fatal("idle, failed read, idle: quiet, want blocked")
 	}
 }
