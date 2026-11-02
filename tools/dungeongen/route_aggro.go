@@ -29,9 +29,12 @@ type routePoint struct {
 	leg     int
 	seq     int // the export's step number (1-based within the leg)
 	x, y, z float32
-	// entries and radius own the spawns this row pulls; ownerIdx marks the row in the owners list (own row when >= 0).
+	// entries and radius own the spawns this row pulls; idx is the row's absolute index in the route. ownerIdx is
+	// the same absolute index when the row pulls, -1 for a move row, which owns nothing: the segment check
+	// compares the owner's absolute index against the segment end's idx.
 	entries  []uint32
 	radius   float32
+	idx      int
 	ownerIdx int
 }
 
@@ -52,16 +55,13 @@ func routePoints(p *dungeon.Plan) ([]routePoint, error) {
 			continue
 		}
 		rp := routePoint{plan: s.Plan, leg: s.Leg, seq: s.Seq,
-			x: s.X, y: s.Y, z: s.Z, entries: s.Entries, radius: s.Radius, ownerIdx: -1}
+			x: s.X, y: s.Y, z: s.Z, entries: s.Entries, radius: s.Radius, idx: len(out), ownerIdx: -1}
 		out = append(out, rp)
 	}
-	oi := 0
 	for i := range out {
-		if len(out[i].entries) == 0 {
-			continue
+		if len(out[i].entries) != 0 {
+			out[i].ownerIdx = i
 		}
-		out[i].ownerIdx = oi
-		oi++
 	}
 	return out, nil
 }
@@ -175,7 +175,7 @@ func RouteIntoLaterPacks(p *dungeon.Plan, cs []creature, ignore map[int]bool) []
 				continue
 			}
 			o, hasOwner := ownerOf[c.GUID]
-			if hasOwner && o.ownerIdx <= b.ownerIdx {
+			if hasOwner && o.ownerIdx <= b.idx {
 				continue
 			}
 			best := math.MaxFloat64

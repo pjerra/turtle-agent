@@ -35,17 +35,12 @@ func TestRouteIntoLaterPacksFindsASegmentThroughAPack(t *testing.T) {
 	if !found {
 		t.Fatalf("a segment through a later pack is no finding: %v", got)
 	}
-	early := 0
+	// The early pack sits on the walked line too, but its row already pulled it: it is no finding. (A move
+	// row ends the middle segment; its -1 owner must not report packs pulled before it.)
 	for _, s := range got {
 		if strings.Contains(s, "Early") {
-			early++
-			if !strings.Contains(s, "owned by row") {
-				t.Fatalf("the early pack is owned by its row: %v", got)
-			}
+			t.Fatalf("an already-pulled pack near a later segment is no finding: %v", got)
 		}
-	}
-	if early == 0 {
-		t.Fatalf("the early pack is owned by its row, not by no row: %v", got)
 	}
 	// The route stops at the later pack's spawn and the later pull's radius owns it from there: every finding is
 	// owned, none is "no row".
@@ -59,6 +54,39 @@ func TestRouteIntoLaterPacksFindsASegmentThroughAPack(t *testing.T) {
 		if strings.Contains(s, "no row") {
 			t.Fatalf("every finding is owned now: %v", got)
 		}
+	}
+}
+
+// The segment to a later pull's approach walks past the already-pulled pack: its spawn is owned by an earlier row,
+// so it is no finding. Move rows own nothing (owner -1); comparing against the move row's owner reports it.
+func TestRouteIntoLaterPacksIgnoresAlreadyPulledPack(t *testing.T) {
+	p := &dungeon.Plan{Name: "probe", Map: 1, Entrance: dungeon.Point{},
+		Legs: []dungeon.Leg{{
+			Name: "a",
+			PullGroups: []dungeon.PullGroup{
+				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 10}}, Radius: 5},
+				{Entries: []uint32{2}, Positions: []dungeon.Point{{X: 30}}, Radius: 5,
+					Approach: []dungeon.Point{{X: 20}}},
+			},
+		}}}
+	cs := []creature{
+		{GUID: 1, Entry: 1, Name: "Early", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 10}},
+		{GUID: 2, Entry: 2, Name: "Later", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 30}},
+	}
+	got := RouteIntoLaterPacks(p, cs, map[int]bool{35: true})
+	for _, s := range got {
+		if strings.Contains(s, "Early") {
+			t.Fatalf("an already-pulled pack near a later segment is no finding: %v", got)
+		}
+	}
+	found := false
+	for _, s := range got {
+		if strings.Contains(s, "Later") && strings.Contains(s, "guid 2") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the later pack past the approach is still a finding: %v", got)
 	}
 }
 
@@ -88,17 +116,30 @@ func TestRouteIntoLaterPacksDefaultsDetectionTo20(t *testing.T) {
 }
 
 // routeAggroKnownFailing lists the hand-written plans whose route passes within aggro of a pack a later row pulls
-// (or of no row), with the number of findings counted when the check came in. A plan that passes now fails the test
-// until it is taken off; one that has more findings than listed fails too. Draft plans are not checked: skeletons
-// have no mapped route.
+// (or of no row), with the number of findings counted after the move-row owner fix (each spawn's owning row keeps
+// its absolute route index, and a spawn counts only when its owner sits after the segment's end). A plan that
+// passes now fails the test until it is taken off; any other change in a count, up or down, fails too, so a drop
+// needs the pin updated with a one-line reason. Draft plans are not checked: skeletons have no mapped route.
 //
 // Counts are measured on origin/dev (the ZG count must drop when W25-1 lands: the Arlokk terrace reordering walks
 // each approach on its pack's level; the comment then says so).
 var routeAggroKnownFailing = map[string]int{
-	"ragefire_chasm": 101, "wailing_caverns": 83, "deadmines": 399, "uldaman": 339, "zulfarrak": 1,
-	"karazhan_crypt": 336, "molten_core": 534, "blackwing_lair": 286, "zul_gurub": 1324,
-	"ruins_of_ahnqiraj": 465, "temple_of_ahnqiraj": 1305, "naxxramas": 584,
-	"lower_karazhan_halls": 505, "upper_karazhan_halls": 1, "emerald_sanctum": 84, "timbermaw_hold": 183,
+	"ragefire_chasm":       77,  // was 101: the move-row owner fix clears already-pulled packs near later segments.
+	"wailing_caverns":      40,  // was 83: the move-row owner fix clears already-pulled packs near later segments.
+	"deadmines":            330, // was 399: the move-row owner fix clears already-pulled packs near later segments.
+	"uldaman":              113, // was 339: the move-row owner fix clears already-pulled packs near later segments.
+	"zulfarrak":            1,   // unchanged: no already-pulled pack sat near a later segment.
+	"karazhan_crypt":       210, // was 336: the move-row owner fix clears already-pulled packs near later segments.
+	"molten_core":          83,  // was 534: the move-row owner fix clears already-pulled packs near later segments.
+	"blackwing_lair":       98,  // was 286: the move-row owner fix clears already-pulled packs near later segments.
+	"zul_gurub":            463, // was 1324: the move-row owner fix clears already-pulled packs near later segments.
+	"ruins_of_ahnqiraj":    154, // was 465: the move-row owner fix clears already-pulled packs near later segments.
+	"temple_of_ahnqiraj":   419, // was 1305: the move-row owner fix clears already-pulled packs near later segments.
+	"naxxramas":            271, // was 584: the move-row owner fix clears already-pulled packs near later segments.
+	"lower_karazhan_halls": 280, // was 505: the move-row owner fix clears already-pulled packs near later segments.
+	"upper_karazhan_halls": 1,   // unchanged: no already-pulled pack sat near a later segment.
+	"emerald_sanctum":      8,   // was 84: the move-row owner fix clears already-pulled packs near later segments.
+	"timbermaw_hold":       105, // was 183: the move-row owner fix clears already-pulled packs near later segments.
 }
 
 // TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn
@@ -130,7 +171,7 @@ func TestNoRouteSegmentPassesALaterPack(t *testing.T) {
 		switch {
 		case len(found) == 0 && listed:
 			t.Errorf("%s passes now: take it off routeAggroKnownFailing", ps.Name)
-		case len(found) > known:
+		case len(found) != known:
 			t.Errorf("%s: %d route segments pass a later pack (known %d):\n  %s", ps.Name, len(found), known, strings.Join(found, "\n  "))
 		}
 	}
