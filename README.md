@@ -2196,7 +2196,9 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   hire for its join summon, then refits with `.bot gear raid <commander> tier <N>`. A hire whose join lands after the
   bind is removed from the group, so `--hire-settle 0` skips the wait (run.log says
   `no wait for the hires' join summons (--hire-settle 0)`) for a walk that proves the bind keeps every late joiner;
-  with 0 a late joiner can miss the refit, so that walk's numbers are a comparison only.
+  with 0 a late joiner can miss the refit, so that walk's numbers are a comparison only. Any `--hire-settle` below the
+  default marks the summary `roster.settle_short: true` (with `roster.hire_settle_s`), and the suite's baseline pick
+  skips it.
 - `--enter auto|near|tele`: `auto` is `cmd enter near` and falls back to `.tele name <hire> <entrance_tele>` once when
   the server answers `requirement`; `tele` needs the plan's `entrance_tele`.
 - `--max-run-minutes` (90) is the ceiling from `run start`; `--hold-minutes` keeps the raid bound afterwards;
@@ -2304,7 +2306,7 @@ The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused
 | `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key (a `live` row, a fight still running, is left for the next read: its finished fight comes back under the same id) |
 | `frames.jsonl` | one `bot_view` frame every 10 s, and every 2 s while a party member is in combat (positions, hp, `power`, `max_power`, `power_type` (0 mana, 1 rage, 2 focus, 3 energy; written even at 0), dead, state, and each bot's `target`, `spell`, `action` and `result`; hostiles; every line carries the walk's `tier`) |
 | `slot-setup.txt`, `teardown.json` | what slot setup printed, and teardown's report |
-| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, `wipe_resumes`, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison`; `place` (a `--place` walk only: `start_step`, `leg`, `point`, `until_step`, `instance`, `circles[]` with their removed counts, `not_cleared[]`, `quiet`, `placed`, `hires`, `summoned[]`) |
+| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, `wipe_resumes`, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`), `roster.tier_comparison`, `roster.hire_settle_s` and `roster.settle_short`; `place` (a `--place` walk only: `start_step`, `leg`, `point`, `until_step`, `instance`, `circles[]` with their removed counts, `not_cleared[]`, `quiet`, `placed`, `hires`, `summoned[]`) |
 
 Exit codes: 0 the run ended by its `until` (or the hold); 18 a phase failed or was refused (setup, login, hire, bind,
 enter, start, the server has no `until`, a stall, the ceiling, an interrupt, `lease lost`); 19 the walk ran and was

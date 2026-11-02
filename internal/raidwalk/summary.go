@@ -95,6 +95,10 @@ type RosterSummary struct {
 	TierSource string `json:"tier_source"`
 	// TierComparison is a run whose tier is not the raid's minimum: comparison, not a tier proof.
 	TierComparison bool `json:"tier_comparison"`
+	// HireSettleS is the --hire-settle wait in seconds; SettleShort is a run whose wait is below the default: its
+	// refit may land before a late hire's join, so it is no baseline for the tier proof (LastGood skips it).
+	HireSettleS float64 `json:"hire_settle_s"`
+	SettleShort bool    `json:"settle_short"`
 }
 
 // LayoutSummary is the TBM:RAID_LAYOUT check.
@@ -193,6 +197,9 @@ type SummaryMeta struct {
 	// TierSource and TierComparison qualify the roster's tier (tiers.go).
 	TierSource     string
 	TierComparison bool
+	// HireSettle is the --hire-settle wait; SettleShort marks it below the default (RosterSummary).
+	HireSettle  time.Duration
+	SettleShort bool
 	// WipeResumes is the walk's recovered wipes and near-wipe stops (--wipe-resume).
 	WipeResumes    int
 	Layout         LayoutSummary
@@ -263,6 +270,8 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		s.Roster.TierSource = m.TierSource
 		s.Roster.TierComparison = m.TierComparison
 	}
+	s.Roster.HireSettleS = m.HireSettle.Seconds()
+	s.Roster.SettleShort = m.SettleShort
 	if t != nil {
 		if s.EndReason == "" {
 			s.EndReason = t.End().Reason()

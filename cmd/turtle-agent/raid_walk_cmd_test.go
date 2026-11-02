@@ -4004,6 +4004,23 @@ func TestRaidWalkHireSettleFlag(t *testing.T) {
 		if !strings.Contains(string(log), "no wait for the hires' join summons (--hire-settle 0)") {
 			t.Fatalf("run.log carries no --hire-settle 0 line: %s", log)
 		}
+		// The summary marks the run, so the suite never takes it as a tier-proof baseline (LastGood).
+		sum := f.summary()
+		if !sum.Roster.SettleShort || sum.Roster.HireSettleS != 0 {
+			t.Fatalf("roster settle_short %v hire_settle_s %v, want true and 0", sum.Roster.SettleShort, sum.Roster.HireSettleS)
+		}
+	})
+	t.Run("the default is not marked", func(t *testing.T) {
+		f := newFixture(t)
+		f.defaultRun("onyxias_lair")
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+		}
+		sum := f.summary()
+		if sum.Roster.SettleShort || sum.Roster.HireSettleS != hireSettleWait.Seconds() {
+			t.Fatalf("roster settle_short %v hire_settle_s %v, want false and %v",
+				sum.Roster.SettleShort, sum.Roster.HireSettleS, hireSettleWait.Seconds())
+		}
 	})
 	t.Run("default is hireSettleWait", func(t *testing.T) {
 		o, code := parseRaidWalkArgs([]string{"onyxias_lair"}, io.Discard)

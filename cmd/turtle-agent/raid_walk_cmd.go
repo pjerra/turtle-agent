@@ -1359,6 +1359,7 @@ func (w *walk) finish(code int) {
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
 		Place:      w.placeSum,
 		TierSource: w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
+		HireSettle: w.opts.hireSettle, SettleShort: w.opts.hireSettle < hireSettleWait,
 		WipeResumes: w.wipeResumes,
 	}
 	if w.inj != nil {
