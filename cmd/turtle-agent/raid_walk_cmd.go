@@ -629,6 +629,10 @@ type walk struct {
 	// while the run stood there, the `boss down` note that leaves it, and the skip the walk sent for that step
 	// (bossSkipStep). Keyed by the step, or by the boss's entry when the step is unknown.
 	bossTracks map[bossKey]*bossStepTrack
+	// bossMismatch is the steps whose boss-kind status found no boss row at that step: the rows the walk reads are
+	// not the deployed ones (without --sql they are the plan JSON's), so the step's kill record is skipped and the
+	// reason noted once.
+	bossMismatch map[int]bool
 
 	stepFirst *dungeon.Point
 	// startStep is the step the run starts at (the placement's staged start, else the --from step): the revive's own
@@ -1431,6 +1435,16 @@ func (w *walk) finish(code int) {
 		code = exitRaidWalkInjectFailed
 	}
 	w.exitCode = code
+	// The tracker's one-shot latch is the fallback when the run's statuses never named a boss step's kind as boss.
+	// It is inserted before the summary reads the tracks, so the single boss_kill field and the boss_kills list both
+	// carry it; a boss entry none of the rows is a boss row of (bossStepOf 0) is not recorded (L4).
+	if w.tracker != nil {
+		if entry, _, ok := w.tracker.BossEngaged(); ok {
+			if s := w.bossStepOf(entry); s > 0 {
+				w.bossTrackAt(s, entry).engaged = true
+			}
+		}
+	}
 	untilEffective := ""
 	if w.placeShortened {
 		untilEffective = w.untilLabel

@@ -832,8 +832,10 @@ func (w *walk) checkStartLine(ctx context.Context, line string) error {
 	if w.tracker != nil {
 		w.tracker.Feed(w.env.now(), st)
 	}
-	w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
+	// The boss rule reads the walk's previous status (a run ending right after the boss step), so it is observed
+	// before this one replaces it.
 	w.observeBossStatus(st, w.env.now())
+	w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
 	w.noteLabel(st)
 	if st.State != tbm.RunRunning {
 		return stopf(exitRaidWalkFailed, "run start: the run is %s: %s", st.State, line)
@@ -1032,8 +1034,8 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 			continue
 		}
 		w.tracker.Feed(now, st)
+		w.observeBossStatus(st, now) // before lastStatus is replaced: the end rule reads the previous status
 		w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
-		w.observeBossStatus(st, now)
 		w.recordRunLine(st, now)
 		w.noteLabel(st)
 		if st.Note != "" {
@@ -1988,29 +1990,44 @@ func (w *walk) bossTrackAt(step int, entry uint32) *bossStepTrack {
 // kind). Either the last note the run reported on the boss step or the first status after it must start with
 // `boss down` (both are read: one poll may carry both lines, so the last status alone would miss the note). Each
 // boss row's step gets its own record, so a walk past several bosses lists each one; a skip the walk sent is stored
-// on the step it was sent for (bossSkipStep).
+// on the step it was sent for (bossSkipStep). A run that ends right after its boss step never sends that note at
+// all (bossEndStatus reads the end), and a boss-kind status that matches no boss row at its step records nothing
+// (the rows the walk reads are not the deployed ones then).
 func (w *walk) observeBossStatus(st tbm.RunStatus, now time.Time) {
-	if row, ok := w.bossRowAt(st.Step); ok {
+	// The run ending right after the boss step (see bossEndStatus) is read first: a plan whose last row is the boss
+	// reports the end ON the boss step, so the boss-row branch below would swallow it.
+	if t := w.bossEndStatus(st, now); t != nil {
+		return
+	}
+	if row, ok := w.bossRowAt(st.Step); ok && st.Kind == planexport.KindBoss {
 		t := w.bossTrackAt(st.Step, row.Entry)
-		if st.Kind == planexport.KindBoss {
-			t.engaged = true
-			t.note = st.Note
-			return
+		t.engaged = true
+		t.note = st.Note
+		return
+	}
+	if st.Kind == planexport.KindBoss {
+		// The run's boss step is no boss row in the rows the walk reads (without --sql they are the plan JSON's, not
+		// the deployed ones): a kill recorded by step would land on another step's row. Skip the record once per step.
+		if w.bossMismatch == nil {
+			w.bossMismatch = map[int]bool{}
 		}
-		// The boss step reporting another kind is the run LEAVING it (review round 4): its note may carry the
-		// kill, so it is read like the first status after the step, below. Returning here would keep the record
-		// killed:false however plainly the same step said `boss down`.
+		if !w.bossMismatch[st.Step] {
+			w.bossMismatch[st.Step] = true
+			w.note("boss record skipped: plan rows are not the deployed rows")
+			w.logLine(now, fmt.Sprintf("boss record skipped at step %d (%s): plan rows are not the deployed rows", st.Step, st.Note))
+		}
+		return
 	}
 	// A leaving status (a step that is not a boss row, or the boss step reporting another kind) reports the kill
-	// of the last boss step the run stood on: the highest boss row step at or below the status's step. A backward
-	// move (a wipe) reads the earlier row.
-	var t *bossStepTrack
-	for _, r := range w.bossTracks {
-		if r.step > 0 && r.step <= st.Step && (t == nil || r.step > t.step) {
-			t = r
-		}
+	// of the nearest boss row at or below the status's step: its track is created when the run never stood on it,
+	// so a boss row no status named still takes its leaving status's `boss down` note. A backward move (a wipe)
+	// reads the earlier row.
+	step, row := w.nearestBossRow(st.Step)
+	if step == 0 {
+		return
 	}
-	if t == nil || t.killed {
+	t := w.bossTrackAt(step, row.Entry)
+	if t.killed {
 		return
 	}
 	ev := t.note
@@ -2022,6 +2039,99 @@ func (w *walk) observeBossStatus(st tbm.RunStatus, now time.Time) {
 	}
 	t.killed, t.evidence = true, ev
 	w.logLine(now, fmt.Sprintf("boss %d down at step %d: %s", t.entry, t.step, ev))
+}
+
+// nearestBossRow is the plan's boss row nearest at or below step: its 1-based step and the row. (0, zero) when no
+// boss row is at or below. The leaving rule credits THIS row, not the highest track: a boss row the run's statuses
+// never named still takes the note its leaving status carries (#1453 walk side).
+func (w *walk) nearestBossRow(step int) (int, planexport.StepRow) {
+	for i := min(step, len(w.rows.Steps)) - 1; i >= 0; i-- {
+		if w.rows.Steps[i].Kind == planexport.KindBoss {
+			return i + 1, w.rows.Steps[i]
+		}
+	}
+	return 0, planexport.StepRow{}
+}
+
+// bossSkippedInNote says the run's end note names this boss in its "boss skipped, not seen killed: ..." list
+// (TortoiseBots DoneNote, UnclearedBosses: every boss step the run ended without clearing). TB then ended the run
+// without the kill, so the end rule must not credit it.
+func bossSkippedInNote(note string, entry uint32, step int) bool {
+	const marker = "boss skipped, not seen killed: "
+	i := strings.Index(note, marker)
+	if i < 0 {
+		return false
+	}
+	return strings.Contains(note[i+len(marker):], fmt.Sprintf("boss %d (step %d)", entry, step))
+}
+
+// bossFramesDead says the frames saw a guid of this boss (or a script-changed form of it, bossGUIDs) dead in the
+// current attempt: a 0 % row at or after the attempt's start (bossAttemptStart), the frames-only half of
+// bossKilled's evidence. The end rule reads it when the run's own statuses never showed the step engaged.
+func (w *walk) bossFramesDead(entry uint32) bool {
+	units := w.bossUnits(entry)
+	attemptAt := w.bossAttemptStart(units)
+	if attemptAt.IsZero() {
+		return false
+	}
+	for g, h := range w.hostiles {
+		if w.bossGUIDs[g] != entry {
+			if w.bossAdds[h.entry] || !inEntries(units, h.entry) {
+				continue
+			}
+		}
+		if h.hppct == 0 && !h.at.Before(attemptAt) {
+			return true
+		}
+	}
+	return false
+}
+
+// bossEndStatus credits the boss kill of a run that ENDED right after its boss step (#1453 walk side): TB's
+// NextStep overwrites the boss step's "boss down" note in the same call, with the until stop's
+// "stopped before step N (...)" (StopAtUntil/EndRunEarly) or DoneNote's "plan done (...)" (runtime/DungeonRunPolicy.h
+// NextStep around line 3841), so a plan ending on a boss (43 of 46) never sends `boss down` at all. The end is
+// credited when all of these hold:
+//   - the status is the run's end (state done, a `stopped before step` or `plan done` note) and its step is the boss
+//     step + 1, or the plan's own end while the run stood on its LAST boss row (the status line clamps the step
+//     there, StatusParts: shown = min(step+1, total));
+//   - the walk's LAST status was on that boss step (the run ended right after it);
+//   - the note's "boss skipped, not seen killed: ..." list does not name this boss (TB's own verdict: it ended
+//     without clearing the step, so no kill), and
+//   - the frames saw the boss's guid (or a script-changed form of it) dead in this attempt, or the run's earlier
+//     status on the boss step was engaged.
+//
+// The evidence says which. nil when the rule does not apply; a track already killed or skipped is left alone.
+func (w *walk) bossEndStatus(st tbm.RunStatus, now time.Time) *bossStepTrack {
+	if !w.haveStatus || st.State != tbm.RunDone {
+		return nil
+	}
+	if !strings.HasPrefix(st.Note, "stopped before step") && !strings.HasPrefix(st.Note, "plan done") {
+		return nil
+	}
+	b := w.lastStatus.Step
+	row, ok := w.bossRowAt(b)
+	if !ok {
+		return nil
+	}
+	atPlanEnd := st.Steps > 0 && st.Step == st.Steps
+	if st.Step != b+1 && !(atPlanEnd && st.Step == b) {
+		return nil
+	}
+	t := w.bossTrackAt(b, row.Entry)
+	if t.killed || t.skipped || bossSkippedInNote(st.Note, row.Entry, b) {
+		return t
+	}
+	switch {
+	case w.bossFramesDead(row.Entry):
+		t.killed, t.evidence = true, "run ended right after the boss step; frames"
+	case t.engaged:
+		t.killed, t.evidence = true, "run ended right after the boss step; engaged"
+	default:
+		return t
+	}
+	w.logLine(now, fmt.Sprintf("boss %d down at step %d: %s", t.entry, t.step, t.evidence))
+	return t
 }
 
 // bossGUIDFor returns the guid the frames showed with a plan boss's own entry (the one with the most forms when
@@ -2127,8 +2237,8 @@ func (w *walk) bossKillSummaries() []raidwalk.BossKillSummary {
 }
 
 // bossKillSummary is the summary's single boss_kill object (spec 6, D5): the LAST engaged boss's record. nil when no
-// boss was engaged. The tracker's one-shot latch is the fallback when the run's statuses never named a boss step's
-// kind as boss.
+// boss was engaged. The tracker's one-shot latch is inserted as a record in finish (L4), before the summary reads
+// the tracks, so this reads only the tracks.
 func (w *walk) bossKillSummary() *raidwalk.BossKillSummary {
 	var best *bossStepTrack
 	for _, t := range w.bossTracks {
@@ -2137,15 +2247,6 @@ func (w *walk) bossKillSummary() *raidwalk.BossKillSummary {
 		}
 		if best == nil || t.step > best.step || (t.step == best.step && t.entry > best.entry) {
 			best = t
-		}
-	}
-	if best == nil && w.tracker != nil {
-		if entry, step, ok := w.tracker.BossEngaged(); ok {
-			if s := w.bossStepOf(entry); s > 0 {
-				step = s
-			}
-			best = w.bossTrackAt(step, entry)
-			best.engaged = true
 		}
 	}
 	if best == nil {

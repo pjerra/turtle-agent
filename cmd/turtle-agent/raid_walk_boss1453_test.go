@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,8 +12,10 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -52,13 +56,15 @@ func zgThekalBossRowPos(f *fixture, boss int) {
 // TestRaidWalkThekalWalk25R1BossKill replays ZG walk 25 test2 r1 from 22:41:06 (spec 6, D5): the run is on the
 // move step before Thekal's boss step, the frames show his guid engaged (the early hand-over lets the run fight
 // him), the same guid changes entry 14599 -> 14509 while two 15068 Zulian Guardians stand up, 14509 is last seen
-// at 6 %, and after the boss step the run reports the kill with "boss down: he died as 14509".
+// at 6 %, and the until stop ends the run right after the boss step.
 //
-// The walk records the summary's boss_kill from the run leader's own note (the last note on the boss step or the
-// first status after it), so no pause and no `.bot run skip` are needed, and the phase comes from the entries the
-// frames saw on the boss's guid: 1 + the one change = 2, the last entry 14509. The steps are the rows the walk
-// walks (the plan JSON: Thekal's boss row is step 127 of its rows; the live walk's deployed rows had 274 of 1095,
-// the same shape).
+// This is TB's REAL sequence: NextStep overwrites the boss step's "boss down" note with the until stop's
+// "stopped before step N (...)" in the same call, so no `boss down` line is ever sent when the boss is the row
+// before the stop (runtime/DungeonRunPolicy.h, StopAtUntil). The walk credits the end right after the boss step
+// (bossEndStatus): the frames saw the guid engaged and the end note does not name the boss as skipped. No pause and
+// no `.bot run skip` are needed, and the phase comes from the entries the frames saw on the boss's guid: 1 + the
+// one change = 2, the last entry 14509. The steps are the rows the walk walks (the plan JSON: Thekal's boss row is
+// step 127 of its rows; the live walk's deployed rows had 274 of 1095, the same shape).
 func TestRaidWalkThekalWalk25R1BossKill(t *testing.T) {
 	f := zgThekalFixture(t, "zul_gurub")
 	boss := zgBossStep(t)
@@ -69,7 +75,6 @@ func TestRaidWalkThekalWalk25R1BossKill(t *testing.T) {
 	f.agent.startQueue = []queuedEvent{
 		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priest_thekal|move|walk|fighting|until step %d (step %d)", boss-1, total, boss+1, boss+1)},
 		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priest_thekal|boss|begin|arrived|until step %d (step %d)", boss, total, boss+1, boss+1)},
-		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priest_thekal|move|walk|boss down: he died as 14509|until step %d (step %d)", boss+1, total, boss+1, boss+1)},
 		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priest_thekal|move|walk|stopped before step %d (until step %d): the party stays where it stands", boss+1, total, boss+1, boss+1)},
 	}
 	f.agent.mu.Unlock()
@@ -113,10 +118,10 @@ func TestRaidWalkThekalWalk25R1BossKill(t *testing.T) {
 	}
 	k := *sum.BossKill
 	if k.Entry != 14599 || k.Step != boss || !k.Killed || k.Phase != 2 || k.PhaseEntry != 14509 ||
-		k.Evidence != "boss down: he died as 14509" {
-		t.Fatalf("boss_kill %+v, want {14599 %d true 2 14509 boss down: he died as 14509}", k, boss)
+		k.Evidence != "run ended right after the boss step; engaged" {
+		t.Fatalf("boss_kill %+v, want {14599 %d true 2 14509 run ended right after the boss step; engaged}", k, boss)
 	}
-	if line := sum.Text(); !strings.Contains(line, fmt.Sprintf("boss kill: 14599 at step %d, killed, phase 2 (14509): boss down: he died as 14509", boss)) {
+	if line := sum.Text(); !strings.Contains(line, fmt.Sprintf("boss kill: 14599 at step %d, killed, phase 2 (14509): run ended right after the boss step; engaged", boss)) {
 		t.Fatalf("summary.txt has no boss kill line:\n%s", line)
 	}
 }
@@ -341,6 +346,14 @@ func bossSummaryWalk(t *testing.T) *walk {
 		bossGUIDs:  map[string]uint32{},
 		bossForms:  map[string][]uint32{},
 	}
+}
+
+// feedStatus runs one status through the walk's status pipeline the way pollOnce, checkStartLine and
+// readEventsPage do: the boss rule sees the PREVIOUS status in lastStatus, then this one replaces it (the end rule
+// reads whether the walk stood on the boss step just before).
+func feedStatus(w *walk, st tbm.RunStatus, now time.Time) {
+	w.observeBossStatus(st, now)
+	w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
 }
 
 // TestBossKillSummariesUnengagedThenKilled is #1453 round 3 (a): a boss row the run only walked past must not be
@@ -599,4 +612,184 @@ func TestBossFormsWipeResetCountsOnlyTheRetry(t *testing.T) {
 			t.Fatalf("phase %d (%d), want 1 (14599): the reset wait's own frames must not count", k.Phase, k.PhaseEntry)
 		}
 	})
+}
+
+// TestBossKillRunEndedAfterBossStep is H1 (#1453 walk side): TB's NextStep overwrites the boss step's `boss down`
+// note with the until stop's "stopped before step N (...)" (StopAtUntil) or DoneNote's "plan done (...)" in the same
+// call, so a plan that ends on a boss never sends `boss down` at all (43 of 46 plans). The walk credits the end when
+// its last status stood on the boss step, the end note does not name the boss in its "boss skipped, not seen
+// killed: ..." list, and the frames saw the boss guid dead in this attempt or the boss step was engaged.
+func TestBossKillRunEndedAfterBossStep(t *testing.T) {
+	now := time.Now()
+	// The until stop's real line: the run stood on the boss step (38, entry 14517) and stops before step 39.
+	stop := tbm.RunStatus{State: tbm.RunDone, Step: 39, Kind: "move",
+		Note: "stopped before step 39 (until step 39): the party stays where it stands"}
+	for _, tc := range []struct {
+		name   string
+		before func(w *walk)
+		killed bool
+		ev     string
+	}{
+		{
+			name:   "engaged then the until stop",
+			before: func(w *walk) {},
+			killed: true,
+			ev:     "run ended right after the boss step; engaged",
+		},
+		{
+			name: "frames saw the boss guid dead",
+			before: func(w *walk) {
+				g := zgWalk25BossGUID.String()
+				w.bossGUIDs[g] = 14517
+				w.bossAttemptAt = map[uint32]time.Time{14517: now.Add(-time.Minute)}
+				w.hostiles = map[string]hostileState{g: {entry: 14517, hppct: 0, at: now.Add(-time.Second)}}
+			},
+			killed: true,
+			ev:     "run ended right after the boss step; frames",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := bossSummaryWalk(t)
+			tc.before(w)
+			feedStatus(w, tbm.RunStatus{Step: 38, Kind: "boss", Note: "fighting"}, now)
+			feedStatus(w, stop, now)
+			k := w.bossKillSummary()
+			if k == nil || k.Step != 38 || k.Entry != 14517 || !k.Engaged || k.Killed != tc.killed {
+				t.Fatalf("boss_kill %+v, want step 38 entry 14517 engaged, killed %v", k, tc.killed)
+			}
+			if tc.killed && k.Evidence != tc.ev {
+				t.Fatalf("evidence %q, want %q", k.Evidence, tc.ev)
+			}
+		})
+	}
+
+	// The plan end on its LAST boss row: the status line clamps the step there (StatusParts), so the done line
+	// carries the boss step itself and its kind is boss.
+	lastBoss := func(t *testing.T) *walk {
+		w := bossSummaryWalk(t)
+		w.rows = planexport.Rows{Steps: []planexport.StepRow{
+			{Kind: planexport.KindMove},
+			{Kind: planexport.KindBoss, Entry: 14517},
+		}}
+		return w
+	}
+	t.Run("plan done on the last boss row", func(t *testing.T) {
+		w := lastBoss(t)
+		feedStatus(w, tbm.RunStatus{Step: 2, Kind: "boss", Note: "fighting"}, now)
+		feedStatus(w, tbm.RunStatus{State: tbm.RunDone, Step: 2, Steps: 2, Kind: "boss", Note: "plan done"}, now)
+		k := w.bossKillSummary()
+		if k == nil || k.Step != 2 || !k.Killed || k.Evidence != "run ended right after the boss step; engaged" {
+			t.Fatalf("boss_kill %+v, want step 2 killed, evidence engaged", k)
+		}
+	})
+	t.Run("the skipped list names the boss", func(t *testing.T) {
+		w := lastBoss(t)
+		feedStatus(w, tbm.RunStatus{Step: 2, Kind: "boss", Note: "fighting"}, now)
+		feedStatus(w, tbm.RunStatus{State: tbm.RunDone, Step: 2, Steps: 2, Kind: "boss",
+			Note: "plan done (boss skipped, not seen killed: boss 14517 (step 2))"}, now)
+		k := w.bossKillSummary()
+		if k == nil || k.Step != 2 || k.Killed {
+			t.Fatalf("boss_kill %+v, want step 2 NOT killed: the end note named the boss as skipped", k)
+		}
+	})
+}
+
+// TestBossLeaveCreditsTheNearestBossRow is M2: the leaving status credits the nearest boss ROW at or below its step,
+// created when the run's statuses never stood on it. A boss row walked past earlier (A, step 38, entry 14517) must
+// not take boss B's kill (B, step 84, entry 14507, no status of its own).
+func TestBossLeaveCreditsTheNearestBossRow(t *testing.T) {
+	w := bossSummaryWalk(t)
+	now := time.Now()
+	feedStatus(w, tbm.RunStatus{Step: 38, Kind: "boss", Note: "fighting"}, now)
+	feedStatus(w, tbm.RunStatus{Step: 39, Kind: "move", Note: "walking"}, now)
+	feedStatus(w, tbm.RunStatus{Step: 85, Kind: "move", Note: "boss down: he died as 14507"}, now)
+	list := w.bossKillSummaries()
+	if len(list) != 2 {
+		t.Fatalf("bossKills %d records, want 2: %+v", len(list), list)
+	}
+	if k := list[0]; k.Step != 38 || k.Entry != 14517 || k.Killed {
+		t.Fatalf("A %+v, want step 38 entry 14517 NOT killed: the `boss down` at 85 is B's", k)
+	}
+	if k := list[1]; k.Step != 84 || k.Entry != 14507 || !k.Killed || k.Evidence != "boss down: he died as 14507" {
+		t.Fatalf("B %+v, want step 84 entry 14507 killed by the `boss down` at 85", k)
+	}
+}
+
+// TestBossRecordSkippedOnUnverifiedRows is M3: without --sql the rows come from the plan JSON, which need not be
+// the rows the server walks. A boss-kind status whose step is no boss row there records nothing and says why; with
+// --sql (the deployed rows) the same status is believed.
+func TestBossRecordSkippedOnUnverifiedRows(t *testing.T) {
+	st := tbm.RunStatus{Step: 1, Kind: "boss", Note: "fighting"}
+	w := bossSummaryWalk(t)
+	if _, ok := w.bossRowAt(st.Step); ok {
+		t.Fatalf("step %d is a boss row: pick a move step", st.Step)
+	}
+	w.observeBossStatus(st, time.Now())
+	if got := w.bossKillSummaries(); len(got) != 0 {
+		t.Fatalf("bossKills %+v, want none: the plan-JSON row is no boss row", got)
+	}
+	if !strings.Contains(strings.Join(w.notes, "\n"), "boss record skipped: plan rows are not the deployed rows") {
+		t.Fatalf("notes %q, want the skipped-record note", w.notes)
+	}
+	w2 := bossSummaryWalk(t)
+	feedStatus(w2, tbm.RunStatus{Step: 38, Kind: "boss", Note: "fighting"}, time.Now())
+	if k := w2.bossKillSummary(); k == nil || k.Step != 38 || !k.Engaged {
+		t.Fatalf("boss_kill %+v, want step 38 engaged: a boss row that matches is recorded", k)
+	}
+}
+
+// TestBossStatusOnInjectorPageMarksKill is M1: the injector reads events pages itself (readEventsPage), and a
+// `boss down` line consumed there must mark the kill as pollOnce's lines do. Without the observe call the page's
+// kill was lost.
+func TestBossStatusOnInjectorPageMarksKill(t *testing.T) {
+	w := bossSummaryWalk(t)
+	now := time.Now()
+	w.env = walkEnv{now: func() time.Time { return now }}
+	w.plan = &dungeon.Plan{Name: "zul_gurub"}
+	page := events.Page{Events: []events.Event{
+		{Kind: events.KindSystem, Text: "TBM:RUN|zul_gurub|running|38/1095|high_priest_thekal|boss|begin|fighting"},
+		{Kind: events.KindSystem, Text: "TBM:RUN|zul_gurub|running|39/1095|high_priest_thekal|move|walk|boss down: he died as 14517"},
+	}}
+	(&raidInjector{w: w}).readEventsPage(page)
+	k := w.bossKillSummary()
+	if k == nil || k.Step != 38 || !k.Killed || k.Evidence != "boss down: he died as 14517" {
+		t.Fatalf("boss_kill %+v, want step 38 killed by the injector page's note", k)
+	}
+}
+
+// TestBossKillTrackerFallbackInFinish is L4: the tracker's one-shot latch is inserted as a boss record in finish,
+// before the summary reads the tracks (so boss_kill and boss_kills both carry it), and only for a boss row the rows
+// know (bossStepOf). The run's own statuses never named this step here: the frames' latch alone did.
+func TestBossKillTrackerFallbackInFinish(t *testing.T) {
+	p, err := dungeon.Load("../../dungeons/zul_gurub.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := bossSummaryWalk(t)
+	w.plan = p
+	w.outDir = t.TempDir()
+	w.stdout = io.Discard
+	w.started = time.Now()
+	w.ended = w.started
+	w.tracker = raidwalk.NewTracker(p, nil)
+	w.tracker.Frame(w.started, tbm.ViewFrame{
+		Party:    []tbm.PartyRec{{GUID: 1000, Name: "Tank"}},
+		Hostiles: []tbm.HostileRec{{GUID: zgWalk25BossGUID, Entry: 14517, HPPct: 90, Target: 1000}},
+	})
+	w.finish(exitOK)
+	raw, err := os.ReadFile(filepath.Join(w.outDir, "summary.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sum raidwalk.Summary
+	if err := json.Unmarshal(raw, &sum); err != nil {
+		t.Fatal(err)
+	}
+	k := sum.BossKill
+	if k == nil || k.Step != 38 || k.Entry != 14517 || !k.Engaged {
+		t.Fatalf("boss_kill %+v, want the tracker's fallback record at step 38 entry 14517", k)
+	}
+	if len(sum.BossKills) != 1 || sum.BossKills[0].Step != 38 {
+		t.Fatalf("boss_kills %+v, want the same record in the list", sum.BossKills)
+	}
 }
