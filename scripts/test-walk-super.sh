@@ -14,6 +14,9 @@
 # control off resets nothing: INT arrives ignored, so the supervisor's INT
 # handler must escalate to TERM or the walk survives it).
 #
+# FAKE_KILL_PARENT / FAKE_CORRUPT_STATUS (case17) kill the run's wrapper before it writes the exit status, leaving
+# no status file (or a garbage one): the supervisor must stop with exit 70.
+#
 # Usage: test-walk-super.sh [case-number ...]   (default: all cases + mutation check)
 # Env: WALK_SUPER_BIN (default: walk-super.sh next to this file),
 #      WALK_SUPER_WAIT (default 1: seconds between test restarts; prod default is 20).
@@ -93,6 +96,16 @@ if [[ -n "${FAKE_SUMMARY_SEQ_FILE:-}" && -s "$FAKE_SUMMARY_SEQ_FILE" ]]; then
 elif [[ -n "${FAKE_SUMMARY:-}" ]]; then
   printf '%s\n' "$FAKE_SUMMARY" >"$out/summary.json"
 fi
+# FAKE_KILL_PARENT SIGKILLs the run's wrapper (the subshell that writes the exit status file) and exits 0, so the
+# status file is never written: the supervisor must read that as "status unknown" (exit 70). FAKE_CORRUPT_STATUS
+# also leaves a non-number in the status file (the wrapper is dead, so nothing overwrites it).
+if [[ -n "${FAKE_KILL_PARENT:-}${FAKE_CORRUPT_STATUS:-}" ]]; then
+  kill -KILL "$PPID"
+  if [[ -n "${FAKE_CORRUPT_STATUS:-}" ]]; then
+    for f in "${TMPDIR:?}"/walk-super-run.*/rc; do printf 'garbage\n' >"$f"; done
+  fi
+  exit 0
+fi
 if [[ -n "${FAKE_STDERR_LINE:-}" ]]; then
   printf '%s\n' "$FAKE_STDERR_LINE" >&2
 fi
@@ -117,12 +130,14 @@ FAKE_EOF
   chmod +x "$T/fake-walk"
 }
 
+# make_cmd writes a cmd file the way a real one reads: every word double-quoted (the parser refuses backslash escapes).
+# No test argument holds a double quote, $, backtick or backslash.
 make_cmd() {
   local p="$1"
   shift
   {
-    printf '%s' "$T/fake-walk"
-    printf ' %q' "$@"
+    printf '"%s"' "$T/fake-walk"
+    printf ' "%s"' "$@"
     printf '\n'
   } >"$p"
 }
@@ -546,6 +561,79 @@ case10() {
   ok "case10 exit-19 x2 at step 41 with no wipe (and with no summary): 3 runs, no no-progress stop"
 }
 
+# case16 (Codex 1): a cmd file with a shell operator, expansion, backslash, quote other than double, glob, or a second
+# line is refused before anything runs: exit 2, no walk started, the injected command never runs (its marker file is
+# not created). MARK in each tail becomes the marker path.
+case16() {
+  local d rc n=0 inj tail base
+  base="\"$T/fake-walk\" raid-walk zul_gurub --server s --slot 2 --holder H16 --sql \"/tmp/w.sql\" --until \"boss-done\""
+  for inj in '; touch MARK' '& touch MARK' '| touch MARK' '> MARK' '< MARK' '$(touch MARK)' '`touch MARK`' \
+    '\touch MARK' "'touch' MARK" '(touch MARK)' 'x* MARK' '"a$HOME" MARK' 'a\"b MARK' '"unterminated'; do
+    n=$((n + 1))
+    d="$T/c16-$n"
+    mkdir -p "$d"
+    tail="${inj//MARK/$d/marker}"
+    printf '%s %s\n' "$base" "$tail" >"$d/cmd.txt"
+    FAKE_ARGS_LOG="$d/args.log" "$SUPER_BIN" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log"
+    rc=$?
+    (( rc == 2 )) || { bad "case16 [$inj] exit=$rc want 2"; return; }
+    [[ ! -e "$d/marker" ]] || { bad "case16 [$inj] the injected command ran (marker exists)"; return; }
+    [[ ! -e "$d/args.log" ]] || { bad "case16 [$inj] the walk ran"; return; }
+    grep -qF -e 'refusing cmd file' "$d/stderr.log" || { bad "case16 [$inj] no refusal message"; return; }
+  done
+  # A second line is refused too (a cmd file is one line).
+  n=$((n + 1))
+  d="$T/c16-$n"
+  mkdir -p "$d"
+  printf '%s\n%s\n' "$base" '--holder ok' >"$d/cmd.txt"
+  FAKE_ARGS_LOG="$d/args.log" "$SUPER_BIN" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log"
+  rc=$?
+  (( rc == 2 )) || { bad "case16 second line exit=$rc want 2"; return; }
+  [[ ! -e "$d/args.log" ]] || { bad "case16 second line: the walk ran"; return; }
+  grep -qF -e 'more than one line' "$d/stderr.log" || { bad "case16 second line: no reason"; return; }
+  ok "case16 ${n} cmd files with ; & | > < \$() backtick, backslash, quote, glob, second line: exit 2, nothing runs"
+}
+
+# case17 (Codex 2): no exit status (the wrapper died before writing its rc file, or wrote a non-number) is exit 70,
+# logged "status unknown", and stops with no restart: a crash, not a pause. The leg is one a restart would rebuild,
+# so only the missing status decides.
+case17() {
+  local d rc runs var
+  for var in FAKE_KILL_PARENT FAKE_CORRUPT_STATUS; do
+    d="$T/c17-$var"
+    mkdir -p "$d/tmp"
+    make_cmd "$d/cmd.txt" raid-walk zul_gurub --server s --slot 2 --holder H17 --sql /tmp/w.sql --out "$d/run0"
+    env "$var=1" TMPDIR="$d/tmp" XDG_RUNTIME_DIR= FAKE_LEG=high_priest_venoxis FAKE_ARGS_LOG="$d/args.log" \
+      "$SUPER_BIN" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log"
+    rc=$?
+    runs="$(runs_done "$d/args.log")"
+    (( rc == 70 )) || { bad "case17 $var exit=$rc want 70"; return; }
+    (( runs == 1 )) || { bad "case17 $var runs=$runs want 1 (no status is a crash: no restart)"; return; }
+    grep -qF -e 'stop: status unknown' "$d/restart.log" || { bad "case17 $var log missing status unknown"; return; }
+    grep -qF -e 'restarting as run' "$d/restart.log" && { bad "case17 $var restarted"; return; }
+  done
+  ok "case17 no exit status (missing file and malformed file): exit 70, status unknown logged, no restart"
+}
+
+# case18 (Codex 1, the real shape): a walk-28 style cmd file (double-quoted "leg ..." and "boss-done" words, a
+# comma-free slot, a name=value-free holder) gives the same argv as the literal list below and as the old eval parse.
+case18() {
+  local d="$T/c18" rc line golden want
+  mkdir -p "$d"
+  printf '"%s" raid-walk zul_gurub --server tortoise-test2 --dir /home/perzi/wt-ta-integ-1102a/dungeons --hires /tmp/roster.json --auto-resume 1 --wipe-resume 3 --wipe-rest 5m --paused-wait 10m --sql /tmp/world.sql --slot 1 --holder zg28-a --from "leg high_priestess_arlokk" --place --until "boss-done" --max-run-minutes 240 --out %s\n' \
+    "$T/fake-walk" "$d/a" >"$d/cmd.txt"
+  local -a expect=(raid-walk zul_gurub --server tortoise-test2 --dir /home/perzi/wt-ta-integ-1102a/dungeons --hires /tmp/roster.json --auto-resume 1 --wipe-resume 3 --wipe-rest 5m --paused-wait 10m --sql /tmp/world.sql --slot 1 --holder zg28-a --from "leg high_priestess_arlokk" --place --until boss-done --max-run-minutes 240 --out "$d/a")
+  want="$(printf '%q ' "${expect[@]}")"
+  golden="$(eval "set -- $(cat -- "$d/cmd.txt")"; shift; printf '%q ' "$@")"
+  [[ "$golden" == "$want" ]] || { bad "case18 setup: literal argv disagrees with the old eval parse"; return; }
+  FAKE_ARGS_LOG="$d/args.log" "$SUPER_BIN" "$d/cmd.txt" 0 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log"
+  rc=$?
+  (( rc == 0 )) || { bad "case18 exit=$rc want 0"; return; }
+  line="$(sed -n '1p' "$d/args.log" 2>/dev/null)"
+  [[ "$line" == "$want" ]] || { bad "case18 argv differs: got [$line] want [$want]"; return; }
+  ok "case18 walk-28 shaped cmd file: argv matches the literal list and the old eval parse (quoted leg and boss-done kept as one word)"
+}
+
 mutation() {
   local d="$T/mut" mrc
   mkdir -p "$d"
@@ -598,6 +686,9 @@ main() {
   if (( run_all )) || [[ "$only" == *" 13 "* ]]; then case13; fi
   if (( run_all )) || [[ "$only" == *" 14 "* ]]; then case14; fi
   if (( run_all )) || [[ "$only" == *" 15 "* ]]; then case15; fi
+  if (( run_all )) || [[ "$only" == *" 16 "* ]]; then case16; fi
+  if (( run_all )) || [[ "$only" == *" 17 "* ]]; then case17; fi
+  if (( run_all )) || [[ "$only" == *" 18 "* ]]; then case18; fi
   if (( run_all )); then mutation; mutation2; fi
   printf -- '----\nPASS=%d FAIL=%d\n' "$PASS" "$FAIL"
   (( FAIL == 0 ))
