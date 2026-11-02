@@ -26,7 +26,10 @@ const (
 	zgOwnMaxYd   = 28.0 // ... and no farther (the tank's shot reaches the nearest unit)
 	zgCentreYd   = 50.0 // ... and within the run leader's reach of the row's point (dungeon.RunLeaderReachYd)
 	zgSampleStep = 2.0  // the straight segments' sampling
-	zgFixture    = "testdata/zg_mandokir_jindo_routes.json"
+	// zgPatrolSpreadYd is added to a patrolling unit's clearance: it walks its whole loop while unpulled, so a stand or
+	// walk sample must clear every waypoint by the detection range plus the spread of the points it was measured at.
+	zgPatrolSpreadYd = 3.0
+	zgFixture        = "testdata/zg_mandokir_jindo_routes.json"
 )
 
 var zgUpdateRoutes = flag.Bool("update-zg-routes", false, "rewrite "+zgFixture+" from the map-309 navmesh")
@@ -106,13 +109,48 @@ func zgPack(g dungeon.PullGroup, cs []creature, forms map[uint64]*zgFormation) (
 func zgPacks(t *testing.T, leg dungeon.Leg, cs []creature) [][]creature {
 	t.Helper()
 	forms := zgFormations(cs)
+	movement, err := readMovementPaths("testdata/map309/movement.tsv")
+	if err != nil {
+		t.Fatalf("movement.tsv: %v", err)
+	}
 	out := make([][]creature, len(leg.PullGroups))
 	for gi, g := range leg.PullGroups {
 		p, err := zgPack(g, cs, forms)
 		if err != nil {
 			t.Fatalf("pull group %d: %v", gi, err)
 		}
+		if zgLonePatrol(p) {
+			p = zgExpandPatrols(p, movement)
+		}
 		out[gi] = p
+	}
+	return out
+}
+
+// zgLonePatrol reports whether a pack is one patrolling unit: it has no static footprint then, and its whole loop is
+// where it stands, so a stand or a walk sample must clear every waypoint. A patroller merged into a multi-unit pack is
+// one unit of that pack: the plan pulls the pack at its row, and a loop that crosses the route is a separate finding
+// (clearing it would reorder the leg or split the pack).
+func zgLonePatrol(pack []creature) bool {
+	return len(pack) == 1 && pack[0].Patrol
+}
+
+// zgExpandPatrols replaces each patrolling member of a pack by its spawn and every waypoint of its loop (movement.tsv):
+// the whole path is a danger point while the pack is unpulled, since the creature walks it. A patrolling spawn with no
+// rows keeps its spawn alone.
+func zgExpandPatrols(pack []creature, movement map[uint64][]dungeon.Point) []creature {
+	out := make([]creature, 0, len(pack))
+	for _, c := range pack {
+		if !c.Patrol {
+			out = append(out, c)
+			continue
+		}
+		for _, at := range append([]dungeon.Point{c.Pos}, movement[c.GUID]...) {
+			q := c
+			q.Pos = at
+			q.patrolPoint = true
+			out = append(out, q)
+		}
 	}
 	return out
 }
@@ -168,14 +206,40 @@ func zgMin3(p dungeon.Point, cs []creature) (float64, creature) {
 	return best, who
 }
 
-func zgMinSegment(a, b dungeon.Point, cs []creature) (float64, dungeon.Point) {
+func zgSampleMin(samples []dungeon.Point, cs []creature) (float64, dungeon.Point, creature) {
 	best, at := math.Inf(1), dungeon.Point{}
-	for _, s := range samplesAlong(a, b, zgSampleStep) {
-		if d, _ := zgMin3(s, cs); d < best {
-			best, at = d, s
+	var who creature
+	for _, s := range samples {
+		if d, c := zgMin3(s, cs); d < best {
+			best, at, who = d, s, c
 		}
 	}
-	return best, at
+	return best, at, who
+}
+
+// zgSplit separates a pack's static spawns from the waypoints of a lone patroller's loop.
+func zgSplit(cs []creature) (static, patrol []creature) {
+	for _, c := range cs {
+		if c.patrolPoint {
+			patrol = append(patrol, c)
+		} else {
+			static = append(static, c)
+		}
+	}
+	return static, patrol
+}
+
+// zgClearSamples asserts that every sample keeps staticYd from a static spawn and patrolYd from every waypoint of an
+// unpulled patrol (20 yd detection + 3 yd spread on these legs).
+func zgClearSamples(t *testing.T, label string, samples []dungeon.Point, cs []creature, staticYd, patrolYd float64) {
+	t.Helper()
+	static, patrol := zgSplit(cs)
+	if d, at, who := zgSampleMin(samples, static); d < staticYd {
+		t.Errorf("%s passes %.1f yd from %s %d at %.1f %.1f, want >= %g", label, d, who.Name, who.Entry, at.X, at.Y, staticYd)
+	}
+	if d, at, who := zgSampleMin(samples, patrol); d < patrolYd {
+		t.Errorf("%s passes %.1f yd from a waypoint of %s %d's patrol (at %.1f %.1f %.1f), want >= %g", label, d, who.Name, who.Entry, at.X, at.Y, at.Z, patrolYd)
+	}
 }
 
 func zgLater(packs [][]creature, gi int) []creature {
@@ -188,7 +252,9 @@ func zgLater(packs [][]creature, gi int) []creature {
 
 // zgCheckStands asserts the stand rules from the first pull on: each group has a stand 19.5-28 yd from its own pack and
 // within 50 yd of its row's point, and the walk from the previous stand stays >= 19 yd from its own pack and >= 20 yd
-// from every pack pulled later. skipFirst leaves the first group to its leg's own `to` (the party arrives there).
+// from every pack pulled later. A patrolling unit's whole loop counts: every waypoint of an unpulled patrol stays
+// >= 23 yd (20 yd detection + 3 yd spread) from a stand or walk sample, since it walks the loop while the party waits.
+// skipFirst leaves the first group to its leg's own `to` (the party arrives there).
 func zgCheckStands(t *testing.T, legName string, leg dungeon.Leg, packs [][]creature, skipFirst bool, lastGroup int) {
 	t.Helper()
 	prev := dungeon.Point{}
@@ -202,6 +268,19 @@ func zgCheckStands(t *testing.T, legName string, leg dungeon.Leg, packs [][]crea
 			} else {
 				prev = g.Positions[0]
 			}
+			// the party stages at the first stand: a lone patroller's stand must still reach it (19.5-28 yd to the
+			// closest waypoint, the tank's shot) and keep the detection range plus spread from every other waypoint
+			if _, patrol := zgSplit(packs[gi]); len(patrol) > 0 {
+				own, who := zgMin3(prev, packs[gi])
+				if own < zgOwnMinYd || own > zgOwnMaxYd {
+					t.Errorf("%s pull group %d: stand %.1f %.1f %.1f is %.1f yd from %s %d's patrol, want %g-%g", legName, gi, prev.X, prev.Y, prev.Z, own, who.Name, who.Entry, zgOwnMinYd, zgOwnMaxYd)
+				}
+				for _, c := range patrol {
+					if d := dist(prev, c.Pos); d < zgLaterYd+zgPatrolSpreadYd {
+						t.Errorf("%s pull group %d: stand %.1f %.1f %.1f is %.1f yd from a waypoint %.1f %.1f %.1f of %s %d's patrol, want >= %g", legName, gi, prev.X, prev.Y, prev.Z, d, c.Pos.X, c.Pos.Y, c.Pos.Z, c.Name, c.Entry, zgLaterYd+zgPatrolSpreadYd)
+					}
+				}
+			}
 			continue
 		}
 		if len(g.Approach) == 0 {
@@ -212,6 +291,15 @@ func zgCheckStands(t *testing.T, legName string, leg dungeon.Leg, packs [][]crea
 		own, who := zgMin3(stand, packs[gi])
 		if own < zgOwnMinYd || own > zgOwnMaxYd {
 			t.Errorf("%s pull group %d: stand %.1f %.1f %.1f is %.1f yd from %s %d, want %g-%g", legName, gi, stand.X, stand.Y, stand.Z, own, who.Name, who.Entry, zgOwnMinYd, zgOwnMaxYd)
+		}
+		// a patrol-only pack walks its whole loop while unpulled: the stand keeps the detection range plus the spread
+		// from every waypoint, so the party is not woken before the pull (the pull reaches it at the nearest one)
+		if _, patrol := zgSplit(packs[gi]); len(patrol) > 0 {
+			for _, c := range patrol {
+				if d := dist(stand, c.Pos); d < zgLaterYd+zgPatrolSpreadYd {
+					t.Errorf("%s pull group %d: stand %.1f %.1f %.1f is %.1f yd from a waypoint %.1f %.1f %.1f of %s %d's patrol, want >= %g", legName, gi, stand.X, stand.Y, stand.Z, d, c.Pos.X, c.Pos.Y, c.Pos.Z, c.Name, c.Entry, zgLaterYd+zgPatrolSpreadYd)
+				}
+			}
 		}
 		var cen dungeon.Point
 		n := float32(len(g.Positions))
@@ -226,12 +314,9 @@ func zgCheckStands(t *testing.T, legName string, leg dungeon.Leg, packs [][]crea
 		if d := dist(cen, stand); d > zgCentreYd {
 			t.Errorf("%s pull group %d: stand is %.1f yd from the row's point, want <= %g", legName, gi, d, zgCentreYd)
 		}
-		if d, at := zgMinSegment(prev, stand, packs[gi]); d < 19 {
-			t.Errorf("%s pull group %d: the walk from the previous stand passes %.1f yd from its own pack at %.1f %.1f", legName, gi, d, at.X, at.Y)
-		}
-		if d, at := zgMinSegment(prev, stand, zgLater(packs, gi)); d < zgLaterYd {
-			t.Errorf("%s pull group %d: the walk from the previous stand passes %.1f yd from a later pack at %.1f %.1f, want >= %g", legName, gi, d, at.X, at.Y, zgLaterYd)
-		}
+		walk := samplesAlong(prev, stand, zgSampleStep)
+		zgClearSamples(t, fmt.Sprintf("%s pull group %d: the walk from the previous stand (own pack)", legName, gi), walk, packs[gi], 19, zgLaterYd+zgPatrolSpreadYd)
+		zgClearSamples(t, fmt.Sprintf("%s pull group %d: the walk from the previous stand", legName, gi), walk, zgLater(packs, gi), zgLaterYd, zgLaterYd+zgPatrolSpreadYd)
 		prev = stand
 	}
 }
@@ -448,8 +533,8 @@ func zgApproachMin(samples []dungeon.Point, pack []creature, endAtStand bool) (f
 }
 
 // zgCheckWalk checks the exported rows' walk: every consecutive pair's straight line and committed navmesh polyline stays
-// >= 20 yd from every pack pulled later (the pack the row approaches excluded), and, with the mmaps, the navmesh walk is
-// the fixture's walk to within a yard.
+// >= 20 yd from every pack pulled later (the pack the row approaches excluded), >= 23 yd from every waypoint of an
+// unpulled patrol, and, with the mmaps, the navmesh walk is the fixture's walk to within a yard.
 func zgCheckWalk(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, packs [][]creature) {
 	t.Helper()
 	fixture := zgLoadRoutes(t)
@@ -457,10 +542,7 @@ func zgCheckWalk(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, p
 		a, b := w.Parties[i], w.Parties[i+1]
 		later := zgLaterOf(w, packs, i)
 		if len(later) > 0 {
-			if d, at := zgMinSegment(a.P, b.P, later); d < zgLaterYd {
-				t.Errorf("%s rows %d (%s) -> %d (%s): the straight walk passes %.1f yd from a later pack at %.1f %.1f, want >= %g",
-					w.Name, a.Seq, a.Label, b.Seq, b.Label, d, at.X, at.Y, zgLaterYd)
-			}
+			zgClearSamples(t, fmt.Sprintf("%s rows %d (%s) -> %d (%s): the straight walk", w.Name, a.Seq, a.Label, b.Seq, b.Label), samplesAlong(a.P, b.P, zgSampleStep), later, zgLaterYd, zgLaterYd+zgPatrolSpreadYd)
 		}
 		var fix *zgRoute
 		for k := range fixture.Routes {
@@ -482,26 +564,22 @@ func zgCheckWalk(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, p
 			samples = append(samples, dungeon.Point{X: q[0], Y: q[1], Z: q[2]})
 		}
 		// a walk must not walk into the pack the next pull approaches before its stand: the navmesh polyline stays
-		// >= zgLaterYd from every unit of that pack, except the last yard before the stand (19.5-28 yd by design)
+		// >= zgLaterYd (23 for a patrol's waypoints) from every unit of that pack, except the last yard before the
+		// stand (19.5-28 yd by design)
 		if g, stand, ok := zgNextPull(w, i); ok && g >= 0 && g < len(packs) {
 			atStand := dist(b.P, stand) < 0.01
-			if d, at, who, found := zgApproachMin(samples, packs[g], atStand); found && d < zgLaterYd {
+			static, patrol := zgSplit(packs[g])
+			if d, at, who, found := zgApproachMin(samples, static, atStand); found && d < zgLaterYd {
 				t.Errorf("%s rows %d (%s) -> %d (%s): the navmesh walk passes %.1f yd from the pack of pull group %d at %.1f %.1f %.1f (%s %d), want >= %g before the stand",
 					w.Name, a.Seq, a.Label, b.Seq, b.Label, d, g, at.X, at.Y, at.Z, who.Name, who.Entry, zgLaterYd)
 			}
+			if d, at, who, found := zgApproachMin(samples, patrol, atStand); found && d < zgLaterYd+zgPatrolSpreadYd {
+				t.Errorf("%s rows %d (%s) -> %d (%s): the navmesh walk passes %.1f yd from a waypoint of %s %d's patrol in pull group %d (at %.1f %.1f %.1f), want >= %g before the stand",
+					w.Name, a.Seq, a.Label, b.Seq, b.Label, d, who.Name, who.Entry, g, at.X, at.Y, at.Z, zgLaterYd+zgPatrolSpreadYd)
+			}
 		}
 		if len(later) > 0 {
-			best, at := math.Inf(1), dungeon.Point{}
-			var who creature
-			for _, s := range samples {
-				if d, c := zgMin3(s, later); d < best {
-					best, at, who = d, s, c
-				}
-			}
-			if best < zgLaterYd {
-				t.Errorf("%s rows %d (%s) -> %d (%s): the navmesh walk passes %.1f yd from a later pack at %.1f %.1f %.1f (%s %d), want >= %g",
-					w.Name, a.Seq, a.Label, b.Seq, b.Label, best, at.X, at.Y, at.Z, who.Name, who.Entry, zgLaterYd)
-			}
+			zgClearSamples(t, fmt.Sprintf("%s rows %d (%s) -> %d (%s): the navmesh walk", w.Name, a.Seq, a.Label, b.Seq, b.Label), samples, later, zgLaterYd, zgLaterYd+zgPatrolSpreadYd)
 		}
 		if pl == nil {
 			continue
