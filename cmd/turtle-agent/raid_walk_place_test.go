@@ -2600,7 +2600,7 @@ func TestPlaceClearZGSweepsLeftoverPatrols(t *testing.T) {
 		"high_priestess_arlokk": {255, 257, 272},
 	}
 	for _, leg := range []string{"high_priestess_marli", "high_priest_venoxis", "high_priest_thekal", "high_priestess_arlokk"} {
-		start, _, err := raidwalk.PlaceStart(rows, froms[leg])
+		start, _, _, _, err := raidwalk.PlaceStart(rows, froms[leg])
 		if err != nil {
 			t.Fatalf("%s: %v", leg, err)
 		}
@@ -2667,13 +2667,13 @@ func TestZGPlacedStartsCoverEveryLeftoverPatrol(t *testing.T) {
 	}
 	starts := map[string]int{}
 	for _, leg := range []string{"high_priestess_marli", "high_priest_thekal", "high_priestess_arlokk"} {
-		start, _, err := raidwalk.PlaceStart(rows, []string{"from", "leg", leg})
+		start, _, _, _, err := raidwalk.PlaceStart(rows, []string{"from", "leg", leg})
 		if err != nil {
 			t.Fatal(err)
 		}
 		starts[leg] = start
 	}
-	start52, _, err := raidwalk.PlaceStart(rows, []string{"from", "step", "52"})
+	start52, _, _, _, err := raidwalk.PlaceStart(rows, []string{"from", "step", "52"})
 	if err != nil {
 		t.Fatal(err)
 	}
