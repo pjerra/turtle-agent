@@ -333,11 +333,11 @@ func (g remoteGame) FloorsAt(ctx context.Context, mapID uint32, x, y, z float32)
 func (g remoteGame) InGroup() bool    { return g.c.cur().Party().InGroup }
 func (g remoteGame) AgentMap() uint32 { return g.c.cur().Status().Map }
 
-// AgentPosition is where the agent's own character stands, and whether z is the server's own height rather than a guess
-// (dungeon.AgentPositioner): the hire step's portal-ground check (#266) waits for a known height near the portal.
-func (g remoteGame) AgentPosition() (dungeon.Point, bool) {
+// AgentPosition is where the agent's own character stands (dungeon.AgentPositioner): the hire step's portal-ground check compares the
+// navmesh floor there with the portal's floor, so a guessed z (session.StatusInfo.ZUnknown) is enough.
+func (g remoteGame) AgentPosition() dungeon.Point {
 	st := g.c.cur().Status()
-	return dungeon.Point{X: st.X, Y: st.Y, Z: st.Z}, !st.ZUnknown
+	return dungeon.Point{X: st.X, Y: st.Y, Z: st.Z}
 }
 
 func (g remoteGame) LeaveGroup(ctx context.Context) error { return g.c.cur().LeaveGroup(ctx) }

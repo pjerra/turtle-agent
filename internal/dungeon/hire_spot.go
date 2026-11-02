@@ -5,26 +5,25 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"time"
 )
 
-// AgentPositioner is the optional part of a Preparer that tells where the agent's own character stands, and whether z is the server's
-// own height (false: a guess until the server sends a position, session.StatusInfo.ZUnknown).
+// AgentPositioner is the optional part of a Preparer that tells where the agent's own character stands. Its z may be a guess until the
+// server sends a position (session.StatusInfo.ZUnknown); the hire spot does not judge that height, it compares navmesh floors.
 type AgentPositioner interface {
-	AgentPosition() (Point, bool)
+	AgentPosition() Point
 }
 
 const (
-	hireSpotRadius = 15.0             // yd, horizontal, around the plan's portal point
-	hireSpotMaxDZ  = 5.0              // yd: farther than this above or below the portal point, inside the radius, is not the portal ground
-	hireSpotZWait  = 10 * time.Second // how long the hire waits near the portal for the server's own height
-	hireSpotZPoll  = 250 * time.Millisecond
+	hireSpotRadius  = 15.0 // yd, horizontal, around the plan's portal point
+	hireSpotMaxDrop = 5.0  // yd: a commander whose navmesh floor is farther than this below the portal's floor hires nothing
 )
 
 // hireSpotProblem says why the commander must not hire where it stands ("" when it may). Hires appear at the commander and muster
-// there (#266: on 2026-10-20 an Alliance commander hired for a horde plan under the Orgrimmar portal, z -19.8 against the portal's
-// -10.4; a Grunt and an imp killed all five hires in 41 s), and the module hires the commander's own faction only, so a commander of
-// the other team than the run's gets a party that fights for the other side.
+// there (#266: on 2026-10-20 an Alliance commander hired for a horde plan under the Orgrimmar portal and a Grunt and an imp killed all
+// five hires in 41 s), and the module hires the commander's own faction only, so a commander of the other team than the run's gets a party
+// that fights for the other side. The portal ground is the navmesh floor at the portal x/y nearest below the trigger centre, and the
+// commander's floor is the navmesh floor at its own x/y nearest its height: only a commander whose floor is well below the portal's
+// refuses, so a guessed z or a trigger centre a few yards above the ground decides nothing.
 func (e *prepEnv) hireSpotProblem(ctx context.Context) (string, error) {
 	agent := ""
 	if ts, ok := e.g.(TeamSource); ok {
@@ -48,52 +47,48 @@ func (e *prepEnv) hireSpotProblem(ctx context.Context) (string, error) {
 	across := func(p Point) float64 {
 		return math.Hypot(float64(p.X)-float64(portal.X), float64(p.Y)-float64(portal.Y))
 	}
-	pos, zKnown := ap.AgentPosition()
+	pos := ap.AgentPosition()
 	if across(pos) > hireSpotRadius {
 		return "", nil
 	}
-	if !zKnown {
-		// A guessed height cannot decide the drop under the portal (#266): wait for the server's own position, then judge on it.
-		e.note(fmt.Sprintf("hire spot: the commander's height is unknown near the portal, waiting up to %.0f s for the server's position", hireSpotZWait.Seconds()))
-		var werr error
-		pos, zKnown, werr = e.waitAgentZ(ctx, ap, portal.Point)
-		if werr != nil {
-			// A stop during the wait ends the hire as stopped, never as a failed spot: the cancellation goes back unchanged, so the
-			// run's classifier (ctxDone) reads it as a stop.
-			return "", werr
-		}
-		if across(pos) > hireSpotRadius {
-			return "", nil
-		}
-		if !zKnown {
-			return "hire: commander height unknown near the portal", nil
-		}
-	}
-	dz := float64(pos.Z) - float64(portal.Z)
-	if math.Abs(dz) <= hireSpotMaxDZ {
+	fl, ok := e.g.(FloorLister)
+	if !ok {
+		e.note("hire: portal ground not checked (no navmesh)")
 		return "", nil
 	}
-	side := "above"
-	if dz < 0 {
-		side = "below"
+	ground, ok := navmeshFloorBelow(ctx, fl, portal.Map, portal.Point)
+	if !ok {
+		e.note("hire: portal ground not checked (no navmesh)")
+		return "", nil
 	}
-	return fmt.Sprintf("the commander stands %.1f yd %s the portal ground (z %.1f, the portal %.1f, %.1f yd across): the hires appear and muster where the commander stands; stand on the portal ground first", math.Abs(dz), side, pos.Z, portal.Z, across(pos)), nil
+	zs, ok := fl.FloorsAt(ctx, portal.Map, pos.X, pos.Y, pos.Z)
+	if !ok {
+		e.note("hire: portal ground not checked (no navmesh)")
+		return "", nil
+	}
+	floor, ok := nearestFloor(zs, pos.Z, -math.MaxFloat32, math.MaxFloat32)
+	if !ok {
+		e.note("hire: portal ground not checked (no navmesh)")
+		return "", nil
+	}
+	if float64(ground)-float64(floor) <= hireSpotMaxDrop {
+		return "", nil
+	}
+	return fmt.Sprintf("the commander stands %.1f yd below the portal ground (its floor %.1f, the portal ground %.1f, %.1f yd across): the hires appear and muster where the commander stands; stand on the portal ground first", float64(ground)-float64(floor), floor, ground, across(pos)), nil
 }
 
-// waitAgentZ waits for the game to report the commander's own height: up to hireSpotZWait, polled every hireSpotZPoll, and ends early
-// when the commander leaves the portal's horizontal radius (there the height decides nothing). It returns the last position, whether
-// the height was the server's own, and the wait's error: a stop during the wait is the caller's stop, never a height verdict.
-func (e *prepEnv) waitAgentZ(ctx context.Context, ap AgentPositioner, portal Point) (Point, bool, error) {
-	deadline := e.now().Add(hireSpotZWait)
-	pos, known := ap.AgentPosition()
-	for !known && e.now().Before(deadline) {
-		if math.Hypot(float64(pos.X)-float64(portal.X), float64(pos.Y)-float64(portal.Y)) > hireSpotRadius {
-			break
-		}
-		if err := e.sleep(ctx, hireSpotZPoll); err != nil {
-			return pos, known, err
-		}
-		pos, known = ap.AgentPosition()
+// navmeshFloorBelow is the floor at p's x/y nearest below p's height: the ground a body at p would rest on, never a deck above the
+// trigger. The trigger centre may sit a little above the mesh (a door or a platform is no navmesh surface), so a floor up to half a yard
+// above it still counts. false when the mesh lists no such floor (no planner, no tile, or the trigger is under the mesh).
+func navmeshFloorBelow(ctx context.Context, fl FloorLister, mapID uint32, p Point) (float32, bool) {
+	zs, ok := fl.FloorsAt(ctx, mapID, p.X, p.Y, p.Z)
+	if !ok {
+		return 0, false
 	}
-	return pos, known, nil
+	for _, z := range zs { // highest first
+		if float64(z) <= float64(p.Z)+0.5 {
+			return z, true
+		}
+	}
+	return 0, false
 }

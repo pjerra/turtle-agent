@@ -401,11 +401,6 @@ func (f *hireFlow) note(format string, a ...any) {
 
 // hire is the prepare step `party: hire`.
 func (e *prepEnv) hire(ctx context.Context) (string, error) {
-	if p, err := e.hireSpotProblem(ctx); err != nil {
-		return "", err
-	} else if p != "" {
-		return "", errors.New(p)
-	}
 	hg, ok := e.g.(HireGame)
 	if !ok {
 		return "", errors.New("this game cannot hire: it has no group view or item queries")
@@ -478,6 +473,15 @@ func (f *hireFlow) run(ctx context.Context) (string, error) {
 		}
 	}
 	standing := f.bindingStands(bound, keep, drop)
+	if !standing {
+		// Nothing new is hired into a kept binding that already holds the wanted party (a resume), so the spot it stands on cannot take
+		// a fresh hire anywhere. Otherwise the check comes before anything is dismissed, hired or bound.
+		if p, err := e.hireSpotProblem(ctx); err != nil {
+			return "", err
+		} else if p != "" {
+			return "", errors.New(p)
+		}
+	}
 	if bound.Answered && !standing {
 		if err := e.unbindCommander(ctx); err != nil {
 			return "", err

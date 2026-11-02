@@ -2,37 +2,40 @@ package dungeon
 
 import (
 	"context"
-	"errors"
+	"math"
 	"strings"
 	"testing"
-	"time"
 )
 
 // The hire spot refusals (#266): hires appear at the commander and muster there, so the commander must not stand under the portal's
-// ground and must be of the run's team.
+// ground and must be of the run's team. The portal ground is the navmesh floor below the trigger centre, not the trigger centre's own z.
 
 const portalMap = 1
 
 // portalPoint is Ragefire Chasm's portal on the outer map (dungeons/ragefire_chasm.json).
 var portalPoint = Point{X: 1818.4, Y: -4427.26, Z: -10.4478}
 
-// hirePosFake is the hire fake with a game that knows where the commander stands (AgentPositioner); a plain hireFake gives none.
-// zUnknown models a height the server has not sent yet (session.StatusInfo.ZUnknown): guessZ stands in for it until knownAt (zero: never).
+// hirePosFake is the hire fake with a game that knows where the commander stands (AgentPositioner) and, when floors is set, the navmesh
+// floors at a point (FloorLister). A plain hireFake gives neither.
 type hirePosFake struct {
 	*hireFake
-	pos      Point
-	zUnknown bool
-	guessZ   float32
-	knownAt  time.Time
+	pos    Point
+	floors map[[2]float32][]float32
 }
 
-func (g *hirePosFake) AgentPosition() (Point, bool) {
-	p := g.pos
-	if g.zUnknown && (g.knownAt.IsZero() || g.now.Before(g.knownAt)) {
-		p.Z = g.guessZ
-		return p, false
+func (g *hirePosFake) AgentPosition() Point { return g.pos }
+
+// FloorsAt answers the fixture floors of the nearest point within a yard, highest first, as the navmesh does.
+func (g *hirePosFake) FloorsAt(_ context.Context, _ uint32, x, y, _ float32) ([]float32, bool) {
+	best := math.Inf(1)
+	var out []float32
+	found := false
+	for k, zs := range g.floors {
+		if d := math.Hypot(float64(k[0]-x), float64(k[1]-y)); d <= 1 && d < best {
+			best, out, found = d, zs, true
+		}
 	}
-	return p, true
+	return out, found
 }
 
 // hireSpotEnv is the prepare environment of the hire step over a plan, the way remote_prepare.go builds it.
@@ -42,13 +45,16 @@ func hireSpotEnv(g *hireFake, own Preparer, note func(string)) *prepEnv {
 		now: clk.Now, sleep: clk.Sleep, note: note, command: g.Command}
 }
 
-// A commander that stands under the portal's ground hires nothing at all: the hires would appear and muster there, out of reach of the
-// instance's entrance.
-func TestHireRefusesUnderThePortal(t *testing.T) {
+// A commander who stands on a floor more than 5 yd below the portal ground hires nothing at all: the hires would appear and muster there,
+// out of reach of the instance's entrance.
+func TestHireRefusesBelowThePortalGround(t *testing.T) {
 	g := newHireFake(t)
 	g.agentMap = portalMap
 	g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
-	pos := &hirePosFake{hireFake: g, pos: Point{X: 1821.5, Y: -4425.3, Z: -19.8}}
+	pos := &hirePosFake{hireFake: g, pos: Point{X: 1821.5, Y: -4425.3, Z: -30.5}, floors: map[[2]float32][]float32{
+		{portalPoint.X, portalPoint.Y}: {-20.306},
+		{1821.5, -4425.3}:              {-30.6},
+	}}
 	e := hireSpotEnv(g, pos, func(string) {})
 	_, err := e.hire(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "portal ground") || !strings.Contains(err.Error(), "below") {
@@ -59,96 +65,85 @@ func TestHireRefusesUnderThePortal(t *testing.T) {
 	}
 }
 
-// A guessed height near the portal never decides the hire, not even when it says the ground is safe: the step waits for the server's own
-// position, and a height that never arrives refuses the hire.
-func TestHireRefusesUnknownHeightNearThePortal(t *testing.T) {
+// The review's real samples stand below their trigger centre but on the portal ground floor: the floor snap allows them (WC 6.1 yd, RFC
+// 9.4 yd, Sunken Temple 5.2 yd and Dire Maul East 4.6 yd under the trigger). A guessed height does not matter: the floor at the
+// commander's x/y is the same.
+func TestHireSpotAllowsTheRealPortalSamples(t *testing.T) {
+	rfc := Point{X: 1818.4, Y: -4427.26, Z: -10.4478}
+	for _, c := range []struct {
+		name            string
+		agentMap        uint32
+		portal          Portal
+		portalFloors    []float32
+		pos             Point
+		commanderFloors []float32
+	}{
+		{"wailing caverns", 1, Portal{Map: 1, Point: Point{X: -753.596, Y: -2212.78, Z: 21.5403}},
+			[]float32{15.4}, Point{X: -753.4, Y: -2212.8, Z: 15.4}, []float32{15.4}},
+		{"ragefire chasm", 1, Portal{Map: 1, Point: rfc},
+			[]float32{-20.306}, Point{X: 1821.5, Y: -4425.3, Z: -19.8}, []float32{-20.305}},
+		{"sunken temple", 0, Portal{Map: 0, Point: Point{X: -10162.7, Y: -3998.65, Z: -107.978}},
+			[]float32{-113.443}, Point{X: -10168, Y: -3997.1, Z: -113.2}, []float32{-113.66}},
+		{"dire maul east", 1, Portal{Map: 1, Point: Point{X: -3981.58, Y: 771.193, Z: 160.962}},
+			[]float32{156.4}, Point{X: -3976.1, Y: 773.2, Z: 156.4}, []float32{156.4}},
+		{"a guessed height on the portal ground", 1, Portal{Map: 1, Point: rfc},
+			[]float32{-20.306}, Point{X: 1821.5, Y: -4425.3, Z: -30}, []float32{-20.305}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			g := newHireFake(t)
+			g.agentMap = c.agentMap
+			g.plan.Portal = &c.portal
+			pos := &hirePosFake{hireFake: g, pos: c.pos, floors: map[[2]float32][]float32{
+				{c.portal.X, c.portal.Y}: c.portalFloors,
+				{c.pos.X, c.pos.Y}:       c.commanderFloors,
+			}}
+			e := hireSpotEnv(g, pos, func(string) {})
+			if p, err := e.hireSpotProblem(context.Background()); err != nil || p != "" {
+				t.Errorf("the spot is allowed: %s %v", p, err)
+			}
+		})
+	}
+}
+
+// No navmesh for the map means no portal-ground check, with a note.
+func TestHireSpotWithoutNavmesh(t *testing.T) {
 	g := newHireFake(t)
 	g.agentMap = portalMap
 	g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
-	began := g.now
-	// The guess sits on the portal ground; the true height is under it, the way a GM teleport's guess hides the drop.
-	pos := &hirePosFake{hireFake: g, pos: Point{X: 1821.5, Y: -4425.3, Z: -19.8}, zUnknown: true, guessZ: -15.0}
 	var notes []string
+	pos := &hirePosFake{hireFake: g, pos: Point{X: 1818.4, Y: -4427.26, Z: -30}}
 	e := hireSpotEnv(g, pos, func(s string) { notes = append(notes, s) })
-	_, err := e.hire(context.Background())
-	if err == nil || err.Error() != "hire: commander height unknown near the portal" {
-		t.Fatalf("a hire with an unknown height near the portal: %v", err)
-	}
-	if d := g.now.Sub(began); d < hireSpotZWait {
-		t.Fatalf("the wait for the server's own height: %v, want at least %v", d, hireSpotZWait)
-	}
-	if len(g.hireLines) != 0 || g.count("cbind") != 0 {
-		t.Fatalf("a hire with an unknown height still hired: hires %v, binds %d", g.hireLines, g.count("cbind"))
-	}
-	if !strings.Contains(strings.Join(notes, "\n"), "height is unknown near the portal") {
-		t.Fatalf("the wait for the height is not noted: %v", notes)
-	}
-}
-
-// A stop during the wait for the server's own height ends the hire as stopped, not as a failed spot: the sleep's cancellation goes
-// back unchanged, so the run reads it as a stop (ctxDone), not as "height unknown".
-func TestHireStopDuringTheHeightWait(t *testing.T) {
-	g := newHireFake(t)
-	g.agentMap = portalMap
-	g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
-	pos := &hirePosFake{hireFake: g, pos: Point{X: 1821.5, Y: -4425.3, Z: -19.8}, zUnknown: true, guessZ: -15.0}
-	e := hireSpotEnv(g, pos, func(string) {})
-	ctx, cancel := context.WithCancel(context.Background())
-	clk := g.clock()
-	call := 0
-	e.sleep = func(ctx context.Context, d time.Duration) error {
-		call++
-		if call == 2 {
-			cancel()
-		}
-		return clk.Sleep(ctx, d)
-	}
-	_, err := e.hire(ctx)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("a stop during the height wait: %v, want context.Canceled", err)
-	}
-	if len(g.hireLines) != 0 || g.count("cbind") != 0 {
-		t.Fatalf("a stop during the height wait still hired: hires %v, binds %d", g.hireLines, g.count("cbind"))
-	}
-	if p, perr := e.hireSpotProblem(ctx); !errors.Is(perr, context.Canceled) || p != "" {
-		t.Fatalf("a stop during the height wait as a spot problem: %q %v, want the cancellation", p, perr)
-	}
-}
-
-// The height arrives within the wait: the spot is judged on the server's position, not on the guess (the guess said the portal ground, the
-// server's own height said under it).
-func TestHireSpotWaitsForTheKnownHeight(t *testing.T) {
-	g := newHireFake(t)
-	g.agentMap = portalMap
-	g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
-	began := g.now
-	pos := &hirePosFake{hireFake: g, pos: Point{X: 1821.5, Y: -4425.3, Z: -19.8}, zUnknown: true, guessZ: -15.0, knownAt: began.Add(2 * time.Second)}
-	e := hireSpotEnv(g, pos, func(string) {})
-	_, err := e.hire(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "portal ground") || !strings.Contains(err.Error(), "below") {
-		t.Fatalf("a hire judged when the height arrived: %v", err)
-	}
-	if d := g.now.Sub(began); d < 2*time.Second || d >= 3*time.Second {
-		t.Fatalf("the wait for the height: %v, want about 2 s", d)
-	}
-	if len(g.hireLines) != 0 || g.count("cbind") != 0 {
-		t.Fatalf("a hire under the portal still hired: hires %v, binds %d", g.hireLines, g.count("cbind"))
-	}
-}
-
-// Far from the portal an unknown height costs nothing: the drop under the portal is not the spot, so no wait and no refusal.
-func TestHireSpotUnknownHeightFarFromThePortal(t *testing.T) {
-	g := newHireFake(t)
-	g.agentMap = portalMap
-	g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
-	began := g.now
-	pos := &hirePosFake{hireFake: g, pos: Point{X: 1838.4, Y: -4427.26, Z: -19.4478}, zUnknown: true, guessZ: -30}
-	e := hireSpotEnv(g, pos, func(string) {})
 	if p, err := e.hireSpotProblem(context.Background()); err != nil || p != "" {
-		t.Fatalf("an unknown height far from the portal: %s %v", p, err)
+		t.Fatalf("no navmesh refused the spot: %s %v", p, err)
 	}
-	if d := g.now.Sub(began); d != 0 {
-		t.Fatalf("an unknown height far from the portal waited %v", d)
+	if !strings.Contains(strings.Join(notes, "\n"), "hire: portal ground not checked (no navmesh)") {
+		t.Fatalf("the skipped portal check is not noted: %v", notes)
+	}
+}
+
+// A commander that stands in a kept binding's spot after a resume hires nothing new: the spot is not judged (nothing appears there).
+func TestHireSpotSkippedForAKeptBinding(t *testing.T) {
+	g := newHireFake(t)
+	for _, c := range [][2]string{{"warrior", "tank"}, {"priest", "healer"}, {"hunter", "dps"}, {"rogue", "dps"}, {"warlock", "dps"}} {
+		g.preHire(c[0], c[1], 43)
+	}
+	g.nextName, g.raid = 5, true
+	g.preBind()
+	g.agentMap = portalMap
+	g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
+	pos := &hirePosFake{hireFake: g, pos: Point{X: 1821.5, Y: -4425.3, Z: -30.5}, floors: map[[2]float32][]float32{
+		{portalPoint.X, portalPoint.Y}: {-20.306},
+		{1821.5, -4425.3}:              {-30.6},
+	}}
+	e := hireSpotEnv(g, pos, func(string) {})
+	if p, err := e.hireSpotProblem(context.Background()); err != nil || p == "" {
+		t.Fatalf("the spot itself is refused: %q %v", p, err)
+	}
+	if _, err := e.hire(context.Background()); err != nil {
+		t.Fatalf("a kept binding is refused by the spot: %v", err)
+	}
+	if len(g.hireLines) != 0 {
+		t.Fatalf("a kept binding hired: %v", g.hireLines)
 	}
 }
 
@@ -180,8 +175,7 @@ func TestHireRefusesTheOtherTeamsCommander(t *testing.T) {
 	}
 }
 
-// The spot is fine on the portal ground, at the edge of the drop, across the ledge, on another map, and whenever a team is unknown or
-// the same in another case.
+// The spot is fine on the portal ground, on another map, and whenever a team is unknown or the same in another case.
 func TestHireSpotAllows(t *testing.T) {
 	rfc := func() *Portal { return &Portal{Map: portalMap, Point: portalPoint} }
 	for _, c := range []struct {
@@ -192,8 +186,6 @@ func TestHireSpotAllows(t *testing.T) {
 		portal          *Portal
 	}{
 		{"on the portal ground", portalMap, portalPoint, "", "", rfc()},
-		{"five yards below the portal", portalMap, Point{X: 1818.4, Y: -4427.26, Z: -15.4478}, "", "", rfc()},
-		{"twenty yards across", portalMap, Point{X: 1838.4, Y: -4427.26, Z: -19.4478}, "", "", rfc()},
 		{"another map", outsideMap, Point{X: 1819.4, Y: -4426.26, Z: -30}, "", "", rfc()},
 		{"the same team in another case", portalMap, portalPoint, "Horde", "horde", rfc()},
 		{"no team in the run", portalMap, portalPoint, "", "alliance", rfc()},

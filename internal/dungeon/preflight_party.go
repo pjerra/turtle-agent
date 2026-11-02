@@ -23,8 +23,11 @@ func (d *RemoteDriver) checkPartyStrength(pf *Preflight) {
 	if name == "" {
 		name = d.opt.Lead
 	}
-	if m, ok := d.memberByName(name); ok && d.plan.TankMinHP > 0 && m.MaxHP > 0 && m.MaxHP < d.plan.TankMinHP {
-		pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: the tank's max health is %d, the plan wants at least %d for its level band (weak gear: autogear again, or hire another tank)", m.Name, m.MaxHP, d.plan.TankMinHP))
+	if m, ok := d.memberByName(name); ok && d.plan.TankMinHP > 0 && m.MaxHP > 0 {
+		floor := d.tankFloor(name)
+		if m.MaxHP < floor {
+			pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: the tank's max health is %d, the plan wants at least %d for its level band (weak gear: autogear again, or hire another tank)", m.Name, m.MaxHP, floor))
+		}
 	}
 	bt, ok := d.g.(BotTeamer)
 	if !ok {
@@ -52,4 +55,27 @@ func (d *RemoteDriver) checkPartyStrength(pf *Preflight) {
 	if unread > 0 {
 		d.rep.note(fmt.Sprintf("faction check: %d of %d bots not in view, not checked", unread, len(d.fr.Party)))
 	}
+}
+
+// tankFloor is the plan's tank_min_hp for the tank named: scaled to the level the hire step read for it (plan.TankMinHP is set at the
+// middle of the plan's level band), else as it stands when the level or the band is unknown.
+func (d *RemoteDriver) tankFloor(name string) uint32 {
+	floor := d.plan.TankMinHP
+	lo, hi := d.plan.Band()
+	if lo == 0 || hi == 0 {
+		return floor
+	}
+	level := 0
+	if rep := d.rep.snapshot(); rep.Ready != nil {
+		for _, b := range rep.Ready.Bots {
+			if b.Level > 0 && strings.EqualFold(b.Name, name) {
+				level = b.Level
+				break
+			}
+		}
+	}
+	if level == 0 {
+		return floor
+	}
+	return scaledTankFloor(floor, (lo+hi)/2, level)
 }
