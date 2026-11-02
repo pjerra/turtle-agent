@@ -2400,7 +2400,7 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 		st, _ := w.status(ctx)
 		return stopf(exitRaidWalkIncident, "not revived: the commander did not land at the revive point on map %d (last read: map %d %.1f %.1f %.1f, z unknown %v, falling %v, teleports %d -> %d)", w.plan.Map, st.Map, st.X, st.Y, st.Z, st.ZUnknown, st.Falling, beforeSeq, st.TeleportSeq)
 	}
-	qs := newQuietState()
+	qs := w.newQuietStateFor()
 	waitFrom := w.env.now()
 	q := w.quietCheck(ctx, qs, p, deadline)
 	if q.timeout != nil {
@@ -2450,7 +2450,7 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 				// Only a LANDED go makes the entrance the checked point, and a point switch needs a fresh quiet state
 				// (Codex H2): p's patrol distances must not exempt a stationary patrol at e whose distance grew for
 				// no reason but the point moving.
-				cur, qs = e, newQuietState()
+				cur, qs = e, w.newQuietStateFor()
 				eq := w.quietCheck(ctx, qs, e, deadline)
 				if eq.timeout != nil {
 					return eq.timeout
@@ -3257,11 +3257,21 @@ func (w *walk) runWentOnAfter(seq0 uint64, step int) bool {
 type quietState struct {
 	prev   map[string]float64
 	idle   *raidwalk.QuietIdleReads
+	homes  raidwalk.QuietHomeSpawns
 	logged string
 }
 
 func newQuietState() *quietState {
 	return &quietState{prev: map[string]float64{}, idle: raidwalk.NewQuietIdleReads()}
+}
+
+// newQuietStateFor builds the quiet state for a revive of this plan: the
+// proven-home spawn list the idle exemption reads. The plan may be nil in
+// tests; then nothing is exempt (fail closed).
+func (w *walk) newQuietStateFor() *quietState {
+	st := newQuietState()
+	st.homes = raidwalk.PlanHomeSpawns(w.plan)
+	return st
 }
 
 // quietRead is one quiet pass's outcome: the point is quiet (ok), or the last failed read's reason and blockers. A
@@ -3320,7 +3330,7 @@ func (w *walk) quietOnce(ctx context.Context, st *quietState, p dungeon.Point) (
 		}
 		st.prev[patrols[j].ID] = best
 	}
-	bs := raidwalk.QuietBlockers(us, patrols, p, st.idle, w.env.now())
+	bs := raidwalk.QuietBlockers(us, patrols, p, st.idle, st.homes, w.env.now())
 	if len(bs) == 0 {
 		st.logged = ""
 		return true, "", nil

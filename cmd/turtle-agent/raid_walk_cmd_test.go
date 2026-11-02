@@ -1803,28 +1803,56 @@ func resumePlacedRun(f *fixture) {
 	}
 }
 
-// walk 25: every refusal was a mob standing at its own spawn about 44.6 yd from the revive point, not fighting. D-A
-// lets an idle unit beyond the placement's 25 yd landing reach through, so the wipe recovers instead of ending at 19.
+// walk 25, hardened by Codex HIGH (turtle-agent#360): D-A lets an idle unit
+// beyond the placement's 25 yd landing reach through only at its proven home
+// (a plan spawn within 3 yd). A still, calm mob standing 8 yd from its spawn
+// is a paused patrol or a wanderer, so the wipe ends at 19; at its own spawn
+// the wipe recovers instead.
 func TestRaidWalkWipeRevivesPastIdleHomeMob(t *testing.T) {
-	f, _ := newPlaceFixture(t)
-	f.agent.startReply = zgPlaceReply(t)
-	f.agent.unitsFn = placedIdleBlocker(t, 44.6, 14532, "Razzashi Venombrood", false)
-	wipeOnceAfterStart(f)
-	resumePlacedRun(f)
-	code := f.run(context.Background())
-	if code != exitOK {
-		t.Fatalf("exit %d, want 0: %s\n%s\n%s", code, f.stderr.String(), f.stdout.String(), f.summaryText())
-	}
-	sum := f.summary()
-	if sum.WipeResumes != 1 || sum.EndReason != "until" {
-		t.Fatalf("wipe_resumes %d end %q, want 1 and until", sum.WipeResumes, sum.EndReason)
-	}
-	if sum.ReviveRefusal != nil {
-		t.Fatalf("the revive was refused with the idle blocker in place: %+v", sum.ReviveRefusal)
-	}
-	if n := countPrefix(f.agent.gmLines(), ".summon "); n == 0 {
-		t.Fatalf("no summons: the revive never reached its summon stage: %q", f.agent.gmLines())
-	}
+	// Away from home: still and calm 44.6 yd out, but the plan's nearest
+	// same-entry spawn is ~230 yd off (Marli's pack, leg 2), so the revive is
+	// refused.
+	t.Run("away from home blocks", func(t *testing.T) {
+		f, _ := newPlaceFixture(t)
+		f.agent.startReply = zgPlaceReply(t)
+		f.agent.unitsFn = placedIdleBlocker(t, 44.6, 14532, "Razzashi Venombrood", false)
+		wipeOnceAfterStart(f)
+		if code := f.run(context.Background()); code != exitRaidWalkIncident {
+			t.Fatalf("exit %d, want 19: %s\n%s\n%s", code, f.stderr.String(), f.stdout.String(), f.summaryText())
+		}
+		rr := f.summary().ReviveRefusal
+		if rr == nil {
+			t.Fatal("no revive_refusal with the away-from-home blocker in place")
+		}
+	})
+	// At home: an onyxia walk whose revive point is step 1 (49.8 -114.6),
+	// blocked by entry 12129 standing on the leg-0 group-1 spawn (-53.0
+	// -96.9, 35 yd out), so the wipe recovers.
+	t.Run("at home revives", func(t *testing.T) {
+		f := newFixture(t)
+		f.agent.startReply = startAt("onyxias_lair", 23)
+		f.agent.unitsFn = func(int) []objects.Unit {
+			return []objects.Unit{{Type: "creature", Name: "Onyxian Warder", Entry: 12129, Hostile: true,
+				X: -52.9699, Y: -96.8813, Z: -38.6419}}
+		}
+		f.allDeadFromHires()
+		var resumeAt time.Time
+		resumeHook(f, 24, 28, &resumeAt)
+		code := f.run(context.Background())
+		if code != exitOK {
+			t.Fatalf("exit %d, want 0: %s\n%s\n%s", code, f.stderr.String(), f.stdout.String(), f.summaryText())
+		}
+		sum := f.summary()
+		if sum.WipeResumes != 1 || sum.EndReason != "until" {
+			t.Fatalf("wipe_resumes %d end %q, want 1 and until", sum.WipeResumes, sum.EndReason)
+		}
+		if sum.ReviveRefusal != nil {
+			t.Fatalf("the revive was refused with the at-home blocker in place: %+v", sum.ReviveRefusal)
+		}
+		if n := countPrefix(f.agent.gmLines(), ".summon "); n == 0 {
+			t.Fatalf("no summons: the revive never reached its summon stage: %q", f.agent.gmLines())
+		}
+	})
 }
 
 // D-C: the 120 s check gives up after 24 reads, so a blocker that leaves later still gets the revive: the walk
