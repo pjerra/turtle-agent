@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/packet"
 )
@@ -60,7 +61,9 @@ func TestPullJoinersLine(t *testing.T) {
 // the markdown row, the guids in the JSON, and one fight with joiners even
 // when the run log's status lines saw one too.
 func TestReportAttachesPullJoiners(t *testing.T) {
-	raw := []byte(`[{"step":2,"count":2,"guids":["0x000000000F130101","0x000000000F130102"]},{"step":5,"count":0,"guids":[]}]`)
+	raw := []byte(`[
+		{"step":2,"at":"2026-10-30T19:16:55Z","count":2,"guids":["0x000000000F130101","0x000000000F130102"]},
+		{"step":5,"at":"2026-10-30T19:20:05Z","count":0,"guids":[]}]`)
 	rep := reportFixture(t, ReportOptions{PullJoins: ParsePullJoins(raw)})
 	if len(rep.Pulls) != 2 {
 		t.Fatalf("pulls %+v", rep.Pulls)
@@ -88,6 +91,57 @@ func TestReportAttachesPullJoiners(t *testing.T) {
 	}
 	if back.Pulls[0].JoinersSeen != 2 || len(back.Pulls[0].JoinerGUIDs) != 2 {
 		t.Fatalf("json round trip: %+v", back.Pulls[0])
+	}
+}
+
+// A retried pull at one step leaves a record per attempt: none replaces the
+// attempt before it.
+func TestParsePullJoinsKeepsEveryAttempt(t *testing.T) {
+	raw := []byte(`[{"step":2,"at":"2026-11-02T03:00:02Z","count":1},{"step":2,"at":"2026-11-02T03:01:02Z","count":2}]`)
+	recs := ParsePullJoins(raw)
+	if len(recs) != 2 || recs[0].Step != 2 || recs[1].Step != 2 || !recs[0].At.Before(recs[1].At) {
+		t.Fatalf("records %+v, want both attempts of step 2", recs)
+	}
+}
+
+// Two fights and two pulls at one step: each fight takes the attempt whose
+// pull time its own window holds, never the step's latest record. A record
+// outside every window stays off the table and is counted in a note.
+func TestReportAttachesJoinersPerAttempt(t *testing.T) {
+	t0 := time.Date(2026, 11, 2, 3, 0, 0, 0, time.UTC)
+	fight := func(id string, start time.Time, durS int) ReportFight {
+		return ReportFight{ID: id, Step: 2, Kind: "pull", Start: float64(start.Unix()), DurMS: int64(durS) * 1000}
+	}
+	f1 := fight("f1", t0, 30)
+	f2 := fight("f2", t0.Add(60*time.Second), 30)
+	raw := []byte(`[
+		{"step":2,"at":"2026-11-02T03:00:02Z","count":1,"guids":["0x000000000F130101"]},
+		{"step":2,"at":"2026-11-02T03:01:02Z","count":2,"guids":["0x000000000F130201","0x000000000F130202"]},
+		{"step":2,"at":"2026-11-02T03:05:00Z","count":9,"guids":["0x000000000F130901"]}]`)
+	rep := BuildReport([]ReportFight{f2, f1}, nil, ReportOptions{PullJoins: ParsePullJoins(raw)})
+	if len(rep.Pulls) != 2 {
+		t.Fatalf("pulls %+v", rep.Pulls)
+	}
+	if p := rep.Pulls[0]; p.Step != 2 || p.JoinersSeen != 1 || len(p.JoinerGUIDs) != 1 || p.JoinerGUIDs[0] != "0x000000000F130101" {
+		t.Fatalf("first attempt: %+v", p)
+	}
+	if p := rep.Pulls[1]; p.Step != 2 || p.JoinersSeen != 2 || len(p.JoinerGUIDs) != 2 || p.JoinerGUIDs[0] != "0x000000000F130201" || p.JoinerGUIDs[1] != "0x000000000F130202" {
+		t.Fatalf("retried attempt: %+v", p)
+	}
+	if rep.Totals.FightsWithJoins != 2 {
+		t.Fatalf("totals %+v, want both fights with joiners", rep.Totals)
+	}
+	var unmatched []string
+	for _, n := range rep.Notes {
+		if strings.Contains(n, "joiners unmatched:") {
+			unmatched = append(unmatched, n)
+		}
+	}
+	if len(unmatched) != 1 || !strings.Contains(unmatched[0], "joiners unmatched: 1") {
+		t.Fatalf("notes %q, want one joiners unmatched note for the one stray record", rep.Notes)
+	}
+	if md := rep.Markdown(); strings.Contains(md, "joiners 9") {
+		t.Fatalf("markdown shows a record outside every window:\n%s", md)
 	}
 }
 
