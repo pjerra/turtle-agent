@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -838,7 +839,8 @@ func placePlanRows(t *testing.T) (planexport.Rows, raidwalk.PlacePlan) {
 		t.Fatal(clear.Refusal)
 	}
 	p := raidwalk.PlacePlan{Start: step, Leg: leg, Point: point, Stop: stop,
-		Circles: clear.Circles, Notes: clear.Notes, Ahead: clear.Ahead, Skips: raidwalk.PlaceSkips(plan)}
+		Circles: clear.Circles, Notes: clear.Notes, Ahead: clear.Ahead, Behind: clear.Behind,
+		Skips: raidwalk.PlaceSkips(plan)}
 	return rows, p
 }
 
@@ -983,7 +985,8 @@ func TestQuietExtraClearRefusesUnsafeCircle(t *testing.T) {
 			owner := plan.Circles[0]
 			home := [3]float32{owner.X, owner.Y, owner.Z}
 			p.quiet = func(int) bool { return false }
-			p.quietNear = []any{quietHomedAt(owner.Entries[0], owner.X, owner.Y, owner.Z, home)}
+			// The quiet unit stands inside the landing reach (D6): beyond it the walk would leave it alive and place.
+			p.quietNear = []any{quietHomedAt(owner.Entries[0], plan.Point.X+10, plan.Point.Y, plan.Point.Z, home)}
 			extra := tc.extra
 			if tc.name == "ahead unit" {
 				ahead := plan.Ahead[0]
@@ -1213,35 +1216,56 @@ func TestQuietExtraClearRefusesUnownedUnit(t *testing.T) {
 	}
 }
 
-// A unit near a circle the corridor skipped is never cleared by the extra round (review round 2, MEDIUM-A (c)).
+// A unit near a circle the corridor skipped is never cleared by the extra round (review round 2, MEDIUM-A (c)). Inside
+// the landing reach the leftover fails the placement (the old case); beyond it the walk leaves the unit alive with a
+// note (D6, F4) — row 94's circle stands about 100 yd from the start.
 func TestQuietExtraClearRefusesUnitNearSkippedCircle(t *testing.T) {
-	f, p := newPlaceFixture(t)
-	rows, plan := placePlanRows(t)
-	first := plan.Circles[0]
-	corridorReads := 0
-	p.units = func(cmd string) ([]any, bool) {
-		if fl := strings.Fields(cmd); len(fl) > 2 && fl[2] == "3" { // the extra round's read: nothing there
-			return nil, false
-		}
-		corridorReads++
-		if corridorReads == 1 { // the first corridor circle holds a unit its row does not own: skipped
-			return []any{map[string]any{"g": "0xF1300000000008", "e": 999999, "n": "Stranger",
-				"p": []float32{first.X, first.Y, first.Z}, "dz": 0.5, "d": 1.0}}, false
-		}
-		return nil, false
-	}
-	home := [3]float32{first.X, first.Y, first.Z}
-	p.quiet = func(int) bool { return false }
-	p.quietNear = []any{quietHomedAt(first.Entries[0], first.X, first.Y, first.Z, home)}
-	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
-	if code := f.run(context.Background()); code != exitRaidWalkFailed {
-		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
-	}
-	if n := extraClearCount(p); n != 0 {
-		t.Fatalf("the extra round cleared next to a skipped circle: %v", p.cleartos)
-	}
-	if !hasNote(f.summary(), "skipped circle of row") {
-		t.Fatalf("notes %v", f.summary().Notes)
+	for _, tc := range []struct {
+		name   string
+		target func(t *testing.T, plan raidwalk.PlacePlan) raidwalk.ClearCircle
+		want   int
+	}{
+		{"inside the reach", func(_ *testing.T, plan raidwalk.PlacePlan) raidwalk.ClearCircle { return plan.Circles[0] }, exitRaidWalkFailed},
+		{"beyond the reach", placeRow94Circle, exitOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, p := newPlaceFixture(t)
+			rows, plan := placePlanRows(t)
+			target := tc.target(t, plan)
+			p.units = func(cmd string) ([]any, bool) {
+				if fl := strings.Fields(cmd); len(fl) > 2 && fl[2] == "3" { // the extra round's read: nothing there
+					return nil, false
+				}
+				if fl := strings.Fields(cmd); len(fl) == 7 && fl[3] == num32(target.X) && fl[4] == num32(target.Y) {
+					// A unit the row does not own stands in the circle: the corridor skips it.
+					return []any{map[string]any{"g": "0xF1300000000008", "e": 999999, "n": "Stranger",
+						"p": []float32{target.X, target.Y, target.Z}, "dz": 0.5, "d": 1.0}}, false
+				}
+				return nil, false
+			}
+			home := [3]float32{target.X, target.Y, target.Z}
+			p.quiet = func(int) bool { return false }
+			p.quietNear = []any{quietHomedAt(target.Entries[0], target.X, target.Y, target.Z, home)}
+			f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+			if code := f.run(context.Background()); code != tc.want {
+				t.Fatalf("exit %d, want %d: %s", code, tc.want, f.summary().EndReason)
+			}
+			if n := extraClearCount(p); n != 0 {
+				t.Fatalf("the extra round cleared next to a skipped circle: %v", p.cleartos)
+			}
+			if !hasNote(f.summary(), "skipped circle of row") {
+				t.Fatalf("notes %v", f.summary().Notes)
+			}
+			if tc.want == exitOK {
+				if !hasNote(f.summary(), "leaves") || !hasNote(f.summary(), "alive") {
+					t.Fatalf("the walk did not leave the unit alive: %v", f.summary().Notes)
+				}
+				return
+			}
+			if len(p.places) != 0 {
+				t.Fatalf("the walk placed with a unit in the reach: %v", p.places)
+			}
+		})
 	}
 }
 
@@ -1293,6 +1317,93 @@ func placeRow96Circle(t *testing.T, plan raidwalk.PlacePlan) raidwalk.ClearCircl
 func placeRow94Circle(t *testing.T, plan raidwalk.PlacePlan) raidwalk.ClearCircle {
 	t.Helper()
 	return placeCircleNear(t, plan, -11945.70, -1841.13, 56.11)
+}
+
+// placeInsideWithoutAhead is a point inside a clear circle but outside every AHEAD row's area: where a unit the circle's
+// pre-read may list stands. The test fails when the fixture leaves none.
+func placeInsideWithoutAhead(t *testing.T, plan raidwalk.PlacePlan, c raidwalk.ClearCircle) [3]float32 {
+	t.Helper()
+	for _, d := range []float64{0, 3, 6, 9, 12, 15} {
+		if d >= float64(c.Radius) {
+			break
+		}
+		for k := range 16 {
+			a := float64(k) * math.Pi / 8
+			x := c.X + float32(d*math.Cos(a))
+			y := c.Y + float32(d*math.Sin(a))
+			if _, in := plan.AheadIn(x, y, c.Z); in {
+				continue
+			}
+			return [3]float32{x, y, c.Z}
+		}
+	}
+	t.Fatalf("the fixture plan leaves no point inside the circle of row %d outside every AHEAD row", c.Step)
+	return [3]float32{}
+}
+
+// placeFarHome is a point 30-200 yd from a circle, at its height, outside every AHEAD circle and every BEHIND pull
+// row's area: where a later leg's patrol spawns. The test fails when the fixture leaves none.
+func placeFarHome(t *testing.T, plan raidwalk.PlacePlan, c raidwalk.ClearCircle) [3]float32 {
+	t.Helper()
+	for _, d := range []float64{30, 35, 40, 45, 50, 60, 80, 100, 150, 200} {
+		for k := range 32 {
+			a := float64(k) * math.Pi / 16
+			x := c.X + float32(d*math.Cos(a))
+			y := c.Y + float32(d*math.Sin(a))
+			if _, in := plan.AheadIn(x, y, c.Z); in {
+				continue
+			}
+			if placeInAnyBehindRow(plan, x, y, c.Z) {
+				continue
+			}
+			return [3]float32{x, y, c.Z}
+		}
+	}
+	t.Fatalf("the fixture plan leaves no home outside every BEHIND row and AHEAD circle within 200 yd of the circle of row %d", c.Step)
+	return [3]float32{}
+}
+
+// placeOwnedHome is the point of a BEHIND pull row that holds the entry, outside every corridor circle's radius + 6 yd
+// (so the extra round's owner check finds none) and outside every AHEAD circle: the home that makes a unit BEHIND trash
+// by positive ownership. The test fails when the fixture has no such row.
+func placeOwnedHome(t *testing.T, plan raidwalk.PlacePlan, entry uint32) [3]float32 {
+	t.Helper()
+	for _, b := range plan.Behind {
+		if !inEntries(b.Entries, entry) {
+			continue
+		}
+		var circled bool
+		for _, c := range plan.Circles {
+			if placeDist3(b.X, b.Y, b.Z, c.X, c.Y, c.Z) <= float64(c.Radius)+placeRogueYd {
+				circled = true
+				break
+			}
+		}
+		if circled {
+			continue
+		}
+		if _, in := plan.AheadIn(b.X, b.Y, b.Z); in {
+			continue
+		}
+		return [3]float32{b.X, b.Y, b.Z}
+	}
+	t.Fatalf("the fixture plan has no BEHIND pull row of entry %d outside every corridor circle and AHEAD row", entry)
+	return [3]float32{}
+}
+
+// placeInAnyBehindRow says the point lies in a BEHIND pull row's area, whatever the entry: the test-side "outside every
+// BEHIND row" check. BehindOwns applies the same row area (radius + 6 yd, its z window) once the row holds the entry,
+// and the row always holds the entry it is asked about.
+func placeInAnyBehindRow(plan raidwalk.PlacePlan, x, y, z float32) bool {
+	for _, b := range plan.Behind {
+		if len(b.Entries) == 0 {
+			continue
+		}
+		if _, in := plan.BehindOwns(b.Entries[0], x, y, z); in {
+			return true
+		}
+	}
+	return false
 }
 
 // quietUnitHome is a quiet read's `near` entry with the unit's home (its spawn point) and its vitals.
@@ -1534,6 +1645,712 @@ func TestPlaceQuietRereadsMovingPatrolsTwiceThenFails(t *testing.T) {
 	}
 	if !hasNote(f.summary(), "reading it again") {
 		t.Fatalf("notes %v", f.summary().Notes)
+	}
+}
+
+// F1 (D1): a roamer the cut join read missed and that stands beyond the landing reach is ignored, with a note
+// (walk 24 m910q-marli: three roamers at 65.6 / 67.4 / 77.2 yd, none of them near the raid's landing).
+func TestPlaceQuietIgnoresMissingRoamerBeyondReach(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	entries := []uint32{11338, 14532, 14881}
+	guids := []string{"0xF1300000009001", "0xF1300000009002", "0xF1300000009003"}
+	var roamers []any
+	for i, d := range []float32{65.6, 67.4, 77.2} {
+		roamers = append(roamers, quietRoamAt(guids[i], entries[i], "moved", d, float32(i)+3.2))
+	}
+	p.quiet = func(int) bool { return false }
+	p.quietRoamers = roamers
+	p.units = func(cmd string) ([]any, bool) {
+		if fl := strings.Fields(cmd); len(fl) > 2 && fl[2] == fmt.Sprintf("%d", placeRoamScopeYd) {
+			return []any{
+				joinUnitAt("0xF1300000009101", 11338, plan.Point.X+90, plan.Point.Y, plan.Point.Z, [3]float32{plan.Point.X + 90, plan.Point.Y, plan.Point.Z}, 4000, 0),
+				joinUnitAt("0xF1300000009102", 14532, plan.Point.X+92, plan.Point.Y, plan.Point.Z, [3]float32{plan.Point.X + 92, plan.Point.Y, plan.Point.Z}, 4000, 0),
+			}, true
+		}
+		return nil, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.summary().EndReason)
+	}
+	if len(p.places) != 1 {
+		t.Fatalf("%d place commands, want one", len(p.places))
+	}
+	if !hasNote(f.summary(), "the cut join read missed it") {
+		t.Fatalf("notes %v", f.summary().Notes)
+	}
+}
+
+// F1 (D1, D4): a roamer the cut join read missed that stands inside the landing reach blocks (fail closed), and it
+// counts as a mover for the re-read rule: the walk makes its two re-reads before it fails.
+func TestPlaceQuietBlocksMissingRoamerWithinReach(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	const guid = "0xF1300000009201"
+	p.quiet = func(int) bool { return false }
+	p.quietRoamers = []any{quietRoamAt(guid, 11338, "moved", 18.0, 3.0)}
+	p.units = func(cmd string) ([]any, bool) {
+		if fl := strings.Fields(cmd); len(fl) > 2 && fl[2] == fmt.Sprintf("%d", placeRoamScopeYd) {
+			return nil, true
+		}
+		return nil, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.summary().EndReason)
+	}
+	if want := 1 + placeQuietRereads; p.quietCalls != want {
+		t.Fatalf("%d quiet reads, want %d", p.quietCalls, want)
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, "11338") {
+		t.Fatalf("end reason %q", sum.EndReason)
+	}
+}
+
+// F1 (D2): a roamer the cut join read missed but that the quiet's own near list carries is judged by that entry: the
+// walk does not refuse it as missing (walk 24 test2-ven: the 11368 roamer at 28.2 yd).
+func TestPlaceQuietFindsRoamerInNearList(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	_, home := placeAheadB(t, plan)
+	const guid = "0xF1300000009301"
+	at := [3]float32{plan.Point.X + 28.2, plan.Point.Y, plan.Point.Z}
+	p.quiet = func(int) bool { return false }
+	p.quietNear = []any{quietUnitHome(guid, 15111, at[0], at[1], at[2], home)}
+	p.quietRoamers = []any{quietRoamAt(guid, 15111, "moved", 28.2, 2.5)}
+	p.units = func(cmd string) ([]any, bool) {
+		if fl := strings.Fields(cmd); len(fl) > 2 && fl[2] == fmt.Sprintf("%d", placeRoamScopeYd) {
+			return []any{joinUnitAt("0xF1300000009302", 11338, plan.Point.X+90, plan.Point.Y, plan.Point.Z, [3]float32{plan.Point.X + 90, plan.Point.Y, plan.Point.Z}, 4000, 0)}, true
+		}
+		return nil, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.summary().EndReason)
+	}
+	for _, n := range f.summary().Notes {
+		if strings.Contains(n, "is not in the join read") {
+			t.Fatalf("the walk refused a roamer it found in the near list: %q", n)
+		}
+		if strings.Contains(n, "missed it") {
+			t.Fatalf("the walk treated a roamer its near list carries as missing: %q", n)
+		}
+	}
+}
+
+// The join read is fresher than the quiet's own near list: a roamer the quiet lists 40 yd out that the join read
+// finds 10 yd out blocks the placement at its 10 yd position (the judge kept the stale near-list position and placed).
+func TestPlaceQuietJoinsFresherRoamerPosition(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	const guid = "0xF1300000009401"
+	home := placeFarHome(t, plan, plan.Circles[0])
+	p.quiet = func(int) bool { return false }
+	p.quietNear = []any{quietUnitHome(guid, 999999, plan.Point.X+40, plan.Point.Y, plan.Point.Z, home)}
+	p.quietRoamers = []any{quietRoamAt(guid, 999999, "moved", 40.0, 3.0)}
+	p.units = joinHook([]any{joinUnitAt(guid, 999999, plan.Point.X+10, plan.Point.Y, plan.Point.Z, home, 4000, 0)})
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.summary().EndReason)
+	}
+	if len(p.places) != 0 {
+		t.Fatalf("the walk placed with a roamer 10 yd out: %v", p.places)
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, "999999") || !strings.Contains(sum.EndReason, "10.0 yd") {
+		t.Fatalf("end reason %q", sum.EndReason)
+	}
+	if !hasNote(f.summary(), "10.0 yd") {
+		t.Fatalf("notes %v", f.summary().Notes)
+	}
+}
+
+// F2 (D3): when the quiet reply cut its near list (len(near) < n_near) and the farthest unit it still lists stands
+// inside the landing reach, the placement is refused at once: the units the cut dropped may stand where the raid lands.
+func TestPlaceQuietCutNearListInsideReachRefuses(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if strings.HasPrefix(cmd, "quiet") {
+			var near []any
+			for i, d := range []float32{10.0, 11.0, 12.0} {
+				near = append(near, map[string]any{"g": fmt.Sprintf("0xF130000000A%03d", i+1), "e": uint32(999000 + i),
+					"n": "Roamer", "p": []float32{plan.Point.X + d, plan.Point.Y, plan.Point.Z}, "d": d})
+			}
+			return ttReplyOf(t, map[string]any{"map": 309, "read": 2, "final": true, "quiet": false, "near": near, "n_near": 30, "roamers": []any{}}), nil
+		}
+		return p.answer(cmd)
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.summary().EndReason)
+	}
+	if len(p.places) != 0 {
+		t.Fatalf("the walk placed with a near list cut inside the reach: %v", p.places)
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, "near list was cut at 12.0 yd") {
+		t.Fatalf("end reason %q", sum.EndReason)
+	}
+}
+
+// F2 (D3): a cut near list whose farthest listed unit stands beyond the landing reach is judged as before (guards
+// against F2 refusing too much).
+func TestPlaceQuietCutNearListBeyondReachIsJudged(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if strings.HasPrefix(cmd, "quiet") {
+			var near []any
+			for i, d := range []float32{29.0, 30.0, 31.0} {
+				near = append(near, map[string]any{"g": fmt.Sprintf("0xF130000000B%03d", i+1), "e": uint32(999000 + i),
+					"n": "Roamer", "p": []float32{plan.Point.X + d, plan.Point.Y, plan.Point.Z}, "d": d})
+			}
+			return ttReplyOf(t, map[string]any{"map": 309, "read": 2, "final": true, "quiet": false, "near": near, "n_near": 30, "roamers": []any{}}), nil
+		}
+		return p.answer(cmd)
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.summary().EndReason)
+	}
+}
+
+// L2 (F2): the reach's own limit is inside. A cut near list whose farthest listed unit stands at exactly 25 yd refuses
+// the placement; at 25.1 yd it is judged as before (the unit is beyond where the raid lands).
+func TestPlaceQuietCutNearListAtTheReach(t *testing.T) {
+	cut := func(t *testing.T, d float32) *placeQuietRead {
+		t.Helper()
+		body, ok := ttLast(ttReplyOf(t, map[string]any{"n_near": 30, "near": []any{
+			map[string]any{"g": "0xF130000000C001", "e": 999001, "n": "Roamer", "p": []float32{5, 0, 0}, "d": 5.0},
+			map[string]any{"g": "0xF130000000C002", "e": 999002, "n": "Roamer", "p": []float32{d, 0, 0}, "d": d},
+		}}))
+		if !ok {
+			t.Fatal("the reply has no body")
+		}
+		r := &placeQuietRead{}
+		r.nearCutOf(body, nearUnitsOf(body))
+		return r
+	}
+	if r := cut(t, placeReachYd); !r.NearCut || r.NearCutYd != placeReachYd {
+		t.Fatalf("a cut list at exactly %v yd is not refused: %+v", placeReachYd, r)
+	}
+	if r := cut(t, placeReachYd+0.1); r.NearCut {
+		t.Fatalf("a cut list at %v yd is refused: %+v", placeReachYd+0.1, r)
+	}
+}
+
+// placeCircleWithEntry is the plan's first clear circle whose entries hold an entry.
+func placeCircleWithEntry(t *testing.T, plan raidwalk.PlacePlan, entry uint32) raidwalk.ClearCircle {
+	t.Helper()
+	for _, c := range plan.Circles {
+		if inEntries(c.Entries, entry) {
+			return c
+		}
+	}
+	t.Fatalf("the fixture plan has no clear circle holding %d", entry)
+	return raidwalk.ClearCircle{}
+}
+
+// F3 (D5): the pre-read does not refuse a circle for BEHIND trash whose entry belongs to another corridor row and whose
+// home lies outside every AHEAD row (walk 24 test2-arlokk: row 264 skipped for the Axe Thrower 11350 of rows 266/268).
+func TestPlacePreReadClearsTrashOfAnotherCorridorRow(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	row94 := placeRow94Circle(t, plan)
+	owner := placeCircleWithEntry(t, plan, 11371)
+	home := [3]float32{owner.X, owner.Y, owner.Z}
+	at := []float32{row94.X, row94.Y, row94.Z}
+	p.units = func(cmd string) ([]any, bool) {
+		if fl := strings.Fields(cmd); len(fl) == 7 && fl[3] == num32(row94.X) && fl[4] == num32(row94.Y) {
+			return []any{map[string]any{"g": "0xF130000000C001", "e": 11371, "n": "Trash of another row",
+				"p": at, "dz": 0.5, "d": 1.0, "hpv": []float64{4000, 4000}, "rk": 0, "db": 49001,
+				"home": []float32{home[0], home[1], home[2]}}}, false
+		}
+		return nil, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.summary().EndReason)
+	}
+	want := fmt.Sprintf("clearto 309 %s %s %s %s dz=8 all=1", num32(row94.X), num32(row94.Y), num32(row94.Z), num32(row94.Radius))
+	var found bool
+	for _, c := range p.cleartos {
+		if strings.HasPrefix(c, want) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("row 94 was not cleared: cleartos %v, not_cleared %v", p.cleartos, f.summary().Place.NotCleared)
+	}
+	for _, s := range f.summary().Place.NotCleared {
+		if strings.Contains(s, fmt.Sprintf("row %d", row94.Step)) {
+			t.Fatalf("row %d still refused: %v", row94.Step, s)
+		}
+	}
+}
+
+// F3 (D5): the same unit stays a refusal when its home lies in an AHEAD row's area (pins the AHEAD exclusion).
+func TestPlacePreReadKeepsForeignUnitWithAheadHome(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	row94 := placeRow94Circle(t, plan)
+	_, aheadHome := placeAheadB(t, plan)
+	at := []float32{row94.X, row94.Y, row94.Z}
+	p.units = func(cmd string) ([]any, bool) {
+		if fl := strings.Fields(cmd); len(fl) == 7 && fl[3] == num32(row94.X) && fl[4] == num32(row94.Y) {
+			return []any{map[string]any{"g": "0xF130000000C101", "e": 11371, "n": "Wanderer of a later leg",
+				"p": at, "dz": 0.5, "d": 1.0, "hpv": []float64{4000, 4000}, "rk": 0, "db": 49002,
+				"home": []float32{aheadHome[0], aheadHome[1], aheadHome[2]}}}, false
+		}
+		return nil, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.summary().EndReason)
+	}
+	var found bool
+	for _, s := range f.summary().Place.NotCleared {
+		if strings.Contains(s, fmt.Sprintf("row %d", row94.Step)) && strings.Contains(s, "stands in the circle") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("row %d was not refused for an AHEAD-home unit: not_cleared %v", row94.Step, f.summary().Place.NotCleared)
+	}
+}
+
+// Review round 3 (positive ownership): a unit that carries a corridor row's entry is not trash unless a BEHIND pull
+// row owns its home. A later leg's patrol carries an entry another of the corridor's circles clears and stands in the
+// first circle, but its home lies outside every BEHIND row's area and every AHEAD circle: the pre-read must refuse the
+// circle, and no clearto may go out (the entry-only rule despawned the patrol).
+func TestPlacePreReadSkipsLaterLegPatrolSharingAnEntry(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	c := plan.Circles[0]
+	var entry uint32 // a corridor entry another circle owns, not one of this circle's
+	for _, other := range plan.Circles {
+		if len(other.Entries) > 0 && !inEntries(c.Entries, other.Entries[0]) {
+			entry = other.Entries[0]
+			break
+		}
+	}
+	if entry == 0 {
+		t.Fatal("the fixture's corridor circles share every entry")
+	}
+	pos := placeInsideWithoutAhead(t, plan, c)
+	home := placeFarHome(t, plan, c)
+	if placeInAnyBehindRow(plan, home[0], home[1], home[2]) {
+		t.Fatalf("the fixture's home %.2f %.2f %.2f lies in a BEHIND row", home[0], home[1], home[2])
+	}
+	p.units = func(cmd string) ([]any, bool) {
+		if fl := strings.Fields(cmd); len(fl) == 7 && fl[3] == num32(c.X) && fl[4] == num32(c.Y) {
+			return []any{map[string]any{"g": "0xF130000000E001", "e": entry, "n": "Patrol of a later leg",
+				"p": []float32{pos[0], pos[1], pos[2]}, "dz": 0.5, "d": 1.0, "hpv": []float64{4000, 4000}, "rk": 0,
+				"db": 49002, "home": []float32{home[0], home[1], home[2]}}}, false
+		}
+		return nil, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.summary().EndReason)
+	}
+	want := fmt.Sprintf("clearto 309 %s %s %s %s dz=8", num32(c.X), num32(c.Y), num32(c.Z), num32(c.Radius))
+	for _, cl := range p.cleartos {
+		if strings.HasPrefix(cl, want) {
+			t.Fatalf("the pre-read cleared the circle of row %d with a later leg's patrol in it: %q", c.Step, cl)
+		}
+	}
+	var found bool
+	for _, s := range f.summary().Place.NotCleared {
+		if strings.HasPrefix(s, fmt.Sprintf("row %d: unit %d", c.Step, entry)) && strings.Contains(s, "stands in the circle") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("row %d was not refused for the patrol: not_cleared %v", c.Step, f.summary().Place.NotCleared)
+	}
+	if hasNote(f.summary(), "trash of a skipped leg") {
+		t.Fatalf("the walk took the patrol as trash: %v", f.summary().Notes)
+	}
+}
+
+// F3 (D5, review round 3): placeBehindTrash. All four conditions hold: the reply carried a home, a BEHIND pull row
+// holds the entry AND owns the home (its radius + 6 yd, any pull row before the start, not only the corridor's
+// circles), the unit is not boss evidence where it stands or at its home, and its home lies in no AHEAD row's area.
+func TestPlaceBehindTrash(t *testing.T) {
+	plan := &dungeon.Plan{Legs: []dungeon.Leg{{
+		Name: "one",
+		Boss: &dungeon.Boss{Entry: 8, Position: dungeon.Point{X: 200, Y: 0, Z: 0}},
+	}}}
+	w := &walk{
+		place: &raidwalk.PlacePlan{
+			// Entry 8 is also a BEHIND row's, so the "entry 8 (boss)" case exercises the BossRows check (not the
+			// ownership check).
+			Behind: []raidwalk.BehindRow{{Step: 90, X: 0, Y: 0, Z: 0, Radius: 10, Entries: []uint32{7, 8}}},
+			Ahead:  []raidwalk.AheadCircle{{Step: 200, X: 100, Y: 0, Z: 0, Radius: 5, Entries: []uint32{9}}},
+		},
+		bossRule: raidwalk.NewBossRows(plan),
+	}
+	hom := func(entry uint32, home [3]float32) ttUnit {
+		return ttUnit{Entry: entry, X: 0, Y: 0, Home: home, HomeOK: true}
+	}
+	if !w.placeBehindTrash(hom(7, [3]float32{0, 0, 0})) {
+		t.Fatal("entry 7 held by a BEHIND row with a home in its area is not trash")
+	}
+	// The row's radius + 6 yd is the edge of its ownership, and the entry alone is not enough.
+	if !w.placeBehindTrash(hom(7, [3]float32{16, 0, 0})) {
+		t.Fatal("a home at the row's radius + 6 yd is not owned")
+	}
+	if w.placeBehindTrash(hom(7, [3]float32{17, 0, 0})) {
+		t.Fatal("a home beyond the row's radius + 6 yd is trash")
+	}
+	if w.placeBehindTrash(ttUnit{Entry: 7}) {
+		t.Fatal("a unit with no home is trash")
+	}
+	if w.placeBehindTrash(hom(6, [3]float32{0, 0, 0})) {
+		t.Fatal("an entry no BEHIND row holds is trash")
+	}
+	if w.placeBehindTrash(hom(7, [3]float32{100, 0, 0})) {
+		t.Fatal("a unit whose home lies in an AHEAD row is trash")
+	}
+	if w.placeBehindTrash(hom(8, [3]float32{0, 0, 0})) {
+		t.Fatal("a boss entry is trash")
+	}
+}
+
+// F3 (D5): the quiet's extra round takes BEHIND trash within the quiet radius even when no corridor circle owns its
+// home; beyond that radius it is never taken (the quiet's own reach).
+func TestQuietExtraClearTakesTrashWithinQuietRadius(t *testing.T) {
+	t.Run("within the quiet radius", func(t *testing.T) {
+		f, p := newPlaceFixture(t)
+		rows, plan := placePlanRows(t)
+		// The home is a BEHIND pull row's point that owns entry 15111 outside every corridor circle: positive ownership
+		// (review round 3), so the extra round takes it as trash rather than as a circle's own unit.
+		home := placeOwnedHome(t, plan, 15111)
+		p.quiet = func(n int) bool { return n >= 2 }
+		p.quietNear = []any{quietUnitHome("0xF130000000D001", 15111, plan.Point.X+10, plan.Point.Y, plan.Point.Z, home)}
+		f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("exit %d: %s", code, f.summary().EndReason)
+		}
+		if n := extraClearCount(p); n != 1 {
+			t.Fatalf("%d extra cleartos, want 1: %v", n, p.cleartos)
+		}
+		if !hasNote(f.summary(), "trash of a skipped leg") {
+			t.Fatalf("notes %v", f.summary().Notes)
+		}
+	})
+	t.Run("beyond the quiet radius", func(t *testing.T) {
+		f, p := newPlaceFixture(t)
+		rows, plan := placePlanRows(t)
+		const guid = "0xF130000000D002"
+		at := [3]float32{plan.Point.X + 60, plan.Point.Y, plan.Point.Z}
+		home := [3]float32{plan.Point.X + 65, plan.Point.Y, plan.Point.Z}
+		p.quiet = func(int) bool { return false }
+		p.quietRoamers = []any{quietRoamAt(guid, 15111, "moved", 60, 3)}
+		p.units = joinHook([]any{joinUnitAt(guid, 15111, at[0], at[1], at[2], home, 4000, 0)})
+		f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("exit %d: %s", code, f.summary().EndReason)
+		}
+		if n := extraClearCount(p); n != 0 {
+			t.Fatalf("the extra round took a unit 60 yd out, beyond the quiet's %d yd radius: %v", placeQuietR, p.cleartos)
+		}
+	})
+}
+
+// Review round 3 (positive ownership, the walk-24 Venoxis case): a bat whose home lies in a BEHIND Jeklik pull row's
+// area is still BEHIND trash even though no corridor circle holds its entry, and the extra round clears it. The bat
+// stands 10 yd from the start; its home is a Jeklik bat row (entry 11368 at row 13 of the deployed rows: -11983.13
+// -1471.61 79.97, 8.8 yd), which the corridor never clears.
+func TestQuietExtraClearTakesABatOwnedByABehindJeklikRow(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	for _, c := range plan.Circles {
+		if inEntries(c.Entries, 11368) {
+			t.Fatalf("the fixture's corridor holds entry 11368 in row %d: the test needs a bat row outside it", c.Step)
+		}
+	}
+	home := placeOwnedHome(t, plan, 11368)
+	p.quiet = func(n int) bool { return n >= 2 }
+	p.quietNear = []any{quietUnitHome("0xF130000000B001", 11368, plan.Point.X+10, plan.Point.Y, plan.Point.Z, home)}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s (notes %v)", code, f.summary().EndReason, f.summary().Notes)
+	}
+	if n := extraClearCount(p); n != 1 {
+		t.Fatalf("%d extra cleartos, want 1: %v", n, p.cleartos)
+	}
+	if !hasNote(f.summary(), "trash of a skipped leg") {
+		t.Fatalf("notes %v", f.summary().Notes)
+	}
+}
+
+// F4 (D6): a unit the extra rounds cannot take and that stands beyond the landing reach is left alive, with a note
+// (walk 24 test2-arlokk: the owned Tiger at 46.5 yd standing at its home).
+func TestPlaceQuietLeavesOwnedUnitBeyondReachAlive(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	owner := placeRow94Circle(t, plan)
+	home := [3]float32{owner.X, owner.Y, owner.Z}
+	p.quiet = func(int) bool { return false }
+	p.quietNear = []any{quietUnitHome("0xF130000000F001", 15111, plan.Point.X+46, plan.Point.Y, plan.Point.Z, home)}
+	p.units = func(cmd string) ([]any, bool) {
+		if fl := strings.Fields(cmd); len(fl) > 2 && fl[2] == "3" { // the extra round's read: a stranger, so it cannot take
+			return []any{map[string]any{"g": "0xF130000000F002", "e": 999999, "n": "Stranger",
+				"p": []float32{0, 0, 0}, "dz": 0.0, "d": 1.0}}, false
+		}
+		return nil, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.summary().EndReason)
+	}
+	if len(p.places) != 1 {
+		t.Fatalf("%d place commands, want one", len(p.places))
+	}
+	if !hasNote(f.summary(), "leaves") || !hasNote(f.summary(), "alive") {
+		t.Fatalf("the walk did not leave the unit alive: %v", f.summary().Notes)
+	}
+}
+
+// F4 (D6): the quiet gets two extra clear rounds. Read 1 lists an owned unit A, read 2 an owned unit B, read 3 is
+// quiet: both A and B are cleared.
+func TestPlaceQuietTwoExtraRounds(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	owner := placeRow94Circle(t, plan)
+	home := [3]float32{owner.X, owner.Y, owner.Z}
+	nearFor := map[int]any{
+		1: quietUnitHome("0xF130000000F101", 15111, plan.Point.X+10, plan.Point.Y, plan.Point.Z, home),
+		2: quietUnitHome("0xF130000000F102", 15111, plan.Point.X+12, plan.Point.Y, plan.Point.Z, home),
+	}
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if strings.HasPrefix(cmd, "quiet") {
+			p.quietCalls++
+			q := p.quietCalls >= 3
+			near := []any{}
+			if !q {
+				near = []any{nearFor[p.quietCalls]}
+			}
+			return ttReplyOf(t, map[string]any{"map": 309, "read": 2, "final": true, "quiet": q, "near": near, "roamers": []any{}}), nil
+		}
+		return p.answer(cmd)
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.summary().EndReason)
+	}
+	if n := extraClearCount(p); n != 2 {
+		t.Fatalf("%d extra cleartos, want 2: %v", n, p.cleartos)
+	}
+	if p.quietCalls != 3 {
+		t.Fatalf("%d quiet reads, want 3", p.quietCalls)
+	}
+}
+
+// F4 (D6): a third owned unit inside the landing reach blocks once the two rounds are spent (walk 24 m910q-ven).
+func TestPlaceQuietThirdOwnedUnitInReachBlocks(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	owner := placeRow94Circle(t, plan)
+	home := [3]float32{owner.X, owner.Y, owner.Z}
+	c := quietUnitHome("0xF130000000F201", 15111, plan.Point.X+10, plan.Point.Y, plan.Point.Z, home)
+	nearFor := map[int]any{
+		1: quietUnitHome("0xF130000000F202", 15111, plan.Point.X+12, plan.Point.Y, plan.Point.Z, home),
+		2: quietUnitHome("0xF130000000F203", 15111, plan.Point.X+14, plan.Point.Y, plan.Point.Z, home),
+		3: c, 4: c, 5: c,
+	}
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if strings.HasPrefix(cmd, "quiet") {
+			p.quietCalls++
+			near := []any{}
+			if u, ok := nearFor[p.quietCalls]; ok {
+				near = []any{u}
+			}
+			return ttReplyOf(t, map[string]any{"map": 309, "read": 2, "final": true, "quiet": false, "near": near, "roamers": []any{}}), nil
+		}
+		return p.answer(cmd)
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.summary().EndReason)
+	}
+	if n := extraClearCount(p); n != 2 {
+		t.Fatalf("%d extra cleartos, want 2: %v", n, p.cleartos)
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, "15111") {
+		t.Fatalf("end reason %q", sum.EndReason)
+	}
+}
+
+// F5 (D8): a placed `--until none` run from Marli shortens its until to stop before the segment that passes Venoxis,
+// and the run start carries the shortened clause (walk 24 m910q-reach: the restart refused with "boss/event row 185").
+func TestPlaceShortenedUntilReachesRunStart(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	f.opts.from = "leg high_priestess_marli"
+	f.opts.until = "none"
+	plan := zgPlan(t)
+	res, err := planexport.Build(plan, planexport.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := res.Rows
+	start, _, err := raidwalk.PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	until, _, _, refusal, hit := raidwalk.PlaceBossGuard(rows, start, len(rows.Steps))
+	if refusal != "" {
+		t.Fatalf("the guard refused: %q", refusal)
+	}
+	if !hit {
+		t.Fatal("the guard did not report the segment")
+	}
+	if until == len(rows.Steps) {
+		t.Fatal("the guard did not shorten the until")
+	}
+	label := fmt.Sprintf("until step %d", until)
+	status := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|marli|move|walk|walking|%s (step %d)", start, len(rows.Steps), label, until)
+	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: status,
+		Lines: []string{
+			status,
+			fmt.Sprintf("The run starts at step %d of %d (leg high_priestess_marli)", start, len(rows.Steps)),
+			"TBM:ACTION_ACK|run start|party|1|-",
+		}}}
+	f.agent.startQueue = []queuedEvent{
+		{raw: status},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|marli|move|walk|stopped before step %d (%s): the party stays where it stands", start, len(rows.Steps), until, label)},
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if want := fmt.Sprintf("until|step|%d", until); !strings.HasSuffix(f.agent.startArgs, want) {
+		t.Fatalf("run start args %q, want the suffix %q", f.agent.startArgs, want)
+	}
+	if !hasNote(f.summary(), "the run stops before step") {
+		t.Fatalf("notes %v", f.summary().Notes)
+	}
+}
+
+// placeLastSegmentRows is the H1 fixture (F5, D8) as rows of plan zul_gurub: leg 0's boss at (20,150), leg 1's moves
+// along +y at (0,10)..(0,100), and leg 2's last row at (20,140), 10 yd from the boss. From step 5 the guard's hit is
+// on the final segment (11 -> 12), so until stays the stop and only hit tells the caller to shorten.
+// The last row is a move, or with bossLast the plan's boss at the same point (so `--until boss-done` resolves to
+// `none`: the boss is the plan's last step).
+func placeLastSegmentRows(bossLast bool) planexport.Rows {
+	const name = "zul_gurub"
+	rows := planexport.Rows{Plan: planexport.PlanRow{Plan: name, Map: 309}, Legs: []planexport.LegRow{
+		{Plan: name, Leg: 0, Name: "one"}, {Plan: name, Leg: 1, Name: "two"}, {Plan: name, Leg: 2, Name: "three"},
+	}}
+	add := func(s planexport.StepRow) {
+		s.Plan, s.Seq = name, len(rows.Steps)+1
+		rows.Steps = append(rows.Steps, s)
+	}
+	add(planexport.StepRow{Kind: planexport.KindBoss, Leg: 0, X: 20, Y: 150, Entries: []uint32{12345}}) // step 1
+	for i := range 10 {                                                                                 // steps 2..11
+		add(planexport.StepRow{Kind: planexport.KindMove, Leg: 1, Y: float32(10 + i*10)})
+	}
+	last := planexport.KindMove
+	if bossLast {
+		last = planexport.KindBoss
+	}
+	add(planexport.StepRow{Kind: last, Leg: 2, X: 20, Y: 140, Entries: []uint32{12345}}) // step 12: the last row
+	return rows
+}
+
+// placeSQLFile writes rows as a migration file for the walk's --sql (planexport's own writer and reader).
+func placeSQLFile(t *testing.T, rows planexport.Rows) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "walk.sql")
+	if err := os.WriteFile(path, []byte(planexport.WriteSQL([]planexport.Rows{rows})), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// H1 (D8): with `--until none` the guard's hit is on the last segment, where until already equals the stop. The walk
+// must shorten to `until step 12` all the same: the run never walks 11 -> 12 past the BEHIND boss of leg 0.
+func TestPlaceShortensAnUntilNoneHitOnTheLastSegment(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	rows := placeLastSegmentRows(false)
+	f.opts.dryRun = true
+	f.opts.from, f.opts.until, f.opts.sql = "step 5", "none", placeSQLFile(t, rows)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	out := f.stdout.String()
+	for _, want := range []string{
+		"until none (the place shortens it to until step 12)",
+		"8b place: start step 5 at 0 40 0; until step 12;",
+		"9 commander: run start zul_gurub from step 5 until step 12",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("the dry run misses %q:\n%s", want, out)
+		}
+	}
+}
+
+// H1 (D8): a boss-done run whose boss is the plan's last step resolves to `none`, and the guard's hit on the last
+// segment would stop the run before that boss: the placement must be refused (exit 2), not shortened past the boss.
+func TestPlaceRefusesAShortenedBossDoneOnTheLastSegment(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	rows := placeLastSegmentRows(true)
+	f.opts.dryRun = true
+	f.opts.from, f.opts.until, f.opts.sql = "step 5", "boss-done", placeSQLFile(t, rows)
+	if code := f.run(context.Background()); code != exitUsage {
+		t.Fatalf("exit %d, want %d: %s", code, exitUsage, f.stderr.String())
+	}
+	if !strings.Contains(f.stderr.String(), "that is before the boss-done step 12") {
+		t.Fatalf("stderr %q", f.stderr.String())
+	}
+}
+
+// L5 (F5): a shortened until is printed next to the one the user asked for, in the dry run's header and in the
+// summary, so the log never says `until none` for a run that walked `until step 12`.
+func TestPlaceShortenedUntilIsPrinted(t *testing.T) {
+	rows := placeLastSegmentRows(false)
+	const want = "until none (the place shortens it to until step 12)"
+	f, _ := newPlaceFixture(t)
+	f.opts.dryRun = true
+	f.opts.from, f.opts.until, f.opts.sql = "step 5", "none", placeSQLFile(t, rows)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("dry run exit %d: %s", code, f.stderr.String())
+	}
+	if out := f.stdout.String(); !strings.Contains(out, want) {
+		t.Fatalf("the dry run's header misses %q:\n%s", want, out)
+	}
+
+	f2, _ := newPlaceFixture(t)
+	f2.opts.from, f2.opts.until, f2.opts.sql = "step 5", "none", placeSQLFile(t, rows)
+	status := "TBM:RUN|zul_gurub|running|5/12|thekal|move|walk|walking|until step 12 (step 12)"
+	f2.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: status,
+		Lines: []string{
+			status,
+			"The run starts at step 5 of 12 (leg one)",
+			"TBM:ACTION_ACK|run start|party|1|-",
+		}}}
+	f2.agent.startQueue = []queuedEvent{
+		{raw: status},
+		{raw: "TBM:RUN|zul_gurub|done|5/12|thekal|move|walk|stopped before step 12 (until step 12): the party stays where it stands"},
+	}
+	if code := f2.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f2.stderr.String(), f2.stdout.String())
+	}
+	text, err := os.ReadFile(filepath.Join(f2.out, "summary.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(text), want) {
+		t.Fatalf("the summary misses %q:\n%s", want, text)
+	}
+	if sum := f2.summary(); sum.UntilEffective != "until step 12" || sum.Until != "none" {
+		t.Fatalf("summary.json until %q, until_effective %q", sum.Until, sum.UntilEffective)
 	}
 }
 
