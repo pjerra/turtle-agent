@@ -46,14 +46,17 @@ func TestZulGurubArlokkTerraceIsOneTwentySevenPull(t *testing.T) {
 // (TestPullSizesUnderCeiling with a known-count map): any change in a count, up
 // or down, fails, so a drop needs the pin updated with a one-line reason.
 // Counts measured on the committed fixture (mmaps-free path, LOS always seen).
+// Round 2: the target is the row's own creature (ownership + kill_first, never
+// an unrelated spawn), which moves zulfarrak 22->53, zul_gurub 82->95,
+// ruins_of_ahnqiraj 28->32, temple_of_ahnqiraj 63->74, naxxramas 149->150.
 var pullSizeKnownCounts = map[string]int{
 	// The repo reach (AggroRadius at the plan's party level plus the party's
 	// spread) and the 20 yd ring join neighbouring packs: every dense plan
 	// warns on most of its pulls (mmaps-free path, LOS always seen).
 	"ragefire_chasm": 28, "wailing_caverns": 54, "deadmines": 131,
-	"uldaman": 58, "zulfarrak": 22, "karazhan_crypt": 125,
-	"molten_core": 21, "blackwing_lair": 40, "zul_gurub": 82,
-	"ruins_of_ahnqiraj": 28, "temple_of_ahnqiraj": 63, "naxxramas": 149,
+	"uldaman": 58, "zulfarrak": 53, "karazhan_crypt": 125,
+	"molten_core": 21, "blackwing_lair": 40, "zul_gurub": 95,
+	"ruins_of_ahnqiraj": 32, "temple_of_ahnqiraj": 74, "naxxramas": 150,
 	"lower_karazhan_halls": 79, "upper_karazhan_halls": 30,
 	"emerald_sanctum": 7, "timbermaw_hold": 27,
 }
@@ -149,5 +152,91 @@ func TestPullSizeWarningNamesLegPullBodiesCeiling(t *testing.T) {
 	}
 	if len(f.Guids) != 2 || !strings.Contains(f.Summary, "leg 0 pull 1: 2 bodies (ceiling 1)") {
 		t.Fatalf("%+v: want both guids and the summary line", f)
+	}
+}
+
+// The target is the row's own creature, kill_first rank first: with the bat
+// rider 14750 in kill_first the target is the rider even when the formation's
+// nearest mob to the stand is another unit, and a closer unrelated spawn next
+// to a stand-pull row is never chosen.
+func TestPullSizeTargetIsOwnedKillFirstFirst(t *testing.T) {
+	p := &dungeon.Plan{Name: "probe", Map: 1, Kind: "raid", LevelBand: []int{60, 60},
+		KillFirst: []uint32{14750}, Entrance: dungeon.Point{},
+		Legs: []dungeon.Leg{{Name: "a", To: dungeon.Point{X: 30},
+			PullGroups: []dungeon.PullGroup{
+				{Entries: []uint32{11368, 14750}, Positions: []dungeon.Point{{X: 30}}, Radius: 25,
+					Approach: []dungeon.Point{{X: 0}}, StandPull: true},
+			}}}}
+	cs := []creature{
+		{GUID: 1, Entry: 11368, Name: "Bat", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 28}},
+		{GUID: 2, Entry: 14750, Name: "Rider", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 34}},
+		{GUID: 3, Entry: 999, Name: "Stranger", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 1}},
+	}
+	pts, err := routePoints(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rp routePoint
+	for _, q := range pts {
+		if q.kind == "pull" {
+			rp = q
+		}
+	}
+	mobs, entries := pullMobs(p, cs, nil)
+	owned := pullOwners(pts, cs)
+	if got := pullTarget(p, mobs, entries, rp, owned); got < 0 || mobs[got].Guid != 2 {
+		t.Fatalf("target guid %v, want the kill_first rider 2", mobs)
+	}
+	// Without kill_first the nearer owned mob wins, still never the stranger.
+	p.KillFirst = nil
+	if got := pullTarget(p, mobs, entries, rp, owned); got < 0 || mobs[got].Guid != 1 {
+		t.Fatalf("target guid %v, want the nearer owned bat 1", mobs)
+	}
+}
+
+// Every pull row of the leg is numbered in route order, not only the rows
+// over their ceiling: a quiet row between two loud ones still consumes its
+// number, so a row's number never moves when a ceiling changes.
+func TestPullSizeNumbersEveryPullRowOfTheLeg(t *testing.T) {
+	p := &dungeon.Plan{Name: "probe", Map: 1, Kind: "dungeon", LevelBand: []int{60, 60}, Entrance: dungeon.Point{},
+		Legs: []dungeon.Leg{{Name: "a", To: dungeon.Point{X: 90},
+			PullGroups: []dungeon.PullGroup{
+				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 10}}, Radius: 5, MaxBodies: 1},
+				{Entries: []uint32{2}, Positions: []dungeon.Point{{X: 40}}, Radius: 5, MaxBodies: 80},
+				{Entries: []uint32{3}, Positions: []dungeon.Point{{X: 70}}, Radius: 5, MaxBodies: 1},
+			}}}}
+	cs := []creature{
+		{GUID: 1, Entry: 1, Name: "One", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 10}},
+		{GUID: 2, Entry: 1, Name: "Two", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 12}},
+		{GUID: 3, Entry: 2, Name: "Lone", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 40}},
+		{GUID: 4, Entry: 3, Name: "Three", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 70}},
+		{GUID: 5, Entry: 3, Name: "Four", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 72}},
+	}
+	found, err := PullSizes(p, cs, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 2 || found[0].Pull != 1 || found[1].Pull != 3 {
+		t.Fatalf("pull numbers %v, want rows 1 and 3 (row 2 quiet)", found)
+	}
+}
+
+// A pull row that owns nothing is a finding of its own ("pull N: no target"),
+// never an unrelated spawn's estimate.
+func TestPullSizeRowWithNoTargetIsANoTargetFinding(t *testing.T) {
+	p := &dungeon.Plan{Name: "probe", Map: 1, Kind: "dungeon", LevelBand: []int{60, 60}, Entrance: dungeon.Point{},
+		Legs: []dungeon.Leg{{Name: "a", To: dungeon.Point{X: 10},
+			PullGroups: []dungeon.PullGroup{
+				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 100}}, Radius: 5},
+			}}}}
+	cs := []creature{
+		{GUID: 7, Entry: 9, Name: "Elsewhere", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 10}},
+	}
+	found, err := PullSizes(p, cs, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 || found[0].Bodies != 0 || found[0].Summary != "leg 0 pull 1: no target" {
+		t.Fatalf("findings %v, want one no-target finding for pull 1", found)
 	}
 }

@@ -6,14 +6,18 @@
 //
 //	leg L pull P: N bodies (ceiling M): guids ...
 //
-// Target: the pack spawn nearest the row's party point. Geometry: the
-// previous row's party point to this row's party point (a straight 2 yd
-// sampled segment: the navmesh polyline needs TURTLE_AGENT_MMAPS and the
-// offline path there is what the server walks, so the mmaps-free straight
-// line is the documented approximation, high side), stand = party point,
-// fight = party point (no camp chain in this work: feature A only), no drag.
-// Sight is "always sees" (high side, documented): without mmaps there is no
-// collision geometry to raycast against.
+// Target: the row's own creature, the run leader's pull target: among the
+// spawns the row owns (its entry in the row's entries and within its radius
+// of the row's ownership point, routeOwnerOf's rule), kill_first rank first,
+// then the nearest to the party point. A row that owns nothing is a finding
+// of its own ("pull N: no target"), never an unrelated spawn's estimate.
+// Geometry: the previous row's party point to this row's party point (a
+// straight 2 yd sampled segment: the navmesh polyline needs TURTLE_AGENT_MMAPS
+// and the offline path there is what the server walks, so the mmaps-free
+// straight line is the documented approximation, high side), stand = party
+// point, fight = party point (no camp chain in this work: feature A only), no
+// drag. Sight is "always sees" (high side, documented): without mmaps there
+// is no collision geometry to raycast against.
 //
 // The ceiling is the row's item (the plan's max_bodies), else the plan's
 // pull_ceiling, else the lint default (8 for raids, 6 for parties).
@@ -36,10 +40,14 @@ const (
 	defaultPartyPullCeiling = 6
 )
 
-// PullFinding is one pull row whose estimate is over its ceiling.
+// PullFinding is one pull row over its ceiling, or a pull row with no target.
 type PullFinding struct {
-	Leg     int // the export's leg number
-	Pull    int // the pull row's seq within its leg (the export's step number)
+	Leg int // the export's leg number
+	// Pull is the pull row's number within its export leg: every pull row of
+	// the leg is numbered in route order, so a row's number never moves when
+	// a ceiling or a neighbour changes (rows under their ceiling and rows
+	// with no target consume a number).
+	Pull    int
 	Bodies  int
 	Ceiling int
 	Guids   []uint32
@@ -71,7 +79,7 @@ func PullSizes(p *dungeon.Plan, cs []creature, w *worldspawn.World) ([]PullFindi
 	if err != nil {
 		return nil, err
 	}
-	mobs := pullMobs(p, cs, packIDs(w))
+	mobs, entries := pullMobs(p, cs, packIDs(w))
 	if len(mobs) == 0 {
 		return nil, nil
 	}
@@ -81,13 +89,20 @@ func PullSizes(p *dungeon.Plan, cs []creature, w *worldspawn.World) ([]PullFindi
 		stand = float32(aggroest.StandSpreadRaidYd)
 	}
 	var out []PullFinding
-	pullIdx := map[int]int{} // export leg -> pulls so far
+	pullIdx := map[int]int{}     // export leg -> pulls so far
+	owned := pullOwners(pts, cs) // guid -> row index, routeOwnerOf's rule
 	for i, rp := range pts {
 		if rp.kind != planexport.KindPull {
 			continue
 		}
-		target := nearestMob(mobs, rp.px, rp.py, rp.pz)
+		pullIdx[rp.leg]++
+		n := pullIdx[rp.leg]
+		target := pullTarget(p, mobs, entries, rp, owned)
 		if target < 0 {
+			out = append(out, PullFinding{
+				Leg: rp.leg, Pull: n, Bodies: 0, Ceiling: PullCeilingOf(p, rp.item),
+				Summary: fmt.Sprintf("leg %d pull %d: no target", rp.leg, n),
+			})
 			continue
 		}
 		var walk []dungeon.Point
@@ -111,10 +126,9 @@ func PullSizes(p *dungeon.Plan, cs []creature, w *worldspawn.World) ([]PullFindi
 		for _, m := range res.Members {
 			guids = append(guids, m.Guid)
 		}
-		pullIdx[rp.leg]++
 		out = append(out, PullFinding{
-			Leg: rp.leg, Pull: pullIdx[rp.leg], Bodies: res.Bodies, Ceiling: ceiling, Guids: guids,
-			Summary: fmt.Sprintf("leg %d pull %d: %d bodies (ceiling %d): %s", rp.leg, pullIdx[rp.leg], res.Bodies, ceiling, guidList(guids)),
+			Leg: rp.leg, Pull: n, Bodies: res.Bodies, Ceiling: ceiling, Guids: guids,
+			Summary: fmt.Sprintf("leg %d pull %d: %d bodies (ceiling %d): %s", rp.leg, n, res.Bodies, ceiling, guidList(guids)),
 		})
 	}
 	return out, nil
@@ -139,9 +153,11 @@ func packIDs(w *worldspawn.World) map[uint64]uint64 {
 // pullMobs converts the spawn export to estimator mobs: hostile, non-critter
 // spawns with their detection range (default 20), NO_AGGRO/NO_ASSIST from
 // flags_extra, patrollers at their current position. groups maps spawn guids
-// to pack ids (packIDs); nil: every spawn its own pack.
-func pullMobs(p *dungeon.Plan, cs []creature, groups map[uint64]uint64) []aggroest.Mob {
+// to pack ids (packIDs); nil: every spawn its own pack. entries maps each
+// kept mob guid to its creature entry, for the kill_first target rank.
+func pullMobs(p *dungeon.Plan, cs []creature, groups map[uint64]uint64) ([]aggroest.Mob, map[uint32]uint32) {
 	var out []aggroest.Mob
+	entries := map[uint32]uint32{}
 	_ = p
 	for _, c := range cs {
 		if c.NPCFlags != 0 || c.Faction == 35 || c.LevelMax <= 1 {
@@ -158,18 +174,75 @@ func pullMobs(p *dungeon.Plan, cs []creature, groups map[uint64]uint64) []aggroe
 			Patroller: c.Patrol,
 		}
 		out = append(out, m)
+		entries[m.Guid] = c.Entry
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Guid < out[j].Guid })
+	return out, entries
+}
+
+// pullOwners maps each spawn guid to the export row that pulls it, by
+// routeOwnerOf's rule (the row's entry and radius at the row's ownership
+// point, formations shared by group_leader). Only pull/boss/hold rows with
+// entries own spawns (routePoints sets ownerIdx for those).
+func pullOwners(pts []routePoint, cs []creature) map[uint64]int {
+	var owners []routePoint
+	for _, q := range pts {
+		if q.ownerIdx >= 0 {
+			owners = append(owners, q)
+		}
+	}
+	byLeader := map[uint64][]creature{}
+	for _, c := range cs {
+		if c.GroupLeader != 0 {
+			byLeader[c.GroupLeader] = append(byLeader[c.GroupLeader], c)
+		}
+	}
+	out := map[uint64]int{}
+	for _, c := range cs {
+		if o, ok := routeOwnerOf(owners, byLeader, c); ok {
+			out[c.GUID] = o.idx
+		}
+	}
 	return out
 }
 
-func nearestMob(mobs []aggroest.Mob, x, y, z float32) int {
-	best, bd := -1, float64(0)
-	for i, m := range mobs {
-		dx, dy, dz := float64(m.Pos.X-x), float64(m.Pos.Y-y), float64(m.Pos.Z-z)
-		if d := dx*dx + dy*dy + dz*dz; best < 0 || d < bd {
-			best, bd = i, d
+// pullTarget is the row's own creature for the estimate: among the mobs the
+// row owns, kill_first rank first (the run leader fires from its stand, and
+// the plan's kill_first bat rider pins the target while the formation walks),
+// then the nearest to the party point. -1 when the row owns nothing: the
+// caller reports "no target" instead of estimating an unrelated spawn.
+func pullTarget(p *dungeon.Plan, mobs []aggroest.Mob, entries map[uint32]uint32, rp routePoint, owned map[uint64]int) int {
+	rank := map[uint32]int{}
+	for i, e := range p.KillFirst {
+		if _, ok := rank[e]; !ok {
+			rank[e] = i
 		}
+	}
+	best, bestListed, bestRank := -1, false, 0
+	var bestDist float64
+	for i, m := range mobs {
+		if owned[uint64(m.Guid)] != rp.idx {
+			continue
+		}
+		dx, dy, dz := float64(m.Pos.X-rp.px), float64(m.Pos.Y-rp.py), float64(m.Pos.Z-rp.pz)
+		d := dx*dx + dy*dy + dz*dz
+		r, listed := rank[entries[m.Guid]]
+		switch {
+		case best < 0:
+		case listed != bestListed:
+			if bestListed {
+				continue
+			}
+		case listed && r != bestRank:
+			if r > bestRank {
+				continue
+			}
+		default:
+			if d >= bestDist {
+				continue
+			}
+		}
+		best, bestListed, bestRank, bestDist = i, listed, r, d
 	}
 	return best
 }
