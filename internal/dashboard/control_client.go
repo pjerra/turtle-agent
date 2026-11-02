@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -29,9 +30,18 @@ var controlWriteMethods = map[string]bool{"dungeon_pause": true, "dungeon_resume
 // controlParamMethods are the writes that carry parameters: only these may be given them.
 var controlParamMethods = map[string]bool{"tune_set": true}
 
-// ErrIndeterminate is returned when the agent answered but not with a JSON-RPC 2.0 reply to this request (no envelope, another id, no
-// result). For a write the command may already have run, so the caller must neither call it OK nor a plain refusal.
+// ErrIndeterminate is returned when the write's outcome cannot be told: the request was sent and then failed (a client timeout, a request
+// context that ended, a reply body that could not be read, any status but 200 or 401), or the agent answered but not with a JSON-RPC 2.0 reply
+// to this request (no envelope, another id, no result). For a write the command may already have run, so the caller must neither call it OK nor
+// a plain refusal. Only a request that never left (it failed while dialing) and a 401 are definite.
 var ErrIndeterminate = errors.New("indeterminate")
+
+// neverSent reports whether err means the request certainly never reached the agent: the dial itself failed. Everything else says the request
+// may have arrived, or that a reply is on its way that we will not see.
+func neverSent(err error) bool {
+	var op *net.OpError
+	return errors.As(err, &op) && op.Op == "dial"
+}
 
 // rpcID is the id every control request carries; a reply must echo it.
 const rpcID = 1
@@ -97,18 +107,21 @@ func (c *ControlClient) call(ctx context.Context, method string, params any) (js
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, err
+		if neverSent(err) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: %v", ErrIndeterminate, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized {
 		return nil, errors.New("unauthorized: no readable " + tokenFileName(c.Agent) + " next to the settings file")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("http %d", resp.StatusCode)
+		return nil, fmt.Errorf("%w: http %d", ErrIndeterminate, resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxReply))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: the reply body could not be read: %v", ErrIndeterminate, err)
 	}
 	var env struct {
 		JSONRPC string          `json:"jsonrpc"`

@@ -4355,18 +4355,25 @@ the dashboard itself discovered (`auto`): an id it does not watch is 404. A succ
 minute per label, 500 the log could not be written, or 502 the agent's RPC failed (its message passed back).
 
 Every control first asks that agent a **fresh** `dungeon_status` (never the poller's cache), a live check: the page greys
-buttons, the server is the gate. `pause` and `stop` always need `"confirm": true`. A pause can **end** a run (any mode but
-`observe`; the party and the instance are kept) or stop the leader in `observe` mode, and the status read can go stale before
-the RPC lands, which carries no expected state to guard with; `stop` unbinds (the hires go back and the instance is lost).
+buttons, the server is the gate. `pause` and `stop` always need `"confirm": true`. The page asks first with the browser's own
+confirm dialog; inside a cross-origin embed (a page framed through `--embed-from`) browsers silence that dialog and treat it as
+"no", so the pause and stop buttons are inert there — `resume` and `skip`, which need no confirm, still work. A pause can
+**end** a run (any mode but `observe`; the party and the instance are kept) or stop the leader in `observe` mode, and the
+status read can go stale before the RPC lands, which carries no expected state to guard with; `stop` unbinds (the hires go
+back and the instance is lost).
 `resume` and `skip` are for observe runs; the agent refuses them on others and its message is passed back.
 
 **Live tuning (`tune`).** A `tune` control reads a **fresh** `tune_list` (an RPC error there — no remote run — is a 409 with the
 agent's message), the key must be in that list, and the value must be a JSON number inside the row's `min`..`max` (whole for
-`pct` and `count`) or the string `"default"`; anything else is a 400 and nothing is sent. `tune_set` then takes the number (or
-`"default"`) as the agent expects and its `TuneAck` (`old`, `new`, `applies`) is the reply's `result`; the change waits for the
+`pct` and `count`) or the string `"default"`; anything else is a 400 and nothing is sent. A row that reports no `min` and `max`
+(an older agent) is refused for a number with "this agent does not report bounds for <key>" — never read as a `0..0` range —
+while `"default"` still goes through. `tune_set` then takes the number (or `"default"`) as the agent expects and its
+`TuneAck` (`old`, `new`, `applies`) is the reply's `result`; the change waits for the
 next leg or pull-group start. No confirm: every tunable is bounded by the driver. The log line names the key as its `verb` and
-the value in `args`. The page shows a **Live tuning** box while a run goes in `remote`/`commander` mode with tunables: eight
-sliders (`rest_health_pct`, `rest_mana_pct`, `rest_healer_mana_pct`, `big_pack`, `patrol_wait_s`, `pull_range`, `pack_radius`,
+the value in `args`. A `tune_set` whose outcome cannot be told (a timeout, a cancelled request, a reply that is not an answer to
+it) is a 502 `unknown: check the tunable's value`, and its log line says `indeterminate`. The page shows a **Live tuning** box
+while a run goes in `remote`/`commander` mode with tunables: eight sliders (`rest_health_pct`, `rest_mana_pct`,
+`rest_healer_mana_pct`, `big_pack`, `patrol_wait_s`, `pull_range`, `pack_radius`,
 `gather_wait_s`, each skipped when the run does not have it), sent on release (`change`, never `input`), a **Default** button per
 row, the "queued -> X (applies at the next leg or pull-group start)" note, and a nested **All tunables** list with a number
 input, **Set** and **Default** for every key. Steps are 1 for `pct`/`count`, 0.5 for `yd`/`s`.
@@ -4378,7 +4385,9 @@ Safety: every control — token or trusted — must be `application/json`, at mo
 its Host and a `Sec-Fetch-Site` of `same-origin` or `none`; the token is in the `Authorization` header only (never a cookie or
 the URL), OPTIONS stays 405, and the Host check is the unchanged one. One control runs at a time per agent (a second is 409).
 The log holds who sent it, how (`token` or `trusted`), the peer, the agent, the verb and what the agent answered — never a
-token: the agent's token is blanked in a message and any JSON answer is scrubbed before it is logged or returned.
+token: the agent's token is blanked in a message and any JSON answer is scrubbed before it is logged or returned. A log read
+shows the `peer` only to a caller who could send a control itself (a valid control token, or the trusted nonce); the page
+reads the log with no token, so it never sees one.
 
 **Over Tailscale.** Listen on the machine's tailnet address (`tailscale ip -4`) and open the page from another tailnet device at
 `http://100.101.102.103:8790/`: that IP is accepted as `Host` by itself. A name the page is opened by (the MagicDNS name,

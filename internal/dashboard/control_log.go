@@ -26,7 +26,7 @@ type controlRecord struct {
 	At      string `json:"at"`                // RFC3339, the dashboard's clock
 	Who     string `json:"who"`               // the token label
 	Via     string `json:"via"`               // token or trusted
-	Peer    string `json:"peer"`              // the caller's address as the dashboard saw it
+	Peer    string `json:"peer,omitempty"`    // the caller's address as the dashboard saw it (left out of a log read by a caller who may not send controls)
 	Agent   string `json:"agent"`             // the agent id (its normalized RPC address)
 	Action  string `json:"action"`            // run (tune, order in later slices)
 	Verb    string `json:"verb"`              // pause, resume, skip, stop
@@ -54,7 +54,9 @@ type controlLog struct {
 	mu sync.Mutex
 }
 
-// openControlLog opens (or makes) the log: its folder 0700, the file 0600, appended to. A failure is fatal to --control (fail closed).
+// openControlLog opens (or makes) the log: its folder 0700, the file 0600, appended to. Like the token file it must be a regular file of ours,
+// not a link, and readable by nobody else (a mode we own with the others' bits set is cut to 0600). A failure is fatal to --control (fail
+// closed).
 func openControlLog(path string) (*controlLog, error) {
 	if path == "" {
 		return nil, errors.New("control log: no path")
@@ -63,7 +65,24 @@ func openControlLog(path string) (*controlLog, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	st, err := os.Lstat(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		// made by the open below, 0600
+	case err != nil:
+		return nil, err
+	case st.Mode()&os.ModeSymlink != 0:
+		return nil, fmt.Errorf("control log %s is a symbolic link", path)
+	case !st.Mode().IsRegular():
+		return nil, fmt.Errorf("control log %s is not a regular file", path)
+	case !ownedByUser(st):
+		return nil, fmt.Errorf("control log %s belongs to another user", path)
+	case st.Mode().Perm()&0o077 != 0:
+		if err := os.Chmod(path, 0o600); err != nil {
+			return nil, fmt.Errorf("control log %s is readable by others (mode %04o) and cannot be made 0600: %w", path, st.Mode().Perm(), err)
+		}
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY|oNoFollow, 0o600)
 	if err != nil {
 		return nil, err
 	}

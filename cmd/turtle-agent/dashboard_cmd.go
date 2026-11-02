@@ -164,6 +164,10 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 			fmt.Fprintln(stderr, "dashboard: --control:", err)
 			return exitUsage
 		}
+		if err := checkControlTokens(expandHome(*controlTokens), tk, expandHome(*editTokens)); err != nil {
+			fmt.Fprintln(stderr, "dashboard: --control:", err)
+			return exitUsage
+		}
 		c, err := dashboard.NewController(p, dashboard.ControlConfig{Tokens: tk, LogPath: expandHome(*controlLog)})
 		if err != nil {
 			fmt.Fprintln(stderr, "dashboard: --control:", err)
@@ -207,6 +211,25 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		return 1
 	}
 	return exitOK
+}
+
+// checkControlTokens refuses a control token file that is the route editor's file (the same file by any path) or that holds a token the
+// editor's file holds too: an editing token must never press run buttons. The editor's file may be absent (nothing can be shared); one that
+// cannot be read is the editor's own problem (--edit refuses it), and holds nothing this can compare.
+func checkControlTokens(controlPath string, control *routeedit.Tokens, editPath string) error {
+	if cs, err := os.Stat(controlPath); err == nil {
+		if es, err := os.Stat(editPath); err == nil && os.SameFile(cs, es) {
+			return fmt.Errorf("--control-tokens %s is the route editor's --edit-tokens file: the controls need a file of their own", controlPath)
+		}
+	}
+	edit, err := routeedit.LoadTokens(editPath)
+	if err != nil {
+		return nil
+	}
+	if label, ok := control.SharesToken(edit); ok {
+		return fmt.Errorf("--control-tokens %s holds the token of %q, which --edit-tokens %s also holds: an editing token must not press run buttons", controlPath, label, editPath)
+	}
+	return nil
 }
 
 // newEditor sets up the route editor: the token file, the versions folder, the navmesh the plans are checked on, and the check that the folders
