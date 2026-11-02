@@ -47,12 +47,13 @@ const (
 	exitRaidWalkFailed       = 18 // a phase failed or was refused
 	exitRaidWalkIncident     = 19 // the walk ran and was torn down, but a wipe or a boss engagement happened, or hires were left
 	exitRaidWalkInjectFailed = 23 // a walk that would exit 0 had at least one fault with verdict fail
+	exitRaidWalkInstanceCap  = 26 // --instance-cap-fail: the server's hourly instance-id ledger is at the cap; nothing was started
 )
 
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
     [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
-    [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--hire-settle 20s] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
+    [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--dry-run]
        turtle-agent raid-walk report <dir> [--spell ID] [--clock-offset 1h] [--md FILE] [--json FILE] [--out DIR]`
 
@@ -86,6 +87,9 @@ type raidWalkOptions struct {
 	wipeResume    int
 	wipeRest      time.Duration
 	hireSettle    time.Duration // --hire-settle: the wait after the last hire; 0 skips it (the #1367 live proof)
+	capWait       time.Duration // --instance-cap-wait: the longest the walk waits for the server's hourly instance-id count to fall
+	capFail       bool          // --instance-cap-fail: exit exitRaidWalkInstanceCap at the cap instead of waiting
+	capReset      bool          // --instance-cap-reset: forget this server's ledger first (its worldserver restarted)
 	patrols       string
 	out           string
 	dashURL       string
@@ -224,6 +228,9 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.DurationVar(&o.resetWait, "reset-wait", 5*time.Minute, "how long a wipe may wait for the instance to reset")
 	fs.DurationVar(&o.wipeRest, "wipe-rest", 10*time.Minute, "how long a revived raid rests out of combat before the run resumes")
 	fs.DurationVar(&o.hireSettle, "hire-settle", hireSettleWait, "how long to wait after the last hire for its join summons before the refit and the bind (0 skips the wait)")
+	fs.DurationVar(&o.capWait, "instance-cap-wait", raidwalk.InstanceCapDefaultWait, "at 4 or more fresh instances in the last hour on the server (the core refuses a 6th per account), wait up to this long for the oldest to age out, then go on (0: warn and go on)")
+	fs.BoolVar(&o.capFail, "instance-cap-fail", false, "at that count exit 26 instead of waiting")
+	fs.BoolVar(&o.capReset, "instance-cap-reset", false, "forget this server's instance ledger before the check (the worldserver restarted)")
 	fs.StringVar(&o.patrols, "patrols", "", "a tb-patrols file for the revive quiet check")
 	fs.StringVar(&o.out, "out", "", "the output dir (default ./raid-walk-<plan>-<stamp>)")
 	fs.StringVar(&o.dashURL, "dash-url", "", "the dashboard URL (or TBDASH_URL)")
@@ -322,6 +329,10 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	}
 	if o.hireSettle < 0 {
 		fmt.Fprintf(stderr, "raid-walk: --hire-settle must be 0 or more\n")
+		return o, exitUsage
+	}
+	if o.capWait < 0 {
+		fmt.Fprintf(stderr, "raid-walk: --instance-cap-wait must be 0 or more\n")
 		return o, exitUsage
 	}
 	if ttl := o.ttlMinutes(); ttl > 720 {
@@ -443,6 +454,11 @@ type walkEnv struct {
 	release    func(server, slot, holder, leaseID string, force bool) (slots.Lease, error)
 	setup      func(args []string, stdout, stderr io.Writer) int
 	teardown   func(args []string, stdout, stderr io.Writer) int
+	// capLedger is the instance-cap ledger file ("": the check is off, as in tests). serverStart, when set, reads the
+	// worldserver's start time so a restart resets the ledger; no existing read gives it today (nil), so
+	// --instance-cap-reset is the operator's way.
+	capLedger   string
+	serverStart func(ctx context.Context, server string) (time.Time, bool)
 }
 
 // walkDeps are the two clients the phases use; tests hand in fakes.
@@ -471,6 +487,7 @@ func defaultWalkEnv(o *raidWalkOptions) (walkEnv, walkDeps, error) {
 		release:    store.Release,
 		setup:      slotSetupCmd,
 		teardown:   teardownCmd,
+		capLedger:  filepath.Join(filepath.Dir(path), raidwalk.InstanceCapFile),
 	}
 	deps := walkDeps{
 		openAgent: func(dir string) (walkAgent, teardownSlotManifest, error) {
