@@ -43,6 +43,15 @@ type creature struct {
 	GroupLeader uint64
 	Patrol      bool
 	Auras       []uint32 // spell ids of the auras the creature spawns with (template and spawn row)
+	// DetectionRange is the creature_template detection_range (the yards at which a spawn of the entry engages, 0 when the
+	// export has none: draft exports predate the column). RouteIntoLaterPacks defaults 0 to 20 yd, then applies the core
+	// aggro rule (party level, spread, wander).
+	DetectionRange float64
+	// Wander is the spawn's wander_distance: how far it walks from its spot, added to the aggro reach (as the trash check does).
+	Wander float32
+	// FlagsExtra is the creature_template flags_extra: RouteIntoLaterPacks skips NO_AGGRO spawns outright (0 when the
+	// export has none: draft exports predate the column).
+	FlagsExtra uint32
 }
 
 type object struct {
@@ -356,6 +365,21 @@ func readCreatures(path string) ([]creature, error) {
 			Patrol: m["patrol"] == "1", Auras: parseAuras(m["auras"])}
 		if l, err := strconv.Atoi(m["level_max"]); err == nil { // optional: only the band of a spec plan needs it
 			c.LevelMax = l
+		}
+		if s, ok := m["detection_range"]; ok && s != "" { // optional: draft exports predate the column
+			if v, err := strconv.ParseFloat(s, 64); err == nil {
+				c.DetectionRange = v
+			}
+		}
+		if s, ok := m["wander"]; ok && s != "" { // optional: draft exports predate the column
+			if v, err := strconv.ParseFloat(s, 32); err == nil {
+				c.Wander = float32(v)
+			}
+		}
+		if s, ok := m["flags_extra"]; ok && s != "" { // optional: draft exports predate the column
+			if v, err := strconv.ParseUint(s, 10, 32); err == nil {
+				c.FlagsExtra = uint32(v)
+			}
 		}
 		out = append(out, c)
 	}
