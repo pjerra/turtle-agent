@@ -663,8 +663,8 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 	}
 }
 
-// F5 (D8): with the deployed-style ZG rows (410 steps from planexport.Build, walk 26b's pack-1-first Marli order,
-// walk 28's 27-unit Arlokk terrace pull and walk 29's leg-5/6 stands),
+// F5 (D8): with the deployed-style ZG rows (407 steps from planexport.Build, walk 26b's pack-1-first Marli order,
+// walk 28's 27-unit Arlokk terrace pull, walk 29's leg-5/6 stands and round 4's three dropped vias),
 // stops before the segment on leg 6 that passes Venoxis, and the shortened corridor clears clean.
 func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 	plan := zgPlacePlan(t)
@@ -673,8 +673,8 @@ func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	if len(rows.Steps) != 410 {
-		t.Fatalf("the fixture has %d steps, want 410", len(rows.Steps))
+	if len(rows.Steps) != 407 {
+		t.Fatalf("the fixture has %d steps, want 407", len(rows.Steps))
 	}
 	start, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
 	if err != nil {
