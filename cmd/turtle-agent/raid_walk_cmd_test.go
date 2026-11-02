@@ -5115,6 +5115,43 @@ func TestRaidWalkWaitingLineOpensNoWindow(t *testing.T) {
 	}
 }
 
+// The boss window's frames mark summoned/arriving boss adds instead of
+// counting them: a unit of a boss-add entry engaged inside the window lands in
+// the record's boss-add set, while a true neighbour of another entry joins.
+func TestRaidWalkPullFramedMarksBossAdds(t *testing.T) {
+	now := time.Now()
+	w := &walk{
+		env:           walkEnv{now: func() time.Time { return now }},
+		rows:          planexport.Rows{},
+		hostiles:      map[string]hostileState{},
+		partyG:        map[uint64]bool{1000: true},
+		pullJoinsAt:   now,
+		pullJoinsStep: 7,
+		pullBossAdds:  map[uint32]bool{11368: true},
+		pullPack:      map[packet.GUID]bool{},
+		pullJoinsSeen: map[packet.GUID]bool{},
+		pullAddsSeen:  map[packet.GUID]bool{},
+	}
+	f := &tbm.ViewFrame{
+		Party: []tbm.PartyRec{{GUID: 1000, Name: "Tank"}},
+		Hostiles: []tbm.HostileRec{
+			{GUID: 0xF13000000011, Entry: 11368, HPPct: 100, Target: packet.GUID(1000)},
+			{GUID: 0xF13000000021, Entry: 12130, HPPct: 100, Target: packet.GUID(1000)},
+		},
+	}
+	w.pullFramed(now.Add(time.Second), f)
+	if len(w.pullJoinsSeen) != 1 || !w.pullJoinsSeen[packet.GUID(0xF13000000021)] {
+		t.Fatalf("joins %+v, want only the 12130 neighbour", w.pullJoinsSeen)
+	}
+	if len(w.pullAddsSeen) != 1 || !w.pullAddsSeen[packet.GUID(0xF13000000011)] {
+		t.Fatalf("adds %+v, want the 11368 boss add marked instead", w.pullAddsSeen)
+	}
+	w.pullJoinersFlush(now.Add(11 * time.Second))
+	if len(w.pullJoins) != 1 || w.pullJoins[0].Count != 1 || len(w.pullJoins[0].BossAdds) != 1 {
+		t.Fatalf("record %+v, want 1 joiner plus 1 boss add", w.pullJoins)
+	}
+}
+
 // The boss latch clears when the walk resumes at an earlier step: a step
 // decrease forgets the armed steps, so the same boss fight later arms a fresh
 // window and its joiners are counted.
