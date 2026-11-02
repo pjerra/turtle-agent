@@ -11,10 +11,11 @@ import (
 	"github.com/pjerra/turtle-agent/internal/planexport"
 )
 
-// PullJoiners is one pull's joiner record, keyed by the pull step: how many
-// engaged hostiles outside the pulled pack joined within the window, and which
-// guids. The walk writes it when the pull window closes; the report reads it
-// from the walk folder (pulljoiners.json) and hangs it on the pull of that step.
+// PullJoiners is one pull attempt's joiner record: the pull's step and time,
+// how many engaged hostiles outside the pulled pack joined within the window,
+// and which guids. The walk writes one per attempt when the pull window
+// closes; the report reads all of them from the walk folder (pulljoiners.json)
+// and hangs each on the fight of its step whose window holds At.
 type PullJoiners struct {
 	Step  int           `json:"step"`
 	At    time.Time     `json:"at"`
@@ -43,17 +44,18 @@ func PullJoinersLine(step int, guids []packet.GUID) string {
 	return ""
 }
 
-// ParsePullJoins reads the walk's per-pull joiner records (pulljoiners.json),
-// keyed by pull step. A later record of a step replaces an earlier one.
-func ParsePullJoins(raw []byte) map[int]PullJoiners {
-	out := map[int]PullJoiners{}
+// ParsePullJoins reads the walk's per-pull joiner records (pulljoiners.json):
+// every attempt keeps its record, with the pull's time, so a retried pull at
+// one step does not replace the attempt before it.
+func ParsePullJoins(raw []byte) []PullJoiners {
 	var list []PullJoiners
 	if err := json.Unmarshal(raw, &list); err != nil {
-		return out
+		return nil
 	}
+	var out []PullJoiners
 	for _, j := range list {
 		if j.Step > 0 {
-			out[j.Step] = j
+			out = append(out, j)
 		}
 	}
 	return out

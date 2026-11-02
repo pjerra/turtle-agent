@@ -85,8 +85,9 @@ func raidWalkReportCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		raidwalk.ResolveLog(lines, *offset, time.Unix(int64(first), 0).UTC())
 	}
-	// The walk's own joiner count per pull (absent in a folder from before it): an unreadable or missing file leaves the column empty.
-	pullJoins := map[int]raidwalk.PullJoiners{}
+	// The walk's own joiner records, one per pull attempt (absent in a folder
+	// from before it): an unreadable or missing file leaves the column empty.
+	var pullJoins []raidwalk.PullJoiners
 	if raw, err := os.ReadFile(filepath.Join(dir, raidwalk.PullJoinersFName)); err == nil {
 		pullJoins = raidwalk.ParsePullJoins(raw)
 	}

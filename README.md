@@ -2296,7 +2296,7 @@ The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused
 | `commanders-<NNNN>-<reason>.json` | GET `/api/v1/commanders` (`reason`: walk, pause, wipe, boss, hold) |
 | `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key (a `live` row, a fight still running, is left for the next read: its finished fight comes back under the same id) |
 | `frames.jsonl` | one `bot_view` frame per 10 s (positions, hp, dead, hostiles; every line carries the walk's `tier`) |
-| `pulljoiners.json` | one record per pull (`step`, `at`, `count`, `guids`): the engaged hostiles outside the pulled pack within 10 s of the `pulling` line; `raid-walk report` shows it in the joined column |
+| `pulljoiners.json` | one record per pull attempt (`step`, `at`, `count`, `guids`): the engaged hostiles outside the pulled pack within 10 s of the `pulling` line; `raid-walk report` shows each attempt's record in the joined column of the fight whose window holds its `at` |
 | `slot-setup.txt`, `teardown.json` | what slot setup printed, and teardown's report |
 | `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, `wipe_resumes`, boss, pauses, fights, injections, blocking incidents, dashboard, teardown (`failed`, `hires_left`, `reason`: the first failing teardown step with its detail, e.g. `gone: still in view after 10 s: ...`; a `Character '<name>' not found` remove counts as already gone, not a failure), exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison`; `place` (a `--place` walk only: `start_step`, `leg`, `point`, `until_step`, `instance`, `circles[]` with their removed counts, `not_cleared[]`, `quiet`, `placed`, `hires`, `summoned[]`) |
 Exit codes: 0 the run ended by its `until` (or the hold); 18 a phase failed or was refused (setup, login, hire, bind,
@@ -2335,13 +2335,14 @@ seconds into the fight), **contact before pull** (`YES` when a status line of th
 before any `pulling` line of the step; `no` when a `pulling` line came first or neither did), **joined mid-fight** (the `a new unit
 joined` status lines inside the fight, with the seconds into the fight, the `N joiners expected` text, and — while the walk watches —
 the frames' own count `frames: joiners N (guids...)` of engaged hostiles outside the pulled pack within 10 s of the pull, from the
-pull's structured record `pulljoiners.json`, keyed by the pull step), and the **stand wait**
+pull's structured record `pulljoiners.json`, placed by its pull time on the fight of the step whose window holds it; a record
+outside every window is left off the table and counted in a `joiners unmatched` note), and the **stand wait**
 (from the first stand-pull status line of the pull to its `pulling` line, or to the fight's start). Below the table: the stand-pull
 status lines of each pull merged by text with digits and guids as `#` (first and last time, span, lines and runs; the lines of a
 step with no fight go last), the pauses, resumes (with how long the pause lasted), stops and the end of the run, and the watched
 casts. `report.json` (format `tb-raid-walk-report` v1) carries the same rows: `pulls[]` (`engaged`, `deaths`,
 `contact_before_pull`, `contact_text`, `neighbour_joins`, `joiners_seen`, `joiner_guids`, `stand_pull`, `stand_wait_s`, `casts`), `control[]`, `casts[]`,
-`stand_pull_unattached[]` and `totals`.
+`stand_pull_unattached[]`, `totals` and `notes[]` (including the `joiners unmatched` count).
 
 ### Fault injection
 

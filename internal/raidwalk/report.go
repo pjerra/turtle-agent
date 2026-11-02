@@ -202,8 +202,10 @@ type ReportOptions struct {
 	Window time.Duration
 	// ClockOffset is how far the run log's clock is ahead of UTC.
 	ClockOffset time.Duration
-	// PullJoins is the walk's structured per-pull joiner record (pulljoiners.json), keyed by pull step.
-	PullJoins map[int]PullJoiners
+	// PullJoins are the walk's structured joiner records (pulljoiners.json),
+	// one per pull attempt: each attaches to the fight of its step whose
+	// window holds the pull time.
+	PullJoins []PullJoiners
 }
 
 // Report is the JSON of a walk report.
@@ -317,8 +319,8 @@ type ReportPull struct {
 	Joins             []ReportJoin `json:"neighbour_joins"`
 	JoinersExpected   string       `json:"joiners_expected,omitempty"`
 	// JoinersSeen is the frames' own count of engaged hostiles outside the
-	// pulled pack within 10 s of the pull, from the walk's structured per-pull
-	// record (pulljoiners.json, keyed by the pull step).
+	// pulled pack within 10 s of the pull, from the walk's structured record
+	// of this pull attempt (pulljoiners.json, placed by its pull time).
 	JoinersSeen int      `json:"joiners_seen,omitempty"`
 	JoinerGUIDs []string `json:"joiner_guids,omitempty"`
 	// StandWaitS is the time from the first stand-pull status line of the pull to its "pulling" line (to the fight's start without one).
@@ -422,6 +424,11 @@ func BuildReport(fights []ReportFight, log []LogLine, opt ReportOptions) *Report
 		lastEnd[f.Step] = end
 	}
 
+	// The walk keeps one joiner record per pull attempt; each one attaches to
+	// the fight of its step whose window holds the record's pull time, so a
+	// retried pull at a step never hands its count to the attempt before it.
+	joinersUsed := make([]bool, len(opt.PullJoins))
+
 	for i, f := range fights {
 		start := unixTime(f.Start)
 		p := ReportPull{Fight: f.ID, Step: f.Step, Kind: f.Kind, Leg: f.Leg, Start: start, DurS: float64(f.DurMS) / 1000, Outcome: f.Outcome, Boss: f.BossName,
@@ -461,8 +468,9 @@ func BuildReport(fights []ReportFight, log []LogLine, opt ReportOptions) *Report
 				rep.Totals.ContactBeforePull++
 			}
 		}
-		if j, ok := opt.PullJoins[f.Step]; ok {
-			attachPullJoiners(&p, j)
+		if k := joinerFor(opt.PullJoins, joinersUsed, f.Step, wins[i]); k >= 0 {
+			joinersUsed[k] = true
+			attachPullJoiners(&p, opt.PullJoins[k])
 		}
 		// One pull with a neighbour joining, whether the run log's status lines or the frames saw it.
 		if len(p.Joins) > 0 || p.JoinersSeen > 0 {
@@ -487,7 +495,43 @@ func BuildReport(fights []ReportFight, log []LogLine, opt ReportOptions) *Report
 	} else {
 		rep.Notes = append(rep.Notes, "no run log: the contact, join, stand-pull and control columns are empty")
 	}
+	if n := unmatchedJoiners(joinersUsed); n > 0 {
+		rep.Notes = append(rep.Notes, fmt.Sprintf("joiners unmatched: %d pull record(s) outside every fight window", n))
+	}
 	return rep
+}
+
+// joinerFor is the joiner record of the fight's step whose pull time the
+// window (from, to] holds: the latest attempt when several landed in it. -1
+// when no record is left for the window. Records already on a fight are skipped.
+func joinerFor(joiners []PullJoiners, used []bool, step int, w fightWindow) int {
+	best := -1
+	for k, j := range joiners {
+		if used[k] || j.Step != step || j.At.IsZero() {
+			continue
+		}
+		if !w.from.IsZero() && !j.At.After(w.from) {
+			continue
+		}
+		if j.At.After(w.to) {
+			continue
+		}
+		if best < 0 || j.At.After(joiners[best].At) {
+			best = k
+		}
+	}
+	return best
+}
+
+// unmatchedJoiners counts the joiner records no fight window took.
+func unmatchedJoiners(used []bool) int {
+	n := 0
+	for _, u := range used {
+		if !u {
+			n++
+		}
+	}
+	return n
 }
 
 // fightWindow is the span of status lines a pull owns: after the end of the step's earlier fight (zero: from the start) up to its own end.
