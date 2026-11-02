@@ -309,22 +309,22 @@ func TestRouteIntoLaterPacksDefaultsDetectionTo20(t *testing.T) {
 // Counts are measured on origin/dev (the ZG count must drop when W25-1 lands: the Arlokk terrace reordering walks
 // each approach on its pack's level; the comment then says so).
 var routeAggroKnownFailing = map[string]int{
-	"ragefire_chasm":       161,  // the repo reach (AggroRadius at 13-18 plus spread and wander) outruns the old 20 yd flat line.
-	"wailing_caverns":      188,  // the repo reach (AggroRadius at 22-27 plus spread and wander) outruns the old 20 yd flat line.
-	"deadmines":            661,  // the repo reach (AggroRadius at 18-22 plus spread and wander) outruns the old 20 yd flat line.
-	"uldaman":              268,  // the repo reach (AggroRadius at 41-45 plus spread and wander) outruns the old 20 yd flat line.
-	"zulfarrak":            66,   // #391: the export now reaches Bly and Ukorz (the plan's last leg, the skip_export Zel'jeb and Arena legs aside): two Sandfury Guardian passes on Ukorz's leg (19.5/21.6 yd, later rows' own packs) and Ukorz's 0.1 yd final approach (no row: his boss row names only Ruuzlu in first, and the loader refuses 7267 there); the Courtyard via removed two.
-	"karazhan_crypt":       459,  // the repo reach (AggroRadius at 59-60 plus spread and wander) outruns the old 20 yd flat line.
-	"molten_core":          315,  // the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"blackwing_lair":       344,  // the repo reach (AggroRadius at 58-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"zul_gurub":            1049, // the repo reach (AggroRadius at 58-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"ruins_of_ahnqiraj":    192,  // the repo reach (AggroRadius at 59-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"temple_of_ahnqiraj":   541,  // the repo reach (AggroRadius at 58-60 plus the raid's 10 yd spread) still reports more than the old 419: more spawns sit inside the wider reach than the plain-pull approach skip clears.
-	"naxxramas":            673,  // the repo reach (AggroRadius at 59-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"lower_karazhan_halls": 1010, // the repo reach (AggroRadius at 59-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"upper_karazhan_halls": 403,  // the live export builds now (GMCrossDirect walks the outland gm_cross gap): the check sees the island hops.
-	"emerald_sanctum":      17,   // the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns detection 20, from 8.
-	"timbermaw_hold":       228,  // the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
+	"ragefire_chasm":       153,  // boss rows own their boss (was 161). the repo reach (AggroRadius at 13-18 plus spread and wander) outruns the old 20 yd flat line.
+	"wailing_caverns":      173,  // boss rows own their boss (was 188). the repo reach (AggroRadius at 22-27 plus spread and wander) outruns the old 20 yd flat line.
+	"deadmines":            641,  // boss rows own their boss (was 661). the repo reach (AggroRadius at 18-22 plus spread and wander) outruns the old 20 yd flat line.
+	"uldaman":              249,  // boss rows own their boss (was 268). the repo reach (AggroRadius at 41-45 plus spread and wander) outruns the old 20 yd flat line.
+	"zulfarrak":            56,   // boss rows own their boss (was 66 with #391, 65 before it): a pass past a boss's own row is no finding.
+	"karazhan_crypt":       447,  // boss rows own their boss (was 459). the repo reach (AggroRadius at 59-60 plus spread and wander) outruns the old 20 yd flat line.
+	"molten_core":          270,  // boss rows own their boss (was 315). the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
+	"blackwing_lair":       321,  // boss rows own their boss (was 344). the repo reach (AggroRadius at 58-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
+	"zul_gurub":            1030, // boss rows own their boss (was 1049). the repo reach (AggroRadius at 58-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
+	"ruins_of_ahnqiraj":    178,  // boss rows own their boss (was 192). the repo reach (AggroRadius at 59-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
+	"temple_of_ahnqiraj":   520,  // boss rows own their boss (was 541). the repo reach (AggroRadius at 58-60 plus the raid's 10 yd spread) still reports more than the old 419: more spawns sit inside the wider reach than the plain-pull approach skip clears.
+	"naxxramas":            647,  // boss rows own their boss (was 673). the repo reach (AggroRadius at 59-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
+	"lower_karazhan_halls": 1000, // boss rows own their boss (was 1010). the repo reach (AggroRadius at 59-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
+	"upper_karazhan_halls": 383,  // boss rows own their boss (was 403). the live export builds now (GMCrossDirect walks the outland gm_cross gap): the check sees the island hops.
+	"emerald_sanctum":      15,   // boss rows own their boss (was 17). the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns detection 20, from 8.
+	"timbermaw_hold":       214,  // boss rows own their boss (was 228). the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
 }
 
 // TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn

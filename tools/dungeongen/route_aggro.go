@@ -75,7 +75,7 @@ func routePoints(p *dungeon.Plan) ([]routePoint, error) {
 	if err != nil {
 		return nil, err
 	}
-	bossOfLeg := routeBossByExportLeg(p)
+	bossOfLeg := routeBossByExportLeg(p, res.Rows.LegMap(p))
 	var out []routePoint
 	for si, s := range res.Rows.Steps {
 		switch s.Kind {
@@ -113,15 +113,15 @@ func routePoints(p *dungeon.Plan) ([]routePoint, error) {
 	return out, nil
 }
 
-// routeBossByExportLeg maps each export leg number (planexport.LegNumber: optional legs take none) to that plan leg's
+// routeBossByExportLeg maps each export leg number (the rows' LegMap: optional legs take none) to that plan leg's
 // boss, nil-free: a leg with no boss is absent.
-func routeBossByExportLeg(p *dungeon.Plan) map[int]*dungeon.Boss {
+func routeBossByExportLeg(p *dungeon.Plan, legs planexport.LegMap) map[int]*dungeon.Boss {
 	out := map[int]*dungeon.Boss{}
 	for li, l := range p.Legs {
 		if l.Boss == nil {
 			continue
 		}
-		if n, ok := planexport.LegNumber(p, li); ok {
+		if n, ok := planexport.LegNumber(legs, li); ok {
 			out[n] = l.Boss
 		}
 	}
