@@ -33,7 +33,8 @@
     "2026-10-24 audit (r35 slot6b): the leg-3 stop at step 475 was the magma pool on the low walkway, not a route length. The exported approach row dipped to z 70.94 at -6404.5 -3951.0 (the pool floor, 1.7 yd under the walkway) and the followers who went down burned 605-610 a second (lava, EnvironmentalDamage.Min/Max) with the lead safe on the rim 14-19 yd short. The `avoid` box below keeps the cutter and the run leader's vias out of it: the re-export walks the east rim at x -6378.7, z 72.69 (884 steps). plan-check is unchanged (the known leg-4 group 45 needs_walk is still the one failure); no plan point lies in the box.",
     "2026-10-25 fix3 (legs 3-5): the corridor camp the old leg-3 walk crossed is its own leg (hall_clear) pulled in 12 waves from stands 21-30 yd; the old halgan and zuluhed legs are split where one walk is more than 300 yd (halgan_approach/halgan_redbrand at the z72 -\u003e z216 climb, zuluhed_approach/zuluhed_floor at the z201 -\u003e z78 descent, zuluhed_the_whacked from the z72 floor to the z322 boss packs). Every such walk is a via list of server-path points every 45 yd: the exporter's 50-yd cut of a long hop interpolates across staircases and lands 4-6 yd above the floor (the refused hops 3:66/3:87/4:13).",
     "2026-10-25 r39s2 fix (DMR-FIX4-2026-10-25.md): the hallway camp leg (hall_clear) now runs BEFORE searistrasz, on the way up the corridor the old leg 2 walked through unpulled (r39s2 steps 226-243: 8 deaths, three tries on 228, four more at 236, 7-9 min walks back). The corridor walk back down is the new hall_return leg. halgan_approach: the rest stand of pull group 19 moved out of the magma sheet (avoid box 2), group 16 (62035 in the lava) and group 17 (the ledge 62036 with no dry stand) left out.",
-    "2026-10-25 fix5 (r39s2 slotA2, DMR-FIX5-2026-10-25.md): the hall_clear landing at -6190.1 -3962.4 215.8 is a plain direct step with a check_skip, no longer a gm_cross (7.4 yd across, 5.1 yd down, a 9.0 yd navmesh gap: no server path across it), so plan-export takes the plan cleanly and the rows are the move_direct the run leader walked live (step 200). zuluhed_approach's four packs on the z 290-303 ledge above the corridor's south end now have the ramp up to them as approach rows (group 19: four points, group 22: three): the plan had no route up, and r39s2 slotA2 stopped at step 614 there (three packs deferred as not reachable from this floor, then no walkable path toward the next point at -6283.5 -4392.5 302.7 from the lead at -6282.7 -4325.9 266.2). Pull stands -6330 -4380 290.4 (29.6, 25.8 and 26.9 yd from the three z 290 packs) and -6283.47 -4392.53 302.69 (22.4 yd from the z 303 golem)."
+    "2026-10-25 fix5 (r39s2 slotA2, DMR-FIX5-2026-10-25.md): the hall_clear landing at -6190.1 -3962.4 215.8 is a plain direct step with a check_skip, no longer a gm_cross (7.4 yd across, 5.1 yd down, a 9.0 yd navmesh gap: no server path across it), so plan-export takes the plan cleanly and the rows are the move_direct the run leader walked live (step 200). zuluhed_approach's four packs on the z 290-303 ledge above the corridor's south end now have the ramp up to them as approach rows (group 19: four points, group 22: three): the plan had no route up, and r39s2 slotA2 stopped at step 614 there (three packs deferred as not reachable from this floor, then no walkable path toward the next point at -6283.5 -4392.5 302.7 from the lead at -6282.7 -4325.9 266.2). Pull stands -6330 -4380 290.4 (29.6, 25.8 and 26.9 yd from the three z 290 packs) and -6283.47 -4392.53 302.69 (22.4 yd from the z 303 golem).",
+    "2026-11-02 (#243): 17 legs - six named bosses the plan only pulled as trash now have legs of their own (overlord_blackheart, elder_hollowblood, slagfist_destroyer, garlok_flamekeeper, web_master_torkon, cavernweb_broodmother); the route and the pulls do not change, and the searistrasz leg keeps its live-tuned groups 0-5 in the new elder_hollowblood leg."
   ],
   "avoid": [
     {
@@ -300,7 +301,7 @@
       }
     },
     {
-      "name": "hall_clear",
+      "name": "overlord_blackheart",
       "to": {"x": -6314.6665, "y": -4074.6665, "z": 215.089},
       "via": [
         {"x": -6191.7, "y": -3955.2, "z": 220.9},
@@ -428,18 +429,21 @@
           "approach": [
             {"x": -6267.239, "y": -4274.766, "z": 266.47}
           ]
-        },
-        {
-          "entries": [62070, 62051],
-          "positions": [
-            {"x": -6305.66, "y": -4316.22, "z": 266.168},
-            {"x": -6301.82, "y": -4317.78, "z": 266.168}
-          ],
-          "radius": 3.6,
-          "approach": [
-            {"x": -6276.68, "y": -4319.647, "z": 266.69}
-          ]
-        },
+        }
+      ],
+      "boss": {
+        "entry": 62070,
+        "position": {"x": -6305.66, "y": -4316.22, "z": 266.168},
+        "first": [62051]
+      },
+      "notes": [
+        "Turtle boss Overlord Blackheart (62070): [KB] names it a boss; was pull group 11 of hall_clear until 2026-11-02 (#243)."
+      ]
+    },
+    {
+      "name": "hall_clear",
+      "to": {"x": -6337.1, "y": -4335.56, "z": 278.164},
+      "pull_groups": [
         {
           "entries": [62045, 62036],
           "positions": [
@@ -458,7 +462,7 @@
       ]
     },
     {
-      "name": "searistrasz",
+      "name": "elder_hollowblood",
       "to": {"x": -6080, "y": -4437.3335, "z": 307.3916},
       "via": [
         {"x": -6293.33, "y": -4373.33, "z": 294.49}
@@ -504,13 +508,20 @@
             {"x": -6195.59, "y": -4342.3, "z": 266.168},
             {"x": -6192.59, "y": -4341.08, "z": 266.168}
           ]
-        },
-        {
-          "entries": [62038],
-          "positions": [
-            {"x": -6170.29, "y": -4353.98, "z": 266.168}
-          ]
-        },
+        }
+      ],
+      "boss": {
+        "entry": 62038,
+        "position": {"x": -6170.29, "y": -4353.98, "z": 266.168}
+      },
+      "notes": [
+        "Turtle boss Elder Hollowblood (62038): [KB] names it a boss; was pull group 7 of searistrasz until 2026-11-02 (#243)."
+      ]
+    },
+    {
+      "name": "searistrasz",
+      "to": {"x": -6062.3, "y": -4470.56, "z": 317.031},
+      "pull_groups": [
         {
           "entries": [62078],
           "positions": [
@@ -1289,7 +1300,7 @@
       ]
     },
     {
-      "name": "halgan_redbrand",
+      "name": "slagfist_destroyer",
       "to": {"x": -6537.17, "y": -3971.65, "z": 216.834},
       "via": [
         {"x": -6443.84, "y": -3978.38, "z": 73.14},
@@ -1380,13 +1391,20 @@
             {"x": -6549.33, "y": -4181.03, "z": 230.636},
             {"x": -6548.92, "y": -4174.77, "z": 229.953}
           ]
-        },
-        {
-          "entries": [62068],
-          "positions": [
-            {"x": -6539.19, "y": -4206.34, "z": 231.847}
-          ]
-        },
+        }
+      ],
+      "boss": {
+        "entry": 62068,
+        "position": {"x": -6539.19, "y": -4206.34, "z": 231.847}
+      },
+      "notes": [
+        "Turtle boss Slagfist Destroyer (62068): [KB] names it a boss; was pull group 11 of halgan_redbrand until 2026-11-02 (#243)."
+      ]
+    },
+    {
+      "name": "halgan_redbrand",
+      "to": {"x": -6526.02, "y": -4226.07, "z": 233.631},
+      "pull_groups": [
         {
           "entries": [62078],
           "positions": [
@@ -1432,7 +1450,7 @@
       }
     },
     {
-      "name": "zuluhed_approach",
+      "name": "garlok_flamekeeper",
       "to": {"x": -6338.03, "y": -4106.99, "z": 214.689},
       "via": [
         {"x": -6554.1, "y": -3983.33, "z": 217.48},
@@ -1471,13 +1489,20 @@
           "positions": [
             {"x": -6316.79, "y": -4067.38, "z": 214.147}
           ]
-        },
-        {
-          "entries": [62071],
-          "positions": [
-            {"x": -6293.57, "y": -4095.59, "z": 264.827}
-          ]
-        },
+        }
+      ],
+      "boss": {
+        "entry": 62071,
+        "position": {"x": -6293.57, "y": -4095.59, "z": 264.827}
+      },
+      "notes": [
+        "Turtle boss Garlok Flamekeeper (62071): [KB] names it a boss; was pull group 5 of zuluhed_approach until 2026-11-02 (#243)."
+      ]
+    },
+    {
+      "name": "zuluhed_approach",
+      "to": {"x": -6304.19, "y": -4102.47, "z": 265.481},
+      "pull_groups": [
         {
           "entries": [62039],
           "positions": [
@@ -1754,7 +1779,7 @@
       ]
     },
     {
-      "name": "zuluhed_floor",
+      "name": "cavernweb_broodmother",
       "to": {"x": -6233.2, "y": -3878.48, "z": 78.0545},
       "via": [
         {"x": -6279.45, "y": -4007.86, "z": 189.49},
@@ -1846,13 +1871,20 @@
             {"x": -6135, "y": -3990, "z": 72.6},
             {"x": -6119, "y": -3966, "z": 72.6}
           ]
-        },
-        {
-          "entries": [62066],
-          "positions": [
-            {"x": -6074.1, "y": -3977.02, "z": 72.5993}
-          ]
-        },
+        }
+      ],
+      "boss": {
+        "entry": 62066,
+        "position": {"x": -6074.1, "y": -3977.02, "z": 72.5993}
+      },
+      "notes": [
+        "Turtle boss Cavernweb Broodmother (62066): [KB] names it a boss; was pull group 12 of web_master_torkon until 2026-11-02 (#243)."
+      ]
+    },
+    {
+      "name": "web_master_torkon",
+      "to": {"x": -6135.89, "y": -3947.33, "z": 73.189},
+      "pull_groups": [
         {
           "entries": [62073],
           "positions": [
@@ -1906,15 +1938,21 @@
           "positions": [
             {"x": -6261.81, "y": -4058.92, "z": 73.189}
           ]
-        },
-        {
-          "entries": [62074, 62067, 62074],
-          "positions": [
-            {"x": -6290.79, "y": -4070.51, "z": 72.6001},
-            {"x": -6292.16, "y": -4069.22, "z": 72.5998},
-            {"x": -6293.82, "y": -4070.76, "z": 72.6001}
-          ]
-        },
+        }
+      ],
+      "boss": {
+        "entry": 62067,
+        "position": {"x": -6292.16, "y": -4069.22, "z": 72.5998},
+        "first": [62074]
+      },
+      "notes": [
+        "Turtle boss Web Master Torkon (62067): [KB] names it a boss; was pull group 21 of zuluhed_floor until 2026-11-02 (#243)."
+      ]
+    },
+    {
+      "name": "zuluhed_floor",
+      "to": {"x": -6301.94, "y": -4048.02, "z": 72.6004},
+      "pull_groups": [
         {
           "entries": [62048, 62046, 62035],
           "positions": [

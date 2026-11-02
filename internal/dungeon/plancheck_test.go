@@ -552,7 +552,6 @@ var planCheckKnownFailing = map[string]bool{
 	"blackwing_lair":        true,
 	"crescent_grove":        true,
 	"dire_maul_east":        true,
-	"dragonmaw_retreat":     true,
 	"gilneas_city":          true,
 	"hateforge_quarry":      true,
 	"karazhan_crypt":        true,
