@@ -37,7 +37,8 @@
     "Thekal (14599) is fought with his Zealots Lor'Khan 11347 and Zath 11348 and two Zulian Tigers 11361 (boss.first); Mar'li with the Witherbark Speaker 11388 and Venoxis with his four Razzashi Cobras 11373 (boss.first). They resurrect each other (boss_thekal.cpp), so the live run must kill the three within 7 s.",
     "WALK 18 (2026-11-01, leg 1 and leg 7; TortoiseBots-audit research/zg-steps93-96/SPEC.md, tests/raid-zg-walk15..18): the Venoxis guards (Mad Servant 15111) killed the raid at steps 93-97. The plan cleared packs C (49059-49061), the patroller E (49056) and A (49065-49067 + Blood Priest 49051) but not D (49053-49055, 49057, in leg 7 group 37 only): D stands 32 yd from the step-97 stand and wanders 5 yd, so every step-96/97 pull fought 7 Servants (3 A + 4 D) and their 6-9 Mad Voidwalkers (2 per dead Servant, Consuming Shadows 24614: 400 shadow a second to everything within 5 yd). Leg 1 now pulls the four packs one at a time from stands out of every other live pack's aggro, in the order E (the patroller first: its loop end is 17-20 yd from C), C, D, A. Each row is a stand_pull (flag 8192, pulled from the move before it): E stand -11937 -1818, C stand -11968 -1813, D stand -11898 -1838, A stand -11910 -1858; each stands within 28.5 yd of its own pack and 27.5 yd or more from every other live Servant pack (D-A 39.1, A-B 45.9), and A and D get radius 10 so their 5 yd wander keeps their units owned by the row, not hop units. D leaves leg 7 group 37 (a pack listed in two legs is pulled, or cleared, twice). 1104 steps become 1092 (leg 1 142 -\u003e 147, leg 7 290 -\u003e 273); the Venoxis boss row is now global step 188 (was 183), so the walks' --until \"step 184\" becomes \"step 189\". Review round 2 (2026-11-01): with D gone, the exporter re-cut leg 7's hop from group 36's pull row (-11900 -1622.39 -10.11) to the tiger pack (group 37) through the lake, 9.4 yd (flat) off the unowned elite Hooktooth Frenzy spawn 51444 (-11772.8 -1790.94), 9.7 off 49074 (-11795.1 -1754.62), 11.0 off 49730 (-11743.3 -1788.03) and 15.7 off 51443 (-11818.4 -1744.63); the tiger pack's approach now walks the pre-walk-18 export's dry route (the format caps approach at 4 points, so it carries the three corridor points -11943.2 -1823.2, -11920.8 -1821.07 and -11745.6 -1837.6 plus the stand -11605.213 -1770.5043; the exporter's own cut fills the old route's other points -11870.9 -1818.02, -11859.73 -1817.33, -11809.72 -1826.11, -11760.77 -1834.88, -11696.07 -1844.32, -11692.53 -1844.8, -11661.33 -1832 and -11627.63 -1795.07 as path rows), so no move row between the two pull rows passes within 15 yd of them (the nearest is 45.6 yd). E's row is radius 3 (was 1): the review's margin on the 61 yd patroller read; 3 yd reaches no other spawn of map 309 (the nearest other is C's 49061, 19.0 yd). Accepted risk: the Gurubashi Berserker patrols 49698 and 51947 (leg 8's) walk within 7.5-17 yd of the four stands; the live run's pass list includes \"a Berserker fought alone at a stand wakes no Servant pack\".",
     "WALK 19/20 (2026-11-01, legs 0 and 1; TortoiseBots-audit research/zg-step33-patrol and research/zg-leg1-w20): two plan fixes from walk 20, one open from walk 19. Leg 1's E stand -11937 -1818 had no line of sight to the E patroller 49056 (walk 20 test2 s2: all 300 notes read out of sight, closest 23.4 yd, inside the 28.5 yd shot; 600 s pause, raid stopped), so it moves to -11942 -1822 z 53.56: 19.5 yd from E's loop west end and 29.7 yd from C's nearest spawn 49059. Walk 20 m910q s4's D stand fight drew A 25 s later from 39-44 yd (the two camps are 28 yd apart and no stand separates them), so leg 1's D row (group 15) and A row (group 16) become one stand_pull row: entries 7 x 15111 + 11340, positions D's four + A's three + the Blood Priest 49051's spawn -11888.9 -1881.35, the D approach and stand. Its radius is 17, not the 10 of the two rows it replaces: the exported row carries the mean of its positions as its centre (-11882.36 -1866.66), and 10 yd there owns none of the eight spawns (the furthest is 49053 at 16.81 yd) while 17 yd owns exactly those eight (the nearest other spawn is 49063 at 22.35 yd). kill_first is 14750, 15146: the Mad Voidwalkers killed 13 of 20 and 9 of 9 at walk 20's D pull (SPEC 5C deferred the order to the killer data). OPEN, walk 19 step 33 (leg 0 group 7): the proposed point -12233.1 -1486.77 radius 6, which would own only F5's bat 49140 and not the static S5 rider 49141, fails plan-check: it is 63.5 yd from the row's stand -12180 -1452, past the run leader's 60 yd see range (RunLeaderSeeYd). The points that both own 49140 and stand within 60 yd of the stand are 3.5-4.2 yd from 49140 along the stand's bearing, where S5's bat 49139 (-12222.8 -1485.23) is 7.2-7.4 yd away - a 0.6 yd-wide window that leaves S5 owned at the row's radius edge - so the fix needs the stand moved (a walk decision) or the step reworked.",
-    "WALK 25 (2026-11-01, leg 2 only; TortoiseBots-audit research/zg-w25/MARLI-PULL.md, SPEC-1, SPEC-1-AMEND and SPEC-2): the leg's `to` -12286.3 -1677.55 stood on the spawn of the patrolling Razzashi Skitterer 49202 (0.1 yd), leader of pack 0 (creature_groups flags 14 with 49770-49775, 49234 and 49235: 9 units); walks 24-25 woke pack 0 on the step-202 move (no pull, no stand, no CC) and, with the fight drifting to x -12265..-12290, pack 1 (leader 49201 + the loose Venombrood 49246) as well: 20-21 elites, 6 of 7 wipes. Pack 0 is a plain pull from S0 -12251.5 -1685.5: its leader 49202 walks a loop that never comes within the stand-pull gate's 27.5 yd of S0, so a stand pull would wait 600 s for it and pause the run. S0 is 48.99 yd from pack 0's row centre -12300.49 -1685.68, inside the exporter's 50 yd approach-hop reach (plan-export --approach-hops cuts a longer hop into 'approach path' move rows: the old S0 -12245.333 -1685.3334 was 55.16 yd out, so the cut put a row 25.3 yd short of the centre, -12275.199 -1686.1334, 14.1 yd from the patroller 49202's own spawn and 17.1 yd from the static Venombrood 49771: the party walked into pack 0's aggro on a MOVE row, before the pull step that has no line yet). S0 clears every STATIC pack-0 unit (nearest: 49771 at 40.6 yd) and pack 1 (nearest: 49254 at 42.1 yd); the patroller's own spawn 49202 is 35.7 yd out, below the 40 yd rule and above the 30 yd exception (49202 belongs to the very pack this row pulls, so its spawn is inside the pack this plain pull wakes anyway). The run leader walks the gathered party to a firing stand about 23.5 yd from the nearest pack-0 unit (about -12268.5 -1684, 35 yd from pack 1). Pack 1 (all static) is a stand pull from S1 -12250 -1683 (40.3 yd from pack 1's 49254, 2.9 yd from S0); it was split off the old S0, 61.4 yd from pack 1's centre and past the run leader's 60 yd see range, and stays as committed (the new S0 is 57.5 yd out). The stand pull hands its out-of-shot static units to the same firing-stand walk and keeps the patrol clearance. The last via point became the `to`'s neighbour and the `to` is -12242.112 -1685.4194 (44.9 yd from pack 0, 46.3 from pack 1, 46.9 from the patroller's loop). Groups 2-5 unchanged. One leg-2 hop is still cut: group 1's stand -12250 -1683 to group 2's row centre -12335.7 -1645.88 is 93.4 yd, so the exporter inserts a row at -12295.88 -1663.1277, 17.0 yd from the static Venombrood 49775 and 17.3 from the patroller 49202's spawn. Harmless: the row is walked after group 1's pull row, packs 0 and 1 are dead by then, and the only live spawns within 25 yd are the level-1 Spiders 91526 (8.5 yd) and 49039 (19.1 yd). cc_priority 14532: the mages Polymorph Venombroods (beasts, not immune) before each spider pull; pack 1 alone wiped at 7 active Venombroods, pack 0 died clean at 5."
+    "WALK 25 (2026-11-01, leg 2 only; TortoiseBots-audit research/zg-w25/MARLI-PULL.md, SPEC-1, SPEC-1-AMEND and SPEC-2): the leg's `to` -12286.3 -1677.55 stood on the spawn of the patrolling Razzashi Skitterer 49202 (0.1 yd), leader of pack 0 (creature_groups flags 14 with 49770-49775, 49234 and 49235: 9 units); walks 24-25 woke pack 0 on the step-202 move (no pull, no stand, no CC) and, with the fight drifting to x -12265..-12290, pack 1 (leader 49201 + the loose Venombrood 49246) as well: 20-21 elites, 6 of 7 wipes. Pack 0 is a plain pull from S0 -12251.5 -1685.5: its leader 49202 walks a loop that never comes within the stand-pull gate's 27.5 yd of S0, so a stand pull would wait 600 s for it and pause the run. S0 is 48.99 yd from pack 0's row centre -12300.49 -1685.68, inside the exporter's 50 yd approach-hop reach (plan-export --approach-hops cuts a longer hop into 'approach path' move rows: the old S0 -12245.333 -1685.3334 was 55.16 yd out, so the cut put a row 25.3 yd short of the centre, -12275.199 -1686.1334, 14.1 yd from the patroller 49202's own spawn and 17.1 yd from the static Venombrood 49771: the party walked into pack 0's aggro on a MOVE row, before the pull step that has no line yet). S0 clears every STATIC pack-0 unit (nearest: 49771 at 40.6 yd) and pack 1 (nearest: 49254 at 42.1 yd); the patroller's own spawn 49202 is 35.7 yd out, below the 40 yd rule and above the 30 yd exception (49202 belongs to the very pack this row pulls, so its spawn is inside the pack this plain pull wakes anyway). The run leader walks the gathered party to a firing stand about 23.5 yd from the nearest pack-0 unit (about -12268.5 -1684, 35 yd from pack 1). Pack 1 (all static) is a stand pull from S1 -12250 -1683 (40.3 yd from pack 1's 49254, 2.9 yd from S0); it was split off the old S0, 61.4 yd from pack 1's centre and past the run leader's 60 yd see range, and stays as committed (the new S0 is 57.5 yd out). The stand pull hands its out-of-shot static units to the same firing-stand walk and keeps the patrol clearance. The last via point became the `to`'s neighbour and the `to` is -12242.112 -1685.4194 (44.9 yd from pack 0, 46.3 from pack 1, 46.9 from the patroller's loop). Groups 2-5 unchanged. One leg-2 hop is still cut: group 1's stand -12250 -1683 to group 2's row centre -12335.7 -1645.88 is 93.4 yd, so the exporter inserts a row at -12295.88 -1663.1277, 17.0 yd from the static Venombrood 49775 and 17.3 from the patroller 49202's spawn. Harmless: the row is walked after group 1's pull row, packs 0 and 1 are dead by then, and the only live spawns within 25 yd are the level-1 Spiders 91526 (8.5 yd) and 49039 (19.1 yd). cc_priority 14532: the mages Polymorph Venombroods (beasts, not immune) before each spider pull; pack 1 alone wiped at 7 active Venombroods, pack 0 died clean at 5.",
+    "WALK 25 (2026-11-01, leg 4; TortoiseBots-audit tests/raid-zg-walk25/summary-autofix.md \"Arlokk\"): the Arlokk terrace pulls the upper level first now: 11, 15, 14, 17 (all z 71.3), then 13, 16 (z 60.4), then 12 (z 49.5). Walk 25 pulled 12 second and its step-313 move from group 11's approach to group 12's approach (-11512.9 -1623.5 z 49.6) crossed group 15's spawn ring 13.3 yd from 51354, waking groups 12, 14, 15 and 16 with no pull line: 3 of 4 attempts wiped, 11-20 elites at once. Group 15 is pulled from group 11's approach -11525.374 -1649.8916 71.32541 (21.9 yd from 51354, inside the 23.5 yd shot; 22.7 yd 3D from group 12's 51366 and 30.2 from 51594). The moved stands, each on its pack's own level and at least 22 yd from every pack pulled later: 14 at -11515 -1608 71.33 (22.7 yd from its nearest, 27.2/24.2/22.6/36.9 from 17/13/16/12), 17 at -11516 -1596 71.33 (16.1 from 51588; 31.3/26.1/47.1 from 13/16/12), 13 at -11507 -1612 60.43 (12.7 from 49343; 27.6/29.8 from 16/12), 16 at -11540 -1625 60.43 (13.0 from 49340; 25.1 from 12); 12 keeps -11512.871 -1623.5192 49.625404. Group 13's radius grows 12 to 16 so its row owns its linked Blood Drinkers 51594/51595 (leader 49343; 15.3 and 14.4 yd from the row centre, walk 25's 12 yd owned the four Panthers only); group 14 keeps 51597/51598 and is pulled before 13. plans_test.go TestZulGurubArlokkTerraceRouteClearOfLaterPacks walks the exported leg-4 rows: no segment of a consecutive move pair passes within 20 yd of a formation a later pull row owns."
   ],
   "legs": [
     {
@@ -856,33 +857,16 @@
           ]
         },
         {
-          "entries": [11365, 11365, 11365, 11365, 11339, 11339],
+          "entries": [11339, 11339, 11339, 11339],
           "positions": [
-            {"x": -11517.4, "y": -1637.71, "z": 49.63},
-            {"x": -11515.6, "y": -1638.36, "z": 49.63},
-            {"x": -11517.3, "y": -1638.4, "z": 49.63},
-            {"x": -11521.2, "y": -1637.47, "z": 49.61},
-            {"x": -11511.8, "y": -1643.48, "z": 49.63},
-            {"x": -11526.9, "y": -1643.49, "z": 49.53}
+            {"x": -11518.3, "y": -1613.51, "z": 71.33},
+            {"x": -11518.3, "y": -1629.19, "z": 71.33},
+            {"x": -11511.3, "y": -1613.84, "z": 71.33},
+            {"x": -11511.4, "y": -1628.43, "z": 71.36}
           ],
-          "radius": 9.8,
+          "radius": 9.2,
           "approach": [
-            {"x": -11512.871, "y": -1623.5192, "z": 49.625404}
-          ]
-        },
-        {
-          "entries": [11353, 11353, 11365, 11365, 11365, 11365],
-          "positions": [
-            {"x": -11498.3, "y": -1640.75, "z": 60.43},
-            {"x": -11498.4, "y": -1641.72, "z": 60.43},
-            {"x": -11495.2, "y": -1621.51, "z": 60.43},
-            {"x": -11496, "y": -1619.55, "z": 60.43},
-            {"x": -11495.1, "y": -1618.88, "z": 60.43},
-            {"x": -11495.2, "y": -1616.76, "z": 60.43}
-          ],
-          "radius": 12,
-          "approach": [
-            {"x": -11505.0625, "y": -1634.1589, "z": 60.425407}
+            {"x": -11525.374, "y": -1649.8916, "z": 71.32541}
           ]
         },
         {
@@ -897,20 +881,35 @@
           ],
           "radius": 8.8,
           "approach": [
-            {"x": -11511.586, "y": -1603.7528, "z": 71.32541}
+            {"x": -11515, "y": -1608, "z": 71.33}
           ]
         },
         {
-          "entries": [11339, 11339, 11339, 11339],
+          "entries": [11365, 11365, 11365, 11365],
           "positions": [
-            {"x": -11518.3, "y": -1613.51, "z": 71.33},
-            {"x": -11518.3, "y": -1629.19, "z": 71.33},
-            {"x": -11511.3, "y": -1613.84, "z": 71.33},
-            {"x": -11511.4, "y": -1628.43, "z": 71.36}
+            {"x": -11525.1, "y": -1582.7, "z": 71.34},
+            {"x": -11511.2, "y": -1580.07, "z": 71.34},
+            {"x": -11523.6, "y": -1573.28, "z": 71.34},
+            {"x": -11511.8, "y": -1573.41, "z": 71.34}
           ],
-          "radius": 9.2,
+          "radius": 9.4,
           "approach": [
-            {"x": -11531.003, "y": -1616.5972, "z": 71.32541}
+            {"x": -11516, "y": -1596, "z": 71.33}
+          ]
+        },
+        {
+          "entries": [11353, 11353, 11365, 11365, 11365, 11365],
+          "positions": [
+            {"x": -11498.3, "y": -1640.75, "z": 60.43},
+            {"x": -11498.4, "y": -1641.72, "z": 60.43},
+            {"x": -11495.2, "y": -1621.51, "z": 60.43},
+            {"x": -11496, "y": -1619.55, "z": 60.43},
+            {"x": -11495.1, "y": -1618.88, "z": 60.43},
+            {"x": -11495.2, "y": -1616.76, "z": 60.43}
+          ],
+          "radius": 16,
+          "approach": [
+            {"x": -11507, "y": -1612, "z": 60.43}
           ]
         },
         {
@@ -924,20 +923,22 @@
           ],
           "radius": 5.6,
           "approach": [
-            {"x": -11534.576, "y": -1628.2699, "z": 60.425407}
+            {"x": -11540, "y": -1625, "z": 60.43}
           ]
         },
         {
-          "entries": [11365, 11365, 11365, 11365],
+          "entries": [11365, 11365, 11365, 11365, 11339, 11339],
           "positions": [
-            {"x": -11525.1, "y": -1582.7, "z": 71.34},
-            {"x": -11511.2, "y": -1580.07, "z": 71.34},
-            {"x": -11523.6, "y": -1573.28, "z": 71.34},
-            {"x": -11511.8, "y": -1573.41, "z": 71.34}
+            {"x": -11517.4, "y": -1637.71, "z": 49.63},
+            {"x": -11515.6, "y": -1638.36, "z": 49.63},
+            {"x": -11517.3, "y": -1638.4, "z": 49.63},
+            {"x": -11521.2, "y": -1637.47, "z": 49.61},
+            {"x": -11511.8, "y": -1643.48, "z": 49.63},
+            {"x": -11526.9, "y": -1643.49, "z": 49.53}
           ],
-          "radius": 9.4,
+          "radius": 9.8,
           "approach": [
-            {"x": -11522.74, "y": -1596.4045, "z": 71.33613}
+            {"x": -11512.871, "y": -1623.5192, "z": 49.625404}
           ]
         },
         {
