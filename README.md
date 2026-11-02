@@ -2158,9 +2158,18 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   required: the placed start step and the corridor are checked against the deployed rows, so a plan JSON whose export
   numbers the steps differently cannot fail the walk after a placement has cost a hire. `--from "leg L"` is staged: the
   walk starts at the highest move row before the leg's first pull that has no later creature row within 50 yd of it
-  (Zul'Gurub leg 3: step 231 of the deployed rows, not the leg's first row 214, which stands inside Marli's room);
-  `--from "step N"` is taken as given and must be a positioned move row (a plain `--from`, without `--place` or
-  `--until boss-done`, still goes to the server unresolved). `validate` refuses a plan whose legs' skip lists hold more
+  (Zul'Gurub leg 3: step 231 of the deployed rows, not the leg's first row 214, which stands inside Marli's room).
+  The first leg needs no placement: `--place --from leg <first leg>` starts at step 1 from the door exactly as a
+  non-placed run does, and the notes carry `place: leg X is the first leg; starting from the door`. When the leg
+  holds no such row, the walk places at the LAST quiet move row before that point, searching backward through the
+  earlier legs, and the notes carry `place: leg X has no quiet row; placing at step N (leg Y)`; only when no quiet
+  row stands anywhere before the first pull is the placement refused (`leg X has no quiet move row before its first
+  pull: pass --from "step N"`, exit 2). The fallback is refused too when a boss or hold row (or the move into an
+  event) lies between it and the leg's first row: the raid would re-fight it on its way in. A fallback start
+  stands before the leg, so `boss` and `boss-done` untils resolve from the leg's first row, never from the
+  fallback start. `--from "step N"` is taken as given and must be a positioned move row (a plain `--from`,
+  without `--place` or `--until boss-done`, still goes to the server unresolved). `validate` refuses a plan
+  whose legs' skip lists hold more
   than the toolkit's 16 entries or whose longest toolkit line would overflow the toolkit's 200-char cap, both before any
   GM command. The walk then clears the corridor of the legs it skips — every pull row before the start whose circle
   comes within 45 yd of the route to the `until` stop, despawned with `.tt clearto ... all=1` after a pre-read of the
@@ -2264,8 +2273,10 @@ the run, waits for the instance to reset (5m at most: nothing with a party targe
 minute at 100 % or gone, held 20 s), then revives: GM to the revive point (step 1's, or with `--place` the start point the raid was put at), a quiet check
 (no living hostile within 45 yd, no moving hostile within 80 yd, no patrol path within 45 yd, rechecked every 5 s for
 120 s; a hostile that is **idle** — not in combat, no target, not moving — and farther out than the placement's own
-25 yd landing reach does not block it: it stands at its own spawn, where a run from the door has it alive at this step
-too (walk 25)) and the plan's entrance once, and, when the point is still not quiet, a re-read every 10 s until
+25 yd landing reach does not block it once two reads 5 s apart saw it idle at the same spot and it stands at its
+proven home — within 3 yd of a plan spawn of its entry (by spawn guid when the plan names one), never for a patrol
+group's unit, and never without plan spawn data (then the 45 yd rule holds): stillness alone is no proof of home
+(turtle-agent#360). A run from the door has it alive at this step too (walk 25)) and the plan's entrance once, and,
 `deadline - --wipe-rest - 30 s`, so the rest and the resume that follow still fit before the recovery's deadline (a
 revive outside a recovery, the wipe's own ending, has no deadline and does not wait). Then `.summon` then `.revive`
 every hire. A revive that never finds a quiet point ends the walk with exit 19 (`not revived: <why>` as before),
@@ -2324,15 +2335,17 @@ hand-over needs a running status.
 When the run leader pauses with `boss <N> not found` on that boss's own row (walk 24 test2 r2: Thekal's phase 1 ends
 in a fake death and TB finds no corpse of 14599), the walk reads the frames for the kill: a boss UNIT at 0 % (the
 boss's own entry or a phase entry that is the boss reborn, judged per guid — never an add that exists several at
-once, such as Thekal's two Zulian Guardians 15068, nor a `first` add), or a corpse the toolkit sees within 40 yd of
-the boss row (`.tt q units 40 <x> <y> <z> all dead e=<entry>`, for a boss that died out of the party's sight and so
-left no frame row). A stale low-hp sighting alone is NEVER a kill: a 0 % frame row counts only when it was seen at
-or after the current attempt began (the frames' first sighting of a boss unit of that family engaged, judged like
-the tracker's own latch: below 100 % or holding a party target, cleared by a wipe recovery) and no boss unit of the
-family was seen alive after it (the frames are never pruned, so an earlier attempt's corpse stays in them after a
-reset or a respawn), no boss unit may be seen alive in the last 15 s, and a hire must be alive. With that evidence
-the walk sends one `.bot run skip` (retried once if the send fails); the evidence is re-read on every tick while the
-pause lasts, and without it the pause path is unchanged.
+once, such as Thekal's two Zulian Guardians 15068, nor a `first` add), or a corpse the toolkit proves within 40 yd
+of the boss row (`.tt q units 40 <x> <y> <z> all dead e=<entry>`, for a boss that died out of the party's sight and
+so left no frame row): the corpse's guid must equal a boss guid the frames showed alive in this attempt, and a
+second toolkit read at least 15 s later must still show it dead with no alive frame for that guid in between (a
+fake death raised again voids the wait; a wipe recovery clears it). A stale low-hp sighting alone is NEVER a kill:
+a 0 % frame row counts only when it was seen at or after the current attempt began (the frames' first sighting of
+a boss unit of that family engaged, judged like the tracker's own latch: below 100 % or holding a party target,
+cleared by a wipe recovery) and no boss unit of the family was seen alive after it (the frames are never pruned,
+so an earlier attempt's corpse stays in them after a reset or a respawn), no boss unit may be seen alive in the
+last 15 s, and a hire must be alive. With that evidence the walk sends one `.bot run skip` (retried once if the
+send fails); the evidence is re-read on every tick while the pause lasts, and without it the pause path is unchanged.
 
 Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
 `.bot gear raid <commander> tier <N>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,
@@ -2351,8 +2364,13 @@ The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused
 | `commanders-<NNNN>-<reason>.json` | GET `/api/v1/commanders` (`reason`: walk, pause, wipe, boss, hold) |
 | `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key (a `live` row, a fight still running, is left for the next read: its finished fight comes back under the same id) |
 | `frames.jsonl` | one `bot_view` frame every 10 s, and every 2 s while a party member is in combat (positions, hp, dead, state, and each bot's `target`, `spell`, `action` and `result`; hostiles; every line carries the walk's `tier`) |
+| `pulljoiners.json` | one record per pull attempt (`step`, `at`, `count`, `guids`): the engaged hostiles outside the pulled pack within 10 s of the `pulling` line; `raid-walk report` shows each attempt's record in the joined column of the fight whose window holds its `at` |
 | `slot-setup.txt`, `teardown.json` | what slot setup printed, and teardown's report |
 | `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, `wipe_resumes`, boss, `boss_kill` (the last boss the walk engaged: `entry`, `step` (the boss's own row), `engaged`, `killed`, `skipped` (the walk's own `.bot run skip`, also kill evidence), `phase` (1 + the entry changes the frames saw on the boss's guid), `phase_entry` (the entry that guid read last) and `evidence` (the run leader's `boss down` note, the run's end right after the boss step when TB overwrites that note — `run ended right after the boss step; engaged` or `; frames`, the walk's own skip evidence, or the reason the kill does not hold); `boss_kills` lists one such record per boss step the run's statuses showed (`summary.txt` carries one `boss kill: ...` line for the single field, plus a `boss steps:` list when more than one boss step was seen), pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison`; `place` (a `--place` walk only: `start_step`, `leg`, `point`, `until_step`, `instance`, `circles[]` with their removed counts, `not_cleared[]`, `quiet`, `placed`, `hires`, `summoned[]`); `until_effective` (a `--place` walk whose route guard shortened the `until`: the clause the run actually walked, `until` staying the one asked for); `revive_refusal` (a revive the walk refused: `wipe_step`, `start_step` (the step of the revive point the walk used), `tried_steps`, `entrance_tried` (the entrance fallback's go went out), `waited_s`, `blockers[]` with `entry`, `name`, `dist`, `idle`, `in_combat` and `all_idle`; `summary.txt` carries one `revive refusal: ...` line for it) |
+
+The summary's `teardown` field carries `failed`, `hires_left` and `reason` (the first failing teardown step with its
+detail, e.g. `gone: still in view after 10 s: ...`; a `Character '<name>' not found` remove counts as already gone,
+not a failure).
 
 Exit codes: 0 the run ended by its `until` (or the hold); 18 a phase failed or was refused (setup, login, hire, bind,
 enter, start, the server has no `until`, a stall, the ceiling, an interrupt, `lease lost`); 19 the walk ran and was
@@ -2388,13 +2406,16 @@ turtle-agent raid-walk report ~/walks/zg10 --spell 24024 --clock-offset 1h --out
 One row per fight: step, fight id, kind and boss, start, duration, outcome, the engaged units by name and count, the deaths (name,
 seconds into the fight), **contact before pull** (`YES` when a status line of the step says the tank engages a unit "on arrival"
 before any `pulling` line of the step; `no` when a `pulling` line came first or neither did), **joined mid-fight** (the `a new unit
-joined` status lines inside the fight, with the seconds into the fight, and the `N joiners expected` text), and the **stand wait**
+joined` status lines inside the fight, with the seconds into the fight, the `N joiners expected` text, and — while the walk watches —
+the frames' own count `frames: joiners N (guids...)` of engaged hostiles outside the pulled pack within 10 s of the pull, from the
+pull's structured record `pulljoiners.json`, placed by its pull time on the fight of the step whose window holds it; a record
+outside every window is left off the table and counted in a `joiners unmatched` note), and the **stand wait**
 (from the first stand-pull status line of the pull to its `pulling` line, or to the fight's start). Below the table: the stand-pull
 status lines of each pull merged by text with digits and guids as `#` (first and last time, span, lines and runs; the lines of a
 step with no fight go last), the pauses, resumes (with how long the pause lasted), stops and the end of the run, and the watched
 casts. `report.json` (format `tb-raid-walk-report` v1) carries the same rows: `pulls[]` (`engaged`, `deaths`,
-`contact_before_pull`, `contact_text`, `neighbour_joins`, `stand_pull`, `stand_wait_s`, `casts`), `control[]`, `casts[]`,
-`stand_pull_unattached[]` and `totals`.
+`contact_before_pull`, `contact_text`, `neighbour_joins`, `joiners_seen`, `joiner_guids`, `stand_pull`, `stand_wait_s`, `casts`), `control[]`, `casts[]`,
+`stand_pull_unattached[]`, `totals` and `notes[]` (including the `joiners unmatched` count).
 
 ### Fault injection
 

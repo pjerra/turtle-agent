@@ -462,21 +462,47 @@ func TestRaidWalkReviveLandedCheck(t *testing.T) {
 		}
 	}
 	// A far go (from map 0, walk 23): ZUnknown stays set for good after SMSG_NEW_WORLD, so it no longer blocks the
-	// landing; every other rule still does.
+	// landing; the session's worldport ack (TeleportSeq > beforeSeq) is the landing itself, since the session
+	// publishes the map no earlier than that write. Every other rule still holds.
+	farSeq := func(x, y, z float32) session.StatusInfo {
+		st := at(x, y, z)
+		st.TeleportSeq = 5
+		return st
+	}
+	farZUnknown, farFalling := farSeq(100, 200, 50), farSeq(100, 200, 50)
+	farZUnknown.ZUnknown, farFalling.Falling = true, true
+	otherFarMap := farSeq(100, 200, 50)
+	otherFarMap.Map = 1
 	for _, c := range []struct {
 		name string
 		st   session.StatusInfo
 		want bool
 	}{
-		{"destination reported with z unknown", zUnknown, true},
-		{"settled on the point", at(100, 200, 50), true},
-		{"still falling", falling, false},
-		{"wrong map", otherMap, false},
-		{"x/y 11 yd off", at(111, 200, 50), false},
-		{"z 40 yd off", at(100, 200, 90), false},
+		{"destination reported with z unknown", farZUnknown, true},
+		{"settled on the point", farSeq(100, 200, 50), true},
+		{"still falling", farFalling, false},
+		{"wrong map", otherFarMap, false},
+		{"x/y 11 yd off", farSeq(111, 200, 50), false},
+		{"z 40 yd off", farSeq(100, 200, 90), false},
 	} {
-		if got := reviveLanded(p, 309, 0, c.st, 0, false); got != c.want {
-			t.Fatalf("%s: reviveLanded = %v, want %v", c.name, got, c.want)
+		if got := reviveLanded(p, 309, 0, c.st, 4, true); got != c.want {
+			t.Fatalf("far go: %s: reviveLanded = %v, want %v", c.name, got, c.want)
+		}
+	}
+	// A far go publishes the new map and the sequence bump in one update after the worldport ack (Codex HIGH): a
+	// map change with an equal sequence is not a landing, and an unread sequence lands nothing either.
+	for _, c := range []struct {
+		name      string
+		beforeSeq uint64
+		haveSeq   bool
+		want      bool
+	}{
+		{"map changed, seq equal", 5, true, false},
+		{"map changed, seq advanced", 4, true, true},
+		{"map changed, beforeSeq unread", 0, false, false},
+	} {
+		if got := reviveLanded(p, 309, 0, farSeq(100, 200, 50), c.beforeSeq, c.haveSeq); got != c.want {
+			t.Fatalf("far go over a map change: %s: reviveLanded = %v, want %v", c.name, got, c.want)
 		}
 	}
 	// A NEAR go over a navmesh hole (walk 24 C1): the seq advanced past beforeSeq is the landing; an equal seq is
