@@ -680,6 +680,199 @@ func readMovementPaths(path string) (map[uint64][]dungeon.Point, error) {
 	return out, r.err
 }
 
+// arlokkTerraceRowYd is how near a walk's straight segment may pass a pack that a later pull row owns: the mobs detect at
+// 20 yd (the map-309 spawns' detection_range), so a sample inside that band wakes the pack before its pull row.
+const arlokkTerraceRowYd = 20
+
+// TestZulGurubArlokkTerraceRouteClearOfLaterPacks: walk 25's Arlokk leg walked the raid onto the three-level terrace in the
+// plan's group order 11, 12, 13, ... and the move from group 11's approach to group 12's crossed the spawn ring of group 15's
+// four Shadow Hunters 11339 at z 71.4 (13.3 yd from 51354), which woke groups 12, 14, 15 and 16 at once: 3 of 4 attempts
+// wiped, the MT idle under 11 elites (TortoiseBots-audit tests/raid-zg-walk25/summary-autofix.md "Arlokk"). The leg pulls
+// the upper level first now (11 -> 15 -> 14 -> 17) and each stand sits on its pack's own level, clear of every pack pulled
+// later. The test walks the exported leg-4 rows from group 11's approach through the last terrace pull: for every pair of
+// consecutive move rows, every spawn of a formation that a later pull row owns stays arlokkTerraceRowYd out of the straight
+// segment sampled every 2 yd. "Later" leaves out the pack the walk is approaching: its own pull row comes after the move, and
+// its firing stand is 12-25 yd from it by design (the group-15 stand, D2, is 21.9 yd from 51354). Group 13's row must own its
+// linked Blood Drinkers 51594/51595 (leader 49343) as well: walk 25's radius 12 stopped 14.4-15.3 yd short of them, so the
+// pack's four Panthers came alone and the two Drinkers joined group 14's fight.
+func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
+	p, err := dungeon.Load(filepath.Join(plansDirT, "zul_gurub.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, err := readCreatures(filepath.Join("testdata", "map309", "creatures.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// formations: the spawns of each pack, which the export and the server key on group_leader (a pack is aggro-together).
+	formations := map[uint64][]creature{}
+	var leaders []uint64
+	for _, c := range cs {
+		lead := c.GroupLeader
+		if lead == 0 {
+			lead = c.GUID
+		}
+		if _, ok := formations[lead]; !ok {
+			leaders = append(leaders, lead)
+		}
+		formations[lead] = append(formations[lead], c)
+	}
+	slices.Sort(leaders)
+	byGUID := map[uint64]creature{}
+	for _, c := range cs {
+		byGUID[c.GUID] = c
+	}
+	res, err := planexport.Build(p, planexport.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var leg4 []planexport.StepRow
+	for _, s := range res.Rows.Steps {
+		if s.Leg == 4 {
+			leg4 = append(leg4, s)
+		}
+	}
+	// The terrace is plan leg 4's pull groups 11-17 (the array indices the plan and the export's comments name): from the
+	// first group's approach row through the last group's pull row.
+	first, last := -1, -1
+	for i, s := range leg4 {
+		if strings.HasPrefix(s.Comment, "pull group 11 approach") {
+			first = i
+		}
+		if s.Comment == "pull group 17" {
+			last = i
+		}
+	}
+	if first < 0 || last <= first {
+		t.Fatalf("no terrace rows in the exported leg 4 (group 11 approach at %d, group 17 pull at %d)", first, last)
+	}
+	isMove := func(k string) bool { return k == planexport.KindMove || k == planexport.KindMoveDirect }
+	var moves, pulls []planexport.StepRow
+	for _, s := range leg4 {
+		switch {
+		case s.Seq >= leg4[first].Seq && s.Seq <= leg4[last].Seq && isMove(s.Kind):
+			moves = append(moves, s)
+		case s.Kind == planexport.KindPull:
+			pulls = append(pulls, s)
+		}
+	}
+	if len(moves) < 6 {
+		t.Fatalf("%d move rows in the terrace, want the seven groups' approaches", len(moves))
+	}
+	// D4: the row that owns group 13's pack owns its linked Blood Drinkers too (51594/51595, leader 49343 = the pack's
+	// first Panther). Walk 25's radius 12 owned the four Panthers only.
+	row13 := -1
+	for i, s := range pulls {
+		if rowOwns(s, formations[49343]) {
+			row13 = i
+			break
+		}
+	}
+	if row13 < 0 {
+		t.Fatal("no exported pull row owns the group-13 pack (its 49343 formation)")
+	}
+	group := 0
+	if _, err := fmt.Sscanf(pulls[row13].Comment, "pull group %d", &group); err != nil || group < 0 || group >= len(p.Legs[4].PullGroups) {
+		t.Fatalf("the owning row's comment %q names no leg-4 group", pulls[row13].Comment)
+	}
+	pg := p.Legs[4].PullGroups[group]
+	for _, guid := range []uint64{51594, 51595} {
+		c, ok := byGUID[guid]
+		if !ok {
+			t.Fatalf("no spawn %d in the export", guid)
+		}
+		listed := false
+		for _, q := range pg.Positions {
+			if math.Hypot(float64(q.X-c.Pos.X), float64(q.Y-c.Pos.Y)) < 1 {
+				listed = true
+			}
+		}
+		if !listed {
+			t.Errorf("leg 4 pull_groups[%d] does not list the Blood Drinker %d's spawn (%.1f %.1f %.1f)", group, guid, c.Pos.X, c.Pos.Y, c.Pos.Z)
+		}
+		if !rowOwnsOne(pulls[row13], c) {
+			t.Errorf("the pull row %.0f %.0f %.0f (radius %.1f, entries %v) does not own the Blood Drinker %d (%s, entry %d) at %.1f %.1f %.1f: %.1f yd out",
+				pulls[row13].X, pulls[row13].Y, pulls[row13].Z, pulls[row13].Radius, pulls[row13].Entries, guid, c.Name, c.Entry, c.Pos.X, c.Pos.Y, c.Pos.Z, rowDist(pulls[row13], c))
+		}
+	}
+	// Every pair of consecutive move rows: the packs a later pull row owns stay arlokkTerraceRowYd out of the straight walk.
+	for i := 0; i+1 < len(moves); i++ {
+		a, b := moves[i], moves[i+1]
+		next := -1 // the pull row the pair walks to: the first one after the second move row
+		for j, s := range pulls {
+			if s.Seq > b.Seq {
+				next = j
+				break
+			}
+		}
+		if next < 0 {
+			continue
+		}
+		samples := samplesAlong(rowPoint(a), rowPoint(b), 2)
+		for _, later := range pulls[next+1:] {
+			for _, lead := range leaders {
+				fam := formations[lead]
+				if !rowOwns(later, fam) {
+					continue
+				}
+				for _, c := range fam {
+					worst, at := math.Inf(1), dungeon.Point{}
+					for _, s := range samples {
+						if d := dist(s, c.Pos); d < worst {
+							worst, at = d, s
+						}
+					}
+					if worst < arlokkTerraceRowYd {
+						t.Errorf("leg 4 rows %d (%s %.1f %.1f) -> %d (%s %.1f %.1f) passes %.1f yd from %s %d (entry %d) at %.1f %.1f %.1f, owned by row %d (%s): %.0f yd wanted",
+							a.Seq, a.Comment, a.X, a.Y, b.Seq, b.Comment, b.X, b.Y, worst, c.Name, c.GUID, c.Entry, at.X, at.Y, at.Z, later.Seq, later.Comment, float64(arlokkTerraceRowYd))
+					}
+				}
+			}
+		}
+	}
+}
+
+// rowOwnsOne reports whether the exported pull row owns the spawn: its entry is one of the row's entries and it stands
+// within the row's radius of the row's point (the run leader's rule for a pull row's mobs).
+func rowOwnsOne(row planexport.StepRow, c creature) bool {
+	return slices.Contains(row.Entries, c.Entry) && rowDist(row, c) <= float64(row.Radius)
+}
+
+// rowOwns reports whether the exported pull row owns any spawn of the formation (see rowOwnsOne).
+func rowOwns(row planexport.StepRow, fam []creature) bool {
+	for _, c := range fam {
+		if rowOwnsOne(row, c) {
+			return true
+		}
+	}
+	return false
+}
+
+// rowPoint is the point of an exported row.
+func rowPoint(row planexport.StepRow) dungeon.Point {
+	return dungeon.Point{X: row.X, Y: row.Y, Z: row.Z}
+}
+
+// rowDist is the 3-D distance from the exported row's point to the spawn.
+func rowDist(row planexport.StepRow, c creature) float64 {
+	return dist(rowPoint(row), c.Pos)
+}
+
+// samplesAlong returns points of the straight segment a-b every step yd, both ends included (a zero-length segment is its
+// one point).
+func samplesAlong(a, b dungeon.Point, step float64) []dungeon.Point {
+	n := int(math.Ceil(dist(a, b) / step))
+	if n < 1 {
+		n = 1
+	}
+	out := make([]dungeon.Point, 0, n+1)
+	for k := 0; k <= n; k++ {
+		f := float32(float64(k) / float64(n))
+		out = append(out, dungeon.Point{X: a.X + (b.X-a.X)*f, Y: a.Y + (b.Y-a.Y)*f, Z: a.Z + (b.Z-a.Z)*f})
+	}
+	return out
+}
+
 // marliLaterPackYd is how far the step 203 stand and the routes to and from it keep from every pack pulled later:
 // 20 yd is the detection of these spiders (Creature::GetAttackDistance: detection_range 20 minus the level
 // difference; packs 0-1 are level 56-61 against a level-60 raid). The walk-26b wake happened at 6.9-9.6 yd from
@@ -995,18 +1188,6 @@ func marliFiringStands(pl *navmesh.Planner, mapID uint32, stand dungeon.Point, p
 }
 
 // samplesAlong returns the points of the straight segment a-b every step yd, both ends included.
-func samplesAlong(a, b dungeon.Point, step float64) []dungeon.Point {
-	n := int(math.Ceil(dist(a, b) / step))
-	if n < 1 {
-		n = 1
-	}
-	out := make([]dungeon.Point, 0, n+1)
-	for k := 0; k <= n; k++ {
-		f := float32(float64(k) / float64(n))
-		out = append(out, dungeon.Point{X: a.X + (b.X-a.X)*f, Y: a.Y + (b.Y-a.Y)*f, Z: a.Z + (b.Z-a.Z)*f})
-	}
-	return out
-}
 
 // marliPolyline plans the walk a->b on the server's navmesh and samples it every yard; false without a complete path.
 func marliPolyline(pl *navmesh.Planner, mapID uint32, a, b dungeon.Point) ([]dungeon.Point, bool) {
@@ -1035,8 +1216,3 @@ func marliPolyline(pl *navmesh.Planner, mapID uint32, a, b dungeon.Point) ([]dun
 }
 
 // rowPoint and rowDist are an exported row's point and its 3-D distance to a spawn.
-func rowPoint(row planexport.StepRow) dungeon.Point {
-	return dungeon.Point{X: row.X, Y: row.Y, Z: row.Z}
-}
-
-func rowDist(row planexport.StepRow, c creature) float64 { return dist(rowPoint(row), c.Pos) }
