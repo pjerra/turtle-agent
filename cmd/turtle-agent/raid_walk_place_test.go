@@ -822,7 +822,7 @@ func placePlanRows(t *testing.T) (planexport.Rows, raidwalk.PlacePlan) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	step, leg, err := raidwalk.PlaceStart(rows, []string{"from", "leg", "high_priest_thekal"})
+	step, leg, _, _, err := raidwalk.PlaceStart(rows, []string{"from", "leg", "high_priest_thekal"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2486,6 +2486,73 @@ func TestStartTextNoteOnlyForPlacedWalk(t *testing.T) {
 			t.Fatalf("notes %v", f.summary().Notes)
 		}
 	})
+}
+
+// H1: --place --from leg high_priestess_jeklik (ZG leg 0) is a door start: no error, no placement, the run
+// starts at step 1 from the entrance exactly as a non-placed run does, and the notes say so.
+func TestPlaceFirstLegStartsFromDoor(t *testing.T) {
+	f := newFixture(t)
+	f.opts.plan = "zul_gurub"
+	f.opts.holder = "raid-walk-zul_gurub"
+	f.opts.from = "leg high_priestess_jeklik"
+	f.opts.place = true
+	f.opts.dryRun = true
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	got := f.stdout.String()
+	// The dry run shows the entrance path, not the place phase: a door start keeps the leg clause, plans
+	// no .go and no 8b, and runs from the leg exactly as a non-placed run does.
+	for _, want := range []string{"5 gm: .go xyz", "8 commander: cmd enter near", "  9 commander: run start zul_gurub from leg high_priestess_jeklik until boss"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the dry run misses %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "8b place:") {
+		t.Fatalf("the door start plans a place phase:\n%s", got)
+	}
+}
+
+// L2: the fallback note is written when the start falls back to an earlier leg. The testdata migration is
+// shaped so leg venoxis starts with a pull: the walk places at the jeklik door move, and the boss-done
+// until resolves from the venoxis leg's first row to the venoxis boss (step 4, the last row: clause "none",
+// so the run start carries no until).
+func TestPlaceFallbackNoteWritten(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	f.opts.from = "leg high_priest_venoxis"
+	f.opts.until = "boss-done"
+	f.opts.sql = "testdata/zg-place-fallback-20000000.sql"
+	rows, _, err := readRaidMigration(f.opts.sql, "zul_gurub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows.Steps) != 4 {
+		t.Fatalf("the fallback fixture has %d steps", len(rows.Steps))
+	}
+	step, leg, fallback, door, err := raidwalk.PlaceStart(rows, []string{"from", "leg", "high_priest_venoxis"})
+	if err != nil || door {
+		t.Fatal(err)
+	}
+	if step != 1 || leg != "high_priestess_jeklik" || fallback != "high_priest_venoxis" {
+		t.Fatalf("start %d (%q fallback %q), want 1 (jeklik)", step, leg, fallback)
+	}
+	// The walk runs for real (dry runs print no notes): the start queue walks two steps from the
+	// fallback start, and the toolkit answers everything quiet.
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|zul_gurub|running|1/4|jeklik|move|walk|walking"},
+		{raw: "TBM:RUN|zul_gurub|running|2/4|jeklik|pull|walk|walking"},
+		{raw: "TBM:RUN|zul_gurub|done|2/4|jeklik|pull|walk|done"},
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", step, len(rows.Steps), len(rows.Steps))
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	if !hasNote(f.summary(), "place: leg high_priest_venoxis has no quiet row; placing at step 1 (leg high_priestess_jeklik)") {
+		t.Fatalf("notes %v", f.summary().Notes)
+	}
+	if sum := f.summary(); sum.Place == nil || sum.Place.Start != 1 {
+		t.Fatalf("place summary %+v, want start 1", sum.Place)
+	}
 }
 
 // The longest-line check counts the extra clear round's lines (review round 2, LOW-4).
