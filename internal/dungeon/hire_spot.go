@@ -1,9 +1,11 @@
 package dungeon
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 )
 
@@ -96,17 +98,15 @@ func (e *prepEnv) hireSpotProblem(ctx context.Context) (string, error) {
 		// Floors stacked more than hireSpotMaxDrop apart: refusing on the guess would refuse correct spots, and hiring on it could hire
 		// onto the unreachable lower floor, so the height is settled first with one short navmesh walk of the commander (which clears
 		// status.z_unknown when it ends on the mesh), and the settled height is judged like a known one. Still a guess afterwards refuses.
-		settled, ok := e.resolveCommanderHeight(ctx, fl, ap, portal.Map, pos)
+		settled, ok := e.resolveCommanderHeight(ctx, fl, ap, portal, pos)
 		if !ok {
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
 			return "commander height unknown over two floors; move the commander and retry", nil
 		}
+		// Judged like a known height wherever the walk ended: leaving the radius during our own walk is never approval.
 		pos = settled
-		if across(pos) > hireSpotRadius {
-			return "", nil
-		}
 	}
 	return e.hireSpotKnown(ctx, fl, portal, ground, pos, across)
 }
@@ -135,18 +135,32 @@ func (e *prepEnv) hireSpotKnown(ctx context.Context, fl FloorLister, portal Port
 const hireSpotResolveStep = 3.0
 
 // resolveCommanderHeight settles a guessed commander height with one short navmesh walk: a walk that ends on the mesh clears
-// status.z_unknown (session tickWalk). It reports the commander's position afterwards, false when the height is still a guess (no
-// walker, no mesh point for a target, or the walk did not settle it).
-func (e *prepEnv) resolveCommanderHeight(ctx context.Context, fl FloorLister, ap AgentPositioner, mapID uint32, pos Point) (Point, bool) {
+// status.z_unknown (session tickWalk). The target is one of the four cardinal points hireSpotResolveStep yd from the commander that lie
+// inside hireSpotRadius of the portal, the one nearest the portal tried first. It reports the commander's position afterwards, false
+// when the height is still a guess (no walker, no mesh point for a target, or the walk did not settle it).
+func (e *prepEnv) resolveCommanderHeight(ctx context.Context, fl FloorLister, ap AgentPositioner, portal Portal, pos Point) (Point, bool) {
 	w, ok := e.g.(CommanderWalker)
 	if !ok {
 		return pos, false
 	}
-	var to Point
-	found := false
+	type target struct {
+		q    Point
+		away float64 // yd from the portal centre
+	}
+	var targets []target
 	for _, d := range [][2]float32{{hireSpotResolveStep, 0}, {-hireSpotResolveStep, 0}, {0, hireSpotResolveStep}, {0, -hireSpotResolveStep}} {
 		q := Point{X: pos.X + d[0], Y: pos.Y + d[1], Z: pos.Z}
-		zs, ok := fl.FloorsAt(ctx, mapID, q.X, q.Y, pos.Z)
+		away := math.Hypot(float64(q.X)-float64(portal.X), float64(q.Y)-float64(portal.Y))
+		if away > hireSpotRadius {
+			continue
+		}
+		targets = append(targets, target{q: q, away: away})
+	}
+	slices.SortStableFunc(targets, func(a, b target) int { return cmp.Compare(a.away, b.away) })
+	var to Point
+	found := false
+	for _, t := range targets {
+		zs, ok := fl.FloorsAt(ctx, portal.Map, t.q.X, t.q.Y, pos.Z)
 		if !ok || len(zs) == 0 {
 			continue
 		}
@@ -154,7 +168,7 @@ func (e *prepEnv) resolveCommanderHeight(ctx context.Context, fl FloorLister, ap
 		if !ok {
 			continue
 		}
-		to = Point{X: q.X, Y: q.Y, Z: f}
+		to = Point{X: t.q.X, Y: t.q.Y, Z: f}
 		found = true
 		break
 	}

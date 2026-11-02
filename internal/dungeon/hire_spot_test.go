@@ -3,6 +3,7 @@ package dungeon
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"math"
 	"slices"
 	"strings"
@@ -29,6 +30,8 @@ type hirePosFake struct {
 	landOn   Point // the commander's settled position after WalkSelf; zUnknown false
 	landFail bool  // WalkSelf leaves the height a guess
 	walkErr  bool  // WalkSelf errors (still re-reads the position)
+	// landAtTarget: WalkSelf ends at the walk's target x/y with landOn's z, so the walk's own choice of target decides where it ends.
+	landAtTarget bool
 }
 
 func (g *hirePosFake) AgentPosition() (Point, bool) { return g.pos, g.zUnknown }
@@ -73,7 +76,11 @@ func (g *hirePosFake) WalkSelf(_ context.Context, to Point) (WalkResult, error) 
 		return WalkResult{Result: "partial", Reason: "interrupted"}, context.DeadlineExceeded
 	}
 	if !g.landFail {
-		g.pos, g.zUnknown = g.landOn, false
+		land := g.landOn
+		if g.landAtTarget {
+			land.X, land.Y = to.X, to.Y
+		}
+		g.pos, g.zUnknown = land, false
 	}
 	return WalkResult{Result: "arrived"}, nil
 }
@@ -251,6 +258,72 @@ func TestHireSpotResolveFailureRefuses(t *testing.T) {
 				t.Fatalf("one resolve walk: %v", pos.walks)
 			}
 		})
+	}
+}
+
+// The settle walk stays inside the spot's 15 yd radius (#385): a commander 13 to 14.5 yd out on the lower floor with a guessed height walks
+// toward the portal, never 3 yd further out past the radius, and the settled lower floor refuses the hire.
+func TestHireSpotSettleWalkStaysInRadius(t *testing.T) {
+	across := func(p Point) float64 {
+		return math.Hypot(float64(p.X-portalPoint.X), float64(p.Y-portalPoint.Y))
+	}
+	for _, d := range []float32{13, 14, 14.5} {
+		t.Run(fmt.Sprintf("%.1f yd", d), func(t *testing.T) {
+			g := newHireFake(t)
+			g.agentMap = portalMap
+			g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
+			at := Point{X: portalPoint.X + d, Y: portalPoint.Y, Z: -20.3}
+			pos := &hirePosFake{hireFake: g, pos: at, zUnknown: true, landAtTarget: true,
+				landOn: Point{Z: -30.6},
+				floors: map[[2]float32][]float32{
+					{portalPoint.X, portalPoint.Y}: {-20.306},
+					{at.X, at.Y}:                   {-20.3, -30.6},
+					{at.X - 3, at.Y}:               {-20.3, -30.6},
+					{at.X + 3, at.Y}:               {-20.3, -30.6},
+				}}
+			e := hireSpotEnv(g, pos, func(string) {})
+			p, err := e.hireSpotProblem(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(pos.walks) != 1 {
+				t.Fatalf("one settle walk: %v", pos.walks)
+			}
+			if got := across(pos.walks[0]); got > hireSpotRadius {
+				t.Fatalf("settle walk targets %.1f yd from the portal, past the %.0f yd radius", got, hireSpotRadius)
+			}
+			if !strings.Contains(p, "portal ground") {
+				t.Fatalf("the settled lower floor is refused: %q", p)
+			}
+		})
+	}
+}
+
+// A settle walk that ends outside the radius is still judged on the floor it stands on (leaving the radius during our own walk is never
+// approval): the commander ends 16 yd out on the lower floor and is refused.
+func TestHireSpotWalkOutsideRadiusStillChecksFloor(t *testing.T) {
+	g := newHireFake(t)
+	g.agentMap = portalMap
+	g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
+	at := Point{X: portalPoint.X + 14, Y: portalPoint.Y, Z: -20.3}
+	out := Point{X: portalPoint.X + 16, Y: portalPoint.Y, Z: -30.6}
+	pos := &hirePosFake{hireFake: g, pos: at, zUnknown: true, landOn: out,
+		floors: map[[2]float32][]float32{
+			{portalPoint.X, portalPoint.Y}: {-20.306},
+			{at.X, at.Y}:                   {-20.3, -30.6},
+			{at.X - 3, at.Y}:               {-20.3, -30.6},
+			{out.X, out.Y}:                 {-20.3, -30.6},
+		}}
+	e := hireSpotEnv(g, pos, func(string) {})
+	p, err := e.hireSpotProblem(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pos.walks) != 1 {
+		t.Fatalf("one settle walk: %v", pos.walks)
+	}
+	if !strings.Contains(p, "portal ground") {
+		t.Fatalf("a walk that ends outside the radius on the lower floor is refused: %q", p)
 	}
 }
 
