@@ -3,7 +3,7 @@
 const assert = require("assert");
 const C = require(process.argv[2]);
 
-const card = (o) => Object.assign({ id: "8765", online: true, character: "Tanky", label: { plan: "zulfarrak" }, run: { state: "running", mode: "" } }, o);
+const card = (o) => Object.assign({ id: "127.0.0.1:8765", online: true, character: "Tanky", label: { plan: "zulfarrak" }, run: { state: "running", mode: "" } }, o);
 const verbs = (c) => C.runButtons(c).map((b) => b.verb);
 const btn = (c, v) => C.runButtons(c).find((b) => b.verb === v);
 
@@ -21,7 +21,7 @@ assert.strictEqual(btn(card({ run: { state: "running", mode: "" } }), "stop").co
 const obs = card({ run: { state: "running", mode: "observe", leader: { state: "running" } } });
 assert.deepStrictEqual(verbs(obs), ["pause", "resume", "skip", "stop"]);
 assert.strictEqual(btn(obs, "pause").enabled, true);
-assert.strictEqual(btn(obs, "pause").confirm, false);
+assert.strictEqual(btn(obs, "pause").confirm, true, "a pause is never sent without a confirm");
 assert.strictEqual(btn(obs, "resume").enabled, false, "resume is off while the run leader is running");
 assert.strictEqual(btn(obs, "skip").enabled, true);
 assert.strictEqual(btn(obs, "stop").confirm, true);
@@ -52,6 +52,7 @@ assert.ok(C.confirmText(card({ run: { state: "running", mode: "remote" } }), "pa
 assert.ok(C.confirmText(card({ run: { state: "running", mode: "remote" } }), "stop").indexOf("zulfarrak") >= 0);
 assert.ok(C.confirmText(card({ run: { state: "stopped" } }), "stop").indexOf("zulfarrak") >= 0);
 assert.ok(/resume/.test(C.confirmText(card({ run: { state: "running", mode: "remote" } }), "pause")));
+assert.ok(/^Pauses/.test(C.confirmText(card({ run: { state: "running", mode: "observe" } }), "pause")), "an observe pause says it pauses");
 
 // the log lines: time, who, what
 const lines = C.logLines({ lines: [{ at: "2026-11-01T12:34:56Z", who: "owner", via: "trusted", verb: "pause", ok: true },

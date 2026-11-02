@@ -20,7 +20,7 @@ import (
 
 // The run controls (README "Controls (--control)", issue #183). Off unless the dashboard is started with --control; then, and only then, does
 // the guard let POST /api/control/* through, and only with a control token (never the route-edit one) or, when --control-trust-local is on, from
-// a trusted peer. Every control first asks the agent a fresh dungeon_status and decides from it; the page is a convenience, the server is the gate.
+// a trusted peer. Every control first asks the agent a fresh dungeon_status, a live check; the page is a convenience, the server is the gate.
 //
 // Slice 1 of #183 has the run controls only (pause, resume, skip, stop). The live tuning and the party orders are added later: a new handler in
 // c.actions is the whole of it (control_tune.go, control_order.go).
@@ -165,7 +165,7 @@ func (c *Controller) status(w http.ResponseWriter, r *http.Request) {
 
 // serveLog answers GET /api/control/<id>/log?n=20: the last result lines of that agent, newest last.
 func (c *Controller) serveLog(w http.ResponseWriter, r *http.Request, id string) {
-	if !agentID.MatchString(id) {
+	if !validAgentID(id) {
 		jsonError(w, http.StatusNotFound, "no such agent")
 		return
 	}
@@ -200,7 +200,7 @@ func (c *Controller) control(w http.ResponseWriter, r *http.Request, id, action 
 		jsonError(w, http.StatusNotFound, "no such control action")
 		return
 	}
-	if !agentID.MatchString(id) {
+	if !validAgentID(id) {
 		jsonError(w, http.StatusNotFound, "no such agent")
 		return
 	}
@@ -267,7 +267,8 @@ type runRequest struct {
 // runVerbs maps a run verb to its RPC method. The page may send these and nothing else.
 var runVerbs = map[string]string{"pause": "dungeon_pause", "resume": "dungeon_resume", "skip": "dungeon_skip", "stop": "dungeon_stop"}
 
-// run is the run-control handler (D8, D9): a fresh dungeon_status decides whether a confirm is needed, and the RPC is logged before it is sent.
+// run is the run-control handler (D8, D9): a fresh dungeon_status proves the agent is reachable, every pause and stop needs a confirm, and
+// the RPC is logged before it is sent.
 func (c *Controller) run(ac *actionContext) {
 	var req runRequest
 	if !decodeBody(ac.w, ac.r, &req) {
@@ -280,20 +281,14 @@ func (c *Controller) run(ac *actionContext) {
 	}
 	cl := NewControlClient(ac.agent, controlTimeout)
 	ctx := ac.r.Context()
-	raw, err := cl.Read(ctx, "dungeon_status")
-	if err != nil {
+	// D8: ask for a fresh status, never the poller's cache. It is a live check: the confirm is decided by the verb alone (D9).
+	if _, err := cl.Read(ctx, "dungeon_status"); err != nil {
 		jsonError(ac.w, http.StatusBadGateway, "the agent's dungeon_status could not be read: %s", redactMessage(err.Error(), cl.Token()))
 		return
 	}
-	var st dungeonStatus
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &st); err != nil {
-			jsonError(ac.w, http.StatusBadGateway, "the agent's dungeon_status could not be read: %v", err)
-			return
-		}
-	}
-	// D9: stopping always needs a confirm; pausing a run that is not in observe mode ENDS it (binding and instance kept), so it needs one too.
-	if !req.Confirm && (req.Verb == "stop" || (req.Verb == "pause" && st.Running && st.mode() != "observe")) {
+	// D9: a pause may end or interrupt a run, and the status read above can be stale by the time the RPC lands. dungeon_pause carries no
+	// expected state to guard with, so every pause and every stop needs a confirm.
+	if !req.Confirm && (req.Verb == "pause" || req.Verb == "stop") {
 		jsonError(ac.w, http.StatusConflict, "%s needs \"confirm\": true", req.Verb)
 		return
 	}
@@ -324,24 +319,6 @@ func (c *Controller) run(ac *actionContext) {
 		return
 	}
 	writeAny(ac.w, http.StatusOK, map[string]any{"status": "ok", "action": ac.action, "verb": req.Verb, "rpc": method, "result": json.RawMessage(scrubbed)})
-}
-
-// dungeonStatus is the part of dungeon_status a run control decides from: whether a run is going and, when it is, the remote mode.
-type dungeonStatus struct {
-	Running bool `json:"running"`
-	Report  *struct {
-		Remote *struct {
-			Mode string `json:"mode"`
-		} `json:"remote"`
-	} `json:"report"`
-}
-
-// mode is report.remote.mode ("remote", "observe", "" for a group/leader run).
-func (s dungeonStatus) mode() string {
-	if s.Report != nil && s.Report.Remote != nil {
-		return s.Report.Remote.Mode
-	}
-	return ""
 }
 
 // decodeBody reads one strict JSON object from the request (unknown fields are refused, a too-large body is 413).

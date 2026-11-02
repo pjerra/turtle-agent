@@ -15,7 +15,7 @@
     if (mode === "observe") {
       const paused = !!(r.leader && r.leader.state === "paused");
       return [
-        { verb: "pause", label: "Pause", title: "Pause the run leader: the bots stop where they are and wait.", confirm: false, enabled: !paused },
+        { verb: "pause", label: "Pause", title: "Pause the run leader: the bots stop where they are and wait.", confirm: true, enabled: !paused },
         { verb: "resume", label: "Resume", title: "Let the run leader go on.", confirm: false, enabled: paused },
         { verb: "skip", label: "Skip step", title: "Ask the run leader to skip the step it is on.", confirm: false, enabled: true },
         { verb: "stop", label: "Stop run", title: "Ends the run and unbinds: the hires go back to your raid and the instance is lost.", confirm: true, enabled: true },
@@ -35,6 +35,9 @@
     const who = card && card.character ? card.character + " (agent " + card.id + ")" : "agent " + (card && card.id || "?");
     const plan = card && card.label && card.label.plan ? card.label.plan : "no plan";
     if (verb === "pause") {
+      if (card && card.run && card.run.mode === "observe") {
+        return "Pauses the run of " + who + " (" + plan + "): the bots stop where they are and wait. The party and the instance are kept.";
+      }
       return "Ends the run of " + who + " (" + plan + "). The party and the instance are kept; go on later with dungeon_run resume.";
     }
     const end = "the hires go back to the commander's raid and the instance is lost.";

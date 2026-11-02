@@ -90,7 +90,7 @@ func (c *ControlClient) call(ctx context.Context, method string, params any) (js
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, errors.New("unauthorized: no readable rpc-" + c.Agent.ID + ".token next to the settings file")
+		return nil, errors.New("unauthorized: no readable " + tokenFileName(c.Agent) + " next to the settings file")
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("http %d", resp.StatusCode)
