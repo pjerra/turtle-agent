@@ -1448,10 +1448,11 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 		}
 	}
 	// The attempt start (after bossAdds, so an add several at a time is already out): the first time the frames
-	// showed a boss unit engaged, judged like the tracker's one-shot latch (checkBoss). bossKilled reads it to
-	// keep a 0 % row an earlier attempt left behind out of the kill evidence (review round 3), so it is recorded
-	// per unit entry and only the first sighting counts. A dead row never starts one: the first sighting of a
-	// corpse that was already there would otherwise time-stamp the very row it then accepts (revive r7).
+	// showed a boss unit alive and engaged (bossAttemptEngaged), judged like the tracker's one-shot latch
+	// (checkBoss). bossKilled reads it to keep a 0 % row an earlier attempt left behind out of the kill evidence
+	// (review round 3), so it is recorded per unit entry and only the first sighting counts. A dead row never
+	// starts one: the first sighting of a corpse that was already there would otherwise time-stamp the very row
+	// it then accepts (revive r7).
 	for _, h := range f.Hostiles {
 		if h.GUID == 0 || !w.bossUnit(h.Entry) || !bossAttemptEngaged(h.HPPct, uint64(h.Target), w.partyG) {
 			continue
@@ -1480,13 +1481,12 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 	}
 }
 
-// bossAttemptEngaged is the tracker's one-shot boss latch judgement (checkBoss): a plan-boss row starts the
-// attempt when it is alive (above 0 %) and hurt (below 100 %) or holding a party target. A 0 % row never
-// starts one: it is a corpse, and a corpse the frames found already there would otherwise time-stamp the
-// very row bossKilled then accepts (revive r7). The frames' own 0 % sighting kills only when the live rows
-// of THIS attempt started the link first (the same alive-before-death rule the toolkit path uses).
+// bossAttemptEngaged is the attempt-start judgement: a plan-boss row starts the attempt when it is alive
+// (above 0 %) and hurt (below 100 %) or holding a party target. A 0 % row never starts one, not even with a
+// party target: the frames' own 0 % sighting of a fresh corpse is the kill bossKilled reads, not a fight (fake
+// deaths), and the wipe-resume kill (wipeBossFrame) needs the same rule — a dead row never starts an attempt.
 func bossAttemptEngaged(hppct int, target uint64, partyG map[uint64]bool) bool {
-	return hppct > 0 && (hppct < 100 || partyG[target])
+	return hppct > 0 && (hppct < 100 || (target != 0 && partyG[target]))
 }
 
 // resetBossAliveSeen ends the previous attempt's live links for entry's boss units: a new attempt starts
@@ -1834,6 +1834,58 @@ const (
 	bossReset
 	bossGone
 )
+
+// wipeBossFrame judges the latched boss from the frames before the 120 s
+// unknown wait (walk 26 test2-ven-door: Jeklik at 0 % while the raid died).
+// kill: the frames' last view of a boss unit is HP 0. The dead row has no
+// freshness cap, so a boss that died and then despawned still counts (the
+// frames' last view of that guid was dead) — but only inside the current
+// attempt: a live row of the family must have been seen since the last wipe
+// recovery (bossAttemptStart, the same "a dead row never starts an attempt"
+// rule bossAttemptEngaged uses), the dead row at or after it, and no live
+// unit of the family seen alive after it (a reset or a respawn left the boss
+// out of view, so the dead row is another attempt's). Otherwise a stale
+// corpse — or a fake death with no live row in this attempt — is no kill.
+// alive: a fresh (<= 15 s) row is alive (HP > 0) with no target and no live
+// target — the reset shape — so the boss is alive and the resume is safe.
+// Otherwise no usable frame evidence: keep the unknown wait. A 1-5 % alive
+// row is never a kill.
+func (w *walk) wipeBossFrame(now time.Time) (kill bool, alive bool, words string) {
+	var haveDead, haveLive bool
+	var deadAt, liveAt time.Time
+	var deadEntry, liveEntry uint32
+	for entry, row := range w.bossRows {
+		if !w.bossSet[entry] {
+			continue
+		}
+		if row.hppct == 0 {
+			if !haveDead || row.at.After(deadAt) || (row.at.Equal(deadAt) && entry < deadEntry) {
+				haveDead, deadAt, deadEntry = true, row.at, entry
+			}
+			continue
+		}
+		if now.Sub(row.at) > 15*time.Second {
+			continue
+		}
+		if row.target != 0 {
+			continue
+		}
+		if row.hppct == 100 && (w.bossTargetAt.IsZero() || now.Sub(w.bossTargetAt) >= 30*time.Second) {
+			if !haveLive || row.at.After(liveAt) || (row.at.Equal(liveAt) && entry < liveEntry) {
+				haveLive, liveAt, liveEntry = true, row.at, entry
+			}
+		}
+	}
+	if haveDead && (!haveLive || !deadAt.Before(liveAt)) {
+		if attemptAt := w.bossAttemptStart(w.bossUnits(deadEntry)); !attemptAt.IsZero() && !deadAt.Before(attemptAt) {
+			return true, false, w.bossRule.Words(deadEntry)
+		}
+	}
+	if haveLive {
+		return false, true, w.bossRule.Words(liveEntry)
+	}
+	return false, false, ""
+}
 
 // bossState reads the engaged boss's row across frames (freshness 15 s). A row gone from the frames for 10 s
 // is a kill only when a hire is alive; with the party dead it is a reset once the last target is 30 s old (a
@@ -3310,6 +3362,10 @@ func (w *walk) freshWipeRest() (time.Duration, error) {
 			return 0, errWipeResumeSkipped
 		}
 		if !w.bossLatchAt.IsZero() && now.Sub(w.bossLatchAt) < 120*time.Second {
+			if kill, _, words := w.wipeBossFrame(now); kill {
+				w.note("boss %s killed (frames show 0 %%, latched %ds ago): advancing as a kill", words, int(now.Sub(w.bossLatchAt)/time.Second))
+				return w.opts.wipeRest, nil
+			}
 			w.note("wipe resume skipped: boss state unknown (after the revive: %s)", w.latchWords(now))
 			return 0, errWipeResumeSkipped
 		}
@@ -3358,30 +3414,41 @@ func (w *walk) bossUnknown(ctx context.Context) error {
 		w.note("wipe resume skipped: boss state unknown (%s engaged in the frames)", w.engagedBossWords())
 		return errWipeResumeSkipped
 	}
-	if !w.bossLatchAt.IsZero() && now.Sub(w.bossLatchAt) < 120*time.Second {
-		w.note("wipe resume skipped: boss state unknown (%s)", w.latchWords(now))
-		return errWipeResumeSkipped
-	}
-	if w.dash == nil {
-		return nil
-	}
-	switch {
-	case w.bossCheckErr != nil:
-		w.note("wipe resume skipped: boss state unknown (dashboard fights read failed: %v)", w.bossCheckErr)
-		return errWipeResumeSkipped
-	case w.bossReadAt.IsZero():
-		w.note("wipe resume skipped: boss state unknown (no dashboard fights read yet)")
-		return errWipeResumeSkipped
-	case now.Sub(w.bossReadAt) > 30*time.Second:
-		w.note("wipe resume skipped: boss state unknown (dashboard fights read stale %ds)", int(now.Sub(w.bossReadAt)/time.Second))
-		return errWipeResumeSkipped
-	}
-	// A boss fight still live on the dashboard blocks recovery before anything is revived.
-	for _, r := range w.fightRows {
-		if r.bossLive() {
-			w.note("wipe resume skipped: boss state unknown (live boss fight row on the dashboard)")
+	// The dashboard first, exactly as before: a live boss fight row blocks the recovery, and a
+	// missing, stale or errored read keeps the unknown wait. The frames only resolve the latch
+	// once the dashboard does not block, so a kill (or reset) the frames show can never walk a
+	// live dashboard fight or an unreadable dashboard into the revive.
+	if w.dash != nil {
+		switch {
+		case w.bossCheckErr != nil:
+			w.note("wipe resume skipped: boss state unknown (dashboard fights read failed: %v)", w.bossCheckErr)
+			return errWipeResumeSkipped
+		case w.bossReadAt.IsZero():
+			w.note("wipe resume skipped: boss state unknown (no dashboard fights read yet)")
+			return errWipeResumeSkipped
+		case now.Sub(w.bossReadAt) > 30*time.Second:
+			w.note("wipe resume skipped: boss state unknown (dashboard fights read stale %ds)", int(now.Sub(w.bossReadAt)/time.Second))
 			return errWipeResumeSkipped
 		}
+		// A boss fight still live on the dashboard blocks recovery before anything is revived.
+		for _, r := range w.fightRows {
+			if r.bossLive() {
+				w.note("wipe resume skipped: boss state unknown (live boss fight row on the dashboard)")
+				return errWipeResumeSkipped
+			}
+		}
+	}
+	if !w.bossLatchAt.IsZero() && now.Sub(w.bossLatchAt) < 120*time.Second {
+		if kill, alive, words := w.wipeBossFrame(now); kill || alive {
+			what := "killed (frames show 0 %%)"
+			if alive {
+				what = "alive (frames show the reset: full HP, no target)"
+			}
+			w.note("boss %s %s, latched %ds ago: advancing, not unknown", words, what, int(now.Sub(w.bossLatchAt)/time.Second))
+			return nil
+		}
+		w.note("wipe resume skipped: boss state unknown (%s)", w.latchWords(now))
+		return errWipeResumeSkipped
 	}
 	return nil
 }
