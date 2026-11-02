@@ -1,6 +1,7 @@
 package tbdash
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,11 +10,13 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // fakePassword is a made-up value: the tests prove it never reaches an error text.
@@ -276,5 +279,97 @@ func TestFightKeyIsPathEscaped(t *testing.T) {
 	}
 	if seen != want {
 		t.Fatalf("request path %q, want %q", seen, want)
+	}
+}
+
+func TestDecisionsListRoute(t *testing.T) {
+	var query string
+	ended := "2026-10-29T20:05:00Z"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/auth/login" {
+			http.SetCookie(w, &http.Cookie{Name: "s", Value: "v", Path: "/"})
+			fmt.Fprint(w, `{"success":true}`)
+			return
+		}
+		if r.URL.Path != "/api/v1/decisions" {
+			http.NotFound(w, r)
+			return
+		}
+		query = r.URL.RawQuery
+		fmt.Fprintf(w, `{"captures":[{"id":"20261029T200000Z-Commander-onyxias_lair","commander":"Commander","plan":"onyxias_lair","map":1,"started":"2026-10-29T20:00:00Z","ended":%q,"end_reason":"done","segments":[{"file":"seg-0000.jsonl","first_seq":1,"last_seq":10,"records":10,"bytes":100,"deleted":false}]}]}`, ended)
+	}))
+	defer srv.Close()
+	c := newClient(t, srv.URL, 0o600)
+	if err := c.Login(context.Background()); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	since := time.Date(2026, 10, 29, 19, 59, 50, 0, time.UTC)
+	until := time.Date(2026, 10, 29, 20, 10, 0, 0, time.UTC)
+	caps, err := c.Decisions(context.Background(), "Commander", since, until)
+	if err != nil {
+		t.Fatalf("Decisions: %v", err)
+	}
+	if len(caps) != 1 || caps[0].Ended == nil {
+		t.Fatalf("captures %+v, want one ended capture", caps)
+	}
+	want := "commander=Commander&since=" + url.QueryEscape("2026-10-29T19:59:50Z") + "&until=" + url.QueryEscape("2026-10-29T20:10:00Z")
+	if query != want {
+		t.Fatalf("query %q, want %q", query, want)
+	}
+	// Null ended parses to nil.
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"captures":[{"id":"20261029T200000Z-Commander-onyxias_lair","commander":"Commander","plan":"p","map":1,"started":"2026-10-29T20:00:00Z","ended":null,"segments":[]}]}`)
+	}))
+	defer srv2.Close()
+	c2 := newClient(t, srv2.URL, 0o600)
+	if err := c2.Login(context.Background()); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	caps2, err := c2.Decisions(context.Background(), "", time.Time{}, time.Time{})
+	if err != nil {
+		t.Fatalf("Decisions: %v", err)
+	}
+	if len(caps2) != 1 || caps2[0].Ended != nil {
+		t.Fatalf("captures %+v, want one unended capture", caps2)
+	}
+}
+
+func TestDecisionFileValidationAndLimits(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/auth/login" {
+			http.SetCookie(w, &http.Cookie{Name: "s", Value: "v", Path: "/"})
+			fmt.Fprint(w, `{"success":true}`)
+			return
+		}
+		hits++
+		body := "0123456789"
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.Header().Set("Content-Length", fmt.Sprint(len(body)))
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+	c := newClient(t, srv.URL, 0o600)
+	if err := c.Login(context.Background()); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	id := "20261029T200000Z-Commander-onyxias_lair"
+	var dst bytes.Buffer
+	n, err := c.DecisionFile(context.Background(), id, "index.json", &dst, 1024)
+	if err != nil || n != 10 {
+		t.Fatalf("DecisionFile = %d, %v, want 10, nil", n, err)
+	}
+	if _, err := c.DecisionFile(context.Background(), "../evil", "index.json", &dst, 1024); err == nil {
+		t.Fatal("bad id: no error, want client-side refusal with no request")
+	}
+	if _, err := c.DecisionFile(context.Background(), id, "evil.json", &dst, 1024); err == nil {
+		t.Fatal("bad file: no error, want client-side refusal with no request")
+	}
+	if hits != 1 {
+		t.Fatalf("%d server hits, want 1 (validation happens before any request)", hits)
+	}
+	var small bytes.Buffer
+	if _, err := c.DecisionFile(context.Background(), id, "seg-0000.jsonl", &small, 4); err == nil {
+		t.Fatal("over-max file: no error, want a limit error")
 	}
 }
