@@ -347,3 +347,39 @@ func TestPullSizeNoEligibleMobsStillFindsEveryPullRow(t *testing.T) {
 		t.Fatalf("findings %v, want one no-target finding for pull 1", found)
 	}
 }
+
+// An awakened or scripted pull row: the encounter's script turns these
+// spawns hostile, so they are mobs whatever their npc_flags or faction say
+// (checkFile's -awakened and -scripted, on the CLI default -ignore-factions
+// 35). Four awakened Stone Keepers (faction 35, Uldaman's 4857) at one stand
+// are the target and three joining bodies: 4 over a ceiling of 3. A scripted
+// spawn with npc_flags does the same.
+func TestPullSizeAwakenedAndScriptedRowsCountTheirBodies(t *testing.T) {
+	cases := []struct {
+		name   string
+		flags  uint32
+		filter PullFilter
+	}{
+		{"awakened", 0, PullFilter{Ignore: map[int]bool{35: true}, Awakened: map[uint32]bool{4857: true}}},
+		{"scripted", 1, PullFilter{Ignore: map[int]bool{35: true}, Scripted: map[uint32]bool{4857: true}}},
+	}
+	for _, tc := range cases {
+		p := &dungeon.Plan{Name: "probe", Map: 1, Kind: "dungeon", LevelBand: []int{60, 60}, Entrance: dungeon.Point{},
+			Legs: []dungeon.Leg{{Name: "a", To: dungeon.Point{X: 30},
+				PullGroups: []dungeon.PullGroup{
+					{Entries: []uint32{4857}, Positions: []dungeon.Point{{X: 30}}, Radius: 5, MaxBodies: 3},
+				}}}}
+		var cs []creature
+		for i := 0; i < 4; i++ {
+			cs = append(cs, creature{GUID: uint64(i + 1), Entry: 4857, Name: "Stone Keeper", LevelMax: 60, Faction: 35,
+				NPCFlags: tc.flags, DetectionRange: 20, Pos: dungeon.Point{X: float32(30 + i)}})
+		}
+		found, err := PullSizes(p, cs, nil, tc.filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(found) != 1 || found[0].NoTarget || found[0].Bodies != 4 || found[0].Ceiling != 3 {
+			t.Fatalf("%s row findings %v, want 4 bodies over ceiling 3", tc.name, found)
+		}
+	}
+}

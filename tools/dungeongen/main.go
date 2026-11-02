@@ -253,7 +253,7 @@ func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool
 	if err != nil {
 		return fail(err)
 	}
-	sized, serr := PullSizes(p, cs, w, PullFilter{Ignore: im, Friendly: fm, Team: team})
+	sized, serr := PullSizes(p, cs, w, PullFilter{Ignore: im, Friendly: fm, Awakened: am, Scripted: toSet(sc), Team: team})
 	if serr != nil {
 		return fail(fmt.Errorf("pull_size: %w", serr))
 	}

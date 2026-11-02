@@ -74,12 +74,16 @@ func PullCeilingOf(p *dungeon.Plan, item uint32) int {
 }
 
 // PullFilter says which spawns and rows the lint counts: the check flags
-// (-ignore-factions, -friendly-factions, -team). 35 is always friendly (as in
-// Check); a row gated to the other team is not pulled by this run. Empty:
-// every mob counts, every row is pulled.
+// (-ignore-factions, -friendly-factions, -team, -awakened, -scripted). 35 is
+// always friendly (as in Check); a row gated to the other team is not pulled
+// by this run. Awakened and Scripted are the check's entry sets (checkFile):
+// a spawn of those entries counts as a mob whatever its npc_flags or faction.
+// Empty: every mob counts, every row is pulled.
 type PullFilter struct {
 	Ignore   map[int]bool
 	Friendly map[int]bool
+	Awakened map[uint32]bool
+	Scripted map[uint32]bool
 	Team     string
 }
 
@@ -169,8 +173,8 @@ func packIDs(w *worldspawn.World) map[uint64]uint64 {
 }
 
 // pullMobs converts the spawn export to estimator mobs: hostile, non-critter
-// spawns (hostileMob: the route lint's filter, with the check's ignore and
-// friendly factions) with their detection range (the lint's own explicit
+// spawns (pullHostile: the route lint's filter, with the check's ignore and
+// friendly factions, and the awakened and scripted entries always in) with their detection range (the lint's own explicit
 // mapping: an export 0 predates the column, read as 20 yd, while the
 // estimator itself never wakes a spawn with no detection range),
 // NO_AGGRO/NO_ASSIST from flags_extra, patrollers at their current position.
@@ -182,7 +186,7 @@ func pullMobs(p *dungeon.Plan, cs []creature, groups map[uint64]uint64, f PullFi
 	entries := map[uint32]uint32{}
 	_ = p
 	for _, c := range cs {
-		if !hostileMob(c, f.Ignore, f.Friendly) {
+		if !pullHostile(c, f) {
 			continue
 		}
 		det := float32(c.DetectionRange)
@@ -200,6 +204,19 @@ func pullMobs(p *dungeon.Plan, cs []creature, groups map[uint64]uint64, f PullFi
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Guid < out[j].Guid })
 	return out, entries
+}
+
+// pullHostile is hostileMob for the pull lint, with the check's awakened and
+// scripted entries always hostile: the encounter's script turns them hostile
+// when the pull starts, so their npc_flags (a scripted gossip NPC) and their
+// faction (35, the stoned Stone Keepers, which the default -ignore-factions
+// also drops) are no reason to leave them out of the count. The critter rule
+// still applies.
+func pullHostile(c creature, f PullFilter) bool {
+	if f.Awakened[c.Entry] || f.Scripted[c.Entry] {
+		return c.LevelMax > 1
+	}
+	return hostileMob(c, f.Ignore, f.Friendly)
 }
 
 // pullOwners maps each spawn guid to the export row that pulls it, by
