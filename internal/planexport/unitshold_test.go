@@ -85,7 +85,7 @@ func TestValidateHoldForms(t *testing.T) {
 }
 
 // A units hold whose boss may be dead before its gossip (hold.skip_if_dead_of_gossip) is the same hold row with the module's
-// kPlanFlagDeadGossipOk (16384) and a comment that says so. The run leader ends such a hold when no unit of it is hostile: at once when
+// kPlanFlagDeadGossipOk (32768) and a comment that says so. The run leader ends such a hold when no unit of it is hostile: at once when
 // the whole crew lies dead, with a note when only friendly survivors are left (the core turns them hostile only from the dead boss's own
 // script, so they can never be fought). Without the flag the row is today's units hold (Bly alive: the crew turns hostile and is fought).
 func TestBossUnitsHoldWithDeadGossip(t *testing.T) {

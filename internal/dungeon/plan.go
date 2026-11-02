@@ -386,7 +386,7 @@ type Hold struct {
 	// (that step must name the hold's boss and carry DeadIsDone). The core turns a friendly crew hostile only from that NPC's own
 	// script: zulfarrak.cpp npc_sergeant_blyAI turns Bly and, in the same update, Raven, Oro and Murta 10 s after his option, and
 	// switchFactionIfAlive is called from nowhere else, so a dead Bly leaves the survivors friendly for good (they cannot be pulled).
-	// The run leader (TortoiseBots, plan-export flag 16384) then ends the hold when no unit of it is hostile: at once when the whole
+	// The run leader (TortoiseBots, plan-export flag 32768) then ends the hold when no unit of it is hostile: at once when the whole
 	// crew lies dead, and with a note when only friendly survivors are left, instead of waiting TimeoutS for a hostility that cannot
 	// come (dungeons/zulfarrak.json's bly hold). Only a boss's hold done by its units takes it.
 	SkipIfDeadOfGossip bool `json:"skip_if_dead_of_gossip,omitempty"`

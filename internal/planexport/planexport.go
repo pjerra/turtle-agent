@@ -79,9 +79,9 @@ const (
 	// FlagDeadGossipOk marks a units hold whose starting NPC may already be dead (a plan's hold.skip_if_dead_of_gossip): the run leader
 	// ends it when no unit of it is hostile — at once when the crew lies dead, with a note when only friendly survivors are left — but
 	// only after the gossip that starts it (the nearest gossip row before it) counted its dead NPC as done (DungeonRunPolicy.h,
-	// GossipDeadIsDone; DungeonPlanPolicy.h kPlanFlagDeadGossipOk). Without the flag that hold waits for a unit seen hostile, which a
+	// GossipDeadIsDone; TortoiseBots DungeonPlanPolicy.h kPlanFlagDeadGossipOk = 32768, the TB side is not written yet; 16384 there is kPlanFlagResetToGossip). Without the flag that hold waits for a unit seen hostile, which a
 	// crew whose NPC died before its option can never be (zulfarrak.cpp npc_sergeant_blyAI turns them only from his script).
-	FlagDeadGossipOk = 16384
+	FlagDeadGossipOk = 32768
 	// EncounterDone is the encounter state DONE: a hold's param.
 	EncounterDone = 3
 )
