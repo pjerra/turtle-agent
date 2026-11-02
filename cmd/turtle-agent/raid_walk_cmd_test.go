@@ -26,6 +26,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/slots"
+	"github.com/pjerra/turtle-agent/internal/tbdash"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -1107,6 +1108,12 @@ type fakeDash struct {
 	// and wins over commandersRaw.
 	commandersRaw []json.RawMessage
 	commandersFn  func() json.RawMessage
+	decisions     []tbdash.DecisionCapture
+	decisionsErr  error
+	decFiles      map[string]string // file name (index.json or seg-*.jsonl) to body
+	decFileErr    map[string]error
+	decRequested  []string // every DecisionFile file name requested, in order
+	decCalls      int      // Decisions calls (the ended wait polls again)
 }
 
 func (d *fakeDash) Login(ctx context.Context) error { return nil }
@@ -1159,6 +1166,35 @@ func (d *fakeDash) Fight(ctx context.Context, key string) (json.RawMessage, erro
 	return json.RawMessage(`{"fight":{"id":"4-5"}}`), nil
 }
 
+func (d *fakeDash) Decisions(ctx context.Context, commander string, since, until time.Time) ([]tbdash.DecisionCapture, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.decCalls++
+	if d.decisionsErr != nil {
+		return nil, d.decisionsErr
+	}
+	return append([]tbdash.DecisionCapture{}, d.decisions...), nil
+}
+
+func (d *fakeDash) DecisionFile(ctx context.Context, id, file string, dst io.Writer, max int64) (int64, error) {
+	d.mu.Lock()
+	d.decRequested = append(d.decRequested, file)
+	body, hasBody := d.decFiles[file]
+	ferr := d.decFileErr[file]
+	d.mu.Unlock()
+	if ferr != nil {
+		return 0, ferr
+	}
+	if !hasBody {
+		return 0, fmt.Errorf("no such decision file %s", file)
+	}
+	if int64(len(body)) > max {
+		return int64(len(body)), fmt.Errorf("dashboard decision file %s/%s: over the %d-byte limit", id, file, max)
+	}
+	n, err := io.WriteString(dst, body)
+	return int64(n), err
+}
+
 // envRecord is what the fake environment saw.
 type envRecord struct {
 	acquires  int
@@ -1197,6 +1233,7 @@ func newFixture(t *testing.T) *fixture {
 		plan: "onyxias_lair", server: "m910q", holder: "raid-walk-onyxias_lair", dir: "../../dungeons",
 		until: "boss", speed: 1.0, enter: "auto", maxRunMinutes: 90, pausedWait: 10 * time.Minute,
 		resetWait: 5 * time.Minute, wipeResume: 1, wipeRest: 10 * time.Minute, out: out,
+		decisions: true, decisionsMaxMiB: decisionsBudgetDefaultMiB,
 	}
 	f.env = walkEnv{
 		now:   clock.now,
@@ -1316,6 +1353,245 @@ func TestRaidWalkRefusesSlot3(t *testing.T) {
 	}
 }
 
+func TestRaidWalkDecisionsDryRunLine(t *testing.T) {
+	f := newFixture(t)
+	f.opts.dryRun = true
+	f.opts.decisions = false
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("dry run exit %d: %s", code, f.stderr.String())
+	}
+	want := " 14 decisions: " + f.out + "/decisions (dashboard: off)\n"
+	if !strings.Contains(f.stdout.String(), want) {
+		t.Fatalf("dry-run plan lacks %q:\n%s", want, f.stdout.String())
+	}
+}
+
+func TestRaidWalkDecisionsPulled(t *testing.T) {
+	f := newFixture(t)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	ended := f.clock.now()
+	f.dash.decisions = []tbdash.DecisionCapture{
+		{ID: "20261029T200000Z-Commander-molten_core", Commander: "Commander", Plan: "molten_core", Map: 1, Started: f.clock.now().Add(-time.Minute), Ended: &ended, Segments: []tbdash.DecisionSegment{
+			{File: "seg-0000.jsonl", FirstSeq: 1, LastSeq: 5, Records: 5, Bytes: 5},
+			{File: "seg-0001.jsonl", FirstSeq: 6, LastSeq: 8, Records: 3, Bytes: 3, Deleted: true},
+		}},
+		{ID: "20261029T200100Z-Commander-molten_core", Commander: "Commander", Plan: "molten_core", Map: 1, Started: f.clock.now().Add(-time.Minute), Ended: &ended},
+	}
+	f.dash.decFiles = map[string]string{
+		"index.json":     `{"id":"x"}`,
+		"seg-0000.jsonl": "{\"seq\":1}\n",
+	}
+	f.defaultRun("onyxias_lair")
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.Decisions == nil || len(sum.Decisions.Captures) != 2 {
+		t.Fatalf("decisions %+v, want the 2 captures of this commander", sum.Decisions)
+	}
+	for _, name := range f.dash.decRequested {
+		if name == "seg-0001.jsonl" {
+			t.Fatalf("deleted segment was requested: %q", f.dash.decRequested)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(f.out, "decisions", "20261029T200000Z-Commander-molten_core", "seg-0000.jsonl")); err != nil {
+		t.Fatalf("segment not pulled: %v (requested %q)", err, f.dash.decRequested)
+	}
+	raw, err := os.ReadFile(filepath.Join(f.out, "decisions", "manifest.json"))
+	if err != nil {
+		t.Fatalf("manifest.json: %v", err)
+	}
+	var man []decisionManifestCapture
+	if err := json.Unmarshal(raw, &man); err != nil {
+		t.Fatalf("manifest: %v", err)
+	}
+	if len(man) != 2 {
+		t.Fatalf("manifest %d captures, want 2: %s", len(man), raw)
+	}
+	if leftovers, _ := filepath.Glob(filepath.Join(f.out, "decisions", "*", "*.part")); len(leftovers) != 0 {
+		t.Fatalf(".part files left behind: %q", leftovers)
+	}
+	st, err := os.Stat(filepath.Join(f.out, "decisions", "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm() != 0o600 {
+		t.Fatalf("manifest mode %o, want 600", st.Mode().Perm())
+	}
+}
+
+func TestRaidWalkDecisionsNoDashboard(t *testing.T) {
+	f := newFixture(t)
+	f.defaultRun("onyxias_lair")
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Decisions == nil || sum.Decisions.Note != "off (no dashboard)" {
+		t.Fatalf("decisions %+v, want the no-dashboard note", sum.Decisions)
+	}
+}
+
+func TestRaidWalkDecisionsBudgetAndFailure(t *testing.T) {
+	f := newFixture(t)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.opts.decisionsMaxMiB = 1
+	ended := f.clock.now()
+	f.dash.decisions = []tbdash.DecisionCapture{
+		{ID: "20261029T200000Z-Commander-molten_core", Commander: "Commander", Ended: &ended, Started: f.clock.now()},
+		{ID: "20261029T200100Z-Commander-molten_core", Commander: "Commander", Ended: &ended, Started: f.clock.now()},
+	}
+	f.dash.decFiles = map[string]string{"index.json": string(make([]byte, 2*1024*1024))}
+	f.defaultRun("onyxias_lair")
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0 (the pull never changes the exit code)", code)
+	}
+	sum := f.summary()
+	if sum.Decisions == nil || !strings.Contains(sum.Decisions.Note, "budget") {
+		t.Fatalf("decisions %+v, want a budget note", sum.Decisions)
+	}
+}
+
+func TestRaidWalkDecisionsServerIDRefused(t *testing.T) {
+	f := newFixture(t)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	ended := f.clock.now()
+	f.dash.decisions = []tbdash.DecisionCapture{
+		{ID: "../evil", Commander: "Commander", Ended: &ended, Started: f.clock.now()},
+		{ID: "20261029T200000Z-Commander-molten_core", Commander: "Commander", Ended: &ended, Started: f.clock.now()},
+	}
+	f.dash.decFiles = map[string]string{"index.json": `{"id":"x"}`}
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0", code)
+	}
+	sum := f.summary()
+	if sum.Decisions == nil || len(sum.Decisions.Captures) != 1 {
+		t.Fatalf("decisions %+v, want only the well-formed id pulled", sum.Decisions)
+	}
+}
+
+func TestRaidWalkDecisionsFileFailureKeepsOthers(t *testing.T) {
+	f := newFixture(t)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	ended := f.clock.now()
+	f.dash.decisions = []tbdash.DecisionCapture{
+		{ID: "20261029T200000Z-Commander-molten_core", Commander: "Commander", Ended: &ended, Started: f.clock.now(), Segments: []tbdash.DecisionSegment{{File: "seg-0000.jsonl"}}},
+		{ID: "20261029T200100Z-Commander-molten_core", Commander: "Commander", Ended: &ended, Started: f.clock.now()},
+	}
+	f.dash.decFiles = map[string]string{"index.json": `{"id":"x"}`}
+	f.dash.decFileErr = map[string]error{"seg-0000.jsonl": errors.New("HTTP 500 for GET /api/v1/decisions")}
+	f.defaultRun("onyxias_lair")
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0 (a failed file notes and the rest continue)", code)
+	}
+	sum := f.summary()
+	if sum.Decisions == nil || len(sum.Decisions.Captures) != 1 {
+		t.Fatalf("decisions %+v, want the good capture pulled and the failed one noted", sum.Decisions)
+	}
+	found := false
+	for _, n := range sum.Notes {
+		if strings.Contains(n, "20261029T200000Z-Commander-molten_core") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no failed-file note in %q", sum.Notes)
+	}
+}
+
+// TestRaidWalkDecisionsFailedRepullKeepsComplete: an existing complete capture survives a failed
+// re-pull — the failure removes only the staging dir, never the target.
+func TestRaidWalkDecisionsFailedRepullKeepsComplete(t *testing.T) {
+	out := t.TempDir()
+	ended := time.Now()
+	id := "20261029T200000Z-Commander-molten_core"
+	good := &fakeDash{
+		decisions: []tbdash.DecisionCapture{
+			{ID: id, Commander: "Commander", Ended: &ended, Started: ended.Add(-time.Minute)},
+		},
+		decFiles: map[string]string{"index.json": `{"id":"x"}`},
+	}
+	if _, notes := pullDecisionsInto(context.Background(), good, "Commander", time.Time{}, time.Time{}, out, 1<<20); len(notes) != 0 {
+		t.Fatalf("first pull notes %q", notes)
+	}
+	want, err := os.ReadFile(filepath.Join(out, "decisions", id, "index.json"))
+	if err != nil {
+		t.Fatalf("first pull: %v", err)
+	}
+	bad := &fakeDash{
+		decisions: []tbdash.DecisionCapture{
+			{ID: id, Commander: "Commander", Ended: &ended, Started: ended.Add(-time.Minute)},
+		},
+		decFiles:   map[string]string{"index.json": `{"id":"x"}`},
+		decFileErr: map[string]error{"index.json": errors.New("HTTP 500 for GET /api/v1/decisions")},
+	}
+	if _, notes := pullDecisionsInto(context.Background(), bad, "Commander", time.Time{}, time.Time{}, out, 1<<20); len(notes) == 0 {
+		t.Fatal("failed re-pull: no note")
+	}
+	got, err := os.ReadFile(filepath.Join(out, "decisions", id, "index.json"))
+	if err != nil {
+		t.Fatalf("complete capture lost on failed re-pull: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("complete capture changed on failed re-pull: %q, want %q", got, want)
+	}
+	if leftovers, _ := filepath.Glob(filepath.Join(out, "decisions", id+"*")); len(leftovers) != 1 {
+		t.Fatalf("staging left behind or target touched: %q", leftovers)
+	}
+	if stag, _ := filepath.Glob(filepath.Join(out, "decisions", ".*staging*")); len(stag) != 0 {
+		t.Fatalf("staging dirs left behind: %q", stag)
+	}
+}
+
+// TestRaidWalkDecisionsUnknownSegmentFailsCapture: a non-deleted segment the file regex rejects
+// fails that capture with a note; it is not in the success manifest.
+func TestRaidWalkDecisionsUnknownSegmentFailsCapture(t *testing.T) {
+	f := newFixture(t)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	ended := f.clock.now()
+	f.dash.decisions = []tbdash.DecisionCapture{
+		{ID: "20261029T200000Z-Commander-molten_core", Commander: "Commander", Ended: &ended, Started: f.clock.now(), Segments: []tbdash.DecisionSegment{{File: "seg-evil!.jsonl"}}},
+		{ID: "20261029T200100Z-Commander-molten_core", Commander: "Commander", Ended: &ended, Started: f.clock.now()},
+	}
+	f.dash.decFiles = map[string]string{"index.json": `{"id":"x"}`}
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (the unknown segment notes, the rest continues)", code)
+	}
+	sum := f.summary()
+	if sum.Decisions == nil || len(sum.Decisions.Captures) != 1 {
+		t.Fatalf("decisions %+v, want only the good capture", sum.Decisions)
+	}
+	if sum.Decisions.Captures[0].ID != "20261029T200100Z-Commander-molten_core" {
+		t.Fatalf("decisions %+v, want the good capture kept", sum.Decisions)
+	}
+	found := false
+	for _, n := range sum.Notes {
+		if strings.Contains(n, "seg-evil!.jsonl") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no unknown-segment note in %q", sum.Notes)
+	}
+	raw, err := os.ReadFile(filepath.Join(f.out, "decisions", "manifest.json"))
+	if err != nil {
+		t.Fatalf("manifest.json: %v", err)
+	}
+	var man []decisionManifestCapture
+	if err := json.Unmarshal(raw, &man); err != nil {
+		t.Fatalf("manifest: %v", err)
+	}
+	if len(man) != 1 || man[0].ID != "20261029T200100Z-Commander-molten_core" {
+		t.Fatalf("manifest %s, want only the good capture", raw)
+	}
+}
+
 func TestRaidWalkDryRunPrintsThePhasePlan(t *testing.T) {
 	f := newFixture(t)
 	f.opts.dryRun = true
@@ -1354,6 +1630,7 @@ phases:
  11 hold: 0m
  12 commander: status; teardown --json ` + f.out + `/slot
  13 summary: ` + f.out + `/summary.json, ` + f.out + `/summary.txt
+ 14 decisions: ` + f.out + `/decisions (dashboard: on)
 `
 	if got != want {
 		t.Fatalf("dry-run plan:\n%s\nwant:\n%s", got, want)
