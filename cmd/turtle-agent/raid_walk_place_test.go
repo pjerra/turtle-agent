@@ -673,7 +673,7 @@ func placePlanRows(t *testing.T) (planexport.Rows, raidwalk.PlacePlan) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	step, leg, err := raidwalk.PlaceStart(rows, []string{"from", "leg", "high_priest_thekal"})
+	step, leg, _, err := raidwalk.PlaceStart(rows, []string{"from", "leg", "high_priest_thekal"})
 	if err != nil {
 		t.Fatal(err)
 	}

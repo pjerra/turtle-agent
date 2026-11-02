@@ -848,9 +848,12 @@ func (w *walk) validate() error {
 		startStep = n
 	}
 	if w.opts.place {
-		step, leg, err := raidwalk.PlaceStart(w.rows, w.fromWords)
+		step, leg, fallbackFrom, err := raidwalk.PlaceStart(w.rows, w.fromWords)
 		if err != nil {
 			return stopf(exitUsage, "%v", err)
+		}
+		if fallbackFrom != "" {
+			w.note("place: leg %s has no quiet row; placing at step %d (leg %s)", fallbackFrom, step, leg)
 		}
 		p, ok := raidwalk.PlacePoint(w.rows, step)
 		if !ok {

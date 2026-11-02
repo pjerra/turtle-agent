@@ -218,29 +218,33 @@ func eventStep(rows planexport.Rows, i int) (int, bool) {
 
 // PlaceStart is the start step of a placed walk (spec 4.2): --from "step N" as given (a positioned move row), or
 // --from "leg L" staged at the highest move row before the leg's first creature row that has no AHEAD creature row
-// within PlaceStartClearYd. The second answer names the leg the start came from ("" for an explicit step).
-func PlaceStart(rows planexport.Rows, from []string) (int, string, error) {
+// within PlaceStartClearYd. When the leg holds no such row, the LAST quiet move row before that point is used,
+// searching backward through the earlier legs (walk 26c: Jeklik's leg starts with a pull); only when no quiet row
+// stands anywhere before the first pull is the placement refused. The second answer names the leg the start came
+// from ("" for an explicit step), the third the requested leg's name when the start fell back to an earlier leg (""
+// otherwise): the caller logs `place: leg X has no quiet row; placing at step N (leg Y)`.
+func PlaceStart(rows planexport.Rows, from []string) (step int, leg, fallbackFrom string, err error) {
 	if len(from) != 3 || from[0] != "from" {
-		return 0, "", errors.New("place: the start needs the words of --from (ParseFrom)")
+		return 0, "", "", errors.New("place: the start needs the words of --from (ParseFrom)")
 	}
 	switch from[1] {
 	case "step":
 		n, err := strconv.Atoi(from[2])
 		if err != nil || n < 1 || n > len(rows.Steps) {
-			return 0, "", fmt.Errorf("--place --from step %s: the rows have %d steps", from[2], len(rows.Steps))
+			return 0, "", "", fmt.Errorf("--place --from step %s: the rows have %d steps", from[2], len(rows.Steps))
 		}
 		s := rows.Steps[n-1]
 		if !moveRow(s) || !placedRow(s) {
-			return 0, "", fmt.Errorf("--place --from step %d: step %d is a %s row; place at a move row before it", n, n, s.Kind)
+			return 0, "", "", fmt.Errorf("--place --from step %d: step %d is a %s row; place at a move row before it", n, n, s.Kind)
 		}
 		if k, ok := eventStep(rows, n-1); ok {
-			return 0, "", fmt.Errorf("--place --from step %d: the start would fall into the event at step %d", n, k)
+			return 0, "", "", fmt.Errorf("--place --from step %d: the start would fall into the event at step %d", n, k)
 		}
-		return n, "", nil
+		return n, "", "", nil
 	case "leg":
 		leg, name, err := findLeg(rows, from[2])
 		if err != nil {
-			return 0, "", fmt.Errorf("--place --from leg %s: %v", from[2], err)
+			return 0, "", "", fmt.Errorf("--place --from leg %s: %v", from[2], err)
 		}
 		lo, hi := legSpan(rows, leg)
 		first := -1
@@ -251,7 +255,7 @@ func PlaceStart(rows planexport.Rows, from []string) (int, string, error) {
 			}
 		}
 		if first < 0 {
-			return 0, "", fmt.Errorf("--place --from leg %s: the leg has no pull, boss or hold row", name)
+			return 0, "", "", fmt.Errorf("--place --from leg %s: the leg has no pull, boss or hold row", name)
 		}
 		for i := first - 1; i >= lo && i >= 0; i-- {
 			s := rows.Steps[i]
@@ -262,13 +266,39 @@ func PlaceStart(rows planexport.Rows, from []string) (int, string, error) {
 				continue
 			}
 			if k, ok := eventStep(rows, i); ok {
-				return 0, "", fmt.Errorf("--place --from leg %s: the start would fall into the event at step %d", name, k)
+				return 0, "", "", fmt.Errorf("--place --from leg %s: the start would fall into the event at step %d", name, k)
 			}
-			return i + 1, name, nil
+			return i + 1, name, "", nil
 		}
-		return 0, "", fmt.Errorf("--place --from leg %s: leg %s has no quiet move row before its first pull: pass --from \"step N\"", name, name)
+		// No quiet row in the leg itself: fall back to the LAST quiet move row before that point, searching
+		// backward through the earlier legs. An event row is skipped, not refused: the server would move the start
+		// back out of it, so it is no quiet row either.
+		for i := lo - 1; i >= 0; i-- {
+			s := rows.Steps[i]
+			if !moveRow(s) || !placedRow(s) {
+				continue
+			}
+			if aheadCreatureWithin(rows, i, PlaceStartClearYd) {
+				continue
+			}
+			if _, ok := eventStep(rows, i); ok {
+				continue
+			}
+			return i + 1, startLegName(rows, s.Leg), name, nil
+		}
+		return 0, "", "", fmt.Errorf("--place --from leg %s: leg %s has no quiet move row before its first pull: pass --from \"step N\"", name, name)
 	}
-	return 0, "", fmt.Errorf("--place: --from wants \"leg L\" or \"step N\", not %q", strings.Join(from, " "))
+	return 0, "", "", fmt.Errorf("--place: --from wants \"leg L\" or \"step N\", not %q", strings.Join(from, " "))
+}
+
+// startLegName is the leg a fallback start row belongs to, as the messages name it.
+func startLegName(rows planexport.Rows, leg int) string {
+	for _, l := range rows.Legs {
+		if l.Leg == leg {
+			return legName(l)
+		}
+	}
+	return strconv.Itoa(leg)
 }
 
 // FromStartStep is the step a --from clause starts the run leader at without --place (spec 5.2): N for "step N", the
