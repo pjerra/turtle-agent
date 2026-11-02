@@ -426,9 +426,11 @@ func TestRaidWalkSelfRegroupSummonsNobody(t *testing.T) {
 	}
 }
 
-// TestRaidWalkReviveLandedCheck pins the landing predicate (Codex HIGH, F4 round 2): the session reports the `.go`
-// destination at once, flagged ZUnknown until the server sends a position, so only a settled status counts. x/y
-// must be within 10 yd and z within 30 yd (dropToFloor may move z), on the plan's map.
+// TestRaidWalkReviveLandedCheck pins the landing predicate (Codex HIGH, F4 round 2, walk 24 C1): the session
+// reports the `.go` destination at once, flagged ZUnknown until the server sends a position, so only a settled
+// status counts. x/y must be within 10 yd and z within 30 yd (dropToFloor may move z), on the plan's map. A
+// teleport the session has ACKED (TeleportSeq > beforeSeq) is a landing over a navmesh hole, where the z guess
+// never settles; still falling blocks it.
 func TestRaidWalkReviveLandedCheck(t *testing.T) {
 	p := dungeon.Point{X: 100, Y: 200, Z: 50}
 	at := func(x, y, z float32) session.StatusInfo {
@@ -454,7 +456,7 @@ func TestRaidWalkReviveLandedCheck(t *testing.T) {
 		{"still falling", falling, false},
 		{"wrong map", otherMap, false},
 	} {
-		if got := reviveLanded(p, 309, 309, c.st); got != c.want {
+		if got := reviveLanded(p, 309, 309, c.st, 0, false); got != c.want {
 			t.Fatalf("near go: %s: reviveLanded = %v, want %v", c.name, got, c.want)
 		}
 	}
@@ -472,8 +474,30 @@ func TestRaidWalkReviveLandedCheck(t *testing.T) {
 		{"x/y 11 yd off", at(111, 200, 50), false},
 		{"z 40 yd off", at(100, 200, 90), false},
 	} {
-		if got := reviveLanded(p, 309, 0, c.st); got != c.want {
+		if got := reviveLanded(p, 309, 0, c.st, 0, false); got != c.want {
 			t.Fatalf("%s: reviveLanded = %v, want %v", c.name, got, c.want)
+		}
+	}
+	// A NEAR go over a navmesh hole (walk 24 C1): the seq advanced past beforeSeq is the landing; an equal seq is
+	// not; still falling is not; an unread beforeSeq (haveSeq false) leaves the old rule.
+	zUnknownSeq := at(100, 200, 50)
+	zUnknownSeq.ZUnknown, zUnknownSeq.TeleportSeq = true, 5
+	zUnknownFalling := at(100, 200, 50)
+	zUnknownFalling.ZUnknown, zUnknownFalling.TeleportSeq, zUnknownFalling.Falling = true, 5, true
+	for _, c := range []struct {
+		name      string
+		st        session.StatusInfo
+		beforeSeq uint64
+		haveSeq   bool
+		want      bool
+	}{
+		{"z unknown, seq advanced", zUnknownSeq, 4, true, true},
+		{"z unknown, seq equal", zUnknownSeq, 5, false, false},
+		{"z unknown, seq advanced but falling", zUnknownFalling, 4, true, false},
+		{"z unknown, beforeSeq unread", zUnknownSeq, 0, false, false},
+	} {
+		if got := reviveLanded(p, 309, 309, c.st, c.beforeSeq, c.haveSeq); got != c.want {
+			t.Fatalf("near go over a hole: %s: reviveLanded = %v, want %v", c.name, got, c.want)
 		}
 	}
 }
@@ -580,9 +604,6 @@ func TestRaidWalkReviveAppearsAtAHireFirst(t *testing.T) {
 	f.allDeadFromHires()
 	var resumeAt time.Time
 	resumeHook(f, 24, 28, &resumeAt)
-	f.agent.mu.Lock()
-	f.agent.farZUnknown = true
-	f.agent.mu.Unlock()
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
 	}
@@ -639,7 +660,7 @@ func TestRaidWalkReviveAppearsAtAHireFirst(t *testing.T) {
 func TestRaidWalkReviveLandsAfterAFarTeleport(t *testing.T) {
 	f, party := selfRegroupWipeWith(t, nil, func(f *fixture) {
 		f.agent.mu.Lock()
-		f.agent.farZUnknown, f.agent.appearRefused = true, true
+		f.agent.appearRefused = true
 		f.agent.mu.Unlock()
 	})
 	gm := f.agent.gmLines()
@@ -754,7 +775,7 @@ func ghostRevive(t *testing.T, statusFails int) (*fixture, int) {
 	var resumeAt time.Time
 	resumeHook(f, 24, 28, &resumeAt)
 	f.agent.mu.Lock()
-	f.agent.farZUnknown, f.agent.ghostsOff = true, true
+	f.agent.ghostsOff = true
 	f.agent.mu.Unlock()
 	if statusFails > 0 {
 		armStatusFails(f, statusFails)
@@ -890,7 +911,7 @@ func TestRaidWalkAppearLandedCheck(t *testing.T) {
 		{"already next to the hire, not moved (stale)", at(309, 101, 100, 12), at(309, 101, 100, 12), false},
 		{"near go on the map next to the hire", at(309, 101, 100, 12), at(309, 105, 100, 12), true},
 	} {
-		if got := appearLanded(c.st, 309, hire, c.before); got != c.want {
+		if got := appearLanded(c.st, 309, hire, c.before, 0); got != c.want {
 			t.Fatalf("%s: appearLanded = %v, want %v", c.name, got, c.want)
 		}
 	}
@@ -942,6 +963,9 @@ func TestRaidWalkReviveNeverLanding(t *testing.T) {
 	sum := f.summary()
 	if !strings.Contains(sum.EndReason, "not revived: the commander did not land at the revive point") {
 		t.Fatalf("end %q, want %q", sum.EndReason, "not revived: the commander did not land at the revive point")
+	}
+	if !strings.Contains(sum.EndReason, "(last read: map") {
+		t.Fatalf("end %q, want the last status read in it", sum.EndReason)
 	}
 	if n := countPrefix(f.agent.gmLines(), ".summon "); n != 0 {
 		t.Fatalf("%d summons, want none: the commander never landed", n)

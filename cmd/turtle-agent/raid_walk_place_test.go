@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -68,12 +69,19 @@ func placeHires(f *fixture, x, y, z float32) {
 type placeToolkit struct {
 	t    *testing.T
 	f    *fixture
-	inst float64 // the instance `q inst` and `q group` report
+	mu   sync.Mutex // guards fields a test sets while the walk runs (instAfterSignal)
+	inst float64    // the instance `q inst` and `q group` report
 	// cmdInst, when set, is what `q inst` reports instead (a commander in another copy).
 	cmdInst float64
 	// afterPlace, when set, makes `q inst` report movedInst once the place has happened.
 	afterPlace bool
 	movedInst  float64
+	// instAfterSignal makes the FIRST `q inst` after the test arms it report otherInst, later ones the normal inst
+	// (walk 24 C2: the copy moved under a placed walk at the revive, then held: the appear path runs, the summons'
+	// own check passes). armed is set by the test (the revive's `.gm visible off` marks its moment).
+	instAfterSignal bool
+	otherInst       float64
+	instSignalAt    int
 	// units is the pre-read's answer for one `q units` command; nil: an empty list.
 	units func(cmd string) (units []any, trunc bool)
 	// quiet is the answer of the n-th quiet read (nil: always quiet).
@@ -103,6 +111,18 @@ func (p *placeToolkit) answer(cmd string) (ttResult, error) {
 			inst = p.cmdInst
 		} else if p.afterPlace && p.movedInst != 0 {
 			inst = p.movedInst
+		}
+		p.mu.Lock()
+		armed, other := p.instAfterSignal, p.otherInst
+		if armed {
+			p.instSignalAt++
+			if p.instSignalAt > 1 {
+				armed = false
+			}
+		}
+		p.mu.Unlock()
+		if armed {
+			inst = other
 		}
 		return ttReplyOf(p.t, map[string]any{"map": 309, "inst": inst}), nil
 	case strings.HasPrefix(cmd, "q group of="):
@@ -590,6 +610,134 @@ func TestReviveUsesPlacePointNoEntranceFallback(t *testing.T) {
 		if strings.HasPrefix(line, entrance) {
 			t.Fatalf("the placed walk fell back to the entrance: %q", line)
 		}
+	}
+}
+
+// A placed walk whose revive lands over a navmesh hole still revives (walk 24 test2 r3). The navmesh has a hole
+// under the place point, so the z guess never settles (ZUnknown for good), and the old near rule never accepts the
+// landing; the session's acked teleport (TeleportSeq) is the landing, so the summons leave.
+func TestRaidWalkPlacedReviveLandsOverAMeshHole(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	f.opts.wipeResume = 0
+	f.agent.startReply = zgPlaceReply(t)
+	f.agent.meshHole = true // the revive's near go lands over a mesh hole
+	wipeAfterStart(f)
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if strings.Contains(sum.EndReason, "not revived: the commander did not land") {
+		t.Fatalf("the revive never landed over the mesh hole: %q", sum.EndReason)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".summon "); n == 0 {
+		t.Fatalf("no summons went out: the revive never reached its summon stage: %q", f.agent.gmLines())
+	}
+}
+
+// A placed walk whose commander is off the plan's map at the revive (map 0) takes the appear path: the placed
+// shortcut only holds while the map does (walk 24 C2). The appear binds the commander to the hires' copy first.
+func TestRaidWalkPlacedReviveOffMapAppearsFirst(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	f.opts.wipeResume = 0
+	f.agent.startReply = zgPlaceReply(t)
+	// The commander is off the map at the revive, but the appear (and its .go) must land it back in the raid's copy.
+	onGM := f.agent.onGM
+	f.agent.onGM = func(line string) {
+		if onGM != nil {
+			onGM(line)
+		}
+		if line == ".gm visible off" {
+			f.agent.mu.Lock()
+			f.agent.status.Map = 0
+			f.agent.mu.Unlock()
+		}
+	}
+	wipeAfterStart(f)
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if strings.Contains(sum.EndReason, "did not land") {
+		t.Fatalf("the commander never landed after its appear: %q", sum.EndReason)
+	}
+	// The appear must precede the revive's .go xyz after the run started.
+	appearAt, goAt := -1, -1
+	started := false
+	for i, line := range f.agentLog() {
+		if strings.HasPrefix(line, "cmdr run start ") {
+			started = true
+			continue
+		}
+		if !started {
+			continue
+		}
+		if appearAt < 0 && strings.HasPrefix(line, "gm .appear ") {
+			appearAt = i
+		}
+		if goAt < 0 && strings.HasPrefix(line, "gm .go xyz ") {
+			goAt = i
+		}
+	}
+	if appearAt < 0 || goAt < 0 || appearAt > goAt {
+		t.Fatalf("appear at %d, go at %d (want appear first): %q", appearAt, goAt, f.agentLog())
+	}
+}
+
+// A placed walk whose commander is in another copy at the revive (map 309, instance 104) takes the appear path too
+// (walk 24 C2): the map alone is not enough, the toolkit instance must match the raid's.
+func TestRaidWalkPlacedReviveOtherCopyAppearsFirst(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.wipeResume = 0
+	f.agent.startReply = zgPlaceReply(t)
+	p.otherInst = 104
+	// Arm the copy move at the revive's own `.gm visible off` (after the run started): the FIRST `q inst` after it
+	// is placeStillJoined's, so the appear path runs, and the later summons check sees the copy held again.
+	onGM := f.agent.onGM
+	f.agent.onGM = func(line string) {
+		if onGM != nil {
+			onGM(line)
+		}
+		if line == ".gm visible off" {
+			f.agent.mu.Lock()
+			started := f.agent.runStarted
+			f.agent.mu.Unlock()
+			if started {
+				p.mu.Lock()
+				p.instAfterSignal = true
+				p.mu.Unlock()
+			}
+		}
+	}
+	wipeAfterStart(f)
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if strings.Contains(sum.EndReason, "did not land") {
+		t.Fatalf("the commander never landed after its appear: %q", sum.EndReason)
+	}
+	appearAt, goAt := -1, -1
+	started := false
+	for i, line := range f.agentLog() {
+		if strings.HasPrefix(line, "cmdr run start ") {
+			started = true
+			continue
+		}
+		if !started {
+			continue
+		}
+		if appearAt < 0 && strings.HasPrefix(line, "gm .appear ") {
+			appearAt = i
+		}
+		if goAt < 0 && strings.HasPrefix(line, "gm .go xyz ") {
+			goAt = i
+		}
+	}
+	if appearAt < 0 || goAt < 0 || appearAt > goAt {
+		t.Fatalf("appear at %d, go at %d (want appear first): %q", appearAt, goAt, f.agentLog())
 	}
 }
 
