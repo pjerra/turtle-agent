@@ -4341,7 +4341,7 @@ turtle-agent dashboard --listen 127.0.0.1:8790 --control --control-tokens ~/.con
 | `--control-tokens` | `~/.config/turtle-agent/dashboard-control-tokens` | lines of `label token`, mode 0600, owned by you: its own file, **never** `--edit-tokens` (an editing token must not press run buttons); the label is the `who` in the control log |
 | `--control-trust-local` | off | a control from this machine, or from a Tailscale address you named, needs no token typed (the rules are the route editor's, above; its own nonce, sent in `X-Control-Nonce`). Needs `--control` |
 | `--control-trust-label` | `owner` | with `--control-trust-local`: the label in the `--control-tokens` file the trusted controls are made as |
-| `--control-log` | `~/.local/state/turtle-agent/dashboard-control.jsonl` | every control appends two JSON lines (the request before the RPC, the result after); the folder is made 0700, the file 0600, and a log that cannot be opened stops `--control` |
+| `--control-log` | `~/.local/state/turtle-agent/dashboard-control.jsonl` | every control appends two JSON lines (the request before the RPC, the result after); the folder is made 0700 (an existing folder must be yours and not writable by others, or `--control` refuses to start), the file 0600 (a link at the path is refused), and a log that cannot be opened stops `--control` |
 
 The contract: `GET /api/control/status` -> `200 {"enabled":true,"local_trusted":bool,"trust_nonce"?:string,"actions":["run","tune"]}`
 (404 without `--control`); `POST /api/control/<id>/run` `{"verb":"pause"|"resume"|"skip"|"stop","confirm":bool}`; `POST

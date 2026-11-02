@@ -991,6 +991,73 @@ func TestControlLogHidesPeerFromUnauthorizedReaders(t *testing.T) {
 	}
 }
 
+// The log's folder must be ours and not writable by others: a group- or world-writable folder is refused (not fixed), so no one else can swap
+// the file under it. A dangling link at the path is refused too (the open is O_NOFOLLOW, so it does not create through the link).
+func TestControlLogFolderAndDanglingLink(t *testing.T) {
+	root := t.TempDir()
+	tk, err := routeedit.LoadTokens(writeTokens(t, root))
+	must(t, err)
+	p := NewPoller(Options{ConfigDir: root})
+
+	for _, mode := range []os.FileMode{0o770, 0o707} {
+		open := filepath.Join(root, fmt.Sprintf("open-%04o", mode))
+		must(t, os.Mkdir(open, 0o700))
+		must(t, os.Chmod(open, mode)) // Mkdir's mode is cut by the umask, so set it again
+		if _, err := NewController(p, ControlConfig{Tokens: tk, LogPath: filepath.Join(open, "control.jsonl")}); err == nil || !strings.Contains(err.Error(), "writable by others") {
+			t.Fatalf("a log in a folder with mode %04o: %v", mode, err)
+		}
+	}
+
+	dangling := filepath.Join(root, "dangling.jsonl")
+	must(t, os.Symlink(filepath.Join(root, "nowhere.jsonl"), dangling))
+	if _, err := NewController(p, ControlConfig{Tokens: tk, LogPath: dangling}); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("a dangling symbolic link as the log: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "nowhere.jsonl")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the open made a file through the dangling link: %v", err)
+	}
+}
+
+// The tail reads through the descriptor the log was opened with: lines appended through it come back for their agent, and a file put at
+// the path afterwards is not what is read.
+func TestControlLogTailReadsDescriptor(t *testing.T) {
+	root := t.TempDir()
+	tk, err := routeedit.LoadTokens(writeTokens(t, root))
+	must(t, err)
+	p := NewPoller(Options{ConfigDir: root})
+	path := filepath.Join(root, "control.jsonl")
+	c, err := NewController(p, ControlConfig{Tokens: tk, LogPath: path})
+	must(t, err)
+	defer c.Close()
+
+	for i := 1; i <= 3; i++ {
+		must(t, c.log.append(controlRecord{Phase: "request", Agent: "a1", Action: "run", Verb: "pause"}))
+		must(t, c.log.append(controlRecord{Phase: "result", Agent: "a1", Action: "run", Verb: "pause", Outcome: "ok", Message: fmt.Sprintf("n%d", i)}))
+	}
+	must(t, c.log.append(controlRecord{Phase: "result", Agent: "other", Action: "run", Verb: "pause", Outcome: "ok", Message: "not a1"}))
+
+	// the path now names another file: a tail that reopened it would read this
+	other := filepath.Join(root, "other.jsonl")
+	must(t, os.WriteFile(other, []byte(`{"phase":"result","agent":"a1","message":"from the other file"}`+"\n"), 0o600))
+	must(t, os.Rename(other, path))
+
+	got, err := c.log.tail("a1", 2)
+	must(t, err)
+	if len(got) != 2 || got[0].Message != "n2" || got[1].Message != "n3" {
+		t.Fatalf("the last two results of a1: %+v", got)
+	}
+	all, err := c.log.tail("a1", 10)
+	must(t, err)
+	if len(all) != 3 {
+		t.Fatalf("a1 has %d results through the descriptor, want 3: %+v", len(all), all)
+	}
+	for _, r := range all {
+		if r.Message == "from the other file" {
+			t.Fatalf("the tail read the file that replaced the path: %+v", all)
+		}
+	}
+}
+
 // L3: the control log is opened like a token file: a link is refused, a folder is refused, and a mode of ours that others can read is cut to 0600.
 func TestControlLogFileChecks(t *testing.T) {
 	root := t.TempDir()

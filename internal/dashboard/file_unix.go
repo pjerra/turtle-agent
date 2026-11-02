@@ -3,6 +3,8 @@
 package dashboard
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"syscall"
 )
@@ -16,4 +18,15 @@ func ownedByUser(st os.FileInfo) bool {
 		return int(sys.Uid) == os.Getuid()
 	}
 	return true
+}
+
+// openRefusal names the refusal behind an open that failed on a link (O_NOFOLLOW) or a folder (O_RDWR); any other error is returned as it is.
+func openRefusal(path string, err error) error {
+	switch {
+	case errors.Is(err, syscall.ELOOP):
+		return fmt.Errorf("control log %s is a symbolic link", path)
+	case errors.Is(err, syscall.EISDIR):
+		return fmt.Errorf("control log %s is not a regular file", path)
+	}
+	return err
 }
