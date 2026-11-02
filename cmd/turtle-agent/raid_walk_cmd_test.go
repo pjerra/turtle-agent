@@ -182,6 +182,11 @@ type walkFakeAgent struct {
 	// the graveyard, once the run has started); appearRefusedUntilRevive refuses every `.appear` until the first `.revive` went out.
 	statusFailNext int
 	ghostsOff      bool
+	// cancelStatusAt cancels cancelStatusCtx on the n-th status read (1-based; 0: disabled): the read answers while
+	// the walk is already interrupted, so a failure there latches nothing. M2 round 5: the old statusFailNext-only
+	// shape cancelled before bossCorpse ran and never reached the status-cancel guard.
+	cancelStatusAt  int
+	cancelStatusCtx context.CancelFunc
 	// ghostsOffN is a PARTIAL release: the first N dead hires show on map 0 (the rest keep the plan's map), so a
 	// walk has a hire off the map and one still to appear at (the post-wait ghosts re-check, review round 1 M2).
 	ghostsOffN               int
@@ -269,6 +274,15 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 	switch method {
 	case "status":
 		f.mu.Lock()
+		if f.cancelStatusAt > 0 {
+			f.cancelStatusAt--
+			if f.cancelStatusAt == 0 && f.cancelStatusCtx != nil {
+				cancel := f.cancelStatusCtx
+				f.mu.Unlock()
+				cancel()
+				f.mu.Lock()
+			}
+		}
 		if f.statusFailNext > 0 {
 			f.statusFailNext--
 			f.mu.Unlock()
@@ -5178,6 +5192,9 @@ func zgThekalFixture(t *testing.T, plan string) *fixture {
 		t.Fatal(err)
 	}
 	f.agent.instMap = p.Map
+	// The live commander stands in the instance by the pause (the enter phase put the raid there); without this the
+	// M1 guard (corpseMoveReady) latches every walk-25 point_far test off the map before any move goes out.
+	f.agent.enterMap = p.Map
 	return f
 }
 
@@ -5556,6 +5573,620 @@ func TestRaidWalkBossNotFoundToolkitCorpseNeedsConfirmation(t *testing.T) {
 	f.agent.mu.Unlock()
 	if countPrefix(verbs, "skip") != 0 {
 		t.Fatalf("run verbs %v, want no skip: the corpse wait never confirmed within the pause", verbs)
+	}
+}
+
+// Walk 25 F3: the toolkit's corpse read is range-limited to 150 yd, so a read from far away is refused with
+// point_far. The walk moves the commander to the boss row once (with the revive's own GM sequence), re-reads the
+// same entry once, and finds the corpse: exactly one `.go xyz` to the boss spot between the two reads, one
+// `.bot run skip`, and the move note. Today: no move, latched, no skip.
+// Codex round 1: a .go to the boss row that fails is not a move: no move note, no second read, and the reads latch
+// off with the real error.
+func TestRaidWalkBossNotFoundCorpseReadPointFarGoFails(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgThekalStart(total, boss)
+	spot := zgRows(t).Steps[boss-1]
+	wantGo := fmt.Sprintf(".go xyz %s %s %s 309", num32(spot.X), num32(spot.Y), num32(spot.Z+2))
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	f.agent.gmFail = func(line string) error {
+		if line == wantGo {
+			return errors.New("command refused")
+		}
+		return nil
+	}
+	f.agent.mu.Lock()
+	f.agent.startQueue = zgThekalPauseQueue(boss, total)
+	f.agent.mu.Unlock()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	f.run(context.Background())
+	f.agent.mu.Lock()
+	tt := append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	if len(tt) != 1 {
+		t.Fatalf("toolkit calls %q, want exactly the one refused read (no re-read after a failed go)", tt)
+	}
+	if hasNote(f.summary(), "the commander moved to the boss row for the corpse read") {
+		t.Fatalf("notes %q, want no move note after a failed go", f.summary().Notes)
+	}
+	if !hasNote(f.summary(), "the move to the boss row failed") {
+		t.Fatalf("notes %q, want the failed-move note", f.summary().Notes)
+	}
+}
+
+// Walk 25 point_far round 4 (Codex MEDIUM): the status read before the boss-row move fails. The failure latches
+// the reads off with the real error: the walk waits out the pause with exactly one toolkit read in total, instead
+// of repeating the corpse read and the failing status RPC on every pause tick.
+func TestRaidWalkBossNotFoundCorpseReadPointFarStatusFails(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgThekalStart(total, boss)
+	f.agent.mu.Lock()
+	f.agent.startQueue = zgThekalPauseQueue(boss, total)
+	f.agent.mu.Unlock()
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		// Arm the failure only once the corpse read is under way: the login and watch phases need a working status.
+		f.agent.mu.Lock()
+		f.agent.statusFailNext = 100 // every status RPC fails from here on, on every pause tick
+		f.agent.mu.Unlock()
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	tt := append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	if len(tt) != 1 {
+		t.Fatalf("toolkit calls %q, want exactly the one refused read (the status failure latches the reads off)", tt)
+	}
+	if hasNote(f.summary(), "the commander moved to the boss row for the corpse read") {
+		t.Fatalf("notes %q, want no move note after a failed status read", f.summary().Notes)
+	}
+	if !hasNote(f.summary(), "the toolkit corpse read failed") || !hasNote(f.summary(), "agent busy") {
+		t.Fatalf("notes %q, want the latch note carrying the real status error", f.summary().Notes)
+	}
+}
+
+// Walk 25 point_far round 4 (Codex MEDIUM): the `.gm visible off` before the boss-row move fails. The failure
+// latches the reads off with the real error: the walk waits out the pause with exactly one toolkit read in total,
+// instead of repeating the corpse read and the failing GM RPC on every pause tick.
+func TestRaidWalkBossNotFoundCorpseReadPointFarVisibleOffFails(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgThekalStart(total, boss)
+	f.agent.mu.Lock()
+	f.agent.startQueue = zgThekalPauseQueue(boss, total)
+	f.agent.mu.Unlock()
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	f.agent.gmFail = func(line string) error {
+		if line == raidwalk.GMVisibleOff {
+			return errors.New("command refused")
+		}
+		return nil
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	tt := append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	if len(tt) != 1 {
+		t.Fatalf("toolkit calls %q, want exactly the one refused read (the visible-off failure latches the reads off)", tt)
+	}
+	if hasNote(f.summary(), "the commander moved to the boss row for the corpse read") {
+		t.Fatalf("notes %q, want no move note after a failed visible-off", f.summary().Notes)
+	}
+	if !hasNote(f.summary(), "the toolkit corpse read failed") || !hasNote(f.summary(), "command refused") {
+		t.Fatalf("notes %q, want the latch note carrying the real visible-off error", f.summary().Notes)
+	}
+}
+
+// Walk 25 point_far round 4 (Codex MEDIUM): a cancelled context is no toolkit failure. The status read inside the
+// point_far branch answers while the walk itself is interrupted (the fake cancels the context on that read), so
+// bossCorpse returns without latching, like today's code. M2 round 5: the old shape cancelled before bossCorpse ran
+// and never reached the status-cancel guard.
+func TestRaidWalkBossNotFoundCorpseReadPointFarStatusCancelDoesNotLatch(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	rows := zgRows(t).Steps
+	// The guard needs the commander's map (see corpseMoveReady): stand in the instance like MovesAndRereads does.
+	f.agent.status.Map = 309
+	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub", Map: 309}, agent: f.agent, rows: planexport.Rows{Steps: rows},
+		env: walkEnv{now: f.clock.now, sleep: f.clock.sleep}, hires: map[string]bool{}}
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	f.agent.statusFailNext = 1 // the point_far branch's status read fails
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel inside the status handler: the status read answers while the walk is already interrupted.
+	f.agent.cancelStatusAt, f.agent.cancelStatusCtx = 1, cancel
+	if ok, _ := w.bossCorpse(ctx, 14599, []uint32{14599}, w.env.now()); ok {
+		t.Fatalf("bossCorpse = true, want no evidence on a cancelled read")
+	}
+	if w.bossToolkitOff {
+		t.Fatalf("bossToolkitOff latched, want no latch on a cancelled status read")
+	}
+	f.agent.cancelStatusAt, f.agent.cancelStatusCtx = 0, nil
+}
+
+// Walk 25 point_far M2 round 5: a cancel before the go returns without latching: the go and the landing wait run
+// under an interrupted walk, so there is no verdict and no latch.
+func TestRaidWalkBossNotFoundCorpseReadPointFarGoCancelDoesNotLatch(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	rows := zgRows(t).Steps
+	// The guard needs the commander's map (see corpseMoveReady): stand in the instance like MovesAndRereads does.
+	f.agent.status.Map = 309
+	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub", Map: 309}, agent: f.agent, rows: planexport.Rows{Steps: rows},
+		env: walkEnv{now: f.clock.now, sleep: f.clock.sleep}, hires: map[string]bool{}}
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the go and the landing wait run under an interrupted walk: no verdict, no latch
+	if ok, _ := w.bossCorpse(ctx, 14599, []uint32{14599}, w.env.now()); ok {
+		t.Fatalf("bossCorpse = true, want no evidence on a cancelled go")
+	}
+	if w.bossToolkitOff {
+		t.Fatalf("bossToolkitOff latched, want no latch on a cancelled go")
+	}
+}
+
+// Walk 25 point_far M2 round 5: a cancel during the landing wait returns without latching: the go went out but the
+// wait sees the interrupted walk first.
+func TestRaidWalkBossNotFoundCorpseReadPointFarLandingCancelDoesNotLatch(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	rows := zgRows(t).Steps
+	spot := zgRows(t).Steps[zgBossStep(t)-1]
+	// The guard needs the commander's map: stand in the instance, away from the boss row so the wait polls.
+	f.agent.status.Map = 309
+	f.agent.goLagEvery = 1 << 30 // the go never lands: the wait polls until ctx ends it
+	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub", Map: 309}, agent: f.agent, rows: planexport.Rows{Steps: rows},
+		env: walkEnv{now: f.clock.now, sleep: f.clock.sleep}, hires: map[string]bool{}}
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the landing wait runs under an interrupted walk: no verdict, no latch
+	_ = spot
+	if ok, _ := w.bossCorpse(ctx, 14599, []uint32{14599}, w.env.now()); ok {
+		t.Fatalf("bossCorpse = true, want no evidence on a cancelled landing wait")
+	}
+	if w.bossToolkitOff {
+		t.Fatalf("bossToolkitOff latched, want no latch on a cancelled landing wait")
+	}
+	f.agent.goLagEvery = 0
+}
+
+// Walk 25 point_far M1 round 5: the commander stands at the portal (off the plan's map), where a `.go xyz ... 309`
+// would open a NEW copy instead of the hires' one. No move goes out; the reads latch with the not-on-map note.
+func TestRaidWalkBossNotFoundCorpseReadPointFarCommanderOffMapDoesNotMove(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	rows := zgRows(t).Steps
+	// Off the plan's map (the fake's spawn map 1, like a commander still at the portal).
+	f.agent.status.Map = 1
+	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub", Map: 309}, agent: f.agent, rows: planexport.Rows{Steps: rows},
+		env: walkEnv{now: f.clock.now, sleep: f.clock.sleep}, hires: map[string]bool{}}
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	if ok, _ := w.bossCorpse(context.Background(), 14599, []uint32{14599}, w.env.now()); ok {
+		t.Fatalf("bossCorpse = true, want no evidence off the map")
+	}
+	if !w.bossToolkitOff {
+		t.Fatalf("bossToolkitOff = false, want the latch on the off-map commander")
+	}
+	f.agent.mu.Lock()
+	gm, tt := append([]string{}, f.agent.gm...), append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	for _, line := range gm {
+		if strings.HasPrefix(line, ".go xyz") {
+			t.Fatalf("gm lines %q, want no .go xyz from off the map", gm)
+		}
+	}
+	if len(tt) != 1 {
+		t.Fatalf("toolkit calls %q, want exactly the refused read (no re-read after the latch)", tt)
+	}
+}
+
+// Walk 25 point_far M1 round 5, placed walk: the commander's instance moved (status's read agrees it is on the plan's
+// map, but the toolkit copy differs from w.placeInst, as placeStillJoined compares). No move goes out; the reads
+// latch with the instance note.
+func TestRaidWalkBossNotFoundCorpseReadPointFarPlacedInstanceMovesDoesNotMove(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	rows := zgRows(t).Steps
+	f.agent.status.Map = 309
+	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub", Map: 309}, agent: f.agent, rows: planexport.Rows{Steps: rows},
+		env: walkEnv{now: f.clock.now, sleep: f.clock.sleep}, hires: map[string]bool{},
+		place: &raidwalk.PlacePlan{Start: 1}, placeInst: 101}
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if strings.HasPrefix(cmd, "q inst") {
+			return ttReplyOf(t, map[string]any{"map": 309, "inst": 104}), nil
+		}
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	if ok, _ := w.bossCorpse(context.Background(), 14599, []uint32{14599}, w.env.now()); ok {
+		t.Fatalf("bossCorpse = true, want no evidence in another copy")
+	}
+	if !w.bossToolkitOff {
+		t.Fatalf("bossToolkitOff = false, want the latch on the moved copy")
+	}
+	f.agent.mu.Lock()
+	gm, tt := append([]string{}, f.agent.gm...), append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	for _, line := range gm {
+		if strings.HasPrefix(line, ".go xyz") {
+			t.Fatalf("gm lines %q, want no .go xyz from another copy", gm)
+		}
+	}
+	if len(tt) == 0 || !strings.Contains(tt[0], "all dead e=14599") {
+		t.Fatalf("toolkit calls %q, want the refused corpse read first", tt)
+	}
+}
+
+// Walk 25 point_far L4 round 5: the re-read after the move is refused again -> the re-read latches the reads off.
+// The move goes out once (the move note), the re-read fails, and the latch note carries it; the walk waits out the
+// pause with no skip.
+func TestRaidWalkBossNotFoundCorpseReadPointFarRereadRefusedLatches(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgThekalStart(total, boss)
+	f.agent.mu.Lock()
+	f.agent.startQueue = zgThekalPauseQueue(boss, total)
+	f.agent.mu.Unlock()
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	tt := append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	// The move went out once and the re-read failed: the refused read plus its re-read, then the latch.
+	if len(tt) != 2 {
+		t.Fatalf("toolkit calls %q, want the refused read and its re-read (the re-read latches the reads off)", tt)
+	}
+	if !hasNote(f.summary(), "the commander moved to the boss row for the corpse read") {
+		t.Fatalf("notes %q, want the move note (the move landed before the re-read)", f.summary().Notes)
+	}
+	if !hasNote(f.summary(), "the toolkit corpse read failed") {
+		t.Fatalf("notes %q, want the latch note carrying the re-read failure", f.summary().Notes)
+	}
+	if n := countPrefix(f.agent.runVerbs, "skip"); n != 0 {
+		t.Fatalf("run verbs %v, want no skip: a twice-refused read is no evidence", f.agent.runVerbs)
+	}
+}
+
+// Walk 25 point_far L4 round 5: the re-read after the move shows no corpse -> no latch, and the next tick does not
+// move again. Exactly one `.go xyz ... 309` goes out for the whole pause (the portal go does not count), and no skip
+// follows a clean re-read.
+func TestRaidWalkBossNotFoundCorpseReadPointFarRereadCleanMovesOnce(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgThekalStart(total, boss)
+	f.agent.mu.Lock()
+	f.agent.startQueue = zgThekalPauseQueue(boss, total)
+	f.agent.mu.Unlock()
+	spot := zgRows(t).Steps[boss-1]
+	refused := true
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if strings.Contains(cmd, "all dead e=14599") && refused {
+			// Only the FIRST read is refused (the commander stands too far away); once the move lands, the
+			// re-read and later ticks read cleanly. The fake answers from the commander's position like the
+			// landing-wait test does.
+			f.agent.mu.Lock()
+			x, y := f.agent.status.X, f.agent.status.Y
+			f.agent.mu.Unlock()
+			if x != spot.X || y != spot.Y {
+				return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+			}
+			refused = false
+		}
+		return ttReplyOf(t, map[string]any{"units": []any{}}), nil
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	wantGo := fmt.Sprintf(".go xyz %s %s %s 309", num32(spot.X), num32(spot.Y), num32(spot.Z+2))
+	f.agent.mu.Lock()
+	gm, tt := append([]string{}, f.agent.gm...), append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	gos := 0
+	for _, line := range gm {
+		if line == wantGo {
+			gos++
+		}
+	}
+	// One move for the whole pause: the move note's go, and no second move on later ticks.
+	if gos != 1 {
+		t.Fatalf("gm lines %q, want exactly one %q for the whole pause", gm, wantGo)
+	}
+	// The re-read went out (and later ticks re-read cleanly without moving again); no latch either.
+	if len(tt) < 2 {
+		t.Fatalf("toolkit calls %q, want the refused read and at least its clean re-read", tt)
+	}
+	if hasNote(f.summary(), "the toolkit corpse read failed") {
+		t.Fatalf("notes %q, want no latch on a clean re-read", f.summary().Notes)
+	}
+	if verbs := f.agent.runVerbs; countPrefix(verbs, "skip") != 0 {
+		t.Fatalf("run verbs %v, want no skip: a clean re-read is no evidence", verbs)
+	}
+}
+
+// Walk 25 point_far L4 round 5: `.gm visible off` is sent before the go. The send log shows gm visible-off, then the
+// go, then the re-read.
+func TestRaidWalkBossNotFoundCorpseReadPointFarVisibleOffBeforeGo(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	rows := zgRows(t).Steps
+	spot := zgRows(t).Steps[zgBossStep(t)-1]
+	f.agent.status.Map = 309
+	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub", Map: 309}, agent: f.agent, rows: planexport.Rows{Steps: rows},
+		env: walkEnv{now: f.clock.now, sleep: f.clock.sleep}, hires: map[string]bool{}}
+	calls := 0
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		calls++
+		if calls == 1 {
+			return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+		}
+		return ttReplyOf(t, map[string]any{"units": []any{}}), nil
+	}
+	if ok, _ := w.bossCorpse(context.Background(), 14599, []uint32{14599}, w.env.now()); ok {
+		t.Fatalf("bossCorpse = true, want no evidence from a clean re-read")
+	}
+	if w.bossToolkitOff {
+		t.Fatalf("bossToolkitOff latched, want no latch on a clean re-read")
+	}
+	f.agent.mu.Lock()
+	log := append([]string{}, f.agent.log...)
+	f.agent.mu.Unlock()
+	visOff, goIdx, rereadIdx, reads := -1, -1, -1, 0
+	for i, line := range log {
+		switch {
+		case line == "gm "+raidwalk.GMVisibleOff && visOff < 0:
+			visOff = i
+		case strings.HasPrefix(line, "gm .go xyz") && goIdx < 0:
+			goIdx = i
+		case strings.HasPrefix(line, "tt q units"):
+			reads++
+			if reads == 2 {
+				rereadIdx = i
+			}
+		}
+	}
+	_ = spot
+	if visOff < 0 || goIdx < 0 || rereadIdx < 0 || !(visOff < goIdx && goIdx < rereadIdx) {
+		t.Fatalf("send log %q, want gm visible-off, then the go, then the re-read", log)
+	}
+}
+
+func TestRaidWalkBossNotFoundCorpseReadPointFarMovesAndRereads(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgThekalStart(total, boss)
+	spot := zgRows(t).Steps[boss-1]
+	wantGo := fmt.Sprintf(".go xyz %s %s %s 309", num32(spot.X), num32(spot.Y), num32(spot.Z+2))
+	seenGo := false
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if !strings.Contains(cmd, "all dead e=14599") {
+			// The boss's reborn phase entry: no corpse in the toolkit's answer for it.
+			return ttReplyOf(t, map[string]any{"units": []any{}}), nil
+		}
+		if !seenGo {
+			return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+		}
+		return ttReplyOf(t, map[string]any{"units": []map[string]any{{"g": packet.GUID(9).String(), "e": 14599, "dead": true, "d": 12.5, "hp": 0}}}), nil
+	}
+	f.agent.mu.Lock()
+	f.agent.startQueue = zgThekalPauseQueue(boss, total)
+	f.agent.mu.Unlock()
+	f.agent.onGM = func(line string) {
+		if line == wantGo {
+			seenGo = true
+		}
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	zgThekalDoneOnSkip(f, boss, total)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs, tt := append([]string{}, f.agent.runVerbs...), append([]string{}, f.agent.ttCalls...)
+	gm := append([]string{}, f.agent.gm...)
+	log := append([]string{}, f.agent.log...)
+	f.agent.mu.Unlock()
+	if countPrefix(verbs, "skip") != 1 {
+		t.Fatalf("run verbs %v, want exactly one skip", verbs)
+	}
+	// The refused read, the re-read after the move that starts the corpse wait, and at least one read 15 s later:
+	// the kill needs the confirmed corpse (the guid the first frame showed alive), not the re-read alone.
+	if len(tt) < 3 || !strings.Contains(tt[0], "all dead e=14599") || !strings.Contains(tt[1], "all dead e=14599") {
+		t.Fatalf("toolkit calls %q, want the refused read, its re-read and the confirming read of 14599", tt)
+	}
+	gos := 0
+	for _, line := range gm {
+		if line == wantGo {
+			gos++
+		}
+	}
+	if gos != 1 {
+		t.Fatalf("gm lines %q, want exactly one %q between the two reads", gm, wantGo)
+	}
+	// The move went out between the two reads: gm, then tt, in the walk's own send log.
+	goIdx, rereadIdx := -1, -1
+	for i, line := range log {
+		if line == "gm "+wantGo && goIdx < 0 {
+			goIdx = i
+		}
+		if strings.HasPrefix(line, "tt q units") && strings.Contains(line, "all dead e=14599") {
+			rereadIdx = i
+		}
+	}
+	if goIdx < 0 || rereadIdx < 0 || goIdx > rereadIdx {
+		t.Fatalf("send log %q, want the %q gm line before the second corpse read", log, wantGo)
+	}
+	if !hasNote(f.summary(), "the commander moved to the boss row for the corpse read") {
+		t.Fatalf("notes %q, want the move note", f.summary().Notes)
+	}
+}
+
+// Walk 25 point_far round 2: a `.go xyz` answers at once but the server lands the commander a moment later, so a
+// re-read at once can still be refused with point_far and latch the reads off. The walk waits for the landing at
+// the boss row with the revive's own landing wait before the move note and the re-read: the fake lands the go 3
+// status reads later, and the second toolkit read goes out only after it.
+func TestRaidWalkBossNotFoundCorpseReadPointFarWaitsForLanding(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgThekalStart(total, boss)
+	spot := zgRows(t).Steps[boss-1]
+	f.agent.mu.Lock()
+	f.agent.startQueue = zgThekalPauseQueue(boss, total)
+	f.agent.goLagEvery = 3 // the go is accepted but lands 3 status reads later
+	f.agent.mu.Unlock()
+	statusReads := func() int {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		n := 0
+		for _, c := range f.agent.calls {
+			if c == "status" {
+				n++
+			}
+		}
+		return n
+	}
+	var atRead []int
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if !strings.Contains(cmd, "all dead e=14599") {
+			// The boss's reborn phase entry: no corpse in the toolkit's answer for it.
+			return ttReplyOf(t, map[string]any{"units": []any{}}), nil
+		}
+		f.agent.mu.Lock()
+		x, y, z := f.agent.x, f.agent.y, f.agent.z
+		f.agent.mu.Unlock()
+		atRead = append(atRead, statusReads())
+		if x != spot.X || y != spot.Y || z != spot.Z+2 {
+			// Still standing far away: the read is refused, as the live toolkit is.
+			return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+		}
+		return ttReplyOf(t, map[string]any{"units": []map[string]any{{"g": packet.GUID(9).String(), "e": 14599, "dead": true, "d": 12.5, "hp": 0}}}), nil
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	zgThekalDoneOnSkip(f, boss, total)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs, tt := append([]string{}, f.agent.runVerbs...), append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	if countPrefix(verbs, "skip") != 1 {
+		t.Fatalf("run verbs %v, want exactly one skip", verbs)
+	}
+	// The refused read, the re-read after the landing that starts the corpse wait, and the later confirming reads.
+	if len(tt) < 3 {
+		t.Fatalf("toolkit calls %q, want the refused read, its re-read and the confirming reads", tt)
+	}
+	if len(atRead) < 2 || atRead[1]-atRead[0] < 3 {
+		t.Fatalf("toolkit reads at status counts %v, want the re-read at least 3 status reads after the refused one (the landing)", atRead)
+	}
+	if !hasNote(f.summary(), "the commander moved to the boss row for the corpse read") {
+		t.Fatalf("notes %q, want the move note", f.summary().Notes)
+	}
+}
+
+// Walk 25 point_far round 2: the move's landing never comes. No re-read goes out, the reads latch with the
+// failed-move note, and the walk waits out the pause as before.
+func TestRaidWalkBossNotFoundCorpseReadPointFarLandingNeverComes(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgThekalStart(total, boss)
+	f.agent.mu.Lock()
+	f.agent.startQueue = zgThekalPauseQueue(boss, total)
+	f.agent.mu.Unlock()
+	neverLanding(f) // the go is accepted but never lands
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs, tt := append([]string{}, f.agent.runVerbs...), append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	if countPrefix(verbs, "skip") != 0 {
+		t.Fatalf("run verbs %v, want no skip: the move never landed", verbs)
+	}
+	if len(tt) != 1 {
+		t.Fatalf("toolkit calls %q, want exactly the refused read (no re-read without the landing)", tt)
+	}
+	if hasNote(f.summary(), "the commander moved to the boss row for the corpse read") {
+		t.Fatalf("notes %q, want no move note without the landing", f.summary().Notes)
+	}
+	if !hasNote(f.summary(), "the move to the boss row did not land") {
+		t.Fatalf("notes %q, want the failed-move note", f.summary().Notes)
 	}
 }
 
