@@ -2021,11 +2021,17 @@ func (w *walk) bossCorpse(ctx context.Context, boss uint32, units []uint32) (boo
 				if !moved && strings.Contains(err.Error(), "point_far") {
 					before, serr := w.status(ctx)
 					if serr != nil {
-						return false, ""
+						if ctx.Err() != nil {
+							return false, ""
+						}
+						return fail("the toolkit corpse read failed (point_far, and the status read before the move to the boss row failed: %v)", serr)
 					}
 					from, beforeSeq, haveSeq := before.Map, before.TeleportSeq, true
 					if gerr := w.gm(ctx, raidwalk.GMVisibleOff); gerr != nil {
-						return false, ""
+						if ctx.Err() != nil {
+							return false, ""
+						}
+						return fail("the toolkit corpse read failed (point_far, and the visible-off before the move to the boss row failed: %v)", gerr)
 					}
 					moved = true
 					if gerr := w.goPlace(ctx, spot.X, spot.Y, spot.Z+2); gerr != nil {

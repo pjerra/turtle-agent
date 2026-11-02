@@ -5530,6 +5530,113 @@ func TestRaidWalkBossNotFoundCorpseReadPointFarGoFails(t *testing.T) {
 	}
 }
 
+// Walk 25 point_far round 4 (Codex MEDIUM): the status read before the boss-row move fails. The failure latches
+// the reads off with the real error: the walk waits out the pause with exactly one toolkit read in total, instead
+// of repeating the corpse read and the failing status RPC on every pause tick.
+func TestRaidWalkBossNotFoundCorpseReadPointFarStatusFails(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgThekalStart(total, boss)
+	f.agent.mu.Lock()
+	f.agent.startQueue = zgThekalPauseQueue(boss, total)
+	f.agent.mu.Unlock()
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		// Arm the failure only once the corpse read is under way: the login and watch phases need a working status.
+		f.agent.mu.Lock()
+		f.agent.statusFailNext = 100 // every status RPC fails from here on, on every pause tick
+		f.agent.mu.Unlock()
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	tt := append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	if len(tt) != 1 {
+		t.Fatalf("toolkit calls %q, want exactly the one refused read (the status failure latches the reads off)", tt)
+	}
+	if hasNote(f.summary(), "the commander moved to the boss row for the corpse read") {
+		t.Fatalf("notes %q, want no move note after a failed status read", f.summary().Notes)
+	}
+	if !hasNote(f.summary(), "the toolkit corpse read failed") || !hasNote(f.summary(), "agent busy") {
+		t.Fatalf("notes %q, want the latch note carrying the real status error", f.summary().Notes)
+	}
+}
+
+// Walk 25 point_far round 4 (Codex MEDIUM): the `.gm visible off` before the boss-row move fails. The failure
+// latches the reads off with the real error: the walk waits out the pause with exactly one toolkit read in total,
+// instead of repeating the corpse read and the failing GM RPC on every pause tick.
+func TestRaidWalkBossNotFoundCorpseReadPointFarVisibleOffFails(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgThekalStart(total, boss)
+	f.agent.mu.Lock()
+	f.agent.startQueue = zgThekalPauseQueue(boss, total)
+	f.agent.mu.Unlock()
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	f.agent.gmFail = func(line string) error {
+		if line == raidwalk.GMVisibleOff {
+			return errors.New("command refused")
+		}
+		return nil
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	tt := append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	if len(tt) != 1 {
+		t.Fatalf("toolkit calls %q, want exactly the one refused read (the visible-off failure latches the reads off)", tt)
+	}
+	if hasNote(f.summary(), "the commander moved to the boss row for the corpse read") {
+		t.Fatalf("notes %q, want no move note after a failed visible-off", f.summary().Notes)
+	}
+	if !hasNote(f.summary(), "the toolkit corpse read failed") || !hasNote(f.summary(), "command refused") {
+		t.Fatalf("notes %q, want the latch note carrying the real visible-off error", f.summary().Notes)
+	}
+}
+
+// Walk 25 point_far round 4 (Codex MEDIUM): a cancelled context is no toolkit failure. The point_far re-read's
+// status read answered while the walk itself was interrupted, so it returns without latching, like today's code.
+func TestRaidWalkBossNotFoundCorpseReadPointFarStatusCancelDoesNotLatch(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	rows := zgRows(t).Steps
+	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub", Map: 309}, agent: f.agent, rows: planexport.Rows{Steps: rows},
+		env: walkEnv{now: f.clock.now, sleep: f.clock.sleep}, hires: map[string]bool{}}
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	f.agent.statusFailNext = 1 // the point_far re-read's status read fails
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the walk itself was interrupted while the status read answered
+	if ok, _ := w.bossCorpse(ctx, 14599, []uint32{14599}); ok {
+		t.Fatalf("bossCorpse = true, want no evidence on a cancelled read")
+	}
+	if w.bossToolkitOff {
+		t.Fatalf("bossToolkitOff latched, want no latch on a cancelled status read")
+	}
+}
+
 func TestRaidWalkBossNotFoundCorpseReadPointFarMovesAndRereads(t *testing.T) {
 	f := zgThekalFixture(t, "zul_gurub")
 	boss := zgBossStep(t)
