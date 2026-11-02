@@ -28,16 +28,17 @@
     "Census: 330 spawns, 23 entries. The 28 Snakes (2914, faction 190, level 1, 9 hp, critter) are out of every pull (26 pure snake pulls gone). Max planned pack is 5 units.",
     "Hostile trash is faction 40 (34, Escortee) except the Time Anomaly 50106 (faction 7, neutral but attackable) and the cave mobs 61316/61317/61318 (faction 16). None is humanoid: no Polymorph, so cc_priority/cc_always are empty and every trash entry is in no_cc. No trash script flees (no Flee/EventAI 47 anywhere in the instance), so fleers is empty.",
     "Casters: 50106 Arcane Explosion (27989); 61316 Sand Blast (57103); 61317 Earth Shock (13281); 61318 Arcane Bolt (25055); 61575 Epidamu Drain Mana (17682); 65102 Riftweaver Time Stop (23171, 20 s) + Shadow Shock + Mind Blast; 65100 Dragonspawn Rend/Cleave; 65101 Riftguard charges a casting player within 50 yd (22911); 65103 Whelp drains 5 % max mana every 3 s from players within 20 yd and Arcane Explosions at full mana; 65105 Rift-Lord Whirlwind/Thunderclap/Demolishing Shout; 65110 Poison 24097; 65111 Wound 16549; 65112 Paralyzing Poison 3609. kill_first: 65124 Mossheart (Rejuvenation 20664 below 75 %, Entangling Roots, Dredge Sickness within 10 yd), 65102 (Time Stop), 65105 (Whirlwind), 61575 (Drain Mana).",
-    "Named scripted mobs in pulls, not bosses: Rotmaw 65122 (Consume roots itself and shrinks a player for 15.5 s, then Knockback; Mortal Wound/Sunder), Mossheart 65124 (stealths out of combat; Rejuv), Epidamu 61575 (Drain Mana). Boss rows: Antnormi 65125 (Thrash, Cowering Roar, Shadow Shock; Enrage at 20 % or 5 min), Medivh 50105 (FACTION 35: friendly to the party, no script, 1,024,000 hp; the run leader's boss step reads 'boss is friendly to this party: left alone' and the leg advances - the row is a destination marker, not a kill), Epochronos 65116 (Sand Breath, Swoop, Arcane Blast; at 50 % banishes itself and summons one Echo: Lich King 65117 / Kael'thas 65118 / Vashj 65119, which must die before it unbanishes), Chronar 65113 (Shout, Mortal Strike, Sweeping Slam, Spell Reflection, Enrage at 35 %).",
+    "Named scripted mobs, promoted to bosses of their own legs on 2026-11-02 (#243, the spec's boss promotion: the route and the pulls do not change): Rotmaw 65122 (Consume roots itself and shrinks a player for 15.5 s, then Knockback; Mortal Wound/Sunder), Mossheart 65124 (stealths out of combat; Rejuv), Epidamu 61575 (Drain Mana), Drifting Avatar of Sand 61316 (Sand Blast 57103, movement_type 1: it wanders). Boss rows: Antnormi 65125 (Thrash, Cowering Roar, Shadow Shock; Enrage at 20 % or 5 min), Medivh 50105 (FACTION 35: friendly to the party, no script, 1,024,000 hp; the run leader's boss step reads 'boss is friendly to this party: left alone' and the leg advances - the row is a destination marker, not a kill), Epochronos 65116 (Sand Breath, Swoop, Arcane Blast; at 50 % banishes itself and summons one Echo: Lich King 65117 / Kael'thas 65118 / Vashj 65119, which must die before it unbanishes), Chronar 65113 (Shout, Mortal Strike, Sweeping Slam, Spell Reflection, Enrage at 35 %).",
     "The Time Anomaly 50106 at -1450.10 6967.23 -14.3097 stood 18.9 yd from Epochronos (detection 20): moved to the end of its leg, so the boss joins that one pull and not a mid-leg one.",
     "Patrols with a creature_movement path: 65100 guid 2567942 (237 yd, ~95 s), 65101 2567943 (190 yd, ~76 s), 65101 2567944 (184 yd, ~74 s), 61318 2574761 (319 yd, ~128 s), 61318 2574775 (431 yd, ~172 s). Each group whose stand is within 25 yd of a path carries that patrol block (period is the path length at 2.5 yd/s: period_estimate). Mossheart 65124, Medivh 50105 and the Bronze Defenders 65126/65128 have movement_type 2 but no movement rows: no block can be written; the mapping walk measures them.",
     "Floors: all pull stands are exact spawn rows and no pack spans |dz| \u003e 6. The map is stacked: other hostile packs stand directly above/below many stands (50106/61317/61318 in the z -165..+56 cave column, 65100-65103 between -230 and -122). Aggro is 3-D, so they are not pull members, but the route between floors is the mapping walk's first item: six approach hops could not be cut (leg 3 steps 2, 3, 5, 15, 18 and 22; the nearest reachable point is 12.6-90.3 yd from the pack). The 247 run-leader hop notices are the same walk.",
     "Route: leg order antnormi -\u003e medivh -\u003e epochronos -\u003e chronar is the shortest of the 24 permutations (7,852 yd from the entrance; the next best is +532). Within each leg the groups are ordered by a 3-D 2-opt from the leg's start to its boss (5,797-\u003e4,940, 1,522-\u003e1,347, 3,321-\u003e2,789 and 1,900-\u003e1,751 yd; the vertical travel is 270-\u003e267, 53-\u003e55, 651-\u003e593 and 491-\u003e452).",
-    "2026-10-24 bm-fix1: leg 0 walks the landing to its `to` on 69 via points (the live mesh path is 2,678 yd, not the 289 yd straight line; the r28d first run stopped at step 1 on it). Every via hop plans complete at 55 yd or less (max 54.5); each via point is on the mesh floor (plan-check: 370 points, only the 4 known look-point failures). The 247 run-leader hop notices are unchanged."
+    "2026-10-24 bm-fix1: leg 0 walks the landing to its `to` on 69 via points (the live mesh path is 2,678 yd, not the 289 yd straight line; the r28d first run stopped at step 1 on it). Every via hop plans complete at 55 yd or less (max 54.5); each via point is on the mesh floor (plan-check: 370 points, only the 4 known look-point failures). The 247 run-leader hop notices are unchanged.",
+    "2026-11-02 (#243): 8 legs and 8 bosses - mossheart, antnormi, rotmaw, medivh, epidamu, drifting_avatar_of_sand, time-lord_epochronos, chronar (the four Turtle bosses were pull groups of antnormi, medivh and epochronos until then)."
   ],
   "legs": [
     {
-      "name": "antnormi",
+      "name": "mossheart",
       "to": {"x": -1961.5, "y": 6797, "z": 26.5253},
       "via": [
         {"x": -1950.93, "y": 6581.6, "z": -153.54},
@@ -818,14 +819,20 @@
             {"x": -1856.14, "y": 6897.87, "z": 25.155}
           ],
           "radius": 2
-        },
-        {
-          "entries": [65124],
-          "positions": [
-            {"x": -1880.32, "y": 6904.04, "z": 26.2261}
-          ],
-          "radius": 6
-        },
+        }
+      ],
+      "boss": {
+        "entry": 65124,
+        "position": {"x": -1880.32, "y": 6904.04, "z": 26.2261}
+      },
+      "notes": [
+        "Turtle boss Mossheart (65124): [KB] names it a boss; was pull group 102 of antnormi until 2026-11-02 (#243)."
+      ]
+    },
+    {
+      "name": "antnormi",
+      "to": {"x": -1914.85, "y": 6911.3, "z": 23.0503},
+      "pull_groups": [
         {
           "entries": [65111],
           "positions": [
@@ -1036,7 +1043,7 @@
       }
     },
     {
-      "name": "medivh",
+      "name": "rotmaw",
       "to": {"x": -2052.7, "y": 7200.09, "z": 19.5721},
       "pull_groups": [
         {
@@ -1059,14 +1066,20 @@
             {"x": -2049.58, "y": 7398.37, "z": 24.5028}
           ],
           "radius": 2
-        },
-        {
-          "entries": [65122],
-          "positions": [
-            {"x": -2095.36, "y": 7410.7, "z": 24.6254}
-          ],
-          "radius": 2
-        },
+        }
+      ],
+      "boss": {
+        "entry": 65122,
+        "position": {"x": -2095.36, "y": 7410.7, "z": 24.6254}
+      },
+      "notes": [
+        "Turtle boss Rotmaw (65122): [KB] names it a boss; was pull group 4 of medivh until 2026-11-02 (#243)."
+      ]
+    },
+    {
+      "name": "medivh",
+      "to": {"x": -2077.43, "y": 7373.29, "z": 23.6338},
+      "pull_groups": [
         {
           "entries": [65110],
           "positions": [
@@ -1207,7 +1220,7 @@
       }
     },
     {
-      "name": "time-lord_epochronos",
+      "name": "epidamu",
       "to": {"x": -1725.48, "y": 7007.04, "z": 21.5786},
       "pull_groups": [
         {
@@ -1639,14 +1652,20 @@
             {"x": -1366.76, "y": 6946.89, "z": -32.675}
           ],
           "radius": 6
-        },
-        {
-          "entries": [61575],
-          "positions": [
-            {"x": -1405.35, "y": 7004.3, "z": -85.968}
-          ],
-          "radius": 2
-        },
+        }
+      ],
+      "boss": {
+        "entry": 61575,
+        "position": {"x": -1405.35, "y": 7004.3, "z": -85.968}
+      },
+      "notes": [
+        "Turtle boss Epidamu (61575): [KB] names it a boss; was pull group 42 of drifting_avatar_of_sand until 2026-11-02 (#243)."
+      ]
+    },
+    {
+      "name": "drifting_avatar_of_sand",
+      "to": {"x": -1417.11, "y": 7036.27, "z": -85.9293},
+      "pull_groups": [
         {
           "entries": [65102],
           "positions": [
@@ -1914,14 +1933,20 @@
             {"x": -1325.51, "y": 6912.92, "z": -22.4307}
           ],
           "radius": 6
-        },
-        {
-          "entries": [61316],
-          "positions": [
-            {"x": -1339.93, "y": 6921.69, "z": -32.675}
-          ],
-          "radius": 6
-        },
+        }
+      ],
+      "boss": {
+        "entry": 61316,
+        "position": {"x": -1339.93, "y": 6921.69, "z": -32.675}
+      },
+      "notes": [
+        "Turtle boss Drifting Avatar of Sand (61316): [KB] names it a boss; was pull group 54 of time-lord_epochronos until 2026-11-02 (#243)."
+      ]
+    },
+    {
+      "name": "time-lord_epochronos",
+      "to": {"x": -1351.41, "y": 6927.9, "z": -32.6752},
+      "pull_groups": [
         {
           "entries": [50106],
           "positions": [

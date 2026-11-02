@@ -16,8 +16,8 @@ const blackMorassPlan = "../../dungeons/black_morass.json"
 // the last via hands to the `to` itself. The `to` stays the exact spawn row.
 func TestBlackMorassLeg0WalksTheLandingToItsTo(t *testing.T) {
 	p := loadPlan(t, blackMorassPlan)
-	if len(p.Legs) != 4 {
-		t.Fatalf("%d legs, want 4", len(p.Legs))
+	if len(p.Legs) != 8 {
+		t.Fatalf("%d legs, want 8", len(p.Legs))
 	}
 	leg := p.Legs[0]
 	if len(leg.Via) != 69 {
@@ -47,13 +47,16 @@ func TestBlackMorassLeg0WalksTheLandingToItsTo(t *testing.T) {
 	}
 }
 
-// The fix changes nothing else: the leg order, the pull counts and bosses, and the `to`
-// points of the other legs stay as the prep left them.
+// The fix changes nothing else: the pull counts and bosses of the legs the fix left alone
+// stay as the prep left them. The 2026-11-02 #243 promotion split three of them around the
+// Turtle bosses (mossheart 101 + antnormi 29 = 130 of the old 131, rotmaw 3 + medivh 19 =
+// 22 of the old 23, epidamu 41 + drifting_avatar_of_sand 11 + time-lord_epochronos 12 = 64
+// of the old 66: the promoted group is the boss row now).
 func TestBlackMorassFixChangesNothingElse(t *testing.T) {
 	p := loadPlan(t, blackMorassPlan)
-	wantLegs := []string{"antnormi", "medivh", "time-lord_epochronos", "chronar"}
-	wantPulls := []int{131, 23, 66, 32}
-	wantBoss := []uint32{65125, 50105, 65116, 65113}
+	wantLegs := []string{"mossheart", "antnormi", "rotmaw", "medivh", "epidamu", "drifting_avatar_of_sand", "time-lord_epochronos", "chronar"}
+	wantPulls := []int{101, 29, 3, 19, 41, 11, 12, 32}
+	wantBoss := []uint32{65124, 65125, 65122, 50105, 61575, 61316, 65116, 65113}
 	for i, l := range p.Legs {
 		if l.Name != wantLegs[i] {
 			t.Errorf("leg %d is %q, want %q", i, l.Name, wantLegs[i])
