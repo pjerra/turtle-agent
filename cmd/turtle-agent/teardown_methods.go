@@ -423,7 +423,11 @@ func runTeardown(ctx context.Context, g teardownGame, p teardownParams, sleep fu
 		if dry {
 			plan("leave_group", "would leave the group")
 		} else if lerr := g.LeaveGroup(ctx); lerr != nil {
-			add("leave_group", "fail", lerr.Error())
+			if errors.Is(lerr, session.ErrNotInGroup) {
+				add("leave_group", "ok", "already out of the group (the server disbanded it)")
+			} else {
+				add("leave_group", "fail", lerr.Error())
+			}
 		} else {
 			add("leave_group", "ok", "left the group (the server ends this character's hires)")
 		}
