@@ -340,8 +340,17 @@ type PullGroup struct {
 	// engage (within RunLeaderSeeYd of the pack, so the run leader sees it and pulls it from there). plan-export writes each as a move row
 	// before the pull row; the plan check walks them. Without it the run leader approaches a pack it cannot see from its last move point
 	// in navmesh hops of its own, which fail where the path is long or ends under a ledge (Uldaman, live 2026-10-16). The agent's own
-	// driver looks at the pack from its path (LookPoint) and does not walk these points.
+	// driver looks at the pack from its path (LookPoint) and does not walk these points. With Camp it is the tank's
+	// walk-out instead, and its last point is the tag spot.
 	Approach []Point `json:"approach,omitempty"`
+	// Camp is the point back along the cleared route the TortoiseBots run leader's party holds for this pull
+	// (TortoiseBots kPlanFlagCampPoint on a move row, kPlanFlagCampPull on the pull row): the tank walks out alone
+	// along Approach (its last point is the tag spot), tags one unit with a ranged shot and drags the pack back to
+	// the camp, where the raid fights. plan-export writes the camp move, the tag rows and the flagged pull row only
+	// with its CampPull option (--camp-pull); without it the group exports as today (approach rows and a plain pull)
+	// and the camp is dropped with a warning. Never with stand_pull, hold or ambush; needs an approach; the camp is
+	// at most MaxCampDragYd (straight) from the tag spot and the tag spot within RunLeaderSeeYd of the pack.
+	Camp *Point `json:"camp,omitempty"`
 	// Hold makes the run leader's row for the group a scripted event's hold (see Hold) instead of a pull; nil: a pull.
 	Hold *Hold `json:"hold,omitempty"`
 	// StandPull says the run leader's party holds at the group's last approach point (its stand, the move row right before the
@@ -400,6 +409,12 @@ const (
 	MaxStandPullRadius = 100
 	// MaxApproach is the most approach points a pull group or boss has.
 	MaxApproach = 4
+	// MaxCampDragYd is the most a camp pull's camp (the point the raid holds) may lie from its tag spot (the
+	// last approach point) in a straight line: the tank must drag the pack back without it leashing. The run
+	// leader's own path may be longer; MaxCampPathYd bounds that once measured (TortoiseBots' run leader path).
+	MaxCampDragYd = 50
+	// MaxCampPathYd is the most a camp pull's camp may lie from its tag spot along the run leader's navmesh path.
+	MaxCampPathYd = 70
 	// RunLeaderSeeYd is how far the TortoiseBots run leader sees a pack, a boss or a move point from its lead bot (DungeonRunPolicy.h kSeeYd);
 	// farther, it walks toward it in navmesh hops of its own.
 	RunLeaderSeeYd = 60
@@ -866,6 +881,7 @@ type rawPullGroup struct {
 	NeedsWalk bool       `json:"needs_walk"`
 	Patrol    *rawPatrol `json:"patrol"`
 	Approach  []rawPoint `json:"approach"`
+	Camp      *rawPoint  `json:"camp"`
 	Hold      *rawHold   `json:"hold"`
 	// StandPull is PullGroup.StandPull.
 	StandPull bool `json:"stand_pull"`
@@ -1473,6 +1489,36 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		if g.ClearYd < 0 || g.ClearYd > MaxStandPullClearYd {
 			c.fail(gp+".clear_yd", "%d: use 0 (the run leader's 40) or 1-%d yards", g.ClearYd, MaxStandPullClearYd)
+		}
+		if g.Camp != nil {
+			cp := c.point(gp+".camp", g.Camp)
+			pg.Camp = &Point{X: cp.X, Y: cp.Y, Z: cp.Z}
+		}
+		if g.Camp != nil && g.StandPull {
+			c.fail(gp+".camp", "a camp group cannot be a stand_pull (the tank walks out and tags, the raid never holds the stand)")
+		}
+		if g.Camp != nil && g.Hold != nil {
+			c.fail(gp+".camp", "a camp group cannot hold (its row is a pull, not a scripted event)")
+		}
+		if g.Camp != nil && g.Ambush {
+			c.fail(gp+".camp", "a camp group cannot be an ambush (a stealthed pack is walked through, not shot)")
+		}
+		if g.Camp != nil && len(g.Approach) == 0 {
+			c.fail(gp+".camp", "a camp group needs an approach (the tank's walk-out; its last point is the tag spot)")
+		}
+		if g.Camp != nil && len(pg.Approach) > 0 && len(pg.Positions) > 0 {
+			tag := pg.Approach[len(pg.Approach)-1]
+			if d := dist3(tag, *pg.Camp); d > MaxCampDragYd {
+				c.fail(gp+".camp", "the camp is %.1f yd from the tag spot (the last approach point): at most %d (the drag would leash)", d, MaxCampDragYd)
+			}
+			var cx, cy, cz float64
+			for _, q := range pg.Positions {
+				cx, cy, cz = cx+float64(q.X), cy+float64(q.Y), cz+float64(q.Z)
+			}
+			n := float64(len(pg.Positions))
+			if d := math.Sqrt(sq64(float64(tag.X)-cx/n) + sq64(float64(tag.Y)-cy/n) + sq64(float64(tag.Z)-cz/n)); d > RunLeaderSeeYd {
+				c.fail(gp+".camp", "the tag spot (the last approach point) is %.1f yd from the pull row's point (the positions' mean): the run leader sees it from %g yd at most", d, float64(RunLeaderSeeYd))
+			}
 		}
 		if g.MaxBodies != nil {
 			if v := *g.MaxBodies; v < 1 || v > 80 {
