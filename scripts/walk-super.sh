@@ -6,6 +6,8 @@
 #
 # <cmd-file>: one line, the full `turtle-agent raid-walk ...` command
 #   (see tests/raid-zg-walk23/cmd-*.txt). Its --out DIR names the first run's folder.
+#   Read as words, never eval'd: plain words and "double-quoted" words only. $, backticks, backslashes, ;, &, |,
+#   <, >, parentheses, quotes other than double, globs, ~, # and a second line are refused (exit 2, nothing runs).
 # Runs the command, waits for it, reads its exit code. The run's own stdout+stderr pass through to ours (so the
 # operator sees the refusal) via a pipe to `tee`; the backgrounded pipeline's exit-status file reports the walk's
 # own code (`wait` on a background pipeline only reports tee's, so PIPESTATUS is unavailable there).
@@ -16,6 +18,8 @@
 # An exit-2 line naming `pass --from "step N"` is also written into the restarts log (walk 26c: the placed Jeklik
 # restart was refused for no quiet move row, and the log only said "exit 2 is not 18/19").
 #   exit 0, or any code other than 18/19: stop, log, exit with that code.
+#   no exit status (the rc file is missing or not a number: the wrapper died first): exit 70, logged
+#     "status unknown", stop. It is a failure, so it restarts nothing.
 #   exit 18 (paused) or 19 (incident), restarts left: rebuild the next
 #     command for the leg it died on, wait, run it again.
 #   restart count reached: stop, exit with that code.
@@ -65,17 +69,58 @@ restart_log="$3"
 
 [[ "$max_restarts" =~ ^[0-9]+$ ]] || { echo "walk-super: <max-restarts> must be a non-negative integer, got '$max_restarts'" >&2; exit 2; }
 [[ -f "$cmdfile" ]] || { echo "walk-super: cmd file not found: $cmdfile" >&2; exit 2; }
-# The cmd line is re-parsed with eval, so refuse command substitution,
-# backticks and command separators outright.
-if grep -qF -e '$(' -- "$cmdfile" || grep -qF -e '`' -- "$cmdfile" || grep -qF -e ';' -- "$cmdfile"; then
-  echo "walk-super: refusing cmd file containing \$(), backtick or ';': $cmdfile" >&2
+# The cmd line is split into argv by parse_cmd_words below, never by eval (a `& touch x` or `| touch x` in the file
+# used to run through eval). A word is plain (no whitespace, and none of $ ` \ ; & | < > ( ) ' * ? [ ] { } ~ # or
+# CR/LF) or double-quoted (no $ ` \ or newline inside; the quotes are dropped). Anything else refuses the file.
+refuse_cmd() {
+  echo "walk-super: refusing cmd file $cmdfile: $1" >&2
   exit 2
-fi
+}
+# parse_cmd_words SETS CMD_ARGV from the cmd line $1. It runs no shell code and expands nothing.
+parse_cmd_words() {
+  local s="$1" n i c word="" inword=0 closed=0
+  CMD_ARGV=()
+  n=${#s}
+  i=0
+  while (( i < n )); do
+    c="${s:i:1}"
+    if [[ "$c" == " " || "$c" == $'\t' ]]; then
+      if (( inword )); then CMD_ARGV+=("$word"); word=""; inword=0; fi
+      i=$((i + 1))
+    elif [[ "$c" == '"' ]]; then
+      inword=1
+      closed=0
+      i=$((i + 1))
+      while (( i < n )); do
+        c="${s:i:1}"
+        i=$((i + 1))
+        if [[ "$c" == '"' ]]; then closed=1; break; fi
+        case "$c" in
+          '$' | '`' | '\' | $'\n' | $'\r')
+            refuse_cmd "$(printf 'character %q inside a double-quoted word at column %d' "$c" "$i")" ;;
+        esac
+        word+="$c"
+      done
+      (( closed )) || refuse_cmd "unterminated double quote"
+    else
+      case "$c" in
+        '$' | '`' | ';' | '&' | '|' | '<' | '>' | '(' | ')' | '\' | "'" | '*' | '?' | '[' | ']' | '{' | '}' | '~' | '#' | $'\n' | $'\r')
+          refuse_cmd "$(printf 'character %q outside quotes at column %d' "$c" "$((i + 1))")" ;;
+      esac
+      inword=1
+      word+="$c"
+      i=$((i + 1))
+    fi
+  done
+  if (( inword )); then CMD_ARGV+=("$word"); fi
+  return 0
+}
 
-# shellcheck disable=SC2091 # mandated: cmd file holds quoted args ("leg ...")
-eval "set -- $(cat -- "$cmdfile")"
-(( $# > 0 )) || { echo "walk-super: empty command in $cmdfile" >&2; exit 2; }
-ARGS=("$@")
+cmd_text="$(cat -- "$cmdfile")"
+[[ "$cmd_text" != *$'\n'* ]] || refuse_cmd "more than one line"
+parse_cmd_words "$cmd_text"
+(( ${#CMD_ARGV[@]} > 0 )) || { echo "walk-super: empty command in $cmdfile" >&2; exit 2; }
+ARGS=("${CMD_ARGV[@]}")
 
 wait_secs="${WALK_SUPER_WAIT:-20}"
 mkdir -p -- "$(dirname -- "$restart_log")"
@@ -301,7 +346,7 @@ leg=""
 step=""
 prev_leg=""
 prev_step=""
-cmdstr=""
+status_unknown=0
 new_out=""
 run_dir=""
 run_out=""
@@ -311,7 +356,7 @@ prev_place_fail=""
 place_start=""
 
 while true; do
-	cmdstr="$(printf '%q ' "${ARGS[@]}")"
+	status_unknown=0
 	run_dir="$(mktemp -d "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/walk-super-run.XXXXXX" 2>/dev/null || mktemp -d "${out:-${TMPDIR:-/tmp}}/walk-super-run.XXXXXX")"
 	run_out="$run_dir/run.out"
 	rc_file="$run_dir/rc"
@@ -319,14 +364,20 @@ while true; do
 	# foreground pipeline would defer the trap until the child exits. The
 	# outer `wait` reports tee's status, so the walk's own code arrives
 	# through the rc file instead of PIPESTATUS.
-	{ nice -n 10 bash -c "$cmdstr" 2>&1; printf '%s' "$?" >"$rc_file"; } | tee "$run_out" &
+	{ nice -n 10 "${ARGS[@]}" 2>&1; printf '%s' "$?" >"$rc_file"; } | tee "$run_out" &
 	pipejob=$!
 	walkpid="$(jobs -p | head -n 1)"
 	[[ -n "$walkpid" && "$walkpid" != "$pipejob" ]] || walkpid="$pipejob"
 	wait "$pipejob"
-	rc=0
-	[[ -f "$rc_file" ]] && rc="$(cat -- "$rc_file")"
-	[[ "$rc" =~ ^[0-9]+$ ]] || rc=0
+	# The walk's code is the rc file the wrapper writes last. A missing or malformed file is no status (the wrapper
+	# died before writing it): exit 70, "status unknown", and the crash rule applies (no restart).
+	rc=70
+	rc_text="$(cat -- "$rc_file" 2>/dev/null || true)"
+	if [[ "$rc_text" =~ ^(0|[1-9][0-9]*)$ ]]; then
+	  rc="$rc_text"
+	else
+	  status_unknown=1
+	fi
 	walkpid=""
 	pipejob=""
 	run_reason="$(reason_of_runout "$run_out" || true)"
@@ -337,7 +388,9 @@ while true; do
   fi
 
   if (( rc != 18 && rc != 19 )); then
-    if [[ -n "$run_reason" ]]; then
+    if (( status_unknown )); then
+      log_event "run $run_no exit $rc leg - out ${out:-<none>} stop: status unknown (no exit status from the run: the wrapper died before writing it)"
+    elif [[ -n "$run_reason" ]]; then
       log_event "run $run_no exit $rc leg - out ${out:-<none>} stop: exit $rc is not 18/19 ($run_reason)"
     else
       log_event "run $run_no exit $rc leg - out ${out:-<none>} stop: exit $rc is not 18/19"
