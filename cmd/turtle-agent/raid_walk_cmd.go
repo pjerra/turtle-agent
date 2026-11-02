@@ -840,31 +840,44 @@ func (w *walk) validate() error {
 	// against the rows: it goes to the server exactly as before, so a step past the plan's own export is not refused
 	// here (review round 1, item 3).
 	startStep := 1
+	// untilBase is the step boss and boss-done untils resolve from: the start step, except when the place start
+	// fell back to an earlier leg (H2: the target leg's first row, so the until answers the target leg's boss).
+	untilBase := 1
 	if w.opts.from != "" && (w.opts.place || raidwalk.IsBossDone(w.opts.until)) {
 		n, err := raidwalk.FromStartStep(w.rows, w.fromWords)
 		if err != nil {
 			return stopf(exitUsage, "%v", err)
 		}
 		startStep = n
+		untilBase = n
 	}
 	if w.opts.place {
-		step, leg, fallbackFrom, err := raidwalk.PlaceStart(w.rows, w.fromWords)
+		step, leg, fallbackFrom, door, err := raidwalk.PlaceStart(w.rows, w.fromWords)
 		if err != nil {
 			return stopf(exitUsage, "%v", err)
 		}
+		if door {
+			w.note("place: leg %s is the first leg; starting from the door", leg)
+		} else {
+			if fallbackFrom != "" {
+				w.note("place: leg %s has no quiet row; placing at step %d (leg %s)", fallbackFrom, step, leg)
+			}
+			p, ok := raidwalk.PlacePoint(w.rows, step)
+			if !ok {
+				return stopf(exitUsage, "--place: step %d of %s has no point", step, w.plan.Name)
+			}
+			w.fromWords = []string{"from", "step", strconv.Itoa(step)}
+			startStep = step
+			w.place = &raidwalk.PlacePlan{Start: step, Leg: leg, Point: p, Skips: raidwalk.PlaceSkips(w.plan)}
+		}
+		// H2: a fallback start stands before the target leg, so boss and boss-done untils resolve from the
+		// target leg's first row, never from the fallback start (the raid meets the earlier rows on its way in).
 		if fallbackFrom != "" {
-			w.note("place: leg %s has no quiet row; placing at step %d (leg %s)", fallbackFrom, step, leg)
+			untilBase = raidwalk.PlaceUntilBase(w.rows, fallbackFrom, startStep)
 		}
-		p, ok := raidwalk.PlacePoint(w.rows, step)
-		if !ok {
-			return stopf(exitUsage, "--place: step %d of %s has no point", step, w.plan.Name)
-		}
-		w.fromWords = []string{"from", "step", strconv.Itoa(step)}
-		startStep = step
-		w.place = &raidwalk.PlacePlan{Start: step, Leg: leg, Point: p, Skips: raidwalk.PlaceSkips(w.plan)}
 	}
 	if raidwalk.IsBossDone(w.opts.until) {
-		clause, boss, err := raidwalk.BossDoneUntil(w.rows, startStep)
+		clause, boss, err := raidwalk.BossDoneUntil(w.rows, untilBase)
 		if err != nil {
 			return stopf(exitUsage, "%v", err)
 		}
@@ -882,7 +895,14 @@ func (w *walk) validate() error {
 		w.untilWords, w.untilLabel = words, label
 	}
 	if w.place != nil {
-		stop, err := raidwalk.PlaceStop(w.rows, w.untilWords, startStep)
+		// H2: the corridor runs from the TARGET leg's first row, so a boss until stops at the target
+		// leg's boss: resolve it from the until base, never from the fallback start. Other untils name
+		// their own row, so they resolve as usual.
+		corridorStart := startStep
+		if len(w.untilWords) == 2 && w.untilWords[0] == "until" && w.untilWords[1] == "boss" {
+			corridorStart = untilBase
+		}
+		stop, err := raidwalk.PlaceStop(w.rows, w.untilWords, corridorStart)
 		if err != nil {
 			return stopf(exitUsage, "%v", err)
 		}

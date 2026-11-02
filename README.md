@@ -2159,11 +2159,17 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   numbers the steps differently cannot fail the walk after a placement has cost a hire. `--from "leg L"` is staged: the
   walk starts at the highest move row before the leg's first pull that has no later creature row within 50 yd of it
   (Zul'Gurub leg 3: step 231 of the deployed rows, not the leg's first row 214, which stands inside Marli's room).
-  When the leg holds no such row, the walk places at the LAST quiet move row before that point, searching backward
-  through the earlier legs, and the notes carry `place: leg X has no quiet row; placing at step N (leg Y)`; only when
-  no quiet row stands anywhere before the first pull is the placement refused (`leg X has no quiet move row before its
-  first pull: pass --from "step N"`, exit 2). `--from "step N"` is taken as given and must be a positioned move row
-  (a plain `--from`, without `--place` or `--until boss-done`, still goes to the server unresolved). `validate` refuses a plan whose legs' skip lists hold more
+  The first leg needs no placement: `--place --from leg <first leg>` starts at step 1 from the door exactly as a
+  non-placed run does, and the notes carry `place: leg X is the first leg; starting from the door`. When the leg
+  holds no such row, the walk places at the LAST quiet move row before that point, searching backward through the
+  earlier legs, and the notes carry `place: leg X has no quiet row; placing at step N (leg Y)`; only when no quiet
+  row stands anywhere before the first pull is the placement refused (`leg X has no quiet move row before its first
+  pull: pass --from "step N"`, exit 2). The fallback is refused too when a boss or hold row (or the move into an
+  event) lies between it and the leg's first row: the raid would re-fight it on its way in. A fallback start
+  stands before the leg, so `boss` and `boss-done` untils resolve from the leg's first row, never from the
+  fallback start. `--from "step N"` is taken as given and must be a positioned move row (a plain `--from`,
+  without `--place` or `--until boss-done`, still goes to the server unresolved). `validate` refuses a plan
+  whose legs' skip lists hold more
   than the toolkit's 16 entries or whose longest toolkit line would overflow the toolkit's 200-char cap, both before any
   GM command. The walk then clears the corridor of the legs it skips — every pull row before the start whose circle
   comes within 45 yd of the route to the `until` stop, despawned with `.tt clearto ... all=1` after a pre-read of the
