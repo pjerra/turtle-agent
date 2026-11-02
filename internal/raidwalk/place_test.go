@@ -2,6 +2,7 @@ package raidwalk
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -54,7 +55,7 @@ func TestPlaceStartStagesBeforeFirstPull(t *testing.T) {
 	if len(rows.Steps) != 15 {
 		t.Fatalf("fixture has %d steps", len(rows.Steps))
 	}
-	got, leg, err := PlaceStart(rows, []string{"from", "leg", "two"})
+	got, leg, _, _, err := PlaceStart(rows, []string{"from", "leg", "two"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,18 +63,171 @@ func TestPlaceStartStagesBeforeFirstPull(t *testing.T) {
 		t.Fatalf("start %d (%q), want 13 (two)", got, leg)
 	}
 	// the leg number finds the same leg
-	if got, _, err := PlaceStart(rows, []string{"from", "leg", "1"}); err != nil || got != 13 {
+	if got, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "1"}); err != nil || got != 13 {
 		t.Fatalf("by number: %d, %v", got, err)
 	}
 }
 
 func TestPlaceStartRefusesNoQuietMove(t *testing.T) {
-	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}},
+	// A leg past the first (leg 1 of two) with no quiet move row refuses, exit 2 (the old wording is kept).
+	// The zero leg's own move is pinned by its pull, so the backward search finds no quiet row at all.
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "zero"}, {Plan: "t", Leg: 1, Name: "one"}},
+		placeMove(0, 0, 1000, 0),
+		placeRow(planexport.KindPull, 0, 0, 1005, 0, 0, 15111),
+		placeMove(1, 0, 100, 0),
+		placeMove(1, 0, 105, 0),
+		placeRow(planexport.KindPull, 1, 0, 110, 0, 0, 15111),
+	)
+	_, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "one"})
+	if err == nil || !strings.Contains(err.Error(), "no quiet move row") {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestPlaceStartFallsBackToEarlierLeg(t *testing.T) {
+	// Leg "two" is not the first leg and starts with a pull: no move row of its own stands before its
+	// first pull. Leg "one" ends with a quiet move row (step 4, 110 yd from the pull), so the start falls
+	// back to it (#370). Leg "zero" holds one pinned move so leg "one" is not the door leg (H1).
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "zero"}, {Plan: "t", Leg: 1, Name: "one"}, {Plan: "t", Leg: 2, Name: "two"}},
+		placeMove(0, 0, 10, 0),
+		placeRow(planexport.KindPull, 0, 0, 15, 0, 0, 15111),
+		placeMove(1, 0, 20, 0),
+		placeMove(1, 0, 30, 0),
+		placeRow(planexport.KindPull, 2, 0, 140, 0, 0, 15111),
+	)
+	got, leg, fallback, _, err := PlaceStart(rows, []string{"from", "leg", "two"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 4 || leg != "one" || fallback != "two" {
+		t.Fatalf("start %d (%q), want 4 (one)", got, leg)
+	}
+}
+
+func TestPlaceStartFirstLegIsDoorStart(t *testing.T) {
+	// H1: Jeklik is leg 0, so the backward search never runs: --place --from leg one behaves like a door
+	// start, with no .go. The ZG cmd-level test pins the real case (leg high_priestess_jeklik -> step 1).
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}, {Plan: "t", Leg: 1, Name: "two"}},
+		placeMove(0, 0, 10, 0),
+		placeMove(0, 0, 20, 0),
+		placeRow(planexport.KindPull, 1, 0, 1000, 0, 0, 15111),
+	)
+	got, leg, fallback, door, err := PlaceStart(rows, []string{"from", "leg", "one"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !door || got != 1 || leg != "one" || fallback != "" {
+		t.Fatalf("start %d (%q fallback %q door %v), want step 1 (one) as a door start", got, leg, fallback, door)
+	}
+	if _, _, _, door, err := PlaceStart(rows, []string{"from", "leg", "two"}); err != nil || door {
+		t.Fatalf("later leg two: step start, door %v, err %v", door, err)
+	}
+}
+
+func TestPlaceStartRefusesFallbackBeforeBossOrHold(t *testing.T) {
+	// H2: the reviewer's probe plan, past a door leg: leg one moves at y=10/20/30, a boss/hold at 100, a
+	// pinned move at 105 (5 yd from leg two's pull at 110), leg two's pull at 110 and boss at 200. The
+	// LAST fallback candidate walking back is the pinned move at step 6, then the boss/hold row itself
+	// (not a move), then the quiet move at step 4 — which stands before the boss/hold, so the raid
+	// would re-fight it and the fallback is refused. Leg zero's move is pinned by its own early pull,
+	// so it cannot absorb the case either (H1 stays a door start).
+	mk := func(secondKind string) planexport.Rows {
+		return placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "zero"}, {Plan: "t", Leg: 1, Name: "one"}, {Plan: "t", Leg: 2, Name: "two"}},
+			placeMove(0, 0, 10, 0),
+			placeRow(planexport.KindPull, 0, 0, 15, 0, 0, 15111),
+			placeMove(1, 0, 20, 0),
+			placeMove(1, 0, 30, 0),
+			placeRow(secondKind, 1, 0, 100, 0, 0, 11347),
+			placeMove(1, 0, 105, 0),
+			placeRow(planexport.KindPull, 2, 0, 110, 0, 0, 15111),
+			placeRow(planexport.KindBoss, 2, 0, 200, 0, 0, 11347),
+		)
+	}
+	for _, kind := range []string{planexport.KindBoss, planexport.KindHold} {
+		rows := mk(kind)
+		_, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "two"})
+		if err == nil {
+			t.Fatalf("%s between: placed, want the exit-2 refusal", kind)
+		}
+		if kind == planexport.KindHold {
+			// A hold is an event row: the move leading into it refuses like the in-leg loop (L1).
+			if !strings.Contains(err.Error(), "event at step 5") {
+				t.Fatalf("hold between: err %v", err)
+			}
+			continue
+		}
+		if !strings.Contains(err.Error(), "no quiet move row") || !strings.Contains(err.Error(), "re-fight") {
+			t.Fatalf("%s between: err %v", kind, err)
+		}
+	}
+}
+
+func TestPlaceStartFallbackResolvesUntilFromTargetLeg(t *testing.T) {
+	// H2: only moves and trash between the fallback row and leg two's first row, so the fallback is placed;
+	// the until resolves from leg two's first row, not from the fallback start. Leg two is not the first
+	// leg (leg zero holds one far move), so PlaceStart takes the fallback path.
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "zero"}, {Plan: "t", Leg: 1, Name: "one"}, {Plan: "t", Leg: 2, Name: "two"}},
+		placeMove(0, 0, 10, 0),
+		placeRow(planexport.KindPull, 0, 0, 15, 0, 0, 15111),
+		placeRow(planexport.KindPull, 1, 0, 900, 0, 0, 15111),
+		placeMove(1, 0, 1000, 0),
+		placeMove(1, 0, 1010, 0),
+		placeMove(1, 0, 1020, 0),
+		placeRow(planexport.KindPull, 2, 0, 2000, 0, 0, 15111),
+		placeRow(planexport.KindBoss, 2, 0, 2005, 0, 0, 11347),
+	)
+	got, leg, fallback, door, err := PlaceStart(rows, []string{"from", "leg", "two"})
+	if err != nil || door {
+		t.Fatal(err)
+	}
+	if got != 6 || leg != "one" || fallback != "two" {
+		t.Fatalf("start %d (%q fallback %q), want 6 (one)", got, leg, fallback)
+	}
+	base := PlaceUntilBase(rows, fallback, got)
+	if base != 7 {
+		t.Fatalf("until base %d, want leg two's first row 7", base)
+	}
+	// The boss until (used for --until boss and boss-done) names leg two's boss, from the target leg's
+	// first row. (The guard refuses every fallback a leg-one boss between the rows would hijack, so the
+	// from-start answer coincides here; the base pins the target leg regardless.)
+	stop, err := PlaceStop(rows, []string{"until", "boss"}, base)
+	if err != nil || stop != 8 {
+		t.Fatalf("until boss stop %d, err %v, want leg two's boss row 8", stop, err)
+	}
+	if clause, boss, err := BossDoneUntil(rows, base); err != nil || boss != 8 {
+		t.Fatalf("boss-done from base: clause %q boss %d, err %v, want boss step 8", clause, boss, err)
+	}
+	if PlaceUntilBase(rows, "", got) != got || PlaceUntilBase(rows, "nope", got) != got {
+		t.Fatal("no fallback: the base is the start")
+	}
+}
+
+func TestPlaceStartRefusesFallbackIntoEvent(t *testing.T) {
+	// H2/L1: an event row in the fallback region refuses like the in-leg loop, it is not skipped. The only
+	// fallback candidate stands one hold before leg two.
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}, {Plan: "t", Leg: 1, Name: "two"}},
+		placeMove(0, 0, 10, 0),
+		placeMove(0, 0, 20, 0),
+		placeMove(0, 0, 30, 0),
+		placeRow(planexport.KindHold, 0, 0, 1000, 0, 0),
+		placeRow(planexport.KindPull, 1, 0, 1005, 0, 0, 15111),
+	)
+	_, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "two"})
+	if err == nil || !strings.Contains(err.Error(), "event at step 4") {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestPlaceStartRefusesNoQuietInEarlierLegs(t *testing.T) {
+	// Every move row stands within 50 yd of a later pull, in the target leg and the earlier one: the backward
+	// search finds no quiet row at all, so the exit-2 refusal stays (#370).
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}, {Plan: "t", Leg: 1, Name: "two"}},
 		placeMove(0, 0, 100, 0),
 		placeMove(0, 0, 105, 0),
 		placeRow(planexport.KindPull, 0, 0, 110, 0, 0, 15111),
+		placeRow(planexport.KindPull, 1, 0, 115, 0, 0, 15111),
 	)
-	_, _, err := PlaceStart(rows, []string{"from", "leg", "one"})
+	_, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "two"})
 	if err == nil || !strings.Contains(err.Error(), "no quiet move row") {
 		t.Fatalf("err %v", err)
 	}
@@ -85,13 +239,13 @@ func TestPlaceStartRefusesPullRow(t *testing.T) {
 		placeRow(planexport.KindPull, 0, 0, 110, 0, 0, 15111),
 		placeRow(planexport.KindBoss, 0, 0, 120, 0, 0, 11347),
 	)
-	if _, _, err := PlaceStart(rows, []string{"from", "step", "2"}); err == nil || !strings.Contains(err.Error(), "is a pull row") {
+	if _, _, _, _, err := PlaceStart(rows, []string{"from", "step", "2"}); err == nil || !strings.Contains(err.Error(), "is a pull row") {
 		t.Fatalf("pull row: %v", err)
 	}
-	if _, _, err := PlaceStart(rows, []string{"from", "step", "3"}); err == nil || !strings.Contains(err.Error(), "is a boss row") {
+	if _, _, _, _, err := PlaceStart(rows, []string{"from", "step", "3"}); err == nil || !strings.Contains(err.Error(), "is a boss row") {
 		t.Fatalf("boss row: %v", err)
 	}
-	if _, _, err := PlaceStart(rows, []string{"from", "step", "9"}); err == nil || !strings.Contains(err.Error(), "3 steps") {
+	if _, _, _, _, err := PlaceStart(rows, []string{"from", "step", "9"}); err == nil || !strings.Contains(err.Error(), "3 steps") {
 		t.Fatalf("out of range: %v", err)
 	}
 }
@@ -103,10 +257,10 @@ func TestPlaceStartRefusesEventHold(t *testing.T) {
 		placeRow(planexport.KindHold, 0, 0, 110, 0, 0),
 	)
 	// step 2 is the move leading into the hold at step 3: the server would move the start back.
-	if _, _, err := PlaceStart(rows, []string{"from", "step", "2"}); err == nil || !strings.Contains(err.Error(), "event at step 3") {
+	if _, _, _, _, err := PlaceStart(rows, []string{"from", "step", "2"}); err == nil || !strings.Contains(err.Error(), "event at step 3") {
 		t.Fatalf("err %v", err)
 	}
-	if _, _, err := PlaceStart(rows, []string{"from", "step", "3"}); err == nil || !strings.Contains(err.Error(), "is a hold row") {
+	if _, _, _, _, err := PlaceStart(rows, []string{"from", "step", "3"}); err == nil || !strings.Contains(err.Error(), "is a hold row") {
 		t.Fatalf("hold row: %v", err)
 	}
 }
@@ -133,6 +287,39 @@ func TestPlaceClearCorridorPicksBehindOnly(t *testing.T) {
 	}
 	if len(cp.Notes) != 0 {
 		t.Fatalf("notes %v", cp.Notes)
+	}
+	// Behind is every pull row before the start, not only the corridor's circles: the row 60 yd out and the one 20 yd
+	// above are BEHIND rows too, so a unit they spawn is owned there. The move and the AHEAD pull are not.
+	if len(cp.Behind) != 3 {
+		t.Fatalf("behind %+v", cp.Behind)
+	}
+	for i, want := range steps[1:4] {
+		b := cp.Behind[i]
+		if b.Step != i+2 || b.X != want.X || b.Y != want.Y || b.Z != want.Z || b.Radius != want.Radius ||
+			len(b.Entries) != 1 || b.Entries[0] != want.Entries[0] {
+			t.Fatalf("behind %d %+v, want row %d of %v", i, b, i+2, want)
+		}
+	}
+}
+
+// BehindOwns is the positive ownership test (review round 3): the row must hold the entry, and the home must lie within
+// its radius plus PlaceOwnYd, 2D, within placeAheadDz of its height.
+func TestPlaceBehindOwns(t *testing.T) {
+	p := PlacePlan{Behind: []BehindRow{{Step: 7, X: 0, Y: 0, Z: 10, Radius: 8, Entries: []uint32{15111}}}}
+	if k, ok := p.BehindOwns(15111, 8+PlaceOwnYd, 0, 10); !ok || k != 7 {
+		t.Fatalf("a home at the row's radius + %d yd: %d, %v", PlaceOwnYd, k, ok)
+	}
+	if _, ok := p.BehindOwns(15111, 8+PlaceOwnYd+0.5, 0, 10); ok {
+		t.Fatal("a home beyond the row's radius + 6 yd is owned")
+	}
+	if _, ok := p.BehindOwns(15111, 0, 0, 10+placeAheadDz); !ok {
+		t.Fatal("a home at the z window's edge is not owned")
+	}
+	if _, ok := p.BehindOwns(15111, 0, 0, 10+placeAheadDz+0.5); ok {
+		t.Fatal("a home above the z window is owned")
+	}
+	if _, ok := p.BehindOwns(15112, 0, 0, 10); ok {
+		t.Fatal("an entry the row does not hold is owned")
 	}
 }
 
@@ -261,11 +448,11 @@ func TestPlaceClearZGLeg3(t *testing.T) {
 
 func TestPlaceStartZGLeg3Stages(t *testing.T) {
 	rows := zgPlaceRows(t)
-	step, leg, err := PlaceStart(rows, []string{"from", "leg", "high_priest_thekal"})
+	step, leg, fallback, _, err := PlaceStart(rows, []string{"from", "leg", "high_priest_thekal"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if step != 231 || leg != "high_priest_thekal" {
+	if step != 231 || leg != "high_priest_thekal" || fallback != "" {
 		t.Fatalf("start %d (%q), want 231", step, leg)
 	}
 	if p, ok := PlacePoint(rows, step); !ok || p.X != -11919.999 || p.Z != 61.340786 {
@@ -377,6 +564,159 @@ func TestPlaceClearAheadBeyondStop(t *testing.T) {
 	}
 	if len(cp.Circles) != 1 || !cp.Circles[0].PerUnit {
 		t.Fatalf("circles %+v", cp.Circles)
+	}
+}
+
+// F5 (D8): a later leg's route comes within the guard of a BEHIND boss row: the run shortens its until to stop before
+// the offending segment, and the corridor's route ends one positioned step earlier.
+func TestPlaceBossGuardShortensInLaterLeg(t *testing.T) {
+	steps := []planexport.StepRow{placeRow(planexport.KindBoss, 0, 20, 150, 0, 0, 12345)} // step 1
+	steps = append(steps, placeRoute(1, 10)...)                                           // steps 2..11: leg 1, (0,10)..(0,100)
+	steps = append(steps, placeMove(2, 20, 140, 0))                                       // step 12: leg 2 starts near the boss
+	for i := 1; i <= 4; i++ {
+		steps = append(steps, placeMove(2, 20, float32(140+i*10), 0)) // steps 13..16: along +y past the boss
+	}
+	rows := placeRows([]planexport.LegRow{
+		{Plan: "t", Leg: 0, Name: "one"}, {Plan: "t", Leg: 1, Name: "two"}, {Plan: "t", Leg: 2, Name: "three"},
+	}, steps...)
+	start, stop := 5, len(rows.Steps)
+	until, routeEnd, note, refusal, hit := PlaceBossGuard(rows, start, stop)
+	if refusal != "" {
+		t.Fatalf("refused: %q", refusal)
+	}
+	if !hit {
+		t.Fatal("the guard did not report the segment")
+	}
+	if until != 12 || routeEnd != 11 {
+		t.Fatalf("until %d, routeEnd %d, want 12 and 11", until, routeEnd)
+	}
+	if !strings.Contains(note, "row 1 of leg 0") {
+		t.Fatalf("note %q", note)
+	}
+	// The corridor ends before the offending segment: PlaceClear accepts routeEnd and refuses until.
+	if cp := PlaceClear(rows, nil, start, routeEnd); cp.Refusal != "" {
+		t.Fatalf("PlaceClear(routeEnd) refused: %q", cp.Refusal)
+	}
+	if cp := PlaceClear(rows, nil, start, until); cp.Refusal == "" {
+		t.Fatal("PlaceClear(until) did not refuse")
+	}
+}
+
+// H1 (D8): the guard's hit is on the LAST segment (the stop step itself), so until stays the stop: the caller needs
+// hit to shorten an `--until none` run to `until step <stop>`, and to refuse a boss-done run it would cut before.
+// The reviewer's fixture: leg 0's boss at (20,150), leg 1's moves, and leg 2's last row at (20,140).
+func TestPlaceBossGuardShortensAHitOnTheLastSegment(t *testing.T) {
+	steps := []planexport.StepRow{placeRow(planexport.KindBoss, 0, 20, 150, 0, 0, 12345)} // step 1
+	steps = append(steps, placeRoute(1, 10)...)                                           // steps 2..11: leg 1, (0,10)..(0,100)
+	steps = append(steps, placeMove(2, 20, 140, 0))                                       // step 12: leg 2's last row, 10 yd from the boss
+	rows := placeRows([]planexport.LegRow{
+		{Plan: "t", Leg: 0, Name: "one"}, {Plan: "t", Leg: 1, Name: "two"}, {Plan: "t", Leg: 2, Name: "three"},
+	}, steps...)
+	start, stop := 5, len(rows.Steps)
+	until, routeEnd, note, refusal, hit := PlaceBossGuard(rows, start, stop)
+	if refusal != "" {
+		t.Fatalf("refused: %q", refusal)
+	}
+	if !hit {
+		t.Fatal("the guard did not report the hit on the last segment")
+	}
+	if until != stop || routeEnd != stop-1 {
+		t.Fatalf("until %d, routeEnd %d, want the stop %d and the step before it %d", until, routeEnd, stop, stop-1)
+	}
+	if !strings.Contains(note, "row 1 of leg 0") || !strings.Contains(note, "stops before step 12") {
+		t.Fatalf("note %q", note)
+	}
+	// The caller's shortening (`until step 12`) stops the run before step 12; the corridor ends at step 11. Without
+	// that, the final segment is walked and PlaceClear(until) refuses.
+	if cp := PlaceClear(rows, nil, start, routeEnd); cp.Refusal != "" {
+		t.Fatalf("PlaceClear(routeEnd) refused: %q", cp.Refusal)
+	}
+	if cp := PlaceClear(rows, nil, start, until); cp.Refusal == "" {
+		t.Fatal("PlaceClear(until) did not refuse: the last segment is within the guard")
+	}
+}
+
+// F5 (D8): a BEHIND boss row next to a segment of the start step's own leg refuses as before (no shortening).
+func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
+	steps := []planexport.StepRow{
+		placeRow(planexport.KindBoss, 0, 0, 30, 0, 0, 12345), // step 1: on the route
+		placeMove(0, 0, 10, 0),
+		placeMove(0, 0, 20, 0),
+		placeMove(0, 0, 30, 0), // step 4: the start, at the boss's point
+		placeMove(0, 0, 40, 0),
+	}
+	rows := placeRows(nil, steps...)
+	start, stop := 4, len(rows.Steps)
+	until, routeEnd, _, refusal, hit := PlaceBossGuard(rows, start, stop)
+	if !hit {
+		t.Fatal("the guard did not report the segment")
+	}
+	if until != stop || routeEnd != stop {
+		t.Fatalf("until %d, routeEnd %d, want %d (no shortening)", until, routeEnd, stop)
+	}
+	want := PlaceClear(rows, nil, start, stop).Refusal
+	if want == "" {
+		t.Fatal("the fixture's PlaceClear does not refuse")
+	}
+	if refusal != want {
+		t.Fatalf("refusal %q, want the PlaceClear text %q", refusal, want)
+	}
+}
+
+// F5 (D8): with the deployed-style ZG rows (401 steps from planexport.Build), a placed `--until none` run from Marli
+// stops before the segment on leg 6 that passes Venoxis, and the shortened corridor clears clean.
+func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
+	plan := zgPlacePlan(t)
+	res, err := planexport.Build(plan, planexport.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := res.Rows
+	if len(rows.Steps) != 401 {
+		t.Fatalf("the fixture has %d steps, want 401", len(rows.Steps))
+	}
+	start, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := len(rows.Steps)
+	until, routeEnd, note, refusal, hit := PlaceBossGuard(rows, start, stop)
+	if refusal != "" {
+		t.Fatalf("refused: %q", refusal)
+	}
+	if !hit {
+		t.Fatal("the guard did not report the segment")
+	}
+	if until <= start {
+		t.Fatalf("until %d is not past the start %d", until, start)
+	}
+	jindo := 0
+	for _, l := range rows.Legs {
+		if l.Name == "jindo_the_hexxer" {
+			jindo = l.Leg
+		}
+	}
+	if jindo == 0 {
+		t.Fatal("the rows have no jindo_the_hexxer leg")
+	}
+	if rows.Steps[until-1].Leg != jindo {
+		t.Fatalf("until step %d is leg %d, want the jindo_the_hexxer leg %d", until, rows.Steps[until-1].Leg, jindo)
+	}
+	ven, venLeg := 0, 0
+	for i, s := range rows.Steps {
+		if s.Kind == planexport.KindBoss && s.Entry == 14507 {
+			ven, venLeg = i+1, s.Leg
+			break
+		}
+	}
+	if ven == 0 {
+		t.Fatal("the rows have no Venoxis (14507) boss row")
+	}
+	if !strings.Contains(note, fmt.Sprintf("row %d of leg %d", ven, venLeg)) {
+		t.Fatalf("the note %q does not name the Venoxis row %d of leg %d", note, ven, venLeg)
+	}
+	if cp := PlaceClear(rows, plan, start, routeEnd); cp.Refusal != "" {
+		t.Fatalf("PlaceClear(routeEnd=%d) refused: %q", routeEnd, cp.Refusal)
 	}
 }
 

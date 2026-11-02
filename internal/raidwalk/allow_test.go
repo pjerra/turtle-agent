@@ -19,6 +19,8 @@ func TestAllowedLine(t *testing.T) {
 		".tele name Tankbot onyxia",
 		".summon Tankbot",
 		".revive Tankbot",
+		".appear Tankbot",
+		".gm visible off",
 		".bot run stop",
 		".bot run resume",
 	}
@@ -52,6 +54,15 @@ func TestAllowedLine(t *testing.T) {
 		".tele name NotAHire onyxia",
 		".tele name Tankbot bad word",
 		".summon Tankbot extra",
+		".appear NotAHire",
+		".appear Tankbot extra",
+		".appear",
+		".gm visible on",
+		".gm off",
+		".gm visible off now",
+		".gm visible off Tankbot",
+		" .gm visible off",
+		".gm  visible off",
 		".bot run stop now",
 		".bot run stop time limit reached (raid-walk 0m)",
 		".bot run resume now",
@@ -74,7 +85,7 @@ func TestAllowedLineAppearUnbind(t *testing.T) {
 	}
 	for _, line := range []string{".appear Stranger", ".appear", ".appear Tankbot extra", ".instance unbind all",
 		".instance unbind 409", ".instance unbind", ".instance listbinds", ".instance unbind 0309",
-		".gm", ".gm off", ".gm on extra", ".gm visible off", ".gm visible on"} {
+		".gm", ".gm off", ".gm on extra", ".gm visible on"} { // `.gm visible off` is the revive's one exact line (TestAllowedLine)
 		if AllowedLine(line, hires, 309) {
 			t.Errorf("accepted a forbidden line %q", line)
 		}
@@ -90,6 +101,9 @@ func TestAllowedTT(t *testing.T) {
 		"q units 30 -11882.36 -1866.66 63.88 all",
 		"q units 41 -11882.36 -1866.66 63.88 all",
 		"q units 80 -11919.999 -1857.6 61.340786 all",
+		"q units 40 -11703.2 -1996.8 62.13 all dead e=14509",
+		"q units 40 -11703.2 -1996.8 62.13 all dead e=12118",
+		"q units 40 -11703.2 -1996.8 62.13 all e=14509",
 		"quiet 50 -11920 -1857.6 61.34 w=20 dz=8",
 		"quiet 50 -11920 -1857.6 61.34 w=20 dz=8 skip=14758,15091",
 		"quiet 50 -11920 -1857.6 61.34 w=0 dz=15 skip=962",
@@ -126,6 +140,12 @@ func TestAllowedTT(t *testing.T) {
 		"q group",
 		"q units 30 -11882.36 -1866.66 63.88",
 		"q units 81 -11882.36 -1866.66 63.88 all",
+		"q units 40 -11703.2 -1996.8 62.13 all dead e=0",
+		"q units 40 -11703.2 -1996.8 62.13 all dead e=10000000",
+		"q units 40 -11703.2 -1996.8 62.13 all dead e=x",
+		"q units 40 -11703.2 -1996.8 62.13 all dead e=14509 kill",
+		"q units 40 -11703.2 -1996.8 62.13 dead all",
+		"q units 40 -11703.2 -1996.8 62.13 all boss",
 		"q unit 0xF130000000000001",
 		"q link 0xF130000000000001",
 		"quiet 51 -11920 -1857.6 61.34 w=20 dz=8",

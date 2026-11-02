@@ -122,3 +122,24 @@ func TestBossDoneUntilFromStart(t *testing.T) {
 		t.Fatalf("the boss is the last step: %q, %d, %v", got, boss, err)
 	}
 }
+
+// TestBossNotFound pins the note the run leader sends when it cannot find a boss (walk 24 test2 r2):
+// "boss <N> not found: ..." names the boss entry; other notes do not.
+func TestBossNotFound(t *testing.T) {
+	for _, c := range []struct {
+		note  string
+		entry uint32
+		ok    bool
+	}{
+		{"boss 14599 not found: not alive or dead within 30.0 yd of -11703.2 -1996.8 62.1 for 60 s nor anywhere in the instance (.bot run skip if he is already dead)", 14599, true},
+		{"boss 12118 not found: not alive or dead within 30.0 yd of a b c", 12118, true},
+		{"boss 14599 not at his spot: waiting for him", 0, false},
+		{"pack 14599 not found: x", 0, false},
+		{"", 0, false},
+	} {
+		entry, ok := BossNotFound(c.note)
+		if ok != c.ok || entry != c.entry {
+			t.Errorf("BossNotFound(%q) = %d, %v; want %d, %v", c.note, entry, ok, c.entry, c.ok)
+		}
+	}
+}
