@@ -2887,6 +2887,30 @@ func (w *walk) bossUnknown(ctx context.Context) error {
 		w.note("wipe resume skipped: boss state unknown (%s engaged in the frames)", w.engagedBossWords())
 		return errWipeResumeSkipped
 	}
+	// The dashboard first, exactly as before: a live boss fight row blocks the recovery, and a
+	// missing, stale or errored read keeps the unknown wait. The frames only resolve the latch
+	// once the dashboard does not block, so a kill (or reset) the frames show can never walk a
+	// live dashboard fight or an unreadable dashboard into the revive.
+	if w.dash != nil {
+		switch {
+		case w.bossCheckErr != nil:
+			w.note("wipe resume skipped: boss state unknown (dashboard fights read failed: %v)", w.bossCheckErr)
+			return errWipeResumeSkipped
+		case w.bossReadAt.IsZero():
+			w.note("wipe resume skipped: boss state unknown (no dashboard fights read yet)")
+			return errWipeResumeSkipped
+		case now.Sub(w.bossReadAt) > 30*time.Second:
+			w.note("wipe resume skipped: boss state unknown (dashboard fights read stale %ds)", int(now.Sub(w.bossReadAt)/time.Second))
+			return errWipeResumeSkipped
+		}
+		// A boss fight still live on the dashboard blocks recovery before anything is revived.
+		for _, r := range w.fightRows {
+			if r.bossLive() {
+				w.note("wipe resume skipped: boss state unknown (live boss fight row on the dashboard)")
+				return errWipeResumeSkipped
+			}
+		}
+	}
 	if !w.bossLatchAt.IsZero() && now.Sub(w.bossLatchAt) < 120*time.Second {
 		if kill, alive, words := w.wipeBossFrame(now); kill || alive {
 			what := "killed (frames show 0 %%)"
@@ -2898,27 +2922,6 @@ func (w *walk) bossUnknown(ctx context.Context) error {
 		}
 		w.note("wipe resume skipped: boss state unknown (%s)", w.latchWords(now))
 		return errWipeResumeSkipped
-	}
-	if w.dash == nil {
-		return nil
-	}
-	switch {
-	case w.bossCheckErr != nil:
-		w.note("wipe resume skipped: boss state unknown (dashboard fights read failed: %v)", w.bossCheckErr)
-		return errWipeResumeSkipped
-	case w.bossReadAt.IsZero():
-		w.note("wipe resume skipped: boss state unknown (no dashboard fights read yet)")
-		return errWipeResumeSkipped
-	case now.Sub(w.bossReadAt) > 30*time.Second:
-		w.note("wipe resume skipped: boss state unknown (dashboard fights read stale %ds)", int(now.Sub(w.bossReadAt)/time.Second))
-		return errWipeResumeSkipped
-	}
-	// A boss fight still live on the dashboard blocks recovery before anything is revived.
-	for _, r := range w.fightRows {
-		if r.bossLive() {
-			w.note("wipe resume skipped: boss state unknown (live boss fight row on the dashboard)")
-			return errWipeResumeSkipped
-		}
 	}
 	return nil
 }

@@ -2741,6 +2741,151 @@ func TestRaidWalkWipeResumeBossDeadFrameKills(t *testing.T) {
 	}
 }
 
+// dashLatchWipeFixture: a molten_core boss-done walk with the dashboard
+// enabled. The frames latch the boss engaged (90 % with a party target)
+// until 140 s, then show after(elapsed) rows; the wipe at 240 s leaves the
+// latch 100 s old, inside the 120 s window. The run resumes when the
+// recovery completes. Codex HIGH: the frame verdict must never skip the
+// dashboard's live-boss gate.
+func dashLatchWipeFixture(t *testing.T, after func(elapsed time.Duration) []tbm.HostileRec) (*fixture, int, int) {
+	t.Helper()
+	f, next, total := bossDoneFixture(t)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+	}
+	f.agent.mu.Unlock()
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	killed := false
+	t0 := f.clock.now()
+	wipeAt := t0.Add(240 * time.Second)
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		now := f.clock.now()
+		if !killed && !now.Before(wipeAt) {
+			killed = true
+			f.agent.mu.Lock()
+			for _, name := range f.agent.party {
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		if elapsed := now.Sub(t0); elapsed < 140*time.Second {
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 90, Target: packet.GUID(1000)}}
+		} else {
+			return after(elapsed)
+		}
+	}
+	f.agent.onResume = func() {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting resumed", next-1, total)},
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|move|walk|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)})
+	}
+	return f, next, total
+}
+
+// revivesBeforeFirstStop counts the revive/summon gm lines sent before the
+// first `.bot run stop`: the recovery's own revive (a wrong resume) happens
+// before the old wipe ending's stop, the ending's revive after it.
+func revivesBeforeFirstStop(gm []string) int {
+	stopAt, revives := -1, 0
+	for i, l := range gm {
+		if stopAt < 0 && strings.HasPrefix(l, ".bot run stop") {
+			stopAt = i
+		}
+		if stopAt < 0 && (strings.HasPrefix(l, ".revive ") || strings.HasPrefix(l, ".summon ")) {
+			revives++
+		}
+	}
+	return revives
+}
+
+// TestRaidWalkWipeResumeFrameKillLiveDashboardBlocks (Codex HIGH): the frames
+// show the boss killed (0 % corpse, the latch kill) while the dashboard's
+// freshest fights list holds a live boss fight row. The dashboard gate runs
+// first, so nothing is revived into that fight: exit 19, wipe_resumes 0, the
+// live-row skip, no kill-advance note and no revive or summon before the run
+// stop. With the frame verdict checked first, the walk advanced on the kill,
+// revived, and only then read the live row.
+func TestRaidWalkWipeResumeFrameKillLiveDashboardBlocks(t *testing.T) {
+	f, _, _ := dashLatchWipeFixture(t, func(elapsed time.Duration) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 0, Target: 0}}
+	})
+	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "k", Live: true, BossName: "Lucifron", Outcome: "live"}}
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 0 {
+		t.Fatalf("wipe_resumes %d, want 0 (a live dashboard fight blocks the revive)", sum.WipeResumes)
+	}
+	if !hasNote(sum, "wipe resume skipped: boss state unknown (live boss fight row on the dashboard)") {
+		t.Fatalf("notes %q, want the live-row skip", sum.Notes)
+	}
+	if hasNote(sum, "advancing, not unknown") {
+		t.Fatalf("notes %q, want no frame kill advance past the dashboard gate", sum.Notes)
+	}
+	if n := revivesBeforeFirstStop(f.agent.gmLines()); n != 0 {
+		t.Fatalf("%d revive/summon lines before the run stop, want 0 (nothing is revived into a live fight): %q", n, f.agent.gmLines())
+	}
+}
+
+// TestRaidWalkWipeResumeFrameKillCleanDashboardResumes: the same frame kill
+// with a fresh fights list that holds no live row (a finished fight is
+// history) still resolves the latch as the kill and resumes.
+func TestRaidWalkWipeResumeFrameKillCleanDashboardResumes(t *testing.T) {
+	f, _, _ := dashLatchWipeFixture(t, func(elapsed time.Duration) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 0, Target: 0}}
+	})
+	f.dash.fights = mcWipeFights()
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (a clean dashboard leaves the frame kill to resolve the latch)", sum.WipeResumes)
+	}
+	if !hasNote(sum, "killed") {
+		t.Fatalf("notes %q, want the kill evidence", sum.Notes)
+	}
+	if hasNote(sum, "boss state unknown") {
+		t.Fatalf("notes %q, want no boss-unknown skip", sum.Notes)
+	}
+}
+
+// TestRaidWalkWipeResumeFrameResetErroredDashboardSkips: the frames show the
+// boss reset (fresh 100 %, no target) but the dashboard fights read errors.
+// An errored read is unknown boss state, exactly as before the frame verdict
+// existed: exit 19, wipe_resumes 0, the read-failed skip, no reset advance.
+func TestRaidWalkWipeResumeFrameResetErroredDashboardSkips(t *testing.T) {
+	f, _, _ := dashLatchWipeFixture(t, func(elapsed time.Duration) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 100, Target: 0}}
+	})
+	f.dash.fightsErr = errors.New("daemon down")
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 0 {
+		t.Fatalf("wipe_resumes %d, want 0 (an errored read is unknown boss state)", sum.WipeResumes)
+	}
+	if !hasNote(sum, "wipe resume skipped: boss state unknown (dashboard fights read failed: daemon down)") {
+		t.Fatalf("notes %q, want the read-failed skip", sum.Notes)
+	}
+	if hasNote(sum, "advancing, not unknown") {
+		t.Fatalf("notes %q, want no frame reset advance past the dashboard gate", sum.Notes)
+	}
+	if n := revivesBeforeFirstStop(f.agent.gmLines()); n != 0 {
+		t.Fatalf("%d revive/summon lines before the run stop, want 0 (an unreadable dashboard is unknown): %q", n, f.agent.gmLines())
+	}
+}
+
 // TestRaidWalkWipeResumeBossDeadNoAttemptNoKill: the frames hold only a
 // 0 % row of the boss — a fake death, never a live row in this attempt. No
 // live row means no attempt start and no boss latch, so the corpse is no
