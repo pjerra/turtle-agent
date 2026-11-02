@@ -2019,8 +2019,13 @@ func (w *walk) bossCorpse(ctx context.Context, boss uint32, units []uint32) (boo
 					if gerr := w.gm(ctx, raidwalk.GMVisibleOff); gerr != nil {
 						return false, ""
 					}
-					w.goPlace(ctx, spot.X, spot.Y, spot.Z+2)
 					moved = true
+					if gerr := w.goPlace(ctx, spot.X, spot.Y, spot.Z+2); gerr != nil {
+						if ctx.Err() != nil {
+							return false, ""
+						}
+						return fail("the toolkit corpse read failed (point_far, and the move to the boss row failed: %v)", gerr)
+					}
 					w.note("boss %d: the commander moved to the boss row for the corpse read (the toolkit read is limited to 150 yd)", boss)
 					continue
 				}

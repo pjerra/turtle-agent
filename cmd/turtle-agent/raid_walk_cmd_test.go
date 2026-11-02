@@ -5487,6 +5487,49 @@ func TestRaidWalkBossNotFoundToolkitCorpseSkips(t *testing.T) {
 // point_far. The walk moves the commander to the boss row once (with the revive's own GM sequence), re-reads the
 // same entry once, and finds the corpse: exactly one `.go xyz` to the boss spot between the two reads, one
 // `.bot run skip`, and the move note. Today: no move, latched, no skip.
+// Codex round 1: a .go to the boss row that fails is not a move: no move note, no second read, and the reads latch
+// off with the real error.
+func TestRaidWalkBossNotFoundCorpseReadPointFarGoFails(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgThekalStart(total, boss)
+	spot := zgRows(t).Steps[boss-1]
+	wantGo := fmt.Sprintf(".go xyz %s %s %s 309", num32(spot.X), num32(spot.Y), num32(spot.Z+2))
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	f.agent.gmFail = func(line string) error {
+		if line == wantGo {
+			return errors.New("command refused")
+		}
+		return nil
+	}
+	f.agent.mu.Lock()
+	f.agent.startQueue = zgThekalPauseQueue(boss, total)
+	f.agent.mu.Unlock()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	f.run(context.Background())
+	f.agent.mu.Lock()
+	tt := append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	if len(tt) != 1 {
+		t.Fatalf("toolkit calls %q, want exactly the one refused read (no re-read after a failed go)", tt)
+	}
+	if hasNote(f.summary(), "the commander moved to the boss row for the corpse read") {
+		t.Fatalf("notes %q, want no move note after a failed go", f.summary().Notes)
+	}
+	if !hasNote(f.summary(), "the move to the boss row failed") {
+		t.Fatalf("notes %q, want the failed-move note", f.summary().Notes)
+	}
+}
+
 func TestRaidWalkBossNotFoundCorpseReadPointFarMovesAndRereads(t *testing.T) {
 	f := zgThekalFixture(t, "zul_gurub")
 	boss := zgBossStep(t)
