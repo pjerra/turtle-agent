@@ -26,7 +26,11 @@ func (d *RemoteDriver) checkPartyStrength(pf *Preflight) {
 	if m, ok := d.memberByName(name); ok && d.plan.TankMinHP > 0 && m.MaxHP > 0 {
 		floor := d.tankFloor(name)
 		if m.MaxHP < floor {
-			pf.Warnings = append(pf.Warnings, fmt.Sprintf("%s: the tank's max health is %d, the plan wants at least %d for its level band (weak gear: autogear again, or hire another tank)", m.Name, m.MaxHP, floor))
+			warn := fmt.Sprintf("%s: the tank's max health is %d, the plan wants at least %d for its level band (weak gear: autogear again, or hire another tank)", m.Name, m.MaxHP, floor)
+			if lo, hi := d.plan.Band(); lo == 60 && hi == 60 {
+				warn += "; the 60 floor assumes tier gear"
+			}
+			pf.Warnings = append(pf.Warnings, warn)
 		}
 	}
 	bt, ok := d.g.(BotTeamer)

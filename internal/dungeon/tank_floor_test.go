@@ -60,3 +60,22 @@ func TestPreflightTankFloorScalesToTheHiredLevel(t *testing.T) {
 		t.Fatalf("a weak level-45 tank was not warned about:\n%s", all)
 	}
 }
+
+// A level-60 plan's floor assumes tier gear: the warning says so. The curve itself is untouched (a level-60 floor still scales).
+func TestPreflightTankFloorAt60NamesTierGear(t *testing.T) {
+	p := &Plan{Name: "onyxias_lair", LevelBand: []int{60, 60}, TankMinHP: 8500}
+	d := &RemoteDriver{plan: p, opt: RemoteOptions{Tank: "Tanky"}}
+	d.fr.Party = []tbm.PartyRec{{Name: "Tanky", MaxHP: 8000}}
+	pf := &Preflight{OK: true}
+	d.checkPartyStrength(pf)
+	if all := strings.Join(pf.Warnings, "\n"); !strings.Contains(all, "the 60 floor assumes tier gear") {
+		t.Fatalf("a level-60 warning names no tier gear:\n%s", all)
+	}
+
+	p.LevelBand = []int{55, 60}
+	pf = &Preflight{OK: true}
+	d.checkPartyStrength(pf)
+	if all := strings.Join(pf.Warnings, "\n"); strings.Contains(all, "tier gear") {
+		t.Fatalf("a non-60 band named tier gear:\n%s", all)
+	}
+}
