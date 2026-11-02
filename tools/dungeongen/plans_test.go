@@ -680,21 +680,37 @@ func readMovementPaths(path string) (map[uint64][]dungeon.Point, error) {
 	return out, r.err
 }
 
-// arlokkTerraceRowYd is how near a walk's straight segment may pass a pack that a later pull row owns: the mobs detect at
-// 20 yd (the map-309 spawns' detection_range), so a sample inside that band wakes the pack before its pull row.
+// arlokkTerraceRowYd is how near a walk may pass a pack that a later pull row owns: the mobs detect at 20 yd (the
+// map-309 spawns' detection_range), so a sample inside that band wakes the pack before its pull row.
 const arlokkTerraceRowYd = 20
+
+// arlokkTerraceStoreyYd is how far above or below a walk a spawn may stand and still count: the terrace's three floors
+// are 10.8-10.9 yd apart, and the upper-level walks have to pass over a middle-level pack (the ring over it is the only
+// way round), where the floor keeps a pack on the storey below from seeing the party. The one crossing that must count
+// is the bridge over the lower pack's pit: it lies 8.2-8.4 yd above the pit floor, and the middle packs' closest pass
+// under a walk is 9.4 yd (19.8 yd 3D) on the ramp, so the band sits between them at 9 yd.
+const arlokkTerraceStoreyYd = 9
 
 // TestZulGurubArlokkTerraceRouteClearOfLaterPacks: walk 25's Arlokk leg walked the raid onto the three-level terrace in the
 // plan's group order 11, 12, 13, ... and the move from group 11's approach to group 12's crossed the spawn ring of group 15's
 // four Shadow Hunters 11339 at z 71.4 (13.3 yd from 51354), which woke groups 12, 14, 15 and 16 at once: 3 of 4 attempts
-// wiped, the MT idle under 11 elites (TortoiseBots-audit tests/raid-zg-walk25/summary-autofix.md "Arlokk"). The leg pulls
-// the upper level first now (11 -> 15 -> 14 -> 17) and each stand sits on its pack's own level, clear of every pack pulled
-// later. The test walks the exported leg-4 rows from group 11's approach through the last terrace pull: for every pair of
-// consecutive move rows, every spawn of a formation that a later pull row owns stays arlokkTerraceRowYd out of the straight
-// segment sampled every 2 yd. "Later" leaves out the pack the walk is approaching: its own pull row comes after the move, and
-// its firing stand is 12-25 yd from it by design (the group-15 stand, D2, is 21.9 yd from 51354). Group 13's row must own its
-// linked Blood Drinkers 51594/51595 (leader 49343) as well: walk 25's radius 12 stopped 14.4-15.3 yd short of them, so the
-// pack's four Panthers came alone and the two Drinkers joined group 14's fight.
+// wiped, the MT idle under 11 elites (TortoiseBots-audit tests/raid-zg-walk25/summary-autofix.md "Arlokk"). Review round 1
+// (Opus HIGH) then found the upper-level-first order still crossed the lower pack's ring on the navmesh: the route from
+// 13's stand to 16's stand ran the bridge at y -1639 z 57.7-60.4, 8.5 yd from 51383 while the lower pack was still alive
+// (the straight segments are blind to the bridge the mesh takes). The leg pulls the seven terrace packs in the order 11
+// upper A, 12 upper B, 13 upper east, 14 upper north, 15 middle -11498, 16 lower, 17 middle -11534: the lower pack from a
+// stand on the east arm of the middle level, before anyone crosses the bridge, and each stand on its pack's own level,
+// clear of every pack pulled later. The test walks the exported leg-4 rows from group 11's approach through the LAST
+// terrace pull (the max seq among the pull rows for groups 11-17, each of which must appear exactly once): for every pair
+// of consecutive move rows, every spawn of a formation that a later pull row owns stays arlokkTerraceRowYd out of the walk.
+// "Later" leaves out the pack the walk is approaching: its own pull row comes after the move, and its firing stand is
+// 12-25 yd from it by design (group 12's stand is 21.9 yd from 51354). Group 15's row must own its linked Blood Drinkers
+// 51594/51595 (leader 49343) as well: walk 25's radius 12 stopped 14.4-15.3 yd short of them, so the pack's four Panthers
+// came alone and the two Drinkers joined group 14's fight. The walk is checked twice: on the navmesh POLYLINES between
+// consecutive move rows (the planner plan-check uses, over ~/turtle-agent-mmaps), sampled every yard, and on the straight
+// segments every 2 yd as a fallback that always runs. The polyline check skips with a clear message when the mmaps are
+// absent (as the Mar'li test does); the straight check never skips. Both report the measured minimum distance for every
+// segment (t.Logf, so -v lists them; the failure lines carry the worst sample).
 func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 	p, err := dungeon.Load(filepath.Join(plansDirT, "zul_gurub.json"))
 	if err != nil {
@@ -732,19 +748,45 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 			leg4 = append(leg4, s)
 		}
 	}
-	// The terrace is plan leg 4's pull groups 11-17 (the array indices the plan and the export's comments name): from the
-	// first group's approach row through the last group's pull row.
+	// The terrace is plan leg 4's pull groups 11-17 (the array indices the plan and the export's comments name), numbered
+	// in pull order: from group 11's approach row through the last group's pull row. The last pull is the max seq among
+	// the seven groups' pull rows (the terrace order moves with the walk's findings, so it is not hard-coded here); each
+	// group must appear exactly once.
+	terracePull := func(s planexport.StepRow) (int, bool) {
+		var group int
+		if _, err := fmt.Sscanf(s.Comment, "pull group %d", &group); err != nil || group < 11 || group > 17 {
+			return 0, false
+		}
+		if rest := strings.TrimPrefix(s.Comment, fmt.Sprintf("pull group %d", group)); rest != "" && rest != " approach" && rest != "; stand pull" {
+			return 0, false
+		}
+		return group, true
+	}
 	first, last := -1, -1
+	counts := map[int]int{}
 	for i, s := range leg4 {
-		if strings.HasPrefix(s.Comment, "pull group 11 approach") {
+		if s.Kind == planexport.KindMove && s.Comment == "pull group 11 approach" {
 			first = i
 		}
-		if s.Comment == "pull group 17" {
+		group, ok := terracePull(s)
+		if !ok || s.Kind != planexport.KindPull {
+			continue
+		}
+		counts[group]++
+		if last < 0 || s.Seq > leg4[last].Seq {
 			last = i
 		}
 	}
-	if first < 0 || last <= first {
-		t.Fatalf("no terrace rows in the exported leg 4 (group 11 approach at %d, group 17 pull at %d)", first, last)
+	if first < 0 {
+		t.Fatal("no group-11 approach row in the exported leg 4")
+	}
+	for group := 11; group <= 17; group++ {
+		if counts[group] != 1 {
+			t.Errorf("exported leg 4 has %d pull rows for group %d, want exactly 1", counts[group], group)
+		}
+	}
+	if last <= first {
+		t.Fatalf("no terrace rows in the exported leg 4 (group 11 approach at %d, last terrace pull at %d)", first, last)
 	}
 	isMove := func(k string) bool { return k == planexport.KindMove || k == planexport.KindMoveDirect }
 	var moves, pulls []planexport.StepRow
@@ -791,11 +833,18 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 			t.Errorf("leg 4 pull_groups[%d] does not list the Blood Drinker %d's spawn (%.1f %.1f %.1f)", group, guid, c.Pos.X, c.Pos.Y, c.Pos.Z)
 		}
 		if !rowOwnsOne(pulls[row13], c) {
-			t.Errorf("the pull row %.0f %.0f %.0f (radius %.1f, entries %v) does not own the Blood Drinker %d (%s, entry %d) at %.1f %.1f %.1f: %.1f yd out",
+			t.Errorf("the pull row %.0f %.0f %.1f (radius %.1f, entries %v) does not own the Blood Drinker %d (%s, entry %d) at %.1f %.1f %.1f: %.1f yd out",
 				pulls[row13].X, pulls[row13].Y, pulls[row13].Z, pulls[row13].Radius, pulls[row13].Entries, guid, c.Name, c.Entry, c.Pos.X, c.Pos.Y, c.Pos.Z, rowDist(pulls[row13], c))
 		}
 	}
-	// Every pair of consecutive move rows: the packs a later pull row owns stay arlokkTerraceRowYd out of the straight walk.
+	// Every pair of consecutive move rows: the packs a later pull row owns stay arlokkTerraceRowYd out of the walk, on the
+	// navmesh polyline (with mmaps) and on the straight segment (always); each pair logs its measured minimum.
+	planner := arlokkTerracePlanner()
+	if planner != nil {
+		defer planner.Close()
+	} else {
+		t.Log("no map 309 navmesh files: polyline check skipped (set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its tiles); the straight-line fallback below still runs")
+	}
 	for i := 0; i+1 < len(moves); i++ {
 		a, b := moves[i], moves[i+1]
 		next := -1 // the pull row the pair walks to: the first one after the second move row
@@ -808,28 +857,111 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 		if next < 0 {
 			continue
 		}
-		samples := samplesAlong(rowPoint(a), rowPoint(b), 2)
+		var laterFams [][]creature
 		for _, later := range pulls[next+1:] {
 			for _, lead := range leaders {
 				fam := formations[lead]
 				if !rowOwns(later, fam) {
 					continue
 				}
-				for _, c := range fam {
-					worst, at := math.Inf(1), dungeon.Point{}
-					for _, s := range samples {
-						if d := dist(s, c.Pos); d < worst {
-							worst, at = d, s
-						}
-					}
-					if worst < arlokkTerraceRowYd {
-						t.Errorf("leg 4 rows %d (%s %.1f %.1f) -> %d (%s %.1f %.1f) passes %.1f yd from %s %d (entry %d) at %.1f %.1f %.1f, owned by row %d (%s): %.0f yd wanted",
-							a.Seq, a.Comment, a.X, a.Y, b.Seq, b.Comment, b.X, b.Y, worst, c.Name, c.GUID, c.Entry, at.X, at.Y, at.Z, later.Seq, later.Comment, float64(arlokkTerraceRowYd))
-					}
+				laterFams = append(laterFams, fam)
+			}
+		}
+		straight := samplesAlong(rowPoint(a), rowPoint(b), 2)
+		checkArlokkTerraceWalk(t, "straight", a, b, straight, laterFams)
+		if planner == nil {
+			continue
+		}
+		poly, ok := arlokkTerracePolyline(planner, p.Map, rowPoint(a), rowPoint(b))
+		if !ok {
+			t.Errorf("leg 4 rows %d (%s) -> %d (%s): no complete navmesh path", a.Seq, a.Comment, b.Seq, b.Comment)
+			continue
+		}
+		checkArlokkTerraceWalk(t, "polyline", a, b, poly, laterFams)
+	}
+}
+
+// checkArlokkTerraceWalk logs the nearest spawn of the packs a later pull row owns against one walk and fails when it
+// stands within arlokkTerraceRowYd of the nearest sample. A spawn more than arlokkTerraceStoreyYd above or below a
+// sample is on another floor and does not count (see the constant).
+func checkArlokkTerraceWalk(t *testing.T, how string, a, b planexport.StepRow, samples []dungeon.Point, laterFams [][]creature) {
+	t.Helper()
+	worst, who, at := worstSample(samples, laterFams, arlokkTerraceStoreyYd)
+	if math.IsInf(worst, 1) {
+		t.Logf("leg 4 rows %d (%s) -> %d (%s): %s, no spawn of a later pack in the storey band", a.Seq, a.Comment, b.Seq, b.Comment, how)
+		return
+	}
+	t.Logf("leg 4 rows %d (%s) -> %d (%s): %s min %.1f yd vs %s at %.1f %.1f %.1f", a.Seq, a.Comment, b.Seq, b.Comment, how, worst, who, at.X, at.Y, at.Z)
+	if worst < arlokkTerraceRowYd {
+		t.Errorf("leg 4 rows %d (%s %.1f %.1f) -> %d (%s %.1f %.1f) walks the %s %.1f yd from %s at %.1f %.1f %.1f: %.0f yd wanted",
+			a.Seq, a.Comment, a.X, a.Y, b.Seq, b.Comment, b.X, b.Y, how, worst, who, at.X, at.Y, at.Z, float64(arlokkTerraceRowYd))
+	}
+}
+
+// arlokkTerracePlanner is the server's navmesh for the terrace route check ($TURTLE_AGENT_MMAPS or
+// ~/turtle-agent-mmaps, as planprobe and navmesh's own real tests use); nil without one, so the caller logs and keeps
+// the straight-line fallback.
+func arlokkTerracePlanner() *navmesh.Planner {
+	home, _ := os.UserHomeDir()
+	for _, dir := range []string{os.Getenv("TURTLE_AGENT_MMAPS"), filepath.Join(home, "turtle-agent-mmaps")} {
+		if dir == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, "309.mmap")); err != nil {
+			continue
+		}
+		if tiles, _ := filepath.Glob(filepath.Join(dir, "309*.mmtile")); len(tiles) == 0 {
+			continue
+		}
+		return navmesh.NewPlanner(dir)
+	}
+	return nil
+}
+
+// arlokkTerracePolyline plans the walk from a to b on the server's navmesh and samples it every yard, both ends
+// included (a one-corner path is its one point). False when the mesh has no complete path.
+func arlokkTerracePolyline(pl *navmesh.Planner, mapID uint32, a, b dungeon.Point) ([]dungeon.Point, bool) {
+	path, err := pl.Plan(mapID, navmesh.Vec3{a.X, a.Y, a.Z}, navmesh.Vec3{b.X, b.Y, b.Z})
+	if err != nil || len(path.Points) < 1 || path.Status != navmesh.Complete {
+		return nil, false
+	}
+	var out []dungeon.Point
+	for i := 0; i+1 < len(path.Points); i++ {
+		from, to := path.Points[i], path.Points[i+1]
+		d := math.Sqrt(float64(sq32(to[0]-from[0]) + sq32(to[1]-from[1]) + sq32(to[2]-from[2])))
+		n := int(math.Ceil(d))
+		if n < 1 {
+			n = 1
+		}
+		for k := 0; k <= n; k++ {
+			f := float32(float64(k) / float64(n))
+			out = append(out, dungeon.Point{X: from[0] + (to[0]-from[0])*f, Y: from[1] + (to[1]-from[1])*f, Z: from[2] + (to[2]-from[2])*f})
+		}
+	}
+	if len(path.Points) == 1 {
+		p := path.Points[0]
+		out = []dungeon.Point{{X: p[0], Y: p[1], Z: p[2]}}
+	}
+	return out, true
+}
+
+// worstSample is the closest any sample stands to any spawn of the later-owned formations within the storey band: the
+// distance, "guid/entry" of the spawn, and the sample point. No such spawn: +Inf, "none", the zero point.
+func worstSample(samples []dungeon.Point, laterFams [][]creature, storey float64) (float64, string, dungeon.Point) {
+	worst, who, at := math.Inf(1), "none", dungeon.Point{}
+	for _, s := range samples {
+		for _, fam := range laterFams {
+			for _, c := range fam {
+				if math.Abs(float64(s.Z-c.Pos.Z)) > storey {
+					continue
+				}
+				if d := dist(s, c.Pos); d < worst {
+					worst, who, at = d, fmt.Sprintf("%d/%d", c.GUID, c.Entry), s
 				}
 			}
 		}
 	}
+	return worst, who, at
 }
 
 // rowOwnsOne reports whether the exported pull row owns the spawn: its entry is one of the row's entries and it stands
