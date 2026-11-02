@@ -58,10 +58,14 @@ func decisionsCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		fmt.Fprintf(stderr, "decisions: %s\n", n)
 	}
 	fmt.Fprintf(stdout, "decisions: pulled %d captures (%d bytes) into %s/decisions\n", len(res.Captures), res.Bytes, o.out)
+	// Budget exhaustion has its own message; every other failure shares the notes above.
 	if res.BudgetHit {
 		fmt.Fprintf(stderr, "decisions: budget stopped the pull at %d MiB\n", o.maxMiB)
+		return exitRaidWalkFailed
 	}
-	fmt.Fprintf(stdout, "decisions: %s\n", res.Note)
+	if res.ListFailed || res.ManifestFailed || res.CtxExpired || res.Incomplete > 0 || pullCtx.Err() != nil {
+		return exitRaidWalkFailed
+	}
 	return exitOK
 }
 

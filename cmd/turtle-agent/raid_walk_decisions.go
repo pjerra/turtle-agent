@@ -1,12 +1,15 @@
 // raid_walk_decisions.go: the walk's decision-capture pull (spec section 10.2). After the
 // teardown step and before finish, on every exit path that reached the dashboard login, the walk
 // lists the dashboard's decision captures for its character in the walk window, waits for each to
-// show ended, downloads index.json and every non-deleted segment into <out>/decisions/<id>/, and
-// writes <out>/decisions/manifest.json. A 5-minute context bounds the pull. It never changes the
-// exit code: every failure lands in the summary's decisions note.
+// show ended, downloads index.json and every non-deleted segment into a staging dir next to
+// <out>/decisions/<id>/, validates the staged files, renames the dir into place (an existing
+// dir is replaced only after full success), and writes <out>/decisions/manifest.json. A
+// 5-minute context bounds the pull. It never changes the exit code: every failure lands in the
+// summary's decisions note.
 //
 // pullDecisionsInto is the shared worker: the walk calls it through pullDecisionsIn, and
-// `turtle-agent decisions pull` calls it directly, so both pull the same files.
+// `turtle-agent decisions pull` calls it directly, so both pull the same files. The standalone
+// context expires, and on budget exhaustion with its own message.
 package main
 
 import (
@@ -101,30 +104,44 @@ func (w *walk) pullDecisionsIn(ctx context.Context) {
 }
 
 // decisionsPullResult is pullDecisionsInto's summary: one row per fully pulled capture.
+// Incomplete counts the well-formed captures that were not fully pulled (never ended, a failed
+// or unknown file); ListFailed, ManifestFailed and CtxExpired flag the pull-wide failures. The
+// walk only notes them (its exit code never changes); the standalone command exits nonzero.
 type decisionsPullResult struct {
-	Captures  []raidwalk.DecisionsCaptureSummary
-	Bytes     int64
-	Note      string
-	BudgetHit bool
+	Captures       []raidwalk.DecisionsCaptureSummary
+	Bytes          int64
+	Note           string
+	BudgetHit      bool
+	Incomplete     int
+	ListFailed     bool
+	ManifestFailed bool
+	CtxExpired     bool
 }
 
 // pullDecisionsInto lists the commander's captures in [since, until], waits up to 15s polling
-// every 3s for each to show ended, downloads index.json and every non-deleted segment into
-// <out>/decisions/<id>/ (0700 dirs, 0600 files via .part + rename), and writes
-// <out>/decisions/manifest.json. It stops at maxBytes with BudgetHit; a failed file notes and the
-// rest continue. A server-sent id that fails the capture regex is refused client-side.
+// every 3s for each to show ended, downloads index.json and every non-deleted segment into a
+// unique staging dir next to <out>/decisions/<id>/, validates every listed file there, and only
+// then renames it into place: an existing dir is replaced only after full success, and on
+// failure only the staging dir is removed (an earlier complete capture survives a failed
+// re-pull). Then it writes <out>/decisions/manifest.json with one row per fully pulled capture.
+// It stops at maxBytes with BudgetHit; a failed file or an unknown non-deleted segment name
+// fails that capture with a note and the rest continue, and the capture stays out of the success
+// manifest. A server-sent id that fails the capture regex is refused client-side.
 func pullDecisionsInto(ctx context.Context, dash decisionsPuller, commander string, since, until time.Time, out string, maxBytes int64) (decisionsPullResult, []string) {
 	var res decisionsPullResult
 	res.Captures = []raidwalk.DecisionsCaptureSummary{}
 	var notes []string
 	caps, err := dash.Decisions(ctx, commander, since, until)
 	if err != nil {
+		res.ListFailed = true
 		return res, []string{err.Error()}
 	}
 	var manifest []decisionManifestCapture
 	var total int64
 	for _, c := range caps {
 		if ctx.Err() != nil {
+			res.CtxExpired = true
+			notes = append(notes, "context expired")
 			break
 		}
 		if !tbdash.DecisionCaptureRe.MatchString(c.ID) {
@@ -133,6 +150,8 @@ func pullDecisionsInto(ctx context.Context, dash decisionsPuller, commander stri
 		if c.Ended == nil {
 			c.Ended = waitDecisionEnded(ctx, dash, commander, since, until, c)
 			if c.Ended == nil {
+				notes = append(notes, fmt.Sprintf("%s: not ended, skipped", c.ID))
+				res.Incomplete++
 				continue
 			}
 		}
@@ -143,19 +162,27 @@ func pullDecisionsInto(ctx context.Context, dash decisionsPuller, commander stri
 			}
 			files = append(files, s.File)
 		}
+		staging, serr := makeDecisionStaging(out, c.ID)
+		if serr != nil {
+			notes = append(notes, fmt.Sprintf("%s: %v", c.ID, serr))
+			res.Incomplete++
+			continue
+		}
 		var rows []decisionManifestFile
 		var capBytes int64
 		ok := true
 		for _, f := range files {
 			if !tbdash.DecisionFileRe.MatchString(f) {
-				continue
+				notes = append(notes, fmt.Sprintf("%s/%s: unknown segment name, capture skipped", c.ID, f))
+				ok = false
+				break
 			}
 			if total >= maxBytes {
 				res.BudgetHit = true
 				ok = false
 				break
 			}
-			n, hash, ferr := pullOneDecisionFile(ctx, dash, out, c.ID, f, maxBytes-total)
+			n, hash, ferr := pullOneDecisionFile(ctx, dash, staging, c.ID, f, maxBytes-total)
 			if ferr != nil {
 				if isDecisionBudgetError(ferr) {
 					res.BudgetHit = true
@@ -171,10 +198,27 @@ func pullDecisionsInto(ctx context.Context, dash decisionsPuller, commander stri
 			rows = append(rows, decisionManifestFile{Name: f, Bytes: n, SHA256: hash})
 		}
 		if !ok {
-			_ = os.RemoveAll(filepath.Join(out, "decisions", c.ID))
+			_ = os.RemoveAll(staging)
 			if res.BudgetHit {
 				break
 			}
+			res.Incomplete++
+			continue
+		}
+		if verr := validateDecisionStage(staging, rows); verr != nil {
+			_ = os.RemoveAll(staging)
+			notes = append(notes, fmt.Sprintf("%s: %v", c.ID, verr))
+			res.Incomplete++
+			continue
+		}
+		target := filepath.Join(out, "decisions", c.ID)
+		// The staging dir validated above, so only now is the target replaced: a
+		// failed re-pull never touches an earlier complete capture.
+		_ = os.RemoveAll(target)
+		if rerr := os.Rename(staging, target); rerr != nil {
+			_ = os.RemoveAll(staging)
+			notes = append(notes, fmt.Sprintf("%s: %v", c.ID, rerr))
+			res.Incomplete++
 			continue
 		}
 		if rows == nil {
@@ -193,6 +237,7 @@ func pullDecisionsInto(ctx context.Context, dash decisionsPuller, commander stri
 		}
 	}
 	if err := writeDecisionManifest(out, manifest); err != nil {
+		res.ManifestFailed = true
 		notes = append(notes, fmt.Sprintf("manifest: %v", err))
 	}
 	return res, notes
@@ -236,14 +281,60 @@ func waitDecisionEnded(ctx context.Context, dash decisionsPuller, commander stri
 	}
 }
 
-// pullOneDecisionFile streams one capture file into <out>/decisions/<id>/ via <file>.part +
+// makeDecisionStaging creates a unique staging dir next to the capture's target dir
+// (<out>/decisions/.<id>.staging-*). The caller renames it into place after validation.
+func makeDecisionStaging(out, id string) (string, error) {
+	parent := filepath.Join(out, "decisions")
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return "", err
+	}
+	return os.MkdirTemp(parent, "."+id+".staging-*")
+}
+
+// validateDecisionStage checks every listed file is in the staging dir with the pulled size
+// and sha256, and nothing else is there (no .part leftovers, no extras).
+func validateDecisionStage(staging string, rows []decisionManifestFile) error {
+	entries, err := os.ReadDir(staging)
+	if err != nil {
+		return err
+	}
+	if len(entries) != len(rows) {
+		return fmt.Errorf("staged %d files, want %d", len(entries), len(rows))
+	}
+	want := make(map[string]decisionManifestFile, len(rows))
+	for _, r := range rows {
+		want[r.Name] = r
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			return fmt.Errorf("unexpected dir %q", e.Name())
+		}
+		r, ok := want[e.Name()]
+		if !ok {
+			return fmt.Errorf("unexpected file %q", e.Name())
+		}
+		raw, rerr := os.ReadFile(filepath.Join(staging, e.Name()))
+		if rerr != nil {
+			return rerr
+		}
+		if int64(len(raw)) != r.Bytes {
+			return fmt.Errorf("%s: staged %d bytes, want %d", e.Name(), len(raw), r.Bytes)
+		}
+		sum := sha256.Sum256(raw)
+		if hex.EncodeToString(sum[:]) != r.SHA256 {
+			return fmt.Errorf("%s: staged hash mismatch", e.Name())
+		}
+	}
+	return nil
+}
+
+// pullOneDecisionFile streams one capture file into the staging dir via <file>.part +
 // rename (0700 dirs, 0600 files) and returns the bytes and sha256 hex. max bounds this file.
-func pullOneDecisionFile(ctx context.Context, dash decisionsPuller, out, id, file string, max int64) (int64, string, error) {
-	dir := filepath.Join(out, "decisions", id)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+func pullOneDecisionFile(ctx context.Context, dash decisionsPuller, staging, id, file string, max int64) (int64, string, error) {
+	if err := os.MkdirAll(staging, 0o700); err != nil {
 		return 0, "", err
 	}
-	part := filepath.Join(dir, file+".part")
+	part := filepath.Join(staging, file+".part")
 	dst, err := os.OpenFile(part, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return 0, "", err
@@ -263,7 +354,7 @@ func pullOneDecisionFile(ctx context.Context, dash decisionsPuller, out, id, fil
 		_ = os.Remove(part)
 		return 0, "", err
 	}
-	if err := os.Rename(part, filepath.Join(dir, file)); err != nil {
+	if err := os.Rename(part, filepath.Join(staging, file)); err != nil {
 		_ = os.Remove(part)
 		return 0, "", err
 	}
