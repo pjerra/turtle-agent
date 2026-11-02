@@ -87,6 +87,16 @@ func TestResetToGossipRules(t *testing.T) {
 	if !strings.Contains(string(out), `"reset_to_gossip": true`) {
 		t.Fatalf("the flag is not written: %s", out)
 	}
+	loot := `{"loot_object":{"entry":128403,"near":` + near + `}}`
+	waitUnit := `{"wait_for":{"unit":{"entries":[7604],"state":"seen"},"timeout_s":30}}`
+	waitClear := `{"wait_for":{"hostiles_gone":{"radius":30},"timeout_s":30}}`
+	waitObject := `{"wait_for":{"gameobject":{"entry":146084,"near":` + near + `,"state":"active"},"timeout_s":30}}`
+	waitHold := `{"wait_for":{"unit":{"entries":[7796],"state":"seen"},"timeout_s":300,"hold":{"instance_data":1,"value":7,"spot":` + near + `,"radius":30,"timeout_s":600}}}`
+	agentOnly := `{"wait_for":{"unit":{"entries":[7604],"state":"seen"},"timeout_s":30,"agent_only":"the boss hold waits for it"}}`
+	trigger := `{"area_trigger":{"id":962,"center":` + near + `,"radius":10,"stand":{"x":5,"y":6,"z":7},"by":"auto","expect":"unit 7271 hostile"}}`
+	useObject := `{"use_object":{"entry":141073,"near":` + near + `}}`
+	useItem := `{"use_item":{"entry":7}}`
+	ritual := `{"ritual":{"entry":130511,"position":` + near + `,"participants":3}}`
 	for _, tc := range []struct{ name, js, want string }{
 		{"no gossip", bossPlan("", units), "needs a gossip step of this leg that starts the encounter (npc 7604, the boss) right before the hold"},
 		{"another NPC", bossPlan(gossip(7605), units), "the last step of this leg that starts an event is not the gossip of npc 7604"},
@@ -96,7 +106,28 @@ func TestResetToGossipRules(t *testing.T) {
 			"cannot be combined with skip_if_dead_of_gossip"},
 		{"a pull group's hold", `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[4857],"positions":[` + near + `],"hold":{"instance_data":2,"spot":` + near + `,"radius":25,"timeout_s":300,"reset_to_gossip":true}}]}]}`,
 			"only a boss's hold done by its units (instance_data left out) takes it"},
+		// TB's EventStartStep walks back over move, move_direct, rest and wait_object rows only: an event starter (ritual,
+		// gossip, open/use_on, use_item, area_trigger-as-move) between the gossip and the hold is a new start, anything else
+		// refuses. A loot row, a wait_clear row, a unit wait (cut before the plan check) or a second hold row between refuses.
+		{"loot between", bossPlan(gossip(7604)+","+loot, units), "steps[1] (loot_object) comes between the gossip and the hold"},
+		{"wait_clear between", bossPlan(gossip(7604)+","+waitClear, units), "steps[1] (wait_for hostiles_gone) comes between the gossip and the hold"},
+		{"unit wait between", bossPlan(gossip(7604)+","+waitUnit, units), "steps[1] (wait_for unit) comes between the gossip and the hold"},
+		{"second hold between", bossPlan(gossip(7604)+","+waitHold, units), "steps[1] (wait_for unit) comes between the gossip and the hold"},
+		{"agent_only between", bossPlan(gossip(7604)+","+agentOnly, units), "steps[1] (wait_for unit) comes between the gossip and the hold"},
+		// An event starter between the gossip and the hold is a new start TB goes back to instead of the gossip: the plan names
+		// the step TB would land on.
+		{"use_object between", bossPlan(gossip(7604)+","+useObject, units), "the last step of this leg that starts an event is not the gossip of npc 7604"},
+		{"use_item between", bossPlan(gossip(7604)+","+useItem, units), "the last step of this leg that starts an event is not the gossip of npc 7604"},
+		{"ritual between", bossPlan(gossip(7604)+","+ritual, units), "the last step of this leg that starts an event is not the gossip of npc 7604"},
+		{"wait_object between", bossPlan(gossip(7604)+","+waitObject, units), ""},
+		{"area trigger between", bossPlan(gossip(7604)+","+trigger, units), ""},
 	} {
+		if tc.want == "" {
+			if _, err := Parse("ok.json", []byte(tc.js)); err != nil {
+				t.Errorf("%s: %v", tc.name, err)
+			}
+			continue
+		}
 		if _, err := Parse("bad.json", []byte(tc.js)); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v", tc.name, err)
 		}

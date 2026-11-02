@@ -441,8 +441,9 @@ func zulfarrakThroughZumrah(t *testing.T) *dungeon.Plan {
 // The whole shipped Zul'Farrak plan exports without a cut (2026-10-21; before, the bly leg's unit waits cut it there): the bly leg is
 // the move to its spot, the gossip 7604 option 1 (the plan's option 0), and the boss's hold done by its units (entry 0, param 0, flags
 // 32768 with skip_if_dead_of_gossip; Bly first, then Murta, Oro and Raven), and ukorz follows it. Bly's three unit waits are agent_only,
-// each listed with its reason, and boss.first under the hold is warned as no kill order. The plan's gahzrilla leg is optional and takes
-// no row number, so bly is row leg 15 of plan leg 16 and ukorz row leg 16.
+// each listed with its reason, and boss.first under the hold is warned as no kill order. The plan's gahzrilla leg is optional and the
+// farraki_arena and zeljeb legs are skip_export, and all three take no row number, so bly is row leg 15 of plan leg 18 and ukorz row
+// leg 16.
 func TestZulfarrakExportsBlyAndReachesUkorz(t *testing.T) {
 	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
 	if err != nil {
@@ -456,12 +457,12 @@ func TestZulfarrakExportsBlyAndReachesUkorz(t *testing.T) {
 		t.Fatalf("cut: %s", res.Cut)
 	}
 	legs := res.Rows.Legs
-	if len(legs) != 19 || legs[16].Name != "weegli_door" || legs[17].Name != "bly" || legs[18].Name != "ukorz" {
+	if len(legs) != 17 || legs[14].Name != "weegli_door" || legs[15].Name != "bly" || legs[16].Name != "ukorz" {
 		t.Fatalf("legs %+v", legs)
 	}
 	var bly []string
 	for _, s := range res.Rows.Steps {
-		if s.Leg == 17 {
+		if s.Leg == 15 {
 			bly = append(bly, fmt.Sprintf("%s %d %g %g %g r%g p%d f%d t%d %v", s.Kind, s.Entry, s.X, s.Y, s.Z, s.Radius, s.Param, s.Flags, s.TimeoutS, s.Entries))
 		}
 	}
@@ -480,12 +481,12 @@ func TestZulfarrakExportsBlyAndReachesUkorz(t *testing.T) {
 		}
 	}
 	for _, s := range res.Rows.Steps {
-		if s.Leg == 17 && s.Kind == KindHold && (!strings.Contains(s.Comment, "until every unit of it is dead (7604 counts while still friendly)") ||
+		if s.Leg == 15 && s.Kind == KindHold && (!strings.Contains(s.Comment, "until every unit of it is dead (7604 counts while still friendly)") ||
 			!strings.Contains(s.Comment, "done when its NPC was dead, with only friendly units left")) {
 			t.Errorf("the units hold's comment: %q", s.Comment)
 		}
 	}
-	if ukorz := kinds(res.Rows, 18); len(ukorz) == 0 || ukorz[len(ukorz)-1] != KindBoss {
+	if ukorz := kinds(res.Rows, 16); len(ukorz) == 0 || ukorz[len(ukorz)-1] != KindBoss {
 		t.Errorf("ukorz kinds %v", ukorz)
 	}
 	if fmt.Sprint(res.Rows.Plan.KillFirst) != "[7785 8179 5650 7247 7608 7606 7605 62499]" {
@@ -499,6 +500,8 @@ func TestZulfarrakExportsBlyAndReachesUkorz(t *testing.T) {
 		`leg 18 (bly) steps[3] "the boss hold waits for it`,
 		"boss.first under a hold (",
 		"leg 18 (bly) boss 7604 first [7608 7606 7605]): not in the rows",
+		"leg 8 (farraki_arena): skip_export (an opt-in wing): left out of the export; pass --with-legs farraki_arena to include it",
+		"leg 10 (zeljeb): skip_export (an opt-in wing): left out of the export; pass --with-legs zeljeb to include it",
 	} {
 		if !strings.Contains(w, want) {
 			t.Errorf("the warnings lack %q:\n%s", want, w)
@@ -529,12 +532,12 @@ func TestZulfarrakWithoutBlyReachesUkorz(t *testing.T) {
 		t.Fatalf("cut: %s", res.Cut)
 	}
 	legs := res.Rows.Legs
-	if len(legs) != 18 || legs[16].Name != "weegli_door" || legs[17].Name != "ukorz" || legs[17].Leg != 17 {
+	if len(legs) != 16 || legs[14].Name != "weegli_door" || legs[15].Name != "ukorz" || legs[15].Leg != 15 {
 		t.Fatalf("legs %+v", legs)
 	}
 	var door []string
 	for _, s := range res.Rows.Steps {
-		if s.Leg == 16 {
+		if s.Leg == 14 {
 			door = append(door, fmt.Sprintf("%s %d %g %g %g r%g p%d f%d t%d %v", s.Kind, s.Entry, s.X, s.Y, s.Z, s.Radius, s.Param, s.Flags, s.TimeoutS, s.Entries))
 		}
 	}
@@ -547,7 +550,7 @@ func TestZulfarrakWithoutBlyReachesUkorz(t *testing.T) {
 	if !slices.Equal(door, want) {
 		t.Errorf("weegli_door rows:\n%s\nwant\n%s", strings.Join(door, "\n"), strings.Join(want, "\n"))
 	}
-	ukorz := kinds(res.Rows, 17)
+	ukorz := kinds(res.Rows, 15)
 	if len(ukorz) == 0 || ukorz[len(ukorz)-1] != KindBoss || slices.Contains(ukorz, KindGossip) {
 		t.Errorf("ukorz kinds %v", ukorz)
 	}
@@ -626,9 +629,9 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The optional gahzrilla leg is left out of the run leader's rows (its bots carry no Mallet), so the rows have one leg fewer and the later
-	// legs close up: the last leg is the plan's last, one number lower.
-	if len(res.Rows.Legs) != len(p.Legs)-1 {
+	// The optional gahzrilla leg (its bots carry no Mallet) and the skip_export farraki_arena and zeljeb legs are left out of the run
+	// leader's rows, so the rows have three legs fewer and the later legs close up: zumrah is the plan's last, three numbers lower.
+	if len(res.Rows.Legs) != len(p.Legs)-3 {
 		t.Fatalf("%d rows legs for %d plan legs", len(res.Rows.Legs), len(p.Legs))
 	}
 	last := len(res.Rows.Legs) - 1
@@ -636,8 +639,8 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 		t.Fatalf("%s", p.Legs[len(p.Legs)-1].Name)
 	}
 	for _, l := range res.Rows.Legs {
-		if l.Name == "gahzrilla" {
-			t.Errorf("the optional leg is in the rows: %+v", l)
+		if l.Name == "gahzrilla" || l.Name == "farraki_arena" || l.Name == "zeljeb" {
+			t.Errorf("the skipped leg is in the rows: %+v", l)
 		}
 	}
 	for _, s := range res.Rows.Steps {
@@ -652,8 +655,15 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 	if len(res.Warnings) == 0 || !strings.Contains(strings.Join(res.Warnings, "\n"), "31 loot_object steps left out") {
 		t.Fatalf("warnings %v", res.Warnings)
 	}
-	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "leg 11 (gahzrilla): optional (needs Mallet of Zul'Farrak (item 9240)") {
-		t.Fatalf("no warning for the optional leg: %v", res.Warnings)
+	w := strings.Join(res.Warnings, "\n")
+	for _, want := range []string{
+		"leg 11 (gahzrilla): optional (needs Mallet of Zul'Farrak (item 9240)",
+		"leg 8 (farraki_arena): skip_export (an opt-in wing): left out of the export; pass --with-legs farraki_arena to include it",
+		"leg 10 (zeljeb): skip_export (an opt-in wing): left out of the export; pass --with-legs zeljeb to include it",
+	} {
+		if !strings.Contains(w, want) {
+			t.Fatalf("no warning for the skipped leg %q: %v", want, res.Warnings)
+		}
 	}
 	back, err := Parse(WriteSQL([]Rows{res.Rows}))
 	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
@@ -1180,6 +1190,27 @@ func TestCutHopsKeepOffALeftAloneSpawn(t *testing.T) {
 	}
 	if len(clear.Rows.Steps) != 3 || clear.Rows.Steps[1].Comment != "approach path" {
 		t.Fatalf("a clear cut is not written: %+v", clear.Rows.Steps)
+	}
+}
+
+// Only the current leg's leave spawns refuse a cut: a spawn another leg leaves alone is that leg's own stretch (the plan check
+// holds every leg's points to every leg's list already), so a hop cut past it is written as before.
+func TestCutHopIgnoresAnotherLegsLeave(t *testing.T) {
+	const js = `{"version":1,"name":"lv","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"leave":[{"entry":7246,"spawn":81610,"at":{"x":1591,"y":1047.7,"z":9},"why":"island Shadowhunter"}],
+  "pull_groups":[{"entries":[100],"positions":[{"x":1650,"y":1047.7,"z":9}]}]},
+ {"name":"b","to":{"x":20,"y":0,"z":0},"pull_groups":[{"entries":[101],"positions":[{"x":1650,"y":1047.7,"z":9}]}]}]}`
+	cut := func(p dungeon.Point) func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
+		return func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
+			return []dungeon.Point{p}, nil
+		}
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", ApproachHops: true, Cut: cut(dungeon.Point{X: 1600, Y: 1045, Z: 9})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows.Steps) != 6 {
+		t.Fatalf("a hop 9 yd from another leg's left-alone spawn was left uncut:\n%+v", res.Rows.Steps)
 	}
 }
 

@@ -92,9 +92,9 @@ func TestValidateUseOn(t *testing.T) {
 	}
 }
 
-// The shipped Zul'Farrak plan with --with-optional gahzrilla: the gahzrilla leg is row leg 11 (move to the stand, the 8 pulls, the two
+// The shipped Zul'Farrak plan with --with-optional gahzrilla: the gahzrilla leg is row leg 9 (move to the stand, the 8 pulls, the two
 // approach moves the east pool ring's two stands add, the stand move, use_on 141832 with 9240 at the gong's point, boss 7273), the
-// courtyard follows as leg 10, and the plan still exports without a cut through Ukorz.
+// courtyard follows it, and the plan still exports without a cut through Ukorz. The skip_export farraki_arena and zeljeb legs stay out.
 func TestZulfarrakWithGahzrilla(t *testing.T) {
 	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
 	if err != nil {
@@ -108,20 +108,74 @@ func TestZulfarrakWithGahzrilla(t *testing.T) {
 		t.Fatalf("cut: %s", res.Cut)
 	}
 	legs := res.Rows.Legs
-	if len(legs) != 20 || legs[11].Name != "gahzrilla" || legs[12].Name != "courtyard" || legs[18].Name != "bly" || legs[19].Name != "ukorz" {
+	if len(legs) != 18 || legs[9].Name != "gahzrilla" || legs[10].Name != "courtyard" || legs[16].Name != "bly" || legs[17].Name != "ukorz" {
 		t.Fatalf("legs %+v", legs)
 	}
-	g := kinds(res.Rows, 11)
+	g := kinds(res.Rows, 9)
 	wantKinds := []string{KindMove, KindPull, KindPull, KindPull, KindMove, KindPull, KindMove, KindPull, KindPull, KindPull, KindPull, KindMove, KindUseOn, KindBoss}
 	if !slices.Equal(g, wantKinds) {
 		t.Fatalf("gahzrilla kinds %v", g)
 	}
 	for _, s := range res.Rows.Steps {
-		if s.Leg == 11 && s.Kind == KindUseOn && (s.Entry != 141832 || s.Item != 9240 || s.X != 1650.9 || s.Y != 1171.9 || s.Z != 10.9 || s.Flags != 0 || s.Param != 0) {
+		if s.Leg == 9 && s.Kind == KindUseOn && (s.Entry != 141832 || s.Item != 9240 || s.X != 1650.9 || s.Y != 1171.9 || s.Z != 10.9 || s.Flags != 0 || s.Param != 0) {
 			t.Errorf("the gong row %+v", s)
 		}
-		if s.Leg == 11 && s.Kind == KindBoss && (s.Entry != 7273 || s.X != 1702.58) {
+		if s.Leg == 9 && s.Kind == KindBoss && (s.Entry != 7273 || s.X != 1702.58) {
 			t.Errorf("the boss row %+v", s)
 		}
+	}
+}
+
+// A skip_export leg is left out by default with a warning naming --with-legs, and written with it: the shipped Zul'Farrak plan's
+// farraki_arena and zeljeb. The default rows keep today's leg numbers (bly is row leg 15, ukorz row leg 16, as TestZulfarrakExportsBly
+// pins); with both legs the rows hold them at 8 and 10.
+func TestZulfarrakSkipExportLegsAreOptIn(t *testing.T) {
+	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Cut != "" {
+		t.Fatalf("cut: %s", res.Cut)
+	}
+	if len(res.Rows.Legs) != 17 {
+		t.Fatalf("leg rows: %d, want 17", len(res.Rows.Legs))
+	}
+	for _, l := range res.Rows.Legs {
+		if l.Name == "farraki_arena" || l.Name == "zeljeb" {
+			t.Errorf("the opt-in leg is in the default rows: %+v", l)
+		}
+	}
+	if got := map[string]int{}; true {
+		for _, l := range res.Rows.Legs {
+			got[l.Name] = l.Leg
+		}
+		if got["bly"] != 15 || got["ukorz"] != 16 || got["velratha_b"] != 8 || got["courtyard"] != 9 {
+			t.Errorf("row legs %v: want bly 15, ukorz 16, velratha_b 8, courtyard 9", got)
+		}
+	}
+	opt, err := Build(p, Options{Source: "test", DropCompanionsLoot: true, WithLegs: []string{"farraki_arena", "zeljeb"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opt.Cut != "" {
+		t.Fatalf("cut: %s", opt.Cut)
+	}
+	if len(opt.Rows.Legs) != 19 {
+		t.Fatalf("leg rows: %d, want 19", len(opt.Rows.Legs))
+	}
+	if got := map[string]int{}; true {
+		for _, l := range opt.Rows.Legs {
+			got[l.Name] = l.Leg
+		}
+		if got["farraki_arena"] != 8 || got["zeljeb"] != 10 || got["bly"] != 17 || got["ukorz"] != 18 {
+			t.Errorf("row legs %v: want farraki_arena 8, zeljeb 10, bly 17, ukorz 18", got)
+		}
+	}
+	if _, err := Build(p, Options{Source: "test", WithLegs: []string{"courtyard"}}); err == nil || !strings.Contains(err.Error(), `with-legs names "courtyard"`) {
+		t.Errorf("a leg that is not skip_export: %v", err)
 	}
 }

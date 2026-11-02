@@ -199,6 +199,10 @@ type Options struct {
 	// use_on when no party bot carries it). Zul'Farrak's gahzrilla (the Mallet of Zul'Farrak 9240 on the gong). A name that is no optional
 	// leg of the plan is an error.
 	WithOptional []string
+	// WithLegs names skip_export legs (Leg.SkipExport) to write into the rows anyway, each with a warning naming the leg as opt-in:
+	// Zul'Farrak's farraki_arena and zeljeb (Turtle-custom wings, mapped offline and never fought live; the default export leaves
+	// them out so its leg numbers stay today's). A name that is no skip_export leg of the plan is an error.
+	WithLegs []string
 	// Route, when set, is called for every hop between two anchors of the rows (move, pull, boss, hold) of a plan with avoid boxes: it
 	// returns the via points that keep the run leader's own navmesh path (the server's, which does not know the boxes) out of them,
 	// none when that path is already clear. An error means a hop that cannot be made safe: the export fails.
@@ -272,6 +276,11 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 	for _, n := range opt.WithOptional {
 		if !slices.ContainsFunc(p.Legs, func(l dungeon.Leg) bool { return l.Name == n && l.Optional != nil }) {
 			return Result{}, fmt.Errorf("plan %s: with-optional names %q, which is no optional leg of the plan", name, n)
+		}
+	}
+	for _, n := range opt.WithLegs {
+		if !slices.ContainsFunc(p.Legs, func(l dungeon.Leg) bool { return l.Name == n && l.SkipExport }) {
+			return Result{}, fmt.Errorf("plan %s: with-legs names %q, which is no skip_export leg of the plan", name, n)
 		}
 	}
 	b := &builder{opt: opt, plan: p, name: name}
@@ -379,7 +388,13 @@ func (b *builder) leg(li int) error {
 		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): left out of the export by the exporter's skip-legs option (a leg the run leader cannot do, or does not need): the later legs close up", li, l.Name))
 		return nil
 	}
-	if l.Optional != nil && slices.Contains(b.opt.WithOptional, l.Name) {
+	if l.SkipExport && slices.Contains(b.opt.WithLegs, l.Name) {
+		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): skip_export, in the rows by --with-legs (an opt-in wing: mapped offline, never fought live)", li, l.Name))
+	} else if l.SkipExport {
+		// An opt-in wing left out unless asked for, as for an optional leg: the default rows keep today's leg numbers.
+		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): skip_export (an opt-in wing): left out of the export; pass --with-legs %s to include it", li, l.Name, l.Name))
+		return nil
+	} else if l.Optional != nil && slices.Contains(b.opt.WithOptional, l.Name) {
 		item := l.Optional.Ref()
 		b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): optional, in the rows by --with-optional: give %s to the lead bot before .bot run start (a GM .additem %d with the bot selected); the run leader has no GM step and pauses at the leg's use_on when no party bot carries it", li, l.Name, item, l.Optional.Item))
 	} else if l.Optional != nil {
@@ -915,8 +930,8 @@ func Validate(r Rows) error {
 		if s.Flags&FlagDeadNpcIsDone != 0 && s.Kind != KindGossip {
 			return bad("the dead-npc-is-done flag is for a gossip row (the loader refuses it on a %s)", s.Kind)
 		}
-		if s.Flags&FlagDeadGossipOk != 0 && s.Kind != KindHold {
-			return bad("the dead-gossip flag is for a hold row whose NPC may be dead (the loader refuses it on a %s)", s.Kind)
+		if s.Flags&FlagResetToGossip != 0 && s.Kind != KindHold {
+			return bad("the reset-to-gossip flag is for a hold row that goes back to its gossip on a reset (the loader refuses it on a %s)", s.Kind)
 		}
 		if s.Flags&FlagExact != 0 {
 			if s.Kind != KindMove {
@@ -941,18 +956,23 @@ func Validate(r Rows) error {
 	return nil
 }
 
-// firstLeaveConflict returns the plan's first Leave spawn the walk from a to c, cut at via, comes within dungeon.LeaveClearYd of (ground
-// distance). The walk is the polyline a, via..., c, so each segment is measured, not only the via points: a straight run between two far
-// vertices can pass a spawn. A cut hop is the exporter's walk, not the plan's: the run leader would hop it itself (as before
-// --approach-hops), so a hop whose cut path comes that near a spawn the plan leaves alone is not cut at all.
-func (b *builder) firstLeaveConflict(a, c dungeon.Point, via []dungeon.Point) (dungeon.Leave, bool) {
+// firstLeaveConflict returns the current leg's first Leave spawn the walk from a to c, cut at via, comes within dungeon.LeaveClearYd of
+// (ground distance). rowLeg is the row leg the cut hop belongs to: only that row leg's own leave spawns count (the plan leg the rows
+// wrote for it). A spawn another leg leaves alone is that leg's own stretch: the plan check holds every leg's points to every leg's
+// list already, and a cut hop's walk is one leg's walk. The walk is the polyline a, via..., c, so each segment is measured, not only
+// the via points: a straight run between two far vertices can pass a spawn. A cut hop is the exporter's walk, not the plan's: the run
+// leader would hop it itself (as before --approach-hops), so a hop whose cut path comes that near a spawn the plan leaves alone is not
+// cut at all.
+func (b *builder) firstLeaveConflict(rowLeg int, a, c dungeon.Point, via []dungeon.Point) (dungeon.Leave, bool) {
+	li, ok := PlanLeg(b.plan, rowLeg)
+	if !ok {
+		return dungeon.Leave{}, false
+	}
 	poly := append(append([]dungeon.Point{a}, via...), c)
 	for i := 0; i+1 < len(poly); i++ {
-		for _, l := range b.plan.Legs {
-			for _, lv := range l.Leave {
-				if groundSegDist(lv.At, poly[i], poly[i+1]) < dungeon.LeaveClearYd {
-					return lv, true
-				}
+		for _, lv := range b.plan.Legs[li].Leave {
+			if groundSegDist(lv.At, poly[i], poly[i+1]) < dungeon.LeaveClearYd {
+				return lv, true
 			}
 		}
 	}
@@ -989,7 +1009,7 @@ func (b *builder) cutLongHops() error {
 				for len(via) > 0 && dist3(via[len(via)-1], c) < approachStandoffYd {
 					via = via[:len(via)-1]
 				}
-				if lv, near := b.firstLeaveConflict(a, c, via); near {
+				if lv, near := b.firstLeaveConflict(s.Leg, a, c, via); near {
 					b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the %s approach path would pass within %.0f yd of the left-alone %d (spawn %d) at %.1f %.1f: the hop is not cut, the run leader walks it itself", s.Leg, s.Seq, s.Kind, dungeon.LeaveClearYd, lv.Entry, lv.Spawn, lv.At.X, lv.At.Y))
 					via = nil
 				}
@@ -1022,7 +1042,7 @@ func (b *builder) cutLongHops() error {
 						if err != nil {
 							b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the move is %.0f yd from the one before it and could not be cut: %v", s.Leg, s.Seq, d, err))
 						}
-						if lv, near := b.firstLeaveConflict(a, c, via); near {
+						if lv, near := b.firstLeaveConflict(s.Leg, a, c, via); near {
 							b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the hop's path would pass within %.0f yd of the left-alone %d (spawn %d) at %.1f %.1f: the hop is not cut, the run leader walks it itself", s.Leg, s.Seq, dungeon.LeaveClearYd, lv.Entry, lv.Spawn, lv.At.X, lv.At.Y))
 							via = nil
 						}
@@ -1123,13 +1143,14 @@ func (r Rows) StepCount() int { return len(r.Steps) }
 
 // LegNumber is the ai_dungeon_leg.leg number the export gives the plan's leg leg. An optional leg is left out and the legs after it
 // close up, so this is not the plan's own index. ok is false for a leg outside the plan and for an optional leg (which has no rows).
+// A skip_export leg left out (without --with-legs) takes no number either; with --with-legs it does.
 func LegNumber(p *dungeon.Plan, leg int) (int, bool) {
-	if leg < 0 || leg >= len(p.Legs) || p.Legs[leg].Optional != nil {
+	if leg < 0 || leg >= len(p.Legs) || p.Legs[leg].Optional != nil || p.Legs[leg].SkipExport {
 		return 0, false
 	}
 	row := 0
-	for i := 0; i < leg; i++ {
-		if p.Legs[i].Optional == nil {
+	for i := range leg {
+		if p.Legs[i].Optional == nil && !p.Legs[i].SkipExport {
 			row++
 		}
 	}

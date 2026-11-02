@@ -2,8 +2,8 @@ package planexport
 
 // The Farraki Arena leg of Zul'Farrak (#243) as rows: the walk to the arena, the gossip that starts the event (option 0 -> param 1),
 // the boss's hold done by his units with reset_to_gossip (entry 0, param 0, flags 16384, the boss first and the scorpids behind him),
-// and the Zel'jeb leg's boss row. Exported with the options the TortoiseBots file uses: drop-companions-loot, carrier-chests,
-// with-optional gahzrilla.
+// and the Zel'jeb leg's boss row. Exported with the options the TortoiseBots file uses plus the opt-in wings: drop-companions-loot,
+// carrier-chests, with-optional gahzrilla, with-legs farraki_arena,zeljeb.
 
 import (
 	"fmt"
@@ -23,6 +23,7 @@ func TestZulfarrakArenaRows(t *testing.T) {
 		DropCompanionsLoot: true,
 		CarrierChests:      true,
 		WithOptional:       []string{"gahzrilla"},
+		WithLegs:           []string{"farraki_arena", "zeljeb"},
 	})
 	if err != nil {
 		t.Fatal(err)

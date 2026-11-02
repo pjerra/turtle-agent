@@ -132,8 +132,8 @@ func stageResultJSON(rep dungeon.StageReport, plan string) stageResult {
 // observePlanRows): the first row of the leg in the server's rows when they
 // can be reproduced, else the leg's first plan point with a note saying why.
 func stageFirstRow(plan *dungeon.Plan, leg int, planner *navmesh.Planner, serverSteps int) (dungeon.Point, bool, string) {
-	if plan.Legs[leg].Optional != nil {
-		return dungeon.Point{}, false, fmt.Sprintf("leg %s is optional: the exporter of this build leaves it out of the rows; the leg's first plan point is used", plan.Legs[leg].Name)
+	if plan.Legs[leg].Optional != nil || plan.Legs[leg].SkipExport {
+		return dungeon.Point{}, false, fmt.Sprintf("leg %s is skipped by default (optional or skip_export): the exporter of this build leaves it out of the rows; the leg's first plan point is used", plan.Legs[leg].Name)
 	}
 	rowLeg, ok := planexport.LegNumber(plan, leg)
 	if !ok {

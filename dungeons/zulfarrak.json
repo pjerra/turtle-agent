@@ -582,6 +582,7 @@
           "why": "pack in a pit 3.3 yd below the arena floor, off the navmesh (path_to no_path: no walkable polygon within 5 yd): never pull, fight or walk up to it; seen from above on the ta243 walk"
         }
       ],
+      "skip_export": true,
       "steps": [
         {
           "gossip": {
@@ -805,6 +806,7 @@
         }
       ],
       "skip": [7269, 10080, 10082],
+      "skip_export": true,
       "boss": {
         "entry": 62495,
         "position": {"x": 1764.37, "y": 1437.86, "z": -0.1},

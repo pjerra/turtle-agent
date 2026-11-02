@@ -181,8 +181,13 @@ type Leg struct {
 	// the plan LeaveClearYd away from them (leave_clear_test.go). The run leader's rows have no place for it yet: plan-export writes it into
 	// the leg row's comment and warns.
 	Leave []Leave `json:"leave,omitempty"`
-	Steps []Step  `json:"steps,omitempty"`
-	Boss  *Boss   `json:"boss,omitempty"`
+	// SkipExport leaves the leg out of the run leader's rows unless plan-export is asked for it by name (--with-legs): skipped
+	// unless asked for, like an optional leg without an item (Zul'Farrak's farraki_arena and zeljeb, Turtle-custom wings mapped
+	// offline and never fought live: the default export keeps today's leg numbers). The driver runs such a leg as written; only
+	// plan-export skips it. Never with Optional (an optional leg is already skipped unless asked for, by its item).
+	SkipExport bool   `json:"skip_export,omitempty"`
+	Steps      []Step `json:"steps,omitempty"`
+	Boss       *Boss  `json:"boss,omitempty"`
 	// CompanionsLoot false has the driver order the party's corpse and object looting off (".bot behavior <bot> loot off") from the start
 	// of the leg to its end, and on again after: the Zul'Farrak graveyard, where a bot that loots opens a Shallow Grave chest and wakes
 	// what lies in it. It is the leg's whole stretch, not only the boss fight (Boss.CompanionsLoot, which the boss's own loot_item needs).
@@ -861,9 +866,11 @@ type rawLeg struct {
 	CompanionsLoot *bool        `json:"companions_loot"`
 	Leftover       []uint32     `json:"leftover_entries"`
 	Optional       *OptionalLeg `json:"optional"`
-	Rest           *RestSpec    `json:"rest"`
-	Notes          []string     `json:"notes"`
-	NeedsWalk      bool         `json:"needs_walk"`
+	// SkipExport is Leg.SkipExport.
+	SkipExport bool      `json:"skip_export"`
+	Rest       *RestSpec `json:"rest"`
+	Notes      []string  `json:"notes"`
+	NeedsWalk  bool      `json:"needs_walk"`
 }
 
 type rawLeave struct {
@@ -1368,13 +1375,16 @@ func (c *checker) entries(path string, es []uint32, need bool) {
 }
 
 func (c *checker) leg(path string, r *rawLeg) Leg {
-	l := Leg{Name: r.Name, Skip: r.Skip, Notes: r.Notes, NeedsWalk: r.NeedsWalk, CompanionsLoot: r.CompanionsLoot, LeftoverEntries: r.Leftover}
+	l := Leg{Name: r.Name, Skip: r.Skip, Notes: r.Notes, NeedsWalk: r.NeedsWalk, CompanionsLoot: r.CompanionsLoot, LeftoverEntries: r.Leftover, SkipExport: r.SkipExport}
 	for i, e := range r.Leftover {
 		if e == 0 {
 			c.fail(fmt.Sprintf("%s.leftover_entries[%d]", path, i), "0 is not a creature entry")
 		}
 	}
 	l.To = c.point(path+".to", r.To)
+	if r.SkipExport && r.Optional != nil {
+		c.fail(path+".skip_export", "never with optional (an optional leg is already skipped unless asked for, by its item)")
+	}
 	if o := r.Optional; o != nil {
 		l.Optional = &OptionalLeg{Item: o.Item, Name: o.Name}
 		if o.Item == 0 {
@@ -1609,22 +1619,39 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 			c.fail(path+".boss.hold.skip_if_dead_of_gossip", "the gossip step of npc %d does not carry dead_is_done: the run leader would pause on the dead NPC before the hold", l.Boss.Entry)
 		}
 	}
-	// A units hold that goes back to its gossip when the script resets it needs that gossip step to be the last one before the
-	// hold that starts an event: the run leader's step to go back to (DungeonRunPolicy.h EventStartStep).
+	// A units hold that goes back to its gossip when the script resets it needs that gossip step to be the row TB's walk-back
+	// lands on: DungeonRunPolicy.h EventStartStep walks back from the hold over move, move_direct, rest and wait_object rows
+	// only, and the first Ritual, Open, UseItem, Gossip or UseOn row wins; anything else between refuses (TB stays on the hold).
+	// In plan steps: ritual, gossip, use_object (open or use_on) and use_item steps that export are event starters; a rest row
+	// (a leg's rest gates) and a wait_object row (a gameobject wait) are passed; an area_trigger step exports to a move row (the
+	// walk into the zone), so it is passed too. A loot_object step exports to a loot row (no walk-back); a hostiles_gone or unit
+	// wait has no usable row (wait_clear is not walked back over, a unit wait cuts or is agent_only); a wait's own hold row is a
+	// second hold (the walk-back from the boss hold passes it first and lands on that wait's event instead).
 	if l.Boss != nil && l.Boss.Hold != nil && l.Boss.Hold.ResetToGossip {
-		start := -1
+		start, stop := -1, ""
 		for i, s := range l.Steps {
-			if s.Ritual != nil || s.UseObject != nil || s.UseItem != nil || s.Gossip != nil {
-				start = i
+			starter := s.Ritual != nil || s.Gossip != nil || s.UseObject != nil || s.UseItem != nil
+			pass := (s.AreaTrigger != nil && s.AreaTrigger.By != TriggerAgent) ||
+				(s.WaitFor != nil && s.WaitFor.GameObject != nil && s.WaitFor.Hold == nil)
+			switch {
+			case starter:
+				start, stop = i, ""
+			case pass:
+				// A move, rest or wait_object row: the walk-back passes it.
+			default:
+				start, stop = -1, fmt.Sprintf("steps[%d] (%s)", i, planStepKind(s))
 			}
 		}
 		switch {
-		case start < 0 || l.Steps[start].Gossip == nil:
+		case start < 0 && stop != "":
+			c.fail(path+".boss.hold.reset_to_gossip", "the run leader walks back from the hold over move, move_direct, rest and wait_object rows only: %s comes between the gossip and the hold, so TB's EventStartStep would stay on the hold through a reset instead of going back to the gossip (npc %d, the boss)", stop, l.Boss.Entry)
+		case start < 0:
 			c.fail(path+".boss.hold.reset_to_gossip", "needs a gossip step of this leg that starts the encounter (npc %d, the boss) right before the hold: that is the step the run leader goes back to", l.Boss.Entry)
-		case l.Steps[start].Gossip.NPC != l.Boss.Entry:
+		case l.Steps[start].Gossip == nil || l.Steps[start].Gossip.NPC != l.Boss.Entry:
 			c.fail(path+".boss.hold.reset_to_gossip", "the last step of this leg that starts an event is not the gossip of npc %d (the boss): the run leader would go back to that step", l.Boss.Entry)
 		}
 	}
+
 	for i, rs := range r.AfterBoss {
 		sp := fmt.Sprintf("%s.after_boss[%d]", path, i)
 		var s rawStep
@@ -1661,6 +1688,37 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		c.fail(path, "has no pull_groups, steps, boss or after_boss: it would only walk to \"to\"; fold it into the next leg or add one")
 	}
 	return l
+}
+
+// planStepKind names a parsed step for the reset_to_gossip walk-back refusal: the step kind a reader of the plan file looks for.
+func planStepKind(s Step) string {
+	switch {
+	case s.Ritual != nil:
+		return "ritual"
+	case s.Gossip != nil:
+		return "gossip"
+	case s.UseObject != nil:
+		return "use_object"
+	case s.UseItem != nil:
+		return "use_item"
+	case s.LootObject != nil:
+		return "loot_object"
+	case s.AreaTrigger != nil:
+		return "area_trigger"
+	case s.WaitFor != nil:
+		if s.WaitFor.GameObject != nil {
+			return "wait_for gameobject"
+		}
+		if s.WaitFor.HostilesGone != nil {
+			return "wait_for hostiles_gone"
+		}
+		if s.WaitFor.Unit != nil {
+			return "wait_for unit"
+		}
+		return "wait_for"
+	default:
+		return "step"
+	}
 }
 
 // approach reads a pull group's or a boss's approach points.
