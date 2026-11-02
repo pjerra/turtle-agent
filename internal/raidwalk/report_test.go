@@ -248,4 +248,7 @@ func TestPullingTarget(t *testing.T) {
 	if _, _, ok := PullingTarget("fighting: the tank engages 11372 on arrival"); ok {
 		t.Fatal("a non-pull note parsed as a pull")
 	}
+	if _, _, ok := PullingTarget("waiting for the tank to stand still before pulling 91918 0xf13001670e2759ac"); ok {
+		t.Fatal("the waiting line parsed as a pull: only the actual pull line arms the window")
+	}
 }
