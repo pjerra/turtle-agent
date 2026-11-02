@@ -400,6 +400,21 @@ func TestQuietAtIgnoresCritters(t *testing.T) {
 	}
 }
 
+// turtle-agent#379, round 2: the quiet fallback only trusts an absolute max health. A percent read carries MaxHealth
+// 100 (the store passes health through as sent), which sits at the band top: a level-1 unit read at 100 max HP is
+// ambiguous with "60 %", so it still blocks.
+func TestQuietAtPercentLevel1StillBlocks(t *testing.T) {
+	p := dungeon.Point{}
+	// A level-1 unit whose max health is a percent read: inside no absolute band, so the moving rule still holds.
+	percent := hostileAt("Snake", 72, true, false)
+	percent.Level = 1
+	percent.Health = 60
+	percent.MaxHealth = 100
+	if ok, reason := quietAt([]objects.Unit{percent}, nil, p); ok {
+		t.Fatalf("a level-1 percent-health unit 72 yd out: quiet (%s)", reason)
+	}
+}
+
 func mustQuiet(t *testing.T, p QuietPatrol) bool {
 	t.Helper()
 	ok, reason := quietAt(nil, []QuietPatrol{p}, dungeon.Point{})
