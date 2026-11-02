@@ -255,6 +255,34 @@ func TestTeardownGoesOnAfterAFailure(t *testing.T) {
 	}
 }
 
+// W25-5: the server may disband the group before teardown leaves it.
+// LeaveGroup then reports session.ErrNotInGroup, which must stay clean
+// (failed 0, so the CLI releases the lease) instead of a fail.
+func TestTeardownLeaveGroupNotInGroupIsClean(t *testing.T) {
+	f := tdBaseFake()
+	f.leaveErr = session.ErrNotInGroup
+	res, err := runTeardown(context.Background(), f, teardownParams{WaitMS: 4000}, func(time.Duration) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var step *teardownStep
+	for i := range res.Steps {
+		if res.Steps[i].Step == "leave_group" {
+			step = &res.Steps[i]
+			break
+		}
+	}
+	if step == nil {
+		t.Fatalf("no leave_group step: %v", tdStepNames(res))
+	}
+	if step.Status != "ok" {
+		t.Fatalf("leave_group %+v", *step)
+	}
+	if res.Failed != 0 {
+		t.Fatalf("failed=%d, want 0 (the lease releases only with no failed step)", res.Failed)
+	}
+}
+
 func TestTeardownDryRunSendsOnlyReads(t *testing.T) {
 	f := tdBaseFake()
 	res, err := runTeardown(context.Background(), f, teardownParams{WaitMS: 4000, DryRun: true}, func(time.Duration) {})
@@ -312,6 +340,73 @@ func TestTeardownRemoveReplies(t *testing.T) {
 	}
 }
 
+// An already-gone hire (the character row is deleted) is a harmless remove and
+// its lingering view row does not fail the gone step: failed stays 0.
+func TestTeardownAlreadyGoneRemoveIsNoFailure(t *testing.T) {
+	f := tdBaseFake()
+	seen := 0
+	f.gmReplies[".bot remove Bo"] = func() (string, bool, error) {
+		return "Character 'Bo' not found.", true, nil
+	}
+	f.gmReplies[".bot remove Beardmeister"] = func() (string, bool, error) {
+		return "Character 'Beardmeister' not found.", true, nil
+	}
+	f.visible = []string{"Bo", "Beardmeister"}
+	res, err := runTeardown(context.Background(), f, teardownParams{WaitMS: 4000}, func(time.Duration) { seen++ })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Failed != 0 {
+		t.Fatalf("failed=%d, want 0: %+v", res.Failed, res.Steps)
+	}
+	for _, s := range res.Steps {
+		if s.Step == "gone" && s.Status != "ok" {
+			t.Fatalf("gone step %v: already-gone removes must pass it", s)
+		}
+	}
+	_ = seen
+}
+
+// A real unbind error fails with the reason naming the step; the brief's case.
+func TestTeardownUnbindErrorFailsWithReason(t *testing.T) {
+	f := tdBaseFake()
+	f.replies["commander unbind"] = func() (tbm.Reply, error) { return tbm.Reply{}, fmt.Errorf("boom") }
+	res, err := runTeardown(context.Background(), f, teardownParams{WaitMS: 4000}, func(time.Duration) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Failed == 0 {
+		t.Fatalf("failed=%d, want >0", res.Failed)
+	}
+	found := false
+	for _, s := range res.Steps {
+		if s.Step == "unbind" && s.Status == "fail" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no failed unbind step: %+v", tdStepNames(res))
+	}
+	if got := teardownReason(teardownJSONForTest(res)); !strings.HasPrefix(got, "unbind: ") {
+		t.Fatalf("reason %q, want the unbind step first", got)
+	}
+}
+
+// teardownJSONForTest converts a runTeardown result into the CLI report shape
+// teardownReason reads.
+func teardownJSONForTest(res teardownResult) teardownJSON {
+	t := teardownJSON{Failed: res.Failed}
+	for _, s := range res.Steps {
+		t.Steps = append(t.Steps, struct {
+			Step   string `json:"step"`
+			Status string `json:"status"`
+			Detail string `json:"detail"`
+		}{Step: s.Step, Status: s.Status, Detail: s.Detail})
+	}
+	return t
+}
+
+// Teardown stops a running player follow first of the stop steps (before agent_run and the brain), waiting for its loop; a
 // Teardown stops a running player follow first of the stop steps (before agent_run and the brain), waiting for its loop; a
 // loop that does not end in time is reported "ending" and counts as failed.
 func TestTeardownStopsThePlayerFollow(t *testing.T) {

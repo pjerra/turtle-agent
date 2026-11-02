@@ -700,6 +700,11 @@ func (s *Session) onTeleportAck(body []byte) error {
 	if err := s.conn.WritePacket(opcode.MSGMoveTeleportAck, game.BuildTeleportAck(self, a.Counter, s.clock())); err != nil {
 		return &fatalError{err}
 	}
+	// AFTER the ack write: the core relocates the player when it reads our ack (MovementHandler), before it reads
+	// any later chat line, so an advanced seq means the server has placed the player (StatusInfo.TeleportSeq).
+	s.mu.Lock()
+	s.teleportSeq++
+	s.mu.Unlock()
 	s.emit(events.Event{Kind: events.KindSession, Data: map[string]any{"state": "teleported", "x": a.Move.X, "y": a.Move.Y, "z": a.Move.Z}})
 	s.teleported()
 	s.dropToFloor()
@@ -718,31 +723,35 @@ func (s *Session) onTransferPending(body []byte) error {
 // onNewWorld finishes a far teleport. The units of the old map are gone, the selection
 // with them.
 //
-// raid-walk's reviveLanded (cmd/turtle-agent) takes a far teleport as landed on the map change
-// alone, as ZUnknown stays set here (no dropToFloor follows a worldport). That relies on two
-// things this handler keeps: the map is set in the same s.mu hold that sets the position, so a
-// status never shows the new map with the old position; and MSG_MOVE_WORLDPORT_ACK goes out here,
-// before any later chat line, so the server has placed the player before it reads the next GM
-// command (a `.summon`).
+// Nothing is published before MSG_MOVE_WORLDPORT_ACK has gone out: the new map, the position and
+// the TeleportSeq bump land in one locked update after that write succeeds (Codex HIGH). The ack
+// goes out before any later chat line, and the core places the player when it reads it
+// (MovementHandler.cpp:43-49), so raid-walk's reviveLanded (cmd/turtle-agent) takes that worldport
+// seq as the far landing and never the map change alone. An ack write error publishes nothing:
+// no map, position or seq changes, so the landing stays pending and raid-walk's landing timeout
+// fires instead of a `.summon`.
 func (s *Session) onNewWorld(body []byte) error {
 	nw, err := game.ParseNewWorld(body)
 	if err != nil {
 		return err
 	}
-	s.gossip = nil
-	s.serverPosition([3]float32{nw.X, nw.Y, nw.Z}, false)
-	s.mu.Lock()
-	s.mapID, s.pos = nw.Map, [4]float32{nw.X, nw.Y, nw.Z, nw.O}
-	s.target = 0
-	s.selUnknownLocked()
-	s.selAttacking = false
-	self := s.self.GUID
-	s.mu.Unlock()
-	s.stopWalk(errNewMap, false) // after the position, so a walk_path woken by it reads the new one
-	s.store.Clear()
+	self := s.selfGUID()
 	if err := s.conn.WritePacket(opcode.MSGMoveWorldportAck, nil); err != nil { // MovementHandler.cpp:43-49
 		return &fatalError{err}
 	}
+	s.gossip = nil
+	pos := [3]float32{nw.X, nw.Y, nw.Z}
+	s.placePlayer(pos) // the owner-loop half of serverPosition, published below with the map and seq
+	s.mu.Lock()
+	s.mapID, s.pos = nw.Map, [4]float32{nw.X, nw.Y, nw.Z, nw.O}
+	s.falling, s.zUnknown = false, true // no dropToFloor follows a worldport: z stays a guess
+	s.teleportSeq++
+	s.target = 0
+	s.selUnknownLocked()
+	s.selAttacking = false
+	s.mu.Unlock()
+	s.stopWalk(errNewMap, false) // after the position, so a walk_path woken by it reads the new one
+	s.store.Clear()
 	if err := s.conn.WritePacket(opcode.CMSGSetActiveMover, packet.NewWriter().GUID(self).Bytes()); err != nil {
 		return &fatalError{err}
 	}
