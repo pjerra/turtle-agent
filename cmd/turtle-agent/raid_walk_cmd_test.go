@@ -5301,10 +5301,18 @@ func TestRaidWalkSlotListRoutesToPair(t *testing.T) {
 // at 49.8, -114.6, radius 10), with the given hostiles in every frame.
 func joinerWalk(t *testing.T, hostiles []tbm.HostileRec) *fixture {
 	t.Helper()
+	return joinerWalkNote(t, hostiles,
+		"TBM:RUN|onyxias_lair|running|2/29|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 29)")
+}
+
+// joinerWalkNote is joinerWalk with the pull's own status line, so a stand
+// pull ("shot from firing stand 1") is counted exactly like a plain one.
+func joinerWalkNote(t *testing.T, hostiles []tbm.HostileRec, pullLine string) *fixture {
+	t.Helper()
 	f := newFixture(t)
 	f.agent.startReply = startAt("onyxias_lair", 1)
 	f.agent.startQueue = []queuedEvent{
-		{raw: "TBM:RUN|onyxias_lair|running|2/29|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 29)"},
+		{raw: pullLine},
 		{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands|until boss (step 29)"},
 	}
 	polls := 0
@@ -5384,7 +5392,372 @@ func TestRaidWalkCountsSameEntryNeighbourAsJoiner(t *testing.T) {
 	}
 }
 
-func TestRaidWalkTeardownReasonNamesTheFailingStep(t *testing.T) {
+// A pull shot from a firing stand counts its joiners like a plain pull: the
+// pulled pack (the guid and its mate within the row) is owned, and 3 engaged
+// hostiles of another pack inside the window make "joiners 3".
+func TestRaidWalkCountsStandPullJoiners(t *testing.T) {
+	f := joinerWalkNote(t, []tbm.HostileRec{
+		{GUID: 0xF130002C6C00C24B, Entry: 12129, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)},
+		{GUID: 0xF130002, Entry: 12129, X: 53.0, Y: -114.6, HPPct: 100, Target: packet.GUID(1000)}, // pack mate
+		// The neighbouring pack, 106 yd off: the stand pull's joiners.
+		{GUID: 0xF130501, Entry: 12130, X: -52.9, Y: -96.9, HPPct: 100, Target: packet.GUID(1001)},
+		{GUID: 0xF130502, Entry: 12130, X: -53.1, Y: -97.0, HPPct: 100, Target: packet.GUID(1002)},
+		{GUID: 0xF130503, Entry: 12130, X: -52.8, Y: -97.4, HPPct: 100, Target: packet.GUID(1000)},
+	}, "TBM:RUN|onyxias_lair|running|2/29|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from firing stand 1); joiners not read|until boss (step 29)")
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "step 2: joiners 3") {
+		t.Fatalf("no stand-pull joiners line in run.log:\n%s", raw)
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 1 || recs[0].Step != 2 || recs[0].Count != 3 || len(recs[0].GUIDs) != 3 {
+		t.Fatalf("pulljoiners.json %+v, want one step-2 record with 3 guids", recs)
+	}
+}
+
+// Headline: the walk 27 defect was move-step stand pulls counting their own
+// pack mates (a-r2 step 5, c-r3 step 262): the run still stands on its
+// approach move row when the stand pull goes out, so the pack is owned from
+// the pulled unit's plan row. Here the pull of 12129 is ordered on move step 1
+// while its pack stands at pull row step 2: the mate 3 yd off never counts,
+// and the 3 engaged units of the far pack do.
+func TestRaidWalkCountsStandPullJoinersOnMoveStep(t *testing.T) {
+	f := joinerWalkNote(t, []tbm.HostileRec{
+		{GUID: 0xF130002C6C00C24B, Entry: 12129, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)},
+		{GUID: 0xF130002, Entry: 12129, X: 53.0, Y: -114.6, HPPct: 100, Target: packet.GUID(1000)}, // pack mate
+		{GUID: 0xF130501, Entry: 12130, X: -52.9, Y: -96.9, HPPct: 100, Target: packet.GUID(1001)},
+		{GUID: 0xF130502, Entry: 12130, X: -53.1, Y: -97.0, HPPct: 100, Target: packet.GUID(1002)},
+		{GUID: 0xF130503, Entry: 12130, X: -52.8, Y: -97.4, HPPct: 100, Target: packet.GUID(1000)},
+	}, "TBM:RUN|onyxias_lair|running|1/29|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from firing stand 1); joiners not read|until boss (step 29)")
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "step 1: joiners 3") {
+		t.Fatalf("no move-step stand-pull joiners line in run.log:\n%s", raw)
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 1 || recs[0].Step != 1 || recs[0].Count != 3 || len(recs[0].GUIDs) != 3 {
+		t.Fatalf("pulljoiners.json %+v, want one step-1 record with 3 guids", recs)
+	}
+}
+
+// A boss pull has no "pulling <entry> <guid>" line: the run leader walks to
+// the firing stand and the tank engages on arrival ("boss|walk|fighting").
+// That fight start arms the same 10 s window, so a boss stand pull counts the
+// hostiles outside the boss row as joiners too.
+func TestRaidWalkCountsBossPullJoiners(t *testing.T) {
+	f := newFixture(t)
+	f.opts.until = "step 8"
+	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: "TBM:ACTION_ACK|run start|party|1|-",
+		Lines: []string{
+			"TBM:RUN|onyxias_lair|running|7/7|onyxia|boss|walk|walking|until step 8 (step 8)",
+			"TBM:ACTION_ACK|run start|party|1|-",
+		}}}
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|onyxias_lair|running|7/7|onyxia|boss|walk|fighting: the tank engages 10184 on arrival (1.0 yd)|until step 8 (step 8)"},
+		{raw: "TBM:RUN|onyxias_lair|done|7/7|onyxia|move|walk|stopped before step 8: the party stays where it stands|until step 8 (step 8)"},
+	}
+	polls := 0
+	f.agent.viewHook = func() {
+		polls++
+		if polls > 3 {
+			f.clock.mu.Lock()
+			f.clock.t = f.clock.t.Add(11 * time.Second)
+			f.clock.mu.Unlock()
+		}
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{
+			{GUID: 0xF13000000010, Entry: 10184, X: 0.7, Y: -212.0, HPPct: 99, Target: packet.GUID(1000)},
+			// The boss row's own adds, within its radius: the boss pack.
+			{GUID: 0xF13000000011, Entry: 11368, X: 5.0, Y: -212.0, HPPct: 100, Target: packet.GUID(1000)},
+			{GUID: 0xF13000000012, Entry: 11368, X: -5.0, Y: -212.0, HPPct: 100, Target: packet.GUID(1001)},
+			// 3 hostiles of another pack, 100 yd off: joiners.
+			{GUID: 0xF13000000021, Entry: 12130, X: 100.7, Y: -212.0, HPPct: 100, Target: packet.GUID(1001)},
+			{GUID: 0xF13000000022, Entry: 12130, X: 101.0, Y: -213.0, HPPct: 100, Target: packet.GUID(1002)},
+			{GUID: 0xF13000000023, Entry: 12130, X: 100.0, Y: -211.0, HPPct: 100, Target: packet.GUID(1000)},
+		}
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "step 7: joiners 3") {
+		t.Fatalf("no boss-pull joiners line in run.log:\n%s", raw)
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 1 || recs[0].Step != 7 || recs[0].Count != 3 || len(recs[0].GUIDs) != 3 {
+		t.Fatalf("pulljoiners.json %+v, want one step-7 record with 3 guids", recs)
+	}
+}
+
+// A boss window marks the boss row's entries and the plan's hold/add entries
+// as "boss add", not as joiners: summoned and arriving adds of those entries
+// join the fight as it runs, and are no other pack joining the pull.
+func TestBossAddsOfMarksRowHoldAndFirstEntries(t *testing.T) {
+	w := &walk{
+		plan: &dungeon.Plan{Legs: []dungeon.Leg{{
+			Boss: &dungeon.Boss{Entry: 100, First: []uint32{200}, Hold: &dungeon.Hold{Entries: []uint32{300}}},
+		}}},
+		rows: planexport.Rows{Steps: []planexport.StepRow{
+			{Kind: planexport.KindBoss, Entry: 100, Entries: []uint32{150}},
+		}},
+	}
+	got := w.bossAddsOf(1)
+	for _, e := range []uint32{150, 200, 300} {
+		if !got[e] {
+			t.Fatalf("bossAddsOf(1) = %v, want entry %d marked boss add", got, e)
+		}
+	}
+	if got[999] {
+		t.Fatalf("bossAddsOf(1) = %v, want no unlisted entry", got)
+	}
+	w.rows.Steps[0].Kind = planexport.KindPull
+	if got := w.bossAddsOf(1); len(got) != 0 {
+		t.Fatalf("a trash pull's bossAddsOf = %v, want nothing", got)
+	}
+}
+
+// A stand pull still inside its 10 s window when the boss's first fighting line
+// goes by must not block the boss window: the pull's own window ends at that
+// line (its record is written then) and the boss window opens, so both records
+// land in pulljoiners.json. The pull line is pumped on the first poll and the
+// fight line is pushed from that poll's frame, so the next poll (same fake
+// clock) sees it 0 s after the pull.
+func TestRaidWalkBossWindowOpensOverOpenPullWindow(t *testing.T) {
+	f := newFixture(t)
+	f.opts.until = "step 8"
+	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: "TBM:ACTION_ACK|run start|party|1|-",
+		Lines: []string{
+			"TBM:RUN|onyxias_lair|running|7/7|onyxia|boss|walk|walking|until step 8 (step 8)",
+			"TBM:ACTION_ACK|run start|party|1|-",
+		}}}
+	// The pull line goes through the poll loop (startQueue), where pullStarted arms the window.
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|onyxias_lair|running|2/7|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until step 8 (step 8)"},
+	}
+	polls := 0
+	f.agent.viewHook = func() {
+		polls++
+		if polls > 3 {
+			f.clock.mu.Lock()
+			f.clock.t = f.clock.t.Add(11 * time.Second)
+			f.clock.mu.Unlock()
+		}
+	}
+	others := []tbm.HostileRec{
+		{GUID: 0xF13000000021, Entry: 12130, X: 100.7, Y: -212.0, HPPct: 100, Target: packet.GUID(1001)},
+		{GUID: 0xF13000000022, Entry: 12130, X: 101.0, Y: -213.0, HPPct: 100, Target: packet.GUID(1002)},
+		{GUID: 0xF13000000023, Entry: 12130, X: 100.0, Y: -211.0, HPPct: 100, Target: packet.GUID(1000)},
+	}
+	pulled := tbm.HostileRec{GUID: 0xF130002C6C00C24B, Entry: 12129, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)}
+	// Views before the run starts (the hire wait) see no frames of the pull.
+	afterStart := 0
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		f.agent.mu.Lock()
+		started := f.agent.runStarted
+		f.agent.mu.Unlock()
+		if !started {
+			return others
+		}
+		afterStart++
+		switch afterStart {
+		case 1:
+			// The first frame after the pull line's poll: the pulled unit is here
+			// (the window seeds on it), and the fight line lands on the next poll.
+			f.agent.push("TBM:RUN|onyxias_lair|running|7/7|onyxia|boss|walk|fighting: the tank engages 10184 on arrival (1.0 yd)|until step 8 (step 8)", "")
+			return append([]tbm.HostileRec{pulled}, others...)
+		case 3:
+			f.agent.push("TBM:RUN|onyxias_lair|done|7/7|onyxia|move|walk|stopped before step 8: the party stays where it stands|until step 8 (step 8)", "")
+		}
+		return others
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "step 2: joiners 3") || !strings.Contains(string(raw), "step 7: joiners 3") {
+		t.Fatalf("run.log lacks a joiners line for both pulls:\n%s", raw)
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 2 {
+		t.Fatalf("pulljoiners.json %+v, want the step-2 and step-7 records", recs)
+	}
+	byStep := map[int]raidwalk.PullJoiners{}
+	for _, r := range recs {
+		byStep[r.Step] = r
+	}
+	for _, step := range []int{2, 7} {
+		if r, ok := byStep[step]; !ok || r.Count != 3 || len(r.GUIDs) != 3 {
+			t.Fatalf("pulljoiners.json %+v, want a step-%d record with 3 guids", recs, step)
+		}
+	}
+}
+
+// No row in range: the pack is the seed's aggro-together mates seen in the
+// first frame within 15 yd, and the record says "no row". Here the pull is
+// ordered on move step 1 and names an entry no pull/boss row holds, so no row
+// is in range: the mate 2 yd off is owned and the far neighbour joins.
+func TestRaidWalkPullWithNoRowUsesSeedMates(t *testing.T) {
+	f := joinerWalkNote(t, []tbm.HostileRec{
+		{GUID: 0xF130002C6C00C24B, Entry: 77777, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)},
+		{GUID: 0xF130002, Entry: 77777, X: 52.0, Y: -114.6, HPPct: 100, Target: packet.GUID(1000)}, // mate 2 yd off
+		{GUID: 0xF130501, Entry: 12130, X: 0, Y: 0, HPPct: 100, Target: packet.GUID(1001)},
+	}, "TBM:RUN|onyxias_lair|running|1/29|onyxia|move|pull|pulling 77777 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 29)")
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "step 1: joiners 1") {
+		t.Fatalf("no no-row joiners line in run.log:\n%s", raw)
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 1 || recs[0].Step != 1 || recs[0].Count != 1 || !recs[0].NoRow {
+		t.Fatalf("pulljoiners.json %+v, want one step-1 record with 1 guid and no_row", recs)
+	}
+	if !hasNote(f.summary(), "step 1: no row") {
+		t.Fatalf("notes %q, want the no-row note", f.summary().Notes)
+	}
+}
+
+// seeding waits for it and the mate still does not count as a joiner.
+func TestRaidWalkPullSeedRetriesAfterFirstFrame(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 1)
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|onyxias_lair|running|2/29|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 29)"},
+		{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands|until boss (step 29)"},
+	}
+	polls := 0
+	f.agent.viewHook = func() {
+		polls++
+		if polls > 4 {
+			f.clock.mu.Lock()
+			f.clock.t = f.clock.t.Add(11 * time.Second)
+			f.clock.mu.Unlock()
+		}
+	}
+	mate := tbm.HostileRec{GUID: 0xF130002, Entry: 12129, X: 53.0, Y: -114.6, HPPct: 100, Target: packet.GUID(1000)}
+	joiner := tbm.HostileRec{GUID: 0xF130501, Entry: 12130, X: 0, Y: 0, HPPct: 100, Target: packet.GUID(1001)}
+	seed := tbm.HostileRec{GUID: 0xF130002C6C00C24B, Entry: 12129, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)}
+	views := 0
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		views++
+		if views <= 2 {
+			return []tbm.HostileRec{mate, joiner} // the seed is not in view yet
+		}
+		return []tbm.HostileRec{seed, mate, joiner}
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 1 || recs[0].Step != 2 || recs[0].Count != 1 || len(recs[0].GUIDs) != 1 {
+		t.Fatalf("pulljoiners.json %+v, want one step-2 record with 1 guid (the mate waited out the retry)", recs)
+	}
+}
+
+// The "waiting for the tank to stand still before pulling" line opens no
+// window: only the actual pull line does. Here the waiting line goes by first
+// and the pull line never comes, so no record is written at all.
+func TestRaidWalkWaitingLineOpensNoWindow(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 1)
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|onyxias_lair|running|2/29|onyxia|move|pull|waiting for the tank to stand still before pulling 12129 0xF130002C6C00C24B|until boss (step 29)"},
+		{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands|until boss (step 29)"},
+	}
+	polls := 0
+	f.agent.viewHook = func() {
+		polls++
+		if polls > 3 {
+			f.clock.mu.Lock()
+			f.clock.t = f.clock.t.Add(11 * time.Second)
+			f.clock.mu.Unlock()
+		}
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{
+			{GUID: 0xF130002C6C00C24B, Entry: 12129, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)},
+			{GUID: 0xF130501, Entry: 12130, X: 0, Y: 0, HPPct: 100, Target: packet.GUID(1001)},
+		}
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 0 {
+		t.Fatalf("pulljoiners.json %+v, want no record: the waiting line opens no window", recs)
+	}
+}
+
+// The boss window's frames mark summoned/arriving boss adds instead of
+// counting them: a unit of a boss-add entry engaged inside the window lands in
+// the record's boss-add set, while a true neighbour of another entry joins.
+func TestRaidWalkPullFramedMarksBossAdds(t *testing.T) {
+	now := time.Now()
+	w := &walk{
+		env:           walkEnv{now: func() time.Time { return now }},
+		rows:          planexport.Rows{},
+		hostiles:      map[string]hostileState{},
+		partyG:        map[uint64]bool{1000: true},
+		pullJoinsAt:   now,
+		pullJoinsStep: 7,
+		pullBossAdds:  map[uint32]bool{11368: true},
+		pullPack:      map[packet.GUID]bool{},
+		pullJoinsSeen: map[packet.GUID]bool{},
+		pullAddsSeen:  map[packet.GUID]bool{},
+	}
+	f := &tbm.ViewFrame{
+		Party: []tbm.PartyRec{{GUID: 1000, Name: "Tank"}},
+		Hostiles: []tbm.HostileRec{
+			{GUID: 0xF13000000011, Entry: 11368, HPPct: 100, Target: packet.GUID(1000)},
+			{GUID: 0xF13000000021, Entry: 12130, HPPct: 100, Target: packet.GUID(1000)},
+		},
+	}
+	w.pullFramed(now.Add(time.Second), f)
+	if len(w.pullJoinsSeen) != 1 || !w.pullJoinsSeen[packet.GUID(0xF13000000021)] {
+		t.Fatalf("joins %+v, want only the 12130 neighbour", w.pullJoinsSeen)
+	}
+	if len(w.pullAddsSeen) != 1 || !w.pullAddsSeen[packet.GUID(0xF13000000011)] {
+		t.Fatalf("adds %+v, want the 11368 boss add marked instead", w.pullAddsSeen)
+	}
+	w.pullJoinersFlush(now.Add(11 * time.Second))
+	if len(w.pullJoins) != 1 || w.pullJoins[0].Count != 1 || len(w.pullJoins[0].BossAdds) != 1 {
+		t.Fatalf("record %+v, want 1 joiner plus 1 boss add", w.pullJoins)
+	}
+}
+
+// The boss latch clears when the walk resumes at an earlier step: a step
+// decrease forgets the armed steps, so the same boss fight later arms a fresh
+// window and its joiners are counted.
+func TestRaidWalkBossLatchClearsOnStepDecrease(t *testing.T) {
+	w := &walk{
+		rows: planexport.Rows{Steps: []planexport.StepRow{
+			{Kind: planexport.KindBoss, Entry: 10184, X: 0, Y: -212, Radius: 30},
+		}},
+		bossPullArmed: map[int]bool{1: true},
+		haveStatus:    true,
+		lastStatus:    tbm.RunStatus{State: tbm.RunRunning, Step: 5},
+	}
+	now := time.Now()
+	w.pullStarted(now, tbm.RunStatus{State: tbm.RunRunning, Step: 1, Kind: planexport.KindBoss, Note: "fighting: the tank engages 10184 on arrival"})
+	if w.pullJoinsAt.IsZero() || w.pullJoinsStep != 1 {
+		t.Fatalf("no boss window after the step decrease (armed %+v, at %v)", w.bossPullArmed, w.pullJoinsAt)
+	}
 	f := newFixture(t)
 	f.defaultRun("onyxias_lair")
 	f.env.teardown = func(args []string, stdout, stderr io.Writer) int {
