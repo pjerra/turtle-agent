@@ -61,8 +61,15 @@ func (p *Plan) runLeaderWalk(from int, move func(RunLeaderPoint), fight func(leg
 		}
 		move(RunLeaderPoint{li, "to", l.To})
 		for gi, g := range l.PullGroups {
+			if g.Camp != nil {
+				move(RunLeaderPoint{li, fmt.Sprintf("pull group %d camp", gi+1), *g.Camp})
+			}
 			for ai, a := range g.Approach {
-				move(RunLeaderPoint{li, fmt.Sprintf("pull group %d approach %d", gi+1, ai), a})
+				part := fmt.Sprintf("pull group %d approach %d", gi+1, ai)
+				if g.Camp != nil {
+					part = fmt.Sprintf("pull group %d tag walk %d", gi+1, ai)
+				}
+				move(RunLeaderPoint{li, part, a})
 			}
 			if g.Hold != nil {
 				move(RunLeaderPoint{li, fmt.Sprintf("pull group %d hold spot", gi+1), g.Hold.Spot})
@@ -104,6 +111,9 @@ func (p *Plan) RunLeaderReach(from int) []PlanIssue {
 		}
 		if group > 0 && group <= len(p.Legs[li].PullGroups) && p.Legs[li].PullGroups[group-1].StandPull && d <= RunLeaderSeeYd {
 			return // a stand_pull group is pulled from its stand: the run leader holds there and needs only to see the row's point
+		}
+		if group > 0 && group <= len(p.Legs[li].PullGroups) && p.Legs[li].PullGroups[group-1].Camp != nil {
+			return // a camp group is fought at its camp: the pack's distance from the last move row is the tank's walk-out, not a hop
 		}
 		is := PlanIssue{Leg: li, LegName: p.Legs[li].Name, Part: part, Point: at, From: last, Reason: WarnRunLeaderHop, Team: team,
 			Detail: fmt.Sprintf("%.0f yd from the run leader's last move row (it sees %d yd; at most %d wanted): it walks there in navmesh hops of its own; give the %s approach points", d, RunLeaderSeeYd, RunLeaderReachYd, part)}

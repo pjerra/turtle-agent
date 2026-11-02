@@ -29,16 +29,17 @@ var unexpressedWhy = map[string]string{
 	"rest":                      "the run leader's own rest lines apply",
 	"companions_loot false":     "dropped (--drop-companions-loot): the bots loot as they like on this leg",
 	"companions_loot false (the chests exported)": "not carried: turn the bots' looting off for this leg (setup), or a module with the trapped-chest rule; the setup of the carrier run: looting off for every bot, party loot method free-for-all, the Executioner's Key 8444 on the lead bot, at least 16 free bag slots on the lead bot, a fresh instance (a looted grave respawns after 2 h); flag 256 needs a TortoiseBots module with the gone-is-done step flag: an older module ignores it and pauses on a despawned grave after a wipe (then a .bot run skip skips the row)",
-	"needs_walk":                  "the point was not snapped to the navmesh by a mapping walk; the run leader walks to it as given",
-	"patrol":                      "no patrol path or period: the run leader pulls the pack where it stands when it comes",
-	"boss.tactics":                "the plan's tactics are the agent's; a bound party uses the module's boss tactics (docs/guides/boss-tactics.md)",
-	"boss.companions_loot":        "no column; the bots loot the boss as they like",
-	"stand (loot_object, ritual)": "no stand point in the row: the bots walk to the object themselves",
-	"object spawn/range":          "the row names the object by entry near its point only (the module's own search range)",
-	"loot_object batch":           "no batches: the chests are opened one step at a time",
-	"wait_for with a hold":        "the row is the wait's hold (the event's spot, fought until its instance data value); the wait's own condition (a unit, an object, hostiles gone) and its fail_text are the agent's only",
-	"gossip stand/by/retry_s":     "the row is the order `cmd gossip <npc> <lead bot> <option>`: the lead bot talks (the tank or carrier of a plan is the same bot), walks to the NPC itself, asks once (no retry), and ends on the order's ACK; the stand point, the talker and retry_s are the agent's only (fail_text is in the row's comment)",
-	"area_trigger expect/timeout": "only the walk into the zone is a row (a move to the stand point); the expect check and its timeout are not run (the comment names the expect)",
+	"needs_walk":                         "the point was not snapped to the navmesh by a mapping walk; the run leader walks to it as given",
+	"patrol":                             "no patrol path or period: the run leader pulls the pack where it stands when it comes",
+	"boss.tactics":                       "the plan's tactics are the agent's; a bound party uses the module's boss tactics (docs/guides/boss-tactics.md)",
+	"boss.companions_loot":               "no column; the bots loot the boss as they like",
+	"camp (dropped without --camp-pull)": "the camp point is not in the rows: the group exports as a plain pull from its tag spot; export with --camp-pull for the camp move (flag 65536), the tag rows and the pull row with flag 131072",
+	"stand (loot_object, ritual)":        "no stand point in the row: the bots walk to the object themselves",
+	"object spawn/range":                 "the row names the object by entry near its point only (the module's own search range)",
+	"loot_object batch":                  "no batches: the chests are opened one step at a time",
+	"wait_for with a hold":               "the row is the wait's hold (the event's spot, fought until its instance data value); the wait's own condition (a unit, an object, hostiles gone) and its fail_text are the agent's only",
+	"gossip stand/by/retry_s":            "the row is the order `cmd gossip <npc> <lead bot> <option>`: the lead bot talks (the tank or carrier of a plan is the same bot), walks to the NPC itself, asks once (no retry), and ends on the order's ACK; the stand point, the talker and retry_s are the agent's only (fail_text is in the row's comment)",
+	"area_trigger expect/timeout":        "only the walk into the zone is a row (a move to the stand point); the expect check and its timeout are not run (the comment names the expect)",
 }
 
 // sweepsLeftovers says whether the leg's LeftoverEntries are carried by the export anyway: with CarrierChests a companions_loot-false
@@ -124,6 +125,9 @@ func unexpressed(p *dungeon.Plan, opt Options, upto int) []string {
 			add("needs_walk", leg+" to")
 		}
 		for gi, g := range l.PullGroups {
+			if g.Camp != nil && !opt.CampPull {
+				add("camp (dropped without --camp-pull)", fmt.Sprintf("%s pull group %d", leg, gi))
+			}
 			if g.Patrol != nil {
 				add("patrol", fmt.Sprintf("%s pull group %d", leg, gi))
 			}

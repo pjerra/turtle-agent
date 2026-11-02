@@ -94,7 +94,7 @@ turtle-agent capture-stats <capture>
 turtle-agent capture events [--from RFC3339] [--to RFC3339] [--kinds a,b] [--out FILE [--force]] <capture>
 turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FILE [--members a,b]] [--plan dungeons/x.json] [--out run.svg] [--html] [--force] [--mmaps DIR | --config FILE] [--map N] [--box x0,y0,x1,y1] [--from RFC3339] [--to RFC3339] [--pad YD] [--floors auto|off|z,z] [--background=false] [--width PX]
 turtle-agent tune-diff <trace.jsonl>
-turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
+turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--skip-legs NAME,...] [--camp-pull] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
@@ -771,6 +771,14 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   on the pull row and writes `clear_yd` as its `param` (TortoiseBots `specs/rl-patrol-timed-pull.md`, for formations that walk loops near other formations);
   `max_bodies` (optional, 1-80) sizes the pull in bodies including the target: `plan-export` writes it as the pull row's `item` (unused on pull rows
   otherwise; the run leader's plan ceiling, replacing its joiner ceiling on that row) and the `pull_size` lint warns when its estimate is above it;
+  `camp` (optional: `{"x":..,"y":..,"z":..}`, never with `stand_pull`, `hold` or `ambush`, needs `approach`) names the point back along the cleared
+  route the raid holds for the pull: the tank walks out alone along `approach` (its last point is the tag spot, within 60 yd of the pack and at most
+  50 yd straight from the camp), tags one unit with a ranged shot and drags the pack back to the camp, where the raid fights. `plan-export --camp-pull`
+  writes the camp `move` (flag 65536, comment `pull group N camp`), the approach rows as the tag walk (`pull group N tag walk`) and the pull row with
+  flag 131072 (`item` = `max_bodies`); without it the group exports as a plain pull and the camp is dropped with a warning (an older run leader ignores
+  the unknown flags and walks the same degrade path). `plan-check`'s camp lint wants the tag spot outside every own-pack unit's aggro reach and within
+  23.5 yd of the nearest one, the tank's walk-out clear of other packs (reach + 1.5 yd) and the camp on the cleared route; `pull_size` estimates camp
+  groups with fight = camp, tank walk = tag rows and the drag back;
   `hold` (optional, also on `boss`: `{"instance_data": 1, "spot": {..}, "radius": 30, "timeout_s": 600, "entries": [..]}`) makes the run leader's row for the group a
   scripted event's `hold` (TortoiseBots #1041: stand on `spot`, fight what the event sends within `radius` until instance data `instance_data` reads DONE; `entries` are more of the
   event's mobs, the group's own and a boss's entry and `first` are always in); the agent's driver ignores it; run `steps` in order; walk to `boss.position` and kill the
@@ -1148,6 +1156,7 @@ turtle-agent plan-export --all-live --out ./migrations/ --stamp 20261014200000  
 | `--mmaps DIR` | a navmesh folder: a hop of more than 60 yd between two moves (the module logs these) is cut into `move` rows along the planned path, at most 50 yd apart. Without it the long hops are listed on stderr and left |
 | `--approach-hops` | with `--mmaps`, also cut the hop to a pull, boss or hold more than 50 yd from the anchor before it (the move, or the fight the party stood at) into `move` rows along the navmesh path (comment `approach path`), the last at least 25 yd short of the pack. Without it such a hop is left to the run leader's own navmesh hops (at most 8 of 40 yd, stopping 30 yd short), which a plan of long corridors outruns. Not on by default: it would change the rows of the plans already exported |
 | `--skip-legs NAME,...` | leave the named legs out of the rows (each with a warning; the later legs close up, as for an optional leg), for a leg the run leader cannot do while the legs after it can: Zul'Farrak's `bly` (a boss that turns hostile after its gossip) stands between Weegli's gossip, which opens the End Door, and `ukorz` behind it. A name that is no leg of the plan is refused |
+| `--camp-pull` | export a pull group's `camp` as the camp pull's rows (camp `move` flag 65536, tag-walk `move`s, pull flag 131072, `item` = `max_bodies`; the fight is at the camp). Off by default: without it the camp is dropped with a warning and the group exports as a plain pull |
 | `--gm-cross-direct` | export a `gm_cross` waypoint as a `move_direct` (a straight walk to the landing point) instead of refusing the plan; the run leader has no GM move. Written for Wailing Caverns' ramp to Lord Serpentis (6 yd down over 3.9 yd), which the plan now crosses with a plain direct step and a `check_skip`, so no plan needs it now; the row's comment and a warning say it is not tried live |
 | `--rev`, `--stamp` | the commit named in `ai_dungeon_plan.source` (default: `git rev-parse` of the plan folder, `+local` when it has changes) and the file's timestamp (default now) |
 

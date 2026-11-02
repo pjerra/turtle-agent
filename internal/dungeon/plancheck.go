@@ -348,7 +348,7 @@ func (c *planChecker) runLeader(from int) error {
 		if err != nil {
 			return
 		}
-		if !strings.Contains(m.Part, "approach") && !strings.Contains(m.Part, "hold spot") {
+		if !strings.Contains(m.Part, "approach") && !strings.Contains(m.Part, "tag walk") && !strings.Contains(m.Part, "camp") && !strings.Contains(m.Part, "hold spot") {
 			// Checked by checkLeg already: the approach pass starts from where
 			// its walk left the party (the arrival rule or the server walk may
 			// have kept it behind), not from the plan's point.
