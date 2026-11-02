@@ -317,7 +317,7 @@ var routeAggroKnownFailing = map[string]int{
 	"karazhan_crypt":       459,  // the repo reach (AggroRadius at 59-60 plus spread and wander) outruns the old 20 yd flat line.
 	"molten_core":          315,  // the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
 	"blackwing_lair":       344,  // the repo reach (AggroRadius at 58-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"zul_gurub":            1064, // the repo reach (AggroRadius at 58-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line; walk 26: leg 2's pack-1-first Marli order and leg 4's terrace order add 15 straight segments over the terrace storeys.
+	"zul_gurub":            1048, // the repo reach (AggroRadius at 58-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line; walk 26: leg 2's pack-1-first Marli order and leg 4's terrace order add 15 straight segments over the terrace storeys; walk 29's ring sweep and Jin'do corridor stands take 16 off (1064 -> 1048).
 	"ruins_of_ahnqiraj":    192,  // the repo reach (AggroRadius at 59-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
 	"temple_of_ahnqiraj":   541,  // the repo reach (AggroRadius at 58-60 plus the raid's 10 yd spread) still reports more than the old 419: more spawns sit inside the wider reach than the plain-pull approach skip clears.
 	"naxxramas":            673,  // the repo reach (AggroRadius at 59-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
