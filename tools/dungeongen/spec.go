@@ -53,6 +53,9 @@ type PlanSpec struct {
 	Skip []uint32     `json:"skip,omitempty"`
 	// Band overrides the level band; absent, it is taken from the packs (median level - 2 to the 90th percentile, at least median + 3).
 	Band []int `json:"band,omitempty"`
+	// TankMinHP is the plan's floor for the hired tank's max health (#266): the tank's max health in the 2026-10 test runs, 0.9 x the
+	// weakest clean run of the plan scaled to the band's hire level. Raids carry none (their tank's health is the roster's gear tier).
+	TankMinHP uint32 `json:"tank_min_hp,omitempty"`
 	// Size is the group size of a raid plan; the roles are a placeholder split of it.
 	Size         int      `json:"size,omitempty"`
 	Composition  []string `json:"composition,omitempty"`
@@ -213,6 +216,7 @@ func GenerateSpec(ps PlanSpec, dataRoot string) (*dungeon.Plan, error) {
 	p.Kind = ps.Kind
 	p.Status = dungeon.DraftStatus
 	p.LevelBand = band
+	p.TankMinHP = ps.TankMinHP
 	p.EntranceTrigger = ps.Trigger
 	p.EntranceTele, p.OutsideTele = ps.EntranceTele, ps.OutsideTele
 	p.Portal = portal

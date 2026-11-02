@@ -14,6 +14,7 @@
     "z": 182.86
   },
   "level_band": [42, 47],
+  "tank_min_hp": 3450,
   "hire_composition": [
     "warrior:tank",
     "priest:healer",

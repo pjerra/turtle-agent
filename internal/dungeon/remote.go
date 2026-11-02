@@ -67,10 +67,14 @@ type FloorSnapper interface {
 	SnapToFloor(ctx context.Context, mapID uint32, p Point) (Point, bool)
 }
 
-// FloorLister is the optional part of a RemoteGame that lists the walkable floors of the navmesh under (x, y) near height z, highest
-// first (false: no planner or no tile there). The walk puts each step on the floor nearest its height with it.
+// FloorLister is the optional part of a RemoteGame that lists the walkable floors of the navmesh under (x, y), highest first (false: no
+// planner or no tile there). The walk puts each step on the floor nearest its height with it; the hire spot looks wider around a guessed
+// height with FloorsWithin.
 type FloorLister interface {
+	// FloorsAt lists the floors within 12 yd of z.
 	FloorsAt(ctx context.Context, mapID uint32, x, y, z float32) ([]float32, bool)
+	// FloorsWithin lists the floors between lo and hi.
+	FloorsWithin(ctx context.Context, mapID uint32, x, y, lo, hi float32) ([]float32, bool)
 }
 
 // CCRule asks for a mob entry to be crowd-controlled in a fight: `.bot cmd cc <mark> <guid> [bot]` before the pull.

@@ -891,14 +891,14 @@ func stageLegNameForCommand(p *Plan, leg int) (string, bool) {
 }
 
 // stageRowLeg is planexport.LegNumber: the leg's number in the exported
-// rows (optional legs take none).
+// rows (optional and skipped legs take none).
 func stageRowLeg(p *Plan, leg int) (int, bool) {
-	if leg < 0 || leg >= len(p.Legs) || p.Legs[leg].Optional != nil {
+	if leg < 0 || leg >= len(p.Legs) || p.Legs[leg].Optional != nil || p.Legs[leg].SkipExport {
 		return 0, false
 	}
 	row := 0
-	for i := 0; i < leg; i++ {
-		if p.Legs[i].Optional == nil {
+	for i := range leg {
+		if p.Legs[i].Optional == nil && !p.Legs[i].SkipExport {
 			row++
 		}
 	}

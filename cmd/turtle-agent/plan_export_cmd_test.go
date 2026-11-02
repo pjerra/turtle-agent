@@ -147,7 +147,7 @@ func TestPlanExportSkipLegs(t *testing.T) {
 	if !strings.Contains(string(data), "'gossip', 7607,") || !strings.Contains(string(data), "'ukorz'") || strings.Contains(string(data), "'bly'") {
 		t.Fatal("the rows lack the Weegli gossip or Ukorz, or still have Bly")
 	}
-	if !strings.Contains(errs, "leg 16 (bly): left out of the export by the exporter's skip-legs option") {
+	if !strings.Contains(errs, "leg 18 (bly): left out of the export by the exporter's skip-legs option") {
 		t.Fatalf("stderr %q", errs)
 	}
 	code, _, errs = runExport("--dir", "../../dungeons", "--drop-companions-loot", "--skip-legs", "bli", "--stamp", "20261021005901", "--out", dir, "zulfarrak")
@@ -192,5 +192,70 @@ func TestPlanExportCarrierChests(t *testing.T) {
 	}
 	if n != 31 {
 		t.Fatalf("%d grave loot rows, want 31", n)
+	}
+}
+
+// --with-optional writes a named optional leg into the rows (the shipped Zul'Farrak plan's gahzrilla: the gong as a use_on row) with the
+// warning that the Mallet is the operator's to give; a name that is no optional leg is refused before anything is written.
+func TestPlanExportWithOptional(t *testing.T) {
+	dir := t.TempDir()
+	code, out, errs := runExport("--dir", "../../dungeons", "--drop-companions-loot", "--with-optional", "gahzrilla", "--stamp", "20261021180000", "--rev", "abc12345", "--out", dir, "zulfarrak")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	if !strings.Contains(out, "zulfarrak: map 209, 18 legs") || strings.Contains(out, "CUT") {
+		t.Fatalf("output %q", out)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "20261021180000_world.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "'use_on', 141832, 1650.9, 1171.9, 10.9,") || !strings.Contains(string(data), "'gahzrilla'") {
+		t.Fatal("the rows lack the gong's use_on or the gahzrilla leg")
+	}
+	if !strings.Contains(errs, "leg 11 (gahzrilla): optional, in the rows by --with-optional: give Mallet of Zul'Farrak (item 9240) to the lead bot") {
+		t.Fatalf("stderr %q", errs)
+	}
+	code, _, errs = runExport("--dir", "../../dungeons", "--drop-companions-loot", "--with-optional", "courtyard", "--stamp", "20261021180001", "--out", dir, "zulfarrak")
+	if code == exitOK || !strings.Contains(errs, `with-optional names "courtyard", which is no optional leg`) {
+		t.Fatalf("a leg that is not optional: %d %q", code, errs)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "20261021180001_world.sql")); err == nil {
+		t.Fatal("a file was written for a refused export")
+	}
+}
+
+// --with-legs writes named skip_export legs into the rows (the shipped Zul'Farrak plan's farraki_arena and zeljeb), and a name that is no
+// skip_export leg is refused before anything is written.
+func TestPlanExportWithLegs(t *testing.T) {
+	dir := t.TempDir()
+	code, out, errs := runExport("--dir", "../../dungeons", "--drop-companions-loot", "--with-legs", "farraki_arena,zeljeb", "--stamp", "20261021180002", "--rev", "abc12345", "--out", dir, "zulfarrak")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	if !strings.Contains(out, "zulfarrak: map 209, 19 legs") || strings.Contains(out, "CUT") {
+		t.Fatalf("output %q", out)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "20261021180002_world.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leg := range []string{"'farraki_arena'", "'zeljeb'"} {
+		if !strings.Contains(string(data), leg) {
+			t.Fatalf("the rows lack the %s leg", leg)
+		}
+	}
+	if !strings.Contains(string(data), "62498") {
+		t.Fatal("the rows lack the arena gossip")
+	}
+	if !strings.Contains(errs, "leg 8 (farraki_arena): skip_export, in the rows by --with-legs") || !strings.Contains(errs, "leg 10 (zeljeb): skip_export, in the rows by --with-legs") {
+		t.Fatalf("stderr %q", errs)
+	}
+	code, _, errs = runExport("--dir", "../../dungeons", "--drop-companions-loot", "--with-legs", "courtyard", "--stamp", "20261021180003", "--out", dir, "zulfarrak")
+	if code == exitOK || !strings.Contains(errs, `with-legs names "courtyard", which is no skip_export leg`) {
+		t.Fatalf("a leg that is not skip_export: %d %q", code, errs)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "20261021180003_world.sql")); err == nil {
+		t.Fatal("a file was written for a refused export")
 	}
 }
