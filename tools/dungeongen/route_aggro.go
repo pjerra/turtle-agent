@@ -462,7 +462,18 @@ func CampPullFindings(p *dungeon.Plan, cs []creature, ignore map[int]bool) ([]st
 			}
 		}
 		cleared := false
-		for j := 0; j < i && !cleared; j++ {
+		campIdx := -1
+		for j := 0; j < i; j++ {
+			if pts[j].camp && pts[j].leg == rp.leg {
+				campIdx = j
+				break
+			}
+		}
+		// The camp's own row, its incoming walk and its tag rows are not
+		// the cleared route: the camp must lie on ground the route walked
+		// before the chain. Row points before the chain count; segments
+		// count only between two such rows.
+		for j := 0; j < campIdx && !cleared; j++ {
 			q := pts[j]
 			switch q.kind {
 			case planexport.KindMove, planexport.KindMoveDirect, planexport.KindMoveHopExact,
@@ -474,7 +485,7 @@ func CampPullFindings(p *dungeon.Plan, cs []creature, ignore map[int]bool) ([]st
 				cleared = true
 				break
 			}
-			if j+1 < i {
+			if j+1 < campIdx {
 				r := pts[j+1]
 				dx, dy, dz := float64(r.px-q.px), float64(r.py-q.py), float64(r.pz-q.pz)
 				seg := int(math.Ceil(math.Sqrt(dx*dx+dy*dy+dz*dz) / routeAggroStep))

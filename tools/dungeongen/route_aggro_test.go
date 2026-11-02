@@ -464,3 +464,43 @@ func TestCampTankWalkClearOfOtherPacks(t *testing.T) {
 		}
 	}
 }
+
+// The camp must stand on the cleared route: a camp 40 yd from every earlier
+// row is a finding; the camp's own row does not count as cleared ground.
+func TestCampMustStandOnTheClearedRoute(t *testing.T) {
+	p := &dungeon.Plan{Name: "probe", Map: 1, LevelBand: []int{60, 60}, Entrance: dungeon.Point{},
+		Legs: []dungeon.Leg{{
+			Name: "a", To: dungeon.Point{X: -40},
+			PullGroups: []dungeon.PullGroup{
+				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 0}}, Radius: 5,
+					Camp:     &dungeon.Point{X: -40, Y: 40},
+					Approach: []dungeon.Point{{X: -20}}},
+			},
+		}}}
+	cs := []creature{
+		{GUID: 1, Entry: 1, Name: "Pack", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 0}},
+	}
+	got, err := CampPullFindings(p, cs, map[int]bool{35: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, s := range got {
+		if strings.Contains(s, "not on the cleared route") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("a camp 40 yd off the route is no finding: %v", got)
+	}
+	p.Legs[0].PullGroups[0].Camp = &dungeon.Point{X: -40}
+	got, err = CampPullFindings(p, cs, map[int]bool{35: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range got {
+		if strings.Contains(s, "not on the cleared route") {
+			t.Fatalf("a camp on the walked route is a finding: %v", got)
+		}
+	}
+}

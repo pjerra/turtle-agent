@@ -363,6 +363,22 @@ func (c *planChecker) runLeader(from int) error {
 		if at, err = c.walk("run leader "+m.Part, m.Point, prev); err == nil {
 			prev = at
 		}
+		if err == nil && strings.HasPrefix(m.Part, "pull group ") && strings.Contains(m.Part, "tag walk ") {
+			// The camp pull's drag (tag spot back to the camp) is the run
+			// leader's own path: past MaxCampPathYd the pack leashes on
+			// the way back.
+			gi := -1
+			fmt.Sscanf(m.Part, "pull group %d tag walk", &gi)
+			if gi > 0 && gi <= len(c.p.Legs[m.Leg].PullGroups) {
+				if camp := c.p.Legs[m.Leg].PullGroups[gi-1].Camp; camp != nil {
+					if path, perr := c.nav.Plan(c.p.Map, vec(m.Point), vec(*camp)); perr != nil {
+						err = perr
+					} else if path.Status == navmesh.Complete && path.Length > MaxCampPathYd {
+						c.fail("run leader "+m.Part, gi, *camp, m.Point, ReasonTooFar, "the drag back to the camp is %.0f yd along the navmesh (at most %d): the pack leashes on the way back", path.Length, MaxCampPathYd)
+					}
+				}
+			}
+		}
 	}, func(int, string, Point, int, string) {})
 	if err != nil {
 		return err
