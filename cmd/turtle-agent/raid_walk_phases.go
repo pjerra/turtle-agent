@@ -1984,6 +1984,9 @@ func inHold(h *dungeon.Hold, e uint32) bool { return h != nil && inEntries(h.Ent
 // `dead`). A refused line, no reply or an error is no evidence: the walk waits as a pause, and the first failure
 // turns the reads off for the rest of the walk (a server without the toolkit must not cost the watch loop a
 // timeout on every tick).
+// Known limits: the commander is never pulled into the hires' copy first (no `.appear` here), so with no shared
+// copy the read stays refused and the frames alone decide; a refused re-read after the move latches as a new
+// toolkit failure instead of moving a second time.
 func (w *walk) bossCorpse(ctx context.Context, boss uint32, units []uint32) (bool, string) {
 	if w.bossToolkitOff {
 		return false, ""
@@ -2019,14 +2022,13 @@ func (w *walk) bossCorpse(ctx context.Context, boss uint32, units []uint32) (boo
 				// character a moment later, and a re-read at once is refused again and latches the reads off),
 				// and only then note the move and re-read the same entry once.
 				if !moved && strings.Contains(err.Error(), "point_far") {
-					before, serr := w.status(ctx)
-					if serr != nil {
-						if ctx.Err() != nil {
-							return false, ""
-						}
-						return fail("the toolkit corpse read failed (point_far, and the status read before the move to the boss row failed: %v)", serr)
+					ready, ok, note := w.corpseMoveReady(ctx, boss)
+					if note != "" {
+						w.note("%s", note)
 					}
-					from, beforeSeq, haveSeq := before.Map, before.TeleportSeq, true
+					if !ok {
+						return false, ""
+					}
 					if gerr := w.gm(ctx, raidwalk.GMVisibleOff); gerr != nil {
 						if ctx.Err() != nil {
 							return false, ""
@@ -2040,11 +2042,12 @@ func (w *walk) bossCorpse(ctx context.Context, boss uint32, units []uint32) (boo
 						}
 						return fail("the toolkit corpse read failed (point_far, and the move to the boss row failed: %v)", gerr)
 					}
-					if gerr := w.waitRevivePoint(ctx, spot, from, beforeSeq, haveSeq, time.Time{}); gerr != nil {
+					waitStart := w.env.now()
+					if gerr := w.waitRevivePoint(ctx, spot, ready.from, ready.seq, true, time.Time{}); gerr != nil {
 						if ctx.Err() != nil {
 							return false, ""
 						}
-						return fail("the toolkit corpse read failed (point_far, and the move to the boss row did not land)")
+						return fail("the toolkit corpse read failed (point_far, and the move to the boss row did not land: %v after %s)", gerr, durWords(w.env.now().Sub(waitStart)))
 					}
 					w.note("boss %d: the commander moved to the boss row for the corpse read (the toolkit read is limited to 150 yd)", boss)
 					continue
@@ -2067,6 +2070,50 @@ func (w *walk) bossCorpse(ctx context.Context, boss uint32, units []uint32) (boo
 		}
 	}
 	return false, ""
+}
+
+// corpseMoveReadiness is what corpseMoveReady proved before the boss-row move: the commander's map (the landing
+// rule's fromMap) and the teleport sequence read just before the move.
+type corpseMoveReadiness struct {
+	from uint32
+	seq  uint64
+}
+
+// corpseMoveReady reads the commander's status before the corpse read's boss-row move: its map is the landing
+// rule's fromMap (see reviveLanded), and it must be the plan's map. From the portal map (0 in live walks, 1 in the
+// walk-25 tests whose fake never left the spawn map) a `.go xyz ... 309` opens a NEW copy instead of the hires' one
+// (walk 23 mangosd: hires in inst 101, commander in 104): no move goes out, and the reads latch with the "not on
+// map" note. For placed walks the toolkit instance must also still match w.placeInst (as placeStillJoined compares):
+// another copy is no move either, latched with the instance note. ok is false on a ctx cancel or a latched refusal
+// (note non-empty on the latter): no verdict, and no move in either case.
+func (w *walk) corpseMoveReady(ctx context.Context, boss uint32) (corpseMoveReadiness, bool, string) {
+	before, serr := w.status(ctx)
+	if serr != nil {
+		if ctx.Err() != nil {
+			return corpseMoveReadiness{}, false, ""
+		}
+		w.bossToolkitOff = true
+		return corpseMoveReadiness{}, false, fmt.Sprintf("boss %d: the toolkit corpse read failed (point_far, and the status read before the move to the boss row failed: %v): the frames alone decide from here", boss, serr)
+	}
+	if before.Map != w.plan.Map {
+		w.bossToolkitOff = true
+		return corpseMoveReadiness{}, false, fmt.Sprintf("boss %d: the toolkit corpse read failed (point_far, and the commander is not on map %d): the frames alone decide from here", boss, w.plan.Map)
+	}
+	if w.place != nil {
+		inst, terr := w.ttInst(ctx, "the corpse read's copy check")
+		if terr != nil {
+			if ctx.Err() != nil {
+				return corpseMoveReadiness{}, false, ""
+			}
+			w.bossToolkitOff = true
+			return corpseMoveReadiness{}, false, fmt.Sprintf("boss %d: the toolkit corpse read failed (point_far, and the instance check before the move to the boss row failed: %v): the frames alone decide from here", boss, terr)
+		}
+		if inst != w.placeInst {
+			w.bossToolkitOff = true
+			return corpseMoveReadiness{}, false, fmt.Sprintf("boss %d: the toolkit corpse read failed (point_far, and the commander is in instance %.0f, not the raid's %.0f): the frames alone decide from here", boss, inst, w.placeInst)
+		}
+	}
+	return corpseMoveReadiness{from: before.Map, seq: before.TeleportSeq}, true, ""
 }
 
 // bossSkipStep sends the pause's `.bot run skip` for the boss step whose kill the frames show. The commander RPC
