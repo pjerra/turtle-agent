@@ -57,10 +57,11 @@ type Card struct {
 	Run   RunInfo   `json:"run"`
 	Stall StallInfo `json:"stall"`
 
-	Counters Counters `json:"counters"`
-	Orders   []Order  `json:"orders"`
-	Changes  []Change `json:"changes"`
-	Tunables []Tune   `json:"tunables,omitempty"`
+	Counters Counters  `json:"counters"`
+	Orders   []Order   `json:"orders"`
+	Changes  []Change  `json:"changes"`
+	Tunables []Tune    `json:"tunables,omitempty"`
+	TuneAll  []TuneRow `json:"tune_all,omitempty"` // every tunable with its limits, for the live-tuning panel
 
 	LastError   string `json:"last_error,omitempty"`
 	LastRefusal string `json:"last_refusal,omitempty"`
@@ -189,6 +190,20 @@ type Tune struct {
 	Value  float64 `json:"value"`
 	Base   float64 `json:"base"`
 	Source string  `json:"source"`
+}
+
+// TuneRow is one line of the live-tuning panel: the tunables the poller read, with their limits.
+type TuneRow struct {
+	Key     string   `json:"key"`
+	Unit    string   `json:"unit"`
+	Min     float64  `json:"min"`
+	Max     float64  `json:"max"`
+	Default float64  `json:"default"`
+	Base    float64  `json:"base"`
+	Value   float64  `json:"value"`
+	Source  string   `json:"source"`
+	Queued  *float64 `json:"queued,omitempty"`
+	Doc     string   `json:"doc"`
 }
 
 // Feed says how fresh the bots' view is.
@@ -358,10 +373,16 @@ type rawReport struct {
 
 type rawTune struct {
 	Tunables []struct {
-		Key    string  `json:"key"`
-		Value  float64 `json:"value"`
-		Base   float64 `json:"base"`
-		Source string  `json:"source"`
+		Key     string   `json:"key"`
+		Unit    string   `json:"unit"`
+		Min     float64  `json:"min"`
+		Max     float64  `json:"max"`
+		Default float64  `json:"default"`
+		Base    float64  `json:"base"`
+		Value   float64  `json:"value"`
+		Source  string   `json:"source"`
+		Queued  *float64 `json:"queued"`
+		Doc     string   `json:"doc"`
 	} `json:"tunables"`
 }
 
@@ -469,6 +490,8 @@ func BuildCard(in Inputs) Card {
 	var tune rawTune
 	if len(in.Tune) > 0 && json.Unmarshal(in.Tune, &tune) == nil {
 		for _, t := range tune.Tunables {
+			c.TuneAll = append(c.TuneAll, TuneRow{Key: t.Key, Unit: t.Unit, Min: t.Min, Max: t.Max, Default: t.Default,
+				Base: t.Base, Value: t.Value, Source: t.Source, Queued: t.Queued, Doc: t.Doc})
 			if t.Source != "" && t.Source != "base" && len(c.Tunables) < 16 {
 				c.Tunables = append(c.Tunables, Tune{Key: t.Key, Value: t.Value, Base: t.Base, Source: t.Source})
 			}

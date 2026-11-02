@@ -380,3 +380,18 @@ button.ctl:disabled { opacity: .5; cursor: default; }
 .ctllog[hidden] { display: none; }
 .ctllog summary { cursor: pointer; color: var(--muted); }
 .ctllog .ctllogpre { margin: 4px 0 0; white-space: pre-wrap; font: 11px/1.4 ui-monospace, monospace; color: var(--muted); }
+
+/* The live-tuning panel (ctltune.js, slice 2): sliders and the all-tunables list inside the Controls box. */
+.ctltune { margin-top: 6px; font-size: 12px; }
+.ctltune[hidden] { display: none; }
+.ctltune summary { cursor: pointer; color: var(--muted); }
+.ctltune-body { margin-top: 4px; }
+.ctltune-rows { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+.tune-row { display: flex; align-items: center; gap: 8px; }
+.tune-key { min-width: 150px; color: var(--muted); }
+.tune-row input[type=range] { width: 160px; }
+.tune-row input[type=number] { width: 80px; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px; font: inherit; }
+.tune-val { min-width: 60px; }
+.tune-queued { color: var(--warn); }
+.tunebtn { padding: 1px 8px; }
+.ctltune-all { margin-top: 6px; }

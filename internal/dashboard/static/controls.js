@@ -99,6 +99,13 @@
       s.log.append(h("summary", { text: "Control log (last 5)" }), logPre);
       s.logPre = logPre;
       s.el.append(s.title, s.row, h("label", { class: "ctltoken" }, h("span", { text: "Token " }), s.token), s.msg, s.log);
+      if (root.CTLT) {
+        s.tune = root.CTLT.create({ h,
+          post: (body) => postControl(s, s.card || card, "tune", body),
+          say: (m) => { s.msg.textContent = m; s.msg.hidden = false; },
+          after: () => { paint(s, s.card || card); refreshLog(s, s.card || card); } });
+        s.el.append(s.tune.el);
+      }
       states.set(card.id, s);
       return s;
     }
@@ -124,6 +131,7 @@
       }
       // the order of the buttons follows the matrix
       for (const spec of specs) s.row.append(s.btns.get(spec.verb));
+      if (s.tune) s.tune.render(card);
     }
 
     function refreshLog(s, card) {
@@ -133,26 +141,33 @@
       });
     }
 
+    // postControl sends one control POST and returns {status, json}; the token (or the trusted nonce) is the current one.
+    async function postControl(s, card, action, body) {
+      const token = st.trusted ? "" : s.token.value.trim();
+      if (!st.trusted && !token) return { status: 0, json: { status: "error", message: "Type the control token first (kept for this browser tab only)." } };
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = "Bearer " + token; else headers["X-Control-Nonce"] = st.nonce;
+      try {
+        const r = await fetch("/api/control/" + encodeURIComponent(card.id) + "/" + action, { method: "POST", cache: "no-store", headers, body: JSON.stringify(body) });
+        let json = null;
+        try { json = await r.json(); } catch (e) { /* not JSON */ }
+        return { status: r.status, json };
+      } catch (e) {
+        return { status: 0, json: { status: "error", message: "Could not reach the dashboard: " + e } };
+      }
+    }
+
     async function send(s, card, spec) {
       if (spec.confirm && !window.confirm(confirmText(card, spec.verb))) return;
-      const token = st.trusted ? "" : s.token.value.trim();
-      if (!st.trusted && !token) { s.msg.textContent = "Type the control token first (kept for this browser tab only)."; s.msg.hidden = false; return; }
       s.busy.add(spec.verb);
       paint(s, card);
       s.msg.textContent = "Sending " + spec.label + "...";
       s.msg.hidden = false;
-      let r;
-      try {
-        r = await fetch("/api/control/" + encodeURIComponent(card.id) + "/run", { method: "POST", cache: "no-store",
-          headers: token ? { "Content-Type": "application/json", Authorization: "Bearer " + token } : { "Content-Type": "application/json", "X-Control-Nonce": st.nonce },
-          body: JSON.stringify({ verb: spec.verb, confirm: !!spec.confirm }) });
-      } catch (e) { s.busy.delete(spec.verb); s.msg.textContent = "Could not reach the dashboard: " + e; paint(s, card); return; }
-      let json = null;
-      try { json = await r.json(); } catch (e) { /* not JSON */ }
+      const r = await postControl(s, card, "run", { verb: spec.verb, confirm: !!spec.confirm });
       s.busy.delete(spec.verb);
       if (r.status === 401) { sess.set(""); s.token.value = ""; s.msg.textContent = "Wrong or missing control token" + (st.trusted ? " (the server did not accept this browser without one)." : "."); }
-      else if (json && json.status === "ok") s.msg.textContent = spec.verb + " sent to agent " + card.id + " (" + json.rpc + ").";
-      else s.msg.textContent = "Refused: " + ((json && json.message) || ("HTTP " + r.status));
+      else if (r.json && r.json.status === "ok") s.msg.textContent = spec.verb + " sent to agent " + card.id + " (" + r.json.rpc + ").";
+      else s.msg.textContent = "Refused: " + ((r.json && r.json.message) || ("HTTP " + r.status));
       paint(s, card);
       refreshLog(s, card);
     }

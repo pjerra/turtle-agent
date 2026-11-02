@@ -21,9 +21,13 @@ import (
 // controlReadMethods are the reads a control uses to decide from a fresh answer (D8), never the poller's cache.
 var controlReadMethods = map[string]bool{"dungeon_status": true, "tune_list": true, "bot_view": true}
 
-// controlWriteMethods are the writes the controls may make. None of them takes a parameter. The live-tuning (tune_set) and party-order
-// (commander) entries belong to slices 2 and 3 of #183 and are added with their handlers.
-var controlWriteMethods = map[string]bool{"dungeon_pause": true, "dungeon_resume": true, "dungeon_skip": true, "dungeon_stop": true}
+// controlWriteMethods are the writes the controls may make. The run controls take no parameter; tune_set takes {key, value}. The
+// party-order entry (commander) belongs to slice 3 of #183 and is added with its handler.
+var controlWriteMethods = map[string]bool{"dungeon_pause": true, "dungeon_resume": true, "dungeon_skip": true, "dungeon_stop": true,
+	"tune_set": true}
+
+// controlParamMethods are the writes that carry parameters: only these may be given them.
+var controlParamMethods = map[string]bool{"tune_set": true}
 
 // ControlClient calls the write methods of one agent. It holds no cache: the run handler makes one per control.
 type ControlClient struct {
@@ -54,16 +58,15 @@ func (c *ControlClient) Read(ctx context.Context, method string) (json.RawMessag
 	return c.call(ctx, method, nil)
 }
 
-// Write runs a write method with its parameters: the four run controls take none, so any parameter is refused (a later slice adds a
-// parameter-taking write here with its own check).
+// Write runs a write method with its parameters. The run controls take none, so a parameter is refused; tune_set takes them.
 func (c *ControlClient) Write(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	if !controlWriteMethods[method] {
 		return nil, ErrNotAllowed
 	}
-	if params != nil {
+	if params != nil && !controlParamMethods[method] {
 		return nil, ErrNotAllowed
 	}
-	return c.call(ctx, method, nil)
+	return c.call(ctx, method, params)
 }
 
 // call sends one JSON-RPC request. The envelope parsing is the read client's (agents.go), with the parameters a control may carry.

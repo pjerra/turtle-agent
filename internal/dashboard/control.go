@@ -82,7 +82,7 @@ func NewController(p *Poller, cfg ControlConfig) (*Controller, error) {
 		return nil, err
 	}
 	c := &Controller{p: p, cfg: cfg, log: log, recent: map[string][]time.Time{}, locks: map[string]*sync.Mutex{}}
-	c.actions = map[string]actionFunc{"run": c.run}
+	c.actions = map[string]actionFunc{"run": c.run, "tune": c.tune}
 	return c, nil
 }
 

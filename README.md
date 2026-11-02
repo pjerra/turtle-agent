@@ -4343,9 +4343,10 @@ turtle-agent dashboard --listen 127.0.0.1:8790 --control --control-tokens ~/.con
 | `--control-trust-label` | `owner` | with `--control-trust-local`: the label in the `--control-tokens` file the trusted controls are made as |
 | `--control-log` | `~/.local/state/turtle-agent/dashboard-control.jsonl` | every control appends two JSON lines (the request before the RPC, the result after); the folder is made 0700, the file 0600, and a log that cannot be opened stops `--control` |
 
-The contract: `GET /api/control/status` -> `200 {"enabled":true,"local_trusted":bool,"trust_nonce"?:string,"actions":["run"]}`
-(404 without `--control`); `POST /api/control/<id>/run` `{"verb":"pause"|"resume"|"skip"|"stop","confirm":bool}`; `GET
-/api/control/<id>/log?n=20` -> `{"lines":[...]}`, the last 1..50 result lines of that agent, newest last. `<id>` must be an
+The contract: `GET /api/control/status` -> `200 {"enabled":true,"local_trusted":bool,"trust_nonce"?:string,"actions":["run","tune"]}`
+(404 without `--control`); `POST /api/control/<id>/run` `{"verb":"pause"|"resume"|"skip"|"stop","confirm":bool}`; `POST
+/api/control/<id>/tune` `{"key":string,"value":number|"default"}`; `GET /api/control/<id>/log?n=20` -> `{"lines":[...]}`, the
+last 1..50 result lines of that agent, newest last. `<id>` must be an
 agent the dashboard itself discovered (`auto`): an id it does not watch is 404. A success answers `200
 {"status":"ok","action","verb","rpc","result":<the agent's answer, scrubbed>}`; an error is `{"status":"error","message"}` with
 400 bad request (unknown verb, unknown field, trailing data), 401 auth, 403 Host / Origin / Sec-Fetch-Site, 404 agent or path,
@@ -4355,9 +4356,21 @@ minute per label, 500 the log could not be written, or 502 the agent's RPC faile
 Every control first asks that agent a **fresh** `dungeon_status` (never the poller's cache) and decides from it: the page
 greys buttons, the server is the gate. `pause` on a run that is not in `observe` mode **ends** it (the party and the instance
 are kept), so it needs `"confirm": true`, and `stop` always does (it unbinds: the hires go back and the instance is lost).
-`resume` and `skip` are for observe runs; the agent refuses them on others and its message is passed back. What is **not**
-there: no way to start or resume a run (`dungeon_run` is never called), no live tuning and no party orders (later slices), and
-no GM verb of any kind.
+`resume` and `skip` are for observe runs; the agent refuses them on others and its message is passed back.
+
+**Live tuning (`tune`).** A `tune` control reads a **fresh** `tune_list` (an RPC error there — no remote run — is a 409 with the
+agent's message), the key must be in that list, and the value must be a JSON number inside the row's `min`..`max` (whole for
+`pct` and `count`) or the string `"default"`; anything else is a 400 and nothing is sent. `tune_set` then takes the number (or
+`"default"`) as the agent expects and its `TuneAck` (`old`, `new`, `applies`) is the reply's `result`; the change waits for the
+next leg or pull-group start. No confirm: every tunable is bounded by the driver. The log line names the key as its `verb` and
+the value in `args`. The page shows a **Live tuning** box while a run goes in `remote`/`commander` mode with tunables: eight
+sliders (`rest_health_pct`, `rest_mana_pct`, `rest_healer_mana_pct`, `big_pack`, `patrol_wait_s`, `pull_range`, `pack_radius`,
+`gather_wait_s`, each skipped when the run does not have it), sent on release (`change`, never `input`), a **Default** button per
+row, the "queued -> X (applies at the next leg or pull-group start)" note, and a nested **All tunables** list with a number
+input, **Set** and **Default** for every key. Steps are 1 for `pct`/`count`, 0.5 for `yd`/`s`.
+
+What is **not** there: no way to start or resume a run (`dungeon_run` is never called), no party orders (later slice), and no GM
+verb of any kind.
 
 Safety: every control — token or trusted — must be `application/json`, at most 4 KiB, with an `Origin` (if present) equal to
 its Host and a `Sec-Fetch-Site` of `same-origin` or `none`; the token is in the `Authorization` header only (never a cookie or
