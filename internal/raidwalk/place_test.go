@@ -55,7 +55,7 @@ func TestPlaceStartStagesBeforeFirstPull(t *testing.T) {
 	if len(rows.Steps) != 15 {
 		t.Fatalf("fixture has %d steps", len(rows.Steps))
 	}
-	got, leg, err := PlaceStart(rows, []string{"from", "leg", "two"})
+	got, leg, _, _, err := PlaceStart(rows, []string{"from", "leg", "two"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,18 +63,171 @@ func TestPlaceStartStagesBeforeFirstPull(t *testing.T) {
 		t.Fatalf("start %d (%q), want 13 (two)", got, leg)
 	}
 	// the leg number finds the same leg
-	if got, _, err := PlaceStart(rows, []string{"from", "leg", "1"}); err != nil || got != 13 {
+	if got, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "1"}); err != nil || got != 13 {
 		t.Fatalf("by number: %d, %v", got, err)
 	}
 }
 
 func TestPlaceStartRefusesNoQuietMove(t *testing.T) {
-	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}},
+	// A leg past the first (leg 1 of two) with no quiet move row refuses, exit 2 (the old wording is kept).
+	// The zero leg's own move is pinned by its pull, so the backward search finds no quiet row at all.
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "zero"}, {Plan: "t", Leg: 1, Name: "one"}},
+		placeMove(0, 0, 1000, 0),
+		placeRow(planexport.KindPull, 0, 0, 1005, 0, 0, 15111),
+		placeMove(1, 0, 100, 0),
+		placeMove(1, 0, 105, 0),
+		placeRow(planexport.KindPull, 1, 0, 110, 0, 0, 15111),
+	)
+	_, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "one"})
+	if err == nil || !strings.Contains(err.Error(), "no quiet move row") {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestPlaceStartFallsBackToEarlierLeg(t *testing.T) {
+	// Leg "two" is not the first leg and starts with a pull: no move row of its own stands before its
+	// first pull. Leg "one" ends with a quiet move row (step 4, 110 yd from the pull), so the start falls
+	// back to it (#370). Leg "zero" holds one pinned move so leg "one" is not the door leg (H1).
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "zero"}, {Plan: "t", Leg: 1, Name: "one"}, {Plan: "t", Leg: 2, Name: "two"}},
+		placeMove(0, 0, 10, 0),
+		placeRow(planexport.KindPull, 0, 0, 15, 0, 0, 15111),
+		placeMove(1, 0, 20, 0),
+		placeMove(1, 0, 30, 0),
+		placeRow(planexport.KindPull, 2, 0, 140, 0, 0, 15111),
+	)
+	got, leg, fallback, _, err := PlaceStart(rows, []string{"from", "leg", "two"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 4 || leg != "one" || fallback != "two" {
+		t.Fatalf("start %d (%q), want 4 (one)", got, leg)
+	}
+}
+
+func TestPlaceStartFirstLegIsDoorStart(t *testing.T) {
+	// H1: Jeklik is leg 0, so the backward search never runs: --place --from leg one behaves like a door
+	// start, with no .go. The ZG cmd-level test pins the real case (leg high_priestess_jeklik -> step 1).
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}, {Plan: "t", Leg: 1, Name: "two"}},
+		placeMove(0, 0, 10, 0),
+		placeMove(0, 0, 20, 0),
+		placeRow(planexport.KindPull, 1, 0, 1000, 0, 0, 15111),
+	)
+	got, leg, fallback, door, err := PlaceStart(rows, []string{"from", "leg", "one"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !door || got != 1 || leg != "one" || fallback != "" {
+		t.Fatalf("start %d (%q fallback %q door %v), want step 1 (one) as a door start", got, leg, fallback, door)
+	}
+	if _, _, _, door, err := PlaceStart(rows, []string{"from", "leg", "two"}); err != nil || door {
+		t.Fatalf("later leg two: step start, door %v, err %v", door, err)
+	}
+}
+
+func TestPlaceStartRefusesFallbackBeforeBossOrHold(t *testing.T) {
+	// H2: the reviewer's probe plan, past a door leg: leg one moves at y=10/20/30, a boss/hold at 100, a
+	// pinned move at 105 (5 yd from leg two's pull at 110), leg two's pull at 110 and boss at 200. The
+	// LAST fallback candidate walking back is the pinned move at step 6, then the boss/hold row itself
+	// (not a move), then the quiet move at step 4 — which stands before the boss/hold, so the raid
+	// would re-fight it and the fallback is refused. Leg zero's move is pinned by its own early pull,
+	// so it cannot absorb the case either (H1 stays a door start).
+	mk := func(secondKind string) planexport.Rows {
+		return placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "zero"}, {Plan: "t", Leg: 1, Name: "one"}, {Plan: "t", Leg: 2, Name: "two"}},
+			placeMove(0, 0, 10, 0),
+			placeRow(planexport.KindPull, 0, 0, 15, 0, 0, 15111),
+			placeMove(1, 0, 20, 0),
+			placeMove(1, 0, 30, 0),
+			placeRow(secondKind, 1, 0, 100, 0, 0, 11347),
+			placeMove(1, 0, 105, 0),
+			placeRow(planexport.KindPull, 2, 0, 110, 0, 0, 15111),
+			placeRow(planexport.KindBoss, 2, 0, 200, 0, 0, 11347),
+		)
+	}
+	for _, kind := range []string{planexport.KindBoss, planexport.KindHold} {
+		rows := mk(kind)
+		_, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "two"})
+		if err == nil {
+			t.Fatalf("%s between: placed, want the exit-2 refusal", kind)
+		}
+		if kind == planexport.KindHold {
+			// A hold is an event row: the move leading into it refuses like the in-leg loop (L1).
+			if !strings.Contains(err.Error(), "event at step 5") {
+				t.Fatalf("hold between: err %v", err)
+			}
+			continue
+		}
+		if !strings.Contains(err.Error(), "no quiet move row") || !strings.Contains(err.Error(), "re-fight") {
+			t.Fatalf("%s between: err %v", kind, err)
+		}
+	}
+}
+
+func TestPlaceStartFallbackResolvesUntilFromTargetLeg(t *testing.T) {
+	// H2: only moves and trash between the fallback row and leg two's first row, so the fallback is placed;
+	// the until resolves from leg two's first row, not from the fallback start. Leg two is not the first
+	// leg (leg zero holds one far move), so PlaceStart takes the fallback path.
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "zero"}, {Plan: "t", Leg: 1, Name: "one"}, {Plan: "t", Leg: 2, Name: "two"}},
+		placeMove(0, 0, 10, 0),
+		placeRow(planexport.KindPull, 0, 0, 15, 0, 0, 15111),
+		placeRow(planexport.KindPull, 1, 0, 900, 0, 0, 15111),
+		placeMove(1, 0, 1000, 0),
+		placeMove(1, 0, 1010, 0),
+		placeMove(1, 0, 1020, 0),
+		placeRow(planexport.KindPull, 2, 0, 2000, 0, 0, 15111),
+		placeRow(planexport.KindBoss, 2, 0, 2005, 0, 0, 11347),
+	)
+	got, leg, fallback, door, err := PlaceStart(rows, []string{"from", "leg", "two"})
+	if err != nil || door {
+		t.Fatal(err)
+	}
+	if got != 6 || leg != "one" || fallback != "two" {
+		t.Fatalf("start %d (%q fallback %q), want 6 (one)", got, leg, fallback)
+	}
+	base := PlaceUntilBase(rows, fallback, got)
+	if base != 7 {
+		t.Fatalf("until base %d, want leg two's first row 7", base)
+	}
+	// The boss until (used for --until boss and boss-done) names leg two's boss, from the target leg's
+	// first row. (The guard refuses every fallback a leg-one boss between the rows would hijack, so the
+	// from-start answer coincides here; the base pins the target leg regardless.)
+	stop, err := PlaceStop(rows, []string{"until", "boss"}, base)
+	if err != nil || stop != 8 {
+		t.Fatalf("until boss stop %d, err %v, want leg two's boss row 8", stop, err)
+	}
+	if clause, boss, err := BossDoneUntil(rows, base); err != nil || boss != 8 {
+		t.Fatalf("boss-done from base: clause %q boss %d, err %v, want boss step 8", clause, boss, err)
+	}
+	if PlaceUntilBase(rows, "", got) != got || PlaceUntilBase(rows, "nope", got) != got {
+		t.Fatal("no fallback: the base is the start")
+	}
+}
+
+func TestPlaceStartRefusesFallbackIntoEvent(t *testing.T) {
+	// H2/L1: an event row in the fallback region refuses like the in-leg loop, it is not skipped. The only
+	// fallback candidate stands one hold before leg two.
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}, {Plan: "t", Leg: 1, Name: "two"}},
+		placeMove(0, 0, 10, 0),
+		placeMove(0, 0, 20, 0),
+		placeMove(0, 0, 30, 0),
+		placeRow(planexport.KindHold, 0, 0, 1000, 0, 0),
+		placeRow(planexport.KindPull, 1, 0, 1005, 0, 0, 15111),
+	)
+	_, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "two"})
+	if err == nil || !strings.Contains(err.Error(), "event at step 4") {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestPlaceStartRefusesNoQuietInEarlierLegs(t *testing.T) {
+	// Every move row stands within 50 yd of a later pull, in the target leg and the earlier one: the backward
+	// search finds no quiet row at all, so the exit-2 refusal stays (#370).
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}, {Plan: "t", Leg: 1, Name: "two"}},
 		placeMove(0, 0, 100, 0),
 		placeMove(0, 0, 105, 0),
 		placeRow(planexport.KindPull, 0, 0, 110, 0, 0, 15111),
+		placeRow(planexport.KindPull, 1, 0, 115, 0, 0, 15111),
 	)
-	_, _, err := PlaceStart(rows, []string{"from", "leg", "one"})
+	_, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "two"})
 	if err == nil || !strings.Contains(err.Error(), "no quiet move row") {
 		t.Fatalf("err %v", err)
 	}
@@ -86,13 +239,13 @@ func TestPlaceStartRefusesPullRow(t *testing.T) {
 		placeRow(planexport.KindPull, 0, 0, 110, 0, 0, 15111),
 		placeRow(planexport.KindBoss, 0, 0, 120, 0, 0, 11347),
 	)
-	if _, _, err := PlaceStart(rows, []string{"from", "step", "2"}); err == nil || !strings.Contains(err.Error(), "is a pull row") {
+	if _, _, _, _, err := PlaceStart(rows, []string{"from", "step", "2"}); err == nil || !strings.Contains(err.Error(), "is a pull row") {
 		t.Fatalf("pull row: %v", err)
 	}
-	if _, _, err := PlaceStart(rows, []string{"from", "step", "3"}); err == nil || !strings.Contains(err.Error(), "is a boss row") {
+	if _, _, _, _, err := PlaceStart(rows, []string{"from", "step", "3"}); err == nil || !strings.Contains(err.Error(), "is a boss row") {
 		t.Fatalf("boss row: %v", err)
 	}
-	if _, _, err := PlaceStart(rows, []string{"from", "step", "9"}); err == nil || !strings.Contains(err.Error(), "3 steps") {
+	if _, _, _, _, err := PlaceStart(rows, []string{"from", "step", "9"}); err == nil || !strings.Contains(err.Error(), "3 steps") {
 		t.Fatalf("out of range: %v", err)
 	}
 }
@@ -104,10 +257,10 @@ func TestPlaceStartRefusesEventHold(t *testing.T) {
 		placeRow(planexport.KindHold, 0, 0, 110, 0, 0),
 	)
 	// step 2 is the move leading into the hold at step 3: the server would move the start back.
-	if _, _, err := PlaceStart(rows, []string{"from", "step", "2"}); err == nil || !strings.Contains(err.Error(), "event at step 3") {
+	if _, _, _, _, err := PlaceStart(rows, []string{"from", "step", "2"}); err == nil || !strings.Contains(err.Error(), "event at step 3") {
 		t.Fatalf("err %v", err)
 	}
-	if _, _, err := PlaceStart(rows, []string{"from", "step", "3"}); err == nil || !strings.Contains(err.Error(), "is a hold row") {
+	if _, _, _, _, err := PlaceStart(rows, []string{"from", "step", "3"}); err == nil || !strings.Contains(err.Error(), "is a hold row") {
 		t.Fatalf("hold row: %v", err)
 	}
 }
@@ -295,11 +448,11 @@ func TestPlaceClearZGLeg3(t *testing.T) {
 
 func TestPlaceStartZGLeg3Stages(t *testing.T) {
 	rows := zgPlaceRows(t)
-	step, leg, err := PlaceStart(rows, []string{"from", "leg", "high_priest_thekal"})
+	step, leg, fallback, _, err := PlaceStart(rows, []string{"from", "leg", "high_priest_thekal"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if step != 231 || leg != "high_priest_thekal" {
+	if step != 231 || leg != "high_priest_thekal" || fallback != "" {
 		t.Fatalf("start %d (%q), want 231", step, leg)
 	}
 	if p, ok := PlacePoint(rows, step); !ok || p.X != -11919.999 || p.Z != 61.340786 {
