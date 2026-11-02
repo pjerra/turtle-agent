@@ -285,7 +285,7 @@ func (g remoteGame) PlanPath(ctx context.Context, mapID uint32, from, to dungeon
 	return out, nil
 }
 
-var _ dungeon.AvoidMarker = remoteGame{}
+var _ dungeon.CommanderWalker = remoteGame{}
 
 // MarkAvoid implements dungeon.AvoidMarker: the plan's avoid boxes are marked on the agent's planner, so its paths and floor snaps keep
 // out of them (the session's own walks too: it is the same planner).
@@ -581,7 +581,8 @@ func respawnUnselected(ctx context.Context, s *session.Session) error {
 	return nil
 }
 
-// WalkSelf is walk_path for the agent's character.
+// WalkSelf is walk_path for the agent's character. It is also the hire spot's settle walk for a guessed commander height
+// (dungeon.CommanderWalker): a navmesh walk that ends on the mesh clears status.z_unknown.
 func (g remoteGame) WalkSelf(ctx context.Context, to dungeon.Point) (dungeon.WalkResult, error) {
 	r, err := g.c.cur().WalkPath(ctx, to.X, to.Y, to.Z)
 	return dungeon.WalkResult{Result: r.Result, Reason: r.Reason, DistLeft: r.DistLeft}, err
