@@ -1088,6 +1088,15 @@ func TestZulGurubMarliStep203StandClearOfPack0(t *testing.T) {
 		t.Fatalf("%d pull groups", len(leg.PullGroups))
 	}
 	approach := leg.PullGroups[0].Approach[len(leg.PullGroups[0].Approach)-1]
+	// R2 (research/zg-w27/MARLI-PACK0.md): the approach is inside pack 1's own clear reach and the plan cannot clear it
+	// for the unit the run leader pulls: 49250 has no stand that clears pack 0 (the best point on its 23.5 yd ring is
+	// still 5.95 yd inside 49202's loop). The approach therefore walks pack 1 awake before the pull step's CC orders;
+	// the fix is the run leader's hold point (specced in the research note), not a plan point. Logged, not asserted: the
+	// route-aggro pin (1067) already carries the three segments.
+	if d, what := marliStandWorst(approach, pack1, movement, p); d < 0 {
+		t.Logf("the group 0 approach %.1f %.1f %.1f is %.1f yd inside pack 1's clear reach (%s): the run leader's hold-point change is specced in research/zg-w27/MARLI-PACK0.md",
+			approach.X, approach.Y, approach.Z, -d, what)
+	}
 	// The exported rows: the first leg-2 pull row (the plan's group 0, pack 1) and the move row before it (the approach).
 	res, err := planexport.Build(p, planexport.Options{})
 	if err != nil {
