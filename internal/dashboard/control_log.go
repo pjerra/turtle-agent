@@ -54,9 +54,9 @@ type controlLog struct {
 	mu sync.Mutex
 }
 
-// openControlLog opens (or makes) the log: its folder 0700, the file 0600, appended to. Like the token file it must be a regular file of ours,
-// not a link, and readable by nobody else (a mode we own with the others' bits set is cut to 0600). A failure is fatal to --control (fail
-// closed).
+// openControlLog opens (or makes) the log: its folder must be ours and not writable by others (refused, not fixed), the file must be a
+// regular file of ours, not a link, and it is held 0600 (a mode of ours that is not 0600 is set to it). Everything is checked on the open
+// descriptor, and every later read goes through that descriptor, never the path. A failure is fatal to --control (fail closed).
 func openControlLog(path string) (*controlLog, error) {
 	if path == "" {
 		return nil, errors.New("control log: no path")
@@ -65,26 +65,46 @@ func openControlLog(path string) (*controlLog, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	st, err := os.Lstat(path)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		// made by the open below, 0600
-	case err != nil:
-		return nil, err
-	case st.Mode()&os.ModeSymlink != 0:
-		return nil, fmt.Errorf("control log %s is a symbolic link", path)
-	case !st.Mode().IsRegular():
-		return nil, fmt.Errorf("control log %s is not a regular file", path)
-	case !ownedByUser(st):
-		return nil, fmt.Errorf("control log %s belongs to another user", path)
-	case st.Mode().Perm()&0o077 != 0:
-		if err := os.Chmod(path, 0o600); err != nil {
-			return nil, fmt.Errorf("control log %s is readable by others (mode %04o) and cannot be made 0600: %w", path, st.Mode().Perm(), err)
-		}
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY|oNoFollow, 0o600)
+	dst, err := os.Stat(dir)
 	if err != nil {
 		return nil, err
+	}
+	switch {
+	case !dst.IsDir():
+		return nil, fmt.Errorf("control log folder %s is not a folder", dir)
+	case !ownedByUser(dst):
+		return nil, fmt.Errorf("control log folder %s belongs to another user", dir)
+	case dst.Mode().Perm()&0o022 != 0:
+		return nil, fmt.Errorf("control log folder %s is writable by others (mode %04o); make it 0700 or choose another --control-log", dir, dst.Mode().Perm())
+	}
+	if oNoFollow == 0 {
+		// Off unix an open follows a link, so the link is refused before it (on unix O_NOFOLLOW does it in the open itself).
+		if st, err := os.Lstat(path); err == nil && st.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("control log %s is a symbolic link", path)
+		}
+	}
+	// One open, no check-then-open gap: a link at the path is an error, and a new file is made 0600.
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE|oNoFollow, 0o600)
+	if err != nil {
+		return nil, openRefusal(path, err)
+	}
+	fail := func(err error) (*controlLog, error) {
+		f.Close()
+		return nil, err
+	}
+	st, err := f.Stat()
+	if err != nil {
+		return fail(err)
+	}
+	switch {
+	case !st.Mode().IsRegular():
+		return fail(fmt.Errorf("control log %s is not a regular file", path))
+	case !ownedByUser(st):
+		return fail(fmt.Errorf("control log %s belongs to another user", path))
+	case st.Mode().Perm() != 0o600:
+		if err := f.Chmod(0o600); err != nil {
+			return fail(fmt.Errorf("control log %s has mode %04o and cannot be made 0600: %w", path, st.Mode().Perm(), err))
+		}
 	}
 	return &controlLog{w: f, f: f}, nil
 }
@@ -109,33 +129,32 @@ func (l *controlLog) append(r controlRecord) error {
 	return err
 }
 
-// tail returns the last n result lines of one agent, newest last, read by tailing the file (at most controlMaxTail bytes).
+// tail returns the last n result lines of one agent, newest last: the last controlMaxTail bytes, read through the descriptor the log was
+// opened with (never the path, which may by now name another file). The lock keeps a half-written line out of the read.
 func (l *controlLog) tail(agent string, n int) ([]controlRecord, error) {
 	l.mu.Lock()
-	path := ""
-	if l.f != nil {
-		path = l.f.Name()
-	}
-	l.mu.Unlock()
-	if path == "" {
+	defer l.mu.Unlock()
+	if l.f == nil {
 		return nil, nil
 	}
-	f, err := os.Open(path)
+	st, err := l.f.Stat()
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	if st, err := f.Stat(); err == nil && st.Size() > controlMaxTail {
-		if _, err := f.Seek(st.Size()-controlMaxTail, io.SeekStart); err != nil {
-			return nil, err
+	var start int64
+	if st.Size() > controlMaxTail {
+		start = st.Size() - controlMaxTail
+	}
+	data := make([]byte, st.Size()-start)
+	m, err := l.f.ReadAt(data, start)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	data = data[:m]
+	if start > 0 {
+		if i := bytes.IndexByte(data, '\n'); i >= 0 {
+			data = data[i+1:] // the first line may be cut by the tail window
 		}
-	}
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return nil, err
-	}
-	if i := bytes.IndexByte(data, '\n'); i >= 0 && len(data) > controlMaxTail {
-		data = data[i+1:] // the first line may be cut by the tail window
 	}
 	var out []controlRecord
 	for _, line := range bytes.Split(data, []byte("\n")) {
