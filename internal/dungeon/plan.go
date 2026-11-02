@@ -390,6 +390,13 @@ type Hold struct {
 	// crew lies dead, and with a note when only friendly survivors are left, instead of waiting TimeoutS for a hostility that cannot
 	// come (dungeons/zulfarrak.json's bly hold). Only a boss's hold done by its units takes it.
 	SkipIfDeadOfGossip bool `json:"skip_if_dead_of_gossip,omitempty"`
+	// ResetToGossip lets a units hold follow its event's script when it resets: when every unit of it is friendly again after
+	// the event started, the run leader goes back to the gossip step that started it instead of waiting out TimeoutS
+	// (TortoiseBots plan-export flag 16384, kPlanFlagResetToGossip). The leg needs that gossip step (npc the boss) before the
+	// hold, and the hold never carries SkipIfDeadOfGossip: a starting NPC already dead starts no event to reset. Only a boss's
+	// hold done by its units takes it (dungeons/zulfarrak.json's farraki_arena hold: farraki_arena.cpp ResetArena makes Razjal,
+	// Kath'zen and Juthza friendly and restores the gossip on a wipe or an evade).
+	ResetToGossip bool `json:"reset_to_gossip,omitempty"`
 }
 
 // The limits of a Hold and of Approach.
@@ -892,6 +899,8 @@ type rawHold struct {
 	Value    *uint32   `json:"value"`
 	// SkipIfDeadOfGossip is Hold.SkipIfDeadOfGossip.
 	SkipIfDeadOfGossip bool `json:"skip_if_dead_of_gossip"`
+	// ResetToGossip is Hold.ResetToGossip.
+	ResetToGossip bool `json:"reset_to_gossip"`
 }
 
 type rawPatrol struct {
@@ -1600,6 +1609,22 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 			c.fail(path+".boss.hold.skip_if_dead_of_gossip", "the gossip step of npc %d does not carry dead_is_done: the run leader would pause on the dead NPC before the hold", l.Boss.Entry)
 		}
 	}
+	// A units hold that goes back to its gossip when the script resets it needs that gossip step to be the last one before the
+	// hold that starts an event: the run leader's step to go back to (DungeonRunPolicy.h EventStartStep).
+	if l.Boss != nil && l.Boss.Hold != nil && l.Boss.Hold.ResetToGossip {
+		start := -1
+		for i, s := range l.Steps {
+			if s.Ritual != nil || s.UseObject != nil || s.UseItem != nil || s.Gossip != nil {
+				start = i
+			}
+		}
+		switch {
+		case start < 0 || l.Steps[start].Gossip == nil:
+			c.fail(path+".boss.hold.reset_to_gossip", "needs a gossip step of this leg that starts the encounter (npc %d, the boss) right before the hold: that is the step the run leader goes back to", l.Boss.Entry)
+		case l.Steps[start].Gossip.NPC != l.Boss.Entry:
+			c.fail(path+".boss.hold.reset_to_gossip", "the last step of this leg that starts an event is not the gossip of npc %d (the boss): the run leader would go back to that step", l.Boss.Entry)
+		}
+	}
 	for i, rs := range r.AfterBoss {
 		sp := fmt.Sprintf("%s.after_boss[%d]", path, i)
 		var s rawStep
@@ -1657,7 +1682,7 @@ func (c *checker) hold(path string, r *rawHold, valueAllowed, unitsAllowed bool)
 	if r == nil {
 		return nil
 	}
-	h := &Hold{Data: r.Data, Radius: r.Radius, TimeoutS: r.TimeoutS, Entries: r.Entries, Value: r.Value, SkipIfDeadOfGossip: r.SkipIfDeadOfGossip}
+	h := &Hold{Data: r.Data, Radius: r.Radius, TimeoutS: r.TimeoutS, Entries: r.Entries, Value: r.Value, SkipIfDeadOfGossip: r.SkipIfDeadOfGossip, ResetToGossip: r.ResetToGossip}
 	h.Spot = c.point(path+".spot", r.Spot)
 	switch {
 	case r.Data == 0 && r.Value != nil:
@@ -1667,6 +1692,12 @@ func (c *checker) hold(path string, r *rawHold, valueAllowed, unitsAllowed bool)
 	}
 	if r.SkipIfDeadOfGossip && (!unitsAllowed || r.Data != 0) {
 		c.fail(path+".skip_if_dead_of_gossip", "only a boss's hold done by its units (instance_data left out) takes it: a hold done by instance data ends by that data")
+	}
+	if r.ResetToGossip && (!unitsAllowed || r.Data != 0) {
+		c.fail(path+".reset_to_gossip", "only a boss's hold done by its units (instance_data left out) takes it: a hold done by instance data ends by that data")
+	}
+	if r.ResetToGossip && r.SkipIfDeadOfGossip {
+		c.fail(path+".reset_to_gossip", "cannot be combined with skip_if_dead_of_gossip: a starting NPC already dead starts no event to reset")
 	}
 	if r.Radius <= 0 || r.Radius > 100 {
 		c.fail(path+".radius", "%g: 1-100 yards (how far from the spot the event's mobs are fought)", r.Radius)

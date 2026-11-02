@@ -1,8 +1,9 @@
 package planexport
 
 // The Farraki Arena leg of Zul'Farrak (#243) as rows: the walk to the arena, the gossip that starts the event (option 0 -> param 1),
-// the boss's hold done by his units (entry 0, param 0, flags 0, the boss first and the scorpids behind him), and the Zel'jeb leg's
-// boss row. Exported with the options the TortoiseBots file uses: drop-companions-loot, carrier-chests, with-optional gahzrilla.
+// the boss's hold done by his units with reset_to_gossip (entry 0, param 0, flags 16384, the boss first and the scorpids behind him),
+// and the Zel'jeb leg's boss row. Exported with the options the TortoiseBots file uses: drop-companions-loot, carrier-chests,
+// with-optional gahzrilla.
 
 import (
 	"fmt"
@@ -40,7 +41,7 @@ func TestZulfarrakArenaRows(t *testing.T) {
 	joined := strings.Join(arena, "\n")
 	want := []string{
 		"gossip 62498 1483.08 1011.05 12.15",
-		"hold 0 1510 1015 12.1 r35 p0 f0 t600 [62498 62496 62497 62499]",
+		"hold 0 1510 1015 12.1 r35 p0 f16384 t600 [62498 62496 62497 62499]",
 	}
 	for _, w := range want {
 		if !strings.Contains(joined, w) {

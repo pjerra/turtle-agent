@@ -79,9 +79,14 @@ const (
 	// FlagDeadGossipOk marks a units hold whose starting NPC may already be dead (a plan's hold.skip_if_dead_of_gossip): the run leader
 	// ends it when no unit of it is hostile — at once when the crew lies dead, with a note when only friendly survivors are left — but
 	// only after the gossip that starts it (the nearest gossip row before it) counted its dead NPC as done (DungeonRunPolicy.h,
-	// GossipDeadIsDone; TortoiseBots DungeonPlanPolicy.h kPlanFlagDeadGossipOk = 32768, the TB side is not written yet; 16384 there is kPlanFlagResetToGossip). Without the flag that hold waits for a unit seen hostile, which a
+	// GossipDeadIsDone; TortoiseBots DungeonPlanPolicy.h kPlanFlagDeadGossipOk = 32768; 16384 there is kPlanFlagResetToGossip). Without the flag that hold waits for a unit seen hostile, which a
 	// crew whose NPC died before its option can never be (zulfarrak.cpp npc_sergeant_blyAI turns them only from his script).
 	FlagDeadGossipOk = 32768
+	// FlagResetToGossip marks a units hold whose event the script resets (a plan's hold.reset_to_gossip): when every unit of it
+	// is friendly again after the event started, the run leader goes back to the gossip step that started it instead of waiting
+	// out the timeout (DungeonRunPolicy.h UnitsHoldResetSeen, DungeonPlanPolicy.h kPlanFlagResetToGossip). Without the flag a
+	// units hold never reads a reset, so a crew that evades and turns friendly again is not mistaken for one.
+	FlagResetToGossip = 16384
 	// EncounterDone is the encounter state DONE: a hold's param.
 	EncounterDone = 3
 )
@@ -574,6 +579,12 @@ func (b *builder) hold(h *dungeon.Hold, entries []uint32, comment string) {
 			flags = FlagDeadGossipOk
 			text += "; done when its NPC was dead, with only friendly units left"
 		}
+		if h.ResetToGossip {
+			// The script can reset the event (a wipe or an evade): the run leader goes back to the gossip that started it instead
+			// of waiting out the timeout.
+			flags = FlagResetToGossip
+			text += "; goes back to its gossip when the script resets it"
+		}
 	}
 	b.add(StepRow{Kind: KindHold, Entry: h.Data, X: h.Spot.X, Y: h.Spot.Y, Z: h.Spot.Z, Radius: h.Radius, Param: param,
 		Flags: flags, TimeoutS: h.TimeoutS, Entries: entries, Comment: clip(text, MaxComment)})
@@ -875,6 +886,9 @@ func Validate(r Rows) error {
 			}
 			if s.Flags&FlagDeadGossipOk != 0 && (s.Flags&(FlagDoneData|FlagEncounter) != 0 || s.Entry != 0 || s.Param != 0) {
 				return bad("the dead-gossip flag is for a hold done by its units: it carries neither the instance data flag nor an entry or param")
+			}
+			if s.Flags&FlagResetToGossip != 0 && (s.Flags&(FlagDoneData|FlagEncounter|FlagDeadGossipOk) != 0 || s.Entry != 0 || s.Param != 0) {
+				return bad("the reset-to-gossip flag is for a hold done by its units: it carries no done flag, no entry or param, and not the dead-gossip flag")
 			}
 			// An encounter state is 0-4; a plain script value (flag 8 without 32) may be any number (the loader's rule).
 			if s.Flags&FlagEncounter != 0 && s.Param > 4 {

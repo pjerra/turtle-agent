@@ -69,6 +69,11 @@ func TestValidateHoldForms(t *testing.T) {
 		{"data value", hold(1, 8, FlagDoneData, nil), true},
 		{"units", hold(0, 0, 0, []uint32{7604, 7608}), true},
 		{"units dead gossip", hold(0, 0, FlagDeadGossipOk, []uint32{7604, 7608}), true},
+		{"units reset to gossip", hold(0, 0, FlagResetToGossip, []uint32{62498, 62499}), true},
+		{"reset to gossip with data", hold(1, 3, FlagResetToGossip|FlagDoneData|FlagEncounter, nil), false},
+		{"reset to gossip with an entry", hold(1, 0, FlagResetToGossip, []uint32{62498}), false},
+		{"reset to gossip with the dead gossip", hold(0, 0, FlagResetToGossip|FlagDeadGossipOk, []uint32{62498}), false},
+		{"reset to gossip on a gossip row", Rows{Steps: []StepRow{{Plan: "p", Kind: KindGossip, Entry: 62498, Param: 1, Flags: FlagResetToGossip}}}, false},
 		{"data without its index", hold(0, 3, FlagDoneData, nil), false},
 		{"units without entries", hold(0, 0, 0, nil), false},
 		{"units with an entry", hold(1, 0, 0, []uint32{7604}), false},
@@ -117,6 +122,43 @@ func TestBossUnitsHoldWithDeadGossip(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := Equal([]Rows{dead}, back); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A units hold whose event the script resets (hold.reset_to_gossip) is the same hold row with the module's kPlanFlagResetToGossip
+// (16384) and a comment that says so: the run leader goes back to the gossip that started the event when every unit of it is
+// friendly again after it started, instead of waiting out the timeout. Without the flag the row is today's units hold (the hold
+// waits for a hostile unit through a reset; Zul'Farrak's Farraki Arena).
+func TestBossUnitsHoldResetToGossip(t *testing.T) {
+	build := func(hold string) Rows {
+		js := `{"version":1,"name":"zf","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"arena","to":{"x":10,"y":0,"z":0},
+  "steps":[{"gossip":{"npc":62498,"near":{"x":12,"y":0,"z":0},"option":0,"by":"tank"}}],
+  "boss":{"entry":62498,"position":{"x":12,"y":0,"z":0},"first":[62496,62497],"hold":` + hold + `}}]}`
+		res, err := Build(parsePlan(t, js), Options{Source: "test"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.Rows
+	}
+	reset := build(`{"spot":{"x":10,"y":0,"z":0},"radius":35,"timeout_s":600,"entries":[62499],"reset_to_gossip":true}`)
+	if len(reset.Steps) != 3 || reset.Steps[2].Kind != KindHold || reset.Steps[2].Flags != FlagResetToGossip || reset.Steps[2].Entry != 0 ||
+		reset.Steps[2].Param != 0 || fmt.Sprint(reset.Steps[2].Entries) != "[62498 62496 62497 62499]" {
+		t.Fatalf("rows %+v", reset.Steps)
+	}
+	if c := reset.Steps[2].Comment; !strings.Contains(c, "goes back to its gossip when the script resets it") {
+		t.Errorf("the flagged hold's comment: %q", c)
+	}
+	plain := build(`{"spot":{"x":10,"y":0,"z":0},"radius":35,"timeout_s":600,"entries":[62499]}`)
+	if len(plain.Steps) != 3 || plain.Steps[2].Flags != 0 {
+		t.Fatalf("the plain units hold's rows %+v", plain.Steps)
+	}
+	back, err := Parse(WriteSQL([]Rows{reset}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Equal([]Rows{reset}, back); err != nil {
 		t.Fatal(err)
 	}
 }
