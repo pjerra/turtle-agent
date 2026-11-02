@@ -55,7 +55,7 @@ var pullSizeKnownCounts = map[string]int{
 	// warns on most of its pulls (mmaps-free path, LOS always seen).
 	"ragefire_chasm": 28, "wailing_caverns": 54, "deadmines": 131,
 	"uldaman": 58, "zulfarrak": 53, "karazhan_crypt": 125,
-	"molten_core": 21, "blackwing_lair": 40, "zul_gurub": 95,
+	"molten_core": 21, "blackwing_lair": 40, "zul_gurub": 88, // 95 -> 88: walk 28's one 27-unit Arlokk terrace pull and walk 29's leg-5/6 groups replace the old per-pack rows.
 	"ruins_of_ahnqiraj": 32, "temple_of_ahnqiraj": 74, "naxxramas": 150,
 	"lower_karazhan_halls": 79, "upper_karazhan_halls": 30,
 	"emerald_sanctum": 7, "timbermaw_hold": 27,

@@ -2371,12 +2371,17 @@ func TestRaidWalkReviveRefusalSummary(t *testing.T) {
 			t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
 		}
 		rr := f.summary().ReviveRefusal
-		if rr == nil || len(rr.Blockers) != 1 || rr.Blockers[0].Entry != 15111 || !rr.AllIdle {
+		if rr != nil && (len(rr.Blockers) != 1 || rr.Blockers[0].Entry != 15111 || !rr.AllIdle) {
 			t.Fatalf("refusal %+v, want one idle blocker (15111) and all_idle", rr)
 		}
 		raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
 		if err != nil {
 			t.Fatalf("run.log: %v", err)
+		}
+		// The run's own refusal is not always reached now: the revive walks the leg's earlier rows (and the entrance)
+		// before the deadline. The failed read's line lists every blocker of the point, so it names the servant alone.
+		if !strings.Contains(string(raw), "quiet read at") || !strings.Contains(string(raw), "15111") {
+			t.Fatalf("run.log has no quiet-read line naming the servant:\n%s", raw)
 		}
 		if strings.Contains(string(raw), "2914") || strings.Contains(string(raw), "Snake") {
 			t.Fatalf("run.log names the critter as a blocker:\n%s", raw)
