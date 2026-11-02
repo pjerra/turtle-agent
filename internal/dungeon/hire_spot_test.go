@@ -2,6 +2,7 @@ package dungeon
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -84,6 +85,36 @@ func TestHireRefusesUnknownHeightNearThePortal(t *testing.T) {
 	}
 }
 
+// A stop during the wait for the server's own height ends the hire as stopped, not as a failed spot: the sleep's cancellation goes
+// back unchanged, so the run reads it as a stop (ctxDone), not as "height unknown".
+func TestHireStopDuringTheHeightWait(t *testing.T) {
+	g := newHireFake(t)
+	g.agentMap = portalMap
+	g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
+	pos := &hirePosFake{hireFake: g, pos: Point{X: 1821.5, Y: -4425.3, Z: -19.8}, zUnknown: true, guessZ: -15.0}
+	e := hireSpotEnv(g, pos, func(string) {})
+	ctx, cancel := context.WithCancel(context.Background())
+	clk := g.clock()
+	call := 0
+	e.sleep = func(ctx context.Context, d time.Duration) error {
+		call++
+		if call == 2 {
+			cancel()
+		}
+		return clk.Sleep(ctx, d)
+	}
+	_, err := e.hire(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("a stop during the height wait: %v, want context.Canceled", err)
+	}
+	if len(g.hireLines) != 0 || g.count("cbind") != 0 {
+		t.Fatalf("a stop during the height wait still hired: hires %v, binds %d", g.hireLines, g.count("cbind"))
+	}
+	if p, perr := e.hireSpotProblem(ctx); !errors.Is(perr, context.Canceled) || p != "" {
+		t.Fatalf("a stop during the height wait as a spot problem: %q %v, want the cancellation", p, perr)
+	}
+}
+
 // The height arrives within the wait: the spot is judged on the server's position, not on the guess (the guess said the portal ground, the
 // server's own height said under it).
 func TestHireSpotWaitsForTheKnownHeight(t *testing.T) {
@@ -113,8 +144,8 @@ func TestHireSpotUnknownHeightFarFromThePortal(t *testing.T) {
 	began := g.now
 	pos := &hirePosFake{hireFake: g, pos: Point{X: 1838.4, Y: -4427.26, Z: -19.4478}, zUnknown: true, guessZ: -30}
 	e := hireSpotEnv(g, pos, func(string) {})
-	if p := e.hireSpotProblem(context.Background()); p != "" {
-		t.Fatalf("an unknown height far from the portal: %s", p)
+	if p, err := e.hireSpotProblem(context.Background()); err != nil || p != "" {
+		t.Fatalf("an unknown height far from the portal: %s %v", p, err)
 	}
 	if d := g.now.Sub(began); d != 0 {
 		t.Fatalf("an unknown height far from the portal waited %v", d)
@@ -175,8 +206,8 @@ func TestHireSpotAllows(t *testing.T) {
 			g.plan.Portal = c.portal
 			e := hireSpotEnv(g, &hirePosFake{hireFake: g, pos: c.pos}, func(string) {})
 			e.team = c.team
-			if p := e.hireSpotProblem(context.Background()); p != "" {
-				t.Errorf("the spot is allowed: %s", p)
+			if p, err := e.hireSpotProblem(context.Background()); err != nil || p != "" {
+				t.Errorf("the spot is allowed: %s %v", p, err)
 			}
 		})
 	}
@@ -189,8 +220,8 @@ func TestHireSpotWithoutPosition(t *testing.T) {
 	g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
 	var notes []string
 	e := hireSpotEnv(g, g, func(s string) { notes = append(notes, s) })
-	if p := e.hireSpotProblem(context.Background()); p != "" {
-		t.Fatalf("a game without an agent position refused the spot: %s", p)
+	if p, err := e.hireSpotProblem(context.Background()); err != nil || p != "" {
+		t.Fatalf("a game without an agent position refused the spot: %s %v", p, err)
 	}
 	if !strings.Contains(strings.Join(notes, "\n"), "the portal ground is not checked") {
 		t.Fatalf("the skipped portal check is not noted: %v", notes)

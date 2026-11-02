@@ -401,7 +401,9 @@ func (f *hireFlow) note(format string, a ...any) {
 
 // hire is the prepare step `party: hire`.
 func (e *prepEnv) hire(ctx context.Context) (string, error) {
-	if p := e.hireSpotProblem(ctx); p != "" {
+	if p, err := e.hireSpotProblem(ctx); err != nil {
+		return "", err
+	} else if p != "" {
 		return "", errors.New(p)
 	}
 	hg, ok := e.g.(HireGame)
