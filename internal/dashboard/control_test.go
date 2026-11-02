@@ -831,5 +831,197 @@ func TestControlLogFailsAfterSuccessfulRPC(t *testing.T) {
 	}
 }
 
+// M2: a write that was sent and then failed — a client timeout, a reply that cannot be read, any status but 200/401 — may have run, so it is
+// indeterminate. Only a dial failure (the request never left) and a 401 stay definite.
+func TestControlWriteAfterSendIsIndeterminate(t *testing.T) {
+	t.Run("timeout after send", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(200 * time.Millisecond)
+			io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`)
+		}))
+		t.Cleanup(srv.Close)
+		cl := NewControlClient(Agent{ID: "x", Addr: strings.TrimPrefix(srv.URL, "http://")}, 20*time.Millisecond)
+		if _, err := cl.Write(context.Background(), "dungeon_pause", nil); !errors.Is(err, ErrIndeterminate) {
+			t.Fatalf("a timeout after the request was sent: %v, want indeterminate", err)
+		}
+	})
+	t.Run("a cancelled request context", func(t *testing.T) {
+		reached, release := make(chan struct{}), make(chan struct{})
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(reached)
+			<-release
+			io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`)
+		}))
+		t.Cleanup(srv.Close)
+		cl := NewControlClient(Agent{ID: "x", Addr: strings.TrimPrefix(srv.URL, "http://")}, time.Second)
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			_, err := cl.Write(ctx, "dungeon_pause", nil)
+			done <- err
+		}()
+		<-reached
+		cancel()
+		close(release)
+		if err := <-done; !errors.Is(err, ErrIndeterminate) {
+			t.Fatalf("a cancelled write: %v, want indeterminate", err)
+		}
+	})
+	t.Run("a non-200 status", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "down", http.StatusServiceUnavailable)
+		}))
+		t.Cleanup(srv.Close)
+		cl := NewControlClient(Agent{ID: "x", Addr: strings.TrimPrefix(srv.URL, "http://")}, time.Second)
+		if _, err := cl.Write(context.Background(), "dungeon_pause", nil); !errors.Is(err, ErrIndeterminate) {
+			t.Fatalf("HTTP 503: %v, want indeterminate", err)
+		}
+	})
+	t.Run("a 401 is definite", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "no", http.StatusUnauthorized)
+		}))
+		t.Cleanup(srv.Close)
+		cl := NewControlClient(Agent{ID: "x", Addr: strings.TrimPrefix(srv.URL, "http://")}, time.Second)
+		_, err := cl.Write(context.Background(), "dungeon_pause", nil)
+		if err == nil || errors.Is(err, ErrIndeterminate) {
+			t.Fatalf("HTTP 401: %v, want a definite refusal", err)
+		}
+	})
+	t.Run("a dial failure is definite", func(t *testing.T) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		must(t, err)
+		addr := ln.Addr().String()
+		ln.Close() // nothing listens there: the dial is refused
+		cl := NewControlClient(Agent{ID: addr, Addr: addr}, time.Second)
+		_, err = cl.Write(context.Background(), "dungeon_pause", nil)
+		if err == nil || errors.Is(err, ErrIndeterminate) {
+			t.Fatalf("a refused dial: %v, want a definite failure", err)
+		}
+	})
+}
+
+// M2: the write runs on a context detached from the request, so closing the tab (cancelling the request) does not cancel a command that is
+// already sent; the log's result line proves the write finished.
+func TestControlWriteSurvivesACancelledRequest(t *testing.T) {
+	r := newControlRig(t)
+	r.fake.set("dungeon_status", `{"running":true,"state":"running","report":{"state":"running","remote":{"mode":"observe"}}}`)
+	r.fake.set("dungeon_pause", `{"ok":true}`)
+	gate := r.fake.hold("dungeon_pause")
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.srv.URL+"/api/control/"+r.agent.ID+"/run",
+		strings.NewReader(`{"verb":"pause","confirm":true}`))
+	must(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+r.token)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			resp.Body.Close()
+		}
+	}()
+	waitFor(t, "the write to reach the agent", func() bool { return r.fake.sawWrite() })
+	cancel() // the tab closes while dungeon_pause is in flight
+	<-done
+	close(gate)
+	var recs []map[string]any
+	waitFor(t, "the result line of the detached write", func() bool {
+		recs = r.logRecords()
+		return len(recs) == 2
+	})
+	if recs[1]["phase"] != "result" || recs[1]["outcome"] != "ok" {
+		t.Fatalf("the detached write's result line is %v", recs[1])
+	}
+}
+
+// waitFor polls cond for a while and fails the test when it does not hold.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// L1: the peer of a control is only in the log the request's own token authorizes; a plain page read gets the line without it, and a read with
+// no credential is not counted as a failed login.
+func TestControlLogHidesPeerFromUnauthorizedReaders(t *testing.T) {
+	r := newControlRig(t)
+	r.fake.set("dungeon_status", `{"running":true,"state":"running","report":{"state":"running","remote":{"mode":"observe"}}}`)
+	r.fake.set("dungeon_pause", `{"ok":true}`)
+	if rec := r.post("/api/control/"+r.agent.ID+"/run", map[string]any{"verb": "pause", "confirm": true}, r.token, nil); rec.code != http.StatusOK {
+		t.Fatalf("pause: %d %s", rec.code, rec.body)
+	}
+	path := "/api/control/" + r.agent.ID + "/log?n=1"
+
+	lines := func(rec reply) []map[string]any {
+		t.Helper()
+		if rec.code != http.StatusOK {
+			t.Fatalf("log: %d %s", rec.code, rec.body)
+		}
+		var got struct {
+			Lines []map[string]any `json:"lines"`
+		}
+		must(t, json.Unmarshal([]byte(rec.body), &got))
+		if len(got.Lines) != 1 {
+			t.Fatalf("the log answered %v", got.Lines)
+		}
+		return got.Lines
+	}
+	// the page reads the log with no token: no peer
+	for range 11 { // more than the failed-login limit: none of these counts as a failed login
+		open := lines(r.do(http.MethodGet, path, nil, nil))
+		if _, ok := open[0]["peer"]; ok {
+			t.Fatalf("an unauthenticated log read shows the peer: %v", open[0])
+		}
+	}
+	// the same reader can still send a control (its log reads did not trip the limit)
+	if rec := r.post("/api/control/"+r.agent.ID+"/run", map[string]any{"verb": "pause", "confirm": true}, r.token, nil); rec.code != http.StatusOK {
+		t.Fatalf("a control after eleven page log reads: %d %s", rec.code, rec.body)
+	}
+	// a caller with the token sees it
+	authorized := lines(r.do(http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer " + r.token}))
+	if peer, ok := authorized[0]["peer"].(string); !ok || peer == "" {
+		t.Fatalf("an authenticated log read hides the peer: %v", authorized[0])
+	}
+}
+
+// L3: the control log is opened like a token file: a link is refused, a folder is refused, and a mode of ours that others can read is cut to 0600.
+func TestControlLogFileChecks(t *testing.T) {
+	root := t.TempDir()
+	tk, err := routeedit.LoadTokens(writeTokens(t, root))
+	must(t, err)
+	p := NewPoller(Options{ConfigDir: root})
+
+	real := filepath.Join(root, "real.jsonl")
+	must(t, os.WriteFile(real, nil, 0o600))
+	link := filepath.Join(root, "link.jsonl")
+	must(t, os.Symlink(real, link))
+	if _, err := NewController(p, ControlConfig{Tokens: tk, LogPath: link}); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("a log that is a symbolic link: %v", err)
+	}
+	dir := filepath.Join(root, "log-dir")
+	must(t, os.Mkdir(dir, 0o700))
+	if _, err := NewController(p, ControlConfig{Tokens: tk, LogPath: dir}); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("a log that is a folder: %v", err)
+	}
+
+	loose := filepath.Join(root, "loose.jsonl")
+	must(t, os.WriteFile(loose, nil, 0o644))
+	must(t, os.Chmod(loose, 0o644)) // WriteFile's mode is cut by the umask, so set it again
+	c, err := NewController(p, ControlConfig{Tokens: tk, LogPath: loose})
+	must(t, err)
+	c.Close()
+	st, err := os.Stat(loose)
+	must(t, err)
+	if got := st.Mode().Perm(); got != 0o600 {
+		t.Fatalf("a log readable by others was left at %04o, want 0600", got)
+	}
+}
+
 // Test 13: the run controls' button matrix, confirm texts and log lines (controls.js, run under node).
 func TestControlButtons(t *testing.T) { runCheck(t, "controls_check.js", "controls.js") }

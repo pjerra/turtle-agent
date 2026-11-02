@@ -94,20 +94,25 @@ func (c *Controller) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/control/", c.serve)
 }
 
+// requester is who a request claims to be, by its token or by the trusted-peer nonce: the token label and how it was trusted. It is the
+// authentication half of authorize; a GET (the log) uses it only to decide what it may show, and a request with no credential at all is not
+// asked for one (the page reads the log with none).
+func (c *Controller) requester(r *http.Request) (label, via string, err error) {
+	host, _, herr := net.SplitHostPort(r.RemoteAddr)
+	if herr != nil {
+		host = r.RemoteAddr
+	}
+	if len(r.Header.Values("Authorization")) == 0 && c.trust != nil && c.trust.withNonce(r, controlNonceHeader) {
+		return c.trust.label, "trusted", nil // a request that sends any token is judged by it alone
+	}
+	label, err = c.cfg.Tokens.Authenticate(r.Header.Get("Authorization"), host, c.cfg.Now())
+	return label, "token", err
+}
+
 // authorize is the gate for a control request: a control token (or a trusted peer under --control-trust-local), a same-origin request and a
 // small JSON body. On failure it has answered and returns false. The label and how it was trusted are put in the request's context.
 func (c *Controller) authorize(w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	var label, via string
-	if len(r.Header.Values("Authorization")) == 0 && c.trust != nil && c.trust.withNonce(r, controlNonceHeader) {
-		label, via = c.trust.label, "trusted" // a request that sends any token is judged by it alone
-	} else {
-		via = "token"
-		label, err = c.cfg.Tokens.Authenticate(r.Header.Get("Authorization"), host, c.cfg.Now())
-	}
+	label, via, err := c.requester(r)
 	switch {
 	case errors.Is(err, routeedit.ErrTooMany):
 		jsonError(w, http.StatusTooManyRequests, "%s", err.Error())
@@ -163,7 +168,9 @@ func (c *Controller) status(w http.ResponseWriter, r *http.Request) {
 	writeAny(w, http.StatusOK, st)
 }
 
-// serveLog answers GET /api/control/<id>/log?n=20: the last result lines of that agent, newest last.
+// serveLog answers GET /api/control/<id>/log?n=20: the last result lines of that agent, newest last. The peer field is only shown to a caller
+// who could send a control itself (L1): where a control came from is the sender's business, not any reader's. A read with no credential is not
+// counted as a failed login, since the page refreshes the log without a token.
 func (c *Controller) serveLog(w http.ResponseWriter, r *http.Request, id string) {
 	if !validAgentID(id) {
 		jsonError(w, http.StatusNotFound, "no such agent")
@@ -189,7 +196,22 @@ func (c *Controller) serveLog(w http.ResponseWriter, r *http.Request, id string)
 	if lines == nil {
 		lines = []controlRecord{}
 	}
+	if !c.maySeePeer(r) {
+		for i := range lines {
+			lines[i].Peer = ""
+		}
+	}
 	writeAny(w, http.StatusOK, map[string]any{"lines": lines})
+}
+
+// maySeePeer reports whether the caller of a log read could send a control: a valid token, or the trusted nonce. A request that carries no
+// credential at all is answered false without being counted as a failed login (the page reads the log that way, every few seconds).
+func (c *Controller) maySeePeer(r *http.Request) bool {
+	if len(r.Header.Values("Authorization")) == 0 && (c.trust == nil || !c.trust.withNonce(r, controlNonceHeader)) {
+		return false
+	}
+	_, _, err := c.requester(r)
+	return err == nil
 }
 
 // control is the shared part of every POST: the action must exist, the agent must be one the dashboard watches (D6), one control per agent
@@ -297,7 +319,11 @@ func (c *Controller) run(ac *actionContext) {
 		jsonError(ac.w, http.StatusInternalServerError, "the control log could not be written, so nothing was sent: %v", err)
 		return
 	}
-	out, err := cl.Write(ctx, method, nil)
+	// The write is detached from the request (M2): a tab that closes, or a client timeout, must not cancel a command that is already sent,
+	// because only the agent knows whether it ran. Its own bound still applies.
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ac.r.Context()), controlTimeout)
+	defer cancel()
+	out, err := cl.Write(wctx, method, nil)
 	okv := err == nil
 	res := controlRecord{Phase: "result", At: c.cfg.Now().UTC().Format(time.RFC3339), Who: ac.who, Via: ac.via, Peer: ac.peer,
 		Agent: ac.agent.ID, Action: ac.action, Verb: req.Verb, RPC: method, OK: &okv, Outcome: "ok"}
