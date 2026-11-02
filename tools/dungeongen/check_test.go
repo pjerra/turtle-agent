@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,5 +142,41 @@ func TestCheckFileStrict(t *testing.T) {
 	// design, and the warnings name the pull rows.
 	if got := checkFile(clean, data, "alliance", "122", "2748,4857", "", true); got != 1 {
 		t.Fatalf("the committed plan under -strict: %d, want 1 (the pull_size lint warns)", got)
+	}
+}
+
+// A world the loader refuses, or a plan the exporter refuses, fails the
+// check even without -strict: a lint that cannot read its inputs is an
+// error, not an empty report.
+func TestCheckFileFailsOnWorldOrExportErrors(t *testing.T) {
+	dir := t.TempDir()
+	plan := filepath.Join(dir, "p.json")
+	if err := os.WriteFile(plan, []byte(`{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":1,"y":0,"z":0}]}]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data := t.TempDir()
+	// No creatures.tsv: worldspawn.Load refuses, and the check fails strict or not.
+	if got := checkFile(plan, data, "", "", "", "", false); got != 1 {
+		t.Fatalf("missing world without strict: %d, want 1", got)
+	}
+	if got := checkFile(plan, data, "", "", "", "", true); got != 1 {
+		t.Fatalf("missing world with strict: %d, want 1", got)
+	}
+	// A world that loads but a plan the exporter refuses (kill_first over the
+	// row column width: dungeon.Load passes, planexport.Build refuses) fails
+	// the same way.
+	long := "10000"
+	for e := 10001; e <= 10060; e++ {
+		long += fmt.Sprintf(",%d", e)
+	}
+	js := `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"kill_first":[` + long + `],"legs":[
+ {"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":1,"y":0,"z":0}]}]}]}`
+	bad := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(bad, []byte(js), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := checkFile(bad, filepath.Join("testdata", "uldaman"), "", "", "", "", false); got != 1 {
+		t.Fatalf("refused export without strict: %d, want 1", got)
 	}
 }
