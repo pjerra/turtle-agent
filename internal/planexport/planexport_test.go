@@ -1570,3 +1570,93 @@ func TestPullGroupMaxBodiesIsTheRowItem(t *testing.T) {
 		t.Fatalf("max_bodies 27: item %d, want 27", got)
 	}
 }
+
+// TestCampGroupExportsCampTagPull: with the CampPull option a camp group
+// writes the camp move (flag 65536), the tag rows (the approach) and the
+// pull row with FlagCampPull; the next hop is measured from the camp.
+func TestCampGroupExportsCampTagPull(t *testing.T) {
+	const js = `{"version":1,"name":"zg","status":"live-checked (test)","map":309,"entrance":{"x":0,"y":0,"z":0},
+	 "legs":[{"name":"arlokk","to":{"x":0,"y":0,"z":0},"pull_groups":[
+	  {"entries":[11365],"positions":[{"x":200,"y":0,"z":0}],"radius":4,"max_bodies":27,
+	   "camp":{"x":150,"y":0,"z":0},"approach":[{"x":170,"y":0,"z":0},{"x":190,"y":0,"z":0}]}]},
+	  {"name":"next","to":{"x":400,"y":0,"z":0},"boss":{"entry":62662,"position":{"x":410,"y":0,"z":0}}}]}`
+	res, err := Build(parsePlan(t, js), Options{Source: "test", CampPull: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []StepRow
+	for _, s := range res.Rows.Steps {
+		if s.Leg == 0 {
+			rows = append(rows, s)
+		}
+	}
+	if len(rows) != 5 {
+		t.Fatalf("leg 0 rows %+v (want to, camp move, 2 tag rows, pull)", rows)
+	}
+	rows = rows[1:]
+	if camp := rows[0]; camp.Kind != KindMove || camp.Flags != FlagCampPoint || camp.X != 150 || !strings.Contains(camp.Comment, "pull group 0 camp") {
+		t.Fatalf("camp row %+v (want a move with flag %d to 150,0,0)", camp, FlagCampPoint)
+	}
+	for i, want := range []float32{170, 190} {
+		if r := rows[1+i]; r.Kind != KindMove || r.Flags != 0 || r.X != want || !strings.Contains(r.Comment, "tag walk") {
+			t.Fatalf("tag row %d %+v (want a plain move to %g,0,0)", i, r, want)
+		}
+	}
+	pull := rows[3]
+	if pull.Kind != KindPull || pull.Flags&FlagCampPull == 0 || pull.Item != 27 || !strings.Contains(pull.Comment, "camp pull") {
+		t.Fatalf("pull row %+v (want flag %d, item 27, the camp-pull comment)", pull, FlagCampPull)
+	}
+	// The next leg's move is cut from the camp: with the cutter the midpoint
+	// of camp->400 is 275, of the pack centre->400 it would be 300.
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 999, Z: 0}}, nil
+	}
+	res, err = Build(parsePlan(t, js), Options{Source: "test", CampPull: true, Cut: cut, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pi := -1
+	for i, s := range res.Rows.Steps {
+		if s.Kind == KindPull {
+			pi = i
+			break
+		}
+	}
+	if next := res.Rows.Steps[pi+1]; next.Kind != KindMove || next.Y != 999 || next.X != (150+400)/2 {
+		t.Fatalf("first hop after the camp pull %+v (want it cut from the camp 150,0,0)", next)
+	}
+}
+
+// TestCampGroupWithoutOptionExportsAsToday: without CampPull the camp is
+// dropped with a warning and the group exports exactly as a plain one.
+func TestCampGroupWithoutOptionExportsAsToday(t *testing.T) {
+	const js = `{"version":1,"name":"zg","status":"live-checked (test)","map":309,"entrance":{"x":0,"y":0,"z":0},
+	 "legs":[{"name":"arlokk","to":{"x":0,"y":0,"z":0},"pull_groups":[
+	  {"entries":[11365],"positions":[{"x":200,"y":0,"z":0}],"radius":4,"max_bodies":27,
+	   "camp":{"x":150,"y":0,"z":0},"approach":[{"x":170,"y":0,"z":0},{"x":190,"y":0,"z":0}]}]}]}`
+	res, err := Build(parsePlan(t, js), Options{Source: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, s := range res.Rows.Steps {
+		if s.Leg == 0 {
+			kinds = append(kinds, s.Kind)
+			if s.Flags&FlagCampPoint != 0 || s.Flags&FlagCampPull != 0 {
+				t.Fatalf("camp flags on without the option: %+v", s)
+			}
+		}
+	}
+	if strings.Join(kinds, " ") != "move move move pull" {
+		t.Fatalf("leg 0 kinds %v (want to, 2 approach moves, plain pull)", kinds)
+	}
+	found := false
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "camp is dropped") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no camp-dropped warning in %q", res.Warnings)
+	}
+}

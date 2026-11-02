@@ -67,6 +67,14 @@ const (
 	// (Stormwrought Ruins' Eldermaw 62661; Zul'Gurub's plateau bat formations, where the pull row's param is the clearance
 	// from other patrols in yd; DungeonPlanPolicy.h kPlanFlagStandPull, specs/rl-patrol-timed-pull.md).
 	FlagStandPull = 8192
+	// FlagCampPoint marks the move row a camp pull's raid holds on (the plan's camp): the run leader's party walks
+	// there before the pull (TortoiseBots kPlanFlagCampPoint, move only; an older module ignores it and walks the
+	// row as a plain move).
+	FlagCampPoint = 65536
+	// FlagCampPull marks the pull row a camp pull's tank tags for (the pack centre): the run leader holds the raid
+	// at the camp, walks the tank out along the tag rows and drags the pack back (TortoiseBots kPlanFlagCampPull,
+	// pull only; an older module ignores it and pulls from the tag spot as today).
+	FlagCampPull = 131072
 	// EncounterDone is the encounter state DONE: a hold's param.
 	EncounterDone = 3
 )
@@ -174,6 +182,11 @@ type Options struct {
 	// gossip (the run leader has no boss that turns hostile later), stands between the Weegli gossip that opens the End Door and the legs behind
 	// that door. An unknown name is an error (a misspelling would otherwise export the leg or cut the plan there).
 	SkipLegs []string
+	// CampPull exports a pull group's camp (dungeon.PullGroup.Camp) as the camp pull's rows: the camp move (FlagCampPoint),
+	// the approach rows as the tank's tag walk, and the pull row with FlagCampPull; the party fights at the camp, so the
+	// next hop is measured from it. Without it a camp group exports as today (approach rows and a plain pull) and the
+	// camp is dropped with a warning; an older TortoiseBots ignores the unknown flag bits and walks the same degrade path.
+	CampPull bool
 	// Route, when set, is called for every hop between two anchors of the rows (move, pull, boss, hold) of a plan with avoid boxes: it
 	// returns the via points that keep the run leader's own navmesh path (the server's, which does not know the boxes) out of them,
 	// none when that path is already clear. An error means a hop that cannot be made safe: the export fails.
@@ -494,6 +507,23 @@ func (b *builder) pull(gi int, g dungeon.PullGroup) error {
 		param = uint32(g.ClearYd)
 	}
 	c := fmt.Sprintf("pull group %d", gi)
+	if g.Camp != nil && g.Hold == nil {
+		if b.opt.CampPull {
+			if len(g.Approach) == 0 {
+				return fmt.Errorf("a camp group needs an approach (the tank's walk-out; its last point is the tag spot)")
+			}
+			b.add(StepRow{Kind: KindMove, X: g.Camp.X, Y: g.Camp.Y, Z: g.Camp.Z, Flags: FlagCampPoint, Comment: c + " camp"})
+			for _, a := range g.Approach {
+				b.move(a, false, c+" tag walk")
+			}
+			flags |= FlagCampPull
+			c += "; camp pull"
+			b.add(StepRow{Kind: KindPull, X: f32(cx), Y: f32(cy), Z: f32(cz), Radius: radius, Item: uint32(g.MaxBodies), Flags: flags, Param: param, Entries: uniq(g.Entries), Comment: c})
+			b.last, b.haveLast = *g.Camp, true // the party fights at the camp: the next move's hop is measured from there
+			return nil
+		}
+		b.warnings = append(b.warnings, fmt.Sprintf("pull group %d: camp is dropped without the exporter's camp-pull option (export with --camp-pull for the camp rows): the group exports as a plain pull", gi))
+	}
 	for _, a := range g.Approach {
 		b.move(a, false, c+" approach")
 	}
@@ -870,6 +900,16 @@ func (b *builder) cutLongHops() error {
 			cp := StepRow{Plan: s.Plan, Leg: s.Leg, Kind: s.Kind, X: s.X, Y: s.Y, Z: s.Z}
 			if (s.Kind == KindBoss || s.Kind == KindPull) && s.Flags&FlagStandPull != 0 && prev.Kind == KindMove {
 				cp.X, cp.Y, cp.Z = prev.X, prev.Y, prev.Z
+			}
+			if s.Kind == KindPull && s.Flags&FlagCampPull != 0 {
+				// A camp pull is fought at its camp (the FlagCampPoint move row of the same leg): the next hop
+				// is measured from there, not from the pack's centre (the tank's walk-out ends back at the camp).
+				for j := len(out); j > 0; j-- {
+					if q := out[j-1]; q.Leg == s.Leg && q.Kind == KindMove && q.Flags&FlagCampPoint != 0 {
+						cp.X, cp.Y, cp.Z = q.X, q.Y, q.Z
+						break
+					}
+				}
 			}
 			prev = &cp
 		}
