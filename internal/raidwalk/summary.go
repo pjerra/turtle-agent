@@ -55,6 +55,7 @@ type Summary struct {
 	BossKills []BossKillSummary `json:"boss_kills,omitempty"`
 	Pauses    []PauseSummary    `json:"pauses"`
 	Fights    []FightSummary    `json:"fights"`
+	Decisions *DecisionsSummary `json:"decisions,omitempty"`
 	Dashboard string            `json:"dashboard"`
 	Teardown  TeardownSummary   `json:"teardown"`
 	// Place is the `place` object of a `--place` walk (spec 5.11): the start step the raid was put at, the instance, the
@@ -289,6 +290,27 @@ type FightSummary struct {
 	Detail *FightDetail `json:"detail,omitempty"`
 }
 
+// DecisionsFileSummary is one file of the decisions pull: its name, bytes and sha256 hex.
+type DecisionsFileSummary struct {
+	Name   string `json:"name"`
+	Bytes  int64  `json:"bytes"`
+	SHA256 string `json:"sha256"`
+}
+
+// DecisionsCaptureSummary is one pulled decision capture: its id, file count and bytes.
+type DecisionsCaptureSummary struct {
+	ID    string `json:"id"`
+	Files int    `json:"files"`
+	Bytes int64  `json:"bytes"`
+}
+
+// DecisionsSummary is the walk's decisions pull: a note plus one row per pulled capture.
+type DecisionsSummary struct {
+	Note     string                    `json:"note"`
+	Captures []DecisionsCaptureSummary `json:"captures"`
+	Bytes    int64                     `json:"bytes"`
+}
+
 // TeardownSummary is what teardown reported. Reason is the first failing step
 // ("gone", "unbind", "remove X", "logout", "rpc", "lease", ...) with its detail;
 // empty when nothing failed.
@@ -329,6 +351,7 @@ type SummaryMeta struct {
 	Ended          time.Time
 	EndReason      string
 	Fights         []FightSummary
+	Decisions      *DecisionsSummary
 	Injections     []InjectSummary
 	InjectedDeaths int
 	Incidents      []InjectIncident
@@ -370,6 +393,7 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		Ended:          m.Ended,
 		EndReason:      m.EndReason,
 		Fights:         nonNilFights(m.Fights),
+		Decisions:      m.Decisions,
 		Injections:     nonNilInjections(m.Injections),
 		Incidents:      nonNilIncidents(m.Incidents),
 		Roster:         RosterSummary{OT: []string{}, Rest: []string{}},
