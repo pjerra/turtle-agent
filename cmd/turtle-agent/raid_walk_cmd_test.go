@@ -130,9 +130,60 @@ type walkFakeAgent struct {
 	hireReply map[int]string
 
 	// The fault injector's fakes (raid_walk_inject_test.go): the server's selection (target/gps), the per-bot
-	ownGUID              packet.GUID // the commander's GUID when a test sets one
-	ownPos               [3]float32  // the commander's own position (.go xyz updates it)
-	pos                  map[string][3]float32
+	ownGUID packet.GUID // the commander's GUID when a test sets one
+	ownPos  [3]float32  // the commander's own position (.go xyz updates it)
+	pos     map[string][3]float32
+	// goLag holds back the position of the recovery's `.go xyz` (the first one after `run start`) for that many
+	// status polls, while the map id takes effect at once: the live server answers the go at once and lands the
+	// character a moment later (walk 22 test2 s4, Q3: the summons left 2 ms after the go). 0: every go lands at
+	// once, as the enter phase's own go does (it precedes the run start).
+	goLag int
+	// goLagEvery re-arms goLag for EVERY recovery go (the entrance fallback's go lags like the first), not only the first.
+	goLagEvery int
+	// goUnsettled makes the status report the recovery go's destination AT ONCE but flagged ZUnknown (or Falling when
+	// goUnsettledFalling) for that many polls, the live session's state until the server sends a position.
+	goUnsettled        int
+	goUnsettledFalling bool
+	unsettledLeft      int
+	lastUnsettled      bool // the last status served was flagged unsettled
+	// summonUnsettled counts the summons that left right after a status flagged unsettled.
+	summonUnsettled int
+	// farZUnknown models the live session after a FAR teleport (walk 23): a recovery `.go xyz` onto another map
+	// lands through SMSG_NEW_WORLD, which leaves ZUnknown set for good (no floor drop follows it, and the core
+	// never sends the player its own position). zStuck is that state; a near go clears it.
+	farZUnknown bool
+	zStuck      bool
+	// commanderInst is the instance copy the commander stands in (walk 23, mangosd TTEV enter events): "hires" after a
+	// `.appear <hire>` (the core binds a GM to the target's copy, Commands.cpp HandleGonameCommand), "fresh" after a
+	// recovery `.go xyz` from another map (the server opens a new copy), unchanged by a near go. instAtRevive is that
+	// copy at the first `.revive`; appearRefused makes `.appear` move nobody (a refused appear).
+	commanderInst string
+	instAtRevive  string
+	appearRefused bool
+	// appearLag serves that many status reads with the pre-appear state before an accepted `.appear` lands (the live
+	// teleport lands a moment after the chat line); goBeforeAppear counts recovery gos sent while it had not landed.
+	// statusFailNext fails that many status reads (an RPC error); ghostsOff reports dead hires on map 0 (released to
+	// the graveyard, once the run has started); appearRefusedUntilRevive refuses every `.appear` until the first `.revive` went out.
+	statusFailNext           int
+	ghostsOff                bool
+	appearRefusedUntilRevive bool
+	revived                  bool
+	appearLag                int
+	appearPend               func()
+	appearPendLeft           int
+	goBeforeAppear           int
+	// enterMap puts the commander on this map once `cmd enter` is acked (0: it stays where its last go put it):
+	// the live walk-22 agent stood inside the instance, so its recovery go was a near one.
+	enterMap   uint32
+	goPend     [3]float32
+	goPendOK   bool
+	goTarget   [3]float32 // the last `.go xyz` target: the revive point a `.summon` must wait for
+	goTargetOK bool
+	// summonDist records, per `.summon`, the distance from the commander's own reported position to that target:
+	// a summon before the landing shows the race the wait closes.
+	summonDist []float64
+	// partyExtra are the P-record fields the module sends beyond the fake's own (F3: target, spell, action, result).
+	partyExtra           map[string]tbm.PartyRec
 	selGUID              packet.GUID  // the selection the server has in force
 	queuedSel            *packet.GUID // a target RPC the server applies after the next .gps (lagTargets)
 	lagTargets           bool
@@ -199,7 +250,44 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 	switch method {
 	case "status":
 		f.mu.Lock()
-		v = f.status
+		if f.statusFailNext > 0 {
+			f.statusFailNext--
+			f.mu.Unlock()
+			return errors.New("status: agent busy")
+		}
+		if f.goPendOK {
+			f.goLag--
+			if f.goLag <= 0 {
+				f.goPendOK, f.goLag = false, 0
+				f.x, f.y, f.z = f.goPend[0], f.goPend[1], f.goPend[2]
+				f.ownPos = [3]float32{f.x, f.y, f.z}
+				f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
+			}
+		}
+		if f.appearPend != nil {
+			if f.appearPendLeft > 0 {
+				f.appearPendLeft--
+			} else {
+				f.appearPend()
+				f.appearPend = nil
+			}
+		}
+		st := f.status
+		f.lastUnsettled = false
+		if f.zStuck {
+			st.ZUnknown = true
+			f.lastUnsettled = true
+		}
+		if f.unsettledLeft > 0 {
+			f.unsettledLeft--
+			f.lastUnsettled = true
+			if f.goUnsettledFalling {
+				st.Falling = true
+			} else {
+				st.ZUnknown = true
+			}
+		}
+		v = st
 		f.mu.Unlock()
 	case "party":
 		f.mu.Lock()
@@ -360,8 +448,12 @@ func (f *walkFakeAgent) gmSide(line string) {
 		f.push("TBM:GEAR|ok|39|39|3|60|-|-|-|0|-|0", "")
 	case strings.HasPrefix(line, ".go xyz "):
 		f.mu.Lock()
-		if f.runStarted {
+		started := f.runStarted
+		if started {
 			f.recoveryGo = true
+			if f.appearPend != nil {
+				f.goBeforeAppear++
+			}
 		}
 		f.mu.Unlock()
 		fields := strings.Fields(line)
@@ -371,14 +463,71 @@ func (f *walkFakeAgent) gmSide(line string) {
 			z, _ := strconv.ParseFloat(fields[4], 32)
 			m, err := strconv.Atoi(fields[5])
 			f.mu.Lock()
-			f.x, f.y, f.z = float32(x), float32(y), float32(z)
-			f.ownPos = [3]float32{f.x, f.y, f.z}
-			f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
+			f.goTarget, f.goTargetOK = [3]float32{float32(x), float32(y), float32(z)}, true
 			if err == nil {
-				f.status.Map = uint32(m)
+				if started && f.farZUnknown {
+					f.zStuck = uint32(m) != f.status.Map // a far go leaves z unknown for good; a near go settles it
+				}
+				if started && uint32(m) != f.status.Map {
+					f.commanderInst = "fresh"
+				}
+				f.status.Map = uint32(m) // the go's map id takes effect at once; only a goLag test holds the position back
+			}
+			if started && f.goLagEvery > 0 {
+				f.goLag = f.goLagEvery
+			}
+			if started && f.goUnsettled > 0 {
+				f.unsettledLeft = f.goUnsettled
+			}
+			if started && f.goLag > 0 {
+				// The recovery's go: the position lands a few status polls later (the live server's landing).
+				f.goPend, f.goPendOK = f.goTarget, true
+			} else {
+				f.x, f.y, f.z = float32(x), float32(y), float32(z)
+				f.ownPos = [3]float32{f.x, f.y, f.z}
+				f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
 			}
 			f.mu.Unlock()
 		}
+	case strings.HasPrefix(line, ".appear "):
+		name := strings.TrimPrefix(line, ".appear ")
+		f.mu.Lock()
+		known := false
+		for _, n := range f.party {
+			known = known || n == name
+		}
+		accepted := !f.appearRefused && !(f.appearRefusedUntilRevive && !f.revived)
+		if accepted && !(known && f.entered) {
+			// The place phase's appear (dev, #354): the GM appears in the named player's copy, and only the status's
+			// map follows (its waitMap).
+			m := f.instMap
+			if m == 0 {
+				m = 249
+			}
+			f.status.Map = m
+		}
+		if accepted && known && f.entered {
+			hm := uint32(249)
+			if f.instMap != 0 {
+				hm = f.instMap
+			}
+			p := f.pos[name]
+			land := func() { // f.mu held
+				if f.farZUnknown {
+					f.zStuck = hm != f.status.Map // the appear itself is a far teleport from the portal
+				}
+				f.status.Map, f.commanderInst = hm, "hires"
+				f.x, f.y, f.z = p[0], p[1], p[2]+2
+				f.ownPos = [3]float32{f.x, f.y, f.z}
+				f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
+			}
+			if f.appearLag > 0 {
+				f.appearPend, f.appearPendLeft = land, f.appearLag
+			} else {
+				land()
+			}
+		}
+		f.mu.Unlock()
 	case line == ".gm on":
 		// The place phase's GM-mode probe (review round 1, item 12): the server answers a notification.
 		if f.noGMOn {
@@ -392,15 +541,6 @@ func (f *walkFakeAgent) gmSide(line string) {
 		f.pinfoSide()
 	case line == ".die":
 		f.dieSide()
-	case strings.HasPrefix(line, ".appear "):
-		// The GM appears in the named player's copy: the status follows (the place phase's waitMap).
-		f.mu.Lock()
-		m := f.instMap
-		if m == 0 {
-			m = 249
-		}
-		f.status.Map = m
-		f.mu.Unlock()
 	case strings.HasPrefix(line, ".summon "):
 		name := strings.TrimPrefix(line, ".summon ")
 		f.mu.Lock()
@@ -408,8 +548,20 @@ func (f *walkFakeAgent) gmSide(line string) {
 			f.pos = map[string][3]float32{}
 		}
 		f.pos[name] = [3]float32{f.x, f.y, f.z}
+		if f.lastUnsettled {
+			f.summonUnsettled++
+		}
+		if f.goTargetOK {
+			f.summonDist = append(f.summonDist, dist3([3]float32{f.status.X, f.status.Y, f.status.Z}, f.goTarget))
+		}
 		f.mu.Unlock()
 	case strings.HasPrefix(line, ".revive "):
+		f.mu.Lock()
+		if f.instAtRevive == "" {
+			f.instAtRevive = f.commanderInst
+		}
+		f.revived = true
+		f.mu.Unlock()
 		// The server's revive brings the hire back: later frames show it alive, so a recovered walk
 		// does not re-fire the wipe it just revived.
 		name := strings.TrimPrefix(line, ".revive ")
@@ -708,7 +860,12 @@ func (f *walkFakeAgent) viewPage() any {
 	for k, v := range f.pos {
 		pos[k] = v
 	}
+	extra := map[string]tbm.PartyRec{}
+	for k, v := range f.partyExtra {
+		extra[k] = v
+	}
 	noParty := f.noPartyFrames
+	ghostsOff := f.ghostsOff && f.runStarted // released once the run is under way
 	fn := f.hostilesFn
 	f.mu.Unlock()
 	if viewHook != nil {
@@ -731,8 +888,16 @@ func (f *walkFakeAgent) viewPage() any {
 			}
 		}
 		p := pos[name]
-		frame.Party = append(frame.Party, tbm.PartyRec{GUID: packet.GUID(1000 + i), Name: name, HP: 1, MaxHP: 1, Map: m, Dead: dead[name], State: state,
-			X: p[0], Y: p[1], Z: p[2]})
+		hm := m
+		if ghostsOff && dead[name] {
+			hm = 0
+		}
+		rec := tbm.PartyRec{GUID: packet.GUID(1000 + i), Name: name, HP: 1, MaxHP: 1, Map: hm, Dead: dead[name], State: state,
+			X: p[0], Y: p[1], Z: p[2]}
+		if ex, ok := extra[name]; ok { // the P-record fields the module sends beyond the fake's own
+			rec.Target, rec.Spell, rec.Action, rec.Result = ex.Target, ex.Spell, ex.Action, ex.Result
+		}
+		frame.Party = append(frame.Party, rec)
 	}
 	if noParty {
 		frame.Party = nil
@@ -789,6 +954,9 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 		if p.Verb == "enter" {
 			f.mu.Lock()
 			f.entered = true
+			if f.enterMap != 0 {
+				f.status.Map = f.enterMap
+			}
 			f.mu.Unlock()
 		}
 		return ack("cmd " + p.Verb)
@@ -854,6 +1022,11 @@ type fakeDash struct {
 	fightsErr error
 	// commanders counts the Commanders reads: a recovery's returned watch loop polls it again.
 	commanders int
+	// commandersRaw are the /api/v1/commanders answers in order, the last one repeating (nil: an empty list);
+	// commandersFn builds one from the test's own state (a dashboard view of the wipe, F4's self-regroup test)
+	// and wins over commandersRaw.
+	commandersRaw []json.RawMessage
+	commandersFn  func() json.RawMessage
 }
 
 func (d *fakeDash) Login(ctx context.Context) error { return nil }
@@ -861,7 +1034,17 @@ func (d *fakeDash) Login(ctx context.Context) error { return nil }
 func (d *fakeDash) Commanders(ctx context.Context) (json.RawMessage, error) {
 	d.mu.Lock()
 	d.commanders++
+	fn, raws := d.commandersFn, d.commandersRaw
+	if len(raws) > 1 {
+		d.commandersRaw = raws[1:]
+	}
 	d.mu.Unlock()
+	if fn != nil {
+		return fn(), nil
+	}
+	if len(raws) > 0 {
+		return raws[0], nil
+	}
 	return json.RawMessage(`{"commanders":[]}`), nil
 }
 

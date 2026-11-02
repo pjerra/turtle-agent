@@ -16,6 +16,10 @@ var (
 	gearTierRe  = regexp.MustCompile(`^[1-3]$`)
 )
 
+// GMVisibleOff is the one `.gm` line raid-walk may send, verbatim: the revive hides the commander before it appears
+// next to a hire (review round 2, L2). Besides `.gm on` (the place phase's probe) no other `.gm` form passes.
+const GMVisibleOff = ".gm visible off"
+
 // AllowedLine says whether raid-walk may send line through the gm RPC (spec 3.6): every line must match one of
 // the forms, with its arguments checked, and a bot name must be one of the walk's hires. mapID is the walk's plan
 // map: `.instance unbind` may name that map and no other (spec 7). The command checks every gm line with it before
@@ -23,6 +27,9 @@ var (
 func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
 	if strings.ContainsAny(line, "\r\n") {
 		return false
+	}
+	if line == GMVisibleOff {
+		return true
 	}
 	if runResumeRe.MatchString(line) {
 		return true
@@ -41,8 +48,8 @@ func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
 	switch f[0] {
 	case ".gm":
 		// The place phase's GM-mode probe (spec 5 step 1, review round 1, item 12): the commander must be in GM mode
-		// before the first teleport, and `.gm on` is the only read of that state (it is a no-op already ON). Nothing
-		// else may be typed into the GM console.
+		// before the first teleport, and `.gm on` is the only read of that state (it is a no-op already ON). Besides
+		// the exact GMVisibleOff line (checked above) nothing else may be typed into the GM console.
 		return len(f) == 2 && f[1] == "on"
 	case ".go":
 		if len(f) != 6 || f[1] != "xyz" {
@@ -64,7 +71,7 @@ func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
 	case ".summon", ".revive":
 		return len(f) == 2 && hires[f[1]]
 	case ".appear":
-		// The place phase's way into the raid's copy (spec 5 step 3): a hire, and only a hire.
+		// The place phase's way into the raid's copy (spec 5 step 3), and the revive's (joinHires): a hire, and only a hire.
 		return len(f) == 2 && hires[f[1]]
 	case ".instance":
 		// `.instance unbind <map>` drops the commander's own bind to the walk's plan map (spec 5.1): that map and no other.

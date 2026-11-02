@@ -626,6 +626,7 @@ type walk struct {
 	fightAt       time.Time
 	lastFrameSave time.Time
 	dashWarned    bool
+	framesWarned  bool // the first frames.jsonl write error is noted once
 	// Review round 2: the boss evidence the recovery needs. bossReadAt is when the last
 	// dashboard fights/boss read succeeded (zero: never), bossEngagedAt when it last
 	// showed an engaged boss, bossLatchAt when the frames last showed an ENGAGED plan-boss row (alive, and a target or below 100 %), bossCheckErr

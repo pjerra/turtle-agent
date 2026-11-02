@@ -19,6 +19,8 @@ func TestAllowedLine(t *testing.T) {
 		".tele name Tankbot onyxia",
 		".summon Tankbot",
 		".revive Tankbot",
+		".appear Tankbot",
+		".gm visible off",
 		".bot run stop",
 		".bot run resume",
 	}
@@ -52,6 +54,15 @@ func TestAllowedLine(t *testing.T) {
 		".tele name NotAHire onyxia",
 		".tele name Tankbot bad word",
 		".summon Tankbot extra",
+		".appear NotAHire",
+		".appear Tankbot extra",
+		".appear",
+		".gm visible on",
+		".gm off",
+		".gm visible off now",
+		".gm visible off Tankbot",
+		" .gm visible off",
+		".gm  visible off",
 		".bot run stop now",
 		".bot run stop time limit reached (raid-walk 0m)",
 		".bot run resume now",
@@ -74,7 +85,7 @@ func TestAllowedLineAppearUnbind(t *testing.T) {
 	}
 	for _, line := range []string{".appear Stranger", ".appear", ".appear Tankbot extra", ".instance unbind all",
 		".instance unbind 409", ".instance unbind", ".instance listbinds", ".instance unbind 0309",
-		".gm", ".gm off", ".gm on extra", ".gm visible off", ".gm visible on"} {
+		".gm", ".gm off", ".gm on extra", ".gm visible on"} { // `.gm visible off` is the revive's one exact line (TestAllowedLine)
 		if AllowedLine(line, hires, 309) {
 			t.Errorf("accepted a forbidden line %q", line)
 		}
