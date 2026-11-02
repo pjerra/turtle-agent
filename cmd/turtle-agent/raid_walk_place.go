@@ -499,12 +499,17 @@ func (w *walk) placeClear(ctx context.Context) error {
 			return err
 		}
 		summary := raidwalk.PlaceCircleSummary{Step: c.Step, Leg: c.Leg, X: c.X, Y: c.Y, Z: c.Z, Radius: c.Radius,
-			PerUnit: c.PerUnit, Unit: c.Unit, Moved: moved}
+			PerUnit: c.PerUnit, Unit: c.Unit, Sweep: c.Sweep, Moved: moved}
 		if why := w.placeCircleBlocked(c, units, trunc); why != "" {
-			w.note("place: not cleared row %d: %s", c.Step, why)
+			sweep := ""
+			if c.Sweep {
+				sweep = " (sweep)"
+			}
+			w.note("place: not cleared row %d%s: %s", c.Step, sweep, why)
 			w.placeSum.NotCleared = append(w.placeSum.NotCleared, fmt.Sprintf("row %d: %s", c.Step, why))
 			w.placeSum.Circles = append(w.placeSum.Circles, summary)
 			// The quiet step's extra round must not act near a circle the corridor refused (review round 2, MEDIUM-A).
+			// A refused sweep circle blocks extra clears near it like a corridor circle.
 			w.placeSkipped = append(w.placeSkipped, c)
 			continue
 		}
@@ -527,7 +532,11 @@ func (w *walk) placeClear(ctx context.Context) error {
 		}
 		w.placeSum.Circles = append(w.placeSum.Circles, summary)
 		w.placeRemoved += int(removed)
-		w.note("place: cleared row %d: %d removed%s", c.Step, int(removed), skippedWords(summary.Skipped))
+		sweep := ""
+		if c.Sweep {
+			sweep = " (sweep)"
+		}
+		w.note("place: cleared row %d%s: %d removed%s", c.Step, sweep, int(removed), skippedWords(summary.Skipped))
 		if int(removed) < len(units) {
 			w.note("place: row %d removed %d of the %d units the pre-read listed", c.Step, int(removed), len(units))
 		}

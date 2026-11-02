@@ -115,9 +115,9 @@ func TestPlaceStartRefusesEventHold(t *testing.T) {
 func TestPlaceClearCorridorPicksBehindOnly(t *testing.T) {
 	steps := []planexport.StepRow{
 		placeMove(0, 0, -100, 0),
-		placeRow(planexport.KindPull, 0, 20, 50, 0, 2, 15111),  // 20 yd from the route: in
-		placeRow(planexport.KindPull, 0, 60, 50, 0, 2, 15112),  // 60 yd out
-		placeRow(planexport.KindPull, 0, 20, 50, 20, 2, 15113), // 20 yd above the route
+		placeRow(planexport.KindPull, 0, 20, 50, 0, 2, 15111),   // 20 yd from the route: in
+		placeRow(planexport.KindPull, 0, 200, 50, 0, 2, 15112),  // 200 yd out (beyond the 150 yd sweep)
+		placeRow(planexport.KindPull, 0, 20, 50, 100, 2, 15113), // 100 yd above the route (beyond the 60 z sweep)
 	}
 	steps = append(steps, placeRoute(0, 11)...)                                  // steps 5..15: the route
 	steps = append(steps, placeRow(planexport.KindPull, 0, 10, 60, 0, 2, 15114)) // step 16: AHEAD
@@ -135,8 +135,8 @@ func TestPlaceClearCorridorPicksBehindOnly(t *testing.T) {
 	if len(cp.Notes) != 0 {
 		t.Fatalf("notes %v", cp.Notes)
 	}
-	// Behind is every pull row before the start, not only the corridor's circles: the row 60 yd out and the one 20 yd
-	// above are BEHIND rows too, so a unit they spawn is owned there. The move and the AHEAD pull are not.
+	// Behind is every pull row before the start, not only the corridor's circles: the rows outside the sweep are
+	// BEHIND rows too, so a unit they spawn is owned there. The move and the AHEAD pull are not.
 	if len(cp.Behind) != 3 {
 		t.Fatalf("behind %+v", cp.Behind)
 	}
@@ -265,7 +265,7 @@ func TestPlaceClearZGLeg3(t *testing.T) {
 			steps = append(steps, c.Step)
 		}
 	}
-	want := []int{89, 91, 94, 96, 99}
+	want := []int{89, 91, 94, 96, 99, 87, 105} // corridor circles first (route order), then the M1 sweep (step order)
 	if len(steps) != len(want) {
 		t.Fatalf("circles from steps %v, want %v (notes %v)", steps, want, cp.Notes)
 	}
@@ -578,5 +578,88 @@ func TestPlaceSkipsUnionsTheLegs(t *testing.T) {
 	}
 	if SkipWords(PlaceSkips(nil)) != "" {
 		t.Fatal("a nil plan gives skips")
+	}
+}
+
+// M1 (PLACE-W26 §3): the landing sweep takes BEHIND pull rows near the start point, even when the corridor
+// does not reach them (leftover patrols whose loop reaches the landing).
+func TestPlaceClearSweepsBehindRowsNearTheStart(t *testing.T) {
+	steps := []planexport.StepRow{
+		placeRow(planexport.KindPull, 0, 68, 4, 71, 1, 11352),   // A: 68 yd out, dz -29: sweep
+		placeRow(planexport.KindPull, 0, 160, 0, 100, 1, 11353), // B: 160 yd out: too far
+		placeRow(planexport.KindPull, 0, 100, 0, 170, 1, 11354), // C: dz +70: too high
+		placeRow(planexport.KindBoss, 0, 60, 0, 100, 1, 12345),  // D: boss at 60 yd: never swept
+		placeRow(planexport.KindPull, 0, 20, 20, 100, 2, 15111), // E: in the corridor: one corridor circle
+		placeMove(0, 0, 0, 100),                                 // 6: the start
+		placeMove(0, 0, 10, 100),                                // 7..16: the route west along x=0 at the start's height
+		placeMove(0, 0, 20, 100),
+		placeMove(0, 0, 30, 100),
+		placeMove(0, 0, 40, 100),
+		placeMove(0, 0, 50, 100),
+		placeMove(0, 0, 60, 100),
+		placeMove(0, 0, 70, 100),
+		placeMove(0, 0, 80, 100),
+		placeMove(0, 0, 90, 100),
+		placeMove(0, 0, 100, 100),
+		placeRow(planexport.KindPull, 0, 10, 110, 100, 2, 15114), // 17: AHEAD
+	}
+	rows := placeRows(nil, steps...)
+	cp := PlaceClear(rows, nil, 6, 17)
+	if cp.Refusal != "" {
+		t.Fatalf("refused: %q", cp.Refusal)
+	}
+	byStep := map[int][]ClearCircle{}
+	for _, c := range cp.Circles {
+		byStep[c.Step] = append(byStep[c.Step], c)
+	}
+	// A: exactly one sweep circle, radius 1 + slack (5) + sweep slack (10) = 16.
+	if len(byStep[1]) != 1 {
+		t.Fatalf("row 1 circles %+v, want one sweep circle", byStep[1])
+	}
+	if a := byStep[1][0]; !a.Sweep || a.Radius != 16 {
+		t.Fatalf("row 1 circle %+v, want Sweep with radius 16", a)
+	}
+	// B, C, D: no circles and no refusal.
+	for _, s := range []int{2, 3, 4} {
+		if len(byStep[s]) != 0 {
+			t.Fatalf("row %d circles %+v, want none", s, byStep[s])
+		}
+	}
+	// E: exactly one corridor circle, not Sweep.
+	if len(byStep[5]) != 1 {
+		t.Fatalf("row 5 circles %+v, want one corridor circle", byStep[5])
+	}
+	if e := byStep[5][0]; e.Sweep {
+		t.Fatalf("row 5 circle %+v is a sweep circle, want corridor", e)
+	}
+}
+
+// A sweep row whose circle overlaps an AHEAD row splits per unit, with Sweep set on the split circles.
+func TestPlaceClearSweepSplitsOnAheadOverlap(t *testing.T) {
+	// The stop (step 4) sits before the AHEAD row: the route runs west and never comes near row 1, so row 1
+	// is a sweep row, while the AHEAD set still sees row 5 (it runs to the last row, not the stop).
+	rows := placeRows(nil,
+		placeRow(planexport.KindPull, 0, 60, 0, 95, 1, 11352),  // 1: BEHIND sweep row (60 yd from the start)
+		placeMove(0, 0, 0, 100),                                // 2: the start
+		placeMove(0, -10, 0, 100),                              // 3: the route west
+		placeMove(0, -20, 0, 100),                              // 4: the stop
+		placeRow(planexport.KindPull, 0, 52, 0, 95, 10, 11352), // 5: AHEAD, overlaps the r-16 sweep circle
+	)
+	plan := &dungeon.Plan{Legs: []dungeon.Leg{{Name: "one", PullGroups: []dungeon.PullGroup{
+		{Entries: []uint32{11352}, Positions: []dungeon.Point{{X: 55, Y: 2, Z: 95}, {X: 65, Y: -2, Z: 95}}},
+	}}}}
+	cp := PlaceClear(rows, plan, 2, 4)
+	if cp.Refusal != "" {
+		t.Fatalf("refused: %q", cp.Refusal)
+	}
+	if len(cp.Circles) != 1 {
+		t.Fatalf("circles %+v, want one per-unit sweep circle", cp.Circles)
+	}
+	c := cp.Circles[0]
+	if !c.PerUnit || !c.Sweep || c.Radius != PlaceUnitYd || c.Unit != 11352 || c.Step != 1 || c.X != 65 || c.Y != -2 {
+		t.Fatalf("circle %+v", c)
+	}
+	if len(cp.Notes) != 1 || !strings.Contains(cp.Notes[0], "lies in AHEAD row 5") || !strings.Contains(cp.Notes[0], "11352") {
+		t.Fatalf("notes %v", cp.Notes)
 	}
 }

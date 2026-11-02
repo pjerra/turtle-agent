@@ -2499,3 +2499,246 @@ func TestPlaceTTMaxCountsExtraRound(t *testing.T) {
 		t.Fatalf("the longest line is %q, not the extra round's clearto", long)
 	}
 }
+
+// M1 (PLACE-W26 §3): with the deployed 1097-step rows, the Mar'li landing sweep takes BEHIND pull rows 122, 128
+// and 130 (today: 0 circles, so the leftover patrol 51962 walks into the landing). The other starts sweep their
+// own leftovers: Venoxis from step 52 takes row 50, Thekal takes 87/105, Arlokk takes 255/257/272.
+func TestPlaceClearZGSweepsLeftoverPatrols(t *testing.T) {
+	rows, _, err := readRaidMigration("testdata/zg-20261101093000.sql", "zul_gurub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := zgPlan(t)
+	stops := map[string][]string{
+		"high_priestess_marli":  {"until", "step", "216"},
+		"high_priest_venoxis":   {"until", "step", "186"},
+		"high_priest_thekal":    {"until", "boss"},
+		"high_priestess_arlokk": {"until", "boss"},
+	}
+	froms := map[string][]string{
+		"high_priestess_marli":  {"from", "leg", "high_priestess_marli"},
+		"high_priest_venoxis":   {"from", "step", "52"},
+		"high_priest_thekal":    {"from", "leg", "high_priest_thekal"},
+		"high_priestess_arlokk": {"from", "leg", "high_priestess_arlokk"},
+	}
+	// The implementer pins what the code gives: the spec's §3 list was measured by hand. Mar'li matches
+	// exactly (122, 128, 130). Thekal takes 87/105 (85 is out of range, the rest are corridor circles);
+	// Arlokk takes 255/257/272 (270 is a corridor circle); Venoxis from step 52 takes row 50 plus whatever
+	// rows the corridor already covers (the test only requires row 50 among the sweeps).
+	want := map[string][]int{
+		"high_priestess_marli":  {122, 128, 130},
+		"high_priest_venoxis":   {50},
+		"high_priest_thekal":    {87, 105},
+		"high_priestess_arlokk": {255, 257, 272},
+	}
+	for _, leg := range []string{"high_priestess_marli", "high_priest_venoxis", "high_priest_thekal", "high_priestess_arlokk"} {
+		start, _, err := raidwalk.PlaceStart(rows, froms[leg])
+		if err != nil {
+			t.Fatalf("%s: %v", leg, err)
+		}
+		stop, err := raidwalk.PlaceStop(rows, stops[leg], start)
+		if err != nil {
+			t.Fatalf("%s: %v", leg, err)
+		}
+		until, routeEnd, _, refusal, _ := raidwalk.PlaceBossGuard(rows, start, stop)
+		if refusal != "" {
+			t.Fatalf("%s: %s", leg, refusal)
+		}
+		cp := raidwalk.PlaceClear(rows, plan, start, routeEnd)
+		if cp.Refusal != "" {
+			t.Fatalf("%s: refused: %s", leg, cp.Refusal)
+		}
+		var sweeps []int
+		seen := map[int]bool{}
+		for _, c := range cp.Circles {
+			if c.Step == start {
+				t.Fatalf("%s: the start step %d has a sweep circle", leg, start)
+			}
+			if !c.Sweep {
+				continue
+			}
+			sweeps = append(sweeps, c.Step)
+			seen[c.Step] = true
+		}
+		for _, c := range cp.Circles {
+			if seen[c.Step] && !c.Sweep {
+				t.Fatalf("%s: row %d is both a corridor and a sweep circle", leg, c.Step)
+			}
+		}
+		for i := 1; i < len(sweeps); i++ {
+			if sweeps[i-1] >= sweeps[i] {
+				t.Fatalf("%s: sweep circles out of step order: %v", leg, sweeps)
+			}
+		}
+		for _, s := range want[leg] {
+			var found bool
+			for _, got := range sweeps {
+				if got == s {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("%s: sweep steps %v, want %v (stop %d, route end %d)", leg, sweeps, want[leg], until, routeEnd)
+			}
+		}
+	}
+}
+
+// M1 (PLACE-W26 §3, TestPlaceClearZGSweepsLeftoverPatrols' guard): every ZG patrol whose closed loop comes within
+// 45 yd 2-D (reach 25 + detection 20) and 10 yd in z of a placed start, and whose entry a BEHIND pull row owns by
+// home, must be among PlaceClear's circles. Fails today for Mar'li (rows 122 and 128).
+func TestZGPlacedStartsCoverEveryLeftoverPatrol(t *testing.T) {
+	rows, _, err := readRaidMigration("testdata/zg-20261101093000.sql", "zul_gurub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := zgPlan(t)
+	spawns, moves, err := zgLeftoverPatrols(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	starts := map[string]int{}
+	for _, leg := range []string{"high_priestess_marli", "high_priest_thekal", "high_priestess_arlokk"} {
+		start, _, err := raidwalk.PlaceStart(rows, []string{"from", "leg", leg})
+		if err != nil {
+			t.Fatal(err)
+		}
+		starts[leg] = start
+	}
+	start52, _, err := raidwalk.PlaceStart(rows, []string{"from", "step", "52"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	starts["high_priest_venoxis"] = start52
+	mkPlan := func(start int, stopWords []string) raidwalk.PlacePlan {
+		t.Helper()
+		stop, err := raidwalk.PlaceStop(rows, stopWords, start)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, routeEnd, _, refusal, _ := raidwalk.PlaceBossGuard(rows, start, stop)
+		if refusal != "" {
+			t.Fatal(refusal)
+		}
+		cp := raidwalk.PlaceClear(rows, plan, start, routeEnd)
+		if cp.Refusal != "" {
+			t.Fatal(cp.Refusal)
+		}
+		pt, ok := raidwalk.PlacePoint(rows, start)
+		if !ok {
+			t.Fatalf("step %d has no point", start)
+		}
+		return raidwalk.PlacePlan{Start: start, Point: pt,
+			Circles: cp.Circles, Ahead: cp.Ahead, Behind: cp.Behind, Skips: raidwalk.PlaceSkips(plan)}
+	}
+	plans := map[string]raidwalk.PlacePlan{
+		"high_priestess_marli":  mkPlan(starts["high_priestess_marli"], []string{"until", "step", "216"}),
+		"high_priest_venoxis":   mkPlan(starts["high_priest_venoxis"], []string{"until", "step", "186"}),
+		"high_priest_thekal":    mkPlan(starts["high_priest_thekal"], []string{"until", "boss"}),
+		"high_priestess_arlokk": mkPlan(starts["high_priestess_arlokk"], []string{"until", "boss"}),
+	}
+	for _, leg := range []string{"high_priestess_marli", "high_priest_venoxis", "high_priest_thekal", "high_priestess_arlokk"} {
+		p := plans[leg]
+		owned := map[int]bool{}
+		for _, c := range p.Circles {
+			owned[c.Step] = true
+		}
+		var missing []string
+		for guid, pts := range moves {
+			sp := spawns[guid]
+			nearest, dz := zgLoopNearest(pts, p.Point)
+			if nearest > 45 || dz > 10 {
+				continue
+			}
+			step, ok := p.BehindOwns(sp.entry, sp.x, sp.y, sp.z)
+			if !ok {
+				continue
+			}
+			if !owned[step] {
+				missing = append(missing, fmt.Sprintf("guid %d entry %d (step %d) reaches %.1f yd, dz %.1f", guid, sp.entry, step, nearest, dz))
+			}
+		}
+		if len(missing) != 0 {
+			t.Fatalf("%s (start %d): the clear misses %d leftover patrol(s):\n%s", leg, p.Start, len(missing), strings.Join(missing, "\n"))
+		}
+	}
+}
+
+// zgSpawn is one creature row of the world spawn table.
+type zgSpawn struct {
+	entry   uint32
+	x, y, z float32
+}
+
+// zgLeftoverPatrols reads the world spawn and movement tables: the spawn point of every creature with movement rows,
+// and its closed loop (the spawn table's point plus every movement point).
+func zgLeftoverPatrols(t *testing.T) (map[int]zgSpawn, map[int][][3]float32, error) {
+	t.Helper()
+	spawns := map[int]zgSpawn{}
+	for _, line := range readTSVLines(t, "../../tools/dungeongen/testdata/map309/creatures.tsv") {
+		guid := atoiZGT(t, line[0])
+		spawns[guid] = zgSpawn{entry: uint32(atoiZGT(t, line[1])), x: atofZGT(t, line[8]), y: atofZGT(t, line[9]), z: atofZGT(t, line[10])}
+	}
+	moves := map[int][][3]float32{}
+	for _, line := range readTSVLines(t, "../../tools/dungeongen/testdata/map309/movement.tsv") {
+		guid := atoiZGT(t, line[0])
+		sp, ok := spawns[guid]
+		if !ok {
+			continue
+		}
+		moves[guid] = append(moves[guid], [3]float32{sp.x, sp.y, sp.z})
+		moves[guid] = append(moves[guid], [3]float32{atofZGT(t, line[2]), atofZGT(t, line[3]), atofZGT(t, line[4])})
+	}
+	return spawns, moves, nil
+}
+
+// readTSVLines reads a tab-separated fixture file, skipping its header line.
+func readTSVLines(t *testing.T, path string) [][]string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out [][]string
+	for i, line := range strings.Split(string(raw), "\n") {
+		if i == 0 || strings.TrimSpace(line) == "" {
+			continue
+		}
+		out = append(out, strings.Split(line, "\t"))
+	}
+	return out
+}
+
+// atoiZGT parses a TSV integer field.
+func atoiZGT(t *testing.T, s string) int {
+	t.Helper()
+	var v int
+	if _, err := fmt.Sscanf(strings.TrimSpace(s), "%d", &v); err != nil {
+		t.Fatalf("bad int %q: %v", s, err)
+	}
+	return v
+}
+
+// atofZGT parses a TSV float field.
+func atofZGT(t *testing.T, s string) float32 {
+	t.Helper()
+	var v float64
+	if _, err := fmt.Sscanf(strings.TrimSpace(s), "%g", &v); err != nil {
+		t.Fatalf("bad float %q: %v", s, err)
+	}
+	return float32(v)
+}
+
+// zgLoopNearest is the closest approach of a patrol's closed loop to a point: the minimum 2-D distance and the z
+// distance at that point. Waypoints cut corners, so this understates the loop's reach; the M1 sweep radius (150 yd
+// against the 143-yd case) carries the margin.
+func zgLoopNearest(pts [][3]float32, p dungeon.Point) (nearest, dz float64) {
+	nearest, dz = math.Inf(1), 0
+	for _, q := range pts {
+		d := math.Hypot(float64(q[0]-p.X), float64(q[1]-p.Y))
+		if d < nearest {
+			nearest, dz = d, math.Abs(float64(q[2]-p.Z))
+		}
+	}
+	return nearest, dz
+}
