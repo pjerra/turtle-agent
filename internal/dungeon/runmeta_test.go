@@ -105,7 +105,7 @@ func TestRemoteRunWithoutMetaSendsNoTraceStart(t *testing.T) {
 		if strings.HasPrefix(cmd, "trace start ") {
 			t.Fatalf("trace start sent without run_meta: %q", cmd)
 		}
-		if cmd == "trace stop" {
+		if strings.HasPrefix(cmd, "trace stop") {
 			t.Fatalf("trace stop sent without run_meta")
 		}
 	}
@@ -134,7 +134,7 @@ func TestRemoteRunMetaStopsTraceAtEnd(t *testing.T) {
 		if cmd == "trace start "+rep.RunID+" driver=haiku:max:zf-ab-2-s5" {
 			start = i
 		}
-		if cmd == "trace stop" {
+		if cmd == "trace stop "+rep.RunID {
 			stop = i
 		}
 	}
@@ -150,7 +150,7 @@ func TestRemoteRunMetaStopsTraceAtEnd(t *testing.T) {
 		t.Fatalf("%v %+v", err, rep2)
 	}
 	for _, cmd := range g2.orders {
-		if cmd == "trace stop" {
+		if strings.HasPrefix(cmd, "trace stop") {
 			t.Fatalf("trace stop after a refused start: %v", g2.orders)
 		}
 	}
@@ -289,7 +289,7 @@ func traceStartStop(orders []string, runID string, meta RunMeta) (start, stop, s
 		if cmd == want {
 			start = i
 		}
-		if cmd == "trace stop" {
+		if cmd == "trace stop "+runID {
 			stop, stops = i, stops+1
 		}
 	}
@@ -345,7 +345,7 @@ func TestRemoteRunMetaStopsTraceOnPanic(t *testing.T) {
 		t.Fatalf("run error %v (panicked %v)", err2, panicked2)
 	}
 	for _, cmd := range g2.orders {
-		if cmd == "trace stop" {
+		if strings.HasPrefix(cmd, "trace stop") {
 			t.Fatalf("trace stop after a refused start: %v", g2.orders)
 		}
 	}
@@ -417,6 +417,17 @@ func countOrders(orders []string, cmd string) int {
 	return n
 }
 
+// countStops counts the scoped trace stop lines (`trace stop <run_id>`).
+func countStops(orders []string) int {
+	n := 0
+	for _, o := range orders {
+		if strings.HasPrefix(o, "trace stop") {
+			n++
+		}
+	}
+	return n
+}
+
 // The run owns the server trace until a stop is answered: a stop that failed (a transport error, no answer) is tried
 // again, after a `trace status` shows the trace running is still this run's own, and exactly one stop succeeds. A stop
 // the server applied but whose answer was lost is not sent again: the status shows the trace has ended.
@@ -440,7 +451,7 @@ func TestRemoteRunMetaRetriesFailedTraceStop(t *testing.T) {
 			if g.traceRun != "" {
 				t.Fatalf("the server trace %q is still running: %v", g.traceRun, g.orders)
 			}
-			stops, status := countOrders(g.orders, "trace stop"), countOrders(g.orders, "trace status")
+			stops, status := countStops(g.orders), countOrders(g.orders, "trace status")
 			if stops != tc.stops || status != tc.status {
 				t.Fatalf("%d stops, %d status (want %d, %d): %v", stops, status, tc.stops, tc.status, g.orders)
 			}
@@ -463,7 +474,7 @@ func TestRemoteRunMetaRetriesFailedTraceStop(t *testing.T) {
 func TestRemoteRunMetaRefusedTraceStopNotRetried(t *testing.T) {
 	shortTraceStop(t)
 	g, rep := metaRun(t, map[string][]string{"stop": {"forbidden"}}, "")
-	if n := countOrders(g.orders, "trace stop"); n != 1 {
+	if n := countStops(g.orders); n != 1 {
 		t.Fatalf("%d stops: %v", n, g.orders)
 	}
 	if !slices.Contains(rep.Notes, "trace stop refused: forbidden") {
@@ -480,7 +491,7 @@ func TestRemoteRunMetaTraceStopGivesUp(t *testing.T) {
 		all[i] = "timeout"
 	}
 	g, rep := metaRun(t, map[string][]string{"stop": all}, "")
-	if n := countOrders(g.orders, "trace stop"); n != 2*serverTraceStopTries {
+	if n := countStops(g.orders); n != 2*serverTraceStopTries {
 		t.Fatalf("%d stops: %v", n, g.orders)
 	}
 	found := false
@@ -517,7 +528,7 @@ func TestRemoteRunMetaUnansweredStartSendsNoStop(t *testing.T) {
 	for _, ans := range []string{"cancel", "lost"} {
 		t.Run(ans, func(t *testing.T) {
 			g, rep := metaRun(t, map[string][]string{"start": {ans}}, "")
-			if n := countOrders(g.orders, "trace stop"); n != 0 {
+			if n := countStops(g.orders); n != 0 {
 				t.Fatalf("%d stops after an unacknowledged start: %v", n, g.orders)
 			}
 			if !slices.Contains(rep.Notes, serverTraceUnknownNote) {
@@ -536,7 +547,7 @@ func TestRemoteRunMetaNonTerminalStopErrorKeepsOwnership(t *testing.T) {
 		all[i] = "internal"
 	}
 	g, rep := metaRun(t, map[string][]string{"stop": all}, "")
-	if n := countOrders(g.orders, "trace stop"); n != 2*serverTraceStopTries {
+	if n := countStops(g.orders); n != 2*serverTraceStopTries {
 		t.Fatalf("%d stops: %v", n, g.orders)
 	}
 	if g.traceRun == "" {
@@ -584,5 +595,49 @@ func TestRunMetaWithoutServerTraceSendsNothing(t *testing.T) {
 		if c.rep.RunMeta == nil || *c.rep.RunMeta != meta {
 			t.Fatalf("%s: report meta %+v", name, c.rep.RunMeta)
 		}
+	}
+}
+
+// The stop line carries this run's id: the server stops only that run's trace.
+func TestServerTraceStopNamesItsRunID(t *testing.T) {
+	shortTraceStop(t)
+	g, rep := metaRun(t, nil, "")
+	if g.traceRun != "" {
+		t.Fatalf("the server trace %q is still running: %v", g.traceRun, g.orders)
+	}
+	want := "trace stop " + rep.RunID
+	found := false
+	for _, cmd := range g.orders {
+		if cmd == want {
+			found = true
+		} else if strings.HasPrefix(cmd, "trace stop") {
+			t.Fatalf("stop without this run's id: %q (want %q): %v", cmd, want, g.orders)
+		}
+	}
+	if !found {
+		t.Fatalf("no scoped stop %q in %v", want, g.orders)
+	}
+}
+
+// An `other-run` refusal means another run's trace is running: note it, end this run's ownership, leave the other
+// trace alone, with no retry.
+func TestServerTraceStopOtherRunLeavesItRunning(t *testing.T) {
+	shortTraceStop(t)
+	g, rep := metaRun(t, map[string][]string{"stop": {"other-run"}}, "")
+	if n := countStops(g.orders); n != 1 {
+		t.Fatalf("%d stops: %v", n, g.orders)
+	}
+	if g.traceRun == "" {
+		t.Fatalf("the other run's trace was stopped: %v", g.orders)
+	}
+	if !slices.Contains(rep.Notes, "server trace: another run's trace is running; left it alone") {
+		t.Fatalf("no other-run note in %q", rep.Notes)
+	}
+	found := false
+	for _, n := range rep.Notes {
+		found = found || strings.Contains(n, "may still be running")
+	}
+	if found {
+		t.Fatalf("give-up note after an other-run refusal: %q", rep.Notes)
 	}
 }
