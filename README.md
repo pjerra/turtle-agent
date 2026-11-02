@@ -687,8 +687,10 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   `prepare.fresh` step teleports the bots and the agent to before it unbinds them. A plan without them can only be entered by hand.
 - `level_band` (optional, `[low, high]`, 1 to 60; Uldaman `[41, 45]`, Zul'Farrak `[44, 48]`) is the levels the dungeon is meant for: the
   [hired party](#hired-party-prepare-party-hire) takes the middle of it as its level and accepts no other level than the band's.
-- `tank_min_hp` (optional, `0` or `100` to `20000`) is the least max health the hired tank should have for the plan's level band (Ragefire
-  Chasm `800` at 13-18); the [kit check](#remote-leader) warns below it. `0` or absent: no check.
+- `tank_min_hp` (optional, `0` or `100` to `20000`) is the least max health the hired tank should have for the plan's level band; the
+  [kit check](#remote-leader) warns below it. Every dungeon plan with a `level_band` carries one, derived from the tank's max health in the
+  2026-10 test runs (0.9 x the weakest clean run of the plan, scaled to the plan's hire level; Ragefire Chasm keeps the issue's `800` at
+  13-18). Raids carry none: a raid tank's health is the raid roster's gear tier, not the plan's band. `0` or absent: no check.
 - `hire_composition` (optional, the form of `prepare.hire.composition`) is the hired party when the run's `prepare.hire` gives none; the loader
   checks it like the run's (one tank, one healer, two to five bots). Zul'Farrak hires `warrior:tank`, `priest:healer`, `mage`, `hunter`, `warlock`:
   the mage is the cc bot of its big packs.
@@ -2880,6 +2882,12 @@ with it (a new hire has no saved instance and is online). `hire` is optional and
 5. **Bind** `commander bind <tank> <others>` (the shared bind code of `fresh`, checked with `commander status`), then wait (10 s) for the commander to be
    out of every group; still in one means a server before #935 and fails. The run's own bind then finds the binding (`already-bound`, the same lead
    and count) and reuses it. The hires stay in the commander's raid afterwards (`unbind` returns them), so a later run finds them.
+   **Before any of that the step refuses two hire spots** (#266, and nothing is dismissed, hired or bound): a commander standing under or over the
+   **portal ground** (inside 15 yd of the plan's `portal` point and more than 5 yd off its z: the hires appear and muster where the commander stands,
+   and a plan's portal is the instance's own ground) and a commander of the **other team** than the run's `team` (the module hires the commander's own
+   faction, so a mismatched commander would only get hires that fight for the other side; start the run from a commander of that team, or drop `team`).
+   A game that gives no agent position (nothing on the real commander) skips the portal check and notes it. No option turns either refusal off: move the
+   commander.
 
 Every wait has its ceiling (`wait_s`, 8 s per hire reply, 6 s per `.bot` line, 3 s per spell question, 60 s for the pet (a bot with no pet at 20 s is told once to `summon voidwalker`, a hunter to `call pet`), 12 s for dismissals, a hire of a **kept binding** (a resume into the group the run before left: it is bound, so it answers no `.bot` line) is not checked again for gear, spells, talents or pet (a warning each; what the first run read is kept in the hire memory), 240 s for the
 whole step); no loop is extended by a retry (a hire line is sent at most three times: the raid conversion and the level fallback are one try each).
