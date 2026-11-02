@@ -2051,6 +2051,38 @@ func TestRaidWalkReviveRefusalSummary(t *testing.T) {
 			t.Fatalf("blocker %+v, want an idle one 20 yd out", b)
 		}
 	})
+	t.Run("critter is not a blocker", func(t *testing.T) {
+		f, _ := newPlaceFixture(t)
+		f.opts.wipeRest = time.Minute
+		_, place := placePlanRows(t)
+		f.agent.startReply = zgPlaceReply(t)
+		// Walk 27 C restart 2: a moving Snake 2914 72 yd out must not join the blocker list, so the idle Mad Servant
+		// 16.8 yd from the point is the only blocker and all_idle is true (the wait is pointless, the mob is off its
+		// spawn). The critter is still in the read, as it was in the evidence.
+		f.agent.unitsFn = func(int) []objects.Unit {
+			return []objects.Unit{
+				{Type: "creature", Name: "Mad Servant", Entry: 15111, Hostile: true, Level: 61, MaxHealth: 4000,
+					X: place.Point.X + 16.8, Y: place.Point.Y, Z: place.Point.Z},
+				{Type: "creature", Name: "Snake", Entry: 2914, Hostile: true, Level: 1, MaxHealth: 8, Moving: true,
+					X: place.Point.X + 72, Y: place.Point.Y, Z: place.Point.Z},
+			}
+		}
+		wipeAfterStart(f)
+		if code := f.run(context.Background()); code != exitRaidWalkIncident {
+			t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+		}
+		rr := f.summary().ReviveRefusal
+		if rr == nil || len(rr.Blockers) != 1 || rr.Blockers[0].Entry != 15111 || !rr.AllIdle {
+			t.Fatalf("refusal %+v, want one idle blocker (15111) and all_idle", rr)
+		}
+		raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+		if err != nil {
+			t.Fatalf("run.log: %v", err)
+		}
+		if strings.Contains(string(raw), "2914") || strings.Contains(string(raw), "Snake") {
+			t.Fatalf("run.log names the critter as a blocker:\n%s", raw)
+		}
+	})
 }
 
 // resumeHook re-queues one running line at step once the walk sends `run resume` through the commander

@@ -357,6 +357,49 @@ func TestQuietAtIdleMovingStillBlocks(t *testing.T) {
 	}
 }
 
+// critterAt is a level-1 critter of the place phase's max-HP band: the units read's stand-in for the frame/toolkit's
+// critter flag (a Snake 2914 in the walk 27 evidence).
+func critterAt(name string, x float32, moving bool) objects.Unit {
+	u := hostileAt(name, x, moving, false)
+	u.Level = 1
+	u.MaxHealth = 8
+	return u
+}
+
+// turtle-agent#379: walk 27 C restart 2 was refused because a moving Snake 2914 at 72 yd and an idle Mad Servant off
+// its spawn were the last blockers, so all_idle was false. A critter never counts, at any distance and in any state;
+// a real hostile off its spawn still blocks (the home-proof rule is unchanged).
+func TestQuietAtIgnoresCritters(t *testing.T) {
+	p := dungeon.Point{}
+	// The evidence's 72 yd moving critter: inside the 80 yd moving rule, so it would block if it counted.
+	if ok, reason := quietAt([]objects.Unit{critterAt("Snake", 72, true)}, nil, p); !ok {
+		t.Fatalf("a moving critter 72 yd out: not quiet (%s)", reason)
+	}
+	// With an idle unit at its home also in the read: the unit is exempt after its two reads, and the critter never
+	// joins the blocker list.
+	atHome := hostileAt("Razzashi Venombrood", 44.6, false, false)
+	atHome.Entry = 14532
+	ok, reason := quietProven([]objects.Unit{critterAt("Snake", 72, true), atHome}, nil, p,
+		atHomeAll([]objects.Unit{atHome}))
+	if !ok {
+		t.Fatalf("a moving critter 72 yd out with an idle unit at home: not quiet (%s)", reason)
+	}
+	// Inside the 45 yd still radius too: no two reads and no home are needed, because a critter never blocks.
+	if ok, reason := quietAt([]objects.Unit{critterAt("Snake", 20, true)}, nil, p); !ok {
+		t.Fatalf("a moving critter 20 yd out: not quiet (%s)", reason)
+	}
+	// A real hostile off its spawn is not a critter by its level, however still it is: the home-proof rule still
+	// blocks it, as walk 27's idle Mad Servant did.
+	servant := hostileAt("Mad Servant", 16.8, false, false)
+	servant.Entry = 15111
+	servant.Level = 61
+	servant.MaxHealth = 4000
+	homes := QuietHomeSpawns{{Entry: 15111, At: dungeon.Point{X: 29}}}
+	if ok, reason := quietProven([]objects.Unit{servant}, nil, p, homes); ok {
+		t.Fatalf("a level-61 hostile off its spawn: quiet (%s)", reason)
+	}
+}
+
 func mustQuiet(t *testing.T, p QuietPatrol) bool {
 	t.Helper()
 	ok, reason := quietAt(nil, []QuietPatrol{p}, dungeon.Point{})
