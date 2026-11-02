@@ -2468,7 +2468,8 @@ func (w *walk) allDead(now time.Time) bool {
 }
 
 // waitReset waits until no hostile with a party target was seen for 20 s and every hostile seen in the last
-// 60 s is at 100 % or gone.
+// 60 s is at 100 % or gone. Critters never count: the frame's own critter flag (hostile kind holding 'k'), so a
+// hurt snake cannot hold the reset open.
 func (w *walk) waitReset(ctx context.Context, limit time.Duration) error {
 	w.resetSince = time.Time{}
 	deadline := w.env.now().Add(limit)
@@ -2496,11 +2497,16 @@ func (w *walk) waitReset(ctx context.Context, limit time.Duration) error {
 	}
 }
 
-// resetReady is the reset condition, held for 20 s.
+// resetReady is the reset condition, held for 20 s. A critter never counts (turtle-agent#379): the frame's own
+// critter flag (kind holding 'k'), which is what the bystander rows of the module carry at any level. The frame
+// carries no max health, so the absolute-vs-percent band test lives on the units read instead (raidwalk's critter).
 func (w *walk) resetReady(now time.Time) bool {
 	clear := true
 	for _, h := range w.hostiles {
 		if now.Sub(h.at) > 60*time.Second {
+			continue
+		}
+		if resetCritter(h) {
 			continue
 		}
 		if h.target != 0 && w.partyG[h.target] {
@@ -2520,6 +2526,14 @@ func (w *walk) resetReady(now time.Time) bool {
 		w.resetSince = now
 	}
 	return now.Sub(w.resetSince) >= 20*time.Second
+}
+
+// resetCritter says the frame row is a critter the reset wait never counts (turtle-agent#379): primarily the
+// frame's own critter flag — the hostile kind holding 'k' (tbm.HostileRec Bystander) — whatever its level; a
+// level-1-by-level row without the flag is not one here, because the frame carries no max health for the fallback
+// band test (that band test lives on the units read, raidwalk's critter).
+func resetCritter(h hostileState) bool {
+	return strings.Contains(h.kind, "k")
 }
 
 // revive is the walk-4 recipe's ending: revive and always end the walk with exit 19.

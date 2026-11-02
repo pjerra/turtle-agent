@@ -4881,6 +4881,41 @@ func TestTrackFrameKeepsPositionsAndKinds(t *testing.T) {
 	}
 }
 
+// turtle-agent#379, round 2: the revive's reset wait never counts the frame's own critter flag — a hurt 'k' row at
+// 60 % still lets the reset complete; a hurt row without the flag still holds it. The band fallback is a units-read
+// test (raidwalk), because the frame carries no max health for it.
+func TestResetReadyIgnoresCritterFlag(t *testing.T) {
+	now := newFakeClock().now()
+	fresh := now.Add(-time.Second)
+	w := &walk{partyG: map[uint64]bool{}, hostiles: map[string]hostileState{
+		"0xF130001234000001": {entry: 2914, kind: "k", hppct: 60, at: fresh},
+	}, bossRows: map[uint32]hostileState{}, botAt: map[string]botPos{}}
+	for i := range 10 {
+		if got := w.resetReady(now.Add(time.Duration(i) * 2 * time.Second)); got {
+			t.Fatalf("reset ready at %ds with only a hurt critter in view", i*2)
+		}
+	}
+	// Held 20 s on a critter alone: the wait completes.
+	if got := w.resetReady(now.Add(20 * time.Second)); !got {
+		t.Fatal("no reset after 20 s with only a hurt critter in view")
+	}
+	// Targeted by nothing, hurt, no flag: still a blocker.
+	w = &walk{partyG: map[uint64]bool{}, hostiles: map[string]hostileState{
+		"0xF130001234000001": {entry: 2914, kind: "-", hppct: 60, at: fresh},
+	}, bossRows: map[uint32]hostileState{}, botAt: map[string]botPos{}}
+	if got := w.resetReady(now.Add(time.Minute)); got {
+		t.Fatal("reset ready with a hurt level-1-by-level row the frame did not flag")
+	}
+	// A level-5 critter the frame flags is still a critter: the flag is primary at any level.
+	w = &walk{partyG: map[uint64]bool{}, hostiles: map[string]hostileState{
+		"0xF130001234000002": {entry: 2915, kind: "k", hppct: 60, at: fresh},
+	}, bossRows: map[uint32]hostileState{}, botAt: map[string]botPos{}}
+	w.resetReady(now)
+	if got := w.resetReady(now.Add(20 * time.Second)); !got {
+		t.Fatal("no reset after 20 s with only a flagged critter in view")
+	}
+}
+
 func TestSummaryCarriesRowsShaAndUntilStep(t *testing.T) {
 	f := newFixture(t)
 	f.opts.sql = "../../internal/planexport/testdata/onyxias_lair-20261029130000.sql"
