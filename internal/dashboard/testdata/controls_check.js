@@ -60,6 +60,7 @@ const lines = C.logLines({ lines: [{ at: "2026-11-01T12:34:56Z", who: "owner", v
 assert.strictEqual(lines.length, 2);
 assert.ok(lines[0].indexOf("12:34:56") >= 0 && lines[0].indexOf("owner") >= 0 && lines[0].indexOf("pause ok") >= 0 && lines[0].indexOf("trusted") >= 0);
 assert.ok(lines[1].indexOf("stop failed") >= 0 && lines[1].indexOf("boo") >= 0);
+assert.ok(C.logLines({ lines: [{ at: "2026-11-01T12:36:00Z", who: "owner", verb: "pause", outcome: "indeterminate" }] })[0].indexOf("pause indeterminate") >= 0);
 assert.deepStrictEqual(C.logLines(null), []);
 
 console.log("ok");
