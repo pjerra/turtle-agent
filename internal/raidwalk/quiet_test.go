@@ -365,3 +365,26 @@ func mustQuiet(t *testing.T, p QuietPatrol) bool {
 	}
 	return ok
 }
+
+// TestZulGurubCubPatrolBlocksTheRevivePoint (turtle-agent#392): the placed Arlokk walk revives at leg 4's via point,
+// which the Zulian Cub patrol of the Last pull group of the Thekal leg walks within 5.7 yd of. The plan's patrol
+// block makes the quiet check refuse that point by path, the reason naming the patrol and its distance (the 392 run
+// saw only the cub's paused position, 32.6 yd away, and waited 568 s on a point the patrol walks through).
+func TestZulGurubCubPatrolBlocksTheRevivePoint(t *testing.T) {
+	plan, err := dungeon.Load("../../dungeons/zul_gurub.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	patrols := PlanQuietPatrols(plan)
+	if len(patrols) == 0 {
+		t.Fatal("the plan yields no patrol: the cub block is missing")
+	}
+	rev := dungeon.Point{X: -11712, Y: -1889.8667, Z: 52.825405}
+	ok, reason := QuietAt(nil, patrols, rev, NewQuietIdleReads(), nil, quietNow)
+	if ok {
+		t.Fatalf("the revive point is quiet: the cub patrol's path does not block")
+	}
+	if !strings.Contains(reason, "51344") || !strings.Contains(reason, "passes") {
+		t.Fatalf("reason %q, want the cub patrol's path reason", reason)
+	}
+}

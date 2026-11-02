@@ -75,8 +75,8 @@ type ReviveRefusal struct {
 	// else the first positioned row of the plan (review round 1, Opus L3: a plain --from walk revives at the plan's
 	// own first point, whatever step the run is started on).
 	StartStep int `json:"start_step"`
-	// TriedSteps are the revive points the walk read, in order. It is the start step alone: D-B's passed steps are not
-	// implemented (the walk revives at the start, or at the placement's point).
+	// TriedSteps are the revive points the walk read, in order: the revive point, then the fallback rows of its leg
+	// and the previous leg's last move row (the entrance has no step: EntranceTried says it was reached).
 	TriedSteps []int `json:"tried_steps"`
 	// EntranceTried says the entrance fallback's `.go xyz` went out (review round 1, Opus L3): true while the walk
 	// refused at the entrance, whether its go landed or not.
@@ -98,7 +98,8 @@ type ReviveBlocker struct {
 	Idle  bool    `json:"idle"`
 	// InCombat is the unit's UNIT_FLAG_IN_COMBAT: the state that keeps the 45 yd rule on it.
 	InCombat bool `json:"in_combat"`
-	// Patrol marks a --patrols patrol rather than a unit (entry 0, no combat): only its path blocks.
+	// Patrol marks a patrol rather than a unit (entry 0, no combat): a --patrols file's patrol or the plan's own
+	// patrol block. Only its path blocks.
 	Patrol bool `json:"patrol,omitempty"`
 }
 
