@@ -56,9 +56,13 @@ type routePoint struct {
 	px, py, pz float32
 	// entries and radius own the spawns this row pulls; idx is the row's absolute index in the route. ownerIdx is
 	// the same absolute index when the row pulls, -1 for a move row, which owns nothing: the segment check
-	// compares the owner's absolute index against the segment end's idx.
+	// compares the owner's absolute index against the segment end's idx. item is the row's item column (a pull
+	// row's max_bodies, 0 when the plan sizes nothing). team is the plan's gate for the row ("alliance" or
+	// "horde", from the export flags): the driver skips it for the other team.
 	entries  []uint32
 	radius   float32
+	item     uint32
+	team     string
 	idx      int
 	ownerIdx int
 }
@@ -87,7 +91,7 @@ func routePoints(p *dungeon.Plan) ([]routePoint, error) {
 		rp := routePoint{plan: s.Plan, leg: s.Leg, seq: s.Seq, kind: s.Kind,
 			standPull: (s.Kind == planexport.KindPull || s.Kind == planexport.KindBoss) && s.Flags&planexport.FlagStandPull != 0,
 			x:         s.X, y: s.Y, z: s.Z, px: s.X, py: s.Y, pz: s.Z,
-			entries: entries, radius: s.Radius, idx: len(out), ownerIdx: -1}
+			entries: entries, radius: s.Radius, item: s.Item, team: rowTeam(s.Flags), idx: len(out), ownerIdx: -1}
 		if rp.standPull {
 			// The party never walks to the row's point (the pack centroid): it fights from its stand. The export
 			// writes the stand as the move row right before the pull row in the same leg (see FlagStandPull), so
@@ -140,6 +144,19 @@ func bossOwnEntries(b *dungeon.Boss, first []uint32) []uint32 {
 	return out
 }
 
+// rowTeam reads the plan's team gate off the export flags (planexport teamFlags):
+// the row is for the Alliance, the Horde, or (no flag) every run.
+func rowTeam(flags uint32) string {
+	switch {
+	case flags&planexport.FlagAlliance != 0:
+		return dungeon.TeamAlliance
+	case flags&planexport.FlagHorde != 0:
+		return dungeon.TeamHorde
+	default:
+		return ""
+	}
+}
+
 // routeOwnerOf is the row that pulls the spawn: the first pull/boss/hold row (in route order) whose entries hold its
 // entry and whose radius reaches it from the row's point. The formation's spawns share the row: ownership expands by
 // group_leader (see PackOverlaps' pack rule, tools/dungeongen/spec.go). ok is false when no row pulls it.
@@ -174,6 +191,21 @@ func routeOwnerOf(owners []routePoint, byLeader map[uint64][]creature, c creatur
 		}
 	}
 	return routePoint{}, false
+}
+
+// hostileMob says the spawn is a mob the aggro lints count: no NPC flags (a
+// vendor, quest giver or the like is nothing to pull), a faction hostile to
+// the run (neither ignored nor friendly to the leader's team; 35 is friendly
+// to all, as in Check), and above the critter level. RouteIntoLaterPacks and
+// pullMobs share it (pull_size.go:153's filter).
+func hostileMob(c creature, ignore, friendly map[int]bool) bool {
+	if c.NPCFlags != 0 || c.LevelMax <= 1 {
+		return false
+	}
+	if c.Faction == 35 || ignore[c.Faction] || friendly[c.Faction] {
+		return false
+	}
+	return true
 }
 
 // routePartyLevel is what the trash check uses for the plan: the party's lowest level (level_band[0]), the widest
@@ -274,7 +306,7 @@ func RouteIntoLaterPacks(p *dungeon.Plan, cs []creature, ignore map[int]bool) ([
 			n = 1
 		}
 		for _, c := range cs {
-			if c.NPCFlags != 0 || ignore[c.Faction] || c.LevelMax <= 1 {
+			if !hostileMob(c, ignore, nil) {
 				continue
 			}
 			if c.FlagsExtra&worldspawn.NoAggro != 0 {

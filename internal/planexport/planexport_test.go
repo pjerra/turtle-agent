@@ -1675,3 +1675,29 @@ func TestPullGroupStandPullFlagParamAndStand(t *testing.T) {
 		t.Fatal("builder: a stand_pull group with no approach was exported")
 	}
 }
+
+// A pull group's max_bodies lands in the pull row's item column (the run
+// leader's plan ceiling, kPlanMaxPullBodies 80); absent, the item stays 0.
+func TestPullGroupMaxBodiesIsTheRowItem(t *testing.T) {
+	plan := func(group string) string {
+		return `{"version":1,"name":"zg","status":"live-checked (test)","map":309,"entrance":{"x":0,"y":0,"z":0},
+	 "legs":[{"name":"arlokk","to":{"x":300,"y":0,"z":0},"pull_groups":[` + group + `]}]}`
+	}
+	pullItem := func(group string) uint32 {
+		t.Helper()
+		for _, s := range build(t, parsePlan(t, plan(group))).Steps {
+			if s.Kind == KindPull {
+				return s.Item
+			}
+		}
+		t.Fatal("no pull row")
+		return 0
+	}
+	const group = `{"entries":[11365],"positions":[{"x":200,"y":0,"z":0}],"radius":4}`
+	if got := pullItem(group); got != 0 {
+		t.Fatalf("no max_bodies: item %d, want 0", got)
+	}
+	if got := pullItem(`{"entries":[11365],"positions":[{"x":200,"y":0,"z":0}],"radius":4,"max_bodies":27}`); got != 27 {
+		t.Fatalf("max_bodies 27: item %d, want 27", got)
+	}
+}

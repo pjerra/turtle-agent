@@ -127,6 +127,11 @@ type Plan struct {
 	// Raid is the raid group of a raid plan (kind "raid"): its size and a placeholder role split.
 	Raid  *RaidSpec `json:"raid,omitempty"`
 	Notes []string  `json:"notes,omitempty"`
+	// PullCeiling is the plan-wide pull size ceiling in bodies (the run leader's
+	// bodies count including the target): a pull row whose estimate is above it
+	// (or above the group's MaxBodies) is warned about by plan-check's pull_size
+	// lint. 0: the lint's default (8 for raids, 6 for parties).
+	PullCeiling int `json:"pull_ceiling,omitempty"`
 	// Watchdog sets the plan's stall levels (see WatchdogConfig); dungeon_run's watchdog parameter wins field by field. Absent: 120/240/420 s.
 	Watchdog *WatchdogConfig `json:"watchdog,omitempty"`
 	// Avoid are the regions of the map the party must never stand in or walk through: ground that kills although the navmesh calls it
@@ -354,6 +359,12 @@ type PullGroup struct {
 	// ClearYd is how far from the lead bot another patrol must be for a StandPull group's pull to go out (yards, 1-60, the
 	// pull row's param; 0: the run leader's 40). Only with StandPull.
 	ClearYd int `json:"clear_yd,omitempty"`
+	// MaxBodies is the pull row's bodies ceiling (the run leader's bodies count
+	// including the target): the pull_size lint warns when the estimate is above
+	// it, and the run leader's plan ceiling replaces the config one on this row.
+	// 0: the plan's PullCeiling (or the lint default). The pull row carries it in
+	// item (unused on pull rows today); 1-80 (kPlanMaxPullBodies).
+	MaxBodies int `json:"max_bodies,omitempty"`
 }
 
 // Hold is a scripted event that the TortoiseBots run leader fights out on one spot (its `hold` step, TortoiseBots #1041): the party
@@ -813,30 +824,31 @@ type rawPoint struct {
 }
 
 type rawPlan struct {
-	Version    *int              `json:"version"`
-	Name       string            `json:"name"`
-	Kind       string            `json:"kind"`
-	Status     string            `json:"status"`
-	Fleers     []uint32          `json:"fleers"`
-	Raid       *RaidSpec         `json:"raid"`
-	Map        *uint32           `json:"map"`
-	Entrance   *rawPoint         `json:"entrance"`
-	Trigger    uint32            `json:"entrance_trigger"`
-	Tele       string            `json:"entrance_tele"`
-	Outside    string            `json:"outside_tele"`
-	Portal     *rawPortal        `json:"portal"`
-	Band       []int             `json:"level_band"`
-	TankMinHP  *uint32           `json:"tank_min_hp"`
-	Hire       []string          `json:"hire_composition"`
-	CCPrio     []uint32          `json:"cc_priority"`
-	CCAlways   []uint32          `json:"cc_always"`
-	NoCC       []uint32          `json:"no_cc"`
-	KillFirst  []uint32          `json:"kill_first"`
-	SummonedKF []uint32          `json:"summoned_kill_first"`
-	Notes      []string          `json:"notes"`
-	Watchdog   *WatchdogConfig   `json:"watchdog"`
-	Avoid      []rawAvoid        `json:"avoid"`
-	Legs       []json.RawMessage `json:"legs"`
+	Version     *int              `json:"version"`
+	Name        string            `json:"name"`
+	Kind        string            `json:"kind"`
+	Status      string            `json:"status"`
+	Fleers      []uint32          `json:"fleers"`
+	Raid        *RaidSpec         `json:"raid"`
+	Map         *uint32           `json:"map"`
+	Entrance    *rawPoint         `json:"entrance"`
+	Trigger     uint32            `json:"entrance_trigger"`
+	Tele        string            `json:"entrance_tele"`
+	Outside     string            `json:"outside_tele"`
+	Portal      *rawPortal        `json:"portal"`
+	Band        []int             `json:"level_band"`
+	TankMinHP   *uint32           `json:"tank_min_hp"`
+	Hire        []string          `json:"hire_composition"`
+	CCPrio      []uint32          `json:"cc_priority"`
+	CCAlways    []uint32          `json:"cc_always"`
+	NoCC        []uint32          `json:"no_cc"`
+	KillFirst   []uint32          `json:"kill_first"`
+	SummonedKF  []uint32          `json:"summoned_kill_first"`
+	Notes       []string          `json:"notes"`
+	PullCeiling *int              `json:"pull_ceiling"`
+	Watchdog    *WatchdogConfig   `json:"watchdog"`
+	Avoid       []rawAvoid        `json:"avoid"`
+	Legs        []json.RawMessage `json:"legs"`
 }
 
 type rawPortal struct {
@@ -895,6 +907,8 @@ type rawPullGroup struct {
 	StandPull bool `json:"stand_pull"`
 	// ClearYd is PullGroup.ClearYd.
 	ClearYd int `json:"clear_yd"`
+	// MaxBodies is PullGroup.MaxBodies.
+	MaxBodies *int `json:"max_bodies"`
 }
 
 type rawHold struct {
@@ -1182,6 +1196,13 @@ func Parse(name string, data []byte) (*Plan, error) {
 	}
 	if len(rp.SummonedKF) > 0 {
 		p.SummonedKillFirst = slices.Clone(rp.SummonedKF)
+	}
+	if rp.PullCeiling != nil {
+		if v := *rp.PullCeiling; v < 1 || v > 80 {
+			c.fail("pull_ceiling", "%d: use 1-80 bodies (or omit it for the lint default)", v)
+		} else {
+			p.PullCeiling = v
+		}
 	}
 	if rp.Portal != nil {
 		if rp.Portal.Map == nil {
@@ -1498,6 +1519,13 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		if g.ClearYd < 0 || g.ClearYd > MaxStandPullClearYd {
 			c.fail(gp+".clear_yd", "%d: use 0 (the run leader's 40) or 1-%d yards", g.ClearYd, MaxStandPullClearYd)
+		}
+		if g.MaxBodies != nil {
+			if v := *g.MaxBodies; v < 1 || v > 80 {
+				c.fail(gp+".max_bodies", "%d: use 1-80 bodies (the pull row's item; kPlanMaxPullBodies)", v)
+			} else {
+				pg.MaxBodies = v
+			}
 		}
 		l.PullGroups = append(l.PullGroups, pg)
 	}

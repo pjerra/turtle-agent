@@ -1,0 +1,23 @@
+{"comment": "Shared estimator cases: the same nine cases as the TortoiseBots TestPullAggroEstimatePolicy suite (spec item 2.4), with the same numbers. The TB test does not read this file; the lead diffs the two case lists in review.",
+  "cases": [
+    {"name": "ring_calls_from_every_member_not_only_the_target"},
+    {"name": "ring_two_hops_then_stops"},
+    {"name": "ring_needs_sight_and_floor_band"},
+    {"name": "walk_proximity_wakes_a_pack_off_the_stand"},
+    {"name": "fight_point_uses_the_raid_spread"},
+    {"name": "drag_sweep_calls_along_the_way_back"},
+    {"name": "members_carry_guids_and_reasons"},
+    {"name": "old_estimator_unchanged"},
+    {"name": "pull_ceiling_bodies"}
+  ],
+  "pins": {
+    "ringYd": 20,
+    "ringHops": 2,
+    "floorDz": 12,
+    "walkSpreadYd": 3,
+    "standSpreadPartyYd": 3,
+    "standSpreadRaidYd": 10,
+    "tankSpreadYd": 1.5,
+    "maxPullBodies": 80
+  }
+}
