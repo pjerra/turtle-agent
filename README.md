@@ -2249,7 +2249,11 @@ that was not quiet; `--wipe-rest` below 30s is refused) and the run resumes (the
 show running again within 60 s); the summary notes each recovery
 (`wipe-resume <n>/<K> at step <s>: revived <d>, rested <m>, resumed`) and counts them in `wipe_resumes`, and the end
 stays truthful. When the run regroups by itself after a wipe (`regrouping by itself`), the walk revives the raid and
-lets the run go on: no rest, no `run resume`; it still counts as one `--wipe-resume`. Every wipe that does not recover
+lets the run go on: no rest, no `run resume`; it still counts as one `--wipe-resume`. Such a revive summons nobody (not
+the lead, not a dead hire; it notes `self-regroup: no summons, revived in place`): every hire is `.revive`d where it lies
+and TB's regroup gathers them. Every revive's `.go xyz` must have landed (a settled status, no `z_unknown`, not falling, x/y within 10 yd
+and z within 30 yd of the point) before any summon leaves, and a landing that never comes ends the walk with exit 19
+(`not revived: the commander did not land at the revive point`). Every wipe that does not recover
 says why in the notes (`wipe resume skipped: ...`, `second wipe at step N during the wipe-resume of step M`). It never
 revives while a boss row has a target: a boss engagement stops the run at once and waits up to 15 minutes for a kill,
 a reset or a wipe. A wipe or a boss engagement with no recovery left ends the walk with exit 19. Recovery fails closed
@@ -2295,7 +2299,7 @@ The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused
 | `run.log` | every `TBM:RUN` line (control bytes escaped) and the walk's own notes, `HH:MM:SS.mmm <text>` |
 | `commanders-<NNNN>-<reason>.json` | GET `/api/v1/commanders` (`reason`: walk, pause, wipe, boss, hold) |
 | `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key (a `live` row, a fight still running, is left for the next read: its finished fight comes back under the same id) |
-| `frames.jsonl` | one `bot_view` frame per 10 s (positions, hp, dead, hostiles; every line carries the walk's `tier`) |
+| `frames.jsonl` | one `bot_view` frame every 10 s, and every 2 s while a party member is in combat (positions, hp, dead, state, and each bot's `target`, `spell`, `action` and `result`; hostiles; every line carries the walk's `tier`) |
 | `slot-setup.txt`, `teardown.json` | what slot setup printed, and teardown's report |
 | `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, `wipe_resumes`, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison`; `place` (a `--place` walk only: `start_step`, `leg`, `point`, `until_step`, `instance`, `circles[]` with their removed counts, `not_cleared[]`, `quiet`, `placed`, `hires`, `summoned[]`) |
 

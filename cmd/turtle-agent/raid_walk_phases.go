@@ -1101,7 +1101,15 @@ func (w *walk) stopRun(ctx context.Context, line string) error {
 // past it the wait fails with the timed-out recovery the caller turns into the
 // original incident's ending.
 func (w *walk) waitMap(ctx context.Context, mapID uint32, timeout time.Duration, deadline time.Time) error {
-	mapDue := w.env.now().Add(timeout)
+	return w.waitStatus(ctx, timeout, deadline, fmt.Sprintf("the commander is not on map %d", mapID),
+		func(st session.StatusInfo) bool { return st.Map == mapID })
+}
+
+// waitStatus polls the agent's status until ok accepts it, up to timeout. The deadline is a recovery entry
+// deadline (zero: no recovery bounds this wait): every loop turn and sleep checks it first, and past it the wait
+// fails with the timed-out recovery the caller turns into the original incident's ending.
+func (w *walk) waitStatus(ctx context.Context, timeout time.Duration, deadline time.Time, what string, ok func(session.StatusInfo) bool) error {
+	statusDue := w.env.now().Add(timeout)
 	for {
 		if err := ctx.Err(); err != nil {
 			return stopf(exitRaidWalkFailed, "interrupted")
@@ -1110,16 +1118,188 @@ func (w *walk) waitMap(ctx context.Context, mapID uint32, timeout time.Duration,
 			return timeout
 		}
 		st, err := w.status(ctx)
-		if err == nil && st.Map == mapID {
+		if err == nil && ok(st) {
 			return nil
 		}
-		if !w.env.now().Before(mapDue) {
-			return stopf(exitRaidWalkFailed, "the commander is not on map %d after %s", mapID, durWords(timeout))
+		if !w.env.now().Before(statusDue) {
+			return stopf(exitRaidWalkFailed, "%s after %s", what, durWords(timeout))
 		}
 		if err := w.recoverySleep(ctx, time.Second, deadline); err != nil {
 			return err
 		}
 	}
+}
+
+// waitRevivePoint waits until the commander has LANDED at p on the plan's map: the server has settled its position
+// (reviveLanded). The map id alone is not enough: a `.go xyz` answers at once, but the server lands the character a
+// moment later, and a summon that leaves before the landing drops the whole party at the OLD spot (walk 22 test2
+// s4, Q3: the lead landed 560 yd back at the ZG entrance and its Voidwalker followed). The session also reports the
+// `.go` destination itself at once, flagged ZUnknown until the server sends a position, so a position match alone
+// is no landing either (Codex HIGH, F4 round 2). fromMap is the commander's map before the `.go` (see reviveLanded).
+func (w *walk) waitRevivePoint(ctx context.Context, p dungeon.Point, fromMap uint32, deadline time.Time) error {
+	return w.waitStatus(ctx, reviveTeleportWait, deadline,
+		fmt.Sprintf("the commander is not within %d yd of the revive point on map %d", reviveLandingYd, w.plan.Map),
+		func(st session.StatusInfo) bool { return reviveLanded(p, w.plan.Map, fromMap, st) })
+}
+
+// commanderMap reads the commander's map before a revive `.go xyz`: what tells a far teleport from a near one. A failed
+// read is retried (commanderMapTries in all, 1 s apart, within the recovery deadline), never guessed: taking the plan's
+// map for it picks the near rule, and a far go then never lands (review round 2, Codex MEDIUM). ok is false when no
+// read answered.
+func (w *walk) commanderMap(ctx context.Context, deadline time.Time) (m uint32, ok bool, err error) {
+	for try := 0; try < commanderMapTries; try++ {
+		if try > 0 {
+			if err := w.recoverySleep(ctx, time.Second, deadline); err != nil {
+				return 0, false, err
+			}
+		}
+		if st, serr := w.status(ctx); serr == nil {
+			return st.Map, true, nil
+		}
+	}
+	return 0, false, nil
+}
+
+const commanderMapTries = 3
+
+// farFromMap stands for "the commander was not on the plan's map" when its map could not be read: a self-regroup's
+// commander starts at the portal (map 0 in every walk), so the far rule applies.
+const farFromMap = math.MaxUint32
+
+// reviveFrom is the fromMap a revive go's landing rule uses: the plan's map after a verified appear (its fresh landing
+// was read on it), else commanderMap. With no readable status a normal revive stops (exit 19) and a self-regroup goes on
+// under the far rule, noted.
+func (w *walk) reviveFrom(ctx context.Context, joined, selfRegroup bool, deadline time.Time) (uint32, error) {
+	if joined {
+		return w.plan.Map, nil
+	}
+	m, ok, err := w.commanderMap(ctx, deadline)
+	if err != nil {
+		return 0, err
+	}
+	if ok {
+		return m, nil
+	}
+	if !selfRegroup {
+		return 0, stopf(exitRaidWalkIncident, "not revived: commander status unreadable")
+	}
+	w.note("revive: commander status unreadable; self-regroup: the far landing rule (the commander starts at the portal)")
+	return farFromMap, nil
+}
+
+// hiresOffMap counts the hires the frames last saw on another map than the plan's (released to the graveyard).
+func (w *walk) hiresOffMap() int {
+	n := 0
+	for _, name := range w.hireList() {
+		if b, ok := w.botAt[name]; ok && b.mapID != w.plan.Map {
+			n++
+		}
+	}
+	return n
+}
+
+// hireUpOnMap says a hire was last seen alive on the plan's map.
+func (w *walk) hireUpOnMap() bool {
+	for _, name := range w.hireList() {
+		if b, ok := w.botAt[name]; ok && b.mapID == w.plan.Map && !b.dead {
+			return true
+		}
+	}
+	return false
+}
+
+// appearHire is the hire the revive appears at before its `.go xyz` to p: among the hires the frames last saw on the
+// plan's map, the living one nearest p (x/y), else the nearest dead one; "" when none is known there. Ties go to roster
+// order.
+func (w *walk) appearHire(p dungeon.Point) string {
+	best, bestDead, bestD := "", true, math.Inf(1)
+	for _, name := range w.hireList() {
+		b, ok := w.botAt[name]
+		if !ok || b.mapID != w.plan.Map {
+			continue
+		}
+		d := math.Hypot(float64(b.x-p.X), float64(b.y-p.Y))
+		if best == "" || (bestDead && !b.dead) || (bestDead == b.dead && d < bestD) {
+			best, bestDead, bestD = name, b.dead, d
+		}
+	}
+	return best
+}
+
+// joinHires puts the commander into the hires' instance copy before a revive `.go xyz` to p, and says why not when it
+// cannot. A `.go xyz` from the portal's map opens a NEW copy (walk 23 mangosd: hires in inst 101, commander in 104;
+// test2 106 vs 107), where the quiet check sees an empty copy. (A `.summon` from there would not drag the raid away:
+// the core moves the summoned hire within its own copy, Player.cpp:2613.) `.appear <hire>` binds a GM to the target's
+// copy (core Commands.cpp HandleGonameCommand: UnbindInstance, then BindToInstance(the target's
+// DungeonPersistentState)), so the `.go xyz` after it is a near go, with the settled-z landing rule.
+//
+// The appear counts only on a FRESH landing (appearLanded): the commander may already stand on the plan's map in a copy
+// of its own, so the map id alone proves nothing. reviveHires sends `.gm visible off` once before it.
+func (w *walk) joinHires(ctx context.Context, p dungeon.Point, deadline time.Time) (joined bool, why string, err error) {
+	name := w.appearHire(p)
+	if name == "" {
+		return false, fmt.Sprintf("no hire seen on map %d", w.plan.Map), nil
+	}
+	hire := w.botAt[name]
+	before, serr := w.status(ctx)
+	if serr != nil { // one retry (review round 2, L1): the freshness check needs the read
+		if err := w.recoverySleep(ctx, time.Second, deadline); err != nil {
+			return false, "", err
+		}
+		if before, serr = w.status(ctx); serr != nil {
+			return false, "commander status unreadable before the appear", nil
+		}
+	}
+	if err := w.gm(ctx, ".appear "+name); err != nil {
+		if ctx.Err() != nil {
+			return false, "", stopf(exitRaidWalkFailed, "interrupted")
+		}
+		return false, fmt.Sprintf(".appear %s failed: %v", name, err), nil
+	}
+	werr := w.waitStatus(ctx, appearWait, deadline, "the appear did not land",
+		func(st session.StatusInfo) bool { return appearLanded(st, w.plan.Map, hire, before) })
+	if werr == nil {
+		return true, "", nil
+	}
+	if timeout, ok := werr.(*recoveryTimeout); ok {
+		return false, "", timeout
+	}
+	if ctx.Err() != nil {
+		return false, "", stopf(exitRaidWalkFailed, "interrupted")
+	}
+	return false, fmt.Sprintf(".appear %s did not land within %d yd of it in %s", name, appearLandingYd, durWords(appearWait)), nil
+}
+
+// appearLanded says st is a fresh landing of an `.appear` at hire: on mapID, x/y within appearLandingYd of where the
+// frames last saw the hire, and a position (or map) other than the read before the appear.
+func appearLanded(st session.StatusInfo, mapID uint32, hire botPos, before session.StatusInfo) bool {
+	if st.Map != mapID || math.Hypot(float64(st.X-hire.x), float64(st.Y-hire.y)) > appearLandingYd {
+		return false
+	}
+	return st.Map != before.Map || st.X != before.X || st.Y != before.Y || st.Z != before.Z
+}
+
+// appearWait bounds the wait for a revive `.appear` to land; appearLandingYd is how close (x/y) to the hire's last
+// frame position it must land (the hire may have moved a little since).
+const (
+	appearWait      = 10 * time.Second
+	appearLandingYd = 15
+)
+
+// reviveLanded says the status is a SETTLED landing at p on mapID: the character is not falling, x/y are within
+// reviveLandingYd of p and z within reviveLandingZYd (a landing may drop to the floor, so z gets more room than x/y).
+// After a NEAR teleport (fromMap == mapID) the server must also have sent a position: not ZUnknown, the session's
+// guess until the floor drop or a server position settles it. After a FAR teleport (fromMap != mapID) ZUnknown stays
+// set for good, as the session lands it through SMSG_NEW_WORLD with no floor drop and the core never sends the player
+// its own position (walk 23: 6 runs exit 19, the commander waited on map 0 at the portal); there the map change is
+// the landing itself, since the session acks the worldport at once and the server places the player on reading that
+// ack, before any later chat line.
+func reviveLanded(p dungeon.Point, mapID, fromMap uint32, st session.StatusInfo) bool {
+	if st.Map != mapID || st.Falling || (st.ZUnknown && fromMap == mapID) {
+		return false
+	}
+	dx, dy := float64(p.X-st.X), float64(p.Y-st.Y)
+	return math.Hypot(dx, dy) <= reviveLandingYd && math.Abs(float64(p.Z-st.Z)) <= reviveLandingZYd
 }
 
 // bossRowEngaged says a plan-boss row is in a fight: alive and either holding a target or hurt.
@@ -1170,16 +1350,20 @@ type savedFrame struct {
 }
 
 type savedBot struct {
-	GUID  string  `json:"guid"`
-	Name  string  `json:"name"`
-	X     float32 `json:"x"`
-	Y     float32 `json:"y"`
-	Z     float32 `json:"z"`
-	Map   uint32  `json:"map"`
-	HP    uint32  `json:"hp"`
-	MaxHP uint32  `json:"max_hp"`
-	Dead  bool    `json:"dead"`
-	State string  `json:"state"`
+	GUID   string  `json:"guid"`
+	Name   string  `json:"name"`
+	X      float32 `json:"x"`
+	Y      float32 `json:"y"`
+	Z      float32 `json:"z"`
+	Map    uint32  `json:"map"`
+	HP     uint32  `json:"hp"`
+	MaxHP  uint32  `json:"max_hp"`
+	Dead   bool    `json:"dead"`
+	State  string  `json:"state"`
+	Target string  `json:"target,omitempty"` // the bot's target, else its victim (absent when the module sent none)
+	Spell  uint32  `json:"spell,omitempty"`  // the spell it casts or channels
+	Action string  `json:"action,omitempty"` // the last action its AI ran
+	Result string  `json:"result,omitempty"` // the verdict on that action (O ok, F failed, I impossible, U useless, P queued, V dropped)
 }
 
 type savedHostile struct {
@@ -1193,19 +1377,39 @@ type savedHostile struct {
 	Flags  string  `json:"flags"`
 }
 
-// saveFrame writes one frame per 10 s.
+const (
+	// frameEvery is the frame cadence the walk keeps out of combat.
+	frameEvery = 10 * time.Second
+	// frameEveryCombat is the frame cadence while any party member is in combat: the Servants of one pile died
+	// 11 s apart, so the old 10 s frames could hold nothing but their corpses (F3, walk 22 Q1).
+	frameEveryCombat = 2 * time.Second
+)
+
+// saveFrame writes one frame per frameEvery, and one per frameEveryCombat while a party member is in combat (a
+// bot's combat or reaction state, or a hostile engaged with the party). Each bot carries the target, spell, action
+// and result of its P record (internal/tbm/view.go), so the frames show which bot hit which Servant with which
+// spell — the evidence the hold needs, at no module cost.
 func (w *walk) saveFrame(now time.Time, f *tbm.ViewFrame) {
 	if w.framesF == nil {
 		return
 	}
-	if !w.lastFrameSave.IsZero() && now.Sub(w.lastFrameSave) < 10*time.Second {
+	every := frameEvery
+	if f.PartyInCombat() {
+		every = frameEveryCombat
+	}
+	if !w.lastFrameSave.IsZero() && now.Sub(w.lastFrameSave) < every {
 		return
 	}
 	w.lastFrameSave = now
 	rec := savedFrame{T: now.UnixMilli(), Seq: f.Seq, Tier: w.roster.Tier}
 	for _, p := range f.Party {
-		rec.Party = append(rec.Party, savedBot{GUID: p.GUID.String(), Name: p.Name, X: p.X, Y: p.Y, Z: p.Z, Map: p.Map,
-			HP: p.HP, MaxHP: p.MaxHP, Dead: p.Dead || p.State == "d", State: p.State})
+		bot := savedBot{GUID: p.GUID.String(), Name: p.Name, X: p.X, Y: p.Y, Z: p.Z, Map: p.Map,
+			HP: p.HP, MaxHP: p.MaxHP, Dead: p.Dead || p.State == "d", State: p.State,
+			Spell: p.Spell, Action: p.Action, Result: p.Result}
+		if p.Target != 0 {
+			bot.Target = p.Target.String()
+		}
+		rec.Party = append(rec.Party, bot)
 	}
 	for _, h := range f.Hostiles {
 		rec.Hostiles = append(rec.Hostiles, savedHostile{GUID: h.GUID.String(), Entry: h.Entry, X: h.X, Y: h.Y, Z: h.Z,
@@ -1215,7 +1419,10 @@ func (w *walk) saveFrame(now time.Time, f *tbm.ViewFrame) {
 	if err != nil {
 		return
 	}
-	_, _ = w.framesF.Write(append(raw, '\n'))
+	if _, err := w.framesF.Write(append(raw, '\n')); err != nil && !w.framesWarned {
+		w.note("frames.jsonl: %v", err)
+		w.framesWarned = true
+	}
 }
 
 // saveCommanders GETs /api/v1/commanders, saves it and feeds the tracker's wipe rule.
@@ -1627,31 +1834,85 @@ func (w *walk) resetReady(now time.Time) bool {
 
 // revive is the walk-4 recipe's ending: revive and always end the walk with exit 19.
 func (w *walk) revive(ctx context.Context, step int) error {
-	if err := w.reviveHires(ctx, time.Time{}); err != nil {
+	// false: this is the boss-wipe ending, with the walk ending here anyway and no run regrouping itself.
+	if err := w.reviveHires(ctx, time.Time{}, false); err != nil {
 		return err
 	}
 	return stopf(exitRaidWalkIncident, "wipe at step %d", step)
 }
+
+// reviveLandingYd is how close (x/y) the commander's own position must come to a revive teleport's target before
+// the summons may leave (F4: a `.go xyz` answers at once, the server lands the character a moment later);
+// reviveLandingZYd is the z room, because a landing may drop to the floor.
+const (
+	reviveLandingYd  = 10
+	reviveLandingZYd = 30
+)
+
+// reviveTeleportWait is how long a revive teleport gets to land on its point.
+const reviveTeleportWait = 30 * time.Second
 
 // reviveHires is the walk-4 recipe's revive half, made safe (spec 3.5): the revive point, the quiet check (then the
 // entrance once), summon and revive, and a look for bots attacked after the revive. revive ends the walk with it;
 // recoverWipe rests and resumes with it. The deadline is the recovery's entry deadline (zero: the old
 // unbounded path outside a recovery): every loop turn and sleep checks it, and past it the
 // revive fails with the timed-out recovery the caller turns into the original incident's ending.
-func (w *walk) reviveHires(ctx context.Context, deadline time.Time) error {
+//
+// Every `.go xyz` must have landed (waitRevivePoint) before a summon leaves: waitMap alone saw only the map id,
+// which is already right when the agent stands in the instance, so the summons dropped the party at the OLD spot
+// (walk 22 test2 s4, Q3). selfRegroup says the run is regrouping by itself: TB then moves the lead and the party
+// itself, so the revive sends no summons at all (the lead, living and dead hires alike): every hire is `.revive`d
+// where it lies and TB's regroup gathers them.
+func (w *walk) reviveHires(ctx context.Context, deadline time.Time, selfRegroup bool) error {
 	revive := w.revivePoint()
 	if revive == nil {
 		return stopf(exitRaidWalkIncident, "not revived: the plan's rows give no revive point")
 	}
 	p := *revive
+	if err := w.gm(ctx, raidwalk.GMVisibleOff); err != nil {
+		if ctx.Err() != nil {
+			return stopf(exitRaidWalkFailed, "interrupted")
+		}
+		w.note("revive: %s failed (%v)", raidwalk.GMVisibleOff, err)
+	}
+	// Hires released to the graveyard stand on another map: nobody to appear at. Their summons resolve to their own
+	// bound copy, so the revive keeps the far go and the summons, with a quiet check of the commander's own copy.
+	var joined bool
+	why := ""
+	ghosts := w.place == nil && w.appearHire(p) == "" && w.hiresOffMap() > 0
+	if w.place != nil {
+		// A placed walk's commander joined the raid's copy at the placement (phasePlace: `.appear <mt>`, the toolkit's
+		// instance read), and placeReviveInstance checks that copy again before the summons; a second appear could not
+		// prove a fresh landing when the commander still stands where the first one put it.
+		joined = true
+	} else if ghosts {
+		w.note("revive: no hire on map %d, %d seen on another map (released): no appear, the far go and summons; the quiet check was blind (the commander's own copy)", w.plan.Map, w.hiresOffMap())
+	} else {
+		var err error
+		if joined, why, err = w.joinHires(ctx, p, deadline); err != nil {
+			return err
+		}
+	}
+	if !joined && !ghosts {
+		// A normal revive quiet-checks and summons from where the commander stands: blind in a copy of its own. A
+		// self-regroup summons nobody and `.revive` works by name, so it keeps the far go (reviveLanded's far rule).
+		if !selfRegroup {
+			return stopf(exitRaidWalkIncident, "not revived: could not join the hires' instance (%s)", why)
+		}
+		w.note("revive: could not join the hires' instance (%s); self-regroup: the go opens its own copy, the hires are revived by name", why)
+	}
+	from, err := w.reviveFrom(ctx, joined, selfRegroup, deadline)
+	if err != nil {
+		return err
+	}
 	if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(p.X), num32(p.Y), num32(p.Z), w.plan.Map)); err != nil {
 		return err
 	}
-	if err := w.waitMap(ctx, w.plan.Map, 30*time.Second, deadline); err != nil {
+	if err := w.waitRevivePoint(ctx, p, from, deadline); err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
 			return timeout
 		}
-		return stopf(exitRaidWalkIncident, "not revived: the commander did not reach map %d", w.plan.Map)
+		return stopf(exitRaidWalkIncident, "not revived: the commander did not land at the revive point on map %d", w.plan.Map)
 	}
 	ok, why, terr := w.quietCheck(ctx, p, deadline)
 	if terr != nil {
@@ -1661,8 +1922,21 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time) error {
 		// A door-to-end walk falls back to the entrance; a placed one does not: the entrance is behind the legs the
 		// placement skipped, and the run leader's walk back would cross them (spec 6).
 		e := w.plan.Entrance
+		if !joined && !ghosts { // only a self-regroup gets here unjoined: one more try, and the far go again when it fails
+			var jerr error
+			if joined, why, jerr = w.joinHires(ctx, e, deadline); jerr != nil {
+				return jerr
+			}
+			if !joined {
+				w.note("revive: could not join the hires' instance at the entrance either (%s)", why)
+			}
+		}
+		from, ferr := w.reviveFrom(ctx, joined, selfRegroup, deadline)
+		if ferr != nil {
+			return ferr
+		}
 		if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(e.X), num32(e.Y), num32(e.Z), w.plan.Map)); err == nil {
-			if werr := w.waitMap(ctx, w.plan.Map, 30*time.Second, deadline); werr == nil {
+			if werr := w.waitRevivePoint(ctx, e, from, deadline); werr == nil {
 				ok, why, terr = w.quietCheck(ctx, e, deadline)
 				if terr != nil {
 					return terr
@@ -1680,15 +1954,23 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time) error {
 			return err
 		}
 	}
-	for _, name := range w.hireList() {
-		if timeout := w.recoveryExpired(deadline); timeout != nil {
-			return timeout
-		}
-		if err := w.gm(ctx, ".summon "+name); err != nil {
-			return err
-		}
-		if err := w.recoverySleep(ctx, 100*time.Millisecond, deadline); err != nil {
-			return err
+	// Walk 22 F4 (lead ruling, round 2): during a self-regroup the agent summons NOBODY, not the lead and not a dead
+	// hire. The run regroups by itself (TB moves the lead and gathers the party), and any `.summon` from where the
+	// agent stands would drag a hire back there (walk 22 test2 s4, Q3: `.summon <lead>` 2 ms after the agent's own
+	// `.go xyz` dropped the lead 560 yd back). Every hire is `.revive`d where it lies, below.
+	if selfRegroup {
+		w.note("self-regroup: no summons, revived in place")
+	} else {
+		for _, name := range w.hireList() {
+			if timeout := w.recoveryExpired(deadline); timeout != nil {
+				return timeout
+			}
+			if err := w.gm(ctx, ".summon "+name); err != nil {
+				return err
+			}
+			if err := w.recoverySleep(ctx, 100*time.Millisecond, deadline); err != nil {
+				return err
+			}
 		}
 	}
 	if err := w.recoverySleep(ctx, 10*time.Second, deadline); err != nil {
@@ -1723,6 +2005,19 @@ func (w *walk) reviveHires(ctx context.Context, deadline time.Time) error {
 			w.note("attacked after revive: %d bots in combat", inCombat)
 		}
 	}
+	// An unjoined self-regroup tries the join once more when its revives have a hire up on the plan's map (review
+	// round 2, L4): the next recovery then starts from the hires' copy.
+	if selfRegroup && !joined && !ghosts && w.hireUpOnMap() {
+		ok, why, err := w.joinHires(ctx, p, deadline)
+		if err != nil {
+			return err
+		}
+		if ok {
+			w.note("revive: joined the hires' instance after the self-regroup revives")
+		} else {
+			w.note("revive: still could not join the hires' instance after the self-regroup revives (%s)", why)
+		}
+	}
 	return nil
 }
 
@@ -1737,7 +2032,7 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 	}
 	from := w.env.now()
 	deadline := recoveryDeadline(from, w.opts.wipeRest, w.opts.maxRunMinutes, w.started)
-	if err := w.reviveHires(ctx, deadline); err != nil {
+	if err := w.reviveHires(ctx, deadline, selfRegroup); err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
 			return timeout.end(step)
 		}
@@ -1853,10 +2148,14 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 // deadline is the recovery's entry deadline: every loop turn and sleep checks it.
 func (w *walk) recoverNearWipeRevive(ctx context.Context, deadline time.Time) (int, error) {
 	if w.allDead(w.env.now()) {
-		if err := w.reviveHires(ctx, deadline); err != nil {
+		// false: a near-wipe stop is a PAUSED run (never a self-regroup), so the old summon recipe stands.
+		if err := w.reviveHires(ctx, deadline, false); err != nil {
 			return 0, err
 		}
 		return len(w.hireList()), nil
+	}
+	if timeout := w.recoveryExpired(deadline); timeout != nil {
+		return 0, timeout
 	}
 	dead, ok := w.completeDeadView(ctx)
 	if !ok {

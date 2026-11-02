@@ -717,6 +717,13 @@ func (s *Session) onTransferPending(body []byte) error {
 
 // onNewWorld finishes a far teleport. The units of the old map are gone, the selection
 // with them.
+//
+// raid-walk's reviveLanded (cmd/turtle-agent) takes a far teleport as landed on the map change
+// alone, as ZUnknown stays set here (no dropToFloor follows a worldport). That relies on two
+// things this handler keeps: the map is set in the same s.mu hold that sets the position, so a
+// status never shows the new map with the old position; and MSG_MOVE_WORLDPORT_ACK goes out here,
+// before any later chat line, so the server has placed the player before it reads the next GM
+// command (a `.summon`).
 func (s *Session) onNewWorld(body []byte) error {
 	nw, err := game.ParseNewWorld(body)
 	if err != nil {
