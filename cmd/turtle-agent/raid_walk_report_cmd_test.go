@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
 const reportCmdFight = `{"fight":{"id":"3-1","commander":"Cmd","plan":"zul_gurub","leg":"jeklik","step":2,"kind":"move","start":1793387810,"dur_ms":100000,"outcome":"end",
@@ -51,6 +54,44 @@ func TestRaidWalkReportPrintsMarkdown(t *testing.T) {
 	// and the contact column is still computed from the step's lines
 	if code, out, _ := runReport(t, dir); code != exitOK || !strings.Contains(out, "# Raid walk report") {
 		t.Fatalf("no offset: %d %s", code, out)
+	}
+}
+
+// End to end: a walk writes the run.log and the structured joiner record of
+// its pull, and the report of that folder carries the count on the pull of
+// the same step.
+func TestRaidWalkReportShowsPullJoiners(t *testing.T) {
+	f := joinerWalk(t, []tbm.HostileRec{
+		{GUID: 0xF130002C6C00C24B, Entry: 12129, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)},
+		{GUID: 0xF130002, Entry: 12129, X: 53.0, Y: -114.6, HPPct: 100, Target: packet.GUID(1000)}, // pack mate
+		{GUID: 0xF130101, Entry: 12130, X: 0, Y: 0, HPPct: 100, Target: packet.GUID(1001)},
+		{GUID: 0xF130102, Entry: 12130, X: 0, Y: 0, HPPct: 100, Target: packet.GUID(1002)},
+	})
+	fight := `{"fight":{"id":"2-1","plan":"onyxias_lair","step":2,"kind":"pull","start":1793387810,"dur_ms":30000,"outcome":"end",
+"engaged":[{"e":12129,"n":"Onyxian Whelp","c":2}],"deaths":[],"log":[]}}`
+	if err := os.WriteFile(filepath.Join(f.out, "combat-fight-2-1.json"), []byte(fight), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, js, errs := runReport(t, f.out, "--json", "-")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	var rep struct {
+		Pulls []struct {
+			Step        int      `json:"step"`
+			JoinersSeen int      `json:"joiners_seen"`
+			JoinerGUIDs []string `json:"joiner_guids"`
+		} `json:"pulls"`
+	}
+	if err := json.Unmarshal([]byte(js), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Pulls) != 1 || rep.Pulls[0].Step != 2 || rep.Pulls[0].JoinersSeen != 2 || len(rep.Pulls[0].JoinerGUIDs) != 2 {
+		t.Fatalf("report pulls %+v, want one step-2 pull with 2 joiners", rep.Pulls)
+	}
+	code, out, errs := runReport(t, f.out)
+	if code != exitOK || !strings.Contains(out, "| frames: joiners 2 (0x000000000F130101 0x000000000F130102) |") {
+		t.Fatalf("markdown lacks the pull joiners: %d %q %s", code, out, errs)
 	}
 }
 

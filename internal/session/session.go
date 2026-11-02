@@ -125,22 +125,28 @@ type Options struct {
 const maxLoginRetries = 5
 
 type StatusInfo struct {
-	State        Status         `json:"state"`
-	Character    string         `json:"character,omitempty"`
-	GUID         packet.GUID    `json:"guid,omitempty"`
-	Level        uint8          `json:"level,omitempty"`
-	Map          uint32         `json:"map"`
-	X            float32        `json:"x"`
-	Y            float32        `json:"y"`
-	Z            float32        `json:"z"`
-	O            float32        `json:"o"`
-	Target       packet.GUID    `json:"target,omitempty"`
-	Health       uint32         `json:"health"`
-	MaxHealth    uint32         `json:"max_health"`
-	Power        uint32         `json:"power"`
-	MaxPower     uint32         `json:"max_power"`
-	Falling      bool           `json:"falling"`   // in the air: a knockback, or a fall after a teleport
-	ZUnknown     bool           `json:"z_unknown"` // z is a guess (GM teleport, climb, landing) until the server sends a position
+	State     Status      `json:"state"`
+	Character string      `json:"character,omitempty"`
+	GUID      packet.GUID `json:"guid,omitempty"`
+	Level     uint8       `json:"level,omitempty"`
+	Map       uint32      `json:"map"`
+	X         float32     `json:"x"`
+	Y         float32     `json:"y"`
+	Z         float32     `json:"z"`
+	O         float32     `json:"o"`
+	Target    packet.GUID `json:"target,omitempty"`
+	Health    uint32      `json:"health"`
+	MaxHealth uint32      `json:"max_health"`
+	Power     uint32      `json:"power"`
+	MaxPower  uint32      `json:"max_power"`
+	Falling   bool        `json:"falling"`   // in the air: a knockback, or a fall after a teleport
+	ZUnknown  bool        `json:"z_unknown"` // z is a guess (GM teleport, climb, landing) until the server sends a position
+	// TeleportSeq counts the server teleports this session has ACKED (a near `.go xyz` teleport ack, a far
+	// worldport): it advances when the client's ack has gone out, so the server has placed the player by the
+	// time it reads any later chat line. raid-walk's reviveLanded reads it as the landing signal over a navmesh
+	// hole, where the z guess never settles (walk 24 test2 r3), and as the far landing itself: a worldport's map,
+	// position and bump land together only after the ack write.
+	TeleportSeq  uint64         `json:"teleport_seq"`
 	LatencyMS    uint32         `json:"latency_ms"`
 	Unknown      map[string]int `json:"unknown_opcodes"`
 	ParseErrors  int            `json:"parse_errors"`
@@ -228,6 +234,7 @@ type Session struct {
 	selAttacking bool                 // between the player's own SMSG_ATTACKSTART and SMSG_ATTACKSTOP
 	falling      bool                 // s.fall != nil, for Status
 	zUnknown     bool
+	teleportSeq  uint64 // server teleports acked (StatusInfo.TeleportSeq)
 
 	// owner-loop only
 	finished        bool
@@ -395,7 +402,7 @@ func (s *Session) Status() StatusInfo {
 	info := StatusInfo{
 		State: s.state, Character: s.self.Name, GUID: s.self.GUID, Level: s.self.Level, Map: s.mapID,
 		X: s.pos[0], Y: s.pos[1], Z: s.pos[2], O: s.pos[3], Target: s.target, LatencyMS: s.latency,
-		Falling: s.falling, ZUnknown: s.zUnknown,
+		Falling: s.falling, ZUnknown: s.zUnknown, TeleportSeq: s.teleportSeq,
 		Unknown: unknown, ParseErrors: s.parseErrs, LastSeq: s.log.Last(), MonoMS: events.MonoMS(), BaseTime: events.BaseTime(), WallOffsetMS: events.WallOffsetMS(), Error: s.lastErr,
 	}
 	// The player's own values from the store (zero until its create block arrives).

@@ -411,6 +411,9 @@ func (r *raidInjector) readEventsPage(page events.Page) injectPageRead {
 				if w.tracker != nil {
 					w.tracker.Feed(w.env.now(), st)
 				}
+				// The injector's own page reads are the walk's status source while an injection runs: a boss
+				// `boss down` (or the run's end right after the boss step) on such a page is the kill too.
+				w.observeBossStatus(st, w.env.now())
 				w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
 				if st.Note != "" {
 					w.newNotes = append(w.newNotes, st.Note)

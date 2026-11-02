@@ -88,16 +88,23 @@ func (r *Report) Markdown() string {
 				contact = "YES: " + p.ContactText
 			}
 		}
-		joins := "-"
+		var joined []string
 		if len(p.Joins) > 0 {
 			js := make([]string, len(p.Joins))
 			for i, j := range p.Joins {
 				js[i] = fmt.Sprintf("+%.0fs", j.TS)
 			}
-			joins = fmt.Sprintf("%d (%s)", len(p.Joins), strings.Join(js, ", "))
+			joined = append(joined, fmt.Sprintf("%d (%s)", len(p.Joins), strings.Join(js, ", ")))
 		}
 		if p.JoinersExpected != "" {
-			joins += "; " + p.JoinersExpected
+			joined = append(joined, p.JoinersExpected)
+		}
+		if len(p.JoinerGUIDs) > 0 {
+			joined = append(joined, fmt.Sprintf("frames: joiners %d (%s)", p.JoinersSeen, strings.Join(p.JoinerGUIDs, " ")))
+		}
+		joins := "-"
+		if len(joined) > 0 {
+			joins = strings.Join(joined, "; ")
 		}
 		stand := "-"
 		if len(p.StandRuns) > 0 {

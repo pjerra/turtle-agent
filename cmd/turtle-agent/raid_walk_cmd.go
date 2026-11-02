@@ -565,7 +565,10 @@ type walk struct {
 	// bossDoneStep is the boss step --until boss-done resolved to (0: not asked). The server must show the step count of w.rows, else the
 	// step numbers are not the ones the clause was computed from.
 	bossDoneStep int
-	fromWords    []string
+	// placeShortened says the --place route guard shortened the until (F5, D8): untilLabel is then the effective
+	// clause and opts.until the one the user asked for, and the dry run and the summary print both.
+	placeShortened bool
+	fromWords      []string
 
 	agent    walkAgent
 	manifest teardownSlotManifest
@@ -604,11 +607,73 @@ type walk struct {
 	bossRows     map[uint32]hostileState
 	bossSeenAt   time.Time
 	bossTargetAt time.Time
+	// bossToolkitOff says the toolkit corpse read (bossCorpse) failed once: the walk stops asking, so a server
+	// without the toolkit costs one bounded read and not a timeout on every pause tick.
+	bossToolkitOff bool
+	// bossAdds are the entries the frames have shown more than one live unit of at once (trackFrame): adds that
+	// exist several at a time, never the boss reborn, so bossUnits leaves them out of the kill evidence.
+	bossAdds map[uint32]bool
+	// bossAttemptAt is when the current boss attempt began, per unit entry: the first time the frames showed
+	// that unit engaged in this attempt (trackFrame, the tracker's own latch judgement). bossKilled accepts a
+	// dead frame row of the family only at or after it, so a 0 % row an EARLIER attempt left in w.hostiles
+	// (never pruned: a reset or a respawn leaves it there) is no evidence on a later pause (review round 3).
+	// A wipe recovery clears it; a new attempt's first sighting sets it.
+	bossAttemptAt map[uint32]time.Time
+	// bossAliveSeen is when the frames last showed the boss unit GUID (key of w.hostiles) alive in the
+	// current attempt: trackFrame records every live boss-unit row here (revive r6). bossKilled's frame
+	// corpse and toolkit corpse both count only for a guid the frames showed alive in THIS attempt before
+	// its death, and the toolkit's wait needs a second read at least 15 s later still dead with no alive
+	// frame for that guid in between (Thekal's fake death: phase 1 dies and is raised again). A new
+	// attempt (resetBossAliveSeen) and a wipe recovery clear it with the attempt.
+	bossAliveSeen map[string]time.Time
+	// bossCorpseSeen is when the toolkit first reported the boss unit GUID (key of w.hostiles) dead in
+	// the current attempt: the wait's first sighting (revive r6). A live frame for that guid clears it,
+	// as does a wipe recovery.
+	bossCorpseSeen map[string]time.Time
+	// bossGUIDs is the guid -> plan boss entry of the units the frames showed with a plan boss's OWN entry
+	// (trackFrame): a script that changes a creature's entry (core UpdateEntry) keeps its guid, so a unit whose
+	// guid the frames showed as the boss entry is the boss whatever entry it now reads (spec 6, D5 b, #1453).
+	// A guid in it is never an add; bossForms keeps the entries that guid was seen with, one per change.
+	bossGUIDs map[string]uint32
+	bossForms map[string][]uint32
+	// bossTracks is one record per boss step the run's own statuses showed (observeBossStatus): the last note seen
+	// while the run stood there, the `boss down` note that leaves it, and the skip the walk sent for that step
+	// (bossSkipStep). Keyed by the step, or by the boss's entry when the step is unknown.
+	bossTracks map[bossKey]*bossStepTrack
+	// bossMismatch is the steps whose boss-kind status found no boss row at that step: the rows the walk reads are
+	// not the deployed ones (without --sql they are the plan JSON's), so the step's kill record is skipped and the
+	// reason noted once.
+	bossMismatch map[int]bool
 
 	stepFirst *dungeon.Point
+	// startStep is the step the run starts at (the placement's staged start, else the --from step): the revive's own
+	// step, and the start_step of a revive refusal (D-D).
+	startStep int
+	// reviveRefusal is the refused revive (D-D): set when the revive point never went quiet and the walk ends with
+	// "not revived"; nil otherwise.
+	reviveRefusal *raidwalk.ReviveRefusal
+	// wipeAt is when the last wipe (or near-wipe stop) was seen: the anchor of a self-regroup's D-C cap (review round
+	// 1, Opus M2).
+	wipeAt time.Time
 
 	lastStatus tbm.RunStatus
 	haveStatus bool
+	// pullJoins tracks the pull the walk is counting joiners for: the pull line's
+	// step and time, the pulled pack's guids and the engaged guids seen since.
+	// The pack is the pulled guid plus the plan pack's other members: the guids
+	// whose frame position stands within the pull row's radius of its centroid
+	// (pullRow), seeded once on the first frame of the window (pullPackSeeded).
+	// Counted once, 10 s after the pull: pullJoinsAt is zero afterwards.
+	pullJoinsAt    time.Time
+	pullJoinsStep  int
+	pullSeed       packet.GUID
+	pullRow        raidwalk.PackRow
+	pullPackSeeded bool
+	pullPack       map[packet.GUID]bool
+	pullJoinsSeen  map[packet.GUID]bool
+	// pullJoins is the per-pull joiner record the report reads: one per pull
+	// step, in first-sight order. Written when the 10 s pull window closes.
+	pullJoins []raidwalk.PullJoiners
 	// Review round 3: statusSeq counts every received run status; resumeRun
 	// captures it before issuing the resume (resumeStatusSeq) so recoveredBoss
 	// can tell a fresh post-resume status from a retained pre-resume one.
@@ -675,6 +740,29 @@ type walk struct {
 	hiresLeft  []string
 }
 
+// bossKey identifies one boss step's record: the step when the run's status gave one (the row the run stood on),
+// else the boss's entry (a skip the pause path sent for a step the rows do not name).
+type bossKey struct {
+	step  int
+	entry uint32
+}
+
+// bossStepTrack is one boss step's record (spec 6, D5): the boss's entry, whether the run reported the encounter
+// engaged (its status kind was boss), whether the kill holds (`boss down` note or the walk's own skip), the guid
+// the frames showed the boss with and the entries that guid read while this step was tracked. The summary lists one
+// record per boss step; the last engaged one also fills the summary's single boss_kill field.
+type bossStepTrack struct {
+	entry    uint32
+	step     int
+	engaged  bool
+	killed   bool
+	skipped  bool
+	note     string
+	evidence string
+	guid     string
+	forms    []uint32
+}
+
 type hostileState struct {
 	entry    uint32
 	x, y, z  float32
@@ -710,7 +798,10 @@ func raidWalkRun(ctx context.Context, o raidWalkOptions, env walkEnv, deps walkD
 	deps.fillDefaults()
 	w := &walk{opts: o, env: env, deps: deps, stdout: stdout, stderr: stderr,
 		seenFights: map[string]bool{}, pendingFights: map[string]int{}, hostiles: map[string]hostileState{}, botAt: map[string]botPos{},
-		partyG: map[uint64]bool{}, bossSet: map[uint32]bool{}, bossRows: map[uint32]hostileState{}, hires: map[string]bool{}}
+		partyG: map[uint64]bool{}, bossSet: map[uint32]bool{}, bossRows: map[uint32]hostileState{}, hires: map[string]bool{},
+		bossAttemptAt: map[uint32]time.Time{}, bossAliveSeen: map[string]time.Time{}, bossCorpseSeen: map[string]time.Time{},
+		bossGUIDs: map[string]uint32{}, bossForms: map[string][]uint32{},
+		bossTracks: map[bossKey]*bossStepTrack{}}
 	return w.main(ctx)
 }
 
@@ -841,28 +932,45 @@ func (w *walk) validate() error {
 	// against the rows: it goes to the server exactly as before, so a step past the plan's own export is not refused
 	// here (review round 1, item 3).
 	startStep := 1
+	// untilBase is the step boss and boss-done untils resolve from: the start step, except when the place start
+	// fell back to an earlier leg (H2: the target leg's first row, so the until answers the target leg's boss).
+	untilBase := 1
 	if w.opts.from != "" && (w.opts.place || raidwalk.IsBossDone(w.opts.until)) {
 		n, err := raidwalk.FromStartStep(w.rows, w.fromWords)
 		if err != nil {
 			return stopf(exitUsage, "%v", err)
 		}
 		startStep = n
+		untilBase = n
 	}
 	if w.opts.place {
-		step, leg, err := raidwalk.PlaceStart(w.rows, w.fromWords)
+		step, leg, fallbackFrom, door, err := raidwalk.PlaceStart(w.rows, w.fromWords)
 		if err != nil {
 			return stopf(exitUsage, "%v", err)
 		}
-		p, ok := raidwalk.PlacePoint(w.rows, step)
-		if !ok {
-			return stopf(exitUsage, "--place: step %d of %s has no point", step, w.plan.Name)
+		if door {
+			w.note("place: leg %s is the first leg; starting from the door", leg)
+		} else {
+			if fallbackFrom != "" {
+				w.note("place: leg %s has no quiet row; placing at step %d (leg %s)", fallbackFrom, step, leg)
+			}
+			p, ok := raidwalk.PlacePoint(w.rows, step)
+			if !ok {
+				return stopf(exitUsage, "--place: step %d of %s has no point", step, w.plan.Name)
+			}
+			w.fromWords = []string{"from", "step", strconv.Itoa(step)}
+			startStep = step
+			w.place = &raidwalk.PlacePlan{Start: step, Leg: leg, Point: p, Skips: raidwalk.PlaceSkips(w.plan)}
 		}
-		w.fromWords = []string{"from", "step", strconv.Itoa(step)}
-		startStep = step
-		w.place = &raidwalk.PlacePlan{Start: step, Leg: leg, Point: p, Skips: raidwalk.PlaceSkips(w.plan)}
+		// H2: a fallback start stands before the target leg, so boss and boss-done untils resolve from the
+		// target leg's first row, never from the fallback start (the raid meets the earlier rows on its way in).
+		if fallbackFrom != "" {
+			untilBase = raidwalk.PlaceUntilBase(w.rows, fallbackFrom, startStep)
+		}
 	}
+	w.startStep = startStep
 	if raidwalk.IsBossDone(w.opts.until) {
-		clause, boss, err := raidwalk.BossDoneUntil(w.rows, startStep)
+		clause, boss, err := raidwalk.BossDoneUntil(w.rows, untilBase)
 		if err != nil {
 			return stopf(exitUsage, "%v", err)
 		}
@@ -880,15 +988,44 @@ func (w *walk) validate() error {
 		w.untilWords, w.untilLabel = words, label
 	}
 	if w.place != nil {
-		stop, err := raidwalk.PlaceStop(w.rows, w.untilWords, startStep)
+		// H2: the corridor runs from the TARGET leg's first row, so a boss until stops at the target
+		// leg's boss: resolve it from the until base, never from the fallback start. Other untils name
+		// their own row, so they resolve as usual.
+		corridorStart := startStep
+		if len(w.untilWords) == 2 && w.untilWords[0] == "until" && w.untilWords[1] == "boss" {
+			corridorStart = untilBase
+		}
+		stop, err := raidwalk.PlaceStop(w.rows, w.untilWords, corridorStart)
 		if err != nil {
 			return stopf(exitUsage, "%v", err)
 		}
-		clear := raidwalk.PlaceClear(w.rows, w.plan, startStep, stop)
+		// A BEHIND boss or hold row of an earlier leg on the route is alive in the raid's fresh copy: when the route
+		// passes one in a later leg, the run shortens its until to stop before that segment (D8). In the start step's
+		// own leg the placement is refused, as PlaceClear's own guard does. A hit on the last segment leaves until at
+		// the stop, so hit says the run must shorten anyway (an `--until none` run, or a boss-done that became none:
+		// its walk would otherwise walk into that segment).
+		until, routeEnd, gnote, refusal, hit := raidwalk.PlaceBossGuard(w.rows, startStep, stop)
+		if refusal != "" {
+			return stopf(exitUsage, "%v", refusal)
+		}
+		if hit && (until != stop || len(w.untilWords) == 0) {
+			if w.bossDoneStep != 0 && until <= w.bossDoneStep {
+				return stopf(exitUsage, "--place: %s; that is before the boss-done step %d", gnote, w.bossDoneStep)
+			}
+			words, label, err := raidwalk.ParseUntil(fmt.Sprintf("step %d", until))
+			if err != nil {
+				return stopf(exitUsage, "%v", err)
+			}
+			w.untilWords, w.untilLabel = words, label
+			w.placeShortened = true
+			w.note("place: %s", gnote)
+		}
+		clear := raidwalk.PlaceClear(w.rows, w.plan, startStep, routeEnd)
 		if clear.Refusal != "" {
 			return stopf(exitUsage, "%v", clear.Refusal)
 		}
-		w.place.Stop, w.place.Circles, w.place.Notes, w.place.Ahead = stop, clear.Circles, clear.Notes, clear.Ahead
+		// Stop is the until the dry run and the summary print; the corridor ended at routeEnd.
+		w.place.Stop, w.place.Circles, w.place.Notes, w.place.Ahead, w.place.Behind = until, clear.Circles, clear.Notes, clear.Ahead, clear.Behind
 		for _, n := range clear.Notes {
 			w.note("place: %s", n)
 		}
@@ -1223,7 +1360,11 @@ func (w *walk) printPlan(out io.Writer) {
 	if slot == "" {
 		slot = "any"
 	}
-	fmt.Fprintf(out, "until %s; from %s; enter %s; server %s slot %s holder %s\n", w.opts.until, from, w.opts.enter, w.opts.server, slot, w.opts.holder)
+	untilLine := w.opts.until
+	if w.placeShortened {
+		untilLine = fmt.Sprintf("%s (the place shortens it to %s)", untilLine, w.untilLabel)
+	}
+	fmt.Fprintf(out, "until %s; from %s; enter %s; server %s slot %s holder %s\n", untilLine, from, w.opts.enter, w.opts.server, slot, w.opts.holder)
 	outDir := slots.ExpandTilde(w.opts.out)
 	if outDir == "" {
 		outDir = "<out>"
@@ -1270,7 +1411,11 @@ func (w *walk) printPlan(out io.Writer) {
 			if c.PerUnit {
 				unit = fmt.Sprintf(" unit %d", c.Unit)
 			}
-			fmt.Fprintf(out, "  8b clear: row %d at %s %s %s r %s%s\n", c.Step, num32(c.X), num32(c.Y), num32(c.Z), num32(c.Radius), unit)
+			sweep := ""
+			if c.Sweep {
+				sweep = " (sweep)"
+			}
+			fmt.Fprintf(out, "  8b clear: row %d at %s %s %s r %s%s%s\n", c.Step, num32(c.X), num32(c.Y), num32(c.Z), num32(c.Radius), unit, sweep)
 		}
 		for _, n := range w.place.Notes {
 			fmt.Fprintf(out, "  8b note: %s\n", n)
@@ -1345,14 +1490,31 @@ func (w *walk) finish(code int) {
 		code = exitRaidWalkInjectFailed
 	}
 	w.exitCode = code
+	// The tracker's one-shot latch is the fallback when the run's statuses never named a boss step's kind as boss.
+	// It is inserted before the summary reads the tracks, so the single boss_kill field and the boss_kills list both
+	// carry it; a boss entry none of the rows is a boss row of (bossStepOf 0) is not recorded (L4).
+	if w.tracker != nil {
+		if entry, _, ok := w.tracker.BossEngaged(); ok {
+			if s := w.bossStepOf(entry); s > 0 {
+				w.bossTrackAt(s, entry).engaged = true
+			}
+		}
+	}
+	untilEffective := ""
+	if w.placeShortened {
+		untilEffective = w.untilLabel
+	}
 	meta := raidwalk.SummaryMeta{
 		Plan: w.plan.Name, Map: w.plan.Map, Server: w.opts.server, Slot: w.slotNumber(), Character: w.manifest.Character,
-		Until: w.opts.until, From: w.opts.from, Speed: w.opts.speed, TestSpeed: w.opts.speed != 1.0,
+		Until: w.opts.until, UntilEffective: untilEffective, From: w.opts.from, Speed: w.opts.speed, TestSpeed: w.opts.speed != 1.0,
 		RowsSHA256: rowsSHA256(w.rows), UntilStep: w.untilStep, RunLabel: w.runLabel, SpeedFellBack: w.speedFellBack,
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
-		Place:      w.placeSum,
-		TierSource: w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
+		Place:         w.placeSum,
+		BossKill:      w.bossKillSummary(),
+		BossKills:     w.bossKillSummaries(),
+		ReviveRefusal: w.reviveRefusal,
+		TierSource:    w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
 		WipeResumes: w.wipeResumes,
 	}
 	if w.inj != nil {
@@ -1369,10 +1531,22 @@ func (w *walk) finish(code int) {
 	if raw, err := json.MarshalIndent(sum, "", "  "); err == nil {
 		_ = w.writeOut("summary.json", append(raw, '\n'))
 	}
+	if raw, err := json.MarshalIndent(w.pullJoinsOrEmpty(), "", "  "); err == nil {
+		_ = w.writeOut(raidwalk.PullJoinersFName, append(raw, '\n'))
+	}
 	text := sum.Text()
 	_ = w.writeOut("summary.txt", []byte(text))
 	line := strings.SplitN(text, "\n", 2)[0]
 	fmt.Fprintf(w.stdout, "%s; out %s\n", line, w.outDir)
+}
+
+// pullJoinsOrEmpty is the walk's per-pull joiner record: never nil, so the
+// file the report reads is always a list.
+func (w *walk) pullJoinsOrEmpty() []raidwalk.PullJoiners {
+	if w.pullJoins == nil {
+		return []raidwalk.PullJoiners{}
+	}
+	return w.pullJoins
 }
 
 // sortedNames sorts a name list, for stable output.
@@ -1454,4 +1628,23 @@ func parseTeardownJSON(raw []byte) (teardownJSON, bool) {
 		return teardownJSON{Failed: 1}, false
 	}
 	return t, true
+}
+
+// teardownReason is the first failing teardown step with its detail ("gone: still in
+// view after 10 s: ..."), so summary.json says WHICH step failed instead of only that
+// one did. The derived lease-kept line is skipped: it only repeats the game-side fail.
+func teardownReason(t teardownJSON) string {
+	for _, s := range t.Steps {
+		if s.Status != "fail" && s.Status != "ending" {
+			continue
+		}
+		if s.Step == "lease" && strings.HasPrefix(s.Detail, "kept: game-side teardown failed") {
+			continue
+		}
+		if s.Detail != "" {
+			return s.Step + ": " + s.Detail
+		}
+		return s.Step + ": failed"
+	}
+	return "teardown failed"
 }
