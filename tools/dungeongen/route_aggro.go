@@ -17,12 +17,17 @@ import (
 	"math"
 	"sort"
 
+	"github.com/pjerra/turtle-agent/internal/aggroest"
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
 const (
+	// campShotYd is how far the tag spot may stand from the nearest unit of
+	// its own pack: the tank's shot (28.5 yd) less the 5 yd margin the run
+	// leader wants (spec 3.7).
+	campShotYd = 23.5
 	// defaultDetectionYd is the yards at which a spawn engages when the export carries no detection_range (draft exports
 	// predate the column).
 	defaultDetectionYd = 20
@@ -34,9 +39,10 @@ const (
 
 // routeAggroBuild carries the options the live rows need: DropCompanionsLoot plus CarrierChests (Zul'Farrak's zumrah
 // leg has companions_loot false and no chest stand-free form, so the plan is refused without them), plus GMCrossDirect
-// for the plan whose gap the run leader walks straight (upper Karazhan's outland_landing gm_cross via).
+// for the plan whose gap the run leader walks straight (upper Karazhan's outland_landing gm_cross via), plus CampPull
+// (a camp group's rows are the camp chain: the party fights at the camp, the tank walks the tag rows alone).
 func routeAggroBuild(p *dungeon.Plan) (planexport.Result, error) {
-	return planexport.Build(p, planexport.Options{DropCompanionsLoot: true, CarrierChests: true, GMCrossDirect: true})
+	return planexport.Build(p, planexport.Options{DropCompanionsLoot: true, CarrierChests: true, GMCrossDirect: true, CampPull: true})
 }
 
 // routePoint is one row that puts the party somewhere (a move, or the fight point of a pull or boss row). Each row
@@ -51,6 +57,8 @@ type routePoint struct {
 	seq        int // the export's step number (0-based within the leg)
 	kind       string
 	standPull  bool
+	campPull   bool
+	camp       bool // the camp move row itself (FlagCampPoint): the party walks there, the tank walks on alone
 	x, y, z    float32
 	px, py, pz float32
 	// entries and radius own the spawns this row pulls; idx is the row's absolute index in the route. ownerIdx is
@@ -82,6 +90,8 @@ func routePoints(p *dungeon.Plan) ([]routePoint, error) {
 		}
 		rp := routePoint{plan: s.Plan, leg: s.Leg, seq: s.Seq, kind: s.Kind,
 			standPull: (s.Kind == planexport.KindPull || s.Kind == planexport.KindBoss) && s.Flags&planexport.FlagStandPull != 0,
+			campPull:  s.Kind == planexport.KindPull && s.Flags&planexport.FlagCampPull != 0,
+			camp:      s.Kind == planexport.KindMove && s.Flags&planexport.FlagCampPoint != 0,
 			x:         s.X, y: s.Y, z: s.Z, px: s.X, py: s.Y, pz: s.Z,
 			entries: s.Entries, radius: s.Radius, item: s.Item, idx: len(out), ownerIdx: -1}
 		if rp.standPull {
@@ -92,6 +102,17 @@ func routePoints(p *dungeon.Plan) ([]routePoint, error) {
 				if prev := res.Rows.Steps[si-1]; prev.Plan == s.Plan && prev.Leg == s.Leg &&
 					(prev.Kind == planexport.KindMove || prev.Kind == planexport.KindMoveDirect || prev.Kind == planexport.KindMoveHopExact) {
 					rp.px, rp.py, rp.pz = prev.X, prev.Y, prev.Z
+				}
+			}
+		}
+		if rp.campPull {
+			// A camp pull is fought at its camp (the FlagCampPoint move row of the same leg): the party point is the
+			// camp's point, while the ownership point stays the row's point (the pack centre).
+			for j := si - 1; j >= 0; j-- {
+				if prev := res.Rows.Steps[j]; prev.Plan == s.Plan && prev.Leg == s.Leg &&
+					prev.Kind == planexport.KindMove && prev.Flags&planexport.FlagCampPoint != 0 {
+					rp.px, rp.py, rp.pz = prev.X, prev.Y, prev.Z
+					break
 				}
 			}
 		}
@@ -291,6 +312,188 @@ func RouteIntoLaterPacks(p *dungeon.Plan, cs []creature, ignore map[int]bool) ([
 			endLeg := b.leg
 			out = append(out, fmt.Sprintf("%s leg %d rows %d->%d (end leg %d): passes %.1f yd from %s (guid %d, entry %d) owned by %s",
 				p.Name, a.leg, a.seq, b.seq, endLeg, best, c.Name, c.GUID, c.Entry, own))
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// campChain returns the tag rows (the tank's walk-out, last = tag spot) and
+// the camp of the camp-pull chain the pull row at pts[i] ends. Empty when the
+// chain cannot be read (a plan the export refused): the caller then keeps the
+// plain geometry.
+func campChain(pts []routePoint, i int) (tag []dungeon.Point, camp dungeon.Point) {
+	leg := pts[i].leg
+	for j := i - 1; j >= 0 && pts[j].leg == leg; j-- {
+		q := pts[j]
+		if q.kind != planexport.KindMove {
+			break
+		}
+		if q.camp {
+			return tag, dungeon.Point{X: q.px, Y: q.py, Z: q.pz}
+		}
+		tag = append([]dungeon.Point{{X: q.px, Y: q.py, Z: q.pz}}, tag...)
+	}
+	return nil, dungeon.Point{}
+}
+
+// campTankReach is a spawn's wake reach for the tank-only walk: the repo's
+// aggro rule with the tank spread (1.5 yd) instead of the party's, plus the
+// spawn's wander. No NO_AGGRO spawn wakes.
+func campTankReach(p *dungeon.Plan, c creature) float64 {
+	det := c.DetectionRange
+	if det <= 0 {
+		det = defaultDetectionYd
+	}
+	s := worldspawn.Spawn{LevelMax: c.LevelMax, DetectionYd: float32(det), FlagsExtra: c.FlagsExtra, Wander: c.Wander}
+	return float64(worldspawn.AggroRadius(s, routePartyLevel(p), routeAggroRate)) + aggroest.TankSpreadYd + float64(c.Wander)
+}
+
+// CampPullFindings lints every camp chain of the plan's export rows (spec
+// 3.7): the tag spot must stand outside every own-pack unit's aggro reach
+// (no body pull of the tagged pack) and within shot (campShotYd) of the
+// nearest one; the tank's walk-out (the tag rows) must stand clear of every
+// spawn the pull does not own; the camp must stand on the cleared route (an
+// earlier row's party point, or within 10 yd of the polyline between two
+// earlier rows). One line per violation; a refused export is the caller's
+// error, never a finding.
+func CampPullFindings(p *dungeon.Plan, cs []creature, ignore map[int]bool) ([]string, error) {
+	pts, err := routePoints(p)
+	if err != nil {
+		return nil, err
+	}
+	var owners []routePoint
+	for _, q := range pts {
+		if q.ownerIdx >= 0 {
+			owners = append(owners, q)
+		}
+	}
+	byLeader := map[uint64][]creature{}
+	for _, c := range cs {
+		if c.GroupLeader != 0 {
+			byLeader[c.GroupLeader] = append(byLeader[c.GroupLeader], c)
+		}
+	}
+	ownerOf := map[uint64]routePoint{}
+	for _, c := range cs {
+		if o, ok := routeOwnerOf(owners, byLeader, c); ok {
+			ownerOf[c.GUID] = o
+		}
+	}
+	eligible := func(c creature) bool {
+		if c.NPCFlags != 0 || ignore[c.Faction] || c.LevelMax <= 1 {
+			return false
+		}
+		return c.FlagsExtra&worldspawn.NoAggro == 0
+	}
+	var out []string
+	pullNum := map[int]int{}
+	for i, rp := range pts {
+		if rp.kind != planexport.KindPull {
+			continue
+		}
+		pullNum[rp.leg]++
+		if !rp.campPull {
+			continue
+		}
+		n := pullNum[rp.leg]
+		tag, camp := campChain(pts, i)
+		if len(tag) == 0 {
+			continue
+		}
+		spot := tag[len(tag)-1]
+		nearest := math.MaxFloat64
+		for _, c := range cs {
+			if !eligible(c) {
+				continue
+			}
+			o, ok := ownerOf[c.GUID]
+			if !ok || o.idx != rp.idx {
+				continue
+			}
+			d := dist(c.Pos, spot)
+			if d < nearest {
+				nearest = d
+			}
+			if reach := campTankReach(p, c); d < reach+1 {
+				out = append(out, fmt.Sprintf("%s leg %d pull %d: tag spot %.1f yd from %s (guid %d, entry %d, reach %.1f): it body-pulls its own pack",
+					p.Name, rp.leg, n, d, c.Name, c.GUID, c.Entry, reach))
+			}
+		}
+		if nearest == math.MaxFloat64 {
+			out = append(out, fmt.Sprintf("%s leg %d pull %d: tag spot owns no spawn of its pull", p.Name, rp.leg, n))
+		} else if nearest > campShotYd {
+			out = append(out, fmt.Sprintf("%s leg %d pull %d: tag spot %.1f yd from its nearest pack unit (over the %g yd shot)", p.Name, rp.leg, n, nearest, campShotYd))
+		}
+		for _, c := range cs {
+			if !eligible(c) {
+				continue
+			}
+			if o, ok := ownerOf[c.GUID]; ok && o.idx == rp.idx {
+				continue
+			}
+			best := math.MaxFloat64
+			for k := range tag {
+				a := camp
+				if k > 0 {
+					a = tag[k-1]
+				} else {
+					// The walk-out starts at the camp: the first tag row is walked from there.
+					a = camp
+				}
+				b := tag[k]
+				dx, dy, dz := float64(b.X-a.X), float64(b.Y-a.Y), float64(b.Z-a.Z)
+				seg := int(math.Ceil(math.Sqrt(dx*dx+dy*dy+dz*dz) / routeAggroStep))
+				if seg < 1 {
+					seg = 1
+				}
+				for s := 0; s <= seg; s++ {
+					t := float64(s) / float64(seg)
+					sx, sy, sz := float64(a.X)+t*dx, float64(a.Y)+t*dy, float64(a.Z)+t*dz
+					ddx, ddy, ddz := float64(c.Pos.X)-sx, float64(c.Pos.Y)-sy, float64(c.Pos.Z)-sz
+					if d := math.Sqrt(ddx*ddx + ddy*ddy + ddz*ddz); d < best {
+						best = d
+					}
+				}
+			}
+			if reach := campTankReach(p, c); best < reach {
+				out = append(out, fmt.Sprintf("%s leg %d pull %d: tank walk passes %.1f yd from %s (guid %d, entry %d, reach %.1f): it wakes another pack",
+					p.Name, rp.leg, n, best, c.Name, c.GUID, c.Entry, reach))
+			}
+		}
+		cleared := false
+		for j := 0; j < i && !cleared; j++ {
+			q := pts[j]
+			switch q.kind {
+			case planexport.KindMove, planexport.KindMoveDirect, planexport.KindMoveHopExact,
+				planexport.KindPull, planexport.KindBoss, planexport.KindHold:
+			default:
+				continue
+			}
+			if dist(camp, dungeon.Point{X: q.px, Y: q.py, Z: q.pz}) <= 10 {
+				cleared = true
+				break
+			}
+			if j+1 < i {
+				r := pts[j+1]
+				dx, dy, dz := float64(r.px-q.px), float64(r.py-q.py), float64(r.pz-q.pz)
+				seg := int(math.Ceil(math.Sqrt(dx*dx+dy*dy+dz*dz) / routeAggroStep))
+				if seg < 1 {
+					seg = 1
+				}
+				for s := 0; s <= seg; s++ {
+					t := float64(s) / float64(seg)
+					sx, sy, sz := float64(q.px)+t*dx, float64(q.py)+t*dy, float64(q.pz)+t*dz
+					ddx, ddy, ddz := float64(camp.X)-sx, float64(camp.Y)-sy, float64(camp.Z)-sz
+					if math.Sqrt(ddx*ddx+ddy*ddy+ddz*ddz) <= 10 {
+						cleared = true
+						break
+					}
+				}
+			}
+		}
+		if !cleared {
+			out = append(out, fmt.Sprintf("%s leg %d pull %d: camp is not on the cleared route (over 10 yd from every earlier row)", p.Name, rp.leg, n))
 		}
 	}
 	sort.Strings(out)

@@ -370,3 +370,30 @@ func TestParsePhaseEntriesClashes(t *testing.T) {
 		}
 	}
 }
+
+// TestCampValidation: each camp refusal names the field; a clean camp group loads.
+func TestCampValidation(t *testing.T) {
+	base := `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[{"name":"a","to":{"x":0,"y":0,"z":0},
+	 "pull_groups":[{"entries":[5],"positions":[{"x":50,"y":0,"z":0}]%s}]}]}`
+	good := `,"camp":{"x":0,"y":0,"z":0},"approach":[{"x":20,"y":0,"z":0},{"x":40,"y":0,"z":0}]`
+	p, err := Parse("t.json", []byte(fmt.Sprintf(base, good)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := p.Legs[0].PullGroups[0]
+	if g.Camp == nil || g.Camp.X != 0 || len(g.Approach) != 2 {
+		t.Fatalf("%+v: want the camp and the two tag rows", g)
+	}
+	for name, bad := range map[string]string{
+		"stand_pull":  `,"camp":{"x":0,"y":0,"z":0},"approach":[{"x":40,"y":0,"z":0}],"stand_pull":true`,
+		"hold":        `,"camp":{"x":0,"y":0,"z":0},"approach":[{"x":40,"y":0,"z":0}],"hold":{"instance_data":1,"spot":{"x":1,"y":0,"z":0},"radius":30,"timeout_s":600}`,
+		"ambush":      `,"camp":{"x":0,"y":0,"z":0},"approach":[{"x":40,"y":0,"z":0}],"ambush":true`,
+		"no approach": `,"camp":{"x":0,"y":0,"z":0}`,
+		"drag 51":     `,"camp":{"x":0,"y":0,"z":0},"approach":[{"x":-11,"y":0,"z":0}]`,
+		"tag far":     `,"camp":{"x":100,"y":0,"z":0},"approach":[{"x":111,"y":0,"z":0}]`,
+	} {
+		if _, err := Parse("t.json", []byte(fmt.Sprintf(base, bad))); err == nil || !strings.Contains(err.Error(), "camp") {
+			t.Errorf("%s: parse error %v (want the camp refusal)", name, err)
+		}
+	}
+}

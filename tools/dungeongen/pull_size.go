@@ -113,6 +113,24 @@ func PullSizes(p *dungeon.Plan, cs []creature, w *worldspawn.World) ([]PullFindi
 			Stand:         dungeon.Point{X: rp.px, Y: rp.py, Z: rp.pz},
 			StandSpreadYd: stand,
 		}
+		if rp.campPull {
+			// A camp pull is fought at the camp: the fight point is the
+			// camp, the stand is the tag spot, the tank-only walk is the
+			// tag rows, and the drag runs tag rows reversed back to camp.
+			tag, camp := campChain(pts, i)
+			g.HasFight, g.Fight = true, dungeon.Point{X: rp.px, Y: rp.py, Z: rp.pz}
+			g.FightSpreadYd = stand
+			if len(tag) > 0 {
+				g.Stand = tag[len(tag)-1]
+				g.TankWalk, g.TankSpreadYd = tag, float32(aggroest.TankSpreadYd)
+				var drag []dungeon.Point
+				for j := len(tag) - 1; j >= 0; j-- {
+					drag = append(drag, tag[j])
+				}
+				drag = append(drag, camp)
+				g.Drag = drag
+			}
+		}
 		res := aggroest.Estimate(mobs, target, g, aggroest.Params{
 			PartyLevel: routePartyLevel(p), Rate: routeAggroRate,
 			RingYd: aggroest.RingYd, RingHops: aggroest.RingHops, FloorDz: aggroest.FloorDz,

@@ -250,6 +250,13 @@ func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool
 	for _, f := range sized {
 		ws = append(ws, f.Summary)
 	}
+	// The camp pull lint (spec 3.7): the tag spot, the tank's walk-out and
+	// the camp of every camp chain. An unreadable export fails the check.
+	camped, cerr := CampPullFindings(p, cs, map[int]bool{35: true})
+	if cerr != nil {
+		return fail(fmt.Errorf("camp_pull: %w", cerr))
+	}
+	ws = append(ws, camped...)
 	for _, w := range ws {
 		fmt.Println("warning:", w)
 	}

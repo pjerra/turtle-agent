@@ -368,3 +368,99 @@ func TestNoRouteSegmentPassesALaterPack(t *testing.T) {
 		t.Errorf("only %d hand-written plans checked", checked)
 	}
 }
+
+// A camp pull's tag spot 18 yd from a level-60 pack unit is an error (the
+// tank body-pulls its own pack); the tank's walk past another pack wakes it;
+// the pull_size geometry fights at the camp.
+func TestCampTagSpotOutsideOwnPackReach(t *testing.T) {
+	p := &dungeon.Plan{Name: "probe", Map: 1, LevelBand: []int{60, 60}, Entrance: dungeon.Point{},
+		Legs: []dungeon.Leg{{
+			Name: "a", To: dungeon.Point{X: -40},
+			PullGroups: []dungeon.PullGroup{
+				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 0}}, Radius: 5,
+					Camp:     &dungeon.Point{X: -40},
+					Approach: []dungeon.Point{{X: -20}, {X: -18}}},
+			},
+		}}}
+	cs := []creature{
+		{GUID: 1, Entry: 1, Name: "Pack", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 0}},
+	}
+	got, err := CampPullFindings(p, cs, map[int]bool{35: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, s := range got {
+		if strings.Contains(s, "body-pulls its own pack") && strings.Contains(s, "guid 1") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("a tag 18 yd from its own pack unit is no finding: %v", got)
+	}
+	// Pulled back to 30 yd the tag is clean of the pack but past the shot.
+	p.Legs[0].PullGroups[0].Approach[1] = dungeon.Point{X: -30}
+	got, err = CampPullFindings(p, cs, map[int]bool{35: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range got {
+		if strings.Contains(s, "body-pulls") {
+			t.Fatalf("a tag 30 yd out body-pulls nothing: %v", got)
+		}
+	}
+	found = false
+	for _, s := range got {
+		if strings.Contains(s, "over the 23.5 yd shot") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("a tag 30 yd from its pack is past the shot: %v", got)
+	}
+}
+
+// The tank's walk-out must stand clear of other packs: a foreign spawn 5 yd
+// off the camp->tag line is a finding; 30 yd off it is not.
+func TestCampTankWalkClearOfOtherPacks(t *testing.T) {
+	p := &dungeon.Plan{Name: "probe", Map: 1, LevelBand: []int{60, 60}, Entrance: dungeon.Point{},
+		Legs: []dungeon.Leg{{
+			Name: "a", To: dungeon.Point{X: -40},
+			PullGroups: []dungeon.PullGroup{
+				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 0}}, Radius: 5,
+					Camp:     &dungeon.Point{X: -40},
+					Approach: []dungeon.Point{{X: -20}}},
+				{Entries: []uint32{2}, Positions: []dungeon.Point{{X: -20, Y: 30}}, Radius: 5},
+			},
+		}}}
+	near := []creature{
+		{GUID: 1, Entry: 1, Name: "Pack", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 0}},
+		{GUID: 2, Entry: 2, Name: "Other", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: -25, Y: 5}},
+	}
+	got, err := CampPullFindings(p, near, map[int]bool{35: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, s := range got {
+		if strings.Contains(s, "wakes another pack") && strings.Contains(s, "guid 2") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the walk 5 yd off another pack is no finding: %v", got)
+	}
+	far := []creature{
+		{GUID: 1, Entry: 1, Name: "Pack", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 0}},
+		{GUID: 2, Entry: 2, Name: "Other", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: -20, Y: 30}},
+	}
+	got, err = CampPullFindings(p, far, map[int]bool{35: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range got {
+		if strings.Contains(s, "wakes another pack") {
+			t.Fatalf("a far pack is no finding: %v", got)
+		}
+	}
+}
