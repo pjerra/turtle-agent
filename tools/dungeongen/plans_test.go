@@ -380,9 +380,24 @@ func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
 	if len(leg.PullGroups) < 2 {
 		t.Fatalf("%d pull groups", len(leg.PullGroups))
 	}
-	// (b) raid clearance: S0 (pack 0's approach point) clears every STATIC unit of pack 0 and every unit of pack 1,
-	// and S1 (pack 1's stand) clears pack 1. Both rows have an approach.
-	stands := make([]dungeon.Point, 2)
+	// The leg pulls pack 1 first (walk 26b's order fix: TestZulGurubMarliStep203RouteClearOfLaterPacks); the two
+	// groups are named by the pack they pull, not by their index.
+	g0, g1 := -1, -1
+	for i, g := range leg.PullGroups[:2] {
+		for _, c := range standPullPack(g, cs) {
+			if c.GroupLeader == 49202 || c.GUID == 49202 {
+				g0 = i
+			} else if c.GroupLeader == 49201 || c.GUID == 49246 {
+				g1 = i
+			}
+		}
+	}
+	if g0 < 0 || g1 < 0 || g0 == g1 {
+		t.Fatalf("leg 2's first two groups do not pull pack 0 and pack 1 (pack0 group %d, pack1 group %d)", g0, g1)
+	}
+	// (b) raid clearance: the pack-0 group's stand clears every STATIC unit of pack 0 and every unit of pack 1, and
+	// the pack-1 group's stand clears pack 1. Both rows have an approach.
+	stands := map[int]dungeon.Point{}
 	for i, g := range leg.PullGroups[:2] {
 		if len(g.Approach) == 0 {
 			t.Errorf("pull_groups[%d] has no stand (approach point)", i)
@@ -403,18 +418,19 @@ func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
 			static0 = append(static0, c)
 		}
 	}
-	check(0, append(append([]creature{}, static0...), pack1...), marliStandYd)
-	// The patroller 49202's own SPAWN is the one exception to marliStandYd for S0: the patroller belongs to the very
-	// pack group 0's plain pull wakes (the pull walks the gathered party to a firing stand in the pack's shot), so its
-	// spawn is inside the pack this row pulls by design, and only has to stay out of the band that woke it in walk 25.
+	check(g0, append(append([]creature{}, static0...), pack1...), marliStandYd)
+	// The patroller 49202's own SPAWN is the one exception to marliStandYd for the pack-0 stand: the patroller
+	// belongs to the very pack this plain pull wakes (the pull walks the gathered party to a firing stand in the
+	// pack's shot), so its spawn is inside the pack this row pulls by design, and only has to stay out of the band
+	// that woke it in walk 25.
 	for _, c := range pack0 {
 		if c.Patrol {
-			if d := dist(stands[0], c.Pos); d < marliPatrollerSpawnYd {
-				t.Errorf("pull_groups[0] approach %.1f %.1f %.1f is %.1f yd from the patroller %s %d's spawn, want >= %d", stands[0].X, stands[0].Y, stands[0].Z, d, c.Name, c.GUID, marliPatrollerSpawnYd)
+			if d := dist(stands[g0], c.Pos); d < marliPatrollerSpawnYd {
+				t.Errorf("pull_groups[%d] approach %.1f %.1f %.1f is %.1f yd from the patroller %s %d's spawn, want >= %d", g0, stands[g0].X, stands[g0].Y, stands[g0].Z, d, c.Name, c.GUID, marliPatrollerSpawnYd)
 			}
 		}
 	}
-	check(1, pack1, marliStandYd)
+	check(g1, pack1, marliStandYd)
 	// (c) pull reachability: every stand-pull row of the leg reaches its pack's patrollers from the stand.
 	for i, g := range leg.PullGroups {
 		if !g.StandPull {
@@ -431,14 +447,14 @@ func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
 		}
 	}
 	// (d) the kinds of the two rows (SPEC-1-AMEND): pack 0 is a plain pull from S0, pack 1 keeps the stand pull.
-	if leg.PullGroups[0].StandPull {
-		t.Errorf("pull_groups[0] is a stand pull: its leader 49202 walks a loop that never comes within the gate's 27.5 yd of S0, so the gate would wait 600 s and pause the run; the pack is a plain pull from the stand")
+	if leg.PullGroups[g0].StandPull {
+		t.Errorf("pull_groups[%d] (pack 0) is a stand pull: its leader 49202 walks a loop that never comes within the gate's 27.5 yd of S0, so the gate would wait 600 s and pause the run; the pack is a plain pull from the stand", g0)
 	}
-	if !leg.PullGroups[1].StandPull {
-		t.Errorf("pull_groups[1] is not a stand pull: it keeps one for its patrol clearance (a stand pull carries the row's clear_yd in its param)")
+	if !leg.PullGroups[g1].StandPull {
+		t.Errorf("pull_groups[%d] (pack 1) is not a stand pull: it keeps one for its patrol clearance (a stand pull carries the row's clear_yd in its param)", g1)
 	}
-	// (e) the exporter's own --approach-hops cut must not put a row of leg 2 inside pack 0's aggro before group 0's
-	// pull row. With the old S0 -12245.333 -1685.3334 the hop to the row centre -12300.49 -1685.68 was 55.16 yd, past
+	// (e) the exporter's own --approach-hops cut must not put a row of leg 2 inside pack 0's aggro before the first
+	// spider pull row. With the old S0 -12245.333 -1685.3334 the hop to the row centre -12300.49 -1685.68 was 55.16 yd, past
 	// the run leader's 50 yd reach (dungeon.RunLeaderReachYd), so cutLongHops walked the navmesh and left a row at
 	// -12275.199 -1686.1334, 14.1 yd from the patroller 49202's spawn and 17.1 from the static Venombrood 49771: the
 	// party walked into pack 0 on a MOVE row, before the pull step, so no pull line and no Polymorph went out. The new
@@ -663,3 +679,364 @@ func readMovementPaths(path string) (map[uint64][]dungeon.Point, error) {
 	}
 	return out, r.err
 }
+
+// marliLaterPackYd is how far the step 203 stand and the routes to and from it keep from every pack pulled later:
+// 20 yd is the detection of these spiders (Creature::GetAttackDistance: detection_range 20 minus the level
+// difference; packs 0-1 are level 56-61 against a level-60 raid). The walk-26b wake happened at 6.9-9.6 yd from
+// 49202's dragged path, well inside the 10 yd family-assistance ring (CreatureFamilyAssistanceRadius).
+const marliLaterPackYd = 20
+
+// TestZulGurubMarliStep203RouteClearOfLaterPacks: walk 26b's step 203 pulled pack 0 from a stand 35.3 yd from the
+// nearest pack-1 spawn and 19.0 yd from 49202's patrol loop, and pack 1 still woke: 23 hostiles within 20 yd, 20 dead
+// in 35 s (TortoiseBots-audit tests/raid-zg-walk26b; research/zg-w26/MARLI-203.md). The frames show the chain is not
+// the camp's distance. Pack 0's leader 49202 is level 56 with detection 20-4 = 16 yd, but it is aggro-together with
+// pack 0 (creature_groups flags 14 = aggro/evade/respawn together, CreatureGroups.h): at 01:07:21Z it stood on its
+// loop at -12308.3 -1624.2, 62.4 yd from any bot, and fought anyway. Its run to the camp passed -12299.5 -1647.2,
+// 6.9 yd from the Venombrood 49251 and 9.6 yd from 49248, inside the 10 yd CallAssistance ring that carries the tank
+// as victim to 49248/49251; their group woke the other nine. No stand in this courtyard keeps that run out (the 81
+// floor points within the 23.5 yd shot of an 11338, >= 22 yd from pack 1 and >= 20 yd from 49202's loop all leave the
+// loop-to-camp run within 11.1 yd of pack 1; the loop itself comes within 12.1 yd of 49251), so the fix is the ORDER:
+// pull pack 1 first from its stand S1, then pack 0. This pins that order and that the step-203 stand and the route
+// from the `to` to it stay marliLaterPackYd clear of every pack pulled later, 49202's whole patrol loop included.
+// Red first on the base plan (step 203 pulls pack 0). After the order change the firing stand the run leader reads for
+// pack 1 (23.5 yd from the target, which three Polymorphs push onto the Broodwidow 49250) is 20.0 yd from 49202's
+// loop: it is logged below as the validation walk's watch item, not asserted, because it is the run leader's choice
+// and not a plan point.
+func TestZulGurubMarliStep203RouteClearOfLaterPacks(t *testing.T) {
+	p, err := dungeon.Load(filepath.Join(plansDirT, "zul_gurub.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, err := readCreatures(filepath.Join("testdata", "map309", "creatures.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	movement, err := readMovementPaths(filepath.Join("testdata", "map309", "movement.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	formations := map[uint64][]creature{}
+	var leaders []uint64
+	for _, c := range cs {
+		lead := c.GroupLeader
+		if lead == 0 {
+			lead = c.GUID
+		}
+		if _, ok := formations[lead]; !ok {
+			leaders = append(leaders, lead)
+		}
+		formations[lead] = append(formations[lead], c)
+	}
+	const pack0, pack1 = uint64(49202), uint64(49201)
+	if len(formations[pack0]) != 9 || len(formations[pack1]) != 11 {
+		t.Fatalf("formations: pack 0 has %d spawns (want 9), pack 1 %d (want 11)", len(formations[pack0]), len(formations[pack1]))
+	}
+	// patrolLoops: each patrolling member's loop with its spawn first and last (the walk out and back is its patrol).
+	patrolLoops := func(lead uint64) [][]dungeon.Point {
+		var out [][]dungeon.Point
+		for _, c := range formations[lead] {
+			if !c.Patrol {
+				continue
+			}
+			loop, ok := movement[c.GUID]
+			if !ok || len(loop) == 0 {
+				continue
+			}
+			out = append(out, append(append([]dungeon.Point{c.Pos}, loop...), c.Pos))
+		}
+		return out
+	}
+	clearance := func(p dungeon.Point, lead uint64) (float64, string) {
+		best, who := math.Inf(1), ""
+		for _, c := range formations[lead] {
+			if d := dist(p, c.Pos); d < best {
+				best, who = d, fmt.Sprintf("%s %d at %.1f %.1f %.1f", c.Name, c.GUID, c.Pos.X, c.Pos.Y, c.Pos.Z)
+			}
+		}
+		for _, loop := range patrolLoops(lead) {
+			if d := closestOnLoop(p, loop); d < best {
+				best, who = d, fmt.Sprintf("the patrol from %.1f %.1f (formation %d)", loop[0].X, loop[0].Y, lead)
+			}
+		}
+		return best, who
+	}
+	var leg *dungeon.Leg
+	for i := range p.Legs {
+		if p.Legs[i].Name == "high_priestess_marli" {
+			leg = &p.Legs[i]
+		}
+	}
+	if leg == nil {
+		t.Fatal("no high_priestess_marli leg")
+	}
+	res, err := planexport.Build(p, planexport.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var leg2 []planexport.StepRow
+	for _, s := range res.Rows.Steps {
+		if s.Leg == 2 {
+			leg2 = append(leg2, s)
+		}
+	}
+	rowOwns := func(row planexport.StepRow, lead uint64) bool {
+		for _, c := range formations[lead] {
+			if slices.Contains(row.Entries, c.Entry) && rowDist(row, c) <= float64(row.Radius) {
+				return true
+			}
+		}
+		return false
+	}
+	var spider []planexport.StepRow
+	var spiderGroup []int
+	for _, s := range leg2 {
+		if s.Kind != planexport.KindPull {
+			continue
+		}
+		g := -1
+		if _, err := fmt.Sscanf(s.Comment, "pull group %d", &g); err != nil || g < 0 || g > 1 {
+			continue
+		}
+		spider = append(spider, s)
+		spiderGroup = append(spiderGroup, g)
+	}
+	if len(spider) != 2 {
+		t.Fatalf("leg 2 has %d pull rows for groups 0-1, want 2", len(spider))
+	}
+	first, second := spider[0], spider[1]
+	if !rowOwns(first, pack1) || !rowOwns(second, pack0) {
+		t.Errorf("leg 2 pulls %q first and %q second: pack 1 (49201) must be pulled before pack 0 (49202), because pulling pack 0 first drags 49202 through pack 1's 10 yd assistance ring (walk 26b: 23 hostiles, 20 dead in 35 s)",
+			first.Comment, second.Comment)
+	}
+	// The step-203 stand and the packs a later pull row owns.
+	stand := leg.PullGroups[spiderGroup[0]].Approach[len(leg.PullGroups[spiderGroup[0]].Approach)-1]
+	var later []uint64
+	seen := map[uint64]bool{}
+	after := false
+	for _, s := range leg2 {
+		if s.Seq > first.Seq && s.Kind == planexport.KindPull {
+			for _, lead := range leaders {
+				if rowOwns(s, lead) && !seen[lead] {
+					seen[lead] = true
+					later = append(later, lead)
+				}
+			}
+		}
+		if s.Seq == first.Seq {
+			after = true
+		}
+	}
+	_ = after
+	if len(later) == 0 {
+		t.Fatal("no pack is pulled after step 203")
+	}
+	minLater := func(at dungeon.Point) (float64, string) {
+		best, what := math.Inf(1), ""
+		for _, lead := range later {
+			if d, w := clearance(at, lead); d < best {
+				best, what = d, w
+			}
+		}
+		return best, what
+	}
+	if d, what := minLater(stand); d < marliLaterPackYd {
+		t.Errorf("step 203 stand %.1f %.1f %.1f is %.1f yd from %s, want >= %d", stand.X, stand.Y, stand.Z, d, what, marliLaterPackYd)
+	}
+	// The route: the move rows from the leg's first move through the last spider pull. A walk must keep
+	// marliLaterPackYd from the packs a pull row AFTER the one it approaches owns (the pack it approaches comes next;
+	// its firing stand is 23.5 yd from it by design).
+	var moves, pulls []planexport.StepRow
+	for _, s := range leg2 {
+		if s.Seq > second.Seq {
+			if s.Kind == planexport.KindPull {
+				pulls = append(pulls, s)
+			}
+			continue
+		}
+		switch s.Kind {
+		case planexport.KindMove, planexport.KindMoveDirect:
+			moves = append(moves, s)
+		case planexport.KindPull:
+			pulls = append(pulls, s)
+		}
+	}
+	if len(moves) < 3 {
+		t.Fatalf("%d move rows before the second spider pull, want at least 3", len(moves))
+	}
+	pl := marliPlannerOrNil(t)
+	if pl != nil {
+		defer pl.Close()
+	} else {
+		t.Log("no map 309 navmesh files: the polyline route check is skipped (set TURTLE_AGENT_MMAPS); the straight segments below always run")
+	}
+	worstSample := func(samples []dungeon.Point, fams []uint64) (float64, string, dungeon.Point) {
+		best, who, at := math.Inf(1), "", dungeon.Point{}
+		for _, s := range samples {
+			for _, lead := range fams {
+				if d, w := clearance(s, lead); d < best {
+					best, who, at = d, w, s
+				}
+			}
+		}
+		return best, who, at
+	}
+	for i := 0; i+1 < len(moves); i++ {
+		a, b := moves[i], moves[i+1]
+		next := -1
+		for j, s := range pulls {
+			if s.Seq > b.Seq {
+				next = j
+				break
+			}
+		}
+		if next < 0 || next+1 >= len(pulls) {
+			continue
+		}
+		var fams []uint64
+		for _, s := range pulls[next+1:] {
+			for _, lead := range leaders {
+				if rowOwns(s, lead) && !slices.Contains(fams, lead) {
+					fams = append(fams, lead)
+				}
+			}
+		}
+		straight := samplesAlong(rowPoint(a), rowPoint(b), 2)
+		if d, who, at := worstSample(straight, fams); d < marliLaterPackYd {
+			t.Errorf("leg 2 rows %d (%s %.1f %.1f) -> %d (%s %.1f %.1f) pass %.1f yd from %s at %.1f %.1f: %.0f yd wanted",
+				a.Seq, a.Comment, a.X, a.Y, b.Seq, b.Comment, b.X, b.Y, d, who, at.X, at.Y, float64(marliLaterPackYd))
+		} else {
+			t.Logf("leg 2 rows %d (%s) -> %d (%s): straight min %.1f yd", a.Seq, a.Comment, b.Seq, b.Comment, d)
+		}
+		if pl == nil {
+			continue
+		}
+		poly, ok := marliPolyline(pl, p.Map, rowPoint(a), rowPoint(b))
+		if !ok {
+			continue
+		}
+		if d, who, at := worstSample(poly, fams); d < marliLaterPackYd {
+			t.Errorf("leg 2 rows %d (%s %.1f %.1f) -> %d (%s %.1f %.1f) walk the navmesh %.1f yd from %s at %.1f %.1f: %.0f yd wanted",
+				a.Seq, a.Comment, a.X, a.Y, b.Seq, b.Comment, b.X, b.Y, d, who, at.X, at.Y, float64(marliLaterPackYd))
+		}
+	}
+	// Watch item, logged only: the firing stand the run leader reads for pack 1 is 23.5 yd from its pull target; with
+	// three Polymorphs on the nearest Venombroods the target is the Broodwidow 49250 (walk 26b pulled 11370 guid
+	// ...c062 at step 204). Its stand's clearance to 49202's loop is the number the validation walk must watch.
+	if pl != nil {
+		var nonCC []creature
+		for _, c := range formations[pack1] {
+			if c.Entry != 14532 {
+				nonCC = append(nonCC, c)
+			}
+		}
+		for _, target := range nonCC {
+			camp := marliFiringStands(pl, p.Map, stand, []creature{target})[0]
+			d, what := clearance(camp, pack0)
+			t.Logf("watch: step 203's firing stand for %s %d (%.1f %.1f) is %.1f yd from %s, want >= %d (the spread round the camp closes it)", target.Name, target.GUID, camp.X, camp.Y, d, what, marliLaterPackYd)
+		}
+	}
+}
+
+// marliPlannerOrNil is the server's navmesh for the Mar'li checks ($TURTLE_AGENT_MMAPS or ~/turtle-agent-mmaps);
+// nil without one, so the straight-line checks always run and the caller logs the skipped polyline check.
+func marliPlannerOrNil(t *testing.T) *navmesh.Planner {
+	t.Helper()
+	home, _ := os.UserHomeDir()
+	for _, dir := range []string{os.Getenv("TURTLE_AGENT_MMAPS"), filepath.Join(home, "turtle-agent-mmaps")} {
+		if dir == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, "309.mmap")); err != nil {
+			continue
+		}
+		if tiles, _ := filepath.Glob(filepath.Join(dir, "309*.mmtile")); len(tiles) == 0 {
+			continue
+		}
+		return navmesh.NewPlanner(dir)
+	}
+	return nil
+}
+
+// marliFiringStands is the run leader's firing stand for each spawn of a pack: a point 23.5 yd from it (leadShotYd
+// 28.5 less the 5 yd shot margin) on the path from the stand; the stand itself when the spawn is already within
+// 23.5 yd.
+func marliFiringStands(pl *navmesh.Planner, mapID uint32, stand dungeon.Point, pack []creature) []dungeon.Point {
+	var out []dungeon.Point
+	for _, c := range pack {
+		var pts []dungeon.Point
+		if pl != nil {
+			if path, err := pl.Plan(mapID, navmesh.Vec3{stand.X, stand.Y, stand.Z}, navmesh.Vec3{c.Pos.X, c.Pos.Y, c.Pos.Z}); err == nil && path.Status == navmesh.Complete && len(path.Points) >= 2 {
+				for _, v := range path.Points {
+					pts = append(pts, dungeon.Point{X: v[0], Y: v[1], Z: v[2]})
+				}
+			}
+		}
+		if len(pts) == 0 {
+			pts = []dungeon.Point{stand, c.Pos}
+		}
+		at := stand
+		left := 23.5
+		cur := c.Pos
+		for i := len(pts) - 2; i >= 0; i-- {
+			prev := pts[i]
+			d := dist(cur, prev)
+			if d >= left && d > 0 {
+				f := float32(left / d)
+				at = dungeon.Point{X: cur.X + (prev.X-cur.X)*f, Y: cur.Y + (prev.Y-cur.Y)*f, Z: cur.Z + (prev.Z-cur.Z)*f}
+				left = 0
+				break
+			}
+			left -= d
+			cur = prev
+		}
+		out = append(out, at)
+	}
+	return out
+}
+
+// samplesAlong returns the points of the straight segment a-b every step yd, both ends included.
+func samplesAlong(a, b dungeon.Point, step float64) []dungeon.Point {
+	n := int(math.Ceil(dist(a, b) / step))
+	if n < 1 {
+		n = 1
+	}
+	out := make([]dungeon.Point, 0, n+1)
+	for k := 0; k <= n; k++ {
+		f := float32(float64(k) / float64(n))
+		out = append(out, dungeon.Point{X: a.X + (b.X-a.X)*f, Y: a.Y + (b.Y-a.Y)*f, Z: a.Z + (b.Z-a.Z)*f})
+	}
+	return out
+}
+
+// marliPolyline plans the walk a->b on the server's navmesh and samples it every yard; false without a complete path.
+func marliPolyline(pl *navmesh.Planner, mapID uint32, a, b dungeon.Point) ([]dungeon.Point, bool) {
+	path, err := pl.Plan(mapID, navmesh.Vec3{a.X, a.Y, a.Z}, navmesh.Vec3{b.X, b.Y, b.Z})
+	if err != nil || path.Status != navmesh.Complete || len(path.Points) < 1 {
+		return nil, false
+	}
+	var out []dungeon.Point
+	for i := 0; i+1 < len(path.Points); i++ {
+		from, to := path.Points[i], path.Points[i+1]
+		d := math.Sqrt(float64(sq32(to[0]-from[0]) + sq32(to[1]-from[1]) + sq32(to[2]-from[2])))
+		n := int(math.Ceil(d))
+		if n < 1 {
+			n = 1
+		}
+		for k := 0; k <= n; k++ {
+			f := float32(float64(k) / float64(n))
+			out = append(out, dungeon.Point{X: from[0] + (to[0]-from[0])*f, Y: from[1] + (to[1]-from[1])*f, Z: from[2] + (to[2]-from[2])*f})
+		}
+	}
+	if len(path.Points) == 1 {
+		q := path.Points[0]
+		out = []dungeon.Point{{X: q[0], Y: q[1], Z: q[2]}}
+	}
+	return out, true
+}
+
+// rowPoint and rowDist are an exported row's point and its 3-D distance to a spawn.
+func rowPoint(row planexport.StepRow) dungeon.Point {
+	return dungeon.Point{X: row.X, Y: row.Y, Z: row.Z}
+}
+
+func rowDist(row planexport.StepRow, c creature) float64 { return dist(rowPoint(row), c.Pos) }
