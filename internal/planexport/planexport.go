@@ -941,6 +941,23 @@ func Validate(r Rows) error {
 	return nil
 }
 
+// firstLeaveConflict returns the plan's first Leave spawn a cut point would walk within dungeon.LeaveClearYd of (ground distance, the plan
+// check's own rule for the plan's points). A cut hop is the exporter's walk, not the plan's: the run leader would hop it itself
+// (as before --approach-hops), so a hop whose cut path comes that near a spawn the plan leaves alone is not cut at all.
+func (b *builder) firstLeaveConflict(via []dungeon.Point) (dungeon.Leave, bool) {
+	for _, p := range via {
+		for _, l := range b.plan.Legs {
+			for _, lv := range l.Leave {
+				dx, dy := float64(p.X-lv.At.X), float64(p.Y-lv.At.Y)
+				if math.Sqrt(dx*dx+dy*dy) < dungeon.LeaveClearYd {
+					return lv, true
+				}
+			}
+		}
+	}
+	return dungeon.Leave{}, false
+}
+
 // cutLongHops finds consecutive moves of the plan that are more than MoveGapWarnYd apart. With Options.Cut set it puts the points the
 // cutter returns between them (as move rows, renumbering the leg's steps); without, it lists them in Warnings.
 func (b *builder) cutLongHops() error {
@@ -958,6 +975,10 @@ func (b *builder) cutLongHops() error {
 				}
 				for len(via) > 0 && dist3(via[len(via)-1], c) < approachStandoffYd {
 					via = via[:len(via)-1]
+				}
+				if lv, near := b.firstLeaveConflict(via); near {
+					b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the %s approach path would pass within %.0f yd of the left-alone %d (spawn %d) at %.1f %.1f: the hop is not cut, the run leader walks it itself", s.Leg, s.Seq, s.Kind, dungeon.LeaveClearYd, lv.Entry, lv.Spawn, lv.At.X, lv.At.Y))
+					via = nil
 				}
 				for _, v := range via {
 					out = append(out, StepRow{Plan: s.Plan, Leg: s.Leg, Kind: KindMove, X: v.X, Y: v.Y, Z: v.Z, Comment: "approach path"})
@@ -987,6 +1008,10 @@ func (b *builder) cutLongHops() error {
 						via, err := b.opt.Cut(b.plan.Map, a, c)
 						if err != nil {
 							b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the move is %.0f yd from the one before it and could not be cut: %v", s.Leg, s.Seq, d, err))
+						}
+						if lv, near := b.firstLeaveConflict(via); near {
+							b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the hop's path would pass within %.0f yd of the left-alone %d (spawn %d) at %.1f %.1f: the hop is not cut, the run leader walks it itself", s.Leg, s.Seq, dungeon.LeaveClearYd, lv.Entry, lv.Spawn, lv.At.X, lv.At.Y))
+							via = nil
 						}
 						for _, v := range via {
 							out = append(out, StepRow{Plan: s.Plan, Leg: s.Leg, Kind: KindMove, X: v.X, Y: v.Y, Z: v.Z, Comment: "path"})
