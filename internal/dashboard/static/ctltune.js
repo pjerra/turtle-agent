@@ -56,7 +56,10 @@
     function send(row, value) {
       env.post({ key: row.key, value: value }).then((r) => {
         if (r.status === 401) env.say("Wrong or missing control token.");
+        // The command ran; only its log line failed. Said once, with no retry offered: a retry would send a second tune_set.
+        else if (r.json && r.json.executed === true && r.json.log_failed === true) env.say(row.key + " set (control log write failed).");
         else if (r.json && r.json.status === "ok") env.say(row.key + " -> " + (value === "default" ? "default" : r.json.result && r.json.result.new !== undefined ? r.json.result.new : value) + ": " + ((r.json.result && r.json.result.applies) || "queued"));
+        else if (r.json && typeof r.json.message === "string" && r.json.message.indexOf("unknown:") === 0) env.say(r.json.message);
         else env.say("Refused: " + ((r.json && r.json.message) || ("HTTP " + r.status)));
         env.after();
       });

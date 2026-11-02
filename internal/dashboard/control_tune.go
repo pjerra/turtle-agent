@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,7 +25,16 @@ type tuneRequest struct {
 
 // tuneListResult is the part of tune_list the handler reads (the same fields the card's tune_all carries).
 type tuneListResult struct {
-	Tunables []TuneRow `json:"tunables"`
+	Tunables []tuneRow `json:"tunables"`
+}
+
+// tuneRow is one row of tune_list as the handler reads it. The bounds are pointers so a row of an older agent, which reports no min and max,
+// is told from a real 0..0 range (L6).
+type tuneRow struct {
+	Key  string   `json:"key"`
+	Unit string   `json:"unit"`
+	Min  *float64 `json:"min"`
+	Max  *float64 `json:"max"`
 }
 
 // tune is the live-tuning handler (D8, D13).
@@ -66,19 +76,37 @@ func (c *Controller) tune(ac *actionContext) {
 		jsonError(ac.w, http.StatusInternalServerError, "the control log could not be written, so nothing was sent: %v", err)
 		return
 	}
-	out, err := cl.Write(ctx, "tune_set", map[string]any{"key": req.Key, "value": value})
+	// The write is detached from the request (M2): a tab that closes, or a client timeout, must not cancel a command that is already sent,
+	// because only the agent knows whether it ran. Its own bound still applies.
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ac.r.Context()), controlTimeout)
+	defer cancel()
+	out, err := cl.Write(wctx, "tune_set", map[string]any{"key": req.Key, "value": value})
 	okv := err == nil
 	res := controlRecord{Phase: "result", At: c.cfg.Now().UTC().Format(time.RFC3339), Who: ac.who, Via: ac.via, Peer: ac.peer,
-		Agent: ac.agent.ID, Action: ac.action, Verb: req.Key, RPC: "tune_set", OK: &okv}
+		Agent: ac.agent.ID, Action: ac.action, Verb: req.Key, RPC: "tune_set", OK: &okv, Outcome: "ok"}
+	indeterminate := errors.Is(err, ErrIndeterminate)
 	if err != nil {
+		res.Outcome = "error"
 		res.Code = rpcCode(err)
 		res.Message = redactMessage(err.Error(), cl.Token())
 	}
-	if lerr := c.log.append(res); lerr != nil {
-		jsonError(ac.w, http.StatusInternalServerError, "the control was sent but the log could not be written: %v", lerr)
-		return
+	if indeterminate { // never OK: the command may have run, so the line says so and carries no ok
+		res.Outcome, res.OK = "indeterminate", nil
 	}
-	if err != nil {
+	// The RPC has run (or been refused) by now. A result line the log cannot take must not turn a success into a 500, which would invite a
+	// second tune_set: it goes to stderr, and a success is answered as executed.
+	if lerr := c.log.append(res); lerr != nil {
+		logLost(res, lerr)
+		if err == nil {
+			writeAny(ac.w, http.StatusOK, map[string]any{"executed": true, "log_failed": true})
+			return
+		}
+	}
+	switch {
+	case indeterminate:
+		jsonError(ac.w, http.StatusBadGateway, "unknown: check the tunable's value")
+		return
+	case err != nil:
 		jsonError(ac.w, http.StatusBadGateway, "%s", res.Message)
 		return
 	}
@@ -91,18 +119,19 @@ func (c *Controller) tune(ac *actionContext) {
 }
 
 // findTuneRow is the tunable with that key, if this run has it.
-func findTuneRow(rows []TuneRow, key string) (TuneRow, bool) {
+func findTuneRow(rows []tuneRow, key string) (tuneRow, bool) {
 	for _, r := range rows {
 		if r.Key == key {
 			return r, true
 		}
 	}
-	return TuneRow{}, false
+	return tuneRow{}, false
 }
 
 // checkTuneValue turns the request's value into what tune_set takes: a JSON number within the row's [min, max] (whole for pct and count), or
-// the string "default". Anything else is refused with the reason (nothing is sent).
-func checkTuneValue(row TuneRow, raw json.RawMessage) (any, error) {
+// the string "default". A number needs the row's bounds: a row of an older agent reports none, and that is refused by name, not as a range.
+// Anything else is refused with the reason (nothing is sent).
+func checkTuneValue(row tuneRow, raw json.RawMessage) (any, error) {
 	if len(raw) == 0 {
 		return nil, errors.New("value is needed: a number, or \"default\"")
 	}
@@ -123,8 +152,11 @@ func checkTuneValue(row TuneRow, raw json.RawMessage) (any, error) {
 		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
 			return nil, fmt.Errorf("%s: value must be a number or \"default\"", row.Key)
 		}
-		if f < row.Min || f > row.Max {
-			return nil, fmt.Errorf("%s: %v is outside %v..%v (%s)", row.Key, trimNum(f), trimNum(row.Min), trimNum(row.Max), row.Unit)
+		if row.Min == nil || row.Max == nil { // an older agent's tune_list has no bounds: its range is unknown, not 0..0 (L6)
+			return nil, fmt.Errorf("this agent does not report bounds for %s", row.Key)
+		}
+		if f < *row.Min || f > *row.Max {
+			return nil, fmt.Errorf("%s: %v is outside %v..%v (%s)", row.Key, trimNum(f), trimNum(*row.Min), trimNum(*row.Max), row.Unit)
 		}
 		if row.Unit == "pct" || row.Unit == "count" {
 			if f != math.Trunc(f) {

@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -109,6 +110,75 @@ func TestControlTuneDefault(t *testing.T) {
 	must(t, json.Unmarshal(p, &got))
 	if len(got) != 2 || got["key"] != "rest_health_pct" || got["value"] != "default" {
 		t.Errorf("tune_set params are %s", p)
+	}
+}
+
+// M1: a tune_set that ran and only failed to be logged is 200 with executed and log_failed (never a 500 that invites a second tune_set), and
+// the result line goes to stderr.
+func TestControlTuneLogFailsAfterSuccessfulRPC(t *testing.T) {
+	r := newTuneRig(t)
+	var stderr bytes.Buffer
+	saved := controlStderr
+	controlStderr = &stderr
+	t.Cleanup(func() { controlStderr = saved })
+	r.ctl.log.w = &failAfter{w: r.ctl.log.w, left: 1} // the request line gets through, the result line does not
+	rec := r.tune("rest_health_pct", 70)
+	if rec.code != http.StatusOK {
+		t.Fatalf("tune with a failing result log: %d %s", rec.code, rec.body)
+	}
+	var got map[string]any
+	must(t, json.Unmarshal([]byte(rec.body), &got))
+	if got["executed"] != true || got["log_failed"] != true {
+		t.Fatalf("the reply is %s, want executed true and log_failed true", rec.body)
+	}
+	n := 0
+	for _, m := range r.fake.methods() {
+		if m == "tune_set" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("tune_set was sent %d times, want once", n)
+	}
+	if !strings.Contains(stderr.String(), `"phase":"result"`) || !strings.Contains(stderr.String(), `"verb":"rest_health_pct"`) {
+		t.Errorf("stderr has no result line: %q", stderr.String())
+	}
+}
+
+// M1: a tune_set whose reply is not an answer to its request is 502 "unknown: check the tunable's value", and its log line says indeterminate,
+// with no ok.
+func TestControlTuneIndeterminateReplyIsNotOK(t *testing.T) {
+	r := newTuneRig(t)
+	r.fake.raw("tune_set", `{}`)
+	rec := r.tune("rest_health_pct", 70)
+	if rec.code != http.StatusBadGateway || !strings.Contains(rec.body, "unknown: check the tunable's value") {
+		t.Fatalf("tune with a bare {} reply: %d %s", rec.code, rec.body)
+	}
+	lines := r.logRecords()
+	if len(lines) != 2 || lines[1]["outcome"] != "indeterminate" {
+		t.Fatalf("the log is %v", lines)
+	}
+	if _, ok := lines[1]["ok"]; ok {
+		t.Errorf("an indeterminate result line carries ok: %v", lines[1])
+	}
+}
+
+// L6: an older agent's tune_list reports no min/max; a number is refused by name (never as "outside 0..0"), while "default" needs no bounds.
+func TestControlTuneWithoutBounds(t *testing.T) {
+	r := newTuneRig(t)
+	r.fake.set("tune_list", `{"tunables":[{"key":"rest_health_pct","unit":"pct","doc":"health to rest at"}]}`)
+	rec := r.tune("rest_health_pct", 70)
+	if rec.code != http.StatusBadRequest || !strings.Contains(rec.body, "this agent does not report bounds for rest_health_pct") {
+		t.Fatalf("a number without reported bounds: %d %s", rec.code, rec.body)
+	}
+	if strings.Contains(rec.body, "outside") {
+		t.Errorf("the refusal reads as a 0..0 range: %s", rec.body)
+	}
+	if r.fake.sawWrite() {
+		t.Fatal("a tune_set reached the agent although the bounds are unknown")
+	}
+	if rec := r.tune("rest_health_pct", "default"); rec.code != http.StatusOK {
+		t.Fatalf("default without reported bounds: %d %s", rec.code, rec.body)
 	}
 }
 
