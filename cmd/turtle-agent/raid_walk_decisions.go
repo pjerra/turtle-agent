@@ -23,6 +23,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
@@ -128,15 +130,17 @@ type decisionsPullResult struct {
 // re-pull). Then it writes <out>/decisions/manifest.json with one row per fully pulled capture.
 // It stops at maxBytes with BudgetHit; a failed file or an unknown non-deleted segment name
 // fails that capture with a note and the rest continue, and the capture stays out of the success
-// manifest. A server-sent id that fails the capture regex is refused client-side.
+// manifest. A server-sent id that fails the capture regex is refused client-side. Before the
+// dashboard is asked anything, a crashed earlier swap is recovered (recoverDecisionDir).
 func pullDecisionsInto(ctx context.Context, dash decisionsPuller, commander string, since, until time.Time, out string, maxBytes int64) (decisionsPullResult, []string) {
 	var res decisionsPullResult
 	res.Captures = []raidwalk.DecisionsCaptureSummary{}
-	var notes []string
+	recoverFailed, recoverNotes := recoverDecisionDir(osDecisionFS{}, out)
+	notes := recoverNotes
 	caps, err := dash.Decisions(ctx, commander, since, until)
 	if err != nil {
 		res.ListFailed = true
-		return res, []string{err.Error()}
+		return res, append(notes, err.Error())
 	}
 	var manifest []decisionManifestCapture
 	var total int64
@@ -147,6 +151,10 @@ func pullDecisionsInto(ctx context.Context, dash decisionsPuller, commander stri
 			break
 		}
 		if !tbdash.DecisionCaptureRe.MatchString(c.ID) {
+			continue
+		}
+		if recoverFailed[c.ID] {
+			res.Incomplete++
 			continue
 		}
 		if c.Ended == nil {
@@ -283,14 +291,30 @@ func waitDecisionEnded(ctx context.Context, dash decisionsPuller, commander stri
 	}
 }
 
-// makeDecisionStaging creates a unique staging dir next to the capture's target dir
-// (<out>/decisions/.<id>.staging-*). The caller renames it into place after validation.
+// Side paths of a capture swap. They are fixed names next to the target, not random ones, so a
+// later pull can find what a crashed pull left behind. Capture ids never contain a dot, so these
+// cannot collide with a capture dir.
+const (
+	decisionBackupSuffix  = ".bak-decisions"
+	decisionStagingSuffix = ".staging-decisions"
+)
+
+func decisionBackupPath(target string) string  { return target + decisionBackupSuffix }
+func decisionStagingPath(target string) string { return target + decisionStagingSuffix }
+
+// makeDecisionStaging creates the capture's staging dir (<out>/decisions/<id>.staging-decisions).
+// recoverDecisionDir has already removed any leftover, so an existing one is an error. The caller
+// renames it into place after validation.
 func makeDecisionStaging(out, id string) (string, error) {
 	parent := filepath.Join(out, "decisions")
 	if err := os.MkdirAll(parent, 0o700); err != nil {
 		return "", err
 	}
-	return os.MkdirTemp(parent, "."+id+".staging-*")
+	staging := decisionStagingPath(filepath.Join(parent, id))
+	if err := os.Mkdir(staging, 0o700); err != nil {
+		return "", err
+	}
+	return staging, nil
 }
 
 // decisionFS is the filesystem the capture swap uses. The walk passes osDecisionFS; tests inject
@@ -314,11 +338,12 @@ func (osDecisionFS) Lstat(path string) (fs.FileInfo, error) { return os.Lstat(pa
 var errDecisionCommitted = errors.New("new capture in place")
 
 // swapDecisionDir moves the validated staging dir onto target without ever losing the old
-// capture. An existing target is renamed to a unique backup in the same parent first; staging is
-// then renamed into place; the backup is removed only after that succeeds. A failure before the
-// commit restores the old target (or leaves it untouched) and removes staging. Every filesystem
-// error is returned; a leftover backup after a committed swap is returned wrapping
-// errDecisionCommitted.
+// capture. An existing target is renamed to <target>.bak-decisions first; staging is then renamed
+// into place; the backup is removed only after that succeeds. A failure before the commit
+// restores the old target (or leaves it untouched) and removes staging. Every filesystem error is
+// returned; a leftover backup after a committed swap is returned wrapping errDecisionCommitted.
+// A crash between the two renames leaves target missing and the backup present; the next pull's
+// recoverDecisionDir restores it.
 func swapDecisionDir(fsys decisionFS, staging, target string) error {
 	fail := func(err error) error {
 		if rerr := fsys.RemoveAll(staging); rerr != nil {
@@ -326,29 +351,33 @@ func swapDecisionDir(fsys decisionFS, staging, target string) error {
 		}
 		return err
 	}
-	backup := ""
-	if _, err := fsys.Lstat(target); err == nil {
-		b, berr := decisionBackupPath(fsys, target)
-		if berr != nil {
-			return fail(fmt.Errorf("name old capture backup: %w", berr))
-		}
-		if rerr := fsys.Rename(target, b); rerr != nil {
+	backup := decisionBackupPath(target)
+	hasTarget, err := decisionPathExists(fsys, target)
+	if err != nil {
+		return fail(fmt.Errorf("stat old capture: %w", err))
+	}
+	hasBackup, err := decisionPathExists(fsys, backup)
+	if err != nil {
+		return fail(fmt.Errorf("stat old capture backup: %w", err))
+	}
+	if hasBackup {
+		return fail(fmt.Errorf("old capture backup %s already exists; recover it first", backup))
+	}
+	if hasTarget {
+		if rerr := fsys.Rename(target, backup); rerr != nil {
 			return fail(fmt.Errorf("move old capture aside: %w", rerr))
 		}
-		backup = b
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return fail(fmt.Errorf("stat old capture: %w", err))
 	}
 	if rerr := fsys.Rename(staging, target); rerr != nil {
 		err := fmt.Errorf("move staged capture into place: %w", rerr)
-		if backup != "" {
+		if hasTarget {
 			if berr := fsys.Rename(backup, target); berr != nil {
 				err = errors.Join(err, fmt.Errorf("restore old capture from %s: %w", backup, berr))
 			}
 		}
 		return fail(err)
 	}
-	if backup != "" {
+	if hasTarget {
 		if rerr := fsys.RemoveAll(backup); rerr != nil {
 			return fmt.Errorf("%w; old capture backup left at %s: %w", errDecisionCommitted, backup, rerr)
 		}
@@ -356,21 +385,89 @@ func swapDecisionDir(fsys decisionFS, staging, target string) error {
 	return nil
 }
 
-// decisionBackupPath returns an unused hidden name next to target for its old contents.
-func decisionBackupPath(fsys decisionFS, target string) (string, error) {
-	dir, base := filepath.Dir(target), filepath.Base(target)
-	stamp := time.Now().UnixNano()
-	for i := 0; i < 100; i++ {
-		p := filepath.Join(dir, fmt.Sprintf(".%s.backup-%d-%d", base, stamp, i))
-		_, err := fsys.Lstat(p)
-		if errors.Is(err, fs.ErrNotExist) {
-			return p, nil
-		}
-		if err != nil {
-			return "", err
+// decisionPathExists reports whether p exists (without following a symlink).
+func decisionPathExists(fsys decisionFS, p string) (bool, error) {
+	_, err := fsys.Lstat(p)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+// recoverDecisionDir runs before a pull touches anything else. For every capture id that has a
+// backup or staging leftover in <out>/decisions it calls recoverDecisionCapture. It returns the ids
+// that could not be recovered (the pull skips those captures) and a note for each failure.
+func recoverDecisionDir(fsys decisionFS, out string) (map[string]bool, []string) {
+	failed := map[string]bool{}
+	parent := filepath.Join(out, "decisions")
+	ents, err := os.ReadDir(parent)
+	if errors.Is(err, fs.ErrNotExist) {
+		return failed, nil
+	}
+	if err != nil {
+		return failed, []string{fmt.Sprintf("recover decisions: %v", err)}
+	}
+	seen := map[string]bool{}
+	var ids []string
+	for _, e := range ents {
+		for _, suffix := range []string{decisionBackupSuffix, decisionStagingSuffix} {
+			id, ok := strings.CutSuffix(e.Name(), suffix)
+			if !ok || !tbdash.DecisionCaptureRe.MatchString(id) || seen[id] {
+				continue
+			}
+			seen[id] = true
+			ids = append(ids, id)
 		}
 	}
-	return "", fmt.Errorf("no free backup name for %s", target)
+	sort.Strings(ids)
+	var notes []string
+	for _, id := range ids {
+		if rerr := recoverDecisionCapture(fsys, filepath.Join(parent, id)); rerr != nil {
+			failed[id] = true
+			notes = append(notes, fmt.Sprintf("%s: recover: %v", id, rerr))
+		}
+	}
+	return failed, notes
+}
+
+// recoverDecisionCapture undoes a crashed swap of target. A missing target with a backup means the
+// crash came between the two renames: the backup is renamed back. A backup beside a present target
+// means the swap had committed: the backup is stale and removed. A staging leftover is never
+// trusted and is removed.
+func recoverDecisionCapture(fsys decisionFS, target string) error {
+	backup, staging := decisionBackupPath(target), decisionStagingPath(target)
+	hasTarget, err := decisionPathExists(fsys, target)
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", target, err)
+	}
+	hasBackup, err := decisionPathExists(fsys, backup)
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", backup, err)
+	}
+	switch {
+	case !hasTarget && hasBackup:
+		if err := fsys.Rename(backup, target); err != nil {
+			return fmt.Errorf("restore old capture from %s: %w", backup, err)
+		}
+	case hasTarget && hasBackup:
+		if err := fsys.RemoveAll(backup); err != nil {
+			return fmt.Errorf("remove stale backup %s: %w", backup, err)
+		}
+	}
+	hasStaging, err := decisionPathExists(fsys, staging)
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", staging, err)
+	}
+	if hasStaging {
+		if err := fsys.RemoveAll(staging); err != nil {
+			return fmt.Errorf("remove leftover staging %s: %w", staging, err)
+		}
+	}
+	return nil
 }
 
 // validateDecisionStage checks every listed file is in the staging dir with the pulled size
