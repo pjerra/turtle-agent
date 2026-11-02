@@ -5188,9 +5188,11 @@ func bossNotFoundLine(plan string, step, total int, entry, next int) string {
 		plan, step, total, entry, next, next)
 }
 
-// Walk 24 test2 r2: the boss died, the frames show his row at 0 %, the run leader never finds his corpse and
-// pauses with "boss 12118 not found" on the boss's own step. The 0 % frame is the kill evidence: the walk sends
-// `.bot run skip` once and the run goes on to its until (exit 0), instead of waiting out pausedWait and exiting 18.
+// Walk 24 test2 r2 (revive r7): the boss fights (a live 60 % row: this walk's attempt start), dies, and
+// the frames show his row at 0 % while the run leader never finds his corpse and pauses with
+// "boss 12118 not found" on the boss's own step. The 0 % frame of the guid seen alive is the kill
+// evidence: the walk sends `.bot run skip` once and the run goes on to its until (exit 0), instead of
+// waiting out pausedWait and exiting 18.
 func TestRaidWalkBossNotFoundAfterKillSkips(t *testing.T) {
 	f, next, total := bossDoneFixture(t)
 	boss := next - 1
@@ -5206,8 +5208,11 @@ func TestRaidWalkBossNotFoundAfterKillSkips(t *testing.T) {
 	f.agent.startQueue = q
 	f.agent.mu.Unlock()
 	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
-		if n <= 1 {
-			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 0, Target: packet.GUID(1000)}}
+		switch {
+		case n == 1:
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}} // the fight: this walk's attempt start
+		case n == 2:
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 0}} // the kill, seen alive first in this attempt
 		}
 		return nil
 	}
@@ -5337,8 +5342,11 @@ func TestRaidWalkBossNotFoundAfterWipeStillPauses(t *testing.T) {
 	f.agent.startQueue = q
 	f.agent.mu.Unlock()
 	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
-		if n <= 1 {
-			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 0, Target: packet.GUID(1000)}}
+		switch {
+		case n == 1:
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}} // the fight: the attempt start
+		case n == 2:
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 0}} // the kill, seen alive first in this attempt
 		}
 		return nil
 	}
@@ -5371,8 +5379,11 @@ func TestRaidWalkBossNotFoundSkipRefusedStillPauses(t *testing.T) {
 	f.agent.mu.Unlock()
 	f.agent.skipErr = true
 	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
-		if n <= 1 {
-			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 0, Target: packet.GUID(1000)}}
+		switch {
+		case n == 1:
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}}
+		case n == 2:
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 0}}
 		}
 		return nil
 	}
@@ -5635,9 +5646,10 @@ func TestRaidWalkBossNotFoundToolkitTimeoutLatchesOnce(t *testing.T) {
 	}
 }
 
-// The pause arrives before the evidence: the first ticks of the pause see no corpse (the frames hold nothing and
-// the toolkit sees none), and a later frame shows 14509 at 0 %. The evidence is re-read on every tick while the
-// pause lasts, and the skip latches only once it went out (review round 1, item 2): exactly one `.bot run skip`.
+// The pause arrives before the evidence (revive r7): the first ticks of the pause see no corpse (the frames
+// hold nothing and the toolkit sees none), and a later frame shows the 14509 seen alive then dead at 0 %.
+// The evidence is re-read on every tick while the pause lasts, and the skip latches only once it went out
+// (review round 1, item 2): exactly one `.bot run skip`.
 func TestRaidWalkBossNotFoundLateEvidenceSkips(t *testing.T) {
 	f := zgThekalFixture(t, "zul_gurub")
 	boss := zgBossStep(t)
@@ -5662,8 +5674,10 @@ func TestRaidWalkBossNotFoundLateEvidenceSkips(t *testing.T) {
 		switch {
 		case pauseFrame < 0 && frames <= 12:
 			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		case pauseFrame >= 0 && frames == pauseFrame+2:
+			return []tbm.HostileRec{{GUID: 10, Entry: 14509, HPPct: 99, Target: packet.GUID(1000)}} // reborn, alive first in this attempt
 		case pauseFrame >= 0 && frames > pauseFrame+3:
-			return []tbm.HostileRec{{GUID: 10, Entry: 14509, HPPct: 0}}
+			return []tbm.HostileRec{{GUID: 10, Entry: 14509, HPPct: 0}} // the kill, seen alive first in this attempt
 		}
 		return nil
 	}
@@ -5682,11 +5696,11 @@ func TestRaidWalkBossNotFoundLateEvidenceSkips(t *testing.T) {
 	}
 }
 
-// Review round 3 (Codex HIGH): a 0 % row in w.hostiles carries no freshness of its own, so a corpse an EARLIER
-// attempt left behind counted as kill evidence on a later pause. The boss dies (a 0 % row), the encounter resets
-// and he respawns (the family is seen alive at 100 % afterwards), the party loses sight of him for 15 s and the
-// run leader pauses with "boss 12118 not found": the corpse's row predates a live sighting of the family, so it is
-// no evidence and the toolkit read decides — no corpse there, no skip, the pause stays (exit 18).
+// Review round 3 (Codex HIGH, r7): a live row after the death voids the frame corpse. The boss fights
+// (a live 60 % row: this walk's attempt start), dies (a 0 % row of the same guid), the encounter resets
+// (the family seen alive at 100 % afterwards) and the party loses sight of him, so when the run leader
+// pauses with "boss 12118 not found" the family corpse is voided by the newer live row: no dead row
+// evidence, no toolkit read (a fresh live row decides alone), no skip, the pause stays (exit 18).
 func TestRaidWalkBossNotFoundRespawnedBossStillPauses(t *testing.T) {
 	f, next, total := bossDoneFixture(t)
 	boss := next - 1
@@ -5703,12 +5717,13 @@ func TestRaidWalkBossNotFoundRespawnedBossStillPauses(t *testing.T) {
 	f.agent.mu.Unlock()
 	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
 		switch {
-		case n <= 1:
-			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 0}} // the kill, this walk's first sighting
 		case n <= 3:
-			return []tbm.HostileRec{{GUID: 10, Entry: 12118, HPPct: 100}} // the respawn: alive, and out of view afterwards
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}} // this walk's attempt start
+		case n <= 4:
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 0}} // the kill, seen alive first in this attempt
+		default:
+			return []tbm.HostileRec{{GUID: 10, Entry: 12118, HPPct: 100, Target: packet.GUID(1000)}} // the reset: the boss back alive
 		}
-		return nil
 	}
 	code := f.run(context.Background())
 	if code != exitRaidWalkFailed {
@@ -5721,16 +5736,17 @@ func TestRaidWalkBossNotFoundRespawnedBossStillPauses(t *testing.T) {
 	verbs, tt := append([]string{}, f.agent.runVerbs...), append([]string{}, f.agent.ttCalls...)
 	f.agent.mu.Unlock()
 	if countPrefix(verbs, "skip") != 0 {
-		t.Fatalf("run verbs %v, want no skip: the corpse predates a live sighting of the boss", verbs)
+		t.Fatalf("run verbs %v, want no skip: the guid was alive again after its death", verbs)
 	}
-	if len(tt) == 0 || !strings.Contains(tt[0], "all dead e=12118") {
-		t.Fatalf("toolkit calls %q, want the corpse read (a stale row must not bypass it)", tt)
+	if len(tt) != 0 {
+		t.Fatalf("toolkit calls %q, want no corpse read: the live boss row decides alone", tt)
 	}
 }
 
-// Review round 3: the attempt bound itself. A 0 % row the frames saw before the CURRENT attempt's engagement is
-// another attempt's corpse (the frames are never pruned, so a wipe recovery leaves it in w.hostiles), and a 0 %
-// row inside the attempt is evidence. Without the bound the stale row alone would be a kill.
+// Review round 3 (Codex HIGH, r7): the attempt bound itself. A 0 % row the frames saw before the CURRENT attempt's
+// engagement is another attempt's corpse (the frames are never pruned, so a wipe recovery leaves it in
+// w.hostiles), and a 0 % row inside the attempt of a guid seen alive there is evidence. Without the bound
+// the stale row alone would be a kill; without the link a corpse the frames never saw alive would be one.
 func TestBossKilledDeadRowBoundToTheAttempt(t *testing.T) {
 	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
 	start := func(deadAt time.Time) *walk {
@@ -5739,6 +5755,7 @@ func TestBossKilledDeadRowBoundToTheAttempt(t *testing.T) {
 			botAt:         map[string]botPos{"Tank": {at: now}},
 			hostiles:      map[string]hostileState{"0x9": {entry: 12118, hppct: 0, at: deadAt}},
 			bossAttemptAt: map[uint32]time.Time{12118: now.Add(-60 * time.Second)},
+			bossAliveSeen: map[string]time.Time{"0x9": now.Add(-60 * time.Second)},
 		}
 	}
 	ok, ev := start(now.Add(-90*time.Second)).bossKilled(context.Background(), 12118, now)
@@ -5858,6 +5875,123 @@ func TestBossKilledToolkitCorpseConfirmedSkips(t *testing.T) {
 	ok, ev := w.bossKilled(context.Background(), 12118, t1.Add(16*time.Second))
 	if !ok || !strings.Contains(ev, "the toolkit sees 12118 dead") {
 		t.Fatalf("bossKilled = %v (%q), want the confirmed toolkit corpse as the evidence", ok, ev)
+	}
+}
+
+// bossFrameWalk is a walk on a one-boss plan (entry 12118) whose toolkit sees no corpse: the frame
+// path alone decides (revive r7). The caller feeds frames with trackFrame and reads bossKilled.
+func bossFrameWalk(t *testing.T) *walk {
+	t.Helper()
+	f := newFixture(t)
+	w := &walk{
+		plan:          &dungeon.Plan{Map: 230, Legs: []dungeon.Leg{{Boss: &dungeon.Boss{Entry: 12118}}}},
+		rows:          planexport.Rows{Steps: []planexport.StepRow{{Kind: planexport.KindBoss, Entry: 12118, X: 100, Y: 200, Z: 300}}},
+		agent:         &bossTTStub{fn: ttUnitsFn(t)},
+		env:           walkEnv{now: f.clock.now, sleep: f.clock.sleep},
+		mt:            "Tank",
+		hires:         map[string]bool{"Tank": true},
+		partyG:        map[uint64]bool{},
+		hostiles:      map[string]hostileState{},
+		botAt:         map[string]botPos{},
+		bossRows:      map[uint32]hostileState{},
+		bossRule:      raidwalk.NewBossRows(&dungeon.Plan{Legs: []dungeon.Leg{{Boss: &dungeon.Boss{Entry: 12118}}}}),
+		bossAttemptAt: map[uint32]time.Time{},
+	}
+	setBossCorpseMaps(w)
+	return w
+}
+
+// bossTestFrame is one frame with Tank (guid 1000) watching the given hostile rows.
+func bossTestFrame(hostiles ...tbm.HostileRec) *tbm.ViewFrame {
+	return &tbm.ViewFrame{
+		Party:    []tbm.PartyRec{{GUID: 1000, Name: "Tank"}},
+		Hostiles: hostiles,
+	}
+}
+
+// Codex HIGH (r7): a dead row never starts the attempt. The first sighting of a pre-existing
+// corpse (0 %, even holding a party target) records no attempt start and no live sighting, so
+// bossKilled finds no evidence and the pause stays: no skip.
+func TestBossAttemptCorpseFirstStartsNoAttempt(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w := bossFrameWalk(t)
+	w.trackFrame(now, bossTestFrame(tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 0, Target: packet.GUID(1000)}))
+	if at := w.bossAttemptAt[12118]; !at.IsZero() {
+		t.Fatalf("bossAttemptAt = %v, want zero: a 0 %% row never starts the attempt", at)
+	}
+	if _, ok := w.bossAliveSeen[packet.GUID(9).String()]; ok {
+		t.Fatalf("bossAliveSeen holds the corpse guid, want nothing: a corpse is no live sighting")
+	}
+	killAt := now.Add(16 * time.Second)
+	w.botAt = map[string]botPos{"Tank": {at: killAt}}
+	if ok, ev := w.bossKilled(context.Background(), 12118, killAt); ok {
+		t.Fatalf("bossKilled = true (%q), want no skip: the corpse predates any attempt", ev)
+	}
+}
+
+// Codex HIGH (r7): a live sighting from an earlier attempt vouches for nothing. The frames show 12118
+// standing at full hp before any attempt began (no target, no latch), then the pull (a live 60 % row of
+// another guid starts the attempt) and a 0 % row of the first guid. That corpse predates the attempt's
+// live link, so it is no evidence and the empty toolkit proves nothing: no skip.
+func TestBossAttemptEarlierSightingVoidsCorpse(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w := bossFrameWalk(t)
+	w.trackFrame(now, bossTestFrame(tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 100}))
+	if _, ok := w.bossAliveSeen[packet.GUID(9).String()]; !ok {
+		t.Fatalf("bossAliveSeen = %v, want the standing boss's sighting", w.bossAliveSeen)
+	}
+	if at := w.bossAttemptAt[12118]; !at.IsZero() {
+		t.Fatalf("bossAttemptAt = %v, want zero: a full hp row with no target starts nothing", at)
+	}
+	pullAt := now.Add(2 * time.Second)
+	w.trackFrame(pullAt, bossTestFrame(tbm.HostileRec{GUID: 10, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}))
+	if at := w.bossAttemptAt[12118]; !at.Equal(pullAt) {
+		t.Fatalf("bossAttemptAt = %v, want %v: the pull starts the attempt", at, pullAt)
+	}
+	deadAt := now.Add(20 * time.Second)
+	w.trackFrame(deadAt, bossTestFrame(tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 0}))
+	w.botAt = map[string]botPos{"Tank": {at: deadAt}}
+	if ok, ev := w.bossKilled(context.Background(), 12118, deadAt); ok {
+		t.Fatalf("bossKilled = true (%q), want no skip: guid 9 was never seen alive in this attempt", ev)
+	}
+}
+
+// Codex HIGH (r7): the attempt starts on a live engaged row, and the 0 % row of that same guid is
+// the kill: seen alive before its death, inside the attempt. Skip.
+func TestBossAttemptLiveThenDeathKills(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w := bossFrameWalk(t)
+	w.trackFrame(now, bossTestFrame(tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}))
+	if at := w.bossAttemptAt[12118]; !at.Equal(now) {
+		t.Fatalf("bossAttemptAt = %v, want %v: the live engaged row starts the attempt", at, now)
+	}
+	deadAt := now.Add(20 * time.Second)
+	w.trackFrame(deadAt, bossTestFrame(tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 0}))
+	w.botAt = map[string]botPos{"Tank": {at: deadAt}}
+	ok, ev := w.bossKilled(context.Background(), 12118, deadAt)
+	if !ok || !strings.Contains(ev, "seen dead in the frames") {
+		t.Fatalf("bossKilled = %v (%q), want the frame row inside the attempt as the evidence", ok, ev)
+	}
+}
+
+// Codex HIGH (r7): a fake death voids the kill. Live, dead, then the same guid alive again (raised):
+// the newest frame row is a stale live one, so no dead row is evidence and the empty toolkit proves
+// nothing: no skip, the pause stays.
+func TestBossAttemptFakeDeathStillPauses(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w := bossFrameWalk(t)
+	w.trackFrame(now, bossTestFrame(tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}))
+	deadAt := now.Add(20 * time.Second)
+	w.trackFrame(deadAt, bossTestFrame(tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 0}))
+	raisedAt := deadAt.Add(5 * time.Second)
+	w.trackFrame(raisedAt, bossTestFrame(tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 100, Target: packet.GUID(1000)}))
+	if at := w.bossAttemptAt[12118]; !at.Equal(now) {
+		t.Fatalf("bossAttemptAt = %v, want %v: the attempt started on the first live row", at, now)
+	}
+	killAt := raisedAt.Add(16 * time.Second)
+	w.botAt = map[string]botPos{"Tank": {at: killAt}}
+	if ok, ev := w.bossKilled(context.Background(), 12118, killAt); ok {
+		t.Fatalf("bossKilled = true (%q), want no skip: the guid was alive again after its death", ev)
 	}
 }
 
