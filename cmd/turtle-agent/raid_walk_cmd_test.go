@@ -182,6 +182,11 @@ type walkFakeAgent struct {
 	// the graveyard, once the run has started); appearRefusedUntilRevive refuses every `.appear` until the first `.revive` went out.
 	statusFailNext int
 	ghostsOff      bool
+	// cancelStatusAt cancels cancelStatusCtx on the n-th status read (1-based; 0: disabled): the read answers while
+	// the walk is already interrupted, so a failure there latches nothing. M2 round 5: the old statusFailNext-only
+	// shape cancelled before bossCorpse ran and never reached the status-cancel guard.
+	cancelStatusAt  int
+	cancelStatusCtx context.CancelFunc
 	// ghostsOffN is a PARTIAL release: the first N dead hires show on map 0 (the rest keep the plan's map), so a
 	// walk has a hire off the map and one still to appear at (the post-wait ghosts re-check, review round 1 M2).
 	ghostsOffN               int
@@ -269,6 +274,15 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 	switch method {
 	case "status":
 		f.mu.Lock()
+		if f.cancelStatusAt > 0 {
+			f.cancelStatusAt--
+			if f.cancelStatusAt == 0 && f.cancelStatusCtx != nil {
+				cancel := f.cancelStatusCtx
+				f.mu.Unlock()
+				cancel()
+				f.mu.Lock()
+			}
+		}
 		if f.statusFailNext > 0 {
 			f.statusFailNext--
 			f.mu.Unlock()
@@ -1803,28 +1817,56 @@ func resumePlacedRun(f *fixture) {
 	}
 }
 
-// walk 25: every refusal was a mob standing at its own spawn about 44.6 yd from the revive point, not fighting. D-A
-// lets an idle unit beyond the placement's 25 yd landing reach through, so the wipe recovers instead of ending at 19.
+// walk 25, hardened by Codex HIGH (turtle-agent#360): D-A lets an idle unit
+// beyond the placement's 25 yd landing reach through only at its proven home
+// (a plan spawn within 3 yd). A still, calm mob standing 8 yd from its spawn
+// is a paused patrol or a wanderer, so the wipe ends at 19; at its own spawn
+// the wipe recovers instead.
 func TestRaidWalkWipeRevivesPastIdleHomeMob(t *testing.T) {
-	f, _ := newPlaceFixture(t)
-	f.agent.startReply = zgPlaceReply(t)
-	f.agent.unitsFn = placedIdleBlocker(t, 44.6, 14532, "Razzashi Venombrood", false)
-	wipeOnceAfterStart(f)
-	resumePlacedRun(f)
-	code := f.run(context.Background())
-	if code != exitOK {
-		t.Fatalf("exit %d, want 0: %s\n%s\n%s", code, f.stderr.String(), f.stdout.String(), f.summaryText())
-	}
-	sum := f.summary()
-	if sum.WipeResumes != 1 || sum.EndReason != "until" {
-		t.Fatalf("wipe_resumes %d end %q, want 1 and until", sum.WipeResumes, sum.EndReason)
-	}
-	if sum.ReviveRefusal != nil {
-		t.Fatalf("the revive was refused with the idle blocker in place: %+v", sum.ReviveRefusal)
-	}
-	if n := countPrefix(f.agent.gmLines(), ".summon "); n == 0 {
-		t.Fatalf("no summons: the revive never reached its summon stage: %q", f.agent.gmLines())
-	}
+	// Away from home: still and calm 44.6 yd out, but the plan's nearest
+	// same-entry spawn is ~230 yd off (Marli's pack, leg 2), so the revive is
+	// refused.
+	t.Run("away from home blocks", func(t *testing.T) {
+		f, _ := newPlaceFixture(t)
+		f.agent.startReply = zgPlaceReply(t)
+		f.agent.unitsFn = placedIdleBlocker(t, 44.6, 14532, "Razzashi Venombrood", false)
+		wipeOnceAfterStart(f)
+		if code := f.run(context.Background()); code != exitRaidWalkIncident {
+			t.Fatalf("exit %d, want 19: %s\n%s\n%s", code, f.stderr.String(), f.stdout.String(), f.summaryText())
+		}
+		rr := f.summary().ReviveRefusal
+		if rr == nil {
+			t.Fatal("no revive_refusal with the away-from-home blocker in place")
+		}
+	})
+	// At home: an onyxia walk whose revive point is step 1 (49.8 -114.6),
+	// blocked by entry 12129 standing on the leg-0 group-1 spawn (-53.0
+	// -96.9, 35 yd out), so the wipe recovers.
+	t.Run("at home revives", func(t *testing.T) {
+		f := newFixture(t)
+		f.agent.startReply = startAt("onyxias_lair", 23)
+		f.agent.unitsFn = func(int) []objects.Unit {
+			return []objects.Unit{{Type: "creature", Name: "Onyxian Warder", Entry: 12129, Hostile: true,
+				X: -52.9699, Y: -96.8813, Z: -38.6419}}
+		}
+		f.allDeadFromHires()
+		var resumeAt time.Time
+		resumeHook(f, 24, 28, &resumeAt)
+		code := f.run(context.Background())
+		if code != exitOK {
+			t.Fatalf("exit %d, want 0: %s\n%s\n%s", code, f.stderr.String(), f.stdout.String(), f.summaryText())
+		}
+		sum := f.summary()
+		if sum.WipeResumes != 1 || sum.EndReason != "until" {
+			t.Fatalf("wipe_resumes %d end %q, want 1 and until", sum.WipeResumes, sum.EndReason)
+		}
+		if sum.ReviveRefusal != nil {
+			t.Fatalf("the revive was refused with the at-home blocker in place: %+v", sum.ReviveRefusal)
+		}
+		if n := countPrefix(f.agent.gmLines(), ".summon "); n == 0 {
+			t.Fatalf("no summons: the revive never reached its summon stage: %q", f.agent.gmLines())
+		}
+	})
 }
 
 // D-C: the 120 s check gives up after 24 reads, so a blocker that leaves later still gets the revive: the walk
@@ -5201,6 +5243,116 @@ func TestRaidWalkSlotListRoutesToPair(t *testing.T) {
 	})
 }
 
+// joinerWalk runs a walk whose pull is step 2 of onyxias_lair (the pull row
+// at 49.8, -114.6, radius 10), with the given hostiles in every frame.
+func joinerWalk(t *testing.T, hostiles []tbm.HostileRec) *fixture {
+	t.Helper()
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 1)
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|onyxias_lair|running|2/29|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 29)"},
+		{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands|until boss (step 29)"},
+	}
+	polls := 0
+	f.agent.viewHook = func() {
+		polls++
+		if polls > 3 {
+			f.clock.mu.Lock()
+			f.clock.t = f.clock.t.Add(11 * time.Second)
+			f.clock.mu.Unlock()
+		}
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec { return hostiles }
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	return f
+}
+
+// readPullJoiners reads the walk's per-pull joiner record.
+func readPullJoiners(t *testing.T, dir string) []raidwalk.PullJoiners {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(dir, raidwalk.PullJoinersFName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recs []raidwalk.PullJoiners
+	if err := json.Unmarshal(raw, &recs); err != nil {
+		t.Fatal(err)
+	}
+	return recs
+}
+
+func TestRaidWalkCountsPullJoinersFromFrames(t *testing.T) {
+	// The pulled unit is at the pull row's point; a mate 5 yd off is the rest
+	// of the pack and never counts, while 3 engaged units of another pack
+	// inside the 10 s window do: the record says 3.
+	f := joinerWalk(t, []tbm.HostileRec{
+		{GUID: 0xF130002C6C00C24B, Entry: 12129, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)},
+		{GUID: 0xF130002, Entry: 12129, X: 53.0, Y: -114.6, HPPct: 100, Target: packet.GUID(1000)},
+		{GUID: 0xF130101, Entry: 12130, X: 0, Y: 0, HPPct: 100, Target: packet.GUID(1001)},
+		{GUID: 0xF130102, Entry: 12130, X: 0, Y: 0, HPPct: 100, Target: packet.GUID(1002)},
+		{GUID: 0xF130103, Entry: 12130, X: 0, Y: 0, HPPct: 100, Target: packet.GUID(1000)},
+	})
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "step 2: joiners 3") {
+		t.Fatalf("no step-keyed joiners line in run.log:\n%s", raw)
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 1 || recs[0].Step != 2 || recs[0].Count != 3 || len(recs[0].GUIDs) != 3 {
+		t.Fatalf("pulljoiners.json %+v, want one step-2 record with 3 guids", recs)
+	}
+}
+
+// A neighbouring pack with the same entry as the pulled pack still joins: the
+// pack is owned by spawn guid and position, not by creature entry.
+func TestRaidWalkCountsSameEntryNeighbourAsJoiner(t *testing.T) {
+	f := joinerWalk(t, []tbm.HostileRec{
+		{GUID: 0xF130002C6C00C24B, Entry: 12129, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)},
+		{GUID: 0xF130002, Entry: 12129, X: 53.0, Y: -114.6, HPPct: 100, Target: packet.GUID(1000)}, // pack mate
+		// The next pull group's pack, 106 yd off, same entry 12129: joiners.
+		{GUID: 0xF130501, Entry: 12129, X: -52.9, Y: -96.9, HPPct: 100, Target: packet.GUID(1001)},
+		{GUID: 0xF130502, Entry: 12129, X: -53.1, Y: -97.0, HPPct: 100, Target: packet.GUID(1000)},
+	})
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "step 2: joiners 2") {
+		t.Fatalf("no same-entry joiners line in run.log:\n%s", raw)
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 1 || recs[0].Step != 2 || recs[0].Count != 2 {
+		t.Fatalf("pulljoiners.json %+v, want one step-2 record with 2 guids", recs)
+	}
+}
+
+func TestRaidWalkTeardownReasonNamesTheFailingStep(t *testing.T) {
+	f := newFixture(t)
+	f.defaultRun("onyxias_lair")
+	f.env.teardown = func(args []string, stdout, stderr io.Writer) int {
+		fmt.Fprint(stdout, `{"server":"m910q","slot":"2","steps":[{"step":"gone","status":"fail","detail":"still in view after 10 s: Bot01"}],"failed":2}`)
+		return 14
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0 (a failed teardown step alone keeps the walk green): %s", code, f.stderr.String())
+	}
+	sum := f.summary()
+	if !sum.Teardown.Failed {
+		t.Fatalf("teardown %+v, want failed", sum.Teardown)
+	}
+	if sum.Teardown.Reason != "gone: still in view after 10 s: Bot01" {
+		t.Fatalf("reason %q", sum.Teardown.Reason)
+	}
+	if !hasNote(sum, "gone: still in view after 10 s: Bot01") {
+		t.Fatalf("notes %q, want the teardown reason", sum.Notes)
+	}
+}
+
 func TestTrackFrameKeepsPositionsAndKinds(t *testing.T) {
 	now := newFakeClock().now()
 	w := &walk{partyG: map[uint64]bool{}, hostiles: map[string]hostileState{}, bossSet: map[uint32]bool{10184: true},
@@ -5671,6 +5823,9 @@ func zgThekalFixture(t *testing.T, plan string) *fixture {
 		t.Fatal(err)
 	}
 	f.agent.instMap = p.Map
+	// The live commander stands in the instance by the pause (the enter phase put the raid there); without this the
+	// M1 guard (corpseMoveReady) latches every walk-25 point_far test off the map before any move goes out.
+	f.agent.enterMap = p.Map
 	return f
 }
 
@@ -5681,9 +5836,11 @@ func bossNotFoundLine(plan string, step, total int, entry, next int) string {
 		plan, step, total, entry, next, next)
 }
 
-// Walk 24 test2 r2: the boss died, the frames show his row at 0 %, the run leader never finds his corpse and
-// pauses with "boss 12118 not found" on the boss's own step. The 0 % frame is the kill evidence: the walk sends
-// `.bot run skip` once and the run goes on to its until (exit 0), instead of waiting out pausedWait and exiting 18.
+// Walk 24 test2 r2 (revive r7): the boss fights (a live 60 % row: this walk's attempt start), dies, and
+// the frames show his row at 0 % while the run leader never finds his corpse and pauses with
+// "boss 12118 not found" on the boss's own step. The 0 % frame of the guid seen alive is the kill
+// evidence: the walk sends `.bot run skip` once and the run goes on to its until (exit 0), instead of
+// waiting out pausedWait and exiting 18.
 func TestRaidWalkBossNotFoundAfterKillSkips(t *testing.T) {
 	f, next, total := bossDoneFixture(t)
 	boss := next - 1
@@ -5970,15 +6127,16 @@ func TestRaidWalkBossNotFoundAddCorpseStillPauses(t *testing.T) {
 
 // TB's own boss step reads the live view only: a boss killed while the party was dead or away leaves no 0 % row in
 // the frames at all. The toolkit's `q units ... all dead e=` reads the map's creatures, corpses included, so a dead
-// 12118 within 40 yd of the boss row is the kill evidence (review round 1, item 1).
+// 12118 within 40 yd of the boss row is the kill evidence (review round 1, item 1) — once the r6 rule holds:
+// the corpse's guid was seen alive in this attempt and a second read 15 s later still shows it dead.
 func TestRaidWalkBossNotFoundToolkitCorpseSkips(t *testing.T) {
 	f, next, total := bossDoneFixture(t)
 	boss := next - 1
-	f.opts.pausedWait = 30 * time.Second
+	f.opts.pausedWait = 60 * time.Second
 	f.agent.startReply = zgStart(total, next)
-	f.agent.ttFn = ttUnitsFn(t, map[string]any{"g": "0xF130000000000009", "e": 12118, "dead": true, "d": 12.5, "hp": 0})
+	f.agent.ttFn = ttUnitsFn(t, map[string]any{"g": "0xF130002F56000009", "e": 12118, "dead": true, "d": 12.5, "hp": 0})
 	var q []queuedEvent
-	for range 12 {
+	for range 24 {
 		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|begin|boss 12118 not at his spot: waiting for him|until step %d (step %d)", boss, total, next, next)})
 	}
 	q = append(q, queuedEvent{raw: bossNotFoundLine("molten_core", boss, total, 12118, next)})
@@ -5987,7 +6145,9 @@ func TestRaidWalkBossNotFoundToolkitCorpseSkips(t *testing.T) {
 	f.agent.mu.Unlock()
 	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
 		if n <= 1 {
-			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}}
+			// GUID 9 with the toolkit corpse's full unit guid: the frames saw this unit alive
+			// in this attempt, and the toolkit reports his corpse, 15 s apart.
+			return []tbm.HostileRec{{GUID: 0xF130002F56000009, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}}
 		}
 		return nil
 	}
@@ -6008,8 +6168,42 @@ func TestRaidWalkBossNotFoundToolkitCorpseSkips(t *testing.T) {
 	if !hasNote(f.summary(), "the toolkit sees 12118 dead") {
 		t.Fatalf("notes %q, want the toolkit's corpse evidence", f.summary().Notes)
 	}
-	if len(tt) == 0 || !strings.Contains(tt[0], "all dead e=12118") {
-		t.Fatalf("toolkit calls %q, want the corpse read of 12118", tt)
+	if len(tt) < 2 || !strings.Contains(tt[0], "all dead e=12118") {
+		t.Fatalf("toolkit calls %q, want the corpse read of 12118 twice (the 15 s confirmation)", tt)
+	}
+}
+
+// Revive r6: the first toolkit corpse sighting alone is no evidence yet (the kill needs the second
+// read 15 s later). A pause shorter than the wait never skips on the toolkit's word alone.
+func TestRaidWalkBossNotFoundToolkitCorpseNeedsConfirmation(t *testing.T) {
+	f, next, total := bossDoneFixture(t)
+	boss := next - 1
+	f.opts.pausedWait = 4 * time.Second
+	f.agent.startReply = zgStart(total, next)
+	f.agent.ttFn = ttUnitsFn(t, map[string]any{"g": "0xF130002F56000009", "e": 12118, "dead": true, "d": 12.5, "hp": 0})
+	var q []queuedEvent
+	for range 12 {
+		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|begin|boss 12118 not at his spot: waiting for him|until step %d (step %d)", boss, total, next, next)})
+	}
+	q = append(q, queuedEvent{raw: bossNotFoundLine("molten_core", boss, total, 12118, next)})
+	f.agent.mu.Lock()
+	f.agent.startQueue = q
+	f.agent.mu.Unlock()
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 0xF130002F56000009, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if countPrefix(verbs, "skip") != 0 {
+		t.Fatalf("run verbs %v, want no skip: the corpse wait never confirmed within the pause", verbs)
 	}
 }
 
@@ -6146,24 +6340,296 @@ func TestRaidWalkBossNotFoundCorpseReadPointFarVisibleOffFails(t *testing.T) {
 	}
 }
 
-// Walk 25 point_far round 4 (Codex MEDIUM): a cancelled context is no toolkit failure. The point_far re-read's
-// status read answered while the walk itself was interrupted, so it returns without latching, like today's code.
+// Walk 25 point_far round 4 (Codex MEDIUM): a cancelled context is no toolkit failure. The status read inside the
+// point_far branch answers while the walk itself is interrupted (the fake cancels the context on that read), so
+// bossCorpse returns without latching, like today's code. M2 round 5: the old shape cancelled before bossCorpse ran
+// and never reached the status-cancel guard.
 func TestRaidWalkBossNotFoundCorpseReadPointFarStatusCancelDoesNotLatch(t *testing.T) {
 	f := zgThekalFixture(t, "zul_gurub")
 	rows := zgRows(t).Steps
+	// The guard needs the commander's map (see corpseMoveReady): stand in the instance like MovesAndRereads does.
+	f.agent.status.Map = 309
 	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub", Map: 309}, agent: f.agent, rows: planexport.Rows{Steps: rows},
 		env: walkEnv{now: f.clock.now, sleep: f.clock.sleep}, hires: map[string]bool{}}
 	f.agent.ttFn = func(cmd string) (ttResult, error) {
 		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
 	}
-	f.agent.statusFailNext = 1 // the point_far re-read's status read fails
+	f.agent.statusFailNext = 1 // the point_far branch's status read fails
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // the walk itself was interrupted while the status read answered
-	if ok, _ := w.bossCorpse(ctx, 14599, []uint32{14599}); ok {
+	// Cancel inside the status handler: the status read answers while the walk is already interrupted.
+	f.agent.cancelStatusAt, f.agent.cancelStatusCtx = 1, cancel
+	if ok, _ := w.bossCorpse(ctx, 14599, []uint32{14599}, w.env.now()); ok {
 		t.Fatalf("bossCorpse = true, want no evidence on a cancelled read")
 	}
 	if w.bossToolkitOff {
 		t.Fatalf("bossToolkitOff latched, want no latch on a cancelled status read")
+	}
+	f.agent.cancelStatusAt, f.agent.cancelStatusCtx = 0, nil
+}
+
+// Walk 25 point_far M2 round 5: a cancel before the go returns without latching: the go and the landing wait run
+// under an interrupted walk, so there is no verdict and no latch.
+func TestRaidWalkBossNotFoundCorpseReadPointFarGoCancelDoesNotLatch(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	rows := zgRows(t).Steps
+	// The guard needs the commander's map (see corpseMoveReady): stand in the instance like MovesAndRereads does.
+	f.agent.status.Map = 309
+	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub", Map: 309}, agent: f.agent, rows: planexport.Rows{Steps: rows},
+		env: walkEnv{now: f.clock.now, sleep: f.clock.sleep}, hires: map[string]bool{}}
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the go and the landing wait run under an interrupted walk: no verdict, no latch
+	if ok, _ := w.bossCorpse(ctx, 14599, []uint32{14599}, w.env.now()); ok {
+		t.Fatalf("bossCorpse = true, want no evidence on a cancelled go")
+	}
+	if w.bossToolkitOff {
+		t.Fatalf("bossToolkitOff latched, want no latch on a cancelled go")
+	}
+}
+
+// Walk 25 point_far M2 round 5: a cancel during the landing wait returns without latching: the go went out but the
+// wait sees the interrupted walk first.
+func TestRaidWalkBossNotFoundCorpseReadPointFarLandingCancelDoesNotLatch(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	rows := zgRows(t).Steps
+	spot := zgRows(t).Steps[zgBossStep(t)-1]
+	// The guard needs the commander's map: stand in the instance, away from the boss row so the wait polls.
+	f.agent.status.Map = 309
+	f.agent.goLagEvery = 1 << 30 // the go never lands: the wait polls until ctx ends it
+	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub", Map: 309}, agent: f.agent, rows: planexport.Rows{Steps: rows},
+		env: walkEnv{now: f.clock.now, sleep: f.clock.sleep}, hires: map[string]bool{}}
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the landing wait runs under an interrupted walk: no verdict, no latch
+	_ = spot
+	if ok, _ := w.bossCorpse(ctx, 14599, []uint32{14599}, w.env.now()); ok {
+		t.Fatalf("bossCorpse = true, want no evidence on a cancelled landing wait")
+	}
+	if w.bossToolkitOff {
+		t.Fatalf("bossToolkitOff latched, want no latch on a cancelled landing wait")
+	}
+	f.agent.goLagEvery = 0
+}
+
+// Walk 25 point_far M1 round 5: the commander stands at the portal (off the plan's map), where a `.go xyz ... 309`
+// would open a NEW copy instead of the hires' one. No move goes out; the reads latch with the not-on-map note.
+func TestRaidWalkBossNotFoundCorpseReadPointFarCommanderOffMapDoesNotMove(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	rows := zgRows(t).Steps
+	// Off the plan's map (the fake's spawn map 1, like a commander still at the portal).
+	f.agent.status.Map = 1
+	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub", Map: 309}, agent: f.agent, rows: planexport.Rows{Steps: rows},
+		env: walkEnv{now: f.clock.now, sleep: f.clock.sleep}, hires: map[string]bool{}}
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	if ok, _ := w.bossCorpse(context.Background(), 14599, []uint32{14599}, w.env.now()); ok {
+		t.Fatalf("bossCorpse = true, want no evidence off the map")
+	}
+	if !w.bossToolkitOff {
+		t.Fatalf("bossToolkitOff = false, want the latch on the off-map commander")
+	}
+	f.agent.mu.Lock()
+	gm, tt := append([]string{}, f.agent.gm...), append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	for _, line := range gm {
+		if strings.HasPrefix(line, ".go xyz") {
+			t.Fatalf("gm lines %q, want no .go xyz from off the map", gm)
+		}
+	}
+	if len(tt) != 1 {
+		t.Fatalf("toolkit calls %q, want exactly the refused read (no re-read after the latch)", tt)
+	}
+}
+
+// Walk 25 point_far M1 round 5, placed walk: the commander's instance moved (status's read agrees it is on the plan's
+// map, but the toolkit copy differs from w.placeInst, as placeStillJoined compares). No move goes out; the reads
+// latch with the instance note.
+func TestRaidWalkBossNotFoundCorpseReadPointFarPlacedInstanceMovesDoesNotMove(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	rows := zgRows(t).Steps
+	f.agent.status.Map = 309
+	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub", Map: 309}, agent: f.agent, rows: planexport.Rows{Steps: rows},
+		env: walkEnv{now: f.clock.now, sleep: f.clock.sleep}, hires: map[string]bool{},
+		place: &raidwalk.PlacePlan{Start: 1}, placeInst: 101}
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if strings.HasPrefix(cmd, "q inst") {
+			return ttReplyOf(t, map[string]any{"map": 309, "inst": 104}), nil
+		}
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	if ok, _ := w.bossCorpse(context.Background(), 14599, []uint32{14599}, w.env.now()); ok {
+		t.Fatalf("bossCorpse = true, want no evidence in another copy")
+	}
+	if !w.bossToolkitOff {
+		t.Fatalf("bossToolkitOff = false, want the latch on the moved copy")
+	}
+	f.agent.mu.Lock()
+	gm, tt := append([]string{}, f.agent.gm...), append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	for _, line := range gm {
+		if strings.HasPrefix(line, ".go xyz") {
+			t.Fatalf("gm lines %q, want no .go xyz from another copy", gm)
+		}
+	}
+	if len(tt) == 0 || !strings.Contains(tt[0], "all dead e=14599") {
+		t.Fatalf("toolkit calls %q, want the refused corpse read first", tt)
+	}
+}
+
+// Walk 25 point_far L4 round 5: the re-read after the move is refused again -> the re-read latches the reads off.
+// The move goes out once (the move note), the re-read fails, and the latch note carries it; the walk waits out the
+// pause with no skip.
+func TestRaidWalkBossNotFoundCorpseReadPointFarRereadRefusedLatches(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgThekalStart(total, boss)
+	f.agent.mu.Lock()
+	f.agent.startQueue = zgThekalPauseQueue(boss, total)
+	f.agent.mu.Unlock()
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	tt := append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	// The move went out once and the re-read failed: the refused read plus its re-read, then the latch.
+	if len(tt) != 2 {
+		t.Fatalf("toolkit calls %q, want the refused read and its re-read (the re-read latches the reads off)", tt)
+	}
+	if !hasNote(f.summary(), "the commander moved to the boss row for the corpse read") {
+		t.Fatalf("notes %q, want the move note (the move landed before the re-read)", f.summary().Notes)
+	}
+	if !hasNote(f.summary(), "the toolkit corpse read failed") {
+		t.Fatalf("notes %q, want the latch note carrying the re-read failure", f.summary().Notes)
+	}
+	if n := countPrefix(f.agent.runVerbs, "skip"); n != 0 {
+		t.Fatalf("run verbs %v, want no skip: a twice-refused read is no evidence", f.agent.runVerbs)
+	}
+}
+
+// Walk 25 point_far L4 round 5: the re-read after the move shows no corpse -> no latch, and the next tick does not
+// move again. Exactly one `.go xyz ... 309` goes out for the whole pause (the portal go does not count), and no skip
+// follows a clean re-read.
+func TestRaidWalkBossNotFoundCorpseReadPointFarRereadCleanMovesOnce(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgThekalStart(total, boss)
+	f.agent.mu.Lock()
+	f.agent.startQueue = zgThekalPauseQueue(boss, total)
+	f.agent.mu.Unlock()
+	spot := zgRows(t).Steps[boss-1]
+	refused := true
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if strings.Contains(cmd, "all dead e=14599") && refused {
+			// Only the FIRST read is refused (the commander stands too far away); once the move lands, the
+			// re-read and later ticks read cleanly. The fake answers from the commander's position like the
+			// landing-wait test does.
+			f.agent.mu.Lock()
+			x, y := f.agent.status.X, f.agent.status.Y
+			f.agent.mu.Unlock()
+			if x != spot.X || y != spot.Y {
+				return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+			}
+			refused = false
+		}
+		return ttReplyOf(t, map[string]any{"units": []any{}}), nil
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	wantGo := fmt.Sprintf(".go xyz %s %s %s 309", num32(spot.X), num32(spot.Y), num32(spot.Z+2))
+	f.agent.mu.Lock()
+	gm, tt := append([]string{}, f.agent.gm...), append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	gos := 0
+	for _, line := range gm {
+		if line == wantGo {
+			gos++
+		}
+	}
+	// One move for the whole pause: the move note's go, and no second move on later ticks.
+	if gos != 1 {
+		t.Fatalf("gm lines %q, want exactly one %q for the whole pause", gm, wantGo)
+	}
+	// The re-read went out (and later ticks re-read cleanly without moving again); no latch either.
+	if len(tt) < 2 {
+		t.Fatalf("toolkit calls %q, want the refused read and at least its clean re-read", tt)
+	}
+	if hasNote(f.summary(), "the toolkit corpse read failed") {
+		t.Fatalf("notes %q, want no latch on a clean re-read", f.summary().Notes)
+	}
+	if verbs := f.agent.runVerbs; countPrefix(verbs, "skip") != 0 {
+		t.Fatalf("run verbs %v, want no skip: a clean re-read is no evidence", verbs)
+	}
+}
+
+// Walk 25 point_far L4 round 5: `.gm visible off` is sent before the go. The send log shows gm visible-off, then the
+// go, then the re-read.
+func TestRaidWalkBossNotFoundCorpseReadPointFarVisibleOffBeforeGo(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	rows := zgRows(t).Steps
+	spot := zgRows(t).Steps[zgBossStep(t)-1]
+	f.agent.status.Map = 309
+	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub", Map: 309}, agent: f.agent, rows: planexport.Rows{Steps: rows},
+		env: walkEnv{now: f.clock.now, sleep: f.clock.sleep}, hires: map[string]bool{}}
+	calls := 0
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		calls++
+		if calls == 1 {
+			return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+		}
+		return ttReplyOf(t, map[string]any{"units": []any{}}), nil
+	}
+	if ok, _ := w.bossCorpse(context.Background(), 14599, []uint32{14599}, w.env.now()); ok {
+		t.Fatalf("bossCorpse = true, want no evidence from a clean re-read")
+	}
+	if w.bossToolkitOff {
+		t.Fatalf("bossToolkitOff latched, want no latch on a clean re-read")
+	}
+	f.agent.mu.Lock()
+	log := append([]string{}, f.agent.log...)
+	f.agent.mu.Unlock()
+	visOff, goIdx, rereadIdx, reads := -1, -1, -1, 0
+	for i, line := range log {
+		switch {
+		case line == "gm "+raidwalk.GMVisibleOff && visOff < 0:
+			visOff = i
+		case strings.HasPrefix(line, "gm .go xyz") && goIdx < 0:
+			goIdx = i
+		case strings.HasPrefix(line, "tt q units"):
+			reads++
+			if reads == 2 {
+				rereadIdx = i
+			}
+		}
+	}
+	_ = spot
+	if visOff < 0 || goIdx < 0 || rereadIdx < 0 || !(visOff < goIdx && goIdx < rereadIdx) {
+		t.Fatalf("send log %q, want gm visible-off, then the go, then the re-read", log)
 	}
 }
 
@@ -6178,12 +6644,13 @@ func TestRaidWalkBossNotFoundCorpseReadPointFarMovesAndRereads(t *testing.T) {
 	seenGo := false
 	f.agent.ttFn = func(cmd string) (ttResult, error) {
 		if !strings.Contains(cmd, "all dead e=14599") {
-			return ttResult{}, errors.New("unexpected toolkit command")
+			// The boss's reborn phase entry: no corpse in the toolkit's answer for it.
+			return ttReplyOf(t, map[string]any{"units": []any{}}), nil
 		}
 		if !seenGo {
 			return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
 		}
-		return ttReplyOf(t, map[string]any{"units": []map[string]any{{"g": "0xF13000000000000A", "e": 14599, "dead": true, "d": 12.5, "hp": 0}}}), nil
+		return ttReplyOf(t, map[string]any{"units": []map[string]any{{"g": packet.GUID(9).String(), "e": 14599, "dead": true, "d": 12.5, "hp": 0}}}), nil
 	}
 	f.agent.mu.Lock()
 	f.agent.startQueue = zgThekalPauseQueue(boss, total)
@@ -6211,8 +6678,10 @@ func TestRaidWalkBossNotFoundCorpseReadPointFarMovesAndRereads(t *testing.T) {
 	if countPrefix(verbs, "skip") != 1 {
 		t.Fatalf("run verbs %v, want exactly one skip", verbs)
 	}
-	if len(tt) != 2 || !strings.Contains(tt[0], "all dead e=14599") || !strings.Contains(tt[1], "all dead e=14599") {
-		t.Fatalf("toolkit calls %q, want the corpse read of 14599 twice (the refused read and its re-read)", tt)
+	// The refused read, the re-read after the move that starts the corpse wait, and at least one read 15 s later:
+	// the kill needs the confirmed corpse (the guid the first frame showed alive), not the re-read alone.
+	if len(tt) < 3 || !strings.Contains(tt[0], "all dead e=14599") || !strings.Contains(tt[1], "all dead e=14599") {
+		t.Fatalf("toolkit calls %q, want the refused read, its re-read and the confirming read of 14599", tt)
 	}
 	gos := 0
 	for _, line := range gm {
@@ -6270,7 +6739,8 @@ func TestRaidWalkBossNotFoundCorpseReadPointFarWaitsForLanding(t *testing.T) {
 	var atRead []int
 	f.agent.ttFn = func(cmd string) (ttResult, error) {
 		if !strings.Contains(cmd, "all dead e=14599") {
-			return ttResult{}, errors.New("unexpected toolkit command")
+			// The boss's reborn phase entry: no corpse in the toolkit's answer for it.
+			return ttReplyOf(t, map[string]any{"units": []any{}}), nil
 		}
 		f.agent.mu.Lock()
 		x, y, z := f.agent.x, f.agent.y, f.agent.z
@@ -6280,7 +6750,7 @@ func TestRaidWalkBossNotFoundCorpseReadPointFarWaitsForLanding(t *testing.T) {
 			// Still standing far away: the read is refused, as the live toolkit is.
 			return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
 		}
-		return ttReplyOf(t, map[string]any{"units": []map[string]any{{"g": "0xF13000000000000A", "e": 14599, "dead": true, "d": 12.5, "hp": 0}}}), nil
+		return ttReplyOf(t, map[string]any{"units": []map[string]any{{"g": packet.GUID(9).String(), "e": 14599, "dead": true, "d": 12.5, "hp": 0}}}), nil
 	}
 	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
 		if n <= 1 {
@@ -6298,10 +6768,11 @@ func TestRaidWalkBossNotFoundCorpseReadPointFarWaitsForLanding(t *testing.T) {
 	if countPrefix(verbs, "skip") != 1 {
 		t.Fatalf("run verbs %v, want exactly one skip", verbs)
 	}
-	if len(tt) != 2 {
-		t.Fatalf("toolkit calls %q, want exactly the refused read and its re-read", tt)
+	// The refused read, the re-read after the landing that starts the corpse wait, and the later confirming reads.
+	if len(tt) < 3 {
+		t.Fatalf("toolkit calls %q, want the refused read, its re-read and the confirming reads", tt)
 	}
-	if len(atRead) != 2 || atRead[1]-atRead[0] < 3 {
+	if len(atRead) < 2 || atRead[1]-atRead[0] < 3 {
 		t.Fatalf("toolkit reads at status counts %v, want the re-read at least 3 status reads after the refused one (the landing)", atRead)
 	}
 	if !hasNote(f.summary(), "the commander moved to the boss row for the corpse read") {
@@ -6437,9 +6908,10 @@ func TestRaidWalkBossNotFoundToolkitTimeoutLatchesOnce(t *testing.T) {
 	}
 }
 
-// The pause arrives before the evidence: the first ticks of the pause see no corpse (the frames hold nothing and
-// the toolkit sees none), and a later frame shows 14509 at 0 %. The evidence is re-read on every tick while the
-// pause lasts, and the skip latches only once it went out (review round 1, item 2): exactly one `.bot run skip`.
+// The pause arrives before the evidence (revive r7): the first ticks of the pause see no corpse (the frames
+// hold nothing and the toolkit sees none), and a later frame shows the 14509 seen alive then dead at 0 %.
+// The evidence is re-read on every tick while the pause lasts, and the skip latches only once it went out
+// (review round 1, item 2): exactly one `.bot run skip`.
 func TestRaidWalkBossNotFoundLateEvidenceSkips(t *testing.T) {
 	f := zgThekalFixture(t, "zul_gurub")
 	boss := zgBossStep(t)
@@ -6464,8 +6936,10 @@ func TestRaidWalkBossNotFoundLateEvidenceSkips(t *testing.T) {
 		switch {
 		case pauseFrame < 0 && frames <= 12:
 			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		case pauseFrame >= 0 && frames == pauseFrame+2:
+			return []tbm.HostileRec{{GUID: 10, Entry: 14509, HPPct: 99, Target: packet.GUID(1000)}} // reborn, alive first in this attempt
 		case pauseFrame >= 0 && frames > pauseFrame+3:
-			return []tbm.HostileRec{{GUID: 10, Entry: 14509, HPPct: 0}}
+			return []tbm.HostileRec{{GUID: 10, Entry: 14509, HPPct: 0}} // the kill, seen alive first in this attempt
 		}
 		return nil
 	}
@@ -6484,11 +6958,11 @@ func TestRaidWalkBossNotFoundLateEvidenceSkips(t *testing.T) {
 	}
 }
 
-// Review round 3 (Codex HIGH): a 0 % row in w.hostiles carries no freshness of its own, and a live sighting after
-// it voids the kill. The boss fights (a live 60 % row: this walk's attempt start), dies (a 0 % row), the encounter
-// resets and he respawns (100 % afterwards), the party loses sight of him for 15 s and the run leader pauses with
-// "boss 12118 not found": the corpse's row is superseded by the newer live row, so it is no evidence and the
-// toolkit read decides — no corpse there, no skip, the pause stays (exit 18).
+// Review round 3 (Codex HIGH, r7): a live row after the death voids the frame corpse. The boss fights
+// (a live 60 % row: this walk's attempt start), dies (a 0 % row of the same guid), the encounter resets
+// (the family seen alive at 100 % afterwards) and the party loses sight of him, so when the run leader
+// pauses with "boss 12118 not found" the family corpse is voided by the newer live row: no dead row
+// evidence, no toolkit read (a fresh live row decides alone), no skip, the pause stays (exit 18).
 func TestRaidWalkBossNotFoundRespawnedBossStillPauses(t *testing.T) {
 	f, next, total := bossDoneFixture(t)
 	boss := next - 1
@@ -6505,14 +6979,13 @@ func TestRaidWalkBossNotFoundRespawnedBossStillPauses(t *testing.T) {
 	f.agent.mu.Unlock()
 	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
 		switch {
-		case n <= 1:
-			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}} // the fight: this walk's attempt start
-		case n <= 2:
-			return []tbm.HostileRec{{GUID: 10, Entry: 12118, HPPct: 0}} // the kill, seen alive first in this attempt
 		case n <= 3:
-			return []tbm.HostileRec{{GUID: 11, Entry: 12118, HPPct: 100}} // the respawn: alive again after the corpse, then out of view
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}} // this walk's attempt start
+		case n <= 4:
+			return []tbm.HostileRec{{GUID: 9, Entry: 12118, HPPct: 0}} // the kill, seen alive first in this attempt
+		default:
+			return []tbm.HostileRec{{GUID: 10, Entry: 12118, HPPct: 100, Target: packet.GUID(1000)}} // the reset: the boss back alive
 		}
-		return nil
 	}
 	code := f.run(context.Background())
 	if code != exitRaidWalkFailed {
@@ -6525,16 +6998,17 @@ func TestRaidWalkBossNotFoundRespawnedBossStillPauses(t *testing.T) {
 	verbs, tt := append([]string{}, f.agent.runVerbs...), append([]string{}, f.agent.ttCalls...)
 	f.agent.mu.Unlock()
 	if countPrefix(verbs, "skip") != 0 {
-		t.Fatalf("run verbs %v, want no skip: the corpse predates a live sighting of the boss", verbs)
+		t.Fatalf("run verbs %v, want no skip: the guid was alive again after its death", verbs)
 	}
-	if len(tt) == 0 || !strings.Contains(tt[0], "all dead e=12118") {
-		t.Fatalf("toolkit calls %q, want the corpse read (a stale row must not bypass it)", tt)
+	if len(tt) != 0 {
+		t.Fatalf("toolkit calls %q, want no corpse read: the live boss row decides alone", tt)
 	}
 }
 
-// Review round 3: the attempt bound itself. A 0 % row the frames saw before the CURRENT attempt's engagement is
-// another attempt's corpse (the frames are never pruned, so a wipe recovery leaves it in w.hostiles), and a 0 %
-// row inside the attempt is evidence. Without the bound the stale row alone would be a kill.
+// Review round 3 (Codex HIGH, r7): the attempt bound itself. A 0 % row the frames saw before the CURRENT attempt's
+// engagement is another attempt's corpse (the frames are never pruned, so a wipe recovery leaves it in
+// w.hostiles), and a 0 % row inside the attempt of a guid seen alive there is evidence. Without the bound
+// the stale row alone would be a kill; without the link a corpse the frames never saw alive would be one.
 func TestBossKilledDeadRowBoundToTheAttempt(t *testing.T) {
 	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
 	start := func(deadAt time.Time) *walk {
@@ -6543,6 +7017,7 @@ func TestBossKilledDeadRowBoundToTheAttempt(t *testing.T) {
 			botAt:         map[string]botPos{"Tank": {at: now}},
 			hostiles:      map[string]hostileState{"0x9": {entry: 12118, hppct: 0, at: deadAt}},
 			bossAttemptAt: map[uint32]time.Time{12118: now.Add(-60 * time.Second)},
+			bossAliveSeen: map[string]time.Time{"0x9": now.Add(-60 * time.Second)},
 		}
 	}
 	ok, ev := start(now.Add(-90*time.Second)).bossKilled(context.Background(), 12118, now)
@@ -6552,6 +7027,233 @@ func TestBossKilledDeadRowBoundToTheAttempt(t *testing.T) {
 	ok, ev = start(now.Add(-30*time.Second)).bossKilled(context.Background(), 12118, now)
 	if !ok || !strings.Contains(ev, "seen dead in the frames") {
 		t.Fatalf("bossKilled = %v (%q), want the frame row inside the attempt as the evidence", ok, ev)
+	}
+}
+
+// bossTTStub is a walkAgent that only answers toolkit reads (bossKilled's corpse read).
+type bossTTStub struct {
+	fn func(cmd string) (ttResult, error)
+}
+
+func (s *bossTTStub) Call(ctx context.Context, method string, params, out any, timeout time.Duration) error {
+	if method != "tt" {
+		return errors.New("unexpected RPC " + method)
+	}
+	raw, _ := json.Marshal(params)
+	var p ttParams
+	_ = json.Unmarshal(raw, &p)
+	res, err := s.fn(p.Cmd)
+	if err != nil {
+		return err
+	}
+	b, _ := json.Marshal(res)
+	return json.Unmarshal(b, out)
+}
+
+// bossCorpseGUID is the toolkit corpse's guid in the tests below: entry 12118 (0x2F56), counter 9.
+const bossCorpseGUID = "0xF130002F56000009"
+
+// bossCorpseWalk is a walk on a one-boss plan (entry 12118) whose toolkit always reports corpse:
+// it returns the walk and the corpse guid's canonical key for the frame maps.
+func bossCorpseWalk(t *testing.T, corpse map[string]any) (*walk, string) {
+	t.Helper()
+	g, err := packet.ParseGUID(bossCorpseGUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newFixture(t)
+	w := &walk{
+		plan:          &dungeon.Plan{Map: 230, Legs: []dungeon.Leg{{Boss: &dungeon.Boss{Entry: 12118}}}},
+		rows:          planexport.Rows{Steps: []planexport.StepRow{{Kind: planexport.KindBoss, Entry: 12118, X: 100, Y: 200, Z: 300}}},
+		agent:         &bossTTStub{fn: ttUnitsFn(t, corpse)},
+		env:           walkEnv{now: f.clock.now, sleep: f.clock.sleep},
+		mt:            "Tank",
+		hires:         map[string]bool{"Tank": true},
+		hostiles:      map[string]hostileState{},
+		bossAttemptAt: map[uint32]time.Time{},
+	}
+	setBossCorpseMaps(w)
+	return w, g.String()
+}
+
+// setBossCorpseMaps inits the corpse wait maps; a helper so the call sites read plainly.
+func setBossCorpseMaps(w *walk) {
+	w.bossAliveSeen = map[string]time.Time{}
+	w.bossCorpseSeen = map[string]time.Time{}
+}
+
+// Codex HIGH (r6): a toolkit corpse whose guid the frames never showed alive in this attempt is a
+// stale or foreign corpse, not kill evidence: no skip, even when the read repeats 16 s later.
+func TestBossKilledToolkitCorpseNeedsAttemptAliveGUID(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w, _ := bossCorpseWalk(t, map[string]any{"g": bossCorpseGUID, "e": 12118, "dead": true, "d": 12.5})
+	t1, t2 := now.Add(16*time.Second), now.Add(32*time.Second)
+	w.botAt = map[string]botPos{"Tank": {at: t2}}
+	w.bossAttemptAt[12118] = now // the attempt began, but this guid was never seen alive in it
+	if ok, ev := w.bossKilled(context.Background(), 12118, t1); ok {
+		t.Fatalf("bossKilled = true (%q), want no skip: the corpse guid was never alive this attempt", ev)
+	}
+	if ok, ev := w.bossKilled(context.Background(), 12118, t2); ok {
+		t.Fatalf("bossKilled = true (%q), want no skip even 16 s later: the guid link never held", ev)
+	}
+}
+
+// Codex HIGH (r6): the boss is seen alive, the toolkit reports his corpse, then the SAME guid is
+// alive again within 15 s (a fake death: Thekal phase 1 dies and is raised again). The
+// resurrection voids the corpse wait: no skip once the alive row goes stale either.
+func TestBossKilledToolkitCorpseFakeDeathStillPauses(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w, key := bossCorpseWalk(t, map[string]any{"g": bossCorpseGUID, "e": 12118, "dead": true, "d": 12.5})
+	t1 := now.Add(16 * time.Second)
+	w.botAt = map[string]botPos{"Tank": {at: t1.Add(21 * time.Second)}}
+	w.bossAttemptAt[12118] = now
+	w.bossAliveSeen[key] = now
+	w.hostiles[key] = hostileState{entry: 12118, hppct: 60, target: 1000, at: now} // stale at t1 (16 s)
+	if ok, ev := w.bossKilled(context.Background(), 12118, t1); ok {
+		t.Fatalf("bossKilled = true (%q), want no skip on the first corpse sighting: it starts the wait", ev)
+	}
+	// Raised again 5 s after the first sighting: the wait is void, not confirmed.
+	aliveAgain := t1.Add(5 * time.Second)
+	w.hostiles[key] = hostileState{entry: 12118, hppct: 100, at: aliveAgain}
+	w.bossAliveSeen[key] = aliveAgain
+	if ok, ev := w.bossKilled(context.Background(), 12118, t1.Add(21*time.Second)); ok {
+		t.Fatalf("bossKilled = true (%q), want no skip: the guid was alive again after the corpse", ev)
+	}
+}
+
+// Codex HIGH (r6): seen alive, toolkit corpse, still dead 16 s later with no alive frame for that
+// guid in between: the kill is proven, skip.
+func TestBossKilledToolkitCorpseConfirmedSkips(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w, key := bossCorpseWalk(t, map[string]any{"g": bossCorpseGUID, "e": 12118, "dead": true, "d": 12.5})
+	t1 := now.Add(16 * time.Second)
+	w.botAt = map[string]botPos{"Tank": {at: t1.Add(16 * time.Second)}}
+	w.bossAttemptAt[12118] = now
+	w.bossAliveSeen[key] = now
+	w.hostiles[key] = hostileState{entry: 12118, hppct: 60, target: 1000, at: now} // stale at t1 (16 s)
+	if ok, ev := w.bossKilled(context.Background(), 12118, t1); ok {
+		t.Fatalf("bossKilled = true (%q), want no skip on the first corpse sighting: it starts the wait", ev)
+	}
+	ok, ev := w.bossKilled(context.Background(), 12118, t1.Add(16*time.Second))
+	if !ok || !strings.Contains(ev, "the toolkit sees 12118 dead") {
+		t.Fatalf("bossKilled = %v (%q), want the confirmed toolkit corpse as the evidence", ok, ev)
+	}
+}
+
+// bossFrameWalk is a walk on a one-boss plan (entry 12118) whose toolkit sees no corpse: the frame
+// path alone decides (revive r7). The caller feeds frames with trackFrame and reads bossKilled.
+func bossFrameWalk(t *testing.T) *walk {
+	t.Helper()
+	f := newFixture(t)
+	w := &walk{
+		plan:          &dungeon.Plan{Map: 230, Legs: []dungeon.Leg{{Boss: &dungeon.Boss{Entry: 12118}}}},
+		rows:          planexport.Rows{Steps: []planexport.StepRow{{Kind: planexport.KindBoss, Entry: 12118, X: 100, Y: 200, Z: 300}}},
+		agent:         &bossTTStub{fn: ttUnitsFn(t)},
+		env:           walkEnv{now: f.clock.now, sleep: f.clock.sleep},
+		mt:            "Tank",
+		hires:         map[string]bool{"Tank": true},
+		partyG:        map[uint64]bool{},
+		hostiles:      map[string]hostileState{},
+		botAt:         map[string]botPos{},
+		bossRows:      map[uint32]hostileState{},
+		bossRule:      raidwalk.NewBossRows(&dungeon.Plan{Legs: []dungeon.Leg{{Boss: &dungeon.Boss{Entry: 12118}}}}),
+		bossAttemptAt: map[uint32]time.Time{},
+	}
+	setBossCorpseMaps(w)
+	return w
+}
+
+// bossTestFrame is one frame with Tank (guid 1000) watching the given hostile rows.
+func bossTestFrame(hostiles ...tbm.HostileRec) *tbm.ViewFrame {
+	return &tbm.ViewFrame{
+		Party:    []tbm.PartyRec{{GUID: 1000, Name: "Tank"}},
+		Hostiles: hostiles,
+	}
+}
+
+// Codex HIGH (r7): a dead row never starts the attempt. The first sighting of a pre-existing
+// corpse (0 %, even holding a party target) records no attempt start and no live sighting, so
+// bossKilled finds no evidence and the pause stays: no skip.
+func TestBossAttemptCorpseFirstStartsNoAttempt(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w := bossFrameWalk(t)
+	w.trackFrame(now, bossTestFrame(tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 0, Target: packet.GUID(1000)}))
+	if at := w.bossAttemptAt[12118]; !at.IsZero() {
+		t.Fatalf("bossAttemptAt = %v, want zero: a 0 %% row never starts the attempt", at)
+	}
+	if _, ok := w.bossAliveSeen[packet.GUID(9).String()]; ok {
+		t.Fatalf("bossAliveSeen holds the corpse guid, want nothing: a corpse is no live sighting")
+	}
+	killAt := now.Add(16 * time.Second)
+	w.botAt = map[string]botPos{"Tank": {at: killAt}}
+	if ok, ev := w.bossKilled(context.Background(), 12118, killAt); ok {
+		t.Fatalf("bossKilled = true (%q), want no skip: the corpse predates any attempt", ev)
+	}
+}
+
+// Codex HIGH (r7): a live sighting from an earlier attempt vouches for nothing. The frames show 12118
+// standing at full hp before any attempt began (no target, no latch), then the pull (a live 60 % row of
+// another guid starts the attempt) and a 0 % row of the first guid. That corpse predates the attempt's
+// live link, so it is no evidence and the empty toolkit proves nothing: no skip.
+func TestBossAttemptEarlierSightingVoidsCorpse(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w := bossFrameWalk(t)
+	w.trackFrame(now, bossTestFrame(tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 100}))
+	if _, ok := w.bossAliveSeen[packet.GUID(9).String()]; !ok {
+		t.Fatalf("bossAliveSeen = %v, want the standing boss's sighting", w.bossAliveSeen)
+	}
+	if at := w.bossAttemptAt[12118]; !at.IsZero() {
+		t.Fatalf("bossAttemptAt = %v, want zero: a full hp row with no target starts nothing", at)
+	}
+	pullAt := now.Add(2 * time.Second)
+	w.trackFrame(pullAt, bossTestFrame(tbm.HostileRec{GUID: 10, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}))
+	if at := w.bossAttemptAt[12118]; !at.Equal(pullAt) {
+		t.Fatalf("bossAttemptAt = %v, want %v: the pull starts the attempt", at, pullAt)
+	}
+	deadAt := now.Add(20 * time.Second)
+	w.trackFrame(deadAt, bossTestFrame(tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 0}))
+	w.botAt = map[string]botPos{"Tank": {at: deadAt}}
+	if ok, ev := w.bossKilled(context.Background(), 12118, deadAt); ok {
+		t.Fatalf("bossKilled = true (%q), want no skip: guid 9 was never seen alive in this attempt", ev)
+	}
+}
+
+// Codex HIGH (r7): the attempt starts on a live engaged row, and the 0 % row of that same guid is
+// the kill: seen alive before its death, inside the attempt. Skip.
+func TestBossAttemptLiveThenDeathKills(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w := bossFrameWalk(t)
+	w.trackFrame(now, bossTestFrame(tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}))
+	if at := w.bossAttemptAt[12118]; !at.Equal(now) {
+		t.Fatalf("bossAttemptAt = %v, want %v: the live engaged row starts the attempt", at, now)
+	}
+	deadAt := now.Add(20 * time.Second)
+	w.trackFrame(deadAt, bossTestFrame(tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 0}))
+	w.botAt = map[string]botPos{"Tank": {at: deadAt}}
+	ok, ev := w.bossKilled(context.Background(), 12118, deadAt)
+	if !ok || !strings.Contains(ev, "seen dead in the frames") {
+		t.Fatalf("bossKilled = %v (%q), want the frame row inside the attempt as the evidence", ok, ev)
+	}
+}
+
+// Codex HIGH (r7): a fake death voids the kill. Live, dead, then the same guid alive again (raised):
+// the newest frame row is a stale live one, so no dead row is evidence and the empty toolkit proves
+// nothing: no skip, the pause stays.
+func TestBossAttemptFakeDeathStillPauses(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w := bossFrameWalk(t)
+	w.trackFrame(now, bossTestFrame(tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 60, Target: packet.GUID(1000)}))
+	deadAt := now.Add(20 * time.Second)
+	w.trackFrame(deadAt, bossTestFrame(tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 0}))
+	raisedAt := deadAt.Add(5 * time.Second)
+	w.trackFrame(raisedAt, bossTestFrame(tbm.HostileRec{GUID: 9, Entry: 12118, HPPct: 100, Target: packet.GUID(1000)}))
+	if at := w.bossAttemptAt[12118]; !at.Equal(now) {
+		t.Fatalf("bossAttemptAt = %v, want %v: the attempt started on the first live row", at, now)
+	}
+	killAt := raisedAt.Add(16 * time.Second)
+	w.botAt = map[string]botPos{"Tank": {at: killAt}}
+	if ok, ev := w.bossKilled(context.Background(), 12118, killAt); ok {
+		t.Fatalf("bossKilled = true (%q), want no skip: the guid was alive again after its death", ev)
 	}
 }
 
