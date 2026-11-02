@@ -403,7 +403,7 @@ func zgWriteRoutes(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk)
 		out = append(out, zgRoute{Walk: w.Name, FromSeq: a.Seq, From: a.Label, ToSeq: b.Seq, To: b.Label,
 			FromPt: zgVec{a.P.X, a.P.Y, a.P.Z}, ToPt: zgVec{b.P.X, b.P.Y, b.P.Z}, Points: vecs})
 	}
-	fixture := zgRoutes{Note: "Navmesh polylines of the Mandokir and Jin'do walk-28 fix (issue #394), sampled every yard. Regenerate with: go test -run 'TestZulGurubMandokirSweepClearOfLaterPacks|TestZulGurubJindoCorridorClearOfLaterPacks' -update-zg-routes ./tools/dungeongen/ (needs the map-309 mmaps)."}
+	fixture := zgRoutes{Note: "Navmesh polylines of the Mandokir and Jin'do walk-28 fix (issue #394), sampled every yard. Regenerate with: go test -run 'TestZulGurubMandokirSweepClearOfLaterPacks|TestZulGurubJindoCorridorClearOfLaterPacks' ./tools/dungeongen/ -update-zg-routes (needs the map-309 mmaps)."}
 	fixture.Routes = out
 	b, err := json.MarshalIndent(fixture, "", " ")
 	if err != nil {
@@ -412,6 +412,39 @@ func zgWriteRoutes(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk)
 	if err := os.WriteFile(zgFixture, append(b, '\n'), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// zgNextPull is the pull a walk from party point i approaches: the first pull row after i (its group and stand). A
+// move row between them is part of the approach.
+func zgNextPull(w zgWalk, i int) (int, dungeon.Point, bool) {
+	for j := i + 1; j <= w.Last && j < len(w.Parties); j++ {
+		if w.Parties[j].Turn {
+			return w.Parties[j].Group, w.Parties[j].P, true
+		}
+	}
+	return -1, dungeon.Point{}, false
+}
+
+// zgApproachMin is the least distance from a walk's samples to the pack it approaches. When the walk ends at the stand,
+// the samples within the last yard of walk before it are left out (the stand sits 19.5-28 yd from its own pack by
+// design).
+func zgApproachMin(samples []dungeon.Point, pack []creature, endAtStand bool) (float64, dungeon.Point, creature, bool) {
+	best, ok := math.Inf(1), false
+	var at dungeon.Point
+	var who creature
+	rem := 0.0 // the walk's length from sample k to its end
+	for k := len(samples) - 1; k >= 0; k-- {
+		if k < len(samples)-1 {
+			rem += dist(samples[k], samples[k+1])
+		}
+		if endAtStand && rem < 1 {
+			continue
+		}
+		if d, c := zgMin3(samples[k], pack); d < best {
+			best, at, who, ok = d, samples[k], c, true
+		}
+	}
+	return best, at, who, ok
 }
 
 // zgCheckWalk checks the exported rows' walk: every consecutive pair's straight line and committed navmesh polyline stays
@@ -447,6 +480,15 @@ func zgCheckWalk(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, p
 		samples := make([]dungeon.Point, 0, len(fix.Points))
 		for _, q := range fix.Points {
 			samples = append(samples, dungeon.Point{X: q[0], Y: q[1], Z: q[2]})
+		}
+		// a walk must not walk into the pack the next pull approaches before its stand: the navmesh polyline stays
+		// >= zgLaterYd from every unit of that pack, except the last yard before the stand (19.5-28 yd by design)
+		if g, stand, ok := zgNextPull(w, i); ok && g >= 0 && g < len(packs) {
+			atStand := dist(b.P, stand) < 0.01
+			if d, at, who, found := zgApproachMin(samples, packs[g], atStand); found && d < zgLaterYd {
+				t.Errorf("%s rows %d (%s) -> %d (%s): the navmesh walk passes %.1f yd from the pack of pull group %d at %.1f %.1f %.1f (%s %d), want >= %g before the stand",
+					w.Name, a.Seq, a.Label, b.Seq, b.Label, d, g, at.X, at.Y, at.Z, who.Name, who.Entry, zgLaterYd)
+			}
 		}
 		if len(later) > 0 {
 			best, at := math.Inf(1), dungeon.Point{}
