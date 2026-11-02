@@ -55,9 +55,11 @@ type routePoint struct {
 	px, py, pz float32
 	// entries and radius own the spawns this row pulls; idx is the row's absolute index in the route. ownerIdx is
 	// the same absolute index when the row pulls, -1 for a move row, which owns nothing: the segment check
-	// compares the owner's absolute index against the segment end's idx.
+	// compares the owner's absolute index against the segment end's idx. item is the row's item column (a pull
+	// row's max_bodies, 0 when the plan sizes nothing).
 	entries  []uint32
 	radius   float32
+	item     uint32
 	idx      int
 	ownerIdx int
 }
@@ -81,7 +83,7 @@ func routePoints(p *dungeon.Plan) ([]routePoint, error) {
 		rp := routePoint{plan: s.Plan, leg: s.Leg, seq: s.Seq, kind: s.Kind,
 			standPull: (s.Kind == planexport.KindPull || s.Kind == planexport.KindBoss) && s.Flags&planexport.FlagStandPull != 0,
 			x:         s.X, y: s.Y, z: s.Z, px: s.X, py: s.Y, pz: s.Z,
-			entries: s.Entries, radius: s.Radius, idx: len(out), ownerIdx: -1}
+			entries: s.Entries, radius: s.Radius, item: s.Item, idx: len(out), ownerIdx: -1}
 		if rp.standPull {
 			// The party never walks to the row's point (the pack centroid): it fights from its stand. The export
 			// writes the stand as the move row right before the pull row in the same leg (see FlagStandPull), so

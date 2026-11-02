@@ -29,6 +29,7 @@ import (
 	"strings"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
 type creature struct {
@@ -193,8 +194,9 @@ func parseFactions(s string) (map[int]bool, error) {
 	return m, err
 }
 
-// checkFile lints a plan against dir's creatures.tsv and prints the warnings; the exit status is 1 for a plan that does not load or
-// an export that cannot be read, 0 otherwise (warnings are for a person to read), and 1 with strict when there is a warning.
+// checkFile lints a plan against dir's creatures.tsv and prints the warnings; the exit status is 1 for a plan that does not load, an
+// export that cannot be read, or a world or pull_size load error (strict or not: a lint that cannot read its inputs fails the check),
+// 0 otherwise (warnings are for a person to read), and 1 with strict when there is a warning.
 func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool) int {
 	fail := func(err error) int {
 		fmt.Fprintln(os.Stderr, "dungeongen:", err)
@@ -231,10 +233,26 @@ func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool
 		return fail(err)
 	}
 	ws := Check(p, cs, CheckOptions{Team: team, Friendly: fm, Awakened: am, Scripted: toSet(sc)})
+	// The pull_size lint: the run leader's aggro-count estimate per pull row,
+	// over the row's max_bodies (or the plan's pull_ceiling, else 8/6).
+	// Mmaps-free: straight 2 yd samples between rows, LOS always seen (high
+	// side, documented in pull_size.go). A plan that fails to export, or a
+	// world that fails to load, fails the check: a lint that cannot read its
+	// inputs is an error, not an empty report.
+	w, _, werr := worldspawn.Load(dir, p.Map)
+	if werr != nil {
+		return fail(fmt.Errorf("pull_size: %w", werr))
+	}
+	sized, serr := PullSizes(p, cs, w)
+	if serr != nil {
+		return fail(fmt.Errorf("pull_size: %w", serr))
+	}
+	for _, f := range sized {
+		ws = append(ws, f.Summary)
+	}
 	for _, w := range ws {
 		fmt.Println("warning:", w)
 	}
-	fmt.Printf("%d warning(s) for %s as team %q\n", len(ws), path, team)
 	if strict && len(ws) > 0 {
 		return 1
 	}

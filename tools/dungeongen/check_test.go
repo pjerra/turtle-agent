@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,7 +137,81 @@ func TestCheckFileStrict(t *testing.T) {
 		t.Fatalf("warnings with -strict: %d", got)
 	}
 	clean := filepath.Join("..", "..", "dungeons", "uldaman.json")
-	if got := checkFile(clean, data, "alliance", "122", "2748,4857", "", true); got != 0 {
-		t.Fatalf("the committed plan: %d", got)
+	// The committed plan has no creature-check warning, but the pull_size lint
+	// warns on its dense pulls (no max_bodies sized yet): strict fails by
+	// design, and the warnings name the pull rows.
+	if got := checkFile(clean, data, "alliance", "122", "2748,4857", "", true); got != 1 {
+		t.Fatalf("the committed plan under -strict: %d, want 1 (the pull_size lint warns)", got)
+	}
+}
+
+// A world the loader refuses, or a plan the exporter refuses, fails the
+// check even without -strict: a lint that cannot read its inputs is an
+// error, not an empty report.
+func TestCheckFileFailsOnWorldOrExportErrors(t *testing.T) {
+	dir := t.TempDir()
+	plan := filepath.Join(dir, "p.json")
+	if err := os.WriteFile(plan, []byte(`{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":1,"y":0,"z":0}]}]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data := t.TempDir()
+	// No creatures.tsv: worldspawn.Load refuses, and the check fails strict or not.
+	if got := checkFile(plan, data, "", "", "", "", false); got != 1 {
+		t.Fatalf("missing world without strict: %d, want 1", got)
+	}
+	if got := checkFile(plan, data, "", "", "", "", true); got != 1 {
+		t.Fatalf("missing world with strict: %d, want 1", got)
+	}
+	// A world that loads but a plan the exporter refuses (kill_first over the
+	// row column width: dungeon.Load passes, planexport.Build refuses) fails
+	// the same way.
+	long := "10000"
+	for e := 10001; e <= 10060; e++ {
+		long += fmt.Sprintf(",%d", e)
+	}
+	js := `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"kill_first":[` + long + `],"legs":[
+ {"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":1,"y":0,"z":0}]}]}]}`
+	bad := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(bad, []byte(js), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := checkFile(bad, filepath.Join("testdata", "uldaman"), "", "", "", "", false); got != 1 {
+		t.Fatalf("refused export without strict: %d, want 1", got)
+	}
+}
+
+// A creature export with no eligible mobs (header only) still reports every
+// pull row as "no target", and -strict fails on it.
+func TestCheckFileNoEligibleMobsFailsStrict(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join("testdata", "uldaman")
+	for _, f := range []string{"entrances.tsv", "gameobjects.tsv"} {
+		b, err := os.ReadFile(filepath.Join(src, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, f), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	creatures, err := os.ReadFile(filepath.Join(src, "creatures.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	header := strings.SplitN(string(creatures), "\n", 2)[0] + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "creatures.tsv"), []byte(header), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan := filepath.Join(dir, "p.json")
+	if err := os.WriteFile(plan, []byte(`{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":1,"y":0,"z":0}]}]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := checkFile(plan, dir, "", "", "", "", false); got != 0 {
+		t.Fatalf("no-target warning without strict: %d, want 0 (warnings do not fail)", got)
+	}
+	if got := checkFile(plan, dir, "", "", "", "", true); got != 1 {
+		t.Fatalf("no-target finding with strict: %d, want 1", got)
 	}
 }
