@@ -63,8 +63,8 @@ func TestStageCheckZulfarrakGahzrillaRefused(t *testing.T) {
 	text := out.String()
 	for _, want := range []string{
 		"cannot be staged in a fresh instance",
-		"the boss of leg 8 velratha_b (entry 7795)",
-		"proposal: earlier_leg leg 8 velratha_b",
+		"the boss of leg 9 velratha_b (entry 7795)",
+		"proposal: earlier_leg leg 9 velratha_b",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("no %q in %q", want, text)
@@ -120,22 +120,20 @@ func stageFirstRowNote(t *testing.T, plan *dungeon.Plan, leg int) (string, bool)
 	p := navmesh.NewPlanner(t.TempDir())
 	defer p.Close()
 	_, _, note := stageFirstRow(plan, leg, p, 0)
-	if !strings.Contains(note, "is optional") {
+	if !strings.Contains(note, "is skipped by default") {
 		return note, false
 	}
 	return note, true
 }
 
 // 30. A plan with an optional leg: stageFirstRow falls back with the
-// optional note.
+// skipped-by-default note.
 func TestStageFirstRowFallsBackForAnOptionalLeg(t *testing.T) {
 	plan := zulfarrakOptionalPlan(t)
 	if _, ok := stageFirstRowNote(t, plan, optionalLegIndex(plan)); !ok {
 		t.Fatal("want the optional fallback")
 	}
 }
-
-// 8. A missing leg is refused as invalid params (instead of staging leg 0).
 func TestStageRunRefusesAMissingLeg(t *testing.T) {
 	r := &dungeonRunner{dir: "../../dungeons"}
 	_, err := stageRun(context.Background(), nil, r, nil, stageParams{Name: "zulfarrak"})
