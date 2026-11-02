@@ -64,13 +64,14 @@ func TestCrescentGroveHasNoCrittersInThePulls(t *testing.T) {
 			}
 		}
 	}
-	if groups != 299 {
+	if groups != 297 {
 		t.Errorf("%d pull groups, want 299", groups)
 	}
 }
 
-// A boss sees 20 yd: no pull member may stand within 25 yd of any of the five bosses. The Elders 92105/92106 stood 11 yd
-// from Grovetender Engryss and are his first instead; the Deer pull 9 yd from Keeper Ranathos is gone.
+// A boss sees 20 yd: no pull member may stand within 25 yd of the seven bosses, except the two Wardens of #243: each comes with two
+// Twisted Ancients (92127) 20-23 yd away that stay pull groups (spec §4), so the pull that takes an escort brings the Warden along by
+// design. The Elders 92105/92106 stood 11 yd from Grovetender Engryss and are his first instead; the Deer pull 9 yd from Keeper Ranathos is gone.
 func TestCrescentGroveNoPackStandsWithABoss(t *testing.T) {
 	p := loadPlan(t, crescentGrovePlan)
 	bosses := map[uint32]Point{}
@@ -79,14 +80,15 @@ func TestCrescentGroveNoPackStandsWithABoss(t *testing.T) {
 			bosses[l.Boss.Entry] = l.Boss.Position
 		}
 	}
-	if len(bosses) != 5 {
+	if len(bosses) != 7 {
 		t.Fatalf("%d bosses", len(bosses))
 	}
+	wardens := map[uint32]bool{92128: true, 92129: true} // see the comment above
 	for _, l := range p.Legs {
 		for i, g := range l.PullGroups {
 			for _, q := range g.Positions {
 				for entry, b := range bosses {
-					if d := distYd(q, b); d < 25 {
+					if d := distYd(q, b); d < 25 && !wardens[entry] {
 						t.Errorf("leg %s pull group %d: a member stands %.1f yd from boss %d", l.Name, i, d, entry)
 					}
 				}
@@ -148,9 +150,9 @@ func TestCrescentGrovePullRadiiKeepTheNeighbourOut(t *testing.T) {
 		{"grovetender_engryss", 528.389, -119.464, 10},
 		{"grovetender_engryss", 310.477, -29.7596, 10},
 		{"grovetender_engryss", 215.456, -52.8876, 10},
-		{"keeper_ranathos", 285.171, 60.2619, 13},
-		{"keeper_ranathos", 312.26, 260.564, 10},
-		{"keeper_ranathos", 201.794, 216.942, 16},
+		{"warden_treeshade", 285.171, 60.2619, 13},
+		{"warden_treeshade", 312.26, 260.564, 10},
+		{"warden_treeshade", 201.794, 216.942, 16},
 		{"fenektis_the_deceiver", -502.81, -76.615, 14},
 	} {
 		found := false

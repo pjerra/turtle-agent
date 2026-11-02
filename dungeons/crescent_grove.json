@@ -30,7 +30,8 @@
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
     "Needs: Keeper Ranathos carries npc_flags (questgiver): a gossip or dialogue starts his fight",
     "Turtle custom (Twisted Branch Grove / Ashenvale grove). Boss order is the order of the boss ids, which matches the layout from the entrance outward.",
-    "Census 2026-10-23 (world export of map 802, no live run; ~/TortoiseBots-audit/PREP-CRESCENT-GROVE-2026-10-23.md): 459 spawns: 437 of the 443 hostile ones are in the pulls (the five bosses are boss rows, the hostile quest NPC Speaker Gnarr 92130 is left out), and the 14 Deer 883 (critters, faction 31) and the two friendly quest NPCs are not. The two Wardens 92128/92129 stand in their own single pulls, not as boss steps; the Elders 92105/92106 stood 11 yd from Grovetender Engryss and are his first; the Deer pull 9 yd from Keeper Ranathos is gone. No creature_groups, no creature_linking, no rare spawn, no EventAI flee on any entry, no door/lever/key or instance script (only two collision objects, an exit, herbs and Kalanar's Strongbox). The two Roaming Felguards 92120 (guids 2566199 and 2566320) patrol (396 yd/158 s and 454 yd/182 s at 2.5 yd/s); their single pulls carry the path and an estimated period. Every trash unit has sight 20 yd and call for help 5 yd; cc_priority is the Shaman 92101 (the only polymorphable healer: Healing Wave, Lightning Bolt), kill_first the heal-curse, fear, mana-burn and nuke casters, no_cc the demons, elementals and undead that Polymorph cannot take. The bosses' interruptible casts are in their tactics (plan only: the rows cannot carry tactics)."
+    "Census 2026-10-23 (world export of map 802, no live run; ~/TortoiseBots-audit/PREP-CRESCENT-GROVE-2026-10-23.md): 459 spawns: 437 of the 443 hostile ones are in the pulls (the five bosses are boss rows, the hostile quest NPC Speaker Gnarr 92130 is left out), and the 14 Deer 883 (critters, faction 31) and the two friendly quest NPCs are not. The two Wardens 92128/92129 stand in their own single pulls, not as boss steps; the Elders 92105/92106 stood 11 yd from Grovetender Engryss and are his first; the Deer pull 9 yd from Keeper Ranathos is gone. No creature_groups, no creature_linking, no rare spawn, no EventAI flee on any entry, no door/lever/key or instance script (only two collision objects, an exit, herbs and Kalanar's Strongbox). The two Roaming Felguards 92120 (guids 2566199 and 2566320) patrol (396 yd/158 s and 454 yd/182 s at 2.5 yd/s); their single pulls carry the path and an estimated period. Every trash unit has sight 20 yd and call for help 5 yd; cc_priority is the Shaman 92101 (the only polymorphable healer: Healing Wave, Lightning Bolt), kill_first the heal-curse, fear, mana-burn and nuke casters, no_cc the demons, elementals and undead that Polymorph cannot take. The bosses' interruptible casts are in their tactics (plan only: the rows cannot carry tactics).",
+    "2026-11-02 (#243): 7 legs - the two Wardens were pull groups of keeper_ranathos and now have legs of their own (warden_treeshade, warden_liferoot); the route and the pulls do not change."
   ],
   "legs": [
     {
@@ -447,7 +448,7 @@
       }
     },
     {
-      "name": "keeper_ranathos",
+      "name": "warden_treeshade",
       "to": {"x": 162.522, "y": -59.1201, "z": 245.879},
       "pull_groups": [
         {
@@ -1043,13 +1044,20 @@
           "positions": [
             {"x": 118.373, "y": 198.67, "z": 249.986}
           ]
-        },
-        {
-          "entries": [92129],
-          "positions": [
-            {"x": -50.6621, "y": 27.2743, "z": 297.397}
-          ]
-        },
+        }
+      ],
+      "boss": {
+        "entry": 92129,
+        "position": {"x": -50.6621, "y": 27.2743, "z": 297.397}
+      },
+      "notes": [
+        "Turtle boss Warden Treeshade (92129): [KB] names it a boss; was pull group 94 of warden_liferoot until 2026-11-02 (#243)."
+      ]
+    },
+    {
+      "name": "warden_liferoot",
+      "to": {"x": -60.6242, "y": 9.74895, "z": 297.028},
+      "pull_groups": [
         {
           "entries": [92127],
           "positions": [
@@ -1079,13 +1087,20 @@
           "positions": [
             {"x": -28.308, "y": -92.115, "z": 295.786}
           ]
-        },
-        {
-          "entries": [92128],
-          "positions": [
-            {"x": -6.16984, "y": -95.9617, "z": 293.077}
-          ]
-        },
+        }
+      ],
+      "boss": {
+        "entry": 92128,
+        "position": {"x": -6.16984, "y": -95.9617, "z": 293.077}
+      },
+      "notes": [
+        "Turtle boss Warden Liferoot (92128): [KB] names it a boss; was pull group 100 of keeper_ranathos until 2026-11-02 (#243)."
+      ]
+    },
+    {
+      "name": "keeper_ranathos",
+      "to": {"x": 26.975, "y": -33.9361, "z": 251.985},
+      "pull_groups": [
         {
           "entries": [92115],
           "positions": [
