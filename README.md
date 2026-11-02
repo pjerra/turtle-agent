@@ -2275,6 +2275,11 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   60 minutes on `--server`; at 4 or more it prints `instance cap: N fresh instances in the last hour on <server>; the
   6th is refused by the core` and waits for the oldest to age out, at most `--instance-cap-wait` (0: warn and go on;
   after the cap it goes on with a note). `--instance-cap-fail` exits 26 instead (`walk-super.sh` does not restart it).
+  The check and the admission are one step under the ledger's lock: a walk below 4 reserves a place (holder + pid,
+  30 minutes), the reservation counts like an entry, becomes the entry once the raid has entered and is released on
+  every exit before that, so walks that start together cannot all pass at a count of 3. A corrupt ledger is moved to
+  `instance-cap.json.corrupt-<stamp>` with a warning and a new one started; one that cannot be read at all is never
+  written over (exit 26 with `--instance-cap-fail`, else the walk waits one minute and goes on without it).
   A worldserver restart clears the core's list, so the ledger must be cleared too: `--instance-cap-reset` forgets the
   server's entries, and the ledger drops every entry older than a worldserver start time when one is read (no status
   read exposes it yet, so the reset flag is the way today).

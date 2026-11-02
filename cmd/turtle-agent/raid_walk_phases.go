@@ -47,6 +47,8 @@ func (w *walk) phases(ctx context.Context) int {
 		}
 	}()
 
+	// Any exit before the raid has entered gives the instance-cap reservation back (phaseEnter's success confirms it).
+	defer w.releaseCapReservation()
 	if err := w.phaseInstanceCap(ctx); err != nil {
 		return w.stop(err, false)
 	}

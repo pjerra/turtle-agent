@@ -748,6 +748,9 @@ type walk struct {
 	placeSkipped  []raidwalk.ClearCircle // the corridor circles placeClear refused (the extra round keeps away from them)
 	placeSummoned []string
 
+	capOwner    string // the instance-cap reservation's owner (holder + pid)
+	capReserved bool   // a reservation is held and not yet confirmed or released
+
 	started     time.Time
 	ended       time.Time
 	runStarted  bool

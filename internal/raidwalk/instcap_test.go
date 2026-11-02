@@ -1,7 +1,9 @@
 package raidwalk
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -129,12 +131,98 @@ func TestCapFileRoundTrip(t *testing.T) {
 		t.Fatalf("missing file: %v, count %d", err, l.Count("s", capT0))
 	}
 	for i := 0; i < 2; i++ {
-		if err := UpdateCapLedger(path, func(l *CapLedger) { l.Record("s", CapEntry{At: capT0, Plan: "zg"}, capT0) }); err != nil {
+		if _, err := UpdateCapLedger(path, func(l *CapLedger) { l.Record("s", CapEntry{At: capT0, Plan: "zg"}, capT0) }); err != nil {
 			t.Fatal(err)
 		}
 	}
 	l, err := LoadCapLedger(path)
 	if err != nil || l.Count("s", capT0) != 2 {
 		t.Fatalf("reload: %v, count %d", err, l.Count("s", capT0))
+	}
+}
+
+func TestCapReservationCountsAndOnlyOneOfThreeIsAdmittedAtThree(t *testing.T) {
+	l := capLedgerWith("m910q", 30*time.Minute, 20*time.Minute, 10*time.Minute)
+	ok1, n1, _ := l.TryReserve("m910q", "a#1", capT0)
+	ok2, n2, w2 := l.TryReserve("m910q", "b#2", capT0)
+	ok3, n3, _ := l.TryReserve("m910q", "c#3", capT0)
+	if !ok1 || n1 != 3 {
+		t.Fatalf("first: admitted %v at %d", ok1, n1)
+	}
+	if ok2 || n2 != 4 || ok3 || n3 != 4 {
+		t.Fatalf("second/third: %v@%d %v@%d, want both refused at 4", ok2, n2, ok3, n3)
+	}
+	// The reservation expires 30 min after it was made, before the oldest entry (30 min old, 30 more to go) leaves.
+	if w2 != InstanceCapReserveFor {
+		t.Fatalf("wait = %s, want %s", w2, InstanceCapReserveFor)
+	}
+	// The same owner asking again does not count against itself.
+	if ok, _, _ := l.TryReserve("m910q", "a#1", capT0); !ok {
+		t.Fatal("an owner's own reservation blocked it")
+	}
+}
+
+func TestCapReservationReleaseConfirmExpire(t *testing.T) {
+	l := capLedgerWith("s", time.Minute)
+	l.TryReserve("s", "a", capT0)
+	l.TryReserve("s", "b", capT0)
+	if n := l.Count("s", capT0); n != 3 {
+		t.Fatalf("1 entry + 2 reservations = %d, want 3", n)
+	}
+	l.Release("s", "a")
+	if n := l.Count("s", capT0); n != 2 {
+		t.Fatalf("after release = %d, want 2", n)
+	}
+	l.Confirm("s", "b", CapEntry{At: capT0}, capT0)
+	if n := l.Count("s", capT0); n != 2 || len(l.Servers["s"].Reservations) != 0 {
+		t.Fatalf("after confirm = %d, reservations %v", n, l.Servers["s"].Reservations)
+	}
+	l.TryReserve("s", "c", capT0)
+	if n := l.Count("s", capT0.Add(InstanceCapReserveFor+time.Second)); n != 2 {
+		t.Fatalf("an expired reservation still counts: %d", n)
+	}
+	l.Record("s", CapEntry{At: capT0.Add(time.Hour)}, capT0.Add(InstanceCapReserveFor+time.Second))
+	if len(l.Servers["s"].Reservations) != 0 {
+		t.Fatal("Record kept an expired reservation")
+	}
+}
+
+func TestCapUpdateMovesACorruptLedgerAside(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, InstanceCapFile)
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := UpdateCapLedger(path, func(l *CapLedger) { l.Record("s", CapEntry{At: capT0}, capT0) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(moved, path+".corrupt-") {
+		t.Fatalf("moved aside to %q", moved)
+	}
+	if got, _ := os.ReadFile(moved); string(got) != "{not json" {
+		t.Fatalf("the corrupt content was not kept: %q", got)
+	}
+	if l, err := LoadCapLedger(path); err != nil || l.Count("s", capT0) != 1 {
+		t.Fatalf("new ledger: %v", err)
+	}
+}
+
+func TestCapUpdateNeverWritesOverAnUnreadableLedger(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, InstanceCapFile)
+	if err := os.Mkdir(path, 0o700); err != nil { // reading a directory fails, and it is not a missing file
+		t.Fatal(err)
+	}
+	ran := false
+	moved, err := UpdateCapLedger(path, func(*CapLedger) { ran = true })
+	if err == nil || ran || moved != "" {
+		t.Fatalf("err %v, fn ran %v, moved %q: an unreadable ledger must be refused", err, ran, moved)
+	}
+	if st, serr := os.Stat(path); serr != nil || !st.IsDir() {
+		t.Fatal("the unreadable ledger was replaced")
+	}
+	if es, _ := filepath.Glob(path + ".corrupt-*"); len(es) != 0 {
+		t.Fatalf("an unreadable ledger was moved aside: %v", es)
 	}
 }
