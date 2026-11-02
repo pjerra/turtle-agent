@@ -2272,7 +2272,9 @@ one), the `bot_view` frames every 2 s and the dashboard every 10/15 s. A wipe (e
 the run, waits for the instance to reset (5m at most: nothing with a party target, every hostile seen in the last
 minute at 100 % or gone, held 20 s), then revives: GM to the revive point (step 1's, or with `--place` the start point the raid was put at), a quiet check
 (no living hostile within 45 yd, no moving hostile within 80 yd, no patrol path within 45 yd, rechecked every 5 s for
-120 s; a hostile that is **idle** — not in combat, no target, not moving — and farther out than the placement's own
+120 s; **critters** — level-1 units of at most 100 max HP, the place phase's critter band — never count at any
+distance or state, so a moving snake 72 yd out cannot make the refusal's `all_idle` false (turtle-agent#379); a
+hostile that is **idle** — not in combat, no target, not moving — and farther out than the placement's own
 25 yd landing reach does not block it once two reads 5 s apart saw it idle at the same spot and it stands at its
 proven home — within 3 yd of a plan spawn of its entry (by spawn guid when the plan names one), never for a patrol
 group's unit, and never without plan spawn data (then the 45 yd rule holds): stillness alone is no proof of home
