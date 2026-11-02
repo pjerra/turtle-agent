@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -46,8 +47,14 @@ type fakeWriteAgent struct {
 
 func newFakeWriteAgent(t *testing.T) *fakeWriteAgent {
 	t.Helper()
+	return newFakeWriteAgentOn(t, nil)
+}
+
+// newFakeWriteAgentOn starts the fake on ln, or on a fresh loopback listener when ln is nil.
+func newFakeWriteAgentOn(t *testing.T, ln net.Listener) *fakeWriteAgent {
+	t.Helper()
 	f := &fakeWriteAgent{results: map[string]string{}, errs: map[string]string{}, gates: map[string]chan struct{}{}}
-	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Method string          `json:"method"`
 			ID     int             `json:"id"`
@@ -69,7 +76,13 @@ func newFakeWriteAgent(t *testing.T) *fakeWriteAgent {
 		default:
 			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":1,"result":%s}`, res)
 		}
-	}))
+	})
+	if ln == nil {
+		f.srv = httptest.NewServer(h)
+	} else {
+		f.srv = &httptest.Server{Listener: ln, Config: &http.Server{Handler: h}}
+		f.srv.Start()
+	}
 	t.Cleanup(f.srv.Close)
 	return f
 }
@@ -150,7 +163,7 @@ func (r *controlRig) watch(f *fakeWriteAgent) Agent {
 	u, _ := url.Parse(f.srv.URL)
 	id := u.Port()
 	must(r.t, os.WriteFile(filepath.Join(r.p.opt.ConfigDir, "rpc-"+id+".token"), []byte(r.agentToken+"\n"), 0o600))
-	a := Agent{ID: id, Addr: u.Host, TokenPath: filepath.Join(r.p.opt.ConfigDir, "rpc-"+id+".token")}
+	a := Agent{ID: u.Host, Addr: u.Host, TokenPath: filepath.Join(r.p.opt.ConfigDir, "rpc-"+id+".token")}
 	r.p.mu.Lock()
 	r.p.known = append(r.p.known, a)
 	r.p.mu.Unlock()
@@ -175,7 +188,7 @@ func newControlRig(t *testing.T) *controlRig {
 	p := NewPoller(Options{ConfigDir: cfg, Agents: "127.0.0.1:" + id})
 	ctl, err := NewController(p, ControlConfig{Tokens: tk, LogPath: logP})
 	must(t, err)
-	a := Agent{ID: id, Addr: u.Host, TokenPath: filepath.Join(cfg, "rpc-"+id+".token")}
+	a := Agent{ID: u.Host, Addr: u.Host, TokenPath: filepath.Join(cfg, "rpc-"+id+".token")}
 	p.mu.Lock()
 	p.known = []Agent{a}
 	p.mu.Unlock()
@@ -183,6 +196,88 @@ func newControlRig(t *testing.T) *controlRig {
 	r.srv = httptest.NewServer(HandlerFull(p, "", nil, nil, nil, ctl))
 	t.Cleanup(r.srv.Close)
 	return r
+}
+
+// Test 14: two agents on the same port, different loopback hosts, keep distinct ids, and each control reaches its own RPC server.
+func TestControlDistinctAgentsOnSamePort(t *testing.T) {
+	ln1, err := net.Listen("tcp", "127.0.0.1:0")
+	must(t, err)
+	_, port, err := net.SplitHostPort(ln1.Addr().String())
+	must(t, err)
+	ln2, err := net.Listen("tcp", net.JoinHostPort("127.0.0.2", port))
+	if err != nil {
+		ln1.Close()
+		t.Skipf("127.0.0.2:%s cannot be bound here: %v", port, err)
+	}
+	first, second := newFakeWriteAgentOn(t, ln1), newFakeWriteAgentOn(t, ln2)
+
+	root := t.TempDir()
+	cfg := filepath.Join(root, "config")
+	must(t, os.MkdirAll(cfg, 0o755))
+	tok := "agent-" + strings.Repeat("b", 24)
+	must(t, os.WriteFile(filepath.Join(cfg, "rpc-"+port+".token"), []byte(tok+"\n"), 0o600))
+	// auto discovery is where an id comes from: the same port on two loopback hosts
+	must(t, os.WriteFile(filepath.Join(cfg, "settings-a.json"), []byte(`{"rpc":"127.0.0.1:`+port+`"}`), 0o600))
+	must(t, os.WriteFile(filepath.Join(cfg, "settings-b.json"), []byte(`{"rpc":"127.0.0.2:`+port+`"}`), 0o600))
+	agents, err := DiscoverAgents(cfg, "auto")
+	must(t, err)
+	if len(agents) != 2 {
+		t.Fatalf("discovered %+v, want two agents", agents)
+	}
+	want := [2]string{"127.0.0.1:" + port, "127.0.0.2:" + port}
+	for i := range want {
+		if agents[i].ID != want[i] || agents[i].ID != agents[i].Addr {
+			t.Fatalf("agent %d is %+v, want id and addr %s", i, agents[i], want[i])
+		}
+	}
+	if agents[0].ID == agents[1].ID {
+		t.Fatalf("two agents on port %s share the id %q", port, agents[0].ID)
+	}
+
+	tokens := filepath.Join(root, "control-tokens")
+	must(t, os.WriteFile(tokens, []byte("owner "+controlToken+"\n"), 0o600))
+	tk, err := routeedit.LoadTokens(tokens)
+	must(t, err)
+	p := NewPoller(Options{ConfigDir: cfg, Agents: "auto"})
+	ctl, err := NewController(p, ControlConfig{Tokens: tk, LogPath: filepath.Join(root, "state", "control.jsonl")})
+	must(t, err)
+	p.mu.Lock()
+	p.known = agents
+	p.mu.Unlock()
+	srv := httptest.NewServer(HandlerFull(p, "", nil, nil, nil, ctl))
+	defer srv.Close()
+
+	fakes := []*fakeWriteAgent{first, second}
+	for i, f := range fakes {
+		f.set("dungeon_status", `{"running":true,"state":"running","report":{"state":"running","remote":{"mode":"observe"}}}`)
+		f.set("dungeon_pause", fmt.Sprintf(`{"ok":true,"server":%d}`, i+1))
+	}
+	post := func(id string) reply {
+		b, _ := json.Marshal(map[string]any{"verb": "pause", "confirm": true})
+		req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/control/"+id+"/run", bytes.NewReader(b))
+		must(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+controlToken)
+		resp, err := http.DefaultClient.Do(req)
+		must(t, err)
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return reply{resp.StatusCode, string(body)}
+	}
+	for i, a := range agents {
+		if rec := post(a.ID); rec.code != http.StatusOK || !strings.Contains(rec.body, fmt.Sprintf(`"server":%d`, i+1)) {
+			t.Fatalf("a pause for %s reached the wrong server: %d %s", a.ID, rec.code, rec.body)
+		}
+		for j, f := range fakes {
+			wantCalls := []string{}
+			if j <= i {
+				wantCalls = []string{"dungeon_status", "dungeon_pause"}
+			}
+			if got := f.methods(); strings.Join(got, ",") != strings.Join(wantCalls, ",") {
+				t.Fatalf("after the control for %s, fake %d saw %v, want %v", a.ID, j+1, got, wantCalls)
+			}
+		}
+	}
 }
 
 func (r *controlRig) do(method, path string, body []byte, hdr map[string]string) reply {
@@ -239,7 +334,7 @@ func TestControlRunPauseObserveSendsDungeonPause(t *testing.T) {
 	r := newControlRig(t)
 	r.fake.set("dungeon_status", `{"running":true,"state":"running","report":{"state":"running","remote":{"mode":"observe"}}}`)
 	r.fake.set("dungeon_pause", `{"ok":true}`)
-	rec := r.post("/api/control/"+r.agent.ID+"/run", map[string]any{"verb": "pause"}, r.token, nil)
+	rec := r.post("/api/control/"+r.agent.ID+"/run", map[string]any{"verb": "pause", "confirm": true}, r.token, nil)
 	if rec.code != http.StatusOK {
 		t.Fatalf("pause: %d %s", rec.code, rec.body)
 	}
@@ -292,6 +387,29 @@ func TestControlStopNeedsConfirm(t *testing.T) {
 		}
 		if rec := r.post("/api/control/"+r.agent.ID+"/run", map[string]any{"verb": "stop", "confirm": true}, r.token, nil); rec.code != http.StatusOK {
 			t.Errorf("running=%v: stop with a confirm: %d %s", running, rec.code, rec.body)
+		}
+	}
+}
+
+// Test 3b: a pause always needs a confirm. The status read can be idle (or an observe run) and the run can start before the RPC lands;
+// dungeon_pause carries no expected state, so a stale read must never let an unconfirmed pause reach the agent.
+func TestControlPauseNeedsConfirmEvenWhenStatusLooksIdle(t *testing.T) {
+	statuses := map[string]string{
+		"idle":    `{"running":false,"state":"idle","report":{"state":"idle"}}`,
+		"observe": `{"running":true,"state":"running","report":{"state":"running","remote":{"mode":"observe"}}}`,
+	}
+	for name, status := range statuses {
+		r := newControlRig(t)
+		r.fake.set("dungeon_status", status)
+		r.fake.set("dungeon_pause", `{"ok":true}`)
+		if rec := r.post("/api/control/"+r.agent.ID+"/run", map[string]any{"verb": "pause"}, r.token, nil); rec.code != http.StatusConflict {
+			t.Errorf("%s: an unconfirmed pause: %d %s, want 409", name, rec.code, rec.body)
+		}
+		if calls := r.fake.methods(); len(calls) != 1 || calls[0] != "dungeon_status" {
+			t.Errorf("%s: the fake saw %v, want only the fresh dungeon_status", name, calls)
+		}
+		if rec := r.post("/api/control/"+r.agent.ID+"/run", map[string]any{"verb": "pause", "confirm": true}, r.token, nil); rec.code != http.StatusOK {
+			t.Errorf("%s: a confirmed pause: %d %s", name, rec.code, rec.body)
 		}
 	}
 }
@@ -445,7 +563,7 @@ func TestControlLogFailClosed(t *testing.T) {
 	r.fake.set("dungeon_status", `{"running":true,"state":"running","report":{"state":"running","remote":{"mode":"observe"}}}`)
 	r.fake.set("dungeon_pause", `{"ok":true}`)
 	r.ctl.log.w = failingWriter{}
-	if rec := r.post("/api/control/"+r.agent.ID+"/run", map[string]any{"verb": "pause"}, r.token, nil); rec.code != http.StatusInternalServerError {
+	if rec := r.post("/api/control/"+r.agent.ID+"/run", map[string]any{"verb": "pause", "confirm": true}, r.token, nil); rec.code != http.StatusInternalServerError {
 		t.Fatalf("a control whose request line cannot be written: %d %s", rec.code, rec.body)
 	}
 	if r.fake.sawWrite() {
@@ -473,7 +591,7 @@ func TestControlTrustLocal(t *testing.T) {
 	r.fake.set("dungeon_status", `{"running":true,"state":"running","report":{"state":"running","remote":{"mode":"observe"}}}`)
 	r.fake.set("dungeon_pause", `{"ok":true}`)
 	path := "/api/control/" + r.agent.ID + "/run"
-	if rec := r.post(path, map[string]any{"verb": "pause"}, "", map[string]string{controlNonceHeader: nonce}); rec.code != http.StatusOK {
+	if rec := r.post(path, map[string]any{"verb": "pause", "confirm": true}, "", map[string]string{controlNonceHeader: nonce}); rec.code != http.StatusOK {
 		t.Fatalf("a trusted pause: %d %s", rec.code, rec.body)
 	}
 	recs := r.logRecords()
@@ -500,7 +618,7 @@ func TestControlOneInFlight(t *testing.T) {
 	gate := r.fake.hold("dungeon_pause")
 	done := make(chan reply, 1)
 	go func() {
-		done <- r.post("/api/control/"+r.agent.ID+"/run", map[string]any{"verb": "pause"}, r.token, nil)
+		done <- r.post("/api/control/"+r.agent.ID+"/run", map[string]any{"verb": "pause", "confirm": true}, r.token, nil)
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -519,7 +637,7 @@ func TestControlOneInFlight(t *testing.T) {
 	otherAgent := r.watch(other)
 	other.set("dungeon_status", `{"running":true,"state":"running","report":{"state":"running","remote":{"mode":"observe"}}}`)
 	other.set("dungeon_pause", `{"ok":true}`)
-	if rec := r.post("/api/control/"+otherAgent.ID+"/run", map[string]any{"verb": "pause"}, r.token, nil); rec.code != http.StatusOK {
+	if rec := r.post("/api/control/"+otherAgent.ID+"/run", map[string]any{"verb": "pause", "confirm": true}, r.token, nil); rec.code != http.StatusOK {
 		t.Errorf("a control for another agent: %d, want 200", rec.code)
 	}
 	close(gate) // let the first control finish
@@ -533,7 +651,7 @@ func TestControlScrubsAgentToken(t *testing.T) {
 	r := newControlRig(t)
 	r.fake.set("dungeon_status", `{"running":true,"state":"running","report":{"state":"running","remote":{"mode":"observe"}}}`)
 	r.fake.fail("dungeon_pause", "the request carried "+r.agentToken)
-	rec := r.post("/api/control/"+r.agent.ID+"/run", map[string]any{"verb": "pause"}, r.token, nil)
+	rec := r.post("/api/control/"+r.agent.ID+"/run", map[string]any{"verb": "pause", "confirm": true}, r.token, nil)
 	if rec.code != http.StatusBadGateway {
 		t.Fatalf("an agent error: %d %s", rec.code, rec.body)
 	}
@@ -551,7 +669,7 @@ func TestControlScrubsAgentToken(t *testing.T) {
 	r2 := newControlRig(t)
 	r2.fake.set("dungeon_status", `{"running":true,"state":"running","report":{"state":"running","remote":{"mode":"observe"}}}`)
 	r2.fake.set("dungeon_pause", `{"note":"the token is `+r2.agentToken+`"}`)
-	rec2 := r2.post("/api/control/"+r2.agent.ID+"/run", map[string]any{"verb": "pause"}, r2.token, nil)
+	rec2 := r2.post("/api/control/"+r2.agent.ID+"/run", map[string]any{"verb": "pause", "confirm": true}, r2.token, nil)
 	if rec2.code != http.StatusOK {
 		t.Fatalf("a pause whose answer echoes the token: %d %s", rec2.code, rec2.body)
 	}
@@ -567,7 +685,7 @@ func TestControlLogEndpoint(t *testing.T) {
 	r.fake.set("dungeon_pause", `{"ok":true}`)
 	path := "/api/control/" + r.agent.ID + "/run"
 	for i := 0; i < 3; i++ {
-		if rec := r.post(path, map[string]any{"verb": "pause"}, r.token, nil); rec.code != http.StatusOK {
+		if rec := r.post(path, map[string]any{"verb": "pause", "confirm": true}, r.token, nil); rec.code != http.StatusOK {
 			t.Fatalf("pause %d: %d %s", i, rec.code, rec.body)
 		}
 	}
@@ -575,7 +693,7 @@ func TestControlLogEndpoint(t *testing.T) {
 	oa := r.watch(other)
 	other.set("dungeon_status", `{"running":true,"state":"running","report":{"state":"running","remote":{"mode":"observe"}}}`)
 	other.set("dungeon_pause", `{"ok":true}`)
-	if rec := r.post("/api/control/"+oa.ID+"/run", map[string]any{"verb": "pause"}, r.token, nil); rec.code != http.StatusOK {
+	if rec := r.post("/api/control/"+oa.ID+"/run", map[string]any{"verb": "pause", "confirm": true}, r.token, nil); rec.code != http.StatusOK {
 		t.Fatalf("other pause: %d %s", rec.code, rec.body)
 	}
 	rec := r.do(http.MethodGet, "/api/control/"+r.agent.ID+"/log?n=2", nil, nil)

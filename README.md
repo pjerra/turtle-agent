@@ -4346,16 +4346,18 @@ turtle-agent dashboard --listen 127.0.0.1:8790 --control --control-tokens ~/.con
 The contract: `GET /api/control/status` -> `200 {"enabled":true,"local_trusted":bool,"trust_nonce"?:string,"actions":["run","tune"]}`
 (404 without `--control`); `POST /api/control/<id>/run` `{"verb":"pause"|"resume"|"skip"|"stop","confirm":bool}`; `POST
 /api/control/<id>/tune` `{"key":string,"value":number|"default"}`; `GET /api/control/<id>/log?n=20` -> `{"lines":[...]}`, the
-last 1..50 result lines of that agent, newest last. `<id>` must be an
-agent the dashboard itself discovered (`auto`): an id it does not watch is 404. A success answers `200
+last 1..50 result lines of that agent, newest last. `<id>` is an agent's normalized RPC address (`host:port`, an IPv6 host in
+brackets), the card's `id`: two agents on different loopback hosts that share a port have different ids. It must be an agent
+the dashboard itself discovered (`auto`): an id it does not watch is 404. A success answers `200
 {"status":"ok","action","verb","rpc","result":<the agent's answer, scrubbed>}`; an error is `{"status":"error","message"}` with
 400 bad request (unknown verb, unknown field, trailing data), 401 auth, 403 Host / Origin / Sec-Fetch-Site, 404 agent or path,
 409 state, a missing confirm or another control for that agent still running, 413 body, 415 type, 429 more than 30 controls a
 minute per label, 500 the log could not be written, or 502 the agent's RPC failed (its message passed back).
 
-Every control first asks that agent a **fresh** `dungeon_status` (never the poller's cache) and decides from it: the page
-greys buttons, the server is the gate. `pause` on a run that is not in `observe` mode **ends** it (the party and the instance
-are kept), so it needs `"confirm": true`, and `stop` always does (it unbinds: the hires go back and the instance is lost).
+Every control first asks that agent a **fresh** `dungeon_status` (never the poller's cache), a live check: the page greys
+buttons, the server is the gate. `pause` and `stop` always need `"confirm": true`. A pause can **end** a run (any mode but
+`observe`; the party and the instance are kept) or stop the leader in `observe` mode, and the status read can go stale before
+the RPC lands, which carries no expected state to guard with; `stop` unbinds (the hires go back and the instance is lost).
 `resume` and `skip` are for observe runs; the agent refuses them on others and its message is passed back.
 
 **Live tuning (`tune`).** A `tune` control reads a **fresh** `tune_list` (an RPC error there — no remote run — is a 409 with the

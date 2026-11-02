@@ -43,8 +43,8 @@ type Inputs struct {
 // Card is everything the page shows of one commander. It is built from an allow-list of fields (never from a raw reply), so no
 // account, password or token can get into it; Scrub runs over it once more before it is served.
 type Card struct {
-	ID        string `json:"id"`
-	RPC       string `json:"rpc"`
+	ID        string `json:"id"`  // the agent's normalized RPC address (host:port, IPv6 bracketed): unique per process
+	RPC       string `json:"rpc"` // the same address, for the page's older readers
 	Online    bool   `json:"online"`
 	Error     string `json:"error,omitempty"`
 	Character string `json:"character,omitempty"`

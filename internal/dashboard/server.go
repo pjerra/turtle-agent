@@ -17,10 +17,20 @@ import (
 	"github.com/pjerra/turtle-agent/internal/netutil"
 )
 
-var (
-	agentID = regexp.MustCompile(`^\d{1,6}$`)
-	runID   = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
-)
+var runID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
+// validAgentID reports whether id has the shape of an agent id: a loopback host and port (IPv6 bracketed), as DiscoverAgents
+// normalizes it. Two agents that share a port on different hosts have distinct ids.
+func validAgentID(id string) bool {
+	host, port, err := net.SplitHostPort(id)
+	if err != nil || host == "" || port == "" {
+		return false
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return false
+	}
+	return netutil.IsLoopback(host)
+}
 
 //go:embed static
 var staticFS embed.FS
@@ -62,7 +72,7 @@ func HandlerFull(p *Poller, testsDir string, allowHosts, embedFrom []string, ed 
 		}
 		var geo []byte
 		var errText string
-		if id := r.URL.Query().Get("agent"); id != "" && agentID.MatchString(id) {
+		if id := r.URL.Query().Get("agent"); id != "" && validAgentID(id) {
 			geo, errText = p.GeometryFor(name, id) // the copy that agent's runs read
 		} else {
 			geo, errText = p.Geometry(name)
@@ -88,7 +98,7 @@ func HandlerFull(p *Poller, testsDir string, allowHosts, embedFrom []string, ed 
 	})
 	mux.HandleFunc("/api/live/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/api/live/")
-		if !agentID.MatchString(id) {
+		if !validAgentID(id) {
 			http.NotFound(w, r)
 			return
 		}

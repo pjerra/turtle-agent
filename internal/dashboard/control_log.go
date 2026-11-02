@@ -26,7 +26,7 @@ type controlRecord struct {
 	Who     string `json:"who"`               // the token label
 	Via     string `json:"via"`               // token or trusted
 	Peer    string `json:"peer"`              // the caller's address as the dashboard saw it
-	Agent   string `json:"agent"`             // the agent id (its RPC port)
+	Agent   string `json:"agent"`             // the agent id (its normalized RPC address)
 	Action  string `json:"action"`            // run (tune, order in later slices)
 	Verb    string `json:"verb"`              // pause, resume, skip, stop
 	Args    any    `json:"args,omitempty"`    // what was sent to the RPC (nil for the run controls)
