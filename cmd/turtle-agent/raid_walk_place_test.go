@@ -15,6 +15,7 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
@@ -2855,5 +2856,47 @@ func TestPlaceLandingReadSkipsUnitsTheQuietJudged(t *testing.T) {
 	}
 	if len(p.places) != 1 {
 		t.Fatalf("the walk did not place: %v", p.places)
+	}
+}
+
+// M2 (PLACE-W26 §3): when the frames show hires fighting after the place, the end reason names the enemy: entry,
+// spawn guid low and position, from a hostile record targeting a hire.
+func TestPlaceCombatCheckNamesTheEnemy(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	f.agent.startReply = zgPlaceReply(t)
+	f.agent.combatAllFn = func(int) bool { return true }
+	f.agent.hostilesFn = func(int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 0xF130002C5800CAFA, Entry: 11352, X: -12228.3, Y: -1680.7, Z: 126.7,
+			HPPct: 90, Target: packet.GUID(1000)}}
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	if reason := f.summary().EndReason; !strings.Contains(reason, "against 11352 (db 51962)") {
+		t.Fatalf("end reason %q, want the enemy named", reason)
+	}
+}
+
+// M2 (PLACE-W26 §3): placeView saves frames, so a placed walk that fails at the combat check leaves frames.jsonl
+// non-empty (walk 26: 0 bytes, the summary could only guess).
+func TestPlaceViewSavesFrames(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	f.agent.startReply = zgPlaceReply(t)
+	f.agent.combatAllFn = func(int) bool { return true }
+	f.agent.hostilesFn = func(int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 0xF130002C5800CAFA, Entry: 11352, X: -12228.3, Y: -1680.7, Z: 126.7,
+			HPPct: 90, Target: packet.GUID(1000)}}
+	}
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(f.out, "frames.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) == 0 {
+		t.Fatal("frames.jsonl is empty after a placed walk that fought")
 	}
 }

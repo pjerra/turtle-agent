@@ -9,11 +9,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
@@ -1160,11 +1162,13 @@ func (w *walk) placeFighting(now time.Time) []string {
 	return out
 }
 
-// placeView polls one frame into the walk's state (the same read waitEntered does).
+// placeView polls one frame into the walk's state (the same read waitEntered does), and saves it, so frames.jsonl
+// holds the place phase (M2: walk 26's place frames were empty, and the summary could only guess the fight).
 func (w *walk) placeView(ctx context.Context) {
 	if n, frame, err := w.view(ctx, w.afterN, 2000); err == nil && frame != nil {
 		w.afterN = n
 		w.trackFrame(w.env.now(), frame)
+		w.saveFrame(w.env.now(), frame)
 	}
 }
 
@@ -1216,12 +1220,79 @@ func (w *walk) placeVerify(ctx context.Context) error {
 	return stopf(exitRaidWalkFailed, "place: not at the start: %s", strings.Join(missing, ", "))
 }
 
-// placeCombatCheck fails when the frames show a hire fighting after the place (spec 5 step 9).
+// placeCombatCheck fails when the frames show a hire fighting after the place (spec 5 step 9). M2 names the enemy:
+// every hostile seen within 10 s that targets a hire (else every hostile with hppct < 100 or a target), with its
+// entry, spawn guid low and position, each with its BEHIND/AHEAD verdict by position (frames carry no home).
 func (w *walk) placeCombatCheck(now time.Time) error {
 	if fighting := w.placeFighting(now); len(fighting) > 0 {
-		return stopf(exitRaidWalkFailed, "place: fighting after the place: %s", strings.Join(fighting, ", "))
+		return stopf(exitRaidWalkFailed, "place: fighting after the place: %s%s", strings.Join(fighting, ", "), w.placeEnemy(now))
 	}
 	return nil
+}
+
+// placeEnemy names the hostiles the frames show around the post-place fight: those seen within 10 s that target a
+// hire, else those seen within 10 s with hppct < 100 or a target. Each reads "<entry> (db <guid low>) at <x> <y> <z>
+// (<verdict>)", where the verdict is the AHEAD/BEHIND judgement by position (frames carry no home). Unknown enemies
+// read "against an unknown unit (no hostile in the frames)".
+func (w *walk) placeEnemy(now time.Time) string {
+	hire := map[uint64]bool{}
+	for _, b := range w.botAt {
+		if b.guid != 0 {
+			hire[uint64(b.guid)] = true
+		}
+	}
+	type foe struct {
+		guid  string
+		state hostileState
+	}
+	var onHire, engaged []foe
+	for guid, h := range w.hostiles {
+		if now.Sub(h.at) > 10*time.Second {
+			continue
+		}
+		if h.target != 0 && hire[h.target] {
+			onHire = append(onHire, foe{guid, h})
+			continue
+		}
+		if h.target != 0 || h.hppct < 100 {
+			engaged = append(engaged, foe{guid, h})
+		}
+	}
+	foes := onHire
+	if len(foes) == 0 {
+		foes = engaged
+	}
+	if len(foes) == 0 {
+		return "; against an unknown unit (no hostile in the frames)"
+	}
+	sort.Slice(foes, func(i, j int) bool {
+		if foes[i].state.entry != foes[j].state.entry {
+			return foes[i].state.entry < foes[j].state.entry
+		}
+		return foes[i].guid < foes[j].guid
+	})
+	seen := map[string]bool{}
+	var out []string
+	for _, f := range foes {
+		low := uint32(0)
+		if g, err := packet.ParseGUID(f.guid); err == nil {
+			low = uint32(uint64(g) & 0xFFFFFF)
+		}
+		key := fmt.Sprintf("%d/%d", f.state.entry, low)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		verdict := "unowned"
+		if _, own := w.place.AheadOwns(f.state.entry, f.state.x, f.state.y, f.state.z); own {
+			verdict = "AHEAD"
+		} else if _, own := w.place.BehindOwns(f.state.entry, f.state.x, f.state.y, f.state.z); own {
+			verdict = "BEHIND"
+		}
+		out = append(out, fmt.Sprintf("%d (db %d) at %s %s %s (%s)", f.state.entry, low,
+			num32(f.state.x), num32(f.state.y), num32(f.state.z), verdict))
+	}
+	return "; against " + strings.Join(out, ", ")
 }
 
 // placeHold is the commander's own `cmd stay` (Q2). A refusal is not fatal: the place-to-start gap is a few seconds, so
