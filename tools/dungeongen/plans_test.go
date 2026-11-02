@@ -683,8 +683,9 @@ func readMovementPaths(path string) (map[uint64][]dungeon.Point, error) {
 }
 
 // arlokkTerraceRowYd is how near a walk may pass a pack that a later pull row owns: the mobs detect at 20 yd (the
-// map-309 spawns' detection_range), so a sample inside that band wakes the pack before its pull row.
-const arlokkTerraceRowYd = 20
+// map-309 spawns' detection_range), and the party stands up to 3 yd off the walk, so a sample inside that band (20 + 3)
+// wakes the pack before its pull row.
+const arlokkTerraceRowYd = 23
 
 // arlokkTerraceStoreyYd is how far above or below a walk a spawn may stand and still count: the terrace's three floors
 // are 10.8-10.9 yd apart, and the upper-level walks have to pass over a middle-level pack (the ring over it is the only
@@ -728,16 +729,17 @@ type arlokkRoutes struct {
 // wiped, the MT idle under 11 elites (TortoiseBots-audit tests/raid-zg-walk25/summary-autofix.md "Arlokk"). Review round 1
 // (Opus HIGH) then found the upper-level-first order still crossed the lower pack's ring on the navmesh: the route from
 // 13's stand to 16's stand ran the bridge at y -1639 z 57.7-60.4, 8.5 yd from 51383 while the lower pack was still alive
-// (the straight segments are blind to the bridge the mesh takes). The leg pulls the seven terrace packs in the order 11
-// upper A, 12 upper B, 13 upper east, 14 upper north, 15 middle -11498, 16 lower, 17 middle -11534: the lower pack from a
-// stand on the east arm of the middle level, before anyone crosses the bridge, and each stand on its pack's own level,
-// clear of every pack pulled later. The test walks the exported leg-4 rows from group 11's approach through the LAST
-// terrace pull (the max seq among the pull rows for groups 11-17, each of which must appear exactly once): for every pair
+// (the straight segments are blind to the bridge the mesh takes).
+// Walk 28 (2026-11-02) then showed the seven groups are one 11-20 yd cluster (11.0 yd 13/15, 16.8 12/13, 19.5 12/15) and
+// the 20 yd family-assist ring wakes the neighbours of any one pull, so the plan pulls the whole 27-unit cluster as one
+// group: 11 upper A, 12 upper B + upper east + middle east + lower + middle west (from the upper-east stand, before the
+// bridge), 13 upper north. The test walks the exported leg-4 rows from group 11's approach through the LAST terrace pull
+// (the max seq among the pull rows for groups 11-13, each of which must appear exactly once): for every pair
 // of consecutive move rows, every spawn of a formation that a later pull row owns stays arlokkTerraceRowYd out of the walk.
 // "Later" leaves out the pack the walk is approaching: its own pull row comes after the move, and its firing stand is
-// 12-25 yd from it by design (group 12's stand is 21.9 yd from 51354). Group 15's row must own its linked Blood Drinkers
-// 51594/51595 (leader 49343) as well: walk 25's radius 12 stopped 14.4-15.3 yd short of them, so the pack's four Panthers
-// came alone and the two Drinkers joined group 14's fight.
+// 12-25 yd from it by design. The big cluster's row must own its middle-east Blood Drinkers 51594/51595 (leader 49343)
+// as well: walk 25's radius 12 stopped 14.4-15.3 yd short of them, so the pack's four Panthers came alone and the two
+// Drinkers joined the upper-north fight.
 //
 // Each walk is checked three ways. The committed navmesh polylines in arlokkRoutesFixture
 // (testdata/zg_arlokk_terrace_routes.json), sampled every yard, are checked ALWAYS, mmaps or not: they are what caught the
@@ -794,13 +796,13 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 			leg4 = append(leg4, s)
 		}
 	}
-	// The terrace is plan leg 4's pull groups 11-17 (the array indices the plan and the export's comments name), numbered
+	// The terrace is plan leg 4's pull groups 11-13 (the array indices the plan and the export's comments name), numbered
 	// in pull order: from group 11's approach row through the last group's pull row. The last pull is the max seq among
 	// the seven groups' pull rows (the terrace order moves with the walk's findings, so it is not hard-coded here); each
 	// group must appear exactly once.
 	terracePull := func(s planexport.StepRow) (int, bool) {
 		var group int
-		if _, err := fmt.Sscanf(s.Comment, "pull group %d", &group); err != nil || group < 11 || group > 17 {
+		if _, err := fmt.Sscanf(s.Comment, "pull group %d", &group); err != nil || group < 11 || group > 13 {
 			return 0, false
 		}
 		if rest := strings.TrimPrefix(s.Comment, fmt.Sprintf("pull group %d", group)); rest != "" && rest != " approach" && rest != "; stand pull" {
@@ -826,7 +828,7 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 	if first < 0 {
 		t.Fatal("no group-11 approach row in the exported leg 4")
 	}
-	for group := 11; group <= 17; group++ {
+	for group := 11; group <= 13; group++ {
 		if counts[group] != 1 {
 			t.Errorf("exported leg 4 has %d pull rows for group %d, want exactly 1", counts[group], group)
 		}
@@ -844,11 +846,11 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 			pulls = append(pulls, s)
 		}
 	}
-	if len(moves) < 6 {
-		t.Fatalf("%d move rows in the terrace, want the seven groups' approaches", len(moves))
+	if len(moves) < 2 {
+		t.Fatalf("%d move rows in the terrace, want the three groups' approaches", len(moves))
 	}
-	// D4: the row that owns group 13's pack owns its linked Blood Drinkers too (51594/51595, leader 49343 = the pack's
-	// first Panther). Walk 25's radius 12 owned the four Panthers only.
+	// D4: the row that owns the big cluster's middle-east pack owns its linked Blood Drinkers too (51594/51595, leader
+	// 49343 = the pack's first Panther). Walk 25's radius 12 owned the four Panthers only.
 	row13 := -1
 	for i, s := range pulls {
 		if rowOwns(s, formations[49343]) {

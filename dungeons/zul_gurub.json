@@ -39,7 +39,8 @@
     "WALK 19/20 (2026-11-01, legs 0 and 1; TortoiseBots-audit research/zg-step33-patrol and research/zg-leg1-w20): two plan fixes from walk 20, one open from walk 19. Leg 1's E stand -11937 -1818 had no line of sight to the E patroller 49056 (walk 20 test2 s2: all 300 notes read out of sight, closest 23.4 yd, inside the 28.5 yd shot; 600 s pause, raid stopped), so it moves to -11942 -1822 z 53.56: 19.5 yd from E's loop west end and 29.7 yd from C's nearest spawn 49059. Walk 20 m910q s4's D stand fight drew A 25 s later from 39-44 yd (the two camps are 28 yd apart and no stand separates them), so leg 1's D row (group 15) and A row (group 16) become one stand_pull row: entries 7 x 15111 + 11340, positions D's four + A's three + the Blood Priest 49051's spawn -11888.9 -1881.35, the D approach and stand. Its radius is 17, not the 10 of the two rows it replaces: the exported row carries the mean of its positions as its centre (-11882.36 -1866.66), and 10 yd there owns none of the eight spawns (the furthest is 49053 at 16.81 yd) while 17 yd owns exactly those eight (the nearest other spawn is 49063 at 22.35 yd). kill_first is 14750, 15146: the Mad Voidwalkers killed 13 of 20 and 9 of 9 at walk 20's D pull (SPEC 5C deferred the order to the killer data). OPEN, walk 19 step 33 (leg 0 group 7): the proposed point -12233.1 -1486.77 radius 6, which would own only F5's bat 49140 and not the static S5 rider 49141, fails plan-check: it is 63.5 yd from the row's stand -12180 -1452, past the run leader's 60 yd see range (RunLeaderSeeYd). The points that both own 49140 and stand within 60 yd of the stand are 3.5-4.2 yd from 49140 along the stand's bearing, where S5's bat 49139 (-12222.8 -1485.23) is 7.2-7.4 yd away - a 0.6 yd-wide window that leaves S5 owned at the row's radius edge - so the fix needs the stand moved (a walk decision) or the step reworked.",
     "WALK 25 (2026-11-01, leg 2 only; TortoiseBots-audit research/zg-w25/MARLI-PULL.md, SPEC-1, SPEC-1-AMEND and SPEC-2): the leg's `to` -12286.3 -1677.55 stood on the spawn of the patrolling Razzashi Skitterer 49202 (0.1 yd), leader of pack 0 (creature_groups flags 14 with 49770-49775, 49234 and 49235: 9 units); walks 24-25 woke pack 0 on the step-202 move (no pull, no stand, no CC) and, with the fight drifting to x -12265..-12290, pack 1 (leader 49201 + the loose Venombrood 49246) as well: 20-21 elites, 6 of 7 wipes. Pack 0 is a plain pull from S0 -12251.5 -1685.5: its leader 49202 walks a loop that never comes within the stand-pull gate's 27.5 yd of S0, so a stand pull would wait 600 s for it and pause the run. S0 is 48.99 yd from pack 0's row centre -12300.49 -1685.68, inside the exporter's 50 yd approach-hop reach (plan-export --approach-hops cuts a longer hop into 'approach path' move rows: the old S0 -12245.333 -1685.3334 was 55.16 yd out, so the cut put a row 25.3 yd short of the centre, -12275.199 -1686.1334, 14.1 yd from the patroller 49202's own spawn and 17.1 yd from the static Venombrood 49771: the party walked into pack 0's aggro on a MOVE row, before the pull step that has no line yet). S0 clears every STATIC pack-0 unit (nearest: 49771 at 40.6 yd) and pack 1 (nearest: 49254 at 42.1 yd); the patroller's own spawn 49202 is 35.7 yd out, below the 40 yd rule and above the 30 yd exception (49202 belongs to the very pack this row pulls, so its spawn is inside the pack this plain pull wakes anyway). The run leader walks the gathered party to a firing stand about 23.5 yd from the nearest pack-0 unit (about -12268.5 -1684, 35 yd from pack 1). Pack 1 (all static) is a stand pull from S1 -12250 -1683 (40.3 yd from pack 1's 49254, 2.9 yd from S0); it was split off the old S0, 61.4 yd from pack 1's centre and past the run leader's 60 yd see range, and stays as committed (the new S0 is 57.5 yd out). The stand pull hands its out-of-shot static units to the same firing-stand walk and keeps the patrol clearance. The last via point became the `to`'s neighbour and the `to` is -12242.112 -1685.4194 (44.9 yd from pack 0, 46.3 from pack 1, 46.9 from the patroller's loop). Groups 2-5 unchanged. One leg-2 hop was cut then: group 1's stand -12250 -1683 to group 2's row centre -12335.7 -1645.88 is 93.4 yd, so the exporter inserted a row at -12295.88 -1663.1277, 17.0 yd from the static Venombrood 49775 and 17.3 from the patroller 49202's spawn. Harmless: the row was walked after group 1's pull row, packs 0 and 1 are dead by then, and the only live spawns within 25 yd are the level-1 Spiders 91526 (8.5 yd) and 49039 (19.1 yd). WALK 26B's order change removed that row: group 1's pull row is now pack 0 at -12300.49 -1685.68, 35.6 yd from group 2's centre, inside the exporter's 50 yd reach. cc_priority 14532: the mages Polymorph Venombroods (beasts, not immune) before each spider pull; pack 1 alone wiped at 7 active Venombroods, pack 0 died clean at 5.",
     "WALK 26B (2026-11-02, leg 2 only; TortoiseBots-audit tests/raid-zg-walk26b and research/zg-w26/MARLI-203.md): step 203 pulled pack 0 from a firing stand 19.8 yd from 49234 and 35.3 yd from the nearest pack-1 spawn, and pack 1 still woke: 23 hostiles within 20 yd, 20 dead in 35 s. The frames show the chain is pack 0's own leader 49202, which is aggro-together with pack 0 (creature_groups flags 14) and was dragged from its patrol loop at -12308.3 -1624.2, 62.4 yd from any bot; its run to the camp passed 6.9 yd from 49251 and 9.6 from 49248, inside the 10 yd CreatureFamilyAssistanceRadius ring that hands the tank to them, and leader 49201's group flags woke the other nine. The camp itself was not the cause (35.3 yd from pack 1); only its 19.0 yd to 49202's loop broke the old rule, and a courtyard-wide search shows no stand does better: the 81 floor points within the 23.5 yd shot of an 11338, \u003e= 22 yd from pack 1 and \u003e= 20 yd from 49202's loop all leave 49202's loop-to-camp run within 11.1 yd of a pack-1 spawn (the loop itself comes within 12.1 yd of 49251). So the order changed: pack 1 is pulled FIRST from S1, pack 0 second from S0. Pulling pack 1 first was 1 death at walk 26b's step 204; pack 0 alone (9) died clean in walk 25 run 1. cc_priority 14532 unchanged (three Polymorphs before each spider pull). Watch item for the validation walk: pack 1's firing stand (23.5 yd from the pull target; with three Polymorphs the target is the Broodwidow 49250 at -12266.2 -1667.3) is 20.0 yd from 49202's loop, and 49202's detection is 16 yd (level 56): report any bot within 20 yd of 49202's path during that fight, or pack 0 joining it.",
-    "WALK 25 (2026-11-01, leg 4; TortoiseBots-audit tests/raid-zg-walk25/summary-autofix.md \"Arlokk\"): the Arlokk terrace pulls the upper level first and every pull has a stand of its own: 11 upper A, 12 upper B, 13 upper east, 14 upper north (z 71.3), 15 middle -11498 (z 60.4), 16 lower (z 49.6), 17 middle -11534 (z 60.4); the packs are numbered in pull order. Walk 25 pulled the lower pack second and its step-313 move crossed group 15's spawn ring on the upper level 13.3 yd from 51354, waking groups 12, 14, 15 and 16 with no pull line: 3 of 4 attempts wiped, 11-20 elites at once. Review round 1 (Opus HIGH) then walked the upper-level-first order 11, 15, 14, 17, 13, 16, 12 on the navmesh: the route from 13's stand to 16's stand took the bridge at y -1639 z 57.7-60.4, 8.5 yd 3D from the lower pack's 51383 while it was alive (every straight segment passed it). The lower pack is pulled from the east arm of the middle level now, -11507 -1632 60.43, before anyone crosses the bridge: 15.2 yd 3D from its nearest spawn 51381 (inside the 23.5 yd shot; 25.4 from 51366, the farthest) and 33.6 yd 3D from 49341, the nearest spawn of 17, pulled after it; the navmesh route from 15's stand to it stays 27.6 yd from 17. The stands, each on its pack's own level and \u003e= 22 yd 3D from every pack pulled later: 12 pulls from 11's approach -11525.374 -1649.8916 71.32541 (21.9 yd from 51354, inside the shot; 22.7 from 51366, 30.2 from 51594); 13 -11513.5 -1608.5 71.33 (21.2 from 51597, the shot's margin 2.3, 2.2 yd closer than round 1's -11515 -1608; 28.3/22.8/36.7/23.8 from 14/15/16/17); 14 -11516 -1596 71.33 (16.1 from 51590; 31.3/47.1 from 15/16, 26.1 from 17); 15 -11507 -1612 60.43 (12.7 from 49343; 29.8 from 16, 27.6 from 17); 17 -11540 -1625 60.43 (13.0 from 49341). Group 15's radius stays 16, so its row owns its linked Blood Drinkers 51594/51595 (leader 49343). TestZulGurubArlokkTerraceRouteClearOfLaterPacks walks the exported leg-4 rows from 11's approach through the last terrace pull (the max seq among groups 11-17, each once) and holds every spawn of a pack a later pull owns \u003e= 20 yd 3D from the navmesh polyline and from the straight fallback, inside a 9 yd storey band: a floor keeps a pack on another storey (10.8-10.9 yd away here) from seeing the walk, while the bridge over the lower pit is 8.2-8.4 yd above it and still counts."
+    "WALK 25 (2026-11-01, leg 4; TortoiseBots-audit tests/raid-zg-walk25/summary-autofix.md \"Arlokk\"): the Arlokk terrace pulls the upper level first and every pull has a stand of its own: 11 upper A, 12 upper B, 13 upper east, 14 upper north (z 71.3), 15 middle -11498 (z 60.4), 16 lower (z 49.6), 17 middle -11534 (z 60.4); the packs are numbered in pull order. Walk 25 pulled the lower pack second and its step-313 move crossed group 15's spawn ring on the upper level 13.3 yd from 51354, waking groups 12, 14, 15 and 16 with no pull line: 3 of 4 attempts wiped, 11-20 elites at once. Review round 1 (Opus HIGH) then walked the upper-level-first order 11, 15, 14, 17, 13, 16, 12 on the navmesh: the route from 13's stand to 16's stand took the bridge at y -1639 z 57.7-60.4, 8.5 yd 3D from the lower pack's 51383 while it was alive (every straight segment passed it). The lower pack is pulled from the east arm of the middle level now, -11507 -1632 60.43, before anyone crosses the bridge: 15.2 yd 3D from its nearest spawn 51381 (inside the 23.5 yd shot; 25.4 from 51366, the farthest) and 33.6 yd 3D from 49341, the nearest spawn of 17, pulled after it; the navmesh route from 15's stand to it stays 27.6 yd from 17. The stands, each on its pack's own level and \u003e= 22 yd 3D from every pack pulled later: 12 pulls from 11's approach -11525.374 -1649.8916 71.32541 (21.9 yd from 51354, inside the shot; 22.7 from 51366, 30.2 from 51594); 13 -11513.5 -1608.5 71.33 (21.2 from 51597, the shot's margin 2.3, 2.2 yd closer than round 1's -11515 -1608; 28.3/22.8/36.7/23.8 from 14/15/16/17); 14 -11516 -1596 71.33 (16.1 from 51590; 31.3/47.1 from 15/16, 26.1 from 17); 15 -11507 -1612 60.43 (12.7 from 49343; 29.8 from 16, 27.6 from 17); 17 -11540 -1625 60.43 (13.0 from 49341). Group 15's radius stays 16, so its row owns its linked Blood Drinkers 51594/51595 (leader 49343). TestZulGurubArlokkTerraceRouteClearOfLaterPacks walks the exported leg-4 rows from 11's approach through the last terrace pull (the max seq among groups 11-17, each once) and holds every spawn of a pack a later pull owns \u003e= 20 yd 3D from the navmesh polyline and from the straight fallback, inside a 9 yd storey band: a floor keeps a pack on another storey (10.8-10.9 yd away here) from seeing the walk, while the bridge over the lower pit is 8.2-8.4 yd above it and still counts.",
+    "WALK 28 (2026-11-02, leg 4): the Arlokk terrace is seven creature_groups in one 11-20 yd cluster, not one group; the family-assist/proximity ring wakes the neighbours of any one pull, so the middle packs cannot be split by a stand. Upper B, upper east, middle east, lower and middle west are one 27-unit pull now (plan group 12, from the upper-east stand -11505 -1608.5); upper north is group 13 from -11505 -1596. The terrace test keeps 20 yd plus the party spread from every later pack."
   ],
   "legs": [
     {
@@ -858,31 +859,39 @@
           ]
         },
         {
-          "entries": [11339, 11339, 11339, 11339],
+          "entries": [11339, 11339, 11339, 11339, 11365, 11365, 11365, 11365, 11339, 11339, 11353, 11353, 11365, 11365, 11365, 11365, 11365, 11365, 11365, 11365, 11339, 11339, 11365, 11365, 11365, 11339, 11365],
           "positions": [
             {"x": -11518.3, "y": -1613.51, "z": 71.33},
             {"x": -11518.3, "y": -1629.19, "z": 71.33},
             {"x": -11511.3, "y": -1613.84, "z": 71.33},
-            {"x": -11511.4, "y": -1628.43, "z": 71.36}
-          ],
-          "radius": 9.2,
-          "approach": [
-            {"x": -11525.374, "y": -1649.8916, "z": 71.32541}
-          ]
-        },
-        {
-          "entries": [11365, 11365, 11365, 11365, 11339, 11339],
-          "positions": [
+            {"x": -11511.4, "y": -1628.43, "z": 71.36},
             {"x": -11492, "y": -1607.23, "z": 71.33},
             {"x": -11491.8, "y": -1609.3, "z": 71.33},
             {"x": -11491.9, "y": -1612.31, "z": 71.33},
             {"x": -11491.2, "y": -1612.34, "z": 71.33},
             {"x": -11496.8, "y": -1621.54, "z": 71.33},
-            {"x": -11496.3, "y": -1621.55, "z": 71.33}
+            {"x": -11496.3, "y": -1621.55, "z": 71.33},
+            {"x": -11498.3, "y": -1640.75, "z": 60.43},
+            {"x": -11498.4, "y": -1641.72, "z": 60.43},
+            {"x": -11495.2, "y": -1621.51, "z": 60.43},
+            {"x": -11496, "y": -1619.55, "z": 60.43},
+            {"x": -11495.1, "y": -1618.88, "z": 60.43},
+            {"x": -11495.2, "y": -1616.76, "z": 60.43},
+            {"x": -11517.4, "y": -1637.71, "z": 49.63},
+            {"x": -11515.6, "y": -1638.36, "z": 49.63},
+            {"x": -11517.3, "y": -1638.4, "z": 49.63},
+            {"x": -11521.2, "y": -1637.47, "z": 49.61},
+            {"x": -11511.8, "y": -1643.48, "z": 49.63},
+            {"x": -11526.9, "y": -1643.49, "z": 49.53},
+            {"x": -11534.8, "y": -1613.09, "z": 60.43},
+            {"x": -11536, "y": -1611.98, "z": 60.43},
+            {"x": -11534.6, "y": -1610.75, "z": 60.43},
+            {"x": -11542.2, "y": -1609.78, "z": 60.43},
+            {"x": -11538.1, "y": -1607.61, "z": 60.43}
           ],
-          "radius": 8.8,
+          "radius": 34,
           "approach": [
-            {"x": -11513.5, "y": -1608.5, "z": 71.33}
+            {"x": -11505, "y": -1608.5, "z": 71.32541}
           ]
         },
         {
@@ -895,51 +904,7 @@
           ],
           "radius": 9.4,
           "approach": [
-            {"x": -11516, "y": -1596, "z": 71.33}
-          ]
-        },
-        {
-          "entries": [11353, 11353, 11365, 11365, 11365, 11365],
-          "positions": [
-            {"x": -11498.3, "y": -1640.75, "z": 60.43},
-            {"x": -11498.4, "y": -1641.72, "z": 60.43},
-            {"x": -11495.2, "y": -1621.51, "z": 60.43},
-            {"x": -11496, "y": -1619.55, "z": 60.43},
-            {"x": -11495.1, "y": -1618.88, "z": 60.43},
-            {"x": -11495.2, "y": -1616.76, "z": 60.43}
-          ],
-          "radius": 16,
-          "approach": [
-            {"x": -11507, "y": -1612, "z": 60.43}
-          ]
-        },
-        {
-          "entries": [11365, 11365, 11365, 11365, 11339, 11339],
-          "positions": [
-            {"x": -11517.4, "y": -1637.71, "z": 49.63},
-            {"x": -11515.6, "y": -1638.36, "z": 49.63},
-            {"x": -11517.3, "y": -1638.4, "z": 49.63},
-            {"x": -11521.2, "y": -1637.47, "z": 49.61},
-            {"x": -11511.8, "y": -1643.48, "z": 49.63},
-            {"x": -11526.9, "y": -1643.49, "z": 49.53}
-          ],
-          "radius": 9.8,
-          "approach": [
-            {"x": -11507, "y": -1632, "z": 60.43}
-          ]
-        },
-        {
-          "entries": [11365, 11365, 11365, 11339, 11365],
-          "positions": [
-            {"x": -11534.8, "y": -1613.09, "z": 60.43},
-            {"x": -11536, "y": -1611.98, "z": 60.43},
-            {"x": -11534.6, "y": -1610.75, "z": 60.43},
-            {"x": -11542.2, "y": -1609.78, "z": 60.43},
-            {"x": -11538.1, "y": -1607.61, "z": 60.43}
-          ],
-          "radius": 5.6,
-          "approach": [
-            {"x": -11540, "y": -1625, "z": 60.43}
+            {"x": -11505, "y": -1596, "z": 71.33}
           ]
         },
         {
