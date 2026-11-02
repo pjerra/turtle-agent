@@ -2973,9 +2973,11 @@ with it (a new hire has no saved instance and is online). `hire` is optional and
    The hires appear and muster where the commander stands, so inside 15 yd of the plan's `portal` point the step compares floors: the portal
    ground is the navmesh floor at the portal's x/y nearest **below** the trigger centre. A height the server settled picks the navmesh floor
    at the commander's own x/y nearest that height and refuses when it stands on the wrong floor. A guessed `status.z_unknown` height (a far
-   teleport leaves it guessed: no floor drop follows, and the core never sends the player its own position) may be on any floor at its x/y,
-   so the step never refuses on it: with floors stacked at the commander's x/y it warns naming both candidate floors and hires anyway, while
-   one floor is used as it is. Only a known floor more than 5 yd below the portal's refuses; a
+   teleport leaves it guessed: no floor drop follows, and the core never sends the player its own position) over two floors more than 5 yd
+   apart is settled first: the commander walks one short navmesh move (3 yd on the mesh), which clears `z_unknown` when it ends on the mesh,
+   and the settled height is judged like a known one (refuse on the wrong floor, hire on the right one). One floor, or floors within 5 yd,
+   needs no walk and hires. A height still a guess after the one try refuses (`commander height unknown over two floors; move the commander
+   and retry`). Only a known floor more than 5 yd below the portal's refuses; a
    trigger centre a few yards above the ground, or a commander on the same ground, is allowed. No navmesh for the map (or no agent
    position): no check, noted (`hire: portal ground not checked (no navmesh)`). A
    **kept binding** (or every slot kept, only the bind redone) is not checked: a resume hires nothing new there. No option turns either refusal off:
