@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -31,9 +32,19 @@ type controlRecord struct {
 	Verb    string `json:"verb"`              // pause, resume, skip, stop
 	Args    any    `json:"args,omitempty"`    // what was sent to the RPC (nil for the run controls)
 	RPC     string `json:"rpc,omitempty"`     // the RPC method of the result line
-	OK      *bool  `json:"ok,omitempty"`      // the result line: did the agent answer without an error
+	OK      *bool  `json:"ok,omitempty"`      // the result line: did the agent answer without an error (absent when indeterminate)
+	Outcome string `json:"outcome,omitempty"` // the result line: ok, error, or indeterminate (a reply that is not a JSON-RPC 2.0 answer to this request)
 	Code    int    `json:"code,omitempty"`    // the agent's RPC error code, when it gave one
 	Message string `json:"message,omitempty"` // the result line: the scrubbed, redacted message
+}
+
+// controlStderr is where a result line the log cannot hold is written (a test injects a buffer).
+var controlStderr io.Writer = os.Stderr
+
+// logLost writes a result line that the control log could not take to controlStderr, so an operator can still read what the agent answered.
+func logLost(res controlRecord, cause error) {
+	b, _ := json.Marshal(res)
+	fmt.Fprintf(controlStderr, "control log write failed (%v); result line: %s\n", cause, b)
 }
 
 // controlLog appends to the log file and reads it back. w is the writer (the file; a test injects a failing one).

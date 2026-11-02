@@ -300,16 +300,30 @@ func (c *Controller) run(ac *actionContext) {
 	out, err := cl.Write(ctx, method, nil)
 	okv := err == nil
 	res := controlRecord{Phase: "result", At: c.cfg.Now().UTC().Format(time.RFC3339), Who: ac.who, Via: ac.via, Peer: ac.peer,
-		Agent: ac.agent.ID, Action: ac.action, Verb: req.Verb, RPC: method, OK: &okv}
+		Agent: ac.agent.ID, Action: ac.action, Verb: req.Verb, RPC: method, OK: &okv, Outcome: "ok"}
+	indeterminate := errors.Is(err, ErrIndeterminate)
 	if err != nil {
+		res.Outcome = "error"
 		res.Code = rpcCode(err)
 		res.Message = redactMessage(err.Error(), cl.Token())
 	}
-	if lerr := c.log.append(res); lerr != nil {
-		jsonError(ac.w, http.StatusInternalServerError, "the control was sent but the log could not be written: %v", lerr)
-		return
+	if indeterminate { // never OK: the command may have run, so the line says so and carries no ok
+		res.Outcome, res.OK = "indeterminate", nil
 	}
-	if err != nil {
+	// The RPC has run (or been refused) by now. A result line the log cannot take must not turn a success into a 500, which would invite a
+	// second skip: it goes to stderr, and a success is answered as executed.
+	if lerr := c.log.append(res); lerr != nil {
+		logLost(res, lerr)
+		if err == nil {
+			writeAny(ac.w, http.StatusOK, map[string]any{"executed": true, "log_failed": true})
+			return
+		}
+	}
+	switch {
+	case indeterminate:
+		jsonError(ac.w, http.StatusBadGateway, "unknown: check the run status")
+		return
+	case err != nil:
 		jsonError(ac.w, http.StatusBadGateway, "%s", res.Message)
 		return
 	}

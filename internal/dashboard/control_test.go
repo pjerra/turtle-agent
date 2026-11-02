@@ -41,6 +41,7 @@ type fakeWriteAgent struct {
 	calls   []rpcCall
 	results map[string]string        // method -> raw JSON result
 	errs    map[string]string        // method -> error message
+	raws    map[string]string        // method -> the reply body sent as it is (a reply that is not an envelope)
 	gates   map[string]chan struct{} // method -> held until closed (for the in-flight test)
 	srv     *httptest.Server
 }
@@ -53,7 +54,7 @@ func newFakeWriteAgent(t *testing.T) *fakeWriteAgent {
 // newFakeWriteAgentOn starts the fake on ln, or on a fresh loopback listener when ln is nil.
 func newFakeWriteAgentOn(t *testing.T, ln net.Listener) *fakeWriteAgent {
 	t.Helper()
-	f := &fakeWriteAgent{results: map[string]string{}, errs: map[string]string{}, gates: map[string]chan struct{}{}}
+	f := &fakeWriteAgent{results: map[string]string{}, errs: map[string]string{}, raws: map[string]string{}, gates: map[string]chan struct{}{}}
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Method string          `json:"method"`
@@ -63,12 +64,14 @@ func newFakeWriteAgentOn(t *testing.T, ln net.Listener) *fakeWriteAgent {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		f.mu.Lock()
 		f.calls = append(f.calls, rpcCall{req.Method, req.Params, r.Header.Get("Authorization")})
-		gate, res, errMsg := f.gates[req.Method], f.results[req.Method], f.errs[req.Method]
+		gate, res, errMsg, raw := f.gates[req.Method], f.results[req.Method], f.errs[req.Method], f.raws[req.Method]
 		f.mu.Unlock()
 		if gate != nil {
 			<-gate
 		}
 		switch {
+		case raw != "":
+			w.Write([]byte(raw))
 		case errMsg != "":
 			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":%s}}`, jsonStr(errMsg))
 		case res == "":
@@ -102,6 +105,13 @@ func (f *fakeWriteAgent) fail(method, message string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.errs[method] = message
+}
+
+// raw makes the agent answer method with body as it is, whatever the request was.
+func (f *fakeWriteAgent) raw(method, body string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.raws[method] = body
 }
 
 func (f *fakeWriteAgent) hold(method string) chan struct{} {
@@ -711,6 +721,113 @@ func TestControlLogEndpoint(t *testing.T) {
 		if l["agent"] != r.agent.ID || l["phase"] != "result" || l["ok"] != true {
 			t.Errorf("a line is %v", l)
 		}
+	}
+}
+
+// The reply envelope (#183 review): a JSON-RPC 2.0 answer that echoes the request id and carries a result or an error. Anything else is
+// indeterminate, never OK, because a write may already have run.
+func TestControlClientRequiresEnvelope(t *testing.T) {
+	cases := []struct {
+		name, body, kind string // kind: ok, indeterminate, or rpc (an error the agent answered with its own id)
+	}{
+		{"empty object", `{}`, "indeterminate"},
+		{"wrong id", `{"jsonrpc":"2.0","id":2,"result":{"ok":true}}`, "indeterminate"},
+		{"string id", `{"jsonrpc":"2.0","id":"1","result":{"ok":true}}`, "indeterminate"},
+		{"no jsonrpc member", `{"id":1,"result":{"ok":true}}`, "indeterminate"},
+		{"no result member", `{"jsonrpc":"2.0","id":1}`, "indeterminate"},
+		{"not JSON", `<html>`, "indeterminate"},
+		{"valid", `{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`, "ok"},
+		{"valid null result", `{"jsonrpc":"2.0","id":1,"result":null}`, "ok"},
+		{"valid error", `{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"nope"}}`, "rpc"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, tc.body) }))
+			t.Cleanup(srv.Close)
+			cl := NewControlClient(Agent{ID: "x", Addr: strings.TrimPrefix(srv.URL, "http://")}, time.Second)
+			res, err := cl.Write(context.Background(), "dungeon_pause", nil)
+			var re *RPCError
+			switch tc.kind {
+			case "ok":
+				if err != nil || res == nil {
+					t.Fatalf("want ok, got %v %q", err, res)
+				}
+			case "indeterminate":
+				if !errors.Is(err, ErrIndeterminate) {
+					t.Fatalf("want indeterminate, got %v %q", err, res)
+				}
+			case "rpc":
+				if !errors.As(err, &re) || errors.Is(err, ErrIndeterminate) {
+					t.Fatalf("want the agent's RPC error, got %v", err)
+				}
+			}
+		})
+	}
+}
+
+// A pause whose reply is not an answer to its request is 502 "unknown: check the run status", and its log line says indeterminate, with no ok.
+func TestControlPauseIndeterminateReplyIsNotOK(t *testing.T) {
+	r := newControlRig(t)
+	r.fake.set("dungeon_status", `{"running":true,"state":"running","report":{"state":"running","remote":{"mode":"observe"}}}`)
+	r.fake.raw("dungeon_pause", `{}`)
+	rec := r.post("/api/control/"+r.agent.ID+"/run", map[string]any{"verb": "pause", "confirm": true}, r.token, nil)
+	if rec.code != http.StatusBadGateway || !strings.Contains(rec.body, "unknown: check the run status") {
+		t.Fatalf("pause with a bare {} reply: %d %s", rec.code, rec.body)
+	}
+	lines := r.logRecords()
+	if len(lines) != 2 || lines[1]["outcome"] != "indeterminate" {
+		t.Fatalf("the log is %v", lines)
+	}
+	if _, ok := lines[1]["ok"]; ok {
+		t.Errorf("an indeterminate result line carries ok: %v", lines[1])
+	}
+}
+
+// failAfter passes the first left writes to w and fails the rest (a full disk, say).
+type failAfter struct {
+	w    io.Writer
+	left int
+}
+
+func (f *failAfter) Write(b []byte) (int, error) {
+	if f.left <= 0 {
+		return 0, errors.New("no space left on device")
+	}
+	f.left--
+	return f.w.Write(b)
+}
+
+// The RPC ran and only the result line could not be written: 200 with executed and log_failed (never a 500 that invites a second skip),
+// and the result line goes to stderr.
+func TestControlLogFailsAfterSuccessfulRPC(t *testing.T) {
+	r := newControlRig(t)
+	r.fake.set("dungeon_status", `{"running":true,"state":"running","report":{"state":"running","remote":{"mode":"observe"}}}`)
+	r.fake.set("dungeon_pause", `{"ok":true}`)
+	var stderr bytes.Buffer
+	saved := controlStderr
+	controlStderr = &stderr
+	t.Cleanup(func() { controlStderr = saved })
+	r.ctl.log.w = &failAfter{w: r.ctl.log.w, left: 1} // the request line gets through, the result line does not
+	rec := r.post("/api/control/"+r.agent.ID+"/run", map[string]any{"verb": "pause", "confirm": true}, r.token, nil)
+	if rec.code != http.StatusOK {
+		t.Fatalf("pause with a failing result log: %d %s", rec.code, rec.body)
+	}
+	var got map[string]any
+	must(t, json.Unmarshal([]byte(rec.body), &got))
+	if got["executed"] != true || got["log_failed"] != true {
+		t.Fatalf("the reply is %s, want executed true and log_failed true", rec.body)
+	}
+	n := 0
+	for _, m := range r.fake.methods() {
+		if m == "dungeon_pause" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("dungeon_pause was sent %d times, want once", n)
+	}
+	if !strings.Contains(stderr.String(), `"phase":"result"`) || !strings.Contains(stderr.String(), `"verb":"pause"`) {
+		t.Errorf("stderr has no result line: %q", stderr.String())
 	}
 }
 

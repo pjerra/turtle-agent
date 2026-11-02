@@ -25,6 +25,13 @@ var controlReadMethods = map[string]bool{"dungeon_status": true, "tune_list": tr
 // (commander) entries belong to slices 2 and 3 of #183 and are added with their handlers.
 var controlWriteMethods = map[string]bool{"dungeon_pause": true, "dungeon_resume": true, "dungeon_skip": true, "dungeon_stop": true}
 
+// ErrIndeterminate is returned when the agent answered but not with a JSON-RPC 2.0 reply to this request (no envelope, another id, no
+// result). For a write the command may already have run, so the caller must neither call it OK nor a plain refusal.
+var ErrIndeterminate = errors.New("indeterminate")
+
+// rpcID is the id every control request carries; a reply must echo it.
+const rpcID = 1
+
 // ControlClient calls the write methods of one agent. It holds no cache: the run handler makes one per control.
 type ControlClient struct {
 	Agent Agent
@@ -66,9 +73,10 @@ func (c *ControlClient) Write(ctx context.Context, method string, params any) (j
 	return c.call(ctx, method, nil)
 }
 
-// call sends one JSON-RPC request. The envelope parsing is the read client's (agents.go), with the parameters a control may carry.
+// call sends one JSON-RPC request. A reply must be a JSON-RPC 2.0 envelope that echoes the request id and carries a result or an error;
+// anything else is ErrIndeterminate, never a success.
 func (c *ControlClient) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	req0 := map[string]any{"jsonrpc": "2.0", "id": 1, "method": method}
+	req0 := map[string]any{"jsonrpc": "2.0", "id": rpcID, "method": method}
 	if params != nil {
 		req0["params"] = params
 	}
@@ -100,17 +108,28 @@ func (c *ControlClient) call(ctx context.Context, method string, params any) (js
 		return nil, err
 	}
 	var env struct {
-		Result json.RawMessage `json:"result"`
-		Error  *struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      any             `json:"id"`
+		Result  json.RawMessage `json:"result"`
+		Error   *struct {
 			Code    int    `json:"code"`
 			Message string `json:"message"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(data, &env); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: the reply is not JSON (%v)", ErrIndeterminate, err)
+	}
+	if env.JSONRPC != "2.0" {
+		return nil, fmt.Errorf("%w: the reply has no jsonrpc 2.0 envelope", ErrIndeterminate)
+	}
+	if id, ok := env.ID.(float64); !ok || id != rpcID {
+		return nil, fmt.Errorf("%w: the reply's id is not the request's id", ErrIndeterminate)
 	}
 	if env.Error != nil {
 		return nil, &RPCError{Code: env.Error.Code, Message: env.Error.Message}
+	}
+	if len(env.Result) == 0 { // "result": null is a result; no member at all is not
+		return nil, fmt.Errorf("%w: the reply has no result", ErrIndeterminate)
 	}
 	return env.Result, nil
 }

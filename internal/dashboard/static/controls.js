@@ -50,7 +50,7 @@
     const lines = json && Array.isArray(json.lines) ? json.lines : [];
     return lines.map((l) => {
       const t = l && l.at ? String(l.at).slice(11, 19) : "";
-      const what = (l && l.verb ? l.verb : "") + (l && l.ok ? " ok" : l && l.ok === false ? " failed" : "");
+      const what = (l && l.verb ? l.verb : "") + (l && l.outcome === "indeterminate" ? " indeterminate" : l && l.ok ? " ok" : l && l.ok === false ? " failed" : "");
       return [t, l && l.who, l && l.via === "trusted" ? "trusted" : "", what, l && l.message ? l.message : ""].filter(Boolean).join(" \u00b7 ");
     });
   }
@@ -154,7 +154,10 @@
       try { json = await r.json(); } catch (e) { /* not JSON */ }
       s.busy.delete(spec.verb);
       if (r.status === 401) { sess.set(""); s.token.value = ""; s.msg.textContent = "Wrong or missing control token" + (st.trusted ? " (the server did not accept this browser without one)." : "."); }
+      // The command ran; only its log line failed. Said once, with no retry offered: a retry would send a second command.
+      else if (json && json.executed === true && json.log_failed === true) s.msg.textContent = spec.verb + " done (control log write failed).";
       else if (json && json.status === "ok") s.msg.textContent = spec.verb + " sent to agent " + card.id + " (" + json.rpc + ").";
+      else if (json && typeof json.message === "string" && json.message.indexOf("unknown:") === 0) s.msg.textContent = json.message;
       else s.msg.textContent = "Refused: " + ((json && json.message) || ("HTTP " + r.status));
       paint(s, card);
       refreshLog(s, card);
