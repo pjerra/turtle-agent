@@ -690,7 +690,8 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
 - `tank_min_hp` (optional, `0` or `100` to `20000`) is the least max health the hired tank should have for the plan's level band; the
   [kit check](#remote-leader) **warns** below it, and the run refuses only with `preflight` `strict` (a warning fails the run there). The
   floor is set at the middle of the plan's band and scaled to the hired tank's own level with the 2026-10 test runs' per-level health
-  curve, so a level-45 tank is judged against a level-45 floor. Every dungeon plan with a `level_band` carries one, derived from the
+  curve, so a level-45 tank is judged against a level-45 floor. The level-60 curve jump assumes tier gear: the warning says so.
+  Every dungeon plan with a `level_band` carries one, derived from the
   tank's max health in the 2026-10 test runs (0.9 x the weakest clean run of the plan, scaled to the plan's hire level; Ragefire Chasm
   keeps the issue's `800` at 13-18). Raids carry none: a raid tank's health is the raid roster's gear tier, not the plan's band. `0` or
   absent: no check.
@@ -2971,13 +2972,13 @@ with it (a new hire has no saved instance and is online). `hire` is optional and
    mismatched commander would only get hires that fight for the other side; start the run from a commander of that team, or drop `team`).
    The hires appear and muster where the commander stands, so inside 15 yd of the plan's `portal` point the step compares floors: the portal
    ground is the navmesh floor at the portal's x/y nearest **below** the trigger centre. A height the server settled picks the navmesh floor
-   at the commander's own x/y nearest that height. A guessed `status.z_unknown` height (a far teleport leaves it guessed: no floor drop
-   follows, and the core never sends the player its own position) may be on any floor at its x/y, so the step looks ±30 yd around the guess
-   and judges the **lowest** floor there: more than 5 yd under the portal ground refuses (`hire: commander may be on a lower floor near the
-   portal`), while one floor is used as it is. Only when the commander's floor is more than 5 yd below the portal's does the step refuse; a
+   at the commander's own x/y nearest that height and refuses when it stands on the wrong floor. A guessed `status.z_unknown` height (a far
+   teleport leaves it guessed: no floor drop follows, and the core never sends the player its own position) may be on any floor at its x/y,
+   so the step never refuses on it: with floors stacked at the commander's x/y it warns naming both candidate floors and hires anyway, while
+   one floor is used as it is. Only a known floor more than 5 yd below the portal's refuses; a
    trigger centre a few yards above the ground, or a commander on the same ground, is allowed. No navmesh for the map (or no agent
    position): no check, noted (`hire: portal ground not checked (no navmesh)`). A
-   **kept binding** that already holds the wanted party is not checked: a resume hires nothing new there. No option turns either refusal off:
+   **kept binding** (or every slot kept, only the bind redone) is not checked: a resume hires nothing new there. No option turns either refusal off:
    move the commander.
 
 Every wait has its ceiling (`wait_s`, 8 s per hire reply, 6 s per `.bot` line, 3 s per spell question, 60 s for the pet (a bot with no pet at 20 s is told once to `summon voidwalker`, a hunter to `call pet`), 12 s for dismissals, a hire of a **kept binding** (a resume into the group the run before left: it is bound, so it answers no `.bot` line) is not checked again for gear, spells, talents or pet (a warning each; what the first run read is kept in the hire memory), 240 s for the
