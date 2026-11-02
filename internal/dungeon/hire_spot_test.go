@@ -1,8 +1,10 @@
 package dungeon
 
 import (
+	"cmp"
 	"context"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -15,27 +17,40 @@ const portalMap = 1
 // portalPoint is Ragefire Chasm's portal on the outer map (dungeons/ragefire_chasm.json).
 var portalPoint = Point{X: 1818.4, Y: -4427.26, Z: -10.4478}
 
-// hirePosFake is the hire fake with a game that knows where the commander stands (AgentPositioner) and, when floors is set, the navmesh
-// floors at a point (FloorLister). A plain hireFake gives neither.
+// hirePosFake is the hire fake with a game that knows where the commander stands and whether its height is a guess (AgentPositioner)
+// and, when floors is set, the navmesh floors at a point (FloorLister). A plain hireFake gives neither.
 type hirePosFake struct {
 	*hireFake
-	pos    Point
-	floors map[[2]float32][]float32
+	pos      Point
+	zUnknown bool
+	floors   map[[2]float32][]float32
 }
 
-func (g *hirePosFake) AgentPosition() Point { return g.pos }
+func (g *hirePosFake) AgentPosition() (Point, bool) { return g.pos, g.zUnknown }
 
-// FloorsAt answers the fixture floors of the nearest point within a yard, highest first, as the navmesh does.
-func (g *hirePosFake) FloorsAt(_ context.Context, _ uint32, x, y, _ float32) ([]float32, bool) {
+// FloorsAt answers the fixture floors of the nearest point within a yard, highest first, within 12 yd of z, as the navmesh does.
+func (g *hirePosFake) FloorsAt(ctx context.Context, mapID uint32, x, y, z float32) ([]float32, bool) {
+	return g.FloorsWithin(ctx, mapID, x, y, z-12, z+12)
+}
+
+// FloorsWithin answers the fixture floors of the nearest point within a yard, highest first, between lo and hi.
+func (g *hirePosFake) FloorsWithin(_ context.Context, _ uint32, x, y, lo, hi float32) ([]float32, bool) {
 	best := math.Inf(1)
 	var out []float32
 	found := false
 	for k, zs := range g.floors {
 		if d := math.Hypot(float64(k[0]-x), float64(k[1]-y)); d <= 1 && d < best {
-			best, out, found = d, zs, true
+			best, found = d, true
+			out = out[:0]
+			for _, z := range zs {
+				if z >= lo && z <= hi {
+					out = append(out, z)
+				}
+			}
 		}
 	}
-	return out, found
+	slices.SortFunc(out, func(a, b float32) int { return cmp.Compare(b, a) })
+	return out, found && len(out) > 0
 }
 
 // hireSpotEnv is the prepare environment of the hire step over a plan, the way remote_prepare.go builds it.
@@ -65,9 +80,68 @@ func TestHireRefusesBelowThePortalGround(t *testing.T) {
 	}
 }
 
+// A guessed commander height (a far teleport leaves status.z_unknown set for good: walk 23) may sit on any floor at its x/y, so the floors
+// within 30 yd of the guess are judged by the lowest, not by the nearest: a lower floor 9 yd under the portal ground refuses even when the
+// guess points at the portal floor, which the nearest-floor snap would allow. The widened look keeps a guess 20 yd too high from failing
+// open as "no navmesh", and a settled height keeps the nearest-floor snap (Codex HIGH, F5 round 5).
+func TestHireSpotGuessedHeightOnStackedFloors(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		zUnknown bool
+		z        float32
+		want     string
+	}{
+		{"guessed height on the portal floor", true, -20.3, "hire: commander may be on a lower floor near the portal"},
+		{"guessed height 20 yd too high", true, -0.3, "hire: commander may be on a lower floor near the portal"},
+		{"settled height on the portal floor", false, -20.3, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			g := newHireFake(t)
+			g.agentMap = portalMap
+			g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
+			pos := &hirePosFake{hireFake: g, pos: Point{X: 1821.5, Y: -4425.3, Z: c.z}, zUnknown: c.zUnknown,
+				floors: map[[2]float32][]float32{
+					{portalPoint.X, portalPoint.Y}: {-20.306},
+					{1821.5, -4425.3}:              {-20.3, -29.3},
+				}}
+			e := hireSpotEnv(g, pos, func(string) {})
+			p, err := e.hireSpotProblem(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.want == "" {
+				if p != "" {
+					t.Fatalf("a settled height on the portal floor is allowed: %q", p)
+				}
+				return
+			}
+			if !strings.Contains(p, c.want) {
+				t.Fatalf("a guessed height on stacked floors: %q, want %q", p, c.want)
+			}
+		})
+	}
+}
+
+// One floor within 30 yd of a guessed height is the commander's floor: Wailing Caverns' portal has one, so a guessed height there is
+// allowed (the widened look does not invent a lower level).
+func TestHireSpotGuessedHeightWithOneFloor(t *testing.T) {
+	g := newHireFake(t)
+	g.agentMap = portalMap
+	g.plan.Portal = &Portal{Map: portalMap, Point: Point{X: -753.596, Y: -2212.78, Z: 21.5403}}
+	pos := &hirePosFake{hireFake: g, pos: Point{X: -753.4, Y: -2212.8, Z: 30}, zUnknown: true,
+		floors: map[[2]float32][]float32{
+			{-753.596, -2212.78}: {15.4},
+			{-753.4, -2212.8}:    {15.4},
+		}}
+	e := hireSpotEnv(g, pos, func(string) {})
+	if p, err := e.hireSpotProblem(context.Background()); err != nil || p != "" {
+		t.Fatalf("a guessed height with one floor is allowed: %s %v", p, err)
+	}
+}
+
 // The review's real samples stand below their trigger centre but on the portal ground floor: the floor snap allows them (WC 6.1 yd, RFC
-// 9.4 yd, Sunken Temple 5.2 yd and Dire Maul East 4.6 yd under the trigger). A guessed height does not matter: the floor at the
-// commander's x/y is the same.
+// 9.4 yd, Sunken Temple 5.2 yd and Dire Maul East 4.6 yd under the trigger). A guessed height on a single floor does not matter: the
+// floor at the commander's x/y is the same.
 func TestHireSpotAllowsTheRealPortalSamples(t *testing.T) {
 	rfc := Point{X: 1818.4, Y: -4427.26, Z: -10.4478}
 	for _, c := range []struct {
@@ -76,24 +150,25 @@ func TestHireSpotAllowsTheRealPortalSamples(t *testing.T) {
 		portal          Portal
 		portalFloors    []float32
 		pos             Point
+		zUnknown        bool
 		commanderFloors []float32
 	}{
 		{"wailing caverns", 1, Portal{Map: 1, Point: Point{X: -753.596, Y: -2212.78, Z: 21.5403}},
-			[]float32{15.4}, Point{X: -753.4, Y: -2212.8, Z: 15.4}, []float32{15.4}},
+			[]float32{15.4}, Point{X: -753.4, Y: -2212.8, Z: 15.4}, false, []float32{15.4}},
 		{"ragefire chasm", 1, Portal{Map: 1, Point: rfc},
-			[]float32{-20.306}, Point{X: 1821.5, Y: -4425.3, Z: -19.8}, []float32{-20.305}},
+			[]float32{-20.306}, Point{X: 1821.5, Y: -4425.3, Z: -19.8}, false, []float32{-20.305}},
 		{"sunken temple", 0, Portal{Map: 0, Point: Point{X: -10162.7, Y: -3998.65, Z: -107.978}},
-			[]float32{-113.443}, Point{X: -10168, Y: -3997.1, Z: -113.2}, []float32{-113.66}},
+			[]float32{-113.443}, Point{X: -10168, Y: -3997.1, Z: -113.2}, false, []float32{-113.66}},
 		{"dire maul east", 1, Portal{Map: 1, Point: Point{X: -3981.58, Y: 771.193, Z: 160.962}},
-			[]float32{156.4}, Point{X: -3976.1, Y: 773.2, Z: 156.4}, []float32{156.4}},
+			[]float32{156.4}, Point{X: -3976.1, Y: 773.2, Z: 156.4}, false, []float32{156.4}},
 		{"a guessed height on the portal ground", 1, Portal{Map: 1, Point: rfc},
-			[]float32{-20.306}, Point{X: 1821.5, Y: -4425.3, Z: -30}, []float32{-20.305}},
+			[]float32{-20.306}, Point{X: 1821.5, Y: -4425.3, Z: -30}, true, []float32{-20.305}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			g := newHireFake(t)
 			g.agentMap = c.agentMap
 			g.plan.Portal = &c.portal
-			pos := &hirePosFake{hireFake: g, pos: c.pos, floors: map[[2]float32][]float32{
+			pos := &hirePosFake{hireFake: g, pos: c.pos, zUnknown: c.zUnknown, floors: map[[2]float32][]float32{
 				{c.portal.X, c.portal.Y}: c.portalFloors,
 				{c.pos.X, c.pos.Y}:       c.commanderFloors,
 			}}

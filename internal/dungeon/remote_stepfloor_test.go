@@ -29,10 +29,18 @@ func (g slopeFloors) FloorsAt(_ context.Context, _ uint32, x, y, z float32) ([]f
 	return []float32{slopeZ(x) + g.off, slopeZ(x) + g.off - 30}, true
 }
 
+func (g slopeFloors) FloorsWithin(_ context.Context, _ uint32, x, y, _ float32, _ float32) ([]float32, bool) {
+	return []float32{slopeZ(x) + g.off, slopeZ(x) + g.off - 30}, true
+}
+
 // flatBelow lists only a floor 5 yd under the flat path.
 type flatBelow struct{ slopeFake }
 
 func (g flatBelow) FloorsAt(_ context.Context, _ uint32, _, _, _ float32) ([]float32, bool) {
+	return []float32{-5}, true
+}
+
+func (g flatBelow) FloorsWithin(_ context.Context, _ uint32, _, _, _, _ float32) ([]float32, bool) {
 	return []float32{-5}, true
 }
 

@@ -2893,10 +2893,13 @@ with it (a new hire has no saved instance and is online). `hire` is optional and
    below the **portal ground**, and a commander of the **other team** than the run's `team` (the module hires the commander's own faction, so a
    mismatched commander would only get hires that fight for the other side; start the run from a commander of that team, or drop `team`).
    The hires appear and muster where the commander stands, so inside 15 yd of the plan's `portal` point the step compares floors: the portal
-   ground is the navmesh floor at the portal's x/y nearest **below** the trigger centre, and the commander's floor is the navmesh floor at its
-   own x/y nearest its height (a guessed `status.z_unknown` height is fine: the floor under it is what counts). Only when the commander's
-   floor is more than 5 yd below the portal's does the step refuse; a trigger centre a few yards above the ground, or a commander on the same
-   ground, is allowed. No navmesh for the map (or no agent position): no check, noted (`hire: portal ground not checked (no navmesh)`). A
+   ground is the navmesh floor at the portal's x/y nearest **below** the trigger centre. A height the server settled picks the navmesh floor
+   at the commander's own x/y nearest that height. A guessed `status.z_unknown` height (a far teleport leaves it guessed: no floor drop
+   follows, and the core never sends the player its own position) may be on any floor at its x/y, so the step looks ±30 yd around the guess
+   and judges the **lowest** floor there: more than 5 yd under the portal ground refuses (`hire: commander may be on a lower floor near the
+   portal`), while one floor is used as it is. Only when the commander's floor is more than 5 yd below the portal's does the step refuse; a
+   trigger centre a few yards above the ground, or a commander on the same ground, is allowed. No navmesh for the map (or no agent
+   position): no check, noted (`hire: portal ground not checked (no navmesh)`). A
    **kept binding** that already holds the wanted party is not checked: a resume hires nothing new there. No option turns either refusal off:
    move the commander.
 
