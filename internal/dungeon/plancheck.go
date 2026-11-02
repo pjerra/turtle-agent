@@ -373,7 +373,9 @@ func (c *planChecker) runLeader(from int) error {
 				if camp := c.p.Legs[m.Leg].PullGroups[gi-1].Camp; camp != nil {
 					if path, perr := c.nav.Plan(c.p.Map, vec(m.Point), vec(*camp)); perr != nil {
 						err = perr
-					} else if path.Status == navmesh.Complete && path.Length > MaxCampPathYd {
+					} else if path.Status != navmesh.Complete {
+						c.fail("run leader "+m.Part, gi, *camp, m.Point, ReasonUnreachable, "camp drag path incomplete: path_to is %s (%s), so the drag back to the camp is not measured", path.Status, path.Reason)
+					} else if path.Length > MaxCampPathYd {
 						c.fail("run leader "+m.Part, gi, *camp, m.Point, ReasonTooFar, "the drag back to the camp is %.0f yd along the navmesh (at most %d): the pack leashes on the way back", path.Length, MaxCampPathYd)
 					}
 				}

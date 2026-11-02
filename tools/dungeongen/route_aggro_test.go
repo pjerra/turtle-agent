@@ -504,3 +504,48 @@ func TestCampMustStandOnTheClearedRoute(t *testing.T) {
 		}
 	}
 }
+
+// Each camp pull is checked against the route cleared up to ITS OWN camp row,
+// not the leg's first camp: a second camp that stands by the first pull's tag
+// walk is on cleared ground; one far from every earlier row is a finding on
+// pull 2 only.
+func TestSecondCampCheckedAgainstRouteClearedUpToIt(t *testing.T) {
+	mk := func(camp2 dungeon.Point) *dungeon.Plan {
+		return &dungeon.Plan{Name: "probe", Map: 1, LevelBand: []int{60, 60}, Entrance: dungeon.Point{},
+			Legs: []dungeon.Leg{{
+				Name: "a", To: dungeon.Point{X: -40},
+				PullGroups: []dungeon.PullGroup{
+					{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 0}}, Radius: 5,
+						Camp:     &dungeon.Point{X: -40},
+						Approach: []dungeon.Point{{X: -20}, {X: -30}}},
+					{Entries: []uint32{2}, Positions: []dungeon.Point{{X: 0, Y: 60}}, Radius: 5,
+						Camp:     &camp2,
+						Approach: []dungeon.Point{{X: -25, Y: 30}, {X: -25, Y: 40}}},
+				},
+			}}}
+	}
+	cs := []creature{
+		{GUID: 1, Entry: 1, Name: "Pack", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 0}},
+		{GUID: 2, Entry: 2, Name: "Pack2", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 0, Y: 60}},
+	}
+	find := func(camp2 dungeon.Point) (pull1, pull2 bool) {
+		got, err := CampPullFindings(mk(camp2), cs, map[int]bool{35: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range got {
+			if strings.Contains(s, "not on the cleared route") {
+				pull1 = pull1 || strings.Contains(s, "pull 1:")
+				pull2 = pull2 || strings.Contains(s, "pull 2:")
+			}
+		}
+		return
+	}
+	// 7 yd from the first pull's tag row at (-20,0), 16 yd from every row before camp 1.
+	if p1, p2 := find(dungeon.Point{X: -25, Y: 5}); p1 || p2 {
+		t.Errorf("a second camp beside the first pull's walk is on the cleared route (pull1 %v pull2 %v)", p1, p2)
+	}
+	if p1, p2 := find(dungeon.Point{X: -25, Y: 90}); p1 || !p2 {
+		t.Errorf("a second camp 90 yd off the route is a finding on pull 2 only (pull1 %v pull2 %v)", p1, p2)
+	}
+}

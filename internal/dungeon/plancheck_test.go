@@ -738,3 +738,48 @@ func TestLookDoesNotChaseAPathThatNeverGetsInView(t *testing.T) {
 		}
 	}
 }
+
+// dragNav answers the drag back from the tag spot to the camp with the given status; every other path is the flat world's.
+type dragNav struct {
+	fakeNav
+	tag, camp Point
+	status    navmesh.Status
+}
+
+func (d dragNav) Plan(m uint32, from, to navmesh.Vec3) (navmesh.Path, error) {
+	p, err := d.fakeNav.Plan(m, from, to)
+	if err == nil && (Point{from[0], from[1], from[2]}) == d.tag && (Point{to[0], to[1], to[2]}) == d.camp {
+		p.Status = d.status
+		if d.status != navmesh.Complete {
+			p.Reason = "path ends short of the goal"
+		}
+	}
+	return p, err
+}
+
+// A camp pull's drag back is measured on a complete path only: an incomplete (partial) path is a plan-check failure, not a pass, and the
+// 70 yd limit still applies to a complete one.
+func TestPlanCheckCampDragPathMustBeComplete(t *testing.T) {
+	camp, tag := Point{0, 10, 0}, Point{0, 40, 0}
+	leg := Leg{Name: "a", To: Point{0, 0, 0},
+		PullGroups: []PullGroup{{Entries: []uint32{1}, Positions: []Point{{0, 60, 0}}, Camp: &camp, Approach: []Point{tag}}}}
+	for _, tc := range []struct {
+		status navmesh.Status
+		want   bool
+	}{{navmesh.Complete, false}, {navmesh.Partial, true}} {
+		res := checkLegs(t, dragNav{tag: tag, camp: camp, status: tc.status}, 0, leg)
+		got := false
+		for _, is := range res.Issues {
+			if strings.Contains(is.String(), "camp drag path incomplete") {
+				got = true
+			}
+		}
+		if got != tc.want {
+			t.Errorf("status %s: incomplete-drag issue %v, want %v:\n%s", tc.status, got, tc.want, res.Summary())
+		}
+	}
+	long := dragNav{fakeNav: fakeNav{detour: map[Point]float32{camp: MaxCampPathYd + 1}}, tag: tag, camp: camp, status: navmesh.Complete}
+	if res := checkLegs(t, long, 0, leg); !strings.Contains(res.Summary(), "the drag back to the camp") {
+		t.Errorf("a complete 71 yd drag should still fail:\n%s", res.Summary())
+	}
+}

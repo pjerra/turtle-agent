@@ -462,9 +462,12 @@ func CampPullFindings(p *dungeon.Plan, cs []creature, ignore map[int]bool) ([]st
 			}
 		}
 		cleared := false
+		// This pull's own camp row (the nearest FlagCampPoint row before the
+		// pull), not the leg's first one: a later camp is checked against
+		// the route cleared up to it.
 		campIdx := -1
-		for j := 0; j < i; j++ {
-			if pts[j].camp && pts[j].leg == rp.leg {
+		for j := i - 1; j >= 0 && pts[j].leg == rp.leg; j-- {
+			if pts[j].camp {
 				campIdx = j
 				break
 			}
