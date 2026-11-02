@@ -353,7 +353,9 @@
     "stairs event with Sergeant Bly's crew, Nekrum and Sezz'ziz (its phase is instance data 1 = 7; the plan waits on Nekrum seen, no phase step yet)",
     "Weegli's gossip (or Bly's) has him blow the End Door for Ukorz and Ruuzlu",
     "Gahz'rilla: the optional gahzrilla leg (Gong with the Mallet of Zul'Farrak, 9240; it drops from Qiaga the Keeper 7996 outside the instance and 9241 must be used to make 9240, so no bot run can obtain it; skipped without give_items)"
-   ]
+   ,
+    "Farraki Arena: Razjal's gossip (option 0) starts Kath'zen, Juthza, Razjal and the scorpid intermission; the run leader holds the arena until all are dead (units hold)",
+    "Zel'jeb the Ancient: Turtle wing north of Velratha; 90 % less damage from all but Fire"]
   },
   {
    "name": "maraudon_orange",

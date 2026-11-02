@@ -63,8 +63,8 @@ func TestStageCheckZulfarrakGahzrillaRefused(t *testing.T) {
 	text := out.String()
 	for _, want := range []string{
 		"cannot be staged in a fresh instance",
-		"the boss of leg 8 velratha_b (entry 7795)",
-		"proposal: earlier_leg leg 8 velratha_b",
+		"the boss of leg 9 velratha_b (entry 7795)",
+		"proposal: earlier_leg leg 9 velratha_b",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("no %q in %q", want, text)

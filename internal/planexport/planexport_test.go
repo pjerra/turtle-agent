@@ -368,7 +368,7 @@ func TestZulfarrakExportCarriesTheUnitLists(t *testing.T) {
 		t.Fatalf("plan row %+v: all three lists must be set", r.Plan)
 	}
 	sql := WriteSQL([]Rows{r})
-	want := "INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `cc_priority`, `cc_always`, `kill_first`, `source`, `comment`) VALUES\n('zulfarrak', 209, '7246,5648', '7246', '7785,8179,5650,7247,7608,7606,7605', 'test', "
+	want := "INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `cc_priority`, `cc_always`, `kill_first`, `source`, `comment`) VALUES\n('zulfarrak', 209, '7246,5648', '7246', '7785,8179,5650,7247,7608,7606,7605,62499', 'test', "
 	if !strings.Contains(sql, want) {
 		t.Fatalf("the migration lacks %q", want)
 	}
@@ -379,7 +379,7 @@ func TestZulfarrakExportCarriesTheUnitLists(t *testing.T) {
 	if err := Equal([]Rows{r}, back); err != nil {
 		t.Fatal(err)
 	}
-	if fmt.Sprint(back[0].Plan.KillFirst) != "[7785 8179 5650 7247 7608 7606 7605]" {
+	if fmt.Sprint(back[0].Plan.KillFirst) != "[7785 8179 5650 7247 7608 7606 7605 62499]" {
 		t.Fatalf("read back %+v", back[0].Plan)
 	}
 }
@@ -456,12 +456,12 @@ func TestZulfarrakExportsBlyAndReachesUkorz(t *testing.T) {
 		t.Fatalf("cut: %s", res.Cut)
 	}
 	legs := res.Rows.Legs
-	if len(legs) != 17 || legs[14].Name != "weegli_door" || legs[15].Name != "bly" || legs[16].Name != "ukorz" {
+	if len(legs) != 19 || legs[16].Name != "weegli_door" || legs[17].Name != "bly" || legs[18].Name != "ukorz" {
 		t.Fatalf("legs %+v", legs)
 	}
 	var bly []string
 	for _, s := range res.Rows.Steps {
-		if s.Leg == 15 {
+		if s.Leg == 17 {
 			bly = append(bly, fmt.Sprintf("%s %d %g %g %g r%g p%d f%d t%d %v", s.Kind, s.Entry, s.X, s.Y, s.Z, s.Radius, s.Param, s.Flags, s.TimeoutS, s.Entries))
 		}
 	}
@@ -480,23 +480,24 @@ func TestZulfarrakExportsBlyAndReachesUkorz(t *testing.T) {
 		}
 	}
 	for _, s := range res.Rows.Steps {
-		if s.Leg == 15 && s.Kind == KindHold && !strings.Contains(s.Comment, "until every unit of it is dead (7604 counts while still friendly)") {
+		if s.Leg == 17 && s.Kind == KindHold && !strings.Contains(s.Comment, "until every unit of it is dead (7604 counts while still friendly)") {
 			t.Errorf("the units hold's comment: %q", s.Comment)
 		}
 	}
-	if ukorz := kinds(res.Rows, 16); len(ukorz) == 0 || ukorz[len(ukorz)-1] != KindBoss {
+	if ukorz := kinds(res.Rows, 18); len(ukorz) == 0 || ukorz[len(ukorz)-1] != KindBoss {
 		t.Errorf("ukorz kinds %v", ukorz)
 	}
-	if fmt.Sprint(res.Rows.Plan.KillFirst) != "[7785 8179 5650 7247 7608 7606 7605]" {
+	if fmt.Sprint(res.Rows.Plan.KillFirst) != "[7785 8179 5650 7247 7608 7606 7605 62499]" {
 		t.Errorf("kill_first %v: the crew is focused by the plan's list (the hold has no kill order)", res.Rows.Plan.KillFirst)
 	}
 	w := strings.Join(res.Warnings, "\n")
 	for _, want := range []string{
 		"wait_for agent_only (",
-		`leg 16 (bly) steps[0] "the End Door wait of weegli_door`,
-		`leg 16 (bly) steps[1] "the weegli_door hold waited for instance data 1 = 8`,
-		`leg 16 (bly) steps[3] "the boss hold waits for it`,
-		"boss.first under a hold (leg 16 (bly) boss 7604 first [7608 7606 7605]): not in the rows",
+		`leg 18 (bly) steps[0] "the End Door wait of weegli_door`,
+		`leg 18 (bly) steps[1] "the weegli_door hold waited for instance data 1 = 8`,
+		`leg 18 (bly) steps[3] "the boss hold waits for it`,
+		"boss.first under a hold (",
+		"leg 18 (bly) boss 7604 first [7608 7606 7605]): not in the rows",
 	} {
 		if !strings.Contains(w, want) {
 			t.Errorf("the warnings lack %q:\n%s", want, w)
@@ -527,12 +528,12 @@ func TestZulfarrakWithoutBlyReachesUkorz(t *testing.T) {
 		t.Fatalf("cut: %s", res.Cut)
 	}
 	legs := res.Rows.Legs
-	if len(legs) != 16 || legs[14].Name != "weegli_door" || legs[15].Name != "ukorz" || legs[15].Leg != 15 {
+	if len(legs) != 18 || legs[16].Name != "weegli_door" || legs[17].Name != "ukorz" || legs[17].Leg != 17 {
 		t.Fatalf("legs %+v", legs)
 	}
 	var door []string
 	for _, s := range res.Rows.Steps {
-		if s.Leg == 14 {
+		if s.Leg == 16 {
 			door = append(door, fmt.Sprintf("%s %d %g %g %g r%g p%d f%d t%d %v", s.Kind, s.Entry, s.X, s.Y, s.Z, s.Radius, s.Param, s.Flags, s.TimeoutS, s.Entries))
 		}
 	}
@@ -545,18 +546,18 @@ func TestZulfarrakWithoutBlyReachesUkorz(t *testing.T) {
 	if !slices.Equal(door, want) {
 		t.Errorf("weegli_door rows:\n%s\nwant\n%s", strings.Join(door, "\n"), strings.Join(want, "\n"))
 	}
-	ukorz := kinds(res.Rows, 15)
+	ukorz := kinds(res.Rows, 17)
 	if len(ukorz) == 0 || ukorz[len(ukorz)-1] != KindBoss || slices.Contains(ukorz, KindGossip) {
 		t.Errorf("ukorz kinds %v", ukorz)
 	}
 	if !slices.ContainsFunc(res.Warnings, func(w string) bool {
-		return strings.Contains(w, "leg 16 (bly): left out of the export by the exporter's skip-legs option")
+		return strings.Contains(w, "leg 18 (bly): left out of the export by the exporter's skip-legs option")
 	}) {
 		t.Errorf("no warning for the skipped leg: %v", res.Warnings)
 	}
 	// The skipped leg's attributes are not warned about: its gossip stand, its skip list and the like are not in any row.
 	for _, w := range res.Warnings {
-		if strings.Contains(w, "leg 16 (bly)") && !strings.Contains(w, "left out of the export") {
+		if strings.Contains(w, "leg 18 (bly)") && !strings.Contains(w, "left out of the export") {
 			t.Errorf("a warning about the skipped leg: %s", w)
 		}
 	}
@@ -650,7 +651,7 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 	if len(res.Warnings) == 0 || !strings.Contains(strings.Join(res.Warnings, "\n"), "31 loot_object steps left out") {
 		t.Fatalf("warnings %v", res.Warnings)
 	}
-	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "leg 9 (gahzrilla): optional (needs Mallet of Zul'Farrak (item 9240)") {
+	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "leg 11 (gahzrilla): optional (needs Mallet of Zul'Farrak (item 9240)") {
 		t.Fatalf("no warning for the optional leg: %v", res.Warnings)
 	}
 	back, err := Parse(WriteSQL([]Rows{res.Rows}))

@@ -29,7 +29,7 @@ func loadPlan(t *testing.T, path string) *Plan {
 }
 
 // zfStepLegs are the legs of the plan that have steps: the Zum'rah leg and the stairs event's.
-var zfStepLegs = map[string]bool{"zumrah": true, "stairs": true, "stairs_top": true, "bly": true, "weegli_door": true}
+var zfStepLegs = map[string]bool{"zumrah": true, "stairs": true, "stairs_top": true, "bly": true, "weegli_door": true, "farraki_arena": true}
 
 // zfLeg is the leg of the plan with that name.
 func zfLeg(t *testing.T, p *Plan, name string) Leg {
@@ -69,7 +69,7 @@ func zfTSV(t *testing.T, name string) []map[string]string {
 
 func TestZulfarrakPlansLoad(t *testing.T) {
 	p := loadPlan(t, zulfarrakPlan)
-	if p.Map != 209 || p.Name != "zulfarrak" || len(p.Legs) != 18 {
+	if p.Map != 209 || p.Name != "zulfarrak" || len(p.Legs) != 20 {
 		t.Fatalf("%+v", p)
 	}
 	var names []string
@@ -88,7 +88,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 			}
 		}
 	}
-	if fmt.Sprint(names) != "[antusul_a antusul_a2 antusul_a3 antusul antusul_c antusul_b theka velratha velratha_b gahzrilla courtyard zumrah stairs stairs_top stairs_base weegli_door bly ukorz]" || fmt.Sprint(bosses) != "[8127 7272 7795 7273 7271 7274 7275 7604 7267]" {
+	if fmt.Sprint(names) != "[antusul_a antusul_a2 antusul_a3 antusul antusul_c antusul_b theka velratha farraki_arena velratha_b zeljeb gahzrilla courtyard zumrah stairs stairs_top stairs_base weegli_door bly ukorz]" || fmt.Sprint(bosses) != "[8127 7272 62498 7795 62495 7273 7271 7274 7275 7604 7267]" {
 		t.Fatalf("%v %v", names, bosses)
 	}
 	// The road to Antu'sul is split where the agent's navmesh leaves the road (ZF-1 and ZF-2 hires, 2026-10-14): waypoints, and the
@@ -114,7 +114,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 	}
 	// The hired party brings a mage for the big packs (owner decision 2026-10-14). Its Polymorph goes on a Sandfury Shadowhunter in any
 	// pack (Hex on the tank; owner rule), then Witch Doctors, then Shadowcasters.
-	if fmt.Sprint(p.HireComposition) != "[warrior:tank priest:healer mage:dps hunter:dps warlock:dps]" || fmt.Sprint(p.CCPriority) != "[7246 5648]" || fmt.Sprint(p.CCAlways) != "[7246]" || fmt.Sprint(p.KillFirst) != "[7785 8179 5650 7247 7608 7606 7605]" || fmt.Sprint(p.SummonedKillFirst) != "[7785 8179]" {
+	if fmt.Sprint(p.HireComposition) != "[warrior:tank priest:healer mage:dps hunter:dps warlock:dps]" || fmt.Sprint(p.CCPriority) != "[7246 5648]" || fmt.Sprint(p.CCAlways) != "[7246]" || fmt.Sprint(p.KillFirst) != "[7785 8179 5650 7247 7608 7606 7605 62499]" || fmt.Sprint(p.SummonedKillFirst) != "[7785 8179]" {
 		t.Errorf("hire %v cc_priority %v cc_always %v kill_first %v", p.HireComposition, p.CCPriority, p.CCAlways, p.KillFirst)
 	}
 	// Entry: no game_tele inside the instance, so the plan names the portal only (area trigger 924 on map 1) and the outside tele.
@@ -167,7 +167,7 @@ func TestZulfarrakPlansLoad(t *testing.T) {
 func TestZulfarrakStairsEventOrder(t *testing.T) {
 	p := loadPlan(t, zulfarrakPlan)
 	var names []string
-	for _, l := range p.Legs[12:] {
+	for _, l := range p.Legs[14:] {
 		names = append(names, l.Name)
 	}
 	if fmt.Sprint(names) != "[stairs stairs_top stairs_base weegli_door bly ukorz]" {
@@ -220,8 +220,14 @@ func TestZulfarrakStairsEventOrder(t *testing.T) {
 			t.Errorf("crew place %+v is %.1f yd from the hold spot (radius %g)", place, d, h.Radius)
 		}
 	}
-	if fmt.Sprint(p.KillFirst[len(p.KillFirst)-3:]) != fmt.Sprint(y.Boss.First) {
-		t.Errorf("kill_first %v does not end with bly's first %v", p.KillFirst, y.Boss.First)
+	crew := false
+	for i := 0; i+len(y.Boss.First) <= len(p.KillFirst); i++ {
+		if fmt.Sprint(p.KillFirst[i:i+len(y.Boss.First)]) == fmt.Sprint(y.Boss.First) {
+			crew = true
+		}
+	}
+	if !crew {
+		t.Errorf("kill_first %v does not hold bly's first %v in order", p.KillFirst, y.Boss.First)
 	}
 	if u := zfLeg(t, p, "ukorz").Boss; u == nil || u.Entry != 7267 || fmt.Sprint(u.First) != "[7797]" {
 		t.Errorf("ukorz: %+v", u)
@@ -721,7 +727,7 @@ func TestZulfarrakCourtyardGroups(t *testing.T) {
 			l = x
 		}
 	}
-	if l.Name == "" || p.Legs[len(p.Legs)-8].Name != "courtyard" || p.Legs[len(p.Legs)-9].Name != "gahzrilla" || p.Legs[len(p.Legs)-10].Name != "velratha_b" || p.Legs[len(p.Legs)-7].Name != "zumrah" {
+	if l.Name == "" || p.Legs[len(p.Legs)-8].Name != "courtyard" || p.Legs[len(p.Legs)-9].Name != "gahzrilla" || p.Legs[len(p.Legs)-11].Name != "velratha_b" || p.Legs[len(p.Legs)-7].Name != "zumrah" {
 		t.Fatalf("the courtyard leg follows the gahzrilla leg, which follows Velratha's")
 	}
 	if l.To != (Point{1822, 1177, 9.1}) || l.Boss != nil || len(l.Steps) != 0 || l.CompanionsLoot != nil {
@@ -974,7 +980,7 @@ func TestZulfarrakGahzrillaLeg(t *testing.T) {
 			l, idx = x, i
 		}
 	}
-	if idx != 9 || p.Legs[idx-1].Name != "velratha_b" || p.Legs[idx+1].Name != "courtyard" {
+	if idx != 11 || p.Legs[idx-1].Name != "zeljeb" || p.Legs[idx+1].Name != "courtyard" {
 		t.Fatalf("the leg is at %d", idx)
 	}
 	if l.Optional == nil || l.Optional.Item != 9240 || l.Optional.Name != "Mallet of Zul'Farrak" {

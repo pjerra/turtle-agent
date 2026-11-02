@@ -92,7 +92,7 @@ func TestValidateUseOn(t *testing.T) {
 	}
 }
 
-// The shipped Zul'Farrak plan with --with-optional gahzrilla: the gahzrilla leg is row leg 9 (move to the stand, the 8 pulls, the two
+// The shipped Zul'Farrak plan with --with-optional gahzrilla: the gahzrilla leg is row leg 11 (move to the stand, the 8 pulls, the two
 // approach moves the east pool ring's two stands add, the stand move, use_on 141832 with 9240 at the gong's point, boss 7273), the
 // courtyard follows as leg 10, and the plan still exports without a cut through Ukorz.
 func TestZulfarrakWithGahzrilla(t *testing.T) {
@@ -108,19 +108,19 @@ func TestZulfarrakWithGahzrilla(t *testing.T) {
 		t.Fatalf("cut: %s", res.Cut)
 	}
 	legs := res.Rows.Legs
-	if len(legs) != 18 || legs[9].Name != "gahzrilla" || legs[10].Name != "courtyard" || legs[16].Name != "bly" || legs[17].Name != "ukorz" {
+	if len(legs) != 20 || legs[11].Name != "gahzrilla" || legs[12].Name != "courtyard" || legs[18].Name != "bly" || legs[19].Name != "ukorz" {
 		t.Fatalf("legs %+v", legs)
 	}
-	g := kinds(res.Rows, 9)
+	g := kinds(res.Rows, 11)
 	wantKinds := []string{KindMove, KindPull, KindPull, KindPull, KindMove, KindPull, KindMove, KindPull, KindPull, KindPull, KindPull, KindMove, KindUseOn, KindBoss}
 	if !slices.Equal(g, wantKinds) {
 		t.Fatalf("gahzrilla kinds %v", g)
 	}
 	for _, s := range res.Rows.Steps {
-		if s.Leg == 9 && s.Kind == KindUseOn && (s.Entry != 141832 || s.Item != 9240 || s.X != 1650.9 || s.Y != 1171.9 || s.Z != 10.9 || s.Flags != 0 || s.Param != 0) {
+		if s.Leg == 11 && s.Kind == KindUseOn && (s.Entry != 141832 || s.Item != 9240 || s.X != 1650.9 || s.Y != 1171.9 || s.Z != 10.9 || s.Flags != 0 || s.Param != 0) {
 			t.Errorf("the gong row %+v", s)
 		}
-		if s.Leg == 9 && s.Kind == KindBoss && (s.Entry != 7273 || s.X != 1702.58) {
+		if s.Leg == 11 && s.Kind == KindBoss && (s.Entry != 7273 || s.X != 1702.58) {
 			t.Errorf("the boss row %+v", s)
 		}
 	}

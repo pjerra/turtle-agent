@@ -23,11 +23,11 @@
   "cc_priority": [7246, 5648],
   "cc_always": [7246],
   "no_cc": [7276, 7286],
-  "kill_first": [7785, 8179, 5650, 7247, 7608, 7606, 7605],
+  "kill_first": [7785, 8179, 5650, 7247, 7608, 7606, 7605, 62499],
   "summoned_kill_first": [7785, 8179],
   "notes": [
     "Zul'Farrak (map 209), written from the world database export of tortoise-wow 5d79486 (tools/dungeongen/testdata/zulfarrak, read with export.sh) and the instance script src/scripts/dungeons/zulfarrak. THE ROUTE: Antu'sul (in seven legs), Theka the Martyr, Hydromancer Velratha (1470 yd of navmesh path from the entrance, checked by TestZulfarrakOnNavmesh), then the courtyard of the pyramid and Witch Doctor Zum'rah (PR B, TortoiseBots #984), then the legs after Zum'rah that were written from the instance script and have not run live: the stairs event (stairs, stairs_top, stairs_base), Sergeant Bly and his crew (bly), the End Door (weegli_door) and Chief Ukorz Sandscalp with Ruuzlu (ukorz). A failure in one of them ends the run; from_leg \"stairs\" starts there. Checked live 2026-10-14: a GM-invisible walk of the whole instance (~3130 yd, 78 walk_path calls, all arrived, no stuck spot, nothing attacked; tests/zf-map/MAP.md in the audit folder). Static spawn positions match the export to the decimal; 59 of the 64 pull-group mobs of the first draft were seen within 10 yd (two road patrollers 12 yd away, three west-road mobs out of the walker's sight); the live walk is why Theka and Velratha are met on their patrol and the patrolling packs have a 30 yd radius.",
-    "Left out of this plan: (1) nothing of the Gong's: Gahz'rilla (7273) is in this plan since PR A, as the optional gahzrilla leg (the Gong of Zul'Farrak, 141832, lock 459, is rung by using the Mallet of Zul'Farrak, item 9240, on it; the leg is skipped, never failed, unless the carrier or the lead bot has a Mallet in its bags). (2) The Turtle-custom Farraki Arena wing (map y 1300-1440, z about 0: Zel'jeb the Ancient 62495, Sandfury Ritualists 62500, Champion Razjal 62498 / Juthza 62497 / Kath'zen 62496, farraki_arena.cpp): not on any route here. The legs after Zum'rah (stairs to ukorz) were written from the instance script (src/scripts/dungeons/zulfarrak/instance_zulfarrak.cpp and zulfarrak.cpp) and the world export, and none has run live. THE EVENT ORDER the script gave: any Troll Cage used (go_troll_cage) frees Bly's crew (faction 250) and sends it to the top of the stairs; when Weegli arrives there wave 1 (23 trolls) spawns at the foot of the stairs and runs up in groups of 2, 3, 4, ... every 10 s; 10 s after it is dead wave 2 (24 trolls) does the same; wave 3 (Nekrum Gutchewer 7796, Shadowpriest Sezz'ziz 7275 and five trolls, none with a spawn row) spawns the instant wave 2 is dead and is NOT sent up the stairs, the crew goes down to meet it; when wave 3 is dead the event is over, the crew stands at 1874-1895 1199-1206, and Bly's and Weegli's menus offer their option. Weegli's option sends him to blow the End Door; Bly's option turns him, Raven, Oro and Murta hostile 10 s later (Weegli stays friendly) and sends Weegli too. The plan talks to Weegli first, waits for him to be gone and the door open, then talks to Bly (the weegli_door and bly legs), the order the Wowhead Classic comments advise. Ukorz and Ruuzlu stand behind the door.",
+    "Left out of this plan: (1) nothing of the Gong's: Gahz'rilla (7273) is in this plan since PR A, as the optional gahzrilla leg (the Gong of Zul'Farrak, 141832, lock 459, is rung by using the Mallet of Zul'Farrak, item 9240, on it; the leg is skipped, never failed, unless the carrier or the lead bot has a Mallet in its bags). (2) The Turtle-custom Zul'Farrak legs, added 2026-11-02 (#243): the Farraki Arena (`farraki_arena`, Razjal 62498 / Juthza 62497 / Kath'zen 62496 and the scorpid intermission 62499, farraki_arena.cpp; gossip then a hold done by the units) between Velratha and velratha_b, and the Zel'jeb wing (`zeljeb`, Zel'jeb the Ancient 62495 and 40 elite trolls north of the pool; 90 % less damage from all but Fire) between velratha_b and gahzrilla. The plan has 20 legs. Both were walked on the ta243 mapping walk (2026-11-01/02) and are mapped offline only: neither has been fought live. +~12-19 min per run. The legs after Zum'rah (stairs to ukorz) were written from the instance script (src/scripts/dungeons/zulfarrak/instance_zulfarrak.cpp and zulfarrak.cpp) and the world export, and none has run live. THE EVENT ORDER the script gave: any Troll Cage used (go_troll_cage) frees Bly's crew (faction 250) and sends it to the top of the stairs; when Weegli arrives there wave 1 (23 trolls) spawns at the foot of the stairs and runs up in groups of 2, 3, 4, ... every 10 s; 10 s after it is dead wave 2 (24 trolls) does the same; wave 3 (Nekrum Gutchewer 7796, Shadowpriest Sezz'ziz 7275 and five trolls, none with a spawn row) spawns the instant wave 2 is dead and is NOT sent up the stairs, the crew goes down to meet it; when wave 3 is dead the event is over, the crew stands at 1874-1895 1199-1206, and Bly's and Weegli's menus offer their option. Weegli's option sends him to blow the End Door; Bly's option turns him, Raven, Oro and Murta hostile 10 s later (Weegli stays friendly) and sends Weegli too. The plan talks to Weegli first, waits for him to be gone and the door open, then talks to Bly (the weegli_door and bly legs), the order the Wowhead Classic comments advise. Ukorz and Ruuzlu stand behind the door.",
     "No team gate is needed: every mob of the route is hostile to both teams (factions 37, 16 and 107); the friendly NPCs (Sergeant Bly's crew faction 35, Elder Wildmane 15578 faction 35 npc_flags 3 at the gong, the three arena NPCs) are not in any pull group.",
     "The End Door (146084, 1854.5 1142.9 16.1) is shut (state ready, flags 32, seen live) and in the middle of the navmesh route between the graveyard (Zum'rah) and the gong: the navmesh has no doors, so the shortest Theka -\u003e Velratha path (562 yd) walks THROUGH the closed door (a GM did, live; bots would too, a player could not). The Velratha leg therefore starts west of the junction at (1645 909) and goes north by the west road (366 yd from the junction, walked live in 12 hops with no replan); no leg may route through the door, which TestZulfarrakOnNavmesh checks along the whole path. The graveyard (x 1832-1898, y 967-1054, about 70 Shallow Grave chests 128308/128403 with a trap 128972 each) is entered only by the zumrah leg, with the bots' looting off for the whole leg (companions_loot false), and left by the stairs leg, which has it off too; every other leg stays out of it. The ukorz leg is the one that goes through the End Door, after the weegli_door leg has waited for it to open.",
     "Entry: needs TortoiseBots #939 (`cmd enter`). The game has no game_tele inside Zul'Farrak (game_tele 160 \"Zul'Farrak\" is outside, map 1 at -6801.2 -2893.0 9.0, 28 yd from the portal), so there is no entrance_tele and `.tele name` (game_tele names only) cannot put a bot inside; `.go xyz` moves only the caller; and a bot that stands in area trigger 924 (map 1, centre -6773.5 -2889.8 15.1, radius 20) is not taken in, because the module handles CMSG_AREATRIGGER only from the master (PlayerbotAI.cpp:304, TeleportAction.cpp:41-47) and a headless bot never sends its own. The remote driver therefore walks the party to the portal and sends `.bot cmd enter 924` (entrance_trigger 924, whose areatrigger_teleport row sends to map 209 at 1212.67 842.04 8.93346, o 6.28319, required level 35, which is the plan's entrance); on a module without that order the entry fails and the run says it needs #939. outside_tele \"farrak\" is a partial match that only game_tele 160 has, for prepare.fresh. Live: a GM's `.go xyz 1212.7 842 8.9 209` made a private instance for the mapping walk; that is not an entry for a bound party.",
@@ -556,6 +556,65 @@
       ]
     },
     {
+      "name": "farraki_arena",
+      "to": {"x": 1554.13, "y": 1037.87, "z": 12.23},
+      "via": [
+        {"x": 1606, "y": 1040, "z": 10.3}
+      ],
+      "skip": [7269, 10080, 10082],
+      "leave": [
+        {
+          "entry": 5650,
+          "spawn": 81618,
+          "at": {"x": 1554.3, "y": 1006.74, "z": 8.96},
+          "why": "pack in a pit 3.3 yd below the arena floor, off the navmesh (path_to no_path: no walkable polygon within 5 yd): never pull, fight or walk up to it; seen from above on the ta243 walk"
+        },
+        {
+          "entry": 5650,
+          "spawn": 81619,
+          "at": {"x": 1556.35, "y": 1002.31, "z": 8.96},
+          "why": "pack in a pit 3.3 yd below the arena floor, off the navmesh (path_to no_path: no walkable polygon within 5 yd): never pull, fight or walk up to it; seen from above on the ta243 walk"
+        },
+        {
+          "entry": 7246,
+          "spawn": 81624,
+          "at": {"x": 1545.05, "y": 995.061, "z": 8.96},
+          "why": "pack in a pit 3.3 yd below the arena floor, off the navmesh (path_to no_path: no walkable polygon within 5 yd): never pull, fight or walk up to it; seen from above on the ta243 walk"
+        }
+      ],
+      "steps": [
+        {
+          "gossip": {
+            "npc": 62498,
+            "near": {"x": 1483.08, "y": 1011.05, "z": 12.15},
+            "option": 0,
+            "by": "tank",
+            "stand": {"x": 1487, "y": 1011, "z": 11.7},
+            "retry_s": 30,
+            "fail_text": "Razjal's menu has no 'I challenge you to combat.': the arena event is running or did not reset, or he is dead."
+          }
+        }
+      ],
+      "boss": {
+        "entry": 62498,
+        "position": {"x": 1483.08, "y": 1011.05, "z": 12.1463},
+        "first": [62496, 62497],
+        "hold": {
+          "spot": {"x": 1510, "y": 1015, "z": 12.1},
+          "radius": 35,
+          "timeout_s": 600,
+          "entries": [62499]
+        }
+      },
+      "notes": [
+        "Champion Razjal the Quick (62498) and the Farraki Arena (Turtle wing on the lake's west shore, farraki_arena.cpp): the gossip that starts the event and then a hold done by the units, the Sergeant Bly pattern. Razjal's menu has one option, index 0 'I challenge you to combat.', offered only while the event is IDLE; the tank talks (GossipByTank) because the script puts every add's threat on the starter (farraki_arena.cpp OnGossipSelect: m_starterGuid = the player who chose, ACTION_ARENA_START, AddThreatToParty). 5 s after the option Kath'zen (62496) engages, enrages at 50 %; Juthza (62497) joins when Kath'zen dies or after 30 s; Razjal joins when both are dead or 30 s after Juthza. At 50 % Razjal sands the arena (1512.21 1016.05 11.68, immune to all damage, channels 13236) and summons 10 Sandfury Scorpids 62499 one per 2 s after 5 s at four points (1498.65 1030.94, 1534.14 1030.72, 1536.58 1005.97, 1499.57 998.44), then fights again; at 10 % a mana-free Hellfire 11684. ANY of the three evading resets the arena (scorpids despawn, all three respawn friendly, the gossip option back): the holds then see them alive and friendly and wait out their 600 s unless TortoiseBots' units-hold reset rule (#1455) rewinds to the gossip. The boss hold carries no instance_data (units hold): every unit of 62498, its first and 62499 dead within radius 35 of 1510 1015, Razjal counting while still friendly. kill_first carries 62499 (the scorpids fight while he is immune).",
+        "Core: sql/database_updates/world/20260626153218_world.sql:457-459 (spawns 2589526/27/28 at 1483.08 1011.05 / 1484.99 1029.15 / 1490.75 993.62, 12.146, respawn 86400), :388-391 (script npc_champion_razjal_the_quick), :520 (gossip option 62498 id 0, option_id 1, npcflag 1), :557-560 and :607 (action_script 6249801). Templates 20260510092659_world.sql (Razjal 11,237 hp, faction 35 npc_flags 1; Kath'zen 10,429; Juthza 10,436).",
+        "The pack below the arena (Witch Doctors 81618 at 1554.3 1006.74 and 81619 at 1556.35 1002.31, Shadowhunter 81624 at 1545.05 995.06, all z 8.96) is in a pit 3.3 yd below the arena floor at its x/y and OFF the navmesh: path_to answers no_path (no walkable polygon within 5 yd) and the server path from the arena edge answers off-mesh. Spec §1.2 made it pull group 0; it cannot be walked or pulled, so it is a leave list instead (never pull, fight or walk up to it) and no leg pulls it. The ta243 walk saw the three from above at their export points. Scarabs 7269 are skip.",
+        "Detour: Velratha's spot (1650.4 1161.4) -\u003e arena holder 240.2 yd of navmesh (the spec's 160.0 yd was measured from velratha pg5 at 1608 1111: 166.8 yd); arena -\u003e velratha_b's first group 174.5 yd, the leg's last point 11.3 yd short of it (the group's 1636 1105 point is itself 11.3 yd off the floor: the same partial the prep plan has from pg5). Mapped (path-check) on 2026-11-02; the farraki-arena walk is pending (#243): nobody selected the option yet. NOT fought live.",
+        "Setup at deploy: AiPlayerbot.BotGossipNpcs must list 62498, and ai_dungeon_boss gets a REPLACE (209, 62498, 'Champion Razjal the Quick') (the leg's row is a units hold, not a boss step, so IsBossEntry does not see him otherwise)."
+      ]
+    },
+    {
       "name": "velratha_b",
       "to": {"x": 1633.6, "y": 1130.7, "z": 9.9},
       "pull_groups": [
@@ -605,6 +664,159 @@
       "notes": [
         "Hydromancer Velratha (7795) is NOT at her SQL spawn (1698.2 1210.7, pool room): live she patrols the strip by the gong, (1658.6 1153.6) -\u003e (1636.5 1174.7) at z 9.8, and was first met at its east end by the party coming from the west road. The boss position is the middle of that strip (1650.4 1161.4); a Blood Drinker was seen walking with her at (1653 1153), so the pull group before her is the two Blood Drinkers of that strip (radius 30) and she may join it. A pack of five (5649, 5650, 7246, 5650, 5649, centre 1715.5 1186.2) stands 25 yd south-east and a single Blood Drinker (5649) 16 yd south of the pool room's spawn point. Two packs of four on the west road (centres 1607 1107 and 1639 1107) lie on the route and are pulled. The unconfirmed live west-road single Shadowcaster at (1589 985) was dropped from the draft (not seen within 67 yd). The Gong of Zul'Farrak (141832, 1650.9 1171.9 10.9, flags 32, usable) is not used by this leg: the optional gahzrilla leg after it rings it, with a Mallet (PR A); Gahz'rilla's pit is at 1664.7 1187.7 -2.9. The lone Blood Drinker at 1714.4 1218.6 (5649) is no pull group of this leg: the plan check passes it, but live the tank found no firing position for it (a server refusal) in two batch-2 runs, both finished without it, and it lies beyond the boss; the gahzrilla leg pulls it last, where it stands 13 yd from Gahz'rilla's end point.",
         "Route edit Z2 (2026-10-16, test it in one group): the leg is split at the pack of five at 1636 1105 (group 1 here) so that it is pulled from the north stand 1645 1144 (82-85 yd of navmesh), not from the west stand 1585 1075, where the pack is walled off (154 yd of navmesh for 40 yd of line). Every pull from the west failed in round 3: evaded after 109 s in s2b, 25 s no_engage and 74 s evaded in s4-b, an error and an evade (172 s) in s1e; the north pull won each time (103-125 s). Velratha (1650 1161, 18 yd from the stand) joined the pull of the pack in s2b and s1e: expect her in the fight and keep the Healing Ward in kill_first. The `velratha` leg now ends at the pack of four at 1601-1610 1104-1111 (stand 1585 1075, 92 yd of navmesh from the north stand). ZF round 5 (2026-10-17, trace zf-r5): the north stand 1645 1144 is 16.6 yd from the strip Velratha patrols ((1658.6 1153.6) to (1636.5 1174.7)), so the pull of the pack of five opened the fight with Velratha (7795) and her Healing Ward adds on top: nine mobs, the healer took the threat (three threat waits of 10 s ran out with the tank not on top), and the party wiped at 23:32. The stand is now 1633.6 1130.7 (a vertex of the navmesh path from the north stand to the pack): 33.9 yd from the strip, 24 yd from the pack, which is outside the aggro range of both (the pack is pulled from there, pull_range 45). The route from the west stand goes by (1636.5 1138.4), 26 yd from the strip, and ends 16 yd short of the old stand. If she still joins, give the run a tune file with threat_wait_s 15 and opener_delay_s 4 so that the party waits for the tank's threat lead before it engages."
+      ]
+    },
+    {
+      "name": "zeljeb",
+      "to": {"x": 1658, "y": 1235, "z": 10.82},
+      "pull_groups": [
+        {
+          "entries": [5650, 7246, 7246, 7246],
+          "positions": [
+            {"x": 1666.95, "y": 1259.23, "z": 10.4681},
+            {"x": 1662.28, "y": 1257.15, "z": 10.4826},
+            {"x": 1665.81, "y": 1254.07, "z": 10.0873},
+            {"x": 1665.86, "y": 1260.72, "z": 10.5635}
+          ],
+          "radius": 17
+        },
+        {
+          "entries": [62500],
+          "positions": [
+            {"x": 1650.05, "y": 1276.55, "z": 10.5589}
+          ],
+          "radius": 19
+        },
+        {
+          "entries": [7246, 5649, 5650],
+          "positions": [
+            {"x": 1621.82, "y": 1304.07, "z": 9.35354},
+            {"x": 1622.36, "y": 1300.79, "z": 9.32312},
+            {"x": 1624.85, "y": 1302.5, "z": 9.27685}
+          ],
+          "radius": 12,
+          "approach": [
+            {"x": 1637.2, "y": 1288.42, "z": 9.34}
+          ]
+        },
+        {
+          "entries": [62500],
+          "positions": [
+            {"x": 1620.03, "y": 1319.88, "z": 9.39558}
+          ],
+          "radius": 12
+        },
+        {
+          "entries": [7268, 62500, 7246],
+          "positions": [
+            {"x": 1623.74, "y": 1359.71, "z": 0.802739},
+            {"x": 1628.23, "y": 1358.32, "z": 0.169761},
+            {"x": 1628.12, "y": 1360.38, "z": 0.2277}
+          ],
+          "radius": 17,
+          "approach": [
+            {"x": 1613.69, "y": 1344.52, "z": 2.63}
+          ]
+        },
+        {
+          "entries": [62500],
+          "positions": [
+            {"x": 1626.48, "y": 1380.68, "z": 0.020633}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [7246, 62500, 5649],
+          "positions": [
+            {"x": 1660.11, "y": 1370.31, "z": -0.758141},
+            {"x": 1658.63, "y": 1372.11, "z": -0.791232},
+            {"x": 1660.98, "y": 1372.08, "z": -0.944851}
+          ],
+          "radius": 20,
+          "approach": [
+            {"x": 1640.47, "y": 1368.97, "z": 0.08}
+          ]
+        },
+        {
+          "entries": [62500, 7268, 7268],
+          "positions": [
+            {"x": 1632.58, "y": 1401.46, "z": -0.155975},
+            {"x": 1630.28, "y": 1393.92, "z": -0.384157},
+            {"x": 1634.98, "y": 1408.43, "z": -0.555517}
+          ],
+          "radius": 10
+        },
+        {
+          "entries": [7268],
+          "positions": [
+            {"x": 1650.14, "y": 1393.48, "z": -0.066635}
+          ],
+          "radius": 16
+        },
+        {
+          "entries": [5649, 5649],
+          "positions": [
+            {"x": 1684.79, "y": 1401.72, "z": -0.783727},
+            {"x": 1687.93, "y": 1398.56, "z": -0.825564}
+          ],
+          "radius": 19
+        },
+        {
+          "entries": [62500, 7247, 5649],
+          "positions": [
+            {"x": 1688.76, "y": 1352.34, "z": -3.69883},
+            {"x": 1689.84, "y": 1348.64, "z": -3.69883},
+            {"x": 1692.24, "y": 1351.42, "z": -3.69883}
+          ],
+          "radius": 25,
+          "approach": [
+            {"x": 1670.43, "y": 1352.97, "z": -2.79}
+          ]
+        },
+        {
+          "entries": [62500, 62500, 62500],
+          "positions": [
+            {"x": 1711.85, "y": 1375.05, "z": -1.00498},
+            {"x": 1715.88, "y": 1381.36, "z": -1.02734},
+            {"x": 1719.52, "y": 1374.9, "z": -0.893592}
+          ],
+          "radius": 25,
+          "approach": [
+            {"x": 1709.86, "y": 1397.18, "z": -1.19}
+          ]
+        },
+        {
+          "entries": [7268, 7268],
+          "positions": [
+            {"x": 1716.18, "y": 1429.67, "z": -0.90437},
+            {"x": 1715.08, "y": 1434.77, "z": -0.923761}
+          ],
+          "radius": 18
+        },
+        {
+          "entries": [7246, 62500, 5650],
+          "positions": [
+            {"x": 1692.63, "y": 1423.56, "z": -0.949104},
+            {"x": 1694.99, "y": 1421.32, "z": -0.932087},
+            {"x": 1695.51, "y": 1424.43, "z": -0.949612}
+          ],
+          "radius": 18
+        }
+      ],
+      "skip": [7269, 10080, 10082],
+      "boss": {
+        "entry": 62495,
+        "position": {"x": 1764.37, "y": 1437.86, "z": -0.1},
+        "approach": [
+          {"x": 1744.51, "y": 1435.56, "z": -0.4}
+        ]
+      },
+      "notes": [
+        "Zel'jeb the Ancient (62495, Turtle custom boss of the wing north of Velratha's pool): 40 hostile elites stand between the pool and him (13 Sandfury Ritualists 62500, 6 Guardians 7268, Shadowhunters 7246, Blood Drinkers 5649, Witch Doctors 5650, a Soul Eater 7247, plus the vanilla troll pack 81590/81592/81594/81595 that no leg pulled). The leg pulls them south to north along the navmesh path Velratha's spot -\u003e Zel'jeb (386.5 yd, complete), one group per pack, each radius cut until no unlisted mob of the export stands within radius + 3 yd (tools/dungeongen TestNoMobStandsInAPullGroupsRangeUnlisted, zulfarrak known 38). The Guardians 2589537 and 2589547 and the Ritualist 2589524 patrol (movement_type 2, a creature_movement row in the core) but the export has no path for them: plain members.",
+        "Core: spawn 2589561 at 1764.369995 1437.859985 -0.100875 o 3.18, respawn 86400 (sql/database_updates/world/20260626153218_world.sql:488); template 62495 L46 elite, faction 37, 27,941 hp, 8,522 mana, spell list 62495, aura 52694; EventAI 6249501-03 (yell on aggro, Curse of Years 52695 at 50 %, yell on death); type 6 (20260517045535_world.sql:534).",
+        "Ancient Embalming 52694: MOD_DAMAGE_PERCENT_TAKEN -91 % (spell_template 52694, effect 6 aura 87 base points -91, misc 123 = every school but Fire; sql/base/tw_world_spell_template.sql). 90 % less damage from all but Fire: the ZF hire's frost mage does a tenth, so the kill is a live-fight question (spec risk R1). Curse of Years 52695 at 50 %: periodic damage 250 and 64, 29, stat -40 %.",
+        "Detour (path-check 2026-11-02): Velratha's spot 1650.4 1161.4 -\u003e Zel'jeb 1764.37 1437.86 = complete, 386.50 yd, 21 points; back the way in (the courtyard leg's via) ~+770 yd and ~13 pulls, about +9-14 min per ZF run. The direct return (528.7 yd) passes within 15-19 yd of gahzrilla pull groups 5 and 6, which stand unpulled whenever the gahzrilla leg is skipped: hence the courtyard via.",
+        "Mapped offline (path-check + the export) on 2026-11-02; the zeljeb wing walk is pending (#243) and it has NOT been fought live. If the fight is too slow for a frost mage, plan-export can leave the leg out with --skip-legs zeljeb."
       ]
     },
     {
@@ -725,6 +937,9 @@
     {
       "name": "courtyard",
       "to": {"x": 1822, "y": 1177, "z": 9.1},
+      "via": [
+        {"x": 1650.4, "y": 1161.4, "z": 9.9}
+      ],
       "pull_groups": [
         {
           "entries": [7247, 5649],

@@ -137,7 +137,7 @@ func TestPlanExportSkipLegs(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit %d: %s", code, errs)
 	}
-	if !strings.Contains(out, "zulfarrak: map 209, 16 legs") || strings.Contains(out, "CUT") {
+	if !strings.Contains(out, "zulfarrak: map 209, 18 legs") || strings.Contains(out, "CUT") {
 		t.Fatalf("output %q", out)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "20261021005900_world.sql"))
@@ -147,7 +147,7 @@ func TestPlanExportSkipLegs(t *testing.T) {
 	if !strings.Contains(string(data), "'gossip', 7607,") || !strings.Contains(string(data), "'ukorz'") || strings.Contains(string(data), "'bly'") {
 		t.Fatal("the rows lack the Weegli gossip or Ukorz, or still have Bly")
 	}
-	if !strings.Contains(errs, "leg 16 (bly): left out of the export by the exporter's skip-legs option") {
+	if !strings.Contains(errs, "leg 18 (bly): left out of the export by the exporter's skip-legs option") {
 		t.Fatalf("stderr %q", errs)
 	}
 	code, _, errs = runExport("--dir", "../../dungeons", "--drop-companions-loot", "--skip-legs", "bli", "--stamp", "20261021005901", "--out", dir, "zulfarrak")
@@ -203,7 +203,7 @@ func TestPlanExportWithOptional(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit %d: %s", code, errs)
 	}
-	if !strings.Contains(out, "zulfarrak: map 209, 18 legs") || strings.Contains(out, "CUT") {
+	if !strings.Contains(out, "zulfarrak: map 209, 20 legs") || strings.Contains(out, "CUT") {
 		t.Fatalf("output %q", out)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "20261021180000_world.sql"))
@@ -213,7 +213,7 @@ func TestPlanExportWithOptional(t *testing.T) {
 	if !strings.Contains(string(data), "'use_on', 141832, 1650.9, 1171.9, 10.9,") || !strings.Contains(string(data), "'gahzrilla'") {
 		t.Fatal("the rows lack the gong's use_on or the gahzrilla leg")
 	}
-	if !strings.Contains(errs, "leg 9 (gahzrilla): optional, in the rows by --with-optional: give Mallet of Zul'Farrak (item 9240) to the lead bot") {
+	if !strings.Contains(errs, "leg 11 (gahzrilla): optional, in the rows by --with-optional: give Mallet of Zul'Farrak (item 9240) to the lead bot") {
 		t.Fatalf("stderr %q", errs)
 	}
 	code, _, errs = runExport("--dir", "../../dungeons", "--drop-companions-loot", "--with-optional", "courtyard", "--stamp", "20261021180001", "--out", dir, "zulfarrak")
