@@ -630,6 +630,20 @@ type walk struct {
 	// the current attempt: the wait's first sighting (revive r6). A live frame for that guid clears it,
 	// as does a wipe recovery.
 	bossCorpseSeen map[string]time.Time
+	// bossGUIDs is the guid -> plan boss entry of the units the frames showed with a plan boss's OWN entry
+	// (trackFrame): a script that changes a creature's entry (core UpdateEntry) keeps its guid, so a unit whose
+	// guid the frames showed as the boss entry is the boss whatever entry it now reads (spec 6, D5 b, #1453).
+	// A guid in it is never an add; bossForms keeps the entries that guid was seen with, one per change.
+	bossGUIDs map[string]uint32
+	bossForms map[string][]uint32
+	// bossTracks is one record per boss step the run's own statuses showed (observeBossStatus): the last note seen
+	// while the run stood there, the `boss down` note that leaves it, and the skip the walk sent for that step
+	// (bossSkipStep). Keyed by the step, or by the boss's entry when the step is unknown.
+	bossTracks map[bossKey]*bossStepTrack
+	// bossMismatch is the steps whose boss-kind status found no boss row at that step: the rows the walk reads are
+	// not the deployed ones (without --sql they are the plan JSON's), so the step's kill record is skipped and the
+	// reason noted once.
+	bossMismatch map[int]bool
 
 	stepFirst *dungeon.Point
 	// startStep is the step the run starts at (the placement's staged start, else the --from step): the revive's own
@@ -710,6 +724,29 @@ type walk struct {
 	hiresLeft  []string
 }
 
+// bossKey identifies one boss step's record: the step when the run's status gave one (the row the run stood on),
+// else the boss's entry (a skip the pause path sent for a step the rows do not name).
+type bossKey struct {
+	step  int
+	entry uint32
+}
+
+// bossStepTrack is one boss step's record (spec 6, D5): the boss's entry, whether the run reported the encounter
+// engaged (its status kind was boss), whether the kill holds (`boss down` note or the walk's own skip), the guid
+// the frames showed the boss with and the entries that guid read while this step was tracked. The summary lists one
+// record per boss step; the last engaged one also fills the summary's single boss_kill field.
+type bossStepTrack struct {
+	entry    uint32
+	step     int
+	engaged  bool
+	killed   bool
+	skipped  bool
+	note     string
+	evidence string
+	guid     string
+	forms    []uint32
+}
+
 type hostileState struct {
 	entry    uint32
 	x, y, z  float32
@@ -746,7 +783,9 @@ func raidWalkRun(ctx context.Context, o raidWalkOptions, env walkEnv, deps walkD
 	w := &walk{opts: o, env: env, deps: deps, stdout: stdout, stderr: stderr,
 		seenFights: map[string]bool{}, pendingFights: map[string]int{}, hostiles: map[string]hostileState{}, botAt: map[string]botPos{},
 		partyG: map[uint64]bool{}, bossSet: map[uint32]bool{}, bossRows: map[uint32]hostileState{}, hires: map[string]bool{},
-		bossAttemptAt: map[uint32]time.Time{}, bossAliveSeen: map[string]time.Time{}, bossCorpseSeen: map[string]time.Time{}}
+		bossAttemptAt: map[uint32]time.Time{}, bossAliveSeen: map[string]time.Time{}, bossCorpseSeen: map[string]time.Time{},
+		bossGUIDs: map[string]uint32{}, bossForms: map[string][]uint32{},
+		bossTracks: map[bossKey]*bossStepTrack{}}
 	return w.main(ctx)
 }
 
@@ -1408,6 +1447,16 @@ func (w *walk) finish(code int) {
 		code = exitRaidWalkInjectFailed
 	}
 	w.exitCode = code
+	// The tracker's one-shot latch is the fallback when the run's statuses never named a boss step's kind as boss.
+	// It is inserted before the summary reads the tracks, so the single boss_kill field and the boss_kills list both
+	// carry it; a boss entry none of the rows is a boss row of (bossStepOf 0) is not recorded (L4).
+	if w.tracker != nil {
+		if entry, _, ok := w.tracker.BossEngaged(); ok {
+			if s := w.bossStepOf(entry); s > 0 {
+				w.bossTrackAt(s, entry).engaged = true
+			}
+		}
+	}
 	untilEffective := ""
 	if w.placeShortened {
 		untilEffective = w.untilLabel
@@ -1419,6 +1468,8 @@ func (w *walk) finish(code int) {
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
 		Place:         w.placeSum,
+		BossKill:      w.bossKillSummary(),
+		BossKills:     w.bossKillSummaries(),
 		ReviveRefusal: w.reviveRefusal,
 		TierSource:    w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
 		WipeResumes: w.wipeResumes,
