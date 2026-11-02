@@ -1480,15 +1480,22 @@ func (w *walk) resetBossAliveSeen(entry uint32) {
 	}
 }
 
-// pullStarted arms the pull-joiners window when a "pulling <entry> <guid>" status
-// line goes by (a stand pull's "waiting ... before pulling" line and the shot's
-// own "pulling" line both arm it): 10 s in which frames count the engaged
-// hostiles that are not the pulled pack. The pack is the pulled guid plus the
-// plan pack's other members: every guid whose frame position stands within the
-// row's radius of the pack centroid (w.pullRow), the row found from the run's
-// step or, on a move step, from the pulled unit's entry and position.
-// bossPullStarted arms the same window for a boss, which has no pulling line.
+// pullStarted arms the pull-joiners window when the pull order's own
+// "pulling <entry> <guid>" status line goes by: 10 s in which frames count
+// the engaged hostiles that are not the pulled pack. The "waiting for the
+// tank to stand still before pulling" line still waits and opens no window:
+// PullingTarget only reads the actual pull line. The pack is the pulled guid
+// plus the plan pack's other members: every guid whose frame position stands
+// within the row's radius of the pack centroid (w.pullRow), the row found
+// from the run's step or, on a move step, from the pulled unit's entry and
+// position. bossPullStarted arms the same window for a boss, which has no
+// pulling line.
 func (w *walk) pullStarted(now time.Time, st tbm.RunStatus) {
+	if w.haveStatus && st.State == tbm.RunRunning && st.Step < w.lastStatus.Step {
+		// The walk resumed at an earlier step: the boss latch belongs to the
+		// abandoned walk on, so a later boss fight arms a fresh window.
+		w.bossPullArmed = nil
+	}
 	if st.State != tbm.RunRunning {
 		// A paused run pulls nothing: forget the boss step's latch so the
 		// resumed attempt's fight start arms a fresh window.
@@ -1503,8 +1510,12 @@ func (w *walk) pullStarted(now time.Time, st tbm.RunStatus) {
 		w.pullEntry = entry
 		w.pullRow = packRowOf(w.rows, st.Step)
 		w.pullPackSeeded = false
+		w.pullSeedTries = 0
+		w.pullNoRow = false
+		w.pullBossAdds = w.bossAddsOf(st.Step)
 		w.pullJoinsAt, w.pullJoinsStep = now, st.Step
 		w.pullJoinsSeen = map[packet.GUID]bool{}
+		w.pullAddsSeen = map[packet.GUID]bool{}
 		if st.Kind == planexport.KindBoss {
 			// The boss step's pull line (a stand pull of one of its adds) opened
 			// the window: the fight-start line below must not open a second one.
@@ -1512,6 +1523,46 @@ func (w *walk) pullStarted(now time.Time, st tbm.RunStatus) {
 		}
 	}
 	w.bossPullStarted(now, st)
+}
+
+// bossAddsOf is the boss-encounter add set of the leg the step's boss row
+// belongs to: the row's own entries and the plan's hold/add entries for that
+// leg (its hold entries and its first adds). Summoned and arriving adds of
+// those entries join the fight as it runs: they are no other pack joining
+// the pull, so the boss window keeps them out of the joiner count and marks
+// them "boss add" in the record instead. With no plan or no boss row for the
+// step (a trash pull): nothing is a boss add.
+func (w *walk) bossAddsOf(step int) map[uint32]bool {
+	if w.plan == nil || step < 1 || step > len(w.rows.Steps) {
+		return nil
+	}
+	s := w.rows.Steps[step-1]
+	if s.Kind != planexport.KindBoss {
+		return nil
+	}
+	out := map[uint32]bool{}
+	for _, e := range s.Entries {
+		out[e] = true
+	}
+	for i := range w.plan.Legs {
+		l := &w.plan.Legs[i]
+		if l.Boss == nil || l.Boss.Entry != s.Entry {
+			continue
+		}
+		if l.Boss.Hold != nil {
+			for _, e := range l.Boss.Hold.Entries {
+				out[e] = true
+			}
+		}
+		for _, e := range l.Boss.First {
+			out[e] = true
+		}
+		break
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // bossPullStarted arms the joiner window of a boss pull: a boss has no
@@ -1546,8 +1597,12 @@ func (w *walk) bossPullStarted(now time.Time, st tbm.RunStatus) {
 	w.pullEntry = 0
 	w.pullRow = row
 	w.pullPackSeeded = false
+	w.pullSeedTries = 0
+	w.pullNoRow = false
+	w.pullBossAdds = w.bossAddsOf(st.Step)
 	w.pullJoinsAt, w.pullJoinsStep = now, st.Step
 	w.pullJoinsSeen = map[packet.GUID]bool{}
+	w.pullAddsSeen = map[packet.GUID]bool{}
 }
 
 func (w *walk) bossPullArmedOf() map[int]bool {
@@ -1574,9 +1629,11 @@ func packRowOf(rows planexport.Rows, step int) raidwalk.PackRow {
 // step is not a pull/boss row: a stand pull is ordered while the run still
 // stands on its approach move row (walk 27: c-r3 step 262 pulled 11360, whose
 // pull row is 265), and the module also pulls a mob found on the way. The row
-// is the nearest pull/boss row whose entries hold the pulled entry; the
-// pulled unit's position breaks a tie between the packs of one entry (a leg
-// repeats an entry in several pull groups).
+// is the nearest pull/boss row whose entries hold the pulled entry within the
+// row radius + 15 yd (3D) of the seed; the pulled unit's position breaks a tie
+// between the packs of one entry (a leg repeats an entry in several pull
+// groups). No row in range: no row, and the pack is the seed's aggro-together
+// mates seen in the first frame within 15 yd (the record says "no row").
 func packRowFor(rows planexport.Rows, entry uint32, seed [3]float32) raidwalk.PackRow {
 	if entry == 0 {
 		return raidwalk.PackRow{}
@@ -1590,6 +1647,9 @@ func packRowFor(rows planexport.Rows, entry uint32, seed [3]float32) raidwalk.Pa
 			continue
 		}
 		d := math.Hypot(float64(s.X)-float64(seed[0]), float64(s.Y)-float64(seed[1]))
+		if d > float64(raidwalk.RowRadius(s.Kind, s.Radius)+raidwalk.PackRowSlackYd) {
+			continue
+		}
 		if best < 0 || d < bestD {
 			best, bestD = i, d
 		}
@@ -1628,10 +1688,12 @@ func (w *walk) packPositions() map[packet.GUID][3]float32 {
 }
 
 // pullFramed counts one frame toward the armed pull: every engaged hostile
-// outside the pulled pack's guids joins the seen set. 10 s after the pull
-// the count is final: the record is written keyed by the pull step and the
-// window closes. A newer pull re-arms first (pullStarted runs on the status
-// lines of the same poll before the frame).
+// outside the pulled pack's guids joins the seen set, except units of the
+// boss window's boss-add entries (they join the fight as it runs, and land in
+// the record's "boss add" set instead). 10 s after the pull the count is
+// final: the record is written keyed by the pull step and the window closes.
+// A newer pull re-arms first (pullStarted runs on the status lines of the
+// same poll before the frame).
 func (w *walk) pullFramed(now time.Time, f *tbm.ViewFrame) {
 	if w.pullJoinsAt.IsZero() {
 		return
@@ -1643,25 +1705,52 @@ func (w *walk) pullFramed(now time.Time, f *tbm.ViewFrame) {
 	if w.pullJoinsSeen == nil {
 		w.pullJoinsSeen = map[packet.GUID]bool{}
 	}
+	if w.pullAddsSeen == nil {
+		w.pullAddsSeen = map[packet.GUID]bool{}
+	}
 	// The first frame of the window sees the pack where it was pulled from
 	// (trackFrame already recorded this frame's positions): its other members
 	// are the guids within the pull row's radius, whatever their entry. A stand
 	// pull ordered on a move step has no row from the step: find the pulled
-	// unit's own plan row here, where its position is known.
+	// unit's own plan row here, where its position is known. A seed missing
+	// from the first frame retries on the next 3 frames before giving up (a
+	// frame may arrive before the pulled unit's first position row does).
 	if !w.pullPackSeeded {
-		w.pullPackSeeded = true
 		pos := w.packPositions()
 		if !w.pullRow.HasRow {
 			if seedPos, ok := pos[w.pullSeed]; ok {
 				w.pullRow = packRowFor(w.rows, w.pullEntry, seedPos)
+				w.pullPackSeeded = true
+				if !w.pullRow.HasRow {
+					w.pullNoRow = true
+				}
+			} else if w.pullSeedTries >= 3 {
+				w.pullPackSeeded = true
+				w.pullNoRow = true
+			} else {
+				w.pullSeedTries++
 			}
+		} else {
+			w.pullPackSeeded = true
 		}
-		for _, g := range raidwalk.PullPackMembers(w.pullSeed, w.pullRow, pos) {
-			w.pullPack[g] = true
+		if w.pullPackSeeded {
+			if w.pullNoRow {
+				for _, g := range raidwalk.SeedMates(w.pullSeed, pos) {
+					w.pullPack[g] = true
+				}
+			} else {
+				for _, g := range raidwalk.PullPackMembers(w.pullSeed, w.pullRow, pos) {
+					w.pullPack[g] = true
+				}
+			}
 		}
 	}
 	for _, h := range f.EngagedHostiles() {
 		if h.GUID == 0 || w.pullPack[h.GUID] {
+			continue
+		}
+		if w.pullBossAdds[h.Entry] {
+			w.pullAddsSeen[h.GUID] = true
 			continue
 		}
 		w.pullJoinsSeen[h.GUID] = true
@@ -1684,18 +1773,46 @@ func (w *walk) pullJoinersFlush(now time.Time) {
 		guids = append(guids, g)
 	}
 	rec := raidwalk.SortJoinerGUIDs(guids)
-	w.pullJoins = append(w.pullJoins, raidwalk.PullJoiners{Step: w.pullJoinsStep, At: w.pullJoinsAt, Count: len(rec), GUIDs: rec})
+	adds := make([]packet.GUID, 0, len(w.pullAddsSeen))
+	for g := range w.pullAddsSeen {
+		adds = append(adds, g)
+	}
+	adds = raidwalk.SortJoinerGUIDs(adds)
+	w.pullJoins = append(w.pullJoins, raidwalk.PullJoiners{Step: w.pullJoinsStep, At: w.pullJoinsAt, Count: len(rec), GUIDs: rec, BossAdds: adds, NoRow: w.pullNoRow})
 	if note := raidwalk.JoinersNote(rec); note != "" {
 		w.note("step %d: %s", w.pullJoinsStep, note)
 		w.logLine(w.env.now(), raidwalk.PullJoinersLine(w.pullJoinsStep, rec))
+	}
+	if len(adds) > 0 {
+		w.note("step %d: boss add %d (%s)", w.pullJoinsStep, len(adds), joinerGUIDs(adds))
+		w.logLine(w.env.now(), fmt.Sprintf("step %d: boss add %d (%s)", w.pullJoinsStep, len(adds), joinerGUIDs(adds)))
+	}
+	if w.pullNoRow {
+		w.note("step %d: no row (mates within 15 yd owned)", w.pullJoinsStep)
 	}
 	w.pullJoinsAt = time.Time{}
 	w.pullSeed = 0
 	w.pullEntry = 0
 	w.pullRow = raidwalk.PackRow{}
 	w.pullPackSeeded = false
+	w.pullSeedTries = 0
+	w.pullNoRow = false
+	w.pullBossAdds = nil
 	w.pullPack = nil
 	w.pullJoinsSeen = nil
+	w.pullAddsSeen = nil
+}
+
+// joinerGUIDs formats guids for the "boss add" note the way JoinersNote does its own.
+func joinerGUIDs(guids []packet.GUID) string {
+	var b strings.Builder
+	for i, g := range guids {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(g.String())
+	}
+	return b.String()
 }
 
 // savedFrame is one frames.jsonl line (compact: positions, hp, dead, hostiles).
