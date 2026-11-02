@@ -52,6 +52,9 @@ type creature struct {
 	// FlagsExtra is the creature_template flags_extra: RouteIntoLaterPacks skips NO_AGGRO spawns outright (0 when the
 	// export has none: draft exports predate the column).
 	FlagsExtra uint32
+	// patrolPoint marks a copy of a patrolling spawn at one waypoint of its loop (the plan tests expand a lone
+	// patroller's path into the pack): it demands the patrol clearance, not the plain spawn one.
+	patrolPoint bool
 }
 
 type object struct {
