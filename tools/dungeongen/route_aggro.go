@@ -15,6 +15,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -70,6 +71,7 @@ func routePoints(p *dungeon.Plan) ([]routePoint, error) {
 	if err != nil {
 		return nil, err
 	}
+	bossOfLeg := routeBossByExportLeg(p)
 	var out []routePoint
 	for si, s := range res.Rows.Steps {
 		switch s.Kind {
@@ -78,10 +80,14 @@ func routePoints(p *dungeon.Plan) ([]routePoint, error) {
 		default:
 			continue
 		}
+		entries := s.Entries
+		if s.Kind == planexport.KindBoss {
+			entries = bossOwnEntries(bossOfLeg[s.Leg], entries)
+		}
 		rp := routePoint{plan: s.Plan, leg: s.Leg, seq: s.Seq, kind: s.Kind,
 			standPull: (s.Kind == planexport.KindPull || s.Kind == planexport.KindBoss) && s.Flags&planexport.FlagStandPull != 0,
 			x:         s.X, y: s.Y, z: s.Z, px: s.X, py: s.Y, pz: s.Z,
-			entries: s.Entries, radius: s.Radius, idx: len(out), ownerIdx: -1}
+			entries: entries, radius: s.Radius, idx: len(out), ownerIdx: -1}
 		if rp.standPull {
 			// The party never walks to the row's point (the pack centroid): it fights from its stand. The export
 			// writes the stand as the move row right before the pull row in the same leg (see FlagStandPull), so
@@ -101,6 +107,37 @@ func routePoints(p *dungeon.Plan) ([]routePoint, error) {
 		}
 	}
 	return out, nil
+}
+
+// routeBossByExportLeg maps each export leg number (planexport.LegNumber: optional legs take none) to that plan leg's
+// boss, nil-free: a leg with no boss is absent.
+func routeBossByExportLeg(p *dungeon.Plan) map[int]*dungeon.Boss {
+	out := map[int]*dungeon.Boss{}
+	for li, l := range p.Legs {
+		if l.Boss == nil {
+			continue
+		}
+		if n, ok := planexport.LegNumber(p, li); ok {
+			out[n] = l.Boss
+		}
+	}
+	return out
+}
+
+// bossOwnEntries is a boss row's owned entries: the export's First entries plus the boss itself and its phase_entries
+// (the export carries neither). A boss row owns its own boss, so the final approach that passes the boss is no finding.
+// A nil boss (no plan leg behind the row) keeps the export's entries.
+func bossOwnEntries(b *dungeon.Boss, first []uint32) []uint32 {
+	if b == nil {
+		return first
+	}
+	out := append([]uint32(nil), first...)
+	for _, e := range append([]uint32{b.Entry}, b.PhaseEntries...) {
+		if !slices.Contains(out, e) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // routeOwnerOf is the row that pulls the spawn: the first pull/boss/hold row (in route order) whose entries hold its

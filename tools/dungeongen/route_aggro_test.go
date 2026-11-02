@@ -368,3 +368,23 @@ func TestNoRouteSegmentPassesALaterPack(t *testing.T) {
 		t.Errorf("only %d hand-written plans checked", checked)
 	}
 }
+
+// A boss row owns its own boss and the boss's phase entries (boss.phase_entries, which the export does not carry): the
+// final approach walks to the boss row's point, passing the boss at 0 yd and the phase add at 3.6 yd, and that is no
+// finding. Before the fix the boss row owned only its First entries, so both were reported as owned by no row.
+func TestRouteIntoLaterPacksBossRowOwnsItsBoss(t *testing.T) {
+	p := &dungeon.Plan{Name: "probe", Map: 1, Entrance: dungeon.Point{},
+		Legs: []dungeon.Leg{{
+			Name: "a",
+			Boss: &dungeon.Boss{Entry: 7, Position: dungeon.Point{X: 40}, Radius: 5,
+				Approach:     []dungeon.Point{{X: 0}},
+				PhaseEntries: []uint32{8}},
+		}}}
+	cs := []creature{
+		{GUID: 1, Entry: 7, Name: "Boss", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 40}},
+		{GUID: 2, Entry: 8, Name: "Add", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 42, Y: 3}},
+	}
+	if got := mustRoute(t, p, cs); len(got) != 0 {
+		t.Fatalf("the final approach passing its own boss and phase add is no finding: %v", got)
+	}
+}
