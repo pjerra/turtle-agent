@@ -220,7 +220,8 @@ func pullTarget(p *dungeon.Plan, mobs []aggroest.Mob, entries map[uint32]uint32,
 	best, bestListed, bestRank := -1, false, 0
 	var bestDist float64
 	for i, m := range mobs {
-		if owned[uint64(m.Guid)] != rp.idx {
+		idx, ok := owned[uint64(m.Guid)]
+		if !ok || idx != rp.idx {
 			continue
 		}
 		dx, dy, dz := float64(m.Pos.X-rp.px), float64(m.Pos.Y-rp.py), float64(m.Pos.Z-rp.pz)

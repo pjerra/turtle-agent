@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pjerra/turtle-agent/internal/aggroest"
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
@@ -191,6 +192,22 @@ func TestPullSizeTargetIsOwnedKillFirstFirst(t *testing.T) {
 	p.KillFirst = nil
 	if got := pullTarget(p, mobs, entries, rp, owned); got < 0 || mobs[got].Guid != 1 {
 		t.Fatalf("target guid %v, want the nearer owned bat 1", mobs)
+	}
+}
+
+// pullTarget never picks a mob no row owns: the owned map's zero value is 0,
+// which is also the route's first row index, so a presence check (not a bare
+// comparison) decides. A mob the first row owns still wins.
+func TestPullSizeTargetIgnoresUnownedMobAtRouteStart(t *testing.T) {
+	p := &dungeon.Plan{Name: "probe", Map: 1, LevelBand: []int{60, 60}, Entrance: dungeon.Point{}}
+	rp := routePoint{kind: "pull", px: 10, idx: 0}
+	mobs := []aggroest.Mob{{Guid: 7, Pos: dungeon.Point{X: 10}, Level: 60, DetectionYd: 20, Faction: 14}}
+	entries := map[uint32]uint32{7: 9}
+	if got := pullTarget(p, mobs, entries, rp, map[uint64]int{}); got != -1 {
+		t.Fatalf("unowned mob is the target: %v", mobs)
+	}
+	if got := pullTarget(p, mobs, entries, rp, map[uint64]int{7: 0}); got != 0 {
+		t.Fatalf("owned mob is not the target: %v", mobs)
 	}
 }
 
