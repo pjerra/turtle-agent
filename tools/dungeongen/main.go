@@ -43,6 +43,9 @@ type creature struct {
 	GroupLeader uint64
 	Patrol      bool
 	Auras       []uint32 // spell ids of the auras the creature spawns with (template and spawn row)
+	// DetectionRange is the creature_template detection_range (the yards at which a spawn of the entry engages, 0 when the
+	// export has none: draft exports predate the column). RouteIntoLaterPacks reads 20 for 0.
+	DetectionRange float64
 }
 
 type object struct {
@@ -356,6 +359,11 @@ func readCreatures(path string) ([]creature, error) {
 			Patrol: m["patrol"] == "1", Auras: parseAuras(m["auras"])}
 		if l, err := strconv.Atoi(m["level_max"]); err == nil { // optional: only the band of a spec plan needs it
 			c.LevelMax = l
+		}
+		if s, ok := m["detection_range"]; ok && s != "" { // optional: draft exports predate the column
+			if v, err := strconv.ParseFloat(s, 64); err == nil {
+				c.DetectionRange = v
+			}
 		}
 		out = append(out, c)
 	}
