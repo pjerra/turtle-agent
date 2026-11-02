@@ -1995,11 +1995,15 @@ func (w *walk) observeBossStatus(st tbm.RunStatus, now time.Time) {
 		if st.Kind == planexport.KindBoss {
 			t.engaged = true
 			t.note = st.Note
+			return
 		}
-		return
+		// The boss step reporting another kind is the run LEAVING it (review round 4): its note may carry the
+		// kill, so it is read like the first status after the step, below. Returning here would keep the record
+		// killed:false however plainly the same step said `boss down`.
 	}
-	// A leaving status (a step that is not a boss row) reports the kill of the last boss step the run stood on:
-	// the highest boss row step at or below the status's step. A backward move (a wipe) reads the earlier row.
+	// A leaving status (a step that is not a boss row, or the boss step reporting another kind) reports the kill
+	// of the last boss step the run stood on: the highest boss row step at or below the status's step. A backward
+	// move (a wipe) reads the earlier row.
 	var t *bossStepTrack
 	for _, r := range w.bossTracks {
 		if r.step > 0 && r.step <= st.Step && (t == nil || r.step > t.step) {
@@ -2071,8 +2075,11 @@ func (w *walk) bossFormsForTrack(t *bossStepTrack) (phase int, phaseEntry uint32
 	return w.bossFormsFor(t.entry)
 }
 
-// resetBossForms clears each boss guid's form history back to its identity entry when a wipe or reset recovery
-// starts (spec 6, D5, #1453): the retry's phase counts the entries the retry's frames saw, not the wiped attempt's.
+// resetBossForms clears each boss guid's form history back to its identity entry when a retry starts (spec 6, D5,
+// #1453): the phase counts the entries the retry's own frames saw, not the wiped attempt's. It MUST come after the
+// recovery's last frame poll (the reset wait, the revive, the rest all read the frames and the boss's reset lands in
+// them) and before the retry's first one: clearing first let those polls re-add the failed attempt's forms, and the
+// record showed a phase the retry never saw (review round 4).
 func (w *walk) resetBossForms() {
 	for g, entry := range w.bossGUIDs {
 		w.bossForms[g] = []uint32{entry}
@@ -2472,10 +2479,14 @@ func (w *walk) handleBoss(ctx context.Context, inc raidwalk.IncidentBossEngaged)
 			if !wipe && !w.allDead(now) {
 				return stopf(exitRaidWalkIncident, "boss %d engaged at step %d", inc.Entry, inc.Step)
 			}
-			w.resetBossForms()
 			if err := w.waitReset(ctx, w.opts.resetWait); err != nil {
 				return err
 			}
+			// The reset wait polls the frames and the reset itself lands in them (the wiped attempt's last
+			// form, then the boss's original one). Clearing the form history only now keeps those frames out
+			// of the retry's phase: clearing first re-added them, and the record showed the failed attempt's
+			// changes as the retry's (review round 4, #1453).
+			w.resetBossForms()
 			return w.revive(ctx, inc.Step)
 		}
 		if !now.Before(deadline) {
@@ -2831,8 +2842,6 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 	// The recovery ends the boss attempt that wiped: nothing the frames showed before it bounds the next
 	// attempt's kill evidence (review round 3).
 	clear(w.bossAttemptAt)
-	// The retry's phase counts the entries its own frames see, not the wiped attempt's (spec 6, D5, #1453).
-	w.resetBossForms()
 	from := w.env.now()
 	deadline := recoveryDeadline(from, w.opts.wipeRest, w.opts.maxRunMinutes, w.started)
 	if err := w.reviveHires(ctx, step, deadline, selfRegroup); err != nil {
@@ -2849,6 +2858,9 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 		if _, err := w.freshWipeRest(); err != nil {
 			return err
 		}
+		// The retry starts here: every frame polled above (the revive's, the rest's) is the wiped attempt's, so
+		// the record's phase counts only the entries the retry's own polls see (spec 6, D5, #1453).
+		w.resetBossForms()
 		w.resumeStatusSeq = w.statusSeq // recoveredBoss's run-leader exception needs a status after this point
 		if err := w.recoveredBoss(ctx, step); err != nil {
 			return err
@@ -2869,6 +2881,8 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 		if err == errRunWentOn {
 			// The run went on by itself while the walk rested (defence in depth: usually the
 			// self-regroup note decided this before the rest). Skip the resume and count it.
+			// The retry already began: the rest's polls above are the wiped attempt's frames (spec 6, D5, #1453).
+			w.resetBossForms()
 			w.resumeStatusSeq = seq0
 			if rerr := w.recoveredBoss(ctx, step); rerr != nil {
 				return rerr
@@ -2879,6 +2893,9 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 		}
 		return err
 	}
+	// The retry starts here: the revive's and the rest's frames are the wiped attempt's last, so the record's
+	// phase counts only the entries the retry's own polls see (spec 6, D5, #1453).
+	w.resetBossForms()
 	if err := w.resumeRun(ctx, step, from, rest); err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
 			return timeout.end(step)
@@ -2902,7 +2919,6 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 	}
 	// As in recoverWipe: the recovery ends the attempt whose frames it woke on.
 	clear(w.bossAttemptAt)
-	w.resetBossForms()
 	from := w.env.now()
 	w.wipeAt = from
 	deadline := recoveryDeadline(from, w.opts.wipeRest, w.opts.maxRunMinutes, w.started)
@@ -2925,6 +2941,8 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 		if err == errRunWentOn {
 			// The run went on by itself while the walk rested (a hand resume, or a regroup the
 			// status line reported): skip the resume and count it.
+			// The rest's polls above are the wiped attempt's frames, the retry's follow (spec 6, D5, #1453).
+			w.resetBossForms()
 			w.resumeStatusSeq = seq0
 			if rerr := w.recoveredBoss(ctx, step); rerr != nil {
 				return rerr
@@ -2935,6 +2953,8 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 		}
 		return err
 	}
+	// As in recoverWipe: the revive's and the rest's frames are the attempt's last, the retry's follow.
+	w.resetBossForms()
 	if err := w.resumeRun(ctx, step, from, rest); err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
 			return timeout.pausedEnd(step)

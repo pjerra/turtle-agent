@@ -11,6 +11,7 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -420,4 +421,182 @@ func TestBossFormsResetOnWipe(t *testing.T) {
 	if k.Phase != 2 || k.PhaseEntry != 14509 {
 		t.Fatalf("phase %d entry %d, want 2 14509: the wipe's change must not count", k.Phase, k.PhaseEntry)
 	}
+}
+
+// TestBossKillSameStepNonBossStatus is #1453 round 4 (a): the boss step reports a boss status, then the SAME step
+// reports another kind (the run left the boss track on the step it stood on). The leaving status must be read like
+// the first status after the step: either the stored note or its own `boss down` note is the kill. The early return
+// every status on a boss row took kept such a kill unread and the record said killed:false.
+func TestBossKillSameStepNonBossStatus(t *testing.T) {
+	now := time.Now()
+	for _, tc := range []struct {
+		name        string
+		bossKind    tbm.RunStatus // the boss-kind status on the boss step
+		leavingKind tbm.RunStatus // the same step reporting another kind
+	}{
+		{
+			name:        "the leaving status carries the kill note",
+			bossKind:    tbm.RunStatus{Step: 38, Kind: "boss", Note: "fighting"},
+			leavingKind: tbm.RunStatus{Step: 38, Kind: "move", Note: "boss down: he died as 14517"},
+		},
+		{
+			name:        "the boss status carried the kill note",
+			bossKind:    tbm.RunStatus{Step: 38, Kind: "boss", Note: "boss down: he died as 14517"},
+			leavingKind: tbm.RunStatus{Step: 38, Kind: "move", Note: "walking"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := bossSummaryWalk(t)
+			w.observeBossStatus(tc.bossKind, now)
+			w.observeBossStatus(tc.leavingKind, now)
+			k := w.bossKillSummary()
+			if k == nil || k.Step != 38 || !k.Engaged || !k.Killed || k.Evidence != "boss down: he died as 14517" {
+				t.Fatalf("boss_kill %+v, want step 38, engaged, killed, evidence %q", k, "boss down: he died as 14517")
+			}
+		})
+	}
+}
+
+// TestBossFormsWipeResetCountsOnlyTheRetry is #1453 round 4 (b): the frames the reset's own polls read — the
+// wiped attempt's last form, then the boss's original one — belong to the attempt that wiped. The form history is
+// cleared once that reset is over (after the reset wait and the wipe recovery's revive/rest), right before the
+// retry's first poll, so the retry's phase counts only the entries the retry saw.
+func TestBossFormsWipeResetCountsOnlyTheRetry(t *testing.T) {
+	// frame is one stage of the frames: the form under the boss guid and whether it is being fought.
+	type frame struct {
+		entry  uint32
+		hppct  int
+		target uint64
+	}
+	bossFrames := func(fr frame) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: zgWalk25BossGUID, Entry: fr.entry, HPPct: fr.hppct, Target: packet.GUID(fr.target)}}
+	}
+
+	// The wipe-resume path: the wipe lands on the boss step before the run engaged him, the revive and the rest
+	// read the wipe's reset (14509, then 14599), and the retry engages him and reports the kill. The phase must be
+	// 2 (14509): the reset's frames are not the retry's changes.
+	t.Run("wipe-resume", func(t *testing.T) {
+		f := zgThekalFixture(t, "zul_gurub")
+		boss, total := zgBossStep(t), len(zgRows(t).Steps)
+		f.agent.startReply = zgThekalStart(total, boss)
+		zgThekalBossRowPos(f, boss)
+		var wipeAt time.Time
+		var retry bool
+		f.agent.mu.Lock()
+		f.agent.startQueue = []queuedEvent{
+			{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priest_thekal|move|walk|walking|until step %d (step %d)", boss, total, boss+1, boss+1)},
+		}
+		f.agent.mu.Unlock()
+		f.agent.eventsHook = func(raw string) {
+			if !wipeAt.IsZero() || !strings.Contains(raw, fmt.Sprintf("|%d/%d|", boss, total)) {
+				return
+			}
+			wipeAt = f.clock.now()
+			f.agent.mu.Lock()
+			for _, n := range f.agent.party {
+				f.agent.dead[n] = true
+			}
+			f.agent.mu.Unlock()
+		}
+		f.agent.hostilesFn = func(int) []tbm.HostileRec {
+			now := f.clock.now()
+			switch {
+			case retry:
+				return bossFrames(frame{14509, 6, 1000}) // the retry's fight
+			case now.Sub(wipeAt) < 60*time.Second:
+				return bossFrames(frame{14599, 100, 0}) // in view, not engaged
+			case now.Sub(wipeAt) < 120*time.Second:
+				return bossFrames(frame{14509, 100, 0}) // the wiped attempt's last form
+			}
+			return bossFrames(frame{14599, 100, 0}) // the reset
+		}
+		f.agent.onResume = func() {
+			retry = true
+			f.agent.mu.Lock()
+			defer f.agent.mu.Unlock()
+			f.agent.lines = append(f.agent.lines,
+				queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priest_thekal|boss|begin|arrived|until step %d (step %d)", boss, total, boss+1, boss+1)},
+				queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priest_thekal|move|walk|boss down: he died as 14509|until step %d (step %d)", boss+1, total, boss+1, boss+1)},
+				queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priest_thekal|move|walk|stopped before step %d (until step %d): the party stays where it stands", boss+1, total, boss+1, boss+1)},
+			)
+		}
+		code := f.run(context.Background())
+		if code != exitOK {
+			t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+		}
+		sum := f.summary()
+		if sum.WipeResumes != 1 {
+			t.Fatalf("wipe_resumes %d, want 1: %q", sum.WipeResumes, sum.Notes)
+		}
+		k := sum.BossKill
+		if k == nil || k.Step != boss || !k.Killed || k.Phase != 2 || k.PhaseEntry != 14509 {
+			t.Fatalf("boss_kill %+v, want step %d killed, phase 2 (14509): the reset's frames must not count", k, boss)
+		}
+	})
+
+	// The boss reset's own wait: the run is stopped at the boss step, the raid wipes, and the reset wait reads
+	// 14509 then 14599 before it is quiet. The history is cleared after that wait (before the revive): nothing
+	// the wait saw is left in the record.
+	t.Run("boss reset wait", func(t *testing.T) {
+		f := zgThekalFixture(t, "zul_gurub")
+		boss, total := zgBossStep(t), len(zgRows(t).Steps)
+		// --until boss: the walk owns the fight (a run line of kind boss would let the run leader fight it).
+		f.opts.until = "boss"
+		firstBoss := 0
+		for i, r := range zgRows(t).Steps {
+			if r.Kind == planexport.KindBoss {
+				firstBoss = i + 1
+				break
+			}
+		}
+		line := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priest_thekal|move|walk|walking|until boss (step %d)", boss-1, total, firstBoss)
+		f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+			Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+			Line: line, Lines: []string{line, "TBM:ACTION_ACK|run start|party|1|-"}}}
+		f.agent.mu.Lock()
+		f.agent.startQueue = []queuedEvent{
+			{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priest_thekal|boss|begin|arrived|until boss (step %d)", boss, total, firstBoss)},
+		}
+		f.agent.mu.Unlock()
+		// The first watch frame shows the boss engaged (the boss path takes the walk), the second kills the raid
+		// (the frame's party, read before the hook, is still alive; the wipe lands on the next frame).
+		var wipeAt time.Time
+		watchFrames := 0
+		f.agent.hostilesFn = func(int) []tbm.HostileRec {
+			if !f.agent.runStarted {
+				return nil // the entry's own views see no boss: nothing latches before the fight
+			}
+			watchFrames++
+			now := f.clock.now()
+			switch {
+			case watchFrames <= 2:
+				if watchFrames == 2 {
+					wipeAt = now
+					f.agent.mu.Lock()
+					for _, n := range f.agent.party {
+						f.agent.dead[n] = true
+					}
+					f.agent.mu.Unlock()
+				}
+				return bossFrames(frame{14599, 100, 1000}) // engaged: the boss path
+			case now.Sub(wipeAt) < 30*time.Second:
+				return bossFrames(frame{14599, 100, 0}) // the target gone: the reset is read from its age
+			case now.Sub(wipeAt) < 40*time.Second:
+				return bossFrames(frame{14509, 100, 0}) // the wiped attempt's last form, during the reset wait
+			}
+			return bossFrames(frame{14599, 100, 0}) // the reset
+		}
+		code := f.run(context.Background())
+		if code != exitRaidWalkIncident {
+			t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+		}
+		sum := f.summary()
+		k := sum.BossKill
+		if k == nil || k.Step != boss || k.Killed {
+			t.Fatalf("boss_kill %+v, want step %d not killed (the wipe)", k, boss)
+		}
+		if k.Phase != 1 || k.PhaseEntry != 14599 {
+			t.Fatalf("phase %d (%d), want 1 (14599): the reset wait's own frames must not count", k.Phase, k.PhaseEntry)
+		}
+	})
 }
