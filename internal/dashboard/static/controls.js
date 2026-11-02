@@ -172,6 +172,8 @@
       refreshLog(s, card);
     }
 
+    ask(); // once at load, so the footer says the controls are on even before an agent card exists
+
     return {
       render(el, card) {
         ask();
