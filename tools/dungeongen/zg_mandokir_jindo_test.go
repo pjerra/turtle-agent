@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -109,7 +110,7 @@ func zgPack(g dungeon.PullGroup, cs []creature, forms map[uint64]*zgFormation) (
 func zgPacks(t *testing.T, leg dungeon.Leg, cs []creature) [][]creature {
 	t.Helper()
 	forms := zgFormations(cs)
-	movement, err := readMovementPaths("testdata/map309/movement.tsv")
+	movement, err := zgReadMovementPaths("testdata/map309/movement.tsv")
 	if err != nil {
 		t.Fatalf("movement.tsv: %v", err)
 	}
@@ -314,7 +315,7 @@ func zgCheckStands(t *testing.T, legName string, leg dungeon.Leg, packs [][]crea
 		if d := dist(cen, stand); d > zgCentreYd {
 			t.Errorf("%s pull group %d: stand is %.1f yd from the row's point, want <= %g", legName, gi, d, zgCentreYd)
 		}
-		walk := samplesAlong(prev, stand, zgSampleStep)
+		walk := zgSamplesAlong(prev, stand, zgSampleStep)
 		zgClearSamples(t, fmt.Sprintf("%s pull group %d: the walk from the previous stand (own pack)", legName, gi), walk, packs[gi], 19, zgLaterYd+zgPatrolSpreadYd)
 		zgClearSamples(t, fmt.Sprintf("%s pull group %d: the walk from the previous stand", legName, gi), walk, zgLater(packs, gi), zgLaterYd, zgLaterYd+zgPatrolSpreadYd)
 		prev = stand
@@ -452,7 +453,7 @@ func zgPolyline(pl *navmesh.Planner, p *dungeon.Plan, a, b dungeon.Point) ([]dun
 	var out []dungeon.Point
 	for j := 0; j+1 < len(path.Points); j++ {
 		u0, u1 := path.Points[j], path.Points[j+1]
-		n := int(math.Ceil(math.Sqrt(float64(sq32(u1[0]-u0[0])+sq32(u1[1]-u0[1])+sq32(u1[2]-u0[2]))) / 1))
+		n := int(math.Ceil(math.Sqrt(float64(zgSq32(u1[0]-u0[0])+zgSq32(u1[1]-u0[1])+zgSq32(u1[2]-u0[2]))) / 1))
 		if n < 1 {
 			n = 1
 		}
@@ -542,7 +543,7 @@ func zgCheckWalk(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, p
 		a, b := w.Parties[i], w.Parties[i+1]
 		later := zgLaterOf(w, packs, i)
 		if len(later) > 0 {
-			zgClearSamples(t, fmt.Sprintf("%s rows %d (%s) -> %d (%s): the straight walk", w.Name, a.Seq, a.Label, b.Seq, b.Label), samplesAlong(a.P, b.P, zgSampleStep), later, zgLaterYd, zgLaterYd+zgPatrolSpreadYd)
+			zgClearSamples(t, fmt.Sprintf("%s rows %d (%s) -> %d (%s): the straight walk", w.Name, a.Seq, a.Label, b.Seq, b.Label), zgSamplesAlong(a.P, b.P, zgSampleStep), later, zgLaterYd, zgLaterYd+zgPatrolSpreadYd)
 		}
 		var fix *zgRoute
 		for k := range fixture.Routes {
@@ -608,6 +609,57 @@ func zgCheckWalk(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, p
 	}
 }
 
+// The helpers below are local copies of the ones the walk-26 Marli tests carry on their branch: this file must compile
+// on a base that has neither (plan tests here), so they are prefixed and do not collide when the two meet.
+func zgSq32(v float32) float32 { return v * v }
+
+// zgSamplesAlong returns the points of the straight segment a-b every step yd, both ends included.
+func zgSamplesAlong(a, b dungeon.Point, step float64) []dungeon.Point {
+	n := int(math.Ceil(dist(a, b) / step))
+	if n < 1 {
+		n = 1
+	}
+	out := make([]dungeon.Point, 0, n+1)
+	for k := 0; k <= n; k++ {
+		f := float32(float64(k) / float64(n))
+		out = append(out, dungeon.Point{X: a.X + (b.X-a.X)*f, Y: a.Y + (b.Y-a.Y)*f, Z: a.Z + (b.Z-a.Z)*f})
+	}
+	return out
+}
+
+// zgReadMovementPaths reads movement.tsv (export.sh): the waypoints of each patrolling spawn by guid, in point order.
+func zgReadMovementPaths(path string) (map[uint64][]dungeon.Point, error) {
+	rs, err := rows(path, "guid", "point", "x", "y", "z")
+	if err != nil {
+		return nil, err
+	}
+	r := &reader{path: path}
+	out := map[uint64][]dungeon.Point{}
+	for _, m := range rs {
+		out[uint64(r.num(m, "guid"))] = append(out[uint64(r.num(m, "guid"))], r.pos(m))
+	}
+	return out, r.err
+}
+
+// zgPlannerOrNil is the map-309 navmesh when the machine has the server's mmaps, nil otherwise.
+func zgPlannerOrNil(t *testing.T) *navmesh.Planner {
+	t.Helper()
+	home, _ := os.UserHomeDir()
+	for _, dir := range []string{os.Getenv("TURTLE_AGENT_MMAPS"), filepath.Join(home, "turtle-agent-mmaps")} {
+		if dir == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, "309.mmap")); err != nil {
+			continue
+		}
+		if tiles, _ := filepath.Glob(filepath.Join(dir, "309*.mmtile")); len(tiles) == 0 {
+			continue
+		}
+		return navmesh.NewPlanner(dir)
+	}
+	return nil
+}
+
 const zgPlan = "../../dungeons/zul_gurub.json"
 
 func zgLoadPlanAndExport(t *testing.T) (*dungeon.Plan, []creature) {
@@ -665,7 +717,7 @@ func TestZulGurubMandokirSweepClearOfLaterPacks(t *testing.T) {
 	}
 	parties := zgParties(t, p, 5)
 	w := zgWalk{Name: "leg5 bloodlord_mandokir", Parties: parties, Last: len(parties) - 1}
-	pl := marliPlannerOrNil(t)
+	pl := zgPlannerOrNil(t)
 	if pl != nil {
 		defer pl.Close()
 	}
@@ -767,7 +819,7 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 		t.Fatal("no pull row for group 14")
 	}
 	w := zgWalk{Name: "leg6 jindo corridor", Parties: parties, Last: last}
-	pl := marliPlannerOrNil(t)
+	pl := zgPlannerOrNil(t)
 	if pl != nil {
 		defer pl.Close()
 	}
