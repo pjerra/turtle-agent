@@ -88,6 +88,42 @@ func PlanHomeSpawns(plan *dungeon.Plan) QuietHomeSpawns {
 	return out
 }
 
+// PlanQuietPatrols is the plan's patrol blocks as the revive quiet check reads them: every pull group's Patrol path,
+// once per patrol. The ID names the patrol in the refusal: the block's source when it has one (the world export's
+// "creature_movement <guid>"), else its entries. A plan with no patrol block returns nil.
+func PlanQuietPatrols(plan *dungeon.Plan) []QuietPatrol {
+	if plan == nil {
+		return nil
+	}
+	var out []QuietPatrol
+	seen := map[string]bool{}
+	for _, l := range plan.Legs {
+		for _, g := range l.PullGroups {
+			p := g.Patrol
+			if p == nil || len(p.Path) == 0 {
+				continue
+			}
+			id := p.Source
+			key := id
+			if id == "" {
+				id = fmt.Sprint(p.Entries)
+				var b strings.Builder
+				b.WriteString(id)
+				for _, pt := range p.Path {
+					fmt.Fprintf(&b, "|%g,%g,%g", pt.X, pt.Y, pt.Z)
+				}
+				key = b.String()
+			}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, QuietPatrol{ID: id, Path: p.Path})
+		}
+	}
+	return out
+}
+
 // spawnLow is the spawn guid low a creature unit's GUID carries (bits 0-23): 0 when the GUID has no creature form.
 func spawnLow(u *objects.Unit) uint32 {
 	if u.GUID.High() != packet.HighUnit {

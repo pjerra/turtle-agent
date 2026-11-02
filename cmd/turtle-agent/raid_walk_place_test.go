@@ -228,9 +228,14 @@ func newPlaceFixture(t *testing.T) (*fixture, *placeToolkit) {
 
 // placeStartReply is the run start's answer for a placed walk: the run running at step of steps, with the until label.
 func placeStartReply(plan string, step, steps, untilStep int) *commanderReply {
+	return placeStartReplyLeg(plan, "thekal", step, steps, untilStep)
+}
+
+// placeStartReplyLeg is placeStartReply for another leg of the plan (the status line's short leg label).
+func placeStartReplyLeg(plan, leg string, step, steps, untilStep int) *commanderReply {
 	lines := []string{
-		fmt.Sprintf("TBM:RUN|%s|running|%d/%d|thekal|move|walk|walking|until boss (step %d)", plan, step, steps, untilStep),
-		fmt.Sprintf("The run starts at step %d of %d (leg high_priest_thekal)", step, steps),
+		fmt.Sprintf("TBM:RUN|%s|running|%d/%d|%s|move|walk|walking|until boss (step %d)", plan, step, steps, leg, untilStep),
+		fmt.Sprintf("The run starts at step %d of %d (leg %s)", step, steps, leg),
 		"TBM:ACTION_ACK|run start|party|1|-",
 	}
 	return &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
@@ -277,7 +282,13 @@ type zgPlaceNums struct{ start, total, until int }
 // to 401 rows) cannot leave the tests' numbers behind.
 func zgPlaceSteps(t *testing.T) zgPlaceNums {
 	t.Helper()
-	rows, plan := placePlanRows(t)
+	return placeStepsFrom(t, "high_priest_thekal")
+}
+
+// placeStepsFrom is zgPlaceSteps for another leg of the fixture's plan.
+func placeStepsFrom(t *testing.T, from string) zgPlaceNums {
+	t.Helper()
+	rows, plan := placePlanRowsFrom(t, from)
 	return zgPlaceNums{start: plan.Start, total: len(rows.Steps), until: plan.Stop}
 }
 
@@ -553,7 +564,16 @@ func TestPlaceStartLineMismatchStops(t *testing.T) {
 
 // wipeAfterStart kills the raid as soon as the walk reads a running status line (after the place).
 func wipeAfterStart(f *fixture) {
-	n := zgPlaceSteps(f.t)
+	wipeAfterStartFrom(f, "high_priest_thekal")
+}
+
+// wipeAfterStartFrom is wipeAfterStart for another leg of the fixture's plan.
+func wipeAfterStartFrom(f *fixture, from string) {
+	wipeAfterStartWith(f, placeStepsFrom(f.t, from))
+}
+
+// wipeAfterStartWith is wipeAfterStart with the running line's own step numbers (a plan in another directory).
+func wipeAfterStartWith(f *fixture, n zgPlaceNums) {
 	f.agent.startQueue = []queuedEvent{{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|thekal|move|walk|walking", n.start, n.total)}}
 	f.agent.eventsHook = func(raw string) {
 		if !strings.Contains(raw, "|running|") {
@@ -567,13 +587,14 @@ func wipeAfterStart(f *fixture) {
 	}
 }
 
-// A wipe revives at the place point, never at the plan's first point, and never falls back to the entrance (spec 6).
-func TestReviveUsesPlacePointNoEntranceFallback(t *testing.T) {
+// A placed wipe revives at the place point, never at the plan's first point; when that point and every fallback row
+// stay refused, the entrance is the last fallback (turtle-agent#392: the 392 run's placed walk refused at step 278
+// and never reached the entrance path, so entrance_tried stayed false).
+func TestPlacedReviveTriesEveryRowThenTheEntrance(t *testing.T) {
 	f, _ := newPlaceFixture(t)
 	f.opts.wipeResume = 0
 	f.agent.startReply = zgPlaceReply(t)
-	// A hostile unit that follows the commander: the place point is never quiet, so the entrance fallback would run
-	// if the placed walk kept it (review round 1, item 5): the test's entrance assertion is what turns red.
+	// A hostile unit that follows the commander: every point is refused, so the walk runs the whole chain.
 	f.agent.unitsFn = func(int) []objects.Unit {
 		f.agent.mu.Lock()
 		x, y, z := f.agent.x, f.agent.y, f.agent.z
@@ -608,10 +629,131 @@ func TestReviveUsesPlacePointNoEntranceFallback(t *testing.T) {
 	}
 	e := zgPlan(t).Entrance
 	entrance := fmt.Sprintf(".go xyz %s %s ", num32(e.X), num32(e.Y))
-	for _, line := range f.agent.gmLines() {
+	tried := false
+	for _, line := range after {
 		if strings.HasPrefix(line, entrance) {
-			t.Fatalf("the placed walk fell back to the entrance: %q", line)
+			tried = true
 		}
+	}
+	if !tried {
+		t.Fatalf("the placed walk never tried the entrance: %q", after)
+	}
+	rr := sum.ReviveRefusal
+	if rr == nil {
+		t.Fatalf("no revive_refusal: end %q", sum.EndReason)
+	}
+	if !rr.EntranceTried {
+		t.Fatalf("refusal %+v, want entrance_tried", rr)
+	}
+	if len(rr.TriedSteps) < 2 || rr.TriedSteps[0] != sum.Place.Start {
+		t.Fatalf("refusal tried_steps %v, want the place start %d and the fallback rows", rr.TriedSteps, sum.Place.Start)
+	}
+}
+
+// zulGurubRowFallbackPlan copies the plan to a temp dir with the cub group's patrol block removed and one move row
+// prepended to the Arlokk leg's via list, so a row-fallback test has an earlier move row of the same leg. The
+// deployed rows carry path rows before the via; the plan JSON's own export starts the leg at the via itself.
+func zulGurubRowFallbackPlan(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile("../../dungeons/zul_gurub.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	legs, ok := doc["legs"].([]any)
+	if !ok || len(legs) < 5 {
+		t.Fatal("the plan has no Arlokk leg")
+	}
+	thekal, ok := legs[3].(map[string]any)
+	if !ok {
+		t.Fatal("the Thekal leg is not an object")
+	}
+	groups, ok := thekal["pull_groups"].([]any)
+	if !ok || len(groups) < 4 {
+		t.Fatal("the Thekal leg has no cub group")
+	}
+	cub, ok := groups[3].(map[string]any)
+	if !ok {
+		t.Fatal("the cub group is not an object")
+	}
+	delete(cub, "patrol")
+	arlokk, ok := legs[4].(map[string]any)
+	if !ok {
+		t.Fatal("the Arlokk leg is not an object")
+	}
+	via, ok := arlokk["via"].([]any)
+	if !ok {
+		t.Fatal("the Arlokk leg has no via list")
+	}
+	// The deployed run's step 277: the move row right before the via at -11712 -1889.8667.
+	arlokk["via"] = append([]any{map[string]any{"x": -11711.371, "y": -1897.5092, "z": 53.490063}}, via...)
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "zul_gurub.json"), out, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// A refused revive point with an earlier quiet move row of the same leg revives the raid at that row (#392): the
+// placed Arlokk walk's point is blocked by a unit 44 yd out, the previous row (277) is 51 yd from it. The plan is read
+// without the cub patrol block so the row fallback is not shadowed by the patrol path.
+func TestPlacedReviveFallsBackToAnEarlierMoveRow(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	dir := zulGurubRowFallbackPlan(t)
+	f.opts.dir = dir
+	f.opts.from = "leg high_priestess_arlokk"
+	f.opts.wipeResume = 0
+	rows, place := placePlanRowsFromDir(t, dir, "high_priestess_arlokk")
+	n := zgPlaceNums{start: place.Start, total: len(rows.Steps), until: place.Stop}
+	f.agent.startReply = placeStartReplyLeg("zul_gurub", "arlokk", n.start, n.total, n.until)
+	wipeAfterStartWith(f, n)
+	// One fixed hostile 44 yd from the revive point, away from the row before it: the point blocks, that row does not.
+	p := place.Point
+	prev := rows.Steps[n.start-2]
+	if prev.Kind != planexport.KindMove {
+		t.Fatalf("row %d before the place start is %s, want a move row", n.start-1, prev.Kind)
+	}
+	dx, dy, dz := float64(p.X-prev.X), float64(p.Y-prev.Y), float64(p.Z-prev.Z)
+	norm := math.Sqrt(dx*dx + dy*dy + dz*dz)
+	u := objects.Unit{Type: "creature", Name: "Zulian Cub", Entry: 11360, Hostile: true,
+		X: p.X + float32(dx/norm*44), Y: p.Y + float32(dy/norm*44), Z: p.Z + float32(dz/norm*44)}
+	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{u} }
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.ReviveRefusal != nil {
+		t.Fatalf("the revive refused: %+v (%q)", sum.ReviveRefusal, sum.EndReason)
+	}
+	// The second go after the run started is the fallback row (the first is the place point).
+	var gos []string
+	started := false
+	for _, line := range f.agentLog() {
+		if strings.HasPrefix(line, "cmdr run start ") {
+			started = true
+			continue
+		}
+		if started && strings.HasPrefix(line, "gm .go xyz ") {
+			gos = append(gos, strings.TrimPrefix(line, "gm "))
+		}
+	}
+	if len(gos) < 2 {
+		t.Fatalf("gos %q, want the place point and the fallback row", gos)
+	}
+	want := fmt.Sprintf(".go xyz %s %s ", num32(prev.X), num32(prev.Y))
+	if !strings.HasPrefix(gos[1], want) {
+		t.Fatalf("second go %q, want the earlier row %d at %s", gos[1], n.start-1, want)
+	}
+	if got := countPrefix(f.agent.gmLines(), ".summon "); got == 0 {
+		t.Fatal("the raid was not revived: no summons")
 	}
 }
 
@@ -817,13 +959,28 @@ func TestDryRunPrintsPlacePlan(t *testing.T) {
 // export), so a test can learn the start step, the circles and the AHEAD rows the walk computes.
 func placePlanRows(t *testing.T) (planexport.Rows, raidwalk.PlacePlan) {
 	t.Helper()
-	plan := zgPlan(t)
+	return placePlanRowsFrom(t, "high_priest_thekal")
+}
+
+// placePlanRowsFrom is placePlanRows for another leg of the fixture's plan.
+func placePlanRowsFrom(t *testing.T, from string) (planexport.Rows, raidwalk.PlacePlan) {
+	t.Helper()
+	return placePlanRowsFromDir(t, "../../dungeons", from)
+}
+
+// placePlanRowsFromDir is placePlanRowsFrom for a plan in another directory.
+func placePlanRowsFromDir(t *testing.T, dir, from string) (planexport.Rows, raidwalk.PlacePlan) {
+	t.Helper()
+	plan, err := dungeon.Load(filepath.Join(dir, "zul_gurub.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	res, err := planexport.Build(plan, planexport.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	step, leg, _, _, err := raidwalk.PlaceStart(rows, []string{"from", "leg", "high_priest_thekal"})
+	step, leg, _, _, err := raidwalk.PlaceStart(rows, []string{"from", "leg", from})
 	if err != nil {
 		t.Fatal(err)
 	}
