@@ -1307,8 +1307,9 @@ func (d *RemoteDriver) begin(ctx context.Context, fromLeg int) error {
 // driver=<model>:<effort>:<run>`, TortoiseBots #986), so the server's summary and the agent's trace join on the run id. Only
 // when run_meta is given; a refusal or silence is noted, never fatal (an older server has no `trace start driver=` yet).
 // A start with no answer (a transport error, a cancel, a timeout) may still have been applied: the run does not own a
-// trace it cannot prove it started, so it sends no stop for it (a blind `trace stop` would end a trace someone started
-// by hand: the server's stop is not scoped to a run id) and the report says the server's trace state is unknown.
+// trace it cannot prove it started, so it sends no stop for it (a blind `trace stop <run_id>` names this run's id and
+// the server answers `other-run` when another run's trace is running) and the report says the server's trace state is
+// unknown.
 func (d *RemoteDriver) startServerTrace(ctx context.Context) {
 	if !d.opt.RunMeta.Set() || !d.opt.RunMeta.ServerTrace {
 		return
@@ -1347,10 +1348,12 @@ var (
 // stopServerTrace ends the server's run trace (`.bot trace stop`), so the next run's start is not refused. Only while
 // the run owns it (an acknowledged start, serverTrace): the run keeps owning it until the server answers the stop. An
 // ack or one of the server's terminal refusals (not-running, forbidden: trying again changes nothing) ends the
-// ownership; any other refusal, a transport error or no answer is tried again, up to serverTraceStopTries times within ctx. The server's stop takes no run id (it stops
-// whatever trace runs), and a stop with no answer may have been applied, so every try after the first asks `trace
-// status` first and sends the stop only while the trace running is still this run's own (its run id): idle, or
-// another run's trace, means ours has ended, and nothing more is sent. It returns why the last try failed when the
+// ownership; any other refusal, a transport error or no answer is tried again, up to serverTraceStopTries times within ctx. The stop names this run's id
+// (`trace stop <run_id>`): the server stops only that run's trace. An `other-run` refusal means another run's trace is running (owned by someone else):
+// note it, end this run's ownership and leave the other trace alone, with no retry.
+// A stop with no answer may have been applied, so every try after the first asks `trace status` first and sends the stop
+// only while the trace running is still this run's own (its run id): idle, or another run's trace, means ours has ended,
+// and nothing more is sent. It returns why the last try failed when the
 // run still owns the trace (the caller notes it), "" otherwise. finish and the deferred stop armed after the acked
 // start both call it: after a stop the server answered, neither sends another.
 func (d *RemoteDriver) stopServerTrace(ctx context.Context) string {
@@ -1376,7 +1379,7 @@ func (d *RemoteDriver) stopServerTrace(ctx context.Context) string {
 			return "trace stop: " + ctx.Err().Error()
 		}
 		tctx, cancel := context.WithTimeout(ctx, serverTraceStopTry)
-		r, err := d.g.Command(tctx, "trace stop")
+		r, err := d.g.Command(tctx, "trace stop "+d.tr.ID())
 		cancel()
 		switch {
 		case err != nil:
@@ -1386,6 +1389,9 @@ func (d *RemoteDriver) stopServerTrace(ctx context.Context) string {
 		case r.Kind == tbm.KindErr && r.Err != nil && (r.Err.Code == "not-running" || r.Err.Code == "forbidden"):
 			d.serverTrace = false
 			d.rep.note("trace stop refused: " + r.Err.Code)
+		case r.Kind == tbm.KindErr && r.Err != nil && r.Err.Code == "other-run":
+			d.serverTrace = false
+			d.rep.note("server trace: another run's trace is running; left it alone")
 		case r.Kind == tbm.KindErr && r.Err != nil:
 			why = "trace stop refused: " + r.Err.Code // not one of the server's terminal codes: the trace may still run
 		default:
