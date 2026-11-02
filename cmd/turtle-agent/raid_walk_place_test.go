@@ -2196,7 +2196,7 @@ func TestPlaceShortenedUntilReachesRunStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	start, _, err := raidwalk.PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
+	start, _, _, _, err := raidwalk.PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
 	if err != nil {
 		t.Fatal(err)
 	}
