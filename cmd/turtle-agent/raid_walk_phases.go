@@ -1043,8 +1043,10 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 		}
 		w.tracker.Feed(now, st)
 		w.observeBossStatus(st, now) // before lastStatus is replaced: the end rule reads the previous status
-		w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
+		// pullStarted compares st with the status before it (the step-decrease latch reset): it runs before
+		// lastStatus takes st.
 		w.pullStarted(now, st)
+		w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
 		w.recordRunLine(st, now)
 		w.noteLabel(st)
 		if st.Note != "" {
@@ -1535,7 +1537,8 @@ func (w *walk) resetBossAliveSeen(entry uint32) {
 // within the row's radius of the pack centroid (w.pullRow), the row found
 // from the run's step or, on a move step, from the pulled unit's entry and
 // position. bossPullStarted arms the same window for a boss, which has no
-// pulling line.
+// pulling line. w.lastStatus must still be the status BEFORE st (the
+// step-decrease check reads it): call this before storing st.
 func (w *walk) pullStarted(now time.Time, st tbm.RunStatus) {
 	if w.haveStatus && st.State == tbm.RunRunning && st.Step < w.lastStatus.Step {
 		// The walk resumed at an earlier step: the boss latch belongs to the
@@ -1696,7 +1699,8 @@ func packRowFor(rows planexport.Rows, entry uint32, seed [3]float32) raidwalk.Pa
 		if !rowHasEntry(s, entry) {
 			continue
 		}
-		d := math.Hypot(float64(s.X)-float64(seed[0]), float64(s.Y)-float64(seed[1]))
+		dx, dy, dz := float64(s.X)-float64(seed[0]), float64(s.Y)-float64(seed[1]), float64(s.Z)-float64(seed[2])
+		d := math.Sqrt(dx*dx + dy*dy + dz*dz)
 		if d > float64(raidwalk.RowRadius(s.Kind, s.Radius)+raidwalk.PackRowSlackYd) {
 			continue
 		}
