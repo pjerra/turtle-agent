@@ -862,8 +862,9 @@ func TestControlWriteAfterSendIsIndeterminate(t *testing.T) {
 		}()
 		<-reached
 		cancel()
+		err := <-done // the client gives up while the server still holds its answer
 		close(release)
-		if err := <-done; !errors.Is(err, ErrIndeterminate) {
+		if !errors.Is(err, ErrIndeterminate) {
 			t.Fatalf("a cancelled write: %v, want indeterminate", err)
 		}
 	})
