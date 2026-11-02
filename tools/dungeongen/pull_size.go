@@ -79,10 +79,9 @@ func PullSizes(p *dungeon.Plan, cs []creature, w *worldspawn.World) ([]PullFindi
 	if err != nil {
 		return nil, err
 	}
+	// No eligible mobs is not an early exit: every pull row then finds no
+	// target below and gets its "no target" finding.
 	mobs, entries := pullMobs(p, cs, packIDs(w))
-	if len(mobs) == 0 {
-		return nil, nil
-	}
 	spread := float32(aggroest.WalkSpreadYd)
 	stand := float32(aggroest.StandSpreadPartyYd)
 	if p.IsRaid() {

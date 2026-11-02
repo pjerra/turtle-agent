@@ -240,3 +240,21 @@ func TestPullSizeRowWithNoTargetIsANoTargetFinding(t *testing.T) {
 		t.Fatalf("findings %v, want one no-target finding for pull 1", found)
 	}
 }
+
+// A plan with pull rows and no eligible mobs at all (an empty or
+// friendly-only export) still gives every pull row a "no target" finding:
+// the lint never returns clean because there was nothing to estimate.
+func TestPullSizeNoEligibleMobsStillFindsEveryPullRow(t *testing.T) {
+	p := &dungeon.Plan{Name: "probe", Map: 1, Kind: "dungeon", LevelBand: []int{60, 60}, Entrance: dungeon.Point{},
+		Legs: []dungeon.Leg{{Name: "a", To: dungeon.Point{X: 10},
+			PullGroups: []dungeon.PullGroup{
+				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 10}}, Radius: 5},
+			}}}}
+	found, err := PullSizes(p, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 || found[0].Summary != "leg 0 pull 1: no target" {
+		t.Fatalf("findings %v, want one no-target finding for pull 1", found)
+	}
+}
