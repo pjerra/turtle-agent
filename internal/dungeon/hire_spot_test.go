@@ -208,28 +208,41 @@ func TestHireSpotWithoutNavmesh(t *testing.T) {
 }
 
 // A commander that stands in a kept binding's spot after a resume hires nothing new: the spot is not judged (nothing appears there).
+// The same holds when the binding needs only a rebind: every slot is kept, no hire line goes out.
 func TestHireSpotSkippedForAKeptBinding(t *testing.T) {
-	g := newHireFake(t)
-	for _, c := range [][2]string{{"warrior", "tank"}, {"priest", "healer"}, {"hunter", "dps"}, {"rogue", "dps"}, {"warlock", "dps"}} {
-		g.preHire(c[0], c[1], 43)
-	}
-	g.nextName, g.raid = 5, true
-	g.preBind()
-	g.agentMap = portalMap
-	g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
-	pos := &hirePosFake{hireFake: g, pos: Point{X: 1821.5, Y: -4425.3, Z: -30.5}, floors: map[[2]float32][]float32{
-		{portalPoint.X, portalPoint.Y}: {-20.306},
-		{1821.5, -4425.3}:              {-30.6},
-	}}
-	e := hireSpotEnv(g, pos, func(string) {})
-	if p, err := e.hireSpotProblem(context.Background()); err != nil || p == "" {
-		t.Fatalf("the spot itself is refused: %q %v", p, err)
-	}
-	if _, err := e.hire(context.Background()); err != nil {
-		t.Fatalf("a kept binding is refused by the spot: %v", err)
-	}
-	if len(g.hireLines) != 0 {
-		t.Fatalf("a kept binding hired: %v", g.hireLines)
+	for _, c := range []struct {
+		name  string
+		bound bool
+	}{
+		{"standing", true},
+		{"only the bind redone", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			g := newHireFake(t)
+			for _, c := range [][2]string{{"warrior", "tank"}, {"priest", "healer"}, {"hunter", "dps"}, {"rogue", "dps"}, {"warlock", "dps"}} {
+				g.preHire(c[0], c[1], 43)
+			}
+			g.nextName, g.raid = 5, true
+			if c.bound {
+				g.preBind()
+			}
+			g.agentMap = portalMap
+			g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
+			pos := &hirePosFake{hireFake: g, pos: Point{X: 1821.5, Y: -4425.3, Z: -30.5}, floors: map[[2]float32][]float32{
+				{portalPoint.X, portalPoint.Y}: {-20.306},
+				{1821.5, -4425.3}:              {-30.6},
+			}}
+			e := hireSpotEnv(g, pos, func(string) {})
+			if p, err := e.hireSpotProblem(context.Background()); err != nil || p == "" {
+				t.Fatalf("the spot itself is refused: %q %v", p, err)
+			}
+			if _, err := e.hire(context.Background()); err != nil {
+				t.Fatalf("a kept binding is refused by the spot: %v", err)
+			}
+			if len(g.hireLines) != 0 {
+				t.Fatalf("a kept binding hired: %v", g.hireLines)
+			}
+		})
 	}
 }
 
