@@ -320,7 +320,14 @@ case12() {
     WALK_SUPER_WAIT=30 bash "$super_path" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log" &
   sup=$!
   set +m
-  sleep 2
+  # Poll for the restarting line: the kill must land inside the wait, not
+  # during run 1 (a fixed sleep races supervisor startup under load).
+  for (( i = 0; i < 100; i++ )); do
+    grep -q 'restarting as run 2' "$d/restart.log" 2>/dev/null && break
+    sleep 0.2
+  done
+  grep -q 'restarting as run 2' "$d/restart.log" 2>/dev/null ||
+    { bad "case12 setup: supervisor never reached the wait"; kill -9 "$sup" 2>/dev/null; wait "$sup" 2>/dev/null; return; }
   kill -INT "$sup"
   start="$SECONDS"
   wait "$sup"
@@ -345,7 +352,12 @@ case13() {
   FAKE_SEQ_FILE="$d/seq" FAKE_ARGS_LOG="$d/args.log" FAKE_LEG="high_priest_venoxis" \
     WALK_SUPER_WAIT=30 "$SUPER_BIN" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log" &
   sup=$!
-  sleep 2
+  for (( i = 0; i < 100; i++ )); do
+    grep -q 'restarting as run 2' "$d/restart.log" 2>/dev/null && break
+    sleep 0.2
+  done
+  grep -q 'restarting as run 2' "$d/restart.log" 2>/dev/null ||
+    { bad "case13 setup: supervisor never reached the wait"; kill -9 "$sup" 2>/dev/null; wait "$sup" 2>/dev/null; return; }
   kill -TERM "$sup"
   start="$SECONDS"
   wait "$sup"
@@ -376,8 +388,12 @@ case14() {
     WALK_SUPER_WAIT=1 bash "$super_path" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log" &
   sup=$!
   set +m
-  sleep 2
-  walk="$(pgrep -f "fake-walk raid-walk.*H14" | head -n 1)"
+  walk=""
+  for (( i = 0; i < 100; i++ )); do
+    walk="$(pgrep -f "fake-walk raid-walk.*H14" | head -n 1)"
+    [[ -n "$walk" ]] && break
+    sleep 0.2
+  done
   [[ -n "$walk" ]] || { bad "case14 setup: no running fake walk found"; kill -9 "$sup" 2>/dev/null; wait "$sup" 2>/dev/null; return; }
   kill -INT "$sup"
   wait "$sup"
@@ -395,20 +411,22 @@ case14() {
 }
 
 # case15 (#370): TERM during a run stops the supervisor at once: exit 143, one
-# run only. Same shape as case14 with FAKE_IGNORE_INT unset (TERM needs no
-# escalation), other signal. $! is the supervisor itself (no wrapper).
+# run only. Same shape as case14 with FAKE_IGNORE_INT unset (TERM is not
+# ignored on entry, so no job-control launch is needed), other signal.
 case15() {
   local d="$T/c15" rc runs sup walk
   mkdir -p "$d"
   make_cmd "$d/cmd.txt" raid-walk zul_gurub --server s --slot 2 --holder H15 \
     --sql /tmp/w.sql --out "$d/run0"
-  set -m
   FAKE_EXIT=19 FAKE_SLEEP=30 FAKE_ARGS_LOG="$d/args.log" FAKE_LEG="high_priest_venoxis" \
     WALK_SUPER_WAIT=1 bash "$SUPER_BIN" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log" &
   sup=$!
-  set +m
-  sleep 2
-  walk="$(pgrep -f "fake-walk raid-walk.*H15" | head -n 1)"
+  walk=""
+  for (( i = 0; i < 100; i++ )); do
+    walk="$(pgrep -f "fake-walk raid-walk.*H15" | head -n 1)"
+    [[ -n "$walk" ]] && break
+    sleep 0.2
+  done
   [[ -n "$walk" ]] || { bad "case15 setup: no running fake walk found"; kill -9 "$sup" 2>/dev/null; wait "$sup" 2>/dev/null; return; }
   kill -TERM "$sup"
   wait "$sup"
