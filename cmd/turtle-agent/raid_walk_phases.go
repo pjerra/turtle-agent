@@ -1412,9 +1412,9 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 		}
 	}
 	// The attempt start (after bossAdds, so an add several at a time is already out): the first time the frames
-	// showed a boss unit engaged, judged like the tracker's one-shot latch (checkBoss). bossKilled reads it to
-	// keep a 0 % row an earlier attempt left behind out of the kill evidence (review round 3), so it is recorded
-	// per unit entry and only the first sighting counts.
+	// showed a boss unit alive and engaged (bossAttemptEngaged). bossKilled reads it to keep a 0 % row an earlier
+	// attempt left behind out of the kill evidence (review round 3), so it is recorded per unit entry and only
+	// the first sighting counts.
 	for _, h := range f.Hostiles {
 		if h.GUID == 0 || !w.bossUnit(h.Entry) || !bossAttemptEngaged(h.HPPct, uint64(h.Target), w.partyG) {
 			continue
@@ -1425,11 +1425,12 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 	}
 }
 
-// bossAttemptEngaged is the tracker's one-shot boss latch judgement (checkBoss): a plan-boss row starts the
-// attempt when it is hurt (below 100 %) or holds a party target. A 0 % row counts too, as it does there: the
-// frames' own 0 % sighting of a fresh corpse is the kill bossKilled reads.
+// bossAttemptEngaged is the attempt-start judgement: a plan-boss row starts the attempt when it is alive
+// (above 0 %) and hurt (below 100 %) or holding a party target. A 0 % row never starts one, not even with a
+// party target: the frames' own 0 % sighting of a fresh corpse is the kill bossKilled reads, not a fight (fake
+// deaths), and the wipe-resume kill (wipeBossFrame) needs the same rule — a dead row never starts an attempt.
 func bossAttemptEngaged(hppct int, target uint64, partyG map[uint64]bool) bool {
-	return hppct < 100 || (target != 0 && partyG[target])
+	return hppct > 0 && (hppct < 100 || (target != 0 && partyG[target]))
 }
 
 // savedFrame is one frames.jsonl line (compact: positions, hp, dead, hostiles).
@@ -1760,8 +1761,15 @@ const (
 
 // wipeBossFrame judges the latched boss from the frames before the 120 s
 // unknown wait (walk 26 test2-ven-door: Jeklik at 0 % while the raid died).
-// kill: the frames' freshest plan-boss row is HP 0 (the dead row has no
-// freshness cap: a corpse out of view for the pause is still the kill).
+// kill: the frames' last view of a boss unit is HP 0. The dead row has no
+// freshness cap, so a boss that died and then despawned still counts (the
+// frames' last view of that guid was dead) — but only inside the current
+// attempt: a live row of the family must have been seen since the last wipe
+// recovery (bossAttemptStart, the same "a dead row never starts an attempt"
+// rule bossAttemptEngaged uses), the dead row at or after it, and no live
+// unit of the family seen alive after it (a reset or a respawn left the boss
+// out of view, so the dead row is another attempt's). Otherwise a stale
+// corpse — or a fake death with no live row in this attempt — is no kill.
 // alive: a fresh (<= 15 s) row is alive (HP > 0) with no target and no live
 // target — the reset shape — so the boss is alive and the resume is safe.
 // Otherwise no usable frame evidence: keep the unknown wait. A 1-5 % alive
@@ -1793,7 +1801,9 @@ func (w *walk) wipeBossFrame(now time.Time) (kill bool, alive bool, words string
 		}
 	}
 	if haveDead && (!haveLive || !deadAt.Before(liveAt)) {
-		return true, false, w.bossRule.Words(deadEntry)
+		if attemptAt := w.bossAttemptStart(w.bossUnits(deadEntry)); !attemptAt.IsZero() && !deadAt.Before(attemptAt) {
+			return true, false, w.bossRule.Words(deadEntry)
+		}
 	}
 	if haveLive {
 		return false, true, w.bossRule.Words(liveEntry)
