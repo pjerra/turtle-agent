@@ -644,6 +644,22 @@ type walk struct {
 
 	lastStatus tbm.RunStatus
 	haveStatus bool
+	// pullJoins tracks the pull the walk is counting joiners for: the pull line's
+	// step and time, the pulled pack's guids and the engaged guids seen since.
+	// The pack is the pulled guid plus the plan pack's other members: the guids
+	// whose frame position stands within the pull row's radius of its centroid
+	// (pullRow), seeded once on the first frame of the window (pullPackSeeded).
+	// Counted once, 10 s after the pull: pullJoinsAt is zero afterwards.
+	pullJoinsAt    time.Time
+	pullJoinsStep  int
+	pullSeed       packet.GUID
+	pullRow        raidwalk.PackRow
+	pullPackSeeded bool
+	pullPack       map[packet.GUID]bool
+	pullJoinsSeen  map[packet.GUID]bool
+	// pullJoins is the per-pull joiner record the report reads: one per pull
+	// step, in first-sight order. Written when the 10 s pull window closes.
+	pullJoins []raidwalk.PullJoiners
 	// Review round 3: statusSeq counts every received run status; resumeRun
 	// captures it before issuing the resume (resumeStatusSeq) so recoveredBoss
 	// can tell a fresh post-resume status from a retained pre-resume one.
@@ -1464,10 +1480,22 @@ func (w *walk) finish(code int) {
 	if raw, err := json.MarshalIndent(sum, "", "  "); err == nil {
 		_ = w.writeOut("summary.json", append(raw, '\n'))
 	}
+	if raw, err := json.MarshalIndent(w.pullJoinsOrEmpty(), "", "  "); err == nil {
+		_ = w.writeOut(raidwalk.PullJoinersFName, append(raw, '\n'))
+	}
 	text := sum.Text()
 	_ = w.writeOut("summary.txt", []byte(text))
 	line := strings.SplitN(text, "\n", 2)[0]
 	fmt.Fprintf(w.stdout, "%s; out %s\n", line, w.outDir)
+}
+
+// pullJoinsOrEmpty is the walk's per-pull joiner record: never nil, so the
+// file the report reads is always a list.
+func (w *walk) pullJoinsOrEmpty() []raidwalk.PullJoiners {
+	if w.pullJoins == nil {
+		return []raidwalk.PullJoiners{}
+	}
+	return w.pullJoins
 }
 
 // sortedNames sorts a name list, for stable output.
@@ -1549,4 +1577,23 @@ func parseTeardownJSON(raw []byte) (teardownJSON, bool) {
 		return teardownJSON{Failed: 1}, false
 	}
 	return t, true
+}
+
+// teardownReason is the first failing teardown step with its detail ("gone: still in
+// view after 10 s: ..."), so summary.json says WHICH step failed instead of only that
+// one did. The derived lease-kept line is skipped: it only repeats the game-side fail.
+func teardownReason(t teardownJSON) string {
+	for _, s := range t.Steps {
+		if s.Status != "fail" && s.Status != "ending" {
+			continue
+		}
+		if s.Step == "lease" && strings.HasPrefix(s.Detail, "kept: game-side teardown failed") {
+			continue
+		}
+		if s.Detail != "" {
+			return s.Step + ": " + s.Detail
+		}
+		return s.Step + ": failed"
+	}
+	return "teardown failed"
 }

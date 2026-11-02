@@ -243,10 +243,13 @@ type FightSummary struct {
 	Detail *FightDetail `json:"detail,omitempty"`
 }
 
-// TeardownSummary is what teardown reported.
+// TeardownSummary is what teardown reported. Reason is the first failing step
+// ("gone", "unbind", "remove X", "logout", "rpc", "lease", ...) with its detail;
+// empty when nothing failed.
 type TeardownSummary struct {
 	Failed    bool     `json:"failed"`
 	HiresLeft []string `json:"hires_left"`
+	Reason    string   `json:"reason,omitempty"`
 }
 
 // SummaryMeta is what the command knows besides the tracker.
@@ -511,7 +514,11 @@ func (s *Summary) Text() string {
 	}
 	fmt.Fprintf(&b, "dashboard: %s\n", s.Dashboard)
 	if s.Teardown.Failed {
-		fmt.Fprintf(&b, "teardown: failed\n")
+		if s.Teardown.Reason != "" {
+			fmt.Fprintf(&b, "teardown: failed (%s)\n", s.Teardown.Reason)
+		} else {
+			fmt.Fprintf(&b, "teardown: failed\n")
+		}
 	} else {
 		fmt.Fprintf(&b, "teardown: ok\n")
 	}
