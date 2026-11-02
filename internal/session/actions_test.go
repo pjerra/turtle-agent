@@ -103,6 +103,58 @@ func TestFaceAndWalk(t *testing.T) {
 	h.logout()
 }
 
+// A near teleport ack (a `.go xyz`) counts a landing only after the client's own ack went out: the core
+// relocates the player when it reads that ack (MovementHandler), so TeleportSeq advances then and never before.
+// The conn write hook records the sequence at the ack write itself: it must still be the old count there.
+func TestTeleportAckAdvancesTeleportSeq(t *testing.T) {
+	h, tap := startAckTap(t, Options{})
+	h.enterWorld()
+	if seq := h.s.Status().TeleportSeq; seq != 0 {
+		t.Fatalf("teleport_seq %d before any teleport, want 0", seq)
+	}
+	w := packet.NewWriter().PackedGUID(me.GUID).U32(7)
+	game.WriteMoveInfo(w, game.MoveInfo{X: 1, Y: 2, Z: 3})
+	h.send(opcode.MSGMoveTeleportAck, w.Bytes())
+	// Expect returns once the ack left, so the status read below observes the sequence after the write.
+	h.expect(opcode.MSGMoveTeleportAck)
+	if seq := h.s.Status().TeleportSeq; seq != 1 {
+		t.Fatalf("teleport_seq %d after one acked teleport, want 1", seq)
+	}
+	if got := tap.ackSeqs(); len(got) != 1 || got[0] != 0 {
+		t.Fatalf("teleport_seq at the ack write %v, want [0]: the landing is counted only after the write", got)
+	}
+	w2 := packet.NewWriter().PackedGUID(me.GUID).U32(8)
+	game.WriteMoveInfo(w2, game.MoveInfo{X: 4, Y: 5, Z: 6})
+	h.send(opcode.MSGMoveTeleportAck, w2.Bytes())
+	h.expect(opcode.MSGMoveTeleportAck)
+	if seq := h.s.Status().TeleportSeq; seq != 2 {
+		t.Fatalf("teleport_seq %d after two acked teleports, want 2", seq)
+	}
+	if got := tap.ackSeqs(); len(got) != 2 || got[1] != 1 {
+		t.Fatalf("teleport_seq at the ack writes %v, want [0 1]", got)
+	}
+	h.logout()
+}
+
+// A far teleport (SMSG_NEW_WORLD) acks the worldport and then counts a landing: the server places the player on
+// reading MSG_MOVE_WORLDPORT_ACK, before any later chat line (a `.summon`), so the sequence is a landing too. The
+// hook pins the same ordering at that ack write.
+func TestNewWorldAdvancesTeleportSeq(t *testing.T) {
+	h, tap := startAckTap(t, Options{})
+	h.enterWorld()
+	h.send(opcode.SMSGTransferPending, packet.NewWriter().U32(1).Bytes())
+	h.send(opcode.SMSGNewWorld, packet.NewWriter().U32(1).F32(10).F32(20).F32(30).F32(0).Bytes())
+	h.expect(opcode.MSGMoveWorldportAck)
+	h.expect(opcode.CMSGSetActiveMover)
+	if seq := h.s.Status().TeleportSeq; seq != 1 {
+		t.Fatalf("teleport_seq %d after a worldport, want 1", seq)
+	}
+	if got := tap.ackSeqs(); len(got) != 1 || got[0] != 0 {
+		t.Fatalf("teleport_seq at the worldport ack write %v, want [0]", got)
+	}
+	h.logout()
+}
+
 func TestTeleportNearFarAndSpeed(t *testing.T) {
 	ctx := context.Background()
 	h := start(t, Options{})
