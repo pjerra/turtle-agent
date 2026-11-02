@@ -8,10 +8,11 @@
 # writes a summary.json verbatim (its `wipes` and `end_reason` are what the
 # no-progress stop reads; unset: no summary.json). Every
 # invocation appends its %q-quoted argv to FAKE_ARGS_LOG (one line per run).
-# The last TBM:RUN line's leg is FAKE_LEG (default high_priest_venoxis) and its
-# step FAKE_STEP (default 41); FAKE_LEG_SEQ_FILE and FAKE_STEP_SEQ_FILE pop a
-# per-run value from a file instead (one line per run), for the cases that need
-# a run's leg or death step to change between restarts.
+# FAKE_SLEEP makes the fake sleep that long before exiting (default 0): the
+# signal cases use it to hold the supervisor inside a run. FAKE_IGNORE_INT
+# makes the fake ignore SIGINT like a backgrounded walk child does (job
+# control off resets nothing: INT arrives ignored, so the supervisor's INT
+# handler must escalate to TERM or the walk survives it).
 #
 # Usage: test-walk-super.sh [case-number ...]   (default: all cases + mutation check)
 # Env: WALK_SUPER_BIN (default: walk-super.sh next to this file),
@@ -94,6 +95,16 @@ elif [[ -n "${FAKE_SUMMARY:-}" ]]; then
 fi
 if [[ -n "${FAKE_STDERR_LINE:-}" ]]; then
   printf '%s\n' "$FAKE_STDERR_LINE" >&2
+fi
+# FAKE_IGNORE_INT makes the fake ignore SIGINT, like a backgrounded walk child
+# with job control off: the supervisor's INT handler must escalate to TERM or
+# the walk survives it. FAKE_SLEEP holds the fake inside the run (seconds)
+# so the signal cases can strike mid-run or mid-wait.
+if [[ -n "${FAKE_IGNORE_INT:-}" ]]; then
+  trap '' INT
+fi
+if [[ -n "${FAKE_SLEEP:-}" ]]; then
+  sleep "$FAKE_SLEEP"
 fi
 if [[ -n "${FAKE_SEQ_FILE:-}" && -s "$FAKE_SEQ_FILE" ]]; then
   code="$(head -n 1 -- "$FAKE_SEQ_FILE")"
@@ -284,6 +295,136 @@ case11() {
   ok "case11 exit 2 with pass --from step N: no restart, exit 2, the reason is logged"
 }
 
+# case12 (#370): INT during the step-6 wait stops the supervisor at once: exit
+# 130, no second run. The wait is long (30 s) so a pass proves the trap fired
+# instead of the sleep running out. FAKE_SEQ: run 1 exits 19 at once, then the
+# supervisor sits in the wait when the INT lands.
+# Launched with job control on (set -m): a plain `&` job in a non-interactive
+# shell inherits SIGINT as ignored, and bash cannot trap an ignored-on-entry
+# signal (an `exec bash` wrapper inherits it too). An interactive Ctrl-C reaches
+# the foreground supervisor with its trap, so this is a harness detail only.
+case12() {
+  local d="$T/c12" rc runs start elapsed sup super_path
+  mkdir -p "$d"
+  make_cmd "$d/cmd.txt" raid-walk zul_gurub --server s --slot 2 --holder H12 \
+    --sql /tmp/w.sql --out "$d/run0"
+  printf '19\n0\n' >"$d/seq"
+  # "$SUPER_BIN" may be a bare filename (mutation copies); resolve it so the
+  # launch finds it regardless of cwd.
+  case "$SUPER_BIN" in
+    */*) super_path="$SUPER_BIN" ;;
+    *) super_path="$HERE/$SUPER_BIN" ;;
+  esac
+  set -m
+  FAKE_SEQ_FILE="$d/seq" FAKE_ARGS_LOG="$d/args.log" FAKE_LEG="high_priest_venoxis" \
+    WALK_SUPER_WAIT=30 bash "$super_path" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log" &
+  sup=$!
+  set +m
+  sleep 2
+  kill -INT "$sup"
+  start="$SECONDS"
+  wait "$sup"
+  rc=$?
+  elapsed=$((SECONDS - start))
+  (( rc == 130 )) || { bad "case12 exit=$rc want 130"; return; }
+  (( elapsed < 25 )) || { bad "case12 took ${elapsed}s: the INT trap did not interrupt the 30s wait"; return; }
+  runs="$(runs_done "$d/args.log")"
+  (( runs == 1 )) || { bad "case12 runs=$runs want 1 (no restart after INT)"; return; }
+  ok "case12 INT during the restart wait: exit 130 in ${elapsed}s, no second run"
+}
+
+# case13 (#370): TERM during the step-6 wait stops the supervisor at once:
+# exit 143, no second run. Same shape as case12, other signal (TERM is not
+# ignored on entry, so no job-control launch is needed).
+case13() {
+  local d="$T/c13" rc runs start elapsed sup
+  mkdir -p "$d"
+  make_cmd "$d/cmd.txt" raid-walk zul_gurub --server s --slot 2 --holder H13 \
+    --sql /tmp/w.sql --out "$d/run0"
+  printf '19\n0\n' >"$d/seq"
+  FAKE_SEQ_FILE="$d/seq" FAKE_ARGS_LOG="$d/args.log" FAKE_LEG="high_priest_venoxis" \
+    WALK_SUPER_WAIT=30 "$SUPER_BIN" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log" &
+  sup=$!
+  sleep 2
+  kill -TERM "$sup"
+  start="$SECONDS"
+  wait "$sup"
+  rc=$?
+  elapsed=$((SECONDS - start))
+  (( rc == 143 )) || { bad "case13 exit=$rc want 143"; return; }
+  (( elapsed < 25 )) || { bad "case13 took ${elapsed}s: the TERM trap did not interrupt the 30s wait"; return; }
+  runs="$(runs_done "$d/args.log")"
+  (( runs == 1 )) || { bad "case13 runs=$runs want 1 (no restart after TERM)"; return; }
+  ok "case13 TERM during the restart wait: exit 143 in ${elapsed}s, no second run"
+}
+
+# case14 (#370): INT during a run stops the supervisor at once: exit 130, the
+# INT-ignoring walk child is gone (the handler escalates to TERM), one run
+# only. FAKE_SLEEP holds the fake inside run 1 when the INT lands. Job control
+# on for the launch, as in case12.
+case14() {
+  local d="$T/c14" rc runs sup walk super_path
+  mkdir -p "$d"
+  make_cmd "$d/cmd.txt" raid-walk zul_gurub --server s --slot 2 --holder H14 \
+    --sql /tmp/w.sql --out "$d/run0"
+  case "$SUPER_BIN" in
+    */*) super_path="$SUPER_BIN" ;;
+    *) super_path="$HERE/$SUPER_BIN" ;;
+  esac
+  set -m
+  FAKE_EXIT=19 FAKE_SLEEP=30 FAKE_IGNORE_INT=1 FAKE_ARGS_LOG="$d/args.log" FAKE_LEG="high_priest_venoxis" \
+    WALK_SUPER_WAIT=1 bash "$super_path" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log" &
+  sup=$!
+  set +m
+  sleep 2
+  walk="$(pgrep -f "fake-walk raid-walk.*H14" | head -n 1)"
+  [[ -n "$walk" ]] || { bad "case14 setup: no running fake walk found"; kill -9 "$sup" 2>/dev/null; wait "$sup" 2>/dev/null; return; }
+  kill -INT "$sup"
+  wait "$sup"
+  rc=$?
+  (( rc == 130 )) || { bad "case14 exit=$rc want 130"; kill -9 "$walk" 2>/dev/null; return; }
+  sleep 2
+  if kill -0 "$walk" 2>/dev/null; then
+    bad "case14 walk $walk still alive after INT (handler must forward and escalate)"
+    kill -9 "$walk" 2>/dev/null
+    return
+  fi
+  runs="$(runs_done "$d/args.log")"
+  (( runs == 1 )) || { bad "case14 runs=$runs want 1 (no restart after INT)"; return; }
+  ok "case14 INT during a run: exit 130, INT-ignoring walk dead, no second run"
+}
+
+# case15 (#370): TERM during a run stops the supervisor at once: exit 143, one
+# run only. Same shape as case14 with FAKE_IGNORE_INT unset (TERM needs no
+# escalation), other signal. $! is the supervisor itself (no wrapper).
+case15() {
+  local d="$T/c15" rc runs sup walk
+  mkdir -p "$d"
+  make_cmd "$d/cmd.txt" raid-walk zul_gurub --server s --slot 2 --holder H15 \
+    --sql /tmp/w.sql --out "$d/run0"
+  set -m
+  FAKE_EXIT=19 FAKE_SLEEP=30 FAKE_ARGS_LOG="$d/args.log" FAKE_LEG="high_priest_venoxis" \
+    WALK_SUPER_WAIT=1 bash "$SUPER_BIN" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log" &
+  sup=$!
+  set +m
+  sleep 2
+  walk="$(pgrep -f "fake-walk raid-walk.*H15" | head -n 1)"
+  [[ -n "$walk" ]] || { bad "case15 setup: no running fake walk found"; kill -9 "$sup" 2>/dev/null; wait "$sup" 2>/dev/null; return; }
+  kill -TERM "$sup"
+  wait "$sup"
+  rc=$?
+  (( rc == 143 )) || { bad "case15 exit=$rc want 143"; kill -9 "$walk" 2>/dev/null; return; }
+  sleep 2
+  if kill -0 "$walk" 2>/dev/null; then
+    bad "case15 walk $walk still alive after TERM (handler must forward)"
+    kill -9 "$walk" 2>/dev/null
+    return
+  fi
+  runs="$(runs_done "$d/args.log")"
+  (( runs == 1 )) || { bad "case15 runs=$runs want 1 (no restart after TERM)"; return; }
+  ok "case15 TERM during a run: exit 143, walk dead, no second run"
+}
+
 case7() {
   local d="$T/c7" rc runs d2="$T/c7b" rc2 runs2
   mkdir -p "$d"
@@ -435,6 +576,10 @@ main() {
   if (( run_all )) || [[ "$only" == *" 9 "* ]]; then case9; fi
   if (( run_all )) || [[ "$only" == *" 10 "* ]]; then case10; fi
   if (( run_all )) || [[ "$only" == *" 11 "* ]]; then case11; fi
+  if (( run_all )) || [[ "$only" == *" 12 "* ]]; then case12; fi
+  if (( run_all )) || [[ "$only" == *" 13 "* ]]; then case13; fi
+  if (( run_all )) || [[ "$only" == *" 14 "* ]]; then case14; fi
+  if (( run_all )) || [[ "$only" == *" 15 "* ]]; then case15; fi
   if (( run_all )); then mutation; mutation2; fi
   printf -- '----\nPASS=%d FAIL=%d\n' "$PASS" "$FAIL"
   (( FAIL == 0 ))

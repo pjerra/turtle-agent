@@ -7,7 +7,12 @@
 # <cmd-file>: one line, the full `turtle-agent raid-walk ...` command
 #   (see tests/raid-zg-walk23/cmd-*.txt). Its --out DIR names the first run's folder.
 # Runs the command, waits for it, reads its exit code. The run's own stdout+stderr pass through to ours (so the
-# operator sees the refusal) via a pipe to `tee`; the loop reads the command's exit code from `${PIPESTATUS[0]}`.
+# operator sees the refusal) via a pipe to `tee`; the backgrounded pipeline's exit-status file reports the walk's
+# own code (`wait` on a background pipeline only reports tee's, so PIPESTATUS is unavailable there).
+# Signals stop the supervisor at once, during a run and during the step-6 wait alike (#370): INT removes the temp
+# dir, forwards the signal to the running child walk (and the wait-sleep, and tee so the pipe drains), and exits
+# 130; TERM does the same and exits 143. EXIT only removes the temp dir. Backgrounded children ignore SIGINT with
+# job control off, so the INT handler escalates to TERM after forwarding INT: no ghost walk survives us.
 # An exit-2 line naming `pass --from "step N"` is also written into the restarts log (walk 26c: the placed Jeklik
 # restart was refused for no quiet move row, and the log only said "exit 2 is not 18/19").
 #   exit 0, or any code other than 18/19: stop, log, exit with that code.
@@ -74,6 +79,63 @@ ARGS=("$@")
 
 wait_secs="${WALK_SUPER_WAIT:-20}"
 mkdir -p -- "$(dirname -- "$restart_log")"
+walkpid=""
+pipejob=""
+waitpid=""
+run_dir=""
+rc_file=""
+
+# Signal handling (#370): Ctrl-C / SIGTERM stop the supervisor at once, during
+# a run and during the step-6 wait alike. EXIT only removes the temp dir.
+# INT removes it too, forwards the signal to the running child walk (its pid),
+# the wait-sleep and tee so the pipe drains, then exits 130; TERM does the
+# same and exits 143. The run pipeline waits in the background (see the loop),
+# so these traps fire at once instead of after the foreground child exits.
+# Backgrounded pipeline children ignore SIGINT with job control off, so the
+# INT handler escalates to TERM on the walk and tee after forwarding INT:
+# no ghost walk survives us.
+cleanup_tmp() {
+  [[ -n "${run_dir:-}" ]] && rm -rf -- "$run_dir"
+}
+child_pids() {
+  local pids="" j
+  [[ -n "${walkpid:-}" ]] && pids="$pids $walkpid"
+  [[ -n "${pipejob:-}" ]] && pids="$pids $pipejob"
+  [[ -n "${waitpid:-}" ]] && pids="$pids $waitpid"
+  j="$(jobs -p 2>/dev/null || true)"
+  [[ -n "$j" ]] && pids="$pids $j"
+  printf '%s' "$pids"
+}
+on_int() {
+  local pids
+  pids="$(child_pids)"
+  # shellcheck disable=SC2086
+  kill -INT $pids 2>/dev/null || true
+  # `sleep` (and backgrounded pipeline children generally) ignore SIGINT with
+  # job control off, so escalate: TERM the whole subtree — waitpid's sleep,
+  # the inner walk shell's children (pkill -P), the inner shell, and tee —
+  # then reap. Without this the trailing `wait` stalls until the sleep or
+  # walk exits on its own (a wait-phase INT took the full WALK_SUPER_WAIT).
+  [[ -n "${walkpid:-}" ]] && pkill -TERM -P "$walkpid" 2>/dev/null || true
+  [[ -n "${pids:-}" ]] && kill -TERM $pids 2>/dev/null || true
+  wait 2>/dev/null || true
+  [[ -n "${run_dir:-}" ]] && rm -rf -- "$run_dir"
+  exit 130
+}
+on_term() {
+  local pids
+  pids="$(child_pids)"
+  # shellcheck disable=SC2086
+  [[ -n "${walkpid:-}" ]] && pkill -TERM -P "$walkpid" 2>/dev/null || true
+  [[ -n "${pids:-}" ]] && kill -TERM $pids 2>/dev/null || true
+  wait 2>/dev/null || true
+  [[ -n "${run_dir:-}" ]] && rm -rf -- "$run_dir"
+  exit 143
+}
+trap cleanup_tmp EXIT
+trap on_int INT
+trap on_term TERM
+
 
 log_event() {
   local line
@@ -252,9 +314,21 @@ while true; do
 	cmdstr="$(printf '%q ' "${ARGS[@]}")"
 	run_dir="$(mktemp -d "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/walk-super-run.XXXXXX" 2>/dev/null || mktemp -d "${out:-${TMPDIR:-/tmp}}/walk-super-run.XXXXXX")"
 	run_out="$run_dir/run.out"
-	trap 'rm -rf -- "$run_dir"' EXIT INT TERM
-	nice -n 10 bash -c "$cmdstr" 2>&1 | tee "$run_out"
-	rc=${PIPESTATUS[0]}
+	rc_file="$run_dir/rc"
+	# In the background so a trapped INT/TERM fires at once (#370): a
+	# foreground pipeline would defer the trap until the child exits. The
+	# outer `wait` reports tee's status, so the walk's own code arrives
+	# through the rc file instead of PIPESTATUS.
+	{ nice -n 10 bash -c "$cmdstr" 2>&1; printf '%s' "$?" >"$rc_file"; } | tee "$run_out" &
+	pipejob=$!
+	walkpid="$(jobs -p | head -n 1)"
+	[[ -n "$walkpid" && "$walkpid" != "$pipejob" ]] || walkpid="$pipejob"
+	wait "$pipejob"
+	rc=0
+	[[ -f "$rc_file" ]] && rc="$(cat -- "$rc_file")"
+	[[ "$rc" =~ ^[0-9]+$ ]] || rc=0
+	walkpid=""
+	pipejob=""
 	run_reason="$(reason_of_runout "$run_out" || true)"
 
   out="$(opt_value out || true)"
@@ -302,7 +376,10 @@ while true; do
       restarts_done=$((restarts_done + 1))
       new_out="${base_out}-r${restarts_done}"
       log_event "run $run_no exit $rc leg <none> out $out restarting as run $((run_no + 1)) out $new_out (restart $restarts_done/$max_restarts): place failed before the run started (no TBM:RUN), retrying the same command"
-      sleep "$wait_secs"
+      sleep "$wait_secs" &
+      waitpid=$!
+      wait "$waitpid"
+      waitpid=""
       swap_out_cmd "$new_out"
       run_no=$((run_no + 1))
       continue
@@ -331,7 +408,10 @@ while true; do
   restarts_done=$((restarts_done + 1))
   new_out="${base_out}-r${restarts_done}"
   log_event "run $run_no exit $rc leg $leg out $out restarting as run $((run_no + 1)) out $new_out (restart $restarts_done/$max_restarts)"
-  sleep "$wait_secs"
+  sleep "$wait_secs" &
+  waitpid=$!
+  wait "$waitpid"
+  waitpid=""
 
   rebuild_cmd "$new_out" "$leg"
   run_no=$((run_no + 1))
