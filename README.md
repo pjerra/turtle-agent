@@ -2890,6 +2890,9 @@ with it (a new hire has no saved instance and is online). `hire` is optional and
    **portal ground** (inside 15 yd of the plan's `portal` point and more than 5 yd off its z: the hires appear and muster where the commander stands,
    and a plan's portal is the instance's own ground) and a commander of the **other team** than the run's `team` (the module hires the commander's own
    faction, so a mismatched commander would only get hires that fight for the other side; start the run from a commander of that team, or drop `team`).
+   A height the server has not sent yet (`status.z_unknown`: the guess after a GM teleport, a climb or a landing) does not decide the portal ground:
+   inside those 15 yd the step waits up to 10 s for the server's own position and then refuses with "hire: commander height unknown near the portal"
+   when it never arrives; farther out an unknown height does not matter.
    A game that gives no agent position (nothing on the real commander) skips the portal check and notes it. No option turns either refusal off: move the
    commander.
 

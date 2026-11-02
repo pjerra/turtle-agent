@@ -86,7 +86,7 @@ func raidPresetOf(plan string) string {
 
 // raidHire is the prepare step `party: hire` on a raid plan. It dispatches from (e *prepEnv) hire by the plan's kind.
 func (e *prepEnv) raidHire(ctx context.Context) (string, error) {
-	if p := e.hireSpotProblem(); p != "" {
+	if p := e.hireSpotProblem(ctx); p != "" {
 		return "", errors.New(p)
 	}
 	hg, ok := e.g.(HireGame)

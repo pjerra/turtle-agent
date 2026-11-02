@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The hire spot refusals (#266): hires appear at the commander and muster there, so the commander must not stand under the portal's
@@ -15,12 +16,23 @@ const portalMap = 1
 var portalPoint = Point{X: 1818.4, Y: -4427.26, Z: -10.4478}
 
 // hirePosFake is the hire fake with a game that knows where the commander stands (AgentPositioner); a plain hireFake gives none.
+// zUnknown models a height the server has not sent yet (session.StatusInfo.ZUnknown): guessZ stands in for it until knownAt (zero: never).
 type hirePosFake struct {
 	*hireFake
-	pos Point
+	pos      Point
+	zUnknown bool
+	guessZ   float32
+	knownAt  time.Time
 }
 
-func (g *hirePosFake) AgentPosition() Point { return g.pos }
+func (g *hirePosFake) AgentPosition() (Point, bool) {
+	p := g.pos
+	if g.zUnknown && (g.knownAt.IsZero() || g.now.Before(g.knownAt)) {
+		p.Z = g.guessZ
+		return p, false
+	}
+	return p, true
+}
 
 // hireSpotEnv is the prepare environment of the hire step over a plan, the way remote_prepare.go builds it.
 func hireSpotEnv(g *hireFake, own Preparer, note func(string)) *prepEnv {
@@ -43,6 +55,69 @@ func TestHireRefusesUnderThePortal(t *testing.T) {
 	}
 	if len(g.hireLines) != 0 || g.count("cbind") != 0 {
 		t.Fatalf("a hire under the portal still hired: hires %v, binds %d", g.hireLines, g.count("cbind"))
+	}
+}
+
+// A guessed height near the portal never decides the hire, not even when it says the ground is safe: the step waits for the server's own
+// position, and a height that never arrives refuses the hire.
+func TestHireRefusesUnknownHeightNearThePortal(t *testing.T) {
+	g := newHireFake(t)
+	g.agentMap = portalMap
+	g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
+	began := g.now
+	// The guess sits on the portal ground; the true height is under it, the way a GM teleport's guess hides the drop.
+	pos := &hirePosFake{hireFake: g, pos: Point{X: 1821.5, Y: -4425.3, Z: -19.8}, zUnknown: true, guessZ: -15.0}
+	var notes []string
+	e := hireSpotEnv(g, pos, func(s string) { notes = append(notes, s) })
+	_, err := e.hire(context.Background())
+	if err == nil || err.Error() != "hire: commander height unknown near the portal" {
+		t.Fatalf("a hire with an unknown height near the portal: %v", err)
+	}
+	if d := g.now.Sub(began); d < hireSpotZWait {
+		t.Fatalf("the wait for the server's own height: %v, want at least %v", d, hireSpotZWait)
+	}
+	if len(g.hireLines) != 0 || g.count("cbind") != 0 {
+		t.Fatalf("a hire with an unknown height still hired: hires %v, binds %d", g.hireLines, g.count("cbind"))
+	}
+	if !strings.Contains(strings.Join(notes, "\n"), "height is unknown near the portal") {
+		t.Fatalf("the wait for the height is not noted: %v", notes)
+	}
+}
+
+// The height arrives within the wait: the spot is judged on the server's position, not on the guess (the guess said the portal ground, the
+// server's own height said under it).
+func TestHireSpotWaitsForTheKnownHeight(t *testing.T) {
+	g := newHireFake(t)
+	g.agentMap = portalMap
+	g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
+	began := g.now
+	pos := &hirePosFake{hireFake: g, pos: Point{X: 1821.5, Y: -4425.3, Z: -19.8}, zUnknown: true, guessZ: -15.0, knownAt: began.Add(2 * time.Second)}
+	e := hireSpotEnv(g, pos, func(string) {})
+	_, err := e.hire(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "portal ground") || !strings.Contains(err.Error(), "below") {
+		t.Fatalf("a hire judged when the height arrived: %v", err)
+	}
+	if d := g.now.Sub(began); d < 2*time.Second || d >= 3*time.Second {
+		t.Fatalf("the wait for the height: %v, want about 2 s", d)
+	}
+	if len(g.hireLines) != 0 || g.count("cbind") != 0 {
+		t.Fatalf("a hire under the portal still hired: hires %v, binds %d", g.hireLines, g.count("cbind"))
+	}
+}
+
+// Far from the portal an unknown height costs nothing: the drop under the portal is not the spot, so no wait and no refusal.
+func TestHireSpotUnknownHeightFarFromThePortal(t *testing.T) {
+	g := newHireFake(t)
+	g.agentMap = portalMap
+	g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
+	began := g.now
+	pos := &hirePosFake{hireFake: g, pos: Point{X: 1838.4, Y: -4427.26, Z: -19.4478}, zUnknown: true, guessZ: -30}
+	e := hireSpotEnv(g, pos, func(string) {})
+	if p := e.hireSpotProblem(context.Background()); p != "" {
+		t.Fatalf("an unknown height far from the portal: %s", p)
+	}
+	if d := g.now.Sub(began); d != 0 {
+		t.Fatalf("an unknown height far from the portal waited %v", d)
 	}
 }
 
@@ -100,7 +175,7 @@ func TestHireSpotAllows(t *testing.T) {
 			g.plan.Portal = c.portal
 			e := hireSpotEnv(g, &hirePosFake{hireFake: g, pos: c.pos}, func(string) {})
 			e.team = c.team
-			if p := e.hireSpotProblem(); p != "" {
+			if p := e.hireSpotProblem(context.Background()); p != "" {
 				t.Errorf("the spot is allowed: %s", p)
 			}
 		})
@@ -114,7 +189,7 @@ func TestHireSpotWithoutPosition(t *testing.T) {
 	g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
 	var notes []string
 	e := hireSpotEnv(g, g, func(s string) { notes = append(notes, s) })
-	if p := e.hireSpotProblem(); p != "" {
+	if p := e.hireSpotProblem(context.Background()); p != "" {
 		t.Fatalf("a game without an agent position refused the spot: %s", p)
 	}
 	if !strings.Contains(strings.Join(notes, "\n"), "the portal ground is not checked") {
