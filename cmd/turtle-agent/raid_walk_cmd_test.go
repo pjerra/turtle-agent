@@ -4184,14 +4184,14 @@ func TestRaidWalkSlotListRoutesToPair(t *testing.T) {
 	})
 }
 
-func TestRaidWalkCountsPullJoinersFromFrames(t *testing.T) {
+// joinerWalk runs a walk whose pull is step 2 of onyxias_lair (the pull row
+// at 49.8, -114.6, radius 10), with the given hostiles in every frame.
+func joinerWalk(t *testing.T, hostiles []tbm.HostileRec) *fixture {
+	t.Helper()
 	f := newFixture(t)
-	f.agent.startReply = startAt("onyxias_lair", 10)
-	// The pull line names pack A (guid 0xF130001, entry 10184); frames then
-	// show 3 engaged units of pack B (entry 10185) inside 10 s: the pull note
-	// says "joiners 3".
+	f.agent.startReply = startAt("onyxias_lair", 1)
 	f.agent.startQueue = []queuedEvent{
-		{raw: "TBM:RUN|onyxias_lair|running|11/29|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 29)"},
+		{raw: "TBM:RUN|onyxias_lair|running|2/29|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 29)"},
 		{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands|until boss (step 29)"},
 	}
 	polls := 0
@@ -4203,24 +4203,71 @@ func TestRaidWalkCountsPullJoinersFromFrames(t *testing.T) {
 			f.clock.mu.Unlock()
 		}
 	}
-	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
-		return []tbm.HostileRec{
-			{GUID: 0xF130002C6C00C24B, Entry: 12129, HPPct: 90, Target: packet.GUID(1000)},
-			{GUID: 0xF130101, Entry: 12130, HPPct: 100, Target: packet.GUID(1001)},
-			{GUID: 0xF130102, Entry: 12130, HPPct: 100, Target: packet.GUID(1002)},
-			{GUID: 0xF130103, Entry: 12130, HPPct: 100, Target: packet.GUID(1000)},
-		}
-	}
-	code := f.run(context.Background())
-	if code != exitOK {
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec { return hostiles }
+	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
 	}
+	return f
+}
+
+// readPullJoiners reads the walk's per-pull joiner record.
+func readPullJoiners(t *testing.T, dir string) []raidwalk.PullJoiners {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(dir, raidwalk.PullJoinersFName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recs []raidwalk.PullJoiners
+	if err := json.Unmarshal(raw, &recs); err != nil {
+		t.Fatal(err)
+	}
+	return recs
+}
+
+func TestRaidWalkCountsPullJoinersFromFrames(t *testing.T) {
+	// The pulled unit is at the pull row's point; a mate 5 yd off is the rest
+	// of the pack and never counts, while 3 engaged units of another pack
+	// inside the 10 s window do: the record says 3.
+	f := joinerWalk(t, []tbm.HostileRec{
+		{GUID: 0xF130002C6C00C24B, Entry: 12129, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)},
+		{GUID: 0xF130002, Entry: 12129, X: 53.0, Y: -114.6, HPPct: 100, Target: packet.GUID(1000)},
+		{GUID: 0xF130101, Entry: 12130, X: 0, Y: 0, HPPct: 100, Target: packet.GUID(1001)},
+		{GUID: 0xF130102, Entry: 12130, X: 0, Y: 0, HPPct: 100, Target: packet.GUID(1002)},
+		{GUID: 0xF130103, Entry: 12130, X: 0, Y: 0, HPPct: 100, Target: packet.GUID(1000)},
+	})
 	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "joiners 3") {
-		t.Fatalf("no joiners note in run.log:\n%s", raw)
+	if !strings.Contains(string(raw), "step 2: joiners 3") {
+		t.Fatalf("no step-keyed joiners line in run.log:\n%s", raw)
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 1 || recs[0].Step != 2 || recs[0].Count != 3 || len(recs[0].GUIDs) != 3 {
+		t.Fatalf("pulljoiners.json %+v, want one step-2 record with 3 guids", recs)
+	}
+}
+
+// A neighbouring pack with the same entry as the pulled pack still joins: the
+// pack is owned by spawn guid and position, not by creature entry.
+func TestRaidWalkCountsSameEntryNeighbourAsJoiner(t *testing.T) {
+	f := joinerWalk(t, []tbm.HostileRec{
+		{GUID: 0xF130002C6C00C24B, Entry: 12129, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)},
+		{GUID: 0xF130002, Entry: 12129, X: 53.0, Y: -114.6, HPPct: 100, Target: packet.GUID(1000)}, // pack mate
+		// The next pull group's pack, 106 yd off, same entry 12129: joiners.
+		{GUID: 0xF130501, Entry: 12129, X: -52.9, Y: -96.9, HPPct: 100, Target: packet.GUID(1001)},
+		{GUID: 0xF130502, Entry: 12129, X: -53.1, Y: -97.0, HPPct: 100, Target: packet.GUID(1000)},
+	})
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "step 2: joiners 2") {
+		t.Fatalf("no same-entry joiners line in run.log:\n%s", raw)
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 1 || recs[0].Step != 2 || recs[0].Count != 2 {
+		t.Fatalf("pulljoiners.json %+v, want one step-2 record with 2 guids", recs)
 	}
 }
 

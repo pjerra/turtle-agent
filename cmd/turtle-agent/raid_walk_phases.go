@@ -1168,28 +1168,50 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 
 // pullStarted arms the pull-joiners window when a "pulling <entry> <guid>" status
 // line goes by: 10 s in which frames count the engaged hostiles that are not the
-// pulled pack (raidwalk.JoinersOfPull). The pack is the plan rows' entries for
-// the pull/boss step with the same step number.
+// pulled pack. The pack is the pulled guid plus the plan pack's other members:
+// every guid whose frame position stands within the row's radius of the pack
+// centroid (w.pullRow).
 func (w *walk) pullStarted(now time.Time, st tbm.RunStatus) {
-	entry, _, ok := raidwalk.PullingTarget(raidwalk.CleanLine(st.Note))
+	_, guid, ok := raidwalk.PullingTarget(raidwalk.CleanLine(st.Note))
 	if !ok {
 		return
 	}
-	w.pullPackEN = map[uint32]bool{entry: true}
-	if st.Step >= 1 && st.Step <= len(w.rows.Steps) {
-		if s := w.rows.Steps[st.Step-1]; s.Kind == planexport.KindPull || s.Kind == planexport.KindBoss {
-			for _, e := range s.Entries {
-				w.pullPackEN[e] = true
-			}
-		}
-	}
+	w.pullPack = map[packet.GUID]bool{guid: true}
+	w.pullSeed = guid
+	w.pullRow = packRowOf(w.rows, st.Step)
+	w.pullPackSeeded = false
 	w.pullJoinsAt, w.pullJoinsStep = now, st.Step
 	w.pullJoinsSeen = map[packet.GUID]bool{}
 }
 
+// packRowOf is the plan pack of the pull step: the centroid and radius of its
+// pull/boss row, for ownership of the pack's other members.
+func packRowOf(rows planexport.Rows, step int) raidwalk.PackRow {
+	if step < 1 || step > len(rows.Steps) {
+		return raidwalk.PackRow{}
+	}
+	s := rows.Steps[step-1]
+	if s.Kind != planexport.KindPull && s.Kind != planexport.KindBoss {
+		return raidwalk.PackRow{}
+	}
+	return raidwalk.PackRow{HasRow: true, CX: s.X, CY: s.Y, Radius: raidwalk.RowRadius(s.Kind, s.Radius)}
+}
+
+func (w *walk) packPositions() map[packet.GUID][3]float32 {
+	out := make(map[packet.GUID][3]float32, len(w.hostiles))
+	for gs, h := range w.hostiles {
+		g, err := packet.ParseGUID(gs)
+		if err != nil || g == 0 {
+			continue
+		}
+		out[g] = [3]float32{h.x, h.y, h.z}
+	}
+	return out
+}
+
 // pullFramed counts one frame toward the armed pull: every engaged hostile
-// whose entry is not the pulled pack's joins the seen set. 10 s after the pull
-// the count is final: the note names it ("joiners N (guids...)") and the
+// outside the pulled pack's guids joins the seen set. 10 s after the pull
+// the count is final: the record is written keyed by the pull step and the
 // window closes. A newer pull re-arms first (pullStarted runs on the status
 // lines of the same poll before the frame).
 func (w *walk) pullFramed(now time.Time, f *tbm.ViewFrame) {
@@ -1203,8 +1225,17 @@ func (w *walk) pullFramed(now time.Time, f *tbm.ViewFrame) {
 	if w.pullJoinsSeen == nil {
 		w.pullJoinsSeen = map[packet.GUID]bool{}
 	}
+	// The first frame of the window sees the pack where it was pulled from
+	// (trackFrame already recorded this frame's positions): its other members
+	// are the guids within the pull row's radius, whatever their entry.
+	if !w.pullPackSeeded {
+		w.pullPackSeeded = true
+		for _, g := range raidwalk.PullPackMembers(w.pullSeed, w.pullRow, w.packPositions()) {
+			w.pullPack[g] = true
+		}
+	}
 	for _, h := range f.EngagedHostiles() {
-		if h.GUID == 0 || w.pullPackEN[h.Entry] {
+		if h.GUID == 0 || w.pullPack[h.GUID] {
 			continue
 		}
 		w.pullJoinsSeen[h.GUID] = true
@@ -1212,7 +1243,8 @@ func (w *walk) pullFramed(now time.Time, f *tbm.ViewFrame) {
 }
 
 // pullJoinersFlush closes the pull window once 10 s passed (or the watch ends:
-// force at the run's end): the note names the count ("joiners N (guids...)").
+// force at the run's end): the joiners record is written keyed by the pull
+// step, where the report reads it.
 func (w *walk) pullJoinersFlush(now time.Time) {
 	if w.pullJoinsAt.IsZero() {
 		return
@@ -1220,19 +1252,22 @@ func (w *walk) pullJoinersFlush(now time.Time) {
 	if !now.IsZero() && now.Sub(w.pullJoinsAt) < raidwalk.JoinWindow {
 		return
 	}
+	// pullFramed never adds a pack guid to the seen set: what it holds is the joiners.
 	guids := make([]packet.GUID, 0, len(w.pullJoinsSeen))
 	for g := range w.pullJoinsSeen {
-		entry := uint32(g.Entry())
-		if !w.pullPackEN[entry] {
-			guids = append(guids, g)
-		}
+		guids = append(guids, g)
 	}
-	if note := raidwalk.JoinersNote(guids); note != "" {
+	rec := raidwalk.SortJoinerGUIDs(guids)
+	w.pullJoins = append(w.pullJoins, raidwalk.PullJoiners{Step: w.pullJoinsStep, At: w.pullJoinsAt, Count: len(rec), GUIDs: rec})
+	if note := raidwalk.JoinersNote(rec); note != "" {
 		w.note("step %d: %s", w.pullJoinsStep, note)
-		w.logLine(w.env.now(), note)
+		w.logLine(w.env.now(), raidwalk.PullJoinersLine(w.pullJoinsStep, rec))
 	}
 	w.pullJoinsAt = time.Time{}
-	w.pullPackEN = nil
+	w.pullSeed = 0
+	w.pullRow = raidwalk.PackRow{}
+	w.pullPackSeeded = false
+	w.pullPack = nil
 	w.pullJoinsSeen = nil
 }
 

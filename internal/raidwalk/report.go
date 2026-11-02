@@ -186,6 +186,14 @@ func ResolveLog(lines []LogLine, clockOffset time.Duration, firstFight time.Time
 	}
 }
 
+// attachPullJoiners hangs the walk's structured joiner record on its pull.
+func attachPullJoiners(p *ReportPull, j PullJoiners) {
+	p.JoinersSeen = j.Count
+	for _, g := range j.GUIDs {
+		p.JoinerGUIDs = append(p.JoinerGUIDs, g.String())
+	}
+}
+
 // ReportOptions are the choices of a report.
 type ReportOptions struct {
 	// Spells are the enemy spell ids whose casts get a row each, with the deaths within Window.
@@ -194,6 +202,8 @@ type ReportOptions struct {
 	Window time.Duration
 	// ClockOffset is how far the run log's clock is ahead of UTC.
 	ClockOffset time.Duration
+	// PullJoins is the walk's structured per-pull joiner record (pulljoiners.json), keyed by pull step.
+	PullJoins map[int]PullJoiners
 }
 
 // Report is the JSON of a walk report.
@@ -306,6 +316,11 @@ type ReportPull struct {
 	PullLineAt        time.Time    `json:"pull_line_at,omitempty"`
 	Joins             []ReportJoin `json:"neighbour_joins"`
 	JoinersExpected   string       `json:"joiners_expected,omitempty"`
+	// JoinersSeen is the frames' own count of engaged hostiles outside the
+	// pulled pack within 10 s of the pull, from the walk's structured per-pull
+	// record (pulljoiners.json, keyed by the pull step).
+	JoinersSeen int      `json:"joiners_seen,omitempty"`
+	JoinerGUIDs []string `json:"joiner_guids,omitempty"`
 	// StandWaitS is the time from the first stand-pull status line of the pull to its "pulling" line (to the fight's start without one).
 	StandWaitS float64      `json:"stand_wait_s"`
 	StandRuns  []StandRun   `json:"stand_pull"`
@@ -445,9 +460,13 @@ func BuildReport(fights []ReportFight, log []LogLine, opt ReportOptions) *Report
 			if p.ContactBeforePull != nil && *p.ContactBeforePull {
 				rep.Totals.ContactBeforePull++
 			}
-			if len(p.Joins) > 0 {
-				rep.Totals.FightsWithJoins++
-			}
+		}
+		if j, ok := opt.PullJoins[f.Step]; ok {
+			attachPullJoiners(&p, j)
+		}
+		// One pull with a neighbour joining, whether the run log's status lines or the frames saw it.
+		if len(p.Joins) > 0 || p.JoinersSeen > 0 {
+			rep.Totals.FightsWithJoins++
 		}
 		rep.Pulls = append(rep.Pulls, p)
 	}
