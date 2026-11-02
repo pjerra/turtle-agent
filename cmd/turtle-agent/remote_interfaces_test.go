@@ -12,6 +12,7 @@ import (
 // driver asserts is listed here, so a new one that remoteGame lacks fails the build.
 var (
 	_ dungeon.RemoteGame       = remoteGame{}
+	_ dungeon.AgentPositioner  = remoteGame{}
 	_ dungeon.AgentHands       = remoteGame{}
 	_ dungeon.AreaTriggerGame  = remoteGame{}
 	_ dungeon.BotLiner         = remoteGame{}

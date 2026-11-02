@@ -473,6 +473,22 @@ func (f *hireFlow) run(ctx context.Context) (string, error) {
 		}
 	}
 	standing := f.bindingStands(bound, keep, drop)
+	missing := false
+	for i := range f.slots {
+		if keep[i] == nil {
+			missing = true
+			break
+		}
+	}
+	if !standing && missing {
+		// Nothing new is hired when every slot is kept (only the bind is redone), so the spot the kept binding stands on cannot take
+		// a fresh hire anywhere. Otherwise the check comes before anything is dismissed, hired or bound.
+		if p, err := e.hireSpotProblem(ctx); err != nil {
+			return "", err
+		} else if p != "" {
+			return "", errors.New(p)
+		}
+	}
 	if bound.Answered && !standing {
 		if err := e.unbindCommander(ctx); err != nil {
 			return "", err
