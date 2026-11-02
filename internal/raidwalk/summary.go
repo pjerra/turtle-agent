@@ -3,25 +3,29 @@ package raidwalk
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // Summary is the tb-raid-walk v1 file written to <out>/summary.json.
 type Summary struct {
-	Format     string  `json:"format"`
-	Version    int     `json:"version"`
-	Plan       string  `json:"plan"`
-	Map        uint32  `json:"map"`
-	Server     string  `json:"server"`
-	Slot       int     `json:"slot"`
-	Character  string  `json:"character"`
-	Until      string  `json:"until"`
-	From       string  `json:"from"`
-	Speed      float64 `json:"speed"`
-	TestSpeed  bool    `json:"test_speed"`
-	RowsSHA256 string  `json:"rows_sha256"`
-	UntilStep  int     `json:"until_step"`
+	Format    string `json:"format"`
+	Version   int    `json:"version"`
+	Plan      string `json:"plan"`
+	Map       uint32 `json:"map"`
+	Server    string `json:"server"`
+	Slot      int    `json:"slot"`
+	Character string `json:"character"`
+	Until     string `json:"until"`
+	// UntilEffective is the until the --place route guard shortened to, when it shortened (empty otherwise): Until
+	// stays what the user asked for.
+	UntilEffective string  `json:"until_effective,omitempty"`
+	From           string  `json:"from"`
+	Speed          float64 `json:"speed"`
+	TestSpeed      bool    `json:"test_speed"`
+	RowsSHA256     string  `json:"rows_sha256"`
+	UntilStep      int     `json:"until_step"`
 	// RunLabel is the newest speed/until label the run's status lines carried ("speed 2.0 (test); until boss (step 41)");
 	// SpeedFellBack says the server's test speed went back to 1.0 once a real player joined.
 	RunLabel      string           `json:"run_label,omitempty"`
@@ -47,9 +51,82 @@ type Summary struct {
 	Teardown      TeardownSummary  `json:"teardown"`
 	// Place is the `place` object of a `--place` walk (spec 5.11): the start step the raid was put at, the instance, the
 	// cleared circles and the result. Absent without --place.
-	Place    *PlaceSummary `json:"place,omitempty"`
-	ExitCode int           `json:"exit_code"`
-	Notes    []string      `json:"notes"`
+	Place *PlaceSummary `json:"place,omitempty"`
+	// ReviveRefusal is what kept the revive point from going quiet when the walk gave up on it (D-D, walk 25). Absent
+	// when the walk never refused a revive.
+	ReviveRefusal *ReviveRefusal `json:"revive_refusal,omitempty"`
+	ExitCode      int            `json:"exit_code"`
+	Notes         []string       `json:"notes"`
+}
+
+// ReviveRefusal is the summary's `revive_refusal` object (D-D): the walk's revive never found a quiet point, ended
+// there (exit 19, "not revived: <why>"), and this says what blocked it and for how long.
+type ReviveRefusal struct {
+	WipeStep int `json:"wipe_step"`
+	// StartStep is the step of the revive point the walk actually used: the placement's staged start with --place,
+	// else the first positioned row of the plan (review round 1, Opus L3: a plain --from walk revives at the plan's
+	// own first point, whatever step the run is started on).
+	StartStep int `json:"start_step"`
+	// TriedSteps are the revive points the walk read, in order. It is the start step alone: D-B's passed steps are not
+	// implemented (the walk revives at the start, or at the placement's point).
+	TriedSteps []int `json:"tried_steps"`
+	// EntranceTried says the entrance fallback's `.go xyz` went out (review round 1, Opus L3): true while the walk
+	// refused at the entrance, whether its go landed or not.
+	EntranceTried bool `json:"entrance_tried"`
+	// WaitedS is how long the revive waited for the point to go quiet: the 120 s check plus the D-C re-reads, in
+	// seconds, from the first read.
+	WaitedS  int             `json:"waited_s"`
+	Blockers []ReviveBlocker `json:"blockers"`
+	// AllIdle says every last blocker of the last read was idle (not in combat, no target, not moving): waiting would
+	// not have helped.
+	AllIdle bool `json:"all_idle"`
+}
+
+// ReviveBlocker is one blocker of a refusal, as the last read saw it.
+type ReviveBlocker struct {
+	Entry uint32  `json:"entry"`
+	Name  string  `json:"name"`
+	Dist  float64 `json:"dist"`
+	Idle  bool    `json:"idle"`
+	// InCombat is the unit's UNIT_FLAG_IN_COMBAT: the state that keeps the 45 yd rule on it.
+	InCombat bool `json:"in_combat"`
+	// Patrol marks a --patrols patrol rather than a unit (entry 0, no combat): only its path blocks.
+	Patrol bool `json:"patrol,omitempty"`
+}
+
+// Line is summary.txt's one-line refusal, under the walk's end.
+func (r *ReviveRefusal) Line() string {
+	steps := make([]string, 0, len(r.TriedSteps))
+	for _, s := range r.TriedSteps {
+		steps = append(steps, strconv.Itoa(s))
+	}
+	bs := make([]string, 0, len(r.Blockers))
+	for _, b := range r.Blockers {
+		part := fmt.Sprintf("%s %.1f yd", b.Name, b.Dist)
+		if b.Entry != 0 {
+			part = fmt.Sprintf("%d %s", b.Entry, part)
+		}
+		switch {
+		case b.Patrol:
+			part += " patrol"
+		case b.Idle:
+			part += " idle"
+		case b.InCombat:
+			part += " in combat"
+		default:
+			part += " not idle"
+		}
+		bs = append(bs, part)
+	}
+	if len(bs) == 0 {
+		bs = append(bs, "none")
+	}
+	entrance := ""
+	if r.EntranceTried {
+		entrance = ", entrance tried"
+	}
+	return fmt.Sprintf("revive refusal: wipe step %d, tried %s%s, waited %d:%02d, blockers %s",
+		r.WipeStep, strings.Join(steps, "/"), entrance, r.WaitedS/60, r.WaitedS%60, strings.Join(bs, "; "))
 }
 
 // PlaceSummary is the summary's `place` object (spec 5.11).
@@ -81,6 +158,7 @@ type PlaceCircleSummary struct {
 	Skipped []string `json:"skipped,omitempty"`
 	PerUnit bool     `json:"per_unit,omitempty"`
 	Unit    uint32   `json:"unit,omitempty"`
+	Sweep   bool     `json:"sweep,omitempty"`
 	Moved   bool     `json:"moved,omitempty"`
 }
 
@@ -179,9 +257,11 @@ type SummaryMeta struct {
 	Slot      int
 	Character string
 	Until     string
-	From      string
-	Speed     float64
-	TestSpeed bool
+	// UntilEffective is the until a --place walk's route guard shortened to (F5, D8): empty when it did not shorten.
+	UntilEffective string
+	From           string
+	Speed          float64
+	TestSpeed      bool
 	// RowsSHA256 is the hex sha256 of planexport.WriteSQL of the walk's rows: the plan the run walked.
 	RowsSHA256 string
 	// UntilStep is the step of the start line's until label (0 when unknown or no until).
@@ -206,48 +286,52 @@ type SummaryMeta struct {
 	Dashboard      string
 	Teardown       TeardownSummary
 	// Place is the --place walk's place object (nil without --place).
-	Place    *PlaceSummary
-	ExitCode int
-	Notes    []string
+	Place *PlaceSummary
+	// ReviveRefusal is the walk's revive_refusal (nil when no revive was refused).
+	ReviveRefusal *ReviveRefusal
+	ExitCode      int
+	Notes         []string
 }
 
 // BuildSummary fills the tb-raid-walk v1 summary from the tracker and the command's own facts.
 func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 	s := &Summary{
-		Format:        "tb-raid-walk",
-		Version:       1,
-		Plan:          m.Plan,
-		Map:           m.Map,
-		Server:        m.Server,
-		Slot:          m.Slot,
-		Character:     m.Character,
-		Until:         m.Until,
-		From:          m.From,
-		Speed:         m.Speed,
-		TestSpeed:     m.TestSpeed,
-		RowsSHA256:    m.RowsSHA256,
-		UntilStep:     m.UntilStep,
-		RunLabel:      m.RunLabel,
-		SpeedFellBack: m.SpeedFellBack,
-		Layout:        m.Layout,
-		Started:       m.Started,
-		Ended:         m.Ended,
-		EndReason:     m.EndReason,
-		Fights:        nonNilFights(m.Fights),
-		Injections:    nonNilInjections(m.Injections),
-		Incidents:     nonNilIncidents(m.Incidents),
-		Roster:        RosterSummary{OT: []string{}, Rest: []string{}},
-		Dashboard:     m.Dashboard,
-		Teardown:      m.Teardown,
-		Place:         m.Place,
-		ExitCode:      m.ExitCode,
-		Notes:         nonNilStrings(m.Notes),
-		WipeResumes:   m.WipeResumes,
-		StepTimeline:  []StepSummary{},
-		Legs:          []LegSummary{},
-		Wipes:         []int{},
-		Pauses:        []PauseSummary{},
-		Deaths:        DeathSummary{ByStep: map[int]int{}, ByBot: map[string]int{}},
+		Format:         "tb-raid-walk",
+		Version:        1,
+		Plan:           m.Plan,
+		Map:            m.Map,
+		Server:         m.Server,
+		Slot:           m.Slot,
+		Character:      m.Character,
+		Until:          m.Until,
+		UntilEffective: m.UntilEffective,
+		From:           m.From,
+		Speed:          m.Speed,
+		TestSpeed:      m.TestSpeed,
+		RowsSHA256:     m.RowsSHA256,
+		UntilStep:      m.UntilStep,
+		RunLabel:       m.RunLabel,
+		SpeedFellBack:  m.SpeedFellBack,
+		Layout:         m.Layout,
+		Started:        m.Started,
+		Ended:          m.Ended,
+		EndReason:      m.EndReason,
+		Fights:         nonNilFights(m.Fights),
+		Injections:     nonNilInjections(m.Injections),
+		Incidents:      nonNilIncidents(m.Incidents),
+		Roster:         RosterSummary{OT: []string{}, Rest: []string{}},
+		Dashboard:      m.Dashboard,
+		Teardown:       m.Teardown,
+		Place:          m.Place,
+		ReviveRefusal:  m.ReviveRefusal,
+		ExitCode:       m.ExitCode,
+		Notes:          nonNilStrings(m.Notes),
+		WipeResumes:    m.WipeResumes,
+		StepTimeline:   []StepSummary{},
+		Legs:           []LegSummary{},
+		Wipes:          []int{},
+		Pauses:         []PauseSummary{},
+		Deaths:         DeathSummary{ByStep: map[int]int{}, ByBot: map[string]int{}},
 	}
 	if s.Layout.Tanks == nil {
 		s.Layout.Tanks = []string{}
@@ -366,10 +450,16 @@ func (s *Summary) Text() string {
 	}
 	b.WriteString("\n")
 	fmt.Fprintf(&b, "plan %s map %d; server %s slot %d as %s\n", s.Plan, s.Map, s.Server, s.Slot, s.Character)
+	// A --place walk whose route guard shortened the until shows both: what the user asked for and what the run
+	// actually walked (F5, D8).
+	shortened := ""
+	if s.UntilEffective != "" {
+		shortened = fmt.Sprintf(" (the place shortens it to %s)", s.UntilEffective)
+	}
 	if s.From != "" {
-		fmt.Fprintf(&b, "from %s; until %s\n", s.From, s.Until)
+		fmt.Fprintf(&b, "from %s; until %s%s\n", s.From, s.Until, shortened)
 	} else {
-		fmt.Fprintf(&b, "until %s\n", s.Until)
+		fmt.Fprintf(&b, "until %s%s\n", s.Until, shortened)
 	}
 	if s.TestSpeed {
 		fmt.Fprintf(&b, "speed %.1f (test)", s.Speed)
@@ -388,6 +478,9 @@ func (s *Summary) Text() string {
 	}
 	fmt.Fprintf(&b, "started %s; ended %s; exit %d\n",
 		s.Started.Format(time.RFC3339), s.Ended.Format(time.RFC3339), s.ExitCode)
+	if s.ReviveRefusal != nil {
+		b.WriteString(s.ReviveRefusal.Line() + "\n")
+	}
 	fmt.Fprintf(&b, "wipes %d; boss engaged: %s\n", len(s.Wipes), bossLine(s.BossEngaged))
 	if len(s.Injections) > 0 {
 		parts := make([]string, 0, len(s.Injections))

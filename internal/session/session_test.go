@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"net"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -119,6 +120,77 @@ func startClocked(t *testing.T, opts Options, clientKey, serverKey []byte, wrap 
 	})
 	return h
 }
+
+// ackTap is the session tests' conn write hook: it records Status().TeleportSeq at the moment the session writes a
+// teleport ack, the write the server places the player on (MovementHandler reads the ack and moves the player, so
+// the session counts the landing only after WritePacket succeeded). A recorded value that already holds the new
+// count would mean the increment ran before the write.
+type ackTap struct {
+	mu   sync.Mutex
+	h    *harness
+	seqs []uint64
+}
+
+// attach gives the tap the harness it reads the status from (the harness does not exist during the handshake).
+func (t *ackTap) attach(h *harness) {
+	t.mu.Lock()
+	t.h = h
+	t.mu.Unlock()
+}
+
+func (t *ackTap) Packet(dir worldconn.Direction, op uint16, body []byte) {
+	if dir != worldconn.ClientToServer || (op != opcode.MSGMoveTeleportAck && op != opcode.MSGMoveWorldportAck) {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.h == nil || t.h.s == nil {
+		return
+	}
+	t.seqs = append(t.seqs, t.h.s.Status().TeleportSeq)
+}
+
+// ackSeqs is the TeleportSeq seen at every ack write, in order.
+func (t *ackTap) ackSeqs() []uint64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]uint64{}, t.seqs...)
+}
+
+// startAckTap is start with the ack write hook installed.
+func startAckTap(t *testing.T, opts Options) (*harness, *ackTap) {
+	t.Helper()
+	tap := &ackTap{}
+	h := startTapped(t, opts, testKey, testKey, nil, tap)
+	tap.attach(h)
+	return h, tap
+}
+
+// blockTap holds the session's write of one opcode at the conn hook (which runs before the write
+// goes out) until unblock, so a test can read the status with that packet still unsent.
+type blockTap struct {
+	op      uint16
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+	rel     sync.Once
+}
+
+func newBlockTap(op uint16) *blockTap {
+	return &blockTap{op: op, entered: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (b *blockTap) Packet(dir worldconn.Direction, op uint16, body []byte) {
+	if dir != worldconn.ClientToServer || op != b.op {
+		return
+	}
+	b.once.Do(func() { close(b.entered) })
+	<-b.release
+}
+
+// unblock lets the held write (and any later one) through; it is safe to call twice, so a failed
+// test still lets Run finish.
+func (b *blockTap) unblock() { b.rel.Do(func() { close(b.release) }) }
 
 // charEnumBody builds SMSG_CHAR_ENUM the way Player::BuildEnumData writes it.
 func charEnumBody(chars ...Character) []byte {
