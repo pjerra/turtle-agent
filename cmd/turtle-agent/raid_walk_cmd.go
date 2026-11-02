@@ -663,14 +663,22 @@ type walk struct {
 	// The pack is the pulled guid plus the plan pack's other members: the guids
 	// whose frame position stands within the pull row's radius of its centroid
 	// (pullRow), seeded once on the first frame of the window (pullPackSeeded).
+	// A stand pull is ordered while the run still stands on a move row, so when
+	// that step has no pull/boss row the row is found by the pulled unit's entry
+	// and position (pullEntry, packRowFor) on the first frame.
 	// Counted once, 10 s after the pull: pullJoinsAt is zero afterwards.
 	pullJoinsAt    time.Time
 	pullJoinsStep  int
 	pullSeed       packet.GUID
+	pullEntry      uint32
 	pullRow        raidwalk.PackRow
 	pullPackSeeded bool
 	pullPack       map[packet.GUID]bool
 	pullJoinsSeen  map[packet.GUID]bool
+	// bossPullArmed are the boss steps whose joiner window was armed: a boss
+	// pull has no "pulling" line (the tank engages on arrival), so the first
+	// fighting line of the step arms it, once per step.
+	bossPullArmed map[int]bool
 	// pullJoins is the per-pull joiner record the report reads: one per pull
 	// step, in first-sight order. Written when the 10 s pull window closes.
 	pullJoins []raidwalk.PullJoiners
