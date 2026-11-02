@@ -17,8 +17,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -214,12 +216,12 @@ func pullDecisionsInto(ctx context.Context, dash decisionsPuller, commander stri
 		target := filepath.Join(out, "decisions", c.ID)
 		// The staging dir validated above, so only now is the target replaced: a
 		// failed re-pull never touches an earlier complete capture.
-		_ = os.RemoveAll(target)
-		if rerr := os.Rename(staging, target); rerr != nil {
-			_ = os.RemoveAll(staging)
-			notes = append(notes, fmt.Sprintf("%s: %v", c.ID, rerr))
-			res.Incomplete++
-			continue
+		if serr := swapDecisionDir(osDecisionFS{}, staging, target); serr != nil {
+			notes = append(notes, fmt.Sprintf("%s: %v", c.ID, serr))
+			if !errors.Is(serr, errDecisionCommitted) {
+				res.Incomplete++
+				continue
+			}
 		}
 		if rows == nil {
 			rows = []decisionManifestFile{}
@@ -289,6 +291,86 @@ func makeDecisionStaging(out, id string) (string, error) {
 		return "", err
 	}
 	return os.MkdirTemp(parent, "."+id+".staging-*")
+}
+
+// decisionFS is the filesystem the capture swap uses. The walk passes osDecisionFS; tests inject
+// faults.
+type decisionFS interface {
+	Rename(oldpath, newpath string) error
+	RemoveAll(path string) error
+	Lstat(path string) (fs.FileInfo, error)
+}
+
+// osDecisionFS is the real filesystem behind decisionFS.
+type osDecisionFS struct{}
+
+func (osDecisionFS) Rename(oldpath, newpath string) error   { return os.Rename(oldpath, newpath) }
+func (osDecisionFS) RemoveAll(path string) error            { return os.RemoveAll(path) }
+func (osDecisionFS) Lstat(path string) (fs.FileInfo, error) { return os.Lstat(path) }
+
+// errDecisionCommitted marks a swap whose new capture is already in place but whose old-capture
+// backup could not be removed. The new capture is valid and kept; only the leftover backup is
+// reported.
+var errDecisionCommitted = errors.New("new capture in place")
+
+// swapDecisionDir moves the validated staging dir onto target without ever losing the old
+// capture. An existing target is renamed to a unique backup in the same parent first; staging is
+// then renamed into place; the backup is removed only after that succeeds. A failure before the
+// commit restores the old target (or leaves it untouched) and removes staging. Every filesystem
+// error is returned; a leftover backup after a committed swap is returned wrapping
+// errDecisionCommitted.
+func swapDecisionDir(fsys decisionFS, staging, target string) error {
+	fail := func(err error) error {
+		if rerr := fsys.RemoveAll(staging); rerr != nil {
+			return errors.Join(err, fmt.Errorf("remove staging %s: %w", staging, rerr))
+		}
+		return err
+	}
+	backup := ""
+	if _, err := fsys.Lstat(target); err == nil {
+		b, berr := decisionBackupPath(fsys, target)
+		if berr != nil {
+			return fail(fmt.Errorf("name old capture backup: %w", berr))
+		}
+		if rerr := fsys.Rename(target, b); rerr != nil {
+			return fail(fmt.Errorf("move old capture aside: %w", rerr))
+		}
+		backup = b
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fail(fmt.Errorf("stat old capture: %w", err))
+	}
+	if rerr := fsys.Rename(staging, target); rerr != nil {
+		err := fmt.Errorf("move staged capture into place: %w", rerr)
+		if backup != "" {
+			if berr := fsys.Rename(backup, target); berr != nil {
+				err = errors.Join(err, fmt.Errorf("restore old capture from %s: %w", backup, berr))
+			}
+		}
+		return fail(err)
+	}
+	if backup != "" {
+		if rerr := fsys.RemoveAll(backup); rerr != nil {
+			return fmt.Errorf("%w; old capture backup left at %s: %w", errDecisionCommitted, backup, rerr)
+		}
+	}
+	return nil
+}
+
+// decisionBackupPath returns an unused hidden name next to target for its old contents.
+func decisionBackupPath(fsys decisionFS, target string) (string, error) {
+	dir, base := filepath.Dir(target), filepath.Base(target)
+	stamp := time.Now().UnixNano()
+	for i := 0; i < 100; i++ {
+		p := filepath.Join(dir, fmt.Sprintf(".%s.backup-%d-%d", base, stamp, i))
+		_, err := fsys.Lstat(p)
+		if errors.Is(err, fs.ErrNotExist) {
+			return p, nil
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("no free backup name for %s", target)
 }
 
 // validateDecisionStage checks every listed file is in the staging dir with the pulled size
