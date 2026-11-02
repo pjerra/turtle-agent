@@ -1992,32 +1992,53 @@ func (w *walk) bossCorpse(ctx context.Context, boss uint32, units []uint32) (boo
 	if !ok {
 		return false, ""
 	}
-	readCtx, cancel := context.WithTimeout(ctx, bossCorpseWait)
-	defer cancel()
+	read := func(e uint32) (ttResult, error) {
+		readCtx, cancel := context.WithTimeout(ctx, bossCorpseWait)
+		defer cancel()
+		return w.tt(readCtx, fmt.Sprintf("q units %s %s %s %s all dead e=%d", num32(bossKillYd), num32(spot.X), num32(spot.Y), num32(spot.Z), e))
+	}
+	fail := func(format string, a ...any) (bool, string) {
+		w.bossToolkitOff = true
+		w.note("boss %d: "+format+": the frames alone decide from here", append([]any{boss}, a...)...)
+		return false, ""
+	}
+	moved := false
 	for _, e := range units {
-		out, err := w.tt(readCtx, fmt.Sprintf("q units %s %s %s %s all dead e=%d", num32(bossKillYd), num32(spot.X), num32(spot.Y), num32(spot.Z), e))
-		if err != nil {
-			if ctx.Err() != nil {
-				return false, "" // the walk itself was interrupted: no verdict, and no latch on a cancelled read
+		for {
+			out, err := read(e)
+			if err != nil {
+				if ctx.Err() != nil {
+					return false, "" // the walk itself was interrupted: no verdict, and no latch on a cancelled read
+				}
+				// The read's own deadline (bossCorpseWait) is a toolkit failure like any other: latch it, so a
+				// toolkit that never answers costs the watch loop one bounded wait, not one per tick.
+				// The toolkit's corpse read is range-limited to 150 yd: a refused point_far read fails only
+				// because the commander stands too far away. Move it to the boss row once, with the same go
+				// the revive needs before its own `.go xyz` (GMVisibleOff), and re-read the same entry once.
+				if !moved && strings.Contains(err.Error(), "point_far") {
+					if gerr := w.gm(ctx, raidwalk.GMVisibleOff); gerr != nil {
+						return false, ""
+					}
+					w.goPlace(ctx, spot.X, spot.Y, spot.Z+2)
+					moved = true
+					w.note("boss %d: the commander moved to the boss row for the corpse read (the toolkit read is limited to 150 yd)", boss)
+					continue
+				}
+				// Only a failure after the move, or any non-point_far error, latches the reads off, as today.
+				return fail("the toolkit corpse read failed (%v)", err)
 			}
-			// The read's own deadline (bossCorpseWait) is a toolkit failure like any other: latch it, so a toolkit
-			// that never answers costs the watch loop one bounded wait, not one per tick.
-			w.bossToolkitOff = true
-			w.note("boss %d: the toolkit corpse read failed (%v): the frames alone decide from here", boss, err)
-			return false, ""
-		}
-		body, ok := ttLast(out)
-		if !ok {
-			w.bossToolkitOff = true
-			w.note("boss %d: the toolkit corpse read gave no reply: the frames alone decide from here", boss)
-			return false, ""
-		}
-		for _, m := range body.list("units") {
-			u := ttUnitOf(m)
-			if u.Entry != e || !u.Dead {
-				continue
+			body, ok := ttLast(out)
+			if !ok {
+				return fail("the toolkit corpse read gave no reply")
 			}
-			return true, fmt.Sprintf("the toolkit sees %d dead %s yd from the boss row", e, num32(u.Dist))
+			for _, m := range body.list("units") {
+				u := ttUnitOf(m)
+				if u.Entry != e || !u.Dead {
+					continue
+				}
+				return true, fmt.Sprintf("the toolkit sees %d dead %s yd from the boss row", e, num32(u.Dist))
+			}
+			break
 		}
 	}
 	return false, ""
