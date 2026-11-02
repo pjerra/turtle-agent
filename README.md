@@ -2293,9 +2293,12 @@ recovery has an absolute deadline (the walk ceiling or start + 3 x `--wipe-rest`
 restarts the quiet window but never moves it, and past it the walk ends with the original incident's exit and
 `wipe recovery timed out after <dur>`). A boss fight still `live` in the dashboard's fights list blocks recovery
 before any revive; finished boss fights in the list do not, and a boss killed earlier in the walk does not block a
-later trash wipe's recovery, while a boss ENGAGED in the frames in the last 120 s (alive and holding a target or
-below 100 %) still blocks recovery; a plan boss or boss add merely in view at full health with no target, or a boss
-corpse, does not. After the rest and the resume the walk checks what the frames say now: a newly engaged boss routes
+latter trash wipe's recovery, while a boss ENGAGED in the frames in the last 120 s (alive and holding a target or
+below 100 %) still blocks recovery — unless the frames already settle it: a fresh HP-0 row is the kill (the walk
+advances as killed; a 1-5 % row alive is never a kill) and a fresh full-HP row with no target and no live target is
+the reset (the walk resumes normally); only with neither in the frames does the 120 s unknown wait hold. A plan
+boss or boss add merely in view at full health with no target, or a boss corpse, does not. After the rest and the
+resume the walk checks what the frames say now: a newly engaged boss routes
 to the boss path exactly as a watch-loop engagement does, so the run never reports a clean wipe-resume while a boss
 fight is live. The run-leader-fights-its-boss exception needs a run status received after the resume went out: a
 retained pre-resume boss-kind line does not hide a newly engaged boss, while a fresh post-resume boss-kind status
