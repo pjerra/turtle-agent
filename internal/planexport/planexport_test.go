@@ -439,10 +439,10 @@ func zulfarrakThroughZumrah(t *testing.T) *dungeon.Plan {
 }
 
 // The whole shipped Zul'Farrak plan exports without a cut (2026-10-21; before, the bly leg's unit waits cut it there): the bly leg is
-// the move to its spot, the gossip 7604 option 1 (the plan's option 0) and the boss's hold done by its units (entry 0, param 0, flags 0;
-// Bly first, then Murta, Oro and Raven), and ukorz follows it. Bly's three unit waits are agent_only, each listed with its reason, and
-// boss.first under the hold is warned as no kill order. The plan's gahzrilla leg is optional and takes no row number, so bly is row leg 15
-// of plan leg 16 and ukorz row leg 16.
+// the move to its spot, the gossip 7604 option 1 (the plan's option 0), and the boss's hold done by its units (entry 0, param 0, flags
+// 16384 with skip_if_dead_of_gossip; Bly first, then Murta, Oro and Raven), and ukorz follows it. Bly's three unit waits are agent_only,
+// each listed with its reason, and boss.first under the hold is warned as no kill order. The plan's gahzrilla leg is optional and takes
+// no row number, so bly is row leg 15 of plan leg 16 and ukorz row leg 16.
 func TestZulfarrakExportsBlyAndReachesUkorz(t *testing.T) {
 	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
 	if err != nil {
@@ -468,7 +468,7 @@ func TestZulfarrakExportsBlyAndReachesUkorz(t *testing.T) {
 	want := []string{
 		"move 0 1884 1212 9 r0 p0 f0 t0 []",
 		"gossip 7604 1883.82 1200.83 8.87 r0 p1 f512 t0 []", // dead_is_done: his crew can be dead before the leg
-		"hold 0 1884 1212 9 r25 p0 f0 t300 [7604 7608 7606 7605]",
+		"hold 0 1884 1212 9 r25 p0 f16384 t300 [7604 7608 7606 7605]",
 	}
 	if !slices.Equal(bly, want) {
 		t.Errorf("bly rows:\n%s\nwant\n%s", strings.Join(bly, "\n"), strings.Join(want, "\n"))
@@ -480,7 +480,8 @@ func TestZulfarrakExportsBlyAndReachesUkorz(t *testing.T) {
 		}
 	}
 	for _, s := range res.Rows.Steps {
-		if s.Leg == 17 && s.Kind == KindHold && !strings.Contains(s.Comment, "until every unit of it is dead (7604 counts while still friendly)") {
+		if s.Leg == 17 && s.Kind == KindHold && (!strings.Contains(s.Comment, "until every unit of it is dead (7604 counts while still friendly)") ||
+			!strings.Contains(s.Comment, "done when its NPC was dead, with only friendly units left")) {
 			t.Errorf("the units hold's comment: %q", s.Comment)
 		}
 	}

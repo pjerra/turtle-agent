@@ -76,6 +76,12 @@ const (
 	// (Stormwrought Ruins' Eldermaw 62661; Zul'Gurub's plateau bat formations, where the pull row's param is the clearance
 	// from other patrols in yd; DungeonPlanPolicy.h kPlanFlagStandPull, specs/rl-patrol-timed-pull.md).
 	FlagStandPull = 8192
+	// FlagDeadGossipOk marks a units hold whose starting NPC may already be dead (a plan's hold.skip_if_dead_of_gossip): the run leader
+	// ends it when no unit of it is hostile — at once when the crew lies dead, with a note when only friendly survivors are left — but
+	// only after the gossip that starts it (the nearest gossip row before it) counted its dead NPC as done (DungeonRunPolicy.h,
+	// GossipDeadIsDone; DungeonPlanPolicy.h kPlanFlagDeadGossipOk). Without the flag that hold waits for a unit seen hostile, which a
+	// crew whose NPC died before its option can never be (zulfarrak.cpp npc_sergeant_blyAI turns them only from his script).
+	FlagDeadGossipOk = 16384
 	// EncounterDone is the encounter state DONE: a hold's param.
 	EncounterDone = 3
 )
@@ -562,6 +568,12 @@ func (b *builder) hold(h *dungeon.Hold, entries []uint32, comment string) {
 		if len(entries) > 0 {
 			text += fmt.Sprintf(" (%d counts while still friendly)", entries[0])
 		}
+		if h.SkipIfDeadOfGossip {
+			// The encounter's NPC may lie dead before the hold (his gossip row already counted it done): the run leader then ends the
+			// hold when no unit of it is hostile (the friendly survivors cannot be turned), at once when all are dead.
+			flags = FlagDeadGossipOk
+			text += "; done when its NPC was dead, with only friendly units left"
+		}
 	}
 	b.add(StepRow{Kind: KindHold, Entry: h.Data, X: h.Spot.X, Y: h.Spot.Y, Z: h.Spot.Z, Radius: h.Radius, Param: param,
 		Flags: flags, TimeoutS: h.TimeoutS, Entries: entries, Comment: clip(text, MaxComment)})
@@ -861,6 +873,9 @@ func Validate(r Rows) error {
 			case s.Flags&FlagDoneData == 0 && (s.Entry != 0 || s.Param != 0 || len(s.Entries) == 0):
 				return bad("a hold done by its units carries no entry or param, and needs its entries")
 			}
+			if s.Flags&FlagDeadGossipOk != 0 && (s.Flags&(FlagDoneData|FlagEncounter) != 0 || s.Entry != 0 || s.Param != 0) {
+				return bad("the dead-gossip flag is for a hold done by its units: it carries neither the instance data flag nor an entry or param")
+			}
 			// An encounter state is 0-4; a plain script value (flag 8 without 32) may be any number (the loader's rule).
 			if s.Flags&FlagEncounter != 0 && s.Param > 4 {
 				return bad("param %d is no encounter state (0-4)", s.Param)
@@ -885,6 +900,9 @@ func Validate(r Rows) error {
 		}
 		if s.Flags&FlagDeadNpcIsDone != 0 && s.Kind != KindGossip {
 			return bad("the dead-npc-is-done flag is for a gossip row (the loader refuses it on a %s)", s.Kind)
+		}
+		if s.Flags&FlagDeadGossipOk != 0 && s.Kind != KindHold {
+			return bad("the dead-gossip flag is for a hold row whose NPC may be dead (the loader refuses it on a %s)", s.Kind)
 		}
 		if s.Flags&FlagExact != 0 {
 			if s.Kind != KindMove {

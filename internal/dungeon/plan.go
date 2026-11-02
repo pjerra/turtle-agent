@@ -382,6 +382,14 @@ type Hold struct {
 	TimeoutS int     `json:"timeout_s"`
 	// Entries are more creature entries of the event (a boss's waking statues and guardians); a group's own entries are always in.
 	Entries []uint32 `json:"entries,omitempty"`
+	// SkipIfDeadOfGossip lets a units hold end without a fight when the encounter's starting NPC was already dead at its gossip step
+	// (that step must name the hold's boss and carry DeadIsDone). The core turns a friendly crew hostile only from that NPC's own
+	// script: zulfarrak.cpp npc_sergeant_blyAI turns Bly and, in the same update, Raven, Oro and Murta 10 s after his option, and
+	// switchFactionIfAlive is called from nowhere else, so a dead Bly leaves the survivors friendly for good (they cannot be pulled).
+	// The run leader (TortoiseBots, plan-export flag 16384) then ends the hold when no unit of it is hostile: at once when the whole
+	// crew lies dead, and with a note when only friendly survivors are left, instead of waiting TimeoutS for a hostility that cannot
+	// come (dungeons/zulfarrak.json's bly hold). Only a boss's hold done by its units takes it.
+	SkipIfDeadOfGossip bool `json:"skip_if_dead_of_gossip,omitempty"`
 }
 
 // The limits of a Hold and of Approach.
@@ -882,6 +890,8 @@ type rawHold struct {
 	TimeoutS int       `json:"timeout_s"`
 	Entries  []uint32  `json:"entries"`
 	Value    *uint32   `json:"value"`
+	// SkipIfDeadOfGossip is Hold.SkipIfDeadOfGossip.
+	SkipIfDeadOfGossip bool `json:"skip_if_dead_of_gossip"`
 }
 
 type rawPatrol struct {
@@ -1574,6 +1584,22 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		l.Steps = append(l.Steps, c.step(sp, &s))
 	}
 	c.batches(path, l.Steps)
+	// A hold that ends when its starting NPC was already dead needs that NPC's gossip step to allow a dead NPC: the run leader only
+	// knows the hold may end without a fight from the gossip row it counted done, and the step must name the boss the hold fights.
+	if l.Boss != nil && l.Boss.Hold != nil && l.Boss.Hold.SkipIfDeadOfGossip {
+		start := -1
+		for i, s := range l.Steps {
+			if s.Gossip != nil && s.Gossip.NPC == l.Boss.Entry {
+				start = i
+			}
+		}
+		switch {
+		case start < 0:
+			c.fail(path+".boss.hold.skip_if_dead_of_gossip", "needs a gossip step of this leg that starts the encounter (npc %d, the boss) before the hold", l.Boss.Entry)
+		case !l.Steps[start].Gossip.DeadIsDone:
+			c.fail(path+".boss.hold.skip_if_dead_of_gossip", "the gossip step of npc %d does not carry dead_is_done: the run leader would pause on the dead NPC before the hold", l.Boss.Entry)
+		}
+	}
 	for i, rs := range r.AfterBoss {
 		sp := fmt.Sprintf("%s.after_boss[%d]", path, i)
 		var s rawStep
@@ -1631,13 +1657,16 @@ func (c *checker) hold(path string, r *rawHold, valueAllowed, unitsAllowed bool)
 	if r == nil {
 		return nil
 	}
-	h := &Hold{Data: r.Data, Radius: r.Radius, TimeoutS: r.TimeoutS, Entries: r.Entries, Value: r.Value}
+	h := &Hold{Data: r.Data, Radius: r.Radius, TimeoutS: r.TimeoutS, Entries: r.Entries, Value: r.Value, SkipIfDeadOfGossip: r.SkipIfDeadOfGossip}
 	h.Spot = c.point(path+".spot", r.Spot)
 	switch {
 	case r.Data == 0 && r.Value != nil:
 		c.fail(path+".instance_data", "required with a value (the value is of that instance data)")
 	case r.Data == 0 && !unitsAllowed:
 		c.fail(path+".instance_data", "required (the index of the event's instance data, 1 or more); only a boss's hold may leave it out (done by its units)")
+	}
+	if r.SkipIfDeadOfGossip && (!unitsAllowed || r.Data != 0) {
+		c.fail(path+".skip_if_dead_of_gossip", "only a boss's hold done by its units (instance_data left out) takes it: a hold done by instance data ends by that data")
 	}
 	if r.Radius <= 0 || r.Radius > 100 {
 		c.fail(path+".radius", "%g: 1-100 yards (how far from the spot the event's mobs are fought)", r.Radius)

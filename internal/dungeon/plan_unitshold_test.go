@@ -1,6 +1,7 @@
 package dungeon
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -53,6 +54,53 @@ func TestAgentOnlyWaitRules(t *testing.T) {
 		{"too long", `{"wait_for":{"unit":{"entries":[7],"state":"seen"},"agent_only":"` + strings.Repeat("a", MaxFailText+1) + `"}}`, "agent_only: say why"},
 	} {
 		if _, err := Parse("bad.json", []byte(eventPlan(tc.step, ""))); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v", tc.name, err)
+		}
+	}
+}
+
+// skip_if_dead_of_gossip is a units hold whose starting NPC was seen dead: the run leader ends it when no unit of it is hostile (the
+// survivors of a dead NPC's crew stay friendly for good; zulfarrak.cpp npc_sergeant_blyAI turns them only from his script), at once when
+// all lie dead. Only a boss's units hold takes it, and the leg needs the gossip step that starts the encounter (the boss's entry) with
+// dead_is_done, since the run leader only knows the NPC was dead from that row.
+func TestSkipIfDeadOfGossipRules(t *testing.T) {
+	const near = `{"x":5,"y":6,"z":7}`
+	gossip := func(npc int, dead bool) string {
+		g := `{"gossip":{"npc":` + fmt.Sprint(npc) + `,"near":` + near + `,"option":0,"by":"tank"`
+		if dead {
+			g += `,"dead_is_done":true`
+		}
+		return g + `}}`
+	}
+	bossPlan := func(steps, hold string) string {
+		return `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[{"to":{"x":0,"y":0,"z":0},"steps":[` + steps +
+			`],"boss":{"entry":7604,"position":` + near + `,"first":[7608],"hold":` + hold + `}}]}`
+	}
+	const units = `{"spot":` + near + `,"radius":25,"timeout_s":300,"skip_if_dead_of_gossip":true}`
+	p, err := Parse("ok.json", []byte(bossPlan(gossip(7604, true), units)))
+	if err != nil {
+		t.Fatalf("a flagged units hold with its dead gossip: %v", err)
+	}
+	if h := p.Legs[0].Boss.Hold; h == nil || !h.SkipIfDeadOfGossip || h.Data != 0 || h.Value != nil {
+		t.Fatalf("boss hold %+v", h)
+	}
+	out, err := Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"skip_if_dead_of_gossip": true`) {
+		t.Fatalf("the flag is not written: %s", out)
+	}
+	for _, tc := range []struct{ name, js, want string }{
+		{"no gossip", bossPlan("", units), "needs a gossip step of this leg that starts the encounter (npc 7604, the boss) before the hold"},
+		{"a live gossip", bossPlan(gossip(7604, false), units), "does not carry dead_is_done"},
+		{"another NPC", bossPlan(gossip(7605, true), units), "needs a gossip step of this leg that starts the encounter (npc 7604, the boss) before the hold"},
+		{"a data hold", bossPlan(gossip(7604, true), `{"instance_data":2,"spot":`+near+`,"radius":25,"timeout_s":300,"skip_if_dead_of_gossip":true}`),
+			"only a boss's hold done by its units (instance_data left out) takes it"},
+		{"a pull group's hold", `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[4857],"positions":[` + near + `],"hold":{"instance_data":2,"spot":` + near + `,"radius":25,"timeout_s":300,"skip_if_dead_of_gossip":true}}]}]}`,
+			"only a boss's hold done by its units (instance_data left out) takes it"},
+	} {
+		if _, err := Parse("bad.json", []byte(tc.js)); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v", tc.name, err)
 		}
 	}
