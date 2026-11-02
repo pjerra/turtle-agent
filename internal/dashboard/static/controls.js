@@ -105,13 +105,15 @@
 
     function paint(s, card) {
       const specs = runButtons(card);
+      s.card = card; // the buttons keep the card and its specs current: a click never sends last poll's state
+      s.specs = new Map(specs.map((x) => [x.verb, x]));
       const have = new Set(specs.map((x) => x.verb));
       for (const [verb, b] of s.btns) if (!have.has(verb)) { b.remove(); s.btns.delete(verb); }
       for (const spec of specs) {
         let b = s.btns.get(spec.verb);
         if (!b) {
           b = h("button", { type: "button", class: "mb ctl" });
-          b.addEventListener("click", () => send(s, card, spec));
+          b.addEventListener("click", () => { const cur = s.specs.get(b.dataset.verb); if (cur) send(s, s.card, cur); });
           s.btns.set(spec.verb, b);
         }
         b.textContent = spec.label;
