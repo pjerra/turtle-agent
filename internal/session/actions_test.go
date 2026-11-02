@@ -103,6 +103,92 @@ func TestFaceAndWalk(t *testing.T) {
 	h.logout()
 }
 
+// A near teleport ack (a `.go xyz`) counts a landing only after the client's own ack went out: the core
+// relocates the player when it reads that ack (MovementHandler), so TeleportSeq advances then and never before.
+// The conn write hook records the sequence at the ack write itself: it must still be the old count there.
+func TestTeleportAckAdvancesTeleportSeq(t *testing.T) {
+	h, tap := startAckTap(t, Options{})
+	h.enterWorld()
+	if seq := h.s.Status().TeleportSeq; seq != 0 {
+		t.Fatalf("teleport_seq %d before any teleport, want 0", seq)
+	}
+	w := packet.NewWriter().PackedGUID(me.GUID).U32(7)
+	game.WriteMoveInfo(w, game.MoveInfo{X: 1, Y: 2, Z: 3})
+	h.send(opcode.MSGMoveTeleportAck, w.Bytes())
+	// Expect returns once the server READ the ack: the session may not have counted it yet, so the read waits.
+	h.expect(opcode.MSGMoveTeleportAck)
+	waitFor(t, func() bool { return h.s.Status().TeleportSeq == 1 })
+	if seq := h.s.Status().TeleportSeq; seq != 1 {
+		t.Fatalf("teleport_seq %d after one acked teleport, want 1", seq)
+	}
+	if got := tap.ackSeqs(); len(got) != 1 || got[0] != 0 {
+		t.Fatalf("teleport_seq at the ack write %v, want [0]: the landing is counted only after the write", got)
+	}
+	w2 := packet.NewWriter().PackedGUID(me.GUID).U32(8)
+	game.WriteMoveInfo(w2, game.MoveInfo{X: 4, Y: 5, Z: 6})
+	h.send(opcode.MSGMoveTeleportAck, w2.Bytes())
+	h.expect(opcode.MSGMoveTeleportAck)
+	waitFor(t, func() bool { return h.s.Status().TeleportSeq == 2 })
+	if seq := h.s.Status().TeleportSeq; seq != 2 {
+		t.Fatalf("teleport_seq %d after two acked teleports, want 2", seq)
+	}
+	if got := tap.ackSeqs(); len(got) != 2 || got[1] != 1 {
+		t.Fatalf("teleport_seq at the ack writes %v, want [0 1]", got)
+	}
+	h.logout()
+}
+
+// A far teleport (SMSG_NEW_WORLD) acks the worldport and then counts a landing: the server places the player on
+// reading MSG_MOVE_WORLDPORT_ACK, before any later chat line (a `.summon`), so the sequence is a landing too. The
+// hook pins the same ordering at that ack write.
+func TestNewWorldAdvancesTeleportSeq(t *testing.T) {
+	h, tap := startAckTap(t, Options{})
+	h.enterWorld()
+	h.send(opcode.SMSGTransferPending, packet.NewWriter().U32(1).Bytes())
+	h.send(opcode.SMSGNewWorld, packet.NewWriter().U32(1).F32(10).F32(20).F32(30).F32(0).Bytes())
+	h.expect(opcode.MSGMoveWorldportAck)
+	h.expect(opcode.CMSGSetActiveMover)
+	waitFor(t, func() bool { return h.s.Status().TeleportSeq == 1 })
+	if seq := h.s.Status().TeleportSeq; seq != 1 {
+		t.Fatalf("teleport_seq %d after a worldport, want 1", seq)
+	}
+	if got := tap.ackSeqs(); len(got) != 1 || got[0] != 0 {
+		t.Fatalf("teleport_seq at the worldport ack write %v, want [0]", got)
+	}
+	h.logout()
+}
+
+// A far teleport publishes the new map, position and TeleportSeq only once the worldport ack has
+// gone out (Codex HIGH): a status read while that write is still held shows the old map, position
+// and sequence. Otherwise raid-walk's reviveLanded could take the map change for a landing and
+// send a `.summon` before the server has placed the player.
+func TestNewWorldPublishesAfterWorldportAck(t *testing.T) {
+	bt := newBlockTap(opcode.MSGMoveWorldportAck)
+	defer bt.unblock()
+	h := startTapped(t, Options{}, testKey, testKey, nil, bt)
+	h.enterWorld()
+	h.send(opcode.SMSGTransferPending, packet.NewWriter().U32(1).Bytes())
+	h.send(opcode.SMSGNewWorld, packet.NewWriter().U32(1).F32(10).F32(20).F32(30).F32(0).Bytes())
+	select {
+	case <-bt.entered:
+	case <-time.After(expectWait):
+		t.Fatal("the worldport ack write never started")
+	}
+	if st := h.s.Status(); st.Map != me.Map || st.X != me.X || st.Y != me.Y || st.Z != me.Z || st.TeleportSeq != 0 {
+		t.Fatalf("status while the worldport ack is unsent: map %d %.1f %.1f %.1f teleports %d, want map %d %.1f %.1f %.1f teleports 0",
+			st.Map, st.X, st.Y, st.Z, st.TeleportSeq, me.Map, me.X, me.Y, me.Z)
+	}
+	bt.unblock()
+	h.expect(opcode.MSGMoveWorldportAck)
+	h.expect(opcode.CMSGSetActiveMover)
+	waitFor(t, func() bool { return h.s.Status().TeleportSeq == 1 })
+	if st := h.s.Status(); st.Map != 1 || st.X != 10 || st.Y != 20 || st.Z != 30 || st.TeleportSeq != 1 {
+		t.Fatalf("status after the worldport ack: map %d %.1f %.1f %.1f teleports %d, want map 1 10.0 20.0 30.0 teleports 1",
+			st.Map, st.X, st.Y, st.Z, st.TeleportSeq)
+	}
+	h.logout()
+}
+
 func TestTeleportNearFarAndSpeed(t *testing.T) {
 	ctx := context.Background()
 	h := start(t, Options{})

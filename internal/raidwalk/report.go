@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -185,6 +186,14 @@ func ResolveLog(lines []LogLine, clockOffset time.Duration, firstFight time.Time
 	}
 }
 
+// attachPullJoiners hangs the walk's structured joiner record on its pull.
+func attachPullJoiners(p *ReportPull, j PullJoiners) {
+	p.JoinersSeen = j.Count
+	for _, g := range j.GUIDs {
+		p.JoinerGUIDs = append(p.JoinerGUIDs, g.String())
+	}
+}
+
 // ReportOptions are the choices of a report.
 type ReportOptions struct {
 	// Spells are the enemy spell ids whose casts get a row each, with the deaths within Window.
@@ -193,6 +202,10 @@ type ReportOptions struct {
 	Window time.Duration
 	// ClockOffset is how far the run log's clock is ahead of UTC.
 	ClockOffset time.Duration
+	// PullJoins are the walk's structured joiner records (pulljoiners.json),
+	// one per pull attempt: each attaches to the fight of its step whose
+	// window holds the pull time.
+	PullJoins []PullJoiners
 }
 
 // Report is the JSON of a walk report.
@@ -305,6 +318,11 @@ type ReportPull struct {
 	PullLineAt        time.Time    `json:"pull_line_at,omitempty"`
 	Joins             []ReportJoin `json:"neighbour_joins"`
 	JoinersExpected   string       `json:"joiners_expected,omitempty"`
+	// JoinersSeen is the frames' own count of engaged hostiles outside the
+	// pulled pack within 10 s of the pull, from the walk's structured record
+	// of this pull attempt (pulljoiners.json, placed by its pull time).
+	JoinersSeen int      `json:"joiners_seen,omitempty"`
+	JoinerGUIDs []string `json:"joiner_guids,omitempty"`
 	// StandWaitS is the time from the first stand-pull status line of the pull to its "pulling" line (to the fight's start without one).
 	StandWaitS float64      `json:"stand_wait_s"`
 	StandRuns  []StandRun   `json:"stand_pull"`
@@ -336,18 +354,37 @@ type ControlEvent struct {
 }
 
 var (
-	onArrivalRe = regexp.MustCompile(`(?i)\bengages\b.*\bon arrival\b`)
-	pullingRe   = regexp.MustCompile(`(?:^|;\s+)pulling\b`)
-	joinedRe    = regexp.MustCompile(`(?i)a new unit joined`)
-	joinersRe   = regexp.MustCompile(`(?i)\b\d+ joiners expected`)
-	standRe     = regexp.MustCompile(`(?i)(waiting at the stand|waiting for the patroller|stand still before pulling|patrol pull|back to the stand|joiners|shot from (where it stands|firing stand))`)
-	normRe      = regexp.MustCompile(`0x[0-9a-fA-F]+|\d+(\.\d+)?`)
-	untilTail   = regexp.MustCompile(`\|until .*$`)
-	sentCmdRe   = regexp.MustCompile(`^> \.bot run (stop|pause|resume)\b(.*)$`)
+	onArrivalRe     = regexp.MustCompile(`(?i)\bengages\b.*\bon arrival\b`)
+	pullingRe       = regexp.MustCompile(`(?:^|;\s+)pulling\b`)
+	joinedRe        = regexp.MustCompile(`(?i)a new unit joined`)
+	joinersRe       = regexp.MustCompile(`(?i)\b\d+ joiners expected`)
+	standRe         = regexp.MustCompile(`(?i)(waiting at the stand|waiting for the patroller|stand still before pulling|patrol pull|back to the stand|joiners|shot from (where it stands|firing stand))`)
+	normRe          = regexp.MustCompile(`0x[0-9a-fA-F]+|\d+(\.\d+)?`)
+	untilTail       = regexp.MustCompile(`\|until .*$`)
+	sentCmdRe       = regexp.MustCompile(`^> \.bot run (stop|pause|resume)\b(.*)$`)
+	pullingTargetRe = regexp.MustCompile(`pulling\s+(\d+)\s+(0[xX][0-9a-fA-F]+)`)
 )
 
 // statusNote is a status line's note without the run leader's trailing `|until ...` label.
 func statusNote(st *tbm.RunStatus) string { return untilTail.ReplaceAllString(st.Note, "") }
+
+// PullingTarget reads the pulled unit's entry and guid from a "pulling <entry>
+// <guid>" status note ("pulling 11368 0xf130002c6800bffa (order 1; ...)").
+func PullingTarget(note string) (entry uint32, guid packet.GUID, ok bool) {
+	m := pullingTargetRe.FindStringSubmatch(note)
+	if m == nil {
+		return 0, 0, false
+	}
+	e, err := strconv.Atoi(m[1])
+	if err != nil || e <= 0 {
+		return 0, 0, false
+	}
+	g, err := packet.ParseGUID(m[2])
+	if err != nil {
+		return 0, 0, false
+	}
+	return uint32(e), g, true
+}
 
 // BuildReport joins the fights with the run log (nil or empty: the table has no status columns).
 func BuildReport(fights []ReportFight, log []LogLine, opt ReportOptions) *Report {
@@ -387,6 +424,11 @@ func BuildReport(fights []ReportFight, log []LogLine, opt ReportOptions) *Report
 		lastEnd[f.Step] = end
 	}
 
+	// The walk keeps one joiner record per pull attempt; each one attaches to
+	// the fight of its step whose window holds the record's pull time, so a
+	// retried pull at a step never hands its count to the attempt before it.
+	joinersUsed := make([]bool, len(opt.PullJoins))
+
 	for i, f := range fights {
 		start := unixTime(f.Start)
 		p := ReportPull{Fight: f.ID, Step: f.Step, Kind: f.Kind, Leg: f.Leg, Start: start, DurS: float64(f.DurMS) / 1000, Outcome: f.Outcome, Boss: f.BossName,
@@ -425,9 +467,14 @@ func BuildReport(fights []ReportFight, log []LogLine, opt ReportOptions) *Report
 			if p.ContactBeforePull != nil && *p.ContactBeforePull {
 				rep.Totals.ContactBeforePull++
 			}
-			if len(p.Joins) > 0 {
-				rep.Totals.FightsWithJoins++
-			}
+		}
+		if k := joinerFor(opt.PullJoins, joinersUsed, f.Step, wins[i]); k >= 0 {
+			joinersUsed[k] = true
+			attachPullJoiners(&p, opt.PullJoins[k])
+		}
+		// One pull with a neighbour joining, whether the run log's status lines or the frames saw it.
+		if len(p.Joins) > 0 || p.JoinersSeen > 0 {
+			rep.Totals.FightsWithJoins++
 		}
 		rep.Pulls = append(rep.Pulls, p)
 	}
@@ -448,7 +495,43 @@ func BuildReport(fights []ReportFight, log []LogLine, opt ReportOptions) *Report
 	} else {
 		rep.Notes = append(rep.Notes, "no run log: the contact, join, stand-pull and control columns are empty")
 	}
+	if n := unmatchedJoiners(joinersUsed); n > 0 {
+		rep.Notes = append(rep.Notes, fmt.Sprintf("joiners unmatched: %d pull record(s) outside every fight window", n))
+	}
 	return rep
+}
+
+// joinerFor is the joiner record of the fight's step whose pull time the
+// window (from, to] holds: the latest attempt when several landed in it. -1
+// when no record is left for the window. Records already on a fight are skipped.
+func joinerFor(joiners []PullJoiners, used []bool, step int, w fightWindow) int {
+	best := -1
+	for k, j := range joiners {
+		if used[k] || j.Step != step || j.At.IsZero() {
+			continue
+		}
+		if !w.from.IsZero() && !j.At.After(w.from) {
+			continue
+		}
+		if j.At.After(w.to) {
+			continue
+		}
+		if best < 0 || j.At.After(joiners[best].At) {
+			best = k
+		}
+	}
+	return best
+}
+
+// unmatchedJoiners counts the joiner records no fight window took.
+func unmatchedJoiners(used []bool) int {
+	n := 0
+	for _, u := range used {
+		if !u {
+			n++
+		}
+	}
+	return n
 }
 
 // fightWindow is the span of status lines a pull owns: after the end of the step's earlier fight (zero: from the start) up to its own end.

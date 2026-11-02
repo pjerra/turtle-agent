@@ -125,9 +125,14 @@ func allowedHireRaid(f []string) bool {
 // request id and room to spare (the toolkit's own cap is 200).
 const AllowedTTMax = 200
 
+// MaxTTEntry is the largest creature entry a toolkit line may name: the toolkit's own number reader refuses
+// anything at or above 1e7 (tt_commands.lua num), so a bigger one is a bug on our side.
+const MaxTTEntry = 9999999
+
 // AllowedTT says whether raid-walk may send cmd to the Eluna test toolkit (the `tt` RPC, spec 7): one line, no `#`
-// (the agent adds the request id), at most AllowedTTMax characters, and one of the forms the place phase needs.
-// Never: kill, boss, force, me, reset, here, a clearto without dz=, another map, a name that is not a hire.
+// (the agent adds the request id), at most AllowedTTMax characters, and one of the forms the place phase and the
+// boss-kill read need. Never: kill, boss, force, me, reset, here, a clearto without dz=, another map, a name that
+// is not a hire.
 func AllowedTT(cmd string, hires map[string]bool, mapID uint32) bool {
 	if cmd == "" || len(cmd) > AllowedTTMax || strings.ContainsAny(cmd, "\r\n#") {
 		return false
@@ -147,8 +152,17 @@ func AllowedTT(cmd string, hires map[string]bool, mapID uint32) bool {
 			return len(f) == 3 && ttHire(f[2], hires)
 		case "units":
 			// The radius cap is the quiet's roamer scope (80): the walk joins the quiet's roamers to a `q units` read of
-			// their own (item 4). The corridor's pre-reads stay far inside it.
-			return len(f) == 7 && ttRadius(f[2], 80) && ttNumbers(f[3:6]) && f[6] == "all"
+			// their own (item 4). The corridor's pre-reads stay far inside it. The boss-kill read adds `dead` and
+			// `e=<entry>` (review round 1, item 1): the corpses too, one entry, near the boss row.
+			if len(f) < 7 || f[6] != "all" || !ttRadius(f[2], 80) || !ttNumbers(f[3:6]) {
+				return false
+			}
+			for _, extra := range f[7:] {
+				if extra != "dead" && !ttKVNum(extra, "e", 1, MaxTTEntry) {
+					return false
+				}
+			}
+			return true
 		}
 	case "quiet":
 		// quiet <r<=50> <x> <y> <z> w=<0..30> dz=<1..15> [skip=<ids>]
