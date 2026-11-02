@@ -1009,7 +1009,10 @@
         "approach": [
           {"x": -11521.645, "y": -1621.636, "z": 41.325405}
         ]
-      }
+      },
+      "notes": [
+        "Pull group 12 (27 units): walk 29 validates this pull live; revert to split pulls if the raid cannot hold 27."
+      ]
     },
     {
       "name": "bloodlord_mandokir",
