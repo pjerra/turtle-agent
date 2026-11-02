@@ -1356,7 +1356,11 @@ func (w *walk) printPlan(out io.Writer) {
 			if c.PerUnit {
 				unit = fmt.Sprintf(" unit %d", c.Unit)
 			}
-			fmt.Fprintf(out, "  8b clear: row %d at %s %s %s r %s%s\n", c.Step, num32(c.X), num32(c.Y), num32(c.Z), num32(c.Radius), unit)
+			sweep := ""
+			if c.Sweep {
+				sweep = " (sweep)"
+			}
+			fmt.Fprintf(out, "  8b clear: row %d at %s %s %s r %s%s%s\n", c.Step, num32(c.X), num32(c.Y), num32(c.Z), num32(c.Radius), unit, sweep)
 		}
 		for _, n := range w.place.Notes {
 			fmt.Fprintf(out, "  8b note: %s\n", n)

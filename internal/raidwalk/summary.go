@@ -158,6 +158,7 @@ type PlaceCircleSummary struct {
 	Skipped []string `json:"skipped,omitempty"`
 	PerUnit bool     `json:"per_unit,omitempty"`
 	Unit    uint32   `json:"unit,omitempty"`
+	Sweep   bool     `json:"sweep,omitempty"`
 	Moved   bool     `json:"moved,omitempty"`
 }
 
