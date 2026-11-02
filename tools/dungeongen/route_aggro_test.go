@@ -313,7 +313,7 @@ var routeAggroKnownFailing = map[string]int{
 	"wailing_caverns":      188,  // the repo reach (AggroRadius at 22-27 plus spread and wander) outruns the old 20 yd flat line.
 	"deadmines":            661,  // the repo reach (AggroRadius at 18-22 plus spread and wander) outruns the old 20 yd flat line.
 	"uldaman":              268,  // the repo reach (AggroRadius at 41-45 plus spread and wander) outruns the old 20 yd flat line.
-	"zulfarrak":            65,   // the live export builds now (CarrierChests carries the zumrah graves): the check sees the whole run.
+	"zulfarrak":            66,   // #391: the export now reaches Bly and Ukorz (the plan's last leg, the skip_export Zel'jeb and Arena legs aside): two Sandfury Guardian passes on Ukorz's leg (19.5/21.6 yd, later rows' own packs) and Ukorz's 0.1 yd final approach (no row: his boss row names only Ruuzlu in first, and the loader refuses 7267 there); the Courtyard via removed two.
 	"karazhan_crypt":       459,  // the repo reach (AggroRadius at 59-60 plus spread and wander) outruns the old 20 yd flat line.
 	"molten_core":          315,  // the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
 	"blackwing_lair":       344,  // the repo reach (AggroRadius at 58-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
