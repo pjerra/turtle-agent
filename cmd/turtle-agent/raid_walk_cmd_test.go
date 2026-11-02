@@ -5483,6 +5483,84 @@ func TestRaidWalkBossNotFoundToolkitCorpseSkips(t *testing.T) {
 	}
 }
 
+// Walk 25 F3: the toolkit's corpse read is range-limited to 150 yd, so a read from far away is refused with
+// point_far. The walk moves the commander to the boss row once (with the revive's own GM sequence), re-reads the
+// same entry once, and finds the corpse: exactly one `.go xyz` to the boss spot between the two reads, one
+// `.bot run skip`, and the move note. Today: no move, latched, no skip.
+func TestRaidWalkBossNotFoundCorpseReadPointFarMovesAndRereads(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgThekalStart(total, boss)
+	spot := zgRows(t).Steps[boss-1]
+	wantGo := fmt.Sprintf(".go xyz %s %s %s 309", num32(spot.X), num32(spot.Y), num32(spot.Z+2))
+	seenGo := false
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if !strings.Contains(cmd, "all dead e=14599") {
+			return ttResult{}, errors.New("unexpected toolkit command")
+		}
+		if !seenGo {
+			return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+		}
+		return ttReplyOf(t, map[string]any{"units": []map[string]any{{"g": "0xF13000000000000A", "e": 14599, "dead": true, "d": 12.5, "hp": 0}}}), nil
+	}
+	f.agent.mu.Lock()
+	f.agent.startQueue = zgThekalPauseQueue(boss, total)
+	f.agent.mu.Unlock()
+	f.agent.onGM = func(line string) {
+		if line == wantGo {
+			seenGo = true
+		}
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	zgThekalDoneOnSkip(f, boss, total)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs, tt := append([]string{}, f.agent.runVerbs...), append([]string{}, f.agent.ttCalls...)
+	gm := append([]string{}, f.agent.gm...)
+	log := append([]string{}, f.agent.log...)
+	f.agent.mu.Unlock()
+	if countPrefix(verbs, "skip") != 1 {
+		t.Fatalf("run verbs %v, want exactly one skip", verbs)
+	}
+	if len(tt) != 2 || !strings.Contains(tt[0], "all dead e=14599") || !strings.Contains(tt[1], "all dead e=14599") {
+		t.Fatalf("toolkit calls %q, want the corpse read of 14599 twice (the refused read and its re-read)", tt)
+	}
+	gos := 0
+	for _, line := range gm {
+		if line == wantGo {
+			gos++
+		}
+	}
+	if gos != 1 {
+		t.Fatalf("gm lines %q, want exactly one %q between the two reads", gm, wantGo)
+	}
+	// The move went out between the two reads: gm, then tt, in the walk's own send log.
+	goIdx, rereadIdx := -1, -1
+	for i, line := range log {
+		if line == "gm "+wantGo && goIdx < 0 {
+			goIdx = i
+		}
+		if strings.HasPrefix(line, "tt q units") && strings.Contains(line, "all dead e=14599") {
+			rereadIdx = i
+		}
+	}
+	if goIdx < 0 || rereadIdx < 0 || goIdx > rereadIdx {
+		t.Fatalf("send log %q, want the %q gm line before the second corpse read", log, wantGo)
+	}
+	if !hasNote(f.summary(), "the commander moved to the boss row for the corpse read") {
+		t.Fatalf("notes %q, want the move note", f.summary().Notes)
+	}
+}
+
 // A toolkit read that fails is no evidence (the walk waits as a pause) and turns the reads off for the rest of the
 // walk: a server without the toolkit must not cost the watch loop a timeout on every pause tick.
 func TestRaidWalkBossNotFoundToolkitFailureStillPauses(t *testing.T) {
