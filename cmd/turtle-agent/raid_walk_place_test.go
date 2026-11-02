@@ -2742,3 +2742,118 @@ func zgLoopNearest(pts [][3]float32, p dungeon.Point) (nearest, dz float64) {
 	}
 	return nearest, dz
 }
+
+// M1b (PLACE-W26 §3): the landing read is the net for BEHIND trash the quiet's floor window missed. The quiet is
+// clean; the landing read (q units 45) lists a leg-3 servant at 36 yd, dz -13, whose home a BEHIND row holding its
+// entry owns. Expect a clearto at its position before place, and the "landing read takes" note.
+func TestPlaceLandingReadClearsBehindTrashBelowTheFloor(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	owner := placeRow94Circle(t, plan)
+	home := [3]float32{owner.X, owner.Y, owner.Z}
+	at := [3]float32{plan.Point.X + 36, plan.Point.Y, plan.Point.Z - 13}
+	p.units = func(cmd string) ([]any, bool) {
+		fl := strings.Fields(cmd)
+		if len(fl) > 2 && fl[2] == "45" && fl[3] == num32(plan.Point.X) && fl[4] == num32(plan.Point.Y) {
+			return []any{map[string]any{"g": "0xF130000000C152", "e": owner.Entries[0], "n": "Servant",
+				"p": []float32{at[0], at[1], at[2]}, "dz": -13.0, "d": 36.0,
+				"hpv": []float64{4000, 4000}, "rk": 1, "db": 51962,
+				"home": []float32{home[0], home[1], home[2]}}}, false
+		}
+		return nil, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	want := fmt.Sprintf("clearto 309 %s %s %s 3 dz=8 all=1", num32(at[0]), num32(at[1]), num32(at[2]))
+	var found bool
+	for _, c := range p.cleartos {
+		if strings.HasPrefix(c, want) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the landing read did not clear the servant at its position: %v", p.cleartos)
+	}
+	if !hasNote(f.summary(), fmt.Sprintf("the landing read takes %d", owner.Entries[0])) {
+		t.Fatalf("notes %v", f.summary().Notes)
+	}
+}
+
+// M1b: the same unit with its home in an AHEAD row's circle is what a door run meets too: no clearto, place sent.
+func TestPlaceLandingReadLeavesAheadBelowTheFloor(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	_, aheadHome := placeAheadB(t, plan)
+	owner := placeRow94Circle(t, plan)
+	// Near the landing (inside the read) but homed in an AHEAD row's circle, like a door run's own patrol.
+	at := [3]float32{plan.Point.X + 36, plan.Point.Y, plan.Point.Z - 13}
+	p.units = func(cmd string) ([]any, bool) {
+		fl := strings.Fields(cmd)
+		if len(fl) > 2 && fl[2] == "45" && fl[3] == num32(plan.Point.X) && fl[4] == num32(plan.Point.Y) {
+			return []any{map[string]any{"g": "0xF130000000C153", "e": owner.Entries[0], "n": "Servant",
+				"p": []float32{at[0], at[1], at[2]}, "dz": -13.0, "d": 36.0,
+				"hpv": []float64{4000, 4000}, "rk": 1, "db": 51963,
+				"home": []float32{aheadHome[0], aheadHome[1], aheadHome[2]}}}, false
+		}
+		return nil, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	if n := extraClearCount(p); n != 0 {
+		t.Fatalf("the landing read cleared an AHEAD unit: %v", p.cleartos)
+	}
+	// The landing read leaves any other unit with no note (an AHEAD unit off the floor is what a door run meets
+	// too): without the ownership check the extra clear notes the refusal.
+	if hasNote(f.summary(), "db 51963") {
+		t.Fatalf("the landing read noted the AHEAD unit: %v", f.summary().Notes)
+	}
+	if len(p.places) != 1 {
+		t.Fatalf("the walk did not place: %v", p.places)
+	}
+}
+
+// M1b: a BEHIND unit at dz -3 (inside the quiet's window) is the quiet's own judgement, not the landing read's:
+// no clearto from the landing read.
+func TestPlaceLandingReadSkipsUnitsTheQuietJudged(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, plan := placePlanRows(t)
+	owner := placeRow94Circle(t, plan)
+	home := [3]float32{owner.X, owner.Y, owner.Z}
+	// 10 yd from the landing (inside the read), 3 yd below the floor (inside the quiet's window).
+	at := [3]float32{plan.Point.X + 10, plan.Point.Y, plan.Point.Z - 3}
+	var landingReads int
+	p.units = func(cmd string) ([]any, bool) {
+		fl := strings.Fields(cmd)
+		if len(fl) > 2 && fl[2] == "3" { // the landing read's extra round fires: the quiet judged the unit too
+			return []any{map[string]any{"g": "0xF130000000C154", "e": owner.Entries[0], "n": "Servant",
+				"p": []float32{at[0], at[1], at[2]}, "dz": -3.0, "d": 1.0,
+				"hpv": []float64{4000, 4000}, "rk": 1, "db": 51964,
+				"home": []float32{home[0], home[1], home[2]}}}, false
+		}
+		if len(fl) > 2 && fl[2] == "45" && fl[3] == num32(plan.Point.X) && fl[4] == num32(plan.Point.Y) {
+			landingReads++
+			return []any{map[string]any{"g": "0xF130000000C154", "e": owner.Entries[0], "n": "Servant",
+				"p": []float32{at[0], at[1], at[2]}, "dz": -3.0, "d": 36.0,
+				"hpv": []float64{4000, 4000}, "rk": 1, "db": 51964,
+				"home": []float32{home[0], home[1], home[2]}}}, false
+		}
+		return nil, false
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	if landingReads == 0 {
+		t.Fatal("the landing read never ran")
+	}
+	if n := extraClearCount(p); n != 0 {
+		t.Fatalf("the landing read cleared a unit the quiet judged: %v", p.cleartos)
+	}
+	if len(p.places) != 1 {
+		t.Fatalf("the walk did not place: %v", p.places)
+	}
+}

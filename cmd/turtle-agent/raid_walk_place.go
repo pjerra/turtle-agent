@@ -55,6 +55,11 @@ const (
 	// placeQuietExtraRounds is how many extra clear rounds the quiet may run (walk 24: one round left the bats that
 	// flew in after it).
 	placeQuietExtraRounds = 2
+	// placeLandingReadYd and placeLandingDz bound the M1b landing read (PLACE-W26): what `q units` radius the walk
+	// re-reads at the end of a clean quiet, and how far off the point's floor a unit may stand to be taken. On Mar'li
+	// at the end of the quiet (the `.go` +22 s) the Berserker is about 36 yd out and 13 yd below.
+	placeLandingReadYd = 45
+	placeLandingDz     = 30
 	// placeCritterHP is the top of a critter's max-HP band: a rank-0 unit with at most this many hit points (a level-1
 	// critter) never blocks the clear or the quiet (item 2).
 	placeCritterHP = 100
@@ -637,7 +642,9 @@ func (w *walk) placeQuiet(ctx context.Context) error {
 					"a BEHIND leftover the extra round took, or beyond %.0f yd, a roamer beyond it that the cut join read missed: "+
 					"the walk places the raid", float64(placeReachYd))
 			}
-			return nil
+			// M1b: the quiet's window (dz 8) misses a patroller between its spawn and the landing. The landing read
+			// (r 45, no floor window) nets BEHIND trash off the floor after a clean quiet.
+			return w.placeLandingRead(ctx, p, skip)
 		}
 		if rereads >= placeQuietRereads || !read.roamersOnly(j.Block) {
 			w.placeSum.Quiet = false
@@ -649,6 +656,55 @@ func (w *walk) placeQuiet(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+// placeLandingRead is the M1b net for BEHIND trash off the quiet's floor window (PLACE-W26): a `q units 45 <p> all`
+// after a clean quiet. For each unit: skip it when the quiet judged it (|Dz| <= placeClearDz), when it stands
+// farther than placeLandingDz off the floor, skip entries/critters/dead units and anything beyond 45 yd. Otherwise,
+// when placeRogueOwner owns it or it is placeBehindTrash, run the existing extra clear (placeQuietClear), which
+// pre-reads, guards and clears 3 yd at the unit's position. Any other unit is left with no note (an AHEAD or unowned
+// unit off the floor is what a door run meets too). A cut read is fail-open: the quiet's own verdict stands. The read
+// does not count against placeQuietExtraRounds.
+func (w *walk) placeLandingRead(ctx context.Context, p dungeon.Point, skip string) error {
+	units, trunc, err := w.placeUnits(ctx, placeLandingReadYd, p.X, p.Y, p.Z)
+	if err != nil {
+		return err
+	}
+	if trunc {
+		w.note("place: the landing read (r %d) was cut", placeLandingReadYd)
+		return nil
+	}
+	for _, u := range units {
+		if math.Abs(float64(u.Dz)) <= placeClearDz {
+			continue
+		}
+		if math.Abs(float64(u.Dz)) > placeLandingDz {
+			continue
+		}
+		if placeDist3(u.X, u.Y, u.Z, p.X, p.Y, p.Z) > placeLandingReadYd {
+			continue
+		}
+		if inEntries(w.place.Skips, u.Entry) || u.critter() || u.Dead {
+			continue
+		}
+		if _, owned := w.placeRogueOwner(u); !owned && !w.placeBehindTrash(u) {
+			continue
+		}
+		took, err := w.placeQuietClear(ctx, u, skip)
+		if err != nil {
+			return err
+		}
+		if !took {
+			continue
+		}
+		below := "below"
+		if u.Dz > 0 {
+			below = "above"
+		}
+		w.note("place: the landing read takes %d %s (%.1f yd, %.1f yd %s, %s)", u.Entry, u.Name,
+			placeDist3(u.X, u.Y, u.Z, p.X, p.Y, p.Z), math.Abs(float64(u.Dz)), below, u.placeWhere())
+	}
+	return nil
 }
 
 // placeQuietNames names the units that block the quiet, as the refusal and the notes read them.
@@ -1396,6 +1452,7 @@ func placeTTLines(p *raidwalk.PlacePlan, planMap uint32) []string {
 		"q group of=" + mt,
 		fmt.Sprintf("q floor %s %s %s", px, py, pz),
 		fmt.Sprintf("quiet %d %s %s %s w=%d dz=%d%s", placeQuietR, px, py, pz, placeQuietWaitS, placeClearDz, tail),
+		fmt.Sprintf("q units %d %s %s %s all", placeLandingReadYd, px, py, pz), // M1b: the landing read after a clean quiet
 		fmt.Sprintf("place %s %s %s spread=5 of=%s", px, py, pz, mt),
 	}
 	if len(p.Circles) > 0 {
