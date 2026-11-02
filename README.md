@@ -915,16 +915,19 @@ dungeongen cannot tell friend from foe by itself: that is in `FactionTemplate.db
 the Ironforge dwarves': friendly to the Alliance, and nothing says it is hostile to the Horde but the data of the users of 122 (Bael'dun soldiers are Horde kill targets).
 `-awakened` names creature entries that spawn friendly (faction 35, stoned) and that the encounter's script turns hostile, so a plan that fights them is not warned about as if it
 asked the party to kill a friend: Uldaman's Stone Keepers (4857, woken one by one by the Altar of the Keepers) and Archaedas (2748, woken by the Altar of Archaedas); their `npc_flags` are
-still looked at. `-strict` makes any warning exit status 1, for CI. Generating a skeleton puts `WARNING:` lines in the leg notes for a boss with `npc_flags` or a faction of `-friendly-factions`.
+still looked at. `-strict` makes a creature-check warning or a pull row with no target exit status 1, for CI. Generating a skeleton puts `WARNING:` lines in the leg notes for a boss with `npc_flags` or a faction of `-friendly-factions`.
 
 The same `-check` run also lints pull sizes (`internal/aggroest`, the offline twin of the run leader's aggro-count estimator): for every pull row of the
 live-export rows it estimates the bodies that would join and warns `leg L pull P: N bodies (ceiling M): guids ...` when `N` is over the row's
-`max_bodies` (the row's `item`), else the plan's `pull_ceiling` (1-80, optional), else 8 for a raid plan and 6 for a party. The target is the row's own
+`max_bodies` (the row's `item`), else the plan's `pull_ceiling` (1-80, optional), else 8 for a raid plan and 6 for a party. Only hostile mobs count
+(no `npc_flags`, no ignored `--ignore-factions` or friendly `--friendly-factions` faction, no critters; 35 is friendly to all), and a row gated to the
+other `-team` is not pulled at all. The target is the row's own
 creature (the spawns the row owns by entry and radius, `kill_first` rank first, then the nearest to the party point); a row that owns nothing warns
 `leg L pull P: no target`. Every pull row of the leg is numbered in route order, under its ceiling or not. The geometry is the previous
 row's party point to this row's party point (a straight 2 yd sampled segment; the navmesh polyline needs mmaps and the straight line is the documented
 approximation, high side), the stand is the party point, and sight is always seen (high side: without mmaps there is no collision geometry to raycast
-against). A world or export the lint cannot read fails the check, strict or not. The plan's own numbers live in the plan JSON: a `pull_group`'s `max_bodies` and the plan-wide `pull_ceiling`.
+against). An over-ceiling row never fails `-strict`: `-pull-size-strict` opts into the ceiling. A world or export the lint cannot read fails the check,
+strict or not, and the run prints `N warning(s) for <plan> as team "<team>"` after the warnings. The plan's own numbers live in the plan JSON: a `pull_group`'s `max_bodies` and the plan-wide `pull_ceiling`.
 
 `internal/dungeon`'s `TestUldamanOnNavmesh` plans a `path_to` route through every waypoint of `dungeons/uldaman.json` in the order
 a run goes and asks for status `complete`; `TestUldamanPlanMatchesTheWorldExport` checks that each pack member, boss and door
