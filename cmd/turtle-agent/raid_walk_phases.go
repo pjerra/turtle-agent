@@ -1173,8 +1173,9 @@ func (w *walk) waitRevivePoint(ctx context.Context, p dungeon.Point, fromMap uin
 }
 
 // reviveSeq reads the session's acked-teleport count just before a revive `.go xyz`, the landing signal that works
-// over a navmesh hole (reviveLanded's seq term). One retry, 1 s later, within the recovery deadline; have is false
-// when no read answered (the near rule then falls back to the settled z, as before).
+// over a navmesh hole and for every far go (reviveLanded's seq term). One retry, 1 s later, within the recovery
+// deadline; have is false when no read answered (a near go then falls back to the settled z, as before; a far one
+// does not land).
 func (w *walk) reviveSeq(ctx context.Context, deadline time.Time) (seq uint64, have bool) {
 	if st, err := w.status(ctx); err == nil {
 		return st.TeleportSeq, true
@@ -1340,19 +1341,25 @@ const (
 
 // reviveLanded says the status is a SETTLED landing at p on mapID: the character is not falling, x/y are within
 // reviveLandingYd of p and z within reviveLandingZYd (a landing may drop to the floor, so z gets more room than x/y).
-// After a NEAR teleport (fromMap == mapID) the server must also have sent a position: not ZUnknown, the session's
-// guess until the floor drop or a server position settles it; or the session must have ACKED the teleport
-// (TeleportSeq > beforeSeq), which is the landing signal when a navmesh hole under p leaves the z guess unsettled
-// for good (walk 24 test2 r3). After a FAR teleport (fromMap != mapID) ZUnknown stays set for good, as the session
-// lands it through SMSG_NEW_WORLD with no floor drop and the core never sends the player its own position (walk 23:
-// 6 runs exit 19, the commander waited on map 0 at the portal); there the map change is the landing itself, since
-// the session acks the worldport at once and the server places the player on reading that ack, before any later
-// chat line. Falling still blocks: a dropToFloor fall must finish first.
+// The session publishes a teleport's landing in one update that bumps TeleportSeq after the client's ack has gone
+// out, so the seq past beforeSeq is the landing signal in both cases. After a NEAR teleport (fromMap == mapID) the
+// other term is a position the server sent: not ZUnknown, the session's guess until the floor drop or a server
+// position settles it; the seq alone lands over a navmesh hole that leaves the z guess unsettled for good (walk 24
+// test2 r3). After a FAR teleport (fromMap != mapID) ZUnknown stays set for good, as the session lands it through
+// SMSG_NEW_WORLD with no floor drop and the core never sends the player its own position (walk 23: 6 runs exit 19,
+// the commander waited on map 0 at the portal); the map change alone is not the landing, only the worldport ack the
+// session counts (Codex HIGH). An unread beforeSeq (haveSeq false) lands nothing: the wait times out rather than
+// summon blind. Falling still blocks: a dropToFloor fall must finish first.
 func reviveLanded(p dungeon.Point, mapID, fromMap uint32, st session.StatusInfo, beforeSeq uint64, haveSeq bool) bool {
 	if st.Map != mapID || st.Falling {
 		return false
 	}
-	if st.ZUnknown && fromMap == mapID && !(haveSeq && st.TeleportSeq > beforeSeq) {
+	seq := haveSeq && st.TeleportSeq > beforeSeq
+	if fromMap != mapID {
+		if !seq {
+			return false
+		}
+	} else if st.ZUnknown && !seq {
 		return false
 	}
 	dx, dy := float64(p.X-st.X), float64(p.Y-st.Y)

@@ -144,7 +144,8 @@ type StatusInfo struct {
 	// TeleportSeq counts the server teleports this session has ACKED (a near `.go xyz` teleport ack, a far
 	// worldport): it advances when the client's ack has gone out, so the server has placed the player by the
 	// time it reads any later chat line. raid-walk's reviveLanded reads it as the landing signal over a navmesh
-	// hole, where the z guess never settles (walk 24 test2 r3).
+	// hole, where the z guess never settles (walk 24 test2 r3), and as the far landing itself: a worldport's map,
+	// position and bump land together only after the ack write.
 	TeleportSeq  uint64         `json:"teleport_seq"`
 	LatencyMS    uint32         `json:"latency_ms"`
 	Unknown      map[string]int `json:"unknown_opcodes"`
