@@ -11,6 +11,7 @@ import (
 	"math"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -832,6 +833,9 @@ func (w *walk) checkStartLine(ctx context.Context, line string) error {
 	if w.tracker != nil {
 		w.tracker.Feed(w.env.now(), st)
 	}
+	// The boss rule reads the walk's previous status (a run ending right after the boss step), so it is observed
+	// before this one replaces it.
+	w.observeBossStatus(st, w.env.now())
 	w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
 	w.noteLabel(st)
 	if st.State != tbm.RunRunning {
@@ -1032,6 +1036,7 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 			continue
 		}
 		w.tracker.Feed(now, st)
+		w.observeBossStatus(st, now) // before lastStatus is replaced: the end rule reads the previous status
 		w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
 		w.pullStarted(now, st)
 		w.recordRunLine(st, now)
@@ -1406,11 +1411,41 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 			}
 		}
 	}
+	// The guid rule (spec 6, D5 b, #1453): the frames are keyed by guid, and a script that changes a creature's
+	// entry (core UpdateEntry) keeps that guid. So a row whose guid the frames showed with a plan boss's OWN entry
+	// is the boss whatever entry it now reads: bossGUIDs remembers the guid, bossForms the entries it was seen with,
+	// one per change (the summary's phase is 1 + the changes).
+	for _, h := range f.Hostiles {
+		if h.GUID == 0 {
+			continue
+		}
+		g := h.GUID.String()
+		if w.bossRule.Owns(h.Entry) {
+			if w.bossGUIDs == nil {
+				w.bossGUIDs = map[string]uint32{}
+			}
+			w.bossGUIDs[g] = h.Entry
+		}
+		if _, boss := w.bossGUIDs[g]; !boss {
+			continue
+		}
+		if l := w.bossForms[g]; len(l) == 0 || l[len(l)-1] != h.Entry {
+			if w.bossForms == nil {
+				w.bossForms = map[string][]uint32{}
+			}
+			w.bossForms[g] = append(l, h.Entry)
+		}
+	}
 	// An entry the frame shows more than one LIVE unit of at once exists several at a time: it is an add, not a
 	// boss reborn, and its corpse proves nothing (bossUnits). Thekal's two Zulian Guardians 15068 are summoned
 	// together (boss_thekal.cpp:41/:413) while Thekal reborn 14509 stands alone.
 	for i := range f.Hostiles {
 		if f.Hostiles[i].HPPct <= 0 || w.bossAdds[f.Hostiles[i].Entry] {
+			continue
+		}
+		// A boss unit is NEVER an add: the row of a guid the frames showed as the boss's own entry must not mark
+		// its entry an add, so a boss that changes entry into a pair's entry is still the boss (bossKilled).
+		if f.Hostiles[i].GUID != 0 && w.bossGUIDs[f.Hostiles[i].GUID.String()] != 0 {
 			continue
 		}
 		for j := range f.Hostiles {
@@ -1462,7 +1497,7 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 // very row bossKilled then accepts (revive r7). The frames' own 0 % sighting kills only when the live rows
 // of THIS attempt started the link first (the same alive-before-death rule the toolkit path uses).
 func bossAttemptEngaged(hppct int, target uint64, partyG map[uint64]bool) bool {
-	return hppct > 0 && (hppct < 100 || partyG[target])
+	return hppct > 0 && (hppct < 100 || (target != 0 && partyG[target]))
 }
 
 // resetBossAliveSeen ends the previous attempt's live links for entry's boss units: a new attempt starts
@@ -1728,6 +1763,10 @@ type walkFightRow struct {
 	Step     uint32 `json:"step"`
 	Deaths   int    `json:"deaths"`
 	Warnings int    `json:"warnings"`
+	// BossPhase and BossPhaseEntry are the boss's phase in the fight (spec 6, D5): TortoiseBots' COMBAT_FIGHT
+	// payload carries them after boss_name when the boss changed entry, and the summary passes them through.
+	BossPhase      int    `json:"boss_phase,omitempty"`
+	BossPhaseEntry uint32 `json:"boss_phase_entry,omitempty"`
 	// Live marks a fight still running (COMBAT_EVENTS opened it, no COMBAT_FIGHT yet): it has no detail to load, and
 	// the finished fight comes back under the same id.
 	Live bool `json:"live"`
@@ -1771,7 +1810,8 @@ func (w *walk) saveFights() {
 			continue
 		}
 		fs := raidwalk.FightSummary{ID: r.ID, Step: int(r.Step), Leg: r.Leg, DurMS: int64(r.Dur),
-			Deaths: r.Deaths, Outcome: r.Outcome, BossName: r.BossName, Warnings: r.Warnings}
+			Deaths: r.Deaths, Outcome: r.Outcome, BossName: r.BossName, Warnings: r.Warnings,
+			BossPhase: r.BossPhase, BossPhaseEntry: r.BossPhaseEntry}
 		idx, pending := w.pendingFights[r.ID] // the row's fields are read fresh on every poll
 		// A fight whose detail could not be loaded or read is kept without it and fetched again on the next poll (and at teardown),
 		// so one dashboard timeout does not lose its death recap for good.
@@ -2011,15 +2051,20 @@ func (w *walk) bossKilled(ctx context.Context, entry uint32, now time.Time) (boo
 	attemptAt := w.bossAttemptStart(units)
 	var alive, dead hostileState
 	haveAlive, haveDead := false, false
-	for k, h := range w.hostiles {
-		if !inEntries(units, h.entry) {
-			continue
+	for g, h := range w.hostiles {
+		// The guid rule first (spec 6, D5 b, #1453): a row whose guid the frames showed as this boss's own entry is
+		// the boss whatever entry it now reads, so the add rule never applies to it. Every other row must be a boss
+		// unit of this boss (its own entry or a phase entry that is not an add).
+		if w.bossGUIDs[g] != entry {
+			if w.bossAdds[h.entry] || !inEntries(units, h.entry) {
+				continue
+			}
 		}
 		if h.hppct == 0 {
 			if attemptAt.IsZero() || h.at.Before(attemptAt) {
 				continue // an earlier attempt's corpse
 			}
-			if seen, ok := w.bossAliveSeen[k]; !ok || seen.After(h.at) {
+			if seen, ok := w.bossAliveSeen[g]; !ok || seen.After(h.at) {
 				continue // the frames never showed this guid alive before its death: a stale or foreign corpse
 			}
 			if !haveDead || dead.at.Before(h.at) {
@@ -2052,6 +2097,321 @@ func (w *walk) bossKilled(ctx context.Context, entry uint32, now time.Time) (boo
 		return false, "no hire alive (a wipe, not a kill)"
 	}
 	return true, fmt.Sprintf("%s; %d hires alive", ev, len(w.hireList()))
+}
+
+// bossDownNote is what the run leader's status note starts with once the boss step's boss is down (TortoiseBots
+// FightStepEnd, spec 5): `boss down`, or `boss down: he died as <entry>` when the boss changed entry.
+const bossDownNote = "boss down"
+
+// bossRowAt is the plan's boss row at a step of the run's own rows (a step outside them is no boss row): safe
+// against a 0/1-based mix-up, and what observeBossStatus tracks the boss step with.
+func (w *walk) bossRowAt(step int) (planexport.StepRow, bool) {
+	if step < 1 || step > len(w.rows.Steps) {
+		return planexport.StepRow{}, false
+	}
+	if row := w.rows.Steps[step-1]; row.Kind == planexport.KindBoss {
+		return row, true
+	}
+	return planexport.StepRow{}, false
+}
+
+// bossStepOf is the step of the plan's boss row whose entry is entry (0: none of the rows is his own boss row).
+func (w *walk) bossStepOf(entry uint32) int {
+	for i, s := range w.rows.Steps {
+		if s.Kind == planexport.KindBoss && s.Entry == entry {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// bossTrackAt is the record of a boss step (or of the boss's entry when the step is unknown), created on first
+// sight. A known step is keyed by the step, so each boss row the run's statuses show keeps its own record.
+func (w *walk) bossTrackAt(step int, entry uint32) *bossStepTrack {
+	if w.bossTracks == nil {
+		w.bossTracks = map[bossKey]*bossStepTrack{}
+	}
+	k := bossKey{step: step}
+	if step <= 0 {
+		k = bossKey{entry: entry}
+	}
+	t, ok := w.bossTracks[k]
+	if !ok {
+		t = &bossStepTrack{entry: entry, step: step}
+		w.bossTracks[k] = t
+	}
+	return t
+}
+
+// observeBossStatus records the run's own boss-step notes per boss step (spec 6, D5): the kill is the run leader's
+// `boss down` note, and it fires when the run LEAVES the boss step (a later step, or the same step reporting another
+// kind). Either the last note the run reported on the boss step or the first status after it must start with
+// `boss down` (both are read: one poll may carry both lines, so the last status alone would miss the note). Each
+// boss row's step gets its own record, so a walk past several bosses lists each one; a skip the walk sent is stored
+// on the step it was sent for (bossSkipStep). A run that ends right after its boss step never sends that note at
+// all (bossEndStatus reads the end), and a boss-kind status that matches no boss row at its step records nothing
+// (the rows the walk reads are not the deployed ones then).
+func (w *walk) observeBossStatus(st tbm.RunStatus, now time.Time) {
+	// The run ending right after the boss step (see bossEndStatus) is read first: a plan whose last row is the boss
+	// reports the end ON the boss step, so the boss-row branch below would swallow it.
+	if t := w.bossEndStatus(st, now); t != nil {
+		return
+	}
+	if row, ok := w.bossRowAt(st.Step); ok && st.Kind == planexport.KindBoss {
+		t := w.bossTrackAt(st.Step, row.Entry)
+		t.engaged = true
+		t.note = st.Note
+		return
+	}
+	if st.Kind == planexport.KindBoss {
+		// The run's boss step is no boss row in the rows the walk reads (without --sql they are the plan JSON's, not
+		// the deployed ones): a kill recorded by step would land on another step's row. Skip the record once per step.
+		if w.bossMismatch == nil {
+			w.bossMismatch = map[int]bool{}
+		}
+		if !w.bossMismatch[st.Step] {
+			w.bossMismatch[st.Step] = true
+			w.note("boss record skipped: plan rows are not the deployed rows")
+			w.logLine(now, fmt.Sprintf("boss record skipped at step %d (%s): plan rows are not the deployed rows", st.Step, st.Note))
+		}
+		return
+	}
+	// A leaving status (a step that is not a boss row, or the boss step reporting another kind) reports the kill
+	// of the nearest boss row at or below the status's step: its track is created when the run never stood on it,
+	// so a boss row no status named still takes its leaving status's `boss down` note. A backward move (a wipe)
+	// reads the earlier row.
+	step, row := w.nearestBossRow(st.Step)
+	if step == 0 {
+		return
+	}
+	t := w.bossTrackAt(step, row.Entry)
+	if t.killed {
+		return
+	}
+	ev := t.note
+	if strings.HasPrefix(st.Note, bossDownNote) {
+		ev = st.Note
+	}
+	if !strings.HasPrefix(ev, bossDownNote) {
+		return
+	}
+	t.killed, t.evidence = true, ev
+	w.logLine(now, fmt.Sprintf("boss %d down at step %d: %s", t.entry, t.step, ev))
+}
+
+// nearestBossRow is the plan's boss row nearest at or below step: its 1-based step and the row. (0, zero) when no
+// boss row is at or below. The leaving rule credits THIS row, not the highest track: a boss row the run's statuses
+// never named still takes the note its leaving status carries (#1453 walk side).
+func (w *walk) nearestBossRow(step int) (int, planexport.StepRow) {
+	for i := min(step, len(w.rows.Steps)) - 1; i >= 0; i-- {
+		if w.rows.Steps[i].Kind == planexport.KindBoss {
+			return i + 1, w.rows.Steps[i]
+		}
+	}
+	return 0, planexport.StepRow{}
+}
+
+// bossSkippedInNote says the run's end note names this boss in its "boss skipped, not seen killed: ..." list
+// (TortoiseBots DoneNote, UnclearedBosses: every boss step the run ended without clearing). TB then ended the run
+// without the kill, so the end rule must not credit it.
+func bossSkippedInNote(note string, entry uint32, step int) bool {
+	const marker = "boss skipped, not seen killed: "
+	i := strings.Index(note, marker)
+	if i < 0 {
+		return false
+	}
+	return strings.Contains(note[i+len(marker):], fmt.Sprintf("boss %d (step %d)", entry, step))
+}
+
+// bossFramesDead says the frames saw a guid of this boss (or a script-changed form of it, bossGUIDs) dead in the
+// current attempt: a 0 % row at or after the attempt's start (bossAttemptStart), the frames-only half of
+// bossKilled's evidence. The end rule reads it when the run's own statuses never showed the step engaged.
+func (w *walk) bossFramesDead(entry uint32) bool {
+	units := w.bossUnits(entry)
+	attemptAt := w.bossAttemptStart(units)
+	if attemptAt.IsZero() {
+		return false
+	}
+	for g, h := range w.hostiles {
+		if w.bossGUIDs[g] != entry {
+			if w.bossAdds[h.entry] || !inEntries(units, h.entry) {
+				continue
+			}
+		}
+		if h.hppct == 0 && !h.at.Before(attemptAt) {
+			return true
+		}
+	}
+	return false
+}
+
+// bossEndStatus credits the boss kill of a run that ENDED right after its boss step (#1453 walk side): TB's
+// NextStep overwrites the boss step's "boss down" note in the same call, with the until stop's
+// "stopped before step N (...)" (StopAtUntil/EndRunEarly) or DoneNote's "plan done (...)" (runtime/DungeonRunPolicy.h
+// NextStep around line 3841), so a plan ending on a boss (43 of 46) never sends `boss down` at all. The end is
+// credited when all of these hold:
+//   - the status is the run's end (state done, a `stopped before step` or `plan done` note) and its step is the boss
+//     step + 1, or the plan's own end while the run stood on its LAST boss row (the status line clamps the step
+//     there, StatusParts: shown = min(step+1, total));
+//   - the walk's LAST status was on that boss step (the run ended right after it);
+//   - the note's "boss skipped, not seen killed: ..." list does not name this boss (TB's own verdict: it ended
+//     without clearing the step, so no kill), and
+//   - the frames saw the boss's guid (or a script-changed form of it) dead in this attempt, or the run's earlier
+//     status on the boss step was engaged.
+//
+// The evidence says which. nil when the rule does not apply; a track already killed or skipped is left alone.
+func (w *walk) bossEndStatus(st tbm.RunStatus, now time.Time) *bossStepTrack {
+	if !w.haveStatus || st.State != tbm.RunDone {
+		return nil
+	}
+	if !strings.HasPrefix(st.Note, "stopped before step") && !strings.HasPrefix(st.Note, "plan done") {
+		return nil
+	}
+	b := w.lastStatus.Step
+	row, ok := w.bossRowAt(b)
+	if !ok {
+		return nil
+	}
+	atPlanEnd := st.Steps > 0 && st.Step == st.Steps
+	if st.Step != b+1 && !(atPlanEnd && st.Step == b) {
+		return nil
+	}
+	t := w.bossTrackAt(b, row.Entry)
+	if t.killed || t.skipped || bossSkippedInNote(st.Note, row.Entry, b) {
+		return t
+	}
+	switch {
+	case w.bossFramesDead(row.Entry):
+		t.killed, t.evidence = true, "run ended right after the boss step; frames"
+	case t.engaged:
+		t.killed, t.evidence = true, "run ended right after the boss step; engaged"
+	default:
+		return t
+	}
+	w.logLine(now, fmt.Sprintf("boss %d down at step %d: %s", t.entry, t.step, t.evidence))
+	return t
+}
+
+// bossGUIDFor returns the guid the frames showed with a plan boss's own entry (the one with the most forms when
+// several rows carry the same entry), or "" when no guid was recorded. It is what bossFormsForTrack reads the
+// phase from.
+func (w *walk) bossGUIDFor(entry uint32) string {
+	best, bestG := 0, ""
+	for g, boss := range w.bossGUIDs {
+		if boss != entry {
+			continue
+		}
+		if forms := w.bossForms[g]; len(forms) > best {
+			best, bestG = len(forms), g
+		}
+	}
+	return bestG
+}
+
+// bossFormsFor is the phase the frames saw the boss's guid with (spec 6, D5): the number of entries recorded on it
+// (one per change, so 1 = never changed) and the last entry it read. Falls back to (1, entry) when no guid of the
+// boss was ever recorded (a boss whose kill came from the run's own note alone).
+func (w *walk) bossFormsFor(entry uint32) (phase int, phaseEntry uint32) {
+	best, last := 0, entry
+	for g, boss := range w.bossGUIDs {
+		if boss != entry {
+			continue
+		}
+		forms := w.bossForms[g]
+		if len(forms) > best {
+			best, last = len(forms), forms[len(forms)-1]
+		}
+	}
+	if best == 0 {
+		return 1, entry
+	}
+	return best, last
+}
+
+// bossFormsForTrack is bossFormsFor for one tracked boss step: the forms of the guid that step's boss row was seen
+// with (the record's guid, else the entry's best guid), so a walk past several bosses reads each boss's own phase.
+func (w *walk) bossFormsForTrack(t *bossStepTrack) (phase int, phaseEntry uint32) {
+	if t.guid == "" {
+		t.guid = w.bossGUIDFor(t.entry)
+	}
+	if t.guid != "" {
+		if forms := w.bossForms[t.guid]; len(forms) > 0 {
+			t.forms = forms
+			return len(forms), forms[len(forms)-1]
+		}
+	}
+	return w.bossFormsFor(t.entry)
+}
+
+// resetBossForms clears each boss guid's form history back to its identity entry when a retry starts (spec 6, D5,
+// #1453): the phase counts the entries the retry's own frames saw, not the wiped attempt's. It MUST come after the
+// recovery's last frame poll (the reset wait, the revive, the rest all read the frames and the boss's reset lands in
+// them) and before the retry's first one: clearing first let those polls re-add the failed attempt's forms, and the
+// record showed a phase the retry never saw (review round 4).
+func (w *walk) resetBossForms() {
+	for g, entry := range w.bossGUIDs {
+		w.bossForms[g] = []uint32{entry}
+	}
+}
+
+// bossKillSummaryFor is one boss step's summary record: its entry and step, whether the encounter was engaged,
+// killed or skipped, and the phase its guid was seen with. A boss that was engaged but never reported dead says so,
+// with the reason, instead of staying silent.
+func (w *walk) bossKillSummaryFor(t *bossStepTrack) raidwalk.BossKillSummary {
+	phase, phaseEntry := w.bossFormsForTrack(t)
+	k := raidwalk.BossKillSummary{
+		Entry: t.entry, Step: t.step, Engaged: t.engaged,
+		Killed: t.killed || t.skipped, Skipped: t.skipped,
+		Phase: phase, PhaseEntry: phaseEntry,
+	}
+	switch {
+	case t.killed:
+		k.Evidence = t.evidence
+	case t.skipped:
+		k.Evidence = t.evidence
+	default:
+		k.Evidence = "the run leader never reported boss down"
+	}
+	return k
+}
+
+// bossKillSummaries is the summary's boss_kills list: one record per boss step the run's statuses showed, ordered by
+// step (unknown steps by entry). nil when no boss row was seen.
+func (w *walk) bossKillSummaries() []raidwalk.BossKillSummary {
+	if len(w.bossTracks) == 0 {
+		return nil
+	}
+	out := make([]raidwalk.BossKillSummary, 0, len(w.bossTracks))
+	for _, t := range w.bossTracks {
+		out = append(out, w.bossKillSummaryFor(t))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Step != out[j].Step {
+			return out[i].Step < out[j].Step
+		}
+		return out[i].Entry < out[j].Entry
+	})
+	return out
+}
+
+// bossKillSummary is the summary's single boss_kill object (spec 6, D5): the LAST engaged boss's record. nil when no
+// boss was engaged. The tracker's one-shot latch is inserted as a record in finish (L4), before the summary reads
+// the tracks, so this reads only the tracks.
+func (w *walk) bossKillSummary() *raidwalk.BossKillSummary {
+	var best *bossStepTrack
+	for _, t := range w.bossTracks {
+		if !t.engaged {
+			continue
+		}
+		if best == nil || t.step > best.step || (t.step == best.step && t.entry > best.entry) {
+			best = t
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	k := w.bossKillSummaryFor(best)
+	return &k
 }
 
 // bossUnits is the boss's units for the kill evidence: the step's boss entry and the phase entries that are the
@@ -2341,6 +2701,9 @@ func (w *walk) bossSkipStep(ctx context.Context, bossEntry uint32, ev string, st
 		case rep.Reply.Err != nil:
 			why = rep.Reply.Err.Message
 		default:
+			t := w.bossTrackAt(step, bossEntry)
+			t.skipped = true
+			t.evidence = ev
 			w.note("boss %d killed (%s); the run leader did not find his corpse: .bot run skip of step %d", bossEntry, ev, step)
 			w.logLine(now, fmt.Sprintf("boss %d killed (%s); the run leader did not find his corpse: .bot run skip of step %d", bossEntry, ev, step))
 			return true
@@ -2525,6 +2888,11 @@ func (w *walk) handleBoss(ctx context.Context, inc raidwalk.IncidentBossEngaged)
 			if err := w.waitReset(ctx, w.opts.resetWait); err != nil {
 				return err
 			}
+			// The reset wait polls the frames and the reset itself lands in them (the wiped attempt's last
+			// form, then the boss's original one). Clearing the form history only now keeps those frames out
+			// of the retry's phase: clearing first re-added them, and the record showed the failed attempt's
+			// changes as the retry's (review round 4, #1453).
+			w.resetBossForms()
 			return w.revive(ctx, inc.Step)
 		}
 		if !now.Before(deadline) {
@@ -2899,6 +3267,9 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 		if _, err := w.freshWipeRest(); err != nil {
 			return err
 		}
+		// The retry starts here: every frame polled above (the revive's, the rest's) is the wiped attempt's, so
+		// the record's phase counts only the entries the retry's own polls see (spec 6, D5, #1453).
+		w.resetBossForms()
 		w.resumeStatusSeq = w.statusSeq // recoveredBoss's run-leader exception needs a status after this point
 		if err := w.recoveredBoss(ctx, step); err != nil {
 			return err
@@ -2919,6 +3290,8 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 		if err == errRunWentOn {
 			// The run went on by itself while the walk rested (defence in depth: usually the
 			// self-regroup note decided this before the rest). Skip the resume and count it.
+			// The retry already began: the rest's polls above are the wiped attempt's frames (spec 6, D5, #1453).
+			w.resetBossForms()
 			w.resumeStatusSeq = seq0
 			if rerr := w.recoveredBoss(ctx, step); rerr != nil {
 				return rerr
@@ -2929,6 +3302,9 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 		}
 		return err
 	}
+	// The retry starts here: the revive's and the rest's frames are the wiped attempt's last, so the record's
+	// phase counts only the entries the retry's own polls see (spec 6, D5, #1453).
+	w.resetBossForms()
 	if err := w.resumeRun(ctx, step, from, rest); err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
 			return timeout.end(step)
@@ -2976,6 +3352,8 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 		if err == errRunWentOn {
 			// The run went on by itself while the walk rested (a hand resume, or a regroup the
 			// status line reported): skip the resume and count it.
+			// The rest's polls above are the wiped attempt's frames, the retry's follow (spec 6, D5, #1453).
+			w.resetBossForms()
 			w.resumeStatusSeq = seq0
 			if rerr := w.recoveredBoss(ctx, step); rerr != nil {
 				return rerr
@@ -2986,6 +3364,8 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 		}
 		return err
 	}
+	// As in recoverWipe: the revive's and the rest's frames are the attempt's last, the retry's follow.
+	w.resetBossForms()
 	if err := w.resumeRun(ctx, step, from, rest); err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
 			return timeout.pausedEnd(step)

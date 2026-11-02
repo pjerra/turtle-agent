@@ -45,10 +45,18 @@ type Summary struct {
 	Wipes         []int            `json:"wipes"`
 	WipeResumes   int              `json:"wipe_resumes"`
 	BossEngaged   *BossSummary     `json:"boss_engaged"`
-	Pauses        []PauseSummary   `json:"pauses"`
-	Fights        []FightSummary   `json:"fights"`
-	Dashboard     string           `json:"dashboard"`
-	Teardown      TeardownSummary  `json:"teardown"`
+	// BossKill is the `boss_kill` object of a walk whose frames engaged a boss (spec 6, D5): the run leader's own
+	// kill report, the phase the boss unit was seen with and the evidence. Absent when no boss was engaged. It is the
+	// LAST engaged boss's record; BossKills lists one record per boss step the run's statuses showed.
+	BossKill *BossKillSummary `json:"boss_kill,omitempty"`
+	// BossKills lists one record per boss step the run's statuses showed (spec 6, D5): each boss row's entry,
+	// whether the encounter was engaged, killed or skipped, and the phase the boss's guid was seen with. Absent when
+	// no boss row was seen.
+	BossKills []BossKillSummary `json:"boss_kills,omitempty"`
+	Pauses    []PauseSummary    `json:"pauses"`
+	Fights    []FightSummary    `json:"fights"`
+	Dashboard string            `json:"dashboard"`
+	Teardown  TeardownSummary   `json:"teardown"`
 	// Place is the `place` object of a `--place` walk (spec 5.11): the start step the raid was put at, the instance, the
 	// cleared circles and the result. Absent without --place.
 	Place *PlaceSummary `json:"place,omitempty"`
@@ -220,6 +228,40 @@ type BossSummary struct {
 	Step  int    `json:"step"`
 }
 
+// BossKillSummary is the summary's `boss_kill` object (spec 6, D5): the boss a walk's frames engaged, whether the
+// run reported the kill, and the phase the boss unit was seen with. `phase` is 1 + the entry changes the frames saw
+// on the boss's guid (a script that changes a creature's entry keeps its guid); `phase_entry` is the entry that guid
+// read last. `evidence` is the run leader's own `boss down` note (or the walk's skip evidence) when the kill holds,
+// and the reason when it does not.
+type BossKillSummary struct {
+	Entry   uint32 `json:"entry"`
+	Step    int    `json:"step"`
+	Engaged bool   `json:"engaged,omitempty"`
+	Killed  bool   `json:"killed"`
+	// Skipped is the walk's own `.bot run skip` for the step (the old-module path, where no `boss down` note
+	// arrives): it is kill evidence too.
+	Skipped    bool   `json:"skipped,omitempty"`
+	Phase      int    `json:"phase"`
+	PhaseEntry uint32 `json:"phase_entry"`
+	Evidence   string `json:"evidence"`
+}
+
+// BossKillLine is the summary.txt line of the boss kill (spec 6): the entry and step, the verdict with its reason
+// when the kill does not hold, the phase and the evidence.
+func (k *BossKillSummary) Line() string {
+	if !k.Engaged && !k.Killed && !k.Skipped {
+		return fmt.Sprintf("boss step: %d at step %d, not engaged", k.Entry, k.Step)
+	}
+	if !k.Killed {
+		return fmt.Sprintf("boss kill: %d at step %d, not killed (%s), phase %d (%d)", k.Entry, k.Step, k.Evidence, k.Phase, k.PhaseEntry)
+	}
+	line := fmt.Sprintf("boss kill: %d at step %d, killed, phase %d (%d)", k.Entry, k.Step, k.Phase, k.PhaseEntry)
+	if k.Evidence != "" {
+		line += ": " + k.Evidence
+	}
+	return line
+}
+
 // PauseSummary is one pause.
 type PauseSummary struct {
 	Step    int     `json:"step"`
@@ -237,6 +279,10 @@ type FightSummary struct {
 	Deaths   int    `json:"deaths"`
 	Outcome  string `json:"outcome"`
 	BossName string `json:"boss_name"`
+	// BossPhase and BossPhaseEntry are the boss's phase in this fight when TortoiseBots sends them (spec 6, D5):
+	// 1 + the entry changes of the boss unit (1 = the boss never changed entry), and the entry he read last.
+	BossPhase      int    `json:"boss_phase,omitempty"`
+	BossPhaseEntry uint32 `json:"boss_phase_entry,omitempty"`
 	// Warnings is the dashboard's rule warning count of the fight (the list row's).
 	Warnings int `json:"warnings,omitempty"`
 	// Detail is the digest of the fight's detail file (fights.go); nil when it could not be read.
@@ -292,8 +338,12 @@ type SummaryMeta struct {
 	Place *PlaceSummary
 	// ReviveRefusal is the walk's revive_refusal (nil when no revive was refused).
 	ReviveRefusal *ReviveRefusal
-	ExitCode      int
-	Notes         []string
+	// BossKill is the walk's boss_kill (nil when no boss was engaged).
+	BossKill *BossKillSummary
+	// BossKills lists one record per boss step the run's statuses showed (nil when no boss row was seen).
+	BossKills []BossKillSummary
+	ExitCode  int
+	Notes     []string
 }
 
 // BuildSummary fills the tb-raid-walk v1 summary from the tracker and the command's own facts.
@@ -326,6 +376,8 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		Dashboard:      m.Dashboard,
 		Teardown:       m.Teardown,
 		Place:          m.Place,
+		BossKill:       m.BossKill,
+		BossKills:      m.BossKills,
 		ReviveRefusal:  m.ReviveRefusal,
 		ExitCode:       m.ExitCode,
 		Notes:          nonNilStrings(m.Notes),
@@ -485,6 +537,15 @@ func (s *Summary) Text() string {
 		b.WriteString(s.ReviveRefusal.Line() + "\n")
 	}
 	fmt.Fprintf(&b, "wipes %d; boss engaged: %s\n", len(s.Wipes), bossLine(s.BossEngaged))
+	if s.BossKill != nil {
+		b.WriteString(s.BossKill.Line() + "\n")
+	}
+	if len(s.BossKills) > 1 {
+		b.WriteString("boss steps:\n")
+		for i := range s.BossKills {
+			b.WriteString("  " + s.BossKills[i].Line() + "\n")
+		}
+	}
 	if len(s.Injections) > 0 {
 		parts := make([]string, 0, len(s.Injections))
 		for _, f := range s.Injections {
