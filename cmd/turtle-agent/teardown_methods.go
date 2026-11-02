@@ -375,6 +375,7 @@ func runTeardown(ctx context.Context, g teardownGame, p teardownParams, sleep fu
 			break
 		}
 	}
+	removedGone := map[string]bool{}
 	switch {
 	case mixed != "":
 		add("remove", "skip", fmt.Sprintf("%s (not a bot of commander status) is in the group: no .bot remove (a GM removes any bot); this character's hires end when it leaves the group", mixed))
@@ -410,6 +411,9 @@ func runTeardown(ctx context.Context, g teardownGame, p teardownParams, sleep fu
 				continue
 			}
 			st, detail := tdClassifyRemove(line, name)
+			if st == "ok" && detail == "already gone" {
+				removedGone[strings.ToLower(name)] = true
+			}
 			add("remove "+name, st, detail)
 		}
 	}
@@ -428,6 +432,9 @@ func runTeardown(ctx context.Context, g teardownGame, p teardownParams, sleep fu
 	}
 
 	// 8. gone: up to 10 s, polled every 500 ms, until no listed name is in view.
+	// A bot whose remove already said it was gone (the character row is deleted:
+	// "Character '<name>' not found.") is a despawn still propagating, not a bot
+	// left online: its lingering row does not fail the teardown.
 	if len(listed) == 0 {
 		add("gone", "skip", "no listed bots")
 	} else if dry {
@@ -440,6 +447,9 @@ func runTeardown(ctx context.Context, g teardownGame, p teardownParams, sleep fu
 				vis[strings.ToLower(v)] = true
 			}
 			for _, n := range listed {
+				if removedGone[strings.ToLower(n)] {
+					continue
+				}
 				if vis[strings.ToLower(n)] {
 					still = append(still, n)
 				}

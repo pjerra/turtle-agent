@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -336,18 +337,37 @@ type ControlEvent struct {
 }
 
 var (
-	onArrivalRe = regexp.MustCompile(`(?i)\bengages\b.*\bon arrival\b`)
-	pullingRe   = regexp.MustCompile(`(?:^|;\s+)pulling\b`)
-	joinedRe    = regexp.MustCompile(`(?i)a new unit joined`)
-	joinersRe   = regexp.MustCompile(`(?i)\b\d+ joiners expected`)
-	standRe     = regexp.MustCompile(`(?i)(waiting at the stand|waiting for the patroller|stand still before pulling|patrol pull|back to the stand|joiners|shot from (where it stands|firing stand))`)
-	normRe      = regexp.MustCompile(`0x[0-9a-fA-F]+|\d+(\.\d+)?`)
-	untilTail   = regexp.MustCompile(`\|until .*$`)
-	sentCmdRe   = regexp.MustCompile(`^> \.bot run (stop|pause|resume)\b(.*)$`)
+	onArrivalRe     = regexp.MustCompile(`(?i)\bengages\b.*\bon arrival\b`)
+	pullingRe       = regexp.MustCompile(`(?:^|;\s+)pulling\b`)
+	joinedRe        = regexp.MustCompile(`(?i)a new unit joined`)
+	joinersRe       = regexp.MustCompile(`(?i)\b\d+ joiners expected`)
+	standRe         = regexp.MustCompile(`(?i)(waiting at the stand|waiting for the patroller|stand still before pulling|patrol pull|back to the stand|joiners|shot from (where it stands|firing stand))`)
+	normRe          = regexp.MustCompile(`0x[0-9a-fA-F]+|\d+(\.\d+)?`)
+	untilTail       = regexp.MustCompile(`\|until .*$`)
+	sentCmdRe       = regexp.MustCompile(`^> \.bot run (stop|pause|resume)\b(.*)$`)
+	pullingTargetRe = regexp.MustCompile(`pulling\s+(\d+)\s+(0[xX][0-9a-fA-F]+)`)
 )
 
 // statusNote is a status line's note without the run leader's trailing `|until ...` label.
 func statusNote(st *tbm.RunStatus) string { return untilTail.ReplaceAllString(st.Note, "") }
+
+// PullingTarget reads the pulled unit's entry and guid from a "pulling <entry>
+// <guid>" status note ("pulling 11368 0xf130002c6800bffa (order 1; ...)").
+func PullingTarget(note string) (entry uint32, guid packet.GUID, ok bool) {
+	m := pullingTargetRe.FindStringSubmatch(note)
+	if m == nil {
+		return 0, 0, false
+	}
+	e, err := strconv.Atoi(m[1])
+	if err != nil || e <= 0 {
+		return 0, 0, false
+	}
+	g, err := packet.ParseGUID(m[2])
+	if err != nil {
+		return 0, 0, false
+	}
+	return uint32(e), g, true
+}
 
 // BuildReport joins the fights with the run log (nil or empty: the table has no status columns).
 func BuildReport(fights []ReportFight, log []LogLine, opt ReportOptions) *Report {

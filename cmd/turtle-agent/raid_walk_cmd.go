@@ -609,6 +609,14 @@ type walk struct {
 
 	lastStatus tbm.RunStatus
 	haveStatus bool
+	// pullJoins tracks the pull the walk is counting joiners for: the pull line's
+	// step and time, the pulled pack's entries (plan rows' entries for the
+	// pull/boss step plus the pulled unit itself), and the engaged guids seen
+	// since. Counted once, 10 s after the pull: pullJoinsAt is zero afterwards.
+	pullJoinsAt   time.Time
+	pullJoinsStep int
+	pullPackEN    map[uint32]bool
+	pullJoinsSeen map[packet.GUID]bool
 	// Review round 3: statusSeq counts every received run status; resumeRun
 	// captures it before issuing the resume (resumeStatusSeq) so recoveredBoss
 	// can tell a fresh post-resume status from a retained pre-resume one.
@@ -1453,4 +1461,23 @@ func parseTeardownJSON(raw []byte) (teardownJSON, bool) {
 		return teardownJSON{Failed: 1}, false
 	}
 	return t, true
+}
+
+// teardownReason is the first failing teardown step with its detail ("gone: still in
+// view after 10 s: ..."), so summary.json says WHICH step failed instead of only that
+// one did. The derived lease-kept line is skipped: it only repeats the game-side fail.
+func teardownReason(t teardownJSON) string {
+	for _, s := range t.Steps {
+		if s.Status != "fail" && s.Status != "ending" {
+			continue
+		}
+		if s.Step == "lease" && strings.HasPrefix(s.Detail, "kept: game-side teardown failed") {
+			continue
+		}
+		if s.Detail != "" {
+			return s.Step + ": " + s.Detail
+		}
+		return s.Step + ": failed"
+	}
+	return "teardown failed"
 }

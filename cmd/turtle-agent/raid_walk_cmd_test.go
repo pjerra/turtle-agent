@@ -4184,6 +4184,69 @@ func TestRaidWalkSlotListRoutesToPair(t *testing.T) {
 	})
 }
 
+func TestRaidWalkCountsPullJoinersFromFrames(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	// The pull line names pack A (guid 0xF130001, entry 10184); frames then
+	// show 3 engaged units of pack B (entry 10185) inside 10 s: the pull note
+	// says "joiners 3".
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|onyxias_lair|running|11/29|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 29)"},
+		{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands|until boss (step 29)"},
+	}
+	polls := 0
+	f.agent.viewHook = func() {
+		polls++
+		if polls > 3 {
+			f.clock.mu.Lock()
+			f.clock.t = f.clock.t.Add(11 * time.Second)
+			f.clock.mu.Unlock()
+		}
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{
+			{GUID: 0xF130002C6C00C24B, Entry: 12129, HPPct: 90, Target: packet.GUID(1000)},
+			{GUID: 0xF130101, Entry: 12130, HPPct: 100, Target: packet.GUID(1001)},
+			{GUID: 0xF130102, Entry: 12130, HPPct: 100, Target: packet.GUID(1002)},
+			{GUID: 0xF130103, Entry: 12130, HPPct: 100, Target: packet.GUID(1000)},
+		}
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "joiners 3") {
+		t.Fatalf("no joiners note in run.log:\n%s", raw)
+	}
+}
+
+func TestRaidWalkTeardownReasonNamesTheFailingStep(t *testing.T) {
+	f := newFixture(t)
+	f.defaultRun("onyxias_lair")
+	f.env.teardown = func(args []string, stdout, stderr io.Writer) int {
+		fmt.Fprint(stdout, `{"server":"m910q","slot":"2","steps":[{"step":"gone","status":"fail","detail":"still in view after 10 s: Bot01"}],"failed":2}`)
+		return 14
+	}
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0 (a failed teardown step alone keeps the walk green): %s", code, f.stderr.String())
+	}
+	sum := f.summary()
+	if !sum.Teardown.Failed {
+		t.Fatalf("teardown %+v, want failed", sum.Teardown)
+	}
+	if sum.Teardown.Reason != "gone: still in view after 10 s: Bot01" {
+		t.Fatalf("reason %q", sum.Teardown.Reason)
+	}
+	if !hasNote(sum, "gone: still in view after 10 s: Bot01") {
+		t.Fatalf("notes %q, want the teardown reason", sum.Notes)
+	}
+}
+
 func TestTrackFrameKeepsPositionsAndKinds(t *testing.T) {
 	now := newFakeClock().now()
 	w := &walk{partyG: map[uint64]bool{}, hostiles: map[string]hostileState{}, bossSet: map[uint32]bool{10184: true},

@@ -17,6 +17,8 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/tbm"
@@ -977,6 +979,7 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 		}
 		if end := w.tracker.End(); end.Kind != raidwalk.EndRunning {
 			w.endReason = end.Reason()
+			w.pullJoinersFlush(time.Time{})
 			return nil
 		}
 		if err := w.env.sleep(ctx, 2*time.Second); err != nil {
@@ -1003,6 +1006,7 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 		}
 		w.tracker.Feed(now, st)
 		w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
+		w.pullStarted(now, st)
 		w.recordRunLine(st, now)
 		w.noteLabel(st)
 		if st.Note != "" {
@@ -1013,8 +1017,10 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 		w.afterN = n
 		w.trackFrame(now, frame)
 		w.tracker.Frame(now, *frame)
+		w.pullFramed(now, frame)
 		w.saveFrame(now, frame)
 	}
+	w.pullJoinersFlush(now)
 	if dash && w.dash != nil {
 		if w.dashAt.IsZero() || now.Sub(w.dashAt) >= 10*time.Second {
 			w.saveCommanders("walk")
@@ -1158,6 +1164,76 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 			}
 		}
 	}
+}
+
+// pullStarted arms the pull-joiners window when a "pulling <entry> <guid>" status
+// line goes by: 10 s in which frames count the engaged hostiles that are not the
+// pulled pack (raidwalk.JoinersOfPull). The pack is the plan rows' entries for
+// the pull/boss step with the same step number.
+func (w *walk) pullStarted(now time.Time, st tbm.RunStatus) {
+	entry, _, ok := raidwalk.PullingTarget(raidwalk.CleanLine(st.Note))
+	if !ok {
+		return
+	}
+	w.pullPackEN = map[uint32]bool{entry: true}
+	if st.Step >= 1 && st.Step <= len(w.rows.Steps) {
+		if s := w.rows.Steps[st.Step-1]; s.Kind == planexport.KindPull || s.Kind == planexport.KindBoss {
+			for _, e := range s.Entries {
+				w.pullPackEN[e] = true
+			}
+		}
+	}
+	w.pullJoinsAt, w.pullJoinsStep = now, st.Step
+	w.pullJoinsSeen = map[packet.GUID]bool{}
+}
+
+// pullFramed counts one frame toward the armed pull: every engaged hostile
+// whose entry is not the pulled pack's joins the seen set. 10 s after the pull
+// the count is final: the note names it ("joiners N (guids...)") and the
+// window closes. A newer pull re-arms first (pullStarted runs on the status
+// lines of the same poll before the frame).
+func (w *walk) pullFramed(now time.Time, f *tbm.ViewFrame) {
+	if w.pullJoinsAt.IsZero() {
+		return
+	}
+	if now.Sub(w.pullJoinsAt) >= raidwalk.JoinWindow {
+		w.pullJoinersFlush(now)
+		return
+	}
+	if w.pullJoinsSeen == nil {
+		w.pullJoinsSeen = map[packet.GUID]bool{}
+	}
+	for _, h := range f.EngagedHostiles() {
+		if h.GUID == 0 || w.pullPackEN[h.Entry] {
+			continue
+		}
+		w.pullJoinsSeen[h.GUID] = true
+	}
+}
+
+// pullJoinersFlush closes the pull window once 10 s passed (or the watch ends:
+// force at the run's end): the note names the count ("joiners N (guids...)").
+func (w *walk) pullJoinersFlush(now time.Time) {
+	if w.pullJoinsAt.IsZero() {
+		return
+	}
+	if !now.IsZero() && now.Sub(w.pullJoinsAt) < raidwalk.JoinWindow {
+		return
+	}
+	guids := make([]packet.GUID, 0, len(w.pullJoinsSeen))
+	for g := range w.pullJoinsSeen {
+		entry := uint32(g.Entry())
+		if !w.pullPackEN[entry] {
+			guids = append(guids, g)
+		}
+	}
+	if note := raidwalk.JoinersNote(guids); note != "" {
+		w.note("step %d: %s", w.pullJoinsStep, note)
+		w.logLine(w.env.now(), note)
+	}
+	w.pullJoinsAt = time.Time{}
+	w.pullPackEN = nil
+	w.pullJoinsSeen = nil
 }
 
 // savedFrame is one frames.jsonl line (compact: positions, hp, dead, hostiles).
@@ -2553,7 +2629,11 @@ func (w *walk) phaseTeardown() {
 	t, ok := parseTeardownJSON(buf.Bytes())
 	w.teardownWd.Failed = !ok || code != exitOK || t.Failed > 0
 	if !ok {
+		w.teardownWd.Reason = "teardown: the report did not parse"
 		w.note("teardown: the report did not parse")
+	} else if w.teardownWd.Failed {
+		w.teardownWd.Reason = teardownReason(t)
+		w.note("teardown: %s", w.teardownWd.Reason)
 	}
 	if w.hiresLeft != nil {
 		w.teardownWd.HiresLeft = w.hiresLeft
