@@ -47,11 +47,14 @@ type PullFinding struct {
 	// the leg is numbered in route order, so a row's number never moves when
 	// a ceiling or a neighbour changes (rows under their ceiling and rows
 	// with no target consume a number).
-	Pull    int
-	Bodies  int
-	Ceiling int
-	Guids   []uint32
-	Summary string
+	Pull int
+	// NoTarget says the row owns no mob to estimate from (its finding warns
+	// "no target" with no bodies); otherwise Bodies is over Ceiling.
+	NoTarget bool
+	Bodies   int
+	Ceiling  int
+	Guids    []uint32
+	Summary  string
 }
 
 // PullCeilingOf is the bodies ceiling of one pull row: the row's item (the
@@ -70,18 +73,31 @@ func PullCeilingOf(p *dungeon.Plan, item uint32) int {
 	return defaultPartyPullCeiling
 }
 
+// PullFilter says which spawns and rows the lint counts: the check flags
+// (-ignore-factions, -friendly-factions, -team). 35 is always friendly (as in
+// Check); a row gated to the other team is not pulled by this run. Empty:
+// every mob counts, every row is pulled.
+type PullFilter struct {
+	Ignore   map[int]bool
+	Friendly map[int]bool
+	Team     string
+}
+
 // PullSizes estimates every pull row of the plan's export rows and returns
 // the rows over their ceiling, in route order. cs are the plan's spawns
 // (readCreatures); w is the map's world (worldspawn.Load: groups, links,
-// patrols) and may be nil (then every spawn is its own pack).
-func PullSizes(p *dungeon.Plan, cs []creature, w *worldspawn.World) ([]PullFinding, error) {
+// patrols) and may be nil (then every spawn is its own pack). A row gated to
+// a team other than f.Team is not pulled by this run and skipped (it consumes
+// no pull number); a pull row with no target of its own is a finding of its
+// own ("no target"), never an unrelated spawn's estimate.
+func PullSizes(p *dungeon.Plan, cs []creature, w *worldspawn.World, f PullFilter) ([]PullFinding, error) {
 	pts, err := routePoints(p)
 	if err != nil {
 		return nil, err
 	}
 	// No eligible mobs is not an early exit: every pull row then finds no
 	// target below and gets its "no target" finding.
-	mobs, entries := pullMobs(p, cs, packIDs(w))
+	mobs, entries := pullMobs(p, cs, packIDs(w), f)
 	spread := float32(aggroest.WalkSpreadYd)
 	stand := float32(aggroest.StandSpreadPartyYd)
 	if p.IsRaid() {
@@ -94,12 +110,15 @@ func PullSizes(p *dungeon.Plan, cs []creature, w *worldspawn.World) ([]PullFindi
 		if rp.kind != planexport.KindPull {
 			continue
 		}
+		if gatedOut(rp.team, f.Team) {
+			continue
+		}
 		pullIdx[rp.leg]++
 		n := pullIdx[rp.leg]
 		target := pullTarget(p, mobs, entries, rp, owned)
 		if target < 0 {
 			out = append(out, PullFinding{
-				Leg: rp.leg, Pull: n, Bodies: 0, Ceiling: PullCeilingOf(p, rp.item),
+				Leg: rp.leg, Pull: n, NoTarget: true, Ceiling: PullCeilingOf(p, rp.item),
 				Summary: fmt.Sprintf("leg %d pull %d: no target", rp.leg, n),
 			})
 			continue
@@ -150,16 +169,20 @@ func packIDs(w *worldspawn.World) map[uint64]uint64 {
 }
 
 // pullMobs converts the spawn export to estimator mobs: hostile, non-critter
-// spawns with their detection range (default 20), NO_AGGRO/NO_ASSIST from
-// flags_extra, patrollers at their current position. groups maps spawn guids
-// to pack ids (packIDs); nil: every spawn its own pack. entries maps each
-// kept mob guid to its creature entry, for the kill_first target rank.
-func pullMobs(p *dungeon.Plan, cs []creature, groups map[uint64]uint64) ([]aggroest.Mob, map[uint32]uint32) {
+// spawns (hostileMob: the route lint's filter, with the check's ignore and
+// friendly factions) with their detection range (the lint's own explicit
+// mapping: an export 0 predates the column, read as 20 yd, while the
+// estimator itself never wakes a spawn with no detection range),
+// NO_AGGRO/NO_ASSIST from flags_extra, patrollers at their current position.
+// groups maps spawn guids to pack ids (packIDs); nil: every spawn its own
+// pack. entries maps each kept mob guid to its creature entry, for the
+// kill_first target rank.
+func pullMobs(p *dungeon.Plan, cs []creature, groups map[uint64]uint64, f PullFilter) ([]aggroest.Mob, map[uint32]uint32) {
 	var out []aggroest.Mob
 	entries := map[uint32]uint32{}
 	_ = p
 	for _, c := range cs {
-		if c.NPCFlags != 0 || c.Faction == 35 || c.LevelMax <= 1 {
+		if !hostileMob(c, f.Ignore, f.Friendly) {
 			continue
 		}
 		det := float32(c.DetectionRange)
