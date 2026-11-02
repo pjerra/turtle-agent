@@ -32,6 +32,10 @@ bad() { printf 'FAIL %s\n' "$1"; FAIL=$((FAIL + 1)); }
 WIPE_SUMMARY='{"wipes": [204], "end_reason": "not revived: the revive point never went quiet", "exit_code": 19}'
 NO_WIPE_SUMMARY='{"wipes": [], "end_reason": "interrupted", "exit_code": 19}'
 
+# PLACE_SUMMARY is a run that died in the place phase (exit 18, no TBM:RUN leg): summary.json's `place.start_step`
+# and `end_reason` are what the empty-leg no-progress guard compares (walk 26d, #373 fix C).
+PLACE_SUMMARY='{"wipes": [], "end_reason": "place: fighting after the place", "exit_code": 18, "place": {"start_step": 201, "leg": "high_priestess_marli", "point": [-12242.112, -1685.4194, 129.40071], "until_step": 216, "instance": 102, "circles": [], "not_cleared": [], "quiet": true, "placed": 0, "hires": 20}}'
+
 T="$(mktemp -d /tmp/walk-super-test.XXXXXX)"
 trap 'rm -rf "$T"' EXIT
 
@@ -81,7 +85,11 @@ else
 fi
 # FAKE_SUMMARY writes a summary.json verbatim: the no-progress stop reads its `wipes` and `end_reason` (review round
 # 1, L4). Unset: no summary at all.
-if [[ -n "${FAKE_SUMMARY:-}" ]]; then
+if [[ -n "${FAKE_SUMMARY_SEQ_FILE:-}" && -s "$FAKE_SUMMARY_SEQ_FILE" ]]; then
+  sum="$(head -n 1 -- "$FAKE_SUMMARY_SEQ_FILE")"
+  tail -n +2 -- "$FAKE_SUMMARY_SEQ_FILE" >"$FAKE_SUMMARY_SEQ_FILE.tmp" && mv -- "$FAKE_SUMMARY_SEQ_FILE.tmp" "$FAKE_SUMMARY_SEQ_FILE"
+  printf '%s\n' "$sum" >"$out/summary.json"
+elif [[ -n "${FAKE_SUMMARY:-}" ]]; then
   printf '%s\n' "$FAKE_SUMMARY" >"$out/summary.json"
 fi
 if [[ -n "${FAKE_STDERR_LINE:-}" ]]; then
@@ -212,8 +220,36 @@ case5() {
   ok "case5 exit 1: no restart, exit 1"
 }
 
-case6() {
-  local d="$T/c6" rc runs
+case6a() {
+  # Walk 26d, #373 fix C: an exit-18 --place run with no TBM:RUN leg died in the place phase, so the supervisor
+  # retries the SAME command with only --out changed to DIR-r1. The stop then comes from the empty-leg
+  # no-progress guard: two consecutive place failures with the same summary.json place.start_step and end_reason.
+  local d="$T/c6a" rc runs l2
+  mkdir -p "$d"
+  make_cmd "$d/cmd.txt" raid-walk zul_gurub --server s --slot 2 --holder H6 \
+    --from "leg high_priestess_marli" --place --sql /tmp/w.sql --until boss --out "$d/run0"
+  printf '18\n18\n' >"$d/seq"
+  printf '%s\n%s\n' "$PLACE_SUMMARY" "$PLACE_SUMMARY" >"$d/sums"
+  FAKE_NO_TBM=1 FAKE_SEQ_FILE="$d/seq" FAKE_SUMMARY_SEQ_FILE="$d/sums" FAKE_ARGS_LOG="$d/args.log" \
+    "$SUPER_BIN" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log"
+  rc=$?
+  runs="$(runs_done "$d/args.log")"
+  (( rc == 18 )) || { bad "case6a exit=$rc want 18"; return; }
+  (( runs == 2 )) || { bad "case6a runs=$runs want 2 (one same-command restart, then the no-progress stop)"; return; }
+  l2="$(sed -n '2p' "$d/args.log")"
+  printf '%s\n' "$l2" | grep -qF -e "--out $d/run0-r1" || { bad "case6a run2 missing --out DIR-r1"; return; }
+  printf '%s\n' "$l2" | grep -qF -e '--from leg\ high_priestess_marli' || { bad "case6a run2 lost its --from leg"; return; }
+  printf '%s\n' "$l2" | grep -qF -e '--place' || { bad "case6a run2 lost --place"; return; }
+  printf '%s\n' "$l2" | grep -qF -e '--sql /tmp/w.sql' || { bad "case6a run2 lost --sql"; return; }
+  (( $(printf '%s' "$l2" | grep -o -F -e '--out' | wc -l) == 1 )) || { bad "case6a run2 --out count != 1"; return; }
+  grep -qF -e 'retrying the same command' "$d/restart.log" || { bad "case6a log missing the same-command restart"; return; }
+  grep -qF -e 'no progress (place failed before the run started at start step 201 twice' "$d/restart.log" ||
+    { bad "case6a log missing the empty-leg no-progress stop"; return; }
+  ok "case6a exit-18 --place with no TBM:RUN: one same-command restart --out DIR-r1, then the no-progress stop"
+}
+
+case6b() {
+  local d="$T/c6b" rc runs
   mkdir -p "$d"
   make_cmd "$d/cmd.txt" raid-walk zul_gurub --server s --slot 2 --holder H6 \
     --sql /tmp/w.sql --out "$d/run0"
@@ -221,10 +257,10 @@ case6() {
     "$SUPER_BIN" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log"
   rc=$?
   runs="$(runs_done "$d/args.log")"
-  (( rc == 19 )) || { bad "case6 exit=$rc want 19"; return; }
-  (( runs == 1 )) || { bad "case6 runs=$runs want 1"; return; }
-  grep -qF -e 'no TBM:RUN leg' "$d/restart.log" || { bad "case6 log missing no-leg reason"; return; }
-  ok "case6 run.log without TBM:RUN: no restart, exit 19"
+  (( rc == 19 )) || { bad "case6b exit=$rc want 19"; return; }
+  (( runs == 1 )) || { bad "case6b runs=$runs want 1"; return; }
+  grep -qF -e 'no TBM:RUN leg' "$d/restart.log" || { bad "case6b log missing no-leg reason"; return; }
+  ok "case6b exit-19 run.log without TBM:RUN: no restart, exit 19"
 }
 
 # case11 (walk 26c, #370): the placed restart is refused for no quiet move row (exit 2 with a
@@ -392,7 +428,8 @@ main() {
   if (( run_all )) || [[ "$only" == *" 3 "* ]]; then case3; fi
   if (( run_all )) || [[ "$only" == *" 4 "* ]]; then case4; fi
   if (( run_all )) || [[ "$only" == *" 5 "* ]]; then case5; fi
-  if (( run_all )) || [[ "$only" == *" 6 "* ]]; then case6; fi
+  if (( run_all )) || [[ "$only" == *" 6 "* || "$only" == *" 6a "* ]]; then case6a; fi
+  if (( run_all )) || [[ "$only" == *" 6 "* || "$only" == *" 6b "* ]]; then case6b; fi
   if (( run_all )) || [[ "$only" == *" 7 "* ]]; then case7; fi
   if (( run_all )) || [[ "$only" == *" 8 "* ]]; then case8; fi
   if (( run_all )) || [[ "$only" == *" 9 "* ]]; then case9; fi

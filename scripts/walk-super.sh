@@ -17,8 +17,9 @@
 #
 # Rebuilding the restart command:
 #   1. Leg = field 5 of the last `TBM:RUN|...` line in <out>/run.log
-#      (TBM:RUN|plan|state|step/total|leg|kind|...). No run.log or no
-#      leg: stop (no restart), log why.
+#      (TBM:RUN|plan|state|step/total|leg|kind|...). No run.log: stop (no
+#      restart), log why. No leg: step 8 (an exit-18 --place run is retried
+#      as-is) or stop.
 #   2. Drop any existing --from / --place, add --from "leg <leg>" --place.
 #   3. --place needs --sql FILE: no --sql, stop (no restart),
 #      log "no --sql, cannot place".
@@ -36,6 +37,15 @@
 #      run N-1 at step P, same leg L): a fresh placed instance repeats it" and
 #      exit with the run's code. The death step is field 4 of the last
 #      `TBM:RUN|...` line ("204/1095" gives 204), read like the leg.
+#   8. Empty-leg place retry (walk 26d, #373 fix C): no TBM:RUN leg means the
+#      run stopped in the place phase, before the run started. When it exited
+#      18 and the command carries --place, retry the SAME command once per
+#      restart budget with only --out changed to <base>-r<n>, after the step-6
+#      wait. A no-progress guard stops when two consecutive place failures
+#      have the same summary.json `place.start_step` and `end_reason`,
+#      logging "no progress (place failed before the run started at start
+#      step S twice with the same end reason: R)". Exit 19 with no leg keeps
+#      today's stop.
 # Log: one line per finished run, appended to <restart-log> and printed to
 # stdout: UTC time, run number, exit code, leg, out, and the new --out
 # (restart) or the stop reason.
@@ -145,6 +155,19 @@ wiped_of_summary() {
   return 1
 }
 
+# place_fail_of_summary prints the place failure a no-TBM:RUN run died with: summary.json's `place.start_step` and
+# its `end_reason`, tab-separated (walk 26d, #373 fix C). Nothing when either is missing: the empty-leg no-progress
+# guard (step 8) then has nothing to compare, and the retry goes on until the budget ends it.
+place_fail_of_summary() {
+  local summary="$1" start end
+  [[ -f "$summary" ]] || return 1
+  start="$(sed -n 's/.*"start_step": *\([0-9][0-9]*\).*/\1/p' -- "$summary" 2>/dev/null | head -n 1)"
+  [[ -n "$start" ]] || return 1
+  end="$(sed -n 's/.*"end_reason": *"\(.*\)".*/\1/p' -- "$summary" 2>/dev/null | head -n 1)"
+  [[ -n "$end" ]] || return 1
+  printf '%s\t%s' "$start" "$end"
+}
+
 rebuild_cmd() {
   local new_out="$1" leg="$2" i a
   local -a rebuilt=()
@@ -179,6 +202,34 @@ rebuild_cmd() {
   ARGS=("${rebuilt[@]}")
 }
 
+# swap_out_cmd renames only the restart's output: --out OLD becomes --out NEW, every other arg (including --from and
+# --place) stays exactly as the operator wrote it. Walk 26d, #373 fix C: an exit-18 place failure never started, so
+# there is no leg to rebuild a --from for; appending one would say `--from "leg "` and a rebuild_cmd call would
+# refuse the empty value.
+swap_out_cmd() {
+  local new_out="$1" i a
+  local -a swapped=()
+  i=0
+  while (( i < ${#ARGS[@]} )); do
+    a="${ARGS[$i]}"
+    case "$a" in
+      --out)
+        swapped+=("$a" "$new_out")
+        i=$((i + 2))
+        ;;
+      --out=*)
+        swapped+=("--out=$new_out")
+        i=$((i + 1))
+        ;;
+      *)
+        swapped+=("$a")
+        i=$((i + 1))
+        ;;
+    esac
+  done
+  ARGS=("${swapped[@]}")
+}
+
 run_no=1
 restarts_done=0
 base_out=""
@@ -193,6 +244,9 @@ new_out=""
 run_dir=""
 run_out=""
 run_reason=""
+place_fail=""
+prev_place_fail=""
+place_start=""
 
 while true; do
 	cmdstr="$(printf '%q ' "${ARGS[@]}")"
@@ -232,6 +286,27 @@ while true; do
     exit "$rc"
   fi
   if [[ -z "$leg" ]]; then
+    # Walk 26d, #373 fix C: a run that stopped in the place phase never started, so its run.log holds no TBM:RUN
+    # leg. When it exited 18 and the command carries --place, retry the SAME command (only --out becomes
+    # <base>-r<n>): there is no leg to rebuild a --from for. An exit-19 run with no leg keeps today's stop.
+    if [[ "$rc" == 18 ]] && has_flag place; then
+      place_fail="$(place_fail_of_summary "$out/summary.json" || true)"
+      if [[ -n "$place_fail" && "$place_fail" == "$prev_place_fail" ]]; then
+        place_start="${place_fail%%$'\t'*}"
+        log_event "run $run_no exit $rc leg <none> out $out stop: no progress (place failed before the run started at start step $place_start twice with the same end reason: ${place_fail#*$'\t'})"
+        exit "$rc"
+      fi
+      prev_place_fail="$place_fail"
+      prev_leg=""
+      prev_step=""
+      restarts_done=$((restarts_done + 1))
+      new_out="${base_out}-r${restarts_done}"
+      log_event "run $run_no exit $rc leg <none> out $out restarting as run $((run_no + 1)) out $new_out (restart $restarts_done/$max_restarts): place failed before the run started (no TBM:RUN), retrying the same command"
+      sleep "$wait_secs"
+      swap_out_cmd "$new_out"
+      run_no=$((run_no + 1))
+      continue
+    fi
     log_event "run $run_no exit $rc leg <none> out $out stop: no TBM:RUN leg in $out/run.log"
     exit "$rc"
   fi
@@ -252,6 +327,7 @@ while true; do
 
   prev_leg="$leg"
   prev_step="$step"
+  prev_place_fail=""
   restarts_done=$((restarts_done + 1))
   new_out="${base_out}-r${restarts_done}"
   log_event "run $run_no exit $rc leg $leg out $out restarting as run $((run_no + 1)) out $new_out (restart $restarts_done/$max_restarts)"
