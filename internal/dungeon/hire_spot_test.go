@@ -14,7 +14,8 @@ import (
 
 const portalMap = 1
 
-// portalPoint is Ragefire Chasm's portal on the outer map (dungeons/ragefire_chasm.json).
+// portalPoint is Ragefire Chasm's portal on the outer map (dungeons/ragefire_chasm.json). (1821.5,-4425.3) near it carries BOTH floors,
+// -30.6 (the lower level) and -20.3 (the portal ground): the RFC fixture for the settled-lower, settled-upper and guessed cases.
 var portalPoint = Point{X: 1818.4, Y: -4427.26, Z: -10.4478}
 
 // hirePosFake is the hire fake with a game that knows where the commander stands and whether its height is a guess (AgentPositioner)
@@ -80,50 +81,60 @@ func TestHireRefusesBelowThePortalGround(t *testing.T) {
 	}
 }
 
-// A guessed commander height (a far teleport leaves status.z_unknown set for good: walk 23) may sit on any floor at its x/y, so the floors
-// within 30 yd of the guess are judged by the lowest, not by the nearest: a lower floor 9 yd under the portal ground refuses even when the
-// guess points at the portal floor, which the nearest-floor snap would allow. The widened look keeps a guess 20 yd too high from failing
-// open as "no navmesh", and a settled height keeps the nearest-floor snap (Codex HIGH, F5 round 5).
-func TestHireSpotGuessedHeightOnStackedFloors(t *testing.T) {
+// A guessed commander height (a far teleport leaves status.z_unknown set for good: walk 23) never refuses: it may sit on any floor at its
+// x/y, so with floors stacked at the commander's x/y the step warns naming both candidate floors and hires anyway. A known height picks
+// the floor at its own x/y nearest that height: known on the lower floor refuses, known on the upper floor hires.
+func TestHireSpotStackedFloors(t *testing.T) {
 	for _, c := range []struct {
 		name     string
 		zUnknown bool
 		z        float32
 		want     string
+		notes    string
+		warns    bool
 	}{
-		{"guessed height on the portal floor", true, -20.3, "hire: commander may be on a lower floor near the portal"},
-		{"guessed height 20 yd too high", true, -0.3, "hire: commander may be on a lower floor near the portal"},
-		{"settled height on the portal floor", false, -20.3, ""},
+		{"known z on the lower floor", false, -30.6, "portal ground", "", false},
+		{"known z on the upper floor", false, -20.3, "", "", false},
+		{"unknown z", true, -20.3, "", "lower floor -30.6 or the portal ground -20.3", true},
+		{"unknown z 20 yd too high", true, -0.3, "", "", false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			g := newHireFake(t)
 			g.agentMap = portalMap
 			g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
+			var notes []string
 			pos := &hirePosFake{hireFake: g, pos: Point{X: 1821.5, Y: -4425.3, Z: c.z}, zUnknown: c.zUnknown,
 				floors: map[[2]float32][]float32{
 					{portalPoint.X, portalPoint.Y}: {-20.306},
-					{1821.5, -4425.3}:              {-20.3, -29.3},
+					{1821.5, -4425.3}:              {-20.3, -30.6},
 				}}
-			e := hireSpotEnv(g, pos, func(string) {})
+			e := hireSpotEnv(g, pos, func(s string) { notes = append(notes, s) })
 			p, err := e.hireSpotProblem(context.Background())
 			if err != nil {
 				t.Fatal(err)
 			}
 			if c.want == "" {
 				if p != "" {
-					t.Fatalf("a settled height on the portal floor is allowed: %q", p)
+					t.Fatalf("allowed: %q", p)
+				}
+			} else if !strings.Contains(p, c.want) {
+				t.Fatalf("refused: %q, want %q", p, c.want)
+			}
+			if !c.warns {
+				if strings.Contains(strings.Join(notes, "\n"), "own height is a guess") {
+					t.Fatalf("an unexpected guess warning: %v", notes)
 				}
 				return
 			}
-			if !strings.Contains(p, c.want) {
-				t.Fatalf("a guessed height on stacked floors: %q, want %q", p, c.want)
+			if !strings.Contains(strings.Join(notes, "\n"), c.notes) {
+				t.Fatalf("no warning naming both floors: %v", notes)
 			}
 		})
 	}
 }
 
-// One floor within 30 yd of a guessed height is the commander's floor: Wailing Caverns' portal has one, so a guessed height there is
-// allowed (the widened look does not invent a lower level).
+// One floor within 30 yd of a guessed height is the commander's floor: Wailing Caverns' portal has one, so a guessed height there hires
+// with no warning (the widened look does not invent a lower level).
 func TestHireSpotGuessedHeightWithOneFloor(t *testing.T) {
 	g := newHireFake(t)
 	g.agentMap = portalMap
@@ -156,13 +167,13 @@ func TestHireSpotAllowsTheRealPortalSamples(t *testing.T) {
 		{"wailing caverns", 1, Portal{Map: 1, Point: Point{X: -753.596, Y: -2212.78, Z: 21.5403}},
 			[]float32{15.4}, Point{X: -753.4, Y: -2212.8, Z: 15.4}, false, []float32{15.4}},
 		{"ragefire chasm", 1, Portal{Map: 1, Point: rfc},
-			[]float32{-20.306}, Point{X: 1821.5, Y: -4425.3, Z: -19.8}, false, []float32{-20.305}},
+			[]float32{-20.306}, Point{X: 1821.5, Y: -4425.3, Z: -19.8}, false, []float32{-20.3, -30.6}},
 		{"sunken temple", 0, Portal{Map: 0, Point: Point{X: -10162.7, Y: -3998.65, Z: -107.978}},
 			[]float32{-113.443}, Point{X: -10168, Y: -3997.1, Z: -113.2}, false, []float32{-113.66}},
 		{"dire maul east", 1, Portal{Map: 1, Point: Point{X: -3981.58, Y: 771.193, Z: 160.962}},
 			[]float32{156.4}, Point{X: -3976.1, Y: 773.2, Z: 156.4}, false, []float32{156.4}},
 		{"a guessed height on the portal ground", 1, Portal{Map: 1, Point: rfc},
-			[]float32{-20.306}, Point{X: 1821.5, Y: -4425.3, Z: -30}, true, []float32{-20.305}},
+			[]float32{-20.306}, Point{X: 1821.5, Y: -4425.3, Z: -30}, true, []float32{-20.3, -30.6}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			g := newHireFake(t)

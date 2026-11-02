@@ -8,8 +8,8 @@ import (
 )
 
 // AgentPositioner is the optional part of a Preparer that tells where the agent's own character stands, and whether its height is a guess
-// (session.StatusInfo.ZUnknown). A teleport or a climb leaves z a guess until the server sends a position, and the hire spot then judges
-// every floor the commander may be on (see hireSpotProblem).
+// (session.StatusInfo.ZUnknown). A teleport or a climb leaves z a guess until the server sends a position; a guessed height never refuses
+// the hire spot (see hireSpotProblem).
 type AgentPositioner interface {
 	AgentPosition() (pos Point, zUnknown bool)
 }
@@ -23,11 +23,11 @@ const (
 // hireSpotProblem says why the commander must not hire where it stands ("" when it may). Hires appear at the commander and muster
 // there (#266: on 2026-10-20 an Alliance commander hired for a horde plan under the Orgrimmar portal and a Grunt and an imp killed all
 // five hires in 41 s), and the module hires the commander's own faction only, so a commander of the other team than the run's gets a party
-// that fights for the other side. The portal ground is the navmesh floor at the portal x/y nearest below the trigger centre. A commander's
-// height that the server settled picks the floor at its own x/y nearest that height; a guessed one (a far teleport leaves it guessed for
-// good: the session lands through SMSG_NEW_WORLD with no floor drop and the core never sends the player its own position, walk 23) picks
-// the lowest floor within hireSpotGuess yd of the guess, so a stacked lower level refuses instead of a nearest-floor snap that could be the
-// portal's own floor. Only a commander whose floor is well below the portal's refuses.
+// that fights for the other side. The portal ground is the navmesh floor at the portal x/y nearest below the trigger centre. A settled
+// height (the server knows it) picks the floor at its own x/y nearest that height and refuses when it stands on the wrong floor. A
+// guessed height (status.z_unknown: a far teleport leaves it guessed for good, the session lands through SMSG_NEW_WORLD with no floor
+// drop and the core never sends the player its own position, walk 23) never refuses: it may be on any floor at its x/y, so the step warns
+// naming both candidates and hires anyway.
 func (e *prepEnv) hireSpotProblem(ctx context.Context) (string, error) {
 	agent := ""
 	if ts, ok := e.g.(TeamSource); ok {
@@ -68,38 +68,42 @@ func (e *prepEnv) hireSpotProblem(ctx context.Context) (string, error) {
 	var floor float32
 	stacked := false
 	if zUnknown {
-		// The guess may be on any floor at the commander's x/y, so its nearest floor could be the portal ground while the commander is a
-		// level down. Looking hireSpotGuess yd around the guess (wider than the walk's 12) and judging the lowest floor there keeps a bad
-		// guess from passing as "no navmesh", and a stacked lower level from snapping to the portal floor (Codex HIGH, F5 round 5).
+		// The guess may sit on any floor at the commander's x/y (a far teleport leaves status.z_unknown set for good: walk 23), so the
+		// step never refuses on it: it warns naming both candidate floors and hires anyway. One floor within hireSpotGuess yd of the
+		// guess is the commander's own: no warning (Wailing Caverns' portal has one).
 		zs, ok := fl.FloorsWithin(ctx, portal.Map, pos.X, pos.Y, pos.Z-hireSpotGuess, pos.Z+hireSpotGuess)
 		if !ok {
 			e.note("hire: portal ground not checked (no navmesh)")
 			return "", nil
 		}
 		floor = zs[0]
+		low := zs[0]
 		for _, z := range zs[1:] {
-			if z < floor {
+			if z > floor {
 				floor = z
 			}
+			if z < low {
+				low = z
+			}
 		}
-		stacked = len(zs) > 1
-	} else {
-		zs, ok := fl.FloorsAt(ctx, portal.Map, pos.X, pos.Y, pos.Z)
-		if !ok {
-			e.note("hire: portal ground not checked (no navmesh)")
-			return "", nil
+		stacked = floor-low > hireSpotMaxDrop
+		if stacked {
+			e.note(fmt.Sprintf("hire: the commander's own height is a guess near the portal, so it may stand on the lower floor %.1f or the portal ground %.1f: the spot is not checked, stand on the portal ground %.1f first", low, floor, ground))
 		}
-		floor, ok = nearestFloor(zs, pos.Z, -math.MaxFloat32, math.MaxFloat32)
-		if !ok {
-			e.note("hire: portal ground not checked (no navmesh)")
-			return "", nil
-		}
+		return "", nil
+	}
+	zs, ok := fl.FloorsAt(ctx, portal.Map, pos.X, pos.Y, pos.Z)
+	if !ok {
+		e.note("hire: portal ground not checked (no navmesh)")
+		return "", nil
+	}
+	floor, ok = nearestFloor(zs, pos.Z, -math.MaxFloat32, math.MaxFloat32)
+	if !ok {
+		e.note("hire: portal ground not checked (no navmesh)")
+		return "", nil
 	}
 	if float64(ground)-float64(floor) <= hireSpotMaxDrop {
 		return "", nil
-	}
-	if zUnknown && stacked {
-		return fmt.Sprintf("hire: commander may be on a lower floor near the portal: its x/y has a floor %.1f, %.1f yd below the portal ground %.1f, and its own height is a guess; stand on the portal ground first", floor, float64(ground)-float64(floor), ground), nil
 	}
 	return fmt.Sprintf("the commander stands %.1f yd below the portal ground (its floor %.1f, the portal ground %.1f, %.1f yd across): the hires appear and muster where the commander stands; stand on the portal ground first", float64(ground)-float64(floor), floor, ground, across(pos)), nil
 }
