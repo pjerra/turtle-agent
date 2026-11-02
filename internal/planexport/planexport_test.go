@@ -584,19 +584,6 @@ func zulfarrakThrough(t *testing.T, last string) *dungeon.Plan {
 	return nil
 }
 
-// buildWhole builds a plan that has to export whole.
-func buildWhole(t *testing.T, p *dungeon.Plan) Result {
-	t.Helper()
-	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Cut != "" {
-		t.Fatalf("cut: %s", res.Cut)
-	}
-	return res
-}
-
 // The cut: a step the run leader cannot do in a later leg ends the export before that leg (its rows, and the warnings it made, are gone); in
 // the first leg there is nothing to export, and the plan is refused.
 func TestCutBeforeTheFirstLegWithAStepTheRunLeaderCannotDo(t *testing.T) {
