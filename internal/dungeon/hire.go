@@ -401,6 +401,9 @@ func (f *hireFlow) note(format string, a ...any) {
 
 // hire is the prepare step `party: hire`.
 func (e *prepEnv) hire(ctx context.Context) (string, error) {
+	if p := e.hireSpotProblem(); p != "" {
+		return "", errors.New(p)
+	}
 	hg, ok := e.g.(HireGame)
 	if !ok {
 		return "", errors.New("this game cannot hire: it has no group view or item queries")

@@ -273,6 +273,8 @@ type prepEnv struct {
 	memory map[string]tbm.Who
 	// remote: the run is in remote mode (the only mode that prepares).
 	remote bool
+	// team is the run's team (RemoteOptions.Team, "alliance" or "horde"): the hire spot refuses a commander of another team (#266).
+	team string
 	// maintain: the hire check may send `.bot maintenance` (observe mode: only with observe.maintenance, #253).
 	maintain bool
 	now      func() time.Time
