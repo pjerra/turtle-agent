@@ -8,10 +8,17 @@ import (
 )
 
 // AgentPositioner is the optional part of a Preparer that tells where the agent's own character stands, and whether its height is a guess
-// (session.StatusInfo.ZUnknown). A teleport or a climb leaves z a guess until the server sends a position; a guessed height never refuses
-// the hire spot (see hireSpotProblem).
+// (session.StatusInfo.ZUnknown). A teleport or a climb leaves z a guess until the server sends a position; a guessed height over two floors
+// is settled with one short walk before the hire spot is judged (see hireSpotProblem).
 type AgentPositioner interface {
 	AgentPosition() (pos Point, zUnknown bool)
+}
+
+// CommanderWalker is the optional part of a Preparer that walks the commander's own character a short navmesh move (walk_path). The hire
+// spot uses it once to settle a guessed height over stacked floors: a navmesh walk that ends on the mesh clears status.z_unknown
+// (session tickWalk).
+type CommanderWalker interface {
+	WalkSelf(ctx context.Context, to Point) (WalkResult, error)
 }
 
 const (
@@ -26,8 +33,8 @@ const (
 // that fights for the other side. The portal ground is the navmesh floor at the portal x/y nearest below the trigger centre. A settled
 // height (the server knows it) picks the floor at its own x/y nearest that height and refuses when it stands on the wrong floor. A
 // guessed height (status.z_unknown: a far teleport leaves it guessed for good, the session lands through SMSG_NEW_WORLD with no floor
-// drop and the core never sends the player its own position, walk 23) never refuses: it may be on any floor at its x/y, so the step warns
-// naming both candidates and hires anyway.
+// drop and the core never sends the player its own position, walk 23) over two floors more than hireSpotMaxDrop apart is settled first
+// with one short navmesh walk of the commander and judged like a settled height; a height still a guess afterwards refuses.
 func (e *prepEnv) hireSpotProblem(ctx context.Context) (string, error) {
 	agent := ""
 	if ts, ok := e.g.(TeamSource); ok {
@@ -65,19 +72,16 @@ func (e *prepEnv) hireSpotProblem(ctx context.Context) (string, error) {
 		e.note("hire: portal ground not checked (no navmesh)")
 		return "", nil
 	}
-	var floor float32
-	stacked := false
 	if zUnknown {
 		// The guess may sit on any floor at the commander's x/y (a far teleport leaves status.z_unknown set for good: walk 23), so the
-		// step never refuses on it: it warns naming both candidate floors and hires anyway. One floor within hireSpotGuess yd of the
-		// guess is the commander's own: no warning (Wailing Caverns' portal has one).
+		// step looks at every floor within hireSpotGuess yd of it. One floor there, or floors within hireSpotMaxDrop of each other
+		// (Wailing Caverns' portal has one), is today's behaviour: no walk, no warning, the spot is not judged on the guess.
 		zs, ok := fl.FloorsWithin(ctx, portal.Map, pos.X, pos.Y, pos.Z-hireSpotGuess, pos.Z+hireSpotGuess)
 		if !ok {
 			e.note("hire: portal ground not checked (no navmesh)")
 			return "", nil
 		}
-		floor = zs[0]
-		low := zs[0]
+		floor, low := zs[0], zs[0]
 		for _, z := range zs[1:] {
 			if z > floor {
 				floor = z
@@ -86,18 +90,36 @@ func (e *prepEnv) hireSpotProblem(ctx context.Context) (string, error) {
 				low = z
 			}
 		}
-		stacked = floor-low > hireSpotMaxDrop
-		if stacked {
-			e.note(fmt.Sprintf("hire: the commander's own height is a guess near the portal, so it may stand on the lower floor %.1f or the portal ground %.1f: the spot is not checked, stand on the portal ground %.1f first", low, floor, ground))
+		if floor-low <= hireSpotMaxDrop {
+			return "", nil
 		}
-		return "", nil
+		// Floors stacked more than hireSpotMaxDrop apart: refusing on the guess would refuse correct spots, and hiring on it could hire
+		// onto the unreachable lower floor, so the height is settled first with one short navmesh walk of the commander (which clears
+		// status.z_unknown when it ends on the mesh), and the settled height is judged like a known one. Still a guess afterwards refuses.
+		settled, ok := e.resolveCommanderHeight(ctx, fl, ap, portal.Map, pos)
+		if !ok {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			return "commander height unknown over two floors; move the commander and retry", nil
+		}
+		pos = settled
+		if across(pos) > hireSpotRadius {
+			return "", nil
+		}
 	}
+	return e.hireSpotKnown(ctx, fl, portal, ground, pos, across)
+}
+
+// hireSpotKnown says why a commander at a settled height must not hire where it stands ("" when it may): the navmesh floor at its own
+// x/y nearest its height must be the portal ground within hireSpotMaxDrop.
+func (e *prepEnv) hireSpotKnown(ctx context.Context, fl FloorLister, portal Portal, ground float32, pos Point, across func(Point) float64) (string, error) {
 	zs, ok := fl.FloorsAt(ctx, portal.Map, pos.X, pos.Y, pos.Z)
 	if !ok {
 		e.note("hire: portal ground not checked (no navmesh)")
 		return "", nil
 	}
-	floor, ok = nearestFloor(zs, pos.Z, -math.MaxFloat32, math.MaxFloat32)
+	floor, ok := nearestFloor(zs, pos.Z, -math.MaxFloat32, math.MaxFloat32)
 	if !ok {
 		e.note("hire: portal ground not checked (no navmesh)")
 		return "", nil
@@ -106,6 +128,46 @@ func (e *prepEnv) hireSpotProblem(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	return fmt.Sprintf("the commander stands %.1f yd below the portal ground (its floor %.1f, the portal ground %.1f, %.1f yd across): the hires appear and muster where the commander stands; stand on the portal ground first", float64(ground)-float64(floor), floor, ground, across(pos)), nil
+}
+
+// hireSpotResolveStep is how far (yd) the settle walk moves the commander: far enough to end on the mesh, near enough to stay by the
+// portal (the spot only judges a commander within hireSpotRadius of it).
+const hireSpotResolveStep = 3.0
+
+// resolveCommanderHeight settles a guessed commander height with one short navmesh walk: a walk that ends on the mesh clears
+// status.z_unknown (session tickWalk). It reports the commander's position afterwards, false when the height is still a guess (no
+// walker, no mesh point for a target, or the walk did not settle it).
+func (e *prepEnv) resolveCommanderHeight(ctx context.Context, fl FloorLister, ap AgentPositioner, mapID uint32, pos Point) (Point, bool) {
+	w, ok := e.g.(CommanderWalker)
+	if !ok {
+		return pos, false
+	}
+	var to Point
+	found := false
+	for _, d := range [][2]float32{{hireSpotResolveStep, 0}, {-hireSpotResolveStep, 0}, {0, hireSpotResolveStep}, {0, -hireSpotResolveStep}} {
+		q := Point{X: pos.X + d[0], Y: pos.Y + d[1], Z: pos.Z}
+		zs, ok := fl.FloorsAt(ctx, mapID, q.X, q.Y, pos.Z)
+		if !ok || len(zs) == 0 {
+			continue
+		}
+		f, ok := nearestFloor(zs, pos.Z, -math.MaxFloat32, math.MaxFloat32)
+		if !ok {
+			continue
+		}
+		to = Point{X: q.X, Y: q.Y, Z: f}
+		found = true
+		break
+	}
+	if !found {
+		return pos, false
+	}
+	e.note(fmt.Sprintf("hire: the commander's height is a guess over two floors, so it walks to %.1f %.1f %.1f to settle it", to.X, to.Y, to.Z))
+	_, _ = w.WalkSelf(ctx, to)
+	after, unknown := ap.AgentPosition()
+	if unknown {
+		return pos, false
+	}
+	return after, true
 }
 
 // navmeshFloorBelow is the floor at p's x/y nearest below p's height: the ground a body at p would rest on, never a deck above the

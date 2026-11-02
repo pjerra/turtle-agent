@@ -25,9 +25,58 @@ type hirePosFake struct {
 	pos      Point
 	zUnknown bool
 	floors   map[[2]float32][]float32
+	walks    []Point
+	landOn   Point // the commander's settled position after WalkSelf; zUnknown false
+	landFail bool  // WalkSelf leaves the height a guess
+	walkErr  bool  // WalkSelf errors (still re-reads the position)
 }
 
 func (g *hirePosFake) AgentPosition() (Point, bool) { return g.pos, g.zUnknown }
+
+// hireNoWalkFake is hirePosFake without the walker: a game that reports the position and the floors but cannot walk the commander.
+type hireNoWalkFake struct {
+	*hireFake
+	pos      Point
+	zUnknown bool
+	floors   map[[2]float32][]float32
+}
+
+func (g *hireNoWalkFake) AgentPosition() (Point, bool) { return g.pos, g.zUnknown }
+
+func (g *hireNoWalkFake) FloorsAt(ctx context.Context, mapID uint32, x, y, z float32) ([]float32, bool) {
+	return g.FloorsWithin(ctx, mapID, x, y, z-12, z+12)
+}
+
+func (g *hireNoWalkFake) FloorsWithin(_ context.Context, _ uint32, x, y, lo, hi float32) ([]float32, bool) {
+	best := math.Inf(1)
+	var out []float32
+	found := false
+	for k, zs := range g.floors {
+		if d := math.Hypot(float64(k[0]-x), float64(k[1]-y)); d <= 1 && d < best {
+			best, found = d, true
+			out = out[:0]
+			for _, z := range zs {
+				if z >= lo && z <= hi {
+					out = append(out, z)
+				}
+			}
+		}
+	}
+	slices.SortFunc(out, func(a, b float32) int { return cmp.Compare(b, a) })
+	return out, found && len(out) > 0
+}
+
+// WalkSelf walks the commander and settles the height unless landFail says otherwise: the record of the resolve walk.
+func (g *hirePosFake) WalkSelf(_ context.Context, to Point) (WalkResult, error) {
+	g.walks = append(g.walks, to)
+	if g.walkErr {
+		return WalkResult{Result: "partial", Reason: "interrupted"}, context.DeadlineExceeded
+	}
+	if !g.landFail {
+		g.pos, g.zUnknown = g.landOn, false
+	}
+	return WalkResult{Result: "arrived"}, nil
+}
 
 // FloorsAt answers the fixture floors of the nearest point within a yard, highest first, within 12 yd of z, as the navmesh does.
 func (g *hirePosFake) FloorsAt(ctx context.Context, mapID uint32, x, y, z float32) ([]float32, bool) {
@@ -81,34 +130,37 @@ func TestHireRefusesBelowThePortalGround(t *testing.T) {
 	}
 }
 
-// A guessed commander height (a far teleport leaves status.z_unknown set for good: walk 23) never refuses: it may sit on any floor at its
-// x/y, so with floors stacked at the commander's x/y the step warns naming both candidate floors and hires anyway. A known height picks
-// the floor at its own x/y nearest that height: known on the lower floor refuses, known on the upper floor hires.
+// A guessed commander height (a far teleport leaves status.z_unknown set for good: walk 23) is settled before it is judged when two
+// floors lie more than 5 yd apart at the commander's x/y: one short walk goes out, then the settled height refuses on the lower floor
+// and allows on the upper. A known height picks the floor at its own x/y nearest that height: known on the lower floor refuses, known
+// on the upper floor hires.
 func TestHireSpotStackedFloors(t *testing.T) {
 	for _, c := range []struct {
 		name     string
 		zUnknown bool
 		z        float32
+		landOn   Point
 		want     string
-		notes    string
-		warns    bool
+		walks    int
 	}{
-		{"known z on the lower floor", false, -30.6, "portal ground", "", false},
-		{"known z on the upper floor", false, -20.3, "", "", false},
-		{"unknown z", true, -20.3, "", "lower floor -30.6 or the portal ground -20.3", true},
-		{"unknown z 20 yd too high", true, -0.3, "", "", false},
+		{"known z on the lower floor", false, -30.6, Point{}, "portal ground", 0},
+		{"known z on the upper floor", false, -20.3, Point{}, "", 0},
+		{"unknown z settles on the upper floor", true, -20.3, Point{X: 1821.5, Y: -4425.3, Z: -20.3}, "", 1},
+		{"unknown z settles on the lower floor", true, -20.3, Point{X: 1821.5, Y: -4425.3, Z: -30.6}, "portal ground", 1},
+		{"unknown z 20 yd too high", true, -0.3, Point{}, "", 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			g := newHireFake(t)
 			g.agentMap = portalMap
 			g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
-			var notes []string
 			pos := &hirePosFake{hireFake: g, pos: Point{X: 1821.5, Y: -4425.3, Z: c.z}, zUnknown: c.zUnknown,
+				landOn: c.landOn,
 				floors: map[[2]float32][]float32{
 					{portalPoint.X, portalPoint.Y}: {-20.306},
 					{1821.5, -4425.3}:              {-20.3, -30.6},
+					{1824.5, -4425.3}:              {-20.3},
 				}}
-			e := hireSpotEnv(g, pos, func(s string) { notes = append(notes, s) })
+			e := hireSpotEnv(g, pos, func(s string) {})
 			p, err := e.hireSpotProblem(context.Background())
 			if err != nil {
 				t.Fatal(err)
@@ -120,21 +172,15 @@ func TestHireSpotStackedFloors(t *testing.T) {
 			} else if !strings.Contains(p, c.want) {
 				t.Fatalf("refused: %q, want %q", p, c.want)
 			}
-			if !c.warns {
-				if strings.Contains(strings.Join(notes, "\n"), "own height is a guess") {
-					t.Fatalf("an unexpected guess warning: %v", notes)
-				}
-				return
-			}
-			if !strings.Contains(strings.Join(notes, "\n"), c.notes) {
-				t.Fatalf("no warning naming both floors: %v", notes)
+			if len(pos.walks) != c.walks {
+				t.Fatalf("resolve walks = %d, want %d (%v)", len(pos.walks), c.walks, pos.walks)
 			}
 		})
 	}
 }
 
 // One floor within 30 yd of a guessed height is the commander's floor: Wailing Caverns' portal has one, so a guessed height there hires
-// with no warning (the widened look does not invent a lower level).
+// with no warning and no resolve walk (the widened look does not invent a lower level).
 func TestHireSpotGuessedHeightWithOneFloor(t *testing.T) {
 	g := newHireFake(t)
 	g.agentMap = portalMap
@@ -147,6 +193,89 @@ func TestHireSpotGuessedHeightWithOneFloor(t *testing.T) {
 	e := hireSpotEnv(g, pos, func(string) {})
 	if p, err := e.hireSpotProblem(context.Background()); err != nil || p != "" {
 		t.Fatalf("a guessed height with one floor is allowed: %s %v", p, err)
+	}
+	if len(pos.walks) != 0 {
+		t.Fatalf("one floor needs no resolve walk: %v", pos.walks)
+	}
+}
+
+// A guessed height the settle walk cannot resolve refuses with the retry message: the step fails open on neither floor. One try only:
+// a walk that leaves the height a guess, a walk error, no walker at all, and no mesh point for a resolve target all refuse the same way.
+func TestHireSpotResolveFailureRefuses(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		landFail bool
+		walkErr  bool
+		noWalker bool
+		noTarget bool
+	}{
+		{"still a guess after the walk", true, false, false, false},
+		{"walk error", false, true, false, false},
+		{"no walker", false, false, true, false},
+		{"no mesh point for a target", false, false, false, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			g := newHireFake(t)
+			g.agentMap = portalMap
+			g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
+			floors := map[[2]float32][]float32{
+				{portalPoint.X, portalPoint.Y}: {-20.306},
+				{1821.5, -4425.3}:              {-20.3, -30.6},
+				{1824.5, -4425.3}:              {-20.3},
+			}
+			if c.noTarget {
+				delete(floors, [2]float32{1824.5, -4425.3})
+			}
+			pos := &hirePosFake{hireFake: g, pos: Point{X: 1821.5, Y: -4425.3, Z: -20.3}, zUnknown: true,
+				landOn:   Point{X: 1821.5, Y: -4425.3, Z: -20.3},
+				landFail: c.landFail, walkErr: c.walkErr, floors: floors}
+			var own Preparer = Preparer(pos)
+			if c.noWalker {
+				own = &hireNoWalkFake{hireFake: g, pos: Point{X: 1821.5, Y: -4425.3, Z: -20.3}, zUnknown: true, floors: floors}
+			}
+			e := hireSpotEnv(g, own, func(string) {})
+			p, err := e.hireSpotProblem(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(p, "commander height unknown over two floors") {
+				t.Fatalf("an unresolvable guess refuses: %q", p)
+			}
+			if c.noWalker {
+				return
+			}
+			if c.noTarget && len(pos.walks) != 0 {
+				t.Fatalf("no target means no walk: %v", pos.walks)
+			}
+			if !c.noTarget && len(pos.walks) != 1 {
+				t.Fatalf("one resolve walk: %v", pos.walks)
+			}
+		})
+	}
+}
+
+// The resolve walk is short and stays by the portal: 3 yd on the mesh, and never past the spot's 15 yd radius.
+func TestHireSpotResolveWalkIsShort(t *testing.T) {
+	g := newHireFake(t)
+	g.agentMap = portalMap
+	g.plan.Portal = &Portal{Map: portalMap, Point: portalPoint}
+	pos := &hirePosFake{hireFake: g, pos: Point{X: 1821.5, Y: -4425.3, Z: -20.3}, zUnknown: true,
+		landOn: Point{X: 1824.5, Y: -4425.3, Z: -20.3},
+		floors: map[[2]float32][]float32{
+			{portalPoint.X, portalPoint.Y}: {-20.306},
+			{1821.5, -4425.3}:              {-20.3, -30.6},
+			{1824.5, -4425.3}:              {-20.3},
+		}}
+	e := hireSpotEnv(g, pos, func(string) {})
+	if _, err := e.hireSpotProblem(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(pos.walks) != 1 {
+		t.Fatalf("one resolve walk: %v", pos.walks)
+	}
+	got := math.Hypot(float64(pos.walks[0].X-1821.5), float64(pos.walks[0].Y+4425.3))
+	if got < 2 || got > 5 {
+		t.Fatalf("resolve walk %.1f yd, want 2-5", got)
 	}
 }
 
@@ -162,26 +291,28 @@ func TestHireSpotAllowsTheRealPortalSamples(t *testing.T) {
 		portalFloors    []float32
 		pos             Point
 		zUnknown        bool
+		landOn          Point
 		commanderFloors []float32
 	}{
 		{"wailing caverns", 1, Portal{Map: 1, Point: Point{X: -753.596, Y: -2212.78, Z: 21.5403}},
-			[]float32{15.4}, Point{X: -753.4, Y: -2212.8, Z: 15.4}, false, []float32{15.4}},
+			[]float32{15.4}, Point{X: -753.4, Y: -2212.8, Z: 15.4}, false, Point{}, []float32{15.4}},
 		{"ragefire chasm", 1, Portal{Map: 1, Point: rfc},
-			[]float32{-20.306}, Point{X: 1821.5, Y: -4425.3, Z: -19.8}, false, []float32{-20.3, -30.6}},
+			[]float32{-20.306}, Point{X: 1821.5, Y: -4425.3, Z: -19.8}, false, Point{}, []float32{-20.3, -30.6}},
 		{"sunken temple", 0, Portal{Map: 0, Point: Point{X: -10162.7, Y: -3998.65, Z: -107.978}},
-			[]float32{-113.443}, Point{X: -10168, Y: -3997.1, Z: -113.2}, false, []float32{-113.66}},
+			[]float32{-113.443}, Point{X: -10168, Y: -3997.1, Z: -113.2}, false, Point{}, []float32{-113.66}},
 		{"dire maul east", 1, Portal{Map: 1, Point: Point{X: -3981.58, Y: 771.193, Z: 160.962}},
-			[]float32{156.4}, Point{X: -3976.1, Y: 773.2, Z: 156.4}, false, []float32{156.4}},
-		{"a guessed height on the portal ground", 1, Portal{Map: 1, Point: rfc},
-			[]float32{-20.306}, Point{X: 1821.5, Y: -4425.3, Z: -30}, true, []float32{-20.3, -30.6}},
+			[]float32{156.4}, Point{X: -3976.1, Y: 773.2, Z: 156.4}, false, Point{}, []float32{156.4}},
+		{"a guessed height that settles on the portal ground", 1, Portal{Map: 1, Point: rfc},
+			[]float32{-20.306}, Point{X: 1821.5, Y: -4425.3, Z: -30}, true, Point{X: 1821.5, Y: -4425.3, Z: -20.3}, []float32{-20.3, -30.6}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			g := newHireFake(t)
 			g.agentMap = c.agentMap
 			g.plan.Portal = &c.portal
-			pos := &hirePosFake{hireFake: g, pos: c.pos, zUnknown: c.zUnknown, floors: map[[2]float32][]float32{
+			pos := &hirePosFake{hireFake: g, pos: c.pos, zUnknown: c.zUnknown, landOn: c.landOn, floors: map[[2]float32][]float32{
 				{c.portal.X, c.portal.Y}: c.portalFloors,
 				{c.pos.X, c.pos.Y}:       c.commanderFloors,
+				{c.pos.X + 3, c.pos.Y}:   {c.commanderFloors[0]},
 			}}
 			e := hireSpotEnv(g, pos, func(string) {})
 			if p, err := e.hireSpotProblem(context.Background()); err != nil || p != "" {
