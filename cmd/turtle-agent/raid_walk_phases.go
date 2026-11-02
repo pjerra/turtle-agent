@@ -1340,7 +1340,7 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 	}
 }
 
-// savedFrame is one frames.jsonl line (compact: positions, hp, dead, hostiles).
+// savedFrame is one frames.jsonl line (compact: positions, hp, power, dead, hostiles).
 type savedFrame struct {
 	T        int64          `json:"t"`
 	Seq      uint64         `json:"seq"`
@@ -1350,20 +1350,23 @@ type savedFrame struct {
 }
 
 type savedBot struct {
-	GUID   string  `json:"guid"`
-	Name   string  `json:"name"`
-	X      float32 `json:"x"`
-	Y      float32 `json:"y"`
-	Z      float32 `json:"z"`
-	Map    uint32  `json:"map"`
-	HP     uint32  `json:"hp"`
-	MaxHP  uint32  `json:"max_hp"`
-	Dead   bool    `json:"dead"`
-	State  string  `json:"state"`
-	Target string  `json:"target,omitempty"` // the bot's target, else its victim (absent when the module sent none)
-	Spell  uint32  `json:"spell,omitempty"`  // the spell it casts or channels
-	Action string  `json:"action,omitempty"` // the last action its AI ran
-	Result string  `json:"result,omitempty"` // the verdict on that action (O ok, F failed, I impossible, U useless, P queued, V dropped)
+	GUID      string  `json:"guid"`
+	Name      string  `json:"name"`
+	X         float32 `json:"x"`
+	Y         float32 `json:"y"`
+	Z         float32 `json:"z"`
+	Map       uint32  `json:"map"`
+	HP        uint32  `json:"hp"`
+	MaxHP     uint32  `json:"max_hp"`
+	Power     uint32  `json:"power"`
+	MaxPower  uint32  `json:"max_power"`
+	PowerType uint8   `json:"power_type"` // 0 mana, 1 rage, 2 focus, 3 energy; written even at 0 (mana)
+	Dead      bool    `json:"dead"`
+	State     string  `json:"state"`
+	Target    string  `json:"target,omitempty"` // the bot's target, else its victim (absent when the module sent none)
+	Spell     uint32  `json:"spell,omitempty"`  // the spell it casts or channels
+	Action    string  `json:"action,omitempty"` // the last action its AI ran
+	Result    string  `json:"result,omitempty"` // the verdict on that action (O ok, F failed, I impossible, U useless, P queued, V dropped)
 }
 
 type savedHostile struct {
@@ -1404,7 +1407,8 @@ func (w *walk) saveFrame(now time.Time, f *tbm.ViewFrame) {
 	rec := savedFrame{T: now.UnixMilli(), Seq: f.Seq, Tier: w.roster.Tier}
 	for _, p := range f.Party {
 		bot := savedBot{GUID: p.GUID.String(), Name: p.Name, X: p.X, Y: p.Y, Z: p.Z, Map: p.Map,
-			HP: p.HP, MaxHP: p.MaxHP, Dead: p.Dead || p.State == "d", State: p.State,
+			HP: p.HP, MaxHP: p.MaxHP, Power: p.Power, MaxPower: p.MaxPower, PowerType: p.PowerType,
+			Dead: p.Dead || p.State == "d", State: p.State,
 			Spell: p.Spell, Action: p.Action, Result: p.Result}
 		if p.Target != 0 {
 			bot.Target = p.Target.String()

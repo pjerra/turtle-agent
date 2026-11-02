@@ -896,6 +896,7 @@ func (f *walkFakeAgent) viewPage() any {
 			X: p[0], Y: p[1], Z: p[2]}
 		if ex, ok := extra[name]; ok { // the P-record fields the module sends beyond the fake's own
 			rec.Target, rec.Spell, rec.Action, rec.Result = ex.Target, ex.Spell, ex.Action, ex.Result
+			rec.Power, rec.MaxPower, rec.PowerType = ex.Power, ex.MaxPower, ex.PowerType
 		}
 		frame.Party = append(frame.Party, rec)
 	}

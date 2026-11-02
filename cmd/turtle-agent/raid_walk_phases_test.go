@@ -268,6 +268,72 @@ func TestRaidWalkFramesCarryBotTargets(t *testing.T) {
 	}
 }
 
+// TestWalkFramesCarryPower (TortoiseBots#1459): the module already sends each bot's power in the P record
+// (internal/tbm/view.go:52-54), but savedBot dropped it, so the frames could not show a warrior's rage or a
+// healer's mana. Both bot lines must carry power, max_power and power_type; power_type 0 is mana and must be
+// written, not omitted.
+func TestWalkFramesCarryPower(t *testing.T) {
+	f := newFixture(t)
+	f.defaultRun("onyxias_lair")
+	f.agent.mu.Lock()
+	f.agent.partyExtra = map[string]tbm.PartyRec{
+		"Bot02": {Power: 37, MaxPower: 1000, PowerType: 1}, // the warrior: 37 rage of 1000
+		"Bot01": {Power: 0, MaxPower: 2400, PowerType: 0},  // the priest: 0 mana of 2400
+	}
+	f.agent.mu.Unlock()
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(f.out, "frames.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := bytes.Split(bytes.TrimSpace(raw), []byte("\n"))
+	var rec struct {
+		Party []struct {
+			Name      string  `json:"name"`
+			Power     *uint32 `json:"power"`
+			MaxPower  *uint32 `json:"max_power"`
+			PowerType *uint8  `json:"power_type"`
+		} `json:"party"`
+	}
+	if err := json.Unmarshal(lines[0], &rec); err != nil {
+		t.Fatalf("frames.jsonl line 1: %v", err)
+	}
+	want := map[string]struct {
+		power, maxPower uint32
+		powerType       uint8
+	}{
+		"Bot02": {37, 1000, 1},
+		"Bot01": {0, 2400, 0},
+	}
+	found := 0
+	for _, p := range rec.Party {
+		w, ok := want[p.Name]
+		if !ok {
+			continue
+		}
+		found++
+		if p.Power == nil || p.MaxPower == nil || p.PowerType == nil {
+			t.Fatalf("%s in the frame: power %v max_power %v power_type %v, want all three keys", p.Name, p.Power, p.MaxPower, p.PowerType)
+		}
+		if *p.Power != w.power || *p.MaxPower != w.maxPower || *p.PowerType != w.powerType {
+			t.Fatalf("%s in the frame: power %d max_power %d power_type %d, want %d %d %d",
+				p.Name, *p.Power, *p.MaxPower, *p.PowerType, w.power, w.maxPower, w.powerType)
+		}
+	}
+	if found != len(want) {
+		t.Fatalf("%d of the two bots in the frame: %+v", found, rec.Party)
+	}
+	line := string(lines[0])
+	if !strings.Contains(line, `"name":"Bot01"`) || !strings.Contains(line, `"power_type":0`) {
+		t.Fatalf("the priest's line carries no power_type 0 (mana must be written, not omitted): %s", line)
+	}
+	if !strings.Contains(line, `"power_type":1`) {
+		t.Fatalf("the warrior's line carries no power_type 1: %s", line)
+	}
+}
+
 // TestRaidWalkFramesEveryTwoSecondsInCombat (walk 22 F3, Q1): the 10 s cadence is too coarse for the pile — the
 // Servants died 11 s apart, so consecutive frames could hold nothing but a corpse. While a party member is in
 // combat the frames must go out every 2 s, the watch loop's own cadence.
