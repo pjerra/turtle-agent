@@ -5604,6 +5604,115 @@ func TestRaidWalkBossNotFoundCorpseReadPointFarMovesAndRereads(t *testing.T) {
 	}
 }
 
+// Walk 25 point_far round 2: a `.go xyz` answers at once but the server lands the commander a moment later, so a
+// re-read at once can still be refused with point_far and latch the reads off. The walk waits for the landing at
+// the boss row with the revive's own landing wait before the move note and the re-read: the fake lands the go 3
+// status reads later, and the second toolkit read goes out only after it.
+func TestRaidWalkBossNotFoundCorpseReadPointFarWaitsForLanding(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgThekalStart(total, boss)
+	spot := zgRows(t).Steps[boss-1]
+	f.agent.mu.Lock()
+	f.agent.startQueue = zgThekalPauseQueue(boss, total)
+	f.agent.goLagEvery = 3 // the go is accepted but lands 3 status reads later
+	f.agent.mu.Unlock()
+	statusReads := func() int {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		n := 0
+		for _, c := range f.agent.calls {
+			if c == "status" {
+				n++
+			}
+		}
+		return n
+	}
+	var atRead []int
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if !strings.Contains(cmd, "all dead e=14599") {
+			return ttResult{}, errors.New("unexpected toolkit command")
+		}
+		f.agent.mu.Lock()
+		x, y, z := f.agent.x, f.agent.y, f.agent.z
+		f.agent.mu.Unlock()
+		atRead = append(atRead, statusReads())
+		if x != spot.X || y != spot.Y || z != spot.Z+2 {
+			// Still standing far away: the read is refused, as the live toolkit is.
+			return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+		}
+		return ttReplyOf(t, map[string]any{"units": []map[string]any{{"g": "0xF13000000000000A", "e": 14599, "dead": true, "d": 12.5, "hp": 0}}}), nil
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	zgThekalDoneOnSkip(f, boss, total)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs, tt := append([]string{}, f.agent.runVerbs...), append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	if countPrefix(verbs, "skip") != 1 {
+		t.Fatalf("run verbs %v, want exactly one skip", verbs)
+	}
+	if len(tt) != 2 {
+		t.Fatalf("toolkit calls %q, want exactly the refused read and its re-read", tt)
+	}
+	if len(atRead) != 2 || atRead[1]-atRead[0] < 3 {
+		t.Fatalf("toolkit reads at status counts %v, want the re-read at least 3 status reads after the refused one (the landing)", atRead)
+	}
+	if !hasNote(f.summary(), "the commander moved to the boss row for the corpse read") {
+		t.Fatalf("notes %q, want the move note", f.summary().Notes)
+	}
+}
+
+// Walk 25 point_far round 2: the move's landing never comes. No re-read goes out, the reads latch with the
+// failed-move note, and the walk waits out the pause as before.
+func TestRaidWalkBossNotFoundCorpseReadPointFarLandingNeverComes(t *testing.T) {
+	f := zgThekalFixture(t, "zul_gurub")
+	boss := zgBossStep(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = zgThekalStart(total, boss)
+	f.agent.mu.Lock()
+	f.agent.startQueue = zgThekalPauseQueue(boss, total)
+	f.agent.mu.Unlock()
+	neverLanding(f) // the go is accepted but never lands
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		return ttResult{}, errors.New("rpc error -32003: eluna: point_far: point is 258 yd from you (max 150): .go xyz there first")
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		if n <= 1 {
+			return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 60, Target: packet.GUID(1000)}}
+		}
+		return nil
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs, tt := append([]string{}, f.agent.runVerbs...), append([]string{}, f.agent.ttCalls...)
+	f.agent.mu.Unlock()
+	if countPrefix(verbs, "skip") != 0 {
+		t.Fatalf("run verbs %v, want no skip: the move never landed", verbs)
+	}
+	if len(tt) != 1 {
+		t.Fatalf("toolkit calls %q, want exactly the refused read (no re-read without the landing)", tt)
+	}
+	if hasNote(f.summary(), "the commander moved to the boss row for the corpse read") {
+		t.Fatalf("notes %q, want no move note without the landing", f.summary().Notes)
+	}
+	if !hasNote(f.summary(), "the move to the boss row did not land") {
+		t.Fatalf("notes %q, want the failed-move note", f.summary().Notes)
+	}
+}
+
 // A toolkit read that fails is no evidence (the walk waits as a pause) and turns the reads off for the rest of the
 // walk: a server without the toolkit must not cost the watch loop a timeout on every pause tick.
 func TestRaidWalkBossNotFoundToolkitFailureStillPauses(t *testing.T) {

@@ -2014,8 +2014,16 @@ func (w *walk) bossCorpse(ctx context.Context, boss uint32, units []uint32) (boo
 				// toolkit that never answers costs the watch loop one bounded wait, not one per tick.
 				// The toolkit's corpse read is range-limited to 150 yd: a refused point_far read fails only
 				// because the commander stands too far away. Move it to the boss row once, with the same go
-				// the revive needs before its own `.go xyz` (GMVisibleOff), and re-read the same entry once.
+				// the revive needs before its own `.go xyz` (GMVisibleOff), wait for the landing with the
+				// revive's own wait (waitRevivePoint: the `.go xyz` answers at once but the server lands the
+				// character a moment later, and a re-read at once is refused again and latches the reads off),
+				// and only then note the move and re-read the same entry once.
 				if !moved && strings.Contains(err.Error(), "point_far") {
+					before, serr := w.status(ctx)
+					if serr != nil {
+						return false, ""
+					}
+					from, beforeSeq, haveSeq := before.Map, before.TeleportSeq, true
 					if gerr := w.gm(ctx, raidwalk.GMVisibleOff); gerr != nil {
 						return false, ""
 					}
@@ -2025,6 +2033,12 @@ func (w *walk) bossCorpse(ctx context.Context, boss uint32, units []uint32) (boo
 							return false, ""
 						}
 						return fail("the toolkit corpse read failed (point_far, and the move to the boss row failed: %v)", gerr)
+					}
+					if gerr := w.waitRevivePoint(ctx, spot, from, beforeSeq, haveSeq, time.Time{}); gerr != nil {
+						if ctx.Err() != nil {
+							return false, ""
+						}
+						return fail("the toolkit corpse read failed (point_far, and the move to the boss row did not land)")
 					}
 					w.note("boss %d: the commander moved to the boss row for the corpse read (the toolkit read is limited to 150 yd)", boss)
 					continue
