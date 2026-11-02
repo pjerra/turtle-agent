@@ -329,3 +329,95 @@ func zgBossStepStart(total, boss int) *commanderReply {
 		Line:  line,
 		Lines: []string{line, "TBM:ACTION_ACK|run start|party|1|-"}}}
 }
+
+// bossSummaryWalk is a walk with just the state the summary reads: the ZG rows and empty boss maps. The summary
+// functions do not touch the network or the frames, so the tests drive observeBossStatus and the skip directly.
+func bossSummaryWalk(t *testing.T) *walk {
+	t.Helper()
+	return &walk{
+		rows:       zgRows(t),
+		bossTracks: map[bossKey]*bossStepTrack{},
+		bossGUIDs:  map[string]uint32{},
+		bossForms:  map[string][]uint32{},
+	}
+}
+
+// TestBossKillSummariesUnengagedThenKilled is #1453 round 3 (a): a boss row the run only walked past must not be
+// marked killed when a later boss row's fight reports `boss down`. Each boss row's step keeps its own record, so the
+// first says not engaged and the second says killed.
+func TestBossKillSummariesUnengagedThenKilled(t *testing.T) {
+	w := bossSummaryWalk(t)
+	now := time.Now()
+	// Step 38 (the ZG plan's first boss row, entry 14517) is walked past: a move status, not an engagement.
+	w.observeBossStatus(tbm.RunStatus{Step: 38, Kind: "move", Note: "walking"}, now)
+	// Step 84 (the second boss row, entry 14507) is engaged.
+	w.observeBossStatus(tbm.RunStatus{Step: 84, Kind: "boss", Note: "fighting"}, now)
+	// The run leaves step 84 and reports the kill on the leaving status.
+	w.observeBossStatus(tbm.RunStatus{Step: 85, Kind: "move", Note: "boss down: he died as 14507"}, now)
+	list := w.bossKillSummaries()
+	if len(list) != 2 {
+		t.Fatalf("bossKills %d records, want 2: %+v", len(list), list)
+	}
+	if k := list[0]; k.Step != 38 || k.Entry != 14517 || k.Engaged || k.Killed {
+		t.Fatalf("first record %+v, want step 38 entry 14517 not engaged and not killed", k)
+	}
+	if k := list[1]; k.Step != 84 || k.Entry != 14507 || !k.Engaged || !k.Killed {
+		t.Fatalf("second record %+v, want step 84 entry 14507 engaged and killed", k)
+	}
+	if single := w.bossKillSummary(); single == nil || single.Step != 84 || !single.Killed {
+		t.Fatalf("single boss_kill %+v, want the last engaged boss at step 84 killed", single)
+	}
+}
+
+// TestBossKillSummariesSkipDoesNotMarkOtherKilled is #1453 round 3 (b): a skip the walk sends for boss B must not
+// mark boss A killed. The skip is stored on B's own record; A's stays engaged and not killed.
+func TestBossKillSummariesSkipDoesNotMarkOtherKilled(t *testing.T) {
+	w := bossSummaryWalk(t)
+	now := time.Now()
+	// Boss A (step 38) is engaged and leaves without a `boss down` note.
+	w.observeBossStatus(tbm.RunStatus{Step: 38, Kind: "boss", Note: "fighting"}, now)
+	w.observeBossStatus(tbm.RunStatus{Step: 39, Kind: "move", Note: "walking"}, now)
+	// Boss B (step 84) is skipped: the walk's own `.bot run skip` for its step.
+	w.bossTrackAt(84, 14507).skipped = true
+	w.bossTrackAt(84, 14507).evidence = "14507 seen dead in the frames"
+	list := w.bossKillSummaries()
+	if len(list) != 2 {
+		t.Fatalf("bossKills %d records, want 2: %+v", len(list), list)
+	}
+	// Sorted by step: A (38) first, B (84) second.
+	if k := list[0]; k.Step != 38 || !k.Engaged || k.Killed {
+		t.Fatalf("A %+v, want step 38 engaged and not killed", k)
+	}
+	if k := list[1]; k.Step != 84 || !k.Skipped || !k.Killed {
+		t.Fatalf("B %+v, want step 84 skipped and killed (skip is kill evidence)", k)
+	}
+	// The single field is the last engaged boss: A alone was engaged.
+	if single := w.bossKillSummary(); single == nil || single.Step != 38 || single.Killed {
+		t.Fatalf("single boss_kill %+v, want A at step 38 not killed", single)
+	}
+}
+
+// TestBossFormsResetOnWipe is #1453 round 3 (c): a wipe recovery clears the boss guid's form history back to its
+// identity entry, so the retry's phase counts only the retry's changes: the wiped attempt's change is gone. The
+// summary reads phase 2, not 4.
+func TestBossFormsResetOnWipe(t *testing.T) {
+	w := bossSummaryWalk(t)
+	g := zgWalk25BossGUID.String()
+	w.bossGUIDs[g] = 14599
+	// The first attempt changes the entry twice: 14599 -> 14509 -> 14599.
+	w.bossForms[g] = []uint32{14599, 14509, 14599}
+	// A wipe recovery starts: the form history goes back to the identity mapping.
+	w.resetBossForms()
+	if forms := w.bossForms[g]; len(forms) != 1 || forms[0] != 14599 {
+		t.Fatalf("forms after reset %v, want [14599]", forms)
+	}
+	// The retry changes the entry once: 14599 -> 14509. Without the reset the
+	// history would read 4 forms (phase 4); with it the retry reads phase 2.
+	w.bossForms[g] = append(w.bossForms[g], 14509)
+	tk := w.bossTrackAt(127, 14599)
+	tk.guid = g
+	k := w.bossKillSummaryFor(tk)
+	if k.Phase != 2 || k.PhaseEntry != 14509 {
+		t.Fatalf("phase %d entry %d, want 2 14509: the wipe's change must not count", k.Phase, k.PhaseEntry)
+	}
+}

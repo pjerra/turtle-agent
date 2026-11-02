@@ -625,12 +625,10 @@ type walk struct {
 	// A guid in it is never an add; bossForms keeps the entries that guid was seen with, one per change.
 	bossGUIDs map[string]uint32
 	bossForms map[string][]uint32
-	// bossTrack is the boss step the run's own statuses showed (observeBossStatus): the last note seen while the
-	// run stood there, and the `boss down` note that leaves it. bossSkipped is the kill evidence a successful
-	// `.bot run skip` recorded (bossSkipStep) for the old-module path, where no such note arrives.
-	bossTrack        bossStepTrack
-	bossSkipped      bool
-	bossSkipEvidence string
+	// bossTracks is one record per boss step the run's own statuses showed (observeBossStatus): the last note seen
+	// while the run stood there, the `boss down` note that leaves it, and the skip the walk sent for that step
+	// (bossSkipStep). Keyed by the step, or by the boss's entry when the step is unknown.
+	bossTracks map[bossKey]*bossStepTrack
 
 	stepFirst *dungeon.Point
 	// startStep is the step the run starts at (the placement's staged start, else the --from step): the revive's own
@@ -711,15 +709,27 @@ type walk struct {
 	hiresLeft  []string
 }
 
-// bossStepTrack is the boss step the run's own statuses showed (spec 6, D5): the last note the run reported while
-// it stood on that step, and the `boss down` note that leaves it. killed/evidence are set once the note is seen.
+// bossKey identifies one boss step's record: the step when the run's status gave one (the row the run stood on),
+// else the boss's entry (a skip the pause path sent for a step the rows do not name).
+type bossKey struct {
+	step  int
+	entry uint32
+}
+
+// bossStepTrack is one boss step's record (spec 6, D5): the boss's entry, whether the run reported the encounter
+// engaged (its status kind was boss), whether the kill holds (`boss down` note or the walk's own skip), the guid
+// the frames showed the boss with and the entries that guid read while this step was tracked. The summary lists one
+// record per boss step; the last engaged one also fills the summary's single boss_kill field.
 type bossStepTrack struct {
-	have     bool
 	entry    uint32
 	step     int
-	note     string
+	engaged  bool
 	killed   bool
+	skipped  bool
+	note     string
 	evidence string
+	guid     string
+	forms    []uint32
 }
 
 type hostileState struct {
@@ -758,7 +768,8 @@ func raidWalkRun(ctx context.Context, o raidWalkOptions, env walkEnv, deps walkD
 	w := &walk{opts: o, env: env, deps: deps, stdout: stdout, stderr: stderr,
 		seenFights: map[string]bool{}, pendingFights: map[string]int{}, hostiles: map[string]hostileState{}, botAt: map[string]botPos{},
 		partyG: map[uint64]bool{}, bossSet: map[uint32]bool{}, bossRows: map[uint32]hostileState{}, hires: map[string]bool{},
-		bossAttemptAt: map[uint32]time.Time{}, bossGUIDs: map[string]uint32{}, bossForms: map[string][]uint32{}}
+		bossAttemptAt: map[uint32]time.Time{}, bossGUIDs: map[string]uint32{}, bossForms: map[string][]uint32{},
+		bossTracks: map[bossKey]*bossStepTrack{}}
 	return w.main(ctx)
 }
 
@@ -1432,6 +1443,7 @@ func (w *walk) finish(code int) {
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
 		Place:         w.placeSum,
 		BossKill:      w.bossKillSummary(),
+		BossKills:     w.bossKillSummaries(),
 		ReviveRefusal: w.reviveRefusal,
 		TierSource:    w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
 		WipeResumes: w.wipeResumes,
