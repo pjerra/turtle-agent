@@ -29,6 +29,7 @@ import (
 	"strings"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
 type creature struct {
@@ -231,10 +232,25 @@ func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool
 		return fail(err)
 	}
 	ws := Check(p, cs, CheckOptions{Team: team, Friendly: fm, Awakened: am, Scripted: toSet(sc)})
+	// The pull_size lint: the run leader's aggro-count estimate per pull row,
+	// over the row's max_bodies (or the plan's pull_ceiling, else 8/6).
+	// Mmaps-free: straight 2 yd samples between rows, LOS always seen (high
+	// side, documented in pull_size.go). A plan that fails to export is not a
+	// pull_size finding: reported like the route check reports it.
+	if w, _, werr := worldspawn.Load(dir, p.Map); werr == nil {
+		if sized, serr := PullSizes(p, cs, w); serr == nil {
+			for _, f := range sized {
+				ws = append(ws, f.Summary)
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "dungeongen: pull_size:", serr)
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "dungeongen: pull_size:", werr)
+	}
 	for _, w := range ws {
 		fmt.Println("warning:", w)
 	}
-	fmt.Printf("%d warning(s) for %s as team %q\n", len(ws), path, team)
 	if strict && len(ws) > 0 {
 		return 1
 	}

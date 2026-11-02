@@ -136,7 +136,10 @@ func TestCheckFileStrict(t *testing.T) {
 		t.Fatalf("warnings with -strict: %d", got)
 	}
 	clean := filepath.Join("..", "..", "dungeons", "uldaman.json")
-	if got := checkFile(clean, data, "alliance", "122", "2748,4857", "", true); got != 0 {
-		t.Fatalf("the committed plan: %d", got)
+	// The committed plan has no creature-check warning, but the pull_size lint
+	// warns on its dense pulls (no max_bodies sized yet): strict fails by
+	// design, and the warnings name the pull rows.
+	if got := checkFile(clean, data, "alliance", "122", "2748,4857", "", true); got != 1 {
+		t.Fatalf("the committed plan under -strict: %d, want 1 (the pull_size lint warns)", got)
 	}
 }
