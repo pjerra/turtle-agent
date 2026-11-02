@@ -1183,6 +1183,29 @@ func TestCutHopsKeepOffALeftAloneSpawn(t *testing.T) {
 	}
 }
 
+// The clearance is the walk's: the polyline start, via points, destination, measured to each of its segments. Here the via point and the
+// destination both stand 40 yd from spawn 81610 and the straight run between them passes through it: the hop is not cut.
+func TestCutHopSegmentKeepsOffALeftAloneSpawn(t *testing.T) {
+	const js = `{"version":1,"name":"lv","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"leave":[{"entry":7246,"spawn":81610,"at":{"x":1591,"y":1047.7,"z":9},"why":"island Shadowhunter"}],
+  "pull_groups":[{"entries":[100],"positions":[{"x":1591,"y":1087.7,"z":9}]}]}]}`
+	cut := func(p dungeon.Point) func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
+		return func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
+			return []dungeon.Point{p}, nil
+		}
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", ApproachHops: true, Cut: cut(dungeon.Point{X: 1591, Y: 1007.7, Z: 9})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows.Steps) != 2 {
+		t.Fatalf("a hop whose segment passes 0 yd from the left-alone spawn was cut:\n%+v", res.Rows.Steps)
+	}
+	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "would pass within 15 yd of the left-alone 7246 (spawn 81610)") || !strings.Contains(w, "not cut, the run leader walks it itself") {
+		t.Errorf("warnings %v", res.Warnings)
+	}
+}
+
 // A leg's `leave` list has no place in the rows: it is the leg row's comment (free text, round-trips through the SQL) and one warning that
 // says the run leader does not read it. A leg without one has no comment and no warning.
 func TestLeaveIsTheLegCommentAndWarned(t *testing.T) {

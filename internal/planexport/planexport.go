@@ -941,21 +941,34 @@ func Validate(r Rows) error {
 	return nil
 }
 
-// firstLeaveConflict returns the plan's first Leave spawn a cut point would walk within dungeon.LeaveClearYd of (ground distance, the plan
-// check's own rule for the plan's points). A cut hop is the exporter's walk, not the plan's: the run leader would hop it itself
-// (as before --approach-hops), so a hop whose cut path comes that near a spawn the plan leaves alone is not cut at all.
-func (b *builder) firstLeaveConflict(via []dungeon.Point) (dungeon.Leave, bool) {
-	for _, p := range via {
+// firstLeaveConflict returns the plan's first Leave spawn the walk from a to c, cut at via, comes within dungeon.LeaveClearYd of (ground
+// distance). The walk is the polyline a, via..., c, so each segment is measured, not only the via points: a straight run between two far
+// vertices can pass a spawn. A cut hop is the exporter's walk, not the plan's: the run leader would hop it itself (as before
+// --approach-hops), so a hop whose cut path comes that near a spawn the plan leaves alone is not cut at all.
+func (b *builder) firstLeaveConflict(a, c dungeon.Point, via []dungeon.Point) (dungeon.Leave, bool) {
+	poly := append(append([]dungeon.Point{a}, via...), c)
+	for i := 0; i+1 < len(poly); i++ {
 		for _, l := range b.plan.Legs {
 			for _, lv := range l.Leave {
-				dx, dy := float64(p.X-lv.At.X), float64(p.Y-lv.At.Y)
-				if math.Sqrt(dx*dx+dy*dy) < dungeon.LeaveClearYd {
+				if groundSegDist(lv.At, poly[i], poly[i+1]) < dungeon.LeaveClearYd {
 					return lv, true
 				}
 			}
 		}
 	}
 	return dungeon.Leave{}, false
+}
+
+// groundSegDist is the 2D (ground) distance of p from the segment a-b; a zero-length segment is the distance from a.
+func groundSegDist(p, a, b dungeon.Point) float64 {
+	ax, ay := float64(a.X), float64(a.Y)
+	dx, dy := float64(b.X)-ax, float64(b.Y)-ay
+	px, py := float64(p.X)-ax, float64(p.Y)-ay
+	t := 0.0
+	if den := dx*dx + dy*dy; den > 0 {
+		t = math.Max(0, math.Min(1, (px*dx+py*dy)/den))
+	}
+	return math.Hypot(px-t*dx, py-t*dy)
 }
 
 // cutLongHops finds consecutive moves of the plan that are more than MoveGapWarnYd apart. With Options.Cut set it puts the points the
@@ -976,7 +989,7 @@ func (b *builder) cutLongHops() error {
 				for len(via) > 0 && dist3(via[len(via)-1], c) < approachStandoffYd {
 					via = via[:len(via)-1]
 				}
-				if lv, near := b.firstLeaveConflict(via); near {
+				if lv, near := b.firstLeaveConflict(a, c, via); near {
 					b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the %s approach path would pass within %.0f yd of the left-alone %d (spawn %d) at %.1f %.1f: the hop is not cut, the run leader walks it itself", s.Leg, s.Seq, s.Kind, dungeon.LeaveClearYd, lv.Entry, lv.Spawn, lv.At.X, lv.At.Y))
 					via = nil
 				}
@@ -1009,7 +1022,7 @@ func (b *builder) cutLongHops() error {
 						if err != nil {
 							b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the move is %.0f yd from the one before it and could not be cut: %v", s.Leg, s.Seq, d, err))
 						}
-						if lv, near := b.firstLeaveConflict(via); near {
+						if lv, near := b.firstLeaveConflict(a, c, via); near {
 							b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the hop's path would pass within %.0f yd of the left-alone %d (spawn %d) at %.1f %.1f: the hop is not cut, the run leader walks it itself", s.Leg, s.Seq, dungeon.LeaveClearYd, lv.Entry, lv.Spawn, lv.At.X, lv.At.Y))
 							via = nil
 						}
