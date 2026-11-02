@@ -362,3 +362,21 @@ svg.hasreal:not(.hide-realpath) .ed-route { opacity: .4; stroke-width: 1.5; }
 .rlegend i.rs.bad { border-top: 4px dashed #ef4444; }
 .rlegend i.rs.pk { width: 14px; height: 14px; margin: 0 4px; border: 2px dashed #ffd400; border-radius: 50%; }
 .rlegend i.rs.nm { width: 16px; height: 16px; margin: 0 3px; border: 2px solid #4ade80; border-radius: 50%; background: #0f172a; color: #fff; font: 700 9px/12px system-ui, sans-serif; text-align: center; font-style: normal; }
+
+/* The run controls' box (controls.js): shown only with --control (GET /api/control/status). */
+.controls { padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.controls[hidden] { display: none; }
+.controls h3 { font-size: 13px; margin: 0 0 6px; }
+.ctlrow { display: flex; flex-wrap: wrap; gap: 6px; }
+button.ctl { border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 3px 10px; border-radius: 6px; cursor: pointer; font: inherit; }
+button.ctl:hover:not(:disabled) { border-color: var(--accent); }
+button.ctl:disabled { opacity: .5; cursor: default; }
+.ctltoken { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.ctltoken[hidden] { display: none; }
+.ctltoken input { background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; font: inherit; }
+.ctlmsg { margin-top: 6px; font-size: 12px; color: var(--muted); }
+.ctlmsg[hidden] { display: none; }
+.ctllog { margin-top: 6px; font-size: 12px; }
+.ctllog[hidden] { display: none; }
+.ctllog summary { cursor: pointer; color: var(--muted); }
+.ctllog .ctllogpre { margin: 4px 0 0; white-space: pre-wrap; font: 11px/1.4 ui-monospace, monospace; color: var(--muted); }

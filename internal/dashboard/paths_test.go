@@ -611,7 +611,7 @@ func TestPathRoutes(t *testing.T) {
 	writeRun(t, tests, "a", fullRun("r-a", "uld", 100, 300, 2, "done", [][2]float64{{10, 10}}))
 	live := writeRun(t, tests, "live", newTraceWithWalk("r-live", "uld", 50000))
 	p := NewPoller(Options{TestsDir: tests, ConfigDir: t.TempDir()})
-	p.livePath["8765"] = live
+	p.livePath["127.0.0.1:8765"] = live
 	p.live.Advance(live, time.Now())
 	h := Handler(p, tests, nil)
 	get := func(path string) *httptest.ResponseRecorder {
@@ -621,7 +621,7 @@ func TestPathRoutes(t *testing.T) {
 		h.ServeHTTP(w, r)
 		return w
 	}
-	w := get("/api/live/8765?min=2")
+	w := get("/api/live/127.0.0.1:8765?min=2")
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"run":"r-live"`) || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("live: %d %s", w.Code, w.Body.String())
 	}
@@ -656,7 +656,7 @@ func TestPathRoutes(t *testing.T) {
 	}
 	// the live answer never carries a secret field name
 	for _, k := range []string{"token", "password", "account"} {
-		if strings.Contains(strings.ToLower(get("/api/live/8765").Body.String()), k) {
+		if strings.Contains(strings.ToLower(get("/api/live/127.0.0.1:8765").Body.String()), k) {
 			t.Fatalf("%q in the live answer", k)
 		}
 	}

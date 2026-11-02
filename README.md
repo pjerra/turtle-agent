@@ -98,7 +98,7 @@ turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loo
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
-turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
+turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--hire-settle 20s] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
 turtle-agent trash-check [--dir dungeons] [--sql FILE [--plan NAME]] [--spawns DIR] [--patrols FILE]... [--mmaps DIR] [--level N] [--spread YD] [--aggro-rate R] [--assist-yd 10] [--json] [--out DIR] [--dash-out FILE] [--fail-on danger|patrol|any] [<plan>|<path.json>]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent scenario check [--var NAME=VALUE]... <file>
@@ -2222,8 +2222,13 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   `onyxias_lair` is **2**: the tier-3 quest is her own kill's reward, so a player fighting her holds the Zul'Gurub kit.
   A raid with no sourced tier (the other eleven, a 0 row and a `TODO` each in that file) refuses to run without
   `--tier N`. `--tier-override N` replaces a known tier and marks the run **comparison, not a tier proof** in the
-  notes and in `summary.json` (`roster.tier_comparison`). The walk refits after the hire with
-  `.bot gear raid <commander> tier <N>`.
+  notes and in `summary.json` (`roster.tier_comparison`). The walk waits `--hire-settle` (default 20s) after the last
+  hire for its join summon, then refits with `.bot gear raid <commander> tier <N>`. A hire whose join lands after the
+  bind is removed from the group, so `--hire-settle 0` skips the wait (run.log says
+  `no wait for the hires' join summons (--hire-settle 0)`) for a walk that proves the bind keeps every late joiner;
+  with 0 a late joiner can miss the refit, so that walk's numbers are a comparison only. Any `--hire-settle` below the
+  default marks the summary `roster.settle_short: true` (with `roster.hire_settle_s`), and the suite's baseline pick
+  skips it.
 - `--enter auto|near|tele`: `auto` is `cmd enter near` and falls back to `.tele name <hire> <entrance_tele>` once when
   the server answers `requirement`; `tele` needs the plan's `entrance_tele`.
 - `--max-run-minutes` (90) is the ceiling from `run start`; `--hold-minutes` keeps the raid bound afterwards;
@@ -2368,10 +2373,10 @@ The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused
 | `run.log` | every `TBM:RUN` line (control bytes escaped) and the walk's own notes, `HH:MM:SS.mmm <text>` |
 | `commanders-<NNNN>-<reason>.json` | GET `/api/v1/commanders` (`reason`: walk, pause, wipe, boss, hold) |
 | `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key (a `live` row, a fight still running, is left for the next read: its finished fight comes back under the same id) |
-| `frames.jsonl` | one `bot_view` frame every 10 s, and every 2 s while a party member is in combat (positions, hp, dead, state, and each bot's `target`, `spell`, `action` and `result`; hostiles; every line carries the walk's `tier`) |
+| `frames.jsonl` | one `bot_view` frame every 10 s, and every 2 s while a party member is in combat (positions, hp, `power`, `max_power`, `power_type` (0 mana, 1 rage, 2 focus, 3 energy; written even at 0; omitted when the bot has no power pool, `max_power` 0, so an absent `power_type` is not mana), dead, state, and each bot's `target`, `spell`, `action` and `result`; hostiles; every line carries the walk's `tier`) |
 | `pulljoiners.json` | one record per pull attempt (`step`, `at`, `count`, `guids`): the engaged hostiles outside the pulled pack within 10 s of the `pulling` line; `raid-walk report` shows each attempt's record in the joined column of the fight whose window holds its `at` |
 | `slot-setup.txt`, `teardown.json` | what slot setup printed, and teardown's report |
-| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, `wipe_resumes`, boss, `boss_kill` (the last boss the walk engaged: `entry`, `step` (the boss's own row), `engaged`, `killed`, `skipped` (the walk's own `.bot run skip`, also kill evidence), `phase` (1 + the entry changes the frames saw on the boss's guid), `phase_entry` (the entry that guid read last) and `evidence` (the run leader's `boss down` note, the run's end right after the boss step when TB overwrites that note — `run ended right after the boss step; engaged` or `; frames`, the walk's own skip evidence, or the reason the kill does not hold); `boss_kills` lists one such record per boss step the run's statuses showed (`summary.txt` carries one `boss kill: ...` line for the single field, plus a `boss steps:` list when more than one boss step was seen), pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison`; `place` (a `--place` walk only: `start_step`, `leg`, `point`, `until_step`, `instance`, `circles[]` with their removed counts, `not_cleared[]`, `quiet`, `placed`, `hires`, `summoned[]`); `until_effective` (a `--place` walk whose route guard shortened the `until`: the clause the run actually walked, `until` staying the one asked for); `revive_refusal` (a revive the walk refused: `wipe_step`, `start_step` (the step of the revive point the walk used), `tried_steps`, `entrance_tried` (the entrance fallback's go went out), `waited_s`, `blockers[]` with `entry`, `name`, `dist`, `idle`, `in_combat` and `all_idle`; `summary.txt` carries one `revive refusal: ...` line for it) |
+| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, `wipe_resumes`, boss, `boss_kill` (the last boss the walk engaged: `entry`, `step` (the boss's own row), `engaged`, `killed`, `skipped` (the walk's own `.bot run skip`, also kill evidence), `phase` (1 + the entry changes the frames saw on the boss's guid), `phase_entry` (the entry that guid read last) and `evidence` (the run leader's `boss down` note, the run's end right after the boss step when TB overwrites that note — `run ended right after the boss step; engaged` or `; frames`, the walk's own skip evidence, or the reason the kill does not hold); `boss_kills` lists one such record per boss step the run's statuses showed (`summary.txt` carries one `boss kill: ...` line for the single field, plus a `boss steps:` list when more than one boss step was seen), pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`), `roster.tier_comparison`, `roster.hire_settle_s` and `roster.settle_short` (`hire_settle_s` is absent, not 0, in a summary written before the field existed); `place` (a `--place` walk only: `start_step`, `leg`, `point`, `until_step`, `instance`, `circles[]` with their removed counts, `not_cleared[]`, `quiet`, `placed`, `hires`, `summoned[]`); `until_effective` (a `--place` walk whose route guard shortened the `until`: the clause the run actually walked, `until` staying the one asked for); `revive_refusal` (a revive the walk refused: `wipe_step`, `start_step` (the step of the revive point the walk used), `tried_steps`, `entrance_tried` (the entrance fallback's go went out), `waited_s`, `blockers[]` with `entry`, `name`, `dist`, `idle`, `in_combat` and `all_idle`; `summary.txt` carries one `revive refusal: ...` line for it) |
 
 The summary's `teardown` field carries `failed`, `hires_left` and `reason` (the first failing teardown step with its
 detail, e.g. `gone: still in view after 10 s: ...`; a `Character '<name>' not found` remove counts as already gone,
@@ -4176,9 +4181,11 @@ except through the movement packets it sent; and there are no textures or models
 ## Live dashboard
 
 `turtle-agent dashboard` serves one web page on the laptop that shows every running commander live: where its party is on
-the dungeon map, what the run is doing, and the numbers and orders behind it. It is for watching runs, so it is
+the dungeon map, what the run is doing, and the numbers and orders behind it. It is for watching runs, so by default it is
 **read-only**: it calls four RPC methods (`status`, `dungeon_status`, `tune_list`, `bot_view`, the last one without its
-`log_every` switch) and nothing else, and the client refuses every other method name. Plain Go standard library, the page
+`log_every` switch) and nothing else, and the read client refuses every other method name. Started with `--edit` or
+`--control` the page can write too — a checked version of a plan's route, or a run control — each an opt-in of its own with
+its own token file (below). Plain Go standard library, the page
 is embedded in the binary (no CDN, no build step). The header's "Refresh every" picker (1 / 2 / 5 / 10 / 30 s / paused, default 2 s —
 saved per browser) sets how often the page polls; "paused" freezes the map for a close look.
 
@@ -4338,10 +4345,56 @@ worktree for a PR and prints the commit message (who, when, what moved, what it 
 longer the one the edit started from. The brief rule for the lead: before copying plans for a run, `route-edits list <plan>`; when a checked
 version is newer than the golden or worktree copy, export it into the slot's fresh `dungeons_dir` instead.
 
+**Controls (`--control`).** Off by default: without `--control` the page is GET/HEAD only, exactly as above. With it every agent
+card gets a "Controls" box whose buttons pause, resume, skip a step or stop that agent's run through `POST
+/api/control/<agent id>/run`, with a control token of its own:
+
+```
+turtle-agent dashboard --listen 127.0.0.1:8790 --control --control-tokens ~/.config/turtle-agent/dashboard-control-tokens
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--control` | off | turns the run controls on. `--listen` must then be loopback or a literal Tailscale address: `0.0.0.0`, `::` and LAN addresses are refused at start-up, since a control token must not cross a LAN in plain HTTP |
+| `--control-tokens` | `~/.config/turtle-agent/dashboard-control-tokens` | lines of `label token`, mode 0600, owned by you: its own file, **never** `--edit-tokens` (an editing token must not press run buttons); the label is the `who` in the control log |
+| `--control-trust-local` | off | a control from this machine, or from a Tailscale address you named, needs no token typed (the rules are the route editor's, above; its own nonce, sent in `X-Control-Nonce`). Needs `--control` |
+| `--control-trust-label` | `owner` | with `--control-trust-local`: the label in the `--control-tokens` file the trusted controls are made as |
+| `--control-log` | `~/.local/state/turtle-agent/dashboard-control.jsonl` | every control appends two JSON lines (the request before the RPC, the result after); the folder is made 0700 (an existing folder must be yours and not writable by others, or `--control` refuses to start), the file 0600 (a link at the path is refused), and a log that cannot be opened stops `--control` |
+
+The contract: `GET /api/control/status` -> `200 {"enabled":true,"local_trusted":bool,"trust_nonce"?:string,"actions":["run"]}`
+(404 without `--control`); `POST /api/control/<id>/run` `{"verb":"pause"|"resume"|"skip"|"stop","confirm":bool}`; `GET
+/api/control/<id>/log?n=20` -> `{"lines":[...]}`, the last 1..50 result lines of that agent, newest last. `<id>` is an agent's
+normalized RPC address (`host:port`, an IPv6 host in brackets), the card's `id`: two agents on different loopback hosts that share a
+port have different ids. It must be an agent the dashboard itself discovered (`auto`): an id it does not watch is 404. A success answers `200
+{"status":"ok","action","verb","rpc","result":<the agent's answer, scrubbed>}`; an error is `{"status":"error","message"}` with
+400 bad request (unknown verb, unknown field, trailing data), 401 auth, 403 Host / Origin / Sec-Fetch-Site, 404 agent or path,
+409 state, a missing confirm or another control for that agent still running, 413 body, 415 type, 429 more than 30 controls a
+minute per label, 500 the log could not be written, or 502 the agent's RPC failed (its message passed back).
+
+Every control first asks that agent a **fresh** `dungeon_status` (never the poller's cache), a live check: the page greys
+buttons, the server is the gate. `pause` and `stop` always need `"confirm": true`. The page asks first with the browser's own
+confirm dialog; inside a cross-origin embed (a page framed through `--embed-from`) browsers silence that dialog and treat it as
+"no", so the pause and stop buttons are inert there — `resume` and `skip`, which need no confirm, still work. A pause can
+**end** a run (any mode but `observe`; the party and the instance are kept) or stop the leader in `observe` mode, and the
+status read can go stale before the RPC lands, which carries no expected state to guard with; `stop` unbinds (the hires go
+back and the instance is lost).
+`resume` and `skip` are for observe runs; the agent refuses them on others and its message is passed back. What is **not**
+there: no way to start or resume a run (`dungeon_run` is never called), no live tuning and no party orders (later slices), and
+no GM verb of any kind.
+
+Safety: every control — token or trusted — must be `application/json`, at most 4 KiB, with an `Origin` (if present) equal to
+its Host and a `Sec-Fetch-Site` of `same-origin` or `none`; the token is in the `Authorization` header only (never a cookie or
+the URL), OPTIONS stays 405, and the Host check is the unchanged one. One control runs at a time per agent (a second is 409).
+The log holds who sent it, how (`token` or `trusted`), the peer, the agent, the verb and what the agent answered — never a
+token: the agent's token is blanked in a message and any JSON answer is scrubbed before it is logged or returned. A log read
+shows the `peer` only to a caller who could send a control itself (a valid control token, or the trusted nonce); the page
+reads the log with no token, so it never sees one.
+
 **Over Tailscale.** Listen on the machine's tailnet address (`tailscale ip -4`) and open the page from another tailnet device at
 `http://100.101.102.103:8790/`: that IP is accepted as `Host` by itself. A name the page is opened by (the MagicDNS name,
-`<machine>.<tailnet>.ts.net`) is refused with 403 until it is listed in `--allow-host`. The page stays read-only, and the scrub
-and the file limits are unchanged. A wildcard `--listen` (`0.0.0.0`) takes no address by itself: name the hosts you open it by.
+`<machine>.<tailnet>.ts.net`) is refused with 403 until it is listed in `--allow-host`. The page stays as it was opted in
+(`--edit`, `--control` or neither), and the scrub and the file limits are unchanged. A wildcard `--listen` (`0.0.0.0`) takes
+no address by itself: name the hosts you open it by.
 
 **What it reads.** From a settings file only the `rpc` and `dungeons_dir` fields (accounts, passwords and every other field are skipped by the
 decoder). Each agent's bearer token comes from its `rpc-<port>.token` file and is used for the calls only. Every 1.5 s each
@@ -4389,7 +4442,7 @@ served (the state, the raw panel) is scrubbed: any JSON member whose name matche
 is dropped at any depth, and a string that contains the agent's token is replaced. A test walks the card model for such
 names and another runs a full poll against a fake agent whose replies are full of them. Files are served only from
 `--tests-dir`: dot-dot segments, absolute paths, backslashes, NUL bytes, symlinks that leave the folder and directories are
-refused (a 404 that does not say why). Only GET and HEAD are answered, a request whose `Host` is neither a loopback name nor one named with
+refused (a 404 that does not say why). Only GET and HEAD are answered (plus `POST /api/edit/*` and `POST /api/control/*` when those are on), a request whose `Host` is neither a loopback name nor one named with
 `--allow-host` (or the `--listen` IP) is refused (DNS rebinding), and the page may be framed only by a loopback page or an origin named with `--embed-from` (the TortoiseBots observability
 dashboard's Commanders tab embeds it that way when `TBDASH_COMMANDER_URL` points here; a dashboard on another machine, for
 example `--embed-from http://m910q:8095`, must be named).
@@ -4401,8 +4454,8 @@ to the middle of the party at every update and keeps the zoom (first the party p
 (a yellow "Following paused, click to resume" chip) and the toggle resumes it. A click on a bot's name in the party table centres the map
 on it. **Dim map** darkens the game picture under the drawing (0-80 %). The drawing's colours are fixed and bright with dark outlines
 (route cyan, current leg thicker, tank blue, healer green, damage orange, commander purple, hostile red, neutral grey, packs dashed yellow,
-bosses magenta, doors and objects white), and its labels keep one size at every zoom. The page is read-only and loads no outside script or
-font. The wording is plain: the state line reads "Sentinel · pack 4 of 5 · fighting Stone Steward", counters have a short name and a hover
+bosses magenta, doors and objects white), and its labels keep one size at every zoom. The page sends nothing unless it was started with
+`--edit` or `--control`, and it loads no outside script or font. The wording is plain: the state line reads "Sentinel · pack 4 of 5 · fighting Stone Steward", counters have a short name and a hover
 explanation, orders read "Attack Stone Steward -> OK" with the raw line on hover. The dashboard has no creature names of its own: it takes
 them from the "Name (entry)" mentions in the plan's notes and says "creature <id>" otherwise.
 
