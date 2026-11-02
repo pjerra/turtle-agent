@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"math"
 	"os"
@@ -691,6 +693,35 @@ const arlokkTerraceRowYd = 20
 // under a walk is 9.4 yd (19.8 yd 3D) on the ramp, so the band sits between them at 9 yd.
 const arlokkTerraceStoreyYd = 9
 
+// arlokkRoutesFixture is the committed navmesh polyline of every Arlokk terrace walk (map 309): the test always checks
+// the clearance rule against it, so the rule holds where the server's mmaps are absent. Regenerate it with -update-routes.
+const arlokkRoutesFixture = "testdata/zg_arlokk_terrace_routes.json"
+
+// updateRoutes rewrites arlokkRoutesFixture from the map-309 navmesh: `go test -run
+// TestZulGurubArlokkTerraceRouteClearOfLaterPacks -update-routes ./tools/dungeongen/`. It needs the mmaps.
+var updateRoutes = flag.Bool("update-routes", false, "rewrite "+arlokkRoutesFixture+" from the map-309 navmesh")
+
+// arlokkVec is a fixture point: the bare [x, y, z] triple, so the routes read as plain number lists.
+type arlokkVec [3]float32
+
+// arlokkRoute is one committed terrace walk: the two exported move rows it joins and the navmesh polyline between them,
+// sampled every yard as arlokkTerracePolyline does.
+type arlokkRoute struct {
+	FromSeq   int         `json:"from_seq"`
+	From      string      `json:"from"`
+	ToSeq     int         `json:"to_seq"`
+	To        string      `json:"to"`
+	FromPoint arlokkVec   `json:"from_point"` // [x, y, z]
+	ToPoint   arlokkVec   `json:"to_point"`   // [x, y, z]
+	Points    []arlokkVec `json:"points"`
+}
+
+// arlokkRoutes is the shape of arlokkRoutesFixture.
+type arlokkRoutes struct {
+	Note   string        `json:"note"`
+	Routes []arlokkRoute `json:"routes"`
+}
+
 // TestZulGurubArlokkTerraceRouteClearOfLaterPacks: walk 25's Arlokk leg walked the raid onto the three-level terrace in the
 // plan's group order 11, 12, 13, ... and the move from group 11's approach to group 12's crossed the spawn ring of group 15's
 // four Shadow Hunters 11339 at z 71.4 (13.3 yd from 51354), which woke groups 12, 14, 15 and 16 at once: 3 of 4 attempts
@@ -706,11 +737,26 @@ const arlokkTerraceStoreyYd = 9
 // "Later" leaves out the pack the walk is approaching: its own pull row comes after the move, and its firing stand is
 // 12-25 yd from it by design (group 12's stand is 21.9 yd from 51354). Group 15's row must own its linked Blood Drinkers
 // 51594/51595 (leader 49343) as well: walk 25's radius 12 stopped 14.4-15.3 yd short of them, so the pack's four Panthers
-// came alone and the two Drinkers joined group 14's fight. The walk is checked twice: on the navmesh POLYLINES between
-// consecutive move rows (the planner plan-check uses, over ~/turtle-agent-mmaps), sampled every yard, and on the straight
-// segments every 2 yd as a fallback that always runs. The polyline check skips with a clear message when the mmaps are
-// absent (as the Mar'li test does); the straight check never skips. Both report the measured minimum distance for every
-// segment (t.Logf, so -v lists them; the failure lines carry the worst sample).
+// came alone and the two Drinkers joined group 14's fight.
+//
+// Each walk is checked three ways. The committed navmesh polylines in arlokkRoutesFixture
+// (testdata/zg_arlokk_terrace_routes.json), sampled every yard, are checked ALWAYS, mmaps or not: they are what caught the
+// bridge the straight segments cannot see. When the server's mmaps are present the test recomputes every polyline and
+// fails when it differs from the fixture by more than 1 yd at any point (the fixture is then stale: regenerate it with
+// `go test -run TestZulGurubArlokkTerraceRouteClearOfLaterPacks -update-routes`, which also needs the mmaps). The fixture
+// names the two rows each route joins (seq, comment, point), so a plan that moves or reorders the terrace rows fails
+// until it is regenerated. Finally the straight segments between the rows every 2 yd are checked as an extra assertion
+// that never skips. All checks report the measured minimum distance for every segment (t.Logf, so -v lists them; the
+// failure lines carry the worst sample).
+//
+// The storey band (arlokkTerraceStoreyYd, 9 yd): a spawn more than 9 yd above or below a walk does not count, because the
+// terrace storeys have solid floors and the core's aggro needs line of sight. The floors are 10.8-10.9 yd apart and the
+// upper level is a ring over the middle-level packs, so the upper walks pass one storey above a middle pack without
+// waking it (10.9 yd above 49339 on the west ring, 11.5 yd above 49345 in the east corridor). The crossings that must
+// keep counting are the bridge over the lower pit, 8.2-8.4 yd above the lower pack (dz -8.4, 8.5 yd 3D from 51383), and
+// the ramp's nearest pass at dz 8.8, 20.2 yd from 49341 of group 17. Nine yd sits between them: the bridge regression
+// stays red and the mandated order's ring crossings pass. It is a geometric proxy; the navmesh cannot say whether a floor
+// is a solid terrace or an open bridge.
 func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 	p, err := dungeon.Load(filepath.Join(plansDirT, "zul_gurub.json"))
 	if err != nil {
@@ -838,13 +884,13 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 		}
 	}
 	// Every pair of consecutive move rows: the packs a later pull row owns stay arlokkTerraceRowYd out of the walk, on the
-	// navmesh polyline (with mmaps) and on the straight segment (always); each pair logs its measured minimum.
-	planner := arlokkTerracePlanner()
-	if planner != nil {
-		defer planner.Close()
-	} else {
-		t.Log("no map 309 navmesh files: polyline check skipped (set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its tiles); the straight-line fallback below still runs")
+	// committed navmesh polyline (always), on the navmesh's own polyline (when the mmaps are present, which must match the
+	// committed one) and on the straight segment (always); each pair logs its measured minimum.
+	type terraceWalk struct {
+		a, b      planexport.StepRow
+		laterFams [][]creature
 	}
+	var walks []terraceWalk
 	for i := 0; i+1 < len(moves); i++ {
 		a, b := moves[i], moves[i+1]
 		next := -1 // the pull row the pair walks to: the first one after the second move row
@@ -867,8 +913,63 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 				laterFams = append(laterFams, fam)
 			}
 		}
+		walks = append(walks, terraceWalk{a: a, b: b, laterFams: laterFams})
+	}
+	planner := arlokkTerracePlanner()
+	if planner != nil {
+		defer planner.Close()
+	} else {
+		t.Logf("no map 309 navmesh files: the committed polylines in %s are checked and the recomputation is skipped (set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its tiles); the straight-line check below still runs", arlokkRoutesFixture)
+	}
+	if *updateRoutes {
+		if planner == nil {
+			t.Fatalf("cannot rewrite %s without the map 309 navmesh (set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its .mmtile files)", arlokkRoutesFixture)
+		}
+		var fixed arlokkRoutes
+		fixed.Note = arlokkRoutesNote
+		for _, w := range walks {
+			poly, ok := arlokkTerracePolyline(planner, p.Map, rowPoint(w.a), rowPoint(w.b))
+			if !ok {
+				t.Fatalf("leg 4 rows %d (%s) -> %d (%s): no complete navmesh path, cannot write %s", w.a.Seq, w.a.Comment, w.b.Seq, w.b.Comment, arlokkRoutesFixture)
+			}
+			fixed.Routes = append(fixed.Routes, arlokkRoute{
+				FromSeq: w.a.Seq, From: w.a.Comment, FromPoint: roundVec(rowPoint(w.a)),
+				ToSeq: w.b.Seq, To: w.b.Comment, ToPoint: roundVec(rowPoint(w.b)),
+				Points: roundVecs(poly),
+			})
+		}
+		if err := writeArlokkRoutes(arlokkRoutesFixture, fixed); err != nil {
+			t.Fatalf("%s: %v", arlokkRoutesFixture, err)
+		}
+		t.Logf("wrote %d routes to %s", len(fixed.Routes), arlokkRoutesFixture)
+	}
+	routes, err := readArlokkRoutes(arlokkRoutesFixture)
+	if err != nil {
+		t.Fatalf("%s: %v", arlokkRoutesFixture, err)
+	}
+	byKey := make(map[[2]int]arlokkRoute, len(routes))
+	for _, r := range routes {
+		byKey[[2]int{r.FromSeq, r.ToSeq}] = r
+	}
+	seen := make(map[[2]int]bool, len(walks))
+	for _, w := range walks {
+		a, b := w.a, w.b
 		straight := samplesAlong(rowPoint(a), rowPoint(b), 2)
-		checkArlokkTerraceWalk(t, "straight", a, b, straight, laterFams)
+		checkArlokkTerraceWalk(t, "straight", a, b, straight, w.laterFams)
+		key := [2]int{a.Seq, b.Seq}
+		seen[key] = true
+		r, ok := byKey[key]
+		if !ok {
+			t.Errorf("leg 4 rows %d (%s) -> %d (%s): no committed polyline in %s: regenerate with `go test -run TestZulGurubArlokkTerraceRouteClearOfLaterPacks -update-routes ./tools/dungeongen/`", a.Seq, a.Comment, b.Seq, b.Comment, arlokkRoutesFixture)
+			continue
+		}
+		if r.From != a.Comment || r.To != b.Comment || dist(pointOfVec(r.FromPoint), rowPoint(a)) > arlokkRouteMatchYd || dist(pointOfVec(r.ToPoint), rowPoint(b)) > arlokkRouteMatchYd {
+			t.Errorf("leg 4 rows %d (%s %.1f %.1f) -> %d (%s %.1f %.1f): the committed polyline in %s joins %q %.1f %.1f -> %q %.1f %.1f, so it is for different rows: the plan moved, regenerate the fixture",
+				a.Seq, a.Comment, a.X, a.Y, b.Seq, b.Comment, b.X, b.Y, arlokkRoutesFixture,
+				r.From, r.FromPoint[0], r.FromPoint[1], r.To, r.ToPoint[0], r.ToPoint[1])
+			continue
+		}
+		checkArlokkTerraceWalk(t, "polyline", a, b, pointsOfVecs(r.Points), w.laterFams)
 		if planner == nil {
 			continue
 		}
@@ -877,7 +978,16 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 			t.Errorf("leg 4 rows %d (%s) -> %d (%s): no complete navmesh path", a.Seq, a.Comment, b.Seq, b.Comment)
 			continue
 		}
-		checkArlokkTerraceWalk(t, "polyline", a, b, poly, laterFams)
+		if diff := arlokkRouteDiff(r.Points, poly); diff != "" {
+			t.Errorf("leg 4 rows %d (%s) -> %d (%s): the committed polyline in %s %s; regenerate with `go test -run TestZulGurubArlokkTerraceRouteClearOfLaterPacks -update-routes ./tools/dungeongen/`",
+				a.Seq, a.Comment, b.Seq, b.Comment, arlokkRoutesFixture, diff)
+		}
+	}
+	for _, r := range routes {
+		if !seen[[2]int{r.FromSeq, r.ToSeq}] {
+			t.Errorf("%s holds a polyline for rows %d (%q) -> %d (%q) that the plan no longer walks: regenerate with `go test -run TestZulGurubArlokkTerraceRouteClearOfLaterPacks -update-routes ./tools/dungeongen/`",
+				arlokkRoutesFixture, r.FromSeq, r.From, r.ToSeq, r.To)
+		}
 	}
 }
 
@@ -943,6 +1053,83 @@ func arlokkTerracePolyline(pl *navmesh.Planner, mapID uint32, a, b dungeon.Point
 		out = []dungeon.Point{{X: p[0], Y: p[1], Z: p[2]}}
 	}
 	return out, true
+}
+
+// arlokkRoutesNote is the fixture's header: what it holds and how to rewrite it.
+const arlokkRoutesNote = "The navmesh polylines of the Arlokk terrace walks in Zul'Gurub leg 4 (map 309): one route per pair of consecutive move rows, sampled every yard between the rows' points. TestZulGurubArlokkTerraceRouteClearOfLaterPacks always checks its clearance rule against these and fails when a recomputation differs by more than 1 yd at a point. Rewrite with: go test -run TestZulGurubArlokkTerraceRouteClearOfLaterPacks -update-routes ./tools/dungeongen/"
+
+// arlokkRouteMatchYd is how far a committed route's ends may stand from the rows it names and still be the same walk.
+const arlokkRouteMatchYd = 1
+
+// readArlokkRoutes reads the committed terrace polylines.
+func readArlokkRoutes(path string) ([]arlokkRoute, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var f arlokkRoutes
+	if err := json.Unmarshal(b, &f); err != nil {
+		return nil, err
+	}
+	if len(f.Routes) == 0 {
+		return nil, fmt.Errorf("no routes")
+	}
+	return f.Routes, nil
+}
+
+// writeArlokkRoutes writes the terrace polylines as the fixture.
+func writeArlokkRoutes(path string, f arlokkRoutes) error {
+	b, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o644)
+}
+
+// roundVec rounds a point to the fixture's hundredths (well inside the 1 yd comparison tolerance), so the committed
+// numbers stay readable.
+func roundVec(p dungeon.Point) arlokkVec {
+	r := func(v float32) float32 { return float32(math.Round(float64(v)*100) / 100) }
+	return arlokkVec{r(p.X), r(p.Y), r(p.Z)}
+}
+
+// roundVecs rounds every point (see roundVec).
+func roundVecs(ps []dungeon.Point) []arlokkVec {
+	out := make([]arlokkVec, len(ps))
+	for i, p := range ps {
+		out[i] = roundVec(p)
+	}
+	return out
+}
+
+// pointOfVec is the dungeon point of a fixture point.
+func pointOfVec(v arlokkVec) dungeon.Point {
+	return dungeon.Point{X: v[0], Y: v[1], Z: v[2]}
+}
+
+// pointsOfVecs is the dungeon points of a fixture polyline.
+func pointsOfVecs(vs []arlokkVec) []dungeon.Point {
+	out := make([]dungeon.Point, len(vs))
+	for i, v := range vs {
+		out[i] = pointOfVec(v)
+	}
+	return out
+}
+
+// arlokkRouteDiff compares a committed polyline with a fresh one: a message naming the first difference, or "" when they
+// have the same points within 1 yd each.
+func arlokkRouteDiff(committed []arlokkVec, fresh []dungeon.Point) string {
+	if len(committed) != len(fresh) {
+		return fmt.Sprintf("has %d points where the navmesh now plans %d", len(committed), len(fresh))
+	}
+	for i := range committed {
+		c := pointOfVec(committed[i])
+		if d := dist(c, fresh[i]); d > arlokkRouteMatchYd {
+			return fmt.Sprintf("point %d %.2f %.2f %.2f is %.2f yd from the navmesh's %.2f %.2f %.2f",
+				i, c.X, c.Y, c.Z, d, fresh[i].X, fresh[i].Y, fresh[i].Z)
+		}
+	}
+	return ""
 }
 
 // worstSample is the closest any sample stands to any spawn of the later-owned formations within the storey band: the
