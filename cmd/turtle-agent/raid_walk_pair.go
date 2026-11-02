@@ -45,8 +45,9 @@ const pairMaxSlots = 8
 const pairUsage = `usage: turtle-agent raid-walk <plan> [<plan2> ...] --slot A,B[,C...] [--stagger 30s] [--out DIR] [walk flags]
     two to 8 slots, never slot 3; one plan for every slot, or one plan per slot, in the slots' order. Each slot is its
     own commander, group and instance. Per-walk flags take a slot prefix: --sql A=a.sql --sql B=b.sql (--sql --hires
-    --dir --patrols --until --from --place --tier --tier-override --holder --inject); every other raid-walk flag is
-    global. --place is a switch: --place turns it on for every walk, --place A=on / --place B=off for one of them`
+    --dir --patrols --until --from --place --tier --tier-override --holder --inject --decisions --decisions-max-mib);
+    every other raid-walk flag is global. --place and --decisions are switches: --place turns it on for every walk,
+    --place A=on / --place B=off for one of them`
 
 // pairSlotRe is a slot id: the slots config's own shape.
 var pairSlotRe = regexp.MustCompile(`^[A-Za-z0-9]{1,8}$`)
@@ -59,11 +60,12 @@ var pairDigitsRe = regexp.MustCompile(`^[0-9]+$`)
 var pairPerWalkFlags = map[string]bool{
 	"sql": true, "hires": true, "dir": true, "patrols": true, "until": true, "from": true,
 	"place": true, "tier": true, "tier-override": true, "holder": true, "inject": true,
+	"decisions": true, "decisions-max-mib": true,
 }
 
 // pairSwitchFlags are the per-walk flags that are switches: a bare flag means on for every walk, and the word after a
 // slot prefix is on or off.
-var pairSwitchFlags = map[string]bool{"place": true}
+var pairSwitchFlags = map[string]bool{"place": true, "decisions": true}
 
 // pairFlag is one flag of the pair command line, before distribution to the walks.
 type pairFlag struct {
