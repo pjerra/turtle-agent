@@ -1646,7 +1646,8 @@ func packRowFor(rows planexport.Rows, entry uint32, seed [3]float32) raidwalk.Pa
 		if !rowHasEntry(s, entry) {
 			continue
 		}
-		d := math.Hypot(float64(s.X)-float64(seed[0]), float64(s.Y)-float64(seed[1]))
+		dx, dy, dz := float64(s.X)-float64(seed[0]), float64(s.Y)-float64(seed[1]), float64(s.Z)-float64(seed[2])
+		d := math.Sqrt(dx*dx + dy*dy + dz*dz)
 		if d > float64(raidwalk.RowRadius(s.Kind, s.Radius)+raidwalk.PackRowSlackYd) {
 			continue
 		}
