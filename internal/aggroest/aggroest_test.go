@@ -17,13 +17,14 @@ func alwaysSees(a, b dungeon.Point) bool { return true }
 
 // The TB constants this package mirrors (PullAggroEstimatePolicy.h):
 // kAggroRingYd = 20, kAggroRingHops = 2, kAggroFloorDz = 12, walk 3,
-// stand/fight 3 party / 10 raid (ai::kSpreadSettledDistance), tank walk 1.5.
+// stand/fight 3 party / 10 raid (ai::kSpreadSettledDistance), tank walk 1.5,
+// kAggroWalkSamples = 64 (the most samples of a party walk an estimate reads).
 func TestConstantsMirrorTheRunLeader(t *testing.T) {
 	if RingYd != 20 || RingHops != 2 || FloorDz != 12 || WalkSpreadYd != 3 ||
 		StandSpreadPartyYd != 3 || StandSpreadRaidYd != 10 || TankSpreadYd != 1.5 ||
-		MaxPullBodies != 80 {
-		t.Fatalf("constants %v %v %v %v %v %v %v %v: want 20 2 12 3 3 10 1.5 80",
-			RingYd, RingHops, FloorDz, WalkSpreadYd, StandSpreadPartyYd, StandSpreadRaidYd, TankSpreadYd, MaxPullBodies)
+		MaxPullBodies != 80 || WalkSamples != 64 {
+		t.Fatalf("constants %v %v %v %v %v %v %v %v %v: want 20 2 12 3 3 10 1.5 80 64",
+			RingYd, RingHops, FloorDz, WalkSpreadYd, StandSpreadPartyYd, StandSpreadRaidYd, TankSpreadYd, MaxPullBodies, WalkSamples)
 	}
 }
 
@@ -111,6 +112,60 @@ func TestRingTwoHopsThenStops(t *testing.T) {
 	}
 	if got := Estimate(mobs10, 0, Geometry{Stand: pt(200, 0, 0)}, Params{PartyLevel: 60, Rate: 1, RingYd: 10, RingHops: 2, FloorDz: 12, Sees: alwaysSees}); got.Bodies != 1 {
 		t.Fatalf("ring 10: bodies %d, want 1", got.Bodies)
+	}
+}
+
+// Hop 2's callers are what hop 1 added, pack members included: B1 is called
+// directly (15 yd), its pack mate B2 is dragged in by the closure, and only
+// B2 reaches G15 (20 yd). The Arlokk shape: G12 calls G15, and G15's pack
+// mate is the only bridge on.
+func TestRingHopTwoCallsFromPackMates(t *testing.T) {
+	mobs := []Mob{
+		{Guid: 1, Pos: pt(0, 0, 0), Level: 60, DetectionYd: 20, Faction: 14},
+		{Guid: 2, Pos: pt(15, 0, 0), Level: 60, DetectionYd: 20, Faction: 14, GroupID: 5},
+		{Guid: 3, Pos: pt(15, 30, 0), Level: 60, DetectionYd: 20, Faction: 14, GroupID: 5},
+		{Guid: 4, Pos: pt(15, 50, 0), Level: 60, DetectionYd: 20, Faction: 14},
+	}
+	p := Params{PartyLevel: 60, Rate: 1, RingYd: 20, RingHops: 2, FloorDz: 12, Sees: alwaysSees}
+	res := Estimate(mobs, 0, Geometry{Stand: pt(200, 0, 0)}, p)
+	if res.Bodies != 4 {
+		t.Fatalf("bodies %d, want 4", res.Bodies)
+	}
+	if got := whyOf(res, 1); got != WhyRing1 {
+		t.Fatalf("B1 reason %v, want Ring1", got)
+	}
+	if got := whyOf(res, 2); got != WhyPack {
+		t.Fatalf("B2 reason %v, want Pack", got)
+	}
+	if got := whyOf(res, 3); got != WhyRing2 {
+		t.Fatalf("G15 reason %v, want Ring2", got)
+	}
+}
+
+// A long walk keeps its end: 150 yd at 2 yd would need 76 samples, over the
+// 64 budget, so the spacing grows and the pack at the far end still wakes.
+func TestLongWalkKeepsItsEnd(t *testing.T) {
+	walk := []MobPoint{pt(0, 0, 0), pt(150, 0, 0)}
+	if got := len(samplePolyline(walk, walkSampleYd)); got != WalkSamples {
+		t.Fatalf("samples %d, want %d", got, WalkSamples)
+	}
+	got := samplePolyline(walk, walkSampleYd)
+	if got[len(got)-1] != walk[1] {
+		t.Fatalf("last sample %+v, want the walk end %+v", got[len(got)-1], walk[1])
+	}
+	mk := func(w []MobPoint) Result {
+		mobs := []Mob{
+			{Guid: 1, Pos: pt(300, 0, 0), Level: 60, DetectionYd: 20, Faction: 14},
+			{Guid: 2, Pos: pt(150, 0, 0), Level: 60, DetectionYd: 20, Faction: 15},
+		}
+		g := Geometry{Walk: w, WalkSpreadYd: 3, Stand: pt(340, 0, 0), StandSpreadYd: 3}
+		return Estimate(mobs, 0, g, Params{PartyLevel: 60, Rate: 1, RingYd: 20, RingHops: 2, FloorDz: 12, Sees: alwaysSees})
+	}
+	if got := mk(walk); got.Bodies != 2 {
+		t.Fatalf("whole path: bodies %d, want 2 (the far pack woke)", got.Bodies)
+	}
+	if got := mk([]MobPoint{pt(126, 0, 0)}); got.Bodies != 1 {
+		t.Fatalf("old end at 126 yd: bodies %d, want 1", got.Bodies)
 	}
 }
 

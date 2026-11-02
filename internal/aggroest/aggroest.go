@@ -58,6 +58,10 @@ const (
 	// walkSampleYd samples the walk polylines; dragSampleYd the drag polyline.
 	walkSampleYd = 2.0
 	dragSampleYd = 4.0
+	// WalkSamples is the most samples of a party walk an estimate reads
+	// (kAggroWalkSamples): the spacing grows with the path so a long walk
+	// still fits, and the walk's end is always kept.
+	WalkSamples = 64
 )
 
 // MobPoint is a position on the map.
@@ -241,7 +245,9 @@ func Estimate(mobs []Mob, target int, g Geometry, p Params) Result {
 	}
 
 	// Ring hops from every member: hop 1 callers are the whole set so far,
-	// later hops only the ones the previous hop added.
+	// later hops the ones the previous hop added, the pack members its
+	// closure dragged in included (Arlokk: G12 calls G15, and G15's pack
+	// mate is the only bridge on).
 	callers := append([]int(nil), memberIndexes(members)...)
 	for h := 1; h <= p.RingHops && len(callers) > 0; h++ {
 		why := WhyRing1
@@ -344,32 +350,55 @@ func nearAny(pos MobPoint, samples []MobPoint, reach float32, sees func(a, b Mob
 	return false
 }
 
-// samplePolyline resamples a polyline about every step yards (endpoints kept;
-// a single point stays one sample).
-func samplePolyline(pts []MobPoint, step float32) []MobPoint {
-	if len(pts) == 0 {
+// sampleWalk resamples a polyline about every step yards: the spacing grows
+// with the path so the whole walk fits maxSamples, and the path's end is
+// always kept (a 150 yd walk at 2 yd would otherwise stop at 126 yd and read
+// past its end). A single point stays one sample. Mirrors the run leader's
+// SampleAggroWalk (kAggroWalkSamples).
+func sampleWalk(path []MobPoint, step float32, maxSamples int) []MobPoint {
+	if len(path) == 0 || maxSamples == 0 {
 		return nil
 	}
-	if len(pts) == 1 {
-		return []MobPoint{pts[0]}
+	out := []MobPoint{path[0]}
+	var total float32
+	for i := 1; i < len(path); i++ {
+		total += dist3(path[i-1], path[i])
 	}
-	out := []MobPoint{pts[0]}
-	for i := 0; i+1 < len(pts); i++ {
-		d := dist3(pts[i], pts[i+1])
-		n := int(d / step)
-		for k := 1; k <= n; k++ {
-			t := float32(k) / float32(n+1)
-			out = append(out, MobPoint{
-				X: pts[i].X + t*(pts[i+1].X-pts[i].X),
-				Y: pts[i].Y + t*(pts[i+1].Y-pts[i].Y),
-				Z: pts[i].Z + t*(pts[i+1].Z-pts[i].Z),
-			})
+	if total < 0.0001 || maxSamples < 2 {
+		return out
+	}
+	spacing := step
+	if grow := total / float32(maxSamples-1); grow > spacing {
+		spacing = grow
+	}
+	var travelled float32
+	next := spacing
+	for i := 1; i < len(path); i++ {
+		from, to := path[i-1], path[i]
+		seg := dist3(from, to)
+		if seg < 0.0001 {
+			continue
 		}
-		out = append(out, pts[i+1])
+		end := travelled + seg
+		for next < end-0.0001 && len(out)+1 < maxSamples {
+			t := (next - travelled) / seg
+			out = append(out, MobPoint{
+				X: from.X + t*(to.X-from.X),
+				Y: from.Y + t*(to.Y-from.Y),
+				Z: from.Z + t*(to.Z-from.Z),
+			})
+			next += spacing
+		}
+		travelled = end
 	}
-	return out
+	return append(out, path[len(path)-1])
 }
 
+// samplePolyline resamples a polyline for one estimate: at most WalkSamples
+// points (the run leader's budget), endpoints kept.
+func samplePolyline(pts []MobPoint, step float32) []MobPoint {
+	return sampleWalk(pts, step, WalkSamples)
+}
 func dist3(a, b MobPoint) float32 {
 	dx, dy, dz := a.X-b.X, a.Y-b.Y, a.Z-b.Z
 	return float32(math.Sqrt(float64(dx*dx + dy*dy + dz*dz)))
