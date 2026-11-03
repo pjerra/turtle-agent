@@ -71,7 +71,7 @@ func gmRows() planexport.Rows {
 // A group expands to its whole pack: the linked unit 300 yd away and the unit linked to that one come with it, the same-entry unit of
 // another pack and the friendly do not.
 func TestPlanGMClearExpandsToWholeLinkedPack(t *testing.T) {
-	packs, err := PlanGMClear(gmRows(), gmWorld(), []GMClearSpec{{Leg: "Second", Groups: []int{1}}})
+	packs, _, err := PlanGMClear(gmRows(), gmWorld(), []GMClearSpec{{Leg: "Second", Groups: []int{1}}})
 	if err != nil || len(packs) != 1 {
 		t.Fatalf("%+v, %v", packs, err)
 	}
@@ -89,7 +89,7 @@ func TestPlanGMClearExpandsToWholeLinkedPack(t *testing.T) {
 		t.Error("a friendly is a member")
 	}
 	// Leg by number, group 2 is the other pack, and a second spec naming a pack again lists it once.
-	packs, err = PlanGMClear(gmRows(), gmWorld(), []GMClearSpec{{Leg: "1", Groups: []int{2, 1}}, {Leg: "second", Groups: []int{1}}})
+	packs, _, err = PlanGMClear(gmRows(), gmWorld(), []GMClearSpec{{Leg: "1", Groups: []int{2, 1}}, {Leg: "second", Groups: []int{1}}})
 	if err != nil || len(packs) != 2 || packs[0].Group != "2" || packs[0].ID != 4 || packs[1].ID != 1 {
 		t.Fatalf("%+v, %v", packs, err)
 	}
@@ -97,7 +97,7 @@ func TestPlanGMClearExpandsToWholeLinkedPack(t *testing.T) {
 
 // The boss form finds the boss row's pack: the boss (entry 300) belongs to the linked chain, so the whole chain is killed.
 func TestPlanGMClearBossTakesItsPack(t *testing.T) {
-	packs, err := PlanGMClear(gmRows(), gmWorld(), []GMClearSpec{{Leg: "Second", Boss: true}})
+	packs, _, err := PlanGMClear(gmRows(), gmWorld(), []GMClearSpec{{Leg: "Second", Boss: true}})
 	if err != nil || len(packs) != 1 || packs[0].Group != GMClearBoss || len(packs[0].Members) != 3 {
 		t.Fatalf("%+v, %v", packs, err)
 	}
@@ -113,13 +113,33 @@ func TestPlanGMClearRefusals(t *testing.T) {
 		{GMClearSpec{Leg: "first", Groups: []int{1}}, "has 0 pull groups"},
 		{GMClearSpec{Leg: "first", Boss: true}, "has no boss row"},
 	} {
-		if _, err := PlanGMClear(gmRows(), gmWorld(), []GMClearSpec{tc.spec}); err == nil || !strings.Contains(err.Error(), tc.want) {
+		if _, _, err := PlanGMClear(gmRows(), gmWorld(), []GMClearSpec{tc.spec}); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%+v: %v (want %q)", tc.spec, err, tc.want)
 		}
 	}
 	empty := &worldspawn.World{Map: 509}
-	if _, err := PlanGMClear(gmRows(), empty, []GMClearSpec{{Leg: "Second", Groups: []int{1}}}); err == nil || !strings.Contains(err.Error(), "holds no spawn") {
-		t.Errorf("empty world: %v", err)
+	packs, warns, err := PlanGMClear(gmRows(), empty, []GMClearSpec{{Leg: "Second", Groups: []int{1}}})
+	if err != nil || len(packs) != 0 || len(warns) != 1 ||
+		!strings.Contains(warns[0], "WARN: skipped") || !strings.Contains(warns[0], "group 1") {
+		t.Errorf("empty world: packs %v, warnings %v, err %v", packs, warns, err)
+	}
+}
+
+// A group with no spawn is skipped with a warning, and the groups after it are still planned: the walk never aborts
+// because one group of the leg is a boss's or an event's (walk 31: Mandokir group 18, the Vilebranch Speaker).
+func TestPlanGMClearSkipsAGroupWithNoSpawn(t *testing.T) {
+	world := gmWorld()
+	world.Spawns = world.Spawns[:3] // spawn 4, the second pack's only member, is gone
+	packs, warns, err := PlanGMClear(gmRows(), world, []GMClearSpec{{Leg: "Second", Groups: []int{2, 1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packs) != 1 || packs[0].Group != "1" || packs[0].ID != 1 {
+		t.Fatalf("packs %+v, want group 1's pack", packs)
+	}
+	if len(warns) != 1 || !strings.Contains(warns[0], "WARN: skipped") ||
+		!strings.Contains(warns[0], "group 2") || !strings.Contains(warns[0], "step 4") {
+		t.Fatalf("warnings %v", warns)
 	}
 }
 
@@ -130,7 +150,7 @@ func unitGUID(entry, spawn uint32) packet.GUID {
 // LiveMembers takes the live creatures whose spawn guid AND entry are the pack's: a corpse, a player, another spawn of the same entry and
 // a unit with a member's spawn number but another entry are left alone.
 func TestGMClearLiveMembers(t *testing.T) {
-	packs, err := PlanGMClear(gmRows(), gmWorld(), []GMClearSpec{{Leg: "Second", Groups: []int{1}}})
+	packs, _, err := PlanGMClear(gmRows(), gmWorld(), []GMClearSpec{{Leg: "Second", Groups: []int{1}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +281,7 @@ func TestGMClearStops(t *testing.T) {
 
 // SeenMembers keeps corpses (the caller decides), LiveMembers drops them.
 func TestGMClearSeenMembersKeepsCorpses(t *testing.T) {
-	packs, err := PlanGMClear(gmRows(), gmWorld(), []GMClearSpec{{Leg: "Second", Groups: []int{1}}})
+	packs, _, err := PlanGMClear(gmRows(), gmWorld(), []GMClearSpec{{Leg: "Second", Groups: []int{1}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,5 +291,33 @@ func TestGMClearSeenMembersKeepsCorpses(t *testing.T) {
 	}
 	if got := packs[0].LiveMembers(units); len(got) != 1 || got[0].GUID != unitGUID(100, 1) {
 		t.Fatalf("live %+v", got)
+	}
+}
+
+// The ASSISTED line names the groups that were not cleared, with a leg's consecutive group numbers compressed: walk
+// 32's failing groups read "high_priestess_arlokk:12-17", "hakkar_outer:6-22" and "high_priestess_marli:1-6".
+func TestGMClearUnclearedGroups(t *testing.T) {
+	var es []GMClearEntry
+	for _, g := range []string{"12", "13", "14", "15", "16", "17", "19"} {
+		es = append(es, GMClearEntry{Leg: "high_priestess_arlokk", Group: g, GUID: "spawn 1", Reason: GMClearAlive})
+	}
+	es = append(es,
+		GMClearEntry{Leg: "high_priestess_marli", Group: "1", GUID: "spawn 2", Reason: GMClearAlive},
+		GMClearEntry{Leg: "high_priestess_marli", Group: "1", GUID: "spawn 3", Reason: GMClearAlive},
+		GMClearEntry{Leg: "hakkar_outer", Group: GMClearBoss, GUID: "spawn 4", Reason: GMClearNotSeen},
+		// A killed member's group is not listed.
+		GMClearEntry{Leg: "hakkar_outer", Group: "6", Killed: true},
+	)
+	got := GMClearUncleared(es)
+	want := []string{"hakkar_outer:boss", "high_priestess_arlokk:12-17,19", "high_priestess_marli:1"}
+	if strings.Join(got, " | ") != strings.Join(want, " | ") {
+		t.Fatalf("uncleared %v, want %v", got, want)
+	}
+	line := GMClearSummaryLine(es, []string{"high_priestess_arlokk", "high_priestess_marli", "hakkar_outer"})
+	if !strings.Contains(line, "groups not cleared: hakkar_outer:boss, high_priestess_arlokk:12-17,19, high_priestess_marli:1") {
+		t.Fatalf("line %q", line)
+	}
+	if got := GMClearUncleared([]GMClearEntry{{Leg: "x", Group: "1", Killed: true}}); len(got) != 0 {
+		t.Fatalf("a fully killed clear lists %v", got)
 	}
 }

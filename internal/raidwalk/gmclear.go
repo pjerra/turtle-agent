@@ -69,7 +69,7 @@ const (
 )
 
 // GMClearEntry is one expected pack member: the summary's gm_clear list and the report's table. Killed says the unit's frames showed
-// it dead; Tries counts the kill lines sent (2 at most). A member that is not Killed has a Reason (GMClearNotSeen, GMClearAlive) and
+// it dead; Tries counts the kill lines sent (gmClearTries at most). A member that is not Killed has a Reason (GMClearNotSeen, GMClearAlive) and
 // leaves the clear PARTIAL. GUID is the unit's world guid, or "spawn <n>" (the export's spawn guid) for a member never seen.
 type GMClearEntry struct {
 	Leg    string `json:"leg"`
@@ -146,18 +146,21 @@ func (p GMClearPack) SpawnGUIDs() []uint64 {
 // PlanGMClear expands the specs into the packs to kill, in spec order. Each group is the leg's n-th pull (or hold) row; the boss is the
 // leg's boss row. The packs a row clears are trashcheck.ClearedPacks: the pack model the pull estimator and the trash check use, so a
 // pack's linked members come with it. A pack found by two rows is listed once, under the first. An error names the spec that has no
-// leg, no such group, or no spawn in the world export.
-func PlanGMClear(rows planexport.Rows, world *worldspawn.World, specs []GMClearSpec) ([]GMClearPack, error) {
+// leg or no such group. A group whose row clears no pack at all (its units are a boss's, an event's or another non-hostile NPC's, so
+// the export holds no hostile spawn of them near the row) is skipped with a warning and the other groups go on: a boss group is never
+// cleared by a trash group's spec.
+func PlanGMClear(rows planexport.Rows, world *worldspawn.World, specs []GMClearSpec) ([]GMClearPack, []string, error) {
 	var out []GMClearPack
+	var warnings []string
 	seen := map[uint64]bool{}
 	for _, sp := range specs {
 		leg, name, err := findLeg(rows, sp.Leg)
 		if err != nil {
-			return nil, fmt.Errorf("--gm-clear: %v", err)
+			return nil, nil, fmt.Errorf("--gm-clear: %v", err)
 		}
 		lo, hi := legSpan(rows, leg)
 		if lo < 0 {
-			return nil, fmt.Errorf("--gm-clear: leg %s has no step", name)
+			return nil, nil, fmt.Errorf("--gm-clear: leg %s has no step", name)
 		}
 		var pulls, bosses []int
 		for i := lo; i <= hi; i++ {
@@ -178,7 +181,7 @@ func PlanGMClear(rows planexport.Rows, world *worldspawn.World, specs []GMClearS
 		var targets []target
 		if sp.Boss {
 			if len(bosses) == 0 {
-				return nil, fmt.Errorf("--gm-clear-boss: leg %s has no boss row", name)
+				return nil, nil, fmt.Errorf("--gm-clear-boss: leg %s has no boss row", name)
 			}
 			for _, i := range bosses {
 				targets = append(targets, target{i, GMClearBoss})
@@ -186,7 +189,7 @@ func PlanGMClear(rows planexport.Rows, world *worldspawn.World, specs []GMClearS
 		}
 		for _, g := range sp.Groups {
 			if g > len(pulls) {
-				return nil, fmt.Errorf("--gm-clear: leg %s has %d pull groups, not %d", name, len(pulls), g)
+				return nil, nil, fmt.Errorf("--gm-clear: leg %s has %d pull groups, not %d", name, len(pulls), g)
 			}
 			targets = append(targets, target{pulls[g-1], strconv.Itoa(g)})
 		}
@@ -195,7 +198,8 @@ func PlanGMClear(rows planexport.Rows, world *worldspawn.World, specs []GMClearS
 			// The step number is the row's place in (leg, seq) order plus one, as the server numbers it; the rows slice is in that order.
 			packs := trashcheck.ClearedPacks(world, row)
 			if len(packs) == 0 {
-				return nil, fmt.Errorf("--gm-clear: leg %s group %s (step %d): the world export holds no spawn of its entries near the row", name, t.group, t.row+1)
+				warnings = append(warnings, fmt.Sprintf("gm-clear: WARN: skipped leg %s group %s (step %d): the world export holds no spawn of its entries near the row; the walk goes on without it", name, t.group, t.row+1))
+				continue
 			}
 			for _, p := range packs {
 				if seen[p.ID] {
@@ -218,7 +222,7 @@ func PlanGMClear(rows planexport.Rows, world *worldspawn.World, specs []GMClearS
 			}
 		}
 	}
-	return out, nil
+	return out, warnings, nil
 }
 
 // SpawnGUID is the DB spawn guid of a creature's world guid: its low 24 bits (ObjectGuid.h: high, entry, counter), the number the world
@@ -285,7 +289,59 @@ func GMClearPartial(es []GMClearEntry) bool {
 	return left > 0
 }
 
-// GMClearSummaryLine is the one ASSISTED line of summary.txt and the report; a PARTIAL clear says how many members are left and why.
+// GMClearUncleared is the "<leg>:<group>" labels of the packs with a member left (alive or not seen), sorted and with a
+// leg's consecutive numeric groups compressed into a range ("high_priestess_arlokk:12-17"). It is what the ASSISTED
+// line and the walk's WARN name: a group that is still alive after its retries never fails the placement, it is listed.
+func GMClearUncleared(es []GMClearEntry) []string {
+	byLeg := map[string]map[string]bool{}
+	for _, e := range es {
+		if e.Killed {
+			continue
+		}
+		if byLeg[e.Leg] == nil {
+			byLeg[e.Leg] = map[string]bool{}
+		}
+		byLeg[e.Leg][e.Group] = true
+	}
+	legs := make([]string, 0, len(byLeg))
+	for leg := range byLeg {
+		legs = append(legs, leg)
+	}
+	sort.Strings(legs)
+	var out []string
+	for _, leg := range legs {
+		var nums []int
+		var words []string
+		for g := range byLeg[leg] {
+			if n, err := strconv.Atoi(g); err == nil {
+				nums = append(nums, n)
+				continue
+			}
+			words = append(words, g)
+		}
+		sort.Ints(nums)
+		sort.Strings(words)
+		var parts []string
+		for i := 0; i < len(nums); {
+			j := i
+			for j+1 < len(nums) && nums[j+1] == nums[j]+1 {
+				j++
+			}
+			if j > i {
+				parts = append(parts, fmt.Sprintf("%d-%d", nums[i], nums[j]))
+			} else {
+				parts = append(parts, strconv.Itoa(nums[i]))
+			}
+			i = j + 1
+		}
+		parts = append(parts, words...)
+		out = append(out, leg+":"+strings.Join(parts, ","))
+	}
+	return out
+}
+
+// GMClearSummaryLine is the one ASSISTED line of summary.txt and the report; a PARTIAL clear says how many members are left and which
+// groups were not cleared.
 func GMClearSummaryLine(es []GMClearEntry, legs []string) string {
 	killed, left := GMClearCounts(es)
 	line := fmt.Sprintf("ASSISTED: --gm-clear killed %d units by GM command (%s); this is not a real clear", killed, strings.Join(legs, ", "))
@@ -302,6 +358,9 @@ func GMClearSummaryLine(es []GMClearEntry, legs []string) string {
 			}
 		}
 		line += fmt.Sprintf("; PARTIAL: %d members left (%d not seen, %d alive)", left, notSeen, alive)
+		if groups := GMClearUncleared(es); len(groups) > 0 {
+			line += "; groups not cleared: " + strings.Join(groups, ", ")
+		}
 	}
 	return line
 }

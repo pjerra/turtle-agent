@@ -99,7 +99,7 @@ turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-
 turtle-agent plan-check --mmaps DIR --sql FILE [--plan NAME] [--spawns DIR] [--strict] [--json]
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
-turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
+turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--reuse-instance] [--dry-run]
 turtle-agent trash-check [--dir dungeons] [--sql FILE [--plan NAME]] [--spawns DIR] [--patrols FILE]... [--mmaps DIR] [--level N] [--spread YD] [--aggro-rate R] [--assist-yd 10] [--json] [--out DIR] [--dash-out FILE] [--fail-on danger|patrol|any] [<plan>|<path.json>]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent scenario check [--var NAME=VALUE]... <file>
@@ -294,7 +294,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `status` | | state, character, map, x/y/z, `falling`, `z_unknown`, `dead`/`ghost`, health, power, `combo_points`/`combo_target`, `gcd_ms` (see [Agent state](#agent-state)), target, last event seq, `mono_ms`, `base_time` and `wall_offset_ms` (the monotonic axis of events: `base_time` is the wall time of mono_ms 0; `wall_offset_ms` is the wall clock now minus `base_time` + `mono_ms`, so host clock steps and drift show) |
 | `chat` | `type` (say, party, yell, emote, guild, raid, whisper, channel), `text`, `to` (whisper target or channel name) | |
 | `gm` | `text` (a `.`-command; the dot is added if missing) | |
-| `gm_kill` | `guid` (a creature) | selects the creature, waits until the server shows the selection, and sends `.die` (account level 3): the test tool of [`raid-walk --gm-clear`](#--gm-clear-test-servers-only). Refuses a player guid. It is authorized from the connection, not from settings: the agent may send `.die` only when the host it dialled (the realm's world address, or settings `world_addr`) equals the configured address of the test server that settings `server_name` names (`m910q` or `tortoise-test2`) in the slots table (`world_addr`, or `realmd` when `world_addr` is unset). `server_name` alone never authorizes; a mismatch refuses with a `gm_kill: refused:` line on stderr at login (checked in the session, not only in raid-walk). It does not read the death; the caller checks the unit's `dead` |
+| `gm_kill` | `guid` (a creature) | selects the creature, waits until the server shows the selection, and sends `.die` (account level 3): the test tool of [`raid-walk --gm-clear`](#--gm-clear-test-servers-only). Refuses a player guid. It is authorized from the connection, not from settings: the agent may send `.die` only when the host it dialled (the realm's world address, or settings `world_addr`) equals the configured `world_addr` of the test server that settings `server_name` names (`m910q` or `tortoise-test2`) in the slots table; a slots entry without a `world_addr` refuses `gm_kill` at every address (its `realmd` is never a stand-in: walk 32's table had none, so every `--gm-clear` kill was refused). `server_name` alone never authorizes; a mismatch refuses with a `gm_kill: refused:` line on stderr at login (checked in the session, not only in raid-walk). It does not read the death; the caller checks the unit's `dead` |
 | `events` | `since`, `kinds`, `limit`, `wait_ms` | page: `events`, `next`, `more`, `dropped` |
 | `chat_log` | `since`, `limit` | chat and system events only |
 | `invite` / `accept_invite` / `leave_group` | `name` / – / – | |
@@ -2212,8 +2212,9 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   the summary says so.
 - `--until` is `boss` (default: a trash walk never wakes a boss: it stops before the first boss step), `boss-done` (stops after the
   first boss step has completed: resolved to `step <the step after the boss>` from the rows, so it needs `--sql` or a plan JSON whose export has the
-  server's step count, else the walk stops the run and exits 18), `none` (a full clear), `step N` or `leg L`; the word
-  goes to `run start` and the server's status label must show `until <clause> (step N)`. `--from leg L|step N` is only
+  server's step count, else the walk stops the run and exits 18), `none` (a full clear: the run leader fights every
+  boss and no boss or until rule stops the run), `step N` or `leg L`; the word goes to `run start` and the server's
+  status label must show `until <clause> (step N)`. `--from leg L|step N` is only
   for a raid already standing at that point (for example after a hold): raid-walk does not stage.
 - `--place` (needs `--from` and `--sql`, and only on `m910q`/`tortoise-test2`) starts the raid **partway into its
   instance** instead of at the door: several raids on one server can then each work a different boss leg (`--slot 2,4`
@@ -2231,18 +2232,37 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   pull: pass --from "step N"`, exit 2). The fallback is refused too when a boss or hold row (or the move into an
   event) lies between it and the leg's first row: the raid would re-fight it on its way in. A fallback start
   stands before the leg, so `boss` and `boss-done` untils resolve from the leg's first row, never from the
-  fallback start. `--from "step N"` is taken as given and must be a positioned move row (a plain `--from`,
-  without `--place` or `--until boss-done`, still goes to the server unresolved). `validate` refuses a plan
+  fallback start. `--reuse-instance` (with `--place`) re-places the raid in the instance it is already in: when the
+  raid is alive, every hired bot must be in the plan's map, then the walk sends no entry order (which would open a
+  fresh copy), binds the commander with `.appear <mt>`, goes to the start point in that copy and teleports every hire
+  there with the GM `.summon`; no corridor clear and no quiet check run (the area is the raid's own instance), and the
+  instance ledger is neither checked nor written, so a re-place never waits at the cap. When the previous party has
+  logged out but the commander's own bind to the map is still alive (`.instance listbinds`: a map line with TTR left),
+  the walk resumes that instance: `.go xyz ... <map>` lands in the bound copy and `.summon` pulls the fresh hires in,
+  with no `.appear` and no entry order; the notes say `resuming it`. With no live bind the walk says
+  `no live bind for map N is left: falling back to a fresh instance`, runs the cap check it skipped for the reuse and
+  enters normally. `--reuse-instance` may be combined with `--gm-clear` (the named packs are killed in the kept copy).
+  `--from "step N"` is taken as given; a positioned move row is placed at its own point, and a pull
+  row at that pull's own stand point (the row's point; the nearest move row before it when the row has none), the
+  notes naming the point (`place: step N is a pull row; placing at the pull's own stand point` — walk 32 refused
+  steps 237 and 560 as pull rows, and the operator had to find 238/559 by hand). Before a fresh instance is entered,
+  the start is also chosen offline: from the requested row the walk walks BACK along the plan's positioned move rows
+  to the nearest one whose point stands at least `AggroRadius + 8 yd` from every static (non-patrol) spawn of the packs
+  a row at or after the start pulls, using the world export `--gm-clear`/the placement lints read (a missing export
+  only notes that the offline check is skipped). The note names the refused row, the spawn and what it needs, and the
+  chosen row. A boss or hold row still refuses
+  (a plain `--from`, without `--place` or `--until boss-done`, still goes to the server unresolved). `validate` refuses a plan
   whose legs' skip lists hold more
   than the toolkit's 16 entries or whose longest toolkit line would overflow the toolkit's 200-char cap, both before any
   GM command. The walk then clears the corridor of the legs it skips — every pull row before the start whose circle
   comes within 45 yd of the route to the `until` stop, despawned with `.tt clearto ... all=1` after a pre-read of the
   units there (never `kill`, never `boss`; a boss or hold row of an earlier leg within 30 yd of the route refuses the
-  placement when the route passes it in the start step's own leg; when it passes in a later leg the walk shortens its
-  `until` to stop before that segment, the corridor ending one positioned step earlier — a placed run is a fresh copy,
-  so those bosses are alive; every segment of the route is tested, not only its closest point, so a hit on the last
-  segment shortens an `--until none` run too, and the dry run's header and the summary print the asked-for until and
-  the effective one) — quiets
+  placement when the route passes it in the start step's own leg; when it passes in a later leg and the operator asked
+  for an `until` clause, the walk shortens that clause to stop before the segment, the corridor ending one positioned
+  step earlier — a placed run is a fresh copy, so those bosses are alive; every segment of the route is tested, not
+  only its closest point, and the dry run's header and the summary print the asked-for until and the effective one.
+  `--until none` is never replaced with a step: the corridor still ends one positioned step earlier, but the run walks
+  the whole plan and the run leader fights whatever it meets) — quiets
   the start point — the walk judges the quiet itself, not the toolkit's flag: a unit blocks only when it is not a skip
   entry, not a rank-0 critter of at most 100 HP and either stands within 25 yd of the point or belongs to a BEHIND row's
   circle by its **home** (the spawn point the toolkit sends with the unit; without one the unit has no owner), which the
@@ -2259,7 +2279,7 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   (one `.summon` per hire the frames miss) and only then starts the run, whose status line must show exactly that step
   and step count. Before the first teleport the commander must be in GM mode: `.gm on` is sent and the walk refuses the
   placement when its reply is not `GM mode is ON`. The commander stays inside the raid's copy for the whole walk (his own `.instance unbind` before the
-  hire, and again at teardown, drops a stale personal bind), so a wipe revives at the place point, not at the entrance.
+  hire, skipped under `--reuse-instance` where that bind is what is resumed, and again at teardown drops a stale personal bind), so a wipe revives at the place point, not at the entrance.
   `--dry-run` prints the staged step, the point and every circle. `summary.json`'s `place` object carries the start step,
   the instance, the circles with their removed counts, the not-cleared list, the quiet result and the placed count.
   **Known limit:** the pre-read (`q units`) and the `clearto` are two commands, so a unit that walks into a circle
@@ -2278,7 +2298,11 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   rows of later legs and unowned units beyond those 25 yd never block: a run from the door has them alive at this step
   too, and a unit no extra round could take and that stands beyond those 25 yd is left alive with a note. When the only
   units left inside the 25 yd are ones the toolkit listed as roamers (patrols walking through), the quiet is read again
-  twice, 20 s apart, and the placement then fails. Every unit the quiet acts
+  twice, 20 s apart. A quiet refusal or a `fighting after the place` after the move does NOT end the walk: in the SAME
+  instance the attempt moves one move row back, up to three rows, re-runs the corridor and quiet there and teleports
+  the party with the GM summons; only when all three fail may it GM-kill just the units the last quiet named (only with
+  `--gm-clear`/`--gm-clear-boss` given) and then fail. No second instance is ever entered for the same
+  placement (walk 33 burned one per refusal and the hourly cap queued the next try 20 minutes). Every unit the quiet acts
   on or refuses is noted with its spawn guid (`db`), where it stands and its home.
 - `--speed 1.0` sends nothing; `1.1` to `3.0` sends `speed=X` (a GM test run, marked `test speed` in the summary).
 - The hire gear tier comes from the committed table `raid -> minimum hire tier` in `internal/raidwalk/tiers.go`
@@ -2302,6 +2326,10 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   60 minutes on `--server`; at 4 or more it prints `instance cap: N fresh instances in the last hour on <server>; the
   6th is refused by the core` and waits for the oldest to age out, at most `--instance-cap-wait` (0: warn and go on;
   after the cap it goes on with a note). `--instance-cap-fail` exits 26 instead (`walk-super.sh` does not restart it).
+  The wait line names the earliest free time as well (`instance cap: waiting 16m5s (earliest free time
+  2026-11-03T12:34:56Z) for the oldest of 4 ...`), so the operator can plan around it. `--reuse-instance` (with
+  `--place`) is the way around a full ledger: it keeps the raid's CURRENT instance (see `--place` above), so nothing is
+  entered, reserved or counted and the cap is not touched.
   The check and the admission are one step under the ledger's lock: a walk below 4 reserves a place (holder + pid,
   30 minutes), the reservation counts like an entry, becomes the entry once the raid has entered and is released on
   every exit before that, so walks that start together cannot all pass at a count of 3. A corrupt ledger is moved to
@@ -2396,7 +2424,17 @@ and z within 30 yd of the point) before any summon leaves, and a landing that ne
 (`not revived: the commander did not land at the revive point`). Every wipe that does not recover
 says why in the notes (`wipe resume skipped: ...`, `second wipe at step N during the wipe-resume of step M`). It never
 revives while a boss row has a target: a boss engagement stops the run at once and waits up to 15 minutes for a kill,
-a reset or a wipe. A wipe or a boss engagement with no recovery left ends the walk with exit 19. Recovery fails closed
+a reset or a wipe. The one exception is a wipe ON THE BOSS'S OWN STEP whose boss the RUN LEADER fights (the same
+`runFightsBoss` hand-over the watch loop uses: a boss step under `--until none`, or an until that goes past the boss
+step, as `--until boss-done`'s resolved clause does): there the walk owns no boss attempt, so the wipe follows the
+ordinary wipe-resume flow — revive, rest (the self-regroup revive when TB says `regrouping by itself`), retry, one
+`--wipe-resume` — and never sends `run stop` at the wipe (walk 32: a Mar'li boss-step wipe under `--until none` was
+stopped 0.7 s after the `20 dead ... regrouping by itself` line, and a Hakkar one 42 ms after it, so boss retries were
+impossible). A boss row still in the frames when the run wipes on TRASH keeps the old gate: that fight is not the
+step's. The boss gate and the unknown-boss gate are skipped for the boss-step fight only, and the post-recovery boss
+re-check accepts the fight as the run's without a new status line (the boss was not newly engaged during the
+recovery). A wipe or a boss
+engagement with no recovery left ends the walk with exit 19. Recovery fails closed
 on unknown boss state (no dashboard, a stale or errored fights read, or a boss latched in the last 120 s: the old
 ending with the note `wipe resume skipped: boss state unknown`); the rest needs a complete quiet view (every roster
 hire present, fresh, out of combat and alive in `bot_view`, polled every 5 s — any gap restarts the window); and the
@@ -2415,7 +2453,8 @@ corpse, does not. After the rest and the resume the walk checks what the frames 
 to the boss path exactly as a watch-loop engagement does, so the run never reports a clean wipe-resume while a boss
 fight is live. The run-leader-fights-its-boss exception needs a run status received after the resume went out: a
 retained pre-resume boss-kind line does not hide a newly engaged boss, while a fresh post-resume boss-kind status
-keeps the old behaviour. A skipped near-wipe recovery is not retried for the same pause. Known limits: the wipe path
+keeps the old behaviour; the exception a boss-step wipe decided before the recovery needs no new line. A skipped
+near-wipe recovery is not retried for the same pause. Known limits: the wipe path
 does not check that the run is paused before reviving, and the 60 s running check can pass on a status line from
 before the resume; the timeout note always names 3 x `--wipe-rest` even when the walk ceiling cut it shorter; a boss's
 `first` add that is engaged as ordinary trash (for example a Zulian Tiger pack in ZG) still counts as a boss for 120 s
@@ -2431,11 +2470,14 @@ once per walk, so a boss engaged after an earlier one reaches the walk only thro
 
 A boss the frames show ENGAGED while the run is running stops the run and goes to the boss path (wipe, kill, reset),
 with one exception: when the run's own status is on its boss step and its `until` goes past it, or (walk 24) when the
-run stands at most two steps before its next boss step in the same leg, its `until` goes past that boss step, the
-engaged entry belongs to that boss (its entry, phase entries, `first` adds or hold entries), and the main tank stands
+run stands at most two steps before its next boss step in the same leg (under `--until boss-done` any number of steps
+back in the same leg: a boss-done walk never stops the run on an engage of its own boss), its `until` goes past that
+boss step, the engaged entry belongs to that boss (its entry, phase entries, `first` adds or hold entries), and the main tank stands
 within 60 yd (2D) of the boss row's plan position in a frame younger than 10 s, the run leader fights it and the walk
-only notes the hand-over. A boss that engages while the run is PAUSED on its boss step still stops the walk: the
-hand-over needs a running status.
+only notes the hand-over. Under `--until none` the exception needs none of that: the run walks to the plan's end, so the
+run leader fights every boss it meets and the walk never sends `.bot run stop` because of a boss or until rule (walk 31:
+Mandokir woke five steps before his row). A boss that engages while the run is PAUSED on its boss step still stops the
+walk for every other until: the hand-over needs a running status.
 
 When the run leader pauses with `boss <N> not found` on that boss's own row (walk 24 test2 r2: Thekal's phase 1 ends
 in a fake death and TB finds no corpse of 14599), the walk reads the frames for the kill: a boss UNIT at 0 % (the
@@ -2497,7 +2539,10 @@ unit of the named pull groups (or the boss of the leg), so a later leg can be te
 AQ20 walk starts at Rajaxx with `--gm-clear-boss kurinnaxx` so Kurinnaxx is dead and Rajaxx's event and Buru can be placed.
 
 - **Refused** unless the server is `m910q` or `tortoise-test2` (the `--place` allow-list, `placeServers`) and `--place` is on; a bad spec,
-  a leg or group the plan does not have, or a missing world export is a usage error before any GM line goes out.
+  a leg or group the plan does not have, or a missing world export is a usage error before any GM line goes out. A group
+  whose row clears no hostile pack (a boss's or an event's units, such as walk 31's Mandokir group 18, the Vilebranch
+  Speaker) is skipped with a `gm-clear: WARN: skipped ...` note and the other groups go on: a boss group is never cleared,
+  and one bad group never aborts the run.
 - **Groups** are 1-based, in route order among the leg's `pull` and `hold` rows (the dry run lists them as `8c gm-clear:` lines); the
   leg is its row number or its name. **Whole packs:** each group expands to every pack its row clears (the trash check's rule: the row's
   entries and its reach) and each pack to all its members, a `creature_groups` AGGRO_TOGETHER group and both directions of every aggro
@@ -2508,11 +2553,15 @@ AQ20 walk starts at Rajaxx with `--gm-clear-boss kurinnaxx` so Kurinnaxx is dead
   member whose spawn guid and entry match calls the agent's `gm_kill` RPC: it selects the creature by guid, waits until the server shows
   that selection (the same select-confirm path as `.additem`), and sends `.die` (core: `Chat.cpp:885`, `SEC_DEVELOPER` = account level 3,
   `HandleDieCommand` at `Commands.cpp:2795` kills the selected unit). The death is read from the unit's frames (`dead`, 5 s); a unit
-  that is still alive gets one more `.die`. Every stop is visited and read in two rounds, always (an empty read ends nothing). A member
-  never seen is recorded `killed: false, reason: "not seen"`, one that would not die `reason: "alive"`, one already dead
-  `reason: "already dead"` (killed, 0 tries). Either of the first two makes the clear **PARTIAL**: noted, in the summary
-  (`gm_clear_partial: true`, `ASSISTED PARTIAL` on the result line) and in the report; the walk goes on. The commander then returns to
-  the start point. `gm_kill` itself refuses on an agent that is not a slot of `m910q`/`tortoise-test2`.
+  that is still alive gets up to three more `.die` lines, 3 s apart. Every stop is visited and read in two rounds, always (an empty read
+  ends nothing). A member never seen is recorded `killed: false, reason: "not seen"`, one that would not die `reason: "alive"`, one
+  already dead `reason: "already dead"` (killed, 0 tries). Either of the first two makes the clear **PARTIAL**: noted, in the summary
+  (`gm_clear_partial: true`, `ASSISTED PARTIAL` on the result line, `groups not cleared: <leg>:<groups>` with a leg's consecutive
+  numbers as a range, e.g. `high_priestess_arlokk:12-17`) and in the report. A group that is still alive after its retries never fails
+  the placement: a `gm-clear: WARN: <leg>:<group> not cleared ...` line names it, and the quiet and the landing read skip that pack's
+  entries (`skip=`), so an alive member cannot make the area "not quiet" and burn an instance (walk 32: every `gm_kill` was refused for
+  a slots table without `world_addr`, and the failed groups then failed the placement with exit 18). The commander then returns to the
+  start point. `gm_kill` itself refuses on an agent that is not a slot of `m910q`/`tortoise-test2`.
 - **Recorded:** `run.log` gets `gm-clear: killed <entry> <guid> (<leg>:<group>)` per kill (and `gm-clear: FAILED ...`), `summary.json`
   gets `assisted: true` and `gm_clear[]` (`leg`, `group`, `entry`, `guid`, `killed`, `tries`) and `assisted: true` on each leg it killed
   in, `summary.txt` and the result line end with `ASSISTED`, and `raid-walk report` (which reads `summary.json` from the walk folder)
