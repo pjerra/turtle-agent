@@ -2207,14 +2207,24 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   event) lies between it and the leg's first row: the raid would re-fight it on its way in. A fallback start
   stands before the leg, so `boss` and `boss-done` untils resolve from the leg's first row, never from the
   fallback start. `--reuse-instance` (with `--place`) re-places the raid in the instance it is already in: every
-  hired bot must be alive in the plan's map (a dead or missing one refuses with exit 2 and names it), then the walk
-  sends no entry order (which would open a fresh copy), binds the commander with `.appear <mt>`, goes to the start
-  point in that copy and teleports every hire there with the GM `.summon`; no corridor clear and no quiet check run
-  (the area is the raid's own instance), and the instance ledger is neither checked nor written, so a re-place never
-  waits at the cap. `--from "step N"` is taken as given; a positioned move row is placed at its own point, and a pull
+  hired bot must be alive in the plan's map, then the walk sends no entry order (which would open a fresh copy),
+  binds the commander with `.appear <mt>`, goes to the start point in that copy and teleports every hire there with
+  the GM `.summon`; no corridor clear and no quiet check run (the area is the raid's own instance), and the instance
+  ledger is neither checked nor written, so a re-place never waits at the cap. When the previous party has logged out
+  but the commander's own bind to the map is still alive (`.instance listbinds`: a map line with TTR left), the walk
+  resumes that instance: `.go xyz ... <map>` lands in the bound copy and `.summon` pulls the fresh hires in, with no
+  `.appear` and no entry order; the notes say `resuming it`. With no live bind the walk says
+  `no live bind for map N is left: falling back to a fresh instance`, runs the cap check it skipped for the reuse and
+  enters normally. `--reuse-instance` may be combined with `--gm-clear` (the named packs are killed in the kept copy).
+  `--from "step N"` is taken as given; a positioned move row is placed at its own point, and a pull
   row at that pull's own stand point (the row's point; the nearest move row before it when the row has none), the
   notes naming the point (`place: step N is a pull row; placing at the pull's own stand point` — walk 32 refused
-  steps 237 and 560 as pull rows, and the operator had to find 238/559 by hand). A boss or hold row still refuses
+  steps 237 and 560 as pull rows, and the operator had to find 238/559 by hand). Before a fresh instance is entered,
+  the start is also chosen offline: from the requested row the walk walks BACK along the plan's positioned move rows
+  to the nearest one whose point stands at least `AggroRadius + 8 yd` from every static (non-patrol) spawn of the packs
+  a row at or after the start pulls, using the world export `--gm-clear`/the placement lints read (a missing export
+  only notes that the offline check is skipped). The note names the refused row, the spawn and what it needs, and the
+  chosen row. A boss or hold row still refuses
   (a plain `--from`, without `--place` or `--until boss-done`, still goes to the server unresolved). `validate` refuses a plan
   whose legs' skip lists hold more
   than the toolkit's 16 entries or whose longest toolkit line would overflow the toolkit's 200-char cap, both before any
@@ -2262,7 +2272,11 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   rows of later legs and unowned units beyond those 25 yd never block: a run from the door has them alive at this step
   too, and a unit no extra round could take and that stands beyond those 25 yd is left alive with a note. When the only
   units left inside the 25 yd are ones the toolkit listed as roamers (patrols walking through), the quiet is read again
-  twice, 20 s apart, and the placement then fails. Every unit the quiet acts
+  twice, 20 s apart. A quiet refusal or a `fighting after the place` after the move does NOT end the walk: in the SAME
+  instance the attempt moves one move row back, up to three rows, re-runs the corridor and quiet there and teleports
+  the party with the GM summons; only when all three fail may it GM-kill just the units the last quiet named (only with
+  `--gm-clear`/`--gm-clear-boss` given) and then fail. No second instance is ever entered for the same
+  placement (walk 33 burned one per refusal and the hourly cap queued the next try 20 minutes). Every unit the quiet acts
   on or refuses is noted with its spawn guid (`db`), where it stands and its home.
 - `--speed 1.0` sends nothing; `1.1` to `3.0` sends `speed=X` (a GM test run, marked `test speed` in the summary).
 - The hire gear tier comes from the committed table `raid -> minimum hire tier` in `internal/raidwalk/tiers.go`
