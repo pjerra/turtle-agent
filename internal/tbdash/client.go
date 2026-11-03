@@ -16,8 +16,10 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/privfile"
 )
@@ -166,6 +168,140 @@ func (c *Client) Fights(ctx context.Context, commander string) (json.RawMessage,
 func (c *Client) Fight(ctx context.Context, key string) (json.RawMessage, error) {
 	return c.GetJSON(ctx, "/api/v1/combat/fight/"+url.PathEscape(key), nil)
 }
+
+// Decision capture id and file names, as the dashboard's /api/v1/decisions routes name them.
+var (
+	DecisionCaptureRe = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}Z-[A-Za-z0-9_]{1,48}-[A-Za-z0-9_]{1,24}(-[0-9]{1,3})?$`)
+	DecisionFileRe    = regexp.MustCompile(`^(index\.json|seg-[0-9]{4}\.jsonl)$`)
+)
+
+// DecisionSegment is one segment row of a decision capture's index.json.
+type DecisionSegment struct {
+	File     string `json:"file"`
+	FirstSeq int64  `json:"first_seq"`
+	LastSeq  int64  `json:"last_seq"`
+	Records  int64  `json:"records"`
+	Bytes    int64  `json:"bytes"`
+	Deleted  bool   `json:"deleted"`
+}
+
+// DecisionCapture is one row of GET /api/v1/decisions: the capture's index.json.
+type DecisionCapture struct {
+	ID        string            `json:"id"`
+	Commander string            `json:"commander"`
+	Plan      string            `json:"plan"`
+	Map       int               `json:"map"`
+	Started   time.Time         `json:"started"`
+	Ended     *time.Time        `json:"ended"`
+	EndReason string            `json:"end_reason"`
+	Segments  []DecisionSegment `json:"segments"`
+}
+
+// Decisions reads GET /api/v1/decisions, filtered to commander (empty: every commander) and to the
+// started window (zero: no bound). Ended parses null or an RFC3339 timestamp.
+func (c *Client) Decisions(ctx context.Context, commander string, since, until time.Time) ([]DecisionCapture, error) {
+	query := url.Values{}
+	if commander != "" {
+		query.Set("commander", commander)
+	}
+	if !since.IsZero() {
+		query.Set("since", since.UTC().Format(time.RFC3339))
+	}
+	if !until.IsZero() {
+		query.Set("until", until.UTC().Format(time.RFC3339))
+	}
+	raw, err := c.GetJSON(ctx, "/api/v1/decisions", query)
+	if err != nil {
+		return nil, err
+	}
+	var body struct {
+		Captures []DecisionCapture `json:"captures"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return nil, fmt.Errorf("dashboard decisions: %w", err)
+	}
+	if body.Captures == nil {
+		body.Captures = []DecisionCapture{}
+	}
+	return body.Captures, nil
+}
+
+// DecisionFile streams GET /api/v1/decisions/<id>/<file> into dst, stopping at max bytes with an
+// error when the file is longer. Id and file are validated client-side before any request; the
+// answer streams with io.Copy and carries Content-Length. It returns the bytes written.
+func (c *Client) DecisionFile(ctx context.Context, id, file string, dst io.Writer, max int64) (int64, error) {
+	if !DecisionCaptureRe.MatchString(id) {
+		return 0, fmt.Errorf("dashboard decision file: bad capture id %q", id)
+	}
+	if !DecisionFileRe.MatchString(file) {
+		return 0, fmt.Errorf("dashboard decision file: bad file name %q", file)
+	}
+	path := "/api/v1/decisions/" + url.PathEscape(id) + "/" + url.PathEscape(file)
+	body, code, length, ctype, err := c.getRaw(ctx, path)
+	if err != nil {
+		return 0, err
+	}
+	if code == http.StatusUnauthorized || code == http.StatusFound {
+		body.Close()
+		if err := c.Login(ctx); err != nil {
+			return 0, err
+		}
+		body, code, length, ctype, err = c.getRaw(ctx, path)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if code != http.StatusOK {
+		body.Close()
+		return 0, &HTTPError{Code: code, Method: http.MethodGet, Path: path}
+	}
+	_ = length
+	_ = ctype
+	defer body.Close()
+	lr := &limitReadCloser{r: body, n: max + 1}
+	written, err := io.Copy(dst, lr)
+	if err != nil {
+		return written, fmt.Errorf("dashboard decision file %s/%s: %w", id, file, err)
+	}
+	if written > max {
+		return max, fmt.Errorf("dashboard decision file %s/%s: over the %d-byte limit", id, file, max)
+	}
+	return written, nil
+}
+
+// getRaw GETs path and hands the caller the open body with the status code, content length and
+// content type.
+func (c *Client) getRaw(ctx context.Context, path string) (io.ReadCloser, int, int64, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.requestURL(path, nil), nil)
+	if err != nil {
+		return nil, 0, -1, "", fmt.Errorf("dashboard GET %s: %w", path, err)
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return nil, 0, -1, "", fmt.Errorf("dashboard GET %s: %w", path, err)
+	}
+	return resp.Body, resp.StatusCode, resp.ContentLength, resp.Header.Get("Content-Type"), nil
+}
+
+// limitReadCloser stops a copy one byte past max so the caller can tell a too-long file apart.
+type limitReadCloser struct {
+	r io.ReadCloser
+	n int64
+}
+
+func (l *limitReadCloser) Read(b []byte) (int, error) {
+	if l.n <= 0 {
+		return 0, io.EOF
+	}
+	if int64(len(b)) > l.n {
+		b = b[:l.n]
+	}
+	n, err := l.r.Read(b)
+	l.n -= int64(n)
+	return n, err
+}
+
+func (l *limitReadCloser) Close() error { return l.r.Close() }
 
 func (c *Client) get(ctx context.Context, path string, query url.Values) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.requestURL(path, query), nil)

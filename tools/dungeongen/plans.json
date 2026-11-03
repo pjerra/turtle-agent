@@ -1149,7 +1149,7 @@
    "size": 20,
    "entrance_tele": "zg",
    "special": [
-    "Handwritten prep: 168 merged packs (L22; leg 0 re-spaced after walks 1 to 7), boss order Jeklik, Venoxis, Mar'li, Thekal, Arlokk, Mandokir, Jin'do, Hakkar; Gahz'ranka is optional and has no step (fishing summon not expressible); Edge of Madness has no spawn (SpawnRandomBoss deactivated).",
+    "Handwritten prep: 168 merged packs (L22; leg 0 re-spaced after walks 1 to 7), boss order Jeklik, Venoxis, Mar'li, Thekal, Arlokk, Mandokir, Jin'do, Hakkar; Gahz'ranka is optional and has no step (fishing summon not expressible); Edge of Madness has no spawn (SpawnRandomBoss deactivated). WALK 29 (2026-11-02, legs 5 and 6; walk 28 runs b and c): the Mandokir terrace is a ring sweep from the ramp top (18, 17, 4, the 5/6/7 knot, 12, 11, 16, 15, 13, 14, 10, 9, 8, 3, 2, 1, 19, 20, 21, 22) and the Jin'do leg pulls the two packs that straddle its walk (49741, then 49119, taken off the Hakkar leg) before 49114, every group from its own stand 20-27 yd from its pack and >= 20 yd from every pack pulled later; walk 28's steps 431 and 531 each fought 14 attackers with 24 hostiles in view.",
     "Arlokk (14515) has no spawn row; the gong 180526 runs event script 9066 and summons her at -11540.7 -1627.71 41.27. The gong step is open for the mapping walk (no walkable server path to it)."
    ],
    "handwritten": true

@@ -93,22 +93,25 @@ const (
 
 // The limits of the module's loader (NormalizePlanStep) and of its column widths.
 const (
-	MaxRadius      = 100   // yards
-	MaxTimeoutS    = 600   // seconds
-	MaxEntries     = 16    // creature entries of a pull or boss
-	MaxKind        = 16    // ai_dungeon_step.kind is a varchar(16): a longer kind fails the INSERT (or is cut)
-	MaxPlanName    = 32    // ai_dungeon_plan.plan
-	MaxLegName     = 32    // ai_dungeon_leg.name
-	MaxPlanList    = 255   // ai_dungeon_plan.cc_priority, cc_always, kill_first (varchar(255))
-	MaxSource      = 64    // ai_dungeon_plan.source
-	MaxComment     = 255   // every comment column
-	MaxLegs        = 255   // ai_dungeon_leg.leg is a tinyint unsigned
-	MaxSteps       = 65535 // ai_dungeon_step.seq is a smallint unsigned
-	DefaultPullYd  = 15    // the module's pull radius for 0
-	PullSlackYd    = 10    // added to the farthest position of a group when the plan gives no radius
-	MoveGapWarnYd  = 60    // the module logs consecutive moves farther apart than this
-	MoveGapCutYd   = 50    // the longest hop the exporter leaves when it cuts a leg into via points
-	DefaultBossRad = 30
+	MaxRadius   = 100 // yards
+	MaxTimeoutS = 600 // seconds
+	// MaxHoldTimeoutS is the cap of a hold row (dungeon.MaxHoldTimeoutS): Rajaxx's event runs about 1272 s. The module's
+	// kPlanMaxTimeoutS must allow it for the hold kind.
+	MaxHoldTimeoutS = dungeon.MaxHoldTimeoutS
+	MaxEntries      = 16    // creature entries of a pull or boss
+	MaxKind         = 16    // ai_dungeon_step.kind is a varchar(16): a longer kind fails the INSERT (or is cut)
+	MaxPlanName     = 32    // ai_dungeon_plan.plan
+	MaxLegName      = 32    // ai_dungeon_leg.name
+	MaxPlanList     = 255   // ai_dungeon_plan.cc_priority, cc_always, kill_first (varchar(255))
+	MaxSource       = 64    // ai_dungeon_plan.source
+	MaxComment      = 255   // every comment column
+	MaxLegs         = 255   // ai_dungeon_leg.leg is a tinyint unsigned
+	MaxSteps        = 65535 // ai_dungeon_step.seq is a smallint unsigned
+	DefaultPullYd   = 15    // the module's pull radius for 0
+	PullSlackYd     = 10    // added to the farthest position of a group when the plan gives no radius
+	MoveGapWarnYd   = 60    // the module logs consecutive moves farther apart than this
+	MoveGapCutYd    = 50    // the longest hop the exporter leaves when it cuts a leg into via points
+	DefaultBossRad  = 30
 	// MaxGossipOption is the highest `param` of a gossip row: the number `.bot cmd gossip` takes counts the menu from 1 (a 1.12 menu holds 15
 	// options), while the plan's `option` is the menu's own index counted from 0 (the CMSG_GOSSIP_SELECT_OPTION value): the row's param is option + 1.
 	MaxGossipOption = 15
@@ -855,8 +858,12 @@ func Validate(r Rows) error {
 		if len(s.Kind) > MaxKind {
 			return bad("the kind is longer than ai_dungeon_step.kind holds (%d)", MaxKind)
 		}
-		if s.TimeoutS < 0 || s.TimeoutS > MaxTimeoutS {
-			return bad("timeout_s %d is outside 0-%d", s.TimeoutS, MaxTimeoutS)
+		maxTimeout := MaxTimeoutS
+		if s.Kind == KindHold {
+			maxTimeout = MaxHoldTimeoutS
+		}
+		if s.TimeoutS < 0 || s.TimeoutS > maxTimeout {
+			return bad("timeout_s %d is outside 0-%d", s.TimeoutS, maxTimeout)
 		}
 		if len(s.Entries) > MaxEntries {
 			return bad("%d entries (at most %d)", len(s.Entries), MaxEntries)

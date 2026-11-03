@@ -11,3 +11,5 @@ settings.json
 *.cap
 *.cap.gz
 /turtle-agent
+# Accidental go build output (commit 98bd065 committed it once; keep it out).
+/cmd/turtle-agent/turtle-agent

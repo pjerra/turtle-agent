@@ -68,6 +68,9 @@ type Settings struct {
 	// one real PC). Off by default: the core's anticheat bans by a hash of fingerprint and IP,
 	// so a shared print marked on one account would reach all of them.
 	SharedFingerprint bool `json:"shared_fingerprint,omitempty"`
+	// ServerName is the slots-config name of the server this slot agent belongs to (slot setup writes it). The gm_kill RPC reads it
+	// only as a name: gm_kill also needs the dialled host:port to be that server's world_addr (gmKillAllowed). Alone it never authorizes.
+	ServerName string `json:"server_name,omitempty"`
 	// StateDir is where the addon fingerprint and the instance-entry ledger are kept
 	// (default: the settings file's folder). A leading ~/ is the home folder. When
 	// set, Load requires it to be an existing folder only the user can write.

@@ -1069,21 +1069,21 @@
               "radius": 80,
               "state": "dead"
             },
-            "timeout_s": 600,
+            "timeout_s": 1500,
             "fail_text": "Rajaxx's event did not finish: a wave is still up, or a wave evaded and the event reset (Andorov's script despawns and respawns the captains; each wave has 180 s).",
             "hold": {
               "instance_data": 2,
               "value": 3,
               "spot": {"x": -9105.203, "y": 1610.6904, "z": 23.540438},
               "radius": 40,
-              "timeout_s": 600,
+              "timeout_s": 1500,
               "entries": [15341, 15385, 15386, 15388, 15389, 15390, 15391, 15392, 15344, 15387]
             }
           }
         }
       ],
       "notes": [
-        "3 pulls (5 units): the hall's two Qiraji Gladiator pairs and a Vile Scarab, then the event's hold. The raid holds on the spot and fights the seven waves; the hold ends on instance data 2 reading 3 (Rajaxx dead). The wave units are pre-placed in the hall and are no pulls."
+        "3 pulls (5 units): the hall's two Qiraji Gladiator pairs and a Vile Scarab, then the event's hold (timeout 1500 s: the seven waves take about 1272 s, so the usual 600 s cap would fail a healthy event). The raid holds on the spot and fights the seven waves; the hold ends on instance data 2 reading 3 (Rajaxx dead). The wave units are pre-placed in the hall and are no pulls."
       ]
     },
     {

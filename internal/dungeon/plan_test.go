@@ -295,12 +295,16 @@ func TestApproachAndHoldAreRead(t *testing.T) {
 	if len(g.Approach) != 1 || g.Approach[0].X != 20 || g.Hold == nil || g.Hold.Data != 1 || g.Hold.Spot.X != 40 || g.Hold.Radius != 30 || g.Hold.TimeoutS != 600 || len(g.Hold.Entries) != 1 {
 		t.Fatalf("%+v %+v", g, g.Hold)
 	}
+	// An event hold may run past 600 s (Rajaxx's seven waves take about 1272 s): up to MaxHoldTimeoutS.
+	if _, err := Parse("t.json", []byte(fmt.Sprintf(base, `,"hold":{"instance_data":1,"spot":{"x":40,"y":0,"z":0},"radius":30,"timeout_s":1500}`))); err != nil {
+		t.Fatalf("a 1500 s hold was refused: %v", err)
+	}
 	for _, bad := range []string{
 		`,"approach":[{"x":1,"y":0,"z":0},{"x":2,"y":0,"z":0},{"x":3,"y":0,"z":0},{"x":4,"y":0,"z":0},{"x":5,"y":0,"z":0}]`,
 		`,"approach":[{"x":1,"y":0}]`,
 		`,"hold":{"spot":{"x":40,"y":0,"z":0},"radius":30,"timeout_s":600}`,
 		`,"hold":{"instance_data":1,"spot":{"x":40,"y":0,"z":0},"radius":0,"timeout_s":600}`,
-		`,"hold":{"instance_data":1,"spot":{"x":40,"y":0,"z":0},"radius":30,"timeout_s":601}`,
+		`,"hold":{"instance_data":1,"spot":{"x":40,"y":0,"z":0},"radius":30,"timeout_s":1801}`,
 		`,"hold":{"instance_data":1,"radius":30,"timeout_s":600}`,
 	} {
 		if _, err := Parse("t.json", []byte(fmt.Sprintf(base, bad))); err == nil {

@@ -26,6 +26,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/slots"
+	"github.com/pjerra/turtle-agent/internal/tbdash"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -99,6 +100,12 @@ type walkFakeAgent struct {
 	hostilesFn func(viewN int) []tbm.HostileRec
 	unitsFn    func(n int) []objects.Unit
 	unitsN     int
+
+	// The --gm-clear fakes: gm_kill calls the killFn with the guid and the number of lines sent to it so far (nil: every kill works);
+	// a unit it lets die shows Dead in the unit RPC (killed).
+	killFn    func(g packet.GUID, tries int) bool
+	killTries map[packet.GUID]int
+	killed    map[packet.GUID]bool
 
 	startReply *commanderReply
 	startQueue []queuedEvent
@@ -219,6 +226,8 @@ type walkFakeAgent struct {
 	// quiet rest (combatAllFn); the dashboard fights read fails through fakeDash.fightsErr.
 	viewFn      func(n int) (fail bool, omit string)
 	combatAllFn func(n int) bool // frame n shows every hire in combat
+	combatBots  map[string]bool  // these hires show in combat in every frame (--revive-at-raid: one fights away)
+	offMapBots  map[string]bool  // these hires show on map 0 in every frame (--revive-at-raid: the lead on another map)
 	// viewHook runs inside the bot_view RPC (outside f.mu): a test's fake wall
 	// time passing during the call, like the live server's RPC waits.
 	viewHook func()
@@ -393,6 +402,36 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		} else {
 			v = fn(n)
 		}
+	case "gm_kill":
+		var p struct {
+			GUID string `json:"guid"`
+		}
+		_ = json.Unmarshal(raw, &p)
+		g, err := packet.ParseGUID(p.GUID)
+		if err != nil {
+			f.t.Errorf("gm_kill %q: %v", p.GUID, err)
+		}
+		f.mu.Lock()
+		f.log = append(f.log, "gm_kill "+g.String())
+		if f.killTries == nil {
+			f.killTries, f.killed = map[packet.GUID]int{}, map[packet.GUID]bool{}
+		}
+		f.killTries[g]++
+		if f.killFn == nil || f.killFn(g, f.killTries[g]) {
+			f.killed[g] = true
+		}
+		f.mu.Unlock()
+	case "unit":
+		var p struct {
+			GUID string `json:"guid"`
+		}
+		_ = json.Unmarshal(raw, &p)
+		g, _ := packet.ParseGUID(p.GUID)
+		f.mu.Lock()
+		f.log = append(f.log, "unit "+g.String())
+		dead := f.killed[g]
+		f.mu.Unlock()
+		v = objects.Unit{GUID: g, Type: "creature", Dead: dead, Health: map[bool]uint32{true: 0, false: 100}[dead], MaxHealth: 100}
 	case "target":
 		var p struct {
 			GUID string `json:"guid"`
@@ -906,6 +945,14 @@ func (f *walkFakeAgent) viewPage() any {
 	m := uint32(1)
 	viewHook := f.viewFn
 	combatAll := f.combatAllFn
+	combatBots := map[string]bool{}
+	for k, v := range f.combatBots {
+		combatBots[k] = v
+	}
+	offMapBots := map[string]bool{}
+	for k, v := range f.offMapBots {
+		offMapBots[k] = v
+	}
 	if f.entered {
 		m = 249
 		if f.instMap != 0 {
@@ -947,6 +994,9 @@ func (f *walkFakeAgent) viewPage() any {
 		if combatAll != nil && combatAll(n) {
 			state = "c"
 		}
+		if combatBots[name] {
+			state = "c"
+		}
 		if viewHook != nil {
 			if _, omit := viewHook(n); omit == name {
 				continue
@@ -955,6 +1005,9 @@ func (f *walkFakeAgent) viewPage() any {
 		p := pos[name]
 		hm := m
 		if (ghostsOff && dead[name]) || (ghostsOffN > 0 && dead[name] && i < ghostsOffN) {
+			hm = 0
+		}
+		if offMapBots[name] {
 			hm = 0
 		}
 		rec := tbm.PartyRec{GUID: packet.GUID(1000 + i), Name: name, HP: 1, MaxHP: 1, Map: hm, Dead: dead[name], State: state,
@@ -1108,6 +1161,12 @@ type fakeDash struct {
 	// and wins over commandersRaw.
 	commandersRaw []json.RawMessage
 	commandersFn  func() json.RawMessage
+	decisions     []tbdash.DecisionCapture
+	decisionsErr  error
+	decFiles      map[string]string // file name (index.json or seg-*.jsonl) to body
+	decFileErr    map[string]error
+	decRequested  []string // every DecisionFile file name requested, in order
+	decCalls      int      // Decisions calls (the ended wait polls again)
 }
 
 func (d *fakeDash) Login(ctx context.Context) error { return nil }
@@ -1160,6 +1219,35 @@ func (d *fakeDash) Fight(ctx context.Context, key string) (json.RawMessage, erro
 	return json.RawMessage(`{"fight":{"id":"4-5"}}`), nil
 }
 
+func (d *fakeDash) Decisions(ctx context.Context, commander string, since, until time.Time) ([]tbdash.DecisionCapture, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.decCalls++
+	if d.decisionsErr != nil {
+		return nil, d.decisionsErr
+	}
+	return append([]tbdash.DecisionCapture{}, d.decisions...), nil
+}
+
+func (d *fakeDash) DecisionFile(ctx context.Context, id, file string, dst io.Writer, max int64) (int64, error) {
+	d.mu.Lock()
+	d.decRequested = append(d.decRequested, file)
+	body, hasBody := d.decFiles[file]
+	ferr := d.decFileErr[file]
+	d.mu.Unlock()
+	if ferr != nil {
+		return 0, ferr
+	}
+	if !hasBody {
+		return 0, fmt.Errorf("no such decision file %s", file)
+	}
+	if int64(len(body)) > max {
+		return int64(len(body)), fmt.Errorf("dashboard decision file %s/%s: over the %d-byte limit", id, file, max)
+	}
+	n, err := io.WriteString(dst, body)
+	return int64(n), err
+}
+
 // envRecord is what the fake environment saw.
 type envRecord struct {
 	acquires  int
@@ -1198,6 +1286,7 @@ func newFixture(t *testing.T) *fixture {
 		plan: "onyxias_lair", server: "m910q", holder: "raid-walk-onyxias_lair", dir: "../../dungeons",
 		until: "boss", speed: 1.0, enter: "auto", maxRunMinutes: 90, pausedWait: 10 * time.Minute,
 		resetWait: 5 * time.Minute, wipeResume: 1, wipeRest: 10 * time.Minute, hireSettle: hireSettleWait, out: out,
+		decisions: true, decisionsMaxMiB: decisionsBudgetDefaultMiB,
 	}
 	f.env = walkEnv{
 		now:   clock.now,
@@ -1317,6 +1406,245 @@ func TestRaidWalkRefusesSlot3(t *testing.T) {
 	}
 }
 
+func TestRaidWalkDecisionsDryRunLine(t *testing.T) {
+	f := newFixture(t)
+	f.opts.dryRun = true
+	f.opts.decisions = false
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("dry run exit %d: %s", code, f.stderr.String())
+	}
+	want := " 14 decisions: " + f.out + "/decisions (dashboard: off)\n"
+	if !strings.Contains(f.stdout.String(), want) {
+		t.Fatalf("dry-run plan lacks %q:\n%s", want, f.stdout.String())
+	}
+}
+
+func TestRaidWalkDecisionsPulled(t *testing.T) {
+	f := newFixture(t)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	ended := f.clock.now()
+	f.dash.decisions = []tbdash.DecisionCapture{
+		{ID: "20261029T200000Z-Commander-molten_core", Commander: "Commander", Plan: "molten_core", Map: 1, Started: f.clock.now().Add(-time.Minute), Ended: &ended, Segments: []tbdash.DecisionSegment{
+			{File: "seg-0000.jsonl", FirstSeq: 1, LastSeq: 5, Records: 5, Bytes: 5},
+			{File: "seg-0001.jsonl", FirstSeq: 6, LastSeq: 8, Records: 3, Bytes: 3, Deleted: true},
+		}},
+		{ID: "20261029T200100Z-Commander-molten_core", Commander: "Commander", Plan: "molten_core", Map: 1, Started: f.clock.now().Add(-time.Minute), Ended: &ended},
+	}
+	f.dash.decFiles = map[string]string{
+		"index.json":     `{"id":"x"}`,
+		"seg-0000.jsonl": "{\"seq\":1}\n",
+	}
+	f.defaultRun("onyxias_lair")
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.Decisions == nil || len(sum.Decisions.Captures) != 2 {
+		t.Fatalf("decisions %+v, want the 2 captures of this commander", sum.Decisions)
+	}
+	for _, name := range f.dash.decRequested {
+		if name == "seg-0001.jsonl" {
+			t.Fatalf("deleted segment was requested: %q", f.dash.decRequested)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(f.out, "decisions", "20261029T200000Z-Commander-molten_core", "seg-0000.jsonl")); err != nil {
+		t.Fatalf("segment not pulled: %v (requested %q)", err, f.dash.decRequested)
+	}
+	raw, err := os.ReadFile(filepath.Join(f.out, "decisions", "manifest.json"))
+	if err != nil {
+		t.Fatalf("manifest.json: %v", err)
+	}
+	var man []decisionManifestCapture
+	if err := json.Unmarshal(raw, &man); err != nil {
+		t.Fatalf("manifest: %v", err)
+	}
+	if len(man) != 2 {
+		t.Fatalf("manifest %d captures, want 2: %s", len(man), raw)
+	}
+	if leftovers, _ := filepath.Glob(filepath.Join(f.out, "decisions", "*", "*.part")); len(leftovers) != 0 {
+		t.Fatalf(".part files left behind: %q", leftovers)
+	}
+	st, err := os.Stat(filepath.Join(f.out, "decisions", "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm() != 0o600 {
+		t.Fatalf("manifest mode %o, want 600", st.Mode().Perm())
+	}
+}
+
+func TestRaidWalkDecisionsNoDashboard(t *testing.T) {
+	f := newFixture(t)
+	f.defaultRun("onyxias_lair")
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Decisions == nil || sum.Decisions.Note != "off (no dashboard)" {
+		t.Fatalf("decisions %+v, want the no-dashboard note", sum.Decisions)
+	}
+}
+
+func TestRaidWalkDecisionsBudgetAndFailure(t *testing.T) {
+	f := newFixture(t)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.opts.decisionsMaxMiB = 1
+	ended := f.clock.now()
+	f.dash.decisions = []tbdash.DecisionCapture{
+		{ID: "20261029T200000Z-Commander-molten_core", Commander: "Commander", Ended: &ended, Started: f.clock.now()},
+		{ID: "20261029T200100Z-Commander-molten_core", Commander: "Commander", Ended: &ended, Started: f.clock.now()},
+	}
+	f.dash.decFiles = map[string]string{"index.json": string(make([]byte, 2*1024*1024))}
+	f.defaultRun("onyxias_lair")
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0 (the pull never changes the exit code)", code)
+	}
+	sum := f.summary()
+	if sum.Decisions == nil || !strings.Contains(sum.Decisions.Note, "budget") {
+		t.Fatalf("decisions %+v, want a budget note", sum.Decisions)
+	}
+}
+
+func TestRaidWalkDecisionsServerIDRefused(t *testing.T) {
+	f := newFixture(t)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	ended := f.clock.now()
+	f.dash.decisions = []tbdash.DecisionCapture{
+		{ID: "../evil", Commander: "Commander", Ended: &ended, Started: f.clock.now()},
+		{ID: "20261029T200000Z-Commander-molten_core", Commander: "Commander", Ended: &ended, Started: f.clock.now()},
+	}
+	f.dash.decFiles = map[string]string{"index.json": `{"id":"x"}`}
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0", code)
+	}
+	sum := f.summary()
+	if sum.Decisions == nil || len(sum.Decisions.Captures) != 1 {
+		t.Fatalf("decisions %+v, want only the well-formed id pulled", sum.Decisions)
+	}
+}
+
+func TestRaidWalkDecisionsFileFailureKeepsOthers(t *testing.T) {
+	f := newFixture(t)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	ended := f.clock.now()
+	f.dash.decisions = []tbdash.DecisionCapture{
+		{ID: "20261029T200000Z-Commander-molten_core", Commander: "Commander", Ended: &ended, Started: f.clock.now(), Segments: []tbdash.DecisionSegment{{File: "seg-0000.jsonl"}}},
+		{ID: "20261029T200100Z-Commander-molten_core", Commander: "Commander", Ended: &ended, Started: f.clock.now()},
+	}
+	f.dash.decFiles = map[string]string{"index.json": `{"id":"x"}`}
+	f.dash.decFileErr = map[string]error{"seg-0000.jsonl": errors.New("HTTP 500 for GET /api/v1/decisions")}
+	f.defaultRun("onyxias_lair")
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0 (a failed file notes and the rest continue)", code)
+	}
+	sum := f.summary()
+	if sum.Decisions == nil || len(sum.Decisions.Captures) != 1 {
+		t.Fatalf("decisions %+v, want the good capture pulled and the failed one noted", sum.Decisions)
+	}
+	found := false
+	for _, n := range sum.Notes {
+		if strings.Contains(n, "20261029T200000Z-Commander-molten_core") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no failed-file note in %q", sum.Notes)
+	}
+}
+
+// TestRaidWalkDecisionsFailedRepullKeepsComplete: an existing complete capture survives a failed
+// re-pull — the failure removes only the staging dir, never the target.
+func TestRaidWalkDecisionsFailedRepullKeepsComplete(t *testing.T) {
+	out := t.TempDir()
+	ended := time.Now()
+	id := "20261029T200000Z-Commander-molten_core"
+	good := &fakeDash{
+		decisions: []tbdash.DecisionCapture{
+			{ID: id, Commander: "Commander", Ended: &ended, Started: ended.Add(-time.Minute)},
+		},
+		decFiles: map[string]string{"index.json": `{"id":"x"}`},
+	}
+	if _, notes := pullDecisionsInto(context.Background(), good, "Commander", time.Time{}, time.Time{}, out, 1<<20); len(notes) != 0 {
+		t.Fatalf("first pull notes %q", notes)
+	}
+	want, err := os.ReadFile(filepath.Join(out, "decisions", id, "index.json"))
+	if err != nil {
+		t.Fatalf("first pull: %v", err)
+	}
+	bad := &fakeDash{
+		decisions: []tbdash.DecisionCapture{
+			{ID: id, Commander: "Commander", Ended: &ended, Started: ended.Add(-time.Minute)},
+		},
+		decFiles:   map[string]string{"index.json": `{"id":"x"}`},
+		decFileErr: map[string]error{"index.json": errors.New("HTTP 500 for GET /api/v1/decisions")},
+	}
+	if _, notes := pullDecisionsInto(context.Background(), bad, "Commander", time.Time{}, time.Time{}, out, 1<<20); len(notes) == 0 {
+		t.Fatal("failed re-pull: no note")
+	}
+	got, err := os.ReadFile(filepath.Join(out, "decisions", id, "index.json"))
+	if err != nil {
+		t.Fatalf("complete capture lost on failed re-pull: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("complete capture changed on failed re-pull: %q, want %q", got, want)
+	}
+	if leftovers, _ := filepath.Glob(filepath.Join(out, "decisions", id+"*")); len(leftovers) != 1 {
+		t.Fatalf("staging left behind or target touched: %q", leftovers)
+	}
+	if stag, _ := filepath.Glob(filepath.Join(out, "decisions", ".*staging*")); len(stag) != 0 {
+		t.Fatalf("staging dirs left behind: %q", stag)
+	}
+}
+
+// TestRaidWalkDecisionsUnknownSegmentFailsCapture: a non-deleted segment the file regex rejects
+// fails that capture with a note; it is not in the success manifest.
+func TestRaidWalkDecisionsUnknownSegmentFailsCapture(t *testing.T) {
+	f := newFixture(t)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	ended := f.clock.now()
+	f.dash.decisions = []tbdash.DecisionCapture{
+		{ID: "20261029T200000Z-Commander-molten_core", Commander: "Commander", Ended: &ended, Started: f.clock.now(), Segments: []tbdash.DecisionSegment{{File: "seg-evil!.jsonl"}}},
+		{ID: "20261029T200100Z-Commander-molten_core", Commander: "Commander", Ended: &ended, Started: f.clock.now()},
+	}
+	f.dash.decFiles = map[string]string{"index.json": `{"id":"x"}`}
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (the unknown segment notes, the rest continues)", code)
+	}
+	sum := f.summary()
+	if sum.Decisions == nil || len(sum.Decisions.Captures) != 1 {
+		t.Fatalf("decisions %+v, want only the good capture", sum.Decisions)
+	}
+	if sum.Decisions.Captures[0].ID != "20261029T200100Z-Commander-molten_core" {
+		t.Fatalf("decisions %+v, want the good capture kept", sum.Decisions)
+	}
+	found := false
+	for _, n := range sum.Notes {
+		if strings.Contains(n, "seg-evil!.jsonl") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no unknown-segment note in %q", sum.Notes)
+	}
+	raw, err := os.ReadFile(filepath.Join(f.out, "decisions", "manifest.json"))
+	if err != nil {
+		t.Fatalf("manifest.json: %v", err)
+	}
+	var man []decisionManifestCapture
+	if err := json.Unmarshal(raw, &man); err != nil {
+		t.Fatalf("manifest: %v", err)
+	}
+	if len(man) != 1 || man[0].ID != "20261029T200100Z-Commander-molten_core" {
+		t.Fatalf("manifest %s, want only the good capture", raw)
+	}
+}
+
 func TestRaidWalkDryRunPrintsThePhasePlan(t *testing.T) {
 	f := newFixture(t)
 	f.opts.dryRun = true
@@ -1355,6 +1683,7 @@ phases:
  11 hold: 0m
  12 commander: status; teardown --json ` + f.out + `/slot
  13 summary: ` + f.out + `/summary.json, ` + f.out + `/summary.txt
+ 14 decisions: ` + f.out + `/decisions (dashboard: on)
 `
 	if got != want {
 		t.Fatalf("dry-run plan:\n%s\nwant:\n%s", got, want)
@@ -1790,6 +2119,18 @@ func placedIdleBlocker(t *testing.T, yd float32, entry uint32, name string, inCo
 	}
 }
 
+// placedFollower is placedIdleBlocker for a unit that follows the commander at yd out: every fallback point of the
+// revive, the entrance included, is blocked too (the fallback rows sit hundreds of yards from the place point).
+func placedFollower(f *fixture, yd float32, entry uint32, name string, inCombat bool) func(int) []objects.Unit {
+	return func(int) []objects.Unit {
+		f.agent.mu.Lock()
+		x, y, z := f.agent.x, f.agent.y, f.agent.z
+		f.agent.mu.Unlock()
+		return []objects.Unit{{Type: "creature", Name: name, Entry: entry, Hostile: true, InCombat: inCombat,
+			X: x + yd, Y: y, Z: z}}
+	}
+}
+
 // wipeOnceAfterStart is wipeAfterStart for a test whose run goes on after the recovery: the raid dies once, on the
 // first running line, so the running line the resume hook queues does not kill the revived party again.
 func wipeOnceAfterStart(f *fixture) {
@@ -1824,13 +2165,13 @@ func resumePlacedRun(f *fixture) {
 // is a paused patrol or a wanderer, so the wipe ends at 19; at its own spawn
 // the wipe recovers instead.
 func TestRaidWalkWipeRevivesPastIdleHomeMob(t *testing.T) {
-	// Away from home: still and calm 44.6 yd out, but the plan's nearest
-	// same-entry spawn is ~230 yd off (Marli's pack, leg 2), so the revive is
-	// refused.
+	// Away from home: still and calm 44.6 yd out (it follows the commander, so every fallback point and the
+	// entrance are blocked too), but the plan's nearest same-entry spawn is ~230 yd off (Marli's pack, leg 2), so
+	// the revive is refused.
 	t.Run("away from home blocks", func(t *testing.T) {
 		f, _ := newPlaceFixture(t)
 		f.agent.startReply = zgPlaceReply(t)
-		f.agent.unitsFn = placedIdleBlocker(t, 44.6, 14532, "Razzashi Venombrood", false)
+		f.agent.unitsFn = placedFollower(f, 44.6, 14532, "Razzashi Venombrood", false)
 		wipeOnceAfterStart(f)
 		if code := f.run(context.Background()); code != exitRaidWalkIncident {
 			t.Fatalf("exit %d, want 19: %s\n%s\n%s", code, f.stderr.String(), f.stdout.String(), f.summaryText())
@@ -1878,13 +2219,17 @@ func TestRaidWalkReviveWaitsForBlockerToLeave(t *testing.T) {
 	// An in-combat unit at 30 yd: not idle (D-A does not exempt it), so the check runs its full 24 reads. It leaves
 	// after 30 reads, a few of which are the D-C wait's.
 	const leaves = 30
-	_, place := placePlanRows(t)
+	unitsAtSummon := 0
 	f.agent.unitsFn = func(reads int) []objects.Unit {
+		unitsAtSummon = reads
 		if reads > leaves {
 			return []objects.Unit{}
 		}
+		f.agent.mu.Lock()
+		x, y, z := f.agent.x, f.agent.y, f.agent.z
+		f.agent.mu.Unlock()
 		return []objects.Unit{{Type: "creature", Name: "Razzashi Skitterer", Entry: 11338, Hostile: true, InCombat: true,
-			X: place.Point.X + 30, Y: place.Point.Y, Z: place.Point.Z}}
+			X: x + 30, Y: y, Z: z}}
 	}
 	wipeOnceAfterStart(f)
 	resumePlacedRun(f)
@@ -1893,7 +2238,7 @@ func TestRaidWalkReviveWaitsForBlockerToLeave(t *testing.T) {
 		t.Fatalf("exit %d, want 0: %s\n%s\n%s", code, f.stderr.String(), f.stdout.String(), f.summaryText())
 	}
 	f.agent.mu.Lock()
-	gm, gmAt := append([]string{}, f.agent.gm...), append([]time.Time{}, f.agent.gmAt...)
+	gm := append([]string{}, f.agent.gm...)
 	f.agent.mu.Unlock()
 	visibleOff, firstSummon := -1, -1
 	for i, line := range gm {
@@ -1907,8 +2252,8 @@ func TestRaidWalkReviveWaitsForBlockerToLeave(t *testing.T) {
 	if visibleOff < 0 || firstSummon < 0 {
 		t.Fatalf("no revive: visible off %d, first summon %d: %q", visibleOff, firstSummon, gm)
 	}
-	if gap := gmAt[firstSummon].Sub(gmAt[visibleOff]); gap <= 120*time.Second {
-		t.Fatalf("the summons left %s after the revive began, want past the 120 s quiet check (the D-C wait)", gap)
+	if unitsAtSummon <= leaves {
+		t.Fatalf("the first summon came after %d units calls; the blocker was still there (it leaves after read %d)", unitsAtSummon, leaves)
 	}
 	if sum := f.summary(); sum.ReviveRefusal != nil {
 		t.Fatalf("the revive was refused with the blocker gone: %+v", sum.ReviveRefusal)
@@ -1920,8 +2265,9 @@ func TestRaidWalkReviveWaitsForBlockerToLeave(t *testing.T) {
 func TestRaidWalkReviveQuietNeedsCommanderOnTheMap(t *testing.T) {
 	f, _ := newPlaceFixture(t)
 	f.agent.startReply = zgPlaceReply(t)
-	const moved = 26 // past the 24-read quiet check, inside the D-C wait
-	_, place := placePlanRows(t)
+	rows, place := placePlanRows(t)
+	// D-C starts after the revive point's 24-read check, one read per row fallback, and the entrance's 24-read check.
+	moved := 24 + len(reviveFallbackRows(rows, place.Start)) + 24 + 1
 	f.agent.unitsFn = func(reads int) []objects.Unit {
 		if reads > moved {
 			return []objects.Unit{} // the area reads empty from where the commander now stands
@@ -1931,8 +2277,11 @@ func TestRaidWalkReviveQuietNeedsCommanderOnTheMap(t *testing.T) {
 			f.agent.status.Map = 0 // moved off the map; the next read's status check sees it
 			f.agent.mu.Unlock()
 		}
+		f.agent.mu.Lock()
+		x, y, z := f.agent.x, f.agent.y, f.agent.z
+		f.agent.mu.Unlock()
 		return []objects.Unit{{Type: "creature", Name: "Razzashi Skitterer", Entry: 11338, Hostile: true, InCombat: true,
-			X: place.Point.X + 30, Y: place.Point.Y, Z: place.Point.Z}}
+			X: x + 30, Y: y, Z: z}}
 	}
 	wipeOnceAfterStart(f)
 	resumePlacedRun(f)
@@ -1953,7 +2302,7 @@ func TestRaidWalkReviveWaitEndsBeforeRest(t *testing.T) {
 	f, _ := newPlaceFixture(t)
 	f.opts.wipeRest = 5 * time.Minute
 	f.agent.startReply = zgPlaceReply(t)
-	f.agent.unitsFn = placedIdleBlocker(t, 30, 14532, "Razzashi Venombrood", true)
+	f.agent.unitsFn = placedFollower(f, 30, 14532, "Razzashi Venombrood", true)
 	wipeAfterStart(f)
 	code := f.run(context.Background())
 	if code != exitRaidWalkIncident {
@@ -1979,17 +2328,19 @@ func TestRaidWalkReviveWaitEndsBeforeRest(t *testing.T) {
 func TestRaidWalkReviveRefusalSummary(t *testing.T) {
 	t.Run("in combat", func(t *testing.T) {
 		f, _ := newPlaceFixture(t)
-		f.opts.wipeRest = time.Minute
+		f.opts.wipeRest = 5 * time.Minute
 		n := zgPlaceSteps(t)
-		_, place := placePlanRows(t)
 		f.agent.startReply = zgPlaceReply(t)
 		// Two blockers, both fighting: the summary and the reason name the nearest, and the run.log line lists both.
 		f.agent.unitsFn = func(int) []objects.Unit {
+			f.agent.mu.Lock()
+			x, y, z := f.agent.x, f.agent.y, f.agent.z
+			f.agent.mu.Unlock()
 			return []objects.Unit{
 				{Type: "creature", Name: "Razzashi Skitterer", Entry: 11338, Hostile: true, InCombat: true,
-					X: place.Point.X + 30, Y: place.Point.Y, Z: place.Point.Z},
+					X: x + 30, Y: y, Z: z},
 				{Type: "creature", Name: "Razzashi Venombrood", Entry: 14532, Hostile: true, InCombat: true,
-					X: place.Point.X + 44.6, Y: place.Point.Y, Z: place.Point.Z},
+					X: x + 44.6, Y: y, Z: z},
 			}
 		}
 		wipeAfterStart(f)
@@ -2001,8 +2352,8 @@ func TestRaidWalkReviveRefusalSummary(t *testing.T) {
 		if rr == nil {
 			t.Fatalf("no revive_refusal: end %q", sum.EndReason)
 		}
-		if rr.WipeStep != n.start || rr.StartStep != n.start || len(rr.TriedSteps) != 1 || rr.TriedSteps[0] != n.start {
-			t.Fatalf("refusal %+v, want wipe step and start step %d", rr, n.start)
+		if rr.WipeStep != n.start || rr.StartStep != n.start || len(rr.TriedSteps) < 2 || rr.TriedSteps[0] != n.start {
+			t.Fatalf("refusal %+v, want wipe step and start step %d and the fallback rows tried", rr, n.start)
 		}
 		if rr.AllIdle {
 			t.Fatalf("all_idle true with in-combat blockers: %+v", rr)
@@ -2019,7 +2370,7 @@ func TestRaidWalkReviveRefusalSummary(t *testing.T) {
 		if !strings.Contains(sum.EndReason, "Razzashi Skitterer 30.0 yd from the revive point") {
 			t.Fatalf("end reason %q, want the nearest blocker named", sum.EndReason)
 		}
-		want := fmt.Sprintf("revive refusal: wipe step %d, tried %d, waited ", n.start, n.start)
+		want := fmt.Sprintf("revive refusal: wipe step %d, tried %d/", n.start, n.start)
 		if txt := f.summaryText(); !strings.Contains(txt, want) || !strings.Contains(txt, "Razzashi Skitterer") {
 			t.Fatalf("summary.txt:\n%s\nwant %q with the blocker", txt, want)
 		}
@@ -2036,10 +2387,10 @@ func TestRaidWalkReviveRefusalSummary(t *testing.T) {
 	})
 	t.Run("idle inside the reach", func(t *testing.T) {
 		f, _ := newPlaceFixture(t)
-		f.opts.wipeRest = time.Minute
+		f.opts.wipeRest = 5 * time.Minute
 		f.agent.startReply = zgPlaceReply(t)
 		// Idle at 20 yd: inside the landing reach, so D-A still lets it block, and waiting cannot help.
-		f.agent.unitsFn = placedIdleBlocker(t, 20, 14532, "Razzashi Venombrood", false)
+		f.agent.unitsFn = placedFollower(f, 20, 14532, "Razzashi Venombrood", false)
 		wipeAfterStart(f)
 		if code := f.run(context.Background()); code != exitRaidWalkIncident {
 			t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
@@ -2050,6 +2401,42 @@ func TestRaidWalkReviveRefusalSummary(t *testing.T) {
 		}
 		if b := rr.Blockers[0]; !b.Idle || b.InCombat || b.Dist < 19 || b.Dist > 21 {
 			t.Fatalf("blocker %+v, want an idle one 20 yd out", b)
+		}
+	})
+	t.Run("critter is not a blocker", func(t *testing.T) {
+		f, _ := newPlaceFixture(t)
+		f.opts.wipeRest = 5 * time.Minute
+		f.agent.startReply = zgPlaceReply(t)
+		// Walk 27 C restart 2: a moving Snake 2914 72 yd out must not join the blocker list, so the idle Mad Servant
+		// 16.8 yd from the commander is the only blocker and all_idle is true (the wait is pointless, the mob is off
+		// its spawn). The critter is still in the read, as it was in the evidence. The two stand relative to the
+		// commander, so the point, the fallback rows and the entrance all stay refused and the refusal reaches the
+		// summary (#392's entrance fallback runs before it).
+		f.agent.unitsFn = func(int) []objects.Unit {
+			f.agent.mu.Lock()
+			x, y, z := f.agent.x, f.agent.y, f.agent.z
+			f.agent.mu.Unlock()
+			return []objects.Unit{
+				{Type: "creature", Name: "Mad Servant", Entry: 15111, Hostile: true, Level: 61, MaxHealth: 4000,
+					X: x + 16.8, Y: y, Z: z},
+				{Type: "creature", Name: "Snake", Entry: 2914, Hostile: true, Level: 1, MaxHealth: 8, Moving: true,
+					X: x + 72, Y: y, Z: z},
+			}
+		}
+		wipeAfterStart(f)
+		if code := f.run(context.Background()); code != exitRaidWalkIncident {
+			t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+		}
+		rr := f.summary().ReviveRefusal
+		if rr == nil || len(rr.Blockers) != 1 || rr.Blockers[0].Entry != 15111 || !rr.AllIdle {
+			t.Fatalf("refusal %+v, want one idle blocker (15111) and all_idle", rr)
+		}
+		raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+		if err != nil {
+			t.Fatalf("run.log: %v", err)
+		}
+		if strings.Contains(string(raw), "2914") || strings.Contains(string(raw), "Snake") {
+			t.Fatalf("run.log names the critter as a blocker:\n%s", raw)
 		}
 	})
 }
@@ -5322,10 +5709,18 @@ func TestRaidWalkSlotListRoutesToPair(t *testing.T) {
 // at 49.8, -114.6, radius 10), with the given hostiles in every frame.
 func joinerWalk(t *testing.T, hostiles []tbm.HostileRec) *fixture {
 	t.Helper()
+	return joinerWalkNote(t, hostiles,
+		"TBM:RUN|onyxias_lair|running|2/29|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 29)")
+}
+
+// joinerWalkNote is joinerWalk with the pull's own status line, so a stand
+// pull ("shot from firing stand 1") is counted exactly like a plain one.
+func joinerWalkNote(t *testing.T, hostiles []tbm.HostileRec, pullLine string) *fixture {
+	t.Helper()
 	f := newFixture(t)
 	f.agent.startReply = startAt("onyxias_lair", 1)
 	f.agent.startQueue = []queuedEvent{
-		{raw: "TBM:RUN|onyxias_lair|running|2/29|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 29)"},
+		{raw: pullLine},
 		{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands|until boss (step 29)"},
 	}
 	polls := 0
@@ -5405,6 +5800,447 @@ func TestRaidWalkCountsSameEntryNeighbourAsJoiner(t *testing.T) {
 	}
 }
 
+// A pull shot from a firing stand counts its joiners like a plain pull: the
+// pulled pack (the guid and its mate within the row) is owned, and 3 engaged
+// hostiles of another pack inside the window make "joiners 3".
+func TestRaidWalkCountsStandPullJoiners(t *testing.T) {
+	f := joinerWalkNote(t, []tbm.HostileRec{
+		{GUID: 0xF130002C6C00C24B, Entry: 12129, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)},
+		{GUID: 0xF130002, Entry: 12129, X: 53.0, Y: -114.6, HPPct: 100, Target: packet.GUID(1000)}, // pack mate
+		// The neighbouring pack, 106 yd off: the stand pull's joiners.
+		{GUID: 0xF130501, Entry: 12130, X: -52.9, Y: -96.9, HPPct: 100, Target: packet.GUID(1001)},
+		{GUID: 0xF130502, Entry: 12130, X: -53.1, Y: -97.0, HPPct: 100, Target: packet.GUID(1002)},
+		{GUID: 0xF130503, Entry: 12130, X: -52.8, Y: -97.4, HPPct: 100, Target: packet.GUID(1000)},
+	}, "TBM:RUN|onyxias_lair|running|2/29|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from firing stand 1); joiners not read|until boss (step 29)")
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "step 2: joiners 3") {
+		t.Fatalf("no stand-pull joiners line in run.log:\n%s", raw)
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 1 || recs[0].Step != 2 || recs[0].Count != 3 || len(recs[0].GUIDs) != 3 {
+		t.Fatalf("pulljoiners.json %+v, want one step-2 record with 3 guids", recs)
+	}
+}
+
+// Headline: the walk 27 defect was move-step stand pulls counting their own
+// pack mates (a-r2 step 5, c-r3 step 262): the run still stands on its
+// approach move row when the stand pull goes out, so the pack is owned from
+// the pulled unit's plan row. Here the pull of 12129 is ordered on move step 1
+// while its pack stands at pull row step 2: the mate 3 yd off never counts,
+// and the 3 engaged units of the far pack do.
+func TestRaidWalkCountsStandPullJoinersOnMoveStep(t *testing.T) {
+	f := joinerWalkNote(t, []tbm.HostileRec{
+		{GUID: 0xF130002C6C00C24B, Entry: 12129, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)},
+		{GUID: 0xF130002, Entry: 12129, X: 53.0, Y: -114.6, HPPct: 100, Target: packet.GUID(1000)}, // pack mate
+		{GUID: 0xF130501, Entry: 12130, X: -52.9, Y: -96.9, HPPct: 100, Target: packet.GUID(1001)},
+		{GUID: 0xF130502, Entry: 12130, X: -53.1, Y: -97.0, HPPct: 100, Target: packet.GUID(1002)},
+		{GUID: 0xF130503, Entry: 12130, X: -52.8, Y: -97.4, HPPct: 100, Target: packet.GUID(1000)},
+	}, "TBM:RUN|onyxias_lair|running|1/29|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from firing stand 1); joiners not read|until boss (step 29)")
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "step 1: joiners 3") {
+		t.Fatalf("no move-step stand-pull joiners line in run.log:\n%s", raw)
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 1 || recs[0].Step != 1 || recs[0].Count != 3 || len(recs[0].GUIDs) != 3 {
+		t.Fatalf("pulljoiners.json %+v, want one step-1 record with 3 guids", recs)
+	}
+}
+
+// A boss pull has no "pulling <entry> <guid>" line: the run leader walks to
+// the firing stand and the tank engages on arrival ("boss|walk|fighting").
+// That fight start arms the same 10 s window, so a boss stand pull counts the
+// hostiles outside the boss row as joiners too.
+func TestRaidWalkCountsBossPullJoiners(t *testing.T) {
+	f := newFixture(t)
+	f.opts.until = "step 8"
+	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: "TBM:ACTION_ACK|run start|party|1|-",
+		Lines: []string{
+			"TBM:RUN|onyxias_lair|running|7/7|onyxia|boss|walk|walking|until step 8 (step 8)",
+			"TBM:ACTION_ACK|run start|party|1|-",
+		}}}
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|onyxias_lair|running|7/7|onyxia|boss|walk|fighting: the tank engages 10184 on arrival (1.0 yd)|until step 8 (step 8)"},
+		{raw: "TBM:RUN|onyxias_lair|done|7/7|onyxia|move|walk|stopped before step 8: the party stays where it stands|until step 8 (step 8)"},
+	}
+	polls := 0
+	f.agent.viewHook = func() {
+		polls++
+		if polls > 3 {
+			f.clock.mu.Lock()
+			f.clock.t = f.clock.t.Add(11 * time.Second)
+			f.clock.mu.Unlock()
+		}
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{
+			{GUID: 0xF13000000010, Entry: 10184, X: 0.7, Y: -212.0, HPPct: 99, Target: packet.GUID(1000)},
+			// The boss row's own adds, within its radius: the boss pack.
+			{GUID: 0xF13000000011, Entry: 11368, X: 5.0, Y: -212.0, HPPct: 100, Target: packet.GUID(1000)},
+			{GUID: 0xF13000000012, Entry: 11368, X: -5.0, Y: -212.0, HPPct: 100, Target: packet.GUID(1001)},
+			// 3 hostiles of another pack, 100 yd off: joiners.
+			{GUID: 0xF13000000021, Entry: 12130, X: 100.7, Y: -212.0, HPPct: 100, Target: packet.GUID(1001)},
+			{GUID: 0xF13000000022, Entry: 12130, X: 101.0, Y: -213.0, HPPct: 100, Target: packet.GUID(1002)},
+			{GUID: 0xF13000000023, Entry: 12130, X: 100.0, Y: -211.0, HPPct: 100, Target: packet.GUID(1000)},
+		}
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "step 7: joiners 3") {
+		t.Fatalf("no boss-pull joiners line in run.log:\n%s", raw)
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 1 || recs[0].Step != 7 || recs[0].Count != 3 || len(recs[0].GUIDs) != 3 {
+		t.Fatalf("pulljoiners.json %+v, want one step-7 record with 3 guids", recs)
+	}
+}
+
+// A boss window marks the boss row's entries and the plan's hold/add entries
+// as "boss add", not as joiners: summoned and arriving adds of those entries
+// join the fight as it runs, and are no other pack joining the pull.
+func TestBossAddsOfMarksRowHoldAndFirstEntries(t *testing.T) {
+	w := &walk{
+		plan: &dungeon.Plan{Legs: []dungeon.Leg{{
+			Boss: &dungeon.Boss{Entry: 100, First: []uint32{200}, Hold: &dungeon.Hold{Entries: []uint32{300}}},
+		}}},
+		rows: planexport.Rows{Steps: []planexport.StepRow{
+			{Kind: planexport.KindBoss, Entry: 100, Entries: []uint32{150}},
+		}},
+	}
+	got := w.bossAddsOf(1)
+	for _, e := range []uint32{150, 200, 300} {
+		if !got[e] {
+			t.Fatalf("bossAddsOf(1) = %v, want entry %d marked boss add", got, e)
+		}
+	}
+	if got[999] {
+		t.Fatalf("bossAddsOf(1) = %v, want no unlisted entry", got)
+	}
+	w.rows.Steps[0].Kind = planexport.KindPull
+	if got := w.bossAddsOf(1); len(got) != 0 {
+		t.Fatalf("a trash pull's bossAddsOf = %v, want nothing", got)
+	}
+}
+
+// A stand pull still inside its 10 s window when the boss's first fighting line
+// goes by must not block the boss window: the pull's own window ends at that
+// line (its record is written then) and the boss window opens, so both records
+// land in pulljoiners.json. The pull line is pumped on the first poll and the
+// fight line is pushed from that poll's frame, so the next poll (same fake
+// clock) sees it 0 s after the pull.
+func TestRaidWalkBossWindowOpensOverOpenPullWindow(t *testing.T) {
+	f := newFixture(t)
+	f.opts.until = "step 8"
+	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: "TBM:ACTION_ACK|run start|party|1|-",
+		Lines: []string{
+			"TBM:RUN|onyxias_lair|running|7/7|onyxia|boss|walk|walking|until step 8 (step 8)",
+			"TBM:ACTION_ACK|run start|party|1|-",
+		}}}
+	// The pull line goes through the poll loop (startQueue), where pullStarted arms the window.
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|onyxias_lair|running|2/7|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until step 8 (step 8)"},
+	}
+	polls := 0
+	f.agent.viewHook = func() {
+		polls++
+		if polls > 3 {
+			f.clock.mu.Lock()
+			f.clock.t = f.clock.t.Add(11 * time.Second)
+			f.clock.mu.Unlock()
+		}
+	}
+	others := []tbm.HostileRec{
+		{GUID: 0xF13000000021, Entry: 12130, X: 100.7, Y: -212.0, HPPct: 100, Target: packet.GUID(1001)},
+		{GUID: 0xF13000000022, Entry: 12130, X: 101.0, Y: -213.0, HPPct: 100, Target: packet.GUID(1002)},
+		{GUID: 0xF13000000023, Entry: 12130, X: 100.0, Y: -211.0, HPPct: 100, Target: packet.GUID(1000)},
+	}
+	pulled := tbm.HostileRec{GUID: 0xF130002C6C00C24B, Entry: 12129, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)}
+	// Views before the run starts (the hire wait) see no frames of the pull.
+	afterStart := 0
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		f.agent.mu.Lock()
+		started := f.agent.runStarted
+		f.agent.mu.Unlock()
+		if !started {
+			return others
+		}
+		afterStart++
+		switch afterStart {
+		case 1:
+			// The first frame after the pull line's poll: the pulled unit is here
+			// (the window seeds on it), and the fight line lands on the next poll.
+			f.agent.push("TBM:RUN|onyxias_lair|running|7/7|onyxia|boss|walk|fighting: the tank engages 10184 on arrival (1.0 yd)|until step 8 (step 8)", "")
+			return append([]tbm.HostileRec{pulled}, others...)
+		case 3:
+			f.agent.push("TBM:RUN|onyxias_lair|done|7/7|onyxia|move|walk|stopped before step 8: the party stays where it stands|until step 8 (step 8)", "")
+		}
+		return others
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "step 2: joiners 3") || !strings.Contains(string(raw), "step 7: joiners 3") {
+		t.Fatalf("run.log lacks a joiners line for both pulls:\n%s", raw)
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 2 {
+		t.Fatalf("pulljoiners.json %+v, want the step-2 and step-7 records", recs)
+	}
+	byStep := map[int]raidwalk.PullJoiners{}
+	for _, r := range recs {
+		byStep[r.Step] = r
+	}
+	for _, step := range []int{2, 7} {
+		if r, ok := byStep[step]; !ok || r.Count != 3 || len(r.GUIDs) != 3 {
+			t.Fatalf("pulljoiners.json %+v, want a step-%d record with 3 guids", recs, step)
+		}
+	}
+}
+
+// No row in range: the pack is the seed's aggro-together mates seen in the
+// first frame within 15 yd, and the record says "no row". Here the pull is
+// ordered on move step 1 and names an entry no pull/boss row holds, so no row
+// is in range: the mate 2 yd off is owned and the far neighbour joins.
+func TestRaidWalkPullWithNoRowUsesSeedMates(t *testing.T) {
+	f := joinerWalkNote(t, []tbm.HostileRec{
+		{GUID: 0xF130002C6C00C24B, Entry: 77777, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)},
+		{GUID: 0xF130002, Entry: 77777, X: 52.0, Y: -114.6, HPPct: 100, Target: packet.GUID(1000)}, // mate 2 yd off
+		{GUID: 0xF130501, Entry: 12130, X: 0, Y: 0, HPPct: 100, Target: packet.GUID(1001)},
+	}, "TBM:RUN|onyxias_lair|running|1/29|onyxia|move|pull|pulling 77777 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 29)")
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "step 1: joiners 1") {
+		t.Fatalf("no no-row joiners line in run.log:\n%s", raw)
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 1 || recs[0].Step != 1 || recs[0].Count != 1 || !recs[0].NoRow {
+		t.Fatalf("pulljoiners.json %+v, want one step-1 record with 1 guid and no_row", recs)
+	}
+	if !hasNote(f.summary(), "step 1: no row") {
+		t.Fatalf("notes %q, want the no-row note", f.summary().Notes)
+	}
+}
+
+// seeding waits for it and the mate still does not count as a joiner.
+func TestRaidWalkPullSeedRetriesAfterFirstFrame(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 1)
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|onyxias_lair|running|2/29|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 29)"},
+		{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands|until boss (step 29)"},
+	}
+	polls := 0
+	f.agent.viewHook = func() {
+		polls++
+		if polls > 4 {
+			f.clock.mu.Lock()
+			f.clock.t = f.clock.t.Add(11 * time.Second)
+			f.clock.mu.Unlock()
+		}
+	}
+	mate := tbm.HostileRec{GUID: 0xF130002, Entry: 12129, X: 53.0, Y: -114.6, HPPct: 100, Target: packet.GUID(1000)}
+	joiner := tbm.HostileRec{GUID: 0xF130501, Entry: 12130, X: 0, Y: 0, HPPct: 100, Target: packet.GUID(1001)}
+	seed := tbm.HostileRec{GUID: 0xF130002C6C00C24B, Entry: 12129, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)}
+	views := 0
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		views++
+		if views <= 2 {
+			return []tbm.HostileRec{mate, joiner} // the seed is not in view yet
+		}
+		return []tbm.HostileRec{seed, mate, joiner}
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 1 || recs[0].Step != 2 || recs[0].Count != 1 || len(recs[0].GUIDs) != 1 {
+		t.Fatalf("pulljoiners.json %+v, want one step-2 record with 1 guid (the mate waited out the retry)", recs)
+	}
+}
+
+// The "waiting for the tank to stand still before pulling" line opens no
+// window: only the actual pull line does. Here the waiting line goes by first
+// and the pull line never comes, so no record is written at all.
+func TestRaidWalkWaitingLineOpensNoWindow(t *testing.T) {
+	f := newFixture(t)
+	f.agent.startReply = startAt("onyxias_lair", 1)
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|onyxias_lair|running|2/29|onyxia|move|pull|waiting for the tank to stand still before pulling 12129 0xF130002C6C00C24B|until boss (step 29)"},
+		{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands|until boss (step 29)"},
+	}
+	polls := 0
+	f.agent.viewHook = func() {
+		polls++
+		if polls > 3 {
+			f.clock.mu.Lock()
+			f.clock.t = f.clock.t.Add(11 * time.Second)
+			f.clock.mu.Unlock()
+		}
+	}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{
+			{GUID: 0xF130002C6C00C24B, Entry: 12129, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)},
+			{GUID: 0xF130501, Entry: 12130, X: 0, Y: 0, HPPct: 100, Target: packet.GUID(1001)},
+		}
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	recs := readPullJoiners(t, f.out)
+	if len(recs) != 0 {
+		t.Fatalf("pulljoiners.json %+v, want no record: the waiting line opens no window", recs)
+	}
+}
+
+// The boss window's frames mark summoned/arriving boss adds instead of
+// counting them: a unit of a boss-add entry engaged inside the window lands in
+// the record's boss-add set, while a true neighbour of another entry joins.
+func TestRaidWalkPullFramedMarksBossAdds(t *testing.T) {
+	now := time.Now()
+	w := &walk{
+		env:           walkEnv{now: func() time.Time { return now }},
+		rows:          planexport.Rows{},
+		hostiles:      map[string]hostileState{},
+		partyG:        map[uint64]bool{1000: true},
+		pullJoinsAt:   now,
+		pullJoinsStep: 7,
+		pullBossAdds:  map[uint32]bool{11368: true},
+		pullPack:      map[packet.GUID]bool{},
+		pullJoinsSeen: map[packet.GUID]bool{},
+		pullAddsSeen:  map[packet.GUID]bool{},
+	}
+	f := &tbm.ViewFrame{
+		Party: []tbm.PartyRec{{GUID: 1000, Name: "Tank"}},
+		Hostiles: []tbm.HostileRec{
+			{GUID: 0xF13000000011, Entry: 11368, HPPct: 100, Target: packet.GUID(1000)},
+			{GUID: 0xF13000000021, Entry: 12130, HPPct: 100, Target: packet.GUID(1000)},
+		},
+	}
+	w.pullFramed(now.Add(time.Second), f)
+	if len(w.pullJoinsSeen) != 1 || !w.pullJoinsSeen[packet.GUID(0xF13000000021)] {
+		t.Fatalf("joins %+v, want only the 12130 neighbour", w.pullJoinsSeen)
+	}
+	if len(w.pullAddsSeen) != 1 || !w.pullAddsSeen[packet.GUID(0xF13000000011)] {
+		t.Fatalf("adds %+v, want the 11368 boss add marked instead", w.pullAddsSeen)
+	}
+	w.pullJoinersFlush(now.Add(11 * time.Second))
+	if len(w.pullJoins) != 1 || w.pullJoins[0].Count != 1 || len(w.pullJoins[0].BossAdds) != 1 {
+		t.Fatalf("record %+v, want 1 joiner plus 1 boss add", w.pullJoins)
+	}
+}
+
+// The boss latch clears when the walk resumes at an earlier step: a step
+// decrease forgets the armed steps, so the same boss fight later arms a fresh
+// window and its joiners are counted.
+func TestRaidWalkBossLatchClearsOnStepDecrease(t *testing.T) {
+	w := &walk{
+		rows: planexport.Rows{Steps: []planexport.StepRow{
+			{Kind: planexport.KindBoss, Entry: 10184, X: 0, Y: -212, Radius: 30},
+		}},
+		bossPullArmed: map[int]bool{1: true},
+		haveStatus:    true,
+		lastStatus:    tbm.RunStatus{State: tbm.RunRunning, Step: 5},
+	}
+	now := time.Now()
+	w.pullStarted(now, tbm.RunStatus{State: tbm.RunRunning, Step: 1, Kind: planexport.KindBoss, Note: "fighting: the tank engages 10184 on arrival"})
+	if w.pullJoinsAt.IsZero() || w.pullJoinsStep != 1 {
+		t.Fatalf("no boss window after the step decrease (armed %+v, at %v)", w.bossPullArmed, w.pullJoinsAt)
+	}
+}
+
+// pollPageStub is a walkAgent that answers each events read with the next page of TBM run lines and fails any
+// other RPC, so one pollOnce call reads exactly its page and no frame.
+type pollPageStub struct {
+	pages [][]string
+	seq   uint64
+}
+
+func (s *pollPageStub) Call(ctx context.Context, method string, params, out any, timeout time.Duration) error {
+	if method != "events" {
+		return errors.New("unexpected RPC " + method)
+	}
+	page, ok := out.(*events.Page)
+	if !ok {
+		return errors.New("events: want *events.Page")
+	}
+	var next events.Page
+	if len(s.pages) > 0 {
+		for _, line := range s.pages[0] {
+			s.seq++
+			next.Events = append(next.Events, events.Event{Seq: s.seq, Kind: events.KindSystem, Text: line})
+		}
+		s.pages = s.pages[1:]
+	}
+	next.Next = s.seq
+	*page = next
+	return nil
+}
+
+// pollOnce hands pullStarted the status the walk held BEFORE the line it reads, so a step decrease clears the
+// boss latch and the same boss's next fighting line opens a fresh joiner window. pollOnce used to store the new
+// status first: the decrease then compared a status with itself and the latch stayed armed.
+func TestRaidWalkPollOnceReopensBossWindowAfterStepDecrease(t *testing.T) {
+	clock := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	plan := &dungeon.Plan{Name: "onyxias_lair", Map: 249, Legs: []dungeon.Leg{{Boss: &dungeon.Boss{Entry: 10184}}}}
+	rows := planexport.Rows{Steps: []planexport.StepRow{
+		{Kind: planexport.KindMove}, {Kind: planexport.KindMove}, {Kind: planexport.KindMove}, {Kind: planexport.KindMove},
+		{Kind: planexport.KindBoss, Entry: 10184, X: 0, Y: -212, Radius: 30},
+	}}
+	const fight = "TBM:RUN|onyxias_lair|running|5/5|onyxia|boss|walk|fighting: the tank engages 10184 on arrival (1.0 yd)|until step 5 (step 5)"
+	const back = "TBM:RUN|onyxias_lair|running|2/5|onyxia|move|walk|walking|until step 5 (step 5)"
+	w := &walk{
+		plan:    plan,
+		rows:    rows,
+		tracker: raidwalk.NewTracker(plan, nil),
+		agent:   &pollPageStub{pages: [][]string{{fight}, {back}, {fight}}},
+		env:     walkEnv{now: func() time.Time { return clock }},
+	}
+	poll := func(label string) {
+		t.Helper()
+		if _, err := w.pollOnce(context.Background(), false); err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+	}
+	// The first fight opens the boss window at t0.
+	poll("first fight")
+	if w.pullJoinsAt.IsZero() || w.pullJoinsStep != 5 {
+		t.Fatalf("no boss window on the first fight (at %v, step %d)", w.pullJoinsAt, w.pullJoinsStep)
+	}
+	// Eleven seconds on, the walk resumes at step 2: the decrease clears the latch and this poll's end closes the old window.
+	clock = clock.Add(11 * time.Second)
+	poll("step decrease")
+	if len(w.pullJoins) != 1 || w.pullJoins[0].Step != 5 {
+		t.Fatalf("records %+v, want the first window's step-5 record", w.pullJoins)
+	}
+	// The same boss fights again: a new window opens at that line.
+	clock = clock.Add(time.Second)
+	poll("second fight")
+	if !w.pullJoinsAt.Equal(clock) || w.pullJoinsStep != 5 {
+		t.Fatalf("no new boss window after the step decrease (at %v, step %d; want %v, step 5; armed %+v)",
+			w.pullJoinsAt, w.pullJoinsStep, clock, w.bossPullArmed)
+	}
+}
+
 func TestRaidWalkTeardownReasonNamesTheFailingStep(t *testing.T) {
 	f := newFixture(t)
 	f.defaultRun("onyxias_lair")
@@ -5456,6 +6292,41 @@ func TestTrackFrameKeepsPositionsAndKinds(t *testing.T) {
 	}
 	if h.hppct != 55 || h.target != 7 || !h.at.Equal(now) {
 		t.Fatalf("hostile %+v, want hp 55, target 7 and the frame's time", h)
+	}
+}
+
+// turtle-agent#379, round 2: the revive's reset wait never counts the frame's own critter flag — a hurt 'k' row at
+// 60 % still lets the reset complete; a hurt row without the flag still holds it. The band fallback is a units-read
+// test (raidwalk), because the frame carries no max health for it.
+func TestResetReadyIgnoresCritterFlag(t *testing.T) {
+	now := newFakeClock().now()
+	fresh := now.Add(-time.Second)
+	w := &walk{partyG: map[uint64]bool{}, hostiles: map[string]hostileState{
+		"0xF130001234000001": {entry: 2914, kind: "k", hppct: 60, at: fresh},
+	}, bossRows: map[uint32]hostileState{}, botAt: map[string]botPos{}}
+	for i := range 10 {
+		if got := w.resetReady(now.Add(time.Duration(i) * 2 * time.Second)); got {
+			t.Fatalf("reset ready at %ds with only a hurt critter in view", i*2)
+		}
+	}
+	// Held 20 s on a critter alone: the wait completes.
+	if got := w.resetReady(now.Add(20 * time.Second)); !got {
+		t.Fatal("no reset after 20 s with only a hurt critter in view")
+	}
+	// Targeted by nothing, hurt, no flag: still a blocker.
+	w = &walk{partyG: map[uint64]bool{}, hostiles: map[string]hostileState{
+		"0xF130001234000001": {entry: 2914, kind: "-", hppct: 60, at: fresh},
+	}, bossRows: map[uint32]hostileState{}, botAt: map[string]botPos{}}
+	if got := w.resetReady(now.Add(time.Minute)); got {
+		t.Fatal("reset ready with a hurt level-1-by-level row the frame did not flag")
+	}
+	// A level-5 critter the frame flags is still a critter: the flag is primary at any level.
+	w = &walk{partyG: map[uint64]bool{}, hostiles: map[string]hostileState{
+		"0xF130001234000002": {entry: 2915, kind: "k", hppct: 60, at: fresh},
+	}, bossRows: map[uint32]hostileState{}, botAt: map[string]botPos{}}
+	w.resetReady(now)
+	if got := w.resetReady(now.Add(20 * time.Second)); !got {
+		t.Fatal("no reset after 20 s with only a flagged critter in view")
 	}
 }
 

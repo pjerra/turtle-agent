@@ -44,7 +44,12 @@ type Summary struct {
 	Incidents     []InjectIncident `json:"incidents"`
 	Wipes         []int            `json:"wipes"`
 	WipeResumes   int              `json:"wipe_resumes"`
-	BossEngaged   *BossSummary     `json:"boss_engaged"`
+	// The --revive-at-raid counts (omitted when the walk never needed it): hires summoned back to the revive point,
+	// hires two summons did not bring within 10 yd, and hires still out of range or in combat when a resume went out.
+	ReviveBrought      int          `json:"revive_brought,omitempty"`
+	ReviveUnreached    int          `json:"revive_unreached,omitempty"`
+	ReviveGatherMissed int          `json:"revive_gather_missed,omitempty"`
+	BossEngaged        *BossSummary `json:"boss_engaged"`
 	// BossKill is the `boss_kill` object of a walk whose frames engaged a boss (spec 6, D5): the run leader's own
 	// kill report, the phase the boss unit was seen with and the evidence. Absent when no boss was engaged. It is the
 	// LAST engaged boss's record; BossKills lists one record per boss step the run's statuses showed.
@@ -55,11 +60,18 @@ type Summary struct {
 	BossKills []BossKillSummary `json:"boss_kills,omitempty"`
 	Pauses    []PauseSummary    `json:"pauses"`
 	Fights    []FightSummary    `json:"fights"`
+	Decisions *DecisionsSummary `json:"decisions,omitempty"`
 	Dashboard string            `json:"dashboard"`
 	Teardown  TeardownSummary   `json:"teardown"`
 	// Place is the `place` object of a `--place` walk (spec 5.11): the start step the raid was put at, the instance, the
 	// cleared circles and the result. Absent without --place.
 	Place *PlaceSummary `json:"place,omitempty"`
+	// Assisted is true for a walk that used --gm-clear (a test server's GM killed units for it): the result is NOT a real clear.
+	// GMClear lists every unit the tool tried to kill. Both are absent without --gm-clear.
+	Assisted bool           `json:"assisted,omitempty"`
+	GMClear  []GMClearEntry `json:"gm_clear,omitempty"`
+	// GMClearPartial is true when an expected pack member was not confirmed dead (not seen, or still alive): the clear is PARTIAL.
+	GMClearPartial bool `json:"gm_clear_partial,omitempty"`
 	// ReviveRefusal is what kept the revive point from going quiet when the walk gave up on it (D-D, walk 25). Absent
 	// when the walk never refused a revive.
 	ReviveRefusal *ReviveRefusal `json:"revive_refusal,omitempty"`
@@ -75,8 +87,8 @@ type ReviveRefusal struct {
 	// else the first positioned row of the plan (review round 1, Opus L3: a plain --from walk revives at the plan's
 	// own first point, whatever step the run is started on).
 	StartStep int `json:"start_step"`
-	// TriedSteps are the revive points the walk read, in order. It is the start step alone: D-B's passed steps are not
-	// implemented (the walk revives at the start, or at the placement's point).
+	// TriedSteps are the revive points the walk read, in order: the revive point, then the fallback rows of its leg
+	// and the previous leg's last move row (the entrance has no step: EntranceTried says it was reached).
 	TriedSteps []int `json:"tried_steps"`
 	// EntranceTried says the entrance fallback's `.go xyz` went out (review round 1, Opus L3): true while the walk
 	// refused at the entrance, whether its go landed or not.
@@ -98,7 +110,8 @@ type ReviveBlocker struct {
 	Idle  bool    `json:"idle"`
 	// InCombat is the unit's UNIT_FLAG_IN_COMBAT: the state that keeps the 45 yd rule on it.
 	InCombat bool `json:"in_combat"`
-	// Patrol marks a --patrols patrol rather than a unit (entry 0, no combat): only its path blocks.
+	// Patrol marks a patrol rather than a unit (entry 0, no combat): a --patrols file's patrol or the plan's own
+	// patrol block. Only its path blocks.
 	Patrol bool `json:"patrol,omitempty"`
 }
 
@@ -208,6 +221,8 @@ type StepSummary struct {
 type LegSummary struct {
 	Leg     string  `json:"leg"`
 	Seconds float64 `json:"seconds"`
+	// Assisted marks a leg the walk's --gm-clear killed units of: its result is not a real clear.
+	Assisted bool `json:"assisted,omitempty"`
 }
 
 // DeathSummary is the deaths total and the per-step and per-bot splits.
@@ -295,6 +310,27 @@ type FightSummary struct {
 	Detail *FightDetail `json:"detail,omitempty"`
 }
 
+// DecisionsFileSummary is one file of the decisions pull: its name, bytes and sha256 hex.
+type DecisionsFileSummary struct {
+	Name   string `json:"name"`
+	Bytes  int64  `json:"bytes"`
+	SHA256 string `json:"sha256"`
+}
+
+// DecisionsCaptureSummary is one pulled decision capture: its id, file count and bytes.
+type DecisionsCaptureSummary struct {
+	ID    string `json:"id"`
+	Files int    `json:"files"`
+	Bytes int64  `json:"bytes"`
+}
+
+// DecisionsSummary is the walk's decisions pull: a note plus one row per pulled capture.
+type DecisionsSummary struct {
+	Note     string                    `json:"note"`
+	Captures []DecisionsCaptureSummary `json:"captures"`
+	Bytes    int64                     `json:"bytes"`
+}
+
 // TeardownSummary is what teardown reported. Reason is the first failing step
 // ("gone", "unbind", "remove X", "logout", "rpc", "lease", ...) with its detail;
 // empty when nothing failed.
@@ -332,19 +368,26 @@ type SummaryMeta struct {
 	HireSettle  time.Duration
 	SettleShort bool
 	// WipeResumes is the walk's recovered wipes and near-wipe stops (--wipe-resume).
-	WipeResumes    int
-	Layout         LayoutSummary
-	Started        time.Time
-	Ended          time.Time
-	EndReason      string
-	Fights         []FightSummary
-	Injections     []InjectSummary
-	InjectedDeaths int
-	Incidents      []InjectIncident
-	Dashboard      string
-	Teardown       TeardownSummary
+	WipeResumes                                        int
+	ReviveBrought, ReviveUnreached, ReviveGatherMissed int
+	Layout                                             LayoutSummary
+	Started                                            time.Time
+	Ended                                              time.Time
+	EndReason                                          string
+	Fights                                             []FightSummary
+	Decisions                                          *DecisionsSummary
+	Injections                                         []InjectSummary
+	InjectedDeaths                                     int
+	Incidents                                          []InjectIncident
+	Dashboard                                          string
+	Teardown                                           TeardownSummary
 	// Place is the --place walk's place object (nil without --place).
 	Place *PlaceSummary
+	// GMClearUsed says the walk ran --gm-clear (also when no unit was found); GMClear is what it tried to kill and GMClearLegs the legs
+	// it came from.
+	GMClearUsed bool
+	GMClear     []GMClearEntry
+	GMClearLegs []string
 	// ReviveRefusal is the walk's revive_refusal (nil when no revive was refused).
 	ReviveRefusal *ReviveRefusal
 	// BossKill is the walk's boss_kill (nil when no boss was engaged).
@@ -379,23 +422,28 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		Ended:          m.Ended,
 		EndReason:      m.EndReason,
 		Fights:         nonNilFights(m.Fights),
+		Decisions:      m.Decisions,
 		Injections:     nonNilInjections(m.Injections),
 		Incidents:      nonNilIncidents(m.Incidents),
 		Roster:         RosterSummary{OT: []string{}, Rest: []string{}},
 		Dashboard:      m.Dashboard,
 		Teardown:       m.Teardown,
 		Place:          m.Place,
+		Assisted:       m.GMClearUsed,
+		GMClear:        m.GMClear,
+		GMClearPartial: GMClearPartial(m.GMClear),
 		BossKill:       m.BossKill,
 		BossKills:      m.BossKills,
 		ReviveRefusal:  m.ReviveRefusal,
 		ExitCode:       m.ExitCode,
 		Notes:          nonNilStrings(m.Notes),
 		WipeResumes:    m.WipeResumes,
-		StepTimeline:   []StepSummary{},
-		Legs:           []LegSummary{},
-		Wipes:          []int{},
-		Pauses:         []PauseSummary{},
-		Deaths:         DeathSummary{ByStep: map[int]int{}, ByBot: map[string]int{}},
+		ReviveBrought:  m.ReviveBrought, ReviveUnreached: m.ReviveUnreached, ReviveGatherMissed: m.ReviveGatherMissed,
+		StepTimeline: []StepSummary{},
+		Legs:         []LegSummary{},
+		Wipes:        []int{},
+		Pauses:       []PauseSummary{},
+		Deaths:       DeathSummary{ByStep: map[int]int{}, ByBot: map[string]int{}},
 	}
 	if s.Layout.Tanks == nil {
 		s.Layout.Tanks = []string{}
@@ -422,8 +470,12 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		for _, sp := range t.Timeline() {
 			s.StepTimeline = append(s.StepTimeline, StepSummary{Step: sp.Step, Leg: sp.Leg, Kind: sp.Kind, Seconds: round1(sp.Seconds)})
 		}
+		assisted := map[string]bool{}
+		for _, l := range m.GMClearLegs {
+			assisted[l] = true
+		}
 		for _, l := range t.Legs() {
-			s.Legs = append(s.Legs, LegSummary{Leg: l.Leg, Seconds: round1(l.Seconds)})
+			s.Legs = append(s.Legs, LegSummary{Leg: l.Leg, Seconds: round1(l.Seconds), Assisted: assisted[l.Leg]})
 		}
 		total, byStep, byBot := t.Deaths()
 		s.Deaths = DeathSummary{Total: total, ByStep: byStep, ByBot: byBot}
@@ -515,7 +567,16 @@ func (s *Summary) Text() string {
 	if s.Until == "none" {
 		b.WriteString(" (full clear: no until)")
 	}
+	if s.Assisted {
+		b.WriteString(" ASSISTED")
+		if s.GMClearPartial {
+			b.WriteString(" PARTIAL")
+		}
+	}
 	b.WriteString("\n")
+	if s.Assisted {
+		b.WriteString(GMClearSummaryLine(s.GMClear, assistedLegs(s)) + "\n")
+	}
 	fmt.Fprintf(&b, "plan %s map %d; server %s slot %d as %s\n", s.Plan, s.Map, s.Server, s.Slot, s.Character)
 	// A --place walk whose route guard shortened the until shows both: what the user asked for and what the run
 	// actually walked (F5, D8).
@@ -605,4 +666,20 @@ func (s *Summary) Text() string {
 		}
 	}
 	return b.String()
+}
+
+// assistedLegs are the legs of the walk's gm_clear entries, in first-use order (the Legs marks when the tracker saw them).
+func assistedLegs(s *Summary) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, e := range s.GMClear {
+		if !seen[e.Leg] {
+			seen[e.Leg] = true
+			out = append(out, e.Leg)
+		}
+	}
+	if len(out) == 0 {
+		out = append(out, "no live unit found")
+	}
+	return out
 }
