@@ -319,7 +319,7 @@
     },
     {
       "name": "warchief_rend_blackhand",
-      "to": {"x": 140.0, "y": -367.0, "z": 117.0},
+      "to": {"x": 140, "y": -367, "z": 117},
       "pull_groups": [
         {
           "entries": [10083],
@@ -564,7 +564,7 @@
     },
     {
       "name": "general_drakkisath",
-      "to": {"x": 70.0, "y": -404.0, "z": 64.4},
+      "to": {"x": 70, "y": -404, "z": 64.4},
       "pull_groups": [
         {
           "entries": [10299],
