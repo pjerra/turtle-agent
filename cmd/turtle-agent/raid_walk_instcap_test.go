@@ -67,6 +67,10 @@ func TestInstanceCapWaitsForTheOldestToAgeOut(t *testing.T) {
 	if len(*slept) != 1 || (*slept)[0] != 5*time.Minute+capWaitMargin {
 		t.Fatalf("slept %v, want one wait of 5m + margin", *slept)
 	}
+	// The wait names when the oldest entry leaves the hour (55 min old at 12:00: 12:05), not only the duration.
+	if !strings.Contains(stderr.String(), "earliest free time 2026-11-03T12:05:00Z") {
+		t.Fatalf("the wait line lacks the earliest free time: %q", stderr.String())
+	}
 	l, _ := raidwalk.LoadCapLedger(w.env.capLedger)
 	// 3 entries left in the hour, plus the place this walk now holds.
 	if n := l.Count("m910q", *now); n != 4 || !w.capReserved {

@@ -42,6 +42,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/slots"
 	"github.com/pjerra/turtle-agent/internal/tbdash"
 	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
 // The exit codes of a raid walk (spec 1.2).
@@ -57,7 +58,7 @@ const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
     [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--decisions on|off] [--decisions-max-mib N]
-    [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--dry-run]
+    [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--reuse-instance] [--dry-run]
        turtle-agent raid-walk report <dir> [--spell ID] [--clock-offset 1h] [--md FILE] [--json FILE] [--out DIR]`
 
 // raidWalkPlanRe is the plan name as the server knows it (spec 3.1).
@@ -77,6 +78,7 @@ type raidWalkOptions struct {
 	until           string
 	from            string
 	place           bool       // --place: start the raid partway into its instance, at the --from start (spec 3)
+	reuseInstance   bool       // --reuse-instance: a re-place keeps the raid's current instance (no fresh one is entered or counted)
 	gmClear         stringList // --gm-clear "<leg>:<group>[,<group>...]", repeatable: GM-kill those pull groups after the placement (test servers only)
 	gmClearBoss     stringList // --gm-clear-boss <leg>, repeatable: GM-kill the leg's boss and its pack
 	gmClearSpawns   string     // --gm-clear-spawns: the world export dir (default <dir>/../tools/dungeongen/testdata/map<N>)
@@ -109,6 +111,9 @@ type raidWalkOptions struct {
 	binary          string
 	injects         stringList // --inject, repeatable
 	dryRun          bool
+	// noPlaceRetreat is a test seam: the unit tests that pin one placement attempt turn the same-instance retreat off
+	// (the walk's own TestPlaceQuietFailureRetreatsInTheSameInstance runs it).
+	noPlaceRetreat bool
 }
 
 // stringList is a repeatable string flag: --inject a --inject b, or --inject=a.
@@ -224,6 +229,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.until, "until", "boss", "boss (stops before it), boss-done (after the boss step), none, \"step N\" or \"leg L\"")
 	fs.StringVar(&o.from, "from", "", "\"leg L\" or \"step N\" for the run leader")
 	fs.Var(onOffFlag{v: &o.place, name: "--place"}, "place", "with --from: put the raid at that start inside the instance, clearing the legs it skips (Eluna test toolkit: m910q or tortoise-test2 only)")
+	fs.BoolVar(&o.reuseInstance, "reuse-instance", false, "with --place: keep the raid's CURRENT instance (no fresh instance is entered or counted, so the instance cap is untouched). A live raid is kept; a logged-out raid is resumed from the commander's live bind; with no bind the walk says so and falls back to a fresh entry. Combines with --gm-clear")
 	fs.StringVar(&speed, "speed", "1.0", "the run's test speed, 1.0 to 3.0")
 	fs.StringVar(&o.hires, "hires", "", "the tb-raid-roster v1 file (default: from the plan's raid block)")
 	fs.IntVar(&o.tier, "tier", 0, "the hire gear tier (1-3) of a raid the committed table leaves unknown")
@@ -379,6 +385,12 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	}
 	// --gm-clear (the owner-approved test tool): refused outside the test servers --place already names, and without --place (the
 	// commander must stand in the raid's copy, in GM mode, before it kills anything).
+	if o.reuseInstance {
+		if !o.place {
+			fmt.Fprintf(stderr, "raid-walk: --reuse-instance needs --place (it is a re-place into the raid's current instance)\n")
+			return o, exitUsage
+		}
+	}
 	if len(o.gmClear) > 0 || len(o.gmClearBoss) > 0 {
 		if !placeServers[o.server] {
 			fmt.Fprintf(stderr, "raid-walk: --gm-clear kills units by GM command: test servers only (%s)\n", strings.Join(placeServerList(), ", "))
@@ -877,6 +889,7 @@ type walk struct {
 	// The --place start (spec 4/5): the plan from validate, the raid's instance id read at the place, the commander's
 	// last `.go xyz` in the copy (the clear's distance rule), the quiet read's near list, and what the phase reports.
 	place         *raidwalk.PlacePlan
+	placeWorld    *worldspawn.World // the world export the offline quiet start reads (nil: unavailable)
 	placeInst     float64
 	placePos      [3]float32
 	placeHavePos  bool
@@ -884,6 +897,11 @@ type walk struct {
 	placeSum      *raidwalk.PlaceSummary
 	placeRemoved  int
 	placeSkipped  []raidwalk.ClearCircle // the corridor circles placeClear refused (the extra round keeps away from them)
+	placeBlockers []ttUnit               // the quiet's last blockers (the same-instance retreat may GM-kill them)
+	placeRouteEnd int                    // the corridor's route end (PlaceBossGuard's routeEnd), for a retreat's clear
+	reuseMode     string                 // "alive", "bind" or "fresh": what --reuse-instance found
+	reuseBindInst float64                // the instance the commander's existing bind names (reuseMode "bind")
+	reuseBindTTR  string                 // that bind's time to reset, from .instance listbinds
 	placeSummoned []string
 
 	capOwner    string // the instance-cap reservation's owner (holder + pid)
@@ -892,6 +910,7 @@ type walk struct {
 	// --gm-clear: the packs validate expanded from the world export, and what the place phase tried to kill. gmClearUsed is true once
 	// the flag was given (the walk is ASSISTED even when no live unit was found).
 	gmClear     []raidwalk.GMClearPack
+	gmClearWarn []string // groups the plan skipped (no hostile spawn near the row): a WARN note and run.log line
 	gmClearLog  []raidwalk.GMClearEntry
 	gmClearUsed bool
 
@@ -1123,11 +1142,46 @@ func (w *walk) validate() error {
 		if err != nil {
 			return stopf(exitUsage, "%v", err)
 		}
+		quietMoved := false
+		if !door {
+			// The offline start choice (walk 33): a requested row within a not-yet-pulled pack's aggro burns a fresh
+			// instance on the quiet check. Walk back along the plan's move rows to the nearest row that stands
+			// AggroRadius+8 yd clear of every static spawn of the packs the run has not pulled yet, and say which
+			// row and why. No session, no instance: this runs before the enter phase.
+			if world := w.loadPlaceWorld(); world != nil {
+				level := 0
+				if len(w.plan.LevelBand) == 2 {
+					level = w.plan.LevelBand[0]
+				}
+				if qs, note := raidwalk.PlaceQuietStart(w.rows, world, step, level); note != "" {
+					w.note("place: %s", note)
+					if qs != step {
+						step, quietMoved = qs, true
+						leg = raidwalk.PlaceLegName(w.rows, step)
+						if fallbackFrom == "" {
+							untilBase = step
+						}
+					}
+				}
+			}
+		}
 		if door {
 			w.note("place: leg %s is the first leg; starting from the door", leg)
 		} else {
 			if fallbackFrom != "" {
 				w.note("place: leg %s has no quiet row; placing at step %d (leg %s)", fallbackFrom, step, leg)
+			}
+			// A --from step on a pull row places at that pull's own stand point (or the move row before it when the
+			// row has no point): say which point was used (walk 32: 237, 560 and others were refused as "a pull row").
+			if !quietMoved && len(w.fromWords) == 3 && w.fromWords[1] == "step" {
+				if req, aerr := strconv.Atoi(w.fromWords[2]); aerr == nil && req >= 1 && req <= len(w.rows.Steps) &&
+					w.rows.Steps[req-1].Kind == planexport.KindPull {
+					if req == step {
+						w.note("place: step %d is a pull row; placing at the pull's own stand point", step)
+					} else {
+						w.note("place: step %d is a pull row without a point; placing at the move row before it (step %d)", req, step)
+					}
+				}
 			}
 			p, ok := raidwalk.PlacePoint(w.rows, step)
 			if !ok {
@@ -1175,15 +1229,18 @@ func (w *walk) validate() error {
 			return stopf(exitUsage, "%v", err)
 		}
 		// A BEHIND boss or hold row of an earlier leg on the route is alive in the raid's fresh copy: when the route
-		// passes one in a later leg, the run shortens its until to stop before that segment (D8). In the start step's
-		// own leg the placement is refused, as PlaceClear's own guard does. A hit on the last segment leaves until at
-		// the stop, so hit says the run must shorten anyway (an `--until none` run, or a boss-done that became none:
-		// its walk would otherwise walk into that segment).
+		// passes one in a later leg, an explicit until is shortened to stop before that segment (D8). In the start
+		// step's own leg the placement is refused, as PlaceClear's own guard does. A hit on the last segment leaves
+		// until at the stop, so hit says the caller must shorten anyway. `--until none` is the operator's own clause
+		// and is never replaced with a step: the run walks the plan to its end and the run leader fights whatever it
+		// meets. The corridor still ends at routeEnd (the step before the guarded segment), so the clear stays off it.
 		until, routeEnd, gnote, refusal, hit := raidwalk.PlaceBossGuard(w.rows, startStep, stop)
+		w.placeRouteEnd = routeEnd
 		if refusal != "" {
 			return stopf(exitUsage, "%v", refusal)
 		}
-		if hit && (until != stop || len(w.untilWords) == 0) {
+		untilNone := strings.TrimSpace(w.opts.until) == "none"
+		if !untilNone && hit && (until != stop || len(w.untilWords) == 0) {
 			if w.bossDoneStep != 0 && until <= w.bossDoneStep {
 				return stopf(exitUsage, "--place: %s; that is before the boss-done step %d", gnote, w.bossDoneStep)
 			}
@@ -1199,8 +1256,13 @@ func (w *walk) validate() error {
 		if clear.Refusal != "" {
 			return stopf(exitUsage, "%v", clear.Refusal)
 		}
-		// Stop is the until the dry run and the summary print; the corridor ended at routeEnd.
-		w.place.Stop, w.place.Circles, w.place.Notes, w.place.Ahead, w.place.Behind = until, clear.Circles, clear.Notes, clear.Ahead, clear.Behind
+		// Stop is the until the dry run and the summary print; the corridor ended at routeEnd. `--until none` has no
+		// stop step: 0 says so (the run start carries no until clause).
+		placeStop := until
+		if untilNone {
+			placeStop = 0
+		}
+		w.place.Stop, w.place.Circles, w.place.Notes, w.place.Ahead, w.place.Behind = placeStop, clear.Circles, clear.Notes, clear.Ahead, clear.Behind
 		for _, n := range clear.Notes {
 			w.note("place: %s", n)
 		}
@@ -1584,8 +1646,12 @@ func (w *walk) printPlan(out io.Writer) {
 	}
 	if w.place != nil {
 		p := w.place.Point
-		fmt.Fprintf(out, "  8b place: start step %d%s at %s %s %s; until step %d; %d circles; skip %s\n",
-			w.place.Start, legWords(w.place.Leg), num32(p.X), num32(p.Y), num32(p.Z), w.place.Stop,
+		stop := fmt.Sprintf("step %d", w.place.Stop)
+		if w.place.Stop == 0 {
+			stop = "none"
+		}
+		fmt.Fprintf(out, "  8b place: start step %d%s at %s %s %s; until %s; %d circles; skip %s\n",
+			w.place.Start, legWords(w.place.Leg), num32(p.X), num32(p.Y), num32(p.Z), stop,
 			len(w.place.Circles), raidwalk.SkipWords(w.place.Skips))
 		for _, c := range w.place.Circles {
 			unit := ""
@@ -1602,6 +1668,9 @@ func (w *walk) printPlan(out io.Writer) {
 			fmt.Fprintf(out, "  8b note: %s\n", n)
 		}
 		fmt.Fprintf(out, "  8b commander: .gm on; .appear <mt>; q inst, q group, q floor, q units, clearto, quiet, place <x> <y> <z> spread=5 of=<mt>; frames; cmd stay; cmd follow\n")
+	}
+	for _, warn := range w.gmClearWarn {
+		fmt.Fprintf(out, "  8c %s\n", warn)
 	}
 	for _, pk := range w.gmClear {
 		fmt.Fprintf(out, "  8c gm-clear: %s pack %d, %d members, around %s %s %s: select each live member by guid, .die, read its death\n",

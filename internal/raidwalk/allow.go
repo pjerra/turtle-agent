@@ -75,6 +75,10 @@ func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
 		return len(f) == 2 && hires[f[1]]
 	case ".instance":
 		// `.instance unbind <map>` drops the commander's own bind to the walk's plan map (spec 5.1): that map and no other.
+		// `.instance listbinds` is read only: the --reuse-instance bind check needs the commander's TTR for the map.
+		if len(f) == 2 && f[1] == "listbinds" {
+			return true
+		}
 		return len(f) == 3 && f[1] == "unbind" && f[2] == strconv.FormatUint(uint64(mapID), 10)
 	case ".bot":
 		if len(f) < 3 {

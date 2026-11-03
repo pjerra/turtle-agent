@@ -101,6 +101,7 @@ type placeToolkit struct {
 	placeAll bool
 
 	quietCalls int
+	quiets     []string
 	cleartos   []string
 	places     []string
 }
@@ -155,6 +156,7 @@ func (p *placeToolkit) answer(cmd string) (ttResult, error) {
 		return ttReplyOf(p.t, map[string]any{"map": 309, "n": n, "removed": []any{}, "skipped": []any{}}), nil
 	case strings.HasPrefix(cmd, "quiet"):
 		p.quietCalls++
+		p.quiets = append(p.quiets, cmd)
 		q := true
 		if p.quiet != nil {
 			q = p.quiet(p.quietCalls)
@@ -215,6 +217,10 @@ func newPlaceFixture(t *testing.T) (*fixture, *placeToolkit) {
 	f.agent.instMap = 309
 	p := &placeToolkit{t: t, f: f, inst: 103, placeAll: true}
 	f.agent.ttFn = p.answer
+	// The offline quiet start reads the world export; the place tests that are not about it run with an empty folder,
+	// so the plan's own start step stays what they pin. TestPlaceWalksStartBackFromANotYetPulledPack supplies one.
+	f.opts.gmClearSpawns = t.TempDir()
+	f.opts.noPlaceRetreat = true
 	// The run's own status lines: the placed run walks two steps and stops at its until. A test that needs the raid to
 	// die (or the run to go on) replaces this queue.
 	n := zgPlaceSteps(t)
@@ -2342,10 +2348,12 @@ func TestPlaceQuietThirdOwnedUnitInReachBlocks(t *testing.T) {
 	}
 }
 
-// F5 (D8): a placed `--until none` run from Marli shortens its until to stop before the segment that passes Venoxis,
-// and the run start carries the shortened clause (walk 24 m910q-reach: the restart refused with "boss/event row 185").
-func TestPlaceShortenedUntilReachesRunStart(t *testing.T) {
+// F5 (D8), walk 31: a placed `--until none` run is never given a step the operator did not ask for. The route guard
+// still ends the corridor before the segment that passes Venoxis, but the run start carries no until clause and the
+// dry run and summary say "none".
+func TestPlaceUntilNoneIsNeverShortened(t *testing.T) {
 	f, _ := newPlaceFixture(t)
+	f.opts.dryRun = true
 	f.opts.from = "leg high_priestess_marli"
 	f.opts.until = "none"
 	plan := zgPlan(t)
@@ -2362,34 +2370,66 @@ func TestPlaceShortenedUntilReachesRunStart(t *testing.T) {
 	if refusal != "" {
 		t.Fatalf("the guard refused: %q", refusal)
 	}
-	if !hit {
-		t.Fatal("the guard did not report the segment")
+	if !hit || until == len(rows.Steps) {
+		t.Fatalf("the guard hit %v with until %d, want a shortened corridor", hit, until)
 	}
-	if until == len(rows.Steps) {
-		t.Fatal("the guard did not shorten the until")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
 	}
-	label := fmt.Sprintf("until step %d", until)
-	status := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|marli|move|walk|walking|%s (step %d)", start, len(rows.Steps), label, until)
+	out := f.stdout.String()
+	for _, want := range []string{
+		"until none;",
+		fmt.Sprintf("8b place: start step %d", start),
+		"until none;",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("the dry run misses %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "shortens") {
+		t.Fatalf("the dry run still names a shortened until:\n%s", out)
+	}
+	if !strings.Contains(out, fmt.Sprintf("9 commander: run start zul_gurub from step %d\n", start)) {
+		t.Fatalf("the run start carries an until:\n%s", out)
+	}
+}
+
+// Walk 31: a placed `--until none` run whose boss engages five steps before its boss row (Mandokir was woken by the
+// pack beside him). The run leader fights it: the walk never sends `.bot run stop` because of a boss or until rule.
+func TestPlacedUntilNoneBossEngageFiveStepsBackDoesNotStop(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	f.opts.until = "none"
+	rows := zgRows(t)
+	n := zgPlaceSteps(t)
+	boss := zgBossStep(t)
+	step := boss - 5
+	if step <= n.start || rows.Steps[step-1].Leg != rows.Steps[boss-1].Leg {
+		t.Fatalf("fixture rows: step %d is not five steps before boss row %d in the same leg", step, boss)
+	}
+	start := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|thekal|move|walk|walking", n.start, n.total)
 	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
 		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
-		Line: status,
+		Line: start,
 		Lines: []string{
-			status,
-			fmt.Sprintf("The run starts at step %d of %d (leg high_priestess_marli)", start, len(rows.Steps)),
+			start,
+			fmt.Sprintf("The run starts at step %d of %d (leg thekal)", n.start, n.total),
 			"TBM:ACTION_ACK|run start|party|1|-",
 		}}}
 	f.agent.startQueue = []queuedEvent{
-		{raw: status},
-		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|marli|move|walk|stopped before step %d (%s): the party stays where it stands", start, len(rows.Steps), until, label)},
+		{raw: start},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|thekal|move|walk|fighting", step, n.total)},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|thekal|move|walk|plan done (0 left): the party stays where it stands", n.total, n.total)},
 	}
-	code := f.run(context.Background())
-	if code != exitOK {
+	f.agent.hostilesFn = func(int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 9, Entry: 14599, HPPct: 100, Target: packet.GUID(1000)}}
+	}
+	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
 	}
-	if want := fmt.Sprintf("until|step|%d", until); !strings.HasSuffix(f.agent.startArgs, want) {
-		t.Fatalf("run start args %q, want the suffix %q", f.agent.startArgs, want)
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want 0: --until none never stops the run on a boss", n)
 	}
-	if !hasNote(f.summary(), "the run stops before step") {
+	if !hasNote(f.summary(), "under --until none: the run leader fights it") {
 		t.Fatalf("notes %v", f.summary().Notes)
 	}
 }
@@ -2430,9 +2470,9 @@ func placeSQLFile(t *testing.T, rows planexport.Rows) string {
 	return path
 }
 
-// H1 (D8): with `--until none` the guard's hit is on the last segment, where until already equals the stop. The walk
-// must shorten to `until step 12` all the same: the run never walks 11 -> 12 past the BEHIND boss of leg 0.
-func TestPlaceShortensAnUntilNoneHitOnTheLastSegment(t *testing.T) {
+// H1 (D8), walk 31: with `--until none` the guard's hit on the last segment does not invent an until either. The
+// corridor still ends before the guarded segment, but the run walks none and the start carries no clause.
+func TestPlaceKeepsUntilNoneOnTheLastSegment(t *testing.T) {
 	f, _ := newPlaceFixture(t)
 	rows := placeLastSegmentRows(false)
 	f.opts.dryRun = true
@@ -2442,14 +2482,28 @@ func TestPlaceShortensAnUntilNoneHitOnTheLastSegment(t *testing.T) {
 	}
 	out := f.stdout.String()
 	for _, want := range []string{
-		"until none (the place shortens it to until step 12)",
-		"8b place: start step 5 at 0 40 0; until step 12;",
-		"9 commander: run start zul_gurub from step 5 until step 12",
+		"until none;",
+		"8b place: start step 5 at 0 40 0; until none;",
+		"9 commander: run start zul_gurub from step 5\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("the dry run misses %q:\n%s", want, out)
 		}
 	}
+	if strings.Contains(out, "shortens") || strings.Contains(out, "until step 12") {
+		t.Fatalf("the dry run names an until the operator did not ask for:\n%s", out)
+	}
+}
+
+// placeGuardRows is placeLastSegmentRows with eight more move rows after the guarded segment, so an explicit until can
+// run past it and the guard's hit is not on the last segment.
+func placeGuardRows() planexport.Rows {
+	rows := placeLastSegmentRows(false)
+	for i := range 8 {
+		rows.Steps = append(rows.Steps, planexport.StepRow{Plan: "zul_gurub", Seq: len(rows.Steps) + 1,
+			Kind: planexport.KindMove, Leg: 2, X: float32(40 + i*10), Y: 140})
+	}
+	return rows
 }
 
 // H1 (D8): a boss-done run whose boss is the plan's last step resolves to `none`, and the guard's hit on the last
@@ -2467,14 +2521,14 @@ func TestPlaceRefusesAShortenedBossDoneOnTheLastSegment(t *testing.T) {
 	}
 }
 
-// L5 (F5): a shortened until is printed next to the one the user asked for, in the dry run's header and in the
-// summary, so the log never says `until none` for a run that walked `until step 12`.
+// L5 (F5): an explicit until that the route guard shortens is printed next to the one the user asked for, in the dry
+// run's header and in the summary. `--until none` is never shortened (walk 31), so this uses an explicit stop.
 func TestPlaceShortenedUntilIsPrinted(t *testing.T) {
-	rows := placeLastSegmentRows(false)
-	const want = "until none (the place shortens it to until step 12)"
+	rows := placeGuardRows()
+	const want = "until step 20 (the place shortens it to until step 12)"
 	f, _ := newPlaceFixture(t)
 	f.opts.dryRun = true
-	f.opts.from, f.opts.until, f.opts.sql = "step 5", "none", placeSQLFile(t, rows)
+	f.opts.from, f.opts.until, f.opts.sql = "step 5", "step 20", placeSQLFile(t, rows)
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("dry run exit %d: %s", code, f.stderr.String())
 	}
@@ -2483,22 +2537,25 @@ func TestPlaceShortenedUntilIsPrinted(t *testing.T) {
 	}
 
 	f2, _ := newPlaceFixture(t)
-	f2.opts.from, f2.opts.until, f2.opts.sql = "step 5", "none", placeSQLFile(t, rows)
-	status := "TBM:RUN|zul_gurub|running|5/12|thekal|move|walk|walking|until step 12 (step 12)"
+	f2.opts.from, f2.opts.until, f2.opts.sql = "step 5", "step 20", placeSQLFile(t, rows)
+	status := "TBM:RUN|zul_gurub|running|5/20|thekal|move|walk|walking|until step 12 (step 12)"
 	f2.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
 		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
 		Line: status,
 		Lines: []string{
 			status,
-			"The run starts at step 5 of 12 (leg one)",
+			"The run starts at step 5 of 20 (leg one)",
 			"TBM:ACTION_ACK|run start|party|1|-",
 		}}}
 	f2.agent.startQueue = []queuedEvent{
 		{raw: status},
-		{raw: "TBM:RUN|zul_gurub|done|5/12|thekal|move|walk|stopped before step 12 (until step 12): the party stays where it stands"},
+		{raw: "TBM:RUN|zul_gurub|done|5/20|thekal|move|walk|stopped before step 12 (until step 12): the party stays where it stands"},
 	}
 	if code := f2.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s\n%s", code, f2.stderr.String(), f2.stdout.String())
+	}
+	if want := "until|step|12"; !strings.HasSuffix(f2.agent.startArgs, want) {
+		t.Fatalf("run start args %q, want the suffix %q", f2.agent.startArgs, want)
 	}
 	text, err := os.ReadFile(filepath.Join(f2.out, "summary.txt"))
 	if err != nil {
@@ -2507,7 +2564,7 @@ func TestPlaceShortenedUntilIsPrinted(t *testing.T) {
 	if !strings.Contains(string(text), want) {
 		t.Fatalf("the summary misses %q:\n%s", want, text)
 	}
-	if sum := f2.summary(); sum.UntilEffective != "until step 12" || sum.Until != "none" {
+	if sum := f2.summary(); sum.UntilEffective != "until step 12" || sum.Until != "step 20" {
 		t.Fatalf("summary.json until %q, until_effective %q", sum.Until, sum.UntilEffective)
 	}
 }
@@ -3122,5 +3179,192 @@ func TestPlaceViewSavesFrames(t *testing.T) {
 	}
 	if len(raw) == 0 {
 		t.Fatal("frames.jsonl is empty after a placed walk that fought")
+	}
+}
+
+// Walk 33: a --from step next to a pack the run has not pulled yet is walked back offline, before an instance is
+// entered, to the nearest move row at least aggro+8 yd from every static spawn of those packs. The world export is a
+// one-spawn fixture at the future pack's own point.
+func TestPlaceWalksStartBackFromANotYetPulledPack(t *testing.T) {
+	rows, _ := placePlanRows(t)
+	var start int
+	var pull planexport.StepRow
+	for i, s := range rows.Steps {
+		if s.Kind != planexport.KindMove || s.X == 0 && s.Y == 0 && s.Z == 0 || i == 0 {
+			continue
+		}
+		for _, later := range rows.Steps[i+1:] {
+			if later.Kind != planexport.KindPull || len(later.Entries) == 0 {
+				continue
+			}
+			dx, dy := float64(s.X-later.X), float64(s.Y-later.Y)
+			if dx*dx+dy*dy <= 20*20 {
+				start, pull = i+1, later
+				break
+			}
+		}
+		if start != 0 {
+			break
+		}
+	}
+	if start == 0 {
+		t.Fatal("no move row of the fixture stands within 20 yd of a later pull")
+	}
+	dir := t.TempDir()
+	tsv := "guid\tentry\tname\tlevel_min\tlevel_max\trank\tfaction\tnpc_flags\tx\ty\tz\twander\tmovement_type\tgroup_leader\tpatrol\tauras\tdetection_range\tflags_extra\tspeed_walk\tgroup_flags\tpool\n" +
+		fmt.Sprintf("1\t%d\tNotYetPulled\t60\t60\t1\t16\t0\t%v\t%v\t%v\t0\t0\t0\t0\t\t20\t0\t1\t0\t0\n",
+			pull.Entries[0], pull.X, pull.Y, pull.Z)
+	if err := os.WriteFile(filepath.Join(dir, "creatures.tsv"), []byte(tsv), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The dry run names the step the offline choice took (dry runs print no notes).
+	f, _ := newPlaceFixture(t)
+	f.opts.gmClearSpawns = dir
+	f.opts.from = fmt.Sprintf("step %d", start)
+	f.opts.dryRun = true
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("dry run exit %d: %s", code, f.stderr.String())
+	}
+	chosen := 0
+	for _, line := range strings.Split(f.stdout.String(), "\n") {
+		if _, rest, ok := strings.Cut(line, "8b place: start step "); ok {
+			fmt.Sscanf(rest, "%d", &chosen)
+		}
+	}
+	if chosen == 0 || chosen >= start {
+		t.Fatalf("the place plan starts step %d, want a move row before %d:\n%s", chosen, start, f.stdout.String())
+	}
+	// A real run says why the requested step was refused and which row it chose.
+	f.opts.dryRun = false
+	until, err := raidwalk.PlaceStop(rows, []string{"until", "boss"}, chosen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", chosen, len(rows.Steps), until)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|thekal|move|walk|walking", chosen, len(rows.Steps))},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|thekal|move|walk|stopped before step %d (until boss): the party stays where it stands", chosen, len(rows.Steps), until)},
+	}
+	f.agent.mu.Unlock()
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	note := ""
+	for _, n := range f.summary().Notes {
+		if strings.Contains(n, fmt.Sprintf("start step %d stands", start)) {
+			note = n
+		}
+	}
+	if note == "" || !strings.Contains(note, fmt.Sprintf("the nearest quiet move row is step %d", chosen)) {
+		t.Fatalf("notes %q, want the offline quiet-start reason naming step %d", f.summary().Notes, chosen)
+	}
+}
+
+// Walk 33: a quiet refusal must not exit and burn a fresh instance. The walk steps one move row back in the SAME
+// instance (the commander is already in it), moves the party there with the GM summon path and verifies it.
+func TestPlaceQuietFailureRetreatsInTheSameInstance(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.noPlaceRetreat = false
+	rows, plan := placePlanRows(t)
+	back, ok := raidwalk.PlaceBack(rows, plan.Start)
+	if !ok || back >= plan.Start {
+		t.Fatalf("no move row before the fixture start %d", plan.Start)
+	}
+	until, err := raidwalk.PlaceStop(rows, []string{"until", "boss"}, back)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.quiet = func(n int) bool { return n >= 2 }
+	p.quietNear = []any{map[string]any{
+		"g": "0xF130003AC3016558", "e": 11830, "n": "Hakkari Priest",
+		"p": []float32{plan.Point.X, plan.Point.Y, plan.Point.Z}, "dz": 0.5, "d": 1.0,
+		"home": []float32{plan.Point.X, plan.Point.Y, plan.Point.Z},
+	}}
+	f.agent.startReply = placeStartReply("zul_gurub", back, len(rows.Steps), until)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|thekal|move|walk|walking", back, len(rows.Steps))},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|thekal|move|walk|stopped before step %d (until boss): the party stays where it stands", back, len(rows.Steps), until)},
+	}
+	f.agent.mu.Unlock()
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.Place == nil || sum.Place.Start != back {
+		t.Fatalf("place summary %+v, want the retreat to step %d", sum.Place, back)
+	}
+	if !hasNote(sum, fmt.Sprintf("stepping back to step %d in the same instance", back)) {
+		t.Fatalf("notes %q, want the same-instance retreat", sum.Notes)
+	}
+	appears, enters := 0, 0
+	for _, l := range f.agentLog() {
+		if strings.HasPrefix(l, "gm .appear ") {
+			appears++
+		}
+		if strings.HasPrefix(l, "cmdr cmd enter") {
+			enters++
+		}
+	}
+	if appears != 1 || enters != 1 {
+		t.Fatalf("appear %d, enter %d, want one each (the retreat never re-enters)", appears, enters)
+	}
+	if len(p.places) != 0 {
+		t.Fatalf("the toolkit place ran on a retreat: %v", p.places)
+	}
+	if len(p.quiets) != 2 {
+		t.Fatalf("%d quiet reads, want the refused start and the retreat", len(p.quiets))
+	}
+	wantPoint := fmt.Sprintf("quiet 50 %v %v", rows.Steps[back-1].X, rows.Steps[back-1].Y)
+	if !strings.HasPrefix(p.quiets[1], wantPoint) {
+		t.Fatalf("second quiet %q, want the retreat point %q", p.quiets[1], wantPoint)
+	}
+}
+
+// Walk 32: --place --from "step N" refused a pull row (237, 560), so the operator had to find the move row before it
+// by hand. A pull row is now a start at that pull's own stand point, and the notes say which point was used.
+func TestPlaceStartStepOnAPullRow(t *testing.T) {
+	rows, _ := placePlanRows(t)
+	n := 0
+	for i, s := range rows.Steps {
+		if s.Kind == planexport.KindPull && (s.X != 0 || s.Y != 0 || s.Z != 0) {
+			n = i + 1
+			break
+		}
+	}
+	if n == 0 {
+		t.Fatal("no positioned pull row in the ZG rows")
+	}
+	until, err := raidwalk.PlaceStop(rows, []string{"until", "boss"}, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, _ := newPlaceFixture(t)
+	// The pull-row point is the subject here, not the offline quiet start: a folder with no export skips that step.
+	f.opts.gmClearSpawns = t.TempDir()
+	f.opts.from = fmt.Sprintf("step %d", n)
+	f.agent.startReply = placeStartReply("zul_gurub", n, len(rows.Steps), until)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|thekal|pull|walk|fighting", n, len(rows.Steps))},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|thekal|move|walk|stopped before step %d (until boss): the party stays where it stands", n, len(rows.Steps), until)},
+	}
+	f.agent.mu.Unlock()
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, fmt.Sprintf("place: step %d is a pull row; placing at the pull's own stand point", n)) {
+		t.Fatalf("notes %q, want the pull-row note (step %d)", sum.Notes, n)
+	}
+	if sum.Place == nil || sum.Place.Start != n {
+		t.Fatalf("place summary %+v, want start_step %d", sum.Place, n)
+	}
+	f.agent.mu.Lock()
+	startArgs := f.agent.startArgs
+	f.agent.mu.Unlock()
+	if want := fmt.Sprintf("from|step|%d", n); !strings.Contains(startArgs, want) {
+		t.Fatalf("run start args %q, want %q", startArgs, want)
 	}
 }

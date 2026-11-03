@@ -119,12 +119,16 @@ func (w *walk) phaseInstanceCap(ctx context.Context) error {
 			w.note("%s", msg)
 			return nil
 		}
+		// The earliest free time is when the count drops below the warn threshold, before the walk's own wait cap and
+		// its margin clip it: the operator can plan around it instead of seeing only a duration (walk 32).
+		freeAt := now.Add(wait)
 		if wait > left {
 			wait = left
 		} else {
 			wait += capWaitMargin
 		}
-		w.say(now, fmt.Sprintf("instance cap: waiting %s for the oldest of %d to age out of the hour", wait.Round(time.Second), n))
+		w.say(now, fmt.Sprintf("instance cap: waiting %s (earliest free time %s) for the oldest of %d to age out of the hour",
+			wait.Round(time.Second), freeAt.UTC().Format(time.RFC3339), n))
 		if err := w.env.sleep(ctx, wait); err != nil {
 			return stopf(exitRaidWalkFailed, "interrupted")
 		}
