@@ -41,6 +41,9 @@ const (
 	RayDirs = 16
 	// EdgeRayYd is how far the clearance rays reach: past the widest edge the check wants to see (StandEdgeYd).
 	EdgeRayYd = 6.0
+	// wanderCapYd bounds a random mover's wander: the ZG export has a wander of 11356 yd (the champion's entry in the
+	// wrong column), which is no radius; the audit ignores a wander this large too.
+	wanderCapYd = 50.0
 )
 
 // Nav is the navmesh the lints ask: navmesh.Planner is one.
@@ -252,8 +255,15 @@ func (c *checker) stand(i int, s planexport.StepRow, p dungeon.Point) ([]Finding
 		if st, owned := c.owner[sp.GUID]; owned && st <= step {
 			continue // pulled before (or at) this row
 		}
-		radius := float64(worldspawn.AggroRadius(sp, c.opt.Level, 1)) + AggroMarginYd
-		if sp.MovementType == 1 { // a random mover wanders into the radius
+		if sp.LevelMax <= 1 {
+			continue // a critter (the export has no creature type): it never wakes a raid
+		}
+		aggro := worldspawn.AggroRadius(sp, c.opt.Level, 1)
+		if aggro == 0 {
+			continue // NO_AGGRO, or no detection range: it never wakes
+		}
+		radius := float64(aggro) + AggroMarginYd
+		if sp.MovementType == 1 && sp.Wander < wanderCapYd { // a random mover wanders into the radius; the export has typos (11356 yd), the audit caps at 50
 			radius += float64(sp.Wander)
 		}
 		margin := dist3(p, sp.Pos) - radius
@@ -290,7 +300,11 @@ func (c *checker) patrol(i int, s planexport.StepRow, p dungeon.Point) (*Finding
 		if !ok {
 			continue
 		}
-		radius := float64(worldspawn.AggroRadius(sp, c.opt.Level, 1)) + PatrolMarginYd
+		aggro := worldspawn.AggroRadius(sp, c.opt.Level, 1)
+		if aggro == 0 {
+			continue
+		}
+		radius := float64(aggro) + PatrolMarginYd
 		d, at := loopDist(p, pt.Path)
 		if margin := d - radius; margin < 0 && margin < worstMargin {
 			worst, worstMargin, worstAt = &c.opt.World.Patrols[k], margin, at
