@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/pjerra/turtle-agent/internal/aggroest"
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -40,9 +41,38 @@ const (
 // routeAggroBuild carries the options the live rows need: DropCompanionsLoot plus CarrierChests (Zul'Farrak's zumrah
 // leg has companions_loot false and no chest stand-free form, so the plan is refused without them), plus GMCrossDirect
 // for the plan whose gap the run leader walks straight (upper Karazhan's outland_landing gm_cross via), plus CampPull
-// (a camp group's rows are the camp chain: the party fights at the camp, the tank walks the tag rows alone).
-func routeAggroBuild(p *dungeon.Plan) (planexport.Result, error) {
-	return planexport.Build(p, planexport.Options{DropCompanionsLoot: true, CarrierChests: true, GMCrossDirect: true, CampPull: true})
+// (a camp group's rows are the camp chain: the party fights at the camp, the tank walks the tag rows alone), plus the
+// formations of the spawns for a staged group.
+func routeAggroBuild(p *dungeon.Plan, cs []creature) (planexport.Result, error) {
+	return planexport.Build(p, planexport.Options{DropCompanionsLoot: true, CarrierChests: true, GMCrossDirect: true, CampPull: true, Formation: formationsOf(cs)})
+}
+
+// formationsOf resolves a spawn guid to its formation (the creature_groups group of its group_leader, the spawn alone when it has none)
+// from the plan's spawns: planexport.Options.Formation for a plan with scripted pull stages.
+func formationsOf(cs []creature) func(uint32, uint32) ([]planexport.FormationSpawn, error) {
+	byGUID := map[uint64]creature{}
+	byLeader := map[uint64][]creature{}
+	for _, c := range cs {
+		byGUID[c.GUID] = c
+		if c.GroupLeader != 0 {
+			byLeader[c.GroupLeader] = append(byLeader[c.GroupLeader], c)
+		}
+	}
+	return func(_ uint32, guid uint32) ([]planexport.FormationSpawn, error) {
+		c, ok := byGUID[uint64(guid)]
+		if !ok {
+			return nil, fmt.Errorf("spawn %d is not in the world export", guid)
+		}
+		members := []creature{c}
+		if c.GroupLeader != 0 {
+			members = byLeader[c.GroupLeader]
+		}
+		out := make([]planexport.FormationSpawn, 0, len(members))
+		for _, m := range members {
+			out = append(out, planexport.FormationSpawn{Guid: uint32(m.GUID), Entry: m.Entry, Pos: m.Pos})
+		}
+		return out, nil
+	}
 }
 
 // routePoint is one row that puts the party somewhere (a move, or the fight point of a pull or boss row). Each row
@@ -65,8 +95,10 @@ type routePoint struct {
 	// the same absolute index when the row pulls, -1 for a move row, which owns nothing: the segment check
 	// compares the owner's absolute index against the segment end's idx. item is the row's item column (a pull
 	// row's max_bodies, 0 when the plan sizes nothing).
-	entries  []uint32
-	radius   float32
+	entries []uint32
+	radius  float32
+	// label is the exported row's comment ("pull group 2 stage 1/3; camp pull" for a staged group's pull).
+	label    string
 	item     uint32
 	idx      int
 	ownerIdx int
@@ -75,8 +107,8 @@ type routePoint struct {
 // routePoints builds the rows with planexport (routeAggroBuild: the live-export options), falling back down the
 // option ladder when the plan refuses an option it does not need (a plan with no companions_loot-false leg builds
 // without CarrierChests).
-func routePoints(p *dungeon.Plan) ([]routePoint, error) {
-	res, err := routeAggroBuild(p)
+func routePoints(p *dungeon.Plan, cs []creature) ([]routePoint, error) {
+	res, err := routeAggroBuild(p, cs)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +125,7 @@ func routePoints(p *dungeon.Plan) ([]routePoint, error) {
 			campPull:  s.Kind == planexport.KindPull && s.Flags&planexport.FlagCampPull != 0,
 			camp:      s.Kind == planexport.KindMove && s.Flags&planexport.FlagCampPoint != 0,
 			x:         s.X, y: s.Y, z: s.Z, px: s.X, py: s.Y, pz: s.Z,
-			entries: s.Entries, radius: s.Radius, item: s.Item, idx: len(out), ownerIdx: -1}
+			entries: s.Entries, radius: s.Radius, item: s.Item, label: s.Comment, idx: len(out), ownerIdx: -1}
 		if rp.standPull {
 			// The party never walks to the row's point (the pack centroid): it fights from its stand. The export
 			// writes the stand as the move row right before the pull row in the same leg (see FlagStandPull), so
@@ -201,7 +233,7 @@ func routeReach(p *dungeon.Plan, c creature) float64 {
 // spread and wander) that is still owned by a later row or by no row is one finding. NO_AGGRO spawns, critters,
 // friendly factions and triggers use the same filter as PackOverlaps (reuse it). One line per (row pair, guid):
 func RouteIntoLaterPacks(p *dungeon.Plan, cs []creature, ignore map[int]bool) ([]string, error) {
-	pts, err := routePoints(p)
+	pts, err := routePoints(p, cs)
 	if err != nil {
 		// A refused export is not a route finding: the caller reports it as the test's own error.
 		return nil, err
@@ -358,7 +390,7 @@ func campTankReach(p *dungeon.Plan, c creature) float64 {
 // earlier rows). One line per violation; a refused export is the caller's
 // error, never a finding.
 func CampPullFindings(p *dungeon.Plan, cs []creature, ignore map[int]bool) ([]string, error) {
-	pts, err := routePoints(p)
+	pts, err := routePoints(p, cs)
 	if err != nil {
 		return nil, err
 	}
@@ -397,6 +429,10 @@ func CampPullFindings(p *dungeon.Plan, cs []creature, ignore map[int]bool) ([]st
 			continue
 		}
 		n := pullNum[rp.leg]
+		where := fmt.Sprintf("leg %d pull %d", rp.leg, n)
+		if _, _, _, ok := stageLabel(rp.label); ok {
+			where += " (" + strings.TrimSuffix(rp.label, "; camp pull") + ")"
+		}
 		tag, camp := campChain(pts, i)
 		if len(tag) == 0 {
 			continue
@@ -416,14 +452,14 @@ func CampPullFindings(p *dungeon.Plan, cs []creature, ignore map[int]bool) ([]st
 				nearest = d
 			}
 			if reach := campTankReach(p, c); d < reach+1 {
-				out = append(out, fmt.Sprintf("%s leg %d pull %d: tag spot %.1f yd from %s (guid %d, entry %d, reach %.1f): it body-pulls its own pack",
-					p.Name, rp.leg, n, d, c.Name, c.GUID, c.Entry, reach))
+				out = append(out, fmt.Sprintf("%s %s: tag spot %.1f yd from %s (guid %d, entry %d, reach %.1f): it body-pulls its own pack",
+					p.Name, where, d, c.Name, c.GUID, c.Entry, reach))
 			}
 		}
 		if nearest == math.MaxFloat64 {
-			out = append(out, fmt.Sprintf("%s leg %d pull %d: tag spot owns no spawn of its pull", p.Name, rp.leg, n))
+			out = append(out, fmt.Sprintf("%s %s: tag spot owns no spawn of its pull", p.Name, where))
 		} else if nearest > campShotYd {
-			out = append(out, fmt.Sprintf("%s leg %d pull %d: tag spot %.1f yd from its nearest pack unit (over the %g yd shot)", p.Name, rp.leg, n, nearest, campShotYd))
+			out = append(out, fmt.Sprintf("%s %s: tag spot %.1f yd from its nearest pack unit (over the %g yd shot)", p.Name, where, nearest, campShotYd))
 		}
 		for _, c := range cs {
 			if !eligible(c) {
@@ -457,8 +493,8 @@ func CampPullFindings(p *dungeon.Plan, cs []creature, ignore map[int]bool) ([]st
 				}
 			}
 			if reach := campTankReach(p, c); best < reach {
-				out = append(out, fmt.Sprintf("%s leg %d pull %d: tank walk passes %.1f yd from %s (guid %d, entry %d, reach %.1f): it wakes another pack",
-					p.Name, rp.leg, n, best, c.Name, c.GUID, c.Entry, reach))
+				out = append(out, fmt.Sprintf("%s %s: tank walk passes %.1f yd from %s (guid %d, entry %d, reach %.1f): it wakes another pack",
+					p.Name, where, best, c.Name, c.GUID, c.Entry, reach))
 			}
 		}
 		cleared := false
@@ -507,7 +543,7 @@ func CampPullFindings(p *dungeon.Plan, cs []creature, ignore map[int]bool) ([]st
 			}
 		}
 		if !cleared {
-			out = append(out, fmt.Sprintf("%s leg %d pull %d: camp is not on the cleared route (over 10 yd from every earlier row)", p.Name, rp.leg, n))
+			out = append(out, fmt.Sprintf("%s %s: camp is not on the cleared route (over 10 yd from every earlier row)", p.Name, where))
 		}
 	}
 	sort.Strings(out)

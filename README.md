@@ -94,7 +94,7 @@ turtle-agent capture-stats <capture>
 turtle-agent capture events [--from RFC3339] [--to RFC3339] [--kinds a,b] [--out FILE [--force]] <capture>
 turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FILE [--members a,b]] [--plan dungeons/x.json] [--out run.svg] [--html] [--force] [--mmaps DIR | --config FILE] [--map N] [--box x0,y0,x1,y1] [--from RFC3339] [--to RFC3339] [--pad YD] [--floors auto|off|z,z] [--background=false] [--width PX]
 turtle-agent tune-diff <trace.jsonl>
-turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--skip-legs NAME,...] [--camp-pull] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
+turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--skip-legs NAME,...] [--camp-pull] [--world DIR] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
@@ -779,6 +779,19 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   the unknown flags and walks the same degrade path). `plan-check`'s camp lint wants the tag spot outside every own-pack unit's aggro reach and within
   23.5 yd of the nearest one, the tank's walk-out clear of other packs (reach + 1.5 yd) and the camp on the cleared route; `pull_size` estimates camp
   groups with fight = camp, tank walk = tag rows and the drag back;
+  `stages` (optional, 1-8; exclusive with the group's own `camp`, `approach`, `stand_pull`, `hold` and `ambush`) scripts a pack that no stand can split or that carries
+  casters that plant: `[{"peel": [leader guids], "tag": [1-4 points, the last is the tag spot], "camp": {..}, "max_bodies": N}, ...]`. Stage 1 peels its formations
+  (the creature_groups leader's spawn guid; a lone spawn is its own leader) from its tag spot and drags them to its camp; when that fight is over stage 2 follows, and so
+  on. Every formation of the group is peeled by exactly one stage. `plan-export --camp-pull` writes each stage as one camp chain (camp `move`, tag walk, pull row with flag
+  131072, comment `pull group N stage i/k`) whose pull row is scoped to the stage: its centre is the centroid of the peeled spawns, its entries are theirs, its radius is the
+  farthest one plus 10 yd, cut so that no other stage's spawn lies inside it (an export error when impossible; `item` = the stage's `max_bodies`, else the group's). Without
+  `--camp-pull` each stage is a plain pull from its tag spot with the same scoped centre and radius. A staged plan needs the world export: `plan-export --world DIR`
+  (default `tools/dungeongen/testdata`: a folder with `creatures.tsv` and `groups.tsv`, or one with `map<N>` folders of them). The plan-wide `caster_entries` lists the
+  healer and caster entries the camp rule protects against. The agent's own driver ignores stages. `dungeongen -check` runs the stage lint (errors with `-strict`): every
+  camp at least 40 yd (3D) from every caster spawn of its own and the later stages' formations; the aggro-count estimator from the tag spot (tank walk camp to tag, fight at the
+  camp, drag back, earlier stages dead) returns exactly the stage's formations and names any other formation with its leader and reason (`Ring1`, `Drag`, ...); the camp's
+  fight point wakes no later pack; and, as camp chains, the shot, the body pull and the cleared route of the camp lint above. `plan-check` walks each stage's camp and tag rows
+  and fails a drag over 70 yd of navmesh;
   `hold` (optional, also on `boss`: `{"instance_data": 1, "spot": {..}, "radius": 30, "timeout_s": 600, "entries": [..]}`) makes the run leader's row for the group a
   scripted event's `hold` (TortoiseBots #1041: stand on `spot`, fight what the event sends within `radius` until instance data `instance_data` reads DONE; `entries` are more of the
   event's mobs, the group's own and a boss's entry and `first` are always in); the agent's driver ignores it; run `steps` in order; walk to `boss.position` and kill the
@@ -921,6 +934,15 @@ mob) or a faction named friendly to the leader's team; what is gated to the othe
 dungeongen cannot tell friend from foe by itself: that is in `FactionTemplate.dbc`, which the export does not carry, so only 35 and the factions of
 `-friendly-factions` count as friendly, and a faction that creatures with `npc_flags` also use is noted as possibly friendly. Faction 122, for one, is
 the Ironforge dwarves': friendly to the Alliance, and nothing says it is hostile to the Horde but the data of the users of 122 (Bael'dun soldiers are Horde kill targets).
+`go run ./tools/dungeongen -dir tools/dungeongen/testdata/map309 [-mmaps DIR] [-camp-step 1] [-camp-top 5] [-camp-party-level N] -camp-search dungeons/zul_gurub.json LEG GROUP [STAGE]`
+measures camp and tag-spot candidates for a pull group (LEG: the plan's leg index from 0, GROUP: the pull group number from 1 as dungeon_status counts, STAGE: the stage of a
+staged group, from 1) and prints them with their distances; it never edits the plan, the author copies the points they pick and the lint checks them. A camp is a 1 yd grid
+point (navmesh ground with `-mmaps`, default `$TURTLE_AGENT_MMAPS`) at least 40 yd from the caster spawns of the stage and the later stages, clear of every other pack's wake
+reach and of the stage's own pack (the raid at the camp must not wake it), and within 10 yd of the cleared route; a tag spot is within 23.5 yd of the nearest peeled unit (with
+mmaps a clear navmesh ray to it), outside every peeled unit's tank wake reach + 1 yd, and wakes exactly the stage's formations by the estimator. The pairs within 50 yd of each
+other (and, with mmaps, a complete path of at most 70 yd) are ranked by drag length and the first `-camp-top` that keep the estimator's verdict with the camp walk and the drag are
+listed, with the plan JSON of each. A pack whose units' wake reach + 1 yd is past the 23.5 yd shot has no tag spot at all (a level-58 party against level-60 units: 22 + 1.5 + 1 =
+24.5 yd) and the output says so; `-camp-party-level` judges the reaches at another party level for the search only.
 `-awakened` names creature entries that spawn friendly (faction 35, stoned) and that the encounter's script turns hostile, so a plan that fights them is not warned about as if it
 asked the party to kill a friend: Uldaman's Stone Keepers (4857, woken one by one by the Altar of the Keepers) and Archaedas (2748, woken by the Altar of Archaedas); their `npc_flags` are
 still looked at. `-strict` makes any warning exit status 1, for CI. Generating a skeleton puts `WARNING:` lines in the leg notes for a boss with `npc_flags` or a faction of `-friendly-factions`.
@@ -1157,6 +1179,7 @@ turtle-agent plan-export --all-live --out ./migrations/ --stamp 20261014200000  
 | `--approach-hops` | with `--mmaps`, also cut the hop to a pull, boss or hold more than 50 yd from the anchor before it (the move, or the fight the party stood at) into `move` rows along the navmesh path (comment `approach path`), the last at least 25 yd short of the pack. Without it such a hop is left to the run leader's own navmesh hops (at most 8 of 40 yd, stopping 30 yd short), which a plan of long corridors outruns. Not on by default: it would change the rows of the plans already exported |
 | `--skip-legs NAME,...` | leave the named legs out of the rows (each with a warning; the later legs close up, as for an optional leg), for a leg the run leader cannot do while the legs after it can: Zul'Farrak's `bly` (a boss that turns hostile after its gossip) stands between Weegli's gossip, which opens the End Door, and `ukorz` behind it. A name that is no leg of the plan is refused |
 | `--camp-pull` | export a pull group's `camp` as the camp pull's rows (camp `move` flag 65536, tag-walk `move`s, pull flag 131072, `item` = `max_bodies`; the fight is at the camp). Off by default: without it the camp is dropped with a warning and the group exports as a plain pull |
+| `--world DIR` | the world export a plan with `stages` reads its formations from (default `tools/dungeongen/testdata`): a folder with `creatures.tsv` (and `groups.tsv`), or one with `map<N>` folders of them. Only read for a staged plan |
 | `--gm-cross-direct` | export a `gm_cross` waypoint as a `move_direct` (a straight walk to the landing point) instead of refusing the plan; the run leader has no GM move. Written for Wailing Caverns' ramp to Lord Serpentis (6 yd down over 3.9 yd), which the plan now crosses with a plain direct step and a `check_skip`, so no plan needs it now; the row's comment and a warning say it is not tried live |
 | `--rev`, `--stamp` | the commit named in `ai_dungeon_plan.source` (default: `git rev-parse` of the plan folder, `+local` when it has changes) and the file's timestamp (default now) |
 

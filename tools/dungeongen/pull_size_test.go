@@ -172,7 +172,7 @@ func TestPullSizeTargetIsOwnedKillFirstFirst(t *testing.T) {
 		{GUID: 2, Entry: 14750, Name: "Rider", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 34}},
 		{GUID: 3, Entry: 999, Name: "Stranger", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 1}},
 	}
-	pts, err := routePoints(p)
+	pts, err := routePoints(p, cs)
 	if err != nil {
 		t.Fatal(err)
 	}

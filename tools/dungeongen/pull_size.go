@@ -75,7 +75,7 @@ func PullCeilingOf(p *dungeon.Plan, item uint32) int {
 // (readCreatures); w is the map's world (worldspawn.Load: groups, links,
 // patrols) and may be nil (then every spawn is its own pack).
 func PullSizes(p *dungeon.Plan, cs []creature, w *worldspawn.World) ([]PullFinding, error) {
-	pts, err := routePoints(p)
+	pts, err := routePoints(p, cs)
 	if err != nil {
 		return nil, err
 	}

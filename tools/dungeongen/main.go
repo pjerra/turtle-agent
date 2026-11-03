@@ -29,6 +29,7 @@ import (
 	"strings"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
@@ -95,6 +96,11 @@ func main() {
 	skip := flag.String("skip", "", "entries to add to every leg's skip list, comma separated")
 	check := flag.String("check", "", "plan file to lint against -dir's creatures.tsv: warn for a boss or pack member with npc_flags or a faction friendly to -team (no generation)")
 	team := flag.String("team", "", "with -check: the leader's team, alliance or horde; what the plan gates to the other team is not looked at")
+	campSearch := flag.String("camp-search", "", "plan file: with -dir, measure camp and tag candidates for a pull group and print them (read-only, the plan is not edited); then LEG GROUP [STAGE] as arguments: LEG the plan's leg index (0-based), GROUP the pull group number (1-based, as dungeon_status counts), STAGE the stage (1-based) of a staged group")
+	mmaps := flag.String("mmaps", os.Getenv("TURTLE_AGENT_MMAPS"), "with -camp-search: the folder with the server's mmaps (default $TURTLE_AGENT_MMAPS): points snap to navmesh ground and the shot needs a clear ray; without it heights come from the nearest route sample and nothing is checked against the navmesh")
+	campStep := flag.Float64("camp-step", 1, "with -camp-search: the grid step in yards")
+	campLevel := flag.Int("camp-party-level", 0, "with -camp-search: judge wake reaches at this party level instead of the plan's level_band[0] (the lint keeps the plan's, so a point found at another level may still fail it)")
+	campTop := flag.Int("camp-top", 5, "with -camp-search: how many pairs to list")
 	strict := flag.Bool("strict", false, "with -check: exit 1 when there is any warning (for CI)")
 	friendly := flag.String("friendly-factions", "", "comma separated factions known to be friendly to the leader's team (FactionTemplate.dbc is not in the export, so dungeongen cannot tell; 35 always is)")
 	awakened := flag.String("awakened", "", "with -check: comma separated creature entries that spawn friendly (faction 35, stoned) and that the encounter's script turns hostile, so they are no warning (Uldaman: 4857 Stone Keeper, 2748 Archaedas)")
@@ -112,6 +118,9 @@ func main() {
 	}
 	if *format != "" {
 		os.Exit(formatFile(*format, *out))
+	}
+	if *campSearch != "" {
+		os.Exit(campSearchFile(*campSearch, *dir, *mmaps, flag.Args(), *campStep, *campTop, *campLevel))
 	}
 	if *check != "" {
 		os.Exit(checkFile(*check, *dir, *team, *friendly, *awakened, *scripted, *strict))
@@ -257,12 +266,66 @@ func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool
 		return fail(fmt.Errorf("camp_pull: %w", cerr))
 	}
 	ws = append(ws, camped...)
+	// The stage lint (spec 4.5): the structure of every staged pull group, the caster distance of its camps, one pack per tag spot and a
+	// camp clear of the later packs. The findings come first; an export the stages cannot make fails the check.
+	staged, terr := StageFindings(p, cs, w, map[int]bool{35: true})
+	ws = append(ws, staged...)
+	if terr != nil {
+		for _, w := range ws {
+			fmt.Println("warning:", w)
+		}
+		return fail(fmt.Errorf("stages: %w", terr))
+	}
 	for _, w := range ws {
 		fmt.Println("warning:", w)
 	}
 	if strict && len(ws) > 0 {
 		return 1
 	}
+	return 0
+}
+
+// campSearchFile runs -camp-search: args are LEG GROUP [STAGE]. It reads the plan and -dir's world export and prints the candidates; the plan file
+// is never written.
+func campSearchFile(path, dir, mmaps string, args []string, step float64, top, level int) int {
+	fail := func(err error) int {
+		fmt.Fprintln(os.Stderr, "dungeongen:", err)
+		return 1
+	}
+	if dir == "" || len(args) < 2 || len(args) > 3 {
+		fmt.Fprintln(os.Stderr, "usage: dungeongen -dir DIR [-mmaps DIR] [-camp-step 1] [-camp-top 5] [-camp-party-level N] -camp-search PLAN LEG GROUP [STAGE]")
+		return 2
+	}
+	var nums [3]int
+	for i, a := range args {
+		n, err := strconv.Atoi(a)
+		if err != nil || n < 0 {
+			return fail(fmt.Errorf("%q is not a leg, group or stage number", a))
+		}
+		nums[i] = n
+	}
+	p, err := dungeon.Load(path)
+	if err != nil {
+		return fail(err)
+	}
+	cs, err := readCreatures(filepath.Join(dir, "creatures.tsv"))
+	if err != nil {
+		return fail(err)
+	}
+	w, _, werr := worldspawn.Load(dir, p.Map)
+	if werr != nil {
+		return fail(fmt.Errorf("camp-search: %w", werr))
+	}
+	opt := CampSearchOptions{Step: step, Top: top, PartyLevel: level}
+	if mmaps != "" {
+		opt.Planner = navmesh.NewPlanner(mmaps)
+		defer opt.Planner.Close()
+	}
+	res, err := CampSearch(p, cs, w, nums[0], nums[1], nums[2], opt)
+	if err != nil {
+		return fail(err)
+	}
+	fmt.Print(res.Format())
 	return 0
 }
 
