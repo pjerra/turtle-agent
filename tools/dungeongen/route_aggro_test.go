@@ -309,7 +309,7 @@ func TestRouteIntoLaterPacksDefaultsDetectionTo20(t *testing.T) {
 // Counts are measured on origin/dev (the ZG count must drop when W25-1 lands: the Arlokk terrace reordering walks
 // each approach on its pack's level; the comment then says so).
 var routeAggroKnownFailing = map[string]int{
-	"ragefire_chasm":       153,  // boss rows own their boss (was 161). the repo reach (AggroRadius at 13-18 plus spread and wander) outruns the old 20 yd flat line.
+	"ragefire_chasm":       152,  // waypoint pass (was 153): the moved stands walk past one fewer later pack.
 	"wailing_caverns":      169,  // waypoint pass (was 173): the moved stands walk past fewer later packs.
 	"deadmines":            641,  // boss rows own their boss (was 661). the repo reach (AggroRadius at 18-22 plus spread and wander) outruns the old 20 yd flat line.
 	"uldaman":              247,  // waypoint pass (was 249): the moved stands walk past fewer later packs.
@@ -331,6 +331,7 @@ var routeAggroKnownFailing = map[string]int{
 	"blackfathom_deeps":    296, "gnomeregan": 276, "lower_blackrock_spire": 408, "stormwind_vault": 170,
 	"frostmane_hollow":     171, "dire_maul_east": 90, "dire_maul_west": 212, "razorfen_downs": 191, "sunken_temple": 66,
 	"scarlet_armory":       101, "scarlet_cathedral": 151, "scarlet_graveyard": 184, "scarlet_library": 148, "shadowfang_keep": 284,
+	"stormwind_stockade":   185, "stratholme_live": 158, "stratholme_undead": 335, // newly hand-maintained: straight-segment counts for the draft routes.
 }
 
 // TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn
