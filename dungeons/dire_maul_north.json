@@ -23,6 +23,7 @@
     "rogue:dps",
     "hunter:dps"
   ],
+  "cc_priority": [11448, 11444, 11445],
   "notes": [
     "DRAFT: a skeleton from the world database export of map 429 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
@@ -33,7 +34,7 @@
   ],
   "legs": [
     {
-      "name": "guard_mol'dar",
+      "name": "guard_mol_dar",
       "to": {"x": 341.42, "y": -39.6943, "z": -25.4997},
       "pull_groups": [
         {
@@ -148,43 +149,6 @@
       }
     },
     {
-      "name": "guard_slip'kik",
-      "to": {"x": 490.175, "y": 530.082, "z": -25.3997},
-      "pull_groups": [
-        {
-          "entries": [13160, 13160, 13160, 13160, 13160, 13160, 13160, 13160, 13160, 13160],
-          "positions": [
-            {"x": 490.175, "y": 530.082, "z": -25.3997},
-            {"x": 480.656, "y": 535.88, "z": -25.3763},
-            {"x": 497.374, "y": 533.127, "z": -25.386},
-            {"x": 491.605, "y": 539.56, "z": -25.3776},
-            {"x": 506.01, "y": 539.586, "z": -25.3869},
-            {"x": 484.566, "y": 544.573, "z": -25.3739},
-            {"x": 498.941, "y": 543.077, "z": -25.3827},
-            {"x": 481.627, "y": 550.035, "z": -25.3735},
-            {"x": 488.495, "y": 558.749, "z": -25.4067},
-            {"x": 500.092, "y": 557.059, "z": -25.4014}
-          ]
-        },
-        {
-          "entries": [14386],
-          "positions": [
-            {"x": 471.759, "y": 591.097, "z": -25.4039}
-          ]
-        },
-        {
-          "entries": [14386],
-          "positions": [
-            {"x": 527.362, "y": 590.968, "z": -25.4039}
-          ]
-        }
-      ],
-      "boss": {
-        "entry": 14323,
-        "position": {"x": 559.22, "y": 549.432, "z": -25.4017}
-      }
-    },
-    {
       "name": "guard_fengus",
       "to": {"x": 471.9, "y": 342.7, "z": 2.9},
       "pull_groups": [
@@ -285,6 +249,43 @@
       "boss": {
         "entry": 14321,
         "position": {"x": 384.67, "y": 341.272, "z": 2.86428}
+      }
+    },
+    {
+      "name": "guard_slip_kik",
+      "to": {"x": 490.175, "y": 530.082, "z": -25.3997},
+      "pull_groups": [
+        {
+          "entries": [13160, 13160, 13160, 13160, 13160, 13160, 13160, 13160, 13160, 13160],
+          "positions": [
+            {"x": 490.175, "y": 530.082, "z": -25.3997},
+            {"x": 480.656, "y": 535.88, "z": -25.3763},
+            {"x": 497.374, "y": 533.127, "z": -25.386},
+            {"x": 491.605, "y": 539.56, "z": -25.3776},
+            {"x": 506.01, "y": 539.586, "z": -25.3869},
+            {"x": 484.566, "y": 544.573, "z": -25.3739},
+            {"x": 498.941, "y": 543.077, "z": -25.3827},
+            {"x": 481.627, "y": 550.035, "z": -25.3735},
+            {"x": 488.495, "y": 558.749, "z": -25.4067},
+            {"x": 500.092, "y": 557.059, "z": -25.4014}
+          ]
+        },
+        {
+          "entries": [14386],
+          "positions": [
+            {"x": 471.759, "y": 591.097, "z": -25.4039}
+          ]
+        },
+        {
+          "entries": [14386],
+          "positions": [
+            {"x": 527.362, "y": 590.968, "z": -25.4039}
+          ]
+        }
+      ],
+      "boss": {
+        "entry": 14323,
+        "position": {"x": 559.22, "y": 549.432, "z": -25.4017}
       }
     },
     {
