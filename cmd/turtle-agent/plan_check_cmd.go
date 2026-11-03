@@ -92,7 +92,7 @@ func planCheckCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		rep := planCheckReport{PlanCheck: *res, Lints: lints, LintCounts: planlint.Counts(lints), LintNote: note}
 		results = append(results, rep)
-		failed = failed || !res.OK() || *strict && len(lints) > 0
+		failed = failed || !res.OK() || *strict && len(lints) > 0 || lintErrors(lints) > 0
 		if *asJSON {
 			continue
 		}
@@ -142,7 +142,19 @@ type planLintReport struct {
 
 // lintOrder is the order the lints are counted and printed in.
 var lintOrder = []string{planlint.LintWater, planlint.LintOffFloor, planlint.LintEdge, planlint.LintLedge,
-	planlint.LintShortHop, planlint.LintAggro, planlint.LintPatrol}
+	planlint.LintShortHop, planlint.LintAggro, planlint.LintPatrol, planlint.LintReach, planlint.LintHop,
+	planlint.LintArrival, planlint.LintClimb, planlint.LintJoiners}
+
+// lintErrors counts the findings the lints call errors: they fail plan-check without --strict.
+func lintErrors(fs []planlint.Finding) int {
+	n := 0
+	for _, f := range fs {
+		if f.Severity == planlint.SeverityError {
+			n++
+		}
+	}
+	return n
+}
 
 func lintCountsText(c map[string]int) string {
 	parts := make([]string, 0, len(c))
@@ -165,13 +177,18 @@ func planLints(p *dungeon.Plan, planner *navmesh.Planner, dir, spawnDir string, 
 	if err != nil {
 		return nil, fmt.Sprintf("lints skipped: the exporter refused the plan: %v", err), nil
 	}
-	return lintRows(rows.Rows, planner, dir, spawnDir)
+	return lintRows(rows.Rows, planner, dir, spawnDir, p)
 }
 
-// lintRows lints already built rows (an export's steps).
-func lintRows(rows planexport.Rows, planner *navmesh.Planner, dir, spawnDir string) ([]planlint.Finding, string, error) {
+// lintRows lints already built rows (an export's steps). p is the plan behind them (nil for a migration: the row's own
+// pull rules stand in).
+func lintRows(rows planexport.Rows, planner *navmesh.Planner, dir, spawnDir string, p *dungeon.Plan) ([]planlint.Finding, string, error) {
 	world, note := worldForLints(dir, spawnDir, rows.Plan.Map)
-	fs, err := planlint.Lint(rows, planner, planlint.Options{Map: rows.Plan.Map, Level: 60, World: world})
+	opt := planlint.Options{Map: rows.Plan.Map, Level: 60, World: world}
+	if p != nil {
+		opt.Raid, opt.KillFirst, opt.PullCeiling = p.IsRaid(), p.KillFirst, p.PullCeiling
+	}
+	fs, err := planlint.Lint(rows, planner, opt)
 	if err != nil {
 		return nil, note, err
 	}
@@ -203,7 +220,9 @@ func printLints(w io.Writer, name string, fs []planlint.Finding, note string, st
 		return
 	}
 	sev := "warnings"
-	if strict {
+	if n := lintErrors(fs); n > 0 && !strict {
+		sev = fmt.Sprintf("findings (%d fail the check)", n)
+	} else if strict {
 		sev = "failures (--strict)"
 	}
 	fmt.Fprintf(w, "%s: %d lint %s (%s)\n%s\n", name, len(fs), sev, lintCountsText(planlint.Counts(fs)), planlint.Summary(fs))
@@ -255,7 +274,7 @@ func planLintCmd(sqlFile, planName, spawns, dir string, planner *navmesh.Planner
 			return exitUsage
 		}
 	}
-	fs, note, err := lintRows(r, planner, dir, spawns)
+	fs, note, err := lintRows(r, planner, dir, spawns, nil)
 	if err != nil {
 		fmt.Fprintf(stderr, "plan-check: %v\n", err)
 		return exitUsage
@@ -270,7 +289,7 @@ func planLintCmd(sqlFile, planName, spawns, dir string, planner *navmesh.Planner
 		fmt.Fprintf(stdout, "%s: %d rows on map %d\n", rep.Plan, rep.Steps, rep.Map)
 		printLints(stdout, rep.Plan, fs, note, strict)
 	}
-	if strict && len(fs) > 0 {
+	if (strict && len(fs) > 0) || lintErrors(fs) > 0 {
 		return exitPlanCheck
 	}
 	return exitOK
