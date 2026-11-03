@@ -327,10 +327,10 @@ func (e *scoutFakeEnv) writeManifest(args []string) {
 		TokenFile: filepath.Join(dir, fmt.Sprintf("rpc-%d.token", port))}
 	b, _ := json.Marshal(m)
 	writePrivate(e.t, filepath.Join(dir, "slot.json"), b)
-	writePrivate(e.t, m.Settings, []byte(`{"realmd":"127.0.0.1:3724","server_name":"tortoise-test2","world_addr":"127.0.0.1:8085","accounts":{"Scout":"sekret"}}`))
+	writePrivate(e.t, m.Settings, []byte(`{"realmd":"127.0.0.1:3724","server_name":"tortoise-test2","world_addr":"127.0.0.1:8085","accounts":{"Fixture":"fixture-pw"}}`))
 	writePrivate(e.t, m.PIDFile, []byte("1234"))
 	writePrivate(e.t, m.Binary, []byte("#!/bin/sh\n"))
-	writePrivate(e.t, m.TokenFile, []byte("token-sekret"))
+	writePrivate(e.t, m.TokenFile, []byte("fixture-token"))
 }
 
 func writePrivate(t *testing.T, path string, b []byte) {
@@ -721,7 +721,7 @@ func TestPlanScoutLogHasNoSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	log := string(b)
-	for _, secret := range []string{"sekret", "token-sekret", "server_name"} {
+	for _, secret := range []string{"fixture-pw", "fixture-token", "server_name"} {
 		if strings.Contains(log, secret) {
 			t.Fatalf("scout.log carries %q:\n%s", secret, log)
 		}
