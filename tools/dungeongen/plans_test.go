@@ -933,8 +933,9 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 		// 8.4 yd above the lower mid-west pack (51365, its spawns at z 49.6) while that pack is still alive. Every
 		// middle-level stand (the D row included) is reached through it; the plan's mitigation is the off-tank on the
 		// stand and the TB safety net in WALK29-FIX-PLAN §9.4 (#9). The crossing is logged and left out of this walk's
-		// later-pack clearance only; the straight check and the D -> E walk still hold the rule.
-		if a.Comment == "pull group 14 approach" && b.Comment == "pull group 15 approach" {
+		// later-pack clearance only; the straight check and the D -> E walk still hold the rule. Walk-31 fix 5 splits
+		// group 13 in two, so the ramp walk is now group 15 -> group 16 (was 14 -> 15).
+		if a.Comment == "pull group 15 approach" && b.Comment == "pull group 16 approach" {
 			kept := laterFams[:0]
 			for _, fam := range laterFams {
 				if len(fam) > 0 && fam[0].GroupLeader == 51365 {
