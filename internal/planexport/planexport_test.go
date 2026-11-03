@@ -1690,3 +1690,32 @@ func TestPullGroupMaxBodiesIsTheRowItem(t *testing.T) {
 		t.Fatalf("max_bodies 27: item %d, want 27", got)
 	}
 }
+
+// A wait_for gameobject with gone_ok exports the gone-is-done flag on the wait_object row (an object a script opens and then
+// removes: Shadowfang Keep's Courtyard Door), and the row validates; without it the flags stay 0.
+func TestObjectWaitGoneOKCarriesTheGoneIsDoneFlag(t *testing.T) {
+	plan := func(extra string) *dungeon.Plan {
+		return parsePlan(t, `{"version":1,"name":"sfk","status":"live-checked (test)","map":33,"entrance":{"x":0,"y":0,"z":0},
+		 "legs":[{"name":"door","to":{"x":10,"y":0,"z":0},"steps":[{"wait_for":{"gameobject":{"entry":18895,"near":{"x":11,"y":0,"z":0},"state":"active"`+extra+`},"timeout_s":60}}]}]}`)
+	}
+	row := func(p *dungeon.Plan) StepRow {
+		t.Helper()
+		for _, s := range build(t, p).Steps {
+			if s.Kind == KindWaitObject {
+				return s
+			}
+		}
+		t.Fatal("no wait_object row")
+		return StepRow{}
+	}
+	with := row(plan(`,"gone_ok":true`))
+	if with.Flags&FlagGoneIsDone == 0 || with.Param != 1 || !strings.Contains(with.Comment, "active or gone") {
+		t.Fatalf("gone_ok row %+v", with)
+	}
+	if err := Validate(Rows{Plan: PlanRow{Plan: "sfk"}, Steps: []StepRow{with}}); err != nil {
+		t.Fatalf("the gone_ok wait row is refused: %v", err)
+	}
+	if plain := row(plan("")); plain.Flags != 0 {
+		t.Fatalf("a plain wait_object row carries flags %d", plain.Flags)
+	}
+}

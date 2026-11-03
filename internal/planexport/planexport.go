@@ -53,11 +53,13 @@ const (
 	// (DungeonPlanPolicy.h kPlanFlagDoneData, kPlanFlagEncounter).
 	FlagDoneData  = 8
 	FlagEncounter = 32
-	// FlagGoneIsDone marks a loot or open row as done when its object is gone (the module's kPlanFlagGoneIsDone): a `not-found` answer
-	// for a loot of no item with this flag ends the step ("nothing of entry N left near the point: done") instead of pausing the run.
-	// A chest of spawntimesecs 7200 (Zul'Farrak's Shallow Grave, entry 128403) despawns once looted; the flag matters only for a run
-	// resumed after a wipe at one of these rows (a fresh run does not need it). A loader that knows no such flag drops it (unknown flags
-	// are ignored on a loot/open), so the rows still load.
+	// FlagGoneIsDone marks a loot, open or wait_object row as done when its object is gone (the module's kPlanFlagGoneIsDone): a
+	// `not-found` answer for a loot of no item with this flag ends the step ("nothing of entry N left near the point: done") instead
+	// of pausing the run, and a wait_object row with it is satisfied by the object being gone instead of seen in its state. A chest
+	// of spawntimesecs 7200 (Zul'Farrak's Shallow Grave, entry 128403) despawns once looted, and a script that opens a door and then
+	// removes it (Shadowfang Keep's Courtyard Door 18895) leaves nothing to see; the flag matters only for a run resumed after a
+	// wipe at one of these rows, or for such a removed object. A loader that knows no such flag drops it (unknown flags are ignored
+	// on a loot/open), so the rows still load.
 	FlagGoneIsDone = 256
 	// FlagDeadNpcIsDone marks a gossip row as done when its NPC is dead (the module's kPlanFlagDeadNpcIsDone): the order refused with the
 	// dead-NPC wording ends the step with a note instead of pausing the run. A plan's gossip step sets it with "dead_is_done": true
@@ -863,12 +865,19 @@ func (b *builder) wait(w *dungeon.WaitFor) error {
 		}
 		x, y, z := refPoint(g.ObjectRef)
 		base := "wait for object " + strconv.Itoa(int(g.Entry)) + " " + g.State
+		flags := uint32(0)
+		if g.GoneOK {
+			// A script opens the object and removes it some steps later (Shadowfang Keep's Courtyard Door): the module's gone-is-done
+			// flag on the wait row ends the step once the object is gone instead of pausing the run on it.
+			flags = FlagGoneIsDone
+			base += " or gone"
+		}
 		if n := len(b.rows.Steps); n > 0 && b.rows.Steps[n-1].Leg == b.outLeg && b.rows.Steps[n-1].Kind == KindHold && (timeout == 0 || timeout > dungeon.HoldDoorWaitS) {
 			// The hold before it ended with the event DONE, which is what opens the door: no fight time to wait for.
 			timeout = dungeon.HoldDoorWaitS
 			base += fmt.Sprintf(" (at most %d s: the hold before it ends with the event done)", timeout)
 		}
-		b.add(StepRow{Kind: KindWaitObject, Entry: g.Entry, X: x, Y: y, Z: z, Param: uint32(param), TimeoutS: timeout, Comment: clip(waitComment(base, w), MaxComment)})
+		b.add(StepRow{Kind: KindWaitObject, Entry: g.Entry, X: x, Y: y, Z: z, Param: uint32(param), Flags: flags, TimeoutS: timeout, Comment: clip(waitComment(base, w), MaxComment)})
 	case w.HostilesGone != nil:
 		h := w.HostilesGone
 		// A wait with no centre is about the party's own spot: the last point the leg put it at.
@@ -1013,11 +1022,10 @@ func Validate(r Rows) error {
 			return bad("param %d is above 2", s.Param)
 		}
 		if s.Flags&FlagGoneIsDone != 0 {
-			// The exporter's own rule (ours, not the module's): the module reads the flag off a loot/open row only, so the exporter refuses
-			// it on any other kind; a module that knows no such step flag yet ignores unknown flags on a loot/open and pauses on a gone
-			// object, so nothing breaks either way.
-			if s.Kind != KindLoot && s.Kind != KindOpen {
-				return bad("the gone-is-done flag is for a loot or open row: the exporter refuses it on a %s (a module without the step flag ignores it there)", s.Kind)
+			// The exporter's own rule (ours, not the module's): the module reads the flag off a loot/open row, and a wait_object row
+			// carries it for an object a script removes after opening (the plan's gone_ok); the exporter refuses it on any other kind.
+			if s.Kind != KindLoot && s.Kind != KindOpen && s.Kind != KindWaitObject {
+				return bad("the gone-is-done flag is for a loot, open or wait_object row: the exporter refuses it on a %s (a module without the step flag ignores it there)", s.Kind)
 			}
 		}
 		if s.Flags&FlagDeadNpcIsDone != 0 && s.Kind != KindGossip {

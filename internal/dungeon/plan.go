@@ -753,6 +753,12 @@ type WaitFor struct {
 type ObjectState struct {
 	ObjectRef
 	State string `json:"state"`
+	// GoneOK counts the object gone as the state reached, for an object a script opens and then removes: Shadowfang Keep's Courtyard
+	// Door (18895) is set active at Deathstalker Adamant's waypoint 6 and his escort script removes it about 5 waypoints later, so
+	// the wait would miss it. The run leader's wait_object row carries the gone-is-done flag (planexport.FlagGoneIsDone, 256) with
+	// it: "active or gone". Not with state ready (a gone object is not closed). In the file:
+	// {"entry": 18895, "near": {..}, "state": "active", "gone_ok": true}.
+	GoneOK bool `json:"gone_ok,omitempty"`
 }
 
 // HostilesGone waits until no hostile unit is within Radius yards of Center (the player when nil).
@@ -1072,7 +1078,8 @@ type rawWait struct {
 
 type rawObjState struct {
 	rawRef
-	State string `json:"state"`
+	State  string `json:"state"`
+	GoneOK *bool  `json:"gone_ok"`
 }
 
 type rawHostiles struct {
@@ -2072,6 +2079,12 @@ func (c *checker) wait(path string, r *rawWait) *WaitFor {
 		g := &ObjectState{ObjectRef: c.ref(gp, &r.GameObject.rawRef), State: r.GameObject.State}
 		if !validState(g.State) {
 			c.fail(gp+".state", "%q is none of %s", g.State, strings.Join(ObjectStates, ", "))
+		}
+		if r.GameObject.GoneOK != nil {
+			g.GoneOK = *r.GameObject.GoneOK
+			if g.GoneOK && g.State == "ready" {
+				c.fail(gp+".gone_ok", "a gone object is not closed: gone_ok needs state active or active_alt")
+			}
 		}
 		w.GameObject = g
 	default:
