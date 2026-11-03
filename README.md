@@ -293,7 +293,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `status` | | state, character, map, x/y/z, `falling`, `z_unknown`, `dead`/`ghost`, health, power, `combo_points`/`combo_target`, `gcd_ms` (see [Agent state](#agent-state)), target, last event seq, `mono_ms`, `base_time` and `wall_offset_ms` (the monotonic axis of events: `base_time` is the wall time of mono_ms 0; `wall_offset_ms` is the wall clock now minus `base_time` + `mono_ms`, so host clock steps and drift show) |
 | `chat` | `type` (say, party, yell, emote, guild, raid, whisper, channel), `text`, `to` (whisper target or channel name) | |
 | `gm` | `text` (a `.`-command; the dot is added if missing) | |
-| `gm_kill` | `guid` (a creature) | selects the creature, waits until the server shows the selection, and sends `.die` (account level 3): the test tool of [`raid-walk --gm-clear`](#--gm-clear-test-servers-only). Refuses a player guid. It does not read the death; the caller checks the unit's `dead` |
+| `gm_kill` | `guid` (a creature) | selects the creature, waits until the server shows the selection, and sends `.die` (account level 3): the test tool of [`raid-walk --gm-clear`](#--gm-clear-test-servers-only). Refuses a player guid, and refuses on any agent whose settings `server_name` (slot setup writes it) is not `m910q` or `tortoise-test2` (checked in the session, not only in raid-walk). It does not read the death; the caller checks the unit's `dead` |
 | `events` | `since`, `kinds`, `limit`, `wait_ms` | page: `events`, `next`, `more`, `dropped` |
 | `chat_log` | `since`, `limit` | chat and system events only |
 | `invite` / `accept_invite` / `leave_group` | `name` / – / – | |
@@ -2446,12 +2446,16 @@ AQ20 walk starts at Rajaxx with `--gm-clear-boss kurinnaxx` so Kurinnaxx is dead
   entries and its reach) and each pack to all its members, a `creature_groups` AGGRO_TOGETHER group and both directions of every aggro
   link, wherever the members stand (`internal/worldspawn` packs, the pull estimator's model). The packs come from the world export
   under `<dir>/../tools/dungeongen/testdata/map<N>` (`--gm-clear-spawns DIR` names another).
-- **Mechanism:** the commander goes (`.go xyz`) to each pack, reads the units its client holds within 150 yd, and for each live member
-  whose spawn guid and entry match calls the agent's `gm_kill` RPC: it selects the creature by guid, waits until the server shows that
-  selection (the same select-confirm path as `.additem`), and sends `.die` (core: `Chat.cpp:885`, `SEC_DEVELOPER` = account level 3,
+- **Mechanism:** every expected member of a pack gets one entry. The commander visits the pack's stops (`.go xyz` to a member's spawn
+  point; a pack wider than the 100 yd a stop covers gets several), reads the units its client holds within 150 yd, and for each live
+  member whose spawn guid and entry match calls the agent's `gm_kill` RPC: it selects the creature by guid, waits until the server shows
+  that selection (the same select-confirm path as `.additem`), and sends `.die` (core: `Chat.cpp:885`, `SEC_DEVELOPER` = account level 3,
   `HandleDieCommand` at `Commands.cpp:2795` kills the selected unit). The death is read from the unit's frames (`dead`, 5 s); a unit
-  that is still alive gets one more `.die`; one that survives both is recorded as not killed and noted, and the walk goes on. The pack is
-  read twice, so a member that came into view late is caught. The commander then returns to the start point.
+  that is still alive gets one more `.die`. Every stop is visited and read in two rounds, always (an empty read ends nothing). A member
+  never seen is recorded `killed: false, reason: "not seen"`, one that would not die `reason: "alive"`, one already dead
+  `reason: "already dead"` (killed, 0 tries). Either of the first two makes the clear **PARTIAL**: noted, in the summary
+  (`gm_clear_partial: true`, `ASSISTED PARTIAL` on the result line) and in the report; the walk goes on. The commander then returns to
+  the start point. `gm_kill` itself refuses on an agent that is not a slot of `m910q`/`tortoise-test2`.
 - **Recorded:** `run.log` gets `gm-clear: killed <entry> <guid> (<leg>:<group>)` per kill (and `gm-clear: FAILED ...`), `summary.json`
   gets `assisted: true` and `gm_clear[]` (`leg`, `group`, `entry`, `guid`, `killed`, `tries`) and `assisted: true` on each leg it killed
   in, `summary.txt` and the result line end with `ASSISTED`, and `raid-walk report` (which reads `summary.json` from the walk folder)

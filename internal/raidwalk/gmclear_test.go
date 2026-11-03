@@ -155,7 +155,7 @@ func assistedMeta() SummaryMeta {
 	return SummaryMeta{Plan: "aq20", Map: 509, Server: "m910q", GMClearUsed: true, GMClearLegs: []string{"Second"},
 		GMClear: []GMClearEntry{
 			{Leg: "Second", Group: "1", Entry: 100, GUID: unitGUID(100, 1).String(), Killed: true, Tries: 1},
-			{Leg: "Second", Group: "boss", Entry: 300, GUID: unitGUID(300, 3).String(), Killed: false, Tries: 2},
+			{Leg: "Second", Group: "boss", Entry: 300, GUID: unitGUID(300, 3).String(), Killed: false, Tries: 2, Reason: GMClearAlive},
 		}}
 }
 
@@ -170,6 +170,9 @@ func TestSummaryMarksAssisted(t *testing.T) {
 	if err := json.Unmarshal(raw, &back); err != nil {
 		t.Fatal(err)
 	}
+	if back["gm_clear_partial"] != true {
+		t.Fatalf("gm_clear_partial missing: %s", raw)
+	}
 	if back["assisted"] != true {
 		t.Fatalf("assisted missing: %s", raw)
 	}
@@ -183,10 +186,10 @@ func TestSummaryMarksAssisted(t *testing.T) {
 	}
 	txt := s.Text()
 	head := strings.SplitN(txt, "\n", 2)[0]
-	if !strings.HasSuffix(head, " ASSISTED") {
+	if !strings.HasSuffix(head, " ASSISTED PARTIAL") {
 		t.Fatalf("first line %q", head)
 	}
-	if !strings.Contains(txt, "ASSISTED: --gm-clear killed 1 units by GM command (Second); this is not a real clear; 1 would not die") {
+	if !strings.Contains(txt, "ASSISTED: --gm-clear killed 1 units by GM command (Second); this is not a real clear; PARTIAL: 1 members left (0 not seen, 1 alive)") {
 		t.Fatalf("summary.txt:\n%s", txt)
 	}
 	// Without the tool: no assisted, no gm_clear, no ASSISTED word.
@@ -226,7 +229,7 @@ func TestReportMarksAssisted(t *testing.T) {
 	m := assistedMeta()
 	rep := BuildReport(nil, nil, ReportOptions{GMClear: m.GMClear, Assisted: true})
 	md := rep.Markdown()
-	if !rep.Assisted || !strings.Contains(md, "**ASSISTED: --gm-clear killed 1 units") || !strings.Contains(md, "| Second | boss | 300 |") || !strings.Contains(md, "| NO | 2 |") {
+	if !rep.Assisted || !strings.Contains(md, "**ASSISTED: --gm-clear killed 1 units") || !strings.Contains(md, "| Second | boss | 300 |") || !strings.Contains(md, "| NO | 2 | alive |") || !strings.Contains(md, "PARTIAL: 1 members left") {
 		t.Fatalf("report:\n%s", md)
 	}
 	js, err := rep.JSON()
@@ -236,5 +239,37 @@ func TestReportMarksAssisted(t *testing.T) {
 	plain := BuildReport(nil, nil, ReportOptions{})
 	if strings.Contains(plain.Markdown(), "ASSISTED") {
 		t.Fatal("a plain report says ASSISTED")
+	}
+}
+
+// A pack wider than the commander's view gets one stop per cluster, at member spawns; a compact pack gets one.
+func TestGMClearStops(t *testing.T) {
+	pt := func(x float32) dungeon.Point { return dungeon.Point{X: x} }
+	compact := GMClearPack{Members: map[uint64]uint32{1: 1, 2: 1, 3: 1}, Positions: map[uint64]dungeon.Point{1: pt(0), 2: pt(60), 3: pt(-90)}}
+	if st := compact.Stops(); len(st) != 1 || st[0] != pt(0) {
+		t.Fatalf("compact stops %v", st)
+	}
+	wide := GMClearPack{Members: map[uint64]uint32{1: 1, 2: 1, 3: 1, 4: 1}, Positions: map[uint64]dungeon.Point{1: pt(0), 2: pt(50), 3: pt(400), 4: pt(430)}}
+	st := wide.Stops()
+	if len(st) != 2 || st[0] != pt(0) || st[1] != pt(400) {
+		t.Fatalf("wide stops %v", st)
+	}
+	if g := wide.SpawnGUIDs(); len(g) != 4 || g[0] != 1 || g[3] != 4 {
+		t.Fatalf("guids %v", g)
+	}
+}
+
+// SeenMembers keeps corpses (the caller decides), LiveMembers drops them.
+func TestGMClearSeenMembersKeepsCorpses(t *testing.T) {
+	packs, err := PlanGMClear(gmRows(), gmWorld(), []GMClearSpec{{Leg: "Second", Groups: []int{1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	units := []objects.Unit{{GUID: unitGUID(100, 1)}, {GUID: unitGUID(200, 2), Dead: true}, {GUID: unitGUID(100, 4)}}
+	if got := packs[0].SeenMembers(units); len(got) != 2 {
+		t.Fatalf("seen %+v", got)
+	}
+	if got := packs[0].LiveMembers(units); len(got) != 1 || got[0].GUID != unitGUID(100, 1) {
+		t.Fatalf("live %+v", got)
 	}
 }

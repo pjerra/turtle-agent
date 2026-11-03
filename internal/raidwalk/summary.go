@@ -64,6 +64,8 @@ type Summary struct {
 	// GMClear lists every unit the tool tried to kill. Both are absent without --gm-clear.
 	Assisted bool           `json:"assisted,omitempty"`
 	GMClear  []GMClearEntry `json:"gm_clear,omitempty"`
+	// GMClearPartial is true when an expected pack member was not confirmed dead (not seen, or still alive): the clear is PARTIAL.
+	GMClearPartial bool `json:"gm_clear_partial,omitempty"`
 	// ReviveRefusal is what kept the revive point from going quiet when the walk gave up on it (D-D, walk 25). Absent
 	// when the walk never refused a revive.
 	ReviveRefusal *ReviveRefusal `json:"revive_refusal,omitempty"`
@@ -398,6 +400,7 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		Place:          m.Place,
 		Assisted:       m.GMClearUsed,
 		GMClear:        m.GMClear,
+		GMClearPartial: GMClearPartial(m.GMClear),
 		BossKill:       m.BossKill,
 		BossKills:      m.BossKills,
 		ReviveRefusal:  m.ReviveRefusal,
@@ -534,6 +537,9 @@ func (s *Summary) Text() string {
 	}
 	if s.Assisted {
 		b.WriteString(" ASSISTED")
+		if s.GMClearPartial {
+			b.WriteString(" PARTIAL")
+		}
 	}
 	b.WriteString("\n")
 	if s.Assisted {

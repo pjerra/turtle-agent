@@ -3,11 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/pjerra/turtle-agent/internal/config"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/planexport"
@@ -72,14 +75,14 @@ func TestParseGMClearRefusals(t *testing.T) {
 	}
 }
 
-// gmClearWorld is the ZG pack of leg 2 group 1 (nine members) and the world guids of its members.
-func gmClearPack(t *testing.T) (raidwalk.GMClearPack, []packet.GUID) {
+// gmClearPack plans the ZG pack of leg 2 group 1 (nine members) from the export in dir and returns it with its members' world guids.
+func gmClearPack(t *testing.T, dir string) (raidwalk.GMClearPack, []packet.GUID) {
 	t.Helper()
 	res, err := planexport.Build(zgPlan(t), planexport.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	world, _, err := worldspawn.Load(gmClearZGSpawns, 309)
+	world, _, err := worldspawn.Load(dir, 309)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,18 +91,69 @@ func gmClearPack(t *testing.T) (raidwalk.GMClearPack, []packet.GUID) {
 		t.Fatalf("packs %v, err %v", packs, err)
 	}
 	var guids []packet.GUID
-	for g, e := range packs[0].Members {
-		guids = append(guids, packet.GUID(uint64(packet.HighUnit)<<48|uint64(e)<<24|g))
+	for _, g := range packs[0].SpawnGUIDs() {
+		guids = append(guids, packet.GUID(uint64(packet.HighUnit)<<48|uint64(packs[0].Members[g])<<24|g))
 	}
 	return packs[0], guids
 }
 
-func gmClearUnitsOf(guids []packet.GUID, dead func(packet.GUID) bool) []objects.Unit {
+// gmClearView is the fake client's view: the pack's units whose spawn point lies within the read radius of where the commander stands
+// (the fake agent's last .go), each dead or alive as dead says. Units outside the radius are not in the object store.
+func gmClearView(f *fixture, pack raidwalk.GMClearPack, guids []packet.GUID, dead func(packet.GUID) bool) []objects.Unit {
+	f.agent.mu.Lock()
+	cx, cy := float64(f.agent.x), float64(f.agent.y)
+	f.agent.mu.Unlock()
 	var out []objects.Unit
 	for _, g := range guids {
+		pt := pack.Positions[raidwalk.SpawnGUID(g)]
+		if math.Hypot(float64(pt.X)-cx, float64(pt.Y)-cy) > gmClearReadYd {
+			continue
+		}
 		out = append(out, objects.Unit{GUID: g, Type: "creature", Entry: g.Entry(), Dead: dead(g)})
 	}
 	return out
+}
+
+// gmClearFarExport copies the ZG export to a temp dir with one member of the pack moved 400 yd east of the rest, so the pack is wider
+// than the commander's view. It returns the dir and the moved member's spawn guid.
+func gmClearFarExport(t *testing.T, member uint64) string {
+	t.Helper()
+	dst := t.TempDir()
+	ents, err := os.ReadDir(gmClearZGSpawns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ents {
+		raw, err := os.ReadFile(filepath.Join(gmClearZGSpawns, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e.Name() == "creatures.tsv" {
+			lines := strings.Split(string(raw), "\n")
+			xi := -1
+			for i, l := range lines {
+				cols := strings.Split(l, "\t")
+				if i == 0 {
+					for j, c := range cols {
+						if c == "x" {
+							xi = j
+						}
+					}
+					continue
+				}
+				if len(cols) > xi && cols[0] == strconv.FormatUint(member, 10) {
+					x, _ := strconv.ParseFloat(cols[xi], 64)
+					cols[xi] = strconv.FormatFloat(x+400, 'f', 3, 64)
+					lines[i] = strings.Join(cols, "\t")
+				}
+			}
+			raw = []byte(strings.Join(lines, "\n"))
+		}
+		if err := os.WriteFile(filepath.Join(dst, e.Name()), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dst
 }
 
 // A placed walk with --gm-clear sends, for every live member of the pack, the kill, reads its death from the unit's frames, logs it,
@@ -108,17 +162,19 @@ func TestPlaceGMClearKillsWholePackAndMarksSummary(t *testing.T) {
 	f, _ := newPlaceFixture(t)
 	f.opts.gmClear = stringList{"2:1"}
 	f.opts.gmClearSpawns = gmClearZGSpawns
-	pack, guids := gmClearPack(t)
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
 	if len(guids) < 2 {
 		t.Fatalf("the test pack must hold linked members, has %d", len(guids))
 	}
-	// A second pack's unit (not a member) and a unit that is already dead stand in the room too: neither is touched.
+	// A unit outside the pack stands in the room too, and one member is a corpse already: neither is killed.
 	stranger := packet.GUID(uint64(packet.HighUnit)<<48 | 11111<<24 | 777)
 	corpse := guids[0]
 	f.agent.unitsFn = func(int) []objects.Unit {
-		f.agent.mu.Lock()
-		defer f.agent.mu.Unlock()
-		us := gmClearUnitsOf(guids, func(g packet.GUID) bool { return f.agent.killed[g] || g == corpse })
+		us := gmClearView(f, pack, guids, func(g packet.GUID) bool {
+			f.agent.mu.Lock()
+			defer f.agent.mu.Unlock()
+			return f.agent.killed[g] || g == corpse
+		})
 		return append(us, objects.Unit{GUID: stranger, Type: "creature", Entry: 11111})
 	}
 	f.agent.startReply = zgPlaceReply(t)
@@ -156,20 +212,34 @@ func TestPlaceGMClearKillsWholePackAndMarksSummary(t *testing.T) {
 	}
 
 	sum := f.summary()
-	if !sum.Assisted || len(sum.GMClear) != len(guids)-1 {
-		t.Fatalf("summary assisted %v, gm_clear %+v", sum.Assisted, sum.GMClear)
+	if !sum.Assisted || sum.GMClearPartial || len(sum.GMClear) != len(guids) {
+		t.Fatalf("summary assisted %v partial %v, gm_clear %+v", sum.Assisted, sum.GMClearPartial, sum.GMClear)
 	}
+	nKilled := 0
 	for _, e := range sum.GMClear {
-		if !e.Killed || e.Tries != 1 || e.Leg != pack.Leg || e.Group != "1" || e.Entry == 0 || !strings.HasPrefix(e.GUID, "0xF130") {
+		if !e.Killed || e.Leg != pack.Leg || e.Group != "1" || e.Entry == 0 || !strings.HasPrefix(e.GUID, "0xF130") {
 			t.Errorf("entry %+v", e)
 		}
+		if e.Reason == raidwalk.GMClearAlreadyDead {
+			if e.Tries != 0 || e.GUID != corpse.String() {
+				t.Errorf("already-dead entry %+v", e)
+			}
+			continue
+		}
+		nKilled++
+		if e.Tries != 1 {
+			t.Errorf("entry %+v", e)
+		}
+	}
+	if nKilled != len(guids)-1 {
+		t.Errorf("%d killed entries", nKilled)
 	}
 	text, err := os.ReadFile(filepath.Join(f.out, "summary.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	first := strings.SplitN(string(text), "\n", 2)[0]
-	if !strings.Contains(first, "ASSISTED") || !strings.Contains(string(text), "this is not a real clear") {
+	if !strings.Contains(first, "ASSISTED") || strings.Contains(first, "PARTIAL") || !strings.Contains(string(text), "this is not a real clear") {
 		t.Fatalf("summary.txt:\n%s", text)
 	}
 	if !strings.Contains(f.stdout.String(), "ASSISTED") {
@@ -179,13 +249,18 @@ func TestPlaceGMClearKillsWholePackAndMarksSummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	lines := 0
 	for _, e := range sum.GMClear {
+		if e.Tries == 0 {
+			continue
+		}
+		lines++
 		want := raidwalk.GMClearLogLine(e)
 		if !strings.Contains(string(runLog), want) {
 			t.Errorf("run.log lacks %q", want)
 		}
 	}
-	if !strings.Contains(string(runLog), "gm-clear: killed ") || !strings.Contains(string(runLog), "("+pack.Leg+":1)") {
+	if lines == 0 || !strings.Contains(string(runLog), "("+pack.Leg+":1)") {
 		t.Errorf("run.log:\n%s", runLog)
 	}
 	// The report reads the folder's summary and marks itself.
@@ -196,17 +271,18 @@ func TestPlaceGMClearKillsWholePackAndMarksSummary(t *testing.T) {
 	if code := raidWalkReportCmd([]string{f.out}, &out, &errb); code != exitOK {
 		t.Fatalf("report exit %d: %s", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "ASSISTED") || !strings.Contains(out.String(), "| "+pack.Leg+" | 1 |") {
+	if !strings.Contains(out.String(), "ASSISTED") || !strings.Contains(out.String(), "| "+pack.Leg+" | 1 |") || strings.Contains(out.String(), "PARTIAL") {
 		t.Fatalf("report:\n%s", out.String())
 	}
 }
 
-// A unit that survives the first line gets one retry; one that survives both is reported (entry killed false, a note) and the walk goes on.
+// A unit that survives the first line gets one retry; one that survives both is recorded as alive and the clear is PARTIAL (the walk
+// goes on).
 func TestPlaceGMClearRetriesOnceAndReportsSurvivors(t *testing.T) {
 	f, _ := newPlaceFixture(t)
 	f.opts.gmClear = stringList{"2:1"}
 	f.opts.gmClearSpawns = gmClearZGSpawns
-	_, guids := gmClearPack(t)
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
 	slow, stubborn := guids[0], guids[1]
 	f.agent.killFn = func(g packet.GUID, tries int) bool {
 		switch g {
@@ -218,9 +294,7 @@ func TestPlaceGMClearRetriesOnceAndReportsSurvivors(t *testing.T) {
 		return true
 	}
 	f.agent.unitsFn = func(int) []objects.Unit {
-		f.agent.mu.Lock()
-		defer f.agent.mu.Unlock()
-		return gmClearUnitsOf(guids, func(g packet.GUID) bool { return f.agent.killed[g] })
+		return gmClearView(f, pack, guids, func(g packet.GUID) bool { f.agent.mu.Lock(); defer f.agent.mu.Unlock(); return f.agent.killed[g] })
 	}
 	f.agent.startReply = zgPlaceReply(t)
 	if code := f.run(context.Background()); code != exitOK {
@@ -234,10 +308,10 @@ func TestPlaceGMClearRetriesOnceAndReportsSurvivors(t *testing.T) {
 	if e := by[slow.String()]; !e.Killed || e.Tries != 2 {
 		t.Errorf("slow unit %+v", e)
 	}
-	if e := by[stubborn.String()]; e.Killed || e.Tries != 2 {
+	if e := by[stubborn.String()]; e.Killed || e.Tries != 2 || e.Reason != raidwalk.GMClearAlive {
 		t.Errorf("stubborn unit %+v", e)
 	}
-	// Two lines at most per unit, and the second read round does not send a third to the stubborn one.
+	// Two lines at most per unit, and the second round does not send a third to the stubborn one.
 	n := 0
 	for _, l := range f.agentLog() {
 		if l == "gm_kill "+stubborn.String() {
@@ -249,36 +323,114 @@ func TestPlaceGMClearRetriesOnceAndReportsSurvivors(t *testing.T) {
 	}
 	found := false
 	for _, note := range sum.Notes {
-		if strings.Contains(note, "would not die") && strings.Contains(note, stubborn.String()) {
+		if strings.Contains(note, "alive after 2") && strings.Contains(note, stubborn.String()) {
 			found = true
 		}
 	}
-	if !found || !sum.Assisted {
-		t.Errorf("notes %v assisted %v", sum.Notes, sum.Assisted)
+	if !found || !sum.Assisted || !sum.GMClearPartial {
+		t.Errorf("notes %v assisted %v partial %v", sum.Notes, sum.Assisted, sum.GMClearPartial)
 	}
 	text, _ := os.ReadFile(filepath.Join(f.out, "summary.txt"))
-	if !strings.Contains(string(text), "would not die") {
+	if !strings.HasPrefix(string(text), "raid-walk ") || !strings.Contains(strings.SplitN(string(text), "\n", 2)[0], "ASSISTED PARTIAL") || !strings.Contains(string(text), "PARTIAL: 1 members left (0 not seen, 1 alive)") {
 		t.Errorf("summary.txt:\n%s", text)
 	}
 }
 
-// With no pack member in view the walk is still ASSISTED: the flag was used, and the summary says nothing died.
-func TestPlaceGMClearNothingInViewStillAssisted(t *testing.T) {
+// A member that stands outside the commander's view of the rest (400 yd away, over the 150 yd read) is visited at its own spawn point,
+// killed, and the clear is not PARTIAL. The first read of every stop is empty here (nothing shows until the members have been "seen"
+// once), and both rounds still run.
+func TestPlaceGMClearVisitsMembersOutsideTheViewAndReadsTwice(t *testing.T) {
+	_, guids := gmClearPack(t, gmClearZGSpawns)
+	far := guids[len(guids)-1]
+	dir := gmClearFarExport(t, raidwalk.SpawnGUID(far))
+	pack, guids := gmClearPack(t, dir)
+	if pack.Radius <= 150 {
+		t.Fatalf("the moved export must make the pack wider than the view: radius %.0f", pack.Radius)
+	}
+	if n := len(pack.Stops()); n < 2 {
+		t.Fatalf("a pack wider than the view needs several stops, has %d", n)
+	}
+	f, _ := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"2:1"}
+	f.opts.gmClearSpawns = dir
+	reads := 0
+	f.agent.unitsFn = func(int) []objects.Unit {
+		reads++
+		if reads <= 1 { // the first read of the walk shows nothing
+			return []objects.Unit{}
+		}
+		return gmClearView(f, pack, guids, func(g packet.GUID) bool { f.agent.mu.Lock(); defer f.agent.mu.Unlock(); return f.agent.killed[g] })
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.GMClearPartial || len(sum.GMClear) != len(guids) {
+		t.Fatalf("partial %v, gm_clear %+v", sum.GMClearPartial, sum.GMClear)
+	}
+	for _, e := range sum.GMClear {
+		if !e.Killed {
+			t.Errorf("entry %+v", e)
+		}
+	}
+	killedFar := false
+	for _, l := range f.agentLog() {
+		if l == "gm_kill "+far.String() {
+			killedFar = true
+		}
+	}
+	if !killedFar {
+		t.Fatal("the member outside the view was never killed")
+	}
+	// Both rounds ran at every stop: at least two reads per stop, the first of them empty.
+	if reads < 2*len(pack.Stops()) {
+		t.Fatalf("%d reads for %d stops", reads, len(pack.Stops()))
+	}
+	// The commander went to the far member's own spawn.
+	pt := pack.Positions[raidwalk.SpawnGUID(far)]
+	goLine := "gm .go xyz " + num32(pt.X) + " " + num32(pt.Y) + " "
+	seen := false
+	for _, l := range f.agentLog() {
+		seen = seen || strings.HasPrefix(l, goLine)
+	}
+	if !seen {
+		t.Fatalf("no %q in the log", goLine)
+	}
+}
+
+// With no pack member ever in view, every expected member is recorded as not seen, the clear is PARTIAL, and the walk still reads twice.
+func TestPlaceGMClearNothingInViewIsPartial(t *testing.T) {
 	f, _ := newPlaceFixture(t)
 	f.opts.gmClear = stringList{"2:1"}
 	f.opts.gmClearSpawns = gmClearZGSpawns
+	pack, _ := gmClearPack(t, gmClearZGSpawns)
+	reads := 0
+	f.agent.unitsFn = func(int) []objects.Unit { reads++; return []objects.Unit{} }
 	f.agent.startReply = zgPlaceReply(t)
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s", code, f.stderr.String())
 	}
 	sum := f.summary()
-	if !sum.Assisted || len(sum.GMClear) != 0 {
-		t.Fatalf("assisted %v, gm_clear %v", sum.Assisted, sum.GMClear)
+	if !sum.Assisted || !sum.GMClearPartial || len(sum.GMClear) != len(pack.Members) {
+		t.Fatalf("assisted %v partial %v, gm_clear %v", sum.Assisted, sum.GMClearPartial, sum.GMClear)
+	}
+	for _, e := range sum.GMClear {
+		if e.Killed || e.Reason != raidwalk.GMClearNotSeen || !strings.HasPrefix(e.GUID, "spawn ") {
+			t.Errorf("entry %+v", e)
+		}
+	}
+	if reads < gmClearRounds {
+		t.Errorf("only %d reads: an empty read must not skip the second round", reads)
 	}
 	for _, l := range f.agentLog() {
 		if strings.HasPrefix(l, "gm_kill") {
 			t.Fatalf("a kill went out: %s", l)
 		}
+	}
+	text, _ := os.ReadFile(filepath.Join(f.out, "summary.txt"))
+	if !strings.Contains(strings.SplitN(string(text), "\n", 2)[0], "ASSISTED PARTIAL") || !strings.Contains(string(text), "PARTIAL: 9 members left (9 not seen, 0 alive)") {
+		t.Fatalf("summary.txt:\n%s", text)
 	}
 }
 
@@ -334,5 +486,14 @@ func TestDryRunListsGMClearPacks(t *testing.T) {
 	}
 	if !strings.Contains(f.stdout.String(), "8c gm-clear: high_priestess_marli:1 pack ") {
 		t.Fatalf("dry run:\n%s", f.stdout.String())
+	}
+}
+
+// Only an agent whose settings name a test server may send gm_kill (session.Options.AllowGMKill, set from server_name).
+func TestGMKillAllowedOnlyForTestServers(t *testing.T) {
+	for server, want := range map[string]bool{"m910q": true, "tortoise-test2": true, "tortoise": false, "": false, "M910Q": false, "m910q ": false} {
+		if got := gmKillAllowed(config.Settings{ServerName: server}); got != want {
+			t.Errorf("server %q: allowed %v, want %v", server, got, want)
+		}
 	}
 }

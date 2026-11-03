@@ -28,6 +28,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/config"
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/mapview"
 	"github.com/pjerra/turtle-agent/internal/objects"
@@ -397,6 +398,9 @@ func parseGMClearSpecs(groups, bosses []string) ([]raidwalk.GMClearSpec, error) 
 
 // placeServers are the servers whose Eluna test toolkit can move a raid (spec 3). --place refuses every other one.
 var placeServers = map[string]bool{"m910q": true, "tortoise-test2": true}
+
+// gmKillAllowed says the agent's settings name a test server (placeServers): only then does the session send the gm_kill RPC's `.die`.
+func gmKillAllowed(st config.Settings) bool { return placeServers[st.ServerName] }
 
 // placeServerList is the place servers, sorted, for the refusal.
 func placeServerList() []string {

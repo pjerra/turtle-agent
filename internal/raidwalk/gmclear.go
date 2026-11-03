@@ -61,8 +61,16 @@ func ParseGMClearBoss(v string) (GMClearSpec, error) {
 	return GMClearSpec{Leg: leg, Boss: true}, nil
 }
 
-// GMClearEntry is one unit the tool tried to kill: the summary's gm_clear list and the report's table. Killed says the unit's frames
-// showed it dead; Tries counts the kill lines sent (2 at most).
+// The Reason of a GMClearEntry that is not a confirmed kill, or a member that was dead before the tool got to it.
+const (
+	GMClearNotSeen     = "not seen"     // no frame showed this member alive or dead: it was never in the commander's view
+	GMClearAlive       = "alive"        // the member was seen alive and the kill lines did not bring a death
+	GMClearAlreadyDead = "already dead" // the member's frames showed it dead before any line was sent (Killed true, Tries 0)
+)
+
+// GMClearEntry is one expected pack member: the summary's gm_clear list and the report's table. Killed says the unit's frames showed
+// it dead; Tries counts the kill lines sent (2 at most). A member that is not Killed has a Reason (GMClearNotSeen, GMClearAlive) and
+// leaves the clear PARTIAL. GUID is the unit's world guid, or "spawn <n>" (the export's spawn guid) for a member never seen.
 type GMClearEntry struct {
 	Leg    string `json:"leg"`
 	Group  string `json:"group"`
@@ -70,6 +78,7 @@ type GMClearEntry struct {
 	GUID   string `json:"guid"`
 	Killed bool   `json:"killed"`
 	Tries  int    `json:"tries"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // GMClearLabel is the "<leg>:<group>" of a run.log line and a summary entry.
@@ -89,8 +98,49 @@ type GMClearPack struct {
 	ID       uint64 // the pack's smallest member spawn guid
 	Centroid dungeon.Point
 	Radius   float32
-	// Members maps a member's spawn guid (the low part of its world guid) to its entry.
-	Members map[uint64]uint32
+	// Members maps a member's spawn guid (the low part of its world guid) to its entry; Positions maps it to its spawn point.
+	Members   map[uint64]uint32
+	Positions map[uint64]dungeon.Point
+}
+
+// GMClearStopYd is how far a member may stand from a visit stop and still be inside the commander's view and read radius there.
+const GMClearStopYd = 100
+
+// Stops are the points the commander visits to see every member: a member within GMClearStopYd (2D) of an earlier stop is covered by
+// it, else it gets a stop of its own, taken in spawn-guid order so the list is the same every time. A pack that fits one view has one
+// stop (its first member's spawn); a pack wider than the view has several, each at a member.
+func (p GMClearPack) Stops() []dungeon.Point {
+	guids := make([]uint64, 0, len(p.Members))
+	for g := range p.Members {
+		guids = append(guids, g)
+	}
+	sort.Slice(guids, func(i, j int) bool { return guids[i] < guids[j] })
+	var stops []dungeon.Point
+	for _, g := range guids {
+		pt := p.Positions[g]
+		covered := false
+		for _, s := range stops {
+			dx, dy := float64(pt.X-s.X), float64(pt.Y-s.Y)
+			if dx*dx+dy*dy <= GMClearStopYd*GMClearStopYd {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			stops = append(stops, pt)
+		}
+	}
+	return stops
+}
+
+// SpawnGUIDs are the members' spawn guids, sorted.
+func (p GMClearPack) SpawnGUIDs() []uint64 {
+	out := make([]uint64, 0, len(p.Members))
+	for g := range p.Members {
+		out = append(out, g)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
 }
 
 // PlanGMClear expands the specs into the packs to kill, in spec order. Each group is the leg's n-th pull (or hold) row; the boss is the
@@ -153,16 +203,18 @@ func PlanGMClear(rows planexport.Rows, world *worldspawn.World, specs []GMClearS
 				}
 				seen[p.ID] = true
 				members := map[uint64]uint32{}
+				positions := map[uint64]dungeon.Point{}
 				for _, g := range p.Members {
 					for _, s := range world.Spawns {
 						if s.GUID == g {
 							members[g] = s.Entry
+							positions[g] = s.Pos
 							break
 						}
 					}
 				}
 				out = append(out, GMClearPack{Leg: name, Group: t.group, Step: t.row + 1, ID: p.ID,
-					Centroid: p.Centroid, Radius: p.Radius, Members: members})
+					Centroid: p.Centroid, Radius: p.Radius, Members: members, Positions: positions})
 			}
 		}
 	}
@@ -173,12 +225,12 @@ func PlanGMClear(rows planexport.Rows, world *worldspawn.World, specs []GMClearS
 // export lists as the spawn's guid.
 func SpawnGUID(g packet.GUID) uint64 { return uint64(g) & 0x00FFFFFF }
 
-// LiveMembers picks, from the units a read shows, the live ones that are members of the pack: a creature whose spawn guid and entry both
-// match a member. A dead unit is left out (a corpse needs no second kill), and the order is by guid.
-func (p GMClearPack) LiveMembers(units []objects.Unit) []objects.Unit {
+// SeenMembers picks, from the units a read shows, the members of the pack: a creature whose spawn guid and entry both match a member,
+// dead or alive (the caller tells them apart). The order is by guid.
+func (p GMClearPack) SeenMembers(units []objects.Unit) []objects.Unit {
 	var out []objects.Unit
 	for _, u := range units {
-		if !u.GUID.IsCreature() || u.Dead {
+		if !u.GUID.IsCreature() {
 			continue
 		}
 		if e, ok := p.Members[SpawnGUID(u.GUID)]; ok && e == u.GUID.Entry() {
@@ -186,6 +238,17 @@ func (p GMClearPack) LiveMembers(units []objects.Unit) []objects.Unit {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].GUID < out[j].GUID })
+	return out
+}
+
+// LiveMembers is SeenMembers without the dead: a corpse needs no second kill.
+func (p GMClearPack) LiveMembers(units []objects.Unit) []objects.Unit {
+	var out []objects.Unit
+	for _, u := range p.SeenMembers(units) {
+		if !u.Dead {
+			out = append(out, u)
+		}
+	}
 	return out
 }
 
@@ -202,24 +265,43 @@ func GMClearLegs(packs []GMClearPack) []string {
 	return out
 }
 
-// GMClearCounts is how many entries were killed and how many would not die.
-func GMClearCounts(es []GMClearEntry) (killed, failed int) {
+// GMClearCounts is how many members are confirmed dead (killed by a line, Tries above 0) and how many are left (not seen, or alive).
+// A member that was already dead when first seen is in neither count.
+func GMClearCounts(es []GMClearEntry) (killed, left int) {
 	for _, e := range es {
-		if e.Killed {
+		switch {
+		case !e.Killed:
+			left++
+		case e.Tries > 0:
 			killed++
-		} else {
-			failed++
 		}
 	}
-	return killed, failed
+	return killed, left
 }
 
-// GMClearSummaryLine is the one ASSISTED line of summary.txt and the report.
+// GMClearPartial says a member of an expected pack was not confirmed dead: the clear is PARTIAL.
+func GMClearPartial(es []GMClearEntry) bool {
+	_, left := GMClearCounts(es)
+	return left > 0
+}
+
+// GMClearSummaryLine is the one ASSISTED line of summary.txt and the report; a PARTIAL clear says how many members are left and why.
 func GMClearSummaryLine(es []GMClearEntry, legs []string) string {
-	killed, failed := GMClearCounts(es)
+	killed, left := GMClearCounts(es)
 	line := fmt.Sprintf("ASSISTED: --gm-clear killed %d units by GM command (%s); this is not a real clear", killed, strings.Join(legs, ", "))
-	if failed > 0 {
-		line += fmt.Sprintf("; %d would not die", failed)
+	if left > 0 {
+		var notSeen, alive int
+		for _, e := range es {
+			if e.Killed {
+				continue
+			}
+			if e.Reason == GMClearNotSeen {
+				notSeen++
+			} else {
+				alive++
+			}
+		}
+		line += fmt.Sprintf("; PARTIAL: %d members left (%d not seen, %d alive)", left, notSeen, alive)
 	}
 	return line
 }

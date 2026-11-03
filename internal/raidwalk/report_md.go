@@ -74,13 +74,17 @@ func (r *Report) Markdown() string {
 		legs := assistedLegs(&Summary{GMClear: r.GMClear})
 		fmt.Fprintf(&b, "**%s**\n\n", GMClearSummaryLine(r.GMClear, legs))
 		if len(r.GMClear) > 0 {
-			b.WriteString("| leg | group | entry | guid | killed | tries |\n| --- | --- | ---: | --- | --- | ---: |\n")
+			b.WriteString("| leg | group | entry | guid | killed | tries | reason |\n| --- | --- | ---: | --- | --- | ---: | --- |\n")
 			for _, e := range r.GMClear {
 				killed := "yes"
 				if !e.Killed {
 					killed = "NO"
 				}
-				fmt.Fprintf(&b, "| %s | %s | %d | %s | %s | %d |\n", mdCell(e.Leg), mdCell(e.Group), e.Entry, e.GUID, killed, e.Tries)
+				reason := "-"
+				if e.Reason != "" {
+					reason = e.Reason
+				}
+				fmt.Fprintf(&b, "| %s | %s | %d | %s | %s | %d | %s |\n", mdCell(e.Leg), mdCell(e.Group), e.Entry, e.GUID, killed, e.Tries, reason)
 			}
 			b.WriteString("\n")
 		}

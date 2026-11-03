@@ -23,11 +23,12 @@ import (
 )
 
 const (
-	// gmClearReadYd is how far around a pack's centroid the commander reads units: the object store holds what the client would see.
+	// gmClearReadYd is how far around a visit stop the commander reads units: the object store holds what the client would see. It is
+	// wider than raidwalk.GMClearStopYd, the distance a stop covers.
 	gmClearReadYd = 150
 	// gmClearReadLimit is the units RPC's row cap for that read (the default 100 would cut a crowded room).
 	gmClearReadLimit = 2000
-	// gmClearRounds is how many times a pack is read and cleared: a second read catches members that were out of view or came in.
+	// gmClearRounds is how many times a pack's stops are visited and read: both always run, so a first empty read ends nothing.
 	gmClearRounds = 2
 	// gmClearDeathWait and gmClearDeathPoll are how long a kill is given to show in the unit's frames, and how often it is read.
 	gmClearDeathWait = 5 * time.Second
@@ -103,9 +104,20 @@ func (w *walk) gmClearKill(ctx context.Context, u objects.Unit) (tries int, dead
 	return tries, false, nil
 }
 
-// placeGMClear is place step 6b: for every pack, the commander goes to the pack, reads the units around it, and kills every live
-// member. A member that will not die is recorded and noted, and the walk goes on (the summary says so). The commander then returns to
-// the start point, on its floor, before the quiet check and the raid's move.
+// gmClearMember is what the walk knows about one expected pack member while it clears the pack.
+type gmClearMember struct {
+	guid   packet.GUID // the unit's world guid once a read showed it (0: never seen)
+	dead   bool        // the frames showed it dead
+	tries  int         // kill lines sent
+	gaveUp bool        // it survived gmClearTries lines: no more are sent
+}
+
+// placeGMClear is place step 6b. Every pack is cleared in gmClearRounds rounds; each round the commander visits every stop of the pack
+// (a member's spawn point, so a pack wider than the commander's view is seen whole), reads the units around it, and kills every live
+// member it sees. An empty read ends nothing: both rounds always run. Every expected member then gets one entry: killed (a death
+// confirmed from the frames), already dead, alive (seen, would not die) or not seen. Anything but the first two leaves the clear
+// PARTIAL, noted and in the summary; the walk goes on. The commander returns to the start point, on its floor, before the quiet check
+// and the raid's move.
 func (w *walk) placeGMClear(ctx context.Context) error {
 	if len(w.gmClear) == 0 {
 		return nil
@@ -114,47 +126,71 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 	p := w.place.Point
 	for _, pk := range w.gmClear {
 		label := raidwalk.GMClearLabel(pk.Leg, pk.Group)
-		if err := w.goPlace(ctx, pk.Centroid.X, pk.Centroid.Y, pk.Centroid.Z+2); err != nil {
-			return err
+		members := map[uint64]*gmClearMember{}
+		for _, g := range pk.SpawnGUIDs() {
+			members[g] = &gmClearMember{}
 		}
-		if err := w.placeSleep(ctx, 2*time.Second); err != nil {
-			return err
-		}
-		if err := w.placeInstanceIs(ctx, w.placeInst); err != nil {
-			return err
-		}
-		done := map[packet.GUID]int{} // unit -> index into gmClearLog
+		stops := pk.Stops()
 		for round := 0; round < gmClearRounds; round++ {
-			units, err := w.gmClearUnits(ctx)
-			if err != nil {
-				return stopf(exitRaidWalkFailed, "gm-clear: units read at %s: %v", label, err)
-			}
-			live := pk.LiveMembers(units)
-			if len(live) == 0 {
-				break
-			}
-			for _, u := range live {
-				if i, ok := done[u.GUID]; ok && !w.gmClearLog[i].Killed {
-					continue // it would not die once already: a third line would not change that
+			for _, stop := range stops {
+				if err := w.goPlace(ctx, stop.X, stop.Y, stop.Z+2); err != nil {
+					return err
 				}
-				tries, dead, err := w.gmClearKill(ctx, u)
+				if err := w.placeSleep(ctx, 2*time.Second); err != nil {
+					return err
+				}
+				if err := w.placeInstanceIs(ctx, w.placeInst); err != nil {
+					return err
+				}
+				units, err := w.gmClearUnits(ctx)
 				if err != nil {
-					return stopf(exitRaidWalkFailed, "gm-clear: interrupted at %s: %v", label, err)
+					return stopf(exitRaidWalkFailed, "gm-clear: units read at %s: %v", label, err)
 				}
-				e := raidwalk.GMClearEntry{Leg: pk.Leg, Group: pk.Group, Entry: u.GUID.Entry(), GUID: u.GUID.String(), Killed: dead, Tries: tries}
-				done[u.GUID] = len(w.gmClearLog)
-				w.gmClearLog = append(w.gmClearLog, e)
-				if dead {
-					w.logLine(w.env.now(), raidwalk.GMClearLogLine(e))
-				} else {
-					w.note("gm-clear: unit %d %s (%s) would not die after %d .die lines", e.Entry, e.GUID, label, tries)
-					w.logLine(w.env.now(), fmt.Sprintf("gm-clear: FAILED %d %s (%s) alive after %d tries", e.Entry, e.GUID, label, tries))
+				for _, u := range pk.SeenMembers(units) {
+					m := members[raidwalk.SpawnGUID(u.GUID)]
+					if m == nil || m.dead || m.gaveUp {
+						continue
+					}
+					m.guid = u.GUID
+					if u.Dead {
+						m.dead = true
+						continue
+					}
+					tries, dead, err := w.gmClearKill(ctx, u)
+					if err != nil {
+						return stopf(exitRaidWalkFailed, "gm-clear: interrupted at %s: %v", label, err)
+					}
+					m.tries += tries
+					m.dead, m.gaveUp = dead, !dead
+					if dead {
+						w.logLine(w.env.now(), raidwalk.GMClearLogLine(raidwalk.GMClearEntry{Leg: pk.Leg, Group: pk.Group, Entry: u.GUID.Entry(), GUID: u.GUID.String()}))
+					} else {
+						w.logLine(w.env.now(), fmt.Sprintf("gm-clear: FAILED %d %s (%s) alive after %d tries", u.GUID.Entry(), u.GUID, label, m.tries))
+					}
 				}
 			}
+		}
+		for _, g := range pk.SpawnGUIDs() {
+			m := members[g]
+			e := raidwalk.GMClearEntry{Leg: pk.Leg, Group: pk.Group, Entry: pk.Members[g], Tries: m.tries}
+			switch {
+			case m.guid == 0:
+				e.GUID, e.Reason = fmt.Sprintf("spawn %d", g), raidwalk.GMClearNotSeen
+			case m.dead:
+				e.GUID, e.Killed = m.guid.String(), true
+				if m.tries == 0 {
+					e.Reason = raidwalk.GMClearAlreadyDead
+				}
+			default:
+				e.GUID, e.Reason = m.guid.String(), raidwalk.GMClearAlive
+			}
+			if !e.Killed {
+				w.note("gm-clear: member %d %s (%s) %s after %d .die lines", e.Entry, e.GUID, label, e.Reason, e.Tries)
+			}
+			w.gmClearLog = append(w.gmClearLog, e)
 		}
 	}
-	killed, failed := raidwalk.GMClearCounts(w.gmClearLog)
-	w.note("gm-clear: ASSISTED, %d units killed by GM command, %d would not die; this walk is not a real clear", killed, failed)
+	w.note("%s", raidwalk.GMClearSummaryLine(w.gmClearLog, raidwalk.GMClearLegs(w.gmClear)))
 	// Back to the start point, on its floor, as the corridor clear's last position was.
 	if err := w.goPlace(ctx, p.X, p.Y, p.Z+2); err != nil {
 		return err

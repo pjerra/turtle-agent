@@ -362,7 +362,7 @@ func TestClearTargetSendsAZeroSelection(t *testing.T) {
 // force. A player guid is refused with nothing sent.
 func TestGMKillSelectsThenSendsDie(t *testing.T) {
 	ctx := context.Background()
-	h := start(t, Options{})
+	h := start(t, Options{AllowGMKill: true})
 	h.enterWorld()
 	h.send(opcode.SMSGUpdateObject, unitCreate(me.GUID, objects.TypePlayer, me.X, me.Y, me.Z, map[uint16]uint32{objects.UnitHealth: 800, objects.UnitMaxHealth: 800}))
 	creature := packet.GUID(uint64(packet.HighUnit)<<48 | 12118<<24 | 4242)
@@ -434,5 +434,26 @@ func TestGMKillSelectsThenSendsDie(t *testing.T) {
 	}
 	if len(lines) != 1 || !strings.Contains(lines[0].text, ".die") || lines[0].inForce != creature {
 		t.Fatalf("lines %+v (all %+v)", lines, got)
+	}
+}
+
+// An agent that is not a slot of a test server refuses GMKill before it selects or sends anything.
+func TestGMKillRefusedOutsideTestServers(t *testing.T) {
+	ctx := context.Background()
+	h := start(t, Options{})
+	h.enterWorld()
+	h.send(opcode.SMSGUpdateObject, unitCreate(me.GUID, objects.TypePlayer, me.X, me.Y, me.Z, map[uint16]uint32{objects.UnitHealth: 800, objects.UnitMaxHealth: 800}))
+	creature := packet.GUID(uint64(packet.HighUnit)<<48 | 12118<<24 | 4242)
+	if err := h.s.GMKill(ctx, creature); !errors.Is(err, ErrGMKillRefused) {
+		t.Fatalf("%v", err)
+	}
+	for {
+		p, err := h.srv.Next(200 * time.Millisecond)
+		if err != nil {
+			break
+		}
+		if p.Op == opcode.CMSGSetSelection || p.Op == opcode.CMSGMessagechat {
+			t.Fatalf("a packet went out: %v", p.Op)
+		}
 	}
 }

@@ -231,6 +231,8 @@ type Report struct {
 	// Assisted is true when the walk used --gm-clear: units died by GM command, so the pulls and legs it covers are not a real clear.
 	Assisted bool           `json:"assisted,omitempty"`
 	GMClear  []GMClearEntry `json:"gm_clear,omitempty"`
+	// GMClearPartial is true when an expected pack member was left (not seen, or alive).
+	GMClearPartial bool `json:"gm_clear_partial,omitempty"`
 }
 
 // ReportTotals sums the table.
@@ -405,7 +407,7 @@ func BuildReport(fights []ReportFight, log []LogLine, opt ReportOptions) *Report
 	})
 	rep := &Report{Format: ReportFormat, Version: ReportVersion, ClockOffset: opt.ClockOffset.String(), HasRunLog: len(log) > 0,
 		Spells: opt.Spells, Pulls: []ReportPull{}, Control: []ControlEvent{},
-		Assisted: opt.Assisted || len(opt.GMClear) > 0, GMClear: opt.GMClear}
+		Assisted: opt.Assisted || len(opt.GMClear) > 0, GMClear: opt.GMClear, GMClearPartial: GMClearPartial(opt.GMClear)}
 	if len(opt.Spells) > 0 {
 		rep.WindowS = opt.Window.Seconds()
 	}
