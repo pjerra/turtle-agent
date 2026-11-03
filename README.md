@@ -2372,7 +2372,15 @@ and z within 30 yd of the point) before any summon leaves, and a landing that ne
 (`not revived: the commander did not land at the revive point`). Every wipe that does not recover
 says why in the notes (`wipe resume skipped: ...`, `second wipe at step N during the wipe-resume of step M`). It never
 revives while a boss row has a target: a boss engagement stops the run at once and waits up to 15 minutes for a kill,
-a reset or a wipe. A wipe or a boss engagement with no recovery left ends the walk with exit 19. Recovery fails closed
+a reset or a wipe. The one exception is the boss the RUN LEADER fights (the same `runFightsBoss` hand-over the watch
+loop uses: a boss step under `--until none`, or an until that goes past the boss step, as `--until boss-done`'s
+resolved clause does): there the walk owns no boss attempt, so a wipe on that step follows the ordinary wipe-resume
+flow — revive, rest (the self-regroup revive when TB says `regrouping by itself`), retry, one `--wipe-resume` — and
+never sends `run stop` at the wipe (walk 32: a Mar'li boss-step wipe under `--until none` was stopped 0.7 s after the
+`20 dead ... regrouping by itself` line, and a Hakkar one 42 ms after it, so boss retries were impossible). The boss
+gate and the unknown-boss gate are skipped for that fight only, and the post-recovery boss re-check accepts the fight
+as the run's without a new status line (the boss was not newly engaged during the recovery). A wipe or a boss
+engagement with no recovery left ends the walk with exit 19. Recovery fails closed
 on unknown boss state (no dashboard, a stale or errored fights read, or a boss latched in the last 120 s: the old
 ending with the note `wipe resume skipped: boss state unknown`); the rest needs a complete quiet view (every roster
 hire present, fresh, out of combat and alive in `bot_view`, polled every 5 s — any gap restarts the window); and the
@@ -2391,7 +2399,8 @@ corpse, does not. After the rest and the resume the walk checks what the frames 
 to the boss path exactly as a watch-loop engagement does, so the run never reports a clean wipe-resume while a boss
 fight is live. The run-leader-fights-its-boss exception needs a run status received after the resume went out: a
 retained pre-resume boss-kind line does not hide a newly engaged boss, while a fresh post-resume boss-kind status
-keeps the old behaviour. A skipped near-wipe recovery is not retried for the same pause. Known limits: the wipe path
+keeps the old behaviour; the exception a boss-step wipe decided before the recovery needs no new line. A skipped
+near-wipe recovery is not retried for the same pause. Known limits: the wipe path
 does not check that the run is paused before reviving, and the 60 s running check can pass on a status line from
 before the resume; the timeout note always names 3 x `--wipe-rest` even when the walk ceiling cut it shorter; a boss's
 `first` add that is engaged as ordinary trash (for example a Zulian Tiger pack in ZG) still counts as a boss for 120 s
