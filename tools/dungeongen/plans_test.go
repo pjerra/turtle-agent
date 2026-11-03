@@ -16,6 +16,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
 const (
@@ -398,7 +399,8 @@ func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
 		t.Fatalf("leg 2's first two groups do not pull pack 0 and pack 1 (pack0 group %d, pack1 group %d)", g0, g1)
 	}
 	// (b) raid clearance: the pack-0 group's stand clears every STATIC unit of pack 0 and every unit of pack 1, and
-	// the pack-1 group's stand clears pack 1. Both rows have an approach.
+	// the pack-1 group's stand clears pack 0 (walk 27: it stands on the east slope, inside the pack it pulls; see the
+	// exception below). Both rows have an approach.
 	stands := map[int]dungeon.Point{}
 	for i, g := range leg.PullGroups[:2] {
 		if len(g.Approach) == 0 {
@@ -432,7 +434,13 @@ func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
 			}
 		}
 	}
-	check(g1, pack1, marliStandYd)
+	// The pack-1 group's approach is the one exception to the own-pack 40 yd rule, from walk 27: it stands on the
+	// reachable east slope -12253 -1653, 15.0 yd from 49254 inside its own pack, because that is the only floor whose
+	// 23.5 yd firing stand keeps pack 0's patrol loop out of the raid's spread (research/zg-w27/MARLI-PACK0.md,
+	// TestZulGurubMarliStep203StandClearOfPack0). Pack 1 is the pack this row pulls, so waking it there IS the pull (it
+	// woke on the stand walk in walk 27 too); what must stay clear of the staging point is the OTHER pack and every
+	// pack pulled later.
+	check(g1, pack0, marliStandYd)
 	// (c) pull reachability: every stand-pull row of the leg reaches its pack's patrollers from the stand.
 	for i, g := range leg.PullGroups {
 		if !g.StandPull {
@@ -448,7 +456,10 @@ func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
 				i, stand.X, stand.Y, stand.Z, worst, marliPatrolReachYd)
 		}
 	}
-	// (d) the kinds of the two rows (SPEC-1-AMEND): pack 0 is a plain pull from S0, pack 1 keeps the stand pull.
+	// (d) the kinds of the two rows (SPEC-1-AMEND): pack 0 is a plain pull from S0, pack 1 keeps the stand pull. At walk
+	// 27's east approach the party stands inside pack 1's aggro, so the gate's anyInCombat check passes it to the plain
+	// pull's stand walk at once (the flag is moot there, not a 600 s wait); it stays because the row's kind is unchanged
+	// and a stand pull is what carries the row's clear_yd.
 	if leg.PullGroups[g0].StandPull {
 		t.Errorf("pull_groups[%d] (pack 0) is a stand pull: its leader 49202 walks a loop that never comes within the gate's 27.5 yd of S0, so the gate would wait 600 s and pause the run; the pack is a plain pull from the stand", g0)
 	}
@@ -519,14 +530,14 @@ func marliMmapsPlanner(t *testing.T) *navmesh.Planner {
 // marliExportCut is plan-export's own cutter (cmd/turtle-agent plan_export_cmd.go cutWith, kept in step with it): the
 // navmesh path from a to b, a point at each corner and equal hops of MoveGapCutYd along the long stretches. The
 // exporter trims the points within approachStandoffYd of the target itself.
-func marliExportCut(pl *navmesh.Planner) func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
-	return func(mapID uint32, from, to dungeon.Point) ([]dungeon.Point, error) {
+func marliExportCut(pl *navmesh.Planner) planexport.CutFunc {
+	return func(mapID uint32, from, to dungeon.Point) ([]dungeon.Point, []planexport.CutNote, error) {
 		path, err := pl.Plan(mapID, navmesh.Vec3{from.X, from.Y, from.Z}, navmesh.Vec3{to.X, to.Y, to.Z})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if path.Status != navmesh.Complete || len(path.Points) < 2 {
-			return nil, fmt.Errorf("no complete path (%s %s)", path.Status, path.Reason)
+			return nil, nil, fmt.Errorf("no complete path (%s %s)", path.Status, path.Reason)
 		}
 		var via []dungeon.Point
 		prev := path.Points[0]
@@ -542,7 +553,7 @@ func marliExportCut(pl *navmesh.Planner) func(uint32, dungeon.Point, dungeon.Poi
 			}
 			prev = p
 		}
-		return via, nil
+		return via, nil, nil
 	}
 }
 
@@ -733,8 +744,10 @@ type arlokkRoutes struct {
 // Walk 28 (2026-11-02) then showed the seven groups are one 11-20 yd cluster (11.0 yd 13/15, 16.8 12/13, 19.5 12/15) and
 // the 20 yd family-assist ring wakes the neighbours of any one pull, so the plan pulls the whole 27-unit cluster as one
 // group: 11 upper A, 12 upper B + upper east + middle east + lower + middle west (from the upper-east stand, before the
-// bridge), 13 upper north. The test walks the exported leg-4 rows from group 11's approach through the LAST terrace pull
-// (the max seq among the pull rows for groups 11-13, each of which must appear exactly once): for every pair
+// bridge), 13 upper north. Walk 29 then wiped at 14 engaged (b-r1) and at 11 (g): the row is split per formation (fix
+// 4b): 12 upper B + upper east, 13 middle east, 14 upper north, 15 middle west, 16 lower, each with its own stand and
+// max_bodies. The test walks the exported leg-4 rows from group 11's approach through the LAST terrace pull
+// (the max seq among the pull rows for groups 11-16, each of which must appear exactly once): for every pair
 // of consecutive move rows, every spawn of a formation that a later pull row owns stays arlokkTerraceRowYd out of the walk.
 // "Later" leaves out the pack the walk is approaching: its own pull row comes after the move, and its firing stand is
 // 12-25 yd from it by design. The big cluster's row must own its middle-east Blood Drinkers 51594/51595 (leader 49343)
@@ -796,13 +809,14 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 			leg4 = append(leg4, s)
 		}
 	}
-	// The terrace is plan leg 4's pull groups 11-13 (the array indices the plan and the export's comments name), numbered
-	// in pull order: from group 11's approach row through the last group's pull row. The last pull is the max seq among
-	// the seven groups' pull rows (the terrace order moves with the walk's findings, so it is not hard-coded here); each
-	// group must appear exactly once.
+	// The terrace is plan leg 4's pull groups 11-16 (the array indices the plan and the export's comments name), numbered
+	// in pull order: 11 upper A, 12 upper B + upper east, 13 middle east, 14 upper north, 15 middle west, 16 lower
+	// (walk 29's fix 4b split the 27-unit row back per formation). From group 11's approach row through the last group's
+	// pull row. The last pull is the max seq among the six groups' pull rows (the terrace order moves with the walk's
+	// findings, so it is not hard-coded here); each group must appear exactly once.
 	terracePull := func(s planexport.StepRow) (int, bool) {
 		var group int
-		if _, err := fmt.Sscanf(s.Comment, "pull group %d", &group); err != nil || group < 11 || group > 13 {
+		if _, err := fmt.Sscanf(s.Comment, "pull group %d", &group); err != nil || group < 11 || group > 16 {
 			return 0, false
 		}
 		if rest := strings.TrimPrefix(s.Comment, fmt.Sprintf("pull group %d", group)); rest != "" && rest != " approach" && rest != "; stand pull" {
@@ -828,7 +842,7 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 	if first < 0 {
 		t.Fatal("no group-11 approach row in the exported leg 4")
 	}
-	for group := 11; group <= 13; group++ {
+	for group := 11; group <= 16; group++ {
 		if counts[group] != 1 {
 			t.Errorf("exported leg 4 has %d pull rows for group %d, want exactly 1", counts[group], group)
 		}
@@ -914,6 +928,23 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 				}
 				laterFams = append(laterFams, fam)
 			}
+		}
+		// Walk 29 fix 4b: the only navmesh access to the middle level is the ramp at about -11518 -1639, which crosses
+		// 8.4 yd above the lower mid-west pack (51365, its spawns at z 49.6) while that pack is still alive. Every
+		// middle-level stand (the D row included) is reached through it; the plan's mitigation is the off-tank on the
+		// stand and the TB safety net in WALK29-FIX-PLAN §9.4 (#9). The crossing is logged and left out of this walk's
+		// later-pack clearance only; the straight check and the D -> E walk still hold the rule. Walk-31 fix 5 splits
+		// group 13 in two, so the ramp walk is now group 15 -> group 16 (was 14 -> 15).
+		if a.Comment == "pull group 15 approach" && b.Comment == "pull group 16 approach" {
+			kept := laterFams[:0]
+			for _, fam := range laterFams {
+				if len(fam) > 0 && fam[0].GroupLeader == 51365 {
+					t.Logf("leg 4 rows %d -> %d: the middle-level ramp crosses 8.4 yd above the lower pack 51365 (z 49.6) while it is alive; the off-tank on D's stand is the plan's mitigation (WALK29-FIX-PLAN §2/§9.4)", a.Seq, b.Seq)
+					continue
+				}
+				kept = append(kept, fam)
+			}
+			laterFams = kept
 		}
 		walks = append(walks, terraceWalk{a: a, b: b, laterFams: laterFams})
 	}
@@ -1195,10 +1226,14 @@ func samplesAlong(a, b dungeon.Point, step float64) []dungeon.Point {
 }
 
 // marliLaterPackYd is how far the step 203 stand and the routes to and from it keep from every pack pulled later:
-// 20 yd is the detection of these spiders (Creature::GetAttackDistance: detection_range 20 minus the level
-// difference; packs 0-1 are level 56-61 against a level-60 raid). The walk-26b wake happened at 6.9-9.6 yd from
-// 49202's dragged path, well inside the 10 yd family-assistance ring (CreatureFamilyAssistanceRadius).
-const marliLaterPackYd = 20
+// 26 yd is the detection of these spiders at a level-60 raid (Creature::GetAttackDistance: detection_range 20 minus
+// the level difference; the level-61 Shadowcasters wake at 21) plus the settled raid spread (10 yd,
+// kSpreadSettledDistance), i.e. the run leader's own StandClearAt rule. Walk 27 is the field evidence that the old
+// 20 yd line was too weak: the firing stand the run leader read was 20.0 yd from 49202's patrol loop (22.6 from its
+// spawn), and the party's spread plus the Venombroods' 5 yd wander put a bot inside their detection 6 s into the
+// fight; pack 0 (all nine) woke and the raid wiped twice (TortoiseBots-audit tests/raid-zg-walk27,
+// research/zg-w27/MARLI-PACK0.md).
+const marliLaterPackYd = 26
 
 // TestZulGurubMarliStep203RouteClearOfLaterPacks: walk 26b's step 203 pulled pack 0 from a stand 35.3 yd from the
 // nearest pack-1 spawn and 19.0 yd from 49202's patrol loop, and pack 1 still woke: 23 hostiles within 20 yd, 20 dead
@@ -1213,9 +1248,10 @@ const marliLaterPackYd = 20
 // pull pack 1 first from its stand S1, then pack 0. This pins that order and that the step-203 stand and the route
 // from the `to` to it stay marliLaterPackYd clear of every pack pulled later, 49202's whole patrol loop included.
 // Red first on the base plan (step 203 pulls pack 0). After the order change the firing stand the run leader reads for
-// pack 1 (23.5 yd from the target, which three Polymorphs push onto the Broodwidow 49250) is 20.0 yd from 49202's
-// loop: it is logged below as the validation walk's watch item, not asserted, because it is the run leader's choice
-// and not a plan point.
+// pack 1 (23.5 yd from the pick, the Broodwidow 49250 after three Polymorphs) is asserted against marliLaterPackYd as
+// well: walk 27 showed that the plan's S1 stand alone does not pin it, and the stand the old approach produced was
+// 20.0 yd from 49202's loop, so pack 0 woke (MARLI-PACK0.md). The approach is on the east slope now and
+// TestZulGurubMarliStep203StandClearOfPack0 holds the stand and its walks against the committed navmesh polylines.
 func TestZulGurubMarliStep203RouteClearOfLaterPacks(t *testing.T) {
 	p, err := dungeon.Load(filepath.Join(plansDirT, "zul_gurub.json"))
 	if err != nil {
@@ -1433,22 +1469,381 @@ func TestZulGurubMarliStep203RouteClearOfLaterPacks(t *testing.T) {
 				a.Seq, a.Comment, a.X, a.Y, b.Seq, b.Comment, b.X, b.Y, d, who, at.X, at.Y, float64(marliLaterPackYd))
 		}
 	}
-	// Watch item, logged only: the firing stand the run leader reads for pack 1 is 23.5 yd from its pull target; with
-	// three Polymorphs on the nearest Venombroods the target is the Broodwidow 49250 (walk 26b pulled 11370 guid
-	// ...c062 at step 204). Its stand's clearance to 49202's loop is the number the validation walk must watch.
+	// The firing stand the run leader reads: 23.5 yd from the pick along the tank's path from the plan's approach. With
+	// three Polymorphs on the nearest Venombroods (cc_priority 14532) the pick is the Broodwidow 49250. Walk 27 measured
+	// it: the old approach's stand was 20.0 yd from 49202's loop and pack 0 woke 6 s into the fight. The plan approach
+	// must put it marliLaterPackYd out; TestZulGurubMarliStep203StandClearOfPack0 checks the same numbers from the
+	// committed polylines without the mmaps.
 	if pl != nil {
-		var nonCC []creature
-		for _, c := range formations[pack1] {
-			if c.Entry != 14532 {
-				nonCC = append(nonCC, c)
+		found := false
+		for _, target := range formations[pack1] {
+			if target.GUID != 49250 {
+				continue
+			}
+			found = true
+			camp := marliFiringStands(pl, p.Map, stand, []creature{target})[0]
+			if d, what := minLater(camp); d < marliLaterPackYd {
+				t.Errorf("step 203's firing stand %.1f %.1f %.1f for %s %d is %.1f yd from %s, want >= %d",
+					camp.X, camp.Y, camp.Z, target.Name, target.GUID, d, what, marliLaterPackYd)
+			} else {
+				t.Logf("step 203's firing stand for %s %d (%.1f %.1f) keeps %.1f yd from %s", target.Name, target.GUID, camp.X, camp.Y, d, what)
 			}
 		}
-		for _, target := range nonCC {
-			camp := marliFiringStands(pl, p.Map, stand, []creature{target})[0]
-			d, what := clearance(camp, pack0)
-			t.Logf("watch: step 203's firing stand for %s %d (%.1f %.1f) is %.1f yd from %s, want >= %d (the spread round the camp closes it)", target.Name, target.GUID, camp.X, camp.Y, d, what, marliLaterPackYd)
+		if !found {
+			t.Fatal("no 49250 in pack 1")
 		}
 	}
+}
+
+// marliStep203StandFile is the committed navmesh fixture of the step-203 pull's firing stand and the two walks that lead
+// to it (the leg's free walk to the approach, and the tank's walk from the approach to the stand). It is the plan's copy
+// of what the map-309 navmesh gives, so the check runs without the mmaps; a plan point that moves makes it stale.
+const marliStep203StandFile = "testdata/zg_marli_step203_stand.json"
+
+const marliStep203StandNote = "The step-203 stand of Zul'Gurub leg 2 (Mar'li, map 309) and the walks to it: the leg's `to` -> the plan approach of pull group 0 (pack 1), and that approach -> the firing stand the run leader reads for the picked Broodwidow 49250 (23.5 yd from it, leadShotYd minus kShotMarginYd, along the tank's navmesh path). Points are the navmesh polyline sampled every yard. TestZulGurubMarliStep203StandClearOfPack0 always checks the clearance rule against these and fails when a recomputation differs by more than 1 yd. Rewrite with: go test -run TestZulGurubMarliStep203StandClearOfPack0 -update-marli-stand ./tools/dungeongen/"
+
+type marliVec = arlokkVec
+
+// marliWalk is one committed walk: what it joins and its navmesh polyline.
+type marliWalk struct {
+	From      string     `json:"from"`
+	FromPoint marliVec   `json:"from_point"`
+	To        string     `json:"to"`
+	ToPoint   marliVec   `json:"to_point"`
+	Points    []marliVec `json:"points"`
+}
+
+// marliStandFix is the shape of marliStep203StandFile.
+type marliStandFix struct {
+	Note      string      `json:"note"`
+	Target    uint64      `json:"target_guid"`
+	Entry     uint32      `json:"target_entry"`
+	TargetPos marliVec    `json:"target_point"`
+	Approach  marliVec    `json:"approach"`
+	Stand     marliVec    `json:"stand"`
+	Walks     []marliWalk `json:"walks"`
+}
+
+// updateMarliStand rewrites marliStep203StandFile from the map-309 navmesh.
+var updateMarliStand = flag.Bool("update-marli-stand", false, "rewrite "+marliStep203StandFile+" from the map-309 navmesh")
+
+// marliStandClearYdAt is a spawn's proximity wake reach at the plan's party level, as the run leader and the route check
+// use it: the core aggro radius (worldspawn.AggroRadius: detection_range minus the level advantage, NO_AGGRO 0) plus
+// the party's settled spread (routePartySpread, 10 yd for the raid) plus the spawn's own wander. Walk 27: pack 0 woke to
+// a stand 20.0 yd from 49202's patrol loop (need 30 at the plan's level band 58: aggro 20 + spread 10).
+func marliStandClearYdAt(p *dungeon.Plan, c creature) float64 {
+	det := c.DetectionRange
+	if det <= 0 {
+		det = defaultDetectionYd
+	}
+	s := worldspawn.Spawn{LevelMax: c.LevelMax, DetectionYd: float32(det), FlagsExtra: c.FlagsExtra, Wander: c.Wander}
+	return float64(worldspawn.AggroRadius(s, routePartyLevel(p), routeAggroRate)) + routePartySpread(p) + float64(c.Wander)
+}
+
+// marliStandWorst is the tightening margin of p against a pack: the distance to the nearest spawn minus that spawn's
+// clear reach, and the same to every patrolling member's loop (2-D; the mob walks the loop itself, so the loop's own
+// reach has no wander term). Negative: p is inside the pack's wake reach.
+func marliStandWorst(p dungeon.Point, pack []creature, movement map[uint64][]dungeon.Point, plan *dungeon.Plan) (float64, string) {
+	worst, who := math.Inf(1), "none"
+	for _, c := range pack {
+		if d := dist(p, c.Pos) - marliStandClearYdAt(plan, c); d < worst {
+			worst, who = d, fmt.Sprintf("spawn %s %d at %.1f %.1f %.1f", c.Name, c.GUID, c.Pos.X, c.Pos.Y, c.Pos.Z)
+		}
+		if !c.Patrol {
+			continue
+		}
+		loop, ok := movement[c.GUID]
+		if !ok || len(loop) == 0 {
+			continue
+		}
+		full := append(append([]dungeon.Point{c.Pos}, loop...), c.Pos)
+		need := marliStandClearYdAt(plan, c) - float64(c.Wander)
+		if d := closestOnLoop(p, full) - need; d < worst {
+			worst, who = d, fmt.Sprintf("the patrol loop of %s %d", c.Name, c.GUID)
+		}
+	}
+	return worst, who
+}
+
+// TestZulGurubMarliStep203StandClearOfPack0: walk 27 pulled pack 1 first (walk 26b's order) and pack 0 still woke 6 s
+// into the fight: the run leader read the firing stand at -12266.2 -1667.3, 20.0 yd from 49202's patrol loop and 22.6
+// from its spawn, and the party's spread plus the Venombroods' 5 yd wander put a bot (or its pet) inside their 16-20 yd
+// detection. All nine of pack 0 took one victim in one read (aggro-together, creature_groups flags 14), and b2/b2-r1
+// lost 43/64 bots at step 203 (TortoiseBots-audit tests/raid-zg-walk27, research/zg-w27/MARLI-PACK0.md).
+//
+// The plan cannot pin the firing stand (the run leader walks out to the first point of the tank's path inside 23.5 yd
+// of the pick), so it pins the approach the stand is read from. Group 0's approach is the reachable east slope
+// -12253 -1653 (z 134.4); the tank's path to the picked Broodwidow 49250 then crosses 23.5 yd at -12261.4 -1648.4,
+// 32.3 yd from 49202's loop instead of 20.0. The pick is 49250 because cc_priority [14532] puts three Polymorphs on the
+// nearest Venombroods; this test re-derives that pick from the plan (nearest non-CC spawn of the row's pack, in the
+// tank's 28.5 yd shot first) so a changed CC list fails here instead of silently checking the wrong unit.
+//
+// The stand and both walks must keep every unit of every pack pulled later (pack 0) out of its wake reach
+// (marliStandClearYdAt: aggro + the 10 yd spread + the spawn's wander). The walks are checked on the committed navmesh
+// polylines in marliStep203StandFile (always, mmaps or not) and recomputed when the mmaps are present (a fixture that
+// drifts by more than 1 yd is stale), plus the straight segments as a last assertion that never skips.
+func TestZulGurubMarliStep203StandClearOfPack0(t *testing.T) {
+	p, err := dungeon.Load(filepath.Join(plansDirT, "zul_gurub.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, err := readCreatures(filepath.Join("testdata", "map309", "creatures.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	movement, err := readMovementPaths(filepath.Join("testdata", "map309", "movement.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	formations := map[uint64][]creature{}
+	for _, c := range cs {
+		lead := c.GroupLeader
+		if lead == 0 {
+			lead = c.GUID
+		}
+		formations[lead] = append(formations[lead], c)
+	}
+	pack0, pack1 := formations[49202], formations[49201]
+	if len(pack0) != 9 || len(pack1) != 11 {
+		t.Fatalf("formations: pack 0 has %d spawns (want 9), pack 1 %d (want 11)", len(pack0), len(pack1))
+	}
+	var leg *dungeon.Leg
+	for i := range p.Legs {
+		if p.Legs[i].Name == "high_priestess_marli" {
+			leg = &p.Legs[i]
+		}
+	}
+	if leg == nil {
+		t.Fatal("no high_priestess_marli leg")
+	}
+	if len(leg.PullGroups) < 2 {
+		t.Fatalf("%d pull groups", len(leg.PullGroups))
+	}
+	approach := leg.PullGroups[0].Approach[len(leg.PullGroups[0].Approach)-1]
+	// R2 (research/zg-w27/MARLI-PACK0.md): the approach is inside pack 1's own clear reach and the plan cannot clear it
+	// for the unit the run leader pulls: 49250 has no stand that clears pack 0 (the best point on its 23.5 yd ring is
+	// still 5.95 yd inside 49202's loop). The approach therefore walks pack 1 awake before the pull step's CC orders;
+	// the fix is the run leader's hold point (specced in the research note), not a plan point. Logged, not asserted: the
+	// route-aggro pin carries the three segments.
+	if d, what := marliStandWorst(approach, pack1, movement, p); d < 0 {
+		t.Logf("the group 0 approach %.1f %.1f %.1f is %.1f yd inside pack 1's clear reach (%s): the run leader's hold-point change is specced in research/zg-w27/MARLI-PACK0.md",
+			approach.X, approach.Y, approach.Z, -d, what)
+	}
+	// The exported rows: the first leg-2 pull row (the plan's group 0, pack 1) and the move row before it (the approach).
+	res, err := planexport.Build(p, planexport.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []planexport.StepRow
+	for _, s := range res.Rows.Steps {
+		if s.Leg == 2 {
+			rows = append(rows, s)
+		}
+	}
+	pullAt := -1
+	for i, s := range rows {
+		if s.Kind == planexport.KindPull && strings.HasPrefix(s.Comment, "pull group 0") {
+			pullAt = i
+			break
+		}
+	}
+	if pullAt <= 0 {
+		t.Fatal("no exported leg-2 pull row for group 0")
+	}
+	approachRow := rows[pullAt-1]
+	if approachRow.Kind != planexport.KindMove || approachRow.Comment != "pull group 0 approach" {
+		t.Fatalf("the row before the first spider pull is %q %q, want the group 0 approach move", approachRow.Kind, approachRow.Comment)
+	}
+	if d := dist(approach, rowPoint(approachRow)); d > 0.1 {
+		t.Errorf("the plan's group 0 approach %.1f %.1f %.1f and the exported row %d (%.1f %.1f %.1f) differ by %.2f yd", approach.X, approach.Y, approach.Z, approachRow.Seq, approachRow.X, approachRow.Y, approachRow.Z, d)
+	}
+	// The pick the run leader makes for the row: the row's pack minus the entries the plan's CC takes, in the tank's
+	// 28.5 yd shot first, then the nearest.
+	ccRank := func(entry uint32) int {
+		for i, e := range p.CCAlways {
+			if e == entry {
+				return i
+			}
+		}
+		for i, e := range p.CCPriority {
+			if slices.Contains(p.CCAlways, e) {
+				continue
+			}
+			if e == entry {
+				return len(p.CCAlways) + i
+			}
+		}
+		return -1
+	}
+	var pick *creature
+	for i := range pack1 {
+		c := &pack1[i]
+		if ccRank(c.Entry) >= 0 {
+			continue
+		}
+		if pick == nil {
+			pick = c
+			continue
+		}
+		inShot, pickShot := dist(approach, c.Pos) <= 28.5, dist(approach, pick.Pos) <= 28.5
+		if inShot != pickShot {
+			if inShot {
+				pick = c
+			}
+			continue
+		}
+		if dist(approach, c.Pos) < dist(approach, pick.Pos) {
+			pick = c
+		}
+	}
+	if pick == nil {
+		t.Fatal("no pick: every spawn of pack 1 is crowd-controlled")
+	}
+	if pick.GUID != 49250 {
+		t.Fatalf("the run leader's pick for step 203 is %s %d, want the Broodwidow 49250: the stand, the fixture and the walk-27 evidence are all measured for it (a changed cc_priority moves the pick, and this test with it)", pick.Name, pick.GUID)
+	}
+	planner := marliPlannerOrNil(t)
+	if planner != nil {
+		defer planner.Close()
+	}
+	short := func(s string) string {
+		if len(s) > 60 {
+			return s[:57] + "..."
+		}
+		return s
+	}
+	legTo := rows[pullAt-2]
+	if legTo.Kind != planexport.KindMove {
+		t.Fatalf("the row before the approach is %q, want the leg's `to` move", legTo.Kind)
+	}
+	stand := dungeon.Point{}
+	if planner != nil {
+		stand = marliFiringStands(planner, p.Map, approach, []creature{*pick})[0]
+	}
+	if *updateMarliStand {
+		if planner == nil {
+			t.Fatalf("cannot rewrite %s without the map 309 navmesh (set TURTLE_AGENT_MMAPS)", marliStep203StandFile)
+		}
+		fixed := marliStandFix{
+			Note: marliStep203StandNote, Target: pick.GUID, Entry: pick.Entry,
+			TargetPos: roundVec(pick.Pos),
+			Approach:  roundVec(approach),
+			Stand:     roundVec(stand),
+		}
+		for _, w := range []struct {
+			from, to string
+			a, b     dungeon.Point
+		}{
+			{short(legTo.Comment), short(approachRow.Comment), rowPoint(legTo), rowPoint(approachRow)},
+			{short(approachRow.Comment), "firing stand for " + short(pick.Name) + " " + fmt.Sprint(pick.GUID), rowPoint(approachRow), stand},
+		} {
+			poly, ok := marliPolyline(planner, p.Map, w.a, w.b)
+			if !ok {
+				t.Fatalf("%s -> %s: no complete navmesh path", w.from, w.to)
+			}
+			fixed.Walks = append(fixed.Walks, marliWalk{From: w.from, FromPoint: roundVec(w.a), To: w.to, ToPoint: roundVec(w.b), Points: roundVecs(poly)})
+		}
+		b, err := json.MarshalIndent(fixed, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(marliStep203StandFile, append(b, '\n'), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("wrote %d walks to %s", len(fixed.Walks), marliStep203StandFile)
+	}
+	raw, err := os.ReadFile(marliStep203StandFile)
+	if err != nil {
+		t.Fatalf("%s: %v", marliStep203StandFile, err)
+	}
+	var fix marliStandFix
+	if err := json.Unmarshal(raw, &fix); err != nil {
+		t.Fatalf("%s: %v", marliStep203StandFile, err)
+	}
+	if len(fix.Walks) != 2 {
+		t.Fatalf("%s holds %d walks, want 2 (the `to` -> approach and the approach -> stand)", marliStep203StandFile, len(fix.Walks))
+	}
+	if fix.Target != pick.GUID || fix.Entry != pick.Entry || dist(pointOfVec(fix.TargetPos), pick.Pos) > 1 ||
+		dist(pointOfVec(fix.Approach), approach) > 1 {
+		t.Errorf("%s is for target %d entry %d approach %.1f %.1f -> %.1f %.1f, not for the plan (49250, approach %.1f %.1f): regenerate with `go test -run TestZulGurubMarliStep203StandClearOfPack0 -update-marli-stand ./tools/dungeongen/`",
+			marliStep203StandFile, fix.Target, fix.Entry, fix.TargetPos[0], fix.TargetPos[1], fix.Approach[0], fix.Approach[1], approach.X, approach.Y)
+	}
+	fixStand := pointOfVec(fix.Stand)
+	if d := dist(fixStand, pick.Pos); d < 20 || d > 28.5 {
+		t.Errorf("%s: the stand %.1f %.1f %.1f is %.1f yd from %s %d, want it inside the tank's 28.5 yd shot (leadShotYd; the stand is 23.5 yd along the path, 21-25 yd in a straight line)", marliStep203StandFile, fixStand.X, fixStand.Y, fixStand.Z, d, pick.Name, pick.GUID)
+	}
+	if planner != nil {
+		if d := dist(fixStand, stand); d > 1 {
+			t.Errorf("%s: the committed stand differs from the navmesh's by %.1f yd (%.1f %.1f vs %.1f %.1f): regenerate with -update-marli-stand", marliStep203StandFile, d, fixStand.X, fixStand.Y, stand.X, stand.Y)
+		}
+	}
+	// The stand itself, always (from the fixture when the mmaps are absent).
+	if margin, who := marliStandWorst(fixStand, pack0, movement, p); margin < 0 {
+		t.Errorf("step 203's firing stand %.1f %.1f %.1f is inside the wake reach of %s by %.1f yd (walk 27: the old stand was 20.0 yd from 49202's loop and pack 0 woke at once)", fixStand.X, fixStand.Y, fixStand.Z, who, -margin)
+	} else {
+		t.Logf("step 203's firing stand %.1f %.1f %.1f keeps %.1f yd beyond the wake reach of %s", fixStand.X, fixStand.Y, fixStand.Z, margin, who)
+	}
+	// Both walks: the committed polylines always, the navmesh's own when it is here, and the straight segments always.
+	want := []struct {
+		from, to string
+		a, b     dungeon.Point
+	}{
+		{short(legTo.Comment), short(approachRow.Comment), rowPoint(legTo), rowPoint(approachRow)},
+		{short(approachRow.Comment), "firing stand for " + short(pick.Name) + " " + fmt.Sprint(pick.GUID), rowPoint(approachRow), fixStand},
+	}
+	for i, w := range want {
+		samples := pointsOfVecs(fix.Walks[i].Points)
+		if margin, who := marliWalkWorst(samples, pack0, movement, p); margin < 0 {
+			t.Errorf("the %s -> %s walk passes inside the wake reach of %s by %.1f yd", w.from, w.to, who, -margin)
+		} else {
+			t.Logf("the %s -> %s walk keeps %.1f yd beyond the wake reach of %s", w.from, w.to, margin, who)
+		}
+		if margin, who := marliWalkWorst(samplesAlong(w.a, w.b, 2), pack0, movement, p); margin < 0 {
+			t.Errorf("the straight %s -> %s walk passes inside the wake reach of %s by %.1f yd", w.from, w.to, who, -margin)
+		}
+		if d := dist(pointOfVec(fix.Walks[i].FromPoint), w.a); d > arlokkRouteMatchYd {
+			t.Errorf("%s walk %d starts at %.1f %.1f, not at the plan's point %.1f %.1f: the plan moved, regenerate", marliStep203StandFile, i, fix.Walks[i].FromPoint[0], fix.Walks[i].FromPoint[1], w.a.X, w.a.Y)
+		}
+		if d := dist(pointOfVec(fix.Walks[i].ToPoint), w.b); d > arlokkRouteMatchYd {
+			t.Errorf("%s walk %d ends at %.1f %.1f, not at %.1f %.1f: the plan moved, regenerate", marliStep203StandFile, i, fix.Walks[i].ToPoint[0], fix.Walks[i].ToPoint[1], w.b.X, w.b.Y)
+		}
+		if planner == nil {
+			continue
+		}
+		poly, ok := marliPolyline(planner, p.Map, w.a, w.b)
+		if !ok {
+			t.Errorf("the %s -> %s walk has no complete navmesh path", w.from, w.to)
+			continue
+		}
+		if diff := marliPolyDiff(fix.Walks[i].Points, poly); diff != "" {
+			t.Errorf("%s walk %d: %s; regenerate with -update-marli-stand", marliStep203StandFile, i, diff)
+		}
+	}
+}
+
+// marliWalkWorst is marliStandWorst over every sample of a walk (the worst sample).
+func marliWalkWorst(samples []dungeon.Point, pack []creature, movement map[uint64][]dungeon.Point, plan *dungeon.Plan) (float64, string) {
+	worst, who := math.Inf(1), "none"
+	for _, s := range samples {
+		if m, w := marliStandWorst(s, pack, movement, plan); m < worst {
+			worst, who = m, w
+		}
+	}
+	return worst, who
+}
+
+// marliPolyDiff compares a committed polyline with the navmesh's own: "" when every committed point is within 1 yd of
+// the recomputed one (same point count, both sampled every yard).
+func marliPolyDiff(committed []marliVec, poly []dungeon.Point) string {
+	if len(committed) != len(poly) {
+		return fmt.Sprintf("the committed polyline has %d points, the navmesh's %d", len(committed), len(poly))
+	}
+	for i := range committed {
+		if d := dist(pointOfVec(committed[i]), poly[i]); d > arlokkRouteMatchYd {
+			return fmt.Sprintf("point %d is %.1f yd from the navmesh's", i, d)
+		}
+	}
+	return ""
 }
 
 // marliPlannerOrNil is the server's navmesh for the Mar'li checks ($TURTLE_AGENT_MMAPS or ~/turtle-agent-mmaps);
@@ -1508,8 +1903,6 @@ func marliFiringStands(pl *navmesh.Planner, mapID uint32, stand dungeon.Point, p
 	return out
 }
 
-// samplesAlong returns the points of the straight segment a-b every step yd, both ends included.
-
 // marliPolyline plans the walk a->b on the server's navmesh and samples it every yard; false without a complete path.
 func marliPolyline(pl *navmesh.Planner, mapID uint32, a, b dungeon.Point) ([]dungeon.Point, bool) {
 	path, err := pl.Plan(mapID, navmesh.Vec3{a.X, a.Y, a.Z}, navmesh.Vec3{b.X, b.Y, b.Z})
@@ -1535,5 +1928,3 @@ func marliPolyline(pl *navmesh.Planner, mapID uint32, a, b dungeon.Point) ([]dun
 	}
 	return out, true
 }
-
-// rowPoint and rowDist are an exported row's point and its 3-D distance to a spawn.

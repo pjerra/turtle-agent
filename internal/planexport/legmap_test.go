@@ -16,14 +16,14 @@ const legMapPlanJS = `{"version":1,"name":"lv","status":"live-checked (test)","m
  {"name":"b","to":{"x":2000,"y":0,"z":0},"pull_groups":[{"entries":[102],"positions":[{"x":2000,"y":0,"z":0}]}],"leave":[{"entry":3,"spawn":3,"at":{"x":1500,"y":0,"z":0},"why":"b mob"}]}]}`
 
 // legMapCut returns the via point of each long hop: 300 for a hop to the middle leg, 1500 for a hop to b.
-func legMapCut(_ uint32, _ dungeon.Point, c dungeon.Point) ([]dungeon.Point, error) {
+func legMapCut(_ uint32, _ dungeon.Point, c dungeon.Point) ([]dungeon.Point, []CutNote, error) {
 	switch c.X {
 	case 500:
-		return []dungeon.Point{{X: 300}}, nil
+		return []dungeon.Point{{X: 300}}, nil, nil
 	case 2000:
-		return []dungeon.Point{{X: 1500}}, nil
+		return []dungeon.Point{{X: 1500}}, nil, nil
 	}
-	return nil, nil
+	return nil, nil, nil
 }
 
 func legMapPlan(t *testing.T, middle string) *dungeon.Plan {

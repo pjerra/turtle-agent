@@ -442,7 +442,10 @@ func TestZulGurubCubPatrolBlocksTheRevivePoint(t *testing.T) {
 	if ok {
 		t.Fatalf("the revive point is quiet: the cub patrol's path does not block")
 	}
-	if !strings.Contains(reason, "51344") || !strings.Contains(reason, "passes") {
-		t.Fatalf("reason %q, want the cub patrol's path reason", reason)
+	// The plan also carries the roaming Berezkerer 91435's patrol (BOTS-PATHING-WAYPOINTS item 2), whose path
+	// passes 41 yd from the same point and may be the one the check names first; either patrol's path reason is
+	// the refusal this test pins.
+	if !strings.Contains(reason, "passes") || (!strings.Contains(reason, "51344") && !strings.Contains(reason, "91435")) {
+		t.Fatalf("reason %q, want a patrol's path reason (51344 or 91435)", reason)
 	}
 }

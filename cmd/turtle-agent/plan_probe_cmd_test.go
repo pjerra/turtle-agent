@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/planprobe"
@@ -39,7 +38,7 @@ func (f cmdFakeNav) Nearest(_ uint32, p navmesh.Vec3) (navmesh.Vec3, bool, error
 }
 
 // useFakeProbeNav swaps the command's navmesh for one test.
-func useFakeProbeNav(t *testing.T, nav planprobe.Nav, cut func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error)) {
+func useFakeProbeNav(t *testing.T, nav planprobe.Nav, cut planexport.CutFunc) {
 	t.Helper()
 	old := planProbeOpen
 	t.Cleanup(func() { planProbeOpen = old })

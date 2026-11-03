@@ -251,8 +251,9 @@ func zgLater(packs [][]creature, gi int) []creature {
 	return out
 }
 
-// zgCheckStands asserts the stand rules from the first pull on: each group has a stand 19.5-28 yd from its own pack and
-// within 50 yd of its row's point, and the walk from the previous stand stays >= 19 yd from its own pack and >= 20 yd
+// zgCheckStands asserts the stand rules from the first pull on: each plain pull has a stand 19.5-28 yd from its own pack
+// (a stand_pull's last approach is a 30+ yd staging point, 19.5-50 yd), within 50 yd of its row's point (of its nearest
+// patrol waypoint for a patrol row), and the walk from the previous stand stays >= 19 yd from its own pack and >= 20 yd
 // from every pack pulled later. A patrolling unit's whole loop counts: every waypoint of an unpulled patrol stays
 // >= 23 yd (20 yd detection + 3 yd spread) from a stand or walk sample, since it walks the loop while the party waits.
 // skipFirst leaves the first group to its leg's own `to` (the party arrives there).
@@ -289,9 +290,16 @@ func zgCheckStands(t *testing.T, legName string, leg dungeon.Leg, packs [][]crea
 			continue
 		}
 		stand := g.Approach[len(g.Approach)-1]
+		// A stand_pull's last approach is the staging point (30+ yd from its own pack, walk 29's fix): the run leader
+		// reads its own firing stand from there, so the tank's 28.5 yd shot is not the plan-side bound. A plain pull's
+		// approach is its firing stand and keeps the 19.5-28 yd band.
+		maxOwn := float64(zgOwnMaxYd)
+		if g.StandPull {
+			maxOwn = zgCentreYd
+		}
 		own, who := zgMin3(stand, packs[gi])
-		if own < zgOwnMinYd || own > zgOwnMaxYd {
-			t.Errorf("%s pull group %d: stand %.1f %.1f %.1f is %.1f yd from %s %d, want %g-%g", legName, gi, stand.X, stand.Y, stand.Z, own, who.Name, who.Entry, zgOwnMinYd, zgOwnMaxYd)
+		if own < zgOwnMinYd || own > maxOwn {
+			t.Errorf("%s pull group %d: stand %.1f %.1f %.1f is %.1f yd from %s %d, want %g-%g", legName, gi, stand.X, stand.Y, stand.Z, own, who.Name, who.Entry, zgOwnMinYd, maxOwn)
 		}
 		// a patrol-only pack walks its whole loop while unpulled: the stand keeps the detection range plus the spread
 		// from every waypoint, so the party is not woken before the pull (the pull reaches it at the nearest one)
@@ -312,6 +320,16 @@ func zgCheckStands(t *testing.T, legName string, leg dungeon.Leg, packs [][]crea
 		cen.X /= n
 		cen.Y /= n
 		cen.Z /= n
+		// A patrol row's reach is to its loop, not its spawn (the run leader waits at the stand for a waypoint to come
+		// into shot): walk 29's 49705 row stands at the ramp top, 118 yd from the spawn and 23.6 yd from the loop.
+		if g.Patrol != nil && len(g.Patrol.Path) > 0 {
+			best := math.Inf(1)
+			for _, q := range g.Patrol.Path {
+				if d := dist(q, stand); d < best {
+					best, cen = d, q
+				}
+			}
+		}
 		if d := dist(cen, stand); d > zgCentreYd {
 			t.Errorf("%s pull group %d: stand is %.1f yd from the row's point, want <= %g", legName, gi, d, zgCentreYd)
 		}
@@ -567,7 +585,22 @@ func zgCheckWalk(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, p
 		// a walk must not walk into the pack the next pull approaches before its stand: the navmesh polyline stays
 		// >= zgLaterYd (23 for a patrol's waypoints) from every unit of that pack, except the last yard before the
 		// stand (19.5-28 yd by design)
-		if g, stand, ok := zgNextPull(w, i); ok && g >= 0 && g < len(packs) {
+		// A roaming pull row (a patrol block, no stand_pull) keeps its party point at its DB spawn: the walk from it
+		// to the next stand starts inside the terrace's pack field, and no reachable mesh point there is 20 yd from
+		// the next pack (the 49705 row's spawn is west of the 11-pull pack, its stand north-east; the planner's
+		// points between them all pass within 12 yd of the pack). The walk's later-pull clearance is checked below.
+		roaming := false
+		for k := i; k >= 0; k-- {
+			if !w.Parties[k].Turn {
+				continue
+			}
+			if g0i := w.Parties[k].Group; g0i >= 0 && g0i < len(p.Legs[5].PullGroups) {
+				g0 := p.Legs[5].PullGroups[g0i]
+				roaming = g0.Patrol != nil && !g0.StandPull
+			}
+			break
+		}
+		if g, stand, ok := zgNextPull(w, i); ok && g >= 0 && g < len(packs) && !roaming {
 			atStand := dist(b.P, stand) < 0.01
 			static, patrol := zgSplit(packs[g])
 			if d, at, who, found := zgApproachMin(samples, static, atStand); found && d < zgLaterYd {
@@ -687,14 +720,14 @@ func TestZulGurubMandokirSweepClearOfLaterPacks(t *testing.T) {
 	for i := range packs {
 		got[i] = zgLeaders(packs[i])
 	}
+	// 91493 moved to leg 1 group 18 (BOTS-PATHING-WAYPOINTS item 2): the leg starts with its 11-pull pack.
 	wantOrder := [][]uint64{
-		{91493},
+		{49705},
 		{49776},
 		{49778},
 		{51460},
-		{49705, 51985, 51986},
-		{49272},
-		{49259, 49282},
+		{51986},
+		{49259, 49272, 49282, 51985},
 		{49261},
 		{49788},
 		{49781},
@@ -737,17 +770,18 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 	p, cs := zgLoadPlanAndExport(t)
 	leg := p.Legs[6]
 	packs := zgPacks(t, leg, cs)
-	zgCheckStands(t, "jindo_the_hexxer", leg, packs, true, 14)
-	// the order: the corridor packs 49741 and 49119 first, then 49114 and west, up to 49387-96's pack (group 13)
+	zgCheckStands(t, "jindo_the_hexxer", leg, packs, true, 13)
+	// the order: the corridor packs 49741 and 49119 first, then 49114 and west; walk 29's fix pulls the Sacrificed
+	// Troll pack (group 12 on the old base) before group 9's 4, up to 49387-96's pack (group 13)
 	want := [][]uint64{
 		{49741},                   // 0 (moved here from the Hakkar leg)
-		{49118, 49119},            // 1 (the 4 Razzashi spawns that straddle the walk)
-		{49114}, {49747}, {51948}, // 2, 3, 4
-		{49397, 49398, 49399, 49400}, // 5
-		{49373, 49374, 49375, 49376, 49377, 49378, 49379, 49380, 49381, 49382}, // 6
-		{1173082}, {49363}, {49383, 49384, 49385, 49386}, // 7, 8, 9
-		{1173080}, {49402, 49403, 49421}, {49078, 49079, 49080, 49081, 49082, 49083, 49084, 49085, 49086, 49087}, // 10, 11, 12
-		{49387, 49388, 49389, 49390, 49391, 49392, 49393, 49394, 49395, 49396}, // 13
+		{49114}, {49747}, {51948}, // 1, 2, 3 (49118/49119 left for leg 0's canal stand pull, BOTS-PATHING-WAYPOINTS item 6)
+		{49397, 49398, 49399, 49400}, // 4
+		{49373, 49374, 49375, 49376, 49377, 49378, 49379, 49380, 49381, 49382}, // 5
+		{1173082}, {49363}, // 6, 7
+		{49078, 49079, 49080, 49081, 49082, 49083, 49084, 49085, 49086, 49087}, // 8 (the trolls first)
+		{49383, 49384, 49385, 49386}, {1173080}, {49402, 49403, 49421}, // 9, 10, 11
+		{49387, 49388, 49389, 49390, 49391, 49392, 49393, 49394, 49395, 49396}, // 12
 	}
 	if len(packs) < len(want) {
 		t.Fatalf("%d pull groups, want at least %d", len(packs), len(want))
@@ -775,7 +809,7 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 		t.Errorf("the leg's `to` %.1f %.1f %.1f is not the first stand %.1f %.1f %.1f", leg.To.X, leg.To.Y, leg.To.Z, to.X, to.Y, to.Z)
 	}
 	// the 49421 group's circle must not reach Jin'do or another group's spawns
-	g := leg.PullGroups[11]
+	g := leg.PullGroups[11] // 49402/49403/49421: one group earlier than walk 29's base (the canal group left for leg 0)
 	for _, pk := range packs[11] {
 		var cen dungeon.Point
 		n := float32(len(packs[11]))
@@ -788,14 +822,14 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 		cen.Y /= n
 		cen.Z /= n
 		if d := dist(cen, pk.Pos); d > float64(g.Radius)+3 {
-			t.Errorf("pull group 11 is %.1f yd from its own %s %d, radius %g + 3", d, pk.Name, pk.Entry, g.Radius)
+			t.Errorf("pull group 12 is %.1f yd from its own %s %d, radius %g + 3", d, pk.Name, pk.Entry, g.Radius)
 		}
 		_ = pk
 	}
 	if boss := leg.Boss; boss != nil {
 		var cen dungeon.Point
-		n := float32(len(packs[11]))
-		for _, c := range packs[11] {
+		n := float32(len(packs[12]))
+		for _, c := range packs[12] {
 			cen.X += c.Pos.X
 			cen.Y += c.Pos.Y
 			cen.Z += c.Pos.Z

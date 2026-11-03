@@ -213,6 +213,13 @@ func Ramp() []Poly {
 // into a new temporary directory, and returns it.
 func WriteDir(t testing.TB, mapID uint32, polys []Poly) string {
 	t.Helper()
+	return WriteDirFlags(t, mapID, polys, nil)
+}
+
+// WriteDirFlags is WriteDir with one polygon flag per poly (nil: all NAV_GROUND): the
+// server's NAV_GROUND, NAV_WATER, NAV_MAGMA, NAV_SLIME or NAV_STEEP.
+func WriteDirFlags(t testing.TB, mapID uint32, polys []Poly, flags []uint16) string {
+	t.Helper()
 	dir := t.TempDir()
 	write := func(name string, data []byte) {
 		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
@@ -220,7 +227,7 @@ func WriteDir(t testing.TB, mapID uint32, polys []Poly) string {
 		}
 	}
 	write(mmapName(mapID), MmapParams())
-	write(tileName(mapID, 12, 12), BuildTile(polys, nil, 0, 0))
+	write(tileName(mapID, 12, 12), BuildTile(polys, flags, 0, 0))
 	return dir
 }
 

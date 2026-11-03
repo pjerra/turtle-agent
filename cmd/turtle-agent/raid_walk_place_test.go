@@ -1389,7 +1389,9 @@ func TestQuietExtraClearRefusesUnitNearSkippedCircle(t *testing.T) {
 		target func(t *testing.T, plan raidwalk.PlacePlan) raidwalk.ClearCircle
 		want   int
 	}{
-		{"inside the reach", func(_ *testing.T, plan raidwalk.PlacePlan) raidwalk.ClearCircle { return plan.Circles[0] }, exitRaidWalkFailed},
+		{"inside the reach", func(t *testing.T, plan raidwalk.PlacePlan) raidwalk.ClearCircle {
+			return placeCircleNear(t, plan, -11945.70, -1841.13, 56.11)
+		}, exitRaidWalkFailed},
 		{"beyond the reach", placeRow94Circle, exitOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1480,7 +1482,7 @@ func placeRow96Circle(t *testing.T, plan raidwalk.PlacePlan) raidwalk.ClearCircl
 // placeRow94Circle is the deployed row 94's circle (15111 at -11945.70 -1841.13 56.11), the E patroller's home.
 func placeRow94Circle(t *testing.T, plan raidwalk.PlacePlan) raidwalk.ClearCircle {
 	t.Helper()
-	return placeCircleNear(t, plan, -11945.70, -1841.13, 56.11)
+	return placeCircleNear(t, plan, -11876.20, -1851.00, 63.90)
 }
 
 // placeInsideWithoutAhead is a point inside a clear circle but outside every AHEAD row's area: where a unit the circle's

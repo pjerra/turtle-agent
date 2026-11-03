@@ -286,7 +286,7 @@ func observePlanRows(p *dungeon.Plan, planner *navmesh.Planner) ([]planexport.Ro
 	if len(boxes) > 0 {
 		aware.SetAvoid(p.Map, boxes)
 	}
-	cut := cutWith(aware)
+	cut := cutWith(aware, false)
 	o := base
 	o.Cut = cut
 	add(o, "cut hops")

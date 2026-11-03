@@ -336,6 +336,19 @@ func zgBossStepStart(total, boss int) *commanderReply {
 		Lines: []string{line, "TBM:ACTION_ACK|run start|party|1|-"}}}
 }
 
+// zgBossStepOf is the step of the ZG plan's boss row of one entry: the plan's row order moves when its points move,
+// so the tests name the boss and read its step.
+func zgBossStepOf(t *testing.T, entry uint32) int {
+	t.Helper()
+	for i, s := range zgRows(t).Steps {
+		if s.Kind == planexport.KindBoss && s.Entry == entry {
+			return i + 1
+		}
+	}
+	t.Fatalf("no ZG boss row for entry %d", entry)
+	return 0
+}
+
 // bossSummaryWalk is a walk with just the state the summary reads: the ZG rows and empty boss maps. The summary
 // functions do not touch the network or the frames, so the tests drive observeBossStatus and the skip directly.
 func bossSummaryWalk(t *testing.T) *walk {
@@ -362,24 +375,25 @@ func feedStatus(w *walk, st tbm.RunStatus, now time.Time) {
 func TestBossKillSummariesUnengagedThenKilled(t *testing.T) {
 	w := bossSummaryWalk(t)
 	now := time.Now()
-	// Step 38 (the ZG plan's first boss row, entry 14517) is walked past: a move status, not an engagement.
-	w.observeBossStatus(tbm.RunStatus{Step: 38, Kind: "move", Note: "walking"}, now)
-	// Step 84 (the second boss row, entry 14507) is engaged.
-	w.observeBossStatus(tbm.RunStatus{Step: 84, Kind: "boss", Note: "fighting"}, now)
-	// The run leaves step 84 and reports the kill on the leaving status.
-	w.observeBossStatus(tbm.RunStatus{Step: 85, Kind: "move", Note: "boss down: he died as 14507"}, now)
+	first, second := zgBossStepOf(t, 14517), zgBossStepOf(t, 14507)
+	// The ZG plan's first boss row (entry 14517) is walked past: a move status, not an engagement.
+	w.observeBossStatus(tbm.RunStatus{Step: first, Kind: "move", Note: "walking"}, now)
+	// The second boss row (entry 14507) is engaged.
+	w.observeBossStatus(tbm.RunStatus{Step: second, Kind: "boss", Note: "fighting"}, now)
+	// The run leaves the second boss step and reports the kill on the leaving status.
+	w.observeBossStatus(tbm.RunStatus{Step: second + 1, Kind: "move", Note: "boss down: he died as 14507"}, now)
 	list := w.bossKillSummaries()
 	if len(list) != 2 {
 		t.Fatalf("bossKills %d records, want 2: %+v", len(list), list)
 	}
-	if k := list[0]; k.Step != 38 || k.Entry != 14517 || k.Engaged || k.Killed {
-		t.Fatalf("first record %+v, want step 38 entry 14517 not engaged and not killed", k)
+	if k := list[0]; k.Step != first || k.Entry != 14517 || k.Engaged || k.Killed {
+		t.Fatalf("first record %+v, want step %d entry 14517 not engaged and not killed", k, first)
 	}
-	if k := list[1]; k.Step != 84 || k.Entry != 14507 || !k.Engaged || !k.Killed {
-		t.Fatalf("second record %+v, want step 84 entry 14507 engaged and killed", k)
+	if k := list[1]; k.Step != second || k.Entry != 14507 || !k.Engaged || !k.Killed {
+		t.Fatalf("second record %+v, want step %d entry 14507 engaged and killed", k, second)
 	}
-	if single := w.bossKillSummary(); single == nil || single.Step != 84 || !single.Killed {
-		t.Fatalf("single boss_kill %+v, want the last engaged boss at step 84 killed", single)
+	if single := w.bossKillSummary(); single == nil || single.Step != second || !single.Killed {
+		t.Fatalf("single boss_kill %+v, want the last engaged boss at step %d killed", single, second)
 	}
 }
 
@@ -388,26 +402,27 @@ func TestBossKillSummariesUnengagedThenKilled(t *testing.T) {
 func TestBossKillSummariesSkipDoesNotMarkOtherKilled(t *testing.T) {
 	w := bossSummaryWalk(t)
 	now := time.Now()
-	// Boss A (step 38) is engaged and leaves without a `boss down` note.
-	w.observeBossStatus(tbm.RunStatus{Step: 38, Kind: "boss", Note: "fighting"}, now)
-	w.observeBossStatus(tbm.RunStatus{Step: 39, Kind: "move", Note: "walking"}, now)
-	// Boss B (step 84) is skipped: the walk's own `.bot run skip` for its step.
-	w.bossTrackAt(84, 14507).skipped = true
-	w.bossTrackAt(84, 14507).evidence = "14507 seen dead in the frames"
+	first, second := zgBossStepOf(t, 14517), zgBossStepOf(t, 14507)
+	// Boss A is engaged and leaves without a `boss down` note.
+	w.observeBossStatus(tbm.RunStatus{Step: first, Kind: "boss", Note: "fighting"}, now)
+	w.observeBossStatus(tbm.RunStatus{Step: first + 1, Kind: "move", Note: "walking"}, now)
+	// Boss B is skipped: the walk's own `.bot run skip` for its step.
+	w.bossTrackAt(second, 14507).skipped = true
+	w.bossTrackAt(second, 14507).evidence = "14507 seen dead in the frames"
 	list := w.bossKillSummaries()
 	if len(list) != 2 {
 		t.Fatalf("bossKills %d records, want 2: %+v", len(list), list)
 	}
-	// Sorted by step: A (38) first, B (84) second.
-	if k := list[0]; k.Step != 38 || !k.Engaged || k.Killed {
-		t.Fatalf("A %+v, want step 38 engaged and not killed", k)
+	// Sorted by step: A first, B second.
+	if k := list[0]; k.Step != first || !k.Engaged || k.Killed {
+		t.Fatalf("A %+v, want step %d engaged and not killed", k, first)
 	}
-	if k := list[1]; k.Step != 84 || !k.Skipped || !k.Killed {
-		t.Fatalf("B %+v, want step 84 skipped and killed (skip is kill evidence)", k)
+	if k := list[1]; k.Step != second || !k.Skipped || !k.Killed {
+		t.Fatalf("B %+v, want step %d skipped and killed (skip is kill evidence)", k, second)
 	}
 	// The single field is the last engaged boss: A alone was engaged.
-	if single := w.bossKillSummary(); single == nil || single.Step != 38 || single.Killed {
-		t.Fatalf("single boss_kill %+v, want A at step 38 not killed", single)
+	if single := w.bossKillSummary(); single == nil || single.Step != first || single.Killed {
+		t.Fatalf("single boss_kill %+v, want A at step %d not killed", single, first)
 	}
 }
 
@@ -442,6 +457,7 @@ func TestBossFormsResetOnWipe(t *testing.T) {
 // every status on a boss row took kept such a kill unread and the record said killed:false.
 func TestBossKillSameStepNonBossStatus(t *testing.T) {
 	now := time.Now()
+	boss := zgBossStepOf(t, 14517)
 	for _, tc := range []struct {
 		name        string
 		bossKind    tbm.RunStatus // the boss-kind status on the boss step
@@ -449,13 +465,13 @@ func TestBossKillSameStepNonBossStatus(t *testing.T) {
 	}{
 		{
 			name:        "the leaving status carries the kill note",
-			bossKind:    tbm.RunStatus{Step: 38, Kind: "boss", Note: "fighting"},
-			leavingKind: tbm.RunStatus{Step: 38, Kind: "move", Note: "boss down: he died as 14517"},
+			bossKind:    tbm.RunStatus{Step: boss, Kind: "boss", Note: "fighting"},
+			leavingKind: tbm.RunStatus{Step: boss + 1, Kind: "move", Note: "boss down: he died as 14517"},
 		},
 		{
 			name:        "the boss status carried the kill note",
-			bossKind:    tbm.RunStatus{Step: 38, Kind: "boss", Note: "boss down: he died as 14517"},
-			leavingKind: tbm.RunStatus{Step: 38, Kind: "move", Note: "walking"},
+			bossKind:    tbm.RunStatus{Step: boss, Kind: "boss", Note: "boss down: he died as 14517"},
+			leavingKind: tbm.RunStatus{Step: boss + 1, Kind: "move", Note: "walking"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -463,8 +479,8 @@ func TestBossKillSameStepNonBossStatus(t *testing.T) {
 			w.observeBossStatus(tc.bossKind, now)
 			w.observeBossStatus(tc.leavingKind, now)
 			k := w.bossKillSummary()
-			if k == nil || k.Step != 38 || !k.Engaged || !k.Killed || k.Evidence != "boss down: he died as 14517" {
-				t.Fatalf("boss_kill %+v, want step 38, engaged, killed, evidence %q", k, "boss down: he died as 14517")
+			if k == nil || k.Step != boss || !k.Engaged || !k.Killed || k.Evidence != "boss down: he died as 14517" {
+				t.Fatalf("boss_kill %+v, want step %d, engaged, killed, evidence %q", k, boss, "boss down: he died as 14517")
 			}
 		})
 	}
@@ -621,9 +637,10 @@ func TestBossFormsWipeResetCountsOnlyTheRetry(t *testing.T) {
 // killed: ..." list, and the frames saw the boss guid dead in this attempt or the boss step was engaged.
 func TestBossKillRunEndedAfterBossStep(t *testing.T) {
 	now := time.Now()
-	// The until stop's real line: the run stood on the boss step (38, entry 14517) and stops before step 39.
-	stop := tbm.RunStatus{State: tbm.RunDone, Step: 39, Kind: "move",
-		Note: "stopped before step 39 (until step 39): the party stays where it stands"}
+	boss := zgBossStepOf(t, 14517)
+	// The until stop's real line: the run stood on the boss step (entry 14517) and stops before the next one.
+	stop := tbm.RunStatus{State: tbm.RunDone, Step: boss + 1, Kind: "move",
+		Note: fmt.Sprintf("stopped before step %d (until step %d): the party stays where it stands", boss+1, boss+1)}
 	for _, tc := range []struct {
 		name   string
 		before func(w *walk)
@@ -651,11 +668,11 @@ func TestBossKillRunEndedAfterBossStep(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			w := bossSummaryWalk(t)
 			tc.before(w)
-			feedStatus(w, tbm.RunStatus{Step: 38, Kind: "boss", Note: "fighting"}, now)
+			feedStatus(w, tbm.RunStatus{Step: boss, Kind: "boss", Note: "fighting"}, now)
 			feedStatus(w, stop, now)
 			k := w.bossKillSummary()
-			if k == nil || k.Step != 38 || k.Entry != 14517 || !k.Engaged || k.Killed != tc.killed {
-				t.Fatalf("boss_kill %+v, want step 38 entry 14517 engaged, killed %v", k, tc.killed)
+			if k == nil || k.Step != boss || k.Entry != 14517 || !k.Engaged || k.Killed != tc.killed {
+				t.Fatalf("boss_kill %+v, want step %d entry 14517 engaged, killed %v", k, boss, tc.killed)
 			}
 			if tc.killed && k.Evidence != tc.ev {
 				t.Fatalf("evidence %q, want %q", k.Evidence, tc.ev)
@@ -695,23 +712,24 @@ func TestBossKillRunEndedAfterBossStep(t *testing.T) {
 }
 
 // TestBossLeaveCreditsTheNearestBossRow is M2: the leaving status credits the nearest boss ROW at or below its step,
-// created when the run's statuses never stood on it. A boss row walked past earlier (A, step 38, entry 14517) must
-// not take boss B's kill (B, step 84, entry 14507, no status of its own).
+// created when the run's statuses never stood on it. A boss row walked past earlier (A, step 44, entry 14517) must
+// not take boss B's kill (B, step 100, entry 14507, no status of its own).
 func TestBossLeaveCreditsTheNearestBossRow(t *testing.T) {
 	w := bossSummaryWalk(t)
 	now := time.Now()
-	feedStatus(w, tbm.RunStatus{Step: 38, Kind: "boss", Note: "fighting"}, now)
-	feedStatus(w, tbm.RunStatus{Step: 39, Kind: "move", Note: "walking"}, now)
-	feedStatus(w, tbm.RunStatus{Step: 85, Kind: "move", Note: "boss down: he died as 14507"}, now)
+	first, second := zgBossStepOf(t, 14517), zgBossStepOf(t, 14507)
+	feedStatus(w, tbm.RunStatus{Step: first, Kind: "boss", Note: "fighting"}, now)
+	feedStatus(w, tbm.RunStatus{Step: first + 1, Kind: "move", Note: "walking"}, now)
+	feedStatus(w, tbm.RunStatus{Step: second + 1, Kind: "move", Note: "boss down: he died as 14507"}, now)
 	list := w.bossKillSummaries()
 	if len(list) != 2 {
 		t.Fatalf("bossKills %d records, want 2: %+v", len(list), list)
 	}
-	if k := list[0]; k.Step != 38 || k.Entry != 14517 || k.Killed {
-		t.Fatalf("A %+v, want step 38 entry 14517 NOT killed: the `boss down` at 85 is B's", k)
+	if k := list[0]; k.Step != first || k.Entry != 14517 || k.Killed {
+		t.Fatalf("A %+v, want step %d entry 14517 NOT killed: the later `boss down` is B's", k, first)
 	}
-	if k := list[1]; k.Step != 84 || k.Entry != 14507 || !k.Killed || k.Evidence != "boss down: he died as 14507" {
-		t.Fatalf("B %+v, want step 84 entry 14507 killed by the `boss down` at 85", k)
+	if k := list[1]; k.Step != second || k.Entry != 14507 || !k.Killed || k.Evidence != "boss down: he died as 14507" {
+		t.Fatalf("B %+v, want step %d entry 14507 killed by the later `boss down`", k, second)
 	}
 }
 
@@ -732,9 +750,10 @@ func TestBossRecordSkippedOnUnverifiedRows(t *testing.T) {
 		t.Fatalf("notes %q, want the skipped-record note", w.notes)
 	}
 	w2 := bossSummaryWalk(t)
-	feedStatus(w2, tbm.RunStatus{Step: 38, Kind: "boss", Note: "fighting"}, time.Now())
-	if k := w2.bossKillSummary(); k == nil || k.Step != 38 || !k.Engaged {
-		t.Fatalf("boss_kill %+v, want step 38 engaged: a boss row that matches is recorded", k)
+	boss := zgBossStepOf(t, 14517)
+	feedStatus(w2, tbm.RunStatus{Step: boss, Kind: "boss", Note: "fighting"}, time.Now())
+	if k := w2.bossKillSummary(); k == nil || k.Step != boss || !k.Engaged {
+		t.Fatalf("boss_kill %+v, want step %d engaged: a boss row that matches is recorded", k, boss)
 	}
 }
 
@@ -746,14 +765,15 @@ func TestBossStatusOnInjectorPageMarksKill(t *testing.T) {
 	now := time.Now()
 	w.env = walkEnv{now: func() time.Time { return now }}
 	w.plan = &dungeon.Plan{Name: "zul_gurub"}
+	boss, total := zgBossStepOf(t, 14517), len(zgRows(t).Steps)
 	page := events.Page{Events: []events.Event{
-		{Kind: events.KindSystem, Text: "TBM:RUN|zul_gurub|running|38/1095|high_priest_thekal|boss|begin|fighting"},
-		{Kind: events.KindSystem, Text: "TBM:RUN|zul_gurub|running|39/1095|high_priest_thekal|move|walk|boss down: he died as 14517"},
+		{Kind: events.KindSystem, Text: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priest_jeklik|boss|begin|fighting", boss, total)},
+		{Kind: events.KindSystem, Text: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priest_jeklik|move|walk|boss down: he died as 14517", boss+1, total)},
 	}}
 	(&raidInjector{w: w}).readEventsPage(page)
 	k := w.bossKillSummary()
-	if k == nil || k.Step != 38 || !k.Killed || k.Evidence != "boss down: he died as 14517" {
-		t.Fatalf("boss_kill %+v, want step 38 killed by the injector page's note", k)
+	if k == nil || k.Step != boss || !k.Killed || k.Evidence != "boss down: he died as 14517" {
+		t.Fatalf("boss_kill %+v, want step %d killed by the injector page's note", k, boss)
 	}
 }
 
@@ -785,11 +805,12 @@ func TestBossKillTrackerFallbackInFinish(t *testing.T) {
 	if err := json.Unmarshal(raw, &sum); err != nil {
 		t.Fatal(err)
 	}
+	boss := zgBossStepOf(t, 14517)
 	k := sum.BossKill
-	if k == nil || k.Step != 38 || k.Entry != 14517 || !k.Engaged {
-		t.Fatalf("boss_kill %+v, want the tracker's fallback record at step 38 entry 14517", k)
+	if k == nil || k.Step != boss || k.Entry != 14517 || !k.Engaged {
+		t.Fatalf("boss_kill %+v, want the tracker's fallback record at step %d entry 14517", k, boss)
 	}
-	if len(sum.BossKills) != 1 || sum.BossKills[0].Step != 38 {
+	if len(sum.BossKills) != 1 || sum.BossKills[0].Step != boss {
 		t.Fatalf("boss_kills %+v, want the same record in the list", sum.BossKills)
 	}
 }
