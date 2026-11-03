@@ -360,15 +360,45 @@ func (c *planChecker) runLeader(from int) error {
 		}
 		c.leg, c.l = m.Leg, c.p.Legs[m.Leg]
 		var at Point
-		if at, err = c.walk("run leader "+m.Part, m.Point, prev); err == nil {
+		// The first approach point is the hopeless hop: the one `cmd move` the run leader sends from its last
+		// move row (walk 31: two Jin'do moves refused past 150 yd). Later approach points leave as path rows on
+		// export, so only it carries the group's number for the hop lint. Only a pack the run leader sees from
+		// where it stands (within RunLeaderSeeYd of the pack's centre) gets one `cmd move`: past that it walks
+		// there in navmesh hops of its own (the RunLeaderReach warning's case), never one refused order.
+		part, group := "run leader "+m.Part, 0
+		if strings.HasSuffix(m.Part, "approach 0") {
+			var g int
+			if _, serr := fmt.Sscanf(m.Part, "pull group %d approach 0", &g); serr == nil && g > 0 && g <= len(c.p.Legs[m.Leg].PullGroups) {
+				if d := dist3(prev, PackCentre(c.p.Legs[m.Leg].PullGroups[g-1])); d <= RunLeaderSeeYd {
+					group = g
+				}
+			}
+		}
+		if at, err = c.walkGroup(part, group, m.Point, prev); err == nil {
 			prev = at
 		}
-	}, func(int, string, Point, int, string) {})
-	if err != nil {
-		return err
-	}
+	}, func(li int, part string, at Point, group int, team string) {
+		// The party fought there (a pull it saw from its move point): the
+		// next move's hop is measured from it, not from the move before the
+		// fight. The fight callback's part names the pack ("pull group");
+		// record the pack's centre under the pull-group key the plan check
+		// uses, so the next approach measures from the fight.
+		end := RunLeaderPoint{Leg: li, Part: fmt.Sprintf("pull group %d", group), Point: at}
+		if group > 0 {
+			c.ends[endKey(end.Leg, end.Part)] = end.Point
+		}
+	})
 	c.res.RunLeader = append(c.res.RunLeader, c.p.RunLeaderReach(from)...)
 	return nil
+}
+
+// pullGroupPart parses a "pull group N ..." part name (runLeaderWalk's and the plan check's shared numbering).
+func pullGroupPart(part string) (string, int, bool) {
+	var g int
+	if _, err := fmt.Sscanf(part, "pull group %d", &g); err != nil || g <= 0 {
+		return "", 0, false
+	}
+	return fmt.Sprintf("pull group %d", g), g, true
 }
 
 // lookFunc finds where the lead bot stands to look at a pack: LookPoint's signature.
@@ -629,15 +659,55 @@ func (c *planChecker) skip(part string, at, from Point, why string) {
 	c.rec.skip(is)
 }
 
+// maxMoveHopYd is the longest hop the TortoiseBots run leader walks as one `cmd move`: past AiPlayerbot.ReactDistance
+// (150 yd) the server refuses the order outright ("too-far: Move in shorter legs"), so a hop past this gets an
+// intermediate waypoint in the plan (walk 31: two Jin'do moves refused at 150+ yd after a fight left the lead there).
+const maxMoveHopYd = 140.0
+
+// WarnLongHop is the reason of the warning on a first approach point farther than maxMoveHopYd from the run leader's
+// last move row: the run leader sends the hop as one `cmd move`, which the server refuses past 150 yd. Walk 31's
+// refusals came after fights dragged the party far off route, which the static check cannot see; the warning pins the
+// authored hop so it cannot come back. It warns rather than fails: the exporter still cuts the walk into path rows,
+// and older plans (Zul'Farrak, AQ40) carry such hops the walk-31 fixes did not touch.
+const WarnLongHop = "long hop"
+
+// hopTooLong warns of a first approach point farther than maxMoveHopYd from where the party stands: the run leader's
+// single move to it is refused past the 150 yd react distance, so the plan must cut the hop with waypoints first.
+func (c *planChecker) hopTooLong(part string, group int, to, from Point) {
+	if d := dist3(to, from); d > maxMoveHopYd {
+		c.warnLongHop(part, group, to, from, d)
+	}
+}
+
+// warnLongHop records a long-hop warning of the current leg, carrying the pull group number so the warning names the
+// row to fix (warn cannot carry one: it always records group 0).
+func (c *planChecker) warnLongHop(part string, group int, to, from Point, d float64) {
+	is := c.issue(part, group, to, from, WarnLongHop, "%.0f yd from the run leader's last move row (the server refuses a move past 150 yd: it takes shorter legs): cut it with intermediate waypoints", d)
+	c.res.Warnings = append(c.res.Warnings, is)
+	c.rec.warn(is)
+}
+
 // count counts a checked point (only those of the run's part of the plan).
 func (c *planChecker) count() {
 	c.res.Points++
 }
 
 func (c *planChecker) walk(part string, to, from Point) (Point, error) {
+	return c.walkGroup(part, 0, to, from)
+}
+
+// walkGroup is walk with the pull group number for the hop lint: approach and stand points carry their group so the
+// failure names the row to fix, while plain via and leg points stay group 0. checkLeg calls it with the group's number
+// only for a pull group's first approach point (the one `cmd move` the run leader sends from its last move row); a hop
+// longer than maxMoveHopYd anywhere else is business as usual (steps, later approach points and the look all run after
+// fights that scatter the party, so their distance from the plan's point before them says nothing about a refused move).
+func (c *planChecker) walkGroup(part string, group int, to, from Point) (Point, error) {
 	c.count()
 	c.rec.begin("", part, from, to)
 	defer c.rec.end()
+	if group > 0 {
+		c.hopTooLong(part, group, to, from)
+	}
 	if c.avoided(part, 0, to, from) {
 		return from, nil
 	}
