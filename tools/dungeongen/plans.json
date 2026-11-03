@@ -1045,6 +1045,7 @@
    "map": 249,
    "kind": "raid",
    "data": "map249",
+   "handwritten": true,
    "trigger": 2848,
    "bosses": [
     10184

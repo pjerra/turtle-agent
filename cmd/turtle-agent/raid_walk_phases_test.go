@@ -1135,9 +1135,45 @@ func TestRaidWalkNoteFramesWriteErrorOnce(t *testing.T) {
 // (the map id follows) but the server never lands it, so the commander still stands at the revive point. The old code
 // set cur = e before the landing wait and then let D-C read e, whose units the walk could see from p said quiet: a
 // "not revived" refusal became a summon with the commander still at p. Now only a LANDED go makes the entrance the
+// onyxiaReviveAwayFromEntrancePlan copies the plan to a temp dir with the leg start back at the old revive point
+// (49.82 -114.607 -24.3112), so a recovery test has a revive point away from the entrance. The committed plan starts
+// the leg at the entrance platform: the old point sits inside the warder patrol lane (plan-check patrol lint), and
+// with the revive at the entrance the entrance fallback below would land by proximity and the walk would resume
+// instead of refusing.
+func onyxiaReviveAwayFromEntrancePlan(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile("../../dungeons/onyxias_lair.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	legs, ok := doc["legs"].([]any)
+	if !ok || len(legs) < 1 {
+		t.Fatal("the plan has no legs")
+	}
+	leg, ok := legs[0].(map[string]any)
+	if !ok {
+		t.Fatal("the first leg is not an object")
+	}
+	leg["to"] = map[string]any{"x": 49.8206, "y": -114.607, "z": -24.3112}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "onyxias_lair.json"), out, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 // checked point, a failed landing skips D-C and refuses, and the refusal records entrance_tried.
 func TestRaidWalkEntranceGoNeverLands(t *testing.T) {
 	f := newFixture(t)
+	f.opts.dir = onyxiaReviveAwayFromEntrancePlan(t)
 	f.agent.startReply = startAt("onyxias_lair", 23)
 	// An in-combat unit 30 yd from the revive point keeps it loud through the 120 s check; from the entrance go on
 	// the units are quiet, so the read the old code ran at the entrance would have said quiet.
