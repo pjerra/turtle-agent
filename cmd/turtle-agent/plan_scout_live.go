@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -44,6 +45,15 @@ const (
 	scoutLoginWait = 90 * time.Second
 	// scoutMapWait is how long a `.go xyz` may take to show its map in the status.
 	scoutMapWait = 30 * time.Second
+	// scoutReadReachYd is how far (3D) the GM may stand from a read's point before the spot is reached first: the
+	// toolkit refuses a read more than 150 yd from the GM (point_far), and a stop's spots can chain out past that.
+	scoutReadReachYd = 120
+	// scoutToolkitFar is the toolkit's refusal of a read out of reach (the rpc error names it).
+	scoutToolkitFar = "point_far"
+	// scoutLandYd is how close (x/y) a `.go xyz` must land to count as acked (raid-walk's reviveLandingYd).
+	scoutLandYd = 10
+	// scoutTeleportWait is how long a `.go xyz` may take to be acked and land.
+	scoutTeleportWait = 10 * time.Second
 	// scoutStopsPerInstanceCheck is how many stops pass between two `q inst` reads (spec 5.6 step 8).
 	scoutStopsPerInstanceCheck = 25
 	// scoutMaxLOSQueries is the toolkit's `q los` cap in one line.
@@ -781,14 +791,18 @@ func (sl *scoutLive) spotPass(ctx context.Context) error {
 	radius := planscout.LiveSpotRadius(sl.world, sl.options())
 	groups := planscout.LiveStops(spots)
 	for gi, group := range groups {
-		if err := sl.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(group[0].Point.X), num32(group[0].Point.Y),
-			num32(group[0].Point.Z), sl.plan.Map)); err != nil {
+		if _, err := sl.standAt(ctx, group[0].Point, scoutLandYd); err != nil {
 			return err
 		}
 		if err := sl.sleep(ctx, time.Second); err != nil {
 			return err
 		}
 		for _, spot := range group {
+			// A stop's spots chain (each within LiveSpotYd of an earlier one), so a later spot can stand past the
+			// toolkit's read reach from the stop: the GM goes there first.
+			if _, err := sl.standAt(ctx, spot.Point, scoutReadReachYd); err != nil {
+				return err
+			}
 			units, err := sl.readUnits(ctx, spot.Point, radius)
 			if err != nil {
 				return err
@@ -865,7 +879,7 @@ func (sl *scoutLive) unitsOnce(ctx context.Context, p dungeon.Point, r float64) 
 		r = 1
 	}
 	cmd := fmt.Sprintf("q units %.0f %s %s %s all", r, num32(p.X), num32(p.Y), num32(p.Z))
-	res, err := sl.tt(ctx, cmd)
+	res, err := sl.ttRead(ctx, p, cmd)
 	if err != nil {
 		return nil, false, scoutStopf(exitPlanScoutLiveAborted, "q units: %v", stopReason(err))
 	}
@@ -948,7 +962,7 @@ func (sl *scoutLive) losAt(ctx context.Context, p dungeon.Point, step int, targe
 		for _, t := range targets[start:end] {
 			cmd += fmt.Sprintf(" %s", scoutFullGUID(t))
 		}
-		res, err := sl.tt(ctx, cmd)
+		res, err := sl.ttRead(ctx, p, cmd)
 		if err != nil {
 			return scoutStopf(exitPlanScoutLiveAborted, "q los: %v", stopReason(err))
 		}
@@ -1266,6 +1280,71 @@ func (sl *scoutLive) status(ctx context.Context) (session.StatusInfo, error) {
 	var st session.StatusInfo
 	err := sl.agent.Call(ctx, "status", nil, &st, 10*time.Second)
 	return st, err
+}
+
+// standAt makes sure the GM stands within reach yd (3D) of p on the plan's map: a farther GM teleports to p first. It says
+// whether it teleported.
+func (sl *scoutLive) standAt(ctx context.Context, p dungeon.Point, reach float64) (bool, error) {
+	st, err := sl.status(ctx)
+	if err != nil {
+		return false, scoutStopf(exitPlanScoutLiveAborted, "the commander's position: %v", stopReason(err))
+	}
+	here := dungeon.Point{X: st.X, Y: st.Y, Z: st.Z}
+	if st.Map == sl.plan.Map && scoutDist3(here, p) <= reach {
+		return false, nil
+	}
+	if err := sl.teleportTo(ctx, p); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// teleportTo sends `.go xyz` to p on the plan's map and waits for the server's ack: the session's TeleportSeq moves past
+// the value read before the teleport, and the GM stands within scoutLandYd of p (x/y).
+func (sl *scoutLive) teleportTo(ctx context.Context, p dungeon.Point) error {
+	before, err := sl.status(ctx)
+	if err != nil {
+		return scoutStopf(exitPlanScoutLiveAborted, "the commander's position: %v", stopReason(err))
+	}
+	if err := sl.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(p.X), num32(p.Y), num32(p.Z), sl.plan.Map)); err != nil {
+		return err
+	}
+	deadline := sl.now().Add(scoutTeleportWait)
+	for {
+		st, err := sl.status(ctx)
+		if err == nil && st.Map == sl.plan.Map && st.TeleportSeq > before.TeleportSeq && !st.Falling &&
+			math.Hypot(float64(st.X-p.X), float64(st.Y-p.Y)) <= scoutLandYd {
+			return nil
+		}
+		if !sl.now().Before(deadline) {
+			return scoutStopf(exitPlanScoutLiveAborted, "the commander did not land at %s %s %s on map %d within %s (no teleport ack)",
+				num32(p.X), num32(p.Y), num32(p.Z), sl.plan.Map, scoutTeleportWait)
+		}
+		if err := sl.sleep(ctx, 200*time.Millisecond); err != nil {
+			return err
+		}
+	}
+}
+
+// ttRead sends one toolkit read at p. A read the toolkit refuses as out of reach (point_far) is sent once more after the GM
+// teleports to p; a second refusal, or any other error, is returned.
+func (sl *scoutLive) ttRead(ctx context.Context, p dungeon.Point, cmd string) (ttResult, error) {
+	res, err := sl.tt(ctx, cmd)
+	if err == nil || !strings.Contains(err.Error(), scoutToolkitFar) {
+		return res, err
+	}
+	sl.note("%s refused as %s at %.1f %.1f %.1f: the commander teleports there and the read is sent once more",
+		strings.Join(strings.Fields(cmd)[:2], " "), scoutToolkitFar, p.X, p.Y, p.Z)
+	if err := sl.teleportTo(ctx, p); err != nil {
+		return ttResult{}, err
+	}
+	return sl.tt(ctx, cmd)
+}
+
+// scoutDist3 is the 3D distance between two points.
+func scoutDist3(a, b dungeon.Point) float64 {
+	dx, dy, dz := float64(a.X-b.X), float64(a.Y-b.Y), float64(a.Z-b.Z)
+	return math.Sqrt(dx*dx + dy*dy + dz*dz)
 }
 
 // gm sends one GM line after the scout's allow-list passes it.

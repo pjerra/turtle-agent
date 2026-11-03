@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -55,6 +56,14 @@ type scoutFakeAgent struct {
 	walkStopSet    bool
 	walkTarget     [3]float32
 	walkMovingOnce bool
+	// farLimit (yd, 0 off) refuses a `q units` or `q los` whose point is further from the GM, as the toolkit does (point_far).
+	farLimit float64
+	// refuse refuses the next `q units` or `q los` as point_far whatever its point (0 off).
+	refuse int
+	// noAck answers a `.go xyz` with the new position but no TeleportSeq bump (the server's teleport ack never comes).
+	noAck bool
+	// trace is every GM and toolkit line in the order sent ("gm ..." or "tt ...").
+	trace []string
 }
 
 func newScoutFakeAgent(t *testing.T, clock *fakeClock) *scoutFakeAgent {
@@ -101,6 +110,7 @@ func (a *scoutFakeAgent) Call(_ context.Context, method string, params, out any,
 			text = m["text"]
 		}
 		a.gm = append(a.gm, text)
+		a.trace = append(a.trace, "gm "+text)
 		a.gmCall(text)
 	case "tt":
 		var cmd string
@@ -108,6 +118,10 @@ func (a *scoutFakeAgent) Call(_ context.Context, method string, params, out any,
 			cmd = p.Cmd
 		}
 		a.tt = append(a.tt, cmd)
+		a.trace = append(a.trace, "tt "+cmd)
+		if err := a.farCheck(cmd); err != nil {
+			return err
+		}
 		res := a.ttCall(cmd)
 		if p, ok := out.(*ttResult); ok {
 			*p = res
@@ -156,6 +170,9 @@ func (a *scoutFakeAgent) gmCall(line string) {
 		fmt.Sscan(f[4], &z)
 		fmt.Sscan(f[5], &m)
 		a.status.Map, a.status.X, a.status.Y, a.status.Z = m, x, y, z
+		if !a.noAck {
+			a.status.TeleportSeq++ // the server's teleport ack, counted by the session
+		}
 	case len(f) >= 4 && f[0] == ".bot" && f[1] == "scout":
 		switch f[2] {
 		case "cfg":
@@ -214,6 +231,38 @@ func (a *scoutFakeAgent) gmCall(line string) {
 			a.queueLocked(line, line)
 		}
 	}
+}
+
+// farCheck refuses a `q units` or `q los` read the way the toolkit does: a point more than farLimit yd from the GM, or any
+// read while refuse is set, is a point_far error (the rpc error text the scout matches).
+func (a *scoutFakeAgent) farCheck(cmd string) error {
+	f := strings.Fields(cmd)
+	if len(f) < 2 || (f[1] != "units" && f[1] != "los") {
+		return nil
+	}
+	if a.refuse > 0 {
+		a.refuse--
+		return fmt.Errorf("rpc error -32003: eluna: point_far: point is 200 yd from you (max 150): .go xyz there first")
+	}
+	if a.farLimit <= 0 {
+		return nil
+	}
+	off := 2
+	if f[1] == "units" {
+		off = 3
+	}
+	if len(f) < off+3 {
+		return nil
+	}
+	var p [3]float64
+	for i := range p {
+		fmt.Sscan(f[off+i], &p[i])
+	}
+	d := math.Sqrt(math.Pow(p[0]-float64(a.status.X), 2) + math.Pow(p[1]-float64(a.status.Y), 2) + math.Pow(p[2]-float64(a.status.Z), 2))
+	if d > a.farLimit {
+		return fmt.Errorf("rpc error -32003: eluna: point_far: point is %.0f yd from you (max %.0f): .go xyz there first", d, a.farLimit)
+	}
+	return nil
 }
 
 // ttCall answers one toolkit command.
@@ -411,10 +460,15 @@ type liveFixture struct {
 
 func newLiveFixture(t *testing.T, nPulls int) *liveFixture {
 	t.Helper()
+	return newFixtureWithPlan(t, "scout_live", func(dir, name string) { writeLivePlan(t, dir, name, nPulls) })
+}
+
+// newFixtureWithPlan is a live fixture whose plan write makes the plan in dir.
+func newFixtureWithPlan(t *testing.T, name string, write func(dir, name string)) *liveFixture {
+	t.Helper()
 	useScoutNet(t)
 	dir := t.TempDir()
-	name := "scout_live"
-	writeLivePlan(t, dir, name, nPulls)
+	write(dir, name)
 	slotsPath := writeSlotsFile(t, dir)
 	clock := newFakeClock()
 	agent := newScoutFakeAgent(t, clock)
@@ -745,5 +799,120 @@ func TestPlanScoutLogHasNoSecrets(t *testing.T) {
 		if !strings.Contains(log, want) {
 			t.Fatalf("scout.log lacks %q:\n%s", want, log)
 		}
+	}
+}
+
+// writeChainPlan writes a plan with one leg whose pull groups stand at xs (x, y 0): the scout's stops chain over them.
+func writeChainPlan(t *testing.T, dir, name string, xs []float32) {
+	t.Helper()
+	groups := make([]dungeon.PullGroup, len(xs))
+	for i, x := range xs {
+		groups[i] = dungeon.PullGroup{Entries: []uint32{100}, Positions: []dungeon.Point{{X: x}},
+			Approach: []dungeon.Point{{X: x - 10}}}
+	}
+	p := &dungeon.Plan{Version: 1, Name: name, Map: 1, Kind: "dungeon",
+		Entrance: dungeon.Point{X: xs[0] - 20},
+		Portal:   &dungeon.Portal{Map: 1, Point: dungeon.Point{X: 10}},
+		Legs:     []dungeon.Leg{{Name: "one", To: dungeon.Point{X: xs[len(xs)-1]}, PullGroups: groups}}}
+	b, err := dungeon.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name+".json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// lastTeleportBefore is the point of the last `.go xyz` sent before trace[i] ("x y z"), or "" when none was.
+func lastTeleportBefore(trace []string, i int) string {
+	for k := i - 1; k >= 0; k-- {
+		if f := strings.Fields(trace[k]); len(f) == 7 && f[0] == "gm" && f[1] == ".go" {
+			return strings.Join(f[3:6], " ")
+		}
+	}
+	return ""
+}
+
+// 26. A stop's spots chain past the toolkit's read reach (195 yd from the stop's first spot): the GM goes to each far spot
+// before its reads, so no read is refused and the live pass does not stop (28). Every `q units` read stands within 120 yd
+// of the GM's last teleport.
+func TestPlanScoutSpotsChainTeleportBeforeFarReads(t *testing.T) {
+	f := newFixtureWithPlan(t, "scout_chain", func(dir, name string) { writeChainPlan(t, dir, name, []float32{0, 98, 195}) })
+	f.agent.farLimit = 150
+	code, _, errOut := f.run(t)
+	if code == exitPlanScoutLiveAborted {
+		t.Fatalf("the live pass stopped (28): %q", errOut)
+	}
+	reads, farTeleports := 0, 0
+	for i, line := range f.agent.trace {
+		if !strings.HasPrefix(line, "tt q units ") {
+			continue
+		}
+		reads++
+		at := strings.Fields(line)[4:7]
+		goAt := lastTeleportBefore(f.agent.trace, i)
+		if goAt == "" {
+			t.Fatalf("read %q with no teleport before it", line)
+		}
+		gf := strings.Fields(goAt)
+		var g, r [3]float64
+		for k := range g {
+			fmt.Sscan(gf[k], &g[k])
+			fmt.Sscan(at[k], &r[k])
+		}
+		if d := math.Sqrt(math.Pow(g[0]-r[0], 2) + math.Pow(g[1]-r[1], 2) + math.Pow(g[2]-r[2], 2)); d > scoutReadReachYd {
+			t.Fatalf("read %q is %.0f yd from the last teleport %q: the GM did not go to the spot", line, d, goAt)
+		}
+		if strings.Join(at, " ") == strings.Join(gf, " ") {
+			farTeleports++
+		}
+	}
+	if reads < 3 {
+		t.Fatalf("%d q units reads, want one per spot (3)", reads)
+	}
+	if farTeleports == 0 {
+		t.Fatalf("no spot was reached by its own teleport: %v", f.agent.trace)
+	}
+}
+
+// 27. A read the toolkit refuses as point_far costs one teleport to its point and one retry; the live pass goes on.
+func TestPlanScoutPointFarRetriesOnce(t *testing.T) {
+	f := newLiveFixture(t, 1)
+	f.agent.refuse = 1
+	code, _, errOut := f.run(t)
+	if code == exitPlanScoutLiveAborted {
+		t.Fatalf("the live pass stopped (28) on one point_far: %q", errOut)
+	}
+	i := -1
+	for k, line := range f.agent.trace {
+		if strings.HasPrefix(line, "tt q units ") {
+			i = k
+			break
+		}
+	}
+	if i < 0 || i+2 >= len(f.agent.trace) {
+		t.Fatalf("no toolkit read after the start: %v", f.agent.trace)
+	}
+	read := f.agent.trace[i]
+	if !strings.HasPrefix(f.agent.trace[i+1], "gm .go xyz ") {
+		t.Fatalf("the refused read %q is not followed by a teleport: next %q", read, f.agent.trace[i+1])
+	}
+	if f.agent.trace[i+2] != read {
+		t.Fatalf("the refused read %q was not sent again after the teleport: next %q", read, f.agent.trace[i+2])
+	}
+	want := "gm .go xyz " + strings.Join(strings.Fields(read)[4:7], " ") + " 1" // the plan's map is 1
+	if f.agent.trace[i+1] != want {
+		t.Fatalf("the teleport %q is not to the refused read's point (want %q)", f.agent.trace[i+1], want)
+	}
+}
+
+// 28. A teleport the server does not ack (no TeleportSeq move) ends the live pass (28) instead of reading from the wrong place.
+func TestPlanScoutTeleportNeedsAck(t *testing.T) {
+	f := newFixtureWithPlan(t, "scout_chain", func(dir, name string) { writeChainPlan(t, dir, name, []float32{0, 98, 195}) })
+	f.agent.farLimit = 150
+	f.agent.noAck = true
+	code, _, errOut := f.run(t)
+	if code != exitPlanScoutLiveAborted || !strings.Contains(errOut, "no teleport ack") {
+		t.Fatalf("code %d, %q: want 28 with the missing ack named", code, errOut)
 	}
 }
