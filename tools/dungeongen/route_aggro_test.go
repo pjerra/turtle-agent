@@ -322,10 +322,11 @@ var routeAggroKnownFailing = map[string]int{
 	"temple_of_ahnqiraj":   512,  // re-pinned for the AQ waypoint pass (was 520): the merged stands and the stands moved off walls and water walk fewer later packs.
 	"naxxramas":            626,  // waypoint pass (was 647): the moved leg stands and vias walk past fewer later packs.
 	"stormwrought_ruins":   606,  // hand-maintained from the generated draft (waypoint pass 2026-11-03): the route into each pack walks past the dense custom packs.
-	"lower_karazhan_halls": 1000, // boss rows own their boss (was 1010). the repo reach (AggroRadius at 59-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
+	"lower_karazhan_halls": 991,  // waypoint pass (was 1000): the moved stands walk past fewer later packs.
 	"upper_karazhan_halls": 383,  // boss rows own their boss (was 403). the live export builds now (GMCrossDirect walks the outland gm_cross gap): the check sees the island hops.
 	"emerald_sanctum":      15,   // boss rows own their boss (was 17). the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns detection 20, from 8.
-	"timbermaw_hold":       214,  // boss rows own their boss (was 228). the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
+	"timbermaw_hold":       195,  // waypoint pass (was 214): the reworked loktanag_lower vias walk past fewer later packs.
+	"maraudon_orange":      135, "scholomance": 843, // newly hand-maintained (were generated): the current route's passes.
 }
 
 // TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn
