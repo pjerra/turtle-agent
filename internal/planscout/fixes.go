@@ -3,8 +3,11 @@ package planscout
 import (
 	"fmt"
 	"math"
+	"os"
 	"sort"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/aggroest"
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -78,6 +81,19 @@ type waterPolygonNav interface {
 // coordinates only.
 func ProposeFixes(rep *Report, in Input, nav Nav, w *worldspawn.World) []Fix {
 	var out []Fix
+	profile := map[string]float64{}
+	start := time.Now()
+	defer func() {
+		if os.Getenv("SCOUT_PROFILE") != "" {
+			fmt.Fprintf(os.Stderr, "fixes %.1fs: %v\n", time.Since(start).Seconds(), profile)
+		}
+	}()
+	spend := func(k string, f func() []Fix) []Fix {
+		t := time.Now()
+		r := f()
+		profile[k] += time.Since(t).Seconds()
+		return r
+	}
 	spread := float64(aggroest.StandSpreadPartyYd)
 	if in.Plan != nil && in.Plan.IsRaid() {
 		spread = aggroest.StandSpreadRaidYd
@@ -96,21 +112,30 @@ func ProposeFixes(rep *Report, in Input, nav Nav, w *worldspawn.World) []Fix {
 			origin := st.Origin
 			switch c.Name {
 			case planlint.LintOffFloor, planlint.LintReach:
-				if f, ok := snapFix(rep, in, nav, st, c, origin); ok {
-					out = append(out, f)
-				}
+				out = append(out, spend("snap", func() []Fix {
+					if f, ok := snapFix(rep, in, nav, st, c, origin); ok {
+						return []Fix{f}
+					}
+					return nil
+				})...)
 			case planlint.LintHop, planlint.LintArrival, planlint.LintClimb:
-				if f, ok := viaFix(rep, in, nav, st, c, origin); ok {
-					out = append(out, f)
-				}
+				out = append(out, spend("via", func() []Fix {
+					if f, ok := viaFix(rep, in, nav, st, c, origin); ok {
+						return []Fix{f}
+					}
+					return nil
+				})...)
 			case planlint.LintWater:
-				out = append(out, dryFixes(rep, in, nav, st, c, origin, idx)...)
+				out = append(out, spend("dry", func() []Fix { return dryFixes(rep, in, nav, st, c, origin, idx) })...)
 			case planlint.LintAggro:
-				if f, ok := standFix(in, nav, w, st, c, origin, idx, rows, level, spread); ok {
-					out = append(out, f)
-				}
+				out = append(out, spend("stand", func() []Fix {
+					if f, ok := standFix(in, nav, w, st, c, origin, idx, rows, level, spread); ok {
+						return []Fix{f}
+					}
+					return nil
+				})...)
 			case planlint.LintJoiners:
-				out = append(out, splitFixes(in, nav, w, st, c, origin, idx, rows, level, spread)...)
+				out = append(out, spend("split", func() []Fix { return splitFixes(in, nav, w, st, c, origin, idx, rows, level, spread) })...)
 			}
 		}
 	}
@@ -133,6 +158,18 @@ func repLevel(in Input, rep *Report) int {
 		}
 	}
 	return 60
+}
+
+// canApply says a plan element the fix can edit: cut rows and step chests are exporter-made, not plan elements.
+func canApply(o *planexport.RowOrigin) bool {
+	if o == nil {
+		return false
+	}
+	switch o.Part {
+	case "via", "to", "approach", "pull", "boss", "hold", "step":
+		return true
+	}
+	return false
 }
 
 // prevPoint is the positioned row before idx.
@@ -165,7 +202,7 @@ func snapFix(rep *Report, in Input, nav Nav, st StepResult, c Check, origin *pla
 			return Fix{}, false
 		}
 	}
-	f := Fix{Step: st.Step, Check: c.Name, Kind: FixSnapPoint, Apply: origin != nil, Ref: origin, Point: &to,
+	f := Fix{Step: st.Step, Check: c.Name, Kind: FixSnapPoint, Apply: canApply(origin), Ref: origin, Point: &to,
 		Reason: "the row point moved to the nearest walkable floor, with a complete path from the row before it"}
 	return f, true
 }
@@ -191,7 +228,7 @@ func viaFix(rep *Report, in Input, nav Nav, st StepResult, c Check, origin *plan
 	} else {
 		reason += "; vias every " + ftoa(planexport.MoveGapCutYd) + " yd"
 	}
-	f := Fix{Step: st.Step, Check: c.Name, Kind: FixInsertVia, Apply: origin != nil, Ref: origin, Vias: vias,
+	f := Fix{Step: st.Step, Check: c.Name, Kind: FixInsertVia, Apply: canApply(origin), Ref: origin, Vias: vias,
 		Reason: reason}
 	if origin == nil {
 		f.Reason += "; no plan element for this row: a migration's rows are not the plan's own"
@@ -262,6 +299,9 @@ func cutVias(mapID uint32, nav Nav, pts []dungeon.Point, climb bool) []dungeon.P
 // dryFixes proposes a dry stand for a wet gather point, and a dry route for a wet hop where the navmesh can list its water.
 func dryFixes(rep *Report, in Input, nav Nav, st StepResult, c Check, origin *planexport.RowOrigin, idx int) []Fix {
 	var out []Fix
+	if strings.HasPrefix(c.Reason, "river below") {
+		return nil // a chase or a fall may land there; the route itself is dry
+	}
 	p := dungeon.Point{X: st.X, Y: st.Y, Z: st.Z}
 	if st.Kind == planexport.KindMove || st.Kind == planexport.KindHold {
 		if f, ok := dryPoint(rep.Map, in, nav, idx, p, origin, c); ok {
@@ -298,7 +338,7 @@ func dryPoint(mapID uint32, in Input, nav Nav, idx int, p dungeon.Point, origin 
 				}
 				at := dungeon.Point{X: q.X, Y: q.Y, Z: f.Z}
 				if path, err := nav.Plan(mapID, navmesh.Vec3{prev.X, prev.Y, prev.Z}, navmesh.Vec3{at.X, at.Y, at.Z}); err == nil && path.Status == navmesh.Complete {
-					return Fix{Step: stepOf(idx), Check: c.Name, Kind: FixDryDetour, Apply: origin != nil, Ref: origin, Point: &at,
+					return Fix{Step: stepOf(idx), Check: c.Name, Kind: FixDryDetour, Apply: canApply(origin), Ref: origin, Point: &at,
 						Reason: "the wet gather point moved to dry ground within " + ftoa(DetourMaxYd) + " yd, with a complete path from the row before it"}, true
 				}
 			}
@@ -373,7 +413,7 @@ func standFix(in Input, nav Nav, w *worldspawn.World, st StepResult, c Check, or
 	if !ok {
 		return Fix{}, false
 	}
-	return Fix{Step: st.Step, Check: c.Name, Kind: FixMoveStand, Apply: origin != nil, Ref: origin, Stand: &cand,
+	return Fix{Step: st.Step, Check: c.Name, Kind: FixMoveStand, Apply: canApply(origin), Ref: origin, Stand: &cand,
 		Reason: c.Reason + "; a stand " + ftoa(cand.ClearYd) + " yd clear of every other pack"}, true
 }
 
@@ -383,7 +423,10 @@ func bestStand(in Input, nav Nav, w *worldspawn.World, idx int, st StepResult, r
 	prev, _ := prevPoint(in, idx)
 	best := FixStand{}
 	bestPath := math.Inf(1)
+	// The nearest radius that yields a clear stand wins (24 paths at most): the search is the fix proposer's, not the
+	// scout's runtime.
 	for _, r := range []float64{StandMinYd, 20, 25, 35, 45, 55} {
+		found := false
 		for k := range 24 {
 			a := 2 * math.Pi * float64(k) / 24
 			q := dungeon.Point{X: centre.X + float32(r)*float32(math.Cos(a)), Y: centre.Y + float32(r)*float32(math.Sin(a)), Z: centre.Z}
@@ -400,10 +443,14 @@ func bestStand(in Input, nav Nav, w *worldspawn.World, idx int, st StepResult, r
 			if err != nil || path.Status != navmesh.Complete {
 				continue
 			}
+			found = true
 			if d := float64(path.Length); d < bestPath {
 				bestPath = d
 				best = FixStand{X: at.X, Y: at.Y, Z: at.Z, ClearYd: clear, PathYd: d}
 			}
+		}
+		if found {
+			break
 		}
 	}
 	return best, bestPath < math.Inf(1)

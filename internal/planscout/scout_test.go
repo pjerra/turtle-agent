@@ -268,12 +268,13 @@ func TestRefusedPointNoFloorF16(t *testing.T) {
 	far := navmesh.Vec3{p.X + 8.8, p.Y, p.Z}
 	nav := fakeNav{near: func(q navmesh.Vec3) (navmesh.Vec3, bool, error) { return far, true, nil }}
 	rows := rowsOf(move(-11918.1, -1443.7, 42.4), move(p.X, p.Y, p.Z))
-	rep := run(t, rows, nav, nil, []planexport.RowOrigin{{Leg: 0, Part: "via", Group: -1, Index: 0}, {Leg: 0, Part: "cut", Group: -1, Index: 1}})
+	origins := []planexport.RowOrigin{{Leg: 0, Part: "via", Group: -1, Index: 0}, {Leg: 0, Part: "via", Group: -1, Index: 1}}
+	rep := run(t, rows, nav, nil, origins)
 	c := checkAt(t, rep, 2, planlint.LintOffFloor)
 	if c == nil || c.Verdict != VerdictFail {
 		t.Fatalf("floor: %+v", c)
 	}
-	fixes := ProposeFixes(rep, Input{Rows: rows, Origins: []planexport.RowOrigin{{Leg: 0, Part: "via", Group: -1, Index: 0}, {Leg: 0, Part: "cut", Group: -1, Index: 1}}, Plan: &dungeon.Plan{Name: "t", Map: 1}}, nav, nil)
+	fixes := ProposeFixes(rep, Input{Rows: rows, Origins: origins, Plan: &dungeon.Plan{Name: "t", Map: 1}}, nav, nil)
 	var snap *Fix
 	for i := range fixes {
 		if fixes[i].Kind == FixSnapPoint {
