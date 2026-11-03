@@ -53,6 +53,7 @@ const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--
     [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
     [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--hire-settle 20s] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
+    [--decisions on|off] [--decisions-max-mib N]
     [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--dry-run]
        turtle-agent raid-walk report <dir> [--spell ID] [--clock-offset 1h] [--md FILE] [--json FILE] [--out DIR]`
 
@@ -64,38 +65,40 @@ var raidWalkSpeedRe = regexp.MustCompile(`^[1-3](?:\.[0-9])?$`)
 
 // raidWalkOptions are the command's flags.
 type raidWalkOptions struct {
-	plan          string
-	server        string
-	slot          string // "" leases any free slot
-	holder        string
-	dir           string
-	sql           string
-	until         string
-	from          string
-	place         bool // --place: start the raid partway into its instance, at the --from start (spec 3)
-	speed         float64
-	hires         string
-	tier          int // --tier: the kit of a raid the committed table leaves unknown
-	tierOverride  int // --tier-override: a comparison, not a tier proof
-	enter         string
-	holdMinutes   int
-	maxRunMinutes int
-	pausedWait    time.Duration
-	autoResume    int
-	resetWait     time.Duration
-	wipeResume    int
-	wipeRest      time.Duration
-	hireSettle    time.Duration // --hire-settle: the wait after the last hire; 0 skips it (the #1367 live proof)
-	patrols       string
-	out           string
-	dashURL       string
-	dashUser      string
-	dashPassFile  string
-	mmaps         string
-	slotsPath     string
-	binary        string
-	injects       stringList // --inject, repeatable
-	dryRun        bool
+	plan            string
+	server          string
+	slot            string // "" leases any free slot
+	holder          string
+	dir             string
+	sql             string
+	until           string
+	from            string
+	place           bool // --place: start the raid partway into its instance, at the --from start (spec 3)
+	speed           float64
+	hires           string
+	tier            int // --tier: the kit of a raid the committed table leaves unknown
+	tierOverride    int // --tier-override: a comparison, not a tier proof
+	enter           string
+	holdMinutes     int
+	maxRunMinutes   int
+	pausedWait      time.Duration
+	autoResume      int
+	resetWait       time.Duration
+	wipeResume      int
+	wipeRest        time.Duration
+	hireSettle      time.Duration // --hire-settle: the wait after the last hire; 0 skips it (the #1367 live proof)
+	patrols         string
+	out             string
+	dashURL         string
+	dashUser        string
+	dashPassFile    string
+	decisions       bool // --decisions: pull decision captures after teardown (on by default)
+	decisionsMaxMiB int  // --decisions-max-mib: budget for the decisions pull in MiB
+	mmaps           string
+	slotsPath       string
+	binary          string
+	injects         stringList // --inject, repeatable
+	dryRun          bool
 }
 
 // stringList is a repeatable string flag: --inject a --inject b, or --inject=a.
@@ -210,7 +213,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.sql, "sql", "", "the deployed migration: step numbers and the first point come from it")
 	fs.StringVar(&o.until, "until", "boss", "boss (stops before it), boss-done (after the boss step), none, \"step N\" or \"leg L\"")
 	fs.StringVar(&o.from, "from", "", "\"leg L\" or \"step N\" for the run leader")
-	fs.Var(onOffFlag{&o.place}, "place", "with --from: put the raid at that start inside the instance, clearing the legs it skips (Eluna test toolkit: m910q or tortoise-test2 only)")
+	fs.Var(onOffFlag{v: &o.place, name: "--place"}, "place", "with --from: put the raid at that start inside the instance, clearing the legs it skips (Eluna test toolkit: m910q or tortoise-test2 only)")
 	fs.StringVar(&speed, "speed", "1.0", "the run's test speed, 1.0 to 3.0")
 	fs.StringVar(&o.hires, "hires", "", "the tb-raid-roster v1 file (default: from the plan's raid block)")
 	fs.IntVar(&o.tier, "tier", 0, "the hire gear tier (1-3) of a raid the committed table leaves unknown")
@@ -229,6 +232,9 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.dashURL, "dash-url", "", "the dashboard URL (or TBDASH_URL)")
 	fs.StringVar(&o.dashUser, "dash-user", "", "the dashboard login (or TBDASH_USER; default TADASH)")
 	fs.StringVar(&o.dashPassFile, "dash-pass-file", "", "the dashboard password file (or TBDASH_PASS_FILE)")
+	o.decisions = true
+	fs.Var(onOffFlag{v: &o.decisions, name: "--decisions"}, "decisions", "pull decision captures after teardown (on or off)")
+	fs.IntVar(&o.decisionsMaxMiB, "decisions-max-mib", 1024, "the decisions pull budget in MiB")
 	fs.StringVar(&o.mmaps, "mmaps", "", "the navmesh dir for slot setup")
 	fs.StringVar(&o.slotsPath, "slots", "", "the slots file (default ~/.config/turtle-agent/slots.json)")
 	fs.StringVar(&o.binary, "binary", "", "the agent binary slot setup copies (default: this executable)")
@@ -366,9 +372,12 @@ func placeServerList() []string {
 	return out
 }
 
-// onOffFlag is --place: a bare `--place` turns it on, `--place=off` turns it off. The pair form writes the word after
-// a slot prefix (--place 2=on), which the half then receives as --place=on.
-type onOffFlag struct{ v *bool }
+// onOffFlag is --place/--decisions: a bare flag turns it on, `--flag=off` turns it off. The pair
+// form writes the word after a slot prefix (--place 2=on), which the half then receives as --place=on.
+type onOffFlag struct {
+	v    *bool
+	name string
+}
 
 func (f onOffFlag) String() string {
 	if f.v != nil && *f.v {
@@ -384,7 +393,11 @@ func (f onOffFlag) Set(s string) error {
 	case "off", "false", "0":
 		*f.v = false
 	default:
-		return fmt.Errorf("--place wants on or off, not %q", s)
+		name := f.name
+		if name == "" {
+			name = "--place"
+		}
+		return fmt.Errorf("%s wants on or off, not %q", name, s)
 	}
 	return nil
 }
@@ -430,6 +443,8 @@ type walkDash interface {
 	Commanders(ctx context.Context) (json.RawMessage, error)
 	Fights(ctx context.Context, commander string) (json.RawMessage, error)
 	Fight(ctx context.Context, key string) (json.RawMessage, error)
+	Decisions(ctx context.Context, commander string, since, until time.Time) ([]tbdash.DecisionCapture, error)
+	DecisionFile(ctx context.Context, id, file string, dst io.Writer, max int64) (int64, error)
 }
 
 // walkEnv is everything the phases reach outside the two clients: the clock, the wait, the agent
@@ -588,12 +603,13 @@ type walk struct {
 	logF    *os.File
 	framesF *os.File
 
-	tracker  *raidwalk.Tracker
-	inj      walkInjector
-	newNotes []string // the RUN notes read since the last injector Tick (it drains them)
-	layout   raidwalk.LayoutSummary
-	notes    []string
-	fights   []raidwalk.FightSummary
+	tracker   *raidwalk.Tracker
+	inj       walkInjector
+	newNotes  []string // the RUN notes read since the last injector Tick (it drains them)
+	layout    raidwalk.LayoutSummary
+	notes     []string
+	fights    []raidwalk.FightSummary
+	decisions *raidwalk.DecisionsSummary
 
 	seenFights map[string]bool
 	// pendingFights are fights listed but whose detail is not loaded yet: fight id to its index in fights.
@@ -1458,9 +1474,14 @@ func (w *walk) printPlan(out io.Writer) {
 	fmt.Fprintf(out, "  9 commander: run start %s\n", strings.Join(start, " "))
 	fmt.Fprintf(out, " 10 watch: events 5s, bot_view 2s, dashboard %s, ceiling %dm, paused wait %s, auto-resume %d, wipe-resume %d, wipe rest %s\n",
 		w.dashNoteOrOff(), w.opts.maxRunMinutes, w.opts.pausedWait, w.opts.autoResume, w.opts.wipeResume, w.opts.wipeRest)
+	decWord := "off"
+	if w.opts.decisions {
+		decWord = "on"
+	}
 	fmt.Fprintf(out, " 11 hold: %dm\n", w.opts.holdMinutes)
 	fmt.Fprintf(out, " 12 commander: status; teardown --json %s/slot\n", outDir)
 	fmt.Fprintf(out, " 13 summary: %s/summary.json, %s/summary.txt\n", outDir, outDir)
+	fmt.Fprintf(out, " 14 decisions: %s/decisions (dashboard: %s)\n", outDir, decWord)
 	if w.inj != nil {
 		w.inj.PrintPlan(out)
 	}
@@ -1531,11 +1552,18 @@ func (w *walk) finish(code int) {
 	if w.placeShortened {
 		untilEffective = w.untilLabel
 	}
+	if w.decisions == nil {
+		if w.dash == nil {
+			w.decisions = &raidwalk.DecisionsSummary{Note: "off (no dashboard)", Captures: []raidwalk.DecisionsCaptureSummary{}}
+		} else if !w.opts.decisions {
+			w.decisions = &raidwalk.DecisionsSummary{Note: "off", Captures: []raidwalk.DecisionsCaptureSummary{}}
+		}
+	}
 	meta := raidwalk.SummaryMeta{
 		Plan: w.plan.Name, Map: w.plan.Map, Server: w.opts.server, Slot: w.slotNumber(), Character: w.manifest.Character,
 		Until: w.opts.until, UntilEffective: untilEffective, From: w.opts.from, Speed: w.opts.speed, TestSpeed: w.opts.speed != 1.0,
 		RowsSHA256: rowsSHA256(w.rows), UntilStep: w.untilStep, RunLabel: w.runLabel, SpeedFellBack: w.speedFellBack,
-		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights,
+		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights, Decisions: w.decisions,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
 		Place:         w.placeSum,
 		BossKill:      w.bossKillSummary(),

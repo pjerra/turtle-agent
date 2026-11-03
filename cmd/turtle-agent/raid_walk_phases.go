@@ -97,6 +97,9 @@ func (w *walk) phases(ctx context.Context) int {
 	_ = w.phaseHold(ctx)
 	w.ended = w.env.now()
 	w.phaseTeardown()
+	if w.dash != nil {
+		w.pullDecisions(ctx)
+	}
 	code := exitOK
 	if len(w.hiresLeft) > 0 {
 		code = exitRaidWalkIncident
@@ -120,6 +123,9 @@ func (w *walk) stop(err error, teardown bool) int {
 		code = exitRaidWalkIncident
 	}
 	w.ended = w.env.now()
+	if w.dash != nil {
+		w.pullDecisions(context.Background())
+	}
 	w.finish(code)
 	return w.exitCode
 }
