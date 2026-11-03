@@ -246,10 +246,7 @@ func planScoutCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	}
 
 	// The fix file (always when asked, also with no fixes).
-	var fixes []planscout.Fix
-	if os.Getenv("SCOUT_NO_FIXES") == "" {
-		fixes = planscout.ProposeFixes(rep, in, planner, world)
-	}
+	fixes := planscout.ProposeFixes(rep, in, planner, world)
 	rowsSHA := scoutRowsSHA(in.Rows)
 	if fixOut != "" {
 		ff := planscout.FixFile{Format: planscout.FixFormat, Version: planscout.FixVersion, Plan: rep.Plan, Map: rep.Map,

@@ -3,11 +3,9 @@ package planscout
 import (
 	"fmt"
 	"math"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/pjerra/turtle-agent/internal/aggroest"
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -17,9 +15,6 @@ import (
 	"github.com/pjerra/turtle-agent/internal/routeedit"
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
-
-// Debug timings, printed with SCOUT_PROFILE.
-var dryPointSec, dryRouteSec float64
 
 // The fix kinds.
 const (
@@ -80,73 +75,12 @@ type waterPolygonNav interface {
 	Scratch() *navmesh.Planner
 }
 
-// detourPlanner is one scratch planner with every NavWater polygon of the rows' box marked: the dry routes share it, so the
-// tiles load once.
-type detourPlanner struct {
-	scratch *navmesh.Planner
-	mapID   uint32
-	boxes   int
-}
-
-// newDetour builds the shared dry-route planner; nil when the navmesh cannot list its polygons.
-func newDetour(nav Nav, rows planexport.Rows) *detourPlanner {
-	pn, ok := nav.(waterPolygonNav)
-	if !ok || len(rows.Steps) == 0 {
-		return nil
-	}
-	x0, y0, x1, y1 := rows.Steps[0].X, rows.Steps[0].Y, rows.Steps[0].X, rows.Steps[0].Y
-	for _, s := range rows.Steps {
-		if s.X == 0 && s.Y == 0 {
-			continue
-		}
-		x0, x1 = min32(x0, s.X), max32(x1, s.X)
-		y0, y1 = min32(y0, s.Y), max32(y1, s.Y)
-	}
-	polys, _, err := pn.Polygons(rows.Plan.Map, x0-20, y0-20, x1+20, y1+20)
-	if err != nil {
-		return nil
-	}
-	var boxes []navmesh.Box
-	for _, poly := range polys {
-		if poly.Flags&navmesh.NavWater == 0 || len(poly.Verts) == 0 {
-			continue
-		}
-		b := navmesh.Box{Min: poly.Verts[0], Max: poly.Verts[0]}
-		for _, v := range poly.Verts[1:] {
-			for i := range 3 {
-				b.Min[i] = min32(b.Min[i], v[i])
-				b.Max[i] = max32(b.Max[i], v[i])
-			}
-		}
-		boxes = append(boxes, b)
-	}
-	if len(boxes) == 0 {
-		return nil
-	}
-	sc := pn.Scratch()
-	sc.SetAvoid(rows.Plan.Map, boxes)
-	return &detourPlanner{scratch: sc, mapID: rows.Plan.Map, boxes: len(boxes)}
-}
-
-func (d *detourPlanner) Close() { d.scratch.Close() }
-
 // ProposeFixes turns the report's non-ok checks into corrections of the plan. A row without an origin gets apply:false and
 // coordinates only.
 func ProposeFixes(rep *Report, in Input, nav Nav, w *worldspawn.World) []Fix {
 	var out []Fix
-	var detT, snapT, viaT, standT, splitT float64
-	defer func() {
-		if os.Getenv("SCOUT_PROFILE") != "" {
-			fmt.Fprintf(os.Stderr, "detour %.1fs snap %.1fs via %.1fs stand %.1fs split %.1fs dryPoint %.1fs dryRoute %.1fs\n", detT, snapT, viaT, standT, splitT, dryPointSec, dryRouteSec)
-		}
-	}()
-	t0 := time.Now()
-	det := newDetour(nav, in.Rows)
-	detT = time.Since(t0).Seconds()
-	if det != nil {
-		defer det.Close()
-	}
-	// A dry route is a full re-plan; the budget keeps the command inside the offline runtime target.
+	// A dry route is a full re-plan around the hop's water polygons; the budget keeps the command inside the offline
+	// runtime target.
 	dryBudget := 3
 	spread := float64(aggroest.StandSpreadPartyYd)
 	if in.Plan != nil && in.Plan.IsRaid() {
@@ -166,29 +100,21 @@ func ProposeFixes(rep *Report, in Input, nav Nav, w *worldspawn.World) []Fix {
 			origin := st.Origin
 			switch c.Name {
 			case planlint.LintOffFloor, planlint.LintReach:
-				t := time.Now()
 				if f, ok := snapFix(rep, in, nav, st, c, origin); ok {
 					out = append(out, f)
 				}
-				snapT += time.Since(t).Seconds()
 			case planlint.LintHop, planlint.LintArrival, planlint.LintClimb:
-				t := time.Now()
 				if f, ok := viaFix(rep, in, nav, st, c, origin); ok {
 					out = append(out, f)
 				}
-				viaT += time.Since(t).Seconds()
 			case planlint.LintWater:
-				out = append(out, dryFixes(rep, in, nav, det, &dryBudget, st, c, origin, idx)...)
+				out = append(out, dryFixes(rep, in, nav, &dryBudget, st, c, origin, idx)...)
 			case planlint.LintAggro:
-				t := time.Now()
 				if f, ok := standFix(in, nav, w, st, c, origin, idx, rows, level, spread); ok {
 					out = append(out, f)
 				}
-				standT += time.Since(t).Seconds()
 			case planlint.LintJoiners:
-				t := time.Now()
 				out = append(out, splitFixes(in, nav, w, st, c, origin, idx, rows, level, spread)...)
-				splitT += time.Since(t).Seconds()
 			}
 		}
 	}
@@ -350,27 +276,23 @@ func cutVias(mapID uint32, nav Nav, pts []dungeon.Point, climb bool) []dungeon.P
 }
 
 // dryFixes proposes a dry stand for a wet gather point, and a dry route for a wet hop where the navmesh can list its water.
-func dryFixes(rep *Report, in Input, nav Nav, det *detourPlanner, budget *int, st StepResult, c Check, origin *planexport.RowOrigin, idx int) []Fix {
+func dryFixes(rep *Report, in Input, nav Nav, budget *int, st StepResult, c Check, origin *planexport.RowOrigin, idx int) []Fix {
 	var out []Fix
 	if strings.HasPrefix(c.Reason, "river below") {
 		return nil // a chase or a fall may land there; the route itself is dry
 	}
 	p := dungeon.Point{X: st.X, Y: st.Y, Z: st.Z}
 	if st.Kind == planexport.KindMove || st.Kind == planexport.KindHold {
-		t := time.Now()
 		if f, ok := dryPoint(rep.Map, in, nav, idx, p, origin, c); ok {
 			out = append(out, f)
 		}
-		dryPointSec += time.Since(t).Seconds()
 	}
-	if det != nil && *budget > 0 {
+	if *budget > 0 {
 		*budget--
-		t := time.Now()
-		if f, ok := dryRoute(rep.Map, in, nav, det, st, c, origin, idx); ok {
+		if f, ok := dryRoute(rep.Map, in, nav, st, c, origin, idx); ok {
 			out = append(out, f)
 		}
-		dryRouteSec += time.Since(t).Seconds()
-	} else if det != nil {
+	} else {
 		out = append(out, Fix{Step: st.Step, Check: c.Name, Kind: FixDryDetour, Apply: false, Ref: origin,
 			Reason: c.Reason + "; no dry route proposed (the 3-route budget is spent; rerun after applying the other fixes)"})
 	}
@@ -413,8 +335,9 @@ func dryPoint(mapID uint32, in Input, nav Nav, idx int, p dungeon.Point, origin 
 func stepOf(idx int) int { return idx + 1 }
 
 // dryRoute re-plans a wet hop around every NavWater polygon of its box (the planner's avoid boxes), cut into vias.
-func dryRoute(mapID uint32, in Input, nav Nav, det *detourPlanner, st StepResult, c Check, origin *planexport.RowOrigin, idx int) (Fix, bool) {
-	if det == nil {
+func dryRoute(mapID uint32, in Input, nav Nav, st StepResult, c Check, origin *planexport.RowOrigin, idx int) (Fix, bool) {
+	pn, ok := nav.(waterPolygonNav)
+	if !ok {
 		return Fix{}, false
 	}
 	prev, ok := prevPoint(in, idx)
@@ -422,21 +345,47 @@ func dryRoute(mapID uint32, in Input, nav Nav, det *detourPlanner, st StepResult
 		return Fix{}, false
 	}
 	to := dungeon.Point{X: st.X, Y: st.Y, Z: st.Z}
-	path, err := det.scratch.Plan(mapID, navmesh.Vec3{prev.X, prev.Y, prev.Z}, navmesh.Vec3{to.X, to.Y, to.Z})
+	x0, x1 := min32(prev.X, to.X)-20, max32(prev.X, to.X)+20
+	y0, y1 := min32(prev.Y, to.Y)-20, max32(prev.Y, to.Y)+20
+	polys, _, err := pn.Polygons(mapID, x0, y0, x1, y1)
+	if err != nil {
+		return Fix{}, false
+	}
+	var boxes []navmesh.Box
+	for _, poly := range polys {
+		if poly.Flags&navmesh.NavWater == 0 || len(poly.Verts) == 0 {
+			continue
+		}
+		b := navmesh.Box{Min: poly.Verts[0], Max: poly.Verts[0]}
+		for _, v := range poly.Verts[1:] {
+			for i := range 3 {
+				b.Min[i] = min32(b.Min[i], v[i])
+				b.Max[i] = max32(b.Max[i], v[i])
+			}
+		}
+		boxes = append(boxes, b)
+	}
+	if len(boxes) == 0 {
+		return Fix{}, false
+	}
+	sc := pn.Scratch()
+	defer sc.Close()
+	sc.SetAvoid(mapID, boxes)
+	path, err := sc.Plan(mapID, navmesh.Vec3{prev.X, prev.Y, prev.Z}, navmesh.Vec3{to.X, to.Y, to.Z})
 	if err != nil || path.Status != navmesh.Complete {
 		return Fix{Step: st.Step, Check: c.Name, Kind: FixDryDetour, Apply: false, Ref: origin,
-			Reason: c.Reason + "; the dry route (" + itoa(det.boxes) + " water polygons) does not complete"}, true
+			Reason: c.Reason + "; the dry route (" + itoa(len(boxes)) + " water polygons) does not complete"}, true
 	}
 	pts := make([]dungeon.Point, len(path.Points))
 	for i, q := range path.Points {
 		pts[i] = dungeon.Point{X: q[0], Y: q[1], Z: q[2]}
 	}
-	vias := cutVias(mapID, det.scratch, pts, false)
+	vias := cutVias(mapID, sc, pts, false)
 	if len(vias) == 0 {
 		return Fix{}, false
 	}
 	return Fix{Step: st.Step, Check: c.Name, Kind: FixDryDetour, Apply: true, Ref: origin, Vias: vias,
-		Reason: c.Reason + "; a dry route that keeps out of " + itoa(det.boxes) + " NavWater polygons"}, true
+		Reason: c.Reason + "; a dry route that keeps out of " + itoa(len(boxes)) + " NavWater polygons"}, true
 }
 
 // standFix proposes a stand for a pull whose gather point is too near other packs.
