@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
+	"github.com/pjerra/turtle-agent/internal/objects"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // farRevive scripts the walk 29 shape on the fake: every `.revive` puts the hire reviveFar yd east of the commander
@@ -169,5 +172,142 @@ func TestRaidWalkReviveAtRaidFlag(t *testing.T) {
 	o, code = parseRaidWalkArgs([]string{"onyxias_lair", "--revive-at-raid=false"}, io.Discard)
 	if code != exitOK || o.reviveAtRaid {
 		t.Fatalf("--revive-at-raid=false: exit %d reviveAtRaid %v, want off", code, o.reviveAtRaid)
+	}
+}
+
+// Codex HIGH on 43d1496: a living lead on another map is not "where the raid is". It is brought back like any hire
+// and, when that fails, named after the gather timeout instead of dropping off the straggler list.
+func TestRaidWalkReviveAtRaidLeadOnAnotherMapStaysAStraggler(t *testing.T) {
+	f, party := selfRegroupWipeWith(t, func(p []string) []string { return p }, func(f *fixture) {
+		f.opts.reviveAtRaid = true
+		f.agent.combatAllFn = nil
+		reviveFarSetup(f, nil)
+		// the layout's main tank is revived on another map (it passed the enter check on the plan's)
+		prev := f.agent.onGM
+		f.agent.onGM = func(line string) {
+			prev(line)
+			if line == ".revive Bot01" {
+				f.agent.mu.Lock()
+				f.agent.offMapBots = map[string]bool{"Bot01": true}
+				f.agent.mu.Unlock()
+			}
+		}
+	})
+	gm := f.agent.gmLines()
+	n := 0
+	for _, l := range gm {
+		if l == ".summon Bot01" {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Fatalf("%d summons of the off-map lead, want 2 (the summon and one retry): %q", n, gm)
+	}
+	sum := f.summary()
+	if !hasNote(sum, "Bot01 (on another map)") || !hasNote(sum, "not gathered") {
+		t.Fatalf("notes %q, want the off-map lead named as not gathered", sum.Notes)
+	}
+	if hasNote(sum, "Bot02 (") {
+		t.Fatalf("notes %q name a gathered hire", sum.Notes)
+	}
+	if sum.ReviveGatherMissed != 1 || sum.ReviveUnreached != 1 || sum.ReviveBrought != len(party) {
+		t.Fatalf("counts brought %d unreached %d gather_missed %d, want %d 1 1", sum.ReviveBrought, sum.ReviveUnreached, sum.ReviveGatherMissed, len(party))
+	}
+}
+
+// A near-wipe stop (someone alive): the hires it revives at their corpses 400 yd from the living ones are brought
+// to them (`.appear` at a living hire, then `.summon`), and the resume goes on.
+func TestRaidWalkReviveAtRaidNearWipeBringsRevivedHiresBack(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		name := "flag off"
+		if on {
+			name = "flag on"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.opts.reviveAtRaid = on
+			f.agent.startReply = startAt("onyxias_lair", 10)
+			f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+			var resumeAt time.Time
+			resumeHook(f, 11, 28, &resumeAt)
+			f.agent.mu.Lock()
+			f.agent.startQueue = []queuedEvent{
+				{raw: "TBM:RUN|onyxias_lair|paused|10/29|onyxia|move|walk|19 dead: 3 near wipes within 10 min (54): the run stops here. Regroup (c...)"},
+			}
+			f.agent.mu.Unlock()
+			// the raid (the lead alone, alive) stands at A; every other hire lies dead 400 yd east of it
+			a := [3]float32{100, 100, 50}
+			f.agent.onGM = func(line string) {
+				if !strings.HasPrefix(line, ".bot hire raid ") {
+					return
+				}
+				f.agent.mu.Lock()
+				defer f.agent.mu.Unlock()
+				if len(f.agent.party) < 39 {
+					return
+				}
+				if f.agent.pos == nil {
+					f.agent.pos = map[string][3]float32{}
+				}
+				for i, n := range f.agent.party {
+					if i == 0 {
+						f.agent.pos[n] = a
+						continue
+					}
+					f.agent.dead[n] = true
+					f.agent.pos[n] = [3]float32{a[0] + reviveFar, a[1], a[2]}
+				}
+			}
+			if code := f.run(context.Background()); code != exitOK {
+				t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+			}
+			f.agent.mu.Lock()
+			party := append([]string{}, f.agent.party...)
+			far := 0
+			for _, n := range party[1:] {
+				if dist3(f.agent.pos[n], a) > reviveFarYd {
+					far++
+				}
+			}
+			f.agent.mu.Unlock()
+			gm := f.agent.gmLines()
+			sum := f.summary()
+			if !on {
+				if got := countPrefix(gm, ".summon "); got != 0 || far != len(party)-1 || sum.ReviveBrought != 0 {
+					t.Fatalf("flag off: %d summons, %d hires still far, brought %d; want the old revive in place", got, far, sum.ReviveBrought)
+				}
+				return
+			}
+			if got := countPrefix(gm, ".summon "); got != len(party)-1 {
+				t.Fatalf("%d summons, want %d (each revived hire): %q", got, len(party)-1, gm)
+			}
+			if far != 0 {
+				t.Fatalf("%d revived hires still far from the raid", far)
+			}
+			lastRevive, appearAt, firstSummon := -1, -1, -1
+			for i, l := range gm {
+				switch {
+				case strings.HasPrefix(l, ".revive "):
+					lastRevive = i
+				case l == ".appear "+party[0]:
+					appearAt = i
+				case strings.HasPrefix(l, ".summon ") && firstSummon < 0:
+					firstSummon = i
+				}
+			}
+			if !(lastRevive < appearAt && appearAt < firstSummon) {
+				t.Fatalf("order revive %d, appear %d, first summon %d: want revives, then the appear at the living lead, then the summons: %q", lastRevive, appearAt, firstSummon, gm)
+			}
+			if sum.ReviveBrought != len(party)-1 || sum.ReviveUnreached != 0 || sum.ReviveGatherMissed != 0 {
+				t.Fatalf("counts brought %d unreached %d gather_missed %d, want %d 0 0 (%q)", sum.ReviveBrought, sum.ReviveUnreached, sum.ReviveGatherMissed, len(party)-1, sum.Notes)
+			}
+			raw, _ := os.ReadFile(filepath.Join(f.out, "run.log"))
+			if !strings.Contains(string(raw), "revive: "+party[1]+" brought back from 400 yd") {
+				t.Fatalf("run.log has no brought-back line for %s", party[1])
+			}
+			if resumeAt.IsZero() || sum.WipeResumes != 1 || sum.EndReason != "until" {
+				t.Fatalf("resume at %v, wipe_resumes %d, end %q: want the run resumed to until", resumeAt, sum.WipeResumes, sum.EndReason)
+			}
+		})
 	}
 }

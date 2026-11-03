@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/raidwalk"
 )
 
 // --revive-at-raid (walk 29, run-to-raid deaths). After a wipe TB releases every bot, the ghosts start their corpse
@@ -74,6 +75,13 @@ func reviveYdWords(d float64) string {
 	return fmt.Sprintf("%d yd", int(math.Round(d)))
 }
 
+func reviveAwayWords(d float64) string {
+	if d >= reviveOffMap {
+		return "on another map"
+	}
+	return reviveYdWords(d) + " away"
+}
+
 // reviveBringBack is the revive-at-raid half of a self-regroup revive: the hires are alive again (the `.revive` loop
 // and its wait are done), and the commander stands on p. Every living hire whose freshest frame is more than
 // reviveFarYd from p is summoned to it, with a log line naming the distance it came from; a hire that is not within
@@ -84,27 +92,31 @@ func (w *walk) reviveBringBack(ctx context.Context, p dungeon.Point, deadline ti
 	w.reviveRead(ctx)
 	now := w.env.now()
 	var far []string
-	from := map[string]float64{}
 	for _, name := range w.hireList() {
 		b, ok := w.botAt[name]
 		if !ok || b.dead {
 			continue
 		}
-		d := w.reviveDist(name, p, now)
-		if d == reviveNoDist || d <= reviveFarYd {
-			continue
+		if d := w.reviveDist(name, p, now); d != reviveNoDist && d > reviveFarYd {
+			far = append(far, name)
 		}
-		far = append(far, name)
-		from[name] = d
 	}
 	if len(far) == 0 {
 		return nil
 	}
+	return w.reviveSummonAll(ctx, far, p, deadline)
+}
+
+// reviveSummonAll summons the far hires to p (the commander stands there): the `revive: <bot> brought back from <dist>
+// yd` line per hire, one retry for a hire not within reviveArriveYd after reviveArriveWait, a note naming the ones that
+// still do not come.
+func (w *walk) reviveSummonAll(ctx context.Context, far []string, p dungeon.Point, deadline time.Time) error {
 	if w.reviveBrought == nil {
 		w.reviveBrought = map[string]bool{}
 	}
+	now := w.env.now()
 	for _, name := range far {
-		w.logLine(w.env.now(), fmt.Sprintf("revive: %s brought back from %s", name, reviveYdWords(from[name])))
+		w.logLine(now, fmt.Sprintf("revive: %s brought back from %s", name, reviveYdWords(w.reviveDist(name, p, now))))
 		w.reviveBrought[name] = true
 	}
 	pending := far
@@ -183,14 +195,16 @@ func (w *walk) reviveStragglers(p dungeon.Point, now time.Time) []string {
 		if !near && lead != nil && name != w.mt && b.mapID == w.plan.Map {
 			near = math.Hypot(float64(b.x-lead.x), float64(b.y-lead.y)) <= reviveFarYd
 		}
-		if !near && name == w.mt {
-			near = true // the lead is where the raid is, by definition
+		// The lead is where the raid is only while it is fresh, alive and on the plan's map (the switch above sent the
+		// first two away); a lead on another map is a straggler like any hire and is named after the timeout.
+		if !near && name == w.mt && b.mapID == w.plan.Map {
+			near = true
 		}
 		switch {
 		case !near && b.inCombat:
-			out = append(out, fmt.Sprintf("%s (%s away, in combat)", name, reviveYdWords(d)))
+			out = append(out, fmt.Sprintf("%s (%s, in combat)", name, reviveAwayWords(d)))
 		case !near:
-			out = append(out, fmt.Sprintf("%s (%s away)", name, reviveYdWords(d)))
+			out = append(out, fmt.Sprintf("%s (%s)", name, reviveAwayWords(d)))
 		case b.inCombat:
 			out = append(out, name+" (in combat)")
 		}
@@ -234,4 +248,66 @@ func (w *walk) reviveGather(ctx context.Context, deadline time.Time) error {
 	sort.Strings(missing)
 	w.note("revive-at-raid: resuming with %d hire(s) not gathered after %s: %s", len(missing), durWords(reviveGatherWait), strings.Join(missing, ", "))
 	return nil
+}
+
+// reviveRaidAnchor is the hire the near-wipe revive treats as the raid's place: a living hire the walk did not just
+// revive, fresh, on the plan's map; the lead first, else the first in roster order.
+func (w *walk) reviveRaidAnchor(revived map[string]bool, now time.Time) (string, botPos) {
+	for _, name := range w.hireList() {
+		b, ok := w.botAt[name]
+		if !ok || revived[name] || b.dead || b.mapID != w.plan.Map || now.Sub(b.at) > reviveFrameFresh {
+			continue
+		}
+		return name, b
+	}
+	return "", botPos{}
+}
+
+// reviveBringBackNear is --revive-at-raid for a near-wipe stop: someone is alive, so the raid is where the living
+// hires stand, and the GM is nowhere near it. The hires this recovery revived (dead lists them) are revived where
+// their corpses lie, which may be far from the raid; each one more than reviveFarYd from the anchor (or on another
+// map) is brought to it. The commander first `.appear`s at the anchor, so the `.summon`s land at the raid and not at
+// the GM's last spot (walk 22 F4, walk 29 S5). It records the anchor's position as the point the resume gate measures.
+func (w *walk) reviveBringBackNear(ctx context.Context, dead []string, deadline time.Time) error {
+	if !w.opts.reviveAtRaid || len(dead) == 0 {
+		return nil
+	}
+	if err := w.recoverySleep(ctx, 5*time.Second, deadline); err != nil {
+		return err
+	}
+	w.reviveRead(ctx)
+	revived := map[string]bool{}
+	for _, n := range dead {
+		revived[n] = true
+	}
+	name, anchor := w.reviveRaidAnchor(revived, w.env.now())
+	if name == "" {
+		w.note("revive-at-raid: no living hire on map %d to bring the revived hires to", w.plan.Map)
+		return nil
+	}
+	spot := dungeon.Point{X: anchor.x, Y: anchor.y, Z: anchor.z}
+	w.reviveSpot = &spot
+	// A hire that is far from the anchor, by its fresh frame.
+	var far []string
+	for _, n := range dead {
+		if b, ok := w.botAt[n]; !ok || b.dead {
+			continue
+		}
+		if d := w.reviveDist(n, spot, w.env.now()); d != reviveNoDist && d > reviveFarYd {
+			far = append(far, n)
+		}
+	}
+	if len(far) == 0 {
+		return nil
+	}
+	if err := w.gm(ctx, raidwalk.GMVisibleOff); err != nil {
+		return err
+	}
+	if ok, why, err := w.appearAtHire(ctx, name, deadline); err != nil {
+		return err
+	} else if !ok {
+		w.note("revive-at-raid: could not appear at %s to bring %d revived hire(s) back (%s)", name, len(far), why)
+		return nil
+	}
+	return w.reviveSummonAll(ctx, far, spot, deadline)
 }

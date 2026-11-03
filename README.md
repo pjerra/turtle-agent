@@ -2342,7 +2342,9 @@ the 3 s portal summon of TB cancels on combat, this does not). The `run.log` lin
 <dist> yd`; a hire not within 10 yd after 15 s gets one more summon, and one that still does not come is named in a note.
 Before the recovery returns (the self-regroup one, and the resume of the other wipe path) it waits up to 60 s for every
 hire to be in range (100 yd of the revive point or of the living lead bot) and out of combat, then goes on with a note
-naming the ones still missing. The summary counts `revive_brought`, `revive_unreached` and `revive_gather_missed`. Every revive's `.go xyz` must have landed (a settled status, no `z_unknown`, not falling, x/y within 10 yd
+naming the ones still missing. A near-wipe stop does the same for the hires it revives at their corpses: the commander `.appear`s at a living hire (the lead
+first) and `.summon`s every revived hire more than 100 yd from it, and the resume waits for the raid to gather. A lead that is
+not fresh, alive and on the plan's map is not the raid's place: it is brought back and named like any other straggler. The summary counts `revive_brought`, `revive_unreached` and `revive_gather_missed`. Every revive's `.go xyz` must have landed (a settled status, no `z_unknown`, not falling, x/y within 10 yd
 and z within 30 yd of the point) before any summon leaves, and a landing that never comes ends the walk with exit 19
 (`not revived: the commander did not land at the revive point`). Every wipe that does not recover
 says why in the notes (`wipe resume skipped: ...`, `second wipe at step N during the wipe-resume of step M`). It never

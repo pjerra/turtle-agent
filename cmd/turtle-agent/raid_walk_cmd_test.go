@@ -220,6 +220,7 @@ type walkFakeAgent struct {
 	viewFn      func(n int) (fail bool, omit string)
 	combatAllFn func(n int) bool // frame n shows every hire in combat
 	combatBots  map[string]bool  // these hires show in combat in every frame (--revive-at-raid: one fights away)
+	offMapBots  map[string]bool  // these hires show on map 0 in every frame (--revive-at-raid: the lead on another map)
 	// viewHook runs inside the bot_view RPC (outside f.mu): a test's fake wall
 	// time passing during the call, like the live server's RPC waits.
 	viewHook func()
@@ -911,6 +912,10 @@ func (f *walkFakeAgent) viewPage() any {
 	for k, v := range f.combatBots {
 		combatBots[k] = v
 	}
+	offMapBots := map[string]bool{}
+	for k, v := range f.offMapBots {
+		offMapBots[k] = v
+	}
 	if f.entered {
 		m = 249
 		if f.instMap != 0 {
@@ -963,6 +968,9 @@ func (f *walkFakeAgent) viewPage() any {
 		p := pos[name]
 		hm := m
 		if (ghostsOff && dead[name]) || (ghostsOffN > 0 && dead[name] && i < ghostsOffN) {
+			hm = 0
+		}
+		if offMapBots[name] {
 			hm = 0
 		}
 		rec := tbm.PartyRec{GUID: packet.GUID(1000 + i), Name: name, HP: 1, MaxHP: 1, Map: hm, Dead: dead[name], State: state,
