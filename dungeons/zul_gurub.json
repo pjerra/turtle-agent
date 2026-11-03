@@ -1828,36 +1828,6 @@
           ]
         },
         {
-          "entries": [11374],
-          "positions": [
-            {"x": -11857, "y": -1514.72, "z": -13.01}
-          ],
-          "radius": 1,
-          "approach": [
-            {"x": -11864.707, "y": -1533.1752, "z": -12.937401}
-          ]
-        },
-        {
-          "entries": [11374],
-          "positions": [
-            {"x": -11852.5, "y": -1488.9, "z": -13.88}
-          ],
-          "radius": 1,
-          "approach": [
-            {"x": -11857.814, "y": -1508.1765, "z": -12.741521}
-          ]
-        },
-        {
-          "entries": [11374],
-          "positions": [
-            {"x": -11895.7, "y": -1473.57, "z": 2.65}
-          ],
-          "radius": 1,
-          "approach": [
-            {"x": -11878.379, "y": -1481.6176, "z": -2.1285448}
-          ]
-        },
-        {
           "entries": [15043, 15043, 15043, 15043, 15043],
           "positions": [
             {"x": -11892.8, "y": -1498.98, "z": 13.78},
@@ -1869,26 +1839,6 @@
           "radius": 12.5,
           "approach": [
             {"x": -11885.48, "y": -1488.1005, "z": 8.001057}
-          ]
-        },
-        {
-          "entries": [11374],
-          "positions": [
-            {"x": -11935.1, "y": -1466.74, "z": -7.94}
-          ],
-          "radius": 1,
-          "approach": [
-            {"x": -11915.847, "y": -1469.9962, "z": -2.2670527}
-          ]
-        },
-        {
-          "entries": [11374],
-          "positions": [
-            {"x": -11872.8, "y": -1548.99, "z": -10.22}
-          ],
-          "radius": 1,
-          "approach": [
-            {"x": -11865.678, "y": -1531.0706, "z": -11.9310055}
           ]
         },
         {
@@ -1975,26 +1925,6 @@
           ]
         },
         {
-          "entries": [11374],
-          "positions": [
-            {"x": -11669.3, "y": -1658.74, "z": -10.35}
-          ],
-          "radius": 1,
-          "approach": [
-            {"x": -11679.032, "y": -1676.1294, "z": -9.308138}
-          ]
-        },
-        {
-          "entries": [11374],
-          "positions": [
-            {"x": -11682.4, "y": -1604.12, "z": -14.39}
-          ],
-          "radius": 1,
-          "approach": [
-            {"x": -11676.779, "y": -1622.6964, "z": -11.421733}
-          ]
-        },
-        {
           "entries": [11357, 11359, 11357],
           "positions": [
             {"x": -11719.9, "y": -1577.18, "z": 21.18},
@@ -2068,36 +1998,6 @@
           ]
         },
         {
-          "entries": [11374],
-          "positions": [
-            {"x": -11714, "y": -1759.32, "z": -3.52}
-          ],
-          "radius": 1,
-          "approach": [
-            {"x": -11702.119, "y": -1744.5781, "z": 7.125192}
-          ]
-        },
-        {
-          "entries": [11374],
-          "positions": [
-            {"x": -11744.82, "y": -1784.89, "z": -12.16}
-          ],
-          "radius": 1,
-          "approach": [
-            {"x": -11727.525, "y": -1777.8397, "z": -15.400403}
-          ]
-        },
-        {
-          "entries": [11374],
-          "positions": [
-            {"x": -11723.2, "y": -1806.56, "z": -14}
-          ],
-          "radius": 1,
-          "approach": [
-            {"x": -11726.175, "y": -1786.8058, "z": -17.415}
-          ]
-        },
-        {
           "entries": [15043, 15043, 15043, 15043],
           "positions": [
             {"x": -11823.6, "y": -1764.53, "z": 11.71},
@@ -2136,23 +2036,6 @@
           ]
         },
         {
-          "entries": [11374],
-          "positions": [
-            {"x": -11886.2, "y": -1716.99, "z": 0.59}
-          ],
-          "radius": 1
-        },
-        {
-          "entries": [11374],
-          "positions": [
-            {"x": -11912.53, "y": -1704.53, "z": -1.66}
-          ],
-          "radius": 1,
-          "approach": [
-            {"x": -11893.598, "y": -1709.1404, "z": -3.7801895}
-          ]
-        },
-        {
           "entries": [15043, 15043, 15043, 15043, 15043],
           "positions": [
             {"x": -11901.3, "y": -1733.02, "z": 13.51},
@@ -2164,16 +2047,6 @@
           "radius": 7.8,
           "approach": [
             {"x": -11890.746, "y": -1724.3602, "z": 7.5332685}
-          ]
-        },
-        {
-          "entries": [11374],
-          "positions": [
-            {"x": -11872.9, "y": -1743.31, "z": -2.59}
-          ],
-          "radius": 1,
-          "approach": [
-            {"x": -11885.883, "y": -1730.3782, "z": 5.597763}
           ]
         },
         {
@@ -2207,26 +2080,16 @@
           "approach": [
             {"x": -11871.792, "y": -1653.6985, "z": 14.099599}
           ]
-        },
-        {
-          "entries": [11374],
-          "positions": [
-            {"x": -11900, "y": -1622.39, "z": -10.11}
-          ],
-          "radius": 1,
-          "approach": [
-            {"x": -11894.194, "y": -1603.4705, "z": -13.550188}
-          ]
         }
       ],
-      "skip": [14758, 15091]
+      "skip": [11374, 14758, 15091],
+      "notes": [
+        "WALK 29 FIX 6 (2026-11-03, leg 7; research/zg-w29/WALK29-FIX-PLAN.md \u00a75, lead decision): rows 620-637 walked the raid into the lake to pull single Hooktooth Frenzies (11374), which are fish: 14 of the leg's 38 groups were 11374-only (groups 3, 4, 5, 7, 8, 16, 17, 24, 25, 26, 30, 31, 33 and 37 at z -14.4 to +2.6) and all 30 spawns are in water. Runs e/e-r1..r3 had 0 deaths but stopped for good: the lead sat at -11855..-11858 -1506..-1508 z -13 at step 624 and -11885.5 -1488.1 z 7.8 at step 628, stuck 35.3-36.7 yd from the goal with its own move failing (lead in water: yes; cmd move path type 0x81). 11374 is in the leg's skip now and the 14 fish-only groups and their approach rows are gone; every remaining point of the leg is on land (z 2.2 and above in the lake basin). The leg's own route (vias z 78.7/65.3/51.0, to z 19.7) is unchanged."
+      ]
     },
     {
       "name": "hakkar",
-      "to": {"x": -11647.14, "y": -1562.4966, "z": 41.362377},
-      "via": [
-        {"x": -11626.666, "y": -1621.3334, "z": 39.025406}
-      ],
+      "to": {"x": -11750.4, "y": -1490.4, "z": 39.85},
       "pull_groups": [
         {
           "entries": [11351, 14821, 11830],
@@ -2341,68 +2204,16 @@
           "approach": [
             {"x": -11823.034, "y": -1595.629, "z": 40.16538}
           ]
-        },
-        {
-          "entries": [11350, 11350],
-          "positions": [
-            {"x": -11903.7, "y": -1327.2, "z": 77.74},
-            {"x": -11910.8, "y": -1322.43, "z": 77.61}
-          ],
-          "radius": 4.8,
-          "approach": [
-            {"x": -11900.554, "y": -1345.9943, "z": 74.701744}
-          ]
-        },
-        {
-          "entries": [11372, 11372],
-          "positions": [
-            {"x": -11925.8, "y": -1336.62, "z": 78.62},
-            {"x": -11932.9, "y": -1329.52, "z": 78.93}
-          ],
-          "radius": 5.5,
-          "approach": [
-            {"x": -11915.684, "y": -1339.1222, "z": 78.57296}
-          ]
-        },
-        {
-          "entries": [11350, 11350],
-          "positions": [
-            {"x": -11882, "y": -1323.86, "z": 77.56},
-            {"x": -11882.7, "y": -1316.07, "z": 78.25}
-          ],
-          "radius": 4.4,
-          "approach": [
-            {"x": -11899.093, "y": -1327.5266, "z": 76.97133}
-          ]
-        },
-        {
-          "entries": [11371, 11372],
-          "positions": [
-            {"x": -11866.1, "y": -1312.97, "z": 78.28},
-            {"x": -11862.2, "y": -1317.21, "z": 78.96}
-          ],
-          "radius": 3.4,
-          "approach": [
-            {"x": -11879.936, "y": -1326.2631, "z": 77.99377}
-          ]
-        },
-        {
-          "entries": [11371, 11372],
-          "positions": [
-            {"x": -11927, "y": -1385.89, "z": 82},
-            {"x": -11932.7, "y": -1394.57, "z": 80.34}
-          ],
-          "radius": 5.8,
-          "approach": [
-            {"x": -11922.972, "y": -1377.0956, "z": 81.31412}
-          ]
         }
       ],
-      "skip": [14758, 15091],
+      "skip": [11374, 14758, 15091],
       "boss": {
         "entry": 14834,
         "position": {"x": -11787.4, "y": -1649.34, "z": 54.1}
-      }
+      },
+      "notes": [
+        "WALK 29 FIX 6 (2026-11-03, leg 8; research/zg-w29/WALK29-FIX-PLAN.md \u00a75, lead decision): the leg's `to` was the boss position -11647.14 -1562.50, so a placed Hakkar run started beside Arlokk's tiger group (row 860 at -11601 -1741) and rows 860-866 walked through leg 7's packs; --from \"leg hakkar\" was refused in k because the route passed 47 earlier-leg packs. The `to` is the quiet point -11750.4 -1490.4 39.85 now: 67.4 yd from the nearest non-critter spawn (11374, in water) and 56.5 yd from the nearest patrol loop (49726, a fish), on the leg's own navmesh path (the party walked it). The leg's rows run from there to the temple through groups 0-9 and the boss; the entrance-pack detour (groups 10-14 at -11866..-11933 -1313..-1395 z 78) and the approach chain in rows 1034-1083 are gone, since the boss route does not need them. 11374 joins the leg's skip with leg 7's."
+      ]
     }
   ]
 }
