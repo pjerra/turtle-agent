@@ -6,7 +6,7 @@
 //
 //	leg L pull P: N bodies (ceiling M): guids ...
 //
-// Target: the row's own creature, the run leader's pull target: among the
+// Target: the row's own Creature, the run leader's pull target: among the
 // spawns the row owns (its entry in the row's entries and within its radius
 // of the row's ownership point, routeOwnerOf's rule), kill_first rank first,
 // then the nearest to the party point. A row that owns nothing is a finding
@@ -21,7 +21,7 @@
 //
 // The ceiling is the row's item (the plan's max_bodies), else the plan's
 // pull_ceiling, else the lint default (8 for raids, 6 for parties).
-package main
+package planlint
 
 import (
 	"fmt"
@@ -89,12 +89,12 @@ type PullFilter struct {
 
 // PullSizes estimates every pull row of the plan's export rows and returns
 // the rows over their ceiling, in route order. cs are the plan's spawns
-// (readCreatures); w is the map's world (worldspawn.Load: groups, links,
+// (ReadCreatures); w is the map's world (worldspawn.Load: groups, links,
 // patrols) and may be nil (then every spawn is its own pack). A row gated to
 // a team other than f.Team is not pulled by this run and skipped (it consumes
 // no pull number); a pull row with no target of its own is a finding of its
 // own ("no target"), never an unrelated spawn's estimate.
-func PullSizes(p *dungeon.Plan, cs []creature, w *worldspawn.World, f PullFilter) ([]PullFinding, error) {
+func PullSizes(p *dungeon.Plan, cs []Creature, w *worldspawn.World, f PullFilter) ([]PullFinding, error) {
 	pts, err := routePoints(p)
 	if err != nil {
 		return nil, err
@@ -179,9 +179,9 @@ func packIDs(w *worldspawn.World) map[uint64]uint64 {
 // estimator itself never wakes a spawn with no detection range),
 // NO_AGGRO/NO_ASSIST from flags_extra, patrollers at their current position.
 // groups maps spawn guids to pack ids (packIDs); nil: every spawn its own
-// pack. entries maps each kept mob guid to its creature entry, for the
+// pack. entries maps each kept mob guid to its Creature entry, for the
 // kill_first target rank.
-func pullMobs(p *dungeon.Plan, cs []creature, groups map[uint64]uint64, f PullFilter) ([]aggroest.Mob, map[uint32]uint32) {
+func pullMobs(p *dungeon.Plan, cs []Creature, groups map[uint64]uint64, f PullFilter) ([]aggroest.Mob, map[uint32]uint32) {
 	var out []aggroest.Mob
 	entries := map[uint32]uint32{}
 	_ = p
@@ -212,7 +212,7 @@ func pullMobs(p *dungeon.Plan, cs []creature, groups map[uint64]uint64, f PullFi
 // faction (35, the stoned Stone Keepers, which the default -ignore-factions
 // also drops) are no reason to leave them out of the count. The critter rule
 // still applies.
-func pullHostile(c creature, f PullFilter) bool {
+func pullHostile(c Creature, f PullFilter) bool {
 	if f.Awakened[c.Entry] || f.Scripted[c.Entry] {
 		return c.LevelMax > 1
 	}
@@ -223,14 +223,14 @@ func pullHostile(c creature, f PullFilter) bool {
 // routeOwnerOf's rule (the row's entry and radius at the row's ownership
 // point, formations shared by group_leader). Only pull/boss/hold rows with
 // entries own spawns (routePoints sets ownerIdx for those).
-func pullOwners(pts []routePoint, cs []creature) map[uint64]int {
+func pullOwners(pts []routePoint, cs []Creature) map[uint64]int {
 	var owners []routePoint
 	for _, q := range pts {
 		if q.ownerIdx >= 0 {
 			owners = append(owners, q)
 		}
 	}
-	byLeader := map[uint64][]creature{}
+	byLeader := map[uint64][]Creature{}
 	for _, c := range cs {
 		if c.GroupLeader != 0 {
 			byLeader[c.GroupLeader] = append(byLeader[c.GroupLeader], c)
@@ -245,7 +245,7 @@ func pullOwners(pts []routePoint, cs []creature) map[uint64]int {
 	return out
 }
 
-// pullTarget is the row's own creature for the estimate: among the mobs the
+// pullTarget is the row's own Creature for the estimate: among the mobs the
 // row owns, kill_first rank first (the run leader fires from its stand, and
 // the plan's kill_first bat rider pins the target while the formation walks),
 // then the nearest to the party point. -1 when the row owns nothing: the

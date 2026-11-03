@@ -1,4 +1,4 @@
-package main
+package planlint
 
 import (
 	"fmt"
@@ -15,13 +15,13 @@ const PackAggroMargin = 3
 // defaultPackRadius is the driver's PackRadius (dungeon.DefaultConfig), the radius of a group that gives none.
 const defaultPackRadius = 25
 
-// PackOverlaps lists the mobs of the creature export that stand within a pull group's radius plus PackAggroMargin of one of its
+// PackOverlaps lists the mobs of the Creature export that stand within a pull group's radius plus PackAggroMargin of one of its
 // positions without being listed in that group: a mob of another pull group, a boss, or a spawn the plan forgot, which the pull would
 // drag in unplanned (Wailing Caverns: a Druid standing on Lady Anacondra's spawn, a pack 3 yd from her). A mob is listed when its entry is
 // in the group's entries (or its patrol's) and the group lists at least as many of that entry as stand in range; the leg's skip list
 // (critters, rares, friendly NPCs) and mobs that are not hostile (ignored factions such as 35, npc_flags, level 1 critters) are left out.
 // Distances are 3-D.
-func PackOverlaps(p *dungeon.Plan, cs []creature, ignore map[int]bool) []string {
+func PackOverlaps(p *dungeon.Plan, cs []Creature, ignore map[int]bool) []string {
 	var out []string
 	for i, l := range p.Legs {
 		skip := map[uint32]bool{}
@@ -42,7 +42,7 @@ func PackOverlaps(p *dungeon.Plan, cs []creature, ignore map[int]bool) []string 
 					want[e] += 100 // a patrol's members are listed by the patrol, however many stand on its spawn rows
 				}
 			}
-			stand := map[uint32][]creature{}
+			stand := map[uint32][]Creature{}
 			for _, c := range cs {
 				if skip[c.Entry] || ignore[c.Faction] || c.NPCFlags != 0 || c.LevelMax <= 1 {
 					continue

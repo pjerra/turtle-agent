@@ -29,7 +29,7 @@
 //
 // Each finding names the plan, leg, row, coordinates, the spawn or pack,
 // the distance, and the rule.
-package main
+package planlint
 
 import (
 	"fmt"
@@ -141,7 +141,7 @@ var walkReadyBasins = []lakeBasin{
 // is clamped to 30 yd: map 309's export carries 11356 in 49794's wander
 // column (its entry, not a distance), and the unclamped value drowns every
 // distance in the report.
-func walkReadyReach(p *dungeon.Plan, c creature) float64 {
+func walkReadyReach(p *dungeon.Plan, c Creature) float64 {
 	if c.Wander > 30 {
 		c.Wander = 30
 	}
@@ -152,7 +152,7 @@ func walkReadyReach(p *dungeon.Plan, c creature) float64 {
 // hostile to the run, above the critter level (hostileMob's rule, with the
 // check's awakened and scripted entries always hostile: the encounter's
 // script turns them hostile when the pull starts).
-func walkReadyHostile(c creature, f PullFilter) bool {
+func walkReadyHostile(c Creature, f PullFilter) bool {
 	if c.LevelMax <= 1 || c.NPCFlags != 0 {
 		if !f.Awakened[c.Entry] && !f.Scripted[c.Entry] {
 			return false
@@ -220,13 +220,13 @@ func walkReadyPlanPoints(l dungeon.Leg, li int) []struct {
 
 // WalkReady checks the plan's six walk-before rules and returns every
 // finding, in route order within each rule, rules in the order above. cs
-// are the plan's spawns (readCreatures); w is the map's world
+// are the plan's spawns (ReadCreatures); w is the map's world
 // (worldspawn.Load: groups, links, patrols) and may be nil (patrol loops
 // then come from the plan's patrol blocks alone). mmapsDir is reserved for
 // the liquid-aware water lint; today the water rule uses the lake-basin
 // table only (the argument is still required so a caller passes where its
 // navmesh lives).
-func WalkReady(p *dungeon.Plan, cs []creature, w *worldspawn.World, f PullFilter, mmapsDir string) ([]WalkReadyFinding, error) {
+func WalkReady(p *dungeon.Plan, cs []Creature, w *worldspawn.World, f PullFilter, mmapsDir string) ([]WalkReadyFinding, error) {
 	_ = mmapsDir
 	pts, err := routePoints(p)
 	if err != nil {
@@ -246,7 +246,7 @@ func WalkReady(p *dungeon.Plan, cs []creature, w *worldspawn.World, f PullFilter
 // every over-ceiling row as a finding instead of a warning, unless the row
 // carries accept_over_ceiling (the finding is kept, and the reason rides
 // in the report).
-func walkReadyOverCeiling(p *dungeon.Plan, cs []creature, w *worldspawn.World, f PullFilter, pts []routePoint) []WalkReadyFinding {
+func walkReadyOverCeiling(p *dungeon.Plan, cs []Creature, w *worldspawn.World, f PullFilter, pts []routePoint) []WalkReadyFinding {
 	sized, err := PullSizes(p, cs, w, f)
 	if err != nil {
 		return []WalkReadyFinding{{
@@ -443,8 +443,8 @@ func patrolOwnerRow(pts []routePoint, owned map[uint64]int, guid uint64) (int, b
 
 // walkReadyPatrolCrossings is rule 3: a patrol waypoint within aggro reach
 // + 3 yd of a route segment walked BEFORE the patrol's own pull row.
-func walkReadyPatrolCrossings(p *dungeon.Plan, cs []creature, w *worldspawn.World, f PullFilter, pts []routePoint) []WalkReadyFinding {
-	byGUID := map[uint64]creature{}
+func walkReadyPatrolCrossings(p *dungeon.Plan, cs []Creature, w *worldspawn.World, f PullFilter, pts []routePoint) []WalkReadyFinding {
+	byGUID := map[uint64]Creature{}
 	for _, c := range cs {
 		byGUID[c.GUID] = c
 	}
@@ -563,7 +563,7 @@ func walkReadyPatrolCrossings(p *dungeon.Plan, cs []creature, w *worldspawn.Worl
 // walkReadyLegExposed is rule 4: a leg's start (its `to`) or end (its last
 // walkable plan point) within aggro reach of a live (unpulled-by-then)
 // spawn.
-func walkReadyLegExposed(p *dungeon.Plan, cs []creature, f PullFilter, pts []routePoint) []WalkReadyFinding {
+func walkReadyLegExposed(p *dungeon.Plan, cs []Creature, f PullFilter, pts []routePoint) []WalkReadyFinding {
 	owned := pullOwners(pts, cs)
 	// The route row where each leg starts and ends (first/last point-row
 	// index of the export leg).
@@ -636,7 +636,7 @@ func walkReadyLegExposed(p *dungeon.Plan, cs []creature, f PullFilter, pts []rou
 // walkReadyUnownedNearLeg is rule 5: a hostile spawn within its aggro reach
 // of a leg's route segment that no pull row of THIS leg owns (unowned, or
 // owned only by a later leg): the strict form of RouteIntoLaterPacks.
-func walkReadyUnownedNearLeg(p *dungeon.Plan, cs []creature, f PullFilter, pts []routePoint) []WalkReadyFinding {
+func walkReadyUnownedNearLeg(p *dungeon.Plan, cs []Creature, f PullFilter, pts []routePoint) []WalkReadyFinding {
 	owned := pullOwners(pts, cs)
 	// owner export leg per spawn guid.
 	ownerLeg := map[uint64]int{}
@@ -734,7 +734,7 @@ func walkReadyUnownedNearLeg(p *dungeon.Plan, cs []creature, f PullFilter, pts [
 	}
 	var out []WalkReadyFinding
 	for _, guid := range order {
-		var c *creature
+		var c *Creature
 		for i := range cs {
 			if cs[i].GUID == guid {
 				c = &cs[i]
@@ -770,7 +770,7 @@ func walkReadyUnownedNearLeg(p *dungeon.Plan, cs []creature, f PullFilter, pts [
 // StageSkippedYd 30 over spawns, 40 yd from patrol loops): a candidate is
 // every plan point of the leg (to, via, approach/positions, boss) and the
 // leg start itself; the finding names the nearest danger when none passes.
-func walkReadyNoQuietStart(p *dungeon.Plan, cs []creature, w *worldspawn.World, f PullFilter) []WalkReadyFinding {
+func walkReadyNoQuietStart(p *dungeon.Plan, cs []Creature, w *worldspawn.World, f PullFilter) []WalkReadyFinding {
 	var out []WalkReadyFinding
 	for li, l := range p.Legs {
 		// An explicit place_at is checked, not trusted: it must pass the
@@ -824,7 +824,7 @@ func walkReadyNoQuietStart(p *dungeon.Plan, cs []creature, w *worldspawn.World, 
 // staged leg and later, StageSkippedYd 30 for earlier legs, 40 yd from
 // patrol loops) at one candidate point. "" passes; else the fault and the
 // nearest danger distance.
-func walkReadyQuietFault(p *dungeon.Plan, cs []creature, w *worldspawn.World, f PullFilter, leg int, at dungeon.Point) (string, float64) {
+func walkReadyQuietFault(p *dungeon.Plan, cs []Creature, w *worldspawn.World, f PullFilter, leg int, at dungeon.Point) (string, float64) {
 	// Spawn points of the plan's own pull groups and its boss position are
 	// no danger: the leg pulls them (Mar'li's boss adds at 0.0 yd are the
 	// fight, not a placement refusal). Patrol loops stay danger wherever
@@ -883,7 +883,7 @@ func walkReadyQuietFault(p *dungeon.Plan, cs []creature, w *worldspawn.World, f 
 
 // spawnPlanLeg is the first plan leg whose pull groups or boss own the
 // spawn's entry: -1 when none does. It is the quiet rule's own/earlier cut.
-func spawnPlanLeg(p *dungeon.Plan, cs []creature, c creature) int {
+func spawnPlanLeg(p *dungeon.Plan, cs []Creature, c Creature) int {
 	for li, l := range p.Legs {
 		for _, g := range l.PullGroups {
 			for _, e := range g.Entries {
@@ -977,5 +977,3 @@ func legEndPoint(p *dungeon.Plan, li int, pts []routePoint, exportLeg int) dunge
 	}
 	return l.To
 }
-
-func (c creature) String() string { return c.Name }

@@ -10,7 +10,7 @@
 // (known limit L1), as are patrol loops, which stand where the export put them (known limit L2). So is the
 // firing-stand walk of a plain pull row: its party point is the row's own point, not the firing stand the run leader
 // walks out to (a stand-pull row instead carries its stand, and the check walks from there).
-package main
+package planlint
 
 import (
 	"fmt"
@@ -160,13 +160,13 @@ func rowTeam(flags uint32) string {
 // routeOwnerOf is the row that pulls the spawn: the first pull/boss/hold row (in route order) whose entries hold its
 // entry and whose radius reaches it from the row's point. The formation's spawns share the row: ownership expands by
 // group_leader (see PackOverlaps' pack rule, tools/dungeongen/spec.go). ok is false when no row pulls it.
-func routeOwnerOf(owners []routePoint, byLeader map[uint64][]creature, c creature) (routePoint, bool) {
-	var group []creature
+func routeOwnerOf(owners []routePoint, byLeader map[uint64][]Creature, c Creature) (routePoint, bool) {
+	var group []Creature
 	if c.GroupLeader != 0 {
 		group = byLeader[c.GroupLeader]
 	}
 	if len(group) == 0 {
-		group = []creature{c}
+		group = []Creature{c}
 	}
 	for _, o := range owners {
 		want := false
@@ -198,7 +198,7 @@ func routeOwnerOf(owners []routePoint, byLeader map[uint64][]creature, c creatur
 // the run (neither ignored nor friendly to the leader's team; 35 is friendly
 // to all, as in Check), and above the critter level. RouteIntoLaterPacks and
 // pullMobs share it (pull_size.go:153's filter).
-func hostileMob(c creature, ignore, friendly map[int]bool) bool {
+func hostileMob(c Creature, ignore, friendly map[int]bool) bool {
 	if c.NPCFlags != 0 || c.LevelMax <= 1 {
 		return false
 	}
@@ -226,9 +226,9 @@ func routePartySpread(p *dungeon.Plan) float64 {
 }
 
 // routeReach is a spawn's proximity wake reach: the same rule the trash check uses (worldspawn.AggroRadius, built on
-// detection_range with the party-minus-creature level difference, NO_AGGRO and the spread), plus the spawn's wander.
+// detection_range with the party-minus-Creature level difference, NO_AGGRO and the spread), plus the spawn's wander.
 // A spawn the export carries no range for wakes at the 20 yd default; a NO_AGGRO spawn never wakes.
-func routeReach(p *dungeon.Plan, c creature) float64 {
+func routeReach(p *dungeon.Plan, c Creature) float64 {
 	det := c.DetectionRange
 	if det <= 0 {
 		det = defaultDetectionYd
@@ -246,7 +246,7 @@ func routeReach(p *dungeon.Plan, c creature) float64 {
 // pack's aggro is the defect). Every spawn closer (3D) than its reach (AggroRadius at the plan's party level, plus
 // spread and wander) that is still owned by a later row or by no row is one finding. NO_AGGRO spawns, critters,
 // friendly factions and triggers use the same filter as PackOverlaps (reuse it). One line per (row pair, guid):
-func RouteIntoLaterPacks(p *dungeon.Plan, cs []creature, ignore map[int]bool) ([]string, error) {
+func RouteIntoLaterPacks(p *dungeon.Plan, cs []Creature, ignore map[int]bool) ([]string, error) {
 	pts, err := routePoints(p)
 	if err != nil {
 		// A refused export is not a route finding: the caller reports it as the test's own error.
@@ -281,7 +281,7 @@ func RouteIntoLaterPacks(p *dungeon.Plan, cs []creature, ignore map[int]bool) ([
 			owners = append(owners, q)
 		}
 	}
-	byLeader := map[uint64][]creature{}
+	byLeader := map[uint64][]Creature{}
 	for _, c := range cs {
 		if c.GroupLeader != 0 {
 			byLeader[c.GroupLeader] = append(byLeader[c.GroupLeader], c)

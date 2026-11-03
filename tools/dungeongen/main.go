@@ -29,34 +29,9 @@ import (
 	"strings"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/planlint"
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
-
-type creature struct {
-	GUID        uint64
-	Entry       uint32
-	Name        string
-	Rank        int
-	LevelMax    int
-	Faction     int
-	NPCFlags    uint32
-	Pos         dungeon.Point
-	GroupLeader uint64
-	Patrol      bool
-	Auras       []uint32 // spell ids of the auras the creature spawns with (template and spawn row)
-	// DetectionRange is the creature_template detection_range (the yards at which a spawn of the entry engages, 0 when the
-	// export has none: draft exports predate the column). RouteIntoLaterPacks defaults 0 to 20 yd, then applies the core
-	// aggro rule (party level, spread, wander).
-	DetectionRange float64
-	// Wander is the spawn's wander_distance: how far it walks from its spot, added to the aggro reach (as the trash check does).
-	Wander float32
-	// FlagsExtra is the creature_template flags_extra: RouteIntoLaterPacks skips NO_AGGRO spawns outright (0 when the
-	// export has none: draft exports predate the column).
-	FlagsExtra uint32
-	// patrolPoint marks a copy of a patrolling spawn at one waypoint of its loop (the plan tests expand a lone
-	// patroller's path into the pack): it demands the patrol clearance, not the plain spawn one.
-	patrolPoint bool
-}
 
 type object struct {
 	GUID  uint64
@@ -218,7 +193,7 @@ func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool
 	if err != nil {
 		return fail(err)
 	}
-	cs, err := readCreatures(filepath.Join(dir, "creatures.tsv"))
+	cs, err := planlint.ReadCreatures(filepath.Join(dir, "creatures.tsv"))
 	if err != nil {
 		return fail(err)
 	}
@@ -238,7 +213,7 @@ func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool
 	if err != nil {
 		return fail(err)
 	}
-	ws := Check(p, cs, CheckOptions{Team: team, Friendly: fm, Awakened: am, Scripted: toSet(sc)})
+	ws := planlint.Check(p, cs, planlint.CheckOptions{Team: team, Friendly: fm, Awakened: am, Scripted: toSet(sc)})
 	strictFails := len(ws) // creature-check warnings fail -strict
 	overCeiling := 0       // over-ceiling rows fail only -pull-size-strict
 	// The pull_size lint: the run leader's aggro-count estimate per pull row,
@@ -257,8 +232,8 @@ func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool
 	if err != nil {
 		return fail(err)
 	}
-	pf := PullFilter{Ignore: im, Friendly: fm, Awakened: am, Scripted: toSet(sc), Team: team}
-	sized, serr := PullSizes(p, cs, w, pf)
+	pf := planlint.PullFilter{Ignore: im, Friendly: fm, Awakened: am, Scripted: toSet(sc), Team: team}
+	sized, serr := planlint.PullSizes(p, cs, w, pf)
 	if serr != nil {
 		return fail(fmt.Errorf("pull_size: %w", serr))
 	}
@@ -274,10 +249,10 @@ func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool
 			overCeiling++
 		}
 	}
-	var ready []WalkReadyFinding
+	var ready []planlint.WalkReadyFinding
 	if walkReady {
 		var rerr error
-		ready, rerr = WalkReady(p, cs, w, pf, "")
+		ready, rerr = planlint.WalkReady(p, cs, w, pf, "")
 		if rerr != nil {
 			return fail(fmt.Errorf("walk-ready: %w", rerr))
 		}
@@ -334,7 +309,7 @@ func parsePoint(s string) (dungeon.Point, error) {
 }
 
 func run(dir string, o Options) (*dungeon.Plan, error) {
-	cs, err := readCreatures(filepath.Join(dir, "creatures.tsv"))
+	cs, err := planlint.ReadCreatures(filepath.Join(dir, "creatures.tsv"))
 	if err != nil {
 		return nil, err
 	}
@@ -413,52 +388,6 @@ func (r *reader) pos(m map[string]string) dungeon.Point {
 	return dungeon.Point{X: float32(r.num(m, "x")), Y: float32(r.num(m, "y")), Z: float32(r.num(m, "z"))}
 }
 
-func readCreatures(path string) ([]creature, error) {
-	rs, err := rows(path, "guid", "entry", "name", "rank", "faction", "npc_flags", "x", "y", "z", "group_leader", "patrol")
-	if err != nil {
-		return nil, err
-	}
-	r := &reader{path: path}
-	var out []creature
-	for _, m := range rs {
-		c := creature{GUID: uint64(r.num(m, "guid")), Entry: uint32(r.num(m, "entry")), Name: m["name"], Rank: int(r.num(m, "rank")),
-			Faction: int(r.num(m, "faction")), NPCFlags: uint32(r.num(m, "npc_flags")), Pos: r.pos(m), GroupLeader: uint64(r.num(m, "group_leader")),
-			Patrol: m["patrol"] == "1", Auras: parseAuras(m["auras"])}
-		if l, err := strconv.Atoi(m["level_max"]); err == nil { // optional: only the band of a spec plan needs it
-			c.LevelMax = l
-		}
-		if s, ok := m["detection_range"]; ok && s != "" { // optional: draft exports predate the column
-			if v, err := strconv.ParseFloat(s, 64); err == nil {
-				c.DetectionRange = v
-			}
-		}
-		if s, ok := m["wander"]; ok && s != "" { // optional: draft exports predate the column
-			if v, err := strconv.ParseFloat(s, 32); err == nil {
-				c.Wander = float32(v)
-			}
-		}
-		if s, ok := m["flags_extra"]; ok && s != "" { // optional: draft exports predate the column
-			if v, err := strconv.ParseUint(s, 10, 32); err == nil {
-				c.FlagsExtra = uint32(v)
-			}
-		}
-		out = append(out, c)
-	}
-	return out, r.err
-}
-
-// parseAuras reads the auras column of creatures.tsv: spell ids separated by spaces ("6408 5916"). A file written
-// before the column existed has none, and NULL or empty is no aura.
-func parseAuras(s string) []uint32 {
-	var out []uint32
-	for _, f := range strings.Fields(s) {
-		if n, err := strconv.ParseUint(f, 10, 32); err == nil && n != 0 {
-			out = append(out, uint32(n))
-		}
-	}
-	return out
-}
-
 func readObjects(path string) ([]object, error) {
 	rs, err := rows(path, "guid", "entry", "name", "type", "x", "y", "z")
 	if err != nil {
@@ -495,7 +424,7 @@ func readEntrance(path string) (dungeon.Point, error) {
 
 // pack is spawns that pull together.
 type pack struct {
-	members []creature
+	members []planlint.Creature
 }
 
 func (p pack) center() dungeon.Point {
@@ -514,17 +443,17 @@ func dist(a, b dungeon.Point) float64 {
 }
 
 // Generate builds the skeleton. It is deterministic: ties break on creature guid.
-func Generate(cs []creature, objs []object, o Options) (*dungeon.Plan, error) {
+func Generate(cs []planlint.Creature, objs []object, o Options) (*dungeon.Plan, error) {
 	if len(o.Bosses) == 0 {
 		return nil, errors.New("no bosses given")
 	}
-	bossAt := map[uint32]creature{}
+	bossAt := map[uint32]planlint.Creature{}
 	isBoss := map[uint32]bool{}
 	for _, b := range o.Bosses {
 		isBoss[b] = true
 	}
 	sort.Slice(cs, func(i, j int) bool { return cs[i].GUID < cs[j].GUID })
-	var trash []creature
+	var trash []planlint.Creature
 	skipSet := map[uint32]bool{}
 	for _, c := range cs {
 		switch {
@@ -588,7 +517,7 @@ func Generate(cs []creature, objs []object, o Options) (*dungeon.Plan, error) {
 		leg.Boss = &dungeon.Boss{Entry: b, Position: boss.Pos}
 		var warns []string
 		if !o.Scripted[b] {
-			warns = bossWarnings(boss, o.Friendly)
+			warns = planlint.BossWarnings(boss, o.Friendly)
 		}
 		leg.Notes = append(warns, objectNotes(objs, leg, o.NoteRange)...)
 		plan.Legs = append(plan.Legs, leg)
@@ -598,7 +527,7 @@ func Generate(cs []creature, objs []object, o Options) (*dungeon.Plan, error) {
 }
 
 // cluster groups spawns that are within radius yards of one another (single linkage) or in one creature group.
-func cluster(cs []creature, radius float64) []pack {
+func cluster(cs []planlint.Creature, radius float64) []pack {
 	parent := make([]int, len(cs))
 	for i := range parent {
 		parent[i] = i
@@ -664,7 +593,7 @@ func order(ps []pack, from dungeon.Point) []pack {
 // packGroup lists a pack's members nearest to from first (the one to pull), one entry and one position each, and
 // marks the group ambush when all of them spawn stealthed (the party cannot pull those).
 func packGroup(p pack, from dungeon.Point) dungeon.PullGroup {
-	ms := append([]creature(nil), p.members...)
+	ms := append([]planlint.Creature(nil), p.members...)
 	sort.SliceStable(ms, func(i, j int) bool { return dist(from, ms[i].Pos) < dist(from, ms[j].Pos) })
 	var g dungeon.PullGroup
 	g.Ambush = len(ms) > 0

@@ -16,6 +16,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/pjerra/turtle-agent/internal/planlint"
 )
 
 const (
@@ -98,7 +99,7 @@ func TestDraftPlansAreWhatTheGeneratorWrites(t *testing.T) {
 	}
 }
 
-// Every generated plan loads, is a draft, has the fields its kind needs, and passes the creature check: no boss or pack member is an NPC
+// Every generated plan loads, is a draft, has the fields its kind needs, and passes the planlint.Creature check: no boss or pack member is an NPC
 // (npc_flags) or friendly (faction 35) unless the spec says a script turns it hostile.
 func TestDraftPlansLoadAndPassTheCheck(t *testing.T) {
 	sf := loadSpecT(t)
@@ -135,11 +136,11 @@ func TestDraftPlansLoadAndPassTheCheck(t *testing.T) {
 				t.Errorf("%s legs[%d]: no boss", ps.Name, i)
 			}
 		}
-		cs, err := readCreatures(filepath.Join("testdata", ps.Data, "creatures.tsv"))
+		cs, err := planlint.ReadCreatures(filepath.Join("testdata", ps.Data, "creatures.tsv"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, w := range Check(p, cs, CheckOptions{Scripted: toSet(ps.Scripted)}) {
+		for _, w := range planlint.Check(p, cs, planlint.CheckOptions{Scripted: toSet(ps.Scripted)}) {
 			if strings.Contains(w, "is an NPC, not a mob") || strings.Contains(w, "is friendly to") {
 				t.Errorf("%s: %s", ps.Name, w)
 			}
@@ -326,7 +327,7 @@ const marliPatrolReachYd = 26.5
 // TestZulGurubMarliStandsOutOfSpiderAggro: walk 25's Mar'li leg walked the raid onto the spawn of the patrolling
 // Skitterer 49202 (pack 0's leader) and, with the fight drifting west, onto pack 1 (leader 49201) as well: 20-21
 // elites at once, 6 of 7 wipes (TortoiseBots-audit research/zg-w25/MARLI-PULL.md sections 0-2). The leg's `to` and
-// the stands must be out of both packs' aggro: every creature of pack 0 (group_leader 49202) and pack 1
+// the stands must be out of both packs' aggro: every planlint.Creature of pack 0 (group_leader 49202) and pack 1
 // (group_leader 49201 plus the loose Venombrood 49246) stays at least marliStandYd away; the leg 2 packs' members
 // are the only ones listed, and a pack is aggro-together (creature_groups flags 14). Walk 25's other half
 // (SPEC-1-AMEND, Codex's HIGH): pack 0's row must NOT be a stand pull. Its leader 49202 walks a 13-point loop that
@@ -343,7 +344,7 @@ func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cs, err := readCreatures(filepath.Join("testdata", "map309", "creatures.tsv"))
+	cs, err := planlint.ReadCreatures(filepath.Join("testdata", "map309", "creatures.tsv"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +353,7 @@ func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
 		t.Fatal(err)
 	}
 	// pack0 and pack1 are the spawns of each pack: its own members and the loose Venombrood 49246 beside pack 1.
-	var pack0, pack1 []creature
+	var pack0, pack1 []planlint.Creature
 	for _, c := range cs {
 		switch {
 		case c.GroupLeader == 49202:
@@ -374,7 +375,7 @@ func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
 		t.Fatal("no high_priestess_marli leg")
 	}
 	// (a) the leg's `to` stands clear of both packs.
-	for _, c := range append(append([]creature{}, pack0...), pack1...) {
+	for _, c := range append(append([]planlint.Creature{}, pack0...), pack1...) {
 		if d := dist(leg.To, c.Pos); d < marliStandYd {
 			t.Errorf("to %.1f %.1f %.1f is %.1f yd from %s %d, want >= %d", leg.To.X, leg.To.Y, leg.To.Z, d, c.Name, c.GUID, marliStandYd)
 		}
@@ -407,20 +408,20 @@ func TestZulGurubMarliStandsOutOfSpiderAggro(t *testing.T) {
 		}
 		stands[i] = g.Approach[len(g.Approach)-1]
 	}
-	check := func(i int, targets []creature, min float64) {
+	check := func(i int, targets []planlint.Creature, min float64) {
 		for _, c := range targets {
 			if d := dist(stands[i], c.Pos); d < min {
 				t.Errorf("pull_groups[%d] approach %.1f %.1f %.1f is %.1f yd from %s %d, want >= %g", i, stands[i].X, stands[i].Y, stands[i].Z, d, c.Name, c.GUID, min)
 			}
 		}
 	}
-	var static0 []creature
+	var static0 []planlint.Creature
 	for _, c := range pack0 {
 		if !c.Patrol {
 			static0 = append(static0, c)
 		}
 	}
-	check(g0, append(append([]creature{}, static0...), pack1...), marliStandYd)
+	check(g0, append(append([]planlint.Creature{}, static0...), pack1...), marliStandYd)
 	// The patroller 49202's own SPAWN is the one exception to marliStandYd for the pack-0 stand: the patroller
 	// belongs to the very pack this plain pull wakes (the pull walks the gathered party to a firing stand in the
 	// pack's shot), so its spawn is inside the pack this row pulls by design, and only has to stay out of the band
@@ -555,12 +556,12 @@ func TestStandPullPatrolReach(t *testing.T) {
 	const guid = 500
 	square := []dungeon.Point{{X: 0, Y: 0}, {X: 0, Y: 20}, {X: 20, Y: 20}, {X: 20, Y: 0}}
 	movement := map[uint64][]dungeon.Point{guid: square}
-	patroller := []creature{{GUID: guid, Patrol: true}}
-	static := []creature{{GUID: guid, Patrol: false}}
+	patroller := []planlint.Creature{{GUID: guid, Patrol: true}}
+	static := []planlint.Creature{{GUID: guid, Patrol: false}}
 	for _, c := range []struct {
 		name  string
 		stand dungeon.Point
-		pack  []creature
+		pack  []planlint.Creature
 		worst float64
 		ok    bool
 	}{
@@ -579,7 +580,7 @@ func TestStandPullPatrolReach(t *testing.T) {
 // patrolling members' closest approaches to the stand, 2-D with the loop closed, and whether that is within
 // marliPatrolReachYd. A pack with no patroller is 0, true. A patroller named in the pack but absent from movement.tsv
 // counts as unreachable (no loop to wait for).
-func standPullPatrolReach(stand dungeon.Point, pack []creature, movement map[uint64][]dungeon.Point) (worstYd float64, ok bool) {
+func standPullPatrolReach(stand dungeon.Point, pack []planlint.Creature, movement map[uint64][]dungeon.Point) (worstYd float64, ok bool) {
 	ok = true
 	for _, c := range pack {
 		if !c.Patrol {
@@ -604,8 +605,8 @@ func standPullPatrolReach(stand dungeon.Point, pack []creature, movement map[uin
 
 // standPullPack is the pack a stand-pull row pulls (DungeonRunPolicy.h ScopeStandPullFacts): every formation with a
 // spawn within the row's radius of the row's centre (the mean of the plan's own positions), plus, since a linked pack
-// is aggro-together (creature_groups flags 14), every creature of a member's group_leader.
-func standPullPack(g dungeon.PullGroup, cs []creature) []creature {
+// is aggro-together (creature_groups flags 14), every planlint.Creature of a member's group_leader.
+func standPullPack(g dungeon.PullGroup, cs []planlint.Creature) []planlint.Creature {
 	var c dungeon.Point
 	for _, p := range g.Positions {
 		c.X += p.X
@@ -632,7 +633,7 @@ func standPullPack(g dungeon.PullGroup, cs []creature) []creature {
 			in[x.GUID] = true
 		}
 	}
-	var out []creature
+	var out []planlint.Creature
 	for _, x := range cs {
 		if in[x.GUID] {
 			out = append(out, x)
@@ -764,12 +765,12 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cs, err := readCreatures(filepath.Join("testdata", "map309", "creatures.tsv"))
+	cs, err := planlint.ReadCreatures(filepath.Join("testdata", "map309", "creatures.tsv"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// formations: the spawns of each pack, which the export and the server key on group_leader (a pack is aggro-together).
-	formations := map[uint64][]creature{}
+	formations := map[uint64][]planlint.Creature{}
 	var leaders []uint64
 	for _, c := range cs {
 		lead := c.GroupLeader
@@ -782,7 +783,7 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 		formations[lead] = append(formations[lead], c)
 	}
 	slices.Sort(leaders)
-	byGUID := map[uint64]creature{}
+	byGUID := map[uint64]planlint.Creature{}
 	for _, c := range cs {
 		byGUID[c.GUID] = c
 	}
@@ -890,7 +891,7 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 	// committed one) and on the straight segment (always); each pair logs its measured minimum.
 	type terraceWalk struct {
 		a, b      planexport.StepRow
-		laterFams [][]creature
+		laterFams [][]planlint.Creature
 	}
 	var walks []terraceWalk
 	for i := 0; i+1 < len(moves); i++ {
@@ -905,7 +906,7 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 		if next < 0 {
 			continue
 		}
-		var laterFams [][]creature
+		var laterFams [][]planlint.Creature
 		for _, later := range pulls[next+1:] {
 			for _, lead := range leaders {
 				fam := formations[lead]
@@ -996,7 +997,7 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 // checkArlokkTerraceWalk logs the nearest spawn of the packs a later pull row owns against one walk and fails when it
 // stands within arlokkTerraceRowYd of the nearest sample. A spawn more than arlokkTerraceStoreyYd above or below a
 // sample is on another floor and does not count (see the constant).
-func checkArlokkTerraceWalk(t *testing.T, how string, a, b planexport.StepRow, samples []dungeon.Point, laterFams [][]creature) {
+func checkArlokkTerraceWalk(t *testing.T, how string, a, b planexport.StepRow, samples []dungeon.Point, laterFams [][]planlint.Creature) {
 	t.Helper()
 	worst, who, at := worstSample(samples, laterFams, arlokkTerraceStoreyYd)
 	if math.IsInf(worst, 1) {
@@ -1136,7 +1137,7 @@ func arlokkRouteDiff(committed []arlokkVec, fresh []dungeon.Point) string {
 
 // worstSample is the closest any sample stands to any spawn of the later-owned formations within the storey band: the
 // distance, "guid/entry" of the spawn, and the sample point. No such spawn: +Inf, "none", the zero point.
-func worstSample(samples []dungeon.Point, laterFams [][]creature, storey float64) (float64, string, dungeon.Point) {
+func worstSample(samples []dungeon.Point, laterFams [][]planlint.Creature, storey float64) (float64, string, dungeon.Point) {
 	worst, who, at := math.Inf(1), "none", dungeon.Point{}
 	for _, s := range samples {
 		for _, fam := range laterFams {
@@ -1155,12 +1156,12 @@ func worstSample(samples []dungeon.Point, laterFams [][]creature, storey float64
 
 // rowOwnsOne reports whether the exported pull row owns the spawn: its entry is one of the row's entries and it stands
 // within the row's radius of the row's point (the run leader's rule for a pull row's mobs).
-func rowOwnsOne(row planexport.StepRow, c creature) bool {
+func rowOwnsOne(row planexport.StepRow, c planlint.Creature) bool {
 	return slices.Contains(row.Entries, c.Entry) && rowDist(row, c) <= float64(row.Radius)
 }
 
 // rowOwns reports whether the exported pull row owns any spawn of the formation (see rowOwnsOne).
-func rowOwns(row planexport.StepRow, fam []creature) bool {
+func rowOwns(row planexport.StepRow, fam []planlint.Creature) bool {
 	for _, c := range fam {
 		if rowOwnsOne(row, c) {
 			return true
@@ -1175,7 +1176,7 @@ func rowPoint(row planexport.StepRow) dungeon.Point {
 }
 
 // rowDist is the 3-D distance from the exported row's point to the spawn.
-func rowDist(row planexport.StepRow, c creature) float64 {
+func rowDist(row planexport.StepRow, c planlint.Creature) float64 {
 	return dist(rowPoint(row), c.Pos)
 }
 
@@ -1221,7 +1222,7 @@ func TestZulGurubMarliStep203RouteClearOfLaterPacks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cs, err := readCreatures(filepath.Join("testdata", "map309", "creatures.tsv"))
+	cs, err := planlint.ReadCreatures(filepath.Join("testdata", "map309", "creatures.tsv"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1229,7 +1230,7 @@ func TestZulGurubMarliStep203RouteClearOfLaterPacks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	formations := map[uint64][]creature{}
+	formations := map[uint64][]planlint.Creature{}
 	var leaders []uint64
 	for _, c := range cs {
 		lead := c.GroupLeader
@@ -1437,14 +1438,14 @@ func TestZulGurubMarliStep203RouteClearOfLaterPacks(t *testing.T) {
 	// three Polymorphs on the nearest Venombroods the target is the Broodwidow 49250 (walk 26b pulled 11370 guid
 	// ...c062 at step 204). Its stand's clearance to 49202's loop is the number the validation walk must watch.
 	if pl != nil {
-		var nonCC []creature
+		var nonCC []planlint.Creature
 		for _, c := range formations[pack1] {
 			if c.Entry != 14532 {
 				nonCC = append(nonCC, c)
 			}
 		}
 		for _, target := range nonCC {
-			camp := marliFiringStands(pl, p.Map, stand, []creature{target})[0]
+			camp := marliFiringStands(pl, p.Map, stand, []planlint.Creature{target})[0]
 			d, what := clearance(camp, pack0)
 			t.Logf("watch: step 203's firing stand for %s %d (%.1f %.1f) is %.1f yd from %s, want >= %d (the spread round the camp closes it)", target.Name, target.GUID, camp.X, camp.Y, d, what, marliLaterPackYd)
 		}
@@ -1474,7 +1475,7 @@ func marliPlannerOrNil(t *testing.T) *navmesh.Planner {
 // marliFiringStands is the run leader's firing stand for each spawn of a pack: a point 23.5 yd from it (leadShotYd
 // 28.5 less the 5 yd shot margin) on the path from the stand; the stand itself when the spawn is already within
 // 23.5 yd.
-func marliFiringStands(pl *navmesh.Planner, mapID uint32, stand dungeon.Point, pack []creature) []dungeon.Point {
+func marliFiringStands(pl *navmesh.Planner, mapID uint32, stand dungeon.Point, pack []planlint.Creature) []dungeon.Point {
 	var out []dungeon.Point
 	for _, c := range pack {
 		var pts []dungeon.Point

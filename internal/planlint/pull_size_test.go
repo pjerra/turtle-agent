@@ -1,4 +1,4 @@
-package main
+package planlint
 
 import (
 	"strings"
@@ -19,11 +19,11 @@ import (
 // by its number and bodies, so a ring or reach change that breaks the set
 // joins shows up here, not just in the per-plan count.
 func TestZulGurubArlokkTerraceIsOneTwentySevenPull(t *testing.T) {
-	p, err := dungeon.Load("../../dungeons/zul_gurub.json")
+	p, err := dungeon.Load("testdata/zul_gurub.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	cs, err := readCreatures("testdata/map309/creatures.tsv")
+	cs, err := ReadCreatures("testdata/map309/creatures.tsv")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,74 +54,6 @@ func TestZulGurubArlokkTerraceIsOneTwentySevenPull(t *testing.T) {
 	}
 }
 
-// The warning counts per plan are pinned like TestNoRouteSegmentPassesALaterPack
-// (TestPullSizesUnderCeiling with a known-count map): any change in a count, up
-// or down, fails, so a drop needs the pin updated with a one-line reason.
-// Counts measured on the committed fixture (mmaps-free path, LOS always seen).
-// Round 2: the target is the row's own creature (ownership + kill_first, never
-// an unrelated spawn), which moves zulfarrak 22->53, zul_gurub 82->95,
-// ruins_of_ahnqiraj 28->32, temple_of_ahnqiraj 63->74, naxxramas 149->150.
-var pullSizeKnownCounts = map[string]int{
-	// The repo reach (AggroRadius at the plan's party level plus the party's
-	// spread) and the 20 yd ring join neighbouring packs: every dense plan
-	// warns on most of its pulls (mmaps-free path, LOS always seen).
-	"ragefire_chasm": 28, "wailing_caverns": 54, "deadmines": 131,
-	"uldaman": 58, "zulfarrak": 53, "karazhan_crypt": 125,
-	"molten_core": 21, "blackwing_lair": 40, "zul_gurub": 88, // re-pinned on the batch tree (was 95): the walk 26b Marli order, walk 28's 27-unit Arlokk pull and walk 29's legs 5/6 pull fewer bodies per row.
-	"ruins_of_ahnqiraj": 32, "temple_of_ahnqiraj": 74, "naxxramas": 150,
-	"lower_karazhan_halls": 79, "upper_karazhan_halls": 30,
-	"emerald_sanctum": 7, "timbermaw_hold": 27,
-}
-
-func TestPullSizesUnderCeiling(t *testing.T) {
-	sf := loadSpecT(t)
-	checked := 0
-	for _, ps := range sf.Plans {
-		if !ps.Handwritten {
-			continue
-		}
-		dir := exportDir(ps)
-		if dir == "" {
-			t.Errorf("%s: no creature export under testdata", ps.Name)
-			continue
-		}
-		p, err := dungeon.Load("../../dungeons/" + ps.Name + ".json")
-		if err != nil {
-			t.Errorf("%s: %v", ps.Name, err)
-			continue
-		}
-		cs, err := readCreatures(dir + "/creatures.tsv")
-		if err != nil {
-			t.Fatal(err)
-		}
-		w, _, err := worldspawn.Load(dir, ps.Map)
-		if err != nil {
-			t.Errorf("%s: %v", ps.Name, err)
-			continue
-		}
-		checked++
-		found, err := PullSizes(p, cs, w, PullFilter{})
-		if err != nil {
-			t.Errorf("%s: %v", ps.Name, err)
-			continue
-		}
-		known, listed := pullSizeKnownCounts[ps.Name]
-		switch {
-		case len(found) == 0 && listed:
-			t.Errorf("%s passes now: take it off pullSizeKnownCounts", ps.Name)
-		case len(found) != known:
-			shown := []string{}
-			for _, f := range found {
-				shown = append(shown, f.Summary)
-			}
-			t.Errorf("%s: %d pulls over the ceiling (known %d):\n  %s", ps.Name, len(found), known, strings.Join(shown, "\n  "))
-		}
-	}
-	if checked < 3 {
-		t.Errorf("only %d hand-written plans checked", checked)
-	}
-}
-
 // The lint warns per pull row with its ceiling: leg, pull index, bodies,
 // ceiling and guids. A lone pair 30 yd apart from a two-row plan stays quiet
 // (each row sees only its own mob); two mobs of one pack 15 yd from the
@@ -133,7 +65,7 @@ func TestPullSizeWarningNamesLegPullBodiesCeiling(t *testing.T) {
 				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 10}}, Radius: 5},
 				{Entries: []uint32{2}, Positions: []dungeon.Point{{X: 40}}, Radius: 5},
 			}}}}
-	qcs := []creature{
+	qcs := []Creature{
 		{GUID: 1, Entry: 1, Name: "Early", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 10}},
 		{GUID: 2, Entry: 2, Name: "Later", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 40}},
 	}
@@ -147,7 +79,7 @@ func TestPullSizeWarningNamesLegPullBodiesCeiling(t *testing.T) {
 			PullGroups: []dungeon.PullGroup{
 				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 30}}, Radius: 5, MaxBodies: 1},
 			}}}}
-	cs := []creature{
+	cs := []Creature{
 		{GUID: 1, Entry: 1, Name: "One", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 30}},
 		{GUID: 2, Entry: 1, Name: "Two", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 45}},
 	}
@@ -178,7 +110,7 @@ func TestPullSizeIgnoresFriendlySpawnsAndOtherTeamRows(t *testing.T) {
 			PullGroups: []dungeon.PullGroup{
 				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 30}}, Radius: 5, MaxBodies: 1},
 			}}}}
-	cs := []creature{
+	cs := []Creature{
 		{GUID: 1, Entry: 1, Name: "One", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 30}},
 		{GUID: 2, Entry: 2, Name: "Friend", LevelMax: 60, Faction: 35, DetectionRange: 20, Pos: dungeon.Point{X: 35}},
 	}
@@ -188,7 +120,7 @@ func TestPullSizeIgnoresFriendlySpawnsAndOtherTeamRows(t *testing.T) {
 		t.Fatalf("faction 35 warns: %v", found)
 	}
 	for _, f := range []PullFilter{{Ignore: map[int]bool{77: true}}, {Friendly: map[int]bool{77: true}}} {
-		quiet := []creature{
+		quiet := []Creature{
 			{GUID: 1, Entry: 1, Name: "One", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 30}},
 			{GUID: 2, Entry: 2, Name: "Friend", LevelMax: 60, Faction: 77, DetectionRange: 20, Pos: dungeon.Point{X: 35}},
 		}
@@ -209,7 +141,7 @@ func TestPullSizeIgnoresFriendlySpawnsAndOtherTeamRows(t *testing.T) {
 				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 10}}, Radius: 5, MaxBodies: 1, Team: dungeon.TeamHorde},
 				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 30}}, Radius: 5, MaxBodies: 1},
 			}}}}
-	hostile := []creature{
+	hostile := []Creature{
 		{GUID: 1, Entry: 1, Name: "One", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 10}},
 		{GUID: 2, Entry: 1, Name: "Two", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 12}},
 		{GUID: 3, Entry: 1, Name: "Three", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 30}},
@@ -229,7 +161,7 @@ func TestPullSizeIgnoresFriendlySpawnsAndOtherTeamRows(t *testing.T) {
 	}
 }
 
-// The target is the row's own creature, kill_first rank first: with the bat
+// The target is the row's own Creature, kill_first rank first: with the bat
 // rider 14750 in kill_first the target is the rider even when the formation's
 // nearest mob to the stand is another unit, and a closer unrelated spawn next
 // to a stand-pull row is never chosen.
@@ -241,7 +173,7 @@ func TestPullSizeTargetIsOwnedKillFirstFirst(t *testing.T) {
 				{Entries: []uint32{11368, 14750}, Positions: []dungeon.Point{{X: 30}}, Radius: 25,
 					Approach: []dungeon.Point{{X: 0}}, StandPull: true},
 			}}}}
-	cs := []creature{
+	cs := []Creature{
 		{GUID: 1, Entry: 11368, Name: "Bat", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 28}},
 		{GUID: 2, Entry: 14750, Name: "Rider", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 34}},
 		{GUID: 3, Entry: 999, Name: "Stranger", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 1}},
@@ -295,7 +227,7 @@ func TestPullSizeNumbersEveryPullRowOfTheLeg(t *testing.T) {
 				{Entries: []uint32{2}, Positions: []dungeon.Point{{X: 40}}, Radius: 5, MaxBodies: 80},
 				{Entries: []uint32{3}, Positions: []dungeon.Point{{X: 70}}, Radius: 5, MaxBodies: 1},
 			}}}}
-	cs := []creature{
+	cs := []Creature{
 		{GUID: 1, Entry: 1, Name: "One", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 10}},
 		{GUID: 2, Entry: 1, Name: "Two", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 12}},
 		{GUID: 3, Entry: 2, Name: "Lone", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 40}},
@@ -319,7 +251,7 @@ func TestPullSizeRowWithNoTargetIsANoTargetFinding(t *testing.T) {
 			PullGroups: []dungeon.PullGroup{
 				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 100}}, Radius: 5},
 			}}}}
-	cs := []creature{
+	cs := []Creature{
 		{GUID: 7, Entry: 9, Name: "Elsewhere", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 10}},
 	}
 	found, err := PullSizes(p, cs, nil, PullFilter{})
@@ -370,9 +302,9 @@ func TestPullSizeAwakenedAndScriptedRowsCountTheirBodies(t *testing.T) {
 				PullGroups: []dungeon.PullGroup{
 					{Entries: []uint32{4857}, Positions: []dungeon.Point{{X: 30}}, Radius: 5, MaxBodies: 3},
 				}}}}
-		var cs []creature
+		var cs []Creature
 		for i := 0; i < 4; i++ {
-			cs = append(cs, creature{GUID: uint64(i + 1), Entry: 4857, Name: "Stone Keeper", LevelMax: 60, Faction: 35,
+			cs = append(cs, Creature{GUID: uint64(i + 1), Entry: 4857, Name: "Stone Keeper", LevelMax: 60, Faction: 35,
 				NPCFlags: tc.flags, DetectionRange: 20, Pos: dungeon.Point{X: float32(30 + i)}})
 		}
 		found, err := PullSizes(p, cs, nil, tc.filter)

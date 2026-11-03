@@ -1,4 +1,4 @@
-package main
+package planlint
 
 import (
 	"fmt"
@@ -62,9 +62,9 @@ func walkReadyPlan(t *testing.T, js string) string {
 	return p
 }
 
-func walkReadyLoad(t *testing.T, planPath, dir string) ([]creature, *worldspawn.World) {
+func walkReadyLoad(t *testing.T, planPath, dir string) ([]Creature, *worldspawn.World) {
 	t.Helper()
-	cs, err := readCreatures(filepath.Join(dir, "creatures.tsv"))
+	cs, err := ReadCreatures(filepath.Join(dir, "creatures.tsv"))
 	if err != nil {
 		t.Fatal(err)
 	}

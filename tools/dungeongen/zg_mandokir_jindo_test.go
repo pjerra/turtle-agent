@@ -19,6 +19,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/pjerra/turtle-agent/internal/planlint"
 )
 
 const (
@@ -39,12 +40,12 @@ var zgUpdateRoutes = flag.Bool("update-zg-routes", false, "rewrite "+zgFixture+"
 // creature_linking rows (links.tsv is a header), so the world's links are the creature_groups alone.
 type zgFormation struct {
 	Lead   uint64
-	Member []creature
+	Member []planlint.Creature
 }
 
-func zgHostile(c creature) bool { return c.Faction != 35 && c.LevelMax > 1 }
+func zgHostile(c planlint.Creature) bool { return c.Faction != 35 && c.LevelMax > 1 }
 
-func zgFormations(cs []creature) map[uint64]*zgFormation {
+func zgFormations(cs []planlint.Creature) map[uint64]*zgFormation {
 	out := map[uint64]*zgFormation{}
 	for _, c := range cs {
 		if !zgHostile(c) {
@@ -65,10 +66,10 @@ func zgFormations(cs []creature) map[uint64]*zgFormation {
 }
 
 // zgPack is the pack a plan group pulls: the spawn nearest each of its positions, expanded to the whole formation.
-func zgPack(g dungeon.PullGroup, cs []creature, forms map[uint64]*zgFormation) ([]creature, error) {
+func zgPack(g dungeon.PullGroup, cs []planlint.Creature, forms map[uint64]*zgFormation) ([]planlint.Creature, error) {
 	var leads []uint64
 	for _, pos := range g.Positions {
-		var best creature
+		var best planlint.Creature
 		bd := math.Inf(1)
 		for _, c := range cs {
 			if d := dist(pos, c.Pos); d < bd {
@@ -92,7 +93,7 @@ func zgPack(g dungeon.PullGroup, cs []creature, forms map[uint64]*zgFormation) (
 			leads = append(leads, lead)
 		}
 	}
-	var out []creature
+	var out []planlint.Creature
 	seen := map[uint64]bool{}
 	for _, l := range leads {
 		if f := forms[l]; f != nil {
@@ -107,14 +108,14 @@ func zgPack(g dungeon.PullGroup, cs []creature, forms map[uint64]*zgFormation) (
 	return out, nil
 }
 
-func zgPacks(t *testing.T, leg dungeon.Leg, cs []creature) [][]creature {
+func zgPacks(t *testing.T, leg dungeon.Leg, cs []planlint.Creature) [][]planlint.Creature {
 	t.Helper()
 	forms := zgFormations(cs)
 	movement, err := zgReadMovementPaths("testdata/map309/movement.tsv")
 	if err != nil {
 		t.Fatalf("movement.tsv: %v", err)
 	}
-	out := make([][]creature, len(leg.PullGroups))
+	out := make([][]planlint.Creature, len(leg.PullGroups))
 	for gi, g := range leg.PullGroups {
 		p, err := zgPack(g, cs, forms)
 		if err != nil {
@@ -132,15 +133,15 @@ func zgPacks(t *testing.T, leg dungeon.Leg, cs []creature) [][]creature {
 // where it stands, so a stand or a walk sample must clear every waypoint. A patroller merged into a multi-unit pack is
 // one unit of that pack: the plan pulls the pack at its row, and a loop that crosses the route is a separate finding
 // (clearing it would reorder the leg or split the pack).
-func zgLonePatrol(pack []creature) bool {
+func zgLonePatrol(pack []planlint.Creature) bool {
 	return len(pack) == 1 && pack[0].Patrol
 }
 
 // zgExpandPatrols replaces each patrolling member of a pack by its spawn and every waypoint of its loop (movement.tsv):
-// the whole path is a danger point while the pack is unpulled, since the creature walks it. A patrolling spawn with no
+// the whole path is a danger point while the pack is unpulled, since the planlint.Creature walks it. A patrolling spawn with no
 // rows keeps its spawn alone.
-func zgExpandPatrols(pack []creature, movement map[uint64][]dungeon.Point) []creature {
-	out := make([]creature, 0, len(pack))
+func zgExpandPatrols(pack []planlint.Creature, movement map[uint64][]dungeon.Point) []planlint.Creature {
+	out := make([]planlint.Creature, 0, len(pack))
 	for _, c := range pack {
 		if !c.Patrol {
 			out = append(out, c)
@@ -149,7 +150,7 @@ func zgExpandPatrols(pack []creature, movement map[uint64][]dungeon.Point) []cre
 		for _, at := range append([]dungeon.Point{c.Pos}, movement[c.GUID]...) {
 			q := c
 			q.Pos = at
-			q.patrolPoint = true
+			q.PatrolPoint = true
 			out = append(out, q)
 		}
 	}
@@ -157,7 +158,7 @@ func zgExpandPatrols(pack []creature, movement map[uint64][]dungeon.Point) []cre
 }
 
 // zgLeaders is the formation leaders of a pack, sorted, for the order pins.
-func zgLeaders(p []creature) []uint64 {
+func zgLeaders(p []planlint.Creature) []uint64 {
 	var out []uint64
 	for _, c := range p {
 		lead := c.GroupLeader
@@ -196,9 +197,9 @@ func zgSameLeaders(got, want []uint64) bool {
 	return true
 }
 
-func zgMin3(p dungeon.Point, cs []creature) (float64, creature) {
+func zgMin3(p dungeon.Point, cs []planlint.Creature) (float64, planlint.Creature) {
 	best := math.Inf(1)
-	var who creature
+	var who planlint.Creature
 	for _, c := range cs {
 		if d := dist(p, c.Pos); d < best {
 			best, who = d, c
@@ -207,9 +208,9 @@ func zgMin3(p dungeon.Point, cs []creature) (float64, creature) {
 	return best, who
 }
 
-func zgSampleMin(samples []dungeon.Point, cs []creature) (float64, dungeon.Point, creature) {
+func zgSampleMin(samples []dungeon.Point, cs []planlint.Creature) (float64, dungeon.Point, planlint.Creature) {
 	best, at := math.Inf(1), dungeon.Point{}
-	var who creature
+	var who planlint.Creature
 	for _, s := range samples {
 		if d, c := zgMin3(s, cs); d < best {
 			best, at, who = d, s, c
@@ -219,9 +220,9 @@ func zgSampleMin(samples []dungeon.Point, cs []creature) (float64, dungeon.Point
 }
 
 // zgSplit separates a pack's static spawns from the waypoints of a lone patroller's loop.
-func zgSplit(cs []creature) (static, patrol []creature) {
+func zgSplit(cs []planlint.Creature) (static, patrol []planlint.Creature) {
 	for _, c := range cs {
-		if c.patrolPoint {
+		if c.PatrolPoint {
 			patrol = append(patrol, c)
 		} else {
 			static = append(static, c)
@@ -232,7 +233,7 @@ func zgSplit(cs []creature) (static, patrol []creature) {
 
 // zgClearSamples asserts that every sample keeps staticYd from a static spawn and patrolYd from every waypoint of an
 // unpulled patrol (20 yd detection + 3 yd spread on these legs).
-func zgClearSamples(t *testing.T, label string, samples []dungeon.Point, cs []creature, staticYd, patrolYd float64) {
+func zgClearSamples(t *testing.T, label string, samples []dungeon.Point, cs []planlint.Creature, staticYd, patrolYd float64) {
 	t.Helper()
 	static, patrol := zgSplit(cs)
 	if d, at, who := zgSampleMin(samples, static); d < staticYd {
@@ -243,8 +244,8 @@ func zgClearSamples(t *testing.T, label string, samples []dungeon.Point, cs []cr
 	}
 }
 
-func zgLater(packs [][]creature, gi int) []creature {
-	var out []creature
+func zgLater(packs [][]planlint.Creature, gi int) []planlint.Creature {
+	var out []planlint.Creature
 	for i := gi + 1; i < len(packs); i++ {
 		out = append(out, packs[i]...)
 	}
@@ -256,7 +257,7 @@ func zgLater(packs [][]creature, gi int) []creature {
 // from every pack pulled later. A patrolling unit's whole loop counts: every waypoint of an unpulled patrol stays
 // >= 23 yd (20 yd detection + 3 yd spread) from a stand or walk sample, since it walks the loop while the party waits.
 // skipFirst leaves the first group to its leg's own `to` (the party arrives there).
-func zgCheckStands(t *testing.T, legName string, leg dungeon.Leg, packs [][]creature, skipFirst bool, lastGroup int) {
+func zgCheckStands(t *testing.T, legName string, leg dungeon.Leg, packs [][]planlint.Creature, skipFirst bool, lastGroup int) {
 	t.Helper()
 	prev := dungeon.Point{}
 	for gi, g := range leg.PullGroups {
@@ -386,7 +387,7 @@ type zgWalk struct {
 
 // zgLaterOf is what the segment ending at party point i must keep clear of: every group not pulled at or before i, less
 // the group the next pull approaches (its stand is 19.5-28 yd from it by design) and the group whose own pull point is i.
-func zgLaterOf(w zgWalk, packs [][]creature, i int) []creature {
+func zgLaterOf(w zgWalk, packs [][]planlint.Creature, i int) []planlint.Creature {
 	next := -1
 	for j := i + 1; j <= w.Last && j < len(w.Parties); j++ {
 		if w.Parties[j].Turn {
@@ -400,7 +401,7 @@ func zgLaterOf(w zgWalk, packs [][]creature, i int) []creature {
 			pulled[w.Parties[j].Group] = true
 		}
 	}
-	var out []creature
+	var out []planlint.Creature
 	for gi := range packs {
 		if gi == next || pulled[gi] {
 			continue
@@ -514,10 +515,10 @@ func zgNextPull(w zgWalk, i int) (int, dungeon.Point, bool) {
 // zgApproachMin is the least distance from a walk's samples to the pack it approaches. When the walk ends at the stand,
 // the samples within the last yard of walk before it are left out (the stand sits 19.5-28 yd from its own pack by
 // design).
-func zgApproachMin(samples []dungeon.Point, pack []creature, endAtStand bool) (float64, dungeon.Point, creature, bool) {
+func zgApproachMin(samples []dungeon.Point, pack []planlint.Creature, endAtStand bool) (float64, dungeon.Point, planlint.Creature, bool) {
 	best, ok := math.Inf(1), false
 	var at dungeon.Point
-	var who creature
+	var who planlint.Creature
 	rem := 0.0 // the walk's length from sample k to its end
 	for k := len(samples) - 1; k >= 0; k-- {
 		if k < len(samples)-1 {
@@ -536,7 +537,7 @@ func zgApproachMin(samples []dungeon.Point, pack []creature, endAtStand bool) (f
 // zgCheckWalk checks the exported rows' walk: every consecutive pair's straight line and committed navmesh polyline stays
 // >= 20 yd from every pack pulled later (the pack the row approaches excluded), >= 23 yd from every waypoint of an
 // unpulled patrol, and, with the mmaps, the navmesh walk is the fixture's walk to within a yard.
-func zgCheckWalk(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, packs [][]creature) {
+func zgCheckWalk(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, packs [][]planlint.Creature) {
 	t.Helper()
 	fixture := zgLoadRoutes(t)
 	for i := 0; i < w.Last && i+1 < len(w.Parties); i++ {
@@ -662,13 +663,13 @@ func zgPlannerOrNil(t *testing.T) *navmesh.Planner {
 
 const zgPlan = "../../dungeons/zul_gurub.json"
 
-func zgLoadPlanAndExport(t *testing.T) (*dungeon.Plan, []creature) {
+func zgLoadPlanAndExport(t *testing.T) (*dungeon.Plan, []planlint.Creature) {
 	t.Helper()
 	p, err := dungeon.Load(zgPlan)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cs, err := readCreatures("testdata/map309/creatures.tsv")
+	cs, err := planlint.ReadCreatures("testdata/map309/creatures.tsv")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -758,7 +759,7 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 		}
 	}
 	// the leg's `to` is the first stand and no via stands in a pack: >= 20 yd from every spawning cluster of the leg
-	var all []creature
+	var all []planlint.Creature
 	for _, pk := range packs {
 		all = append(all, pk...)
 	}

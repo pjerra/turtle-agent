@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/planlint"
 )
 
 // SpecFile is plans.json.
@@ -162,7 +163,7 @@ func defaultComposition() []string {
 // GenerateSpec builds the draft plan of one spec entry from the exports under dataRoot.
 func GenerateSpec(ps PlanSpec, dataRoot string) (*dungeon.Plan, error) {
 	dir := filepath.Join(dataRoot, ps.Data)
-	all, err := readCreatures(filepath.Join(dir, "creatures.tsv"))
+	all, err := planlint.ReadCreatures(filepath.Join(dir, "creatures.tsv"))
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +186,7 @@ func GenerateSpec(ps PlanSpec, dataRoot string) (*dungeon.Plan, error) {
 			firsts[f] = true
 		}
 	}
-	var cs []creature
+	var cs []planlint.Creature
 	for _, c := range all {
 		if bossEntry[c.Entry] || inBoxes(c.Pos, ps.Bbox) {
 			cs = append(cs, c)
@@ -267,7 +268,7 @@ func inBoxes(p dungeon.Point, boxes [][4]float64) bool {
 }
 
 // routeOrder walks the bosses nearest-first from the entrance; last, when set, goes at the end.
-func routeOrder(entries []uint32, cs []creature, from dungeon.Point, last uint32) ([]uint32, error) {
+func routeOrder(entries []uint32, cs []planlint.Creature, from dungeon.Point, last uint32) ([]uint32, error) {
 	at := map[uint32]dungeon.Point{}
 	for _, c := range cs { // the first spawn row of an entry, as Generate takes it
 		if _, ok := at[c.Entry]; !ok {
@@ -303,7 +304,7 @@ func routeOrder(entries []uint32, cs []creature, from dungeon.Point, last uint32
 
 // autoBand is the level band of the packs: the median level - 2 up to the 90th percentile (at least median + 3), within 1-60. Only
 // ordinary mobs count (hostile, no npc_flags, not a rare or a boss).
-func autoBand(cs []creature, ignore map[int]bool) []int {
+func autoBand(cs []planlint.Creature, ignore map[int]bool) []int {
 	var lv []int
 	for _, c := range cs {
 		if ignore[c.Faction] || c.NPCFlags != 0 || c.Rank > 1 || c.LevelMax < 1 {

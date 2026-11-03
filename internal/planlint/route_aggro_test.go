@@ -1,7 +1,6 @@
-package main
+package planlint
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,7 +8,7 @@ import (
 )
 
 // mustRoute runs the check on a synthetic plan: a refused export is the test's own failure, never a finding.
-func mustRoute(t *testing.T, p *dungeon.Plan, cs []creature) []string {
+func mustRoute(t *testing.T, p *dungeon.Plan, cs []Creature) []string {
 	t.Helper()
 	got, err := RouteIntoLaterPacks(p, cs, map[int]bool{35: true})
 	if err != nil {
@@ -31,7 +30,7 @@ func TestRouteIntoLaterPacksFindsASegmentThroughAPack(t *testing.T) {
 					Approach: []dungeon.Point{{X: 40}}},
 			},
 		}}}
-	cs := []creature{
+	cs := []Creature{
 		{GUID: 1, Entry: 1, Name: "Early", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 10, Y: 8}},
 		{GUID: 2, Entry: 2, Name: "Later", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 25, Y: -2}},
 	}
@@ -86,7 +85,7 @@ func TestRouteIntoLaterPacksIgnoresPlainPullApproach(t *testing.T) {
 					Approach: []dungeon.Point{{X: 20}}},
 			},
 		}}}
-	cs := []creature{
+	cs := []Creature{
 		{GUID: 1, Entry: 1, Name: "Early", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 10}},
 		{GUID: 2, Entry: 2, Name: "Later", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 30}},
 	}
@@ -133,7 +132,7 @@ func TestRouteIntoLaterPacksReportsStandPullStandInsideAggro(t *testing.T) {
 		}}}
 	// Stand sits at (0,0); the pack it pulls sits 12 yd off the stand's outgoing segment (a real stand-in-aggro
 	// defect: the party waits at the stand inside the pack's reach).
-	cs := []creature{
+	cs := []Creature{
 		{GUID: 1, Entry: 1, Name: "Early", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 50}},
 		{GUID: 2, Entry: 2, Name: "Later", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: -12, Y: 30}, DetectionRange: 15},
 	}
@@ -165,7 +164,7 @@ func TestRouteIntoLaterPacksStandPullWalksFromTheStand(t *testing.T) {
 					Approach: []dungeon.Point{{X: 0, Y: 60}}},
 			},
 		}}}
-	cs := []creature{
+	cs := []Creature{
 		{GUID: 1, Entry: 1, Name: "Early", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 50}},
 		{GUID: 2, Entry: 2, Name: "Later", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: -12, Y: 30}, DetectionRange: 15},
 		{GUID: 3, Entry: 99, Name: "StrayQ", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 50, Y: 12}, DetectionRange: 15},
@@ -208,7 +207,7 @@ func TestRouteIntoLaterPacksUsesTheRepoAggroRule(t *testing.T) {
 			}}}
 	}
 	p := mkplan("")
-	cs := []creature{
+	cs := []Creature{
 		{GUID: 1, Entry: 1, Name: "Early", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 10}},
 		// NO_AGGRO (flags_extra 0x2): 2 yd off the route, inside any detection range, spread or wander: still no
 		// finding even though the reach (spread plus wander on top of a 0 AggroRadius) would otherwise cover it.
@@ -260,7 +259,7 @@ func TestRouteIntoLaterPacksMapsSkipToPlanLeg(t *testing.T) {
 			},
 		}}}
 	// The skipped entry sits 10 yd off the route: no finding even though a later row pulls it.
-	cs := []creature{
+	cs := []Creature{
 		{GUID: 1, Entry: 1, Name: "Early", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 10}},
 		{GUID: 2, Entry: 2, Name: "Skipped", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 10, Y: 10}, DetectionRange: 15},
 	}
@@ -285,7 +284,7 @@ func TestRouteIntoLaterPacksDefaultsDetectionTo20(t *testing.T) {
 				{Entries: []uint32{2}, Positions: []dungeon.Point{{X: 10}}, Radius: 5},
 			},
 		}}}
-	cs := []creature{
+	cs := []Creature{
 		{GUID: 1, Entry: 1, Name: "Early", LevelMax: 60, Faction: 14, Pos: dungeon.Point{X: 10}},
 		{GUID: 2, Entry: 2, Name: "Later", LevelMax: 60, Faction: 14, Pos: dungeon.Point{X: 10, Y: 10}},
 	}
@@ -295,77 +294,6 @@ func TestRouteIntoLaterPacksDefaultsDetectionTo20(t *testing.T) {
 	cs[1].DetectionRange = 5
 	if got := mustRoute(t, p, cs); len(got) != 0 {
 		t.Fatalf("a later pack 10 yd off the route with detection 5 is no finding (reach 8): %v", got)
-	}
-}
-
-// routeAggroKnownFailing lists the hand-written plans whose route passes within aggro of a pack a later row pulls
-// (or of no row). The check walks the live-export rows (plandrift options: DropCompanionsLoot, CarrierChests,
-// GMCrossDirect) and uses the repo's aggro rule (worldspawn.AggroRadius at level_band[0], plus the party's spread and
-// the spawn's wander). A plan that passes now fails the test until it is taken off; any other change in a count, up
-// or down, fails too, so a drop needs the pin updated with a one-line reason. Draft plans are not checked: skeletons
-// have no mapped route. Straight segments are the approximation (the navmesh path is out of scope, L1) and patrols
-// stand where the export put them (L2).
-//
-// Counts are measured on origin/dev (the ZG count must drop when W25-1 lands: the Arlokk terrace reordering walks
-// each approach on its pack's level; the comment then says so).
-var routeAggroKnownFailing = map[string]int{
-	"ragefire_chasm":       153,  // boss rows own their boss (was 161). the repo reach (AggroRadius at 13-18 plus spread and wander) outruns the old 20 yd flat line.
-	"wailing_caverns":      173,  // boss rows own their boss (was 188). the repo reach (AggroRadius at 22-27 plus spread and wander) outruns the old 20 yd flat line.
-	"deadmines":            641,  // boss rows own their boss (was 661). the repo reach (AggroRadius at 18-22 plus spread and wander) outruns the old 20 yd flat line.
-	"uldaman":              249,  // boss rows own their boss (was 268). the repo reach (AggroRadius at 41-45 plus spread and wander) outruns the old 20 yd flat line.
-	"zulfarrak":            56,   // boss rows own their boss (was 66 with #391, 65 before it): a pass past a boss's own row is no finding.
-	"karazhan_crypt":       447,  // boss rows own their boss (was 459). the repo reach (AggroRadius at 59-60 plus spread and wander) outruns the old 20 yd flat line.
-	"molten_core":          270,  // boss rows own their boss (was 315). the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"blackwing_lair":       321,  // boss rows own their boss (was 344). the repo reach (AggroRadius at 58-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"zul_gurub":            910,  // re-pinned on the batch tree: boss rows own their boss (was 1049 on dev), and the walk 26b Marli order, walk 28's 27-unit Arlokk pull and walk 29's legs 5/6 walk fewer later packs.
-	"ruins_of_ahnqiraj":    178,  // boss rows own their boss (was 192). the repo reach (AggroRadius at 59-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"temple_of_ahnqiraj":   520,  // boss rows own their boss (was 541). the repo reach (AggroRadius at 58-60 plus the raid's 10 yd spread) still reports more than the old 419: more spawns sit inside the wider reach than the plain-pull approach skip clears.
-	"naxxramas":            647,  // boss rows own their boss (was 673). the repo reach (AggroRadius at 59-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"lower_karazhan_halls": 1000, // boss rows own their boss (was 1010). the repo reach (AggroRadius at 59-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"upper_karazhan_halls": 383,  // boss rows own their boss (was 403). the live export builds now (GMCrossDirect walks the outland gm_cross gap): the check sees the island hops.
-	"emerald_sanctum":      15,   // boss rows own their boss (was 17). the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns detection 20, from 8.
-	"timbermaw_hold":       214,  // boss rows own their boss (was 228). the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-}
-
-// TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn
-// that a later row pulls (or that no row pulls). See RouteIntoLaterPacks.
-func TestNoRouteSegmentPassesALaterPack(t *testing.T) {
-	sf := loadSpecT(t)
-	checked := 0
-	for _, ps := range sf.Plans {
-		if !ps.Handwritten {
-			continue
-		}
-		dir := exportDir(ps)
-		if dir == "" {
-			t.Errorf("%s: no creature export under testdata", ps.Name)
-			continue
-		}
-		p, err := dungeon.Load(filepath.Join(plansDirT, ps.Name+".json"))
-		if err != nil {
-			t.Errorf("%s: %v", ps.Name, err)
-			continue
-		}
-		cs, err := readCreatures(filepath.Join(dir, "creatures.tsv"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		checked++
-		found, err := RouteIntoLaterPacks(p, cs, map[int]bool{35: true})
-		if err != nil {
-			t.Errorf("%s: %v", ps.Name, err)
-			continue
-		}
-		known, listed := routeAggroKnownFailing[ps.Name]
-		switch {
-		case len(found) == 0 && listed:
-			t.Errorf("%s passes now: take it off routeAggroKnownFailing", ps.Name)
-		case len(found) != known:
-			t.Errorf("%s: %d route segments pass a later pack (known %d):\n  %s", ps.Name, len(found), known, strings.Join(found, "\n  "))
-		}
-	}
-	if checked < 3 {
-		t.Errorf("only %d hand-written plans checked", checked)
 	}
 }
 
@@ -380,7 +308,7 @@ func TestRouteIntoLaterPacksBossRowOwnsItsBoss(t *testing.T) {
 				Approach:     []dungeon.Point{{X: 0}},
 				PhaseEntries: []uint32{8}},
 		}}}
-	cs := []creature{
+	cs := []Creature{
 		{GUID: 1, Entry: 7, Name: "Boss", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 40}},
 		{GUID: 2, Entry: 8, Name: "Add", LevelMax: 20, Faction: 14, Pos: dungeon.Point{X: 42, Y: 3}},
 	}

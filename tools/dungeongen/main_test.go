@@ -9,12 +9,13 @@ import (
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/planlint"
 )
 
 func pt(x, y, z float32) dungeon.Point { return dungeon.Point{X: x, Y: y, Z: z} }
 
 func TestGenerateSynthetic(t *testing.T) {
-	cs := []creature{
+	cs := []planlint.Creature{
 		{GUID: 1, Entry: 100, Name: "Near A", Faction: 59, Pos: pt(10, 0, 0)},
 		{GUID: 2, Entry: 101, Name: "Near B", Faction: 59, Pos: pt(15, 0, 0)},                    // 5 yd from A: one pack
 		{GUID: 3, Entry: 102, Name: "Far", Faction: 59, Pos: pt(150, 0, 0)},                      // its own pack, nearer to boss 2
@@ -22,7 +23,7 @@ func TestGenerateSynthetic(t *testing.T) {
 		{GUID: 5, Entry: 104, Name: "Statue", Faction: 35, Pos: pt(11, 0, 0)},                    // friendly: dropped
 		{GUID: 6, Entry: 105, Name: "Vendor", Faction: 59, NPCFlags: 128, Pos: pt(12, 0, 0)},     // vendor: dropped
 		{GUID: 7, Entry: 106, Name: "Rare", Faction: 59, Rank: 4, Pos: pt(11, 1, 0)},             // rare: skipped, never a pack member
-		{GUID: 8, Entry: 107, Name: "Linked 1", Faction: 59, GroupLeader: 8, Pos: pt(200, 0, 0)}, // creature group: one pack although 80 yd apart
+		{GUID: 8, Entry: 107, Name: "Linked 1", Faction: 59, GroupLeader: 8, Pos: pt(200, 0, 0)}, // planlint.Creature group: one pack although 80 yd apart
 		{GUID: 9, Entry: 108, Name: "Linked 2", Faction: 59, GroupLeader: 8, Pos: pt(280, 0, 0)},
 		{GUID: 10, Entry: 109, Name: "Patrol", Faction: 59, Patrol: true, Pos: pt(14, 1, 0)}, // a patrol joins no pack
 		{GUID: 50, Entry: 900, Name: "First Boss", Faction: 59, Rank: 3, Pos: pt(20, 0, 0)},
@@ -52,7 +53,7 @@ func TestGenerateSynthetic(t *testing.T) {
 	if len(l0) != 3 || len(l0[0]) != 2 || l0[0][0] != 100 || l0[0][1] != 101 || l0[1][0] != 109 || l0[2][0] != 103 {
 		t.Fatalf("leg 0: %v", l0)
 	}
-	// Leg 1: the far one, then the linked pair (80 yd apart, one creature group).
+	// Leg 1: the far one, then the linked pair (80 yd apart, one planlint.Creature group).
 	if len(l1) != 2 || l1[0][0] != 102 || len(l1[1]) != 2 {
 		t.Fatalf("leg 1: %v", l1)
 	}
@@ -122,7 +123,7 @@ func TestGenerateUldaman(t *testing.T) {
 	if p.Entrance != pt(-228.859, 46.1018, -46.0186) || len(p.Legs) != 3 {
 		t.Fatalf("%+v", p.Entrance)
 	}
-	cs, err := readCreatures(filepath.Join("testdata", "uldaman", "creatures.tsv"))
+	cs, err := planlint.ReadCreatures(filepath.Join("testdata", "uldaman", "creatures.tsv"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,17 +184,17 @@ func TestReadErrors(t *testing.T) {
 		}
 		return p
 	}
-	if _, err := readCreatures(write("a.tsv", "guid\tentry\n1\t2\n")); err == nil || !strings.Contains(err.Error(), `no "name" column`) {
+	if _, err := planlint.ReadCreatures(write("a.tsv", "guid\tentry\n1\t2\n")); err == nil || !strings.Contains(err.Error(), `no "name" column`) {
 		t.Fatalf("%v", err)
 	}
 	head := "guid\tentry\tname\trank\tfaction\tnpc_flags\tx\ty\tz\tgroup_leader\tpatrol\n"
-	if _, err := readCreatures(write("b.tsv", head+"1\t2\tWolf\t0\t59\t0\tnorth\t0\t0\t0\t0\n")); err == nil || !strings.Contains(err.Error(), `"north" in column x is not a number`) {
+	if _, err := planlint.ReadCreatures(write("b.tsv", head+"1\t2\tWolf\t0\t59\t0\tnorth\t0\t0\t0\t0\n")); err == nil || !strings.Contains(err.Error(), `"north" in column x is not a number`) {
 		t.Fatalf("%v", err)
 	}
-	if _, err := readCreatures(write("c.tsv", head+"1\t2\tWolf\n")); err == nil || !strings.Contains(err.Error(), "c.tsv:2: 3 fields") {
+	if _, err := planlint.ReadCreatures(write("c.tsv", head+"1\t2\tWolf\n")); err == nil || !strings.Contains(err.Error(), "c.tsv:2: 3 fields") {
 		t.Fatalf("%v", err)
 	}
-	cs, err := readCreatures(write("d.tsv", head+"1\t2\tEric \"The Swift\"\t1\t122\t2\t1.5\t2.5\t3.5\t0\t1\n"))
+	cs, err := planlint.ReadCreatures(write("d.tsv", head+"1\t2\tEric \"The Swift\"\t1\t122\t2\t1.5\t2.5\t3.5\t0\t1\n"))
 	if err != nil || len(cs) != 1 || cs[0].Name != `Eric "The Swift"` || cs[0].Pos != pt(1.5, 2.5, 3.5) || !cs[0].Patrol {
 		t.Fatalf("%+v %v", cs, err)
 	}
@@ -211,12 +212,12 @@ func TestReadErrors(t *testing.T) {
 // A pack is an ambush when every member spawns stealthed; one that can be pulled makes it a normal pack. The auras
 // column is read as spell ids, and a file without it (an export from before the column) has none.
 func TestGenerateMarksStealthedPacks(t *testing.T) {
-	cs := []creature{
-		{GUID: 1, Entry: 100, Name: "Lurker A", Faction: 59, Pos: pt(10, 0, 0), Auras: parseAuras("6408 5916")},
-		{GUID: 2, Entry: 100, Name: "Lurker B", Faction: 59, Pos: pt(14, 0, 0), Auras: parseAuras("5916")},
+	cs := []planlint.Creature{
+		{GUID: 1, Entry: 100, Name: "Lurker A", Faction: 59, Pos: pt(10, 0, 0), Auras: planlint.ParseAuras("6408 5916")},
+		{GUID: 2, Entry: 100, Name: "Lurker B", Faction: 59, Pos: pt(14, 0, 0), Auras: planlint.ParseAuras("5916")},
 		{GUID: 3, Entry: 101, Name: "Oracle", Faction: 59, Pos: pt(60, 0, 0)},
-		{GUID: 4, Entry: 100, Name: "Lurker C", Faction: 59, Pos: pt(63, 0, 0), Auras: parseAuras("5916")}, // beside a pullable one
-		{GUID: 5, Entry: 102, Name: "Plain", Faction: 59, Pos: pt(120, 0, 0), Auras: parseAuras("7165")},   // an aura, not a stealth
+		{GUID: 4, Entry: 100, Name: "Lurker C", Faction: 59, Pos: pt(63, 0, 0), Auras: planlint.ParseAuras("5916")}, // beside a pullable one
+		{GUID: 5, Entry: 102, Name: "Plain", Faction: 59, Pos: pt(120, 0, 0), Auras: planlint.ParseAuras("7165")},   // an aura, not a stealth
 		{GUID: 50, Entry: 900, Name: "Boss", Faction: 59, Rank: 3, Pos: pt(200, 0, 0)},
 	}
 	e := pt(0, 0, 0)
@@ -239,10 +240,10 @@ func TestGenerateMarksStealthedPacks(t *testing.T) {
 	if !strings.Contains(string(b), `"ambush": true`) || strings.Count(string(b), `"ambush"`) != 1 {
 		t.Fatalf("%s", b)
 	}
-	if a := parseAuras(""); len(a) != 0 {
+	if a := planlint.ParseAuras(""); len(a) != 0 {
 		t.Fatal(a)
 	}
-	if a := parseAuras("NULL 12 0 x"); len(a) != 1 || a[0] != 12 {
+	if a := planlint.ParseAuras("NULL 12 0 x"); len(a) != 1 || a[0] != 12 {
 		t.Fatal(a)
 	}
 }

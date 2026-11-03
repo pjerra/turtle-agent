@@ -1,4 +1,4 @@
-package main
+package planlint
 
 import (
 	"fmt"
@@ -37,17 +37,17 @@ type CheckOptions struct {
 	// relation of a faction is in FactionTemplate.dbc (a faction template's friend and enemy masks and groups), which the world
 	// database export does not carry. 35 (friendly to all) is always in it.
 	Friendly map[int]bool
-	// Awakened lists creature entries that spawn friendly (faction 35, "stoned") and that the encounter's script turns hostile when it
+	// Awakened lists Creature entries that spawn friendly (faction 35, "stoned") and that the encounter's script turns hostile when it
 	// starts: Uldaman's four Stone Keepers (4857, woken one by one by the Altar of the Keepers) and Archaedas (2748, by the Altar of
 	// Archaedas). The export carries only the spawn faction, so without this a plan that fights them is warned about as if it asked the
 	// party to kill a friend. Their npc_flags (none) are still looked at.
 	Awakened map[uint32]bool
-	// Scripted lists creature entries that are NPCs (npc_flags such as gossip or questgiver, or faction 35) until a script or a dialogue
+	// Scripted lists Creature entries that are NPCs (npc_flags such as gossip or questgiver, or faction 35) until a script or a dialogue
 	// makes them hostile: Moroes, Vaelastrasz, the Gordok guards. Nothing is said about their flags or factions.
 	Scripted map[uint32]bool
 }
 
-// Check lints a plan against the creature export (creatures.tsv): a boss or pack member that is no mob, or that is friendly to the leader's
+// Check lints a plan against the Creature export (creatures.tsv): a boss or pack member that is no mob, or that is friendly to the leader's
 // team, would make the driver wait for a kill that never starts (the Alliance and Uldaman's Baelog, Eric and Olaf, faction 122,
 // questgivers). It returns one warning per entry.
 //
@@ -55,8 +55,8 @@ type CheckOptions struct {
 // that is certain (unless the part is gated to a team: then the author meant that team to fight it). A faction is friendly only when it is in Friendly or is 35 (and the entry is not in Awakened); for any other faction the check says nothing about the
 // leader's team, but notes when the faction is shared with creatures that carry npc_flags (a questgiver's faction is usually friendly
 // to some team). Hostility toward the other team cannot be told at all without FactionTemplate.dbc.
-func Check(p *dungeon.Plan, cs []creature, o CheckOptions) []string {
-	byEntry := map[uint32]creature{}
+func Check(p *dungeon.Plan, cs []Creature, o CheckOptions) []string {
+	byEntry := map[uint32]Creature{}
 	npcFaction := map[int][]string{} // faction -> names of creatures with npc_flags that use it
 	for _, c := range cs {
 		if _, ok := byEntry[c.Entry]; !ok {
@@ -140,8 +140,8 @@ func firstNames(names []string, n int) string {
 	return strings.Join(names, ", ")
 }
 
-// bossWarnings is what Generate puts in a leg's notes for its boss: an NPC (npc_flags) or a faction the caller named as friendly.
-func bossWarnings(c creature, friendly map[int]bool) []string {
+// BossWarnings is what Generate puts in a leg's notes for its boss: an NPC (npc_flags) or a faction the caller named as friendly.
+func BossWarnings(c Creature, friendly map[int]bool) []string {
 	var out []string
 	if c.NPCFlags != 0 {
 		out = append(out, fmt.Sprintf("WARNING: boss %d (%s) has npc_flags %s: it is an NPC, not a mob. A leader it is friendly to cannot kill it; gate the boss with \"team\" or drop it.", c.Entry, c.Name, describeFlags(c.NPCFlags)))
