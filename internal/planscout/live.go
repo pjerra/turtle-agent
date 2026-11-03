@@ -412,6 +412,9 @@ func MergeLive(rep *Report, in Input, w *worldspawn.World, live LiveData, opt Op
 				anchor = pointOf(steps[prev])
 			}
 			addLive(st, liveWalkCheck(st, wk, anchorHop, anchor))
+		} else if live.Aborted && liveWalkWanted(st) {
+			addLive(st, Check{Name: CheckLiveWalk, Source: SourceLive, Verdict: VerdictSkip,
+				Reason: "not walked" + abortedSuffix(live)})
 		}
 		if gather[idx] || isAnchorRow(steps, gather, idx) {
 			switch {
@@ -448,6 +451,19 @@ func MergeLive(rep *Report, in Input, w *worldspawn.World, live LiveData, opt Op
 	}
 	rep.Notes = append(rep.Notes, live.Notes...)
 	recount(rep)
+}
+
+// liveWalkWanted says the walk pass ranks this step (its checks are in its list, or the live path failed).
+func liveWalkWanted(st *StepResult) bool {
+	for _, c := range st.Checks {
+		switch c.Name {
+		case planlint.LintClimb, planlint.LintWater, planlint.LintArrival, "drop", CheckLivePath:
+			if c.Verdict == VerdictFail || c.Verdict == VerdictWarn {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // abortedSuffix says the live pass stopped, with its reason.
