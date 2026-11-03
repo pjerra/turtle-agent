@@ -877,6 +877,7 @@
    "title": "Stormwrought Ruins",
    "map": 818,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 2850,
    "data": "map818",
    "trigger": 5347,
@@ -896,7 +897,8 @@
    "route": true,
    "special": [
     "secret door and four switches (GO_SECRET_DOOR_GUID, GO_SECRET_SWITCH_1-4), Nether altar (GO_NETHER_ALTAR_GUID)",
-    "Librarian Theodorus' elemental (SPELL_SUMMON_THEODORUS_ELEMENTAL), volatile fungus (GO_VOLATILE_FUNGUS)"
+    "Librarian Theodorus' elemental (SPELL_SUMMON_THEODORUS_ELEMENTAL), volatile fungus (GO_VOLATILE_FUNGUS)",
+    "waypoint pass 2026-11-03: leg starts moved off mesh edges and water, entry vias for the legs the server query would not walk to in one hop; the generator's nearest-neighbour route would clobber them, so the plan stays hand-maintained"
    ],
    "notes": [
     "Turtle custom with a front (5347) and a back entrance (5605); eleven bosses, the order is a nearest-neighbour walk from the front."
