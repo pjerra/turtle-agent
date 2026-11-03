@@ -12,13 +12,15 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/pjerra/turtle-agent/internal/planlint"
 	"github.com/pjerra/turtle-agent/internal/rpc"
+	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
 // exitPlanCheck: plan-check found a point the navmesh cannot take (a failing plan is not a usage error).
 const exitPlanCheck = 11
 
-const planCheckUsage = "usage: turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>..."
+const planCheckUsage = "usage: turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--walk-ready] [--json] <plan>..."
 
 // planCheckCmd walks the named plans on the navmesh (README, "Plan check") and prints each failing point. It reads the plan files and
 // the mmaps folder and nothing else.
@@ -29,6 +31,7 @@ func planCheckCmd(args []string, stdout, stderr io.Writer) int {
 	mmaps := fs.String("mmaps", "", "folder with the server's mmaps (<map>.mmap and <map>*.mmtile); required")
 	from := fs.Int("from-leg", 0, "check from this leg on (the legs before it only place the party)")
 	fromGroup := fs.Int("from-pull-group", -1, "with --from-leg: check from this pull group (0-based) of that leg on (default: the leg's own walk too)")
+	walkReady := fs.Bool("walk-ready", false, "run the six walk-ready lints (over_ceiling, point_in_water, patrol_crossing, leg_start_end_exposed, unowned_near_leg, no_quiet_start) and fail on any finding (the normal check stays warnings)")
 	asJSON := fs.Bool("json", false, "print the results as JSON")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -68,6 +71,20 @@ func planCheckCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		results = append(results, res)
 		failed = failed || !res.OK()
+		if *walkReady {
+			ready, rerr := planCheckWalkReady(p, *dir)
+			if rerr != nil {
+				fmt.Fprintf(stderr, "plan-check: %s: %v\n", n, rerr)
+				return exitUsage
+			}
+			if len(ready) > 0 {
+				failed = true
+				for _, f := range ready {
+					fmt.Fprintf(stdout, "walk-ready: %s\n", f.String())
+				}
+				fmt.Fprintf(stdout, "%s: %d walk-ready finding(s)\n", n, len(ready))
+			}
+		}
 		if *asJSON {
 			continue
 		}
@@ -93,6 +110,26 @@ func planCheckCmd(args []string, stdout, stderr io.Writer) int {
 		return exitPlanCheck
 	}
 	return exitOK
+}
+
+// planCheckWalkReady runs the six walk-ready lints of a plan against the
+// world export of its map (tools/dungeongen/export.sh). Without the export
+// (no creatures.tsv for the map) it returns the reason as an error: a lint
+// that cannot read its inputs fails the check.
+func planCheckWalkReady(p *dungeon.Plan, dir string) ([]planlint.WalkReadyFinding, error) {
+	spawns := filepath.Join(dir, "..", "tools", "dungeongen", "testdata", fmt.Sprintf("map%d", p.Map))
+	if _, err := os.Stat(filepath.Join(spawns, "creatures.tsv")); err != nil {
+		return nil, fmt.Errorf("no world export in %s: pass a --dir whose ../tools/dungeongen/testdata/map%d holds creatures.tsv (tools/dungeongen/export.sh writes it)", spawns, p.Map)
+	}
+	cs, err := planlint.ReadCreatures(filepath.Join(spawns, "creatures.tsv"))
+	if err != nil {
+		return nil, err
+	}
+	w, _, err := worldspawn.Load(spawns, p.Map)
+	if err != nil {
+		return nil, err
+	}
+	return planlint.WalkReady(p, cs, w, planlint.PullFilter{Ignore: map[int]bool{35: true}}, "")
 }
 
 // planCheckUnavailable says the plan check was not run, and why, when the navmesh cannot answer: a build without cgo, or no files for the map.
