@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
@@ -65,6 +67,10 @@ const (
 	// placeCritterHP is the top of a critter's max-HP band: a rank-0 unit with at most this many hit points (a level-1
 	// critter) never blocks the clear or the quiet (item 2).
 	placeCritterHP = 100
+	// placeRetreatRows is how many move rows a quiet refusal or a post-place fight may step back withIN the same
+	// instance before the placement fails (walk 33: each refusal burned a fresh instance and the hourly cap queued
+	// the next attempt 20 minutes).
+	placeRetreatRows = 3
 )
 
 // ttBody is one toolkit reply's fields.
@@ -276,7 +282,9 @@ func (w *walk) ttInst(ctx context.Context, why string) (float64, error) {
 // right after the portal (he is outside the instance then, and nothing is selected), so that `.appear` later lands him
 // in the raid's copy and not in the copy of an older walk.
 func (w *walk) phaseUnbindSelf(ctx context.Context) error {
-	if w.place == nil {
+	if w.place == nil || w.opts.reuseInstance {
+		// --reuse-instance resumes the instance the commander's own bind still names, so the bind must survive until
+		// the bind check has read it (walk 33). The fresh fallback drops it explicitly just before its entry.
 		return nil
 	}
 	return w.gm(ctx, fmt.Sprintf(".instance unbind %d", w.plan.Map))
@@ -601,6 +609,7 @@ func (w *walk) placeQuiet(ctx context.Context) error {
 		}
 		if read.NearCut {
 			w.placeSum.Quiet = false
+			w.placeBlockers = nil
 			return stopf(exitRaidWalkFailed, "place: the area is not quiet: the quiet's near list was cut at %.1f yd, inside the %d yd landing reach", read.NearCutYd, placeReachYd)
 		}
 		j = w.placeQuietJudge(read, p)
@@ -650,6 +659,7 @@ func (w *walk) placeQuiet(ctx context.Context) error {
 		}
 		if rereads >= placeQuietRereads || !read.roamersOnly(j.Block) {
 			w.placeSum.Quiet = false
+			w.placeBlockers = j.Block
 			return stopf(exitRaidWalkFailed, "place: the area is not quiet: %s", strings.Join(placeQuietNames(j.Block), ", "))
 		}
 		rereads++
@@ -1396,9 +1406,16 @@ func (w *walk) phasePlace(ctx context.Context) error {
 		return err
 	}
 	// --reuse-instance: the raid's copy is already open and alive, so there is no corridor clear, no quiet check and
-	// no `.tt place`: the commander joins the raid's copy and summons every hire to the start point.
+	// no `.tt place`: the commander joins the raid's copy and summons every hire to the start point. The bind mode
+	// (the previous raid logged out but its bind lives on) resumes that instance instead; the fresh fallback runs the
+	// ordinary placement below, in the fresh instance phaseEnter just opened.
 	if w.opts.reuseInstance {
-		return w.placeReuse(ctx)
+		switch w.reuseMode {
+		case "alive":
+			return w.placeReuse(ctx)
+		case "bind":
+			return w.placeResume(ctx)
+		}
 	}
 	// 2. hold the raid where it stands while the commander steps out.
 	w.placeStayed = w.placeHold(ctx)
@@ -1419,23 +1436,6 @@ func (w *walk) phasePlace(ctx context.Context) error {
 	}
 	w.placeInst = inst
 	w.placeSum.Instance = inst
-	// 5. to the start point, on its floor.
-	if err := w.goPlace(ctx, p.X, p.Y, p.Z+2); err != nil {
-		return err
-	}
-	if err := w.placeSleep(ctx, 2*time.Second); err != nil {
-		return err
-	}
-	if err := w.placeInstanceIs(ctx, w.placeInst); err != nil {
-		return err
-	}
-	if err := w.placeFloor(ctx, p); err != nil {
-		return err
-	}
-	// 6. the corridor of the legs the raid skips.
-	if err := w.placeClear(ctx); err != nil {
-		return err
-	}
 	// 6b. --gm-clear (test tool): the named packs die by GM command before the quiet check and the raid's move. A
 	// group the plan skipped (a boss's or an event's units) gets its WARN line here, where run.log exists.
 	for _, warn := range w.gmClearWarn {
@@ -1444,18 +1444,45 @@ func (w *walk) phasePlace(ctx context.Context) error {
 	if err := w.placeGMClear(ctx); err != nil {
 		return err
 	}
-	// 7. the area must be quiet.
-	if err := w.placeQuiet(ctx); err != nil {
-		return err
+	// 5-9. the start point, the corridor, the quiet, the raid's move and the frames, retried in THIS instance: walk 33
+	// burned a fresh instance for every quiet refusal and every post-place fight. A quiet or a post-place fight moves
+	// the attempt one move row back, up to placeRetreatRows; the last one may GM-kill only the blocking units when
+	// --gm-clear is on. A second instance is never entered for this placement.
+	retries := 0
+	for {
+		err := w.placeTry(ctx, retries > 0)
+		if err == nil {
+			break
+		}
+		reason, retryable := placeRetryReason(err)
+		if !retryable || w.opts.noPlaceRetreat {
+			return err
+		}
+		if retries >= placeRetreatRows {
+			if done := w.placeKillBlockers(ctx); !done {
+				return err
+			}
+			if qerr := w.placeQuiet(ctx); qerr != nil {
+				return err
+			}
+			retries++
+			if err := w.placeFinishAttempt(ctx); err != nil {
+				return err
+			}
+			break
+		}
+		next, ok := raidwalk.PlaceBack(w.rows, w.place.Start)
+		if !ok {
+			return err
+		}
+		retries++
+		w.note("place: %s; stepping back to step %d in the same instance (retry %d of %d, no fresh instance)",
+			reason, next, retries, placeRetreatRows)
+		if err := w.placeSetStart(next); err != nil {
+			return err
+		}
 	}
-	// 8. the raid onto the point.
-	if err := w.placeMove(ctx); err != nil {
-		return err
-	}
-	// 9. the walk's own frames must show it.
-	if err := w.placeVerify(ctx); err != nil {
-		return err
-	}
+	p = w.place.Point
 	// 10. re-anchor here and release.
 	if w.placeStayed {
 		w.placeStayed = w.placeHold(ctx)
@@ -1471,10 +1498,135 @@ func (w *walk) phasePlace(ctx context.Context) error {
 	return nil
 }
 
+// placeRetryReason names the two place failures a retreat may retry in the same instance, and whether err is one.
+func placeRetryReason(err error) (string, bool) {
+	_, reason := stopInfo(err)
+	switch {
+	case strings.Contains(reason, "area is not quiet"):
+		return "the area is not quiet", true
+	case strings.Contains(reason, "fighting after the place"):
+		return "fighting after the place", true
+	}
+	return "", false
+}
+
+// placeTry runs spec 5 steps 5-9 once at w.place.Point: to the point on its floor, the corridor clear, the quiet, the
+// raid's move and the frames. retry says an earlier attempt already moved the raid (and may have left it fighting), so
+// the GM summon path puts the party on the new point instead of the toolkit's own place, which refuses in combat.
+func (w *walk) placeTry(ctx context.Context, retry bool) error {
+	p := w.place.Point
+	if err := w.goPlace(ctx, p.X, p.Y, p.Z+2); err != nil {
+		return err
+	}
+	if err := w.placeSleep(ctx, 2*time.Second); err != nil {
+		return err
+	}
+	if err := w.placeInstanceIs(ctx, w.placeInst); err != nil {
+		return err
+	}
+	if err := w.placeFloor(ctx, p); err != nil {
+		return err
+	}
+	w.placeSkipped = nil
+	w.placeBlockers = nil
+	if err := w.placeClear(ctx); err != nil {
+		return err
+	}
+	if err := w.placeQuiet(ctx); err != nil {
+		return err
+	}
+	if retry {
+		return w.placeSummonParty(ctx)
+	}
+	if err := w.placeMove(ctx); err != nil {
+		return err
+	}
+	return w.placeVerify(ctx)
+}
+
+// placeSummonParty teleports every hire to the commander with the GM path (the reuse placement's own line), then
+// judges the landing by the walk's frames.
+func (w *walk) placeSummonParty(ctx context.Context) error {
+	for _, name := range w.hireList() {
+		if err := w.gm(ctx, ".summon "+name); err != nil {
+			return err
+		}
+		if err := w.placeSleep(ctx, 100*time.Millisecond); err != nil {
+			return err
+		}
+	}
+	return w.placeVerify(ctx)
+}
+
+// placeFinishAttempt is the summon-and-verify half after the last retreat's GM-killed blockers and a clean quiet.
+func (w *walk) placeFinishAttempt(ctx context.Context) error {
+	return w.placeSummonParty(ctx)
+}
+
+// placeKillBlockers GM-kills only the units the last quiet named, and only when --gm-clear is on. It looks every
+// blocker up by GUID, confirms each death from the frames, and returns whether any line went out. It never kills a
+// whole pack and never a unit the quiet did not name.
+func (w *walk) placeKillBlockers(ctx context.Context) bool {
+	if len(w.opts.gmClear) == 0 && len(w.opts.gmClearBoss) == 0 {
+		return false
+	}
+	tried := false
+	for _, u := range w.placeBlockers {
+		if u.GUID == "" {
+			continue
+		}
+		g, err := packet.ParseGUID(u.GUID)
+		if err != nil {
+			w.note("place: the retreat's blocker %d has no readable guid (%q): not killed", u.Entry, u.GUID)
+			continue
+		}
+		tries, dead, err := w.gmClearKill(ctx, objects.Unit{GUID: g, Entry: u.Entry, Name: u.Name})
+		tried = true
+		if err != nil {
+			w.note("place: the retreat's gm_kill of %d %s: %v", u.Entry, u.GUID, err)
+			continue
+		}
+		if dead {
+			w.note("place: the retreat GM-killed the blocker %d %s (%s), only the unit the quiet named", u.Entry, u.Name, u.GUID)
+			w.logLine(w.env.now(), raidwalk.GMClearLogLine(raidwalk.GMClearEntry{Entry: u.Entry, GUID: u.GUID, Killed: true, Tries: tries}))
+		} else {
+			w.note("place: the retreat's blocker %d %s (%s) survived %d kill lines", u.Entry, u.Name, u.GUID, tries)
+		}
+	}
+	return tried
+}
+
+// placeSetStart moves the place plan to an earlier row in the same instance: its point, its leg, its corridor clear
+// and the run's --from step. A clear that refuses at the new start keeps the old circles (the retreat still goes on).
+func (w *walk) placeSetStart(step int) error {
+	p, ok := raidwalk.PlacePoint(w.rows, step)
+	if !ok {
+		return stopf(exitRaidWalkFailed, "place: the retreat row %d has no point", step)
+	}
+	w.place.Start, w.place.Point = step, p
+	w.place.Leg = raidwalk.PlaceLegName(w.rows, step)
+	if w.placeRouteEnd >= step {
+		clear := raidwalk.PlaceClear(w.rows, w.plan, step, w.placeRouteEnd)
+		if clear.Refusal != "" {
+			w.note("place: the retreat to step %d keeps the earlier corridor: %s", step, clear.Refusal)
+		} else {
+			w.place.Circles, w.place.Ahead, w.place.Behind = clear.Circles, clear.Ahead, clear.Behind
+		}
+	}
+	w.fromWords = []string{"from", "step", strconv.Itoa(step)}
+	w.startStep = step
+	if w.placeSum != nil {
+		w.placeSum.Start = step
+		w.placeSum.Point = []float32{p.X, p.Y, p.Z}
+	}
+	return nil
+}
+
 // reuseReady is --reuse-instance's precondition, run instead of the enter order: every hired bot must be alive and on
-// the plan's map in a fresh frame, so the placement can keep the copy the raid is already in. A bot missing, dead or
-// elsewhere refuses the walk (exit 2) instead of opening a fresh instance and burning a cap slot.
-func (w *walk) reuseReady(ctx context.Context) error {
+// the plan's map in a fresh frame, so the placement can keep the copy the raid is already in. false means the party is
+// logged out (or dead/elsewhere): the caller then looks for an existing bind and resumes it, or falls back to a fresh
+// entry with a note (walk 33: the walk used to refuse, and the operator had to burn an instance).
+func (w *walk) reuseReady(ctx context.Context) (bool, error) {
 	deadline := w.env.now().Add(30 * time.Second)
 	for {
 		w.placeView(ctx)
@@ -1496,14 +1648,15 @@ func (w *walk) reuseReady(ctx context.Context) error {
 		}
 		if len(missing)+len(dead)+len(elsewhere) == 0 {
 			w.note("place: --reuse-instance: the raid is alive in map %d; the run keeps its instance", w.plan.Map)
-			return nil
+			return true, nil
 		}
 		if !now.Before(deadline) {
-			return stopf(exitUsage, "--reuse-instance: the raid is not alive in map %d (dead: %s; not seen: %s; elsewhere: %s)",
+			w.note("place: --reuse-instance: the raid is not alive in map %d (dead: %s; not seen: %s; elsewhere: %s)",
 				w.plan.Map, namesOrNone(dead), namesOrNone(missing), namesOrNone(elsewhere))
+			return false, nil
 		}
 		if err := w.placeSleep(ctx, 2*time.Second); err != nil {
-			return err
+			return false, err
 		}
 	}
 }
@@ -1514,6 +1667,71 @@ func namesOrNone(names []string) string {
 		return "none"
 	}
 	return strings.Join(names, ", ")
+}
+
+// bindInstanceOf reads one `.instance listbinds` line for the walk's map: `map: 309 (Zul'Gurub) inst: 103 perm: no
+// canReset: yes TTR: 1h 30m`. It returns the instance id and the time to reset ("" and false for another map or a
+// line without both fields).
+func bindInstanceOf(line string, mapID uint32) (inst float64, ttr string, ok bool) {
+	if !strings.HasPrefix(line, fmt.Sprintf("map: %d ", mapID)) {
+		return 0, "", false
+	}
+	if _, rest, found := strings.Cut(line, "inst: "); found {
+		field, _, _ := strings.Cut(rest, " ")
+		if _, err := fmt.Sscanf(field, "%g", &inst); err != nil {
+			return 0, "", false
+		}
+	} else {
+		return 0, "", false
+	}
+	_, ttr, found := strings.Cut(line, "TTR: ")
+	if !found {
+		return 0, "", false
+	}
+	return inst, strings.TrimSpace(ttr), true
+}
+
+// reuseBind reads the commander's own binds (`.instance listbinds`) and answers the plan map's live one. The
+// commander's `.appear` into the raid's copy created that bind; a walk that was stopped without its teardown leaves it
+// behind, and the core sends `.go xyz ... <map>` into a bound instance. No bind, an expired one (TTR 0s) or no answer
+// is false, and the caller falls back to a fresh entry with the reason in the notes.
+func (w *walk) reuseBind(ctx context.Context) (float64, string, bool) {
+	if err := w.gm(ctx, ".instance listbinds"); err != nil {
+		w.note("place: --reuse-instance: .instance listbinds: %v", err)
+		return 0, "", false
+	}
+	deadline := w.env.now().Add(5 * time.Second)
+	for {
+		var page events.Page
+		params := map[string]any{"since": w.eventsAt, "kinds": []string{"system", "addon"}, "wait_ms": 1000}
+		if err := w.agent.Call(ctx, "events", params, &page, 15*time.Second); err != nil {
+			w.note("place: --reuse-instance: the bind read: %v", err)
+			return 0, "", false
+		}
+		w.eventsAt = page.Next
+		for _, e := range page.Events {
+			if e.Kind != events.KindSystem || e.Text == "" {
+				continue
+			}
+			line := raidwalk.CleanLine(e.Text)
+			inst, ttr, ok := bindInstanceOf(line, w.plan.Map)
+			if !ok {
+				continue
+			}
+			if ttr == "" || ttr == "0s" || ttr == "0sec" {
+				w.note("place: --reuse-instance: the commander's bind to map %d (instance %.0f) has expired (TTR %q)", w.plan.Map, inst, ttr)
+				return 0, "", false
+			}
+			return inst, ttr, true
+		}
+		if !w.env.now().Before(deadline) {
+			w.note("place: --reuse-instance: .instance listbinds names no live bind for map %d", w.plan.Map)
+			return 0, "", false
+		}
+		if err := w.placeSleep(ctx, 200*time.Millisecond); err != nil {
+			return 0, "", false
+		}
+	}
 }
 
 // placeReuse is the --reuse-instance placement: bind the commander to the main tank's copy (`.appear` opens no copy of
@@ -1537,6 +1755,12 @@ func (w *walk) placeReuse(ctx context.Context) error {
 	w.placeInst = inst
 	w.placeSum.Instance = inst
 	w.note("place: --reuse-instance: keeping the raid's instance %.0f (no fresh instance is entered or counted)", inst)
+	for _, warn := range w.gmClearWarn {
+		w.logLine(w.env.now(), warn)
+	}
+	if err := w.placeGMClear(ctx); err != nil {
+		return err
+	}
 	if err := w.goPlace(ctx, p.X, p.Y, p.Z+2); err != nil {
 		return err
 	}
@@ -1569,6 +1793,63 @@ func (w *walk) placeReuse(ctx context.Context) error {
 	w.placeSum.Placed = len(w.hireList()) - len(w.placeSummoned)
 	w.placeSum.Summoned = w.placeSummoned
 	w.note("place: start step %d%s at %s %s %s; reused instance %.0f; placed %d/%d",
+		w.place.Start, legWords(w.place.Leg), num32(p.X), num32(p.Y), num32(p.Z), inst, w.placeSum.Placed, w.placeSum.Hires)
+	return nil
+}
+
+// placeResume is --reuse-instance's bind path: the previous raid has logged out, but the commander's own bind to the
+// plan map is alive, so `.go xyz ... <map>` lands in that bound instance (the core finds the player's bind for the
+// map) and every fresh hire is pulled in with `.summon`. No `.appear` (no party member is online to appear at), no
+// entry order, and no instance is counted. A q inst that names another instance fails: the bind did not hold.
+func (w *walk) placeResume(ctx context.Context) error {
+	p := w.place.Point
+	w.placeInst = w.reuseBindInst
+	w.placeSum.Instance = w.reuseBindInst
+	if err := w.goPlace(ctx, p.X, p.Y, p.Z+2); err != nil {
+		return err
+	}
+	if err := w.waitMap(ctx, w.plan.Map, 30*time.Second, time.Time{}); err != nil {
+		return err
+	}
+	if err := w.placeSleep(ctx, 2*time.Second); err != nil {
+		return err
+	}
+	inst, err := w.ttInst(ctx, "the resumed instance check")
+	if err != nil {
+		return err
+	}
+	if inst != w.placeInst {
+		return stopf(exitRaidWalkFailed, "place: --reuse-instance: the existing bind named instance %.0f, but .go entered %.0f: the bind is gone; run without --reuse-instance", w.placeInst, inst)
+	}
+	if err := w.placeFloor(ctx, p); err != nil {
+		return err
+	}
+	for _, warn := range w.gmClearWarn {
+		w.logLine(w.env.now(), warn)
+	}
+	if err := w.placeGMClear(ctx); err != nil {
+		return err
+	}
+	w.note("place: --reuse-instance: resumed instance %.0f from the commander's existing bind (expires in %s); no fresh instance is entered or counted",
+		inst, w.reuseBindTTR)
+	for _, name := range w.hireList() {
+		if err := w.gm(ctx, ".summon "+name); err != nil {
+			return err
+		}
+		if err := w.placeSleep(ctx, 100*time.Millisecond); err != nil {
+			return err
+		}
+	}
+	if err := w.placeVerify(ctx); err != nil {
+		return err
+	}
+	w.placeStayed = w.placeHold(ctx)
+	if err := w.placeRelease(ctx); err != nil {
+		return err
+	}
+	w.placeSum.Placed = len(w.hireList()) - len(w.placeSummoned)
+	w.placeSum.Summoned = w.placeSummoned
+	w.note("place: start step %d%s at %s %s %s; resumed instance %.0f; placed %d/%d",
 		w.place.Start, legWords(w.place.Leg), num32(p.X), num32(p.Y), num32(p.Z), inst, w.placeSum.Placed, w.placeSum.Hires)
 	return nil
 }

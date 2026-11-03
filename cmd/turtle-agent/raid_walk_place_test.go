@@ -101,6 +101,7 @@ type placeToolkit struct {
 	placeAll bool
 
 	quietCalls int
+	quiets     []string
 	cleartos   []string
 	places     []string
 }
@@ -155,6 +156,7 @@ func (p *placeToolkit) answer(cmd string) (ttResult, error) {
 		return ttReplyOf(p.t, map[string]any{"map": 309, "n": n, "removed": []any{}, "skipped": []any{}}), nil
 	case strings.HasPrefix(cmd, "quiet"):
 		p.quietCalls++
+		p.quiets = append(p.quiets, cmd)
 		q := true
 		if p.quiet != nil {
 			q = p.quiet(p.quietCalls)
@@ -215,6 +217,10 @@ func newPlaceFixture(t *testing.T) (*fixture, *placeToolkit) {
 	f.agent.instMap = 309
 	p := &placeToolkit{t: t, f: f, inst: 103, placeAll: true}
 	f.agent.ttFn = p.answer
+	// The offline quiet start reads the world export; the place tests that are not about it run with an empty folder,
+	// so the plan's own start step stays what they pin. TestPlaceWalksStartBackFromANotYetPulledPack supplies one.
+	f.opts.gmClearSpawns = t.TempDir()
+	f.opts.noPlaceRetreat = true
 	// The run's own status lines: the placed run walks two steps and stops at its until. A test that needs the raid to
 	// die (or the run to go on) replaces this queue.
 	n := zgPlaceSteps(t)
@@ -3176,6 +3182,146 @@ func TestPlaceViewSavesFrames(t *testing.T) {
 	}
 }
 
+// Walk 33: a --from step next to a pack the run has not pulled yet is walked back offline, before an instance is
+// entered, to the nearest move row at least aggro+8 yd from every static spawn of those packs. The world export is a
+// one-spawn fixture at the future pack's own point.
+func TestPlaceWalksStartBackFromANotYetPulledPack(t *testing.T) {
+	rows, _ := placePlanRows(t)
+	var start int
+	var pull planexport.StepRow
+	for i, s := range rows.Steps {
+		if s.Kind != planexport.KindMove || s.X == 0 && s.Y == 0 && s.Z == 0 || i == 0 {
+			continue
+		}
+		for _, later := range rows.Steps[i+1:] {
+			if later.Kind != planexport.KindPull || len(later.Entries) == 0 {
+				continue
+			}
+			dx, dy := float64(s.X-later.X), float64(s.Y-later.Y)
+			if dx*dx+dy*dy <= 20*20 {
+				start, pull = i+1, later
+				break
+			}
+		}
+		if start != 0 {
+			break
+		}
+	}
+	if start == 0 {
+		t.Fatal("no move row of the fixture stands within 20 yd of a later pull")
+	}
+	dir := t.TempDir()
+	tsv := "guid\tentry\tname\tlevel_min\tlevel_max\trank\tfaction\tnpc_flags\tx\ty\tz\twander\tmovement_type\tgroup_leader\tpatrol\tauras\tdetection_range\tflags_extra\tspeed_walk\tgroup_flags\tpool\n" +
+		fmt.Sprintf("1\t%d\tNotYetPulled\t60\t60\t1\t16\t0\t%v\t%v\t%v\t0\t0\t0\t0\t\t20\t0\t1\t0\t0\n",
+			pull.Entries[0], pull.X, pull.Y, pull.Z)
+	if err := os.WriteFile(filepath.Join(dir, "creatures.tsv"), []byte(tsv), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The dry run names the step the offline choice took (dry runs print no notes).
+	f, _ := newPlaceFixture(t)
+	f.opts.gmClearSpawns = dir
+	f.opts.from = fmt.Sprintf("step %d", start)
+	f.opts.dryRun = true
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("dry run exit %d: %s", code, f.stderr.String())
+	}
+	chosen := 0
+	for _, line := range strings.Split(f.stdout.String(), "\n") {
+		if _, rest, ok := strings.Cut(line, "8b place: start step "); ok {
+			fmt.Sscanf(rest, "%d", &chosen)
+		}
+	}
+	if chosen == 0 || chosen >= start {
+		t.Fatalf("the place plan starts step %d, want a move row before %d:\n%s", chosen, start, f.stdout.String())
+	}
+	// A real run says why the requested step was refused and which row it chose.
+	f.opts.dryRun = false
+	until, err := raidwalk.PlaceStop(rows, []string{"until", "boss"}, chosen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", chosen, len(rows.Steps), until)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|thekal|move|walk|walking", chosen, len(rows.Steps))},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|thekal|move|walk|stopped before step %d (until boss): the party stays where it stands", chosen, len(rows.Steps), until)},
+	}
+	f.agent.mu.Unlock()
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	note := ""
+	for _, n := range f.summary().Notes {
+		if strings.Contains(n, fmt.Sprintf("start step %d stands", start)) {
+			note = n
+		}
+	}
+	if note == "" || !strings.Contains(note, fmt.Sprintf("the nearest quiet move row is step %d", chosen)) {
+		t.Fatalf("notes %q, want the offline quiet-start reason naming step %d", f.summary().Notes, chosen)
+	}
+}
+
+// Walk 33: a quiet refusal must not exit and burn a fresh instance. The walk steps one move row back in the SAME
+// instance (the commander is already in it), moves the party there with the GM summon path and verifies it.
+func TestPlaceQuietFailureRetreatsInTheSameInstance(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.noPlaceRetreat = false
+	rows, plan := placePlanRows(t)
+	back, ok := raidwalk.PlaceBack(rows, plan.Start)
+	if !ok || back >= plan.Start {
+		t.Fatalf("no move row before the fixture start %d", plan.Start)
+	}
+	until, err := raidwalk.PlaceStop(rows, []string{"until", "boss"}, back)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.quiet = func(n int) bool { return n >= 2 }
+	p.quietNear = []any{map[string]any{
+		"g": "0xF130003AC3016558", "e": 11830, "n": "Hakkari Priest",
+		"p": []float32{plan.Point.X, plan.Point.Y, plan.Point.Z}, "dz": 0.5, "d": 1.0,
+		"home": []float32{plan.Point.X, plan.Point.Y, plan.Point.Z},
+	}}
+	f.agent.startReply = placeStartReply("zul_gurub", back, len(rows.Steps), until)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|thekal|move|walk|walking", back, len(rows.Steps))},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|thekal|move|walk|stopped before step %d (until boss): the party stays where it stands", back, len(rows.Steps), until)},
+	}
+	f.agent.mu.Unlock()
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.Place == nil || sum.Place.Start != back {
+		t.Fatalf("place summary %+v, want the retreat to step %d", sum.Place, back)
+	}
+	if !hasNote(sum, fmt.Sprintf("stepping back to step %d in the same instance", back)) {
+		t.Fatalf("notes %q, want the same-instance retreat", sum.Notes)
+	}
+	appears, enters := 0, 0
+	for _, l := range f.agentLog() {
+		if strings.HasPrefix(l, "gm .appear ") {
+			appears++
+		}
+		if strings.HasPrefix(l, "cmdr cmd enter") {
+			enters++
+		}
+	}
+	if appears != 1 || enters != 1 {
+		t.Fatalf("appear %d, enter %d, want one each (the retreat never re-enters)", appears, enters)
+	}
+	if len(p.places) != 0 {
+		t.Fatalf("the toolkit place ran on a retreat: %v", p.places)
+	}
+	if len(p.quiets) != 2 {
+		t.Fatalf("%d quiet reads, want the refused start and the retreat", len(p.quiets))
+	}
+	wantPoint := fmt.Sprintf("quiet 50 %v %v", rows.Steps[back-1].X, rows.Steps[back-1].Y)
+	if !strings.HasPrefix(p.quiets[1], wantPoint) {
+		t.Fatalf("second quiet %q, want the retreat point %q", p.quiets[1], wantPoint)
+	}
+}
+
 // Walk 32: --place --from "step N" refused a pull row (237, 560), so the operator had to find the move row before it
 // by hand. A pull row is now a start at that pull's own stand point, and the notes say which point was used.
 func TestPlaceStartStepOnAPullRow(t *testing.T) {
@@ -3195,6 +3341,8 @@ func TestPlaceStartStepOnAPullRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	f, _ := newPlaceFixture(t)
+	// The pull-row point is the subject here, not the offline quiet start: a folder with no export skips that step.
+	f.opts.gmClearSpawns = t.TempDir()
 	f.opts.from = fmt.Sprintf("step %d", n)
 	f.agent.startReply = placeStartReply("zul_gurub", n, len(rows.Steps), until)
 	f.agent.mu.Lock()
