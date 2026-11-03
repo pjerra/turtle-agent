@@ -2,7 +2,7 @@
   "version": 1,
   "name": "zul_gurub",
   "kind": "raid",
-  "status": "draft (not mapped, not live-checked)",
+  "status": "mapped (live-walked in ZG walks 31-34: Jeklik, Venoxis, Mar'li, Thekal and Mandokir killed; Arlokk via the gong step; Hakkar pending)",
   "map": 309,
   "entrance": {"x": -11916.6, "y": -1243.52, "z": 92.5338},
   "entrance_trigger": 3928,

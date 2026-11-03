@@ -61,7 +61,7 @@ func dmLegSteps(p *Plan, name string) (l Leg) {
 
 func TestDeadminesPlanLoads(t *testing.T) {
 	p := loadPlan(t, deadminesPlan)
-	if p.Map != 36 || p.Name != "deadmines" || p.Status != DraftStatus || len(p.Legs) != 16 {
+	if p.Map != 36 || p.Name != "deadmines" || p.Status != DraftStatus || len(p.Legs) != 18 {
 		t.Fatalf("%s %q %d, %d legs", p.Name, p.Status, p.Map, len(p.Legs))
 	}
 	var names []string
@@ -77,12 +77,12 @@ func TestDeadminesPlanLoads(t *testing.T) {
 			}
 		}
 	}
-	if fmt.Sprint(names) != "[mine_a rhahk_zor factory sneed west_area hall harvester gilnid cannon_a cannon dock mr_smite deck_a deck_b captain_greenskin edwin_vancleef]" {
+	if fmt.Sprint(names) != "[mine_a lab_tunnel laboratory rhahk_zor factory sneed west_area hall harvester gilnid cannon_a cannon dock mr_smite deck_a deck_b captain_greenskin edwin_vancleef]" {
 		t.Fatalf("%v", names)
 	}
-	// Rhahk'Zor, Sneed's Shredder, the Masterpiece Harvester (Turtle's Foe Reaper, a side branch the navmesh reaches before the foundry), Gilnid,
+	// Jared Voss (Turtle's boss in the laboratory side wing), Rhahk'Zor, Sneed's Shredder, the Masterpiece Harvester (Turtle's Foe Reaper, a side branch the navmesh reaches before the foundry), Gilnid,
 	// Mr. Smite, Captain Greenskin, Edwin VanCleef.
-	if fmt.Sprint(bosses) != "[644 642 61963 1763 646 647 639]" {
+	if fmt.Sprint(bosses) != "[61961 644 642 61963 1763 646 647 639]" {
 		t.Fatalf("%v", bosses)
 	}
 	// Entry: area trigger 78 on map 0, game_tele 174 `deadmines` inside and 288 `TheDeadmines` outside.
@@ -91,8 +91,8 @@ func TestDeadminesPlanLoads(t *testing.T) {
 	}
 	// EventAI "flee at 15 %" (command 47) of the entries the plan fights: miners, engineers, overseers, watchmen, evokers, craftsmen,
 	// squallshapers, shipbuilders and wizards.
-	if fmt.Sprint(p.Fleers) != "[598 622 634 1725 1729 1731 1732 3947 4418]" || fmt.Sprint(p.CCPriority) != "[4418 1729 1732]" || fmt.Sprint(p.KillFirst) != "[636 622]" {
-		t.Errorf("fleers %v cc_priority %v kill_first %v", p.Fleers, p.CCPriority, p.KillFirst)
+	if fmt.Sprint(p.Fleers) != "[598 622 634 1725 1729 1731 1732 3947 4418]" || fmt.Sprint(p.CCPriority) != "[622 1731 4418 1729 1732]" || fmt.Sprint(p.CCAlways) != "[622]" || fmt.Sprint(p.KillFirst) != "[636 622]" {
+		t.Errorf("fleers %v cc_priority %v cc_always %v kill_first %v", p.Fleers, p.CCPriority, p.CCAlways, p.KillFirst)
 	}
 	if lo, hi := p.Band(); lo != 18 || hi != 22 {
 		t.Errorf("band %d-%d", lo, hi)
@@ -458,6 +458,8 @@ var deadminesExemptions = map[string]deadminesExemption{
 	"2583051": {Reason: "Defias Overseer on the z 57.8 catwalk over the goblin hall: it PATROLS two points along y -584 (x -92.5 to -64.5); the party's look points on the way to the Harvester come within 13.9 yd of its line in 3-D (the route 0.9 yd on the ground, 6.6 yd in 3-D at the pull stand -82 -583 51), the aggro radius 18 yd (level 18 against a level-20 party) and 2 yd are 20 yd; the packs harvester:3, :4 and the Harvester stand under or beside the line; no mesh link to the floor; live aggro test pending"},
 	"2583058": {Reason: "Defias Overseer on the z 57.8 catwalk, static at -107.6 -556.7: the look points of harvester:3 to :5 are 14.3 to 19.4 yd from it in 3-D (aggro radius 18 and 2 yd: 20); a clear look point exists within the view of each hall pack but the plan has no field that places a look point (it is the standoff of the path), so each would need a leg of its own; no mesh link to the floor; live aggro test pending"},
 	"2583061": {Reason: "Defias Overseer on the z 57.8 catwalk, static at -68.4 -556.3: the look of harvester:7 (the pack at -63.8 -559.3, 4.7 yd from it) is 18.3 yd away in 3-D and no floor point within the 21 yd view of that pack is 20 yd from it and from the other two (0 of 108 points, probed 2026-10-16); the Harvester himself stands 15.3 yd from it in 3-D; no mesh link to the floor; live aggro test pending"},
+	"79129": {Reason: "Defias Miner in the mine's west pocket at -104.4 -426.7: 17.9 yd from the laboratory tunnel mouth in 3-D behind a wall (no navmesh link), 2.7-2.9 yd outside its level-17 15 yd aggro radius from the lab_tunnel route: not pulled (TB's f4344311 plan carries the same exemption)"},
+	"79131": {Reason: "Defias Miner in the mine's west pocket at -100.3 -430.7: 17.9 yd from the laboratory tunnel mouth in 3-D behind a wall (no navmesh link), 2.7-2.9 yd outside its level-17 15 yd aggro radius from the lab_tunnel route: not pulled (TB's f4344311 plan carries the same exemption)"},
 }
 
 // A plan that says mapped or live-checked has had its route corrected by a mapping walk (README "Dungeon plans"): while an exemption is unsettled,

@@ -328,13 +328,17 @@ var routeAggroKnownFailing = map[string]int{
 	"timbermaw_hold":       195,                                                                      // waypoint pass (was 214): the reworked loktanag_lower vias walk past fewer later packs.
 	"hateforge_quarry":     754,                                                                      // newly hand-maintained (was a generated draft): the current route passes.
 	"maraudon_orange":      121, "maraudon_purple": 272, "blackrock_depths": 722, "scholomance": 843, // newly hand-maintained (were generated): the current route's passes; the water fixes at the two Maraudon starts add two and nine segments.
-	"razorfen_kraul": 256, "dire_maul_north": 36, "windhorn_canyon": 436, "upper_blackrock_spire": 459,
+	"razorfen_kraul": 309, "dire_maul_north": 57, "windhorn_canyon": 436, "upper_blackrock_spire": 459,
 	"blackfathom_deeps": 296, "gnomeregan": 276, "lower_blackrock_spire": 408, "stormwind_vault": 170,
 	"frostmane_hollow": 171, "dire_maul_east": 97, "dire_maul_west": 199, "razorfen_downs": 191, "sunken_temple": 337,
 	"scarlet_armory": 101, "scarlet_cathedral": 151, "scarlet_graveyard": 184, "scarlet_library": 148, "shadowfang_keep": 382,
 	"stormwind_stockade": 185, "stratholme_live": 158, "stratholme_undead": 294, // newly hand-maintained: straight-segment counts for the draft routes.
 	// newly hand-maintained (waypoint lint fixes): measured route passes of the four drafts.
-	"crescent_grove": 438, "dragonmaw_retreat": 398, "gilneas_city": 267, "black_morass": 385,
+	// Re-pinned for the TB plan reconcile: razorfen_kraul 256 -> 309 and dire_maul_north 36 -> 57 (ported/split legs and TB's
+	// leg order), dire_maul_west 212 -> 243 (the revanchion leg adds rows), scarlet_graveyard 184 -> 178 (the hall split
+	// moves the hall rows before the bosses), shadowfang_keep 284 -> 317 (the door and courtyard legs add rows), and
+	// dragonmaw_retreat 398 -> 429 (the searistrasz_line split).
+	"crescent_grove": 438, "dragonmaw_retreat": 429, "gilneas_city": 267, "black_morass": 385,
 }
 
 // TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn

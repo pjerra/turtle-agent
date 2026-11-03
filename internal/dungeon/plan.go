@@ -782,7 +782,8 @@ type ObjectState struct {
 	// answer, never a refusal) and has held for GoneConfirm; a wait with no Near is never judged gone. A script that sets the object active and then removes it (Shadowfang Keep's Courtyard
 	// Door 18895, which Deathstalker Adamant's escort opens and despawns a few waypoints later) never reads "active" for long. An object
 	// never seen is not gone, only not there yet: the wait runs out its timeout as before. plan-export writes it as the wait_object
-	// row's flag 256 (the TortoiseBots module's kPlanFlagGoneIsDone, the same flag a loot or open row carries).
+	// row's flag 256 (the TortoiseBots module's kPlanFlagGoneIsDone, the same flag a loot or open row carries). Not with state ready: a
+	// gone object is not closed.
 	GoneOK bool `json:"gone_ok,omitempty"`
 }
 
@@ -2154,6 +2155,9 @@ func (c *checker) wait(path string, r *rawWait) *WaitFor {
 		g := &ObjectState{ObjectRef: c.ref(gp, &r.GameObject.rawRef), State: r.GameObject.State, GoneOK: r.GameObject.GoneOK}
 		if !validState(g.State) {
 			c.fail(gp+".state", "%q is none of %s", g.State, strings.Join(ObjectStates, ", "))
+		}
+		if r.GameObject.GoneOK && g.State == "ready" {
+			c.fail(gp+".gone_ok", "a gone object is not closed: gone_ok needs state active or active_alt")
 		}
 		w.GameObject = g
 	default:
