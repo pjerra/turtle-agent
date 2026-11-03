@@ -23,6 +23,7 @@
     "rogue:dps",
     "hunter:dps"
   ],
+  "cc_priority": [3855, 61970, 10000],
   "notes": [
     "DRAFT: a skeleton from the world database export of map 33 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
@@ -425,8 +426,42 @@
       }
     },
     {
-      "name": "odo_the_blindwatcher",
-      "to": {"x": -200.86, "y": 2194.01, "z": 79.8479},
+      "name": "courtyard_door",
+      "to": {"x": -243.7, "y": 2116.9, "z": 81.3},
+      "steps": [
+        {
+          "gossip": {
+            "npc": 3849,
+            "near": {"x": -243.7, "y": 2113.7, "z": 81.3},
+            "option": 0,
+            "by": "tank",
+            "stand": {"x": -243.7, "y": 2116.9, "z": 81.3},
+            "retry_s": 30,
+            "fail_text": "Deathstalker Adamant's menu has no option to unlock the courtyard door: he is dead, or the party stands out of the server's 5 yd gossip range."
+          }
+        },
+        {
+          "wait_for": {
+            "gameobject": {
+              "entry": 18895,
+              "near": {"x": -242.58, "y": 2159.05, "z": 90.62},
+              "spawn": 20835,
+              "state": "active",
+              "gone_ok": true
+            },
+            "timeout_s": 60,
+            "fail_text": "The Courtyard Door (18895, spawn 20835) was not seen open or gone 60 s after Adamant's gossip (instance_shadowfang_keep.cpp:193-201 sets it active at Adamant's waypoint 6 and his escort script removes it about 5 waypoints later, so gone_ok counts it gone once it was seen)."
+          }
+        }
+      ],
+      "notes": [
+        "Needs: Deathstalker Adamant (3849, at -243.7 2113.7 81.3, in the entrance cells) and his menu's option 0 \"Please unlock the courtyard door\". Live probe 2026-10-23 (tests/r24/slot7): the commander gossiped him and the Courtyard Door 18895 (guid 20835, at -242.58 2159.05 90.62; the lever 101812 at -236.25 2164.04 91.16 is the other opener, 15 s after its use) left the gameobject list. Horde party: the freed-NPC event's Horde NPC; the Alliance counterpart is Sorcerer Ashcrombe 3850.",
+        "The walk back to the cells from Springvale's hall (~200 yd) is deliberate: the gossip must come before the courtyard-side pulls of the next leg, and the legs 0-3 rows stay as the run 1 export."
+      ]
+    },
+    {
+      "name": "odo_the_blindwatcher_yard",
+      "to": {"x": -200.86, "y": 2191.01, "z": 79.8479},
       "pull_groups": [
         {
           "entries": [3853, 3862],
@@ -441,7 +476,8 @@
             {"x": -207.099, "y": 2162.01, "z": 79.8483},
             {"x": -195.926, "y": 2162.95, "z": 79.8327},
             {"x": -198.594, "y": 2153.93, "z": 79.8471}
-          ]
+          ],
+          "radius": 12
         },
         {
           "entries": [3875],
@@ -457,7 +493,8 @@
             {"x": -222.174, "y": 2149.43, "z": 81.0438},
             {"x": -231.866, "y": 2165.91, "z": 79.8476},
             {"x": -214.404, "y": 2146.14, "z": 80.9466}
-          ]
+          ],
+          "radius": 19
         },
         {
           "entries": [3877],
@@ -491,8 +528,28 @@
             {"x": -206.364, "y": 2130.33, "z": 86.5839},
             {"x": -194.589, "y": 2133.5, "z": 81.584},
             {"x": -191.003, "y": 2125.8, "z": 81.585}
-          ]
+          ],
+          "radius": 17
         },
+        {
+          "entries": [3861, 3851],
+          "positions": [
+            {"x": -197.316, "y": 2111.16, "z": 81.1401},
+            {"x": -205.378, "y": 2117.15, "z": 81.1379}
+          ],
+          "radius": 10
+        }
+      ],
+      "notes": [
+        "button \"Lever\" entry 101812 at -236.25 2164.04 91.16",
+        "door \"Courtyard Door\" entry 18895 (spawn 20835) at -242.58 2159.05 90.62",
+        "Split 2026-10-23 (r24 shadowfang_keep slot7, PREP + NAVMESH-GAPS): this leg is the entrance-side (network A) pulls only. The walkway pulls (Tormented Officers 3873, Deathsworn Captain 3872) and Odo's floor (z 100.1) are on the far network B, and the navmesh seam at the stair top (-264.5 2150.3 95.9; A ends -264.8 2149.3, B starts -265.2 2150.6) cuts them off: the next leg crosses it with a move_direct and fights them from the west/upper side. The leg's second pull keeps the far-side Officer out."
+      ]
+    },
+    {
+      "name": "odo_the_blindwatcher",
+      "to": {"x": -200.86, "y": 2194.01, "z": 79.8479},
+      "pull_groups": [
         {
           "entries": [3873, 3873, 3873],
           "positions": [
@@ -517,13 +574,6 @@
           "entries": [3873],
           "positions": [
             {"x": -205.822, "y": 2105.25, "z": 97.3899}
-          ]
-        },
-        {
-          "entries": [3861, 3851],
-          "positions": [
-            {"x": -197.316, "y": 2111.16, "z": 81.1401},
-            {"x": -205.378, "y": 2117.15, "z": 81.1379}
           ]
         }
       ],
