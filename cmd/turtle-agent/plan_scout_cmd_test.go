@@ -196,6 +196,10 @@ func TestPlanScoutApplyWritesCopyOnly(t *testing.T) {
 	if string(before) != string(after) {
 		t.Fatal("the plan file was written in place")
 	}
+	// Without --apply-fixes no patched copy is written anywhere.
+	if _, err := os.Stat(filepath.Join(out, "scout_pass.json")); err == nil {
+		t.Fatal("a patched copy was written without --apply-fixes")
+	}
 	// A DIR under a dungeons/ folder is refused.
 	bad := filepath.Join(dir, "dungeons", "patched")
 	if code, _, _ := runCLI("plan-scout", "scout_pass", "--dir", dir, "--out", out, "--mmaps", dir, "--apply-fixes", bad); code != exitUsage {
