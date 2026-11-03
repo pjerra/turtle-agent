@@ -311,6 +311,7 @@ func (r *regen) regenLegOnce(legIdx int) (string, error) {
 			entry = w.Point
 		}
 	}
+	origVia, origTo := leg.Via, leg.To
 	// The leg starts where the leg before it ended (the exporter measures its first hop from that row): a first via far from
 	// it makes the exporter cut a long hop of its own, and its split rows are the water and off-floor ones.
 	if legIdx > 0 && len(pinnedVia) == 0 {
@@ -445,7 +446,9 @@ func (r *regen) regenLegOnce(legIdx int) (string, error) {
 			}
 		}
 		prev := &seq[len(seq)-1]
-		moved, note, err := r.placeAnchor("boss", bossStand, prev, &bossPoint, pulled, regenBossID(legIdx), true, lanes, spawns)
+		// The boss's own pack counts for the stand as planlint's aggro lint counts it (a boss row does not own a second spawn
+		// of the entry): the party stands out of the boss's aggro + 8 and pulls him from there.
+		moved, note, err := r.placeAnchor("boss", bossStand, prev, &bossPoint, pulled, -1, true, lanes, spawns)
 		if err != nil {
 			return "", fmt.Errorf("the boss: %w", err)
 		}
@@ -463,7 +466,10 @@ func (r *regen) regenLegOnce(legIdx int) (string, error) {
 		}
 		via, err := r.route(entry, leg.To, regenCopySet(model.pulledBase), viaSelf, 0, lanes, spawns)
 		if err != nil {
-			return "", fmt.Errorf("the leg's walk from %.1f %.1f %.1f to its `to`: %w", entry.X, entry.Y, entry.Z, err)
+			// The walk in from the leg before cannot be authored (a crossing no bank splits): the leg keeps its written
+			// via and `to`, and the groups' routes start from the `to`.
+			moveNotes = append(moveNotes, fmt.Sprintf("the walk in from %.1f %.1f %.1f to the `to` cannot be authored (%v): the written via and `to` kept", entry.X, entry.Y, entry.Z, err))
+			leg.Via, leg.To = origVia, origTo
 		}
 		leg.Via = nil
 		if entry != leg.To {
@@ -489,6 +495,7 @@ func (r *regen) regenLegOnce(legIdx int) (string, error) {
 			g.Approach = nil
 			newGroups[k] = g
 			pulled[gr.id] = true
+			prev = gr.centre
 			continue
 		}
 		viaPts, err := r.route(prev, stand, pulled, gr.id, dungeon.MaxApproach, lanes, spawns)
@@ -496,7 +503,7 @@ func (r *regen) regenLegOnce(legIdx int) (string, error) {
 			// The walk to the stand cannot be kept clear: the group keeps its written approach when that passes the required
 			// rules (water, off-floor, aggro), else it is pulled in passing and the lead is told.
 			g := *gr.g
-			if r.oldApproachOK(&g, pulled, gr.id, lanes, spawns) {
+			if r.oldApproachOK(&g, prev, pulled, gr.id, lanes, spawns) {
 				moveNotes = append(moveNotes, fmt.Sprintf("pull group %d (%v): no clear route to its stand %.1f %.1f %.1f (%v): the written approach kept",
 					gi+1, gr.g.Entries, stand.X, stand.Y, stand.Z, err))
 			} else {
@@ -506,6 +513,7 @@ func (r *regen) regenLegOnce(legIdx int) (string, error) {
 			}
 			newGroups[k] = g
 			pulled[gr.id] = true
+			prev = gr.centre
 			continue
 		}
 		approach := viaPts // route ends at the stand
@@ -526,13 +534,17 @@ func (r *regen) regenLegOnce(legIdx int) (string, error) {
 			}
 		}
 		pulled[gr.id] = true
-		prev = stand
+		// The next hop is measured from the pull row's own point (the pack's centre), where the party stands to fight.
+		prev = gr.centre
 	}
 	leg.PullGroups = newGroups
 	if leg.Boss != nil {
 		viaPts, err := r.route(prev, bossStand, pulled, regenBossID(legIdx), dungeon.MaxApproach, lanes, spawns)
 		if err != nil {
-			return "", fmt.Errorf("the route to the boss: %w", err)
+			// The boss's approach is optional: the run leader walks to the boss from its last move point.
+			moveNotes = append(moveNotes, fmt.Sprintf("no route to the boss's stand %.1f %.1f %.1f (%v): no boss approach", bossStand.X, bossStand.Y, bossStand.Z, err))
+			leg.Boss.Approach = nil
+			viaPts = nil
 		}
 		approach := viaPts
 		if len(approach) == 0 || approach[len(approach)-1] != bossStand {
@@ -829,6 +841,12 @@ func (r *regen) plane(p dungeon.Point) (navmesh.Floor, bool, error) {
 	if err != nil {
 		return navmesh.Floor{}, false, err
 	}
+	// planlint's water rule: a point whose floor at its own height is water is in the water, whatever ground lies under it.
+	for _, f := range fl {
+		if f.Flags&navmesh.NavWater != 0 && math.Abs(float64(f.Z-p.Z)) <= 1.5 {
+			return navmesh.Floor{}, false, nil
+		}
+	}
 	best, ok := regenNearestFloor(fl, p.Z)
 	if !ok || best.Flags&navmesh.NavGround == 0 || best.Flags&(navmesh.NavWater|navmesh.NavSteep|navmesh.NavMagma|navmesh.NavSlime) != 0 {
 		return navmesh.Floor{}, false, nil
@@ -922,12 +940,13 @@ func (r *regen) ownerNear(p dungeon.Point, pulled map[int]bool, self int, spawns
 
 // oldApproachOK says a group's written approach still passes the required rules: every point dry plain ground, the stand out
 // of every other unpulled unit's aggro + 8.
-func (r *regen) oldApproachOK(g *dungeon.PullGroup, pulled map[int]bool, self int, lanes []regenLane, spawns []regenSpawn) bool {
+func (r *regen) oldApproachOK(g *dungeon.PullGroup, prev dungeon.Point, pulled map[int]bool, self int, lanes []regenLane, spawns []regenSpawn) bool {
 	if len(g.Approach) == 0 {
 		return false
 	}
-	p0 := dungeon.Point{}
-	prev := p0
+	if regenDist3(prev, g.Approach[0]) > regenMaxHopYd {
+		return false // the exporter would cut the first hop from the point before it
+	}
 	for i, p := range g.Approach {
 		if ok, _, err := r.routePointOK(p); err != nil || !ok {
 			return false
@@ -1183,6 +1202,16 @@ func (r *regen) estimateStand(centre, from dungeon.Point, pulled map[int]bool, s
 }
 
 // pathLen is a complete navmesh path's length over plain ground (water left out), ok false when there is no complete path.
+// pathLenWalk is a complete navmesh path's length on the plain mesh (water and all): the walk the run leader can make,
+// across a bridge or a shallow. The order weighs this, so a stop on the far side of a lake has a finite distance from here.
+func (r *regen) pathLenWalk(from, to dungeon.Point) (float64, bool) {
+	path, err := r.nav.Plan(r.mapID, navmesh.Vec3{from.X, from.Y, from.Z}, navmesh.Vec3{to.X, to.Y, to.Z})
+	if err != nil || path.Status != navmesh.Complete {
+		return 0, false
+	}
+	return float64(path.Length), true
+}
+
 func (r *regen) pathLen(from, to dungeon.Point) (float64, bool) {
 	path, err := r.nav.PlanNoWater(r.mapID, navmesh.Vec3{from.X, from.Y, from.Z}, navmesh.Vec3{to.X, to.Y, to.Z})
 	if err != nil || path.Status != navmesh.Complete {
@@ -1402,6 +1431,10 @@ func (r *regen) route(from, to dungeon.Point, pulled map[int]bool, self, maxPts 
 			return nil, err
 		} else if !ok {
 			return nil, fmt.Errorf("the route point %.1f %.1f %.1f (index %d of %d, from %.1f %.1f %.1f) fails: %s", p.X, p.Y, p.Z, idx, len(spaced), from.X, from.Y, from.Z, why)
+		}
+		if regenDist3(prev, p) > regenMaxHopLongYd {
+			return nil, fmt.Errorf("the hop %.0f yd from %.1f %.1f %.1f to %.1f %.1f %.1f is over the %g yd limit: it cannot be split on a bank",
+				regenDist3(prev, p), prev.X, prev.Y, prev.Z, p.X, p.Y, p.Z, regenMaxHopLongYd)
 		}
 		long := regenDist3(prev, p) > regenMaxHopYd
 		if long {
@@ -1900,7 +1933,7 @@ func (r *regen) order(targets []dungeon.Point, start dungeon.Point, end dungeon.
 			if i == j {
 				continue
 			}
-			if d, ok := r.pathLen(at(i), at(j)); ok {
+			if d, ok := r.pathLenWalk(at(i), at(j)); ok {
 				l[i][j] = d
 			} else {
 				l[i][j] = math.Inf(1)
@@ -1909,7 +1942,7 @@ func (r *regen) order(targets []dungeon.Point, start dungeon.Point, end dungeon.
 	}
 	from := make([]float64, total)
 	for i := 0; i < total; i++ {
-		if d, ok := r.pathLen(start, at(i)); ok {
+		if d, ok := r.pathLenWalk(start, at(i)); ok {
 			from[i] = d
 		} else {
 			from[i] = math.Inf(1)
@@ -1970,6 +2003,30 @@ func (r *regen) order(targets []dungeon.Point, start dungeon.Point, end dungeon.
 			before[g][ownerLocal] = true
 		}
 	}
+	// The improvements (2-opt, Or-opt) may relax the lane-derived preferences, but never the learned order or the fixed end.
+	hardEdges := map[int]map[int]bool{}
+	for g, owners := range r.must {
+		gi, ok := localOf[g]
+		if !ok {
+			continue
+		}
+		for owner := range owners {
+			oi, ok := localOf[owner]
+			if !ok {
+				continue
+			}
+			if hardEdges[gi] == nil {
+				hardEdges[gi] = map[int]bool{}
+			}
+			hardEdges[gi][oi] = true
+		}
+	}
+	if hasEnd {
+		hardEdges[stop] = map[int]bool{}
+		for i := 0; i < n; i++ {
+			hardEdges[stop][i] = true
+		}
+	}
 	oneWays := regenOneWays(l)
 	orig := make([]int, total)
 	for i := range orig {
@@ -1983,8 +2040,8 @@ func (r *regen) order(targets []dungeon.Point, start dungeon.Point, end dungeon.
 		if len(cand) != total {
 			continue // regenOrder's cycle breaker can stop early; a short order is no order
 		}
-		cand = regenTwoOpt(l, from, cand, before)
-		cand = regenOrOpt(l, from, cand, before)
+		cand = regenTwoOpt(l, from, cand, hardEdges)
+		cand = regenOrOpt(l, from, cand, hardEdges)
 		cost := regenTourCost(l, from, cand)
 		// An uphill hop is what the order exists to avoid: it costs more than any length.
 		for i := 0; i+1 < len(cand); i++ {

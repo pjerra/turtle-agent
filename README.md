@@ -929,8 +929,9 @@ navmesh test for the drafts (`TestPlansOnNavmeshWhereTheMachineHasIt`) logs how 
 `go run ./tools/dungeongen route-regen --mmaps DIR --leg N [--leg N...] [--dry-run] [--dir dungeons] [--spawns DIR] [--out FILE] [--force] <plan>`
 regenerates one leg's route from the navmesh (the method of the Zul'Gurub waypoint audit, `research/zg-waypoints/WAYPOINT-AUDIT.md` §4.2): it keeps the leg's anchors (its `to`, gm_cross
 vias, every pull group's stand or last approach point, the boss), moves a failing anchor to the cheapest passing point within 25 yd (dry plain ground, a stand's wall and ledge clearance,
-aggro + 8 of every unpulled unit, patrol + 5), orders the pulls by a navmesh path-length matrix that flags one-way pairs (a path over twice its reverse) and scores the original,
-nearest-neighbour and constrained orders so no uphill return is scheduled while a downhill one exists, plans each anchor pair round the packs not pulled yet and the patrol lanes,
+aggro + 8 of every unpulled unit, patrol + 5), orders the pulls by a navmesh path-length matrix on the walkable mesh (so a stop across a lake has a finite distance) that flags
+one-way pairs (a path over twice its reverse) and scores the original, nearest-neighbour and constrained orders so no uphill
+return is scheduled while a downhill one exists, ending the leg at the next leg's first point, plans each anchor pair round the packs not pulled yet and the patrol lanes,
 string-pulls the path with clearance, spaces the kept points 8-45 yd apart (one hop up to 110 yd where a split cannot pass), and writes them as the groups' `approach` points (or the
 leg's `via`), so the exporter has nothing to cut. Water is left out of the planning where the plain ground reaches; a crossing stays one hop between banks. A stand whose route cannot
 be kept clear keeps the written approach when that passes the rules (dry, no hop the exporter would cut) and is otherwise dropped for the run leader to approach itself, with a note.
