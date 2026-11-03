@@ -9,14 +9,15 @@ import (
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
-// The terrace pull (Arlokk leg, pull 14: the row over the G13/G16 terrace at
-// -11496.4 -1626.5 60.4, step 29 of the export) estimates 27 bodies with the
+// The terrace pull (Arlokk leg, pull 13 on this base: the row over the
+// G13/G16 terrace at -11496.4 -1626.5 60.4) estimates 27 bodies with the
 // committed fixture (mmaps-free path, LOS always seen): the G12/G13/G16/G17
 // packs joined by the 20 yd ring (cross-pack gaps 11.0-19.5 yd) plus their
-// pack closures. The neighbouring terrace rows (pulls 13, 16, 17) estimate the
-// same 27; the pin holds this one row by its number and bodies, so a ring or
-// reach change that breaks the set joins shows up here, not just in the
-// per-plan count.
+// pack closures. It was pull 14 on origin/dev: walk 28's 27-unit terrace pull
+// (the Arlokk plan merge) puts the one big row one place earlier, and the next
+// row (upper north, 4 entries) now estimates 31; the pin holds the 27-body row
+// by its number and bodies, so a ring or reach change that breaks the set
+// joins shows up here, not just in the per-plan count.
 func TestZulGurubArlokkTerraceIsOneTwentySevenPull(t *testing.T) {
 	p, err := dungeon.Load("../../dungeons/zul_gurub.json")
 	if err != nil {
@@ -41,15 +42,15 @@ func TestZulGurubArlokkTerraceIsOneTwentySevenPull(t *testing.T) {
 	}
 	terrace := -1
 	for i, f := range found {
-		if f.Leg == 4 && f.Pull == 14 {
+		if f.Leg == 4 && f.Pull == 13 {
 			terrace = i
 		}
 	}
 	if terrace < 0 {
-		t.Fatalf("no pull 14 on leg 4: %v", found)
+		t.Fatalf("no pull 13 on leg 4: %v", found)
 	}
 	if found[terrace].Bodies != 27 {
-		t.Fatalf("leg 4 pull 14 estimates %d bodies, want 27: %s", found[terrace].Bodies, found[terrace].Summary)
+		t.Fatalf("leg 4 pull 13 estimates %d bodies, want 27: %s", found[terrace].Bodies, found[terrace].Summary)
 	}
 }
 
@@ -66,7 +67,7 @@ var pullSizeKnownCounts = map[string]int{
 	// warns on most of its pulls (mmaps-free path, LOS always seen).
 	"ragefire_chasm": 28, "wailing_caverns": 54, "deadmines": 131,
 	"uldaman": 58, "zulfarrak": 53, "karazhan_crypt": 125,
-	"molten_core": 21, "blackwing_lair": 40, "zul_gurub": 95,
+	"molten_core": 21, "blackwing_lair": 40, "zul_gurub": 88, // re-pinned on the batch tree (was 95): the walk 26b Marli order, walk 28's 27-unit Arlokk pull and walk 29's legs 5/6 pull fewer bodies per row.
 	"ruins_of_ahnqiraj": 32, "temple_of_ahnqiraj": 74, "naxxramas": 150,
 	"lower_karazhan_halls": 79, "upper_karazhan_halls": 30,
 	"emerald_sanctum": 7, "timbermaw_hold": 27,

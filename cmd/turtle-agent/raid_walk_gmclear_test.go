@@ -76,7 +76,7 @@ func TestParseGMClearRefusals(t *testing.T) {
 	}
 }
 
-// gmClearPack plans the ZG pack of leg 2 group 1 (nine members) from the export in dir and returns it with its members' world guids.
+// gmClearPack plans the ZG pack of leg 2 group 2 (nine members: the walk-26b pack 0 stand pull) from the export in dir and returns it with its members' world guids.
 func gmClearPack(t *testing.T, dir string) (raidwalk.GMClearPack, []packet.GUID) {
 	t.Helper()
 	res, err := planexport.Build(zgPlan(t), planexport.Options{})
@@ -87,7 +87,7 @@ func gmClearPack(t *testing.T, dir string) (raidwalk.GMClearPack, []packet.GUID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	packs, err := raidwalk.PlanGMClear(res.Rows, world, []raidwalk.GMClearSpec{{Leg: "2", Groups: []int{1}}})
+	packs, err := raidwalk.PlanGMClear(res.Rows, world, []raidwalk.GMClearSpec{{Leg: "2", Groups: []int{2}}})
 	if err != nil || len(packs) != 1 {
 		t.Fatalf("packs %v, err %v", packs, err)
 	}
@@ -161,7 +161,7 @@ func gmClearFarExport(t *testing.T, member uint64) string {
 // and marks the summary ASSISTED. It does this after the corridor clear and before the quiet check.
 func TestPlaceGMClearKillsWholePackAndMarksSummary(t *testing.T) {
 	f, _ := newPlaceFixture(t)
-	f.opts.gmClear = stringList{"2:1"}
+	f.opts.gmClear = stringList{"2:2"}
 	f.opts.gmClearSpawns = gmClearZGSpawns
 	pack, guids := gmClearPack(t, gmClearZGSpawns)
 	if len(guids) < 2 {
@@ -218,7 +218,7 @@ func TestPlaceGMClearKillsWholePackAndMarksSummary(t *testing.T) {
 	}
 	nKilled := 0
 	for _, e := range sum.GMClear {
-		if !e.Killed || e.Leg != pack.Leg || e.Group != "1" || e.Entry == 0 || !strings.HasPrefix(e.GUID, "0xF130") {
+		if !e.Killed || e.Leg != pack.Leg || e.Group != "2" || e.Entry == 0 || !strings.HasPrefix(e.GUID, "0xF130") {
 			t.Errorf("entry %+v", e)
 		}
 		if e.Reason == raidwalk.GMClearAlreadyDead {
@@ -261,7 +261,7 @@ func TestPlaceGMClearKillsWholePackAndMarksSummary(t *testing.T) {
 			t.Errorf("run.log lacks %q", want)
 		}
 	}
-	if lines == 0 || !strings.Contains(string(runLog), "("+pack.Leg+":1)") {
+	if lines == 0 || !strings.Contains(string(runLog), "("+pack.Leg+":2)") {
 		t.Errorf("run.log:\n%s", runLog)
 	}
 	// The report reads the folder's summary and marks itself.
@@ -272,7 +272,7 @@ func TestPlaceGMClearKillsWholePackAndMarksSummary(t *testing.T) {
 	if code := raidWalkReportCmd([]string{f.out}, &out, &errb); code != exitOK {
 		t.Fatalf("report exit %d: %s", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "ASSISTED") || !strings.Contains(out.String(), "| "+pack.Leg+" | 1 |") || strings.Contains(out.String(), "PARTIAL") {
+	if !strings.Contains(out.String(), "ASSISTED") || !strings.Contains(out.String(), "| "+pack.Leg+" | 2 |") || strings.Contains(out.String(), "PARTIAL") {
 		t.Fatalf("report:\n%s", out.String())
 	}
 }
@@ -281,7 +281,7 @@ func TestPlaceGMClearKillsWholePackAndMarksSummary(t *testing.T) {
 // goes on).
 func TestPlaceGMClearRetriesOnceAndReportsSurvivors(t *testing.T) {
 	f, _ := newPlaceFixture(t)
-	f.opts.gmClear = stringList{"2:1"}
+	f.opts.gmClear = stringList{"2:2"}
 	f.opts.gmClearSpawns = gmClearZGSpawns
 	pack, guids := gmClearPack(t, gmClearZGSpawns)
 	slow, stubborn := guids[0], guids[1]
@@ -352,7 +352,7 @@ func TestPlaceGMClearVisitsMembersOutsideTheViewAndReadsTwice(t *testing.T) {
 		t.Fatalf("a pack wider than the view needs several stops, has %d", n)
 	}
 	f, _ := newPlaceFixture(t)
-	f.opts.gmClear = stringList{"2:1"}
+	f.opts.gmClear = stringList{"2:2"}
 	f.opts.gmClearSpawns = dir
 	reads := 0
 	f.agent.unitsFn = func(int) []objects.Unit {
@@ -403,7 +403,7 @@ func TestPlaceGMClearVisitsMembersOutsideTheViewAndReadsTwice(t *testing.T) {
 // With no pack member ever in view, every expected member is recorded as not seen, the clear is PARTIAL, and the walk still reads twice.
 func TestPlaceGMClearNothingInViewIsPartial(t *testing.T) {
 	f, _ := newPlaceFixture(t)
-	f.opts.gmClear = stringList{"2:1"}
+	f.opts.gmClear = stringList{"2:2"}
 	f.opts.gmClearSpawns = gmClearZGSpawns
 	pack, _ := gmClearPack(t, gmClearZGSpawns)
 	reads := 0
@@ -469,7 +469,7 @@ func TestValidateGMClearUnknownGroup(t *testing.T) {
 		}
 	}
 	f2, _ := newPlaceFixture(t)
-	f2.opts.gmClear = stringList{"2:1"}
+	f2.opts.gmClear = stringList{"2:2"}
 	f2.opts.gmClearSpawns = t.TempDir()
 	if code := f2.run(context.Background()); code != exitUsage || !strings.Contains(f2.stderr.String(), "no world export") {
 		t.Fatalf("exit %d, stderr %q", code, f2.stderr.String())
@@ -479,13 +479,13 @@ func TestValidateGMClearUnknownGroup(t *testing.T) {
 // The dry run lists the packs and sends nothing.
 func TestDryRunListsGMClearPacks(t *testing.T) {
 	f, _ := newPlaceFixture(t)
-	f.opts.gmClear = stringList{"2:1"}
+	f.opts.gmClear = stringList{"2:2"}
 	f.opts.gmClearSpawns = gmClearZGSpawns
 	f.opts.dryRun = true
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s", code, f.stderr.String())
 	}
-	if !strings.Contains(f.stdout.String(), "8c gm-clear: high_priestess_marli:1 pack ") {
+	if !strings.Contains(f.stdout.String(), "8c gm-clear: high_priestess_marli:2 pack ") {
 		t.Fatalf("dry run:\n%s", f.stdout.String())
 	}
 }

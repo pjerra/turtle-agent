@@ -2405,18 +2405,22 @@ func TestRaidWalkReviveRefusalSummary(t *testing.T) {
 	})
 	t.Run("critter is not a blocker", func(t *testing.T) {
 		f, _ := newPlaceFixture(t)
-		f.opts.wipeRest = time.Minute
-		_, place := placePlanRows(t)
+		f.opts.wipeRest = 5 * time.Minute
 		f.agent.startReply = zgPlaceReply(t)
 		// Walk 27 C restart 2: a moving Snake 2914 72 yd out must not join the blocker list, so the idle Mad Servant
-		// 16.8 yd from the point is the only blocker and all_idle is true (the wait is pointless, the mob is off its
-		// spawn). The critter is still in the read, as it was in the evidence.
+		// 16.8 yd from the commander is the only blocker and all_idle is true (the wait is pointless, the mob is off
+		// its spawn). The critter is still in the read, as it was in the evidence. The two stand relative to the
+		// commander, so the point, the fallback rows and the entrance all stay refused and the refusal reaches the
+		// summary (#392's entrance fallback runs before it).
 		f.agent.unitsFn = func(int) []objects.Unit {
+			f.agent.mu.Lock()
+			x, y, z := f.agent.x, f.agent.y, f.agent.z
+			f.agent.mu.Unlock()
 			return []objects.Unit{
 				{Type: "creature", Name: "Mad Servant", Entry: 15111, Hostile: true, Level: 61, MaxHealth: 4000,
-					X: place.Point.X + 16.8, Y: place.Point.Y, Z: place.Point.Z},
+					X: x + 16.8, Y: y, Z: z},
 				{Type: "creature", Name: "Snake", Entry: 2914, Hostile: true, Level: 1, MaxHealth: 8, Moving: true,
-					X: place.Point.X + 72, Y: place.Point.Y, Z: place.Point.Z},
+					X: x + 72, Y: y, Z: z},
 			}
 		}
 		wipeAfterStart(f)
