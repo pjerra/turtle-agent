@@ -415,6 +415,52 @@ func (w *walk) placeInstanceIs(ctx context.Context, want float64) error {
 	return nil
 }
 
+// placeHakkarStart says the placement's start is a Hakkar leg (the row a --from "step N" lands on too, so the check
+// is not tied to how the start was named).
+func (w *walk) placeHakkarStart() bool {
+	return w.place != nil && raidwalk.PlaceLegName(w.rows, w.place.Start) == "hakkar"
+}
+
+// placePriestsDone refuses a placed Hakkar start unless the instance data shows the five High Priests DONE. Hakkar wears
+// one Hakkar Power 24692 stack per priest whose instance state is not DONE (+20 % damage and +10 % max health each),
+// and Zul'Gurub walk 33's fresh start at the Hakkar leg died in 25-36 s per pull. The saved instance data is the only
+// read of that state this core exposes (its instance scripts are C++: Map:GetInstanceData is Eluna data only), so its
+// five leading fields are the check; 3 is DONE. --allow-priests-alive skips it, for a deliberate repro only.
+func (w *walk) placePriestsDone(ctx context.Context) error {
+	if !w.placeHakkarStart() {
+		return nil
+	}
+	if w.opts.allowPriestsAlive {
+		w.note("place: --allow-priests-alive: the Hakkar start does not check the five High Priests' instance states")
+		return nil
+	}
+	out, err := w.tt(ctx, "q inst")
+	if err != nil {
+		return stopf(exitRaidWalkFailed, "place: the Hakkar start's instance data: q inst: %v", err)
+	}
+	body, ok := ttLast(out)
+	if !ok {
+		return stopf(exitRaidWalkFailed, "place: the Hakkar start's instance data: q inst gave no reply")
+	}
+	saved := strOf(body.raw, "saved")
+	if saved == "" {
+		why := strOf(body.raw, "saved_err")
+		if why == "" {
+			why = "no saved instance data"
+		}
+		return stopf(exitRaidWalkFailed, "place: cannot read the instance data (%s): the five High Priests' states are unknown, so a Hakkar start would risk Hakkar Power; run the priest legs first", why)
+	}
+	fields := strings.Fields(saved)
+	done := len(fields) >= 5
+	for i := 0; done && i < 5; i++ {
+		done = fields[i] == "3"
+	}
+	if !done {
+		return stopf(exitRaidWalkFailed, "place: the five High Priests are not DONE in this instance (saved %q): Hakkar would wear Hakkar Power; run the priest legs first", saved)
+	}
+	return nil
+}
+
 // placeFloor checks the toolkit's floor under the start point (spec 5 step 5).
 func (w *walk) placeFloor(ctx context.Context, p dungeon.Point) error {
 	out, err := w.tt(ctx, fmt.Sprintf("q floor %s %s %s", num32(p.X), num32(p.Y), num32(p.Z)))
@@ -1436,6 +1482,11 @@ func (w *walk) phasePlace(ctx context.Context) error {
 	}
 	w.placeInst = inst
 	w.placeSum.Instance = inst
+	// 4b. a placed Hakkar start: the instance data must show the five High Priests DONE, or Hakkar would wear Hakkar
+	// Power and the run would die at its first pull (the run leader's pull gate is the other half).
+	if err := w.placePriestsDone(ctx); err != nil {
+		return err
+	}
 	// 5-9. the start point, the corridor, the quiet, the raid's move and the frames, retried in THIS instance: walk 33
 	// burned a fresh instance for every quiet refusal and every post-place fight. A quiet or a post-place fight moves
 	// the attempt one move row back, up to placeRetreatRows; the last one may GM-kill only the blocking units when
@@ -1757,6 +1808,9 @@ func (w *walk) placeReuse(ctx context.Context) error {
 	}
 	w.placeInst = inst
 	w.placeSum.Instance = inst
+	if err := w.placePriestsDone(ctx); err != nil {
+		return err
+	}
 	w.note("place: --reuse-instance: keeping the raid's instance %.0f (no fresh instance is entered or counted)", inst)
 	for _, warn := range w.gmClearWarn {
 		w.logLine(w.env.now(), warn)
@@ -1823,6 +1877,9 @@ func (w *walk) placeResume(ctx context.Context) error {
 	}
 	if inst != w.placeInst {
 		return stopf(exitRaidWalkFailed, "place: --reuse-instance: the existing bind named instance %.0f, but .go entered %.0f: the bind is gone; run without --reuse-instance", w.placeInst, inst)
+	}
+	if err := w.placePriestsDone(ctx); err != nil {
+		return err
 	}
 	if err := w.placeFloor(ctx, p); err != nil {
 		return err

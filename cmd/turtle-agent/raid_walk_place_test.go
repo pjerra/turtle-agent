@@ -100,6 +100,11 @@ type placeToolkit struct {
 	// placeAll says the default place handler moves every hire (the zero value leaves the last one behind).
 	placeAll bool
 
+	// saved is the instance data `q inst` reports (the toolkit's `saved`); savedErr its read error (the toolkit's
+	// `saved_err`, "unsafe_methods_off" when Eluna's unsafe methods are off). Both empty: the toolkit's null.
+	saved    string
+	savedErr string
+
 	quietCalls int
 	quiets     []string
 	cleartos   []string
@@ -127,7 +132,14 @@ func (p *placeToolkit) answer(cmd string) (ttResult, error) {
 		if armed {
 			inst = other
 		}
-		return ttReplyOf(p.t, map[string]any{"map": 309, "inst": inst}), nil
+		body := map[string]any{"map": 309, "inst": inst, "saved": nil}
+		if p.saved != "" {
+			body["saved"] = p.saved
+		}
+		if p.savedErr != "" {
+			body["saved_err"] = p.savedErr
+		}
+		return ttReplyOf(p.t, body), nil
 	case strings.HasPrefix(cmd, "q group of="):
 		return ttReplyOf(p.t, map[string]any{"map": 309, "inst": p.inst, "members": p.members()}), nil
 	case strings.HasPrefix(cmd, "q floor"):
@@ -448,6 +460,94 @@ func TestPlaceInstanceMismatchClearsNothing(t *testing.T) {
 	}
 	if sum := f.summary(); !strings.Contains(sum.EndReason, "the commander is in instance 104, the raid in 103") {
 		t.Fatalf("end reason %q", sum.EndReason)
+	}
+}
+
+// placeQueueFrom is the run's own status lines for a placed walk from another leg (newPlaceFixture's queue is the
+// thekal start's).
+func placeQueueFrom(n zgPlaceNums, leg string) []queuedEvent {
+	return []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|%s|move|walk|walking", n.start, n.total, leg)},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|%s|move|walk|stopped before step %d (until boss): the party stays where it stands", n.start+1, n.total, leg, n.until)},
+	}
+}
+
+// placeHakkarFixture is a placed Hakkar start (ZG leg 8) whose `q inst` reports `saved` as the instance data.
+func placeHakkarFixture(t *testing.T, saved string) (*fixture, *placeToolkit, zgPlaceNums) {
+	t.Helper()
+	f, p := newPlaceFixture(t)
+	f.opts.from = "leg hakkar"
+	n := placeStepsFrom(t, "hakkar")
+	f.agent.startReply = placeStartReplyLeg("zul_gurub", "hakkar", n.start, n.total, n.until)
+	f.agent.startQueue = placeQueueFrom(n, "hakkar")
+	p.saved = saved
+	return f, p, n
+}
+
+// Hakkar wears one Hakkar Power 24692 stack per High Priest whose instance state is not DONE (+20 % damage and
+// +10 % max health each). A placed Hakkar start in a fresh instance (the five priests' states at 0) is refused before
+// anything is cleared or moved: Zul'Gurub walk 33 started a fresh instance at the Hakkar leg and every pull died in
+// 25-36 s. Nothing is spent on the attempt.
+func TestPlaceRefusesHakkarWithPriestsAlive(t *testing.T) {
+	saved := "0 3 3 3 3 0 0 0 0 0 11380 0" // Arlokk's state 0: alive
+	f, p, _ := placeHakkarFixture(t, saved)
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, "the five High Priests are not DONE") ||
+		!strings.Contains(sum.EndReason, saved) {
+		t.Fatalf("end reason %q does not name the priests and the saved instance data", sum.EndReason)
+	}
+	if len(p.cleartos) != 0 || len(p.places) != 0 {
+		t.Fatalf("cleared %v and placed %v with a High Priest alive", p.cleartos, p.places)
+	}
+}
+
+// The five priests DONE (3 3 3 3 3): the placed Hakkar start goes ahead as any other placed start.
+func TestPlaceAcceptsHakkarWithPriestsDone(t *testing.T) {
+	f, p, n := placeHakkarFixture(t, "3 3 3 3 3 0 0 0 0 0 11380 0")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	if len(p.places) == 0 {
+		t.Fatalf("the walk placed nothing:\n%s", f.stdout.String())
+	}
+	if sum := f.summary(); sum.Place == nil || sum.Place.Start != n.start {
+		t.Fatalf("place summary %+v, want start %d", sum.Place, n.start)
+	}
+}
+
+// --allow-priests-alive skips the check for a deliberate repro (the run leader's pull gate still holds Hakkar).
+func TestPlaceAllowPriestsAliveFlag(t *testing.T) {
+	saved := "0 3 3 3 3 0 0 0 0 0 11380 0"
+	f, p, _ := placeHakkarFixture(t, saved)
+	f.opts.allowPriestsAlive = true
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	if len(p.places) == 0 {
+		t.Fatalf("the walk placed nothing with --allow-priests-alive:\n%s", f.stdout.String())
+	}
+	if !hasNote(f.summary(), "--allow-priests-alive") {
+		t.Fatalf("notes %v", f.summary().Notes)
+	}
+}
+
+// No readable instance data (Eluna's unsafe methods off, or no saved row): the five priests' states are unknown, so
+// the placed Hakkar start is refused rather than risking Hakkar Power.
+func TestPlaceRefusesWithoutSavedData(t *testing.T) {
+	f, p, _ := placeHakkarFixture(t, "")
+	p.savedErr = "unsafe_methods_off"
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, "cannot read the instance data") {
+		t.Fatalf("end reason %q", sum.EndReason)
+	}
+	if len(p.cleartos) != 0 || len(p.places) != 0 {
+		t.Fatalf("cleared %v and placed %v without the instance data", p.cleartos, p.places)
 	}
 }
 

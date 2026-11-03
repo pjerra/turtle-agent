@@ -58,7 +58,7 @@ const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
     [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--decisions on|off] [--decisions-max-mib N]
-    [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--reuse-instance] [--dry-run]
+    [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--reuse-instance] [--allow-priests-alive] [--dry-run]
        turtle-agent raid-walk report <dir> [--spell ID] [--clock-offset 1h] [--md FILE] [--json FILE] [--out DIR]`
 
 // raidWalkPlanRe is the plan name as the server knows it (spec 3.1).
@@ -69,49 +69,52 @@ var raidWalkSpeedRe = regexp.MustCompile(`^[1-3](?:\.[0-9])?$`)
 
 // raidWalkOptions are the command's flags.
 type raidWalkOptions struct {
-	plan            string
-	server          string
-	slot            string // "" leases any free slot
-	holder          string
-	dir             string
-	sql             string
-	until           string
-	from            string
-	place           bool       // --place: start the raid partway into its instance, at the --from start (spec 3)
-	reuseInstance   bool       // --reuse-instance: a re-place keeps the raid's current instance (no fresh one is entered or counted)
-	gmClear         stringList // --gm-clear "<leg>:<group>[,<group>...]", repeatable: GM-kill those pull groups after the placement (test servers only)
-	gmClearBoss     stringList // --gm-clear-boss <leg>, repeatable: GM-kill the leg's boss and its pack
-	gmClearSpawns   string     // --gm-clear-spawns: the world export dir (default <dir>/../tools/dungeongen/testdata/map<N>)
-	speed           float64
-	hires           string
-	tier            int // --tier: the kit of a raid the committed table leaves unknown
-	tierOverride    int // --tier-override: a comparison, not a tier proof
-	enter           string
-	holdMinutes     int
-	maxRunMinutes   int
-	pausedWait      time.Duration
-	autoResume      int
-	resetWait       time.Duration
-	wipeResume      int
-	wipeRest        time.Duration
-	reviveAtRaid    bool          // --revive-at-raid (default on): a wipe recovery brings far hires to the revive point and waits for the raid to gather
-	hireSettle      time.Duration // --hire-settle: the wait after the last hire; 0 skips it (the #1367 live proof)
-	capWait         time.Duration // --instance-cap-wait: the longest the walk waits for the server's hourly instance-id count to fall
-	capFail         bool          // --instance-cap-fail: exit exitRaidWalkInstanceCap at the cap instead of waiting
-	capUnsafe       bool          // --instance-cap-unsafe: when the wait runs out or the ledger is unreadable, go on without a reservation (logged) instead of exiting exitRaidWalkInstanceCap
-	capReset        bool          // --instance-cap-reset: forget this server's ledger first (its worldserver restarted)
-	patrols         string
-	out             string
-	dashURL         string
-	dashUser        string
-	dashPassFile    string
-	decisions       bool // --decisions: pull decision captures after teardown (on by default)
-	decisionsMaxMiB int  // --decisions-max-mib: budget for the decisions pull in MiB
-	mmaps           string
-	slotsPath       string
-	binary          string
-	injects         stringList // --inject, repeatable
-	dryRun          bool
+	plan          string
+	server        string
+	slot          string // "" leases any free slot
+	holder        string
+	dir           string
+	sql           string
+	until         string
+	from          string
+	place         bool // --place: start the raid partway into its instance, at the --from start (spec 3)
+	reuseInstance bool // --reuse-instance: a re-place keeps the raid's current instance (no fresh one is entered or counted)
+	// allowPriestsAlive skips the placed Hakkar start's instance-data check (the five High Priests DONE): a deliberate
+	// repro of the Hakkar leg with Hakkar Power up, never a proof run.
+	allowPriestsAlive bool
+	gmClear           stringList // --gm-clear "<leg>:<group>[,<group>...]", repeatable: GM-kill those pull groups after the placement (test servers only)
+	gmClearBoss       stringList // --gm-clear-boss <leg>, repeatable: GM-kill the leg's boss and its pack
+	gmClearSpawns     string     // --gm-clear-spawns: the world export dir (default <dir>/../tools/dungeongen/testdata/map<N>)
+	speed             float64
+	hires             string
+	tier              int // --tier: the kit of a raid the committed table leaves unknown
+	tierOverride      int // --tier-override: a comparison, not a tier proof
+	enter             string
+	holdMinutes       int
+	maxRunMinutes     int
+	pausedWait        time.Duration
+	autoResume        int
+	resetWait         time.Duration
+	wipeResume        int
+	wipeRest          time.Duration
+	reviveAtRaid      bool          // --revive-at-raid (default on): a wipe recovery brings far hires to the revive point and waits for the raid to gather
+	hireSettle        time.Duration // --hire-settle: the wait after the last hire; 0 skips it (the #1367 live proof)
+	capWait           time.Duration // --instance-cap-wait: the longest the walk waits for the server's hourly instance-id count to fall
+	capFail           bool          // --instance-cap-fail: exit exitRaidWalkInstanceCap at the cap instead of waiting
+	capUnsafe         bool          // --instance-cap-unsafe: when the wait runs out or the ledger is unreadable, go on without a reservation (logged) instead of exiting exitRaidWalkInstanceCap
+	capReset          bool          // --instance-cap-reset: forget this server's ledger first (its worldserver restarted)
+	patrols           string
+	out               string
+	dashURL           string
+	dashUser          string
+	dashPassFile      string
+	decisions         bool // --decisions: pull decision captures after teardown (on by default)
+	decisionsMaxMiB   int  // --decisions-max-mib: budget for the decisions pull in MiB
+	mmaps             string
+	slotsPath         string
+	binary            string
+	injects           stringList // --inject, repeatable
+	dryRun            bool
 	// noPlaceRetreat is a test seam: the unit tests that pin one placement attempt turn the same-instance retreat off
 	// (the walk's own TestPlaceQuietFailureRetreatsInTheSameInstance runs it).
 	noPlaceRetreat bool
@@ -230,6 +233,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.until, "until", "boss", "boss (stops before it), boss-done (after the boss step), none, \"step N\" or \"leg L\"")
 	fs.StringVar(&o.from, "from", "", "\"leg L\" or \"step N\" for the run leader")
 	fs.Var(onOffFlag{v: &o.place, name: "--place"}, "place", "with --from: put the raid at that start inside the instance, clearing the legs it skips (Eluna test toolkit: m910q or tortoise-test2 only)")
+	fs.BoolVar(&o.allowPriestsAlive, "allow-priests-alive", false, "with --place --from a Hakkar leg: start even when the instance data does not show the five High Priests DONE (a deliberate repro only: Hakkar would wear Hakkar Power 24692, one stack per living priest)")
 	fs.BoolVar(&o.reuseInstance, "reuse-instance", false, "with --place: keep the raid's CURRENT instance (no fresh instance is entered or counted, so the instance cap is untouched). A live raid is kept; a logged-out raid is resumed from the commander's live bind; with no bind the walk says so and falls back to a fresh entry. Combines with --gm-clear")
 	fs.StringVar(&speed, "speed", "1.0", "the run's test speed, 1.0 to 3.0")
 	fs.StringVar(&o.hires, "hires", "", "the tb-raid-roster v1 file (default: from the plan's raid block)")
