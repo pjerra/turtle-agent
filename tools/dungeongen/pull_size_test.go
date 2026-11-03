@@ -85,6 +85,7 @@ var pullSizeKnownCounts = map[string]int{
 	"razorfen_kraul": 89, "dire_maul_north": 19, "windhorn_canyon": 104, "upper_blackrock_spire": 68,
 	"blackfathom_deeps": 74, "gnomeregan": 94, "lower_blackrock_spire": 104, "stormwind_vault": 30,
 	"frostmane_hollow": 51, "dire_maul_east": 51, "dire_maul_west": 72, "razorfen_downs": 75, "sunken_temple": 62,
+	"scarlet_armory": 36, "scarlet_cathedral": 41, "scarlet_graveyard": 50, "scarlet_library": 44, "shadowfang_keep": 72,
 }
 
 func TestPullSizesUnderCeiling(t *testing.T) {

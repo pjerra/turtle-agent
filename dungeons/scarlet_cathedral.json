@@ -33,7 +33,7 @@
   "legs": [
     {
       "name": "high_inquisitor_fairbanks",
-      "to": {"x": 876.701, "y": 1322.55, "z": 18.0893},
+      "to": {"x": 870.7, "y": 1322.55, "z": 18.0893},
       "pull_groups": [
         {
           "entries": [4295],
@@ -94,7 +94,7 @@
     },
     {
       "name": "scarlet_commander_mograine",
-      "to": {"x": 1131.25, "y": 1390.61, "z": 30.3824},
+      "to": {"x": 1135.25, "y": 1390.61, "z": 30.3824},
       "pull_groups": [
         {
           "entries": [4540, 4302],

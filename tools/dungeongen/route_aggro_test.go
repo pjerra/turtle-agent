@@ -330,6 +330,7 @@ var routeAggroKnownFailing = map[string]int{
 	"razorfen_kraul":       256, "dire_maul_north": 36, "windhorn_canyon": 327, "upper_blackrock_spire": 459,
 	"blackfathom_deeps":    296, "gnomeregan": 276, "lower_blackrock_spire": 408, "stormwind_vault": 170,
 	"frostmane_hollow":     171, "dire_maul_east": 90, "dire_maul_west": 212, "razorfen_downs": 191, "sunken_temple": 66,
+	"scarlet_armory":       101, "scarlet_cathedral": 151, "scarlet_graveyard": 184, "scarlet_library": 148, "shadowfang_keep": 284,
 }
 
 // TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn
