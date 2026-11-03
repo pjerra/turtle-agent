@@ -50,7 +50,7 @@ const (
 )
 
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
-    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--speed X] [--hires FILE] [--tier N|--tier-override N]
+    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
     [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--hire-settle 20s] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--dry-run]
@@ -72,7 +72,10 @@ type raidWalkOptions struct {
 	sql           string
 	until         string
 	from          string
-	place         bool // --place: start the raid partway into its instance, at the --from start (spec 3)
+	place         bool       // --place: start the raid partway into its instance, at the --from start (spec 3)
+	gmClear       stringList // --gm-clear "<leg>:<group>[,<group>...]", repeatable: GM-kill those pull groups after the placement (test servers only)
+	gmClearBoss   stringList // --gm-clear-boss <leg>, repeatable: GM-kill the leg's boss and its pack
+	gmClearSpawns string     // --gm-clear-spawns: the world export dir (default <dir>/../tools/dungeongen/testdata/map<N>)
 	speed         float64
 	hires         string
 	tier          int // --tier: the kit of a raid the committed table leaves unknown
@@ -225,6 +228,9 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.DurationVar(&o.wipeRest, "wipe-rest", 10*time.Minute, "how long a revived raid rests out of combat before the run resumes")
 	fs.DurationVar(&o.hireSettle, "hire-settle", hireSettleWait, "how long to wait after the last hire for its join summons before the refit and the bind (0 skips the wait)")
 	fs.StringVar(&o.patrols, "patrols", "", "a tb-patrols file for the revive quiet check")
+	fs.Var(&o.gmClear, "gm-clear", "TEST SERVERS ONLY, needs --place: after the placement the commander GM-kills every live unit of these pull groups of a leg, \"<leg>:<group>[,<group>...]\" (whole packs, links included); repeatable; the walk is then ASSISTED, never a real clear")
+	fs.Var(&o.gmClearBoss, "gm-clear-boss", "TEST SERVERS ONLY, needs --place: like --gm-clear for the boss of a leg (and its pack); repeatable")
+	fs.StringVar(&o.gmClearSpawns, "gm-clear-spawns", "", "the world export dir --gm-clear reads the packs from (default: <dir>/../tools/dungeongen/testdata/map<N>)")
 	fs.StringVar(&o.out, "out", "", "the output dir (default ./raid-walk-<plan>-<stamp>)")
 	fs.StringVar(&o.dashURL, "dash-url", "", "the dashboard URL (or TBDASH_URL)")
 	fs.StringVar(&o.dashUser, "dash-user", "", "the dashboard login (or TBDASH_USER; default TADASH)")
@@ -350,7 +356,43 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 			return o, exitUsage
 		}
 	}
+	// --gm-clear (the owner-approved test tool): refused outside the test servers --place already names, and without --place (the
+	// commander must stand in the raid's copy, in GM mode, before it kills anything).
+	if len(o.gmClear) > 0 || len(o.gmClearBoss) > 0 {
+		if !placeServers[o.server] {
+			fmt.Fprintf(stderr, "raid-walk: --gm-clear kills units by GM command: test servers only (%s)\n", strings.Join(placeServerList(), ", "))
+			return o, exitUsage
+		}
+		if !o.place {
+			fmt.Fprintf(stderr, "raid-walk: --gm-clear needs --place (and --from): the kills run in the raid's copy after the placement\n")
+			return o, exitUsage
+		}
+		if _, err := parseGMClearSpecs(o.gmClear, o.gmClearBoss); err != nil {
+			fmt.Fprintf(stderr, "raid-walk: %v\n", err)
+			return o, exitUsage
+		}
+	}
 	return o, exitOK
+}
+
+// parseGMClearSpecs reads every --gm-clear and --gm-clear-boss value, the group specs first.
+func parseGMClearSpecs(groups, bosses []string) ([]raidwalk.GMClearSpec, error) {
+	var out []raidwalk.GMClearSpec
+	for _, v := range groups {
+		sp, err := raidwalk.ParseGMClear(v)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sp)
+	}
+	for _, v := range bosses {
+		sp, err := raidwalk.ParseGMClearBoss(v)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sp)
+	}
+	return out, nil
 }
 
 // placeServers are the servers whose Eluna test toolkit can move a raid (spec 3). --place refuses every other one.
@@ -731,6 +773,12 @@ type walk struct {
 	placeSkipped  []raidwalk.ClearCircle // the corridor circles placeClear refused (the extra round keeps away from them)
 	placeSummoned []string
 
+	// --gm-clear: the packs validate expanded from the world export, and what the place phase tried to kill. gmClearUsed is true once
+	// the flag was given (the walk is ASSISTED even when no live unit was found).
+	gmClear     []raidwalk.GMClearPack
+	gmClearLog  []raidwalk.GMClearEntry
+	gmClearUsed bool
+
 	started     time.Time
 	ended       time.Time
 	runStarted  bool
@@ -1042,6 +1090,12 @@ func (w *walk) validate() error {
 		}
 		if long, n := placeTTMax(w.place, w.plan.Map); n > raidwalk.AllowedTTMax {
 			return stopf(exitUsage, "--place: the longest toolkit line is %d chars, over the toolkit's %d: %s", n, raidwalk.AllowedTTMax, long)
+		}
+	}
+
+	if len(w.opts.gmClear) > 0 || len(w.opts.gmClearBoss) > 0 {
+		if err := w.validateGMClear(); err != nil {
+			return err
 		}
 	}
 
@@ -1428,6 +1482,10 @@ func (w *walk) printPlan(out io.Writer) {
 		}
 		fmt.Fprintf(out, "  8b commander: .gm on; .appear <mt>; q inst, q group, q floor, q units, clearto, quiet, place <x> <y> <z> spread=5 of=<mt>; frames; cmd stay; cmd follow\n")
 	}
+	for _, pk := range w.gmClear {
+		fmt.Fprintf(out, "  8c gm-clear: %s pack %d, %d members, around %s %s %s: select each live member by guid, .die, read its death\n",
+			raidwalk.GMClearLabel(pk.Leg, pk.Group), pk.ID, len(pk.Members), num32(pk.Centroid.X), num32(pk.Centroid.Y), num32(pk.Centroid.Z))
+	}
 	start := []string{w.plan.Name}
 	start = append(start, w.fromWords...)
 	start = append(start, w.untilWords...)
@@ -1517,6 +1575,9 @@ func (w *walk) finish(code int) {
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
 		Place:         w.placeSum,
+		GMClearUsed:   w.gmClearUsed,
+		GMClear:       w.gmClearLog,
+		GMClearLegs:   raidwalk.GMClearLegs(w.gmClear),
 		BossKill:      w.bossKillSummary(),
 		BossKills:     w.bossKillSummaries(),
 		ReviveRefusal: w.reviveRefusal,

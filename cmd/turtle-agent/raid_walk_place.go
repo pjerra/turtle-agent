@@ -1431,6 +1431,10 @@ func (w *walk) phasePlace(ctx context.Context) error {
 	if err := w.placeClear(ctx); err != nil {
 		return err
 	}
+	// 6b. --gm-clear (test tool): the named packs die by GM command before the quiet check and the raid's move.
+	if err := w.placeGMClear(ctx); err != nil {
+		return err
+	}
 	// 7. the area must be quiet.
 	if err := w.placeQuiet(ctx); err != nil {
 		return err
