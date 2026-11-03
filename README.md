@@ -98,7 +98,7 @@ turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loo
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
-turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
+turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
 turtle-agent trash-check [--dir dungeons] [--sql FILE [--plan NAME]] [--spawns DIR] [--patrols FILE]... [--mmaps DIR] [--level N] [--spread YD] [--aggro-rate R] [--assist-yd 10] [--json] [--out DIR] [--dash-out FILE] [--fail-on danger|patrol|any] [<plan>|<path.json>]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent scenario check [--var NAME=VALUE]... <file>
@@ -2266,6 +2266,23 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   with 0 a late joiner can miss the refit, so that walk's numbers are a comparison only. Any `--hire-settle` below the
   default marks the summary `roster.settle_short: true` (with `roster.hire_settle_s`), and the suite's baseline pick
   skips it.
+- `--instance-cap-wait 20m`, `--instance-cap-fail`, `--instance-cap-reset`: the core lets an account enter only 5
+  distinct instance ids an hour, and its list lives in the worldserver's memory. Hires pack up to 10 a pool account, so
+  a re-placed raid (`--place`, a `walk-super.sh` restart, an idle-raid re-placement) soon meets the 6th, which is
+  refused and fails the summons. Every walk that enters a fresh instance is written to a per-server ledger
+  (`instance-cap.json` beside the slots file; entries are timestamps and the plan, the hire output does not name the
+  pool accounts, so it counts raids and can only over-count). Before the lease the walk counts the entries of the last
+  60 minutes on `--server`; at 4 or more it prints `instance cap: N fresh instances in the last hour on <server>; the
+  6th is refused by the core` and waits for the oldest to age out, at most `--instance-cap-wait` (0: warn and go on;
+  after the cap it goes on with a note). `--instance-cap-fail` exits 26 instead (`walk-super.sh` does not restart it).
+  The check and the admission are one step under the ledger's lock: a walk below 4 reserves a place (holder + pid,
+  30 minutes), the reservation counts like an entry, becomes the entry once the raid has entered and is released on
+  every exit before that, so walks that start together cannot all pass at a count of 3. A corrupt ledger is moved to
+  `instance-cap.json.corrupt-<stamp>` with a warning and a new one started; one that cannot be read at all is never
+  written over (exit 26 with `--instance-cap-fail`, else the walk waits one minute and goes on without it).
+  A worldserver restart clears the core's list, so the ledger must be cleared too: `--instance-cap-reset` forgets the
+  server's entries, and the ledger drops every entry older than a worldserver start time when one is read (no status
+  read exposes it yet, so the reset flag is the way today).
 - `--enter auto|near|tele`: `auto` is `cmd enter near` and falls back to `.tele name <hire> <entrance_tele>` once when
   the server answers `requirement`; `tele` needs the plan's `entrance_tele`.
 - `--max-run-minutes` (90) is the ceiling from `run start`; `--hold-minutes` keeps the raid bound afterwards;
