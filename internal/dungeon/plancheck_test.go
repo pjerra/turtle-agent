@@ -544,17 +544,13 @@ func TestZulfarrakOldPlanFailsCheck(t *testing.T) {
 // exported to the run leader.
 var planCheckKnownFailing = map[string]bool{
 	"temple_of_ahnqiraj":    true,
-	"stratholme_undead":     true,
 	"scarlet_graveyard":     true,
 	"razorfen_downs":        true,
 	"blackfathom_deeps":     true,
 	"black_morass":          true,
-	"blackrock_depths":      true,
 	"crescent_grove":        true,
 	"dire_maul_east":        true,
 	"dire_maul_west":        true,
-	"dragonmaw_retreat":     true,
-	"gilneas_city":          true,
 	"hateforge_quarry":      true,
 	"karazhan_crypt":        true,
 	"lower_blackrock_spire": true,

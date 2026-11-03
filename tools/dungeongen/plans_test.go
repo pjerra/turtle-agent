@@ -80,8 +80,13 @@ func TestDraftPlansAreWhatTheGeneratorWrites(t *testing.T) {
 			generated++
 		}
 	}
-	if generated == 0 || len(files) != generated {
+	if len(files) != generated {
 		t.Fatalf("%d plans generated, want the spec's %d generated plans", len(files), generated)
+	}
+	if generated == 0 {
+		// Every plan is hand-maintained now (blackrock_depths was the last generated draft): nothing to compare.
+		// TestGenerateSpecSynthetic still exercises the generator from a synthetic spec.
+		return
 	}
 	for _, f := range files {
 		want, err := os.ReadFile(f)

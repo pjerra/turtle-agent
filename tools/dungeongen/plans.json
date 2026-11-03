@@ -499,6 +499,7 @@
    "title": "Blackrock Depths",
    "map": 230,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 5000,
    "data": "map230",
    "trigger": 1466,
