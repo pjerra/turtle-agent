@@ -209,7 +209,12 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 // cutWith cuts a hop along the navmesh path. floorAware (plan-export's --floor-aware) keeps a hop of up to
 // planexport.FloorAwareHopYd whole, drops the corners a walk gains nothing from, puts the kept corners off the wall, and takes a
 // split point's z from the navmesh floor instead of the straight line between the corners.
-func cutWith(pl *navmesh.Planner, floorAware bool) planexport.CutFunc {
+// pathPlanner is the offline planner cutWith asks: navmesh.Planner is one, a test fake the other.
+type pathPlanner interface {
+	Plan(mapID uint32, from, to navmesh.Vec3) (navmesh.Path, error)
+}
+
+func cutWith(pl pathPlanner, floorAware bool) planexport.CutFunc {
 	return func(mapID uint32, from, to dungeon.Point) ([]dungeon.Point, []planexport.CutNote, error) {
 		path, err := pl.Plan(mapID, navmesh.Vec3{from.X, from.Y, from.Z}, navmesh.Vec3{to.X, to.Y, to.Z})
 		if err != nil {
@@ -219,7 +224,9 @@ func cutWith(pl *navmesh.Planner, floorAware bool) planexport.CutFunc {
 			return nil, nil, fmt.Errorf("no complete path (%s %s)", path.Status, path.Reason)
 		}
 		if floorAware {
-			return floorAwareCut(pl, mapID, path)
+			if real, ok := pl.(*navmesh.Planner); ok {
+				return floorAwareCut(real, mapID, path)
+			}
 		}
 		var via []dungeon.Point
 		prev := path.Points[0]

@@ -59,8 +59,12 @@ type Options struct {
 	Map uint32
 	// Level is the party level the aggro radius is computed at (the audit used 60).
 	Level int
-	// World is the map's world export (spawns, groups, patrol lanes). Nil skips the aggro and patrol lints.
+	// World is the map's world export (spawns, groups, patrol lanes). Nil skips the aggro, patrol and joiner lints.
 	World *worldspawn.World
+	// Raid, KillFirst and PullCeiling are the plan's pull rules (the joiner lint); zero values are a party with none.
+	Raid        bool
+	KillFirst   []uint32
+	PullCeiling int
 }
 
 // Finding is one point that fails one lint.
@@ -77,6 +81,13 @@ type Finding struct {
 	Detail string         `json:"detail"`
 	// Stand says the point is the move row a pull, boss or hold is fought from (the rules are tighter there).
 	Stand bool `json:"stand,omitempty"`
+	// Severity is SeverityError (the finding fails the check) or SeverityWarning (the default).
+	Severity string `json:"severity,omitempty"`
+	// Bodies, Ceiling, Guids and JoinerPacks carry a joiner finding's payload.
+	Bodies      int          `json:"bodies,omitempty"`
+	Ceiling     int          `json:"ceiling,omitempty"`
+	Guids       []uint32     `json:"guids,omitempty"`
+	JoinerPacks []JoinerPack `json:"joiner_packs,omitempty"`
 }
 
 func (f Finding) String() string {
@@ -108,25 +119,31 @@ func Lint(rows planexport.Rows, nav Nav, opt Options) ([]Finding, error) {
 	c.owner = owners(c.steps, opt.World)
 	var out []Finding
 	for i, s := range c.steps {
-		if !moveKind(s.Kind) {
-			continue
-		}
-		p := pointOf(s)
-		f, err := c.point(i, s, p)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, f...)
-		if prev := c.prev(i); prev >= 0 {
-			out = append(out, c.shortHop(i, s, p, pointOf(c.steps[prev]))...)
+		if moveKind(s.Kind) {
+			p := pointOf(s)
+			f, err := c.point(i, s, p)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, f...)
+			if prev := c.prev(i); prev >= 0 {
+				out = append(out, c.shortHop(i, s, p, pointOf(c.steps[prev]))...)
+			}
 		}
 		if c.gather[i] {
-			f, err := c.stand(i, s, p)
+			f, err := c.stand(i, s, pointOf(s))
 			if err != nil {
 				return nil, err
 			}
 			out = append(out, f...)
 		}
+		out = append(out, c.checkReach(i, s)...)
+		out = append(out, c.checkHopLen(i, s)...)
+		out = append(out, c.checkArrival(i, s)...)
+		out = append(out, c.checkClimbAnchor(i, s)...)
+		out = append(out, c.checkBothEndsWater(i, s)...)
+		out = append(out, c.checkRiverBelow(i, s)...)
+		out = append(out, c.checkJoiners(i, s)...)
 	}
 	return out, nil
 }
@@ -138,6 +155,9 @@ type checker struct {
 	steps  []planexport.StepRow
 	gather []bool
 	owner  map[uint64]int // spawn guid -> step number of the pull or boss row that owns it
+	// joins caches the joiner estimate: one PullSizes pass per Lint call, not one per pull row.
+	joins     []PullFinding
+	joinsDone bool
 }
 
 // moveKind says the row is a point the party walks to (a pull, boss or hold row is a fight, not a walk).
@@ -197,17 +217,25 @@ func (c *checker) point(i int, s planexport.StepRow, p dungeon.Point) ([]Finding
 		return nil, err
 	}
 	if !ok {
-		return append(out, c.finding(i, s, LintOffFloor, "no walkable polygon within 4 yd")), nil
+		f := c.finding(i, s, LintOffFloor, "no walkable polygon within 4 yd")
+		f.Severity = SeverityError
+		return append(out, f), nil
 	}
 	if d := dist3(p, point3(n)); d > OffFloorYd {
-		out = append(out, c.finding(i, s, LintOffFloor, fmt.Sprintf("the nearest floor %.1f %.1f %.1f is %.1f yd away", n[0], n[1], n[2], d)))
+		f := c.finding(i, s, LintOffFloor, fmt.Sprintf("the nearest floor %.1f %.1f %.1f is %.1f yd away", n[0], n[1], n[2], d))
+		f.Severity = SeverityError
+		out = append(out, f)
 	}
 	fl, err := c.nav.Floors(c.opt.Map, n[0], n[1], n[2]-6, n[2]+6)
 	if err != nil {
 		return nil, err
 	}
 	if here, ok := nearestFloor(fl, n[2]); ok && here.Flags&navmesh.NavWater != 0 {
-		out = append(out, c.finding(i, s, LintWater, fmt.Sprintf("the floor %.1f %.1f %.1f is NavWater", n[0], n[1], here.Z)))
+		f := c.finding(i, s, LintWater, fmt.Sprintf("the floor %.1f %.1f %.1f is NavWater", n[0], n[1], here.Z))
+		if c.gather[i] {
+			f.Severity = SeverityError // a stand, an approach end or a gather anchor in water
+		}
+		out = append(out, f)
 	}
 	limit := EdgeYd
 	if c.gather[i] {
@@ -272,7 +300,7 @@ func (c *checker) stand(i int, s planexport.StepRow, p dungeon.Point) ([]Finding
 		}
 	}
 	if worst != nil {
-		f := c.finding(i, s, LintAggro, fmt.Sprintf("%.1f yd inside the aggro+%g yd of %s %d (spawn %d at %.1f %.1f %.1f, %.1f yd away; the run has not pulled it)", -worstMargin, AggroMarginYd, worst.Name, worst.Entry, worst.GUID, worst.Pos.X, worst.Pos.Y, worst.Pos.Z, dist3(p, worst.Pos)))
+		f := c.severityFinding(i, s, LintAggro, fmt.Sprintf("%.1f yd inside the aggro+%g yd of %s %d (spawn %d at %.1f %.1f %.1f, %.1f yd away; the run has not pulled it)", -worstMargin, AggroMarginYd, worst.Name, worst.Entry, worst.GUID, worst.Pos.X, worst.Pos.Y, worst.Pos.Z, dist3(p, worst.Pos)), SeverityError)
 		f.Stand = true
 		out = append(out, f)
 	}
