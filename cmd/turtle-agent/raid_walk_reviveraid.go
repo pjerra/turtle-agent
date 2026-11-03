@@ -26,6 +26,8 @@ const (
 	reviveArriveWait = 15 * time.Second    // how long one summon gets to land before the retry
 	reviveGatherWait = 60 * time.Second    // how long the resume waits for every hire to be in range and out of combat
 	reviveReadStep   = 2 * time.Second     // the poll step of both waits
+	reviveAliveWait  = 20 * time.Second    // how long a revive waits for every revived hire's frame to show it alive
+	reviveAlivePoll  = time.Second         // the poll step of that wait
 	reviveFrameFresh = 10 * time.Second    // a hire's frame older than this says nothing about where it is
 	reviveNoDist     = -1.0                // reviveDist: no fresh frame of this hire
 	reviveOffMap     = math.MaxFloat64 / 4 // reviveDist: the hire is on another map than the plan's
@@ -82,25 +84,93 @@ func reviveAwayWords(d float64) string {
 	return reviveYdWords(d) + " away"
 }
 
-// reviveBringBack is the revive-at-raid half of a self-regroup revive: the hires are alive again (the `.revive` loop
-// and its wait are done), and the commander stands on p. Every living hire whose freshest frame is more than
-// reviveFarYd from p is summoned to it, with a log line naming the distance it came from; a hire that is not within
-// reviveArriveYd after reviveArriveWait gets one more summon; one that still does not come is named in a note and
-// counted. The summons never end the walk: the gather wait that follows decides what the resume does about a hire
-// that is still away.
-func (w *walk) reviveBringBack(ctx context.Context, p dungeon.Point, deadline time.Time) error {
-	w.reviveRead(ctx)
-	now := w.env.now()
-	var far []string
-	for _, name := range w.hireList() {
-		b, ok := w.botAt[name]
-		if !ok || b.dead {
-			continue
+// reviveSeen is what a hire's freshest frame says about the revive. Only a frame read since the revive counts: a frame
+// from before it shows the hire as the revive found it (dead, or not in the frame at all).
+type reviveSeen int
+
+const (
+	reviveSeenUnknown reviveSeen = iota // no frame since the revive shows the hire: none read, a failed view, or absent
+	reviveSeenAlive
+	reviveSeenDead
+)
+
+func (w *walk) reviveStateSince(name string, since time.Time) reviveSeen {
+	b, ok := w.botAt[name]
+	switch {
+	case !ok || b.at.Before(since):
+		return reviveSeenUnknown
+	case b.dead:
+		return reviveSeenDead
+	}
+	return reviveSeenAlive
+}
+
+// reviveAwaitAlive reads the view one frame a second until every hire in names has a frame read since `since` that
+// shows it alive, or reviveAliveWait passes, whichever is sooner and never past the recovery's deadline. The state
+// it leaves is what reviveSummonList judges by. A failed read is not an error: the hire stays unknown until a frame
+// says otherwise.
+func (w *walk) reviveAwaitAlive(ctx context.Context, names []string, since, deadline time.Time) error {
+	end := w.env.now().Add(reviveAliveWait)
+	if !deadline.IsZero() && deadline.Add(-reviveAlivePoll).Before(end) {
+		end = deadline.Add(-reviveAlivePoll)
+	}
+	for {
+		w.reviveRead(ctx)
+		waiting := false
+		for _, name := range names {
+			if w.reviveStateSince(name, since) != reviveSeenAlive {
+				waiting = true
+				break
+			}
 		}
-		if d := w.reviveDist(name, p, now); d != reviveNoDist && d > reviveFarYd {
-			far = append(far, name)
+		if !waiting || !w.env.now().Before(end) {
+			return nil
+		}
+		if err := w.recoverySleep(ctx, reviveAlivePoll, deadline); err != nil {
+			return err
 		}
 	}
+}
+
+// reviveSummonList is who the revive-at-raid summons go to, judged by each hire's frame since `since`: a hire shown
+// alive within reviveFarYd of p stays where it is; any other hire goes, far or on another map, and also a hire still
+// shown dead or not shown at all, which is summoned anyway (a summon of a living hire is harmless, a summon of a dead
+// one fails visibly). The dead and unknown ones are named in a note.
+func (w *walk) reviveSummonList(names []string, p dungeon.Point, since time.Time) []string {
+	now := w.env.now()
+	var out, unseen []string
+	for _, name := range names {
+		switch w.reviveStateSince(name, since) {
+		case reviveSeenAlive:
+			if d := w.reviveDist(name, p, now); d != reviveNoDist && d <= reviveFarYd {
+				continue
+			}
+		case reviveSeenDead:
+			unseen = append(unseen, name+" (shown dead)")
+		default:
+			unseen = append(unseen, name+" (state unknown)")
+		}
+		out = append(out, name)
+	}
+	if len(unseen) > 0 {
+		w.note("revive-at-raid: %d hire(s) not shown alive %s after the revive, summoned to the point anyway: %s", len(unseen), durWords(reviveAliveWait), strings.Join(unseen, ", "))
+	}
+	return out
+}
+
+// reviveBringBack is the revive-at-raid half of a self-regroup revive: the hires are alive again (the `.revive` loop
+// and its wait are done), and the commander stands on p. The frames are polled first (reviveAwaitAlive), then every
+// hire reviveSummonList names is summoned to p, with a log line naming the distance it came from; a hire that is not
+// within reviveArriveYd after reviveArriveWait gets one more summon; one that still does not come is named in a note
+// and counted. The summons never end the walk: the gather wait that follows decides what the resume does about a
+// hire that is still away.
+func (w *walk) reviveBringBack(ctx context.Context, p dungeon.Point, deadline time.Time) error {
+	since := w.env.now()
+	names := w.hireList()
+	if err := w.reviveAwaitAlive(ctx, names, since, deadline); err != nil {
+		return err
+	}
+	far := w.reviveSummonList(names, p, since)
 	if len(far) == 0 {
 		return nil
 	}
@@ -266,20 +336,20 @@ func (w *walk) reviveRaidAnchor(revived map[string]bool, now time.Time) (string,
 // reviveBringBackNear is --revive-at-raid for a near-wipe stop: someone is alive, so the raid is where the living
 // hires stand, and the GM is nowhere near it. The hires this recovery revived (dead lists them) are revived where
 // their corpses lie, which may be far from the raid; each one more than reviveFarYd from the anchor (or on another
-// map) is brought to it. The commander first `.appear`s at the anchor, so the `.summon`s land at the raid and not at
+// map, or not shown alive by a frame since the revive) is brought to it. The commander first `.appear`s at the anchor, so the `.summon`s land at the raid and not at
 // the GM's last spot (walk 22 F4, walk 29 S5). It records the anchor's position as the point the resume gate measures.
 func (w *walk) reviveBringBackNear(ctx context.Context, dead []string, deadline time.Time) error {
 	if !w.opts.reviveAtRaid || len(dead) == 0 {
 		return nil
 	}
-	if err := w.recoverySleep(ctx, 5*time.Second, deadline); err != nil {
-		return err
-	}
+	since := w.env.now()
 	w.reviveRead(ctx)
 	revived := map[string]bool{}
 	for _, n := range dead {
 		revived[n] = true
 	}
+	// The anchor is a living hire the revive did not touch, so it is picked before the poll: a view that fails during
+	// the poll must not cost the walk its place to bring the hires to.
 	name, anchor := w.reviveRaidAnchor(revived, w.env.now())
 	if name == "" {
 		w.note("revive-at-raid: no living hire on map %d to bring the revived hires to", w.plan.Map)
@@ -287,16 +357,12 @@ func (w *walk) reviveBringBackNear(ctx context.Context, dead []string, deadline 
 	}
 	spot := dungeon.Point{X: anchor.x, Y: anchor.y, Z: anchor.z}
 	w.reviveSpot = &spot
-	// A hire that is far from the anchor, by its fresh frame.
-	var far []string
-	for _, n := range dead {
-		if b, ok := w.botAt[n]; !ok || b.dead {
-			continue
-		}
-		if d := w.reviveDist(n, spot, w.env.now()); d != reviveNoDist && d > reviveFarYd {
-			far = append(far, n)
-		}
+	// The revived hires' frames are polled (a hire whose alive frame comes late is still brought back); the summons
+	// then go to every hire that is not shown alive within reviveFarYd of the anchor.
+	if err := w.reviveAwaitAlive(ctx, dead, since, deadline); err != nil {
+		return err
 	}
+	far := w.reviveSummonList(dead, spot, since)
 	if len(far) == 0 {
 		return nil
 	}

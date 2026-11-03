@@ -311,3 +311,158 @@ func TestRaidWalkReviveAtRaidNearWipeBringsRevivedHiresBack(t *testing.T) {
 		})
 	}
 }
+
+// nearWipeRevive runs the near-wipe stop of TestRaidWalkReviveAtRaidNearWipeBringsRevivedHiresBack with revive-at-raid
+// on: the lead alone alive at a, every other hire dead 400 yd east of it. setup runs before the run and may wrap
+// f.agent.onGM and set the view hooks. It returns the fixture and the party (the lead first).
+func nearWipeRevive(t *testing.T, setup func(f *fixture)) (*fixture, []string) {
+	t.Helper()
+	f := newFixture(t)
+	f.opts.reviveAtRaid = true
+	f.agent.startReply = startAt("onyxias_lair", 10)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	var resumeAt time.Time
+	resumeHook(f, 11, 28, &resumeAt)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: "TBM:RUN|onyxias_lair|paused|10/29|onyxia|move|walk|19 dead: 3 near wipes within 10 min (54): the run stops here. Regroup (c...)"},
+	}
+	f.agent.mu.Unlock()
+	a := [3]float32{100, 100, 50}
+	f.agent.onGM = func(line string) {
+		if !strings.HasPrefix(line, ".bot hire raid ") {
+			return
+		}
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		if len(f.agent.party) < 39 {
+			return
+		}
+		if f.agent.pos == nil {
+			f.agent.pos = map[string][3]float32{}
+		}
+		for i, n := range f.agent.party {
+			if i == 0 {
+				f.agent.pos[n] = a
+				continue
+			}
+			f.agent.dead[n] = true
+			f.agent.pos[n] = [3]float32{a[0] + reviveFar, a[1], a[2]}
+		}
+	}
+	setup(f)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	party := append([]string{}, f.agent.party...)
+	f.agent.mu.Unlock()
+	return f, party
+}
+
+// Codex HIGH on e625950: a revived hire whose alive frame comes 8 s after its revive (until then the view leaves it out,
+// so only its dead frame from before stands) is still brought back. The revive's frames are polled, not read once.
+func TestRaidWalkReviveAtRaidNearWipeWaitsForALateAliveFrame(t *testing.T) {
+	// The victim is the last hire revived, so its alive frame comes 8 s after the revive loop ends: the wait starts there,
+	// and a single read 5 s later (the old fixed sleep) would still see only the dead frame.
+	var victim string
+	var revivedAt time.Time
+	f, party := nearWipeRevive(t, func(f *fixture) {
+		prev := f.agent.onGM
+		f.agent.onGM = func(line string) {
+			prev(line)
+			if strings.HasPrefix(line, ".revive ") {
+				victim = strings.TrimPrefix(line, ".revive ")
+				revivedAt = f.clock.now()
+			}
+		}
+		f.agent.viewFn = func(int) (bool, string) {
+			if victim != "" && f.clock.now().Before(revivedAt.Add(8*time.Second)) {
+				return false, victim
+			}
+			return false, ""
+		}
+	})
+	if victim == "" {
+		t.Fatal("no `.revive` line: the near-wipe path revived nobody")
+	}
+	gm := f.agent.gmLines()
+	if got := countPrefix(gm, ".summon "); got != len(party)-1 {
+		t.Fatalf("%d summons, want %d (each revived hire, %s included): %q", got, len(party)-1, victim, gm)
+	}
+	if got := countExact(gm, ".summon "+victim); got != 1 {
+		t.Fatalf("%d summons of %s, want 1 (its late frame shows it far, not unknown): %q", got, victim, gm)
+	}
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "revive: "+victim+" brought back from 400 yd") {
+		t.Fatalf("run.log has no `revive: %s brought back from 400 yd` line:\n%s", victim, raw)
+	}
+	sum := f.summary()
+	if hasNote(sum, "state unknown") || hasNote(sum, "shown dead") {
+		t.Fatalf("notes %q name a hire not shown alive, want none: the late frame came within the wait", sum.Notes)
+	}
+	if sum.ReviveBrought != len(party)-1 || sum.ReviveUnreached != 0 {
+		t.Fatalf("counts brought %d unreached %d, want %d 0", sum.ReviveBrought, sum.ReviveUnreached, len(party)-1)
+	}
+	if sum.WipeResumes != 1 || sum.EndReason != "until" {
+		t.Fatalf("wipe_resumes %d, end %q: want the run resumed to until", sum.WipeResumes, sum.EndReason)
+	}
+}
+
+// Codex HIGH on e625950: a view that fails through the revive's wait leaves every revived hire's state unknown. None is
+// dropped: each is summoned to the point anyway, and the note names them `state unknown`.
+func TestRaidWalkReviveAtRaidNearWipeSummonsAHireWithUnknownState(t *testing.T) {
+	var victim string
+	var revived, polled bool
+	f, party := nearWipeRevive(t, func(f *fixture) {
+		prev := f.agent.onGM
+		f.agent.onGM = func(line string) {
+			prev(line)
+			switch {
+			case strings.HasPrefix(line, ".revive "):
+				if victim == "" {
+					victim = strings.TrimPrefix(line, ".revive ")
+				}
+				revived = true
+			case revived:
+				polled = true // the first GM line after the revives: the wait for the frames is over
+			}
+		}
+		// every bot_view fails from the first revive until the wait is over
+		f.agent.viewFn = func(int) (bool, string) { return revived && !polled, "" }
+	})
+	if victim == "" {
+		t.Fatal("no `.revive` line: the near-wipe path revived nobody")
+	}
+	gm := f.agent.gmLines()
+	if got := countPrefix(gm, ".summon "); got != len(party)-1 {
+		t.Fatalf("%d summons, want %d (every revived hire, the unknown ones too): %q", got, len(party)-1, gm)
+	}
+	if got := countExact(gm, ".summon "+victim); got != 1 {
+		t.Fatalf("%d summons of %s, want 1: %q", got, victim, gm)
+	}
+	sum := f.summary()
+	if !hasNote(sum, victim+" (state unknown)") {
+		t.Fatalf("notes %q, want %s named as state unknown", sum.Notes, victim)
+	}
+	if sum.ReviveBrought != len(party)-1 || sum.ReviveUnreached != 0 {
+		t.Fatalf("counts brought %d unreached %d, want %d 0 (%q)", sum.ReviveBrought, sum.ReviveUnreached, len(party)-1, sum.Notes)
+	}
+	if sum.WipeResumes != 1 || sum.EndReason != "until" {
+		t.Fatalf("wipe_resumes %d, end %q: want the run resumed to until", sum.WipeResumes, sum.EndReason)
+	}
+}
+
+// countExact counts the lines equal to line.
+func countExact(lines []string, line string) int {
+	n := 0
+	for _, l := range lines {
+		if l == line {
+			n++
+		}
+	}
+	return n
+}
