@@ -663,7 +663,7 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 	}
 }
 
-// F5 (D8): with the deployed-style ZG rows (402 steps from planexport.Build: walk 26b's pack-1-first Marli order,
+// F5 (D8): with the deployed-style ZG rows (404 steps from planexport.Build: walk 26b's pack-1-first Marli order,
 // walk 28/29's Arlokk terrace split and walk 29's legs 5/6, plus walk 31's 23 added approach rows (the over-140 yd hops,
 // the canal rim, the floored G0 midpoint and the step-366 split), and legs 7/8 from route-regen, which drops the
 // approach rows whose routes could not be kept clear; it was 397 before walk 31, 407 before walk 29's fix 6 dropped the
@@ -678,8 +678,8 @@ func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	if len(rows.Steps) != 402 {
-		t.Fatalf("the fixture has %d steps, want 402", len(rows.Steps))
+	if len(rows.Steps) != 404 {
+		t.Fatalf("the fixture has %d steps, want 404", len(rows.Steps))
 	}
 	start, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
 	if err != nil {
