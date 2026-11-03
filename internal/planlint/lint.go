@@ -155,6 +155,9 @@ type checker struct {
 	steps  []planexport.StepRow
 	gather []bool
 	owner  map[uint64]int // spawn guid -> step number of the pull or boss row that owns it
+	// joins caches the joiner estimate: one PullSizes pass per Lint call, not one per pull row.
+	joins     []PullFinding
+	joinsDone bool
 }
 
 // moveKind says the row is a point the party walks to (a pull, boss or hold row is a fight, not a walk).

@@ -411,10 +411,13 @@ func (c *checker) checkJoiners(i int, s planexport.StepRow) []Finding {
 	if row < 0 {
 		return nil
 	}
-	found := PullSizes(rows, c.opt.World.Spawns, c.opt.World, func(sp worldspawn.Spawn) bool { return sp.Hostile() && sp.LevelMax > 1 }, PullOptions{
-		PartyLevel: c.opt.Level, Raid: c.opt.Raid, Ceiling: c.opt.PullCeiling, KillFirst: c.opt.KillFirst, Fight: true, Joiners: true, All: true,
-	})
-	for _, f := range found {
+	if !c.joinsDone {
+		c.joins = PullSizes(rows, c.opt.World.Spawns, c.opt.World, func(sp worldspawn.Spawn) bool { return sp.Hostile() && sp.LevelMax > 1 }, PullOptions{
+			PartyLevel: c.opt.Level, Raid: c.opt.Raid, Ceiling: c.opt.PullCeiling, KillFirst: c.opt.KillFirst, Fight: true, Joiners: true, All: true,
+		})
+		c.joinsDone = true
+	}
+	for _, f := range c.joins {
 		if f.Row != row {
 			continue
 		}
