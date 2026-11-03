@@ -738,3 +738,30 @@ func TestLookDoesNotChaseAPathThatNeverGetsInView(t *testing.T) {
 		}
 	}
 }
+
+// A first approach point past the run leader's 150 yd react distance warns the hop lint (a warning, not a
+// failure: the exporter still cuts the walk into path rows, and older plans carry such hops): the order to walk there
+// as one `cmd move` is refused, so the plan must cut it with intermediate waypoints. Later approach points leave as
+// path rows on export and are not linted.
+func TestPlanCheckFlagsAHopPastTheReactDistance(t *testing.T) {
+	leg := Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{
+		{Entries: []uint32{1}, Positions: []Point{{50, 0, 0}}, Approach: []Point{{200, 0, 0}}},
+	}}
+	res := checkLegs(t, fakeNav{}, 0, leg)
+	if !res.OK() {
+		t.Errorf("the hop lint warns, it does not fail: %q", issueReasons(res.Issues))
+	}
+	// The pack centre (50,0) is within the run leader's sight of the to (0,0), so the 200 yd first approach is one
+	// `cmd move` and warns. A pack past RunLeaderSeeYd gets the run leader's own hops instead (the RunLeaderReach
+	// warning's case) and is not linted: group 2's centre (400,0) is 400 yd out.
+	if got, want := issueReasons(res.Warnings), "0/run leader pull group 1 approach 0/1/long hop"; got != want {
+		t.Errorf("warnings %q, want %q", got, want)
+	}
+	leg = Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{
+		{Entries: []uint32{1}, Positions: []Point{{400, 0, 0}}, Approach: []Point{{310, 0, 0}}},
+	}}
+	res = checkLegs(t, fakeNav{}, 0, leg)
+	if got := issueReasons(res.Warnings); got != "" {
+		t.Errorf("warnings %q, want none: the run leader walks its own hops to an unseen pack", got)
+	}
+}
