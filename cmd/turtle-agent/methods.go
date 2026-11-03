@@ -164,6 +164,10 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	srv.Register("gm", rpc.Typed(func(ctx context.Context, p gmParams) (empty, error) {
 		return empty{}, rpcErr(cur().GM(ctx, p.Text))
 	}))
+	// gm_kill is the test tool of `raid-walk --gm-clear`: select the creature by guid, wait for the server to show it, send ".die".
+	srv.Register("gm_kill", rpc.Typed(func(ctx context.Context, p guidParams) (empty, error) {
+		return empty{}, rpcErr(cur().GMKill(ctx, p.GUID))
+	}))
 	srv.Register("events", rpc.Typed(func(ctx context.Context, p eventsParams) (events.Page, error) {
 		q := events.Query{Since: p.Since, Kinds: p.Kinds, PartyOnly: p.PartyOnly, Limit: p.Limit}
 		return readEvents(ctx, log, q, p.WaitMS), nil

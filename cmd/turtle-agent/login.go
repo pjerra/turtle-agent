@@ -356,7 +356,13 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		defer planner.Close()
 		fmt.Fprintf(stderr, "navmesh: tiles from %s\n", st.MmapsDir)
 	}
-	s := session.New(conn, sessionOptions(character, log, stderr, []string{ticket.Account, account}, password, planner, create))
+	so := sessionOptions(character, log, stderr, []string{ticket.Account, account}, password, planner, create)
+	gmOK, gmWhy := gmKillAuthorize(st, addr)
+	if gmWhy != "" {
+		fmt.Fprintln(stderr, "gm_kill: refused: "+gmWhy)
+	}
+	so.AllowGMKill = gmOK
+	s := session.New(conn, so)
 	runErr := make(chan error, 1)
 	go func() { runErr <- s.Run(context.Background()) }()
 	select {
