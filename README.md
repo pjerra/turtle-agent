@@ -944,8 +944,7 @@ creature (the spawns the row owns by entry and radius, `kill_first` rank first, 
 `leg L pull P: no target`. Every pull row of the leg is numbered in route order, under its ceiling or not. The geometry is the previous
 row's party point to this row's party point (a straight 2 yd sampled segment; the navmesh polyline needs mmaps and the straight line is the documented
 approximation, high side), the stand is the party point, and sight is always seen (high side: without mmaps there is no collision geometry to raycast
-against). An over-ceiling row never fails `-strict`: `-pull-size-strict` opts into the ceiling. A world or export the lint cannot read fails the check,
-strict or not, and the run prints `N warning(s) for <plan> as team "<team>"` after the warnings. The plan's own numbers live in the plan JSON: a `pull_group`'s `max_bodies` and the plan-wide `pull_ceiling`.
+against). An over-ceiling row never fails `-strict`: `-pull-size-strict` opts into the ceiling. `-walk-ready` instead fails on the six walk-ready findings below (plan-check's mode): over-ceiling rows are findings whether or not `accept_over_ceiling` names the reason. A world or export the lint cannot read fails the check,
 
 `internal/dungeon`'s `TestUldamanOnNavmesh` plans a `path_to` route through every waypoint of `dungeons/uldaman.json` in the order
 a run goes and asks for status `complete`; `TestUldamanPlanMatchesTheWorldExport` checks that each pack member, boss and door
@@ -1001,6 +1000,30 @@ Limits (what the check does not model): the bot's real z and the vmap floor snap
 A run that starts inside the plan is checked from where the driver puts the party (`Plan.LegStart` for `from_leg`, `Plan.GatherSpot` for `from_pull_group`; the part before is not walked).
 
 A hop the plan itself exempts, `"check_skip": "<reason>"` on a `via` point (Uldaman's two direct hops over the scorpid pit, which the navmesh cannot judge), is listed under `exempt` with the reason and not checked.
+
+**Walk-ready.** `turtle-agent plan-check --mmaps DIR --walk-ready <plan>` (and `dungeongen -check <plan> -dir <export> -walk-ready`)
+runs six lints that fail a bad plan before a walk (they exit nonzero on any finding; the accepted rows stay findings, with
+their reason). Rules 1, 3-6 share the route lints' geometry (straight 2 yd samples between the export rows' party points;
+a stand-pull row is fought from its stand) and the aggro rule (`worldspawn.AggroRadius` at the plan's party level, plus
+the party's spread and the spawn's wander, the wander clamped to 30 yd):
+
+- `over_ceiling`: a pull row whose `pull_size` estimate is above its ceiling (`max_bodies`, else `pull_ceiling`, else 8/6),
+  unless the row carries `accept_over_ceiling: "<reason>"` (the finding is kept, with the reason);
+- `point_in_water`: a plan point below the water surface inside a tabled lake basin (today only Zul'Gurub's basin,
+  x -11950..-11650, y -1820..-1440, z 0: a stand-in until the liquid-aware mmap lint exists; other maps are silent);
+- `patrol_crossing`: a patrol loop (world `movement.tsv` loops and the plan's `patrol` blocks) within aggro reach + 3 yd
+  of a walked segment before the patrol's own pull row, in its own leg;
+- `leg_start_end_exposed`: a leg's start (`to`) or end within aggro reach of a live (unpulled-by-then) spawn;
+- `unowned_near_leg`: a hostile spawn within its reach of a leg's route segment that no pull row of this leg owns
+  (the strict form of the route-aggro lint, one finding per spawn);
+- `no_quiet_start`: no quiet placement point passes the stage's quiet rule (20 yd own packs, 30 yd earlier legs, 40 yd
+  patrol loops) at the leg start and the leg lists no `place_at` (a `place_at` point is checked, not trusted).
+
+Each finding names the plan, leg, row, coordinates, the spawn or pack, the distance, and the rule. `plan-check`
+needs the map's world export next to `--dir` (`../tools/dungeongen/testdata/map<N>/creatures.tsv`, written by
+`tools/dungeongen/export.sh`); without it the walk-ready part errors instead of reporting empty. The reports that
+motivated the mode (`research/lints/WALK-READY-zul_gurub.txt`, `WALK-READY-ruins_of_ahnqiraj.txt`) hold 250 and 99
+findings against the current plans; plan data is unchanged until the plan branch sizes the rows.
 
 A **warning** (not a failure, and it never blocks a run) says a `direct` hop is not needed: the navmesh already joins its two ends with a complete, nearly straight path, so a plain
 waypoint does the same and can be sent again from wherever a fight leaves the lead bot. The check is static: it cannot see where a fight drags the lead bot, or a refusal
