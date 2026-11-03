@@ -232,6 +232,19 @@ func TestBothEndsSwimmableA2(t *testing.T) {
 	if c == nil || !strings.Contains(c.Reason, "0x81") {
 		t.Fatalf("water: %+v", rep.Steps[1].Checks)
 	}
+	// A dry start with a wet end is no swim line: only the end's own water warning.
+	dry := fakeNav{floors: func(x, y, lo, hi float32) ([]navmesh.Floor, error) {
+		if x > 0 { // the end
+			return []navmesh.Floor{{Z: lo + 5, Flags: navmesh.NavWater}}, nil
+		}
+		return nil, nil
+	}}
+	rep = run(t, rowsOf(move(-10, 0, 64.6), move(10, 0, 68.1)), dry, nil, nil)
+	for _, c := range rep.Steps[1].Checks {
+		if c.Name == planlint.LintWater && strings.Contains(c.Reason, "0x81") {
+			t.Fatalf("a dry start is a swim line: %+v", c)
+		}
+	}
 }
 
 // 5. A river 13 yd below the path warns.
