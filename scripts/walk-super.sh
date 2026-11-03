@@ -277,23 +277,35 @@ plan_of_cmd() {
   return 1
 }
 
-# move_row_before prints the last MOVE row strictly before step <want> of <plan> in the command's --sql file. Every
-# ai_dungeon_step row is one line; its kind is the fourth single-quoted field, so the k-th matching row is step k.
+# move_row_before prints the server step number of the last MOVE row strictly before step <want> of <plan> in the
+# command's --sql file. The server numbers a plan's ai_dungeon_step rows 1..N in (leg, seq) order over EVERY row,
+# whatever its kind (loot, open, rest, gossip, use_object ... take a number too; the importer keeps the file order and
+# trashcheck's orderedSteps numbers the same way). Only the kind decides a move: move, move_direct or move_hop_exact
+# (trashcheck isMove, raidwalk moveRow). Rows of other tables (ai_dungeon_leg, ai_dungeon_plan) are not steps.
 move_row_before() {
   local plan="$1" want="$2" sql
   sql="$(opt_value sql || true)"
   [[ -n "$sql" && -f "$sql" ]] || return 1
-  awk -v plan="$plan" -v want="$want" '
-    {
+  # Pass 1: "leg seq line kind" for each ai_dungeon_step row of the plan. Fields are the INSERT's (plan, leg, seq, kind, ...);
+  # the single-quoted split gives the plan in field 2, "leg, seq" in field 3 and the kind in field 4. The file line is the
+  # tie-break, so the sort is stable.
+  awk -v plan="$plan" '
+    /^INSERT INTO `/ || /^DELETE FROM `/ { in_step = ($0 ~ /^INSERT INTO `ai_dungeon_step`/); next }
+    in_step {
       n = split($0, a, "\047")
       if (n < 4 || a[2] != plan) next
-      kind = a[4]
-      if (kind != "move" && kind != "pull" && kind != "boss" && kind != "hold") next
-      count++
-      if (kind == "move" && count < want + 0) last = count
+      m = split(a[3], f, ",")
+      if (m < 3) next
+      printf "%d %d %d %s\n", f[2] + 0, f[3] + 0, NR, a[4]
+    }
+  ' "$sql" | LC_ALL=C sort -n -k1,1 -k2,2 -k3,3 | awk -v want="$want" '
+    {
+      step = NR
+      if (step >= want + 0) next
+      if ($4 == "move" || $4 == "move_direct" || $4 == "move_hop_exact") last = step
     }
     END { if (last > 0) print last; else exit 1 }
-  ' "$sql"
+  '
 }
 
 # place_count is how many placement failures at start step <step> the per-command counter file holds (either of the

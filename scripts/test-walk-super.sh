@@ -262,6 +262,8 @@ case6a() {
   local d="$T/c6a" rc runs l2 l3 i
   mkdir -p "$d"
   {
+    # The importer refuses rows before an INSERT (planexport ParseMigration): the header is part of a real --sql file.
+    printf 'INSERT INTO `ai_dungeon_step` (`plan`, `leg`, `seq`, `kind`, `entry`, `x`, `y`, `z`, `radius`, `item`, `param`, `flags`, `timeout_s`, `entries`, `comment`) VALUES\n'
     for (( i = 1; i <= 205; i++ )); do
       kind=move
       (( i % 2 == 0 )) && kind=pull
@@ -746,6 +748,57 @@ case22() {
   ok "case22 no move row in the log: the restart falls back to the leg start"
 }
 
+# case24: the server numbers every ai_dungeon_step row in (leg, seq) order (loot, open, rest, gossip, move_direct,
+# move_hop_exact ... all take a number), and the "one move row back" retreat takes the last MOVE row (move, move_direct
+# or move_hop_exact) before the start step, by its server step number. The --sql file lists leg 1 before leg 0, and an
+# ai_dungeon_leg row sits before the steps: neither may move the numbers. Plan (server steps):
+#   leg 0: 1 move, 2 loot, 3 open, 4 move_hop_exact, 5 rest, 6 gossip, 7 move_direct, 8 pull, 9 loot
+#   leg 1: 10 move, 11 wait_object, 12 move_direct
+# Two placed failures at start step 7 retreat to step 4 (the move_hop_exact); at start step 8 they retreat to step 7
+# (the move_direct). The count of move rows was 2 and 2 here, so the old code could not tell them apart.
+case24() {
+  local d rc runs l3 start want sum
+  for pair in "7 4" "8 7"; do
+    read -r start want <<<"$pair"
+    d="$T/c24-$start"
+    mkdir -p "$d"
+    {
+      printf 'DELETE FROM `ai_dungeon_leg` WHERE `plan` = %s;\n' "'zul_gurub'"
+      printf 'INSERT INTO `ai_dungeon_leg` (`plan`, `leg`, `name`, `comment`) VALUES\n'
+      printf "('zul_gurub', 0, 'move', 'not a step'),\n"
+      printf 'DELETE FROM `ai_dungeon_step` WHERE `plan` = %s;\n' "'zul_gurub'"
+      printf 'INSERT INTO `ai_dungeon_step` (`plan`, `leg`, `seq`, `kind`, `entry`, `x`, `y`, `z`, `radius`, `item`, `param`, `flags`, `timeout_s`, `entries`, `comment`) VALUES\n'
+      printf "('zul_gurub', 1, 0, 'move', 0, 0, 0, 0, 0, 0, 0, 0, 0, '', 'x'),\n"
+      printf "('zul_gurub', 1, 1, 'wait_object', 0, 0, 0, 0, 0, 0, 0, 0, 0, '', 'x'),\n"
+      printf "('zul_gurub', 1, 2, 'move_direct', 0, 0, 0, 0, 0, 0, 0, 0, 0, '', 'x'),\n"
+      printf "('zul_gurub', 0, 0, 'move', 0, 0, 0, 0, 0, 0, 0, 0, 0, '', 'x'),\n"
+      printf "('zul_gurub', 0, 1, 'loot', 0, 0, 0, 0, 0, 0, 0, 0, 0, '', 'x'),\n"
+      printf "('zul_gurub', 0, 2, 'open', 0, 0, 0, 0, 0, 0, 0, 0, 0, '', 'x'),\n"
+      printf "('zul_gurub', 0, 3, 'move_hop_exact', 0, 0, 0, 0, 0, 0, 0, 0, 0, '', 'x'),\n"
+      printf "('zul_gurub', 0, 4, 'rest', 0, 0, 0, 0, 0, 0, 0, 0, 0, '', 'x'),\n"
+      printf "('zul_gurub', 0, 5, 'gossip', 0, 0, 0, 0, 0, 0, 0, 0, 0, '', 'x'),\n"
+      printf "('zul_gurub', 0, 6, 'move_direct', 0, 0, 0, 0, 0, 0, 0, 0, 0, '', 'x'),\n"
+      printf "('zul_gurub', 0, 7, 'pull', 0, 0, 0, 0, 0, 0, 0, 0, 0, '', 'x'),\n"
+      printf "('zul_gurub', 0, 8, 'loot', 0, 0, 0, 0, 0, 0, 0, 0, 0, '', 'x');\n"
+    } >"$d/rows.sql"
+    make_cmd "$d/cmd.txt" raid-walk zul_gurub --server s --slot 2 --holder H24 \
+      --from "leg high_priestess_marli" --place --sql "$d/rows.sql" --until boss --out "$d/run0"
+    printf '18\n18\n0\n' >"$d/seq"
+    sum="${PLACE_SUMMARY/\"start_step\": 201/\"start_step\": $start}"
+    printf '%s\n%s\n' "$sum" "$sum" >"$d/sums"
+    FAKE_NO_TBM=1 FAKE_SEQ_FILE="$d/seq" FAKE_SUMMARY_SEQ_FILE="$d/sums" FAKE_ARGS_LOG="$d/args.log" \
+      "$SUPER_BIN" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log"
+    rc=$?
+    runs="$(runs_done "$d/args.log")"
+    (( rc == 0 )) || { bad "case24 start $start exit=$rc want 0"; return; }
+    (( runs == 3 )) || { bad "case24 start $start runs=$runs want 3 (retry, then one move row back)"; return; }
+    l3="$(sed -n '3p' "$d/args.log")"
+    printf '%s\n' "$l3" | grep -qF -e "--from step\\ $want " || { bad "case24 start $start: run3 is not step $want: $l3"; return; }
+    grep -qF -e "one move row back to \"step $want\"" "$d/restart.log" || { bad "case24 start $start: log missing the retreat to step $want"; return; }
+  done
+  ok "case24 server step numbers count every row (loot/open/rest/gossip); the retreat takes the last move kind (step 4 hop, step 7 direct)"
+}
+
 mutation() {
   local d="$T/mut" mrc
   mkdir -p "$d"
@@ -806,6 +859,7 @@ main() {
   if (( run_all )) || [[ "$only" == *" 21 "* ]]; then case21; fi
   if (( run_all )) || [[ "$only" == *" 22 "* ]]; then case22; fi
   if (( run_all )) || [[ "$only" == *" 23 "* ]]; then case23; fi
+  if (( run_all )) || [[ "$only" == *" 24 "* ]]; then case24; fi
   if (( run_all )); then mutation; mutation2; fi
   printf -- '----\nPASS=%d FAIL=%d\n' "$PASS" "$FAIL"
   (( FAIL == 0 ))
