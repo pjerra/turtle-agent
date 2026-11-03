@@ -314,7 +314,7 @@ var routeAggroKnownFailing = map[string]int{
 	"deadmines":            641,  // boss rows own their boss (was 661). the repo reach (AggroRadius at 18-22 plus spread and wander) outruns the old 20 yd flat line.
 	"uldaman":              249,  // boss rows own their boss (was 268). the repo reach (AggroRadius at 41-45 plus spread and wander) outruns the old 20 yd flat line.
 	"zulfarrak":            56,   // boss rows own their boss (was 66 with #391, 65 before it): a pass past a boss's own row is no finding.
-	"karazhan_crypt":       447,  // boss rows own their boss (was 459). the repo reach (AggroRadius at 59-60 plus spread and wander) outruns the old 20 yd flat line.
+	"karazhan_crypt":       439,  // waypoint pass (was 447): the moved Hivaxxis and lower-crypt stands walk past fewer later packs.
 	"molten_core":          270,  // boss rows own their boss (was 315). the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
 	"blackwing_lair":       321,  // boss rows own their boss (was 344). the repo reach (AggroRadius at 58-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
 	"zul_gurub":            856,  // re-pinned for BOTS-PATHING-WAYPOINTS items 1-8 (was 835): the leg-0 entrance stand pulls and the early Berserker rows walk beside the ramp packs before their rows (the route into the ramp is the packs' own camp), and the new Arlokk/Thekal patrol blocks add their waypoint points.: the Mar'li east-slope approach, the Arlokk per-formation rows with their own stands, the Mandokir patrol + chain rows, the Jin'do stand pulls and the Hakkar land route walk fewer later packs (the deleted fish rows carried most of the old segments).
@@ -322,9 +322,10 @@ var routeAggroKnownFailing = map[string]int{
 	"temple_of_ahnqiraj":   520,  // boss rows own their boss (was 541). the repo reach (AggroRadius at 58-60 plus the raid's 10 yd spread) still reports more than the old 419: more spawns sit inside the wider reach than the plain-pull approach skip clears.
 	"naxxramas":            647,  // boss rows own their boss (was 673). the repo reach (AggroRadius at 59-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
 	"lower_karazhan_halls": 1000, // boss rows own their boss (was 1010). the repo reach (AggroRadius at 59-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"upper_karazhan_halls": 383,  // boss rows own their boss (was 403). the live export builds now (GMCrossDirect walks the outland gm_cross gap): the check sees the island hops.
-	"emerald_sanctum":      15,   // boss rows own their boss (was 17). the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns detection 20, from 8.
+	"upper_karazhan_halls": 379,  // waypoint pass (was 383): the moved stands walk past fewer later packs.
+	"emerald_sanctum":      17,   // waypoint pass (was 15): the moved north_hall stands' segments pass two more later packs.
 	"timbermaw_hold":       214,  // boss rows own their boss (was 228). the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
+	"hateforge_quarry":     296,  // newly hand-maintained (was a generated draft): the current route passes.
 }
 
 // TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn

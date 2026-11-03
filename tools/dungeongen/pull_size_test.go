@@ -79,7 +79,7 @@ var pullSizeKnownCounts = map[string]int{
 	"molten_core": 21, "blackwing_lair": 40, "zul_gurub": 80, // re-pinned for BOTS-PATHING-WAYPOINTS items 1-8 (was 78): the leg-0 entrance stand pulls add 2 rows over a ceiling; the Arlokk rock stands moved lower but their estimates stay under.: the Arlokk 27-unit row becomes five formation rows, the Mandokir knot becomes a 1+11 row pair and the Hakkar fish rows are gone, so fewer rows carry a body estimate above a ceiling.
 	"ruins_of_ahnqiraj": 32, "temple_of_ahnqiraj": 74, "naxxramas": 150,
 	"lower_karazhan_halls": 79, "upper_karazhan_halls": 30,
-	"emerald_sanctum": 7, "timbermaw_hold": 27,
+	"emerald_sanctum": 8, "timbermaw_hold": 27, "hateforge_quarry": 127, // waypoint pass (was 7): the moved north_hall stands' estimates join one more neighbour pack. hateforge_quarry newly hand-maintained (was a generated draft): the current over-ceiling pulls.
 }
 
 func TestPullSizesUnderCeiling(t *testing.T) {
