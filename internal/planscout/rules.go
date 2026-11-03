@@ -37,4 +37,6 @@ type Options struct {
 	AggroRate float32
 	// ReactDistance is the run leader's AiPlayerbot.ReactDistance (offline: its default).
 	ReactDistance float32
+	// KillFirst ranks the live target choice like the run leader (the plan's kill_first).
+	KillFirst []uint32
 }

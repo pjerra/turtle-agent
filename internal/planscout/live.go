@@ -86,6 +86,8 @@ type LiveData struct {
 	// Aborted says the live pass stopped part-way; AbortReason says why.
 	Aborted     bool
 	AbortReason string
+	// Notes are the live pass's report notes (leases, instance cap, retries).
+	Notes []string
 }
 
 // LiveHop is one path query: a hop row from one origin of 3.2.
@@ -105,6 +107,12 @@ type LiveHop struct {
 	Anchor   dungeon.Point
 }
 
+// LiveTarget is one unit of a pull's target pack: its spawn guid (the toolkit's db guid) and entry.
+type LiveTarget struct {
+	Guid  uint32
+	Entry uint32
+}
+
 // LiveSpot is one point the live pass teleports to and reads.
 type LiveSpot struct {
 	Step  int
@@ -112,8 +120,9 @@ type LiveSpot struct {
 	Point dungeon.Point
 	// LOSPoint is where `q los` is asked from: the spot itself, or the pull's stand for a pull row.
 	LOSPoint dungeon.Point
-	// TargetGuids is the pull's target pack (pull row spots only).
-	TargetGuids []uint32
+	// TargetGuids is the pull's target pack with its entries (pull row spots only): the toolkit's `q los` needs a
+	// full creature guid (entry and counter).
+	TargetGuids []LiveTarget
 }
 
 // LiveHops lists every hop origin of the reported steps, in route order. A row without a positioned row before it is
@@ -211,19 +220,23 @@ func LiveSpots(rep *Report, in Input, w *worldspawn.World, extra []Fix) []LiveSp
 			continue
 		}
 		prev := planlint.PrevPositioned(steps, idx)
-		if prev < 0 || !gather[prev] || !moveKindOf(steps[prev].Kind) {
+		stand := prev >= 0 && gather[prev] && moveKindOf(steps[prev].Kind)
+		if stand {
+			add(LiveSpot{Step: prev + 1, Kind: "stand", Point: pointOf(steps[prev]), LOSPoint: pointOf(steps[prev])})
+		}
+		if row.Kind != planexport.KindPull && row.Kind != planexport.KindBoss {
 			continue
 		}
-		add(LiveSpot{Step: prev + 1, Kind: "stand", Point: pointOf(steps[prev]), LOSPoint: pointOf(steps[prev])})
-		if row.Kind == planexport.KindPull || row.Kind == planexport.KindBoss {
-			losPoint := pointOf(steps[prev])
-			if row.Flags&planexport.FlagStandPull != 0 {
-				if anchor := planlint.PrevPositioned(steps, prev); anchor >= 0 {
-					add(LiveSpot{Step: anchor + 1, Kind: "anchor", Point: pointOf(steps[anchor]), LOSPoint: pointOf(steps[anchor])})
-				}
+		losPoint := pointOf(row)
+		if stand {
+			losPoint = pointOf(steps[prev])
+		}
+		add(LiveSpot{Step: st.Step, Kind: "pull", Point: pointOf(row), LOSPoint: losPoint,
+			TargetGuids: liveTargetPack(planKillFirst(in), rows, owned, w, idx)})
+		if stand && row.Flags&planexport.FlagStandPull != 0 {
+			if anchor := planlint.PrevPositioned(steps, prev); anchor >= 0 {
+				add(LiveSpot{Step: anchor + 1, Kind: "anchor", Point: pointOf(steps[anchor]), LOSPoint: pointOf(steps[anchor])})
 			}
-			add(LiveSpot{Step: st.Step, Kind: "pull", Point: pointOf(row), LOSPoint: losPoint,
-				TargetGuids: liveTargetPack(rows, owned, w, idx)})
 		}
 	}
 	for _, f := range extra {
@@ -313,23 +326,23 @@ func liveSpread(opt Options) float64 {
 }
 
 // liveTargetPack is the pull's target pack: the target mob's GroupID members (planlint's target rule).
-func liveTargetPack(rows []planlint.PullRow, owned map[uint64]int, w *worldspawn.World, idx int) []uint32 {
+func liveTargetPack(killFirst []uint32, rows []planlint.PullRow, owned map[uint64]int, w *worldspawn.World, idx int) []LiveTarget {
 	if w == nil || idx < 0 || idx >= len(rows) {
 		return nil
 	}
 	mobs, entries := planlint.PullMobs(w.Spawns, livePats(w), planlint.PackIDs(w), liveKeep)
-	target := planlint.PullTarget(nil, mobs, entries, idx, rows[idx], owned)
+	target := planlint.PullTarget(killFirst, mobs, entries, idx, rows[idx], owned)
 	if target < 0 {
 		return nil
 	}
 	pack := mobs[target].GroupID
-	var out []uint32
+	var out []LiveTarget
 	for _, m := range mobs {
 		if m.GroupID == pack {
-			out = append(out, m.Guid)
+			out = append(out, LiveTarget{Guid: m.Guid, Entry: entries[m.Guid]})
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	sort.Slice(out, func(i, j int) bool { return out[i].Guid < out[j].Guid })
 	return out
 }
 
@@ -416,12 +429,16 @@ func MergeLive(rep *Report, in Input, w *worldspawn.World, live LiveData, opt Op
 			}
 		}
 		if row.Kind == planexport.KindPull || row.Kind == planexport.KindBoss {
-			targets := liveTargetPack(rows, owned, w, idx)
+			var targets []uint32
+			for _, t := range liveTargetPack(liveKillFirst(in, opt), rows, owned, w, idx) {
+				targets = append(targets, t.Guid)
+			}
 			addLive(st, liveLOSCheck(st, targets, live))
 			if w != nil && len(mobs) > 0 {
 				if units, ok := live.Units[st.Step]; ok {
 					ceiling := planlint.PullCeilingOf(planCeiling(in), row.Item, opt.Raid)
-					if c := liveJoinersCheck(st, row, idx, rows, owned, mobs, entries, units, ceiling, spread, level, rate, live); c.Name != "" {
+					if c := liveJoinersCheck(st, row, idx, rows, owned, mobs, entries, units, ceiling, spread, level, rate,
+						liveKillFirst(in, opt), live); c.Name != "" {
 						removeCheck(st, planlint.LintJoiners)
 						addLive(st, c)
 					}
@@ -429,6 +446,7 @@ func MergeLive(rep *Report, in Input, w *worldspawn.World, live LiveData, opt Op
 			}
 		}
 	}
+	rep.Notes = append(rep.Notes, live.Notes...)
 	recount(rep)
 }
 
@@ -745,7 +763,7 @@ func liveLOSCheck(st *StepResult, targets []uint32, live LiveData) Check {
 // liveJoinersCheck recomputes the pull's joiner estimate with live positions and live sight (spec 3.4).
 func liveJoinersCheck(st *StepResult, row planexport.StepRow, idx int, rows []planlint.PullRow, owned map[uint64]int,
 	mobs []aggroest.Mob, entries map[uint32]uint32, units []objects.Unit, ceiling int, spread float64, level int,
-	rate float32, live LiveData) Check {
+	rate float32, killFirst []uint32, live LiveData) Check {
 	c := Check{Name: CheckLiveJoiners, Source: SourceLive, Verdict: VerdictOK}
 	at := map[uint32]dungeon.Point{}
 	for _, u := range units {
@@ -763,7 +781,7 @@ func liveJoinersCheck(st *StepResult, row planexport.StepRow, idx int, rows []pl
 			moved++
 		}
 	}
-	target := planlint.PullTarget(nil, lmobs, entries, idx, rows[idx], owned)
+	target := planlint.PullTarget(killFirst, lmobs, entries, idx, rows[idx], owned)
 	if target < 0 {
 		return Check{}
 	}
@@ -828,6 +846,22 @@ func liveJoinersCheck(st *StepResult, row planexport.StepRow, idx int, rows []pl
 		c.Reason += fmt.Sprintf("; %d bodies over the ceiling %d", res.Bodies, ceiling)
 	}
 	return c
+}
+
+// planKillFirst is the plan's kill_first order (the live target rule).
+func planKillFirst(in Input) []uint32 {
+	if in.Plan != nil {
+		return in.Plan.KillFirst
+	}
+	return nil
+}
+
+// liveKillFirst prefers the caller's Options and falls back to the plan.
+func liveKillFirst(in Input, opt Options) []uint32 {
+	if len(opt.KillFirst) > 0 {
+		return opt.KillFirst
+	}
+	return planKillFirst(in)
 }
 
 // planCeiling is the plan's pull ceiling (0: the lint's default).

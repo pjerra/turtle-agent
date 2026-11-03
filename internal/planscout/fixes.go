@@ -94,7 +94,19 @@ func ProposeFixes(rep *Report, in Input, nav Nav, w *worldspawn.World) []Fix {
 			continue
 		}
 		for _, c := range st.Checks {
-			if c.Verdict == VerdictOK || c.Source != SourceOffline {
+			if c.Verdict == VerdictOK {
+				continue
+			}
+			switch c.Source {
+			case SourceOffline:
+			case SourceLive:
+				// The live pass's findings get the same corrections its offline twins do (revision 1 item 4).
+				switch c.Name {
+				case CheckLivePath, CheckLiveWalk, CheckLiveAggro, CheckLiveJoiners:
+				default:
+					continue
+				}
+			default:
 				continue
 			}
 			origin := st.Origin
@@ -103,17 +115,17 @@ func ProposeFixes(rep *Report, in Input, nav Nav, w *worldspawn.World) []Fix {
 				if f, ok := snapFix(rep, in, nav, st, c, origin); ok {
 					out = append(out, f)
 				}
-			case planlint.LintHop, planlint.LintArrival, planlint.LintClimb:
+			case planlint.LintHop, planlint.LintArrival, planlint.LintClimb, CheckLivePath, CheckLiveWalk:
 				if f, ok := viaFix(rep, in, nav, st, c, origin); ok {
 					out = append(out, f)
 				}
 			case planlint.LintWater:
 				out = append(out, dryFixes(rep, in, nav, &dryBudget, st, c, origin, idx)...)
-			case planlint.LintAggro:
+			case planlint.LintAggro, CheckLiveAggro:
 				if f, ok := standFix(in, nav, w, st, c, origin, idx, rows, level, spread); ok {
 					out = append(out, f)
 				}
-			case planlint.LintJoiners:
+			case planlint.LintJoiners, CheckLiveJoiners:
 				out = append(out, splitFixes(in, nav, w, st, c, origin, idx, rows, level, spread)...)
 			}
 		}

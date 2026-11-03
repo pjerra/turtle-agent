@@ -72,6 +72,9 @@ type planScoutOptions struct {
 	instanceCapWait  string
 	instanceCapFail  bool
 	instanceCapReset bool
+	// walkBudgetD and capWaitD are walkBudget and instanceCapWait parsed (the live pass's waits).
+	walkBudgetD time.Duration
+	capWaitD    time.Duration
 }
 
 // planScoutCmd checks a plan's exported rows offline (README, "Plan scout"): the placement lints, the four scout rules and
@@ -93,7 +96,7 @@ func planScoutCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	fs.StringVar(&fixOut, "fix-out", "", "write the fix file (tb-scout-fix v1) here, also with no fixes")
 	fs.StringVar(&applyTo, "apply-fixes", "", "write the patched plan copy and its diff to this folder (must not exist or be empty)")
 	fs.StringVar(&o.failOn, "fail-on", "fail", "fail or warn: which step verdict fails the run")
-	fs.StringVar(&o.live, "live", "", "run the live pass on this test server (not in this build)")
+	fs.StringVar(&o.live, "live", "", "run the live pass on this test server (m910q, tortoise-test2)")
 	fs.IntVar(&o.slot, "slot", 0, "the slot to use (3 is never allowed)")
 	fs.StringVar(&o.holder, "holder", "", "the lease holder's name (default plan-scout-<plan>)")
 	fs.StringVar(&o.slots, "slots", "", "the slots file")
@@ -129,9 +132,19 @@ func planScoutCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		fmt.Fprintln(stderr, "plan-scout: slot 3 is never used")
 		return exitSlotRefused
 	}
-	if o.live != "" {
-		fmt.Fprintf(stderr, "plan-scout: the live phase is not in this build (W3 builds it): run without --live\n")
+	if o.live != "" && !placeServers[o.live] {
+		fmt.Fprintf(stderr, "plan-scout: %q is not a test server (the live pass runs on %s only)\n", o.live, strings.Join(placeServerList(), ", "))
 		return exitLivePhaseRefused
+	}
+	var derr error
+	if o.walkBudgetD, derr = time.ParseDuration(o.walkBudget); derr != nil || o.walkBudgetD <= 0 {
+		return fail("--walk-budget takes a duration like 5m")
+	}
+	if o.capWaitD, derr = time.ParseDuration(o.instanceCapWait); derr != nil || o.capWaitD < 0 {
+		return fail("--instance-cap-wait takes a duration like 20m")
+	}
+	if o.maxMinutes < 1 {
+		return fail("--max-minutes takes at least 1")
 	}
 
 	planner := planScoutOpen(o.mmaps)
@@ -245,6 +258,36 @@ func planScoutCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		rep.Notes = append(rep.Notes, wnote)
 	}
 
+	outDir := out
+	if outDir == "" {
+		outDir = fmt.Sprintf("./plan-scout-%s-%s", rep.Plan, time.Now().Format("20060102-150405"))
+	}
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return fail("%v", err)
+	}
+
+	// The live pass (spec 5.6): the offline report is done, the live spots and hops come from it.
+	liveAborted := false
+	if o.live != "" {
+		if in.Plan == nil || in.Plan.Portal == nil {
+			return fail("--live needs the plan file (%s) with its portal", planPath)
+		}
+		preFixes := planscout.ProposeFixes(rep, in, planner, world)
+		data, code, reason := runScoutLive(ctx, &o, in, rep, world, planner, preFixes, outDir, stdout, stderr)
+		rep.Server = o.live
+		planscout.MergeLive(rep, in, world, data, planscout.Options{PartyLevel: o.partyLevel, Raid: in.Plan.IsRaid(), KillFirst: in.Plan.KillFirst})
+		switch code {
+		case exitOK:
+		case exitPlanScoutLiveAborted:
+			liveAborted = true
+			rep.Notes = append(rep.Notes, "live pass aborted: "+reason)
+			fmt.Fprintf(stderr, "plan-scout: the live pass stopped part-way: %s\n", reason)
+		default:
+			fmt.Fprintf(stderr, "plan-scout: %s\n", reason)
+			return code
+		}
+	}
+
 	// The fix file (always when asked, also with no fixes).
 	fixes := planscout.ProposeFixes(rep, in, planner, world)
 	rowsSHA := scoutRowsSHA(in.Rows)
@@ -260,13 +303,6 @@ func planScoutCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	}
 
 	// The report files.
-	outDir := out
-	if outDir == "" {
-		outDir = fmt.Sprintf("./plan-scout-%s-%s", rep.Plan, time.Now().Format("20060102-150405"))
-	}
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return fail("%v", err)
-	}
 	jsonFile := filepath.Join(outDir, "scout-"+rep.Plan+".json")
 	textFile := filepath.Join(outDir, "scout-"+rep.Plan+".txt")
 	if err := writeJSON(jsonFile, rep); err != nil {
@@ -338,6 +374,8 @@ func planScoutCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	}
 
 	switch {
+	case liveAborted:
+		return exitPlanScoutLiveAborted
 	case applyRefused, rep.Counts.Fail > 0, o.failOn == "warn" && rep.Counts.Warn > 0:
 		return exitPlanScoutFail
 	}
