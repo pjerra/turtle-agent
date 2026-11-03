@@ -132,6 +132,13 @@ type Plan struct {
 	// (or above the group's MaxBodies) is warned about by plan-check's pull_size
 	// lint. 0: the lint's default (8 for raids, 6 for parties).
 	PullCeiling int `json:"pull_ceiling,omitempty"`
+	// WalkLevel is the level the party really walks the dungeon at: the offline aggro lints (pull_size, the route and camp lints,
+	// dungeongen -camp-search) judge every wake reach against it. 0: the top of LevelBand (a raid walks at the cap, 60), see PartyWalkLevel.
+	WalkLevel int `json:"walk_level,omitempty"`
+	// TagShotYd is how far from the nearest unit of its pack the tank's tag spot may stand: the reach of the tank's ranged pull (Shoot Bow, Shoot
+	// Gun and Throw are SpellRange.dbc rangeIndex 74, 8-30 yd: TortoiseBots spell_template ids 2480, 7918, 2764). DefaultTagShotYd..: 20-35, 0: the
+	// default 30. The camp lint, the stage lint and -camp-search all read it, see TagShot.
+	TagShotYd float32 `json:"tag_shot_yd,omitempty"`
 	// CasterEntries are the creature entries the scripted pull stages' camp rule protects against (data-driven: the
 	// plan author lists the healers and casters, such as Zul'Gurub's 11830 Hakkari Priest): a stage's camp stands at
 	// least CasterCampYd from every spawn of these entries in its own and the later stages' formations, so a caster
@@ -444,6 +451,10 @@ const (
 	MaxCampPathYd = 70
 	// MaxStages is the most scripted pull stages a pull group has.
 	MaxStages = 8
+	// DefaultTagShotYd, MinTagShotYd and MaxTagShotYd bound Plan.TagShotYd: the tank's ranged pull reaches 30 yd (SpellRange.dbc index 74).
+	DefaultTagShotYd = 30
+	MinTagShotYd     = 20
+	MaxTagShotYd     = 35
 	// CasterCampYd is how far a stage's camp must stand from every caster spawn of its own and the later stages
 	// (Plan.CasterEntries), in a straight 3D line: a caster nearer can plant and hold the fight away from the raid.
 	CasterCampYd = 40
@@ -859,6 +870,8 @@ type rawPlan struct {
 	SummonedKF    []uint32          `json:"summoned_kill_first"`
 	Notes         []string          `json:"notes"`
 	PullCeiling   *int              `json:"pull_ceiling"`
+	WalkLevel     *int              `json:"walk_level"`
+	TagShotYd     *float32          `json:"tag_shot_yd"`
 	CasterEntries []uint32          `json:"caster_entries"`
 	Watchdog      *WatchdogConfig   `json:"watchdog"`
 	Avoid         []rawAvoid        `json:"avoid"`
@@ -1219,6 +1232,20 @@ func Parse(name string, data []byte) (*Plan, error) {
 			p.PullCeiling = v
 		}
 	}
+	if rp.WalkLevel != nil {
+		if v := *rp.WalkLevel; v < 1 || v > 60 {
+			c.fail("walk_level", "%d: use 1-60 (or omit it for the top of level_band)", v)
+		} else {
+			p.WalkLevel = v
+		}
+	}
+	if rp.TagShotYd != nil {
+		if v := *rp.TagShotYd; v < MinTagShotYd || v > MaxTagShotYd {
+			c.fail("tag_shot_yd", "%g: use %d-%d yards (or omit it for the tank's 30 yd ranged pull)", v, MinTagShotYd, MaxTagShotYd)
+		} else {
+			p.TagShotYd = v
+		}
+	}
 	c.entries("caster_entries", rp.CasterEntries, false)
 	if len(rp.CasterEntries) > 0 {
 		p.CasterEntries = slices.Clone(rp.CasterEntries)
@@ -1362,6 +1389,25 @@ func (c *checker) kindStatus(p *Plan, rp *rawPlan) {
 }
 
 // IsRaid says whether the plan is a raid plan.
+// PartyWalkLevel is the level the aggro lints judge wake reaches at: WalkLevel, else the top of LevelBand, else 0 (no band: no level difference).
+func (p *Plan) PartyWalkLevel() int {
+	switch {
+	case p.WalkLevel > 0:
+		return p.WalkLevel
+	case len(p.LevelBand) == 2:
+		return p.LevelBand[1]
+	}
+	return 0
+}
+
+// TagShot is the farthest a camp pull's tag spot may stand from the nearest unit of its pack, in yards.
+func (p *Plan) TagShot() float64 {
+	if p.TagShotYd > 0 {
+		return float64(p.TagShotYd)
+	}
+	return DefaultTagShotYd
+}
+
 func (p *Plan) IsRaid() bool { return p.Kind == KindRaid }
 
 // strict decodes JSON that must hold exactly one value of v's shape and no unknown field.

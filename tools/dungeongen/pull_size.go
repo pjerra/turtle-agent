@@ -131,8 +131,12 @@ func PullSizes(p *dungeon.Plan, cs []creature, w *worldspawn.World) ([]PullFindi
 				g.Drag = drag
 			}
 		}
+		level := routePartyLevel(p)
+		if rp.campPull {
+			level = routeWalkLevel(p) // a camp chain is judged at the level the raid walks at, like the camp lint
+		}
 		res := aggroest.Estimate(mobs, target, g, aggroest.Params{
-			PartyLevel: routePartyLevel(p), Rate: routeAggroRate,
+			PartyLevel: level, Rate: routeAggroRate,
 			RingYd: aggroest.RingYd, RingHops: aggroest.RingHops, FloorDz: aggroest.FloorDz,
 		})
 		ceiling := PullCeilingOf(p, rp.item)

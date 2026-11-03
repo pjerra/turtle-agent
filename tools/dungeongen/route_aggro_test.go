@@ -398,25 +398,73 @@ func TestCampTagSpotOutsideOwnPackReach(t *testing.T) {
 	if !found {
 		t.Fatalf("a tag 18 yd from its own pack unit is no finding: %v", got)
 	}
-	// Pulled back to 30 yd the tag is clean of the pack but past the shot.
-	p.Legs[0].PullGroups[0].Approach[1] = dungeon.Point{X: -30}
+	// Pulled back to 35 yd the tag is clean of the pack but past the plan's shot (default 30 yd, the tank's ranged pull).
+	p.Legs[0].PullGroups[0].Approach[1] = dungeon.Point{X: -35}
 	got, err = CampPullFindings(p, cs, map[int]bool{35: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, s := range got {
 		if strings.Contains(s, "body-pulls") {
-			t.Fatalf("a tag 30 yd out body-pulls nothing: %v", got)
+			t.Fatalf("a tag 35 yd out body-pulls nothing: %v", got)
 		}
 	}
-	found = false
-	for _, s := range got {
-		if strings.Contains(s, "over the 23.5 yd shot") {
-			found = true
-		}
+	if !hasFinding(got, "over the 30 yd shot") {
+		t.Fatalf("a tag 35 yd from its pack is past the shot: %v", got)
 	}
-	if !found {
-		t.Fatalf("a tag 30 yd from its pack is past the shot: %v", got)
+	// The shot is the plan's: 30 yd out is in the default shot and past a 25 yd one.
+	p.Legs[0].PullGroups[0].Approach[1] = dungeon.Point{X: -30}
+	if got, _ = CampPullFindings(p, cs, map[int]bool{35: true}); hasFinding(got, "yd shot") {
+		t.Fatalf("a tag 30 yd out is inside the default 30 yd shot: %v", got)
+	}
+	p.TagShotYd = 25
+	if got, _ = CampPullFindings(p, cs, map[int]bool{35: true}); !hasFinding(got, "over the 25 yd shot") {
+		t.Fatalf("a tag 30 yd out is past a 25 yd shot: %v", got)
+	}
+}
+
+// The lints judge the camp pull at the level the raid walks at: walk_level, else the top of level_band. A tag 24 yd from a level-60 unit
+// (detection 20) body-pulls it for a level-58 walker (22 + 1.5 + 1 = 24.5 yd) and not for a level-60 one (22.5 yd).
+func TestCampLintsUseTheWalkLevel(t *testing.T) {
+	p := &dungeon.Plan{Name: "probe", Map: 1, LevelBand: []int{58, 60}, Entrance: dungeon.Point{},
+		Legs: []dungeon.Leg{{
+			Name: "a", To: dungeon.Point{X: -60},
+			PullGroups: []dungeon.PullGroup{{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 0}}, Radius: 5,
+				Camp: &dungeon.Point{X: -60}, Approach: []dungeon.Point{{X: -24}}}},
+		}}}
+	cs := []creature{{GUID: 1, Entry: 1, Name: "Pack", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 0}}}
+	got, err := CampPullFindings(p, cs, map[int]bool{35: true})
+	if err != nil || hasFinding(got, "body-pulls") {
+		t.Fatalf("band top 60 is the walk level: %v %v", got, err)
+	}
+	p.WalkLevel = 58
+	if got, _ = CampPullFindings(p, cs, map[int]bool{35: true}); !hasFinding(got, "body-pulls") {
+		t.Fatalf("walk_level 58 wakes it: %v", got)
+	}
+}
+
+// The raid at the camp must not wake its own pack before the tank tags it: reach 20 + raid spread 10 for a raid plan, 20 + 3 for a party.
+func TestCampMustNotWakeItsOwnPack(t *testing.T) {
+	mk := func(campX float32) *dungeon.Plan {
+		return &dungeon.Plan{Name: "probe", Map: 1, Kind: dungeon.KindRaid, LevelBand: []int{60, 60}, Entrance: dungeon.Point{},
+			Legs: []dungeon.Leg{{
+				Name: "a", To: dungeon.Point{X: campX},
+				PullGroups: []dungeon.PullGroup{{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 0}}, Radius: 5,
+					Camp: &dungeon.Point{X: campX}, Approach: []dungeon.Point{{X: -23}}}},
+			}}}
+	}
+	cs := []creature{{GUID: 1, Entry: 1, Name: "Pack", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 0}}}
+	for _, tc := range []struct {
+		campX float32
+		bad   bool
+	}{{-29.9, true}, {-30, false}} {
+		got, err := CampPullFindings(mk(tc.campX), cs, map[int]bool{35: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bad := hasFinding(got, "wakes its own pack"); bad != tc.bad {
+			t.Errorf("camp at %g: finding %v, want %v: %v", tc.campX, bad, tc.bad, got)
+		}
 	}
 }
 

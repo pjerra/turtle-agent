@@ -11,7 +11,7 @@
 //	     and clear of the stage's own pack too (a camp inside its wake reach, aggro + raid spread, would pull it before the tank tags);
 //	  5. on the cleared route: within 10 yd of an earlier row's point or of the segment between two earlier rows (CampPullFindings' rule);
 //	tag spot (grid around the stage's units)
-//	  4. the shot: at most campShotYd from the nearest peeled unit (with mmaps, a clear navmesh ray to it), and outside every peeled unit's
+//	  4. the shot: at most Plan.TagShot (30 yd) from the nearest peeled unit (with mmaps, a clear navmesh ray to it), and outside every peeled unit's
 //	     tank wake reach + 1 yd (no body pull);
 //	  2. one pack: the estimator from the tag spot (and, for a pair, from the camp walk, the fight at the camp and the drag back) returns
 //	     exactly the stage's formations;
@@ -36,8 +36,6 @@ import (
 )
 
 const (
-	// campSearchMargin is how far beyond the peeled units the camp grid reaches: the shot (23.5) plus the drag cap (50).
-	campSearchMargin = campShotYd + dungeon.MaxCampDragYd + 2
 	// campSearchMaxPairs bounds the pairs the full estimate is run on.
 	campSearchMaxPairs = 20000
 	// campRouteYd is how close the cleared route must pass to a camp (CampPullFindings' 10 yd).
@@ -133,7 +131,7 @@ func abs32(v float32) float32 {
 func CampSearch(p *dungeon.Plan, cs []creature, w *worldspawn.World, leg, group, stage int, opt CampSearchOptions) (*CampSearchResult, error) {
 	if opt.PartyLevel > 0 {
 		q := *p
-		q.LevelBand = []int{opt.PartyLevel, opt.PartyLevel}
+		q.WalkLevel = opt.PartyLevel
 		p = &q
 	}
 	if opt.Step <= 0 {
@@ -148,6 +146,8 @@ func CampSearch(p *dungeon.Plan, cs []creature, w *worldspawn.World, leg, group,
 	if leg < 0 || leg >= len(p.Legs) {
 		return nil, fmt.Errorf("leg %d: the plan has legs 0-%d", leg, len(p.Legs)-1)
 	}
+	maxShot := p.TagShot()
+	campSearchMargin := maxShot + dungeon.MaxCampDragYd + 2 // how far beyond the peeled units the grid reaches: the shot plus the drag cap
 	l := p.Legs[leg]
 	if group < 1 || group > len(l.PullGroups) {
 		return nil, fmt.Errorf("pull group %d: leg %d (%s) has pull groups 1-%d", group, leg, l.Name, len(l.PullGroups))
@@ -287,7 +287,7 @@ func CampSearch(p *dungeon.Plan, cs []creature, w *worldspawn.World, leg, group,
 	}
 
 	floors := campFloors{pl: opt.Planner, mid: p.Map}
-	res.PartyLevel = routePartyLevel(p)
+	res.PartyLevel = routeWalkLevel(p)
 	res.PartyLevelOverride = opt.PartyLevel > 0
 	res.Mode = "no mmaps: heights come from the nearest cleared-route sample (camps) or peeled unit (tag spots); nothing is checked against the navmesh; sight is always"
 	if opt.Planner != nil {
@@ -306,7 +306,7 @@ func CampSearch(p *dungeon.Plan, cs []creature, w *worldspawn.World, leg, group,
 			mobs = append(mobs, m)
 		}
 	}
-	params := aggroest.Params{PartyLevel: routePartyLevel(p), Rate: routeAggroRate, RingYd: aggroest.RingYd, RingHops: aggroest.RingHops, FloorDz: aggroest.FloorDz}
+	params := aggroest.Params{PartyLevel: routeWalkLevel(p), Rate: routeAggroRate, RingYd: aggroest.RingYd, RingHops: aggroest.RingHops, FloorDz: aggroest.FloorDz}
 	spread := float32(aggroest.StandSpreadPartyYd)
 	if p.IsRaid() {
 		spread = float32(aggroest.StandSpreadRaidYd)
@@ -322,7 +322,7 @@ func CampSearch(p *dungeon.Plan, cs []creature, w *worldspawn.World, leg, group,
 	}
 	// verdict runs the estimate from a tag spot (with the camp walk and drag when a camp is given) and says whether exactly the stage's
 	// spawns come, with the body count.
-	verdict := func(tag dungeon.Point, camp *dungeon.Point) (bool, int) {
+	verdict := func(tag dungeon.Point, camp *dungeon.Point) (bool, int, string) {
 		target, best := -1, math.MaxFloat64
 		for _, i := range ownMobs {
 			if d := dist(tag, mobs[i].Pos); d < best {
@@ -340,15 +340,15 @@ func CampSearch(p *dungeon.Plan, cs []creature, w *worldspawn.World, leg, group,
 		for _, m := range r.Members {
 			came[m.Guid] = true
 			if !own[uint64(m.Guid)] {
-				return false, r.Bodies
+				return false, r.Bodies, fmt.Sprintf("wakes %s (guid %d) of another pack via %s", byGUID[uint64(m.Guid)].Name, m.Guid, m.Why)
 			}
 		}
 		for _, i := range ownMobs {
 			if !came[mobs[i].Guid] {
-				return false, r.Bodies
+				return false, r.Bodies, fmt.Sprintf("does not bring its own guid %d", mobs[i].Guid)
 			}
 		}
-		return true, r.Bodies
+		return true, r.Bodies, ""
 	}
 
 	// The wake reach of every other spawn at the camp (rule 3), and the units' tank wake reach (rule 4).
@@ -364,13 +364,13 @@ func CampSearch(p *dungeon.Plan, cs []creature, w *worldspawn.World, leg, group,
 		if o, ok := owners[c.GUID]; ok && o.idx <= rowIdx {
 			continue
 		}
-		if r := routeReach(p, c); r > 0 {
+		if r := routeWalkReach(p, c); r > 0 {
 			others = append(others, other{c, r})
 		}
 	}
 	unitWake := make([]float64, len(units)) // the raid's wake reach of each unit at the camp (aggro + raid spread + wander)
 	for i, u := range units {
-		unitWake[i] = routeReach(p, u)
+		unitWake[i] = routeWalkReach(p, u)
 	}
 	unitReach := make([]float64, len(units))
 	minWake := math.MaxFloat64
@@ -378,9 +378,9 @@ func CampSearch(p *dungeon.Plan, cs []creature, w *worldspawn.World, leg, group,
 		unitReach[i] = campTankReach(p, u)
 		minWake = math.Min(minWake, unitReach[i]+1)
 	}
-	if minWake > campShotYd {
+	if minWake > maxShot {
 		res.Notes = append(res.Notes, fmt.Sprintf("no tag spot can exist: every unit's tank wake reach + 1 yd is at least %.1f yd, past the %.1f yd shot (party level %d against level %d: detection range minus the level difference, plus the tank's %.1f yd spread)",
-			minWake, campShotYd, routePartyLevel(p), units[0].LevelMax, aggroest.TankSpreadYd))
+			minWake, maxShot, routeWalkLevel(p), units[0].LevelMax, aggroest.TankSpreadYd))
 	}
 
 	// Candidate camps.
@@ -474,7 +474,7 @@ func CampSearch(p *dungeon.Plan, cs []creature, w *worldspawn.World, leg, group,
 					ni, nd = i, d
 				}
 			}
-			if ni < 0 || nd > campShotYd+campFloorDz {
+			if ni < 0 || nd > maxShot+campFloorDz {
 				continue
 			}
 			z, ok := floors.z(float32(x), float32(y), units[ni].Pos.Z)
@@ -494,8 +494,8 @@ func CampSearch(p *dungeon.Plan, cs []creature, w *worldspawn.World, leg, group,
 					wake = m
 				}
 			}
-			if shot > campShotYd {
-				res.Rejected["tag: rule 4, past the 23.5 yd shot"]++
+			if shot > maxShot {
+				res.Rejected[fmt.Sprintf("tag: rule 4, past the %g yd shot", maxShot)]++
 				continue
 			}
 			if wake < 0 {
@@ -509,8 +509,8 @@ func CampSearch(p *dungeon.Plan, cs []creature, w *worldspawn.World, leg, group,
 					continue
 				}
 			}
-			if ok, _ := verdict(pt, nil); !ok {
-				res.Rejected["tag: rule 2, wakes more or less than the stage"]++
+			if ok, _, why := verdict(pt, nil); !ok {
+				res.Rejected["tag: rule 2, "+why]++
 				continue
 			}
 			tagPts = append(tagPts, tagPt{pt, shot, wake})
@@ -560,14 +560,16 @@ func CampSearch(p *dungeon.Plan, cs []creature, w *worldspawn.World, leg, group,
 		}
 		res.Pairs++
 		camp := c.pt
-		ok, bodies := verdict(t.pt, &camp)
+		ok, bodies, why := verdict(t.pt, &camp)
 		if !ok {
+			res.Rejected["pair: rule 2, "+why]++
 			continue
 		}
 		path := 0.0
 		if opt.Planner != nil {
 			pth, err := opt.Planner.Plan(p.Map, navmesh.Vec3{t.pt.X, t.pt.Y, t.pt.Z}, navmesh.Vec3{c.pt.X, c.pt.Y, c.pt.Z})
 			if err != nil || pth.Status != navmesh.Complete || pth.Length > dungeon.MaxCampPathYd {
+				res.Rejected["pair: no complete navmesh path of at most 70 yd from the tag spot to the camp"]++
 				continue
 			}
 			path = float64(pth.Length)
@@ -590,7 +592,7 @@ func (r *CampSearchResult) Format() string {
 	if r.PartyLevelOverride {
 		fmt.Fprintf(&b, "party level: %d (-camp-party-level; the lint judges the plan's own level_band[0], so a point found here may still fail it)\n", r.PartyLevel)
 	} else {
-		fmt.Fprintf(&b, "party level: %d (the plan's level_band[0])\n", r.PartyLevel)
+		fmt.Fprintf(&b, "party level: %d (the plan's walk level)\n", r.PartyLevel)
 	}
 	fmt.Fprintf(&b, "pack: %d spawns", len(r.Units))
 	for i, u := range r.Units {

@@ -278,7 +278,7 @@ func StageFindings(p *dungeon.Plan, cs []creature, w *worldspawn.World, ignore m
 						HasFight: true, Fight: st.Camp, FightSpreadYd: spread,
 						Drag: drag,
 					}, aggroest.Params{
-						PartyLevel: routePartyLevel(p), Rate: routeAggroRate,
+						PartyLevel: routeWalkLevel(p), Rate: routeAggroRate,
 						RingYd: aggroest.RingYd, RingHops: aggroest.RingHops, FloorDz: aggroest.FloorDz,
 					})
 					came := map[uint64]bool{}
@@ -330,7 +330,7 @@ func StageFindings(p *dungeon.Plan, cs []creature, w *worldspawn.World, ignore m
 					if owned && o.idx <= rowIdx {
 						continue
 					}
-					reach := routeReach(p, c)
+					reach := routeWalkReach(p, c)
 					if reach <= 0 {
 						continue
 					}

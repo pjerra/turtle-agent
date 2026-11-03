@@ -478,3 +478,35 @@ func TestRunLeaderWalkStagedGroup(t *testing.T) {
 		t.Fatalf("a stage's pack is fought at its camp: %v", got)
 	}
 }
+
+// TestWalkLevelAndTagShot: walk_level (1-60) and tag_shot_yd (20-35) are read and refused outside their range; PartyWalkLevel falls back to
+// the top of level_band and TagShot to 30 yd.
+func TestWalkLevelAndTagShot(t *testing.T) {
+	base := `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"level_band":[58,60]%s,"legs":[{"name":"a","to":{"x":0,"y":0,"z":0},
+	 "boss":{"entry":5,"position":{"x":5,"y":0,"z":0}}}]}`
+	p, err := Parse("t.json", []byte(fmt.Sprintf(base, ``)))
+	if err != nil || p.PartyWalkLevel() != 60 || p.TagShot() != 30 {
+		t.Fatalf("defaults: %v level %d shot %g", err, p.PartyWalkLevel(), p.TagShot())
+	}
+	p, err = Parse("t.json", []byte(fmt.Sprintf(base, `,"walk_level":57,"tag_shot_yd":24.5`)))
+	if err != nil || p.PartyWalkLevel() != 57 || p.TagShot() != 24.5 {
+		t.Fatalf("set: %v level %d shot %g", err, p.PartyWalkLevel(), p.TagShot())
+	}
+	for _, tc := range []struct{ extra, want string }{
+		{`,"walk_level":0`, "walk_level"}, {`,"walk_level":61`, "walk_level"},
+		{`,"tag_shot_yd":19.9`, "tag_shot_yd"}, {`,"tag_shot_yd":35.1`, "tag_shot_yd"},
+	} {
+		if _, err := Parse("t.json", []byte(fmt.Sprintf(base, tc.extra))); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v", tc.extra, err)
+		}
+	}
+	for _, ok := range []string{`,"tag_shot_yd":20`, `,"tag_shot_yd":35`, `,"walk_level":60`} {
+		if _, err := Parse("t.json", []byte(fmt.Sprintf(base, ok))); err != nil {
+			t.Errorf("%s: %v", ok, err)
+		}
+	}
+	noBand := &Plan{}
+	if noBand.PartyWalkLevel() != 0 {
+		t.Errorf("no band, no walk level: %d", noBand.PartyWalkLevel())
+	}
+}

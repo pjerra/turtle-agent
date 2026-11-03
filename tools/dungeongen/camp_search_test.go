@@ -22,7 +22,7 @@ func TestCampSearchFindsPointsTheLintAccepts(t *testing.T) {
 		t.Fatalf("camps %d tags %d candidates %d", res.Camps, res.Tags, len(res.Candidates))
 	}
 	for i, c := range res.Candidates {
-		if c.DragYd > dungeon.MaxCampDragYd || c.ShotYd > campShotYd || c.WakeYd < 0 || c.RouteYd > campRouteYd || c.Bodies != 1 {
+		if c.DragYd > dungeon.MaxCampDragYd || c.ShotYd > p.TagShot() || c.WakeYd < 0 || c.RouteYd > campRouteYd || c.Bodies != 1 {
 			t.Errorf("candidate %d breaks a rule: %+v", i, c)
 		}
 		if i > 0 && c.DragYd < res.Candidates[i-1].DragYd {
@@ -131,5 +131,26 @@ func TestCampSearchCommandIsReadOnly(t *testing.T) {
 	}
 	if code := campSearchFile(file, dir, "", []string{"9", "1"}, 1, 3, 0); code != 1 {
 		t.Fatalf("a leg out of range: exit %d, want 1", code)
+	}
+}
+
+// The search reads the plan's shot: with tag_shot_yd 22 a level-60 pack (tank wake reach + 1 = 22.5 yd) has no tag spot at all and the
+// output says why.
+func TestCampSearchUsesThePlanShot(t *testing.T) {
+	p, cs := stagedFixture()
+	p.TagShotYd = 22
+	res, err := CampSearch(p, cs, nil, 0, 1, 1, CampSearchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Tags != 0 || len(res.Candidates) != 0 || !strings.Contains(res.Format(), "no tag spot can exist") {
+		t.Fatalf("tags %d candidates %d:\n%s", res.Tags, len(res.Candidates), res.Format())
+	}
+	// -camp-party-level is the walk level of the search: a level-58 walker's tag window (22 + 1.5 + 1 = 24.5 yd) is past the default shot's
+	// near edge only when the shot is the old 23.5 yd.
+	p.TagShotYd = 0
+	res, _ = CampSearch(p, cs, nil, 0, 1, 1, CampSearchOptions{PartyLevel: 58})
+	if res.PartyLevel != 58 || len(res.Candidates) == 0 {
+		t.Fatalf("level 58 with the default 30 yd shot has a 24.5-30 yd window: level %d candidates %d", res.PartyLevel, len(res.Candidates))
 	}
 }

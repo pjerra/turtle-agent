@@ -776,8 +776,9 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   50 yd straight from the camp), tags one unit with a ranged shot and drags the pack back to the camp, where the raid fights. `plan-export --camp-pull`
   writes the camp `move` (flag 65536, comment `pull group N camp`), the approach rows as the tag walk (`pull group N tag walk`) and the pull row with
   flag 131072 (`item` = `max_bodies`); without it the group exports as a plain pull and the camp is dropped with a warning (an older run leader ignores
-  the unknown flags and walks the same degrade path). `plan-check`'s camp lint wants the tag spot outside every own-pack unit's aggro reach and within
-  23.5 yd of the nearest one, the tank's walk-out clear of other packs (reach + 1.5 yd) and the camp on the cleared route; `pull_size` estimates camp
+  the unknown flags and walks the same degrade path). `plan-check`'s camp lint wants the tag spot outside every own-pack unit's aggro reach (+ 1.5 yd tank spread + 1 yd) and within
+  the plan's `tag_shot_yd` (default 30) of the nearest one, the tank's walk-out clear of other packs (reach + 1.5 yd), the camp on the cleared route and out of the own pack's
+  wake reach (aggro + raid spread: the raid at the camp must not wake the pack before the tag); the camp, stage and search lints judge reaches at `walk_level`; `pull_size` estimates camp
   groups with fight = camp, tank walk = tag rows and the drag back;
   `stages` (optional, 1-8; exclusive with the group's own `camp`, `approach`, `stand_pull`, `hold` and `ambush`) scripts a pack that no stand can split or that carries
   casters that plant: `[{"peel": [leader guids], "tag": [1-4 points, the last is the tag spot], "camp": {..}, "max_bodies": N}, ...]`. Stage 1 peels its formations
@@ -938,11 +939,10 @@ the Ironforge dwarves': friendly to the Alliance, and nothing says it is hostile
 measures camp and tag-spot candidates for a pull group (LEG: the plan's leg index from 0, GROUP: the pull group number from 1 as dungeon_status counts, STAGE: the stage of a
 staged group, from 1) and prints them with their distances; it never edits the plan, the author copies the points they pick and the lint checks them. A camp is a 1 yd grid
 point (navmesh ground with `-mmaps`, default `$TURTLE_AGENT_MMAPS`) at least 40 yd from the caster spawns of the stage and the later stages, clear of every other pack's wake
-reach and of the stage's own pack (the raid at the camp must not wake it), and within 10 yd of the cleared route; a tag spot is within 23.5 yd of the nearest peeled unit (with
+reach and of the stage's own pack (the raid at the camp must not wake it), and within 10 yd of the cleared route; a tag spot is within `tag_shot_yd` (30) of the nearest peeled unit (with
 mmaps a clear navmesh ray to it), outside every peeled unit's tank wake reach + 1 yd, and wakes exactly the stage's formations by the estimator. The pairs within 50 yd of each
 other (and, with mmaps, a complete path of at most 70 yd) are ranked by drag length and the first `-camp-top` that keep the estimator's verdict with the camp walk and the drag are
-listed, with the plan JSON of each. A pack whose units' wake reach + 1 yd is past the 23.5 yd shot has no tag spot at all (a level-58 party against level-60 units: 22 + 1.5 + 1 =
-24.5 yd) and the output says so; `-camp-party-level` judges the reaches at another party level for the search only.
+listed, with the plan JSON of each. A pack whose units' wake reach + 1 yd is past the shot has no tag spot at all and the output says so; `-camp-party-level` sets the walk level for the search only.
 `-awakened` names creature entries that spawn friendly (faction 35, stoned) and that the encounter's script turns hostile, so a plan that fights them is not warned about as if it
 asked the party to kill a friend: Uldaman's Stone Keepers (4857, woken one by one by the Altar of the Keepers) and Archaedas (2748, woken by the Altar of Archaedas); their `npc_flags` are
 still looked at. `-strict` makes any warning exit status 1, for CI. Generating a skeleton puts `WARNING:` lines in the leg notes for a boss with `npc_flags` or a faction of `-friendly-factions`.
@@ -954,7 +954,9 @@ creature (the spawns the row owns by entry and radius, `kill_first` rank first, 
 `leg L pull P: no target`. Every pull row of the leg is numbered in route order, under its ceiling or not. The geometry is the previous
 row's party point to this row's party point (a straight 2 yd sampled segment; the navmesh polyline needs mmaps and the straight line is the documented
 approximation, high side), the stand is the party point, and sight is always seen (high side: without mmaps there is no collision geometry to raycast
-against). A world or export the lint cannot read fails the check, strict or not. The plan's own numbers live in the plan JSON: a `pull_group`'s `max_bodies` and the plan-wide `pull_ceiling`.
+against). A world or export the lint cannot read fails the check, strict or not. The plan's own numbers live in the plan JSON: a `pull_group`'s `max_bodies` and the plan-wide `pull_ceiling`. Two more plan-wide numbers serve the camp pull lints: `walk_level` (1-60; default the top of `level_band`, the level the raid
+walks at) is the level their wake reaches are judged at (the route and `pull_size` lints keep `level_band[0]`), and `tag_shot_yd` (20-35, default 30) is how far the tag spot may stand from the nearest
+peeled unit: the tank's ranged pull (Shoot Bow, Shoot Gun and Throw are SpellRange.dbc index 74, 8-30 yd).
 
 `internal/dungeon`'s `TestUldamanOnNavmesh` plans a `path_to` route through every waypoint of `dungeons/uldaman.json` in the order
 a run goes and asks for status `complete`; `TestUldamanPlanMatchesTheWorldExport` checks that each pack member, boss and door

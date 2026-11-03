@@ -25,10 +25,6 @@ import (
 )
 
 const (
-	// campShotYd is how far the tag spot may stand from the nearest unit of
-	// its own pack: the tank's shot (28.5 yd) less the 5 yd margin the run
-	// leader wants (spec 3.7).
-	campShotYd = 23.5
 	// defaultDetectionYd is the yards at which a spawn engages when the export carries no detection_range (draft exports
 	// predate the column).
 	defaultDetectionYd = 20
@@ -195,13 +191,19 @@ func routeOwnerOf(owners []routePoint, byLeader map[uint64][]creature, c creatur
 }
 
 // routePartyLevel is what the trash check uses for the plan: the party's lowest level (level_band[0]), the widest
-// aggro radius, as the run leader assumes. 0 when the plan gives no band (wailing_caverns-extra).
+// aggro radius, as the run leader assumes. 0 when the plan gives no band (wailing_caverns-extra). The route and pull_size
+// lints use it (their pinned counts are measured at it).
 func routePartyLevel(p *dungeon.Plan) int {
 	if len(p.LevelBand) == 2 {
 		return p.LevelBand[0]
 	}
 	return 0
 }
+
+// routeWalkLevel is the level the party really walks at (Plan.PartyWalkLevel: walk_level, else the top of level_band): the camp
+// pull lints, the stage lint and -camp-search judge wake reaches at it, so a raid that walks at 60 is not held to the reach a
+// level-58 member would give.
+func routeWalkLevel(p *dungeon.Plan) int { return p.PartyWalkLevel() }
 
 // routePartySpread is the party's spread from the route: 10 yd for a raid, 3 else (trash-check's default).
 func routePartySpread(p *dungeon.Plan) float64 {
@@ -215,12 +217,21 @@ func routePartySpread(p *dungeon.Plan) float64 {
 // detection_range with the party-minus-creature level difference, NO_AGGRO and the spread), plus the spawn's wander.
 // A spawn the export carries no range for wakes at the 20 yd default; a NO_AGGRO spawn never wakes.
 func routeReach(p *dungeon.Plan, c creature) float64 {
+	return routeReachAt(p, c, routePartyLevel(p))
+}
+
+// routeWalkReach is routeReach at the party's walk level (the camp and stage lints).
+func routeWalkReach(p *dungeon.Plan, c creature) float64 {
+	return routeReachAt(p, c, routeWalkLevel(p))
+}
+
+func routeReachAt(p *dungeon.Plan, c creature, level int) float64 {
 	det := c.DetectionRange
 	if det <= 0 {
 		det = defaultDetectionYd
 	}
 	s := worldspawn.Spawn{LevelMax: c.LevelMax, DetectionYd: float32(det), FlagsExtra: c.FlagsExtra, Wander: c.Wander}
-	return float64(worldspawn.AggroRadius(s, routePartyLevel(p), routeAggroRate)) + routePartySpread(p) + float64(c.Wander)
+	return float64(worldspawn.AggroRadius(s, level, routeAggroRate)) + routePartySpread(p) + float64(c.Wander)
 }
 
 // RouteIntoLaterPacks lists every spawn within aggro of a straight route segment that a later row pulls (or that no
@@ -378,7 +389,7 @@ func campTankReach(p *dungeon.Plan, c creature) float64 {
 		det = defaultDetectionYd
 	}
 	s := worldspawn.Spawn{LevelMax: c.LevelMax, DetectionYd: float32(det), FlagsExtra: c.FlagsExtra, Wander: c.Wander}
-	return float64(worldspawn.AggroRadius(s, routePartyLevel(p), routeAggroRate)) + aggroest.TankSpreadYd + float64(c.Wander)
+	return float64(worldspawn.AggroRadius(s, routeWalkLevel(p), routeAggroRate)) + aggroest.TankSpreadYd + float64(c.Wander)
 }
 
 // CampPullFindings lints every camp chain of the plan's export rows (spec
@@ -451,6 +462,10 @@ func CampPullFindings(p *dungeon.Plan, cs []creature, ignore map[int]bool) ([]st
 			if d < nearest {
 				nearest = d
 			}
+			if dc, reach := dist(c.Pos, camp), routeWalkReach(p, c); dc < reach {
+				out = append(out, fmt.Sprintf("%s %s: camp %.1f yd from %s (guid %d, entry %d, reach %.1f): the raid at the camp wakes its own pack before the tag",
+					p.Name, where, dc, c.Name, c.GUID, c.Entry, reach))
+			}
 			if reach := campTankReach(p, c); d < reach+1 {
 				out = append(out, fmt.Sprintf("%s %s: tag spot %.1f yd from %s (guid %d, entry %d, reach %.1f): it body-pulls its own pack",
 					p.Name, where, d, c.Name, c.GUID, c.Entry, reach))
@@ -458,8 +473,8 @@ func CampPullFindings(p *dungeon.Plan, cs []creature, ignore map[int]bool) ([]st
 		}
 		if nearest == math.MaxFloat64 {
 			out = append(out, fmt.Sprintf("%s %s: tag spot owns no spawn of its pull", p.Name, where))
-		} else if nearest > campShotYd {
-			out = append(out, fmt.Sprintf("%s %s: tag spot %.1f yd from its nearest pack unit (over the %g yd shot)", p.Name, where, nearest, campShotYd))
+		} else if nearest > p.TagShot() {
+			out = append(out, fmt.Sprintf("%s %s: tag spot %.1f yd from its nearest pack unit (over the %g yd shot)", p.Name, where, nearest, p.TagShot()))
 		}
 		for _, c := range cs {
 			if !eligible(c) {
