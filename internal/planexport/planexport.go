@@ -30,6 +30,7 @@ const (
 	KindBoss         = "boss"
 	KindLoot         = "loot"
 	KindOpen         = "open"
+	KindOpenProof    = "open_proof"
 	KindUseItem      = "use_item"
 	KindWaitObject   = "wait_object"
 	KindWaitClear    = "wait_clear"
@@ -87,6 +88,9 @@ const (
 	// out the timeout (DungeonRunPolicy.h UnitsHoldResetSeen, DungeonPlanPolicy.h kPlanFlagResetToGossip). Without the flag a
 	// units hold never reads a reset, so a crew that evades and turns friendly again is not mistaken for one.
 	FlagResetToGossip = 16384
+	// FlagProofCreature marks an open_proof row whose proof entry is a creature (alive), not a spawned game object
+	// (DungeonPlanPolicy.h kPlanFlagProofCreature, the next free bit: 1024 is the module's pull-only no-defer flag).
+	FlagProofCreature = 2048
 	// EncounterDone is the encounter state DONE: a hold's param.
 	EncounterDone = 3
 )
@@ -95,6 +99,8 @@ const (
 const (
 	MaxRadius   = 100 // yards
 	MaxTimeoutS = 600 // seconds
+	// MaxProofRadiusYd is the most yards an open_proof's proof is searched around the object (the module's kPlanMaxProofRadius).
+	MaxProofRadiusYd = 20
 	// MaxHoldTimeoutS is the cap of a hold row (dungeon.MaxHoldTimeoutS): Rajaxx's event runs about 1272 s. The module's
 	// kPlanMaxTimeoutS must allow it for the hold kind.
 	MaxHoldTimeoutS = dungeon.MaxHoldTimeoutS
@@ -790,7 +796,17 @@ func (b *builder) step(list string, si int, st dungeon.Step) error {
 			b.move(*u.Stand, false, "stand")
 		}
 		x, y, z := refPoint(u.ObjectRef)
-		b.add(StepRow{Kind: KindOpen, Entry: u.Entry, X: x, Y: y, Z: z, Item: itemEntry(u.RequiresItem), Comment: itemComment("open", u.RequiresItem)})
+		if p := u.Proof; p != nil {
+			entry, flags, what := p.GameObject, uint32(0), "object"
+			if p.Creature != 0 {
+				entry, flags, what = p.Creature, uint32(FlagProofCreature), "creature"
+			}
+			b.add(StepRow{Kind: KindOpenProof, Entry: u.Entry, X: x, Y: y, Z: z, Item: itemEntry(u.RequiresItem), Radius: p.Radius,
+				Flags: flags, Entries: []uint32{entry},
+				Comment: clip(fmt.Sprintf("%s; done when %s %d is up within %g yd", itemComment("open", u.RequiresItem), what, entry, p.Radius), MaxComment)})
+		} else {
+			b.add(StepRow{Kind: KindOpen, Entry: u.Entry, X: x, Y: y, Z: z, Item: itemEntry(u.RequiresItem), Comment: itemComment("open", u.RequiresItem)})
+		}
 	case st.LootObject != nil:
 		l := st.LootObject
 		x, y, z := refPoint(l.ObjectRef)
@@ -1006,6 +1022,26 @@ func Validate(r Rows) error {
 			if s.Radius <= 0 {
 				return bad("a wait_clear needs a radius")
 			}
+		case KindOpenProof:
+			// The loader's rule (DungeonPlanPolicy.h NormalizePlanStep, open_proof).
+			switch {
+			case s.Entry == 0:
+				return bad("needs an entry")
+			case len(s.Entries) != 1:
+				return bad("an open_proof names exactly one proof entry, not %d", len(s.Entries))
+			case s.Radius <= 0 || s.Radius > MaxProofRadiusYd:
+				return bad("radius %g: an open_proof's proof radius is more than 0 and at most %d", s.Radius, MaxProofRadiusYd)
+			case s.Param != 0:
+				return bad("an open_proof carries no param (the module reads an open's param as a second item)")
+			case s.Flags&^uint32(FlagProofCreature) != 0:
+				return bad("an open_proof carries no flag but %d (the proof is a creature)", FlagProofCreature)
+			case s.TimeoutS != 0:
+				return bad("an open_proof carries no timeout_s")
+			case s.X == 0 && s.Y == 0 && s.Z == 0:
+				return bad("an open_proof needs the object's point")
+			case s.Flags&FlagProofCreature == 0 && s.Entries[0] == s.Entry:
+				return bad("the proof object is the used object itself")
+			}
 		default:
 			return bad("unknown kind")
 		}
@@ -1025,6 +1061,9 @@ func Validate(r Rows) error {
 		}
 		if s.Flags&FlagResetToGossip != 0 && s.Kind != KindHold {
 			return bad("the reset-to-gossip flag is for a hold row that goes back to its gossip on a reset (the loader refuses it on a %s)", s.Kind)
+		}
+		if s.Flags&FlagProofCreature != 0 && s.Kind != KindOpenProof {
+			return bad("flag %d (the proof is a creature) is for an open_proof row (the loader refuses it on a %s)", FlagProofCreature, s.Kind)
 		}
 		if s.Flags&FlagExact != 0 {
 			if s.Kind != KindMove {
