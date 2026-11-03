@@ -2375,14 +2375,16 @@ and z within 30 yd of the point) before any summon leaves, and a landing that ne
 (`not revived: the commander did not land at the revive point`). Every wipe that does not recover
 says why in the notes (`wipe resume skipped: ...`, `second wipe at step N during the wipe-resume of step M`). It never
 revives while a boss row has a target: a boss engagement stops the run at once and waits up to 15 minutes for a kill,
-a reset or a wipe. The one exception is the boss the RUN LEADER fights (the same `runFightsBoss` hand-over the watch
-loop uses: a boss step under `--until none`, or an until that goes past the boss step, as `--until boss-done`'s
-resolved clause does): there the walk owns no boss attempt, so a wipe on that step follows the ordinary wipe-resume
-flow — revive, rest (the self-regroup revive when TB says `regrouping by itself`), retry, one `--wipe-resume` — and
-never sends `run stop` at the wipe (walk 32: a Mar'li boss-step wipe under `--until none` was stopped 0.7 s after the
-`20 dead ... regrouping by itself` line, and a Hakkar one 42 ms after it, so boss retries were impossible). The boss
-gate and the unknown-boss gate are skipped for that fight only, and the post-recovery boss re-check accepts the fight
-as the run's without a new status line (the boss was not newly engaged during the recovery). A wipe or a boss
+a reset or a wipe. The one exception is a wipe ON THE BOSS'S OWN STEP whose boss the RUN LEADER fights (the same
+`runFightsBoss` hand-over the watch loop uses: a boss step under `--until none`, or an until that goes past the boss
+step, as `--until boss-done`'s resolved clause does): there the walk owns no boss attempt, so the wipe follows the
+ordinary wipe-resume flow — revive, rest (the self-regroup revive when TB says `regrouping by itself`), retry, one
+`--wipe-resume` — and never sends `run stop` at the wipe (walk 32: a Mar'li boss-step wipe under `--until none` was
+stopped 0.7 s after the `20 dead ... regrouping by itself` line, and a Hakkar one 42 ms after it, so boss retries were
+impossible). A boss row still in the frames when the run wipes on TRASH keeps the old gate: that fight is not the
+step's. The boss gate and the unknown-boss gate are skipped for the boss-step fight only, and the post-recovery boss
+re-check accepts the fight as the run's without a new status line (the boss was not newly engaged during the
+recovery). A wipe or a boss
 engagement with no recovery left ends the walk with exit 19. Recovery fails closed
 on unknown boss state (no dashboard, a stale or errored fights read, or a boss latched in the last 120 s: the old
 ending with the note `wipe resume skipped: boss state unknown`); the rest needs a complete quiet view (every roster

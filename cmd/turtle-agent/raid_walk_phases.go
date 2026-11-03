@@ -2166,7 +2166,7 @@ func (w *walk) handleWipe(ctx context.Context, step int) error {
 	// ever happen.
 	runLeaderFights := false
 	if w.bossEngagedNow() {
-		runLeaderFights = w.runLeaderFightsEngagedBoss()
+		runLeaderFights = w.runLeaderFightsEngagedBoss(step)
 		if !runLeaderFights {
 			w.note("wipe resume skipped: %s engaged", w.engagedBossWords())
 			return w.endWipe(ctx, step)
@@ -2190,13 +2190,17 @@ func (w *walk) handleWipe(ctx context.Context, step int) error {
 	}
 }
 
-// runLeaderFightsEngagedBoss says the frames' engaged boss is the run's own fight: runFightsBoss hands that encounter
-// to the run leader (a boss step under --until none or a boss-done until, or an until that goes past the step), so the
-// walk owns no boss attempt and a wipe on it is an ordinary wipe. False when no engaged plan boss names itself (the
-// rows-gone-but-target-fresh case keeps the old gate: the walk may own that fight).
-func (w *walk) runLeaderFightsEngagedBoss() bool {
+// runLeaderFightsEngagedBoss says a wipe ON THE BOSS'S OWN STEP is the run's own fight: runFightsBoss hands that
+// encounter to the run leader (a boss step under --until none or a boss-done until, or an until that goes past the
+// step), so the walk owns no boss attempt and the wipe is an ordinary wipe (walk 32's Mar'li and Hakkar wipes). A boss
+// row the frames still hold while the run wipes on TRASH keeps the old gate: that fight is not the step's, and reviving
+// under it is not this rule's business. False for an unknown step (rows not the plan's) or no named engagement.
+func (w *walk) runLeaderFightsEngagedBoss(step int) bool {
 	entry, ok := w.engagedBossEntry()
 	if !ok {
+		return false
+	}
+	if b := w.bossStepOf(entry); b == 0 || b != step {
 		return false
 	}
 	ok, _ = w.runFightsBoss(entry)
