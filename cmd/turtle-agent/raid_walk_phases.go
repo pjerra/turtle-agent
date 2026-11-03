@@ -3124,8 +3124,9 @@ const (
 // (a boss that engages while the run is paused on its boss step still stops the walk), when the
 // rows are not the server's (step numbers mean nothing), when the next boss step is in another
 // leg, when the until does not go past the boss step, when the run stands more than
-// earlyEngageSteps steps before that boss step, or when the main tank is not within earlyEngageYd
-// of the boss row (review round 1, item 3).
+// earlyEngageSteps steps before that boss step (not under boss-done, which never stops on its own
+// boss's engage), or when the main tank is not within earlyEngageYd of the boss row (review round 1,
+// item 3).
 func (w *walk) runFightsBoss(entry uint32) (ok bool, early int) {
 	if w.opts.until == "boss" || !w.haveStatus || w.lastStatus.State != tbm.RunRunning {
 		return false, 0
@@ -3160,8 +3161,10 @@ func (w *walk) runFightsBoss(entry uint32) (ok bool, early int) {
 	// The hand-over is for a boss pulled from the raid's own approach: further back than earlyEngageSteps the
 	// boss is woken by something else (another leg's pull, a patrol), and a main tank far from the boss row means
 	// the party is not standing at the pull at all (review round 1, item 3: walk 24's Thekal approach point sits
-	// inside the pull, so the step-back case is the common one).
-	if b-w.lastStatus.Step > earlyEngageSteps {
+	// inside the pull, so the step-back case is the common one). Under boss-done the step window does not apply:
+	// boss-done never stops the run on an engage of its own boss (walk 29b/29c: Mandokir woke 5 steps before his
+	// boss row when the party pulled the pack beside him). The leg, the family and the main tank's distance still do.
+	if b-w.lastStatus.Step > earlyEngageSteps && w.bossDoneStep == 0 {
 		return false, 0
 	}
 	lead, ok := w.botAt[w.mt]

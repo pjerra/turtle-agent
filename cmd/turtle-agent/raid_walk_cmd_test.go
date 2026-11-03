@@ -6537,20 +6537,51 @@ func TestRaidWalkBossDoneEarlyEngageTwoStepsBackLetsTheRunFightIt(t *testing.T) 
 	}
 }
 
-// Five steps back the boss is woken by something else (another leg's pull, a patrol), not by this party: the walk
-// stops the run as before, even with the lead bot at the boss row (review round 1, item 3).
-func TestRaidWalkBossDoneEarlyEngageFiveStepsBackStops(t *testing.T) {
+// Boss-done boss death: the party engages its boss on the approach step and the run leader fights it on the boss step
+// until the boss is down. No run stop, the walk ends at its until (exit 0) and the boss is credited killed.
+func TestRaidWalkBossDoneRunLeaderKillEndsAtUntil(t *testing.T) {
+	_, next, _ := bossDoneFixture(t)
+	f, _, total := earlyEngageFixture(t, next-1-5, 10)
+	f.agent.startReply = zgStart(total, next)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|move|walk|fighting", next-1-5, total)},
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|running|%d/%d|lucifron|boss|fight|fighting", next-1, total)},
+		{raw: fmt.Sprintf("TBM:RUN|molten_core|done|%d/%d|lucifron|boss|fight|stopped before step %d (until step %d): the party stays where it stands", next, total, next, next)},
+	}
+	f.agent.mu.Unlock()
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want 0", n)
+	}
+	sum := f.summary()
+	if sum.EndReason != "until" {
+		t.Fatalf("summary end %q, want until", sum.EndReason)
+	}
+	if sum.BossKill == nil || !sum.BossKill.Killed {
+		t.Fatalf("boss kill %+v, want killed by the run leader", sum.BossKill)
+	}
+}
+
+// Five steps back, with the lead bot at the boss row, is still the party's own pull: the boss woke when this party
+// pulled the pack next to it (walk 29c Mandokir, engaged at step 469 with the boss row at 474, the tank 41 yd from
+// the boss row). Under boss-done the run leader fights it: no run stop, the run goes on to its until.
+func TestRaidWalkBossDoneEarlyEngageFiveStepsBackLetsTheRunFightIt(t *testing.T) {
 	_, next, _ := bossDoneFixture(t)
 	f, _, _ := earlyEngageFixture(t, next-1-5, 10)
-	code := f.run(context.Background())
-	if code != exitRaidWalkIncident {
-		t.Fatalf("exit %d, want 19: %s", code, f.stderr.String())
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
 	}
-	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
-		t.Fatalf("%d run stops, want exactly 1", n)
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want 0: boss-done never stops the run on an engage of its boss", n)
 	}
-	if hasNote(f.summary(), "before its boss step") {
-		t.Fatalf("notes %q, want no early-engage note", f.summary().Notes)
+	if sum := f.summary(); sum.EndReason != "until" {
+		t.Fatalf("summary end %q, want until", sum.EndReason)
+	}
+	if !hasNote(f.summary(), "before its boss step") {
+		t.Fatalf("notes %q, want the early-engage note", f.summary().Notes)
 	}
 }
 
