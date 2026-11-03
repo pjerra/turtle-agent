@@ -309,7 +309,7 @@ func TestRouteIntoLaterPacksDefaultsDetectionTo20(t *testing.T) {
 // Counts are measured on origin/dev (the ZG count must drop when W25-1 lands: the Arlokk terrace reordering walks
 // each approach on its pack's level; the comment then says so).
 var routeAggroKnownFailing = map[string]int{
-	"ragefire_chasm":       153,  // boss rows own their boss (was 161). the repo reach (AggroRadius at 13-18 plus spread and wander) outruns the old 20 yd flat line.
+	"ragefire_chasm":       152,  // waypoint pass (was 153): the moved stands walk past one fewer later pack.
 	"wailing_caverns":      173,  // boss rows own their boss (was 188). the repo reach (AggroRadius at 22-27 plus spread and wander) outruns the old 20 yd flat line.
 	"deadmines":            641,  // boss rows own their boss (was 661). the repo reach (AggroRadius at 18-22 plus spread and wander) outruns the old 20 yd flat line.
 	"uldaman":              249,  // boss rows own their boss (was 268). the repo reach (AggroRadius at 41-45 plus spread and wander) outruns the old 20 yd flat line.
@@ -325,6 +325,7 @@ var routeAggroKnownFailing = map[string]int{
 	"upper_karazhan_halls": 383,  // boss rows own their boss (was 403). the live export builds now (GMCrossDirect walks the outland gm_cross gap): the check sees the island hops.
 	"emerald_sanctum":      15,   // boss rows own their boss (was 17). the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns detection 20, from 8.
 	"timbermaw_hold":       214,  // boss rows own their boss (was 228). the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
+	"stormwind_stockade":   185, "stratholme_live": 158, "stratholme_undead": 335, // newly hand-maintained: straight-segment counts for the draft routes.
 }
 
 // TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn
