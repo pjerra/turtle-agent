@@ -926,6 +926,17 @@ median level - 2 up to their 90th percentile), `size` of a raid, the hired party
 hand-written and live-checked and `ragefire_chasm` is hand-written with an offline route but still a draft (not mapped), none of them regenerated. The tests regenerate every draft and compare it byte for byte with `dungeons/`, load it, run the creature check (`-check`, with `-scripted`) and compare the table; the
 navmesh test for the drafts (`TestPlansOnNavmeshWhereTheMachineHasIt`) logs how many plan points are on the mesh for every map whose `<map>.mmap` and tiles are present and lists the maps that are not.
 
+`go run ./tools/dungeongen route-regen --mmaps DIR --leg N [--leg N...] [--dry-run] [--dir dungeons] [--spawns DIR] [--out FILE] [--force] <plan>`
+regenerates one leg's route from the navmesh (the method of the Zul'Gurub waypoint audit, `research/zg-waypoints/WAYPOINT-AUDIT.md` §4.2): it keeps the leg's anchors (its `to`, gm_cross
+vias, every pull group's stand or last approach point, the boss), moves a failing anchor to the cheapest passing point within 25 yd (dry plain ground, a stand's wall and ledge clearance,
+aggro + 8 of every unpulled unit, patrol + 5), orders the pulls by a navmesh path-length matrix that flags one-way pairs (a path over twice its reverse) and scores the original,
+nearest-neighbour and constrained orders so no uphill return is scheduled while a downhill one exists, plans each anchor pair round the packs not pulled yet and the patrol lanes,
+string-pulls the path with clearance, spaces the kept points 8-45 yd apart (one hop up to 110 yd where a split cannot pass), and writes them as the groups' `approach` points (or the
+leg's `via`), so the exporter has nothing to cut. Water is left out of the planning where the plain ground reaches; a crossing stays one hop between banks. A stand whose route cannot
+be kept clear keeps the written approach when that passes the rules (dry, no hop the exporter would cut) and is otherwise dropped for the run leader to approach itself, with a note.
+The pull set never changes: only the order and the route do. Each leg's run prints a diff (old and new walked length, anchors, water rows, hops over 45 yd and the authored rows' lints),
+`--dry-run` prints it without writing. `--spawns` defaults to `tools/dungeongen/testdata/map<N>`. It needs a cgo build (Detour), as `plan-check` does.
+
 `go run ./tools/dungeongen -check dungeons/uldaman.json -dir tools/dungeongen/testdata/uldaman -team alliance -friendly-factions 122 -awakened 2748,4857 -strict` lints a plan against
 the export (`creatures.tsv`) and prints a warning for each boss, `boss.first` entry or pack member that has `npc_flags` (a quest giver, vendor or trainer is no
 mob) or a faction named friendly to the leader's team; what is gated to the other team is not looked at, and the flags of a part gated to a team are not repeated.
