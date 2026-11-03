@@ -1436,14 +1436,6 @@ func (w *walk) phasePlace(ctx context.Context) error {
 	}
 	w.placeInst = inst
 	w.placeSum.Instance = inst
-	// 6b. --gm-clear (test tool): the named packs die by GM command before the quiet check and the raid's move. A
-	// group the plan skipped (a boss's or an event's units) gets its WARN line here, where run.log exists.
-	for _, warn := range w.gmClearWarn {
-		w.logLine(w.env.now(), warn)
-	}
-	if err := w.placeGMClear(ctx); err != nil {
-		return err
-	}
 	// 5-9. the start point, the corridor, the quiet, the raid's move and the frames, retried in THIS instance: walk 33
 	// burned a fresh instance for every quiet refusal and every post-place fight. A quiet or a post-place fight moves
 	// the attempt one move row back, up to placeRetreatRows; the last one may GM-kill only the blocking units when
@@ -1531,6 +1523,17 @@ func (w *walk) placeTry(ctx context.Context, retry bool) error {
 	w.placeBlockers = nil
 	if err := w.placeClear(ctx); err != nil {
 		return err
+	}
+	if !retry {
+		// --gm-clear (test tool), once per placement after the corridor clear and before the quiet: the named packs
+		// die by GM command before the raid's move. A group the plan skipped gets its WARN line here, where run.log
+		// exists; a retreat does not kill the packs a second time.
+		for _, warn := range w.gmClearWarn {
+			w.logLine(w.env.now(), warn)
+		}
+		if err := w.placeGMClear(ctx); err != nil {
+			return err
+		}
 	}
 	if err := w.placeQuiet(ctx); err != nil {
 		return err
