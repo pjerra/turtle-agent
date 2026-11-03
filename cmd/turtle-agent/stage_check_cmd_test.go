@@ -64,7 +64,10 @@ func TestStageCheckZulfarrakGahzrillaRefused(t *testing.T) {
 	for _, want := range []string{
 		"cannot be staged in a fresh instance",
 		"the boss of leg 9 velratha_b (entry 7795)",
-		"proposal: earlier_leg leg 9 velratha_b",
+		// No earlier-leg proposal: leg 9 velratha_b's first point moved (waypoint lint fix abd457e) to 22 yd from alive
+		// leg 7 velratha (entry 7246), and a fresh-instance stage point needs 30, so velratha_b no longer stages safely.
+		// The plan-check passes that point; this is the stage rule, and the refusal above still holds.
+		"No leg up to 3 back stages safely",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("no %q in %q", want, text)

@@ -313,7 +313,7 @@ var routeAggroKnownFailing = map[string]int{
 	"wailing_caverns":      169,  // waypoint pass (was 173): the moved stands walk past fewer later packs.
 	"deadmines":            641,  // boss rows own their boss (was 661). the repo reach (AggroRadius at 18-22 plus spread and wander) outruns the old 20 yd flat line.
 	"uldaman":              247,  // waypoint pass (was 249): the moved stands walk past fewer later packs.
-	"zulfarrak":            56,   // boss rows own their boss (was 66 with #391, 65 before it): a pass past a boss's own row is no finding.
+	"zulfarrak":            54,   // zulfarrak re-pinned for the waypoint lint fixes (was 56): the moved points pass two fewer later packs, rows renumbered.
 	"karazhan_crypt":       447,  // boss rows own their boss (was 459). the repo reach (AggroRadius at 59-60 plus spread and wander) outruns the old 20 yd flat line.
 	"molten_core":          253,  // boss rows own their boss (was 315). raids-mc-bwl-ony (was 270): the moved stands walk past fewer later packs.
 	"blackwing_lair":       312,  // boss rows own their boss (was 344). raids-mc-bwl-ony (was 321): the moved stands walk past fewer later packs.
@@ -332,6 +332,8 @@ var routeAggroKnownFailing = map[string]int{
 	"frostmane_hollow":     171, "dire_maul_east": 90, "dire_maul_west": 212, "razorfen_downs": 191, "sunken_temple": 66,
 	"scarlet_armory":       101, "scarlet_cathedral": 151, "scarlet_graveyard": 184, "scarlet_library": 148, "shadowfang_keep": 284,
 	"stormwind_stockade":   185, "stratholme_live": 158, "stratholme_undead": 335, // newly hand-maintained: straight-segment counts for the draft routes.
+	// newly hand-maintained (waypoint lint fixes): measured route passes of the four drafts.
+	"crescent_grove": 438, "dragonmaw_retreat": 301, "gilneas_city": 306, "black_morass": 147,
 }
 
 // TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn
