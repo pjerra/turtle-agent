@@ -311,7 +311,7 @@ func TestRouteIntoLaterPacksDefaultsDetectionTo20(t *testing.T) {
 var routeAggroKnownFailing = map[string]int{
 	"ragefire_chasm":       152,                                                                      // waypoint pass (was 153): the moved stands walk past one fewer later pack.
 	"wailing_caverns":      170,                                                                      // waypoint pass (was 173): the water fix at cobrahn_b's start walks one more segment past a later pack.
-	"deadmines":            641,                                                                      // boss rows own their boss (was 661). the repo reach (AggroRadius at 18-22 plus spread and wander) outruns the old 20 yd flat line.
+	"deadmines":            750,                                                                      // ported lab_tunnel and laboratory legs (TB f4344311): the mine route walks past the lab packs and the lab rows add segments. Boss rows own their boss (was 661). The repo reach (AggroRadius at 18-22 plus spread and wander) outruns the old 20 yd flat line.
 	"uldaman":              247,                                                                      // waypoint pass (was 249): the moved stands walk past fewer later packs.
 	"zulfarrak":            54,                                                                       // zulfarrak re-pinned for the waypoint lint fixes (was 56): the moved points pass two fewer later packs, rows renumbered.
 	"karazhan_crypt":       439,                                                                      // waypoint pass (was 447): the moved Hivaxxis and lower-crypt stands walk past fewer later packs.
@@ -328,13 +328,17 @@ var routeAggroKnownFailing = map[string]int{
 	"timbermaw_hold":       195,                                                                      // waypoint pass (was 214): the reworked loktanag_lower vias walk past fewer later packs.
 	"hateforge_quarry":     754,                                                                      // newly hand-maintained (was a generated draft): the current route passes.
 	"maraudon_orange":      121, "maraudon_purple": 272, "blackrock_depths": 722, "scholomance": 843, // newly hand-maintained (were generated): the current route's passes; the water fixes at the two Maraudon starts add two and nine segments.
-	"razorfen_kraul": 256, "dire_maul_north": 36, "windhorn_canyon": 436, "upper_blackrock_spire": 459,
+	"razorfen_kraul": 309, "dire_maul_north": 57, "windhorn_canyon": 436, "upper_blackrock_spire": 459,
 	"blackfathom_deeps": 296, "gnomeregan": 276, "lower_blackrock_spire": 408, "stormwind_vault": 170,
-	"frostmane_hollow": 171, "dire_maul_east": 97, "dire_maul_west": 212, "razorfen_downs": 191, "sunken_temple": 66,
-	"scarlet_armory": 101, "scarlet_cathedral": 151, "scarlet_graveyard": 184, "scarlet_library": 148, "shadowfang_keep": 284,
+	"frostmane_hollow": 171, "dire_maul_east": 97, "dire_maul_west": 243, "razorfen_downs": 191, "sunken_temple": 66,
+	"scarlet_armory": 101, "scarlet_cathedral": 151, "scarlet_graveyard": 178, "scarlet_library": 148, "shadowfang_keep": 317,
 	"stormwind_stockade": 185, "stratholme_live": 158, "stratholme_undead": 294, // newly hand-maintained: straight-segment counts for the draft routes.
 	// newly hand-maintained (waypoint lint fixes): measured route passes of the four drafts.
-	"crescent_grove": 438, "dragonmaw_retreat": 398, "gilneas_city": 267, "black_morass": 385,
+	// Re-pinned for the TB plan reconcile: razorfen_kraul 256 -> 309 and dire_maul_north 36 -> 57 (ported/split legs and TB's
+	// leg order), dire_maul_west 212 -> 243 (the revanchion leg adds rows), scarlet_graveyard 184 -> 178 (the hall split
+	// moves the hall rows before the bosses), shadowfang_keep 284 -> 317 (the door and courtyard legs add rows), and
+	// dragonmaw_retreat 398 -> 429 (the searistrasz_line split).
+	"crescent_grove": 438, "dragonmaw_retreat": 429, "gilneas_city": 267, "black_morass": 385,
 }
 
 // TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn

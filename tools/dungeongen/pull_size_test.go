@@ -75,7 +75,7 @@ var pullSizeKnownCounts = map[string]int{
 	// The repo reach (AggroRadius at the plan's party level plus the party's
 	// spread) and the 20 yd ring join neighbouring packs: every dense plan
 	// warns on most of its pulls (mmaps-free path, LOS always seen).
-	"ragefire_chasm": 28, "wailing_caverns": 54, "deadmines": 132,
+	"ragefire_chasm": 28, "wailing_caverns": 54, "deadmines": 146, // deadmines 132 -> 146: the ported lab_tunnel and laboratory legs add 14 pulls over the ceiling.
 	// zulfarrak re-pinned for the waypoint lint fixes (was 53): leg 8 pull 1 (12 bodies) now crosses the ceiling and leg 3 pull 1 grows 11 -> 14 bodies.
 	"uldaman": 57, "zulfarrak": 54, "karazhan_crypt": 125, // waypoint pass (was 58): the moved stands join fewer neighbouring packs.
 	"molten_core": 19, "blackwing_lair": 40, "zul_gurub": 92, // re-pinned for the walk-32 point fixes: the regenerated leg 7/8 rows and their stands in the dense pool ring, and the leg-0 group-3 row now names the Razzashi Adder 11372 that stands on its point. raids-mc-bwl-ony (was 21): the moved stands clear two pulls' rings.
@@ -86,7 +86,7 @@ var pullSizeKnownCounts = map[string]int{
 	"maraudon_orange": 57, "maraudon_purple": 75, "blackrock_depths": 228, "scholomance": 101, // newly hand-maintained (were generated): the moved stands' estimates; maraudon_purple's water fix moves its two starts.
 	"razorfen_kraul": 89, "dire_maul_north": 19, "windhorn_canyon": 84, "upper_blackrock_spire": 68,
 	"blackfathom_deeps": 74, "gnomeregan": 94, "lower_blackrock_spire": 104, "stormwind_vault": 30,
-	"frostmane_hollow": 51, "dire_maul_east": 50, "dire_maul_west": 72, "razorfen_downs": 75, "sunken_temple": 62,
+	"frostmane_hollow": 51, "dire_maul_east": 50, "dire_maul_west": 71, "razorfen_downs": 75, "sunken_temple": 62,
 	"scarlet_armory": 36, "scarlet_cathedral": 41, "scarlet_graveyard": 50, "scarlet_library": 44, "shadowfang_keep": 72,
 	"stormwind_stockade": 40, "stratholme_live": 58, "stratholme_undead": 74,
 	// newly hand-maintained (waypoint lint fixes): measured over-ceiling pulls of the four drafts.
