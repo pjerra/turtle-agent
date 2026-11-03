@@ -94,9 +94,9 @@ func TestZGWalk31OfflineCatchesF1F3F4F5(t *testing.T) {
 	if !failed(366, planlint.LintJoiners) {
 		t.Errorf("step 366: no joiners failure")
 	}
-	// F3/river: rows 7-9 are the water geometry.
+	// F3/river: leg 1's rows 7-9 (steps 71-73 of the export) are the Mar'li water.
 	watered := false
-	for step := 7; step <= 10 && !watered; step++ {
+	for step := 71; step <= 73 && !watered; step++ {
 		for _, s := range rep.Steps {
 			if s.Step != step {
 				continue
@@ -110,7 +110,7 @@ func TestZGWalk31OfflineCatchesF1F3F4F5(t *testing.T) {
 		}
 	}
 	if !watered {
-		t.Errorf("no water finding on steps 7-10")
+		t.Errorf("no water finding on leg 1 rows 7-9 (steps 71-73)")
 	}
 	fmt.Printf("scout: %d steps, %d fail, %d warn in %.1f s\n", len(rep.Steps), rep.Counts.Fail, rep.Counts.Warn, rep.Runtime)
 }
