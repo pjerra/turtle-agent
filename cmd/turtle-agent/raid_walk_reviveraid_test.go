@@ -39,7 +39,7 @@ func reviveFarSetup(f *fixture, onSummon func(name string)) {
 
 // Walk 29: hires revived 400 yd away are brought to the revive point before the resume goes on.
 func TestRaidWalkReviveAtRaidBringsFarHiresBack(t *testing.T) {
-	f, party := selfRegroupWipeWith(t, func(p []string) []string { return p }, func(f *fixture) {
+	f, party := selfRegroupWipeWith(t, nil, func(f *fixture) { // every hire still down at the revive: the revive is the thing under test
 		f.opts.reviveAtRaid = true
 		reviveFarSetup(f, nil)
 	})
@@ -98,7 +98,7 @@ func TestRaidWalkReviveAtRaidBringsFarHiresBack(t *testing.T) {
 // names it.
 func TestRaidWalkReviveAtRaidWaitsForAHireFightingAway(t *testing.T) {
 	var victim string
-	f, party := selfRegroupWipeWith(t, func(p []string) []string { return p }, func(f *fixture) {
+	f, party := selfRegroupWipeWith(t, nil, func(f *fixture) { // every hire still down at the revive: the revive is the thing under test
 		f.opts.reviveAtRaid = true
 		f.agent.combatAllFn = nil
 		victim = "Bot03"
@@ -144,7 +144,7 @@ func TestRaidWalkReviveAtRaidWaitsForAHireFightingAway(t *testing.T) {
 
 // --revive-at-raid=false gives the old flow: revived in place, no summon, no revive-at-raid note or count.
 func TestRaidWalkReviveAtRaidOffKeepsTheOldFlow(t *testing.T) {
-	f, party := selfRegroupWipeWith(t, func(p []string) []string { return p }, func(f *fixture) {
+	f, party := selfRegroupWipeWith(t, nil, func(f *fixture) { // every hire still down at the revive: the revive is the thing under test
 		f.opts.reviveAtRaid = false
 		reviveFarSetup(f, nil)
 	})
@@ -178,7 +178,7 @@ func TestRaidWalkReviveAtRaidFlag(t *testing.T) {
 // Codex HIGH on 43d1496: a living lead on another map is not "where the raid is". It is brought back like any hire
 // and, when that fails, named after the gather timeout instead of dropping off the straggler list.
 func TestRaidWalkReviveAtRaidLeadOnAnotherMapStaysAStraggler(t *testing.T) {
-	f, party := selfRegroupWipeWith(t, func(p []string) []string { return p }, func(f *fixture) {
+	f, party := selfRegroupWipeWith(t, nil, func(f *fixture) { // every hire still down at the revive: the revive is the thing under test
 		f.opts.reviveAtRaid = true
 		f.agent.combatAllFn = nil
 		reviveFarSetup(f, nil)

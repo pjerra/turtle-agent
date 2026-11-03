@@ -808,6 +808,9 @@ type walk struct {
 	// wipeAt is when the last wipe (or near-wipe stop) was seen: the anchor of a self-regroup's D-C cap (review round
 	// 1, Opus M2).
 	wipeAt time.Time
+	// regroupAt is when the walk read TB's "regrouping by itself" line of the self-regroup wipe that is being recovered
+	// (zero otherwise): TB releases the party then, and no `.revive` goes out until selfRegroupReviveWait after it.
+	regroupAt time.Time
 
 	lastStatus tbm.RunStatus
 	haveStatus bool

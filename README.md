@@ -2426,11 +2426,14 @@ show running again within 60 s); the summary notes each recovery
 (`wipe-resume <n>/<K> at step <s>: revived <d>, rested <m>, resumed`) and counts them in `wipe_resumes`, and the end
 stays truthful. When the run regroups by itself after a wipe (`regrouping by itself`), the walk revives the raid and
 lets the run go on: no rest, no `run resume`; it still counts as one `--wipe-resume`. Such a revive summons nobody (not
-the lead, not a dead hire; it notes `self-regroup: no summons, revived in place`): every hire is `.revive`d where it lies
-and TB's regroup gathers them. `--revive-at-raid` (default on, `--revive-at-raid=false` gives exactly this old flow) changes
+the lead, not a dead hire; it notes `self-regroup: no summons, revived in place`): no `.revive` goes out until 10 s after
+TB's `regrouping by itself` line (the released bots' graveyard repop must not meet a living bot), then only the hires a
+fresh frame still shows dead are `.revive`d where they lie, and TB's regroup gathers them. A hire TB has already brought
+up is never revived; the note `revive after the regroup: N hire(s) still dead (revived), M alive ..., K not in the frame`
+counts them. `--revive-at-raid` (default on, `--revive-at-raid=false` gives exactly this old flow) changes
 the self-regroup revive after walk 29, where TB's `revive party` released every bot, the ghosts ran their corpse
-run from the graveyard and the revives landed 300-650 yd from the raid, in uncleared packs: the revive then skips the
-10 s summon wait, and after the revives (and a fresh look at the frames) every living hire more than 100 yd (or on
+run from the graveyard and the revives landed 300-650 yd from the raid, in uncleared packs: the revive then waits
+only until 10 s after TB's regroup line (no summon wait), and after the revives (and a fresh look at the frames) every living hire more than 100 yd (or on
 another map) from the revive point is brought to it with the GM `.summon <hire>` (the commander stands on the point;
 the 3 s portal summon of TB cancels on combat, this does not). The `run.log` line is `revive: <bot> brought back from
 <dist> yd`; a hire not within 10 yd after 15 s gets one more summon, and one that still does not come is named in a note.

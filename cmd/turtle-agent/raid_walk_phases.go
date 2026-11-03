@@ -2189,12 +2189,18 @@ func (w *walk) handleWipe(ctx context.Context, step int) error {
 	// live TB sends "regrouping by itself" and then "regroup: waiting for X (dead), ... reviving" for
 	// the same step in one page, and it may even go on to its own "regrouped" or a line of the next
 	// step, which also moves the step the wipe fires on. So the decision reads the recorded running
-	// lines of this step (selfRegroupSeen, which also takes a note whose own page already carried the
+	// lines of this step (selfRegroupLine, which also takes a note whose own page already carried the
 	// run past it) instead of the last status, and only the run's state still comes from that status:
 	// a paused or done last line is no self-regroup.
 	now := w.env.now()
 	w.wipeAt = now
-	selfRegroup := w.haveStatus && w.lastStatus.State == tbm.RunRunning && w.selfRegroupSeen(step, now)
+	selfRegroup := false
+	w.regroupAt = time.Time{}
+	if w.haveStatus && w.lastStatus.State == tbm.RunRunning {
+		if o, ok := w.selfRegroupLine(step, now); ok {
+			selfRegroup, w.regroupAt = true, o.at
+		}
+	}
 	// The observations explained this wipe: a later wipe needs its own line since the last recovery.
 	w.runLines = nil
 	// A boss row engaged by the walk's own boss path (handleBoss) still ends the wipe as before: the walk owns that
@@ -3662,14 +3668,30 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 		spot := cur
 		w.reviveSpot = &spot
 	}
-	// Nothing was summoned in a self-regroup, so the 10 s the summons need is dead time while the ghosts run:
-	// revive at once (the earlier the revive, the nearer the corpse run's start).
-	if !atRaid {
-		if err := w.recoverySleep(ctx, 10*time.Second, deadline); err != nil {
+	// A self-regroup: TB released the party at its regroup line, and a released bot's graveyard repop fires only once
+	// its pending movement changes are acked. A `.revive` inside that window makes the bot alive with the repop still
+	// pending, and the repop then far-teleports it out of the fight (CRASH-2026-11-03). So no revive goes out until
+	// selfRegroupReviveWait after the release, however long the checks above took, and then only the hires that are
+	// still dead are revived.
+	revives := w.hireList()
+	if selfRegroup {
+		if err := w.waitPastRelease(ctx, deadline); err != nil {
 			return err
 		}
+		var err error
+		if revives, err = w.stillDeadHires(ctx, deadline); err != nil {
+			return err
+		}
+	} else {
+		// Nothing was summoned in a self-regroup, so the 10 s the summons need is dead time while the ghosts run:
+		// revive at once (the earlier the revive, the nearer the corpse run's start).
+		if !atRaid {
+			if err := w.recoverySleep(ctx, 10*time.Second, deadline); err != nil {
+				return err
+			}
+		}
 	}
-	for _, name := range w.hireList() {
+	for _, name := range revives {
 		if timeout := w.recoveryExpired(deadline); timeout != nil {
 			return timeout
 		}
@@ -4427,6 +4449,67 @@ func selfRegroupNote(note string) bool {
 // same step in one poll (walk 18 r5: m910q s4, test2 s2), so the note is at most one poll old.
 const selfRegroupWindow = 30 * time.Second
 
+// selfRegroupReviveWait is how long after TB's release (the regroup line the walk read) a self-regroup waits before its
+// first `.revive`: the released bots' graveyard repop must fire (or be cleared by TB) before a bot is made alive again.
+const selfRegroupReviveWait = 10 * time.Second
+
+// waitPastRelease sleeps until selfRegroupReviveWait after the regroup line (regroupAt), or not at all when that has
+// passed already. With no regroup time it waits the full wait.
+func (w *walk) waitPastRelease(ctx context.Context, deadline time.Time) error {
+	d := selfRegroupReviveWait
+	if !w.regroupAt.IsZero() {
+		d = w.regroupAt.Add(selfRegroupReviveWait).Sub(w.env.now())
+	}
+	if d <= 0 {
+		return nil
+	}
+	return w.recoverySleep(ctx, d, deadline)
+}
+
+// stillDeadHires reads a fresh frame and returns the hires it shows dead, in hire order. It logs one line with the
+// counts: alive hires (TB already brought them back) and hires missing from the frame are never revived.
+func (w *walk) stillDeadHires(ctx context.Context, deadline time.Time) ([]string, error) {
+	now := w.env.now()
+	n, frame, err := w.view(ctx, w.afterN, 2000)
+	if ctx.Err() != nil {
+		return nil, stopf(exitRaidWalkFailed, "interrupted")
+	}
+	if err != nil || frame == nil {
+		return nil, stopf(exitRaidWalkIncident, "not revived: could not read which hires are still dead after the regroup (%v)", err)
+	}
+	w.afterN = n
+	w.trackFrame(now, frame)
+	if timeout := w.recoveryExpired(deadline); timeout != nil {
+		return nil, timeout
+	}
+	dead, alive, unread := stillDead(w.hireList(), frame.Party)
+	msg := fmt.Sprintf("revive after the regroup: %d hire(s) still dead (revived), %d alive (TB brought them back: not revived), %d not in the frame (not revived)", len(dead), alive, unread)
+	w.note("%s", msg)
+	w.logLine(w.env.now(), msg)
+	return dead, nil
+}
+
+// stillDead splits the hires by the party read of one frame: dead when the read shows them dead, alive when it shows
+// them up, unread when the party list does not have them. Hire order is kept.
+func stillDead(hires []string, party []tbm.PartyRec) (dead []string, alive, unread int) {
+	byName := make(map[string]tbm.PartyRec, len(party))
+	for _, p := range party {
+		byName[p.Name] = p
+	}
+	for _, name := range hires {
+		p, ok := byName[name]
+		switch {
+		case !ok:
+			unread++
+		case p.Dead || p.State == "d":
+			dead = append(dead, name)
+		default:
+			alive++
+		}
+	}
+	return dead, alive, unread
+}
+
 // runObsKeep bounds w.runLines: a running status stays for the self-regroup window and well past a
 // rest turn, while a long watch still cannot grow the list without bound.
 const runObsKeep = 5 * time.Minute
@@ -4448,23 +4531,23 @@ func (w *walk) recordRunLine(st tbm.RunStatus, now time.Time) {
 	}
 }
 
-// selfRegroupSeen says a running status line recorded since the last recovery reports the run
+// selfRegroupLine returns the running status line recorded since the last recovery that reports the run
 // regrouping by itself: its note arrived within selfRegroupWindow of now and either it is the line of
 // this step — pollOnce keeps every running line of a page, so the note still counts when a later line
 // of the same page ("regroup: waiting ... reviving", the run's own "regrouped") is the last status the
 // wipe fires on (walk 18 r5) — or its own page carried the run on to this step: the note's page holds
 // the note and the later line that moved the step, so the wipe explains the note (walk 19 r6).
-func (w *walk) selfRegroupSeen(step int, now time.Time) bool {
+func (w *walk) selfRegroupLine(step int, now time.Time) (runObs, bool) {
 	for i := len(w.runLines) - 1; i >= 0; i-- {
 		o := w.runLines[i]
 		if !selfRegroupNote(o.note) || now.Sub(o.at) > selfRegroupWindow {
 			continue
 		}
 		if o.step == step || (o.seq > w.pollSeq0 && step > o.step) {
-			return true
+			return o, true
 		}
 	}
-	return false
+	return runObs{}, false
 }
 
 // runWentOnAfter says a running status line the rest read after it began (seq0) shows the run going
