@@ -182,6 +182,10 @@ type PlanIssue struct {
 	From   Point  `json:"from"`
 	Reason string `json:"reason"`
 	Detail string `json:"detail,omitempty"`
+	// ReanchoredAfter is the check step whose failure left the party off the mesh: the issues after
+	// it were measured from the next plan point on the mesh (0: the plan's own failure). They are
+	// not the plan's failing points, only what an off-mesh start made fail.
+	ReanchoredAfter int `json:"reanchored_after,omitempty"`
 	// Team is the team a pull group or boss is gated to ("horde"). The other team's run still walks to look at it (gatedLook).
 	Team string `json:"team,omitempty"`
 }
@@ -209,8 +213,12 @@ type PlanCheck struct {
 	Plan string `json:"plan"`
 	Map  uint32 `json:"map"`
 	// Points is how many plan points were checked; needs_walk points are left out (the generator could not snap them to the mesh).
-	Points int         `json:"points"`
-	Issues []PlanIssue `json:"issues"`
+	Points int `json:"points"`
+	// Reanchored is how many of the issues were measured after an earlier failure left the party
+	// off the mesh and the check re-anchored it on the next plan point on the mesh. They are not
+	// the plan's own failing points; RootIssues counts those.
+	Reanchored int         `json:"reanchored,omitempty"`
+	Issues     []PlanIssue `json:"issues"`
 	// Warnings are points that work but are fragile (WarnNeedlessDirect); they never fail the plan.
 	Warnings []PlanIssue `json:"warnings"`
 	// Exempt are the hops the plan exempts from the check (Waypoint.CheckSkip); Detail is the plan's reason.
@@ -222,6 +230,10 @@ type PlanCheck struct {
 
 // OK says the plan passed.
 func (c *PlanCheck) OK() bool { return len(c.Issues) == 0 }
+
+// RootIssues is how many of the issues are the plan's own failing points: the others follow a
+// failure that left the party off the mesh (Reanchored).
+func (c *PlanCheck) RootIssues() int { return len(c.Issues) - c.Reanchored }
 
 // Summary is one line per issue, for a refusal or a log.
 func (c *PlanCheck) Summary() string { return joinIssues(c.Issues) }
@@ -339,6 +351,9 @@ func checkPlanRec(p *Plan, nav Navmesh, opt CheckOptions, look lookFunc, rec *ro
 // must be walked to from the run leader's point before it, as checkLeg walks a via point. It also warns of every pack or boss the run
 // leader would walk toward in navmesh hops of its own (Plan.RunLeaderReach), in PlanCheck.RunLeader.
 func (c *planChecker) runLeader(from int) error {
+	// The run leader's walk is its own: a look at the end of the legs that could not see its
+	// pack must not put the run leader at its next approach point without walking there.
+	c.anchorNext = false
 	prev := c.p.Entrance
 	if from > 0 {
 		prev, _ = c.p.LegStart(from)
@@ -438,6 +453,17 @@ type planChecker struct {
 	// plan, keyed "leg/part" with runLeaderWalk's part names: the run leader's
 	// approach pass starts from there, not from the plan's point.
 	ends map[string]Point
+	// step is the number of the plan point being checked (1-based: the count plus the needs_walk
+	// points, which Points leaves out); failStep is the step of the last failure.
+	step, failStep int
+	// reanchorAfter is the step whose failure left the party off the mesh and the check put it
+	// back on the next plan point on the mesh (0: the party has not been re-anchored): the
+	// issues after it carry it and are counted apart from the plan's own.
+	reanchorAfter int
+	// anchorNext says the last check failed in a way that leaves the party off the plan's point
+	// (a look that could not see its pack, a needs_walk point): the next plan point on the mesh
+	// is where the party is put.
+	anchorNext bool
 }
 
 // endKey keys ends: the leg and the runLeaderWalk part name of the move row.
@@ -457,9 +483,17 @@ func (c *planChecker) issue(part string, group int, at, from Point, reason, form
 	return is
 }
 
-// fail records a failing point of the current leg.
+// fail records a failing point of the current leg. A failure found after the check re-anchored
+// the party on the mesh (an earlier failure left it off) is marked with the step it was
+// re-anchored after and counted apart: it is a consequence of the start, not the plan's own.
 func (c *planChecker) fail(part string, group int, at, from Point, reason, format string, a ...any) {
 	is := c.issue(part, group, at, from, reason, format, a...)
+	c.failStep = c.step
+	if c.reanchorAfter > 0 {
+		is.ReanchoredAfter = c.reanchorAfter
+		is.Detail = fmt.Sprintf("re-anchored after step %d: %s", c.reanchorAfter, is.Detail)
+		c.res.Reanchored++
+	}
 	c.res.Issues = append(c.res.Issues, is)
 	c.rec.fail(is)
 }
@@ -647,7 +681,9 @@ func (c *planChecker) steps(kind string, steps []Step, cur Point) (Point, error)
 // needsWalk records a point the plan marks needs_walk: the generator could not snap it to the navmesh, so nothing about it is checked and a
 // live-checked plan must not carry one.
 func (c *planChecker) needsWalk(part string, group int, team string, at, from Point) {
+	c.step++ // a point of the plan, but not one the check walks: it stays out of Points
 	c.team = team
+	c.anchorNext = true
 	c.fail(part, group, at, from, ReasonNeedsWalk, "the plan marks it needs_walk: its mapping walk is still to do")
 	c.team = ""
 }
@@ -689,7 +725,62 @@ func (c *planChecker) warnLongHop(part string, group int, to, from Point, d floa
 
 // count counts a checked point (only those of the run's part of the plan).
 func (c *planChecker) count() {
+	c.step++
 	c.res.Points++
+}
+
+// onFloor says whether the nearest walkable point n is close enough to p for the walk checks
+// (checkWalkDZ up or down, checkWalkDH sideways).
+func onFloor(p, n Point) bool {
+	return math.Abs(float64(n.Z-p.Z)) <= checkWalkDZ &&
+		math.Hypot(float64(n.X-p.X), float64(n.Y-p.Y)) <= checkWalkDH
+}
+
+// offMesh says whether p is off the navmesh: there is no walkable point within the walk rule
+// (Nearest answers for 4 yd round and 6 yd up and down).
+func (c *planChecker) offMesh(p Point) (bool, error) {
+	n, ok, err := c.nav.Nearest(c.p.Map, vec(p))
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return true, nil
+	}
+	return !onFloor(p, point(n)), nil
+}
+
+// reanchor puts the party on the plan point at when an earlier failure left it off the mesh: the
+// check goes on from at (the route trace's rule for a walk it cannot path, which the plain check
+// did not follow). It reports whether it did; false when the party is on the mesh already or at
+// is off it too (the next plan point is tried then).
+func (c *planChecker) reanchor(from, at Point) (Point, bool, error) {
+	off, err := c.offMesh(from)
+	if err != nil || !off && !c.anchorNext {
+		return from, false, err
+	}
+	if c.reanchorAfter == 0 {
+		c.reanchorAfter = max(c.failStep, 1)
+	}
+	off, err = c.offMesh(at)
+	if err != nil || off {
+		return from, false, err
+	}
+	c.anchorNext = false
+	return at, true, nil
+}
+
+// standFloor puts a look stand the look could not use on the floor of the mesh: the nearest
+// walkable point within the walk rule, else the path's end (the last point of the walk, which is
+// on the mesh: the check goes on from it).
+func (c *planChecker) standFloor(p, end Point) (Point, error) {
+	n, ok, err := c.nav.Nearest(c.p.Map, vec(p))
+	if err != nil {
+		return p, err
+	}
+	if ok && onFloor(p, point(n)) {
+		return point(n), nil
+	}
+	return end, nil
 }
 
 func (c *planChecker) walk(part string, to, from Point) (Point, error) {
@@ -722,6 +813,14 @@ func (c *planChecker) walkGroup(part string, group int, to, from Point) (Point, 
 			c.fail(part, 0, to, from, ReasonOffMesh, "no walkable polygon within 4 yd")
 		}
 		return from, nil
+	}
+	// A failure before this point (a look off the mesh, a needs_walk point) left the party off the
+	// mesh: this point is on it, so it is where the party stands (the route trace's rule for a
+	// point it cannot path) and the hop has nothing to prove.
+	if at, ok, err := c.reanchor(from, to); err != nil {
+		return from, err
+	} else if ok {
+		return at, nil
 	}
 	path, err := c.nav.Plan(c.p.Map, vec(from), vec(to))
 	if err != nil {
@@ -806,6 +905,10 @@ func (c *planChecker) gmCross(part string, to, from Point) (Point, error) {
 	if c.avoided(part, 0, to, from) {
 		return to, nil
 	}
+	// A failure before this point left the party off the mesh: a GM puts it here all the same.
+	if _, _, err := c.reanchor(from, to); err != nil {
+		return from, err
+	}
 	n, ok, err := c.nav.Nearest(c.p.Map, vec(to))
 	if err != nil {
 		return from, err
@@ -830,6 +933,13 @@ func (c *planChecker) direct(part string, to, from Point) (Point, error) {
 	defer c.rec.end()
 	if c.avoided(part, 0, to, from) {
 		return to, nil
+	}
+	// A failure before this point left the party off the mesh: this point is on it, so it is
+	// where the party stands (the hop's limits and ray are measured from a place it is not at).
+	if at, ok, err := c.reanchor(from, to); err != nil {
+		return from, err
+	} else if ok {
+		return at, nil
 	}
 	if !DirectStepOK(from, to) {
 		c.fail(part, 0, to, from, ReasonTooFar, "%.1f yd across and %.1f up or down: the limits are %g and %g", hdist(from, to), math.Abs(float64(to.Z-from.Z)), DirectMaxDistance, DirectMaxVertical)
@@ -886,12 +996,22 @@ func (c *planChecker) look(part string, group int, team string, at, from Point) 
 	defer c.rec.end()
 	c.team = team
 	defer func() { c.team = "" }()
+	// A failure before this point left the party off the mesh: this position is on it, so the
+	// party is put there (the route trace's rule for a point it cannot path) and the pack is in
+	// view from it. The look would only path from a place the party is not at.
+	if stand, ok, err := c.reanchor(from, at); err != nil {
+		return from, err
+	} else if ok {
+		c.rec.lookPath([]Point{stand}, stand, false)
+		return stand, nil
+	}
 	path, err := c.nav.Plan(c.p.Map, vec(from), vec(at))
 	if err != nil {
 		return from, err
 	}
 	if len(path.Points) < 2 {
 		if path.Status != navmesh.Complete { // complete with one point: the party is at the pack already
+			c.anchorNext = true // the party cannot get to the pack: the next plan point is its place
 			return from, c.failPath(part, group, at, from, path)
 		}
 		c.rec.lookPath(nil, from, false)
@@ -930,13 +1050,24 @@ func (c *planChecker) look(part string, group int, team string, at, from Point) 
 	if !moved {
 		stand = from
 	}
-	c.rec.lookPath(pts, stand, moved)
 	if b, ok := c.p.InAvoid(stand); ok {
+		c.anchorNext = true // the party cannot stand where the look put it
 		c.fail(part, group, at, from, ReasonAvoid, "the look point %.1f %.1f %.1f lies in avoid box %q (%s)", stand.X, stand.Y, stand.Z, b.Name, boxText(b))
 	}
 	// The lead bot may stop LookArrive short of the look point, and the view is ClearSeeRadius: the look point must leave room for both.
 	if d := dist3(stand, at); d > ClearSeeRadius-float64(c.opt.LookArrive) {
+		c.anchorNext = true // the look point is not where the plan means the party to be: the next plan point is
 		c.fail(part, group, at, from, ReasonTooFar, "the look point %.1f %.1f %.1f is %.0f yd from it (the view is %d yd, less %g for the lead bot's stop): no point of the path comes within the look view of the pack (it ends %.1f %.1f %.1f, %.1f yd short of it)", stand.X, stand.Y, stand.Z, d, ClearSeeRadius, c.opt.LookArrive, end.X, end.Y, end.Z, dist3(end, at))
+		// The look failed, and the party is left where it put it for the rest of the plan: the
+		// standoff of a path over a ramp or a drop can be off the mesh (the point is interpolated
+		// between corners), and every later point would fail "start is not on the navmesh". The
+		// stand goes on the floor, else on the path's end (the nearest on-mesh point reached).
+		if s, err := c.standFloor(stand, end); err != nil {
+			return from, err
+		} else {
+			stand = s
+		}
 	}
+	c.rec.lookPath(pts, stand, moved)
 	return stand, nil
 }
