@@ -101,6 +101,12 @@ type walkFakeAgent struct {
 	unitsFn    func(n int) []objects.Unit
 	unitsN     int
 
+	// The --gm-clear fakes: gm_kill calls the killFn with the guid and the number of lines sent to it so far (nil: every kill works);
+	// a unit it lets die shows Dead in the unit RPC (killed).
+	killFn    func(g packet.GUID, tries int) bool
+	killTries map[packet.GUID]int
+	killed    map[packet.GUID]bool
+
 	startReply *commanderReply
 	startQueue []queuedEvent
 	bindLayout string
@@ -396,6 +402,36 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		} else {
 			v = fn(n)
 		}
+	case "gm_kill":
+		var p struct {
+			GUID string `json:"guid"`
+		}
+		_ = json.Unmarshal(raw, &p)
+		g, err := packet.ParseGUID(p.GUID)
+		if err != nil {
+			f.t.Errorf("gm_kill %q: %v", p.GUID, err)
+		}
+		f.mu.Lock()
+		f.log = append(f.log, "gm_kill "+g.String())
+		if f.killTries == nil {
+			f.killTries, f.killed = map[packet.GUID]int{}, map[packet.GUID]bool{}
+		}
+		f.killTries[g]++
+		if f.killFn == nil || f.killFn(g, f.killTries[g]) {
+			f.killed[g] = true
+		}
+		f.mu.Unlock()
+	case "unit":
+		var p struct {
+			GUID string `json:"guid"`
+		}
+		_ = json.Unmarshal(raw, &p)
+		g, _ := packet.ParseGUID(p.GUID)
+		f.mu.Lock()
+		f.log = append(f.log, "unit "+g.String())
+		dead := f.killed[g]
+		f.mu.Unlock()
+		v = objects.Unit{GUID: g, Type: "creature", Dead: dead, Health: map[bool]uint32{true: 0, false: 100}[dead], MaxHealth: 100}
 	case "target":
 		var p struct {
 			GUID string `json:"guid"`

@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/config"
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/mapview"
 	"github.com/pjerra/turtle-agent/internal/objects"
@@ -51,7 +53,7 @@ const (
 )
 
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
-    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--speed X] [--hires FILE] [--tier N|--tier-override N]
+    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
     [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--decisions on|off] [--decisions-max-mib N]
@@ -74,7 +76,10 @@ type raidWalkOptions struct {
 	sql             string
 	until           string
 	from            string
-	place           bool // --place: start the raid partway into its instance, at the --from start (spec 3)
+	place           bool       // --place: start the raid partway into its instance, at the --from start (spec 3)
+	gmClear         stringList // --gm-clear "<leg>:<group>[,<group>...]", repeatable: GM-kill those pull groups after the placement (test servers only)
+	gmClearBoss     stringList // --gm-clear-boss <leg>, repeatable: GM-kill the leg's boss and its pack
+	gmClearSpawns   string     // --gm-clear-spawns: the world export dir (default <dir>/../tools/dungeongen/testdata/map<N>)
 	speed           float64
 	hires           string
 	tier            int // --tier: the kit of a raid the committed table leaves unknown
@@ -237,6 +242,9 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.BoolVar(&o.capFail, "instance-cap-fail", false, "at that count exit 26 instead of waiting")
 	fs.BoolVar(&o.capReset, "instance-cap-reset", false, "forget this server's instance ledger before the check (the worldserver restarted)")
 	fs.StringVar(&o.patrols, "patrols", "", "a tb-patrols file for the revive quiet check")
+	fs.Var(&o.gmClear, "gm-clear", "TEST SERVERS ONLY, needs --place: after the placement the commander GM-kills every live unit of these pull groups of a leg, \"<leg>:<group>[,<group>...]\" (whole packs, links included); repeatable; the walk is then ASSISTED, never a real clear")
+	fs.Var(&o.gmClearBoss, "gm-clear-boss", "TEST SERVERS ONLY, needs --place: like --gm-clear for the boss of a leg (and its pack); repeatable")
+	fs.StringVar(&o.gmClearSpawns, "gm-clear-spawns", "", "the world export dir --gm-clear reads the packs from (default: <dir>/../tools/dungeongen/testdata/map<N>)")
 	fs.StringVar(&o.out, "out", "", "the output dir (default ./raid-walk-<plan>-<stamp>)")
 	fs.StringVar(&o.dashURL, "dash-url", "", "the dashboard URL (or TBDASH_URL)")
 	fs.StringVar(&o.dashUser, "dash-user", "", "the dashboard login (or TBDASH_USER; default TADASH)")
@@ -369,11 +377,103 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 			return o, exitUsage
 		}
 	}
+	// --gm-clear (the owner-approved test tool): refused outside the test servers --place already names, and without --place (the
+	// commander must stand in the raid's copy, in GM mode, before it kills anything).
+	if len(o.gmClear) > 0 || len(o.gmClearBoss) > 0 {
+		if !placeServers[o.server] {
+			fmt.Fprintf(stderr, "raid-walk: --gm-clear kills units by GM command: test servers only (%s)\n", strings.Join(placeServerList(), ", "))
+			return o, exitUsage
+		}
+		if !o.place {
+			fmt.Fprintf(stderr, "raid-walk: --gm-clear needs --place (and --from): the kills run in the raid's copy after the placement\n")
+			return o, exitUsage
+		}
+		if _, err := parseGMClearSpecs(o.gmClear, o.gmClearBoss); err != nil {
+			fmt.Fprintf(stderr, "raid-walk: %v\n", err)
+			return o, exitUsage
+		}
+	}
 	return o, exitOK
+}
+
+// parseGMClearSpecs reads every --gm-clear and --gm-clear-boss value, the group specs first.
+func parseGMClearSpecs(groups, bosses []string) ([]raidwalk.GMClearSpec, error) {
+	var out []raidwalk.GMClearSpec
+	for _, v := range groups {
+		sp, err := raidwalk.ParseGMClear(v)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sp)
+	}
+	for _, v := range bosses {
+		sp, err := raidwalk.ParseGMClearBoss(v)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sp)
+	}
+	return out, nil
 }
 
 // placeServers are the servers whose Eluna test toolkit can move a raid (spec 3). --place refuses every other one.
 var placeServers = map[string]bool{"m910q": true, "tortoise-test2": true}
+
+// gmKillAuthorize is gmKillAllowed with the slots table read from its default path (the file slot setup and teardown read;
+// slots.Load holds it to mode 0600 in a folder no one else can write). Login and reconnect call it with the address the
+// session dialled.
+func gmKillAuthorize(st config.Settings, dialed string) (bool, string) {
+	if !placeServers[st.ServerName] {
+		return false, ""
+	}
+	cfg, err := slots.Load(slots.DefaultPath())
+	if err != nil {
+		return false, fmt.Sprintf("server_name %q is a test server, but the slots table could not be read (%v): gm_kill needs its configured address", st.ServerName, err)
+	}
+	return gmKillAllowed(st, dialed, cfg.Servers)
+}
+
+// gmKillAllowed says whether this session may send gm_kill's `.die` (session.Options.AllowGMKill). It trusts the connection,
+// not the settings: the host:port the session dialled (the realm's world address, or settings world_addr) must equal the
+// world_addr of the test server that settings server_name names in the slots table. A server with no world_addr is
+// refused: its realmd is never a stand-in. server_name alone never authorizes. A refusal carries a reason only when
+// server_name names a test server (an ordinary agent is refused silently).
+func gmKillAllowed(st config.Settings, dialed string, servers []slots.Server) (bool, string) {
+	if !placeServers[st.ServerName] {
+		return false, ""
+	}
+	var srv *slots.Server
+	for i := range servers {
+		if servers[i].Name == st.ServerName {
+			srv = &servers[i]
+			break
+		}
+	}
+	if srv == nil {
+		return false, fmt.Sprintf("server_name %q is a test server, but the slots table has no entry for it: gm_kill needs its configured address", st.ServerName)
+	}
+	if srv.WorldAddr == "" {
+		return false, fmt.Sprintf("server_name %q is a test server, but its slots entry has no world_addr: gm_kill needs its configured world address (its realmd is not used)", st.ServerName)
+	}
+	if !sameAddr(dialed, srv.WorldAddr) {
+		return false, fmt.Sprintf("settings server_name is %q, but the session dialled %s, which is not the configured world_addr of %s in the slots table: gm_kill refused", st.ServerName, dialed, st.ServerName)
+	}
+	return true, ""
+}
+
+// sameAddr reports whether dialed and configured are the same host:port: the host compares case-insensitively, the port
+// exactly. Either side without a host and a port never matches.
+func sameAddr(dialed, configured string) bool {
+	dh, dp, err := net.SplitHostPort(dialed)
+	if err != nil || dh == "" || dp == "" {
+		return false
+	}
+	ch, cp, err := net.SplitHostPort(configured)
+	if err != nil || ch == "" || cp == "" {
+		return false
+	}
+	return strings.EqualFold(dh, ch) && dp == cp
+}
 
 // placeServerList is the place servers, sorted, for the refusal.
 func placeServerList() []string {
@@ -789,6 +889,12 @@ type walk struct {
 	capOwner    string // the instance-cap reservation's owner (holder + pid)
 	capReserved bool   // a reservation is held and not yet confirmed or released
 
+	// --gm-clear: the packs validate expanded from the world export, and what the place phase tried to kill. gmClearUsed is true once
+	// the flag was given (the walk is ASSISTED even when no live unit was found).
+	gmClear     []raidwalk.GMClearPack
+	gmClearLog  []raidwalk.GMClearEntry
+	gmClearUsed bool
+
 	started     time.Time
 	ended       time.Time
 	runStarted  bool
@@ -1105,6 +1211,12 @@ func (w *walk) validate() error {
 		}
 		if long, n := placeTTMax(w.place, w.plan.Map); n > raidwalk.AllowedTTMax {
 			return stopf(exitUsage, "--place: the longest toolkit line is %d chars, over the toolkit's %d: %s", n, raidwalk.AllowedTTMax, long)
+		}
+	}
+
+	if len(w.opts.gmClear) > 0 || len(w.opts.gmClearBoss) > 0 {
+		if err := w.validateGMClear(); err != nil {
+			return err
 		}
 	}
 
@@ -1491,6 +1603,10 @@ func (w *walk) printPlan(out io.Writer) {
 		}
 		fmt.Fprintf(out, "  8b commander: .gm on; .appear <mt>; q inst, q group, q floor, q units, clearto, quiet, place <x> <y> <z> spread=5 of=<mt>; frames; cmd stay; cmd follow\n")
 	}
+	for _, pk := range w.gmClear {
+		fmt.Fprintf(out, "  8c gm-clear: %s pack %d, %d members, around %s %s %s: select each live member by guid, .die, read its death\n",
+			raidwalk.GMClearLabel(pk.Leg, pk.Group), pk.ID, len(pk.Members), num32(pk.Centroid.X), num32(pk.Centroid.Y), num32(pk.Centroid.Z))
+	}
 	start := []string{w.plan.Name}
 	start = append(start, w.fromWords...)
 	start = append(start, w.untilWords...)
@@ -1592,6 +1708,9 @@ func (w *walk) finish(code int) {
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights, Decisions: w.decisions,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
 		Place:         w.placeSum,
+		GMClearUsed:   w.gmClearUsed,
+		GMClear:       w.gmClearLog,
+		GMClearLegs:   raidwalk.GMClearLegs(w.gmClear),
 		BossKill:      w.bossKillSummary(),
 		BossKills:     w.bossKillSummaries(),
 		ReviveRefusal: w.reviveRefusal,
