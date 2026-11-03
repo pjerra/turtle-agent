@@ -322,6 +322,7 @@
   },
   {
    "name": "razorfen_downs",
+   "handwritten": true,
    "title": "Razorfen Downs",
    "map": 129,
    "kind": "dungeon",
@@ -449,6 +450,7 @@
   },
   {
    "name": "sunken_temple",
+   "handwritten": true,
    "title": "The Temple of Atal'Hakkar",
    "map": 109,
    "kind": "dungeon",
@@ -557,6 +559,7 @@
   },
   {
    "name": "dire_maul_east",
+   "handwritten": true,
    "title": "Dire Maul: East",
    "map": 429,
    "kind": "dungeon",
@@ -590,6 +593,7 @@
   },
   {
    "name": "dire_maul_west",
+   "handwritten": true,
    "title": "Dire Maul: West",
    "map": 429,
    "kind": "dungeon",
@@ -778,6 +782,7 @@
   },
   {
    "name": "frostmane_hollow",
+   "handwritten": true,
    "title": "Frostmane Hollow",
    "map": 822,
    "kind": "dungeon",
