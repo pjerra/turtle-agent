@@ -279,8 +279,9 @@ plan_of_cmd() {
 
 # move_row_before prints the server step number of the last MOVE row strictly before step <want> of <plan> in the
 # command's --sql file. The server numbers a plan's ai_dungeon_step rows 1..N in (leg, seq) order over EVERY row,
-# whatever its kind (loot, open, rest, gossip, use_object ... take a number too; the importer keeps the file order and
-# trashcheck's orderedSteps numbers the same way). Only the kind decides a move: move, move_direct or move_hop_exact
+# whatever its kind (loot, open, rest, gossip, use_object ... take a number too). The --sql file order is not used:
+# trashcheck's orderedSteps sorts by (leg, seq) and numbers the same way. Only the kind decides a move: move,
+# move_direct or move_hop_exact
 # (trashcheck isMove, raidwalk moveRow). Rows of other tables (ai_dungeon_leg, ai_dungeon_plan) are not steps.
 move_row_before() {
   local plan="$1" want="$2" sql
