@@ -75,9 +75,9 @@ var pullSizeKnownCounts = map[string]int{
 	// The repo reach (AggroRadius at the plan's party level plus the party's
 	// spread) and the 20 yd ring join neighbouring packs: every dense plan
 	// warns on most of its pulls (mmaps-free path, LOS always seen).
-	"ragefire_chasm": 28, "wailing_caverns": 54, "deadmines": 132,
+	"ragefire_chasm": 27, "wailing_caverns": 52, "deadmines": 132, // ci-lint fix round (was 28/54): the ramp approach points pull from closer, joining fewer neighbour packs.
 	// zulfarrak re-pinned for the waypoint lint fixes (was 53): leg 8 pull 1 (12 bodies) now crosses the ceiling and leg 3 pull 1 grows 11 -> 14 bodies.
-	"uldaman": 57, "zulfarrak": 54, "karazhan_crypt": 125, // waypoint pass (was 58): the moved stands join fewer neighbouring packs.
+	"uldaman": 56, "zulfarrak": 54, "karazhan_crypt": 125, // ci-lint fix round (was 57): the snapped ramp approaches join one fewer neighbour pack.
 	"molten_core": 19, "blackwing_lair": 40, "zul_gurub": 92, // re-pinned for the walk-32 point fixes: the regenerated leg 7/8 rows and their stands in the dense pool ring, and the leg-0 group-3 row now names the Razzashi Adder 11372 that stands on its point. raids-mc-bwl-ony (was 21): the moved stands clear two pulls' rings.
 	"ruins_of_ahnqiraj": 29, "temple_of_ahnqiraj": 74, "naxxramas": 150, // re-pinned for the AQ waypoint pass (was 32): three over-ceiling estimates are gone, the leg-0 stands moved out of the wasp ring, the leg-3 stand off the Rajaxx cluster walk, and leg-6 pull 4 drops 15 bodies to 9.
 	"stormwrought_ruins":   169,                            // hand-maintained from the generated draft (waypoint pass 2026-11-03): dense custom packs warn on most pulls.
