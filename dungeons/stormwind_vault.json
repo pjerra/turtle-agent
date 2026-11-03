@@ -23,6 +23,7 @@
     "rogue:dps",
     "hunter:dps"
   ],
+  "kill_first": [60602, 60596, 60601, 60603],
   "notes": [
     "DRAFT: a skeleton from the world database export of map 35 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
