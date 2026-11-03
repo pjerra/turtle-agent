@@ -345,13 +345,16 @@ func (c *checker) checkRiverBelow(i int, s planexport.StepRow) []Finding {
 		for j := 0; j <= n; j++ {
 			t := float32(j) / float32(n)
 			p := dungeon.Point{X: a[0] + (b[0]-a[0])*t, Y: a[1] + (b[1]-a[1])*t, Z: a[2] + (b[2]-a[2])*t}
-			fl, err := c.nav.Floors(c.opt.Map, p.X, p.Y, p.Z-40, p.Z-6)
-			if err != nil {
-				continue
-			}
-			for _, f := range fl {
-				if f.Flags&navmesh.NavWater != 0 {
-					return []Finding{c.severityFinding(i, s, LintWater, fmt.Sprintf("river below: a NavWater floor %.1f yd under the path at %.1f %.1f (a chase or a fall lands in water)", float64(p.Z-f.Z), p.X, p.Y), SeverityWarning)}
+			// Within 5 yd 2D of the path: the sample itself and four points 4 yd off it.
+			for _, off := range [][2]float32{{0, 0}, {4, 0}, {-4, 0}, {0, 4}, {0, -4}} {
+				fl, err := c.nav.Floors(c.opt.Map, p.X+off[0], p.Y+off[1], p.Z-40, p.Z-6)
+				if err != nil {
+					continue
+				}
+				for _, f := range fl {
+					if f.Flags&navmesh.NavWater != 0 {
+						return []Finding{c.severityFinding(i, s, LintWater, fmt.Sprintf("river below: a NavWater floor %.1f yd under the path at %.1f %.1f (a chase or a fall lands in water)", float64(p.Z-f.Z), p.X+off[0], p.Y+off[1]), SeverityWarning)}
+					}
 				}
 			}
 		}
