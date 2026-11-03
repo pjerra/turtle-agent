@@ -30,6 +30,12 @@ import (
 // The exemption needs TWO reads (review round 1, Opus M1): quietIdleHold is how far apart they must be and
 // quietIdleMoveYd how close to the same spot, so a mob that was idle once and starts to move is not waved through on
 // the strength of one stale sighting.
+//
+// A critter never counts (turtle-agent#379): the frame's own critter flag is the primary test (the walk's reset
+// wait reads it off the frame row), and the fallback here is a level-1 unit whose max health is absolute and inside
+// the place phase's max-HP band — no threat to a revive, so not a blocker at any distance or state. Walk 27 C
+// restart 2 waited 115 s on a moving Snake 2914 at 72 yd beside an idle Mad Servant off its spawn; with the critter
+// out of the list the refusal's all_idle names the real blocker and the wait is not blamed on a snake.
 const (
 	quietStillYd  = 45
 	quietMovingYd = 80
@@ -43,7 +49,22 @@ const (
 	// quietIdleMaxGap bounds how old the first of the two reads may be (Codex round 3): a sighting from long ago,
 	// or from before a stretch of failed reads, is no evidence about the unit now.
 	quietIdleMaxGap = 30 * time.Second
+	// quietCritterHP is the top of a critter's max-HP band, the place phase's own (placeCritterHP): a level-1 unit
+	// whose max health is really inside this band is a critter and never counts in the quiet check (turtle-agent#379).
+	// Really: a percent read carries MaxHealth 100 exactly (the store passes health through as sent), so the band
+	// test is strict — a MaxHealth of 100 is ambiguous with a percent read and fails closed. The units read has no
+	// rank or kind field, so the level is the rank the frame/toolkit would carry: critters are level 1.
+	quietCritterHP = 100
 )
+
+// critter says the unit never counts in the quiet check: a critter never blocks a revive, so it must not make
+// all_idle false either. The frame's own critter flag (the kind on the frame row) never reaches the units read, so
+// the test here is the fallback: a level-1 unit whose max health is absolute and inside the place phase's band. A
+// percent read's MaxHealth is the band top itself, which is why the band test is strict; a unit with no level read
+// (0) is never a critter (fail closed).
+func critter(u *objects.Unit) bool {
+	return u.Type == "creature" && u.Level == 1 && u.MaxHealth > 0 && u.MaxHealth < quietCritterHP
+}
 
 // QuietHomeSpawn is one plan spawn the idle exemption trusts: an entry and where it stands (a pull group's position,
 // the boss's position, a left-alone spawn's At), with the spawn guid when the plan names one. Patrol says the group
@@ -345,7 +366,10 @@ func QuietBlockers(units []objects.Unit, patrols []QuietPatrol, p dungeon.Point,
 	seen := map[string]bool{}
 	for i := range units {
 		u := &units[i]
-		if !u.Hostile || u.Dead || u.Type == "player" {
+		// A critter never counts, at any distance and in any state (turtle-agent#379: the moving Snake 2914 at 72 yd
+		// made all_idle false beside an idle Mad Servant). It is skipped before the read memory, so it is never a
+		// blocker and never a reason to wait.
+		if !u.Hostile || u.Dead || u.Type == "player" || critter(u) {
 			continue
 		}
 		seen[strings.ToUpper(u.GUID.String())] = true

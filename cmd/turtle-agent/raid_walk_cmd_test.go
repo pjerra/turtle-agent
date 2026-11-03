@@ -2074,6 +2074,38 @@ func TestRaidWalkReviveRefusalSummary(t *testing.T) {
 			t.Fatalf("blocker %+v, want an idle one 20 yd out", b)
 		}
 	})
+	t.Run("critter is not a blocker", func(t *testing.T) {
+		f, _ := newPlaceFixture(t)
+		f.opts.wipeRest = time.Minute
+		_, place := placePlanRows(t)
+		f.agent.startReply = zgPlaceReply(t)
+		// Walk 27 C restart 2: a moving Snake 2914 72 yd out must not join the blocker list, so the idle Mad Servant
+		// 16.8 yd from the point is the only blocker and all_idle is true (the wait is pointless, the mob is off its
+		// spawn). The critter is still in the read, as it was in the evidence.
+		f.agent.unitsFn = func(int) []objects.Unit {
+			return []objects.Unit{
+				{Type: "creature", Name: "Mad Servant", Entry: 15111, Hostile: true, Level: 61, MaxHealth: 4000,
+					X: place.Point.X + 16.8, Y: place.Point.Y, Z: place.Point.Z},
+				{Type: "creature", Name: "Snake", Entry: 2914, Hostile: true, Level: 1, MaxHealth: 8, Moving: true,
+					X: place.Point.X + 72, Y: place.Point.Y, Z: place.Point.Z},
+			}
+		}
+		wipeAfterStart(f)
+		if code := f.run(context.Background()); code != exitRaidWalkIncident {
+			t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+		}
+		rr := f.summary().ReviveRefusal
+		if rr == nil || len(rr.Blockers) != 1 || rr.Blockers[0].Entry != 15111 || !rr.AllIdle {
+			t.Fatalf("refusal %+v, want one idle blocker (15111) and all_idle", rr)
+		}
+		raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+		if err != nil {
+			t.Fatalf("run.log: %v", err)
+		}
+		if strings.Contains(string(raw), "2914") || strings.Contains(string(raw), "Snake") {
+			t.Fatalf("run.log names the critter as a blocker:\n%s", raw)
+		}
+	})
 }
 
 // resumeHook re-queues one running line at step once the walk sends `run resume` through the commander
@@ -5478,6 +5510,41 @@ func TestTrackFrameKeepsPositionsAndKinds(t *testing.T) {
 	}
 	if h.hppct != 55 || h.target != 7 || !h.at.Equal(now) {
 		t.Fatalf("hostile %+v, want hp 55, target 7 and the frame's time", h)
+	}
+}
+
+// turtle-agent#379, round 2: the revive's reset wait never counts the frame's own critter flag — a hurt 'k' row at
+// 60 % still lets the reset complete; a hurt row without the flag still holds it. The band fallback is a units-read
+// test (raidwalk), because the frame carries no max health for it.
+func TestResetReadyIgnoresCritterFlag(t *testing.T) {
+	now := newFakeClock().now()
+	fresh := now.Add(-time.Second)
+	w := &walk{partyG: map[uint64]bool{}, hostiles: map[string]hostileState{
+		"0xF130001234000001": {entry: 2914, kind: "k", hppct: 60, at: fresh},
+	}, bossRows: map[uint32]hostileState{}, botAt: map[string]botPos{}}
+	for i := range 10 {
+		if got := w.resetReady(now.Add(time.Duration(i) * 2 * time.Second)); got {
+			t.Fatalf("reset ready at %ds with only a hurt critter in view", i*2)
+		}
+	}
+	// Held 20 s on a critter alone: the wait completes.
+	if got := w.resetReady(now.Add(20 * time.Second)); !got {
+		t.Fatal("no reset after 20 s with only a hurt critter in view")
+	}
+	// Targeted by nothing, hurt, no flag: still a blocker.
+	w = &walk{partyG: map[uint64]bool{}, hostiles: map[string]hostileState{
+		"0xF130001234000001": {entry: 2914, kind: "-", hppct: 60, at: fresh},
+	}, bossRows: map[uint32]hostileState{}, botAt: map[string]botPos{}}
+	if got := w.resetReady(now.Add(time.Minute)); got {
+		t.Fatal("reset ready with a hurt level-1-by-level row the frame did not flag")
+	}
+	// A level-5 critter the frame flags is still a critter: the flag is primary at any level.
+	w = &walk{partyG: map[uint64]bool{}, hostiles: map[string]hostileState{
+		"0xF130001234000002": {entry: 2915, kind: "k", hppct: 60, at: fresh},
+	}, bossRows: map[uint32]hostileState{}, botAt: map[string]botPos{}}
+	w.resetReady(now)
+	if got := w.resetReady(now.Add(20 * time.Second)); !got {
+		t.Fatal("no reset after 20 s with only a flagged critter in view")
 	}
 }
 
