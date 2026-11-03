@@ -104,7 +104,8 @@
    ],
    "notes": [
     "Turtle adds Sever (14682), Prelate Ironmane (61969) and a second Arugal row (10000) that are not legs."
-   ]
+   ],
+   "handwritten": true
   },
   {
    "name": "blackfathom_deeps",
@@ -227,7 +228,8 @@
    "notes": [
     "One of four wings of map 189; the packs are the ones inside the wing's box.",
     "Duke Dreadmoore (61972) is a Turtle addition in the crypt level (z -3.7): script npc_duke_dreadmoore sets him to 20 % health on reset and yells on aggro and death; his crypt pack is needs_walk until the mapping walk"
-   ]
+   ],
+   "handwritten": true
   },
   {
    "name": "scarlet_library",
@@ -258,7 +260,8 @@
    ],
    "notes": [
     "One of four wings of map 189."
-   ]
+   ],
+   "handwritten": true
   },
   {
    "name": "scarlet_armory",
@@ -287,7 +290,8 @@
    ],
    "notes": [
     "One of four wings of map 189; Armory Quartermaster Daghelm (61982) is Turtle's addition."
-   ]
+   ],
+   "handwritten": true
   },
   {
    "name": "scarlet_cathedral",
@@ -318,7 +322,8 @@
    ],
    "notes": [
     "One of four wings of map 189."
-   ]
+   ],
+   "handwritten": true
   },
   {
    "name": "razorfen_downs",
