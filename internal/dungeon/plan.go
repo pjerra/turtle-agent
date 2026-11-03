@@ -214,8 +214,12 @@ type Leg struct {
 	// guards, the item to combine with what the boss dropped. Same kinds as Steps.
 	AfterBoss []Step `json:"after_boss,omitempty"`
 	// Rest overrides the rest gates' targets and cap for this leg (see RestSpec); absent: the driver's defaults.
-	Rest  *RestSpec `json:"rest,omitempty"`
-	Notes []string  `json:"notes,omitempty"`
+	Rest *RestSpec `json:"rest,omitempty"`
+	// PlaceAt is the leg's quiet placement point (walk-ready rule 6): the
+	// spot --from places the party when the leg starts (the place the quiet
+	// check passes). Nil: the lint demands a quiet point at the leg start.
+	PlaceAt *Point   `json:"place_at,omitempty"`
+	Notes   []string `json:"notes,omitempty"`
 }
 
 // LeaveClearYd is how far an approach point or a stand keeps from a Leave spawn: more than the run leader's hop pull reaches (kHopPullYd, 15).
@@ -369,6 +373,11 @@ type PullGroup struct {
 	// 0: the plan's PullCeiling (or the lint default). The pull row carries it in
 	// item (unused on pull rows today); 1-80 (kPlanMaxPullBodies).
 	MaxBodies int `json:"max_bodies,omitempty"`
+	// AcceptOverCeiling names why the plan accepts a pull row the walk-ready lint
+	// (dungeongen -check -walk-ready) still reports over its pull_size ceiling:
+	// the finding is kept, and the reason rides in the report. Empty: no
+	// accepted finding (the normal case).
+	AcceptOverCeiling string `json:"accept_over_ceiling,omitempty"`
 }
 
 // Hold is a scripted event that the TortoiseBots run leader fights out on one spot (its `hold` step, TortoiseBots #1041): the party
@@ -887,6 +896,8 @@ type rawLeg struct {
 	Rest       *RestSpec `json:"rest"`
 	Notes      []string  `json:"notes"`
 	NeedsWalk  bool      `json:"needs_walk"`
+	// PlaceAt is Leg.PlaceAt.
+	PlaceAt *rawPoint `json:"place_at"`
 }
 
 type rawLeave struct {
@@ -913,6 +924,8 @@ type rawPullGroup struct {
 	ClearYd int `json:"clear_yd"`
 	// MaxBodies is PullGroup.MaxBodies.
 	MaxBodies *int `json:"max_bodies"`
+	// AcceptOverCeiling is PullGroup.AcceptOverCeiling.
+	AcceptOverCeiling string `json:"accept_over_ceiling"`
 }
 
 type rawHold struct {
@@ -1407,6 +1420,10 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 	}
 	l.To = c.point(path+".to", r.To)
+	if r.PlaceAt != nil {
+		at := c.point(path+".place_at", r.PlaceAt)
+		l.PlaceAt = &at
+	}
 	if r.SkipExport && r.Optional != nil {
 		c.fail(path+".skip_export", "never with optional (an optional leg is already skipped unless asked for, by its item)")
 	}
@@ -1531,6 +1548,10 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 				pg.MaxBodies = v
 			}
 		}
+		if strings.TrimSpace(g.AcceptOverCeiling) != "" && len(g.AcceptOverCeiling) > 200 {
+			c.fail(gp+".accept_over_ceiling", "%d characters: keep the reason under 200", len(g.AcceptOverCeiling))
+		}
+		pg.AcceptOverCeiling = strings.TrimSpace(g.AcceptOverCeiling)
 		l.PullGroups = append(l.PullGroups, pg)
 	}
 	for i, lv := range r.Leave {

@@ -130,10 +130,10 @@ func TestCheckFileStrict(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := filepath.Join("testdata", "uldaman")
-	if got := checkFile(plan, data, "alliance", "122", "", "", false, "35", false); got != 0 {
+	if got := checkFile(plan, data, "alliance", "122", "", "", false, "35", false, false); got != 0 {
 		t.Fatalf("warnings without -strict: %d", got)
 	}
-	if got := checkFile(plan, data, "alliance", "122", "", "", true, "35", false); got != 1 {
+	if got := checkFile(plan, data, "alliance", "122", "", "", true, "35", false, false); got != 1 {
 		t.Fatalf("warnings with -strict: %d", got)
 	}
 	clean := filepath.Join("..", "..", "dungeons", "uldaman.json")
@@ -142,10 +142,10 @@ func TestCheckFileStrict(t *testing.T) {
 	// 1 owns no mob in the export, and that no-target finding fails strict
 	// (see TestCheckFileNoEligibleMobsFailsStrict). -pull-size-strict fails
 	// on the over-ceiling rows either way.
-	if got := checkFile(clean, data, "alliance", "122", "2748,4857", "", true, "35", false); got != 1 {
+	if got := checkFile(clean, data, "alliance", "122", "2748,4857", "", true, "35", false, false); got != 1 {
 		t.Fatalf("the committed plan under -strict: %d, want 1 (its no-target row fails it)", got)
 	}
-	if got := checkFile(clean, data, "alliance", "122", "2748,4857", "", false, "35", true); got != 1 {
+	if got := checkFile(clean, data, "alliance", "122", "2748,4857", "", false, "35", true, false); got != 1 {
 		t.Fatalf("the committed plan under -pull-size-strict: %d, want 1 (its over-ceiling rows fail it)", got)
 	}
 }
@@ -162,10 +162,10 @@ func TestCheckFileFailsOnWorldOrExportErrors(t *testing.T) {
 	}
 	data := t.TempDir()
 	// No creatures.tsv: worldspawn.Load refuses, and the check fails strict or not.
-	if got := checkFile(plan, data, "", "", "", "", false, "35", false); got != 1 {
+	if got := checkFile(plan, data, "", "", "", "", false, "35", false, false); got != 1 {
 		t.Fatalf("missing world without strict: %d, want 1", got)
 	}
-	if got := checkFile(plan, data, "", "", "", "", true, "35", false); got != 1 {
+	if got := checkFile(plan, data, "", "", "", "", true, "35", false, false); got != 1 {
 		t.Fatalf("missing world with strict: %d, want 1", got)
 	}
 	// A world that loads but a plan the exporter refuses (kill_first over the
@@ -181,7 +181,7 @@ func TestCheckFileFailsOnWorldOrExportErrors(t *testing.T) {
 	if err := os.WriteFile(bad, []byte(js), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := checkFile(bad, filepath.Join("testdata", "uldaman"), "", "", "", "", false, "35", false); got != 1 {
+	if got := checkFile(bad, filepath.Join("testdata", "uldaman"), "", "", "", "", false, "35", false, false); got != 1 {
 		t.Fatalf("refused export without strict: %d, want 1", got)
 	}
 }
@@ -213,10 +213,10 @@ func TestCheckFileNoEligibleMobsFailsStrict(t *testing.T) {
  {"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":1,"y":0,"z":0}]}]}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := checkFile(plan, dir, "", "", "", "", false, "35", false); got != 0 {
+	if got := checkFile(plan, dir, "", "", "", "", false, "35", false, false); got != 0 {
 		t.Fatalf("no-target warning without strict: %d, want 0 (warnings do not fail)", got)
 	}
-	if got := checkFile(plan, dir, "", "", "", "", true, "35", false); got != 1 {
+	if got := checkFile(plan, dir, "", "", "", "", true, "35", false, false); got != 1 {
 		t.Fatalf("no-target finding with strict: %d, want 1", got)
 	}
 }
@@ -255,13 +255,13 @@ func TestCheckFilePullSizeStrictOnlyFailsOverCeiling(t *testing.T) {
  {"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":30,"y":0,"z":0}],"max_bodies":1}]}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := checkFile(plan, dir, "", "", "", "", false, "35", false); got != 0 {
+	if got := checkFile(plan, dir, "", "", "", "", false, "35", false, false); got != 0 {
 		t.Fatalf("over-ceiling warning without strict: %d, want 0 (warnings do not fail)", got)
 	}
-	if got := checkFile(plan, dir, "", "", "", "", true, "35", false); got != 0 {
+	if got := checkFile(plan, dir, "", "", "", "", true, "35", false, false); got != 0 {
 		t.Fatalf("over-ceiling warning with -strict: %d, want 0 (only -pull-size-strict opts in)", got)
 	}
-	if got := checkFile(plan, dir, "", "", "", "", false, "35", true); got != 1 {
+	if got := checkFile(plan, dir, "", "", "", "", false, "35", true, false); got != 1 {
 		t.Fatalf("over-ceiling warning with -pull-size-strict: %d, want 1", got)
 	}
 }

@@ -100,6 +100,7 @@ func main() {
 	team := flag.String("team", "", "with -check: the leader's team, alliance or horde; what the plan gates to the other team is not looked at")
 	strict := flag.Bool("strict", false, "with -check: exit 1 on a creature-check warning or a pull row with no target (for CI)")
 	pullSizeStrict := flag.Bool("pull-size-strict", false, "with -check: exit 1 when a pull row is over its bodies ceiling (a pull_size finding is a warning otherwise)")
+	walkReady := flag.Bool("walk-ready", false, "with -check: run the six walk-ready lints (over_ceiling, point_in_water, patrol_crossing, leg_start_end_exposed, unowned_near_leg, no_quiet_start) and exit 1 on any finding (accepted over-ceiling rows stay findings, with their reason)")
 	friendly := flag.String("friendly-factions", "", "comma separated factions known to be friendly to the leader's team (FactionTemplate.dbc is not in the export, so dungeongen cannot tell; 35 always is)")
 	awakened := flag.String("awakened", "", "with -check: comma separated creature entries that spawn friendly (faction 35, stoned) and that the encounter's script turns hostile, so they are no warning (Uldaman: 4857 Stone Keeper, 2748 Archaedas)")
 	spec := flag.String("spec", "", "plan spec (tools/dungeongen/plans.json): with -out-dir writes every draft plan it lists, with -table docs/PLANS.md")
@@ -118,7 +119,7 @@ func main() {
 		os.Exit(formatFile(*format, *out))
 	}
 	if *check != "" {
-		os.Exit(checkFile(*check, *dir, *team, *friendly, *awakened, *scripted, *strict, *ignore, *pullSizeStrict))
+		os.Exit(checkFile(*check, *dir, *team, *friendly, *awakened, *scripted, *strict, *ignore, *pullSizeStrict, *walkReady))
 	}
 	if *dir == "" || *name == "" || *mapID == 0 || *bosses == "" {
 		fmt.Fprintln(os.Stderr, "usage: dungeongen -dir DIR -name NAME -map ID -bosses E1,E2,... [-entrance x,y,z] [-cluster 12] [-ignore-factions 35] [-skip E,...] [-out FILE]")
@@ -201,8 +202,8 @@ func parseFactions(s string) (map[int]bool, error) {
 // checkFile lints a plan against dir's creatures.tsv and prints the warnings; the exit status is 1 for a plan that does not load, an
 // export that cannot be read, or a world or pull_size load error (strict or not: a lint that cannot read its inputs fails the check),
 // 0 otherwise (warnings are for a person to read), 1 with strict when a creature-check warning or a pull row with no target fires,
-// and 1 with pull-size-strict when a pull row is over its ceiling.
-func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool, ignore string, pullSizeStrict bool) int {
+// 1 with pull-size-strict when a pull row is over its ceiling, and 1 with walk-ready when any of the six walk-ready findings fires.
+func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool, ignore string, pullSizeStrict bool, walkReady bool) int {
 	fail := func(err error) int {
 		fmt.Fprintln(os.Stderr, "dungeongen:", err)
 		return 1
@@ -256,7 +257,8 @@ func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool
 	if err != nil {
 		return fail(err)
 	}
-	sized, serr := PullSizes(p, cs, w, PullFilter{Ignore: im, Friendly: fm, Awakened: am, Scripted: toSet(sc), Team: team})
+	pf := PullFilter{Ignore: im, Friendly: fm, Awakened: am, Scripted: toSet(sc), Team: team}
+	sized, serr := PullSizes(p, cs, w, pf)
 	if serr != nil {
 		return fail(fmt.Errorf("pull_size: %w", serr))
 	}
@@ -272,6 +274,18 @@ func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool
 			overCeiling++
 		}
 	}
+	var ready []WalkReadyFinding
+	if walkReady {
+		var rerr error
+		ready, rerr = WalkReady(p, cs, w, pf, "")
+		if rerr != nil {
+			return fail(fmt.Errorf("walk-ready: %w", rerr))
+		}
+		for _, f := range ready {
+			fmt.Println("walk-ready:", f.String())
+		}
+		fmt.Printf("%d walk-ready finding(s) for %s as team %q\n", len(ready), path, team)
+	}
 	for _, w := range ws {
 		fmt.Println("warning:", w)
 	}
@@ -280,6 +294,9 @@ func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool
 		return 1
 	}
 	if pullSizeStrict && overCeiling > 0 {
+		return 1
+	}
+	if walkReady && len(ready) > 0 {
 		return 1
 	}
 	return 0
