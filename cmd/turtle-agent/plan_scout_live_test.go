@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -632,14 +633,19 @@ func capReservations(t *testing.T, dir string) int {
 	return n
 }
 
-// 23. Path probes are pipelined by id: a dropped reply is retried once; a lost one leaves a skip.
+// 23. Path probes are pipelined by id: a dropped reply is retried once. A reply lost twice leaves the live pass incomplete (28),
+// the abort reason names the request and its step, and the hop is queued for the walk pass (walked, budget permitting).
 func TestPlanScoutPipelinesPathProbes(t *testing.T) {
 	f := newLiveFixture(t, 2)
 	f.agent.dropFirst = 1
 	f.agent.holdFirstReply = true
 	f.agent.dropAt = map[string]int{"250.00 0.00 0.00": 2}
-	if code, _, errOut := f.run(t); code != exitOK && code != exitPlanScoutFail {
-		t.Fatalf("code %d, %q", code, errOut)
+	code, _, errOut := f.run(t)
+	if code != exitPlanScoutLiveAborted {
+		t.Fatalf("code %d, want %d (a lost path reply is an incomplete live pass): %q", code, exitPlanScoutLiveAborted, errOut)
+	}
+	if !regexp.MustCompile(`path request\(s\) unanswered after the retry: #\d+ \(step \d+\)`).MatchString(errOut) {
+		t.Fatalf("the reason does not name the unanswered request and its step: %q", errOut)
 	}
 	rep := f.report(t)
 	if !hasCheck(rep, "live_path", "skip") {
@@ -647,6 +653,15 @@ func TestPlanScoutPipelinesPathProbes(t *testing.T) {
 	}
 	if !hasCheck(rep, "live_path", "ok") {
 		t.Fatal("the retried reply did not land")
+	}
+	queued := false
+	for _, line := range f.agent.gm {
+		if strings.HasPrefix(line, ".bot scout walk #") && strings.HasSuffix(line, " 250 0 0") {
+			queued = true
+		}
+	}
+	if !queued {
+		t.Fatalf("the unanswered hop was not queued for the walk pass: %v", f.agent.gm)
 	}
 }
 

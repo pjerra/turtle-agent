@@ -119,6 +119,8 @@ type scoutLive struct {
 	data planscout.LiveData
 	// preFixes are the offline fixes, for their move_stand candidate spots.
 	preFixes []planscout.Fix
+	// pathMissed are the path requests unanswered after their retry: the live pass is incomplete (28) and their hops go to the walk pass.
+	pathMissed []*respReq
 
 	capOwner    string
 	capReserved bool
@@ -181,19 +183,33 @@ func (sl *scoutLive) run(ctx context.Context, preFixes []planscout.Fix) (plansco
 			return sl.data, code, reason
 		}
 	}
-	// The passes: any stop is a partial report (28).
+	// The passes: a stop ends the run with its code. An unanswered path request does not end it: its hop is queued for the walk
+	// pass, and the live pass is still incomplete (28) with the request named in the reason.
+	code, reason := exitOK, ""
 	for _, pass := range []func(context.Context) error{sl.pathPass, sl.spotPass, sl.walkPass} {
 		if err := pass(runCtx); err != nil {
-			code, reason := scoutStopInfo(err)
-			if code == exitPlanScoutLiveAborted {
-				sl.data.Aborted = true
-				sl.data.AbortReason = reason
-			}
-			return sl.data, code, reason
+			code, reason = scoutStopInfo(err)
+			break
 		}
 	}
-	sl.data.Aborted = false
-	return sl.data, exitOK, ""
+	if len(sl.pathMissed) > 0 {
+		missed := sl.pathMissedReason()
+		switch code {
+		case exitOK:
+			code, reason = exitPlanScoutLiveAborted, missed
+		case exitPlanScoutLiveAborted:
+			reason += "; " + missed
+		}
+	}
+	if code == exitOK {
+		sl.data.Aborted = false
+		return sl.data, exitOK, ""
+	}
+	if code == exitPlanScoutLiveAborted {
+		sl.data.Aborted = true
+		sl.data.AbortReason = reason
+	}
+	return sl.data, code, reason
 }
 
 // now, sleep and expired use the env's clock, so tests drive a whole run.
@@ -694,8 +710,24 @@ func (sl *scoutLive) pathPass(ctx context.Context) error {
 				break
 			}
 		}
+		for _, r := range win {
+			if !r.done {
+				sl.pathMissed = append(sl.pathMissed, r)
+				sl.note("path #%d (step %d) unanswered after the retry", r.id, r.hop.Step)
+			}
+		}
 	}
 	return nil
+}
+
+// pathMissedReason names the unanswered path requests: the abort reason of an incomplete live pass.
+func (sl *scoutLive) pathMissedReason() string {
+	named := make([]string, 0, len(sl.pathMissed))
+	for _, r := range sl.pathMissed {
+		named = append(named, fmt.Sprintf("#%d (step %d)", r.id, r.hop.Step))
+	}
+	return fmt.Sprintf("%d path request(s) unanswered after the retry: %s (their hops are queued for the walk pass)",
+		len(sl.pathMissed), strings.Join(named, ", "))
 }
 
 // takePath records a SCOUT_PATH answer for a request of the window.
@@ -971,12 +1003,24 @@ func (sl *scoutLive) walkPass(ctx context.Context) error {
 		step  int
 		score int
 	}
+	// A primary hop whose path request went unanswered is queued: it ranks above every checked hop.
+	const queuedRank = 1000
+	queued := map[int]bool{}
+	for _, r := range sl.pathMissed {
+		if r.hop.Primary {
+			queued[r.hop.Step] = true
+		}
+	}
 	var list []ranked
 	for _, st := range sl.rep.Steps {
 		if _, ok := primary[st.Step]; !ok {
 			continue
 		}
-		if s := scoutWalkRank(&st, sl.data.Paths[st.Step]); s > 0 {
+		s := scoutWalkRank(&st, sl.data.Paths[st.Step])
+		if queued[st.Step] {
+			s = queuedRank
+		}
+		if s > 0 {
 			list = append(list, ranked{step: st.Step, score: s})
 		}
 	}
