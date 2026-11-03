@@ -309,10 +309,10 @@ func TestRouteIntoLaterPacksDefaultsDetectionTo20(t *testing.T) {
 // Counts are measured on origin/dev (the ZG count must drop when W25-1 lands: the Arlokk terrace reordering walks
 // each approach on its pack's level; the comment then says so).
 var routeAggroKnownFailing = map[string]int{
-	"ragefire_chasm":       152,                                                                      // waypoint pass (was 153): the moved stands walk past one fewer later pack.
-	"wailing_caverns":      170,                                                                      // waypoint pass (was 173): the water fix at cobrahn_b's start walks one more segment past a later pack.
+	"ragefire_chasm":       164,                                                                      // ci-lint fix round (was 152): the new approach rows add walked segments past later packs.
+	"wailing_caverns":      178,                                                                      // ci-lint fix round (was 170): the new approach rows add walked segments past later packs.
 	"deadmines":            641,                                                                      // boss rows own their boss (was 661). the repo reach (AggroRadius at 18-22 plus spread and wander) outruns the old 20 yd flat line.
-	"uldaman":              247,                                                                      // waypoint pass (was 249): the moved stands walk past fewer later packs.
+	"uldaman":              250,                                                                      // ci-lint fix round (was 247): the new approach rows add walked segments past later packs.
 	"zulfarrak":            54,                                                                       // zulfarrak re-pinned for the waypoint lint fixes (was 56): the moved points pass two fewer later packs, rows renumbered.
 	"karazhan_crypt":       439,                                                                      // waypoint pass (was 447): the moved Hivaxxis and lower-crypt stands walk past fewer later packs.
 	"molten_core":          253,                                                                      // boss rows own their boss (was 315). raids-mc-bwl-ony (was 270): the moved stands walk past fewer later packs.
