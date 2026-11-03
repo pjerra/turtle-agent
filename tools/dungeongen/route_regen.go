@@ -834,18 +834,19 @@ func (r *regen) clearance(p dungeon.Point) (float64, bool) {
 	return min, true
 }
 
-// plane says the point stands on plain ground: its nearest floor is ground, not water, steep, lava or slime, within
-// regenGroundZtolYd of its z.
+// plane says the point stands on plain ground: not in or under a liquid (navmesh.LiquidAt), its nearest floor ground, not
+// water, steep, lava or slime, within regenGroundZtolYd of its z.
 func (r *regen) plane(p dungeon.Point) (navmesh.Floor, bool, error) {
 	fl, err := r.nav.Floors(r.mapID, p.X, p.Y, p.Z-regenFloorWindowYd, p.Z+regenFloorWindowYd)
 	if err != nil {
 		return navmesh.Floor{}, false, err
 	}
-	// planlint's water rule: a point whose floor at its own height is water is in the water, whatever ground lies under it.
-	for _, f := range fl {
-		if f.Flags&navmesh.NavWater != 0 && math.Abs(float64(f.Z-p.Z)) <= 1.5 {
-			return navmesh.Floor{}, false, nil
-		}
+	// planlint's water rule: the point's own floor is water, or it stands under a nearby NavWater floor (the lake bed, the
+	// canal under its rim), whatever ground lies under it.
+	if liq, err := navmesh.LiquidAt(r.nav, r.mapID, navmesh.Vec3{p.X, p.Y, p.Z}); err != nil {
+		return navmesh.Floor{}, false, err
+	} else if liq.Wet {
+		return navmesh.Floor{}, false, nil
 	}
 	best, ok := regenNearestFloor(fl, p.Z)
 	if !ok || best.Flags&navmesh.NavGround == 0 || best.Flags&(navmesh.NavWater|navmesh.NavSteep|navmesh.NavMagma|navmesh.NavSlime) != 0 {
