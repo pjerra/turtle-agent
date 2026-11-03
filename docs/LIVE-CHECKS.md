@@ -1198,8 +1198,10 @@ teleport. What it has to settle:
    left at the door that then runs 600 yd through trash is its own ticket (dismiss before the place, or a GM teleport).
 8. **Respawn.** Read `creature.spawntimesecs` for the cleared GUIDs before the proof; a pack that returns within
    `--max-run-minutes` is only an add for the run leader, but it must be noted.
-9. **Wipe resume.** A forced wipe revives at the place point (not step 1) with no entrance fallback, and the summons go
-   out only after `tt q inst` still names the raid's instance (exit 19 when it does not).
+9. **Wipe resume.** A forced wipe revives at the place point (not step 1). When that point stays refused for its 120 s
+   check, the walk tries the earlier move rows of the same leg (newest first) and the previous leg's last move row,
+   then the instance entrance (`entrance_tried`), and the summons go out only after `tt q inst` still names the raid's
+   instance (exit 19 when it does not).
 10. **Teardown.** `teardown.json` has no failed step and no hire left; the commander's `.go xyz` to the portal and
     `.instance unbind 309` go out before the teardown (its report ends the agent).
 11. **The pair.** `--slot 2,4 --place 2=on --from 2="leg high_priest_thekal" --place 4=on --from 4="leg

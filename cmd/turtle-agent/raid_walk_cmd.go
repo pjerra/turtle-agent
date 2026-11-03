@@ -718,6 +718,9 @@ type walk struct {
 
 	quietPatrols []raidwalk.QuietPatrol
 	patrolGUIDS  []map[string]bool
+	// pulledSteps are the run's pull steps the status showed pulling ("pulling <entry> <guid>"): a plan patrol's pack is
+	// done when its pull step is pulled and the run has moved past it (applyPlanPatrolState).
+	pulledSteps map[int]bool
 
 	// The --place start (spec 4/5): the plan from validate, the raid's instance id read at the place, the commander's
 	// last `.go xyz` in the copy (the clear's distance rule), the quiet read's near list, and what the phase reports.
@@ -772,6 +775,7 @@ type bossStepTrack struct {
 type hostileState struct {
 	entry    uint32
 	x, y, z  float32
+	first    dungeon.Point // where the frames FIRST saw this unit: a plan patrol binds its members by it (round 4)
 	kind     string
 	reaction string
 	flags    string

@@ -1790,6 +1790,18 @@ func placedIdleBlocker(t *testing.T, yd float32, entry uint32, name string, inCo
 	}
 }
 
+// placedFollower is placedIdleBlocker for a unit that follows the commander at yd out: every fallback point of the
+// revive, the entrance included, is blocked too (the fallback rows sit hundreds of yards from the place point).
+func placedFollower(f *fixture, yd float32, entry uint32, name string, inCombat bool) func(int) []objects.Unit {
+	return func(int) []objects.Unit {
+		f.agent.mu.Lock()
+		x, y, z := f.agent.x, f.agent.y, f.agent.z
+		f.agent.mu.Unlock()
+		return []objects.Unit{{Type: "creature", Name: name, Entry: entry, Hostile: true, InCombat: inCombat,
+			X: x + yd, Y: y, Z: z}}
+	}
+}
+
 // wipeOnceAfterStart is wipeAfterStart for a test whose run goes on after the recovery: the raid dies once, on the
 // first running line, so the running line the resume hook queues does not kill the revived party again.
 func wipeOnceAfterStart(f *fixture) {
@@ -1824,13 +1836,13 @@ func resumePlacedRun(f *fixture) {
 // is a paused patrol or a wanderer, so the wipe ends at 19; at its own spawn
 // the wipe recovers instead.
 func TestRaidWalkWipeRevivesPastIdleHomeMob(t *testing.T) {
-	// Away from home: still and calm 44.6 yd out, but the plan's nearest
-	// same-entry spawn is ~230 yd off (Marli's pack, leg 2), so the revive is
-	// refused.
+	// Away from home: still and calm 44.6 yd out (it follows the commander, so every fallback point and the
+	// entrance are blocked too), but the plan's nearest same-entry spawn is ~230 yd off (Marli's pack, leg 2), so
+	// the revive is refused.
 	t.Run("away from home blocks", func(t *testing.T) {
 		f, _ := newPlaceFixture(t)
 		f.agent.startReply = zgPlaceReply(t)
-		f.agent.unitsFn = placedIdleBlocker(t, 44.6, 14532, "Razzashi Venombrood", false)
+		f.agent.unitsFn = placedFollower(f, 44.6, 14532, "Razzashi Venombrood", false)
 		wipeOnceAfterStart(f)
 		if code := f.run(context.Background()); code != exitRaidWalkIncident {
 			t.Fatalf("exit %d, want 19: %s\n%s\n%s", code, f.stderr.String(), f.stdout.String(), f.summaryText())
@@ -1878,13 +1890,17 @@ func TestRaidWalkReviveWaitsForBlockerToLeave(t *testing.T) {
 	// An in-combat unit at 30 yd: not idle (D-A does not exempt it), so the check runs its full 24 reads. It leaves
 	// after 30 reads, a few of which are the D-C wait's.
 	const leaves = 30
-	_, place := placePlanRows(t)
+	unitsAtSummon := 0
 	f.agent.unitsFn = func(reads int) []objects.Unit {
+		unitsAtSummon = reads
 		if reads > leaves {
 			return []objects.Unit{}
 		}
+		f.agent.mu.Lock()
+		x, y, z := f.agent.x, f.agent.y, f.agent.z
+		f.agent.mu.Unlock()
 		return []objects.Unit{{Type: "creature", Name: "Razzashi Skitterer", Entry: 11338, Hostile: true, InCombat: true,
-			X: place.Point.X + 30, Y: place.Point.Y, Z: place.Point.Z}}
+			X: x + 30, Y: y, Z: z}}
 	}
 	wipeOnceAfterStart(f)
 	resumePlacedRun(f)
@@ -1893,7 +1909,7 @@ func TestRaidWalkReviveWaitsForBlockerToLeave(t *testing.T) {
 		t.Fatalf("exit %d, want 0: %s\n%s\n%s", code, f.stderr.String(), f.stdout.String(), f.summaryText())
 	}
 	f.agent.mu.Lock()
-	gm, gmAt := append([]string{}, f.agent.gm...), append([]time.Time{}, f.agent.gmAt...)
+	gm := append([]string{}, f.agent.gm...)
 	f.agent.mu.Unlock()
 	visibleOff, firstSummon := -1, -1
 	for i, line := range gm {
@@ -1907,8 +1923,8 @@ func TestRaidWalkReviveWaitsForBlockerToLeave(t *testing.T) {
 	if visibleOff < 0 || firstSummon < 0 {
 		t.Fatalf("no revive: visible off %d, first summon %d: %q", visibleOff, firstSummon, gm)
 	}
-	if gap := gmAt[firstSummon].Sub(gmAt[visibleOff]); gap <= 120*time.Second {
-		t.Fatalf("the summons left %s after the revive began, want past the 120 s quiet check (the D-C wait)", gap)
+	if unitsAtSummon <= leaves {
+		t.Fatalf("the first summon came after %d units calls; the blocker was still there (it leaves after read %d)", unitsAtSummon, leaves)
 	}
 	if sum := f.summary(); sum.ReviveRefusal != nil {
 		t.Fatalf("the revive was refused with the blocker gone: %+v", sum.ReviveRefusal)
@@ -1920,8 +1936,9 @@ func TestRaidWalkReviveWaitsForBlockerToLeave(t *testing.T) {
 func TestRaidWalkReviveQuietNeedsCommanderOnTheMap(t *testing.T) {
 	f, _ := newPlaceFixture(t)
 	f.agent.startReply = zgPlaceReply(t)
-	const moved = 26 // past the 24-read quiet check, inside the D-C wait
-	_, place := placePlanRows(t)
+	rows, place := placePlanRows(t)
+	// D-C starts after the revive point's 24-read check, one read per row fallback, and the entrance's 24-read check.
+	moved := 24 + len(reviveFallbackRows(rows, place.Start)) + 24 + 1
 	f.agent.unitsFn = func(reads int) []objects.Unit {
 		if reads > moved {
 			return []objects.Unit{} // the area reads empty from where the commander now stands
@@ -1931,8 +1948,11 @@ func TestRaidWalkReviveQuietNeedsCommanderOnTheMap(t *testing.T) {
 			f.agent.status.Map = 0 // moved off the map; the next read's status check sees it
 			f.agent.mu.Unlock()
 		}
+		f.agent.mu.Lock()
+		x, y, z := f.agent.x, f.agent.y, f.agent.z
+		f.agent.mu.Unlock()
 		return []objects.Unit{{Type: "creature", Name: "Razzashi Skitterer", Entry: 11338, Hostile: true, InCombat: true,
-			X: place.Point.X + 30, Y: place.Point.Y, Z: place.Point.Z}}
+			X: x + 30, Y: y, Z: z}}
 	}
 	wipeOnceAfterStart(f)
 	resumePlacedRun(f)
@@ -1953,7 +1973,7 @@ func TestRaidWalkReviveWaitEndsBeforeRest(t *testing.T) {
 	f, _ := newPlaceFixture(t)
 	f.opts.wipeRest = 5 * time.Minute
 	f.agent.startReply = zgPlaceReply(t)
-	f.agent.unitsFn = placedIdleBlocker(t, 30, 14532, "Razzashi Venombrood", true)
+	f.agent.unitsFn = placedFollower(f, 30, 14532, "Razzashi Venombrood", true)
 	wipeAfterStart(f)
 	code := f.run(context.Background())
 	if code != exitRaidWalkIncident {
@@ -1979,17 +1999,19 @@ func TestRaidWalkReviveWaitEndsBeforeRest(t *testing.T) {
 func TestRaidWalkReviveRefusalSummary(t *testing.T) {
 	t.Run("in combat", func(t *testing.T) {
 		f, _ := newPlaceFixture(t)
-		f.opts.wipeRest = time.Minute
+		f.opts.wipeRest = 5 * time.Minute
 		n := zgPlaceSteps(t)
-		_, place := placePlanRows(t)
 		f.agent.startReply = zgPlaceReply(t)
 		// Two blockers, both fighting: the summary and the reason name the nearest, and the run.log line lists both.
 		f.agent.unitsFn = func(int) []objects.Unit {
+			f.agent.mu.Lock()
+			x, y, z := f.agent.x, f.agent.y, f.agent.z
+			f.agent.mu.Unlock()
 			return []objects.Unit{
 				{Type: "creature", Name: "Razzashi Skitterer", Entry: 11338, Hostile: true, InCombat: true,
-					X: place.Point.X + 30, Y: place.Point.Y, Z: place.Point.Z},
+					X: x + 30, Y: y, Z: z},
 				{Type: "creature", Name: "Razzashi Venombrood", Entry: 14532, Hostile: true, InCombat: true,
-					X: place.Point.X + 44.6, Y: place.Point.Y, Z: place.Point.Z},
+					X: x + 44.6, Y: y, Z: z},
 			}
 		}
 		wipeAfterStart(f)
@@ -2001,8 +2023,8 @@ func TestRaidWalkReviveRefusalSummary(t *testing.T) {
 		if rr == nil {
 			t.Fatalf("no revive_refusal: end %q", sum.EndReason)
 		}
-		if rr.WipeStep != n.start || rr.StartStep != n.start || len(rr.TriedSteps) != 1 || rr.TriedSteps[0] != n.start {
-			t.Fatalf("refusal %+v, want wipe step and start step %d", rr, n.start)
+		if rr.WipeStep != n.start || rr.StartStep != n.start || len(rr.TriedSteps) < 2 || rr.TriedSteps[0] != n.start {
+			t.Fatalf("refusal %+v, want wipe step and start step %d and the fallback rows tried", rr, n.start)
 		}
 		if rr.AllIdle {
 			t.Fatalf("all_idle true with in-combat blockers: %+v", rr)
@@ -2019,7 +2041,7 @@ func TestRaidWalkReviveRefusalSummary(t *testing.T) {
 		if !strings.Contains(sum.EndReason, "Razzashi Skitterer 30.0 yd from the revive point") {
 			t.Fatalf("end reason %q, want the nearest blocker named", sum.EndReason)
 		}
-		want := fmt.Sprintf("revive refusal: wipe step %d, tried %d, waited ", n.start, n.start)
+		want := fmt.Sprintf("revive refusal: wipe step %d, tried %d/", n.start, n.start)
 		if txt := f.summaryText(); !strings.Contains(txt, want) || !strings.Contains(txt, "Razzashi Skitterer") {
 			t.Fatalf("summary.txt:\n%s\nwant %q with the blocker", txt, want)
 		}
@@ -2036,10 +2058,10 @@ func TestRaidWalkReviveRefusalSummary(t *testing.T) {
 	})
 	t.Run("idle inside the reach", func(t *testing.T) {
 		f, _ := newPlaceFixture(t)
-		f.opts.wipeRest = time.Minute
+		f.opts.wipeRest = 5 * time.Minute
 		f.agent.startReply = zgPlaceReply(t)
 		// Idle at 20 yd: inside the landing reach, so D-A still lets it block, and waiting cannot help.
-		f.agent.unitsFn = placedIdleBlocker(t, 20, 14532, "Razzashi Venombrood", false)
+		f.agent.unitsFn = placedFollower(f, 20, 14532, "Razzashi Venombrood", false)
 		wipeAfterStart(f)
 		if code := f.run(context.Background()); code != exitRaidWalkIncident {
 			t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())

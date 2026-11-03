@@ -1401,7 +1401,12 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 	}
 	for _, h := range f.Hostiles {
 		if h.GUID != 0 {
-			w.hostiles[h.GUID.String()] = hostileState{entry: h.Entry, x: h.X, y: h.Y, z: h.Z, kind: h.Kind, reaction: h.Reaction, flags: h.Flags,
+			// first keeps the position the frames first saw the unit at: a later one never changes the patrol binding (round 4).
+			first := dungeon.Point{X: h.X, Y: h.Y, Z: h.Z}
+			if prev, ok := w.hostiles[h.GUID.String()]; ok {
+				first = prev.first
+			}
+			w.hostiles[h.GUID.String()] = hostileState{entry: h.Entry, x: h.X, y: h.Y, z: h.Z, first: first, kind: h.Kind, reaction: h.Reaction, flags: h.Flags,
 				hppct: h.HPPct, target: uint64(h.Target), at: now}
 		}
 		if w.bossRule.Counts(h.Entry, h.X, h.Y) {
@@ -1532,6 +1537,10 @@ func (w *walk) pullStarted(now time.Time, st tbm.RunStatus) {
 	}
 	w.pullPack = map[packet.GUID]bool{guid: true}
 	w.pullSeed = guid
+	if w.pulledSteps == nil {
+		w.pulledSteps = map[int]bool{}
+	}
+	w.pulledSteps[st.Step] = true
 	w.pullRow = packRowOf(w.rows, st.Step)
 	w.pullPackSeeded = false
 	w.pullJoinsAt, w.pullJoinsStep = now, st.Step
@@ -3148,14 +3157,52 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 		return q.err
 	}
 	ok, why, blockers := q.ok, q.why, q.blockers
-	// cur is the point the commander stands at: p, or the entrance once the fallback's go has LANDED. The D-C wait
-	// re-reads that one. entranceTried says the fallback's `.go xyz` went out at all (the refusal's entrance_tried).
+	// cur is the point the commander stands at: p, a fallback row, or the entrance once its go has LANDED. The D-C
+	// wait re-reads that one. entranceTried says the entrance fallback's `.go xyz` went out at all (the refusal's
+	// entrance_tried); tried is every point the revive tried, in order (the refusal's tried_steps).
 	cur := p
+	curStep := w.reviveStep()
+	tried := []int{curStep}
 	entranceTried, entranceLanded := false, true
-	if !ok && w.place == nil {
-		// A door-to-end walk falls back to the entrance; a placed one does not: the entrance is behind the legs the
-		// placement skipped, and the run leader's walk back would cross them (spec 6).
+	if !ok {
+		// The point stays refused for its 120 s check: try the earlier move rows of its own leg, newest first, then
+		// the previous leg's last move row. Each is quiet-checked in turn; the first quiet one revives the raid there.
+		for _, cand := range w.reviveFallbackRows() {
+			if timeout := w.recoveryExpired(deadline); timeout != nil {
+				return timeout
+			}
+			w.note("revive: point %d refused (%s); trying %d", curStep, why, cand.step)
+			w.logLine(w.env.now(), fmt.Sprintf("revive: point %d refused (%s); trying %d", curStep, why, cand.step))
+			tried = append(tried, cand.step)
+			cq, landed, err := w.reviveGoPoint(ctx, cand.point, joined, selfRegroup, deadline)
+			if err != nil {
+				return err
+			}
+			if cq.timeout != nil {
+				return cq.timeout
+			}
+			if cq.err != nil {
+				return cq.err
+			}
+			// A point switch needs a fresh quiet state (Codex H2): the old point's patrol distances must not exempt
+			// a stationary patrol at the new one whose distance grew only because the point moved.
+			cur, curStep, qs = cand.point, cand.step, w.newQuietStateFor()
+			if !landed {
+				why = fmt.Sprintf("the commander did not land at step %d", cand.step)
+				continue
+			}
+			ok, why, blockers = cq.ok, cq.why, cq.blockers
+			if ok {
+				break
+			}
+		}
+	}
+	if !ok {
+		// The instance entrance is the last fallback: the old entrance fallback, and it now also runs for a placed
+		// walk whose own point and rows all stayed refused (the 392 run: the placed walk never reached it).
 		e := w.plan.Entrance
+		w.note("revive: point %d refused (%s); trying the entrance", curStep, why)
+		w.logLine(w.env.now(), fmt.Sprintf("revive: point %d refused (%s); trying the entrance", curStep, why))
 		if !joined && !ghosts { // only a self-regroup gets here unjoined: one more try, and the far go again when it fails
 			var jerr error
 			if joined, why, jerr = w.joinHires(ctx, e, deadline); jerr != nil {
@@ -3180,15 +3227,12 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 				return timeout
 			}
 			if werr != nil {
-				// The go was accepted but never landed: the commander still stands at p, so a quiet read of e would
-				// judge a point its own character is nowhere near (quietOnce's own reach rule) and D-C would wait on
-				// nothing. Refuse (review round 1, Codex/Opus H1).
+				// The go was accepted but never landed: the commander still stands at the last point, so a quiet read
+				// of e would judge a point its own character is nowhere near (quietOnce's own reach rule) and D-C
+				// would wait on nothing. Refuse (review round 1, Codex/Opus H1).
 				entranceLanded = false
 			} else {
-				// Only a LANDED go makes the entrance the checked point, and a point switch needs a fresh quiet state
-				// (Codex H2): p's patrol distances must not exempt a stationary patrol at e whose distance grew for
-				// no reason but the point moving.
-				cur, qs = e, w.newQuietStateFor()
+				cur, qs, curStep = e, w.newQuietStateFor(), 0
 				eq := w.quietCheck(ctx, qs, e, deadline)
 				if eq.timeout != nil {
 					return eq.timeout
@@ -3201,7 +3245,7 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 		}
 	}
 	if !entranceLanded {
-		w.reviveRefusal = w.refusal(step, blockers, w.env.now().Sub(waitFrom), entranceTried)
+		w.reviveRefusal = w.refusal(step, blockers, w.env.now().Sub(waitFrom), entranceTried, tried...)
 		return stopf(exitRaidWalkIncident, "not revived: the entrance go never landed (the commander is not within %d yd of the revive point on map %d)", reviveLandingYd, w.plan.Map)
 	}
 	if !ok {
@@ -3226,7 +3270,7 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 		}
 	}
 	if !ok {
-		w.reviveRefusal = w.refusal(step, blockers, w.env.now().Sub(waitFrom), entranceTried)
+		w.reviveRefusal = w.refusal(step, blockers, w.env.now().Sub(waitFrom), entranceTried, tried...)
 		return stopf(exitRaidWalkIncident, "not revived: %s", why)
 	}
 	if w.place != nil {
@@ -4025,10 +4069,11 @@ func (w *walk) runWentOnAfter(seq0 uint64, step int) bool {
 // last failed read logged (D-E logs a change of blockers, not the same ones every 5 s). One state belongs to ONE
 // checked point: a fresh one whenever the point changes (Codex H2).
 type quietState struct {
-	prev   map[string]float64
-	idle   *raidwalk.QuietIdleReads
-	homes  raidwalk.QuietHomeSpawns
-	logged string
+	prev    map[string]float64
+	idle    *raidwalk.QuietIdleReads
+	homes   raidwalk.QuietHomeSpawns
+	patrols []raidwalk.QuietPatrol
+	logged  string
 }
 
 func newQuietState() *quietState {
@@ -4041,6 +4086,7 @@ func newQuietState() *quietState {
 func (w *walk) newQuietStateFor() *quietState {
 	st := newQuietState()
 	st.homes = raidwalk.PlanHomeSpawns(w.plan)
+	st.patrols = raidwalk.PlanQuietPatrols(w.plan)
 	return st
 }
 
@@ -4078,9 +4124,15 @@ func (w *walk) quietOnce(ctx context.Context, st *quietState, p dungeon.Point) (
 		st.idle.Reset() // a gap in the reads breaks the two-read idle rule (Codex round 3)
 		return false, "units: " + err.Error(), nil
 	}
-	patrols := make([]raidwalk.QuietPatrol, len(w.quietPatrols))
-	copy(patrols, w.quietPatrols)
+	patrols := make([]raidwalk.QuietPatrol, 0, len(w.quietPatrols)+len(st.patrols))
+	patrols = append(patrols, w.quietPatrols...)
+	patrols = append(patrols, st.patrols...)
+	w.applyPlanPatrolState(patrols)
 	for j := range patrols {
+		if j >= len(w.patrolGUIDS) {
+			// A plan patrol has no member guids: the run's state decides it (applyPlanPatrolState), never the units' distances.
+			continue
+		}
 		best := -1.0
 		for _, u := range us {
 			key := strings.ToUpper(u.GUID.String())
@@ -4111,6 +4163,81 @@ func (w *walk) quietOnce(ctx context.Context, st *quietState, p dungeon.Point) (
 		w.logLine(w.env.now(), fmt.Sprintf("quiet read at (%s %s %s): %s", num32(p.X), num32(p.Y), num32(p.Z), blockerWords(bs)))
 	}
 	return false, bs[0].Reason(), bs
+}
+
+// applyPlanPatrolState sets each plan patrol's exemption and remark for this read. A plan patrol's pack is done
+// (raidwalk.PatrolPackDone: its pull step was pulled and the run is past it, or its bound members are all dead, see
+// packMembersHP), and then its path stops blocking. A patrol whose pack cannot be tied to its units, whose pull step is
+// not in the rows, or whose members do not show it done keeps blocking and says so in its reason (fail safe).
+func (w *walk) applyPlanPatrolState(patrols []raidwalk.QuietPatrol) {
+	progress := 0
+	if w.haveStatus {
+		progress = w.lastStatus.Step
+	}
+	for j := len(w.quietPatrols); j < len(patrols); j++ {
+		p := &patrols[j]
+		p.Exempt, p.Note = false, ""
+		if p.Pack == nil {
+			p.Note = "its pull group cannot be tied to its units: blocks by path"
+			continue
+		}
+		step := raidwalk.PullStepOf(w.rows, *p.Pack)
+		pulled := step > 0 && w.pulledSteps[step]
+		hp, why := w.packMembersHP(p.Pack, p.Path)
+		p.Exempt = raidwalk.PatrolPackDone(step, pulled, progress, hp)
+		if p.Exempt {
+			continue
+		}
+		var notes []string
+		if step == 0 {
+			notes = append(notes, "its pull row is not in the plan's rows: blocks by path")
+		}
+		if why != "" {
+			notes = append(notes, why)
+		}
+		p.Note = strings.Join(notes, "; ")
+	}
+}
+
+// patrolCorridorYd is how close a pack unit's first sighting must stand to a plan patrol's path to be that patrol's member.
+const patrolCorridorYd = 15
+
+// patrolSpawnYd is how close a pack unit's first sighting must stand to one of the pack's spawns (its pull group's
+// positions) to be that pack's member: the raidwalk home-spawn tolerance (quietHomeYd).
+const patrolSpawnYd = 3
+
+// packMembersHP binds a plan patrol's members by guid (Codex HIGH, round 4). A hostile of the pack's members joins the
+// patrol only when the frames FIRST saw it within patrolCorridorYd of a path point or within patrolSpawnYd of a pack spawn,
+// so a same-entry mob first seen elsewhere never joins, dead or alive. It returns each bound member's last frame health.
+// The patrol can be retired only when at least the pack's unit count is bound (the set is then non-empty); with fewer,
+// it returns no health and a reason, so the caller's PatrolPackDone is false and the path keeps blocking (fail safe).
+func (w *walk) packMembersHP(pack *raidwalk.PatrolPack, path []dungeon.Point) ([]int, string) {
+	var hp []int
+	for _, h := range w.hostiles {
+		if !inEntries(pack.Members, h.entry) || !patrolBinds(h.first, path, pack.Spawns) {
+			continue
+		}
+		hp = append(hp, h.hppct)
+	}
+	if want := len(pack.Entries); len(hp) < want {
+		return nil, fmt.Sprintf("%d of its %d pack units are bound to the path: blocks by path", len(hp), want)
+	}
+	return hp, ""
+}
+
+// patrolBinds says a unit first seen at first is a member of the patrol with this path and pack spawns (packMembersHP).
+func patrolBinds(first dungeon.Point, path, spawns []dungeon.Point) bool {
+	for _, pt := range path {
+		if raidDist3(pt, first.X, first.Y, first.Z) <= patrolCorridorYd {
+			return true
+		}
+	}
+	for _, s := range spawns {
+		if raidDist3(s, first.X, first.Y, first.Z) <= patrolSpawnYd {
+			return true
+		}
+	}
+	return false
 }
 
 // blockerKey identifies a blocker set for D-E's log-on-a-change rule: the units and patrols by identity and state,
@@ -4231,10 +4358,15 @@ const selfRegroupQuietCap = 5 * time.Minute
 // quiet, from its first read. all_idle says every blocker of the last read was idle, which is what makes waiting
 // pointless; a read that named no unit blocker at all (a failed RPC, say) does not claim that. entrance_tried says the
 // entrance fallback's go went out (review round 1, Opus L3).
-func (w *walk) refusal(step int, blockers []raidwalk.QuietBlocker, waited time.Duration, entranceTried bool) *raidwalk.ReviveRefusal {
+// tried is every point the revive tried, in order (the revive point and its fallback rows): a call without one
+// records the revive point alone. The entrance has no step; entranceTried says it was reached.
+func (w *walk) refusal(step int, blockers []raidwalk.QuietBlocker, waited time.Duration, entranceTried bool, tried ...int) *raidwalk.ReviveRefusal {
 	at := w.reviveStep()
+	if len(tried) == 0 {
+		tried = []int{at}
+	}
 	r := &raidwalk.ReviveRefusal{
-		WipeStep: step, StartStep: at, TriedSteps: []int{at}, EntranceTried: entranceTried,
+		WipeStep: step, StartStep: at, TriedSteps: append([]int{}, tried...), EntranceTried: entranceTried,
 		WaitedS: int(waited / time.Second), Blockers: make([]raidwalk.ReviveBlocker, 0, len(blockers)),
 		AllIdle: len(blockers) > 0,
 	}
@@ -4264,6 +4396,82 @@ func (w *walk) reviveStep() int {
 		return i + 1
 	}
 	return 1
+}
+
+// reviveCandidate is one fallback point of a refused revive: the row it comes from and its point.
+type reviveCandidate struct {
+	step  int
+	point dungeon.Point
+}
+
+// reviveFallbackRows lists the row fallbacks after the revive point, in the order the revive tries them: the earlier
+// move rows of the revive point's own leg, newest first, then the previous leg's last move row. The instance entrance
+// is the caller's last fallback. A point-less row (a rest at 0,0,0) is not a candidate.
+func (w *walk) reviveFallbackRows() []reviveCandidate {
+	return reviveFallbackRows(w.rows, w.reviveStep())
+}
+
+// reviveFallbackRows is the candidate list for a step in rows (the walk's own revive point uses it).
+func reviveFallbackRows(rows planexport.Rows, at int) []reviveCandidate {
+	if at < 1 || at > len(rows.Steps) {
+		return nil
+	}
+	leg := rows.Steps[at-1].Leg
+	var out []reviveCandidate
+	for i := at - 2; i >= 0; i-- {
+		s := rows.Steps[i]
+		if s.Leg != leg || !reviveMoveRow(s) {
+			continue
+		}
+		out = append(out, reviveCandidate{step: i + 1, point: dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}})
+	}
+	for i := at - 2; i >= 0; i-- {
+		s := rows.Steps[i]
+		if s.Leg != leg-1 {
+			continue
+		}
+		if reviveMoveRow(s) {
+			out = append(out, reviveCandidate{step: i + 1, point: dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}})
+			break
+		}
+	}
+	return out
+}
+
+// reviveMoveRow says the row is a positioned move the revive may stand on.
+func reviveMoveRow(s planexport.StepRow) bool {
+	if s.X == 0 && s.Y == 0 && s.Z == 0 {
+		return false
+	}
+	return s.Kind == planexport.KindMove || s.Kind == planexport.KindMoveDirect
+}
+
+// reviveGoPoint teleports the commander to p, waits for the landing, and quiet-checks the point once (a fallback row
+// gets one read: a blocked one is left for the next candidate, it does not get the 120 s wait the revive point does).
+// landed is false when the go never landed: the commander still stands at the previous point, so the caller refuses
+// that candidate without reading a point its character is nowhere near (quietOnce's own reach rule). A timeout or a
+// walk-ending error is returned for the caller to pass on.
+func (w *walk) reviveGoPoint(ctx context.Context, p dungeon.Point, joined, selfRegroup bool, deadline time.Time) (quietRead, bool, error) {
+	from, err := w.reviveFrom(ctx, joined, selfRegroup, deadline)
+	if err != nil {
+		return quietRead{}, false, err
+	}
+	seq, have := w.reviveSeq(ctx, deadline)
+	if st, serr := w.status(ctx); serr == nil {
+		w.logLine(w.env.now(), fmt.Sprintf("revive go from map %d (%.1f %.1f %.1f, z unknown %v, teleports %d)", st.Map, st.X, st.Y, st.Z, st.ZUnknown, st.TeleportSeq))
+	}
+	if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(p.X), num32(p.Y), num32(p.Z), w.plan.Map)); err != nil {
+		return quietRead{}, false, err
+	}
+	if err := w.waitRevivePoint(ctx, p, from, seq, have, deadline); err != nil {
+		if timeout, isTimeout := err.(*recoveryTimeout); isTimeout {
+			return quietRead{timeout: timeout}, false, nil
+		}
+		return quietRead{why: fmt.Sprintf("the commander did not land within %d yd of the point on map %d", reviveLandingYd, w.plan.Map)}, false, nil
+	}
+	qs := w.newQuietStateFor()
+	ok, why, bs := w.quietOnce(ctx, qs, p)
+	return quietRead{ok: ok, why: why, blockers: bs}, true, nil
 }
 
 // recoveryExpired reports the recovery's timed-out ending when the entry deadline
