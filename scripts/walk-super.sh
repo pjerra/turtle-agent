@@ -43,6 +43,9 @@
 #   4. --out DIR -> DIR-r<n> (n = 1, 2, ...). --holder is unchanged.
 #   5. --until is kept.
 #   6. Wait 20 s before each restart (the server finishes the old run's stop).
+#      A restart of the same cmd keeps its instance: the stopped walk's teardown keeps the commander's live bind
+#      for the plan's map under --reuse-instance (raid-walk placeLeave), so the restart resumes that copy instead
+#      of entering a fresh one; a cmd without --reuse-instance asks for a fresh instance and unbinds as before.
 #   7. No-progress stop: a restart whose death step is at or before the run
 #      before it, on the same leg, died at the same wall again and a fresh
 #      placed copy repeats it (walk 25: four placed restarts, each wiping on

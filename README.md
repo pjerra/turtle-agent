@@ -2253,7 +2253,9 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   (one `.summon` per hire the frames miss) and only then starts the run, whose status line must show exactly that step
   and step count. Before the first teleport the commander must be in GM mode: `.gm on` is sent and the walk refuses the
   placement when its reply is not `GM mode is ON`. The commander stays inside the raid's copy for the whole walk (his own `.instance unbind` before the
-  hire, skipped under `--reuse-instance` where that bind is what is resumed, and again at teardown drops a stale personal bind), so a wipe revives at the place point, not at the entrance.
+  hire, and again at teardown for a stale personal bind; under `--reuse-instance` the teardown keeps the bind while
+  `.instance listbinds` names the plan's map with TTR left, since a walk-super restart of the same cmd resumes it, and
+  drops an expired one as before), so a wipe revives at the place point, not at the entrance.
   `--dry-run` prints the staged step, the point and every circle. `summary.json`'s `place` object carries the start step,
   the instance, the circles with their removed counts, the not-cleared list, the quiet result and the placed count.
   **Known limit:** the pre-read (`q units`) and the `clearto` are two commands, so a unit that walks into a circle
