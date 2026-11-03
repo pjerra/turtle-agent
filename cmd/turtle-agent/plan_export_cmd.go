@@ -219,7 +219,11 @@ func cutWith(pl *navmesh.Planner, floorAware bool) planexport.CutFunc {
 			return nil, nil, fmt.Errorf("no complete path (%s %s)", path.Status, path.Reason)
 		}
 		if floorAware {
-			return floorAwareCut(pl, mapID, path)
+			via, notes, err := floorAwareCut(pl, mapID, path)
+			if err != nil {
+				return nil, notes, err
+			}
+			return dropWetCut(pl, mapID, via, &notes)
 		}
 		var via []dungeon.Point
 		prev := path.Points[0]
@@ -236,8 +240,36 @@ func cutWith(pl *navmesh.Planner, floorAware bool) planexport.CutFunc {
 			}
 			prev = p
 		}
-		return via, nil, nil
+		var notes []planexport.CutNote
+		return dropWetCut(pl, mapID, via, &notes)
 	}
+}
+
+// dropWetCut drops the cut points that stand in or under a liquid: the plan's move rows are the points the party stops at, and a
+// water stop is the audit's water rule (a chase or a fall lands in water, and the run leader's own walk can stall there). The
+// water stays a crossing: the hop between the dry points either side is one hop, which the run leader's own path takes.
+func dropWetCut(pl *navmesh.Planner, mapID uint32, via []dungeon.Point, notes *[]planexport.CutNote) ([]dungeon.Point, []planexport.CutNote, error) {
+	if len(via) == 0 {
+		return via, *notes, nil
+	}
+	out := make([]dungeon.Point, 0, len(via))
+	for _, p := range via {
+		liq, err := navmesh.LiquidAt(pl, mapID, navmesh.Vec3{p.X, p.Y, p.Z})
+		if err != nil {
+			return nil, *notes, err
+		}
+		if liq.Wet {
+			what := "the point's own floor is NavWater"
+			if !liq.Own {
+				what = fmt.Sprintf("a NavWater floor stands %.1f yd above it within %g yd", liq.Z-p.Z, navmesh.LiquidNearYd)
+			}
+			*notes = append(*notes, planexport.CutNote{Old: p, Dropped: true,
+				Reason: fmt.Sprintf("%s: the water is crossed in one hop between dry points", what)})
+			continue
+		}
+		out = append(out, p)
+	}
+	return out, *notes, nil
 }
 
 // floorAwareCut is cutWith's --floor-aware route: the path's corners are merged (under FloorAwareMergeYd), unneeded (a turn under
