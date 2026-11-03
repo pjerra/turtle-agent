@@ -54,15 +54,20 @@
 #      run N-1 at step P, same leg L): a fresh placed instance repeats it" and
 #      exit with the run's code. The death step is field 4 of the last
 #      `TBM:RUN|...` line ("204/1095" gives 204), read like the leg.
-#   8. Empty-leg place retry (walk 26d, #373 fix C): no TBM:RUN leg means the
+#   8. Empty-leg place retry (walk 26d, #373 fix C, walk 33): no TBM:RUN leg means the
 #      run stopped in the place phase, before the run started. When it exited
-#      18 and the command carries --place, retry the SAME command once per
-#      restart budget with only --out changed to <base>-r<n>, after the step-6
-#      wait. A no-progress guard stops when two consecutive place failures
-#      have the same summary.json `place.start_step` and `end_reason`,
-#      logging "no progress (place failed before the run started at start
-#      step S twice with the same end reason: R)". Exit 19 with no leg keeps
-#      today's stop.
+#      18 and the command carries --place, the failure is counted per start step
+#      in <cmd-file>.place-fails (a line per failure: step, category, reason),
+#      so the count survives a relaunch. The first failure of a start step
+#      retries the SAME command once, with only --out changed to <base>-r<n>,
+#      after the step-6 wait. Two failures of the same step with the category
+#      "area not quiet" or "fighting after the place" make the next try start
+#      at the previous MOVE row of the --sql rows (one row back, read from the
+#      rows file), never a third try at the same step ("never repeating start
+#      step S a third time"). Any other place end_reason keeps the old guard:
+#      two consecutive failures with the same start step and reason stop with
+#      "no progress (place failed before the run started ...)". Exit 19 with no
+#      leg keeps today's stop.
 #   9. Stuck stop: never re-place into a step that just failed by the same
 #      stuck reason twice. The reason is the walk's own last `paused: ...`
 #      run.log line with digits folded to #, so the same wall reads the same
@@ -245,6 +250,59 @@ has_flag() {
     fi
   done
   return 1
+}
+
+# place_fail_category prints the two placement failures walk 33 counts per start step: "area not quiet" and
+# "fighting after the place". Any other place end reason keeps the old same-reason-twice stop.
+place_fail_category() {
+  case "$1" in
+    *"area is not quiet"*) printf 'area not quiet' ;;
+    *"fighting after the place"*) printf 'fighting after the place' ;;
+    *) return 1 ;;
+  esac
+}
+
+# plan_of_cmd is the raid-walk plan word of the current command.
+plan_of_cmd() {
+  local i
+  for (( i = 0; i < ${#ARGS[@]}; i++ )); do
+    if [[ "${ARGS[$i]}" == "raid-walk" ]]; then
+      printf '%s' "${ARGS[$((i + 1))]:-}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# move_row_before prints the last MOVE row strictly before step <want> of <plan> in the command's --sql file. Every
+# ai_dungeon_step row is one line; its kind is the fourth single-quoted field, so the k-th matching row is step k.
+move_row_before() {
+  local plan="$1" want="$2" sql
+  sql="$(opt_value sql || true)"
+  [[ -n "$sql" && -f "$sql" ]] || return 1
+  awk -v plan="$plan" -v want="$want" '
+    {
+      n = split($0, a, "\047")
+      if (n < 4 || a[2] != plan) next
+      kind = a[4]
+      if (kind != "move" && kind != "pull" && kind != "boss" && kind != "hold") next
+      count++
+      if (kind == "move" && count < want + 0) last = count
+    }
+    END { if (last > 0) print last; else exit 1 }
+  ' "$sql"
+}
+
+# place_count is how many failures of category <cat> at start step <step> the per-command counter file holds.
+place_count() {
+  local step="$1" cat="$2"
+  [[ -f "$cmdfile.place-fails" ]] || { printf '0'; return 0; }
+  awk -F'\t' -v s="$step" -v c="$cat" '$1 == s && $2 == c { n++ } END { print n + 0 }' "$cmdfile.place-fails"
+}
+
+# place_record appends one placement failure to the per-command counter file.
+place_record() {
+  printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$cmdfile.place-fails"
 }
 
 leg_of_runlog() {
@@ -496,25 +554,59 @@ while true; do
     # <base>-r<n>): there is no leg to rebuild a --from for. An exit-19 run with no leg keeps today's stop.
     if [[ "$rc" == 18 ]] && has_flag place; then
       place_fail="$(place_fail_of_summary "$out/summary.json" || true)"
-      if [[ -n "$place_fail" && "$place_fail" == "$prev_place_fail" ]]; then
-        place_start="${place_fail%%$'\t'*}"
-        log_event "run $run_no exit $rc leg <none> out $out stop: no progress (place failed before the run started at start step $place_start twice with the same end reason: ${place_fail#*$'\t'})"
-        exit "$rc"
+      place_start="${place_fail%%$'\t'*}"
+      place_reason="${place_fail#*$'\t'}"
+      place_moved=""
+      if [[ -n "$place_start" ]] && place_cat="$(place_fail_category "$place_reason")"; then
+        # Walk 33: the same start step may fail this way twice; the third try moves one move row back, and a start
+        # step is never tried a third time. The counter file is per command file, so it survives a relaunch.
+        place_seen="$(place_count "$place_start" "$place_cat")"
+        if (( place_seen >= 2 )); then
+          log_event "run $run_no exit $rc leg <none> out $out stop: never repeating start step $place_start a third time ($place_cat: $place_reason)"
+          exit "$rc"
+        fi
+        place_record "$place_start" "$place_cat" "$place_reason"
+        place_seen=$((place_seen + 1))
+        if (( place_seen >= 2 )); then
+          plan_word="$(plan_of_cmd || true)"
+          place_prev=""
+          if [[ -n "$plan_word" ]]; then
+            place_prev="$(move_row_before "$plan_word" "$place_start" || true)"
+          fi
+          if [[ -z "$place_prev" || "$place_prev" -ge "$place_start" ]]; then
+            log_event "run $run_no exit $rc leg <none> out $out stop: start step $place_start failed twice ($place_cat) and no move row stands before it in --sql"
+            exit "$rc"
+          fi
+          place_moved="step $place_prev"
+        fi
+      else
+        if [[ -n "$place_fail" && "$place_fail" == "$prev_place_fail" ]]; then
+          log_event "run $run_no exit $rc leg <none> out $out stop: no progress (place failed before the run started at start step $place_start twice with the same end reason: $place_reason)"
+          exit "$rc"
+        fi
+        prev_place_fail="$place_fail"
       fi
-      prev_place_fail="$place_fail"
       prev_leg=""
       prev_step=""
       prev_restart_step=""
       prev_stuck=""
       restarts_done=$((restarts_done + 1))
       new_out="${base_out}-r${restarts_done}"
-      log_event "run $run_no exit $rc leg <none> out $out restarting as run $((run_no + 1)) out $new_out (restart $restarts_done/$max_restarts): place failed before the run started (no TBM:RUN), retrying the same command"
+      if [[ -n "$place_moved" ]]; then
+        log_event "run $run_no exit $rc leg <none> out $out restarting as run $((run_no + 1)) out $new_out (restart $restarts_done/$max_restarts): start step $place_start failed twice ($place_cat) -> one move row back to \"$place_moved\""
+      else
+        log_event "run $run_no exit $rc leg <none> out $out restarting as run $((run_no + 1)) out $new_out (restart $restarts_done/$max_restarts): place failed before the run started (no TBM:RUN), retrying the same command"
+      fi
       sleep "$wait_secs" &
       waitpid=$!
       wait "$waitpid"
       waitpid=""
       reload_cmd
-      swap_out_cmd "$new_out"
+      if [[ -n "$place_moved" ]]; then
+        rebuild_cmd "$new_out" "$place_moved"
+      else
+        swap_out_cmd "$new_out"
+      fi
       run_no=$((run_no + 1))
       continue
     fi

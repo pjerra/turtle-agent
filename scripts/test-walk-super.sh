@@ -257,31 +257,57 @@ case5() {
 }
 
 case6a() {
-  # Walk 26d, #373 fix C: an exit-18 --place run with no TBM:RUN leg died in the place phase, so the supervisor
-  # retries the SAME command with only --out changed to DIR-r1. The stop then comes from the empty-leg
-  # no-progress guard: two consecutive place failures with the same summary.json place.start_step and end_reason.
-  local d="$T/c6a" rc runs l2
+  # Walk 33: the first two failures of the same start step ("fighting after the place") keep the same command; the
+  # third try moves one MOVE row back in the --sql rows (step 199 here: every odd row is a move).
+  local d="$T/c6a" rc runs l2 l3 i
   mkdir -p "$d"
+  {
+    for (( i = 1; i <= 205; i++ )); do
+      kind=move
+      (( i % 2 == 0 )) && kind=pull
+      printf "('zul_gurub', 0, %d, '%s', 0, 0, 0, 0, 0, 0, 0, 0, 0, '', 'x'),\n" "$i" "$kind"
+    done
+  } >"$d/rows.sql"
   make_cmd "$d/cmd.txt" raid-walk zul_gurub --server s --slot 2 --holder H6 \
-    --from "leg high_priestess_marli" --place --sql /tmp/w.sql --until boss --out "$d/run0"
-  printf '18\n18\n' >"$d/seq"
+    --from "leg high_priestess_marli" --place --sql "$d/rows.sql" --until boss --out "$d/run0"
+  printf '18\n18\n0\n' >"$d/seq"
   printf '%s\n%s\n' "$PLACE_SUMMARY" "$PLACE_SUMMARY" >"$d/sums"
   FAKE_NO_TBM=1 FAKE_SEQ_FILE="$d/seq" FAKE_SUMMARY_SEQ_FILE="$d/sums" FAKE_ARGS_LOG="$d/args.log" \
     "$SUPER_BIN" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log"
   rc=$?
   runs="$(runs_done "$d/args.log")"
-  (( rc == 18 )) || { bad "case6a exit=$rc want 18"; return; }
-  (( runs == 2 )) || { bad "case6a runs=$runs want 2 (one same-command restart, then the no-progress stop)"; return; }
+  (( rc == 0 )) || { bad "case6a exit=$rc want 0"; return; }
+  (( runs == 3 )) || { bad "case6a runs=$runs want 3 (retry, then one move row back)"; return; }
   l2="$(sed -n '2p' "$d/args.log")"
   printf '%s\n' "$l2" | grep -qF -e "--out $d/run0-r1" || { bad "case6a run2 missing --out DIR-r1"; return; }
   printf '%s\n' "$l2" | grep -qF -e '--from leg\ high_priestess_marli' || { bad "case6a run2 lost its --from leg"; return; }
   printf '%s\n' "$l2" | grep -qF -e '--place' || { bad "case6a run2 lost --place"; return; }
-  printf '%s\n' "$l2" | grep -qF -e '--sql /tmp/w.sql' || { bad "case6a run2 lost --sql"; return; }
-  (( $(printf '%s' "$l2" | grep -o -F -e '--out' | wc -l) == 1 )) || { bad "case6a run2 --out count != 1"; return; }
+  l3="$(sed -n '3p' "$d/args.log")"
+  printf '%s\n' "$l3" | grep -qF -e '--from step\ 199' || { bad "case6a run3 is not one move row back (199): $l3"; return; }
+  printf '%s\n' "$l3" | grep -qF -e '--place' || { bad "case6a run3 lost --place"; return; }
   grep -qF -e 'retrying the same command' "$d/restart.log" || { bad "case6a log missing the same-command restart"; return; }
-  grep -qF -e 'no progress (place failed before the run started at start step 201 twice' "$d/restart.log" ||
-    { bad "case6a log missing the empty-leg no-progress stop"; return; }
-  ok "case6a exit-18 --place with no TBM:RUN: one same-command restart --out DIR-r1, then the no-progress stop"
+  grep -qF -e 'one move row back to "step 199"' "$d/restart.log" || { bad "case6a log missing the move-row retreat"; return; }
+  ok "case6a exit-18 --place: same command once, then one move row back; run3 starts step 199"
+}
+
+# Walk 33: a start step that already failed this way twice is never tried a third time, even across a relaunch (the
+# per-command counter file is the memory).
+case23() {
+  local d="$T/c23" rc runs
+  mkdir -p "$d"
+  make_cmd "$d/cmd.txt" raid-walk zul_gurub --server s --slot 2 --holder H23 \
+    --from "leg high_priestess_marli" --place --sql /tmp/w.sql --until boss --out "$d/run0"
+  printf '201\tfighting after the place\tplace: fighting after the place\n201\tfighting after the place\tplace: fighting after the place\n' >"$d/cmd.txt.place-fails"
+  printf '18\n18\n' >"$d/seq"
+  printf '%s\n' "$PLACE_SUMMARY" >"$d/sums"
+  FAKE_NO_TBM=1 FAKE_SEQ_FILE="$d/seq" FAKE_SUMMARY_SEQ_FILE="$d/sums" FAKE_ARGS_LOG="$d/args.log" \
+    "$SUPER_BIN" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log"
+  rc=$?
+  runs="$(runs_done "$d/args.log")"
+  (( rc == 18 )) || { bad "case23 exit=$rc want 18"; return; }
+  (( runs == 1 )) || { bad "case23 runs=$runs want 1 (no third try at the same step)"; return; }
+  grep -qF -e 'never repeating start step 201 a third time' "$d/restart.log" || { bad "case23 log missing the third-try stop"; return; }
+  ok "case23 a start step that failed twice is never tried a third time"
 }
 
 case6b() {
@@ -779,6 +805,7 @@ main() {
   if (( run_all )) || [[ "$only" == *" 20 "* ]]; then case20; fi
   if (( run_all )) || [[ "$only" == *" 21 "* ]]; then case21; fi
   if (( run_all )) || [[ "$only" == *" 22 "* ]]; then case22; fi
+  if (( run_all )) || [[ "$only" == *" 23 "* ]]; then case23; fi
   if (( run_all )); then mutation; mutation2; fi
   printf -- '----\nPASS=%d FAIL=%d\n' "$PASS" "$FAIL"
   (( FAIL == 0 ))
