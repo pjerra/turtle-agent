@@ -1571,8 +1571,10 @@
           ],
           "radius": 4.4,
           "approach": [
-            {"x": -11632, "y": -1306, "z": 80.16}
-          ]
+            {"x": -11632, "y": -1322, "z": 78.1}
+          ],
+          "stand_pull": true,
+          "max_bodies": 10
         },
         {
           "entries": [14825, 14825, 14825, 14825],
@@ -1603,8 +1605,31 @@
           ],
           "radius": 6.2,
           "approach": [
-            {"x": -11596, "y": -1306, "z": 77.7}
-          ]
+            {"x": -11606.5, "y": -1302.8, "z": 79.3}
+          ],
+          "stand_pull": true,
+          "max_bodies": 10
+        },
+        {
+          "entries": [14826, 14826, 14826, 14826, 14826, 14826, 14826, 14826, 14826, 14826],
+          "positions": [
+            {"x": -11580.6, "y": -1254.79, "z": 77.66},
+            {"x": -11580.2, "y": -1250.6, "z": 77.71},
+            {"x": -11581.5, "y": -1252.54, "z": 77.69},
+            {"x": -11583.2, "y": -1254.83, "z": 77.67},
+            {"x": -11582.5, "y": -1250.32, "z": 77.69},
+            {"x": -11584.2, "y": -1252.21, "z": 77.76},
+            {"x": -11582.3, "y": -1247.86, "z": 77.7},
+            {"x": -11586.4, "y": -1253.92, "z": 77.66},
+            {"x": -11585.11, "y": -1248.78, "z": 77.64},
+            {"x": -11586.6, "y": -1250.72, "z": 77.67}
+          ],
+          "radius": 4.6,
+          "approach": [
+            {"x": -11563, "y": -1282.6, "z": 77.9}
+          ],
+          "stand_pull": true,
+          "max_bodies": 10
         },
         {
           "entries": [14825, 14825, 14882, 14825],
@@ -1649,25 +1674,6 @@
           "radius": 8,
           "approach": [
             {"x": -11558, "y": -1276, "z": 78.06}
-          ]
-        },
-        {
-          "entries": [14826, 14826, 14826, 14826, 14826, 14826, 14826, 14826, 14826, 14826],
-          "positions": [
-            {"x": -11580.6, "y": -1254.79, "z": 77.66},
-            {"x": -11580.2, "y": -1250.6, "z": 77.71},
-            {"x": -11581.5, "y": -1252.54, "z": 77.69},
-            {"x": -11583.2, "y": -1254.83, "z": 77.67},
-            {"x": -11582.5, "y": -1250.32, "z": 77.69},
-            {"x": -11584.2, "y": -1252.21, "z": 77.76},
-            {"x": -11582.3, "y": -1247.86, "z": 77.7},
-            {"x": -11586.4, "y": -1253.92, "z": 77.66},
-            {"x": -11585.11, "y": -1248.78, "z": 77.64},
-            {"x": -11586.6, "y": -1250.72, "z": 77.67}
-          ],
-          "radius": 4.6,
-          "approach": [
-            {"x": -11566, "y": -1278, "z": 77.87}
           ]
         },
         {
@@ -1780,7 +1786,10 @@
         "approach": [
           {"x": -11533.048, "y": -1285.5894, "z": 79.13654}
         ]
-      }
+      },
+      "notes": [
+        "WALK 29 FIX 3 (2026-11-03, leg 6; research/zg-w29/WALK29-FIX-PLAN.md \u00a74, lead decision): step 528 (group 6) pulled the 10 lone 14825/14882/14883 units of the 49373-49382 cluster from an approach 26.1 yd out; d 00:41:06 aggroed 49377 on arrival and 12 bodies (with the Corrupted Infernals from Voodoo Slave spell 23426) were in at 00:41:08, 19 dead in 38 s, no CC (the units were not in cc_priority and the row was not a stand_pull). Step 532 (group 8, formation 49363, 10 units) repeated it from 24.0 yd: 11-12 engaged, 21+23 dead. Step 534 walked to group 9's approach -11566 -1270, 21.1 yd from the Sacrificed Troll pack (group 12): 9 trolls woke on the walk and group 9 added 8, 17 engaged, 21 dead. Rows 6, 8 and 12 are stand_pull now with max_bodies 10, and their approaches sit 30+ yd from their own packs with the party's spread clear: group 6 at -11632 -1322 78.1 (40.3 yd from its nearest unit, 43.6 from the row centre), group 8 at -11606.5 -1302.8 79.3 (34.9, 37.0) and the trolls at -11563 -1282.6 77.9 (32.9, 37.0). The troll pack (Sacrificed Trolls 49078-49087) is pulled before group 9, from its own stand, which removes the walk exposure at step 534 entirely. 14882 Atal'ai Mistress is in cc_priority; 14883 Voodoo Slave is kill_first (its creature_spells entry 148830 casts 23426 Summon Infernals)."
+      ]
     },
     {
       "name": "hakkar_outer",
