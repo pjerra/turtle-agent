@@ -358,6 +358,22 @@ func TestClearTargetSendsAZeroSelection(t *testing.T) {
 	}
 }
 
+// waitSelfCreated waits until the session has stored the player's own create block (the target field comes with it) and applied it. The
+// session applies a block and then notes the target field on its owner goroutine; the barrier op runs on that goroutine after the block is
+// applied. Without the wait a selection can run before the session knows the field is 0: it then sends a neutral select, and the fake server
+// never echoes that (it echoes only a change of the field), so the select waits out its full timeout.
+func (h *harness) waitSelfCreated(ctx context.Context) {
+	h.t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); h.s.Status().MaxHealth != 800; time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			h.t.Fatal("the session did not store the player's create block within 5s")
+		}
+	}
+	if _, err := h.s.do(ctx, func() (any, error) { return nil, nil }); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
 // GMKill selects the creature, the server shows the selection, and only then ".die" goes out, while that creature is the selection in
 // force. A player guid is refused with nothing sent.
 func TestGMKillSelectsThenSendsDie(t *testing.T) {
@@ -365,6 +381,7 @@ func TestGMKillSelectsThenSendsDie(t *testing.T) {
 	h := start(t, Options{AllowGMKill: true})
 	h.enterWorld()
 	h.send(opcode.SMSGUpdateObject, unitCreate(me.GUID, objects.TypePlayer, me.X, me.Y, me.Z, map[uint16]uint32{objects.UnitHealth: 800, objects.UnitMaxHealth: 800}))
+	h.waitSelfCreated(ctx)
 	creature := packet.GUID(uint64(packet.HighUnit)<<48 | 12118<<24 | 4242)
 
 	type seen struct {
@@ -412,7 +429,24 @@ func TestGMKillSelectsThenSendsDie(t *testing.T) {
 	if err := h.s.GMKill(ctx, creature); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(200 * time.Millisecond)
+	// GMKill returns once the line is written, not once the server has read it: wait for the read, bounded, instead of a fixed sleep.
+	chatRead := func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, s := range got {
+			if s.op == uint16(opcode.CMSGMessagechat) {
+				return true
+			}
+		}
+		return false
+	}
+	for deadline := time.Now().Add(5 * time.Second); !chatRead(); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			close(stop)
+			<-done
+			t.Fatal("the server did not read the .die line within 5s")
+		}
+	}
 	close(stop)
 	<-done
 	mu.Lock()
