@@ -128,11 +128,11 @@ func (e *engine) markBox(b Box, flag uint16, share float32) int {
 // findPath returns Detour's verdict (0 complete, 1 partial, 2 partial with the goal over
 // 7 yd from the mesh, -1 start off the mesh, -2 goal off the mesh, -3 failure), the
 // straight path between the floor points, and the floor point found for the goal.
-func (e *engine) findPath(from, to Vec3) (int, []Vec3, Vec3) {
+func (e *engine) findPath(from, to Vec3, include, exclude uint16) (int, []Vec3, Vec3) {
 	out := make([]Vec3, maxPoints)
 	var n C.int
 	var goal Vec3
-	rc := C.nd_find_path(e.h, cvec(&from), cvec(&to), C.ushort(IncludeFlags), C.ushort(ExcludeFlags),
+	rc := C.nd_find_path(e.h, cvec(&from), cvec(&to), C.ushort(include), C.ushort(exclude),
 		cvec(&out[0]), C.int(maxPoints), &n, cvec(&goal))
 	return int(rc), out[:int(n)], goal
 }
@@ -159,9 +159,9 @@ func (e *engine) serverPath(from, to Vec3) (uint32, []Vec3, Vec3, float32, float
 
 // raycast casts a walkability ray over the mesh from one point to another: the fraction of the way at which it meets the mesh's
 // edge (over 1 when it reaches the end), and 0 for done, -1 when the start is off the mesh, -3 on a Detour failure.
-func (e *engine) raycast(from, to Vec3) (float32, int) {
+func (e *engine) raycast(from, to Vec3, include, exclude uint16) (float32, int) {
 	var t C.float
-	rc := C.nd_raycast(e.h, cvec(&from), cvec(&to), C.ushort(IncludeFlags), C.ushort(ExcludeFlags), &t)
+	rc := C.nd_raycast(e.h, cvec(&from), cvec(&to), C.ushort(include), C.ushort(exclude), &t)
 	return float32(t), int(rc)
 }
 

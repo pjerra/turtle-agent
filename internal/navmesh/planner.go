@@ -202,6 +202,18 @@ func (p *Planner) Tiles(mapID uint32) []string {
 // will not fix (no folder, no map, a broken tile, no engine); an unreachable goal is a
 // Path with Status NoPath or Partial and a Reason.
 func (p *Planner) Plan(mapID uint32, from, to Vec3) (Path, error) {
+	return p.planQuery(mapID, from, to, IncludeFlags, ExcludeFlags)
+}
+
+// PlanNoWater is Plan over plain ground only: a water polygon is not walkable, so the path goes round a lake instead of
+// through it (route-regen plans every hop this way; the run leader walks the ground). A ground polygon the tiles also flag
+// NavWater is still walkable, as on the plain mesh.
+func (p *Planner) PlanNoWater(mapID uint32, from, to Vec3) (Path, error) {
+	return p.planQuery(mapID, from, to, NavGround, ExcludeFlags)
+}
+
+// planQuery plans with the given polygon filter (include, exclude).
+func (p *Planner) planQuery(mapID uint32, from, to Vec3, include, exclude uint16) (Path, error) {
 	if p.dir == "" {
 		return Path{}, errors.New(`navmesh: no tiles folder; set "mmaps_dir" in the settings file`)
 	}
@@ -232,7 +244,7 @@ func (p *Planner) Plan(mapID uint32, from, to Vec3) (Path, error) {
 			p.mu.Unlock()
 			return Path{}, err
 		}
-		path = plan(m.eng, from, to)
+		path = plan(m.eng, from, to, include, exclude)
 		p.mu.Unlock()
 		if path.Status == Complete || len(names) <= smallMap {
 			break
@@ -332,6 +344,17 @@ type Ray struct {
 // tile's width crosses at most two; a longer one over an unloaded tile reads as blocked there), and gives Known false for an end whose
 // tile file is missing.
 func (p *Planner) Raycast(mapID uint32, from, to Vec3) (Ray, error) {
+	return p.raycastQuery(mapID, from, to, IncludeFlags, ExcludeFlags)
+}
+
+// RaycastNoWater is Raycast over plain ground only: a ray that would cross water reads as blocked where it meets the water
+// polygon, so a string-pulled corner never cuts across a lake.
+func (p *Planner) RaycastNoWater(mapID uint32, from, to Vec3) (Ray, error) {
+	return p.raycastQuery(mapID, from, to, NavGround, ExcludeFlags)
+}
+
+// raycastQuery casts a walkability ray with the given polygon filter (include, exclude).
+func (p *Planner) raycastQuery(mapID uint32, from, to Vec3, include, exclude uint16) (Ray, error) {
 	if p.dir == "" {
 		return Ray{}, errors.New(`navmesh: no tiles folder; set "mmaps_dir" in the settings file`)
 	}
@@ -348,7 +371,7 @@ func (p *Planner) Raycast(mapID uint32, from, to Vec3) (Ray, error) {
 			return Ray{}, nil
 		}
 	}
-	t, rc := m.eng.raycast(from, to)
+	t, rc := m.eng.raycast(from, to, include, exclude)
 	switch {
 	case rc == -1:
 		return Ray{}, nil
@@ -601,8 +624,8 @@ func (p *Planner) load(m *mapMesh, want []string, data map[string][]byte) error 
 	return nil
 }
 
-func plan(eng *engine, from, to Vec3) Path {
-	rc, pts, goal := eng.findPath(from, to)
+func plan(eng *engine, from, to Vec3, include, exclude uint16) Path {
+	rc, pts, goal := eng.findPath(from, to, include, exclude)
 	path := Path{Engine: engineName, Points: pts}
 	switch rc {
 	case 0:
