@@ -3,6 +3,7 @@ package dungeon
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -395,5 +396,85 @@ func TestCampValidation(t *testing.T) {
 		if _, err := Parse("t.json", []byte(fmt.Sprintf(base, bad))); err == nil || !strings.Contains(err.Error(), "camp") {
 			t.Errorf("%s: parse error %v (want the camp refusal)", name, err)
 		}
+	}
+}
+
+// TestStagesValidate: a clean staged group loads (and writes back the same); each stage refusal names its field.
+func TestStagesValidate(t *testing.T) {
+	base := `{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"caster_entries":[11830],"legs":[{"name":"a","to":{"x":0,"y":0,"z":0},
+	 "pull_groups":[{"entries":[5],"positions":[{"x":50,"y":0,"z":0}]%s}]}]}`
+	st := func(peel, tag, camp, extra string) string {
+		return `{"peel":` + peel + `,"tag":` + tag + `,"camp":` + camp + extra + `}`
+	}
+	one := st(`[7]`, `[{"x":30,"y":0,"z":0}]`, `{"x":0,"y":0,"z":0}`, `,"max_bodies":10`)
+	two := st(`[8,9]`, `[{"x":25,"y":0,"z":0},{"x":35,"y":0,"z":0}]`, `{"x":0,"y":5,"z":0}`, ``)
+	p, err := Parse("t.json", []byte(fmt.Sprintf(base, `,"stages":[`+one+`,`+two+`]`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := p.Legs[0].PullGroups[0]
+	if len(g.Stages) != 2 || g.Stages[0].Peel[0] != 7 || g.Stages[0].MaxBodies != 10 || len(g.Stages[1].Tag) != 2 ||
+		g.Stages[1].Camp.Y != 5 || !slices.Equal(p.CasterEntries, []uint32{11830}) {
+		t.Fatalf("%+v %v: want both stages and the caster list", g, p.CasterEntries)
+	}
+	b, err := Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, err := Parse("t.json", b)
+	if err != nil || !reflect.DeepEqual(p, p2) {
+		t.Fatalf("a staged plan does not survive Marshal+Parse: %v", err)
+	}
+	nine := make([]string, 9)
+	for i := range nine {
+		nine[i] = st(fmt.Sprintf("[%d]", 100+i), `[{"x":30,"y":0,"z":0}]`, `{"x":0,"y":0,"z":0}`, ``)
+	}
+	for _, tc := range []struct{ name, stages, extra, want string }{
+		{"nine stages", `[` + strings.Join(nine, ",") + `]`, ``, "9 stages: at most 8"},
+		{"empty peel", `[` + st(`[]`, `[{"x":30,"y":0,"z":0}]`, `{"x":0,"y":0,"z":0}`, ``) + `]`, ``, "stages[0].peel: needs at least one formation leader guid"},
+		{"zero guid", `[` + st(`[0]`, `[{"x":30,"y":0,"z":0}]`, `{"x":0,"y":0,"z":0}`, ``) + `]`, ``, "stages[0].peel[0]: 0 is no spawn guid"},
+		{"guid twice in a stage", `[` + st(`[7,7]`, `[{"x":30,"y":0,"z":0}]`, `{"x":0,"y":0,"z":0}`, ``) + `]`, ``, "stages[0].peel[1]: 7 is listed twice"},
+		{"guid in two stages", `[` + one + `,` + st(`[7]`, `[{"x":30,"y":0,"z":0}]`, `{"x":0,"y":0,"z":0}`, ``) + `]`, ``, "stages[1].peel[0]: 7 is already peeled by stages[0]"},
+		{"no tag", `[` + st(`[7]`, `[]`, `{"x":0,"y":0,"z":0}`, ``) + `]`, ``, "stages[0].tag: needs 1-4 points"},
+		{"five tag", `[` + st(`[7]`, `[{"x":1,"y":0,"z":0},{"x":2,"y":0,"z":0},{"x":3,"y":0,"z":0},{"x":4,"y":0,"z":0},{"x":5,"y":0,"z":0}]`, `{"x":0,"y":0,"z":0}`, ``) + `]`, ``, "stages[0].tag: 5 points: at most 4"},
+		{"no camp", `[{"peel":[7],"tag":[{"x":30,"y":0,"z":0}]}]`, ``, "stages[0].camp: required"},
+		{"drag 51", `[` + st(`[7]`, `[{"x":51,"y":0,"z":0}]`, `{"x":0,"y":0,"z":0}`, ``) + `]`, ``, "stages[0].camp: the camp is 51.0 yd from the tag spot"},
+		{"max_bodies 0", `[` + st(`[7]`, `[{"x":30,"y":0,"z":0}]`, `{"x":0,"y":0,"z":0}`, `,"max_bodies":0`) + `]`, ``, "stages[0].max_bodies: 0: use 1-80"},
+		{"own camp", `[` + one + `]`, `,"camp":{"x":0,"y":0,"z":0}`, "a staged group cannot also have its own camp"},
+		{"approach", `[` + one + `]`, `,"approach":[{"x":40,"y":0,"z":0}]`, "a staged group cannot also have an approach"},
+		{"stand_pull", `[` + one + `]`, `,"stand_pull":true`, "a staged group cannot be a stand_pull"},
+		{"hold", `[` + one + `]`, `,"hold":{"instance_data":1,"spot":{"x":1,"y":0,"z":0},"radius":30,"timeout_s":600}`, "a staged group cannot hold"},
+		{"ambush", `[` + one + `]`, `,"ambush":true`, "a staged group cannot be an ambush"},
+	} {
+		_, err := Parse("t.json", []byte(fmt.Sprintf(base, `,"stages":`+tc.stages+tc.extra)))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: parse error %v, want %q", tc.name, err, tc.want)
+		}
+	}
+	if _, err := Parse("t.json", []byte(strings.Replace(fmt.Sprintf(base, `,"stages":[`+one+`]`), `"caster_entries":[11830]`, `"caster_entries":[0]`, 1))); err == nil || !strings.Contains(err.Error(), "caster_entries[0]") {
+		t.Errorf("a 0 caster entry: %v", err)
+	}
+}
+
+// The run leader's walk of a staged group is one camp chain per stage, in stage order, and a stage's pack distance from the last
+// move row is no hop to warn about (the pack is fought at the camp).
+func TestRunLeaderWalkStagedGroup(t *testing.T) {
+	p := &Plan{Name: "t", Map: 1, Legs: []Leg{{Name: "a", To: Point{}, PullGroups: []PullGroup{{
+		Entries: []uint32{5}, Positions: []Point{{X: 90}},
+		Stages: []Stage{
+			{Peel: []uint32{1}, Tag: []Point{{X: 60}, {X: 70}}, Camp: Point{X: 40}},
+			{Peel: []uint32{2}, Tag: []Point{{X: 75}}, Camp: Point{X: 45}},
+		}}}}}}
+	var parts []string
+	p.runLeaderWalk(0, func(m RunLeaderPoint) { parts = append(parts, m.Part) }, func(li int, part string, at Point, group int, team string) {
+		parts = append(parts, "fight:"+part)
+	})
+	want := []string{"to", "pull group 1 stage 1 camp", "pull group 1 stage 1 tag walk 0", "pull group 1 stage 1 tag walk 1", "fight:pull group stage 1",
+		"pull group 1 stage 2 camp", "pull group 1 stage 2 tag walk 0", "fight:pull group stage 2"}
+	if !slices.Equal(parts, want) {
+		t.Fatalf("walk %q, want %q", parts, want)
+	}
+	if got := p.RunLeaderReach(0); len(got) != 0 {
+		t.Fatalf("a stage's pack is fought at its camp: %v", got)
 	}
 }

@@ -132,6 +132,11 @@ type Plan struct {
 	// (or above the group's MaxBodies) is warned about by plan-check's pull_size
 	// lint. 0: the lint's default (8 for raids, 6 for parties).
 	PullCeiling int `json:"pull_ceiling,omitempty"`
+	// CasterEntries are the creature entries the scripted pull stages' camp rule protects against (data-driven: the
+	// plan author lists the healers and casters, such as Zul'Gurub's 11830 Hakkari Priest): a stage's camp stands at
+	// least CasterCampYd from every spawn of these entries in its own and the later stages' formations, so a caster
+	// in range of the camp cannot plant and hold the fight away from the raid. Only the stage lint reads it.
+	CasterEntries []uint32 `json:"caster_entries,omitempty"`
 	// Watchdog sets the plan's stall levels (see WatchdogConfig); dungeon_run's watchdog parameter wins field by field. Absent: 120/240/420 s.
 	Watchdog *WatchdogConfig `json:"watchdog,omitempty"`
 	// Avoid are the regions of the map the party must never stand in or walk through: ground that kills although the navmesh calls it
@@ -369,6 +374,28 @@ type PullGroup struct {
 	// 0: the plan's PullCeiling (or the lint default). The pull row carries it in
 	// item (unused on pull rows today); 1-80 (kPlanMaxPullBodies).
 	MaxBodies int `json:"max_bodies,omitempty"`
+	// Stages script the pull of a pack that no stand can split (Arlokk's terrace) or that carries casters that
+	// plant: stage 1 peels its formations from its own tag spot and drags them to its own camp; when that fight is
+	// over, stage 2 peels its formations, and so on. With plan-export's camp-pull option each stage is one camp
+	// chain (camp move, tag rows, camp pull row scoped to the stage's formations); without it each stage is a plain
+	// pull from its tag spot. Exclusive with the group's own camp, approach, stand_pull, hold and ambush; the
+	// group's entries and positions still say which pack the stages split. The agent's own driver ignores stages
+	// and pulls the whole group as one.
+	Stages []Stage `json:"stages,omitempty"`
+}
+
+// Stage is one scripted pull of a PullGroup (see PullGroup.Stages).
+type Stage struct {
+	// Peel are the formation leader spawn guids (creature_groups group_leader; a lone spawn is its own leader) the
+	// stage owns: exactly those formations come with its pull. Every formation of the group is peeled by exactly one
+	// stage (dungeongen -check, which knows the world).
+	Peel []uint32 `json:"peel"`
+	// Tag is the tank's walk-out from the camp, 1-MaxApproach points; the last is the tag spot.
+	Tag []Point `json:"tag"`
+	// Camp is where the raid holds and fights the stage; at most MaxCampDragYd (straight) from the tag spot.
+	Camp Point `json:"camp"`
+	// MaxBodies is the stage's pull row's bodies ceiling (PullGroup.MaxBodies); 0: the plan's.
+	MaxBodies int `json:"max_bodies,omitempty"`
 }
 
 // Hold is a scripted event that the TortoiseBots run leader fights out on one spot (its `hold` step, TortoiseBots #1041): the party
@@ -415,6 +442,11 @@ const (
 	MaxCampDragYd = 50
 	// MaxCampPathYd is the most a camp pull's camp may lie from its tag spot along the run leader's navmesh path.
 	MaxCampPathYd = 70
+	// MaxStages is the most scripted pull stages a pull group has.
+	MaxStages = 8
+	// CasterCampYd is how far a stage's camp must stand from every caster spawn of its own and the later stages
+	// (Plan.CasterEntries), in a straight 3D line: a caster nearer can plant and hold the fight away from the raid.
+	CasterCampYd = 40
 	// RunLeaderSeeYd is how far the TortoiseBots run leader sees a pack, a boss or a move point from its lead bot (DungeonRunPolicy.h kSeeYd);
 	// farther, it walks toward it in navmesh hops of its own.
 	RunLeaderSeeYd = 60
@@ -805,31 +837,32 @@ type rawPoint struct {
 }
 
 type rawPlan struct {
-	Version     *int              `json:"version"`
-	Name        string            `json:"name"`
-	Kind        string            `json:"kind"`
-	Status      string            `json:"status"`
-	Fleers      []uint32          `json:"fleers"`
-	Raid        *RaidSpec         `json:"raid"`
-	Map         *uint32           `json:"map"`
-	Entrance    *rawPoint         `json:"entrance"`
-	Trigger     uint32            `json:"entrance_trigger"`
-	Tele        string            `json:"entrance_tele"`
-	Outside     string            `json:"outside_tele"`
-	Portal      *rawPortal        `json:"portal"`
-	Band        []int             `json:"level_band"`
-	TankMinHP   *uint32           `json:"tank_min_hp"`
-	Hire        []string          `json:"hire_composition"`
-	CCPrio      []uint32          `json:"cc_priority"`
-	CCAlways    []uint32          `json:"cc_always"`
-	NoCC        []uint32          `json:"no_cc"`
-	KillFirst   []uint32          `json:"kill_first"`
-	SummonedKF  []uint32          `json:"summoned_kill_first"`
-	Notes       []string          `json:"notes"`
-	PullCeiling *int              `json:"pull_ceiling"`
-	Watchdog    *WatchdogConfig   `json:"watchdog"`
-	Avoid       []rawAvoid        `json:"avoid"`
-	Legs        []json.RawMessage `json:"legs"`
+	Version       *int              `json:"version"`
+	Name          string            `json:"name"`
+	Kind          string            `json:"kind"`
+	Status        string            `json:"status"`
+	Fleers        []uint32          `json:"fleers"`
+	Raid          *RaidSpec         `json:"raid"`
+	Map           *uint32           `json:"map"`
+	Entrance      *rawPoint         `json:"entrance"`
+	Trigger       uint32            `json:"entrance_trigger"`
+	Tele          string            `json:"entrance_tele"`
+	Outside       string            `json:"outside_tele"`
+	Portal        *rawPortal        `json:"portal"`
+	Band          []int             `json:"level_band"`
+	TankMinHP     *uint32           `json:"tank_min_hp"`
+	Hire          []string          `json:"hire_composition"`
+	CCPrio        []uint32          `json:"cc_priority"`
+	CCAlways      []uint32          `json:"cc_always"`
+	NoCC          []uint32          `json:"no_cc"`
+	KillFirst     []uint32          `json:"kill_first"`
+	SummonedKF    []uint32          `json:"summoned_kill_first"`
+	Notes         []string          `json:"notes"`
+	PullCeiling   *int              `json:"pull_ceiling"`
+	CasterEntries []uint32          `json:"caster_entries"`
+	Watchdog      *WatchdogConfig   `json:"watchdog"`
+	Avoid         []rawAvoid        `json:"avoid"`
+	Legs          []json.RawMessage `json:"legs"`
 }
 
 type rawPortal struct {
@@ -889,6 +922,15 @@ type rawPullGroup struct {
 	ClearYd int `json:"clear_yd"`
 	// MaxBodies is PullGroup.MaxBodies.
 	MaxBodies *int `json:"max_bodies"`
+	// Stages is PullGroup.Stages.
+	Stages []rawStage `json:"stages"`
+}
+
+type rawStage struct {
+	Peel      []uint32   `json:"peel"`
+	Tag       []rawPoint `json:"tag"`
+	Camp      *rawPoint  `json:"camp"`
+	MaxBodies *int       `json:"max_bodies"`
 }
 
 type rawHold struct {
@@ -1176,6 +1218,10 @@ func Parse(name string, data []byte) (*Plan, error) {
 		} else {
 			p.PullCeiling = v
 		}
+	}
+	c.entries("caster_entries", rp.CasterEntries, false)
+	if len(rp.CasterEntries) > 0 {
+		p.CasterEntries = slices.Clone(rp.CasterEntries)
 	}
 	if rp.Portal != nil {
 		if rp.Portal.Map == nil {
@@ -1520,6 +1566,9 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 				c.fail(gp+".camp", "the tag spot (the last approach point) is %.1f yd from the pull row's point (the positions' mean): the run leader sees it from %g yd at most", d, float64(RunLeaderSeeYd))
 			}
 		}
+		if len(g.Stages) > 0 {
+			pg.Stages = c.stages(gp, &g)
+		}
 		if g.MaxBodies != nil {
 			if v := *g.MaxBodies; v < 1 || v > 80 {
 				c.fail(gp+".max_bodies", "%d: use 1-80 bodies (the pull row's item; kPlanMaxPullBodies)", v)
@@ -1670,6 +1719,78 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 }
 
 // approach reads a pull group's or a boss's approach points.
+// stages reads a pull group's scripted pull stages (PullGroup.Stages): 1-MaxStages of them, exclusive with the group's own camp,
+// approach, stand_pull, hold and ambush; each peels at least one formation leader (a guid peeled by two stages would be pulled
+// twice), walks 1-MaxApproach tag points and names a camp at most MaxCampDragYd (straight) from its tag spot. What needs the
+// world (the leader exists and is in the group, every formation peeled once, the tag spot's distance from the stage's centre)
+// is dungeongen's stage lint.
+func (c *checker) stages(gp string, g *rawPullGroup) []Stage {
+	var out []Stage
+	if len(g.Stages) > MaxStages {
+		c.fail(gp+".stages", "%d stages: at most %d", len(g.Stages), MaxStages)
+	}
+	if g.Camp != nil {
+		c.fail(gp+".stages", "a staged group cannot also have its own camp (each stage names its camp)")
+	}
+	if len(g.Approach) > 0 {
+		c.fail(gp+".stages", "a staged group cannot also have an approach (each stage walks its own tag points)")
+	}
+	if g.StandPull {
+		c.fail(gp+".stages", "a staged group cannot be a stand_pull (each stage is a camp pull)")
+	}
+	if g.Hold != nil {
+		c.fail(gp+".stages", "a staged group cannot hold (its rows are pulls, not a scripted event)")
+	}
+	if g.Ambush {
+		c.fail(gp+".stages", "a staged group cannot be an ambush (a stealthed pack is walked through, not shot)")
+	}
+	peeled := map[uint32]int{}
+	for i := range g.Stages {
+		r := &g.Stages[i]
+		sp := fmt.Sprintf("%s.stages[%d]", gp, i)
+		st := Stage{Peel: slices.Clone(r.Peel)}
+		if len(r.Peel) == 0 {
+			c.fail(sp+".peel", "needs at least one formation leader guid")
+		}
+		for j, id := range r.Peel {
+			switch {
+			case id == 0:
+				c.fail(fmt.Sprintf("%s.peel[%d]", sp, j), "0 is no spawn guid")
+			case slices.Contains(r.Peel[:j], id):
+				c.fail(fmt.Sprintf("%s.peel[%d]", sp, j), "%d is listed twice", id)
+			default:
+				if at, dup := peeled[id]; dup {
+					c.fail(fmt.Sprintf("%s.peel[%d]", sp, j), "%d is already peeled by stages[%d]: a formation is pulled by one stage only", id, at)
+				}
+				peeled[id] = i
+			}
+		}
+		if len(r.Tag) == 0 {
+			c.fail(sp+".tag", "needs 1-%d points (the tank's walk-out; the last is the tag spot)", MaxApproach)
+		}
+		st.Tag = c.approach(sp+".tag", r.Tag)
+		if r.Camp == nil {
+			c.fail(sp+".camp", "required (the point the raid holds and fights the stage at)")
+		} else {
+			st.Camp = c.point(sp+".camp", r.Camp)
+		}
+		if r.Camp != nil && len(st.Tag) > 0 {
+			if d := dist3(st.Tag[len(st.Tag)-1], st.Camp); d > MaxCampDragYd {
+				c.fail(sp+".camp", "the camp is %.1f yd from the tag spot (the last tag point): at most %d (the drag would leash)", d, MaxCampDragYd)
+			}
+		}
+		if r.MaxBodies != nil {
+			if v := *r.MaxBodies; v < 1 || v > 80 {
+				c.fail(sp+".max_bodies", "%d: use 1-80 bodies (the pull row's item; kPlanMaxPullBodies)", v)
+			} else {
+				st.MaxBodies = v
+			}
+		}
+		out = append(out, st)
+	}
+	return out
+}
+
 func (c *checker) approach(path string, ps []rawPoint) []Point {
 	if len(ps) > MaxApproach {
 		c.fail(path, "%d points: at most %d", len(ps), MaxApproach)

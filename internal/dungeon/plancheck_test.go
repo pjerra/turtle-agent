@@ -783,3 +783,26 @@ func TestPlanCheckCampDragPathMustBeComplete(t *testing.T) {
 		t.Errorf("a complete 71 yd drag should still fail:\n%s", res.Summary())
 	}
 }
+
+// A staged group's drag back is measured from each stage's tag walk to that stage's own camp: a complete 71 yd drag of stage 2 fails, and
+// stage 1's short drag does not.
+func TestPlanCheckStageDragPath(t *testing.T) {
+	camp1, tag1 := Point{0, 10, 0}, Point{0, 40, 0}
+	camp2, tag2 := Point{0, 20, 0}, Point{0, 60, 0}
+	leg := Leg{Name: "a", To: Point{0, 0, 0},
+		PullGroups: []PullGroup{{Entries: []uint32{1}, Positions: []Point{{0, 80, 0}}, Stages: []Stage{
+			{Peel: []uint32{1}, Tag: []Point{tag1}, Camp: camp1},
+			{Peel: []uint32{2}, Tag: []Point{tag2}, Camp: camp2},
+		}}}}
+	if res := checkLegs(t, fakeNav{}, 0, leg); strings.Contains(res.Summary(), "the drag back to the camp") {
+		t.Fatalf("short drags should pass:\n%s", res.Summary())
+	}
+	long := fakeNav{detour: map[Point]float32{camp2: MaxCampPathYd + 1}}
+	res := checkLegs(t, long, 0, leg)
+	if !strings.Contains(res.Summary(), "stage 2 tag walk 0") || !strings.Contains(res.Summary(), "the drag back to the camp") {
+		t.Fatalf("stage 2's 71 yd drag should fail:\n%s", res.Summary())
+	}
+	if strings.Contains(res.Summary(), "stage 1 tag walk") && strings.Contains(res.Summary(), "leashes") && strings.Count(res.Summary(), "the drag back to the camp") > 1 {
+		t.Fatalf("only stage 2 is too long:\n%s", res.Summary())
+	}
+}

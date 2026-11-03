@@ -61,6 +61,17 @@ func (p *Plan) runLeaderWalk(from int, move func(RunLeaderPoint), fight func(leg
 		}
 		move(RunLeaderPoint{li, "to", l.To})
 		for gi, g := range l.PullGroups {
+			for si, st := range g.Stages {
+				// plan-export's camp chain per stage: the camp, the tank's tag walk, then the pull the raid fights at the camp.
+				move(RunLeaderPoint{li, fmt.Sprintf("pull group %d stage %d camp", gi+1, si+1), st.Camp})
+				for ai, a := range st.Tag {
+					move(RunLeaderPoint{li, fmt.Sprintf("pull group %d stage %d tag walk %d", gi+1, si+1, ai), a})
+				}
+				fight(li, fmt.Sprintf("pull group stage %d", si+1), PackCentre(g), gi+1, g.Team)
+			}
+			if len(g.Stages) > 0 {
+				continue
+			}
 			if g.Camp != nil {
 				move(RunLeaderPoint{li, fmt.Sprintf("pull group %d camp", gi+1), *g.Camp})
 			}
@@ -112,7 +123,7 @@ func (p *Plan) RunLeaderReach(from int) []PlanIssue {
 		if group > 0 && group <= len(p.Legs[li].PullGroups) && p.Legs[li].PullGroups[group-1].StandPull && d <= RunLeaderSeeYd {
 			return // a stand_pull group is pulled from its stand: the run leader holds there and needs only to see the row's point
 		}
-		if group > 0 && group <= len(p.Legs[li].PullGroups) && p.Legs[li].PullGroups[group-1].Camp != nil {
+		if group > 0 && group <= len(p.Legs[li].PullGroups) && (p.Legs[li].PullGroups[group-1].Camp != nil || len(p.Legs[li].PullGroups[group-1].Stages) > 0) {
 			return // a camp group is fought at its camp: the pack's distance from the last move row is the tank's walk-out, not a hop
 		}
 		is := PlanIssue{Leg: li, LegName: p.Legs[li].Name, Part: part, Point: at, From: last, Reason: WarnRunLeaderHop, Team: team,

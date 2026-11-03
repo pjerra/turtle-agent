@@ -367,10 +367,18 @@ func (c *planChecker) runLeader(from int) error {
 			// The camp pull's drag (tag spot back to the camp) is the run
 			// leader's own path: past MaxCampPathYd the pack leashes on
 			// the way back.
-			gi := -1
-			fmt.Sscanf(m.Part, "pull group %d tag walk", &gi)
+			gi, si := -1, 0
+			if n, _ := fmt.Sscanf(m.Part, "pull group %d stage %d tag walk", &gi, &si); n < 2 {
+				si = 0
+				fmt.Sscanf(m.Part, "pull group %d tag walk", &gi)
+			}
 			if gi > 0 && gi <= len(c.p.Legs[m.Leg].PullGroups) {
-				if camp := c.p.Legs[m.Leg].PullGroups[gi-1].Camp; camp != nil {
+				// A staged group's drag runs to the stage's own camp.
+				camp := c.p.Legs[m.Leg].PullGroups[gi-1].Camp
+				if sts := c.p.Legs[m.Leg].PullGroups[gi-1].Stages; si > 0 && si <= len(sts) {
+					camp = &sts[si-1].Camp
+				}
+				if camp != nil {
 					if path, perr := c.nav.Plan(c.p.Map, vec(m.Point), vec(*camp)); perr != nil {
 						err = perr
 					} else if path.Status != navmesh.Complete {
