@@ -666,6 +666,7 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 // F5 (D8): with the deployed-style ZG rows (394 steps from planexport.Build, walk 26b's pack-1-first Marli order and
 // walk 28's 27-unit Arlokk terrace pull), a placed `--until none` run from Marli
 // stops before the segment on leg 6 that passes Venoxis, and the shortened corridor clears clean.
+
 func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 	plan := zgPlacePlan(t)
 	res, err := planexport.Build(plan, planexport.Options{})
