@@ -207,8 +207,8 @@ func TestLongHopsAreListedOrCut(t *testing.T) {
 	if err != nil || len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "leg 1 step 0") {
 		t.Fatalf("%v %v", res.Warnings, err)
 	}
-	cut := func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, error) {
-		return []dungeon.Point{{X: 50}, {X: 100}, {X: 150}}, nil
+	cut := func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return []dungeon.Point{{X: 50}, {X: 100}, {X: 150}}, nil, nil
 	}
 	res, err = Build(p, Options{Cut: cut})
 	if err != nil || len(res.Warnings) != 0 {
@@ -815,12 +815,12 @@ func TestGMCrossDirect(t *testing.T) {
 func TestApproachHops(t *testing.T) {
 	const js = `{"version":1,"name":"far","status":"live-checked (test)","map":43,"entrance":{"x":0,"y":0,"z":0},
  "legs":[{"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":100,"y":0,"z":0}]},{"entries":[101],"positions":[{"x":120,"y":0,"z":0}]}]}]}`
-	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
 		var out []dungeon.Point
 		for x := a.X + 40; x < b.X; x += 40 {
 			out = append(out, dungeon.Point{X: x})
 		}
-		return out, nil
+		return out, nil, nil
 	}
 	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut, ApproachHops: true})
 	if err != nil {
@@ -948,9 +948,9 @@ func TestLongHopStartsAtTheLastFight(t *testing.T) {
 	 {"name":"a","to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[3],"positions":[{"x":40,"y":0,"z":0}],"approach":[{"x":30,"y":0,"z":0}]}],
 	  "boss":{"entry":1,"position":{"x":100,"y":0,"z":0},"approach":[{"x":60,"y":0,"z":0}]}},
 	 {"name":"b","to":{"x":110,"y":0,"z":0},"boss":{"entry":2,"position":{"x":120,"y":0,"z":0}}}]}`
-	res, err := Build(parsePlan(t, js), Options{Cut: func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, error) {
+	res, err := Build(parsePlan(t, js), Options{Cut: func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, []CutNote, error) {
 		t.Fatalf("cut from %v to %v: the boss at 100 is 10 yd from the next move", from, to)
-		return nil, nil
+		return nil, nil, nil
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -1034,8 +1034,8 @@ func TestGroupStepStartsAtTheWalkBeforeTheGroup(t *testing.T) {
 func TestGroupStepWithApproachHops(t *testing.T) {
 	p := parsePlan(t, `{"version":1,"name":"Hops","status":"live-checked (test)","map":43,"entrance":{"x":0,"y":0,"z":0},"legs":[
 	 {"name":"first","to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":200,"y":0,"z":0}]}]}]}`)
-	cut := func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, error) {
-		return []dungeon.Point{{X: 60, Y: 0, Z: 0}, {X: 120, Y: 0, Z: 0}, {X: 180, Y: 0, Z: 0}}, nil
+	cut := func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return []dungeon.Point{{X: 60, Y: 0, Z: 0}, {X: 120, Y: 0, Z: 0}, {X: 180, Y: 0, Z: 0}}, nil, nil
 	}
 	res, err := Build(p, Options{Source: "test", Cut: cut, ApproachHops: true})
 	if err != nil {
@@ -1156,9 +1156,9 @@ func TestCutHopsKeepOffALeftAloneSpawn(t *testing.T) {
 	const js = `{"version":1,"name":"lv","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
  {"name":"a","to":{"x":10,"y":0,"z":0},"leave":[{"entry":7246,"spawn":81610,"at":{"x":1591,"y":1047.7,"z":9},"why":"island Shadowhunter"}],
   "pull_groups":[{"entries":[100],"positions":[{"x":1650,"y":1047.7,"z":9}]}]}]}`
-	cut := func(p dungeon.Point) func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
-		return func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
-			return []dungeon.Point{p}, nil
+	cut := func(p dungeon.Point) func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+			return []dungeon.Point{p}, nil, nil
 		}
 	}
 	res, err := Build(parsePlan(t, js), Options{Source: "test", ApproachHops: true, Cut: cut(dungeon.Point{X: 1600, Y: 1045, Z: 9})})
@@ -1187,9 +1187,9 @@ func TestCutHopIgnoresAnotherLegsLeave(t *testing.T) {
  {"name":"a","to":{"x":10,"y":0,"z":0},"leave":[{"entry":7246,"spawn":81610,"at":{"x":1591,"y":1047.7,"z":9},"why":"island Shadowhunter"}],
   "pull_groups":[{"entries":[100],"positions":[{"x":1650,"y":1047.7,"z":9}]}]},
  {"name":"b","to":{"x":20,"y":0,"z":0},"pull_groups":[{"entries":[101],"positions":[{"x":1650,"y":1047.7,"z":9}]}]}]}`
-	cut := func(p dungeon.Point) func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
-		return func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
-			return []dungeon.Point{p}, nil
+	cut := func(p dungeon.Point) func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+			return []dungeon.Point{p}, nil, nil
 		}
 	}
 	res, err := Build(parsePlan(t, js), Options{Source: "test", ApproachHops: true, Cut: cut(dungeon.Point{X: 1600, Y: 1045, Z: 9})})
@@ -1207,9 +1207,9 @@ func TestCutHopSegmentKeepsOffALeftAloneSpawn(t *testing.T) {
 	const js = `{"version":1,"name":"lv","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
  {"name":"a","to":{"x":10,"y":0,"z":0},"leave":[{"entry":7246,"spawn":81610,"at":{"x":1591,"y":1047.7,"z":9},"why":"island Shadowhunter"}],
   "pull_groups":[{"entries":[100],"positions":[{"x":1591,"y":1087.7,"z":9}]}]}]}`
-	cut := func(p dungeon.Point) func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
-		return func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
-			return []dungeon.Point{p}, nil
+	cut := func(p dungeon.Point) func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+			return []dungeon.Point{p}, nil, nil
 		}
 	}
 	res, err := Build(parsePlan(t, js), Options{Source: "test", ApproachHops: true, Cut: cut(dungeon.Point{X: 1591, Y: 1007.7, Z: 9})})
@@ -1354,9 +1354,9 @@ func TestCutterLeavesTheExactHopAlone(t *testing.T) {
 	p := parsePlan(t, js)
 	p.Legs[0].Via[1].X = 70
 	calls := 0
-	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
 		calls++
-		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 1, Z: b.Z}}, nil
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 1, Z: b.Z}}, nil, nil
 	}
 	res, err := Build(p, Options{Source: "test", Cut: cut})
 	if err != nil {
@@ -1550,8 +1550,8 @@ func TestBossStandPullNoApproachHops(t *testing.T) {
 	  "boss":{"entry":62661,"position":{"x":200,"y":0,"z":0},"stand_pull":true,
 	   "approach":[{"x":10,"y":0,"z":0}]}},
 	  {"name":"next","to":{"x":400,"y":0,"z":0},"boss":{"entry":62662,"position":{"x":410,"y":0,"z":0}}}]}`
-	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
-		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 999, Z: 0}}, nil
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 999, Z: 0}}, nil, nil
 	}
 	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut, ApproachHops: true})
 	if err != nil {
@@ -1602,8 +1602,8 @@ func TestPullGroupStandPullFlagParamAndStand(t *testing.T) {
 	}
 	const good = `{"entries":[11368,14750],"positions":[{"x":200,"y":0,"z":0}],"radius":4,"stand_pull":true,"clear_yd":35,
 	  "approach":[{"x":150,"y":0,"z":0}]}`
-	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
-		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 999, Z: 0}}, nil
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 999, Z: 0}}, nil, nil
 	}
 	res, err := Build(parsePlan(t, plan(good)), Options{Source: "test", Cut: cut, ApproachHops: true})
 	if err != nil {

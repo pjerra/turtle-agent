@@ -77,7 +77,7 @@ var pullSizeKnownCounts = map[string]int{
 	// warns on most of its pulls (mmaps-free path, LOS always seen).
 	"ragefire_chasm": 28, "wailing_caverns": 54, "deadmines": 131,
 	"uldaman": 58, "zulfarrak": 53, "karazhan_crypt": 125,
-	"molten_core": 21, "blackwing_lair": 40, "zul_gurub": 81, // re-pinned for walk-31 fix 5 (was 80): the terrace 6-pack splits into a 2-pack and a 4-pack, one more row over a ceiling.
+	"molten_core": 21, "blackwing_lair": 40, "zul_gurub": 93, // re-pinned for the route-regen merge (walk-31 legs 0-6 plus route-regen legs 7/8): the walk-31 fix-5 terrace split, the regenerated leg-7/8 rows and their stands in the dense pool ring.
 	"ruins_of_ahnqiraj": 32, "temple_of_ahnqiraj": 74, "naxxramas": 150,
 	"lower_karazhan_halls": 79, "upper_karazhan_halls": 30,
 	"emerald_sanctum": 7, "timbermaw_hold": 27,

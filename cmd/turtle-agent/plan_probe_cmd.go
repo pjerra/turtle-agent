@@ -31,14 +31,14 @@ const (
 type planProbeNavmesh struct {
 	nav   planprobe.Nav
 	polys func(mapID uint32, x0, y0, x1, y1 float32) ([]navmesh.Polygon, bool, error)
-	cut   func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error)
+	cut   planexport.CutFunc
 	close func()
 }
 
 // planProbeOpen opens the navmesh of one mmaps folder; the caller closes it. Tests replace it with a fake.
 var planProbeOpen = func(dir string) *planProbeNavmesh {
 	pl := navmesh.NewPlanner(dir)
-	return &planProbeNavmesh{nav: pl, polys: pl.Polygons, cut: cutWith(pl), close: pl.Close}
+	return &planProbeNavmesh{nav: pl, polys: pl.Polygons, cut: cutWith(pl, false), close: pl.Close}
 }
 
 // planProbeCmd measures the run leader's rows of one plan on the navmesh and prints where its hops are bad or worth a look
@@ -148,7 +148,7 @@ func probeUnavailable(stderr io.Writer, err error) int {
 
 // planProbeRows loads the input: one plan of a deployed migration (the recommended source: the rows the server runs) or a plan
 // JSON, whose rows are rebuilt and cut as plan-export cuts them.
-func planProbeRows(sqlFile, planFlag, dir, arg string, cut func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error)) (planexport.Rows, string, []string, error) {
+func planProbeRows(sqlFile, planFlag, dir, arg string, cut planexport.CutFunc) (planexport.Rows, string, []string, error) {
 	if sqlFile != "" {
 		b, err := os.ReadFile(sqlFile)
 		if err != nil {

@@ -111,7 +111,17 @@ const (
 	PullSlackYd     = 10    // added to the farthest position of a group when the plan gives no radius
 	MoveGapWarnYd   = 60    // the module logs consecutive moves farther apart than this
 	MoveGapCutYd    = 50    // the longest hop the exporter leaves when it cuts a leg into via points
-	DefaultBossRad  = 30
+	// The floor-aware cut (plan-export --floor-aware): a hop up to FloorAwareHopYd stays one hop, corners under FloorAwareMergeYd
+	// from the point before them and turns under FloorAwareTurnDeg get no row, a kept corner is pushed FloorAwarePushYd off the wall
+	// it sees within FloorAwareEdgeScanYd, and a split point takes the floor within FloorAwareFloorYd of its straight-line z or is
+	// dropped.
+	FloorAwareHopYd      = 110.0
+	FloorAwareMergeYd    = 8.0
+	FloorAwareTurnDeg    = 20.0
+	FloorAwarePushYd     = 3.0
+	FloorAwareEdgeScanYd = 6.0
+	FloorAwareFloorYd    = 1.5
+	DefaultBossRad       = 30
 	// MaxGossipOption is the highest `param` of a gossip row: the number `.bot cmd gossip` takes counts the menu from 1 (a 1.12 menu holds 15
 	// options), while the plan's `option` is the menu's own index counted from 0 (the CMSG_GOSSIP_SELECT_OPTION value): the row's param is option + 1.
 	MaxGossipOption = 15
@@ -163,13 +173,38 @@ type Rows struct {
 // Count is the number of rows of the plan in all three tables.
 func (r Rows) Count() int { return 1 + len(r.Legs) + len(r.Steps) }
 
+// CutNote is one point a Cut dropped or moved: the exporter writes it as a warning line with the step (dropped points, and the
+// points it put somewhere else, are never silent).
+type CutNote struct {
+	// Old is the point the navmesh path put there.
+	Old dungeon.Point
+	// New is where the cutter put the point instead; it is meaningful only when Dropped is false.
+	New dungeon.Point
+	// Dropped says the point got no row.
+	Dropped bool
+	// Reason is why (the floor check, the 8 yd merge, the turn under 20 degrees, the push that failed).
+	Reason string
+}
+
+// Text is the note as one line: the old point, the new one or "dropped", and the reason.
+func (n CutNote) Text() string {
+	if n.Dropped {
+		return fmt.Sprintf("cut point %.1f %.1f %.1f dropped: %s", n.Old.X, n.Old.Y, n.Old.Z, n.Reason)
+	}
+	return fmt.Sprintf("cut point %.1f %.1f %.1f -> %.1f %.1f %.1f: %s", n.Old.X, n.Old.Y, n.Old.Z, n.New.X, n.New.Y, n.New.Z, n.Reason)
+}
+
+// CutFunc returns the via points of one hop (not including its two ends) and a note for every point it dropped or moved.
+type CutFunc func(mapID uint32, from, to dungeon.Point) (via []dungeon.Point, notes []CutNote, err error)
+
 // Options are the exporter's choices.
 type Options struct {
 	// Source is the text of ai_dungeon_plan.source (where the rows came from); empty: "turtle-agent dungeons/<name>.json".
 	Source string
 	// Cut, when set, cuts a hop longer than MoveGapWarnYd between two moves into via points: it returns the points to walk through
-	// (not including the two ends), e.g. a navmesh path. Nil: the long hops stay and are reported in Warnings.
-	Cut func(mapID uint32, from, to dungeon.Point) ([]dungeon.Point, error)
+	// (not including the two ends), e.g. a navmesh path, with a note for every point it dropped or moved. Nil: the long hops stay and
+	// are reported in Warnings.
+	Cut CutFunc
 	// DropCompanionsLoot lets a plan with a leg whose companions_loot is false be exported all the same, without it: the rows have no
 	// column for it (TortoiseBots' run leader has no such setting), so the bots would loot what the leg wants left alone (Zul'Farrak's
 	// graveyard chests). Without this option such a plan is refused.
@@ -374,6 +409,13 @@ type builder struct {
 	skippedLoot int           // loot_object steps of a companions_loot false leg left out of the leg being built
 	last        dungeon.Point // the last point a step of the leg put the party at
 	haveLast    bool
+}
+
+// cutNotes writes one warning per point a cut dropped or moved, with the step whose hop it cut.
+func (b *builder) cutNotes(leg, seq int, notes []CutNote) {
+	for _, n := range notes {
+		b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: %s", leg, seq, n.Text()))
+	}
 }
 
 func (b *builder) add(s StepRow) {
@@ -1015,7 +1057,8 @@ func (b *builder) cutLongHops() error {
 		if b.opt.ApproachHops && b.opt.Cut != nil && prev != nil && (s.Kind == KindPull || s.Kind == KindBoss || s.Kind == KindHold) && s.Flags&FlagStandPull == 0 {
 			a, c := dungeon.Point{X: prev.X, Y: prev.Y, Z: prev.Z}, dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
 			if d := dist3(a, c); d > dungeon.RunLeaderReachYd {
-				via, err := b.opt.Cut(b.plan.Map, a, c)
+				via, notes, err := b.opt.Cut(b.plan.Map, a, c)
+				b.cutNotes(s.Leg, s.Seq, notes)
 				if err != nil {
 					b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the %s is %.0f yd from the anchor before it and the approach could not be cut: %v", s.Leg, s.Seq, s.Kind, d, err))
 				}
@@ -1051,7 +1094,8 @@ func (b *builder) cutLongHops() error {
 					if b.opt.Cut == nil {
 						b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the move is %.0f yd from the one before it (the module logs hops over %d yd); export with --mmaps to cut it into via points", s.Leg, s.Seq, d, MoveGapWarnYd))
 					} else {
-						via, err := b.opt.Cut(b.plan.Map, a, c)
+						via, notes, err := b.opt.Cut(b.plan.Map, a, c)
+						b.cutNotes(s.Leg, s.Seq, notes)
 						if err != nil {
 							b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the move is %.0f yd from the one before it and could not be cut: %v", s.Leg, s.Seq, d, err))
 						}

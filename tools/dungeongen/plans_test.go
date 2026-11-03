@@ -530,14 +530,14 @@ func marliMmapsPlanner(t *testing.T) *navmesh.Planner {
 // marliExportCut is plan-export's own cutter (cmd/turtle-agent plan_export_cmd.go cutWith, kept in step with it): the
 // navmesh path from a to b, a point at each corner and equal hops of MoveGapCutYd along the long stretches. The
 // exporter trims the points within approachStandoffYd of the target itself.
-func marliExportCut(pl *navmesh.Planner) func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
-	return func(mapID uint32, from, to dungeon.Point) ([]dungeon.Point, error) {
+func marliExportCut(pl *navmesh.Planner) planexport.CutFunc {
+	return func(mapID uint32, from, to dungeon.Point) ([]dungeon.Point, []planexport.CutNote, error) {
 		path, err := pl.Plan(mapID, navmesh.Vec3{from.X, from.Y, from.Z}, navmesh.Vec3{to.X, to.Y, to.Z})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if path.Status != navmesh.Complete || len(path.Points) < 2 {
-			return nil, fmt.Errorf("no complete path (%s %s)", path.Status, path.Reason)
+			return nil, nil, fmt.Errorf("no complete path (%s %s)", path.Status, path.Reason)
 		}
 		var via []dungeon.Point
 		prev := path.Points[0]
@@ -553,7 +553,7 @@ func marliExportCut(pl *navmesh.Planner) func(uint32, dungeon.Point, dungeon.Poi
 			}
 			prev = p
 		}
-		return via, nil
+		return via, nil, nil
 	}
 }
 
