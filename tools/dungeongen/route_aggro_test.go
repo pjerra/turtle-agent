@@ -309,22 +309,32 @@ func TestRouteIntoLaterPacksDefaultsDetectionTo20(t *testing.T) {
 // Counts are measured on origin/dev (the ZG count must drop when W25-1 lands: the Arlokk terrace reordering walks
 // each approach on its pack's level; the comment then says so).
 var routeAggroKnownFailing = map[string]int{
-	"ragefire_chasm":       153,  // boss rows own their boss (was 161). the repo reach (AggroRadius at 13-18 plus spread and wander) outruns the old 20 yd flat line.
-	"wailing_caverns":      173,  // boss rows own their boss (was 188). the repo reach (AggroRadius at 22-27 plus spread and wander) outruns the old 20 yd flat line.
-	"deadmines":            641,  // boss rows own their boss (was 661). the repo reach (AggroRadius at 18-22 plus spread and wander) outruns the old 20 yd flat line.
-	"uldaman":              249,  // boss rows own their boss (was 268). the repo reach (AggroRadius at 41-45 plus spread and wander) outruns the old 20 yd flat line.
-	"zulfarrak":            56,   // boss rows own their boss (was 66 with #391, 65 before it): a pass past a boss's own row is no finding.
-	"karazhan_crypt":       447,  // boss rows own their boss (was 459). the repo reach (AggroRadius at 59-60 plus spread and wander) outruns the old 20 yd flat line.
-	"molten_core":          270,  // boss rows own their boss (was 315). the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"blackwing_lair":       321,  // boss rows own their boss (was 344). the repo reach (AggroRadius at 58-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"zul_gurub":            907,  // re-pinned for the walk-33 water fix: leg 5's river vias are the dry route round the gorge and leg 6 drops its river via, so fewer walked segments pass a later pack
-	"ruins_of_ahnqiraj":    178,  // boss rows own their boss (was 192). the repo reach (AggroRadius at 59-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"temple_of_ahnqiraj":   520,  // boss rows own their boss (was 541). the repo reach (AggroRadius at 58-60 plus the raid's 10 yd spread) still reports more than the old 419: more spawns sit inside the wider reach than the plain-pull approach skip clears.
-	"naxxramas":            647,  // boss rows own their boss (was 673). the repo reach (AggroRadius at 59-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"lower_karazhan_halls": 1000, // boss rows own their boss (was 1010). the repo reach (AggroRadius at 59-60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
-	"upper_karazhan_halls": 383,  // boss rows own their boss (was 403). the live export builds now (GMCrossDirect walks the outland gm_cross gap): the check sees the island hops.
-	"emerald_sanctum":      15,   // boss rows own their boss (was 17). the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns detection 20, from 8.
-	"timbermaw_hold":       214,  // boss rows own their boss (was 228). the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns the old 20 yd flat line.
+	"ragefire_chasm":       152,                                             // waypoint pass (was 153): the moved stands walk past one fewer later pack.
+	"wailing_caverns":      170,                                             // waypoint pass (was 173): the water fix at cobrahn_b's start walks one more segment past a later pack.
+	"deadmines":            641,                                             // boss rows own their boss (was 661). the repo reach (AggroRadius at 18-22 plus spread and wander) outruns the old 20 yd flat line.
+	"uldaman":              247,                                             // waypoint pass (was 249): the moved stands walk past fewer later packs.
+	"zulfarrak":            54,                                              // zulfarrak re-pinned for the waypoint lint fixes (was 56): the moved points pass two fewer later packs, rows renumbered.
+	"karazhan_crypt":       439,                                             // waypoint pass (was 447): the moved Hivaxxis and lower-crypt stands walk past fewer later packs.
+	"molten_core":          253,                                             // boss rows own their boss (was 315). raids-mc-bwl-ony (was 270): the moved stands walk past fewer later packs.
+	"blackwing_lair":       312,                                             // boss rows own their boss (was 344). raids-mc-bwl-ony (was 321): the moved stands walk past fewer later packs.
+	"zul_gurub":            907,                                             // re-pinned for the walk-33 water fix: leg 5's river vias are the dry route round the gorge and leg 6 drops its river via, so fewer walked segments pass a later pack
+	"ruins_of_ahnqiraj":    169,                                             // re-pinned for the AQ waypoint pass (was 178): the merged leg-start stands and the stands moved out of neighbour aggro walk fewer later packs.
+	"temple_of_ahnqiraj":   512,                                             // re-pinned for the AQ waypoint pass (was 520): the merged stands and the stands moved off walls and water walk fewer later packs.
+	"naxxramas":            626,                                             // waypoint pass (was 647): the moved leg stands and vias walk past fewer later packs.
+	"stormwrought_ruins":   606,                                             // hand-maintained from the generated draft (waypoint pass 2026-11-03): the route into each pack walks past the dense custom packs.
+	"lower_karazhan_halls": 991,                                             // waypoint pass (was 1000): the moved stands walk past fewer later packs.
+	"upper_karazhan_halls": 379,                                             // waypoint pass (was 383): the moved stands walk past fewer later packs.
+	"emerald_sanctum":      17,                                              // waypoint pass (was 15): the moved north_hall stands' segments pass two more later packs.
+	"timbermaw_hold":       195,                                             // waypoint pass (was 214): the reworked loktanag_lower vias walk past fewer later packs.
+	"hateforge_quarry":     296,                                             // newly hand-maintained (was a generated draft): the current route passes.
+	"maraudon_orange":      137, "maraudon_purple": 135, "scholomance": 843, // newly hand-maintained (were generated): the current route's passes; the water fixes at the two Maraudon starts add two and nine segments.
+	"razorfen_kraul": 256, "dire_maul_north": 36, "windhorn_canyon": 327, "upper_blackrock_spire": 459,
+	"blackfathom_deeps": 296, "gnomeregan": 276, "lower_blackrock_spire": 408, "stormwind_vault": 170,
+	"frostmane_hollow": 171, "dire_maul_east": 90, "dire_maul_west": 212, "razorfen_downs": 191, "sunken_temple": 66,
+	"scarlet_armory": 101, "scarlet_cathedral": 151, "scarlet_graveyard": 184, "scarlet_library": 148, "shadowfang_keep": 284,
+	"stormwind_stockade": 185, "stratholme_live": 158, "stratholme_undead": 335, // newly hand-maintained: straight-segment counts for the draft routes.
+	// newly hand-maintained (waypoint lint fixes): measured route passes of the four drafts.
+	"crescent_grove": 438, "dragonmaw_retreat": 301, "gilneas_city": 306, "black_morass": 147,
 }
 
 // TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn

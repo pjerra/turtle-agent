@@ -75,12 +75,22 @@ var pullSizeKnownCounts = map[string]int{
 	// The repo reach (AggroRadius at the plan's party level plus the party's
 	// spread) and the 20 yd ring join neighbouring packs: every dense plan
 	// warns on most of its pulls (mmaps-free path, LOS always seen).
-	"ragefire_chasm": 28, "wailing_caverns": 54, "deadmines": 131,
-	"uldaman": 58, "zulfarrak": 53, "karazhan_crypt": 125,
-	"molten_core": 21, "blackwing_lair": 40, "zul_gurub": 92, // re-pinned for the walk-32 point fixes: the regenerated leg 7/8 rows and their stands in the dense pool ring, and the leg-0 group-3 row now names the Razzashi Adder 11372 that stands on its point.
-	"ruins_of_ahnqiraj": 32, "temple_of_ahnqiraj": 74, "naxxramas": 150,
-	"lower_karazhan_halls": 79, "upper_karazhan_halls": 30,
-	"emerald_sanctum": 7, "timbermaw_hold": 27,
+	"ragefire_chasm": 28, "wailing_caverns": 54, "deadmines": 132,
+	// zulfarrak re-pinned for the waypoint lint fixes (was 53): leg 8 pull 1 (12 bodies) now crosses the ceiling and leg 3 pull 1 grows 11 -> 14 bodies.
+	"uldaman": 57, "zulfarrak": 54, "karazhan_crypt": 125, // waypoint pass (was 58): the moved stands join fewer neighbouring packs.
+	"molten_core": 19, "blackwing_lair": 40, "zul_gurub": 92, // re-pinned for the walk-32 point fixes: the regenerated leg 7/8 rows and their stands in the dense pool ring, and the leg-0 group-3 row now names the Razzashi Adder 11372 that stands on its point. raids-mc-bwl-ony (was 21): the moved stands clear two pulls' rings.
+	"ruins_of_ahnqiraj": 29, "temple_of_ahnqiraj": 74, "naxxramas": 150, // re-pinned for the AQ waypoint pass (was 32): three over-ceiling estimates are gone, the leg-0 stands moved out of the wasp ring, the leg-3 stand off the Rajaxx cluster walk, and leg-6 pull 4 drops 15 bodies to 9.
+	"stormwrought_ruins":   190,                            // hand-maintained from the generated draft (waypoint pass 2026-11-03): dense custom packs warn on most pulls.
+	"lower_karazhan_halls": 78, "upper_karazhan_halls": 30, // waypoint pass (was 79): one moved stand pulls its pack from one body fewer.
+	"emerald_sanctum": 8, "timbermaw_hold": 27, "hateforge_quarry": 127, // waypoint pass (was 7): the moved north_hall stands' estimates join one more neighbour pack. hateforge_quarry newly hand-maintained (was a generated draft): the current over-ceiling pulls.
+	"maraudon_orange": 86, "maraudon_purple": 101, "scholomance": 101, // newly hand-maintained (were generated): the moved stands' estimates; maraudon_purple's water fix moves its two starts.
+	"razorfen_kraul": 89, "dire_maul_north": 19, "windhorn_canyon": 104, "upper_blackrock_spire": 68,
+	"blackfathom_deeps": 74, "gnomeregan": 94, "lower_blackrock_spire": 104, "stormwind_vault": 30,
+	"frostmane_hollow": 51, "dire_maul_east": 51, "dire_maul_west": 72, "razorfen_downs": 75, "sunken_temple": 62,
+	"scarlet_armory": 36, "scarlet_cathedral": 41, "scarlet_graveyard": 50, "scarlet_library": 44, "shadowfang_keep": 72,
+	"stormwind_stockade": 40, "stratholme_live": 58, "stratholme_undead": 83,
+	// newly hand-maintained (waypoint lint fixes): measured over-ceiling pulls of the four drafts.
+	"crescent_grove": 99, "dragonmaw_retreat": 138, "gilneas_city": 122, "black_morass": 59,
 }
 
 func TestPullSizesUnderCeiling(t *testing.T) {

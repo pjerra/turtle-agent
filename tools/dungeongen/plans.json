@@ -104,10 +104,12 @@
    ],
    "notes": [
     "Turtle adds Sever (14682), Prelate Ironmane (61969) and a second Arugal row (10000) that are not legs."
-   ]
+   ],
+   "handwritten": true
   },
   {
    "name": "blackfathom_deeps",
+   "handwritten": true,
    "title": "Blackfathom Deeps",
    "map": 48,
    "kind": "dungeon",
@@ -136,6 +138,7 @@
    "title": "The Stockade",
    "map": 34,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 1550,
    "data": "map34",
    "trigger": 101,
@@ -152,6 +155,7 @@
   },
   {
    "name": "gnomeregan",
+   "handwritten": true,
    "title": "Gnomeregan",
    "map": 90,
    "kind": "dungeon",
@@ -181,6 +185,7 @@
    "title": "Razorfen Kraul",
    "map": 47,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 2050,
    "data": "map47",
    "trigger": 244,
@@ -227,7 +232,8 @@
    "notes": [
     "One of four wings of map 189; the packs are the ones inside the wing's box.",
     "Duke Dreadmoore (61972) is a Turtle addition in the crypt level (z -3.7): script npc_duke_dreadmoore sets him to 20 % health on reset and yells on aggro and death; his crypt pack is needs_walk until the mapping walk"
-   ]
+   ],
+   "handwritten": true
   },
   {
    "name": "scarlet_library",
@@ -258,7 +264,8 @@
    ],
    "notes": [
     "One of four wings of map 189."
-   ]
+   ],
+   "handwritten": true
   },
   {
    "name": "scarlet_armory",
@@ -287,7 +294,8 @@
    ],
    "notes": [
     "One of four wings of map 189; Armory Quartermaster Daghelm (61982) is Turtle's addition."
-   ]
+   ],
+   "handwritten": true
   },
   {
    "name": "scarlet_cathedral",
@@ -318,10 +326,12 @@
    ],
    "notes": [
     "One of four wings of map 189."
-   ]
+   ],
+   "handwritten": true
   },
   {
    "name": "razorfen_downs",
+   "handwritten": true,
    "title": "Razorfen Downs",
    "map": 129,
    "kind": "dungeon",
@@ -372,6 +382,7 @@
    "title": "Maraudon: Orange",
    "map": 349,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 3700,
    "data": "map349",
    "trigger": 3133,
@@ -412,6 +423,7 @@
    "title": "Maraudon: Purple",
    "map": 349,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 3250,
    "data": "map349",
    "trigger": 3134,
@@ -449,6 +461,7 @@
   },
   {
    "name": "sunken_temple",
+   "handwritten": true,
    "title": "The Temple of Atal'Hakkar",
    "map": 109,
    "kind": "dungeon",
@@ -515,6 +528,7 @@
   },
   {
    "name": "lower_blackrock_spire",
+   "handwritten": true,
    "title": "Lower Blackrock Spire",
    "map": 229,
    "kind": "dungeon",
@@ -557,6 +571,7 @@
   },
   {
    "name": "dire_maul_east",
+   "handwritten": true,
    "title": "Dire Maul: East",
    "map": 429,
    "kind": "dungeon",
@@ -590,6 +605,7 @@
   },
   {
    "name": "dire_maul_west",
+   "handwritten": true,
    "title": "Dire Maul: West",
    "map": 429,
    "kind": "dungeon",
@@ -627,6 +643,7 @@
    "title": "Dire Maul: North",
    "map": 429,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 5300,
    "data": "map429",
    "trigger": 3189,
@@ -673,6 +690,7 @@
    "title": "Stratholme: Live side",
    "map": 329,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 5300,
    "data": "map329",
    "trigger": 2216,
@@ -707,6 +725,7 @@
    "title": "Stratholme: Undead side",
    "map": 329,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 5300,
    "data": "map329",
    "trigger": 2214,
@@ -739,6 +758,7 @@
    "title": "Scholomance",
    "map": 289,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 5300,
    "data": "map289",
    "trigger": 2567,
@@ -778,6 +798,7 @@
   },
   {
    "name": "frostmane_hollow",
+   "handwritten": true,
    "title": "Frostmane Hollow",
    "map": 822,
    "kind": "dungeon",
@@ -804,6 +825,7 @@
    "title": "Windhorn Canyon",
    "map": 820,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 1750,
    "data": "map820",
    "trigger": 5611,
@@ -829,6 +851,7 @@
    "title": "Crescent Grove",
    "map": 802,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 2700,
    "data": "map802",
    "trigger": 5004,
@@ -855,6 +878,7 @@
    "title": "Dragonmaw Retreat",
    "map": 816,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 2050,
    "data": "map816",
    "trigger": 5343,
@@ -877,6 +901,7 @@
    "title": "Stormwrought Ruins",
    "map": 818,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 2850,
    "data": "map818",
    "trigger": 5347,
@@ -896,7 +921,8 @@
    "route": true,
    "special": [
     "secret door and four switches (GO_SECRET_DOOR_GUID, GO_SECRET_SWITCH_1-4), Nether altar (GO_NETHER_ALTAR_GUID)",
-    "Librarian Theodorus' elemental (SPELL_SUMMON_THEODORUS_ELEMENTAL), volatile fungus (GO_VOLATILE_FUNGUS)"
+    "Librarian Theodorus' elemental (SPELL_SUMMON_THEODORUS_ELEMENTAL), volatile fungus (GO_VOLATILE_FUNGUS)",
+    "waypoint pass 2026-11-03: leg starts moved off mesh edges and water, entry vias for the legs the server query would not walk to in one hop; the generator's nearest-neighbour route would clobber them, so the plan stays hand-maintained"
    ],
    "notes": [
     "Turtle custom with a front (5347) and a back entrance (5605); eleven bosses, the order is a nearest-neighbour walk from the front."
@@ -907,6 +933,7 @@
    "title": "Gilneas City",
    "map": 815,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 3450,
    "data": "map815",
    "trigger": 5014,
@@ -938,6 +965,7 @@
    "title": "Hateforge Quarry",
    "map": 808,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 4600,
    "data": "map808",
    "trigger": 5009,
@@ -985,6 +1013,7 @@
   },
   {
    "name": "stormwind_vault",
+   "handwritten": true,
    "title": "Stormwind Vault",
    "map": 35,
    "kind": "dungeon",
@@ -1018,6 +1047,7 @@
    "title": "Black Morass",
    "map": 269,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 5300,
    "data": "map269",
    "trigger": 1632,
@@ -1045,6 +1075,7 @@
    "map": 249,
    "kind": "raid",
    "data": "map249",
+   "handwritten": true,
    "trigger": 2848,
    "bosses": [
     10184
@@ -1272,6 +1303,7 @@
    "title": "Upper Blackrock Spire",
    "map": 229,
    "kind": "raid",
+   "handwritten": true,
    "data": "map229",
    "entrance": [
     138.726,
