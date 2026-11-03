@@ -2206,8 +2206,11 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   pull: pass --from "step N"`, exit 2). The fallback is refused too when a boss or hold row (or the move into an
   event) lies between it and the leg's first row: the raid would re-fight it on its way in. A fallback start
   stands before the leg, so `boss` and `boss-done` untils resolve from the leg's first row, never from the
-  fallback start. `--from "step N"` is taken as given and must be a positioned move row (a plain `--from`,
-  without `--place` or `--until boss-done`, still goes to the server unresolved). `validate` refuses a plan
+  fallback start. `--from "step N"` is taken as given; a positioned move row is placed at its own point, and a pull
+  row at that pull's own stand point (the row's point; the nearest move row before it when the row has none), the
+  notes naming the point (`place: step N is a pull row; placing at the pull's own stand point` — walk 32 refused
+  steps 237 and 560 as pull rows, and the operator had to find 238/559 by hand). A boss or hold row still refuses
+  (a plain `--from`, without `--place` or `--until boss-done`, still goes to the server unresolved). `validate` refuses a plan
   whose legs' skip lists hold more
   than the toolkit's 16 entries or whose longest toolkit line would overflow the toolkit's 200-char cap, both before any
   GM command. The walk then clears the corridor of the legs it skips — every pull row before the start whose circle

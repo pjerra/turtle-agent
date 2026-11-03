@@ -3175,3 +3175,48 @@ func TestPlaceViewSavesFrames(t *testing.T) {
 		t.Fatal("frames.jsonl is empty after a placed walk that fought")
 	}
 }
+
+// Walk 32: --place --from "step N" refused a pull row (237, 560), so the operator had to find the move row before it
+// by hand. A pull row is now a start at that pull's own stand point, and the notes say which point was used.
+func TestPlaceStartStepOnAPullRow(t *testing.T) {
+	rows, _ := placePlanRows(t)
+	n := 0
+	for i, s := range rows.Steps {
+		if s.Kind == planexport.KindPull && (s.X != 0 || s.Y != 0 || s.Z != 0) {
+			n = i + 1
+			break
+		}
+	}
+	if n == 0 {
+		t.Fatal("no positioned pull row in the ZG rows")
+	}
+	until, err := raidwalk.PlaceStop(rows, []string{"until", "boss"}, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, _ := newPlaceFixture(t)
+	f.opts.from = fmt.Sprintf("step %d", n)
+	f.agent.startReply = placeStartReply("zul_gurub", n, len(rows.Steps), until)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|thekal|pull|walk|fighting", n, len(rows.Steps))},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|thekal|move|walk|stopped before step %d (until boss): the party stays where it stands", n, len(rows.Steps), until)},
+	}
+	f.agent.mu.Unlock()
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, fmt.Sprintf("place: step %d is a pull row; placing at the pull's own stand point", n)) {
+		t.Fatalf("notes %q, want the pull-row note (step %d)", sum.Notes, n)
+	}
+	if sum.Place == nil || sum.Place.Start != n {
+		t.Fatalf("place summary %+v, want start_step %d", sum.Place, n)
+	}
+	f.agent.mu.Lock()
+	startArgs := f.agent.startArgs
+	f.agent.mu.Unlock()
+	if want := fmt.Sprintf("from|step|%d", n); !strings.Contains(startArgs, want) {
+		t.Fatalf("run start args %q, want %q", startArgs, want)
+	}
+}

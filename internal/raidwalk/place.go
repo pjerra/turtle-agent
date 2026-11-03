@@ -261,7 +261,8 @@ func eventStep(rows planexport.Rows, i int) (int, bool) {
 	return 0, false
 }
 
-// PlaceStart is the start step of a placed walk (spec 4.2): --from "step N" as given (a positioned move row), or
+// PlaceStart is the start step of a placed walk (spec 4.2): --from "step N" as given (a positioned move row, or a
+// pull row at its own stand point — the nearest move row before it when the pull row has no point), or
 // --from "leg L" staged at the highest move row before the leg's first creature row that has no AHEAD creature row
 // within PlaceStartClearYd. The FIRST leg needs no placement: it is a door start (door is true, step 1), and the
 // caller skips the place phase and logs `place: leg X is the first leg; starting from the door`. When the leg holds
@@ -282,7 +283,25 @@ func PlaceStart(rows planexport.Rows, from []string) (step int, leg, fallbackFro
 			return 0, "", "", false, fmt.Errorf("--place --from step %s: the rows have %d steps", from[2], len(rows.Steps))
 		}
 		s := rows.Steps[n-1]
-		if !moveRow(s) || !placedRow(s) {
+		if !moveRow(s) {
+			// A pull row is a stand the raid may be placed on: its own point is the pull's stand (walk 32: steps 237
+			// and 560 were refused, and the operator had to find 238/559/575 by hand). A pull row without a point
+			// falls back to the nearest move row before it. Anything else still refuses.
+			if s.Kind != planexport.KindPull {
+				return 0, "", "", false, fmt.Errorf("--place --from step %d: step %d is a %s row; place at a move row before it", n, n, s.Kind)
+			}
+			if placedRow(s) {
+				return n, "", "", false, nil
+			}
+			for i := n - 2; i >= 0; i-- {
+				m := rows.Steps[i]
+				if moveRow(m) && placedRow(m) {
+					return i + 1, "", "", false, nil
+				}
+			}
+			return 0, "", "", false, fmt.Errorf("--place --from step %d: step %d is a pull row without a point and no move row stands before it", n, n)
+		}
+		if !placedRow(s) {
 			return 0, "", "", false, fmt.Errorf("--place --from step %d: step %d is a %s row; place at a move row before it", n, n, s.Kind)
 		}
 		if k, ok := eventStep(rows, n-1); ok {

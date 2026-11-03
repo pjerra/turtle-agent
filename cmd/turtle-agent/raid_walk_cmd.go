@@ -1130,6 +1130,18 @@ func (w *walk) validate() error {
 			if fallbackFrom != "" {
 				w.note("place: leg %s has no quiet row; placing at step %d (leg %s)", fallbackFrom, step, leg)
 			}
+			// A --from step on a pull row places at that pull's own stand point (or the move row before it when the
+			// row has no point): say which point was used (walk 32: 237, 560 and others were refused as "a pull row").
+			if len(w.fromWords) == 3 && w.fromWords[1] == "step" {
+				if req, aerr := strconv.Atoi(w.fromWords[2]); aerr == nil && req >= 1 && req <= len(w.rows.Steps) &&
+					w.rows.Steps[req-1].Kind == planexport.KindPull {
+					if req == step {
+						w.note("place: step %d is a pull row; placing at the pull's own stand point", step)
+					} else {
+						w.note("place: step %d is a pull row without a point; placing at the move row before it (step %d)", req, step)
+					}
+				}
+			}
 			p, ok := raidwalk.PlacePoint(w.rows, step)
 			if !ok {
 				return stopf(exitUsage, "--place: step %d of %s has no point", step, w.plan.Name)
