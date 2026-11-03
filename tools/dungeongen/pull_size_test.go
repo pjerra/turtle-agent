@@ -80,6 +80,7 @@ var pullSizeKnownCounts = map[string]int{
 	"ruins_of_ahnqiraj": 32, "temple_of_ahnqiraj": 74, "naxxramas": 150,
 	"lower_karazhan_halls": 79, "upper_karazhan_halls": 30,
 	"emerald_sanctum": 7, "timbermaw_hold": 27,
+	"razorfen_kraul": 89, "dire_maul_north": 19, "windhorn_canyon": 104, "upper_blackrock_spire": 68,
 }
 
 func TestPullSizesUnderCeiling(t *testing.T) {
