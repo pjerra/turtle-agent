@@ -566,6 +566,17 @@ func standNote(stand bool) string {
 	return ""
 }
 
+// nearestFloor is the floor nearest z.
+func nearestFloor(fl []navmesh.Floor, z float32) (navmesh.Floor, bool) {
+	best, ok := navmesh.Floor{}, false
+	for _, f := range fl {
+		if !ok || math.Abs(float64(f.Z-z)) < math.Abs(float64(best.Z-z)) {
+			best, ok = f, true
+		}
+	}
+	return best, ok
+}
+
 func aboveBelow(z, at float32) string {
 	if z > at {
 		return "above"
