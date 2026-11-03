@@ -91,8 +91,8 @@ func TestPlanScoutUsageAndExitCodes(t *testing.T) {
 			t.Fatalf("%v: code %d, want %d", args, code, exitUsage)
 		}
 	}
-	if code, _, errOut := runCLI("plan-scout", "x", "--live", "tortoise-test2"); code != exitLivePhaseRefused || !strings.Contains(errOut, "not in this build") {
-		t.Fatalf("--live: code %d, %q", code, errOut)
+	if code, _, errOut := runCLI("plan-scout", "x", "--live", "live-server"); code != exitLivePhaseRefused || !strings.Contains(errOut, "not a test server") {
+		t.Fatalf("--live on a live server: code %d, %q", code, errOut)
 	}
 	if code, _, _ := runCLI("plan-scout", "x", "--slot", "3"); code != exitSlotRefused {
 		t.Fatalf("--slot 3: code %d", code)
