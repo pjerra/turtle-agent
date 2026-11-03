@@ -3253,8 +3253,18 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 			}
 		}
 	}
-	if err := w.recoverySleep(ctx, 10*time.Second, deadline); err != nil {
-		return err
+	// --revive-at-raid: the commander stands on cur from here on, the point the hires are brought back to.
+	atRaid := selfRegroup && w.opts.reviveAtRaid
+	if w.opts.reviveAtRaid {
+		spot := cur
+		w.reviveSpot = &spot
+	}
+	// Nothing was summoned in a self-regroup, so the 10 s the summons need is dead time while the ghosts run:
+	// revive at once (the earlier the revive, the nearer the corpse run's start).
+	if !atRaid {
+		if err := w.recoverySleep(ctx, 10*time.Second, deadline); err != nil {
+			return err
+		}
 	}
 	for _, name := range w.hireList() {
 		if timeout := w.recoveryExpired(deadline); timeout != nil {
@@ -3298,6 +3308,10 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 			w.note("revive: still could not join the hires' instance after the self-regroup revives (%s)", why)
 		}
 	}
+	// --revive-at-raid: the hires the ghosts' corpse run had carried far away are brought to the point.
+	if atRaid {
+		return w.reviveBringBack(ctx, cur, deadline)
+	}
 	return nil
 }
 
@@ -3325,6 +3339,16 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 		return err
 	}
 	revived := len(w.hireList())
+	// --revive-at-raid: no resume while a hire is far or fighting away from the raid (up to 60 s, then it goes on
+	// with a note naming them).
+	if selfRegroup {
+		if err := w.reviveGather(ctx, deadline); err != nil {
+			if timeout, ok := err.(*recoveryTimeout); ok {
+				return timeout.end(step)
+			}
+			return err
+		}
+	}
 	if selfRegroup {
 		// The run is running and regroups by itself: it rests, gathers and walks back on its own.
 		// No out-of-combat rest and no run resume (walk 17b: the rest never got quiet while the
@@ -3364,6 +3388,13 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 			w.wipeResumes++
 			w.note("wipe-resume %d/%d at step %d: revived %d; the run went on by itself during the rest (no resume)", w.wipeResumes, w.opts.wipeResume, step, revived)
 			return errWipeRecovered
+		}
+		return err
+	}
+	// --revive-at-raid: the resume waits for the raid to gather (the rest's own polls are the same wiped attempt's).
+	if err := w.reviveGather(ctx, deadline); err != nil {
+		if timeout, ok := err.(*recoveryTimeout); ok {
+			return timeout.end(step)
 		}
 		return err
 	}

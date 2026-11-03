@@ -219,6 +219,7 @@ type walkFakeAgent struct {
 	// quiet rest (combatAllFn); the dashboard fights read fails through fakeDash.fightsErr.
 	viewFn      func(n int) (fail bool, omit string)
 	combatAllFn func(n int) bool // frame n shows every hire in combat
+	combatBots  map[string]bool  // these hires show in combat in every frame (--revive-at-raid: one fights away)
 	// viewHook runs inside the bot_view RPC (outside f.mu): a test's fake wall
 	// time passing during the call, like the live server's RPC waits.
 	viewHook func()
@@ -906,6 +907,10 @@ func (f *walkFakeAgent) viewPage() any {
 	m := uint32(1)
 	viewHook := f.viewFn
 	combatAll := f.combatAllFn
+	combatBots := map[string]bool{}
+	for k, v := range f.combatBots {
+		combatBots[k] = v
+	}
 	if f.entered {
 		m = 249
 		if f.instMap != 0 {
@@ -945,6 +950,9 @@ func (f *walkFakeAgent) viewPage() any {
 			state = "d"
 		}
 		if combatAll != nil && combatAll(n) {
+			state = "c"
+		}
+		if combatBots[name] {
 			state = "c"
 		}
 		if viewHook != nil {

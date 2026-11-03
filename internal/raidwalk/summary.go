@@ -44,7 +44,12 @@ type Summary struct {
 	Incidents     []InjectIncident `json:"incidents"`
 	Wipes         []int            `json:"wipes"`
 	WipeResumes   int              `json:"wipe_resumes"`
-	BossEngaged   *BossSummary     `json:"boss_engaged"`
+	// The --revive-at-raid counts (omitted when the walk never needed it): hires summoned back to the revive point,
+	// hires two summons did not bring within 10 yd, and hires still out of range or in combat when a resume went out.
+	ReviveBrought      int          `json:"revive_brought,omitempty"`
+	ReviveUnreached    int          `json:"revive_unreached,omitempty"`
+	ReviveGatherMissed int          `json:"revive_gather_missed,omitempty"`
+	BossEngaged        *BossSummary `json:"boss_engaged"`
 	// BossKill is the `boss_kill` object of a walk whose frames engaged a boss (spec 6, D5): the run leader's own
 	// kill report, the phase the boss unit was seen with and the evidence. Absent when no boss was engaged. It is the
 	// LAST engaged boss's record; BossKills lists one record per boss step the run's statuses showed.
@@ -332,17 +337,18 @@ type SummaryMeta struct {
 	HireSettle  time.Duration
 	SettleShort bool
 	// WipeResumes is the walk's recovered wipes and near-wipe stops (--wipe-resume).
-	WipeResumes    int
-	Layout         LayoutSummary
-	Started        time.Time
-	Ended          time.Time
-	EndReason      string
-	Fights         []FightSummary
-	Injections     []InjectSummary
-	InjectedDeaths int
-	Incidents      []InjectIncident
-	Dashboard      string
-	Teardown       TeardownSummary
+	WipeResumes                                        int
+	ReviveBrought, ReviveUnreached, ReviveGatherMissed int
+	Layout                                             LayoutSummary
+	Started                                            time.Time
+	Ended                                              time.Time
+	EndReason                                          string
+	Fights                                             []FightSummary
+	Injections                                         []InjectSummary
+	InjectedDeaths                                     int
+	Incidents                                          []InjectIncident
+	Dashboard                                          string
+	Teardown                                           TeardownSummary
 	// Place is the --place walk's place object (nil without --place).
 	Place *PlaceSummary
 	// ReviveRefusal is the walk's revive_refusal (nil when no revive was refused).
@@ -391,11 +397,12 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		ExitCode:       m.ExitCode,
 		Notes:          nonNilStrings(m.Notes),
 		WipeResumes:    m.WipeResumes,
-		StepTimeline:   []StepSummary{},
-		Legs:           []LegSummary{},
-		Wipes:          []int{},
-		Pauses:         []PauseSummary{},
-		Deaths:         DeathSummary{ByStep: map[int]int{}, ByBot: map[string]int{}},
+		ReviveBrought:  m.ReviveBrought, ReviveUnreached: m.ReviveUnreached, ReviveGatherMissed: m.ReviveGatherMissed,
+		StepTimeline: []StepSummary{},
+		Legs:         []LegSummary{},
+		Wipes:        []int{},
+		Pauses:       []PauseSummary{},
+		Deaths:       DeathSummary{ByStep: map[int]int{}, ByBot: map[string]int{}},
 	}
 	if s.Layout.Tanks == nil {
 		s.Layout.Tanks = []string{}
