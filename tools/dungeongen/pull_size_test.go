@@ -75,11 +75,14 @@ var pullSizeKnownCounts = map[string]int{
 	// spread) and the 20 yd ring join neighbouring packs: every dense plan
 	// warns on most of its pulls (mmaps-free path, LOS always seen).
 	"ragefire_chasm": 28, "wailing_caverns": 54, "deadmines": 131,
-	"uldaman": 58, "zulfarrak": 53, "karazhan_crypt": 125,
+	// zulfarrak re-pinned for the waypoint lint fixes (was 53): leg 8 pull 1 (12 bodies) now crosses the ceiling and leg 3 pull 1 grows 11 -> 14 bodies.
+	"uldaman": 58, "zulfarrak": 54, "karazhan_crypt": 125,
 	"molten_core": 21, "blackwing_lair": 40, "zul_gurub": 80, // re-pinned for BOTS-PATHING-WAYPOINTS items 1-8 (was 78): the leg-0 entrance stand pulls add 2 rows over a ceiling; the Arlokk rock stands moved lower but their estimates stay under.: the Arlokk 27-unit row becomes five formation rows, the Mandokir knot becomes a 1+11 row pair and the Hakkar fish rows are gone, so fewer rows carry a body estimate above a ceiling.
 	"ruins_of_ahnqiraj": 32, "temple_of_ahnqiraj": 74, "naxxramas": 150,
 	"lower_karazhan_halls": 79, "upper_karazhan_halls": 30,
 	"emerald_sanctum": 7, "timbermaw_hold": 27,
+	// newly hand-maintained (waypoint lint fixes): measured over-ceiling pulls of the four drafts.
+	"crescent_grove": 99, "dragonmaw_retreat": 138, "gilneas_city": 122, "black_morass": 59,
 }
 
 func TestPullSizesUnderCeiling(t *testing.T) {
