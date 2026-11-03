@@ -423,6 +423,7 @@
    "title": "Maraudon: Purple",
    "map": 349,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 3250,
    "data": "map349",
    "trigger": 3134,
