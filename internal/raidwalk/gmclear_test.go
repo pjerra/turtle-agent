@@ -293,3 +293,31 @@ func TestGMClearSeenMembersKeepsCorpses(t *testing.T) {
 		t.Fatalf("live %+v", got)
 	}
 }
+
+// The ASSISTED line names the groups that were not cleared, with a leg's consecutive group numbers compressed: walk
+// 32's failing groups read "high_priestess_arlokk:12-17", "hakkar_outer:6-22" and "high_priestess_marli:1-6".
+func TestGMClearUnclearedGroups(t *testing.T) {
+	var es []GMClearEntry
+	for _, g := range []string{"12", "13", "14", "15", "16", "17", "19"} {
+		es = append(es, GMClearEntry{Leg: "high_priestess_arlokk", Group: g, GUID: "spawn 1", Reason: GMClearAlive})
+	}
+	es = append(es,
+		GMClearEntry{Leg: "high_priestess_marli", Group: "1", GUID: "spawn 2", Reason: GMClearAlive},
+		GMClearEntry{Leg: "high_priestess_marli", Group: "1", GUID: "spawn 3", Reason: GMClearAlive},
+		GMClearEntry{Leg: "hakkar_outer", Group: GMClearBoss, GUID: "spawn 4", Reason: GMClearNotSeen},
+		// A killed member's group is not listed.
+		GMClearEntry{Leg: "hakkar_outer", Group: "6", Killed: true},
+	)
+	got := GMClearUncleared(es)
+	want := []string{"hakkar_outer:boss", "high_priestess_arlokk:12-17,19", "high_priestess_marli:1"}
+	if strings.Join(got, " | ") != strings.Join(want, " | ") {
+		t.Fatalf("uncleared %v, want %v", got, want)
+	}
+	line := GMClearSummaryLine(es, []string{"high_priestess_arlokk", "high_priestess_marli", "hakkar_outer"})
+	if !strings.Contains(line, "groups not cleared: hakkar_outer:boss, high_priestess_arlokk:12-17,19, high_priestess_marli:1") {
+		t.Fatalf("line %q", line)
+	}
+	if got := GMClearUncleared([]GMClearEntry{{Leg: "x", Group: "1", Killed: true}}); len(got) != 0 {
+		t.Fatalf("a fully killed clear lists %v", got)
+	}
+}

@@ -222,6 +222,7 @@ type walkFakeAgent struct {
 	statusTargetMismatch bool
 	noPartyFrames        bool        // bot_view frames without a party (an injector with no bot positions)
 	gmAt                 []time.Time // when each gm line was sent
+	killAt               []time.Time // when each gm_kill call arrived (the retry gap's clock)
 	// Review-round-2 fault hooks: bot_view failure/omission (viewFn) and combat during the
 	// quiet rest (combatAllFn); the dashboard fights read fails through fakeDash.fightsErr.
 	viewFn      func(n int) (fail bool, omit string)
@@ -413,6 +414,7 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		}
 		f.mu.Lock()
 		f.log = append(f.log, "gm_kill "+g.String())
+		f.killAt = append(f.killAt, f.clock.now())
 		if f.killTries == nil {
 			f.killTries, f.killed = map[packet.GUID]int{}, map[packet.GUID]bool{}
 		}

@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/config"
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -350,10 +352,10 @@ func TestPlaceGMClearRetriesOnceAndReportsSurvivors(t *testing.T) {
 	if e := by[slow.String()]; !e.Killed || e.Tries != 2 {
 		t.Errorf("slow unit %+v", e)
 	}
-	if e := by[stubborn.String()]; e.Killed || e.Tries != 2 || e.Reason != raidwalk.GMClearAlive {
+	if e := by[stubborn.String()]; e.Killed || e.Tries != gmClearTries || e.Reason != raidwalk.GMClearAlive {
 		t.Errorf("stubborn unit %+v", e)
 	}
-	// Two lines at most per unit, and the second round does not send a third to the stubborn one.
+	// gmClearTries lines at most per unit, and the second round sends none to the stubborn one.
 	n := 0
 	for _, l := range f.agentLog() {
 		if l == "gm_kill "+stubborn.String() {
@@ -365,7 +367,7 @@ func TestPlaceGMClearRetriesOnceAndReportsSurvivors(t *testing.T) {
 	}
 	found := false
 	for _, note := range sum.Notes {
-		if strings.Contains(note, "alive after 2") && strings.Contains(note, stubborn.String()) {
+		if strings.Contains(note, fmt.Sprintf("alive after %d", gmClearTries)) && strings.Contains(note, stubborn.String()) {
 			found = true
 		}
 	}
@@ -616,5 +618,92 @@ func TestGMKillAuthorizeReadsTheSlotsTable(t *testing.T) {
 	}
 	if got, why := gmKillAuthorize(config.Settings{ServerName: "tortoise"}, "203.0.113.9:8085"); got || why != "" {
 		t.Fatalf("ordinary agent: allowed %v, reason %q", got, why)
+	}
+}
+
+// Walk 32: every gm_kill was refused (the slots table had no world_addr for the test server), so the groups stayed
+// alive after the two tries, and the placement then failed on the quiet (exit 18) or the member list (PARTIAL). A
+// group that cannot be cleared must WARN and the placement must go on WITHOUT it: its entries join the quiet's and the
+// landing read's skip list, so an alive member cannot refuse the placement, and the ASSISTED line lists the group.
+func TestPlaceGMClearUnclearedGroupDoesNotFailThePlacement(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
+	f.agent.killFn = func(packet.GUID, int) bool { return false }
+	f.agent.unitsFn = func(int) []objects.Unit {
+		return gmClearView(f, pack, guids, func(packet.GUID) bool { return false })
+	}
+	// The quiet sees one of the pack's units inside the landing reach on every read: only the skip list keeps it out
+	// of the placement's verdict (before the fix this refused the placement, exit 18).
+	_, plan := placePlanRows(t)
+	entry := pack.Members[raidwalk.SpawnGUID(guids[0])]
+	p.quiet = func(int) bool { return false }
+	p.quietNear = []any{quietUnitAt(entry, plan.Point.X+10, plan.Point.Y, plan.Point.Z)}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (an uncleared group must not fail the placement): %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !sum.Assisted || !sum.GMClearPartial {
+		t.Fatalf("summary assisted %v partial %v, want an ASSISTED PARTIAL clear", sum.Assisted, sum.GMClearPartial)
+	}
+	warn := ""
+	for _, n := range sum.Notes {
+		if strings.Contains(n, "not cleared") && strings.Contains(n, "placement goes on without it") {
+			warn = n
+		}
+	}
+	if !strings.Contains(warn, pack.Leg+":2") {
+		t.Fatalf("notes %q, want the group's WARN (%s:2)", sum.Notes, pack.Leg)
+	}
+	// Every member got its retries (four lines, three seconds apart).
+	f.agent.mu.Lock()
+	log := append([]string{}, f.agent.log...)
+	killAt := append([]time.Time{}, f.agent.killAt...)
+	f.agent.mu.Unlock()
+	for _, g := range guids {
+		n := 0
+		var at []time.Time
+		k := 0
+		for _, l := range log {
+			if !strings.HasPrefix(l, "gm_kill ") {
+				continue
+			}
+			if l == "gm_kill "+g.String() {
+				n++
+				if k < len(killAt) {
+					at = append(at, killAt[k])
+				}
+			}
+			k++
+		}
+		if n != gmClearTries {
+			t.Errorf("member %s got %d kill lines, want %d", g, n, gmClearTries)
+		}
+		for i := 1; i < len(at); i++ {
+			if gap := at[i].Sub(at[i-1]); gap < gmClearRetryGap {
+				t.Errorf("member %s: %s between kill lines, want at least %s", g, gap, gmClearRetryGap)
+			}
+		}
+	}
+	// The quiet carried the pack's entries as skips.
+	skips := ""
+	for _, c := range f.agentLog() {
+		if strings.HasPrefix(c, "tt quiet ") {
+			skips = c
+		}
+	}
+	for _, g := range pack.SpawnGUIDs() {
+		if e := pack.Members[g]; !strings.Contains(skips, "skip=") || !strings.Contains(skips, strconv.FormatUint(uint64(e), 10)) {
+			t.Errorf("the quiet does not skip entry %d: %q", e, skips)
+		}
+	}
+	text, err := os.ReadFile(filepath.Join(f.out, "summary.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(text), "groups not cleared: "+pack.Leg+":2") {
+		t.Fatalf("summary.txt lacks the uncleared group:\n%s", text)
 	}
 }

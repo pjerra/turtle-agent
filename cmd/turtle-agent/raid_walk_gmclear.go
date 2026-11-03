@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/objects"
@@ -34,8 +35,12 @@ const (
 	// gmClearDeathWait and gmClearDeathPoll are how long a kill is given to show in the unit's frames, and how often it is read.
 	gmClearDeathWait = 5 * time.Second
 	gmClearDeathPoll = 500 * time.Millisecond
-	// gmClearTries is how many kill lines one unit gets: the first and one retry.
-	gmClearTries = 2
+	// gmClearTries is how many kill lines one unit gets: the first and three retries (walk 32: the two tries were over
+	// before a refused gm_kill or a slow death could be told apart), gmClearRetryGap apart.
+	gmClearTries = 4
+	// gmClearRetryGap is the pause between a kill line that did not show a death and the next one: a unit that is
+	// still falling, or a server still answering the selection, gets the time.
+	gmClearRetryGap = 3 * time.Second
 )
 
 // validateGMClear expands the specs into packs from the plan's rows and the world export, before any GM command.
@@ -84,8 +89,8 @@ func (w *walk) gmClearDead(ctx context.Context, g packet.GUID) bool {
 	return u.Dead || (u.MaxHealth > 0 && u.Health == 0)
 }
 
-// gmClearKill sends the kill line for one unit (up to gmClearTries times) and reads its death from the frames after each. It returns the
-// number of lines sent and whether the death was seen.
+// gmClearKill sends the kill line for one unit (up to gmClearTries times, gmClearRetryGap apart) and reads its death from the frames
+// after each. It returns the number of lines sent and whether the death was seen.
 func (w *walk) gmClearKill(ctx context.Context, u objects.Unit) (tries int, dead bool, err error) {
 	for tries < gmClearTries {
 		tries++
@@ -95,18 +100,39 @@ func (w *walk) gmClearKill(ctx context.Context, u objects.Unit) (tries int, dead
 			if ctx.Err() != nil {
 				return tries, false, ctx.Err()
 			}
-			continue
-		}
-		for waited := time.Duration(0); waited < gmClearDeathWait; waited += gmClearDeathPoll {
-			if err := w.env.sleep(ctx, gmClearDeathPoll); err != nil {
-				return tries, false, err
+		} else {
+			for waited := time.Duration(0); waited < gmClearDeathWait; waited += gmClearDeathPoll {
+				if err := w.env.sleep(ctx, gmClearDeathPoll); err != nil {
+					return tries, false, err
+				}
+				if w.gmClearDead(ctx, u.GUID) {
+					return tries, true, nil
+				}
 			}
-			if w.gmClearDead(ctx, u.GUID) {
-				return tries, true, nil
+		}
+		if tries < gmClearTries {
+			if err := w.placeSleep(ctx, gmClearRetryGap); err != nil {
+				return tries, false, err
 			}
 		}
 	}
 	return tries, false, nil
+}
+
+// appendSkipEntries adds entries to a skip list, keeping its order and dropping duplicates.
+func appendSkipEntries(skips, entries []uint32) []uint32 {
+	seen := make(map[uint32]bool, len(skips)+len(entries))
+	for _, e := range skips {
+		seen[e] = true
+	}
+	for _, e := range entries {
+		if seen[e] {
+			continue
+		}
+		seen[e] = true
+		skips = append(skips, e)
+	}
+	return skips
 }
 
 // gmClearMember is what the walk knows about one expected pack member while it clears the pack.
@@ -175,6 +201,7 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 				}
 			}
 		}
+		left := 0
 		for _, g := range pk.SpawnGUIDs() {
 			m := members[g]
 			e := raidwalk.GMClearEntry{Leg: pk.Leg, Group: pk.Group, Entry: pk.Members[g], Tries: m.tries}
@@ -190,9 +217,28 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 				e.GUID, e.Reason = m.guid.String(), raidwalk.GMClearAlive
 			}
 			if !e.Killed {
+				left++
 				w.note("gm-clear: member %d %s (%s) %s after %d .die lines", e.Entry, e.GUID, label, e.Reason, e.Tries)
 			}
 			w.gmClearLog = append(w.gmClearLog, e)
+		}
+		if left > 0 {
+			// The group stays alive (walk 32: every gm_kill was refused for the slots table's missing world_addr, so
+			// the units never died): the placement must NOT fail for it. WARN, and let the quiet and the landing read
+			// ignore the pack's entries, so an alive member cannot make the area "not quiet" and burn an instance.
+			entries := make([]uint32, 0, len(pk.Members))
+			seen := map[uint32]bool{}
+			for _, e := range pk.Members {
+				if !seen[e] {
+					seen[e] = true
+					entries = append(entries, e)
+				}
+			}
+			sort.Slice(entries, func(i, j int) bool { return entries[i] < entries[j] })
+			w.place.Skips = appendSkipEntries(w.place.Skips, entries)
+			warn := fmt.Sprintf("gm-clear: WARN: %s not cleared (%d members left): the placement goes on without it; the quiet and the landing read ignore entries %s", label, left, raidwalk.SkipWords(entries))
+			w.note("%s", warn)
+			w.logLine(w.env.now(), warn)
 		}
 	}
 	w.note("%s", raidwalk.GMClearSummaryLine(w.gmClearLog, raidwalk.GMClearLegs(w.gmClear)))

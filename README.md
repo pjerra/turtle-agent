@@ -293,7 +293,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `status` | | state, character, map, x/y/z, `falling`, `z_unknown`, `dead`/`ghost`, health, power, `combo_points`/`combo_target`, `gcd_ms` (see [Agent state](#agent-state)), target, last event seq, `mono_ms`, `base_time` and `wall_offset_ms` (the monotonic axis of events: `base_time` is the wall time of mono_ms 0; `wall_offset_ms` is the wall clock now minus `base_time` + `mono_ms`, so host clock steps and drift show) |
 | `chat` | `type` (say, party, yell, emote, guild, raid, whisper, channel), `text`, `to` (whisper target or channel name) | |
 | `gm` | `text` (a `.`-command; the dot is added if missing) | |
-| `gm_kill` | `guid` (a creature) | selects the creature, waits until the server shows the selection, and sends `.die` (account level 3): the test tool of [`raid-walk --gm-clear`](#--gm-clear-test-servers-only). Refuses a player guid. It is authorized from the connection, not from settings: the agent may send `.die` only when the host it dialled (the realm's world address, or settings `world_addr`) equals the configured address of the test server that settings `server_name` names (`m910q` or `tortoise-test2`) in the slots table (`world_addr`, or `realmd` when `world_addr` is unset). `server_name` alone never authorizes; a mismatch refuses with a `gm_kill: refused:` line on stderr at login (checked in the session, not only in raid-walk). It does not read the death; the caller checks the unit's `dead` |
+| `gm_kill` | `guid` (a creature) | selects the creature, waits until the server shows the selection, and sends `.die` (account level 3): the test tool of [`raid-walk --gm-clear`](#--gm-clear-test-servers-only). Refuses a player guid. It is authorized from the connection, not from settings: the agent may send `.die` only when the host it dialled (the realm's world address, or settings `world_addr`) equals the configured `world_addr` of the test server that settings `server_name` names (`m910q` or `tortoise-test2`) in the slots table; a slots entry without a `world_addr` refuses `gm_kill` at every address (its `realmd` is never a stand-in: walk 32's table had none, so every `--gm-clear` kill was refused). `server_name` alone never authorizes; a mismatch refuses with a `gm_kill: refused:` line on stderr at login (checked in the session, not only in raid-walk). It does not read the death; the caller checks the unit's `dead` |
 | `events` | `since`, `kinds`, `limit`, `wait_ms` | page: `events`, `next`, `more`, `dropped` |
 | `chat_log` | `since`, `limit` | chat and system events only |
 | `invite` / `accept_invite` / `leave_group` | `name` / – / – | |
@@ -2499,11 +2499,15 @@ AQ20 walk starts at Rajaxx with `--gm-clear-boss kurinnaxx` so Kurinnaxx is dead
   member whose spawn guid and entry match calls the agent's `gm_kill` RPC: it selects the creature by guid, waits until the server shows
   that selection (the same select-confirm path as `.additem`), and sends `.die` (core: `Chat.cpp:885`, `SEC_DEVELOPER` = account level 3,
   `HandleDieCommand` at `Commands.cpp:2795` kills the selected unit). The death is read from the unit's frames (`dead`, 5 s); a unit
-  that is still alive gets one more `.die`. Every stop is visited and read in two rounds, always (an empty read ends nothing). A member
-  never seen is recorded `killed: false, reason: "not seen"`, one that would not die `reason: "alive"`, one already dead
-  `reason: "already dead"` (killed, 0 tries). Either of the first two makes the clear **PARTIAL**: noted, in the summary
-  (`gm_clear_partial: true`, `ASSISTED PARTIAL` on the result line) and in the report; the walk goes on. The commander then returns to
-  the start point. `gm_kill` itself refuses on an agent that is not a slot of `m910q`/`tortoise-test2`.
+  that is still alive gets up to three more `.die` lines, 3 s apart. Every stop is visited and read in two rounds, always (an empty read
+  ends nothing). A member never seen is recorded `killed: false, reason: "not seen"`, one that would not die `reason: "alive"`, one
+  already dead `reason: "already dead"` (killed, 0 tries). Either of the first two makes the clear **PARTIAL**: noted, in the summary
+  (`gm_clear_partial: true`, `ASSISTED PARTIAL` on the result line, `groups not cleared: <leg>:<groups>` with a leg's consecutive
+  numbers as a range, e.g. `high_priestess_arlokk:12-17`) and in the report. A group that is still alive after its retries never fails
+  the placement: a `gm-clear: WARN: <leg>:<group> not cleared ...` line names it, and the quiet and the landing read skip that pack's
+  entries (`skip=`), so an alive member cannot make the area "not quiet" and burn an instance (walk 32: every `gm_kill` was refused for
+  a slots table without `world_addr`, and the failed groups then failed the placement with exit 18). The commander then returns to the
+  start point. `gm_kill` itself refuses on an agent that is not a slot of `m910q`/`tortoise-test2`.
 - **Recorded:** `run.log` gets `gm-clear: killed <entry> <guid> (<leg>:<group>)` per kill (and `gm-clear: FAILED ...`), `summary.json`
   gets `assisted: true` and `gm_clear[]` (`leg`, `group`, `entry`, `guid`, `killed`, `tries`) and `assisted: true` on each leg it killed
   in, `summary.txt` and the result line end with `ASSISTED`, and `raid-walk report` (which reads `summary.json` from the walk folder)
