@@ -1149,6 +1149,45 @@
           ]
         },
         {
+          "entries": [11352],
+          "positions": [
+            {"x": -12329.9, "y": -1870.84, "z": 130.349}
+          ],
+          "radius": 12,
+          "patrol": {
+            "entries": [11352],
+            "path": [
+              {"x": -12326.9, "y": -1867.14, "z": 130.261},
+              {"x": -12323.9, "y": -1854.4, "z": 130.261},
+              {"x": -12314.1, "y": -1863.58, "z": 130.261},
+              {"x": -12307.6, "y": -1870.95, "z": 130.261},
+              {"x": -12297.4, "y": -1891.95, "z": 130.261},
+              {"x": -12293.5, "y": -1897.16, "z": 130.261},
+              {"x": -12298.7, "y": -1890.01, "z": 130.261},
+              {"x": -12307.2, "y": -1871.38, "z": 130.261},
+              {"x": -12324.6, "y": -1854.02, "z": 130.261},
+              {"x": -12320.1, "y": -1836.85, "z": 130.261},
+              {"x": -12302.4, "y": -1829.73, "z": 130.263},
+              {"x": -12292.9, "y": -1820.72, "z": 130.261},
+              {"x": -12244.9, "y": -1820.63, "z": 130.205},
+              {"x": -12292.4, "y": -1821.75, "z": 130.262},
+              {"x": -12323.0, "y": -1836.59, "z": 130.259},
+              {"x": -12341.3, "y": -1832.95, "z": 130.399},
+              {"x": -12321.7, "y": -1836.53, "z": 130.261},
+              {"x": -12324.4, "y": -1854.5, "z": 130.259},
+              {"x": -12329.5, "y": -1874.39, "z": 130.259},
+              {"x": -12348.3, "y": -1883.78, "z": 130.259},
+              {"x": -12329.9, "y": -1875.18, "z": 130.259}
+            ],
+            "period_s": 170.7,
+            "period_estimate": true,
+            "source": "creature_movement 49705 (21 points, 426.7 yd at 2.5 yd/s)"
+          },
+          "approach": [
+            {"x": -12222, "y": -1822, "z": 124.7}
+          ]
+        },
+        {
           "entries": [11830, 11830, 11353, 11353, 11353, 11353],
           "positions": [
             {"x": -12273.9, "y": -1861.77, "z": 131.05},
@@ -1190,33 +1229,23 @@
           ]
         },
         {
-          "entries": [11830, 11352, 11830],
+          "entries": [11830],
           "positions": [
-            {"x": -12323.9, "y": -1883.92, "z": 131.26},
-            {"x": -12329.9, "y": -1870.84, "z": 130.3},
-            {"x": -12328.2, "y": -1865.28, "z": 130.33}
+            {"x": -12328.2, "y": -1865.28, "z": 130.382}
           ],
-          "radius": 12.7,
+          "radius": 6,
           "approach": [
-            {"x": -12302, "y": -1864, "z": 130.63}
+            {"x": -12312, "y": -1845, "z": 130.9}
           ]
         },
         {
-          "entries": [11356, 11356, 11830, 11830],
+          "entries": [11830, 11356, 11356, 11830, 11830, 11353, 11353, 14821, 11830, 11830, 11830],
           "positions": [
+            {"x": -12323.9, "y": -1883.92, "z": 131.513},
             {"x": -12329.5, "y": -1901.46, "z": 130.79},
             {"x": -12332.2, "y": -1903.89, "z": 130.77},
             {"x": -12326.2, "y": -1905.07, "z": 130.59},
-            {"x": -12328.7, "y": -1907.03, "z": 130.49}
-          ],
-          "radius": 3.6,
-          "approach": [
-            {"x": -12300, "y": -1898, "z": 130.59}
-          ]
-        },
-        {
-          "entries": [11353, 11353, 14821, 11830, 11830, 11830],
-          "positions": [
+            {"x": -12328.7, "y": -1907.03, "z": 130.49},
             {"x": -12359.7, "y": -1870.49, "z": 130.54},
             {"x": -12355.5, "y": -1878.74, "z": 130.5},
             {"x": -12362.7, "y": -1873.9, "z": 130.34},
@@ -1224,10 +1253,12 @@
             {"x": -12344.7, "y": -1888.57, "z": 130.62},
             {"x": -12347.5, "y": -1890.89, "z": 130.37}
           ],
-          "radius": 14.1,
+          "radius": 25,
           "approach": [
-            {"x": -12318, "y": -1890, "z": 132.16}
-          ]
+            {"x": -12320, "y": -1858, "z": 132.0}
+          ],
+          "stand_pull": true,
+          "max_bodies": 11
         },
         {
           "entries": [14821, 11830, 11353, 11353, 14821],
@@ -1427,7 +1458,10 @@
       "boss": {
         "entry": 11382,
         "position": {"x": -12167.8, "y": -1927.25, "z": 153.73}
-      }
+      },
+      "notes": [
+        "WALK 29 FIX 5 (2026-11-03, leg 5; research/zg-w29/WALK29-FIX-PLAN.md \u00a73, lead decision): step 423 walked into the 49705 patroller (11352, movement 2, 21 waypoints; waypoint 13 -12244.9 -1820.6 z 130.2 is 13.4 yd from row 419's point and 20.1 from row 423's): in c it walked into the party at 00:34:57 (2.4 yd) and the drifting fight woke group 1 (49776) and group 2 (49778) at 22-27 yd, 11 engaged, 56 dead. Step 431's knot then came apart: the 11830 Priest on the approach (-12302 -1864, 26.2 yd) was pulled, the melee chased the caster to 12-14 yd of the other Priest, and the 20 yd assist chain 51985 -\u003e 49272 -\u003e 49259 -\u003e 49282 woke 15 bodies at once (c-r2 01:46:34, nearest bot 31-42 yd) plus 49789's four 11353 at 01:46:43; 41/19 dead. The patroller is pulled first now, as its own patrol row (its spawn 49705 -12329.9 -1870.8, radius 12, the full 21-point loop, period 170.7 s estimated; stand -12222 -1822 124.7, well off the row point because the loop is the row: 23.6 yd from the loop's nearest waypoint, 59.8 from the nearest static pack 49776); the ramp rows 417-423 come after it. The knot is dissolved: 51986 is its own row from -12312 -1845 130.9 (26.0 yd from it, 40.7 from 51985, 35.1 from 49789's spawn; a caster: do not chase), and 51985 joins 49272 (4), 49259 (2) and 49282 (4) as the 11-body assist chain row, stand_pull with max_bodies 11, pulled from -12320 -1858 132.0 on the north side (26.2 yd from its nearest spawn, 39.0 from the row centre, 29.0 from 49789; the south-west point -12360 -1915 is 30.7 from the centre and 68.7 from 49789, but the walk there from 51986's stand passes 10.3 yd from 51985 and the navmesh route cannot avoid the pack, so the party would wake the chain before the pre-CC; 51986 is dead by then, and the stand's 29 yd from 49789 is its own row's next). Order: 91493, 49705, 49776, 49778, 51460, 51986, the chain, 49789, then the rest of walk 28's ring sweep. Groups 7/9/10 (14821/11830/11353 entries) were re-checked with the 20 yd, 3-hop chain: 5, 6 and 4 bodies, inside their rows' ceilings. The later groups 11, 12, 13 and 14 chain to 7, 9, 9 and 10 (their own rows hold 7, 5, 4 and 6), which the \u00a78 chain lint must size before walk 31 if their order leaves those neighbours alive."
+      ]
     },
     {
       "name": "jindo_the_hexxer",
