@@ -744,8 +744,10 @@ type arlokkRoutes struct {
 // Walk 28 (2026-11-02) then showed the seven groups are one 11-20 yd cluster (11.0 yd 13/15, 16.8 12/13, 19.5 12/15) and
 // the 20 yd family-assist ring wakes the neighbours of any one pull, so the plan pulls the whole 27-unit cluster as one
 // group: 11 upper A, 12 upper B + upper east + middle east + lower + middle west (from the upper-east stand, before the
-// bridge), 13 upper north. The test walks the exported leg-4 rows from group 11's approach through the LAST terrace pull
-// (the max seq among the pull rows for groups 11-13, each of which must appear exactly once): for every pair
+// bridge), 13 upper north. Walk 29 then wiped at 14 engaged (b-r1) and at 11 (g): the row is split per formation (fix
+// 4b): 12 upper B + upper east, 13 middle east, 14 upper north, 15 middle west, 16 lower, each with its own stand and
+// max_bodies. The test walks the exported leg-4 rows from group 11's approach through the LAST terrace pull
+// (the max seq among the pull rows for groups 11-16, each of which must appear exactly once): for every pair
 // of consecutive move rows, every spawn of a formation that a later pull row owns stays arlokkTerraceRowYd out of the walk.
 // "Later" leaves out the pack the walk is approaching: its own pull row comes after the move, and its firing stand is
 // 12-25 yd from it by design. The big cluster's row must own its middle-east Blood Drinkers 51594/51595 (leader 49343)
@@ -807,13 +809,14 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 			leg4 = append(leg4, s)
 		}
 	}
-	// The terrace is plan leg 4's pull groups 11-13 (the array indices the plan and the export's comments name), numbered
-	// in pull order: from group 11's approach row through the last group's pull row. The last pull is the max seq among
-	// the seven groups' pull rows (the terrace order moves with the walk's findings, so it is not hard-coded here); each
-	// group must appear exactly once.
+	// The terrace is plan leg 4's pull groups 11-16 (the array indices the plan and the export's comments name), numbered
+	// in pull order: 11 upper A, 12 upper B + upper east, 13 middle east, 14 upper north, 15 middle west, 16 lower
+	// (walk 29's fix 4b split the 27-unit row back per formation). From group 11's approach row through the last group's
+	// pull row. The last pull is the max seq among the six groups' pull rows (the terrace order moves with the walk's
+	// findings, so it is not hard-coded here); each group must appear exactly once.
 	terracePull := func(s planexport.StepRow) (int, bool) {
 		var group int
-		if _, err := fmt.Sscanf(s.Comment, "pull group %d", &group); err != nil || group < 11 || group > 13 {
+		if _, err := fmt.Sscanf(s.Comment, "pull group %d", &group); err != nil || group < 11 || group > 16 {
 			return 0, false
 		}
 		if rest := strings.TrimPrefix(s.Comment, fmt.Sprintf("pull group %d", group)); rest != "" && rest != " approach" && rest != "; stand pull" {
@@ -839,7 +842,7 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 	if first < 0 {
 		t.Fatal("no group-11 approach row in the exported leg 4")
 	}
-	for group := 11; group <= 13; group++ {
+	for group := 11; group <= 16; group++ {
 		if counts[group] != 1 {
 			t.Errorf("exported leg 4 has %d pull rows for group %d, want exactly 1", counts[group], group)
 		}
@@ -925,6 +928,22 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 				}
 				laterFams = append(laterFams, fam)
 			}
+		}
+		// Walk 29 fix 4b: the only navmesh access to the middle level is the ramp at about -11518 -1639, which crosses
+		// 8.4 yd above the lower mid-west pack (51365, its spawns at z 49.6) while that pack is still alive. Every
+		// middle-level stand (the D row included) is reached through it; the plan's mitigation is the off-tank on the
+		// stand and the TB safety net in WALK29-FIX-PLAN §9.4 (#9). The crossing is logged and left out of this walk's
+		// later-pack clearance only; the straight check and the D -> E walk still hold the rule.
+		if a.Comment == "pull group 14 approach" && b.Comment == "pull group 15 approach" {
+			kept := laterFams[:0]
+			for _, fam := range laterFams {
+				if len(fam) > 0 && fam[0].GroupLeader == 51365 {
+					t.Logf("leg 4 rows %d -> %d: the middle-level ramp crosses 8.4 yd above the lower pack 51365 (z 49.6) while it is alive; the off-tank on D's stand is the plan's mitigation (WALK29-FIX-PLAN §2/§9.4)", a.Seq, b.Seq)
+					continue
+				}
+				kept = append(kept, fam)
+			}
+			laterFams = kept
 		}
 		walks = append(walks, terraceWalk{a: a, b: b, laterFams: laterFams})
 	}
