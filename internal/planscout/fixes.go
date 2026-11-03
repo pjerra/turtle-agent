@@ -144,7 +144,7 @@ func ProposeFixes(rep *Report, in Input, nav Nav, w *worldspawn.World) []Fix {
 		defer det.Close()
 	}
 	// A dry route is a full re-plan; the budget keeps the command inside the offline runtime target.
-	dryBudget := 20
+	dryBudget := 3
 	spread := float64(aggroest.StandSpreadPartyYd)
 	if in.Plan != nil && in.Plan.IsRaid() {
 		spread = aggroest.StandSpreadRaidYd
@@ -361,7 +361,7 @@ func dryFixes(rep *Report, in Input, nav Nav, det *detourPlanner, budget *int, s
 		dryRouteSec += time.Since(t).Seconds()
 	} else if det != nil {
 		out = append(out, Fix{Step: st.Step, Check: c.Name, Kind: FixDryDetour, Apply: false, Ref: origin,
-			Reason: c.Reason + "; no dry route proposed (the 20-route budget is spent; rerun after applying the other fixes)"})
+			Reason: c.Reason + "; no dry route proposed (the 3-route budget is spent; rerun after applying the other fixes)"})
 	}
 	if len(out) == 0 {
 		out = append(out, Fix{Step: st.Step, Check: c.Name, Kind: FixDryDetour, Apply: false, Ref: origin,
