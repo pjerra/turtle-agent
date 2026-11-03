@@ -137,8 +137,14 @@ var walkReadyBasins = []lakeBasin{
 
 // walkReadyReach is a spawn's proximity wake reach for the walk-ready rules:
 // worldspawn.AggroRadius at the plan's party level (routePartyLevel), plus
-// the party's spread and the spawn's wander (routeReach's rule).
+// the party's spread and the spawn's wander (routeReach's rule). The wander
+// is clamped to 30 yd: map 309's export carries 11356 in 49794's wander
+// column (its entry, not a distance), and the unclamped value drowns every
+// distance in the report.
 func walkReadyReach(p *dungeon.Plan, c creature) float64 {
+	if c.Wander > 30 {
+		c.Wander = 30
+	}
 	return routeReach(p, c)
 }
 
@@ -496,8 +502,12 @@ func walkReadyPatrolCrossings(p *dungeon.Plan, cs []creature, w *worldspawn.Worl
 			}
 			ownerPull = n
 		}
-		// One finding per patrol (its nearest crossing). The loop is one
-		// walker: every waypoint it crosses is the same defect.
+		// One finding per patrol (its nearest crossing within its OWN leg).
+		// The loop is one walker: every waypoint it crosses is the same
+		// defect. Segments of other legs are not the patrol's defect: the
+		// patrol belongs to its own leg's pull row (the walk-29 class is a
+		// loop crossed before its own pull, not a loop brushed three legs
+		// away).
 		bestD := math.MaxFloat64
 		bestSeg := ""
 		bestAt := dungeon.Point{}
@@ -509,6 +519,9 @@ func walkReadyPatrolCrossings(p *dungeon.Plan, cs []creature, w *worldspawn.Worl
 			}
 			if hasOwner && b.idx >= ownIdx {
 				continue // the patrol is pulled by then (or walked with)
+			}
+			if hasOwner && a.leg != ownerLeg {
+				continue // not the patrol's own leg: its loop is that leg's business
 			}
 			for _, wp := range t.path {
 				if d := segDist(a, b, wp); d < bestD && d < reach {
@@ -812,12 +825,35 @@ func walkReadyNoQuietStart(p *dungeon.Plan, cs []creature, w *worldspawn.World, 
 // patrol loops) at one candidate point. "" passes; else the fault and the
 // nearest danger distance.
 func walkReadyQuietFault(p *dungeon.Plan, cs []creature, w *worldspawn.World, f PullFilter, leg int, at dungeon.Point) (string, float64) {
-	owned := map[uint64]bool{}
-	_ = owned
+	// Spawn points of the plan's own pull groups and its boss position are
+	// no danger: the leg pulls them (Mar'li's boss adds at 0.0 yd are the
+	// fight, not a placement refusal). Patrol loops stay danger wherever
+	// they walk.
+	ownPos := map[uint64]bool{}
+	for _, g := range p.Legs[leg].PullGroups {
+		for _, q := range g.Positions {
+			for _, c := range cs {
+				// 2 yd: plan positions are hand-snapped, not exact spawns.
+				if ptDist(q, c.Pos) < 2.0 {
+					ownPos[c.GUID] = true
+				}
+			}
+		}
+	}
+	if b := p.Legs[leg].Boss; b != nil {
+		for _, c := range cs {
+			if ptDist(b.Position, c.Pos) < 2.0 {
+				ownPos[c.GUID] = true
+			}
+		}
+	}
 	best := ""
 	bestD := math.MaxFloat64
 	for _, c := range cs {
 		if !walkReadyHostile(c, f) {
+			continue
+		}
+		if ownPos[c.GUID] {
 			continue
 		}
 		d := ptDist(at, c.Pos)
