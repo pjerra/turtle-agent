@@ -187,11 +187,11 @@ func TestCarrierChestsNeedsDropCompanionsLoot(t *testing.T) {
 	}
 	r := Rows{Plan: PlanRow{Plan: "zf"}, Steps: []StepRow{{Kind: KindMove}}}
 	r.Steps[0].Flags = FlagGoneIsDone
-	if err := Validate(r); err == nil || !strings.Contains(err.Error(), "gone-is-done flag is for a loot or open row") {
+	if err := Validate(r); err == nil || !strings.Contains(err.Error(), "gone-is-done flag is for a loot, open or wait_object row") {
 		t.Fatalf("the flag on a move row: %v", err)
 	}
 	r.Steps[0] = StepRow{Kind: KindPull, Entries: []uint32{7286}, Flags: FlagGoneIsDone}
-	if err := Validate(r); err == nil || !strings.Contains(err.Error(), "gone-is-done flag is for a loot or open row") {
+	if err := Validate(r); err == nil || !strings.Contains(err.Error(), "gone-is-done flag is for a loot, open or wait_object row") {
 		t.Fatalf("the flag on a pull row: %v", err)
 	}
 }

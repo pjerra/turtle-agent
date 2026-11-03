@@ -2974,6 +2974,15 @@
     {
       "name": "gluth",
       "to": {"x": 3076.34, "y": -2982.96, "z": 267.6},
+      "via": [
+        {
+          "x": 3094.3,
+          "y": -3046.5,
+          "z": 268.2,
+          "direct": true,
+          "gm_cross": true
+        }
+      ],
       "pull_groups": [
         {
           "entries": [16447, 16447, 16447, 16447],
@@ -3400,7 +3409,7 @@
         }
       ],
       "notes": [
-        "BLOCKER: Gluth's room floor (z 297.8) is a navmesh island: from Grobbulus' platform (z 320.18) the nearest reachable point is 53.9 yd away and the mesh has no polygon for the drop, so neither the packs nor the boss point can be walked to. The data stays for the mapping walk.",
+        "BLOCKER (marked): Gluth's room floor (z 297.8) is a navmesh island: the walk from Grobbulus' platform ends at the fallen pipe's mouth (3093.3 -3055.5 294.1), 9.1 yd across and 25.9 yd down from the island's nearest floor (3094.3 -3046.5 268.2), and the mesh has no polygon for the drop (the server's PathFinder answers no path too). The leg starts with a direct gm_cross waypoint on that landing (the GM move of the commander and a summon of the party), the same way upper_karazhan_halls crosses its portals; a plain direct step cannot take it (25.9 yd down, the limit is 8).",
         "His zombies (16360) are summoned by his AI and eat to heal him; the bots' GluthKitePolicy owns the chow."
       ]
     },
@@ -3420,6 +3429,21 @@
     {
       "name": "sapphiron",
       "to": {"x": 3521.3, "y": -5237.56, "z": 137.72},
+      "via": [
+        {
+          "x": 3498.13,
+          "y": -5349.6,
+          "z": 144.967,
+          "direct": true,
+          "gm_cross": true
+        },
+        {
+          "x": 3500,
+          "y": -5335,
+          "z": 145,
+          "check_skip": "the first step off the teleport landing: the server's path query from the area trigger's own teleport point (3498.1 -5349.6 145.0) answers type 0x8 unreachable (start poly 0.1 yd), while from 3500 -5335 145.0 it walks to Sapphiron (0.5 yd short), so the plan check cannot judge the hop off the landing; 14 yd, flat"
+        }
+      ],
       "boss": {
         "entry": 15989,
         "position": {"x": 3521.3, "y": -5237.56, "z": 137.72}
@@ -3449,7 +3473,7 @@
         }
       ],
       "notes": [
-        "BLOCKER: the frostwyrm lair is entered by area trigger 4156 only (instance_naxxramas.cpp:1362-1366, gated on all 13 encounters DONE), and a bot in a raid fires no area trigger (ai/playerbot/BotAreaTriggers.cpp: IsNonRaidDungeon); the GO 181229 portal has no script. No navmesh route from the hub (1,296.7 yd short).",
+        "The frostwyrm lair is entered by area trigger 4156 only (instance_naxxramas.cpp:1362-1366, gated on all 13 encounters DONE), which teleports the player to 3498.13 -5349.6 144.967, and a bot in a raid fires no area trigger (ai/playerbot/BotAreaTriggers.cpp: IsNonRaidDungeon); the GO 181229 portal has no script. The leg starts with a direct gm_cross waypoint on that landing (the GM move of the commander and a summon of the party), the same way upper_karazhan_halls crosses its portals.",
         "Sapphiron starts on proximity (boss_sapphiron.cpp AggroRadius, 70 yd): the skeleton summon and her phases need no step.",
         "The doors 181225 and 181228 are waited for after her death; 181228 opens about 53 s later, at the end of the Kel'Thuzad dialogue, hence the 90 s timeout."
       ]
