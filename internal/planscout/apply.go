@@ -193,24 +193,30 @@ func setPoint(p *dungeon.Plan, ref planexport.RowOrigin, pt dungeon.Point) error
 		leg.Boss.Position = pt
 		return nil
 	case "step":
-		// A step's stand (the row a step walks the party to).
-		for _, steps := range [][]dungeon.Step{leg.Steps, leg.AfterBoss} {
-			for si := range steps {
-				st := &steps[si]
-				switch {
-				case st.UseObject != nil && st.UseObject.Stand != nil:
-					*st.UseObject.Stand = pt
-					return nil
-				case st.LootObject != nil && st.LootObject.Stand != nil:
-					*st.LootObject.Stand = pt
-					return nil
-				case st.AreaTrigger != nil:
-					st.AreaTrigger.Stand = pt
-					return nil
-				}
-			}
+		// A step's stand (the row a step walks the party to): the step the origin names, in the list it names.
+		steps, list := leg.Steps, "steps"
+		switch ref.List {
+		case "", "steps":
+		case "after_boss":
+			steps, list = leg.AfterBoss, "after_boss"
+		default:
+			return fmt.Errorf("a step row names list %q, not steps or after_boss", ref.List)
 		}
-		return fmt.Errorf("the step has no stand point to move")
+		if ref.Index < 0 || ref.Index >= len(steps) {
+			return fmt.Errorf("%s index %d is outside the leg", list, ref.Index)
+		}
+		st := &steps[ref.Index]
+		switch {
+		case st.UseObject != nil && st.UseObject.Stand != nil:
+			*st.UseObject.Stand = pt
+		case st.LootObject != nil && st.LootObject.Stand != nil:
+			*st.LootObject.Stand = pt
+		case st.AreaTrigger != nil:
+			st.AreaTrigger.Stand = pt
+		default:
+			return fmt.Errorf("%s %d has no stand point to move", list, ref.Index)
+		}
+		return nil
 	}
 	return fmt.Errorf("a %q row has no plan element to move", ref.Part)
 }

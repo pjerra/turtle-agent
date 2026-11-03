@@ -148,3 +148,30 @@ func TestSQLUnchangedByOrigins(t *testing.T) {
 		}
 	}
 }
+
+// TestStepOriginsNameTheirList: a step row's origin names the list the step is in (steps or after_boss) and its index there.
+func TestStepOriginsNameTheirList(t *testing.T) {
+	p := testPlan()
+	p.Legs[0].Steps = []dungeon.Step{{AreaTrigger: &dungeon.AreaTrigger{ID: 1, Stand: dungeon.Point{X: 12}}}}
+	p.Legs[0].AfterBoss = []dungeon.Step{{AreaTrigger: &dungeon.AreaTrigger{ID: 2, Stand: dungeon.Point{X: 40}}}}
+	res, err := Build(p, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []RowOrigin
+	for _, o := range res.Origins {
+		if o.Part == "step" {
+			got = append(got, o)
+		}
+	}
+	want := []RowOrigin{{Leg: 0, Part: "step", Group: -1, Index: 0, List: "steps"},
+		{Leg: 0, Part: "step", Group: -1, Index: 0, List: "after_boss"}}
+	if len(got) != len(want) {
+		t.Fatalf("step origins %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("step origin %d %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}

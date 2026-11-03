@@ -272,6 +272,8 @@ type RowOrigin struct {
 	// Index is the via index, the approach index or the steps index; for "cut" the via index the cut row precedes
 	// (len(Via) = before `to`).
 	Index int `json:"index"`
+	// List is "steps" or "after_boss" for a "step" row: the leg list Index counts into. Empty (an older fix file) means "steps".
+	List string `json:"list,omitempty"`
 }
 
 // Result is a plan's rows and what the exporter had to say about them.
@@ -535,7 +537,7 @@ func (b *builder) leg(li int) error {
 			b.carrierChest(si, st.LootObject)
 			continue
 		}
-		if err := b.step(si, st); err != nil {
+		if err := b.step("steps", si, st); err != nil {
 			return fmt.Errorf("steps[%d]: %w", si, err)
 		}
 	}
@@ -545,7 +547,7 @@ func (b *builder) leg(li int) error {
 		}
 	}
 	for si, st := range l.AfterBoss {
-		if err := b.step(si, st); err != nil {
+		if err := b.step("after_boss", si, st); err != nil {
 			return fmt.Errorf("after_boss[%d]: %w", si, err)
 		}
 	}
@@ -765,8 +767,10 @@ func (b *builder) carrierChest(si int, lo *dungeon.LootObject) {
 	}
 }
 
-func (b *builder) step(si int, st dungeon.Step) error {
+// step writes the rows of one step of list ("steps" or "after_boss"); the origin names that list and the index in it.
+func (b *builder) step(list string, si int, st dungeon.Step) error {
 	b.at("step", -1, si)
+	b.origin.List = list
 	switch {
 	case st.UseObject != nil:
 		u := st.UseObject
