@@ -142,7 +142,11 @@ func pullDecisionsInto(ctx context.Context, dash decisionsPuller, commander stri
 		res.ListFailed = true
 		return res, append(notes, err.Error())
 	}
-	var manifest []decisionManifestCapture
+	existing, enote := loadDecisionManifest(out)
+	if enote != "" {
+		notes = append(notes, enote)
+	}
+	var fresh []decisionManifestCapture
 	var total int64
 	for _, c := range caps {
 		if ctx.Err() != nil {
@@ -234,23 +238,90 @@ func pullDecisionsInto(ctx context.Context, dash decisionsPuller, commander stri
 		if rows == nil {
 			rows = []decisionManifestFile{}
 		}
-		manifest = append(manifest, decisionManifestCapture{ID: c.ID, Files: rows})
+		fresh = append(fresh, decisionManifestCapture{ID: c.ID, Files: rows})
 		res.Captures = append(res.Captures, raidwalk.DecisionsCaptureSummary{ID: c.ID, Files: len(rows), Bytes: capBytes})
 		res.Bytes += capBytes
 	}
-	if manifest == nil {
-		manifest = []decisionManifestCapture{}
-	}
-	for i := range manifest {
-		if manifest[i].Files == nil {
-			manifest[i].Files = []decisionManifestFile{}
-		}
-	}
-	if err := writeDecisionManifest(out, manifest); err != nil {
+	merged, mnotes := mergeDecisionManifest(out, existing, fresh)
+	notes = append(notes, mnotes...)
+	if err := writeDecisionManifest(out, merged); err != nil {
 		res.ManifestFailed = true
 		notes = append(notes, fmt.Sprintf("manifest: %v", err))
 	}
 	return res, notes
+}
+
+// loadDecisionManifest reads <out>/decisions/manifest.json for the merge. A missing file is an
+// empty manifest. An unreadable or malformed one is noted and treated as empty: its rows cannot
+// be trusted, so their captures are not kept.
+func loadDecisionManifest(out string) ([]decisionManifestCapture, string) {
+	raw, err := os.ReadFile(filepath.Join(out, "decisions", "manifest.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, ""
+	}
+	if err != nil {
+		return nil, fmt.Sprintf("existing manifest unreadable, its captures are not kept: %v", err)
+	}
+	var m []decisionManifestCapture
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Sprintf("existing manifest is not valid JSON, its captures are not kept: %v", err)
+	}
+	return m, ""
+}
+
+// mergeDecisionManifest builds the manifest after a pull. An existing row this run pulled
+// successfully is replaced in place. Every other existing row is kept only if its directory still
+// validates against the row, and is dropped with a note otherwise. First-time captures are
+// appended in pull order. Rows the pull never reached (empty window, budget stop, failed re-pull)
+// survive untouched.
+func mergeDecisionManifest(out string, existing, fresh []decisionManifestCapture) ([]decisionManifestCapture, []string) {
+	pulled := make(map[string]decisionManifestCapture, len(fresh))
+	for _, c := range fresh {
+		pulled[c.ID] = c
+	}
+	merged := []decisionManifestCapture{}
+	var notes []string
+	seen := make(map[string]bool, len(existing))
+	for _, c := range existing {
+		if seen[c.ID] {
+			continue
+		}
+		seen[c.ID] = true
+		if f, ok := pulled[c.ID]; ok {
+			merged = append(merged, f)
+			continue
+		}
+		if err := validateKeptDecisionCapture(out, c); err != nil {
+			notes = append(notes, fmt.Sprintf("%s: dropped from manifest: %v", c.ID, err))
+			continue
+		}
+		if c.Files == nil {
+			c.Files = []decisionManifestFile{}
+		}
+		merged = append(merged, c)
+	}
+	for _, f := range fresh {
+		if !seen[f.ID] {
+			seen[f.ID] = true
+			merged = append(merged, f)
+		}
+	}
+	return merged, notes
+}
+
+// validateKeptDecisionCapture checks an existing manifest row against its directory: the id and
+// every file name must be well formed, and the directory must hold exactly the listed files with
+// the recorded sizes and hashes.
+func validateKeptDecisionCapture(out string, c decisionManifestCapture) error {
+	if !tbdash.DecisionCaptureRe.MatchString(c.ID) {
+		return errors.New("malformed capture id")
+	}
+	for _, f := range c.Files {
+		if !tbdash.DecisionFileRe.MatchString(f.Name) {
+			return fmt.Errorf("unknown file name %q", f.Name)
+		}
+	}
+	return validateDecisionStage(filepath.Join(out, "decisions", c.ID), c.Files)
 }
 
 // waitDecisionEnded polls up to 15s, every 3s, for one capture to show ended. Nil means it never
@@ -540,21 +611,38 @@ func pullOneDecisionFile(ctx context.Context, dash decisionsPuller, staging, id,
 	return n, hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// writeDecisionManifest writes <out>/decisions/manifest.json (always a list).
-func writeDecisionManifest(out string, manifest []decisionManifestCapture) error {
+// writeDecisionManifest writes <out>/decisions/manifest.json (always a list) atomically: a synced
+// temp file in the same dir is renamed over the old manifest, so a crash leaves the old file or
+// the new one, never a partial one.
+func writeDecisionManifest(out string, manifest []decisionManifestCapture) (err error) {
 	dir := filepath.Join(out, "decisions")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err = os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	raw, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return err
 	}
-	part := filepath.Join(dir, "manifest.json.part")
-	if err := os.WriteFile(part, append(raw, '\n'), 0o600); err != nil {
+	tmp, err := os.CreateTemp(dir, "manifest-*.json.part")
+	if err != nil {
 		return err
 	}
-	return os.Rename(part, filepath.Join(dir, "manifest.json"))
+	defer func() {
+		if err != nil {
+			_ = tmp.Close()
+			_ = os.Remove(tmp.Name())
+		}
+	}()
+	if _, err = tmp.Write(append(raw, '\n')); err != nil {
+		return err
+	}
+	if err = tmp.Sync(); err != nil {
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), filepath.Join(dir, "manifest.json"))
 }
 
 func isDecisionBudgetError(err error) bool {
