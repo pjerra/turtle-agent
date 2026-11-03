@@ -1026,6 +1026,8 @@ What it checks:
 
 The aggro, patrol and joiner lints need the map's world export (`--spawns DIR`, default `<dir>/../tools/dungeongen/testdata/mapN`); without one they are skipped with a note. The Zul'Gurub plan of 2026-11-03 (`--floor-aware --approach-hops`, 752 rows) has no water row left: its other lints are edge 274, ledge 49, short hop 111, aggro 7 and patrol 27.
 
+**CI gate policy (`tools/ci/plan-check-all.sh`).** The quality lints `water`, `off-floor`, `edge`, `ledge`, `short hop`, `aggro`, `patrol` and `joiners` are reported as `WARN` with a count per plan and do not fail the job. They stay quality findings until each plan gets its own fix round (lead's decision, 2026-11-03). `--strict-lints` makes them fail the gate. Every other error-severity finding still fails it: `reach`, `arrival`, `hop_len` and `climb_anchor`, and every plan-check point failure (unreachable, too far, needs a mapping walk). Plan statuses are not changed by this policy.
+
 Limits (what the check does not model): the bot's real z and the vmap floor snap of the goal (a ledge whose mesh floats 2-3 yd above the game floor still passes); swimming (the water lint reads the mmaps' own `NavWater` floors, but an underwater shortcut the run leader's path takes between two dry points is not a row the lint sees); tiles unloaded on the server (the core loads mmtiles per loaded grid; the check covers only the start and end); the module's 25 yd stand-in
   search (`NearestReachablePoint`, `MoveFallbackYd`) and the `leadSpotGather` / `kMoveHereYd` branch, and a too-far refusal, are NOT modelled either: a `server unreachable` can still be
   saved live when the run leader's ring point around the goal (up to 25 yd out) takes a path the direct hop's query refuses.
