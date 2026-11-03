@@ -99,7 +99,7 @@ func planCheckCmd(args []string, stdout, stderr io.Writer) int {
 		if res.OK() {
 			fmt.Fprintf(stdout, "%s: ok, %d points on the map %d navmesh\n", n, res.Points, res.Map)
 		} else {
-			fmt.Fprintf(stdout, "%s: %d of %d points fail\n%s\n", n, len(res.Issues), res.Points, res.Summary())
+			fmt.Fprintf(stdout, "%s: %d of %d points fail (%d root, %d re-anchored after an earlier failure)\n%s\n", n, len(res.Issues), res.Points, res.RootIssues(), res.Reanchored, res.Summary())
 		}
 		if len(res.Exempt) > 0 {
 			fmt.Fprintf(stdout, "%s: %d hops exempted by the plan (check_skip)\n%s\n", n, len(res.Exempt), res.ExemptSummary())
@@ -466,5 +466,5 @@ func (r *dungeonRunner) checkForRun(plan *dungeon.Plan, opt dungeon.CheckOptions
 	if n := len(res.Issues) - len(shown.Issues); n > 0 {
 		more = fmt.Sprintf("\n... and %d more (plan_check lists all)", n)
 	}
-	return finding(fmt.Sprintf("failed, %d of %d points fail:\n%s%s", len(res.Issues), res.Points, shown.Summary(), more), true)
+	return finding(fmt.Sprintf("failed, %d of %d points fail (%d root, %d re-anchored after an earlier failure):\n%s%s", len(res.Issues), res.Points, res.RootIssues(), res.Reanchored, shown.Summary(), more), true)
 }
