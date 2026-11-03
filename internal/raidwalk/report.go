@@ -368,9 +368,16 @@ var (
 // statusNote is a status line's note without the run leader's trailing `|until ...` label.
 func statusNote(st *tbm.RunStatus) string { return untilTail.ReplaceAllString(st.Note, "") }
 
-// PullingTarget reads the pulled unit's entry and guid from a "pulling <entry>
-// <guid>" status note ("pulling 11368 0xf130002c6800bffa (order 1; ...)").
+// PullingTarget reads the pulled unit's entry and guid from the pull order's
+// own note ("pulling 11368 0xf130002c6800bffa (order 1; ...)"). Only a note
+// starting with "pulling" counts: a "waiting for the tank to stand still
+// before pulling <entry> <guid>" line says the pull is still waiting, and
+// must not arm the window (only the actual pull line does).
 func PullingTarget(note string) (entry uint32, guid packet.GUID, ok bool) {
+	note = strings.TrimSpace(note)
+	if !isPullStart(note) {
+		return 0, 0, false
+	}
 	m := pullingTargetRe.FindStringSubmatch(note)
 	if m == nil {
 		return 0, 0, false
@@ -384,6 +391,22 @@ func PullingTarget(note string) (entry uint32, guid packet.GUID, ok bool) {
 		return 0, 0, false
 	}
 	return uint32(e), g, true
+}
+
+// isPullStart says the note is the pull order's own line: "pulling ..." at
+// the start (after an optional ";" separator), not the "waiting ... before
+// pulling" line that names the pull while it still waits.
+func isPullStart(note string) bool {
+	low := strings.ToLower(note)
+	if strings.HasPrefix(low, "pulling ") || strings.HasPrefix(low, "pulling\t") {
+		return true
+	}
+	for _, sep := range []string{";pulling ", ";\tpulling ", ";\tpulling\t", ";pulling\t"} {
+		if strings.Contains(low, sep) {
+			return true
+		}
+	}
+	return false
 }
 
 // BuildReport joins the fights with the run log (nil or empty: the table has no status columns).

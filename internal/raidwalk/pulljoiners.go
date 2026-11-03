@@ -13,14 +13,21 @@ import (
 
 // PullJoiners is one pull attempt's joiner record: the pull's step and time,
 // how many engaged hostiles outside the pulled pack joined within the window,
-// and which guids. The walk writes one per attempt when the pull window
-// closes; the report reads all of them from the walk folder (pulljoiners.json)
-// and hangs each on the fight of its step whose window holds At.
+// and which guids. BossAdds holds the engaged boss-encounter adds instead:
+// units of the boss row's entries or the plan's hold/add entries, which join
+// the fight as it runs and are not another pack joining the pull. NoRow says
+// the pull had no plan row in range, so the pack is the seed's mates within
+// 15 yd in the first frame. The walk writes one per attempt when the pull
+// window closes; the report reads all of them from the walk folder
+// (pulljoiners.json) and hangs each on the fight of its step whose window
+// holds At.
 type PullJoiners struct {
-	Step  int           `json:"step"`
-	At    time.Time     `json:"at"`
-	Count int           `json:"count"`
-	GUIDs []packet.GUID `json:"guids"`
+	Step     int           `json:"step"`
+	At       time.Time     `json:"at"`
+	Count    int           `json:"count"`
+	GUIDs    []packet.GUID `json:"guids"`
+	BossAdds []packet.GUID `json:"boss_adds,omitempty"`
+	NoRow    bool          `json:"no_row,omitempty"`
 }
 
 // PullJoinersFName is the structured pull-joiner record the walk writes and the report reads.
@@ -72,9 +79,10 @@ func SortJoinerGUIDs(guids []packet.GUID) []packet.GUID {
 // the pack's other members. seed is the pulled guid; row is the plan pack of
 // the pull step; pos holds the freshest known frame position per guid. A guid
 // is a member when its position stands within the row's radius of the pack
-// centroid, as JoinersOfPull's pack map does. Units outside the radius belong
-// to a neighbouring pack, even when they share the entry. Without a row
-// nothing is owned by position: only the pulled guid is the pack.
+// centroid (capped at the radius + 15 yd: a far-off row must not own the
+// whole map), as JoinersOfPull's pack map does. Units outside the radius
+// belong to a neighbouring pack, even when they share the entry. Without a
+// row nothing is owned by position: only the pulled guid is the pack.
 func PullPackMembers(seed packet.GUID, row PackRow, pos map[packet.GUID][3]float32) []packet.GUID {
 	if !row.HasRow {
 		return nil
@@ -85,7 +93,33 @@ func PullPackMembers(seed packet.GUID, row PackRow, pos map[packet.GUID][3]float
 			continue
 		}
 		dx, dy := float64(p[0])-float64(row.CX), float64(p[1])-float64(row.CY)
-		if math.Hypot(dx, dy) <= float64(row.Radius) {
+		if math.Hypot(dx, dy) <= float64(row.Radius+PackRowSlackYd) {
+			members = append(members, g)
+		}
+	}
+	return SortJoinerGUIDs(members)
+}
+
+// PackRowSlackYd caps a row's reach past its radius: packRowFor's nearest-row
+// lookup may land on a row far from the pulled unit, and that row must not own
+// half the map. A mate within 15 yd (3D) of the seed still counts; farther
+// guids are neighbours, even when they share the entry.
+const PackRowSlackYd = 15
+
+// SeedMates owns the pulled pack with no row in range: the seed's
+// aggro-together mates seen in the first frame within 15 yd (3D).
+func SeedMates(seed packet.GUID, pos map[packet.GUID][3]float32) []packet.GUID {
+	seedPos, ok := pos[seed]
+	if !ok {
+		return nil
+	}
+	var members []packet.GUID
+	for g, p := range pos {
+		if g == seed {
+			continue
+		}
+		dx, dy, dz := float64(p[0])-float64(seedPos[0]), float64(p[1])-float64(seedPos[1]), float64(p[2])-float64(seedPos[2])
+		if math.Sqrt(dx*dx+dy*dy+dz*dz) <= PackRowSlackYd {
 			members = append(members, g)
 		}
 	}

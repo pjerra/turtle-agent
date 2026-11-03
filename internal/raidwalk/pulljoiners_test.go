@@ -35,7 +35,7 @@ func TestPullPackMembersOwnsPackMates(t *testing.T) {
 		seed:      {10, 0, 0},
 		0xF130002: {14, 0, 0},
 		0xF130003: {6, 0, 0},
-		0xF130004: {10, 20, 0}, // 20 yd out: another pack
+		0xF130004: {10, 40, 0}, // 40 yd out, past row + 15: another pack
 	}
 	got := PullPackMembers(seed, row, pos)
 	if len(got) != 2 || got[0] != 0xF130002 || got[1] != 0xF130003 {
@@ -43,6 +43,41 @@ func TestPullPackMembersOwnsPackMates(t *testing.T) {
 	}
 	if own := PullPackMembers(seed, PackRow{}, pos); own != nil {
 		t.Fatalf("no row owns nothing, got %v", own)
+	}
+}
+
+// The row lookup is capped at the row radius + 15 yd: a far-off row must not
+// own the whole map, so a guid past the cap is a neighbour even inside a big
+// radius row looked up from far away.
+func TestPullPackMembersCapsRowAtRadiusPlusSlack(t *testing.T) {
+	row := PackRow{HasRow: true, CX: 0, CY: 0, Radius: 10}
+	seed := packet.GUID(0xF130001)
+	pos := map[packet.GUID][3]float32{
+		seed:      {100, 0, 0},
+		0xF130002: {30, 0, 0}, // past row + 15 of the centroid: a neighbour
+		0xF130003: {96, 0, 0}, // 4 yd from the seed but outside row + 15 of the centroid
+	}
+	if got := PullPackMembers(seed, row, pos); len(got) != 0 {
+		t.Fatalf("pack members %v, want none past the row + 15 yd cap", got)
+	}
+}
+
+// No row in range: the pack is the seed's aggro-together mates seen in the
+// first frame within 15 yd (3D).
+func TestSeedMatesOwnsMatesWithin15Yd(t *testing.T) {
+	seed := packet.GUID(0xF130001)
+	pos := map[packet.GUID][3]float32{
+		seed:      {0, 0, 0},
+		0xF130002: {10, 0, 0},
+		0xF130003: {0, 10, 9},
+		0xF130004: {16, 0, 0}, // past 15: a neighbour
+	}
+	got := SeedMates(seed, pos)
+	if len(got) != 2 || got[0] != 0xF130002 || got[1] != 0xF130003 {
+		t.Fatalf("seed mates %v, want the two within 15 yd", got)
+	}
+	if SeedMates(0xF130099, pos) != nil {
+		t.Fatal("a missing seed owns nothing")
 	}
 }
 
