@@ -98,7 +98,7 @@ turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loo
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
-turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--hire-settle 20s] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
+turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
 turtle-agent trash-check [--dir dungeons] [--sql FILE [--plan NAME]] [--spawns DIR] [--patrols FILE]... [--mmaps DIR] [--level N] [--spread YD] [--aggro-rate R] [--assist-yd 10] [--json] [--out DIR] [--dash-out FILE] [--fail-on danger|patrol|any] [<plan>|<path.json>]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent scenario check [--var NAME=VALUE]... <file>
@@ -2336,7 +2336,18 @@ show running again within 60 s); the summary notes each recovery
 stays truthful. When the run regroups by itself after a wipe (`regrouping by itself`), the walk revives the raid and
 lets the run go on: no rest, no `run resume`; it still counts as one `--wipe-resume`. Such a revive summons nobody (not
 the lead, not a dead hire; it notes `self-regroup: no summons, revived in place`): every hire is `.revive`d where it lies
-and TB's regroup gathers them. Every revive's `.go xyz` must have landed (a settled status, no `z_unknown`, not falling, x/y within 10 yd
+and TB's regroup gathers them. `--revive-at-raid` (default on, `--revive-at-raid=false` gives exactly this old flow) changes
+the self-regroup revive after walk 29, where TB's `revive party` released every bot, the ghosts ran their corpse
+run from the graveyard and the revives landed 300-650 yd from the raid, in uncleared packs: the revive then skips the
+10 s summon wait, and after the revives (and a fresh look at the frames) every living hire more than 100 yd (or on
+another map) from the revive point is brought to it with the GM `.summon <hire>` (the commander stands on the point;
+the 3 s portal summon of TB cancels on combat, this does not). The `run.log` line is `revive: <bot> brought back from
+<dist> yd`; a hire not within 10 yd after 15 s gets one more summon, and one that still does not come is named in a note.
+Before the recovery returns (the self-regroup one, and the resume of the other wipe path) it waits up to 60 s for every
+hire to be in range (100 yd of the revive point or of the living lead bot) and out of combat, then goes on with a note
+naming the ones still missing. A near-wipe stop does the same for the hires it revives at their corpses: the commander `.appear`s at a living hire (the lead
+first) and `.summon`s every revived hire more than 100 yd from it, and the resume waits for the raid to gather. A lead that is
+not fresh, alive and on the plan's map is not the raid's place: it is brought back and named like any other straggler. The summary counts `revive_brought`, `revive_unreached` and `revive_gather_missed`. Every revive's `.go xyz` must have landed (a settled status, no `z_unknown`, not falling, x/y within 10 yd
 and z within 30 yd of the point) before any summon leaves, and a landing that never comes ends the walk with exit 19
 (`not revived: the commander did not land at the revive point`). Every wipe that does not recover
 says why in the notes (`wipe resume skipped: ...`, `second wipe at step N during the wipe-resume of step M`). It never

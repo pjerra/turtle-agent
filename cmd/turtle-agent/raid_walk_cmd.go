@@ -52,7 +52,7 @@ const (
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
     [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
-    [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--hire-settle 20s] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
+    [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--decisions on|off] [--decisions-max-mib N]
     [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--dry-run]
        turtle-agent raid-walk report <dir> [--spell ID] [--clock-offset 1h] [--md FILE] [--json FILE] [--out DIR]`
@@ -86,6 +86,7 @@ type raidWalkOptions struct {
 	resetWait       time.Duration
 	wipeResume      int
 	wipeRest        time.Duration
+	reviveAtRaid    bool          // --revive-at-raid (default on): a wipe recovery brings far hires to the revive point and waits for the raid to gather
 	hireSettle      time.Duration // --hire-settle: the wait after the last hire; 0 skips it (the #1367 live proof)
 	patrols         string
 	out             string
@@ -226,6 +227,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.IntVar(&o.autoResume, "auto-resume", 0, "resume a regroup pause this many times per step (0-3)")
 	fs.DurationVar(&o.resetWait, "reset-wait", 5*time.Minute, "how long a wipe may wait for the instance to reset")
 	fs.DurationVar(&o.wipeRest, "wipe-rest", 10*time.Minute, "how long a revived raid rests out of combat before the run resumes")
+	fs.BoolVar(&o.reviveAtRaid, "revive-at-raid", true, "a wipe recovery revives the raid AT the revive point: a hire revived more than 100 yd away is summoned to it, and the resume waits up to 60s for every hire to be in range and out of combat (false: the old revive in place)")
 	fs.DurationVar(&o.hireSettle, "hire-settle", hireSettleWait, "how long to wait after the last hire for its join summons before the refit and the bind (0 skips the wait)")
 	fs.StringVar(&o.patrols, "patrols", "", "a tb-patrols file for the revive quiet check")
 	fs.StringVar(&o.out, "out", "", "the output dir (default ./raid-walk-<plan>-<stamp>)")
@@ -772,9 +774,13 @@ type walk struct {
 	runStarted  bool
 	runStopped  bool
 	wipeResumes int // wipes and near-wipe stops recovered so far (--wipe-resume bounds them)
-	lease       slots.Lease
-	leaseLost   atomic.Bool
-	cancel      context.CancelFunc
+	// --revive-at-raid bookkeeping (raid_walk_reviveraid.go): the point the commander stood at for the last revive, and
+	// the distinct hires brought back to it, not reached by two summons, and still missing when a resume went out.
+	reviveSpot                                         *dungeon.Point
+	reviveBrought, reviveUnreached, reviveGatherMissed map[string]bool
+	lease                                              slots.Lease
+	leaseLost                                          atomic.Bool
+	cancel                                             context.CancelFunc
 
 	endReason  string
 	exitCode   int
@@ -1571,7 +1577,8 @@ func (w *walk) finish(code int) {
 		ReviveRefusal: w.reviveRefusal,
 		TierSource:    w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
 		HireSettle: w.opts.hireSettle, SettleShort: w.opts.hireSettle < hireSettleWait,
-		WipeResumes: w.wipeResumes,
+		WipeResumes:   w.wipeResumes,
+		ReviveBrought: len(w.reviveBrought), ReviveUnreached: len(w.reviveUnreached), ReviveGatherMissed: len(w.reviveGatherMissed),
 	}
 	if w.inj != nil {
 		meta.Injections, meta.InjectedDeaths = w.inj.Results()
