@@ -3,11 +3,9 @@ package planscout
 import (
 	"fmt"
 	"math"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/pjerra/turtle-agent/internal/aggroest"
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -131,35 +129,12 @@ func (d *detourPlanner) Close() { d.scratch.Close() }
 // coordinates only.
 func ProposeFixes(rep *Report, in Input, nav Nav, w *worldspawn.World) []Fix {
 	var out []Fix
-	prof := os.Getenv("SCOUT_PROFILE") != ""
-	var detT time.Time
-	if prof {
-		detT = time.Now()
-	}
 	det := newDetour(nav, in.Rows)
-	if prof {
-		fmt.Fprintf(os.Stderr, "detour %.1fs\n", time.Since(detT).Seconds())
-	}
 	if det != nil {
 		defer det.Close()
 	}
-	sums := map[string]float64{}
-	calls := map[string]int{}
-	defer func() {
-		if prof {
-			fmt.Fprintf(os.Stderr, "stages %v calls %v\n", sums, calls)
-		}
-	}()
-	stage := func(name string, f func() []Fix) []Fix {
-		if !prof {
-			return f()
-		}
-		t := time.Now()
-		r := f()
-		sums[name] += time.Since(t).Seconds()
-		calls[name]++
-		return r
-	}
+	// A dry route is a full re-plan; the budget keeps the command inside the offline runtime target.
+	dryBudget := 20
 	spread := float64(aggroest.StandSpreadPartyYd)
 	if in.Plan != nil && in.Plan.IsRaid() {
 		spread = aggroest.StandSpreadRaidYd
@@ -182,23 +157,17 @@ func ProposeFixes(rep *Report, in Input, nav Nav, w *worldspawn.World) []Fix {
 					out = append(out, f)
 				}
 			case planlint.LintHop, planlint.LintArrival, planlint.LintClimb:
-				out = append(out, stage("via", func() []Fix {
-					if f, ok := viaFix(rep, in, nav, st, c, origin); ok {
-						return []Fix{f}
-					}
-					return nil
-				})...)
+				if f, ok := viaFix(rep, in, nav, st, c, origin); ok {
+					out = append(out, f)
+				}
 			case planlint.LintWater:
-				out = append(out, stage("dry", func() []Fix { return dryFixes(rep, in, nav, det, st, c, origin, idx) })...)
+				out = append(out, dryFixes(rep, in, nav, det, &dryBudget, st, c, origin, idx)...)
 			case planlint.LintAggro:
-				out = append(out, stage("stand", func() []Fix {
-					if f, ok := standFix(in, nav, w, st, c, origin, idx, rows, level, spread); ok {
-						return []Fix{f}
-					}
-					return nil
-				})...)
+				if f, ok := standFix(in, nav, w, st, c, origin, idx, rows, level, spread); ok {
+					out = append(out, f)
+				}
 			case planlint.LintJoiners:
-				out = append(out, stage("split", func() []Fix { return splitFixes(in, nav, w, st, c, origin, idx, rows, level, spread) })...)
+				out = append(out, splitFixes(in, nav, w, st, c, origin, idx, rows, level, spread)...)
 			}
 		}
 	}
@@ -360,7 +329,7 @@ func cutVias(mapID uint32, nav Nav, pts []dungeon.Point, climb bool) []dungeon.P
 }
 
 // dryFixes proposes a dry stand for a wet gather point, and a dry route for a wet hop where the navmesh can list its water.
-func dryFixes(rep *Report, in Input, nav Nav, det *detourPlanner, st StepResult, c Check, origin *planexport.RowOrigin, idx int) []Fix {
+func dryFixes(rep *Report, in Input, nav Nav, det *detourPlanner, budget *int, st StepResult, c Check, origin *planexport.RowOrigin, idx int) []Fix {
 	var out []Fix
 	if strings.HasPrefix(c.Reason, "river below") {
 		return nil // a chase or a fall may land there; the route itself is dry
@@ -371,8 +340,14 @@ func dryFixes(rep *Report, in Input, nav Nav, det *detourPlanner, st StepResult,
 			out = append(out, f)
 		}
 	}
-	if f, ok := dryRoute(rep.Map, in, nav, det, st, c, origin, idx); ok {
-		out = append(out, f)
+	if det != nil && *budget > 0 {
+		*budget--
+		if f, ok := dryRoute(rep.Map, in, nav, det, st, c, origin, idx); ok {
+			out = append(out, f)
+		}
+	} else if det != nil {
+		out = append(out, Fix{Step: st.Step, Check: c.Name, Kind: FixDryDetour, Apply: false, Ref: origin,
+			Reason: c.Reason + "; no dry route proposed (the 20-route budget is spent; rerun after applying the other fixes)"})
 	}
 	if len(out) == 0 {
 		out = append(out, Fix{Step: st.Step, Check: c.Name, Kind: FixDryDetour, Apply: false, Ref: origin,
@@ -387,7 +362,7 @@ func dryPoint(mapID uint32, in Input, nav Nav, idx int, p dungeon.Point, origin 
 	if !ok {
 		prev = p
 	}
-	for r := float32(3); r <= DetourMaxYd; r += 3 {
+	for r := float32(5); r <= DetourMaxYd; r += 5 {
 		for k := range 8 {
 			a := 2 * math.Pi * float64(k) / 8
 			q := dungeon.Point{X: p.X + r*float32(math.Cos(a)), Y: p.Y + r*float32(math.Sin(a)), Z: p.Z}
