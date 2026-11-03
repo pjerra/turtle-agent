@@ -287,9 +287,19 @@ func saveCapLedger(path string, l *CapLedger) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// UpdateCapLedger loads the ledger, runs fn on it and saves it, under a lock file so concurrent walks do not lose
-// each other's change (the admission check and its reservation are one call). A lock held for over 10 s is taken as
-// stale. It returns the path the old file was moved to when it was corrupt ("" otherwise): the corrupt file is moved
+// errLedgerLockBusy is acquireLedgerLock's answer when the lock stayed held past the retry budget.
+var errLedgerLockBusy = errors.New("ledger lock busy")
+
+// The lock retry budget: ledgerLockTries polls, ledgerLockPoll apart (about 5 s).
+const (
+	ledgerLockTries = 100
+	ledgerLockPoll  = 50 * time.Millisecond
+)
+
+// UpdateCapLedger loads the ledger, runs fn on it and saves it, under an advisory lock (flock on <path>.lock, held
+// for the critical section) so concurrent walks do not lose each other's change (the admission check and its
+// reservation are one call). The lock is never taken over by age: a live holder keeps it however long it holds, and a
+// dead holder's lock is released by the kernel. It returns the path the old file was moved to when it was corrupt ("" otherwise): the corrupt file is moved
 // aside to <path>.corrupt-<stamp> and a new ledger started, so the history loss is visible. A file that cannot be read
 // at all is an error, fn is not run and nothing is written over it.
 func UpdateCapLedger(path string, fn func(*CapLedger)) (movedAside string, err error) {
@@ -297,27 +307,14 @@ func UpdateCapLedger(path string, fn func(*CapLedger)) (movedAside string, err e
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", err
 	}
-	var held bool
-	for i := 0; i < 100 && !held; i++ {
-		f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if err == nil {
-			f.Close()
-			held = true
-			break
-		}
-		if !errors.Is(err, os.ErrExist) {
-			return "", err
-		}
-		if st, serr := os.Stat(lock); serr == nil && time.Since(st.ModTime()) > 10*time.Second {
-			os.Remove(lock)
-			continue
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if !held {
+	f, err := acquireLedgerLock(lock)
+	if errors.Is(err, errLedgerLockBusy) {
 		return "", fmt.Errorf("instance-cap ledger lock %s is busy", lock)
 	}
-	defer os.Remove(lock)
+	if err != nil {
+		return "", err
+	}
+	defer releaseLedgerLock(f)
 	l, lerr := LoadCapLedger(path)
 	if lerr != nil {
 		if !errors.Is(lerr, ErrCapCorrupt) {
