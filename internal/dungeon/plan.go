@@ -28,8 +28,12 @@ const Version = 1
 
 // Limits the loader enforces, so a typo cannot ask for an hour-long wait or a 3-mile radius.
 const (
-	DefaultTimeoutS    = 60
-	MaxTimeoutS        = 600
+	DefaultTimeoutS = 60
+	MaxTimeoutS     = 600
+	// MaxHoldTimeoutS caps an event hold's timeout (and the timeout of a wait_for that carries one). An event can outlast any single
+	// wait: Rajaxx's seven waves run about 1272 s on the server, so a 600 s cap would fail a healthy event. TortoiseBots'
+	// kPlanMaxTimeoutS must allow the same for the hold kind (the migration's side).
+	MaxHoldTimeoutS    = 1800
 	DefaultObjectRange = 8   // yards around Near an object is looked for
 	MaxRadius          = 300 // yards
 	MaxFailText        = 400 // characters of a wait's fail_text
@@ -1788,8 +1792,8 @@ func (c *checker) hold(path string, r *rawHold, valueAllowed, unitsAllowed bool)
 	if r.Radius <= 0 || r.Radius > 100 {
 		c.fail(path+".radius", "%g: 1-100 yards (how far from the spot the event's mobs are fought)", r.Radius)
 	}
-	if r.TimeoutS <= 0 || r.TimeoutS > MaxTimeoutS {
-		c.fail(path+".timeout_s", "%d s is outside 1-%d", r.TimeoutS, MaxTimeoutS)
+	if r.TimeoutS <= 0 || r.TimeoutS > MaxHoldTimeoutS {
+		c.fail(path+".timeout_s", "%d s is outside 1-%d", r.TimeoutS, MaxHoldTimeoutS)
 	}
 	c.entries(path+".entries", r.Entries, false)
 	switch {
@@ -2044,8 +2048,12 @@ func (c *checker) wait(path string, r *rawWait) *WaitFor {
 		w.FailText = r.FailText
 	}
 	if r.TimeoutS != nil {
-		if *r.TimeoutS <= 0 || *r.TimeoutS > MaxTimeoutS {
-			c.fail(path+".timeout_s", "%d s is outside 1-%d", *r.TimeoutS, MaxTimeoutS)
+		limit := MaxTimeoutS
+		if r.Hold != nil {
+			limit = MaxHoldTimeoutS // an event hold can run past 600 s (see MaxHoldTimeoutS)
+		}
+		if *r.TimeoutS <= 0 || *r.TimeoutS > limit {
+			c.fail(path+".timeout_s", "%d s is outside 1-%d", *r.TimeoutS, limit)
 		} else {
 			w.TimeoutS = *r.TimeoutS
 		}

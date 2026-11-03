@@ -261,7 +261,8 @@ func eventStep(rows planexport.Rows, i int) (int, bool) {
 	return 0, false
 }
 
-// PlaceStart is the start step of a placed walk (spec 4.2): --from "step N" as given (a positioned move row), or
+// PlaceStart is the start step of a placed walk (spec 4.2): --from "step N" as given (a positioned move row, or a
+// pull row at its own stand point — the nearest move row before it when the pull row has no point), or
 // --from "leg L" staged at the highest move row before the leg's first creature row that has no AHEAD creature row
 // within PlaceStartClearYd. The FIRST leg needs no placement: it is a door start (door is true, step 1), and the
 // caller skips the place phase and logs `place: leg X is the first leg; starting from the door`. When the leg holds
@@ -282,7 +283,25 @@ func PlaceStart(rows planexport.Rows, from []string) (step int, leg, fallbackFro
 			return 0, "", "", false, fmt.Errorf("--place --from step %s: the rows have %d steps", from[2], len(rows.Steps))
 		}
 		s := rows.Steps[n-1]
-		if !moveRow(s) || !placedRow(s) {
+		if !moveRow(s) {
+			// A pull row is a stand the raid may be placed on: its own point is the pull's stand (walk 32: steps 237
+			// and 560 were refused, and the operator had to find 238/559/575 by hand). A pull row without a point
+			// falls back to the nearest move row before it. Anything else still refuses.
+			if s.Kind != planexport.KindPull {
+				return 0, "", "", false, fmt.Errorf("--place --from step %d: step %d is a %s row; place at a move row before it", n, n, s.Kind)
+			}
+			if placedRow(s) {
+				return n, "", "", false, nil
+			}
+			for i := n - 2; i >= 0; i-- {
+				m := rows.Steps[i]
+				if moveRow(m) && placedRow(m) {
+					return i + 1, "", "", false, nil
+				}
+			}
+			return 0, "", "", false, fmt.Errorf("--place --from step %d: step %d is a pull row without a point and no move row stands before it", n, n)
+		}
+		if !placedRow(s) {
 			return 0, "", "", false, fmt.Errorf("--place --from step %d: step %d is a %s row; place at a move row before it", n, n, s.Kind)
 		}
 		if k, ok := eventStep(rows, n-1); ok {
@@ -545,6 +564,39 @@ func routeSteps(rows planexport.Rows, start, stop int) []int {
 	return out
 }
 
+// startPointGuard says whether the start point itself stands within the boss guard of a BEHIND boss or hold row (the
+// test PlaceBossGuard and PlaceClear make for a row of an EARLIER leg than the start): the 2-D distance minus the row's
+// radius <= PlaceBossGuardYd and dz <= PlaceCorridorZ. The distance is returned for the refusal text.
+func startPointGuard(rows planexport.Rows, start int, s planexport.StepRow) (d float64, near bool) {
+	sp := rows.Steps[start-1]
+	d = dist2f(sp.X, sp.Y, s.X, s.Y)
+	return d, d-float64(s.Radius) <= PlaceBossGuardYd && math.Abs(float64(s.Z)-float64(sp.Z)) <= PlaceCorridorZ
+}
+
+// earlierLegGuard is the PlaceClear guard for a BEHIND boss or hold row of an EARLIER leg than the start: a placement
+// teleports the raid to the start point, so the route that leads to the start leg (and the start leg's own walk) is not
+// tested; only the start point itself and the segments that end in a later leg are (PlaceBossGuard reports the step to
+// stop before those). Rows of the start leg itself keep the whole route.
+func earlierLegGuard(rows planexport.Rows, start, stop int, s planexport.StepRow) (d float64, near bool) {
+	if d, near = startPointGuard(rows, start, s); near {
+		return d, true
+	}
+	startLeg := rows.Steps[start-1].Leg
+	steps := routeSteps(rows, start, stop)
+	for i := 0; i+1 < len(steps); i++ {
+		a, b := rows.Steps[steps[i]-1], rows.Steps[steps[i+1]-1]
+		if b.Leg == startLeg {
+			continue
+		}
+		seg := []dungeon.Point{{X: a.X, Y: a.Y, Z: a.Z}, {X: b.X, Y: b.Y, Z: b.Z}}
+		dd, z := routeDistance(seg, s.X, s.Y)
+		if dd-float64(s.Radius) <= PlaceBossGuardYd && math.Abs(float64(s.Z)-z) <= PlaceCorridorZ {
+			return dd, true
+		}
+	}
+	return d, false
+}
+
 // PlaceBossGuard walks the route from start to stop segment by segment against every BEHIND boss or hold row (the same
 // test as PlaceClear's guard: route distance minus the row's radius <= PlaceBossGuardYd and dz <= PlaceCorridorZ).
 // A placed run is a fresh copy, so those bosses are alive. For the first segment a -> b that comes within the guard:
@@ -564,6 +616,17 @@ func PlaceBossGuard(rows planexport.Rows, start, stop int) (until, routeEnd int,
 		return until, routeEnd, "", "", false
 	}
 	startLeg := rows.Steps[start-1].Leg
+	// A BEHIND boss or hold row of an EARLIER leg refuses the placement only when the start point itself stands within
+	// the guard of it (the raid is teleported there, so the walk that led there does not matter). The segments of the
+	// start leg's own route are not tested against it (see earlierLegGuard); the segments of later legs still are.
+	for j := 0; j < start-1 && j < len(rows.Steps); j++ {
+		s := rows.Steps[j]
+		if (s.Kind == planexport.KindBoss || s.Kind == planexport.KindHold) && placedRow(s) && s.Leg != startLeg {
+			if d, near := startPointGuard(rows, start, s); near {
+				return stop, stop, "", fmt.Sprintf("boss/event row %d of leg %d is within %.0f yd of the route: start later or walk from the door", j+1, s.Leg, d), true
+			}
+		}
+	}
 	for i := 0; i+1 < len(steps); i++ {
 		a, b := rows.Steps[steps[i]-1], rows.Steps[steps[i+1]-1]
 		seg := []dungeon.Point{{X: a.X, Y: a.Y, Z: a.Z}, {X: b.X, Y: b.Y, Z: b.Z}}
@@ -574,6 +637,9 @@ func PlaceBossGuard(rows planexport.Rows, start, stop int) (until, routeEnd int,
 			}
 			if s.Kind != planexport.KindBoss && s.Kind != planexport.KindHold {
 				continue
+			}
+			if s.Leg != startLeg && b.Leg == startLeg {
+				continue // an earlier leg's row against the start leg's own route: the start point was tested above
 			}
 			d, z := routeDistance(seg, s.X, s.Y)
 			if d-float64(s.Radius) > PlaceBossGuardYd || math.Abs(float64(s.Z)-z) > PlaceCorridorZ {
@@ -770,7 +836,12 @@ func PlaceClear(rows planexport.Rows, plan *dungeon.Plan, start, stop int) Clear
 		d, z := routeDistance(route, s.X, s.Y)
 		dz := math.Abs(float64(s.Z) - z)
 		if s.Kind == planexport.KindBoss || s.Kind == planexport.KindHold {
-			if d-float64(s.Radius) <= PlaceBossGuardYd && dz <= PlaceCorridorZ {
+			near := d-float64(s.Radius) <= PlaceBossGuardYd && dz <= PlaceCorridorZ
+			if s.Leg != rows.Steps[start-1].Leg {
+				// An earlier leg's row: only the start point and the later legs' segments count (earlierLegGuard).
+				d, near = earlierLegGuard(rows, start, stop, s)
+			}
+			if near {
 				out.Refusal = fmt.Sprintf("boss/event row %d of leg %d is within %.0f yd of the route: start later or walk from the door", i+1, s.Leg, d)
 				out.Circles, out.Notes = nil, nil
 				return out

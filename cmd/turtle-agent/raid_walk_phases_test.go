@@ -93,8 +93,8 @@ func (f *fixture) killAllButFromHires(keep int) {
 // recovery is already moving the party — the lead and the off-tanks stand alive at the regroup point, while the
 // dashboard the agent reads still reports the wipe. The agent's revive then sent `.summon <lead>` 2 ms after its
 // own `.go xyz` and dropped the lead 560 yd back at the entrance, its Voidwalker in tow. During a self-regroup the
-// agent summons NOBODY (lead ruling, round 2): every hire, living or dead, is `.revive`d where it lies and TB's
-// regroup gathers them.
+// agent summons NOBODY (lead ruling, round 2): every hire still dead is `.revive`d where it lies and TB's regroup
+// gathers them; a hire TB has already brought up is not revived (CRASH-2026-11-03).
 func TestRaidWalkSelfRegroupNeverSummonsTheLiving(t *testing.T) {
 	t.Run("TB has already revived the lead", func(t *testing.T) {
 		const keep = 5 // the lead and the four tanks TB revived first
@@ -165,8 +165,16 @@ func TestRaidWalkSelfRegroupNeverSummonsTheLiving(t *testing.T) {
 		if got := countPrefix(gm, ".summon "); got != 0 {
 			t.Fatalf("%d summons, want none (a self-regroup summons nobody, dead hires included): %q", got, gm)
 		}
-		if got := countPrefix(gm, ".revive "); got != len(party) {
-			t.Fatalf("%d revives, want %d (the recovery still revives every hire)", got, len(party))
+		// Only the hires still dead after TB's release are revived; the keep living ones are never `.revive`d.
+		if got := countPrefix(gm, ".revive "); got != len(party)-keep {
+			t.Fatalf("%d revives, want %d (every dead hire, none of the %d TB brought up)", got, len(party)-keep, keep)
+		}
+		for _, l := range gm {
+			for _, n := range party[:keep] {
+				if l == ".revive "+n {
+					t.Fatalf("%s was revived though TB had already brought it up: %q", n, gm)
+				}
+			}
 		}
 		if sum := f.summary(); !hasNote(sum, "the run regroups by itself") {
 			t.Fatalf("summary notes %q, want the self-regroup recovery note", sum.Notes)
@@ -433,8 +441,13 @@ func selfRegroupWipeWith(t *testing.T, live func(party []string) []string, setup
 	f.agent.viewHook = func() {
 		if goSeen && live != nil {
 			f.agent.mu.Lock()
-			for _, n := range live(f.agent.party) {
+			up := live(f.agent.party)
+			for _, n := range up {
 				f.agent.dead[n] = false
+			}
+			// Every hire up means no `.revive` will ever come: the recovery's end is the anchor the done line counts from.
+			if reviveAt.IsZero() && len(up) == len(f.agent.party) {
+				reviveAt = f.clock.now()
 			}
 			f.agent.mu.Unlock()
 		}
@@ -463,7 +476,7 @@ func selfRegroupWipeWith(t *testing.T, live func(party []string) []string, setup
 // NO summons at all — not the lead, not a living hire, not a dead one — whatever the frames say. The old rules
 // summoned a hire whose freshest frame was merely older than 10 s, and a one-fresh-view rule still let a `.summon`
 // drag a hire to where the agent stands while TB's regroup moves the party (Q3, walk 22 test2 s4). Every hire is
-// `.revive`d where it lies and the note says so.
+// `.revive`d where it lies and the note says so. Only the hires still dead on the fresh read are revived.
 func TestRaidWalkSelfRegroupSummonsNobody(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -479,8 +492,13 @@ func TestRaidWalkSelfRegroupSummonsNobody(t *testing.T) {
 			if n := countPrefix(gm, ".summon "); n != 0 {
 				t.Fatalf("%d summons, want none in a self-regroup: %q", n, gm)
 			}
-			if got := countPrefix(gm, ".revive "); got != len(party) {
-				t.Fatalf("%d revives, want %d (every hire is revived where it lies)", got, len(party))
+			// Every hire still dead is revived where it lies; one TB has already brought up is left alone.
+			up := 0
+			if c.live != nil {
+				up = len(c.live(party))
+			}
+			if got := countPrefix(gm, ".revive "); got != len(party)-up {
+				t.Fatalf("%d revives, want %d (every hire still dead is revived where it lies)", got, len(party)-up)
 			}
 			sum := f.summary()
 			if !hasNote(sum, "self-regroup: no summons, revived in place") {
@@ -1135,9 +1153,45 @@ func TestRaidWalkNoteFramesWriteErrorOnce(t *testing.T) {
 // (the map id follows) but the server never lands it, so the commander still stands at the revive point. The old code
 // set cur = e before the landing wait and then let D-C read e, whose units the walk could see from p said quiet: a
 // "not revived" refusal became a summon with the commander still at p. Now only a LANDED go makes the entrance the
+// onyxiaReviveAwayFromEntrancePlan copies the plan to a temp dir with the leg start back at the old revive point
+// (49.82 -114.607 -24.3112), so a recovery test has a revive point away from the entrance. The committed plan starts
+// the leg at the entrance platform: the old point sits inside the warder patrol lane (plan-check patrol lint), and
+// with the revive at the entrance the entrance fallback below would land by proximity and the walk would resume
+// instead of refusing.
+func onyxiaReviveAwayFromEntrancePlan(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile("../../dungeons/onyxias_lair.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	legs, ok := doc["legs"].([]any)
+	if !ok || len(legs) < 1 {
+		t.Fatal("the plan has no legs")
+	}
+	leg, ok := legs[0].(map[string]any)
+	if !ok {
+		t.Fatal("the first leg is not an object")
+	}
+	leg["to"] = map[string]any{"x": 49.8206, "y": -114.607, "z": -24.3112}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "onyxias_lair.json"), out, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 // checked point, a failed landing skips D-C and refuses, and the refusal records entrance_tried.
 func TestRaidWalkEntranceGoNeverLands(t *testing.T) {
 	f := newFixture(t)
+	f.opts.dir = onyxiaReviveAwayFromEntrancePlan(t)
 	f.agent.startReply = startAt("onyxias_lair", 23)
 	// An in-combat unit 30 yd from the revive point keeps it loud through the 120 s check; from the entrance go on
 	// the units are quiet, so the read the old code ran at the entrance would have said quiet.

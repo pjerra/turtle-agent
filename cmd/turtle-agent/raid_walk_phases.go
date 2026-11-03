@@ -47,6 +47,14 @@ func (w *walk) phases(ctx context.Context) int {
 		}
 	}()
 
+	// Any exit before the raid has entered gives the instance-cap reservation back (phaseEnter's success confirms it).
+	defer w.releaseCapReservation()
+	// --reuse-instance keeps the raid's instance: no fresh instance is entered, so nothing is counted or reserved.
+	if !w.opts.reuseInstance {
+		if err := w.phaseInstanceCap(ctx); err != nil {
+			return w.stop(err, false)
+		}
+	}
 	if err := w.phaseLease(ctx); err != nil {
 		return w.stop(err, false)
 	}
@@ -72,8 +80,45 @@ func (w *walk) phases(ctx context.Context) int {
 	if err := w.phaseBind(ctx); err != nil {
 		return w.stop(err, true)
 	}
-	if err := w.phaseEnter(ctx); err != nil {
-		return w.stop(err, true)
+	if w.opts.reuseInstance {
+		// The raid is already inside: no entry order (which opens a fresh copy), only a check that it is alive in the
+		// plan's map (walk 32: every restart re-entered at the leg start and burned a fresh instance). When the
+		// previous run's party logged out but the commander still holds its bind and the instance has not expired, the
+		// walk resumes that instance instead (walk 33); with no bind it says so and falls back to a fresh entry.
+		ready, err := w.reuseReady(ctx)
+		if err != nil {
+			return w.stop(err, true)
+		}
+		switch {
+		case ready:
+			w.reuseMode = "alive"
+		default:
+			if inst, ttr, ok := w.reuseBind(ctx); ok {
+				w.reuseMode, w.reuseBindInst, w.reuseBindTTR = "bind", inst, ttr
+				w.note("place: --reuse-instance: the previous raid has logged out, but the commander is still bound to map %d instance %.0f (expires in %s): resuming it, no fresh instance",
+					w.plan.Map, inst, ttr)
+			} else {
+				w.reuseMode = "fresh"
+				w.note("place: --reuse-instance: the previous raid has logged out and no live bind for map %d is left: falling back to a fresh instance", w.plan.Map)
+				// The fresh fallback is a real entry: the cap check skipped for --reuse-instance runs now, and the
+				// commander's stale personal bind (if any) is dropped first, or .appear would land in an old copy.
+				if err := w.phaseInstanceCap(ctx); err != nil {
+					return w.stop(err, false)
+				}
+				if err := w.phaseUnbindSelf(ctx); err != nil {
+					return w.stop(err, true)
+				}
+				if err := w.phaseEnter(ctx); err != nil {
+					return w.stop(err, true)
+				}
+				w.recordFreshInstance()
+			}
+		}
+	} else {
+		if err := w.phaseEnter(ctx); err != nil {
+			return w.stop(err, true)
+		}
+		w.recordFreshInstance()
 	}
 	if err := w.phasePlace(ctx); err != nil {
 		return w.stop(err, true)
@@ -97,6 +142,9 @@ func (w *walk) phases(ctx context.Context) int {
 	_ = w.phaseHold(ctx)
 	w.ended = w.env.now()
 	w.phaseTeardown()
+	if w.dash != nil {
+		w.pullDecisions(ctx)
+	}
 	code := exitOK
 	if len(w.hiresLeft) > 0 {
 		code = exitRaidWalkIncident
@@ -120,6 +168,9 @@ func (w *walk) stop(err error, teardown bool) int {
 		code = exitRaidWalkIncident
 	}
 	w.ended = w.env.now()
+	if w.dash != nil {
+		w.pullDecisions(context.Background())
+	}
 	w.finish(code)
 	return w.exitCode
 }
@@ -940,10 +991,14 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 				}
 			case raidwalk.IncidentBossEngaged:
 				if ok, early := w.runFightsBoss(v.Entry); ok {
-					if early > 0 {
+					switch {
+					case strings.TrimSpace(w.opts.until) == "none":
+						w.note("boss %d engaged at step %d under --until none: the run leader fights it", v.Entry, v.Step)
+						w.logLine(now, fmt.Sprintf("boss %d engaged at step %d under --until none: the run leader fights it", v.Entry, v.Step))
+					case early > 0:
 						w.note("boss %d engaged at step %d, before its boss step %d in the same leg, and the until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, early, w.untilLabel)
 						w.logLine(now, fmt.Sprintf("boss %d engaged at step %d, before its boss step %d in the same leg, and the until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, early, w.untilLabel))
-					} else {
+					default:
 						w.note("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, w.untilLabel)
 						w.logLine(now, fmt.Sprintf("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, w.untilLabel))
 					}
@@ -1042,8 +1097,10 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 		}
 		w.tracker.Feed(now, st)
 		w.observeBossStatus(st, now) // before lastStatus is replaced: the end rule reads the previous status
-		w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
+		// pullStarted compares st with the status before it (the step-decrease latch reset): it runs before
+		// lastStatus takes st.
 		w.pullStarted(now, st)
+		w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
 		w.recordRunLine(st, now)
 		w.noteLabel(st)
 		if st.Note != "" {
@@ -1301,6 +1358,11 @@ func (w *walk) joinHires(ctx context.Context, p dungeon.Point, deadline time.Tim
 	if name == "" {
 		return false, fmt.Sprintf("no hire seen on map %d", w.plan.Map), nil
 	}
+	return w.appearAtHire(ctx, name, deadline)
+}
+
+// appearAtHire is joinHires' appear half for a named hire: `.appear <name>` and the wait for a fresh landing.
+func (w *walk) appearAtHire(ctx context.Context, name string, deadline time.Time) (joined bool, why string, err error) {
 	hire := w.botAt[name]
 	before, serr := w.status(ctx)
 	if serr != nil { // one retry (review round 2, L1): the freshness check needs the read
@@ -1401,7 +1463,12 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 	}
 	for _, h := range f.Hostiles {
 		if h.GUID != 0 {
-			w.hostiles[h.GUID.String()] = hostileState{entry: h.Entry, x: h.X, y: h.Y, z: h.Z, kind: h.Kind, reaction: h.Reaction, flags: h.Flags,
+			// first keeps the position the frames first saw the unit at: a later one never changes the patrol binding (round 4).
+			first := dungeon.Point{X: h.X, Y: h.Y, Z: h.Z}
+			if prev, ok := w.hostiles[h.GUID.String()]; ok {
+				first = prev.first
+			}
+			w.hostiles[h.GUID.String()] = hostileState{entry: h.Entry, x: h.X, y: h.Y, z: h.Z, first: first, kind: h.Kind, reaction: h.Reaction, flags: h.Flags,
 				hppct: h.HPPct, target: uint64(h.Target), at: now}
 		}
 		if w.bossRule.Counts(h.Entry, h.X, h.Y) {
@@ -1520,22 +1587,141 @@ func (w *walk) resetBossAliveSeen(entry uint32) {
 	}
 }
 
-// pullStarted arms the pull-joiners window when a "pulling <entry> <guid>" status
-// line goes by: 10 s in which frames count the engaged hostiles that are not the
-// pulled pack. The pack is the pulled guid plus the plan pack's other members:
-// every guid whose frame position stands within the row's radius of the pack
-// centroid (w.pullRow).
+// pullStarted arms the pull-joiners window when the pull order's own
+// "pulling <entry> <guid>" status line goes by: 10 s in which frames count
+// the engaged hostiles that are not the pulled pack. The "waiting for the
+// tank to stand still before pulling" line still waits and opens no window:
+// PullingTarget only reads the actual pull line. The pack is the pulled guid
+// plus the plan pack's other members: every guid whose frame position stands
+// within the row's radius of the pack centroid (w.pullRow), the row found
+// from the run's step or, on a move step, from the pulled unit's entry and
+// position. bossPullStarted arms the same window for a boss, which has no
+// pulling line. w.lastStatus must still be the status BEFORE st (the
+// step-decrease check reads it): call this before storing st.
 func (w *walk) pullStarted(now time.Time, st tbm.RunStatus) {
-	_, guid, ok := raidwalk.PullingTarget(raidwalk.CleanLine(st.Note))
-	if !ok {
+	if w.haveStatus && st.State == tbm.RunRunning && st.Step < w.lastStatus.Step {
+		// The walk resumed at an earlier step: the boss latch belongs to the
+		// abandoned walk on, so a later boss fight arms a fresh window.
+		w.bossPullArmed = nil
+	}
+	if st.State != tbm.RunRunning {
+		// A paused run pulls nothing: forget the boss step's latch so the
+		// resumed attempt's fight start arms a fresh window.
+		if st.Kind == planexport.KindBoss {
+			delete(w.bossPullArmedOf(), st.Step)
+		}
 		return
 	}
-	w.pullPack = map[packet.GUID]bool{guid: true}
-	w.pullSeed = guid
-	w.pullRow = packRowOf(w.rows, st.Step)
+	if entry, guid, ok := raidwalk.PullingTarget(raidwalk.CleanLine(st.Note)); ok {
+		w.pullPack = map[packet.GUID]bool{guid: true}
+		w.pullSeed = guid
+		w.pullEntry = entry
+		w.pullRow = packRowOf(w.rows, st.Step)
+		if w.pulledSteps == nil {
+			w.pulledSteps = map[int]bool{}
+		}
+		w.pulledSteps[st.Step] = true
+		w.pullPackSeeded = false
+		w.pullSeedTries = 0
+		w.pullNoRow = false
+		w.pullBossAdds = w.bossAddsOf(st.Step)
+		w.pullJoinsAt, w.pullJoinsStep = now, st.Step
+		w.pullJoinsSeen = map[packet.GUID]bool{}
+		w.pullAddsSeen = map[packet.GUID]bool{}
+		if st.Kind == planexport.KindBoss {
+			// The boss step's pull line (a stand pull of one of its adds) opened
+			// the window: the fight-start line below must not open a second one.
+			w.bossPullArmedOf()[st.Step] = true
+		}
+	}
+	w.bossPullStarted(now, st)
+}
+
+// bossAddsOf is the boss-encounter add set of the leg the step's boss row
+// belongs to: the row's own entries and the plan's hold/add entries for that
+// leg (its hold entries and its first adds). Summoned and arriving adds of
+// those entries join the fight as it runs: they are no other pack joining
+// the pull, so the boss window keeps them out of the joiner count and marks
+// them "boss add" in the record instead. With no plan or no boss row for the
+// step (a trash pull): nothing is a boss add.
+func (w *walk) bossAddsOf(step int) map[uint32]bool {
+	if w.plan == nil || step < 1 || step > len(w.rows.Steps) {
+		return nil
+	}
+	s := w.rows.Steps[step-1]
+	if s.Kind != planexport.KindBoss {
+		return nil
+	}
+	out := map[uint32]bool{}
+	for _, e := range s.Entries {
+		out[e] = true
+	}
+	for i := range w.plan.Legs {
+		l := &w.plan.Legs[i]
+		if l.Boss == nil || l.Boss.Entry != s.Entry {
+			continue
+		}
+		if l.Boss.Hold != nil {
+			for _, e := range l.Boss.Hold.Entries {
+				out[e] = true
+			}
+		}
+		for _, e := range l.Boss.First {
+			out[e] = true
+		}
+		break
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// bossPullStarted arms the joiner window of a boss pull: a boss has no
+// "pulling <entry> <guid>" line (the run leader walks to the firing stand and
+// the tank engages on arrival), so the first fighting line of its boss step is
+// its pull order. One window per boss step: the later fighting lines of the
+// same fight are not further pulls.
+func (w *walk) bossPullStarted(now time.Time, st tbm.RunStatus) {
+	if st.Kind != planexport.KindBoss || !strings.HasPrefix(strings.ToLower(st.Note), "fighting") {
+		return
+	}
+	if w.bossPullArmedOf()[st.Step] {
+		return
+	}
+	row := packRowOf(w.rows, st.Step)
+	if !row.HasRow {
+		return
+	}
+	if !w.pullJoinsAt.IsZero() && w.pullJoinsStep == st.Step {
+		// A stand pull of one of the boss's adds already counts this fight.
+		w.bossPullArmedOf()[st.Step] = true
+		return
+	}
+	// Another pull's window is still open (under 10 s old): write its record now,
+	// as its window end does, so the boss window can open.
+	if !w.pullJoinsAt.IsZero() {
+		w.pullJoinersFlush(time.Time{})
+	}
+	w.bossPullArmedOf()[st.Step] = true
+	w.pullPack = map[packet.GUID]bool{}
+	w.pullSeed = 0 // the row owns the boss and its adds by position
+	w.pullEntry = 0
+	w.pullRow = row
 	w.pullPackSeeded = false
+	w.pullSeedTries = 0
+	w.pullNoRow = false
+	w.pullBossAdds = w.bossAddsOf(st.Step)
 	w.pullJoinsAt, w.pullJoinsStep = now, st.Step
 	w.pullJoinsSeen = map[packet.GUID]bool{}
+	w.pullAddsSeen = map[packet.GUID]bool{}
+}
+
+func (w *walk) bossPullArmedOf() map[int]bool {
+	if w.bossPullArmed == nil {
+		w.bossPullArmed = map[int]bool{}
+	}
+	return w.bossPullArmed
 }
 
 // packRowOf is the plan pack of the pull step: the centroid and radius of its
@@ -1551,6 +1737,57 @@ func packRowOf(rows planexport.Rows, step int) raidwalk.PackRow {
 	return raidwalk.PackRow{HasRow: true, CX: s.X, CY: s.Y, Radius: raidwalk.RowRadius(s.Kind, s.Radius)}
 }
 
+// packRowFor finds the plan row that owns a pulled unit when the run's current
+// step is not a pull/boss row: a stand pull is ordered while the run still
+// stands on its approach move row (walk 27: c-r3 step 262 pulled 11360, whose
+// pull row is 265), and the module also pulls a mob found on the way. The row
+// is the nearest pull/boss row whose entries hold the pulled entry within the
+// row radius + 15 yd (3D) of the seed; the pulled unit's position breaks a tie
+// between the packs of one entry (a leg repeats an entry in several pull
+// groups). No row in range: no row, and the pack is the seed's aggro-together
+// mates seen in the first frame within 15 yd (the record says "no row").
+func packRowFor(rows planexport.Rows, entry uint32, seed [3]float32) raidwalk.PackRow {
+	if entry == 0 {
+		return raidwalk.PackRow{}
+	}
+	best, bestD := -1, float64(0)
+	for i, s := range rows.Steps {
+		if s.Kind != planexport.KindPull && s.Kind != planexport.KindBoss {
+			continue
+		}
+		if !rowHasEntry(s, entry) {
+			continue
+		}
+		dx, dy, dz := float64(s.X)-float64(seed[0]), float64(s.Y)-float64(seed[1]), float64(s.Z)-float64(seed[2])
+		d := math.Sqrt(dx*dx + dy*dy + dz*dz)
+		if d > float64(raidwalk.RowRadius(s.Kind, s.Radius)+raidwalk.PackRowSlackYd) {
+			continue
+		}
+		if best < 0 || d < bestD {
+			best, bestD = i, d
+		}
+	}
+	if best < 0 {
+		return raidwalk.PackRow{}
+	}
+	s := rows.Steps[best]
+	return raidwalk.PackRow{HasRow: true, CX: s.X, CY: s.Y, Radius: raidwalk.RowRadius(s.Kind, s.Radius)}
+}
+
+// rowHasEntry says a pull/boss row owns entry: the boss row's own entry, or
+// one of the row's listed pack entries.
+func rowHasEntry(s planexport.StepRow, entry uint32) bool {
+	if s.Entry == entry {
+		return true
+	}
+	for _, e := range s.Entries {
+		if e == entry {
+			return true
+		}
+	}
+	return false
+}
+
 func (w *walk) packPositions() map[packet.GUID][3]float32 {
 	out := make(map[packet.GUID][3]float32, len(w.hostiles))
 	for gs, h := range w.hostiles {
@@ -1564,10 +1801,12 @@ func (w *walk) packPositions() map[packet.GUID][3]float32 {
 }
 
 // pullFramed counts one frame toward the armed pull: every engaged hostile
-// outside the pulled pack's guids joins the seen set. 10 s after the pull
-// the count is final: the record is written keyed by the pull step and the
-// window closes. A newer pull re-arms first (pullStarted runs on the status
-// lines of the same poll before the frame).
+// outside the pulled pack's guids joins the seen set, except units of the
+// boss window's boss-add entries (they join the fight as it runs, and land in
+// the record's "boss add" set instead). 10 s after the pull the count is
+// final: the record is written keyed by the pull step and the window closes.
+// A newer pull re-arms first (pullStarted runs on the status lines of the
+// same poll before the frame).
 func (w *walk) pullFramed(now time.Time, f *tbm.ViewFrame) {
 	if w.pullJoinsAt.IsZero() {
 		return
@@ -1579,17 +1818,52 @@ func (w *walk) pullFramed(now time.Time, f *tbm.ViewFrame) {
 	if w.pullJoinsSeen == nil {
 		w.pullJoinsSeen = map[packet.GUID]bool{}
 	}
+	if w.pullAddsSeen == nil {
+		w.pullAddsSeen = map[packet.GUID]bool{}
+	}
 	// The first frame of the window sees the pack where it was pulled from
 	// (trackFrame already recorded this frame's positions): its other members
-	// are the guids within the pull row's radius, whatever their entry.
+	// are the guids within the pull row's radius, whatever their entry. A stand
+	// pull ordered on a move step has no row from the step: find the pulled
+	// unit's own plan row here, where its position is known. A seed missing
+	// from the first frame retries on the next 3 frames before giving up (a
+	// frame may arrive before the pulled unit's first position row does).
 	if !w.pullPackSeeded {
-		w.pullPackSeeded = true
-		for _, g := range raidwalk.PullPackMembers(w.pullSeed, w.pullRow, w.packPositions()) {
-			w.pullPack[g] = true
+		pos := w.packPositions()
+		if !w.pullRow.HasRow {
+			if seedPos, ok := pos[w.pullSeed]; ok {
+				w.pullRow = packRowFor(w.rows, w.pullEntry, seedPos)
+				w.pullPackSeeded = true
+				if !w.pullRow.HasRow {
+					w.pullNoRow = true
+				}
+			} else if w.pullSeedTries >= 3 {
+				w.pullPackSeeded = true
+				w.pullNoRow = true
+			} else {
+				w.pullSeedTries++
+			}
+		} else {
+			w.pullPackSeeded = true
+		}
+		if w.pullPackSeeded {
+			if w.pullNoRow {
+				for _, g := range raidwalk.SeedMates(w.pullSeed, pos) {
+					w.pullPack[g] = true
+				}
+			} else {
+				for _, g := range raidwalk.PullPackMembers(w.pullSeed, w.pullRow, pos) {
+					w.pullPack[g] = true
+				}
+			}
 		}
 	}
 	for _, h := range f.EngagedHostiles() {
 		if h.GUID == 0 || w.pullPack[h.GUID] {
+			continue
+		}
+		if w.pullBossAdds[h.Entry] {
+			w.pullAddsSeen[h.GUID] = true
 			continue
 		}
 		w.pullJoinsSeen[h.GUID] = true
@@ -1612,17 +1886,46 @@ func (w *walk) pullJoinersFlush(now time.Time) {
 		guids = append(guids, g)
 	}
 	rec := raidwalk.SortJoinerGUIDs(guids)
-	w.pullJoins = append(w.pullJoins, raidwalk.PullJoiners{Step: w.pullJoinsStep, At: w.pullJoinsAt, Count: len(rec), GUIDs: rec})
+	adds := make([]packet.GUID, 0, len(w.pullAddsSeen))
+	for g := range w.pullAddsSeen {
+		adds = append(adds, g)
+	}
+	adds = raidwalk.SortJoinerGUIDs(adds)
+	w.pullJoins = append(w.pullJoins, raidwalk.PullJoiners{Step: w.pullJoinsStep, At: w.pullJoinsAt, Count: len(rec), GUIDs: rec, BossAdds: adds, NoRow: w.pullNoRow})
 	if note := raidwalk.JoinersNote(rec); note != "" {
 		w.note("step %d: %s", w.pullJoinsStep, note)
 		w.logLine(w.env.now(), raidwalk.PullJoinersLine(w.pullJoinsStep, rec))
 	}
+	if len(adds) > 0 {
+		w.note("step %d: boss add %d (%s)", w.pullJoinsStep, len(adds), joinerGUIDs(adds))
+		w.logLine(w.env.now(), fmt.Sprintf("step %d: boss add %d (%s)", w.pullJoinsStep, len(adds), joinerGUIDs(adds)))
+	}
+	if w.pullNoRow {
+		w.note("step %d: no row (mates within 15 yd owned)", w.pullJoinsStep)
+	}
 	w.pullJoinsAt = time.Time{}
 	w.pullSeed = 0
+	w.pullEntry = 0
 	w.pullRow = raidwalk.PackRow{}
 	w.pullPackSeeded = false
+	w.pullSeedTries = 0
+	w.pullNoRow = false
+	w.pullBossAdds = nil
 	w.pullPack = nil
 	w.pullJoinsSeen = nil
+	w.pullAddsSeen = nil
+}
+
+// joinerGUIDs formats guids for the "boss add" note the way JoinersNote does its own.
+func joinerGUIDs(guids []packet.GUID) string {
+	var b strings.Builder
+	for i, g := range guids {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(g.String())
+	}
+	return b.String()
 }
 
 // savedFrame is one frames.jsonl line (compact: positions, hp, power, dead, hostiles).
@@ -1886,17 +2189,34 @@ func (w *walk) handleWipe(ctx context.Context, step int) error {
 	// live TB sends "regrouping by itself" and then "regroup: waiting for X (dead), ... reviving" for
 	// the same step in one page, and it may even go on to its own "regrouped" or a line of the next
 	// step, which also moves the step the wipe fires on. So the decision reads the recorded running
-	// lines of this step (selfRegroupSeen, which also takes a note whose own page already carried the
+	// lines of this step (selfRegroupLine, which also takes a note whose own page already carried the
 	// run past it) instead of the last status, and only the run's state still comes from that status:
 	// a paused or done last line is no self-regroup.
 	now := w.env.now()
 	w.wipeAt = now
-	selfRegroup := w.haveStatus && w.lastStatus.State == tbm.RunRunning && w.selfRegroupSeen(step, now)
+	selfRegroup := false
+	w.regroupAt = time.Time{}
+	if w.haveStatus && w.lastStatus.State == tbm.RunRunning {
+		if o, ok := w.selfRegroupLine(step, now); ok {
+			selfRegroup, w.regroupAt = true, o.at
+		}
+	}
 	// The observations explained this wipe: a later wipe needs its own line since the last recovery.
 	w.runLines = nil
+	// A boss row engaged by the walk's own boss path (handleBoss) still ends the wipe as before: the walk owns that
+	// fight and never revives under it. When the run LEADER fights the boss (runFightsBoss: --until none, or an until
+	// that goes past the boss step), the wipe is the run's own and follows the normal wipe-resume flow. Walk 32: a
+	// Mar'li boss-step wipe under --until none was read as a boss wipe and `.bot run stop` went out 0.7 s after the
+	// "20 dead ... regrouping by itself" line (a-r1), and a Hakkar one 42 ms after it (e-r3), so no boss retry could
+	// ever happen.
+	runLeaderFights := false
 	if w.bossEngagedNow() {
-		w.note("wipe resume skipped: %s engaged", w.engagedBossWords())
-		return w.endWipe(ctx, step)
+		runLeaderFights = w.runLeaderFightsEngagedBoss(step)
+		if !runLeaderFights {
+			w.note("wipe resume skipped: %s engaged", w.engagedBossWords())
+			return w.endWipe(ctx, step)
+		}
+		w.note("wipe on a boss step: the run leader fights %s %s, so the wipe recovers like any other", w.engagedBossWords(), w.untilNoteWords())
 	}
 	if w.opts.wipeResume > 0 && w.wipeResumes >= w.opts.wipeResume {
 		w.note("wipe resume skipped: no recoveries left (%d/%d)", w.wipeResumes, w.opts.wipeResume)
@@ -1905,7 +2225,7 @@ func (w *walk) handleWipe(ctx context.Context, step int) error {
 	if w.wipeResumes >= w.opts.wipeResume { // --wipe-resume 0: the old ending, no note
 		return w.endWipe(ctx, step)
 	}
-	if err := w.recoverWipe(ctx, step, selfRegroup); err == errWipeResumeSkipped {
+	if err := w.recoverWipe(ctx, step, selfRegroup, runLeaderFights); err == errWipeResumeSkipped {
 		return w.endWipe(ctx, step)
 	} else if terr, ok := err.(*timeoutWalkStop); ok {
 		w.note("%s", terr.note)
@@ -1913,6 +2233,34 @@ func (w *walk) handleWipe(ctx context.Context, step int) error {
 	} else {
 		return err
 	}
+}
+
+// runLeaderFightsEngagedBoss says a wipe ON THE BOSS'S OWN STEP is the run's own fight: runFightsBoss hands that
+// encounter to the run leader (a boss step under --until none or a boss-done until, or an until that goes past the
+// step), so the walk owns no boss attempt and the wipe is an ordinary wipe (walk 32's Mar'li and Hakkar wipes). A boss
+// row the frames still hold while the run wipes on TRASH keeps the old gate: that fight is not the step's, and reviving
+// under it is not this rule's business. False for an unknown step (rows not the plan's) or no named engagement.
+func (w *walk) runLeaderFightsEngagedBoss(step int) bool {
+	entry, ok := w.engagedBossEntry()
+	if !ok {
+		return false
+	}
+	if b := w.bossStepOf(entry); b == 0 || b != step {
+		return false
+	}
+	ok, _ = w.runFightsBoss(entry)
+	return ok
+}
+
+// untilWords names the run's until for a note ("under --until none", "under the until (until step 248)").
+func (w *walk) untilNoteWords() string {
+	if strings.TrimSpace(w.opts.until) == "none" {
+		return "under --until none"
+	}
+	if w.untilLabel == "" {
+		return "under its until"
+	}
+	return "under the until (" + w.untilLabel + ")"
 }
 
 // bossEngagedNow is the "not a boss wipe" gate: handleBoss owns the engaged path, so a boss row the frames still
@@ -2864,10 +3212,20 @@ const (
 // (a boss that engages while the run is paused on its boss step still stops the walk), when the
 // rows are not the server's (step numbers mean nothing), when the next boss step is in another
 // leg, when the until does not go past the boss step, when the run stands more than
-// earlyEngageSteps steps before that boss step, or when the main tank is not within earlyEngageYd
-// of the boss row (review round 1, item 3).
+// earlyEngageSteps steps before that boss step (not under boss-done, which never stops on its own
+// boss's engage), or when the main tank is not within earlyEngageYd of the boss row (review round 1,
+// item 3). --until none is true from the first check: a full clear never stops the run on a boss.
 func (w *walk) runFightsBoss(entry uint32) (ok bool, early int) {
-	if w.opts.until == "boss" || !w.haveStatus || w.lastStatus.State != tbm.RunRunning {
+	if w.opts.until == "boss" {
+		return false, 0
+	}
+	// --until none walks the plan to its end: no boss or until rule may stop the run. The run leader fights every
+	// boss it meets, however many steps before the boss row the engage came from (walk 31: Mandokir woke five steps
+	// before his row, and the auto-shortened until made the walk send `.bot run stop` ~10 s into the fight).
+	if strings.TrimSpace(w.opts.until) == "none" {
+		return true, 0
+	}
+	if !w.haveStatus || w.lastStatus.State != tbm.RunRunning {
 		return false, 0
 	}
 	if w.lastStatus.Kind == "boss" {
@@ -2900,8 +3258,10 @@ func (w *walk) runFightsBoss(entry uint32) (ok bool, early int) {
 	// The hand-over is for a boss pulled from the raid's own approach: further back than earlyEngageSteps the
 	// boss is woken by something else (another leg's pull, a patrol), and a main tank far from the boss row means
 	// the party is not standing at the pull at all (review round 1, item 3: walk 24's Thekal approach point sits
-	// inside the pull, so the step-back case is the common one).
-	if b-w.lastStatus.Step > earlyEngageSteps {
+	// inside the pull, so the step-back case is the common one). Under boss-done the step window does not apply:
+	// boss-done never stops the run on an engage of its own boss (walk 29b/29c: Mandokir woke 5 steps before his
+	// boss row when the party pulled the pack beside him). The leg, the family and the main tank's distance still do.
+	if b-w.lastStatus.Step > earlyEngageSteps && w.bossDoneStep == 0 {
 		return false, 0
 	}
 	lead, ok := w.botAt[w.mt]
@@ -2995,7 +3355,8 @@ func (w *walk) allDead(now time.Time) bool {
 }
 
 // waitReset waits until no hostile with a party target was seen for 20 s and every hostile seen in the last
-// 60 s is at 100 % or gone.
+// 60 s is at 100 % or gone. Critters never count: the frame's own critter flag (hostile kind holding 'k'), so a
+// hurt snake cannot hold the reset open.
 func (w *walk) waitReset(ctx context.Context, limit time.Duration) error {
 	w.resetSince = time.Time{}
 	deadline := w.env.now().Add(limit)
@@ -3023,11 +3384,16 @@ func (w *walk) waitReset(ctx context.Context, limit time.Duration) error {
 	}
 }
 
-// resetReady is the reset condition, held for 20 s.
+// resetReady is the reset condition, held for 20 s. A critter never counts (turtle-agent#379): the frame's own
+// critter flag (kind holding 'k'), which is what the bystander rows of the module carry at any level. The frame
+// carries no max health, so the absolute-vs-percent band test lives on the units read instead (raidwalk's critter).
 func (w *walk) resetReady(now time.Time) bool {
 	clear := true
 	for _, h := range w.hostiles {
 		if now.Sub(h.at) > 60*time.Second {
+			continue
+		}
+		if resetCritter(h) {
 			continue
 		}
 		if h.target != 0 && w.partyG[h.target] {
@@ -3047,6 +3413,14 @@ func (w *walk) resetReady(now time.Time) bool {
 		w.resetSince = now
 	}
 	return now.Sub(w.resetSince) >= 20*time.Second
+}
+
+// resetCritter says the frame row is a critter the reset wait never counts (turtle-agent#379): primarily the
+// frame's own critter flag — the hostile kind holding 'k' (tbm.HostileRec Bystander) — whatever its level; a
+// level-1-by-level row without the flag is not one here, because the frame carries no max health for the fallback
+// band test (that band test lives on the units read, raidwalk's critter).
+func resetCritter(h hostileState) bool {
+	return strings.Contains(h.kind, "k")
 }
 
 // revive is the walk-4 recipe's ending: revive and always end the walk with exit 19.
@@ -3148,14 +3522,52 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 		return q.err
 	}
 	ok, why, blockers := q.ok, q.why, q.blockers
-	// cur is the point the commander stands at: p, or the entrance once the fallback's go has LANDED. The D-C wait
-	// re-reads that one. entranceTried says the fallback's `.go xyz` went out at all (the refusal's entrance_tried).
+	// cur is the point the commander stands at: p, a fallback row, or the entrance once its go has LANDED. The D-C
+	// wait re-reads that one. entranceTried says the entrance fallback's `.go xyz` went out at all (the refusal's
+	// entrance_tried); tried is every point the revive tried, in order (the refusal's tried_steps).
 	cur := p
+	curStep := w.reviveStep()
+	tried := []int{curStep}
 	entranceTried, entranceLanded := false, true
-	if !ok && w.place == nil {
-		// A door-to-end walk falls back to the entrance; a placed one does not: the entrance is behind the legs the
-		// placement skipped, and the run leader's walk back would cross them (spec 6).
+	if !ok {
+		// The point stays refused for its 120 s check: try the earlier move rows of its own leg, newest first, then
+		// the previous leg's last move row. Each is quiet-checked in turn; the first quiet one revives the raid there.
+		for _, cand := range w.reviveFallbackRows() {
+			if timeout := w.recoveryExpired(deadline); timeout != nil {
+				return timeout
+			}
+			w.note("revive: point %d refused (%s); trying %d", curStep, why, cand.step)
+			w.logLine(w.env.now(), fmt.Sprintf("revive: point %d refused (%s); trying %d", curStep, why, cand.step))
+			tried = append(tried, cand.step)
+			cq, landed, err := w.reviveGoPoint(ctx, cand.point, joined, selfRegroup, deadline)
+			if err != nil {
+				return err
+			}
+			if cq.timeout != nil {
+				return cq.timeout
+			}
+			if cq.err != nil {
+				return cq.err
+			}
+			// A point switch needs a fresh quiet state (Codex H2): the old point's patrol distances must not exempt
+			// a stationary patrol at the new one whose distance grew only because the point moved.
+			cur, curStep, qs = cand.point, cand.step, w.newQuietStateFor()
+			if !landed {
+				why = fmt.Sprintf("the commander did not land at step %d", cand.step)
+				continue
+			}
+			ok, why, blockers = cq.ok, cq.why, cq.blockers
+			if ok {
+				break
+			}
+		}
+	}
+	if !ok {
+		// The instance entrance is the last fallback: the old entrance fallback, and it now also runs for a placed
+		// walk whose own point and rows all stayed refused (the 392 run: the placed walk never reached it).
 		e := w.plan.Entrance
+		w.note("revive: point %d refused (%s); trying the entrance", curStep, why)
+		w.logLine(w.env.now(), fmt.Sprintf("revive: point %d refused (%s); trying the entrance", curStep, why))
 		if !joined && !ghosts { // only a self-regroup gets here unjoined: one more try, and the far go again when it fails
 			var jerr error
 			if joined, why, jerr = w.joinHires(ctx, e, deadline); jerr != nil {
@@ -3180,15 +3592,12 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 				return timeout
 			}
 			if werr != nil {
-				// The go was accepted but never landed: the commander still stands at p, so a quiet read of e would
-				// judge a point its own character is nowhere near (quietOnce's own reach rule) and D-C would wait on
-				// nothing. Refuse (review round 1, Codex/Opus H1).
+				// The go was accepted but never landed: the commander still stands at the last point, so a quiet read
+				// of e would judge a point its own character is nowhere near (quietOnce's own reach rule) and D-C
+				// would wait on nothing. Refuse (review round 1, Codex/Opus H1).
 				entranceLanded = false
 			} else {
-				// Only a LANDED go makes the entrance the checked point, and a point switch needs a fresh quiet state
-				// (Codex H2): p's patrol distances must not exempt a stationary patrol at e whose distance grew for
-				// no reason but the point moving.
-				cur, qs = e, w.newQuietStateFor()
+				cur, qs, curStep = e, w.newQuietStateFor(), 0
 				eq := w.quietCheck(ctx, qs, e, deadline)
 				if eq.timeout != nil {
 					return eq.timeout
@@ -3201,7 +3610,7 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 		}
 	}
 	if !entranceLanded {
-		w.reviveRefusal = w.refusal(step, blockers, w.env.now().Sub(waitFrom), entranceTried)
+		w.reviveRefusal = w.refusal(step, blockers, w.env.now().Sub(waitFrom), entranceTried, tried...)
 		return stopf(exitRaidWalkIncident, "not revived: the entrance go never landed (the commander is not within %d yd of the revive point on map %d)", reviveLandingYd, w.plan.Map)
 	}
 	if !ok {
@@ -3226,7 +3635,7 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 		}
 	}
 	if !ok {
-		w.reviveRefusal = w.refusal(step, blockers, w.env.now().Sub(waitFrom), entranceTried)
+		w.reviveRefusal = w.refusal(step, blockers, w.env.now().Sub(waitFrom), entranceTried, tried...)
 		return stopf(exitRaidWalkIncident, "not revived: %s", why)
 	}
 	if w.place != nil {
@@ -3253,10 +3662,36 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 			}
 		}
 	}
-	if err := w.recoverySleep(ctx, 10*time.Second, deadline); err != nil {
-		return err
+	// --revive-at-raid: the commander stands on cur from here on, the point the hires are brought back to.
+	atRaid := selfRegroup && w.opts.reviveAtRaid
+	if w.opts.reviveAtRaid {
+		spot := cur
+		w.reviveSpot = &spot
 	}
-	for _, name := range w.hireList() {
+	// A self-regroup: TB released the party at its regroup line, and a released bot's graveyard repop fires only once
+	// its pending movement changes are acked. A `.revive` inside that window makes the bot alive with the repop still
+	// pending, and the repop then far-teleports it out of the fight (CRASH-2026-11-03). So no revive goes out until
+	// selfRegroupReviveWait after the release, however long the checks above took, and then only the hires that are
+	// still dead are revived.
+	revives := w.hireList()
+	if selfRegroup {
+		if err := w.waitPastRelease(ctx, deadline); err != nil {
+			return err
+		}
+		var err error
+		if revives, err = w.stillDeadHires(ctx, deadline); err != nil {
+			return err
+		}
+	} else {
+		// Nothing was summoned in a self-regroup, so the 10 s the summons need is dead time while the ghosts run:
+		// revive at once (the earlier the revive, the nearer the corpse run's start).
+		if !atRaid {
+			if err := w.recoverySleep(ctx, 10*time.Second, deadline); err != nil {
+				return err
+			}
+		}
+	}
+	for _, name := range revives {
 		if timeout := w.recoveryExpired(deadline); timeout != nil {
 			return timeout
 		}
@@ -3298,6 +3733,10 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 			w.note("revive: still could not join the hires' instance after the self-regroup revives (%s)", why)
 		}
 	}
+	// --revive-at-raid: the hires the ghosts' corpse run had carried far away are brought to the point.
+	if atRaid {
+		return w.reviveBringBack(ctx, cur, deadline)
+	}
 	return nil
 }
 
@@ -3306,9 +3745,13 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 // again: the watch loop keeps going and the summary's end stays truthful. Any failure ends the walk with the
 // failure's own reason, exactly as endWipe would. Review round 2: the boss evidence must be fresh, the rest
 // needs a complete quiet view, and the whole recovery has an absolute deadline.
-func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) error {
-	if err := w.bossUnknown(ctx); err != nil {
-		return err
+func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup, runLeaderFights bool) error {
+	// The boss-unknown gate guards a revival under a boss the WALK owns. When the run leader fights the boss, the walk
+	// owns no attempt to be unsure about: the run's own fight carries on after the revive.
+	if !runLeaderFights {
+		if err := w.bossUnknown(ctx); err != nil {
+			return err
+		}
 	}
 	// The recovery ends the boss attempt that wiped: nothing the frames showed before it bounds the next
 	// attempt's kill evidence (review round 3). The corpse wait's alive link and first sighting end with
@@ -3325,27 +3768,45 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 		return err
 	}
 	revived := len(w.hireList())
+	// --revive-at-raid: no resume while a hire is far or fighting away from the raid (up to 60 s, then it goes on
+	// with a note naming them).
+	if selfRegroup {
+		if err := w.reviveGather(ctx, deadline); err != nil {
+			if timeout, ok := err.(*recoveryTimeout); ok {
+				return timeout.end(step)
+			}
+			return err
+		}
+	}
 	if selfRegroup {
 		// The run is running and regroups by itself: it rests, gathers and walks back on its own.
 		// No out-of-combat rest and no run resume (walk 17b: the rest never got quiet while the
 		// run marched on). The post-revive boss re-check still runs; a boss it names ends the walk.
-		if _, err := w.freshWipeRest(); err != nil {
-			return err
+		//
+		// When the run leader fights the boss, the boss gate below has nothing to decide: the live boss is the
+		// run's own fight and recoveredBoss hands that encounter back to it (walk 32's boss-step wipes).
+		if !runLeaderFights {
+			if _, err := w.freshWipeRest(); err != nil {
+				return err
+			}
 		}
 		// The retry starts here: every frame polled above (the revive's, the rest's) is the wiped attempt's, so
 		// the record's phase counts only the entries the retry's own polls see (spec 6, D5, #1453).
 		w.resetBossForms()
 		w.resumeStatusSeq = w.statusSeq // recoveredBoss's run-leader exception needs a status after this point
-		if err := w.recoveredBoss(ctx, step); err != nil {
+		if err := w.recoveredBoss(ctx, step, runLeaderFights); err != nil {
 			return err
 		}
 		w.wipeResumes++
 		w.note("wipe-resume %d/%d at step %d: revived %d; the run regroups by itself (no rest, no resume)", w.wipeResumes, w.opts.wipeResume, step, revived)
 		return errWipeRecovered
 	}
-	rest, err := w.freshWipeRest()
-	if err != nil {
-		return err
+	rest := w.opts.wipeRest
+	if !runLeaderFights {
+		var err error
+		if rest, err = w.freshWipeRest(); err != nil {
+			return err
+		}
 	}
 	seq0 := w.statusSeq
 	if err := w.restOutOfCombat(ctx, step, rest, deadline); err != nil {
@@ -3358,12 +3819,19 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 			// The retry already began: the rest's polls above are the wiped attempt's frames (spec 6, D5, #1453).
 			w.resetBossForms()
 			w.resumeStatusSeq = seq0
-			if rerr := w.recoveredBoss(ctx, step); rerr != nil {
+			if rerr := w.recoveredBoss(ctx, step, runLeaderFights); rerr != nil {
 				return rerr
 			}
 			w.wipeResumes++
 			w.note("wipe-resume %d/%d at step %d: revived %d; the run went on by itself during the rest (no resume)", w.wipeResumes, w.opts.wipeResume, step, revived)
 			return errWipeRecovered
+		}
+		return err
+	}
+	// --revive-at-raid: the resume waits for the raid to gather (the rest's own polls are the same wiped attempt's).
+	if err := w.reviveGather(ctx, deadline); err != nil {
+		if timeout, ok := err.(*recoveryTimeout); ok {
+			return timeout.end(step)
 		}
 		return err
 	}
@@ -3376,7 +3844,7 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 		}
 		return err
 	}
-	if err := w.recoveredBoss(ctx, step); err != nil {
+	if err := w.recoveredBoss(ctx, step, runLeaderFights); err != nil {
 		return err
 	}
 	w.wipeResumes++
@@ -3398,6 +3866,7 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 	from := w.env.now()
 	w.wipeAt = from
 	deadline := recoveryDeadline(from, w.opts.wipeRest, w.opts.maxRunMinutes, w.started)
+	w.reviveSpot = nil
 	revived, err := w.recoverNearWipeRevive(ctx, step, deadline)
 	if err != nil {
 		if timeout, ok := err.(*recoveryTimeout); ok {
@@ -3420,12 +3889,19 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 			// The rest's polls above are the wiped attempt's frames, the retry's follow (spec 6, D5, #1453).
 			w.resetBossForms()
 			w.resumeStatusSeq = seq0
-			if rerr := w.recoveredBoss(ctx, step); rerr != nil {
+			if rerr := w.recoveredBoss(ctx, step, false); rerr != nil {
 				return rerr
 			}
 			w.wipeResumes++
 			w.note("wipe-resume %d/%d at step %d: revived %d; the run went on by itself during the rest (no resume)", w.wipeResumes, w.opts.wipeResume, step, revived)
 			return errWipeRecovered
+		}
+		return err
+	}
+	// --revive-at-raid: no resume while a hire is far or fighting away from the raid.
+	if err := w.reviveGather(ctx, deadline); err != nil {
+		if timeout, ok := err.(*recoveryTimeout); ok {
+			return timeout.pausedEnd(step)
 		}
 		return err
 	}
@@ -3437,7 +3913,7 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 		}
 		return err
 	}
-	if err := w.recoveredBoss(ctx, step); err != nil {
+	if err := w.recoveredBoss(ctx, step, false); err != nil {
 		return err
 	}
 	w.wipeResumes++
@@ -3475,6 +3951,10 @@ func (w *walk) recoverNearWipeRevive(ctx context.Context, step int, deadline tim
 		if err := w.recoverySleep(ctx, 100*time.Millisecond, deadline); err != nil {
 			return 0, err
 		}
+	}
+	// --revive-at-raid: the corpses may lie far from the raid; bring those hires to the living ones.
+	if err := w.reviveBringBackNear(ctx, dead, deadline); err != nil {
+		return 0, err
 	}
 	return len(dead), nil
 }
@@ -3682,8 +4162,10 @@ func (w *walk) completeDeadView(ctx context.Context) ([]string, bool) {
 // new boss from one engaged before the recovery (it fires once for life), so this decides from
 // what the frames say now — the same bossEngagedNow the non-recovery path gates on, with the
 // row's plan-boss identity from the frames — and reuses the watch loop's handleBoss call,
-// including its run-leader-fights-its-boss exception.
-func (w *walk) recoveredBoss(ctx context.Context, step int) error {
+// including its run-leader-fights-its-boss exception. knownFight says the wipe handler already decided the engaged
+// boss is the run leader's own fight (a boss-step wipe under an until that goes past the step): no new status line is
+// needed then, because the boss was not newly engaged during the recovery.
+func (w *walk) recoveredBoss(ctx context.Context, step int, knownFight bool) error {
 	if !w.bossEngagedNow() {
 		return nil
 	}
@@ -3701,11 +4183,14 @@ func (w *walk) recoveredBoss(ctx context.Context, step int) error {
 	// stale boss-kind status must not hide a newly engaged boss. A fresh
 	// post-resume boss-kind status keeps the old behaviour: the run leader
 	// fights its boss step.
-	if w.statusSeq > w.resumeStatusSeq {
+	if knownFight || w.statusSeq > w.resumeStatusSeq {
 		if ok, early := w.runFightsBoss(entry); ok {
-			if early > 0 {
+			switch {
+			case strings.TrimSpace(w.opts.until) == "none":
+				w.note("boss %d engaged at step %d under --until none: the run leader fights it", entry, step)
+			case early > 0:
 				w.note("boss %d engaged at step %d, before its boss step %d in the same leg, and the until (%s) goes past it, so the run leader fights it", entry, step, early, w.untilLabel)
-			} else {
+			default:
 				w.note("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", entry, step, w.untilLabel)
 			}
 			return nil
@@ -3964,6 +4449,67 @@ func selfRegroupNote(note string) bool {
 // same step in one poll (walk 18 r5: m910q s4, test2 s2), so the note is at most one poll old.
 const selfRegroupWindow = 30 * time.Second
 
+// selfRegroupReviveWait is how long after TB's release (the regroup line the walk read) a self-regroup waits before its
+// first `.revive`: the released bots' graveyard repop must fire (or be cleared by TB) before a bot is made alive again.
+const selfRegroupReviveWait = 10 * time.Second
+
+// waitPastRelease sleeps until selfRegroupReviveWait after the regroup line (regroupAt), or not at all when that has
+// passed already. With no regroup time it waits the full wait.
+func (w *walk) waitPastRelease(ctx context.Context, deadline time.Time) error {
+	d := selfRegroupReviveWait
+	if !w.regroupAt.IsZero() {
+		d = w.regroupAt.Add(selfRegroupReviveWait).Sub(w.env.now())
+	}
+	if d <= 0 {
+		return nil
+	}
+	return w.recoverySleep(ctx, d, deadline)
+}
+
+// stillDeadHires reads a fresh frame and returns the hires it shows dead, in hire order. It logs one line with the
+// counts: alive hires (TB already brought them back) and hires missing from the frame are never revived.
+func (w *walk) stillDeadHires(ctx context.Context, deadline time.Time) ([]string, error) {
+	now := w.env.now()
+	n, frame, err := w.view(ctx, w.afterN, 2000)
+	if ctx.Err() != nil {
+		return nil, stopf(exitRaidWalkFailed, "interrupted")
+	}
+	if err != nil || frame == nil {
+		return nil, stopf(exitRaidWalkIncident, "not revived: could not read which hires are still dead after the regroup (%v)", err)
+	}
+	w.afterN = n
+	w.trackFrame(now, frame)
+	if timeout := w.recoveryExpired(deadline); timeout != nil {
+		return nil, timeout
+	}
+	dead, alive, unread := stillDead(w.hireList(), frame.Party)
+	msg := fmt.Sprintf("revive after the regroup: %d hire(s) still dead (revived), %d alive (TB brought them back: not revived), %d not in the frame (not revived)", len(dead), alive, unread)
+	w.note("%s", msg)
+	w.logLine(w.env.now(), msg)
+	return dead, nil
+}
+
+// stillDead splits the hires by the party read of one frame: dead when the read shows them dead, alive when it shows
+// them up, unread when the party list does not have them. Hire order is kept.
+func stillDead(hires []string, party []tbm.PartyRec) (dead []string, alive, unread int) {
+	byName := make(map[string]tbm.PartyRec, len(party))
+	for _, p := range party {
+		byName[p.Name] = p
+	}
+	for _, name := range hires {
+		p, ok := byName[name]
+		switch {
+		case !ok:
+			unread++
+		case p.Dead || p.State == "d":
+			dead = append(dead, name)
+		default:
+			alive++
+		}
+	}
+	return dead, alive, unread
+}
+
 // runObsKeep bounds w.runLines: a running status stays for the self-regroup window and well past a
 // rest turn, while a long watch still cannot grow the list without bound.
 const runObsKeep = 5 * time.Minute
@@ -3985,23 +4531,23 @@ func (w *walk) recordRunLine(st tbm.RunStatus, now time.Time) {
 	}
 }
 
-// selfRegroupSeen says a running status line recorded since the last recovery reports the run
+// selfRegroupLine returns the running status line recorded since the last recovery that reports the run
 // regrouping by itself: its note arrived within selfRegroupWindow of now and either it is the line of
 // this step — pollOnce keeps every running line of a page, so the note still counts when a later line
 // of the same page ("regroup: waiting ... reviving", the run's own "regrouped") is the last status the
 // wipe fires on (walk 18 r5) — or its own page carried the run on to this step: the note's page holds
 // the note and the later line that moved the step, so the wipe explains the note (walk 19 r6).
-func (w *walk) selfRegroupSeen(step int, now time.Time) bool {
+func (w *walk) selfRegroupLine(step int, now time.Time) (runObs, bool) {
 	for i := len(w.runLines) - 1; i >= 0; i-- {
 		o := w.runLines[i]
 		if !selfRegroupNote(o.note) || now.Sub(o.at) > selfRegroupWindow {
 			continue
 		}
 		if o.step == step || (o.seq > w.pollSeq0 && step > o.step) {
-			return true
+			return o, true
 		}
 	}
-	return false
+	return runObs{}, false
 }
 
 // runWentOnAfter says a running status line the rest read after it began (seq0) shows the run going
@@ -4025,10 +4571,11 @@ func (w *walk) runWentOnAfter(seq0 uint64, step int) bool {
 // last failed read logged (D-E logs a change of blockers, not the same ones every 5 s). One state belongs to ONE
 // checked point: a fresh one whenever the point changes (Codex H2).
 type quietState struct {
-	prev   map[string]float64
-	idle   *raidwalk.QuietIdleReads
-	homes  raidwalk.QuietHomeSpawns
-	logged string
+	prev    map[string]float64
+	idle    *raidwalk.QuietIdleReads
+	homes   raidwalk.QuietHomeSpawns
+	patrols []raidwalk.QuietPatrol
+	logged  string
 }
 
 func newQuietState() *quietState {
@@ -4041,6 +4588,7 @@ func newQuietState() *quietState {
 func (w *walk) newQuietStateFor() *quietState {
 	st := newQuietState()
 	st.homes = raidwalk.PlanHomeSpawns(w.plan)
+	st.patrols = raidwalk.PlanQuietPatrols(w.plan)
 	return st
 }
 
@@ -4078,9 +4626,15 @@ func (w *walk) quietOnce(ctx context.Context, st *quietState, p dungeon.Point) (
 		st.idle.Reset() // a gap in the reads breaks the two-read idle rule (Codex round 3)
 		return false, "units: " + err.Error(), nil
 	}
-	patrols := make([]raidwalk.QuietPatrol, len(w.quietPatrols))
-	copy(patrols, w.quietPatrols)
+	patrols := make([]raidwalk.QuietPatrol, 0, len(w.quietPatrols)+len(st.patrols))
+	patrols = append(patrols, w.quietPatrols...)
+	patrols = append(patrols, st.patrols...)
+	w.applyPlanPatrolState(patrols)
 	for j := range patrols {
+		if j >= len(w.patrolGUIDS) {
+			// A plan patrol has no member guids: the run's state decides it (applyPlanPatrolState), never the units' distances.
+			continue
+		}
 		best := -1.0
 		for _, u := range us {
 			key := strings.ToUpper(u.GUID.String())
@@ -4111,6 +4665,81 @@ func (w *walk) quietOnce(ctx context.Context, st *quietState, p dungeon.Point) (
 		w.logLine(w.env.now(), fmt.Sprintf("quiet read at (%s %s %s): %s", num32(p.X), num32(p.Y), num32(p.Z), blockerWords(bs)))
 	}
 	return false, bs[0].Reason(), bs
+}
+
+// applyPlanPatrolState sets each plan patrol's exemption and remark for this read. A plan patrol's pack is done
+// (raidwalk.PatrolPackDone: its pull step was pulled and the run is past it, or its bound members are all dead, see
+// packMembersHP), and then its path stops blocking. A patrol whose pack cannot be tied to its units, whose pull step is
+// not in the rows, or whose members do not show it done keeps blocking and says so in its reason (fail safe).
+func (w *walk) applyPlanPatrolState(patrols []raidwalk.QuietPatrol) {
+	progress := 0
+	if w.haveStatus {
+		progress = w.lastStatus.Step
+	}
+	for j := len(w.quietPatrols); j < len(patrols); j++ {
+		p := &patrols[j]
+		p.Exempt, p.Note = false, ""
+		if p.Pack == nil {
+			p.Note = "its pull group cannot be tied to its units: blocks by path"
+			continue
+		}
+		step := raidwalk.PullStepOf(w.rows, *p.Pack)
+		pulled := step > 0 && w.pulledSteps[step]
+		hp, why := w.packMembersHP(p.Pack, p.Path)
+		p.Exempt = raidwalk.PatrolPackDone(step, pulled, progress, hp)
+		if p.Exempt {
+			continue
+		}
+		var notes []string
+		if step == 0 {
+			notes = append(notes, "its pull row is not in the plan's rows: blocks by path")
+		}
+		if why != "" {
+			notes = append(notes, why)
+		}
+		p.Note = strings.Join(notes, "; ")
+	}
+}
+
+// patrolCorridorYd is how close a pack unit's first sighting must stand to a plan patrol's path to be that patrol's member.
+const patrolCorridorYd = 15
+
+// patrolSpawnYd is how close a pack unit's first sighting must stand to one of the pack's spawns (its pull group's
+// positions) to be that pack's member: the raidwalk home-spawn tolerance (quietHomeYd).
+const patrolSpawnYd = 3
+
+// packMembersHP binds a plan patrol's members by guid (Codex HIGH, round 4). A hostile of the pack's members joins the
+// patrol only when the frames FIRST saw it within patrolCorridorYd of a path point or within patrolSpawnYd of a pack spawn,
+// so a same-entry mob first seen elsewhere never joins, dead or alive. It returns each bound member's last frame health.
+// The patrol can be retired only when at least the pack's unit count is bound (the set is then non-empty); with fewer,
+// it returns no health and a reason, so the caller's PatrolPackDone is false and the path keeps blocking (fail safe).
+func (w *walk) packMembersHP(pack *raidwalk.PatrolPack, path []dungeon.Point) ([]int, string) {
+	var hp []int
+	for _, h := range w.hostiles {
+		if !inEntries(pack.Members, h.entry) || !patrolBinds(h.first, path, pack.Spawns) {
+			continue
+		}
+		hp = append(hp, h.hppct)
+	}
+	if want := len(pack.Entries); len(hp) < want {
+		return nil, fmt.Sprintf("%d of its %d pack units are bound to the path: blocks by path", len(hp), want)
+	}
+	return hp, ""
+}
+
+// patrolBinds says a unit first seen at first is a member of the patrol with this path and pack spawns (packMembersHP).
+func patrolBinds(first dungeon.Point, path, spawns []dungeon.Point) bool {
+	for _, pt := range path {
+		if raidDist3(pt, first.X, first.Y, first.Z) <= patrolCorridorYd {
+			return true
+		}
+	}
+	for _, s := range spawns {
+		if raidDist3(s, first.X, first.Y, first.Z) <= patrolSpawnYd {
+			return true
+		}
+	}
+	return false
 }
 
 // blockerKey identifies a blocker set for D-E's log-on-a-change rule: the units and patrols by identity and state,
@@ -4231,10 +4860,15 @@ const selfRegroupQuietCap = 5 * time.Minute
 // quiet, from its first read. all_idle says every blocker of the last read was idle, which is what makes waiting
 // pointless; a read that named no unit blocker at all (a failed RPC, say) does not claim that. entrance_tried says the
 // entrance fallback's go went out (review round 1, Opus L3).
-func (w *walk) refusal(step int, blockers []raidwalk.QuietBlocker, waited time.Duration, entranceTried bool) *raidwalk.ReviveRefusal {
+// tried is every point the revive tried, in order (the revive point and its fallback rows): a call without one
+// records the revive point alone. The entrance has no step; entranceTried says it was reached.
+func (w *walk) refusal(step int, blockers []raidwalk.QuietBlocker, waited time.Duration, entranceTried bool, tried ...int) *raidwalk.ReviveRefusal {
 	at := w.reviveStep()
+	if len(tried) == 0 {
+		tried = []int{at}
+	}
 	r := &raidwalk.ReviveRefusal{
-		WipeStep: step, StartStep: at, TriedSteps: []int{at}, EntranceTried: entranceTried,
+		WipeStep: step, StartStep: at, TriedSteps: append([]int{}, tried...), EntranceTried: entranceTried,
 		WaitedS: int(waited / time.Second), Blockers: make([]raidwalk.ReviveBlocker, 0, len(blockers)),
 		AllIdle: len(blockers) > 0,
 	}
@@ -4264,6 +4898,82 @@ func (w *walk) reviveStep() int {
 		return i + 1
 	}
 	return 1
+}
+
+// reviveCandidate is one fallback point of a refused revive: the row it comes from and its point.
+type reviveCandidate struct {
+	step  int
+	point dungeon.Point
+}
+
+// reviveFallbackRows lists the row fallbacks after the revive point, in the order the revive tries them: the earlier
+// move rows of the revive point's own leg, newest first, then the previous leg's last move row. The instance entrance
+// is the caller's last fallback. A point-less row (a rest at 0,0,0) is not a candidate.
+func (w *walk) reviveFallbackRows() []reviveCandidate {
+	return reviveFallbackRows(w.rows, w.reviveStep())
+}
+
+// reviveFallbackRows is the candidate list for a step in rows (the walk's own revive point uses it).
+func reviveFallbackRows(rows planexport.Rows, at int) []reviveCandidate {
+	if at < 1 || at > len(rows.Steps) {
+		return nil
+	}
+	leg := rows.Steps[at-1].Leg
+	var out []reviveCandidate
+	for i := at - 2; i >= 0; i-- {
+		s := rows.Steps[i]
+		if s.Leg != leg || !reviveMoveRow(s) {
+			continue
+		}
+		out = append(out, reviveCandidate{step: i + 1, point: dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}})
+	}
+	for i := at - 2; i >= 0; i-- {
+		s := rows.Steps[i]
+		if s.Leg != leg-1 {
+			continue
+		}
+		if reviveMoveRow(s) {
+			out = append(out, reviveCandidate{step: i + 1, point: dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}})
+			break
+		}
+	}
+	return out
+}
+
+// reviveMoveRow says the row is a positioned move the revive may stand on.
+func reviveMoveRow(s planexport.StepRow) bool {
+	if s.X == 0 && s.Y == 0 && s.Z == 0 {
+		return false
+	}
+	return s.Kind == planexport.KindMove || s.Kind == planexport.KindMoveDirect
+}
+
+// reviveGoPoint teleports the commander to p, waits for the landing, and quiet-checks the point once (a fallback row
+// gets one read: a blocked one is left for the next candidate, it does not get the 120 s wait the revive point does).
+// landed is false when the go never landed: the commander still stands at the previous point, so the caller refuses
+// that candidate without reading a point its character is nowhere near (quietOnce's own reach rule). A timeout or a
+// walk-ending error is returned for the caller to pass on.
+func (w *walk) reviveGoPoint(ctx context.Context, p dungeon.Point, joined, selfRegroup bool, deadline time.Time) (quietRead, bool, error) {
+	from, err := w.reviveFrom(ctx, joined, selfRegroup, deadline)
+	if err != nil {
+		return quietRead{}, false, err
+	}
+	seq, have := w.reviveSeq(ctx, deadline)
+	if st, serr := w.status(ctx); serr == nil {
+		w.logLine(w.env.now(), fmt.Sprintf("revive go from map %d (%.1f %.1f %.1f, z unknown %v, teleports %d)", st.Map, st.X, st.Y, st.Z, st.ZUnknown, st.TeleportSeq))
+	}
+	if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(p.X), num32(p.Y), num32(p.Z), w.plan.Map)); err != nil {
+		return quietRead{}, false, err
+	}
+	if err := w.waitRevivePoint(ctx, p, from, seq, have, deadline); err != nil {
+		if timeout, isTimeout := err.(*recoveryTimeout); isTimeout {
+			return quietRead{timeout: timeout}, false, nil
+		}
+		return quietRead{why: fmt.Sprintf("the commander did not land within %d yd of the point on map %d", reviveLandingYd, w.plan.Map)}, false, nil
+	}
+	qs := w.newQuietStateFor()
+	ok, why, bs := w.quietOnce(ctx, qs, p)
+	return quietRead{ok: ok, why: why, blockers: bs}, true, nil
 }
 
 // recoveryExpired reports the recovery's timed-out ending when the entry deadline

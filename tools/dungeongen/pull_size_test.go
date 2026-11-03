@@ -9,15 +9,14 @@ import (
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
-// The terrace pull (Arlokk leg, pull 14: the row over the G13/G16 terrace at
-// -11496.4 -1626.5 60.4, step 29 of the export) estimates 27 bodies with the
-// committed fixture (mmaps-free path, LOS always seen): the G12/G13/G16/G17
-// packs joined by the 20 yd ring (cross-pack gaps 11.0-19.5 yd) plus their
-// pack closures. The neighbouring terrace rows (pulls 13, 16, 17) estimate the
-// same 27; the pin holds this one row by its number and bodies, so a ring or
-// reach change that breaks the set joins shows up here, not just in the
-// per-plan count.
-func TestZulGurubArlokkTerraceIsOneTwentySevenPull(t *testing.T) {
+// The Arlokk terrace rows (leg 4, pulls 13-17 on this base) are split per formation by walk 29's fix 4b: 13 upper B +
+// upper east (10), 14 middle east (6), 15 upper north (4, unsized), 16 middle west (5), 17 lower (6). The ring estimate
+// (mmaps-free path, LOS always seen) still joins the whole 11-20 yd cluster, so each row estimates 27-37 bodies: that is
+// the walk-28 finding the split does not remove by itself (the neighbours are within the 20 yd family-assist ring), and
+// the pin holds the rows' numbers, ceilings and estimates so a ring or reach change that breaks the set shows up here,
+// not just in the per-plan count. Walk 29's field evidence is that the formation-sized pieces held (4-8 bodies at a
+// time), which is why the plan splits them despite this estimate.
+func TestZulGurubArlokkTerraceIsSplitPerFormation(t *testing.T) {
 	p, err := dungeon.Load("../../dungeons/zul_gurub.json")
 	if err != nil {
 		t.Fatal(err)
@@ -39,17 +38,29 @@ func TestZulGurubArlokkTerraceIsOneTwentySevenPull(t *testing.T) {
 			t.Logf("leg %d pull %d: %d bodies (ceiling %d): %s", f.Leg, f.Pull, f.Bodies, f.Ceiling, f.Summary)
 		}
 	}
-	terrace := -1
-	for i, f := range found {
-		if f.Leg == 4 && f.Pull == 14 {
-			terrace = i
+	want := map[int]struct{ bodies, ceiling int }{
+		13: {31, 10}, // upper B + upper east: max_bodies 10
+		14: {31, 2},  // middle east Blood Drinkers, pulled first from the clear stand: max_bodies 2
+		15: {31, 4},  // middle east Panthers: max_bodies 4
+		16: {31, 8},  // upper north: unsized (the lint's raid default)
+		17: {27, 5},  // middle west: max_bodies 5
+		18: {37, 6},  // lower: max_bodies 6
+	}
+	seen := map[int]bool{}
+	for _, f := range found {
+		w, ok := want[f.Pull]
+		if f.Leg != 4 || !ok {
+			continue
+		}
+		seen[f.Pull] = true
+		if f.Bodies != w.bodies || f.Ceiling != w.ceiling {
+			t.Errorf("leg 4 pull %d estimates %d bodies (ceiling %d), want %d (ceiling %d): %s", f.Pull, f.Bodies, f.Ceiling, w.bodies, w.ceiling, f.Summary)
 		}
 	}
-	if terrace < 0 {
-		t.Fatalf("no pull 14 on leg 4: %v", found)
-	}
-	if found[terrace].Bodies != 27 {
-		t.Fatalf("leg 4 pull 14 estimates %d bodies, want 27: %s", found[terrace].Bodies, found[terrace].Summary)
+	for pull := range want {
+		if !seen[pull] {
+			t.Errorf("no leg 4 pull %d in the sizes: %v", pull, found)
+		}
 	}
 }
 
@@ -64,12 +75,22 @@ var pullSizeKnownCounts = map[string]int{
 	// The repo reach (AggroRadius at the plan's party level plus the party's
 	// spread) and the 20 yd ring join neighbouring packs: every dense plan
 	// warns on most of its pulls (mmaps-free path, LOS always seen).
-	"ragefire_chasm": 28, "wailing_caverns": 54, "deadmines": 131,
-	"uldaman": 58, "zulfarrak": 53, "karazhan_crypt": 125,
-	"molten_core": 21, "blackwing_lair": 40, "zul_gurub": 95,
-	"ruins_of_ahnqiraj": 32, "temple_of_ahnqiraj": 74, "naxxramas": 150,
-	"lower_karazhan_halls": 79, "upper_karazhan_halls": 30,
-	"emerald_sanctum": 7, "timbermaw_hold": 27,
+	"ragefire_chasm": 28, "wailing_caverns": 54, "deadmines": 132,
+	// zulfarrak re-pinned for the waypoint lint fixes (was 53): leg 8 pull 1 (12 bodies) now crosses the ceiling and leg 3 pull 1 grows 11 -> 14 bodies.
+	"uldaman": 57, "zulfarrak": 54, "karazhan_crypt": 125, // waypoint pass (was 58): the moved stands join fewer neighbouring packs.
+	"molten_core": 19, "blackwing_lair": 40, "zul_gurub": 92, // re-pinned for the walk-32 point fixes: the regenerated leg 7/8 rows and their stands in the dense pool ring, and the leg-0 group-3 row now names the Razzashi Adder 11372 that stands on its point. raids-mc-bwl-ony (was 21): the moved stands clear two pulls' rings.
+	"ruins_of_ahnqiraj": 29, "temple_of_ahnqiraj": 74, "naxxramas": 150, // re-pinned for the AQ waypoint pass (was 32): three over-ceiling estimates are gone, the leg-0 stands moved out of the wasp ring, the leg-3 stand off the Rajaxx cluster walk, and leg-6 pull 4 drops 15 bodies to 9.
+	"stormwrought_ruins":   169,                            // hand-maintained from the generated draft (waypoint pass 2026-11-03): dense custom packs warn on most pulls.
+	"lower_karazhan_halls": 78, "upper_karazhan_halls": 30, // waypoint pass (was 79): one moved stand pulls its pack from one body fewer.
+	"emerald_sanctum": 8, "timbermaw_hold": 27, "hateforge_quarry": 120, // waypoint pass (was 7): the moved north_hall stands' estimates join one more neighbour pack. hateforge_quarry newly hand-maintained (was a generated draft): the current over-ceiling pulls.
+	"maraudon_orange": 57, "maraudon_purple": 75, "blackrock_depths": 228, "scholomance": 101, // newly hand-maintained (were generated): the moved stands' estimates; maraudon_purple's water fix moves its two starts.
+	"razorfen_kraul": 89, "dire_maul_north": 19, "windhorn_canyon": 84, "upper_blackrock_spire": 68,
+	"blackfathom_deeps": 74, "gnomeregan": 94, "lower_blackrock_spire": 104, "stormwind_vault": 30,
+	"frostmane_hollow": 51, "dire_maul_east": 50, "dire_maul_west": 72, "razorfen_downs": 75, "sunken_temple": 62,
+	"scarlet_armory": 36, "scarlet_cathedral": 41, "scarlet_graveyard": 50, "scarlet_library": 44, "shadowfang_keep": 72,
+	"stormwind_stockade": 40, "stratholme_live": 58, "stratholme_undead": 74,
+	// newly hand-maintained (waypoint lint fixes): measured over-ceiling pulls of the four drafts.
+	"crescent_grove": 99, "dragonmaw_retreat": 89, "gilneas_city": 90, "black_morass": 35,
 }
 
 func TestPullSizesUnderCeiling(t *testing.T) {

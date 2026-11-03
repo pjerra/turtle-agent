@@ -261,6 +261,7 @@ func slotSetupCmd(args []string, stdout, stderr io.Writer) int {
 	dst := config.Settings{
 		Realmd:            server.Realmd,
 		Realm:             server.Realm,
+		ServerName:        server.Name,
 		WorldAddr:         server.WorldAddr,
 		RPC:               fmt.Sprintf("127.0.0.1:%d", slot.Port),
 		Accounts:          map[string]string{slot.Account: pw},

@@ -19,7 +19,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/planexport"
 )
 
-const planExportUsage = "usage: turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--gm-cross-direct] [--approach-hops] [--skip-legs NAME,...] [--with-optional NAME,...] [--with-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)"
+const planExportUsage = "usage: turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--gm-cross-direct] [--approach-hops] [--floor-aware] [--skip-legs NAME,...] [--with-optional NAME,...] [--with-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)"
 
 // migrationName is what a TortoiseBots world migration is called (data/sql/world/).
 var migrationName = regexp.MustCompile(`^\d{14}_world\.sql$`)
@@ -41,6 +41,7 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 	carrierChests := fs.Bool("carrier-chests", false, "with --drop-companions-loot, export such a leg's loot_object steps as carrier rows: a move to its stand, the loot (gone-is-done flag 256), and — when the leg has leftover_entries — their sweep pull at the point; the bots' looting still has to be turned off for the leg in the setup, or a module's trapped-chest rule has to skip them; flag 256 needs a TortoiseBots module with the gone-is-done step flag: an older module ignores it and pauses on a despawned grave after a wipe (then a .bot run skip skips the row)")
 	gmCrossDirect := fs.Bool("gm-cross-direct", false, "export a gm_cross waypoint as a move_direct (a straight walk to the landing point) instead of refusing the plan; only for a gap that is a drop the line crosses, and not tried live")
 	approach := fs.Bool("approach-hops", false, "with --mmaps, also cut the hop to a pull, boss or hold that is more than 50 yd from the anchor before it into move rows along the navmesh path (the run leader's own hops are at most 8 of 40 yd)")
+	floorAware := fs.Bool("floor-aware", false, "with --mmaps, cut hops the floor-aware way: a hop up to 110 yd stays whole, corners under 8 yd apart and turns under 20 degrees get no row, kept corners are pushed 3 yd off the wall, and split points take their z from the navmesh floor (a split over a dip or liquid bed is dropped, with a warning)")
 	skipLegs := fs.String("skip-legs", "", "leg names (comma list) left out of the rows, each with a warning; the later legs close up. An unknown name is refused")
 	withOptional := fs.String("with-optional", "", "optional leg names (comma list) written into the rows anyway (Zul'Farrak's gahzrilla), each with a warning: the item the leg needs is the operator's to give to the lead bot before .bot run start (a GM .additem); a name that is no optional leg is refused")
 	withLegs := fs.String("with-legs", "", "skip_export leg names (comma list) written into the rows anyway (Zul'Farrak's farraki_arena, zeljeb), each with a warning; a name that is no skip_export leg is refused")
@@ -127,7 +128,7 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 	if *mmaps != "" {
 		planner = navmesh.NewPlanner(*mmaps)
 		defer planner.Close()
-		opt.Cut = cutWith(planner)
+		opt.Cut = cutWith(planner, *floorAware)
 		// What the run leader's bots walk: the server's navmesh, which does not know a plan's avoid boxes.
 		naive = navmesh.NewPlanner(*mmaps)
 		defer naive.Close()
@@ -205,15 +206,31 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
-// cutWith cuts a hop along the navmesh path, leaving hops of at most planexport.MoveGapCutYd.
-func cutWith(pl *navmesh.Planner) func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, error) {
-	return func(mapID uint32, from, to dungeon.Point) ([]dungeon.Point, error) {
+// cutWith cuts a hop along the navmesh path. floorAware (plan-export's --floor-aware) keeps a hop of up to
+// planexport.FloorAwareHopYd whole, drops the corners a walk gains nothing from, puts the kept corners off the wall, and takes a
+// split point's z from the navmesh floor instead of the straight line between the corners.
+// pathPlanner is the offline planner cutWith asks: navmesh.Planner is one, a test fake the other.
+type pathPlanner interface {
+	Plan(mapID uint32, from, to navmesh.Vec3) (navmesh.Path, error)
+}
+
+func cutWith(pl pathPlanner, floorAware bool) planexport.CutFunc {
+	return func(mapID uint32, from, to dungeon.Point) ([]dungeon.Point, []planexport.CutNote, error) {
 		path, err := pl.Plan(mapID, navmesh.Vec3{from.X, from.Y, from.Z}, navmesh.Vec3{to.X, to.Y, to.Z})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if path.Status != navmesh.Complete || len(path.Points) < 2 {
-			return nil, fmt.Errorf("no complete path (%s %s)", path.Status, path.Reason)
+			return nil, nil, fmt.Errorf("no complete path (%s %s)", path.Status, path.Reason)
+		}
+		if floorAware {
+			if real, ok := pl.(*navmesh.Planner); ok {
+				via, notes, err := floorAwareCut(real, mapID, path)
+				if err != nil {
+					return nil, notes, err
+				}
+				return dropWetCut(real, mapID, via, &notes)
+			}
 		}
 		var via []dungeon.Point
 		prev := path.Points[0]
@@ -230,9 +247,203 @@ func cutWith(pl *navmesh.Planner) func(uint32, dungeon.Point, dungeon.Point) ([]
 			}
 			prev = p
 		}
-		return via, nil
+		var notes []planexport.CutNote
+		if real, ok := pl.(*navmesh.Planner); ok {
+			return dropWetCut(real, mapID, via, &notes)
+		}
+		return via, notes, nil
 	}
 }
+
+// dropWetCut drops the cut points that stand in or under a liquid: the plan's move rows are the points the party stops at, and a
+// water stop is the audit's water rule (a chase or a fall lands in water, and the run leader's own walk can stall there). The
+// water stays a crossing: the hop between the dry points either side is one hop, which the run leader's own path takes.
+func dropWetCut(pl *navmesh.Planner, mapID uint32, via []dungeon.Point, notes *[]planexport.CutNote) ([]dungeon.Point, []planexport.CutNote, error) {
+	if len(via) == 0 {
+		return via, *notes, nil
+	}
+	out := make([]dungeon.Point, 0, len(via))
+	for _, p := range via {
+		liq, err := navmesh.LiquidAt(pl, mapID, navmesh.Vec3{p.X, p.Y, p.Z})
+		if err != nil {
+			return nil, *notes, err
+		}
+		if liq.Wet {
+			what := "the point's own floor is NavWater"
+			if !liq.Own {
+				what = fmt.Sprintf("a NavWater floor stands %.1f yd above it within %g yd", liq.Z-p.Z, navmesh.LiquidNearYd)
+			}
+			*notes = append(*notes, planexport.CutNote{Old: p, Dropped: true,
+				Reason: fmt.Sprintf("%s: the water is crossed in one hop between dry points", what)})
+			continue
+		}
+		out = append(out, p)
+	}
+	return out, *notes, nil
+}
+
+// floorAwareCut is cutWith's --floor-aware route: the path's corners are merged (under FloorAwareMergeYd), unneeded (a turn under
+// FloorAwareTurnDeg) or pushed FloorAwarePushYd off the nearest wall, then the kept points are joined in hops of at most
+// planexport.FloorAwareHopYd, every split point taking its z from the floor and dropped when there is no ground within
+// FloorAwareFloorYd of the straight line's z.
+func floorAwareCut(pl *navmesh.Planner, mapID uint32, path navmesh.Path) ([]dungeon.Point, []planexport.CutNote, error) {
+	var notes []planexport.CutNote
+	kept := []navmesh.Vec3{path.Points[0]}
+	for i := 1; i < len(path.Points)-1; i++ {
+		p := path.Points[i]
+		prev := kept[len(kept)-1]
+		next := path.Points[i+1]
+		if turn := turnDeg(path.Points[i-1], p, next); turn < planexport.FloorAwareTurnDeg && canDrop(pl, mapID, prev, next) {
+			notes = append(notes, planexport.CutNote{Old: cutPoint(p), Dropped: true, Reason: fmt.Sprintf("the turn is %.0f degrees (under %g): the walk does not need a row here", turn, planexport.FloorAwareTurnDeg)})
+			continue
+		}
+		if d := cutDist(prev, p); d < planexport.FloorAwareMergeYd && canDrop(pl, mapID, prev, next) {
+			notes = append(notes, planexport.CutNote{Old: cutPoint(p), Dropped: true, Reason: fmt.Sprintf("%.1f yd from the point before it (under %g): one arrival radius covers both", d, planexport.FloorAwareMergeYd)})
+			continue
+		}
+		q, pushed, why := pushOffWall(pl, mapID, p)
+		if why != "" {
+			notes = append(notes, planexport.CutNote{Old: cutPoint(p), New: cutPoint(q), Reason: why})
+		} else if pushed {
+			notes = append(notes, planexport.CutNote{Old: cutPoint(p), New: cutPoint(q), Reason: fmt.Sprintf("pushed %g yd off the nearest wall", planexport.FloorAwarePushYd)})
+		}
+		kept = append(kept, q)
+	}
+	kept = append(kept, path.Points[len(path.Points)-1])
+	var via []dungeon.Point
+	for i := 1; i < len(kept); i++ {
+		a, b := kept[i-1], kept[i]
+		d := cutDist(a, b)
+		if d > planexport.FloorAwareHopYd {
+			n := int(math.Ceil(float64(d) / planexport.FloorAwareHopYd))
+			for k := 1; k < n; k++ {
+				f := float64(k) / float64(n)
+				x, y := a[0]+(b[0]-a[0])*float32(f), a[1]+(b[1]-a[1])*float32(f)
+				meanZ := a[2] + (b[2]-a[2])*float32(f)
+				floor, ok, err := splitFloor(pl, mapID, x, y, meanZ)
+				if err != nil {
+					return nil, notes, err
+				}
+				if !ok {
+					notes = append(notes, planexport.CutNote{Old: dungeon.Point{X: x, Y: y, Z: meanZ}, Dropped: true,
+						Reason: fmt.Sprintf("no ground within %g yd of %.1f yd (the straight line crosses a dip or a liquid bed): the hop stays %.0f yd", planexport.FloorAwareFloorYd, meanZ, d)})
+					continue
+				}
+				via = append(via, dungeon.Point{X: x, Y: y, Z: floor.Z})
+			}
+		}
+		if i < len(kept)-1 {
+			via = append(via, cutPoint(kept[i]))
+		}
+	}
+	return via, notes, nil
+}
+
+// pushOffWall moves a path corner FloorAwarePushYd away from the nearest mesh edge it can see within FloorAwareEdgeScanYd, snaps it
+// to the mesh and checks it is plain ground (not water, a steep slope or lava). It reports whether it moved, and why not when it
+// should have (the caller keeps the original then).
+func pushOffWall(pl *navmesh.Planner, mapID uint32, p navmesh.Vec3) (navmesh.Vec3, bool, string) {
+	dirs := 16
+	best, bestR := -1, float32(-1)
+	for k := range dirs {
+		a := 2 * math.Pi * float64(k) / float64(dirs)
+		q := navmesh.Vec3{p[0] + planexport.FloorAwareEdgeScanYd*float32(math.Cos(a)), p[1] + planexport.FloorAwareEdgeScanYd*float32(math.Sin(a)), p[2]}
+		ray, err := pl.Raycast(mapID, p, q)
+		if err != nil || !ray.Known {
+			return p, false, "the mesh cannot measure the wall at the corner: the original is kept"
+		}
+		if !ray.Clear && (bestR < 0 || ray.Hit < bestR) {
+			best, bestR = k, ray.Hit
+		}
+	}
+	if best < 0 {
+		return p, false, "" // open ground: no edge to push off
+	}
+	// Away from the nearest edge is the opposite of the ray that hit it.
+	a := 2 * math.Pi * float64(best) / float64(dirs)
+	q := navmesh.Vec3{p[0] - planexport.FloorAwarePushYd*float32(math.Cos(a)), p[1] - planexport.FloorAwarePushYd*float32(math.Sin(a)), p[2]}
+	n, ok, err := pl.Nearest(mapID, q)
+	if err != nil || !ok {
+		return p, false, "no walkable mesh within 4 yd of the pushed point: the original is kept"
+	}
+	floor, ok, err := groundFloor(pl, mapID, n)
+	if err != nil || !ok || math.Abs(float64(floor.Z-n[2])) > planexport.FloorAwareFloorYd ||
+		floor.Flags&navmesh.NavGround == 0 || floor.Flags&(navmesh.NavWater|navmesh.NavSteep|navmesh.NavMagma|navmesh.NavSlime) != 0 {
+		return p, false, fmt.Sprintf("the point %g yd off the wall is not plain ground (water, steep or lava): the original is kept", planexport.FloorAwarePushYd)
+	}
+	return n, true, ""
+}
+
+// splitFloor is the floor a split point takes its z from: the highest plain ground within FloorAwareFloorYd of meanZ at (x, y).
+func splitFloor(pl *navmesh.Planner, mapID uint32, x, y, meanZ float32) (navmesh.Floor, bool, error) {
+	fl, err := pl.Floors(mapID, x, y, meanZ-planexport.FloorAwareFloorYd, meanZ+planexport.FloorAwareFloorYd)
+	if err != nil {
+		return navmesh.Floor{}, false, err
+	}
+	best, ok := navmesh.Floor{}, false
+	for _, f := range fl {
+		if f.Flags&navmesh.NavGround == 0 || f.Flags&(navmesh.NavWater|navmesh.NavSteep|navmesh.NavMagma|navmesh.NavSlime) != 0 {
+			continue
+		}
+		if d := math.Abs(float64(f.Z - meanZ)); d <= planexport.FloorAwareFloorYd && (!ok || d < math.Abs(float64(best.Z-meanZ))) {
+			best, ok = f, true
+		}
+	}
+	return best, ok, nil
+}
+
+// groundFloor is the floor at p nearest p's z.
+func groundFloor(pl *navmesh.Planner, mapID uint32, p navmesh.Vec3) (navmesh.Floor, bool, error) {
+	fl, err := pl.Floors(mapID, p[0], p[1], p[2]-6, p[2]+6)
+	if err != nil || len(fl) == 0 {
+		return navmesh.Floor{}, false, err
+	}
+	best := fl[0]
+	for _, f := range fl {
+		if math.Abs(float64(f.Z-p[2])) < math.Abs(float64(best.Z-p[2])) {
+			best = f
+		}
+	}
+	return best, true, nil
+}
+
+// canDrop says the walk from a to b may skip the corner between them: the hop stays within FloorAwareHopYd, the straight line
+// keeps off the mesh edge, and the ground under its middle is within FloorAwareFloorYd of the line's z (a corner on a ramp or
+// over a dip is kept).
+func canDrop(pl *navmesh.Planner, mapID uint32, a, b navmesh.Vec3) bool {
+	d := cutDist(a, b)
+	if d > planexport.FloorAwareHopYd {
+		return false
+	}
+	ray, err := pl.Raycast(mapID, a, b)
+	if err != nil || !ray.Known || !ray.Clear && float64(ray.Hit) < d-1 {
+		return false
+	}
+	x, y := (a[0]+b[0])/2, (a[1]+b[1])/2
+	meanZ := (a[2] + b[2]) / 2
+	_, ok, err := splitFloor(pl, mapID, x, y, meanZ)
+	return err == nil && ok
+}
+
+// turnDeg is the 3D change of direction at b (0 straight on, 180 back).
+func turnDeg(a, b, c navmesh.Vec3) float64 {
+	u := navmesh.Vec3{b[0] - a[0], b[1] - a[1], b[2] - a[2]}
+	v := navmesh.Vec3{c[0] - b[0], c[1] - b[1], c[2] - b[2]}
+	lu, lv := cutDist(a, b), cutDist(b, c)
+	if lu == 0 || lv == 0 {
+		return 180
+	}
+	dot := float64(u[0])*float64(v[0]) + float64(u[1])*float64(v[1]) + float64(u[2])*float64(v[2])
+	cos := math.Max(-1, math.Min(1, dot/(lu*lv)))
+	return math.Acos(cos) * 180 / math.Pi
+}
+
+// cutDist is the 3D distance of the cutter's points.
+func cutDist(a, b navmesh.Vec3) float64 {
+	return math.Sqrt(float64(sq32(a[0]-b[0]) + sq32(a[1]-b[1]) + sq32(a[2]-b[2])))
+}
+
+func cutPoint(v navmesh.Vec3) dungeon.Point { return dungeon.Point{X: v[0], Y: v[1], Z: v[2]} }
 
 func sq32(v float32) float32 { return v * v }
 

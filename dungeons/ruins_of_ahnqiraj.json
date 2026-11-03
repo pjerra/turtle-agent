@@ -27,7 +27,7 @@
     "Rajaxx's event: the instance loads Andorov only once Kurinnaxx is DONE (instance_ruins_of_ahnqiraj.cpp Update); his menu 6629's option 0 (gossip_scripts 6629 -\u003e generic_scripts 154710) starts his run to the hall, and the first wave starts about 12 s after he reaches it (creature_movement_scripts 1547103 -\u003e 153911). The waves then chain captain by captain, and the hold ends when instance data 2 (TYPE_RAJAXX) reads 3, Rajaxx's death (creature_ai_events 1534101/1534102). Pulling any wave unit also starts Andorov's script (OnCreatureEnterCombat), so the gossip only says when; the hall's two Qiraji Gladiator pairs are pulled after it, because the wave units stand in the hall and would aggro on entry.",
     "Ossirian's crystals (180619) are summoned by the instance two at a time near the used one (SpawnNewCrystals) and the weakness school is random: no plan step can click a moving object, so the bosses' own fight strategy runs the crystal and the boss stand is on his platform. Buru's 6 eggs (summoned at z -63.5), Ayamiss's larvae and hornets and Moam's Mana Fiends are summoned by their bosses: no step.",
     "The map has no static door, lever or key: its 7 game objects are all Scarab Coffers (180691), which are left alone; door 176149 is summoned by the instance while any boss is in combat and deleted after (Update), so it gates nothing.",
-    "Every pull and every boss carries an approach stand (102 pulls, 5 bosses): 16-30 yd from a member, on the pack's floor, a complete server path from the point before it, 20 yd clear of every pull made later and of every Rajaxx wave spawn. The first stand of a leg is the leg's `to`. plan-check: ok, 352 points, 0 failures, 0 run-leader hops, 40 warnings (every patrol's period is an estimate the walk measures)."
+    "Every pull and every boss carries an approach stand (102 pulls, 5 bosses; 11 share a stand: each leg's first pull is fought from the leg's `to`, and 4 pulls whose stand sat within 8 yd of the previous stand share that stand): 16-30 yd from a member, on the pack's floor, a complete server path from the point before it, 20 yd clear of every pull made later and of every Rajaxx wave spawn. plan-check: ok, 341 points, 0 failures, 0 run-leader hops, 40 warnings (every patrol's period is an estimate the walk measures)."
   ],
   "legs": [
     {
@@ -40,10 +40,7 @@
             {"x": -8533.14, "y": 1518.29, "z": 33.2713},
             {"x": -8512.86, "y": 1506.96, "z": 33.5213}
           ],
-          "radius": 16.61554,
-          "approach": [
-            {"x": -8507.443, "y": 1528.1814, "z": 32.221165}
-          ]
+          "radius": 16.61554
         },
         {
           "entries": [15168],
@@ -271,7 +268,7 @@
           ],
           "radius": 5,
           "approach": [
-            {"x": -8696.733, "y": 1394.7236, "z": 32.088535}
+            {"x": -8694.61, "y": 1396.84, "z": 32.3}
           ]
         },
         {
@@ -372,7 +369,7 @@
             "source": "spawn 1178337"
           },
           "approach": [
-            {"x": -8622.954, "y": 1469.8104, "z": 31.9832}
+            {"x": -8607.95, "y": 1469.81, "z": 32.08}
           ]
         },
         {
@@ -675,7 +672,7 @@
             "source": "spawn 1178446"
           },
           "approach": [
-            {"x": -8624.927, "y": 1498.3234, "z": 31.978071}
+            {"x": -8606.93, "y": 1498.32, "z": 32.07}
           ]
         },
         {
@@ -853,7 +850,7 @@
     },
     {
       "name": "kurinnaxx",
-      "to": {"x": -8717.993, "y": 1600.1932, "z": 21.641983},
+      "to": {"x": -8744.99, "y": 1600.19, "z": 21.74},
       "pull_groups": [
         {
           "entries": [15325, 15327, 15325],
@@ -877,10 +874,7 @@
             "period_s": 87.343124,
             "period_estimate": true,
             "source": "spawn 1178352"
-          },
-          "approach": [
-            {"x": -8717.993, "y": 1600.1932, "z": 21.641983}
-          ]
+          }
         },
         {
           "entries": [15168],
@@ -899,7 +893,7 @@
           ],
           "radius": 5,
           "approach": [
-            {"x": -8655.85, "y": 1640.164, "z": 21.469395}
+            {"x": -8658.15, "y": 1645.71, "z": 21.47}
           ]
         },
         {
@@ -925,7 +919,7 @@
             "source": "spawn 1178354"
           },
           "approach": [
-            {"x": -8711.927, "y": 1634.64, "z": 24.164387}
+            {"x": -8707.68, "y": 1638.88, "z": 23.89}
           ]
         },
         {
@@ -1031,10 +1025,7 @@
           "positions": [
             {"x": -8938.57, "y": 1533.05, "z": 22.2206}
           ],
-          "radius": 5,
-          "approach": [
-            {"x": -8938.57, "y": 1555.05, "z": 21.513962}
-          ]
+          "radius": 5
         },
         {
           "entries": [15324, 15324],
@@ -1044,7 +1035,7 @@
           ],
           "radius": 12.677544,
           "approach": [
-            {"x": -9077.217, "y": 1651.8136, "z": 21.622665}
+            {"x": -9085.7, "y": 1660.3, "z": 21.5}
           ]
         },
         {
@@ -1069,21 +1060,21 @@
               "radius": 80,
               "state": "dead"
             },
-            "timeout_s": 600,
+            "timeout_s": 1500,
             "fail_text": "Rajaxx's event did not finish: a wave is still up, or a wave evaded and the event reset (Andorov's script despawns and respawns the captains; each wave has 180 s).",
             "hold": {
               "instance_data": 2,
               "value": 3,
               "spot": {"x": -9105.203, "y": 1610.6904, "z": 23.540438},
               "radius": 40,
-              "timeout_s": 600,
+              "timeout_s": 1500,
               "entries": [15341, 15385, 15386, 15388, 15389, 15390, 15391, 15392, 15344, 15387]
             }
           }
         }
       ],
       "notes": [
-        "3 pulls (5 units): the hall's two Qiraji Gladiator pairs and a Vile Scarab, then the event's hold. The raid holds on the spot and fights the seven waves; the hold ends on instance data 2 reading 3 (Rajaxx dead). The wave units are pre-placed in the hall and are no pulls."
+        "3 pulls (5 units): the hall's two Qiraji Gladiator pairs and a Vile Scarab, then the event's hold (timeout 1500 s: the seven waves take about 1272 s, so the usual 600 s cap would fail a healthy event). The raid holds on the spot and fights the seven waves; the hold ends on instance data 2 reading 3 (Rajaxx dead). The wave units are pre-placed in the hall and are no pulls."
       ]
     },
     {
@@ -1095,10 +1086,7 @@
           "positions": [
             {"x": -8988.91, "y": 1719.89, "z": 22.0955}
           ],
-          "radius": 5,
-          "approach": [
-            {"x": -8999.91, "y": 1738.9426, "z": 21.928339}
-          ]
+          "radius": 5
         },
         {
           "entries": [15338],
@@ -1180,7 +1168,7 @@
           ],
           "radius": 5,
           "approach": [
-            {"x": -8840.62, "y": 1920.086, "z": 22.306494}
+            {"x": -8842.74, "y": 1922.21, "z": 22.24}
           ]
         },
         {
@@ -1426,10 +1414,7 @@
           "positions": [
             {"x": -8984.98, "y": 1907.55, "z": 21.411}
           ],
-          "radius": 5,
-          "approach": [
-            {"x": -8984.98, "y": 1929.55, "z": 21.469395}
-          ]
+          "radius": 5
         },
         {
           "entries": [15461, 15461, 15461, 15462, 15462, 15462, 15462, 15462, 15461],
@@ -1521,7 +1506,7 @@
             "source": "spawn 1178627"
           },
           "approach": [
-            {"x": -9091.67, "y": 1776.45, "z": 21.656672}
+            {"x": -9093.79, "y": 1774.33, "z": 21.81}
           ]
         },
         {
@@ -1717,7 +1702,7 @@
     },
     {
       "name": "buru_the_gorger",
-      "to": {"x": -9198.923, "y": 1431.5726, "z": 21.899925},
+      "to": {"x": -9187.84, "y": 1426.98, "z": 23.22},
       "pull_groups": [
         {
           "entries": [15320, 15323, 15323],
@@ -1726,10 +1711,7 @@
             {"x": -9186.31, "y": 1463.15, "z": 21.3862},
             {"x": -9176.3, "y": 1458.25, "z": 21.3906}
           ],
-          "radius": 13.187704,
-          "approach": [
-            {"x": -9198.923, "y": 1431.5726, "z": 21.899925}
-          ]
+          "radius": 13.187704
         },
         {
           "entries": [15168],
@@ -1738,7 +1720,7 @@
           ],
           "radius": 5,
           "approach": [
-            {"x": -9215.305, "y": 1410.7596, "z": 21.488155}
+            {"x": -9189.85, "y": 1436.22, "z": 21.96}
           ]
         },
         {
@@ -1821,7 +1803,7 @@
           ],
           "radius": 11.61957,
           "approach": [
-            {"x": -9403.535, "y": 1392.0211, "z": 21.833147}
+            {"x": -9401.24, "y": 1386.48, "z": 22.32}
           ]
         },
         {
@@ -1855,10 +1837,7 @@
             "period_s": 159.86685,
             "period_estimate": true,
             "source": "spawn 1179138"
-          },
-          "approach": [
-            {"x": -9386.735, "y": 1395.0004, "z": 21.4832}
-          ]
+          }
         },
         {
           "entries": [15320, 15320],
@@ -1868,7 +1847,7 @@
           ],
           "radius": 11.107097,
           "approach": [
-            {"x": -9313.332, "y": 1171.4667, "z": 21.6832}
+            {"x": -9338.46, "y": 1212.44, "z": 21.46}
           ]
         },
         {
@@ -1890,7 +1869,7 @@
           ],
           "radius": 5,
           "approach": [
-            {"x": -9302.52, "y": 1293.294, "z": -63.665173}
+            {"x": -9307.11, "y": 1304.38, "z": -62.99}
           ]
         }
       ],
@@ -1899,7 +1878,7 @@
         "entry": 15370,
         "position": {"x": -9240.79, "y": 1230.42, "z": -63.7576},
         "approach": [
-          {"x": -9256.347, "y": 1245.9764, "z": -63.613262}
+          {"x": -9258.34, "y": 1241.007, "z": -63.4475}
         ]
       },
       "notes": [
@@ -1915,10 +1894,7 @@
           "positions": [
             {"x": -9485.41, "y": 1337.77, "z": 21.5676}
           ],
-          "radius": 5,
-          "approach": [
-            {"x": -9469.854, "y": 1322.2136, "z": 22.007504}
-          ]
+          "radius": 5
         },
         {
           "entries": [15333, 15333],
@@ -1928,7 +1904,7 @@
           ],
           "radius": 11.879571,
           "approach": [
-            {"x": -9486.945, "y": 1337.5223, "z": 21.615906}
+            {"x": -9497.94, "y": 1332.57, "z": 21.61}
           ]
         },
         {
@@ -1955,7 +1931,7 @@
           ],
           "radius": 11.756678,
           "approach": [
-            {"x": -9556.662, "y": 1385.345, "z": 21.808933}
+            {"x": -9520.63, "y": 1370.42, "z": 21.5}
           ]
         },
         {
@@ -1965,7 +1941,7 @@
           ],
           "radius": 5,
           "approach": [
-            {"x": -9493.787, "y": 1463.1464, "z": 21.532967}
+            {"x": -9463.79, "y": 1463.15, "z": 21.56}
           ]
         },
         {
@@ -1975,7 +1951,7 @@
           ],
           "radius": 5,
           "approach": [
-            {"x": -9475.822, "y": 1451.22, "z": 21.4832}
+            {"x": -9464.81, "y": 1459.62, "z": 21.53}
           ]
         },
         {
@@ -1998,7 +1974,7 @@
           ],
           "radius": 21.169058,
           "approach": [
-            {"x": -9519.661, "y": 1440.4666, "z": 23.054714}
+            {"x": -9528.85, "y": 1462.64, "z": 22.63}
           ]
         },
         {
@@ -2017,7 +1993,7 @@
           ],
           "radius": 35,
           "approach": [
-            {"x": -9558.598, "y": 1423.3789, "z": 22.582727}
+            {"x": -9562.84, "y": 1419.14, "z": 21.54}
           ]
         },
         {
@@ -2036,7 +2012,7 @@
           ],
           "radius": 35,
           "approach": [
-            {"x": -9608.43, "y": 1464.469, "z": 23.79158}
+            {"x": -9608.43, "y": 1461.47, "z": 23.34}
           ]
         },
         {
@@ -2159,10 +2135,7 @@
           "positions": [
             {"x": -9656.95, "y": 1667.25, "z": 21.5542}
           ],
-          "radius": 5,
-          "approach": [
-            {"x": -9645.95, "y": 1648.1974, "z": 21.542751}
-          ]
+          "radius": 5
         },
         {
           "entries": [15333],
@@ -2191,7 +2164,7 @@
           ],
           "radius": 5,
           "approach": [
-            {"x": -9681.81, "y": 1554.3574, "z": 21.479124}
+            {"x": -9670.72, "y": 1549.77, "z": 21.51}
           ]
         },
         {
@@ -2245,7 +2218,7 @@
           ],
           "radius": 5,
           "approach": [
-            {"x": -9685.71, "y": 1554.73, "z": 21.478323}
+            {"x": -9679.35, "y": 1561.09, "z": 21.65}
           ]
         },
         {
@@ -2293,7 +2266,7 @@
           ],
           "radius": 12.209062,
           "approach": [
-            {"x": -9733.984, "y": 1512.3201, "z": 21.586355}
+            {"x": -9735.13, "y": 1509.55, "z": 21.62}
           ]
         },
         {
@@ -2301,10 +2274,7 @@
           "positions": [
             {"x": -9746.4, "y": 1510.24, "z": 22.5943}
           ],
-          "radius": 5,
-          "approach": [
-            {"x": -9740.706, "y": 1488.9896, "z": 22.58759}
-          ]
+          "radius": 5
         }
       ],
       "skip": [15344, 15385, 15386, 15387, 15388, 15389, 15390, 15391, 15392, 15471, 15473, 15505],
@@ -2312,7 +2282,7 @@
         "entry": 15369,
         "position": {"x": -9698.38, "y": 1535.55, "z": 21.444},
         "approach": [
-          {"x": -9695.007, "y": 1513.7927, "z": 21.576557}
+          {"x": -9706.09, "y": 1509.2, "z": 21.58}
         ]
       },
       "notes": [
@@ -2338,10 +2308,7 @@
             "period_s": 44.857803,
             "period_estimate": true,
             "source": "spawn 1178590"
-          },
-          "approach": [
-            {"x": -9486.66, "y": 1851.09, "z": 86.09051}
-          ]
+          }
         },
         {
           "entries": [15355],

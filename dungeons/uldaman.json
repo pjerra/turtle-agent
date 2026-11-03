@@ -45,7 +45,7 @@
   "legs": [
     {
       "name": "baelog",
-      "to": {"x": -236.5, "y": 54.9, "z": -46},
+      "to": {"x": -230.5, "y": 54.9, "z": -46},
       "pull_groups": [
         {
           "entries": [4852, 4851],
@@ -89,7 +89,7 @@
             {"x": -276.4, "y": 136.5, "z": -47.3}
           ],
           "approach": [
-            {"x": -250.3, "y": 134, "z": -46.7}
+            {"x": -244.8, "y": 136.3, "z": -46.7}
           ]
         },
         {
@@ -143,9 +143,9 @@
     },
     {
       "name": "revelosh",
-      "to": {"x": -286.7, "y": 143.2, "z": -47.2},
+      "to": {"x": -280.7, "y": 143.2, "z": -47.2},
       "via": [
-        {"x": -322.9, "y": 115.1, "z": -50.5}
+        {"x": -319.9, "y": 115.1, "z": -50.5}
       ],
       "pull_groups": [
         {
@@ -191,7 +191,7 @@
     },
     {
       "name": "keystone",
-      "to": {"x": -247.5, "y": 173.1, "z": -43.5},
+      "to": {"x": -243.3, "y": 168.9, "z": -43.5},
       "pull_groups": [
         {
           "entries": [4851],
@@ -280,7 +280,7 @@
     },
     {
       "name": "scorpid_cave",
-      "to": {"x": -205, "y": 265, "z": -49},
+      "to": {"x": -205, "y": 259, "z": -49},
       "pull_groups": [
         {
           "entries": [4861],
@@ -309,12 +309,12 @@
             {"x": -179, "y": 321.7, "z": -52.7}
           ],
           "approach": [
-            {"x": -174.5, "y": 308.5, "z": -53.3}
+            {"x": -175.6, "y": 305.7, "z": -53.3}
           ]
         }
       ],
       "notes": [
-        "Ironaya's room is a dead end. The way on goes back south through the Seal of Khaz'Mul (open since leg 2) and east through the cave at -205 265, 126 yd by the navmesh from Ironaya to the west lip of the mesh at -163.5 298.7 -52.5, where the Cleft Scorpid pit begins. The leg walks that with the navmesh and ends at the nest in the pit, the last thing before the hole in the mesh that leg 5 crosses. Packs on it: a Shrike Bat (4861, wander 3) at -186 285 and the nest of ten Cleft Scorpids (7078, level 35-36, wander 1, sleeping) at -175 to -165 / 284 to 296, z -53, which the route passes within 2.5 yd, so it is pulled. The live map walk of 2026-10-14 (~/TortoiseBots-audit/tests/uldaman-map/MAP.md) saw the same spawns at the same places.",
+        "Ironaya's room is a dead end. The way on goes back south through the Seal of Khaz'Mul (open since leg 2) and east through the cave at -205 259, 126 yd by the navmesh from Ironaya to the west lip of the mesh at -163.5 298.7 -52.5, where the Cleft Scorpid pit begins. The leg walks that with the navmesh and ends at the nest in the pit, the last thing before the hole in the mesh that leg 5 crosses. Packs on it: a Shrike Bat (4861, wander 3) at -186 285 and the nest of ten Cleft Scorpids (7078, level 35-36, wander 1, sleeping) at -175 to -165 / 284 to 296, z -53, which the route passes within 2.5 yd, so it is pulled. The live map walk of 2026-10-14 (~/TortoiseBots-audit/tests/uldaman-map/MAP.md) saw the same spawns at the same places.",
         "Nothing is pulled from Ironaya's room: the first group of the leg is the bat. Stonevault Cave Lurkers (4850, stealth) near -250 270 are 25+ yd west of the route and left alone.",
         "The Jadespine Basilisk 4863 (world guid 30084, -179.0 321.7 -52.7) stands on a shelf north of the pit that the navmesh does not join to the pit floor (the path from the pit ends 12 yd short of it, at -173.9 310.7 -50.0): its group's approach point is on the pit floor 14 yd from it (-174.5 308.5 -53.3), from where it is pulled (it comes down to the party)."
       ]
@@ -323,7 +323,7 @@
       "name": "sentinel",
       "to": {"x": -158.4, "y": 283.7, "z": -48.9},
       "via": [
-        {"x": -163.5, "y": 298.7, "z": -52.5},
+        {"x": -166.5, "y": 298.7, "z": -52.5},
         {"x": -161.1, "y": 284.5, "z": -52.1},
         {
           "x": -158.4,
@@ -373,8 +373,8 @@
             {"x": -139.4, "y": 370.1, "z": -41.7}
           ],
           "approach": [
-            {"x": -134.5, "y": 322.1, "z": -44.2},
-            {"x": -128, "y": 341.3, "z": -43.1}
+            {"x": -133.4, "y": 324.9, "z": -44.2},
+            {"x": -119.7, "y": 344.7, "z": -43.1}
           ]
         },
         {
@@ -395,19 +395,19 @@
           "kill_first": [7209]
         },
         "approach": [
-          {"x": -131.5, "y": 365.2, "z": -42.2}
+          {"x": -140, "y": 378, "z": -40}
         ]
       },
       "notes": [
-        "Starts across the one hole of the map 70 navmesh, found by `path_to` and confirmed by the live map walk (MAP.md): the west part (entrance, legs 0-4) ends at the scorpid pit's lip (-163.5 298.7 -52.5), the east part (the rest of the dungeon) begins at -158.4 283.7 -48.9, and between them is a continuous ramp of 15 yd that the mesh does not link (a straight walk over it worked both ways for a GM walker; `walk_path` alone returns partial). hires-1 (2026-10-14, 12:41) showed that `cmd move` (a server navmesh path) to the east side is acked but the bots stop on the pit floor at -161.1 284.5 -52.1. So the leg crosses with a `via` list: the lip (a plain walk along the mesh), then two direct steps (`direct`: the driver sends `cmd move x y z direct`, TortoiseBots #942/#948): 4 yd to -162.8 294.8 -51.2, under the high side of the rock overhang the ramp starts under, then 12 yd up the ramp to -158.4 283.7 -48.9, the first point of the east mesh (the leg's `to`; the rest of the leg walks the east mesh from there). Why two: 3 to 5 yd south of the lip the overhang leaves only 1.5 to 2 yd above the floor on the line the GM walked, so one long step's 2 yd sight line hits its underside (runs 11 and 13 of hires-2: `no-los` for the lead bot at the lip, to -158.4 283.7 and to -160.5 291). Checked offline with the core's vmap code on the live map 70 vmap (lostool on the test VM, ~/tb-ci/vmaps70; TortoiseBots #948): both steps are clear at 1.5, 2 and 2.5 yd, both ways, from every floor point within 1 yd of each start, and the floor under each line has no step over 1 yd. The old plateau point -155.7 279.6 -46.8 is above a 2 yd step from the ramp top and out of sight from it: it is no direct target. The followers take the lead bot's line (TortoiseBots #948: each walks to the lead bot's spot first); an older module checks every bot's own line, and followers on the pit floor west of the lip, a 2.5 yd ledge below the ramp, fail it. The test TestUldamanDirectSteps pins the steps' lengths and the floor at the ends. Since 2026-10-17 (live run uldaman-events-2) the first direct step ends on the pit floor at -161.1 284.5 -52.1 instead: the old -162.8 294.8 -51.2 was 2.6 yd off the navmesh, so a follower had no way to the lead bot's spot and the second step had to summon one first. The new point is the last navmesh point before the ramp (0.0 yd off; navmesh path from the lip complete, 17.0 yd), the second step shrinks from 11.9 to 4.2 yd, and the sight lines (lostool on the live map 70 vmap: 1.5, 2 and 2.5 yd up, both ways, and lip to the new point) are clear; the vmap floor is -52.32 under it and rises about 1.8 yd at the foot of the ramp, which the straight walk carries the bots over. Since 2026-10-17 (live run uldaman-events-4) the step to the pit floor is a plain move, not a direct step: its navmesh path from the lip is complete (17.0 yd), so only the 4.2 yd step up the ramp is direct. Both pauses of that run (14:03 and 14:39) were on the walk back after the lead bot died: \"the point of step 40 refused 4 times (too-far: \u003cbot\u003e is not with Bonky ...)\". The bots named were the ones held alive where the lead bot fell, 320 yd away, not the ones beside it on the lip (navmesh paths to the lead bot's spot 2.5, 4.0 and 8.7 yd, complete); the run leader summoned each but did not wait for the summon (TortoiseBots fix in the same change). With one direct step the walk back meets that gather once.",
+        "Starts across the one hole of the map 70 navmesh, found by `path_to` and confirmed by the live map walk (MAP.md): the west part (entrance, legs 0-4) ends at the scorpid pit's lip (-166.5 298.7 -52.5), the east part (the rest of the dungeon) begins at -158.4 283.7 -48.9, and between them is a continuous ramp of 15 yd that the mesh does not link (a straight walk over it worked both ways for a GM walker; `walk_path` alone returns partial). hires-1 (2026-10-14, 12:41) showed that `cmd move` (a server navmesh path) to the east side is acked but the bots stop on the pit floor at -161.1 284.5 -52.1. So the leg crosses with a `via` list: the lip (a plain walk along the mesh), then two direct steps (`direct`: the driver sends `cmd move x y z direct`, TortoiseBots #942/#948): 4 yd to -162.8 294.8 -51.2, under the high side of the rock overhang the ramp starts under, then 12 yd up the ramp to -158.4 283.7 -48.9, the first point of the east mesh (the leg's `to`; the rest of the leg walks the east mesh from there). Why two: 3 to 5 yd south of the lip the overhang leaves only 1.5 to 2 yd above the floor on the line the GM walked, so one long step's 2 yd sight line hits its underside (runs 11 and 13 of hires-2: `no-los` for the lead bot at the lip, to -158.4 283.7 and to -160.5 291). Checked offline with the core's vmap code on the live map 70 vmap (lostool on the test VM, ~/tb-ci/vmaps70; TortoiseBots #948): both steps are clear at 1.5, 2 and 2.5 yd, both ways, from every floor point within 1 yd of each start, and the floor under each line has no step over 1 yd. The old plateau point -155.7 279.6 -46.8 is above a 2 yd step from the ramp top and out of sight from it: it is no direct target. The followers take the lead bot's line (TortoiseBots #948: each walks to the lead bot's spot first); an older module checks every bot's own line, and followers on the pit floor west of the lip, a 2.5 yd ledge below the ramp, fail it. The test TestUldamanDirectSteps pins the steps' lengths and the floor at the ends. Since 2026-10-17 (live run uldaman-events-2) the first direct step ends on the pit floor at -161.1 284.5 -52.1 instead: the old -162.8 294.8 -51.2 was 2.6 yd off the navmesh, so a follower had no way to the lead bot's spot and the second step had to summon one first. The new point is the last navmesh point before the ramp (0.0 yd off; navmesh path from the lip complete, 17.0 yd), the second step shrinks from 11.9 to 4.2 yd, and the sight lines (lostool on the live map 70 vmap: 1.5, 2 and 2.5 yd up, both ways, and lip to the new point) are clear; the vmap floor is -52.32 under it and rises about 1.8 yd at the foot of the ramp, which the straight walk carries the bots over. Since 2026-10-17 (live run uldaman-events-4) the step to the pit floor is a plain move, not a direct step: its navmesh path from the lip is complete (17.0 yd), so only the 4.2 yd step up the ramp is direct. Both pauses of that run (14:03 and 14:39) were on the walk back after the lead bot died: \"the point of step 40 refused 4 times (too-far: \u003cbot\u003e is not with Bonky ...)\". The bots named were the ones held alive where the lead bot fell, 320 yd away, not the ones beside it on the lip (navmesh paths to the lead bot's spot 2.5, 4.0 and 8.7 yd, complete); the run leader summoned each but did not wait for the summon (TortoiseBots fix in the same change). With one direct step the walk back meets that gather once.",
         "East of the hole: the Venomlash Scorpid (7022, wander 5) at -153 275, the second nest of ten Cleft Scorpids (7078) at -145 to -133 / 258 to 277, which stands 11.7 yd off the route and is pulled all the same because of its size, the Jadespine Basilisk (4863, Crystalline Slumber) at -141 312.5, then the Relic Hunter camp, six mobs: five Relic Hunters (4847) and a Geologist (7030) at -139.4 370.1, -151.8 368.5 (ledge, z -34), -160.9 364 (ledge, wanders 5), -137.3 386.4, -143.1 389 and -139.3 393.8. hires-3 (2026-10-14, trace r-20261014T163749-c696) showed the camp is one pack: the plan had a group for the first Hunter alone and a trio, the party killed the first Hunter in 26 s with the second ledge Hunter sheeped, then the engage loop picked the next Hunter of the same entry (the group radius reaches all of them) and that pull woke four Hunters, the Geologist and the Sentinel at once: six mobs and a wipe. Run 4 of 2026-10-17 (server 19z13, uldaman-events-4) showed that one group of six cannot be pulled: its centre (-145.3 378.6, radius 31.9) lies 15.7 yd from the Sentinel (aggro 20 yd), the tank walked toward the west Hunters to reach it and pulled six mobs with the boss, and the party nearly wiped; run 3 won the same ground in three smaller pulls. The camp is now split by where the mobs stand (world guids 29591 to 29594, 29649 to 29651): the Hunter at -139.4 370.1 (29592) is a group of its own, on the route and 19 yd from the rest; the east trio (Hunters 29594 at -137.3 386.4 and 29651 at -143.1 389, the Geologist 29593 at -139.3 393.8) is one group with a radius of 6 around its centre (-139.9 389.7), 24 yd from the Sentinel, the three within the 5 yd call for help of each other; the two west ledge Hunters (29591 at -160.9 364, 29649 at -151.8 368.5; 23-24 yd from the Sentinel) are the boss step's first entries: they join its fight, and the plan no longer walks the tank toward them.",
         "Obsidian Sentinel (7023, level 42, 8255 hp, faction 54, EventAI) stands in a dead-end room at -163.8 388; the Echomok Door (124370, -185.4 389.6) is on its west side, between the room and the Back Entrance corridor, and is not on this route, so there is no door step (the earlier draft of this plan had one). The Sentinel re-casts Spell Reflection (9941, 'Obsidian Reflection') whenever the aura is missing (event type 27), so casters lose a spell now and then; at 80, 60, 40 and 20 % health it summons an Obsidian Shard (10061) and casts Splintered Obsidian (10072). The two ledge Relic Hunters at -160.9 364 and -151.8 368.5 stand 23-24 yd from it and join its fight; they are the boss step's first entries (the east camp is cleared first, and the Sentinel, if it comes with a pull, is a joiner of that fight).",
-        "Two groups for the run leader's sake (2026-10-16): the Jadespine Basilisk 4863 (world guid 30089, -125.9 266.9 -45.7) on the ledge east of the ramp top, 37 yd from the leg's `to`, is pulled after the Venomlash Scorpid. The Relic Hunters' approach goes up to the south mouth of the low tunnel (-128.0 341.3 -43.1) and the boss's past its north mouth (-131.5 365.2 -42.2): the tunnel itself (-125..-123 345..359) has a vmap ceiling 5-6 yd above its floor that the run leader's `cmd move` snaps a point onto (live: `cmd move -123.5 348.1 -43.0 refused: off-mesh`), so no plan point lies in it."
+        "Two groups for the run leader's sake (2026-10-16): the Jadespine Basilisk 4863 (world guid 30089, -125.9 266.9 -45.7) on the ledge east of the ramp top, 37 yd from the leg's `to`, is pulled after the Venomlash Scorpid. The Relic Hunters' approach goes up to the south mouth of the low tunnel (-119.7 344.7 -43.1) and the boss's past its north mouth into the room (-140 378 -40): the tunnel itself (-125..-123 345..359) has a vmap ceiling 5-6 yd above its floor that the run leader's `cmd move` snaps a point onto (live: `cmd move -123.5 348.1 -43.0 refused: off-mesh`), so no plan point lies in it."
       ]
     },
     {
       "name": "ancient_stone_keeper",
-      "to": {"x": -149, "y": 381, "z": -37},
+      "to": {"x": -151.3, "y": 386.5, "z": -37},
       "pull_groups": [
         {
           "entries": [7011, 7011, 7011, 7012, 7011],
@@ -419,7 +419,7 @@
             {"x": -101, "y": 315.5, "z": -49.3}
           ],
           "approach": [
-            {"x": -128, "y": 341.3, "z": -43.1}
+            {"x": -131.4, "y": 333, "z": -43.1}
           ]
         },
         {
@@ -428,7 +428,7 @@
             {"x": -89.7, "y": 301.9, "z": -50.2}
           ],
           "approach": [
-            {"x": -116, "y": 319.3, "z": -46}
+            {"x": -113, "y": 319.3, "z": -46}
           ]
         },
         {
@@ -449,7 +449,7 @@
             {"x": -88.3, "y": 262.8, "z": -47.6}
           ],
           "approach": [
-            {"x": -97.9, "y": 310.8, "z": -50.5}
+            {"x": -95.1, "y": 311.9, "z": -50.5}
           ]
         },
         {
@@ -484,7 +484,7 @@
             {"x": -39.6, "y": 272.8, "z": -49}
           ],
           "approach": [
-            {"x": -64, "y": 241, "z": -49.7}
+            {"x": -65.1, "y": 238.2, "z": -49.7}
           ]
         },
         {
@@ -495,7 +495,7 @@
             {"x": -42.7, "y": 255.2, "z": -48.9}
           ],
           "approach": [
-            {"x": -58, "y": 241, "z": -48.3}
+            {"x": -60.1, "y": 238.9, "z": -48.3}
           ]
         },
         {
@@ -505,7 +505,7 @@
             {"x": -43.2, "y": 203.8, "z": -48.3}
           ],
           "approach": [
-            {"x": -64, "y": 227, "z": -49.5}
+            {"x": -60.6, "y": 235.3, "z": -49.5}
           ]
         }
       ],
@@ -513,7 +513,7 @@
         "entry": 7206,
         "position": {"x": -38.4, "y": 221.3, "z": -48.4},
         "approach": [
-          {"x": -73.3, "y": 240.2, "z": -49.7}
+          {"x": -76.1, "y": 239.1, "z": -49.7}
         ]
       },
       "rest": {
@@ -526,12 +526,12 @@
         "From the Sentinel south-west through the big central hall (x -110 to -40, y 200 to 340): the Earthen guards of the hall (Earthen Rocksmashers 7011, Sculptors 7012, faction 415, hostile to both teams, stationary or wandering 2-5 yd) in five groups, two Stone Stewards (4860, waypoint patrols: their spawn point is where the plan looks first). Packs are the spawns within 10 yd of the navmesh route (the older legs use 8), grouped by tools/dungeongen (12 yd, creature groups).",
         "Ancient Stone Keeper (7206, level 44, 8910 hp, faction 415, no script, one spell, 10132) stands alone at the south end of the central hall, a dead end off the way on: it is a mini boss, nothing opens behind it.",
         "The run leader stands the party within 50 yd of each pack (approach points): the south mouth of the tunnel for the first group, past the doorway at -126..-119 320..322 (a vmap lintel 5-6 yd up: no point there) for the Stone Steward, then the rooms south to the Keeper. Without them every pack of the leg was 75-195 yd from the leg's `to` and the run leader's own hops failed (live 2026-10-16, steps 77-84).",
-        "The Stone Steward (4860 at -39.6 272.8, a patrol along x -42 from y 274 to 234), the Sculptor trio north of the Keeper (-44 .. -43 at y 255-273) and the two southern Rocksmashers (-49.6 202 and -43.2 204) are pulled before the Keeper: pull groups 7-9 here, the first two moved from the galgann leg, from stands in the south hall (-64 241, -58 241, -64 227) that stay 23 yd or more from the Keeper and from the groups pulled after them. In the runs r4 slot1 (wipe) and r6 slot5 (two deaths) the patrol and the trio were alive at the Keeper and 5-7 mobs fought together; with only the Steward or 2-4 mobs at a time nobody died (PLAN-ULDAMAN-GRIMLOK.txt, #1)."
+        "The Stone Steward (4860 at -39.6 272.8, a patrol along x -42 from y 274 to 234), the Sculptor trio north of the Keeper (-44 .. -43 at y 255-273) and the two southern Rocksmashers (-49.6 202 and -43.2 204) are pulled before the Keeper: pull groups 7-9 here, the first two moved from the galgann leg, from stands in the south hall (-65.1 238.2, -60.1 238.9, -69.5 224.7) that stay 23 yd or more from the Keeper and from the groups pulled after them. In the runs r4 slot1 (wipe) and r6 slot5 (two deaths) the patrol and the trio were alive at the Keeper and 5-7 mobs fought together; with only the Steward or 2-4 mobs at a time nobody died (PLAN-ULDAMAN-GRIMLOK.txt, #1)."
       ]
     },
     {
       "name": "galgann",
-      "to": {"x": -39, "y": 243, "z": -48},
+      "to": {"x": -43.2, "y": 238.8, "z": -48},
       "pull_groups": [
         {
           "entries": [7011],
@@ -554,7 +554,7 @@
             {"x": -14.8, "y": 289.6, "z": -46.7}
           ],
           "approach": [
-            {"x": -37.8, "y": 258.9, "z": -49}
+            {"x": -40.8, "y": 258.9, "z": -49}
           ]
         },
         {
@@ -582,7 +582,7 @@
             {"x": -5, "y": 389.7, "z": -43.7}
           ],
           "approach": [
-            {"x": -9.8, "y": 336.8, "z": -40.5},
+            {"x": -12.8, "y": 336.8, "z": -40.5},
             {"x": -9.1, "y": 347.9, "z": -40.8}
           ]
         },
@@ -593,7 +593,7 @@
             {"x": 15.1, "y": 401.8, "z": -44.1}
           ],
           "approach": [
-            {"x": -4.4, "y": 365, "z": -42.8}
+            {"x": 1.1, "y": 367.3, "z": -42.8}
           ]
         },
         {
@@ -603,7 +603,7 @@
             {"x": 8, "y": 412.2, "z": -47.5}
           ],
           "approach": [
-            {"x": -2.2, "y": 375.2, "z": -43.6}
+            {"x": -2.2, "y": 378.2, "z": -43.6}
           ]
         }
       ],
@@ -626,7 +626,7 @@
     },
     {
       "name": "grimlok",
-      "to": {"x": 4, "y": 393, "z": -45},
+      "to": {"x": 4, "y": 399, "z": -45},
       "pull_groups": [
         {
           "entries": [4853, 4855, 4855],
@@ -644,7 +644,7 @@
             {"x": 48.9, "y": 340.7, "z": -40.9}
           ],
           "approach": [
-            {"x": 28, "y": 360, "z": -41.6}
+            {"x": 25.9, "y": 357.9, "z": -41.6}
           ]
         },
         {
@@ -654,7 +654,7 @@
             {"x": 42.1, "y": 323.2, "z": -42.9}
           ],
           "approach": [
-            {"x": 33, "y": 354, "z": -42.5}
+            {"x": 36, "y": 354, "z": -42.5}
           ]
         },
         {
@@ -678,7 +678,7 @@
             {"x": 85.3, "y": 397.1, "z": -38.2}
           ],
           "approach": [
-            {"x": 50.8, "y": 379.3, "z": -38.6}
+            {"x": 66, "y": 387, "z": -38.2}
           ]
         },
         {
@@ -720,12 +720,12 @@
       "notes": [
         "Back out of the Galgann room and east along the Stonevault corridor: Brawler (4855) + Geomancer (4853) pairs and trios (Geomancers flee at 15 % health), the patrolling Brawler near 57.9 374, then the group of three at 55 417. The trio at 79-85 397-405 (Brawler, Brawler, Geomancer: guids 27512-27514, wander 2) stands 25 yd east of the group of three at 55 417 and 18 yd from the lead bot's way to it: it is its own pull group, taken first (Uldaman A run 6: the tank walked up to the group of three, the trio aggroed on the way, six mobs at once, the party wiped at pull group 4).",
         "Grimlok (4854, level 45, 7390 hp, faction 59, EventAI) is in one creature group (leader guid 27528) with a Stonevault Brawler, a Stonevault Geomancer and a Jadespine Basilisk (4863; script mob_jadespine_basilisk: Crystalline Slumber every 28 s on its target, which it then drops from its threat): boss.first kills them in that order. Grimlok yells on aggro and on a player kill, casts Bloodlust (6742) at 30 % health, and has the spells 11892, 8292, 8143 and 9532. The run's `cc` option can mark the Basilisk.",
-        "Pull order of 2026-10-21 (PLAN-ULDAMAN-GRIMLOK.txt, #2; every wipe and near wipe of eight runs was a pull that grew from 2-4 to 5-11 mobs): group 0 lists the Brawler 30105 at 40.6 359.9 (16.7 yd from the Brawler at 36.2 376 it joined in 8 of 8 runs, radius 16 so that the Brawler at 55.4 379 stays out); the Brawler and Geomancer pair at 49 346/341 and the two Brawlers at 37-42 332/323 (they were the first groups of the keepers_door leg and woke while the fight of the east groups ran 14-20 yd from them) are pulled next, from stands at 28 360 and 33 354 west of the patrol and its trio; the patrol Brawler (57.9 374) and the trio at 55-62 367-379 are one group of four (they came together in 8 of 8 runs; group 2 of the old order was empty each time); the pair at 38-40 439-445 is pulled from 48 419 (a navmesh line to both, 29.8 yd or more from Grimlok's own group), and its fight must not move north of y 425."
+        "Pull order of 2026-10-21 (PLAN-ULDAMAN-GRIMLOK.txt, #2; every wipe and near wipe of eight runs was a pull that grew from 2-4 to 5-11 mobs): group 0 lists the Brawler 30105 at 40.6 359.9 (16.7 yd from the Brawler at 36.2 376 it joined in 8 of 8 runs, radius 16 so that the Brawler at 55.4 379 stays out); the Brawler and Geomancer pair at 49 346/341 and the two Brawlers at 37-42 332/323 (they were the first groups of the keepers_door leg and woke while the fight of the east groups ran 14-20 yd from them) are pulled next, from stands at 25.9 357.9 and 36 354 west of the patrol and its trio; the patrol Brawler (57.9 374) and the trio at 55-62 367-379 are one group of four (they came together in 8 of 8 runs; group 2 of the old order was empty each time); the pair at 38-40 439-445 is pulled from 48 419 (a navmesh line to both, 29.8 yd or more from Grimlok's own group), and its fight must not move north of y 425."
       ]
     },
     {
       "name": "keepers_door",
-      "to": {"x": 61, "y": 397, "z": -38},
+      "to": {"x": 70, "y": 397, "z": -38},
       "pull_groups": [
         {
           "entries": [4855, 4855, 4853],
@@ -735,7 +735,7 @@
             {"x": 43.4, "y": 304.6, "z": -39.6}
           ],
           "approach": [
-            {"x": 47.6, "y": 357.3, "z": -43.3}
+            {"x": 44.6, "y": 357.3, "z": -43.3}
           ]
         },
         {
@@ -756,7 +756,7 @@
             {"x": 3.8, "y": 282.1, "z": -38.2}
           ],
           "approach": [
-            {"x": 29.5, "y": 314, "z": -39.3}
+            {"x": 26.5, "y": 314, "z": -39.3}
           ]
         },
         {
@@ -766,7 +766,7 @@
             {"x": 10.2, "y": 263, "z": -35.6}
           ],
           "approach": [
-            {"x": 22.8, "y": 299.6, "z": -39.8}
+            {"x": 22.8, "y": 293.6, "z": -39.8}
           ]
         },
         {
@@ -777,7 +777,7 @@
             {"x": 16, "y": 241.9, "z": -32.9}
           ],
           "approach": [
-            {"x": 13.2, "y": 282.9, "z": -37.1}
+            {"x": 12.1, "y": 285.7, "z": -37.1}
           ]
         }
       ],
@@ -799,13 +799,13 @@
       "notes": [
         "Back along the corridor Grimlok's room opens into, then south down the Stonevault passage and the ramp room of the Stonevault Maulers (7320) and Flameweavers (7321; Fire Shield IV, flee at 15 %; Maulers frenzy at 50 %) to the foot of the ramp up to the Hall of the Keepers (z -26). The route is 260 yd; the packs of the way in (the trio at 55 417 and the three near 58 374) were pulled by the grimlok leg.",
         "The Temple Door (124368, 50.0 247.2 -26.5) closes the Hall of the Keepers: a plain door like the Echomok Door (type 0, lock 86, spawned closed, no script; same unverified lock). The step uses it from the west side (46.5 247.2).",
-        "Pull group 3 (Brawler, Brawler, Geomancer at 39-50 305-311) is pulled from 47.6 357.3 -43.3 since 2026-10-17 (live run uldaman-events-2), 9.5 yd farther back than the old stand 44.5 348 -42.2. From there, 40 yd from the pack, the Geomancer cast from range and came only to 42 318; the mage walked after it to 37 315 and woke the two Stonevault Maulers of pull group 4 (7320 at 26 301 and 26 293, 16-18 yd from him), which had stood idle through the tank's own pull, and the party wiped. From 49 yd a caster has to come about 20 yd toward the party, and the fight stays farther from pull group 4 (64 yd from the stand). The approach point of pull group 2 (50.4 365.8, 57.8 yd) would be farther still but breaks the 50 yd reach rule (TestUldamanRunLeaderReach: the run leader judges a pack from 60 yd). Pulling groups 3 and 4 as one (five mobs) was not chosen: the Maulers joined only the chase, never the pull.",
+        "Pull group 3 (Brawler, Brawler, Geomancer at 39-50 305-311) is pulled from 44.6 357.3 -43.3 since 2026-10-17 (live run uldaman-events-2), 9.5 yd farther back than the old stand 44.5 348 -42.2. From there, 40 yd from the pack, the Geomancer cast from range and came only to 42 318; the mage walked after it to 37 315 and woke the two Stonevault Maulers of pull group 4 (7320 at 26 301 and 26 293, 16-18 yd from him), which had stood idle through the tank's own pull, and the party wiped. From 49 yd a caster has to come about 20 yd toward the party, and the fight stays farther from pull group 4 (64 yd from the stand). The approach point of pull group 2 (50.4 365.8, 57.8 yd) would be farther still but breaks the 50 yd reach rule (TestUldamanRunLeaderReach: the run leader judges a pack from 60 yd). Pulling groups 3 and 4 as one (five mobs) was not chosen: the Maulers joined only the chase, never the pull.",
         "Its first three pull groups (the Brawler and Geomancer pair at 49 346/341, the Brawler at 40.6 360 and the two Brawlers at 37-42 332/323) moved to the grimlok leg, which pulls them before the patrol and the trio (PLAN-ULDAMAN-GRIMLOK.txt, #2); the group numbers in the notes above are the old ones (old groups 3-7 are now 0-4)."
       ]
     },
     {
       "name": "keepers_altar",
-      "to": {"x": 54, "y": 251, "z": -26.5},
+      "to": {"x": 58, "y": 252, "z": -26.5},
       "pull_groups": [
         {
           "entries": [7396, 7396, 7397, 4860, 7396, 7396],
@@ -829,7 +829,7 @@
             {"x": 129.5, "y": 264, "z": -26.6}
           ],
           "approach": [
-            {"x": 82.3, "y": 252.4, "z": -26.5}
+            {"x": 85.3, "y": 252.4, "z": -26.5}
           ]
         },
         {
@@ -944,7 +944,7 @@
             {"x": 118.2, "y": 220.4, "z": -42.4}
           ],
           "approach": [
-            {"x": 158.8, "y": 243.8, "z": -30.7}
+            {"x": 164.3, "y": 241.5, "z": -30.7}
           ]
         },
         {
@@ -953,7 +953,7 @@
             {"x": 76.2, "y": 213.9, "z": -55}
           ],
           "approach": [
-            {"x": 113.2, "y": 220.7, "z": -42.4}
+            {"x": 80, "y": 205, "z": -54.9}
           ]
         },
         {
@@ -968,7 +968,7 @@
             {"x": 48.8, "y": 260.6, "z": -52.1}
           ],
           "approach": [
-            {"x": 79.4, "y": 216.8, "z": -54.9}
+            {"x": 55, "y": 258, "z": -52}
           ]
         }
       ],
@@ -986,14 +986,14 @@
     },
     {
       "name": "archaedas",
-      "to": {"x": 70.7, "y": 252.5, "z": -52.1},
+      "to": {"x": 58, "y": 260, "z": -52.1},
       "skip": [7076, 7077, 7309, 10120],
       "steps": [
         {
           "use_object": {
             "entry": 141869,
             "near": {"x": 70.7, "y": 256.9, "z": -52.1},
-            "stand": {"x": 70.7, "y": 252.5, "z": -52.1}
+            "stand": {"x": 67.7, "y": 252.5, "z": -52.1}
           }
         },
         {

@@ -26,6 +26,9 @@ func (f fakeNav) Plan(_ uint32, from, to navmesh.Vec3) (navmesh.Path, error) {
 	if f.off[g] {
 		return navmesh.Path{Status: navmesh.NoPath, Reason: "goal is not on the navmesh (no walkable polygon within 5 yd)", Points: []navmesh.Vec3{}}, nil
 	}
+	if f.off[Point{from[0], from[1], from[2]}] {
+		return navmesh.Path{Status: navmesh.NoPath, Reason: "start is not on the navmesh (no walkable polygon within 5 yd)", Points: []navmesh.Vec3{}}, nil
+	}
 	if f.block != nil && f.block(Point{from[0], from[1], from[2]}, g) {
 		return navmesh.Path{Status: navmesh.NoPath, Reason: "Detour found no path", Points: []navmesh.Vec3{}}, nil
 	}
@@ -512,8 +515,11 @@ func TestZulfarrakOldPlanFailsCheck(t *testing.T) {
 			gp9++
 		}
 	}
-	if gp9 != 5 { // its five positions, each looked at from the same stand
-		t.Errorf("pull group 9 of 12 fails %d times as too far, want 5:\n%s", gp9, res.Summary())
+	// Its five positions are looked at from the same stand; the first failing look now re-anchors
+	// the party on the next position, so only the first fails as too far (the rest are checked
+	// from the position before them, not from a stand the party never reached).
+	if gp9 != 1 {
+		t.Errorf("pull group 9 of 12 fails %d times as too far, want 1:\n%s", gp9, res.Summary())
 	}
 	if !strings.Contains(res.Summary(), "1605.5 1104.2") {
 		t.Errorf("the look point should be the live 1605.5 1104.2:\n%s", res.Summary())
@@ -544,17 +550,13 @@ func TestZulfarrakOldPlanFailsCheck(t *testing.T) {
 // exported to the run leader.
 var planCheckKnownFailing = map[string]bool{
 	"temple_of_ahnqiraj":    true,
-	"stratholme_undead":     true,
 	"scarlet_graveyard":     true,
 	"razorfen_downs":        true,
 	"blackfathom_deeps":     true,
 	"black_morass":          true,
-	"blackrock_depths":      true,
 	"crescent_grove":        true,
 	"dire_maul_east":        true,
 	"dire_maul_west":        true,
-	"dragonmaw_retreat":     true,
-	"gilneas_city":          true,
 	"hateforge_quarry":      true,
 	"karazhan_crypt":        true,
 	"lower_blackrock_spire": true,
@@ -736,5 +738,115 @@ func TestLookDoesNotChaseAPathThatNeverGetsInView(t *testing.T) {
 		if err != nil || issueReasons(res.Issues) != "0/pull group look/1/too far" {
 			t.Errorf("%s: %v %q", c.name, err, issueReasons(res.Issues))
 		}
+	}
+}
+
+// A first approach point past the run leader's 150 yd react distance warns the hop lint (a warning, not a
+// failure: the exporter still cuts the walk into path rows, and older plans carry such hops): the order to walk there
+// as one `cmd move` is refused, so the plan must cut it with intermediate waypoints. Later approach points leave as
+// path rows on export and are not linted.
+func TestPlanCheckFlagsAHopPastTheReactDistance(t *testing.T) {
+	leg := Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{
+		{Entries: []uint32{1}, Positions: []Point{{50, 0, 0}}, Approach: []Point{{200, 0, 0}}},
+	}}
+	res := checkLegs(t, fakeNav{}, 0, leg)
+	if !res.OK() {
+		t.Errorf("the hop lint warns, it does not fail: %q", issueReasons(res.Issues))
+	}
+	// The pack centre (50,0) is within the run leader's sight of the to (0,0), so the 200 yd first approach is one
+	// `cmd move` and warns. A pack past RunLeaderSeeYd gets the run leader's own hops instead (the RunLeaderReach
+	// warning's case) and is not linted: group 2's centre (400,0) is 400 yd out.
+	if got, want := issueReasons(res.Warnings), "0/run leader pull group 1 approach 0/1/long hop"; got != want {
+		t.Errorf("warnings %q, want %q", got, want)
+	}
+	leg = Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: []PullGroup{
+		{Entries: []uint32{1}, Positions: []Point{{400, 0, 0}}, Approach: []Point{{310, 0, 0}}},
+	}}
+	res = checkLegs(t, fakeNav{}, 0, leg)
+	if got := issueReasons(res.Warnings); got != "" {
+		t.Errorf("warnings %q, want none: the run leader walks its own hops to an unseen pack", got)
+	}
+}
+
+// goodGroups returns n packs 20 yd apart from x, for a leg that must pass them all.
+func goodGroups(x float32, n int) []PullGroup {
+	out := make([]PullGroup, n)
+	for i := range out {
+		out[i] = pg(x+20*float32(i), 0)
+	}
+	return out
+}
+
+// A look whose path ends short leaves the party on the look point. When that point is not on the
+// mesh (the standoff of a path over a ramp or a drop), every later point used to fail "start is
+// not on the navmesh": one bad point made the whole rest of the plan fail. The stand goes on the
+// floor, or on the path's end when there is none, and the check goes on from there.
+func TestPlanCheckSnapsAFailedLookAndGoesOn(t *testing.T) {
+	nav := fakeNav{
+		off:     map[Point]bool{{79, 0, 0}: true},
+		partial: map[Point]Point{{200, 0, 0}: {100, 0, 0}},
+	}
+	groups := append([]PullGroup{pg(200, 0)}, goodGroups(150, 10)...)
+	res := checkLegs(t, nav, 0, Leg{Name: "a", To: Point{0, 0, 0}, PullGroups: groups})
+	if got, want := issueReasons(res.Issues), "0/pull group look/1/too far"; got != want {
+		t.Fatalf("issues %q, want %q", got, want)
+	}
+	if res.Reanchored != 0 {
+		t.Errorf("%d re-anchored failures, want 0: the checks after the look start on the mesh", res.Reanchored)
+	}
+}
+
+// A needs_walk `to` is off the mesh by definition. The party used to be left there and every
+// later point failed "start is not on the navmesh": the check now puts it on the next plan point
+// that is on the mesh, so the plan has the one failing point.
+func TestPlanCheckReanchorsAfterANeedsWalkTo(t *testing.T) {
+	nav := fakeNav{off: map[Point]bool{{79, 0, 0}: true}}
+	res := checkLegs(t, nav, 0, Leg{Name: "a", To: Point{79, 0, 0}, NeedsWalk: true, PullGroups: goodGroups(150, 10)})
+	if got, want := issueReasons(res.Issues), "0/to/0/needs a mapping walk"; got != want {
+		t.Fatalf("issues %q, want %q", got, want)
+	}
+	if res.RootIssues() != 1 || res.Reanchored != 0 {
+		t.Errorf("root %d re-anchored %d, want 1 and 0", res.RootIssues(), res.Reanchored)
+	}
+}
+
+// A failure found after the check re-anchored the party is not one of the plan's own: it is marked
+// with the step it was re-anchored after and counted apart, so the summary tells the root FAILs
+// from what the off-mesh start made fail.
+func TestPlanCheckMarksTheChecksAfterAReanchor(t *testing.T) {
+	nav := fakeNav{
+		off:   map[Point]bool{{79, 0, 0}: true},
+		block: func(from, to Point) bool { return to == (Point{300, 0, 0}) },
+	}
+	res := checkLegs(t, nav, 0, Leg{Name: "a", To: Point{79, 0, 0}, NeedsWalk: true,
+		PullGroups: []PullGroup{pg(150, 0), pg(300, 0)}})
+	if res.RootIssues() != 1 || res.Reanchored != 1 {
+		t.Fatalf("root %d re-anchored %d, want 1 and 1: %q", res.RootIssues(), res.Reanchored, issueReasons(res.Issues))
+	}
+	if len(res.Issues) != 2 || !strings.Contains(res.Issues[1].Detail, "re-anchored after step 1") {
+		t.Errorf("the point after the re-anchor is not marked: %q", res.Issues)
+	}
+}
+
+// The route trace keeps the rule it had: a walk the planner cannot path is judged from the point
+// the plan means the party to stand on, so the segments after it are not red. The plain check's
+// new re-anchor does not change it.
+func TestTraceReanchorIsUnchanged(t *testing.T) {
+	p := &Plan{Name: "t", Map: 1, Legs: []Leg{{Name: "a", To: Point{60, 0, 0},
+		Via: []Waypoint{{Point: Point{20, 0, 0}}, {Point: Point{40, 0, 0}}}}}}
+	nav := fakeNav{block: func(from, to Point) bool { return to == (Point{20, 0, 0}) }}
+	tr, err := TracePlan(p, nav)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.Segs) != 3 || tr.Segs[0].OK || !tr.Segs[1].OK || !tr.Segs[2].OK {
+		t.Fatalf("segments: %+v", tr.Segs)
+	}
+	if tr.Segs[1].From != (Point{20, 0, 0}) {
+		t.Errorf("the walk after the unreachable point starts at %v, not at the point it follows", tr.Segs[1].From)
+	}
+	res, err := CheckPlan(p, nav, 0)
+	if err != nil || len(res.Issues) != 1 {
+		t.Errorf("the plain check: %v %q", err, issueReasons(res.Issues))
 	}
 }

@@ -7,6 +7,7 @@
 //	dungeongen -dir testdata/uldaman -name uldaman -map 70 -bosses 6906,6910,7228 -out /tmp/uldaman.skeleton.json
 //	dungeongen -format dungeons/uldaman.json            # check a plan and print it in the form the files are kept in
 //	dungeongen -spec tools/dungeongen/plans.json -out-dir dungeons -table docs/PLANS.md   # every draft dungeon and raid plan, and their table
+//	dungeongen route-regen --mmaps DIR --leg 7 dungeons/zul_gurub.json   # one leg's route rewritten from the navmesh (see route_regen.go)
 //
 // What the skeleton is: one leg per boss, in the order of -bosses; each pack of hostile creatures (spawns within -cluster
 // yards of each other, or in one creature_groups group) goes into the leg of the boss nearest to it, packs ordered by a
@@ -53,6 +54,9 @@ type creature struct {
 	// FlagsExtra is the creature_template flags_extra: RouteIntoLaterPacks skips NO_AGGRO spawns outright (0 when the
 	// export has none: draft exports predate the column).
 	FlagsExtra uint32
+	// patrolPoint marks a copy of a patrolling spawn at one waypoint of its loop (the plan tests expand a lone
+	// patroller's path into the pack): it demands the patrol clearance, not the plain spawn one.
+	patrolPoint bool
 }
 
 type object struct {
@@ -84,6 +88,9 @@ type Options struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "route-regen" {
+		os.Exit(routeRegenCmd(os.Args[2:]))
+	}
 	dir := flag.String("dir", "", "folder holding creatures.tsv, gameobjects.tsv and entrances.tsv (written by export.sh)")
 	out := flag.String("out", "", "plan file to write (default: standard output)")
 	name := flag.String("name", "", "plan name (the file is dungeons/<name>.json)")

@@ -357,6 +357,64 @@ func TestQuietAtIdleMovingStillBlocks(t *testing.T) {
 	}
 }
 
+// critterAt is a level-1 critter of the place phase's max-HP band: the units read's stand-in for the frame/toolkit's
+// critter flag (a Snake 2914 in the walk 27 evidence).
+func critterAt(name string, x float32, moving bool) objects.Unit {
+	u := hostileAt(name, x, moving, false)
+	u.Level = 1
+	u.MaxHealth = 8
+	return u
+}
+
+// turtle-agent#379: walk 27 C restart 2 was refused because a moving Snake 2914 at 72 yd and an idle Mad Servant off
+// its spawn were the last blockers, so all_idle was false. A critter never counts, at any distance and in any state;
+// a real hostile off its spawn still blocks (the home-proof rule is unchanged).
+func TestQuietAtIgnoresCritters(t *testing.T) {
+	p := dungeon.Point{}
+	// The evidence's 72 yd moving critter: inside the 80 yd moving rule, so it would block if it counted.
+	if ok, reason := quietAt([]objects.Unit{critterAt("Snake", 72, true)}, nil, p); !ok {
+		t.Fatalf("a moving critter 72 yd out: not quiet (%s)", reason)
+	}
+	// With an idle unit at its home also in the read: the unit is exempt after its two reads, and the critter never
+	// joins the blocker list.
+	atHome := hostileAt("Razzashi Venombrood", 44.6, false, false)
+	atHome.Entry = 14532
+	ok, reason := quietProven([]objects.Unit{critterAt("Snake", 72, true), atHome}, nil, p,
+		atHomeAll([]objects.Unit{atHome}))
+	if !ok {
+		t.Fatalf("a moving critter 72 yd out with an idle unit at home: not quiet (%s)", reason)
+	}
+	// Inside the 45 yd still radius too: no two reads and no home are needed, because a critter never blocks.
+	if ok, reason := quietAt([]objects.Unit{critterAt("Snake", 20, true)}, nil, p); !ok {
+		t.Fatalf("a moving critter 20 yd out: not quiet (%s)", reason)
+	}
+	// A real hostile off its spawn is not a critter by its level, however still it is: the home-proof rule still
+	// blocks it, as walk 27's idle Mad Servant did.
+	servant := hostileAt("Mad Servant", 16.8, false, false)
+	servant.Entry = 15111
+	servant.Level = 61
+	servant.MaxHealth = 4000
+	homes := QuietHomeSpawns{{Entry: 15111, At: dungeon.Point{X: 29}}}
+	if ok, reason := quietProven([]objects.Unit{servant}, nil, p, homes); ok {
+		t.Fatalf("a level-61 hostile off its spawn: quiet (%s)", reason)
+	}
+}
+
+// turtle-agent#379, round 2: the quiet fallback only trusts an absolute max health. A percent read carries MaxHealth
+// 100 (the store passes health through as sent), which sits at the band top: a level-1 unit read at 100 max HP is
+// ambiguous with "60 %", so it still blocks.
+func TestQuietAtPercentLevel1StillBlocks(t *testing.T) {
+	p := dungeon.Point{}
+	// A level-1 unit whose max health is a percent read: inside no absolute band, so the moving rule still holds.
+	percent := hostileAt("Snake", 72, true, false)
+	percent.Level = 1
+	percent.Health = 60
+	percent.MaxHealth = 100
+	if ok, reason := quietAt([]objects.Unit{percent}, nil, p); ok {
+		t.Fatalf("a level-1 percent-health unit 72 yd out: quiet (%s)", reason)
+	}
+}
+
 func mustQuiet(t *testing.T, p QuietPatrol) bool {
 	t.Helper()
 	ok, reason := quietAt(nil, []QuietPatrol{p}, dungeon.Point{})
@@ -364,4 +422,30 @@ func mustQuiet(t *testing.T, p QuietPatrol) bool {
 		t.Fatal("not quiet without a reason")
 	}
 	return ok
+}
+
+// TestZulGurubCubPatrolBlocksTheRevivePoint (turtle-agent#392): the placed Arlokk walk revives at leg 4's via point,
+// which the Zulian Cub patrol of the Last pull group of the Thekal leg walks within 5.7 yd of. The plan's patrol
+// block makes the quiet check refuse that point by path, the reason naming the patrol and its distance (the 392 run
+// saw only the cub's paused position, 32.6 yd away, and waited 568 s on a point the patrol walks through).
+func TestZulGurubCubPatrolBlocksTheRevivePoint(t *testing.T) {
+	plan, err := dungeon.Load("../../dungeons/zul_gurub.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	patrols := PlanQuietPatrols(plan)
+	if len(patrols) == 0 {
+		t.Fatal("the plan yields no patrol: the cub block is missing")
+	}
+	rev := dungeon.Point{X: -11712, Y: -1889.8667, Z: 52.825405}
+	ok, reason := QuietAt(nil, patrols, rev, NewQuietIdleReads(), nil, quietNow)
+	if ok {
+		t.Fatalf("the revive point is quiet: the cub patrol's path does not block")
+	}
+	// The plan also carries the roaming Berezkerer 91435's patrol (BOTS-PATHING-WAYPOINTS item 2), whose path
+	// passes 41 yd from the same point and may be the one the check names first; either patrol's path reason is
+	// the refusal this test pins.
+	if !strings.Contains(reason, "passes") || (!strings.Contains(reason, "51344") && !strings.Contains(reason, "91435")) {
+		t.Fatalf("reason %q, want a patrol's path reason (51344 or 91435)", reason)
+	}
 }

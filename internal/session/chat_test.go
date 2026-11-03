@@ -357,3 +357,137 @@ func TestClearTargetSendsAZeroSelection(t *testing.T) {
 		t.Fatalf("target %v", h.s.Status().Target)
 	}
 }
+
+// waitSelfCreated waits until the session has stored the player's own create block (the target field comes with it) and applied it. The
+// session applies a block and then notes the target field on its owner goroutine; the barrier op runs on that goroutine after the block is
+// applied. Without the wait a selection can run before the session knows the field is 0: it then sends a neutral select, and the fake server
+// never echoes that (it echoes only a change of the field), so the select waits out its full timeout.
+func (h *harness) waitSelfCreated(ctx context.Context) {
+	h.t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); h.s.Status().MaxHealth != 800; time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			h.t.Fatal("the session did not store the player's create block within 5s")
+		}
+	}
+	if _, err := h.s.do(ctx, func() (any, error) { return nil, nil }); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// GMKill selects the creature, the server shows the selection, and only then ".die" goes out, while that creature is the selection in
+// force. A player guid is refused with nothing sent.
+func TestGMKillSelectsThenSendsDie(t *testing.T) {
+	ctx := context.Background()
+	h := start(t, Options{AllowGMKill: true})
+	h.enterWorld()
+	h.send(opcode.SMSGUpdateObject, unitCreate(me.GUID, objects.TypePlayer, me.X, me.Y, me.Z, map[uint16]uint32{objects.UnitHealth: 800, objects.UnitMaxHealth: 800}))
+	h.waitSelfCreated(ctx)
+	creature := packet.GUID(uint64(packet.HighUnit)<<48 | 12118<<24 | 4242)
+
+	type seen struct {
+		op      uint16
+		inForce packet.GUID
+		text    string
+	}
+	var mu sync.Mutex
+	var got []seen
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		inForce := packet.GUID(0)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			p, err := h.srv.Next(50 * time.Millisecond)
+			if err != nil {
+				continue
+			}
+			switch p.Op {
+			case opcode.CMSGSetSelection:
+				g := packet.NewReader(p.Body).GUID()
+				mu.Lock()
+				got = append(got, seen{op: uint16(p.Op), inForce: g})
+				mu.Unlock()
+				if g != inForce {
+					inForce = g
+					h.send(opcode.SMSGUpdateObject, targetEcho(g))
+				}
+			case opcode.CMSGMessagechat:
+				mu.Lock()
+				got = append(got, seen{op: uint16(p.Op), inForce: inForce, text: string(p.Body)})
+				mu.Unlock()
+			}
+		}
+	}()
+	if err := h.s.GMKill(ctx, packet.GUID(0x31)); err == nil {
+		t.Error("GMKill accepted a player-shaped guid")
+	}
+	if err := h.s.GMKill(ctx, creature); err != nil {
+		t.Fatal(err)
+	}
+	// GMKill returns once the line is written, not once the server has read it: wait for the read, bounded, instead of a fixed sleep.
+	chatRead := func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, s := range got {
+			if s.op == uint16(opcode.CMSGMessagechat) {
+				return true
+			}
+		}
+		return false
+	}
+	for deadline := time.Now().Add(5 * time.Second); !chatRead(); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			close(stop)
+			<-done
+			t.Fatal("the server did not read the .die line within 5s")
+		}
+	}
+	close(stop)
+	<-done
+	mu.Lock()
+	defer mu.Unlock()
+	var lines []seen
+	selected := false
+	for _, s := range got {
+		switch s.op {
+		case uint16(opcode.CMSGSetSelection):
+			if s.inForce == creature {
+				selected = true
+			}
+		case uint16(opcode.CMSGMessagechat):
+			if !selected {
+				t.Error("the line went out before the creature was selected")
+			}
+			lines = append(lines, s)
+		}
+	}
+	if len(lines) != 1 || !strings.Contains(lines[0].text, ".die") || lines[0].inForce != creature {
+		t.Fatalf("lines %+v (all %+v)", lines, got)
+	}
+}
+
+// An agent that is not a slot of a test server refuses GMKill before it selects or sends anything.
+func TestGMKillRefusedOutsideTestServers(t *testing.T) {
+	ctx := context.Background()
+	h := start(t, Options{})
+	h.enterWorld()
+	h.send(opcode.SMSGUpdateObject, unitCreate(me.GUID, objects.TypePlayer, me.X, me.Y, me.Z, map[uint16]uint32{objects.UnitHealth: 800, objects.UnitMaxHealth: 800}))
+	creature := packet.GUID(uint64(packet.HighUnit)<<48 | 12118<<24 | 4242)
+	if err := h.s.GMKill(ctx, creature); !errors.Is(err, ErrGMKillRefused) {
+		t.Fatalf("%v", err)
+	}
+	for {
+		p, err := h.srv.Next(200 * time.Millisecond)
+		if err != nil {
+			break
+		}
+		if p.Op == opcode.CMSGSetSelection || p.Op == opcode.CMSGMessagechat {
+			t.Fatalf("a packet went out: %v", p.Op)
+		}
+	}
+}
