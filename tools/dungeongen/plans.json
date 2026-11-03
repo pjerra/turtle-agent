@@ -964,6 +964,7 @@
    "title": "Hateforge Quarry",
    "map": 808,
    "kind": "dungeon",
+   "handwritten": true,
    "tank_min_hp": 4600,
    "data": "map808",
    "trigger": 5009,
