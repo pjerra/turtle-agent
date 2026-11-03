@@ -360,8 +360,11 @@ func (r *regen) regenLegOnce(legIdx int) (string, error) {
 	endPt := leg.To
 	hasEnd := false
 	if legIdx+1 < len(r.plan.Legs) {
-		if e, ok := regenLegEnd(&r.plan.Legs[legIdx+1]); ok {
-			endPt, hasEnd = e, true
+		// Where the next leg starts walking: its first via, else its `to`. The leg has to end near it.
+		next := &r.plan.Legs[legIdx+1]
+		endPt, hasEnd = next.To, true
+		if len(next.Via) > 0 {
+			endPt = next.Via[0].Point
 		}
 	}
 	order, oneWays := r.order(targets, leg.To, endPt, hasEnd)
