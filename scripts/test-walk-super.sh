@@ -82,9 +82,13 @@ else
     step="$(head -n 1 -- "$FAKE_STEP_SEQ_FILE")"
     tail -n +2 -- "$FAKE_STEP_SEQ_FILE" >"$FAKE_STEP_SEQ_FILE.tmp" && mv -- "$FAKE_STEP_SEQ_FILE.tmp" "$FAKE_STEP_SEQ_FILE"
   fi
+  kind="move"
+  [[ -z "${FAKE_NO_MOVE:-}" ]] || kind="pull" # a log with no move row: the restart's leg fallback
   {
-    printf 'TBM:RUN|zul_gurub|running|%s/1103|%s|move|walk|fighting\n' "$((step - 1))" "$leg"
+    printf 'TBM:RUN|zul_gurub|running|%s/1103|%s|%s|walk|fighting\n' "$((step - 1))" "$leg" "$kind"
     printf 'TBM:RUN|zul_gurub|paused|%s/1103|%s|boss|walk|16 dead: the run stops here\n' "$step" "$leg"
+    # FAKE_PAUSE_NOTE is the walk's own `paused: <note>` line, what the stuck rule reads (walk 32's water wall).
+    [[ -z "${FAKE_PAUSE_NOTE:-}" ]] || printf '12:00:00.000 paused: %s\n' "$FAKE_PAUSE_NOTE"
   } >"$out/run.log"
 fi
 # FAKE_SUMMARY writes a summary.json verbatim: the no-progress stop reads its `wipes` and `end_reason` (review round
@@ -95,6 +99,12 @@ if [[ -n "${FAKE_SUMMARY_SEQ_FILE:-}" && -s "$FAKE_SUMMARY_SEQ_FILE" ]]; then
   printf '%s\n' "$sum" >"$out/summary.json"
 elif [[ -n "${FAKE_SUMMARY:-}" ]]; then
   printf '%s\n' "$FAKE_SUMMARY" >"$out/summary.json"
+fi
+# FAKE_REWRITE_CMDFILE rewrites the supervisor's cmd file mid-run with a fresh marker flag: the next run must be
+# started from the NEW line (walk 32: walk-super read the file once, so a binary/flag change needed a relaunch).
+if [[ -n "${FAKE_REWRITE_CMDFILE:-}" ]]; then
+  printf '"%s" "raid-walk" "zul_gurub" "--marker" "%s" "--sql" "%s" "--until" "boss" "--out" "%s"\n' \
+    "$0" "${FAKE_MARKER:-NEW}" "${FAKE_SQL:-/tmp/w.sql}" "$out" >"$FAKE_REWRITE_CMDFILE"
 fi
 # FAKE_KILL_PARENT SIGKILLs the run's wrapper (the subshell that writes the exit status file) and exits 0, so the
 # status file is never written: the supervisor must read that as "status unknown" (exit 70). FAKE_CORRUPT_STATUS
@@ -163,7 +173,7 @@ case1() {
   (( rc == 0 )) || { bad "case1 exit=$rc want 0"; return; }
   (( runs == 2 )) || { bad "case1 runs=$runs want 2"; return; }
   l2="$(sed -n '2p' "$d/args.log")"
-  printf '%s\n' "$l2" | grep -qF -e '--from leg\ high_priest_venoxis' || { bad "case1 run2 missing --from leg venoxis"; return; }
+  printf '%s\n' "$l2" | grep -qF -e '--from step\ 40' || { bad "case1 run2 missing --from step 40 (the furthest move row)"; return; }
   printf '%s\n' "$l2" | grep -qF -e '--place' || { bad "case1 run2 missing --place"; return; }
   printf '%s\n' "$l2" | grep -qF -e "--out $d/run0-r1" || { bad "case1 run2 missing --out DIR-r1"; return; }
   printf '%s\n' "$l2" | grep -qF -e '--holder H1' || { bad "case1 run2 holder changed"; return; }
@@ -173,7 +183,7 @@ case1() {
   grep -q 'run 1 exit 19' "$d/restart.log" || { bad "case1 restart.log missing run 1 exit 19"; return; }
   grep -q -- "$d/run0-r1" "$d/restart.log" || { bad "case1 restart.log missing new --out"; return; }
   cmp -s "$d/restart.log" "$d/stdout.log" || { bad "case1 stdout differs from restart.log"; return; }
-  ok "case1 exit-19 then 0: 2 runs, run2 --from leg venoxis --place --out DIR-r1 holder kept"
+  ok "case1 exit-19 then 0: 2 runs, run2 --from step 40 --place --out DIR-r1 holder kept"
 }
 
 case2() {
@@ -193,9 +203,9 @@ case2() {
   (( nfrom == 1 )) || { bad "case2 run2 --from count=$nfrom want 1"; return; }
   nplace="$(printf '%s' "$l2" | grep -o -F -e '--place' | wc -l)"
   (( nplace == 1 )) || { bad "case2 run2 --place count=$nplace want 1"; return; }
-  printf '%s\n' "$l2" | grep -qF -e '--from leg\ high_priest_venoxis' || { bad "case2 run2 missing new --from leg venoxis"; return; }
+  printf '%s\n' "$l2" | grep -qF -e '--from step\ 40' || { bad "case2 run2 missing new --from step 40 (the furthest move row)"; return; }
   printf '%s\n' "$l2" | grep -qF -e 'leg\ x' && { bad "case2 run2 still carries old leg x"; return; }
-  ok "case2 pre-existing --from/--place: run2 has exactly one --from (new leg) and one --place"
+  ok "case2 pre-existing --from/--place: run2 has exactly one --from (the furthest move row) and one --place"
 }
 
 case3() {
@@ -634,6 +644,82 @@ case18() {
   ok "case18 walk-28 shaped cmd file: argv matches the literal list and the old eval parse (quoted leg and boss-done kept as one word)"
 }
 
+# case19 (walk 32): the cmd file is re-read before every restart, so a flag (or the binary) changed while the walk runs
+# applies to the next run. The fake rewrites the file with --marker NEWFLAG during run 1.
+case19() {
+  local d="$T/c19" rc runs l2
+  mkdir -p "$d"
+  make_cmd "$d/cmd.txt" raid-walk zul_gurub --server s --slot 2 --holder H19 --sql /tmp/w.sql --out "$d/run0"
+  printf '19\n0\n' >"$d/seq"
+  FAKE_SEQ_FILE="$d/seq" FAKE_ARGS_LOG="$d/args.log" FAKE_REWRITE_CMDFILE="$d/cmd.txt" FAKE_MARKER=NEWFLAG \
+    "$SUPER_BIN" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log"
+  rc=$?
+  runs="$(runs_done "$d/args.log")"
+  (( rc == 0 )) || { bad "case19 exit=$rc want 0"; return; }
+  (( runs == 2 )) || { bad "case19 runs=$runs want 2"; return; }
+  l2="$(sed -n '2p' "$d/args.log")"
+  printf '%s\n' "$l2" | grep -qF -e '--marker NEWFLAG' || { bad "case19 run2 misses the flag the cmd file gained mid-run"; return; }
+  printf '%s\n' "$l2" | grep -qF -e '--sql /tmp/w.sql' || { bad "case19 run2 lost the fresh file's --sql"; return; }
+  ok "case19 the cmd file is re-read on restart: run2 carries the flag added mid-run"
+}
+
+# case20 (walk 32): a restart goes back to the furthest MOVE row the run reached (203 here, the running line before the
+# pause at 204), not to the leg's start.
+case20() {
+  local d="$T/c20" rc runs l2
+  mkdir -p "$d"
+  make_cmd "$d/cmd.txt" raid-walk zul_gurub --server s --slot 2 --holder H20 --sql /tmp/w.sql --out "$d/run0"
+  printf '19\n0\n' >"$d/seq"
+  printf '204\n210\n' >"$d/steps"
+  FAKE_SEQ_FILE="$d/seq" FAKE_STEP_SEQ_FILE="$d/steps" FAKE_ARGS_LOG="$d/args.log" FAKE_LEG="high_priest_venoxis" \
+    "$SUPER_BIN" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log"
+  rc=$?
+  runs="$(runs_done "$d/args.log")"
+  (( rc == 0 )) || { bad "case20 exit=$rc want 0"; return; }
+  (( runs == 2 )) || { bad "case20 runs=$runs want 2"; return; }
+  l2="$(sed -n '2p' "$d/args.log")"
+  printf '%s\n' "$l2" | grep -qF -e '--from step\ 203' || { bad "case20 run2 does not start at the furthest move row (203): $l2"; return; }
+  grep -qF -e 'from "step 203"' "$d/restart.log" || { bad "case20 the log does not name the start"; return; }
+  ok "case20 the restart starts at the furthest move row reached (step 203), not the leg start"
+}
+
+# case21 (walk 32): a restart that would place the SAME step again and died on the same stuck reason twice stops with a
+# clear line instead of burning another instance (the water wall at 236).
+case21() {
+  local d="$T/c21" rc runs
+  mkdir -p "$d"
+  make_cmd "$d/cmd.txt" raid-walk zul_gurub --server s --slot 2 --holder H21 --sql /tmp/w.sql --out "$d/run0"
+  printf '19\n19\n0\n' >"$d/seq"
+  printf '204\n204\n204\n' >"$d/steps"
+  FAKE_SEQ_FILE="$d/seq" FAKE_STEP_SEQ_FILE="$d/steps" FAKE_ARGS_LOG="$d/args.log" FAKE_LEG="high_priest_venoxis" \
+    FAKE_PAUSE_NOTE='the lead bot is stuck 35.9 yd from -11951.0 -1393.5 68.1 (lead in water: yes)' \
+    "$SUPER_BIN" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log"
+  rc=$?
+  runs="$(runs_done "$d/args.log")"
+  (( rc == 19 )) || { bad "case21 exit=$rc want 19"; return; }
+  (( runs == 2 )) || { bad "case21 runs=$runs want 2 (one re-place, then the same wall twice stops it)"; return; }
+  grep -qF -e 'the same stuck reason twice' "$d/restart.log" || { bad "case21 log missing the stuck stop"; return; }
+  grep -qF -e 'place step 203 again' "$d/restart.log" || { bad "case21 the stop does not name the step"; return; }
+  ok "case21 the same stuck reason at the same step twice: stop with a clear line, no third instance"
+}
+
+# case22: a run whose log holds no move row falls back to the leg start, as before.
+case22() {
+  local d="$T/c22" rc runs l2
+  mkdir -p "$d"
+  make_cmd "$d/cmd.txt" raid-walk zul_gurub --server s --slot 2 --holder H22 --sql /tmp/w.sql --out "$d/run0"
+  printf '19\n0\n' >"$d/seq"
+  FAKE_SEQ_FILE="$d/seq" FAKE_ARGS_LOG="$d/args.log" FAKE_LEG="high_priest_venoxis" FAKE_NO_MOVE=1 \
+    "$SUPER_BIN" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log"
+  rc=$?
+  runs="$(runs_done "$d/args.log")"
+  (( rc == 0 )) || { bad "case22 exit=$rc want 0"; return; }
+  (( runs == 2 )) || { bad "case22 runs=$runs want 2"; return; }
+  l2="$(sed -n '2p' "$d/args.log")"
+  printf '%s\n' "$l2" | grep -qF -e '--from leg\ high_priest_venoxis' || { bad "case22 the leg fallback is gone: $l2"; return; }
+  ok "case22 no move row in the log: the restart falls back to the leg start"
+}
+
 mutation() {
   local d="$T/mut" mrc
   mkdir -p "$d"
@@ -689,6 +775,10 @@ main() {
   if (( run_all )) || [[ "$only" == *" 16 "* ]]; then case16; fi
   if (( run_all )) || [[ "$only" == *" 17 "* ]]; then case17; fi
   if (( run_all )) || [[ "$only" == *" 18 "* ]]; then case18; fi
+  if (( run_all )) || [[ "$only" == *" 19 "* ]]; then case19; fi
+  if (( run_all )) || [[ "$only" == *" 20 "* ]]; then case20; fi
+  if (( run_all )) || [[ "$only" == *" 21 "* ]]; then case21; fi
+  if (( run_all )) || [[ "$only" == *" 22 "* ]]; then case22; fi
   if (( run_all )); then mutation; mutation2; fi
   printf -- '----\nPASS=%d FAIL=%d\n' "$PASS" "$FAIL"
   (( FAIL == 0 ))

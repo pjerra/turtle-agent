@@ -49,8 +49,11 @@ func (w *walk) phases(ctx context.Context) int {
 
 	// Any exit before the raid has entered gives the instance-cap reservation back (phaseEnter's success confirms it).
 	defer w.releaseCapReservation()
-	if err := w.phaseInstanceCap(ctx); err != nil {
-		return w.stop(err, false)
+	// --reuse-instance keeps the raid's instance: no fresh instance is entered, so nothing is counted or reserved.
+	if !w.opts.reuseInstance {
+		if err := w.phaseInstanceCap(ctx); err != nil {
+			return w.stop(err, false)
+		}
 	}
 	if err := w.phaseLease(ctx); err != nil {
 		return w.stop(err, false)
@@ -77,10 +80,18 @@ func (w *walk) phases(ctx context.Context) int {
 	if err := w.phaseBind(ctx); err != nil {
 		return w.stop(err, true)
 	}
-	if err := w.phaseEnter(ctx); err != nil {
-		return w.stop(err, true)
+	if w.opts.reuseInstance {
+		// The raid is already inside: no entry order (which opens a fresh copy), only a check that it is alive in the
+		// plan's map (walk 32: every restart re-entered at the leg start and burned a fresh instance).
+		if err := w.reuseReady(ctx); err != nil {
+			return w.stop(err, true)
+		}
+	} else {
+		if err := w.phaseEnter(ctx); err != nil {
+			return w.stop(err, true)
+		}
+		w.recordFreshInstance()
 	}
-	w.recordFreshInstance()
 	if err := w.phasePlace(ctx); err != nil {
 		return w.stop(err, true)
 	}
@@ -952,10 +963,14 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 				}
 			case raidwalk.IncidentBossEngaged:
 				if ok, early := w.runFightsBoss(v.Entry); ok {
-					if early > 0 {
+					switch {
+					case strings.TrimSpace(w.opts.until) == "none":
+						w.note("boss %d engaged at step %d under --until none: the run leader fights it", v.Entry, v.Step)
+						w.logLine(now, fmt.Sprintf("boss %d engaged at step %d under --until none: the run leader fights it", v.Entry, v.Step))
+					case early > 0:
 						w.note("boss %d engaged at step %d, before its boss step %d in the same leg, and the until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, early, w.untilLabel)
 						w.logLine(now, fmt.Sprintf("boss %d engaged at step %d, before its boss step %d in the same leg, and the until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, early, w.untilLabel))
-					} else {
+					default:
 						w.note("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, w.untilLabel)
 						w.logLine(now, fmt.Sprintf("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, w.untilLabel))
 					}
@@ -2154,9 +2169,20 @@ func (w *walk) handleWipe(ctx context.Context, step int) error {
 	selfRegroup := w.haveStatus && w.lastStatus.State == tbm.RunRunning && w.selfRegroupSeen(step, now)
 	// The observations explained this wipe: a later wipe needs its own line since the last recovery.
 	w.runLines = nil
+	// A boss row engaged by the walk's own boss path (handleBoss) still ends the wipe as before: the walk owns that
+	// fight and never revives under it. When the run LEADER fights the boss (runFightsBoss: --until none, or an until
+	// that goes past the boss step), the wipe is the run's own and follows the normal wipe-resume flow. Walk 32: a
+	// Mar'li boss-step wipe under --until none was read as a boss wipe and `.bot run stop` went out 0.7 s after the
+	// "20 dead ... regrouping by itself" line (a-r1), and a Hakkar one 42 ms after it (e-r3), so no boss retry could
+	// ever happen.
+	runLeaderFights := false
 	if w.bossEngagedNow() {
-		w.note("wipe resume skipped: %s engaged", w.engagedBossWords())
-		return w.endWipe(ctx, step)
+		runLeaderFights = w.runLeaderFightsEngagedBoss(step)
+		if !runLeaderFights {
+			w.note("wipe resume skipped: %s engaged", w.engagedBossWords())
+			return w.endWipe(ctx, step)
+		}
+		w.note("wipe on a boss step: the run leader fights %s %s, so the wipe recovers like any other", w.engagedBossWords(), w.untilNoteWords())
 	}
 	if w.opts.wipeResume > 0 && w.wipeResumes >= w.opts.wipeResume {
 		w.note("wipe resume skipped: no recoveries left (%d/%d)", w.wipeResumes, w.opts.wipeResume)
@@ -2165,7 +2191,7 @@ func (w *walk) handleWipe(ctx context.Context, step int) error {
 	if w.wipeResumes >= w.opts.wipeResume { // --wipe-resume 0: the old ending, no note
 		return w.endWipe(ctx, step)
 	}
-	if err := w.recoverWipe(ctx, step, selfRegroup); err == errWipeResumeSkipped {
+	if err := w.recoverWipe(ctx, step, selfRegroup, runLeaderFights); err == errWipeResumeSkipped {
 		return w.endWipe(ctx, step)
 	} else if terr, ok := err.(*timeoutWalkStop); ok {
 		w.note("%s", terr.note)
@@ -2173,6 +2199,34 @@ func (w *walk) handleWipe(ctx context.Context, step int) error {
 	} else {
 		return err
 	}
+}
+
+// runLeaderFightsEngagedBoss says a wipe ON THE BOSS'S OWN STEP is the run's own fight: runFightsBoss hands that
+// encounter to the run leader (a boss step under --until none or a boss-done until, or an until that goes past the
+// step), so the walk owns no boss attempt and the wipe is an ordinary wipe (walk 32's Mar'li and Hakkar wipes). A boss
+// row the frames still hold while the run wipes on TRASH keeps the old gate: that fight is not the step's, and reviving
+// under it is not this rule's business. False for an unknown step (rows not the plan's) or no named engagement.
+func (w *walk) runLeaderFightsEngagedBoss(step int) bool {
+	entry, ok := w.engagedBossEntry()
+	if !ok {
+		return false
+	}
+	if b := w.bossStepOf(entry); b == 0 || b != step {
+		return false
+	}
+	ok, _ = w.runFightsBoss(entry)
+	return ok
+}
+
+// untilWords names the run's until for a note ("under --until none", "under the until (until step 248)").
+func (w *walk) untilNoteWords() string {
+	if strings.TrimSpace(w.opts.until) == "none" {
+		return "under --until none"
+	}
+	if w.untilLabel == "" {
+		return "under its until"
+	}
+	return "under the until (" + w.untilLabel + ")"
 }
 
 // bossEngagedNow is the "not a boss wipe" gate: handleBoss owns the engaged path, so a boss row the frames still
@@ -3124,10 +3178,20 @@ const (
 // (a boss that engages while the run is paused on its boss step still stops the walk), when the
 // rows are not the server's (step numbers mean nothing), when the next boss step is in another
 // leg, when the until does not go past the boss step, when the run stands more than
-// earlyEngageSteps steps before that boss step, or when the main tank is not within earlyEngageYd
-// of the boss row (review round 1, item 3).
+// earlyEngageSteps steps before that boss step (not under boss-done, which never stops on its own
+// boss's engage), or when the main tank is not within earlyEngageYd of the boss row (review round 1,
+// item 3). --until none is true from the first check: a full clear never stops the run on a boss.
 func (w *walk) runFightsBoss(entry uint32) (ok bool, early int) {
-	if w.opts.until == "boss" || !w.haveStatus || w.lastStatus.State != tbm.RunRunning {
+	if w.opts.until == "boss" {
+		return false, 0
+	}
+	// --until none walks the plan to its end: no boss or until rule may stop the run. The run leader fights every
+	// boss it meets, however many steps before the boss row the engage came from (walk 31: Mandokir woke five steps
+	// before his row, and the auto-shortened until made the walk send `.bot run stop` ~10 s into the fight).
+	if strings.TrimSpace(w.opts.until) == "none" {
+		return true, 0
+	}
+	if !w.haveStatus || w.lastStatus.State != tbm.RunRunning {
 		return false, 0
 	}
 	if w.lastStatus.Kind == "boss" {
@@ -3160,8 +3224,10 @@ func (w *walk) runFightsBoss(entry uint32) (ok bool, early int) {
 	// The hand-over is for a boss pulled from the raid's own approach: further back than earlyEngageSteps the
 	// boss is woken by something else (another leg's pull, a patrol), and a main tank far from the boss row means
 	// the party is not standing at the pull at all (review round 1, item 3: walk 24's Thekal approach point sits
-	// inside the pull, so the step-back case is the common one).
-	if b-w.lastStatus.Step > earlyEngageSteps {
+	// inside the pull, so the step-back case is the common one). Under boss-done the step window does not apply:
+	// boss-done never stops the run on an engage of its own boss (walk 29b/29c: Mandokir woke 5 steps before his
+	// boss row when the party pulled the pack beside him). The leg, the family and the main tank's distance still do.
+	if b-w.lastStatus.Step > earlyEngageSteps && w.bossDoneStep == 0 {
 		return false, 0
 	}
 	lead, ok := w.botAt[w.mt]
@@ -3629,9 +3695,13 @@ func (w *walk) reviveHires(ctx context.Context, step int, deadline time.Time, se
 // again: the watch loop keeps going and the summary's end stays truthful. Any failure ends the walk with the
 // failure's own reason, exactly as endWipe would. Review round 2: the boss evidence must be fresh, the rest
 // needs a complete quiet view, and the whole recovery has an absolute deadline.
-func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) error {
-	if err := w.bossUnknown(ctx); err != nil {
-		return err
+func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup, runLeaderFights bool) error {
+	// The boss-unknown gate guards a revival under a boss the WALK owns. When the run leader fights the boss, the walk
+	// owns no attempt to be unsure about: the run's own fight carries on after the revive.
+	if !runLeaderFights {
+		if err := w.bossUnknown(ctx); err != nil {
+			return err
+		}
 	}
 	// The recovery ends the boss attempt that wiped: nothing the frames showed before it bounds the next
 	// attempt's kill evidence (review round 3). The corpse wait's alive link and first sighting end with
@@ -3662,23 +3732,31 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 		// The run is running and regroups by itself: it rests, gathers and walks back on its own.
 		// No out-of-combat rest and no run resume (walk 17b: the rest never got quiet while the
 		// run marched on). The post-revive boss re-check still runs; a boss it names ends the walk.
-		if _, err := w.freshWipeRest(); err != nil {
-			return err
+		//
+		// When the run leader fights the boss, the boss gate below has nothing to decide: the live boss is the
+		// run's own fight and recoveredBoss hands that encounter back to it (walk 32's boss-step wipes).
+		if !runLeaderFights {
+			if _, err := w.freshWipeRest(); err != nil {
+				return err
+			}
 		}
 		// The retry starts here: every frame polled above (the revive's, the rest's) is the wiped attempt's, so
 		// the record's phase counts only the entries the retry's own polls see (spec 6, D5, #1453).
 		w.resetBossForms()
 		w.resumeStatusSeq = w.statusSeq // recoveredBoss's run-leader exception needs a status after this point
-		if err := w.recoveredBoss(ctx, step); err != nil {
+		if err := w.recoveredBoss(ctx, step, runLeaderFights); err != nil {
 			return err
 		}
 		w.wipeResumes++
 		w.note("wipe-resume %d/%d at step %d: revived %d; the run regroups by itself (no rest, no resume)", w.wipeResumes, w.opts.wipeResume, step, revived)
 		return errWipeRecovered
 	}
-	rest, err := w.freshWipeRest()
-	if err != nil {
-		return err
+	rest := w.opts.wipeRest
+	if !runLeaderFights {
+		var err error
+		if rest, err = w.freshWipeRest(); err != nil {
+			return err
+		}
 	}
 	seq0 := w.statusSeq
 	if err := w.restOutOfCombat(ctx, step, rest, deadline); err != nil {
@@ -3691,7 +3769,7 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 			// The retry already began: the rest's polls above are the wiped attempt's frames (spec 6, D5, #1453).
 			w.resetBossForms()
 			w.resumeStatusSeq = seq0
-			if rerr := w.recoveredBoss(ctx, step); rerr != nil {
+			if rerr := w.recoveredBoss(ctx, step, runLeaderFights); rerr != nil {
 				return rerr
 			}
 			w.wipeResumes++
@@ -3716,7 +3794,7 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup bool) erro
 		}
 		return err
 	}
-	if err := w.recoveredBoss(ctx, step); err != nil {
+	if err := w.recoveredBoss(ctx, step, runLeaderFights); err != nil {
 		return err
 	}
 	w.wipeResumes++
@@ -3761,7 +3839,7 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 			// The rest's polls above are the wiped attempt's frames, the retry's follow (spec 6, D5, #1453).
 			w.resetBossForms()
 			w.resumeStatusSeq = seq0
-			if rerr := w.recoveredBoss(ctx, step); rerr != nil {
+			if rerr := w.recoveredBoss(ctx, step, false); rerr != nil {
 				return rerr
 			}
 			w.wipeResumes++
@@ -3785,7 +3863,7 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 		}
 		return err
 	}
-	if err := w.recoveredBoss(ctx, step); err != nil {
+	if err := w.recoveredBoss(ctx, step, false); err != nil {
 		return err
 	}
 	w.wipeResumes++
@@ -4034,8 +4112,10 @@ func (w *walk) completeDeadView(ctx context.Context) ([]string, bool) {
 // new boss from one engaged before the recovery (it fires once for life), so this decides from
 // what the frames say now — the same bossEngagedNow the non-recovery path gates on, with the
 // row's plan-boss identity from the frames — and reuses the watch loop's handleBoss call,
-// including its run-leader-fights-its-boss exception.
-func (w *walk) recoveredBoss(ctx context.Context, step int) error {
+// including its run-leader-fights-its-boss exception. knownFight says the wipe handler already decided the engaged
+// boss is the run leader's own fight (a boss-step wipe under an until that goes past the step): no new status line is
+// needed then, because the boss was not newly engaged during the recovery.
+func (w *walk) recoveredBoss(ctx context.Context, step int, knownFight bool) error {
 	if !w.bossEngagedNow() {
 		return nil
 	}
@@ -4053,11 +4133,14 @@ func (w *walk) recoveredBoss(ctx context.Context, step int) error {
 	// stale boss-kind status must not hide a newly engaged boss. A fresh
 	// post-resume boss-kind status keeps the old behaviour: the run leader
 	// fights its boss step.
-	if w.statusSeq > w.resumeStatusSeq {
+	if knownFight || w.statusSeq > w.resumeStatusSeq {
 		if ok, early := w.runFightsBoss(entry); ok {
-			if early > 0 {
+			switch {
+			case strings.TrimSpace(w.opts.until) == "none":
+				w.note("boss %d engaged at step %d under --until none: the run leader fights it", entry, step)
+			case early > 0:
 				w.note("boss %d engaged at step %d, before its boss step %d in the same leg, and the until (%s) goes past it, so the run leader fights it", entry, step, early, w.untilLabel)
-			} else {
+			default:
 				w.note("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", entry, step, w.untilLabel)
 			}
 			return nil
