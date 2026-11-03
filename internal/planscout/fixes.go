@@ -3,9 +3,11 @@ package planscout
 import (
 	"fmt"
 	"math"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/aggroest"
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -129,9 +131,26 @@ func (d *detourPlanner) Close() { d.scratch.Close() }
 // coordinates only.
 func ProposeFixes(rep *Report, in Input, nav Nav, w *worldspawn.World) []Fix {
 	var out []Fix
+	prof := os.Getenv("SCOUT_PROFILE") != ""
+	var detT time.Time
+	if prof {
+		detT = time.Now()
+	}
 	det := newDetour(nav, in.Rows)
+	if prof {
+		fmt.Fprintf(os.Stderr, "detour %.1fs\n", time.Since(detT).Seconds())
+	}
 	if det != nil {
 		defer det.Close()
+	}
+	stage := func(name string, f func() []Fix) []Fix {
+		if !prof {
+			return f()
+		}
+		t := time.Now()
+		r := f()
+		fmt.Fprintf(os.Stderr, "%s %.1fs\n", name, time.Since(t).Seconds())
+		return r
 	}
 	spread := float64(aggroest.StandSpreadPartyYd)
 	if in.Plan != nil && in.Plan.IsRaid() {
@@ -155,17 +174,23 @@ func ProposeFixes(rep *Report, in Input, nav Nav, w *worldspawn.World) []Fix {
 					out = append(out, f)
 				}
 			case planlint.LintHop, planlint.LintArrival, planlint.LintClimb:
-				if f, ok := viaFix(rep, in, nav, st, c, origin); ok {
-					out = append(out, f)
-				}
+				out = append(out, stage("via", func() []Fix {
+					if f, ok := viaFix(rep, in, nav, st, c, origin); ok {
+						return []Fix{f}
+					}
+					return nil
+				})...)
 			case planlint.LintWater:
-				out = append(out, dryFixes(rep, in, nav, det, st, c, origin, idx)...)
+				out = append(out, stage("dry", func() []Fix { return dryFixes(rep, in, nav, det, st, c, origin, idx) })...)
 			case planlint.LintAggro:
-				if f, ok := standFix(in, nav, w, st, c, origin, idx, rows, level, spread); ok {
-					out = append(out, f)
-				}
+				out = append(out, stage("stand", func() []Fix {
+					if f, ok := standFix(in, nav, w, st, c, origin, idx, rows, level, spread); ok {
+						return []Fix{f}
+					}
+					return nil
+				})...)
 			case planlint.LintJoiners:
-				out = append(out, splitFixes(in, nav, w, st, c, origin, idx, rows, level, spread)...)
+				out = append(out, stage("split", func() []Fix { return splitFixes(in, nav, w, st, c, origin, idx, rows, level, spread) })...)
 			}
 		}
 	}
