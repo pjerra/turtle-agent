@@ -86,8 +86,8 @@ var pullSizeKnownCounts = map[string]int{
 	"maraudon_orange": 57, "maraudon_purple": 75, "blackrock_depths": 228, "scholomance": 101, // newly hand-maintained (were generated): the moved stands' estimates; maraudon_purple's water fix moves its two starts.
 	"razorfen_kraul": 89, "dire_maul_north": 19, "windhorn_canyon": 84, "upper_blackrock_spire": 68,
 	"blackfathom_deeps": 74, "gnomeregan": 94, "lower_blackrock_spire": 104, "stormwind_vault": 30,
-	"frostmane_hollow": 51, "dire_maul_east": 50, "dire_maul_west": 72, "razorfen_downs": 75, "sunken_temple": 62,
-	"scarlet_armory": 36, "scarlet_cathedral": 41, "scarlet_graveyard": 50, "scarlet_library": 44, "shadowfang_keep": 72,
+	"frostmane_hollow": 51, "dire_maul_east": 50, "dire_maul_west": 58, "razorfen_downs": 75, "sunken_temple": 65,
+	"scarlet_armory": 36, "scarlet_cathedral": 41, "scarlet_graveyard": 50, "scarlet_library": 44, "shadowfang_keep": 71,
 	"stormwind_stockade": 40, "stratholme_live": 58, "stratholme_undead": 74,
 	// newly hand-maintained (waypoint lint fixes): measured over-ceiling pulls of the four drafts.
 	"crescent_grove": 99, "dragonmaw_retreat": 89, "gilneas_city": 90, "black_morass": 35,

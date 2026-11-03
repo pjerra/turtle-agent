@@ -80,6 +80,7 @@
   },
   {
    "name": "shadowfang_keep",
+   "handwritten": true,
    "title": "Shadowfang Keep",
    "map": 33,
    "kind": "dungeon",

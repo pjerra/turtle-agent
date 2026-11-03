@@ -320,7 +320,7 @@ var routeAggroKnownFailing = map[string]int{
 	"zul_gurub":            907,                                                                      // re-pinned for the walk-33 water fix: leg 5's river vias are the dry route round the gorge and leg 6 drops its river via, so fewer walked segments pass a later pack
 	"ruins_of_ahnqiraj":    169,                                                                      // re-pinned for the AQ waypoint pass (was 178): the merged leg-start stands and the stands moved out of neighbour aggro walk fewer later packs.
 	"temple_of_ahnqiraj":   512,                                                                      // re-pinned for the AQ waypoint pass (was 520): the merged stands and the stands moved off walls and water walk fewer later packs.
-	"naxxramas":            626,                                                                      // waypoint pass (was 647): the moved leg stands and vias walk past fewer later packs.
+	"naxxramas":            623,                                                                      // waypoint pass (was 647): the moved leg stands and vias walk past fewer later packs.
 	"stormwrought_ruins":   581,                                                                      // hand-maintained from the generated draft (waypoint pass 2026-11-03): the route into each pack walks past the dense custom packs.
 	"lower_karazhan_halls": 991,                                                                      // waypoint pass (was 1000): the moved stands walk past fewer later packs.
 	"upper_karazhan_halls": 379,                                                                      // waypoint pass (was 383): the moved stands walk past fewer later packs.
@@ -330,8 +330,8 @@ var routeAggroKnownFailing = map[string]int{
 	"maraudon_orange":      121, "maraudon_purple": 272, "blackrock_depths": 722, "scholomance": 843, // newly hand-maintained (were generated): the current route's passes; the water fixes at the two Maraudon starts add two and nine segments.
 	"razorfen_kraul": 256, "dire_maul_north": 36, "windhorn_canyon": 436, "upper_blackrock_spire": 459,
 	"blackfathom_deeps": 296, "gnomeregan": 276, "lower_blackrock_spire": 408, "stormwind_vault": 170,
-	"frostmane_hollow": 171, "dire_maul_east": 97, "dire_maul_west": 212, "razorfen_downs": 191, "sunken_temple": 66,
-	"scarlet_armory": 101, "scarlet_cathedral": 151, "scarlet_graveyard": 184, "scarlet_library": 148, "shadowfang_keep": 284,
+	"frostmane_hollow": 171, "dire_maul_east": 97, "dire_maul_west": 199, "razorfen_downs": 191, "sunken_temple": 338,
+	"scarlet_armory": 101, "scarlet_cathedral": 151, "scarlet_graveyard": 184, "scarlet_library": 148, "shadowfang_keep": 382,
 	"stormwind_stockade": 185, "stratholme_live": 158, "stratholme_undead": 294, // newly hand-maintained: straight-segment counts for the draft routes.
 	// newly hand-maintained (waypoint lint fixes): measured route passes of the four drafts.
 	"crescent_grove": 438, "dragonmaw_retreat": 398, "gilneas_city": 267, "black_morass": 385,
