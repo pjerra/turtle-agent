@@ -98,7 +98,7 @@ turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loo
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
-turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
+turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--reuse-instance] [--dry-run]
 turtle-agent trash-check [--dir dungeons] [--sql FILE [--plan NAME]] [--spawns DIR] [--patrols FILE]... [--mmaps DIR] [--level N] [--spread YD] [--aggro-rate R] [--assist-yd 10] [--json] [--out DIR] [--dash-out FILE] [--fail-on danger|patrol|any] [<plan>|<path.json>]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent scenario check [--var NAME=VALUE]... <file>
@@ -2206,7 +2206,12 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   pull: pass --from "step N"`, exit 2). The fallback is refused too when a boss or hold row (or the move into an
   event) lies between it and the leg's first row: the raid would re-fight it on its way in. A fallback start
   stands before the leg, so `boss` and `boss-done` untils resolve from the leg's first row, never from the
-  fallback start. `--from "step N"` is taken as given; a positioned move row is placed at its own point, and a pull
+  fallback start. `--reuse-instance` (with `--place`) re-places the raid in the instance it is already in: every
+  hired bot must be alive in the plan's map (a dead or missing one refuses with exit 2 and names it), then the walk
+  sends no entry order (which would open a fresh copy), binds the commander with `.appear <mt>`, goes to the start
+  point in that copy and teleports every hire there with the GM `.summon`; no corridor clear and no quiet check run
+  (the area is the raid's own instance), and the instance ledger is neither checked nor written, so a re-place never
+  waits at the cap. `--from "step N"` is taken as given; a positioned move row is placed at its own point, and a pull
   row at that pull's own stand point (the row's point; the nearest move row before it when the row has none), the
   notes naming the point (`place: step N is a pull row; placing at the pull's own stand point` — walk 32 refused
   steps 237 and 560 as pull rows, and the operator had to find 238/559 by hand). A boss or hold row still refuses
@@ -2281,6 +2286,10 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   60 minutes on `--server`; at 4 or more it prints `instance cap: N fresh instances in the last hour on <server>; the
   6th is refused by the core` and waits for the oldest to age out, at most `--instance-cap-wait` (0: warn and go on;
   after the cap it goes on with a note). `--instance-cap-fail` exits 26 instead (`walk-super.sh` does not restart it).
+  The wait line names the earliest free time as well (`instance cap: waiting 16m5s (earliest free time
+  2026-11-03T12:34:56Z) for the oldest of 4 ...`), so the operator can plan around it. `--reuse-instance` (with
+  `--place`) is the way around a full ledger: it keeps the raid's CURRENT instance (see `--place` above), so nothing is
+  entered, reserved or counted and the cap is not touched.
   The check and the admission are one step under the ledger's lock: a walk below 4 reserves a place (holder + pid,
   30 minutes), the reservation counts like an entry, becomes the entry once the raid has entered and is released on
   every exit before that, so walks that start together cannot all pass at a count of 3. A corrupt ledger is moved to

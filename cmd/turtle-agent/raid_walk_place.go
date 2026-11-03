@@ -1395,6 +1395,11 @@ func (w *walk) phasePlace(ctx context.Context) error {
 	if err := w.placeGM(ctx); err != nil {
 		return err
 	}
+	// --reuse-instance: the raid's copy is already open and alive, so there is no corridor clear, no quiet check and
+	// no `.tt place`: the commander joins the raid's copy and summons every hire to the start point.
+	if w.opts.reuseInstance {
+		return w.placeReuse(ctx)
+	}
 	// 2. hold the raid where it stands while the commander steps out.
 	w.placeStayed = w.placeHold(ctx)
 	// 3. into the raid's copy.
@@ -1463,6 +1468,108 @@ func (w *walk) phasePlace(ctx context.Context) error {
 	w.note("place: start step %d%s at %s %s %s; cleared %d rows (%d units); quiet; placed %d/%d",
 		w.place.Start, legWords(w.place.Leg), num32(p.X), num32(p.Y), num32(p.Z),
 		len(w.place.Circles), w.placeRemoved, w.placeSum.Placed, w.placeSum.Hires)
+	return nil
+}
+
+// reuseReady is --reuse-instance's precondition, run instead of the enter order: every hired bot must be alive and on
+// the plan's map in a fresh frame, so the placement can keep the copy the raid is already in. A bot missing, dead or
+// elsewhere refuses the walk (exit 2) instead of opening a fresh instance and burning a cap slot.
+func (w *walk) reuseReady(ctx context.Context) error {
+	deadline := w.env.now().Add(30 * time.Second)
+	for {
+		w.placeView(ctx)
+		now := w.env.now()
+		var missing, dead, elsewhere []string
+		for _, name := range w.hireList() {
+			b, ok := w.botAt[name]
+			if !ok || now.Sub(b.at) > 10*time.Second {
+				missing = append(missing, name)
+				continue
+			}
+			if b.dead {
+				dead = append(dead, name)
+				continue
+			}
+			if b.mapID != w.plan.Map {
+				elsewhere = append(elsewhere, name)
+			}
+		}
+		if len(missing)+len(dead)+len(elsewhere) == 0 {
+			w.note("place: --reuse-instance: the raid is alive in map %d; the run keeps its instance", w.plan.Map)
+			return nil
+		}
+		if !now.Before(deadline) {
+			return stopf(exitUsage, "--reuse-instance: the raid is not alive in map %d (dead: %s; not seen: %s; elsewhere: %s)",
+				w.plan.Map, namesOrNone(dead), namesOrNone(missing), namesOrNone(elsewhere))
+		}
+		if err := w.placeSleep(ctx, 2*time.Second); err != nil {
+			return err
+		}
+	}
+}
+
+// namesOrNone is a note's name list ("none" when empty).
+func namesOrNone(names []string) string {
+	if len(names) == 0 {
+		return "none"
+	}
+	return strings.Join(names, ", ")
+}
+
+// placeReuse is the --reuse-instance placement: bind the commander to the main tank's copy (`.appear` opens no copy of
+// its own), go to the start point in it, and teleport every hire there with the GM `.summon` (the line the revive and
+// placeVerify use). The area is not cleared or quiet-checked: the copy is the one the raid is already playing in.
+func (w *walk) placeReuse(ctx context.Context) error {
+	p := w.place.Point
+	if err := w.gm(ctx, ".appear "+w.mt); err != nil {
+		return err
+	}
+	if err := w.waitMap(ctx, w.plan.Map, 30*time.Second, time.Time{}); err != nil {
+		return err
+	}
+	if err := w.placeSleep(ctx, 2*time.Second); err != nil {
+		return err
+	}
+	inst, err := w.placeInstance(ctx)
+	if err != nil {
+		return err
+	}
+	w.placeInst = inst
+	w.placeSum.Instance = inst
+	w.note("place: --reuse-instance: keeping the raid's instance %.0f (no fresh instance is entered or counted)", inst)
+	if err := w.goPlace(ctx, p.X, p.Y, p.Z+2); err != nil {
+		return err
+	}
+	if err := w.placeSleep(ctx, 2*time.Second); err != nil {
+		return err
+	}
+	if err := w.placeInstanceIs(ctx, w.placeInst); err != nil {
+		return err
+	}
+	if err := w.placeFloor(ctx, p); err != nil {
+		return err
+	}
+	for _, name := range w.hireList() {
+		if err := w.gm(ctx, ".summon "+name); err != nil {
+			return err
+		}
+		if err := w.placeSleep(ctx, 100*time.Millisecond); err != nil {
+			return err
+		}
+	}
+	w.note("place: teleported %d hires to the start point with the GM path (.summon); the area was not cleared or quiet-checked (the raid's own instance)",
+		len(w.hireList()))
+	if err := w.placeVerify(ctx); err != nil {
+		return err
+	}
+	w.placeStayed = w.placeHold(ctx)
+	if err := w.placeRelease(ctx); err != nil {
+		return err
+	}
+	w.placeSum.Placed = len(w.hireList()) - len(w.placeSummoned)
+	w.placeSum.Summoned = w.placeSummoned
+	w.note("place: start step %d%s at %s %s %s; reused instance %.0f; placed %d/%d",
+		w.place.Start, legWords(w.place.Leg), num32(p.X), num32(p.Y), num32(p.Z), inst, w.placeSum.Placed, w.placeSum.Hires)
 	return nil
 }
 

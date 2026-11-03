@@ -49,8 +49,11 @@ func (w *walk) phases(ctx context.Context) int {
 
 	// Any exit before the raid has entered gives the instance-cap reservation back (phaseEnter's success confirms it).
 	defer w.releaseCapReservation()
-	if err := w.phaseInstanceCap(ctx); err != nil {
-		return w.stop(err, false)
+	// --reuse-instance keeps the raid's instance: no fresh instance is entered, so nothing is counted or reserved.
+	if !w.opts.reuseInstance {
+		if err := w.phaseInstanceCap(ctx); err != nil {
+			return w.stop(err, false)
+		}
 	}
 	if err := w.phaseLease(ctx); err != nil {
 		return w.stop(err, false)
@@ -77,10 +80,18 @@ func (w *walk) phases(ctx context.Context) int {
 	if err := w.phaseBind(ctx); err != nil {
 		return w.stop(err, true)
 	}
-	if err := w.phaseEnter(ctx); err != nil {
-		return w.stop(err, true)
+	if w.opts.reuseInstance {
+		// The raid is already inside: no entry order (which opens a fresh copy), only a check that it is alive in the
+		// plan's map (walk 32: every restart re-entered at the leg start and burned a fresh instance).
+		if err := w.reuseReady(ctx); err != nil {
+			return w.stop(err, true)
+		}
+	} else {
+		if err := w.phaseEnter(ctx); err != nil {
+			return w.stop(err, true)
+		}
+		w.recordFreshInstance()
 	}
-	w.recordFreshInstance()
 	if err := w.phasePlace(ctx); err != nil {
 		return w.stop(err, true)
 	}

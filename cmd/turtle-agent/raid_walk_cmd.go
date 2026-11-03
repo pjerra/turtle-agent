@@ -57,7 +57,7 @@ const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
     [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--decisions on|off] [--decisions-max-mib N]
-    [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--dry-run]
+    [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--reuse-instance] [--dry-run]
        turtle-agent raid-walk report <dir> [--spell ID] [--clock-offset 1h] [--md FILE] [--json FILE] [--out DIR]`
 
 // raidWalkPlanRe is the plan name as the server knows it (spec 3.1).
@@ -77,6 +77,7 @@ type raidWalkOptions struct {
 	until           string
 	from            string
 	place           bool       // --place: start the raid partway into its instance, at the --from start (spec 3)
+	reuseInstance   bool       // --reuse-instance: a re-place keeps the raid's current instance (no fresh one is entered or counted)
 	gmClear         stringList // --gm-clear "<leg>:<group>[,<group>...]", repeatable: GM-kill those pull groups after the placement (test servers only)
 	gmClearBoss     stringList // --gm-clear-boss <leg>, repeatable: GM-kill the leg's boss and its pack
 	gmClearSpawns   string     // --gm-clear-spawns: the world export dir (default <dir>/../tools/dungeongen/testdata/map<N>)
@@ -224,6 +225,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.until, "until", "boss", "boss (stops before it), boss-done (after the boss step), none, \"step N\" or \"leg L\"")
 	fs.StringVar(&o.from, "from", "", "\"leg L\" or \"step N\" for the run leader")
 	fs.Var(onOffFlag{v: &o.place, name: "--place"}, "place", "with --from: put the raid at that start inside the instance, clearing the legs it skips (Eluna test toolkit: m910q or tortoise-test2 only)")
+	fs.BoolVar(&o.reuseInstance, "reuse-instance", false, "with --place: a re-place that keeps the raid's CURRENT instance (no fresh instance is entered or counted, so the instance cap is untouched): the raid must be alive in the plan's map, and every hire is teleported to the start point with the GM path")
 	fs.StringVar(&speed, "speed", "1.0", "the run's test speed, 1.0 to 3.0")
 	fs.StringVar(&o.hires, "hires", "", "the tb-raid-roster v1 file (default: from the plan's raid block)")
 	fs.IntVar(&o.tier, "tier", 0, "the hire gear tier (1-3) of a raid the committed table leaves unknown")
@@ -379,6 +381,16 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	}
 	// --gm-clear (the owner-approved test tool): refused outside the test servers --place already names, and without --place (the
 	// commander must stand in the raid's copy, in GM mode, before it kills anything).
+	if o.reuseInstance {
+		if !o.place {
+			fmt.Fprintf(stderr, "raid-walk: --reuse-instance needs --place (it is a re-place into the raid's current instance)\n")
+			return o, exitUsage
+		}
+		if len(o.gmClear) > 0 || len(o.gmClearBoss) > 0 {
+			fmt.Fprintf(stderr, "raid-walk: --reuse-instance and --gm-clear are not combined: a reuse re-places a live raid, it does not clear packs\n")
+			return o, exitUsage
+		}
+	}
 	if len(o.gmClear) > 0 || len(o.gmClearBoss) > 0 {
 		if !placeServers[o.server] {
 			fmt.Fprintf(stderr, "raid-walk: --gm-clear kills units by GM command: test servers only (%s)\n", strings.Join(placeServerList(), ", "))
