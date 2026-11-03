@@ -48,13 +48,13 @@
     "WALK 29 CC (2026-11-03, plan level; TortoiseBots-audit research/zg-w29/WALK29-FIX-PLAN.md §2 and §9.1): walk 29 issued 0 CC orders at Arlokk, Mandokir and Jin'do because cc_priority held only 14532. The list now ranks the ZG humanoids and beasts best first: 14532 Razzashi Venombrood first (unchanged: Mar'li's pull target depends on it), then 11356 Champion, 11339 Shadow Hunter, 14882 Atal'ai Mistress, 11361 Tiger, 11365 Panther, 11350 Axe Thrower, 14825 Withered Mistress, 14826 Sacrificed Troll (the last two only matter with a Shackle priest). 11353 Blood Drinker is NOT in cc_priority (lead decision): it is a healer and goes to kill_first instead. 14883 Voodoo Slave also goes to kill_first, after 11830: its creature_spells 148830 casts 23426 Summon Infernals (the Corrupted Infernals that joined step 528), and kill_first units are never CC'd. 11830 stays kill_first.",
     "PLAN R2 ITEM 1 (2026-11-03, leg 0 groups 3 and 7; TortoiseBots-audit research/improvements/BOTS-PATHING-WAYPOINTS.md §1): the step-22 stand -12093 -1446 was 30.1 yd from Headhunter 49135's closest pass, outside the tank's 28.5 yd shot, so the row waited 121-373 s per run and the two crossing formations wiped the raid at the stand (70 deaths in five runs); it is -12099 -1448 130.96 now: 24.1 yd from 49135's loop (in shot), 33.1 from Bat Rider 49155's, 36.5 from 49189's, 114-120 from the west formations. The step-33 approach chain -12177 -1479/-12177 -1461/-12180 -1452 sat 1.6-4.2 yd from 49135, 49155 and 49189 and 39-54 yd from its own static pack (49137's bats and riders), so the gate never fired and the pull fell back to a plain walk through the lanes; the stand is one point -12196 -1493 131.91: 27.9 yd from 49141 (in shot), 33-44 from the formations still alive then (49185, 49130, 49131) and 17-22 from 49135/49155/49189, which the fixed step 22 and groups 4/5 kill first. plan-check --mmaps: ok.",
     "PLAN R2 ITEM 2 (2026-11-03; BOTS-PATHING-WAYPOINTS.md §2): the nine roaming 11352 patrollers now each have a patrol block from creature_movement (49761 26 points 429.6 yd 257.3 s, 49698 25/404.6/242.3, 51947 19/347.5/208.1, 91493 27/456.3/273.2, 51962 20/454.8/272.3, 91435 26/581.3/348.1, 91444 22/258.9/155.0, 51948 20/352.1/210.8; 49705 had one) and are pulled in the first leg whose route meets their loop instead of at the spawn in legs 5-8: 49761 leg 0 group 3 (after F1, stand -12066.7 -1459 127.6: 27.8 yd from its loop, 39.6 from its spawn, 51+ from the plateau formations; stand pull), 49698 leg 1 group 10 (stand -11986.9 -1731.7 54.5, 23.0 yd), 51947 leg 1 group 13 (stand -11918 -1788 47.3, 23.2), 91493 leg 1 group 18 (stand -12032 -1781 58.83, 23.0), 51962 leg 1 group 19 (stand -12115 -1819 80.4, 27.6 yd; 37.8 from 49763's loop), 91435 leg 3 group 3 (stand -11739 -1855 40.78, 27.7), 91444 leg 4 group 21 (stand -11587 -1542 53.07, 23.3) and 51948 leg 6 group 4 (same row, stand -11746 -1344 58.7, 22.6). The old spawn rows are gone: leg 1 group 0 and group 18, leg 5 group 0, leg 6 group 17, leg 8's 51947 and 49698 rows, and the 11352 entry of leg 4 group 6. Plan-check --mmaps: ok, 808 points. The export cannot carry a patrol block (\"patrol: not in the rows\"), so those rows stay plain pulls at the spawn with their approach row; plan-check lists the six new run-leader hops (52-174 yd) beside the two the plan had.",
-    "PLAN R2 ITEM 3 (2026-11-03, leg 4 groups 3-5 and 6; BOTS-PATHING-WAYPOINTS.md §3): the rock's four lone 11371 spawns stand at z 50-65 (-11583 -1793, -11558 -1801, -11556 -1795, -11545 -1788). The ground stand below the rock (-11595.5 -1807.9 41.3) is 21.3 yd from 49050 but 37.6, 40.6 and 50.8 yd from 49046, 91510 and 91509, beyond the 28.5 yd shot, so the three east serpents cannot be pulled from the floor; the doc's fallback is taken. Group 4's stand moves from -11572.7 -1794.9 53.0 (16.0 yd from its serpents, inside their 20 yd aggro) to -11575 -1793 50.6 (20.6/21.2 yd, in shot, 3-4 yd lower), group 5's from -11562.6 -1792.5 56.4 (19.9 yd from 91509) to -11562 -1782 55.8 (20.5 yd), and group 6's approach now walks back down the slope it climbed ((-11572.7 -1794.9 53.0, -11595.5 -1807.9 41.3) before its stand -11576 -1778 46.3) instead of dropping 19 yd off the rim at -11565 -1770. The climb is 15 yd lower and the drop 19 -> 9 yd. Plan-check --mmaps: ok, 810 points.",
+    "PLAN R2 ITEM 3 (2026-11-03, leg 4 groups 3-5 and 6; BOTS-PATHING-WAYPOINTS.md §3): the rock's four lone 11371 spawns stand at z 50-65 (-11583 -1793, -11558 -1801, -11556 -1795, -11545 -1788). The ground stand below the rock (-11595.5 -1807.9 41.3) is 21.3 yd from 49050 but 37.6, 40.6 and 50.8 yd from 49046, 91510 and 91509, beyond the 28.5 yd shot, so the three east serpents cannot be pulled from the floor; the doc's fallback is taken. Group 4's stand moves from -11572.7 -1794.9 53.0 (16.0 yd from its serpents, inside their 20 yd aggro) to -11575 -1793 50.6 (20.6/21.2 yd, in shot, 3-4 yd lower), group 5's from -11562.6 -1792.5 56.4 (19.9 yd from 91509) to -11562 -1782 55.8 (20.5 yd), and group 6's approach now walks back down the slope it climbed ((-11572.7 -1794.9 53.0, -11595.5 -1807.9 41.3) before its stand -11576 -1778 46.3) instead of dropping 19 yd off the rim at -11565 -1770. The climb is 15 yd lower and the drop 19 -\u003e 9 yd. Plan-check --mmaps: ok, 810 points.",
     "PLAN R2 ITEM 6 (2026-11-03, leg 0 front; BOTS-PATHING-WAYPOINTS.md §5): leg 0 no longer walks past the entrance ramp and canal packs. Its via is the entrance platform only and its to is the adders stand; five stand pulls come first: adders 49739/49740 from -11927 -1309 78.63 (27.6/27.7 yd), axe throwers 49733/49732 from -11918 -1342 79.08 (20.9), serpent 49089 from -11929 -1366 77.28 (20.6), serpent 49088 from -11957 -1409 81.74 (28.3), canal pack 49118/49116/49117/49119 from -11905 -1384 67.15 (21.3). The old canal walk is the first terrace pack approach (old vias 4, 5, 7 and the old to); the terrace Headhunter pair is a stand pull from the old to (26.5/31.4/35.5 yd from its three spawns) and the bat pack from -12002.5 -1493.5 80.5 (24.4/27.1); the Jin do leg old canal row is gone. Measured, not changed: F1 bat pack has no stand at its level (south of it the mesh is steep or off-mesh: -12058 -1470 is floor 110, -12058 -1455 steep 123.5), so its approach still ends 6.7 yd from 49147; the Arlokk entrance pack (49807 five) has no stand 20.5-28.3 yd from all its spawns and 21 from 91435 loop (the loop passes 10-15 yd from the pack); the Arlokk terrace rows that pass 51593 pack are the next group approach. Plan-check --mmaps: ok, 816 points.",
-    "PLAN R2 ITEM 7 (2026-11-03; BOTS-PATHING-WAYPOINTS.md §7): the Jeklik step-8 row (-11931.9 -1491.8 41.5) is gone with item 6 leg-front restructure. The Mandokir ramp gains a via -12178.5 -1811.9 103.19 between -12224 -1813.3 125.3 and -12125.6 -1810.1 80.7; the Hakkar-outer slope a via -11744.9 -1397 33 between via -11700 -1400.3 51 and the leg to -11762.4 -1396.3 19.7; the Jin do river a via -11882.7 -1408 61.34 after -11925.3 -1472 33.05. The Jeklik stair approach is now the walkable ramp the navmesh takes: -12049.9 -1474.7 87.25, -12070.7 -1474.7 106.35, -12102.1 -1472.8 130.05, then the plateau -12057 -1448 129.13; all six points are ground, none water or steep. Still open: the exporter cuts a path row at -11710.1 -1499.6 40.4 (Hakkar outer) and at -11928.6 -1482.9 34.5 (Jin do), both above ground and water the server refuses. The plan cannot delete an export path row, and no dry crossing exists there (the bridge deck is a game object off the mesh). Plan-check --mmaps: ok, 819 points.",
-    "PLAN R2 ITEM 8 (2026-11-03; BOTS-PATHING-WAYPOINTS.md §6): approach points along the navmesh path at most 38 yd apart on every long hop plan-check named: leg 1 groups 10 (49698), 13 (51947), 18 (91493), 19 (51962) and the Venoxis boss, leg 2 groups 2, 3, 5 and the Mar li boss, leg 3 group 3 (91435), leg 4 group 21 (91444), leg 5 group 1 (the 11-pull pack), leg 7 group 20 and the Hakkar boss. plan-check --mmaps: ok, 844 points; the run leader hops fall from 15 to 2: leg 5 group 0 (49705; its stand -12222 -1822 is 119 yd from its spawn, so a stand_pull is refused and the row stays a plain pull) and leg 7 group 20 (the Hakkar outer ledge; the server PathFinder from the lower dock -11815.8 -1728.5 11.1 answers type 0x4 14-25 yd short, so no approach point there is reachable)."
+    "PLAN R2 ITEM 7 (2026-11-03; BOTS-PATHING-WAYPOINTS.md §7): the Jeklik step-8 row (-11931.9 -1491.8 41.5) is gone with item 6 leg-front restructure. The Mandokir ramp gains a via -12178.5 -1811.9 103.19 between -12224 -1813.3 125.3 and -12125.6 -1810.1 80.7; the Hakkar-outer slope a via -11744.9 -1397 33 between via -11700 -1400.3 51 and the leg to -11762.4 -1396.3 19.7. The Jeklik stair approach is now the walkable ramp the navmesh takes: -12049.9 -1474.7 87.25, -12070.7 -1474.7 106.35, -12102.1 -1472.8 130.05, then the plateau -12057 -1448 129.13; all five points are ground, none water or steep. Still open: the exporter cuts a path row at -11710.1 -1499.6 40.4 (Hakkar outer) and at -11928.6 -1482.9 34.5 (Jin do), both above ground and water the server refuses. The plan cannot delete an export path row, and no dry crossing exists there (the bridge deck is a game object off the mesh); a via tried at -11882.7 -1408 61.34 sat 10.2 yd from an axe thrower, so it was dropped. Plan-check --mmaps: ok, 818 points.",
+    "PLAN R2 ITEM 8 (2026-11-03; BOTS-PATHING-WAYPOINTS.md §6): approach points along the navmesh path, at most 38 yd apart, on the long hops plan-check named: leg 1 groups 10 (49698), 13 (51947), 18 (91493), 19 (51962) and the Venoxis boss, leg 2 groups 2, 3, 4, 5 and the Mar li boss, leg 3 group 3 (91435), leg 4 group 21 (91444), leg 5 group 1 (the 11-pull pack), leg 7 group 20 and the Hakkar boss. Existing stands stay the last point. plan-check --mmaps: ok, 837 points. Eight run-leader hops remain, all roaming pulls whose stand is 52-174 yd from the DB spawn the export keys on (leg 1 groups 10, 13, 18, 19; leg 3 group 3; leg 4 group 21; leg 5 group 0), plus leg 7 group 20, whose ledge the server PathFinder cannot reach from the lower dock (-11815.8 -1728.5 11.1 answers type 0x4 14-25 yd short). The export carries no patrol block, so those rows stay plain pulls at the spawn."
   ],
   "legs": [
-        {
+    {
       "name": "high_priestess_jeklik",
       "to": {"x": -11927, "y": -1309, "z": 78.63},
       "via": [
@@ -67,7 +67,7 @@
             {"x": -11932.9, "y": -1329.52, "z": 79.1473},
             {"x": -11925.8, "y": -1336.62, "z": 78.6494}
           ],
-          "radius": 1,
+          "radius": 11,
           "approach": [
             {"x": -11927, "y": -1309, "z": 78.63}
           ],
@@ -79,7 +79,7 @@
             {"x": -11910.8, "y": -1322.43, "z": 77.5587},
             {"x": -11903.7, "y": -1327.2, "z": 77.621}
           ],
-          "radius": 1,
+          "radius": 9,
           "approach": [
             {"x": -11918, "y": -1342, "z": 79.08}
           ],
@@ -115,7 +115,7 @@
             {"x": -11881.9, "y": -1368.83, "z": 69.049},
             {"x": -11884.3, "y": -1379.01, "z": 66.4316}
           ],
-          "radius": 1,
+          "radius": 18,
           "approach": [
             {"x": -11905, "y": -1384, "z": 67.15}
           ],
@@ -309,7 +309,6 @@
         {"x": -12202.666, "y": -1450.6667, "z": 130.65147}
       ],
       "pull_groups": [
-        
         {
           "entries": [11374],
           "positions": [
@@ -426,7 +425,7 @@
             {"x": -12033.322, "y": -1736.735, "z": 53.323223}
           ]
         },
-                {
+        {
           "entries": [11352],
           "positions": [
             {"x": -11954.2, "y": -1805.99, "z": 53.222}
@@ -466,11 +465,11 @@
             "source": "creature_movement 49698 (25 points, 404.6 yd at 1.67 yd/s)"
           },
           "approach": [
-            {"x": -11992.0575, "y": -1763.4525, "z": 55.605},
-            {"x": -11972.53, "y": -1775.47, "z": 55.64}
+            {"x": -12005.411, "y": -1745.7611, "z": 55.0556},
+            {"x": -11986.9, "y": -1731.7, "z": 54.5}
           ]
         },
-{
+        {
           "entries": [11371, 11371],
           "positions": [
             {"x": -11961.8, "y": -1804.01, "z": 54.64},
@@ -481,7 +480,7 @@
             {"x": -11968.836, "y": -1785.2998, "z": 54.45766}
           ]
         },
-{
+        {
           "entries": [11371, 11371, 11372, 11371, 11372, 11371],
           "positions": [
             {"x": -11989.6, "y": -1815.7, "z": 59.03},
@@ -496,7 +495,7 @@
             {"x": -11989.542, "y": -1805.2452, "z": 58.763268}
           ]
         },
-                {
+        {
           "entries": [11352],
           "positions": [
             {"x": -11871.3, "y": -1811.38, "z": 51.1542}
@@ -530,10 +529,10 @@
             "source": "creature_movement 51947 (19 points, 347.5 yd at 1.67 yd/s)"
           },
           "approach": [
-            {"x": -11894.0687, "y": -1801.5988, "z": 50.335}
+            {"x": -11918, "y": -1788, "z": 47.3}
           ]
         },
-{
+        {
           "entries": [15111],
           "positions": [
             {"x": -11945.7, "y": -1841.13, "z": 56.11}
@@ -545,7 +544,7 @@
           ],
           "stand_pull": true
         },
-{
+        {
           "entries": [15111, 15111, 15111],
           "positions": [
             {"x": -11965.3, "y": -1840.45, "z": 55.81},
@@ -590,7 +589,7 @@
             {"x": -11941.1455, "y": -1783.1444, "z": 53.333504}
           ]
         },
-                {
+        {
           "entries": [11352],
           "positions": [
             {"x": -12145.2, "y": -1818.32, "z": 86.2209}
@@ -632,10 +631,7 @@
             "source": "creature_movement 91493 (27 points, 456.3 yd at 1.67 yd/s)"
           },
           "approach": [
-            {"x": -12049.9892, "y": -1767.9977, "z": 61.6708},
-            {"x": -12072.7569, "y": -1780.8008, "z": 71.9631},
-            {"x": -12095.9637, "y": -1793.8025, "z": 80.565},
-            {"x": -12121.3663, "y": -1807.7975, "z": 80.715}
+            {"x": -12032, "y": -1781, "z": 58.83}
           ]
         },
         {
@@ -673,13 +669,11 @@
             "source": "creature_movement 51962 (20 points, 454.8 yd at 1.67 yd/s)"
           },
           "approach": [
-            {"x": -12120.7722, "y": -1791.2278, "z": 80.44},
-            {"x": -12125.33, "y": -1758.67, "z": 81.14},
-            {"x": -12127.47, "y": -1699.73, "z": 82.74},
-            {"x": -12160, "y": -1685.33, "z": 93.44}
+            {"x": -12132.257, "y": -1818.6115, "z": 83.9371},
+            {"x": -12115, "y": -1819, "z": 80.4}
           ]
         },
-{
+        {
           "entries": [14880, 14880],
           "positions": [
             {"x": -12119.2, "y": -1762.42, "z": 80.37},
@@ -690,7 +684,7 @@
             {"x": -12111.564, "y": -1773.5154, "z": 80.4708}
           ]
         },
-{
+        {
           "entries": [14880, 14880],
           "positions": [
             {"x": -12181.9, "y": -1689.92, "z": 105.81},
@@ -790,7 +784,8 @@
           ],
           "radius": 1,
           "approach": [
-            {"x": -12319.6955, "y": -1663.9709, "z": 131.2991}
+            {"x": -12310.095, "y": -1674.825, "z": 131.2},
+            {"x": -12319.695, "y": -1663.971, "z": 131.2991}
           ]
         },
         {
@@ -807,10 +802,7 @@
             {"x": -12372.1, "y": -1657.33, "z": 130.96},
             {"x": -12380, "y": -1661.66, "z": 132.07}
           ],
-          "radius": 4.6,
-          "approach": [
-            {"x": -12355, "y": -1668.35, "z": 131.12}
-          ]
+          "radius": 4.6
         },
         {
           "entries": [14532],
@@ -836,7 +828,8 @@
           ],
           "radius": 22.4,
           "approach": [
-            {"x": -12359.73, "y": -1634.13, "z": 130.77}
+            {"x": -12361.735, "y": -1661.13, "z": 130.785},
+            {"x": -12361.065, "y": -1652.13, "z": 130.92}
           ]
         }
       ],
@@ -846,6 +839,7 @@
         "position": {"x": -12326.5, "y": -1577.11, "z": 133.59},
         "first": [11388],
         "approach": [
+          {"x": -12351.6, "y": -1612.725, "z": 131.87},
           {"x": -12340.4, "y": -1598.2811, "z": 132.8178}
         ]
       }
@@ -908,7 +902,7 @@
             {"x": -11819.281, "y": -1872.9023, "z": 49.291256}
           ]
         },
-                {
+        {
           "entries": [11352],
           "positions": [
             {"x": -11611.7, "y": -1736.6, "z": 38.7837}
@@ -949,13 +943,11 @@
             "source": "creature_movement 91435 (26 points, 581.3 yd at 1.67 yd/s)"
           },
           "approach": [
-            {"x": -11720.6443, "y": -1848.5714, "z": 40.5771},
-            {"x": -11666.13, "y": -1828.8, "z": 40.83},
-            {"x": -11643.734, "y": -1804.798, "z": 40.93},
-            {"x": -11626.67, "y": -1770.67, "z": 39.73}
+            {"x": -11751.887, "y": -1857.143, "z": 41.1486},
+            {"x": -11739, "y": -1855, "z": 40.78}
           ]
         },
-{
+        {
           "entries": [11360, 11360],
           "positions": [
             {"x": -11745.6, "y": -1903.2, "z": 55.9},
@@ -1353,7 +1345,7 @@
             {"x": -11625.076, "y": -1582.0726, "z": 39.17823}
           ]
         },
-                {
+        {
           "entries": [11352],
           "positions": [
             {"x": -11565.6, "y": -1478.67, "z": 65.0101}
@@ -1385,18 +1377,16 @@
               {"x": -11566.4, "y": -1472.8, "z": 64.5584},
               {"x": -11562.2, "y": -1478.41, "z": 65.9041}
             ],
-            "period_s": 155.0,
+            "period_s": 155,
             "period_estimate": true,
             "source": "creature_movement 91444 (22 points, 258.9 yd at 1.67 yd/s)"
           },
           "approach": [
-            {"x": -11588.27, "y": -1608.53, "z": 49.63},
-            {"x": -11613.95, "y": -1584.0377, "z": 40.0338},
-            {"x": -11606.13, "y": -1530.67, "z": 41.24},
-            {"x": -11580.355, "y": -1494.8867, "z": 54.5733}
+            {"x": -11587.115, "y": -1549.5, "z": 52.615},
+            {"x": -11587, "y": -1542, "z": 53.07}
           ]
         },
-{
+        {
           "entries": [11830, 11351],
           "positions": [
             {"x": -11612.5, "y": -1515.44, "z": 43.78},
@@ -1470,7 +1460,6 @@
         {"x": -12002.399, "y": -1762.1333, "z": 55.440784}
       ],
       "pull_groups": [
-        
         {
           "entries": [11352],
           "positions": [
@@ -1522,7 +1511,8 @@
           ],
           "radius": 5.4,
           "approach": [
-            {"x": -12306.6625, "y": -1866.4358, "z": 130.4542}
+            {"x": -12259.314, "y": -1852.748, "z": 132.914},
+            {"x": -12248, "y": -1848, "z": 133.76}
           ]
         },
         {
@@ -1805,8 +1795,7 @@
         {"x": -11998.133, "y": -1597.6, "z": 25.8515},
         {"x": -11973.6, "y": -1565.8667, "z": 31.4515},
         {"x": -11943.999, "y": -1532, "z": 39.6515},
-        {"x": -11925.333, "y": -1472, "z": 33.0515},
-        {"x": -11882.7, "y": -1408, "z": 61.34}
+        {"x": -11925.333, "y": -1472, "z": 33.0515}
       ],
       "pull_groups": [
         {
@@ -2058,7 +2047,7 @@
           ],
           "radius": 7.9,
           "approach": [
-            {"x": -11633.724, "y": -1470.977, "z": 51.0732}
+            {"x": -11632.7, "y": -1470, "z": 51.07}
           ]
         },
         {
@@ -2524,8 +2513,8 @@
         "approach": [
           {"x": -11837.45, "y": -1627.89, "z": 38.895},
           {"x": -11832, "y": -1661.6, "z": 37.04},
-          {"x": -11823.47, "y": -1689.6, "z": 40.84},
-          {"x": -11799.2889, "y": -1671.1122, "z": 52.6244}
+          {"x": -11821.07, "y": -1689.465, "z": 42.59},
+          {"x": -11799.289, "y": -1671.1122, "z": 52.6244}
         ]
       },
       "notes": [

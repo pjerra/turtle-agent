@@ -2,9 +2,9 @@
   "note": "The navmesh polylines of the Arlokk terrace walks in Zul'Gurub leg 4 (map 309): one route per pair of consecutive move rows, sampled every yard between the rows' points. TestZulGurubArlokkTerraceRouteClearOfLaterPacks always checks its clearance rule against these and fails when a recomputation differs by more than 1 yd at a point. Rewrite with: go test -run TestZulGurubArlokkTerraceRouteClearOfLaterPacks -update-routes ./tools/dungeongen/",
   "routes": [
     {
-      "from_seq": 24,
+      "from_seq": 26,
       "from": "pull group 11 approach",
-      "to_seq": 26,
+      "to_seq": 28,
       "to": "pull group 12 approach",
       "from_point": [
         -11525.37,
@@ -130,9 +130,9 @@
       ]
     },
     {
-      "from_seq": 26,
+      "from_seq": 28,
       "from": "pull group 12 approach",
-      "to_seq": 28,
+      "to_seq": 30,
       "to": "pull group 13 approach",
       "from_point": [
         -11505,
@@ -458,9 +458,9 @@
       ]
     },
     {
-      "from_seq": 28,
+      "from_seq": 30,
       "from": "pull group 13 approach",
-      "to_seq": 30,
+      "to_seq": 32,
       "to": "pull group 14 approach",
       "from_point": [
         -11509,
@@ -526,9 +526,9 @@
       ]
     },
     {
-      "from_seq": 30,
+      "from_seq": 32,
       "from": "pull group 14 approach",
-      "to_seq": 32,
+      "to_seq": 34,
       "to": "pull group 15 approach",
       "from_point": [
         -11505,
@@ -1279,9 +1279,9 @@
       ]
     },
     {
-      "from_seq": 32,
+      "from_seq": 34,
       "from": "pull group 15 approach",
-      "to_seq": 34,
+      "to_seq": 36,
       "to": "pull group 16 approach",
       "from_point": [
         -11546.7,

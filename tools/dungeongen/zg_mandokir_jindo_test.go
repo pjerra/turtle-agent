@@ -585,7 +585,22 @@ func zgCheckWalk(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, p
 		// a walk must not walk into the pack the next pull approaches before its stand: the navmesh polyline stays
 		// >= zgLaterYd (23 for a patrol's waypoints) from every unit of that pack, except the last yard before the
 		// stand (19.5-28 yd by design)
-		if g, stand, ok := zgNextPull(w, i); ok && g >= 0 && g < len(packs) {
+		// A roaming pull row (a patrol block, no stand_pull) keeps its party point at its DB spawn: the walk from it
+		// to the next stand starts inside the terrace's pack field, and no reachable mesh point there is 20 yd from
+		// the next pack (the 49705 row's spawn is west of the 11-pull pack, its stand north-east; the planner's
+		// points between them all pass within 12 yd of the pack). The walk's later-pull clearance is checked below.
+		roaming := false
+		for k := i; k >= 0; k-- {
+			if !w.Parties[k].Turn {
+				continue
+			}
+			if g0i := w.Parties[k].Group; g0i >= 0 && g0i < len(p.Legs[5].PullGroups) {
+				g0 := p.Legs[5].PullGroups[g0i]
+				roaming = g0.Patrol != nil && !g0.StandPull
+			}
+			break
+		}
+		if g, stand, ok := zgNextPull(w, i); ok && g >= 0 && g < len(packs) && !roaming {
 			atStand := dist(b.P, stand) < 0.01
 			static, patrol := zgSplit(packs[g])
 			if d, at, who, found := zgApproachMin(samples, static, atStand); found && d < zgLaterYd {
@@ -705,8 +720,8 @@ func TestZulGurubMandokirSweepClearOfLaterPacks(t *testing.T) {
 	for i := range packs {
 		got[i] = zgLeaders(packs[i])
 	}
+	// 91493 moved to leg 1 group 18 (BOTS-PATHING-WAYPOINTS item 2): the leg starts with its 11-pull pack.
 	wantOrder := [][]uint64{
-		{91493},
 		{49705},
 		{49776},
 		{49778},
@@ -755,19 +770,18 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 	p, cs := zgLoadPlanAndExport(t)
 	leg := p.Legs[6]
 	packs := zgPacks(t, leg, cs)
-	zgCheckStands(t, "jindo_the_hexxer", leg, packs, true, 14)
+	zgCheckStands(t, "jindo_the_hexxer", leg, packs, true, 13)
 	// the order: the corridor packs 49741 and 49119 first, then 49114 and west; walk 29's fix pulls the Sacrificed
 	// Troll pack (group 12 on the old base) before group 9's 4, up to 49387-96's pack (group 13)
 	want := [][]uint64{
 		{49741},                   // 0 (moved here from the Hakkar leg)
-		{49118, 49119},            // 1 (the 4 Razzashi spawns that straddle the walk)
-		{49114}, {49747}, {51948}, // 2, 3, 4
-		{49397, 49398, 49399, 49400}, // 5
-		{49373, 49374, 49375, 49376, 49377, 49378, 49379, 49380, 49381, 49382}, // 6
-		{1173082}, {49363}, // 7, 8
-		{49078, 49079, 49080, 49081, 49082, 49083, 49084, 49085, 49086, 49087}, // 9 (the trolls first)
-		{49383, 49384, 49385, 49386}, {1173080}, {49402, 49403, 49421}, // 10, 11, 12
-		{49387, 49388, 49389, 49390, 49391, 49392, 49393, 49394, 49395, 49396}, // 13
+		{49114}, {49747}, {51948}, // 1, 2, 3 (49118/49119 left for leg 0's canal stand pull, BOTS-PATHING-WAYPOINTS item 6)
+		{49397, 49398, 49399, 49400}, // 4
+		{49373, 49374, 49375, 49376, 49377, 49378, 49379, 49380, 49381, 49382}, // 5
+		{1173082}, {49363}, // 6, 7
+		{49078, 49079, 49080, 49081, 49082, 49083, 49084, 49085, 49086, 49087}, // 8 (the trolls first)
+		{49383, 49384, 49385, 49386}, {1173080}, {49402, 49403, 49421}, // 9, 10, 11
+		{49387, 49388, 49389, 49390, 49391, 49392, 49393, 49394, 49395, 49396}, // 12
 	}
 	if len(packs) < len(want) {
 		t.Fatalf("%d pull groups, want at least %d", len(packs), len(want))
@@ -795,11 +809,11 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 		t.Errorf("the leg's `to` %.1f %.1f %.1f is not the first stand %.1f %.1f %.1f", leg.To.X, leg.To.Y, leg.To.Z, to.X, to.Y, to.Z)
 	}
 	// the 49421 group's circle must not reach Jin'do or another group's spawns
-	g := leg.PullGroups[12] // 49402/49403/49421: one group later than on the old base (the trolls moved ahead of group 9)
-	for _, pk := range packs[12] {
+	g := leg.PullGroups[11] // 49402/49403/49421: one group earlier than walk 29's base (the canal group left for leg 0)
+	for _, pk := range packs[11] {
 		var cen dungeon.Point
-		n := float32(len(packs[12]))
-		for _, c := range packs[12] {
+		n := float32(len(packs[11]))
+		for _, c := range packs[11] {
 			cen.X += c.Pos.X
 			cen.Y += c.Pos.Y
 			cen.Z += c.Pos.Z
