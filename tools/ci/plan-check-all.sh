@@ -9,7 +9,8 @@
 # Usage:
 #   tools/ci/plan-check-all.sh --mmaps DIR [--dir DUNGEONS] [--bin TURTLE-AGENT] [--json-out FILE]
 #
-# The exit status is plan-check's: 0 when every checked plan passes, 11 when a point fails, 2 on a usage error.
+# The exit status is plan-check's: 0 when every checked plan passes, 11 when a point fails or a placement lint is an error, 2 on a usage error.
+# A plan that fails on either is printed as FAIL with its points or lint findings.
 # The JSON-out file (when given) holds plan-check's own report for the checked plans.
 set -euo pipefail
 
@@ -98,7 +99,7 @@ status=0
 if [[ -n $jsonout ]]; then
 	cp "$tmp" "$jsonout"
 fi
-python3 - "$tmp" <<'PY' || status=1
+python3 - "$tmp" <<'PY' || { [[ $status -ne 0 ]] || status=1; } # keep plan-check's own status (11) when it already failed
 import json
 import sys
 
@@ -114,13 +115,20 @@ failed = 0
 for r in results:
     name = r.get("plan", "?")
     issues = r.get("issues") or []
-    if issues:
+    # plan-check also fails on an error-severity placement lint (README "Placement lints"); the exit status counts those, so this must too.
+    lint_errors = [f for f in (r.get("lints") or []) if f.get("severity") == "error"]
+    if issues or lint_errors:
         failed += 1
+    if issues:
         print(f"FAIL {name}: {len(issues)} of {r.get('points', 0)} points fail (map {r.get('map', '?')})")
         for i in issues:
             detail = i.get("detail") or ""
             print(f"  leg {i.get('leg', '?')} {i.get('leg_name', '')}: {i.get('part', '')}: {i.get('reason', '')}: {detail}")
-    else:
+    if lint_errors:
+        print(f"FAIL {name}: {len(lint_errors)} placement lint error(s) (map {r.get('map', '?')})")
+        for f in lint_errors:
+            print(f"  step {f.get('step', '?')} leg {f.get('leg', '?')} {f.get('lint', '')}: {f.get('point', '')}: {f.get('detail', '')}")
+    if not issues and not lint_errors:
         print(f"PASS {name}: {r.get('points', 0)} points on map {r.get('map', '?')} ({len(r.get('warnings') or [])} warnings, {len(r.get('exempt') or [])} exempt)")
 if failed:
     print(f"plan-check-all: {failed} of {len(results)} plan(s) failed")
