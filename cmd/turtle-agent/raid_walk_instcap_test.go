@@ -78,12 +78,13 @@ func TestInstanceCapWaitsForTheOldestToAgeOut(t *testing.T) {
 	}
 }
 
-func TestInstanceCapWaitIsCapped(t *testing.T) {
-	// The oldest entry needs 50 more minutes; the wait cap is 20 minutes, then the walk goes on with a note.
-	w, _, slept, stderr := capWalk(t, raidWalkOptions{capWait: 20 * time.Minute},
+func TestInstanceCapWaitIsCappedExitsWithoutAReservation(t *testing.T) {
+	// The oldest entry needs 50 more minutes; the wait cap is 20 minutes, then the walk exits 26 and holds no place.
+	w, now, slept, stderr := capWalk(t, raidWalkOptions{capWait: 20 * time.Minute},
 		10*time.Minute, 8*time.Minute, 5*time.Minute, 2*time.Minute)
-	if err := w.phaseInstanceCap(context.Background()); err != nil {
-		t.Fatal(err)
+	code, reason := stopInfo(w.phaseInstanceCap(context.Background()))
+	if code != exitRaidWalkInstanceCap {
+		t.Fatalf("code %d (%s), want %d: a walk past the wait must not start without a reservation", code, reason, exitRaidWalkInstanceCap)
 	}
 	var total time.Duration
 	for _, d := range *slept {
@@ -92,18 +93,90 @@ func TestInstanceCapWaitIsCapped(t *testing.T) {
 	if total != 20*time.Minute {
 		t.Fatalf("waited %s, want exactly the 20m cap (slept %v)", total, *slept)
 	}
-	if !strings.Contains(stderr.String(), "going on") || len(w.notes) == 0 {
-		t.Fatalf("no going-on note: %q / %v", stderr.String(), w.notes)
+	if w.capReserved || !strings.Contains(reason, "no fresh instance is started without a reservation") || len(w.notes) == 0 {
+		t.Fatalf("reserved %v, reason %q, notes %v", w.capReserved, reason, w.notes)
+	}
+	if !strings.Contains(stderr.String(), "still 4 on m910q") {
+		t.Fatalf("no wait-exhausted line: %q", stderr.String())
+	}
+	l, _ := raidwalk.LoadCapLedger(w.env.capLedger)
+	if n := l.Count("m910q", *now); n != 4 { // the 4 entries only: no place was taken
+		t.Fatalf("count %d, want 4 (no reservation)", n)
 	}
 }
 
-func TestInstanceCapZeroWaitWarnsAndGoesOn(t *testing.T) {
+func TestInstanceCapZeroWaitExitsAtTheCount(t *testing.T) {
 	w, _, slept, stderr := capWalk(t, raidWalkOptions{}, time.Minute, 2*time.Minute, 3*time.Minute, 4*time.Minute)
-	if err := w.phaseInstanceCap(context.Background()); err != nil {
-		t.Fatal(err)
+	code, _ := stopInfo(w.phaseInstanceCap(context.Background()))
+	if code != exitRaidWalkInstanceCap || w.capReserved || len(*slept) != 0 || !strings.Contains(stderr.String(), "instance cap: 4 fresh instances") {
+		t.Fatalf("code %d, reserved %v, slept %v, stderr %q", code, w.capReserved, *slept, stderr.String())
 	}
-	if len(*slept) != 0 || !strings.Contains(stderr.String(), "instance cap: 4 fresh instances") {
-		t.Fatalf("slept %v, stderr %q", *slept, stderr.String())
+}
+
+func TestInstanceCapUnsafeGoesOnWithoutAReservation(t *testing.T) {
+	w, now, slept, stderr := capWalk(t, raidWalkOptions{capWait: 20 * time.Minute, capUnsafe: true},
+		10*time.Minute, 8*time.Minute, 5*time.Minute, 2*time.Minute)
+	if err := w.phaseInstanceCap(context.Background()); err != nil {
+		t.Fatalf("--instance-cap-unsafe must go on at the wait's end: %v", err)
+	}
+	var total time.Duration
+	for _, d := range *slept {
+		total += d
+	}
+	if total != 20*time.Minute {
+		t.Fatalf("waited %s, want the 20m cap (slept %v)", total, *slept)
+	}
+	if w.capReserved || !strings.Contains(stderr.String(), "--instance-cap-unsafe") || len(w.notes) == 0 {
+		t.Fatalf("reserved %v, stderr %q, notes %v: the unsafe pass must be logged", w.capReserved, stderr.String(), w.notes)
+	}
+	// Past the cap the walk's entry is still recorded once it enters, so later walks count it.
+	w.recordFreshInstance()
+	l, _ := raidwalk.LoadCapLedger(w.env.capLedger)
+	if n := l.Count("m910q", *now); n != 5 {
+		t.Fatalf("count %d, want the 4 entries and the walk's own", n)
+	}
+}
+
+func TestInstanceCapTimedOutWalkersNoneProceedsWithoutAReservation(t *testing.T) {
+	// Four walkers start together at the threshold (4 entries, the oldest needs 56 more minutes, the wait is 2 minutes):
+	// every one of them times out and exits 26, and none is admitted or holds a place.
+	w0, now0, _, _ := capWalk(t, raidWalkOptions{capWait: 2 * time.Minute, holder: "w0"},
+		time.Minute, 2*time.Minute, 3*time.Minute, 4*time.Minute)
+	ledger := w0.env.capLedger
+	start := *now0
+	walks := []*walk{w0}
+	for _, h := range []string{"w1", "w2", "w3"} {
+		var se bytes.Buffer
+		clock := start
+		w := &walk{opts: raidWalkOptions{capWait: 2 * time.Minute, holder: h, server: "m910q"}, stderr: &se, plan: w0.plan}
+		w.env = walkEnv{
+			now:       func() time.Time { return clock },
+			sleep:     func(_ context.Context, d time.Duration) error { clock = clock.Add(d); return nil },
+			capLedger: ledger,
+		}
+		walks = append(walks, w)
+	}
+	errs := make([]error, len(walks))
+	var wg sync.WaitGroup
+	for i, w := range walks {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = w.phaseInstanceCap(context.Background())
+		}()
+	}
+	wg.Wait()
+	for i, e := range errs {
+		if code, reason := stopInfo(e); code != exitRaidWalkInstanceCap {
+			t.Fatalf("walk %d: code %d (%s), want %d and no admission", i, code, reason, exitRaidWalkInstanceCap)
+		}
+		if walks[i].capReserved {
+			t.Fatalf("walk %d holds a reservation after timing out", i)
+		}
+	}
+	l, _ := raidwalk.LoadCapLedger(ledger)
+	if s := l.Servers["m910q"]; s == nil || len(s.Reservations) != 0 || len(s.Entries) != 4 {
+		t.Fatalf("ledger after the timeouts: %+v, want 4 entries and no reservation", s)
 	}
 }
 
@@ -166,12 +239,16 @@ func TestInstanceCapRecordsTheEntryAndOffWithoutALedger(t *testing.T) {
 func TestInstanceCapFlags(t *testing.T) {
 	var se bytes.Buffer
 	o, code := parseRaidWalkArgs([]string{"zg"}, &se)
-	if code != exitOK || o.capWait != 20*time.Minute || o.capFail || o.capReset {
+	if code != exitOK || o.capWait != 20*time.Minute || o.capFail || o.capReset || o.capUnsafe {
 		t.Fatalf("defaults: %+v code %d", o, code)
 	}
 	o, code = parseRaidWalkArgs([]string{"zg", "--instance-cap-wait", "5m", "--instance-cap-fail", "--instance-cap-reset"}, &se)
 	if code != exitOK || o.capWait != 5*time.Minute || !o.capFail || !o.capReset {
 		t.Fatalf("set: %+v code %d", o, code)
+	}
+	o, code = parseRaidWalkArgs([]string{"zg", "--instance-cap-unsafe"}, &se)
+	if code != exitOK || !o.capUnsafe || o.capFail {
+		t.Fatalf("--instance-cap-unsafe: %+v code %d", o, code)
 	}
 	if _, code = parseRaidWalkArgs([]string{"zg", "--instance-cap-wait", "-1m"}, &se); code != exitUsage {
 		t.Fatalf("negative wait: code %d", code)
@@ -248,25 +325,46 @@ func TestInstanceCapUnreadableLedger(t *testing.T) {
 		}
 		return w, slept, stderr
 	}
+	untouched := func(w *walk) {
+		t.Helper()
+		if st, err := os.Stat(w.env.capLedger); err != nil || !st.IsDir() {
+			t.Fatal("the unreadable ledger was written over")
+		}
+	}
+	// --instance-cap-fail: exit 26 at once.
 	w, slept, _ := mk(raidWalkOptions{capFail: true})
 	code, reason := stopInfo(w.phaseInstanceCap(context.Background()))
 	if code != exitRaidWalkInstanceCap || !strings.Contains(reason, "cannot be read") || len(*slept) != 0 {
 		t.Fatalf("--instance-cap-fail: code %d %q slept %v", code, reason, *slept)
 	}
+	// Fail closed: one cycle's wait for a transient read error, then exit 26 with no reservation and no write.
 	w, slept, stderr := mk(raidWalkOptions{capWait: 20 * time.Minute})
-	if err := w.phaseInstanceCap(context.Background()); err != nil {
-		t.Fatal(err)
+	code, reason = stopInfo(w.phaseInstanceCap(context.Background()))
+	if code != exitRaidWalkInstanceCap || !strings.Contains(reason, "cannot be read") || !strings.Contains(reason, "--instance-cap-unsafe") {
+		t.Fatalf("unreadable ledger must fail closed: code %d %q", code, reason)
 	}
 	if len(*slept) != 1 || (*slept)[0] != capUnreadableWait || w.capReserved || !strings.Contains(stderr.String(), "cannot be read") {
 		t.Fatalf("wait one cycle: slept %v, reserved %v, stderr %q", *slept, w.capReserved, stderr.String())
 	}
-	if st, err := os.Stat(w.env.capLedger); err != nil || !st.IsDir() {
-		t.Fatal("the unreadable ledger was written over")
-	}
+	untouched(w)
 	w.recordFreshInstance() // must not overwrite either
-	if st, err := os.Stat(w.env.capLedger); err != nil || !st.IsDir() {
-		t.Fatal("recordFreshInstance wrote over the unreadable ledger")
+	untouched(w)
+	// No wait (--instance-cap-wait 0): exit 26 at once.
+	w, slept, _ = mk(raidWalkOptions{})
+	if code, _ := stopInfo(w.phaseInstanceCap(context.Background())); code != exitRaidWalkInstanceCap || len(*slept) != 0 {
+		t.Fatalf("zero wait: code %d slept %v", code, *slept)
 	}
+	// --instance-cap-unsafe: the same wait, then go on without the ledger, logged, no reservation, nothing written.
+	w, slept, stderr = mk(raidWalkOptions{capWait: 20 * time.Minute, capUnsafe: true})
+	if err := w.phaseInstanceCap(context.Background()); err != nil {
+		t.Fatalf("--instance-cap-unsafe must go on: %v", err)
+	}
+	if len(*slept) != 1 || w.capReserved || !strings.Contains(stderr.String(), "--instance-cap-unsafe") {
+		t.Fatalf("unsafe: slept %v, reserved %v, stderr %q", *slept, w.capReserved, stderr.String())
+	}
+	untouched(w)
+	w.recordFreshInstance()
+	untouched(w)
 }
 
 func TestInstanceCapCorruptLedgerIsMovedAsideAndLogged(t *testing.T) {

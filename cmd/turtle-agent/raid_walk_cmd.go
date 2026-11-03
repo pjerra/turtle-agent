@@ -50,13 +50,13 @@ const (
 	exitRaidWalkFailed       = 18 // a phase failed or was refused
 	exitRaidWalkIncident     = 19 // the walk ran and was torn down, but a wipe or a boss engagement happened, or hires were left
 	exitRaidWalkInjectFailed = 23 // a walk that would exit 0 had at least one fault with verdict fail
-	exitRaidWalkInstanceCap  = 26 // --instance-cap-fail: the server's hourly instance-id ledger is at the cap; nothing was started
+	exitRaidWalkInstanceCap  = 26 // the server's hourly instance-id ledger is at the cap (--instance-cap-fail, or the wait ran out) or unreadable, and the walk was not allowed past it: nothing was started
 )
 
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
     [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
-    [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
+    [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--decisions on|off] [--decisions-max-mib N]
     [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--reuse-instance] [--dry-run]
        turtle-agent raid-walk report <dir> [--spell ID] [--clock-offset 1h] [--md FILE] [--json FILE] [--out DIR]`
@@ -98,6 +98,7 @@ type raidWalkOptions struct {
 	hireSettle      time.Duration // --hire-settle: the wait after the last hire; 0 skips it (the #1367 live proof)
 	capWait         time.Duration // --instance-cap-wait: the longest the walk waits for the server's hourly instance-id count to fall
 	capFail         bool          // --instance-cap-fail: exit exitRaidWalkInstanceCap at the cap instead of waiting
+	capUnsafe       bool          // --instance-cap-unsafe: when the wait runs out or the ledger is unreadable, go on without a reservation (logged) instead of exiting exitRaidWalkInstanceCap
 	capReset        bool          // --instance-cap-reset: forget this server's ledger first (its worldserver restarted)
 	patrols         string
 	out             string
@@ -244,8 +245,9 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.DurationVar(&o.wipeRest, "wipe-rest", 10*time.Minute, "how long a revived raid rests out of combat before the run resumes")
 	fs.BoolVar(&o.reviveAtRaid, "revive-at-raid", true, "a wipe recovery revives the raid AT the revive point: a hire revived more than 100 yd away is summoned to it, and the resume waits up to 60s for every hire to be in range and out of combat (false: the old revive in place)")
 	fs.DurationVar(&o.hireSettle, "hire-settle", hireSettleWait, "how long to wait after the last hire for its join summons before the refit and the bind (0 skips the wait)")
-	fs.DurationVar(&o.capWait, "instance-cap-wait", raidwalk.InstanceCapDefaultWait, "at 4 or more fresh instances in the last hour on the server (the core refuses a 6th per account), wait up to this long for the oldest to age out, then go on (0: warn and go on)")
+	fs.DurationVar(&o.capWait, "instance-cap-wait", raidwalk.InstanceCapDefaultWait, "at 4 or more fresh instances in the last hour on the server (the core refuses a 6th per account), wait up to this long for the oldest to age out, then exit 26 (0: no wait, exit 26 at that count)")
 	fs.BoolVar(&o.capFail, "instance-cap-fail", false, "at that count exit 26 instead of waiting")
+	fs.BoolVar(&o.capUnsafe, "instance-cap-unsafe", false, "UNSAFE: when the wait runs out or the ledger cannot be read, go on without a reservation (concurrent walks may then each create a fresh instance) instead of exiting 26; logged")
 	fs.BoolVar(&o.capReset, "instance-cap-reset", false, "forget this server's instance ledger before the check (the worldserver restarted)")
 	fs.StringVar(&o.patrols, "patrols", "", "a tb-patrols file for the revive quiet check")
 	fs.Var(&o.gmClear, "gm-clear", "TEST SERVERS ONLY, needs --place: after the placement the commander GM-kills every live unit of these pull groups of a leg, \"<leg>:<group>[,<group>...]\" (whole packs, links included); repeatable; the walk is then ASSISTED, never a real clear")

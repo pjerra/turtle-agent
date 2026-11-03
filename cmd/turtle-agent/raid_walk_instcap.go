@@ -5,7 +5,9 @@
 // admission are one step under the ledger lock: a walk below 4 in the last hour RESERVES a place (owner holder+pid,
 // 30 min), so walks that start together cannot all pass at a count of 3; the reservation becomes the entry once the
 // raid has entered and is released on every exit before that. At 4 or more the walk warns and waits
-// (--instance-cap-wait), or exits 26 (--instance-cap-fail).
+// (--instance-cap-wait), or exits 26 (--instance-cap-fail). A walk never starts a fresh instance without a reservation:
+// when the wait runs out, or the ledger cannot be read, it exits 26 too, unless --instance-cap-unsafe lets it go on
+// (logged, no reservation).
 package main
 
 import (
@@ -83,13 +85,16 @@ func (w *walk) phaseInstanceCap(ctx context.Context) error {
 			if unreadable == 0 && w.opts.capWait > 0 {
 				unreadable++
 				d := min(capUnreadableWait, w.opts.capWait)
-				w.say(now, fmt.Sprintf("instance cap: waiting %s for the ledger, then going on without it", d))
+				w.say(now, fmt.Sprintf("instance cap: waiting %s for the ledger, then giving up on it", d))
 				if err := w.env.sleep(ctx, d); err != nil {
 					return stopf(exitRaidWalkFailed, "interrupted")
 				}
 				continue
 			}
-			w.say(now, "instance cap: going on without the ledger; no entry will be written over it")
+			if !w.opts.capUnsafe {
+				return stopf(exitRaidWalkInstanceCap, "%s: no fresh instance is started without a reservation (--instance-cap-unsafe goes on without the ledger)", msg)
+			}
+			w.say(now, "instance cap: --instance-cap-unsafe: going on without the ledger and without a reservation; no entry will be written over it")
 			return nil
 		}
 		if admitted {
@@ -114,7 +119,13 @@ func (w *walk) phaseInstanceCap(ctx context.Context) error {
 			wait = capWaitMargin
 		}
 		if left <= 0 {
-			msg := fmt.Sprintf("instance cap: waited %s (--instance-cap-wait), still %d on %s; going on", w.opts.capWait, n, server)
+			msg := fmt.Sprintf("instance cap: waited %s (--instance-cap-wait), still %d on %s", w.opts.capWait, n, server)
+			if !w.opts.capUnsafe {
+				w.say(now, msg)
+				w.note("%s", msg)
+				return stopf(exitRaidWalkInstanceCap, "%s: no fresh instance is started without a reservation (--instance-cap-unsafe goes on anyway)", msg)
+			}
+			msg += "; --instance-cap-unsafe: going on without a reservation"
 			w.say(now, msg)
 			w.note("%s", msg)
 			return nil
