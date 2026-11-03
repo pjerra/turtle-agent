@@ -1383,7 +1383,9 @@ func TestQuietExtraClearRefusesUnitNearSkippedCircle(t *testing.T) {
 		target func(t *testing.T, plan raidwalk.PlacePlan) raidwalk.ClearCircle
 		want   int
 	}{
-		{"inside the reach", func(t *testing.T, plan raidwalk.PlacePlan) raidwalk.ClearCircle { return placeCircleNear(t, plan, -11945.70, -1841.13, 56.11) }, exitRaidWalkFailed},
+		{"inside the reach", func(t *testing.T, plan raidwalk.PlacePlan) raidwalk.ClearCircle {
+			return placeCircleNear(t, plan, -11945.70, -1841.13, 56.11)
+		}, exitRaidWalkFailed},
 		{"beyond the reach", placeRow94Circle, exitOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
