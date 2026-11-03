@@ -187,10 +187,21 @@ type Options struct {
 	// next hop is measured from it. Without it a camp group exports as today (approach rows and a plain pull) and the
 	// camp is dropped with a warning; an older TortoiseBots ignores the unknown flag bits and walks the same degrade path.
 	CampPull bool
+	// Formation resolves a spawn guid to its formation (the creature_groups group of that spawn, the spawn itself when it is alone) in the
+	// map's world export: a pull group's scripted stages (dungeon.PullGroup.Stages) name the formations they peel by leader guid, and the
+	// pull row of a stage is scoped to their spawns (centre, radius, entries). A plan with a staged group is refused without it.
+	Formation func(mapID uint32, guid uint32) ([]FormationSpawn, error)
 	// Route, when set, is called for every hop between two anchors of the rows (move, pull, boss, hold) of a plan with avoid boxes: it
 	// returns the via points that keep the run leader's own navmesh path (the server's, which does not know the boxes) out of them,
 	// none when that path is already clear. An error means a hop that cannot be made safe: the export fails.
 	Route func(mapID uint32, from, to dungeon.Point) ([]dungeon.Point, error)
+}
+
+// FormationSpawn is one spawn of a formation (Options.Formation).
+type FormationSpawn struct {
+	Guid  uint32
+	Entry uint32
+	Pos   dungeon.Point
 }
 
 // ErrCompanionsLoot is the refusal of a plan with a leg whose companions_loot is false (see Options.DropCompanionsLoot).
@@ -477,6 +488,9 @@ func (b *builder) pull(gi int, g dungeon.PullGroup) error {
 	if len(g.Positions) == 0 {
 		return fmt.Errorf("no position")
 	}
+	if len(g.Stages) > 0 {
+		return b.stagedPull(gi, g)
+	}
 	var cx, cy, cz float64
 	for _, p := range g.Positions {
 		cx, cy, cz = cx+float64(p.X), cy+float64(p.Y), cz+float64(p.Z)
@@ -538,6 +552,100 @@ func (b *builder) pull(gi int, g dungeon.PullGroup) error {
 	b.last, b.haveLast = dungeon.Point{X: f32(cx), Y: f32(cy), Z: f32(cz)}, true
 	if g.StandPull {
 		b.last = g.Approach[len(g.Approach)-1] // the party fights from its stand: the next move's hop is measured from there
+	}
+	return nil
+}
+
+// stagedPull writes a staged group (dungeon.PullGroup.Stages): one pull per stage, scoped to the formations the stage peels. With the
+// CampPull option a stage is a camp chain (the camp move, its tag rows, the pull row with FlagCampPull) and the party fights at the camp;
+// without it the tag rows are approach moves and the pull row a plain pull, so an older build still pulls one formation per row. The
+// pull row's centre is the centroid of the peeled spawns and its radius the farthest of them plus PullSlackYd, cut under the nearest
+// spawn of any other stage so the run leader's formation scope (every formation with a spawn inside the radius) takes this stage's
+// formations and no other: a stage that cannot be scoped that way is an error, the author must split differently.
+func (b *builder) stagedPull(gi int, g dungeon.PullGroup) error {
+	if g.Hold != nil || g.Ambush || g.StandPull || g.Camp != nil || len(g.Approach) > 0 {
+		return fmt.Errorf("a staged group has no camp, approach, hold, stand_pull or ambush of its own")
+	}
+	if b.opt.Formation == nil {
+		return fmt.Errorf("a staged group needs the world's formations (Options.Formation: plan-export --world DIR)")
+	}
+	forms := make([][]FormationSpawn, len(g.Stages))
+	for si, st := range g.Stages {
+		for _, leader := range st.Peel {
+			f, err := b.opt.Formation(b.plan.Map, leader)
+			if err != nil {
+				return fmt.Errorf("stages[%d].peel %d: %w", si, leader, err)
+			}
+			if len(f) == 0 {
+				return fmt.Errorf("stages[%d].peel %d: the formation has no spawn", si, leader)
+			}
+			forms[si] = append(forms[si], f...)
+		}
+	}
+	k := len(g.Stages)
+	if !b.opt.CampPull {
+		b.warnings = append(b.warnings, fmt.Sprintf("pull group %d: camp is dropped without the exporter's camp-pull option (export with --camp-pull for the camp rows): its %d stages export as plain pulls from their tag spots", gi, k))
+	}
+	for si, st := range g.Stages {
+		var cx, cy, cz float64
+		for _, s := range forms[si] {
+			cx, cy, cz = cx+float64(s.Pos.X), cy+float64(s.Pos.Y), cz+float64(s.Pos.Z)
+		}
+		n := float64(len(forms[si]))
+		cx, cy, cz = cx/n, cy/n, cz/n
+		far := 0.0
+		for _, s := range forms[si] {
+			far = math.Max(far, math.Sqrt(sq(float64(s.Pos.X)-cx)+sq(float64(s.Pos.Y)-cy)+sq(float64(s.Pos.Z)-cz)))
+		}
+		radius := float64(ceil1(far + PullSlackYd))
+		for oi := range g.Stages {
+			if oi == si {
+				continue
+			}
+			for _, o := range forms[oi] {
+				d := math.Sqrt(sq(float64(o.Pos.X)-cx) + sq(float64(o.Pos.Y)-cy) + sq(float64(o.Pos.Z)-cz))
+				if d > radius {
+					continue
+				}
+				// Strictly under the other stage's spawn, in tenths.
+				radius = math.Floor((d-0.01)*10) / 10
+				if radius < far {
+					return fmt.Errorf("stages[%d]: spawn %d of stages[%d] stands %.1f yd from the centre of the peeled formations, inside their own reach (%.1f yd): the pull row cannot be scoped to this stage; split the stages differently", si, o.Guid, oi, d, far)
+				}
+			}
+		}
+		centre := dungeon.Point{X: f32(cx), Y: f32(cy), Z: f32(cz)}
+		if len(st.Tag) == 0 {
+			return fmt.Errorf("stages[%d]: no tag point", si)
+		}
+		tag := st.Tag[len(st.Tag)-1]
+		if d := math.Sqrt(sq(float64(tag.X)-cx) + sq(float64(tag.Y)-cy) + sq(float64(tag.Z)-cz)); d > dungeon.RunLeaderSeeYd {
+			return fmt.Errorf("stages[%d]: the tag spot is %.1f yd from the centre of the peeled formations: the run leader sees %d yd at most", si, d, dungeon.RunLeaderSeeYd)
+		}
+		var entries []uint32
+		for _, s := range forms[si] {
+			entries = append(entries, s.Entry)
+		}
+		item := uint32(st.MaxBodies)
+		if item == 0 {
+			item = uint32(g.MaxBodies)
+		}
+		flags := teamFlags(g.Team)
+		c := fmt.Sprintf("pull group %d stage %d/%d", gi, si+1, k)
+		if b.opt.CampPull {
+			b.add(StepRow{Kind: KindMove, X: st.Camp.X, Y: st.Camp.Y, Z: st.Camp.Z, Flags: FlagCampPoint, Comment: c + " camp"})
+			for _, a := range st.Tag {
+				b.move(a, false, c+" tag walk")
+			}
+			b.add(StepRow{Kind: KindPull, X: centre.X, Y: centre.Y, Z: centre.Z, Radius: float32(radius), Item: item, Flags: flags | FlagCampPull, Entries: uniq(entries), Comment: c + "; camp pull"})
+			b.last, b.haveLast = st.Camp, true // the party fights at the camp: the next move's hop is measured from there
+			continue
+		}
+		for _, a := range st.Tag {
+			b.move(a, false, c+" approach")
+		}
+		b.add(StepRow{Kind: KindPull, X: centre.X, Y: centre.Y, Z: centre.Z, Radius: float32(radius), Item: item, Flags: flags, Entries: uniq(entries), Comment: c})
+		b.last, b.haveLast = centre, true
 	}
 	return nil
 }

@@ -125,7 +125,7 @@ func unexpressed(p *dungeon.Plan, opt Options, upto int) []string {
 			add("needs_walk", leg+" to")
 		}
 		for gi, g := range l.PullGroups {
-			if g.Camp != nil && !opt.CampPull {
+			if (g.Camp != nil || len(g.Stages) > 0) && !opt.CampPull {
 				add("camp (dropped without --camp-pull)", fmt.Sprintf("%s pull group %d", leg, gi))
 			}
 			if g.Patrol != nil {

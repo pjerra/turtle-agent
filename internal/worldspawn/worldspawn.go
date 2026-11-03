@@ -99,6 +99,31 @@ type World struct {
 	Patrols []Patrol // the DB's waypoint loops; see Patrol for why this is not patrols.Patrol
 }
 
+// Formation is the spawn with that guid and every spawn that shares its creature_groups group (the leader's group: GroupLeader), the spawn
+// alone when it is in no group; nil when no spawn has the guid. A scripted pull stage peels a formation by its leader's guid.
+func (w *World) Formation(guid uint64) []Spawn {
+	var self *Spawn
+	for i := range w.Spawns {
+		if w.Spawns[i].GUID == guid {
+			self = &w.Spawns[i]
+			break
+		}
+	}
+	if self == nil {
+		return nil
+	}
+	if self.GroupLeader == 0 {
+		return []Spawn{*self}
+	}
+	var out []Spawn
+	for _, s := range w.Spawns {
+		if s.GroupLeader == self.GroupLeader {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // AggroRadius is Creature::GetAttackDistance for one spawn against a party of partyLevel: the detection range minus the level
 // difference (party minus creature, floored at -25 levels), never below min(detection, 5 yd), times the aggro rate. It is the
 // run leader's estimate too (TortoiseBots ai::AggroRadius), so the two tools agree. A NO_AGGRO creature or one with no

@@ -17,9 +17,10 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
-const planExportUsage = "usage: turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--gm-cross-direct] [--approach-hops] [--camp-pull] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)"
+const planExportUsage = "usage: turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--gm-cross-direct] [--approach-hops] [--camp-pull] [--world DIR] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)"
 
 // migrationName is what a TortoiseBots world migration is called (data/sql/world/).
 var migrationName = regexp.MustCompile(`^\d{14}_world\.sql$`)
@@ -34,6 +35,7 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 	out := fs.String("out", "", "the migration file to write, or a folder: the file is then named <stamp>_world.sql")
 	allLive := fs.Bool("all-live", false, "export every plan whose status is live-checked")
 	allowDraft := fs.Bool("allow-draft", false, "export a named plan whose status is draft (refused without)")
+	world := fs.String("world", "tools/dungeongen/testdata", "the world export a plan with scripted pull stages reads its formations from: a folder holding creatures.tsv (and groups.tsv), or one holding map<N> folders of them")
 	mmaps := fs.String("mmaps", "", "folder with the server's mmaps: a hop of more than 60 yd between two moves is cut into via points along the navmesh path (without it: only listed)")
 	rev := fs.String("rev", "", "the turtle-agent commit named in ai_dungeon_plan.source (default: git rev-parse of the plan folder, if it is a checkout)")
 	stamp := fs.String("stamp", "", "the migration's timestamp, YYYYMMDDHHMMSS (default: now, UTC)")
@@ -112,6 +114,7 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 			opt.SkipLegs = append(opt.SkipLegs, n)
 		}
 	}
+	opt.Formation = formationsFrom(*world)
 	var naive *navmesh.Planner
 	if *mmaps != "" {
 		planner = navmesh.NewPlanner(*mmaps)
@@ -320,4 +323,32 @@ func pathHitsBox(pts []navmesh.Vec3, boxes []navmesh.Box) bool {
 		}
 	}
 	return false
+}
+
+// formationsFrom resolves a spawn guid to its formation from the world export under dir (creatures.tsv there, or in dir/map<N>), loading each
+// map once: the pull stages of a plan (dungeon.PullGroup.Stages) peel formations by their leader's guid.
+func formationsFrom(dir string) func(uint32, uint32) ([]planexport.FormationSpawn, error) {
+	worlds := map[uint32]*worldspawn.World{}
+	return func(mapID, guid uint32) ([]planexport.FormationSpawn, error) {
+		w := worlds[mapID]
+		if w == nil {
+			d := dir
+			if _, err := os.Stat(filepath.Join(d, "creatures.tsv")); err != nil {
+				d = filepath.Join(dir, fmt.Sprintf("map%d", mapID))
+			}
+			var err error
+			if w, _, err = worldspawn.Load(d, mapID); err != nil {
+				return nil, fmt.Errorf("--world %s: %w", dir, err)
+			}
+			worlds[mapID] = w
+		}
+		var out []planexport.FormationSpawn
+		for _, s := range w.Formation(uint64(guid)) {
+			out = append(out, planexport.FormationSpawn{Guid: uint32(s.GUID), Entry: s.Entry, Pos: s.Pos})
+		}
+		if len(out) == 0 {
+			return nil, fmt.Errorf("spawn %d is not in the world export of map %d (--world %s)", guid, mapID, dir)
+		}
+		return out, nil
+	}
 }

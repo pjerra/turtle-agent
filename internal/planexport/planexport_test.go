@@ -3,6 +3,8 @@ package planexport
 import (
 	"errors"
 	"fmt"
+	"math"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -1658,5 +1660,172 @@ func TestCampGroupWithoutOptionExportsAsToday(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no camp-dropped warning in %q", res.Warnings)
+	}
+}
+
+// stageWorld is a fake world for the staged export: the formation of a spawn guid. Guid 10 leads a pair 6 yd apart at x=200, guid 20 is a
+// lone spawn 10 yd off at x=210 and guid 30 leads a pair at x=260; the stages peel one formation each.
+func stageWorld() func(uint32, uint32) ([]FormationSpawn, error) {
+	forms := map[uint32][]FormationSpawn{
+		10: {{Guid: 10, Entry: 100, Pos: dungeon.Point{X: 200, Y: 0}}, {Guid: 11, Entry: 101, Pos: dungeon.Point{X: 200, Y: 6}}},
+		20: {{Guid: 20, Entry: 102, Pos: dungeon.Point{X: 210, Y: 0}}},
+		30: {{Guid: 30, Entry: 100, Pos: dungeon.Point{X: 260, Y: 0}}, {Guid: 31, Entry: 103, Pos: dungeon.Point{X: 260, Y: 4}}},
+	}
+	return func(_ uint32, g uint32) ([]FormationSpawn, error) {
+		if f, ok := forms[g]; ok {
+			return f, nil
+		}
+		return nil, fmt.Errorf("spawn %d is not in the world", g)
+	}
+}
+
+const stagedJS = `{"version":1,"name":"zg","status":"live-checked (test)","map":309,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"arlokk","to":{"x":0,"y":0,"z":0},"pull_groups":[
+  {"entries":[100,101,102,103],"positions":[{"x":200,"y":0,"z":0}],"max_bodies":9,"team":"horde","stages":[
+   {"peel":[10],"tag":[{"x":170,"y":0,"z":0}],"camp":{"x":140,"y":0,"z":0},"max_bodies":10},
+   {"peel":[20],"tag":[{"x":225,"y":0,"z":0},{"x":235,"y":0,"z":0}],"camp":{"x":190,"y":0,"z":0}},
+   {"peel":[30],"tag":[{"x":240,"y":0,"z":0}],"camp":{"x":220,"y":0,"z":0}}]}]},
+  {"name":"next","to":{"x":400,"y":0,"z":0},"boss":{"entry":62662,"position":{"x":410,"y":0,"z":0}}}]}`
+
+func leg0(res Result) (rows []StepRow) {
+	for _, s := range res.Rows.Steps {
+		if s.Leg == 0 {
+			rows = append(rows, s)
+		}
+	}
+	return rows
+}
+
+func kindsOf(rows []StepRow) string {
+	var kinds []string
+	for _, r := range rows {
+		kinds = append(kinds, r.Kind)
+	}
+	return strings.Join(kinds, " ")
+}
+
+// TestStageExportScopesEachPull: with CampPull each stage is one B chain whose pull row is scoped to the stage's formations (centre = the
+// centroid of the peeled spawns, entries = their entries, radius = the farthest spawn + 10 yd, cut so no other stage's spawn is inside it).
+func TestStageExportScopesEachPull(t *testing.T) {
+	res, err := Build(parsePlan(t, stagedJS), Options{Source: "test", CampPull: true, Formation: stageWorld()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := leg0(res)
+	if got := kindsOf(rows); got != "move move move pull move move move pull move move pull" {
+		t.Fatalf("leg 0 kinds %q (want to, then a camp+tag+pull chain per stage)", got)
+	}
+	if r := rows[1]; r.Flags != FlagCampPoint || r.X != 140 || !strings.Contains(r.Comment, "pull group 0 stage 1/3 camp") {
+		t.Fatalf("stage 1 camp %+v", r)
+	}
+	if r := rows[2]; r.Flags != 0 || r.X != 170 || !strings.Contains(r.Comment, "stage 1/3 tag walk") {
+		t.Fatalf("stage 1 tag %+v", r)
+	}
+	// Formation 10: spawns (200,0) and (200,6): centre (200,3), farthest 3 yd, 13 yd with the slack; the next stage's spawn (210,0) is 10.44
+	// yd from the centre, inside 13: the radius is cut to 10.4.
+	p1 := rows[3]
+	if p1.Kind != KindPull || p1.Flags != FlagCampPull|FlagHorde || p1.Item != 10 || p1.X != 200 || p1.Y != 3 || p1.Radius != 10.4 ||
+		!reflect.DeepEqual(p1.Entries, []uint32{100, 101}) || !strings.Contains(p1.Comment, "pull group 0 stage 1/3") {
+		t.Fatalf("stage 1 pull %+v", p1)
+	}
+	if r := rows[4]; r.Flags != FlagCampPoint || r.X != 190 || !strings.Contains(r.Comment, "stage 2/3 camp") {
+		t.Fatalf("stage 2 camp %+v", r)
+	}
+	// Stage 2 is one lone spawn at (210,0): radius 10 by the slack, but stage 1's spawn (200,0) stands exactly 10.0 away: cut to 9.9.
+	p2 := rows[7]
+	if p2.Kind != KindPull || p2.Item != 9 || p2.X != 210 || p2.Radius != 9.9 || !reflect.DeepEqual(p2.Entries, []uint32{102}) || !strings.Contains(p2.Comment, "stage 2/3") {
+		t.Fatalf("stage 2 pull %+v (the group's max_bodies 9 stands in for the stage's)", p2)
+	}
+	p3 := rows[10]
+	if p3.Kind != KindPull || p3.Flags != FlagCampPull|FlagHorde || p3.X != 260 || p3.Y != 2 || p3.Radius != 12 || !reflect.DeepEqual(p3.Entries, []uint32{100, 103}) {
+		t.Fatalf("stage 3 pull %+v", p3)
+	}
+	// No other stage's spawn is inside any stage row's radius (the TB scope would pull it with the stage).
+	spawns := map[int][]dungeon.Point{0: {{X: 200}, {X: 200, Y: 6}}, 1: {{X: 210}}, 2: {{X: 260}, {X: 260, Y: 4}}}
+	for si, row := range []StepRow{p1, p2, p3} {
+		for oi, pts := range spawns {
+			for _, q := range pts {
+				if d := math.Hypot(float64(row.X-q.X), float64(row.Y-q.Y)); oi != si && d <= float64(row.Radius) {
+					t.Fatalf("stage %d row radius %g holds stage %d's spawn %v (%.2f yd)", si+1, row.Radius, oi+1, q, d)
+				}
+			}
+		}
+	}
+	// The next hop is measured from the last stage's camp (the party fights there).
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 999, Z: 0}}, nil
+	}
+	res, err = Build(parsePlan(t, stagedJS), Options{Source: "test", CampPull: true, Formation: stageWorld(), Cut: cut, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, s := range res.Rows.Steps {
+		if s.Kind == KindPull && s.Y == 2 {
+			if next := res.Rows.Steps[i+1]; next.Y != 999 || next.X != (220+400)/2 {
+				t.Fatalf("first hop after the last stage %+v (want it cut from its camp 220,0,0)", next)
+			}
+			return
+		}
+	}
+	t.Fatal("no stage 3 pull row")
+}
+
+// Without CampPull each stage is a plain pull from its tag spot (the tag rows as approach moves) with the same scoped centre and radius: a
+// stage list still helps an older build (one formation per pull row). No camp flag, no camp row.
+func TestStageExportWithoutOptionIsPlainPullsFromTheTagSpot(t *testing.T) {
+	res, err := Build(parsePlan(t, stagedJS), Options{Source: "test", Formation: stageWorld()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := leg0(res)
+	for _, s := range rows {
+		if s.Flags&(FlagCampPoint|FlagCampPull) != 0 || s.Kind == KindMove && (s.X == 140 || s.X == 190 || s.X == 220) {
+			t.Fatalf("a camp row or flag is exported without the option: %+v", s)
+		}
+	}
+	if got := kindsOf(rows); got != "move move pull move move pull move pull" {
+		t.Fatalf("leg 0 kinds %q (want to, then the tag rows and a plain pull per stage)", got)
+	}
+	found := false
+	for _, w := range res.Warnings {
+		found = found || strings.Contains(w, "camp is dropped") && strings.Contains(w, "stage")
+	}
+	if !found {
+		t.Fatalf("no stage camps-dropped warning in %q", res.Warnings)
+	}
+	if p := rows[2]; p.Y != 3 || p.Radius != 10.4 || !reflect.DeepEqual(p.Entries, []uint32{100, 101}) || p.Flags != FlagHorde || !strings.Contains(rows[1].Comment, "approach") {
+		t.Fatalf("stage 1 plain pull %+v after %+v", p, rows[1])
+	}
+}
+
+// A staged group needs the world; a stage whose formation cannot be scoped (another stage's spawn is inside the peeled formations' own
+// reach) or whose tag spot is out of the run leader's sight is an export error naming the stage.
+func TestStageExportRefusals(t *testing.T) {
+	if _, err := Build(parsePlan(t, stagedJS), Options{Source: "test", CampPull: true}); err == nil || !strings.Contains(err.Error(), "needs the world") {
+		t.Fatalf("no Formation option: %v", err)
+	}
+	world := func(m uint32, g uint32) ([]FormationSpawn, error) {
+		switch g {
+		case 10:
+			return []FormationSpawn{{Guid: 10, Entry: 100, Pos: dungeon.Point{X: 200}}, {Guid: 11, Entry: 100, Pos: dungeon.Point{X: 210}}}, nil
+		case 20:
+			return []FormationSpawn{{Guid: 20, Entry: 100, Pos: dungeon.Point{X: 205, Y: 1}}}, nil
+		}
+		return nil, fmt.Errorf("spawn %d is not in the world", g)
+	}
+	const js = `{"version":1,"name":"zg","status":"live-checked (test)","map":309,"entrance":{"x":0,"y":0,"z":0},
+	 "legs":[{"name":"a","to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":200,"y":0,"z":0}],"stages":[
+	  {"peel":[10],"tag":[{"x":170,"y":0,"z":0}],"camp":{"x":140,"y":0,"z":0}},
+	  {"peel":[20],"tag":[{"x":170,"y":0,"z":0}],"camp":{"x":140,"y":0,"z":0}}]}]}]}`
+	_, err := Build(parsePlan(t, js), Options{Source: "test", CampPull: true, Formation: world})
+	if err == nil || !strings.Contains(err.Error(), "stages[0]") || !strings.Contains(err.Error(), "spawn 20") {
+		t.Fatalf("an unscopable stage: %v", err)
+	}
+	far := strings.Replace(stagedJS, `"tag":[{"x":170,"y":0,"z":0}]`, `"tag":[{"x":120,"y":0,"z":0}]`, 1)
+	if _, err := Build(parsePlan(t, far), Options{Source: "test", CampPull: true, Formation: stageWorld()}); err == nil || !strings.Contains(err.Error(), "stages[0]") || !strings.Contains(err.Error(), "sees") {
+		t.Fatalf("a tag spot 80 yd from the pack: %v", err)
+	}
+	if _, err := Build(parsePlan(t, stagedJS), Options{Source: "test", CampPull: true, Formation: func(uint32, uint32) ([]FormationSpawn, error) { return nil, fmt.Errorf("boom") }}); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("a resolver error is the export's: %v", err)
 	}
 }

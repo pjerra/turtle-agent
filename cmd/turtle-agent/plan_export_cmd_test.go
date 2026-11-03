@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -194,3 +195,56 @@ func TestPlanExportCarrierChests(t *testing.T) {
 		t.Fatalf("%d grave loot rows, want 31", n)
 	}
 }
+
+// A plan with scripted pull stages exports from the world export of --world: --camp-pull writes a camp chain per stage scoped to the
+// formations its peel guids name (a member's guid reaches the whole creature_groups group), without the option plain pulls.
+func TestPlanExportStagedGroupReadsTheWorld(t *testing.T) {
+	world := t.TempDir()
+	hdr := "guid\tentry\tname\tlevel_min\tlevel_max\trank\tfaction\tnpc_flags\tx\ty\tz\twander\tmovement_type\tgroup_leader\tpatrol\tauras\n"
+	row := func(guid, entry int, x float64, leader int) string {
+		return strings.Join([]string{itoa(guid), itoa(entry), "Mob", "60", "60", "1", "14", "0", ftoa(x), "0", "0", "0", "0", itoa(leader), "0", ""}, "\t") + "\n"
+	}
+	if err := os.MkdirAll(filepath.Join(world, "map309"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Formation 10 = spawns 10 and 11 (x=200, x=204); spawn 20 stands alone at x=240.
+	if err := os.WriteFile(filepath.Join(world, "map309", "creatures.tsv"), []byte(hdr+row(10, 100, 200, 10)+row(11, 101, 204, 10)+row(20, 102, 240, 0)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plans := t.TempDir()
+	js := `{"version":1,"name":"stg","status":"live-checked","map":309,"entrance":{"x":0,"y":0,"z":0},"legs":[{"name":"a","to":{"x":0,"y":0,"z":0},"pull_groups":[
+	 {"entries":[100,101,102],"positions":[{"x":200,"y":0,"z":0}],"stages":[
+	  {"peel":[11],"tag":[{"x":175,"y":0,"z":0}],"camp":{"x":150,"y":0,"z":0}},
+	  {"peel":[20],"tag":[{"x":215,"y":0,"z":0}],"camp":{"x":180,"y":0,"z":0}}]}]}]}`
+	if err := os.WriteFile(filepath.Join(plans, "stg.json"), []byte(js), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+	if code, _, errs := runExport("--dir", plans, "--world", world, "--camp-pull", "--stamp", "20261103120000", "--rev", "abc", "--out", out, "stg"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	data, err := os.ReadFile(filepath.Join(out, "20261103120000_world.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := planexport.Parse(string(data))
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("%v %d", err, len(rows))
+	}
+	var pulls []planexport.StepRow
+	for _, s := range rows[0].Steps {
+		if s.Kind == planexport.KindPull {
+			pulls = append(pulls, s)
+		}
+	}
+	if len(pulls) != 2 || pulls[0].Flags&planexport.FlagCampPull == 0 || pulls[0].X != 202 || len(pulls[0].Entries) != 2 || pulls[1].X != 240 || len(pulls[1].Entries) != 1 {
+		t.Fatalf("pull rows %+v (want stage 1 = both spawns of formation 10 at x=202, stage 2 = spawn 20)", pulls)
+	}
+	// An unknown guid in the world is the export's error, naming the stage.
+	if code, _, errs := runExport("--dir", plans, "--world", t.TempDir(), "--stamp", "20261103120001", "--out", out, "stg"); code == exitOK || errs == "" {
+		t.Fatalf("a missing world should fail: %d %q", code, errs)
+	}
+}
+
+func itoa(n int) string     { return strconv.Itoa(n) }
+func ftoa(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }

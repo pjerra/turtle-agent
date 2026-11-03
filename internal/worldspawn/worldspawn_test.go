@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -175,5 +176,26 @@ func TestHostileFilter(t *testing.T) {
 	}
 	if r := AggroRadius(byGUID(t, w, 4), 60, 1); r != 0 {
 		t.Errorf("NO_AGGRO spawn radius %g, want 0", r)
+	}
+}
+
+// TestFormationIsTheSpawnsWholeGroup: a leader's guid (or any member's) gives the group, an ungrouped spawn gives itself, an unknown guid nothing.
+func TestFormationIsTheSpawnsWholeGroup(t *testing.T) {
+	w := &World{Spawns: []Spawn{
+		{GUID: 1, GroupLeader: 1}, {GUID: 2, GroupLeader: 1}, {GUID: 3}, {GUID: 4, GroupLeader: 4}, {GUID: 5, GroupLeader: 4},
+	}}
+	guids := func(ss []Spawn) (out []uint64) {
+		for _, s := range ss {
+			out = append(out, s.GUID)
+		}
+		return out
+	}
+	for guid, want := range map[uint64][]uint64{1: {1, 2}, 2: {1, 2}, 3: {3}, 5: {4, 5}} {
+		if got := guids(w.Formation(guid)); !slices.Equal(got, want) {
+			t.Errorf("Formation(%d) = %v, want %v", guid, got, want)
+		}
+	}
+	if got := w.Formation(99); got != nil {
+		t.Errorf("Formation(99) = %v, want nil", got)
 	}
 }
