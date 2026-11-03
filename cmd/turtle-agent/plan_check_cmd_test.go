@@ -26,6 +26,27 @@ func TestPlanCheckCmdUsage(t *testing.T) {
 	}
 }
 
+// plan-check --walk-ready on a plan whose map has no world export next to
+// --dir is a usage error, not an empty report: the lint cannot read its
+// inputs (the helper's ../tools/dungeongen/testdata/map<N> layout).
+func TestPlanCheckWalkReadyNeedsWorldExport(t *testing.T) {
+	dir := t.TempDir()
+	data, err := os.ReadFile("../../dungeons/zulfarrak.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "zulfarrak.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := dungeon.Load(filepath.Join(dir, "zulfarrak.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := planCheckWalkReady(p, dir); err == nil || !strings.Contains(err.Error(), "no world export") {
+		t.Errorf("walk-ready without an export: %v (want a no-world-export error)", err)
+	}
+}
+
 // Without a planner, or without navmesh files for the map, the plan cannot be checked: dungeon_run refuses it unless force is given, which
 // runs it and says so.
 func TestPlanCheckFailsClosedWithoutNavmesh(t *testing.T) {

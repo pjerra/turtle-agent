@@ -195,6 +195,20 @@ func TestWalkReadyPatrolCrossing(t *testing.T) {
 	if got := walkReadyRules(fs)[WalkReadyPatrolCrossing]; got != 1 {
 		t.Fatalf("patrol-crossing findings: %d, want 1 (%v)", got, fs)
 	}
+	// The mutation moves the first pull's position off the loop (100 yd up):
+	// the walk no longer crosses it.
+	p2 := walkReadyPlan(t, `{"version":1,"name":"t","map":0,"entrance":{"x":0,"y":0,"z":0},"level_band":[60,60],"legs":[
+ {"name":"a","to":{"x":0,"y":100,"z":0},"pull_groups":[
+  {"entries":[1],"positions":[{"x":0,"y":100,"z":0}]},
+  {"entries":[2],"positions":[{"x":10,"y":0,"z":0}]}]}]}`)
+	plan2 := mustWalkReadyPlan(t, p2)
+	fs2, err := WalkReady(plan2, cs, w, walkReadyFilter(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := walkReadyRules(fs2)[WalkReadyPatrolCrossing]; got != 0 {
+		t.Fatalf("patrol-crossing findings after rerouting: %d, want 0", got)
+	}
 }
 
 // Rule 4: the leg start (its `to`) within aggro reach of a live spawn is
@@ -232,6 +246,19 @@ func TestWalkReadyUnownedNearLeg(t *testing.T) {
 	if got := walkReadyRules(fs)[WalkReadyUnownedNearLeg]; got < 1 {
 		t.Fatalf("unowned findings: %d, want >= 1 (%v)", got, fs)
 	}
+	// The mutation moves the later spawn 100 yd off the walked segment: the
+	// leg's route is clear of unowned packs.
+	dir2 := walkReadyDir(t,
+		wrRow(1, 1, "Early", 14, 0, 0, 0, 0, 0, 20)+
+			wrRow(2, 2, "Later", 14, 10, 100, 0, 5, 0, 20), "")
+	cs2, w2 := walkReadyLoad(t, p, dir2)
+	fs2, err := WalkReady(plan, cs2, w2, walkReadyFilter(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := walkReadyRules(fs2)[WalkReadyUnownedNearLeg]; got != 0 {
+		t.Fatalf("unowned findings after moving the spawn: %d, want 0", got)
+	}
 }
 
 // Rule 6: no quiet placement point at the leg start fails; a hot `to` with
@@ -263,5 +290,27 @@ func TestWalkReadyNoQuietStart(t *testing.T) {
 	}
 	if got := walkReadyRules(fs2)[WalkReadyNoQuietStart]; got != 0 {
 		t.Fatalf("no-quiet findings after moving the start: %d, want 0", got)
+	}
+	// A quiet place_at exempts the leg even when every plan point is hot;
+	// a place_at standing inside the lurker's reach fails on the place_at.
+	withPlace := walkReadyPlan(t, `{"version":1,"name":"t","map":0,"entrance":{"x":0,"y":0,"z":0},"level_band":[60,60],"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":12,"y":0,"z":0}]}],"place_at":{"x":100,"y":0,"z":0}}]}`)
+	plan3 := mustWalkReadyPlan(t, withPlace)
+	fs3, err := WalkReady(plan3, cs, w, walkReadyFilter(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := walkReadyRules(fs3)[WalkReadyNoQuietStart]; got != 0 {
+		t.Fatalf("no-quiet findings with a quiet place_at: %d, want 0", got)
+	}
+	hotPlace := walkReadyPlan(t, `{"version":1,"name":"t","map":0,"entrance":{"x":0,"y":0,"z":0},"level_band":[60,60],"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":12,"y":0,"z":0}]}],"place_at":{"x":5,"y":0,"z":0}}]}`)
+	plan4 := mustWalkReadyPlan(t, hotPlace)
+	fs4, err := WalkReady(plan4, cs, w, walkReadyFilter(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := walkReadyRules(fs4)[WalkReadyNoQuietStart]; got != 1 {
+		t.Fatalf("no-quiet findings with a hot place_at: %d, want 1 (%v)", got, fs4)
 	}
 }
