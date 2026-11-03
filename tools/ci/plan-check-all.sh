@@ -11,12 +11,12 @@
 #
 # The gate's verdict (exit status):
 #   0   every checked plan passes (WARN placement lints do not count),
-#   11  a point fails, or an error-severity placement lint that is not a quality lint, or (with --strict-lints) any
-#       error-severity placement lint,
+#   11  a point fails (plan-check's navmesh FAIL), or (with --strict-lints) any error-severity placement lint,
 #   2   a usage error, or plan-check itself failed with a status other than 0 or 11.
-# Quality lints (water, off-floor, edge, ledge, short hop, aggro, patrol, joiners) are reported as WARN with a count per
-# plan and do not fail the gate, by the lead's decision of 2026-11-03; --strict-lints makes them fail. Every other
-# error-severity lint (reach, arrival, hop_len, climb_anchor) and every point issue still fails the gate.
+# Every error-severity placement lint (water, off-floor, edge, ledge, short hop, aggro, patrol, joiners, reach, arrival,
+# hop_len, climb_anchor) is reported as WARN with a count per plan and does not fail the gate, by the lead's decisions of
+# 2026-11-03 (the second one extends the first to the plan-scout lints); --strict-lints makes them all fail.
+# Only a point failure, the same failure the gate had before the placement lints existed, blocks by default.
 # A plan that fails is printed as FAIL with its points or lint findings. The JSON-out file (when given) holds plan-check's
 # own report for the checked plans.
 set -euo pipefail
@@ -111,7 +111,7 @@ status=0
 if [[ -n $jsonout ]]; then
 	cp "$tmp" "$jsonout"
 fi
-# plan-check exits 11 for any error-severity finding, including the quality lints the gate only warns on, so the
+# plan-check exits 11 for any error-severity finding, including the placement lints the gate only warns on, so the
 # verdict comes from the report. Any other failing status is plan-check's own failure and is passed through.
 if ((status != 0 && status != 11)); then
 	echo "plan-check-all: plan-check exited $status" >&2
@@ -125,9 +125,6 @@ import sys
 
 path = sys.argv[1]
 strict = sys.argv[2] == "1"
-# The lead's decision of 2026-11-03: these placement lints are quality findings. The gate reports them as WARN with a
-# count per plan; --strict-lints makes them fail. Other error-severity lints are navmesh route defects and always fail.
-QUALITY = {"water", "off-floor", "edge", "ledge", "short hop", "aggro", "patrol", "joiners"}
 try:
     with open(path) as f:
         results = json.load(f)
@@ -142,8 +139,9 @@ for r in results:
     mapname = r.get("map", "?")
     issues = r.get("issues") or []
     errors = [f for f in (r.get("lints") or []) if f.get("severity") == "error"]
-    soft = [f for f in errors if f.get("lint") in QUALITY and not strict]
-    hard = [f for f in errors if not (f.get("lint") in QUALITY and not strict)]
+    # The lead's decisions of 2026-11-03: every error-severity placement lint warns; --strict-lints makes them all block.
+    soft = [] if strict else errors
+    hard = errors if strict else []
     if issues or hard:
         blocked += 1
     if issues:

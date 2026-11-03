@@ -22,6 +22,12 @@ It downloads the server's navmesh files from the **private** `pjerra/tb-server-d
 - builds `turtle-agent` with cgo and runs `tools/ci/plan-check-all.sh`, which checks every plan whose status starts with
   `live-checked` or `mapped` (“live or prep”: a `draft` has not had its mapping walk and is left out of the navmesh gate).
 
+The gate fails only on a point failure (plan-check's navmesh FAIL: a point unreachable, too far, or needing a mapping
+walk). Every error-severity placement lint (`water`, `off-floor`, `edge`, `ledge`, `short hop`, `aggro`, `patrol`,
+`joiners`, `reach`, `arrival`, `hop_len`, `climb_anchor`) is printed as `WARN <plan>: N placement lint finding(s) do not
+fail the gate` with a count per kind, and the job stays green (lead's decisions, 2026-11-03). `--strict-lints` on
+`plan-check-all.sh` makes every lint error fail the job, which is how to see them as blockers before a plan's fix round.
+
 The download is `tools/ci/fetch-mmaps.sh`: it joins split assets (`<name>.tar.zst.part-aa`, `.part-ab`, ...`) into
 `<name>.tar.zst`, verifies the release's `SHA256SUMS`, unpacks the archives into one flat folder and checks at least one
 checksum. `actions/cache` keeps the folder keyed on the release tag and the SHA256SUMS hash.
