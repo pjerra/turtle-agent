@@ -3,9 +3,11 @@ package planscout
 import (
 	"fmt"
 	"math"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/aggroest"
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -15,6 +17,9 @@ import (
 	"github.com/pjerra/turtle-agent/internal/routeedit"
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
+
+// Debug timings, printed with SCOUT_PROFILE.
+var dryPointSec, dryRouteSec float64
 
 // The fix kinds.
 const (
@@ -129,6 +134,11 @@ func (d *detourPlanner) Close() { d.scratch.Close() }
 // coordinates only.
 func ProposeFixes(rep *Report, in Input, nav Nav, w *worldspawn.World) []Fix {
 	var out []Fix
+	defer func() {
+		if os.Getenv("SCOUT_PROFILE") != "" {
+			fmt.Fprintf(os.Stderr, "dryPoint %.1fs dryRoute %.1fs\n", dryPointSec, dryRouteSec)
+		}
+	}()
 	det := newDetour(nav, in.Rows)
 	if det != nil {
 		defer det.Close()
@@ -336,15 +346,19 @@ func dryFixes(rep *Report, in Input, nav Nav, det *detourPlanner, budget *int, s
 	}
 	p := dungeon.Point{X: st.X, Y: st.Y, Z: st.Z}
 	if st.Kind == planexport.KindMove || st.Kind == planexport.KindHold {
+		t := time.Now()
 		if f, ok := dryPoint(rep.Map, in, nav, idx, p, origin, c); ok {
 			out = append(out, f)
 		}
+		dryPointSec += time.Since(t).Seconds()
 	}
 	if det != nil && *budget > 0 {
 		*budget--
+		t := time.Now()
 		if f, ok := dryRoute(rep.Map, in, nav, det, st, c, origin, idx); ok {
 			out = append(out, f)
 		}
+		dryRouteSec += time.Since(t).Seconds()
 	} else if det != nil {
 		out = append(out, Fix{Step: st.Step, Check: c.Name, Kind: FixDryDetour, Apply: false, Ref: origin,
 			Reason: c.Reason + "; no dry route proposed (the 20-route budget is spent; rerun after applying the other fixes)"})
