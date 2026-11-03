@@ -933,7 +933,8 @@ aggro + 8 of every unpulled unit, patrol + 5), orders the pulls by a navmesh pat
 one-way pairs (a path over twice its reverse) and scores the original, nearest-neighbour and constrained orders so no uphill
 return is scheduled while a downhill one exists, ending the leg at the next leg's first point, plans each anchor pair round the packs not pulled yet and the patrol lanes,
 string-pulls the path with clearance, spaces the kept points 8-45 yd apart (one hop up to 110 yd where a split cannot pass), and writes them as the groups' `approach` points (or the
-leg's `via`), so the exporter has nothing to cut. Water is left out of the planning where the plain ground reaches; a crossing stays one hop between banks. A stand whose route cannot
+leg's `via`), so the exporter has nothing to cut. Water is left out of the planning where the plain ground reaches: a point in or under a liquid fails the placement rule (the
+mmaps' own `NavWater` floors, `navmesh.LiquidAt`), so an anchor or a written point avoids the lake beds and the canals the mmaps flag, and a crossing stays one hop between dry banks. A stand whose route cannot
 be kept clear keeps the written approach when that passes the rules (dry, no hop the exporter would cut) and is otherwise dropped for the run leader to approach itself, with a note.
 The pull set never changes: only the order and the route do. Each leg's run prints a diff (old and new walked length, anchors, water rows, hops over 45 yd and the authored rows' lints),
 `--dry-run` prints it without writing. `--spawns` defaults to `tools/dungeongen/testdata/map<N>`. It needs a cgo build (Detour), as `plan-check` does.
@@ -1008,7 +1009,7 @@ What it checks:
   position with `turtle-agent path-check --mmaps DIR --map N x y z x y z`: two lines, the offline `Plan` answer and the server's type, verdict, end and distances to each end's walk poly.
 **Placement lints.** The command also lints the **exported rows**, not only the plan's own points: it rebuilds the plan's rows with the exporter (the same cutter, `--floor-aware` and `--approach-hops` are passed through) and checks every `move` row; `--sql FILE` lints a deployed migration's rows directly instead (`--plan NAME` picks one plan). The lints report by default and do not fail the check; `--strict` turns them into failures (exit 11). Each finding names the row's step number (counted from 1 in file order, as `.bot run status` prints it) and the point, and the counts are printed per lint (`lints` and `lint_counts` in JSON):
 
-- `water`: the floor under the point is `NavWater`;
+- `water`: the floor under the point is `NavWater`, or the point stands under a nearby one (a `NavWater` floor 2 yd or more above it within 6 yd: the mmap generator flags a liquid's bed, not its surface, so the lake bed a walk dips into reads as ground) (`internal/navmesh/liquid.go`). The exporter's cutter writes no cut point in or under a liquid (`--floor-aware` and the plain cut alike), so the water stays a crossing: one hop between the dry points either side;
 - `off-floor`: the nearest walkable floor is more than 1.5 yd away (or there is none within 4 yd);
 - `edge`: a mesh edge is closer than 2.5 yd (4 yd at a gather or stand point, the `move` row right before a pull, boss or hold);
 - `ledge`: another floor stands 4.5-8 yd above or below within 4.5 yd;
@@ -1016,10 +1017,9 @@ What it checks:
 - `aggro`: a gather or stand point is inside the core aggro radius at party level 60 (detection 20 yd unless the export carries `detection_range`) plus 8 yd of a hostile unit no earlier pull or boss row owns, with the target pack left out;
 - `patrol`: a move point is inside a patrol lane's aggro radius plus 5 yd and the run has not pulled that patroller yet.
 
-The aggro and patrol lints need the map's world export (`--spawns DIR`, default `<dir>/../tools/dungeongen/testdata/mapN`); without one they are skipped with a note. The Zul'Gurub plan of 2026-11-03 fails all of them (the audit's figures: 663 rows at an edge, 180 ledges, 77 water rows): the lints are report-only until the plan is regenerated.
+The aggro and patrol lints need the map's world export (`--spawns DIR`, default `<dir>/../tools/dungeongen/testdata/mapN`); without one they are skipped with a note. The Zul'Gurub plan of 2026-11-03 (`--floor-aware --approach-hops`, 752 rows) has no water row left: its other lints are edge 274, ledge 49, short hop 111, aggro 7 and patrol 27, and the lints stay report-only.
 
-Limits (what the check does not model): the bot's real z and the vmap floor snap of the goal (a ledge whose mesh floats 2-3 yd above the game floor still passes); swimming (underwater
-  shortcut paths, which need liquid data); tiles unloaded on the server (the core loads mmtiles per loaded grid; the check covers only the start and end); the module's 25 yd stand-in
+Limits (what the check does not model): the bot's real z and the vmap floor snap of the goal (a ledge whose mesh floats 2-3 yd above the game floor still passes); swimming (the water lint reads the mmaps' own `NavWater` floors, but an underwater shortcut the run leader's path takes between two dry points is not a row the lint sees); tiles unloaded on the server (the core loads mmtiles per loaded grid; the check covers only the start and end); the module's 25 yd stand-in
   search (`NearestReachablePoint`, `MoveFallbackYd`) and the `leadSpotGather` / `kMoveHereYd` branch, and a too-far refusal, are NOT modelled either: a `server unreachable` can still be
   saved live when the run leader's ring point around the goal (up to 25 yd out) takes a path the direct hop's query refuses.
 

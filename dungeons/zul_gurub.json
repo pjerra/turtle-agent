@@ -51,7 +51,8 @@
     "PLAN R2 ITEM 3 (2026-11-03, leg 4 groups 3-5 and 6; BOTS-PATHING-WAYPOINTS.md §3): the rock's four lone 11371 spawns stand at z 50-65 (-11583 -1793, -11558 -1801, -11556 -1795, -11545 -1788). The ground stand below the rock (-11595.5 -1807.9 41.3) is 21.3 yd from 49050 but 37.6, 40.6 and 50.8 yd from 49046, 91510 and 91509, beyond the 28.5 yd shot, so the three east serpents cannot be pulled from the floor; the doc's fallback is taken. Group 4's stand moves from -11572.7 -1794.9 53.0 (16.0 yd from its serpents, inside their 20 yd aggro) to -11575 -1793 50.6 (20.6/21.2 yd, in shot, 3-4 yd lower), group 5's from -11562.6 -1792.5 56.4 (19.9 yd from 91509) to -11562 -1782 55.8 (20.5 yd), and group 6's approach now walks back down the slope it climbed ((-11572.7 -1794.9 53.0, -11595.5 -1807.9 41.3) before its stand -11576 -1778 46.3) instead of dropping 19 yd off the rim at -11565 -1770. The climb is 15 yd lower and the drop 19 -\u003e 9 yd. Plan-check --mmaps: ok, 810 points.",
     "PLAN R2 ITEM 6 (2026-11-03, leg 0 front; BOTS-PATHING-WAYPOINTS.md §5): leg 0 no longer walks past the entrance ramp and canal packs. Its via is the entrance platform only and its to is the adders stand; five stand pulls come first: adders 49739/49740 from -11927 -1309 78.63 (27.6/27.7 yd), axe throwers 49733/49732 from -11918 -1342 79.08 (20.9), serpent 49089 from -11929 -1366 77.28 (20.6), serpent 49088 from -11957 -1409 81.74 (28.3), canal pack 49118/49116/49117/49119 from -11905 -1384 67.15 (21.3). The old canal walk is the first terrace pack approach (old vias 4, 5, 7 and the old to); the terrace Headhunter pair is a stand pull from the old to (26.5/31.4/35.5 yd from its three spawns) and the bat pack from -12002.5 -1493.5 80.5 (24.4/27.1); the Jin do leg old canal row is gone. Measured, not changed: F1 bat pack has no stand at its level (south of it the mesh is steep or off-mesh: -12058 -1470 is floor 110, -12058 -1455 steep 123.5), so its approach still ends 6.7 yd from 49147; the Arlokk entrance pack (49807 five) has no stand 20.5-28.3 yd from all its spawns and 21 from 91435 loop (the loop passes 10-15 yd from the pack); the Arlokk terrace rows that pass 51593 pack are the next group approach. Plan-check --mmaps: ok, 816 points.",
     "PLAN R2 ITEM 7 (2026-11-03; BOTS-PATHING-WAYPOINTS.md §7): the Jeklik step-8 row (-11931.9 -1491.8 41.5) is gone with item 6 leg-front restructure. The Mandokir ramp gains a via -12178.5 -1811.9 103.19 between -12224 -1813.3 125.3 and -12125.6 -1810.1 80.7; the Hakkar-outer slope a via -11744.9 -1397 33 between via -11700 -1400.3 51 and the leg to -11762.4 -1396.3 19.7. The Jeklik stair approach is now the walkable ramp the navmesh takes: -12049.9 -1474.7 87.25, -12070.7 -1474.7 106.35, -12102.1 -1472.8 130.05, then the plateau -12057 -1448 129.13; all five points are ground, none water or steep. Still open: the exporter cuts a path row at -11710.1 -1499.6 40.4 (Hakkar outer) and at -11928.6 -1482.9 34.5 (Jin do), both above ground and water the server refuses. The plan cannot delete an export path row, and no dry crossing exists there (the bridge deck is a game object off the mesh); a via tried at -11882.7 -1408 61.34 sat 10.2 yd from an axe thrower, so it was dropped. Plan-check --mmaps: ok, 818 points.",
-    "PLAN R2 ITEM 8 (2026-11-03; BOTS-PATHING-WAYPOINTS.md §6): approach points along the navmesh path, at most 38 yd apart, on the long hops plan-check named: leg 1 groups 10 (49698), 13 (51947), 18 (91493), 19 (51962) and the Venoxis boss, leg 2 groups 2, 3, 4, 5 and the Mar li boss, leg 3 group 3 (91435), leg 4 group 21 (91444), leg 5 group 1 (the 11-pull pack), leg 7 group 20 and the Hakkar boss. Existing stands stay the last point. plan-check --mmaps: ok, 837 points. Eight run-leader hops remain, all roaming pulls whose stand is 52-174 yd from the DB spawn the export keys on (leg 1 groups 10, 13, 18, 19; leg 3 group 3; leg 4 group 21; leg 5 group 0), plus leg 7 group 20, whose ledge the server PathFinder cannot reach from the lower dock (-11815.8 -1728.5 11.1 answers type 0x4 14-25 yd short). The export carries no patrol block, so those rows stay plain pulls at the spawn."
+    "PLAN R2 ITEM 8 (2026-11-03; BOTS-PATHING-WAYPOINTS.md §6): approach points along the navmesh path, at most 38 yd apart, on the long hops plan-check named: leg 1 groups 10 (49698), 13 (51947), 18 (91493), 19 (51962) and the Venoxis boss, leg 2 groups 2, 3, 4, 5 and the Mar li boss, leg 3 group 3 (91435), leg 4 group 21 (91444), leg 5 group 1 (the 11-pull pack), leg 7 group 20 and the Hakkar boss. Existing stands stay the last point. plan-check --mmaps: ok, 837 points. Eight run-leader hops remain, all roaming pulls whose stand is 52-174 yd from the DB spawn the export keys on (leg 1 groups 10, 13, 18, 19; leg 3 group 3; leg 4 group 21; leg 5 group 0), plus leg 7 group 20, whose ledge the server PathFinder cannot reach from the lower dock (-11815.8 -1728.5 11.1 answers type 0x4 14-25 yd short). The export carries no patrol block, so those rows stay plain pulls at the spawn.",
+    "WALK 33 WATER (2026-11-03; TortoiseBots-audit tests/raid-zg-walk33 e/f: the lead stuck in water at step 626 (-11862.4 -1508.5 -8.1, the Hakkar lake bed) and the canal at -11944.3 -1353.8 62.3): the mmaps flag the lake bed and the canal as NavWater, but the point's own floor is only checked when the walk stands on it, so the exporter's cut points and the route through the lake went unflagged. planlint's water lint now reads a nearby NavWater floor above the point too (navmesh.LiquidAt), and the exporter writes no cut point in or under a liquid, so the lake stays one hop between the dry banks and the walk is 752 rows, no water row. Leg 5's river vias 9-13 are the navmesh's dry route round the gorge instead (via the south bank, 405.7 yd; the old crossing was 266.5 yd of water), leg 6 drops its river via -11998.1 -1597.6 25.85, and the Venoxis approach starts at -11990.3 -1565.8 25.86, off the waterline."
   ],
   "legs": [
     {
@@ -721,7 +722,7 @@
         "position": {"x": -12029.8, "y": -1707.93, "z": 39.41},
         "first": [11373],
         "approach": [
-          {"x": -11991.73, "y": -1567.2, "z": 24.35},
+          {"x": -11990.316, "y": -1565.786, "z": 25.864},
           {"x": -12001.87, "y": -1611.47, "z": 32.84},
           {"x": -11997.07, "y": -1653.6, "z": 33.84},
           {"x": -12004.4, "y": -1686.4, "z": 32.3}
@@ -1470,11 +1471,13 @@
         {"x": -11605.333, "y": -1632.2667, "z": 41.325405},
         {"x": -11641.6, "y": -1725.3334, "z": 36.225407},
         {"x": -11670.666, "y": -1754.1333, "z": 18.725405},
-        {"x": -11704.533, "y": -1754.1333, "z": 3.6254046},
-        {"x": -11725.066, "y": -1775.4667, "z": -12.874596},
-        {"x": -11775.999, "y": -1792, "z": -13.159215},
-        {"x": -11795.732, "y": -1758.4, "z": -11.959215},
-        {"x": -11824.533, "y": -1753.6, "z": 9.040785},
+        {"x": -11647.088, "y": -1782.273, "z": 38.443363},
+        {"x": -11659.642, "y": -1829.858, "z": 40.97931},
+        {"x": -11706.026, "y": -1843.963, "z": 40.70659},
+        {"x": -11755.92, "y": -1840.869, "z": 39.964703},
+        {"x": -11803.212, "y": -1826.053, "z": 51.996853},
+        {"x": -11850.493, "y": -1810.607, "z": 51.155266},
+        {"x": -11898.879, "y": -1798.034, "z": 50.745903},
         {"x": -11878.933, "y": -1774.6666, "z": 21.440784},
         {"x": -11946.666, "y": -1770.6667, "z": 53.240784},
         {"x": -12002.399, "y": -1762.1333, "z": 55.440784}
@@ -1814,7 +1817,6 @@
         {"x": -12053.333, "y": -1706.6667, "z": 45.4408},
         {"x": -12045.866, "y": -1665.8667, "z": 41.4408},
         {"x": -12002.933, "y": -1633.0668, "z": 35.4408},
-        {"x": -11998.133, "y": -1597.6, "z": 25.8515},
         {"x": -11973.6, "y": -1565.8667, "z": 31.4515},
         {"x": -11943.999, "y": -1532, "z": 39.6515},
         {"x": -11925.333, "y": -1472, "z": 33.0515}
