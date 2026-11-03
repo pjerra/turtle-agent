@@ -143,13 +143,21 @@ func ProposeFixes(rep *Report, in Input, nav Nav, w *worldspawn.World) []Fix {
 	if det != nil {
 		defer det.Close()
 	}
+	sums := map[string]float64{}
+	calls := map[string]int{}
+	defer func() {
+		if prof {
+			fmt.Fprintf(os.Stderr, "stages %v calls %v\n", sums, calls)
+		}
+	}()
 	stage := func(name string, f func() []Fix) []Fix {
 		if !prof {
 			return f()
 		}
 		t := time.Now()
 		r := f()
-		fmt.Fprintf(os.Stderr, "%s %.1fs\n", name, time.Since(t).Seconds())
+		sums[name] += time.Since(t).Seconds()
+		calls[name]++
 		return r
 	}
 	spread := float64(aggroest.StandSpreadPartyYd)
