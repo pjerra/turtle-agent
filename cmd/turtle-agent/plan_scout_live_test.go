@@ -570,6 +570,15 @@ func TestPlanScoutInstanceCap(t *testing.T) {
 	if n := capReservations(t, f.env.dir); n != 0 {
 		t.Fatalf("%d reservation(s) left", n)
 	}
+	// Waited past the cap, then went on: the reservation became the scout's entry.
+	f = newLiveFixture(t, 1)
+	fillCap(t, f.env.dir, 5)
+	if code, _, errOut := f.run(t, "--instance-cap-wait", "1ms"); code != exitOK && code != exitPlanScoutFail {
+		t.Fatalf("wait then go: code %d, %q", code, errOut)
+	}
+	if n := capEntries(t, f.env.dir, "scout_live"); n != 1 {
+		t.Fatalf("the scout's ledger entry: %d", n)
+	}
 
 	f = newLiveFixture(t, 1)
 	fillCap(t, f.env.dir, 5)
@@ -591,6 +600,23 @@ func fillCap(t *testing.T, dir string, n int) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func capEntries(t *testing.T, dir, plan string) int {
+	t.Helper()
+	n := 0
+	if _, err := raidwalk.UpdateCapLedger(dir+"/instance-cap.json", func(l *raidwalk.CapLedger) {
+		if s := l.Servers["tortoise-test2"]; s != nil {
+			for _, e := range s.Entries {
+				if e.Plan == plan {
+					n++
+				}
+			}
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 func capReservations(t *testing.T, dir string) int {

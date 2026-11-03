@@ -370,12 +370,17 @@ func (sl *scoutLive) capUpdate(fn func(*raidwalk.CapLedger)) error {
 
 // confirmInstance turns the reservation into the ledger entry once the GM is inside the fresh copy.
 func (sl *scoutLive) confirmInstance() {
-	if sl.env.capLedger == "" || !sl.capReserved {
+	if sl.env.capLedger == "" {
 		return
 	}
 	now := sl.now()
 	err := sl.capUpdate(func(l *raidwalk.CapLedger) {
-		l.Confirm(sl.server, sl.capOwner, raidwalk.CapEntry{At: now.UTC(), Plan: sl.plan.Name}, now)
+		if sl.capReserved {
+			l.Confirm(sl.server, sl.capOwner, raidwalk.CapEntry{At: now.UTC(), Plan: sl.plan.Name}, now)
+			return
+		}
+		// The scout went on past the wait cap (no reservation): a plain entry, as raid-walk records it.
+		l.Record(sl.server, raidwalk.CapEntry{At: now.UTC(), Plan: sl.plan.Name}, now)
 	})
 	if err != nil {
 		sl.note("instance cap: ledger entry not written: %v", err)
