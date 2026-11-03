@@ -78,13 +78,13 @@ func TestAllowedLine(t *testing.T) {
 // The place phase's two added GM lines (spec 7): .appear of a hire, and .instance unbind of the walk's own map.
 func TestAllowedLineAppearUnbind(t *testing.T) {
 	hires := map[string]bool{"Tankbot": true, "Healbot": true}
-	for _, line := range []string{".appear Tankbot", ".appear Healbot", ".instance unbind 309", ".gm on"} {
+	for _, line := range []string{".appear Tankbot", ".appear Healbot", ".instance unbind 309", ".gm on", ".instance listbinds"} {
 		if !AllowedLine(line, hires, 309) {
 			t.Errorf("refused an allowed line %q", line)
 		}
 	}
 	for _, line := range []string{".appear Stranger", ".appear", ".appear Tankbot extra", ".instance unbind all",
-		".instance unbind 409", ".instance unbind", ".instance listbinds", ".instance unbind 0309",
+		".instance unbind 409", ".instance unbind", ".instance listbinds 309", ".instance unbind 0309",
 		".gm", ".gm off", ".gm on extra", ".gm visible on"} { // `.gm visible off` is the revive's one exact line (TestAllowedLine)
 		if AllowedLine(line, hires, 309) {
 			t.Errorf("accepted a forbidden line %q", line)

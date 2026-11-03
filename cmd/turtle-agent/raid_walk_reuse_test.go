@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 )
 
@@ -93,27 +95,99 @@ func TestReuseInstanceKeepsTheInstance(t *testing.T) {
 	}
 }
 
-// A raid that is not alive in the plan's map refuses the reuse instead of entering a fresh instance.
-func TestReuseInstanceRefusesARaidThatIsNotThere(t *testing.T) {
+// Walk 33: --reuse-instance and --gm-clear are allowed together: the named packs are killed in the kept copy.
+func TestReuseInstanceRunsGMClear(t *testing.T) {
 	f, _ := newPlaceFixture(t)
 	f.opts.reuseInstance = true
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
 	f.agent.entered = true
-	f.agent.dead["Bot01"] = true
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
+	f.agent.unitsFn = func(int) []objects.Unit {
+		return gmClearView(f, pack, guids, func(packet.GUID) bool { return false })
+	}
 	f.agent.startReply = zgPlaceReply(t)
-	if code := f.run(context.Background()); code != exitUsage {
-		t.Fatalf("exit %d, want %d (usage): %s", code, exitUsage, f.stderr.String())
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	kills := 0
+	for _, l := range f.agentLog() {
+		if strings.HasPrefix(l, "gm_kill ") {
+			kills++
+		}
+	}
+	if kills == 0 {
+		t.Fatal("no gm_kill went out under --reuse-instance --gm-clear")
+	}
+	if !hasNote(f.summary(), "ASSISTED") {
+		t.Fatalf("notes %q, want the ASSISTED mark", f.summary().Notes)
+	}
+}
+
+// A raid that is not alive in the plan's map refuses the reuse instead of entering a fresh instance.
+// Walk 33: a raid that logged out with no live bind is said so, and the walk falls back to a fresh entry (it used to
+// refuse with exit 2, leaving the operator to burn an instance by hand).
+func TestReuseInstanceFallsBackWhenTheRaidAndBindAreGone(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	f.opts.reuseInstance = true
+	f.agent.entered = false
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
 	}
 	out := f.stderr.String() + f.stdout.String()
-	if !strings.Contains(out, "--reuse-instance: the raid is not alive in map 309") {
-		t.Fatalf("output %q, want the not-alive refusal", out)
+	sum := f.summary()
+	if !hasNote(sum, "--reuse-instance: the raid is not alive in map 309 (dead: none; not seen: ") {
+		t.Fatalf("notes %q, want the not-alive report", sum.Notes)
 	}
-	if !strings.Contains(out, "dead: Bot01") {
-		t.Fatalf("output %q, want the dead hire named", out)
+	if !hasNote(sum, "no live bind for map 309 is left: falling back to a fresh instance") {
+		t.Fatalf("notes %q, want the fresh fallback", sum.Notes)
 	}
+	enters := 0
 	for _, l := range f.agentLog() {
 		if strings.HasPrefix(l, "cmdr cmd enter") {
-			t.Fatalf("an entry order went out for a refused reuse: %q", l)
+			enters++
 		}
+	}
+	if enters != 1 {
+		t.Fatalf("%d entry orders, want exactly one for the fresh fallback: %q", enters, out)
+	}
+}
+
+// Walk 33: the previous party logged out, but the commander's own bind to the map is alive: .go xyz lands in it and
+// the fresh hires are summoned in, so no fresh instance is entered or counted.
+func TestReuseInstanceResumesTheExistingBind(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.reuseInstance = true
+	f.agent.entered = false
+	f.agent.instanceBinds = []fakeBind{{inst: 107, ttr: "1h 0m"}}
+	p.inst = 107
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.Place == nil || sum.Place.Instance != 107 {
+		t.Fatalf("place summary %+v, want instance 107", sum.Place)
+	}
+	if !hasNote(sum, "still bound to map 309 instance 107") ||
+		!hasNote(sum, "resumed instance 107 from the commander's existing bind") {
+		t.Fatalf("notes %q, want the bind resume", sum.Notes)
+	}
+	appears, enters := 0, 0
+	for _, l := range f.agentLog() {
+		if strings.HasPrefix(l, "gm .appear ") {
+			appears++
+		}
+		if strings.HasPrefix(l, "cmdr cmd enter") {
+			enters++
+		}
+		if l == "gm .instance listbinds" {
+			// the read itself
+		}
+	}
+	if appears != 0 || enters != 0 {
+		t.Fatalf("appear %d, enter %d, want neither on a bind resume", appears, enters)
 	}
 }
 
@@ -126,8 +200,8 @@ func TestReuseInstanceRefusals(t *testing.T) {
 	stderr.Reset()
 	args := []string{"zul_gurub", "--place", "--from", "leg high_priest_thekal", "--sql", "walk.sql",
 		"--reuse-instance", "--gm-clear", "2:1"}
-	if _, code := parseRaidWalkArgs(args, &stderr); code != exitUsage || !strings.Contains(stderr.String(), "not combined") {
-		t.Fatalf("with --gm-clear: exit %d, stderr %q", code, stderr.String())
+	if o, code := parseRaidWalkArgs(args, &stderr); code != exitOK || !o.reuseInstance || len(o.gmClear) != 1 {
+		t.Fatalf("with --gm-clear: exit %d, options %+v, stderr %q (walk 33: the two are allowed together)", code, o, stderr.String())
 	}
 	stderr.Reset()
 	args = []string{"zul_gurub", "--place", "--from", "leg high_priest_thekal", "--sql", "walk.sql", "--reuse-instance"}

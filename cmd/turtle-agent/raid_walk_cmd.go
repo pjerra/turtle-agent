@@ -42,6 +42,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/slots"
 	"github.com/pjerra/turtle-agent/internal/tbdash"
 	"github.com/pjerra/turtle-agent/internal/tbm"
+	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
 // The exit codes of a raid walk (spec 1.2).
@@ -110,6 +111,9 @@ type raidWalkOptions struct {
 	binary          string
 	injects         stringList // --inject, repeatable
 	dryRun          bool
+	// noPlaceRetreat is a test seam: the unit tests that pin one placement attempt turn the same-instance retreat off
+	// (the walk's own TestPlaceQuietFailureRetreatsInTheSameInstance runs it).
+	noPlaceRetreat bool
 }
 
 // stringList is a repeatable string flag: --inject a --inject b, or --inject=a.
@@ -225,7 +229,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.until, "until", "boss", "boss (stops before it), boss-done (after the boss step), none, \"step N\" or \"leg L\"")
 	fs.StringVar(&o.from, "from", "", "\"leg L\" or \"step N\" for the run leader")
 	fs.Var(onOffFlag{v: &o.place, name: "--place"}, "place", "with --from: put the raid at that start inside the instance, clearing the legs it skips (Eluna test toolkit: m910q or tortoise-test2 only)")
-	fs.BoolVar(&o.reuseInstance, "reuse-instance", false, "with --place: a re-place that keeps the raid's CURRENT instance (no fresh instance is entered or counted, so the instance cap is untouched): the raid must be alive in the plan's map, and every hire is teleported to the start point with the GM path")
+	fs.BoolVar(&o.reuseInstance, "reuse-instance", false, "with --place: keep the raid's CURRENT instance (no fresh instance is entered or counted, so the instance cap is untouched). A live raid is kept; a logged-out raid is resumed from the commander's live bind; with no bind the walk says so and falls back to a fresh entry. Combines with --gm-clear")
 	fs.StringVar(&speed, "speed", "1.0", "the run's test speed, 1.0 to 3.0")
 	fs.StringVar(&o.hires, "hires", "", "the tb-raid-roster v1 file (default: from the plan's raid block)")
 	fs.IntVar(&o.tier, "tier", 0, "the hire gear tier (1-3) of a raid the committed table leaves unknown")
@@ -384,10 +388,6 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	if o.reuseInstance {
 		if !o.place {
 			fmt.Fprintf(stderr, "raid-walk: --reuse-instance needs --place (it is a re-place into the raid's current instance)\n")
-			return o, exitUsage
-		}
-		if len(o.gmClear) > 0 || len(o.gmClearBoss) > 0 {
-			fmt.Fprintf(stderr, "raid-walk: --reuse-instance and --gm-clear are not combined: a reuse re-places a live raid, it does not clear packs\n")
 			return o, exitUsage
 		}
 	}
@@ -889,6 +889,7 @@ type walk struct {
 	// The --place start (spec 4/5): the plan from validate, the raid's instance id read at the place, the commander's
 	// last `.go xyz` in the copy (the clear's distance rule), the quiet read's near list, and what the phase reports.
 	place         *raidwalk.PlacePlan
+	placeWorld    *worldspawn.World // the world export the offline quiet start reads (nil: unavailable)
 	placeInst     float64
 	placePos      [3]float32
 	placeHavePos  bool
@@ -896,6 +897,11 @@ type walk struct {
 	placeSum      *raidwalk.PlaceSummary
 	placeRemoved  int
 	placeSkipped  []raidwalk.ClearCircle // the corridor circles placeClear refused (the extra round keeps away from them)
+	placeBlockers []ttUnit               // the quiet's last blockers (the same-instance retreat may GM-kill them)
+	placeRouteEnd int                    // the corridor's route end (PlaceBossGuard's routeEnd), for a retreat's clear
+	reuseMode     string                 // "alive", "bind" or "fresh": what --reuse-instance found
+	reuseBindInst float64                // the instance the commander's existing bind names (reuseMode "bind")
+	reuseBindTTR  string                 // that bind's time to reset, from .instance listbinds
 	placeSummoned []string
 
 	capOwner    string // the instance-cap reservation's owner (holder + pid)
@@ -1136,6 +1142,29 @@ func (w *walk) validate() error {
 		if err != nil {
 			return stopf(exitUsage, "%v", err)
 		}
+		quietMoved := false
+		if !door {
+			// The offline start choice (walk 33): a requested row within a not-yet-pulled pack's aggro burns a fresh
+			// instance on the quiet check. Walk back along the plan's move rows to the nearest row that stands
+			// AggroRadius+8 yd clear of every static spawn of the packs the run has not pulled yet, and say which
+			// row and why. No session, no instance: this runs before the enter phase.
+			if world := w.loadPlaceWorld(); world != nil {
+				level := 0
+				if len(w.plan.LevelBand) == 2 {
+					level = w.plan.LevelBand[0]
+				}
+				if qs, note := raidwalk.PlaceQuietStart(w.rows, world, step, level); note != "" {
+					w.note("place: %s", note)
+					if qs != step {
+						step, quietMoved = qs, true
+						leg = raidwalk.PlaceLegName(w.rows, step)
+						if fallbackFrom == "" {
+							untilBase = step
+						}
+					}
+				}
+			}
+		}
 		if door {
 			w.note("place: leg %s is the first leg; starting from the door", leg)
 		} else {
@@ -1144,7 +1173,7 @@ func (w *walk) validate() error {
 			}
 			// A --from step on a pull row places at that pull's own stand point (or the move row before it when the
 			// row has no point): say which point was used (walk 32: 237, 560 and others were refused as "a pull row").
-			if len(w.fromWords) == 3 && w.fromWords[1] == "step" {
+			if !quietMoved && len(w.fromWords) == 3 && w.fromWords[1] == "step" {
 				if req, aerr := strconv.Atoi(w.fromWords[2]); aerr == nil && req >= 1 && req <= len(w.rows.Steps) &&
 					w.rows.Steps[req-1].Kind == planexport.KindPull {
 					if req == step {
@@ -1206,6 +1235,7 @@ func (w *walk) validate() error {
 		// and is never replaced with a step: the run walks the plan to its end and the run leader fights whatever it
 		// meets. The corridor still ends at routeEnd (the step before the guarded segment), so the clear stays off it.
 		until, routeEnd, gnote, refusal, hit := raidwalk.PlaceBossGuard(w.rows, startStep, stop)
+		w.placeRouteEnd = routeEnd
 		if refusal != "" {
 			return stopf(exitUsage, "%v", refusal)
 		}

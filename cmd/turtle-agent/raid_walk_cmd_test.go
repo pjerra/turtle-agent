@@ -69,6 +69,12 @@ type timelineEntry struct {
 	Targeted bool
 }
 
+// fakeBind is one `.instance listbinds` row: the instance id and its time to reset.
+type fakeBind struct {
+	inst float64
+	ttr  string
+}
+
 type walkFakeAgent struct {
 	runStarted bool   // the walk sent `run start` (wipe-fault tests gate on it)
 	recoveryGo bool   // a `.go xyz` went out after run start (the recovery teleport)
@@ -106,6 +112,9 @@ type walkFakeAgent struct {
 	killFn    func(g packet.GUID, tries int) bool
 	killTries map[packet.GUID]int
 	killed    map[packet.GUID]bool
+
+	// instanceBinds is what `.instance listbinds` reports for the commander (the reuse bind check).
+	instanceBinds []fakeBind
 
 	startReply *commanderReply
 	startQueue []queuedEvent
@@ -637,6 +646,13 @@ func (f *walkFakeAgent) gmSide(line string) {
 		} else {
 			f.push("GM mode is ON", "")
 		}
+	case line == ".instance listbinds":
+		// The core's HandleInstanceListBindsCommand: one line per player bind, then the two counts.
+		for _, b := range f.instanceBinds {
+			f.push(fmt.Sprintf("map: %d (Zul'Gurub) inst: %.0f perm: no canReset: yes TTR: %s", f.instMap, b.inst, b.ttr), "")
+		}
+		f.push("player binds: "+strconv.Itoa(len(f.instanceBinds)), "")
+		f.push("group binds: 0", "")
 	case line == ".gps":
 		f.gpsSide()
 	case line == ".pinfo":
@@ -650,6 +666,10 @@ func (f *walkFakeAgent) gmSide(line string) {
 			f.pos = map[string][3]float32{}
 		}
 		f.pos[name] = [3]float32{f.x, f.y, f.z}
+		if f.instMap != 0 && f.status.Map == f.instMap {
+			// A summon lands the hire in the commander's map and instance (the bind resume's path).
+			f.entered = true
+		}
 		if f.lastUnsettled {
 			f.summonUnsettled++
 		}

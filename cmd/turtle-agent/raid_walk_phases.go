@@ -82,9 +82,37 @@ func (w *walk) phases(ctx context.Context) int {
 	}
 	if w.opts.reuseInstance {
 		// The raid is already inside: no entry order (which opens a fresh copy), only a check that it is alive in the
-		// plan's map (walk 32: every restart re-entered at the leg start and burned a fresh instance).
-		if err := w.reuseReady(ctx); err != nil {
+		// plan's map (walk 32: every restart re-entered at the leg start and burned a fresh instance). When the
+		// previous run's party logged out but the commander still holds its bind and the instance has not expired, the
+		// walk resumes that instance instead (walk 33); with no bind it says so and falls back to a fresh entry.
+		ready, err := w.reuseReady(ctx)
+		if err != nil {
 			return w.stop(err, true)
+		}
+		switch {
+		case ready:
+			w.reuseMode = "alive"
+		default:
+			if inst, ttr, ok := w.reuseBind(ctx); ok {
+				w.reuseMode, w.reuseBindInst, w.reuseBindTTR = "bind", inst, ttr
+				w.note("place: --reuse-instance: the previous raid has logged out, but the commander is still bound to map %d instance %.0f (expires in %s): resuming it, no fresh instance",
+					w.plan.Map, inst, ttr)
+			} else {
+				w.reuseMode = "fresh"
+				w.note("place: --reuse-instance: the previous raid has logged out and no live bind for map %d is left: falling back to a fresh instance", w.plan.Map)
+				// The fresh fallback is a real entry: the cap check skipped for --reuse-instance runs now, and the
+				// commander's stale personal bind (if any) is dropped first, or .appear would land in an old copy.
+				if err := w.phaseInstanceCap(ctx); err != nil {
+					return w.stop(err, false)
+				}
+				if err := w.phaseUnbindSelf(ctx); err != nil {
+					return w.stop(err, true)
+				}
+				if err := w.phaseEnter(ctx); err != nil {
+					return w.stop(err, true)
+				}
+				w.recordFreshInstance()
+			}
 		}
 	} else {
 		if err := w.phaseEnter(ctx); err != nil {

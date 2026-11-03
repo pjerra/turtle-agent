@@ -43,16 +43,43 @@ const (
 	gmClearRetryGap = 3 * time.Second
 )
 
+// worldExportDir is the world export the placement and --gm-clear read: --gm-clear-spawns, else the map's testdata
+// beside the plan folder (tools/dungeongen/testdata/map<N>).
+func (w *walk) worldExportDir() string {
+	dir := w.opts.gmClearSpawns
+	if dir == "" {
+		dir = filepath.Join(slots.ExpandTilde(w.opts.dir), "..", "tools", "dungeongen", "testdata", fmt.Sprintf("map%d", w.plan.Map))
+	}
+	return dir
+}
+
+// loadPlaceWorld reads the world export the offline quiet start judges (once per walk). A missing export is a note,
+// never a refusal: the placement still works, it just cannot walk the start back.
+func (w *walk) loadPlaceWorld() *worldspawn.World {
+	if w.placeWorld != nil {
+		return w.placeWorld
+	}
+	dir := w.worldExportDir()
+	if _, err := os.Stat(filepath.Join(dir, "creatures.tsv")); err != nil {
+		w.note("place: no world export in %s: the offline quiet start is skipped (pass --gm-clear-spawns DIR)", dir)
+		return nil
+	}
+	world, _, err := worldspawn.Load(dir, w.plan.Map)
+	if err != nil {
+		w.note("place: the world export in %s: %v; the offline quiet start is skipped", dir, err)
+		return nil
+	}
+	w.placeWorld = world
+	return world
+}
+
 // validateGMClear expands the specs into packs from the plan's rows and the world export, before any GM command.
 func (w *walk) validateGMClear() error {
 	specs, err := parseGMClearSpecs(w.opts.gmClear, w.opts.gmClearBoss)
 	if err != nil {
 		return stopf(exitUsage, "%v", err)
 	}
-	dir := w.opts.gmClearSpawns
-	if dir == "" {
-		dir = filepath.Join(slots.ExpandTilde(w.opts.dir), "..", "tools", "dungeongen", "testdata", fmt.Sprintf("map%d", w.plan.Map))
-	}
+	dir := w.worldExportDir()
 	if _, err := os.Stat(filepath.Join(dir, "creatures.tsv")); err != nil {
 		return stopf(exitUsage, "--gm-clear: no world export in %s: pass --gm-clear-spawns DIR (tools/dungeongen/export.sh writes it)", dir)
 	}
@@ -60,6 +87,7 @@ func (w *walk) validateGMClear() error {
 	if err != nil {
 		return stopf(exitUsage, "--gm-clear: %v", err)
 	}
+	w.placeWorld = world
 	packs, warnings, err := raidwalk.PlanGMClear(w.rows, world, specs)
 	if err != nil {
 		return stopf(exitUsage, "%v", err)
