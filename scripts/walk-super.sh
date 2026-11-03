@@ -293,11 +293,12 @@ move_row_before() {
   ' "$sql"
 }
 
-# place_count is how many failures of category <cat> at start step <step> the per-command counter file holds.
+# place_count is how many placement failures at start step <step> the per-command counter file holds (either of the
+# two categories counts: a step that failed once each way has failed twice).
 place_count() {
-  local step="$1" cat="$2"
+  local step="$1"
   [[ -f "$cmdfile.place-fails" ]] || { printf '0'; return 0; }
-  awk -F'\t' -v s="$step" -v c="$cat" '$1 == s && $2 == c { n++ } END { print n + 0 }' "$cmdfile.place-fails"
+  awk -F'\t' -v s="$step" '$1 == s { n++ } END { print n + 0 }' "$cmdfile.place-fails"
 }
 
 # place_record appends one placement failure to the per-command counter file.
@@ -560,7 +561,7 @@ while true; do
       if [[ -n "$place_start" ]] && place_cat="$(place_fail_category "$place_reason")"; then
         # Walk 33: the same start step may fail this way twice; the third try moves one move row back, and a start
         # step is never tried a third time. The counter file is per command file, so it survives a relaunch.
-        place_seen="$(place_count "$place_start" "$place_cat")"
+        place_seen="$(place_count "$place_start")"
         if (( place_seen >= 2 )); then
           log_event "run $run_no exit $rc leg <none> out $out stop: never repeating start step $place_start a third time ($place_cat: $place_reason)"
           exit "$rc"
