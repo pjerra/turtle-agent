@@ -209,3 +209,48 @@ func TestReuseInstanceRefusals(t *testing.T) {
 		t.Fatalf("plain reuse: exit %d, options %+v, stderr %q", code, o, stderr.String())
 	}
 }
+
+// Walk 33: the teardown's `.instance unbind` left --reuse-instance with no bind after a stop, so every walk-super
+// restart entered a fresh instance. A restart of the same cmd (--reuse-instance) keeps a live bind for the plan's
+// map; a cmd that asks for a fresh instance, and an expired bind, still unbind.
+func TestTeardownKeepsTheReuseBind(t *testing.T) {
+	cases := []struct {
+		name     string
+		reuse    bool
+		binds    []fakeBind
+		wantKeep bool
+	}{
+		{"reuse keeps a live bind", true, []fakeBind{{inst: 107, ttr: "1h 0m"}}, true},
+		{"reuse drops an expired bind", true, []fakeBind{{inst: 107, ttr: "0s"}}, false},
+		{"fresh placement unbinds", false, []fakeBind{{inst: 107, ttr: "1h 0m"}}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.agent.instMap = 309
+			f.agent.instanceBinds = c.binds
+			f.agent.status.Map = zgPlan(t).Portal.Map
+			w := leaveWalk(t, f, f.clock.sleep)
+			w.opts.reuseInstance = c.reuse
+			w.placeLeave(context.Background())
+			unbinds := 0
+			for _, l := range f.agent.gmLines() {
+				if strings.HasPrefix(l, ".instance unbind") {
+					unbinds++
+				}
+			}
+			if c.wantKeep {
+				if unbinds != 0 {
+					t.Fatalf("the teardown unbound the bind --reuse-instance resumes: %v", f.agent.gmLines())
+				}
+				if !strings.Contains(strings.Join(w.notes, "\n"), "keeps the commander's bind to map 309 (instance 107, TTR 1h 0m)") {
+					t.Fatalf("notes %q, want the kept bind", w.notes)
+				}
+				return
+			}
+			if unbinds != 1 {
+				t.Fatalf("%d unbinds, want one: %v (notes %q)", unbinds, f.agent.gmLines(), w.notes)
+			}
+		})
+	}
+}

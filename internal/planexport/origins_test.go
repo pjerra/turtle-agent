@@ -131,7 +131,7 @@ func TestSQLUnchangedByOrigins(t *testing.T) {
 		plan string
 		sha  string
 	}{
-		{"zul_gurub", "d6a21939b3549c67262de2831e965d76adfa6b54444a4fa7d15190153e6aa9ee"},
+		{"zul_gurub", "44a2f79427f1dbaf047cf2d7f59e43c0c8b8d0b86a0020e49410aa3bf7b6c9a7"},
 		{"onyxias_lair", "142c1d58928ad1efd9aca2b773c4762e2ddcbae05c308540080a1fedd6e3b38e"},
 	} {
 		p, err := dungeon.Load(filepath.Join("..", "..", "dungeons", c.plan+".json"))

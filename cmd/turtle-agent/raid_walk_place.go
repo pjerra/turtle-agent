@@ -1868,9 +1868,20 @@ func legWords(leg string) string {
 // placeLeave sends the teardown's own unbind: out to the portal and `.instance unbind <plan map>`, so the commander
 // does not carry a bind into the next walk. The external teardown ends the commander's agent, so these lines go out
 // before it, not after (spec 5.1).
+// Under --reuse-instance the bind is what the next placement resumes (walk 33: walk-super restarts the same cmd, and
+// this unbind left the commander with no live bind, so every stop fell back to a fresh instance). A live bind for the
+// plan's map is kept instead; an expired, foreign or unreadable bind is dropped as before, and a cmd without
+// --reuse-instance asks for a fresh instance and unbinds.
 func (w *walk) placeLeave(ctx context.Context) {
 	if w.plan == nil || w.plan.Portal == nil {
 		return
+	}
+	if w.opts.reuseInstance {
+		if inst, ttr, ok := w.reuseBind(ctx); ok {
+			w.note("place: teardown: --reuse-instance keeps the commander's bind to map %d (instance %.0f, TTR %s) for the next placement",
+				w.plan.Map, inst, ttr)
+			return
+		}
 	}
 	if err := w.gm(ctx, fmt.Sprintf(".go xyz %s %s %s %d", num32(w.plan.Portal.X), num32(w.plan.Portal.Y), num32(w.plan.Portal.Z), w.plan.Portal.Map)); err != nil {
 		w.note("place: the teardown's .go to the portal: %v", err)
