@@ -396,10 +396,11 @@ type Hold struct {
 	// writes entry Object.Entry, param the state's index (0 ready, 1 active, 2 active_alt) and flag 16 (done by object), and
 	// the run leader reads that object near the hold's spot. Data stays 0 then. A hold with neither Object nor a Data value is
 	// refused. The first user is Dire Maul West's five crystals: each is used when its four Mana Remnants die, and the hold
-	// fights them and ends when the crystal reads ready - the crystals spawn active (tw_world_gameobject.sql state 1) and
-	// the script's DoUseDoorOrButton toggles each to ready as it is counted, so `ready` is the done sign (r39 slot6 step 491
-	// was the active reading, which never came). The lookup also needs the spot within 30 yd of the object (TortoiseBots'
-	// kEntryPointRadius); the plan check does not measure that.
+	// fights them and ends when the crystal reads active - the crystals spawn ready (tw_world_gameobject.sql state 0) and the
+	// script's DoUseDoorOrButton leaves that state as it is counted, so `active` is the done sign (r39s2 slotC waited for
+	// `ready` for 4 x 120 s on a crystal that was already active; r40 slot6 passed all five holds at once on `active`). The
+	// lookup also needs the spot within 30 yd of the object (TortoiseBots' kEntryPointRadius); the plan check does not measure
+	// that.
 	Object *ObjectRef `json:"object,omitempty"`
 	State  string     `json:"state,omitempty"`
 	// Value, when set, is the value of instance data Data that ends the event, read as the script's own number, not as an encounter state:
