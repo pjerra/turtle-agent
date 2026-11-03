@@ -9,6 +9,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/pjerra/turtle-agent/internal/planlint"
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
@@ -165,5 +166,30 @@ func TestLiveHopsCoverOrigins(t *testing.T) {
 	}
 	if stand == nil || !stand.StandRow || stand.Anchor.Z != 57.3 || stand.From.Z != 57.3 {
 		t.Fatalf("stand hop: %+v", hops)
+	}
+}
+
+// live_joiners recomputes the pull's estimate with live positions and live sight; it replaces the offline joiners check.
+func TestMergeLiveJoiners(t *testing.T) {
+	rows := rowsOf(move(-20, 0, 0), move(0, 0, 0), mkPull(10, 0, 0, 5, 100))
+	w := &worldspawn.World{Spawns: []worldspawn.Spawn{
+		{GUID: 500, Entry: 100, LevelMax: 60, DetectionYd: 20, Faction: 14, Pos: dungeon.Point{X: 10}},
+		{GUID: 601, Entry: 200, LevelMax: 60, DetectionYd: 20, Faction: 14, Pos: dungeon.Point{X: 14}},
+		{GUID: 602, Entry: 200, LevelMax: 60, DetectionYd: 20, Faction: 14, Pos: dungeon.Point{X: 14, Y: 1}},
+		{GUID: 603, Entry: 200, LevelMax: 60, DetectionYd: 20, Faction: 14, Pos: dungeon.Point{X: 15}},
+	}}
+	units := []objects.Unit{
+		{GUID: unitGUID(200, 601), Entry: 200, Name: "j1", X: 14, Y: 0, Z: 0, Level: 60, Hostile: true},
+		{GUID: unitGUID(200, 602), Entry: 200, Name: "j2", X: 14, Y: 1, Z: 0, Level: 60, Hostile: true},
+		{GUID: unitGUID(200, 603), Entry: 200, Name: "j3", X: 15, Y: 0, Z: 0, Level: 60, Hostile: true},
+	}
+	rep := mergeOn(t, rows, nil, w, LiveData{Units: map[int][]objects.Unit{3: units},
+		LOS: map[LOSKey]bool{{Step: 3, Guid: 601}: true, {Step: 3, Guid: 602}: true, {Step: 3, Guid: 603}: true}})
+	if c := checkAt(t, rep, 3, planlint.LintJoiners); c != nil {
+		t.Fatalf("the offline joiners check was kept: %+v", c)
+	}
+	c := checkAt(t, rep, 3, CheckLiveJoiners)
+	if c == nil || c.Verdict != VerdictFail || len(c.Guids) != 3 {
+		t.Fatalf("live_joiners: %+v", c)
 	}
 }
