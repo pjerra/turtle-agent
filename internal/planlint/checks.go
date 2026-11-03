@@ -73,6 +73,8 @@ type hopOrigin struct {
 	Point dungeon.Point
 	Drift bool
 	Label string
+	// Step is the row the origin is the point of (1-based).
+	Step int
 }
 
 // origins lists the points row i is walked from (spec 3.2): the positioned row before it, the drift ring of a pull or boss
@@ -80,20 +82,20 @@ type hopOrigin struct {
 func (c *checker) origins(i int) []hopOrigin {
 	steps := c.steps
 	var out []hopOrigin
-	add := func(p dungeon.Point, drift bool, label string) {
+	add := func(p dungeon.Point, drift bool, label string, step int) {
 		for _, o := range out {
 			if dist3(o.Point, p) <= 1 {
 				return
 			}
 		}
-		out = append(out, hopOrigin{Point: p, Drift: drift, Label: label})
+		out = append(out, hopOrigin{Point: p, Drift: drift, Label: label, Step: step})
 	}
 	prev := c.prev(i)
 	if prev < 0 {
 		return nil
 	}
 	p := pointOf(steps[prev])
-	add(p, false, fmt.Sprintf("row %d", prev+1))
+	add(p, false, fmt.Sprintf("row %d", prev+1), prev+1)
 	if steps[prev].Kind == planexport.KindPull || steps[prev].Kind == planexport.KindBoss {
 		radius := float64(steps[prev].Radius)
 		if radius <= 0 {
@@ -108,17 +110,46 @@ func (c *checker) origins(i int) []hopOrigin {
 			a := 2 * math.Pi * float64(k) / 8
 			q := dungeon.Point{X: p.X + float32(radius)*float32(math.Cos(a)), Y: p.Y + float32(radius)*float32(math.Sin(a)), Z: p.Z}
 			if n, ok, err := c.nav.Nearest(c.opt.Map, v3(q)); err == nil && ok && dist3(q, point3(n)) <= 5 {
-				add(point3(n), true, fmt.Sprintf("drift from row %d", prev+1))
+				add(point3(n), true, fmt.Sprintf("drift from row %d", prev+1), prev+1)
 			}
 		}
 	}
 	if (steps[i].Kind == planexport.KindPull || steps[i].Kind == planexport.KindBoss) && steps[i].Flags&planexport.FlagStandPull != 0 &&
 		moveKind(steps[prev].Kind) {
 		if anchor := c.prev(prev); anchor >= 0 {
-			add(pointOf(steps[anchor]), false, fmt.Sprintf("anchor row %d", anchor+1))
+			add(pointOf(steps[anchor]), false, fmt.Sprintf("anchor row %d", anchor+1), anchor+1)
 		}
 	}
 	return out
+}
+
+// HopOrigin is one point row i may be walked from, as origins lists it: the plan row before it, a point of the previous
+// pull's drift ring, or (for a stand pull) its stand and the anchor before the stand.
+type HopOrigin struct {
+	Point dungeon.Point
+	// Step is the row the origin is the point of (1-based).
+	Step  int
+	Drift bool
+	Label string
+}
+
+// HopOrigins lists the points row i is walked from (spec 3.2). The scout's live path pass asks every one; the offline
+// hop_len lint measures them.
+func HopOrigins(rows planexport.Rows, nav Nav, i int) []HopOrigin {
+	c := &checker{nav: nav, opt: Options{Map: rows.Plan.Map}, steps: rows.Steps}
+	var out []HopOrigin
+	for _, o := range c.origins(i) {
+		out = append(out, HopOrigin{Point: o.Point, Step: o.Step, Drift: o.Drift, Label: o.Label})
+	}
+	return out
+}
+
+// GatherPoints marks the move row right before a pull, boss or hold row: the party necessarily stops there.
+func GatherPoints(steps []planexport.StepRow) []bool { return gatherPoints(steps) }
+
+// PrevPositioned is the index of the positioned row before i, or -1.
+func PrevPositioned(steps []planexport.StepRow, i int) int {
+	return (&checker{steps: steps}).prev(i)
 }
 
 // walkedTo says the party walks to row i's own point: a move, a hold, or a pull/boss it walks to (a stand pull is fought
