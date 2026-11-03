@@ -134,12 +134,15 @@ func (d *detourPlanner) Close() { d.scratch.Close() }
 // coordinates only.
 func ProposeFixes(rep *Report, in Input, nav Nav, w *worldspawn.World) []Fix {
 	var out []Fix
+	var detT, snapT, viaT, standT, splitT float64
 	defer func() {
 		if os.Getenv("SCOUT_PROFILE") != "" {
-			fmt.Fprintf(os.Stderr, "dryPoint %.1fs dryRoute %.1fs\n", dryPointSec, dryRouteSec)
+			fmt.Fprintf(os.Stderr, "detour %.1fs snap %.1fs via %.1fs stand %.1fs split %.1fs dryPoint %.1fs dryRoute %.1fs\n", detT, snapT, viaT, standT, splitT, dryPointSec, dryRouteSec)
 		}
 	}()
+	t0 := time.Now()
 	det := newDetour(nav, in.Rows)
+	detT = time.Since(t0).Seconds()
 	if det != nil {
 		defer det.Close()
 	}
@@ -163,21 +166,29 @@ func ProposeFixes(rep *Report, in Input, nav Nav, w *worldspawn.World) []Fix {
 			origin := st.Origin
 			switch c.Name {
 			case planlint.LintOffFloor, planlint.LintReach:
+				t := time.Now()
 				if f, ok := snapFix(rep, in, nav, st, c, origin); ok {
 					out = append(out, f)
 				}
+				snapT += time.Since(t).Seconds()
 			case planlint.LintHop, planlint.LintArrival, planlint.LintClimb:
+				t := time.Now()
 				if f, ok := viaFix(rep, in, nav, st, c, origin); ok {
 					out = append(out, f)
 				}
+				viaT += time.Since(t).Seconds()
 			case planlint.LintWater:
 				out = append(out, dryFixes(rep, in, nav, det, &dryBudget, st, c, origin, idx)...)
 			case planlint.LintAggro:
+				t := time.Now()
 				if f, ok := standFix(in, nav, w, st, c, origin, idx, rows, level, spread); ok {
 					out = append(out, f)
 				}
+				standT += time.Since(t).Seconds()
 			case planlint.LintJoiners:
+				t := time.Now()
 				out = append(out, splitFixes(in, nav, w, st, c, origin, idx, rows, level, spread)...)
+				splitT += time.Since(t).Seconds()
 			}
 		}
 	}
