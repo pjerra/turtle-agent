@@ -40,10 +40,11 @@ func TestZulGurubArlokkTerraceIsSplitPerFormation(t *testing.T) {
 	}
 	want := map[int]struct{ bodies, ceiling int }{
 		13: {31, 10}, // upper B + upper east: max_bodies 10
-		14: {31, 6},  // middle east: max_bodies 6
-		15: {31, 8},  // upper north: unsized (the lint's raid default)
-		16: {27, 5},  // middle west: max_bodies 5
-		17: {37, 6},  // lower: max_bodies 6
+		14: {31, 2},  // middle east Blood Drinkers, pulled first from the clear stand: max_bodies 2
+		15: {31, 4},  // middle east Panthers: max_bodies 4
+		16: {31, 8},  // upper north: unsized (the lint's raid default)
+		17: {27, 5},  // middle west: max_bodies 5
+		18: {37, 6},  // lower: max_bodies 6
 	}
 	seen := map[int]bool{}
 	for _, f := range found {
@@ -76,7 +77,7 @@ var pullSizeKnownCounts = map[string]int{
 	// warns on most of its pulls (mmaps-free path, LOS always seen).
 	"ragefire_chasm": 28, "wailing_caverns": 54, "deadmines": 131,
 	"uldaman": 58, "zulfarrak": 53, "karazhan_crypt": 125,
-	"molten_core": 21, "blackwing_lair": 40, "zul_gurub": 80, // re-pinned for BOTS-PATHING-WAYPOINTS items 1-8 (was 78): the leg-0 entrance stand pulls add 2 rows over a ceiling; the Arlokk rock stands moved lower but their estimates stay under.: the Arlokk 27-unit row becomes five formation rows, the Mandokir knot becomes a 1+11 row pair and the Hakkar fish rows are gone, so fewer rows carry a body estimate above a ceiling.
+	"molten_core": 21, "blackwing_lair": 40, "zul_gurub": 81, // re-pinned for walk-31 fix 5 (was 80): the terrace 6-pack splits into a 2-pack and a 4-pack, one more row over a ceiling.
 	"ruins_of_ahnqiraj": 32, "temple_of_ahnqiraj": 74, "naxxramas": 150,
 	"lower_karazhan_halls": 79, "upper_karazhan_halls": 30,
 	"emerald_sanctum": 7, "timbermaw_hold": 27,
