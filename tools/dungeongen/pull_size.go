@@ -116,9 +116,6 @@ func pullTarget(p *dungeon.Plan, mobs []aggroest.Mob, entries map[uint32]uint32,
 	return planlint.PullTarget(p.KillFirst, mobs, entries, rp.ownerIdx, row, owned)
 }
 
-// packIDs maps each spawn guid to its pack id (the smallest member guid); nil world: every spawn its own pack.
-func packIDs(w *worldspawn.World) map[uint64]uint64 { return planlint.PackIDs(w) }
-
 // pullHostile is hostileMob for the pull lint, with the check's awakened and scripted entries always hostile: the
 // encounter's script turns them hostile when the pull starts, so their npc_flags (a scripted gossip NPC) and their faction
 // (35, the stoned Stone Keepers, which the default -ignore-factions also drops) are no reason to leave them out of the

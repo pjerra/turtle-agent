@@ -174,8 +174,6 @@ func prevPoint(in Input, idx int) (dungeon.Point, bool) {
 	return dungeon.Point{}, false
 }
 
-func rowPoint(s planexport.StepRow) dungeon.Point { return dungeon.Point{X: s.X, Y: s.Y, Z: s.Z} }
-
 // snapFix moves a row point to the nearest walkable spot on its floor, with a complete path from the row before it.
 func snapFix(rep *Report, in Input, nav Nav, st StepResult, c Check, origin *planexport.RowOrigin) (Fix, bool) {
 	p := dungeon.Point{X: st.X, Y: st.Y, Z: st.Z}

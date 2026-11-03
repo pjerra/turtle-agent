@@ -407,15 +407,6 @@ func (c *planChecker) runLeader(from int) error {
 	return nil
 }
 
-// pullGroupPart parses a "pull group N ..." part name (runLeaderWalk's and the plan check's shared numbering).
-func pullGroupPart(part string) (string, int, bool) {
-	var g int
-	if _, err := fmt.Sscanf(part, "pull group %d", &g); err != nil || g <= 0 {
-		return "", 0, false
-	}
-	return fmt.Sprintf("pull group %d", g), g, true
-}
-
 // lookFunc finds where the lead bot stands to look at a pack: LookPoint's signature.
 type lookFunc func(path []Point, pack Point, standoff, view float32, snap func(Point) Point) (Point, bool)
 

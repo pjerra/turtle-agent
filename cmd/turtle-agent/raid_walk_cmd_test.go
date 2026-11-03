@@ -2130,17 +2130,6 @@ func TestRaidWalkWipeRevivesOnlyWhenQuiet(t *testing.T) {
 	})
 }
 
-// placedIdleBlocker returns the unitsFn of a placed walk whose revive point is blocked by entry at yd out (place
-// point + yd in x, same z), with the given state on the unit.
-func placedIdleBlocker(t *testing.T, yd float32, entry uint32, name string, inCombat bool) func(int) []objects.Unit {
-	t.Helper()
-	_, place := placePlanRows(t)
-	return func(int) []objects.Unit {
-		return []objects.Unit{{Type: "creature", Name: name, Entry: entry, Hostile: true, InCombat: inCombat,
-			X: place.Point.X + yd, Y: place.Point.Y, Z: place.Point.Z}}
-	}
-}
-
 // placedFollower is placedIdleBlocker for a unit that follows the commander at yd out: every fallback point of the
 // revive, the entrance included, is blocked too (the fallback rows sit hundreds of yards from the place point).
 func placedFollower(f *fixture, yd float32, entry uint32, name string, inCombat bool) func(int) []objects.Unit {

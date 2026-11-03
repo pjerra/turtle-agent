@@ -599,8 +599,8 @@ func regenLegEnd(l *dungeon.Leg) (dungeon.Point, bool) {
 		}
 		return regenCentre(g.Positions), true
 	}
-	for i := len(l.Via) - 1; i >= 0; i-- {
-		return l.Via[i].Point, true
+	if n := len(l.Via); n > 0 {
+		return l.Via[n-1].Point, true
 	}
 	return dungeon.Point{}, false
 }
@@ -922,21 +922,6 @@ func (r *regen) checkPoint(p dungeon.Point, stand bool, pulled map[int]bool, sel
 		}
 	}
 	return true, "", nil
-}
-
-// ownerNear is the owner of an unpulled pull group with a spawn within 45 yd of p (the pack a stand there would stand in).
-func (r *regen) ownerNear(p dungeon.Point, pulled map[int]bool, self int, spawns []regenSpawn) (int, bool) {
-	best := -1
-	bestD := 45.0
-	for _, sp := range spawns {
-		if sp.owner < 0 || (self != -1 && sp.owner == self) || pulled[sp.owner] || r.laterOwner(sp.owner) {
-			continue
-		}
-		if d := regenDist3(p, sp.sp.Pos); d < bestD {
-			best, bestD = sp.owner, d
-		}
-	}
-	return best, best >= 0
 }
 
 // oldApproachOK says a group's written approach still passes the required rules: every point dry plain ground, the stand out
@@ -1268,9 +1253,7 @@ func (r *regen) route(from, to dungeon.Point, pulled map[int]bool, self, maxPts 
 	var pts []dungeon.Point
 	for i, path := range legs {
 		kept := r.stringPull(path.Points, anchors[i], wet[i], pulled, self, lanes, spawns)
-		for _, p := range kept[1:] {
-			pts = append(pts, p)
-		}
+		pts = append(pts, kept[1:]...)
 	}
 	pts = append(pts, to)
 	// Two adjacent points from different legs (or either side of a snap) can lose sight of each other: drop one of them and
@@ -1813,50 +1796,6 @@ func (r *regen) hopClear(a, b dungeon.Point, pulled map[int]bool, self int, lane
 	return true
 }
 
-// pushCorner moves a kept path corner regenPushYd into the walkable side of its bisector, snaps it to plain ground and checks
-// it; the original is kept when no push passes and improves the clearance.
-func (r *regen) pushCorner(p dungeon.Point, prev, next navmesh.Vec3, pulled map[int]bool, self int,
-	lanes []regenLane, spawns []regenSpawn) dungeon.Point {
-	in := [2]float64{float64(prev[0] - p.X), float64(prev[1] - p.Y)}
-	out := [2]float64{float64(next[0] - p.X), float64(next[1] - p.Y)}
-	for i := range in {
-		if n := math.Hypot(in[0], in[1]); n > 0 {
-			in[i] /= n
-		}
-		if n := math.Hypot(out[0], out[1]); n > 0 {
-			out[i] /= n
-		}
-	}
-	bx, by := in[0]+out[0], in[1]+out[1]
-	if n := math.Hypot(bx, by); n > 1e-6 {
-		bx, by = bx/n, by/n
-	} else {
-		return p
-	}
-	base, ok := r.clearance(p)
-	if !ok {
-		return p
-	}
-	best, bestWall := p, base
-	for _, rad := range []float64{regenPushYd, regenPushYd / 2, 4} {
-		q := navmesh.Vec3{p.X + float32(rad*bx), p.Y + float32(rad*by), p.Z}
-		c, ok, err := r.snap(q)
-		if err != nil || !ok {
-			continue
-		}
-		if math.Abs(float64(c.Z-p.Z)) > 3 || regenDist3(p, c) > 2*rad+1 {
-			continue
-		}
-		if ok, _, _ := r.routePointOK(c); !ok {
-			continue
-		}
-		if wall, ok := r.clearance(c); ok && wall > bestWall+0.2 {
-			best, bestWall = c, wall
-		}
-	}
-	return best
-}
-
 // split finds a point of the path between a and b at regenMaxHopYd; it must be plain ground within regenFillerZtolYd of the
 // line's z at that place.
 func (r *regen) split(a, b dungeon.Point) (dungeon.Point, bool) {
@@ -2137,11 +2076,11 @@ func regenOrder(l [][]float64, from []float64, must map[int]map[int]bool) ([]int
 		if best < 0 {
 			// A cycle: first drop the one-way edges only (the learned "clear this pack first" order is kept), and only then
 			// the learned ones too.
-			best, bestCost = pick(hard)
+			best, _ = pick(hard)
 			if best < 0 {
 				for i := 0; i < n && best < 0; i++ {
 					if !done[i] {
-						best, bestCost = i, 1
+						best = i
 					}
 				}
 			}

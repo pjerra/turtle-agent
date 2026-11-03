@@ -1457,7 +1457,6 @@ func (w *walk) phasePlace(ctx context.Context) error {
 			if qerr := w.placeQuiet(ctx); qerr != nil {
 				return err
 			}
-			retries++
 			if err := w.placeFinishAttempt(ctx); err != nil {
 				return err
 			}

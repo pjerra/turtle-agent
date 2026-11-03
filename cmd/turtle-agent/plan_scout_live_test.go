@@ -72,19 +72,6 @@ func newScoutFakeAgent(t *testing.T, clock *fakeClock) *scoutFakeAgent {
 		instCalls: func(int) float64 { return 1 }, losIn: map[string]bool{}}
 }
 
-// queue adds one system event carrying line as its raw protocol line.
-func (a *scoutFakeAgent) queue(line string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.queueLocked(line, line)
-}
-
-func (a *scoutFakeAgent) queueText(text string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.queueLocked("", text)
-}
-
 // queueLocked queues one system event; the caller holds the lock (Call answers a gm line under it).
 func (a *scoutFakeAgent) queueLocked(raw, text string) {
 	a.seq++
@@ -306,7 +293,6 @@ type scoutFakeEnv struct {
 	acquireSlot   string // lease slot ("" default "1")
 	setupFails    bool
 	bigSleep      bool // every sleep advances the clock by 40 s (the time ceiling test)
-	nowCalls      int
 }
 
 func (e *scoutFakeEnv) walkEnv() walkEnv {
