@@ -783,7 +783,9 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   otherwise; the run leader's plan ceiling, replacing its joiner ceiling on that row) and the `pull_size` lint warns when its estimate is above it;
   `hold` (optional, also on `boss`: `{"instance_data": 1, "spot": {..}, "radius": 30, "timeout_s": 600, "entries": [..]}`) makes the run leader's row for the group a
   scripted event's `hold` (TortoiseBots #1041: stand on `spot`, fight what the event sends within `radius` until instance data `instance_data` reads DONE; `entries` are more of the
-  event's mobs, the group's own and a boss's entry and `first` are always in; a boss's hold may leave `instance_data` out: the event is then done by its units, every unit of the
+  event's mobs, the group's own and a boss's entry and `first` are always in; a hold may instead be done by a game object's state: `{"object": {"entry": 179505}, "state": "ready", ...}`
+  with `instance_data` left out ends when that object near `spot` reads `state` (`ready`, `active` or `active_alt`), for a script whose last event unit opens something (Dire Maul West's
+  five crystals, which spawn active and toggle to ready as they are used; `plan-export` writes the object as the row's `entry`, the state's index as `param` and flag 16); a boss's hold may leave `instance_data` out: the event is then done by its units, every unit of the
   boss, its `first` and `entries` dead within `radius` after one turned hostile, the boss counting while still friendly, for a boss a script turns hostile later: Sergeant Bly; such a
   hold may also carry `skip_if_dead_of_gossip` (optional, `true`): when the gossip step that starts the encounter (`npc` the boss, `dead_is_done` set) found the boss already dead, the
   run leader ends the hold as soon as no unit of it is hostile — at once when the crew lies dead, with a note when only friendly survivors are left, since the core turns the crew

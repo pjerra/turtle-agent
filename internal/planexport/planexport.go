@@ -52,8 +52,11 @@ const (
 	FlagHorde    = 4
 	// FlagDoneData, FlagEncounter: a hold is done when instance data `entry` reads `param`, read as the core's encounter states
 	// (DungeonPlanPolicy.h kPlanFlagDoneData, kPlanFlagEncounter).
-	FlagDoneData  = 8
-	FlagEncounter = 32
+	FlagDoneData = 8
+	// FlagDoneObject marks a hold done when game object `entry` near its spot is in state `param` (DungeonPlanPolicy.h
+	// kPlanFlagDoneObject; 0 ready, 1 active, 2 active_alt).
+	FlagDoneObject = 16
+	FlagEncounter  = 32
 	// FlagGoneIsDone marks a loot or open row as done when its object is gone (the module's kPlanFlagGoneIsDone): a `not-found` answer
 	// for a loot of no item with this flag ends the step ("nothing of entry N left near the point: done") instead of pausing the run.
 	// A chest of spawntimesecs 7200 (Zul'Farrak's Shallow Grave, entry 128403) despawns once looted; the flag matters only for a run
@@ -632,8 +635,7 @@ func (b *builder) pull(gi int, g dungeon.PullGroup) error {
 	}
 	if g.Hold != nil {
 		b.at("hold", gi, 0)
-		b.hold(g.Hold, uniq(g.Entries), c+" hold")
-		return nil
+		return b.hold(g.Hold, uniq(g.Entries), c+" hold")
 	}
 	if g.StandPull {
 		c += "; stand pull"
@@ -647,10 +649,10 @@ func (b *builder) pull(gi int, g dungeon.PullGroup) error {
 	return nil
 }
 
-// hold writes a scripted event's hold row (dungeon.Hold): done when instance data h.Data reads DONE, read as encounter states. A move row
-// straight before it to the same spot is left out: the hold walks there itself, and a ritual followed straight by its hold keeps the
+// hold writes a scripted event's hold row (dungeon.Hold): done when instance data h.Data reads DONE, read as encounter states, or —
+// with h.Object — when that game object near the spot is in h.State. A move row straight before it to the same spot is left out: the hold walks there itself, and a ritual followed straight by its hold keeps the
 // event's first fight (it starts with the ritual's cast) in the hold.
-func (b *builder) hold(h *dungeon.Hold, entries []uint32, comment string) {
+func (b *builder) hold(h *dungeon.Hold, entries []uint32, comment string) error {
 	if n := len(b.rows.Steps); n > 0 {
 		prev := b.rows.Steps[n-1]
 		if prev.Leg == b.outLeg && prev.Kind == KindMove && dist3(dungeon.Point{X: prev.X, Y: prev.Y, Z: prev.Z}, h.Spot) <= 1 {
@@ -661,14 +663,32 @@ func (b *builder) hold(h *dungeon.Hold, entries []uint32, comment string) {
 	}
 	param, flags := uint32(EncounterDone), uint32(FlagDoneData|FlagEncounter)
 	done := fmt.Sprintf("%d (DONE)", EncounterDone)
-	if h.Value != nil {
+	entry := h.Data
+	if h.Object != nil {
+		// A hold done by a game object's state: entry the object, param the state's index, flag 16 (done by object).
+		state := -1
+		for i, s := range dungeon.ObjectStates {
+			if s == h.State {
+				state = i
+			}
+		}
+		if state < 0 {
+			return fmt.Errorf("hold object: state %q is none of %v", h.State, dungeon.ObjectStates)
+		}
+		entry = h.Object.Entry
+		param, flags = uint32(state), FlagDoneObject
+		done = fmt.Sprintf("object %d is %s", h.Object.Entry, h.State)
+	} else if h.Value != nil {
 		// A script value (Zul'Farrak's pyramid phase), not an encounter state: flag 8 alone, so the run leader reads no FAIL or reset
 		// into it and its loader takes a param above 4 (DungeonPlanPolicy.h NormalizePlanStep).
 		param, flags = *h.Value, FlagDoneData
 		done = fmt.Sprintf("%d (a script value, not an encounter state)", *h.Value)
 	}
 	text := fmt.Sprintf("%s: the event's mobs are fought on the spot until instance data %d reads %s", comment, h.Data, done)
-	if h.Data == 0 {
+	if h.Object != nil {
+		text = fmt.Sprintf("%s: the event's mobs are fought on the spot until %s", comment, done)
+	}
+	if h.Data == 0 && h.Object == nil {
 		// Done by its units (a boss's hold without instance data, dungeon.Hold): neither done flag, so the run leader ends the hold when
 		// every unit of the entries within the radius is dead after one was seen hostile; the first entry (the boss) counts while friendly.
 		param, flags = 0, 0
@@ -689,9 +709,10 @@ func (b *builder) hold(h *dungeon.Hold, entries []uint32, comment string) {
 			text += "; goes back to its gossip when the script resets it"
 		}
 	}
-	b.add(StepRow{Kind: KindHold, Entry: h.Data, X: h.Spot.X, Y: h.Spot.Y, Z: h.Spot.Z, Radius: h.Radius, Param: param,
+	b.add(StepRow{Kind: KindHold, Entry: entry, X: h.Spot.X, Y: h.Spot.Y, Z: h.Spot.Z, Radius: h.Radius, Param: param,
 		Flags: flags, TimeoutS: h.TimeoutS, Entries: entries, Comment: clip(text, MaxComment)})
 	b.last, b.haveLast = h.Spot, true
+	return nil
 }
 
 func (b *builder) boss(bs *dungeon.Boss) error {
@@ -710,8 +731,7 @@ func (b *builder) boss(bs *dungeon.Boss) error {
 	}
 	if bs.Hold != nil {
 		b.at("boss", -1, 0)
-		b.hold(bs.Hold, uniq(append(append([]uint32{bs.Entry}, bs.First...), bs.Hold.Entries...)), "boss hold")
-		return nil
+		return b.hold(bs.Hold, uniq(append(append([]uint32{bs.Entry}, bs.First...), bs.Hold.Entries...)), "boss hold")
 	}
 	flags, comment := teamFlags(bs.Team), "boss"
 	if bs.SkipUnreachable != "" {
@@ -858,8 +878,7 @@ func (b *builder) wait(w *dungeon.WaitFor) error {
 	if w.Hold != nil {
 		// The wait's run leader form (dungeon.Hold on a wait_for): the event's hold row in place of the wait, which the run leader may not
 		// be able to run at all (a unit wait). The agent's driver still runs the wait as written.
-		b.hold(w.Hold, uniq(w.Hold.Entries), "wait hold")
-		return nil
+		return b.hold(w.Hold, uniq(w.Hold.Entries), "wait hold")
 	}
 	if w.AgentOnly != "" {
 		// A unit wait the plan says the run leader needs no row for (dungeon.WaitFor.AgentOnly): left out, and listed by unexpressed.
@@ -998,24 +1017,34 @@ func Validate(r Rows) error {
 				return bad("a gossip carries no flag but the dead-npc-is-done flag (%d)", FlagDeadNpcIsDone)
 			}
 		case KindHold:
-			// Done by instance data (flag 8, entry = the data's index) or by its units (no flag, the entries): the loader's rule
-			// (DungeonPlanPolicy.h NormalizePlanStep refuses a units hold without entries). The exporter writes no object-done hold.
+			// Done by instance data (flag 8, entry = the data's index), by a game object's state (flag 16, entry = the object,
+			// param = the state) or by its units (no flag, the entries): the loader's rule (DungeonPlanPolicy.h
+			// NormalizePlanStep refuses a units hold without entries).
+			byData, byObject := s.Flags&FlagDoneData != 0, s.Flags&FlagDoneObject != 0
 			switch {
-			case s.Flags&FlagDoneData != 0 && s.Entry == 0:
-				return bad("a hold done by instance data needs the data's index (entry)")
-			case s.Flags&FlagDoneData == 0 && s.Flags&FlagEncounter != 0:
+			case byData && byObject:
+				return bad("a hold ends by instance data or by an object state, not both")
+			case byObject && s.Entry == 0:
+				return bad("a hold done by an object state needs the object's entry")
+			case byObject && s.Param > 2:
+				return bad("param %d is no object state (0-2)", s.Param)
+			case byObject && s.Flags&FlagEncounter != 0:
 				return bad("the encounter flag needs the instance data flag")
-			case s.Flags&FlagDoneData == 0 && (s.Entry != 0 || s.Param != 0 || len(s.Entries) == 0):
+			case byData && s.Entry == 0:
+				return bad("a hold done by instance data needs the data's index (entry)")
+			case !byData && !byObject && s.Flags&FlagEncounter != 0:
+				return bad("the encounter flag needs the instance data flag")
+			case !byData && !byObject && (s.Entry != 0 || s.Param != 0 || len(s.Entries) == 0):
 				return bad("a hold done by its units carries no entry or param, and needs its entries")
 			}
-			if s.Flags&FlagDeadGossipOk != 0 && (s.Flags&(FlagDoneData|FlagEncounter) != 0 || s.Entry != 0 || s.Param != 0) {
+			if s.Flags&FlagDeadGossipOk != 0 && (s.Flags&(FlagDoneData|FlagEncounter|FlagDoneObject) != 0 || s.Entry != 0 || s.Param != 0) {
 				return bad("the dead-gossip flag is for a hold done by its units: it carries neither the instance data flag nor an entry or param")
 			}
-			if s.Flags&FlagResetToGossip != 0 && (s.Flags&(FlagDoneData|FlagEncounter|FlagDeadGossipOk) != 0 || s.Entry != 0 || s.Param != 0) {
+			if s.Flags&FlagResetToGossip != 0 && (s.Flags&(FlagDoneData|FlagEncounter|FlagDoneObject|FlagDeadGossipOk) != 0 || s.Entry != 0 || s.Param != 0) {
 				return bad("the reset-to-gossip flag is for a hold done by its units: it carries no done flag, no entry or param, and not the dead-gossip flag")
 			}
 			// An encounter state is 0-4; a plain script value (flag 8 without 32) may be any number (the loader's rule).
-			if s.Flags&FlagEncounter != 0 && s.Param > 4 {
+			if byData && s.Flags&FlagEncounter != 0 && s.Param > 4 {
 				return bad("param %d is no encounter state (0-4)", s.Param)
 			}
 		case KindWaitClear:

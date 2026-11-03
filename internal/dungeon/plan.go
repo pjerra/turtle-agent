@@ -392,6 +392,16 @@ type PullGroup struct {
 // still needs Data, and a Value needs Data.
 type Hold struct {
 	Data uint32 `json:"instance_data,omitempty"`
+	// Object, when set, makes the hold's done condition a game object state instead of an instance data value: plan-export
+	// writes entry Object.Entry, param the state's index (0 ready, 1 active, 2 active_alt) and flag 16 (done by object), and
+	// the run leader reads that object near the hold's spot. Data stays 0 then. A hold with neither Object nor a Data value is
+	// refused. The first user is Dire Maul West's five crystals: each is used when its four Mana Remnants die, and the hold
+	// fights them and ends when the crystal reads ready - the crystals spawn active (tw_world_gameobject.sql state 1) and
+	// the script's DoUseDoorOrButton toggles each to ready as it is counted, so `ready` is the done sign (r39 slot6 step 491
+	// was the active reading, which never came). The lookup also needs the spot within 30 yd of the object (TortoiseBots'
+	// kEntryPointRadius); the plan check does not measure that.
+	Object *ObjectRef `json:"object,omitempty"`
+	State  string     `json:"state,omitempty"`
 	// Value, when set, is the value of instance data Data that ends the event, read as the script's own number, not as an encounter state:
 	// plan-export writes param Value with flags 8 alone (done by instance data), without the encounter flag 32, so the run leader neither
 	// reads a FAIL nor a reset into it (TortoiseBots DungeonPlanPolicy.h: a hold with flag 8 and not 32 takes any param). The run leader
@@ -930,6 +940,8 @@ type rawPullGroup struct {
 
 type rawHold struct {
 	Data     uint32    `json:"instance_data"`
+	Object   *rawRef   `json:"object"`
+	State    string    `json:"state"`
 	Spot     *rawPoint `json:"spot"`
 	Radius   float32   `json:"radius"`
 	TimeoutS int       `json:"timeout_s"`
@@ -1794,20 +1806,44 @@ func (c *checker) hold(path string, r *rawHold, valueAllowed, unitsAllowed bool)
 	}
 	h := &Hold{Data: r.Data, Radius: r.Radius, TimeoutS: r.TimeoutS, Entries: r.Entries, Value: r.Value, SkipIfDeadOfGossip: r.SkipIfDeadOfGossip, ResetToGossip: r.ResetToGossip}
 	h.Spot = c.point(path+".spot", r.Spot)
-	switch {
-	case r.Data == 0 && r.Value != nil:
-		c.fail(path+".instance_data", "required with a value (the value is of that instance data)")
-	case r.Data == 0 && !unitsAllowed:
-		c.fail(path+".instance_data", "required (the index of the event's instance data, 1 or more); only a boss's hold may leave it out (done by its units)")
-	}
-	if r.SkipIfDeadOfGossip && (!unitsAllowed || r.Data != 0) {
-		c.fail(path+".skip_if_dead_of_gossip", "only a boss's hold done by its units (instance_data left out) takes it: a hold done by instance data ends by that data")
-	}
-	if r.ResetToGossip && (!unitsAllowed || r.Data != 0) {
-		c.fail(path+".reset_to_gossip", "only a boss's hold done by its units (instance_data left out) takes it: a hold done by instance data ends by that data")
-	}
-	if r.ResetToGossip && r.SkipIfDeadOfGossip {
-		c.fail(path+".reset_to_gossip", "cannot be combined with skip_if_dead_of_gossip: a starting NPC already dead starts no event to reset")
+	if r.Object != nil {
+		h.State = r.State
+		h.Object = &ObjectRef{Entry: r.Object.Entry, Spawn: r.Object.Spawn}
+		if r.Data != 0 {
+			c.fail(path+".instance_data", "is for a hold done by instance data; an object hold names object and state instead")
+		}
+		if r.Object.Entry == 0 {
+			c.fail(path+".object.entry", "required (the game object whose state ends the hold)")
+		}
+		if r.Object.Near != nil {
+			p := c.point(path+".object.near", r.Object.Near)
+			h.Object.Near = &p
+		}
+		if !slices.Contains(ObjectStates, r.State) {
+			c.fail(path+".state", "%q is none of %s", r.State, strings.Join(ObjectStates, ", "))
+		}
+		if r.Value != nil {
+			c.fail(path+".value", "an object hold ends on the object's state; it takes no value")
+		}
+		if r.SkipIfDeadOfGossip || r.ResetToGossip {
+			c.fail(path, "an object hold ends on the object's state; it takes neither skip_if_dead_of_gossip nor reset_to_gossip")
+		}
+	} else {
+		switch {
+		case r.Data == 0 && r.Value != nil:
+			c.fail(path+".instance_data", "required with a value (the value is of that instance data)")
+		case r.Data == 0 && !unitsAllowed:
+			c.fail(path+".instance_data", "required (the index of the event's instance data, 1 or more); only a boss's hold may leave it out (done by its units), or give object and state")
+		}
+		if r.SkipIfDeadOfGossip && (!unitsAllowed || r.Data != 0) {
+			c.fail(path+".skip_if_dead_of_gossip", "only a boss's hold done by its units (instance_data left out) takes it: a hold done by instance data ends by that data")
+		}
+		if r.ResetToGossip && (!unitsAllowed || r.Data != 0) {
+			c.fail(path+".reset_to_gossip", "only a boss's hold done by its units (instance_data left out) takes it: a hold done by instance data ends by that data")
+		}
+		if r.ResetToGossip && r.SkipIfDeadOfGossip {
+			c.fail(path+".reset_to_gossip", "cannot be combined with skip_if_dead_of_gossip: a starting NPC already dead starts no event to reset")
+		}
 	}
 	if r.Radius <= 0 || r.Radius > 100 {
 		c.fail(path+".radius", "%g: 1-100 yards (how far from the spot the event's mobs are fought)", r.Radius)
