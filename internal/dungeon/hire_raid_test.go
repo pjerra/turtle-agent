@@ -26,6 +26,7 @@ type hireRaidFake struct {
 	nextName            int
 	agentLvl            int
 	agentName           string
+	team                string // the commander's own faction (Team()), empty: unknown
 	hires               []*fhire
 	binding             []string // bound names, lead first; nil: not bound
 	haveGroup           bool
@@ -156,6 +157,9 @@ func (g *hireRaidFake) raidReply(command string) ([]string, bool) {
 
 func (g *hireRaidFake) AgentLevel() int   { return g.agentLvl }
 func (g *hireRaidFake) AgentName() string { return g.agentName }
+
+// Team is the commander's own faction (TeamSource): empty unless a test sets one.
+func (g *hireRaidFake) Team() string { return g.team }
 func (g *hireRaidFake) AgentGUID() packet.GUID {
 	return packet.GUID(0x20D)
 }

@@ -388,9 +388,13 @@ func (w *walk) phaseHire(ctx context.Context) error {
 	default:
 		return stopf(exitRaidWalkFailed, "hire: asked for %d bots, the party has %d", requested, hired)
 	}
-	w.logLine(w.env.now(), fmt.Sprintf("waiting %s for the last hires' join summons", durWords(hireSettleWait)))
-	if err := w.env.sleep(ctx, hireSettleWait); err != nil {
-		return stopf(exitRaidWalkFailed, "interrupted")
+	if w.opts.hireSettle == 0 {
+		w.logLine(w.env.now(), "no wait for the hires' join summons (--hire-settle 0)")
+	} else {
+		w.logLine(w.env.now(), fmt.Sprintf("waiting %s for the last hires' join summons", durWords(w.opts.hireSettle)))
+		if err := w.env.sleep(ctx, w.opts.hireSettle); err != nil {
+			return stopf(exitRaidWalkFailed, "interrupted")
+		}
 	}
 	// The refit at the walk's tier (amendment G1): the hire wears the raid's minimum kit, and a comparison run its
 	// override. A failed refit is a failed walk: the tier is what the run is judged against.
@@ -415,7 +419,8 @@ func (w *walk) phaseHire(ctx context.Context) error {
 // hireSettleWait follows the last hire batch before the refit and the bind. A big hire answers while its bots are
 // still on their join summon (about one a second), and a hire whose join lands after the bind is removed from the
 // group by the server. Walk 12 (ZG, 17-bot batches): the last join came 4-8 s after the answer. The party list is
-// no help: it names a hire before its join, and its zone there stays stale after it.
+// no help: it names a hire before its join, and its zone there stays stale after it. This is the default of
+// --hire-settle; 0 skips the wait, which is how a walk proves TortoiseBots#1367's bind keeps its late joiners.
 const hireSettleWait = 20 * time.Second
 
 // hireReply is one TBM:HIRE_RAID line read field by field (TortoiseBots commands/Hire.cpp:124):
@@ -1869,7 +1874,7 @@ func joinerGUIDs(guids []packet.GUID) string {
 	return b.String()
 }
 
-// savedFrame is one frames.jsonl line (compact: positions, hp, dead, hostiles).
+// savedFrame is one frames.jsonl line (compact: positions, hp, power, dead, hostiles).
 type savedFrame struct {
 	T        int64          `json:"t"`
 	Seq      uint64         `json:"seq"`
@@ -1879,20 +1884,23 @@ type savedFrame struct {
 }
 
 type savedBot struct {
-	GUID   string  `json:"guid"`
-	Name   string  `json:"name"`
-	X      float32 `json:"x"`
-	Y      float32 `json:"y"`
-	Z      float32 `json:"z"`
-	Map    uint32  `json:"map"`
-	HP     uint32  `json:"hp"`
-	MaxHP  uint32  `json:"max_hp"`
-	Dead   bool    `json:"dead"`
-	State  string  `json:"state"`
-	Target string  `json:"target,omitempty"` // the bot's target, else its victim (absent when the module sent none)
-	Spell  uint32  `json:"spell,omitempty"`  // the spell it casts or channels
-	Action string  `json:"action,omitempty"` // the last action its AI ran
-	Result string  `json:"result,omitempty"` // the verdict on that action (O ok, F failed, I impossible, U useless, P queued, V dropped)
+	GUID      string  `json:"guid"`
+	Name      string  `json:"name"`
+	X         float32 `json:"x"`
+	Y         float32 `json:"y"`
+	Z         float32 `json:"z"`
+	Map       uint32  `json:"map"`
+	HP        uint32  `json:"hp"`
+	MaxHP     uint32  `json:"max_hp"`
+	Power     uint32  `json:"power"`
+	MaxPower  uint32  `json:"max_power"`
+	PowerType *uint8  `json:"power_type,omitempty"` // 0 mana, 1 rage, 2 focus, 3 energy; written even at 0 (mana); absent when the bot has no power pool (max_power 0)
+	Dead      bool    `json:"dead"`
+	State     string  `json:"state"`
+	Target    string  `json:"target,omitempty"` // the bot's target, else its victim (absent when the module sent none)
+	Spell     uint32  `json:"spell,omitempty"`  // the spell it casts or channels
+	Action    string  `json:"action,omitempty"` // the last action its AI ran
+	Result    string  `json:"result,omitempty"` // the verdict on that action (O ok, F failed, I impossible, U useless, P queued, V dropped)
 }
 
 type savedHostile struct {
@@ -1933,8 +1941,13 @@ func (w *walk) saveFrame(now time.Time, f *tbm.ViewFrame) {
 	rec := savedFrame{T: now.UnixMilli(), Seq: f.Seq, Tier: w.roster.Tier}
 	for _, p := range f.Party {
 		bot := savedBot{GUID: p.GUID.String(), Name: p.Name, X: p.X, Y: p.Y, Z: p.Z, Map: p.Map,
-			HP: p.HP, MaxHP: p.MaxHP, Dead: p.Dead || p.State == "d", State: p.State,
+			HP: p.HP, MaxHP: p.MaxHP, Power: p.Power, MaxPower: p.MaxPower,
+			Dead: p.Dead || p.State == "d", State: p.State,
 			Spell: p.Spell, Action: p.Action, Result: p.Result}
+		if p.MaxPower > 0 { // no power pool, no power_type: an absent key is not mana (0)
+			pt := p.PowerType
+			bot.PowerType = &pt
+		}
 		if p.Target != 0 {
 			bot.Target = p.Target.String()
 		}

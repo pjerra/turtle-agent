@@ -98,7 +98,8 @@ func main() {
 	skip := flag.String("skip", "", "entries to add to every leg's skip list, comma separated")
 	check := flag.String("check", "", "plan file to lint against -dir's creatures.tsv: warn for a boss or pack member with npc_flags or a faction friendly to -team (no generation)")
 	team := flag.String("team", "", "with -check: the leader's team, alliance or horde; what the plan gates to the other team is not looked at")
-	strict := flag.Bool("strict", false, "with -check: exit 1 when there is any warning (for CI)")
+	strict := flag.Bool("strict", false, "with -check: exit 1 on a creature-check warning or a pull row with no target (for CI)")
+	pullSizeStrict := flag.Bool("pull-size-strict", false, "with -check: exit 1 when a pull row is over its bodies ceiling (a pull_size finding is a warning otherwise)")
 	friendly := flag.String("friendly-factions", "", "comma separated factions known to be friendly to the leader's team (FactionTemplate.dbc is not in the export, so dungeongen cannot tell; 35 always is)")
 	awakened := flag.String("awakened", "", "with -check: comma separated creature entries that spawn friendly (faction 35, stoned) and that the encounter's script turns hostile, so they are no warning (Uldaman: 4857 Stone Keeper, 2748 Archaedas)")
 	spec := flag.String("spec", "", "plan spec (tools/dungeongen/plans.json): with -out-dir writes every draft plan it lists, with -table docs/PLANS.md")
@@ -117,7 +118,7 @@ func main() {
 		os.Exit(formatFile(*format, *out))
 	}
 	if *check != "" {
-		os.Exit(checkFile(*check, *dir, *team, *friendly, *awakened, *scripted, *strict))
+		os.Exit(checkFile(*check, *dir, *team, *friendly, *awakened, *scripted, *strict, *ignore, *pullSizeStrict))
 	}
 	if *dir == "" || *name == "" || *mapID == 0 || *bosses == "" {
 		fmt.Fprintln(os.Stderr, "usage: dungeongen -dir DIR -name NAME -map ID -bosses E1,E2,... [-entrance x,y,z] [-cluster 12] [-ignore-factions 35] [-skip E,...] [-out FILE]")
@@ -199,8 +200,9 @@ func parseFactions(s string) (map[int]bool, error) {
 
 // checkFile lints a plan against dir's creatures.tsv and prints the warnings; the exit status is 1 for a plan that does not load, an
 // export that cannot be read, or a world or pull_size load error (strict or not: a lint that cannot read its inputs fails the check),
-// 0 otherwise (warnings are for a person to read), and 1 with strict when there is a warning.
-func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool) int {
+// 0 otherwise (warnings are for a person to read), 1 with strict when a creature-check warning or a pull row with no target fires,
+// and 1 with pull-size-strict when a pull row is over its ceiling.
+func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool, ignore string, pullSizeStrict bool) int {
 	fail := func(err error) int {
 		fmt.Fprintln(os.Stderr, "dungeongen:", err)
 		return 1
@@ -236,27 +238,48 @@ func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool
 		return fail(err)
 	}
 	ws := Check(p, cs, CheckOptions{Team: team, Friendly: fm, Awakened: am, Scripted: toSet(sc)})
+	strictFails := len(ws) // creature-check warnings fail -strict
+	overCeiling := 0       // over-ceiling rows fail only -pull-size-strict
 	// The pull_size lint: the run leader's aggro-count estimate per pull row,
-	// over the row's max_bodies (or the plan's pull_ceiling, else 8/6).
-	// Mmaps-free: straight 2 yd samples between rows, LOS always seen (high
-	// side, documented in pull_size.go). A plan that fails to export, or a
-	// world that fails to load, fails the check: a lint that cannot read its
-	// inputs is an error, not an empty report.
+	// over the row's max_bodies (or the plan's pull_ceiling, else 8/6), with
+	// the check's ignore and friendly factions and team (a spawn friendly to
+	// the run is nothing to pull; a row gated to the other team is not
+	// pulled). Mmaps-free: straight 2 yd samples between rows, LOS always
+	// seen (high side, documented in pull_size.go). A plan that fails to
+	// export, or a world that fails to load, fails the check: a lint that
+	// cannot read its inputs is an error, not an empty report.
 	w, _, werr := worldspawn.Load(dir, p.Map)
 	if werr != nil {
 		return fail(fmt.Errorf("pull_size: %w", werr))
 	}
-	sized, serr := PullSizes(p, cs, w)
+	im, err := parseFactions(ignore)
+	if err != nil {
+		return fail(err)
+	}
+	sized, serr := PullSizes(p, cs, w, PullFilter{Ignore: im, Friendly: fm, Awakened: am, Scripted: toSet(sc), Team: team})
 	if serr != nil {
 		return fail(fmt.Errorf("pull_size: %w", serr))
 	}
 	for _, f := range sized {
 		ws = append(ws, f.Summary)
+		// An over-ceiling row is a warning for a person: it never fails
+		// -strict (only -pull-size-strict opts in). A row with no target, and
+		// a lint that cannot read its inputs, fail -strict like any other
+		// warning.
+		if f.NoTarget {
+			strictFails++
+		} else {
+			overCeiling++
+		}
 	}
 	for _, w := range ws {
 		fmt.Println("warning:", w)
 	}
-	if strict && len(ws) > 0 {
+	fmt.Printf("%d warning(s) for %s as team %q\n", len(ws), path, team)
+	if strict && strictFails > 0 {
+		return 1
+	}
+	if pullSizeStrict && overCeiling > 0 {
 		return 1
 	}
 	return 0

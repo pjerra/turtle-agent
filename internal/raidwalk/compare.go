@@ -102,8 +102,8 @@ func ReadHistory(dir, plan string) ([]SummaryFile, []string, error) {
 }
 
 // LastGood picks the newest walk of the history worth comparing with cur: exit 0, ended on its own goal, no tier
-// comparison, the same tier, until, speed and test speed, and no fault injection; never the walk at curPath. A nil
-// return means cur is the first good walk (the suite calls it "new").
+// comparison, no short --hire-settle, the same tier, until, speed and test speed, and no fault injection; never the
+// walk at curPath. A nil return means cur is the first good walk (the suite calls it "new").
 func LastGood(hist []SummaryFile, cur *Summary, curPath string) *SummaryFile {
 	var best *SummaryFile
 	for i := range hist {
@@ -115,7 +115,7 @@ func LastGood(hist []SummaryFile, cur *Summary, curPath string) *SummaryFile {
 		if s.EndReason != string(EndUntil) && s.EndReason != string(EndPlanDone) {
 			continue
 		}
-		if s.Roster.TierComparison || s.Roster.Tier != cur.Roster.Tier {
+		if s.Roster.TierComparison || s.Roster.SettleShort || s.Roster.Tier != cur.Roster.Tier {
 			continue
 		}
 		if s.Until != cur.Until || s.Speed != cur.Speed || s.TestSpeed != cur.TestSpeed {

@@ -319,12 +319,14 @@ func memberIndexes(ms []Member) []int {
 // aggroReach is Creature::GetAttackDistance for one spawn: the detection range
 // minus the party-minus-creature level difference (floored at -25 levels),
 // never below min(detection, 5 yd), times the aggro rate. A spawn with no
-// detection range wakes at the 20 yd default.
+// detection range never wakes (worldspawn.AggroRadius: 0 for it, and the NO_AGGRO
+// and no-detection guards there); the pull_size lint keeps its own explicit
+// mapping (export 0 means the draft predates the column, read as 20 yd).
 func aggroReach(m Mob, partyLevel int, rate float32) float32 {
-	det := m.DetectionYd
-	if det < 1 {
-		det = 20
+	if m.DetectionYd < 1 {
+		return 0
 	}
+	det := m.DetectionYd
 	diff := partyLevel - m.Level
 	if diff < -25 {
 		diff = -25

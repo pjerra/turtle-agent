@@ -61,6 +61,12 @@ type Summary struct {
 	// Place is the `place` object of a `--place` walk (spec 5.11): the start step the raid was put at, the instance, the
 	// cleared circles and the result. Absent without --place.
 	Place *PlaceSummary `json:"place,omitempty"`
+	// Assisted is true for a walk that used --gm-clear (a test server's GM killed units for it): the result is NOT a real clear.
+	// GMClear lists every unit the tool tried to kill. Both are absent without --gm-clear.
+	Assisted bool           `json:"assisted,omitempty"`
+	GMClear  []GMClearEntry `json:"gm_clear,omitempty"`
+	// GMClearPartial is true when an expected pack member was not confirmed dead (not seen, or still alive): the clear is PARTIAL.
+	GMClearPartial bool `json:"gm_clear_partial,omitempty"`
 	// ReviveRefusal is what kept the revive point from going quiet when the walk gave up on it (D-D, walk 25). Absent
 	// when the walk never refused a revive.
 	ReviveRefusal *ReviveRefusal `json:"revive_refusal,omitempty"`
@@ -183,6 +189,12 @@ type RosterSummary struct {
 	TierSource string `json:"tier_source"`
 	// TierComparison is a run whose tier is not the raid's minimum: comparison, not a tier proof.
 	TierComparison bool `json:"tier_comparison"`
+	// HireSettleS is the --hire-settle wait in seconds, written by every summary that has the field (0 for
+	// --hire-settle 0). A pointer: a summary written before the field existed decodes it as nil, absent, not 0.
+	// SettleShort is a run whose wait is below the default: its refit may land before a late hire's join, so it is
+	// no baseline for the tier proof (LastGood skips it).
+	HireSettleS *float64 `json:"hire_settle_s,omitempty"`
+	SettleShort bool     `json:"settle_short"`
 }
 
 // LayoutSummary is the TBM:RAID_LAYOUT check.
@@ -204,6 +216,8 @@ type StepSummary struct {
 type LegSummary struct {
 	Leg     string  `json:"leg"`
 	Seconds float64 `json:"seconds"`
+	// Assisted marks a leg the walk's --gm-clear killed units of: its result is not a real clear.
+	Assisted bool `json:"assisted,omitempty"`
 }
 
 // DeathSummary is the deaths total and the per-step and per-bot splits.
@@ -345,6 +359,9 @@ type SummaryMeta struct {
 	// TierSource and TierComparison qualify the roster's tier (tiers.go).
 	TierSource     string
 	TierComparison bool
+	// HireSettle is the --hire-settle wait; SettleShort marks it below the default (RosterSummary).
+	HireSettle  time.Duration
+	SettleShort bool
 	// WipeResumes is the walk's recovered wipes and near-wipe stops (--wipe-resume).
 	WipeResumes    int
 	Layout         LayoutSummary
@@ -360,6 +377,11 @@ type SummaryMeta struct {
 	Teardown       TeardownSummary
 	// Place is the --place walk's place object (nil without --place).
 	Place *PlaceSummary
+	// GMClearUsed says the walk ran --gm-clear (also when no unit was found); GMClear is what it tried to kill and GMClearLegs the legs
+	// it came from.
+	GMClearUsed bool
+	GMClear     []GMClearEntry
+	GMClearLegs []string
 	// ReviveRefusal is the walk's revive_refusal (nil when no revive was refused).
 	ReviveRefusal *ReviveRefusal
 	// BossKill is the walk's boss_kill (nil when no boss was engaged).
@@ -401,6 +423,9 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		Dashboard:      m.Dashboard,
 		Teardown:       m.Teardown,
 		Place:          m.Place,
+		Assisted:       m.GMClearUsed,
+		GMClear:        m.GMClear,
+		GMClearPartial: GMClearPartial(m.GMClear),
 		BossKill:       m.BossKill,
 		BossKills:      m.BossKills,
 		ReviveRefusal:  m.ReviveRefusal,
@@ -427,6 +452,9 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		s.Roster.TierSource = m.TierSource
 		s.Roster.TierComparison = m.TierComparison
 	}
+	hireSettle := m.HireSettle.Seconds()
+	s.Roster.HireSettleS = &hireSettle
+	s.Roster.SettleShort = m.SettleShort
 	if t != nil {
 		if s.EndReason == "" {
 			s.EndReason = t.End().Reason()
@@ -435,8 +463,12 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		for _, sp := range t.Timeline() {
 			s.StepTimeline = append(s.StepTimeline, StepSummary{Step: sp.Step, Leg: sp.Leg, Kind: sp.Kind, Seconds: round1(sp.Seconds)})
 		}
+		assisted := map[string]bool{}
+		for _, l := range m.GMClearLegs {
+			assisted[l] = true
+		}
 		for _, l := range t.Legs() {
-			s.Legs = append(s.Legs, LegSummary{Leg: l.Leg, Seconds: round1(l.Seconds)})
+			s.Legs = append(s.Legs, LegSummary{Leg: l.Leg, Seconds: round1(l.Seconds), Assisted: assisted[l.Leg]})
 		}
 		total, byStep, byBot := t.Deaths()
 		s.Deaths = DeathSummary{Total: total, ByStep: byStep, ByBot: byBot}
@@ -528,7 +560,16 @@ func (s *Summary) Text() string {
 	if s.Until == "none" {
 		b.WriteString(" (full clear: no until)")
 	}
+	if s.Assisted {
+		b.WriteString(" ASSISTED")
+		if s.GMClearPartial {
+			b.WriteString(" PARTIAL")
+		}
+	}
 	b.WriteString("\n")
+	if s.Assisted {
+		b.WriteString(GMClearSummaryLine(s.GMClear, assistedLegs(s)) + "\n")
+	}
 	fmt.Fprintf(&b, "plan %s map %d; server %s slot %d as %s\n", s.Plan, s.Map, s.Server, s.Slot, s.Character)
 	// A --place walk whose route guard shortened the until shows both: what the user asked for and what the run
 	// actually walked (F5, D8).
@@ -618,4 +659,20 @@ func (s *Summary) Text() string {
 		}
 	}
 	return b.String()
+}
+
+// assistedLegs are the legs of the walk's gm_clear entries, in first-use order (the Legs marks when the tracker saw them).
+func assistedLegs(s *Summary) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, e := range s.GMClear {
+		if !seen[e.Leg] {
+			seen[e.Leg] = true
+			out = append(out, e.Leg)
+		}
+	}
+	if len(out) == 0 {
+		out = append(out, "no live unit found")
+	}
+	return out
 }

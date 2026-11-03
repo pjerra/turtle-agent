@@ -20,8 +20,10 @@ import (
 
 const dashboardUsage = "usage: turtle-agent dashboard [--listen 127.0.0.1:8790] [--allow-host HOST[,HOST]] [--agents auto|<rpc,...>] [--tests-dir DIR] [--traces-dir DIR] [--plans-dir DIR[,DIR]] [--minimap-dir DIR] [--embed-from ORIGIN[,ORIGIN]] [--config-dir DIR] [--mmaps-dir DIR]\n" +
 	"                          [--edit [--edit-dir DIR] [--edit-source DIR] [--edit-tokens FILE] [--edit-allow-default-dir FILE[,FILE]] [--edit-trust-local [--edit-trust-label LABEL]]]\n" +
-	"  serves a read-only live page of the running agents (README \"Live dashboard\"); it never sends a command.\n" +
-	"  --edit turns on the route editor (README \"Route editor\"): the only thing the page can then write is a checked version of a plan's route"
+	"                          [--control [--control-tokens FILE] [--control-trust-local [--control-trust-label LABEL]] [--control-log FILE]]\n" +
+	"  serves a read-only live page of the running agents (README \"Live dashboard\"); with --edit or --control the page can also write.\n" +
+	"  --edit turns on the route editor (README \"Route editor\"): the only thing the page can then write is a checked version of a plan's route\n" +
+	"  --control turns on the run controls (README \"Controls (--control)\"): the page can pause, resume, skip or stop a run"
 
 // expandHome turns a leading ~/ into the home folder.
 func expandHome(p string) string {
@@ -53,6 +55,11 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	editAllow := fs.String("edit-allow-default-dir", "", "with --edit: settings files (by file name, comma separated) that have an rpc but no dungeons_dir, whose default plans folder (dungeons/ under the agent's working folder) you vouch is not the edits folder; any other such file stops the editor")
 	trustLocal := fs.Bool("edit-trust-local", false, "with --edit: a save from this machine (loopback) or from a Tailscale address in --allow-host / the --listen address needs no token typed: the server uses its own token for --edit-trust-label (the token never reaches the page); any other caller still needs the token. Off by default; read README \"Route editor\" first")
 	trustLabel := fs.String("edit-trust-label", "owner", "with --edit-trust-local: the label in the --edit-tokens file whose token the trusted saves are made as")
+	control := fs.Bool("control", false, "turn on the run controls (README \"Controls (--control)\"): POST /api/control/<agent id>/run with a control token pauses, resumes, skips or stops that agent's run (off: the page is GET/HEAD only)")
+	controlTokens := fs.String("control-tokens", filepath.Join(home, ".config", "turtle-agent", "dashboard-control-tokens"), "with --control: file of `label token` lines, mode 0600; its own file, never the route-editor one (an editing token must not press run buttons); the label is the who in the control log")
+	controlTrustLocal := fs.Bool("control-trust-local", false, "with --control: a control from this machine (loopback) or from a Tailscale address in --allow-host / the --listen address needs no token typed: the server uses its own token for --control-trust-label (the token never reaches the page); off by default")
+	controlTrustLabel := fs.String("control-trust-label", "owner", "with --control-trust-local: the label in the --control-tokens file whose token the trusted controls are made as")
+	controlLog := fs.String("control-log", filepath.Join(home, ".local", "state", "turtle-agent", "dashboard-control.jsonl"), "with --control: every control appends who sent it and what the agent answered (a request and a result line each, no token); the folder is made 0700, the file 0600")
 	editMmaps := fs.String("mmaps-dir", "", "the navmesh folder of the server the plans are run on (a check on another server's mesh proves nothing): the plan view draws the real route on it (GET /api/plan/<name>/route); required with --edit")
 	cfgDir := fs.String("config-dir", dashboard.DefaultConfigDir(), "folder with settings*.json and the rpc-<port>.token files")
 	if err := fs.Parse(args); err != nil {
@@ -69,6 +76,14 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	}
 	if !netutil.IsLoopback(host) {
 		fmt.Fprintf(stderr, "dashboard: warning: %s is not loopback; anyone who can reach it sees the runs and the files under --tests-dir\n", *listen)
+	}
+	if *controlTrustLocal && !*control {
+		fmt.Fprintln(stderr, "dashboard: --control-trust-local needs --control")
+		return exitUsage
+	}
+	if *control && !dashboard.IsTailnetListen(host) {
+		fmt.Fprintf(stderr, "dashboard: --control refuses the listen host %q: a control token must not cross a LAN in plain HTTP (listen on loopback or a literal Tailscale address)\n", host)
+		return exitUsage
 	}
 	allow, err := dashboard.AllowedHosts(host, *allowHosts)
 	if err != nil {
@@ -142,6 +157,36 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		}
 		fmt.Fprintf(stderr, "dashboard: route editing is ON: edits start from %s, versions go to %s, checked on the mesh in %s\n", src, expandHome(*editDir), expandHome(*editMmaps))
 	}
+	var ctl *dashboard.Controller
+	if *control {
+		tk, err := routeedit.LoadTokens(expandHome(*controlTokens))
+		if err != nil {
+			fmt.Fprintln(stderr, "dashboard: --control:", err)
+			return exitUsage
+		}
+		if err := checkControlTokens(expandHome(*controlTokens), tk, expandHome(*editTokens)); err != nil {
+			fmt.Fprintln(stderr, "dashboard: --control:", err)
+			return exitUsage
+		}
+		c, err := dashboard.NewController(p, dashboard.ControlConfig{Tokens: tk, LogPath: expandHome(*controlLog)})
+		if err != nil {
+			fmt.Fprintln(stderr, "dashboard: --control:", err)
+			return exitUsage
+		}
+		ctl = c
+		if *controlTrustLocal {
+			peers, ignored := dashboard.TrustPeers(allow)
+			if err := ctl.EnableTrustLocal(*controlTrustLabel, peers); err != nil {
+				fmt.Fprintln(stderr, "dashboard: --control-trust-local:", err)
+				return exitUsage
+			}
+			fmt.Fprintf(stderr, "dashboard: --control-trust-local: controls from loopback and from %v need no token (made as %q)\n", peers, *controlTrustLabel)
+			if len(ignored) > 0 {
+				fmt.Fprintf(stderr, "dashboard: --control-trust-local: not trusted as callers (only literal Tailscale addresses are): %s\n", strings.Join(ignored, ", "))
+			}
+		}
+		fmt.Fprintf(stderr, "dashboard: controls ON: every control is logged (who, and what the agent answered) to %s\n", expandHome(*controlLog))
+	}
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", *listen)
 	if err != nil {
 		fmt.Fprintln(stderr, "dashboard:", err)
@@ -151,16 +196,40 @@ func dashboardCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	defer stop()
 	go p.Run(pctx)
 	mode := "read-only"
-	if editor != nil {
+	switch {
+	case editor != nil && ctl != nil:
+		mode = "route editing and controls ON"
+	case editor != nil:
 		mode = "route editing ON"
+	case ctl != nil:
+		mode = "controls ON"
 	}
 	fmt.Fprintf(stdout, "turtle-agent dashboard %s on http://%s/ (%s; agents: %s)\n", version, ln.Addr(), mode, *agents)
-	err = rpc.Serve(ctx, ln, dashboard.HandlerWithEditor(p, testsDir, allow, embedFrom, editor))
+	err = rpc.Serve(ctx, ln, dashboard.HandlerFull(p, testsDir, allow, embedFrom, editor, ctl))
 	if err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintln(stderr, "dashboard:", err)
 		return 1
 	}
 	return exitOK
+}
+
+// checkControlTokens refuses a control token file that is the route editor's file (the same file by any path) or that holds a token the
+// editor's file holds too: an editing token must never press run buttons. The editor's file may be absent (nothing can be shared); one that
+// cannot be read is the editor's own problem (--edit refuses it), and holds nothing this can compare.
+func checkControlTokens(controlPath string, control *routeedit.Tokens, editPath string) error {
+	if cs, err := os.Stat(controlPath); err == nil {
+		if es, err := os.Stat(editPath); err == nil && os.SameFile(cs, es) {
+			return fmt.Errorf("--control-tokens %s is the route editor's --edit-tokens file: the controls need a file of their own", controlPath)
+		}
+	}
+	edit, err := routeedit.LoadTokens(editPath)
+	if err != nil {
+		return nil
+	}
+	if label, ok := control.SharesToken(edit); ok {
+		return fmt.Errorf("--control-tokens %s holds the token of %q, which --edit-tokens %s also holds: an editing token must not press run buttons", controlPath, label, editPath)
+	}
+	return nil
 }
 
 // newEditor sets up the route editor: the token file, the versions folder, the navmesh the plans are checked on, and the check that the folders

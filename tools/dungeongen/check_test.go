@@ -130,18 +130,23 @@ func TestCheckFileStrict(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := filepath.Join("testdata", "uldaman")
-	if got := checkFile(plan, data, "alliance", "122", "", "", false); got != 0 {
+	if got := checkFile(plan, data, "alliance", "122", "", "", false, "35", false); got != 0 {
 		t.Fatalf("warnings without -strict: %d", got)
 	}
-	if got := checkFile(plan, data, "alliance", "122", "", "", true); got != 1 {
+	if got := checkFile(plan, data, "alliance", "122", "", "", true, "35", false); got != 1 {
 		t.Fatalf("warnings with -strict: %d", got)
 	}
 	clean := filepath.Join("..", "..", "dungeons", "uldaman.json")
-	// The committed plan has no creature-check warning, but the pull_size lint
-	// warns on its dense pulls (no max_bodies sized yet): strict fails by
-	// design, and the warnings name the pull rows.
-	if got := checkFile(clean, data, "alliance", "122", "2748,4857", "", true); got != 1 {
-		t.Fatalf("the committed plan under -strict: %d, want 1 (the pull_size lint warns)", got)
+	// The committed plan has no creature-check warning, and its dense pulls
+	// (no max_bodies sized yet) warn without failing -strict; but leg 7 pull
+	// 1 owns no mob in the export, and that no-target finding fails strict
+	// (see TestCheckFileNoEligibleMobsFailsStrict). -pull-size-strict fails
+	// on the over-ceiling rows either way.
+	if got := checkFile(clean, data, "alliance", "122", "2748,4857", "", true, "35", false); got != 1 {
+		t.Fatalf("the committed plan under -strict: %d, want 1 (its no-target row fails it)", got)
+	}
+	if got := checkFile(clean, data, "alliance", "122", "2748,4857", "", false, "35", true); got != 1 {
+		t.Fatalf("the committed plan under -pull-size-strict: %d, want 1 (its over-ceiling rows fail it)", got)
 	}
 }
 
@@ -157,10 +162,10 @@ func TestCheckFileFailsOnWorldOrExportErrors(t *testing.T) {
 	}
 	data := t.TempDir()
 	// No creatures.tsv: worldspawn.Load refuses, and the check fails strict or not.
-	if got := checkFile(plan, data, "", "", "", "", false); got != 1 {
+	if got := checkFile(plan, data, "", "", "", "", false, "35", false); got != 1 {
 		t.Fatalf("missing world without strict: %d, want 1", got)
 	}
-	if got := checkFile(plan, data, "", "", "", "", true); got != 1 {
+	if got := checkFile(plan, data, "", "", "", "", true, "35", false); got != 1 {
 		t.Fatalf("missing world with strict: %d, want 1", got)
 	}
 	// A world that loads but a plan the exporter refuses (kill_first over the
@@ -176,7 +181,7 @@ func TestCheckFileFailsOnWorldOrExportErrors(t *testing.T) {
 	if err := os.WriteFile(bad, []byte(js), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := checkFile(bad, filepath.Join("testdata", "uldaman"), "", "", "", "", false); got != 1 {
+	if got := checkFile(bad, filepath.Join("testdata", "uldaman"), "", "", "", "", false, "35", false); got != 1 {
 		t.Fatalf("refused export without strict: %d, want 1", got)
 	}
 }
@@ -208,10 +213,55 @@ func TestCheckFileNoEligibleMobsFailsStrict(t *testing.T) {
  {"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":1,"y":0,"z":0}]}]}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := checkFile(plan, dir, "", "", "", "", false); got != 0 {
+	if got := checkFile(plan, dir, "", "", "", "", false, "35", false); got != 0 {
 		t.Fatalf("no-target warning without strict: %d, want 0 (warnings do not fail)", got)
 	}
-	if got := checkFile(plan, dir, "", "", "", "", true); got != 1 {
+	if got := checkFile(plan, dir, "", "", "", "", true, "35", false); got != 1 {
 		t.Fatalf("no-target finding with strict: %d, want 1", got)
+	}
+}
+
+// An over-ceiling pull row warns without failing -strict: only
+// -pull-size-strict opts into the ceiling. (A no-target row still fails
+// strict; see TestCheckFileNoEligibleMobsFailsStrict.)
+func TestCheckFilePullSizeStrictOnlyFailsOverCeiling(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join("testdata", "uldaman")
+	for _, f := range []string{"entrances.tsv", "gameobjects.tsv"} {
+		b, err := os.ReadFile(filepath.Join(src, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, f), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	creatures, err := os.ReadFile(filepath.Join(src, "creatures.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	header := strings.SplitN(string(creatures), "\n", 2)[0] + "\n"
+	// Two mobs of one entry 15 yd apart: the second joins through the ring
+	// and the row (ceiling 1) warns, with no creature-check warning and a
+	// target of its own.
+	rows := header +
+		"1\t1\tOne\t60\t60\t0\t14\t0\t30\t0\t0\t0\t0\t0\t0\t\n" +
+		"2\t1\tTwo\t60\t60\t0\t14\t0\t45\t0\t0\t0\t0\t0\t0\t\n"
+	if err := os.WriteFile(filepath.Join(dir, "creatures.tsv"), []byte(rows), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan := filepath.Join(dir, "p.json")
+	if err := os.WriteFile(plan, []byte(`{"version":1,"name":"t","map":70,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[1],"positions":[{"x":30,"y":0,"z":0}],"max_bodies":1}]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := checkFile(plan, dir, "", "", "", "", false, "35", false); got != 0 {
+		t.Fatalf("over-ceiling warning without strict: %d, want 0 (warnings do not fail)", got)
+	}
+	if got := checkFile(plan, dir, "", "", "", "", true, "35", false); got != 0 {
+		t.Fatalf("over-ceiling warning with -strict: %d, want 0 (only -pull-size-strict opts in)", got)
+	}
+	if got := checkFile(plan, dir, "", "", "", "", false, "35", true); got != 1 {
+		t.Fatalf("over-ceiling warning with -pull-size-strict: %d, want 1", got)
 	}
 }

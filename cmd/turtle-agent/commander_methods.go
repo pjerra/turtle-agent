@@ -285,7 +285,7 @@ func (g remoteGame) PlanPath(ctx context.Context, mapID uint32, from, to dungeon
 	return out, nil
 }
 
-var _ dungeon.AvoidMarker = remoteGame{}
+var _ dungeon.CommanderWalker = remoteGame{}
 
 // MarkAvoid implements dungeon.AvoidMarker: the plan's avoid boxes are marked on the agent's planner, so its paths and floor snaps keep
 // out of them (the session's own walks too: it is the same planner).
@@ -308,13 +308,22 @@ func (g remoteGame) SnapToFloor(ctx context.Context, mapID uint32, p dungeon.Poi
 	return dungeon.Point{X: n[0], Y: n[1], Z: n[2]}, true
 }
 
-// FloorsAt implements dungeon.FloorLister: the walkable ground floors of the navmesh under (x, y) within 12 yd of z, highest first;
-// false when there is no planner, the tile is missing or the lookup fails.
+// floorsAtBand is how far around z FloorsAt looks: the walk's step check.
+const floorsAtBand = 12
+
+// FloorsAt implements dungeon.FloorLister: the walkable ground floors of the navmesh under (x, y) within floorsAtBand yd of z, highest
+// first; false when there is no planner, the tile is missing or the lookup fails.
 func (g remoteGame) FloorsAt(ctx context.Context, mapID uint32, x, y, z float32) ([]float32, bool) {
+	return g.FloorsWithin(ctx, mapID, x, y, z-floorsAtBand, z+floorsAtBand)
+}
+
+// FloorsWithin implements dungeon.FloorLister: the walkable ground floors of the navmesh under (x, y) between lo and hi, highest first.
+// The hire spot looks ±30 yd around a guessed commander height with it.
+func (g remoteGame) FloorsWithin(ctx context.Context, mapID uint32, x, y, lo, hi float32) ([]float32, bool) {
 	if g.c.planner == nil {
 		return nil, false
 	}
-	fl, err := g.c.planner.Floors(mapID, x, y, z-12, z+12)
+	fl, err := g.c.planner.Floors(mapID, x, y, lo, hi)
 	if err != nil || len(fl) == 0 {
 		return nil, false
 	}
@@ -332,6 +341,13 @@ func (g remoteGame) FloorsAt(ctx context.Context, mapID uint32, x, y, z float32)
 
 func (g remoteGame) InGroup() bool    { return g.c.cur().Party().InGroup }
 func (g remoteGame) AgentMap() uint32 { return g.c.cur().Status().Map }
+
+// AgentPosition is where the agent's own character stands and whether its z is a guess (dungeon.AgentPositioner): the hire step's
+// portal-ground check compares the navmesh floors there with the portal's floor, and a guessed z changes which floor it judges.
+func (g remoteGame) AgentPosition() (dungeon.Point, bool) {
+	st := g.c.cur().Status()
+	return dungeon.Point{X: st.X, Y: st.Y, Z: st.Z}, st.ZUnknown
+}
 
 func (g remoteGame) LeaveGroup(ctx context.Context) error { return g.c.cur().LeaveGroup(ctx) }
 
@@ -565,7 +581,8 @@ func respawnUnselected(ctx context.Context, s *session.Session) error {
 	return nil
 }
 
-// WalkSelf is walk_path for the agent's character.
+// WalkSelf is walk_path for the agent's character. It is also the hire spot's settle walk for a guessed commander height
+// (dungeon.CommanderWalker): a navmesh walk that ends on the mesh clears status.z_unknown.
 func (g remoteGame) WalkSelf(ctx context.Context, to dungeon.Point) (dungeon.WalkResult, error) {
 	r, err := g.c.cur().WalkPath(ctx, to.X, to.Y, to.Z)
 	return dungeon.WalkResult{Result: r.Result, Reason: r.Reason, DistLeft: r.DistLeft}, err

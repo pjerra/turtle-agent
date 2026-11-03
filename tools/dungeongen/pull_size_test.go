@@ -4,15 +4,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pjerra/turtle-agent/internal/aggroest"
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
-// The terrace rows (Arlokk leg) each estimate 27 bodies with the committed
-// fixture (mmaps-free path, LOS always seen): the G12/G13/G16/G17 packs joined
-// by the 20 yd ring (cross-pack gaps 11.0-19.5 yd) plus their pack closures.
-// Fails today (no lint). The ring-10 pin lives in the pure test
-// TestRingTwoHopsThenStops (a 10 yd ring stops the 18 yd chain at one body).
+// The terrace pull (Arlokk leg, pull 14: the row over the G13/G16 terrace at
+// -11496.4 -1626.5 60.4, step 29 of the export) estimates 27 bodies with the
+// committed fixture (mmaps-free path, LOS always seen): the G12/G13/G16/G17
+// packs joined by the 20 yd ring (cross-pack gaps 11.0-19.5 yd) plus their
+// pack closures. The neighbouring terrace rows (pulls 13, 16, 17) estimate the
+// same 27; the pin holds this one row by its number and bodies, so a ring or
+// reach change that breaks the set joins shows up here, not just in the
+// per-plan count.
 func TestZulGurubArlokkTerraceIsOneTwentySevenPull(t *testing.T) {
 	p, err := dungeon.Load("../../dungeons/zul_gurub.json")
 	if err != nil {
@@ -26,19 +30,26 @@ func TestZulGurubArlokkTerraceIsOneTwentySevenPull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found, err := PullSizes(p, cs, w)
+	found, err := PullSizes(p, cs, w, PullFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	best := -1
 	for _, f := range found {
-		if f.Leg == 4 && f.Bodies == 27 {
-			best = f.Bodies
+		if f.Leg == 4 {
 			t.Logf("leg %d pull %d: %d bodies (ceiling %d): %s", f.Leg, f.Pull, f.Bodies, f.Ceiling, f.Summary)
 		}
 	}
-	if best != 27 {
-		t.Fatalf("no 27-body terrace pull on leg 4: %v", found)
+	terrace := -1
+	for i, f := range found {
+		if f.Leg == 4 && f.Pull == 14 {
+			terrace = i
+		}
+	}
+	if terrace < 0 {
+		t.Fatalf("no pull 14 on leg 4: %v", found)
+	}
+	if found[terrace].Bodies != 27 {
+		t.Fatalf("leg 4 pull 14 estimates %d bodies, want 27: %s", found[terrace].Bodies, found[terrace].Summary)
 	}
 }
 
@@ -88,7 +99,7 @@ func TestPullSizesUnderCeiling(t *testing.T) {
 			continue
 		}
 		checked++
-		found, err := PullSizes(p, cs, w)
+		found, err := PullSizes(p, cs, w, PullFilter{})
 		if err != nil {
 			t.Errorf("%s: %v", ps.Name, err)
 			continue
@@ -125,7 +136,7 @@ func TestPullSizeWarningNamesLegPullBodiesCeiling(t *testing.T) {
 		{GUID: 1, Entry: 1, Name: "Early", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 10}},
 		{GUID: 2, Entry: 2, Name: "Later", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 40}},
 	}
-	if found, err := PullSizes(quiet, qcs, nil); err != nil {
+	if found, err := PullSizes(quiet, qcs, nil, PullFilter{}); err != nil {
 		t.Fatal(err)
 	} else if len(found) != 0 {
 		t.Fatalf("lone pair warns: %v", found)
@@ -139,7 +150,7 @@ func TestPullSizeWarningNamesLegPullBodiesCeiling(t *testing.T) {
 		{GUID: 1, Entry: 1, Name: "One", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 30}},
 		{GUID: 2, Entry: 1, Name: "Two", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 45}},
 	}
-	found, err := PullSizes(p, cs, nil)
+	found, err := PullSizes(p, cs, nil, PullFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,6 +163,68 @@ func TestPullSizeWarningNamesLegPullBodiesCeiling(t *testing.T) {
 	}
 	if len(f.Guids) != 2 || !strings.Contains(f.Summary, "leg 0 pull 1: 2 bodies (ceiling 1)") {
 		t.Fatalf("%+v: want both guids and the summary line", f)
+	}
+}
+
+// A friendly spawn next to a pull is not counted: with the neighbour in an
+// ignored faction (or 35, friendly to all, or the check's friendly list) the
+// row's own mob pulls alone and stays under its ceiling; unfiltered it joins
+// through the ring and warns. A row gated to the other team is not pulled at
+// all: it warns for neither team, and consumes no pull number.
+func TestPullSizeIgnoresFriendlySpawnsAndOtherTeamRows(t *testing.T) {
+	p := &dungeon.Plan{Name: "probe", Map: 1, Kind: "dungeon", LevelBand: []int{60, 60}, Entrance: dungeon.Point{},
+		Legs: []dungeon.Leg{{Name: "a", To: dungeon.Point{X: 30},
+			PullGroups: []dungeon.PullGroup{
+				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 30}}, Radius: 5, MaxBodies: 1},
+			}}}}
+	cs := []creature{
+		{GUID: 1, Entry: 1, Name: "One", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 30}},
+		{GUID: 2, Entry: 2, Name: "Friend", LevelMax: 60, Faction: 35, DetectionRange: 20, Pos: dungeon.Point{X: 35}},
+	}
+	if found, err := PullSizes(p, cs, nil, PullFilter{}); err != nil {
+		t.Fatal(err)
+	} else if len(found) != 0 {
+		t.Fatalf("faction 35 warns: %v", found)
+	}
+	for _, f := range []PullFilter{{Ignore: map[int]bool{77: true}}, {Friendly: map[int]bool{77: true}}} {
+		quiet := []creature{
+			{GUID: 1, Entry: 1, Name: "One", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 30}},
+			{GUID: 2, Entry: 2, Name: "Friend", LevelMax: 60, Faction: 77, DetectionRange: 20, Pos: dungeon.Point{X: 35}},
+		}
+		if found, err := PullSizes(p, quiet, nil, f); err != nil {
+			t.Fatal(err)
+		} else if len(found) != 0 {
+			t.Fatalf("friendly 77 warns (%v): %v", f, found)
+		}
+		if found, err := PullSizes(p, quiet, nil, PullFilter{}); err != nil {
+			t.Fatal(err)
+		} else if len(found) != 1 || found[0].Bodies != 2 {
+			t.Fatalf("unfiltered 77 stays quiet: %v", found)
+		}
+	}
+	gated := &dungeon.Plan{Name: "probe", Map: 1, Kind: "dungeon", LevelBand: []int{60, 60}, Entrance: dungeon.Point{},
+		Legs: []dungeon.Leg{{Name: "a", To: dungeon.Point{X: 30},
+			PullGroups: []dungeon.PullGroup{
+				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 10}}, Radius: 5, MaxBodies: 1, Team: dungeon.TeamHorde},
+				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 30}}, Radius: 5, MaxBodies: 1},
+			}}}}
+	hostile := []creature{
+		{GUID: 1, Entry: 1, Name: "One", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 10}},
+		{GUID: 2, Entry: 1, Name: "Two", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 12}},
+		{GUID: 3, Entry: 1, Name: "Three", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 30}},
+		{GUID: 4, Entry: 1, Name: "Four", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 32}},
+	}
+	found, err := PullSizes(gated, hostile, nil, PullFilter{Team: dungeon.TeamAlliance})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 || found[0].Pull != 1 {
+		t.Fatalf("alliance sees one pull 1: %v", found)
+	}
+	if found, err := PullSizes(gated, hostile, nil, PullFilter{}); err != nil {
+		t.Fatal(err)
+	} else if len(found) != 2 || found[0].Pull != 1 || found[1].Pull != 2 {
+		t.Fatalf("no team pulls both rows: %v", found)
 	}
 }
 
@@ -182,7 +255,7 @@ func TestPullSizeTargetIsOwnedKillFirstFirst(t *testing.T) {
 			rp = q
 		}
 	}
-	mobs, entries := pullMobs(p, cs, nil)
+	mobs, entries := pullMobs(p, cs, nil, PullFilter{})
 	owned := pullOwners(pts, cs)
 	if got := pullTarget(p, mobs, entries, rp, owned); got < 0 || mobs[got].Guid != 2 {
 		t.Fatalf("target guid %v, want the kill_first rider 2", mobs)
@@ -191,6 +264,22 @@ func TestPullSizeTargetIsOwnedKillFirstFirst(t *testing.T) {
 	p.KillFirst = nil
 	if got := pullTarget(p, mobs, entries, rp, owned); got < 0 || mobs[got].Guid != 1 {
 		t.Fatalf("target guid %v, want the nearer owned bat 1", mobs)
+	}
+}
+
+// pullTarget never picks a mob no row owns: the owned map's zero value is 0,
+// which is also the route's first row index, so a presence check (not a bare
+// comparison) decides. A mob the first row owns still wins.
+func TestPullSizeTargetIgnoresUnownedMobAtRouteStart(t *testing.T) {
+	p := &dungeon.Plan{Name: "probe", Map: 1, LevelBand: []int{60, 60}, Entrance: dungeon.Point{}}
+	rp := routePoint{kind: "pull", px: 10, idx: 0}
+	mobs := []aggroest.Mob{{Guid: 7, Pos: dungeon.Point{X: 10}, Level: 60, DetectionYd: 20, Faction: 14}}
+	entries := map[uint32]uint32{7: 9}
+	if got := pullTarget(p, mobs, entries, rp, map[uint64]int{}); got != -1 {
+		t.Fatalf("unowned mob is the target: %v", mobs)
+	}
+	if got := pullTarget(p, mobs, entries, rp, map[uint64]int{7: 0}); got != 0 {
+		t.Fatalf("owned mob is not the target: %v", mobs)
 	}
 }
 
@@ -212,7 +301,7 @@ func TestPullSizeNumbersEveryPullRowOfTheLeg(t *testing.T) {
 		{GUID: 4, Entry: 3, Name: "Three", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 70}},
 		{GUID: 5, Entry: 3, Name: "Four", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 72}},
 	}
-	found, err := PullSizes(p, cs, nil)
+	found, err := PullSizes(p, cs, nil, PullFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +321,7 @@ func TestPullSizeRowWithNoTargetIsANoTargetFinding(t *testing.T) {
 	cs := []creature{
 		{GUID: 7, Entry: 9, Name: "Elsewhere", LevelMax: 60, Faction: 14, DetectionRange: 20, Pos: dungeon.Point{X: 10}},
 	}
-	found, err := PullSizes(p, cs, nil)
+	found, err := PullSizes(p, cs, nil, PullFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,11 +339,47 @@ func TestPullSizeNoEligibleMobsStillFindsEveryPullRow(t *testing.T) {
 			PullGroups: []dungeon.PullGroup{
 				{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 10}}, Radius: 5},
 			}}}}
-	found, err := PullSizes(p, nil, nil)
+	found, err := PullSizes(p, nil, nil, PullFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(found) != 1 || found[0].Summary != "leg 0 pull 1: no target" {
 		t.Fatalf("findings %v, want one no-target finding for pull 1", found)
+	}
+}
+
+// An awakened or scripted pull row: the encounter's script turns these
+// spawns hostile, so they are mobs whatever their npc_flags or faction say
+// (checkFile's -awakened and -scripted, on the CLI default -ignore-factions
+// 35). Four awakened Stone Keepers (faction 35, Uldaman's 4857) at one stand
+// are the target and three joining bodies: 4 over a ceiling of 3. A scripted
+// spawn with npc_flags does the same.
+func TestPullSizeAwakenedAndScriptedRowsCountTheirBodies(t *testing.T) {
+	cases := []struct {
+		name   string
+		flags  uint32
+		filter PullFilter
+	}{
+		{"awakened", 0, PullFilter{Ignore: map[int]bool{35: true}, Awakened: map[uint32]bool{4857: true}}},
+		{"scripted", 1, PullFilter{Ignore: map[int]bool{35: true}, Scripted: map[uint32]bool{4857: true}}},
+	}
+	for _, tc := range cases {
+		p := &dungeon.Plan{Name: "probe", Map: 1, Kind: "dungeon", LevelBand: []int{60, 60}, Entrance: dungeon.Point{},
+			Legs: []dungeon.Leg{{Name: "a", To: dungeon.Point{X: 30},
+				PullGroups: []dungeon.PullGroup{
+					{Entries: []uint32{4857}, Positions: []dungeon.Point{{X: 30}}, Radius: 5, MaxBodies: 3},
+				}}}}
+		var cs []creature
+		for i := 0; i < 4; i++ {
+			cs = append(cs, creature{GUID: uint64(i + 1), Entry: 4857, Name: "Stone Keeper", LevelMax: 60, Faction: 35,
+				NPCFlags: tc.flags, DetectionRange: 20, Pos: dungeon.Point{X: float32(30 + i)}})
+		}
+		found, err := PullSizes(p, cs, nil, tc.filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(found) != 1 || found[0].NoTarget || found[0].Bodies != 4 || found[0].Ceiling != 3 {
+			t.Fatalf("%s row findings %v, want 4 bodies over ceiling 3", tc.name, found)
+		}
 	}
 }

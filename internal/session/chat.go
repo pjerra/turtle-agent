@@ -171,6 +171,26 @@ func (s *Session) GMOn(ctx context.Context, g packet.GUID, text string) error {
 	return fmt.Errorf("%w: it changed %d times between the server's confirmation and the line, which was not sent", err, gmOnAttempts)
 }
 
+// ErrGMKillRefused is GMKill's refusal on an agent not authorized for gm_kill (the dialled host is not a test server's configured address).
+var ErrGMKillRefused = errors.New("gm kill: refused: this agent is not a slot of a test server (m910q, tortoise-test2)")
+
+// GMKillLine is the one GM line GMKill sends: the core's ".die" (Chat.cpp:885 `{ "die", SEC_DEVELOPER, ... HandleDieCommand }`, from account
+// level 3), which kills the SELECTED unit (Commands.cpp:2795, HandleDieCommand: GetSelectedUnit, then DealDamage for its whole health).
+const GMKillLine = ".die"
+
+// GMKill selects the creature g, waits until the server shows the selection (SelectConfirmed) and sends ".die" while that confirmed selection
+// still stands (GMOn). Only a creature or pet guid is accepted: ".die" on a player would kill a bot, and this call exists for the raid-walk
+// `--gm-clear` test tool. The death is NOT read here: the caller confirms it from the unit's frames.
+func (s *Session) GMKill(ctx context.Context, g packet.GUID) error {
+	if !s.opts.AllowGMKill {
+		return ErrGMKillRefused
+	}
+	if !g.IsCreature() {
+		return fmt.Errorf("gm kill: %s is not a creature guid", g)
+	}
+	return s.GMOn(ctx, g, GMKillLine)
+}
+
 // ErrSelectionChanged is GMOnConfirmed's refusal: the selection is not the unit the caller confirmed (another request changed it, or the
 // server does not show it), so no line was sent.
 var ErrSelectionChanged = errors.New("gm: the selection is not the confirmed unit any more")

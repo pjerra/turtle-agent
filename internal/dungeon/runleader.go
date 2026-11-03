@@ -53,8 +53,8 @@ func (p *Plan) runLeaderWalk(from int, move func(RunLeaderPoint), fight func(leg
 	}
 	for li := from; li < len(p.Legs); li++ {
 		l := p.Legs[li]
-		if l.Optional != nil {
-			continue
+		if l.Optional != nil || l.SkipExport {
+			continue // left out of the rows unless asked for, as plan-export leaves them out
 		}
 		for vi, w := range l.Via {
 			move(RunLeaderPoint{li, fmt.Sprintf("via %d", vi), w.Point})

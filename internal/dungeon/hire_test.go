@@ -44,6 +44,7 @@ type hireFake struct {
 	names     []string
 	nextName  int
 	agentLvl  int
+	team      string // the commander's own faction (Team()), empty: unknown
 	maxAbove  int
 	levelMode string // "": TB #940; "refuse": "Bad level"; "ignore": the argument is not read
 	raid      bool
@@ -498,6 +499,9 @@ func (g *hireFake) Command(ctx context.Context, command string) (tbm.Reply, erro
 // The HireGame the step sees.
 
 func (g *hireFake) AgentLevel() int { return g.agentLvl }
+
+// Team is the commander's own faction (TeamSource): empty unless a test sets one.
+func (g *hireFake) Team() string { return g.team }
 func (g *hireFake) InGroup() bool {
 	if g.keepInGroup && g.binding != nil {
 		return true

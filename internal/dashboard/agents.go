@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,8 +23,8 @@ import (
 
 // Agent is one running turtle-agent the dashboard watches.
 type Agent struct {
-	ID        string // the RPC port, as text
-	Addr      string // host:port, loopback only
+	ID        string // the normalized RPC address (host:port, IPv6 bracketed): unique even when two hosts share a port
+	Addr      string // the same address: loopback only
 	TokenPath string // rpc-<port>.token next to the settings file
 	// DungeonsDir is the settings file's dungeons_dir (a leading ~/ made the home folder): the folder the agent's runs read their plan files
 	// from. "" when the settings name none (the agent then reads dungeons/ under its working folder, which the dashboard cannot see).
@@ -124,12 +125,12 @@ func DiscoverAgents(configDir, spec string) ([]Agent, error) {
 		if port == 0 {
 			return fmt.Errorf("agent %q: port 0", addr)
 		}
-		a := host + ":" + strconv.Itoa(port)
+		a := net.JoinHostPort(host, strconv.Itoa(port))
 		if seen[a] {
 			return nil
 		}
 		seen[a] = true
-		out = append(out, Agent{ID: strconv.Itoa(port), Addr: a, TokenPath: filepath.Join(tokenDir, "rpc-"+strconv.Itoa(port)+".token"), DungeonsDir: dungeonsDir, TBDashboardURL: tbURL})
+		out = append(out, Agent{ID: a, Addr: a, TokenPath: filepath.Join(tokenDir, "rpc-"+strconv.Itoa(port)+".token"), DungeonsDir: dungeonsDir, TBDashboardURL: tbURL})
 		return nil
 	}
 	for _, part := range strings.Split(spec, ",") {
@@ -159,11 +160,27 @@ func DiscoverAgents(configDir, spec string) ([]Agent, error) {
 			}
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return portOf(out[i]) < portOf(out[j]) })
+	sort.Slice(out, func(i, j int) bool {
+		if pi, pj := portOf(out[i]), portOf(out[j]); pi != pj {
+			return pi < pj
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out, nil
 }
 
-func portOf(a Agent) int { n, _ := strconv.Atoi(a.ID); return n }
+// portOf is the agent's RPC port, which its token file is named after.
+func portOf(a Agent) int {
+	_, p, err := net.SplitHostPort(a.Addr)
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(p)
+	return n
+}
+
+// tokenFileName is the token file name next to the agent's settings file.
+func tokenFileName(a Agent) string { return "rpc-" + strconv.Itoa(portOf(a)) + ".token" }
 
 // readOnlyMethods are the only RPC methods the dashboard calls. None of them changes anything in the agent or the game
 // (bot_view is called without parameters: its log_every switch is never sent).
@@ -226,7 +243,7 @@ func (c *Client) Call(ctx context.Context, method string) (json.RawMessage, erro
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, errors.New("unauthorized: no readable rpc-" + c.Agent.ID + ".token next to the settings file")
+		return nil, errors.New("unauthorized: no readable " + tokenFileName(c.Agent) + " next to the settings file")
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("http %d", resp.StatusCode)

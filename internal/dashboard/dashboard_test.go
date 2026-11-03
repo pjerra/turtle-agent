@@ -68,7 +68,7 @@ func tinyPlan(t *testing.T) *dungeon.Plan {
 }
 
 func TestBuildCardFromStatus(t *testing.T) {
-	in := Inputs{Agent: Agent{ID: "8768", Addr: "127.0.0.1:8768"}, Now: t0, Status: json.RawMessage(statusJSON),
+	in := Inputs{Agent: Agent{ID: "127.0.0.1:8768", Addr: "127.0.0.1:8768"}, Now: t0, Status: json.RawMessage(statusJSON),
 		Dungeon: json.RawMessage(dungeonJSON("leg 0 (one): pull group 2 of 3", 150*time.Second)), View: json.RawMessage(viewJSON),
 		Plan: tinyPlan(t), Folder: "zf-hires-2", Links: []Link{{Name: "trace", Path: "zf-hires-2/traces/r-1.jsonl"}},
 		Trace: &TraceSnapshot{SHA: "c7775d5b9baf", Orders: []Order{{Text: "cmd move 1 2 3", Reply: "ACK"}, {Text: "cmd attack 0x1", Reply: "ERR", Code: "invalid-target", Message: "No unit"}}}}
@@ -531,12 +531,16 @@ func TestDiscoverAgents(t *testing.T) {
 		}
 	}
 	as, err = DiscoverAgents(dir, "auto,8770,127.0.0.1:8765")
-	if err != nil || len(as) != 3 || as[2].ID != "8770" {
+	if err != nil || len(as) != 3 || as[2].ID != "127.0.0.1:8770" || as[2].ID != as[2].Addr {
 		t.Fatalf("auto plus list: %+v %v", as, err)
 	}
 	as, err = DiscoverAgents(dir, "8771, 8772")
 	if err != nil || len(as) != 2 {
 		t.Fatalf("list: %+v %v", as, err)
+	}
+	as, err = DiscoverAgents(dir, "[::1]:8773")
+	if err != nil || len(as) != 1 || as[0].ID != "[::1]:8773" || as[0].Addr != "[::1]:8773" {
+		t.Fatalf("an IPv6 agent is bracketed in its id and address: %+v %v", as, err)
 	}
 	for _, bad := range []string{"10.0.0.5:8765", "example.com:80", "0.0.0.0:8765", "127.0.0.1:0"} {
 		if _, err := DiscoverAgents(dir, bad); err == nil {
@@ -642,7 +646,7 @@ func TestPollerEndToEndIsReadOnlyAndSecretFree(t *testing.T) {
 		}
 	}
 	body := string(p.State())
-	raw, ok := p.Raw(u.Port())
+	raw, ok := p.Raw(u.Host)
 	if !ok {
 		t.Fatal("no raw panel")
 	}
