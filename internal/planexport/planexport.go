@@ -261,10 +261,25 @@ func (e noRunLeaderStep) Is(target error) bool { return target == ErrNoRunLeader
 
 func noStep(format string, a ...any) error { return noRunLeaderStep{fmt.Sprintf(format, a...)} }
 
+// RowOrigin names the plan element a row was written from (the scout's fix target).
+type RowOrigin struct {
+	// Leg is the plan leg index (Plan.Legs), not the exported leg number.
+	Leg int `json:"leg"`
+	// Part is "via", "to", "approach", "pull", "boss", "hold", "step", "cut", "chest" or "leave".
+	Part string `json:"part"`
+	// Group is the pull group index for approach, pull and hold; -1 otherwise.
+	Group int `json:"group"`
+	// Index is the via index, the approach index or the steps index; for "cut" the via index the cut row precedes
+	// (len(Via) = before `to`).
+	Index int `json:"index"`
+}
+
 // Result is a plan's rows and what the exporter had to say about them.
 type Result struct {
 	Rows     Rows
 	Warnings []string
+	// Origins names the plan element of every step row, the same length and order as Rows.Steps.
+	Origins []RowOrigin
 	// Cut is the note of a plan exported only up to the first leg with a step the run leader cannot do ("" for a whole plan): it names the
 	// leg and the step, is in Warnings and ends the plan row's comment.
 	Cut string
@@ -367,7 +382,7 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 	if err := Validate(b.rows); err != nil {
 		return Result{}, err
 	}
-	return Result{Rows: b.rows, Warnings: b.warnings, Cut: cut}, nil
+	return Result{Rows: b.rows, Warnings: b.warnings, Origins: b.origins, Cut: cut}, nil
 }
 
 // leaveComment is the leg row's comment for the leg's `leave` list. The rows have no column or step kind for a spawn the run leaves alone (a
@@ -409,6 +424,8 @@ type builder struct {
 	skippedLoot int           // loot_object steps of a companions_loot false leg left out of the leg being built
 	last        dungeon.Point // the last point a step of the leg put the party at
 	haveLast    bool
+	origins     []RowOrigin // one per step row, in the same order
+	origin      RowOrigin   // the plan element the next add writes
 }
 
 // cutNotes writes one warning per point a cut dropped or moved, with the step whose hop it cut.
@@ -422,6 +439,12 @@ func (b *builder) add(s StepRow) {
 	s.Plan, s.Leg, s.Seq = b.name, b.outLeg, b.seq
 	b.seq++
 	b.rows.Steps = append(b.rows.Steps, s)
+	b.origins = append(b.origins, b.origin)
+}
+
+// at sets the plan element the rows added next come from.
+func (b *builder) at(part string, group, index int) {
+	b.origin = RowOrigin{Leg: b.leg_, Part: part, Group: group, Index: index}
 }
 
 func (b *builder) move(p dungeon.Point, direct bool, comment string) {
@@ -462,6 +485,7 @@ func (b *builder) leg(li int) error {
 	defer func() { b.outLeg++ }()
 	// The leg in the order the driver does it: the via waypoints, the To, the pull groups, the steps, the boss, the steps after it.
 	for vi, w := range l.Via {
+		b.at("via", -1, vi)
 		if w.GMCross && b.opt.GMCrossDirect {
 			b.warnings = append(b.warnings, fmt.Sprintf("leg %d (%s): via %.1f %.1f %.1f is a gm_cross; exported as a move_direct (a straight walk to the landing point), not tried live: the run leader has no GM move", li, l.Name, w.X, w.Y, w.Z))
 			b.move(w.Point, true, "via (gm_cross in the plan; move_direct, not tried live)")
@@ -484,6 +508,7 @@ func (b *builder) leg(li int) error {
 		}
 		b.move(w.Point, w.Direct, "via")
 	}
+	b.at("to", -1, 0)
 	b.move(l.To, false, "to")
 	for gi, g := range l.PullGroups {
 		if err := b.pull(gi, g); err != nil {
@@ -507,10 +532,10 @@ func (b *builder) leg(li int) error {
 				// last row left the party, possibly out of the search range or in the next pack.
 				return fmt.Errorf("steps[%d]: loot_object %d has no stand: give the chest a stand point (the carrier's rows walk the party there before the loot)", si, st.LootObject.Entry)
 			}
-			b.carrierChest(l, st.LootObject)
+			b.carrierChest(si, st.LootObject)
 			continue
 		}
-		if err := b.step(st); err != nil {
+		if err := b.step(si, st); err != nil {
 			return fmt.Errorf("steps[%d]: %w", si, err)
 		}
 	}
@@ -520,7 +545,7 @@ func (b *builder) leg(li int) error {
 		}
 	}
 	for si, st := range l.AfterBoss {
-		if err := b.step(st); err != nil {
+		if err := b.step(si, st); err != nil {
 			return fmt.Errorf("after_boss[%d]: %w", si, err)
 		}
 	}
@@ -593,16 +618,19 @@ func (b *builder) pull(gi int, g dungeon.PullGroup) error {
 		param = uint32(g.ClearYd)
 	}
 	c := fmt.Sprintf("pull group %d", gi)
-	for _, a := range g.Approach {
+	for ai, a := range g.Approach {
+		b.at("approach", gi, ai)
 		b.move(a, false, c+" approach")
 	}
 	if g.Hold != nil {
+		b.at("hold", gi, 0)
 		b.hold(g.Hold, uniq(g.Entries), c+" hold")
 		return nil
 	}
 	if g.StandPull {
 		c += "; stand pull"
 	}
+	b.at("pull", gi, 0)
 	b.add(StepRow{Kind: KindPull, X: f32(cx), Y: f32(cy), Z: f32(cz), Radius: radius, Item: uint32(g.MaxBodies), Flags: flags, Param: param, Entries: uniq(g.Entries), Comment: c})
 	b.last, b.haveLast = dungeon.Point{X: f32(cx), Y: f32(cy), Z: f32(cz)}, true
 	if g.StandPull {
@@ -619,6 +647,7 @@ func (b *builder) hold(h *dungeon.Hold, entries []uint32, comment string) {
 		prev := b.rows.Steps[n-1]
 		if prev.Leg == b.outLeg && prev.Kind == KindMove && dist3(dungeon.Point{X: prev.X, Y: prev.Y, Z: prev.Z}, h.Spot) <= 1 {
 			b.rows.Steps = b.rows.Steps[:n-1]
+			b.origins = b.origins[:len(b.origins)-1]
 			b.seq--
 		}
 	}
@@ -667,10 +696,12 @@ func (b *builder) boss(bs *dungeon.Boss) error {
 	if bs.Radius < 0 || bs.Radius > MaxRadius {
 		return fmt.Errorf("boss %d: radius %.1f is outside 0-%d", bs.Entry, bs.Radius, MaxRadius)
 	}
-	for _, a := range bs.Approach {
+	for ai, a := range bs.Approach {
+		b.at("approach", -1, ai)
 		b.move(a, false, "boss approach")
 	}
 	if bs.Hold != nil {
+		b.at("boss", -1, 0)
 		b.hold(bs.Hold, uniq(append(append([]uint32{bs.Entry}, bs.First...), bs.Hold.Entries...)), "boss hold")
 		return nil
 	}
@@ -682,6 +713,7 @@ func (b *builder) boss(bs *dungeon.Boss) error {
 	if bs.StandPull {
 		flags |= FlagStandPull
 	}
+	b.at("boss", -1, 0)
 	b.add(StepRow{Kind: KindBoss, Entry: bs.Entry, X: bs.Position.X, Y: bs.Position.Y, Z: bs.Position.Z, Radius: bs.Radius, Flags: flags, Entries: uniq(bs.First), TimeoutS: bs.WaitS, Comment: comment})
 	stand := bs.Position
 	if bs.StandPull {
@@ -719,20 +751,22 @@ const carrierSweepRadiusYd = 15
 // it), and — when the leg has leftover_entries — the sweep pull (the chest's linked trap raises its adds in the same server call the
 // loot ACK answers, and round 3's eleven leftovers aggroed the next walk; the loot row is never safe without the sweep). batch is
 // ignored: one chest a row keeps the adds two at a time (batches of 3+ wiped twice in round 4); the `loot_object batch` warning stays.
-func (b *builder) carrierChest(l dungeon.Leg, lo *dungeon.LootObject) {
+func (b *builder) carrierChest(si int, lo *dungeon.LootObject) {
+	b.at("chest", -1, si)
 	if lo.Stand != nil {
 		b.move(*lo.Stand, false, "stand")
 	}
 	x, y, z := refPoint(lo.ObjectRef)
 	b.add(StepRow{Kind: KindLoot, Entry: lo.Entry, X: x, Y: y, Z: z, Item: itemEntry(lo.ExpectItem), Flags: FlagGoneIsDone,
 		Comment: clip(itemComment("loot", lo.ExpectItem), MaxComment)})
-	if len(l.LeftoverEntries) > 0 {
-		b.add(StepRow{Kind: KindPull, X: x, Y: y, Z: z, Radius: carrierSweepRadiusYd, Entries: uniq(l.LeftoverEntries),
+	if left := b.plan.Legs[b.leg_].LeftoverEntries; len(left) > 0 {
+		b.add(StepRow{Kind: KindPull, X: x, Y: y, Z: z, Radius: carrierSweepRadiusYd, Entries: uniq(left),
 			Comment: clip("sweep: what the chest raised", MaxComment)})
 	}
 }
 
-func (b *builder) step(st dungeon.Step) error {
+func (b *builder) step(si int, st dungeon.Step) error {
+	b.at("step", -1, si)
 	switch {
 	case st.UseObject != nil:
 		u := st.UseObject
@@ -1046,14 +1080,28 @@ func groundSegDist(p, a, b dungeon.Point) float64 {
 	return math.Hypot(px-t*dx, py-t*dy)
 }
 
+// cutOrigin is the origin of a cut row inserted before the row with origin o: the via index it precedes (len(Via) before `to`).
+func (b *builder) cutOrigin(o RowOrigin) RowOrigin {
+	idx := -1
+	switch o.Part {
+	case "via":
+		idx = o.Index
+	case "to":
+		idx = len(b.plan.Legs[o.Leg].Via)
+	}
+	return RowOrigin{Leg: o.Leg, Part: "cut", Group: -1, Index: idx}
+}
+
 // cutLongHops finds consecutive moves of the plan that are more than MoveGapWarnYd apart. With Options.Cut set it puts the points the
 // cutter returns between them (as move rows, renumbering the leg's steps); without, it lists them in Warnings.
 func (b *builder) cutLongHops() error {
 	var out []StepRow
+	var outOrigins []RowOrigin
 	var prev *StepRow
 	renumber := map[int]int{} // leg -> next seq
 	for i := range b.rows.Steps {
 		s := b.rows.Steps[i]
+		origin := b.origins[i]
 		if b.opt.ApproachHops && b.opt.Cut != nil && prev != nil && (s.Kind == KindPull || s.Kind == KindBoss || s.Kind == KindHold) && s.Flags&FlagStandPull == 0 {
 			a, c := dungeon.Point{X: prev.X, Y: prev.Y, Z: prev.Z}, dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
 			if d := dist3(a, c); d > dungeon.RunLeaderReachYd {
@@ -1071,6 +1119,7 @@ func (b *builder) cutLongHops() error {
 				}
 				for _, v := range via {
 					out = append(out, StepRow{Plan: s.Plan, Leg: s.Leg, Kind: KindMove, X: v.X, Y: v.Y, Z: v.Z, Comment: "approach path"})
+					outOrigins = append(outOrigins, b.cutOrigin(origin))
 				}
 			}
 		}
@@ -1105,22 +1154,26 @@ func (b *builder) cutLongHops() error {
 						}
 						for _, v := range via {
 							out = append(out, StepRow{Plan: s.Plan, Leg: s.Leg, Kind: KindMove, X: v.X, Y: v.Y, Z: v.Z, Comment: "path"})
+							outOrigins = append(outOrigins, b.cutOrigin(origin))
 						}
 					}
 				}
 			}
 			cp := s
 			out = append(out, cp)
+			outOrigins = append(outOrigins, origin)
 			prev = &out[len(out)-1]
 			continue
 		}
 		out = append(out, s)
+		outOrigins = append(outOrigins, origin)
 	}
 	for i := range out {
 		out[i].Seq = renumber[out[i].Leg]
 		renumber[out[i].Leg]++
 	}
 	b.rows.Steps = out
+	b.origins = outOrigins
 	return nil
 }
 
@@ -1133,13 +1186,16 @@ func (b *builder) routeAroundAvoid() error {
 		return nil
 	}
 	var out []StepRow
+	var outOrigins []RowOrigin
 	prev := b.plan.Entrance
 	added := map[int]int{}
-	for _, s := range b.rows.Steps {
+	for i, s := range b.rows.Steps {
+		origin := b.origins[i]
 		switch s.Kind {
 		case KindMove, KindMoveDirect, KindMoveHopExact, KindPull, KindBoss, KindHold:
 		default:
 			out = append(out, s)
+			outOrigins = append(outOrigins, origin)
 			continue
 		}
 		to := dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
@@ -1150,10 +1206,12 @@ func (b *builder) routeAroundAvoid() error {
 			}
 			for _, v := range via {
 				out = append(out, StepRow{Plan: s.Plan, Leg: s.Leg, Kind: KindMove, X: v.X, Y: v.Y, Z: v.Z, Comment: "path (keeps out of an avoid box)"})
+				outOrigins = append(outOrigins, b.cutOrigin(origin))
 			}
 			added[s.Leg] += len(via)
 		}
 		out = append(out, s)
+		outOrigins = append(outOrigins, origin)
 		prev = to
 	}
 	renumber := map[int]int{}
@@ -1162,6 +1220,7 @@ func (b *builder) routeAroundAvoid() error {
 		renumber[out[i].Leg]++
 	}
 	b.rows.Steps = out
+	b.origins = outOrigins
 	legs := make([]int, 0, len(added))
 	for l, n := range added {
 		if n > 0 {
