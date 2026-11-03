@@ -892,6 +892,7 @@ type walk struct {
 	// --gm-clear: the packs validate expanded from the world export, and what the place phase tried to kill. gmClearUsed is true once
 	// the flag was given (the walk is ASSISTED even when no live unit was found).
 	gmClear     []raidwalk.GMClearPack
+	gmClearWarn []string // groups the plan skipped (no hostile spawn near the row): a WARN note and run.log line
 	gmClearLog  []raidwalk.GMClearEntry
 	gmClearUsed bool
 
@@ -1175,15 +1176,17 @@ func (w *walk) validate() error {
 			return stopf(exitUsage, "%v", err)
 		}
 		// A BEHIND boss or hold row of an earlier leg on the route is alive in the raid's fresh copy: when the route
-		// passes one in a later leg, the run shortens its until to stop before that segment (D8). In the start step's
-		// own leg the placement is refused, as PlaceClear's own guard does. A hit on the last segment leaves until at
-		// the stop, so hit says the run must shorten anyway (an `--until none` run, or a boss-done that became none:
-		// its walk would otherwise walk into that segment).
+		// passes one in a later leg, an explicit until is shortened to stop before that segment (D8). In the start
+		// step's own leg the placement is refused, as PlaceClear's own guard does. A hit on the last segment leaves
+		// until at the stop, so hit says the caller must shorten anyway. `--until none` is the operator's own clause
+		// and is never replaced with a step: the run walks the plan to its end and the run leader fights whatever it
+		// meets. The corridor still ends at routeEnd (the step before the guarded segment), so the clear stays off it.
 		until, routeEnd, gnote, refusal, hit := raidwalk.PlaceBossGuard(w.rows, startStep, stop)
 		if refusal != "" {
 			return stopf(exitUsage, "%v", refusal)
 		}
-		if hit && (until != stop || len(w.untilWords) == 0) {
+		untilNone := strings.TrimSpace(w.opts.until) == "none"
+		if !untilNone && hit && (until != stop || len(w.untilWords) == 0) {
 			if w.bossDoneStep != 0 && until <= w.bossDoneStep {
 				return stopf(exitUsage, "--place: %s; that is before the boss-done step %d", gnote, w.bossDoneStep)
 			}
@@ -1199,8 +1202,13 @@ func (w *walk) validate() error {
 		if clear.Refusal != "" {
 			return stopf(exitUsage, "%v", clear.Refusal)
 		}
-		// Stop is the until the dry run and the summary print; the corridor ended at routeEnd.
-		w.place.Stop, w.place.Circles, w.place.Notes, w.place.Ahead, w.place.Behind = until, clear.Circles, clear.Notes, clear.Ahead, clear.Behind
+		// Stop is the until the dry run and the summary print; the corridor ended at routeEnd. `--until none` has no
+		// stop step: 0 says so (the run start carries no until clause).
+		placeStop := until
+		if untilNone {
+			placeStop = 0
+		}
+		w.place.Stop, w.place.Circles, w.place.Notes, w.place.Ahead, w.place.Behind = placeStop, clear.Circles, clear.Notes, clear.Ahead, clear.Behind
 		for _, n := range clear.Notes {
 			w.note("place: %s", n)
 		}
@@ -1584,8 +1592,12 @@ func (w *walk) printPlan(out io.Writer) {
 	}
 	if w.place != nil {
 		p := w.place.Point
-		fmt.Fprintf(out, "  8b place: start step %d%s at %s %s %s; until step %d; %d circles; skip %s\n",
-			w.place.Start, legWords(w.place.Leg), num32(p.X), num32(p.Y), num32(p.Z), w.place.Stop,
+		stop := fmt.Sprintf("step %d", w.place.Stop)
+		if w.place.Stop == 0 {
+			stop = "none"
+		}
+		fmt.Fprintf(out, "  8b place: start step %d%s at %s %s %s; until %s; %d circles; skip %s\n",
+			w.place.Start, legWords(w.place.Leg), num32(p.X), num32(p.Y), num32(p.Z), stop,
 			len(w.place.Circles), raidwalk.SkipWords(w.place.Skips))
 		for _, c := range w.place.Circles {
 			unit := ""
@@ -1602,6 +1614,9 @@ func (w *walk) printPlan(out io.Writer) {
 			fmt.Fprintf(out, "  8b note: %s\n", n)
 		}
 		fmt.Fprintf(out, "  8b commander: .gm on; .appear <mt>; q inst, q group, q floor, q units, clearto, quiet, place <x> <y> <z> spread=5 of=<mt>; frames; cmd stay; cmd follow\n")
+	}
+	for _, warn := range w.gmClearWarn {
+		fmt.Fprintf(out, "  8c %s\n", warn)
 	}
 	for _, pk := range w.gmClear {
 		fmt.Fprintf(out, "  8c gm-clear: %s pack %d, %d members, around %s %s %s: select each live member by guid, .die, read its death\n",

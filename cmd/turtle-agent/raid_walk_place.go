@@ -1431,7 +1431,11 @@ func (w *walk) phasePlace(ctx context.Context) error {
 	if err := w.placeClear(ctx); err != nil {
 		return err
 	}
-	// 6b. --gm-clear (test tool): the named packs die by GM command before the quiet check and the raid's move.
+	// 6b. --gm-clear (test tool): the named packs die by GM command before the quiet check and the raid's move. A
+	// group the plan skipped (a boss's or an event's units) gets its WARN line here, where run.log exists.
+	for _, warn := range w.gmClearWarn {
+		w.logLine(w.env.now(), warn)
+	}
 	if err := w.placeGMClear(ctx); err != nil {
 		return err
 	}

@@ -1,7 +1,8 @@
 // raid_walk_gmclear.go: the `--gm-clear` test tool of raid-walk (owner-approved, test servers only, off by default). After the placement
 // and before the raid moves, the commander GM-kills every live unit of the named pull groups (or a leg's boss) so a later leg can be
 // tested while the trash before it is still being fixed. Every unit it kills goes into run.log, summary.json (gm_clear, assisted) and the
-// report, and the walk's result line says ASSISTED: it is never a real clear.
+// report, and the walk's result line says ASSISTED: it is never a real clear. A group whose row holds no hostile pack (a boss's
+// or an event's units) is skipped with a gm-clear: WARN note; the other groups still run and the walk never aborts for it.
 //
 // The kill is the core's `.die` on the SELECTED unit (Chat.cpp:885, SEC_DEVELOPER = account level 3; Commands.cpp:2795
 // HandleDieCommand). The agent's gm_kill RPC selects the creature by guid, waits for the server to show the selection and sends the
@@ -54,9 +55,13 @@ func (w *walk) validateGMClear() error {
 	if err != nil {
 		return stopf(exitUsage, "--gm-clear: %v", err)
 	}
-	packs, err := raidwalk.PlanGMClear(w.rows, world, specs)
+	packs, warnings, err := raidwalk.PlanGMClear(w.rows, world, specs)
 	if err != nil {
 		return stopf(exitUsage, "%v", err)
+	}
+	w.gmClearWarn = warnings
+	for _, warn := range warnings {
+		w.note("%s", warn)
 	}
 	w.gmClear = packs
 	w.note("--gm-clear: %d packs to kill by GM command (test tool; the walk is ASSISTED, not a real clear)", len(packs))

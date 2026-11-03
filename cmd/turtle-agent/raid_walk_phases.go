@@ -952,10 +952,14 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 				}
 			case raidwalk.IncidentBossEngaged:
 				if ok, early := w.runFightsBoss(v.Entry); ok {
-					if early > 0 {
+					switch {
+					case strings.TrimSpace(w.opts.until) == "none":
+						w.note("boss %d engaged at step %d under --until none: the run leader fights it", v.Entry, v.Step)
+						w.logLine(now, fmt.Sprintf("boss %d engaged at step %d under --until none: the run leader fights it", v.Entry, v.Step))
+					case early > 0:
 						w.note("boss %d engaged at step %d, before its boss step %d in the same leg, and the until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, early, w.untilLabel)
 						w.logLine(now, fmt.Sprintf("boss %d engaged at step %d, before its boss step %d in the same leg, and the until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, early, w.untilLabel))
-					} else {
+					default:
 						w.note("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, w.untilLabel)
 						w.logLine(now, fmt.Sprintf("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", v.Entry, v.Step, w.untilLabel))
 					}
@@ -3126,9 +3130,18 @@ const (
 // leg, when the until does not go past the boss step, when the run stands more than
 // earlyEngageSteps steps before that boss step (not under boss-done, which never stops on its own
 // boss's engage), or when the main tank is not within earlyEngageYd of the boss row (review round 1,
-// item 3).
+// item 3). --until none is true from the first check: a full clear never stops the run on a boss.
 func (w *walk) runFightsBoss(entry uint32) (ok bool, early int) {
-	if w.opts.until == "boss" || !w.haveStatus || w.lastStatus.State != tbm.RunRunning {
+	if w.opts.until == "boss" {
+		return false, 0
+	}
+	// --until none walks the plan to its end: no boss or until rule may stop the run. The run leader fights every
+	// boss it meets, however many steps before the boss row the engage came from (walk 31: Mandokir woke five steps
+	// before his row, and the auto-shortened until made the walk send `.bot run stop` ~10 s into the fight).
+	if strings.TrimSpace(w.opts.until) == "none" {
+		return true, 0
+	}
+	if !w.haveStatus || w.lastStatus.State != tbm.RunRunning {
 		return false, 0
 	}
 	if w.lastStatus.Kind == "boss" {
@@ -4058,9 +4071,12 @@ func (w *walk) recoveredBoss(ctx context.Context, step int) error {
 	// fights its boss step.
 	if w.statusSeq > w.resumeStatusSeq {
 		if ok, early := w.runFightsBoss(entry); ok {
-			if early > 0 {
+			switch {
+			case strings.TrimSpace(w.opts.until) == "none":
+				w.note("boss %d engaged at step %d under --until none: the run leader fights it", entry, step)
+			case early > 0:
 				w.note("boss %d engaged at step %d, before its boss step %d in the same leg, and the until (%s) goes past it, so the run leader fights it", entry, step, early, w.untilLabel)
-			} else {
+			default:
 				w.note("boss %d engaged at step %d: the run is on its boss step and its until (%s) goes past it, so the run leader fights it", entry, step, w.untilLabel)
 			}
 			return nil

@@ -603,7 +603,7 @@ func TestPlaceBossGuardShortensInLaterLeg(t *testing.T) {
 }
 
 // H1 (D8): the guard's hit is on the LAST segment (the stop step itself), so until stays the stop: the caller needs
-// hit to shorten an `--until none` run to `until step <stop>`, and to refuse a boss-done run it would cut before.
+// hit to shorten an explicit until to `until step <stop>`, and to refuse a boss-done run it would cut before.
 // The reviewer's fixture: leg 0's boss at (20,150), leg 1's moves, and leg 2's last row at (20,140).
 func TestPlaceBossGuardShortensAHitOnTheLastSegment(t *testing.T) {
 	steps := []planexport.StepRow{placeRow(planexport.KindBoss, 0, 20, 150, 0, 0, 12345)} // step 1
@@ -664,8 +664,9 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 }
 
 // F5 (D8): with the deployed-style ZG rows (407 steps from planexport.Build: walk 26b's pack-1-first Marli order,
-// walk 28's 27-unit Arlokk terrace pull and walk 29's legs 5/6), a placed `--until none` run from Marli
-// stops before the segment on leg 6 that passes Venoxis, and the shortened corridor clears clean.
+// walk 28's 27-unit Arlokk terrace pull and walk 29's legs 5/6), a placed run from Marli with `--until none`
+// still reports the segment on leg 6 that passes Venoxis, so the caller can end the corridor before it (the run
+// itself keeps `--until none`), and the shortened corridor clears clean.
 
 func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 	plan := zgPlacePlan(t)

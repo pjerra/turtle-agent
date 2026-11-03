@@ -556,8 +556,8 @@ func startPointGuard(rows planexport.Rows, start int, s planexport.StepRow) (d f
 
 // earlierLegGuard is the PlaceClear guard for a BEHIND boss or hold row of an EARLIER leg than the start: a placement
 // teleports the raid to the start point, so the route that leads to the start leg (and the start leg's own walk) is not
-// tested; only the start point itself and the segments that end in a later leg are (PlaceBossGuard shortens the run
-// before those). Rows of the start leg itself keep the whole route.
+// tested; only the start point itself and the segments that end in a later leg are (PlaceBossGuard reports the step to
+// stop before those). Rows of the start leg itself keep the whole route.
 func earlierLegGuard(rows planexport.Rows, start, stop int, s planexport.StepRow) (d float64, near bool) {
 	if d, near = startPointGuard(rows, start, s); near {
 		return d, true

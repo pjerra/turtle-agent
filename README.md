@@ -2186,8 +2186,9 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   the summary says so.
 - `--until` is `boss` (default: a trash walk never wakes a boss: it stops before the first boss step), `boss-done` (stops after the
   first boss step has completed: resolved to `step <the step after the boss>` from the rows, so it needs `--sql` or a plan JSON whose export has the
-  server's step count, else the walk stops the run and exits 18), `none` (a full clear), `step N` or `leg L`; the word
-  goes to `run start` and the server's status label must show `until <clause> (step N)`. `--from leg L|step N` is only
+  server's step count, else the walk stops the run and exits 18), `none` (a full clear: the run leader fights every
+  boss and no boss or until rule stops the run), `step N` or `leg L`; the word goes to `run start` and the server's
+  status label must show `until <clause> (step N)`. `--from leg L|step N` is only
   for a raid already standing at that point (for example after a hold): raid-walk does not stage.
 - `--place` (needs `--from` and `--sql`, and only on `m910q`/`tortoise-test2`) starts the raid **partway into its
   instance** instead of at the door: several raids on one server can then each work a different boss leg (`--slot 2,4`
@@ -2212,11 +2213,12 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   GM command. The walk then clears the corridor of the legs it skips — every pull row before the start whose circle
   comes within 45 yd of the route to the `until` stop, despawned with `.tt clearto ... all=1` after a pre-read of the
   units there (never `kill`, never `boss`; a boss or hold row of an earlier leg within 30 yd of the route refuses the
-  placement when the route passes it in the start step's own leg; when it passes in a later leg the walk shortens its
-  `until` to stop before that segment, the corridor ending one positioned step earlier — a placed run is a fresh copy,
-  so those bosses are alive; every segment of the route is tested, not only its closest point, so a hit on the last
-  segment shortens an `--until none` run too, and the dry run's header and the summary print the asked-for until and
-  the effective one) — quiets
+  placement when the route passes it in the start step's own leg; when it passes in a later leg and the operator asked
+  for an `until` clause, the walk shortens that clause to stop before the segment, the corridor ending one positioned
+  step earlier — a placed run is a fresh copy, so those bosses are alive; every segment of the route is tested, not
+  only its closest point, and the dry run's header and the summary print the asked-for until and the effective one.
+  `--until none` is never replaced with a step: the corridor still ends one positioned step earlier, but the run walks
+  the whole plan and the run leader fights whatever it meets) — quiets
   the start point — the walk judges the quiet itself, not the toolkit's flag: a unit blocks only when it is not a skip
   entry, not a rank-0 critter of at most 100 HP and either stands within 25 yd of the point or belongs to a BEHIND row's
   circle by its **home** (the spawn point the toolkit sends with the unit; without one the unit has no owner), which the
@@ -2409,8 +2411,10 @@ run stands at most two steps before its next boss step in the same leg (under `-
 back in the same leg: a boss-done walk never stops the run on an engage of its own boss), its `until` goes past that
 boss step, the engaged entry belongs to that boss (its entry, phase entries, `first` adds or hold entries), and the main tank stands
 within 60 yd (2D) of the boss row's plan position in a frame younger than 10 s, the run leader fights it and the walk
-only notes the hand-over. A boss that engages while the run is PAUSED on its boss step still stops the walk: the
-hand-over needs a running status.
+only notes the hand-over. Under `--until none` the exception needs none of that: the run walks to the plan's end, so the
+run leader fights every boss it meets and the walk never sends `.bot run stop` because of a boss or until rule (walk 31:
+Mandokir woke five steps before his row). A boss that engages while the run is PAUSED on its boss step still stops the
+walk for every other until: the hand-over needs a running status.
 
 When the run leader pauses with `boss <N> not found` on that boss's own row (walk 24 test2 r2: Thekal's phase 1 ends
 in a fake death and TB finds no corpse of 14599), the walk reads the frames for the kill: a boss UNIT at 0 % (the
@@ -2472,7 +2476,10 @@ unit of the named pull groups (or the boss of the leg), so a later leg can be te
 AQ20 walk starts at Rajaxx with `--gm-clear-boss kurinnaxx` so Kurinnaxx is dead and Rajaxx's event and Buru can be placed.
 
 - **Refused** unless the server is `m910q` or `tortoise-test2` (the `--place` allow-list, `placeServers`) and `--place` is on; a bad spec,
-  a leg or group the plan does not have, or a missing world export is a usage error before any GM line goes out.
+  a leg or group the plan does not have, or a missing world export is a usage error before any GM line goes out. A group
+  whose row clears no hostile pack (a boss's or an event's units, such as walk 31's Mandokir group 18, the Vilebranch
+  Speaker) is skipped with a `gm-clear: WARN: skipped ...` note and the other groups go on: a boss group is never cleared,
+  and one bad group never aborts the run.
 - **Groups** are 1-based, in route order among the leg's `pull` and `hold` rows (the dry run lists them as `8c gm-clear:` lines); the
   leg is its row number or its name. **Whole packs:** each group expands to every pack its row clears (the trash check's rule: the row's
   entries and its reach) and each pack to all its members, a `creature_groups` AGGRO_TOGETHER group and both directions of every aggro

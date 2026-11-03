@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/config"
+	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/planexport"
@@ -76,6 +77,46 @@ func TestParseGMClearRefusals(t *testing.T) {
 	}
 }
 
+// A --gm-clear group whose row holds no hostile spawn (a boss's or an event's speaker) is skipped with a WARN note,
+// never an error, and the groups before and after it are still planned (walk 31: Mandokir group 18, the Vilebranch
+// Speaker, aborted the whole tool).
+func TestValidateGMClearSkipsBossGroupWithWarn(t *testing.T) {
+	dir := t.TempDir()
+	const creatures = "guid\tentry\tname\tlevel_max\trank\tfaction\tnpc_flags\tx\ty\tz\twander\tmovement_type\tgroup_leader\n" +
+		"1\t100\tTrash\t60\t0\t16\t0\t10\t0\t0\t0\t0\t0\n" +
+		"2\t200\tVilebranch Speaker\t60\t0\t35\t2\t100\t0\t0\t0\t0\t0\n"
+	if err := os.WriteFile(filepath.Join(dir, "creatures.tsv"), []byte(creatures), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rows := planexport.Rows{
+		Plan: planexport.PlanRow{Plan: "zul_gurub", Map: 309},
+		Legs: []planexport.LegRow{{Plan: "zul_gurub", Leg: 0, Name: "one"}},
+		Steps: []planexport.StepRow{
+			{Plan: "zul_gurub", Leg: 0, Seq: 1, Kind: planexport.KindMove, X: 1, Y: 1, Z: 1},
+			{Plan: "zul_gurub", Leg: 0, Seq: 2, Kind: planexport.KindPull, Entries: []uint32{100}, Radius: 10, X: 10},
+			{Plan: "zul_gurub", Leg: 0, Seq: 3, Kind: planexport.KindPull, Entries: []uint32{200}, Radius: 10, X: 100},
+		},
+	}
+	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub", Map: 309}, rows: rows,
+		opts: raidWalkOptions{dir: "../../dungeons", gmClear: stringList{"one:1,2"}, gmClearSpawns: dir}}
+	if err := w.validateGMClear(); err != nil {
+		t.Fatalf("validateGMClear aborted: %v", err)
+	}
+	if len(w.gmClear) != 1 || w.gmClear[0].Group != "1" {
+		t.Fatalf("packs %+v, want group 1's pack", w.gmClear)
+	}
+	if len(w.gmClearWarn) != 1 || !strings.Contains(w.gmClearWarn[0], "group 2") {
+		t.Fatalf("warnings %v, want the group 2 WARN", w.gmClearWarn)
+	}
+	notes := strings.Join(w.notes, "\n")
+	if !strings.Contains(notes, "WARN: skipped leg one group 2 (step 3)") {
+		t.Fatalf("notes %q, want the group 2 WARN", notes)
+	}
+	if !strings.Contains(notes, "1 packs to kill") {
+		t.Fatalf("notes %q, want group 1 planned", notes)
+	}
+}
+
 // gmClearPack plans the ZG pack of leg 2 group 2 (nine members: the walk-26b pack 0 stand pull) from the export in dir and returns it with its members' world guids.
 func gmClearPack(t *testing.T, dir string) (raidwalk.GMClearPack, []packet.GUID) {
 	t.Helper()
@@ -87,7 +128,7 @@ func gmClearPack(t *testing.T, dir string) (raidwalk.GMClearPack, []packet.GUID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	packs, err := raidwalk.PlanGMClear(res.Rows, world, []raidwalk.GMClearSpec{{Leg: "2", Groups: []int{2}}})
+	packs, _, err := raidwalk.PlanGMClear(res.Rows, world, []raidwalk.GMClearSpec{{Leg: "2", Groups: []int{2}}})
 	if err != nil || len(packs) != 1 {
 		t.Fatalf("packs %v, err %v", packs, err)
 	}
