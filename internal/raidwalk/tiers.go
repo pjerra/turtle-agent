@@ -10,7 +10,7 @@ import "fmt"
 // tuning finding, never fixed by raising the tier).
 //
 // TODO (0 rows to source, one raid at a time, with that raid's mercenary unlock quest and hire-gear set): molten_core,
-// blackwing_lair, ruins_of_ahnqiraj, temple_of_ahnqiraj, naxxramas, upper_blackrock_spire,
+// blackwing_lair, temple_of_ahnqiraj, naxxramas, upper_blackrock_spire,
 // lower_karazhan_halls, upper_karazhan_halls, timbermaw_hold, emerald_sanctum.
 var MinimumHireTier = map[string]int{
 	// onyxia-kill-plan.md (c): the tier-3 quest needs Molten Core, Onyxia and Timbermaw kills, so a player who fights
@@ -21,8 +21,10 @@ var MinimumHireTier = map[string]int{
 	"blackwing_lair": 0,
 	// HireUnlockPolicy.h kHireUnlockCounters: the tier-2 quest counts Zul'Gurub bosses slain (95111), so a player in
 	// Zul'Gurub holds the tier-1 kit (unlocked by the dungeon lords, 95110).
-	"zul_gurub":             1,
-	"ruins_of_ahnqiraj":     0,
+	"zul_gurub": 1,
+	// A player reaching AQ20 holds the tier-1 kit: the tier-2 quest (90101) counts Zul'Gurub, Ruins of Ahn'Qiraj and Lower
+	// Karazhan bosses slain, so AQ20 is entered under tier 1, as Zul'Gurub is.
+	"ruins_of_ahnqiraj":     1,
 	"temple_of_ahnqiraj":    0,
 	"naxxramas":             0,
 	"upper_blackrock_spire": 0,
