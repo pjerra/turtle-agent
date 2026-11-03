@@ -96,6 +96,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return planCheckCmd(args[1:], stdout, stderr)
 	case "plan-probe":
 		return planProbeCmd(args[1:], stdout, stderr)
+	case "plan-scout":
+		return planScoutCmd(ctx, args[1:], stdout, stderr)
 	case "path-check":
 		return pathCheckCmd(args[1:], stdout, stderr)
 	case "patrol-record":

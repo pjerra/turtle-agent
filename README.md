@@ -97,6 +97,7 @@ turtle-agent tune-diff <trace.jsonl>
 turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--approach-hops] [--floor-aware] [--skip-legs NAME,...] [--with-optional NAME,...] [--with-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--spawns DIR] [--floor-aware] [--approach-hops] [--strict] [--json] <plan>...
 turtle-agent plan-check --mmaps DIR --sql FILE [--plan NAME] [--spawns DIR] [--strict] [--json]
+turtle-agent plan-scout <dungeon> [--dir dungeons] [--sql FILE] [--mmaps DIR] [--spawns DIR] [--from LEG] [--until LEG] [--party-level N] [--out DIR] [--json] [--fix-out FILE] [--apply-fixes DIR] [--fail-on fail|warn] [--live SERVER --slot N ...]
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
 turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
@@ -1002,9 +1003,16 @@ What it checks:
 - `ledge`: another floor stands 4.5-8 yd above or below within 4.5 yd;
 - `short hop`: the point is under 8 yd from the row before it (the arrival radius is 3 yd, so one goal never needs two rows that close);
 - `aggro`: a gather or stand point is inside the core aggro radius at party level 60 (detection 20 yd unless the export carries `detection_range`) plus 8 yd of a hostile unit no earlier pull or boss row owns, with the target pack left out;
-- `patrol`: a move point is inside a patrol lane's aggro radius plus 5 yd and the run has not pulled that patroller yet.
+- `patrol`: a move point is inside a patrol lane's aggro radius plus 5 yd and the run has not pulled that patroller yet;
+- `reach`: the server's own query answers NOPATH, unreachable or off-mesh (the pull/boss tolerance of `plan-probe` kept);
+- `hop_len`: a walked row is over 120 yd from the row before it (warning) or over 140 yd, the move cap minus the drift margin (error); a pull or boss row's eight-point drift ring is measured too;
+- `arrival`: the server's path to a `move` row ends more than 3 yd short (warning: only the stall rule arrives) or more than 6 yd short (error);
+- `climb_anchor`: the stand of a stand pull, or the point of a plain pull, stands more than 8 yd above or below its anchor (error: `CheckAnchor` says Off and the run loops gathering; a plain move's climb only warns);
+- `joiners`: the target pack's pull wakes 1-2 bodies of other packs (warning) or 3+, or over the row's `item` ceiling (error), by the `aggroest` estimate (`dungeongen`'s `pull_size` lint now calls the same `planlint.PullSizes`).
 
-The aggro and patrol lints need the map's world export (`--spawns DIR`, default `<dir>/../tools/dungeongen/testdata/mapN`); without one they are skipped with a note. The Zul'Gurub plan of 2026-11-03 fails all of them (the audit's figures: 663 rows at an edge, 180 ledges, 77 water rows): the lints are report-only until the plan is regenerated.
+A finding's own severity decides the check's exit status: `severity: "error"` findings fail it without `--strict` (the JSON carries the field); the warning lints keep report-only.
+
+The aggro, patrol and joiner lints need the map's world export (`--spawns DIR`, default `<dir>/../tools/dungeongen/testdata/mapN`); without one they are skipped with a note. The Zul'Gurub plan of 2026-11-03 fails all of them (the audit's figures: 663 rows at an edge, 180 ledges, 77 water rows): the lints are report-only until the plan is regenerated.
 
 Limits (what the check does not model): the bot's real z and the vmap floor snap of the goal (a ledge whose mesh floats 2-3 yd above the game floor still passes); swimming (underwater
   shortcut paths, which need liquid data); tiles unloaded on the server (the core loads mmtiles per loaded grid; the check covers only the start and end); the module's 25 yd stand-in
@@ -1046,6 +1054,16 @@ The file is `tb-patrols` v1 (`internal/patrols`): per patrol the measured path, 
 estimate, and raid-walk's revive quiet check (`--patrols`) keeps the revive point clear of patrol paths. A complete recording prints one line
 per patrol (`52050 Onyxian Warder: period 33.4 s (3 cycles), 7 points, matches spawn 52050`) and exits 0. Exit 15 is a refused slot, a
 grouped agent or an agent that is not in the world; 16 is an RPC error, 2 a usage error and 22 a safety stop.
+
+### Plan scout
+
+`turtle-agent plan-scout <dungeon> [--dir dungeons] [--sql FILE] [--mmaps DIR] [--spawns DIR] [--from LEG] [--until LEG] [--party-level N] [--out DIR] [--json] [--fix-out FILE] [--apply-fixes DIR] [--fail-on fail|warn]` checks a raid or dungeon plan point by point before a walk. The offline pass is `plan-check`'s lint entry point, `planlint.Lint`, over the plan's exported rows (or a migration's rows with `--sql`): every finding becomes a step check named after the lint, `source: "offline"`, its severity mapped error -> `fail` and warning -> `warn`. The rows are rebuilt with the exporter's cutter unless `--sql` gives the deployed rows. The report (`tb-plan-scout` v1: `<out>/scout-<plan>.json` and `.txt`, `<out>` default `./plan-scout-<plan>-<stamp>`) lists every step with its verdict, the plan element it came from (`origin`, from `planexport`'s row origins) and the checks that were not ok; the text has one line per non-ok step, then the counts and the runtime. `--from`/`--until` take an exported leg number (0-based, as the rows carry it) or a leg name, inclusive.
+
+The fix file (`--fix-out FILE`, `tb-scout-fix` v1, also written with no fixes) proposes corrections: `snap_point` (a row moved to the nearest walkable floor), `insert_via` (vias along the offline server path every 50 yd, and every 6 yd of climb), `dry_detour` (a wet gather point moved to dry ground, or a hop re-planned around the water polygons), `move_stand` (a stand at 24 bearings and 15-55 yd that keeps every other pack clear) and `split_pull` (the joiner packs and the plan group that owns each later, `apply: false`: a new pull group changes ownership and the step pins). Each fix names its plan element through the row origin; a row without one is coordinate-only and `apply: false`.
+
+`--apply-fixes DIR` writes `DIR/<plan>.json` and `DIR/<plan>.diff`, never in place: `DIR` must not exist or be empty, and a `DIR` inside a `dungeons/` folder (or a slot's plan folder) is refused. The fixes are applied by `routeedit.Clone` and checked with `routeedit.Evaluate`: a fix set that adds a plan-check issue is refused as a whole (exit 27, nothing written). With `--sql`, the rows must equal the plan's own export (`rows_sha256`) or the apply is refused (exit 2).
+
+Exit codes: 0 no failing step (warnings allowed unless `--fail-on warn`); 27 a failing step or a refused `--apply-fixes`; 1 the navmesh cannot answer; 2 usage or an unreadable plan/sql/spawns; 15 slot 3; 18 a live phase refused (the live pass is not in this build yet). `--live` and the live flags parse now and return 18; the GM path, the live spot/walk/path passes and `MergeLive` are the next build.
 
 ### Plan probe
 
