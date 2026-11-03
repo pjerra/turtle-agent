@@ -803,6 +803,26 @@
           ]
         },
         {
+          "entries": [11361, 11831, 11350, 11361, 11350, 11361, 11830, 11361, 11352],
+          "positions": [
+            {"x": -11598.9, "y": -1764.43, "z": 39.89},
+            {"x": -11591.8, "y": -1763.43, "z": 43.3},
+            {"x": -11596.8, "y": -1757.02, "z": 40.03},
+            {"x": -11591.7, "y": -1756.43, "z": 40},
+            {"x": -11601.8, "y": -1744, "z": 39.82},
+            {"x": -11603.5, "y": -1739.6, "z": 39.49},
+            {"x": -11596, "y": -1738.28, "z": 43.45},
+            {"x": -11601.3, "y": -1729.95, "z": 39.92},
+            {"x": -11611.7, "y": -1736.6, "z": 38.88}
+          ],
+          "radius": 18,
+          "approach": [
+            {"x": -11576, "y": -1778, "z": 46.3}
+          ],
+          "stand_pull": true,
+          "max_bodies": 9
+        },
+        {
           "entries": [11368, 11368, 11350, 11830],
           "positions": [
             {"x": -11564.6, "y": -1736.66, "z": 39},
@@ -813,16 +833,6 @@
           "radius": 7.6,
           "approach": [
             {"x": -11573.13, "y": -1754.6578, "z": 40.149597}
-          ]
-        },
-        {
-          "entries": [11352],
-          "positions": [
-            {"x": -11611.7, "y": -1736.6, "z": 38.88}
-          ],
-          "radius": 1,
-          "approach": [
-            {"x": -11594.056, "y": -1745.6417, "z": 39.677322}
           ]
         },
         {
@@ -1033,7 +1043,8 @@
         ]
       },
       "notes": [
-        "Pull group 12 (27 units): walk 29 validates this pull live; revert to split pulls if the raid cannot hold 27."
+        "Pull group 12 (27 units): walk 29 validates this pull live; revert to split pulls if the raid cannot hold 27.",
+        "WALK 29 FIX 4 (2026-11-03, leg 4; research/zg-w29/WALK29-FIX-PLAN.md \u00a72): step 295's move to the bats' approach walked the party through two leg-7 tiger formations no leg-4 row owned: on arrival (b 00:37:52) formation 49699 (Tigers 49699/49700, Axe Thrower 91464, Witch Doctor 91465; its spawn 18.6 yd from the approach) and 49716 (Tigers 49716/49717, Axe Thrower 91511, Priest 91512) plus the Bloodseeker bats 51873 and their summons were 12 bodies at once; peak 14-15, 53/3/9/22 dead in b/b-r1/g/g-r1. The two formations and the patroller 91435 (11352, movement 2, 8.8 yd from them) are one leg-4 row now, ahead of the bats: 9 bodies, max_bodies 9, stand_pull. Its stand -11576 -1778 46.3 (walked by the party in b/g) is 21.7 yd from the nearest tiger and 43.5 yd from the bat formation; it lies on the ramp down from group 6 (-11562.6 -1792.5 z 56.4). The leg-7 group 38 and its 4-point approach chain are gone. Today's bats approach -11573.13 -1754.66 keeps a dead neighbourhood but is still 18.6 yd from 49699's spawn: it is used only after the tigers are dead, as the row now ensures."
       ]
     },
     {
@@ -2129,26 +2140,6 @@
           "radius": 1,
           "approach": [
             {"x": -11894.194, "y": -1603.4705, "z": -13.550188}
-          ]
-        },
-        {
-          "entries": [11361, 11831, 11350, 11361, 11350, 11361, 11830, 11361],
-          "positions": [
-            {"x": -11598.9, "y": -1764.43, "z": 39.89},
-            {"x": -11591.8, "y": -1763.43, "z": 43.3},
-            {"x": -11596.8, "y": -1757.02, "z": 40.03},
-            {"x": -11591.7, "y": -1756.43, "z": 40},
-            {"x": -11601.8, "y": -1744, "z": 39.82},
-            {"x": -11603.5, "y": -1739.6, "z": 39.49},
-            {"x": -11596, "y": -1738.28, "z": 43.45},
-            {"x": -11601.3, "y": -1729.95, "z": 39.92}
-          ],
-          "radius": 18.9,
-          "approach": [
-            {"x": -11943.2, "y": -1823.2, "z": 53.84},
-            {"x": -11920.8, "y": -1821.07, "z": 52.14},
-            {"x": -11745.6, "y": -1837.6, "z": 39.34},
-            {"x": -11605.213, "y": -1770.5043, "z": 40.788986}
           ]
         }
       ],
