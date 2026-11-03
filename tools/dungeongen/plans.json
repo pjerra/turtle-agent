@@ -108,6 +108,7 @@
   },
   {
    "name": "blackfathom_deeps",
+   "handwritten": true,
    "title": "Blackfathom Deeps",
    "map": 48,
    "kind": "dungeon",
@@ -152,6 +153,7 @@
   },
   {
    "name": "gnomeregan",
+   "handwritten": true,
    "title": "Gnomeregan",
    "map": 90,
    "kind": "dungeon",
@@ -517,6 +519,7 @@
   },
   {
    "name": "lower_blackrock_spire",
+   "handwritten": true,
    "title": "Lower Blackrock Spire",
    "map": 229,
    "kind": "dungeon",
@@ -992,6 +995,7 @@
   },
   {
    "name": "stormwind_vault",
+   "handwritten": true,
    "title": "Stormwind Vault",
    "map": 35,
    "kind": "dungeon",
