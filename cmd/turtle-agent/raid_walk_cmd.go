@@ -415,10 +415,10 @@ func gmKillAuthorize(st config.Settings, dialed string) (bool, string) {
 }
 
 // gmKillAllowed says whether this session may send gm_kill's `.die` (session.Options.AllowGMKill). It trusts the connection,
-// not the settings: the host the session dialled (the realm's world address, or settings world_addr) must equal the
-// configured address of the test server that settings server_name names in the slots table: its world_addr, or its realmd
-// when world_addr is unset. server_name alone never authorizes. A refusal carries a reason only when server_name names a
-// test server (an ordinary agent is refused silently).
+// not the settings: the host:port the session dialled (the realm's world address, or settings world_addr) must equal the
+// world_addr of the test server that settings server_name names in the slots table. A server with no world_addr is
+// refused: its realmd is never a stand-in. server_name alone never authorizes. A refusal carries a reason only when
+// server_name names a test server (an ordinary agent is refused silently).
 func gmKillAllowed(st config.Settings, dialed string, servers []slots.Server) (bool, string) {
 	if !placeServers[st.ServerName] {
 		return false, ""
@@ -433,28 +433,27 @@ func gmKillAllowed(st config.Settings, dialed string, servers []slots.Server) (b
 	if srv == nil {
 		return false, fmt.Sprintf("server_name %q is a test server, but the slots table has no entry for it: gm_kill needs its configured address", st.ServerName)
 	}
-	want := srv.WorldAddr
-	if want == "" {
-		want = srv.Realmd
+	if srv.WorldAddr == "" {
+		return false, fmt.Sprintf("server_name %q is a test server, but its slots entry has no world_addr: gm_kill needs its configured world address (its realmd is not used)", st.ServerName)
 	}
-	if !sameHost(dialed, want) {
-		return false, fmt.Sprintf("settings server_name is %q, but the session dialled %s, which is not the configured address of %s in the slots table: gm_kill refused", st.ServerName, dialed, st.ServerName)
+	if !sameAddr(dialed, srv.WorldAddr) {
+		return false, fmt.Sprintf("settings server_name is %q, but the session dialled %s, which is not the configured world_addr of %s in the slots table: gm_kill refused", st.ServerName, dialed, st.ServerName)
 	}
 	return true, ""
 }
 
-// sameHost reports whether dialed and configured name the same host (ports are not compared). Either side without a
-// host:port never matches.
-func sameHost(dialed, configured string) bool {
-	dh, _, err := net.SplitHostPort(dialed)
-	if err != nil || dh == "" {
+// sameAddr reports whether dialed and configured are the same host:port: the host compares case-insensitively, the port
+// exactly. Either side without a host and a port never matches.
+func sameAddr(dialed, configured string) bool {
+	dh, dp, err := net.SplitHostPort(dialed)
+	if err != nil || dh == "" || dp == "" {
 		return false
 	}
-	ch, _, err := net.SplitHostPort(configured)
-	if err != nil || ch == "" {
+	ch, cp, err := net.SplitHostPort(configured)
+	if err != nil || ch == "" || cp == "" {
 		return false
 	}
-	return strings.EqualFold(dh, ch)
+	return strings.EqualFold(dh, ch) && dp == cp
 }
 
 // placeServerList is the place servers, sorted, for the refusal.

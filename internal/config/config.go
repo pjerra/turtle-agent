@@ -69,7 +69,7 @@ type Settings struct {
 	// so a shared print marked on one account would reach all of them.
 	SharedFingerprint bool `json:"shared_fingerprint,omitempty"`
 	// ServerName is the slots-config name of the server this slot agent belongs to (slot setup writes it). The gm_kill RPC reads it
-	// only as a name: gm_kill also needs the dialled host to be that server's configured address (gmKillAllowed). Alone it never authorizes.
+	// only as a name: gm_kill also needs the dialled host:port to be that server's world_addr (gmKillAllowed). Alone it never authorizes.
 	ServerName string `json:"server_name,omitempty"`
 	// StateDir is where the addon fingerprint and the instance-entry ledger are kept
 	// (default: the settings file's folder). A leading ~/ is the home folder. When

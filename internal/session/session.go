@@ -91,7 +91,7 @@ func (e *LogoutError) Error() string {
 }
 
 type Options struct {
-	// AllowGMKill lets GMKill send ".die". The agent sets it only when the dialled host is a test server's configured address (raid-walk's gmKillAllowed); false refuses.
+	// AllowGMKill lets GMKill send ".die". The agent sets it only when the dialled host:port is a test server's configured world_addr (raid-walk's gmKillAllowed); false refuses.
 	AllowGMKill   bool
 	Character     string        // character name, case-insensitive
 	Create        *CreateSpec   // nil: no create; set: create this race/class when the list lacks the name

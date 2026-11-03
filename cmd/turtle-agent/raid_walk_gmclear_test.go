@@ -490,12 +490,13 @@ func TestDryRunListsGMClearPacks(t *testing.T) {
 	}
 }
 
-// gm_kill is authorized from the dialled host, never from server_name alone: the host must be the configured address
-// of the test server server_name names in the slots table (world_addr, or realmd when world_addr is unset). Ports are not
-// compared. An ordinary agent (server_name not a test server) is refused with no reason.
+// gm_kill is authorized from the dialled host:port, never from server_name alone: it must be exactly the world_addr of the
+// test server server_name names in the slots table. The host compares case-insensitively, the port exactly. A test server
+// with no world_addr is refused (its realmd is not a stand-in). An ordinary agent (server_name not a test server) is
+// refused with no reason.
 func TestGMKillAllowedNeedsTheConfiguredAddress(t *testing.T) {
 	servers := []slots.Server{
-		{Name: "m910q", Realmd: "10.1.1.1:3724"},
+		{Name: "m910q", Realmd: "10.1.1.1:3724", WorldAddr: "10.1.1.1:8085"},
 		{Name: "tortoise-test2", Realmd: "10.2.2.2:3724", WorldAddr: "10.2.2.3:8085"},
 	}
 	cases := []struct {
@@ -504,7 +505,10 @@ func TestGMKillAllowedNeedsTheConfiguredAddress(t *testing.T) {
 		reasonHas            string // "" = no reason expected
 	}{
 		{"test2 dialled at its world_addr", "tortoise-test2", "10.2.2.3:8085", true, ""},
-		{"m910q dialled at its realmd host, any port", "m910q", "10.1.1.1:9999", true, ""},
+		{"m910q dialled at its world_addr", "m910q", "10.1.1.1:8085", true, ""},
+		{"m910q same host, its realmd port", "m910q", "10.1.1.1:3724", false, "gm_kill refused"},
+		{"m910q same host, another port", "m910q", "10.1.1.1:9999", false, "gm_kill refused"},
+		{"test2 same host, another port", "tortoise-test2", "10.2.2.3:8086", false, "gm_kill refused"},
 		{"settings say tortoise-test2, session dialled a live host", "tortoise-test2", "203.0.113.9:8085", false, "gm_kill refused"},
 		{"settings say tortoise-test2, dialled its realmd host, not its world_addr", "tortoise-test2", "10.2.2.2:8085", false, "gm_kill refused"},
 		{"settings say m910q, dialled the other test server", "m910q", "10.2.2.3:8085", false, "gm_kill refused"},
@@ -526,6 +530,21 @@ func TestGMKillAllowedNeedsTheConfiguredAddress(t *testing.T) {
 	// A test server named in settings but missing from the slots table is refused with a reason.
 	if got, why := gmKillAllowed(config.Settings{ServerName: "m910q"}, "10.1.1.1:8085", nil); got || !strings.Contains(why, "no entry") {
 		t.Errorf("no slots entry: allowed %v, reason %q", got, why)
+	}
+	// A test server whose slots entry has no world_addr is refused on every address, its realmd included.
+	noWorld := []slots.Server{{Name: "m910q", Realmd: "10.1.1.1:3724"}}
+	for _, dialed := range []string{"10.1.1.1:3724", "10.1.1.1:8085"} {
+		if got, why := gmKillAllowed(config.Settings{ServerName: "m910q"}, dialed, noWorld); got || !strings.Contains(why, "no world_addr") {
+			t.Errorf("no world_addr, dialled %s: allowed %v, reason %q", dialed, got, why)
+		}
+	}
+	// The host compares case-insensitively; the port still has to match exactly.
+	hostname := []slots.Server{{Name: "m910q", WorldAddr: "test.local:8085"}}
+	if got, why := gmKillAllowed(config.Settings{ServerName: "m910q"}, "TEST.Local:8085", hostname); !got || why != "" {
+		t.Errorf("host in another case, same port: allowed %v, reason %q", got, why)
+	}
+	if got, _ := gmKillAllowed(config.Settings{ServerName: "m910q"}, "TEST.Local:8086", hostname); got {
+		t.Errorf("host in another case, other port: allowed")
 	}
 }
 
