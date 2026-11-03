@@ -313,8 +313,8 @@ func TestWailingCavernsPlanMatchesTheExport(t *testing.T) {
 		t.Fatalf("no kresh leg")
 	}
 	if kl != 3 || p.Legs[kl].Boss == nil || p.Legs[kl].Boss.Entry != 3653 || len(p.Legs[kl].PullGroups) != 0 ||
-		dist3(p.Legs[kl].To, Point{X: 4, Y: 254, Z: -105.5}) > 0.1 || p.Legs[kl].Boss.WaitS != 300 {
-		t.Fatalf("legs[%d] (%s): want the kresh boss leg (3653, no pulls, wait_s 300) at 4 254 -105.5: %+v", kl, p.Legs[kl].Name, p.Legs[kl])
+		dist3(p.Legs[kl].To, Point{X: -18, Y: 234, Z: -104.5}) > 0.1 || p.Legs[kl].Boss.WaitS != 300 {
+		t.Fatalf("legs[%d] (%s): want the kresh boss leg (3653, no pulls, wait_s 300) at -18 234 -104.5: %+v", kl, p.Legs[kl].Name, p.Legs[kl])
 	}
 	wp := Point{X: -3.64081, Y: 229.268, Z: -106.189}
 	if dist3(p.Legs[kl].Boss.Position, wp) > 0.1 {

@@ -82,6 +82,7 @@ var pullSizeKnownCounts = map[string]int{
 	"stormwrought_ruins": 190, // hand-maintained from the generated draft (waypoint pass 2026-11-03): dense custom packs warn on most pulls.
 	"lower_karazhan_halls": 78, "upper_karazhan_halls": 30, // waypoint pass (was 79): one moved stand pulls its pack from one body fewer.
 	"emerald_sanctum": 7, "timbermaw_hold": 27, "maraudon_orange": 86, "scholomance": 101, // newly hand-maintained (were generated): the moved stands' estimates.
+	"razorfen_kraul": 89, "dire_maul_north": 19, "windhorn_canyon": 104, "upper_blackrock_spire": 68,
 }
 
 func TestPullSizesUnderCeiling(t *testing.T) {

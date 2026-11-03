@@ -310,7 +310,7 @@ func TestRouteIntoLaterPacksDefaultsDetectionTo20(t *testing.T) {
 // each approach on its pack's level; the comment then says so).
 var routeAggroKnownFailing = map[string]int{
 	"ragefire_chasm":       153,  // boss rows own their boss (was 161). the repo reach (AggroRadius at 13-18 plus spread and wander) outruns the old 20 yd flat line.
-	"wailing_caverns":      173,  // boss rows own their boss (was 188). the repo reach (AggroRadius at 22-27 plus spread and wander) outruns the old 20 yd flat line.
+	"wailing_caverns":      169,  // waypoint pass (was 173): the moved stands walk past fewer later packs.
 	"deadmines":            641,  // boss rows own their boss (was 661). the repo reach (AggroRadius at 18-22 plus spread and wander) outruns the old 20 yd flat line.
 	"uldaman":              249,  // boss rows own their boss (was 268). the repo reach (AggroRadius at 41-45 plus spread and wander) outruns the old 20 yd flat line.
 	"zulfarrak":            56,   // boss rows own their boss (was 66 with #391, 65 before it): a pass past a boss's own row is no finding.
@@ -327,6 +327,7 @@ var routeAggroKnownFailing = map[string]int{
 	"emerald_sanctum":      15,   // boss rows own their boss (was 17). the repo reach (AggroRadius at 60 plus the raid's 10 yd spread) outruns detection 20, from 8.
 	"timbermaw_hold":       195,  // waypoint pass (was 214): the reworked loktanag_lower vias walk past fewer later packs.
 	"maraudon_orange":      135, "scholomance": 843, // newly hand-maintained (were generated): the current route's passes.
+	"razorfen_kraul":       256, "dire_maul_north": 36, "windhorn_canyon": 327, "upper_blackrock_spire": 459,
 }
 
 // TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn
