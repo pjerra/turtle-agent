@@ -22,10 +22,33 @@
     "rogue:dps",
     "hunter:dps"
   ],
+  "cc_priority": [62077, 62036, 62047, 62046],
+  "cc_always": [62077],
+  "no_cc": [62037, 62041, 62066, 62067, 62072, 62073, 62074, 62075, 62078, 62263, 62264, 62453],
+  "kill_first": [62053, 62039, 62071, 62070, 8853],
   "notes": [
     "DRAFT: a skeleton from the world database export of map 816 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
-    "Turtle custom with a front (5343) and a back entrance (5346); the draft starts at the front. Bogpaw Truthsay and Gowlfang stand together; the other named mobs (Slagfist Destroyer 62068, Overlord Blackheart 62070, Garlok Flamekeeper 62071, Elder Hollowblood 62038, Web Master Torkon 62067, Cavernweb Broodmother 62066) are packs here, some may be bosses."
+    "Turtle custom with a front (5343) and a back entrance (5346); the draft starts at the front. Bogpaw Truthsay and Gowlfang stand together; the other named mobs (Slagfist Destroyer 62068, Overlord Blackheart 62070, Garlok Flamekeeper 62071, Elder Hollowblood 62038, Web Master Torkon 62067, Cavernweb Broodmother 62066) are packs here, some may be bosses.",
+    "2026-10-23 prep: critters 4075 (rat) and 14881 (spider) removed from every pull group (type 8, faction 31/190: not trash). 74 spawns, 41 pure groups gone. Leg 2 now enters through the main network: a plain via at the front ramp end (-6191.7 -3955.2 220.9) and a direct gm_cross at the main landing (-6190.1 -3962.4 215.8), the one-way 6 yd drop (NAVMESH-GAPS-2026-10-23); the back-entrance wing `to` is gone. The single Bruiser inside Bogpaw/Gowlfang 20 yd detection is no longer a pull: it joins the twin-boss fight (boss first [62057] Gowlfang). Enchanter 62453 group moved before the near-boss whelp pack. Lists from the census: no fleer (no EventAI flee row); cc_priority 62077 (Fear) 62036 62047 62046, kill_first 62053 (Healing Wave) 62039 62071 62070 and the summoned Skeleton 8853; no_cc for the non-polymorphable casters.",
+    "2026-10-24 audit (r35 slot6b): the leg-3 stop at step 475 was the magma pool on the low walkway, not a route length. The exported approach row dipped to z 70.94 at -6404.5 -3951.0 (the pool floor, 1.7 yd under the walkway) and the followers who went down burned 605-610 a second (lava, EnvironmentalDamage.Min/Max) with the lead safe on the rim 14-19 yd short. The `avoid` box below keeps the cutter and the run leader's vias out of it: the re-export walks the east rim at x -6378.7, z 72.69 (884 steps). plan-check is unchanged (the known leg-4 group 45 needs_walk is still the one failure); no plan point lies in the box.",
+    "2026-10-25 fix3 (legs 3-5): the corridor camp the old leg-3 walk crossed is its own leg (hall_clear) pulled in 12 waves from stands 21-30 yd; the old halgan and zuluhed legs are split where one walk is more than 300 yd (halgan_approach/halgan_redbrand at the z72 -\u003e z216 climb, zuluhed_approach/zuluhed_floor at the z201 -\u003e z78 descent, zuluhed_the_whacked from the z72 floor to the z322 boss packs). Every such walk is a via list of server-path points every 45 yd: the exporter's 50-yd cut of a long hop interpolates across staircases and lands 4-6 yd above the floor (the refused hops 3:66/3:87/4:13).",
+    "2026-10-25 r39s2 fix (DMR-FIX4-2026-10-25.md): the hallway camp leg (hall_clear) now runs BEFORE searistrasz, on the way up the corridor the old leg 2 walked through unpulled (r39s2 steps 226-243: 8 deaths, three tries on 228, four more at 236, 7-9 min walks back). The corridor walk back down is the new hall_return leg. halgan_approach: the rest stand of pull group 19 moved out of the magma sheet (avoid box 2), group 16 (62035 in the lava) and group 17 (the ledge 62036 with no dry stand) left out.",
+    "2026-10-25 fix5 (r39s2 slotA2, DMR-FIX5-2026-10-25.md): the hall_clear landing at -6190.1 -3962.4 215.8 is a plain direct step with a check_skip, no longer a gm_cross (7.4 yd across, 5.1 yd down, a 9.0 yd navmesh gap: no server path across it), so plan-export takes the plan cleanly and the rows are the move_direct the run leader walked live (step 200). zuluhed_approach's four packs on the z 290-303 ledge above the corridor's south end now have the ramp up to them as approach rows (group 19: four points, group 22: three): the plan had no route up, and r39s2 slotA2 stopped at step 614 there (three packs deferred as not reachable from this floor, then no walkable path toward the next point at -6283.5 -4392.5 302.7 from the lead at -6282.7 -4325.9 266.2). Pull stands -6330 -4380 290.4 (29.6, 25.8 and 26.9 yd from the three z 290 packs) and -6283.47 -4392.53 302.69 (22.4 yd from the z 303 golem)."
+  ],
+  "avoid": [
+    {
+      "name": "magma pool under the halgan_redbrand low walkway",
+      "min": {"x": -6416, "y": -3970, "z": 70.7},
+      "max": {"x": -6378, "y": -3946, "z": 72.6},
+      "why": "Run r35 slot6b (2026-10-24): 13 bots lost in leg 3, 11 of them on step 475, each hit 484-608 hp with no hostile within 60 yd and no combat flag (trace t8572-t9017; the 608 twice on a 1638-hp mage and a 1883-hp hunter in one frame at t8742.8). That is the core's lava tick: Player::OnMirrorTimerExpirationPulse DAMAGE_LAVA, urand(EnvironmentalDamage.Min 605, Max 610) every 1 s, cut by fire resist; drowning would be GetMaxHealth()/5 (264-377). The pool floor's polygons are flagged liquid at z 70.8-70.9; the magma surface is between 72.5 (a bot at 72.5 still burned, t8798) and 72.64 (the dry walkway). The exported step 475 (leg 3 seq 118, -6404.53 -3950.93 70.94) was the exporter's cut of the climb to pull group 24: it sent the party down the shore slope into the pool, the lead refused its own walk ('stay walk resting after 3 failed walks'), the followers burned, and the run stopped after the 4th pause (9053 s). The box is the floor band, Max.Z just under the walkway, so the walkway rows at z 72.636-72.689 stay legal."
+    },
+    {
+      "name": "magma sheet under the hall bridge (halgan_approach rest stand)",
+      "min": {"x": -6385, "y": -3870, "z": 69.9},
+      "max": {"x": -6330.5, "y": -3830, "z": 73.3},
+      "why": "Run r39s2 slotA (2026-10-25): the party rested at the old pull group 19 approach -6332.93 -3863.11 and died with no hostile in combat, twice (04:55:56-04:56:54 and 05:06:06-05:07:24 CET): the addon view held 0 hostiles, every hostile in the trace had no target, and the hp fell 392-1183 per 3 s on a 3113-hp tank - the core lava tick (Player::OnMirrorTimerExpirationPulse DAMAGE_LAVA, 605-610 every 1 s). The bots stood at z 70.3-73.1 while the navmesh calls the sheet walkable at z 72.69 (a phantom floor over the bridge); the trace's unhurt bots stood at z 73.0 at x \u003e= -6330. The trace x/y of the burning bots: -6381.6 -3843.7, -6379.3 -3835.7, -6355.4 -3849.8, -6347 -3857.5, -6342.3 -3856.3, -6340 -3861.5, -6335.6 -3861.8, -6334.8 -3862.3, -6332.9 -3863.1. The 62035 at -6360.97 -3838.82 73.17 and the ledge 62036 at -6357.21 -3867.19 106.97 were suspected of killing the party; neither ever targeted a bot (trace mobs Target=0, cb=false) and neither can deal that damage."
+    }
   ],
   "legs": [
     {
@@ -36,13 +59,15 @@
           "entries": [62052],
           "positions": [
             {"x": -6171.48, "y": -3627.91, "z": 283.887}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [62052],
           "positions": [
             {"x": -6172.06, "y": -3620.08, "z": 282.421}
-          ]
+          ],
+          "radius": 7
         },
         {
           "entries": [62052],
@@ -75,13 +100,15 @@
           "positions": [
             {"x": -6184.91, "y": -3671.55, "z": 240.878},
             {"x": -6193.94, "y": -3663.97, "z": 240.878}
-          ]
+          ],
+          "radius": 13
         },
         {
           "entries": [62046],
           "positions": [
             {"x": -6198.5, "y": -3666.8, "z": 241.438}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [62052],
@@ -177,12 +204,6 @@
           ]
         },
         {
-          "entries": [62055],
-          "positions": [
-            {"x": -5985.32, "y": -3626.44, "z": 326.214}
-          ]
-        },
-        {
           "entries": [62055, 62054, 62053],
           "positions": [
             {"x": -6026.66, "y": -3598.95, "z": 325.644},
@@ -195,21 +216,51 @@
           "positions": [
             {"x": -6200.23, "y": -3608.99, "z": 275.428}
           ]
+        },
+        {
+          "entries": [62264, 62036, 62264],
+          "positions": [
+            {"x": -6181.27, "y": -3841.27, "z": 252.539},
+            {"x": -6181.89, "y": -3836.28, "z": 252.539},
+            {"x": -6187.22, "y": -3835.21, "z": 252.54}
+          ]
+        },
+        {
+          "entries": [62264, 62263],
+          "positions": [
+            {"x": -6186.97, "y": -3826.21, "z": 277.349},
+            {"x": -6190.42, "y": -3826.19, "z": 277.349}
+          ]
+        },
+        {
+          "entries": [62264],
+          "positions": [
+            {"x": -6200.36, "y": -3823.62, "z": 277.604}
+          ]
+        },
+        {
+          "entries": [62036, 62264, 62263],
+          "positions": [
+            {"x": -6259.34, "y": -3825.47, "z": 252.555},
+            {"x": -6259.46, "y": -3828.06, "z": 252.553},
+            {"x": -6260.82, "y": -3829.47, "z": 252.553}
+          ]
         }
       ],
       "boss": {
         "entry": 62056,
-        "position": {"x": -5966.17, "y": -3622.8, "z": 325.644}
+        "position": {"x": -5966.17, "y": -3622.8, "z": 325.644},
+        "first": [62057]
       }
     },
     {
       "name": "gowlfang",
-      "to": {"x": -5964, "y": -3648, "z": 325.8},
+      "to": {"x": -5973.75, "y": -3640.44, "z": 325.903},
       "pull_groups": [
         {
           "entries": [62053],
           "positions": [
-            {"x": -5964, "y": -3648, "z": 325.8}
+            {"x": -5966.75, "y": -3647.44, "z": 325.644}
           ]
         },
         {
@@ -250,85 +301,173 @@
       }
     },
     {
-      "name": "searistrasz",
-      "to": {"x": -5755.52, "y": -3954.59, "z": 300.186},
+      "name": "hall_clear",
+      "to": {"x": -6314.6665, "y": -4074.6665, "z": 215.089},
+      "via": [
+        {"x": -6191.7, "y": -3955.2, "z": 220.9},
+        {
+          "x": -6190.1,
+          "y": -3962.4,
+          "z": 215.8,
+          "direct": true,
+          "check_skip": "the drop off the front ramp's end (a plain direct step, no GM): 7.4 yd across and 5.1 yd down, and the navmesh has NO route across it (ServerPath from the ramp end answers no path, its nearest reachable point 9.0 yd short of the landing's floor), so the plan check cannot judge this hop; the run leader walks it as a move_direct, inside the direct limits (25 yd across, 8 yd down), and walked the same row live (r39s2 slotA2 step 200 moved -6191.8 -3954.9 221.6 to -6186.7 -3964.3 215.2 with no death)"
+        }
+      ],
       "pull_groups": [
         {
-          "entries": [4075],
+          "entries": [62036, 62036, 62041, 62040],
           "positions": [
-            {"x": -5755.52, "y": -3954.59, "z": 300.186}
+            {"x": -6261.28, "y": -4069.38, "z": 239.741},
+            {"x": -6258.6, "y": -4072.74, "z": 239.741},
+            {"x": -6258.07, "y": -4067.25, "z": 239.742},
+            {"x": -6257.36, "y": -4068.95, "z": 239.741}
+          ],
+          "radius": 4.7,
+          "approach": [
+            {"x": -6258.138, "y": -4093.273, "z": 247.18}
           ]
         },
         {
-          "entries": [4075],
+          "entries": [62039, 62039],
           "positions": [
-            {"x": -5771.53, "y": -4005.11, "z": 300.242}
+            {"x": -6261.38, "y": -4123.84, "z": 264.987},
+            {"x": -6275.2, "y": -4114.86, "z": 264.827}
+          ],
+          "radius": 9.7,
+          "approach": [
+            {"x": -6270.069, "y": -4096.311, "z": 248.96}
           ]
         },
         {
-          "entries": [4075],
+          "entries": [62039, 62039],
           "positions": [
-            {"x": -5756.96, "y": -4036.56, "z": 300.186}
+            {"x": -6294.93, "y": -4132.73, "z": 264.827},
+            {"x": -6291.77, "y": -4134.18, "z": 264.827}
+          ],
+          "radius": 3.2,
+          "approach": [
+            {"x": -6269.621, "y": -4114.897, "z": 260.37}
           ]
         },
         {
-          "entries": [4075],
+          "entries": [62051],
           "positions": [
-            {"x": -5753.59, "y": -4067.42, "z": 300.997}
+            {"x": -6280.47, "y": -4154.86, "z": 265.789}
+          ],
+          "radius": 1.5,
+          "approach": [
+            {"x": -6271.19, "y": -4131.233, "z": 265.84}
           ]
         },
         {
-          "entries": [4075],
+          "entries": [62045, 62045, 62036],
           "positions": [
-            {"x": -5775.07, "y": -4078.17, "z": 301.256}
+            {"x": -6275.18, "y": -4214.76, "z": 264.603},
+            {"x": -6284.72, "y": -4214.87, "z": 264.635},
+            {"x": -6279.9, "y": -4216.88, "z": 264.638}
+          ],
+          "radius": 6.3,
+          "approach": [
+            {"x": -6274.069, "y": -4190.792, "z": 265.79}
           ]
         },
         {
-          "entries": [4075],
+          "entries": [62045, 62045],
           "positions": [
-            {"x": -5796.53, "y": -4064.14, "z": 309.011}
+            {"x": -6257.98, "y": -4242.48, "z": 265.083},
+            {"x": -6260.58, "y": -4239.47, "z": 265.036}
+          ],
+          "radius": 3.5,
+          "approach": [
+            {"x": -6275.016, "y": -4214.679, "z": 265.22}
           ]
         },
         {
-          "entries": [4075],
+          "entries": [62045, 62039],
           "positions": [
-            {"x": -5825.26, "y": -4079.01, "z": 309.344}
+            {"x": -6296.93, "y": -4252.4, "z": 265.488},
+            {"x": -6293.99, "y": -4248.48, "z": 265.391}
+          ],
+          "radius": 4,
+          "approach": [
+            {"x": -6275.503, "y": -4226.858, "z": 265.39}
           ]
         },
         {
-          "entries": [4075],
+          "entries": [62036, 62045],
           "positions": [
-            {"x": -5849.89, "y": -4059.97, "z": 309.952}
+            {"x": -6281.71, "y": -4259.68, "z": 265.6},
+            {"x": -6266.81, "y": -4256.15, "z": 266.019}
+          ],
+          "radius": 9.2,
+          "approach": [
+            {"x": -6275.095, "y": -4232.76, "z": 265.5}
           ]
         },
         {
-          "entries": [4075],
+          "entries": [62045, 62051, 62039],
           "positions": [
-            {"x": -5867.79, "y": -4069.62, "z": 310.317}
+            {"x": -6258.45, "y": -4285.05, "z": 266.09},
+            {"x": -6262.51, "y": -4286.39, "z": 266.118},
+            {"x": -6267.36, "y": -4286.13, "z": 266.136}
+          ],
+          "radius": 6.1,
+          "approach": [
+            {"x": -6272.99, "y": -4257.847, "z": 266.06}
           ]
         },
         {
-          "entries": [4075],
+          "entries": [62045, 62036, 62045, 62045, 62045],
           "positions": [
-            {"x": -5859.73, "y": -4078.66, "z": 310.051}
+            {"x": -6266.97, "y": -4322.41, "z": 266.167},
+            {"x": -6263.59, "y": -4319.82, "z": 266.167},
+            {"x": -6262.22, "y": -4323.09, "z": 266.167},
+            {"x": -6276.5, "y": -4307.98, "z": 266.692},
+            {"x": -6264.79, "y": -4298.8, "z": 266.167}
+          ],
+          "radius": 17.3,
+          "approach": [
+            {"x": -6267.239, "y": -4274.766, "z": 266.47}
           ]
         },
         {
-          "entries": [4075],
+          "entries": [62070, 62051],
           "positions": [
-            {"x": -5903.78, "y": -4075.55, "z": 322.689}
+            {"x": -6305.66, "y": -4316.22, "z": 266.168},
+            {"x": -6301.82, "y": -4317.78, "z": 266.168}
+          ],
+          "radius": 3.6,
+          "approach": [
+            {"x": -6276.68, "y": -4319.647, "z": 266.69}
           ]
         },
         {
-          "entries": [4075],
+          "entries": [62045, 62036],
           "positions": [
-            {"x": -5967.56, "y": -4076.94, "z": 322.689}
+            {"x": -6337.1, "y": -4335.56, "z": 278.164},
+            {"x": -6339.74, "y": -4337.99, "z": 278.164}
+          ],
+          "radius": 3.3,
+          "approach": [
+            {"x": -6312.194, "y": -4330.296, "z": 278.76}
           ]
-        },
+        }
+      ],
+      "notes": [
+        "The corridor camp (r27 slot5 step 388: 21 units in one fight, 2 wipes; r39s2 slotA steps 226-243: 8 deaths, three tries on step 228 and four more at 236) is pulled in 12 waves from stands 21-30 yd on the corridor, 1-6 units each, BEFORE this leg walks it: the leg's to is the corridor bottom and the waves climb it. Census, stands and the refused-hop replay: DMR-FIX3-2026-10-25.md; the r39s2 order fix: DMR-FIX4-2026-10-25.md.",
+        "The way down from the front ramp end to the main landing (-6190.1 -3962.4 215.8) is a plain direct step with a check_skip, not a gm_cross: 7.4 yd across and 5.1 yd down over a 9.0 yd navmesh gap (no server path across it), so plan-check exempts the hop and plan-export writes the move_direct the run leader walks; r39s2 slotA2 walked that same row live at step 200 (from -6191.8 -3954.9 221.6 to -6186.7 -3964.3 215.2, no death)."
+      ]
+    },
+    {
+      "name": "searistrasz",
+      "to": {"x": -5978.82, "y": -4137.36, "z": 322.099},
+      "via": [
+        {"x": -6293.33, "y": -4373.33, "z": 294.49}
+      ],
+      "pull_groups": [
         {
-          "entries": [4075, 62039, 62051, 62039, 62041, 62040],
+          "entries": [62039, 62051, 62039, 62041, 62040],
           "positions": [
-            {"x": -5966.89, "y": -4136.92, "z": 322.689},
             {"x": -5978.82, "y": -4137.36, "z": 322.099},
             {"x": -5982.54, "y": -4138.28, "z": 322.099},
             {"x": -5977.89, "y": -4141.99, "z": 322.099},
@@ -337,17 +476,22 @@
           ]
         },
         {
-          "entries": [62047, 62047, 4075],
+          "entries": [62047, 62047],
           "positions": [
             {"x": -6010.98, "y": -4135.24, "z": 322.1},
-            {"x": -6011.79, "y": -4144.93, "z": 322.1},
-            {"x": -6021.09, "y": -4137.83, "z": 322.689}
+            {"x": -6011.79, "y": -4144.93, "z": 322.1}
           ]
         },
         {
           "entries": [62040],
           "positions": [
             {"x": -6028.72, "y": -4176.9, "z": 322.689}
+          ],
+          "approach": [
+            {"x": -5986.9, "y": -4160, "z": 322.2},
+            {"x": -5986.9, "y": -4178.1, "z": 322.2},
+            {"x": -5998.9, "y": -4193.1, "z": 322.2},
+            {"x": -6018, "y": -4205, "z": 324.059}
           ]
         },
         {
@@ -355,7 +499,8 @@
           "positions": [
             {"x": -6029.32, "y": -4190.71, "z": 322.689},
             {"x": -6037.67, "y": -4187.47, "z": 322.689}
-          ]
+          ],
+          "radius": 12
         },
         {
           "entries": [62040, 62041, 62036],
@@ -363,6 +508,9 @@
             {"x": -6050.11, "y": -4199.27, "z": 322.099},
             {"x": -6048.98, "y": -4200.84, "z": 322.099},
             {"x": -6053.28, "y": -4198.14, "z": 322.099}
+          ],
+          "approach": [
+            {"x": -6030, "y": -4199, "z": 322.2}
           ]
         },
         {
@@ -371,13 +519,19 @@
             {"x": -6072.15, "y": -4218.35, "z": 322.189},
             {"x": -6071.68, "y": -4227.34, "z": 322.099},
             {"x": -6072.45, "y": -4228.85, "z": 322.099}
+          ],
+          "approach": [
+            {"x": -6067, "y": -4206, "z": 322.2}
           ]
         },
         {
-          "entries": [4075, 62041],
+          "entries": [62041],
           "positions": [
-            {"x": -6033.4, "y": -4252.59, "z": 322.689},
             {"x": -6028.71, "y": -4254.44, "z": 322.689}
+          ],
+          "approach": [
+            {"x": -6067.2, "y": -4230.7, "z": 322.2},
+            {"x": -6046, "y": -4240, "z": 322.2}
           ]
         },
         {
@@ -386,12 +540,9 @@
             {"x": -6040.97, "y": -4272.62, "z": 322.099},
             {"x": -6038.04, "y": -4274.67, "z": 322.099},
             {"x": -6041.69, "y": -4276.22, "z": 322.099}
-          ]
-        },
-        {
-          "entries": [4075],
-          "positions": [
-            {"x": -6056.89, "y": -4282.14, "z": 322.692}
+          ],
+          "approach": [
+            {"x": -6040, "y": -4254, "z": 322.2}
           ]
         },
         {
@@ -424,12 +575,6 @@
           ]
         },
         {
-          "entries": [4075],
-          "positions": [
-            {"x": -6033.86, "y": -4314.29, "z": 322.221}
-          ]
-        },
-        {
           "entries": [62041],
           "positions": [
             {"x": -6027.33, "y": -4297.2, "z": 322.692}
@@ -452,27 +597,15 @@
           ]
         },
         {
-          "entries": [4075],
-          "positions": [
-            {"x": -5960.5, "y": -4276.48, "z": 322.692}
-          ]
-        },
-        {
           "entries": [62041],
           "positions": [
             {"x": -5932.73, "y": -4294.78, "z": 323.21}
           ]
         },
         {
-          "entries": [4075],
-          "positions": [
-            {"x": -5929.99, "y": -4306.24, "z": 322.192}
-          ]
-        },
-        {
           "entries": [62041],
           "positions": [
-            {"x": -5920.39, "y": -4301.79, "z": 322.692}
+            {"x": -5908.6, "y": -4342.96, "z": 322.692}
           ]
         },
         {
@@ -487,7 +620,7 @@
         {
           "entries": [62041],
           "positions": [
-            {"x": -5908.6, "y": -4342.96, "z": 322.692}
+            {"x": -5920.39, "y": -4301.79, "z": 322.692}
           ]
         },
         {
@@ -526,9 +659,8 @@
           ]
         },
         {
-          "entries": [4075, 62036, 62051, 62040, 62041],
+          "entries": [62036, 62051, 62040, 62041],
           "positions": [
-            {"x": -5989.94, "y": -4366.85, "z": 322.692},
             {"x": -5995.23, "y": -4364.02, "z": 322.099},
             {"x": -5995.52, "y": -4368.33, "z": 322.099},
             {"x": -5999.08, "y": -4365.99, "z": 322.099},
@@ -564,18 +696,6 @@
           ]
         },
         {
-          "entries": [4075],
-          "positions": [
-            {"x": -6115.34, "y": -4398.78, "z": 302.424}
-          ]
-        },
-        {
-          "entries": [4075],
-          "positions": [
-            {"x": -6142.96, "y": -4392.55, "z": 303.192}
-          ]
-        },
-        {
           "entries": [62078],
           "positions": [
             {"x": -6186.2, "y": -4397.23, "z": 302.835}
@@ -593,12 +713,6 @@
           "entries": [62078],
           "positions": [
             {"x": -6223.62, "y": -4397.6, "z": 303.192}
-          ]
-        },
-        {
-          "entries": [4075],
-          "positions": [
-            {"x": -6246.08, "y": -4406.16, "z": 303.01}
           ]
         },
         {
@@ -623,21 +737,9 @@
           ]
         },
         {
-          "entries": [4075],
-          "positions": [
-            {"x": -6085.19, "y": -4442.85, "z": 308.433}
-          ]
-        },
-        {
           "entries": [62078],
           "positions": [
             {"x": -6062.3, "y": -4470.56, "z": 317.031}
-          ]
-        },
-        {
-          "entries": [4075],
-          "positions": [
-            {"x": -6032.9, "y": -4480.7, "z": 316.866}
           ]
         },
         {
@@ -655,12 +757,6 @@
           ]
         },
         {
-          "entries": [4075],
-          "positions": [
-            {"x": -5991.49, "y": -4497.31, "z": 316.792}
-          ]
-        },
-        {
           "entries": [62041, 62036, 62040, 62045],
           "positions": [
             {"x": -5996.9, "y": -4508.53, "z": 316.281},
@@ -673,7 +769,8 @@
           "entries": [62047],
           "positions": [
             {"x": -5980.2, "y": -4510.32, "z": 316.792}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [62036, 62045, 62039],
@@ -681,24 +778,23 @@
             {"x": -5970.71, "y": -4512.22, "z": 316.281},
             {"x": -5968.97, "y": -4508.44, "z": 316.281},
             {"x": -5967.22, "y": -4512.27, "z": 316.281}
-          ]
+          ],
+          "radius": 5
         },
         {
-          "entries": [4075, 62047, 62047],
+          "entries": [62047, 62047],
           "positions": [
-            {"x": -5973.75, "y": -4546.99, "z": 316.792},
             {"x": -5973.57, "y": -4547.17, "z": 316.281},
             {"x": -5985.48, "y": -4547.12, "z": 316.281}
           ]
         },
         {
-          "entries": [62041, 62040, 62045, 62051, 4075],
+          "entries": [62041, 62040, 62045, 62051],
           "positions": [
             {"x": -5977.55, "y": -4466.6, "z": 316.281},
             {"x": -5979.82, "y": -4466.16, "z": 316.281},
             {"x": -5983.25, "y": -4462.6, "z": 316.281},
-            {"x": -5978.46, "y": -4461.96, "z": 316.281},
-            {"x": -5972.5, "y": -4453.43, "z": 316.865}
+            {"x": -5978.46, "y": -4461.96, "z": 316.281}
           ]
         },
         {
@@ -724,9 +820,8 @@
           ]
         },
         {
-          "entries": [4075, 62041],
+          "entries": [62041],
           "positions": [
-            {"x": -5870.64, "y": -4311.61, "z": 322.692},
             {"x": -5865.24, "y": -4315.07, "z": 322.661}
           ]
         },
@@ -751,12 +846,6 @@
             {"x": -5887.87, "y": -4253.57, "z": 322.099},
             {"x": -5887.97, "y": -4251.22, "z": 322.099},
             {"x": -5889.79, "y": -4256.5, "z": 322.099}
-          ]
-        },
-        {
-          "entries": [4075],
-          "positions": [
-            {"x": -5891.11, "y": -4237, "z": 322.689}
           ]
         },
         {
@@ -797,12 +886,6 @@
           ]
         },
         {
-          "entries": [4075],
-          "positions": [
-            {"x": -5961.2, "y": -4205.43, "z": 322.689}
-          ]
-        },
-        {
           "entries": [62041, 62047],
           "positions": [
             {"x": -5964.33, "y": -4232.61, "z": 322.689},
@@ -810,24 +893,23 @@
           ]
         },
         {
-          "entries": [62041],
-          "positions": [
-            {"x": -5992.12, "y": -4220.69, "z": 322.689}
-          ]
-        },
-        {
           "entries": [62453],
           "positions": [
             {"x": -6021.87, "y": -4217.88, "z": 323.957}
+          ],
+          "approach": [
+            {"x": -6003, "y": -4212, "z": 322.2}
           ]
         },
         {
-          "entries": [4075, 62047, 62039, 62047],
+          "entries": [62047, 62039, 62047],
           "positions": [
-            {"x": -5985.01, "y": -4187.04, "z": 322.689},
             {"x": -5987.13, "y": -4180.56, "z": 322.099},
             {"x": -5981.5, "y": -4176.35, "z": 322.099},
             {"x": -5975.68, "y": -4180.25, "z": 322.099}
+          ],
+          "approach": [
+            {"x": -5994, "y": -4196, "z": 322.2}
           ]
         },
         {
@@ -854,13 +936,65 @@
       ]
     },
     {
-      "name": "halgan_redbrand",
-      "to": {"x": -6346, "y": -4084.7, "z": 214.2},
+      "name": "halgan_approach",
+      "to": {"x": -6348.12, "y": -4082.42, "z": 214.189},
+      "via": [
+        {"x": -5981.6, "y": -4231.49, "z": 322.69},
+        {"x": -5982.03, "y": -4255.48, "z": 322.69},
+        {"x": -5982.45, "y": -4279.48, "z": 322.69},
+        {"x": -5982.87, "y": -4303.47, "z": 322.69},
+        {"x": -5983.3, "y": -4327.47, "z": 322.69},
+        {"x": -5983.72, "y": -4351.46, "z": 322.69},
+        {"x": -5984.14, "y": -4375.46, "z": 322.69},
+        {"x": -5984.57, "y": -4399.46, "z": 322.69},
+        {"x": -5984.99, "y": -4423.45, "z": 321.36},
+        {"x": -5986.86, "y": -4451.38, "z": 316.83},
+        {"x": -5988.65, "y": -4475.31, "z": 316.79},
+        {"x": -5991.35, "y": -4485.85, "z": 316.79},
+        {"x": -6003.1, "y": -4487.72, "z": 316.79},
+        {"x": -6022.15, "y": -4483.95, "z": 316.79},
+        {"x": -6038.01, "y": -4475.43, "z": 316.89},
+        {"x": -6054.51, "y": -4464.16, "z": 317.01},
+        {"x": -6071.48, "y": -4447.21, "z": 311.79},
+        {"x": -6088.07, "y": -4429.86, "z": 304.91},
+        {"x": -6100.52, "y": -4416.86, "z": 302.4},
+        {"x": -6113.04, "y": -4406.94, "z": 302.39},
+        {"x": -6135.36, "y": -4398.09, "z": 302.79},
+        {"x": -6160.65, "y": -4394.23, "z": 302.82},
+        {"x": -6184.65, "y": -4393.96, "z": 302.88},
+        {"x": -6208.65, "y": -4393.69, "z": 303.19},
+        {"x": -6232.65, "y": -4393.42, "z": 303.19},
+        {"x": -6256.64, "y": -4393.09, "z": 303.19},
+        {"x": -6281.28, "y": -4380.36, "z": 302.33},
+        {"x": -6293.38, "y": -4373.31, "z": 294.97},
+        {"x": -6317.27, "y": -4371.08, "z": 291.04},
+        {"x": -6331.12, "y": -4369.22, "z": 290.82},
+        {"x": -6329.54, "y": -4351.29, "z": 280.14},
+        {"x": -6318.08, "y": -4335.09, "z": 278.82},
+        {"x": -6298.51, "y": -4328.62, "z": 277.66},
+        {"x": -6284.59, "y": -4327.11, "z": 269.39},
+        {"x": -6267.2, "y": -4308.49, "z": 266.69},
+        {"x": -6255.66, "y": -4294.68, "z": 266.69},
+        {"x": -6260.92, "y": -4283.66, "z": 266.63},
+        {"x": -6272.93, "y": -4259.08, "z": 266.09},
+        {"x": -6276.31, "y": -4235.32, "z": 265.57},
+        {"x": -6279.69, "y": -4211.56, "z": 265.41},
+        {"x": -6283.07, "y": -4187.8, "z": 265.79},
+        {"x": -6286.45, "y": -4164.04, "z": 265.79},
+        {"x": -6289.83, "y": -4140.27, "z": 265.79},
+        {"x": -6292.55, "y": -4122.48, "z": 265.5},
+        {"x": -6274.57, "y": -4121.55, "z": 265.79},
+        {"x": -6269.87, "y": -4101.52, "z": 252.09},
+        {"x": -6270.38, "y": -4083.53, "z": 241.64},
+        {"x": -6290.42, "y": -4080.99, "z": 230.12},
+        {"x": -6314.42, "y": -4080.64, "z": 215.73},
+        {"x": -6338.06, "y": -4083.87, "z": 214.69}
+      ],
       "pull_groups": [
         {
           "entries": [62046],
           "positions": [
-            {"x": -6346, "y": -4084.7, "z": 214.2}
+            {"x": -6347.62, "y": -4085.92, "z": 214.148}
           ]
         },
         {
@@ -880,13 +1014,13 @@
           ]
         },
         {
-          "entries": [62041, 62040, 4075, 62051],
+          "entries": [62041, 62040, 62051],
           "positions": [
             {"x": -6376.63, "y": -4100.93, "z": 214.147},
             {"x": -6375.32, "y": -4101.4, "z": 214.147},
-            {"x": -6365.85, "y": -4101.17, "z": 214.689},
             {"x": -6357.17, "y": -4093.2, "z": 214.147}
-          ]
+          ],
+          "radius": 15
         },
         {
           "entries": [62051],
@@ -908,9 +1042,8 @@
           ]
         },
         {
-          "entries": [4075, 62264],
+          "entries": [62264],
           "positions": [
-            {"x": -6361.74, "y": -4009.95, "z": 189.29},
             {"x": -6356.8, "y": -4010.54, "z": 188.554}
           ]
         },
@@ -918,7 +1051,8 @@
           "entries": [62048],
           "positions": [
             {"x": -6345.68, "y": -4005.04, "z": 189.305}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [62263, 62036, 62264],
@@ -926,7 +1060,8 @@
             {"x": -6340.68, "y": -4001.05, "z": 188.554},
             {"x": -6344.24, "y": -3998.31, "z": 188.554},
             {"x": -6340.72, "y": -3997.44, "z": 188.554}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [62036],
@@ -939,6 +1074,11 @@
           "positions": [
             {"x": -6424.17, "y": -3933.73, "z": 147.76},
             {"x": -6426.9, "y": -3936.55, "z": 147.761}
+          ],
+          "approach": [
+            {"x": -6375.01, "y": -4002.07, "z": 187.12},
+            {"x": -6416.3, "y": -3999.8, "z": 169.38},
+            {"x": -6420.69, "y": -3958.25, "z": 154.86}
           ]
         },
         {
@@ -971,19 +1111,13 @@
         {
           "entries": [62035],
           "positions": [
-            {"x": -6360.97, "y": -3838.82, "z": 73.1706}
-          ]
-        },
-        {
-          "entries": [62036],
-          "positions": [
-            {"x": -6357.21, "y": -3867.19, "z": 106.973}
-          ]
-        },
-        {
-          "entries": [62035],
-          "positions": [
             {"x": -6308.27, "y": -3870.76, "z": 75.7977}
+          ],
+          "approach": [
+            {"x": -6400, "y": -3880, "z": 73.2},
+            {"x": -6370, "y": -3890, "z": 73.2},
+            {"x": -6341.7, "y": -3892.5, "z": 72.7},
+            {"x": -6322, "y": -3880, "z": 72.6}
           ]
         },
         {
@@ -991,6 +1125,21 @@
           "positions": [
             {"x": -6275.41, "y": -3899.49, "z": 72.5997},
             {"x": -6272.17, "y": -3896.24, "z": 72.5997}
+          ],
+          "approach": [
+            {"x": -6326, "y": -3912, "z": 72.6},
+            {"x": -6281, "y": -3915.5, "z": 72.6}
+          ]
+        },
+        {
+          "entries": [62035, 62036, 62046],
+          "positions": [
+            {"x": -6260.61, "y": -3935.97, "z": 72.6007},
+            {"x": -6262.17, "y": -3932.23, "z": 72.6007},
+            {"x": -6260.73, "y": -3928.89, "z": 72.6007}
+          ],
+          "approach": [
+            {"x": -6264, "y": -3914, "z": 72.6}
           ]
         },
         {
@@ -1018,7 +1167,38 @@
           "positions": [
             {"x": -6443.84, "y": -3978.38, "z": 73.1361}
           ]
-        },
+        }
+      ],
+      "notes": [
+        "r39s2/r41s2 (2026-10-25): 33 of 34 hall deaths stood on a thin floor (z 72.6) over the WMO magma (level 72.25, bed 60-67), one in the open pool: the module's DispatchMovement applies UpdateAllowedPositionZ, the core's GetWaterOrGroundLevel answers level-2 = 70.25 there, in the lava. Stands are only on solid columns (specs/dmr-step453.md); the fix-4 stand -6328 -3861.5 was in the channel."
+      ]
+    },
+    {
+      "name": "halgan_redbrand",
+      "to": {"x": -6537.17, "y": -3971.65, "z": 216.834},
+      "via": [
+        {"x": -6443.84, "y": -3978.38, "z": 73.14},
+        {"x": -6387.47, "y": -3977.33, "z": 72.69},
+        {"x": -6378.67, "y": -3925.33, "z": 72.69},
+        {"x": -6422.72, "y": -3905.39, "z": 73.15},
+        {"x": -6432.56, "y": -3873.68, "z": 87.93},
+        {"x": -6398.57, "y": -3873.04, "z": 101.81},
+        {"x": -6362.66, "y": -3881.07, "z": 110.51},
+        {"x": -6363.11, "y": -3921.07, "z": 127.78},
+        {"x": -6394.86, "y": -3937.32, "z": 141.55},
+        {"x": -6418.17, "y": -3966.02, "z": 158.36},
+        {"x": -6401.86, "y": -4003.08, "z": 175.6},
+        {"x": -6362.61, "y": -4010.78, "z": 189.45},
+        {"x": -6355.7, "y": -4044.53, "z": 204.63},
+        {"x": -6378.47, "y": -4071.96, "z": 214.79},
+        {"x": -6411.73, "y": -4092.68, "z": 215.02},
+        {"x": -6453.69, "y": -4094.4, "z": 225.19},
+        {"x": -6493.66, "y": -4092.76, "z": 239.01},
+        {"x": -6525.66, "y": -4066.62, "z": 238.88},
+        {"x": -6524.19, "y": -4034.65, "z": 221.87},
+        {"x": -6522.35, "y": -3994.69, "z": 217.94}
+      ],
+      "pull_groups": [
         {
           "entries": [62051, 62051],
           "positions": [
@@ -1137,33 +1317,38 @@
       }
     },
     {
-      "name": "zuluhed_the_whacked",
-      "to": {"x": -6346, "y": -4107.7, "z": 214.2},
+      "name": "zuluhed_approach",
+      "to": {"x": -6346.03, "y": -4104.99, "z": 214.189},
+      "via": [
+        {"x": -6554.1, "y": -3983.33, "z": 217.48},
+        {"x": -6533.78, "y": -4013.59, "z": 217.34},
+        {"x": -6525.96, "y": -4048.57, "z": 230.34},
+        {"x": -6518.9, "y": -4090.78, "z": 239.14},
+        {"x": -6479.12, "y": -4094.75, "z": 238.73},
+        {"x": -6447.22, "y": -4097.33, "z": 221.11},
+        {"x": -6407.35, "y": -4100.56, "z": 215.01},
+        {"x": -6365.5, "y": -4104.13, "z": 214.69}
+      ],
       "pull_groups": [
         {
           "entries": [62048],
           "positions": [
-            {"x": -6346, "y": -4107.7, "z": 214.2}
-          ]
+            {"x": -6338.03, "y": -4106.99, "z": 214.689}
+          ],
+          "radius": 5
         },
         {
-          "entries": [4075, 62036, 62039],
+          "entries": [62036, 62039],
           "positions": [
-            {"x": -6336.13, "y": -4103.69, "z": 214.689},
             {"x": -6332.21, "y": -4106.51, "z": 214.147},
             {"x": -6329.54, "y": -4104, "z": 214.147}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [62046],
           "positions": [
             {"x": -6330.29, "y": -4092.15, "z": 214.689}
-          ]
-        },
-        {
-          "entries": [4075],
-          "positions": [
-            {"x": -6327.24, "y": -4082.54, "z": 214.689}
           ]
         },
         {
@@ -1173,93 +1358,25 @@
           ]
         },
         {
-          "entries": [62036, 62036, 62041, 62040],
+          "entries": [62071],
           "positions": [
-            {"x": -6261.28, "y": -4069.38, "z": 239.741},
-            {"x": -6258.6, "y": -4072.74, "z": 239.741},
-            {"x": -6258.07, "y": -4067.25, "z": 239.742},
-            {"x": -6257.36, "y": -4068.95, "z": 239.741}
-          ]
-        },
-        {
-          "entries": [4075, 62071, 4075],
-          "positions": [
-            {"x": -6284.24, "y": -4100.64, "z": 265.389},
-            {"x": -6293.57, "y": -4095.59, "z": 264.827},
-            {"x": -6297.57, "y": -4094.86, "z": 265.408}
+            {"x": -6293.57, "y": -4095.59, "z": 264.827}
           ]
         },
         {
           "entries": [62039],
           "positions": [
             {"x": -6304.19, "y": -4102.47, "z": 265.481}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [62039, 62039],
           "positions": [
             {"x": -6306.43, "y": -4110.58, "z": 264.827},
             {"x": -6306.45, "y": -4113.91, "z": 264.827}
-          ]
-        },
-        {
-          "entries": [4075, 62039, 62039],
-          "positions": [
-            {"x": -6291.86, "y": -4129.05, "z": 265.634},
-            {"x": -6294.93, "y": -4132.73, "z": 264.827},
-            {"x": -6291.77, "y": -4134.18, "z": 264.827}
-          ]
-        },
-        {
-          "entries": [62039],
-          "positions": [
-            {"x": -6275.2, "y": -4114.86, "z": 264.827}
-          ]
-        },
-        {
-          "entries": [62039],
-          "positions": [
-            {"x": -6261.38, "y": -4123.84, "z": 264.987}
-          ]
-        },
-        {
-          "entries": [62051],
-          "positions": [
-            {"x": -6280.47, "y": -4154.86, "z": 265.789}
-          ]
-        },
-        {
-          "entries": [62045, 62045, 62036],
-          "positions": [
-            {"x": -6275.18, "y": -4214.76, "z": 264.603},
-            {"x": -6284.72, "y": -4214.87, "z": 264.635},
-            {"x": -6279.9, "y": -4216.88, "z": 264.638}
-          ]
-        },
-        {
-          "entries": [4075],
-          "positions": [
-            {"x": -6279.87, "y": -4245.67, "z": 265.828}
-          ]
-        },
-        {
-          "entries": [62036],
-          "positions": [
-            {"x": -6281.71, "y": -4259.68, "z": 265.6}
-          ]
-        },
-        {
-          "entries": [62045],
-          "positions": [
-            {"x": -6266.81, "y": -4256.15, "z": 266.019}
-          ]
-        },
-        {
-          "entries": [62045, 62045],
-          "positions": [
-            {"x": -6257.98, "y": -4242.48, "z": 265.083},
-            {"x": -6260.58, "y": -4239.47, "z": 265.036}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [62051, 62036],
@@ -1269,40 +1386,11 @@
           ]
         },
         {
-          "entries": [62039, 62051, 62036, 4075],
+          "entries": [62039, 62051, 62036],
           "positions": [
             {"x": -6234.18, "y": -4261.38, "z": 265.414},
             {"x": -6233.45, "y": -4266.46, "z": 265.538},
-            {"x": -6240.42, "y": -4265.68, "z": 265.919},
-            {"x": -6246.06, "y": -4275.21, "z": 266.342}
-          ]
-        },
-        {
-          "entries": [62045, 62051, 62039],
-          "positions": [
-            {"x": -6258.45, "y": -4285.05, "z": 266.09},
-            {"x": -6262.51, "y": -4286.39, "z": 266.118},
-            {"x": -6267.36, "y": -4286.13, "z": 266.136}
-          ]
-        },
-        {
-          "entries": [62045],
-          "positions": [
-            {"x": -6264.79, "y": -4298.8, "z": 266.167}
-          ]
-        },
-        {
-          "entries": [62045],
-          "positions": [
-            {"x": -6276.5, "y": -4307.98, "z": 266.692}
-          ]
-        },
-        {
-          "entries": [62045, 62036, 62045],
-          "positions": [
-            {"x": -6266.97, "y": -4322.41, "z": 266.167},
-            {"x": -6263.59, "y": -4319.82, "z": 266.167},
-            {"x": -6262.22, "y": -4323.09, "z": 266.167}
+            {"x": -6240.42, "y": -4265.68, "z": 265.919}
           ]
         },
         {
@@ -1320,12 +1408,6 @@
           ]
         },
         {
-          "entries": [4075],
-          "positions": [
-            {"x": -6248.87, "y": -4302.47, "z": 266.692}
-          ]
-        },
-        {
           "entries": [62051, 62036],
           "positions": [
             {"x": -6288.98, "y": -4282.82, "z": 266.142},
@@ -1336,13 +1418,6 @@
           "entries": [62045],
           "positions": [
             {"x": -6304.45, "y": -4263.85, "z": 265.771}
-          ]
-        },
-        {
-          "entries": [62045, 62039],
-          "positions": [
-            {"x": -6296.93, "y": -4252.4, "z": 265.488},
-            {"x": -6293.99, "y": -4248.48, "z": 265.391}
           ]
         },
         {
@@ -1364,19 +1439,15 @@
           "entries": [62039],
           "positions": [
             {"x": -6324.75, "y": -4259.58, "z": 266.326}
-          ]
+          ],
+          "radius": 7
         },
         {
           "entries": [62051],
           "positions": [
             {"x": -6325.59, "y": -4267.5, "z": 266.653}
-          ]
-        },
-        {
-          "entries": [4075],
-          "positions": [
-            {"x": -6313.71, "y": -4284.65, "z": 266.81}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [62039, 62051, 62039],
@@ -1387,32 +1458,10 @@
           ]
         },
         {
-          "entries": [4075],
-          "positions": [
-            {"x": -6347.98, "y": -4306.4, "z": 266.667}
-          ]
-        },
-        {
-          "entries": [4075, 62045, 62036],
-          "positions": [
-            {"x": -6338.83, "y": -4331.93, "z": 278.213},
-            {"x": -6337.1, "y": -4335.56, "z": 278.164},
-            {"x": -6339.74, "y": -4337.99, "z": 278.164}
-          ]
-        },
-        {
-          "entries": [62070, 62051],
-          "positions": [
-            {"x": -6305.66, "y": -4316.22, "z": 266.168},
-            {"x": -6301.82, "y": -4317.78, "z": 266.168}
-          ]
-        },
-        {
-          "entries": [62036, 62039, 4075, 62045, 62051],
+          "entries": [62036, 62039, 62045, 62051],
           "positions": [
             {"x": -6276.63, "y": -4352.33, "z": 266.168},
             {"x": -6271.6, "y": -4350.9, "z": 266.168},
-            {"x": -6266.45, "y": -4356.51, "z": 266.692},
             {"x": -6274.82, "y": -4363.75, "z": 266.168},
             {"x": -6269.18, "y": -4360.04, "z": 266.168}
           ]
@@ -1421,14 +1470,21 @@
           "entries": [62078],
           "positions": [
             {"x": -6300.44, "y": -4380.81, "z": 290.839}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": -6293.33, "y": -4349.07, "z": 274.39},
+            {"x": -6329.07, "y": -4349.33, "z": 278.69},
+            {"x": -6329.6, "y": -4369.6, "z": 290.69},
+            {"x": -6330, "y": -4380, "z": 290.4}
           ]
         },
         {
-          "entries": [62039, 4075],
+          "entries": [62039],
           "positions": [
-            {"x": -6305.22, "y": -4372.68, "z": 290.162},
-            {"x": -6309.66, "y": -4376.17, "z": 290.749}
-          ]
+            {"x": -6305.22, "y": -4372.68, "z": 290.162}
+          ],
+          "radius": 5
         },
         {
           "entries": [62051],
@@ -1440,6 +1496,11 @@
           "entries": [62078],
           "positions": [
             {"x": -6266.44, "y": -4407.07, "z": 303.029}
+          ],
+          "approach": [
+            {"x": -6293.33, "y": -4380, "z": 294.49},
+            {"x": -6288.5, "y": -4386, "z": 297.46},
+            {"x": -6283.47, "y": -4392.53, "z": 302.69}
           ]
         },
         {
@@ -1455,77 +1516,78 @@
             {"x": -6336.19, "y": -4247.53, "z": 265.522},
             {"x": -6336.15, "y": -4242.77, "z": 265.417}
           ]
-        },
-        {
-          "entries": [4075],
-          "positions": [
-            {"x": -6139.53, "y": -4173.83, "z": 322.701}
-          ]
-        },
-        {
-          "entries": [62047, 62051, 62039, 62040, 62041],
-          "positions": [
-            {"x": -6123.77, "y": -4166.62, "z": 322.099},
-            {"x": -6119.71, "y": -4170.23, "z": 322.099},
-            {"x": -6119.83, "y": -4163.77, "z": 322.099},
-            {"x": -6116.88, "y": -4166.66, "z": 322.099},
-            {"x": -6116.22, "y": -4168.51, "z": 322.099}
-          ]
-        },
-        {
-          "entries": [62051, 62051],
-          "positions": [
-            {"x": -6103.91, "y": -4142.38, "z": 322.099},
-            {"x": -6106.86, "y": -4138.96, "z": 322.099}
-          ]
-        },
-        {
-          "entries": [4075],
-          "positions": [
-            {"x": -6134.88, "y": -4115.33, "z": 322.689}
-          ]
-        },
-        {
-          "entries": [4075],
-          "positions": [
-            {"x": -6079.46, "y": -4080.61, "z": 322.69}
-          ]
-        },
-        {
-          "entries": [62047],
-          "positions": [
-            {"x": -6084.45, "y": -4175.15, "z": 329.651}
-          ]
-        },
-        {
-          "entries": [4075],
-          "positions": [
-            {"x": -6067.61, "y": -4177.11, "z": 330.189}
-          ]
-        },
+        }
+      ],
+      "notes": [
+        "Its last four packs (groups 19-22) stand on the z 290-303 ledge above the corridor's south end and need the ramp up to it, which the plan did not have: r39s2 slotA2 step 614 deferred the z 290.8, z 290.2 and z 303.0 packs (not reachable from this floor: no safe stand 15-25 yd the lead bot had a path to) with the lead on the corridor at -6282.7 -4325.9 266.2, then paused on no walkable path toward the next point at -6283.5 -4392.5 302.7. The way up is the ramp the party walks the other way in leg 4's descent and climbs in leg 3 (r39s2: the lead at -6329.1 -4349.3 278.6 at 07:56:05, -6282.1 -4385.3 300.8 at 07:56:17); group 19 carries it as four approach points and group 22 the second ramp as three, every hop a complete server path on ground (no liquid). Stands: -6330 -4380 290.4 (29.6, 25.8 and 26.9 yd from the three z 290 packs, and the nearest pack not yet pulled is 24.6 yd from the walk up) and -6283.47 -4392.53 302.69 (22.4 yd from the z 303 golem). The three z 290 packs stand 9.4-17.4 yd apart, so the second and third fights may take a neighbour."
+      ]
+    },
+    {
+      "name": "zuluhed_mid",
+      "to": {"x": -6187.57, "y": -4026.14, "z": 201.389},
+      "via": [
+        {"x": -6045.49, "y": -4155.59, "z": 324.78},
+        {"x": -6012.1, "y": -4138.68, "z": 322.69},
+        {"x": -5986.75, "y": -4169.41, "z": 322.69},
+        {"x": -5986.49, "y": -4209.41, "z": 322.69},
+        {"x": -5986.23, "y": -4249.41, "z": 322.69},
+        {"x": -5985.97, "y": -4289.41, "z": 322.69},
+        {"x": -5985.71, "y": -4329.41, "z": 322.69},
+        {"x": -5985.45, "y": -4369.41, "z": 322.69},
+        {"x": -5985.19, "y": -4409.41, "z": 322.69},
+        {"x": -5986.86, "y": -4451.34, "z": 316.83},
+        {"x": -6001.09, "y": -4487.67, "z": 316.79},
+        {"x": -6039.76, "y": -4474.49, "z": 316.91},
+        {"x": -6071.46, "y": -4447.2, "z": 311.79},
+        {"x": -6101.88, "y": -4415.45, "z": 302.39},
+        {"x": -6135.32, "y": -4398.11, "z": 302.79},
+        {"x": -6176.61, "y": -4394.06, "z": 302.95},
+        {"x": -6216.61, "y": -4393.6, "z": 303.19},
+        {"x": -6260.51, "y": -4392.46, "z": 303.18},
+        {"x": -6298.49, "y": -4379.89, "z": 291.92},
+        {"x": -6329.69, "y": -4353.34, "z": 281.29},
+        {"x": -6298.54, "y": -4328.64, "z": 277.67},
+        {"x": -6267.23, "y": -4308.5, "z": 266.69},
+        {"x": -6262.1, "y": -4269.18, "z": 266.31},
+        {"x": -6275.62, "y": -4227.52, "z": 265.39},
+        {"x": -6273.48, "y": -4187.58, "z": 265.79},
+        {"x": -6271.34, "y": -4143.63, "z": 265.79},
+        {"x": -6269.95, "y": -4101.7, "z": 252.22},
+        {"x": -6293.55, "y": -4075.29, "z": 227.99},
+        {"x": -6334.02, "y": -4064.08, "z": 215.19},
+        {"x": -6336.54, "y": -4029.11, "z": 195.24},
+        {"x": -6304.75, "y": -4009.9, "z": 189.49},
+        {"x": -6260.75, "y": -4009.87, "z": 192.24},
+        {"x": -6221.63, "y": -4017.02, "z": 201.89}
+      ],
+      "pull_groups": [
         {
           "entries": [62048],
           "positions": [
             {"x": -6179.57, "y": -4028.14, "z": 201.305}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [62036],
           "positions": [
             {"x": -6173.77, "y": -4023.33, "z": 201.889}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [62046],
           "positions": [
             {"x": -6184.94, "y": -4007.18, "z": 201.889}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [62264],
           "positions": [
             {"x": -6186.11, "y": -4001.08, "z": 201.889}
-          ]
+          ],
+          "radius": 5
         },
         {
           "entries": [62263, 62264],
@@ -1556,15 +1618,8 @@
           ]
         },
         {
-          "entries": [4075],
+          "entries": [62264],
           "positions": [
-            {"x": -6192.51, "y": -4034.29, "z": 201.288}
-          ]
-        },
-        {
-          "entries": [4075, 62264],
-          "positions": [
-            {"x": -6226.95, "y": -4008.58, "z": 201.882},
             {"x": -6236.64, "y": -4002.8, "z": 201.422}
           ]
         },
@@ -1573,52 +1628,41 @@
           "positions": [
             {"x": -6238.33, "y": -4017.47, "z": 201.366}
           ]
-        },
+        }
+      ],
+      "leave": [
         {
-          "entries": [62046],
-          "positions": [
-            {"x": -6190.56, "y": -3919.91, "z": 243.079}
-          ]
-        },
-        {
-          "entries": [62264, 62036, 62264],
-          "positions": [
-            {"x": -6181.27, "y": -3841.27, "z": 252.539},
-            {"x": -6181.89, "y": -3836.28, "z": 252.539},
-            {"x": -6187.22, "y": -3835.21, "z": 252.54}
-          ]
-        },
-        {
-          "entries": [62264, 62263],
-          "positions": [
-            {"x": -6186.97, "y": -3826.21, "z": 277.349},
-            {"x": -6190.42, "y": -3826.19, "z": 277.349}
-          ]
-        },
-        {
-          "entries": [62264],
-          "positions": [
-            {"x": -6200.36, "y": -3823.62, "z": 277.604}
-          ]
-        },
-        {
-          "entries": [62036, 62264, 62263],
-          "positions": [
-            {"x": -6259.34, "y": -3825.47, "z": 252.555},
-            {"x": -6259.46, "y": -3828.06, "z": 252.553},
-            {"x": -6260.82, "y": -3829.47, "z": 252.553}
-          ]
-        },
+          "entry": 62046,
+          "at": {"x": -6190.56, "y": -3919.91, "z": 243.079},
+          "why": "an island no walk reaches (the server query answers 0x8 from the hall, the z215 landing and a point 40 yd south on its own floor); it stands 0.6 yd over a floor of its own"
+        }
+      ]
+    },
+    {
+      "name": "zuluhed_floor",
+      "to": {"x": -6233.2, "y": -3878.48, "z": 78.0545},
+      "via": [
+        {"x": -6279.45, "y": -4007.86, "z": 189.49},
+        {"x": -6319.38, "y": -4005.51, "z": 189.49},
+        {"x": -6359.31, "y": -4003.16, "z": 189.37},
+        {"x": -6399.24, "y": -4000.81, "z": 176.73},
+        {"x": -6417.96, "y": -3971.85, "z": 160.89},
+        {"x": -6401.92, "y": -3938.7, "z": 144.69},
+        {"x": -6362.71, "y": -3930.78, "z": 128.08},
+        {"x": -6362.87, "y": -3890.78, "z": 114.69},
+        {"x": -6395.53, "y": -3873.04, "z": 103.12},
+        {"x": -6433.34, "y": -3881.61, "z": 85.19},
+        {"x": -6406.83, "y": -3904.35, "z": 73.14},
+        {"x": -6366.94, "y": -3901.4, "z": 73.19},
+        {"x": -6329.3, "y": -3889.29, "z": 73.19},
+        {"x": -6290.97, "y": -3875, "z": 75.58},
+        {"x": -6247.19, "y": -3876.44, "z": 75.84}
+      ],
+      "pull_groups": [
         {
           "entries": [62073],
           "positions": [
             {"x": -6233.2, "y": -3878.48, "z": 78.0545}
-          ]
-        },
-        {
-          "entries": [4075],
-          "positions": [
-            {"x": -6252.91, "y": -3879.55, "z": 74.8929}
           ]
         },
         {
@@ -1641,17 +1685,14 @@
           ]
         },
         {
-          "entries": [14881, 14881, 62075],
+          "entries": [62075],
           "positions": [
-            {"x": -6163.98, "y": -3914.44, "z": 73.189},
-            {"x": -6170.63, "y": -3922.4, "z": 73.189},
             {"x": -6176.24, "y": -3926.43, "z": 72.689}
           ]
         },
         {
-          "entries": [14881, 62073],
+          "entries": [62073],
           "positions": [
-            {"x": -6157.99, "y": -3940.74, "z": 73.189},
             {"x": -6152.67, "y": -3945.93, "z": 73.189}
           ]
         },
@@ -1662,25 +1703,6 @@
           ]
         },
         {
-          "entries": [14881],
-          "positions": [
-            {"x": -6177.33, "y": -3953.34, "z": 73.292}
-          ]
-        },
-        {
-          "entries": [14881, 14881],
-          "positions": [
-            {"x": -6165.08, "y": -3961.94, "z": 73.189},
-            {"x": -6158.94, "y": -3969.86, "z": 73.189}
-          ]
-        },
-        {
-          "entries": [14881],
-          "positions": [
-            {"x": -6142.85, "y": -3970.31, "z": 73.2084}
-          ]
-        },
-        {
           "entries": [62074],
           "positions": [
             {"x": -6145.16, "y": -3984.6, "z": 73.189}
@@ -1688,16 +1710,9 @@
           "ambush": true
         },
         {
-          "entries": [14881],
+          "entries": [62075],
           "positions": [
-            {"x": -6137.79, "y": -3999.01, "z": 73.3464}
-          ]
-        },
-        {
-          "entries": [62075, 14881],
-          "positions": [
-            {"x": -6116.84, "y": -4022.42, "z": 78.5964},
-            {"x": -6112.6, "y": -4022.74, "z": 79.0625}
+            {"x": -6116.84, "y": -4022.42, "z": 78.5964}
           ]
         },
         {
@@ -1707,10 +1722,14 @@
           ]
         },
         {
-          "entries": [14881, 62074],
+          "entries": [62074],
           "positions": [
-            {"x": -6107.62, "y": -3975.01, "z": 72.9238},
             {"x": -6100.52, "y": -3971.36, "z": 73.2176}
+          ],
+          "approach": [
+            {"x": -6130, "y": -4005, "z": 72.6},
+            {"x": -6135, "y": -3990, "z": 72.6},
+            {"x": -6119, "y": -3966, "z": 72.6}
           ]
         },
         {
@@ -1720,25 +1739,21 @@
           ]
         },
         {
-          "entries": [14881, 62073],
+          "entries": [62073],
           "positions": [
-            {"x": -6129.92, "y": -3948.11, "z": 73.189},
             {"x": -6135.89, "y": -3947.33, "z": 73.189}
           ]
         },
         {
-          "entries": [14881, 62074],
+          "entries": [62074],
           "positions": [
-            {"x": -6123.29, "y": -3928.54, "z": 73.189},
             {"x": -6120.48, "y": -3921.42, "z": 73.2024}
           ]
         },
         {
-          "entries": [14881, 62075, 14881],
+          "entries": [62075],
           "positions": [
-            {"x": -6137.7, "y": -3918.4, "z": 73.189},
-            {"x": -6142.33, "y": -3923.53, "z": 73.189},
-            {"x": -6141.57, "y": -3908.06, "z": 73.2909}
+            {"x": -6142.33, "y": -3923.53, "z": 73.189}
           ]
         },
         {
@@ -1754,39 +1769,21 @@
           ]
         },
         {
-          "entries": [4075],
-          "positions": [
-            {"x": -6280.84, "y": -3955.78, "z": 73.3994}
-          ]
-        },
-        {
-          "entries": [62035, 62036, 62046, 4075],
-          "positions": [
-            {"x": -6260.61, "y": -3935.97, "z": 72.6007},
-            {"x": -6262.17, "y": -3932.23, "z": 72.6007},
-            {"x": -6260.73, "y": -3928.89, "z": 72.6007},
-            {"x": -6258.43, "y": -3926.02, "z": 73.189}
-          ]
-        },
-        {
           "entries": [62035],
           "positions": [
             {"x": -6290.9, "y": -4016.66, "z": 73.189}
+          ],
+          "approach": [
+            {"x": -6284, "y": -3968, "z": 72.6},
+            {"x": -6290, "y": -3996, "z": 72.6}
           ]
         },
         {
-          "entries": [4075],
-          "positions": [
-            {"x": -6279.76, "y": -4025.86, "z": 73.189}
-          ]
-        },
-        {
-          "entries": [62046, 62036, 62035, 4075],
+          "entries": [62046, 62036, 62035],
           "positions": [
             {"x": -6270.9, "y": -4036.63, "z": 72.5999},
             {"x": -6269.97, "y": -4039.21, "z": 72.5999},
-            {"x": -6269.63, "y": -4041.9, "z": 72.5999},
-            {"x": -6268.97, "y": -4048.1, "z": 73.189}
+            {"x": -6269.63, "y": -4041.9, "z": 72.5999}
           ]
         },
         {
@@ -1804,13 +1801,87 @@
           ]
         },
         {
-          "entries": [14881, 62048, 62046, 62035, 4075],
+          "entries": [62048, 62046, 62035],
           "positions": [
-            {"x": -6289.04, "y": -4051.08, "z": 73.2204},
             {"x": -6301.94, "y": -4048.02, "z": 72.6004},
             {"x": -6297.35, "y": -4045.46, "z": 72.6004},
-            {"x": -6300.26, "y": -4045.73, "z": 72.6004},
-            {"x": -6311.41, "y": -4047.17, "z": 73.2244}
+            {"x": -6300.26, "y": -4045.73, "z": 72.6004}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "zuluhed_the_whacked",
+      "to": {"x": -6123.77, "y": -4166.62, "z": 322.099},
+      "via": [
+        {"x": -6342.54, "y": -4054.64, "z": 73.19},
+        {"x": -6376, "y": -4036.84, "z": 73.26},
+        {"x": -6386.82, "y": -3997.95, "z": 73.37},
+        {"x": -6376.93, "y": -3956.03, "z": 73.22},
+        {"x": -6385.99, "y": -3917.08, "z": 75.26},
+        {"x": -6428.42, "y": -3905.69, "z": 73.21},
+        {"x": -6424.06, "y": -3872.78, "z": 90.87},
+        {"x": -6384.06, "y": -3872.97, "z": 108.06},
+        {"x": -6362.55, "y": -3897.07, "z": 117.38},
+        {"x": -6379.17, "y": -3934.18, "z": 135.04},
+        {"x": -6418.39, "y": -3942.03, "z": 148.77},
+        {"x": -6418.01, "y": -3982.03, "z": 165.28},
+        {"x": -6386.16, "y": -4006.17, "z": 182.36},
+        {"x": -6352.26, "y": -4027.8, "z": 194.19},
+        {"x": -6336.3, "y": -4062.29, "z": 214.88},
+        {"x": -6296.9, "y": -4074.75, "z": 226},
+        {"x": -6267.64, "y": -4090.39, "z": 245.35},
+        {"x": -6254.85, "y": -4128.29, "z": 265.39},
+        {"x": -6271.51, "y": -4165.29, "z": 265.79},
+        {"x": -6271.04, "y": -4205.29, "z": 265.79},
+        {"x": -6274.05, "y": -4244.76, "z": 265.79},
+        {"x": -6262.74, "y": -4282.1, "z": 266.61},
+        {"x": -6276.44, "y": -4319.41, "z": 266.69},
+        {"x": -6314.76, "y": -4330.68, "z": 278.69},
+        {"x": -6329.6, "y": -4369.71, "z": 291.18},
+        {"x": -6291.8, "y": -4373.48, "z": 295.94},
+        {"x": -6259.28, "y": -4393.13, "z": 303.15},
+        {"x": -6219.28, "y": -4393.66, "z": 303.19},
+        {"x": -6179.28, "y": -4394.19, "z": 302.87},
+        {"x": -6135.9, "y": -4397.76, "z": 302.78},
+        {"x": -6100.86, "y": -4416.37, "z": 302.39},
+        {"x": -6071.87, "y": -4446.73, "z": 311.61},
+        {"x": -6040.28, "y": -4477.31, "z": 316.91},
+        {"x": -5996.48, "y": -4487.45, "z": 316.79},
+        {"x": -5986.3, "y": -4444.22, "z": 317.1},
+        {"x": -5985.14, "y": -4402.27, "z": 322.69},
+        {"x": -5985.44, "y": -4362.27, "z": 322.69},
+        {"x": -5985.74, "y": -4322.27, "z": 322.69},
+        {"x": -5986.03, "y": -4282.27, "z": 322.69},
+        {"x": -5986.33, "y": -4242.27, "z": 322.69},
+        {"x": -5986.62, "y": -4202.27, "z": 322.69},
+        {"x": -5987.11, "y": -4158.28, "z": 322.69},
+        {"x": -6026.42, "y": -4144.54, "z": 322.69},
+        {"x": -6063.5, "y": -4167.47, "z": 330.19},
+        {"x": -6106.72, "y": -4167.85, "z": 322.78}
+      ],
+      "pull_groups": [
+        {
+          "entries": [62047, 62051, 62039, 62040, 62041],
+          "positions": [
+            {"x": -6123.77, "y": -4166.62, "z": 322.099},
+            {"x": -6119.71, "y": -4170.23, "z": 322.099},
+            {"x": -6119.83, "y": -4163.77, "z": 322.099},
+            {"x": -6116.88, "y": -4166.66, "z": 322.099},
+            {"x": -6116.22, "y": -4168.51, "z": 322.099}
+          ]
+        },
+        {
+          "entries": [62051, 62051],
+          "positions": [
+            {"x": -6103.91, "y": -4142.38, "z": 322.099},
+            {"x": -6106.86, "y": -4138.96, "z": 322.099}
+          ]
+        },
+        {
+          "entries": [62047],
+          "positions": [
+            {"x": -6084.45, "y": -4175.15, "z": 329.651}
           ]
         }
       ],
