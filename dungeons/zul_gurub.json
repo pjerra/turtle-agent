@@ -891,7 +891,7 @@
           ]
         },
         {
-          "entries": [11339, 11339, 11339, 11339, 11365, 11365, 11365, 11365, 11339, 11339, 11353, 11353, 11365, 11365, 11365, 11365, 11365, 11365, 11365, 11365, 11339, 11339, 11365, 11365, 11365, 11339, 11365],
+          "entries": [11339, 11339, 11339, 11339, 11365, 11365, 11365, 11365, 11339, 11339],
           "positions": [
             {"x": -11518.3, "y": -1613.51, "z": 71.33},
             {"x": -11518.3, "y": -1629.19, "z": 71.33},
@@ -902,29 +902,30 @@
             {"x": -11491.9, "y": -1612.31, "z": 71.33},
             {"x": -11491.2, "y": -1612.34, "z": 71.33},
             {"x": -11496.8, "y": -1621.54, "z": 71.33},
-            {"x": -11496.3, "y": -1621.55, "z": 71.33},
+            {"x": -11496.3, "y": -1621.55, "z": 71.33}
+          ],
+          "radius": 12,
+          "approach": [
+            {"x": -11505, "y": -1652, "z": 71.3}
+          ],
+          "max_bodies": 10,
+          "stand_pull": true
+        },
+        {
+          "entries": [11353, 11353, 11365, 11365, 11365, 11365],
+          "positions": [
             {"x": -11498.3, "y": -1640.75, "z": 60.43},
             {"x": -11498.4, "y": -1641.72, "z": 60.43},
             {"x": -11495.2, "y": -1621.51, "z": 60.43},
             {"x": -11496, "y": -1619.55, "z": 60.43},
             {"x": -11495.1, "y": -1618.88, "z": 60.43},
-            {"x": -11495.2, "y": -1616.76, "z": 60.43},
-            {"x": -11517.4, "y": -1637.71, "z": 49.63},
-            {"x": -11515.6, "y": -1638.36, "z": 49.63},
-            {"x": -11517.3, "y": -1638.4, "z": 49.63},
-            {"x": -11521.2, "y": -1637.47, "z": 49.61},
-            {"x": -11511.8, "y": -1643.48, "z": 49.63},
-            {"x": -11526.9, "y": -1643.49, "z": 49.53},
-            {"x": -11534.8, "y": -1613.09, "z": 60.43},
-            {"x": -11536, "y": -1611.98, "z": 60.43},
-            {"x": -11534.6, "y": -1610.75, "z": 60.43},
-            {"x": -11542.2, "y": -1609.78, "z": 60.43},
-            {"x": -11538.1, "y": -1607.61, "z": 60.43}
+            {"x": -11495.2, "y": -1616.76, "z": 60.43}
           ],
-          "radius": 34,
+          "radius": 16,
           "approach": [
-            {"x": -11505, "y": -1608.5, "z": 71.32541}
-          ]
+            {"x": -11509, "y": -1603, "z": 71.33}
+          ],
+          "max_bodies": 6
         },
         {
           "entries": [11365, 11365, 11365, 11365],
@@ -938,6 +939,37 @@
           "approach": [
             {"x": -11505, "y": -1596, "z": 71.33}
           ]
+        },
+        {
+          "entries": [11365, 11365, 11365, 11339, 11365],
+          "positions": [
+            {"x": -11534.8, "y": -1613.09, "z": 60.43},
+            {"x": -11536, "y": -1611.98, "z": 60.43},
+            {"x": -11534.6, "y": -1610.75, "z": 60.43},
+            {"x": -11542.2, "y": -1609.78, "z": 60.43},
+            {"x": -11538.1, "y": -1607.61, "z": 60.43}
+          ],
+          "radius": 6,
+          "approach": [
+            {"x": -11548, "y": -1630, "z": 60.5}
+          ],
+          "max_bodies": 5
+        },
+        {
+          "entries": [11365, 11365, 11365, 11365, 11339, 11339],
+          "positions": [
+            {"x": -11517.4, "y": -1637.71, "z": 49.63},
+            {"x": -11515.6, "y": -1638.36, "z": 49.63},
+            {"x": -11517.3, "y": -1638.4, "z": 49.63},
+            {"x": -11521.2, "y": -1637.47, "z": 49.61},
+            {"x": -11511.8, "y": -1643.48, "z": 49.63},
+            {"x": -11526.9, "y": -1643.49, "z": 49.53}
+          ],
+          "radius": 10,
+          "approach": [
+            {"x": -11520, "y": -1665, "z": 49.6}
+          ],
+          "max_bodies": 6
         },
         {
           "entries": [11365, 11365, 11365, 11365, 11365, 11365, 11365, 11339, 11339],
@@ -1044,7 +1076,8 @@
       },
       "notes": [
         "Pull group 12 (27 units): walk 29 validates this pull live; revert to split pulls if the raid cannot hold 27.",
-        "WALK 29 FIX 4 (2026-11-03, leg 4; research/zg-w29/WALK29-FIX-PLAN.md \u00a72): step 295's move to the bats' approach walked the party through two leg-7 tiger formations no leg-4 row owned: on arrival (b 00:37:52) formation 49699 (Tigers 49699/49700, Axe Thrower 91464, Witch Doctor 91465; its spawn 18.6 yd from the approach) and 49716 (Tigers 49716/49717, Axe Thrower 91511, Priest 91512) plus the Bloodseeker bats 51873 and their summons were 12 bodies at once; peak 14-15, 53/3/9/22 dead in b/b-r1/g/g-r1. The two formations and the patroller 91435 (11352, movement 2, 8.8 yd from them) are one leg-4 row now, ahead of the bats: 9 bodies, max_bodies 9, stand_pull. Its stand -11576 -1778 46.3 (walked by the party in b/g) is 21.7 yd from the nearest tiger and 43.5 yd from the bat formation; it lies on the ramp down from group 6 (-11562.6 -1792.5 z 56.4). The leg-7 group 38 and its 4-point approach chain are gone. Today's bats approach -11573.13 -1754.66 keeps a dead neighbourhood but is still 18.6 yd from 49699's spawn: it is used only after the tigers are dead, as the row now ensures."
+        "WALK 29 FIX 4 (2026-11-03, leg 4; research/zg-w29/WALK29-FIX-PLAN.md \u00a72): step 295's move to the bats' approach walked the party through two leg-7 tiger formations no leg-4 row owned: on arrival (b 00:37:52) formation 49699 (Tigers 49699/49700, Axe Thrower 91464, Witch Doctor 91465; its spawn 18.6 yd from the approach) and 49716 (Tigers 49716/49717, Axe Thrower 91511, Priest 91512) plus the Bloodseeker bats 51873 and their summons were 12 bodies at once; peak 14-15, 53/3/9/22 dead in b/b-r1/g/g-r1. The two formations and the patroller 91435 (11352, movement 2, 8.8 yd from them) are one leg-4 row now, ahead of the bats: 9 bodies, max_bodies 9, stand_pull. Its stand -11576 -1778 46.3 (walked by the party in b/g) is 21.7 yd from the nearest tiger and 43.5 yd from the bat formation; it lies on the ramp down from group 6 (-11562.6 -1792.5 z 56.4). The leg-7 group 38 and its 4-point approach chain are gone. Today's bats approach -11573.13 -1754.66 keeps a dead neighbourhood but is still 18.6 yd from 49699's spawn: it is used only after the tigers are dead, as the row now ensures.",
+        "WALK 29 FIX 4b (2026-11-03, leg 4; research/zg-w29/WALK29-FIX-PLAN.md \u00a72, lead decision): the 27-unit row (walk 28's answer to the 11-20 yd cluster) did not hold live: walk 29 wiped at 14 engaged (b-r1 01:16:37-01:17:46, 20 dead in 55 s) and at 11 (g 01:17:03, 18 dead in 40 s), and its 34 yd circle let the run leader pick a unit on another height level, which walked the raid down into the next packs (g). The pieces that held were formation-sized (g, g-r1: 4-8 bodies). The row is split per formation, not walk 28's stampede split: (A) upper B + upper east as one row of 10 (formation 51353's 4 Shadow Hunters + 51369's 4 Panthers and 2 Shadow Hunters, 16.8 yd apart and inseparable), from the upper stand -11505 -1652 71.3 (24.4 yd 3D from its nearest spawn, 35.3 from the row centre, 72.2 from upper north; the old -11505 -1608.5 stood 8.3 yd from 51353 and 22.8 from upper north), radius 12 (one member of each formation; it stays 12.8 yd 3D from middle east's panthers), max_bodies 10, stand_pull so the hold point and the three Polymorphs run; (B) middle east (formation 49343: 4 Panthers + the two Blood Drinkers 51594/51595 that walk 25's radius missed), from the upper edge -11509 -1603 71.33 (23.5 yd 3D), max_bodies 6, 11353 kill_first; (C) upper north, unchanged from -11505 -1596 71.33; (D) middle west (formation 49329, 5) from -11548 -1630 60.5 on the middle ring (21.0 yd 3D), max_bodies 5; (E) lower (formation 51365, 6) from -11520 -1665 49.6 (22.6-27.6 yd), max_bodies 6. Every row has its own approach; the D and E stands sit on their pack's own level, and the C -\u003e D walk is the middle-ring route (148.5 yd; the straight drop has no navmesh link), \u003e= 23 yd from E (the 30.6 yd D/E pair needs the off-tank on the stand)."
       ]
     },
     {
