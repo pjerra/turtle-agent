@@ -1,6 +1,7 @@
 package planlint
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -75,6 +76,23 @@ func TestLintWater(t *testing.T) {
 		return []navmesh.Floor{{Z: 0, Flags: navmesh.NavWater}}, nil
 	}}
 	wantOnly(t, lintOne(t, rowsOf(move(0, 0, 0)), nav, nil), LintWater)
+}
+
+// A point on plain ground but under the water surface of a nearby NavWater floor (the lake bed the mmap generator flags dry).
+func TestLintWaterUnderNearbySurface(t *testing.T) {
+	nav := fakeNav{floors: func(x, y, lo, hi float32) ([]navmesh.Floor, error) {
+		if x == navmesh.LiquidNearYd && lo <= 5 && hi >= 5 {
+			return []navmesh.Floor{{Z: 5, Flags: navmesh.NavGround | navmesh.NavWater}}, nil
+		}
+		return nil, nil
+	}, nearest: func(p navmesh.Vec3) (navmesh.Vec3, bool, error) {
+		return p, true, nil
+	}}
+	fs := lintOne(t, rowsOf(move(0, 0, 0)), nav, nil)
+	wantOnly(t, fs, LintWater)
+	if !strings.Contains(fs[0].Detail, "NavWater floor stands") {
+		t.Fatalf("detail %q does not name the nearby surface", fs[0].Detail)
+	}
 }
 
 // A point 2 yd above the nearest floor.

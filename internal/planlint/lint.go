@@ -202,12 +202,16 @@ func (c *checker) point(i int, s planexport.StepRow, p dungeon.Point) ([]Finding
 	if d := dist3(p, point3(n)); d > OffFloorYd {
 		out = append(out, c.finding(i, s, LintOffFloor, fmt.Sprintf("the nearest floor %.1f %.1f %.1f is %.1f yd away", n[0], n[1], n[2], d)))
 	}
-	fl, err := c.nav.Floors(c.opt.Map, n[0], n[1], n[2]-6, n[2]+6)
+	liq, err := navmesh.LiquidAt(c.nav, c.opt.Map, v3(p))
 	if err != nil {
 		return nil, err
 	}
-	if here, ok := nearestFloor(fl, n[2]); ok && here.Flags&navmesh.NavWater != 0 {
-		out = append(out, c.finding(i, s, LintWater, fmt.Sprintf("the floor %.1f %.1f %.1f is NavWater", n[0], n[1], here.Z)))
+	switch {
+	case liq.Own:
+		out = append(out, c.finding(i, s, LintWater, fmt.Sprintf("the floor %.1f %.1f %.1f is NavWater", p.X, p.Y, liq.Z)))
+	case liq.Wet:
+		out = append(out, c.finding(i, s, LintWater, fmt.Sprintf("a NavWater floor stands %.1f yd above at %.1f %.1f %.1f within %g yd: the point is under a liquid surface",
+			liq.Z-p.Z, liq.Where[0], liq.Where[1], liq.Z, navmesh.LiquidNearYd)))
 	}
 	limit := EdgeYd
 	if c.gather[i] {
@@ -487,17 +491,6 @@ func hasEntry(entries []uint32, e uint32) bool {
 		}
 	}
 	return false
-}
-
-// nearestFloor is the floor nearest z.
-func nearestFloor(fl []navmesh.Floor, z float32) (navmesh.Floor, bool) {
-	best, ok := navmesh.Floor{}, false
-	for _, f := range fl {
-		if !ok || math.Abs(float64(f.Z-z)) < math.Abs(float64(best.Z-z)) {
-			best, ok = f, true
-		}
-	}
-	return best, ok
 }
 
 // loopDist is the 3D distance from p to the patrol's closed loop, and the loop point it is measured from.
