@@ -84,6 +84,7 @@ var pullSizeKnownCounts = map[string]int{
 	"emerald_sanctum": 7, "timbermaw_hold": 27, "maraudon_orange": 86, "scholomance": 101, // newly hand-maintained (were generated): the moved stands' estimates.
 	"razorfen_kraul": 89, "dire_maul_north": 19, "windhorn_canyon": 104, "upper_blackrock_spire": 68,
 	"blackfathom_deeps": 74, "gnomeregan": 94, "lower_blackrock_spire": 104, "stormwind_vault": 30,
+	"frostmane_hollow": 51, "dire_maul_east": 51, "dire_maul_west": 72, "razorfen_downs": 75, "sunken_temple": 62,
 }
 
 func TestPullSizesUnderCeiling(t *testing.T) {

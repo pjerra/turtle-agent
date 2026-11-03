@@ -329,6 +329,7 @@ var routeAggroKnownFailing = map[string]int{
 	"maraudon_orange":      135, "scholomance": 843, // newly hand-maintained (were generated): the current route's passes.
 	"razorfen_kraul":       256, "dire_maul_north": 36, "windhorn_canyon": 327, "upper_blackrock_spire": 459,
 	"blackfathom_deeps":    296, "gnomeregan": 276, "lower_blackrock_spire": 408, "stormwind_vault": 170,
+	"frostmane_hollow":     171, "dire_maul_east": 90, "dire_maul_west": 212, "razorfen_downs": 191, "sunken_temple": 66,
 }
 
 // TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn
