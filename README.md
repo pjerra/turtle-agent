@@ -2206,14 +2206,14 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   pull: pass --from "step N"`, exit 2). The fallback is refused too when a boss or hold row (or the move into an
   event) lies between it and the leg's first row: the raid would re-fight it on its way in. A fallback start
   stands before the leg, so `boss` and `boss-done` untils resolve from the leg's first row, never from the
-  fallback start. `--reuse-instance` (with `--place`) re-places the raid in the instance it is already in: every
-  hired bot must be alive in the plan's map, then the walk sends no entry order (which would open a fresh copy),
-  binds the commander with `.appear <mt>`, goes to the start point in that copy and teleports every hire there with
-  the GM `.summon`; no corridor clear and no quiet check run (the area is the raid's own instance), and the instance
-  ledger is neither checked nor written, so a re-place never waits at the cap. When the previous party has logged out
-  but the commander's own bind to the map is still alive (`.instance listbinds`: a map line with TTR left), the walk
-  resumes that instance: `.go xyz ... <map>` lands in the bound copy and `.summon` pulls the fresh hires in, with no
-  `.appear` and no entry order; the notes say `resuming it`. With no live bind the walk says
+  fallback start. `--reuse-instance` (with `--place`) re-places the raid in the instance it is already in: when the
+  raid is alive, every hired bot must be in the plan's map, then the walk sends no entry order (which would open a
+  fresh copy), binds the commander with `.appear <mt>`, goes to the start point in that copy and teleports every hire
+  there with the GM `.summon`; no corridor clear and no quiet check run (the area is the raid's own instance), and the
+  instance ledger is neither checked nor written, so a re-place never waits at the cap. When the previous party has
+  logged out but the commander's own bind to the map is still alive (`.instance listbinds`: a map line with TTR left),
+  the walk resumes that instance: `.go xyz ... <map>` lands in the bound copy and `.summon` pulls the fresh hires in,
+  with no `.appear` and no entry order; the notes say `resuming it`. With no live bind the walk says
   `no live bind for map N is left: falling back to a fresh instance`, runs the cap check it skipped for the reuse and
   enters normally. `--reuse-instance` may be combined with `--gm-clear` (the named packs are killed in the kept copy).
   `--from "step N"` is taken as given; a positioned move row is placed at its own point, and a pull
@@ -2253,7 +2253,7 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   (one `.summon` per hire the frames miss) and only then starts the run, whose status line must show exactly that step
   and step count. Before the first teleport the commander must be in GM mode: `.gm on` is sent and the walk refuses the
   placement when its reply is not `GM mode is ON`. The commander stays inside the raid's copy for the whole walk (his own `.instance unbind` before the
-  hire, and again at teardown, drops a stale personal bind), so a wipe revives at the place point, not at the entrance.
+  hire, skipped under `--reuse-instance` where that bind is what is resumed, and again at teardown drops a stale personal bind), so a wipe revives at the place point, not at the entrance.
   `--dry-run` prints the staged step, the point and every circle. `summary.json`'s `place` object carries the start step,
   the instance, the circles with their removed counts, the not-cleared list, the quiet result and the placed count.
   **Known limit:** the pre-read (`q units`) and the `clearto` are two commands, so a unit that walks into a circle
