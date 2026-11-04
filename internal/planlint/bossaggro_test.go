@@ -63,7 +63,6 @@ func TestBossAggroUsesScriptRangeForMoam(t *testing.T) {
 	}
 }
 
-
 func countLint(t *testing.T, rows planexport.Rows, w *worldspawn.World, lint string) int {
 	t.Helper()
 	n := 0

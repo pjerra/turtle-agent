@@ -162,7 +162,7 @@ type checker struct {
 	steps  []planexport.StepRow
 	gather []bool
 	owner  map[uint64]int // spawn guid -> step number of the pull or boss row that owns it
-	bosses []bossRow       // every boss row's index and the pull group of its leg's rows that pull with it
+	bosses []bossRow      // every boss row's index and the pull group of its leg's rows that pull with it
 	// joins caches the joiner estimate: one PullSizes pass per Lint call, not one per pull row.
 	joins     []PullFinding
 	joinsDone bool
@@ -420,7 +420,8 @@ func (c *checker) bossPullStand(b bossRow, i int) bool {
 		return k < b.index && c.steps[k].Kind == planexport.KindPull && hasEntry(c.steps[k].Entries, b.entry)
 	}
 	return false
- }
+}
+
 // bossSpawn is the world spawn of a boss row's entry: the live boss on the
 // map (the lowest guid), not a corpse or a placeholder.
 func (c *checker) bossSpawn(entry uint32) *worldspawn.Spawn {
@@ -435,7 +436,7 @@ func (c *checker) bossSpawn(entry uint32) *worldspawn.Spawn {
 		}
 	}
 	return best
- }
+}
 
 // patrol lints a point against every patrol lane its patroller has not been pulled for.
 func (c *checker) patrol(i int, s planexport.StepRow, p dungeon.Point) (*Finding, error) {
