@@ -92,7 +92,7 @@ func (g *hireRaidFake) BotLines(_ context.Context, command string, _ time.Durati
 	return got, false, nil
 }
 
-func (g *hireRaidFake) BotBurst(_ context.Context, command string, _, _ time.Duration, begin func(string) bool) ([]string, bool, error) {
+func (g *hireRaidFake) BotBurst(_ context.Context, command string, _, _, _ time.Duration, begin func(string) bool) ([]string, bool, error) {
 	reply, _ := g.raidReply(command)
 	for i, l := range reply {
 		if begin(l) {

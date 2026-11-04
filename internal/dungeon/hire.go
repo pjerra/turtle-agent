@@ -67,6 +67,7 @@ const (
 	hireInvWait      = 8 * time.Second
 	hireSpellWait    = 3 * time.Second        // the first line of one `spells <filter>` answer
 	hireSpellQuiet   = 400 * time.Millisecond // its burst of lines ends when none came for this long
+	hireSpellRetry   = 2 * time.Second        // the pause before one unanswered `spells <filter>` is asked again (the hire intro is past by then)
 	hireItemWait     = 3 * time.Second
 	hirePetWait      = 60 * time.Second // a regeared warlock re-summons its demon some 10 to 30 s later (hires-2 live: 10 s was too short; 40 s was too short once more in the 2026-10-15 live run)
 	hirePetNudge     = 20 * time.Second // a bot with no pet this long after it showed is told once to summon one
@@ -217,8 +218,9 @@ type HireGame interface {
 	// PetOf says whether the player has a pet out (a hunter's or warlock's), by its name.
 	PetOf(guid packet.GUID) (string, bool)
 	// BotBurst sends a plain `.bot` line whose answer is a run of lines (tbm.Commander.Burst): from the first line begin accepts until the
-	// lines stop coming for quiet.
-	BotBurst(ctx context.Context, command string, wait, quiet time.Duration, begin func(line string) bool) (lines []string, began bool, err error)
+	// lines stop coming for quiet. resend above zero asks once more when no line began within wait, and reads both answers out
+	// (tbm.Commander.BurstRetry): a fresh hire drops the first line while its hire intro is still to come.
+	BotBurst(ctx context.Context, command string, wait, quiet, resend time.Duration, begin func(line string) bool) (lines []string, began bool, err error)
 	// ConvertRaid turns the commander's party into a raid.
 	ConvertRaid(ctx context.Context) error
 	// ItemInfos asks the server for the prototypes (those it answers within wait are returned).

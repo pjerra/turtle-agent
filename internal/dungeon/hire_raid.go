@@ -191,7 +191,7 @@ func (f *raidHireFlow) run(ctx context.Context) (string, error) {
 	if err := f.over(); err != nil {
 		return "", err
 	}
-	got, settled, err := f.hg.BotBurst(ctx, line, hireReplyWait, raidHirePoll, func(l string) bool {
+	got, settled, err := f.hg.BotBurst(ctx, line, hireReplyWait, raidHirePoll, 0, func(l string) bool {
 		return strings.HasPrefix(l, "TBM:HIRE_RAID|")
 	})
 	switch {
@@ -222,7 +222,7 @@ func (f *raidHireFlow) run(ctx context.Context) (string, error) {
 
 	// 5. Gear.
 	gearLine := fmt.Sprintf("gear raid %s preset %s", e.g.AgentName(), f.gear)
-	got, settled, err = f.hg.BotBurst(ctx, gearLine, raidGearWait, raidHirePoll, func(l string) bool {
+	got, settled, err = f.hg.BotBurst(ctx, gearLine, raidGearWait, raidHirePoll, 0, func(l string) bool {
 		return strings.HasPrefix(l, "TBM:GEAR|")
 	})
 	switch {

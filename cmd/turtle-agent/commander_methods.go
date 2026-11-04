@@ -650,8 +650,12 @@ func (g remoteGame) PetOf(guid packet.GUID) (string, bool) {
 	return u.Name, true
 }
 
-// BotBurst implements dungeon.HireGame: a plain `.bot` line whose answer is a run of lines (a bot's spell list).
-func (g remoteGame) BotBurst(ctx context.Context, command string, wait, quiet time.Duration, begin func(line string) bool) ([]string, bool, error) {
+// BotBurst implements dungeon.HireGame: a plain `.bot` line whose answer is a run of lines (a bot's spell list), asked once more when
+// the question went unanswered (resend above zero).
+func (g remoteGame) BotBurst(ctx context.Context, command string, wait, quiet, resend time.Duration, begin func(line string) bool) ([]string, bool, error) {
+	if resend > 0 {
+		return g.c.cmdr.BurstRetry(ctx, command, wait, quiet, resend, begin)
+	}
 	return g.c.cmdr.Burst(ctx, command, wait, quiet, begin)
 }
 

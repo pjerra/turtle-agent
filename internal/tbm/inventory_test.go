@@ -3,6 +3,7 @@ package tbm
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -269,5 +270,66 @@ func TestLinesAllReadsEachBotsAnswerInOneWait(t *testing.T) {
 	}
 	if _, err := c.LinesAll(context.Background(), []LineRequest{{Command: "command Tank;y talents", Done: func(string) bool { return true }}}, time.Second); err == nil {
 		t.Fatal("a bad line was sent")
+	}
+}
+
+// BurstRetry asks a question a bot can drop: when nothing began within wait the same command goes out once more, and both answers are
+// read under the first send's cursor — a late answer to the first send, and the second send's own answer, which must not be left in the
+// log to be taken as the answer of the question asked after this one (a hire's spell list: every answer starts with the same header).
+func TestBurstRetryAsksOnceMoreAndDrainsBothAnswers(t *testing.T) {
+	l := newFakeLink()
+	c := NewCommander(l)
+	header := func(s string) bool { return strings.Contains(s, "=== Spells ===") }
+	answer := func(spells ...string) []string {
+		return append([]string{"=== Spells ==="}, spells...)
+	}
+	var stanceAsks int
+	l.sayHook = func(text string) {
+		switch text {
+		case ".bot command Tanky spells stance":
+			stanceAsks++
+			if stanceAsks == 1 {
+				return // the hire dropped the line: no answer at all
+			}
+			go func() {
+				// The first send's answer, late, just after the second send.
+				time.Sleep(10 * time.Millisecond)
+				for _, line := range answer("[Battle Stance]") {
+					l.log.Append(events.Event{Kind: events.KindWhisper, Source: "Tanky", Text: line, Data: map[string]any{"type": "whisper"}})
+				}
+				// The second send's own answer, after the first one's quiet window.
+				time.Sleep(80 * time.Millisecond)
+				for _, line := range answer("[Battle Stance]", "[Defensive Stance]") {
+					l.log.Append(events.Event{Kind: events.KindWhisper, Source: "Tanky", Text: line, Data: map[string]any{"type": "whisper"}})
+				}
+			}()
+		case ".bot command Tanky spells taunt":
+			go func() {
+				time.Sleep(10 * time.Millisecond)
+				for _, line := range answer("[Taunt]") {
+					l.log.Append(events.Event{Kind: events.KindWhisper, Source: "Tanky", Text: line, Data: map[string]any{"type": "whisper"}})
+				}
+			}()
+		}
+	}
+	at := time.Now()
+	lines, began, err := c.BurstRetry(context.Background(), "command Tanky spells stance", 100*time.Millisecond, 40*time.Millisecond, 30*time.Millisecond, header)
+	if err != nil || !began {
+		t.Fatalf("%v %v %v", lines, began, err)
+	}
+	if stanceAsks != 2 || len(l.sent) != 2 {
+		t.Fatalf("the dropped question went out %d times (%v)", stanceAsks, l.sent)
+	}
+	// Both answers are read here: two headers, and the second send's extra line.
+	if n := strings.Count(strings.Join(lines, "|"), "=== Spells ==="); n != 2 || !slices.Contains(lines, "[Defensive Stance]") {
+		t.Fatalf("%d headers, lines %v", n, lines)
+	}
+	if spent := time.Since(at); spent > 300*time.Millisecond {
+		t.Fatalf("the retry read %v", spent)
+	}
+	// The next question reads only its own answer: nothing of the stance replies is left over.
+	lines, began, err = c.BurstRetry(context.Background(), "command Tanky spells taunt", 100*time.Millisecond, 40*time.Millisecond, 30*time.Millisecond, header)
+	if err != nil || !began || strings.Join(lines, "|") != "=== Spells ===|[Taunt]" {
+		t.Fatalf("%v %v %v", lines, began, err)
 	}
 }

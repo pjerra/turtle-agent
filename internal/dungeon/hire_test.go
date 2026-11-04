@@ -64,6 +64,7 @@ type hireFake struct {
 	noSlot      map[string][]int    // class -> equipment slots that stay empty even after autogear (no blue piece at the level)
 	lack        map[string][]string // class -> spells the bots of the class do not know
 	silentList  bool                // the bot never answers `spells <filter>`
+	missSpell   map[string]int      // a bot drops this many `spells <filter>` questions (its intro is still to come)
 	unreachable map[string]bool     // bots that answer no whisper (teleporting, offline in the grace)
 	noTalents   map[string]bool     // bots that answer `who` and `spells` but not `talents`
 	whoSilent   map[string]bool     // bots that answer everything but `who` (the hires of a kept binding)
@@ -88,7 +89,7 @@ func newHireFake(t *testing.T) *hireFake {
 	e.agentMap = outsideMap
 	g := &hireFake{enterFake: e, agentLvl: 45, maxHires: 5, arriveIn: 3 * time.Second, noSupplies: true,
 		names: []string{"Zamoraela", "Khaeworval", "Corkhas", "Gredel", "Zisorlo", "Alrunmel", "Thundrik", "Sevaria", "Brannoch", "Ilyandra", "Morgrim", "Tessaly", "Varkull"},
-		epic:  map[string]bool{}, unreachable: map[string]bool{}, noTalents: map[string]bool{}, noShield: map[string]bool{}, noSlot: map[string][]int{}, lack: map[string][]string{}, items: map[uint32]ItemInfo{}}
+		epic:  map[string]bool{}, unreachable: map[string]bool{}, noTalents: map[string]bool{}, noShield: map[string]bool{}, noSlot: map[string][]int{}, lack: map[string][]string{}, items: map[uint32]ItemInfo{}, missSpell: map[string]int{}}
 	for s := 0; s < 19; s++ {
 		g.items[uint32(90000+s)] = ItemInfo{Found: true, Name: fmt.Sprintf("Blue %d", s), Quality: hQuality, ItemLevel: 40 + s%5}
 		g.items[uint32(91000+s)] = ItemInfo{Found: true, Name: fmt.Sprintf("Epic %d", s), Quality: 4, ItemLevel: 60}
@@ -141,10 +142,23 @@ var hireSpells = map[string][]string{
 	"hunter":  {"Tame Beast", "Call Pet", "Mend Pet", "Revive Pet", "Multi-Shot", "Hunter's Mark"},
 	"rogue":   {"Kick", "Gouge", "Sinister Strike", "Evasion"},
 	"warlock": {"Summon Imp", "Summon Voidwalker", "Summon Succubus", "Shadow Bolt"},
-	"mage":    {"Polymorph", "Frost Nova", "Frostbolt"},
+	"mage":    {"Polymorph", "Polymorph: Pig", "Polymorph: Turtle", "Frost Nova", "Frostbolt"},
 	"paladin": {"Redemption", "Holy Light"},
 	"shaman":  {"Ancestral Spirit"},
 	"druid":   {"Bear Form"},
+}
+
+// hireSpellsAt is the spell list a hire of the class gets at its level: the level-60 mage variants ("Polymorph: Pig", "Polymorph:
+// Turtle", TortoiseBots PlayerbotFactory::InitAvailableSpells) come only at 60.
+func hireSpellsAt(class string, level int) []string {
+	var out []string
+	for _, s := range hireSpells[class] {
+		if level < 60 && strings.HasPrefix(s, "Polymorph: ") {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 var hireTrees = map[string][3]int{
@@ -175,7 +189,7 @@ func (g *hireFake) newHire(class, role string, level int) *fhire {
 	if g.epic[class] {
 		h.equip[slotChest] = uint32(91000 + slotChest)
 	}
-	for _, s := range hireSpells[class] {
+	for _, s := range hireSpellsAt(class, level) {
 		if !slices.Contains(g.lack[class], s) {
 			h.spells[strings.ToLower(s)] = true
 		}
@@ -214,18 +228,23 @@ func (g *hireFake) BotLines(_ context.Context, command string, _ time.Duration, 
 	return got, false, nil
 }
 
-// BotBurst models tbm.Commander.Burst: the reply's lines from the first one begin accepts; began is false when none does.
-func (g *hireFake) BotBurst(_ context.Context, command string, _, _ time.Duration, begin func(string) bool) ([]string, bool, error) {
-	if g.deafTo(command) {
-		return nil, false, nil
-	}
-	reply, _ := g.reply(command)
-	for i, l := range reply {
-		if begin(l) {
-			return reply[i:], true, nil
+// BotBurst models tbm.Commander.Burst and BurstRetry: the reply's lines from the first one begin accepts; began is false when none does.
+// With resend above zero a question that went unanswered is asked once more, as the commander does.
+func (g *hireFake) BotBurst(_ context.Context, command string, _, _, resend time.Duration, begin func(string) bool) ([]string, bool, error) {
+	for ask := 0; ; ask++ {
+		if g.deafTo(command) {
+			return nil, false, nil
+		}
+		reply, _ := g.reply(command)
+		for i, l := range reply {
+			if begin(l) {
+				return reply[i:], true, nil
+			}
+		}
+		if ask > 0 || resend <= 0 {
+			return nil, false, nil
 		}
 	}
-	return nil, false, nil
 }
 
 // deafTo says whether the line names a bot that answers no `.bot` line.
@@ -335,9 +354,14 @@ func (g *hireFake) reply(command string) (reply []string, handled bool) {
 		if h == nil || g.silentList || g.unreachable[h.name] {
 			break
 		}
+		if g.missSpell[h.name] > 0 {
+			// A hire that drops the line while its intro is still to come (no header at all).
+			g.missSpell[h.name]--
+			break
+		}
 		// ListSpellsAction::Execute: the header (also when nothing matches), then ONE spell per line, each a spell link.
 		reply = []string{fmt.Sprintf("Forwarded command for %s: spells %s; action success is not guaranteed.", h.name, filter), "=== Spells ==="}
-		for i, sp := range hireSpells[h.class] {
+		for i, sp := range hireSpellsAt(h.class, h.level) {
 			if h.spells[strings.ToLower(sp)] && strings.Contains(strings.ToLower(sp), filter) {
 				reply = append(reply, fmt.Sprintf("|cffffffff|Hspell:%d|h[%s]|h|r", 100+i, sp))
 			}
@@ -1086,7 +1110,7 @@ func TestHireSpellQuestionThatIsNotAnsweredFailsAsNoAnswer(t *testing.T) {
 	g := newHireFake(t)
 	g.silentList = true
 	rep, err := g.run(hireSpec())
-	if !failed(rep, err, "Zamoraela", "no answer from Zamoraela to `spells stance`") || strings.Contains(err.Error(), "lacks") {
+	if !failed(rep, err, "Zamoraela", "no answer from Zamoraela to `spells stance`", "in two questions (3 s each, 2 s apart)") || strings.Contains(err.Error(), "lacks") {
 		t.Fatalf("%v %s", err, rep.State)
 	}
 }
@@ -1108,6 +1132,65 @@ func TestHireSpellFamilyWithTwoSpellsIsReadFromAllItsLines(t *testing.T) {
 	rep, err = g.run(hireSpec())
 	if !failed(rep, err, "Corkhas", "lacks Mend Pet") || strings.Contains(err.Error(), "Call Pet,") {
 		t.Fatalf("%v %s", err, rep.State)
+	}
+}
+
+// A level-60 mage is provisioned with "Polymorph: Pig" and "Polymorph: Turtle" (TortoiseBots PlayerbotFactory::InitAvailableSpells), and
+// its own filtered answer then lists only those: ListSpellsAction skips a spell whose name an earlier line already contains, and the plain
+// "Polymorph" is a part of "Polymorph: Pig". The mage can polymorph, so the variant counts and the run goes on (live 2026-11-04: three
+// level-60 mage hires refused at "lacks Polymorph").
+func TestHireMageWhoseListShowsOnlyThePolymorphVariantsIsReady(t *testing.T) {
+	level60Party := func(t *testing.T) *hireFake {
+		g := newHireFake(t)
+		g.agentLvl, g.plan.LevelBand = 60, []int{60, 60}
+		return g
+	}
+	mageParty := func() PrepareSpec {
+		spec := hireSpec()
+		spec.Hire = &HireSpec{Composition: []string{"warrior:tank", "priest:healer", "mage:dps"}}
+		return spec
+	}
+	g := level60Party(t)
+	g.lack["mage"] = []string{"Polymorph"}
+	rep, err := g.run(mageParty())
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	mage := rep.Ready.Bots[2]
+	if mage.Class != "mage" || mage.Level != 60 || !slices.Contains(mage.Spells, "Polymorph") {
+		t.Fatalf("%+v", mage)
+	}
+	// A mage whose list shows no polymorph at all still fails.
+	g = level60Party(t)
+	g.lack["mage"] = []string{"Polymorph", "Polymorph: Pig", "Polymorph: Turtle"}
+	if rep, err = g.run(mageParty()); !failed(rep, err, "Corkhas", "lacks Polymorph") {
+		t.Fatalf("%v %s", err, rep.State)
+	}
+}
+
+// spellsIn reads a named variant as the spell it varies, and nothing else.
+func TestSpellsInReadsANamedVariantAndNotAnotherSpell(t *testing.T) {
+	want := []spellReq{{"Polymorph", 8}}
+	text := "|cffffffff|Hspell:28272|h[Polymorph: Pig]|h|r\n|cffffffff|Hspell:28271|h[Polymorph: Turtle]|h|r"
+	if found, missing := spellsIn(text, want); len(found) != 1 || found[0] != "Polymorph" || len(missing) != 0 {
+		t.Fatalf("found %v missing %v", found, missing)
+	}
+	if _, missing := spellsIn("|h[Frostbolt]|h", want); len(missing) != 1 {
+		t.Fatalf("Frostbolt counted as Polymorph: %v", missing)
+	}
+}
+
+// The first `.bot` question of a fresh hire is dropped while its hire intro is still to come: the question is asked once more, and the
+// hire is judged on the answer (live 2026-11-04: a level-60 warrior answered no `spells stance` at all, the next question in 76 ms).
+func TestHireSpellQuestionDroppedOnceIsAskedAgain(t *testing.T) {
+	g := newHireFake(t)
+	g.missSpell["Zamoraela"] = 1
+	rep, err := g.run(hireSpec())
+	if err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+	if n := g.count("spells Zamoraela stance"); n != 2 {
+		t.Fatalf("the dropped stance question was asked %d times: %v", n, g.events)
 	}
 }
 

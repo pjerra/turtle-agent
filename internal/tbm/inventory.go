@@ -340,6 +340,19 @@ const MaxBurst = 3 * time.Second
 // and ends when none came for quiet (at most MaxBurst after it began). The lines from the first one on are returned, began says whether
 // the reply started at all. One command is in flight at a time, like Lines.
 func (c *Commander) Burst(ctx context.Context, command string, wait, quiet time.Duration, begin func(line string) bool) (lines []string, began bool, err error) {
+	return c.burst(ctx, command, wait, quiet, 0, begin)
+}
+
+// BurstRetry is Burst for a question a bot can drop: when no line began within wait, the same command is sent once more after resend, and
+// the reading goes on under the first send's cursor until both answers are out (each ends when none came for quiet, at most MaxBurst
+// after it began). A late answer to the first send answers the question too, and the second send's own answer is read here, so neither is
+// left in the log to be taken as the answer of the question asked after this one.
+func (c *Commander) BurstRetry(ctx context.Context, command string, wait, quiet, resend time.Duration, begin func(line string) bool) (lines []string, began bool, err error) {
+	return c.burst(ctx, command, wait, quiet, resend, begin)
+}
+
+// burst is Burst, with a second send of the same command when none of resend's answering began within wait (resend 0: no second send).
+func (c *Commander) burst(ctx context.Context, command string, wait, quiet, resend time.Duration, begin func(line string) bool) (lines []string, began bool, err error) {
 	command = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(command), ".bot "))
 	if err := CheckBotLine(command); err != nil {
 		return nil, false, err
@@ -364,8 +377,16 @@ func (c *Commander) Burst(ctx context.Context, command string, wait, quiet time.
 	if from != "" {
 		kinds = append(kinds, events.KindWhisper, events.KindChat)
 	}
-	deadline := time.Now().Add(wait)
-	var limit time.Time
+	sent := 1
+	askedAt := time.Now()
+	askAgainAt := time.Time{} // when the second send goes out (zero: no second send)
+	var retriedAt time.Time   // when it went out; its own wait ends then
+	if resend > 0 {
+		askAgainAt = askedAt.Add(wait + resend)
+	}
+	inReply := false
+	replies := 0 // answers read to their end
+	var limit, quietEnd time.Time
 	for {
 		p := log.Read(events.Query{Since: cursor, Kinds: kinds, Limit: events.MaxLimit})
 		for _, e := range p.Events {
@@ -373,33 +394,62 @@ func (c *Commander) Burst(ctx context.Context, command string, wait, quiet time.
 			if !ok || strings.HasPrefix(line, ViewPrefix) {
 				continue
 			}
-			if !began {
+			if !inReply {
 				if !begin(line) {
 					continue
 				}
-				began, limit = true, time.Now().Add(MaxBurst)
+				inReply, began = true, true
+				limit = time.Now().Add(MaxBurst)
 			}
 			if len(lines) < maxLines {
 				lines = append(lines, line)
 			}
-			deadline = time.Now().Add(quiet)
-			if deadline.After(limit) {
-				deadline = limit
+			quietEnd = time.Now().Add(quiet)
+			if quietEnd.After(limit) {
+				quietEnd = limit
 			}
 		}
 		cursor = p.Next
 		if p.More {
 			continue
 		}
+		now := time.Now()
+		if inReply && !now.Before(quietEnd) {
+			inReply = false
+			replies++
+		}
+		switch {
+		case !inReply && replies > 0 && sent == 1:
+			return lines, began, nil // the first send's answer is out: nothing else was asked
+		case !inReply && sent == 1 && resend <= 0 && !now.Before(askedAt.Add(wait)):
+			return lines, began, nil // no answer, and no second send: as Burst always did
+		case !inReply && sent == 1 && resend > 0 && !now.Before(askAgainAt):
+			if err := c.link.Say(ctx, Chat(command)); err != nil {
+				return lines, began, err
+			}
+			sent, retriedAt = 2, time.Now()
+		case !inReply && sent == 2 && (replies >= 2 || !now.Before(retriedAt.Add(wait))):
+			return lines, began, nil // both sends are answered, or the second one's wait is over
+		}
+		var deadline time.Time
+		switch {
+		case inReply:
+			deadline = quietEnd
+		case sent == 1 && resend > 0:
+			deadline = askAgainAt
+		case sent == 1:
+			deadline = askedAt.Add(wait)
+		default:
+			deadline = retriedAt.Add(wait)
+		}
 		wctx, cancel := context.WithDeadline(ctx, deadline)
 		werr := log.Wait(wctx, cursor)
 		cancel()
-		if werr != nil {
-			if err := ctx.Err(); err != nil {
-				return lines, began, err
-			}
-			return lines, began, nil
+		if werr != nil && ctx.Err() != nil {
+			return lines, began, ctx.Err()
 		}
+		// The deadline passed with nothing new (Wait's other error is the deadline): the switch above settles it on the next pass — the
+		// second send, or the end of the read.
 	}
 }
 

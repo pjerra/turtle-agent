@@ -475,11 +475,15 @@ func keySpells(class, role string, level int) []spellCheck {
 	return out
 }
 
-// spellsIn says which of the wanted spells a reply lists: a spell shows as "[Name]" in the bot's whisper.
+// spellsIn says which of the wanted spells a reply lists: a spell shows as "[Name]" in the bot's whisper. A name continued by a colon is
+// a named variant of the wanted spell ("Polymorph: Pig", "Polymorph: Turtle", the two every level-60 mage is provisioned with): a variant
+// casts the same spell, and the bot's own filtered list answers with the variants while the plain name is dropped (ListSpellsAction skips a
+// spell whose name an earlier line already contains, and "Polymorph" is a part of "Polymorph: Pig"), so one variant counts as the spell.
 func spellsIn(text string, want []spellReq) (found, missing []string) {
 	low := strings.ToLower(text)
 	for _, w := range want {
-		if strings.Contains(low, "["+strings.ToLower(w.name)+"]") {
+		name := strings.ToLower(w.name)
+		if strings.Contains(low, "["+name+"]") || strings.Contains(low, "["+name+":") {
 			found = append(found, w.name)
 		} else {
 			missing = append(missing, w.name)
@@ -494,11 +498,12 @@ const spellsHeader = "=== Spells ==="
 
 // checkSpells asks the bot's own spell list (`command <bot> spells <filter>`) for each key spell family and reads the whole burst of lines.
 // A question the bot never answered (no header) fails the bot as "no answer", not as a missing spell; one it answered without the spell
-// fails as lacking it.
+// fails as lacking it. A question that goes unanswered is asked once more (hireSpellRetry): a fresh hire drops the first `.bot` command
+// while its hire intro is still to come (a level-60 warrior's `spells stance` got no answer at all, the next question answered in 76 ms).
 func (f *hireFlow) checkSpells(ctx context.Context, b *hireBot, m HireMember) {
 	var lacking, silent []string
 	for _, c := range keySpells(b.slot.Class, b.slot.Role, m.Level) {
-		lines, began, err := f.hg.BotBurst(ctx, "command "+b.name+" spells "+c.filter, hireSpellWait, hireSpellQuiet, func(l string) bool {
+		lines, began, err := f.hg.BotBurst(ctx, "command "+b.name+" spells "+c.filter, hireSpellWait, hireSpellQuiet, hireSpellRetry, func(l string) bool {
 			return strings.Contains(l, spellsHeader)
 		})
 		if err != nil {
@@ -517,7 +522,8 @@ func (f *hireFlow) checkSpells(ctx context.Context, b *hireBot, m HireMember) {
 		lacking = append(lacking, missing...)
 	}
 	if len(silent) > 0 {
-		b.fail("no answer from %s to `spells %s` within %.0f s: its key spells are not confirmed", b.name, strings.Join(silent, "`, `spells "), hireSpellWait.Seconds())
+		b.fail("no answer from %s to `spells %s` in two questions (%.0f s each, %.0f s apart): its key spells are not confirmed", b.name,
+			strings.Join(silent, "`, `spells "), hireSpellWait.Seconds(), hireSpellRetry.Seconds())
 	}
 	if len(lacking) > 0 {
 		b.fail("lacks %s (its own spell list does not show them; the step learns nothing, .learn is a GM command)", strings.Join(lacking, ", "))
