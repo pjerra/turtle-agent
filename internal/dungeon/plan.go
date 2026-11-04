@@ -82,7 +82,12 @@ type Plan struct {
 	// Kind is "dungeon" (the default when absent) or "raid".
 	Kind string `json:"kind,omitempty"`
 	// Status says how far the plan has been checked: draft, mapped or live-checked, then free text (see StatusDraft). Absent: not said.
-	Status   string `json:"status,omitempty"`
+	Status string `json:"status,omitempty"`
+	// Team is the party the plan needs ("alliance" or "horde"), when some of its steps only work for one: Shadowfang Keep's
+	// courtyard_door gossip (Deathstalker Adamant 3849, faction template 68 = Undercity) is refused to an Alliance party, whose
+	// tank gets `npc-busy`; the run leader has no team column on a gossip row, so dungeon_run refuses the other team before the
+	// first order (checkTeam). Empty: either team.
+	Team     string `json:"team,omitempty"`
 	Map      uint32 `json:"map"`
 	Entrance Point  `json:"entrance"`
 	// EntranceTrigger is the id of the area trigger of the dungeon's entrance portal (areatrigger_teleport in the world
@@ -865,6 +870,7 @@ type rawPlan struct {
 	Name        string            `json:"name"`
 	Kind        string            `json:"kind"`
 	Status      string            `json:"status"`
+	Team        string            `json:"team"`
 	Fleers      []uint32          `json:"fleers"`
 	Raid        *RaidSpec         `json:"raid"`
 	Map         *uint32           `json:"map"`
@@ -1358,6 +1364,8 @@ func (c *checker) kindStatus(p *Plan, rp *rawPlan) {
 			p.Status = rp.Status
 		}
 	}
+	c.team("team", rp.Team)
+	p.Team = rp.Team
 	c.entries("fleers", rp.Fleers, false)
 	p.Fleers = rp.Fleers
 	if len(rp.Hire) > 0 {

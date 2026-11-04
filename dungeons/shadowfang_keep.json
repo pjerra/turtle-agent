@@ -3,6 +3,7 @@
   "name": "shadowfang_keep",
   "kind": "dungeon",
   "status": "live-checked",
+  "team": "horde",
   "map": 33,
   "entrance": {"x": -228.191, "y": 2111.41, "z": 76.8904},
   "entrance_trigger": 145,
