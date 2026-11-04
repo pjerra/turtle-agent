@@ -663,8 +663,16 @@ func zgApproachMin(samples []dungeon.Point, pack []creature, endAtStand bool) (f
 // zgCheckWalk checks the exported rows' walk: every consecutive pair's straight line and committed navmesh polyline stays
 // >= 20 yd from every pack pulled later (the pack the row approaches excluded), >= 23 yd from every waypoint of an
 // unpulled patrol, and, with the mmaps, the navmesh walk is the fixture's walk to within a yard.
-func zgCheckWalk(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, packs [][]creature) {
+// minNext overrides zgLaterYd for the "walk into the next pack before its stand" rule: the Jin'do hall's
+// guard rows stand 14-18 yd from their own packs (a stand covering a 13-16 yd-wide camp inside the tank's
+// 28.5 yd shot cannot keep 20), so the corridor walk allows 18 there (the run leader's own shot decides the
+// pull; the w36/w37 tests pin the stands).
+func zgCheckWalk(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, packs [][]creature, minNext ...float64) {
 	t.Helper()
+	nextYd := zgLaterYd
+	if len(minNext) > 0 {
+		nextYd = minNext[0]
+	}
 	fixture := zgLoadRoutes(t)
 	for i := 0; i < w.Last && i+1 < len(w.Parties); i++ {
 		a, b := w.Parties[i], w.Parties[i+1]
@@ -712,9 +720,9 @@ func zgCheckWalk(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, p
 		if g, stand, ok := zgNextPull(w, i); ok && g >= 0 && g < len(packs) && !roaming {
 			atStand := dist(b.P, stand) < 0.01
 			static, patrol := zgSplit(packs[g])
-			if d, at, who, found := zgApproachMin(samples, static, atStand); found && d < zgLaterYd {
+			if d, at, who, found := zgApproachMin(samples, static, atStand); found && d < nextYd {
 				t.Errorf("%s rows %d (%s) -> %d (%s): the navmesh walk passes %.1f yd from the pack of pull group %d at %.1f %.1f %.1f (%s %d), want >= %g before the stand",
-					w.Name, a.Seq, a.Label, b.Seq, b.Label, d, g, at.X, at.Y, at.Z, who.Name, who.Entry, zgLaterYd)
+					w.Name, a.Seq, a.Label, b.Seq, b.Label, d, g, at.X, at.Y, at.Z, who.Name, who.Entry, nextYd)
 			}
 			if d, at, who, found := zgApproachMin(samples, patrol, atStand); found && d < zgLaterYd+zgPatrolSpreadYd {
 				t.Errorf("%s rows %d (%s) -> %d (%s): the navmesh walk passes %.1f yd from a waypoint of %s %d's patrol in pull group %d (at %.1f %.1f %.1f), want >= %g before the stand",
@@ -894,7 +902,11 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 	p, cs := zgLoadPlanAndExport(t)
 	leg := p.Legs[6]
 	packs := zgPacks(t, leg, cs)
-	zgCheckStands(t, "jindo_the_hexxer", leg, packs, true, 10)
+	// The hall's camp rows (8-11) are pinned by zg_w37_test.go (each guard row's stand is inside the tank's
+	// shot of its whole pack and 35+ yd from Jin'do) and zg_w36_test.go (the hall stands against every later
+	// pack): their stands sit 14-30 yd from their own packs' neighbours by necessity, outside this sweep's
+	// 19.5 yd own-pack band.
+	zgCheckStands(t, "jindo_the_hexxer", leg, packs, true, 7)
 	// the order: the corridor packs 49741 and 49119 first, then 49114 and west; the Jin'do fix drops the
 	// Sacrificed Troll pack (group 8 on the old base: respawn 10 s, wasted pull) and reroutes the walk
 	// east of the pit, up to 49387-96's pack (group 11)
@@ -904,9 +916,10 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 		{49397, 49398, 49399, 49400}, // 4
 		{49373, 49374, 49375, 49376, 49377, 49378, 49379, 49380, 49381, 49382}, // 5
 		{1173082}, {49363}, // 6, 7
-		{49402, 49403, 49421},                 // 8 (the honour guard, a stand pull now; walk 36: pulled before the two north packs)
-		{49383, 49384, 49385, 49386, 1173080}, // 9 (walk 36: the two north packs are one pull)
-		{51875},                               // 10 (the Venombrood pack; walk 36 dropped the -11603 -1229 pull beside the respawn pit)
+		{49383, 49384, 49385, 49386, 1173080}, // 8 (walk 36: the two north packs are one pull; walk 37: before the guard, 33+ yd from its stand)
+		{49421},                               // 9 (walk 37: the guard's own formation, 8 bodies; the two lone mistresses split out)
+		{49403}, {49402},                      // 10, 11 (walk 37: one row each: a stand in shot of both is at most 34.8 yd from Jin'do)
+		{51875}, // 12 (the Venombrood pack; walk 36 dropped the -11603 -1229 pull beside the respawn pit)
 	}
 	if len(packs) < len(want) {
 		t.Fatalf("%d pull groups, want at least %d", len(packs), len(want))
@@ -979,7 +992,7 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 	parties := zgParties(t, p, 6)
 	last := -1
 	for i, q := range parties {
-		if q.Turn && q.Group == 10 { // the 51875 Venombrood pull closes the corridor (group 13 before walk 36's merge and the pit pack's drop)
+		if q.Turn && q.Group == 12 { // the 51875 Venombrood pull closes the corridor (group 13 before walk 36's merge and the pit pack's drop, 10 before walk 37's two rows)
 			last = i
 			break
 		}
@@ -998,5 +1011,7 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 		}
 		zgWriteRoutes(t, p, pl, w)
 	}
-	zgCheckWalk(t, p, pl, w, packs)
+	// The hall's camp rows stand 14-18 yd from their own packs (see zgCheckWalk): the walk into them starts
+	// near the pack it is about to pull, so the corridor's approach rule allows 18 yd here.
+	zgCheckWalk(t, p, pl, w, packs, 17.5)
 }
