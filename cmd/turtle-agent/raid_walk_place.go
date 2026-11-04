@@ -1605,7 +1605,8 @@ func (w *walk) placeKillBlockers(ctx context.Context) bool {
 			w.note("place: the retreat's blocker %d has no readable guid (%q): not killed", u.Entry, u.GUID)
 			continue
 		}
-		tries, dead, err := w.gmClearKill(ctx, objects.Unit{GUID: g, Entry: u.Entry, Name: u.Name})
+		// The retreat's blockers are killed under the tool's own budget: a blocker that will not die must not hold the retreat.
+		tries, dead, err := w.gmClearKill(ctx, objects.Unit{GUID: g, Entry: u.Entry, Name: u.Name}, w.env.now().Add(gmClearBudget))
 		tried = true
 		if err != nil {
 			w.note("place: the retreat's gm_kill of %d %s: %v", u.Entry, u.GUID, err)

@@ -788,8 +788,9 @@ func TestPlaceGMClearStopsAtTheBudget(t *testing.T) {
 			lines++
 		}
 	}
-	// 40 s buys one member's four tries (32 s); the second one starts inside the budget and its own tries pass it.
-	if want := 2 * gmClearTries; lines != want {
+	// 40 s: the first member's four tries take 32 s (4 x 5 s death wait + 3 x 3 s gap); the second one gets its first line
+	// at 29 s and a second at 37 s (5 s + 3 s gap), and the check at 45 s stops it. No line goes out past the budget.
+	if want := 6; lines != want {
 		t.Fatalf("%d kill lines, want %d (the budget is %s)", lines, want, gmClearBudget)
 	}
 	sum := f.summary()

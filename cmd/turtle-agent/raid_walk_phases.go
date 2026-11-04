@@ -879,12 +879,9 @@ func firstRunLine(lines []string, plan string) (string, bool) {
 	return "", false
 }
 
-// checkStartLine feeds the start line to the tracker and checks it: running, and the until label.
-func (w *walk) checkStartLine(ctx context.Context, line string) error {
-	st, ok := raidwalk.ParseRun(line)
-	if !ok {
-		return stopf(exitRaidWalkFailed, "run start: %s", line)
-	}
+// adoptRunStatus makes st the walk's current run status: its log line, the tracker, the boss rule's previous status and the
+// labels. A run start that is not a fresh run (a re-run of a leg's open row, rerunOpenStep) checks its line with it too.
+func (w *walk) adoptRunStatus(st tbm.RunStatus, line string) {
 	w.logLine(w.env.now(), line)
 	if w.tracker != nil {
 		w.tracker.Feed(w.env.now(), st)
@@ -894,6 +891,15 @@ func (w *walk) checkStartLine(ctx context.Context, line string) error {
 	w.observeBossStatus(st, w.env.now())
 	w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
 	w.noteLabel(st)
+}
+
+// checkStartLine feeds the start line to the tracker and checks it: running, and the until label.
+func (w *walk) checkStartLine(ctx context.Context, line string) error {
+	st, ok := raidwalk.ParseRun(line)
+	if !ok {
+		return stopf(exitRaidWalkFailed, "run start: %s", line)
+	}
+	w.adoptRunStatus(st, line)
 	if st.State != tbm.RunRunning {
 		return stopf(exitRaidWalkFailed, "run start: the run is %s: %s", st.State, line)
 	}
@@ -3146,20 +3152,26 @@ const bossGongReruns = 3
 
 // rerunOpenStep restarts the walk's run at the leg's open row (raidwalk.OpenStepBeforeBoss): `.bot run stop`, then
 // `.bot run start <plan> from step <N>` with the walk's own until and speed, so the run leader walks back to the object, opens it
-// (the gong) and meets the boss it summons. The run's status lines are read again from there: a fresh pause re-arms the
-// boss-not-found handling, and the step decrease is the run's own resume (pullStarted clears the boss latch for it). A refused
-// start is noted and left to the pause path (pausedWait then ends the walk as before); nothing here aborts the walk.
+// (the gong) and meets the boss it summons. The new run's own status line is adopted and checked (running, that step, the walk's
+// row count, the until label), as a placed walk checks its start; a refused or wrong start is noted and left to the pause path
+// (pausedWait then ends the walk as before), and nothing here aborts the walk.
 func (w *walk) rerunOpenStep(ctx context.Context, openStep int, bossEntry uint32, bossStep int, ev string, now time.Time) {
 	line := fmt.Sprintf("boss %d not found (%s): re-running step %d (the open summons the boss) with .bot run stop and .bot run start from step %d", bossEntry, ev, openStep, openStep)
 	w.note("%s", line)
 	w.logLine(now, line)
-	if err := w.stopRun(ctx, ""); err != nil {
+	// The stop is sent here, not through stopRun: its send has to be seen, since a second run start over a live run would leave
+	// two run leaders on the party. `.bot run stop` alone is what the allow-list accepts.
+	if !w.runStarted || w.runStopped {
+		w.note("boss %d not found: no run to stop before the re-run: the pause path takes over", bossEntry)
+		return
+	}
+	if err := w.gm(ctx, ".bot run stop"); err != nil {
 		w.note("boss %d not found: the run stop before the re-run failed (%v): the pause path takes over", bossEntry, err)
 		return
 	}
-	w.runStopped = false
-	if err := w.placeSleep(ctx, 2*time.Second); err != nil {
-		return
+	w.runStopped = true
+	if err := w.env.sleep(ctx, 2*time.Second); err != nil {
+		return // interrupted: the phase loop's own ctx check ends the walk
 	}
 	args := []string{w.plan.Name, "from", "step", strconv.Itoa(openStep)}
 	args = append(args, w.untilWords...)
@@ -3176,12 +3188,38 @@ func (w *walk) rerunOpenStep(ctx context.Context, openStep int, bossEntry uint32
 	case !rep.Reply.OK && rep.Reply.Kind != tbm.KindAck:
 		why = "no ACK (" + rep.Reply.Line + ")"
 	}
+	var st tbm.RunStatus
+	var startLine string
+	haveLine := false
+	if why == "" {
+		startLine, haveLine = firstRunLine(rep.Reply.Lines, w.plan.Name)
+		if !haveLine {
+			startLine, haveLine, err = w.waitTBM(ctx, "TBM:RUN|"+w.plan.Name+"|", 15*time.Second)
+			if err != nil {
+				return
+			}
+		}
+		if !haveLine {
+			why = "no TBM:RUN status for the new run"
+		} else if st, haveLine = raidwalk.ParseRun(startLine); !haveLine {
+			why = "its status line is not a run line: " + startLine
+		}
+	}
+	switch {
+	case why == "" && st.State != tbm.RunRunning:
+		why = fmt.Sprintf("the new run is %s", st.State)
+	case why == "" && (st.Step != openStep || st.Steps != len(w.rows.Steps)):
+		why = fmt.Sprintf("it started at step %d of %d, not step %d of the walk's %d rows", st.Step, st.Steps, openStep, len(w.rows.Steps))
+	case why == "" && len(w.untilWords) > 0 && !strings.Contains(raidwalk.CleanLine(startLine), w.untilLabel+" (step "):
+		why = "a run without the walk's until (" + w.untilLabel + ")"
+	}
 	if why != "" {
-		w.note("boss %d not found: the re-run at step %d was refused (%s): the pause path takes over", bossEntry, openStep, why)
-		w.logLine(now, fmt.Sprintf("boss %d not found: the re-run at step %d was refused (%s)", bossEntry, openStep, why))
+		w.note("boss %d not found: the re-run at step %d failed (%s): the pause path takes over", bossEntry, openStep, why)
+		w.logLine(now, fmt.Sprintf("boss %d not found: the re-run at step %d failed (%s)", bossEntry, openStep, why))
 		return
 	}
-	w.runStarted = true
+	w.adoptRunStatus(st, startLine)
+	w.runStarted, w.runStopped = true, false
 	w.note("the run restarted at step %d (leg %s) for boss %d", openStep, raidwalk.PlaceLegName(w.rows, openStep), bossEntry)
 	w.logLine(w.env.now(), fmt.Sprintf("the run restarted at step %d for boss %d (its row is step %d)", openStep, bossEntry, bossStep))
 }

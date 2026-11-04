@@ -8407,7 +8407,13 @@ func TestRaidWalkBossNotFoundRerunsTheLegsSummoningOpenStep(t *testing.T) {
 		if starts != 2 {
 			return
 		}
-		f.agent.push(fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|open|begin|arrived", openStep, total), "")
+		// The re-run's own answer: the run running at the gong row, with the walk's until. The hook runs before the
+		// fake hands its reply back, so this replaces the first start's answer.
+		run := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|open|begin|arrived|until step %d (step %d)", openStep, total, bossStep+1, bossStep+1)
+		f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+			Ack:   &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+			Line:  run,
+			Lines: []string{run, "TBM:ACTION_ACK|run start|party|1|-"}}}
 		f.agent.push(fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_arlokk|move|walk|stopped before step %d (until step %d): the party stays where it stands", bossStep+1, total, bossStep+1, bossStep+1), "")
 	}
 	if code := f.run(context.Background()); code != exitOK {
@@ -8446,5 +8452,41 @@ func TestRaidWalkBossNotFoundRerunsTheLegsSummoningOpenStep(t *testing.T) {
 	// No skip: the boss is not killed, she is brought back.
 	if n := countPrefix(verbs, "skip"); n != 0 {
 		t.Fatalf("%d skips went out", n)
+	}
+}
+
+// The gong re-run must not start a second run over a live one: when `.bot run stop` is refused, no `run start` goes out and the walk
+// falls back to the old pause path (exit 18 after pausedWait).
+func TestRaidWalkBossNotFoundRerunNeedsTheStop(t *testing.T) {
+	f, openStep, bossStep := zgArlokkFixture(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 5 * time.Second
+	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: fmt.Sprintf("TBM:RUN|zul_gurub|running|1/%d|high_priestess_arlokk|move|walk|walking|until step %d (step %d)", total, bossStep+1, bossStep+1),
+		Lines: []string{
+			fmt.Sprintf("TBM:RUN|zul_gurub|running|1/%d|high_priestess_arlokk|move|walk|walking|until step %d (step %d)", total, bossStep+1, bossStep+1),
+			"TBM:ACTION_ACK|run start|party|1|-",
+		}}}
+	f.agent.startQueue = []queuedEvent{{raw: fmt.Sprintf("TBM:RUN|zul_gurub|paused|%d/%d|high_priestess_arlokk|boss|begin|boss 14515 not found: not alive or dead within 30.0 yd of -11540.7 -1627.7 41.3 for 60 s nor anywhere in the instance|until step %d (step %d)",
+		bossStep, total, bossStep+1, bossStep+1)}}
+	f.agent.hostilesFn = func(int) []tbm.HostileRec { return nil }
+	f.agent.gmFail = func(line string) error {
+		if line == ".bot run stop" {
+			return fmt.Errorf("the command was refused")
+		}
+		return nil
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if got := strings.Join(verbs, ","); got != "start" {
+		t.Fatalf("run verbs %q: no second start may go out over a run that did not stop", got)
+	}
+	if !hasNote(f.summary(), fmt.Sprintf("re-running step %d", openStep)) || !hasNote(f.summary(), "the run stop before the re-run failed") {
+		t.Fatalf("notes %q, want the re-run attempt and the failed stop", f.summary().Notes)
 	}
 }

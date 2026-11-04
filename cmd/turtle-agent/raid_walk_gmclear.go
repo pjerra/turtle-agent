@@ -124,9 +124,13 @@ func (w *walk) gmClearDead(ctx context.Context, g packet.GUID) bool {
 }
 
 // gmClearKill sends the kill line for one unit (up to gmClearTries times, gmClearRetryGap apart) and reads its death from the frames
-// after each. It returns the number of lines sent and whether the death was seen.
-func (w *walk) gmClearKill(ctx context.Context, u objects.Unit) (tries int, dead bool, err error) {
+// after each. It returns the number of lines sent and whether the death was seen. No line goes out at or after deadline: the tool's
+// budget is checked before every line, so a unit that cannot die stops the tool on its current try.
+func (w *walk) gmClearKill(ctx context.Context, u objects.Unit, deadline time.Time) (tries int, dead bool, err error) {
 	for tries < gmClearTries {
+		if !w.env.now().Before(deadline) {
+			return tries, false, nil
+		}
 		tries++
 		w.logLine(w.env.now(), fmt.Sprintf("> .die (gm_kill, selected %s)", u.GUID))
 		if err := w.agent.Call(ctx, "gm_kill", map[string]string{"guid": u.GUID.String()}, nil, 15*time.Second); err != nil {
@@ -235,7 +239,7 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 						m.dead = true
 						continue
 					}
-					tries, dead, err := w.gmClearKill(ctx, u)
+					tries, dead, err := w.gmClearKill(ctx, u, deadline)
 					if err != nil {
 						return stopf(exitRaidWalkFailed, "gm-clear: interrupted at %s: %v", label, err)
 					}
