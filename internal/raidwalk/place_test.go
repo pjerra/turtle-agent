@@ -677,7 +677,7 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 // water fix made it 405: leg 5's five river vias are the seven of the dry route round the gorge and leg 6 loses its river
 // via; walk 34 adds the Jin'do group-12 midpoint approach row, 408; the Jin'do fix drops the pit pull group and its
 // approach row and nets one fewer row elsewhere on leg 6, 406; fix 1 makes groups 8/9 stand pulls with south hops and
-// moves the group-11 stand south past the pit, 408), a placed
+// moves the group-11 stand south past the pit, 408; walk 35 drops the Arlokk middle-east-Panther pull and its approach row, 406), a placed
 // `--until none` run from Marli stops before the segment on leg 6 that passes Venoxis, and the shortened corridor
 // clears clean.
 
@@ -688,8 +688,8 @@ func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	if len(rows.Steps) != 408 {
-		t.Fatalf("the fixture has %d steps, want 408", len(rows.Steps))
+	if len(rows.Steps) != 406 {
+		t.Fatalf("the fixture has %d steps, want 406", len(rows.Steps))
 	}
 	start, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
 	if err != nil {

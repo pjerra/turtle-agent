@@ -707,3 +707,116 @@ func TestPlaceGMClearUnclearedGroupDoesNotFailThePlacement(t *testing.T) {
 		t.Fatalf("summary.txt lacks the uncleared group:\n%s", text)
 	}
 }
+
+// Walk 35 (Jin'do hall groups 5-13, 52 members "alive after 4 tries", 15-25 min per placement): the corridor clear had already
+// despawned those units in the same instance. The server no longer has them, so `.die` on their guid does nothing while the
+// client's object store still shows them alive. The tool must not spend a line on a member its own clearto removed: it is
+// recorded as despawned at once, the clear stays whole, and no 32 s retry run happens.
+func TestPlaceGMClearSkipsMembersTheCorridorClearRemoved(t *testing.T) {
+	f, tk := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
+	gone := guids[0] // the corridor clear's victim
+	tk.clearto = func(string) (int, error) { return 1, nil }
+	tk.cleartoRemoved = func(string) []any {
+		return []any{map[string]any{"g": gone.String(), "e": gone.Entry(), "n": "despawned"}}
+	}
+	f.agent.unitsFn = func(int) []objects.Unit {
+		// The stale store still lists the despawned unit as alive, exactly as the walk-35 client did.
+		return gmClearView(f, pack, guids, func(g packet.GUID) bool {
+			f.agent.mu.Lock()
+			defer f.agent.mu.Unlock()
+			return f.agent.killed[g] && g != gone
+		})
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	for _, l := range f.agentLog() {
+		if l == "gm_kill "+gone.String() {
+			t.Fatalf("the tool sent a line for the member its own clearto despawned: %v", f.agentLog())
+		}
+	}
+	sum := f.summary()
+	if sum.GMClearPartial || len(sum.GMClear) != len(guids) {
+		t.Fatalf("partial %v, gm_clear %+v", sum.GMClearPartial, sum.GMClear)
+	}
+	by := map[string]raidwalk.GMClearEntry{}
+	for _, e := range sum.GMClear {
+		by[e.GUID] = e
+	}
+	e, ok := by["spawn "+strconv.FormatUint(raidwalk.SpawnGUID(gone), 10)]
+	if !ok || !e.Killed || e.Tries != 0 || e.Reason != raidwalk.GMClearDespawned {
+		t.Errorf("the despawned member's entry is %+v (want killed, 0 tries, %q)", e, raidwalk.GMClearDespawned)
+	}
+	if !hasNote(sum, "already despawned by this walk's own clear") {
+		t.Errorf("notes %q do not explain the despawned member", sum.Notes)
+	}
+	text, err := os.ReadFile(filepath.Join(f.out, "summary.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(text), "PARTIAL") {
+		t.Fatalf("summary.txt:\n%s", text)
+	}
+}
+
+// A member that cannot die costs gmClearTries * (gmClearDeathWait + gmClearRetryGap) = 32 s. The clear's budget stops the tool
+// after five minutes instead of running for half an hour: the rest of the pack is recorded as not tried, a WARN names the budget,
+// and the placement still goes on.
+func TestPlaceGMClearStopsAtTheBudget(t *testing.T) {
+	old := gmClearBudget
+	gmClearBudget = 40 * time.Second
+	t.Cleanup(func() { gmClearBudget = old })
+	f, _ := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
+	f.agent.killFn = func(packet.GUID, int) bool { return false } // nothing dies
+	f.agent.unitsFn = func(int) []objects.Unit {
+		return gmClearView(f, pack, guids, func(packet.GUID) bool { return false })
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	lines := 0
+	for _, l := range f.agentLog() {
+		if strings.HasPrefix(l, "gm_kill ") {
+			lines++
+		}
+	}
+	// 40 s: the first member's four tries take 32 s (4 x 5 s death wait + 3 x 3 s gap); the second one gets its first line
+	// at 29 s and a second at 37 s (5 s + 3 s gap), and the check at 45 s stops it. No line goes out past the budget.
+	if want := 6; lines != want {
+		t.Fatalf("%d kill lines, want %d (the budget is %s)", lines, want, gmClearBudget)
+	}
+	sum := f.summary()
+	if !sum.GMClearPartial || len(sum.GMClear) != len(guids) {
+		t.Fatalf("partial %v, gm_clear %+v", sum.GMClearPartial, sum.GMClear)
+	}
+	untried := 0
+	for _, e := range sum.GMClear {
+		if e.Reason == raidwalk.GMClearGaveUp {
+			untried++
+			if e.Killed || e.Tries != 0 {
+				t.Errorf("untried entry %+v", e)
+			}
+		}
+	}
+	if untried != len(guids)-2 {
+		t.Errorf("%d untried members, want %d: %+v", untried, len(guids)-2, sum.GMClear)
+	}
+	if !hasNote(sum, "gave up after 40s") && !hasNote(sum, "gave up after 40.0s") {
+		t.Errorf("notes %q do not name the budget", sum.Notes)
+	}
+	text, err := os.ReadFile(filepath.Join(f.out, "summary.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(text), "not tried") {
+		t.Fatalf("summary.txt:\n%s", text)
+	}
+}

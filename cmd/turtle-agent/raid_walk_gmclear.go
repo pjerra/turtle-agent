@@ -43,6 +43,12 @@ const (
 	gmClearRetryGap = 3 * time.Second
 )
 
+// gmClearBudget bounds the whole --gm-clear: past it no more lines go out, the members left are listed as not tried and the walk goes
+// on. A member that cannot die costs gmClearTries * (gmClearDeathWait + gmClearRetryGap) = 32 s, so an unbounded clear of a big hall
+// runs for half an hour (walk 35: Jin'do groups 5-13, 52 members, 15-25 min per placement). The despawned-member skip handles the known
+// cause; this is the ceiling for an unknown one. A var so a test can shorten it.
+var gmClearBudget = 5 * time.Minute
+
 // worldExportDir is the world export the placement and --gm-clear read: --gm-clear-spawns, else the map's testdata
 // beside the plan folder (tools/dungeongen/testdata/map<N>).
 func (w *walk) worldExportDir() string {
@@ -118,9 +124,13 @@ func (w *walk) gmClearDead(ctx context.Context, g packet.GUID) bool {
 }
 
 // gmClearKill sends the kill line for one unit (up to gmClearTries times, gmClearRetryGap apart) and reads its death from the frames
-// after each. It returns the number of lines sent and whether the death was seen.
-func (w *walk) gmClearKill(ctx context.Context, u objects.Unit) (tries int, dead bool, err error) {
+// after each. It returns the number of lines sent and whether the death was seen. No line goes out at or after deadline: the tool's
+// budget is checked before every line, so a unit that cannot die stops the tool on its current try.
+func (w *walk) gmClearKill(ctx context.Context, u objects.Unit, deadline time.Time) (tries int, dead bool, err error) {
 	for tries < gmClearTries {
+		if !w.env.now().Before(deadline) {
+			return tries, false, nil
+		}
 		tries++
 		w.logLine(w.env.now(), fmt.Sprintf("> .die (gm_kill, selected %s)", u.GUID))
 		if err := w.agent.Call(ctx, "gm_kill", map[string]string{"guid": u.GUID.String()}, nil, 15*time.Second); err != nil {
@@ -165,29 +175,39 @@ func appendSkipEntries(skips, entries []uint32) []uint32 {
 
 // gmClearMember is what the walk knows about one expected pack member while it clears the pack.
 type gmClearMember struct {
-	guid   packet.GUID // the unit's world guid once a read showed it (0: never seen)
-	dead   bool        // the frames showed it dead
-	tries  int         // kill lines sent
-	gaveUp bool        // it survived gmClearTries lines: no more are sent
+	guid      packet.GUID // the unit's world guid once a read showed it (0: never seen)
+	dead      bool        // the frames showed it dead, or this walk's own clear despawned it
+	tries     int         // kill lines sent
+	gaveUp    bool        // it survived gmClearTries lines: no more are sent
+	despawned bool        // the corridor clear or the quiet's extra round removed it before the tool ran
 }
 
 // placeGMClear is place step 6b. Every pack is cleared in gmClearRounds rounds; each round the commander visits every stop of the pack
 // (a member's spawn point, so a pack wider than the commander's view is seen whole), reads the units around it, and kills every live
-// member it sees. An empty read ends nothing: both rounds always run. Every expected member then gets one entry: killed (a death
-// confirmed from the frames), already dead, alive (seen, would not die) or not seen. Anything but the first two leaves the clear
-// PARTIAL, noted and in the summary; the walk goes on. The commander returns to the start point, on its floor, before the quiet check
-// and the raid's move.
+// member it sees. An empty read ends nothing: both rounds always run. A member the walk's own corridor clear already despawned is never
+// sent a line: the server no longer has it (walk 35), so it is recorded as despawned at once. Every expected member then gets one entry:
+// killed (a death confirmed from the frames), despawned, already dead, alive (seen, would not die) or not seen. Anything but the first
+// three leaves the clear PARTIAL, noted and in the summary; the walk goes on. gmClearBudget bounds the whole tool: past it no more lines
+// go out. The commander returns to the start point, on its floor, before the quiet check and the raid's move.
 func (w *walk) placeGMClear(ctx context.Context) error {
 	if len(w.gmClear) == 0 {
 		return nil
 	}
 	w.gmClearUsed = true
 	p := w.place.Point
+	deadline := w.env.now().Add(gmClearBudget)
+	budgetHit := false
 	for _, pk := range w.gmClear {
 		label := raidwalk.GMClearLabel(pk.Leg, pk.Group)
 		members := map[uint64]*gmClearMember{}
 		for _, g := range pk.SpawnGUIDs() {
-			members[g] = &gmClearMember{}
+			m := &gmClearMember{}
+			if w.placeCleared[g] {
+				// The corridor clear or the quiet's extra round removed it in this instance: `.die` on its guid does nothing
+				// (the client's store still lists it), so four tries would burn 32 s and report it alive.
+				m.dead, m.despawned = true, true
+			}
+			members[g] = m
 		}
 		stops := pk.Stops()
 		for round := 0; round < gmClearRounds; round++ {
@@ -210,12 +230,16 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 					if m == nil || m.dead || m.gaveUp {
 						continue
 					}
+					if !w.env.now().Before(deadline) {
+						budgetHit = true
+						continue
+					}
 					m.guid = u.GUID
 					if u.Dead {
 						m.dead = true
 						continue
 					}
-					tries, dead, err := w.gmClearKill(ctx, u)
+					tries, dead, err := w.gmClearKill(ctx, u, deadline)
 					if err != nil {
 						return stopf(exitRaidWalkFailed, "gm-clear: interrupted at %s: %v", label, err)
 					}
@@ -229,26 +253,49 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 				}
 			}
 		}
-		left := 0
+		left, gone := 0, 0
 		for _, g := range pk.SpawnGUIDs() {
 			m := members[g]
 			e := raidwalk.GMClearEntry{Leg: pk.Leg, Group: pk.Group, Entry: pk.Members[g], Tries: m.tries}
+			untried := m.tries == 0 && !w.env.now().Before(deadline)
 			switch {
 			case m.guid == 0:
-				e.GUID, e.Reason = fmt.Sprintf("spawn %d", g), raidwalk.GMClearNotSeen
+				e.GUID = fmt.Sprintf("spawn %d", g)
+				switch {
+				case m.despawned:
+					e.Killed, e.Reason = true, raidwalk.GMClearDespawned
+				case untried:
+					e.Reason = raidwalk.GMClearGaveUp
+				default:
+					e.Reason = raidwalk.GMClearNotSeen
+				}
 			case m.dead:
 				e.GUID, e.Killed = m.guid.String(), true
 				if m.tries == 0 {
-					e.Reason = raidwalk.GMClearAlreadyDead
+					if m.despawned {
+						e.Reason = raidwalk.GMClearDespawned
+					} else {
+						e.Reason = raidwalk.GMClearAlreadyDead
+					}
 				}
+			case untried:
+				e.GUID, e.Reason = m.guid.String(), raidwalk.GMClearGaveUp
 			default:
 				e.GUID, e.Reason = m.guid.String(), raidwalk.GMClearAlive
 			}
-			if !e.Killed {
+			switch {
+			case e.Reason == raidwalk.GMClearDespawned:
+				gone++
+			case !e.Killed:
 				left++
 				w.note("gm-clear: member %d %s (%s) %s after %d .die lines", e.Entry, e.GUID, label, e.Reason, e.Tries)
 			}
 			w.gmClearLog = append(w.gmClearLog, e)
+		}
+		if gone > 0 {
+			// The walk's own clear removed them: the frames still show them alive in the client's store, so this is not a
+			// partial clear. Say it, because --gm-clear's count then reads lower than the pack size.
+			w.note("gm-clear: %s: %d of %d members were already despawned by this walk's own clear (no line sent)", label, gone, len(pk.SpawnGUIDs()))
 		}
 		if left > 0 {
 			// The group stays alive (walk 32: every gm_kill was refused for the slots table's missing world_addr, so
@@ -268,6 +315,17 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 			w.note("%s", warn)
 			w.logLine(w.env.now(), warn)
 		}
+	}
+	if budgetHit {
+		untried := 0
+		for _, e := range w.gmClearLog {
+			if e.Reason == raidwalk.GMClearGaveUp {
+				untried++
+			}
+		}
+		warn := fmt.Sprintf("gm-clear: WARN: gave up after %s (the tool's budget): %d expected members were not tried and count as not cleared; the placement goes on (raise the budget only to debug a kill that does not land)", gmClearBudget, untried)
+		w.note("%s", warn)
+		w.logLine(w.env.now(), warn)
 	}
 	w.note("%s", raidwalk.GMClearSummaryLine(w.gmClearLog, raidwalk.GMClearLegs(w.gmClear)))
 	// Back to the start point, on its floor, as the corridor clear's last position was.

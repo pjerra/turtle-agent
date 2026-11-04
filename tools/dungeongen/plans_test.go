@@ -868,41 +868,47 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 	if len(moves) < 2 {
 		t.Fatalf("%d move rows in the terrace, want the three groups' approaches", len(moves))
 	}
-	// D4: the row that owns the big cluster's middle-east pack owns its linked Blood Drinkers too (51594/51595, leader
-	// 49343 = the pack's first Panther). Walk 25's radius 12 owned the four Panthers only.
-	row13 := -1
+	// D4: the terrace row owns the middle-east Panthers (formation 49343's 11365s) and the middle-east Blood-Drinker row
+	// owns the formation's linked Drinkers (51594/51595). Walk 25's radius 12 owned the four Panthers only, and the two
+	// Drinkers joined the upper-north fight. Walk 35's radius 14 still stops 26+ yd short of the Drinkers (their entry
+	// is not the terrace row's), so they stay with the Blood-Drinker pull: the terrace row fights the Panthers with its
+	// pack, and no row waits on a wandered Panther.
+	row12 := -1
 	for i, s := range pulls {
 		if rowOwns(s, formations[49343]) {
+			row12 = i
+			break
+		}
+	}
+	if row12 < 0 {
+		t.Fatal("no exported pull row owns the terrace pack (its 49343 Panthers)")
+	}
+	group := 0
+	if _, err := fmt.Sscanf(pulls[row12].Comment, "pull group %d", &group); err != nil || group < 0 || group >= len(p.Legs[4].PullGroups) {
+		t.Fatalf("the owning row's comment %q names no leg-4 group", pulls[row12].Comment)
+	}
+	for _, guid := range []uint64{49343, 49344, 49345, 49346} {
+		c, ok := byGUID[guid]
+		if !ok {
+			t.Fatalf("no spawn %d in the export", guid)
+		}
+		if !rowOwnsOne(pulls[row12], c) {
+			t.Errorf("the terrace pull row %.0f %.0f %.1f (radius %.1f, entries %v) does not own its Panther %d at %.1f %.1f %.1f: %.1f yd out",
+				pulls[row12].X, pulls[row12].Y, pulls[row12].Z, pulls[row12].Radius, pulls[row12].Entries, guid, c.Pos.X, c.Pos.Y, c.Pos.Z, rowDist(pulls[row12], c))
+		}
+	}
+	row13 := -1
+	for i, s := range pulls {
+		if s.Kind != planexport.KindPull || !slices.Contains(s.Entries, uint32(11353)) {
+			continue
+		}
+		if rowOwnsOne(s, byGUID[51594]) && rowOwnsOne(s, byGUID[51595]) {
 			row13 = i
 			break
 		}
 	}
 	if row13 < 0 {
-		t.Fatal("no exported pull row owns the group-13 pack (its 49343 formation)")
-	}
-	group := 0
-	if _, err := fmt.Sscanf(pulls[row13].Comment, "pull group %d", &group); err != nil || group < 0 || group >= len(p.Legs[4].PullGroups) {
-		t.Fatalf("the owning row's comment %q names no leg-4 group", pulls[row13].Comment)
-	}
-	pg := p.Legs[4].PullGroups[group]
-	for _, guid := range []uint64{51594, 51595} {
-		c, ok := byGUID[guid]
-		if !ok {
-			t.Fatalf("no spawn %d in the export", guid)
-		}
-		listed := false
-		for _, q := range pg.Positions {
-			if math.Hypot(float64(q.X-c.Pos.X), float64(q.Y-c.Pos.Y)) < 1 {
-				listed = true
-			}
-		}
-		if !listed {
-			t.Errorf("leg 4 pull_groups[%d] does not list the Blood Drinker %d's spawn (%.1f %.1f %.1f)", group, guid, c.Pos.X, c.Pos.Y, c.Pos.Z)
-		}
-		if !rowOwnsOne(pulls[row13], c) {
-			t.Errorf("the pull row %.0f %.0f %.1f (radius %.1f, entries %v) does not own the Blood Drinker %d (%s, entry %d) at %.1f %.1f %.1f: %.1f yd out",
-				pulls[row13].X, pulls[row13].Y, pulls[row13].Z, pulls[row13].Radius, pulls[row13].Entries, guid, c.Name, c.Entry, c.Pos.X, c.Pos.Y, c.Pos.Z, rowDist(pulls[row13], c))
-		}
+		t.Fatal("no exported pull row owns the linked Blood Drinkers 51594/51595")
 	}
 	// Every pair of consecutive move rows: the packs a later pull row owns stay arlokkTerraceRowYd out of the walk, on the
 	// committed navmesh polyline (always), on the navmesh's own polyline (when the mmaps are present, which must match the
@@ -939,8 +945,9 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 		// middle-level stand (the D row included) is reached through it; the plan's mitigation is the off-tank on the
 		// stand and the TB safety net in WALK29-FIX-PLAN §9.4 (#9). The crossing is logged and left out of this walk's
 		// later-pack clearance only; the straight check and the D -> E walk still hold the rule. Walk-31 fix 5 splits
-		// group 13 in two, so the ramp walk is now group 15 -> group 16 (was 14 -> 15).
-		if a.Comment == "pull group 15 approach" && b.Comment == "pull group 16 approach" {
+		// group 13 in two, so the ramp walk was group 15 -> group 16 (was 14 -> 15). Walk 35 drops the middle-east-Panther
+		// pull, so it is group 14 -> group 15 now.
+		if a.Comment == "pull group 14 approach" && b.Comment == "pull group 15 approach" {
 			kept := laterFams[:0]
 			for _, fam := range laterFams {
 				if len(fam) > 0 && fam[0].GroupLeader == 51365 {

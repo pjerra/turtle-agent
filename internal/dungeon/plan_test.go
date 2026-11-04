@@ -403,3 +403,16 @@ func TestParsePhaseEntriesClashes(t *testing.T) {
 		}
 	}
 }
+
+// The plan's required team: "alliance" or "horde" only, read into Plan.Team (Shadowfang Keep's courtyard_door gossip is
+// Horde-only). Anything else is refused like the groups' and bosses' team fields.
+func TestParsePlanTeam(t *testing.T) {
+	p, err := Parse("t.json", []byte(strings.Replace(validPlan, `"version": 1,`, `"version": 1, "team": "horde",`, 1)))
+	if err != nil || p.Team != TeamHorde {
+		t.Fatalf("%v %+v", err, p)
+	}
+	if _, err := Parse("t.json", []byte(strings.Replace(validPlan, `"version": 1,`, `"version": 1, "team": "neutral",`, 1))); err == nil ||
+		!strings.Contains(err.Error(), `"neutral" is neither "alliance" nor "horde"`) {
+		t.Fatalf("%v", err)
+	}
+}

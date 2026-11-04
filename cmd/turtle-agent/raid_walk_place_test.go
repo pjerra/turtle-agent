@@ -95,6 +95,9 @@ type placeToolkit struct {
 	quietRoamers []any
 	// clearto, when set, answers a `clearto` (n removed, or an error).
 	clearto func(cmd string) (int, error)
+	// cleartoRemoved is the `removed` list a clearto reply carries (the units the server despawned, each with its world guid
+	// "g"). nil: an empty list.
+	cleartoRemoved func(cmd string) []any
 	// place, when set, replaces the default place handler.
 	place func(cmd string) error
 	// placeAll says the default place handler moves every hire (the zero value leaves the last one behind).
@@ -153,7 +156,11 @@ func (p *placeToolkit) answer(cmd string) (ttResult, error) {
 				return ttResult{}, err
 			}
 		}
-		return ttReplyOf(p.t, map[string]any{"map": 309, "n": n, "removed": []any{}, "skipped": []any{}}), nil
+		removed := []any{}
+		if p.cleartoRemoved != nil {
+			removed = p.cleartoRemoved(cmd)
+		}
+		return ttReplyOf(p.t, map[string]any{"map": 309, "n": n, "removed": removed, "skipped": []any{}}), nil
 	case strings.HasPrefix(cmd, "quiet"):
 		p.quietCalls++
 		p.quiets = append(p.quiets, cmd)

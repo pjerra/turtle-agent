@@ -101,7 +101,8 @@
    "outside_tele": "ShadowFangKeep",
    "special": [
     "courtyard door, Sorcerer's door and Arugal's door (GO_COURTYARD_DOOR, GO_SORCERER_DOOR, GO_ARUGAL_DOOR) opened by the keep script as bosses die",
-    "Arugal's summoning focus (GO_ARUGAL_FOCUS)"
+    "Arugal's summoning focus (GO_ARUGAL_FOCUS)",
+    "the courtyard_door gossip (Deathstalker Adamant 3849, faction template 68 Undercity) is Horde-only: the plan is `team: horde` and a run of the other team is refused before its first order (the run leader has no team column on a gossip row)"
    ],
    "notes": [
     "Turtle adds Sever (14682), Prelate Ironmane (61969) and a second Arugal row (10000) that are not legs."

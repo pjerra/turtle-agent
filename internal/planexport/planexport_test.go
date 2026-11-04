@@ -3,6 +3,7 @@ package planexport
 import (
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -839,6 +840,125 @@ func TestApproachHops(t *testing.T) {
 	}
 }
 
+// A pull on another level needs approach points though it stands within the run leader's straight-line reach: its way is the
+// navmesh path down the ledge (maraudon_purple round 35: 42 yd away, 20 yd down, 216 yd along the mesh), and the leader's own hops
+// could not take the party there. A pull at the same level within the reach is still left uncut.
+func TestApproachHopsCutAPullOnAnotherLevel(t *testing.T) {
+	const js = `{"version":1,"name":"ledge","status":"live-checked (test)","map":349,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[
+  {"entries":[100],"positions":[{"x":100,"y":0,"z":0}]},
+  {"entries":[101],"positions":[{"x":140,"y":0,"z":-20}]},
+  {"entries":[102],"positions":[{"x":200,"y":0,"z":-20}]},
+  {"entries":[103],"positions":[{"x":205,"y":0,"z":-20}]}]}]}`
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		// One corner off to the side: the way is a detour around the ledge, not the straight line.
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 60, Z: (a.Z + b.Z) / 2}}, nil, nil
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The pull 20 yd down (42 yd away, so within the straight-line reach) gets an approach row; the one 5 yd away does not.
+	idx := -1
+	for i, s := range res.Rows.Steps {
+		if s.Kind == KindPull && len(s.Entries) == 1 && s.Entries[0] == 101 {
+			idx = i
+		}
+	}
+	if idx < 0 || res.Rows.Steps[idx-1].Kind != KindMove || res.Rows.Steps[idx-1].Comment != "approach path" {
+		t.Fatalf("a pull 20 yd down got no approach points: %v", kinds(res.Rows, 0))
+	}
+	for i, s := range res.Rows.Steps {
+		if s.Kind == KindPull && len(s.Entries) == 1 && s.Entries[0] == 103 {
+			if i > 0 && res.Rows.Steps[i-1].Kind == KindMove && res.Rows.Steps[i-1].Comment == "approach path" {
+				t.Fatalf("a pull 5 yd away at the same level was cut: %v", kinds(res.Rows, 0))
+			}
+		}
+	}
+}
+
+// The last approach row must stand where the run leader sees the pack or boss (at most RunLeaderReachYd away): the floor-aware
+// cutter's hop or the 25 yd standoff can leave the kept corner 70+ yd out (razorfen_kraul round 35: the boss row 73.5 yd from the
+// last approach row). A point on the path just past the standoff is the last row then; a cutter whose corner is already within the
+// reach gets no extra point.
+func TestApproachHopsEndWithinTheRunLeaderReach(t *testing.T) {
+	const js = `{"version":1,"name":"far","status":"live-checked (test)","map":47,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":100,"y":0,"z":0}]}]}]}`
+	// One corner 70 yd from the pack: the standoff keeps it, and it is beyond the reach.
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return []dungeon.Point{{X: a.X + 10, Y: 0, Z: 0}, {X: 30, Y: 0, Z: 0}, {X: 95, Y: 0, Z: 0}}, nil, nil
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last *StepRow
+	for i, s := range res.Rows.Steps {
+		if s.Kind == KindPull {
+			last = &res.Rows.Steps[i-1]
+		}
+	}
+	if last == nil || last.Kind != KindMove {
+		t.Fatalf("no approach row: %v", kinds(res.Rows, 0))
+	}
+	if d := math.Hypot(float64(last.X-100), float64(last.Y)); d > dungeon.RunLeaderReachYd {
+		t.Fatalf("the last approach row is %.1f yd from the pack (row %+.1f): %v", d, last.X, kinds(res.Rows, 0))
+	}
+	if last.X != 70 {
+		t.Fatalf("the last approach row is %.1f, within %d yd wanted: %v", last.X, 30, kinds(res.Rows, 0))
+	}
+
+	// A corner 40 yd out is within the reach: no extra row.
+	near := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return []dungeon.Point{{X: 60, Y: 0, Z: 0}}, nil, nil
+	}
+	res, err = Build(parsePlan(t, js), Options{Source: "test", Cut: near, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(res.Rows.Steps); n != 3 {
+		t.Fatalf("%d rows, an extra approach row for a near corner: %v", n, kinds(res.Rows, 0))
+	}
+}
+
+// The opening move of leg 0 is cut from the plan's entrance: the run leader stands there before its first row, and a leg whose
+// `to` is hundreds of yards in was otherwise one uncut move walked in the leader's own hops (razorfen_downs round 35: 449 yd).
+// A plan whose entrance is near its first point gets no extra row.
+func TestFirstLegMoveIsCutFromTheEntrance(t *testing.T) {
+	const js = `{"version":1,"name":"open","status":"live-checked (test)","map":129,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"a","to":{"x":200,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":200,"y":0,"z":0}]}]}]}`
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		var out []dungeon.Point
+		for x := a.X + 40; x < b.X; x += 40 {
+			out = append(out, dungeon.Point{X: x})
+		}
+		return out, nil, nil
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paths, to int
+	for _, s := range res.Rows.Steps {
+		if s.Kind == KindMove && s.Comment == "path" {
+			paths++
+		}
+		if s.Kind == KindMove && s.Comment == "to" {
+			to++
+		}
+	}
+	if paths == 0 || to != 1 {
+		t.Fatalf("the opening move from the entrance is not cut: %v", kinds(res.Rows, 0))
+	}
+
+	const near = `{"version":1,"name":"open","status":"live-checked (test)","map":129,"entrance":{"x":190,"y":0,"z":0},
+ "legs":[{"name":"a","to":{"x":200,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":205,"y":0,"z":0}]}]}]}`
+	res, err = Build(parsePlan(t, near), Options{Source: "test", Cut: cut})
+	if err != nil || strings.Join(kinds(res.Rows, 0), " ") != "move pull" {
+		t.Fatalf("%v %v", err, kinds(res.Rows, 0))
+	}
+}
+
 // TestRouteAroundAvoid: a plan with an avoid box asks Route for every hop between anchors (the entrance, moves, pulls) and puts the
 // points it returns in as move rows; an error from Route fails the export; a plan without a box never calls it.
 func TestRouteAroundAvoid(t *testing.T) {
@@ -1086,11 +1206,11 @@ func TestGroupStepWithApproachHops(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := kinds(res.Rows, 0); strings.Join(got, " ") != "move move move pull" {
+	if got := kinds(res.Rows, 0); strings.Join(got, " ") != "move move move move pull" {
 		t.Fatalf("kinds %v", got)
 	}
 	if n, ok := res.Rows.GroupStep(p, 0, 0); !ok || n != 2 {
-		t.Fatalf("group 0: step %d ok %v, want 2 (the first approach path row, not the pull row 4)", n, ok)
+		t.Fatalf("group 0: step %d ok %v, want 2 (the first approach path row, not the pull row 5)", n, ok)
 	}
 }
 
@@ -1216,7 +1336,7 @@ func TestCutHopsKeepOffALeftAloneSpawn(t *testing.T) {
 	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "would pass within 15 yd of the left-alone 7246 (spawn 81610)") || !strings.Contains(w, "not cut, the run leader walks it itself") {
 		t.Errorf("warnings %v", res.Warnings)
 	}
-	clear, err := Build(parsePlan(t, js), Options{Source: "test", ApproachHops: true, Cut: cut(dungeon.Point{X: 800, Y: 500, Z: 9})})
+	clear, err := Build(parsePlan(t, js), Options{Source: "test", ApproachHops: true, Cut: cut(dungeon.Point{X: 1625, Y: 1047.7, Z: 9})})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1237,7 +1357,7 @@ func TestCutHopIgnoresAnotherLegsLeave(t *testing.T) {
 			return []dungeon.Point{p}, nil, nil
 		}
 	}
-	res, err := Build(parsePlan(t, js), Options{Source: "test", ApproachHops: true, Cut: cut(dungeon.Point{X: 1600, Y: 1045, Z: 9})})
+	res, err := Build(parsePlan(t, js), Options{Source: "test", ApproachHops: true, Cut: cut(dungeon.Point{X: 1600, Y: 1047.7, Z: 9})})
 	if err != nil {
 		t.Fatal(err)
 	}

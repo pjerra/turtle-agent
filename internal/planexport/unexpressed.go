@@ -16,6 +16,7 @@ import (
 var unexpressedWhy = map[string]string{
 	"entrance/teleports/portal": "the run leader starts inside the instance (`.bot run start` checks the party is in it); getting there is the caller's",
 	"level_band":                "the run leader leads the bound party at whatever level it is",
+	"team":                      "no team column on a step: dungeon_run refuses a party of the other team before the run (the run leader has no team hint and would pause on the step)",
 	"hire_composition":          "the run leader leads the bound party as it is",
 	"fleers":                    "no column; the bots' own AI chases or lets go a fleeing mob",
 	"no_cc":                     "no column; the run leader's crowd control picks only from cc_priority and cc_always",
@@ -72,6 +73,9 @@ func unexpressed(p *dungeon.Plan, opt Options, upto int) []string {
 	}
 	if len(p.LevelBand) > 0 {
 		add("level_band", fmt.Sprintf("plan %v", p.LevelBand))
+	}
+	if p.Team != "" {
+		add("team", "plan "+p.Team)
 	}
 	if len(p.HireComposition) > 0 {
 		add("hire_composition", "plan "+strings.Join(p.HireComposition, ","))
