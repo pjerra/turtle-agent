@@ -131,7 +131,7 @@ func TestSQLUnchangedByOrigins(t *testing.T) {
 		plan string
 		sha  string
 	}{
-		{"zul_gurub", "27e5ab3769c13b224984f3fb033e70638530cec17b6ae1c98fefd8290074540b"}, // walk 36: the honour guard is pulled first from -11562 -1306, the two north packs are one 8-body stand pull, the -11603 -1229 pull beside the respawn pit is dropped, and the boss stand is -11536.8 -1261.5; the venoxis group 9 stand routes south of the boss
+		{"zul_gurub", "d218863f38bca69cb0362f20e38ef67c281908d6c603b3c4320aba9dcf7f2c01"}, // walk 37: the honour guard is three stand pulls (49421's 8 from -11552 -1277, 49403 from -11548.5 -1291, 49402 from -11546.5 -1257), leg 0's empty row is gone and F5 is a plain pull at its own camp, and the five roaming-Berserker rows are stand pulls; walk 36 put the guard first from -11562 -1306 and the two north packs in one 8-body stand pull
 		{"onyxias_lair", "142c1d58928ad1efd9aca2b773c4762e2ddcbae05c308540080a1fedd6e3b38e"},
 	} {
 		p, err := dungeon.Load(filepath.Join("..", "..", "dungeons", c.plan+".json"))

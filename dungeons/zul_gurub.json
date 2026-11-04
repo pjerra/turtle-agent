@@ -52,7 +52,8 @@
     "PLAN R2 ITEM 6 (2026-11-03, leg 0 front; BOTS-PATHING-WAYPOINTS.md §5): leg 0 no longer walks past the entrance ramp and canal packs. Its via is the entrance platform only and its to is the adders stand; five stand pulls come first: adders 49739/49740 from -11927 -1309 78.63 (27.6/27.7 yd), axe throwers 49733/49732 from -11918 -1342 79.08 (20.9), serpent 49089 from -11929 -1366 77.28 (20.6), serpent 49088 from -11957 -1409 81.74 (28.3), canal pack 49118/49116/49117/49119 from -11905 -1384 67.15 (21.3). The old canal walk is the first terrace pack approach (old vias 4, 5, 7 and the old to); the terrace Headhunter pair is a stand pull from the old to (26.5/31.4/35.5 yd from its three spawns) and the bat pack from -12002.5 -1493.5 80.5 (24.4/27.1); the Jin do leg old canal row is gone. Measured, not changed: F1 bat pack has no stand at its level (south of it the mesh is steep or off-mesh: -12058 -1470 is floor 110, -12058 -1455 steep 123.5), so its approach still ends 6.7 yd from 49147; the Arlokk entrance pack (49807 five) has no stand 20.5-28.3 yd from all its spawns and 21 from 91435 loop (the loop passes 10-15 yd from the pack); the Arlokk terrace rows that pass 51593 pack are the next group approach. Plan-check --mmaps: ok, 816 points.",
     "PLAN R2 ITEM 7 (2026-11-03; BOTS-PATHING-WAYPOINTS.md §7): the Jeklik step-8 row (-11931.9 -1491.8 41.5) is gone with item 6 leg-front restructure. The Mandokir ramp gains a via -12178.5 -1811.9 103.19 between -12224 -1813.3 125.3 and -12125.6 -1810.1 80.7; the Hakkar-outer slope a via -11744.9 -1397 33 between via -11700 -1400.3 51 and the leg to -11762.4 -1396.3 19.7. The Jeklik stair approach is now the walkable ramp the navmesh takes: -12049.9 -1474.7 87.25, -12070.7 -1474.7 106.35, -12102.1 -1472.8 130.05, then the plateau -12057 -1448 129.13; all five points are ground, none water or steep. Still open: the exporter cuts a path row at -11710.1 -1499.6 40.4 (Hakkar outer) and at -11928.6 -1482.9 34.5 (Jin do), both above ground and water the server refuses. The plan cannot delete an export path row, and no dry crossing exists there (the bridge deck is a game object off the mesh); a via tried at -11882.7 -1408 61.34 sat 10.2 yd from an axe thrower, so it was dropped. Plan-check --mmaps: ok, 818 points.",
     "PLAN R2 ITEM 8 (2026-11-03; BOTS-PATHING-WAYPOINTS.md §6): approach points along the navmesh path, at most 38 yd apart, on the long hops plan-check named: leg 1 groups 10 (49698), 13 (51947), 18 (91493), 19 (51962) and the Venoxis boss, leg 2 groups 2, 3, 4, 5 and the Mar li boss, leg 3 group 3 (91435), leg 4 group 21 (91444), leg 5 group 1 (the 11-pull pack), leg 7 group 20 and the Hakkar boss. Existing stands stay the last point. plan-check --mmaps: ok, 837 points. Eight run-leader hops remain, all roaming pulls whose stand is 52-174 yd from the DB spawn the export keys on (leg 1 groups 10, 13, 18, 19; leg 3 group 3; leg 4 group 21; leg 5 group 0), plus leg 7 group 20, whose ledge the server PathFinder cannot reach from the lower dock (-11815.8 -1728.5 11.1 answers type 0x4 14-25 yd short). The export carries no patrol block, so those rows stay plain pulls at the spawn.",
-    "WALK 33 WATER (2026-11-03; TortoiseBots-audit tests/raid-zg-walk33 e/f: the lead stuck in water at step 626 (-11862.4 -1508.5 -8.1, the Hakkar lake bed) and the canal at -11944.3 -1353.8 62.3): the mmaps flag the lake bed water (NavWater floors 2-4 yd above the bed round it) and the canal (its floor is NavWater), but planlint only read the point's own floor and the exporter kept the navmesh corners as rows, so neither the lake-bed rows nor the river paths were flagged. planlint's water lint now also reads a nearby NavWater floor above the point (navmesh.LiquidAt), and the exporter writes no cut point in or under a liquid, so the lake is crossed in one hop and no row stands in water: the walk is 752 steps (762 rows), no water lint. Leg 5's river vias 9-13 are the navmesh's dry route round the gorge instead (via the south bank, 405.7 yd; the old crossing was 266.5 yd of water), leg 6 drops its river via -11998.1 -1597.6 25.85, and the Venoxis approach starts at -11990.3 -1565.8 25.86, off the waterline."
+    "WALK 33 WATER (2026-11-03; TortoiseBots-audit tests/raid-zg-walk33 e/f: the lead stuck in water at step 626 (-11862.4 -1508.5 -8.1, the Hakkar lake bed) and the canal at -11944.3 -1353.8 62.3): the mmaps flag the lake bed water (NavWater floors 2-4 yd above the bed round it) and the canal (its floor is NavWater), but planlint only read the point's own floor and the exporter kept the navmesh corners as rows, so neither the lake-bed rows nor the river paths were flagged. planlint's water lint now also reads a nearby NavWater floor above the point (navmesh.LiquidAt), and the exporter writes no cut point in or under a liquid, so the lake is crossed in one hop and no row stands in water: the walk is 752 steps (762 rows), no water lint. Leg 5's river vias 9-13 are the navmesh's dry route round the gorge instead (via the south bank, 405.7 yd; the old crossing was 266.5 yd of water), leg 6 drops its river via -11998.1 -1597.6 25.85, and the Venoxis approach starts at -11990.3 -1565.8 25.86, off the waterline.",
+    "WALK 37 FIX 1 (2026-11-04, leg 6; TortoiseBots-audit tests/raid-zg-walk37 e/e2: Jin'do 11380 engaged at step 552 in three wipes, 69 deaths in e). The honour guard's ten-body row (stand -11562 -1306) was a stand pull whose stand stood 35.5-52.2 yd from its own pack, past the run leader's 28.5 yd shot (\"patrol pull: not waiting for units that walk no patrol and stand out of the 28.5 yd shot\"), so the row plain-pulled and walked the party to the pack 12.9 yd from Jin'do. No stand serves the ten: they span 13 yd, so a stand in shot of all of them is at most 34.8 yd from Jin'do, and one 35+ yd out is out of shot of the two lone Withered Mistresses 49402/49403, who stand 8-10 yd from him (routeReach 35: 25 aggro at the plan's party level 58 plus the raid's 10 yd spread). The camp is three rows now, each a stand pull in shot of its whole pack: formation 49421's eight bodies from -11552 -1277 (27.2 yd from its farthest unit, 36.3 from Jin'do, line of sight to all eight; 18.1 yd from its nearest, the camp cannot keep 19.5 and stay in shot), 49403 from -11548.5 -1291 (27.8, 36.2) and 49402 from -11546.5 -1257 (27.9, 35.8); the two north packs (49383-49386, 1173080; 8 bodies) keep their stand -11558 -1304 and are pulled first (the guard stands 11-19 yd from them, so a stand in the guard's shot is inside their reach). tools/dungeongen/zg_w37_test.go checks the live export: no leg-6 pull row's party point and no move row before the boss approach is inside Jin'do's reach, and the three guard rows are stand pulls in shot of their packs. Not covered: the fight starts 30-33 yd from Jin'do when the north packs wake the party on the walk into the guard's stand (the same 11-19 yd entanglement); the rows keep the pull out of his reach, not every metre of the fight."
   ],
   "legs": [
     {
@@ -1977,27 +1978,6 @@
           "max_bodies": 10
         },
         {
-          "entries": [14883, 14883, 14882, 14882, 14825, 14825, 14882, 14882, 14825, 14825],
-          "positions": [
-            {"x": -11534.8, "y": -1282.44, "z": 78.65},
-            {"x": -11534.2, "y": -1269.71, "z": 78.74},
-            {"x": -11532, "y": -1270.02, "z": 78.91},
-            {"x": -11532, "y": -1282.05, "z": 78.84},
-            {"x": -11528.5, "y": -1270.31, "z": 79.2},
-            {"x": -11528.7, "y": -1281.83, "z": 79.1},
-            {"x": -11525.6, "y": -1270.86, "z": 79.42},
-            {"x": -11525.4, "y": -1281.18, "z": 79.31},
-            {"x": -11522.8, "y": -1271.63, "z": 79.56},
-            {"x": -11522.8, "y": -1280.45, "z": 79.45}
-          ],
-          "radius": 9.5,
-          "approach": [
-            {"x": -11562, "y": -1306, "z": 78.1}
-          ],
-          "stand_pull": true,
-          "max_bodies": 12
-        },
-        {
           "entries": [14825, 14825, 14882, 14825, 14825, 14825, 14825, 14825],
           "positions": [
             {"x": -11547, "y": -1250.59, "z": 78.55},
@@ -2009,12 +1989,55 @@
             {"x": -11544.3, "y": -1263.2, "z": 78.48},
             {"x": -11542.2, "y": -1263.87, "z": 78.45}
           ],
-          "radius": 9.5,
+          "radius": 13,
           "approach": [
             {"x": -11558, "y": -1304, "z": 78.1}
           ],
           "stand_pull": true,
-          "max_bodies": 10
+          "max_bodies": 8
+        },
+        {
+          "entries": [14883, 14883, 14882, 14882, 14882, 14882, 14825, 14825],
+          "positions": [
+            {"x": -11534.8, "y": -1282.44, "z": 78.7332},
+            {"x": -11534.2, "y": -1269.71, "z": 78.6456},
+            {"x": -11532, "y": -1270.02, "z": 79.115},
+            {"x": -11532, "y": -1282.05, "z": 79.074},
+            {"x": -11528.5, "y": -1270.31, "z": 79.4239},
+            {"x": -11528.7, "y": -1281.83, "z": 79.4193},
+            {"x": -11525.6, "y": -1270.86, "z": 79.571},
+            {"x": -11525.4, "y": -1281.18, "z": 79.6252}
+          ],
+          "radius": 7,
+          "approach": [
+            {"x": -11552, "y": -1277, "z": 78}
+          ],
+          "stand_pull": true,
+          "max_bodies": 8
+        },
+        {
+          "entries": [14825],
+          "positions": [
+            {"x": -11522.8, "y": -1280.45, "z": 79.6704}
+          ],
+          "radius": 4,
+          "approach": [
+            {"x": -11548.5, "y": -1291, "z": 78.1}
+          ],
+          "stand_pull": true,
+          "max_bodies": 1
+        },
+        {
+          "entries": [14825],
+          "positions": [
+            {"x": -11522.8, "y": -1271.63, "z": 79.6408}
+          ],
+          "radius": 4,
+          "approach": [
+            {"x": -11546.5, "y": -1257, "z": 78.77}
+          ],
+          "stand_pull": true,
+          "max_bodies": 1
         },
         {
           "entries": [14532, 11351, 11830, 14532],

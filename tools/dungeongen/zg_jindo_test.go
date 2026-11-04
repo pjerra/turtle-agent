@@ -34,10 +34,12 @@ func TestZgJindoKillFirstTotemWardFirst(t *testing.T) {
 	}
 }
 
-// TestZgJindoGuardIsStandPull: the honour-guard group (the 49421 formation with 49402/49403,
-// now group 10 after the pit group's drop) is a stand pull with max_bodies 10, shot from its
-// approach (-11558, -1276, 78.06), 42.2 yd from Jin'do, so the fight happens there and not 13 yd
-// from him. It fails today (plain pull, fought where it stands 10-20 yd from Jin'do).
+// TestZgJindoGuardIsStandPull: the honour guard's camp is three rows now (walk 37 e/e2 wiped three
+// times at step 552 on the old ten-body row whose stand sat 52 yd from its pack, past the tank's
+// 28.5 yd shot, so the row plain-pulled to the pack 13 yd from Jin'do): formation 49421's eight units
+// and the two lone Withered Mistresses 49402/49403, each a stand pull whose stand is inside the tank's
+// shot of its whole pack and 35+ yd from Jin'do. A stand covering all ten cannot exist: they span 13 yd
+// and a stand in shot of the two lone mistresses (8-10 yd from Jin'do) is at most 34.8 yd from him.
 func TestZgJindoGuardIsStandPull(t *testing.T) {
 	p, err := dungeon.Load(zgPlan)
 	if err != nil {
@@ -57,41 +59,62 @@ func TestZgJindoGuardIsStandPull(t *testing.T) {
 		t.Fatal(err)
 	}
 	packs := zgPacks(t, *leg, cs)
-	found := -1
-	for gi, g := range leg.PullGroups {
-		leads := map[uint64]bool{}
-		for _, m := range packs[gi] {
-			lead := m.GroupLeader
-			if lead == 0 {
-				lead = m.GUID
+	jindo := dungeon.Point{X: -11515.8, Y: -1275.48, Z: 79.66}
+	for _, want := range []struct {
+		lead uint64
+		size int
+	}{
+		{49421, 8}, // the guard formation (creature_groups flags 2: it comes as one)
+		{49402, 1},
+		{49403, 1},
+	} {
+		found := -1
+		for gi := range leg.PullGroups {
+			leads := map[uint64]bool{}
+			for _, m := range packs[gi] {
+				lead := m.GroupLeader
+				if lead == 0 {
+					lead = m.GUID
+				}
+				leads[lead] = true
 			}
-			leads[lead] = true
+			if leads[want.lead] {
+				found = gi
+				break
+			}
 		}
-		if !leads[49421] || (!leads[49402] && !leads[49403]) {
-			continue
+		if found < 0 {
+			t.Fatalf("no pull group owns the honour-guard formation %d (with 49402/49403 split out)", want.lead)
 		}
-		found = gi
+		g := leg.PullGroups[found]
 		if !g.StandPull {
-			t.Errorf("pull group %d (the honour guard) is not a stand pull: it must be shot from its approach, not fought where it stands 10-20 yd from Jin'do", gi)
+			t.Errorf("pull group %d (lead %d) is not a stand pull: the fight must happen at its stand, not where it stands 8-20 yd from Jin'do", found, want.lead)
 		}
-		// Walk 36: the ring's radius 8 missed its own two Voodoo Slaves 14883 at -11534.2 -1269.7 and
-		// -11534.8 -1282.4 (9.3 yd from the centroid), so the fight had 12 bodies with a ceiling of 10. The
-		// radius is 10 and the ceiling 12 now.
-		if g.MaxBodies != 12 {
-			t.Errorf("pull group %d (the honour guard) has max_bodies %d, want 12", gi, g.MaxBodies)
+		if len(packs[found]) != want.size {
+			t.Errorf("pull group %d (lead %d) owns %d units, want %d", found, want.lead, len(packs[found]), want.size)
+		}
+		if g.MaxBodies > 0 && g.MaxBodies < want.size {
+			t.Errorf("pull group %d (lead %d): max_bodies %d is under its %d bodies", found, want.lead, g.MaxBodies, want.size)
 		}
 		if len(g.Approach) == 0 {
-			t.Errorf("pull group %d (the honour guard) has no approach (no stand to shoot from)", gi)
+			t.Errorf("pull group %d (lead %d) has no approach (no stand to shoot from)", found, want.lead)
 			continue
 		}
 		stand := g.Approach[len(g.Approach)-1]
-		jindo := dungeon.Point{X: -11515.8, Y: -1275.48, Z: 79.66}
 		if d := dist(stand, jindo); d < 35 {
-			t.Errorf("pull group %d (the honour guard) stand %.1f %.1f %.1f is %.1f yd from Jin'do, want >= 35 (shot from 42 yd, not fought 13 yd from him)", gi, stand.X, stand.Y, stand.Z, d)
+			t.Errorf("pull group %d (lead %d) stand %.1f %.1f %.1f is %.1f yd from Jin'do, want >= 35", found, want.lead, stand.X, stand.Y, stand.Z, d)
 		}
-	}
-	if found < 0 {
-		t.Fatal("no pull group owns the 49421 honour-guard formation (with 49402/49403)")
+		// The run leader's shot from the stand must reach the whole pack, or PatrolStandPullGate
+		// leaves it to a plain pull (the walk-37 message names the units out of the 28.5 yd shot).
+		worst, who := 0.0, creature{}
+		for _, m := range packs[found] {
+			if d := dist(stand, m.Pos); d > worst {
+				worst, who = d, m
+			}
+		}
+		if worst > 28.5 {
+			t.Errorf("pull group %d (lead %d): its farthest unit %s is %.1f yd from the stand, past the 28.5 yd shot: the row would plain-pull to the pack", found, want.lead, who.Name, worst)
+		}
 	}
 }
 

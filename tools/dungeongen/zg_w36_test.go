@@ -61,8 +61,11 @@ func zgW36Centroid(g dungeon.PullGroup) dungeon.Point {
 func zgW36Order(leg int, group int) int { return leg*1000 + group }
 
 // zgW36Owner maps every spawn to the order of the first group that pulls it (dungeon.PullGroup.Positions and radius,
-// the exporter's ownership rule).
+// the exporter's ownership rule). It follows the run leader's scope: a group owns the whole formation of a unit whose
+// spawn lies within its radius of the group's point (TortoiseBots ScopeStandPullFacts), so one member inside the circle
+// pulls its group_leader mates in with it.
 func zgW36Owner(p *dungeon.Plan, cs []creature) map[uint64]int {
+	forms := zgFormations(cs)
 	own := map[uint64]int{}
 	for li := range p.Legs {
 		leg := &p.Legs[li]
@@ -74,12 +77,33 @@ func zgW36Owner(p *dungeon.Plan, cs []creature) map[uint64]int {
 				if have, ok := own[sp.GUID]; ok && have <= o {
 					continue
 				}
+				if !zgHostile(sp) {
+					continue
+				}
+				lead := sp.GroupLeader
+				if lead == 0 {
+					lead = sp.GUID
+				}
+				var group []creature
+				if f := forms[lead]; f != nil {
+					group = f.Member
+				}
+				if len(group) == 0 {
+					group = []creature{sp}
+				}
 				for _, e := range g.Entries {
 					if e != sp.Entry {
 						continue
 					}
 					if dist(c, sp.Pos) <= float64(g.Radius) {
 						own[sp.GUID] = o
+						break
+					}
+					for _, m := range group {
+						if dist(c, m.Pos) <= float64(g.Radius) {
+							own[sp.GUID] = o
+							break
+						}
 					}
 				}
 			}
@@ -158,6 +182,9 @@ func TestZgW36JindoHallStandsKeepTheBossReach(t *testing.T) {
 				}
 				if c.Wander > 50 {
 					continue // the export's wander typo (11356 yd): planlint caps it
+				}
+				if dist(c.Pos, boss) < bossReach {
+					continue // a guard standing at Jin'do's own side: no stand can be out of his reach and in shot of it (the w37 guard rows pin where it is fought instead)
 				}
 				reach := routeReach(p, c)
 				if reach <= 0 {
