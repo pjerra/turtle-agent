@@ -902,6 +902,7 @@ type walk struct {
 	placeSum      *raidwalk.PlaceSummary
 	placeRemoved  int
 	placeSkipped  []raidwalk.ClearCircle // the corridor circles placeClear refused (the extra round keeps away from them)
+	placeCleared  map[uint64]bool        // spawn guids this walk's cleartos already despawned (--gm-clear skips them)
 	placeBlockers []ttUnit               // the quiet's last blockers (the same-instance retreat may GM-kill them)
 	placeRouteEnd int                    // the corridor's route end (PlaceBossGuard's routeEnd), for a retreat's clear
 	reuseMode     string                 // "alive", "bind" or "fresh": what --reuse-instance found
@@ -918,6 +919,9 @@ type walk struct {
 	gmClearWarn []string // groups the plan skipped (no hostile spawn near the row): a WARN note and run.log line
 	gmClearLog  []raidwalk.GMClearEntry
 	gmClearUsed bool
+	// gongReruns counts the run restarts at a leg's summoning open row (a boss that despawns after a wipe comes back with the
+	// object: Zul'Gurub's Arlokk). bossGongReruns bounds them.
+	gongReruns int
 
 	started     time.Time
 	ended       time.Time

@@ -452,6 +452,24 @@ func (w *walk) placeUnits(ctx context.Context, r, x, y, z float32) ([]ttUnit, bo
 	return units, body.flag("trunc"), nil
 }
 
+// placeRecordRemoved remembers the units a clearto removed (its reply's "removed" list, each with the world guid "g"), by spawn
+// guid. --gm-clear runs right after the corridor clear in the same instance, and a unit this walk already despawned is gone from
+// the server: the client's object store still shows it, so `.die` on its guid is a no-op and the tool would retry it four times
+// over ~30 s and report it alive (walk 35: the Jin'do hall packs, 52 members, ~25 min per placement). A server whose reply carries
+// no list leaves the set empty, and --gm-clear behaves as before.
+func (w *walk) placeRecordRemoved(body ttBody) {
+	for _, m := range body.list("removed") {
+		g, err := packet.ParseGUID(strOf(m, "g"))
+		if err != nil {
+			continue
+		}
+		if w.placeCleared == nil {
+			w.placeCleared = map[uint64]bool{}
+		}
+		w.placeCleared[raidwalk.SpawnGUID(g)] = true
+	}
+}
+
 // placeCircleBlocked says why a circle must not be cleared ("" when it may): a unit the row does not own (unless it is
 // BEHIND trash, D5), a unit that stands in an AHEAD row's circle, or a pre-read the toolkit had to cut.
 func (w *walk) placeCircleBlocked(c raidwalk.ClearCircle, units []ttUnit, trunc bool) string {
@@ -542,6 +560,7 @@ func (w *walk) placeClear(ctx context.Context) error {
 			return stopf(exitRaidWalkFailed, "place: clearto row %d gave no count", c.Step)
 		}
 		summary.Removed = int(removed)
+		w.placeRecordRemoved(body)
 		for _, s := range body.list("skipped") {
 			summary.Skipped = append(summary.Skipped, strOf(s, "why"))
 		}
@@ -1039,9 +1058,13 @@ func (w *walk) placeQuietClear(ctx context.Context, u ttUnit, skip string) (took
 		return false, nil
 	}
 	cmd := fmt.Sprintf("clearto %d %s %s %s %d dz=%s all=1%s", w.plan.Map, num32(u.X), num32(u.Y), num32(u.Z), placeExtraRadius, num32(placeClearDz), skip)
-	if _, err := w.tt(ctx, cmd); err != nil {
+	out, err := w.tt(ctx, cmd)
+	if err != nil {
 		w.note("place: the extra clear of %d %s: %v", u.Entry, u.Name, err)
 		return false, nil
+	}
+	if body, ok := ttLast(out); ok {
+		w.placeRecordRemoved(body)
 	}
 	if trash {
 		w.note("place: cleared %d %s in the extra round: trash of a skipped leg (a BEHIND row holds its entry and owns its home, outside every AHEAD row) (%s)", u.Entry, u.Name, u.placeWhere())
@@ -1582,7 +1605,8 @@ func (w *walk) placeKillBlockers(ctx context.Context) bool {
 			w.note("place: the retreat's blocker %d has no readable guid (%q): not killed", u.Entry, u.GUID)
 			continue
 		}
-		tries, dead, err := w.gmClearKill(ctx, objects.Unit{GUID: g, Entry: u.Entry, Name: u.Name})
+		// The retreat's blockers are killed under the tool's own budget: a blocker that will not die must not hold the retreat.
+		tries, dead, err := w.gmClearKill(ctx, objects.Unit{GUID: g, Entry: u.Entry, Name: u.Name}, w.env.now().Add(gmClearBudget))
 		tried = true
 		if err != nil {
 			w.note("place: the retreat's gm_kill of %d %s: %v", u.Entry, u.GUID, err)

@@ -130,6 +130,9 @@ type walkFakeAgent struct {
 	runVerbs []string
 	onSkip   func()
 	skipErr  bool
+	// onStart runs after a `run start` was answered and its startQueue was pushed (a test that needs lines after a
+	// later start: the boss-not-found re-run). nil: nothing.
+	onStart func()
 
 	// pos is where the commander's last .go put it; the quiet-check fakes place units around it.
 	x, y, z float32
@@ -1126,6 +1129,9 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 			f.mu.Unlock()
 			for _, e := range q {
 				f.push(e.raw, e.text)
+			}
+			if hook := f.onStart; hook != nil {
+				hook()
 			}
 			if f.startReply != nil {
 				return *f.startReply
@@ -8345,5 +8351,142 @@ func TestRaidWalkWipeRestFloor(t *testing.T) {
 	var ok bytes.Buffer
 	if _, code := parseRaidWalkArgs([]string{"zul_gurub", "--wipe-rest", "30s"}, &ok); code != exitOK {
 		t.Fatalf("--wipe-rest 30s: exit %d, want %d (%q)", code, exitOK, ok.String())
+	}
+}
+
+// zgArlokkFixture is a Zul'Gurub walk whose until is the step after Arlokk's boss row, with that leg's gong row and boss row.
+func zgArlokkFixture(t *testing.T) (f *fixture, openStep, bossStep int) {
+	t.Helper()
+	f = newFixture(t)
+	f.opts.plan, f.opts.holder = "zul_gurub", "raid-walk-zul_gurub"
+	rows := zgRows(t)
+	for i, s := range rows.Steps {
+		if s.Kind == planexport.KindBoss && s.Entry == 14515 {
+			bossStep = i + 1
+		}
+	}
+	if bossStep == 0 {
+		t.Fatal("no Arlokk boss row in the ZG rows")
+	}
+	step, ok := raidwalk.OpenStepBeforeBoss(rows, bossStep)
+	if !ok {
+		t.Fatalf("the Arlokk boss row %d reports no open step", bossStep)
+	}
+	f.opts.until = fmt.Sprintf("step %d", bossStep+1)
+	p, err := dungeon.Load(filepath.Join(f.opts.dir, "zul_gurub.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.agent.instMap = p.Map
+	f.agent.enterMap = p.Map
+	f.agent.ttFn = ttUnitsFn(t)
+	return f, step, bossStep
+}
+
+// Walk 35 (b3/e3, Arlokk): after a wipe she despawns and no spawn row is left, so the run leader pauses "boss 14515 not found" on
+// her own step. The leg's only other row is the gong (use_object 180526, kind open), which summons her: the walk restarts its run at
+// that row (`.bot run stop`, then `.bot run start ... from step <gong>`) with the run's own until, so the party repeats the gong and
+// meets her again, instead of waiting out pausedWait and ending the walk (which is what forced an operator restart in walk 35).
+func TestRaidWalkBossNotFoundRerunsTheLegsSummoningOpenStep(t *testing.T) {
+	f, openStep, bossStep := zgArlokkFixture(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 30 * time.Second
+	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: fmt.Sprintf("TBM:RUN|zul_gurub|running|1/%d|high_priestess_arlokk|move|walk|walking|until step %d (step %d)", total, bossStep+1, bossStep+1),
+		Lines: []string{
+			fmt.Sprintf("TBM:RUN|zul_gurub|running|1/%d|high_priestess_arlokk|move|walk|walking|until step %d (step %d)", total, bossStep+1, bossStep+1),
+			"TBM:ACTION_ACK|run start|party|1|-",
+		}}}
+	f.agent.startQueue = []queuedEvent{{raw: fmt.Sprintf("TBM:RUN|zul_gurub|paused|%d/%d|high_priestess_arlokk|boss|begin|boss 14515 not found: not alive or dead within 30.0 yd of -11540.7 -1627.7 41.3 for 60 s nor anywhere in the instance (.bot run skip if he is already dead)|until step %d (step %d)",
+		bossStep, total, bossStep+1, bossStep+1)}}
+	f.agent.hostilesFn = func(int) []tbm.HostileRec { return nil } // she despawned: no unit of her entry in the frames
+	starts := 0
+	f.agent.onStart = func() {
+		starts++
+		if starts != 2 {
+			return
+		}
+		// The re-run's own answer: the run running at the gong row, with the walk's until. The hook runs before the
+		// fake hands its reply back, so this replaces the first start's answer.
+		run := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|open|begin|arrived|until step %d (step %d)", openStep, total, bossStep+1, bossStep+1)
+		f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+			Ack:   &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+			Line:  run,
+			Lines: []string{run, "TBM:ACTION_ACK|run start|party|1|-"}}}
+		f.agent.push(fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_arlokk|move|walk|stopped before step %d (until step %d): the party stays where it stands", bossStep+1, total, bossStep+1, bossStep+1), "")
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	// The stop is a GM chat line (`.bot run stop`), not a commander run verb: the verbs are the two starts.
+	if got := strings.Join(verbs, ","); got != "start,start" {
+		t.Fatalf("run verbs %q, want the run started again after the stop", got)
+	}
+	stopped, restarted := false, false
+	for _, l := range f.agentLog() {
+		switch {
+		case strings.HasPrefix(l, "gm .bot run stop"):
+			stopped = true
+		case strings.HasPrefix(l, "cmdr run start ") && stopped:
+			restarted = true
+		}
+	}
+	if !stopped || !restarted {
+		t.Fatalf("log %v: want `.bot run stop` before the re-run's start", f.agentLog())
+	}
+	want := fmt.Sprintf("zul_gurub|from|step|%d|until|step|%d", openStep, bossStep+1)
+	if f.agent.startArgs != want {
+		t.Fatalf("the re-run started with %q, want %q", f.agent.startArgs, want)
+	}
+	sum := f.summary()
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until", sum.EndReason)
+	}
+	if !hasNote(sum, fmt.Sprintf("re-running step %d", openStep)) || !hasNote(sum, fmt.Sprintf("restarted at step %d", openStep)) {
+		t.Fatalf("notes %q, want the gong re-run and the restart", sum.Notes)
+	}
+	// No skip: the boss is not killed, she is brought back.
+	if n := countPrefix(verbs, "skip"); n != 0 {
+		t.Fatalf("%d skips went out", n)
+	}
+}
+
+// The gong re-run must not start a second run over a live one: when `.bot run stop` is refused, no `run start` goes out and the walk
+// falls back to the old pause path (exit 18 after pausedWait).
+func TestRaidWalkBossNotFoundRerunNeedsTheStop(t *testing.T) {
+	f, openStep, bossStep := zgArlokkFixture(t)
+	total := len(zgRows(t).Steps)
+	f.opts.pausedWait = 5 * time.Second
+	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: fmt.Sprintf("TBM:RUN|zul_gurub|running|1/%d|high_priestess_arlokk|move|walk|walking|until step %d (step %d)", total, bossStep+1, bossStep+1),
+		Lines: []string{
+			fmt.Sprintf("TBM:RUN|zul_gurub|running|1/%d|high_priestess_arlokk|move|walk|walking|until step %d (step %d)", total, bossStep+1, bossStep+1),
+			"TBM:ACTION_ACK|run start|party|1|-",
+		}}}
+	f.agent.startQueue = []queuedEvent{{raw: fmt.Sprintf("TBM:RUN|zul_gurub|paused|%d/%d|high_priestess_arlokk|boss|begin|boss 14515 not found: not alive or dead within 30.0 yd of -11540.7 -1627.7 41.3 for 60 s nor anywhere in the instance|until step %d (step %d)",
+		bossStep, total, bossStep+1, bossStep+1)}}
+	f.agent.hostilesFn = func(int) []tbm.HostileRec { return nil }
+	f.agent.gmFail = func(line string) error {
+		if line == ".bot run stop" {
+			return fmt.Errorf("the command was refused")
+		}
+		return nil
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if got := strings.Join(verbs, ","); got != "start" {
+		t.Fatalf("run verbs %q: no second start may go out over a run that did not stop", got)
+	}
+	if !hasNote(f.summary(), fmt.Sprintf("re-running step %d", openStep)) || !hasNote(f.summary(), "the run stop before the re-run failed") {
+		t.Fatalf("notes %q, want the re-run attempt and the failed stop", f.summary().Notes)
 	}
 }

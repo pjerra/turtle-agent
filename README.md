@@ -2533,6 +2533,16 @@ cleared by a wipe recovery) and no boss unit of the family was seen alive after 
 so an earlier attempt's corpse stays in them after a reset or a respawn), no boss unit may be seen alive in the
 last 15 s, and a hire must be alive. With that evidence the walk sends one `.bot run skip` (retried once if the
 send fails); the evidence is re-read on every tick while the pause lasts, and without it the pause path is unchanged.
+With no kill evidence and a `use_object` row (kind `open`, or `open_proof`) as the leg's last non-move row before the boss row,
+its point within 60 yd (2D) of the boss row's point — the object that summons it, inferred from the plan's shape (plan v1 has no
+field for that link; a door or lever elsewhere in the wing is no evidence) — the walk restarts its own run at that row instead
+of waiting the pause out (walk 35: Arlokk 14515 despawns after a wipe with no spawn row left, and b3/e3 paused `boss 14515 not
+found` until an operator repeated the gong): `.bot run stop`, then `run start <plan> from step <the open row>` with the walk's own
+`until` and speed, so the run leader walks back to the object, opens it (the gong 180526) and meets the boss again; a fresh
+pause re-arms the same handling, and at most 3 such restarts are sent per walk (past them the pause ends the walk as before).
+The new run's own status line is adopted and checked (running, that step, the walk's row count, the walk's until label); a
+refused stop, a refused start or a wrong status is noted and the pause path takes over, with no second `run start` over a run
+that did not stop. The note and run.log line say `re-running step N` and `the run restarted at step N`.
 
 Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
 `.bot gear raid <commander> tier <N>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,
@@ -2595,7 +2605,14 @@ AQ20 walk starts at Rajaxx with `--gm-clear-boss kurinnaxx` so Kurinnaxx is dead
   `HandleDieCommand` at `Commands.cpp:2795` kills the selected unit). The death is read from the unit's frames (`dead`, 5 s); a unit
   that is still alive gets up to three more `.die` lines, 3 s apart. Every stop is visited and read in two rounds, always (an empty read
   ends nothing). A member never seen is recorded `killed: false, reason: "not seen"`, one that would not die `reason: "alive"`, one
-  already dead `reason: "already dead"` (killed, 0 tries). Either of the first two makes the clear **PARTIAL**: noted, in the summary
+  already dead `reason: "already dead"` (killed, 0 tries), one **this walk's own corridor clear already despawned**
+  `reason: "despawned by the corridor clear"` (killed, 0 tries, no line sent: the clearto reply's `removed` list names those units, and
+  the server no longer has them while the client's object store still shows them alive, so a `.die` on their guid is a no-op — that was
+  walk 35's 52 `alive after 4 tries` members in the Jin'do hall, ~25 min of retries per placement), and one the tool's **budget** left
+  untried `reason: "not tried: the gm-clear budget ran out"` (5 minutes for the whole tool, checked before every `.die` line, so
+  the budget is a real ceiling; past it no more lines go out, a `gm-clear: WARN: gave up after 5m0s ...` line names it, and the
+  placement goes on — a member already mid-retry when it ran out keeps `reason: "alive"`). A not-seen, alive or not-tried member makes the
+  clear **PARTIAL**: noted, in the summary
   (`gm_clear_partial: true`, `ASSISTED PARTIAL` on the result line, `groups not cleared: <leg>:<groups>` with a leg's consecutive
   numbers as a range, e.g. `high_priestess_arlokk:12-17`) and in the report. A group that is still alive after its retries never fails
   the placement: a `gm-clear: WARN: <leg>:<group> not cleared ...` line names it, and the quiet and the landing read skip that pack's
