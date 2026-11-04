@@ -1166,20 +1166,47 @@ func (d *RemoteDriver) leadPos() (Point, bool) {
 	return partyPoint(l), true
 }
 
-// resolveTeam takes the party's team for the team gate: the run's team option, else the game's (the agent's own race; the feed carries
-// no race, and the owned bots share the account's faction). Without either, nothing is gated and the report says so.
-func (d *RemoteDriver) resolveTeam() {
-	src := ""
+// partyTeam is the party's team and where it was read from: the run's team option, else the game's (the agent's own race; the feed
+// carries no race, and the owned bots share the account's faction). Both empty: unknown.
+func (d *RemoteDriver) partyTeam() (team, src string) {
 	switch {
 	case d.opt.Team != "":
-		d.team, src = d.opt.Team, "the team option"
+		return d.opt.Team, "the team option"
 	default:
 		if ts, ok := d.g.(TeamSource); ok {
 			if t := ts.Team(); t != "" {
-				d.team, src = t, "the agent's own race (the bots are taken to share it; pass team to override)"
+				return t, "the agent's own race (the bots are taken to share it; pass team to override)"
 			}
 		}
 	}
+	return "", ""
+}
+
+// checkTeam refuses a plan whose steps only work for one team when the party is the other one (Plan.Team): Shadowfang Keep's
+// courtyard_door gossip is Deathstalker Adamant (3849), friendly to the Horde and hostile to the Alliance, and the run leader's
+// gossip row has no team column, so an Alliance tank's `cmd gossip` is refused npc-busy and the run pauses four times (round 35).
+// An unknown team does not refuse: the report says the check could not be made.
+func (d *RemoteDriver) checkTeam() error {
+	need := d.plan.Team
+	if need == "" {
+		return nil
+	}
+	have, src := d.partyTeam()
+	if have == "" {
+		d.rep.note("team check: " + d.plan.Name + " needs a " + need + " party and the party's team is unknown; not checked")
+		return nil
+	}
+	if have == need {
+		return nil
+	}
+	return fmt.Errorf("plan %s needs a %s party (some of its steps only work for that team); the party is %s (%s): use a %s commander", d.plan.Name, need, have, src, need)
+}
+
+// resolveTeam takes the party's team for the team gate: the run's team option, else the game's (the agent's own race; the feed carries
+// no race, and the owned bots share the account's faction). Without either, nothing is gated and the report says so.
+func (d *RemoteDriver) resolveTeam() {
+	var src string
+	d.team, src = d.partyTeam()
 	if d.team == "" {
 		d.rep.note("team gate: the party's team is unknown (no team option, the agent's race is not known); every team-gated step runs")
 		return

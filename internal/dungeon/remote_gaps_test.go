@@ -1005,3 +1005,33 @@ func TestRemotePreflightTalentsZeroPointsWarnsInTheTogetherPath(t *testing.T) {
 		}
 	}
 }
+
+// A plan that needs one team is refused for the other before anything is sent (round 35: the Shadowfang Keep run used an Alliance
+// commander, its tank's gossip with Deathstalker Adamant 3849 was refused npc-busy four times and stopped the run; the NPC is
+// Horde-friendly, faction template 68 = Undercity). An unknown team does not refuse.
+func TestRemoteRefusesAPlanWhoseTeamDiffers(t *testing.T) {
+	plan := remotePlan(Leg{Name: "a", To: Point{10, 0, 0}})
+	plan.Team = TeamHorde
+	g := teamFake{fakeRemote: newFakeRemote(t), team: TeamAlliance}
+	err := NewRemoteDriver(plan, g, DefaultConfig(), opts(), g.clock()).Run(context.Background(), 0)
+	if err == nil || !strings.Contains(err.Error(), "needs a horde party") || !strings.Contains(err.Error(), "the party is alliance") {
+		t.Fatalf("%v", err)
+	}
+	if len(g.orders) != 0 {
+		t.Fatalf("a refused start sent orders: %v", g.orders)
+	}
+
+	plan = remotePlan(Leg{Name: "a", To: Point{10, 0, 0}})
+	plan.Team = TeamHorde
+	g = teamFake{fakeRemote: newFakeRemote(t), team: TeamHorde}
+	if rep, err := runRemote(t, g, plan, opts(), nil); err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+
+	plan = remotePlan(Leg{Name: "a", To: Point{10, 0, 0}})
+	plan.Team = TeamHorde
+	g = teamFake{fakeRemote: newFakeRemote(t), team: ""}
+	if rep, err := runRemote(t, g, plan, opts(), nil); err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+}
