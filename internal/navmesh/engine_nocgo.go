@@ -17,6 +17,9 @@ func (*engine) floors(float32, float32, float32, float32) ([]Floor, error) {
 	return nil, ErrNoEngine
 }
 func (*engine) polys([4]float32) ([]Polygon, error) { return nil, ErrNoEngine }
+func (*engine) component(Vec3, uint16, uint16) (bool, int, [6]float32, error) {
+	return false, 0, [6]float32{}, ErrNoEngine
+}
 func (*engine) findPath(Vec3, Vec3) (int, []Vec3, Vec3) {
 	return -3, nil, Vec3{}
 }

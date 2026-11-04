@@ -380,6 +380,39 @@ func (p *Planner) Nearest(mapID uint32, pt Vec3) (Vec3, bool, error) {
 	return out, ok, nil
 }
 
+// Component is the connected component of walkable mesh a point belongs to: found false when no
+// walkable polygon is within the walk filter near it; count is the component's polygon count and bbox
+// its WoW box (x0, y0, z0, x1, y1, z1). It loads the map's tiles whole (a dungeon), so the walk is not
+// cut at a tile edge.
+func (p *Planner) Component(mapID uint32, pt Vec3) (found bool, count int, bbox [6]float32, err error) {
+	if p.dir == "" {
+		return false, 0, [6]float32{}, errors.New(`navmesh: no tiles folder; set "mmaps_dir" in the settings file`)
+	}
+	m, err := p.mesh(mapID)
+	if err != nil {
+		return false, 0, [6]float32{}, err
+	}
+	names, err := p.list(mapID)
+	if err != nil {
+		return false, 0, [6]float32{}, err
+	}
+	want := wantTiles(names, mapID, pt, pt, 1, p.max)
+	data, err := p.fetch(m, want)
+	if err != nil {
+		return false, 0, [6]float32{}, err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.maps[mapID] != m {
+		return false, 0, [6]float32{}, errClosed
+	}
+	m.missing = nil
+	if err := p.load(m, want, data); err != nil {
+		return false, 0, [6]float32{}, err
+	}
+	return m.eng.component(pt, IncludeFlags, ExcludeFlags)
+}
+
 // Polygon is one convex navmesh polygon for drawing: its corners in WoW (x, y, z), in the order the tile holds
 // them, and its flags (NavGround, NavWater, ...).
 type Polygon struct {

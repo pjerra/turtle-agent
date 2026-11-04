@@ -75,6 +75,25 @@ func (e *engine) nearest(p, ext Vec3) (Vec3, bool) {
 	return out, rc == 0
 }
 
+// component is the connected component of the walkable polygon nearest p: its polygon count and
+// WoW bbox (x0, y0, z0, x1, y1, z1).
+func (e *engine) component(p Vec3, include, exclude uint16) (bool, int, [6]float32, error) {
+	var count C.int
+	var bb [6]C.float
+	rc := int(C.nd_component(e.h, cvec(&p), C.ushort(include), C.ushort(exclude), &count, &bb[0]))
+	if rc < 0 {
+		return false, 0, [6]float32{}, errors.New("navmesh: Detour failed to walk the component")
+	}
+	if rc == 0 {
+		return false, 0, [6]float32{}, nil
+	}
+	var out [6]float32
+	for i := range out {
+		out[i] = float32(bb[i])
+	}
+	return true, int(count), out, nil
+}
+
 // floors lists the surface heights at (x, y) between lo and hi with their polygon flags.
 func (e *engine) floors(x, y, lo, hi float32) ([]Floor, error) {
 	const most = 64 // nd_floors queries at most 64 polygons, so none is cut

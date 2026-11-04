@@ -8,7 +8,9 @@
 // wall margin: a headless client has no collision to catch on corners.
 #include <cstdint>
 #include <cstring>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "DetourAlloc.h"
 #include "DetourCommon.h"
@@ -185,6 +187,65 @@ extern "C" int nd_floors(void* h, const float* p, float lo, float hi, float* z, 
         ++count;
     }
     return count;
+}
+
+extern "C" int nd_component(void* h, const float* p, unsigned short include, unsigned short exclude, int* count,
+                            float* bbox) {
+    Nav* n = (Nav*)h;
+    if (!n || !n->mesh)
+        return -1;
+    dtQueryFilter f = makeFilter(include, exclude);
+    float pd[3], closest[3], dist;
+    toDt(p, pd);
+    dtPolyRef start = findWalkPoly(n, pd, f, closest, &dist);
+    if (!start)
+        return 0;
+    std::unordered_set<dtPolyRef> seen;
+    std::vector<dtPolyRef> stack;
+    seen.insert(start);
+    stack.push_back(start);
+    float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
+    while (!stack.empty()) {
+        dtPolyRef ref = stack.back();
+        stack.pop_back();
+        const dtMeshTile* t = nullptr;
+        const dtPoly* poly = nullptr;
+        if (dtStatusFailed(n->mesh->getTileAndPolyByRef(ref, &t, &poly)) || !t || !poly)
+            continue;
+        for (unsigned int k = poly->firstLink; k != DT_NULL_LINK; k = t->links[k].next) {
+            dtPolyRef nr = t->links[k].ref;
+            if (!nr || seen.count(nr))
+                continue;
+            const dtMeshTile* nt = nullptr;
+            const dtPoly* np = nullptr;
+            if (dtStatusFailed(n->mesh->getTileAndPolyByRef(nr, &nt, &np)) || !nt || !np)
+                continue;
+            if (np->getType() != DT_POLYTYPE_GROUND || (np->flags & include) == 0 || (np->flags & exclude) != 0)
+                continue;
+            seen.insert(nr);
+            stack.push_back(nr);
+        }
+    }
+    for (dtPolyRef ref : seen) {
+        const dtMeshTile* t = nullptr;
+        const dtPoly* poly = nullptr;
+        if (dtStatusFailed(n->mesh->getTileAndPolyByRef(ref, &t, &poly)) || !t || !poly)
+            continue;
+        for (int k = 0; k < poly->vertCount; ++k) {
+            float w[3];
+            toWow(&t->verts[poly->verts[k] * 3], w);
+            for (int a = 0; a < 3; ++a) {
+                lo[a] = w[a] < lo[a] ? w[a] : lo[a];
+                hi[a] = w[a] > hi[a] ? w[a] : hi[a];
+            }
+        }
+    }
+    *count = (int)seen.size();
+    for (int a = 0; a < 3; ++a) {
+        bbox[a] = lo[a];
+        bbox[3 + a] = hi[a];
+    }
+    return 1;
 }
 
 extern "C" int nd_polys(void* h, const float* box, float* out, int max) {

@@ -7,6 +7,10 @@
 extern "C" {
 #endif
 
+// The connected component of the walkable polygon nearest p (the walk filter as nd_find_path):
+// 1 found (*count = its polygons, bbox = WoW x0,y0,z0,x1,y1,z1), 0 no walkable polygon near p,
+// -1 Detour failure. Scratch: it exists to tell an isolated piece of mesh from the rest.
+
 // 100 * DT_NAVMESH_VERSION + sizeof(dtPolyRef): 708 is the core's build (Detour 7, 64-bit refs).
 int nd_version(void);
 
@@ -61,6 +65,8 @@ int nd_raycast(void* h, const float* start, const float* end, unsigned short inc
 // = the floor point found for end (set from 0 up).
 int nd_find_path(void* h, const float* start, const float* end, unsigned short include, unsigned short exclude,
                  float* out, int max_points, int* count, float* goal);
+
+int nd_component(void* h, const float* p, unsigned short include, unsigned short exclude, int* count, float* bbox);
 
 #ifdef __cplusplus
 }
