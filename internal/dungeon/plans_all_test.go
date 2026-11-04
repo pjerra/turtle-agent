@@ -55,7 +55,7 @@ func TestPlanKindStatusAndParty(t *testing.T) {
 
 // offlineMapped are the plans whose legs, doors and steps were written by hand (from the export, the scripts and the walks), so they carry
 // steps and are still drafts. A plan leaves the list when its status moves on: TestOfflineMappedPlansAreStillDrafts fails for one that does not.
-var offlineMapped = map[string]bool{"deadmines": true, "molten_core": true, "blackwing_lair": true, "wailing_caverns-extra": true, "temple_of_ahnqiraj": true, "ruins_of_ahnqiraj": true, "lower_karazhan_halls": true, "emerald_sanctum": true, "naxxramas": true}
+var offlineMapped = map[string]bool{"blackfathom_deeps": true, "deadmines": true, "molten_core": true, "blackwing_lair": true, "wailing_caverns-extra": true, "temple_of_ahnqiraj": true, "ruins_of_ahnqiraj": true, "lower_karazhan_halls": true, "emerald_sanctum": true, "naxxramas": true}
 
 // Every plan with a level band carries its tank_min_hp, from the tank's max health in the 2026-10 test runs
 // (~/TortoiseBots-audit/specs/ta-266-tank-floors.md: 0.9 x the weakest clean run of the plan, scaled to the hire level; Ragefire
