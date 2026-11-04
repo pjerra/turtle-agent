@@ -88,13 +88,6 @@ func zgW36Owner(p *dungeon.Plan, cs []creature) map[uint64]int {
 	return own
 }
 
-func max32(a, b float32) float32 {
-	if a > b {
-		return b
-	}
-	return a
-}
-
 // zgW36ApproachPoints is every point the party stands on for the group: its approach points (the last of them is the
 // stand) and the row point a plain fallback pull would walk to.
 func zgW36ApproachPoints(g dungeon.PullGroup) []dungeon.Point {
