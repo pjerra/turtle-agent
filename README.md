@@ -2533,6 +2533,13 @@ cleared by a wipe recovery) and no boss unit of the family was seen alive after 
 so an earlier attempt's corpse stays in them after a reset or a respawn), no boss unit may be seen alive in the
 last 15 s, and a hire must be alive. With that evidence the walk sends one `.bot run skip` (retried once if the
 send fails); the evidence is re-read on every tick while the pause lasts, and without it the pause path is unchanged.
+With no kill evidence and a `use_object` row (kind `open`) as the leg's last non-move row before the boss row — the
+object that summons it — the walk restarts its own run at that row instead of waiting the pause out (walk 35: Arlokk
+14515 despawns after a wipe with no spawn row left, and b3/e3 paused `boss 14515 not found` until an operator repeated
+the gong): `.bot run stop`, then `run start <plan> from step <the open row>` with the walk's own `until` and
+speed, so the run leader walks back to the object, opens it (the gong 180526) and meets the boss again; a fresh
+pause re-arms the same handling, and at most 3 such restarts are sent per walk (past them the pause ends the walk as
+before). The note and run.log line say `re-running step N` and `the run restarted at step N`.
 
 Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
 `.bot gear raid <commander> tier <N>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,

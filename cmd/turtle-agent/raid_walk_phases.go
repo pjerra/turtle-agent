@@ -957,9 +957,11 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 		skipped bool // a near-wipe recovery was skipped for this pause: the old ending, once
 		// bossSkip says this pause's boss-not-found skip is settled: a `.bot run skip` went out, or its two tries
 		// failed (then the pause path takes over). Until then the kill evidence is re-read on every tick (review
-		// round 1, item 2). bossNoKill notes the first tick without evidence once, not every tick.
+		// round 1, item 2). bossNoKill notes the first tick without evidence once, not every tick. gongStep is the
+		// leg's open row this pause already re-ran to bring the boss back (0: none yet); a new pause re-arms it.
 		bossSkip   bool
 		bossNoKill bool
+		gongStep   int
 	}
 	perStep := map[int]int{}
 	autoTotal := 0
@@ -1016,7 +1018,7 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 		if w.haveStatus && w.lastStatus.State == tbm.RunPaused {
 			if !ps.armed || ps.note != w.lastStatus.Note || ps.step != w.lastStatus.Step {
 				ps.armed, ps.at, ps.note, ps.step, ps.lastTry, ps.skipped = true, now, w.lastStatus.Note, w.lastStatus.Step, now, false
-				ps.bossSkip, ps.bossNoKill = false, false
+				ps.bossSkip, ps.bossNoKill, ps.gongStep = false, false, 0
 				w.logLine(now, "paused: "+w.lastStatus.Note)
 				if w.dash != nil {
 					w.saveCommanders("pause")
@@ -1035,6 +1037,13 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 				if ok, ev := w.bossKilled(ctx, bossEntry, now); ok {
 					ps.bossSkip = true
 					w.bossSkipStep(ctx, bossEntry, ev, ps.step, now)
+				} else if openStep, ok := raidwalk.OpenStepBeforeBoss(w.rows, ps.step); ok && ps.gongStep != openStep && w.gongReruns < bossGongReruns {
+					// The boss is gone from the instance and the leg's open row is what brings it back (walk 35: Arlokk
+					// 14515 despawns after a wipe with no spawn row left, and the run pauses "boss 14515 not found" until
+					// the gong is repeated by hand). Restart the run at that row instead of ending the walk.
+					ps.gongStep = openStep
+					w.gongReruns++
+					w.rerunOpenStep(ctx, openStep, bossEntry, ps.step, ev, now)
 				} else if !ps.bossNoKill {
 					ps.bossNoKill = true
 					w.note("boss %d not found and no kill in the frames yet (%s): re-reading while the pause lasts", bossEntry, ev)
@@ -3128,6 +3137,53 @@ func (w *walk) bossSkipStep(ctx context.Context, bossEntry uint32, ev string, st
 		}
 	}
 	return false
+}
+
+// bossGongReruns bounds how many times one walk restarts its run at a leg's summoning open row. A boss that despawns after a
+// wipe and comes back with the object (Zul'Gurub's Arlokk and the gong 180526) needs one per lost boss; the bound keeps a boss
+// that never comes back from turning the pause into a restart loop. Past it the pause ends the walk as before.
+const bossGongReruns = 3
+
+// rerunOpenStep restarts the walk's run at the leg's open row (raidwalk.OpenStepBeforeBoss): `.bot run stop`, then
+// `.bot run start <plan> from step <N>` with the walk's own until and speed, so the run leader walks back to the object, opens it
+// (the gong) and meets the boss it summons. The run's status lines are read again from there: a fresh pause re-arms the
+// boss-not-found handling, and the step decrease is the run's own resume (pullStarted clears the boss latch for it). A refused
+// start is noted and left to the pause path (pausedWait then ends the walk as before); nothing here aborts the walk.
+func (w *walk) rerunOpenStep(ctx context.Context, openStep int, bossEntry uint32, bossStep int, ev string, now time.Time) {
+	line := fmt.Sprintf("boss %d not found (%s): re-running step %d (the open summons the boss) with .bot run stop and .bot run start from step %d", bossEntry, ev, openStep, openStep)
+	w.note("%s", line)
+	w.logLine(now, line)
+	if err := w.stopRun(ctx, ""); err != nil {
+		w.note("boss %d not found: the run stop before the re-run failed (%v): the pause path takes over", bossEntry, err)
+		return
+	}
+	w.runStopped = false
+	if err := w.placeSleep(ctx, 2*time.Second); err != nil {
+		return
+	}
+	args := []string{w.plan.Name, "from", "step", strconv.Itoa(openStep)}
+	args = append(args, w.untilWords...)
+	if w.opts.speed != 1.0 {
+		args = append(args, fmt.Sprintf("speed=%.1f", w.opts.speed))
+	}
+	rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "start", Args: args, WaitMS: 10000})
+	var why string
+	switch {
+	case err != nil:
+		why = err.Error()
+	case rep.Reply.Err != nil:
+		why = rep.Reply.Err.Message
+	case !rep.Reply.OK && rep.Reply.Kind != tbm.KindAck:
+		why = "no ACK (" + rep.Reply.Line + ")"
+	}
+	if why != "" {
+		w.note("boss %d not found: the re-run at step %d was refused (%s): the pause path takes over", bossEntry, openStep, why)
+		w.logLine(now, fmt.Sprintf("boss %d not found: the re-run at step %d was refused (%s)", bossEntry, openStep, why))
+		return
+	}
+	w.runStarted = true
+	w.note("the run restarted at step %d (leg %s) for boss %d", openStep, raidwalk.PlaceLegName(w.rows, openStep), bossEntry)
+	w.logLine(w.env.now(), fmt.Sprintf("the run restarted at step %d for boss %d (its row is step %d)", openStep, bossEntry, bossStep))
 }
 
 // bossSpot is the plan boss row's position: the spot the run leader's own boss step searches around (30 yd) and

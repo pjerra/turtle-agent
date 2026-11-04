@@ -919,6 +919,9 @@ type walk struct {
 	gmClearWarn []string // groups the plan skipped (no hostile spawn near the row): a WARN note and run.log line
 	gmClearLog  []raidwalk.GMClearEntry
 	gmClearUsed bool
+	// gongReruns counts the run restarts at a leg's summoning open row (a boss that despawns after a wipe comes back with the
+	// object: Zul'Gurub's Arlokk). bossGongReruns bounds them.
+	gongReruns int
 
 	started     time.Time
 	ended       time.Time
