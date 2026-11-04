@@ -1188,13 +1188,23 @@ func (b *builder) cutLongHops() error {
 			a, c := dungeon.Point{X: prev.X, Y: prev.Y, Z: prev.Z}, dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
 			d := dist3(a, c)
 			if d > dungeon.RunLeaderReachYd || math.Abs(float64(a.Z-c.Z)) > approachDropYd {
-				via, notes, err := b.opt.Cut(b.plan.Map, a, c)
+				full, notes, err := b.opt.Cut(b.plan.Map, a, c)
 				b.cutNotes(s.Leg, s.Seq, notes)
 				if err != nil {
 					b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the %s is %.0f yd from the anchor before it and the approach could not be cut: %v", s.Leg, s.Seq, s.Kind, d, err))
 				}
+				via := full
 				for len(via) > 0 && dist3(via[len(via)-1], c) < approachStandoffYd {
 					via = via[:len(via)-1]
+				}
+				// The leader must see the target from its last row: the floor-aware cutter keeps hops up to 110 yd, so the corner
+				// left after the 25 yd standoff can stand beyond its 60 yd sight (razorfen_kraul round 35: the boss row 73.5 yd
+				// from the last approach row, and its stand discipline walked back there into a no-LOS hold). A point on the path
+				// at approachLeadYd past the standoff is the last row then.
+				if len(via) > 0 && dist3(via[len(via)-1], c) > dungeon.RunLeaderReachYd {
+					if p, ok := pointBefore(full, c, approachStandoffYd+approachLeadYd); ok {
+						via = append(via, p)
+					}
 				}
 				if lv, near := b.firstLeaveConflict(b.legs, s.Leg, a, c, via); near {
 					b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the %s approach path would pass within %.0f yd of the left-alone %d (spawn %d) at %.1f %.1f: the hop is not cut, the run leader walks it itself", s.Leg, s.Seq, s.Kind, dungeon.LeaveClearYd, lv.Entry, lv.Spawn, lv.At.X, lv.At.Y))
@@ -1324,6 +1334,29 @@ const approachStandoffYd = 25
 // leader's hops follow the navmesh, and a pack on a ledge 8 yd below is reached by a path far longer than the straight line
 // (Maraudon purple round 35: the second pack 20 yd down and 42 yd away, 216 yd along the mesh).
 const approachDropYd = 8
+
+// approachLeadYd is how far past the standoff the last approach row stands when the cutter's kept corner is beyond the run
+// leader's reach: the row the party pulls from, within its sight of the pack or boss.
+const approachLeadYd = 5
+
+// pointBefore returns the point `yd` yards before target along the polyline of via points (in walking order) and the target.
+func pointBefore(via []dungeon.Point, target dungeon.Point, yd float64) (dungeon.Point, bool) {
+	prev := target
+	for i := len(via) - 1; i >= 0; i-- {
+		seg := dist3(via[i], prev)
+		if seg > 0 && seg >= yd {
+			f := yd / seg
+			return dungeon.Point{
+				X: f32(float64(prev.X) + float64(via[i].X-prev.X)*f),
+				Y: f32(float64(prev.Y) + float64(via[i].Y-prev.Y)*f),
+				Z: f32(float64(prev.Z) + float64(via[i].Z-prev.Z)*f),
+			}, true
+		}
+		yd -= seg
+		prev = via[i]
+	}
+	return dungeon.Point{}, false
+}
 
 func dist3(a, b dungeon.Point) float64 {
 	return math.Sqrt(sq(float64(a.X-b.X)) + sq(float64(a.Y-b.Y)) + sq(float64(a.Z-b.Z)))
