@@ -40,7 +40,7 @@ func TestZulGurubArlokkTerraceIsSplitPerFormation(t *testing.T) {
 		}
 	}
 	want := map[int]struct{ bodies, ceiling int }{
-		13: {31, 10}, // upper B + upper east: max_bodies 10 (walk 35: radius 13 owns the four lower Panthers too, so the 60 s wait and the straggler walk are gone)
+		13: {31, 14}, // upper B + upper east + the four lower Panthers: max_bodies 14 (walk 35 fix 1: radius 14 owns all three formations, 14 bodies)
 		14: {31, 2},  // middle east Blood Drinkers, pulled first from the clear stand: max_bodies 2
 		15: {31, 8},  // upper north: unsized (the lint's raid default; walk 35 drops the old middle-east-Panther pull, whose pack the terrace owns now)
 		16: {27, 5},  // middle west: max_bodies 5

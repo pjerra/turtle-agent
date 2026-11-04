@@ -870,7 +870,7 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 	}
 	// D4: the terrace row owns the middle-east Panthers (formation 49343's 11365s) and the middle-east Blood-Drinker row
 	// owns the formation's linked Drinkers (51594/51595). Walk 25's radius 12 owned the four Panthers only, and the two
-	// Drinkers joined the upper-north fight. Walk 35's radius 13 still stops 26+ yd short of the Drinkers (their entry
+	// Drinkers joined the upper-north fight. Walk 35's radius 14 still stops 26+ yd short of the Drinkers (their entry
 	// is not the terrace row's), so they stay with the Blood-Drinker pull: the terrace row fights the Panthers with its
 	// pack, and no row waits on a wandered Panther.
 	row12 := -1

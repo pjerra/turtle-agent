@@ -131,7 +131,7 @@ func TestSQLUnchangedByOrigins(t *testing.T) {
 		plan string
 		sha  string
 	}{
-		{"zul_gurub", "536a533aff3c86146a515f281c73b46400addf8e3fa2c93b4b1c4e85efa48556"}, // walk 35: group 13 carries the 14750 patrol block, the terrace is radius 14 and drops the middle-east-Panther pull
+		{"zul_gurub", "ca16703a1f787d3eabe5f3c2d81f874fb49485b1e614e92c5d8f80fe28c479ea"}, // walk 35 fix 1: the terrace is max_bodies 14 (radius 14 owns three formations, 14 bodies)
 		{"onyxias_lair", "142c1d58928ad1efd9aca2b773c4762e2ddcbae05c308540080a1fedd6e3b38e"},
 	} {
 		p, err := dungeon.Load(filepath.Join("..", "..", "dungeons", c.plan+".json"))

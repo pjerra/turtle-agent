@@ -175,8 +175,18 @@ func TestZgW35JeklikGroup13KnowsTheBatLoop(t *testing.T) {
 // straggler walk to it crosses its packmate at 0.6 yd. 49345's spawn stands
 // 12.7-13.6 yd (3D over the level gap) from the row point, outside the
 // radius-12 pull. Radius 14 owns it (3D 12.7-13.6 < 14), so it fights with the pack.
+//
+// Radius 14 reaches entry-gated members of three formations: the four lower
+// Panthers (formation 49343's 11365s), the four upper-B Shadow Hunters
+// (formation 51353's 11339s) and the upper-east pack (formation 51369: four
+// 11365s and two 11339s). The row's pull is 14 bodies, so max_bodies must be
+// 14: 10 leaves four owned bodies over the run leader's plan ceiling.
 func TestZgW35ArlokkTerraceOwnsTheLowerPanther(t *testing.T) {
 	p, err := dungeon.Load(filepath.Join(plansDirT, "zul_gurub.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, err := readCreatures(filepath.Join("testdata", "map309", "creatures.tsv"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,5 +216,66 @@ func TestZgW35ArlokkTerraceOwnsTheLowerPanther(t *testing.T) {
 	d3 := math.Sqrt(float64((spawn.X-cen.X)*(spawn.X-cen.X) + (spawn.Y-cen.Y)*(spawn.Y-cen.Y) + (spawn.Z-cen.Z)*(spawn.Z-cen.Z)))
 	if d3 > float64(g.Radius) {
 		t.Errorf("group 12 radius %g does not own 49345 (3D %.1f yd from the row point): the run waits 60 s for it, then pauses on the straggler walk", g.Radius, d3)
+	}
+	byLeader := map[uint64][]creature{}
+	for _, c := range cs {
+		if c.GroupLeader != 0 {
+			byLeader[c.GroupLeader] = append(byLeader[c.GroupLeader], c)
+		}
+	}
+	entries := map[uint32]bool{}
+	for _, e := range g.Entries {
+		entries[e] = true
+	}
+	rowDist := func(c creature) float64 {
+		return dist(cen, c.Pos)
+	}
+	owned := 0
+	for _, c := range cs {
+		if !entries[c.Entry] {
+			continue
+		}
+		fam := byLeader[c.GroupLeader]
+		if len(fam) == 0 {
+			fam = []creature{c}
+		}
+		for _, m := range fam {
+			if rowDist(m) <= float64(g.Radius) {
+				owned++
+				break
+			}
+		}
+	}
+	// All four absorbed Panthers (formation 49343's 11365s) are owned.
+	for _, guid := range []uint64{49343, 49344, 49345, 49346} {
+		var c *creature
+		for i := range cs {
+			if cs[i].GUID == guid {
+				c = &cs[i]
+				break
+			}
+		}
+		if c == nil {
+			t.Fatalf("no spawn %d in the map-309 export", guid)
+		}
+		if !entries[c.Entry] || rowDist(*c) > float64(g.Radius) {
+			// The formation rule owns through any member in reach: check the pack.
+			hit := false
+			for _, m := range byLeader[c.GroupLeader] {
+				if entries[m.Entry] && rowDist(m) <= float64(g.Radius) {
+					hit = true
+					break
+				}
+			}
+			if !hit {
+				t.Errorf("group 12 (radius %g) does not own its Panther %d at %.1f %.1f %.1f: %.1f yd out", g.Radius, guid, c.Pos.X, c.Pos.Y, c.Pos.Z, rowDist(*c))
+			}
+		}
+	}
+	if owned != 14 {
+		t.Errorf("group 12 owns %d bodies, want 14 (upper B 4 + upper east 6 + the four lower Panthers)", owned)
+	}
+	if g.MaxBodies != 14 {
+		t.Errorf("group 12 max_bodies %d, want 14 (the row's owned pull size)", g.MaxBodies)
 	}
 }

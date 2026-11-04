@@ -1248,7 +1248,7 @@
             {"x": -11505, "y": -1652, "z": 71.3}
           ],
           "stand_pull": true,
-          "max_bodies": 10
+          "max_bodies": 14
         },
         {
           "entries": [11353, 11353],
