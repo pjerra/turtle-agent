@@ -234,3 +234,47 @@ func zgW38Creature(cs []creature, guid uint64) *creature {
 	return nil
 }
 
+// TestZgW38HakkarOuterRowsWalkable: every consecutive pair of the hakkar_outer leg's live-flag rows has a complete
+// navmesh path, and every row stands on the mesh. Walk 38 f2 paused at step 601 "no walkable path toward
+// -11752.0 -1741.9 14.3": the approach-hop cutter had put a point 4.1 yd under the floor on the straight line
+// between the group-5 and group-6 pulls (the floor-aware cut's kept point was the only one, and the last-approach
+// interpolation crossed the gap), so the run leader could not path to it. The floor-aware cut leaves the 114 yd hop
+// to the run leader, whose own path around the lake is complete.
+func TestZgW38HakkarOuterRowsWalkable(t *testing.T) {
+	p, cs := zgLoadPlanAndExport(t)
+	pl := zgPlannerOrNil(t)
+	if pl == nil {
+		t.Skip("needs the map-309 mmaps")
+	}
+	defer pl.Close()
+	rows := zgW37BuildRows(t, p, cs, 7)
+	var pts []struct {
+		at   dungeon.Point
+		what string
+	}
+	for _, s := range rows.rows {
+		switch s.Kind {
+		case planexport.KindMove, planexport.KindMoveDirect, planexport.KindMoveHopExact, planexport.KindPull, planexport.KindBoss:
+			pts = append(pts, struct {
+				at   dungeon.Point
+				what string
+			}{dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}, fmt.Sprintf("%s %q", s.Kind, s.Comment)})
+		}
+	}
+	if len(pts) < 10 {
+		t.Fatalf("%d rows in the hakkar_outer leg", len(pts))
+	}
+	for i := 0; i+1 < len(pts); i++ {
+		a, b := pts[i].at, pts[i+1].at
+		path, err := pl.Plan(309, navmesh.Vec3{a.X, a.Y, a.Z}, navmesh.Vec3{b.X, b.Y, b.Z})
+		if err != nil {
+			t.Errorf("%s -> %s: %v", pts[i].what, pts[i+1].what, err)
+			continue
+		}
+		if path.Status != navmesh.Complete {
+			t.Errorf("%s -> %s (%.1f %.1f %.1f -> %.1f %.1f %.1f): no complete navmesh path (%s %s)", pts[i].what, pts[i+1].what,
+				a.X, a.Y, a.Z, b.X, b.Y, b.Z, path.Status, path.Reason)
+		}
+	}
+}
+

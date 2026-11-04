@@ -1204,7 +1204,8 @@ func (b *builder) cutLongHops() error {
 				// left after the 25 yd standoff can stand beyond its 60 yd sight (razorfen_kraul round 35: the boss row 73.5 yd
 				// from the last approach row, and its stand discipline walked back there into a no-LOS hold). A point on the path
 				// at approachLeadYd past the standoff is the last row then.
-				if len(via) > 0 && dist3(via[len(via)-1], c) > dungeon.RunLeaderReachYd {
+				if len(via) > 0 && len(full) > 1 && dist3(via[len(via)-1], c) > dungeon.RunLeaderReachYd &&
+					dist3(full[len(full)-1], c) <= FloorAwareHopYd {
 					if p, ok := pointBefore(full, c, approachStandoffYd+approachLeadYd); ok {
 						via = append(via, p)
 					}

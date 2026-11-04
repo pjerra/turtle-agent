@@ -1882,3 +1882,44 @@ func TestObjectWaitGoneOKCarriesTheGoneIsDoneFlag(t *testing.T) {
 		t.Fatalf("a plain wait_object row carries flags %d", plain.Flags)
 	}
 }
+
+// TestApproachHopsDoesNotInterpolateACutGap: a cutter that keeps a single point far from the pack (the floor-aware
+// cut drops the wet corners, so its via can be one dry point) leaves that point as the last approach row. Walk 38 f2
+// paused at step 601 "no walkable path toward -11752.0 -1741.9 14.3": the exporter took the straight line from that
+// point to the pack, 30 yd before it, and wrote a row 4 yd under the floor (the straight line crosses a ridge the
+// navmesh does not). With no second cut point there is no path polyline to interpolate, and the run leader walks its
+// own complete path to the pack.
+func TestApproachHopsDoesNotInterpolateACutGap(t *testing.T) {
+	const js = `{"version":1,"name":"gap","status":"live-checked (test)","map":309,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":100,"y":0,"z":0}]}]}]}`
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		// One dry corner near the start; the rest of the path is wet and dropped.
+		return []dungeon.Point{{X: a.X + 10, Y: 0, Z: 0}}, nil, nil
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var moves []float32
+	pull := -1
+	for i, s := range res.Rows.Steps {
+		if s.Leg != 0 {
+			continue
+		}
+		switch s.Kind {
+		case KindMove:
+			moves = append(moves, s.X)
+		case KindPull:
+			pull = i
+		}
+	}
+	if pull < 0 {
+		t.Fatalf("no pull row: %v", kinds(res.Rows, 0))
+	}
+	if len(moves) != 2 { // the leg's `to` move and the cutter's one point
+		t.Fatalf("approach rows at %v, want only the cutter's point (no straight-line interpolation across the wet gap)", moves)
+	}
+	if moves[len(moves)-1] != 20 {
+		t.Fatalf("the last approach row is at %.1f, want 20 (the cutter's point, 80 yd from the pack): %v", moves[len(moves)-1], moves)
+	}
+}
