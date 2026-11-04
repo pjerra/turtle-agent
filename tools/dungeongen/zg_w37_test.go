@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -323,4 +324,104 @@ func TestZgW37JindoHonourGuardKeepsTheBossReach(t *testing.T) {
 		}
 	}
 	_ = leg
+}
+
+// TestZgW37PatrolPullsClearOfLaterPacks is the MANDOKIR-440 method on the five ZG patrol rows that were a
+// plain pull at a roaming Berserker 11352's DB spawn 68-174 yd behind the row's stand (research/zg-w36/
+// MANDOKIR-440.md "Also found": leg 1 groups 10/18/19, leg 3 group 3, leg 4 group 21): the exporter cut the
+// hop into approach-path rows through the pack field. Each row is a stand pull now, scoped from a centre the
+// run leader sees (<= dungeon.RunLeaderSeeYd), with a radius that holds the patroller's DB spawn (2D, as the
+// run leader scopes it), and its stand inside the tank's shot of the patroller's loop: the party holds and the
+// run leader shoots it when the loop comes round. The live export has no approach-path row for them, and the
+// walk from the previous stand to theirs keeps 20 yd from every pack pulled later.
+func TestZgW37PatrolPullsClearOfLaterPacks(t *testing.T) {
+	p, cs := zgLoadPlanAndExport(t)
+	for _, want := range []struct {
+		leg   string
+		group int
+	}{
+		{"high_priest_venoxis", 10}, {"high_priest_venoxis", 18}, {"high_priest_venoxis", 19},
+		{"high_priest_thekal", 3}, {"high_priestess_arlokk", 21},
+	} {
+		leg, legNo := zgW37LegByName(t, p, want.leg)
+		rows := zgW37BuildRows(t, p, cs, legNo)
+		where := fmt.Sprintf("%s pull group %d", want.leg, want.group)
+		g := &leg.PullGroups[want.group]
+		if !g.StandPull {
+			t.Errorf("%s: a patrol row is not a stand pull: the party walks to its DB spawn and the exporter cuts approach paths through the pack field", where)
+			continue
+		}
+		if g.Patrol == nil || len(g.Patrol.Path) == 0 {
+			t.Errorf("%s: no patrol block: the gate cannot wait for its loop", where)
+			continue
+		}
+		if len(g.Approach) == 0 {
+			t.Errorf("%s: a stand pull with no approach", where)
+			continue
+		}
+		stand := g.Approach[len(g.Approach)-1]
+		n := float32(len(g.Positions))
+		var c dungeon.Point
+		for _, q := range g.Positions {
+			c.X += q.X
+			c.Y += q.Y
+			c.Z += q.Z
+		}
+		c.X, c.Y, c.Z = c.X/n, c.Y/n, c.Z/n
+		if d := dist(c, stand); d > dungeon.RunLeaderSeeYd {
+			t.Errorf("%s: the centre %.1f %.1f is %.1f yd from the stand, want <= %d (the run leader's sight)", where, c.X, c.Y, d, dungeon.RunLeaderSeeYd)
+		}
+		// The patroller's DB spawn must lie inside the radius (2D, as TB's ScopeStandPullFacts scopes it).
+		dir := -1
+		best := math.Inf(1)
+		for i := range cs {
+			if cs[i].Entry != 11352 {
+				continue
+			}
+			if d := math.Hypot(float64(cs[i].Pos.X-c.X), float64(cs[i].Pos.Y-c.Y)); d < best {
+				best, dir = d, i
+			}
+		}
+		if dir < 0 {
+			t.Fatalf("%s: no 11352 spawn in the map export", where)
+		}
+		if best > float64(g.Radius) {
+			t.Errorf("%s: its nearest 11352 spawn %d is %.1f yd from the centre, past radius %g: the row owns nothing", where, cs[dir].GUID, best, g.Radius)
+		}
+		loop := math.Inf(1)
+		for _, q := range g.Patrol.Path {
+			if d := dist(stand, q); d < loop {
+				loop = d
+			}
+		}
+		if loop > zgW37TankShotYd {
+			t.Errorf("%s: the stand is %.1f yd from the nearest waypoint of its patroller's loop, past the %g yd shot: the gate never fires", where, loop, zgW37TankShotYd)
+		}
+		// The live export: the row right before the pull is the stand (no approach-path row was cut), and the
+		// walk from the previous stand keeps 20 yd from every pack pulled later.
+		found := -1
+		for i := range rows.rows {
+			s := rows.rows[i]
+			if s.Kind == planexport.KindPull && strings.HasPrefix(s.Comment, fmt.Sprintf("pull group %d", want.group)) {
+				found = i
+			}
+		}
+		if found < 0 {
+			t.Errorf("%s: no exported pull row", where)
+			continue
+		}
+		if prev := found - 1; prev < 0 || dist(dungeon.Point{X: rows.rows[prev].X, Y: rows.rows[prev].Y, Z: rows.rows[prev].Z}, stand) > 0.01 {
+			t.Errorf("%s: the exported row right before the pull is not the stand (an approach path was cut)", where)
+		}
+		if found > 0 {
+			from := rows.party(found - 1)
+			later := rows.later(found, cs)
+			for _, q := range zgSamplesAlong(from, stand, zgSampleStep) {
+				if d, who := zgMin3(q, later); d < zgLaterYd {
+					t.Errorf("%s: the walk from the previous stand passes %.1f yd from %s %d at %.1f %.1f, want >= %g from every pack pulled later", where, d, who.Name, who.Entry, q.X, q.Y, zgLaterYd)
+					break
+				}
+			}
+		}
+	}
 }
