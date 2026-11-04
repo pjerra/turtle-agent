@@ -51,6 +51,10 @@ const (
 	exitRaidWalkIncident     = 19 // the walk ran and was torn down, but a wipe or a boss engagement happened, or hires were left
 	exitRaidWalkInjectFailed = 23 // a walk that would exit 0 had at least one fault with verdict fail
 	exitRaidWalkInstanceCap  = 26 // the server's hourly instance-id ledger is at the cap (--instance-cap-fail, or the wait ran out) or unreadable, and the walk was not allowed past it: nothing was started
+	// exitRaidWalkPlaceFailed: the placement failed every try it makes in the same instance (placeTryLimit). Its own
+	// retries are the budget; a walk-super restart would only enter another fresh instance, so the supervisor stops on
+	// this code (walk 37: eight "not at the start" failures at step 582 each burned one of the 4 fresh instances an hour).
+	exitRaidWalkPlaceFailed = 29
 )
 
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]

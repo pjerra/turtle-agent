@@ -1187,8 +1187,10 @@ teleport. What it has to settle:
    or refuses, so the reply and the export can be compared line by line. If the core moves `home` along the waypoints,
    own by `db` against the spawn export instead (item 1 of the proof findings). On the re-run, rows 94 and 96 must be
    cleared (a patrol owned by home; a critter ignored), and the B pack, the Berserkers and the snakes must not block.
-   `tt place ... of=<mt>` answers `placed:true` and the frames show every hire on map 309, alive, within 12 yd of the
-   point; the summary's `place.placed` equals `place.hires` and `place.quiet` is the walk's own verdict.
+   `tt place ... of=<mt>` answers `placed:true` and the frames show every hire on map 309, alive, inside the landing
+   area (25 yd 2D of the point, within 8 yd of its floor; walk 37 moved this from 12 yd 3D and added the 4 s settle
+   and the three summon waves); the summary's `place.placed` equals `place.hires` and `place.quiet` is the walk's own
+   verdict.
 5. **The start.** The run's status line reads `running 231/1097` and the until label `until boss (step 274)`; the
    walk's own text `The run starts at step 231 of 1097 (leg high_priest_thekal)` is in `run.log`. No fight and no death
    before leg 3's first pull row (234), and the run reaches the until stop before the Thekal boss row.

@@ -47,8 +47,11 @@ const (
 	PlaceSweepSlack = 10
 	// PlaceMaxCircles bounds one walk's clear: more circles than this refuse the placement.
 	PlaceMaxCircles = 40
-	// PlaceReviveYd is how close a hire's frame must be to the place point to count as placed.
-	PlaceReviveYd = 12
+	// PlaceArriveYd is how close a hire's frame must be to the place point (2D, within the clear's dz window) to
+	// count as placed: the same 25 yd landing reach the quiet refuses a unit within, so a hire inside the opening the
+	// raid lands in counts even when the raid's spread and the summon latency leave it a few yards out (walk 37: the
+	// 12 yd check failed placements whose hires stood 13 to 22 yd out, inside the reach).
+	PlaceArriveYd = 25
 	// PlaceMTYd is how close the main tank's frame must be to the start point before `run start`.
 	PlaceMTYd = 15
 	// PlaceFloorYd is how far the toolkit's floor may be from the start point's z.

@@ -525,6 +525,270 @@ func TestPlaceVerifyFailsWhenStillMissing(t *testing.T) {
 	}
 }
 
+// Walk 37: eight placements failed "not at the start" while their hires stood inside the 25 yd the quiet protects
+// (e3: 13 hires at 0.3 to 7 yd, the rest one poll short; a retreat's wave at 19:31:23 had all 20 within 22 yd). A hire
+// inside the landing area counts as placed: no summon, no failure.
+func TestPlaceAcceptsAHireInsideTheLandingReach(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	var hire string
+	var x0, y0, z0 float32
+	p.place = func(cmd string) error {
+		x, y, z := ttPointOf(t, cmd)
+		x0, y0, z0 = x, y, z
+		placeHires(f, x, y, z)
+		f.agent.mu.Lock()
+		hire = f.agent.party[len(f.agent.party)-1]
+		f.agent.pos[hire] = [3]float32{x + 20, y, z} // inside the 25 yd reach, outside the old 12 yd check
+		f.agent.mu.Unlock()
+		return nil
+	}
+	// A summon never moves it: the walk must judge the 20 yd by its own reach.
+	f.agent.onGM = func(line string) {
+		if name, ok := strings.CutPrefix(line, ".summon "); ok && name == hire {
+			f.agent.mu.Lock()
+			f.agent.pos[name] = [3]float32{x0 + 20, y0, z0}
+			f.agent.mu.Unlock()
+		}
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".summon "); n != 0 {
+		t.Fatalf("%d summons, want none: a hire inside the 25 yd landing reach is placed", n)
+	}
+	if sum := f.summary(); sum.Place.Placed != sum.Place.Hires {
+		t.Fatalf("place summary %+v, want every hire placed", sum.Place)
+	}
+}
+
+// Walk 37: a summon wave takes a moment to land, and one wave of a 20-hire raid was still landing when the 10 s
+// window closed. A straggler whose first summon does not take gets another wave after the settle.
+func TestPlaceSummonsStragglersAgainAfterTheSettle(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	var hire string
+	x0, y0, z0 := float32(0), float32(0), float32(0)
+	p.place = func(cmd string) error {
+		x, y, z := ttPointOf(t, cmd)
+		x0, y0, z0 = x, y, z
+		placeHires(f, x, y, z)
+		f.agent.mu.Lock()
+		hire = f.agent.party[len(f.agent.party)-1]
+		f.agent.pos[hire] = [3]float32{x + 40, y, z}
+		f.agent.mu.Unlock()
+		return nil
+	}
+	summons := 0
+	f.agent.onGM = func(line string) {
+		if name, ok := strings.CutPrefix(line, ".summon "); !ok || name != hire {
+			return
+		}
+		summons++
+		if summons == 1 {
+			// The first summon did not take (not loaded yet): the hire is still 40 yd out.
+			f.agent.mu.Lock()
+			f.agent.pos[hire] = [3]float32{x0 + 40, y0, z0}
+			f.agent.mu.Unlock()
+		}
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if summons != 2 {
+		t.Fatalf("%d summons for the straggler, want two (the second wave after the settle)", summons)
+	}
+	if sum := f.summary(); !hasNote(sum, "place: summoned "+hire+" (round 2 of") {
+		t.Fatalf("notes %q, want the second summon round", sum.Notes)
+	}
+}
+
+// Walk 37: a placement whose hires did not arrive must retry in the SAME instance (the bind the next placement keeps)
+// instead of exiting 18, which made walk-super restart the cmd and enter a fresh instance. Here the second attempt,
+// one move row back, gathers the party.
+func TestPlaceNotAtTheStartRetriesInTheSameInstance(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.noPlaceRetreat = false
+	rows, plan := placePlanRows(t)
+	back, ok := raidwalk.PlaceBack(rows, plan.Start)
+	if !ok || back >= plan.Start {
+		t.Fatalf("no move row before the fixture start %d", plan.Start)
+	}
+	until, err := raidwalk.PlaceStop(rows, []string{"until", "boss"}, back)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	deliver := false
+	p.placeAll = false // one hire is left behind, and the summons do not take on the first attempt
+	p.quiet = func(n int) bool {
+		if n >= 2 {
+			mu.Lock()
+			deliver = true
+			mu.Unlock()
+		}
+		return true
+	}
+	f.agent.onGM = func(line string) {
+		name, ok := strings.CutPrefix(line, ".summon ")
+		if !ok {
+			return
+		}
+		mu.Lock()
+		d := deliver
+		mu.Unlock()
+		if d {
+			return // the summon lands the hire at the commander
+		}
+		f.agent.mu.Lock()
+		f.agent.pos[name] = [3]float32{0, 0, 0}
+		f.agent.mu.Unlock()
+	}
+	f.agent.startReply = placeStartReply("zul_gurub", back, len(rows.Steps), until)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|thekal|move|walk|walking", back, len(rows.Steps))},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|thekal|move|walk|stopped before step %d (until boss): the party stays where it stands", back, len(rows.Steps), until)},
+	}
+	f.agent.mu.Unlock()
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.Place == nil || sum.Place.Start != back {
+		t.Fatalf("place summary %+v, want the retreat to step %d", sum.Place, back)
+	}
+	if !hasNote(sum, fmt.Sprintf("stepping back to step %d in the same instance", back)) {
+		t.Fatalf("notes %q, want the same-instance retreat", sum.Notes)
+	}
+	appears, enters := 0, 0
+	for _, l := range f.agentLog() {
+		if strings.HasPrefix(l, "gm .appear ") {
+			appears++
+		}
+		if strings.HasPrefix(l, "cmdr cmd enter") {
+			enters++
+		}
+	}
+	if appears != 1 || enters != 1 {
+		t.Fatalf("appear %d, enter %d, want one each: the retry never re-enters the instance", appears, enters)
+	}
+	if len(p.places) != 1 {
+		t.Fatalf("%d toolkit places, want one (the retries use the GM summons)", len(p.places))
+	}
+}
+
+// Walk 37: each retried placement that fails burns nothing while the walk's own budget lasts; after placeTryLimit tries
+// in the same instance the walk exits exitRaidWalkPlaceFailed, which walk-super stops on (a fresh instance per
+// exit-18 restart locked m910q for an hour).
+func TestPlaceGivesUpAfterTheTryLimit(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.noPlaceRetreat = false
+	p.placeAll = false
+	f.agent.onGM = func(line string) {
+		if name, ok := strings.CutPrefix(line, ".summon "); ok {
+			f.agent.mu.Lock()
+			f.agent.pos[name] = [3]float32{0, 0, 0}
+			f.agent.mu.Unlock()
+		}
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	code := f.run(context.Background())
+	if code != 29 {
+		t.Fatalf("exit %d, want 29 (exitRaidWalkPlaceFailed): %s", code, f.stderr.String())
+	}
+	sum := f.summary()
+	if !strings.Contains(sum.EndReason, "not at the start") || !strings.Contains(sum.EndReason, "Bot01") ||
+		!strings.Contains(sum.EndReason, "4 tries in the same instance") {
+		t.Fatalf("end reason %q, want the arrival failure and its hires after 4 tries", sum.EndReason)
+	}
+	if len(p.quiets) != 4 {
+		t.Fatalf("%d quiet reads, want one per try (4): the walk's own retries are the budget", len(p.quiets))
+	}
+	appears := 0
+	for _, l := range f.agentLog() {
+		if strings.HasPrefix(l, "gm .appear ") {
+			appears++
+		}
+	}
+	if appears != 1 {
+		t.Fatalf("%d appears, want one: no try enters another instance", appears)
+	}
+}
+
+// Walk 37: the retry paths judged the pre-summon "missing" set by frames the corridor clear and the quiet left stale
+// (10 s), so every hire counted as summoned and the summary printed placed 0/20. The gather polls first: a raid
+// already on the point is placed, not summoned.
+func TestPlaceSamePointRetryCountsTheHiresAlreadyInside(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.noPlaceRetreat = false
+	f.opts.from = "leg high_priestess_arlokk"
+	rows, plan := placePlanRowsFrom(t, "high_priestess_arlokk")
+	if back, ok := raidwalk.PlaceBackInLeg(rows, plan.Start, plan.Leg); ok {
+		t.Fatalf("PlaceBackInLeg retreats from the Arlokk start %d to %d: the same-point retry is not pinned", plan.Start, back)
+	}
+	var hire string
+	var summons int
+	p.place = func(cmd string) error {
+		x, y, z := ttPointOf(t, cmd)
+		placeHires(f, x, y, z)
+		f.agent.mu.Lock()
+		hire = f.agent.party[len(f.agent.party)-1]
+		delete(f.agent.pos, hire) // one hire is left behind
+		f.agent.mu.Unlock()
+		return nil
+	}
+	p.quiet = func(int) bool { return true }
+	// A quiet read blocks the walk for its 20 s window (the live toolkit answers twice, 20 s apart), so the frames
+	// from the failed attempt are stale at the next gather, as they are on a live server.
+	answer := f.agent.ttFn
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if strings.HasPrefix(cmd, "quiet ") {
+			if err := f.env.sleep(context.Background(), 20*time.Second); err != nil {
+				return ttResult{}, err
+			}
+		}
+		return answer(cmd)
+	}
+	f.agent.onGM = func(line string) {
+		name, ok := strings.CutPrefix(line, ".summon ")
+		if !ok || name != hire {
+			return
+		}
+		summons++
+		if summons <= placeSummonRounds {
+			// The first gather's waves do not take: the hire is still at 0,0,0.
+			f.agent.mu.Lock()
+			f.agent.pos[name] = [3]float32{0, 0, 0}
+			f.agent.mu.Unlock()
+		}
+	}
+	f.agent.startReply = placeStartReplyLeg("zul_gurub", "high_priestess_arlokk", plan.Start, len(rows.Steps), plan.Stop)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|move|walk|walking", plan.Start, len(rows.Steps))},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_arlokk|move|walk|stopped before step %d (until boss): the party stays where it stands", plan.Start, len(rows.Steps), plan.Stop)},
+	}
+	f.agent.mu.Unlock()
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, fmt.Sprintf("trying step %d again in the same instance", plan.Start)) {
+		t.Fatalf("notes %q, want the same-point retry", sum.Notes)
+	}
+	if len(sum.Place.Summoned) != 1 || sum.Place.Summoned[0] != hire {
+		t.Fatalf("summoned %v, want only the hire that was outside (%s)", sum.Place.Summoned, hire)
+	}
+	if sum.Place.Placed != sum.Place.Hires-1 {
+		t.Fatalf("place summary %+v, want every hire but the straggler placed", sum.Place)
+	}
+}
+
 // The walk judges the place by its own frames, never by the toolkit's member lists (which truncate near a full raid).
 func TestPlaceIgnoresTruncatedRead2(t *testing.T) {
 	f, p := newPlaceFixture(t)
@@ -3359,20 +3623,36 @@ func TestPlaceQuietRefusalDoesNotRetreatAcrossTheBoss(t *testing.T) {
 	}}
 	f.agent.startReply = placeStartReplyLeg("zul_gurub", "high_priestess_arlokk", plan.Start, len(rows.Steps), plan.Stop)
 	code := f.run(context.Background())
-	if code != exitRaidWalkFailed {
-		t.Fatalf("exit %d, want 18 (the place refuses at the leg's own start): %s", code, f.stderr.String())
+	if code != exitRaidWalkPlaceFailed {
+		t.Fatalf("exit %d, want %d (the place retries at the leg's own start and gives up there): %s", code, exitRaidWalkPlaceFailed, f.stderr.String())
 	}
 	sum := f.summary()
-	if !strings.Contains(sum.EndReason, "not quiet") {
-		t.Fatalf("end reason %q, want the quiet refusal", sum.EndReason)
+	if !strings.Contains(sum.EndReason, "not quiet") || !strings.Contains(sum.EndReason, fmt.Sprintf("%d tries in the same instance", placeTryLimit)) {
+		t.Fatalf("end reason %q, want the quiet refusal after %d tries", sum.EndReason, placeTryLimit)
 	}
+	again := 0
 	for _, n := range sum.Notes {
 		if strings.Contains(n, "stepping back to step") {
 			t.Fatalf("the walk stepped back out of the leg: %q", n)
 		}
+		if strings.Contains(n, fmt.Sprintf("trying step %d again", plan.Start)) {
+			again++
+		}
+	}
+	if again != placeTryLimit-1 {
+		t.Fatalf("%d same-point retries, want %d: %v", again, placeTryLimit-1, sum.Notes)
 	}
 	if len(p.places) != 0 {
 		t.Fatalf("the toolkit place ran: %v", p.places)
+	}
+	appears := 0
+	for _, l := range f.agentLog() {
+		if strings.HasPrefix(l, "gm .appear ") {
+			appears++
+		}
+	}
+	if appears != 1 {
+		t.Fatalf("%d appears, want one: the retries never re-enter the instance", appears)
 	}
 	for _, q := range p.quiets {
 		want := fmt.Sprintf("quiet 50 %v %v", plan.Point.X, plan.Point.Y)
