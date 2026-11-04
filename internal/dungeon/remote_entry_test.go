@@ -363,6 +363,7 @@ func TestEntryTargetsWaitGoneAfterSeenIsDone(t *testing.T) {
 	g := entryKeystoneGame(t, 3, true)
 	g.fakeRemote.onTick = func(*fakeRemote) {
 		if len(g.asked) >= 4 && len(g.world) == 2 { // the Seal was answered ready a few times, then the script removed it
+			parkCarrier(g, *sealAtEntry())
 			g.world = g.world[:1]
 		}
 	}
@@ -381,7 +382,12 @@ func TestEntryTargetsWaitGoneBlipRestartsTheConfirmation(t *testing.T) {
 	polls := func(present func(n int) bool) int {
 		g := entryKeystoneGame(t, 3, true)
 		seal := g.world[1]
+		parked := false
 		g.fakeRemote.onTick = func(*fakeRemote) {
+			if !parked && len(g.asked) >= 4 { // the carrier stands at the Seal's spot for the whole watch
+				parked = true
+				parkCarrier(g, *sealAtEntry())
+			}
 			g.world = g.world[:1]
 			if present(len(g.asked)) {
 				g.world = append(g.world, seal)
@@ -415,6 +421,61 @@ func TestEntryTargetsWaitGoneNeedsTheModuleToLookAndFindNothing(t *testing.T) {
 	_, err := entryRun(t, g, plan)
 	if err == nil || !strings.Contains(err.Error(), "waited 20 s for game object 124372") || !strings.Contains(err.Error(), "too-far") {
 		t.Fatalf("%v", err)
+	}
+}
+
+// parkCarrier stands the carrier (Magey) at p for 30 s, out of the formation (the fake's lagUntil): where a gone_ok miss is read from.
+func parkCarrier(g *entryGame, p Point) {
+	if g.lagUntil == nil {
+		g.lagUntil = map[packet.GUID]time.Time{}
+	}
+	g.lagUntil[gMage] = g.now.Add(30 * time.Second)
+	for _, m := range g.party {
+		if m.Name == "Magey" {
+			m.X, m.Y, m.Z = p.X, p.Y, p.Z
+		}
+	}
+}
+
+// Seen, then not-found with the carrier 60 yd from the object's last seen point (at the Keystone, with the lead): the miss is not
+// the object's to read, so no completion, and the wait runs out its timeout.
+func TestEntryTargetsWaitGoneNeedsTheCarrierInRange(t *testing.T) {
+	g := entryKeystoneGame(t, 3, true)
+	g.fakeRemote.onTick = func(*fakeRemote) {
+		if len(g.asked) >= 4 && len(g.world) == 2 {
+			g.world = g.world[:1] // removed; the carrier stays with the lead, 60 yd from the Seal
+		}
+	}
+	plan := remotePlan(Leg{Name: "k", To: Point{20, 0, 0}, Steps: entrySealGoneStep(20, true)})
+	rep, err := entryRun(t, g, plan)
+	if err == nil || !strings.Contains(err.Error(), "waited 20 s for game object 124372") || !strings.Contains(err.Error(), "last cmd state answer: not-found") {
+		t.Fatalf("%v\n%s", err, notesOf(rep))
+	}
+	if hasNote(rep, "counted as done (gone_ok)") {
+		t.Fatalf("counted gone with the carrier out of range:\n%s", notesOf(rep))
+	}
+}
+
+// The window restarts when the carrier comes back: removed while the carrier is out of range, then the carrier stands at the spot
+// (parked during poll 10, so poll 10 is the first in range). The miss counts from that poll; GoneConfirm is 3 s and the polls are 2 s
+// apart, so the completion comes at poll 12 at the earliest: two polls after the park. A wait that completed before the park never
+// reaches poll 10 (parked stays -1) and fails.
+func TestEntryTargetsWaitGoneWindowRestartsWhenTheCarrierReturns(t *testing.T) {
+	g := entryKeystoneGame(t, 3, true)
+	parked := -1
+	g.fakeRemote.onTick = func(*fakeRemote) {
+		if len(g.asked) >= 4 && len(g.world) == 2 {
+			g.world = g.world[:1]
+		}
+		if parked < 0 && len(g.asked) >= 10 {
+			parked = len(g.asked)
+			parkCarrier(g, *sealAtEntry())
+		}
+	}
+	plan := remotePlan(Leg{Name: "k", To: Point{20, 0, 0}, Steps: entrySealGoneStep(60, true)}, Leg{Name: "i", To: Point{20, 20, 0}})
+	rep, err := entryRun(t, g, plan)
+	if err != nil || parked < 0 || !hasNote(rep, "counted as done (gone_ok)") || len(g.asked)-parked < 2 {
+		t.Fatalf("parked at %d, polls %d: %v\n%s", parked, len(g.asked), err, notesOf(rep))
 	}
 }
 
