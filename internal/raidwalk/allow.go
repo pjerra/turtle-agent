@@ -63,6 +63,10 @@ func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
 		}
 		_, err := strconv.ParseUint(f[5], 10, 32)
 		return err == nil
+	case ".pinfo":
+		// The instance ledger's account read (the pool accounts of the hired party). Read-only; a name must be one of
+		// the walk's hires, and no name uses the server's selection (the injector's identity check).
+		return len(f) == 1 || (len(f) == 2 && hires[f[1]])
 	case ".tele":
 		if len(f) != 4 || f[1] != "name" || !hires[f[2]] {
 			return false

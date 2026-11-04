@@ -146,6 +146,80 @@ func (w *walk) phaseInstanceCap(ctx context.Context) error {
 	}
 }
 
+// waitHireAccountCap is the exact gate after the hires: the core refuses an account's sixth fresh instance in an
+// hour, so when the busiest hired account is at the cap the walk waits (--instance-cap-wait) before it enters, or
+// exits 26 with --instance-cap-fail. A ledger that cannot count per account (an older entry without accounts) is not
+// a second gate: phaseInstanceCap's raid count already ran. --instance-cap-unsafe goes on, logged, as before.
+func (w *walk) waitHireAccountCap(ctx context.Context) error {
+	if w.env.capLedger == "" || len(w.hireAccounts) == 0 {
+		return nil
+	}
+	server := w.opts.server
+	started := w.env.now()
+	warned := false
+	for {
+		now := w.env.now()
+		var peak int
+		var known bool
+		var wait time.Duration
+		err := w.capUpdate(func(l *raidwalk.CapLedger) {
+			peak, known = l.PeakFor(server, w.hireAccounts, now)
+			if known {
+				wait = l.WaitForAccounts(server, w.hireAccounts, now)
+			}
+		})
+		if err != nil {
+			// The ledger was read a moment ago for the reservation; a read that now fails leaves the raid count in
+			// charge, exactly as before this check.
+			w.note("instance cap: the hired accounts cannot be counted (%v); going on with the raid count", err)
+			return nil
+		}
+		if !known {
+			w.note("instance cap: an entry in the hour names no accounts, so the hired accounts are counted as raids")
+			return nil
+		}
+		if peak < raidwalk.InstanceCapPerAccount {
+			if warned {
+				w.say(now, fmt.Sprintf("instance cap: the busiest hired account has %d fresh instance(s) in the last hour; going on", peak))
+			}
+			return nil
+		}
+		if !warned {
+			msg := fmt.Sprintf("instance cap: a hired account already has %d fresh instances in the last hour on %s; the 6th is refused by the core", peak, server)
+			w.say(now, msg)
+			w.note("%s", msg)
+			warned = true
+		}
+		if w.opts.capFail {
+			return stopf(exitRaidWalkInstanceCap, "instance cap: the hired accounts are at %d in the last hour on %s (--instance-cap-fail)", peak, server)
+		}
+		left := w.opts.capWait - now.Sub(started)
+		if wait <= 0 {
+			wait = capWaitMargin
+		}
+		if left <= 0 {
+			msg := fmt.Sprintf("instance cap: waited %s (--instance-cap-wait), a hired account is still at %d on %s", w.opts.capWait, peak, server)
+			if !w.opts.capUnsafe {
+				w.say(now, msg)
+				w.note("%s", msg)
+				return stopf(exitRaidWalkInstanceCap, "%s: no fresh instance is started without a reservation (--instance-cap-unsafe goes on anyway)", msg)
+			}
+			w.say(now, msg+"; --instance-cap-unsafe: going on without a reservation")
+			w.note("%s; --instance-cap-unsafe: going on", msg)
+			return nil
+		}
+		if wait > left {
+			wait = left
+		} else {
+			wait += capWaitMargin
+		}
+		w.say(now, fmt.Sprintf("instance cap: waiting %s for a hired account's oldest instance to age out of the hour", wait.Round(time.Second)))
+		if err := w.env.sleep(ctx, wait); err != nil {
+			return stopf(exitRaidWalkFailed, "interrupted")
+		}
+	}
+}
+
 // say prints a line to the walk's stderr and run.log.
 func (w *walk) say(now time.Time, text string) {
 	fmt.Fprintln(w.stderr, "raid-walk: "+text)
@@ -160,7 +234,7 @@ func (w *walk) recordFreshInstance() {
 		return
 	}
 	now := w.env.now()
-	e := raidwalk.CapEntry{At: now.UTC(), Plan: w.plan.Name}
+	e := raidwalk.CapEntry{At: now.UTC(), Plan: w.plan.Name, Accounts: w.hireAccounts}
 	owner := w.capOwnerName()
 	err := w.capUpdate(func(l *raidwalk.CapLedger) { l.Confirm(w.opts.server, owner, e, now) })
 	if err != nil {

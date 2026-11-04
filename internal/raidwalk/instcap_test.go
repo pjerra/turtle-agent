@@ -226,3 +226,86 @@ func TestCapUpdateNeverWritesOverAnUnreadableLedger(t *testing.T) {
 		t.Fatalf("an unreadable ledger was moved aside: %v", es)
 	}
 }
+
+// TestCapCountsPerAccountWhenEveryEntryNamesThem is the walk 37 fix: the old count blocked a walk at four RAIDS on
+// the server although the busiest pool account had only four fresh instances, and the core refuses the sixth.
+func TestCapCountsPerAccountWhenEveryEntryNamesThem(t *testing.T) {
+	l := &CapLedger{}
+	for i := 0; i < 4; i++ {
+		l.Record("s", CapEntry{At: capT0.Add(-time.Duration(50-10*i) * time.Minute), Accounts: []string{"a1", "a2"}}, capT0)
+	}
+	if n, known := l.Busiest("s", capT0); !known || n != 4 {
+		t.Fatalf("busiest = %d known %v, want 4 true", n, known)
+	}
+	// Four raids on the server used to fill the ledger; per account the fifth is still allowed.
+	if admitted, n, _ := l.TryReserve("s", "w1", capT0); !admitted || n != 4 {
+		t.Fatalf("admission at four per account: admitted %v count %d, want true 4", admitted, n)
+	}
+	l.Release("s", "w1")
+	l.Record("s", CapEntry{At: capT0.Add(-5 * time.Minute), Accounts: []string{"a1"}}, capT0)
+	if n, known := l.Busiest("s", capT0); !known || n != 5 {
+		t.Fatalf("busiest after a fifth entry = %d known %v, want 5 true", n, known)
+	}
+	// Five is the core's cap: the sixth is refused, so the walk waits for the oldest a1 entry (50 min old).
+	admitted, n, wait := l.TryReserve("s", "w1", capT0)
+	if admitted || n != 5 || wait != 10*time.Minute {
+		t.Fatalf("admission at five per account: admitted %v count %d wait %s, want false 5 10m", admitted, n, wait)
+	}
+	// At six the second-oldest a1 entry must leave (the one 40 min old leaves in 20).
+	l.Record("s", CapEntry{At: capT0.Add(-time.Minute), Accounts: []string{"a1"}}, capT0)
+	if w := l.WaitForBusiest("s", capT0); w != 20*time.Minute {
+		t.Fatalf("wait at six = %s, want 20m", w)
+	}
+}
+
+func TestCapTiedBusiestAccountsAllHaveToLeaveOne(t *testing.T) {
+	l := &CapLedger{}
+	for i := 0; i < 5; i++ {
+		age := time.Duration(50-10*i) * time.Minute
+		l.Record("s", CapEntry{At: capT0.Add(-age), Accounts: []string{"a1"}}, capT0)
+		l.Record("s", CapEntry{At: capT0.Add(-age - time.Minute), Accounts: []string{"a2"}}, capT0)
+	}
+	// a1's oldest leaves in 10m, a2's in 9m; the busiest is still five until both left one (10m).
+	if w := l.WaitForBusiest("s", capT0); w != 10*time.Minute {
+		t.Fatalf("wait with two tied busiest accounts = %s, want 10m", w)
+	}
+}
+
+func TestCapPerAccountWaitForTheHiredParty(t *testing.T) {
+	l := &CapLedger{}
+	for i := 0; i < 5; i++ {
+		l.Record("s", CapEntry{At: capT0.Add(-time.Duration(50-10*i) * time.Minute), Accounts: []string{"a1"}}, capT0)
+	}
+	for i := 0; i < 5; i++ {
+		l.Record("s", CapEntry{At: capT0.Add(-time.Duration(40-5*i) * time.Minute), Accounts: []string{"a2"}}, capT0)
+	}
+	if w := l.WaitForAccounts("s", []string{"a2"}, capT0); w != 20*time.Minute {
+		t.Fatalf("wait for a2 = %s, want 20m (its oldest entry leaves)", w)
+	}
+	if w := l.WaitForAccounts("s", []string{"a1", "a2"}, capT0); w != 20*time.Minute {
+		t.Fatalf("wait for both = %s, want the later of the two (20m)", w)
+	}
+	if n, known := l.PeakFor("s", []string{"a1", "a2"}, capT0); !known || n != 5 {
+		t.Fatalf("peak known %v count %d, want true 5", known, n)
+	}
+	if w := l.WaitForAccounts("s", []string{"a3"}, capT0); w != 0 {
+		t.Fatalf("wait for an unused account = %s, want 0", w)
+	}
+}
+
+func TestCapFallsBackToRaidsOnAnUnnamedEntry(t *testing.T) {
+	l := &CapLedger{}
+	for i := 0; i < 3; i++ {
+		l.Record("s", CapEntry{At: capT0.Add(-time.Duration(30-10*i) * time.Minute), Accounts: []string{"a1"}}, capT0)
+	}
+	l.Record("s", CapEntry{At: capT0.Add(-time.Minute)}, capT0) // an old walk's entry
+	if n, known := l.Busiest("s", capT0); known || n != 4 {
+		t.Fatalf("busiest with an unnamed entry = %d known %v, want 4 false", n, known)
+	}
+	if admitted, n, _ := l.TryReserve("s", "w1", capT0); admitted || n != 4 {
+		t.Fatalf("admission with an unnamed entry: admitted %v count %d, want false 4", admitted, n)
+	}
+	if n, known := l.PeakFor("s", []string{"a1"}, capT0); known || n != 4 {
+		t.Fatalf("peak with an unnamed entry = %d known %v, want 4 false", n, known)
+	}
+}

@@ -77,6 +77,12 @@ func (w *walk) phases(ctx context.Context) int {
 	if err := w.phaseHire(ctx); err != nil {
 		return w.stop(err, true)
 	}
+	// The exact instance cap: the hire reply names no pool accounts, so read them now (before anything enters) and
+	// make the per-account count the gate. A refused read leaves the list empty and the ledger keeps the raid count.
+	w.hireAccounts = w.readHireAccounts(ctx)
+	if err := w.waitHireAccountCap(ctx); err != nil {
+		return w.stop(err, true)
+	}
 	if err := w.phaseBind(ctx); err != nil {
 		return w.stop(err, true)
 	}

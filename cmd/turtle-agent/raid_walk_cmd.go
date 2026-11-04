@@ -884,6 +884,10 @@ type walk struct {
 	mt    string
 	ots   []string
 	rest  []string
+	// hireAccounts are the pool accounts behind the hires (read with `.pinfo` after the last batch, ids only): the
+	// instance ledger counts the core's five-per-account cap on them instead of the conservative raid count. Empty
+	// when the server refused the read; the entry then carries none and counts as before.
+	hireAccounts []string
 
 	quietPatrols []raidwalk.QuietPatrol
 	patrolGUIDS  []map[string]bool

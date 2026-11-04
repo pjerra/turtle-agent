@@ -2358,15 +2358,22 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   distinct instance ids an hour, and its list lives in the worldserver's memory. Hires pack up to 10 a pool account, so
   a re-placed raid (`--place`, a `walk-super.sh` restart, an idle-raid re-placement) soon meets the 6th, which is
   refused and fails the summons. Every walk that enters a fresh instance is written to a per-server ledger
-  (`instance-cap.json` beside the slots file; entries are timestamps and the plan, the hire output does not name the
-  pool accounts, so it counts raids and can only over-count). Before the lease the walk counts the entries of the last
-  60 minutes on `--server`; at 4 or more it prints `instance cap: N fresh instances in the last hour on <server>; the
-  6th is refused by the core` and waits for the oldest to age out, at most `--instance-cap-wait`. A walk never starts a
-  fresh instance without a reservation: when the wait runs out it exits 26 (`instance cap: waited ... still N on <server>`),
-  and `--instance-cap-wait 0` exits 26 at the count at once. `--instance-cap-fail` exits 26 at the count instead of
-  waiting (`walk-super.sh` does not restart a 26). `--instance-cap-unsafe` is the explicit override: it goes on without a
-  reservation at the wait's end (or with an unreadable ledger), logs it, and concurrent walks may then each create a
-  fresh instance.
+  (`instance-cap.json` beside the slots file; entries are timestamps, the plan and now the pool accounts of the
+  party). The count is the core's own: **per pool account**, five fresh instance ids in the last hour. After the last
+  hire the walk reads the party's accounts with one read-only `.pinfo <hire>` per hire (the reply's `Account: ...
+  (id: N)`; names are never stored, only ids) and records them on the entry. A ledger whose live entries all name
+  their accounts counts the busiest account and waits at 5 (the 6th is refused); before the hires it takes the
+  busiest account the window knows, then checks the hired party exactly before it enters. With an older entry that
+  names no accounts (or a live reservation of a walk that has not hired yet) it keeps the conservative raid count at
+  4, because a raid packs 2-3 pool accounts: that was walk 37's 12-47 minute waits. Both lines name the count, the
+  cap and the earliest free time, e.g. `instance cap: a hired account already has 5 fresh instances in the last hour
+  on <server>; the 6th is refused by the core` or `instance cap: 4 fresh instances in the last hour on <server>; the
+  6th is refused by the core`. A walk never starts a fresh instance without a reservation: when the wait runs out it
+  exits 26 (`instance cap: waited ... still N on <server>`), and `--instance-cap-wait 0` exits 26 at the count at
+  once. `--instance-cap-fail` exits 26 at the count instead of waiting (`walk-super.sh` does not restart a 26).
+  `--instance-cap-unsafe` is the explicit override: it goes on without a reservation at the wait's end (or with an
+  unreadable ledger, or past a hired account's cap), logs it, and concurrent walks may then each create a fresh
+  instance.
   The wait line names the earliest free time as well (`instance cap: waiting 16m5s (earliest free time
   2026-11-03T12:34:56Z) for the oldest of 4 ...`), so the operator can plan around it. `--reuse-instance` (with
   `--place`) is the way around a full ledger: it keeps the raid's CURRENT instance (see `--place` above), so nothing is
