@@ -2627,10 +2627,13 @@ AQ20 walk starts at Rajaxx with `--gm-clear-boss kurinnaxx` so Kurinnaxx is dead
   entries (`skip=`), so an alive member cannot make the area "not quiet" and burn an instance (walk 32: every `gm_kill` was refused for
   a slots table without `world_addr`, and the failed groups then failed the placement with exit 18). The commander then returns to the
   start point. `gm_kill` itself refuses on an agent that is not a slot of `m910q`/`tortoise-test2`.
-- **Recorded:** `run.log` gets `gm-clear: killed <entry> <guid> (<leg>:<group>)` per kill (and `gm-clear: FAILED ...`), `summary.json`
-  gets `assisted: true` and `gm_clear[]` (`leg`, `group`, `entry`, `guid`, `killed`, `tries`) and `assisted: true` on each leg it killed
-  in, `summary.txt` and the result line end with `ASSISTED`, and `raid-walk report` (which reads `summary.json` from the walk folder)
-  prints an **ASSISTED** line and the table. An ASSISTED walk is never a real clear. In the pair form the flags apply to every walk.
+- **Recorded:** `run.log` gets `gm-clear: killed <entry> <guid> (<leg>:<group>)` per kill (and `gm-clear: FAILED ...`),
+  plus one `gm-clear: <leg>:<group>: ...` line per named group (a group with nothing to kill says `nothing to clear`),
+  so a supervisor-restarted placement shows the flag acted even when the corridor clear already despawned the pack.
+  `summary.json` gets `assisted: true` and `gm_clear[]` (`leg`, `group`, `entry`, `guid`, `killed`, `tries`) and
+  `assisted: true` on each leg it killed in, `summary.txt` and the result line end with `ASSISTED`, and `raid-walk report`
+  (which reads `summary.json` from the walk folder) prints an **ASSISTED** line and the table. An ASSISTED walk is never
+  a real clear. In the pair form the flags apply to every walk.
 
 ### Walk report
 
