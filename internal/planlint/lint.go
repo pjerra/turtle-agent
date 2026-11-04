@@ -342,13 +342,15 @@ func bossRows(steps []planexport.StepRow) []bossRow {
 
 // bossAggro lints a move row (a stand the gather pass marks, or a path
 // point) against every boss row after it: inside the boss's script aggro
-// range (BossAggroYd, 3D) before its fight is an error. Exempt: the move row
-// right before the boss row (the fight's own approach); the stand of a pull
-// row that lists the boss entry (a boss pulled with its adds); rows at or
-// after the boss row (after_boss). The rows only name their pull group in
-// their comments, never in a column, so a multi-point approach to a
-// boss-adds pull still flags its earlier points by design: walk in from
-// outside the aggro.
+// range (BossAggroYd, 3D) before its fight is an error. Exempt: the committed
+// walk into the fight (the trailing move run before the boss row, approach
+// plus the cutter's path tail: the party must enter the aggro to fight);
+// the stand of a pull row that lists the boss entry (a boss pulled with its
+// adds); rows at or after the boss row (after_boss). A stand always has its
+// pull row right after it, so a stand inside the aggro still flags. The rows
+// only name their pull group in their comments, never in a column, so a
+// multi-point approach to a boss-adds pull still flags its earlier points by
+// design: walk in from outside the aggro.
 func (c *checker) bossAggro(i int, s planexport.StepRow, p dungeon.Point) []Finding {
 	if c.opt.World == nil {
 		return nil
@@ -358,8 +360,8 @@ func (c *checker) bossAggro(i int, s planexport.StepRow, p dungeon.Point) []Find
 		if b.index <= i {
 			continue // the fight is on or over: after_boss rows walk freely
 		}
-		if prev := c.prev(b.index); prev == i {
-			continue // the boss's own approach row
+		if c.walkIn(b, i) {
+			continue // the committed walk into the fight
 		}
 		if c.bossPullStand(b, i) {
 			continue // the stand of a pull that takes the boss with its adds
@@ -380,6 +382,34 @@ func (c *checker) bossAggro(i int, s planexport.StepRow, p dungeon.Point) []Find
 	return out
 }
 
+// walkIn says move row i is part of the committed walk into boss row b: every
+// row after i up to and including b is a move row, and i stands no closer to
+// the boss than the fight's own approach (the move right before the boss
+// row). Moam's approach stands 22 yd inside his 60 yd script range, as a boss
+// stand should, so the final walk-in always crosses the range; only that walk
+// is exempt. A point closer than the stand (a walk past the boss to a stand
+// on the far side, walk 30's Ossirian wipe) still flags, and a stand always
+// has its pull row right after it, so a stand inside the aggro still flags.
+func (c *checker) walkIn(b bossRow, i int) bool {
+	prev := c.prev(b.index)
+	if prev < 0 || !moveKind(c.steps[prev].Kind) {
+		return false
+	}
+	for k := i + 1; k <= b.index; k++ {
+		if k == b.index {
+			break
+		}
+		if !moveKind(c.steps[k].Kind) {
+			return false
+		}
+	}
+	sp := c.bossSpawn(b.entry)
+	if sp == nil {
+		return false
+	}
+	return dist3(pointOf(c.steps[i]), sp.Pos) >= dist3(pointOf(c.steps[prev]), sp.Pos)
+}
+
 // bossPullStand says move row i is the stand of a pull row before boss row b
 // that lists the boss entry: the next positioned row after i is that pull.
 func (c *checker) bossPullStand(b bossRow, i int) bool {
@@ -390,8 +420,7 @@ func (c *checker) bossPullStand(b bossRow, i int) bool {
 		return k < b.index && c.steps[k].Kind == planexport.KindPull && hasEntry(c.steps[k].Entries, b.entry)
 	}
 	return false
-}
-
+ }
 // bossSpawn is the world spawn of a boss row's entry: the live boss on the
 // map (the lowest guid), not a corpse or a placeholder.
 func (c *checker) bossSpawn(entry uint32) *worldspawn.Spawn {

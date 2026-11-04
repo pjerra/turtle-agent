@@ -2138,7 +2138,7 @@
           ],
           "radius": 5,
           "approach": [
-            {"x": -9681.62, "y": 1570.57, "z": 21.7306}
+            {"x": -9681.62, "y": 1585.0, "z": 21.6}
           ]
         },
         {
@@ -2148,7 +2148,7 @@
           ],
           "radius": 5,
           "approach": [
-            {"x": -9670.72, "y": 1549.77, "z": 21.51}
+            {"x": -9650.0, "y": 1555.0, "z": 21.5}
           ]
         },
         {
@@ -2194,71 +2194,6 @@
           "approach": [
             {"x": -9651.298, "y": 1550.755, "z": 21.547853}
           ]
-        },
-        {
-          "entries": [15333],
-          "positions": [
-            {"x": -9685.71, "y": 1532.73, "z": 21.4449}
-          ],
-          "radius": 5,
-          "approach": [
-            {"x": -9679.35, "y": 1561.09, "z": 21.65}
-          ]
-        },
-        {
-          "entries": [15325, 15327, 15325, 15327, 15327],
-          "positions": [
-            {"x": -9712.81, "y": 1497.22, "z": 22.2975},
-            {"x": -9709.95, "y": 1494.1, "z": 23.751},
-            {"x": -9707.9, "y": 1492.47, "z": 25.5398},
-            {"x": -9708.26, "y": 1500.27, "z": 22.849},
-            {"x": -9705.17, "y": 1497.81, "z": 25.0354}
-          ],
-          "radius": 9.381316,
-          "patrol": {
-            "entries": [15325, 15327],
-            "path": [
-              {"x": -9699.17, "y": 1509.16, "z": 21.4444},
-              {"x": -9691.4, "y": 1520.31, "z": 21.7705},
-              {"x": -9672.95, "y": 1540.98, "z": 21.4444},
-              {"x": -9652.28, "y": 1559.83, "z": 21.4444},
-              {"x": -9632.54, "y": 1575.53, "z": 21.4036},
-              {"x": -9618.07, "y": 1592.44, "z": 21.5062},
-              {"x": -9603.04, "y": 1616.07, "z": 21.7327},
-              {"x": -9587.15, "y": 1646.02, "z": 21.4159},
-              {"x": -9598.28, "y": 1650, "z": 21.3869},
-              {"x": -9607.04, "y": 1623.42, "z": 21.8973},
-              {"x": -9618.59, "y": 1600.98, "z": 21.4448},
-              {"x": -9637.17, "y": 1576.23, "z": 21.7135},
-              {"x": -9656.2, "y": 1559.52, "z": 21.4443},
-              {"x": -9675.18, "y": 1538.93, "z": 21.4443},
-              {"x": -9693.53, "y": 1517.8, "z": 21.4448}
-            ],
-            "period_s": 142.39398,
-            "period_estimate": true,
-            "source": "spawn 1178586"
-          },
-          "approach": [
-            {"x": -9731.335, "y": 1483.374, "z": 22.240383}
-          ]
-        },
-        {
-          "entries": [15333, 15333],
-          "positions": [
-            {"x": -9728.81, "y": 1481.31, "z": 22.2073},
-            {"x": -9739.16, "y": 1491.33, "z": 21.6315}
-          ],
-          "radius": 12.209062,
-          "approach": [
-            {"x": -9735.13, "y": 1509.55, "z": 21.62}
-          ]
-        },
-        {
-          "entries": [15333],
-          "positions": [
-            {"x": -9746.4, "y": 1510.24, "z": 22.5943}
-          ],
-          "radius": 5
         }
       ],
       "skip": [15344, 15385, 15386, 15387, 15388, 15389, 15390, 15391, 15392, 15471, 15473, 15505],
@@ -2266,11 +2201,54 @@
         "entry": 15369,
         "position": {"x": -9698.38, "y": 1535.55, "z": 21.444},
         "approach": [
-          {"x": -9706.09, "y": 1509.2, "z": 21.58}
+          {"x": -9650.0, "y": 1535.0, "z": 21.5}
         ]
       },
+      "after_boss": [
+        {
+          "wait_for": {
+            "hostiles_gone": {
+              "radius": 10,
+              "center": {"x": -9685.71, "y": 1532.73, "z": 21.4449}
+            },
+            "timeout_s": 300,
+            "fail_text": "Ayamiss is dead but the Silicate Feeder at her altar (-9685.71 1532.73, 13 yd from her) still lives: the party walks there from her corpse and kills it."
+          }
+        },
+        {
+          "wait_for": {
+            "hostiles_gone": {
+              "radius": 14,
+              "center": {"x": -9709.0, "y": 1497.0, "z": 23.0}
+            },
+            "timeout_s": 300,
+            "fail_text": "Ayamiss is dead but her south wasp patrol (15325/15327, two units inside her 40 yd aggro) still lives: the party walks there from her corpse and kills it."
+          }
+        },
+        {
+          "wait_for": {
+            "hostiles_gone": {
+              "radius": 14,
+              "center": {"x": -9733.98, "y": 1486.32, "z": 21.92}
+            },
+            "timeout_s": 300,
+            "fail_text": "Ayamiss is dead but the two Feeders south-west of her altar (-9734 1486, the walk to them threads her 40 yd aggro) still live: the party walks there from her corpse and kills them."
+          }
+        },
+        {
+          "wait_for": {
+            "hostiles_gone": {
+              "radius": 8,
+              "center": {"x": -9746.4, "y": 1510.24, "z": 22.5943}
+            },
+            "timeout_s": 300,
+            "fail_text": "Ayamiss is dead but the lone Feeder west of her altar (-9746 1510) still lives: the party walks there from her corpse and kills it."
+          }
+        }
+      ],
       "notes": [
-        "27 pulls (76 units) in the west hive: 37 Silicate Feeders (15333), six Drones, six Collectors and six Tail Lashers, eleven wasps and nine stingers; then Ayamiss. She flies, summons 20 swarmers every 60 s and paralyses a random raider to feed a larva: no plan step can cover it."
+        "23 pulls (65 units) in the west hive: 32 Silicate Feeders (15333), six Drones, six Collectors and six Tail Lashers, eleven wasps and nine stingers; then Ayamiss. Pull groups 8 and 9 (10 units each) are kept whole: each is an AGGRO_TOGETHER core (group flags 2) with nearby loners 5-18 yd away inside the 21 yd aggro, so a split-off pack would rejoin; the walk runs with DungeonRunAutoCc = 1. She flies, summons 20 swarmers every 60 s and paralyses a random raider to feed a larva: no plan step can cover it.",
+        "The feeder at her altar (13 yd from her), her south wasp patrol (two units inside her 40 yd) and the three Feeders south-west of the altar (the only walk to them threads her 40 yd aggro) are pulled after the boss (after_boss hostiles_gone): pulling any of them before her takes her along. The patrol is pulled where it stands when the party walks in."
       ]
     },
     {

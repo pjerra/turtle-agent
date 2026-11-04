@@ -63,6 +63,18 @@ func TestBossAggroUsesScriptRangeForMoam(t *testing.T) {
 	}
 }
 
+
+func countLint(t *testing.T, rows planexport.Rows, w *worldspawn.World, lint string) int {
+	t.Helper()
+	n := 0
+	for _, f := range lintOne(t, rows, fakeNav{}, w) {
+		if f.Lint == lint {
+			n++
+		}
+	}
+	return n
+}
+
 // The boss's own approach row (the move right before the boss row) is exempt.
 func TestBossApproachExempt(t *testing.T) {
 	w := bossWorld()
@@ -90,5 +102,27 @@ func TestBossPullStandExempt(t *testing.T) {
 	rows := rowsOf(move(30, 0, 0), pull(35, 0, 0, 15339), b)
 	if fs := lintOne(t, rows, fakeNav{}, w); len(fs) != 0 {
 		t.Fatalf("boss-pull stand findings %v, want none", fs)
+	}
+}
+
+// The committed walk into Moam (trailing moves no closer than his 22 yd
+// approach) is exempt; a point closer than the stand still flags.
+func TestBossWalkInExempt(t *testing.T) {
+	w := worldOf(
+		worldspawn.Spawn{GUID: 2, Entry: 15340, Name: "Moam", LevelMax: 63, DetectionYd: 20, Faction: 16, Pos: dungeon.Point{X: 1000, Y: 0, Z: 0}},
+	)
+	b := bossStep(15340)
+	b.X, b.Y, b.Z = 1000, 0, 0
+	// Walk-in from 90 yd to the 22 yd stand: the 55 yd tail point is exempt.
+	// (Only boss_aggro is judged: the old stand aggro lint still sees the
+	// boss spawn itself, as on every live boss approach.)
+	rows := rowsOf(move(910, 0, 0), move(945, 0, 0), move(978, 0, 0), b)
+	if n := countLint(t, rows, w, LintBossAggro); n != 0 {
+		t.Fatalf("walk-in boss_aggro findings %d, want none", n)
+	}
+	// A point at 10 yd, closer than the 22 yd stand (a walk past him), flags.
+	rows = rowsOf(move(910, 0, 0), move(990, 0, 0), move(978, 0, 0), b)
+	if n := countLint(t, rows, w, LintBossAggro); n != 1 {
+		t.Fatalf("walk-past boss_aggro findings %d, want one", n)
 	}
 }
