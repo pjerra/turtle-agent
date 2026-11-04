@@ -921,6 +921,44 @@ func TestApproachHopsEndWithinTheRunLeaderReach(t *testing.T) {
 	}
 }
 
+// The opening move of leg 0 is cut from the plan's entrance: the run leader stands there before its first row, and a leg whose
+// `to` is hundreds of yards in was otherwise one uncut move walked in the leader's own hops (razorfen_downs round 35: 449 yd).
+// A plan whose entrance is near its first point gets no extra row.
+func TestFirstLegMoveIsCutFromTheEntrance(t *testing.T) {
+	const js = `{"version":1,"name":"open","status":"live-checked (test)","map":129,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"a","to":{"x":200,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":200,"y":0,"z":0}]}]}]}`
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		var out []dungeon.Point
+		for x := a.X + 40; x < b.X; x += 40 {
+			out = append(out, dungeon.Point{X: x})
+		}
+		return out, nil, nil
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paths, to int
+	for _, s := range res.Rows.Steps {
+		if s.Kind == KindMove && s.Comment == "path" {
+			paths++
+		}
+		if s.Kind == KindMove && s.Comment == "to" {
+			to++
+		}
+	}
+	if paths == 0 || to != 1 {
+		t.Fatalf("the opening move from the entrance is not cut: %v", kinds(res.Rows, 0))
+	}
+
+	const near = `{"version":1,"name":"open","status":"live-checked (test)","map":129,"entrance":{"x":190,"y":0,"z":0},
+ "legs":[{"name":"a","to":{"x":200,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":205,"y":0,"z":0}]}]}]}`
+	res, err = Build(parsePlan(t, near), Options{Source: "test", Cut: cut})
+	if err != nil || strings.Join(kinds(res.Rows, 0), " ") != "move pull" {
+		t.Fatalf("%v %v", err, kinds(res.Rows, 0))
+	}
+}
+
 // TestRouteAroundAvoid: a plan with an avoid box asks Route for every hop between anchors (the entrance, moves, pulls) and puts the
 // points it returns in as move rows; an error from Route fails the export; a plan without a box never calls it.
 func TestRouteAroundAvoid(t *testing.T) {

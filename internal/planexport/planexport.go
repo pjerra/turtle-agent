@@ -1179,12 +1179,15 @@ func (b *builder) cutOrigin(o RowOrigin) RowOrigin {
 func (b *builder) cutLongHops() error {
 	var out []StepRow
 	var outOrigins []RowOrigin
-	var prev *StepRow
+	// The run leader stands at the plan's entrance before its first row (dungeon.RunLeaderReach starts there too), so the opening
+	// move of leg 0 is an anchor like any other: without it a leg whose `to` is hundreds of yards in is one uncut move that the run
+	// leader walks in hops of its own (razorfen_downs round 35: 449 yd from the entrance to the first point).
+	prev := &StepRow{Leg: 0, Kind: KindMove, X: b.plan.Entrance.X, Y: b.plan.Entrance.Y, Z: b.plan.Entrance.Z}
 	renumber := map[int]int{} // leg -> next seq
 	for i := range b.rows.Steps {
 		s := b.rows.Steps[i]
 		origin := b.origins[i]
-		if b.opt.ApproachHops && b.opt.Cut != nil && prev != nil && (s.Kind == KindPull || s.Kind == KindBoss || s.Kind == KindHold) && s.Flags&FlagStandPull == 0 {
+		if b.opt.ApproachHops && b.opt.Cut != nil && (s.Kind == KindPull || s.Kind == KindBoss || s.Kind == KindHold) && s.Flags&FlagStandPull == 0 {
 			a, c := dungeon.Point{X: prev.X, Y: prev.Y, Z: prev.Z}, dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
 			d := dist3(a, c)
 			if d > dungeon.RunLeaderReachYd || math.Abs(float64(a.Z-c.Z)) > approachDropYd {
