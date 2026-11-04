@@ -3,7 +3,10 @@
 // -up restart budget or a stall tears the slot down and re-places: the same instance first (--reuse-instance), a fresh
 // one only when the old bind is gone (a failed placement). A boss kill advances to the id's next goal. It never uses
 // slot 3, never sends `.bot run stop` and never passes --instance-cap-unsafe; it runs detached (setsid) and stops
-// cleanly on a YIELD file (tear down, release leases, YIELD-DONE). Walk 37 is the case set (EVENTS.txt, summary.md).
+// cleanly on a YIELD file (tear down, release leases, YIELD-DONE). A teardown that does not verify (the walk gone and
+// the lease released) is not completion: the run stays put and is retried, and the third failed tick escalates the
+// slot in EVENTS.txt/status.txt and leaves it alone (no relaunch, no YIELD-DONE). One supervisor per walk dir, by an
+// flock on autopilot.lock. Walk 37 is the case set (EVENTS.txt, summary.md).
 package main
 
 import (
@@ -40,6 +43,7 @@ const (
 	autoYieldFile   = "YIELD"
 	autoYieldDone   = "YIELD-DONE"
 	autoPIDFile     = "autopilot.pid"
+	autoLockFile    = "autopilot.lock"
 	autoLogFile     = "autopilot.log"
 )
 
@@ -52,6 +56,8 @@ const (
 	autoTeardownTimeout    = 3 * time.Minute
 	// autoSummaryGrace is how long an exited run may take to write summary.json before the autopilot acts without it.
 	autoSummaryGrace = 10 * time.Second
+	// autoTeardownTries is how many ticks a failed teardown is retried before the slot is escalated and left alone.
+	autoTeardownTries = 3
 )
 
 type autoOptions struct {
@@ -79,6 +85,7 @@ type autoGoalState struct {
 type autoRun struct {
 	seq     int
 	out     string
+	slot    string
 	reuse   bool
 	goal    raidwalk.AutoGoal
 	cmd     *exec.Cmd
@@ -94,7 +101,13 @@ type autoRun struct {
 	frameOff     int64
 	frameSig     string
 	fastFails    int
-	tornDown     bool
+	// pending is the finish the decision rule asked for; a failed teardown holds it back and the next tick retries
+	// instead of deciding again. tornDown is a clean teardown; escalated is the third failure: the slot is left alone.
+	pending       *raidwalk.AutoDecision
+	tornDown      bool
+	teardownFails int
+	teardownErr   string
+	escalated     bool
 }
 
 // autoState is one raid id and its place in its goal lines.
@@ -139,15 +152,25 @@ func raidAutopilotCmd(ctx context.Context, args []string, stdout, stderr io.Writ
 	if !o.foreground && os.Getenv(autoChildEnv) == "" {
 		return autoDetach(o, stdout, stderr)
 	}
-	if code := autoPIDGuard(o.walkDir, stderr); code != exitOK {
-		return code
+	if err := os.MkdirAll(o.walkDir, 0o700); err != nil {
+		fmt.Fprintf(stderr, "raid-autopilot: %v\n", err)
+		return exitUsage
 	}
+	// One supervisor per walk dir, held for this process's lifetime. The pid file is informational only: a start
+	// that reads it and then races another one both find no live pid, so the lock is the guard.
+	lock, err := autoLock(o.walkDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "raid-autopilot: %v\n", err)
+		return exitUsage
+	}
+	defer lock.Close()
 	pidPath := filepath.Join(o.walkDir, autoPIDFile)
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
+	pid := strconv.Itoa(os.Getpid())
+	if err := os.WriteFile(pidPath, []byte(pid+"\n"), 0o600); err != nil {
 		fmt.Fprintf(stderr, "raid-autopilot: pid file: %v\n", err)
 		return exitUsage
 	}
-	defer os.Remove(pidPath)
+	defer autoRemovePIDFile(pidPath, pid)
 
 	s := &autoSupervisor{o: o, stderr: stderr}
 	if err := s.open(); err != nil {
@@ -314,27 +337,43 @@ func (s *autoSupervisor) event(id, action, detail string) {
 	if id == "" {
 		id = "all"
 	}
-	line := fmt.Sprintf("%s %s %s: %s", time.Now().UTC().Format(time.RFC3339), id, action, detail)
+	s.eventLine(fmt.Sprintf("%s %s %s: %s", time.Now().UTC().Format(time.RFC3339), id, action, detail))
+}
+
+// eventLine writes an already built line to EVENTS.txt and the supervisor's stderr.
+func (s *autoSupervisor) eventLine(line string) {
 	if s.events != nil {
 		fmt.Fprintln(s.events, line)
 	}
 	fmt.Fprintln(s.stderr, "raid-autopilot: "+line)
 }
 
-func autoPIDGuard(dir string, stderr io.Writer) int {
-	raw, err := os.ReadFile(filepath.Join(dir, autoPIDFile))
+// autoLock takes <dir>/autopilot.lock exclusively (LOCK_EX|LOCK_NB) and holds it as long as the returned file is
+// open: the OS drops the lock when the process ends, so a crashed supervisor never leaves a stale guard. A second
+// start exits with an error instead of running a second supervisor on the same targets, slots and out numbering.
+func autoLock(dir string) (*os.File, error) {
+	path := filepath.Join(dir, autoLockFile)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return exitOK
+		return nil, fmt.Errorf("lock: %v", err)
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-	if err != nil || pid <= 0 || pid == os.Getpid() {
-		return exitOK
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("another autopilot runs in %s (it holds %s)", dir, path)
 	}
-	if err := syscall.Kill(pid, 0); err == nil || err == syscall.EPERM {
-		fmt.Fprintf(stderr, "raid-autopilot: another autopilot runs in %s (pid %d)\n", dir, pid)
-		return exitUsage
+	return f, nil
+}
+
+// autoRemovePIDFile removes the informational pid file only while it still names this process: a supervisor that lost
+// the lock (or was replaced) never deletes its successor's file.
+func autoRemovePIDFile(path, pid string) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
 	}
-	return exitOK
+	if strings.TrimSpace(string(raw)) == pid {
+		_ = os.Remove(path)
+	}
 }
 
 func autoDetach(o autoOptions, stdout, stderr io.Writer) int {
@@ -428,6 +467,16 @@ func (s *autoSupervisor) tick(ctx context.Context) {
 		if st.run == nil {
 			continue
 		}
+		// An escalated slot is left alone: no further teardown, no relaunch, no YIELD-DONE.
+		if st.run.escalated {
+			continue
+		}
+		// The last decision asked for a finish whose teardown failed: retry the teardown, never re-decide (a second
+		// decide would relaunch on a slot that is still the old run's).
+		if st.run.pending != nil {
+			s.completeFinish(st)
+			continue
+		}
 		obs := s.observe(st.run)
 		if obs.Exited && obs.ObserveErr != "" && time.Since(st.run.exitedAt) < autoSummaryGrace {
 			continue
@@ -436,30 +485,80 @@ func (s *autoSupervisor) tick(ctx context.Context) {
 			Goal: st.run.goal, Attempt: st.goals[st.current].attempt, Reuse: st.run.reuse,
 			HasRun: st.goals[st.current].attempt > 0, FastFailures: st.run.fastFails,
 		}, time.Now(), s.o.stall)
-		switch d.Action {
-		case raidwalk.AutoContinue:
+		if d.Action == raidwalk.AutoContinue {
 			continue
-		case raidwalk.AutoAdvance:
-			s.event(st.id, "advance", d.Reason)
-			s.finish(st, true)
-			st.nextAt = time.Now().Add(s.o.settle)
-		case raidwalk.AutoStop:
-			s.event(st.id, "stop", d.Reason)
-			s.finish(st, false)
-			st.done = true
-		case raidwalk.AutoRestart:
-			s.event(st.id, "restart", fmt.Sprintf("%s; next %s", d.Reason, s.nextPlacement(d.Reuse)))
-			s.finish(st, false)
-			if st.last != nil {
-				st.last.reuse = d.Reuse
-			}
-			wait := s.o.settle
-			if d.Backoff > wait {
-				wait = d.Backoff
-				s.event(st.id, "backoff", d.Backoff.String())
-			}
-			st.nextAt = time.Now().Add(wait)
 		}
+		st.run.pending = &d
+		s.completeFinish(st)
+	}
+}
+
+// completeFinish applies a decided finish: the walk is stopped, the slot is torn down and verified, and only then is
+// the run cleared and the action (advance, stop or restart) taken. A teardown that does not verify keeps the run and
+// the pending decision: the next tick retries it, and the third failure escalates and leaves the slot alone.
+func (s *autoSupervisor) completeFinish(st *autoState) {
+	r := st.run
+	if r == nil || r.pending == nil || r.tornDown {
+		return
+	}
+	d := r.pending
+	s.stopRun(st, r)
+	// An attempt that ended before the poll ran still has a step in its log (and a restart must start there, not at
+	// the goal's own start again).
+	if r.lastStep == 0 {
+		r.lastStep = autoLastStep(filepath.Join(r.out, "run.log"))
+		if r.lastStep == 0 {
+			if sum, err := autoReadSummary(filepath.Join(r.out, "summary.json")); err == nil {
+				r.lastStep = sum.StepsReached
+			}
+		}
+	}
+	if err := s.teardown(st.id, r); err != nil {
+		r.teardownFails++
+		r.teardownErr = err.Error()
+		if r.teardownFails >= autoTeardownTries {
+			r.escalated = true
+			s.escalate(st.id, r.slot, err.Error())
+			s.writeStatus()
+			return
+		}
+		s.event(st.id, "teardown-failed", fmt.Sprintf("%v; the run stays active, the teardown is retried next tick (fail %d of %d)", err, r.teardownFails, autoTeardownTries))
+		return
+	}
+	st.run = nil
+	st.last = r
+	// A fast failure (under two minutes, no step) doubles the next backoff.
+	if time.Since(r.started) < 2*time.Minute && r.lastStep == 0 {
+		r.fastFails++
+	} else {
+		r.fastFails = 0
+	}
+	switch d.Action {
+	case raidwalk.AutoAdvance:
+		s.event(st.id, "advance", d.Reason)
+		if st.current+1 < len(st.goals) {
+			st.current++
+			st.last = nil
+			st.nextReuse = true
+			st.goals[st.current].attempt = 0
+			s.event(st.id, "goal", "next: "+st.goals[st.current].target.Goal.String())
+		} else {
+			st.done = true
+			s.event(st.id, "done", "the last goal is met")
+		}
+		st.nextAt = time.Now().Add(s.o.settle)
+	case raidwalk.AutoStop:
+		s.event(st.id, "stop", d.Reason)
+		st.done = true
+	case raidwalk.AutoRestart:
+		s.event(st.id, "restart", fmt.Sprintf("%s; next %s", d.Reason, s.nextPlacement(d.Reuse)))
+		st.last.reuse = d.Reuse
+		wait := s.o.settle
+		if d.Backoff > wait {
+			wait = d.Backoff
+			s.event(st.id, "backoff", d.Backoff.String())
+		}
+		st.nextAt = time.Now().Add(wait)
 	}
 }
 
@@ -511,7 +610,7 @@ func (s *autoSupervisor) launchAttempt(st *autoState, g *autoGoalState, from str
 		return
 	}
 	run := &autoRun{
-		seq: st.seq, out: out, reuse: reuse, goal: g.target.Goal, cmd: cmd,
+		seq: st.seq, out: out, slot: g.target.Slot, reuse: reuse, goal: g.target.Goal, cmd: cmd,
 		wait: make(chan error, 1), started: time.Now(), lastProgress: time.Now(),
 	}
 	if st.last != nil {
@@ -761,47 +860,6 @@ func autoFrameSignature(path string, r *autoRun) string {
 	return sig
 }
 
-// finish tears the run's slot down and advances the goal (advance) or leaves the next attempt to the loop.
-func (s *autoSupervisor) finish(st *autoState, advance bool) {
-	r := st.run
-	if r == nil {
-		return
-	}
-	s.stopRun(st, r)
-	// An attempt that ended before the poll ran still has a step in its log (and a restart must start there, not at
-	// the goal's own start again).
-	if r.lastStep == 0 {
-		r.lastStep = autoLastStep(filepath.Join(r.out, "run.log"))
-		if r.lastStep == 0 {
-			if sum, err := autoReadSummary(filepath.Join(r.out, "summary.json")); err == nil {
-				r.lastStep = sum.StepsReached
-			}
-		}
-	}
-	s.teardown(st.id, r)
-	st.run = nil
-	st.last = r
-	// A fast failure (under two minutes, no step) doubles the next backoff.
-	if time.Since(r.started) < 2*time.Minute && r.lastStep == 0 {
-		r.fastFails++
-	} else {
-		r.fastFails = 0
-	}
-	if advance {
-		if st.current+1 < len(st.goals) {
-			st.current++
-			st.last = nil
-			st.nextReuse = true
-			st.goals[st.current].attempt = 0
-			s.event(st.id, "goal", "next: "+st.goals[st.current].target.Goal.String())
-		} else {
-			st.done = true
-			s.event(st.id, "done", "the last goal is met")
-		}
-		return
-	}
-}
-
 // stopRun ends the child gracefully: SIGTERM the walk's process group (its own signal handler stops the run and tears
 // down), then SIGKILL after the grace. The autopilot never sends `.bot run stop`.
 func (s *autoSupervisor) stopRun(st *autoState, r *autoRun) {
@@ -825,29 +883,88 @@ func (s *autoSupervisor) stopRun(st *autoState, r *autoRun) {
 	r.exited = true
 }
 
-// teardown runs the slot teardown once; when the lease is still held or the teardown failed, it runs again with
-// --release-anyway (the brief's "twice if the lease is kept").
-func (s *autoSupervisor) teardown(id string, r *autoRun) {
-	if r.tornDown {
-		return
+// pid is the attempt's walk pid (0: no process was started, a test's simulated run).
+func (r *autoRun) pid() int {
+	if r.cmd == nil || r.cmd.Process == nil {
+		return 0
 	}
-	r.tornDown = true
+	return r.cmd.Process.Pid
+}
+
+// processGone says the attempt's walk process ended: the wait saw it exit and its pid no longer exists. A pid that
+// still answers (or a run whose exit was never seen) is not gone.
+func (r *autoRun) processGone() bool {
+	if !r.exited {
+		return false
+	}
+	pid := r.pid()
+	if pid <= 0 {
+		return true
+	}
+	return syscall.Kill(pid, 0) == syscall.ESRCH
+}
+
+// teardown tears the run's slot down and verifies it: the walk process is gone and the slot lease is released. The
+// first attempt is a plain teardown; when it failed or the lease is kept, a second one runs with --release-anyway
+// (the brief's "twice if the lease is kept"). A non-nil error means the slot is not clean: the caller keeps the run
+// and never relaunches on that slot. A run already torn down, or a slot dir that no longer exists, is clean.
+func (s *autoSupervisor) teardown(id string, r *autoRun) error {
+	if r.tornDown {
+		return nil
+	}
+	if r.escalated {
+		return fmt.Errorf("teardown %s: the slot is escalated and left alone", r.out)
+	}
 	slotDir := filepath.Join(r.out, "slot")
 	if _, err := os.Stat(slotDir); err != nil {
-		return
+		if !r.processGone() {
+			return fmt.Errorf("teardown %s: the walk process %d is still alive", r.out, r.pid())
+		}
+		r.tornDown = true
+		return nil
 	}
 	ok, detail := s.teardownOnce(slotDir, false)
-	if ok && !s.leaseHeld(slotDir) {
+	unclean := s.teardownUnclean(r, slotDir, ok)
+	if unclean == "" {
+		r.tornDown = true
 		s.event(id, "teardown", detail)
-		return
+		return nil
 	}
-	s.event(id, "teardown", detail+"; the lease is kept or the teardown failed, trying again with --release-anyway")
+	s.event(id, "teardown", detail+"; not clean ("+unclean+"), trying again with --release-anyway")
 	ok, detail = s.teardownOnce(slotDir, true)
-	verb := "teardown"
-	if !ok {
-		verb = "teardown-failed"
+	if unclean := s.teardownUnclean(r, slotDir, ok); unclean != "" {
+		return fmt.Errorf("%s: %s", detail, unclean)
 	}
-	s.event(id, verb, detail)
+	r.tornDown = true
+	s.event(id, "teardown", detail)
+	return nil
+}
+
+// teardownUnclean names what is still unclean after a teardown ("" when the slot is verified clean): the command
+// failed, the walk process is alive, or the lease is held or cannot be verified. An unverifiable lease is not called
+// released: a second supervisor must never place on a slot whose lease state is unknown.
+func (s *autoSupervisor) teardownUnclean(r *autoRun, slotDir string, teardownOK bool) string {
+	var left []string
+	if !teardownOK {
+		left = append(left, "the teardown command failed")
+	}
+	if !r.processGone() {
+		left = append(left, fmt.Sprintf("the walk process %d is still alive", r.pid()))
+	}
+	held, err := s.leaseHeld(slotDir)
+	switch {
+	case err != nil:
+		left = append(left, "the lease cannot be verified: "+err.Error())
+	case held:
+		left = append(left, "the slot lease is still held")
+	}
+	return strings.Join(left, "; ")
+}
+
+// escalate is the third failed teardown: the line names the raid and slot in EVENTS.txt and status.txt, and the slot
+// is left alone until a person clears it (no relaunch, no further teardown, no YIELD-DONE).
+func (s *autoSupervisor) escalate(id, slot, detail string) {
+	s.eventLine(fmt.Sprintf("%s ESCALATE teardown %s %s: %s", time.Now().UTC().Format(time.RFC3339), id, slot, detail))
 }
 
 func (s *autoSupervisor) teardownOnce(slotDir string, releaseAnyway bool) (bool, string) {
@@ -868,19 +985,20 @@ func (s *autoSupervisor) teardownOnce(slotDir string, releaseAnyway bool) (bool,
 	return true, fmt.Sprintf("teardown %s: %s", slotDir, detail)
 }
 
-// leaseHeld asks the slots store whether the slot's lease is still there.
-func (s *autoSupervisor) leaseHeld(slotDir string) bool {
+// leaseHeld asks the slots store whether the slot's lease is still there. An error means the lease state cannot be
+// verified (no readable slot.json, a failed lease list, bad JSON): that is not "released".
+func (s *autoSupervisor) leaseHeld(slotDir string) (bool, error) {
 	raw, err := os.ReadFile(filepath.Join(slotDir, "slot.json"))
 	if err != nil {
-		return false
+		return false, fmt.Errorf("slot.json: %v", err)
 	}
 	var m struct {
 		Server    string `json:"server"`
 		Slot      string `json:"slot"`
 		SlotsPath string `json:"slots_path"`
 	}
-	if json.Unmarshal(raw, &m) != nil || m.Server == "" || m.Slot == "" {
-		return false
+	if err := json.Unmarshal(raw, &m); err != nil || m.Server == "" || m.Slot == "" {
+		return false, fmt.Errorf("slot.json does not name the server and the slot")
 	}
 	args := []string{"lease", "list", m.Server, "--json"}
 	if m.SlotsPath != "" {
@@ -890,37 +1008,57 @@ func (s *autoSupervisor) leaseHeld(slotDir string) bool {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, s.o.binary, args...).Output()
 	if err != nil {
-		return false
+		return false, fmt.Errorf("lease list %s: %v", m.Server, err)
 	}
 	var list []struct {
 		Slot  struct{ ID string } `json:"slot"`
 		Lease *json.RawMessage    `json:"lease"`
 	}
-	if json.Unmarshal(out, &list) != nil {
-		return false
+	if err := json.Unmarshal(out, &list); err != nil {
+		return false, fmt.Errorf("lease list %s: %v", m.Server, err)
 	}
 	for _, e := range list {
 		if e.Slot.ID == m.Slot && e.Lease != nil {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
-// shutdown tears every run down (YIELD or a signal) and writes YIELD-DONE for a YIELD.
+// shutdown tears every run down (YIELD or a signal) and writes YIELD-DONE for a YIELD, but only when every slot was
+// verified clean: a failed teardown, or a slot escalated and left alone, keeps YIELD-DONE away.
 func (s *autoSupervisor) shutdown(why string) {
+	clean := true
 	for _, st := range s.states {
+		s.event(st.id, "shutdown", why)
 		switch {
 		case st.run != nil:
-			s.stopRun(st, st.run)
-			s.teardown(st.id, st.run)
+			r := st.run
+			s.stopRun(st, r)
+			if r.escalated {
+				clean = false
+				s.event(st.id, "escalated", "the slot is left alone: no teardown, no relaunch")
+				continue
+			}
+			if err := s.teardown(st.id, r); err != nil {
+				clean = false
+				s.event(st.id, "teardown-failed", err.Error())
+				continue
+			}
 			st.run = nil
 		case st.last != nil:
-			s.teardown(st.id, st.last)
+			if err := s.teardown(st.id, st.last); err != nil {
+				clean = false
+				s.event(st.id, "teardown-failed", err.Error())
+				continue
+			}
 		}
-		s.event(st.id, "shutdown", why)
 	}
 	if why != "YIELD" {
+		return
+	}
+	if !clean {
+		s.event("", "yield", "no YIELD-DONE: a teardown did not finish cleanly (the slot is left alone)")
 		return
 	}
 	if err := os.WriteFile(filepath.Join(s.o.walkDir, autoYieldDone), nil, 0o600); err != nil {
@@ -943,6 +1081,10 @@ func (s *autoSupervisor) writeStatus() {
 			fmt.Fprintf(&b, "%s goal=%s done\n", st.id, g)
 			continue
 		}
+		if st.run != nil && st.run.escalated {
+			fmt.Fprintf(&b, "ESCALATE teardown %s %s: %s\n", st.id, st.run.slot, st.run.teardownErr)
+			continue
+		}
 		if st.run == nil {
 			fmt.Fprintf(&b, "%s goal=%s waiting for the next launch\n", st.id, g)
 			continue
@@ -951,6 +1093,9 @@ func (s *autoSupervisor) writeStatus() {
 		state := "running"
 		if r.exited {
 			state = fmt.Sprintf("exited %d", r.exitCode)
+		}
+		if r.teardownFails > 0 {
+			state += fmt.Sprintf(" teardown-failed=%d/%d", r.teardownFails, autoTeardownTries)
 		}
 		fmt.Fprintf(&b, "%s goal=%s attempt=%d out=%s %s step=%d progress=%s ago reuse=%v\n",
 			st.id, g, st.goals[st.current].attempt, filepath.Base(r.out), state,

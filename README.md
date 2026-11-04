@@ -2814,14 +2814,22 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   (20 s doubling to 10 min after fast failures). Exit 26 keeps its cap wait and re-places later.
 - **Teardown.** `teardown <out>/slot`; when the lease is still held or the teardown failed, a second run with
   `--release-anyway` (the brief's "twice if the lease is kept"). The walk's own teardown has already released the
-  lease in the normal case.
+  lease in the normal case. A teardown is only done when it is verified: the walk's process is gone **and** `lease
+  list` says the slot's lease is released (a lease it cannot verify counts as held). A teardown that fails keeps the
+  run active — same `--out`, no relaunch on that slot, no `YIELD-DONE` — and the next tick retries it; after three
+  failed ticks the autopilot writes `ESCALATE teardown <raid> <slot>` to `EVENTS.txt` and `status.txt` and leaves the
+  slot alone until a person clears it (no relaunch, no further teardown, no `YIELD-DONE`).
 - **Files.** `<walk-dir>/EVENTS.txt` gets one line per action (UTC, id, action, reason); `status.txt` is rewritten
-  every `--status-every` (1m): id, goal, attempt, out, state, step, progress age, reuse. `<id>-<n>.out` is the walk's
-  own stdout/stderr; `autopilot.log` is the detached supervisor's.
-- **Detached and YIELD.** By default the launcher re-execs itself with `setsid` and returns (pid + log); the
-  supervisor writes `autopilot.pid` and refuses a second one. `--foreground` runs it in place. A `YIELD` file in the
-  walk dir tears every run down, releases every lease, writes `YIELD-DONE` and exits 0; SIGINT/SIGTERM does the same
-  without `YIELD-DONE`.
+  every `--status-every` (1m): id, goal, attempt, out, state, step, progress age, reuse (an escalated slot is one
+  `ESCALATE teardown <raid> <slot>` line). `<id>-<n>.out` is the walk's own stdout/stderr; `autopilot.log` is the
+  detached supervisor's.
+- **Detached and YIELD.** By default the launcher re-execs itself with `setsid` and returns (pid + log); the supervisor
+  writes `autopilot.pid` and takes an exclusive `flock` on `<walk-dir>/autopilot.lock` for its lifetime, so a second
+  start on the same walk dir refuses (exit 2) instead of running beside it — the pid file is informational. The OS
+  drops the lock when the process ends, so a crash leaves no stale guard. `--foreground` runs it in place. A `YIELD`
+  file in the walk dir tears every run down, releases every lease, writes `YIELD-DONE` and exits 0; SIGINT/SIGTERM
+  does the same without `YIELD-DONE`. A `YIELD` whose teardown does not verify writes no `YIELD-DONE` (the event log
+  says why).
 - **Dry run.** `--dry-run` validates `targets.txt` and prints each goal's first command; nothing is launched.
 - **Tests.** The decision rule is pure (`internal/raidwalk/autopilot.go`): exit 0 after a run stop, restarts 3/3, a
   65-minute no-progress fight and a failed placement are the walk 37 fixtures. `--poll`, `--stall`, `--settle` and

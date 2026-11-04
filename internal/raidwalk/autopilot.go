@@ -40,13 +40,13 @@ func ParseAutoGoal(s string) (AutoGoal, error) {
 	case strings.HasPrefix(s, "leg:"):
 		leg := strings.TrimPrefix(s, "leg:")
 		if leg == "" || strings.ContainsAny(leg, " \t") {
-			return AutoGoal{}, fmt.Errorf("goal %q: leg wants a leg name or number after leg:", s)
+			return AutoGoal{}, fmt.Errorf("goal %q: leg wants a leg name or number after the leg: prefix", s)
 		}
 		return AutoGoal{Kind: "leg", Leg: leg}, nil
 	case strings.HasPrefix(s, "boss:"):
 		n, err := strconv.ParseUint(strings.TrimPrefix(s, "boss:"), 10, 32)
 		if err != nil || n == 0 {
-			return AutoGoal{}, fmt.Errorf("goal %q: boss wants a creature entry after boss:", s)
+			return AutoGoal{}, fmt.Errorf("goal %q: boss wants a creature entry after the boss: prefix", s)
 		}
 		return AutoGoal{Kind: "boss", Boss: uint32(n)}, nil
 	}
