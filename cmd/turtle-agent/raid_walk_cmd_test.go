@@ -118,11 +118,14 @@ type walkFakeAgent struct {
 
 	startReply *commanderReply
 	startQueue []queuedEvent
-	bindLayout string
-	enterReply *commanderReply
-	enterBusy  int // the first enterBusy enter orders answer ERR busy
-	enterCalls int
-	onGM       func(line string)
+	// startCallErr makes the `run start` RPC itself fail (a timed-out call: the server may still have accepted the
+	// start), after the fake recorded it and ran its startQueue and onStart hooks.
+	startCallErr error
+	bindLayout   string
+	enterReply   *commanderReply
+	enterBusy    int // the first enterBusy enter orders answer ERR busy
+	enterCalls   int
+	onGM         func(line string)
 	// onResume runs when the walk sends `run resume` through the commander RPC (nil: ACK only).
 	onResume func()
 	// runVerbs records every `run` commander request's verb, in order, and onSkip runs for one whose verb is skip
@@ -476,6 +479,9 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		var p commanderReq
 		_ = json.Unmarshal(raw, &p)
 		v = f.commander(&p)
+		if p.Op == "run" && p.Verb == "start" && f.startCallErr != nil {
+			return f.startCallErr
+		}
 	case "tt":
 		var p ttParams
 		_ = json.Unmarshal(raw, &p)
@@ -8368,14 +8374,14 @@ func zgArlokkFixture(t *testing.T) (f *fixture, openStep, bossStep int) {
 	if bossStep == 0 {
 		t.Fatal("no Arlokk boss row in the ZG rows")
 	}
-	step, ok := raidwalk.OpenStepBeforeBoss(rows, bossStep)
-	if !ok {
-		t.Fatalf("the Arlokk boss row %d reports no open step", bossStep)
-	}
 	f.opts.until = fmt.Sprintf("step %d", bossStep+1)
 	p, err := dungeon.Load(filepath.Join(f.opts.dir, "zul_gurub.json"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	step, ok := raidwalk.SummonOpenStep(rows, p, bossStep)
+	if !ok {
+		t.Fatalf("the Arlokk boss row %d reports no summoning open step (its plan annotation)", bossStep)
 	}
 	f.agent.instMap = p.Map
 	f.agent.enterMap = p.Map
@@ -8488,5 +8494,206 @@ func TestRaidWalkBossNotFoundRerunNeedsTheStop(t *testing.T) {
 	}
 	if !hasNote(f.summary(), fmt.Sprintf("re-running step %d", openStep)) || !hasNote(f.summary(), "the run stop before the re-run failed") {
 		t.Fatalf("notes %q, want the re-run attempt and the failed stop", f.summary().Notes)
+	}
+}
+
+// zgArlokkPause starts a Zul'Gurub walk whose run is running and then pauses at Arlokk's boss row with "boss 14515 not found",
+// the pause testRaidWalkBossNotFoundRerunStopsTheRun's four cases fail their re-run from. It returns the plan's step count.
+func zgArlokkPause(t *testing.T, f *fixture, bossStep int) int {
+	t.Helper()
+	total := len(zgRows(t).Steps)
+	run := func(step int) string {
+		return fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|move|walk|walking|until step %d (step %d)", step, total, bossStep+1, bossStep+1)
+	}
+	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:   &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line:  run(1),
+		Lines: []string{run(1), "TBM:ACTION_ACK|run start|party|1|-"}}}
+	f.agent.startQueue = []queuedEvent{{raw: fmt.Sprintf("TBM:RUN|zul_gurub|paused|%d/%d|high_priestess_arlokk|boss|begin|boss 14515 not found: not alive or dead within 30.0 yd of -11540.7 -1627.7 41.3 for 60 s nor anywhere in the instance (.bot run skip if he is already dead)|until step %d (step %d)",
+		bossStep, total, bossStep+1, bossStep+1)}}
+	f.agent.hostilesFn = func(int) []tbm.HostileRec { return nil } // she despawned: no unit of her entry in the frames
+	f.opts.pausedWait = 60 * time.Second
+	return total
+}
+
+// The re-run's `run start` may be accepted by the server even when its own answer says nothing useful: the RPC times out, no run
+// status arrives, the status is malformed, or it reports another step. The run then counts as possibly live: the walk sends
+// `.bot run stop` again (its own cleanup would otherwise skip it) and falls back to the pause path.
+func TestRaidWalkBossNotFoundRerunStopsTheRunWhenTheStartDoesNotCheckOut(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reply func(total, openStep, bossStep int) (*commanderReply, error)
+		want  string
+	}{
+		{"the start times out", func(total, openStep, bossStep int) (*commanderReply, error) {
+			return nil, errors.New("commander run start: the call timed out after 25s")
+		}, "the call timed out"},
+		{"no status line", func(total, openStep, bossStep int) (*commanderReply, error) {
+			return &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+				Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+				Line: "TBM:ACTION_ACK|run start|party|1|-"}}, nil
+		}, "no TBM:RUN status for the new run"},
+		{"a malformed status line", func(total, openStep, bossStep int) (*commanderReply, error) {
+			return &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+				Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+				Line: "TBM:ACTION_ACK|run start|party|1|-"}}, nil
+		}, "its status line is not a run line"},
+		{"a status at another step", func(total, openStep, bossStep int) (*commanderReply, error) {
+			run := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|open|begin|arrived|until step %d (step %d)", openStep+3, total, bossStep+1, bossStep+1)
+			return &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+				Ack:   &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+				Line:  run,
+				Lines: []string{run, "TBM:ACTION_ACK|run start|party|1|-"}}}, nil
+		}, "it started at step"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, openStep, bossStep := zgArlokkFixture(t)
+			total := zgArlokkPause(t, f, bossStep)
+			starts := 0
+			var rerunAt time.Time
+			f.agent.onStart = func() {
+				starts++
+				if starts != 2 {
+					return
+				}
+				rerunAt = f.agent.clock.now()
+				rep, err := tc.reply(total, openStep, bossStep)
+				if err != nil {
+					f.agent.startCallErr = err
+					return
+				}
+				f.agent.startReply = rep
+				if tc.name == "a malformed status line" {
+					f.agent.push("TBM:RUN|zul_gurub|running", "")
+				}
+			}
+			if code := f.run(context.Background()); code != exitRaidWalkFailed {
+				t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+			}
+			f.agent.mu.Lock()
+			var stops []time.Time
+			for i, l := range f.agent.gm {
+				if l == ".bot run stop" {
+					stops = append(stops, f.agent.gmAt[i])
+				}
+			}
+			f.agent.mu.Unlock()
+			if len(stops) != 2 {
+				t.Fatalf("%d run stops %v, want the one before the re-run and the one after it", len(stops), stops)
+			}
+			// The second stop is the walk's own, right after the start that did not check out: the ending cleanup (60 s of pause
+			// later) is no stop of its own, since the walk knows the run is stopped.
+			if d := stops[1].Sub(rerunAt); d < 0 || d > 30*time.Second {
+				t.Fatalf("the stop after the failed start came %v after it (stops %v, start %v): want the walk's own, not the cleanup's", d, stops, rerunAt)
+			}
+			sum := f.summary()
+			if !hasNote(sum, fmt.Sprintf("the re-run at step %d failed", openStep)) || !hasNote(sum, tc.want) {
+				t.Fatalf("notes %q, want the failed re-run naming %q", sum.Notes, tc.want)
+			}
+		})
+	}
+}
+
+// When the stop after the failed re-run does not go out at all, the walk's ending cleanup sends another: the run counts as live from
+// the moment `run start` was sent, so a stop that failed cannot leave it running with the cleanup believing it stopped.
+func TestRaidWalkBossNotFoundRerunCleanupStopsARunTheRerunStopMissed(t *testing.T) {
+	f, openStep, bossStep := zgArlokkFixture(t)
+	zgArlokkPause(t, f, bossStep)
+	starts := 0
+	f.agent.onStart = func() {
+		starts++
+		if starts == 2 {
+			f.agent.startCallErr = errors.New("commander run start: the call timed out after 25s")
+		}
+	}
+	stops := 0
+	f.agent.gmFail = func(line string) error {
+		if line == ".bot run stop" {
+			stops++
+			if stops == 2 {
+				return errors.New("the command was refused")
+			}
+		}
+		return nil
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 3 {
+		t.Fatalf("%d run stops, want the one before the re-run, the refused one after it and the cleanup's", n)
+	}
+	sum := f.summary()
+	if !hasNote(sum, "the run stop after the re-run: gm .bot run stop: the command was refused") || !hasNote(sum, "the walk's cleanup sends another") {
+		t.Fatalf("notes %q, want the failed stop named", sum.Notes)
+	}
+	if !hasNote(sum, fmt.Sprintf("the re-run at step %d failed", openStep)) {
+		t.Fatalf("notes %q, want the failed re-run", sum.Notes)
+	}
+}
+
+// With the plan's annotation gone, the same pause is no re-run: the gong row still stands right before Arlokk's boss row, but
+// nothing says it summons her, so the walk waits the pause out as before (the rows' shape is no evidence).
+func TestRaidWalkBossNotFoundWithoutTheAnnotationDoesNotRerunTheOpen(t *testing.T) {
+	raw, err := os.ReadFile("../../dungeons/zul_gurub.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keep []string
+	for _, l := range strings.Split(string(raw), "\n") {
+		if strings.Contains(l, `"summon_open_step"`) {
+			// It is the boss object's last field: the line before it loses the comma that held the object open.
+			if n := len(keep); n > 0 {
+				keep[n-1] = strings.TrimSuffix(keep[n-1], ",")
+			}
+			continue
+		}
+		keep = append(keep, l)
+	}
+	dir := t.TempDir()
+	plan := filepath.Join(dir, "zul_gurub.json")
+	if err := os.WriteFile(plan, []byte(strings.Join(keep, "\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := dungeon.Load(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range p.Legs {
+		if b := p.Legs[i].Boss; b != nil && b.SummonOpenStep != 0 {
+			t.Fatalf("the plan copy still carries summon_open_step %d on boss %d", b.SummonOpenStep, b.Entry)
+		}
+	}
+	f := newFixture(t)
+	f.opts.dir = dir
+	f.opts.plan, f.opts.holder = "zul_gurub", "raid-walk-zul_gurub"
+	bossStep := 0
+	for i, s := range zgRows(t).Steps {
+		if s.Kind == planexport.KindBoss && s.Entry == 14515 {
+			bossStep = i + 1
+		}
+	}
+	if bossStep == 0 {
+		t.Fatal("no Arlokk boss row in the ZG rows")
+	}
+	f.opts.until = fmt.Sprintf("step %d", bossStep+1)
+	f.agent.instMap = p.Map
+	f.agent.enterMap = p.Map
+	f.agent.ttFn = ttUnitsFn(t)
+	zgArlokkPause(t, f, bossStep)
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if got := strings.Join(verbs, ","); got != "start" {
+		t.Fatalf("run verbs %q: an un-annotated boss must not be re-run", got)
+	}
+	sum := f.summary()
+	if hasNote(sum, "re-running step") {
+		t.Fatalf("notes %q: the walk re-ran an open row no plan field names", sum.Notes)
+	}
+	if !hasNote(sum, "boss 14515 not found and no kill in the frames yet") {
+		t.Fatalf("notes %q, want the pause path's re-reading note", sum.Notes)
 	}
 }

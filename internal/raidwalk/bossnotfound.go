@@ -3,6 +3,7 @@ package raidwalk
 import (
 	"regexp"
 
+	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 )
 
@@ -28,46 +29,50 @@ func BossNotFound(note string) (uint32, bool) {
 	return n, true
 }
 
-// OpenStepNearBossYd bounds how far the open row's point may stand from the boss row's point and still be taken as the object
-// that summons the boss. Zul'Gurub's gong stands 28.5 yd from Arlokk's row (step 222 at -11569.2 -1627.9, her row at
-// -11540.7 -1627.7); a door, lever or prerequisite object elsewhere in the wing stands farther and is no evidence.
-const OpenStepNearBossYd = 60
-
-// OpenStepBeforeBoss is the plan's open row that summons the boss of the boss row at bossStep (1-based), when there is one: the
-// last non-move row of that leg before the boss row, an open (KindOpen, or KindOpenProof: the same object, with a proof creature
-// the run watches), and its point within OpenStepNearBossYd (2D) of the boss row's point. Zul'Gurub's Arlokk is the case it exists
-// for: the leg's last non-move row is `use_object 180526` (the gong, 28.5 yd from her row) and the boss row 14515 follows it, and
-// after a wipe she despawns with no spawn row left, so the run leader pauses "boss 14515 not found" until an operator repeats the
-// gong (walk 35).
+// SummonOpenStep is the run leader's step number (1-based) of the leg's open row that summons the boss of the boss row at bossStep
+// (1-based), when the plan annotates one (dungeon.Boss.SummonOpenStep, the 1-based place of that use_object step in the leg's steps):
+// the object whose use brings the boss back. Zul'Gurub's Arlokk is the case it exists for: after a wipe she despawns with no spawn row
+// left, the run leader pauses "boss 14515 not found" on her own step, and only the gong 180526 (the leg's use_object step) starts her
+// script again (walk 35). The step a walk restarts at is the open (KindOpen) or open_proof (KindOpenProof: the same object, with a
+// proof creature the run watches) row the export wrote for the annotated step, in the same leg and before the boss row.
 //
-// The summoning link itself is INFERRED from the plan's shape: plan v1 has no field that says an object summons a boss. A leg whose
-// last non-move row before the boss is anything else (a pull, a hold, a loot, a gossip, a trigger) has no such step, and neither
-// has an open that stands away from the boss row; false.
-func OpenStepBeforeBoss(rows planexport.Rows, bossStep int) (int, bool) {
-	if bossStep < 1 || bossStep > len(rows.Steps) {
+// The link is the plan's own annotation: an open row that merely stands before or near a boss row is no evidence that it summons the
+// boss, so a boss with no SummonOpenStep gets no re-run (false), whatever stands around it. A plan whose rows do not carry the annotated
+// step's open row (rows deployed from another export of the plan) is no re-run either: false.
+func SummonOpenStep(rows planexport.Rows, p *dungeon.Plan, bossStep int) (int, bool) {
+	if p == nil || bossStep < 1 || bossStep > len(rows.Steps) {
 		return 0, false
 	}
 	boss := rows.Steps[bossStep-1]
 	if boss.Kind != planexport.KindBoss {
 		return 0, false
 	}
-	for i := bossStep - 2; i >= 0; i-- {
-		s := rows.Steps[i]
-		if s.Leg != boss.Leg {
-			return 0, false
-		}
-		switch s.Kind {
-		case planexport.KindMove, planexport.KindMoveDirect, planexport.KindMoveHopExact, planexport.KindRest:
+	for li := range p.Legs {
+		l := &p.Legs[li]
+		if l.Boss == nil || l.Boss.Entry != boss.Entry || l.Boss.SummonOpenStep == 0 {
 			continue
-		case planexport.KindOpen, planexport.KindOpenProof:
-			dx, dy := float64(s.X-boss.X), float64(s.Y-boss.Y)
-			if dx*dx+dy*dy > OpenStepNearBossYd*OpenStepNearBossYd {
-				return 0, false
-			}
-			return i + 1, true
-		default:
-			return 0, false
 		}
+		rowLeg, ok := rows.LegNumber(p, li)
+		if !ok || rowLeg != boss.Leg {
+			continue
+		}
+		step := l.Boss.SummonOpenStep
+		if step < 1 || step > len(l.Steps) || l.Steps[step-1].UseObject == nil || l.Steps[step-1].UseObject.ViaItem {
+			continue // the plan loader refuses these; a plan file newer than this build gets no re-run
+		}
+		entry := l.Steps[step-1].UseObject.Entry
+		// The row that step wrote: an open row of the same leg with the object's entry, before the boss row (the step's own stand move
+		// and the leg's cut points may stand between them). The last such row is the one that summons it.
+		for i := bossStep - 2; i >= 0; i-- {
+			s := rows.Steps[i]
+			if s.Leg != boss.Leg {
+				continue
+			}
+			if (s.Kind == planexport.KindOpen || s.Kind == planexport.KindOpenProof) && s.Entry == entry {
+				return i + 1, true
+			}
+		}
+		return 0, false
 	}
 	return 0, false
 }
