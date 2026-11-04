@@ -131,7 +131,7 @@ func TestSQLUnchangedByOrigins(t *testing.T) {
 		plan string
 		sha  string
 	}{
-		{"zul_gurub", "ca16703a1f787d3eabe5f3c2d81f874fb49485b1e614e92c5d8f80fe28c479ea"}, // walk 35 fix 1: the terrace is max_bodies 14 (radius 14 owns three formations, 14 bodies)
+		{"zul_gurub", "b26bf6896d14cd2535aa964ed826b6ee77ac738cda4755bb4f0a4e5f6f1daa69"}, // walk 36 fix 1: the honour guard is pulled first from -11562 -1306 and the two north packs are one 8-body stand pull
 		{"onyxias_lair", "142c1d58928ad1efd9aca2b773c4762e2ddcbae05c308540080a1fedd6e3b38e"},
 	} {
 		p, err := dungeon.Load(filepath.Join("..", "..", "dungeons", c.plan+".json"))

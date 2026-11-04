@@ -780,8 +780,9 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 		{49397, 49398, 49399, 49400}, // 4
 		{49373, 49374, 49375, 49376, 49377, 49378, 49379, 49380, 49381, 49382}, // 5
 		{1173082}, {49363}, // 6, 7
-		{49383, 49384, 49385, 49386}, {1173080}, {49402, 49403, 49421}, // 8, 9, 10 (the honour guard, a stand pull now)
-		{49387, 49388, 49389, 49390, 49391, 49392, 49393, 49394, 49395, 49396}, // 11
+		{49402, 49403, 49421}, // 8 (the honour guard, a stand pull now; walk 36: pulled before the two north packs)
+		{49383, 49384, 49385, 49386, 1173080}, // 9 (walk 36: the two north packs are one pull)
+		{49387, 49388, 49389, 49390, 49391, 49392, 49393, 49394, 49395, 49396}, // 10
 	}
 	if len(packs) < len(want) {
 		t.Fatalf("%d pull groups, want at least %d", len(packs), len(want))
@@ -808,49 +809,59 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 	if dist(leg.To, to) > 0.01 {
 		t.Errorf("the leg's `to` %.1f %.1f %.1f is not the first stand %.1f %.1f %.1f", leg.To.X, leg.To.Y, leg.To.Z, to.X, to.Y, to.Z)
 	}
-	// the 49421 group's circle must not reach Jin'do or another group's spawns
-	g := leg.PullGroups[10] // 49402/49403/49421: one group earlier than walk 29's base (the canal group left for leg 0), two earlier now the pit group is dropped
-	for _, pk := range packs[10] {
-		var cen dungeon.Point
-		n := float32(len(packs[10]))
-		for _, c := range packs[10] {
-			cen.X += c.Pos.X
-			cen.Y += c.Pos.Y
-			cen.Z += c.Pos.Z
+	// the 49421 group's circle must not reach Jin'do or another group's spawns. Found by formation, not by index:
+	// walk 36 merged the two north packs into one and pulled the honour guard first, so the indices after 7 moved.
+	guard := -1
+	for gi := range leg.PullGroups {
+		for _, c := range packs[gi] {
+			if c.GUID == 49421 {
+				guard = gi
+			}
 		}
-		cen.X /= n
-		cen.Y /= n
-		cen.Z /= n
-		if d := dist(cen, pk.Pos); d > float64(g.Radius)+3 {
-			t.Errorf("pull group 11 is %.1f yd from its own %s %d, radius %g + 3", d, pk.Name, pk.Entry, g.Radius)
+	}
+	if guard < 0 {
+		t.Fatal("no pull group holds the 49421 honour-guard formation")
+	}
+	g := leg.PullGroups[guard]
+	var cen dungeon.Point
+	for _, c := range packs[guard] {
+		cen.X += c.Pos.X
+		cen.Y += c.Pos.Y
+		cen.Z += c.Pos.Z
+	}
+	cn := float32(len(packs[guard]))
+	cen.X, cen.Y, cen.Z = cen.X/cn, cen.Y/cn, cen.Z/cn
+	for _, c := range packs[guard] {
+		if d := dist(cen, c.Pos); d > float64(g.Radius)+3 {
+			t.Errorf("the honour-guard pull is %.1f yd from its own %s %d, radius %g + 3", d, c.Name, c.Entry, g.Radius)
 		}
-		_ = pk
 	}
 	if boss := leg.Boss; boss != nil {
-		var cen dungeon.Point
-		n := float32(len(packs[11]))
-		for _, c := range packs[11] {
-			cen.X += c.Pos.X
-			cen.Y += c.Pos.Y
-			cen.Z += c.Pos.Z
-		}
-		cen.X /= n
-		cen.Y /= n
-		cen.Z /= n
 		if d := dist(cen, boss.Position); d <= float64(g.Radius)+3 {
-			t.Errorf("pull group 10's circle %.1f yd from Jin'do at %.1f %.1f %.1f: the pull would wake him (radius %g + 3)", d, boss.Position.X, boss.Position.Y, boss.Position.Z, g.Radius)
+			t.Errorf("the honour-guard circle is %.1f yd from Jin'do at %.1f %.1f %.1f: the pull would wake him (radius %g + 3)", d, boss.Position.X, boss.Position.Y, boss.Position.Z, g.Radius)
+		}
+		// and no other pack's spawn inside the circle
+		for gi := range leg.PullGroups {
+			if gi == guard {
+				continue
+			}
+			for _, c := range packs[gi] {
+				if d := dist(cen, c.Pos); d <= float64(g.Radius) {
+					t.Errorf("the honour-guard circle (radius %g) holds %s %d of pull group %d at %.1f yd", g.Radius, c.Name, c.Entry, gi, d)
+				}
+			}
 		}
 	}
 	parties := zgParties(t, p, 6)
 	last := -1
 	for i, q := range parties {
-		if q.Turn && q.Group == 13 { // the group-13 pull (51875: the Venombroods) closes the corridor
+		if q.Turn && q.Group == 12 { // the 51875 Venombrood pull closes the corridor (group 13 before walk 36's merge)
 			last = i
 			break
 		}
 	}
 	if last < 0 {
-		t.Fatal("no pull row for group 13")
+		t.Fatal("no pull row for the Venombrood pack (51875)")
 	}
 	w := zgWalk{Name: "leg6 jindo corridor", Parties: parties, Last: last}
 	pl := zgPlannerOrNil(t)
