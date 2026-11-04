@@ -123,3 +123,32 @@ func TestFloorAwareCutKeepsAStraightHopWhole(t *testing.T) {
 		t.Fatalf("via %+v notes %+v err %v", via, notes, err)
 	}
 }
+
+
+// A corner pushed 3 yd off a wall keeps its z when the landing floor is lower: the row
+// stays on the walk's own level instead of dropping onto the sag below (sunken_temple
+// leg 0: the terrace walk at -172.9 pushed onto mesh at -173.5..-173.8, under the
+// pinned floor).
+func TestFloorAwareCutPushKeepsCornerLevel(t *testing.T) {
+	// One cell sloping down eastward (z 0 at x 40, z -2 at x 60): the west seam is a
+	// wall, the corner at (40.5, 85) pushes 3 yd east onto the slope at about -0.3.
+	pl := cutPlanner(t, []navfixture.Poly{{{40, 80, 0}, {60, 80, -2}, {60, 90, -2}, {40, 90, 0}}})
+	path := pathOf(
+		navmesh.Vec3{10, 85, 0},
+		navmesh.Vec3{40.5, 85, 0},
+		navmesh.Vec3{90, 85, -2},
+	)
+	via, notes, err := floorAwareCut(pl, 309, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(via) != 1 {
+		t.Fatalf("rows %+v notes %+v", via, notes)
+	}
+	if math.Abs(float64(via[0].X-43.5)) > 0.6 || math.Abs(float64(via[0].Y-85)) > 0.6 {
+		t.Fatalf("the corner did not push 3 yd east: %+v notes %+v", via[0], notes)
+	}
+	if math.Abs(float64(via[0].Z)) > 0.2 {
+		t.Fatalf("the pushed corner dropped onto the sag: %+v", via[0])
+	}
+}

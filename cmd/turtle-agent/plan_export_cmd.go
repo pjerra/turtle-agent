@@ -340,8 +340,9 @@ func floorAwareCut(pl *navmesh.Planner, mapID uint32, path navmesh.Path) ([]dung
 }
 
 // pushOffWall moves a path corner FloorAwarePushYd away from the nearest mesh edge it can see within FloorAwareEdgeScanYd, snaps it
-// to the mesh and checks it is plain ground (not water, a steep slope or lava). It reports whether it moved, and why not when it
-// should have (the caller keeps the original then).
+// to the mesh and checks it is plain ground (not water, a steep slope or lava). The pushed point keeps the corner's z when the mesh
+// there is lower: the walk stays on its own level instead of dropping onto the sag beside it (a row under its level reads as
+// off-floor). It reports whether it moved, and why not when it should have (the caller keeps the original then).
 func pushOffWall(pl *navmesh.Planner, mapID uint32, p navmesh.Vec3) (navmesh.Vec3, bool, string) {
 	dirs := 16
 	best, bestR := -1, float32(-1)
@@ -370,6 +371,9 @@ func pushOffWall(pl *navmesh.Planner, mapID uint32, p navmesh.Vec3) (navmesh.Vec
 	if err != nil || !ok || math.Abs(float64(floor.Z-n[2])) > planexport.FloorAwareFloorYd ||
 		floor.Flags&navmesh.NavGround == 0 || floor.Flags&(navmesh.NavWater|navmesh.NavSteep|navmesh.NavMagma|navmesh.NavSlime) != 0 {
 		return p, false, fmt.Sprintf("the point %g yd off the wall is not plain ground (water, steep or lava): the original is kept", planexport.FloorAwarePushYd)
+	}
+	if n[2] < p[2] {
+		n[2] = p[2]
 	}
 	return n, true, ""
 }
