@@ -2310,9 +2310,13 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   when its last listed unit stands at those 25 yd or nearer, since the dropped ones may stand where the raid lands; a
   unit no extra round could take that stands beyond those 25 yd is left alive — moves the
   raid onto it
-  (`.tt place ... of=<mt>`), verifies it by the walk's own frames
-  (one `.summon` per hire the frames miss) and only then starts the run, whose status line must show exactly that step
-  and step count. Before the first teleport the commander must be in GM mode: `.gm on` is sent and the walk refuses the
+  (`.tt place ... of=<mt>`), verifies it by the walk's own frames and only then starts the run, whose status line must
+  show exactly that step and step count. A hire counts as placed when its freshest frame is inside the landing area:
+  within 25 yd (2D) of the point and within 8 yd of its floor, the same opening the quiet protects. A missing hire
+  gets a GM `.summon`, after the wave has settled (4 s: the teleport lands a moment after the line),
+  and the walk sends up to three waves, each with its own 10 s window, before it fails (walk 37: one wave of a 20-hire
+  raid was still landing when the old 10 s window closed, and the 12 yd 3D check failed placements whose hires stood
+  inside the landing area). Before the first teleport the commander must be in GM mode: `.gm on` is sent and the walk refuses the
   placement when its reply is not `GM mode is ON`. The commander stays inside the raid's copy for the whole walk (his own `.instance unbind` before the
   hire, and again at teardown for a stale personal bind; under `--reuse-instance` the teardown keeps the bind while
   `.instance listbinds` names the plan's map with TTR left, since a walk-super restart of the same cmd resumes it, and
@@ -2335,12 +2339,17 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   rows of later legs and unowned units beyond those 25 yd never block: a run from the door has them alive at this step
   too, and a unit no extra round could take and that stands beyond those 25 yd is left alive with a note. When the only
   units left inside the 25 yd are ones the toolkit listed as roamers (patrols walking through), the quiet is read again
-  twice, 20 s apart. A quiet refusal or a `fighting after the place` after the move does NOT end the walk: in the SAME
-  instance the attempt moves one move row back, up to three rows, re-runs the corridor and quiet there and teleports
-  the party with the GM summons; only when all three fail may it GM-kill just the units the last quiet named (only with
-  `--gm-clear`/`--gm-clear-boss` given) and then fail. No second instance is ever entered for the same
-  placement (walk 33 burned one per refusal and the hourly cap queued the next try 20 minutes). Every unit the quiet acts
-  on or refuses is noted with its spawn guid (`db`), where it stands and its home.
+  twice, 20 s apart. A quiet refusal, a `fighting after the place` after the move, or hires that did not arrive
+  (`not at the start`) does NOT end the walk: in the SAME instance the placement gets up to four tries.
+  While a move row stands before the start inside its leg, the attempt moves one move row back (up to three rows:
+  walk 36 b's Arlokk start would otherwise step back over Thekal's boss row and the run would re-fight him), re-runs the
+  corridor and quiet there and teleports the party with the GM summons; after that it retries the same point, with the
+  units the last quiet named GM-killed first when `--gm-clear`/`--gm-clear-boss` is given. Only when every try fails
+  does the walk give up, with exit 29 (`place: 4 tries in the same instance ...`), which walk-super stops on: a
+  restart of that cmd would enter a fresh instance, and walk 37's eight `not at the start` exits each burned one of the
+  four an hour per server, locking m910q for an hour. No second instance is ever entered for the same placement (walk 33
+  burned one per refusal and the hourly cap queued the next try 20 minutes). Every unit the quiet acts on or refuses is
+  noted with its spawn guid (`db`), where it stands and its home.
 - `--speed 1.0` sends nothing; `1.1` to `3.0` sends `speed=X` (a GM test run, marked `test speed` in the summary).
 - The hire gear tier comes from the committed table `raid -> minimum hire tier` in `internal/raidwalk/tiers.go`
   (Sagiroth's rule: hire and refit at the kit a player holds when the raid is next, from the mercenary unlock quests).
