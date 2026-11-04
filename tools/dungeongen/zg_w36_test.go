@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
@@ -141,6 +142,11 @@ func TestZgW36JindoHallStandsKeepTheBossReach(t *testing.T) {
 		t.Fatalf("%d hall pull groups, want the north packs and the honour guard", len(groups))
 	}
 	owner := zgW36Owner(p, cs)
+	pl := zgPlannerOrNil(t)
+	if pl == nil {
+		t.Skip("needs the map-309 mmaps (the stand line-of-sight check)")
+	}
+	defer pl.Close()
 	li := 6
 	for _, gi := range groups {
 		g := leg.PullGroups[gi]
@@ -173,66 +179,47 @@ func TestZgW36JindoHallStandsKeepTheBossReach(t *testing.T) {
 					gi, what, q.X, q.Y, q.Z, d, bossReach)
 			}
 		}
+		// A stand pull's stand must see its pack: with no line of sight the run leader searches a firing stand 25-35 yd
+		// from the pack and moves the party there (walk 36 f3 11:03:23 "no LOS from the authored stand after 20 s;
+		// searching a firing stand"), which is how the party entered the guard's reach.
+		if g.StandPull && len(g.Approach) > 0 {
+			stand := g.Approach[len(g.Approach)-1]
+			seen := 0
+			for _, u := range g.Positions {
+				r, err := pl.Raycast(309, navmesh.Vec3{stand.X, stand.Y, stand.Z + 1.5}, navmesh.Vec3{u.X, u.Y, u.Z + 1})
+				if err == nil && r.Known && r.Clear {
+					seen++
+				}
+			}
+			if seen == 0 {
+				t.Errorf("leg 6 pull group %d's stand (%.1f %.1f %.1f) sees none of its %d units: the run leader searches a firing stand and walks the party into the next pack",
+					gi, stand.X, stand.Y, stand.Z, len(g.Positions))
+			}
+		}
 	}
 }
 
-// TestZgW36JindoGroup11ShotFromASafeStand: walk 36 d 09:40:05 and e3 11:48:19 pulled group 11 as "a plain pull"
-// because its stand (-11620 -1266) is 41-45 yd from its pack, out of the run leader's 28.5 yd shot; the walk-in runs
-// beside the Sacrificed Troll pit (reach 28) and the respawning 14826s kept the fight open past 180 s (d 09:54:16,
-// e3 11:48:21, 20 dead in d2/e3). It fails today: 41-45 yd from the pack's nearest unit.
-func TestZgW36JindoGroup11ShotFromASafeStand(t *testing.T) {
+// TestZgW36JindoNoPullBesideTheRespawnPit: walk 36 d 09:40:05 and e3 11:48:19 pulled the -11603 -1229 pack (run step
+// 552) as "a plain pull" (its stand is 41-45 yd out, past the run leader's 28.5 yd shot), and the party ended 10.9 yd
+// from a Sacrificed Troll (d 09:40:30 "Halgrim takes 14826 off the healer (10.9 yd)"): the fight sat inside the pit's
+// reach and the pit's 14826s respawn every 10 s (tw_world_creature.sql 49078-49087), so they kept coming until d
+// 09:54:16 and e3 11:48:21 paused with "a fight lasted more than 180 s (kept on by nothing hostile engaged)"; 20 dead
+// in d2/e3. The pack's stands cannot be fixed: in shot (26-28 yd, with LOS) only the hall's east side works, and the
+// navmesh walk there passes 18.4 yd from a troll; the pack's north and west sides have no floor. The pack is 80+ yd
+// from the corridor and off the boss route, so its pull is dropped. This fails before the drop.
+func TestZgW36JindoNoPullBesideTheRespawnPit(t *testing.T) {
 	p, err := dungeon.Load(zgPlan)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cs, err := readCreatures("testdata/map309/creatures.tsv")
-	if err != nil {
-		t.Fatal(err)
-	}
 	leg := zgW36JindoLeg(t, p)
-	// The pack at -11603 -1229 (ten units, the hall's north-west Voodoo Slave pack).
-	pack := dungeon.Point{X: -11603.2, Y: -1229.2, Z: 79.2}
-	var g *dungeon.PullGroup
-	for gi := range leg.PullGroups {
-		for _, q := range leg.PullGroups[gi].Positions {
-			if dist(q, pack) <= 4 {
-				g = &leg.PullGroups[gi]
-				break
+	pack := dungeon.Point{X: -11602.5, Y: -1230.4, Z: 79.2}
+	for gi, g := range leg.PullGroups {
+		for _, q := range g.Positions {
+			if dist(q, pack) <= 5 {
+				t.Errorf("leg 6 pull group %d pulls the -11603 -1229 pack (a position at %.1f %.1f %.1f): its fight ends inside the respawning pit's reach (walk 36 d/e3, 20 dead, two 180 s stalls)",
+					gi, q.X, q.Y, q.Z)
 			}
-		}
-		if g != nil {
-			break
-		}
-	}
-	if g == nil {
-		t.Fatal("no pull group holds the -11603 -1229 pack")
-	}
-	if !g.StandPull || len(g.Approach) == 0 {
-		t.Fatalf("the Voodoo Slave pack is no stand pull with an approach")
-	}
-	stand := g.Approach[len(g.Approach)-1]
-	near := math.Inf(1)
-	var nearest creature
-	owner := zgW36Owner(p, cs)
-	for _, c := range cs {
-		if o, ok := owner[c.GUID]; ok && o != zgW36Order(6, 11) && o < zgW36Order(6, 11) {
-			continue // pulled before this pack: dead when it is fought
-		}
-		if d := dist(stand, c.Pos); d < near {
-			near, nearest = d, c
-		}
-	}
-	if near > 28.5 {
-		t.Errorf("the Voodoo Slave pack's stand %.1f %.1f %.1f is %.1f yd from its nearest unit (%s at %.1f %.1f %.1f): the run leader's shot is 28.5 yd, so it plain-pulls into the pit",
-			stand.X, stand.Y, stand.Z, near, nearest.Name, nearest.Pos.X, nearest.Pos.Y, nearest.Pos.Z)
-	}
-	for _, c := range cs {
-		if c.Entry != 14826 {
-			continue
-		}
-		if d := dist(stand, c.Pos); d < routeReach(p, c) {
-			t.Errorf("the Voodoo Slave pack's stand is %.1f yd from Sacrificed Troll %d (%d): the pit's reach is %.1f yd and the trolls respawn every 10 s",
-				d, c.GUID, c.Entry, routeReach(p, c))
 		}
 	}
 }

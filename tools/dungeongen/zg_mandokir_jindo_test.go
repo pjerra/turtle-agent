@@ -770,7 +770,7 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 	p, cs := zgLoadPlanAndExport(t)
 	leg := p.Legs[6]
 	packs := zgPacks(t, leg, cs)
-	zgCheckStands(t, "jindo_the_hexxer", leg, packs, true, 12)
+	zgCheckStands(t, "jindo_the_hexxer", leg, packs, true, 10)
 	// the order: the corridor packs 49741 and 49119 first, then 49114 and west; the Jin'do fix drops the
 	// Sacrificed Troll pack (group 8 on the old base: respawn 10 s, wasted pull) and reroutes the walk
 	// east of the pit, up to 49387-96's pack (group 11)
@@ -782,7 +782,7 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 		{1173082}, {49363}, // 6, 7
 		{49402, 49403, 49421}, // 8 (the honour guard, a stand pull now; walk 36: pulled before the two north packs)
 		{49383, 49384, 49385, 49386, 1173080}, // 9 (walk 36: the two north packs are one pull)
-		{49387, 49388, 49389, 49390, 49391, 49392, 49393, 49394, 49395, 49396}, // 10
+		{51875}, // 10 (the Venombrood pack; walk 36 dropped the -11603 -1229 pull beside the respawn pit)
 	}
 	if len(packs) < len(want) {
 		t.Fatalf("%d pull groups, want at least %d", len(packs), len(want))
@@ -855,7 +855,7 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 	parties := zgParties(t, p, 6)
 	last := -1
 	for i, q := range parties {
-		if q.Turn && q.Group == 12 { // the 51875 Venombrood pull closes the corridor (group 13 before walk 36's merge)
+		if q.Turn && q.Group == 10 { // the 51875 Venombrood pull closes the corridor (group 13 before walk 36's merge and the pit pack's drop)
 			last = i
 			break
 		}

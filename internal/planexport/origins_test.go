@@ -131,7 +131,7 @@ func TestSQLUnchangedByOrigins(t *testing.T) {
 		plan string
 		sha  string
 	}{
-		{"zul_gurub", "b26bf6896d14cd2535aa964ed826b6ee77ac738cda4755bb4f0a4e5f6f1daa69"}, // walk 36 fix 1: the honour guard is pulled first from -11562 -1306 and the two north packs are one 8-body stand pull
+		{"zul_gurub", "5c0397f1f46888f19dbb5a96e91de647eea126c34b252e5bd0c4882b29ea3321"}, // walk 36: the honour guard is pulled first from -11562 -1306, the two north packs are one 8-body stand pull, and the -11603 -1229 pull beside the respawn pit is dropped
 		{"onyxias_lair", "142c1d58928ad1efd9aca2b773c4762e2ddcbae05c308540080a1fedd6e3b38e"},
 	} {
 		p, err := dungeon.Load(filepath.Join("..", "..", "dungeons", c.plan+".json"))
