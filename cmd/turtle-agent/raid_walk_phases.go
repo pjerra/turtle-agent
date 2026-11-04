@@ -3150,11 +3150,28 @@ func (w *walk) bossSkipStep(ctx context.Context, bossEntry uint32, ev string, st
 // that never comes back from turning the pause into a restart loop. Past it the pause ends the walk as before.
 const bossGongReruns = 3
 
-// rerunOpenStep restarts the walk's run at the leg's open row (raidwalk.OpenStepBeforeBoss): `.bot run stop`, then
+// stopAfterRerun sends the cleanup `.bot run stop` of a re-run whose `run start` may have been accepted: the start's own RPC can time
+// out with the run live (the server runs the plan whether or not the reply arrives), and no status line, a malformed one or a wrong
+// one says nothing about what the server did. The stop has its own context, so an interrupted walk still stops the run; when the stop
+// itself fails, runStopped stays false and the walk's own cleanup sends another.
+func (w *walk) stopAfterRerun() {
+	callCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := w.gm(callCtx, ".bot run stop"); err != nil {
+		w.note("the run stop after the re-run: %v (the walk's cleanup sends another)", err)
+		return
+	}
+	w.runStopped = true
+}
+
+// rerunOpenStep restarts the walk's run at the leg's open row (raidwalk.SummonOpenStep): `.bot run stop`, then
 // `.bot run start <plan> from step <N>` with the walk's own until and speed, so the run leader walks back to the object, opens it
 // (the gong) and meets the boss it summons. The new run's own status line is adopted and checked (running, that step, the walk's
 // row count, the until label), as a placed walk checks its start; a refused or wrong start is noted and left to the pause path
 // (pausedWait then ends the walk as before), and nothing here aborts the walk.
+//
+// From the moment `run start` goes out the run counts as possibly live (runStopped is cleared), so every failure after it stops the
+// run again (stopAfterRerun) and the walk's own cleanup is not skipped by a stop that no longer holds.
 func (w *walk) rerunOpenStep(ctx context.Context, openStep int, bossEntry uint32, bossStep int, ev string, now time.Time) {
 	line := fmt.Sprintf("boss %d not found (%s): re-running step %d (the open summons the boss) with .bot run stop and .bot run start from step %d", bossEntry, ev, openStep, openStep)
 	w.note("%s", line)
@@ -3171,13 +3188,15 @@ func (w *walk) rerunOpenStep(ctx context.Context, openStep int, bossEntry uint32
 	}
 	w.runStopped = true
 	if err := w.env.sleep(ctx, 2*time.Second); err != nil {
-		return // interrupted: the phase loop's own ctx check ends the walk
+		return // interrupted: the phase loop's own ctx check ends the walk; the run is stopped
 	}
 	args := []string{w.plan.Name, "from", "step", strconv.Itoa(openStep)}
 	args = append(args, w.untilWords...)
 	if w.opts.speed != 1.0 {
 		args = append(args, fmt.Sprintf("speed=%.1f", w.opts.speed))
 	}
+	// The start is sent from here: whatever its reply says, the server may have the plan running (a timed-out RPC is the clear case).
+	w.runStopped = false
 	rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "start", Args: args, WaitMS: 10000})
 	var why string
 	switch {
@@ -3196,6 +3215,7 @@ func (w *walk) rerunOpenStep(ctx context.Context, openStep int, bossEntry uint32
 		if !haveLine {
 			startLine, haveLine, err = w.waitTBM(ctx, "TBM:RUN|"+w.plan.Name+"|", 15*time.Second)
 			if err != nil {
+				w.stopAfterRerun()
 				return
 			}
 		}
@@ -3216,6 +3236,7 @@ func (w *walk) rerunOpenStep(ctx context.Context, openStep int, bossEntry uint32
 	if why != "" {
 		w.note("boss %d not found: the re-run at step %d failed (%s): the pause path takes over", bossEntry, openStep, why)
 		w.logLine(now, fmt.Sprintf("boss %d not found: the re-run at step %d failed (%s)", bossEntry, openStep, why))
+		w.stopAfterRerun()
 		return
 	}
 	w.adoptRunStatus(st, startLine)

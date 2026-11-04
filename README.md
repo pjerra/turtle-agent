@@ -795,7 +795,7 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   right before the hold that starts an event is the boss's gossip, the step the run leader goes back to); the agent's driver ignores it; run `steps` in order; walk to `boss.position` and kill the
   boss; run `after_boss` (steps of the same kinds, done once the boss is dead or skipped). Each part is optional, but a leg needs at least one of pull groups, steps, a boss and after_boss steps. `skip` lists creature entries the leg
   never waits for (rares, escorts, friendly NPCs, adds that die with the boss). `boss.first` lists entries to kill before the boss,
-  in order. `boss.phase_entries` (optional) lists entries the encounter turns into or summons that no other field names (Zul'Gurub's Thekal: 14509, 15068); only raid-walk's boss gates read them, the driver and plan-export ignore them. A boss whose script changes his entry mid-fight keeps his guid (core `UpdateEntry`), so raid-walk follows the boss by GUID: a frame row whose guid the walk saw as the boss's own entry is the boss whatever entry it now reads, and such a guid is never an add (the summary's `boss_kill`, its `phase`/`phase_entry`, Sagiroth/TortoiseBots#1453). `boss.wait_s` (seconds 1-600) is how long the TortoiseBots run leader waits at `boss.position` for a boss who
+  in order. `boss.phase_entries` (optional) lists entries the encounter turns into or summons that no other field names (Zul'Gurub's Thekal: 14509, 15068); only raid-walk's boss gates read them, the driver and plan-export ignore them. `boss.summon_open_step` (optional, the 1-based place of a `use_object` step of the same leg) names the object that summons the boss: raid-walk restarts its run at that step's open row when the boss is gone (Zul'Gurub's Arlokk 14515 and the gong 180526, walk 35); the loader refuses a place that is no `use_object` step or is a `via_item` one, and a step of a plan, not a row number, keeps the pointer true across exports (cut points renumber row seqs). Only raid-walk reads it; the driver and plan-export ignore it (the rows have no field for it). A boss whose script changes his entry mid-fight keeps his guid (core `UpdateEntry`), so raid-walk follows the boss by GUID: a frame row whose guid the walk saw as the boss's own entry is the boss whatever entry it now reads, and such a guid is never an add (the summary's `boss_kill`, its `phase`/`phase_entry`, Sagiroth/TortoiseBots#1453). `boss.wait_s` (seconds 1-600) is how long the TortoiseBots run leader waits at `boss.position` for a boss who
   patrols before it searches the instance for him and pauses (written as the row's `timeout_s`; absent: the run leader's 60 s):
   a round longer than that needs it (Wailing Caverns' Kresh walks 525.9 yd in the river, about 210 s, and passes his point within
   the row's 30 yd radius at most 96 s apart; his row carries 300). `rest` overrides the leg's rest gates (all keys optional, `0` or absent keeps the default): `{"health": 90, "healer_mana": 50, "mana": 35, "max_s": 60}`
@@ -2533,16 +2533,17 @@ cleared by a wipe recovery) and no boss unit of the family was seen alive after 
 so an earlier attempt's corpse stays in them after a reset or a respawn), no boss unit may be seen alive in the
 last 15 s, and a hire must be alive. With that evidence the walk sends one `.bot run skip` (retried once if the
 send fails); the evidence is re-read on every tick while the pause lasts, and without it the pause path is unchanged.
-With no kill evidence and a `use_object` row (kind `open`, or `open_proof`) as the leg's last non-move row before the boss row,
-its point within 60 yd (2D) of the boss row's point — the object that summons it, inferred from the plan's shape (plan v1 has no
-field for that link; a door or lever elsewhere in the wing is no evidence) — the walk restarts its own run at that row instead
-of waiting the pause out (walk 35: Arlokk 14515 despawns after a wipe with no spawn row left, and b3/e3 paused `boss 14515 not
-found` until an operator repeated the gong): `.bot run stop`, then `run start <plan> from step <the open row>` with the walk's own
-`until` and speed, so the run leader walks back to the object, opens it (the gong 180526) and meets the boss again; a fresh
-pause re-arms the same handling, and at most 3 such restarts are sent per walk (past them the pause ends the walk as before).
-The new run's own status line is adopted and checked (running, that step, the walk's row count, the walk's until label); a
-refused stop, a refused start or a wrong status is noted and the pause path takes over, with no second `run start` over a run
-that did not stop. The note and run.log line say `re-running step N` and `the run restarted at step N`.
+With no kill evidence and the boss's plan row annotated with `summon_open_step` (the leg's `use_object` step that holds the object
+summoning the boss), the walk restarts its own run at that step's row (the `open`/`open_proof` row of the same leg before the boss
+row) instead of waiting the pause out (walk 35: Arlokk 14515 despawns after a wipe with no spawn row left, and b3/e3 paused `boss
+14515 not found` until an operator repeated the gong): `.bot run stop`, then `run start <plan> from step <the open row>` with the
+walk's own `until` and speed, so the run leader walks back to the object, opens it (the gong 180526) and meets the boss again; a
+fresh pause re-arms the same handling, and at most 3 such restarts are sent per walk (past them the pause ends the walk as before).
+A boss with no annotation is never restarted, whatever open row stands before it. The new run's own status line is adopted and
+checked (running, that step, the walk's row count, the walk's until label); a refused stop, a refused start, or a start whose RPC
+timed out, whose status never came or came malformed or wrong is noted, the run then counts as possibly live (`.bot run stop` goes
+out again, and the walk's cleanup is not skipped), and the pause path takes over, with no second `run start` over a run that did not
+stop. The note and run.log line say `re-running step N` and `the run restarted at step N`.
 
 Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
 `.bot gear raid <commander> tier <N>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,
