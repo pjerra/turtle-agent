@@ -14,11 +14,16 @@ import (
 
 // Roster is the tb-raid-roster v1 file: the batches hired, in order, and the level and tier.
 type Roster struct {
-	Format  string  `json:"format"`
-	Version int     `json:"version"`
-	Level   int     `json:"level,omitempty"`
-	Tier    int     `json:"tier,omitempty"`
-	Batches []Batch `json:"batches"`
+	Format  string `json:"format"`
+	Version int    `json:"version"`
+	Level   int    `json:"level,omitempty"`
+	Tier    int    `json:"tier,omitempty"`
+	// CommanderFaction (version 2) is the side the commander hiring the roster must be on:
+	// "alliance" or "horde". TortoiseBots' hire fills the commander's own faction only, so a roster of
+	// the other side cannot be hired at all (a shaman is Horde, a paladin Alliance in 1.12); the walk
+	// reads the commander's team before the first hire and refuses the other side.
+	CommanderFaction string  `json:"commander_faction,omitempty"`
+	Batches          []Batch `json:"batches"`
 }
 
 // Batch is one hire order: an mt, an ot or a rest batch. Spec (version 2) is the class spec every
@@ -192,6 +197,14 @@ func (r *Roster) check(p *dungeon.Plan) error {
 	}
 	if r.Tier < 0 || r.Tier > maxHireTier {
 		return fmt.Errorf("roster tier %d, want 1-3 or absent", r.Tier)
+	}
+	if r.CommanderFaction != "" {
+		if r.Version < 2 {
+			return errors.New("roster: commander_faction needs roster version 2")
+		}
+		if r.CommanderFaction != "alliance" && r.CommanderFaction != "horde" {
+			return fmt.Errorf("roster commander_faction %q, want alliance or horde", r.CommanderFaction)
+		}
 	}
 	if len(r.Batches) == 0 {
 		return errors.New("roster: no batches")

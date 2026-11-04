@@ -127,8 +127,12 @@ type Options struct {
 const maxLoginRetries = 5
 
 type StatusInfo struct {
-	State     Status      `json:"state"`
-	Character string      `json:"character,omitempty"`
+	State     Status `json:"state"`
+	Character string `json:"character,omitempty"`
+	// Team is the player's side ("alliance" or "horde") from its race, empty until the create block
+	// arrives (Team). The module hires a commander's own faction only, so a raid roster's
+	// commander_faction is checked against it before the first hire.
+	Team      string      `json:"team,omitempty"`
 	GUID      packet.GUID `json:"guid,omitempty"`
 	Level     uint8       `json:"level,omitempty"`
 	Map       uint32      `json:"map"`
@@ -403,7 +407,10 @@ func (s *Session) Status() StatusInfo {
 	}
 	info := StatusInfo{
 		State: s.state, Character: s.self.Name, GUID: s.self.GUID, Level: s.self.Level, Map: s.mapID,
-		X: s.pos[0], Y: s.pos[1], Z: s.pos[2], O: s.pos[3], Target: s.target, LatencyMS: s.latency,
+		// Team(name of the side) from the player's own race, read here rather than through s.Team(): that
+		// takes s.mu, which this method holds.
+		Team: Team(uint8(s.store.Field(s.self.GUID, objects.UnitBytes0))),
+		X:    s.pos[0], Y: s.pos[1], Z: s.pos[2], O: s.pos[3], Target: s.target, LatencyMS: s.latency,
 		Falling: s.falling, ZUnknown: s.zUnknown, TeleportSeq: s.teleportSeq,
 		Unknown: unknown, ParseErrors: s.parseErrs, LastSeq: s.log.Last(), MonoMS: events.MonoMS(), BaseTime: events.BaseTime(), WallOffsetMS: events.WallOffsetMS(), Error: s.lastErr,
 	}

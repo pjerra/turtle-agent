@@ -327,6 +327,24 @@ const hireRetryWait = 30 * time.Second
 
 // phaseHire is phase 6: the batches, the party diff and the gear preset.
 func (w *walk) phaseHire(ctx context.Context) error {
+	if f := w.roster.CommanderFaction; f != "" {
+		// TortoiseBots' hire fills the commander's own faction only, so a roster of the other side cannot be
+		// hired at all (a Horde commander gets no paladin, an Alliance one no shaman). Fail before the first
+		// hire, not after a party of the wrong side has been bought.
+		st, err := w.status(ctx)
+		if err != nil {
+			return stopf(exitRaidWalkFailed, "roster: commander faction %s: status: %v", f, err)
+		}
+		switch st.Team {
+		case f:
+			w.logLine(w.env.now(), fmt.Sprintf("roster: commander %s is %s, the roster wants %s", st.Character, st.Team, f))
+		case "":
+			return stopf(exitRaidWalkFailed, "roster: the roster wants a %s commander, but %s's faction is unknown (no race yet); hire from a %s commander", f, st.Character, f)
+		default:
+			return stopf(exitRaidWalkFailed, "roster: the roster wants a %s commander, but %s is %s: the module hires the commander's own faction, so hire from a %s commander",
+				f, st.Character, st.Team, f)
+		}
+	}
 	lines := w.roster.HireLines()
 	for i, b := range w.roster.Batches {
 		// The server hires at most HireCap bots: a roster that asks for more (the 40-man raids) has its last

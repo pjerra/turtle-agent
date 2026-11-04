@@ -1,6 +1,7 @@
 package raidwalk
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -168,6 +169,47 @@ func TestRosterPlanBoundAndDefaults(t *testing.T) {
 	}
 	if err := r.Validate(loadRaidPlan(t, "zul_gurub")); err == nil {
 		t.Fatal("a 40-bot roster validated against a 20-player raid")
+	}
+}
+
+// commander_faction is a version 2 field naming the side the commander must be on; version 1 takes none,
+// and any other word than alliance or horde is refused.
+func TestRosterCommanderFaction(t *testing.T) {
+	ony := loadRaidPlan(t, "onyxias_lair")
+	roster := func(version int, faction string) string {
+		return fmt.Sprintf(`{"format":"tb-raid-roster","version":%d,"level":60,"tier":2,"commander_faction":%q,
+ "batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection"},
+            {"role":"rest","hire":"39d"}]}`, version, faction)
+	}
+	for _, faction := range []string{"alliance", "horde"} {
+		r, err := ParseRoster([]byte(roster(2, faction)))
+		if err != nil {
+			t.Fatalf("%s: %v", faction, err)
+		}
+		if err := r.Validate(ony); err != nil {
+			t.Fatalf("%s against onyxia: %v", faction, err)
+		}
+		if r.CommanderFaction != faction {
+			t.Errorf("commander_faction = %q, want %q", r.CommanderFaction, faction)
+		}
+	}
+	refuse := []struct{ name, json, text string }{
+		{"v1", roster(1, "horde"), "version 2"},
+		{"bad word", roster(2, "neutral"), "want alliance or horde"},
+	}
+	for _, c := range refuse {
+		if _, err := ParseRoster([]byte(c.json)); err == nil || !strings.Contains(err.Error(), c.text) {
+			t.Errorf("%s: error = %v, want it to name %q", c.name, err, c.text)
+		}
+	}
+	// Absent: no check, as in version 1.
+	r, err := ParseRoster([]byte(`{"format":"tb-raid-roster","version":2,"level":60,"tier":2,
+ "batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection"},{"role":"rest","hire":"39d"}]}`))
+	if err != nil {
+		t.Fatalf("no commander_faction: %v", err)
+	}
+	if r.CommanderFaction != "" {
+		t.Errorf("commander_faction = %q, want none", r.CommanderFaction)
 	}
 }
 

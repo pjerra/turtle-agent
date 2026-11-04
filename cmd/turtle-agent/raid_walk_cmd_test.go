@@ -5329,6 +5329,66 @@ func TestRaidWalkSetsBatchSpecsBeforeTheRefit(t *testing.T) {
 	}
 }
 
+// A roster's commander_faction is checked against the commander's own side before the first hire: the
+// module hires the commander's faction only, so the other side's roster cannot be filled (no shaman for an
+// Alliance commander, no paladin for a Horde one).
+func TestRaidWalkRefusesTheOtherCommanderFaction(t *testing.T) {
+	f := newFixture(t)
+	f.agent.status.Team = "alliance"
+	f.agent.status.Character = "Glacienne"
+	roster := `{"format":"tb-raid-roster","version":2,"level":60,"tier":2,"commander_faction":"horde",
+ "batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection"},
+            {"role":"rest","hire":"1 shaman:dps","spec":"ele"},
+            {"role":"rest","hire":"18d"}]}`
+	path := filepath.Join(t.TempDir(), "roster.json")
+	if err := os.WriteFile(path, []byte(roster), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.opts.hires = path
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	reason := f.summary().EndReason
+	if !strings.Contains(reason, "wants a horde commander") || !strings.Contains(reason, "Glacienne is alliance") {
+		t.Fatalf("end reason %q, want the roster's faction and the commander's", reason)
+	}
+	for _, line := range f.agent.gmLines() {
+		if strings.HasPrefix(line, ".bot hire raid ") {
+			t.Fatalf("a hire went out for the other side: %q", line)
+		}
+	}
+}
+
+// The roster's commander_faction and the commander's own side agree: the hire goes on, and the log says
+// which side the commander is.
+func TestRaidWalkAcceptsTheRostersCommanderFaction(t *testing.T) {
+	f := newFixture(t)
+	f.agent.status.Team = "horde"
+	f.agent.status.Character = "Zfmageb"
+	roster := `{"format":"tb-raid-roster","version":2,"level":60,"tier":2,"commander_faction":"horde",
+ "batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection"},
+            {"role":"ot","hire":"1 druid:tank","spec":"bear"},
+            {"role":"rest","hire":"1 shaman:healer","spec":"restoration"},
+            {"role":"rest","hire":"16d"}]}`
+	path := filepath.Join(t.TempDir(), "roster.json")
+	if err := os.WriteFile(path, []byte(roster), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.opts.hires = path
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.stderr.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "roster: commander Zfmageb is horde, the roster wants horde") {
+		t.Errorf("run.log lacks the commander's faction line")
+	}
+}
+
 // A `.bot role` the server refuses stops the walk before the refit: the roster's spec is not optional.
 func TestRaidWalkRefusedSpecStopsBeforeTheRefit(t *testing.T) {
 	f := newFixture(t)
