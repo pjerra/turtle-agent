@@ -112,7 +112,15 @@ func TestZgW38JindosHallPullsStayUnderTheirCeilings(t *testing.T) {
 			t.Errorf("leg 6 row %d (%s) stands %.1f yd from Jin'do 11380 at %.1f %.1f, want >= %g", i, s.Comment, d, at.X, at.Y, bossReach)
 		}
 		if prev != (dungeon.Point{}) {
-			for _, q := range zgSamplesAlong(prev, at, zgSampleStep) {
+			walk := zgSamplesAlong(prev, at, zgSampleStep)
+			if path, err := pl.Plan(309, navmesh.Vec3{prev.X, prev.Y, prev.Z}, navmesh.Vec3{at.X, at.Y, at.Z}); err == nil && path.Status == navmesh.Complete && len(path.Points) > 1 {
+				walk = walk[:0]
+				for k := 0; k+1 < len(path.Points); k++ {
+					a, b := path.Points[k], path.Points[k+1]
+					walk = append(walk, zgSamplesAlong(dungeon.Point{X: a[0], Y: a[1], Z: a[2]}, dungeon.Point{X: b[0], Y: b[1], Z: b[2]}, zgSampleStep)...)
+				}
+			}
+			for _, q := range walk {
 				if d := dist(q, boss.Pos); d < bossReach {
 					t.Errorf("leg 6 rows %d->%d (%s -> %s) walk %.1f yd from Jin'do 11380 at %.1f %.1f, want >= %g", i-1, i, rows.rows[i-1].Comment, s.Comment, d, q.X, q.Y, bossReach)
 					break
@@ -194,6 +202,32 @@ func TestZgW38JindosHallPullsStayUnderTheirCeilings(t *testing.T) {
 			}
 			t.Errorf("leg 6 row %d (%s) brings %d bodies over its ceiling %d: %v", i, s.Comment, res.Bodies, ceiling, why)
 		}
+		// The guard's raised ceiling names exactly the bodies the stand wakes: its own eight, the north
+		// camp's east formation (1173078-81) and the two lone mistresses. Nothing else may pad it.
+		if gi, ok := rows.owner[49421]; ok && gi == i {
+			want := map[uint32]bool{49402: true, 49403: true,
+				1173078: true, 1173079: true, 1173080: true, 1173081: true}
+			for _, c := range cs {
+				if (c.GUID == 49421 || c.GroupLeader == 49421) && zgHostile(c) {
+					want[uint32(c.GUID)] = true
+				}
+			}
+			got := map[uint32]bool{}
+			for _, m := range res.Members {
+				got[m.Guid] = true
+				if !want[m.Guid] {
+					t.Errorf("leg 6 row %d (the honour guard) wakes %s %d, not one of its own eight, the north camp's east four or the two lone mistresses", i, zgW38Creature(cs, uint64(m.Guid)).Name, m.Guid)
+				}
+			}
+			for g := range want {
+				if !got[g] {
+					t.Errorf("leg 6 row %d (the honour guard) does not wake %d, which its ceiling counts", i, g)
+				}
+			}
+			if s.Item != uint32(len(want)) {
+				t.Errorf("leg 6 row %d (the honour guard) max_bodies %d, want %d (its eight, the east four, the two mistresses)", i, s.Item, len(want))
+			}
+		}
 		for _, m := range res.Members {
 			if m.Guid == uint32(boss.GUID) {
 				t.Errorf("leg 6 row %d (%s) brings Jin'do 11380 before its boss row: the pull's bodies are %d over the ceiling %d", i, s.Comment, res.Bodies, ceiling)
@@ -219,7 +253,18 @@ func zgW38Tail(walk []dungeon.Point, yd float64) []dungeon.Point {
 		k--
 	}
 	if k == len(walk)-1 {
-		return walk[len(walk)-1:]
+		// The last segment is longer than yd: take its final yd yards (do not drop the walk).
+		prev, last := walk[len(walk)-2], walk[len(walk)-1]
+		if rem >= yd {
+			return walk[len(walk)-1:]
+		}
+		f := (yd - rem) / dist(prev, last)
+		start := dungeon.Point{
+			X: last.X - (last.X-prev.X)*float32(f),
+			Y: last.Y - (last.Y-prev.Y)*float32(f),
+			Z: last.Z - (last.Z-prev.Z)*float32(f),
+		}
+		return []dungeon.Point{start, last}
 	}
 	return walk[k:]
 }
@@ -286,11 +331,12 @@ func TestZgW38HakkarOuterRowsWalkable(t *testing.T) {
 // read. Dev has neither loop, so this fails on dev.
 func TestZgW38JeklikPatrolStands(t *testing.T) {
 	p, cs := zgLoadPlanAndExport(t)
+	// The structural checks need no navmesh (so dev fails without it); the shot's line of sight does, and is
+	// skipped alone when the machine has no map-309 mmaps.
 	pl := zgPlannerOrNil(t)
-	if pl == nil {
-		t.Skip("needs the map-309 mmaps")
+	if pl != nil {
+		defer pl.Close()
 	}
-	defer pl.Close()
 	leg, _ := zgW37LegByName(t, p, "high_priestess_jeklik")
 	movement, err := zgReadMovementPaths("testdata/map309/movement.tsv")
 	if err != nil {
@@ -301,8 +347,8 @@ func TestZgW38JeklikPatrolStands(t *testing.T) {
 		guid uint64
 		size int
 	}{
-		{49135, 3}, // the south headhunter camp
-		{49131, 3}, // the north witch-doctor camp (8 yd from the bat camp, so the row pulls both: 10)
+		{49135, 3},  // the south headhunter camp
+		{49131, 10}, // the north witch-doctor camp and the bat camp 8 yd away (one row)
 	} {
 		loop, ok := movement[want.guid]
 		if !ok || len(loop) < 3 {
@@ -321,6 +367,9 @@ func TestZgW38JeklikPatrolStands(t *testing.T) {
 		g := leg.PullGroups[gi]
 		if !g.StandPull {
 			t.Errorf("pull group %d (patroller %d) is not a stand pull", gi, want.guid)
+		}
+		if len(packs[gi]) != want.size {
+			t.Errorf("pull group %d carries %d bodies, want %d (its own camp; the north camp also owns the bat camp)", gi, len(packs[gi]), want.size)
 		}
 		if len(g.Patrol.Path) != len(loop) {
 			t.Errorf("pull group %d patrol path has %d points, want %d", gi, len(g.Patrol.Path), len(loop))
@@ -364,9 +413,11 @@ func TestZgW38JeklikPatrolStands(t *testing.T) {
 			if d := dist(stand, c.Pos); d > zgW37TankShotYd {
 				t.Errorf("pull group %d: its unit %s %d is %.1f yd from the stand, past the %g yd shot: the row plain-pulls", gi, c.Name, c.GUID, d, zgW37TankShotYd)
 			}
-			r, err := pl.Raycast(309, navmesh.Vec3{stand.X, stand.Y, stand.Z + 1.5}, navmesh.Vec3{c.Pos.X, c.Pos.Y, c.Pos.Z + 1})
-			if err != nil || !r.Known || !r.Clear {
-				t.Errorf("pull group %d: no line of sight from the stand to %s %d", gi, c.Name, c.GUID)
+			if pl != nil {
+				r, err := pl.Raycast(309, navmesh.Vec3{stand.X, stand.Y, stand.Z + 1.5}, navmesh.Vec3{c.Pos.X, c.Pos.Y, c.Pos.Z + 1})
+				if err != nil || !r.Known || !r.Clear {
+					t.Errorf("pull group %d: no line of sight from the stand to %s %d", gi, c.Name, c.GUID)
+				}
 			}
 		}
 	}

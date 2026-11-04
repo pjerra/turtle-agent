@@ -1894,7 +1894,8 @@ func TestApproachHopsDoesNotInterpolateACutGap(t *testing.T) {
  "legs":[{"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":100,"y":0,"z":0}]}]}]}`
 	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
 		// One dry corner near the start; the rest of the path is wet and dropped.
-		return []dungeon.Point{{X: a.X + 10, Y: 0, Z: 0}}, nil, nil
+		return []dungeon.Point{{X: a.X + 10, Y: 0, Z: 0}},
+			[]CutNote{{Old: dungeon.Point{X: a.X + 20}, Dropped: true, Reason: "the point's own floor is NavWater: the water is crossed in one hop between dry points"}}, nil
 	}
 	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut, ApproachHops: true})
 	if err != nil {
