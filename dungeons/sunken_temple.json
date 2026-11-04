@@ -2,7 +2,7 @@
   "version": 1,
   "name": "sunken_temple",
   "kind": "dungeon",
-  "status": "draft (not mapped, not live-checked)",
+  "status": "live-checked",
   "map": 109,
   "entrance": {"x": -315.903, "y": 100.197, "z": -131.849},
   "entrance_trigger": 446,
