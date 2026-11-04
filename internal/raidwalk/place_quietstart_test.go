@@ -97,3 +97,35 @@ func TestPlaceBackIsThePreviousMoveRow(t *testing.T) {
 		t.Fatalf("back from 3: %d %v, want 1", got, ok)
 	}
 }
+
+// Walk 36 b: a start placed at leg high_priestess_arlokk refused the quiet circle at the leg's first row and the quiet
+// retreat stepped one move row back, over Thekal's boss row, to his approach at step 271; --from was rewritten to
+// "from step 271", the run started there and fought Thekal again (boss 14599 engaged at step 271, 2 deaths, 166 s).
+// PlaceBackInLeg keeps a retreat inside the leg and never across a boss or hold row.
+func TestPlaceBackInLegStopsAtABossRowAndAtTheLeg(t *testing.T) {
+	rows := placeRows(nil,
+		placeMove(3, 1, 10, 0),                           // leg 3: the earlier leg
+		placeRow(planexport.KindBoss, 3, 2, 10, 0, 1, 1), // its boss row
+		placeMove(4, 3, 10, 0),                           // leg 4: the start's own leg, first row
+		placeMove(4, 4, 10, 0),                           // and the row behind the start
+	)
+	// A start at leg 4's first row has no retreat: step 3 is the boss row, and step 2 is another leg.
+	if got, ok := PlaceBackInLeg(rows, 3, "4"); ok {
+		t.Fatalf("a retreat from leg 4's first row went to %d: it would start the run at the boss row before it", got)
+	}
+	// Inside the leg the row behind is the retreat.
+	if got, ok := PlaceBackInLeg(rows, 4, "4"); !ok || got != 3 {
+		t.Fatalf("retreat from 4 in leg 4: %d %v, want 3", got, ok)
+	}
+	// An explicit-step start (--from step N) names no leg: the retreat stays in the row's own leg.
+	if got, ok := PlaceBackInLeg(rows, 2, ""); ok {
+		t.Fatalf("a retreat from the boss row (step 2) went to %d", got)
+	}
+	if got, ok := PlaceBackInLeg(rows, 4, ""); !ok || got != 3 {
+		t.Fatalf("retreat from 4 with no leg name: %d %v, want 3 (leg 4's own row)", got, ok)
+	}
+	// The pure finder still crosses it (walk-super's restart is not the quiet retreat).
+	if got, ok := PlaceBack(rows, 3); !ok || got != 1 {
+		t.Fatalf("PlaceBack from 3: %d %v, want 1", got, ok)
+	}
+}

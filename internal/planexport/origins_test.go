@@ -131,7 +131,7 @@ func TestSQLUnchangedByOrigins(t *testing.T) {
 		plan string
 		sha  string
 	}{
-		{"zul_gurub", "ca16703a1f787d3eabe5f3c2d81f874fb49485b1e614e92c5d8f80fe28c479ea"}, // walk 35 fix 1: the terrace is max_bodies 14 (radius 14 owns three formations, 14 bodies)
+		{"zul_gurub", "7470ab7fa2f7e8a7369d4be98efe8d028eb20d01915632b48b9c937fe26fa475"}, // walk 36: the honour guard is pulled first from -11562 -1306, the two north packs are one 8-body stand pull, the -11603 -1229 pull beside the respawn pit is dropped, and the boss stand is -11536.8 -1261.5
 		{"onyxias_lair", "142c1d58928ad1efd9aca2b773c4762e2ddcbae05c308540080a1fedd6e3b38e"},
 	} {
 		p, err := dungeon.Load(filepath.Join("..", "..", "dungeons", c.plan+".json"))

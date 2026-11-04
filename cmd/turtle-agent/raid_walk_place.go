@@ -1473,7 +1473,12 @@ func (w *walk) phasePlace(ctx context.Context) error {
 		if !retryable || w.opts.noPlaceRetreat {
 			return err
 		}
-		if retries >= placeRetreatRows {
+		next, ok := raidwalk.PlaceBackInLeg(w.rows, w.place.Start, w.place.Leg)
+		if !ok || retries >= placeRetreatRows {
+			// No legal retreat (a boss or hold row stands behind the start, or the leg's own first row is the start:
+			// walk 36 b's Arlokk start would have stepped back over Thekal's boss row and the run would re-fight him) or
+			// the retreat budget is spent: stay on this row, GM-kill the units the quiet named when --gm-clear is on,
+			// and place again.
 			if done := w.placeKillBlockers(ctx); !done {
 				return err
 			}
@@ -1484,10 +1489,6 @@ func (w *walk) phasePlace(ctx context.Context) error {
 				return err
 			}
 			break
-		}
-		next, ok := raidwalk.PlaceBack(w.rows, w.place.Start)
-		if !ok {
-			return err
 		}
 		retries++
 		w.note("place: %s; stepping back to step %d in the same instance (retry %d of %d, no fresh instance)",

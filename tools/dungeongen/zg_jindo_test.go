@@ -74,8 +74,11 @@ func TestZgJindoGuardIsStandPull(t *testing.T) {
 		if !g.StandPull {
 			t.Errorf("pull group %d (the honour guard) is not a stand pull: it must be shot from its approach, not fought where it stands 10-20 yd from Jin'do", gi)
 		}
-		if g.MaxBodies != 10 {
-			t.Errorf("pull group %d (the honour guard) has max_bodies %d, want 10", gi, g.MaxBodies)
+		// Walk 36: the ring's radius 8 missed its own two Voodoo Slaves 14883 at -11534.2 -1269.7 and
+		// -11534.8 -1282.4 (9.3 yd from the centroid), so the fight had 12 bodies with a ceiling of 10. The
+		// radius is 10 and the ceiling 12 now.
+		if g.MaxBodies != 12 {
+			t.Errorf("pull group %d (the honour guard) has max_bodies %d, want 12", gi, g.MaxBodies)
 		}
 		if len(g.Approach) == 0 {
 			t.Errorf("pull group %d (the honour guard) has no approach (no stand to shoot from)", gi)
