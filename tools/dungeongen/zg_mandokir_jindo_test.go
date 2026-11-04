@@ -748,6 +748,21 @@ func TestZulGurubMandokirSweepClearOfLaterPacks(t *testing.T) {
 			t.Errorf("pull group %d has formations %v, want %v (the ring sweep of WALK 29)", i, got[i], wantOrder[i])
 		}
 	}
+	// Walk 36's wipe at step 454 (a3-r3 twice): group 5's stand at -12320
+	// -1858 stands 28.9 yd from group 12's Blood Drinkers (formation 49789),
+	// so the 11-body chain fight (six Hakkari Priests casting Psychic Scream)
+	// pulls group 12 in. The stand keeps 35 yd from every unit of group 12
+	// (the fear margin for a fight with Psychic Scream casters at the
+	// stand). Fails on the walk-36 plan (28.9 yd).
+	if len(leg.PullGroups) > 12 && len(packs) > 12 {
+		stand := leg.PullGroups[5].Approach[len(leg.PullGroups[5].Approach)-1]
+		for _, c := range packs[12] {
+			if d := dist(stand, c.Pos); d < 35 {
+				t.Errorf("pull group 5: stand %.1f %.1f %.1f is %.1f yd from %s %d of pull group 12, want >= 35 (the chain fight's fear drifts into it)",
+					stand.X, stand.Y, stand.Z, d, c.Name, c.Entry)
+			}
+		}
+	}
 	parties := zgParties(t, p, 5)
 	w := zgWalk{Name: "leg5 bloodlord_mandokir", Parties: parties, Last: len(parties) - 1}
 	pl := zgPlannerOrNil(t)
