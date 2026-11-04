@@ -12897,7 +12897,7 @@
    "from_seq": 57,
    "from": "move pull group 17 approach",
    "to_seq": 58,
-   "to": "pull pull group 17",
+   "to": "pull pull group 17; stand pull",
    "from_point": [
     -12216,
     -1930,
@@ -12913,7 +12913,7 @@
   {
    "walk": "leg5 bloodlord_mandokir",
    "from_seq": 58,
-   "from": "pull pull group 17",
+   "from": "pull pull group 17; stand pull",
    "to_seq": 59,
    "to": "move pull group 18 approach",
    "from_point": [
