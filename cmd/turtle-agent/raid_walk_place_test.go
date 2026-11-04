@@ -719,6 +719,76 @@ func TestPlaceGivesUpAfterTheTryLimit(t *testing.T) {
 	}
 }
 
+// Walk 37: the retry paths judged the pre-summon "missing" set by frames the corridor clear and the quiet left stale
+// (10 s), so every hire counted as summoned and the summary printed placed 0/20. The gather polls first: a raid
+// already on the point is placed, not summoned.
+func TestPlaceSamePointRetryCountsTheHiresAlreadyInside(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.noPlaceRetreat = false
+	f.opts.from = "leg high_priestess_arlokk"
+	rows, plan := placePlanRowsFrom(t, "high_priestess_arlokk")
+	if back, ok := raidwalk.PlaceBackInLeg(rows, plan.Start, plan.Leg); ok {
+		t.Fatalf("PlaceBackInLeg retreats from the Arlokk start %d to %d: the same-point retry is not pinned", plan.Start, back)
+	}
+	var hire string
+	var summons int
+	p.place = func(cmd string) error {
+		x, y, z := ttPointOf(t, cmd)
+		placeHires(f, x, y, z)
+		f.agent.mu.Lock()
+		hire = f.agent.party[len(f.agent.party)-1]
+		delete(f.agent.pos, hire) // one hire is left behind
+		f.agent.mu.Unlock()
+		return nil
+	}
+	p.quiet = func(int) bool { return true }
+	// A quiet read blocks the walk for its 20 s window (the live toolkit answers twice, 20 s apart), so the frames
+	// from the failed attempt are stale at the next gather, as they are on a live server.
+	answer := f.agent.ttFn
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if strings.HasPrefix(cmd, "quiet ") {
+			if err := f.env.sleep(context.Background(), 20*time.Second); err != nil {
+				return ttResult{}, err
+			}
+		}
+		return answer(cmd)
+	}
+	f.agent.onGM = func(line string) {
+		name, ok := strings.CutPrefix(line, ".summon ")
+		if !ok || name != hire {
+			return
+		}
+		summons++
+		if summons <= placeSummonRounds {
+			// The first gather's waves do not take: the hire is still at 0,0,0.
+			f.agent.mu.Lock()
+			f.agent.pos[name] = [3]float32{0, 0, 0}
+			f.agent.mu.Unlock()
+		}
+	}
+	f.agent.startReply = placeStartReplyLeg("zul_gurub", "high_priestess_arlokk", plan.Start, len(rows.Steps), plan.Stop)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|move|walk|walking", plan.Start, len(rows.Steps))},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_arlokk|move|walk|stopped before step %d (until boss): the party stays where it stands", plan.Start, len(rows.Steps), plan.Stop)},
+	}
+	f.agent.mu.Unlock()
+	code := f.run(context.Background())
+	if code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, fmt.Sprintf("trying step %d again in the same instance", plan.Start)) {
+		t.Fatalf("notes %q, want the same-point retry", sum.Notes)
+	}
+	if len(sum.Place.Summoned) != 1 || sum.Place.Summoned[0] != hire {
+		t.Fatalf("summoned %v, want only the hire that was outside (%s)", sum.Place.Summoned, hire)
+	}
+	if sum.Place.Placed != sum.Place.Hires-1 {
+		t.Fatalf("place summary %+v, want every hire but the straggler placed", sum.Place)
+	}
+}
+
 // The walk judges the place by its own frames, never by the toolkit's member lists (which truncate near a full raid).
 func TestPlaceIgnoresTruncatedRead2(t *testing.T) {
 	f, p := newPlaceFixture(t)

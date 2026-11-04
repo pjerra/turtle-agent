@@ -1648,6 +1648,10 @@ func (w *walk) placeTry(ctx context.Context, retry bool) error {
 // judges the landing by the walk's frames. A hire already inside the landing area is summoned too (the retry is
 // cheap), but only the ones that were outside count as summoned in the summary.
 func (w *walk) placeSummonParty(ctx context.Context) error {
+	// Poll one frame first: placeMissing judges by frames no older than 10 s, and the corridor clear and the quiet
+	// (2 x 20 s) leave no fresh one. A stale frame would count the whole raid as summoned even when it stands at the
+	// point (walk 37: the retry paths printed placed 0/20).
+	w.placeView(ctx)
 	missing := map[string]bool{}
 	for _, name := range w.placeMissing(w.env.now(), w.place.Point) {
 		missing[name] = true
@@ -1689,11 +1693,6 @@ func (w *walk) placeGather(ctx context.Context) error {
 		w.note("place: %s; summoning the party at step %d again (try %d of %d, no fresh instance)",
 			reason, w.place.Start, try+1, placeTryLimit)
 	}
-}
-
-// placeFinishAttempt is the summon-and-verify half after the last retreat's GM-killed blockers and a clean quiet.
-func (w *walk) placeFinishAttempt(ctx context.Context) error {
-	return w.placeSummonParty(ctx)
 }
 
 // placeKillBlockers GM-kills only the units the last quiet named, and only when --gm-clear is on. It looks every
