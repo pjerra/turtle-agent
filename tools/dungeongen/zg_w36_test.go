@@ -224,4 +224,41 @@ func TestZgW36JindoNoPullBesideTheRespawnPit(t *testing.T) {
 	}
 }
 
+// TestZgW36JindoBossStandSeesHim: walk 36 f3-r1 11:57:14 "no LOS from the authored stand; holding", 11:57:30
+// "searching a firing stand", 11:57:35 "to firing stand 1 for 11380 ... (24.5 yd from it; was 32.1 yd, los yes)": the
+// boss row's authored stand (-11545.6 -1289, 30.6 yd from him) cannot see Jin'do, so the run leader searched, the
+// fight drifted (the lead chased a spell target to -11582.9 -1251.2 90, the pit's upper rim: frames seq 3079) and at
+// 12:00:32 the boss begin paused with "no walkable path toward the boss ... no safe stand 35.0-25.0 yd from it the
+// lead bot has a path to (the lead bot 72.1 yd from it)". The stand must be in the run leader's own window (25-35 yd)
+// with line of sight; it fails today on the 30.6 yd stand with none.
+func TestZgW36JindoBossStandSeesHim(t *testing.T) {
+	p, err := dungeon.Load(zgPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leg := zgW36JindoLeg(t, p)
+	if leg.Boss == nil || len(leg.Boss.Approach) == 0 {
+		t.Fatal("the jindo leg has no boss or no approach")
+	}
+	stand := leg.Boss.Approach[len(leg.Boss.Approach)-1]
+	boss := leg.Boss.Position
+	d := dist(stand, boss)
+	if d < 25 || d > 35 {
+		t.Errorf("the boss stand %.1f %.1f %.1f is %.1f yd from Jin'do, want 25-35 (the run leader's own safe-stand window)", stand.X, stand.Y, stand.Z, d)
+	}
+	pl := zgPlannerOrNil(t)
+	if pl == nil {
+		t.Skip("needs the map-309 mmaps (the stand line-of-sight check)")
+	}
+	defer pl.Close()
+	r, err := pl.Raycast(309, navmesh.Vec3{stand.X, stand.Y, stand.Z + 1.5}, navmesh.Vec3{boss.X, boss.Y, boss.Z + 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Known || !r.Clear {
+		t.Errorf("the boss stand %.1f %.1f %.1f does not see Jin'do (ray known %v clear %v, hit %.1f yd): the run leader searches a firing stand and the fight drifts",
+			stand.X, stand.Y, stand.Z, r.Known, r.Clear, r.Hit)
+	}
+}
+
 var _ = planexport.KindMove
