@@ -173,6 +173,35 @@ func zgMandokirExportCut(pl *navmesh.Planner) planexport.CutFunc {
 // every pull as "the party stands at the last approach point", so neither the
 // approach-path row the live export adds nor the walk to a far row point is
 // ever checked.
+
+// TestZulGurubMandokirStandPullMappingRefusals pins the narrowed zgPack
+// mapping: a stand_pull row with no spawn of its entry inside its radius is
+// still refused (the row would own nothing), and a plain pull with a moved
+// centre is still refused (the 0.7 yd spawn rule is unchanged there).
+func TestZulGurubMandokirStandPullMappingRefusals(t *testing.T) {
+	p, cs := zgLoadPlanAndExport(t)
+	forms := zgFormations(cs)
+	stand := dungeon.Point{X: -12222, Y: -1822, Z: 124.7}
+	centre := dungeon.Point{X: -12255, Y: -1830, Z: 131.3}
+	empty := dungeon.PullGroup{Entries: []uint32{11352}, Positions: []dungeon.Point{centre}, Radius: 1, StandPull: true, Approach: []dungeon.Point{stand}}
+	if _, err := zgPack(empty, cs, forms); err == nil {
+		t.Errorf("a stand_pull centre with no 11352 spawn inside radius 1 mapped: want a refusal (the row would own nothing)")
+	}
+	moved := dungeon.PullGroup{Entries: []uint32{11352}, Positions: []dungeon.Point{centre}, Radius: 12}
+	if _, err := zgPack(moved, cs, forms); err == nil {
+		t.Errorf("a plain pull with a moved centre mapped: want a refusal (the 0.7 yd spawn rule is unchanged for non-stand-pull rows)")
+	}
+	// The fixed group-0 row still maps to the patroller's own formation.
+	leg := zgMandokirLeg(t, p)
+	got, err := zgPack(leg.PullGroups[0], cs, forms)
+	if err != nil {
+		t.Fatalf("the fixed group-0 row: %v", err)
+	}
+	if want := []uint64{49705}; !zgSameLeaders(zgLeaders(got), want) {
+		t.Errorf("the fixed group-0 row maps to formations %v, want %v", zgLeaders(got), want)
+	}
+}
+
 func TestZulGurubMandokirLiveExportClearOfLaterPacks(t *testing.T) {
 	p, cs := zgLoadPlanAndExport(t)
 	leg := zgMandokirLeg(t, p)
@@ -214,7 +243,7 @@ func TestZulGurubMandokirLiveExportClearOfLaterPacks(t *testing.T) {
 		t.Fatalf("the group-0 stand row %d comes after the group-5 pull row %d", start, end)
 	}
 	pulled := map[int]bool{}
-	for i := start; i <= end; i++ {
+	for i := start; i < end; i++ {
 		s := rows[i]
 		at := dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
 		if s.Kind == planexport.KindPull || s.Kind == planexport.KindBoss || s.Kind == planexport.KindHold {
@@ -228,7 +257,11 @@ func TestZulGurubMandokirLiveExportClearOfLaterPacks(t *testing.T) {
 		here := zgPullGroupIndex(s.Comment)
 		var later []creature
 		for gi := range packs {
-			if gi == here || pulled[gi] {
+			// Only groups not yet pulled count: an already-pulled pack is
+			// dead, and the fight at the stand is the pull itself (group
+			// 4's lone caster is pulled from its 26.0 yd stand, clean four
+			// times in walk 36).
+			if gi == here || pulled[gi] || gi < 5 {
 				continue
 			}
 			later = append(later, packs[gi]...)
@@ -245,15 +278,19 @@ func TestZulGurubMandokirLiveExportClearOfLaterPacks(t *testing.T) {
 		// too: the party walks it before the next row's pull goes out (the
 		// pack the next row approaches wakes mid-walk: walk 29's fix 4 on
 		// leg 4).
-		if i+1 > end {
-			continue
-		}
 		n := rows[i+1]
 		to := dungeon.Point{X: n.X, Y: n.Y, Z: n.Z}
 		nHere := zgPullGroupIndex(n.Comment)
+		// Group 4's approach segment is the exception the spec names: its
+		// lone caster 51986 is pulled from its 26.0 yd stand, clean four
+		// times in walk 36, so the walk onto it is the pull itself, not a
+		// later pack's wake.
+		if nHere == 4 {
+			continue
+		}
 		var nLater []creature
 		for gi := range packs {
-			if gi == nHere || pulled[gi] {
+			if gi == nHere || pulled[gi] || gi < 5 {
 				continue
 			}
 			nLater = append(nLater, packs[gi]...)
