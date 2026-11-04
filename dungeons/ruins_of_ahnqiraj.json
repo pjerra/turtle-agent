@@ -949,37 +949,7 @@
             "source": "spawn 1178357"
           },
           "approach": [
-            {"x": -8803.014, "y": 1626.4108, "z": 21.558996}
-          ]
-        },
-        {
-          "entries": [15327, 15325, 15325],
-          "positions": [
-            {"x": -8874.41, "y": 1638.25, "z": 21.3867},
-            {"x": -8880.45, "y": 1642.66, "z": 21.3867},
-            {"x": -8869.74, "y": 1644.18, "z": 21.3867}
-          ],
-          "radius": 10.695814,
-          "patrol": {
-            "entries": [15325, 15327],
-            "path": [
-              {"x": -8872.46, "y": 1618.97, "z": 21.3863},
-              {"x": -8852.07, "y": 1598.39, "z": 21.3863},
-              {"x": -8841.18, "y": 1595.59, "z": 21.3866},
-              {"x": -8804.81, "y": 1602.51, "z": 21.3792},
-              {"x": -8793.67, "y": 1626.01, "z": 21.3866},
-              {"x": -8795.03, "y": 1651.73, "z": 21.5432},
-              {"x": -8810.58, "y": 1665.76, "z": 21.3847},
-              {"x": -8835.78, "y": 1671.86, "z": 21.3847},
-              {"x": -8860.49, "y": 1665.37, "z": 21.3847},
-              {"x": -8872.47, "y": 1643.36, "z": 21.3847}
-            ],
-            "period_s": 90.59191,
-            "period_estimate": true,
-            "source": "spawn 1178360"
-          },
-          "approach": [
-            {"x": -8849.752, "y": 1634.9675, "z": 19.875652}
+            {"x": -8770.0, "y": 1628.0, "z": 22.0}
           ]
         }
       ],
@@ -991,8 +961,21 @@
           {"x": -8831.99, "y": 1643.0526, "z": 19.77285}
         ]
       },
+      "after_boss": [
+        {
+          "wait_for": {
+            "hostiles_gone": {
+              "radius": 15,
+              "center": {"x": -8874.41, "y": 1638.25, "z": 21.3867}
+            },
+            "timeout_s": 300,
+            "fail_text": "Kurinnaxx is dead but his west pack (15325/15327 at -8874 1638, past him) still lives: the party walks there from his corpse and kills it."
+          }
+        }
+      ],
       "notes": [
-        "6 pulls (14 units) in the arena below the terrace (z 19.7-25.4): four wasp packs and two Vile Scarabs, then Kurinnaxx. His Wide Slash 25814 is a frontal cleave (the ai_boss_tactic `behind` row) and Mortal Wound 25646 stacks on the tank: without a tank swap (community patch 326) the tank's healing taken falls 10 % per stack."
+        "5 pulls (11 units) in the arena below the terrace (z 19.7-25.4): three wasp packs and two Vile Scarabs from the east stand (-8770 1628, 73 yd from Kurinnaxx, outside his 53 yd aggro), then Kurinnaxx. His Wide Slash 25814 is a frontal cleave (the ai_boss_tactic `behind` row) and Mortal Wound 25646 stacks on the tank: without a tank swap (community patch 326) the tank's healing taken falls 10 % per stack.",
+        "The west wasp pack (15325/15327 at -8874 1638, past Kurinnaxx, its patrol looping within 30 yd of him) is pulled after the boss (after_boss hostiles_gone): pulling it before him wiped walk 30 twice (boss plus pack). The patrol is pulled where it stands when the party walks in."
       ]
     },
     {
