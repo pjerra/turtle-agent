@@ -278,3 +278,96 @@ func TestZgW38HakkarOuterRowsWalkable(t *testing.T) {
 	}
 }
 
+// TestZgW38JeklikPatrolStands is the MANDOKIR-440 method on Jeklik's two patrol camps: each patroller's own row
+// carries its movement.tsv loop (the run leader waits at the stand for a waypoint to come into its 28.5 yd shot),
+// the stand is inside the shot of the whole pack, and it is within the run leader's 60 yd sight of the row's centre.
+// Walk 38 d/h2/a/h3 stalled at leg-0 step 43: the combined row at -12218 -1440 held the 49131 and 49135 camps
+// (54 yd apart) with no patrol block, so the gate waited on the stand for units that walk a patrol it could not
+// read. Dev has neither loop, so this fails on dev.
+func TestZgW38JeklikPatrolStands(t *testing.T) {
+	p, cs := zgLoadPlanAndExport(t)
+	pl := zgPlannerOrNil(t)
+	if pl == nil {
+		t.Skip("needs the map-309 mmaps")
+	}
+	defer pl.Close()
+	leg, _ := zgW37LegByName(t, p, "high_priestess_jeklik")
+	movement, err := zgReadMovementPaths("testdata/map309/movement.tsv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	packs := zgPacks(t, p.Legs[0], cs)
+	for _, want := range []struct {
+		guid uint64
+		size int
+	}{
+		{49135, 3}, // the south headhunter camp
+		{49131, 3}, // the north witch-doctor camp (8 yd from the bat camp, so the row pulls both: 10)
+	} {
+		loop, ok := movement[want.guid]
+		if !ok || len(loop) < 3 {
+			t.Fatalf("movement.tsv: %d has no loop", want.guid)
+		}
+		gi := -1
+		for i := range leg.PullGroups {
+			if pt := leg.PullGroups[i].Patrol; pt != nil && strings.Contains(pt.Source, fmt.Sprintf("creature_movement %d", want.guid)) {
+				gi = i
+			}
+		}
+		if gi < 0 {
+			t.Errorf("no pull group carries the %d patroller's loop: the stand pull waits on units whose patrol the run leader cannot read", want.guid)
+			continue
+		}
+		g := leg.PullGroups[gi]
+		if !g.StandPull {
+			t.Errorf("pull group %d (patroller %d) is not a stand pull", gi, want.guid)
+		}
+		if len(g.Patrol.Path) != len(loop) {
+			t.Errorf("pull group %d patrol path has %d points, want %d", gi, len(g.Patrol.Path), len(loop))
+		} else {
+			for k := range loop {
+				if d := dist(g.Patrol.Path[k], loop[k]); d > 0.5 {
+					t.Errorf("pull group %d patrol path[%d] is %.1f yd from %d's waypoint", gi, k, d, want.guid)
+					break
+				}
+			}
+		}
+		if g.Patrol.PeriodS <= 0 {
+			t.Errorf("pull group %d patrol period is %.1f s", gi, g.Patrol.PeriodS)
+		}
+		if len(g.Approach) == 0 {
+			t.Errorf("pull group %d has no stand", gi)
+			continue
+		}
+		stand := g.Approach[len(g.Approach)-1]
+		var cen dungeon.Point
+		for _, q := range g.Positions {
+			cen.X += q.X
+			cen.Y += q.Y
+			cen.Z += q.Z
+		}
+		n := float32(len(g.Positions))
+		cen.X, cen.Y, cen.Z = cen.X/n, cen.Y/n, cen.Z/n
+		if d := dist(cen, stand); d > dungeon.RunLeaderSeeYd {
+			t.Errorf("pull group %d stand is %.1f yd from its centre, want <= %d", gi, d, dungeon.RunLeaderSeeYd)
+		}
+		nearest := math.Inf(1)
+		for _, q := range loop {
+			if d := dist(stand, q); d < nearest {
+				nearest = d
+			}
+		}
+		if nearest > zgW37TankShotYd {
+			t.Errorf("pull group %d stand is %.1f yd from the nearest waypoint of %d's loop, past the %g yd shot: the gate never fires", gi, nearest, want.guid, zgW37TankShotYd)
+		}
+		for _, c := range packs[gi] {
+			if d := dist(stand, c.Pos); d > zgW37TankShotYd {
+				t.Errorf("pull group %d: its unit %s %d is %.1f yd from the stand, past the %g yd shot: the row plain-pulls", gi, c.Name, c.GUID, d, zgW37TankShotYd)
+			}
+			r, err := pl.Raycast(309, navmesh.Vec3{stand.X, stand.Y, stand.Z + 1.5}, navmesh.Vec3{c.Pos.X, c.Pos.Y, c.Pos.Z + 1})
+			if err != nil || !r.Known || !r.Clear {
+				t.Errorf("pull group %d: no line of sight from the stand to %s %d", gi, c.Name, c.GUID)
+			}
+		}
+	}
+}
