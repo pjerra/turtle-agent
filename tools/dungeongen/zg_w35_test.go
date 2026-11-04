@@ -1,11 +1,9 @@
-// Walk-35 water bounds (TortoiseBots-audit tests/raid-zg-walk35, item 1) and the
-// Mar'li-stand bound (item 3).
+// Walk-35 fixes (TortoiseBots-audit tests/raid-zg-walk35): the water bounds
+// (item 1), the Jeklik/Arlokk patroller pulls (item 2) and the Mar'li-stand
+// bound (item 3).
 //
 // Run step N is export index N-1 (the run numbers from 1). The water strands sit
-// on walk-back/ghost walks, not on plan rows: the stuck targets are live hop
-// corners, 16+ yd from any row. No authored dry reroute exists, so these pin the
-// current state instead of a fix (see TestZgW35WalkBackWaterBounds). The Mar'li
-// stand likewise cannot move (see TestZgW35MarliStandKeeps41YdFromPack0).
+// on walk-back/ghost walks, not on plan rows (see TestZgW35WalkBackWaterBounds).
 package main
 
 import (
@@ -123,5 +121,90 @@ func TestZgW35MarliStandKeeps41YdFromPack0(t *testing.T) {
 	}
 	if best < 40 {
 		t.Errorf("group-0 stand %.1f %.1f %.1f is %.1f yd from pack 0 (want >= 40: the walk-35 wipes drifted into it at 41)", stand.X, stand.Y, stand.Z, best)
+	}
+}
+
+// TestZgW35JeklikGroup13KnowsTheBatLoop: walk 35 run-42 (leg-0 group 13, formation
+// 49137) paused twice: the walk to the leftover 11368 passes the patrolling 14750
+// 49185 at 12.1/0.9 yd, and the run reports "its patrol's loop was not read". The
+// group carries 49185's 7-point movement.tsv loop as a patrol block (entries
+// [14750], estimated period over the loop length at the unit's walk speed), the
+// way the nine roaming Berserkers are handled.
+func TestZgW35JeklikGroup13KnowsTheBatLoop(t *testing.T) {
+	p, err := dungeon.Load(filepath.Join(plansDirT, "zul_gurub.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	movement, err := readMovementPaths(filepath.Join("testdata", "map309", "movement.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loop, ok := movement[49185]
+	if !ok || len(loop) != 7 {
+		t.Fatalf("movement.tsv: 49185 has %d waypoints (want 7)", len(loop))
+	}
+	leg := zgW35Leg(t, p, "high_priestess_jeklik")
+	var g *dungeon.PullGroup
+	for i := range leg.PullGroups {
+		if len(leg.PullGroups[i].Entries) == 2 &&
+			leg.PullGroups[i].Entries[0] == 11368 && leg.PullGroups[i].Entries[1] == 14750 &&
+			len(leg.PullGroups[i].Positions) == 1 &&
+			math.Hypot(float64(leg.PullGroups[i].Positions[0].X+12228), float64(leg.PullGroups[i].Positions[0].Y+1478)) < 1 {
+			g = &leg.PullGroups[i]
+			break
+		}
+	}
+	if g == nil {
+		t.Fatal("no leg-0 group 13 (11368,14750 at -12228 -1478)")
+	}
+	if g.Patrol == nil {
+		t.Fatal("leg-0 group 13 has no patrol block: the 14750 patroller 49185 walks its loop through the pull and the run pauses on the straggler walk")
+	}
+	if len(g.Patrol.Path) != len(loop) {
+		t.Fatalf("group 13 patrol path has %d points (want 49185's %d)", len(g.Patrol.Path), len(loop))
+	}
+	for i, q := range loop {
+		if d := math.Hypot(float64(g.Patrol.Path[i].X-q.X), float64(g.Patrol.Path[i].Y-q.Y)); d > 0.5 {
+			t.Fatalf("group 13 patrol path[%d] is %.1f yd from 49185's waypoint (%.1f %.1f)", i, d, q.X, q.Y)
+		}
+	}
+}
+
+// TestZgW35ArlokkTerraceOwnsTheLowerPanther: walk 35 run-310 (leg-4 group 12)
+// waited twice for the "patroller" 11365 49345 (60 s each) then paused: the
+// straggler walk to it crosses its packmate at 0.6 yd. 49345's spawn stands
+// 12.7-13.6 yd (3D over the level gap) from the row point, outside the
+// radius-12 pull. Radius 14 owns it (3D 12.7-13.6 < 14), so it fights with the pack.
+func TestZgW35ArlokkTerraceOwnsTheLowerPanther(t *testing.T) {
+	p, err := dungeon.Load(filepath.Join(plansDirT, "zul_gurub.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	leg := zgW35Leg(t, p, "high_priestess_arlokk")
+	var g *dungeon.PullGroup
+	for i := range leg.PullGroups {
+		if len(leg.PullGroups[i].Positions) == 10 {
+			g = &leg.PullGroups[i]
+			break
+		}
+	}
+	if g == nil {
+		t.Fatal("no leg-4 group 12 (the 10-position terrace cluster)")
+	}
+	var cen dungeon.Point
+	for _, q := range g.Positions {
+		cen.X += q.X
+		cen.Y += q.Y
+		cen.Z += q.Z
+	}
+	n := float32(len(g.Positions))
+	cen.X /= n
+	cen.Y /= n
+	cen.Z /= n
+	// 49345's spawn below the terrace (the run's "spawned 12.7 yd from the centre").
+	spawn := dungeon.Point{X: -11496, Y: -1619.55, Z: 60.4075}
+	d3 := math.Sqrt(float64((spawn.X-cen.X)*(spawn.X-cen.X) + (spawn.Y-cen.Y)*(spawn.Y-cen.Y) + (spawn.Z-cen.Z)*(spawn.Z-cen.Z)))
+	if d3 > float64(g.Radius) {
+		t.Errorf("group 12 radius %g does not own 49345 (3D %.1f yd from the row point): the run waits 60 s for it, then pauses on the straggler walk", g.Radius, d3)
 	}
 }

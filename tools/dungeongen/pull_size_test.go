@@ -10,7 +10,8 @@ import (
 )
 
 // The Arlokk terrace rows (leg 4, pulls 13-17 on this base) are split per formation by walk 29's fix 4b: 13 upper B +
-// upper east (10), 14 middle east (6), 15 upper north (4, unsized), 16 middle west (5), 17 lower (6). The ring estimate
+// upper east (10), 14 middle east Blood Drinkers (2), 15 upper north (unsized), 16 middle west (5), 17 lower (6). Walk 35 drops
+// the old middle-east-Panther pull (its pack is owned by the terrace row now). The ring estimate
 // (mmaps-free path, LOS always seen) still joins the whole 11-20 yd cluster, so each row estimates 27-37 bodies: that is
 // the walk-28 finding the split does not remove by itself (the neighbours are within the 20 yd family-assist ring), and
 // the pin holds the rows' numbers, ceilings and estimates so a ring or reach change that breaks the set shows up here,
@@ -39,12 +40,11 @@ func TestZulGurubArlokkTerraceIsSplitPerFormation(t *testing.T) {
 		}
 	}
 	want := map[int]struct{ bodies, ceiling int }{
-		13: {31, 10}, // upper B + upper east: max_bodies 10
+		13: {31, 10}, // upper B + upper east: max_bodies 10 (walk 35: radius 13 owns the four lower Panthers too, so the 60 s wait and the straggler walk are gone)
 		14: {31, 2},  // middle east Blood Drinkers, pulled first from the clear stand: max_bodies 2
-		15: {31, 4},  // middle east Panthers: max_bodies 4
-		16: {31, 8},  // upper north: unsized (the lint's raid default)
-		17: {27, 5},  // middle west: max_bodies 5
-		18: {37, 6},  // lower: max_bodies 6
+		15: {31, 8},  // upper north: unsized (the lint's raid default; walk 35 drops the old middle-east-Panther pull, whose pack the terrace owns now)
+		16: {27, 5},  // middle west: max_bodies 5
+		17: {37, 6},  // lower: max_bodies 6
 	}
 	seen := map[int]bool{}
 	for _, f := range found {
@@ -78,7 +78,7 @@ var pullSizeKnownCounts = map[string]int{
 	"ragefire_chasm": 27, "wailing_caverns": 52, "deadmines": 144, // ci-lint fix round (was 28/54): the ramp approach points pull from closer, joining fewer neighbour packs. deadmines 132 -> 146: the ported lab_tunnel and laboratory legs add 14 pulls over the ceiling.
 	// zulfarrak re-pinned for the waypoint lint fixes (was 53): leg 8 pull 1 (12 bodies) now crosses the ceiling and leg 3 pull 1 grows 11 -> 14 bodies.
 	"uldaman": 58, "zulfarrak": 54, "karazhan_crypt": 125, // ci-lint fix round (was 57): the snapped ramp approaches join one fewer neighbour pack.
-	"molten_core": 19, "blackwing_lair": 40, "zul_gurub": 91, // Jin'do (was 92): the dropped pit pull group takes its over-ceiling row with it (the walk keeps 22 yd from the respawning trolls instead of pulling them).
+	"molten_core": 19, "blackwing_lair": 40, "zul_gurub": 90, // walk 35 (was 91): the dropped middle-east-Panther pull takes its over-ceiling row with it (its pack is owned by the terrace row now).
 	"ruins_of_ahnqiraj": 29, "temple_of_ahnqiraj": 74, "naxxramas": 150, // re-pinned for the AQ waypoint pass (was 32): three over-ceiling estimates are gone, the leg-0 stands moved out of the wasp ring, the leg-3 stand off the Rajaxx cluster walk, and leg-6 pull 4 drops 15 bodies to 9.
 	"stormwrought_ruins":   169,                            // hand-maintained from the generated draft (waypoint pass 2026-11-03): dense custom packs warn on most pulls.
 	"lower_karazhan_halls": 78, "upper_karazhan_halls": 30, // waypoint pass (was 79): one moved stand pulls its pack from one body fewer.

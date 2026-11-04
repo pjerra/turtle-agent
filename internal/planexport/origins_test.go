@@ -131,7 +131,7 @@ func TestSQLUnchangedByOrigins(t *testing.T) {
 		plan string
 		sha  string
 	}{
-		{"zul_gurub", "d92ba59ff6465be3dbab037e02449086ec036e0a208714cf14de1fbce29a8f0d"}, // Jin'do fix 1: groups 8/9 are stand pulls and the corridor bends south of the pit, so every segment clears each pit troll by the route-aggro reach; the group-11 stand moves south and group 12 drops its west hop
+		{"zul_gurub", "536a533aff3c86146a515f281c73b46400addf8e3fa2c93b4b1c4e85efa48556"}, // walk 35: group 13 carries the 14750 patrol block, the terrace is radius 14 and drops the middle-east-Panther pull
 		{"onyxias_lair", "142c1d58928ad1efd9aca2b773c4762e2ddcbae05c308540080a1fedd6e3b38e"},
 	} {
 		p, err := dungeon.Load(filepath.Join("..", "..", "dungeons", c.plan+".json"))
