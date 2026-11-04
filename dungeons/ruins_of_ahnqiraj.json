@@ -2443,11 +2443,11 @@
         "entry": 15339,
         "position": {"x": -9493.6, "y": 2030.27, "z": 105.48},
         "approach": [
-          {"x": -9514.85, "y": 2024.576, "z": 105.61608}
+          {"x": -9440.0, "y": 2014.9, "z": 88.7}
         ]
       },
       "notes": [
-        "8 pulls (8 units): the eight Anubisath Guardians (15355), each on its own patrol; then Ossirian on his platform (z 105.5). His Strength of Ossirian (25176) only falls to a crystal's weakness debuff, and the crystals are summoned during the fight (no step)."
+        "8 pulls (8 units): the eight Anubisath Guardians (15355), each on its own patrol; then Ossirian. The boss approach stands east of him on the ramp (-9440 2014.9, 58 yd 3D from his spawn, outside his 45 yd aggro): walk 30's old approach past the dais pulled him with the raid still walking. The pull brings him down the ramp toward the first crystal pair near the central courtyard. Cost: the boss row carries a climb_anchor error (16.8 yd above the approach; every ramp point outside his 45 yd aggro climbs 13+ yd to the dais, against the 8 yd rule), WARN in the gate."
       ]
     }
   ]
