@@ -839,6 +839,43 @@ func TestApproachHops(t *testing.T) {
 	}
 }
 
+// A pull on another level needs approach points though it stands within the run leader's straight-line reach: its way is the
+// navmesh path down the ledge (maraudon_purple round 35: 42 yd away, 20 yd down, 216 yd along the mesh), and the leader's own hops
+// could not take the party there. A pull at the same level within the reach is still left uncut.
+func TestApproachHopsCutAPullOnAnotherLevel(t *testing.T) {
+	const js = `{"version":1,"name":"ledge","status":"live-checked (test)","map":349,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[
+  {"entries":[100],"positions":[{"x":100,"y":0,"z":0}]},
+  {"entries":[101],"positions":[{"x":140,"y":0,"z":-20}]},
+  {"entries":[102],"positions":[{"x":200,"y":0,"z":-20}]},
+  {"entries":[103],"positions":[{"x":205,"y":0,"z":-20}]}]}]}`
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		// One corner off to the side: the way is a detour around the ledge, not the straight line.
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 60, Z: (a.Z + b.Z) / 2}}, nil, nil
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The pull 20 yd down (42 yd away, so within the straight-line reach) gets an approach row; the one 5 yd away does not.
+	idx := -1
+	for i, s := range res.Rows.Steps {
+		if s.Kind == KindPull && len(s.Entries) == 1 && s.Entries[0] == 101 {
+			idx = i
+		}
+	}
+	if idx < 0 || res.Rows.Steps[idx-1].Kind != KindMove || res.Rows.Steps[idx-1].Comment != "approach path" {
+		t.Fatalf("a pull 20 yd down got no approach points: %v", kinds(res.Rows, 0))
+	}
+	for i, s := range res.Rows.Steps {
+		if s.Kind == KindPull && len(s.Entries) == 1 && s.Entries[0] == 103 {
+			if i > 0 && res.Rows.Steps[i-1].Kind == KindMove && res.Rows.Steps[i-1].Comment == "approach path" {
+				t.Fatalf("a pull 5 yd away at the same level was cut: %v", kinds(res.Rows, 0))
+			}
+		}
+	}
+}
+
 // TestRouteAroundAvoid: a plan with an avoid box asks Route for every hop between anchors (the entrance, moves, pulls) and puts the
 // points it returns in as move rows; an error from Route fails the export; a plan without a box never calls it.
 func TestRouteAroundAvoid(t *testing.T) {

@@ -1186,7 +1186,8 @@ func (b *builder) cutLongHops() error {
 		origin := b.origins[i]
 		if b.opt.ApproachHops && b.opt.Cut != nil && prev != nil && (s.Kind == KindPull || s.Kind == KindBoss || s.Kind == KindHold) && s.Flags&FlagStandPull == 0 {
 			a, c := dungeon.Point{X: prev.X, Y: prev.Y, Z: prev.Z}, dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
-			if d := dist3(a, c); d > dungeon.RunLeaderReachYd {
+			d := dist3(a, c)
+			if d > dungeon.RunLeaderReachYd || math.Abs(float64(a.Z-c.Z)) > approachDropYd {
 				via, notes, err := b.opt.Cut(b.plan.Map, a, c)
 				b.cutNotes(s.Leg, s.Seq, notes)
 				if err != nil {
@@ -1318,6 +1319,11 @@ func (b *builder) routeAroundAvoid() error {
 
 // approachStandoffYd is how near the pack a cut approach path's last point may be (the party is not walked onto the pack).
 const approachStandoffYd = 25
+
+// approachDropYd is the level step that makes a nearer pull need approach points though it is within the leader's reach: the run
+// leader's hops follow the navmesh, and a pack on a ledge 8 yd below is reached by a path far longer than the straight line
+// (Maraudon purple round 35: the second pack 20 yd down and 42 yd away, 216 yd along the mesh).
+const approachDropYd = 8
 
 func dist3(a, b dungeon.Point) float64 {
 	return math.Sqrt(sq(float64(a.X-b.X)) + sq(float64(a.Y-b.Y)) + sq(float64(a.Z-b.Z)))
