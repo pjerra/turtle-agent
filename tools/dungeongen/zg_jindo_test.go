@@ -1,8 +1,10 @@
 // The Jin'do fixes (spec TortoiseBots-audit/specs/jindo-mechanics.md §6, plan worker step 1):
 // the plan's kill_first leads with the Brain Wash Totem 15112 and the Powerful Healing Ward 14987,
 // the honour-guard group is a stand pull shot from its approach 42 yd from Jin'do, and every leg-6
-// route point from group 8's approach (the old group-9 slot) to the boss row keeps 22 yd (2D) from
-// the pit centre (-11583, -1251). The pit pull group (Sacrificed Trolls, respawn 10 s) is gone.
+// route segment from group 8's approach to the boss row clears each of the ten Sacrificed Troll
+// spawns (guids 49078-49087, the dropped pit pull group: respawn 10 s) by the route-aggro model's
+// own reach (routeReach: AggroRadius at the plan's party level plus the raid spread and the
+// spawn's wander). The pit pull group is gone.
 package main
 
 import (
@@ -90,23 +92,44 @@ func TestZgJindoGuardIsStandPull(t *testing.T) {
 	}
 }
 
-// TestZgJindoRouteClearOfPit: every leg-6 route point from group 8's approach (the old group-9 slot,
-// the Jin'do proof placement) to the boss row keeps at least 22 yd (2D) from the pit centre
-// (-11583.0, -1251.0): troll aggro 18 + 4 margin. It fails today on the old group-12 approach hop
-// (-11576, -1232) at 20.2 yd, and the straight walk to it bottoms at 18.7 yd.
-func TestZgJindoRouteClearOfPit(t *testing.T) {
+// TestZgJindoRouteClearOfTrolls: every leg-6 route segment from group 8's approach (the old
+// group-9 slot, the Jin'do proof placement) to the boss row clears EACH of the ten Sacrificed
+// Troll spawns (guids 49078-49087) by the route-aggro model's own reach (routeReach, sampled
+// every routeAggroStep yd like RouteIntoLaterPacks). The pit-centre rule it replaces measured
+// the wrong thing: the group-8 approach passed ~21.1 yd from the nearest troll spawn while
+// keeping 22 yd from the pit centre, and the model (aggro radius + 10 yd raid spread + wander)
+// flags it. It fails today on any segment the walk bends past the pit.
+func TestZgJindoRouteClearOfTrolls(t *testing.T) {
 	p, err := dungeon.Load(zgPlan)
 	if err != nil {
 		t.Fatal(err)
+	}
+	cs, err := readCreatures("testdata/map309/creatures.tsv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var trolls []creature
+	for _, c := range cs {
+		if c.Entry == 14826 {
+			trolls = append(trolls, c)
+		}
+	}
+	if len(trolls) != 10 {
+		t.Fatalf("%d Sacrificed Troll spawns, want 10 (guids 49078-49087)", len(trolls))
 	}
 	res, err := planexport.Build(p, planexport.Options{})
 	if err != nil {
 		t.Fatalf("plan-export: %v", err)
 	}
-	pit := dungeon.Point{X: -11583.0, Y: -1251.0}
-	const pitClearYd = 22.0
+	// The walked line is the model's party-point walk, not the raw rows: a stand-pull
+	// pull row is fought from its stand (the move row right before it, FlagStandPull),
+	// so its party point is the stand's point (routePoints' rule; the clearance below
+	// still calls the model's routeReach per spawn, it does not re-implement it).
+	type pt struct{ x, y, z float64 }
+	var walk []pt
 	started := false
-	for _, s := range res.Rows.Steps {
+	steps := res.Rows.Steps
+	for si, s := range steps {
 		if s.Leg != 6 {
 			continue
 		}
@@ -116,15 +139,46 @@ func TestZgJindoRouteClearOfPit(t *testing.T) {
 		if !started {
 			continue
 		}
-		if d := math.Hypot(float64(s.X-pit.X), float64(s.Y-pit.Y)); d < pitClearYd {
-			t.Errorf("leg 6 seq %d (%s %s at %.1f %.1f %.1f) is %.1f yd from the pit centre, want >= %g",
-				s.Seq, s.Kind, s.Comment, s.X, s.Y, s.Z, d, pitClearYd)
+		px, py, pz := float64(s.X), float64(s.Y), float64(s.Z)
+		if (s.Kind == planexport.KindPull || s.Kind == planexport.KindBoss) && s.Flags&planexport.FlagStandPull != 0 && si > 0 {
+			if prev := steps[si-1]; prev.Leg == s.Leg &&
+				(prev.Kind == planexport.KindMove || prev.Kind == planexport.KindMoveDirect || prev.Kind == planexport.KindMoveHopExact) {
+				px, py, pz = float64(prev.X), float64(prev.Y), float64(prev.Z)
+			}
 		}
+		walk = append(walk, pt{px, py, pz})
 		if s.Kind == planexport.KindBoss {
 			break
 		}
 	}
 	if !started {
 		t.Fatal("no pull group 8 approach row in the exported leg 6 (the Jin'do proof placement)")
+	}
+	for i := 0; i+1 < len(walk); i++ {
+		a, b := walk[i], walk[i+1]
+		if a == b {
+			continue
+		}
+		dx, dy, dz := b.x-a.x, b.y-a.y, b.z-a.z
+		n := int(math.Ceil(math.Sqrt(dx*dx+dy*dy+dz*dz) / routeAggroStep))
+		if n < 1 {
+			n = 1
+		}
+		for _, c := range trolls {
+			reach := routeReach(p, c)
+			best := math.MaxFloat64
+			for k := 0; k <= n; k++ {
+				f := float64(k) / float64(n)
+				sx, sy, sz := a.x+f*dx, a.y+f*dy, a.z+f*dz
+				ddx, ddy, ddz := float64(c.Pos.X)-sx, float64(c.Pos.Y)-sy, float64(c.Pos.Z)-sz
+				if d := math.Sqrt(ddx*ddx + ddy*ddy + ddz*ddz); d < best {
+					best = d
+				}
+			}
+			if best < reach {
+				t.Errorf("leg 6 segment %d->%d passes %.1f yd from %s (guid %d) at %.1f %.1f %.1f, want >= %.1f (the route-aggro reach)",
+					i, i+1, best, c.Name, c.GUID, c.Pos.X, c.Pos.Y, c.Pos.Z, reach)
+			}
+		}
 	}
 }
