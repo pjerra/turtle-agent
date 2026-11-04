@@ -1687,25 +1687,16 @@
     {
       "name": "buru_the_gorger",
       "to": {"x": -9187.84, "y": 1426.98, "z": 23.22},
+      "via": [
+        {"x": -8851.26, "y": 2263.29, "z": 21.3093}
+      ],
       "pull_groups": [
-        {
-          "entries": [15320, 15323, 15323],
-          "positions": [
-            {"x": -9189.16, "y": 1451.26, "z": 21.4716},
-            {"x": -9186.31, "y": 1463.15, "z": 21.3862},
-            {"x": -9176.3, "y": 1458.25, "z": 21.3906}
-          ],
-          "radius": 13.187704
-        },
         {
           "entries": [15168],
           "positions": [
             {"x": -9209.61, "y": 1432.01, "z": 21.387}
           ],
-          "radius": 5,
-          "approach": [
-            {"x": -9189.85, "y": 1436.22, "z": 21.96}
-          ]
+          "radius": 5
         },
         {
           "entries": [15320, 15323, 15323],
@@ -1720,15 +1711,21 @@
           ]
         },
         {
+          "entries": [15320, 15323, 15323],
+          "positions": [
+            {"x": -9189.16, "y": 1451.26, "z": 21.4716},
+            {"x": -9186.31, "y": 1463.15, "z": 21.3862},
+            {"x": -9176.3, "y": 1458.25, "z": 21.3906}
+          ],
+          "radius": 13.187704
+        },
+        {
           "entries": [15320, 15323],
           "positions": [
             {"x": -9314.76, "y": 1393.69, "z": 21.4322},
             {"x": -9303.7, "y": 1386.26, "z": 21.3872}
           ],
-          "radius": 11.662237,
-          "approach": [
-            {"x": -9324.787, "y": 1374.4186, "z": 21.371677}
-          ]
+          "radius": 11.662237
         },
         {
           "entries": [15335, 15320],
@@ -1776,19 +1773,17 @@
             "source": "spawn 85885"
           },
           "approach": [
-            {"x": -9290.02, "y": 1378.736, "z": 21.454218}
+            {"x": -9302.02, "y": 1378.736, "z": 21.445038}
           ]
         },
         {
-          "entries": [15323, 15320],
+          "entries": [15320, 15323, 15323],
           "positions": [
-            {"x": -9381.61, "y": 1391.13, "z": 21.3864},
-            {"x": -9382.96, "y": 1404.3, "z": 21.3959}
+            {"x": -9142.4, "y": 1292.85, "z": 21.3875},
+            {"x": -9152.83, "y": 1286.96, "z": 21.3875},
+            {"x": -9152.6, "y": 1303.69, "z": 21.3866}
           ],
-          "radius": 11.61957,
-          "approach": [
-            {"x": -9401.24, "y": 1386.48, "z": 22.32}
-          ]
+          "radius": 14.772357
         },
         {
           "entries": [15335],
@@ -1824,26 +1819,14 @@
           }
         },
         {
-          "entries": [15320, 15320],
+          "entries": [15323, 15320],
           "positions": [
-            {"x": -9329.18, "y": 1186.5, "z": 21.437},
-            {"x": -9338.46, "y": 1194.44, "z": 21.3894}
+            {"x": -9381.61, "y": 1391.13, "z": 21.3864},
+            {"x": -9382.96, "y": 1404.3, "z": 21.3959}
           ],
-          "radius": 11.107097,
+          "radius": 11.61957,
           "approach": [
-            {"x": -9338.46, "y": 1212.44, "z": 21.46}
-          ]
-        },
-        {
-          "entries": [15320, 15323, 15323],
-          "positions": [
-            {"x": -9142.4, "y": 1292.85, "z": 21.3875},
-            {"x": -9152.83, "y": 1286.96, "z": 21.3875},
-            {"x": -9152.6, "y": 1303.69, "z": 21.3866}
-          ],
-          "radius": 14.772357,
-          "approach": [
-            {"x": -9174.391, "y": 1301.2292, "z": 21.329317}
+            {"x": -9401.24, "y": 1386.48, "z": 22.32}
           ]
         },
         {
@@ -1853,7 +1836,22 @@
           ],
           "radius": 5,
           "approach": [
+            {"x": -9405.766, "y": 1355.2705, "z": 21.581314},
+            {"x": -9376.357, "y": 1285.8737, "z": -17.150654},
             {"x": -9307.11, "y": 1304.38, "z": -62.99}
+          ]
+        },
+        {
+          "entries": [15320, 15320],
+          "positions": [
+            {"x": -9329.18, "y": 1186.5, "z": 21.437},
+            {"x": -9338.46, "y": 1194.44, "z": 21.3894}
+          ],
+          "radius": 11.107097,
+          "approach": [
+            {"x": -9316.799, "y": 1270.9333, "z": -57.0168},
+            {"x": -9365.332, "y": 1280, "z": -21.9168},
+            {"x": -9344.003, "y": 1214.7361, "z": 21.506935}
           ]
         }
       ],
@@ -1862,11 +1860,16 @@
         "entry": 15370,
         "position": {"x": -9240.79, "y": 1230.42, "z": -63.7576},
         "approach": [
-          {"x": -9258.34, "y": 1241.007, "z": -63.4475}
+          {"x": -9374.595, "y": 1227.9559, "z": 21.322174},
+          {"x": -9383.199, "y": 1283.2001, "z": -13.7168},
+          {"x": -9333.196, "y": 1264.1133, "z": -44.541508},
+          {"x": -9274.97, "y": 1247.8953, "z": -63.16186}
         ]
       },
       "notes": [
-        "10 pulls (20 units) on the plateau south-west of the hall (15320 Hive'Zara Soldier, 15323 Hive'Zara Sandstalker, three Flesh Hunters, one Vile Scarab), the descent, and Buru's pit (z -63.8). Buru summons six eggs at z -63.5 and walks at a random target; killing an egg within 5 yd stops him (boss_buru.cpp OnEggExploded)."
+        "10 pulls (20 units) on the plateau south-west of the hall (15320 Hive'Zara Soldier, 15323 Hive'Zara Sandstalker, three Flesh Hunters, one Vile Scarab), the descent, and Buru's pit (z -63.8). Buru summons six eggs at z -63.5 and walks at a random target; killing an egg within 5 yd stops him (boss_buru.cpp OnEggExploded).",
+        "ROUTE-REGEN b7bea8c (2026-11-03, audit §4.2): 12 points, minimum aggro margin 59.6 yd, minimum wall 0.0 yd; pull order regen from the navmesh path-length matrix (0 one-way pairs flagged); every point authored, no exporter cut",
+        "Walk 7183.6 yd to 4103.3 yd (0.57x, floor-aware). Ratio against the direct leg span (1104 yd) is 3.7, above the 3.0 bar: the leg must drop from Moam's room (z 21) into Buru's pit (z -63.8) and climb back out to the leg-6 to, and the pit drop is one-way, so the descent and the climb cannot share ground; the 10 plateau pulls are spread over 400 yd. That geography is the written reason. The walk is dry (no authored water row); three river-below path findings remain where the descent corridor bridges the sunken channel with water 6-10 yd below (a chase or a fall lands in water, the walk itself stays on dry mesh)."
       ]
     },
     {
