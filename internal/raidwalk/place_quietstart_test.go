@@ -104,10 +104,10 @@ func TestPlaceBackIsThePreviousMoveRow(t *testing.T) {
 // PlaceBackInLeg keeps a retreat inside the leg and never across a boss or hold row.
 func TestPlaceBackInLegStopsAtABossRowAndAtTheLeg(t *testing.T) {
 	rows := placeRows(nil,
-		placeMove(3, 1, 10, 0),                          // leg 3: the earlier leg
+		placeMove(3, 1, 10, 0),                           // leg 3: the earlier leg
 		placeRow(planexport.KindBoss, 3, 2, 10, 0, 1, 1), // its boss row
-		placeMove(4, 3, 10, 0),                          // leg 4: the start's own leg, first row
-		placeMove(4, 4, 10, 0),                          // and the row behind the start
+		placeMove(4, 3, 10, 0),                           // leg 4: the start's own leg, first row
+		placeMove(4, 4, 10, 0),                           // and the row behind the start
 	)
 	// A start at leg 4's first row has no retreat: step 3 is the boss row, and step 2 is another leg.
 	if got, ok := PlaceBackInLeg(rows, 3, "4"); ok {

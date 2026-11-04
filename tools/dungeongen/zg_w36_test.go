@@ -289,8 +289,8 @@ func TestZgW36WalkStrandsStayOffTheWater(t *testing.T) {
 	}
 	defer pl.Close()
 	spans := []struct {
-		name string
-		at   dungeon.Point
+		name  string
+		at    dungeon.Point
 		minYd float64
 	}{
 		{"the hall's terrace lake (c3-r2 12:36, walk 35 f3)", dungeon.Point{X: -11750.1, Y: -1249.6, Z: 107.6}, 20},

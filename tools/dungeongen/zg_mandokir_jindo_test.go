@@ -780,9 +780,9 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 		{49397, 49398, 49399, 49400}, // 4
 		{49373, 49374, 49375, 49376, 49377, 49378, 49379, 49380, 49381, 49382}, // 5
 		{1173082}, {49363}, // 6, 7
-		{49402, 49403, 49421}, // 8 (the honour guard, a stand pull now; walk 36: pulled before the two north packs)
+		{49402, 49403, 49421},                 // 8 (the honour guard, a stand pull now; walk 36: pulled before the two north packs)
 		{49383, 49384, 49385, 49386, 1173080}, // 9 (walk 36: the two north packs are one pull)
-		{51875}, // 10 (the Venombrood pack; walk 36 dropped the -11603 -1229 pull beside the respawn pit)
+		{51875},                               // 10 (the Venombrood pack; walk 36 dropped the -11603 -1229 pull beside the respawn pit)
 	}
 	if len(packs) < len(want) {
 		t.Fatalf("%d pull groups, want at least %d", len(packs), len(want))
