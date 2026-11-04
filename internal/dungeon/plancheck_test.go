@@ -563,7 +563,6 @@ var planCheckKnownFailing = map[string]bool{
 	"maraudon_purple":       true,
 	"molten_core":           true,
 	"naxxramas":             true,
-	"shadowfang_keep":       true,
 	"stormwrought_ruins":    true,
 	"upper_blackrock_spire": true,
 	"wailing_caverns-extra": true,

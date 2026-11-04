@@ -572,13 +572,13 @@
       "name": "odo_the_blindwatcher",
       "to": {"x": -266.5, "y": 2150.2, "z": 95.9},
       "via": [
-        {"x": -264.8, "y": 2149.3, "z": 95.9},
+        {"x": -262.5, "y": 2150.3, "z": 95.9},
         {
           "x": -266.5,
           "y": 2150.2,
           "z": 95.9,
           "direct": true,
-          "check_skip": "the mesh build seam at the stair top: network A ends at -264.8 2149.3 95.9 and network B starts at -265.2 2150.6 95.8, 1.0-2.2 yd apart at the same height; the ramp collision runs under the landing plate, so Recast drops the step and leaves it unlinked. The ray from the launch point leaves the mesh at once (no static geometry at 96.2-98.5 in the collision check). Crossed live 2026-10-23 (tests/r24/slot7): the commander walked to -266.5 2150.2 95.9 and path_to from there to Odo's spot was complete (40 yd); from the east side (-262.5 2150.3) it was partial."
+          "check_skip": "the mesh build seam at the stair top: network A ends at -264.8 2149.3 95.9 and network B starts at -265.2 2150.6 95.8, 1.0-2.2 yd apart at the same height; the ramp collision runs under the landing plate, so Recast drops the step and leaves it unlinked. The ray from the launch point leaves the mesh at once (no static geometry at 96.2-98.5 in the collision check). Crossed live 2026-10-23 (tests/r24/slot7): the commander walked to -266.5 2150.2 95.9 and path_to from there to Odo's spot was complete (40 yd); from the east side (-262.5 2150.3) it was partial. The walk before the hop ends at -262.5 2150.3, 4.0 yd from the landing: from the old launch at -264.8 the hop was 1.9 yd, inside the run leader's kArriveYd 3, so it counted the point reached and never sent the move (plan-check: 'hop inside the arrival radius'), and the party stayed east of the seam."
         }
       ],
       "pull_groups": [
