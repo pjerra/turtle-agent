@@ -361,3 +361,26 @@ func TestStepperSkipsToAFiredTrigger(t *testing.T) {
 		t.Fatalf("dead: %d %v", step, ok)
 	}
 }
+
+// A wait_for gameobject may count the object gone as its state reached (gone_ok: a script opens the door and removes it some
+// steps later). The field is kept through Marshal, and gone_ok with state ready is refused (a gone object is not closed).
+func TestObjectWaitGoneOKParsesAndKeepsItsForm(t *testing.T) {
+	p := mustPlan(t, eventPlan(`{"wait_for":{"gameobject":{"entry":18895,"near":{"x":1,"y":2,"z":3},"state":"active","gone_ok":true},"timeout_s":60}}`, ""))
+	g := p.Legs[0].Steps[0].WaitFor.GameObject
+	if !g.GoneOK || g.State != "active" || g.Entry != 18895 {
+		t.Fatalf("%+v", g)
+	}
+	out, err := Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"gone_ok": true`) {
+		t.Fatalf("%s", out)
+	}
+	if q, err := Parse("again.json", out); err != nil || !q.Legs[0].Steps[0].WaitFor.GameObject.GoneOK {
+		t.Fatalf("round trip: %v", err)
+	}
+	if _, err := Parse("bad.json", []byte(eventPlan(`{"wait_for":{"gameobject":{"entry":1,"state":"ready","gone_ok":true}}}`, ""))); err == nil || !strings.Contains(err.Error(), "gone_ok needs state active") {
+		t.Fatalf("gone_ok with ready: %v", err)
+	}
+}

@@ -24,7 +24,8 @@
     "hunter:dps"
   ],
   "fleers": [598, 622, 634, 1725, 1729, 1731, 1732, 3947, 4418],
-  "cc_priority": [4418, 1729, 1732],
+  "cc_priority": [622, 1731, 4418, 1729, 1732],
+  "cc_always": [622],
   "kill_first": [636, 622],
   "notes": [
     "The Deadmines (map 36), written from the world database export of tortoise-wow (tools/dungeongen/testdata/map36, read with export.sh; creature_movement of the patrols in movement.tsv), the instance script (src/scripts/dungeons/deadmines: instance_deadmines.cpp, deadmines.cpp, boss_mr_smite.cpp), the EventAI and creature_spells rows, Lock.dbc, and the map 36 navmesh (every route point is a point of a path_to route; TestDeadminesOnNavmesh). Wowhead Classic (the instance page zone=1581, the strategy guide 7786 and the npc pages with their comments, fetched with tools/wowhead/wh.py) was read for the kill order, the trash to watch and the boss tips; where it differs from the database or the script the plan follows the server and the README section lists the differences. Status stays draft (not mapped, not live-checked) until the GM-invisible walk (step 2) has checked the route, the doors and the patrols in the instance; dungeon_run refuses it without allow_draft. The patrol periods are estimates (path length at 2.5 yd/s plus the waits), not timed.",
@@ -319,6 +320,166 @@
             "source": "creature_movement of spawn 79188 (Defias Evoker, 22 points, 200 yd at 2.5 yd/s) with its formation members 79151; period_s measured on the 2026-10-15 GM walk (tests/walk-dm/FINDINGS.txt)"
           }
         }
+      ]
+    },
+    {
+      "name": "lab_tunnel",
+      "to": {"x": -73, "y": -404, "z": 56.29},
+      "pull_groups": [
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -87.3985, "y": -421.766, "z": 56.0572}
+          ],
+          "radius": 1
+        },
+        {
+          "entries": [61960],
+          "positions": [
+            {"x": -76.5884, "y": -435.058, "z": 56.718}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -71, "y": -414, "z": 55.8}
+          ]
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -96.4333, "y": -442.155, "z": 55.8174}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -83, "y": -425, "z": 55.64}
+          ]
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -83.9959, "y": -445.069, "z": 56.0449}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -83, "y": -424, "z": 55.6}
+          ]
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -91.2473, "y": -459.754, "z": 56.0719}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -88, "y": -438, "z": 56.38}
+          ]
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -98.4166, "y": -469.802, "z": 56.2318}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -90, "y": -450, "z": 56.11}
+          ]
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -102.796, "y": -477.032, "z": 54.4928}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -94, "y": -457, "z": 55.9}
+          ]
+        },
+        {
+          "entries": [598],
+          "positions": [
+            {"x": -82.5628, "y": -484.323, "z": 54.5806}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -92, "y": -465, "z": 56.44}
+          ]
+        },
+        {
+          "entries": [61960],
+          "positions": [
+            {"x": -97.2543, "y": -489.712, "z": 54.2621}
+          ],
+          "radius": 5,
+          "approach": [
+            {"x": -94, "y": -469, "z": 56.29}
+          ]
+        }
+      ],
+      "notes": [
+        "The upper mine's south tunnel (entered from the mine's east ledge at -73 -404, z 56, down to the laboratory door at -97 -490): the tunnel's Defias Miners (598) and two Defias Mixologists (61960, 2583007 and 2583082) are on no other leg. Rows from the map 36 spawn export: 2583008, 2583007, 2583009, 2583010, 2583012, 2583013, 2583017, 2583018, 2583082. The two Miners 79129 and 79131 stand in the mine's west pocket, 17.7-17.9 yd from the tunnel mouth in 3-D but behind a wall (no navmesh link; the way to them is 134 yd round the mine) and 2.7-2.9 yd outside their 15 yd aggro radius: not pulled (the test's exemptions carry them). Not walked; every stand is a point of the server path to its pack and 19.5 to 22.9 yd from it (the aggro radius of a level 17 mob against the level-22 party is 15 yd)."
+      ]
+    },
+    {
+      "name": "laboratory",
+      "to": {"x": -93, "y": -477, "z": 55.56},
+      "pull_groups": [
+        {
+          "entries": [61959],
+          "positions": [
+            {"x": -101.098, "y": -497.095, "z": 54.8054}
+          ],
+          "radius": 7
+        },
+        {
+          "entries": [61960],
+          "positions": [
+            {"x": -86.7989, "y": -503.043, "z": 54.4325}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -91, "y": -482, "z": 54.78}
+          ]
+        },
+        {
+          "entries": [61959],
+          "positions": [
+            {"x": -90.491, "y": -505.258, "z": 54.3517}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -91, "y": -484, "z": 54.7}
+          ]
+        },
+        {
+          "entries": [61960],
+          "positions": [
+            {"x": -108.696, "y": -506.088, "z": 53.9933}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -96, "y": -489, "z": 54.37}
+          ]
+        },
+        {
+          "entries": [61959, 61960],
+          "positions": [
+            {"x": -98.7702, "y": -514.548, "z": 54.1626},
+            {"x": -99.9165, "y": -521.855, "z": 54.1195}
+          ],
+          "radius": 7,
+          "approach": [
+            {"x": -96, "y": -501, "z": 54.34}
+          ]
+        }
+      ],
+      "boss": {
+        "entry": 61961,
+        "position": {"x": -85.063, "y": -525.839, "z": 54.4025},
+        "approach": [
+          {"x": -91.5, "y": -505.5, "z": 54.73}
+        ]
+      },
+      "notes": [
+        "The laboratory (x -85 to -109, y -497 to -526): the Defias Chemists (61959) and Mixologists (61960) around Jared Voss (61961, Turtle's custom boss; spawn row 2582921). Voss is a static spawn (604800 s respawn like every Deadmines boss, no game_event_creature row, no pool, no script; EventAI only says on aggro and death) and stands 15.4 yd from the Mixologist 2583081, so the pair 2583084/2583081 is pulled from -96 -501 (21.2 and 21.7 yd) before him. His spell list 180300 carries Poison Cloud 3815 (a 7 s cast: the interrupt row of 20261018120925); Poison 13298, Withering Poison 13884 and Poisonous Stab 7357 are instant. Every caster is pulled on its own from a stand 21.1 to 21.7 yd away; the room's rats (4075) are critters."
       ]
     },
     {

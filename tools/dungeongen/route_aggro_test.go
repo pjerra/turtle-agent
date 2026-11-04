@@ -309,10 +309,10 @@ func TestRouteIntoLaterPacksDefaultsDetectionTo20(t *testing.T) {
 // Counts are measured on origin/dev (the ZG count must drop when W25-1 lands: the Arlokk terrace reordering walks
 // each approach on its pack's level; the comment then says so).
 var routeAggroKnownFailing = map[string]int{
-	"ragefire_chasm":       152,                                                                      // waypoint pass (was 153): the moved stands walk past one fewer later pack.
-	"wailing_caverns":      170,                                                                      // waypoint pass (was 173): the water fix at cobrahn_b's start walks one more segment past a later pack.
-	"deadmines":            641,                                                                      // boss rows own their boss (was 661). the repo reach (AggroRadius at 18-22 plus spread and wander) outruns the old 20 yd flat line.
-	"uldaman":              247,                                                                      // waypoint pass (was 249): the moved stands walk past fewer later packs.
+	"ragefire_chasm":       164,                                                                      // ci-lint fix round (was 152): the new approach rows add walked segments past later packs.
+	"wailing_caverns":      178,                                                                      // ci-lint fix round (was 170): the new approach rows add walked segments past later packs.
+	"deadmines":            750,                                                                      // ported lab_tunnel and laboratory legs (TB f4344311): the mine route walks past the lab packs and the lab rows add segments. Boss rows own their boss (was 661). The repo reach (AggroRadius at 18-22 plus spread and wander) outruns the old 20 yd flat line.
+	"uldaman":              250,                                                                      // ci-lint fix round (was 247): the new approach rows add walked segments past later packs.
 	"zulfarrak":            54,                                                                       // zulfarrak re-pinned for the waypoint lint fixes (was 56): the moved points pass two fewer later packs, rows renumbered.
 	"karazhan_crypt":       439,                                                                      // waypoint pass (was 447): the moved Hivaxxis and lower-crypt stands walk past fewer later packs.
 	"molten_core":          253,                                                                      // boss rows own their boss (was 315). raids-mc-bwl-ony (was 270): the moved stands walk past fewer later packs.
@@ -320,7 +320,7 @@ var routeAggroKnownFailing = map[string]int{
 	"zul_gurub":            907,                                                                      // re-pinned for the walk-33 water fix: leg 5's river vias are the dry route round the gorge and leg 6 drops its river via, so fewer walked segments pass a later pack
 	"ruins_of_ahnqiraj":    169,                                                                      // re-pinned for the AQ waypoint pass (was 178): the merged leg-start stands and the stands moved out of neighbour aggro walk fewer later packs.
 	"temple_of_ahnqiraj":   512,                                                                      // re-pinned for the AQ waypoint pass (was 520): the merged stands and the stands moved off walls and water walk fewer later packs.
-	"naxxramas":            626,                                                                      // waypoint pass (was 647): the moved leg stands and vias walk past fewer later packs.
+	"naxxramas":            623,                                                                      // waypoint pass (was 647): the moved leg stands and vias walk past fewer later packs.
 	"stormwrought_ruins":   581,                                                                      // hand-maintained from the generated draft (waypoint pass 2026-11-03): the route into each pack walks past the dense custom packs.
 	"lower_karazhan_halls": 991,                                                                      // waypoint pass (was 1000): the moved stands walk past fewer later packs.
 	"upper_karazhan_halls": 379,                                                                      // waypoint pass (was 383): the moved stands walk past fewer later packs.
@@ -328,13 +328,18 @@ var routeAggroKnownFailing = map[string]int{
 	"timbermaw_hold":       195,                                                                      // waypoint pass (was 214): the reworked loktanag_lower vias walk past fewer later packs.
 	"hateforge_quarry":     754,                                                                      // newly hand-maintained (was a generated draft): the current route passes.
 	"maraudon_orange":      121, "maraudon_purple": 272, "blackrock_depths": 722, "scholomance": 843, // newly hand-maintained (were generated): the current route's passes; the water fixes at the two Maraudon starts add two and nine segments.
-	"razorfen_kraul": 256, "dire_maul_north": 36, "windhorn_canyon": 436, "upper_blackrock_spire": 459,
+	"razorfen_kraul": 309, "dire_maul_north": 57, "windhorn_canyon": 436, "upper_blackrock_spire": 459,
 	"blackfathom_deeps": 296, "gnomeregan": 276, "lower_blackrock_spire": 408, "stormwind_vault": 170,
-	"frostmane_hollow": 171, "dire_maul_east": 97, "dire_maul_west": 212, "razorfen_downs": 191, "sunken_temple": 66,
-	"scarlet_armory": 101, "scarlet_cathedral": 151, "scarlet_graveyard": 184, "scarlet_library": 148, "shadowfang_keep": 284,
+	"frostmane_hollow": 171, "dire_maul_east": 97, "dire_maul_west": 199, "razorfen_downs": 191, "sunken_temple": 337,
+	"scarlet_armory": 101, "scarlet_cathedral": 151, "scarlet_graveyard": 178, "scarlet_library": 148, "shadowfang_keep": 383,
 	"stormwind_stockade": 185, "stratholme_live": 158, "stratholme_undead": 294, // newly hand-maintained: straight-segment counts for the draft routes.
 	// newly hand-maintained (waypoint lint fixes): measured route passes of the four drafts.
-	"crescent_grove": 438, "dragonmaw_retreat": 398, "gilneas_city": 267, "black_morass": 385,
+	// Re-pinned for the TB plan reconcile: razorfen_kraul 256 -> 309 and dire_maul_north 36 -> 57 (ported/split legs and TB's
+	// leg order), scarlet_graveyard 184 -> 178 (the hall split moves the hall rows before the bosses), and dragonmaw_retreat
+	// 398 -> 429 (the searistrasz_line split). dire_maul_west and shadowfang_keep keep the live plans' rows (the reconcile
+	// port is the same revanchion leg and the same door/courtyard legs, already in them); shadowfang_keep 382 -> 383 is the
+	// odo hop's launch point moved to -262.5 2150.3 (4.0 yd from the landing, outside kArriveYd 3).
+	"crescent_grove": 438, "dragonmaw_retreat": 429, "gilneas_city": 267, "black_morass": 385,
 }
 
 // TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn

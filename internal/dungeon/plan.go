@@ -37,6 +37,8 @@ const (
 	DefaultObjectRange = 8   // yards around Near an object is looked for
 	MaxRadius          = 300 // yards
 	MaxFailText        = 400 // characters of a wait's fail_text
+	// MaxProofRadius is the most yards a use_object's proof is searched around the object (TortoiseBots kPlanMaxProofRadius).
+	MaxProofRadius = 20
 )
 
 // Point is a position in the map's coordinates.
@@ -390,6 +392,17 @@ type PullGroup struct {
 // still needs Data, and a Value needs Data.
 type Hold struct {
 	Data uint32 `json:"instance_data,omitempty"`
+	// Object, when set, makes the hold's done condition a game object state instead of an instance data value: plan-export
+	// writes entry Object.Entry, param the state's index (0 ready, 1 active, 2 active_alt) and flag 16 (done by object), and
+	// the run leader reads that object near the hold's spot. Data stays 0 then. A hold with neither Object nor a Data value is
+	// refused. The first user is Dire Maul West's five crystals: each is used when its four Mana Remnants die, and the hold
+	// fights them and ends when the crystal reads active - the crystals spawn ready (tw_world_gameobject.sql state 0) and the
+	// script's DoUseDoorOrButton leaves that state as it is counted, so `active` is the done sign (r39s2 slotC waited for
+	// `ready` for 4 x 120 s on a crystal that was already active; r40 slot6 passed all five holds at once on `active`). The
+	// lookup also needs the spot within 30 yd of the object (TortoiseBots' kEntryPointRadius); the plan check does not measure
+	// that.
+	Object *ObjectRef `json:"object,omitempty"`
+	State  string     `json:"state,omitempty"`
 	// Value, when set, is the value of instance data Data that ends the event, read as the script's own number, not as an encounter state:
 	// plan-export writes param Value with flags 8 alone (done by instance data), without the encounter flag 32, so the run leader neither
 	// reads a FAIL nor a reset into it (TortoiseBots DungeonPlanPolicy.h: a hold with flag 8 and not 32 takes any param). The run leader
@@ -676,7 +689,18 @@ type UseObject struct {
 	// rung that way: the Mallet of Zul'Farrak's on-use spell 11434 (SPELL_EFFECT_OPEN_LOCK_ITEM, target the game object) opens the gong's lock
 	// 459 (Gahz'ridian) and the gong's event 2488 runs; a plain use of the gong object does nothing (live 2026-10-15, round 3: no answer, no
 	// Gahz'rilla). It needs requires_item, and a stand within UseRange of the object, since the spell's range is short. Remote runs only.
-	ViaItem bool `json:"via_item,omitempty"`
+	ViaItem bool      `json:"via_item,omitempty"`
+	Proof   *UseProof `json:"proof,omitempty"`
+}
+
+// UseProof names what shows that a use_object took when the object itself changes no state (Sunken Temple's Atal'ai statues
+// 148830-148835: the script only sets NO_INTERACT on the right one and respawns the green light 148883 beside it). Exactly one of
+// GameObject (a spawned object) and Creature (a living one), within Radius yards of the object's near point. plan-export writes the
+// run leader's open_proof row (TortoiseBots DungeonPlanPolicy.h kPlanKindOpenProof). The agent's own driver does not read it.
+type UseProof struct {
+	GameObject uint32  `json:"gameobject,omitempty"`
+	Creature   uint32  `json:"creature,omitempty"`
+	Radius     float32 `json:"radius"`
 }
 
 // LootObject opens a chest or a node and takes what is in it: the leader walks next to it (to Stand when given), casts the Opening
@@ -753,6 +777,14 @@ type WaitFor struct {
 type ObjectState struct {
 	ObjectRef
 	State string `json:"state"`
+	// GoneOK counts the object being gone as the wanted state, once the run has seen it: a wait that reads the object found (in any
+	// state) and later missing is done, when the miss is the object's (the agent within GoneReadYd of Near, or the module's `not-found`
+	// answer, never a refusal) and has held for GoneConfirm; a wait with no Near is never judged gone. A script that sets the object active and then removes it (Shadowfang Keep's Courtyard
+	// Door 18895, which Deathstalker Adamant's escort opens and despawns a few waypoints later) never reads "active" for long. An object
+	// never seen is not gone, only not there yet: the wait runs out its timeout as before. plan-export writes it as the wait_object
+	// row's flag 256 (the TortoiseBots module's kPlanFlagGoneIsDone, the same flag a loot or open row carries). Not with state ready: a
+	// gone object is not closed.
+	GoneOK bool `json:"gone_ok,omitempty"`
 }
 
 // HostilesGone waits until no hostile unit is within Radius yards of Center (the player when nil).
@@ -917,6 +949,8 @@ type rawPullGroup struct {
 
 type rawHold struct {
 	Data     uint32    `json:"instance_data"`
+	Object   *rawRef   `json:"object"`
+	State    string    `json:"state"`
 	Spot     *rawPoint `json:"spot"`
 	Radius   float32   `json:"radius"`
 	TimeoutS int       `json:"timeout_s"`
@@ -1053,6 +1087,13 @@ type rawUse struct {
 	Stand        *rawPoint `json:"stand"`
 	RequiresItem *rawItem  `json:"requires_item"`
 	ViaItem      bool      `json:"via_item"`
+	Proof        *rawProof `json:"proof"`
+}
+
+type rawProof struct {
+	GameObject uint32  `json:"gameobject"`
+	Creature   uint32  `json:"creature"`
+	Radius     float32 `json:"radius"`
 }
 
 type rawItem struct {
@@ -1072,7 +1113,8 @@ type rawWait struct {
 
 type rawObjState struct {
 	rawRef
-	State string `json:"state"`
+	State  string `json:"state"`
+	GoneOK bool   `json:"gone_ok"`
 }
 
 type rawHostiles struct {
@@ -1774,20 +1816,44 @@ func (c *checker) hold(path string, r *rawHold, valueAllowed, unitsAllowed bool)
 	}
 	h := &Hold{Data: r.Data, Radius: r.Radius, TimeoutS: r.TimeoutS, Entries: r.Entries, Value: r.Value, SkipIfDeadOfGossip: r.SkipIfDeadOfGossip, ResetToGossip: r.ResetToGossip}
 	h.Spot = c.point(path+".spot", r.Spot)
-	switch {
-	case r.Data == 0 && r.Value != nil:
-		c.fail(path+".instance_data", "required with a value (the value is of that instance data)")
-	case r.Data == 0 && !unitsAllowed:
-		c.fail(path+".instance_data", "required (the index of the event's instance data, 1 or more); only a boss's hold may leave it out (done by its units)")
-	}
-	if r.SkipIfDeadOfGossip && (!unitsAllowed || r.Data != 0) {
-		c.fail(path+".skip_if_dead_of_gossip", "only a boss's hold done by its units (instance_data left out) takes it: a hold done by instance data ends by that data")
-	}
-	if r.ResetToGossip && (!unitsAllowed || r.Data != 0) {
-		c.fail(path+".reset_to_gossip", "only a boss's hold done by its units (instance_data left out) takes it: a hold done by instance data ends by that data")
-	}
-	if r.ResetToGossip && r.SkipIfDeadOfGossip {
-		c.fail(path+".reset_to_gossip", "cannot be combined with skip_if_dead_of_gossip: a starting NPC already dead starts no event to reset")
+	if r.Object != nil {
+		h.State = r.State
+		h.Object = &ObjectRef{Entry: r.Object.Entry, Spawn: r.Object.Spawn}
+		if r.Data != 0 {
+			c.fail(path+".instance_data", "is for a hold done by instance data; an object hold names object and state instead")
+		}
+		if r.Object.Entry == 0 {
+			c.fail(path+".object.entry", "required (the game object whose state ends the hold)")
+		}
+		if r.Object.Near != nil {
+			p := c.point(path+".object.near", r.Object.Near)
+			h.Object.Near = &p
+		}
+		if !slices.Contains(ObjectStates, r.State) {
+			c.fail(path+".state", "%q is none of %s", r.State, strings.Join(ObjectStates, ", "))
+		}
+		if r.Value != nil {
+			c.fail(path+".value", "an object hold ends on the object's state; it takes no value")
+		}
+		if r.SkipIfDeadOfGossip || r.ResetToGossip {
+			c.fail(path, "an object hold ends on the object's state; it takes neither skip_if_dead_of_gossip nor reset_to_gossip")
+		}
+	} else {
+		switch {
+		case r.Data == 0 && r.Value != nil:
+			c.fail(path+".instance_data", "required with a value (the value is of that instance data)")
+		case r.Data == 0 && !unitsAllowed:
+			c.fail(path+".instance_data", "required (the index of the event's instance data, 1 or more); only a boss's hold may leave it out (done by its units), or give object and state")
+		}
+		if r.SkipIfDeadOfGossip && (!unitsAllowed || r.Data != 0) {
+			c.fail(path+".skip_if_dead_of_gossip", "only a boss's hold done by its units (instance_data left out) takes it: a hold done by instance data ends by that data")
+		}
+		if r.ResetToGossip && (!unitsAllowed || r.Data != 0) {
+			c.fail(path+".reset_to_gossip", "only a boss's hold done by its units (instance_data left out) takes it: a hold done by instance data ends by that data")
+		}
+		if r.ResetToGossip && r.SkipIfDeadOfGossip {
+			c.fail(path+".reset_to_gossip", "cannot be combined with skip_if_dead_of_gossip: a starting NPC already dead starts no event to reset")
+		}
 	}
 	if r.Radius <= 0 || r.Radius > 100 {
 		c.fail(path+".radius", "%g: 1-100 yards (how far from the spot the event's mobs are fought)", r.Radius)
@@ -1876,6 +1942,23 @@ func (c *checker) step(path string, r *rawStep) Step {
 				c.fail(path+".use_object.via_item", "needs near and stand: the item's spell has a short range, so the stand must be within %g yd of the object", UseRange)
 			case dist3(*u.Stand, *u.Near) > UseRange:
 				c.fail(path+".use_object.stand", "is %.1f yd from near; with via_item the stand must be within %g yd (the item's spell range)", dist3(*u.Stand, *u.Near), UseRange)
+			}
+		}
+		if p := r.UseObject.Proof; p != nil {
+			pp := path + ".use_object.proof"
+			switch {
+			case (p.GameObject == 0) == (p.Creature == 0):
+				c.fail(pp, "name exactly one of gameobject and creature: the entry whose spawn shows that the use took")
+			case p.Radius <= 0 || p.Radius > MaxProofRadius:
+				c.fail(pp+".radius", "%g: more than 0 and at most %d yards around near", p.Radius, MaxProofRadius)
+			case u.ViaItem:
+				c.fail(pp, "a via_item use is the run leader's use_on, which takes no proof")
+			case u.Near == nil || u.Entry == 0:
+				c.fail(pp, "needs the object's entry and near: the proof is searched around the object's point")
+			case p.GameObject != 0 && p.GameObject == u.Entry:
+				c.fail(pp+".gameobject", "%d is the used object itself: the proof is another object", p.GameObject)
+			default:
+				u.Proof = &UseProof{GameObject: p.GameObject, Creature: p.Creature, Radius: p.Radius}
 			}
 		}
 		s.UseObject = u
@@ -2069,9 +2152,12 @@ func (c *checker) wait(path string, r *rawWait) *WaitFor {
 		w.Unit = c.unitWait(path+".unit", r.Unit)
 	case r.GameObject != nil:
 		gp := path + ".gameobject"
-		g := &ObjectState{ObjectRef: c.ref(gp, &r.GameObject.rawRef), State: r.GameObject.State}
+		g := &ObjectState{ObjectRef: c.ref(gp, &r.GameObject.rawRef), State: r.GameObject.State, GoneOK: r.GameObject.GoneOK}
 		if !validState(g.State) {
 			c.fail(gp+".state", "%q is none of %s", g.State, strings.Join(ObjectStates, ", "))
+		}
+		if r.GameObject.GoneOK && g.State == "ready" {
+			c.fail(gp+".gone_ok", "a gone object is not closed: gone_ok needs state active or active_alt")
 		}
 		w.GameObject = g
 	default:
