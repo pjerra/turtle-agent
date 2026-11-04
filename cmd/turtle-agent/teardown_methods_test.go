@@ -254,7 +254,6 @@ func TestTeardownGoesOnAfterAFailure(t *testing.T) {
 		t.Fatalf("run_stop %v", res.Steps[4])
 	}
 }
-
 // W25-5: the server may disband the group before teardown leaves it.
 // LeaveGroup then reports session.ErrNotInGroup, which must stay clean
 // (failed 0, so the CLI releases the lease) instead of a fail.
@@ -282,6 +281,7 @@ func TestTeardownLeaveGroupNotInGroupIsClean(t *testing.T) {
 		t.Fatalf("failed=%d, want 0 (the lease releases only with no failed step)", res.Failed)
 	}
 }
+
 
 func TestTeardownDryRunSendsOnlyReads(t *testing.T) {
 	f := tdBaseFake()

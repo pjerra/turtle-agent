@@ -22,9 +22,8 @@ import (
 //   - ZG walk 19 test2 s4: Zulian Tigers 11361 (Thekal's first adds, also ZG trash) fought as trash at step 89 on
 //     Venoxis's leg, ~330 yd from Thekal's position, latched the walk's boss gate and blocked a trash-wipe recovery.
 //   - Thekal phase 2: Thekal 14599 dies in phase 1 and comes back as 14509 with Zulian Guardians 15068 (plan
-//     boss.phase_entries); on THIS server no dead creature of the boss's own entry (14599) is left, so TB does not
-//     mark the step done: it pauses with "boss 14599 not found: ..." (walk 24 test2 r2), and the walk skips the step
-//     when the frames show the family killed (Part B). A leg rule would fail open there.
+//     boss.phase_entries); TB marks the step done (bossDeadNearSpot, TortoiseBots runtime/DungeonRunPolicy.h:1404) and
+//     the status moves on to arlokk while the fight goes on at Thekal's spot. A leg rule would fail open there.
 //
 // The nearest 11361 trash pull group in zul_gurub.json stands 56.5 yd from Thekal's position (on his own leg).
 const FirstAddBossRadius = 40

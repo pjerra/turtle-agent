@@ -32,19 +32,6 @@ const (
 	PlaceAheadSlack = 3
 	// PlaceUnitYd is the radius of a per-unit circle a split row becomes.
 	PlaceUnitYd = 4
-	// PlaceOwnYd is how far beyond a BEHIND pull row's radius a unit's home may stand and still be owned by that row
-	// (the spawn-home ownership test: the same 6 yd the extra clear round allows around a corridor circle).
-	PlaceOwnYd = 6
-	// PlaceSweepYd and PlaceSweepZ bound the landing sweep (PLACE-W26 M1): a BEHIND pull row whose point stands
-	// within PlaceSweepYd 2-D and PlaceSweepZ in z of the start point is cleared even when the corridor never
-	// reaches it (a leftover patrol whose loop walks into the landing). 150 yd is the farthest BEHIND patrol
-	// spawn whose loop reaches a placed ZG landing; the ZG coverage test is the real guard: raise the constant
-	// when it fails.
-	PlaceSweepYd = 150
-	PlaceSweepZ  = 60
-	// PlaceSweepSlack is added to a sweep circle's radius, so a patroller a few seconds into its loop is still
-	// inside. Capped at PlaceCircleMax like the corridor's circles.
-	PlaceSweepSlack = 10
 	// PlaceMaxCircles bounds one walk's clear: more circles than this refuse the placement.
 	PlaceMaxCircles = 40
 	// PlaceReviveYd is how close a hire's frame must be to the place point to count as placed.
@@ -55,10 +42,8 @@ const (
 	PlaceFloorYd = 3
 )
 
-// ClearCircle is one despawn circle of the place clear (spec 4.3, PLACE-W26 M1): a BEHIND creature row's circle, or,
-// for a row whose circle overlaps an AHEAD row's, one circle per unit of the plan's pull group (PerUnit,
-// PlaceUnitYd). Sweep marks a circle the M1 landing sweep added (a BEHIND pull row near the start point, outside
-// the corridor): corridor circles come first, sweep circles after, both in route then step order.
+// ClearCircle is one despawn circle of the place clear (spec 4.3): a BEHIND creature row's circle, or, for a row whose
+// circle overlaps an AHEAD row's, one circle per unit of the plan's pull group (PerUnit, PlaceUnitYd).
 type ClearCircle struct {
 	Step    int
 	Leg     int
@@ -67,7 +52,6 @@ type ClearCircle struct {
 	Entries []uint32
 	PerUnit bool
 	Unit    uint32 // the unit's entry (PerUnit only)
-	Sweep   bool   // the M1 landing sweep added this circle, not the corridor
 }
 
 // ClearPlan is PlaceClear's answer: the circles to despawn in route order, the per-unit circles it dropped and why, the
@@ -77,7 +61,6 @@ type ClearPlan struct {
 	Circles []ClearCircle
 	Notes   []string
 	Ahead   []AheadCircle
-	Behind  []BehindRow
 	Refusal string
 }
 
@@ -88,33 +71,6 @@ type AheadCircle struct {
 	X, Y, Z float32
 	Radius  float32
 	Entries []uint32
-}
-
-// BehindRow is one BEHIND pull row: any pull row before the start step, whether or not its circle reaches the corridor.
-// A unit is only BEHIND trash when such a row holds its entry and owns its home (PlacePlan.BehindOwns), because entries
-// are shared: a later leg's patrol can carry a corridor row's entry.
-type BehindRow struct {
-	Step    int
-	X, Y, Z float32
-	Radius  float32
-	Entries []uint32
-}
-
-// BehindOwns says whether a BEHIND pull row that holds the entry owns a home: the point lies within the row's radius
-// plus PlaceOwnYd, 2D, within placeAheadDz of the row's height (the z rule the AHEAD ownership test uses).
-func (p PlacePlan) BehindOwns(entry uint32, x, y, z float32) (int, bool) {
-	for _, b := range p.Behind {
-		if !holdsEntry(b.Entries, entry) {
-			continue
-		}
-		if math.Abs(float64(b.Z)-float64(z)) > placeAheadDz {
-			continue
-		}
-		if dist2f(x, y, b.X, b.Y) <= float64(b.Radius)+PlaceOwnYd {
-			return b.Step, true
-		}
-	}
-	return 0, false
 }
 
 // AheadIn says whether a point lies in an AHEAD creature row's circle (spec 5 step 6).
@@ -168,7 +124,6 @@ type PlacePlan struct {
 	Circles []ClearCircle
 	Notes   []string
 	Ahead   []AheadCircle
-	Behind  []BehindRow
 	Skips   []uint32
 }
 
@@ -263,41 +218,29 @@ func eventStep(rows planexport.Rows, i int) (int, bool) {
 
 // PlaceStart is the start step of a placed walk (spec 4.2): --from "step N" as given (a positioned move row), or
 // --from "leg L" staged at the highest move row before the leg's first creature row that has no AHEAD creature row
-// within PlaceStartClearYd. The FIRST leg needs no placement: it is a door start (door is true, step 1), and the
-// caller skips the place phase and logs `place: leg X is the first leg; starting from the door`. When the leg holds
-// no quiet row, the LAST quiet move row before that point is used, searching backward through the earlier legs (walk
-// 26c: Jeklik's leg starts with a pull); only when no quiet row stands anywhere before the first pull is the
-// placement refused. A fallback start with a boss or hold row between it and the target leg's first row is refused
-// too: the raid would re-fight it on its way to the target leg. The second answer names the leg the start came from
-// ("" for an explicit step), the third the requested leg's name when the start fell back to an earlier leg (""
-// otherwise): the caller logs `place: leg X has no quiet row; placing at step N (leg Y)`.
-func PlaceStart(rows planexport.Rows, from []string) (step int, leg, fallbackFrom string, door bool, err error) {
+// within PlaceStartClearYd. The second answer names the leg the start came from ("" for an explicit step).
+func PlaceStart(rows planexport.Rows, from []string) (int, string, error) {
 	if len(from) != 3 || from[0] != "from" {
-		return 0, "", "", false, errors.New("place: the start needs the words of --from (ParseFrom)")
+		return 0, "", errors.New("place: the start needs the words of --from (ParseFrom)")
 	}
 	switch from[1] {
 	case "step":
 		n, err := strconv.Atoi(from[2])
 		if err != nil || n < 1 || n > len(rows.Steps) {
-			return 0, "", "", false, fmt.Errorf("--place --from step %s: the rows have %d steps", from[2], len(rows.Steps))
+			return 0, "", fmt.Errorf("--place --from step %s: the rows have %d steps", from[2], len(rows.Steps))
 		}
 		s := rows.Steps[n-1]
 		if !moveRow(s) || !placedRow(s) {
-			return 0, "", "", false, fmt.Errorf("--place --from step %d: step %d is a %s row; place at a move row before it", n, n, s.Kind)
+			return 0, "", fmt.Errorf("--place --from step %d: step %d is a %s row; place at a move row before it", n, n, s.Kind)
 		}
 		if k, ok := eventStep(rows, n-1); ok {
-			return 0, "", "", false, fmt.Errorf("--place --from step %d: the start would fall into the event at step %d", n, k)
+			return 0, "", fmt.Errorf("--place --from step %d: the start would fall into the event at step %d", n, k)
 		}
-		return n, "", "", false, nil
+		return n, "", nil
 	case "leg":
 		leg, name, err := findLeg(rows, from[2])
 		if err != nil {
-			return 0, "", "", false, fmt.Errorf("--place --from leg %s: %v", from[2], err)
-		}
-		// The first leg is a door start: the walk begins at step 1 from the instance entrance exactly as a
-		// non-placed run does, so no quiet row is needed and the backward search below never runs for it.
-		if len(rows.Steps) > 0 && rows.Steps[0].Leg == leg {
-			return 1, name, "", true, nil
+			return 0, "", fmt.Errorf("--place --from leg %s: %v", from[2], err)
 		}
 		lo, hi := legSpan(rows, leg)
 		first := -1
@@ -308,7 +251,7 @@ func PlaceStart(rows planexport.Rows, from []string) (step int, leg, fallbackFro
 			}
 		}
 		if first < 0 {
-			return 0, "", "", false, fmt.Errorf("--place --from leg %s: the leg has no pull, boss or hold row", name)
+			return 0, "", fmt.Errorf("--place --from leg %s: the leg has no pull, boss or hold row", name)
 		}
 		for i := first - 1; i >= lo && i >= 0; i-- {
 			s := rows.Steps[i]
@@ -319,65 +262,13 @@ func PlaceStart(rows planexport.Rows, from []string) (step int, leg, fallbackFro
 				continue
 			}
 			if k, ok := eventStep(rows, i); ok {
-				return 0, "", "", false, fmt.Errorf("--place --from leg %s: the start would fall into the event at step %d", name, k)
+				return 0, "", fmt.Errorf("--place --from leg %s: the start would fall into the event at step %d", name, k)
 			}
-			return i + 1, name, "", false, nil
+			return i + 1, name, nil
 		}
-		// No quiet row in the leg itself: fall back to the LAST quiet move row before that point, searching
-		// backward through the earlier legs. An event row refuses like in the leg itself (the server would move the
-		// start back out of it), it is not skipped.
-		for i := lo - 1; i >= 0; i-- {
-			s := rows.Steps[i]
-			if !moveRow(s) || !placedRow(s) {
-				continue
-			}
-			if aheadCreatureWithin(rows, i, PlaceStartClearYd) {
-				continue
-			}
-			if k, ok := eventStep(rows, i); ok {
-				return 0, "", "", false, fmt.Errorf("--place --from leg %s: the start would fall into the event at step %d", name, k)
-			}
-			// The raid walks from the fallback start to the target leg: a boss or hold row between the two would be
-			// re-fought, and a boss until would resolve to it. Refuse with the old exit-2 error, naming why.
-			for j := i + 1; j < lo; j++ {
-				if bs := rows.Steps[j]; bs.Kind == planexport.KindBoss || bs.Kind == planexport.KindHold {
-					return 0, "", "", false, fmt.Errorf("--place --from leg %s: leg %s has no quiet move row before its first pull: pass --from \"step N\" (the fallback start at step %d (leg %s) stands before the %s row at step %d (leg %s); the raid would re-fight it)", name, name, i+1, startLegName(rows, s.Leg), bs.Kind, j+1, startLegName(rows, bs.Leg))
-				}
-			}
-			return i + 1, startLegName(rows, s.Leg), name, false, nil
-		}
-		return 0, "", "", false, fmt.Errorf("--place --from leg %s: leg %s has no quiet move row before its first pull: pass --from \"step N\"", name, name)
+		return 0, "", fmt.Errorf("--place --from leg %s: leg %s has no quiet move row before its first pull: pass --from \"step N\"", name, name)
 	}
-	return 0, "", "", false, fmt.Errorf("--place: --from wants \"leg L\" or \"step N\", not %q", strings.Join(from, " "))
-}
-
-// startLegName is the leg a fallback start row belongs to, as the messages name it.
-func startLegName(rows planexport.Rows, leg int) string {
-	for _, l := range rows.Legs {
-		if l.Leg == leg {
-			return legName(l)
-		}
-	}
-	return strconv.Itoa(leg)
-}
-
-// PlaceUntilBase is the step a boss or boss-done until is resolved from when the start fell back to an earlier leg:
-// the TARGET leg's first row. Resolving from the fallback start would answer the earlier leg's boss, which the raid
-// meets on its way to the target leg (PlaceStart refuses the fallback when a boss or hold row lies between, but the
-// base stays the target leg's regardless).
-func PlaceUntilBase(rows planexport.Rows, targetLeg string, start int) int {
-	if targetLeg == "" {
-		return start
-	}
-	leg, _, err := findLeg(rows, targetLeg)
-	if err != nil {
-		return start
-	}
-	lo, _ := legSpan(rows, leg)
-	if lo < 0 {
-		return start
-	}
-	return lo + 1
+	return 0, "", fmt.Errorf("--place: --from wants \"leg L\" or \"step N\", not %q", strings.Join(from, " "))
 }
 
 // FromStartStep is the step a --from clause starts the run leader at without --place (spec 5.2): N for "step N", the
@@ -527,73 +418,6 @@ func routeDistance(route []dungeon.Point, x, y float32) (d float64, z float64) {
 	return best, z
 }
 
-// routeSteps is the step numbers of the positioned rows from start to stop, in order (the same filter as routePoints).
-func routeSteps(rows planexport.Rows, start, stop int) []int {
-	if start < 1 {
-		start = 1
-	}
-	if stop > len(rows.Steps) {
-		stop = len(rows.Steps)
-	}
-	var out []int
-	for i := start - 1; i < stop; i++ {
-		if !placedRow(rows.Steps[i]) {
-			continue
-		}
-		out = append(out, i+1)
-	}
-	return out
-}
-
-// PlaceBossGuard walks the route from start to stop segment by segment against every BEHIND boss or hold row (the same
-// test as PlaceClear's guard: route distance minus the row's radius <= PlaceBossGuardYd and dz <= PlaceCorridorZ).
-// A placed run is a fresh copy, so those bosses are alive. For the first segment a -> b that comes within the guard:
-//   - b in the start step's own leg (or a == start): refusal, the message PlaceClear gives today;
-//   - b in a later leg: until = b (`until step b` stops before b, so the run never walks a -> b), routeEnd = a (the
-//     corridor's route end), and a note naming the row, its leg, the distance and the two steps. When b is the stop
-//     itself, until == stop: the caller must still shorten, so hit says a segment came within the guard at all.
-//
-// With no segment within the guard: until = routeEnd = stop, no note, hit false.
-func PlaceBossGuard(rows planexport.Rows, start, stop int) (until, routeEnd int, note, refusal string, hit bool) {
-	until, routeEnd = stop, stop
-	if start < 1 {
-		return until, routeEnd, "", "", false
-	}
-	steps := routeSteps(rows, start, stop)
-	if len(steps) < 2 {
-		return until, routeEnd, "", "", false
-	}
-	startLeg := rows.Steps[start-1].Leg
-	for i := 0; i+1 < len(steps); i++ {
-		a, b := rows.Steps[steps[i]-1], rows.Steps[steps[i+1]-1]
-		seg := []dungeon.Point{{X: a.X, Y: a.Y, Z: a.Z}, {X: b.X, Y: b.Y, Z: b.Z}}
-		for j := 0; j < start-1 && j < len(rows.Steps); j++ {
-			s := rows.Steps[j]
-			if !creatureRow(s) || !placedRow(s) {
-				continue
-			}
-			if s.Kind != planexport.KindBoss && s.Kind != planexport.KindHold {
-				continue
-			}
-			d, z := routeDistance(seg, s.X, s.Y)
-			if d-float64(s.Radius) > PlaceBossGuardYd || math.Abs(float64(s.Z)-z) > PlaceCorridorZ {
-				continue
-			}
-			if steps[i] == start || b.Leg == startLeg {
-				return stop, stop, "", fmt.Sprintf("boss/event row %d of leg %d is within %.0f yd of the route: start later or walk from the door", j+1, s.Leg, d), true
-			}
-			kind := "boss"
-			if s.Kind == planexport.KindHold {
-				kind = "hold"
-			}
-			note = fmt.Sprintf("the run stops before step %d (until step %d): the route from step %d to %d passes %.0f yd from BEHIND %s row %d of leg %d, which a placed run leaves alive",
-				steps[i+1], steps[i+1], steps[i], steps[i+1], d, kind, j+1, s.Leg)
-			return steps[i+1], steps[i], note, "", true
-		}
-	}
-	return until, routeEnd, "", "", false
-}
-
 // circleRadius is a BEHIND pull row's circle radius (spec 4.3).
 func circleRadius(row float32) float32 {
 	r := row + PlaceCircleSlack
@@ -727,28 +551,16 @@ func aheadInside(ahead []aheadRow, x, y, z float32) (int, bool) {
 // placeAheadDz is the vertical window of the overlap test (spec 4.3).
 const placeAheadDz = 8
 
-// PlaceClear is the corridor clear plus the M1 landing sweep (spec 4.3, PLACE-W26 §3). One circle per BEHIND pull
-// row whose circle comes within PlaceCorridorYd of the route from start to stop and within PlaceCorridorZ of the
-// route's height; then one circle per BEHIND pull row near the start point (within PlaceSweepYd 2-D and PlaceSweepZ
-// in z) that the corridor did not already take. Boss and hold rows are never swept, and the sweep adds no refusal
-// (the boss guard stays route-based). A row whose circle overlaps an AHEAD creature row's is split into per-unit
-// circles (PlaceUnitYd), and a unit that still lies inside the AHEAD circle is dropped and named. A BEHIND boss or
-// hold row within PlaceBossGuardYd of the route refuses the placement: no `boss` flag is ever sent.
+// PlaceClear is the corridor clear (spec 4.3). One circle per BEHIND pull row whose circle comes within
+// PlaceCorridorYd of the route from start to stop and within PlaceCorridorZ of the route's height; a row whose circle
+// overlaps an AHEAD creature row's is split into per-unit circles (PlaceUnitYd), and a unit that still lies inside the
+// AHEAD circle is dropped and named. A BEHIND boss or hold row within PlaceBossGuardYd of the route refuses the
+// placement: no `boss` flag is ever sent.
 func PlaceClear(rows planexport.Rows, plan *dungeon.Plan, start, stop int) ClearPlan {
 	var out ClearPlan
 	route := routePoints(rows, start, stop)
 	if len(route) == 0 {
 		return out
-	}
-	// Every BEHIND pull row, whether or not its circle reaches the corridor: the spawn-home ownership test reads the
-	// row's own area and entries, not only the corridor's circles.
-	for i := 0; i < start-1 && i < len(rows.Steps); i++ {
-		s := rows.Steps[i]
-		if s.Kind != planexport.KindPull || !placedRow(s) {
-			continue
-		}
-		out.Behind = append(out.Behind, BehindRow{Step: i + 1, X: s.X, Y: s.Y, Z: s.Z, Radius: s.Radius,
-			Entries: append([]uint32{}, s.Entries...)})
 	}
 	// The AHEAD set is every creature row from the start step to the LAST row of the plan, not to the until stop: a
 	// BEHIND circle may overlap a pack of a later leg that the run reaches after the stop, and the split must see it
@@ -761,7 +573,6 @@ func PlaceClear(rows planexport.Rows, plan *dungeon.Plan, start, stop int) Clear
 				Radius: rows.Steps[i].Radius, Entries: append([]uint32{}, rows.Steps[i].Entries...)})
 		}
 	}
-	circled := map[int]bool{} // steps already the source of a circle: the sweep never doubles a corridor row
 	for i := 0; i < start-1 && i < len(rows.Steps); i++ {
 		s := rows.Steps[i]
 		if !creatureRow(s) || !placedRow(s) {
@@ -780,57 +591,30 @@ func PlaceClear(rows planexport.Rows, plan *dungeon.Plan, start, stop int) Clear
 		if d-float64(s.Radius) > PlaceCorridorYd || dz > PlaceCorridorZ {
 			continue
 		}
-		behindCircles(&out, plan, rows, ahead, i, s, circleRadius(s.Radius), false)
-		circled[i+1] = true
-	}
-	// M1 landing sweep: BEHIND pull rows near the start point, ascending by step. The corridor's way, with sweep
-	// slack on the radius and Sweep set. The start point is rows.Steps[start-1].
-	if start-1 >= 0 && start-1 < len(rows.Steps) {
-		sp := rows.Steps[start-1]
-		for i := 0; i < start-1 && i < len(rows.Steps); i++ {
-			s := rows.Steps[i]
-			if s.Kind != planexport.KindPull || !placedRow(s) || circled[i+1] {
+		if hit, ok := aheadHit(ahead, s.X, s.Y, s.Z, circleRadius(s.Radius)); ok {
+			units := groupPositions(plan, rows, s)
+			if len(units) == 0 {
+				out.Notes = append(out.Notes, fmt.Sprintf("not cleared: row %d has no pull group positions and its circle overlaps AHEAD row %d", i+1, hit))
 				continue
 			}
-			if dist2f(s.X, s.Y, sp.X, sp.Y) > PlaceSweepYd || math.Abs(float64(s.Z)-float64(sp.Z)) > PlaceSweepZ {
-				continue
+			for _, u := range units {
+				if k, inside := aheadInside(ahead, u.X, u.Y, u.Z); inside {
+					out.Notes = append(out.Notes, fmt.Sprintf("not cleared: unit %d at %.0f %.0f %.0f lies in AHEAD row %d", u.Entry, u.X, u.Y, u.Z, k))
+					continue
+				}
+				out.Circles = append(out.Circles, ClearCircle{Step: i + 1, Leg: s.Leg, X: u.X, Y: u.Y, Z: u.Z,
+					Radius: PlaceUnitYd, Entries: []uint32{u.Entry}, PerUnit: true, Unit: u.Entry})
 			}
-			r := s.Radius + PlaceCircleSlack + PlaceSweepSlack
-			if r > PlaceCircleMax {
-				r = PlaceCircleMax
-			}
-			behindCircles(&out, plan, rows, ahead, i, s, r, true)
+			continue
 		}
+		out.Circles = append(out.Circles, ClearCircle{Step: i + 1, Leg: s.Leg, X: s.X, Y: s.Y, Z: s.Z,
+			Radius: circleRadius(s.Radius), Entries: append([]uint32{}, s.Entries...)})
 	}
 	if len(out.Circles) > PlaceMaxCircles {
 		out.Refusal = fmt.Sprintf("the route passes %d packs of earlier legs: use --until to shorten it", len(out.Circles))
 		out.Circles = nil
 	}
 	return out
-}
-
-// behindCircles appends the clear's circles for one BEHIND row i (spec 4.3, PLACE-W26 M1): the row's circle at radius
-// r, or, when it overlaps an AHEAD row's, one per-unit circle (PlaceUnitYd) per member of the plan's pull group, with
-// the same notes. Sweep marks circles the M1 landing sweep added.
-func behindCircles(out *ClearPlan, plan *dungeon.Plan, rows planexport.Rows, ahead []aheadRow, i int, s planexport.StepRow, r float32, sweep bool) {
-	if hit, ok := aheadHit(ahead, s.X, s.Y, s.Z, r); ok {
-		units := groupPositions(plan, rows, s)
-		if len(units) == 0 {
-			out.Notes = append(out.Notes, fmt.Sprintf("not cleared: row %d has no pull group positions and its circle overlaps AHEAD row %d", i+1, hit))
-			return
-		}
-		for _, u := range units {
-			if k, inside := aheadInside(ahead, u.X, u.Y, u.Z); inside {
-				out.Notes = append(out.Notes, fmt.Sprintf("not cleared: unit %d at %.0f %.0f %.0f lies in AHEAD row %d", u.Entry, u.X, u.Y, u.Z, k))
-				continue
-			}
-			out.Circles = append(out.Circles, ClearCircle{Step: i + 1, Leg: s.Leg, X: u.X, Y: u.Y, Z: u.Z,
-				Radius: PlaceUnitYd, Entries: []uint32{u.Entry}, PerUnit: true, Unit: u.Entry, Sweep: sweep})
-		}
-		return
-	}
-	out.Circles = append(out.Circles, ClearCircle{Step: i + 1, Leg: s.Leg, X: s.X, Y: s.Y, Z: s.Z,
-		Radius: r, Entries: append([]uint32{}, s.Entries...), Sweep: sweep})
 }
 
 // PlaceSkips is the union of every leg's skip list, sorted (spec 4.3): the entries the toolkit's quiet and clearto

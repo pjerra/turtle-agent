@@ -16,10 +16,6 @@ var (
 	gearTierRe  = regexp.MustCompile(`^[1-3]$`)
 )
 
-// GMVisibleOff is the one `.gm` line raid-walk may send, verbatim: the revive hides the commander before it appears
-// next to a hire (review round 2, L2). Besides `.gm on` (the place phase's probe) no other `.gm` form passes.
-const GMVisibleOff = ".gm visible off"
-
 // AllowedLine says whether raid-walk may send line through the gm RPC (spec 3.6): every line must match one of
 // the forms, with its arguments checked, and a bot name must be one of the walk's hires. mapID is the walk's plan
 // map: `.instance unbind` may name that map and no other (spec 7). The command checks every gm line with it before
@@ -27,9 +23,6 @@ const GMVisibleOff = ".gm visible off"
 func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
 	if strings.ContainsAny(line, "\r\n") {
 		return false
-	}
-	if line == GMVisibleOff {
-		return true
 	}
 	if runResumeRe.MatchString(line) {
 		return true
@@ -48,8 +41,8 @@ func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
 	switch f[0] {
 	case ".gm":
 		// The place phase's GM-mode probe (spec 5 step 1, review round 1, item 12): the commander must be in GM mode
-		// before the first teleport, and `.gm on` is the only read of that state (it is a no-op already ON). Besides
-		// the exact GMVisibleOff line (checked above) nothing else may be typed into the GM console.
+		// before the first teleport, and `.gm on` is the only read of that state (it is a no-op already ON). Nothing
+		// else may be typed into the GM console.
 		return len(f) == 2 && f[1] == "on"
 	case ".go":
 		if len(f) != 6 || f[1] != "xyz" {
@@ -71,7 +64,7 @@ func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
 	case ".summon", ".revive":
 		return len(f) == 2 && hires[f[1]]
 	case ".appear":
-		// The place phase's way into the raid's copy (spec 5 step 3), and the revive's (joinHires): a hire, and only a hire.
+		// The place phase's way into the raid's copy (spec 5 step 3): a hire, and only a hire.
 		return len(f) == 2 && hires[f[1]]
 	case ".instance":
 		// `.instance unbind <map>` drops the commander's own bind to the walk's plan map (spec 5.1): that map and no other.
@@ -125,14 +118,9 @@ func allowedHireRaid(f []string) bool {
 // request id and room to spare (the toolkit's own cap is 200).
 const AllowedTTMax = 200
 
-// MaxTTEntry is the largest creature entry a toolkit line may name: the toolkit's own number reader refuses
-// anything at or above 1e7 (tt_commands.lua num), so a bigger one is a bug on our side.
-const MaxTTEntry = 9999999
-
 // AllowedTT says whether raid-walk may send cmd to the Eluna test toolkit (the `tt` RPC, spec 7): one line, no `#`
-// (the agent adds the request id), at most AllowedTTMax characters, and one of the forms the place phase and the
-// boss-kill read need. Never: kill, boss, force, me, reset, here, a clearto without dz=, another map, a name that
-// is not a hire.
+// (the agent adds the request id), at most AllowedTTMax characters, and one of the forms the place phase needs.
+// Never: kill, boss, force, me, reset, here, a clearto without dz=, another map, a name that is not a hire.
 func AllowedTT(cmd string, hires map[string]bool, mapID uint32) bool {
 	if cmd == "" || len(cmd) > AllowedTTMax || strings.ContainsAny(cmd, "\r\n#") {
 		return false
@@ -152,17 +140,8 @@ func AllowedTT(cmd string, hires map[string]bool, mapID uint32) bool {
 			return len(f) == 3 && ttHire(f[2], hires)
 		case "units":
 			// The radius cap is the quiet's roamer scope (80): the walk joins the quiet's roamers to a `q units` read of
-			// their own (item 4). The corridor's pre-reads stay far inside it. The boss-kill read adds `dead` and
-			// `e=<entry>` (review round 1, item 1): the corpses too, one entry, near the boss row.
-			if len(f) < 7 || f[6] != "all" || !ttRadius(f[2], 80) || !ttNumbers(f[3:6]) {
-				return false
-			}
-			for _, extra := range f[7:] {
-				if extra != "dead" && !ttKVNum(extra, "e", 1, MaxTTEntry) {
-					return false
-				}
-			}
-			return true
+			// their own (item 4). The corridor's pre-reads stay far inside it.
+			return len(f) == 7 && ttRadius(f[2], 80) && ttNumbers(f[3:6]) && f[6] == "all"
 		}
 	case "quiet":
 		// quiet <r<=50> <x> <y> <z> w=<0..30> dz=<1..15> [skip=<ids>]
