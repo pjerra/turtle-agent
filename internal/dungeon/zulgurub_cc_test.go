@@ -55,8 +55,11 @@ func TestZulGurubTrashCcLists(t *testing.T) {
 			t.Errorf("cc_priority %v holds %d (never CC: 14826 respawns, 11368 is AoE fodder, 11352/14750 are Polymorph-immune)", p.CCPriority, e)
 		}
 	}
-	// coreTmpl is {entry: (creatureType, mechanicImmuneMask)} copied from
-	// tortoise-wow sql/base/tw_world_creature_template.sql (5d79486):
+	// coreTmpl is {entry: (creature_template.type, creature_template.mechanic_immune_mask)} copied from
+	// tortoise-wow sql/base/tw_world_creature_template.sql @5d79486 (commit "mangosd: build gsoap from source, ...",
+	// 2026-09-16; the file predates it: last content change e1a48b4 "Initial 1.18.1-7272 spell implimentation").
+	// Re-check: `git show 5d79486:sql/base/tw_world_creature_template.sql | grep -o '(<entry>,[^)]*)'`
+	// and read the `type` and `mechanic_immune_mask` columns of the CREATE TABLE header.
 	// type 1 Beast, 3 Demon, 6 Undead, 7 Humanoid; mask bit (1 << (mechanic-1)).
 	coreTmpl := []struct {
 		entry uint32
