@@ -280,9 +280,9 @@ func TestPlansOnNavmeshWhereTheMachineHasIt(t *testing.T) {
 // live export was checked against and the m910q mmaps differ there by about a yard). The TB guard pins these coordinates,
 // so they cannot be snapped or flagged without making a valid pull "needs a mapping walk".
 var navmeshKnownOff = map[string]map[string]bool{
-	"crescent_grove":  {"pull_groups[49].approach[1]": true},
-	"razorfen_downs":  {"pull_groups[6].positions[5]": true},
-	"scholomance":     {"pull_groups[18].approach[0]": true},
+	"crescent_grove": {"pull_groups[49].approach[1]": true},
+	"razorfen_downs": {"pull_groups[6].positions[5]": true},
+	"scholomance":    {"pull_groups[18].approach[0]": true},
 }
 
 // needsWalkPoints are the points of a leg marked needs_walk: its To, a flagged pull group's positions, a flagged boss's position,
