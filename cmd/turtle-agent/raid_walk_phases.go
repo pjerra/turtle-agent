@@ -329,6 +329,14 @@ const hireRetryWait = 30 * time.Second
 func (w *walk) phaseHire(ctx context.Context) error {
 	lines := w.roster.HireLines()
 	for i, b := range w.roster.Batches {
+		// The server hires at most HireCap bots: a roster that asks for more (the 40-man raids) has its last
+		// batches skipped whole, so a one-bot last batch is not refused as "maximum companions" (v2 rosters
+		// name every bot's class, so the last seat is often a batch of its own).
+		if len(w.hires) >= raidwalk.HireCap {
+			w.note("hire cap %d: batch %s skipped, the raid is full", raidwalk.HireCap, b.Hire)
+			w.logLine(w.env.now(), fmt.Sprintf("hire cap %d: batch %s skipped", raidwalk.HireCap, b.Hire))
+			continue
+		}
 		before, err := w.partyNames(ctx)
 		if err != nil {
 			return stopf(exitRaidWalkFailed, "party: %v", err)
@@ -1220,7 +1228,7 @@ func (w *walk) applySpec(ctx context.Context, name, spec string) error {
 	if err := w.gm(ctx, line); err != nil {
 		return err
 	}
-	okPrefix := fmt.Sprintf("Bot %s role set to ", name)
+	okPrefix := fmt.Sprintf("Bot %s role set to %s", name, raidwalk.SpecRole(spec))
 	bad := func(text string) bool {
 		return strings.HasPrefix(text, fmt.Sprintf("Bot %s does not use that spec", name)) ||
 			strings.HasPrefix(text, fmt.Sprintf("Bot %s has no AI yet", name)) ||

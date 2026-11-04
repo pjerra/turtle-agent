@@ -27,7 +27,7 @@ type Batch struct {
 	Role  string `json:"role"`
 	Hire  string `json:"hire"`
 	Spec  string `json:"spec,omitempty"`
-	Count int    `json:"count,omitempty"`
+	Count *int   `json:"count,omitempty"`
 
 	tokens []hireToken
 }
@@ -274,14 +274,14 @@ func (r *Roster) check(p *dungeon.Plan) error {
 // single class, and must not contradict the role the hire names; count, when given, must be the
 // batch's size. A v1 roster takes neither field.
 func (r *Roster) checkSpec(i int, b *Batch, n int) error {
-	if b.Spec == "" && b.Count == 0 {
+	if b.Spec == "" && b.Count == nil {
 		return nil
 	}
 	if r.Version < 2 {
 		return fmt.Errorf("roster batch %d (%s): spec and count need roster version 2", i+1, b.Role)
 	}
-	if b.Count != 0 && b.Count != n {
-		return fmt.Errorf("roster batch %d (%s): count %d, the hire hires %d", i+1, b.Role, b.Count, n)
+	if b.Count != nil && *b.Count != n {
+		return fmt.Errorf("roster batch %d (%s): count %d, the hire hires %d", i+1, b.Role, *b.Count, n)
 	}
 	if b.Spec == "" {
 		return nil

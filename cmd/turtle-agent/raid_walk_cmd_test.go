@@ -82,16 +82,17 @@ type walkFakeAgent struct {
 	t          *testing.T
 	clock      *fakeClock
 
-	mu        sync.Mutex
-	calls     []string
-	gm        []string
-	gmUnits   []int
-	timeline  []timelineEntry
-	party     []string
-	nameSeq   int
-	startArgs string
-	roleLines []string // every `.bot role` line, in order
-	roleFail  bool     // the server refuses every `.bot role` ("does not use that spec")
+	mu         sync.Mutex
+	calls      []string
+	gm         []string
+	gmUnits    []int
+	timeline   []timelineEntry
+	party      []string
+	nameSeq    int
+	startArgs  string
+	roleLines  []string // every `.bot role` line, in order
+	roleFail   bool     // the server refuses every `.bot role` ("does not use that spec")
+	roleSilent bool     // the server never answers `.bot role`
 
 	entered  bool
 	status   session.StatusInfo
@@ -564,12 +565,13 @@ func (f *walkFakeAgent) gmSide(line string) {
 		f.mu.Lock()
 		f.roleLines = append(f.roleLines, line)
 		fail := f.roleFail
+		silent := f.roleSilent
 		f.mu.Unlock()
-		if len(fields) == 4 {
+		if len(fields) == 4 && !silent {
 			if fail {
 				f.push(fmt.Sprintf("Bot %s does not use that spec.", fields[2]), "")
 			} else {
-				f.push(fmt.Sprintf("Bot %s role set to tank.", fields[2]), "")
+				f.push(fmt.Sprintf("Bot %s role set to %s.", fields[2], raidwalk.SpecRole(fields[3])), "")
 			}
 		}
 	case strings.HasPrefix(line, ".go xyz "):
@@ -5350,6 +5352,72 @@ func TestRaidWalkRefusedSpecStopsBeforeTheRefit(t *testing.T) {
 	for _, line := range f.agent.gmLines() {
 		if strings.HasPrefix(line, ".bot gear raid ") {
 			t.Fatal("the refit went out after a refused spec")
+		}
+	}
+}
+
+// A 40-bot roster whose last spec batch is one bot: the server's 39-bot cap fills the earlier batches,
+// the last batch is skipped whole (the server would refuse it as "maximum companions"), and the walk
+// goes on with the cap note.
+func TestRaidWalkSkipsBatchesBeyondTheHireCap(t *testing.T) {
+	f := newFixture(t)
+	roster := `{"format":"tb-raid-roster","version":2,"level":60,"tier":2,
+ "batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection"},
+            {"role":"ot","hire":"3t"},
+            {"role":"rest","hire":"10h 25d"},
+            {"role":"rest","hire":"1 mage","spec":"fire"}]}`
+	path := filepath.Join(t.TempDir(), "roster.json")
+	if err := os.WriteFile(path, []byte(roster), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.opts.hires = path
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.stderr.String())
+	}
+	if len(f.agent.party) != raidwalk.HireCap {
+		t.Fatalf("party holds %d bots, want the capped %d", len(f.agent.party), raidwalk.HireCap)
+	}
+	if !hasNote(f.summary(), "hire cap 39: asked for 40 bots, the server hired 39") {
+		t.Fatalf("summary notes %q, want the hire cap note", f.summary().Notes)
+	}
+	for _, line := range f.agent.gmLines() {
+		if strings.HasPrefix(line, ".bot hire raid 1 mage") {
+			t.Fatalf("the batch beyond the cap was sent: %q", line)
+		}
+		if strings.HasPrefix(line, ".bot role ") && strings.HasSuffix(line, " fire") {
+			t.Fatalf("a spec of the skipped batch was set: %q", line)
+		}
+	}
+	if got := f.agent.roleOrder(); len(got) != 1 || got[0] != ".bot role Bot01 protection" {
+		t.Fatalf("role lines %q, want only the mt's", got)
+	}
+}
+
+// The server never answers `.bot role`: the walk stops before the refit, so no tier kit is set on a bot
+// whose spec is unknown.
+func TestRaidWalkWaitsForTheSpecReplyBeforeTheRefit(t *testing.T) {
+	f := newFixture(t)
+	f.agent.roleSilent = true
+	roster := `{"format":"tb-raid-roster","version":2,"level":60,"tier":2,
+ "batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection"},
+            {"role":"ot","hire":"1t"},
+            {"role":"rest","hire":"18d"}]}`
+	path := filepath.Join(t.TempDir(), "roster.json")
+	if err := os.WriteFile(path, []byte(roster), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.opts.hires = path
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	if !strings.Contains(f.summary().EndReason, "no answer to .bot role Bot01 protection") {
+		t.Fatalf("end reason %q, want the unanswered role line", f.summary().EndReason)
+	}
+	for _, line := range f.agent.gmLines() {
+		if strings.HasPrefix(line, ".bot gear raid ") {
+			t.Fatal("the refit went out without the spec applied")
 		}
 	}
 }

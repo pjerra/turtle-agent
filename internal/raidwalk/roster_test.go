@@ -219,6 +219,7 @@ func TestRosterV2Specs(t *testing.T) {
 		{"wrong role spec", `{"format":"tb-raid-roster","version":2,"level":60,"batches":[{"role":"mt","hire":"1 warrior:tank","spec":"arms"},{"role":"rest","hire":"10h 26d"}]}`, "the hire says tank"},
 		{"default role spec", `{"format":"tb-raid-roster","version":2,"level":60,"batches":[{"role":"mt","hire":"1t"},{"role":"rest","hire":"1 druid","spec":"bear"}]}`, "the hire says healer"},
 		{"count mismatch", `{"format":"tb-raid-roster","version":2,"level":60,"batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection","count":2},{"role":"rest","hire":"10h 26d"}]}`, "count 2"},
+		{"count zero", `{"format":"tb-raid-roster","version":2,"level":60,"batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection","count":0},{"role":"rest","hire":"10h 26d"}]}`, "count 0"},
 		{"bad spec", `{"format":"tb-raid-roster","version":2,"level":60,"batches":[{"role":"mt","hire":"1 warrior:tank","spec":"prot"},{"role":"rest","hire":"10h 26d"}]}`, "not a warrior spec"},
 	}
 	for _, c := range refuse {
