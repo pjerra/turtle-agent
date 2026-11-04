@@ -66,11 +66,19 @@ const (
 	GMClearNotSeen     = "not seen"     // no frame showed this member alive or dead: it was never in the commander's view
 	GMClearAlive       = "alive"        // the member was seen alive and the kill lines did not bring a death
 	GMClearAlreadyDead = "already dead" // the member's frames showed it dead before any line was sent (Killed true, Tries 0)
+	// GMClearDespawned marks a member the walk's own corridor clear had already despawned in this instance before the tool
+	// ran (Killed true, Tries 0). The client's object store does not drop a despawned unit, so the frames still show it
+	// alive; the server no longer has it, and every `.die` on its guid is a no-op (walk 35: 52 members of the Jin'do hall
+	// groups, ~25 min of fruitless retries).
+	GMClearDespawned = "despawned by the corridor clear"
+	// GMClearGaveUp marks a member the tool never got to because the clear's time budget ran out (Killed false, Tries 0).
+	GMClearGaveUp = "not tried: the gm-clear budget ran out"
 )
 
-// GMClearEntry is one expected pack member: the summary's gm_clear list and the report's table. Killed says the unit's frames showed
-// it dead; Tries counts the kill lines sent (gmClearTries at most). A member that is not Killed has a Reason (GMClearNotSeen, GMClearAlive) and
-// leaves the clear PARTIAL. GUID is the unit's world guid, or "spawn <n>" (the export's spawn guid) for a member never seen.
+// GMClearEntry is one expected pack member: the summary's gm_clear list and the report's table. Killed says the unit is gone from the
+// instance: its frames showed it dead, or the walk's corridor clear despawned it. Tries counts the kill lines sent (gmClearTries at
+// most). A member that is not Killed has a Reason (GMClearNotSeen, GMClearAlive, GMClearGaveUp) and leaves the clear PARTIAL. GUID is
+// the unit's world guid, or "spawn <n>" (the export's spawn guid) for a member never seen.
 type GMClearEntry struct {
 	Leg    string `json:"leg"`
 	Group  string `json:"group"`
@@ -341,23 +349,30 @@ func GMClearUncleared(es []GMClearEntry) []string {
 }
 
 // GMClearSummaryLine is the one ASSISTED line of summary.txt and the report; a PARTIAL clear says how many members are left and which
-// groups were not cleared.
+// groups were not cleared. A member the tool's budget left untried is counted apart from the ones its lines could not kill.
 func GMClearSummaryLine(es []GMClearEntry, legs []string) string {
 	killed, left := GMClearCounts(es)
 	line := fmt.Sprintf("ASSISTED: --gm-clear killed %d units by GM command (%s); this is not a real clear", killed, strings.Join(legs, ", "))
 	if left > 0 {
-		var notSeen, alive int
+		var notSeen, alive, untried int
 		for _, e := range es {
 			if e.Killed {
 				continue
 			}
-			if e.Reason == GMClearNotSeen {
+			switch e.Reason {
+			case GMClearNotSeen:
 				notSeen++
-			} else {
+			case GMClearGaveUp:
+				untried++
+			default:
 				alive++
 			}
 		}
-		line += fmt.Sprintf("; PARTIAL: %d members left (%d not seen, %d alive)", left, notSeen, alive)
+		line += fmt.Sprintf("; PARTIAL: %d members left (%d not seen, %d alive", left, notSeen, alive)
+		if untried > 0 {
+			line += fmt.Sprintf(", %d not tried", untried)
+		}
+		line += ")"
 		if groups := GMClearUncleared(es); len(groups) > 0 {
 			line += "; groups not cleared: " + strings.Join(groups, ", ")
 		}

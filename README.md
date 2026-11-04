@@ -2595,7 +2595,13 @@ AQ20 walk starts at Rajaxx with `--gm-clear-boss kurinnaxx` so Kurinnaxx is dead
   `HandleDieCommand` at `Commands.cpp:2795` kills the selected unit). The death is read from the unit's frames (`dead`, 5 s); a unit
   that is still alive gets up to three more `.die` lines, 3 s apart. Every stop is visited and read in two rounds, always (an empty read
   ends nothing). A member never seen is recorded `killed: false, reason: "not seen"`, one that would not die `reason: "alive"`, one
-  already dead `reason: "already dead"` (killed, 0 tries). Either of the first two makes the clear **PARTIAL**: noted, in the summary
+  already dead `reason: "already dead"` (killed, 0 tries), one **this walk's own corridor clear already despawned**
+  `reason: "despawned by the corridor clear"` (killed, 0 tries, no line sent: the clearto reply's `removed` list names those units, and
+  the server no longer has them while the client's object store still shows them alive, so a `.die` on their guid is a no-op — that was
+  walk 35's 52 `alive after 4 tries` members in the Jin'do hall, ~25 min of retries per placement), and one the tool's **budget** left
+  untried `reason: "not tried: the gm-clear budget ran out"` (5 minutes for the whole tool; past it no more lines go out, a
+  `gm-clear: WARN: gave up after 5m0s ...` line names it, and the placement goes on). A not-seen, alive or not-tried member makes the
+  clear **PARTIAL**: noted, in the summary
   (`gm_clear_partial: true`, `ASSISTED PARTIAL` on the result line, `groups not cleared: <leg>:<groups>` with a leg's consecutive
   numbers as a range, e.g. `high_priestess_arlokk:12-17`) and in the report. A group that is still alive after its retries never fails
   the placement: a `gm-clear: WARN: <leg>:<group> not cleared ...` line names it, and the quiet and the landing read skip that pack's

@@ -321,3 +321,28 @@ func TestGMClearUnclearedGroups(t *testing.T) {
 		t.Fatalf("a fully killed clear lists %v", got)
 	}
 }
+
+// A member the walk's own clear despawned is Killed with 0 tries and does not make the clear PARTIAL; a member the tool's budget
+// left untried is left, counted apart from the ones its lines could not kill (walk 35: the corridor clear's despawned packs, and
+// the 5-minute ceiling for a unit that will not die).
+func TestGMClearDespawnedIsNoPartialAndBudgetIsCounted(t *testing.T) {
+	es := []GMClearEntry{
+		{Leg: "jindo_the_hexxer", Group: "5", Entry: 14825, GUID: "spawn 49397", Killed: true, Reason: GMClearDespawned},
+		{Leg: "jindo_the_hexxer", Group: "5", Entry: 14882, GUID: "0xF130003A2200C0F7", Killed: true, Tries: 1},
+	}
+	line := GMClearSummaryLine(es, []string{"jindo_the_hexxer"})
+	if strings.Contains(line, "PARTIAL") || !strings.Contains(line, "killed 1 units") {
+		t.Fatalf("line %q: a despawned member is no partial and no GM kill", line)
+	}
+	if k, left := GMClearCounts(es); k != 1 || left != 0 {
+		t.Fatalf("counts %d/%d, want 1 killed by the tool and nothing left", k, left)
+	}
+	es = append(es, GMClearEntry{Leg: "jindo_the_hexxer", Group: "6", Entry: 14883, GUID: "0xF130003A2300C0E5", Reason: GMClearGaveUp})
+	line = GMClearSummaryLine(es, []string{"jindo_the_hexxer"})
+	if !strings.Contains(line, "PARTIAL: 1 members left (0 not seen, 0 alive, 1 not tried)") {
+		t.Fatalf("line %q", line)
+	}
+	if got := GMClearUncleared(es); len(got) != 1 || got[0] != "jindo_the_hexxer:6" {
+		t.Fatalf("uncleared %v", got)
+	}
+}
