@@ -459,7 +459,7 @@ func TestDeadminesPlanPointsOnMesh(t *testing.T) {
 // while any is open.
 type deadminesExemption struct{ Reason, Settled string }
 
-const defiasCompanion = 3450 // summoned with a Pirate (EventAI 65701, Bloodsail Companion 5172): a level 14-15 hostile, no spawn row
+const defiasCompanion = 3450    // summoned with a Pirate (EventAI 65701, Bloodsail Companion 5172): a level 14-15 hostile, no spawn row
 const manufacturedGolem = 61962 // a Goblin Engineer 622's golem: one spawn has no row where the summoned one stands on the engineer
 
 // deadminesDoorsVerified is the finding of the 2026-10-15 walk on the two script-less Heavy Doors (spawns 26183 and 26184): shut at the start (state ready,
