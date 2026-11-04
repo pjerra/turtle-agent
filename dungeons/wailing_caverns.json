@@ -530,7 +530,10 @@
           "positions": [
             {"x": -50.5, "y": 81.7, "z": -106.2}
           ],
-          "radius": 23.8
+          "radius": 23.8,
+          "approach": [
+            {"x": -50, "y": 112, "z": -105.42}
+          ]
         },
         {
           "entries": [5053],
@@ -547,14 +550,20 @@
             ],
             "period_s": 66,
             "source": "creature_movement guid 26197 (entry 5053); period_s measured on the live walk 2026-10-15 (full loops: 66.9, 65.5 s)"
-          }
+          },
+          "approach": [
+            {"x": -90, "y": 70, "z": -105.81}
+          ]
         },
         {
           "entries": [5053],
           "positions": [
             {"x": -161.5, "y": 51.8, "z": -106}
           ],
-          "radius": 20.8
+          "radius": 20.8,
+          "approach": [
+            {"x": -142, "y": 62, "z": -105.65}
+          ]
         },
         {
           "entries": [5053],

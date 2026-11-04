@@ -8,7 +8,7 @@ import (
 )
 
 // TestWailingCavernsExportNeedsNoGMFlagAndNoCut: the mapped route (15 legs to Verdan) has no gm_cross and no step the run leader cannot
-// do, so the export needs neither --gm-cross-direct nor a cut. Without a navmesh it is 150 steps (166 rows with the plan row and the
+// do, so the export needs neither --gm-cross-direct nor a cut. Without a navmesh it is 153 steps (169 rows with the plan row and the
 // 15 legs); with --mmaps and --approach-hops, as the applied mirror 20261018201557 was written, 226 steps (239 rows: checked by hand
 // against the mirror, see the commit). The Naralex event lives in dungeons/wailing_caverns-extra.json.
 func TestWailingCavernsExportNeedsNoGMFlagAndNoCut(t *testing.T) {
@@ -31,8 +31,8 @@ func TestWailingCavernsExportNeedsNoGMFlagAndNoCut(t *testing.T) {
 	if n := len(res.Rows.Legs); n != 15 || res.Rows.Legs[n-1].Name != "verdan" {
 		t.Fatalf("%d legs, want 15 with verdan last", n)
 	}
-	if len(res.Rows.Steps) != 150 || res.Rows.Count() != 166 {
-		t.Fatalf("%d steps and %d rows, want 150 and 166 (no navmesh: the mapped route only)", len(res.Rows.Steps), res.Rows.Count())
+	if len(res.Rows.Steps) != 153 || res.Rows.Count() != 169 {
+		t.Fatalf("%d steps and %d rows, want 153 and 169 (no navmesh: the mapped route only)", len(res.Rows.Steps), res.Rows.Count())
 	}
 }
 
