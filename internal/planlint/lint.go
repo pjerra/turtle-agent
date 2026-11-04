@@ -24,6 +24,11 @@ const (
 	LintShortHop = "short hop"
 	LintAggro    = "aggro"
 	LintPatrol   = "patrol"
+	// LintBossAggro flags a move row (a stand or a path point) before a boss's
+	// own row that stands inside the boss's script aggro range (§8: Moam 60,
+	// Ossirian 45, Ayamiss 40 yd); the boss's own approach and its pull
+	// group's rows are exempt, as are rows after the boss row.
+	LintBossAggro = "boss_aggro"
 )
 
 // The thresholds, in yards (the audit's §3 placement rules).
@@ -117,6 +122,7 @@ func Lint(rows planexport.Rows, nav Nav, opt Options) ([]Finding, error) {
 	c.steps = rows.Steps
 	c.gather = gatherPoints(c.steps)
 	c.owner = owners(c.steps, opt.World)
+	c.bosses = bossRows(c.steps)
 	var out []Finding
 	for i, s := range c.steps {
 		if moveKind(s.Kind) {
@@ -126,6 +132,7 @@ func Lint(rows planexport.Rows, nav Nav, opt Options) ([]Finding, error) {
 				return nil, err
 			}
 			out = append(out, f...)
+			out = append(out, c.bossAggro(i, s, p)...)
 			if prev := c.prev(i); prev >= 0 {
 				out = append(out, c.shortHop(i, s, p, pointOf(c.steps[prev]))...)
 			}
@@ -155,6 +162,7 @@ type checker struct {
 	steps  []planexport.StepRow
 	gather []bool
 	owner  map[uint64]int // spawn guid -> step number of the pull or boss row that owns it
+	bosses []bossRow       // every boss row's index and the pull group of its leg's rows that pull with it
 	// joins caches the joiner estimate: one PullSizes pass per Lint call, not one per pull row.
 	joins     []PullFinding
 	joinsDone bool
@@ -314,6 +322,91 @@ func (c *checker) stand(i int, s planexport.StepRow, p dungeon.Point) ([]Finding
 	}
 	return out, nil
 }
+
+// bossRow is one boss step row: its index and its entry.
+type bossRow struct {
+	index int
+	entry uint32
+}
+
+// bossRows lists every boss row's index in step order.
+func bossRows(steps []planexport.StepRow) []bossRow {
+	var out []bossRow
+	for i, s := range steps {
+		if s.Kind == planexport.KindBoss {
+			out = append(out, bossRow{index: i, entry: s.Entry})
+		}
+	}
+	return out
+}
+
+// bossAggro lints a move row (a stand the gather pass marks, or a path
+// point) against every boss row after it: inside the boss's script aggro
+// range (BossAggroYd, 3D) before its fight is an error. Exempt: the move row
+// right before the boss row (the fight's own approach); the stand of a pull
+// row that lists the boss entry (a boss pulled with its adds); rows at or
+// after the boss row (after_boss). The rows only name their pull group in
+// their comments, never in a column, so a multi-point approach to a
+// boss-adds pull still flags its earlier points by design: walk in from
+// outside the aggro.
+func (c *checker) bossAggro(i int, s planexport.StepRow, p dungeon.Point) []Finding {
+	if c.opt.World == nil {
+		return nil
+	}
+	var out []Finding
+	for _, b := range c.bosses {
+		if b.index <= i {
+			continue // the fight is on or over: after_boss rows walk freely
+		}
+		if prev := c.prev(b.index); prev == i {
+			continue // the boss's own approach row
+		}
+		if c.bossPullStand(b, i) {
+			continue // the stand of a pull that takes the boss with its adds
+		}
+		sp := c.bossSpawn(b.entry)
+		if sp == nil {
+			continue
+		}
+		aggro := worldspawn.BossAggroYd(*sp, c.opt.Level, 1)
+		if aggro == 0 {
+			continue
+		}
+		if d := dist3(p, sp.Pos); d < float64(aggro) {
+			f := c.severityFinding(i, s, LintBossAggro, fmt.Sprintf("%.1f yd from boss %s %d (spawn %d at %.1f %.1f %.1f; script aggro %.0f yd, the run has not pulled it)", d, sp.Name, sp.Entry, sp.GUID, sp.Pos.X, sp.Pos.Y, sp.Pos.Z, aggro), SeverityError)
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// bossPullStand says move row i is the stand of a pull row before boss row b
+// that lists the boss entry: the next positioned row after i is that pull.
+func (c *checker) bossPullStand(b bossRow, i int) bool {
+	for k := i + 1; k < len(c.steps); k++ {
+		if !positioned(c.steps[k]) {
+			continue
+		}
+		return k < b.index && c.steps[k].Kind == planexport.KindPull && hasEntry(c.steps[k].Entries, b.entry)
+	}
+	return false
+}
+
+// bossSpawn is the world spawn of a boss row's entry: the live boss on the
+// map (the lowest guid), not a corpse or a placeholder.
+func (c *checker) bossSpawn(entry uint32) *worldspawn.Spawn {
+	var best *worldspawn.Spawn
+	for k := range c.opt.World.Spawns {
+		sp := &c.opt.World.Spawns[k]
+		if sp.Entry != entry || !sp.Hostile() || sp.LevelMax <= 1 {
+			continue
+		}
+		if best == nil || sp.GUID < best.GUID {
+			best = sp
+		}
+	}
+	return best
+ }
 
 // patrol lints a point against every patrol lane its patroller has not been pulled for.
 func (c *checker) patrol(i int, s planexport.StepRow, p dungeon.Point) (*Finding, error) {

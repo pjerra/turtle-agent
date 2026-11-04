@@ -2380,7 +2380,7 @@ func regenLintText(c map[string]int) string {
 	if c == nil {
 		return "not run"
 	}
-	keys := []string{planlint.LintWater, planlint.LintOffFloor, planlint.LintAggro, planlint.LintPatrol, planlint.LintEdge, planlint.LintLedge, planlint.LintShortHop}
+	keys := []string{planlint.LintWater, planlint.LintOffFloor, planlint.LintAggro, planlint.LintBossAggro, planlint.LintPatrol, planlint.LintEdge, planlint.LintLedge, planlint.LintShortHop}
 	var parts []string
 	for _, k := range keys {
 		if c[k] > 0 {
