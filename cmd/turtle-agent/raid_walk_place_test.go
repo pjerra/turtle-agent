@@ -3331,6 +3331,57 @@ func TestPlaceQuietFailureRetreatsInTheSameInstance(t *testing.T) {
 	}
 }
 
+// Walk 36 b: a start placed at leg high_priestess_arlokk (`--place --from "leg high_priestess_arlokk"`, its first row
+// 273) refused the quiet circle three times (a patrolling Zulian Cub 11360 kept the 50 yd circle busy, b 09:43:53 to
+// 09:45:31); the quiet retreat then stepped one move row back over Thekal's boss row to his approach at step 271, the
+// walk rewrote --from to "from step 271", the server started there and the raid re-fought Thekal (boss 14599 engaged at
+// step 271, 2 deaths, 166 s; b's summary: "boss engaged: 14599 at step 271"). The retreat now stays in the leg: with
+// no move row before the leg's first row and no --gm-clear to kill the blocker, the place refuses at the leg's own
+// start instead of starting the run on the boss row before it.
+func TestPlaceQuietRefusalDoesNotRetreatAcrossTheBoss(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.noPlaceRetreat = false
+	f.opts.from = "leg high_priestess_arlokk"
+	rows, plan := placePlanRowsFrom(t, "high_priestess_arlokk")
+	// The fixture pins the walk-36 geometry: the Arlokk leg's start has a move row before it, but it is another leg's
+	// (Thekal's approach) or a boss row, so the quiet retreat may not take it.
+	if _, ok := raidwalk.PlaceBack(rows, plan.Start); !ok {
+		t.Fatalf("the Arlokk leg's start %d has no move row before it: the fixture no longer pins the walk-36 case", plan.Start)
+	}
+	if back, ok := raidwalk.PlaceBackInLeg(rows, plan.Start, plan.Leg); ok {
+		t.Fatalf("PlaceBackInLeg retreats from the Arlokk start %d to %d: the walk-36 boss-row crossing is not pinned", plan.Start, back)
+	}
+	p.quiet = func(int) bool { return false }
+	p.quietNear = []any{map[string]any{
+		"g": "0xF130002C6000C099", "e": 11360, "n": "Zulian Cub",
+		"p": []float32{plan.Point.X, plan.Point.Y, plan.Point.Z}, "dz": 0.5, "d": 1.0,
+		"home": []float32{plan.Point.X, plan.Point.Y, plan.Point.Z},
+	}}
+	f.agent.startReply = placeStartReplyLeg("zul_gurub", "high_priestess_arlokk", plan.Start, len(rows.Steps), plan.Stop)
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18 (the place refuses at the leg's own start): %s", code, f.stderr.String())
+	}
+	sum := f.summary()
+	if !strings.Contains(sum.EndReason, "not quiet") {
+		t.Fatalf("end reason %q, want the quiet refusal", sum.EndReason)
+	}
+	for _, n := range sum.Notes {
+		if strings.Contains(n, "stepping back to step") {
+			t.Fatalf("the walk stepped back out of the leg: %q", n)
+		}
+	}
+	if len(p.places) != 0 {
+		t.Fatalf("the toolkit place ran: %v", p.places)
+	}
+	for _, q := range p.quiets {
+		want := fmt.Sprintf("quiet 50 %v %v", plan.Point.X, plan.Point.Y)
+		if !strings.HasPrefix(q, want) {
+			t.Fatalf("a quiet read ran at %q, want the leg's own start %q", q, want)
+		}
+	}
+}
+
 // Walk 32: --place --from "step N" refused a pull row (237, 560), so the operator had to find the move row before it
 // by hand. A pull row is now a start at that pull's own stand point, and the notes say which point was used.
 func TestPlaceStartStepOnAPullRow(t *testing.T) {

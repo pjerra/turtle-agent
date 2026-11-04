@@ -177,14 +177,38 @@ func PlaceLegName(rows planexport.Rows, step int) string {
 	return startLegName(rows, rows.Steps[step-1].Leg)
 }
 
-// PlaceBack is the previous positioned move row before step (the restart the in-instance quiet retry and walk-super
-// take, one move row at a time). false when no move row stands before it.
+// PlaceBack is the previous positioned move row before step (the restart walk-super takes, one move row at a time).
+// false when no move row stands before it. The in-instance quiet retreat takes PlaceBackInLeg instead: a start placed
+// at a leg must not step back out of it.
 func PlaceBack(rows planexport.Rows, step int) (int, bool) {
 	for i := step - 2; i >= 0; i-- {
 		s := rows.Steps[i]
 		if moveRow(s) && placedRow(s) {
 			return i + 1, true
 		}
+	}
+	return 0, false
+}
+
+// PlaceBackInLeg is the retreat a placed start may take (the in-instance quiet retry): the previous positioned move
+// row before step, in the same leg as `leg` and with no boss or hold row between. false when there is none: a retreat
+// across a boss or hold row, or out of the leg, would put the run before that row and the raid would re-fight it
+// (walk 36 b: a start placed at leg high_priestess_arlokk refused the quiet circle at step 273, stepped back over
+// Thekal's boss row to his approach at step 271, and the run started there and fought Thekal again; the leg lookup
+// was right, the retreat was not).
+func PlaceBackInLeg(rows planexport.Rows, step int, leg string) (int, bool) {
+	for i := step - 2; i >= 0; i-- {
+		s := rows.Steps[i]
+		if s.Kind == planexport.KindBoss || s.Kind == planexport.KindHold {
+			return 0, false
+		}
+		if !moveRow(s) || !placedRow(s) {
+			continue
+		}
+		if startLegName(rows, s.Leg) != leg {
+			return 0, false
+		}
+		return i + 1, true
 	}
 	return 0, false
 }
