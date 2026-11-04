@@ -373,6 +373,10 @@ func pushOffWall(pl *navmesh.Planner, mapID uint32, p navmesh.Vec3) (navmesh.Vec
 		return p, false, fmt.Sprintf("the point %g yd off the wall is not plain ground (water, steep or lava): the original is kept", planexport.FloorAwarePushYd)
 	}
 	if n[2] < p[2] {
+		if p[2]-n[2] > planexport.FloorAwareFloorYd {
+			return p, false, fmt.Sprintf("the mesh %g yd off the wall is %.1f yd below the corner (over %g): a pushed row there would hang in the air, so the original is kept",
+				planexport.FloorAwarePushYd, p[2]-n[2], planexport.FloorAwareFloorYd)
+		}
 		n[2] = p[2]
 	}
 	return n, true, ""

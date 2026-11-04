@@ -124,7 +124,6 @@ func TestFloorAwareCutKeepsAStraightHopWhole(t *testing.T) {
 	}
 }
 
-
 // A corner pushed 3 yd off a wall keeps its z when the landing floor is lower: the row
 // stays on the walk's own level instead of dropping onto the sag below (sunken_temple
 // leg 0: the terrace walk at -172.9 pushed onto mesh at -173.5..-173.8, under the
@@ -150,5 +149,79 @@ func TestFloorAwareCutPushKeepsCornerLevel(t *testing.T) {
 	}
 	if math.Abs(float64(via[0].Z)) > 0.2 {
 		t.Fatalf("the pushed corner dropped onto the sag: %+v", via[0])
+	}
+}
+
+// A push that lands on mesh lower than the corner is bounded by FloorAwareFloorYd
+// (1.5 yd, the plan lint's off-floor bound): 1.0 yd below keeps the corner's z,
+// while 2.0 and 4.0 yd below refuse the push outright, so no row hangs over a
+// lower floor.
+func pushDropPlanner(t *testing.T, drop float32) *navmesh.Planner {
+	t.Helper()
+	return cutPlanner(t, []navfixture.Poly{
+		plane(0, 9, 100, 10, 0),        // the terrace the corner stands on
+		plane(0, -20, 100, 7.5, -drop), // the sag the push lands on
+	})
+}
+
+func pushDropPath(drop float32) navmesh.Path {
+	return pathOf(
+		navmesh.Vec3{10, 1, -drop},
+		navmesh.Vec3{50, 9.5, 0}, // 0.5 yd from the terrace's north edge
+		navmesh.Vec3{90, 1, -drop},
+	)
+}
+
+// Mesh 1.0 yd below (within 1.5): the corner pushes 3 yd south and keeps its z.
+func TestFloorAwareCutPushKeepsCornerLevelWithinFloorYd(t *testing.T) {
+	pl := pushDropPlanner(t, 1.0)
+	via, notes, err := floorAwareCut(pl, 309, pushDropPath(1.0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(via) != 1 {
+		t.Fatalf("rows %+v notes %+v", via, notes)
+	}
+	if math.Abs(float64(via[0].X-50)) > 0.6 || math.Abs(float64(via[0].Y-6.5)) > 0.6 {
+		t.Fatalf("the corner did not push 3 yd south: %+v notes %+v", via[0], notes)
+	}
+	if math.Abs(float64(via[0].Z)) > 0.2 {
+		t.Fatalf("the pushed corner dropped onto the sag: %+v", via[0])
+	}
+}
+
+// Mesh 2.0 yd below (over 1.5): no push, the original corner is kept.
+func TestFloorAwareCutPushRefusedTwoYdDown(t *testing.T) {
+	pl := pushDropPlanner(t, 2.0)
+	via, notes, err := floorAwareCut(pl, 309, pushDropPath(2.0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(via) != 1 {
+		t.Fatalf("rows %+v notes %+v", via, notes)
+	}
+	if math.Abs(float64(via[0].X-50)) > 0.6 || math.Abs(float64(via[0].Y-9.5)) > 0.6 {
+		t.Fatalf("the corner pushed onto mesh 2 yd below: %+v notes %+v", via[0], notes)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0].Reason, "below") {
+		t.Fatalf("want the below-level refusal note, got %+v", notes)
+	}
+}
+
+// Mesh 4.0 yd below: no push, the original corner is kept.
+func TestFloorAwareCutPushRefusedFourYdDown(t *testing.T) {
+	pl := pushDropPlanner(t, 4.0)
+	via, notes, err := floorAwareCut(pl, 309, pushDropPath(4.0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(via) != 1 {
+		t.Fatalf("rows %+v notes %+v", via, notes)
+	}
+	if math.Abs(float64(via[0].X-50)) > 0.6 || math.Abs(float64(via[0].Y-9.5)) > 0.6 {
+		t.Fatalf("the corner pushed onto mesh 4 yd below: %+v notes %+v", via[0], notes)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0].Reason, "below") {
+		t.Fatalf("want the below-level refusal note, got %+v", notes)
 	}
 }
