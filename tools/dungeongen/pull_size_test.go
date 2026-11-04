@@ -78,7 +78,7 @@ var pullSizeKnownCounts = map[string]int{
 	"ragefire_chasm": 27, "wailing_caverns": 52, "deadmines": 144, // ci-lint fix round (was 28/54): the ramp approach points pull from closer, joining fewer neighbour packs. deadmines 132 -> 146: the ported lab_tunnel and laboratory legs add 14 pulls over the ceiling.
 	// zulfarrak re-pinned for the waypoint lint fixes (was 53): leg 8 pull 1 (12 bodies) now crosses the ceiling and leg 3 pull 1 grows 11 -> 14 bodies.
 	"uldaman": 58, "zulfarrak": 54, "karazhan_crypt": 125, // ci-lint fix round (was 57): the snapped ramp approaches join one fewer neighbour pack.
-	"molten_core": 19, "blackwing_lair": 40, "zul_gurub": 92, // re-pinned for the walk-32 point fixes: the regenerated leg 7/8 rows and their stands in the dense pool ring, and the leg-0 group-3 row now names the Razzashi Adder 11372 that stands on its point. raids-mc-bwl-ony (was 21): the moved stands clear two pulls' rings.
+	"molten_core": 19, "blackwing_lair": 40, "zul_gurub": 91, // Jin'do (was 92): the dropped pit pull group takes its over-ceiling row with it (the walk keeps 22 yd from the respawning trolls instead of pulling them).
 	"ruins_of_ahnqiraj": 29, "temple_of_ahnqiraj": 74, "naxxramas": 150, // re-pinned for the AQ waypoint pass (was 32): three over-ceiling estimates are gone, the leg-0 stands moved out of the wasp ring, the leg-3 stand off the Rajaxx cluster walk, and leg-6 pull 4 drops 15 bodies to 9.
 	"stormwrought_ruins":   169,                            // hand-maintained from the generated draft (waypoint pass 2026-11-03): dense custom packs warn on most pulls.
 	"lower_karazhan_halls": 78, "upper_karazhan_halls": 30, // waypoint pass (was 79): one moved stand pulls its pack from one body fewer.

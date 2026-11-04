@@ -669,13 +669,14 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 	}
 }
 
-// F5 (D8): with the deployed-style ZG rows (408 steps from planexport.Build: the Arlokk gong step (use_object 180526) adds 2 rows to the 405 below: walk 26b's pack-1-first Marli order,
+// F5 (D8): with the deployed-style ZG rows (406 steps from planexport.Build: the Arlokk gong step (use_object 180526) adds 2 rows to the 405 below: walk 26b's pack-1-first Marli order,
 // walk 28/29's Arlokk terrace split and walk 29's legs 5/6, plus walk 31's 23 added approach rows (the over-140 yd hops,
 // the canal rim, the floored G0 midpoint and the step-366 split), and legs 7/8 from route-regen, which drops the
 // approach rows whose routes could not be kept clear; it was 397 before walk 31, 407 before walk 29's fix 6 dropped the
 // 14 fish-only Hakkar-outer groups and leg 8's entrance-pack detour and added the Mandokir patrol/chain rows; walk 33's
 // water fix made it 405: leg 5's five river vias are the seven of the dry route round the gorge and leg 6 loses its river
-// via; walk 34 adds the Jin'do group-12 midpoint approach row, 408), a placed
+// via; walk 34 adds the Jin'do group-12 midpoint approach row, 408; the Jin'do fix drops the pit pull group and its
+// approach row and nets one fewer row elsewhere on leg 6, 406), a placed
 // `--until none` run from Marli stops before the segment on leg 6 that passes Venoxis, and the shortened corridor
 // clears clean.
 
@@ -686,8 +687,8 @@ func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	if len(rows.Steps) != 408 {
-		t.Fatalf("the fixture has %d steps, want 408", len(rows.Steps))
+	if len(rows.Steps) != 406 {
+		t.Fatalf("the fixture has %d steps, want 406", len(rows.Steps))
 	}
 	start, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
 	if err != nil {

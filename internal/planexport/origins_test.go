@@ -131,7 +131,7 @@ func TestSQLUnchangedByOrigins(t *testing.T) {
 		plan string
 		sha  string
 	}{
-		{"zul_gurub", "3a1bcd9d4ac49bbcdf99c6fdff4454824a5ab73507313d82ef306b25e81b091c"}, // walk-34 plan: the Mandokir 11391 stand-pull flag and the Jin'do group-12 midpoint row
+		{"zul_gurub", "1f135f1e47731750a492d840af8a4f86e97c4301111b41dc0ab01953d972340c"}, // Jin'do: kill_first opens with the totem 15112 and ward 14987; the honour guard is a stand pull; the pit group is dropped; the route keeps 22 yd from the pit
 		{"onyxias_lair", "142c1d58928ad1efd9aca2b773c4762e2ddcbae05c308540080a1fedd6e3b38e"},
 	} {
 		p, err := dungeon.Load(filepath.Join("..", "..", "dungeons", c.plan+".json"))
