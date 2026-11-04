@@ -7,6 +7,7 @@
 package main
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
@@ -258,6 +259,68 @@ func TestZgW36JindoBossStandSeesHim(t *testing.T) {
 	if !r.Known || !r.Clear {
 		t.Errorf("the boss stand %.1f %.1f %.1f does not see Jin'do (ray known %v clear %v, hit %.1f yd): the run leader searches a firing stand and the fight drifts",
 			stand.X, stand.Y, stand.Z, r.Known, r.Clear, r.Hit)
+	}
+}
+
+// TestZgW36WalkStrandsStayOffTheWater: the two walk-36 water strands are on the run leader's own walks, not on plan
+// rows. (a) c3-r2 12:36:24, resumed after a Jin'do wipe: step 536 (leg 6 group 2 approach) "the lead bot is stuck
+// 32.3 yd from -11750.1 -1249.6 107.6 (lead in water: yes; cmd move path type 0x81 ...) on the way toward the pack at
+// -11614.4 -1282.1 79.4 ... the approach hops got no nearer than 172.6 yd"; frames.jsonl puts the lead at
+// -11782.1 -1249.2 103.4, the terrace lake above the hall. (b) b2 11:26 and b2-r1 11:44: step 440 (leg 5 approach
+// path -12287.3 -1835.9 131.6) "stuck 37.8/39.8 yd from -11947.2 -1390.2 68.6 / -11944.3 -1353.9 62.3 (lead in
+// water: yes)".
+//
+// No plan row or hop crosses either pool: the nearest hop's server path keeps 20+ yd (a) and 24+ yd (b) from it (the
+// deployed 20261105101000 rows, which the cut splits further, keep 0 hops within 20 yd of (a) and one at 28.3 yd of
+// (b)). The tests pin those clearances, so a row moved into a pool fails here. The fix is outside the plan:
+// see the report (the core's ghost run and the run leader's walk-back choose their own navmesh path).
+func TestZgW36WalkStrandsStayOffTheWater(t *testing.T) {
+	p, err := dungeon.Load(zgPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := planexport.Build(p, planexport.Options{ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pl := zgPlannerOrNil(t)
+	if pl == nil {
+		t.Skip("needs the map-309 mmaps (the walk paths under test)")
+	}
+	defer pl.Close()
+	spans := []struct {
+		name string
+		at   dungeon.Point
+		minYd float64
+	}{
+		{"the hall's terrace lake (c3-r2 12:36, walk 35 f3)", dungeon.Point{X: -11750.1, Y: -1249.6, Z: 107.6}, 20},
+		{"the entrance pool (b2 11:26, b2-r1 11:44)", dungeon.Point{X: -11944.3, Y: -1353.9, Z: 62.3}, 24},
+	}
+	for _, sp := range spans {
+		best := math.Inf(1)
+		where := ""
+		var prev *planexport.StepRow
+		prevN := 0
+		for i := range res.Rows.Steps {
+			s := &res.Rows.Steps[i]
+			if s.X == 0 && s.Y == 0 && s.Z == 0 {
+				continue
+			}
+			if prev != nil && prev.Leg == s.Leg {
+				path, perr := pl.Plan(309, navmesh.Vec3{prev.X, prev.Y, prev.Z}, navmesh.Vec3{s.X, s.Y, s.Z})
+				if perr == nil && path.Status == navmesh.Complete {
+					for _, q := range path.Points {
+						if d := dist(sp.at, dungeon.Point{X: q[0], Y: q[1], Z: q[2]}); d < best {
+							best, where = d, fmt.Sprintf("rows %d->%d (%q -> %q)", prevN, i+1, prev.Comment, s.Comment)
+						}
+					}
+				}
+			}
+			prev, prevN = s, i+1
+		}
+		if best < sp.minYd {
+			t.Errorf("%s: %s passes %.1f yd from the water, want >= %.0f: the plan must not route a walk through the pool (the strands are the run leader's own walks, not plan rows)", sp.name, where, best, sp.minYd)
+		}
 	}
 }
 
