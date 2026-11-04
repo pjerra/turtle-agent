@@ -142,7 +142,7 @@ type planLintReport struct {
 
 // lintOrder is the order the lints are counted and printed in.
 var lintOrder = []string{planlint.LintWater, planlint.LintOffFloor, planlint.LintEdge, planlint.LintLedge,
-	planlint.LintShortHop, planlint.LintAggro, planlint.LintPatrol, planlint.LintReach, planlint.LintHop,
+	planlint.LintShortHop, planlint.LintAggro, planlint.LintBossAggro, planlint.LintPatrol, planlint.LintReach, planlint.LintHop,
 	planlint.LintArrival, planlint.LintClimb, planlint.LintJoiners}
 
 // lintErrors counts the findings the lints call errors: they fail plan-check without --strict.

@@ -949,37 +949,7 @@
             "source": "spawn 1178357"
           },
           "approach": [
-            {"x": -8803.014, "y": 1626.4108, "z": 21.558996}
-          ]
-        },
-        {
-          "entries": [15327, 15325, 15325],
-          "positions": [
-            {"x": -8874.41, "y": 1638.25, "z": 21.3867},
-            {"x": -8880.45, "y": 1642.66, "z": 21.3867},
-            {"x": -8869.74, "y": 1644.18, "z": 21.3867}
-          ],
-          "radius": 10.695814,
-          "patrol": {
-            "entries": [15325, 15327],
-            "path": [
-              {"x": -8872.46, "y": 1618.97, "z": 21.3863},
-              {"x": -8852.07, "y": 1598.39, "z": 21.3863},
-              {"x": -8841.18, "y": 1595.59, "z": 21.3866},
-              {"x": -8804.81, "y": 1602.51, "z": 21.3792},
-              {"x": -8793.67, "y": 1626.01, "z": 21.3866},
-              {"x": -8795.03, "y": 1651.73, "z": 21.5432},
-              {"x": -8810.58, "y": 1665.76, "z": 21.3847},
-              {"x": -8835.78, "y": 1671.86, "z": 21.3847},
-              {"x": -8860.49, "y": 1665.37, "z": 21.3847},
-              {"x": -8872.47, "y": 1643.36, "z": 21.3847}
-            ],
-            "period_s": 90.59191,
-            "period_estimate": true,
-            "source": "spawn 1178360"
-          },
-          "approach": [
-            {"x": -8849.752, "y": 1634.9675, "z": 19.875652}
+            {"x": -8770, "y": 1628, "z": 22}
           ]
         }
       ],
@@ -991,8 +961,21 @@
           {"x": -8831.99, "y": 1643.0526, "z": 19.77285}
         ]
       },
+      "after_boss": [
+        {
+          "wait_for": {
+            "hostiles_gone": {
+              "radius": 15,
+              "center": {"x": -8874.41, "y": 1638.25, "z": 21.3867}
+            },
+            "timeout_s": 300,
+            "fail_text": "Kurinnaxx is dead but his west pack (15325/15327 at -8874 1638, past him) still lives: the party walks there from his corpse and kills it."
+          }
+        }
+      ],
       "notes": [
-        "6 pulls (14 units) in the arena below the terrace (z 19.7-25.4): four wasp packs and two Vile Scarabs, then Kurinnaxx. His Wide Slash 25814 is a frontal cleave (the ai_boss_tactic `behind` row) and Mortal Wound 25646 stacks on the tank: without a tank swap (community patch 326) the tank's healing taken falls 10 % per stack."
+        "5 pulls (11 units) in the arena below the terrace (z 19.7-25.4): three wasp packs and two Vile Scarabs from the east stand (-8770 1628, 73 yd from Kurinnaxx, outside his 53 yd aggro), then Kurinnaxx. His Wide Slash 25814 is a frontal cleave (the ai_boss_tactic `behind` row) and Mortal Wound 25646 stacks on the tank: without a tank swap (community patch 326) the tank's healing taken falls 10 % per stack.",
+        "The west wasp pack (15325/15327 at -8874 1638, past Kurinnaxx, its patrol looping within 30 yd of him) is pulled after the boss (after_boss hostiles_gone): pulling it before him wiped walk 30 twice (boss plus pack). The patrol is pulled where it stands when the party walks in."
       ]
     },
     {
@@ -1148,6 +1131,7 @@
           ],
           "radius": 5,
           "approach": [
+            {"x": -8895, "y": 1800, "z": 21.5},
             {"x": -8874.87, "y": 1790.416, "z": 21.791414}
           ]
         },
@@ -1697,31 +1681,22 @@
         ]
       },
       "notes": [
-        "29 pulls (70 units) up the north corridor: five Hive'Zara scarab swarms (15461/15462, one linked pack each, radius 35), nine Obsidian Destroyers and two Flesh Hunters on their patrols, seven Vile Scarabs; then Moam. The Canal Frenzy in the channel below are in no pull. Moam drains mana and turns to stone when his mana fills (25685): the raid's Mages and Priests Mana Burn him."
+        "29 pulls (70 units) up the north corridor: five Hive'Zara scarab swarms (15461/15462, one linked pack each, radius 35), nine Obsidian Destroyers and two Flesh Hunters on their patrols, seven Vile Scarabs; then Moam. The Canal Frenzy in the channel below are in no pull. Moam drains mana and turns to stone when his mana fills (25685): the raid's Mages and Priests Mana Burn him. Pull group 3 walks in over the dry north-bank via (-8895 1800): walk 30's lead stuck in the sunken channel between group 2 and the old direct approach."
       ]
     },
     {
       "name": "buru_the_gorger",
       "to": {"x": -9187.84, "y": 1426.98, "z": 23.22},
+      "via": [
+        {"x": -8851.26, "y": 2263.29, "z": 21.3093}
+      ],
       "pull_groups": [
-        {
-          "entries": [15320, 15323, 15323],
-          "positions": [
-            {"x": -9189.16, "y": 1451.26, "z": 21.4716},
-            {"x": -9186.31, "y": 1463.15, "z": 21.3862},
-            {"x": -9176.3, "y": 1458.25, "z": 21.3906}
-          ],
-          "radius": 13.187704
-        },
         {
           "entries": [15168],
           "positions": [
             {"x": -9209.61, "y": 1432.01, "z": 21.387}
           ],
-          "radius": 5,
-          "approach": [
-            {"x": -9189.85, "y": 1436.22, "z": 21.96}
-          ]
+          "radius": 5
         },
         {
           "entries": [15320, 15323, 15323],
@@ -1736,15 +1711,21 @@
           ]
         },
         {
+          "entries": [15320, 15323, 15323],
+          "positions": [
+            {"x": -9189.16, "y": 1451.26, "z": 21.4716},
+            {"x": -9186.31, "y": 1463.15, "z": 21.3862},
+            {"x": -9176.3, "y": 1458.25, "z": 21.3906}
+          ],
+          "radius": 13.187704
+        },
+        {
           "entries": [15320, 15323],
           "positions": [
             {"x": -9314.76, "y": 1393.69, "z": 21.4322},
             {"x": -9303.7, "y": 1386.26, "z": 21.3872}
           ],
-          "radius": 11.662237,
-          "approach": [
-            {"x": -9324.787, "y": 1374.4186, "z": 21.371677}
-          ]
+          "radius": 11.662237
         },
         {
           "entries": [15335, 15320],
@@ -1792,19 +1773,17 @@
             "source": "spawn 85885"
           },
           "approach": [
-            {"x": -9290.02, "y": 1378.736, "z": 21.454218}
+            {"x": -9302.02, "y": 1378.736, "z": 21.445038}
           ]
         },
         {
-          "entries": [15323, 15320],
+          "entries": [15320, 15323, 15323],
           "positions": [
-            {"x": -9381.61, "y": 1391.13, "z": 21.3864},
-            {"x": -9382.96, "y": 1404.3, "z": 21.3959}
+            {"x": -9142.4, "y": 1292.85, "z": 21.3875},
+            {"x": -9152.83, "y": 1286.96, "z": 21.3875},
+            {"x": -9152.6, "y": 1303.69, "z": 21.3866}
           ],
-          "radius": 11.61957,
-          "approach": [
-            {"x": -9401.24, "y": 1386.48, "z": 22.32}
-          ]
+          "radius": 14.772357
         },
         {
           "entries": [15335],
@@ -1840,26 +1819,14 @@
           }
         },
         {
-          "entries": [15320, 15320],
+          "entries": [15323, 15320],
           "positions": [
-            {"x": -9329.18, "y": 1186.5, "z": 21.437},
-            {"x": -9338.46, "y": 1194.44, "z": 21.3894}
+            {"x": -9381.61, "y": 1391.13, "z": 21.3864},
+            {"x": -9382.96, "y": 1404.3, "z": 21.3959}
           ],
-          "radius": 11.107097,
+          "radius": 11.61957,
           "approach": [
-            {"x": -9338.46, "y": 1212.44, "z": 21.46}
-          ]
-        },
-        {
-          "entries": [15320, 15323, 15323],
-          "positions": [
-            {"x": -9142.4, "y": 1292.85, "z": 21.3875},
-            {"x": -9152.83, "y": 1286.96, "z": 21.3875},
-            {"x": -9152.6, "y": 1303.69, "z": 21.3866}
-          ],
-          "radius": 14.772357,
-          "approach": [
-            {"x": -9174.391, "y": 1301.2292, "z": 21.329317}
+            {"x": -9401.24, "y": 1386.48, "z": 22.32}
           ]
         },
         {
@@ -1869,7 +1836,22 @@
           ],
           "radius": 5,
           "approach": [
+            {"x": -9405.766, "y": 1355.2705, "z": 21.581314},
+            {"x": -9376.357, "y": 1285.8737, "z": -17.150654},
             {"x": -9307.11, "y": 1304.38, "z": -62.99}
+          ]
+        },
+        {
+          "entries": [15320, 15320],
+          "positions": [
+            {"x": -9329.18, "y": 1186.5, "z": 21.437},
+            {"x": -9338.46, "y": 1194.44, "z": 21.3894}
+          ],
+          "radius": 11.107097,
+          "approach": [
+            {"x": -9316.799, "y": 1270.9333, "z": -57.0168},
+            {"x": -9365.332, "y": 1280, "z": -21.9168},
+            {"x": -9344.003, "y": 1214.7361, "z": 21.506935}
           ]
         }
       ],
@@ -1878,11 +1860,16 @@
         "entry": 15370,
         "position": {"x": -9240.79, "y": 1230.42, "z": -63.7576},
         "approach": [
-          {"x": -9258.34, "y": 1241.007, "z": -63.4475}
+          {"x": -9374.595, "y": 1227.9559, "z": 21.322174},
+          {"x": -9383.199, "y": 1283.2001, "z": -13.7168},
+          {"x": -9333.196, "y": 1264.1133, "z": -44.541508},
+          {"x": -9274.97, "y": 1247.8953, "z": -63.16186}
         ]
       },
       "notes": [
-        "10 pulls (20 units) on the plateau south-west of the hall (15320 Hive'Zara Soldier, 15323 Hive'Zara Sandstalker, three Flesh Hunters, one Vile Scarab), the descent, and Buru's pit (z -63.8). Buru summons six eggs at z -63.5 and walks at a random target; killing an egg within 5 yd stops him (boss_buru.cpp OnEggExploded)."
+        "10 pulls (20 units) on the plateau south-west of the hall (15320 Hive'Zara Soldier, 15323 Hive'Zara Sandstalker, three Flesh Hunters, one Vile Scarab), the descent, and Buru's pit (z -63.8). Buru summons six eggs at z -63.5 and walks at a random target; killing an egg within 5 yd stops him (boss_buru.cpp OnEggExploded).",
+        "ROUTE-REGEN b7bea8c (2026-11-03, audit §4.2): 12 points, minimum aggro margin 59.6 yd, minimum wall 0.0 yd; pull order regen from the navmesh path-length matrix (0 one-way pairs flagged); every point authored, no exporter cut",
+        "Walk 7183.6 yd to 4103.3 yd (0.57x, floor-aware). Ratio against the direct leg span (1104 yd) is 3.7, above the 3.0 bar: the leg must drop from Moam's room (z 21) into Buru's pit (z -63.8) and climb back out to the leg-6 to, and the pit drop is one-way, so the descent and the climb cannot share ground; the 10 plateau pulls are spread over 400 yd. That geography is the written reason. The walk is dry (no authored water row); three river-below path findings remain where the descent corridor bridges the sunken channel with water 6-10 yd below (a chase or a fall lands in water, the walk itself stays on dry mesh)."
       ]
     },
     {
@@ -2154,7 +2141,7 @@
           ],
           "radius": 5,
           "approach": [
-            {"x": -9681.62, "y": 1570.57, "z": 21.7306}
+            {"x": -9681.62, "y": 1585, "z": 21.6}
           ]
         },
         {
@@ -2164,7 +2151,7 @@
           ],
           "radius": 5,
           "approach": [
-            {"x": -9670.72, "y": 1549.77, "z": 21.51}
+            {"x": -9650, "y": 1555, "z": 21.5}
           ]
         },
         {
@@ -2210,71 +2197,6 @@
           "approach": [
             {"x": -9651.298, "y": 1550.755, "z": 21.547853}
           ]
-        },
-        {
-          "entries": [15333],
-          "positions": [
-            {"x": -9685.71, "y": 1532.73, "z": 21.4449}
-          ],
-          "radius": 5,
-          "approach": [
-            {"x": -9679.35, "y": 1561.09, "z": 21.65}
-          ]
-        },
-        {
-          "entries": [15325, 15327, 15325, 15327, 15327],
-          "positions": [
-            {"x": -9712.81, "y": 1497.22, "z": 22.2975},
-            {"x": -9709.95, "y": 1494.1, "z": 23.751},
-            {"x": -9707.9, "y": 1492.47, "z": 25.5398},
-            {"x": -9708.26, "y": 1500.27, "z": 22.849},
-            {"x": -9705.17, "y": 1497.81, "z": 25.0354}
-          ],
-          "radius": 9.381316,
-          "patrol": {
-            "entries": [15325, 15327],
-            "path": [
-              {"x": -9699.17, "y": 1509.16, "z": 21.4444},
-              {"x": -9691.4, "y": 1520.31, "z": 21.7705},
-              {"x": -9672.95, "y": 1540.98, "z": 21.4444},
-              {"x": -9652.28, "y": 1559.83, "z": 21.4444},
-              {"x": -9632.54, "y": 1575.53, "z": 21.4036},
-              {"x": -9618.07, "y": 1592.44, "z": 21.5062},
-              {"x": -9603.04, "y": 1616.07, "z": 21.7327},
-              {"x": -9587.15, "y": 1646.02, "z": 21.4159},
-              {"x": -9598.28, "y": 1650, "z": 21.3869},
-              {"x": -9607.04, "y": 1623.42, "z": 21.8973},
-              {"x": -9618.59, "y": 1600.98, "z": 21.4448},
-              {"x": -9637.17, "y": 1576.23, "z": 21.7135},
-              {"x": -9656.2, "y": 1559.52, "z": 21.4443},
-              {"x": -9675.18, "y": 1538.93, "z": 21.4443},
-              {"x": -9693.53, "y": 1517.8, "z": 21.4448}
-            ],
-            "period_s": 142.39398,
-            "period_estimate": true,
-            "source": "spawn 1178586"
-          },
-          "approach": [
-            {"x": -9731.335, "y": 1483.374, "z": 22.240383}
-          ]
-        },
-        {
-          "entries": [15333, 15333],
-          "positions": [
-            {"x": -9728.81, "y": 1481.31, "z": 22.2073},
-            {"x": -9739.16, "y": 1491.33, "z": 21.6315}
-          ],
-          "radius": 12.209062,
-          "approach": [
-            {"x": -9735.13, "y": 1509.55, "z": 21.62}
-          ]
-        },
-        {
-          "entries": [15333],
-          "positions": [
-            {"x": -9746.4, "y": 1510.24, "z": 22.5943}
-          ],
-          "radius": 5
         }
       ],
       "skip": [15344, 15385, 15386, 15387, 15388, 15389, 15390, 15391, 15392, 15471, 15473, 15505],
@@ -2282,11 +2204,54 @@
         "entry": 15369,
         "position": {"x": -9698.38, "y": 1535.55, "z": 21.444},
         "approach": [
-          {"x": -9706.09, "y": 1509.2, "z": 21.58}
+          {"x": -9650, "y": 1535, "z": 21.5}
         ]
       },
+      "after_boss": [
+        {
+          "wait_for": {
+            "hostiles_gone": {
+              "radius": 10,
+              "center": {"x": -9685.71, "y": 1532.73, "z": 21.4449}
+            },
+            "timeout_s": 300,
+            "fail_text": "Ayamiss is dead but the Silicate Feeder at her altar (-9685.71 1532.73, 13 yd from her) still lives: the party walks there from her corpse and kills it."
+          }
+        },
+        {
+          "wait_for": {
+            "hostiles_gone": {
+              "radius": 14,
+              "center": {"x": -9709, "y": 1497, "z": 23}
+            },
+            "timeout_s": 300,
+            "fail_text": "Ayamiss is dead but her south wasp patrol (15325/15327, two units inside her 40 yd aggro) still lives: the party walks there from her corpse and kills it."
+          }
+        },
+        {
+          "wait_for": {
+            "hostiles_gone": {
+              "radius": 14,
+              "center": {"x": -9733.98, "y": 1486.32, "z": 21.92}
+            },
+            "timeout_s": 300,
+            "fail_text": "Ayamiss is dead but the two Feeders south-west of her altar (-9734 1486, the walk to them threads her 40 yd aggro) still live: the party walks there from her corpse and kills them."
+          }
+        },
+        {
+          "wait_for": {
+            "hostiles_gone": {
+              "radius": 8,
+              "center": {"x": -9746.4, "y": 1510.24, "z": 22.5943}
+            },
+            "timeout_s": 300,
+            "fail_text": "Ayamiss is dead but the lone Feeder west of her altar (-9746 1510) still lives: the party walks there from her corpse and kills it."
+          }
+        }
+      ],
       "notes": [
-        "27 pulls (76 units) in the west hive: 37 Silicate Feeders (15333), six Drones, six Collectors and six Tail Lashers, eleven wasps and nine stingers; then Ayamiss. She flies, summons 20 swarmers every 60 s and paralyses a random raider to feed a larva: no plan step can cover it."
+        "23 pulls (65 units) in the west hive: 32 Silicate Feeders (15333), six Drones, six Collectors and six Tail Lashers, eleven wasps and nine stingers; then Ayamiss. Pull groups 8 and 9 (10 units each) are kept whole: each is an AGGRO_TOGETHER core (group flags 2) with nearby loners 5-18 yd away inside the 21 yd aggro, so a split-off pack would rejoin; the walk runs with DungeonRunAutoCc = 1. She flies, summons 20 swarmers every 60 s and paralyses a random raider to feed a larva: no plan step can cover it.",
+        "The feeder at her altar (13 yd from her), her south wasp patrol (two units inside her 40 yd) and the three Feeders south-west of the altar (the only walk to them threads her 40 yd aggro) are pulled after the boss (after_boss hostiles_gone): pulling any of them before her takes her along. The patrol is pulled where it stands when the party walks in."
       ]
     },
     {
@@ -2459,11 +2424,11 @@
         "entry": 15339,
         "position": {"x": -9493.6, "y": 2030.27, "z": 105.48},
         "approach": [
-          {"x": -9514.85, "y": 2024.576, "z": 105.61608}
+          {"x": -9440, "y": 2014.9, "z": 88.7}
         ]
       },
       "notes": [
-        "8 pulls (8 units): the eight Anubisath Guardians (15355), each on its own patrol; then Ossirian on his platform (z 105.5). His Strength of Ossirian (25176) only falls to a crystal's weakness debuff, and the crystals are summoned during the fight (no step)."
+        "8 pulls (8 units): the eight Anubisath Guardians (15355), each on its own patrol; then Ossirian. The boss approach stands east of him on the ramp (-9440 2014.9, 58 yd 3D from his spawn, outside his 45 yd aggro): walk 30's old approach past the dais pulled him with the raid still walking. The pull brings him down the ramp toward the first crystal pair near the central courtyard. Cost: the boss row carries a climb_anchor error (16.8 yd above the approach; every ramp point outside his 45 yd aggro climbs 13+ yd to the dais, against the 8 yd rule), WARN in the gate."
       ]
     }
   ]

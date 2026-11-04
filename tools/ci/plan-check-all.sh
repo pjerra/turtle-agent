@@ -13,7 +13,7 @@
 #   0   every checked plan passes (WARN placement lints do not count),
 #   11  a point fails (plan-check's navmesh FAIL), or (with --strict-lints) any error-severity placement lint,
 #   2   a usage error, or plan-check itself failed with a status other than 0 or 11.
-# Every error-severity placement lint (water, off-floor, edge, ledge, short hop, aggro, patrol, joiners, reach, arrival,
+# Every error-severity placement lint (water, off-floor, edge, ledge, short hop, aggro, boss_aggro, patrol, joiners, reach, arrival,
 # hop_len, climb_anchor) is reported as WARN with a count per plan and does not fail the gate, by the lead's decisions of
 # 2026-11-03 (the second one extends the first to the plan-scout lints); --strict-lints makes them all fail.
 # Only a point failure, the same failure the gate had before the placement lints existed, blocks by default.

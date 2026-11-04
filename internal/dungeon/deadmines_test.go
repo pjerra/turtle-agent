@@ -220,6 +220,20 @@ func TestDeadminesPlanMatchesTheWorldExport(t *testing.T) {
 				continue
 			}
 			for k, at := range g.Positions {
+				if g.Entries[k] == manufacturedGolem && !hasC(g.Entries[k], at) {
+					// The golem a 622 Goblin Engineer summons stands on the engineer when the pull starts (no spawn row for the
+					// summoned one; TB's live plan pairs it at the engineer's point in the harvester hall).
+					near := false
+					for q, e := range g.Entries {
+						if e == 622 && dist3(g.Positions[q], at) <= 6 {
+							near = true
+						}
+					}
+					if !near {
+						t.Errorf("legs[%d] (%s).pull_groups[%d]: the Manufactured Golem at %v is not within 6 yd of a Goblin Engineer of the group", i, l.Name, j, at)
+					}
+					continue
+				}
 				if g.Entries[k] == defiasCompanion {
 					// A level 14-15 pet the server makes with a Pirate at the start of the instance (no spawn row; 9 seen on the 2026-10-15 walk, 2.3 to 4.8 yd
 					// from a Pirate of the same group, or at the spawn point of a patrolling Pirate).
@@ -445,7 +459,8 @@ func TestDeadminesPlanPointsOnMesh(t *testing.T) {
 // while any is open.
 type deadminesExemption struct{ Reason, Settled string }
 
-const defiasCompanion = 3450 // summoned with a Pirate (EventAI 65701, Bloodsail Companion 5172): a level 14-15 hostile, no spawn row
+const defiasCompanion = 3450    // summoned with a Pirate (EventAI 65701, Bloodsail Companion 5172): a level 14-15 hostile, no spawn row
+const manufacturedGolem = 61962 // a Goblin Engineer 622's golem: one spawn has no row where the summoned one stands on the engineer
 
 // deadminesDoorsVerified is the finding of the 2026-10-15 walk on the two script-less Heavy Doors (spawns 26183 and 26184): shut at the start (state ready,
 // flags 32), one click opens each (state active, flags 33), and they stayed open for 50 minutes.
