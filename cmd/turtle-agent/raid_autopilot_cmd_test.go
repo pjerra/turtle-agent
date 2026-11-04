@@ -87,3 +87,31 @@ func TestAutoCapFreeTime(t *testing.T) {
 		t.Fatalf("free time = %s", at)
 	}
 }
+
+// TestAutoInitSeq continues the out numbering after an earlier autopilot's dirs (the walk refuses an existing --out).
+func TestAutoInitSeq(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"a-1", "a-2.out", "a-10", "b-3", "other-9"} {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := &autoSupervisor{o: autoOptions{walkDir: dir}, states: []*autoState{{id: "a"}, {id: "b"}}}
+	s.initSeq()
+	if s.states[0].seq != 10 || s.states[1].seq != 3 {
+		t.Fatalf("seq a=%d b=%d, want 10 and 3", s.states[0].seq, s.states[1].seq)
+	}
+}
+
+func TestAutoSummaryReadsTheSingularBossKill(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "summary.json")
+	os.WriteFile(path, []byte(`{"exit_code":0,"steps_reached":51,"steps_total":761,"end_reason":"until","boss_kill":{"entry":14517,"killed":true},"boss_kills":[{"entry":14517,"killed":true}]}`), 0o600)
+	sum, err := autoReadSummary(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.BossKill == nil || !sum.BossKill.Killed || sum.BossKill.Entry != 14517 {
+		t.Fatalf("boss_kill = %+v", sum.BossKill)
+	}
+}

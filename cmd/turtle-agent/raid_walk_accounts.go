@@ -117,7 +117,10 @@ func (w *walk) readHireAccounts(ctx context.Context) []string {
 	}
 	sort.Strings(out)
 	if len(found) < len(names) {
-		w.note("instance cap: %d of %d hires' accounts were read; the entry names %d account(s)", len(found), len(names), len(out))
+		// A partial list under-counts: the bots whose account is missing may sit on the account at the cap. Keep the
+		// conservative raid count for this entry instead of a list that looks exact.
+		w.note("instance cap: %d of %d hires' accounts were not read; the entry names no accounts and later walks count raids", len(names)-len(found), len(names))
+		return nil
 	}
 	return out
 }

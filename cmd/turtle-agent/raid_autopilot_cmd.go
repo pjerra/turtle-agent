@@ -152,6 +152,7 @@ func raidAutopilotCmd(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	defer s.close()
 	s.states = groupAutoTargets(targets)
+	s.initSeq()
 	for _, st := range s.states {
 		s.event(st.id, "supervise", fmt.Sprintf("goal %s (%d goal line(s))", st.goals[0].target.Goal, len(st.goals)))
 	}
@@ -236,6 +237,32 @@ func autoCommandArgs(binary string, t raidwalk.AutoTarget, out, from string, reu
 		args = append(args, "--reuse-instance")
 	}
 	return args
+}
+
+// initSeq continues the out numbering after the dirs an earlier autopilot made: the walk refuses an existing --out,
+// and a relaunch must not think every attempt is the first.
+func (s *autoSupervisor) initSeq() {
+	entries, err := os.ReadDir(s.o.walkDir)
+	if err != nil {
+		return
+	}
+	byID := map[string]*autoState{}
+	for _, st := range s.states {
+		byID[st.id] = st
+	}
+	for _, e := range entries {
+		name := e.Name()
+		for id, st := range byID {
+			prefix := id + "-"
+			if !strings.HasPrefix(name, prefix) {
+				continue
+			}
+			n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".out"))
+			if err == nil && n > st.seq {
+				st.seq = n
+			}
+		}
+	}
 }
 
 func (s *autoSupervisor) open() error {
@@ -464,7 +491,11 @@ func (s *autoSupervisor) launchAttempt(st *autoState, g *autoGoalState, from str
 		run.fastFails = st.last.fastFails
 	}
 	go func() {
-		run.wait <- cmd.Wait()
+		err := cmd.Wait()
+		// cmd.Wait does not close a parent-supplied *os.File; the supervisor restarts indefinitely, so every attempt
+		// must close its log or it runs out of descriptors.
+		f.Close()
+		run.wait <- err
 		close(run.wait)
 	}()
 	st.run = run
@@ -526,6 +557,9 @@ func (s *autoSupervisor) observe(r *autoRun) raidwalk.AutoObservation {
 			o.KilledBosses[b.Entry] = true
 		}
 	}
+	if sum.BossKill != nil && sum.BossKill.Killed {
+		o.KilledBosses[sum.BossKill.Entry] = true
+	}
 	return o
 }
 
@@ -539,6 +573,11 @@ type autoSummary struct {
 		Entry  uint32 `json:"entry"`
 		Killed bool   `json:"killed"`
 	} `json:"boss_kills"`
+	// BossKill is the last boss the walk engaged (older summaries only; boss_kills has all of them).
+	BossKill *struct {
+		Entry  uint32 `json:"entry"`
+		Killed bool   `json:"killed"`
+	} `json:"boss_kill"`
 }
 
 func autoReadSummary(path string) (autoSummary, error) {
@@ -820,7 +859,9 @@ func (s *autoSupervisor) leaseHeld(slotDir string) bool {
 	if m.SlotsPath != "" {
 		args = append(args, "--slots", m.SlotsPath)
 	}
-	out, err := exec.Command(s.o.binary, args...).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, s.o.binary, args...).Output()
 	if err != nil {
 		return false
 	}
