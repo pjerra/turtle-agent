@@ -101,6 +101,7 @@ turtle-agent plan-scout <dungeon> [--dir dungeons] [--sql FILE] [--mmaps DIR] [-
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
 turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--reuse-instance] [--dry-run]
+turtle-agent raid-autopilot [--foreground] [--binary PATH] [--poll D] [--stall D] [--settle D] [--status-every D] [--dry-run] <walk-dir>
 turtle-agent trash-check [--dir dungeons] [--sql FILE [--plan NAME]] [--spawns DIR] [--patrols FILE]... [--mmaps DIR] [--level N] [--spread YD] [--aggro-rate R] [--assist-yd 10] [--json] [--out DIR] [--dash-out FILE] [--fail-on danger|patrol|any] [<plan>|<path.json>]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent scenario check [--var NAME=VALUE]... <file>
@@ -2777,6 +2778,47 @@ one fault in `fail` exits **23**; 18 and 19 keep their meaning and win over 23. 
 lower exit code to **23** as well, and that 23 outranks 18 and 19 too (a bot left frozen must never hide). A fault
 that never fired is `not-fired`; one that could not be caused or measured is
 `inconclusive`; neither changes the exit code.
+### Raid autopilot
+
+`turtle-agent raid-autopilot <walk-dir>` keeps a walk dir's raids running without a worker watching them (walk 37:
+18:00-19:25 idle while no worker watched, rests of 15-90 minutes on the instance cap, eight failed placements burning
+instances). It reads `<walk-dir>/targets.txt`, one goal per line:
+
+```
+# id   server          slot holder goal        -- raid-walk args...
+a      tortoise-test2  1    zg37-a full        -- zul_gurub --dir /plans --hires roster-best.json --sql zg.sql
+b      tortoise-test2  2    zg37-b boss:14515  -- zul_gurub --dir /plans --hires roster.json --sql zg.sql --from step 405
+c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /plans --hires roster.json
+```
+
+- **Targets.** Blank lines and `#` lines are skipped. The header is exactly `id server slot holder goal --`; the rest
+  is the raid-walk args, starting with the plan. A goal is `full` (walk to the plan's end), `leg:<L>` (`--until "leg
+  L"`) or `boss:<ENTRY>` (`--until boss-done`, done when that boss's `boss_kills` entry reads killed). An id may
+  repeat: its lines are walked in file order, and a met goal advances to the next line. `--from` in a line is the
+  goal's own start (first placement); a restart inside the goal starts at the furthest step the run reached.
+  `--server/--slot/--holder/--until/--place/--reuse-instance/--out` are managed and dropped if present; slot 3 and
+  `--instance-cap-unsafe` are refused before anything runs.
+- **Keep running.** On ANY end (any exit code, including the walk's own `.bot run stop` exit 0), on a used-up restart
+  budget, or on a **stall** (no `TBM:RUN` step and no hostile HP change in `run.log`/`frames.jsonl` for `--stall`,
+  default 15m) it stops the walk (SIGTERM; never `.bot run stop`), tears the slot down, picks a new `--out`
+  (`<walk-dir>/<id>-<n>`), and re-places: the same instance first (`--place --from "step N" --reuse-instance`), a
+  fresh instance only when that placement failed (the old bind is gone). A legitimate instance-cap wait (`earliest
+  free time` in `run.log`) is not a stall. Exit 2 stops that id (bad arguments); other exits re-place with a backoff
+  (20 s doubling to 10 min after fast failures). Exit 26 keeps its cap wait and re-places later.
+- **Teardown.** `teardown <out>/slot`; when the lease is still held or the teardown failed, a second run with
+  `--release-anyway` (the brief's "twice if the lease is kept"). The walk's own teardown has already released the
+  lease in the normal case.
+- **Files.** `<walk-dir>/EVENTS.txt` gets one line per action (UTC, id, action, reason); `status.txt` is rewritten
+  every `--status-every` (1m): id, goal, attempt, out, state, step, progress age, reuse. `<id>-<n>.out` is the walk's
+  own stdout/stderr; `autopilot.log` is the detached supervisor's.
+- **Detached and YIELD.** By default the launcher re-execs itself with `setsid` and returns (pid + log); the
+  supervisor writes `autopilot.pid` and refuses a second one. `--foreground` runs it in place. A `YIELD` file in the
+  walk dir tears every run down, releases every lease, writes `YIELD-DONE` and exits 0; SIGINT/SIGTERM does the same
+  without `YIELD-DONE`.
+- **Dry run.** `--dry-run` validates `targets.txt` and prints each goal's first command; nothing is launched.
+- **Tests.** The decision rule is pure (`internal/raidwalk/autopilot.go`): exit 0 after a run stop, restarts 3/3, a
+  65-minute no-progress fight and a failed placement are the walk 37 fixtures. `--poll`, `--stall`, `--settle` and
+  `--status-every` are the timings; `--binary` picks the turtle-agent the walks run.
 ### Raid suite
 
 `turtle-agent raid-suite` walks a list of raid plans one after another, each with `raid-walk`, and judges each walk
