@@ -328,13 +328,12 @@ func TestUldamanPullOrderExport(t *testing.T) {
 		}
 	}
 	// ancient_stone_keeper (leg 6): after the Rocksmasher at -43.6 237.3 come the Steward, the trio and the southern pair, then the boss approach and the boss.
-	// (waypoint pass: the stands moved off the mesh edges.)
 	check(6,
 		"pull [7011] -43.6,237.3 r10",
-		"move -65.1,238.2", "pull [4860] -39.6,272.8 r10",
-		"move -60.1,238.9", "pull [7012 7011] -43.0,263.9 r18.9",
-		"move -60.6,235.3", "pull [7011] -46.4,202.9 r13.4",
-		"move -76.1,239.1", "boss 7206")
+		"move -64.0,241.0", "pull [4860] -39.6,272.8 r10",
+		"move -58.0,241.0", "pull [7012 7011] -43.0,263.9 r18.9",
+		"move -64.0,227.0", "pull [7011] -46.4,202.9 r13.4",
+		"move -73.3,240.2", "boss 7206")
 	for _, r := range rows(7) {
 		if strings.Contains(r, "[4860]") || strings.Contains(r, "-39.6,272.8") {
 			t.Errorf("galgann still pulls the Steward: %s", r)
@@ -343,18 +342,17 @@ func TestUldamanPullOrderExport(t *testing.T) {
 	// galgann (leg 7) starts at the Rocksmasher pack at -18.8 276.5 (its first group, the Keeper's Rocksmasher, is a repeat that has no row).
 	check(7, "pull [7012 7011] -18.8,276.5 r15.5")
 	// grimlok (leg 8): pull 0 with the third Brawler, the two moved groups from their west stands, the merged patrol and trio, the east trio, the three, the pair.
-	// (waypoint pass: the stands moved off the mesh edges.)
 	check(8,
 		"pull [4853 4855] 35.8,370.6 r16",
-		"move 25.9,357.9", "pull [4855 4853] 49.1,343.5 r12.8",
-		"move 36.0,354.0", "pull [4855] 39.5,327.5 r15.1",
-		"move 19.1,366.4", "pull [4855 4853] 58.6,374.4 r18",
-		"move 66.0,387.0", "pull [4855 4853] 83.2,401.9 r15.3",
+		"move 28.0,360.0", "pull [4855 4853] 49.1,343.5 r12.8",
+		"move 33.0,354.0", "pull [4855] 39.5,327.5 r15.1",
+		"move 19.1,366.4", "move 37.5,363.5", "pull [4855 4853] 58.6,374.4 r18",
+		"move 50.8,379.3", "pull [4855 4853] 83.2,401.9 r15.3",
 		"pull [4855 4853] 51.7,420.1 r16",
 		"move 48.0,419.0", "pull [4853 4855] 38.8,442.0 r13.5",
 		"boss 4854")
-	// keepers_door (leg 9) begins with its old pull group 3 from the stand at 44.6 357.3.
-	check(9, "move 44.6,357.3", "pull [4855 4853] 44.3,308.4 r15.9")
+	// keepers_door (leg 9) begins with its old pull group 3 from the stand at 47.6 357.3.
+	check(9, "move 47.6,357.3", "pull [4855 4853] 44.3,308.4 r15.9")
 }
 
 // TestZulfarrakExportCarriesTheUnitLists: the plan row has cc_priority, cc_always and kill_first (TortoiseBots #1001's columns on
