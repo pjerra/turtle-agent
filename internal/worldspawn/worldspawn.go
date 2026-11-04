@@ -122,6 +122,18 @@ func AggroRadius(s Spawn, partyLevel int, rate float32) float32 {
 	return reach * rate
 }
 
+// WanderCapYd bounds the wander a spawn adds to its wake reach. The zul_gurub export has wander 11356 on the Gurubashi Champion
+// (its entry in the wrong column): no radius, so a wander this large counts as none (planlint's wanderCapYd).
+const WanderCapYd = 50
+
+// WanderYd is the wander a spawn adds to its wake reach: its wander, or 0 when the wander is at or above WanderCapYd.
+func WanderYd(s Spawn) float32 {
+	if s.Wander >= WanderCapYd {
+		return 0
+	}
+	return s.Wander
+}
+
 // Load reads the export in dir (the files tools/dungeongen/export.sh writes for one map) and returns the map's world. The
 // notes say what the export could not give (an old export's missing columns and files, unresolved entry links, patrolling
 // spawns without waypoints); they are informational, never errors.
