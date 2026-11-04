@@ -619,28 +619,8 @@ type walk struct {
 	// (never pruned: a reset or a respawn leaves it there) is no evidence on a later pause (review round 3).
 	// A wipe recovery clears it; a new attempt's first sighting sets it.
 	bossAttemptAt map[uint32]time.Time
-	// bossAliveSeen is when the frames last showed the boss unit GUID (key of w.hostiles) alive in the
-	// current attempt: trackFrame records every live boss-unit row here (revive r6). bossKilled's frame
-	// corpse and toolkit corpse both count only for a guid the frames showed alive in THIS attempt before
-	// its death, and the toolkit's wait needs a second read at least 15 s later still dead with no alive
-	// frame for that guid in between (Thekal's fake death: phase 1 dies and is raised again). A new
-	// attempt (resetBossAliveSeen) and a wipe recovery clear it with the attempt.
-	bossAliveSeen map[string]time.Time
-	// bossCorpseSeen is when the toolkit first reported the boss unit GUID (key of w.hostiles) dead in
-	// the current attempt: the wait's first sighting (revive r6). A live frame for that guid clears it,
-	// as does a wipe recovery.
-	bossCorpseSeen map[string]time.Time
 
 	stepFirst *dungeon.Point
-	// startStep is the step the run starts at (the placement's staged start, else the --from step): the revive's own
-	// step, and the start_step of a revive refusal (D-D).
-	startStep int
-	// reviveRefusal is the refused revive (D-D): set when the revive point never went quiet and the walk ends with
-	// "not revived"; nil otherwise.
-	reviveRefusal *raidwalk.ReviveRefusal
-	// wipeAt is when the last wipe (or near-wipe stop) was seen: the anchor of a self-regroup's D-C cap (review round
-	// 1, Opus M2).
-	wipeAt time.Time
 
 	lastStatus tbm.RunStatus
 	haveStatus bool
@@ -762,7 +742,7 @@ func raidWalkRun(ctx context.Context, o raidWalkOptions, env walkEnv, deps walkD
 	w := &walk{opts: o, env: env, deps: deps, stdout: stdout, stderr: stderr,
 		seenFights: map[string]bool{}, pendingFights: map[string]int{}, hostiles: map[string]hostileState{}, botAt: map[string]botPos{},
 		partyG: map[uint64]bool{}, bossSet: map[uint32]bool{}, bossRows: map[uint32]hostileState{}, hires: map[string]bool{},
-		bossAttemptAt: map[uint32]time.Time{}, bossAliveSeen: map[string]time.Time{}, bossCorpseSeen: map[string]time.Time{}}
+		bossAttemptAt: map[uint32]time.Time{}}
 	return w.main(ctx)
 }
 
@@ -929,7 +909,6 @@ func (w *walk) validate() error {
 			untilBase = raidwalk.PlaceUntilBase(w.rows, fallbackFrom, startStep)
 		}
 	}
-	w.startStep = startStep
 	if raidwalk.IsBossDone(w.opts.until) {
 		clause, boss, err := raidwalk.BossDoneUntil(w.rows, untilBase)
 		if err != nil {
@@ -1372,11 +1351,7 @@ func (w *walk) printPlan(out io.Writer) {
 			if c.PerUnit {
 				unit = fmt.Sprintf(" unit %d", c.Unit)
 			}
-			sweep := ""
-			if c.Sweep {
-				sweep = " (sweep)"
-			}
-			fmt.Fprintf(out, "  8b clear: row %d at %s %s %s r %s%s%s\n", c.Step, num32(c.X), num32(c.Y), num32(c.Z), num32(c.Radius), unit, sweep)
+			fmt.Fprintf(out, "  8b clear: row %d at %s %s %s r %s%s\n", c.Step, num32(c.X), num32(c.Y), num32(c.Z), num32(c.Radius), unit)
 		}
 		for _, n := range w.place.Notes {
 			fmt.Fprintf(out, "  8b note: %s\n", n)
@@ -1461,9 +1436,8 @@ func (w *walk) finish(code int) {
 		RowsSHA256: rowsSHA256(w.rows), UntilStep: w.untilStep, RunLabel: w.runLabel, SpeedFellBack: w.speedFellBack,
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
-		Place:         w.placeSum,
-		ReviveRefusal: w.reviveRefusal,
-		TierSource:    w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
+		Place:      w.placeSum,
+		TierSource: w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
 		WipeResumes: w.wipeResumes,
 	}
 	if w.inj != nil {

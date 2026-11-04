@@ -35,16 +35,6 @@ const (
 	// PlaceOwnYd is how far beyond a BEHIND pull row's radius a unit's home may stand and still be owned by that row
 	// (the spawn-home ownership test: the same 6 yd the extra clear round allows around a corridor circle).
 	PlaceOwnYd = 6
-	// PlaceSweepYd and PlaceSweepZ bound the landing sweep (PLACE-W26 M1): a BEHIND pull row whose point stands
-	// within PlaceSweepYd 2-D and PlaceSweepZ in z of the start point is cleared even when the corridor never
-	// reaches it (a leftover patrol whose loop walks into the landing). 150 yd is the farthest BEHIND patrol
-	// spawn whose loop reaches a placed ZG landing; the ZG coverage test is the real guard: raise the constant
-	// when it fails.
-	PlaceSweepYd = 150
-	PlaceSweepZ  = 60
-	// PlaceSweepSlack is added to a sweep circle's radius, so a patroller a few seconds into its loop is still
-	// inside. Capped at PlaceCircleMax like the corridor's circles.
-	PlaceSweepSlack = 10
 	// PlaceMaxCircles bounds one walk's clear: more circles than this refuse the placement.
 	PlaceMaxCircles = 40
 	// PlaceReviveYd is how close a hire's frame must be to the place point to count as placed.
@@ -55,10 +45,8 @@ const (
 	PlaceFloorYd = 3
 )
 
-// ClearCircle is one despawn circle of the place clear (spec 4.3, PLACE-W26 M1): a BEHIND creature row's circle, or,
-// for a row whose circle overlaps an AHEAD row's, one circle per unit of the plan's pull group (PerUnit,
-// PlaceUnitYd). Sweep marks a circle the M1 landing sweep added (a BEHIND pull row near the start point, outside
-// the corridor): corridor circles come first, sweep circles after, both in route then step order.
+// ClearCircle is one despawn circle of the place clear (spec 4.3): a BEHIND creature row's circle, or, for a row whose
+// circle overlaps an AHEAD row's, one circle per unit of the plan's pull group (PerUnit, PlaceUnitYd).
 type ClearCircle struct {
 	Step    int
 	Leg     int
@@ -67,7 +55,6 @@ type ClearCircle struct {
 	Entries []uint32
 	PerUnit bool
 	Unit    uint32 // the unit's entry (PerUnit only)
-	Sweep   bool   // the M1 landing sweep added this circle, not the corridor
 }
 
 // ClearPlan is PlaceClear's answer: the circles to despawn in route order, the per-unit circles it dropped and why, the
@@ -727,13 +714,11 @@ func aheadInside(ahead []aheadRow, x, y, z float32) (int, bool) {
 // placeAheadDz is the vertical window of the overlap test (spec 4.3).
 const placeAheadDz = 8
 
-// PlaceClear is the corridor clear plus the M1 landing sweep (spec 4.3, PLACE-W26 §3). One circle per BEHIND pull
-// row whose circle comes within PlaceCorridorYd of the route from start to stop and within PlaceCorridorZ of the
-// route's height; then one circle per BEHIND pull row near the start point (within PlaceSweepYd 2-D and PlaceSweepZ
-// in z) that the corridor did not already take. Boss and hold rows are never swept, and the sweep adds no refusal
-// (the boss guard stays route-based). A row whose circle overlaps an AHEAD creature row's is split into per-unit
-// circles (PlaceUnitYd), and a unit that still lies inside the AHEAD circle is dropped and named. A BEHIND boss or
-// hold row within PlaceBossGuardYd of the route refuses the placement: no `boss` flag is ever sent.
+// PlaceClear is the corridor clear (spec 4.3). One circle per BEHIND pull row whose circle comes within
+// PlaceCorridorYd of the route from start to stop and within PlaceCorridorZ of the route's height; a row whose circle
+// overlaps an AHEAD creature row's is split into per-unit circles (PlaceUnitYd), and a unit that still lies inside the
+// AHEAD circle is dropped and named. A BEHIND boss or hold row within PlaceBossGuardYd of the route refuses the
+// placement: no `boss` flag is ever sent.
 func PlaceClear(rows planexport.Rows, plan *dungeon.Plan, start, stop int) ClearPlan {
 	var out ClearPlan
 	route := routePoints(rows, start, stop)
@@ -761,7 +746,6 @@ func PlaceClear(rows planexport.Rows, plan *dungeon.Plan, start, stop int) Clear
 				Radius: rows.Steps[i].Radius, Entries: append([]uint32{}, rows.Steps[i].Entries...)})
 		}
 	}
-	circled := map[int]bool{} // steps already the source of a circle: the sweep never doubles a corridor row
 	for i := 0; i < start-1 && i < len(rows.Steps); i++ {
 		s := rows.Steps[i]
 		if !creatureRow(s) || !placedRow(s) {
@@ -780,57 +764,30 @@ func PlaceClear(rows planexport.Rows, plan *dungeon.Plan, start, stop int) Clear
 		if d-float64(s.Radius) > PlaceCorridorYd || dz > PlaceCorridorZ {
 			continue
 		}
-		behindCircles(&out, plan, rows, ahead, i, s, circleRadius(s.Radius), false)
-		circled[i+1] = true
-	}
-	// M1 landing sweep: BEHIND pull rows near the start point, ascending by step. The corridor's way, with sweep
-	// slack on the radius and Sweep set. The start point is rows.Steps[start-1].
-	if start-1 >= 0 && start-1 < len(rows.Steps) {
-		sp := rows.Steps[start-1]
-		for i := 0; i < start-1 && i < len(rows.Steps); i++ {
-			s := rows.Steps[i]
-			if s.Kind != planexport.KindPull || !placedRow(s) || circled[i+1] {
+		if hit, ok := aheadHit(ahead, s.X, s.Y, s.Z, circleRadius(s.Radius)); ok {
+			units := groupPositions(plan, rows, s)
+			if len(units) == 0 {
+				out.Notes = append(out.Notes, fmt.Sprintf("not cleared: row %d has no pull group positions and its circle overlaps AHEAD row %d", i+1, hit))
 				continue
 			}
-			if dist2f(s.X, s.Y, sp.X, sp.Y) > PlaceSweepYd || math.Abs(float64(s.Z)-float64(sp.Z)) > PlaceSweepZ {
-				continue
+			for _, u := range units {
+				if k, inside := aheadInside(ahead, u.X, u.Y, u.Z); inside {
+					out.Notes = append(out.Notes, fmt.Sprintf("not cleared: unit %d at %.0f %.0f %.0f lies in AHEAD row %d", u.Entry, u.X, u.Y, u.Z, k))
+					continue
+				}
+				out.Circles = append(out.Circles, ClearCircle{Step: i + 1, Leg: s.Leg, X: u.X, Y: u.Y, Z: u.Z,
+					Radius: PlaceUnitYd, Entries: []uint32{u.Entry}, PerUnit: true, Unit: u.Entry})
 			}
-			r := s.Radius + PlaceCircleSlack + PlaceSweepSlack
-			if r > PlaceCircleMax {
-				r = PlaceCircleMax
-			}
-			behindCircles(&out, plan, rows, ahead, i, s, r, true)
+			continue
 		}
+		out.Circles = append(out.Circles, ClearCircle{Step: i + 1, Leg: s.Leg, X: s.X, Y: s.Y, Z: s.Z,
+			Radius: circleRadius(s.Radius), Entries: append([]uint32{}, s.Entries...)})
 	}
 	if len(out.Circles) > PlaceMaxCircles {
 		out.Refusal = fmt.Sprintf("the route passes %d packs of earlier legs: use --until to shorten it", len(out.Circles))
 		out.Circles = nil
 	}
 	return out
-}
-
-// behindCircles appends the clear's circles for one BEHIND row i (spec 4.3, PLACE-W26 M1): the row's circle at radius
-// r, or, when it overlaps an AHEAD row's, one per-unit circle (PlaceUnitYd) per member of the plan's pull group, with
-// the same notes. Sweep marks circles the M1 landing sweep added.
-func behindCircles(out *ClearPlan, plan *dungeon.Plan, rows planexport.Rows, ahead []aheadRow, i int, s planexport.StepRow, r float32, sweep bool) {
-	if hit, ok := aheadHit(ahead, s.X, s.Y, s.Z, r); ok {
-		units := groupPositions(plan, rows, s)
-		if len(units) == 0 {
-			out.Notes = append(out.Notes, fmt.Sprintf("not cleared: row %d has no pull group positions and its circle overlaps AHEAD row %d", i+1, hit))
-			return
-		}
-		for _, u := range units {
-			if k, inside := aheadInside(ahead, u.X, u.Y, u.Z); inside {
-				out.Notes = append(out.Notes, fmt.Sprintf("not cleared: unit %d at %.0f %.0f %.0f lies in AHEAD row %d", u.Entry, u.X, u.Y, u.Z, k))
-				continue
-			}
-			out.Circles = append(out.Circles, ClearCircle{Step: i + 1, Leg: s.Leg, X: u.X, Y: u.Y, Z: u.Z,
-				Radius: PlaceUnitYd, Entries: []uint32{u.Entry}, PerUnit: true, Unit: u.Entry, Sweep: sweep})
-		}
-		return
-	}
-	out.Circles = append(out.Circles, ClearCircle{Step: i + 1, Leg: s.Leg, X: s.X, Y: s.Y, Z: s.Z,
-		Radius: r, Entries: append([]uint32{}, s.Entries...), Sweep: sweep})
 }
 
 // PlaceSkips is the union of every leg's skip list, sorted (spec 4.3): the entries the toolkit's quiet and clearto

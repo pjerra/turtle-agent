@@ -88,20 +88,13 @@ func (s *Session) sendWalkMove(op uint16, mi game.MoveInfo, body []byte, now tim
 	return nil
 }
 
-// placePlayer is serverPosition's owner-loop half: it ends any flight and records the position the
-// server put the player at. A caller that publishes more state in the same locked update (a
-// worldport's map and TeleportSeq) calls this and takes s.mu itself.
-func (s *Session) placePlayer(p [3]float32) {
+// serverPosition records a position the server put the player at. zKnown is false when
+// the z may be in the air (a GM teleport); the next position from the server settles it.
+func (s *Session) serverPosition(p [3]float32, zKnown bool) {
 	s.resolveFall() // a flight still waiting for its trace announces itself first
 	s.fall = nil
 	s.placed++
 	s.last = lastMove{pos: p, ctime: s.last.ctime}
-}
-
-// serverPosition records a position the server put the player at. zKnown is false when
-// the z may be in the air (a GM teleport); the next position from the server settles it.
-func (s *Session) serverPosition(p [3]float32, zKnown bool) {
-	s.placePlayer(p)
 	s.mu.Lock()
 	s.pos[0], s.pos[1], s.pos[2] = p[0], p[1], p[2]
 	s.falling, s.zUnknown = false, !zKnown

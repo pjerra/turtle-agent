@@ -166,32 +166,6 @@ func startAckTap(t *testing.T, opts Options) (*harness, *ackTap) {
 	return h, tap
 }
 
-// blockTap holds the session's write of one opcode at the conn hook (which runs before the write
-// goes out) until unblock, so a test can read the status with that packet still unsent.
-type blockTap struct {
-	op      uint16
-	entered chan struct{}
-	release chan struct{}
-	once    sync.Once
-	rel     sync.Once
-}
-
-func newBlockTap(op uint16) *blockTap {
-	return &blockTap{op: op, entered: make(chan struct{}), release: make(chan struct{})}
-}
-
-func (b *blockTap) Packet(dir worldconn.Direction, op uint16, body []byte) {
-	if dir != worldconn.ClientToServer || op != b.op {
-		return
-	}
-	b.once.Do(func() { close(b.entered) })
-	<-b.release
-}
-
-// unblock lets the held write (and any later one) through; it is safe to call twice, so a failed
-// test still lets Run finish.
-func (b *blockTap) unblock() { b.rel.Do(func() { close(b.release) }) }
-
 // charEnumBody builds SMSG_CHAR_ENUM the way Player::BuildEnumData writes it.
 func charEnumBody(chars ...Character) []byte {
 	w := packet.NewWriter().U8(uint8(len(chars)))

@@ -3,7 +3,6 @@ package raidwalk
 import (
 	"fmt"
 	"math"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -51,82 +50,9 @@ type Summary struct {
 	Teardown      TeardownSummary  `json:"teardown"`
 	// Place is the `place` object of a `--place` walk (spec 5.11): the start step the raid was put at, the instance, the
 	// cleared circles and the result. Absent without --place.
-	Place *PlaceSummary `json:"place,omitempty"`
-	// ReviveRefusal is what kept the revive point from going quiet when the walk gave up on it (D-D, walk 25). Absent
-	// when the walk never refused a revive.
-	ReviveRefusal *ReviveRefusal `json:"revive_refusal,omitempty"`
-	ExitCode      int            `json:"exit_code"`
-	Notes         []string       `json:"notes"`
-}
-
-// ReviveRefusal is the summary's `revive_refusal` object (D-D): the walk's revive never found a quiet point, ended
-// there (exit 19, "not revived: <why>"), and this says what blocked it and for how long.
-type ReviveRefusal struct {
-	WipeStep int `json:"wipe_step"`
-	// StartStep is the step of the revive point the walk actually used: the placement's staged start with --place,
-	// else the first positioned row of the plan (review round 1, Opus L3: a plain --from walk revives at the plan's
-	// own first point, whatever step the run is started on).
-	StartStep int `json:"start_step"`
-	// TriedSteps are the revive points the walk read, in order. It is the start step alone: D-B's passed steps are not
-	// implemented (the walk revives at the start, or at the placement's point).
-	TriedSteps []int `json:"tried_steps"`
-	// EntranceTried says the entrance fallback's `.go xyz` went out (review round 1, Opus L3): true while the walk
-	// refused at the entrance, whether its go landed or not.
-	EntranceTried bool `json:"entrance_tried"`
-	// WaitedS is how long the revive waited for the point to go quiet: the 120 s check plus the D-C re-reads, in
-	// seconds, from the first read.
-	WaitedS  int             `json:"waited_s"`
-	Blockers []ReviveBlocker `json:"blockers"`
-	// AllIdle says every last blocker of the last read was idle (not in combat, no target, not moving): waiting would
-	// not have helped.
-	AllIdle bool `json:"all_idle"`
-}
-
-// ReviveBlocker is one blocker of a refusal, as the last read saw it.
-type ReviveBlocker struct {
-	Entry uint32  `json:"entry"`
-	Name  string  `json:"name"`
-	Dist  float64 `json:"dist"`
-	Idle  bool    `json:"idle"`
-	// InCombat is the unit's UNIT_FLAG_IN_COMBAT: the state that keeps the 45 yd rule on it.
-	InCombat bool `json:"in_combat"`
-	// Patrol marks a --patrols patrol rather than a unit (entry 0, no combat): only its path blocks.
-	Patrol bool `json:"patrol,omitempty"`
-}
-
-// Line is summary.txt's one-line refusal, under the walk's end.
-func (r *ReviveRefusal) Line() string {
-	steps := make([]string, 0, len(r.TriedSteps))
-	for _, s := range r.TriedSteps {
-		steps = append(steps, strconv.Itoa(s))
-	}
-	bs := make([]string, 0, len(r.Blockers))
-	for _, b := range r.Blockers {
-		part := fmt.Sprintf("%s %.1f yd", b.Name, b.Dist)
-		if b.Entry != 0 {
-			part = fmt.Sprintf("%d %s", b.Entry, part)
-		}
-		switch {
-		case b.Patrol:
-			part += " patrol"
-		case b.Idle:
-			part += " idle"
-		case b.InCombat:
-			part += " in combat"
-		default:
-			part += " not idle"
-		}
-		bs = append(bs, part)
-	}
-	if len(bs) == 0 {
-		bs = append(bs, "none")
-	}
-	entrance := ""
-	if r.EntranceTried {
-		entrance = ", entrance tried"
-	}
-	return fmt.Sprintf("revive refusal: wipe step %d, tried %s%s, waited %d:%02d, blockers %s",
-		r.WipeStep, strings.Join(steps, "/"), entrance, r.WaitedS/60, r.WaitedS%60, strings.Join(bs, "; "))
+	Place    *PlaceSummary `json:"place,omitempty"`
+	ExitCode int           `json:"exit_code"`
+	Notes    []string      `json:"notes"`
 }
 
 // PlaceSummary is the summary's `place` object (spec 5.11).
@@ -158,7 +84,6 @@ type PlaceCircleSummary struct {
 	Skipped []string `json:"skipped,omitempty"`
 	PerUnit bool     `json:"per_unit,omitempty"`
 	Unit    uint32   `json:"unit,omitempty"`
-	Sweep   bool     `json:"sweep,omitempty"`
 	Moved   bool     `json:"moved,omitempty"`
 }
 
@@ -289,11 +214,9 @@ type SummaryMeta struct {
 	Dashboard      string
 	Teardown       TeardownSummary
 	// Place is the --place walk's place object (nil without --place).
-	Place *PlaceSummary
-	// ReviveRefusal is the walk's revive_refusal (nil when no revive was refused).
-	ReviveRefusal *ReviveRefusal
-	ExitCode      int
-	Notes         []string
+	Place    *PlaceSummary
+	ExitCode int
+	Notes    []string
 }
 
 // BuildSummary fills the tb-raid-walk v1 summary from the tracker and the command's own facts.
@@ -326,7 +249,6 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		Dashboard:      m.Dashboard,
 		Teardown:       m.Teardown,
 		Place:          m.Place,
-		ReviveRefusal:  m.ReviveRefusal,
 		ExitCode:       m.ExitCode,
 		Notes:          nonNilStrings(m.Notes),
 		WipeResumes:    m.WipeResumes,
@@ -481,9 +403,6 @@ func (s *Summary) Text() string {
 	}
 	fmt.Fprintf(&b, "started %s; ended %s; exit %d\n",
 		s.Started.Format(time.RFC3339), s.Ended.Format(time.RFC3339), s.ExitCode)
-	if s.ReviveRefusal != nil {
-		b.WriteString(s.ReviveRefusal.Line() + "\n")
-	}
 	fmt.Fprintf(&b, "wipes %d; boss engaged: %s\n", len(s.Wipes), bossLine(s.BossEngaged))
 	if len(s.Injections) > 0 {
 		parts := make([]string, 0, len(s.Injections))
