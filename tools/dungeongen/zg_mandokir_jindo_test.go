@@ -763,25 +763,25 @@ func TestZulGurubMandokirSweepClearOfLaterPacks(t *testing.T) {
 	zgCheckWalk(t, p, pl, w, packs)
 }
 
-// TestZulGurubJindoCorridorClearOfLaterPacks covers the Jin'do corridor through the group-14 pull (the Venombroods at the
+// TestZulGurubJindoCorridorClearOfLaterPacks covers the Jin'do corridor through the group-13 pull (the Venombroods at the
 // south hall's entry): the two packs that straddle the walk, the `to` moved off 49114's spawn, the swept north corridor,
-// the 1173080 split and the 49421 group's radius. The south hall's pulls 15-20 keep their existing stands (not touched).
+// the 1173080 split and the 49421 group's radius. The south hall's pulls 14-17 keep their existing stands (not touched).
 func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 	p, cs := zgLoadPlanAndExport(t)
 	leg := p.Legs[6]
 	packs := zgPacks(t, leg, cs)
-	zgCheckStands(t, "jindo_the_hexxer", leg, packs, true, 13)
-	// the order: the corridor packs 49741 and 49119 first, then 49114 and west; walk 29's fix pulls the Sacrificed
-	// Troll pack (group 12 on the old base) before group 9's 4, up to 49387-96's pack (group 13)
+	zgCheckStands(t, "jindo_the_hexxer", leg, packs, true, 12)
+	// the order: the corridor packs 49741 and 49119 first, then 49114 and west; the Jin'do fix drops the
+	// Sacrificed Troll pack (group 8 on the old base: respawn 10 s, wasted pull) and reroutes the walk
+	// east of the pit, up to 49387-96's pack (group 11)
 	want := [][]uint64{
 		{49741},                   // 0 (moved here from the Hakkar leg)
 		{49114}, {49747}, {51948}, // 1, 2, 3 (49118/49119 left for leg 0's canal stand pull, BOTS-PATHING-WAYPOINTS item 6)
 		{49397, 49398, 49399, 49400}, // 4
 		{49373, 49374, 49375, 49376, 49377, 49378, 49379, 49380, 49381, 49382}, // 5
 		{1173082}, {49363}, // 6, 7
-		{49078, 49079, 49080, 49081, 49082, 49083, 49084, 49085, 49086, 49087}, // 8 (the trolls first)
-		{49383, 49384, 49385, 49386}, {1173080}, {49402, 49403, 49421}, // 9, 10, 11
-		{49387, 49388, 49389, 49390, 49391, 49392, 49393, 49394, 49395, 49396}, // 12
+		{49383, 49384, 49385, 49386}, {1173080}, {49402, 49403, 49421}, // 8, 9, 10 (the honour guard, a stand pull now)
+		{49387, 49388, 49389, 49390, 49391, 49392, 49393, 49394, 49395, 49396}, // 11
 	}
 	if len(packs) < len(want) {
 		t.Fatalf("%d pull groups, want at least %d", len(packs), len(want))
@@ -809,8 +809,24 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 		t.Errorf("the leg's `to` %.1f %.1f %.1f is not the first stand %.1f %.1f %.1f", leg.To.X, leg.To.Y, leg.To.Z, to.X, to.Y, to.Z)
 	}
 	// the 49421 group's circle must not reach Jin'do or another group's spawns
-	g := leg.PullGroups[11] // 49402/49403/49421: one group earlier than walk 29's base (the canal group left for leg 0)
-	for _, pk := range packs[11] {
+	g := leg.PullGroups[10] // 49402/49403/49421: one group earlier than walk 29's base (the canal group left for leg 0), two earlier now the pit group is dropped
+	for _, pk := range packs[10] {
+		var cen dungeon.Point
+		n := float32(len(packs[10]))
+		for _, c := range packs[10] {
+			cen.X += c.Pos.X
+			cen.Y += c.Pos.Y
+			cen.Z += c.Pos.Z
+		}
+		cen.X /= n
+		cen.Y /= n
+		cen.Z /= n
+		if d := dist(cen, pk.Pos); d > float64(g.Radius)+3 {
+			t.Errorf("pull group 11 is %.1f yd from its own %s %d, radius %g + 3", d, pk.Name, pk.Entry, g.Radius)
+		}
+		_ = pk
+	}
+	if boss := leg.Boss; boss != nil {
 		var cen dungeon.Point
 		n := float32(len(packs[11]))
 		for _, c := range packs[11] {
@@ -821,36 +837,20 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 		cen.X /= n
 		cen.Y /= n
 		cen.Z /= n
-		if d := dist(cen, pk.Pos); d > float64(g.Radius)+3 {
-			t.Errorf("pull group 12 is %.1f yd from its own %s %d, radius %g + 3", d, pk.Name, pk.Entry, g.Radius)
-		}
-		_ = pk
-	}
-	if boss := leg.Boss; boss != nil {
-		var cen dungeon.Point
-		n := float32(len(packs[12]))
-		for _, c := range packs[12] {
-			cen.X += c.Pos.X
-			cen.Y += c.Pos.Y
-			cen.Z += c.Pos.Z
-		}
-		cen.X /= n
-		cen.Y /= n
-		cen.Z /= n
 		if d := dist(cen, boss.Position); d <= float64(g.Radius)+3 {
-			t.Errorf("pull group 11's circle %.1f yd from Jin'do at %.1f %.1f %.1f: the pull would wake him (radius %g + 3)", d, boss.Position.X, boss.Position.Y, boss.Position.Z, g.Radius)
+			t.Errorf("pull group 10's circle %.1f yd from Jin'do at %.1f %.1f %.1f: the pull would wake him (radius %g + 3)", d, boss.Position.X, boss.Position.Y, boss.Position.Z, g.Radius)
 		}
 	}
 	parties := zgParties(t, p, 6)
 	last := -1
 	for i, q := range parties {
-		if q.Turn && q.Group == 14 { // the group-14 pull (51875: the Venombroods) closes the corridor
+		if q.Turn && q.Group == 13 { // the group-13 pull (51875: the Venombroods) closes the corridor
 			last = i
 			break
 		}
 	}
 	if last < 0 {
-		t.Fatal("no pull row for group 14")
+		t.Fatal("no pull row for group 13")
 	}
 	w := zgWalk{Name: "leg6 jindo corridor", Parties: parties, Last: last}
 	pl := zgPlannerOrNil(t)
