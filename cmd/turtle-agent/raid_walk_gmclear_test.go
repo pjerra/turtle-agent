@@ -478,6 +478,63 @@ func TestPlaceGMClearNothingInViewIsPartial(t *testing.T) {
 	}
 }
 
+// Walk 37 raid e (ZG walk 37): the supervisor's restart kept --gm-clear and the
+// tool ran, but run.log held no gm-clear: line for the group, so the report
+// could not tell whether the flag acted on this placement. Every named group
+// gets one run.log line, including a group with nothing to clear.
+func TestPlaceGMClearLogsOneLinePerGroup(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
+	f.agent.unitsFn = func(int) []objects.Unit {
+		return gmClearView(f, pack, guids, func(g packet.GUID) bool {
+			f.agent.mu.Lock()
+			defer f.agent.mu.Unlock()
+			return f.agent.killed[g]
+		})
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f.stderr.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	label := raidwalk.GMClearLabel(pack.Leg, "2")
+	if !strings.Contains(string(raw), "gm-clear: "+label) {
+		t.Fatalf("run.log has no gm-clear: line for group %s:\n%s", label, raw)
+	}
+	// The corridor clear despawns the whole pack: still one line, naming that
+	// there was nothing to clear.
+	f2, tk := newPlaceFixture(t)
+	f2.opts.gmClear = stringList{"2:2"}
+	f2.opts.gmClearSpawns = gmClearZGSpawns
+	tk.clearto = func(string) (int, error) { return 1, nil }
+	tk.cleartoRemoved = func(string) []any {
+		out := make([]any, 0, len(guids))
+		for _, g := range guids {
+			out = append(out, map[string]any{"g": g.String(), "e": g.Entry(), "n": "despawned"})
+		}
+		return out
+	}
+	f2.agent.unitsFn = func(int) []objects.Unit {
+		return gmClearView(f2, pack, guids, func(g packet.GUID) bool { return false })
+	}
+	f2.agent.startReply = zgPlaceReply(t)
+	if code := f2.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s", code, f2.stderr.String())
+	}
+	raw2, err := os.ReadFile(filepath.Join(f2.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw2), "gm-clear: "+label) || !strings.Contains(string(raw2), "nothing to clear") {
+		t.Fatalf("run.log has no nothing-to-clear line for group %s:\n%s", label, raw2)
+	}
+}
+
 // Without the flag nothing changes: no kill, no assisted mark, no gm_clear field.
 func TestPlaceWithoutGMClearIsNotAssisted(t *testing.T) {
 	f, _ := newPlaceFixture(t)

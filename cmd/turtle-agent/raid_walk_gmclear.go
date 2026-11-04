@@ -253,7 +253,7 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 				}
 			}
 		}
-		left, gone := 0, 0
+		left, gone, dead := 0, 0, 0
 		for _, g := range pk.SpawnGUIDs() {
 			m := members[g]
 			e := raidwalk.GMClearEntry{Leg: pk.Leg, Group: pk.Group, Entry: pk.Members[g], Tries: m.tries}
@@ -289,12 +289,20 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 			case !e.Killed:
 				left++
 				w.note("gm-clear: member %d %s (%s) %s after %d .die lines", e.Entry, e.GUID, label, e.Reason, e.Tries)
+			case e.Tries > 0:
+				dead++
 			}
 			w.gmClearLog = append(w.gmClearLog, e)
 		}
+		why := "nothing to clear"
+		if dead > 0 || left > 0 {
+			why = fmt.Sprintf("%d killed by .die, %d already gone, %d left", dead, gone, left)
+		}
+		w.logLine(w.env.now(), fmt.Sprintf("gm-clear: %s: %s", label, why))
 		if gone > 0 {
-			// The walk's own clear removed them: the frames still show them alive in the client's store, so this is not a
-			// partial clear. Say it, because --gm-clear's count then reads lower than the pack size.
+			// The frames still show them alive in the client's store, so this is not a partial clear. The per-group
+			// line above already says they were gone; the note keeps the count, because --gm-clear's count then
+			// reads lower than the pack size.
 			w.note("gm-clear: %s: %d of %d members were already despawned by this walk's own clear (no line sent)", label, gone, len(pk.SpawnGUIDs()))
 		}
 		if left > 0 {
