@@ -748,6 +748,27 @@ case22() {
   ok "case22 no move row in the log: the restart falls back to the leg start"
 }
 
+# case25: raid-walk's placement now retries in the same instance and gives up with exit 29 when its own budget is
+# spent. walk-super must stop on 29 with its own line, never restart (a restart would enter a fresh instance: walk 37
+# burned one of the 4 an hour per failure there).
+case25() {
+  local d="$T/c25" rc runs
+  mkdir -p "$d"
+  make_cmd "$d/cmd.txt" raid-walk zul_gurub --server s --slot 2 --holder H25 \
+    --from "step 582" --place --reuse-instance --sql /tmp/w.sql --until boss --out "$d/run0"
+  printf '29\n0\n' >"$d/seq"
+  printf '%s\n' "$PLACE_SUMMARY" >"$d/run0.summary"
+  FAKE_NO_TBM=1 FAKE_SEQ_FILE="$d/seq" FAKE_ARGS_LOG="$d/args.log" FAKE_SUMMARY="$PLACE_SUMMARY" \
+    "$SUPER_BIN" "$d/cmd.txt" 5 "$d/restart.log" >"$d/stdout.log" 2>"$d/stderr.log"
+  rc=$?
+  runs="$(runs_done "$d/args.log")"
+  (( rc == 29 )) || { bad "case25 exit=$rc want 29"; return; }
+  (( runs == 1 )) || { bad "case25 runs=$runs want 1 (no restart on exit 29)"; return; }
+  grep -qF -e 'run 1 exit 29' -e 'stop: the placement failed every try in the same instance' "$d/restart.log" ||
+    { bad "case25 restart.log missing the exit-29 stop line"; return; }
+  ok "case25 exit 29 (placement exhausted): stop, no fresh-instance restart"
+}
+
 # case24: the server numbers every ai_dungeon_step row in (leg, seq) order (loot, open, rest, gossip, move_direct,
 # move_hop_exact ... all take a number), and the "one move row back" retreat takes the last MOVE row (move, move_direct
 # or move_hop_exact) before the start step, by its server step number. The --sql file lists leg 1 before leg 0, and an
@@ -860,6 +881,7 @@ main() {
   if (( run_all )) || [[ "$only" == *" 22 "* ]]; then case22; fi
   if (( run_all )) || [[ "$only" == *" 23 "* ]]; then case23; fi
   if (( run_all )) || [[ "$only" == *" 24 "* ]]; then case24; fi
+  if (( run_all )) || [[ "$only" == *" 25 "* ]]; then case25; fi
   if (( run_all )); then mutation; mutation2; fi
   printf -- '----\nPASS=%d FAIL=%d\n' "$PASS" "$FAIL"
   (( FAIL == 0 ))

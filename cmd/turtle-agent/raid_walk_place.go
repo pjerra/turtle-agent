@@ -34,6 +34,19 @@ const (
 	// placeVerifyWait and placeSummonWait are the frame windows of the place verification (spec 5 step 9).
 	placeVerifyWait = 15 * time.Second
 	placeSummonWait = 10 * time.Second
+	// placeSettleWait is how long the walk waits after a place or a summon wave before it reads the frames: a GM
+	// `.summon` and the toolkit's place land a moment after their line (walk 37: e3's frames showed a summoned hire
+	// at the point 2 to 4 s after its line, and the walk judged the wave while the last hires were still landing).
+	placeSettleWait = 4 * time.Second
+	// placeSummonRounds is how many summon waves the verification may send to the hires its frames still miss. Walk
+	// 37: one wave of a 20-hire raid was still landing when its 10 s window closed, and eight placements failed with
+	// 13 to 18 hires "missing" that the next poll would have found at the point.
+	placeSummonRounds = 3
+	// placeTryLimit is how many placement attempts one walk makes in the SAME instance (the first, then the retreats
+	// and same-point retries) before it gives up with exitRaidWalkPlaceFailed. Walk 37: every failed placement exited
+	// 18, walk-super restarted the same cmd, and the restart with a dead bind entered a fresh instance (4 per hour
+	// per server): eight failures at step 582 locked m910q for an hour. The walk's own retries are the budget now.
+	placeTryLimit = 4
 	// placeNearYd is how close the commander must stand to a circle's point to clear it without a move (spec 5 step 6).
 	placeNearYd = 140
 	// placeRogueYd is how close to a BEHIND circle a named unit must stand for the one extra clear round (spec 5 step 7):
@@ -1167,8 +1180,10 @@ func (w *walk) placeMove(ctx context.Context) error {
 	return nil
 }
 
-// placeMissing are the hires whose freshest frame is not on the walk's map, alive and within
-// raidwalk.PlaceReviveYd of the start point.
+// placeMissing are the hires whose freshest frame is not on the walk's map, alive and inside the landing area:
+// within raidwalk.PlaceArriveYd (2D) of the start point and within placeClearDz of its floor. The 2D reach and the
+// dz window are the same landing area the quiet protects, so a hire the raid's spread or a slow summon leaves a few
+// yards out still counts (walk 37: the 12 yd 3D check failed placements whose hires stood inside that reach).
 func (w *walk) placeMissing(now time.Time, p dungeon.Point) []string {
 	var out []string
 	for _, name := range w.hireList() {
@@ -1177,7 +1192,28 @@ func (w *walk) placeMissing(now time.Time, p dungeon.Point) []string {
 			out = append(out, name)
 			continue
 		}
-		if placeDist3(b.x, b.y, b.z, p.X, p.Y, p.Z) > raidwalk.PlaceReviveYd {
+		if !placeArrived(b, p) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// placeArrived says a hire's freshest frame is inside the landing area around the start point.
+func placeArrived(b botPos, p dungeon.Point) bool {
+	if placeDist2(b.x, b.y, p.X, p.Y) > raidwalk.PlaceArriveYd {
+		return false
+	}
+	return math.Abs(float64(b.z-p.Z)) <= placeClearDz
+}
+
+// placeDead are the hires the freshest frames show dead: a `.summon` never moves a corpse, so the failure names them
+// apart from the hires that are merely late (walk 37: d3's restart at step 43 failed on 3 dead hires the walk would
+// never place).
+func (w *walk) placeDead(now time.Time) []string {
+	var out []string
+	for _, name := range w.hireList() {
+		if b, ok := w.botAt[name]; ok && now.Sub(b.at) <= 10*time.Second && b.dead {
 			out = append(out, name)
 		}
 	}
@@ -1205,11 +1241,17 @@ func (w *walk) placeView(ctx context.Context) {
 	}
 }
 
-// placeVerify is spec 5 step 9: the walk's own frames must show every hire on the point. A missing hire gets one
-// `.summon` (it lands at the commander's x/y/z, in the raid's copy); still missing is a failure. The toolkit's own
-// member lists are never judged: they truncate near a full raid.
+// placeVerify is spec 5 step 9: the walk's own frames must show every hire inside the landing area. Each missing
+// hire gets a GM `.summon` (it lands at the commander's x/y/z, in the raid's copy), up to placeSummonRounds waves,
+// each followed by placeSettleWait and its own placeSummonWait window; the walk reads the frames only after a wave
+// has settled. Still missing is a failure, naming the dead hires apart: a `.summon` never moves a corpse. The
+// toolkit's own member lists are never judged: they truncate near a full raid.
 func (w *walk) placeVerify(ctx context.Context) error {
 	p := w.place.Point
+	// The place's teleport (and the summons of a retry) lands a moment after the line: judge the settled frames.
+	if err := w.placeSleep(ctx, placeSettleWait); err != nil {
+		return err
+	}
 	deadline := w.env.now().Add(placeVerifyWait)
 	for {
 		w.placeView(ctx)
@@ -1224,33 +1266,56 @@ func (w *walk) placeVerify(ctx context.Context) error {
 			return err
 		}
 	}
-	missing := w.placeMissing(w.env.now(), p)
-	for _, name := range missing {
-		if err := w.gm(ctx, ".summon "+name); err != nil {
+	for round := 1; round <= placeSummonRounds; round++ {
+		for _, name := range w.placeMissing(w.env.now(), p) {
+			if err := w.gm(ctx, ".summon "+name); err != nil {
+				return err
+			}
+			if err := w.placeSleep(ctx, 100*time.Millisecond); err != nil {
+				return err
+			}
+			w.placeSummonedOnce(name)
+			w.note("place: summoned %s (round %d of %d: not in the landing area by the frames)", name, round, placeSummonRounds)
+		}
+		if err := w.placeSleep(ctx, placeSettleWait); err != nil {
 			return err
 		}
-		if err := w.placeSleep(ctx, 100*time.Millisecond); err != nil {
-			return err
+		deadline = w.env.now().Add(placeSummonWait)
+		for {
+			w.placeView(ctx)
+			now := w.env.now()
+			if missing := w.placeMissing(now, p); len(missing) == 0 {
+				return w.placeCombatCheck(now)
+			}
+			if !now.Before(deadline) {
+				break
+			}
+			if err := w.placeSleep(ctx, 2*time.Second); err != nil {
+				return err
+			}
 		}
-		w.placeSummoned = append(w.placeSummoned, name)
-		w.note("place: summoned %s (not on the point by the frames)", name)
 	}
-	deadline = w.env.now().Add(placeSummonWait)
-	for {
-		w.placeView(ctx)
-		now := w.env.now()
-		missing = w.placeMissing(now, p)
-		if len(missing) == 0 {
-			return w.placeCombatCheck(now)
-		}
-		if !now.Before(deadline) {
-			break
-		}
-		if err := w.placeSleep(ctx, 2*time.Second); err != nil {
-			return err
+	return stopf(exitRaidWalkFailed, "place: not at the start: %s", w.placeMissingWords(w.env.now(), p))
+}
+
+// placeSummonedOnce records a hire the place verification summoned, once: the summary's placed count is
+// hires - summoned, however many waves a straggler took.
+func (w *walk) placeSummonedOnce(name string) {
+	for _, n := range w.placeSummoned {
+		if n == name {
+			return
 		}
 	}
-	return stopf(exitRaidWalkFailed, "place: not at the start: %s", strings.Join(missing, ", "))
+	w.placeSummoned = append(w.placeSummoned, name)
+}
+
+// placeMissingWords is the failure's name list, with the dead hires called out.
+func (w *walk) placeMissingWords(now time.Time, p dungeon.Point) string {
+	missing := w.placeMissing(now, p)
+	if dead := w.placeDead(now); len(dead) > 0 {
+		return strings.Join(missing, ", ") + " (dead: " + strings.Join(dead, ", ") + ")"
+	}
+	return strings.Join(missing, ", ")
 }
 
 // placeCombatCheck fails when the frames show a hire fighting after the place (spec 5 step 9). M2 names the enemy:
@@ -1460,12 +1525,17 @@ func (w *walk) phasePlace(ctx context.Context) error {
 	w.placeInst = inst
 	w.placeSum.Instance = inst
 	// 5-9. the start point, the corridor, the quiet, the raid's move and the frames, retried in THIS instance: walk 33
-	// burned a fresh instance for every quiet refusal and every post-place fight. A quiet or a post-place fight moves
-	// the attempt one move row back, up to placeRetreatRows; the last one may GM-kill only the blocking units when
-	// --gm-clear is on. A second instance is never entered for this placement.
-	retries := 0
+	// burned a fresh instance for every quiet refusal and every post-place fight, and walk 37's "not at the start"
+	// exits did the same through walk-super's restart (a dead bind made every restart a fresh instance). Every place
+	// failure a retry can help (a quiet, a post-place fight, hires that did not arrive) now takes a try in THIS
+	// instance: a move row back while the retreat budget lasts, then the same point (with the units the last quiet
+	// named GM-killed first when --gm-clear is on). After placeTryLimit tries the walk gives up with
+	// exitRaidWalkPlaceFailed, which walk-super stops on instead of spending a fresh instance. A second instance is
+	// never entered for this placement.
+	tries, backs := 0, 0
 	for {
-		err := w.placeTry(ctx, retries > 0)
+		tries++
+		err := w.placeTry(ctx, tries > 1)
 		if err == nil {
 			break
 		}
@@ -1473,29 +1543,29 @@ func (w *walk) phasePlace(ctx context.Context) error {
 		if !retryable || w.opts.noPlaceRetreat {
 			return err
 		}
+		if tries >= placeTryLimit {
+			_, detail := stopInfo(err)
+			return stopf(exitRaidWalkPlaceFailed,
+				"place: %d tries in the same instance, start step %d: %s: no fresh instance was entered; walk-super stops here",
+				tries, w.place.Start, strings.TrimPrefix(detail, "place: "))
+		}
 		next, ok := raidwalk.PlaceBackInLeg(w.rows, w.place.Start, w.place.Leg)
-		if !ok || retries >= placeRetreatRows {
-			// No legal retreat (a boss or hold row stands behind the start, or the leg's own first row is the start:
-			// walk 36 b's Arlokk start would have stepped back over Thekal's boss row and the run would re-fight him) or
-			// the retreat budget is spent: stay on this row, GM-kill the units the quiet named when --gm-clear is on,
-			// and place again.
-			if done := w.placeKillBlockers(ctx); !done {
+		if ok && backs < placeRetreatRows {
+			backs++
+			w.note("place: %s; stepping back to step %d in the same instance (try %d of %d, no fresh instance)",
+				reason, next, tries+1, placeTryLimit)
+			if err := w.placeSetStart(next); err != nil {
 				return err
 			}
-			if qerr := w.placeQuiet(ctx); qerr != nil {
-				return err
-			}
-			if err := w.placeFinishAttempt(ctx); err != nil {
-				return err
-			}
-			break
+			continue
 		}
-		retries++
-		w.note("place: %s; stepping back to step %d in the same instance (retry %d of %d, no fresh instance)",
-			reason, next, retries, placeRetreatRows)
-		if err := w.placeSetStart(next); err != nil {
-			return err
-		}
+		// No legal retreat (a boss or hold row stands behind the start, or the leg's own first row is the start:
+		// walk 36 b's Arlokk start would have stepped back over Thekal's boss row and the run would re-fight him) or
+		// the retreat budget is spent: stay on this row and place again. With --gm-clear, the units the last quiet
+		// named die first (walk 33).
+		w.note("place: %s; trying step %d again in the same instance (try %d of %d, no fresh instance)",
+			reason, w.place.Start, tries+1, placeTryLimit)
+		w.placeKillBlockers(ctx)
 	}
 	p = w.place.Point
 	// 10. re-anchor here and release.
@@ -1513,7 +1583,9 @@ func (w *walk) phasePlace(ctx context.Context) error {
 	return nil
 }
 
-// placeRetryReason names the two place failures a retreat may retry in the same instance, and whether err is one.
+// placeRetryReason names the place failures the same-instance retry may repeat, and whether err is one: a quiet the
+// area does not yet give, a fight that broke out after the move, or hires the frames did not find in the landing area
+// (walk 37: the summons land a moment late, and a raid still fighting just off the point runs back to the fight).
 func placeRetryReason(err error) (string, bool) {
 	_, reason := stopInfo(err)
 	switch {
@@ -1521,6 +1593,8 @@ func placeRetryReason(err error) (string, bool) {
 		return "the area is not quiet", true
 	case strings.Contains(reason, "fighting after the place"):
 		return "fighting after the place", true
+	case strings.Contains(reason, "not at the start"):
+		return "not at the start", true
 	}
 	return "", false
 }
@@ -1571,8 +1645,17 @@ func (w *walk) placeTry(ctx context.Context, retry bool) error {
 }
 
 // placeSummonParty teleports every hire to the commander with the GM path (the reuse placement's own line), then
-// judges the landing by the walk's frames.
+// judges the landing by the walk's frames. A hire already inside the landing area is summoned too (the retry is
+// cheap), but only the ones that were outside count as summoned in the summary.
 func (w *walk) placeSummonParty(ctx context.Context) error {
+	// Poll one frame first: placeMissing judges by frames no older than 10 s, and the corridor clear and the quiet
+	// (2 x 20 s) leave no fresh one. A stale frame would count the whole raid as summoned even when it stands at the
+	// point (walk 37: the retry paths printed placed 0/20).
+	w.placeView(ctx)
+	missing := map[string]bool{}
+	for _, name := range w.placeMissing(w.env.now(), w.place.Point) {
+		missing[name] = true
+	}
 	for _, name := range w.hireList() {
 		if err := w.gm(ctx, ".summon "+name); err != nil {
 			return err
@@ -1580,13 +1663,36 @@ func (w *walk) placeSummonParty(ctx context.Context) error {
 		if err := w.placeSleep(ctx, 100*time.Millisecond); err != nil {
 			return err
 		}
+		if missing[name] {
+			w.placeSummonedOnce(name)
+		}
 	}
 	return w.placeVerify(ctx)
 }
 
-// placeFinishAttempt is the summon-and-verify half after the last retreat's GM-killed blockers and a clean quiet.
-func (w *walk) placeFinishAttempt(ctx context.Context) error {
-	return w.placeSummonParty(ctx)
+// placeGather summons the party and verifies the landing, retrying in the SAME instance (the reuse and bind paths
+// already run there) up to placeTryLimit times. A long summon wave or a raid still finishing a fight gets another
+// wave instead of an exit 18, whose walk-super restart would enter a fresh instance when the bind is gone. When every
+// try fails the walk exits exitRaidWalkPlaceFailed.
+func (w *walk) placeGather(ctx context.Context) error {
+	for try := 1; ; try++ {
+		err := w.placeSummonParty(ctx)
+		if err == nil {
+			return nil
+		}
+		reason, retryable := placeRetryReason(err)
+		if !retryable || w.opts.noPlaceRetreat {
+			return err
+		}
+		if try >= placeTryLimit {
+			_, detail := stopInfo(err)
+			return stopf(exitRaidWalkPlaceFailed,
+				"place: %d tries in the same instance, start step %d: %s: no fresh instance was entered; walk-super stops here",
+				try, w.place.Start, strings.TrimPrefix(detail, "place: "))
+		}
+		w.note("place: %s; summoning the party at step %d again (try %d of %d, no fresh instance)",
+			reason, w.place.Start, try+1, placeTryLimit)
+	}
 }
 
 // placeKillBlockers GM-kills only the units the last quiet named, and only when --gm-clear is on. It looks every
@@ -1810,7 +1916,7 @@ func (w *walk) placeReuse(ctx context.Context) error {
 	}
 	w.note("place: teleported %d hires to the start point with the GM path (.summon); the area was not cleared or quiet-checked (the raid's own instance)",
 		len(w.hireList()))
-	if err := w.placeVerify(ctx); err != nil {
+	if err := w.placeGather(ctx); err != nil {
 		return err
 	}
 	w.placeStayed = w.placeHold(ctx)
@@ -1859,15 +1965,7 @@ func (w *walk) placeResume(ctx context.Context) error {
 	}
 	w.note("place: --reuse-instance: resumed instance %.0f from the commander's existing bind (expires in %s); no fresh instance is entered or counted",
 		inst, w.reuseBindTTR)
-	for _, name := range w.hireList() {
-		if err := w.gm(ctx, ".summon "+name); err != nil {
-			return err
-		}
-		if err := w.placeSleep(ctx, 100*time.Millisecond); err != nil {
-			return err
-		}
-	}
-	if err := w.placeVerify(ctx); err != nil {
+	if err := w.placeGather(ctx); err != nil {
 		return err
 	}
 	w.placeStayed = w.placeHold(ctx)

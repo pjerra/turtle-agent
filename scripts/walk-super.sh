@@ -17,7 +17,9 @@
 # job control off, so the INT handler escalates to TERM after forwarding INT: no ghost walk survives us.
 # An exit-2 line naming `pass --from "step N"` is also written into the restarts log (walk 26c: the placed Jeklik
 # restart was refused for no quiet move row, and the log only said "exit 2 is not 18/19").
-#   exit 0, or any code other than 18/19: stop, log, exit with that code.
+#   exit 0, or any code other than 18/19: stop, log, exit with that code. Exit 29 (the placement failed every
+#     try raid-walk makes in the same instance) gets its own line: a restart of that cmd would enter a fresh
+#     instance, the one-per-hour resource the walk's own retries exist to save.
 #   no exit status (the rc file is missing or not a number: the wrapper died first): exit 70, logged
 #     "status unknown", stop. It is a failure, so it restarts nothing.
 #   exit 18 (paused) or 19 (incident), restarts left: re-read the cmd file,
@@ -543,6 +545,10 @@ while true; do
   if (( rc != 18 && rc != 19 )); then
     if (( status_unknown )); then
       log_event "run $run_no exit $rc leg - out ${out:-<none>} stop: status unknown (no exit status from the run: the wrapper died before writing it)"
+    elif (( rc == 29 )); then
+      # Walk 37: the placement failed every try it makes in the same instance (raid-walk's own retry budget is
+      # spent). A restart of this cmd would enter a fresh instance and burn one of the hourly ones, so stop here.
+      log_event "run $run_no exit 29 leg - out ${out:-<none>} stop: the placement failed every try in the same instance (no restart: it would enter a fresh instance)"
     elif [[ -n "$run_reason" ]]; then
       log_event "run $run_no exit $rc leg - out ${out:-<none>} stop: exit $rc is not 18/19 ($run_reason)"
     else

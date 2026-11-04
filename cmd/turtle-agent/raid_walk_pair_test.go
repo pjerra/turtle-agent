@@ -339,6 +339,8 @@ func TestRaidWalkPairWorstExit(t *testing.T) {
 		{"usage over blocking", true, exitUsage, exitRaidWalkInjectFailed, exitUsage},
 		{"a refused slot", false, exitSlotRefused, exitOK, exitSlotRefused},
 		{"usage first", false, exitSlotRefused, exitUsage, exitUsage},
+		{"a placement exhaustion over 18", false, exitRaidWalkFailed, exitRaidWalkPlaceFailed, exitRaidWalkPlaceFailed},
+		{"a placement exhaustion over 19", false, exitRaidWalkIncident, exitRaidWalkPlaceFailed, exitRaidWalkPlaceFailed},
 		{"clean", false, exitOK, exitOK, exitOK},
 	}
 	for _, c := range cases {

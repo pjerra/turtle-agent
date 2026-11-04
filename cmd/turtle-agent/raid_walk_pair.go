@@ -709,11 +709,12 @@ func pairHasFlag(flags []pairFlag, name string) bool {
 
 // pairWorstExit is the pair's exit: the first that occurs in this order over the walks' codes (spec 4.1). A blocking
 // incident - a walk that exits 23 because a bot was left frozen - ranks above 18 and 19, so it never hides (spec 0.5,
-// lead amendment); every other 23 keeps its place.
+// lead amendment); every other 23 keeps its place. A placement that exhausted its tries (29) ranks first among the
+// walk codes: reporting 18 or 19 instead would let walk-super restart it into the fresh instance the 29 stops.
 func pairWorstExit(blocking bool, codes ...int) int {
-	order := []int{exitUsage, exitSlotRefused, exitRaidWalkInjectFailed, exitRaidWalkFailed, exitRaidWalkIncident, exitOK}
+	order := []int{exitUsage, exitSlotRefused, exitRaidWalkPlaceFailed, exitRaidWalkInjectFailed, exitRaidWalkFailed, exitRaidWalkIncident, exitOK}
 	if !blocking {
-		order = []int{exitUsage, exitSlotRefused, exitRaidWalkFailed, exitRaidWalkIncident, exitRaidWalkInjectFailed, exitOK}
+		order = []int{exitUsage, exitSlotRefused, exitRaidWalkPlaceFailed, exitRaidWalkFailed, exitRaidWalkIncident, exitRaidWalkInjectFailed, exitOK}
 	}
 	for _, p := range order {
 		for _, c := range codes {
