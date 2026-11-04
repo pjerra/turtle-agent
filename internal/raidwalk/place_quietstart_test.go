@@ -117,6 +117,13 @@ func TestPlaceBackInLegStopsAtABossRowAndAtTheLeg(t *testing.T) {
 	if got, ok := PlaceBackInLeg(rows, 4, "4"); !ok || got != 3 {
 		t.Fatalf("retreat from 4 in leg 4: %d %v, want 3", got, ok)
 	}
+	// An explicit-step start (--from step N) names no leg: the retreat stays in the row's own leg.
+	if got, ok := PlaceBackInLeg(rows, 2, ""); ok {
+		t.Fatalf("a retreat from the boss row (step 2) went to %d", got)
+	}
+	if got, ok := PlaceBackInLeg(rows, 4, ""); !ok || got != 3 {
+		t.Fatalf("retreat from 4 with no leg name: %d %v, want 3 (leg 4's own row)", got, ok)
+	}
 	// The pure finder still crosses it (walk-super's restart is not the quiet retreat).
 	if got, ok := PlaceBack(rows, 3); !ok || got != 1 {
 		t.Fatalf("PlaceBack from 3: %d %v, want 1", got, ok)

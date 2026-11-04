@@ -197,6 +197,16 @@ func PlaceBack(rows planexport.Rows, step int) (int, bool) {
 // Thekal's boss row to his approach at step 271, and the run started there and fought Thekal again; the leg lookup
 // was right, the retreat was not).
 func PlaceBackInLeg(rows planexport.Rows, step int, leg string) (int, bool) {
+	if step < 1 || step > len(rows.Steps) {
+		return 0, false
+	}
+	if k := rows.Steps[step-1].Kind; k == planexport.KindBoss || k == planexport.KindHold {
+		return 0, false // a start on a boss or hold row already re-fights it; no retreat makes that worse
+	}
+	if leg == "" {
+		// An explicit-step start names no leg: the retreat stays in the leg the row itself belongs to.
+		leg = startLegName(rows, rows.Steps[step-1].Leg)
+	}
 	for i := step - 2; i >= 0; i-- {
 		s := rows.Steps[i]
 		if s.Kind == planexport.KindBoss || s.Kind == planexport.KindHold {
