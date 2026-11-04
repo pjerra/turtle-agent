@@ -692,8 +692,8 @@ func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 	rows := res.Rows
 	// walk 37: +4 (the guard camp's two extra rows and the pair rows' stands; the later items of the walk drop
 	// five approach paths and add three staging moves, net -2 more).
-	if len(rows.Steps) != 403 {
-		t.Fatalf("the fixture has %d steps, want 403", len(rows.Steps))
+	if len(rows.Steps) != 402 {
+		t.Fatalf("the fixture has %d steps, want 402", len(rows.Steps))
 	}
 	start, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
 	if err != nil {

@@ -9,6 +9,7 @@ package main
 import (
 	"math"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -146,16 +147,21 @@ func TestZgW35JeklikGroup13KnowsTheBatLoop(t *testing.T) {
 	leg := zgW35Leg(t, p, "high_priestess_jeklik")
 	var g *dungeon.PullGroup
 	for i := range leg.PullGroups {
-		if len(leg.PullGroups[i].Entries) == 2 &&
-			leg.PullGroups[i].Entries[0] == 11368 && leg.PullGroups[i].Entries[1] == 14750 &&
-			len(leg.PullGroups[i].Positions) == 1 &&
-			math.Hypot(float64(leg.PullGroups[i].Positions[0].X+12228), float64(leg.PullGroups[i].Positions[0].Y+1478)) < 1 {
+		if lg := leg.PullGroups[i]; lg.Patrol != nil && strings.Contains(lg.Patrol.Source, "creature_movement 49185") {
 			g = &leg.PullGroups[i]
 			break
 		}
 	}
 	if g == nil {
-		t.Fatal("no leg-0 group 13 (11368,14750 at -12228 -1478)")
+		t.Fatal("no leg-0 pull group carries the 14750 patroller 49185's loop")
+	}
+	// Walk 37: the row is formation 49185's own camp (six spawns), pulled after F6 (the walk-35 row was
+	// the static pack's camp 20 yd east and owned nothing alive; the residue walk then crossed a bat lane).
+	if len(g.Positions) != 6 {
+		t.Fatalf("the 49185 row has %d positions, want its formation's 6", len(g.Positions))
+	}
+	if int64(g.Entries[0]) != 14750 {
+		t.Fatalf("the 49185 row's first entry is %d, want the patrolling rider 14750", g.Entries[0])
 	}
 	if g.Patrol == nil {
 		t.Fatal("leg-0 group 13 has no patrol block: the 14750 patroller 49185 walks its loop through the pull and the run pauses on the straggler walk")
