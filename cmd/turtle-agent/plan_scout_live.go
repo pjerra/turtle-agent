@@ -94,7 +94,8 @@ func scoutStopInfo(err error) (int, string) {
 
 // planScoutLiveEnv binds the live pass to the slot config; tests replace it with fakes.
 var planScoutLiveEnv = func(o *planScoutOptions) (walkEnv, walkDeps, error) {
-	return defaultWalkEnv(&raidWalkOptions{slotsPath: o.slots, mmaps: o.mmaps, dir: o.dir, binary: o.binary})
+	return defaultWalkEnv(&raidWalkOptions{slotsPath: o.slots, mmaps: o.mmaps, dir: o.dir, binary: o.binary,
+		server: o.live, capPerAccount: o.instanceCapPerAccount, capGiven: o.instanceCapSet})
 }
 
 // scoutLive is one scout's live run.
@@ -309,6 +310,21 @@ func (sl *scoutLive) logReply(line string) {
 	}
 }
 
+// capPerAccount is the core's fresh instances per account and hour: the flag's value, else the slots.json server
+// entry's, else the stock 5.
+func (sl *scoutLive) capPerAccount() int {
+	if sl.opts.instanceCapSet && sl.opts.instanceCapPerAccount > 0 {
+		return sl.opts.instanceCapPerAccount
+	}
+	if sl.env.capPerAccount > 0 {
+		return sl.env.capPerAccount
+	}
+	if sl.opts.instanceCapPerAccount > 0 {
+		return sl.opts.instanceCapPerAccount
+	}
+	return raidwalk.InstanceCapPerAccount
+}
+
 // instanceCap is step 2: the raid-walk ledger's check and reservation.
 func (sl *scoutLive) instanceCap(ctx context.Context) (int, string) {
 	sl.capOwner = fmt.Sprintf("plan-scout-%s-%d", sl.plan.Name, os.Getpid())
@@ -330,7 +346,9 @@ func (sl *scoutLive) instanceCap(ctx context.Context) (int, string) {
 		var admitted bool
 		var n int
 		var wait time.Duration
-		err := sl.capUpdate(func(l *raidwalk.CapLedger) { admitted, n, wait = l.TryReserve(sl.server, sl.capOwner, now) })
+		err := sl.capUpdate(func(l *raidwalk.CapLedger) {
+			admitted, n, wait = l.TryReserve(sl.server, sl.capOwner, sl.capPerAccount(), now)
+		})
 		if err != nil {
 			msg := fmt.Sprintf("instance cap: the ledger cannot be read, so the count on %s is unknown: %v", sl.server, err)
 			sl.note("%s", msg)
@@ -356,7 +374,7 @@ func (sl *scoutLive) instanceCap(ctx context.Context) (int, string) {
 			}
 			return exitOK, ""
 		}
-		warn := fmt.Sprintf("instance cap: %d fresh instances in the last hour on %s; the 6th is refused by the core", n, sl.server)
+		warn := fmt.Sprintf("instance cap: %d fresh instances in the last hour on %s; the core's cap is %d per account and hour", n, sl.server, sl.capPerAccount())
 		if !warned {
 			sl.note("%s", warn)
 			warned = true
@@ -412,7 +430,7 @@ func (sl *scoutLive) confirmInstance() {
 		sl.note("instance cap: ledger entry not written: %v", err)
 	}
 	sl.capReserved = false
-	sl.note("instance: one of the account's 5 fresh instance ids per hour was used")
+	sl.note("instance: one of the account's %d fresh instance ids per hour was used", sl.capPerAccount())
 }
 
 // releaseCap gives the reservation back when the scout ends before its GM entered.

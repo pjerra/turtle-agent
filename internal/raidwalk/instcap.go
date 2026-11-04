@@ -1,12 +1,14 @@
-// instcap.go: the per-server ledger of fresh instance placements (the core's "5 instance ids per account per hour"
-// cap). The core lets one account enter only 5 distinct instance ids in an hour; the list lives in the worldserver's
-// memory, so a restart clears it. A raid walk that creates a fresh instance (a first run, --place, a walk-super
-// restart, an idle-raid re-placement) records it here, and the next walk reads the count before it hires.
+// instcap.go: the per-server ledger of fresh instance placements (the core's "N instance ids per account per hour"
+// cap). The core lets one account enter only N distinct instance ids in an hour (stock 5, MAX_INSTANCE_PER_ACCOUNT_PER_HOUR);
+// the list lives in the worldserver's memory, so a restart clears it. A raid walk that creates a fresh instance (a
+// first run, --place, a walk-super restart, an idle-raid re-placement) records it here, and the next walk reads the
+// count before it hires.
 //
 // The hire output (TBM:HIRE_RAID) does not name the pool accounts it used; the walk reads them with `.pinfo <hire>`
 // after the last batch and records their ids on the entry. When every live entry in the window names its accounts the
-// ledger counts the core's cap per account (5/hour), and TryReserve/PeakFor use that. An older entry without accounts
-// (or a live reservation from a walk that has not hired yet) falls back to the conservative raid count.
+// ledger counts the core's cap per account (cap/hour), and TryReserve/PeakFor use that. An older entry without accounts
+// (or a live reservation from a walk that has not hired yet) falls back to the conservative raid count, one below the
+// cap.
 package raidwalk
 
 import (
@@ -22,11 +24,11 @@ import (
 const (
 	// InstanceCapWindow is how long the core remembers an entered instance id for an account.
 	InstanceCapWindow = time.Hour
-	// InstanceCapWarnAt is the count at which a walk stops starting blindly when the ledger cannot count per account
-	// (the core refuses the 6th fresh instance; 4 leaves a spare for the walk that is already running).
-	InstanceCapWarnAt = 4
-	// InstanceCapPerAccount is the core's cap per pool account: the 6th distinct instance id in an hour is refused.
-	// When every live entry names its accounts the ledger counts this exactly instead of the raid count above.
+	// InstanceCapWarnAt is the stock raid count at which a walk stops starting blindly when the ledger cannot count
+	// per account (one below the stock cap, leaving a spare for the walk that is already running).
+	InstanceCapWarnAt = InstanceCapPerAccount - 1
+	// InstanceCapPerAccount is the stock core's cap per pool account: the 6th distinct instance id in an hour is refused.
+	// A local core patch may raise it; the commands take --instance-cap-per-account and slots.json a per-server value.
 	InstanceCapPerAccount = 5
 	// InstanceCapDefaultWait is the default of --instance-cap-wait.
 	InstanceCapDefaultWait = 20 * time.Minute
@@ -36,6 +38,16 @@ const (
 	// InstanceCapFile is the ledger's file name in the walk state dir.
 	InstanceCapFile = "instance-cap.json"
 )
+
+// RaidLimit is the conservative raid count for a ledger that cannot count per account: one below the per-account cap,
+// because a raid packs 2-3 pool accounts and the walk that is about to start needs the last place. cap 0 means the
+// stock core; a cap of 1 still admits the first raid.
+func RaidLimit(cap int) int {
+	if cap <= 0 {
+		cap = InstanceCapPerAccount
+	}
+	return max(1, cap-1)
+}
 
 // CapEntry is one fresh instance placement.
 type CapEntry struct {
@@ -144,14 +156,15 @@ func (l *CapLedger) CountFor(name string, accounts []string, now time.Time) int 
 	return most
 }
 
-// WaitFor is how long until the count drops below InstanceCapWarnAt: zero when it already is, else until the item
-// that has to leave does (the oldest at a count of 4, the second at a count of 5).
-func (l *CapLedger) WaitFor(name string, now time.Time) time.Duration {
+// WaitFor is how long until the raid count drops below RaidLimit(cap): zero when it already is, else until the item
+// that has to leave does (the oldest at a count of 4 for cap 5, the second at a count of 5).
+func (l *CapLedger) WaitFor(name string, cap int, now time.Time) time.Duration {
 	lv := l.leaves(name, now)
-	if len(lv) < InstanceCapWarnAt {
+	limit := RaidLimit(cap)
+	if len(lv) < limit {
 		return 0
 	}
-	return lv[len(lv)-InstanceCapWarnAt].Sub(now)
+	return lv[len(lv)-limit].Sub(now)
 }
 
 // accountsKnown reports whether every live item names its accounts: entries carry them, reservations do not.
@@ -209,9 +222,12 @@ func (l *CapLedger) PeakFor(name string, accounts []string, now time.Time) (peak
 	return peak, true
 }
 
-// WaitForAccounts is how long until every account in accounts is below InstanceCapPerAccount: zero when they all
-// are, else until the entry that has to leave does (an account's oldest at a count of 5, its second at 6).
-func (l *CapLedger) WaitForAccounts(name string, accounts []string, now time.Time) time.Duration {
+// WaitForAccounts is how long until every account in accounts is below cap: zero when they all are, else until the
+// entry that has to leave does (an account's oldest at a count of 5 for cap 5, its second at 6).
+func (l *CapLedger) WaitForAccounts(name string, accounts []string, cap int, now time.Time) time.Duration {
+	if cap <= 0 {
+		cap = InstanceCapPerAccount
+	}
 	set := map[string]bool{}
 	for _, a := range accounts {
 		set[a] = true
@@ -226,11 +242,11 @@ func (l *CapLedger) WaitForAccounts(name string, accounts []string, now time.Tim
 	}
 	var until time.Time
 	for _, ts := range per {
-		if len(ts) < InstanceCapPerAccount {
+		if len(ts) < cap {
 			continue
 		}
 		sort.Slice(ts, func(i, j int) bool { return ts[i].Before(ts[j]) })
-		if at := ts[len(ts)-InstanceCapPerAccount]; at.After(until) {
+		if at := ts[len(ts)-cap]; at.After(until) {
 			until = at
 		}
 	}
@@ -240,11 +256,14 @@ func (l *CapLedger) WaitForAccounts(name string, accounts []string, now time.Tim
 	return until.Sub(now)
 }
 
-// WaitForBusiest is how long until the busiest pool account is below InstanceCapPerAccount: zero when the ledger
-// cannot count per account (WaitFor then) or one already is, else until that account's entry that has to leave does.
-func (l *CapLedger) WaitForBusiest(name string, now time.Time) time.Duration {
+// WaitForBusiest is how long until the busiest pool account is below cap: zero when the ledger cannot count per
+// account (WaitFor then) or one already is, else until that account's entry that has to leave does.
+func (l *CapLedger) WaitForBusiest(name string, cap int, now time.Time) time.Duration {
+	if cap <= 0 {
+		cap = InstanceCapPerAccount
+	}
 	if !l.accountsKnown(name, now) {
-		return l.WaitFor(name, now)
+		return l.WaitFor(name, cap, now)
 	}
 	per := map[string][]time.Time{}
 	for _, e := range l.live(name, now) {
@@ -258,7 +277,7 @@ func (l *CapLedger) WaitForBusiest(name string, now time.Time) time.Duration {
 			peak = len(ts)
 		}
 	}
-	if peak < InstanceCapPerAccount {
+	if peak < cap {
 		return 0
 	}
 	// Every account at the peak has to lose one before the busiest is below the cap: the latest of those leaves.
@@ -268,7 +287,7 @@ func (l *CapLedger) WaitForBusiest(name string, now time.Time) time.Duration {
 			continue
 		}
 		sort.Slice(ts, func(i, j int) bool { return ts[i].Before(ts[j]) })
-		if at := ts[len(ts)-InstanceCapPerAccount]; at.After(until) {
+		if at := ts[len(ts)-cap]; at.After(until) {
 			until = at
 		}
 	}
@@ -276,21 +295,24 @@ func (l *CapLedger) WaitForBusiest(name string, now time.Time) time.Duration {
 }
 
 // TryReserve is the admission step, to run inside UpdateCapLedger so it is atomic with the count. When the ledger
-// names every live entry's accounts it counts per pool account (InstanceCapPerAccount) and the busiest account must
-// be below it; otherwise it keeps the conservative raid count (InstanceCapWarnAt), because a raid packs 2-3 pool
-// accounts. On admission it holds a place for owner; otherwise it reports the count and the wait until it falls.
-func (l *CapLedger) TryReserve(name, owner string, now time.Time) (admitted bool, count int, wait time.Duration) {
+// names every live entry's accounts it counts per pool account (cap) and the busiest account must be below it;
+// otherwise it keeps the conservative raid count (RaidLimit(cap)), because a raid packs 2-3 pool accounts. On
+// admission it holds a place for owner; otherwise it reports the count and the wait until it falls.
+func (l *CapLedger) TryReserve(name, owner string, cap int, now time.Time) (admitted bool, count int, wait time.Duration) {
 	l.Release(name, owner)
-	limit := InstanceCapWarnAt
+	if cap <= 0 {
+		cap = InstanceCapPerAccount
+	}
+	limit := RaidLimit(cap)
 	count, known := l.Busiest(name, now)
 	if known {
-		limit = InstanceCapPerAccount
+		limit = cap
 	}
 	if count >= limit {
 		if known {
-			return false, count, l.WaitForBusiest(name, now)
+			return false, count, l.WaitForBusiest(name, cap, now)
 		}
-		return false, count, l.WaitFor(name, now)
+		return false, count, l.WaitFor(name, cap, now)
 	}
 	s := l.server(name)
 	s.Reservations = append(s.Reservations, CapReservation{Owner: owner, At: now, Expires: now.Add(InstanceCapReserveFor)})

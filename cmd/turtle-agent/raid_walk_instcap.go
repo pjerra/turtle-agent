@@ -1,13 +1,13 @@
 // raid_walk_instcap.go: the instance-cap check before a walk starts and the ledger entry after it enters. The core
-// lets an account enter 5 distinct instance ids per hour, remembered in the worldserver's memory only; hires are
-// packed up to 10 a pool account, so a re-placed raid soon meets the 6th and its summons fail. Every walk that
-// enters a fresh instance is recorded in raidwalk's ledger (a JSON file beside the slots file). The check and the
-// admission are one step under the ledger lock: a walk below 4 in the last hour RESERVES a place (owner holder+pid,
-// 30 min), so walks that start together cannot all pass at a count of 3; the reservation becomes the entry once the
-// raid has entered and is released on every exit before that. At 4 or more the walk warns and waits
-// (--instance-cap-wait), or exits 26 (--instance-cap-fail). A walk never starts a fresh instance without a reservation:
-// when the wait runs out, or the ledger cannot be read, it exits 26 too, unless --instance-cap-unsafe lets it go on
-// (logged, no reservation).
+// lets an account enter N distinct instance ids per hour (stock 5, --instance-cap-per-account or slots.json's
+// instance_cap_per_account), remembered in the worldserver's memory only; hires are packed up to 10 a pool account, so
+// a re-placed raid soon meets the cap and its summons fail. Every walk that enters a fresh instance is recorded in
+// raidwalk's ledger (a JSON file beside the slots file). The check and the admission are one step under the ledger
+// lock: a walk below the raid count (N-1) in the last hour RESERVES a place (owner holder+pid, 30 min), so walks that
+// start together cannot all pass at the last place; the reservation becomes the entry once the raid has entered and
+// is released on every exit before that. At that count the walk warns and waits (--instance-cap-wait), or exits 26
+// (--instance-cap-fail). A walk never starts a fresh instance without a reservation: when the wait runs out, or the
+// ledger cannot be read, it exits 26 too, unless --instance-cap-unsafe lets it go on (logged, no reservation).
 package main
 
 import (
@@ -28,6 +28,18 @@ const (
 
 // capOwnerName is this walk's reservation owner.
 func (w *walk) capOwnerName() string { return fmt.Sprintf("%s#%d", w.opts.holder, os.Getpid()) }
+
+// instanceCap is the core's fresh instances per account and hour: the flag's value, else the slots.json server entry's,
+// else the stock 5 (defaultWalkEnv resolves the first two into opts and env; tests may set neither).
+func (w *walk) instanceCap() int {
+	if w.opts.capPerAccount > 0 {
+		return w.opts.capPerAccount
+	}
+	if w.env.capPerAccount > 0 {
+		return w.env.capPerAccount
+	}
+	return raidwalk.InstanceCapPerAccount
+}
 
 // capUpdate runs fn on the ledger under its lock and reports a corrupt file that was moved aside.
 func (w *walk) capUpdate(fn func(*raidwalk.CapLedger)) error {
@@ -73,7 +85,9 @@ func (w *walk) phaseInstanceCap(ctx context.Context) error {
 		var admitted bool
 		var n int
 		var wait time.Duration
-		err := w.capUpdate(func(l *raidwalk.CapLedger) { admitted, n, wait = l.TryReserve(server, w.capOwner, now) })
+		err := w.capUpdate(func(l *raidwalk.CapLedger) {
+			admitted, n, wait = l.TryReserve(server, w.capOwner, w.instanceCap(), now)
+		})
 		if err != nil {
 			// The ledger cannot be read (not merely corrupt): it is never written over, and the walk does not guess.
 			msg := fmt.Sprintf("instance cap: the ledger cannot be read, so the count on %s is unknown: %v", server, err)
@@ -104,7 +118,7 @@ func (w *walk) phaseInstanceCap(ctx context.Context) error {
 			}
 			return nil
 		}
-		warn := fmt.Sprintf("instance cap: %d fresh instances in the last hour on %s; the 6th is refused by the core", n, server)
+		warn := fmt.Sprintf("instance cap: %d fresh instances in the last hour on %s; the core's cap is %d per account and hour", n, server, w.instanceCap())
 		if !warned {
 			w.say(now, warn)
 			w.note("%s", warn)
@@ -165,7 +179,7 @@ func (w *walk) waitHireAccountCap(ctx context.Context) error {
 		err := w.capUpdate(func(l *raidwalk.CapLedger) {
 			peak, known = l.PeakFor(server, w.hireAccounts, now)
 			if known {
-				wait = l.WaitForAccounts(server, w.hireAccounts, now)
+				wait = l.WaitForAccounts(server, w.hireAccounts, w.instanceCap(), now)
 			}
 		})
 		if err != nil {
@@ -178,14 +192,14 @@ func (w *walk) waitHireAccountCap(ctx context.Context) error {
 			w.note("instance cap: an entry in the hour names no accounts, so the hired accounts are counted as raids")
 			return nil
 		}
-		if peak < raidwalk.InstanceCapPerAccount {
+		if peak < w.instanceCap() {
 			if warned {
 				w.say(now, fmt.Sprintf("instance cap: the busiest hired account has %d fresh instance(s) in the last hour; going on", peak))
 			}
 			return nil
 		}
 		if !warned {
-			msg := fmt.Sprintf("instance cap: a hired account already has %d fresh instances in the last hour on %s; the 6th is refused by the core", peak, server)
+			msg := fmt.Sprintf("instance cap: a hired account already has %d fresh instances in the last hour on %s; the core's cap is %d", peak, server, w.instanceCap())
 			w.say(now, msg)
 			w.note("%s", msg)
 			warned = true

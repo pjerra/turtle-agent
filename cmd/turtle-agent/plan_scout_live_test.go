@@ -902,3 +902,19 @@ func TestPlanScoutTeleportNeedsAck(t *testing.T) {
 		t.Fatalf("code %d, %q: want 28 with the missing ack named", code, errOut)
 	}
 }
+
+// The scout's cap resolves the flag first, then the slots.json server value defaultWalkEnv resolved, then the stock 5.
+func TestScoutCapPerAccountPrecedence(t *testing.T) {
+	sl := &scoutLive{opts: &planScoutOptions{instanceCapPerAccount: 5}, env: walkEnv{capPerAccount: 30}}
+	if got := sl.capPerAccount(); got != 30 {
+		t.Fatalf("without the flag = %d, want the server's 30", got)
+	}
+	sl.opts.instanceCapSet = true
+	if got := sl.capPerAccount(); got != 5 {
+		t.Fatalf("with the flag = %d, want 5", got)
+	}
+	plain := &scoutLive{opts: &planScoutOptions{instanceCapPerAccount: 5}}
+	if got := plain.capPerAccount(); got != 5 {
+		t.Fatalf("with no env = %d, want the stock 5", got)
+	}
+}

@@ -17,7 +17,7 @@ func TestAutoCommandArgs(t *testing.T) {
 		Goal: raidwalk.AutoGoal{Kind: "boss", Boss: 14515},
 		Args: []string{"zul_gurub", "--dir", "/plans", "--hires", "/roster.json"},
 	}
-	args := autoCommandArgs("/bin/ta", target, "/walk/a-1", "step 405", true)
+	args := autoCommandArgs("/bin/ta", target, "/walk/a-1", "step 405", true, 0)
 	got := strings.Join(args, " ")
 	want := "raid-walk zul_gurub --dir /plans --hires /roster.json --server tortoise-test2 --slot 1 --holder zg-a --until boss-done --out /walk/a-1 --from step 405 --place --reuse-instance"
 	if got != want {
@@ -27,10 +27,18 @@ func TestAutoCommandArgs(t *testing.T) {
 		t.Fatal("unsafe flag added")
 	}
 	// A first placement has no --from, no --place and no reuse.
-	args = autoCommandArgs("/bin/ta", target, "/walk/a-1", "", false)
+	args = autoCommandArgs("/bin/ta", target, "/walk/a-1", "", false, 0)
 	got = strings.Join(args, " ")
 	if strings.Contains(got, "--from") || strings.Contains(got, "--place") || strings.Contains(got, "--reuse-instance") {
 		t.Fatalf("first placement has managed restart flags: %s", got)
+	}
+	if strings.Contains(got, "--instance-cap-per-account") {
+		t.Fatalf("an unset cap was forwarded: %s", got)
+	}
+	// An explicit cap is passed on for every walk.
+	args = autoCommandArgs("/bin/ta", target, "/walk/a-1", "", false, 30)
+	if got = strings.Join(args, " "); !strings.Contains(got, "--instance-cap-per-account 30") {
+		t.Fatalf("the cap was not forwarded: %s", got)
 	}
 }
 

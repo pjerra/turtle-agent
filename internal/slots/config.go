@@ -22,7 +22,10 @@ type Server struct {
 	WorldAddr string `json:"world_addr,omitempty"`
 	MmapsDir  string `json:"mmaps_dir,omitempty"`
 	StateDir  string `json:"state_dir,omitempty"`
-	Slots     []Slot `json:"slots"`
+	// InstanceCapPerAccount is this server's core cap of fresh instance ids per account and hour (MAX_INSTANCE_PER_ACCOUNT_PER_HOUR
+	// in the worldserver's core patch). Zero: the stock 5. The raid commands' --instance-cap-per-account wins over it.
+	InstanceCapPerAccount int    `json:"instance_cap_per_account,omitempty"`
+	Slots                 []Slot `json:"slots"`
 }
 
 type Slot struct {
@@ -115,6 +118,9 @@ func (c *Config) validate(path string) error {
 		if srv.Realmd == "" {
 			return fmt.Errorf("slots %s: server %q: realmd is required (host:port)", path, srv.Name)
 		}
+		if srv.InstanceCapPerAccount < 0 {
+			return fmt.Errorf("slots %s: server %q: instance_cap_per_account must be 1 or more, not %d", path, srv.Name, srv.InstanceCapPerAccount)
+		}
 		if srv.Slots == nil {
 			return fmt.Errorf("slots %s: server %q: has no slots", path, srv.Name)
 		}
@@ -147,6 +153,14 @@ func (c *Config) validate(path string) error {
 		}
 	}
 	return nil
+}
+
+// ServerInstanceCap is the server's instance_cap_per_account, 0 when unset (the stock core's 5).
+func (c *Config) ServerInstanceCap(server string) int {
+	if srv := c.findServer(server); srv != nil {
+		return srv.InstanceCapPerAccount
+	}
+	return 0
 }
 
 func (c *Config) findServer(server string) *Server {

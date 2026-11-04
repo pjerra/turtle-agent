@@ -27,7 +27,7 @@ import (
 )
 
 const raidAutopilotUsage = `usage: turtle-agent raid-autopilot [--foreground] [--binary PATH] [--poll D] [--stall D]
-    [--settle D] [--status-every D] [--dry-run] <walk-dir>`
+    [--settle D] [--status-every D] [--instance-cap-per-account N] [--dry-run] <walk-dir>`
 
 // autoChildEnv marks the re-exec'd detached process.
 const autoChildEnv = "TURTLE_RAID_AUTOPILOT_CHILD"
@@ -62,7 +62,11 @@ type autoOptions struct {
 	stall       time.Duration
 	settle      time.Duration
 	statusEvery time.Duration
-	dryRun      bool
+	// instanceCapPerAccount is the core's fresh instances per account and hour, forwarded to raid-walk only when the
+	// flag was given (otherwise raid-walk resolves slots.json's per-server value and then the stock 5).
+	instanceCapPerAccount int
+	instanceCapSet        bool
+	dryRun                bool
 }
 
 // autoGoalState is one of an id's goal lines.
@@ -128,7 +132,7 @@ func raidAutopilotCmd(ctx context.Context, args []string, stdout, stderr io.Writ
 	if o.dryRun {
 		for _, t := range targets {
 			out := filepath.Join(o.walkDir, fmt.Sprintf("%s-1", t.ID))
-			fmt.Fprintf(stdout, "%s %s slot %s goal %s: %s\n", t.ID, t.Server, t.Slot, t.Goal, strings.Join(autoCommandArgs(o.binary, t, out, t.Start, false), " "))
+			fmt.Fprintf(stdout, "%s %s slot %s goal %s: %s\n", t.ID, t.Server, t.Slot, t.Goal, strings.Join(autoCommandArgs(o.binary, t, out, t.Start, false, o.forwardInstanceCap()), " "))
 		}
 		return exitOK
 	}
@@ -169,8 +173,18 @@ func parseAutoArgs(args []string, stderr io.Writer) (autoOptions, int) {
 	fs.DurationVar(&o.stall, "stall", autoDefaultStall, "no step or boss-HP change for this long re-places the run")
 	fs.DurationVar(&o.settle, "settle", autoDefaultSettle, "wait after a teardown before the next launch")
 	fs.DurationVar(&o.statusEvery, "status-every", autoDefaultStatusEvery, "how often status.txt is written")
+	fs.IntVar(&o.instanceCapPerAccount, "instance-cap-per-account", raidwalk.InstanceCapPerAccount, "the core's limit of fresh instance ids one account may enter in an hour, passed to every raid-walk (stock 5; without the flag each walk uses slots.json's instance_cap_per_account)")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "validate the targets and print the first command, launch nothing")
 	if err := fs.Parse(args); err != nil {
+		return o, exitUsage
+	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "instance-cap-per-account" {
+			o.instanceCapSet = true
+		}
+	})
+	if o.instanceCapPerAccount < 1 {
+		fmt.Fprintf(stderr, "raid-autopilot: --instance-cap-per-account must be 1 or more, not %d\n", o.instanceCapPerAccount)
 		return o, exitUsage
 	}
 	if fs.NArg() != 1 {
@@ -218,9 +232,19 @@ func groupAutoTargets(targets []raidwalk.AutoTarget) []*autoState {
 	return out
 }
 
+// forwardInstanceCap is the --instance-cap-per-account to pass on, 0 when the flag was not given (raid-walk then
+// resolves slots.json's per-server value itself).
+func (o autoOptions) forwardInstanceCap() int {
+	if o.instanceCapSet {
+		return o.instanceCapPerAccount
+	}
+	return 0
+}
+
 // autoCommandArgs is the raid-walk command for one attempt. from is the start the attempt asks for (a target's own
-// --from, or the furthest step a restart reached); reuse asks for the same instance first.
-func autoCommandArgs(binary string, t raidwalk.AutoTarget, out, from string, reuse bool) []string {
+// --from, or the furthest step a restart reached); reuse asks for the same instance first; instanceCap > 0 is passed
+// on as --instance-cap-per-account.
+func autoCommandArgs(binary string, t raidwalk.AutoTarget, out, from string, reuse bool, instanceCap int) []string {
 	args := []string{"raid-walk"}
 	args = append(args, t.Args...)
 	args = append(args,
@@ -235,6 +259,9 @@ func autoCommandArgs(binary string, t raidwalk.AutoTarget, out, from string, reu
 	}
 	if reuse {
 		args = append(args, "--reuse-instance")
+	}
+	if instanceCap > 0 {
+		args = append(args, "--instance-cap-per-account", strconv.Itoa(instanceCap))
 	}
 	return args
 }
@@ -467,7 +494,7 @@ func (s *autoSupervisor) launch(st *autoState) {
 func (s *autoSupervisor) launchAttempt(st *autoState, g *autoGoalState, from string, reuse bool) {
 	st.seq++
 	out := filepath.Join(s.o.walkDir, fmt.Sprintf("%s-%d", st.id, st.seq))
-	args := autoCommandArgs(s.o.binary, g.target, out, from, reuse)
+	args := autoCommandArgs(s.o.binary, g.target, out, from, reuse, s.o.forwardInstanceCap())
 	f, err := os.OpenFile(out+".out", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		s.event(st.id, "launch-failed", err.Error())
