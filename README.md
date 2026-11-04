@@ -2539,7 +2539,10 @@ row) instead of waiting the pause out (walk 35: Arlokk 14515 despawns after a wi
 14515 not found` until an operator repeated the gong): `.bot run stop`, then `run start <plan> from step <the open row>` with the
 walk's own `until` and speed, so the run leader walks back to the object, opens it (the gong 180526) and meets the boss again; a
 fresh pause re-arms the same handling, and at most 3 such restarts are sent per walk (past them the pause ends the walk as before).
-A boss with no annotation is never restarted, whatever open row stands before it. The new run's own status line is adopted and
+A boss with no annotation is never restarted, whatever open row stands before it. The stop's send is not the run stopping: after
+`.bot run stop` the walk polls the run's own status (`run status`, up to 15 s) and only a status with no active run (state `none`,
+or a `done` line of its own plan) lets the `run start` go out; a status still running or paused, or none at all, sends no start,
+leaves the cleanup's own stop in place and lets the pause path take over. The new run's own status line is adopted and
 checked (running, that step, the walk's row count, the walk's until label); a refused stop, a refused start, or a start whose RPC
 timed out, whose status never came or came malformed or wrong is noted, the run then counts as possibly live (`.bot run stop` goes
 out again, and the walk's cleanup is not skipped), and the pause path takes over, with no second `run start` over a run that did not
