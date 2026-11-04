@@ -247,7 +247,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.DurationVar(&o.wipeRest, "wipe-rest", 10*time.Minute, "how long a revived raid rests out of combat before the run resumes")
 	fs.BoolVar(&o.reviveAtRaid, "revive-at-raid", true, "a wipe recovery revives the raid AT the revive point: a hire revived more than 100 yd away is summoned to it, and the resume waits up to 60s for every hire to be in range and out of combat (false: the old revive in place)")
 	fs.DurationVar(&o.hireSettle, "hire-settle", hireSettleWait, "how long to wait after the last hire for its join summons before the refit and the bind (0 skips the wait)")
-	fs.IntVar(&o.capPerAccount, "instance-cap-per-account", raidwalk.InstanceCapPerAccount, "the core's limit of fresh instance ids one account may enter in an hour (stock 5; a patched test core may be 30). slots.json's instance_cap_per_account on the server is used when this flag is not given")
+	fs.IntVar(&o.capPerAccount, "instance-cap-per-account", raidwalk.InstanceCapPerAccount, "the core's limit of fresh instance ids one account may enter in an hour (stock 5; a patched test core may be 30). The server's entry in instance-cap-per-account.json is used when this flag is not given")
 	fs.DurationVar(&o.capWait, "instance-cap-wait", raidwalk.InstanceCapDefaultWait, "at the cap's raid count (one below --instance-cap-per-account) in the last hour on the server, wait up to this long for the oldest to age out, then exit 26 (0: no wait, exit 26 at that count)")
 	fs.BoolVar(&o.capFail, "instance-cap-fail", false, "at that count exit 26 instead of waiting")
 	fs.BoolVar(&o.capUnsafe, "instance-cap-unsafe", false, "UNSAFE: when the wait runs out or the ledger cannot be read, go on without a reservation (concurrent walks may then each create a fresh instance) instead of exiting 26; logged")
@@ -624,10 +624,15 @@ func defaultWalkEnv(o *raidWalkOptions) (walkEnv, walkDeps, error) {
 		return walkEnv{}, walkDeps{}, err
 	}
 	store := slots.NewStore(cfg, path)
-	// The instance cap: the flag when given, else the server's slots.json entry, else the stock core's 5.
+	// The instance cap: the flag when given, else the server's entry in instance-cap-per-account.json beside the
+	// slots file, else the stock core's 5.
 	capPerAccount := o.capPerAccount
-	if !o.capGiven || capPerAccount <= 0 {
-		if n := cfg.ServerInstanceCap(o.server); n > 0 {
+	if !o.capGiven {
+		caps, err := slots.LoadInstanceCaps(filepath.Join(filepath.Dir(path), slots.InstanceCapPerAccountFile))
+		if err != nil {
+			return walkEnv{}, walkDeps{}, err
+		}
+		if n := caps[o.server]; n > 0 {
 			capPerAccount = n
 		}
 	}

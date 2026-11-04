@@ -1,7 +1,7 @@
 // raid_walk_instcap.go: the instance-cap check before a walk starts and the ledger entry after it enters. The core
-// lets an account enter N distinct instance ids per hour (stock 5, --instance-cap-per-account or slots.json's
-// instance_cap_per_account), remembered in the worldserver's memory only; hires are packed up to 10 a pool account, so
-// a re-placed raid soon meets the cap and its summons fail. Every walk that enters a fresh instance is recorded in
+// lets an account enter N distinct instance ids per hour (stock 5; --instance-cap-per-account or the
+// instance-cap-per-account.json entry), remembered in the worldserver's memory only; hires are packed up to 10 a pool
+// account, so a re-placed raid soon meets the cap and its summons fail. Every walk that enters a fresh instance is recorded in
 // raidwalk's ledger (a JSON file beside the slots file). The check and the admission are one step under the ledger
 // lock: a walk below the raid count (N-1) in the last hour RESERVES a place (owner holder+pid, 30 min), so walks that
 // start together cannot all pass at the last place; the reservation becomes the entry once the raid has entered and

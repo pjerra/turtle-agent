@@ -173,7 +173,7 @@ func parseAutoArgs(args []string, stderr io.Writer) (autoOptions, int) {
 	fs.DurationVar(&o.stall, "stall", autoDefaultStall, "no step or boss-HP change for this long re-places the run")
 	fs.DurationVar(&o.settle, "settle", autoDefaultSettle, "wait after a teardown before the next launch")
 	fs.DurationVar(&o.statusEvery, "status-every", autoDefaultStatusEvery, "how often status.txt is written")
-	fs.IntVar(&o.instanceCapPerAccount, "instance-cap-per-account", raidwalk.InstanceCapPerAccount, "the core's limit of fresh instance ids one account may enter in an hour, passed to every raid-walk (stock 5; without the flag each walk uses slots.json's instance_cap_per_account)")
+	fs.IntVar(&o.instanceCapPerAccount, "instance-cap-per-account", raidwalk.InstanceCapPerAccount, "the core's limit of fresh instance ids one account may enter in an hour, passed to every raid-walk (stock 5; without the flag each walk uses the server's entry in instance-cap-per-account.json)")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "validate the targets and print the first command, launch nothing")
 	if err := fs.Parse(args); err != nil {
 		return o, exitUsage

@@ -95,31 +95,3 @@ func writeSlots(t *testing.T, body string) string {
 	}
 	return path
 }
-
-// A server's instance_cap_per_account (the core's MAX_INSTANCE_PER_ACCOUNT_PER_HOUR patch) is read for the raid
-// commands; unset is 0 (the stock 5) and a negative value is refused.
-func TestServerInstanceCap(t *testing.T) {
-	path := writeSlots(t, `{"version":1,"servers":[
-		{"name":"m910q","realmd":"10.0.0.1:3724","instance_cap_per_account":30,"slots":[
-			{"id":"1","account":"A","character":"Gbmage","port":8771,"settings_from":"/s.json"}]},
-		{"name":"test2","realmd":"10.0.0.2:3724","slots":[
-			{"id":"1","account":"A","character":"Gbmage","port":8772,"settings_from":"/s.json"}]}]}`)
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := cfg.ServerInstanceCap("m910q"); got != 30 {
-		t.Fatalf("m910q cap = %d, want 30", got)
-	}
-	if got := cfg.ServerInstanceCap("test2"); got != 0 {
-		t.Fatalf("unset cap = %d, want 0 (the stock 5)", got)
-	}
-	if got := cfg.ServerInstanceCap("nowhere"); got != 0 {
-		t.Fatalf("unknown server cap = %d, want 0", got)
-	}
-	bad := writeSlots(t, `{"version":1,"servers":[
-		{"name":"m910q","realmd":"10.0.0.1:3724","instance_cap_per_account":-1,"slots":[]}]}`)
-	if _, err := Load(bad); err == nil || !strings.Contains(err.Error(), "instance_cap_per_account") {
-		t.Fatalf("negative cap: %v, want a refusal", err)
-	}
-}

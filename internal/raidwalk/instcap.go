@@ -28,7 +28,8 @@ const (
 	// per account (one below the stock cap, leaving a spare for the walk that is already running).
 	InstanceCapWarnAt = InstanceCapPerAccount - 1
 	// InstanceCapPerAccount is the stock core's cap per pool account: the 6th distinct instance id in an hour is refused.
-	// A local core patch may raise it; the commands take --instance-cap-per-account and slots.json a per-server value.
+	// A local core patch may raise it; the commands take --instance-cap-per-account and the instance-cap-per-account.json
+	// file a per-server value.
 	InstanceCapPerAccount = 5
 	// InstanceCapDefaultWait is the default of --instance-cap-wait.
 	InstanceCapDefaultWait = 20 * time.Minute

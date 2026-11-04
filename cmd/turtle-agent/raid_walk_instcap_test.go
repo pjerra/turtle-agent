@@ -396,16 +396,19 @@ func TestInstanceCapCorruptLedgerIsMovedAsideAndLogged(t *testing.T) {
 	}
 }
 
-// The instance cap resolves flag first, then slots.json's per-server instance_cap_per_account, then the stock 5.
-func TestWalkInstanceCapFromFlagAndSlots(t *testing.T) {
+// The instance cap resolves flag first, then instance-cap-per-account.json beside the slots file, then the stock 5.
+func TestWalkInstanceCapFromFlagAndFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "slots.json")
 	body := `{"version":1,"servers":[
-		{"name":"m910q","realmd":"10.0.0.1:3724","instance_cap_per_account":30,"slots":[
+		{"name":"m910q","realmd":"10.0.0.1:3724","slots":[
 			{"id":"1","account":"A","character":"Gbmage","port":8771,"settings_from":"/s.json"}]},
 		{"name":"tortoise-test2","realmd":"10.0.0.2:3724","slots":[
 			{"id":"1","account":"A","character":"Gbmage","port":8772,"settings_from":"/s.json"}]}]}`
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "instance-cap-per-account.json"), []byte(`{"m910q":30}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cases := []struct {
@@ -413,8 +416,8 @@ func TestWalkInstanceCapFromFlagAndSlots(t *testing.T) {
 		o    raidWalkOptions
 		want int
 	}{
-		{"the server's slots entry", raidWalkOptions{slotsPath: path, server: "m910q"}, 30},
-		{"an unset entry is the stock 5", raidWalkOptions{slotsPath: path, server: "tortoise-test2"}, raidwalk.InstanceCapPerAccount},
+		{"the server's file entry", raidWalkOptions{slotsPath: path, server: "m910q"}, 30},
+		{"an unset server is the stock 5", raidWalkOptions{slotsPath: path, server: "tortoise-test2"}, raidwalk.InstanceCapPerAccount},
 		{"the flag wins", raidWalkOptions{slotsPath: path, server: "m910q", capPerAccount: 5, capGiven: true}, 5},
 	}
 	for _, c := range cases {
