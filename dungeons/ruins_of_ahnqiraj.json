@@ -1131,6 +1131,7 @@
           ],
           "radius": 5,
           "approach": [
+            {"x": -8895.0, "y": 1800.0, "z": 21.5},
             {"x": -8874.87, "y": 1790.416, "z": 21.791414}
           ]
         },
@@ -1680,7 +1681,7 @@
         ]
       },
       "notes": [
-        "29 pulls (70 units) up the north corridor: five Hive'Zara scarab swarms (15461/15462, one linked pack each, radius 35), nine Obsidian Destroyers and two Flesh Hunters on their patrols, seven Vile Scarabs; then Moam. The Canal Frenzy in the channel below are in no pull. Moam drains mana and turns to stone when his mana fills (25685): the raid's Mages and Priests Mana Burn him."
+        "29 pulls (70 units) up the north corridor: five Hive'Zara scarab swarms (15461/15462, one linked pack each, radius 35), nine Obsidian Destroyers and two Flesh Hunters on their patrols, seven Vile Scarabs; then Moam. The Canal Frenzy in the channel below are in no pull. Moam drains mana and turns to stone when his mana fills (25685): the raid's Mages and Priests Mana Burn him. Pull group 3 walks in over the dry north-bank via (-8895 1800): walk 30's lead stuck in the sunken channel between group 2 and the old direct approach."
       ]
     },
     {
