@@ -669,12 +669,22 @@ func zgApproachMin(samples []dungeon.Point, pack []creature, endAtStand bool) (f
 // pull; the w36/w37 tests pin the stands).
 func zgCheckWalk(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, packs [][]creature, minNext ...float64) {
 	t.Helper()
+	zgCheckWalkExcept(t, p, pl, w, packs, nil, minNext...)
+}
+
+// zgCheckWalkExcept is zgCheckWalk with pairs to leave out: the hall's knot is pinned by the live-flag walks
+// (zg_w37_test.go, zg_w38_test.go) and its stands sit 8-30 yd from the neighbours by necessity.
+func zgCheckWalkExcept(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, packs [][]creature, except func(i int) bool, minNext ...float64) {
+	t.Helper()
 	nextYd := zgLaterYd
 	if len(minNext) > 0 {
 		nextYd = minNext[0]
 	}
 	fixture := zgLoadRoutes(t)
 	for i := 0; i < w.Last && i+1 < len(w.Parties); i++ {
+		if except != nil && except(i) {
+			continue
+		}
 		a, b := w.Parties[i], w.Parties[i+1]
 		later := zgLaterOf(w, packs, i)
 		if len(later) > 0 {
@@ -902,11 +912,11 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 	p, cs := zgLoadPlanAndExport(t)
 	leg := p.Legs[6]
 	packs := zgPacks(t, leg, cs)
-	// The hall's camp rows (8-11) are pinned by zg_w37_test.go (each guard row's stand is inside the tank's
-	// shot of its whole pack and 35+ yd from Jin'do) and zg_w36_test.go (the hall stands against every later
-	// pack): their stands sit 14-30 yd from their own packs' neighbours by necessity, outside this sweep's
-	// 19.5 yd own-pack band.
-	zgCheckStands(t, "jindo_the_hexxer", leg, packs, true, 7)
+	// The hall's camp rows (5-11) are pinned by zg_w38_test.go (the bodies against each row's ceiling and
+	// Jin'do out of every pre-boss pull) and zg_w37_test.go (each guard row's stand is inside the tank's shot
+	// of its whole pack and 35+ yd from Jin'do); their stands sit 14-30 yd from their own packs' neighbours
+	// by necessity, outside this sweep's 19.5 yd own-pack band.
+	zgCheckStands(t, "jindo_the_hexxer", leg, packs, true, 4)
 	// the order: the corridor packs 49741 and 49119 first, then 49114 and west; the Jin'do fix drops the
 	// Sacrificed Troll pack (group 8 on the old base: respawn 10 s, wasted pull) and reroutes the walk
 	// east of the pit, up to 49387-96's pack (group 11)
@@ -915,9 +925,9 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 		{49114}, {49747}, {51948}, // 1, 2, 3 (49118/49119 left for leg 0's canal stand pull, BOTS-PATHING-WAYPOINTS item 6)
 		{49397, 49398, 49399, 49400}, // 4
 		{49373, 49374, 49375, 49376, 49377, 49378, 49379, 49380, 49381, 49382}, // 5
-		{1173082}, {49363}, // 6, 7
-		{49383, 49384, 49385, 49386, 1173080}, // 8 (walk 36: the two north packs are one pull; walk 37: before the guard, 33+ yd from its stand)
-		{49421},                               // 9 (walk 37: the guard's own formation, 8 bodies; the two lone mistresses split out)
+		{49363}, {1173082}, // 6, 7 (walk 38: the 10-unit 49363 camp from its south stand, then the 4-unit 1173082 formation; the 20 yd apart camps cannot be split)
+		{49421},                               // 8 (walk 38: the guard first, then the north camp; the guard's stand is 33+ yd from the camp)
+		{49383, 49384, 49385, 49386, 1173080}, // 9 (walk 36: the two north packs are one pull; walk 38: pulled after the guard, from its south stand)
 		{49403}, {49402},                      // 10, 11 (walk 37: one row each: a stand in shot of both is at most 34.8 yd from Jin'do)
 		{51875}, // 12 (the Venombrood pack; walk 36 dropped the -11603 -1229 pull beside the respawn pit)
 	}
@@ -1011,7 +1021,12 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 		}
 		zgWriteRoutes(t, p, pl, w)
 	}
-	// The hall's camp rows stand 14-18 yd from their own packs (see zgCheckWalk): the walk into them starts
-	// near the pack it is about to pull, so the corridor's approach rule allows 18 yd here.
-	zgCheckWalk(t, p, pl, w, packs, 17.5)
+	// The Jin'do hall's knock (plan groups 5-11) is pinned by the live-flag walks in zg_w37_test.go and
+	// zg_w38_test.go: its packs stand 8-30 yd from each other and no route between its stands keeps 20 yd.
+	// The corridor's own rows (0-4 and 12-17) keep the 20 yd rule.
+	hall := func(i int) bool {
+		q := w.Parties[i].P
+		return q.X >= -11630 && q.X <= -11515 && q.Y >= -1370 && q.Y <= -1235
+	}
+	zgCheckWalkExcept(t, p, pl, w, packs, hall)
 }
