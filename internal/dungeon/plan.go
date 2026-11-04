@@ -521,6 +521,14 @@ type Boss struct {
 	// swims a pool whose bed navmesh is cut off from the shore; specs/sw-eldermaw.md): plan-export sets the run leader's
 	// skip-unreachable flag on the boss row and carries the reason in its comment. Required to be non-empty when set.
 	SkipUnreachable string `json:"skip_unreachable,omitempty"`
+	// SummonOpenStep names the use_object step of this leg that summons the boss: its 1-based place in the leg's `steps`
+	// (that step is the open row, or the open_proof row when it carries a proof creature). The object brings the boss
+	// back — Zul'Gurub's Arlokk 14515 despawns after a wipe and only the gong 180526 starts her script again — so
+	// raid-walk may restart its run at that row instead of waiting a "boss not found" pause out. The place is a step of
+	// the plan, not a row number: the export renumbers row seqs with every cut point (Arlokk's gong is row seq 62
+	// without mmaps and 185 with), so a row number would break on the next export. Only raid-walk reads it; the driver
+	// and plan-export do not carry it (the rows have no field for it).
+	SummonOpenStep int `json:"summon_open_step,omitempty"`
 }
 
 // The two teams a Team field can name. The driver learns the leader's from its race (session.Team).
@@ -995,6 +1003,8 @@ type rawBoss struct {
 	WaitS int `json:"wait_s"`
 	// SkipUnreachable is Boss.SkipUnreachable.
 	SkipUnreachable string `json:"skip_unreachable"`
+	// SummonOpenStep is Boss.SummonOpenStep.
+	SummonOpenStep int `json:"summon_open_step"`
 }
 
 type rawStep struct {
@@ -1665,6 +1675,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		if r.Boss.SkipUnreachable != "" && strings.TrimSpace(r.Boss.SkipUnreachable) == "" {
 			c.fail(bp+".skip_unreachable", "required to be non-empty when set (why the boss may stand out of the party's reach)")
 		}
+		b.SummonOpenStep = r.Boss.SummonOpenStep
 
 		l.Boss = &b
 	}
@@ -1678,6 +1689,20 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		l.Steps = append(l.Steps, c.step(sp, &s))
 	}
 	c.batches(path, l.Steps)
+	// A summoning open row: the plan names the use_object step whose object brings the boss back (raid-walk restarts its run
+	// there when the boss is gone), so the pointer has to be a step of this leg that exports to an open/open_proof row. A
+	// via_item step exports to a use_on row, which the run leader cannot repeat as an open.
+	if l.Boss != nil && l.Boss.SummonOpenStep != 0 {
+		sp := path + ".boss.summon_open_step"
+		switch step := l.Boss.SummonOpenStep; {
+		case step < 1 || step > len(l.Steps):
+			c.fail(sp, "%d is no step of this leg (it has %d): name the step that holds the open object, counted from 1", step, len(l.Steps))
+		case l.Steps[step-1].UseObject == nil:
+			c.fail(sp, "steps[%d] is a %s step, not a use_object step: the row that summons the boss is an open or open_proof row", step-1, planStepKind(l.Steps[step-1]))
+		case l.Steps[step-1].UseObject.ViaItem:
+			c.fail(sp, "steps[%d] is a use_on step (via_item): it exports to a use_on row, not an open the run leader can repeat", step-1)
+		}
+	}
 	// A hold that ends when its starting NPC was already dead needs that NPC's gossip step to allow a dead NPC: the run leader only
 	// knows the hold may end without a fight from the gossip row it counted done, and the step must name the boss the hold fights.
 	if l.Boss != nil && l.Boss.Hold != nil && l.Boss.Hold.SkipIfDeadOfGossip {

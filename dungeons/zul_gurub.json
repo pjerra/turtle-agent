@@ -1459,7 +1459,8 @@
         "position": {"x": -11540.7, "y": -1627.71, "z": 41.27},
         "approach": [
           {"x": -11521.645, "y": -1621.636, "z": 41.325405}
-        ]
+        ],
+        "summon_open_step": 1
       },
       "notes": [
         "Pull group 12 (27 units): walk 29 validates this pull live; revert to split pulls if the raid cannot hold 27.",

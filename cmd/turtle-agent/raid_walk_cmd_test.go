@@ -8368,14 +8368,14 @@ func zgArlokkFixture(t *testing.T) (f *fixture, openStep, bossStep int) {
 	if bossStep == 0 {
 		t.Fatal("no Arlokk boss row in the ZG rows")
 	}
-	step, ok := raidwalk.OpenStepBeforeBoss(rows, bossStep)
-	if !ok {
-		t.Fatalf("the Arlokk boss row %d reports no open step", bossStep)
-	}
 	f.opts.until = fmt.Sprintf("step %d", bossStep+1)
 	p, err := dungeon.Load(filepath.Join(f.opts.dir, "zul_gurub.json"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	step, ok := raidwalk.SummonOpenStep(rows, p, bossStep)
+	if !ok {
+		t.Fatalf("the Arlokk boss row %d reports no summoning open step (its plan annotation)", bossStep)
 	}
 	f.agent.instMap = p.Map
 	f.agent.enterMap = p.Map

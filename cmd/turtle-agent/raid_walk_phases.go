@@ -1043,10 +1043,10 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 				if ok, ev := w.bossKilled(ctx, bossEntry, now); ok {
 					ps.bossSkip = true
 					w.bossSkipStep(ctx, bossEntry, ev, ps.step, now)
-				} else if openStep, ok := raidwalk.OpenStepBeforeBoss(w.rows, ps.step); ok && ps.gongStep != openStep && w.gongReruns < bossGongReruns {
-					// The boss is gone from the instance and the leg's open row is what brings it back (walk 35: Arlokk
-					// 14515 despawns after a wipe with no spawn row left, and the run pauses "boss 14515 not found" until
-					// the gong is repeated by hand). Restart the run at that row instead of ending the walk.
+				} else if openStep, ok := raidwalk.SummonOpenStep(w.rows, w.plan, ps.step); ok && ps.gongStep != openStep && w.gongReruns < bossGongReruns {
+					// The boss is gone from the instance and the plan says which open row is the object that summons it (walk 35: Arlokk
+					// 14515 despawns after a wipe with no spawn row left, and the run pauses "boss 14515 not found" until the gong is
+					// repeated by hand). Restart the run at that row instead of ending the walk.
 					ps.gongStep = openStep
 					w.gongReruns++
 					w.rerunOpenStep(ctx, openStep, bossEntry, ps.step, ev, now)
