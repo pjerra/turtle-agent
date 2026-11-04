@@ -1497,9 +1497,9 @@
         {
           "entries": [11352],
           "positions": [
-            {"x": -12329.9, "y": -1870.84, "z": 130.349}
+            {"x": -12255, "y": -1830, "z": 131.3}
           ],
-          "radius": 12,
+          "radius": 92,
           "patrol": {
             "entries": [11352],
             "path": [
@@ -1533,7 +1533,8 @@
             {"x": -12091.7, "y": -1791.5, "z": 80.5},
             {"x": -12181.3, "y": -1813.3, "z": 104.3},
             {"x": -12222, "y": -1822, "z": 124.7}
-          ]
+          ],
+          "stand_pull": true
         },
         {
           "entries": [11830, 11830, 11353, 11353, 11353, 11353],
@@ -1547,7 +1548,6 @@
           ],
           "radius": 5.4,
           "approach": [
-            {"x": -12259.314, "y": -1852.748, "z": 132.914},
             {"x": -12248, "y": -1848, "z": 133.76}
           ]
         },
@@ -1604,7 +1604,7 @@
           ],
           "radius": 25,
           "approach": [
-            {"x": -12320, "y": -1858, "z": 130.49841}
+            {"x": -12300, "y": -1868, "z": 131.3}
           ],
           "stand_pull": true,
           "max_bodies": 11
@@ -1810,6 +1810,7 @@
         "position": {"x": -12167.8, "y": -1927.25, "z": 153.73}
       },
       "notes": [
+        "WALK 36 FIX (2026-11-04, research/zg-w36/MANDOKIR-440.md): steps 440-454 wiped because pull group 0 (the patrolling Berserker 49705) was a plain pull row at the patroller's DB spawn, 118 yd from its stand: the exporter's --approach-hops cut the hop into an approach-path row at -12287.3 -1835.9, 9.0 yd from group 2's priest 49780, and the walk to the spawn passed 1.7-3.9 yd from groups 2 and 4; and group 5's stand at -12320 -1858 stood 28.9 yd from group 12, so the 11-body chain fight pulled it in. Three edits: group 0 is a stand pull from its stand (centre -12255 -1830 131.3, radius 92, owning 49705's spawn at 85.3 yd and no other 11352); group 1's approach point -12259.314 -1852.748 is deleted (the stand -12248 -1848 alone is reachable straight from the group-0 stand); group 5's stand moves to -12300 -1868 131.3 (26.4 yd from the chain, 51.2 yd from group 12). Pull order and cc_priority / kill_first unchanged.",
         "WALK 29 FIX 5 (2026-11-03, leg 5; research/zg-w29/WALK29-FIX-PLAN.md §3, lead decision): step 423 walked into the 49705 patroller (11352, movement 2, 21 waypoints; waypoint 13 -12244.9 -1820.6 z 130.2 is 13.4 yd from row 419's point and 20.1 from row 423's): in c it walked into the party at 00:34:57 (2.4 yd) and the drifting fight woke group 1 (49776) and group 2 (49778) at 22-27 yd, 11 engaged, 56 dead. Step 431's knot then came apart: the 11830 Priest on the approach (-12302 -1864, 26.2 yd) was pulled, the melee chased the caster to 12-14 yd of the other Priest, and the 20 yd assist chain 51985 -\u003e 49272 -\u003e 49259 -\u003e 49282 woke 15 bodies at once (c-r2 01:46:34, nearest bot 31-42 yd) plus 49789's four 11353 at 01:46:43; 41/19 dead. The patroller is pulled first now, as its own patrol row (its spawn 49705 -12329.9 -1870.8, radius 12, the full 21-point loop, period 170.7 s estimated; stand -12222 -1822 124.7, well off the row point because the loop is the row: 23.6 yd from the loop's nearest waypoint, 59.8 from the nearest static pack 49776); the ramp rows 417-423 come after it. The knot is dissolved: 51986 is its own row from -12312 -1845 130.9 (26.0 yd from it, 40.7 from 51985, 35.1 from 49789's spawn; a caster: do not chase), and 51985 joins 49272 (4), 49259 (2) and 49282 (4) as the 11-body assist chain row, stand_pull with max_bodies 11, pulled from -12320 -1858 132.0 on the north side (26.2 yd from its nearest spawn, 39.0 from the row centre, 29.0 from 49789; the south-west point -12360 -1915 is 30.7 from the centre and 68.7 from 49789, but the walk there from 51986's stand passes 10.3 yd from 51985 and the navmesh route cannot avoid the pack, so the party would wake the chain before the pre-CC; 51986 is dead by then, and the stand's 29 yd from 49789 is its own row's next). Order: 91493, 49705, 49776, 49778, 51460, 51986, the chain, 49789, then the rest of walk 28's ring sweep. Groups 7/9/10 (14821/11830/11353 entries) were re-checked with the 20 yd, 3-hop chain: 5, 6 and 4 bodies, inside their rows' ceilings. The later groups 11, 12, 13 and 14 chain to 7, 9, 9 and 10 (their own rows hold 7, 5, 4 and 6), which the §8 chain lint must size before walk 31 if their order leaves those neighbours alive."
       ]
     },

@@ -11,14 +11,14 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"math"
-	"os"
-	"path/filepath"
-	"testing"
-
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/planexport"
+	"math"
+	"os"
+	"path/filepath"
+	"slices"
+	"testing"
 )
 
 const (
@@ -65,7 +65,116 @@ func zgFormations(cs []creature) map[uint64]*zgFormation {
 }
 
 // zgPack is the pack a plan group pulls: the spawn nearest each of its positions, expanded to the whole formation.
+// A stand_pull group is scoped from a centre the run leader sees (up to 60
+// yd from its stand), not from a spawn: its pack is the formations with a
+// unit of the group's own entries whose DB spawn lies within its radius of
+// the centre (TortoiseBots ScopeStandPullFacts). Every other group keeps the
+// 0.7 yd spawn rule (a moved centre is a plan bug there).
 func zgPack(g dungeon.PullGroup, cs []creature, forms map[uint64]*zgFormation) ([]creature, error) {
+	if g.StandPull {
+		var c dungeon.Point
+		for _, p := range g.Positions {
+			c.X += p.X
+			c.Y += p.Y
+			c.Z += p.Z
+		}
+		n := float32(len(g.Positions))
+		if n == 0 {
+			return nil, fmt.Errorf("no position")
+		}
+		c = dungeon.Point{X: c.X / n, Y: c.Y / n, Z: c.Z / n}
+		// The row's own listed positions scope their formations first (the
+		// plan names one spawn per member): the centre's radius only adds
+		// formations the positions miss (a patroller's loop, a centre set
+		// off the spawns).
+		in := map[uint64]bool{}
+		var leaders []uint64
+		nearest := func(pos dungeon.Point) creature {
+			var best creature
+			bd := math.Inf(1)
+			for _, c := range cs {
+				if !zgHostile(c) {
+					continue
+				}
+				if d := dist(pos, c.Pos); d < bd {
+					bd, best = d, c
+				}
+			}
+			return best
+		}
+		for _, pos := range g.Positions {
+			best := nearest(pos)
+			// The listed positions name the row's own spawns: only a spawn of the row's own entries scopes its
+			// formation (a nearer foreign unit is another row's pack, not this one).
+			own := false
+			for _, e := range g.Entries {
+				if best.Entry == e {
+					own = true
+					break
+				}
+			}
+			if !own {
+				continue
+			}
+			in[best.GUID] = true
+			lead := best.GroupLeader
+			if lead == 0 {
+				lead = best.GUID
+			}
+			if !slices.Contains(leaders, lead) {
+				leaders = append(leaders, lead)
+			}
+		}
+		for _, x := range cs {
+			hit := false
+			for _, e := range g.Entries {
+				if x.Entry == e {
+					hit = true
+					break
+				}
+			}
+			if !hit || !zgHostile(x) {
+				continue
+			}
+			// 2D, as the run leader scopes it (DungeonRunPolicy.h
+			// ScopeStandPullFacts), with the test packer's yard of
+			// tolerance.
+			if math.Hypot(float64(x.Pos.X-c.X), float64(x.Pos.Y-c.Y)) <= float64(g.Radius)+1 {
+				in[x.GUID] = true
+			}
+		}
+		if len(in) == 0 {
+			return nil, fmt.Errorf("stand_pull centre %.1f %.1f %.1f: no spawn of its entries within radius %g", c.X, c.Y, c.Z, g.Radius)
+		}
+		// The row owns the formations it scopes: a leaderless spawn scopes
+		// its own formation (its live mates assist it: the lone patroller's
+		// formation is itself), and a scoped formation's own members come
+		// with it even past the radius.
+		for guid := range in {
+			lead := guid
+			for _, x := range cs {
+				if x.GUID == guid && x.GroupLeader != 0 {
+					lead = x.GroupLeader
+					break
+				}
+			}
+			if !slices.Contains(leaders, lead) {
+				leaders = append(leaders, lead)
+			}
+		}
+		for _, x := range cs {
+			if !in[x.GUID] && zgHostile(x) && slices.Contains(leaders, x.GroupLeader) {
+				in[x.GUID] = true
+			}
+		}
+		var out []creature
+		for _, x := range cs {
+			if in[x.GUID] && zgHostile(x) {
+				out = append(out, x)
+			}
+		}
+		return out, nil
+	}
 	var leads []uint64
 	for _, pos := range g.Positions {
 		var best creature
@@ -746,6 +855,21 @@ func TestZulGurubMandokirSweepClearOfLaterPacks(t *testing.T) {
 	for i := range wantOrder {
 		if !zgSameLeaders(got[i], wantOrder[i]) {
 			t.Errorf("pull group %d has formations %v, want %v (the ring sweep of WALK 29)", i, got[i], wantOrder[i])
+		}
+	}
+	// Walk 36's wipe at step 454 (a3-r3 twice): group 5's stand at -12320
+	// -1858 stands 28.9 yd from group 12's Blood Drinkers (formation 49789),
+	// so the 11-body chain fight (six Hakkari Priests casting Psychic Scream)
+	// pulls group 12 in. The stand keeps 35 yd from every unit of group 12
+	// (the fear margin for a fight with Psychic Scream casters at the
+	// stand). Fails on the walk-36 plan (28.9 yd).
+	if len(leg.PullGroups) > 12 && len(packs) > 12 {
+		stand := leg.PullGroups[5].Approach[len(leg.PullGroups[5].Approach)-1]
+		for _, c := range packs[12] {
+			if d := dist(stand, c.Pos); d < 35 {
+				t.Errorf("pull group 5: stand %.1f %.1f %.1f is %.1f yd from %s %d of pull group 12, want >= 35 (the chain fight's fear drifts into it)",
+					stand.X, stand.Y, stand.Z, d, c.Name, c.Entry)
+			}
 		}
 	}
 	parties := zgParties(t, p, 5)
