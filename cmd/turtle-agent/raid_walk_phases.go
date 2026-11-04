@@ -3164,11 +3164,69 @@ func (w *walk) stopAfterRerun() {
 	w.runStopped = true
 }
 
-// rerunOpenStep restarts the walk's run at the leg's open row (raidwalk.SummonOpenStep): `.bot run stop`, then
-// `.bot run start <plan> from step <N>` with the walk's own until and speed, so the run leader walks back to the object, opens it
-// (the gong) and meets the boss it summons. The new run's own status line is adopted and checked (running, that step, the walk's
-// row count, the until label), as a placed walk checks its start; a refused or wrong start is noted and left to the pause path
-// (pausedWait then ends the walk as before), and nothing here aborts the walk.
+// runStopConfirmWait bounds the re-run's wait for the run's own status to show it stopped. The `.bot run stop` returning is its
+// chat line reaching the commander, not the server stopping the run: a refused, dropped or late stop leaves the old run live.
+const runStopConfirmWait = 15 * time.Second
+
+// lastRunLine is the newest TBM:RUN status line of a reply's lines.
+func lastRunLine(lines []string) (tbm.RunStatus, string, bool) {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if st, ok := raidwalk.ParseRun(lines[i]); ok {
+			return st, lines[i], true
+		}
+	}
+	return tbm.RunStatus{}, "", false
+}
+
+// waitRunStopped polls `.bot run status` until it answers with no active run: state none, or a done line of this walk's plan (the
+// run's own stop). A failed ask, an answer without a run line, and a status still running or paused are retried until timeout,
+// which returns the last answer for the note. The question is put to the server through the commander RPC, so the answer is the
+// run's own status, not the push feed's newest line.
+func (w *walk) waitRunStopped(ctx context.Context, timeout time.Duration) (bool, string) {
+	deadline := w.env.now().Add(timeout)
+	why := "the run status was never read"
+	for {
+		if err := ctx.Err(); err != nil {
+			return false, "interrupted"
+		}
+		remaining := deadline.Sub(w.env.now())
+		if remaining <= 0 {
+			return false, why
+		}
+		callCtx, cancel := context.WithTimeout(ctx, remaining)
+		rep, err := w.commander(callCtx, commanderReq{Op: "run", Verb: "status", WaitMS: 5000})
+		cancel()
+		switch {
+		case err != nil:
+			why = "run status: " + err.Error()
+		case rep.Reply.Err != nil:
+			why = "run status: " + rep.Reply.Err.Message
+		default:
+			st, line, ok := lastRunLine(rep.Reply.Lines)
+			switch {
+			case !ok:
+				why = "the run status answer has no TBM:RUN line"
+			case st.State == tbm.RunNone, st.State == tbm.RunDone && (st.Plan == "" || st.Plan == w.plan.Name):
+				w.logLine(w.env.now(), line)
+				return true, ""
+			case st.State == tbm.RunDone:
+				why = fmt.Sprintf("the run is done, but for %s: %s", st.Plan, line)
+			default:
+				why = fmt.Sprintf("the run is still %s at step %d/%d: %s", st.State, st.Step, st.Steps, line)
+			}
+		}
+		if err := w.env.sleep(ctx, time.Second); err != nil {
+			return false, "interrupted"
+		}
+	}
+}
+
+// rerunOpenStep restarts the walk's run at the leg's open row (raidwalk.SummonOpenStep): `.bot run stop`, then, once the run's own
+// status shows it stopped, `.bot run start <plan> from step <N>` with the walk's own until and speed, so the run leader walks back
+// to the object, opens it (the gong) and meets the boss it summons. A stop that its own status does not confirm is never followed
+// by a start: the pause path takes over instead. The new run's own status line is adopted and checked (running, that step, the
+// walk's row count, the until label), as a placed walk checks its start; a refused or wrong start is noted and left to the pause
+// path (pausedWait then ends the walk as before), and nothing here aborts the walk.
 //
 // From the moment `run start` goes out the run counts as possibly live (runStopped is cleared), so every failure after it stops the
 // run again (stopAfterRerun) and the walk's own cleanup is not skipped by a stop that no longer holds.
@@ -3184,6 +3242,17 @@ func (w *walk) rerunOpenStep(ctx context.Context, openStep int, bossEntry uint32
 	}
 	if err := w.gm(ctx, ".bot run stop"); err != nil {
 		w.note("boss %d not found: the run stop before the re-run failed (%v): the pause path takes over", bossEntry, err)
+		return
+	}
+	// The stop's send is not the run stopping: a refused, dropped or late stop leaves the old run live, and a start over it would
+	// leave two run leaders on the party. Only the run's own status decides, so the start waits for it.
+	stopped, stopWhy := w.waitRunStopped(ctx, runStopConfirmWait)
+	if !stopped {
+		if ctx.Err() != nil {
+			return // interrupted: the phase loop's own ctx check ends the walk; runStopped stays false, so the cleanup stops the run
+		}
+		w.note("boss %d not found: the run stop before the re-run is not confirmed (%s): no second run start, the pause path takes over", bossEntry, stopWhy)
+		w.logLine(w.env.now(), fmt.Sprintf("boss %d not found: the run stop before the re-run is not confirmed (%s)", bossEntry, stopWhy))
 		return
 	}
 	w.runStopped = true

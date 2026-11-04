@@ -136,6 +136,9 @@ type walkFakeAgent struct {
 	// onStart runs after a `run start` was answered and its startQueue was pushed (a test that needs lines after a
 	// later start: the boss-not-found re-run). nil: nothing.
 	onStart func()
+	// runStatusFn answers one `run status` RPC (the re-run's stop confirmation): nil keeps the party line's answer, and
+	// a nil result falls back to it. It runs on the walk's goroutine, so it must not take f.mu.
+	runStatusFn func() *commanderReply
 
 	// pos is where the commander's last .go put it; the quiet-check fakes place units around it.
 	x, y, z float32
@@ -1148,6 +1151,11 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 			return rep
 		}
 		if p.Verb == "status" {
+			if fn := f.runStatusFn; fn != nil {
+				if rep := fn(); rep != nil {
+					return *rep
+				}
+			}
 			rep := ack("commander status")
 			f.mu.Lock()
 			names := strings.Join(f.party, ", ")
@@ -2036,6 +2044,18 @@ func countPrefix(lines []string, prefix string) int {
 		}
 	}
 	return n
+}
+
+// startsAndSkips is a fake's `run` verbs without the `run status` asks: the re-run's stop confirmation polls the status, so the
+// verbs a test counts are the ones that change the run.
+func startsAndSkips(verbs []string) []string {
+	out := make([]string, 0, len(verbs))
+	for _, v := range verbs {
+		if v != "status" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func TestRaidWalkReadsRawLinesNotStrippedText(t *testing.T) {
@@ -8407,6 +8427,20 @@ func TestRaidWalkBossNotFoundRerunsTheLegsSummoningOpenStep(t *testing.T) {
 	f.agent.startQueue = []queuedEvent{{raw: fmt.Sprintf("TBM:RUN|zul_gurub|paused|%d/%d|high_priestess_arlokk|boss|begin|boss 14515 not found: not alive or dead within 30.0 yd of -11540.7 -1627.7 41.3 for 60 s nor anywhere in the instance (.bot run skip if he is already dead)|until step %d (step %d)",
 		bossStep, total, bossStep+1, bossStep+1)}}
 	f.agent.hostilesFn = func(int) []tbm.HostileRec { return nil } // she despawned: no unit of her entry in the frames
+	// The stop's confirmation: the first `run status` still sees the old run (the stop has not landed), the next sees it done.
+	asks := 0
+	f.agent.runStatusFn = func() *commanderReply {
+		asks++
+		state := "done"
+		if asks == 1 {
+			state = "paused"
+		}
+		run := fmt.Sprintf("TBM:RUN|zul_gurub|%s|%d/%d|high_priestess_arlokk|boss|begin|boss 14515 not found", state, bossStep, total)
+		return &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+			Ack:   &tbm.Ack{Intent: "run status", Scope: "party", Count: 1, Executor: "-"},
+			Line:  run,
+			Lines: []string{run, "TBM:ACTION_ACK|run status|party|1|-"}}}
+	}
 	starts := 0
 	f.agent.onStart = func() {
 		starts++
@@ -8428,9 +8462,13 @@ func TestRaidWalkBossNotFoundRerunsTheLegsSummoningOpenStep(t *testing.T) {
 	f.agent.mu.Lock()
 	verbs := append([]string{}, f.agent.runVerbs...)
 	f.agent.mu.Unlock()
-	// The stop is a GM chat line (`.bot run stop`), not a commander run verb: the verbs are the two starts.
-	if got := strings.Join(verbs, ","); got != "start,start" {
+	// The stop is a GM chat line (`.bot run stop`), not a commander run verb: without the stop confirmation's `run status`
+	// asks, the verbs are the two starts.
+	if got := strings.Join(startsAndSkips(verbs), ","); got != "start,start" {
 		t.Fatalf("run verbs %q, want the run started again after the stop", got)
+	}
+	if asks < 2 {
+		t.Fatalf("%d run status asks: the start must wait for a status that shows the run stopped", asks)
 	}
 	stopped, restarted := false, false
 	for _, l := range f.agentLog() {
@@ -8497,6 +8535,46 @@ func TestRaidWalkBossNotFoundRerunNeedsTheStop(t *testing.T) {
 	}
 }
 
+// A `.bot run stop` that the commander takes is not the run stopping: the chat may be refused by the module, dropped, or handled
+// late, and the old run then stays live. The re-run waits for the run's own status to show it stopped; a status that stays paused
+// or running sends no second `run start`, leaves the cleanup armed (a stopped run is never assumed) and the pause path ends the walk.
+func TestRaidWalkBossNotFoundRerunWaitsForTheRunToShowItStopped(t *testing.T) {
+	for _, state := range []string{"paused", "running"} {
+		t.Run(state, func(t *testing.T) {
+			f, openStep, bossStep := zgArlokkFixture(t)
+			total := zgArlokkPause(t, f, bossStep)
+			f.opts.pausedWait = 5 * time.Second
+			line := fmt.Sprintf("TBM:RUN|zul_gurub|%s|%d/%d|high_priestess_arlokk|boss|begin|boss 14515 not found", state, bossStep, total)
+			f.agent.runStatusFn = func() *commanderReply {
+				return &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+					Ack:   &tbm.Ack{Intent: "run status", Scope: "party", Count: 1, Executor: "-"},
+					Line:  line,
+					Lines: []string{line, "TBM:ACTION_ACK|run status|party|1|-"}}}
+			}
+			if code := f.run(context.Background()); code != exitRaidWalkFailed {
+				t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+			}
+			f.agent.mu.Lock()
+			verbs := append([]string{}, f.agent.runVerbs...)
+			f.agent.mu.Unlock()
+			if got := strings.Join(startsAndSkips(verbs), ","); got != "start" {
+				t.Fatalf("run verbs %q: no second start may go out over a run the status does not show stopped", got)
+			}
+			// The run may still be live: the walk's cleanup keeps its own stop instead of trusting the re-run's.
+			if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 2 {
+				t.Fatalf("%d run stops, want the re-run's and the cleanup's", n)
+			}
+			sum := f.summary()
+			if !hasNote(sum, "the run stop before the re-run is not confirmed") || !hasNote(sum, "the run is still "+state+" at step ") {
+				t.Fatalf("notes %q, want the unconfirmed stop naming the %s run", sum.Notes, state)
+			}
+			if !hasNote(sum, fmt.Sprintf("re-running step %d", openStep)) {
+				t.Fatalf("notes %q, want the re-run attempt", sum.Notes)
+			}
+		})
+	}
+}
+
 // zgArlokkPause starts a Zul'Gurub walk whose run is running and then pauses at Arlokk's boss row with "boss 14515 not found",
 // the pause testRaidWalkBossNotFoundRerunStopsTheRun's four cases fail their re-run from. It returns the plan's step count.
 func zgArlokkPause(t *testing.T, f *fixture, bossStep int) int {
@@ -8513,6 +8591,14 @@ func zgArlokkPause(t *testing.T, f *fixture, bossStep int) int {
 		bossStep, total, bossStep+1, bossStep+1)}}
 	f.agent.hostilesFn = func(int) []tbm.HostileRec { return nil } // she despawned: no unit of her entry in the frames
 	f.opts.pausedWait = 60 * time.Second
+	// The re-run's stop confirmation: the run's own status shows the run stopped after the `.bot run stop`.
+	stopped := fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_arlokk|boss|begin|stopped (.bot run stop)", bossStep, total)
+	f.agent.runStatusFn = func() *commanderReply {
+		return &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+			Ack:   &tbm.Ack{Intent: "run status", Scope: "party", Count: 1, Executor: "-"},
+			Line:  stopped,
+			Lines: []string{stopped, "TBM:ACTION_ACK|run status|party|1|-"}}}
+	}
 	return total
 }
 
