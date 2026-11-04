@@ -128,6 +128,36 @@ func TestStatusCarriesOwnHealthAndPower(t *testing.T) {
 	h.logout()
 }
 
+// Status carries the player's side from its race: a raid roster's commander_faction is checked against
+// it before the hire, because TortoiseBots hires the commander's own faction only.
+func TestStatusCarriesOwnTeam(t *testing.T) {
+	for _, c := range []struct {
+		race uint8
+		want string
+	}{
+		{1, "alliance"}, // human
+		{7, "alliance"}, // gnome
+		{2, "horde"},    // orc
+		{5, "horde"},    // undead
+		{0, ""},         // unknown until the create block
+	} {
+		h := start(t, Options{})
+		h.enterWorld()
+		if got := h.s.Status().Team; got != "" {
+			t.Fatalf("race %d: team %q before the create block, want none", c.race, got)
+		}
+		h.send(opcode.SMSGUpdateObject, unitCreate(me.GUID, objects.TypePlayer, me.X, me.Y, me.Z, map[uint16]uint32{
+			objects.UnitBytes0: uint32(c.race),
+		}))
+		if c.race == 0 {
+			h.logout()
+			continue
+		}
+		waitFor(t, func() bool { return h.s.Status().Team == c.want })
+		h.logout()
+	}
+}
+
 // Ruling P7: the name filter sees past the 100 nearest units, and the caller's limit
 // (100 when unset) applies after it.
 func TestUnitsNameFilterAndLimit(t *testing.T) {

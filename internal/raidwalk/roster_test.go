@@ -1,6 +1,7 @@
 package raidwalk
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -64,7 +65,7 @@ func TestRosterGrammar(t *testing.T) {
 		{"removed gear_preset", `{"format":"tb-raid-roster","version":1,"level":60,"gear_preset":"onyxia","batches":[{"role":"mt","hire":"1t"},{"role":"rest","hire":"1d"}]}`, "unknown field"},
 		{"bad class", `{"format":"tb-raid-roster","version":1,"level":60,"batches":[{"role":"mt","hire":"1t"},{"role":"rest","hire":"1 bard"}]}`, "class"},
 		{"bad format", `{"format":"other","version":1,"batches":[{"role":"mt","hire":"1t"},{"role":"rest","hire":"1d"}]}`, "format"},
-		{"bad version", `{"format":"tb-raid-roster","version":2,"batches":[{"role":"mt","hire":"1t"},{"role":"rest","hire":"1d"}]}`, "version"},
+		{"bad version", `{"format":"tb-raid-roster","version":3,"batches":[{"role":"mt","hire":"1t"},{"role":"rest","hire":"1d"}]}`, "version"},
 	}
 	for _, c := range refuse {
 		if _, err := ParseRoster([]byte(c.json)); err == nil || !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(c.text)) {
@@ -168,5 +169,104 @@ func TestRosterPlanBoundAndDefaults(t *testing.T) {
 	}
 	if err := r.Validate(loadRaidPlan(t, "zul_gurub")); err == nil {
 		t.Fatal("a 40-bot roster validated against a 20-player raid")
+	}
+}
+
+// commander_faction is a version 2 field naming the side the commander must be on; version 1 takes none,
+// and any other word than alliance or horde is refused.
+func TestRosterCommanderFaction(t *testing.T) {
+	ony := loadRaidPlan(t, "onyxias_lair")
+	roster := func(version int, faction string) string {
+		return fmt.Sprintf(`{"format":"tb-raid-roster","version":%d,"level":60,"tier":2,"commander_faction":%q,
+ "batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection"},
+            {"role":"rest","hire":"39d"}]}`, version, faction)
+	}
+	for _, faction := range []string{"alliance", "horde"} {
+		r, err := ParseRoster([]byte(roster(2, faction)))
+		if err != nil {
+			t.Fatalf("%s: %v", faction, err)
+		}
+		if err := r.Validate(ony); err != nil {
+			t.Fatalf("%s against onyxia: %v", faction, err)
+		}
+		if r.CommanderFaction != faction {
+			t.Errorf("commander_faction = %q, want %q", r.CommanderFaction, faction)
+		}
+	}
+	refuse := []struct{ name, json, text string }{
+		{"v1", roster(1, "horde"), "version 2"},
+		{"bad word", roster(2, "neutral"), "want alliance or horde"},
+	}
+	for _, c := range refuse {
+		if _, err := ParseRoster([]byte(c.json)); err == nil || !strings.Contains(err.Error(), c.text) {
+			t.Errorf("%s: error = %v, want it to name %q", c.name, err, c.text)
+		}
+	}
+	// Absent: no check, as in version 1.
+	r, err := ParseRoster([]byte(`{"format":"tb-raid-roster","version":2,"level":60,"tier":2,
+ "batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection"},{"role":"rest","hire":"39d"}]}`))
+	if err != nil {
+		t.Fatalf("no commander_faction: %v", err)
+	}
+	if r.CommanderFaction != "" {
+		t.Errorf("commander_faction = %q, want none", r.CommanderFaction)
+	}
+}
+
+// A v2 roster sets a spec per batch: the spec must be a `.bot role` id of the batch's single class
+// and agree with the role the hire names; count, when given, must be the batch's size.
+func TestRosterV2Specs(t *testing.T) {
+	ony := loadRaidPlan(t, "onyxias_lair")
+	const v2 = `{"format":"tb-raid-roster","version":2,"level":60,"tier":2,
+ "batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection","count":1},
+            {"role":"ot","hire":"1 paladin:tank","spec":"protection"},
+            {"role":"rest","hire":"2 priest:healer","spec":"holy","count":2},
+            {"role":"rest","hire":"1 druid:tank","spec":"bear"},
+            {"role":"rest","hire":"1 mage","spec":"fire"},
+            {"role":"rest","hire":"34d"}]}`
+	r, err := ParseRoster([]byte(v2))
+	if err != nil {
+		t.Fatalf("the v2 roster: %v", err)
+	}
+	if err := r.Validate(ony); err != nil {
+		t.Fatalf("the v2 roster against onyxia: %v", err)
+	}
+	if r.Total() != 40 {
+		t.Fatalf("total = %d, want 40", r.Total())
+	}
+	if got := r.Batches[0].Spec; got != "protection" {
+		t.Errorf("mt spec = %q, want protection", got)
+	}
+	if got := r.Batches[3].Class(); got != "druid" {
+		t.Errorf("the bear batch's class = %q, want druid", got)
+	}
+	if got := r.Batches[5].Class(); got != "" {
+		t.Errorf("a role count's class = %q, want none", got)
+	}
+	// A v1 roster is still read and hired the same way.
+	if _, err := ParseRoster([]byte(exampleRoster)); err != nil {
+		t.Fatalf("v1: %v", err)
+	}
+
+	refuse := []struct {
+		name string
+		json string
+		text string
+	}{
+		{"v1 spec", `{"format":"tb-raid-roster","version":1,"level":60,"batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection"},{"role":"rest","hire":"10h 26d"}]}`, "version 2"},
+		{"v1 count", `{"format":"tb-raid-roster","version":1,"level":60,"batches":[{"role":"mt","hire":"1t","count":1},{"role":"rest","hire":"10h 26d"}]}`, "version 2"},
+		{"role count spec", `{"format":"tb-raid-roster","version":2,"level":60,"batches":[{"role":"mt","hire":"1t"},{"role":"rest","hire":"5h","spec":"holy"}]}`, "class batch"},
+		{"mixed class spec", `{"format":"tb-raid-roster","version":2,"level":60,"batches":[{"role":"mt","hire":"1t"},{"role":"rest","hire":"1 priest 1 mage","spec":"holy"}]}`, "class batch"},
+		{"wrong class spec", `{"format":"tb-raid-roster","version":2,"level":60,"batches":[{"role":"mt","hire":"1 warrior:tank","spec":"holy"},{"role":"rest","hire":"10h 26d"}]}`, "not a warrior spec"},
+		{"wrong role spec", `{"format":"tb-raid-roster","version":2,"level":60,"batches":[{"role":"mt","hire":"1 warrior:tank","spec":"arms"},{"role":"rest","hire":"10h 26d"}]}`, "the hire says tank"},
+		{"default role spec", `{"format":"tb-raid-roster","version":2,"level":60,"batches":[{"role":"mt","hire":"1t"},{"role":"rest","hire":"1 druid","spec":"bear"}]}`, "the hire says healer"},
+		{"count mismatch", `{"format":"tb-raid-roster","version":2,"level":60,"batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection","count":2},{"role":"rest","hire":"10h 26d"}]}`, "count 2"},
+		{"count zero", `{"format":"tb-raid-roster","version":2,"level":60,"batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection","count":0},{"role":"rest","hire":"10h 26d"}]}`, "count 0"},
+		{"bad spec", `{"format":"tb-raid-roster","version":2,"level":60,"batches":[{"role":"mt","hire":"1 warrior:tank","spec":"prot"},{"role":"rest","hire":"10h 26d"}]}`, "not a warrior spec"},
+	}
+	for _, c := range refuse {
+		if _, err := ParseRoster([]byte(c.json)); err == nil || !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(c.text)) {
+			t.Errorf("%s: ParseRoster error = %v, want it to name %q", c.name, err, c.text)
+		}
 	}
 }

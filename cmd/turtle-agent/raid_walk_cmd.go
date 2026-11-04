@@ -1647,8 +1647,11 @@ func (w *walk) printPlan(out io.Writer) {
 	if w.place != nil {
 		fmt.Fprintf(out, "  5b gm: .instance unbind %d\n", w.plan.Map)
 	}
-	for _, line := range w.roster.HireLines() {
-		fmt.Fprintf(out, "  6 gm: %s\n", line)
+	for _, b := range w.roster.Batches {
+		fmt.Fprintf(out, "  6 gm: %s\n", w.roster.HireLine(b.Hire))
+		if b.Spec != "" {
+			fmt.Fprintf(out, "  6 gm: .bot role <hire> %s\n", b.Spec)
+		}
 	}
 	fmt.Fprintf(out, "  6 party: before and after every batch (the new names are the mt, ot and rest)\n")
 	if w.roster.Total() > raidwalk.HireCap {
