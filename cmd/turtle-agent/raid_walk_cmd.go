@@ -920,8 +920,19 @@ type walk struct {
 	gmClearLog  []raidwalk.GMClearEntry
 	gmClearUsed bool
 	// gongReruns counts the run restarts at a leg's summoning open row (a boss that despawns after a wipe comes back with the
-	// object: Zul'Gurub's Arlokk). bossGongReruns bounds them.
-	gongReruns int
+	// object: Zul'Gurub's Arlokk). bossGongReruns bounds them. gongRerunAt/-Boss/-Open name the last one that went out: the
+	// next "boss not found" pause reads whether the frames saw the boss alive since, which tells the gong summoning him again
+	// from the core refusing it (the object is a no-op while the encounter is IN_PROGRESS or DONE).
+	gongReruns    int
+	gongRerunAt   time.Time
+	gongRerunBoss uint32
+	gongRerunOpen int
+	// rerunStale drops the stopped run's own ending in the feed: a done or none line of the plan at step 0 or at the step the
+	// re-run's pause stood on, until the new run's own running line arrives or rerunStaleUntil passes. It is no end of the walk
+	// (walk 37 b: "no run" and "done ... stopped by .bot run stop" at step 417 landed after the re-run's start went out).
+	rerunStale      bool
+	rerunStaleStep  int
+	rerunStaleUntil time.Time
 
 	started     time.Time
 	ended       time.Time

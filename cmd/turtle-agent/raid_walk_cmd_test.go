@@ -8717,6 +8717,212 @@ func TestRaidWalkBossNotFoundRerunCleanupStopsARunTheRerunStopMissed(t *testing.
 	}
 }
 
+// zgArlokkNotFoundPause is the run leader's pause at Arlokk's boss row: the frames show no unit of her entry, so the run
+// leader cannot find her (walk 35's note; walk 37 b's at step 417).
+func zgArlokkNotFoundPause(total, bossStep int) string {
+	return fmt.Sprintf("TBM:RUN|zul_gurub|paused|%d/%d|high_priestess_arlokk|boss|begin|boss 14515 not found: not alive or dead within 30.0 yd of -11540.7 -1627.7 41.3 for 60 s nor anywhere in the instance (.bot run skip if he is already dead)|until step %d (step %d)",
+		bossStep, total, bossStep+1, bossStep+1)
+}
+
+// zgArlokkRunning is the run's status at the gong row (the re-run's own start) with the walk's until.
+func zgArlokkRunning(total, step, bossStep int) string {
+	return fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|open|begin|arrived|until step %d (step %d)", step, total, bossStep+1, bossStep+1)
+}
+
+// Walk 37 b: the re-run's own `.bot run stop` reaches the server after its `run start` went out, so the start's reply carries
+// the OLD run's final line ("done ... stopped by .bot run stop") before the new run's first status. The walk took that line for
+// the new run ("the new run is done"), sent its cleanup stop, killed the run it had just started, and the walk ended 0 (walk-super
+// restarts only 18/19, so the raid sat dead). The new run's own running line at the open row decides; the old run's ending is no
+// evidence about it.
+func TestRaidWalkBossNotFoundRerunIgnoresTheOldRunsFinalLine(t *testing.T) {
+	f, openStep, bossStep := zgArlokkFixture(t)
+	total := zgArlokkPause(t, f, bossStep)
+	f.opts.pausedWait = 60 * time.Second
+	starts := 0
+	f.agent.onStart = func() {
+		starts++
+		if starts != 2 {
+			return
+		}
+		old := fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_arlokk|boss|begin|stopped by .bot run stop|until step %d (step %d)", bossStep, total, bossStep+1, bossStep+1)
+		run := zgArlokkRunning(total, openStep, bossStep)
+		f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+			Ack:   &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+			Line:  old,
+			Lines: []string{old, run, "TBM:ACTION_ACK|run start|party|1|-"}}}
+		// The stopped run's own ending is in the feed too, ahead of the new run's line; the walk must not take it for the
+		// walk's end. Then the new run's status, and the walk's until.
+		f.agent.push("TBM:RUN|-|none|0/0|-|-|-|no run", "")
+		f.agent.push(old, "")
+		f.agent.push(run, "")
+		f.agent.push(fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_arlokk|move|walk|stopped before step %d (until step %d): the party stays where it stands", bossStep+1, total, bossStep+1, bossStep+1), "")
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if got := strings.Join(startsAndSkips(verbs), ","); got != "start,start" {
+		t.Fatalf("run verbs %q, want the run started again after the stop", got)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
+		t.Fatalf("%d run stops, want only the one before the re-run: the old run's ending is no failed start", n)
+	}
+	sum := f.summary()
+	if sum.EndReason != "until" {
+		t.Fatalf("end %q, want until", sum.EndReason)
+	}
+	if hasNote(sum, fmt.Sprintf("the re-run at step %d failed", openStep)) {
+		t.Fatalf("notes %q: the old run's done line must not fail the re-run", sum.Notes)
+	}
+	if !hasNote(sum, fmt.Sprintf("restarted at step %d", openStep)) {
+		t.Fatalf("notes %q, want the restart", sum.Notes)
+	}
+}
+
+// Walk 37 b's ending, on the tool's own stop: a re-run that fails after its stop leaves the run stopped, and the tracker's own
+// "stopped by .bot run stop" line then ended the walk 0. Walk-super restarts only 18/19, so the raid sat dead 67 minutes. A failed
+// re-run ends the walk with the pause path's restartable code, whatever the run's own ending says.
+func TestRaidWalkBossNotFoundRerunFailureEndsRestartable(t *testing.T) {
+	f, openStep, bossStep := zgArlokkFixture(t)
+	total := zgArlokkPause(t, f, bossStep)
+	starts := 0
+	f.agent.onStart = func() {
+		starts++
+		if starts != 2 {
+			return
+		}
+		f.agent.startCallErr = errors.New("commander run start: the call timed out after 25s")
+		// The stop after the failed start reaches the server: the run's own "done ... stopped by .bot run stop" lands in the
+		// feed, where the tracker would otherwise end the walk clean.
+		f.agent.push(fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_arlokk|boss|begin|stopped by .bot run stop|until step %d (step %d)", bossStep, total, bossStep+1, bossStep+1), "")
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, fmt.Sprintf("the re-run at step %d failed", openStep)) {
+		t.Fatalf("notes %q, want the failed re-run", sum.Notes)
+	}
+	if sum.EndReason == "" || strings.Contains(sum.EndReason, "stopped by") {
+		t.Fatalf("end %q, want the failed re-run's own reason, not the run's stopped ending", sum.EndReason)
+	}
+}
+
+// The stale-drop's other half: the new run's own ending at the paused step (a "stopped before step" until line) is not the
+// stopped run's, so it ends the walk even when the start line came from the reply and the feed shows no further running line.
+func TestRaidWalkBossNotFoundRerunKeepsTheNewRunsEndingAtThePausedStep(t *testing.T) {
+	f, openStep, bossStep := zgArlokkFixture(t)
+	total := zgArlokkPause(t, f, bossStep)
+	starts := 0
+	f.agent.onStart = func() {
+		starts++
+		if starts != 2 {
+			return
+		}
+		run := zgArlokkRunning(total, openStep, bossStep)
+		f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+			Ack:   &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+			Line:  run,
+			Lines: []string{run, "TBM:ACTION_ACK|run start|party|1|-"}}}
+		f.agent.push(fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_arlokk|move|walk|stopped before step %d (until step %d): the party stays where it stands", bossStep, total, bossStep+1, bossStep+1), "")
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if sum := f.summary(); sum.EndReason != "until" {
+		t.Fatalf("end %q, want until: the new run's own ending must end the walk", sum.EndReason)
+	}
+}
+
+// The gong cannot be used twice in an instance whose encounter state still counts the boss started: the core's script returns
+// before the goober's spell while the instance says IN_PROGRESS or DONE (boss_arlokk.cpp GOHello_go_gong_of_bethekk), and only
+// the boss reaching home resets it. A re-run whose gong summons nothing (no unit of his alive in the frames since) is reported
+// as such and ends the walk restartable, for a fresh instance, instead of burning the other re-runs and the pause.
+func TestRaidWalkBossNotFoundRerunThatSummonsNothingEndsRestartable(t *testing.T) {
+	f, openStep, bossStep := zgArlokkFixture(t)
+	total := zgArlokkPause(t, f, bossStep)
+	f.opts.pausedWait = 60 * time.Second
+	starts := 0
+	f.agent.onStart = func() {
+		starts++
+		if starts != 2 {
+			return
+		}
+		run := zgArlokkRunning(total, openStep, bossStep)
+		f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+			Ack:   &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+			Line:  run,
+			Lines: []string{run, "TBM:ACTION_ACK|run start|party|1|-"}}}
+		// The run walks on to the boss row and pauses again; the frames never show Arlokk alive (hostilesFn is nil).
+		f.agent.push(zgArlokkNotFoundPause(total, bossStep), "")
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if got := strings.Join(startsAndSkips(verbs), ","); got != "start,start" {
+		t.Fatalf("run verbs %q, want no second re-run after a gong that summoned nothing", got)
+	}
+	sum := f.summary()
+	if !hasNote(sum, fmt.Sprintf("the re-run at step %d did not summon him again", openStep)) {
+		t.Fatalf("notes %q, want the gong that summoned nothing", sum.Notes)
+	}
+	if !hasNote(sum, "a fresh instance is needed") {
+		t.Fatalf("notes %q, want the fresh instance named", sum.Notes)
+	}
+}
+
+// The other half of the same rule: when the frames DID show the boss alive after the re-run, the gong worked and the boss
+// despawned again, so the next pause is another re-run (up to bossGongReruns), not the "summoned nothing" ending.
+func TestRaidWalkBossNotFoundRerunThatSummonsTheBossAgainRerunsAgain(t *testing.T) {
+	f, openStep, bossStep := zgArlokkFixture(t)
+	total := zgArlokkPause(t, f, bossStep)
+	f.opts.pausedWait = 60 * time.Second
+	seen, paused := false, false
+	f.agent.hostilesFn = func(int) []tbm.HostileRec {
+		if !seen {
+			return nil
+		}
+		if !paused {
+			paused = true
+			// The pause arrives after this frame, so the walk has the live sighting before it judges the gong.
+			f.agent.push(zgArlokkNotFoundPause(total, bossStep), "")
+		}
+		return []tbm.HostileRec{{GUID: 0xF1300038B33D0D35, Entry: 14515, X: -11540.7, Y: -1627.7, Z: 41.3, HPPct: 100}}
+	}
+	starts := 0
+	f.agent.onStart = func() {
+		starts++
+		run := zgArlokkRunning(total, openStep, bossStep)
+		switch starts {
+		case 2:
+			seen = true
+		case 3:
+			// The second re-run: end the walk at its until.
+			f.agent.push(fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_arlokk|move|walk|stopped before step %d (until step %d): the party stays where it stands", bossStep+1, total, bossStep+1, bossStep+1), "")
+		default:
+			return
+		}
+		f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+			Ack:   &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+			Line:  run,
+			Lines: []string{run, "TBM:ACTION_ACK|run start|party|1|-"}}}
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if starts != 3 {
+		t.Fatalf("%d starts, want the first, the re-run and the second re-run", starts)
+	}
+	if hasNote(f.summary(), "did not summon him again") {
+		t.Fatalf("notes %q: a boss seen alive after the re-run means the gong worked", f.summary().Notes)
+	}
+}
+
 // With the plan's annotation gone, the same pause is no re-run: the gong row still stands right before Arlokk's boss row, but
 // nothing says it summons her, so the walk waits the pause out as before (the rows' shape is no evidence).
 func TestRaidWalkBossNotFoundWithoutTheAnnotationDoesNotRerunTheOpen(t *testing.T) {
@@ -8781,5 +8987,59 @@ func TestRaidWalkBossNotFoundWithoutTheAnnotationDoesNotRerunTheOpen(t *testing.
 	}
 	if !hasNote(sum, "boss 14515 not found and no kill in the frames yet") {
 		t.Fatalf("notes %q, want the pause path's re-reading note", sum.Notes)
+	}
+}
+
+// sinceAgent serves events by the cursor the walk asks from (the real events RPC's `since` is exclusive), so a wait that
+// leaves the page's tail unread can be seen to lose it.
+type sinceAgent struct {
+	evs []events.Event
+}
+
+func (a *sinceAgent) Call(_ context.Context, method string, params, out any, _ time.Duration) error {
+	if method != "events" {
+		return errors.New("unexpected RPC " + method)
+	}
+	since, _ := params.(map[string]any)["since"].(uint64)
+	page, ok := out.(*events.Page)
+	if !ok {
+		return errors.New("events: want *events.Page")
+	}
+	*page = events.Page{}
+	for _, e := range a.evs {
+		if e.Seq > since {
+			page.Events = append(page.Events, e)
+			page.Next = e.Seq
+		}
+	}
+	return nil
+}
+
+// A wait that matches a line in the middle of an events page must not lose the page's tail: a run's done line right after
+// its start line is the walk's end, and the re-run's wait reads the start line from the feed when the reply has none (review
+// of walk 37 b). waitTBMMatch puts the cursor back after the matched line, so the next poll reads the tail.
+func TestWaitTBMMatchKeepsThePageTail(t *testing.T) {
+	clk := newFakeClock()
+	ag := &sinceAgent{evs: []events.Event{
+		{Seq: 1, Kind: events.KindSystem, Text: "TBM:RUN|zul_gurub|running|415/761|high_priestess_arlokk|open|begin|arrived|until step 418 (step 418)"},
+		{Seq: 2, Kind: events.KindSystem, Text: "TBM:RUN|zul_gurub|done|418/761|high_priestess_arlokk|move|walk|stopped before step 418 (until step 418)"},
+	}}
+	w := &walk{agent: ag, env: walkEnv{now: clk.now, sleep: clk.sleep}}
+	line, ok, err := w.waitTBMMatch(context.Background(), 5*time.Second, func(l string) bool {
+		st, ok := raidwalk.ParseRun(l)
+		return ok && st.State == tbm.RunRunning
+	})
+	if err != nil || !ok || !strings.Contains(line, "running|415") {
+		t.Fatalf("wait: line %q ok %v err %v, want the running line", line, ok, err)
+	}
+	if w.eventsAt != 1 {
+		t.Fatalf("eventsAt %d, want 1 (after the matched line)", w.eventsAt)
+	}
+	lines, err := w.pump(context.Background(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 1 || !strings.Contains(lines[0], "done|418") {
+		t.Fatalf("next pump %q, want the page's done line", lines)
 	}
 }

@@ -2546,11 +2546,23 @@ fresh pause re-arms the same handling, and at most 3 such restarts are sent per 
 A boss with no annotation is never restarted, whatever open row stands before it. The stop's send is not the run stopping: after
 `.bot run stop` the walk polls the run's own status (`run status`, up to 15 s) and only a status with no active run (state `none`,
 or a `done` line of its own plan) lets the `run start` go out; a status still running or paused, or none at all, sends no start,
-leaves the cleanup's own stop in place and lets the pause path take over. The new run's own status line is adopted and
-checked (running, that step, the walk's row count, the walk's until label); a refused stop, a refused start, or a start whose RPC
-timed out, whose status never came or came malformed or wrong is noted, the run then counts as possibly live (`.bot run stop` goes
-out again, and the walk's cleanup is not skipped), and the pause path takes over, with no second `run start` over a run that did not
-stop. The note and run.log line say `re-running step N` and `the run restarted at step N`.
+leaves the cleanup's own stop in place and ends the walk 18. The new run's own status line is adopted and checked (running at the
+open row, the walk's row count, the walk's until label); the reply can also carry the OLD run's final line, whose stop reaches the
+server after the start went out (walk 37 b: the walk read it as "the new run is done", stopped the run it had just started and ended
+0), so a done or none line of the plan is no evidence about the new run and the walk waits up to 15 s for its own running line at
+the open row. A refused stop, a refused start, or a start whose RPC timed out, whose status never came or came malformed or wrong is
+noted, the run then counts as possibly live (`.bot run stop` goes out again, and the walk's cleanup is not skipped), and the walk
+ends 18 (the pause path's restartable code), never 0: the walk has stopped its own run, and walk-super restarts only 18/19, so a 0
+there leaves the raid dead (walk 37 b sat 67 minutes). The note and run.log line say `re-running step N` and `the run restarted at
+step N`.
+
+The gong is not usable twice in an instance whose encounter state still counts the boss started: the core's script returns before the
+goober's spell while the instance says `IN_PROGRESS` or `DONE` (`boss_arlokk.cpp`, `GOHello_go_gong_of_bethekk`), and only the boss
+reaching home (`JustReachedHome`) resets it. So a re-run whose gong summons nothing (no unit of the boss's family alive in the frames
+since it went out) is reported as such ("the re-run at step N did not summon him again ... a fresh instance is needed") and ends the
+walk 18 at once, instead of sending the other re-runs and waiting the pause out; walk-super then re-places the walk, and the cmd must
+not carry `--reuse-instance` for such a boss, or the restart re-enters the copy whose gong is spent (a boss the frames DID show alive
+after the re-run did come back, and a fresh pause re-runs the gong again).
 
 Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
 `.bot gear raid <commander> tier <N>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,
