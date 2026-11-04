@@ -675,7 +675,9 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 // approach rows whose routes could not be kept clear; it was 397 before walk 31, 407 before walk 29's fix 6 dropped the
 // 14 fish-only Hakkar-outer groups and leg 8's entrance-pack detour and added the Mandokir patrol/chain rows; walk 33's
 // water fix made it 405: leg 5's five river vias are the seven of the dry route round the gorge and leg 6 loses its river
-// via; walk 34 adds the Jin'do group-12 midpoint approach row, 408), a placed
+// via; walk 34 adds the Jin'do group-12 midpoint approach row, 408; the Jin'do fix drops the pit pull group and its
+// approach row and nets one fewer row elsewhere on leg 6, 406; fix 1 makes groups 8/9 stand pulls with south hops and
+// moves the group-11 stand south past the pit, 408), a placed
 // `--until none` run from Marli stops before the segment on leg 6 that passes Venoxis, and the shortened corridor
 // clears clean.
 

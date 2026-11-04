@@ -15,7 +15,7 @@
   },
   "level_band": [58, 60],
   "cc_priority": [14532, 11356, 11339, 14882, 11361, 11365, 11350, 14825, 14826],
-  "kill_first": [14750, 15146, 11830, 14883, 11353],
+  "kill_first": [15112, 14987, 14750, 15146, 11830, 14883, 11353],
   "raid": {
     "size": 20,
     "tanks": 3,
@@ -1975,27 +1975,6 @@
           "max_bodies": 10
         },
         {
-          "entries": [14826, 14826, 14826, 14826, 14826, 14826, 14826, 14826, 14826, 14826],
-          "positions": [
-            {"x": -11580.6, "y": -1254.79, "z": 77.66},
-            {"x": -11580.2, "y": -1250.6, "z": 77.71},
-            {"x": -11581.5, "y": -1252.54, "z": 77.69},
-            {"x": -11583.2, "y": -1254.83, "z": 77.67},
-            {"x": -11582.5, "y": -1250.32, "z": 77.69},
-            {"x": -11584.2, "y": -1252.21, "z": 77.76},
-            {"x": -11582.3, "y": -1247.86, "z": 77.7},
-            {"x": -11586.4, "y": -1253.92, "z": 77.66},
-            {"x": -11585.11, "y": -1248.78, "z": 77.64},
-            {"x": -11586.6, "y": -1250.72, "z": 77.67}
-          ],
-          "radius": 4.6,
-          "approach": [
-            {"x": -11563, "y": -1282.6, "z": 77.9}
-          ],
-          "stand_pull": true,
-          "max_bodies": 10
-        },
-        {
           "entries": [14825, 14825, 14882, 14825],
           "positions": [
             {"x": -11547, "y": -1250.59, "z": 78.55},
@@ -2005,8 +1984,11 @@
           ],
           "radius": 4.2,
           "approach": [
-            {"x": -11566, "y": -1270, "z": 77.8}
-          ]
+            {"x": -11585, "y": -1300, "z": 77.8},
+            {"x": -11560, "y": -1280, "z": 77.9}
+          ],
+          "stand_pull": true,
+          "max_bodies": 10
         },
         {
           "entries": [14825, 14825, 14825, 14825],
@@ -2018,8 +2000,10 @@
           ],
           "radius": 5,
           "approach": [
-            {"x": -11566, "y": -1276, "z": 78.38}
-          ]
+            {"x": -11562, "y": -1285, "z": 78.1}
+          ],
+          "stand_pull": true,
+          "max_bodies": 10
         },
         {
           "entries": [14883, 14883, 14882, 14882, 14825, 14825, 14882, 14882, 14825, 14825],
@@ -2038,7 +2022,9 @@
           "radius": 8,
           "approach": [
             {"x": -11558, "y": -1276, "z": 78.06}
-          ]
+          ],
+          "stand_pull": true,
+          "max_bodies": 10
         },
         {
           "entries": [14825, 14825, 14883, 14882, 14825, 14883, 14825, 14882, 14882, 14882],
@@ -2056,9 +2042,13 @@
           ],
           "radius": 8.2,
           "approach": [
-            {"x": -11552.3, "y": -1254, "z": 78.4},
-            {"x": -11576, "y": -1232, "z": 77.78}
-          ]
+            {"x": -11555, "y": -1295, "z": 78},
+            {"x": -11585, "y": -1302, "z": 77.8},
+            {"x": -11615, "y": -1290, "z": 79.3},
+            {"x": -11620, "y": -1266, "z": 79.8}
+          ],
+          "stand_pull": true,
+          "max_bodies": 10
         },
         {
           "entries": [14532, 11351, 11830, 14532],
@@ -2070,7 +2060,6 @@
           ],
           "radius": 7.7,
           "approach": [
-            {"x": -11587.7, "y": -1261.6, "z": 77.6},
             {"x": -11605.3, "y": -1344, "z": 78.1},
             {"x": -11660, "y": -1424, "z": 59.65}
           ]
@@ -2148,7 +2137,9 @@
         ]
       },
       "notes": [
-        "WALK 29 FIX 3 (2026-11-03, leg 6; research/zg-w29/WALK29-FIX-PLAN.md §4, lead decision): step 528 (group 6) pulled the 10 lone 14825/14882/14883 units of the 49373-49382 cluster from an approach 26.1 yd out; d 00:41:06 aggroed 49377 on arrival and 12 bodies (with the Corrupted Infernals from Voodoo Slave spell 23426) were in at 00:41:08, 19 dead in 38 s, no CC (the units were not in cc_priority and the row was not a stand_pull). Step 532 (group 8, formation 49363, 10 units) repeated it from 24.0 yd: 11-12 engaged, 21+23 dead. Step 534 walked to group 9's approach -11566 -1270, 21.1 yd from the Sacrificed Troll pack (group 12): 9 trolls woke on the walk and group 9 added 8, 17 engaged, 21 dead. Rows 6, 8 and 12 are stand_pull now with max_bodies 10, and their approaches sit 30+ yd from their own packs with the party's spread clear: group 6 at -11632 -1322 78.1 (40.3 yd from its nearest unit, 43.6 from the row centre), group 8 at -11606.5 -1302.8 79.3 (34.9, 37.0) and the trolls at -11563 -1282.6 77.9 (32.9, 37.0). The troll pack (Sacrificed Trolls 49078-49087) is pulled before group 9, from its own stand, which removes the walk exposure at step 534 entirely. 14882 Atal'ai Mistress is in cc_priority; 14883 Voodoo Slave is kill_first (its creature_spells entry 148830 casts 23426 Summon Infernals)."
+        "WALK 29 FIX 3 (2026-11-03, leg 6; research/zg-w29/WALK29-FIX-PLAN.md §4, lead decision): step 528 (group 6) pulled the 10 lone 14825/14882/14883 units of the 49373-49382 cluster from an approach 26.1 yd out; d 00:41:06 aggroed 49377 on arrival and 12 bodies (with the Corrupted Infernals from Voodoo Slave spell 23426) were in at 00:41:08, 19 dead in 38 s, no CC (the units were not in cc_priority and the row was not a stand_pull). Step 532 (group 8, formation 49363, 10 units) repeated it from 24.0 yd: 11-12 engaged, 21+23 dead. Step 534 walked to group 9's approach -11566 -1270, 21.1 yd from the Sacrificed Troll pack (group 12): 9 trolls woke on the walk and group 9 added 8, 17 engaged, 21 dead. Rows 6, 8 and 12 are stand_pull now with max_bodies 10, and their approaches sit 30+ yd from their own packs with the party's spread clear: group 6 at -11632 -1322 78.1 (40.3 yd from its nearest unit, 43.6 from the row centre), group 8 at -11606.5 -1302.8 79.3 (34.9, 37.0) and the trolls at -11563 -1282.6 77.9 (32.9, 37.0). The troll pack (Sacrificed Trolls 49078-49087) is pulled before group 9, from its own stand, which removes the walk exposure at step 534 entirely. 14882 Atal'ai Mistress is in cc_priority; 14883 Voodoo Slave is kill_first (its creature_spells entry 148830 casts 23426 Summon Infernals).",
+        "JIN'DO (2026-11-04, spec TortoiseBots-audit/specs/jindo-mechanics.md §§D1/D6/D7): kill_first leads with the Brain Wash Totem 15112 (a charmed bot kills raid members) and the Powerful Healing Ward 14987 (3 333 hp/s, out-heals the raid's 2.2-3.0 k dps), then 14750, 15146, 11830, 14883, 11353. Sacrificed Troll 14826 respawn in 10 s (tw_world_creature.sql 49078-49087); the pit pull group is dropped and the route keeps 22 yd from the pit (-11583, -1251). Jin'do proof walks place at 'pull group 9 approach', plain, never from the boss approach.",
+        "JIN'DO GUARD (2026-11-04, spec §D6): the honour-guard group (10 bodies incl. 49402/49403, approach -11558 -1276 78.06, 42.2 yd from Jin'do) is a stand pull with max_bodies 10, shot from its approach so the fight happens there and not 13 yd from him."
       ]
     },
     {
