@@ -8630,3 +8630,70 @@ func TestRaidWalkBossNotFoundRerunCleanupStopsARunTheRerunStopMissed(t *testing.
 		t.Fatalf("notes %q, want the failed re-run", sum.Notes)
 	}
 }
+
+// With the plan's annotation gone, the same pause is no re-run: the gong row still stands right before Arlokk's boss row, but
+// nothing says it summons her, so the walk waits the pause out as before (the rows' shape is no evidence).
+func TestRaidWalkBossNotFoundWithoutTheAnnotationDoesNotRerunTheOpen(t *testing.T) {
+	raw, err := os.ReadFile("../../dungeons/zul_gurub.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keep []string
+	for _, l := range strings.Split(string(raw), "\n") {
+		if strings.Contains(l, `"summon_open_step"`) {
+			// It is the boss object's last field: the line before it loses the comma that held the object open.
+			if n := len(keep); n > 0 {
+				keep[n-1] = strings.TrimSuffix(keep[n-1], ",")
+			}
+			continue
+		}
+		keep = append(keep, l)
+	}
+	dir := t.TempDir()
+	plan := filepath.Join(dir, "zul_gurub.json")
+	if err := os.WriteFile(plan, []byte(strings.Join(keep, "\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := dungeon.Load(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range p.Legs {
+		if b := p.Legs[i].Boss; b != nil && b.SummonOpenStep != 0 {
+			t.Fatalf("the plan copy still carries summon_open_step %d on boss %d", b.SummonOpenStep, b.Entry)
+		}
+	}
+	f := newFixture(t)
+	f.opts.dir = dir
+	f.opts.plan, f.opts.holder = "zul_gurub", "raid-walk-zul_gurub"
+	bossStep := 0
+	for i, s := range zgRows(t).Steps {
+		if s.Kind == planexport.KindBoss && s.Entry == 14515 {
+			bossStep = i + 1
+		}
+	}
+	if bossStep == 0 {
+		t.Fatal("no Arlokk boss row in the ZG rows")
+	}
+	f.opts.until = fmt.Sprintf("step %d", bossStep+1)
+	f.agent.instMap = p.Map
+	f.agent.enterMap = p.Map
+	f.agent.ttFn = ttUnitsFn(t)
+	zgArlokkPause(t, f, bossStep)
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if got := strings.Join(verbs, ","); got != "start" {
+		t.Fatalf("run verbs %q: an un-annotated boss must not be re-run", got)
+	}
+	sum := f.summary()
+	if hasNote(sum, "re-running step") {
+		t.Fatalf("notes %q: the walk re-ran an open row no plan field names", sum.Notes)
+	}
+	if !hasNote(sum, "boss 14515 not found and no kill in the frames yet") {
+		t.Fatalf("notes %q, want the pause path's re-reading note", sum.Notes)
+	}
+}
