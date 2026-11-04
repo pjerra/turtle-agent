@@ -21,10 +21,13 @@ type Roster struct {
 	Batches []Batch `json:"batches"`
 }
 
-// Batch is one hire order: an mt, an ot or a rest batch.
+// Batch is one hire order: an mt, an ot or a rest batch. Spec (version 2) is the class spec every
+// bot of the batch is set to after its hire; Count is the batch's expected size.
 type Batch struct {
-	Role string `json:"role"`
-	Hire string `json:"hire"`
+	Role  string `json:"role"`
+	Hire  string `json:"hire"`
+	Spec  string `json:"spec,omitempty"`
+	Count int    `json:"count,omitempty"`
 
 	tokens []hireToken
 }
@@ -66,8 +69,99 @@ var (
 
 var errPresetHire = errors.New("a preset fills the raid in one go; name the tanks in an mt batch")
 
-// ParseRoster reads and checks a tb-raid-roster v1 file. It needs no plan: the raid-size bound is checked by
-// Validate, after the plan is loaded.
+// classDefaultRole is the role a class hire takes when its token names none (TortoiseBots'
+// DefaultRoleForClass): hybrids are hired as healers, the rest as dps.
+var classDefaultRole = map[string]string{
+	"warrior": "dps", "rogue": "dps", "hunter": "dps", "mage": "dps", "warlock": "dps",
+	"priest": "healer", "shaman": "healer", "druid": "healer", "paladin": "healer",
+}
+
+// classSpecs is the class-spec ids `.bot role <Name> <spec>` takes, per class, in TortoiseBots'
+// order (commands/Party.cpp kSpecRows). A shared id (holy, protection, restoration) means the right
+// spec for the bot's own class, so the class of a spec batch decides which ids are valid.
+var classSpecs = map[string][]string{
+	"warrior": {"arms", "fury", "protection"},
+	"paladin": {"holy", "protection", "retribution"},
+	"hunter":  {"bm", "mm", "survival"},
+	"rogue":   {"assa", "combat", "subtlety"},
+	"priest":  {"discipline", "holy", "shadow", "hybrid"},
+	"shaman":  {"ele", "enh", "restoration"},
+	"mage":    {"arcane", "fire", "frost"},
+	"warlock": {"affliction", "demonology", "destruction"},
+	"druid":   {"balance", "boomkin", "cat", "bear", "restoration"},
+}
+
+// specRoles is the group role a spec id implies (the same table's BOT_ROLE_* column). Every id
+// absent here is a dps spec.
+var specRoles = map[string]string{
+	"protection":  "tank",
+	"bear":        "tank",
+	"holy":        "healer",
+	"discipline":  "healer",
+	"hybrid":      "healer",
+	"restoration": "healer",
+}
+
+// SpecIDs are the spec ids a bot of class takes, in TortoiseBots' order. nil for an unknown class.
+func SpecIDs(class string) []string {
+	ids := classSpecs[class]
+	if ids == nil {
+		return nil
+	}
+	return append([]string{}, ids...)
+}
+
+// SpecRole is the group role a spec id implies: tank, healer or dps.
+func SpecRole(spec string) string {
+	if role, ok := specRoles[spec]; ok {
+		return role
+	}
+	return "dps"
+}
+
+// ValidSpec reports whether spec is a `.bot role` class-spec id for class.
+func ValidSpec(class, spec string) bool {
+	for _, id := range classSpecs[class] {
+		if id == spec {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidSpecID reports whether spec is a `.bot role` class-spec id for any class.
+func ValidSpecID(spec string) bool {
+	for _, ids := range classSpecs {
+		for _, id := range ids {
+			if id == spec {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Class is the single class the batch hires: the class of every token, or "" for a role count
+// (the server picks the class) or a mixed batch.
+func (b *Batch) Class() string {
+	class := ""
+	for _, t := range b.tokens {
+		if t.Class == "" {
+			return ""
+		}
+		if class == "" {
+			class = t.Class
+			continue
+		}
+		if t.Class != class {
+			return ""
+		}
+	}
+	return class
+}
+
+// ParseRoster reads and checks a tb-raid-roster v1 or v2 file. It needs no plan: the raid-size bound
+// is checked by Validate, after the plan is loaded.
 func ParseRoster(data []byte) (*Roster, error) {
 	var r Roster
 	d := json.NewDecoder(bytes.NewReader(data))
@@ -78,8 +172,8 @@ func ParseRoster(data []byte) (*Roster, error) {
 	if r.Format != "tb-raid-roster" {
 		return nil, fmt.Errorf("roster format %q, want tb-raid-roster", r.Format)
 	}
-	if r.Version != 1 {
-		return nil, fmt.Errorf("roster version %d, want 1", r.Version)
+	if r.Version != 1 && r.Version != 2 {
+		return nil, fmt.Errorf("roster version %d, want 1 or 2", r.Version)
 	}
 	if err := r.check(nil); err != nil {
 		return nil, err
@@ -116,6 +210,9 @@ func (r *Roster) check(p *dungeon.Plan) error {
 			return fmt.Errorf("roster batch %d (%s): %w", i+1, b.Role, err)
 		}
 		b.tokens = tokens
+		if err := r.checkSpec(i, b, n); err != nil {
+			return err
+		}
 		total += n
 		switch b.Role {
 		case RoleMT:
@@ -168,6 +265,44 @@ func (r *Roster) check(p *dungeon.Plan) error {
 				return fmt.Errorf("plan %s gives no level_band; set the roster's level", p.Name)
 			}
 			r.Level = p.LevelBand[1]
+		}
+	}
+	return nil
+}
+
+// checkSpec validates a v2 batch's spec and count: the spec must be a `.bot role` id of the batch's
+// single class, and must not contradict the role the hire names; count, when given, must be the
+// batch's size. A v1 roster takes neither field.
+func (r *Roster) checkSpec(i int, b *Batch, n int) error {
+	if b.Spec == "" && b.Count == 0 {
+		return nil
+	}
+	if r.Version < 2 {
+		return fmt.Errorf("roster batch %d (%s): spec and count need roster version 2", i+1, b.Role)
+	}
+	if b.Count != 0 && b.Count != n {
+		return fmt.Errorf("roster batch %d (%s): count %d, the hire hires %d", i+1, b.Role, b.Count, n)
+	}
+	if b.Spec == "" {
+		return nil
+	}
+	class := b.Class()
+	if class == "" {
+		return fmt.Errorf("roster batch %d (%s): spec %q needs a class batch: name the class (\"1 priest\"), not a role count (\"5h\")",
+			i+1, b.Role, b.Spec)
+	}
+	if !ValidSpec(class, b.Spec) {
+		return fmt.Errorf("roster batch %d (%s): %q is not a %s spec; its specs are %s",
+			i+1, b.Role, b.Spec, class, strings.Join(SpecIDs(class), ", "))
+	}
+	role := SpecRole(b.Spec)
+	for _, t := range b.tokens {
+		have := t.Role
+		if have == "" {
+			have = classDefaultRole[t.Class]
+		}
+		if have != role {
+			return fmt.Errorf("roster batch %d (%s): spec %q is a %s spec, the hire says %s", i+1, b.Role, b.Spec, role, have)
 		}
 	}
 	return nil
