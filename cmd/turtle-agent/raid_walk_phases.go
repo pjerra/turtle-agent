@@ -422,6 +422,17 @@ func (w *walk) phaseHire(ctx context.Context) error {
 			w.rest = append(w.rest, added...)
 		}
 		w.logLine(w.env.now(), fmt.Sprintf("hired %s: %s", b.Role, strings.Join(added, ", ")))
+		if b.Spec != "" {
+			// The roster's spec goes on every bot of the batch before the refit: the tier kit follows the
+			// bot's own spec, so the spec has to be in place first.
+			class := b.Class()
+			for _, n := range added {
+				if err := w.applySpec(ctx, n, b.Spec); err != nil {
+					return err
+				}
+				w.logLine(w.env.now(), fmt.Sprintf("roster: %s %s %s", n, class, b.Spec))
+			}
+		}
 	}
 	// A roster asks for the raid's every seat; the server's hire cap fills all but the last one (amendment G2).
 	requested := w.roster.Total()
@@ -1159,6 +1170,75 @@ func (w *walk) pump(ctx context.Context, waitMS int) ([]string, error) {
 		}
 	}
 	return lines, nil
+}
+
+// waitSystem waits for a plain system line (not a TBM line) that match accepts, logging every line it
+// reads. The .bot role reply is such a line; its text is colour-stripped before the match.
+func (w *walk) waitSystem(ctx context.Context, timeout time.Duration, match func(string) bool) (string, bool, error) {
+	deadline := w.env.now().Add(timeout)
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", false, stopf(exitRaidWalkFailed, "interrupted")
+		}
+		var page events.Page
+		params := map[string]any{"since": w.eventsAt, "kinds": []string{"system", "addon"}, "wait_ms": 1000}
+		if err := w.agent.Call(ctx, "events", params, &page, 15*time.Second); err != nil {
+			return "", false, stopf(exitRaidWalkFailed, "events: %v", err)
+		}
+		w.eventsAt = page.Next
+		for _, e := range page.Events {
+			if line, ok := tbm.Line(e); ok {
+				w.logLine(w.env.now(), line)
+				continue
+			}
+			if e.Kind != events.KindSystem || e.Text == "" {
+				continue
+			}
+			text := raidwalk.CleanLine(e.Text)
+			w.logLine(w.env.now(), text)
+			if match(text) {
+				return text, true, nil
+			}
+		}
+		if !w.env.now().Before(deadline) {
+			return "", false, nil
+		}
+		if err := w.env.sleep(ctx, time.Second); err != nil {
+			return "", false, stopf(exitRaidWalkFailed, "interrupted")
+		}
+	}
+}
+
+// specWait bounds one `.bot role` reply: the command rebuilds the bot's strategies and saves them before
+// it answers, so the answer is the spec applied.
+const specWait = 30 * time.Second
+
+// applySpec sets one hire's class spec with `.bot role` and waits for the server's answer: the "role set"
+// line is the spec applied, any refusal is a failed walk.
+func (w *walk) applySpec(ctx context.Context, name, spec string) error {
+	line := fmt.Sprintf(".bot role %s %s", name, spec)
+	if err := w.gm(ctx, line); err != nil {
+		return err
+	}
+	okPrefix := fmt.Sprintf("Bot %s role set to ", name)
+	bad := func(text string) bool {
+		return strings.HasPrefix(text, fmt.Sprintf("Bot %s does not use that spec", name)) ||
+			strings.HasPrefix(text, fmt.Sprintf("Bot %s has no AI yet", name)) ||
+			strings.HasPrefix(text, "Usage: .bot role")
+	}
+	text, ok, err := w.waitSystem(ctx, specWait, func(s string) bool {
+		return strings.HasPrefix(s, okPrefix) || bad(s)
+	})
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return stopf(exitRaidWalkFailed, "roster: no answer to %s in %s", line, durWords(specWait))
+	}
+	if bad(text) {
+		return stopf(exitRaidWalkFailed, "roster: %s", text)
+	}
+	return nil
 }
 
 // waitTBM waits for a line with prefix and logs the lines it reads on the way.

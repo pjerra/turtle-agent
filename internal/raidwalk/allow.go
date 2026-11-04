@@ -91,6 +91,9 @@ func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
 			// `.bot gear raid <commander> tier <N>`, the refit after the hire (amendment G1); the speculative
 			// `preset <word>` form is gone.
 			return len(f) == 6 && gmNameRe.MatchString(f[3]) && f[4] == "tier" && gearTierRe.MatchString(f[5])
+		case f[1] == "role":
+			// `.bot role <hire> <spec id>`: a version 2 roster's spec, set before the refit.
+			return len(f) == 4 && hires[f[2]] && ValidSpecID(f[3])
 		}
 	}
 	return false

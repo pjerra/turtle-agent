@@ -90,6 +90,8 @@ type walkFakeAgent struct {
 	party     []string
 	nameSeq   int
 	startArgs string
+	roleLines []string // every `.bot role` line, in order
+	roleFail  bool     // the server refuses every `.bot role` ("does not use that spec")
 
 	entered  bool
 	status   session.StatusInfo
@@ -557,6 +559,19 @@ func (f *walkFakeAgent) gmSide(line string) {
 		f.push("TBM:HIRE_RAID|ok|"+strconv.Itoa(n)+"|"+strconv.Itoa(n)+"|0|0|0|3|0|", "")
 	case strings.HasPrefix(line, ".bot gear raid "):
 		f.push("TBM:GEAR|ok|39|39|3|60|-|-|-|0|-|0", "")
+	case strings.HasPrefix(line, ".bot role "):
+		fields := strings.Fields(line)
+		f.mu.Lock()
+		f.roleLines = append(f.roleLines, line)
+		fail := f.roleFail
+		f.mu.Unlock()
+		if len(fields) == 4 {
+			if fail {
+				f.push(fmt.Sprintf("Bot %s does not use that spec.", fields[2]), "")
+			} else {
+				f.push(fmt.Sprintf("Bot %s role set to tank.", fields[2]), "")
+			}
+		}
 	case strings.HasPrefix(line, ".go xyz "):
 		f.mu.Lock()
 		started := f.runStarted
@@ -1180,6 +1195,13 @@ func (f *walkFakeAgent) gmLines() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string{}, f.gm...)
+}
+
+// roleOrder is every `.bot role` line the walk sent, in order.
+func (f *walkFakeAgent) roleOrder() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string{}, f.roleLines...)
 }
 
 // gmContexts is the injector's allow-list context per gm line (gmCtxOK false: none was available).
@@ -5253,6 +5275,81 @@ func TestRaidWalkNeverRetriesAClassBatch(t *testing.T) {
 		}
 		if n != 1 {
 			t.Fatalf("reply %q: %d hire lines, want 1 (no retry)", reply, n)
+		}
+	}
+}
+
+// A version 2 roster sets each batch's spec with `.bot role` after its hire and before the refit, and
+// logs one "roster:" line per bot (name, class, spec).
+func TestRaidWalkSetsBatchSpecsBeforeTheRefit(t *testing.T) {
+	f := newFixture(t)
+	roster := `{"format":"tb-raid-roster","version":2,"level":60,"tier":2,
+ "batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection"},
+            {"role":"ot","hire":"1 paladin:tank","spec":"protection"},
+            {"role":"rest","hire":"1 priest:healer","spec":"holy"},
+            {"role":"rest","hire":"17d"}]}`
+	path := filepath.Join(t.TempDir(), "roster.json")
+	if err := os.WriteFile(path, []byte(roster), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.opts.hires = path
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.stderr.String())
+	}
+	want := []string{".bot role Bot01 protection", ".bot role Bot02 protection", ".bot role Bot03 holy"}
+	if got := f.agent.roleOrder(); len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("role lines %q, want %q", got, want)
+	}
+	// Every spec goes on before the one refit, which follows the bots' own specs.
+	gear := -1
+	for i, line := range f.agent.gmLines() {
+		if strings.HasPrefix(line, ".bot gear raid ") {
+			gear = i
+		}
+	}
+	if gear < 0 {
+		t.Fatal("no refit line")
+	}
+	for i, line := range f.agent.gmLines() {
+		if strings.HasPrefix(line, ".bot role ") && i > gear {
+			t.Fatalf("the spec line %q came after the refit", line)
+		}
+	}
+	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"roster: Bot01 warrior protection", "roster: Bot02 paladin protection", "roster: Bot03 priest holy"} {
+		if !strings.Contains(string(raw), line) {
+			t.Errorf("run.log lacks %q", line)
+		}
+	}
+}
+
+// A `.bot role` the server refuses stops the walk before the refit: the roster's spec is not optional.
+func TestRaidWalkRefusedSpecStopsBeforeTheRefit(t *testing.T) {
+	f := newFixture(t)
+	f.agent.roleFail = true
+	roster := `{"format":"tb-raid-roster","version":2,"level":60,"tier":2,
+ "batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection"},
+            {"role":"ot","hire":"1t"},
+            {"role":"rest","hire":"18d"}]}`
+	path := filepath.Join(t.TempDir(), "roster.json")
+	if err := os.WriteFile(path, []byte(roster), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.opts.hires = path
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	if !strings.Contains(f.summary().EndReason, "does not use that spec") {
+		t.Fatalf("end reason %q, want the server's refusal", f.summary().EndReason)
+	}
+	for _, line := range f.agent.gmLines() {
+		if strings.HasPrefix(line, ".bot gear raid ") {
+			t.Fatal("the refit went out after a refused spec")
 		}
 	}
 }

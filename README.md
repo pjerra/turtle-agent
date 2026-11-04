@@ -2392,14 +2392,16 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   run, tears down and exits 18 (`lease lost`). SIGINT/SIGTERM stops the run, tears down and exits 18 (`interrupted`);
   during the hold it exits 0.
 
-The roster (`--hires FILE`, format `tb-raid-roster` v1) hires batches in order and learns the names of each batch by
-diffing `party` before and after the hire:
+The roster (`--hires FILE`, format `tb-raid-roster` v1 or v2) hires batches in order and learns the names of each
+batch by diffing `party` before and after the hire:
 
 ```json
-{"format":"tb-raid-roster","version":1,"level":60,"tier":2,
- "batches":[{"role":"mt","hire":"1 warrior:tank"},
-            {"role":"ot","hire":"1 druid:tank 1 paladin:tank"},
-            {"role":"rest","hire":"10h 27d"}]}
+{"format":"tb-raid-roster","version":2,"level":60,"tier":2,
+ "batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection"},
+            {"role":"ot","hire":"1 paladin:tank","spec":"protection"},
+            {"role":"rest","hire":"1 priest:healer","spec":"holy"},
+            {"role":"rest","hire":"2 hunter","spec":"mm"},
+            {"role":"rest","hire":"14d"}]}
 ```
 
 `hire` is `<n>t`, `<n>h`, `<n>d` or `<n> <class>[:<role>]`; a preset (`onyxia`, `mc`, ...) is refused because it fills
@@ -2411,6 +2413,17 @@ commander stands outside the group, so every raid seat is a hire). `level` defau
 `1 warrior:tank`, `<tanks-1>t`, `<healers>h <size-tanks-healers>d` (Onyxia's plan gives `1 warrior:tank`, `3t`,
 `10h 26d` = 40) and the table's tier (2 for Onyxia; 0, "no tier sourced yet", for the other eleven raids until
 their unlock quests are written into `tiers.go`).
+
+Version 2 adds `spec` (a class-spec id) and an optional `count` to a batch. After the batch's hire the walk sends
+`.bot role <name> <spec>` for every bot it added, waits for the server's `role set` answer, and only then runs the
+tier refit (`.bot gear raid <commander> tier N`), which follows the bot's own spec; each bot logs a
+`roster: <name> <class> <spec>` line. The batch must name one class (`1 priest:healer`, not `5h`), because the spec is
+validated against that class before anything is sent, and the spec's role must match the hire's (a `bear` needs
+`1 druid:tank`). The ids are TortoiseBots' `.bot role` ids: warrior `arms fury protection`, paladin
+`holy protection retribution`, hunter `bm mm survival`, rogue `assa combat subtlety`, priest
+`discipline holy shadow hybrid`, shaman `ele enh restoration`, mage `arcane fire frost`, warlock
+`affliction demonology destruction`, druid `balance boomkin cat bear restoration` (a shaman tank is `.bot role tank`,
+not a spec id). `count`, when present, must be the batch's size. A version 1 roster takes neither field.
 
 The server's hire cap is 39 bots (TortoiseBots `HireMaxBotsPerPlayer`, onyxia-kill-plan C6), so a 40-man roster asks
 for all 40 and gets 39: the summary notes `hire cap 39` and the walk goes on. A shortfall below the cap is a failed
