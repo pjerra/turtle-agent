@@ -16,8 +16,7 @@ func TestRunIDs(t *testing.T) {
 	if !regexp.MustCompile(`^r-20261014T093012-[0-9a-f]{4}$`).MatchString(id) || !ValidRunID(id) {
 		t.Fatalf("%q", id)
 	}
-	first, second := NewRunID(time.Now()), NewRunID(time.Now())
-	if first == second {
+	if NewRunID(time.Now()) == NewRunID(time.Now()) {
 		t.Fatal("two ids the same")
 	}
 	for _, ok := range []string{"r-1", "scenario.7_a", "A", strings.Repeat("a", 64)} {

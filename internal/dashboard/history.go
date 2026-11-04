@@ -72,6 +72,7 @@ type History struct {
 }
 
 type cachedJSON struct {
+	at   time.Time
 	scan time.Time
 	body []byte
 }

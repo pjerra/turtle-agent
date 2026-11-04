@@ -190,7 +190,10 @@ func TestRemoteEnterByGMTele(t *testing.T) {
 	}
 	// Order: bind, the agent leaves, probe, the lead bot is teleported, the others are summoned, the entry is recorded.
 	want := []string{"bind", "leave", "probe", "tele Tanky ulda", "record", "summon Healy", "summon Magey"}
-	got := append([]string(nil), g.log...)
+	var got []string
+	for _, l := range g.log {
+		got = append(got, l)
+	}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("log %v", g.log)
 	}

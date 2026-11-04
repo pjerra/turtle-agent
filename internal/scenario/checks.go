@@ -84,7 +84,9 @@ func (rr *run) fetch(ctx context.Context, st *sessState, waitMS int) error {
 	if err := json.Unmarshal(raw, &page); err != nil {
 		return err
 	}
-	st.buf = append(st.buf, page.Events...)
+	for _, e := range page.Events {
+		st.buf = append(st.buf, e)
+	}
 	if len(st.buf) > 20000 {
 		st.buf = append([]events.Event(nil), st.buf[len(st.buf)-20000:]...)
 	}
@@ -594,4 +596,11 @@ func (rr *run) finalStep(ctx context.Context, s *Step, n int) {
 		return
 	}
 	rr.errorf(n, fmt.Sprintf("finally step %d (%s)", n-1000+1, s.Do), "failed")
+}
+
+func minDur(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
 }

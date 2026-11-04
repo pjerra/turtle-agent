@@ -518,7 +518,8 @@ func cluster(cs []creature, radius float64) []pack {
 	for i := range parent {
 		parent[i] = i
 	}
-	find := func(i int) int {
+	var find func(int) int
+	find = func(i int) int {
 		for parent[i] != i {
 			parent[i] = parent[parent[i]]
 			i = parent[i]
