@@ -60,3 +60,16 @@ This returns the addon's state plus the host cursor and the last sends. When don
 ```
 
 Stopping when nothing runs is refused (`the addon host is not running`). Calls after the sidecar has exited or was stopped fail with `addon host stopped`.
+
+## 5. Check the addon contract
+
+`make tbm-contract` replays recorded server lines through the real addon (Sagiroth's TortoiseBotsManager, MIT) beside a mock built from its `tests/regression.lua`, and compares the addon's state with what the lines say:
+
+```sh
+make tbm-contract
+make tbm-contract EVENTS=capture1.twcap,capture2.twcap
+```
+
+Plain runs check every `tools/tbmcontract/fixtures/ok-*.txt` line and require every `bad-*.txt` line to fail with its listed mismatches. `EVENTS=` extracts the `TBM:` lines of each capture (`tools/tbmlines`, `data.raw` keeps the `|r` color) and requires a match. Fixtures are scrubbed (build 16/17 shapes, synthetic roster) with one `# expect: <text>` line per mismatch they must produce, in any order.
+
+Mismatches carry tags: `[server]` the line breaks the protocol, `[addon]` the addon refuses a valid line or stores something else, `[contract]` the driver has no expectation for that verb. The addon checkout comes from `tools/tbmcontract/fetch.sh` (pinned commit under `.cache/`, or your own with `TBM_ADDON_DIR=`); a moved pin warns when `tests/regression.lua` changed. The check is offline-only and skips (exit 0) without `lua5.1` or the addon, unless `TBM_CONTRACT_STRICT=1` turns the skip into a failure. It is not part of `make test`.

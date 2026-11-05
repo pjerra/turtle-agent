@@ -38,6 +38,8 @@ turtle-agent rpc <dir> dungeon_run '{"name":"<plan>","mode":"commander","lead_bo
 
 The report's `prepare` block records each step's seconds.
 
+`online` warns for an already-online bot (`already_online`): the roster never lists it but `.bot add` says `already online` (a hired bot, or another owner's), taken as online without waiting. `fresh` needs a GM account (developer level): at level 4+ each bot leaves its group and `.instance unbind all` goes out per bot; below 4 the bots bind, `.instance groupunbind all` unbinds the group, and they bind again. `give_items` (≤4, `bot` `lead`/`carrier`/name) sends `.additem` per bot with the bot selected (needs level 3), then checks `.bot inv`; an already-carried item sends nothing. Every GM line of prepare is a `setup` shortcut in the report, never a `gm_commands` line. Prepare is remote-only: a group run refuses it. Ceilings: `online_wait_s` default 45, at most 180.
+
 ## 2. Hire a fresh party instead
 
 ```sh
@@ -54,6 +56,14 @@ Each entry is `"class"` or `"class:role"` (roles `tank`, `healer`, `dps`). A war
 
 The hire step checks gear, talents, spells, bags, and pets, fixes what it can, and binds the party. The report's `ready` block names the bots.
 
+### Raid-only keys and refusals
+
+`tier`, `gear_preset` and raid-size compositions are raid-only (observe mode): a 5-man hire ignores them. A hired raid party refuses the run when the commander is not 60, when a rehire does not keep exact role counts, or when the portal floor is unknown (see below).
+
+### Portal-floor and team refusals
+
+Hiring through a portal whose floor the navmesh does not know is refused (`z_unknown`): the party cannot gather on an unknown floor. A bot on another team's map, or a navmesh floor over 5 yd from the portal ground, is refused the same way. A kept binding skips the check.
+
 ## 3. Pick how the party enters
 
 ```sh
@@ -64,6 +74,10 @@ turtle-agent rpc <dir> dungeon_run '{"name":"<plan>","mode":"commander","prepare
 
 - `preflight` is `warn` (the default: report and go on), `strict` (a warning fails the run), or `off`.
 - `ignore_entry_limit` lets the run try a 6th new instance within the hour; see [Refusals, the watchdog, and the entry ledger](/dungeons/refusals-watchdog.md).
+
+### Enter ceilings
+
+The `cmd enter` order at the portal retries 3× on `busy`, 2× on `cancelled` or `too-far`; an `in-combat` refusal waits out the fight up to 45 s. The whole phase (walk + order) fails past 4 min. Bots count as at the door within 30 yd (lead within 12 yd vertically).
 
 ## 4. Read the enter result in the report
 

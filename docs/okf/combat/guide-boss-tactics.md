@@ -45,3 +45,13 @@ Load the plan (`plan_check`, or run the leader). Spell names are checked against
 ## 4. Know what plays it
 
 The encounter turns on when a boss or `first` entry is in view, hostile, and in combat. Then the brain aims `kill_first` targets within 40 yd, interrupts planned casts first, dispels planned auras first at any mana, and walks out of `move_out` circles (tanks hold their ground). Commander and group runs ignore the block except through plan-level kill order; see [Combat troubleshooting](/combat/troubleshooting.md) if a rule never seems to fire.
+
+## 5. Limits and shipped bosses
+
+The encounter stays on while a boss or `first` entry is in view, hostile, and in combat; when the last one dies or leaves, the brain logs `brain_state encounter_end`. Effects: the nearest planned target within 40 yd dies first (skipping the tank's target and the selected target unless the plan names the fight's own mob); planned interrupts fire before class interrupts with the class spell unless the cast is not interruptible; planned dispels fire before class dispels at any mana (slows count at 20% mana); avoid walks hold for the tank. A tactics block with a `first` entry treats those adds as the fight: losing sight of both boss and `first` ends it.
+
+Shipped plans name Uldaman and Zul'Farrak bosses (entries such as 7785/8179 plus a 10 yd summon rule for called adds). Remote (commander) runs carry the block but do not act on it, except through `kill_first`/`summoned_kill_first` kill order.
+
+Shipped plans with tactics blocks include Uldaman, Zul'Farrak, Deadmines, Wailing Caverns, Ragefire Chasm, Scarlet Library, Stormwind Stockade and Crescent Grove.
+
+Remote (commander) runs carry the block but do not act on it, except through plan-level `kill_first`/`summoned_kill_first` kill order.

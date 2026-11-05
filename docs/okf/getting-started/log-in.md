@@ -53,7 +53,9 @@ status: draft
 
    `--stay` logs out after that long. `--reconnect N` logs in again up to N times after an unplanned disconnect (it cannot be combined with `--capture`).
 
-5. Log out with Ctrl-C. The agent logs out cleanly and the process ends at once. If the server refuses the logout (you are in combat), the agent says so once and retries for 35 seconds; a second Ctrl-C ends the process at once, and the character may stay in world.
+Attempts wait 5 s, then 10 s, 20 s and so on up to 2 min. The agent keeps its own realmd logins under realmd's per-IP throttle (15 logins per 300 s; after a `busy` answer it waits the whole 300 s). In a fleet the supervisor books the wait for every child.
+
+A rejection that cannot change (unknown account, wrong password, ban, build) stops the attempts at once, since failed logins count towards realmd's autoban. The RPC address and the event log stay the same across a reconnect, so event cursors stay valid; a `session` event with state `reconnected` marks the new session. Out of attempts the agent behaves as without the flag: status stays up for 30 s, then exit 6.
 
 ## Exit codes
 
@@ -65,5 +67,14 @@ status: draft
 - `6`: the server closed the connection.
 - `8`: the server kept refusing the logout.
 - `10`: the logout did not complete (no answer within 30 seconds, or the socket died first); the character may stay in world.
+
+A logout from Ctrl-C, `--stay` or the `logout` RPC always ends the process at once. There is no disconnect grace window on this path.
+
+- `0`: `complete` (`SMSG_LOGOUT_COMPLETE` arrived) or `closed_by_server` (server accepted with `SMSG_LOGOUT_RESPONSE` reason 0 then closed the socket; state `logged_out`).
+- `10`: `lost` (socket died before accept; RPC `-32002`, state `disconnected`; the core keeps a dropped character in world for about 20 s, so this is not a logout) or `timeout` (no answer within 30 s; agent closes socket; RPC `-32004`; character may stay in world).
+
+## If the logout looks lost but was clean
+
+The 1.18.1 core sometimes closes the socket right after a GM's logout request without sending either packet, in the open world and inside instances. That ends as `lost`, although the server's `char.log` recorded a normal logout each time it was checked.
 
 Every flag is listed in [login](/getting-started/login-reference.md).

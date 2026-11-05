@@ -71,6 +71,30 @@ The autopilot validates `targets.txt` before anything runs (exit 2): `no -- betw
 
 That id is left for a person: exit 2 or 29, three exit 15s, three placement failures, six hire-pool waits or three teardown failures. Clear the cause (arguments, placement, lease holder, pool pressure, slot state), then remove or fix the id's lines.
 
+## `fighting after the place` / `not at the start`
+
+The placement moved the raid but a fight started at the point, or the hires never arrived. The walk steps back up to three move rows (or retries the same point with the last quiet's blockers GM-killed under `--gm-clear`) and tries again in the same instance, up to four tries. Exit 29 when every try fails.
+
+## `re-running step N`
+
+The run leader paused `boss <entry> not found:` and the walk restarts the run at the leg's summoning open row. When the frames saw no unit of the boss alive since the re-run, the instance still counts the encounter started and refuses the object: the walk ends with exit 18 (`this instance cannot bring him back; a fresh instance is needed`). Re-place in a fresh instance; never reuse the spent copy for that boss.
+
+## `gong spent` / `the re-run did not summon him again`
+
+The gong's encounter is `IN_PROGRESS` or `DONE` with a home reset: the object is a no-op until the boss reaches home. Same fix as above: a fresh instance.
+
+## `hire pool: 6 waits`
+
+The server's shared hire pool refused the hires six times in a row (about 30 minutes at 5 minutes a wait): another raid of the server holds the mercenaries. The id is escalated. Wait for the other raid to finish hiring, then clear the id's lines.
+
+## `teardown-failed` / `no YIELD-DONE`
+
+The teardown did not verify (the walk process or its group still alive, or `lease list` still shows the lease): the run stays active on the same out dir and the next tick retries it. The third failure escalates the slot. A `YIELD` over it writes no `YIELD-DONE`. Clear the slot state (process, lease), then clear the id.
+
+## `launch failed` three times
+
+Three consecutive launch failures escalate the id. Check the walk dir's `<id>-<n>.out` for the launch error, fix the cause, then clear the id's lines.
+
 ## `raid-suite never uses slot 3 (owner rule)`
 
 You passed `--slot 3` to the suite. Pick another slot. Exit 15.

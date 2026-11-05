@@ -43,6 +43,21 @@ On a wipe the walk stops the run, waits for the instance to reset (`--reset-wait
 
 A revive needs a quiet point: no living hostile within 45 yd, no moving hostile within 80 yd and no patrol path within 45 yd, rechecked until it holds. Critters never count. `--patrols FILE` (a tb-patrols file) feeds the quiet check. A revive that never finds a quiet point ends the walk with exit 19 (`not revived: <why>`) and records `revive_refusal` in the summary.
 
+### Quiet, gather and boss evidence
+
+The revive's quiet is the walk's own read: nothing alive and hostile within 45 yd, nothing alive hostile and moving within 80 yd, no patrol whose path comes within 45 yd. An idle hostile (not in combat, no target, not moving) at its home stands outside the rule when it is over 30 yd out and within 3 yd of a plan spawn: it is what the run faced when it started there. Critters never count: the frame's own critter flag decides first, else a level-1 unit inside the max-HP band. The walk waits up to 120 s plus re-reads; only moving patrols earn a re-read (up to 2), and a revive that never finds quiet ends the walk with exit 19.[^reviveraid]
+
+The gather brings every living hire more than 100 yd away to the revive point with a GM summon and waits up to 60 s for every hire to be in range and out of combat. `summary.json` counts `revive_brought`, `revive_unreached` and `revive_gather_missed`. The commander checks it still stands in the raid's copy first: a commander in another copy would summon the hires out of the raid's instance.[^reviveraid]
+
+Boss evidence decides whether a boss step counts as dead. The frames must show the boss's own guid dead this attempt, with no alive sighting within 15 s, and a hire alive: a stale low-HP frame never kills. Adds with the boss's `first` entries and guardians do not count as the boss. An unknown state fails closed: no resume, exit 19.[^reviveraid]
+
+### Boss-not-found and re-run
+
+When the run leader pauses `boss <entry> not found:` on the boss's own step, the walk re-runs the leg's summoning open row instead of failing it. The link is the plan's own annotation (`boss.summon_open_step`): an open or open-proof row of the same leg, before the boss row, with the annotated object's entry. Zul'Gurub's Arlokk is the case it exists for: after a wipe she despawns, and only the gong 180526 starts her script again. A boss with no annotated summon gets no re-run, whatever stands around it.[^reviveraid]
+
+The re-run sends `.bot run stop`, waits up to 15 s for the run's own status to show it stopped, then starts the run again at the open row with the walk's own until and speed, and reads `re-running step N` into the notes. It re-runs at most 3 times per walk; a refused stop falls back to the pause path. When the frames saw no unit of the boss alive since the re-run went out, the instance still counts the encounter started and refuses the object: the walk reports `this instance cannot bring him back; a fresh instance is needed` and ends restartable with exit 18, for walk-super to re-place in a fresh instance (never a reuse of the spent copy).[^reviveraid]
+
+
 ## 4. Know what blocks recovery
 
 No `run stop` goes out while a boss row has a target: a boss engagement stops the run and waits up to 15 minutes for a kill, a reset or a wipe. The one exception is a wipe on the boss's own step whose run leader fights that boss (an `until` past the boss step, or `--until none`): then the walk owns no boss attempt, so the wipe follows the ordinary wipe-resume flow and never sends `run stop` at the wipe.

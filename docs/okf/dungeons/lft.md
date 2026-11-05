@@ -50,6 +50,8 @@ turtle-agent rpc <dir> lfg_auto '{"off":true}'
 
 `lfg_auto` runs a background answerer: role checks get `roles`, offers get accepted (`true`) or declined (`false`; omitted: offers are left alone), after `delay_ms` (default 1500, 0–30000). It returns at once; the answer carries the `auto` settings. `off` stops it.
 
+Role checks and offers each wait 90 s: the state folds `rolecheck` and `offer` deadlines 90 s after the server's line. A reconnect starts the folded state empty: the log it folds from belongs to the old session. Fleet members queue on their own RPC; the fleet file carries no LFT state.
+
 ## 4. Browse listed groups
 
 ```sh

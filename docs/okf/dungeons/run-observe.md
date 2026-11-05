@@ -27,6 +27,10 @@ In observe mode the TortoiseBots run leader on the server (`.bot run`) clears th
 turtle-agent rpc <dir> dungeon_run '{"name":"<plan>","mode":"observe","prepare":{"party":"hire"}}'
 ```
 
+### Raid plans
+
+A raid plan runs in observe mode only with `prepare.party: hire`. The hire step defaults `tier` to the preset tier else 2, and `gear_preset` to the plan preset. The flow hires, gears, binds to the main tank and starts; `.bot maintenance` is never sent.
+
 `from_leg`, `from_pull_group`, and `from_step` only say at which step of the run leader's own plan it starts (`from_step` is the step number `.bot run status` shows, from 1). These steer the bots and are refused in observe mode: `start_here`, `pulltest`, `have_items`, `give_items`, `cc`, `carrier`, `loot_restore`, `object_fallback`, `tank`, `healer`, `recover_wipe`, `graves_batch`, `graves_ramp`, `graves_open_by`, `tune`, `live_reload`, `force_start`.
 
 ## 2. Tune the watch
@@ -46,3 +50,7 @@ turtle-agent rpc <dir> dungeon_skip
 ```
 
 In observe mode these go to the run leader on the server (`.bot run pause|resume|skip`). `dungeon_stop` sends `.bot run stop` and unbinds.
+
+## 4. Staging, ceilings, wipes
+
+`dungeon_stage` proofs the start before the watch: it walks the party to the leg start and answers `staged`, the point, `refusal`, and `gm_commands`. Ceilings: `poll_s` 15, `max_run_s` 3 h, `stall_s` 10 min, `paused_wait_s` 10 min; past a ceiling the run is stopped and fails. `auto_resume` (0–3, off) resumes the run leader after its regroup pause, 15 s later, at most 6 per run. A partway start over 80 yd from the lead bot is refused without `allow_far_start`. Wipes pause the run leader; the watch counts them and stops at the ceilings.

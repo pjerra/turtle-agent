@@ -40,3 +40,7 @@ Your character loots corpses and objects with the ordinary session calls. Boss l
 ## Gossip: who talks
 
 A plan's gossip step names the NPC, a point near it, and either an option number or matching text, plus who talks (`by`: `agent` by default, or `carrier`/`tank` in commander runs). By bot: the party walks to the NPC and the bot gets `cmd gossip <npc> <bot> <option>`; when the module has no gossip verb, your character talks instead and the report notes the fallback. By agent (always, in leader mode): your character walks up, says hello, picks the option, and waits for the close. The option match is by number first, else case-insensitive substring; a text matching two options fails the step rather than guessing.
+
+## Entry targets and view
+
+A remote run with object steps probes once with `cmd state entry:<id>@x,y,z`: any answer proving the module knows the verb (`ack`, `not-found`, `too-far`) turns entry targets on (`remote.entry_targets: "on"`, with `state_polls` counted). Object steps then name the object by entry within 30 yd of the point; the agent's own GUID is the retry after `not-found`. A game-object wait polls `cmd state` every 2 s instead of needing the object in view. When every object step has an entry, the agent is not kept near the party (no `.appear`: `run_gm_assists` stays 0). An older module (`invalid`) keeps GUIDs and keep-near. A `not-found` names entry and point; a `too-far` walks the party once, then retries.

@@ -39,7 +39,7 @@ turtle-agent plan-scout <plan> --mmaps <mmaps-dir> --from <leg> --until <leg>
 turtle-agent plan-scout <plan> --mmaps <mmaps-dir> --out <dir> --fix-out <file>
 ```
 
-`--out` writes `scout-<plan>.json` and `scout-<plan>.txt`; `--json` prints the report as JSON instead of text. `--fix-out` writes the fix file (`tb-scout-fix v1`), even when there are no fixes. `--apply-fixes <dir>` writes the patched plan copy and its diff to a folder that must not exist or be empty.
+Fixes are `tb-scout-fix v1`, one per origin: `snap_point`, `insert_via` (within 50 yd, 6 yd of climb), `dry_detour`, `move_stand` (24 bearings, 15-55 yd), and `split_pull`. Coordinate-only fixes carry `apply: false`. `--apply-fixes` never writes in place: it writes the patched plan copy plus its diff, and refuses a folder that exists non-empty, overlaps `dungeons/`, or a slot plan. A fix that adds an issue refuses the whole apply (exit 27, nothing written). With `--sql`, the migration must equal the plan's own export (`rows_sha256`) or the run exits 2.
 
 ## 4. Decide what fails the run
 
@@ -51,4 +51,4 @@ turtle-agent plan-scout <plan> --mmaps <mmaps-dir> --out <dir> --fix-out <file>
 turtle-agent plan-scout <plan> --mmaps <mmaps-dir> --live <server> --slot <n>
 ```
 
-The live pass walks the route on a test server (pass `--live <server>`; without it only the offline pass runs). The server must be a test server — any other name is refused. Slot 3 is never used. `--walk-budget` (default `5m`) bounds the walk and `--max-minutes` (default 20) the whole pass. The instance-cap flags (`--instance-cap-per-account`, `--instance-cap-wait`, `--instance-cap-fail`, `--instance-cap-reset`) handle the core's fresh-instance limit.
+The live pass runs after the offline pass on a test server only (the exact names in the usage line; any other name is refused before anything is sent). It leases one slot (never slot 3), turns the GM on and invisible, unbinds the instance, and walks the route with `.bot scout cfg|path|walk|where` plus `.tt q inst|units|los`. Server paths run per hop origin (8 in flight, id-matched, 1 retry); stands, anchors, and pulls are queried per point (hops past 120 yd get their own `.go`). The walk budget (`--walk-budget`, default `5m`) bounds the walk and `--max-minutes` (default 20) the whole pass. Findings merge by source: `live_path` (swim type `0x80`), `live_walk` (stop plus anchor check), `live_aggro`, `live_los`, and `live_joiners` replace the offline verdict. The pass writes `<out>/scout.log` with every scout line. `--slot` picks the slot (default 0), `--holder` the lease name, `--slots` a slot file, `--binary` the server binary. Exit 26 means the instance cap fired before anything started (nothing ran); exit 28 means the live pass aborted part-way (report and fixes are still written). `--fail-on warn` also fails on warnings. The instance-cap flag wins over the per-server JSON file when both are given.

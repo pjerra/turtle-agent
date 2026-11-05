@@ -53,6 +53,8 @@ The walk dir holds the supervisor's state:
 
 On any end (any exit code, a used-up restart budget, or a stall) the autopilot stops the walk, tears the slot down, picks a new `--out` (`<walk-dir>/<id>-<n>`) and re-places: the same instance first (`--place --from "step N" --reuse-instance`), a fresh instance only when that placement failed. Exit 2 (bad arguments) and exit 29 (placement failed every try in the same instance) stop that id with an `ESCALATE` line and no retry; on an exit 26 the autopilot restarts later after the cap wait, with no backoff.
 
+A restart inside a goal starts at the furthest step a run of it reached, else the target's own `--from`, else a fresh start (a restart with no step and no `--from` never sends `--reuse-instance`: the walk would refuse it). When that row is one `raid-walk` refuses as a place start (a boss row, a hold row, a row inside an event), the restart steps back to the nearest accepted row of the same leg, else the leg's own start, and logs a `resume:` line — exit 2 for a refused resume start is never escalated. An id whose goal boss is already dead is `DONE` at start and never placed again: the checkpoint's `boss_dead` keeps it across a supervisor restart (a kill counts whatever the exit code, even 19 or a stopped ending, and Thekal's 14509 and 14599 are one boss).[^autopilot]
+
 ## 4. Stop one raid
 
 ```sh

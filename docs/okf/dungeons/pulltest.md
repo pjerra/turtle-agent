@@ -34,6 +34,8 @@ turtle-agent rpc <dir> dungeon_run '{"name":"<plan>","mode":"commander","lead_bo
 
 Each try gathers the party, pulls, fights, and rests, then records kills, time to kill (pull order to last kill), deaths, mobs fought off the tank, adds, the healer's lowest mana, and rest seconds. The result lands in `<run id>.pulltest.json` beside the trace.
 
+A reset that cannot bring the pack back refuses: `respawn` needs your character within 80 yd (commander) or in view (leader); a boss reset is refused with the boss text. A `.respawn` GM assist is booked in `setup_shortcuts` (`GM assist during the run: pulltest reset`) plus `run_gm_assists` and the result's `gm_commands`. The result file (`<run id>.pulltest.json`) keeps per-try rows plus the summary. Pulltest reads the tunables before each try; the plan is not reloaded (keep still for A/B).
+
 ## 2. Read the table
 
 ```sh

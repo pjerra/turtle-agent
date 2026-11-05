@@ -58,4 +58,4 @@ status: draft
 
 ## Branches
 
-Work goes feature branch -> `dev` -> `main`. Open pull requests against `dev`. The `test` check must be green to merge into either branch.
+Work goes feature branch -> `dev` -> `main`. Open pull requests against `dev`. The `test` check must be green to merge into either branch. `main` only takes `dev` after the owner's review.

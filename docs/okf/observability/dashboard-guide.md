@@ -72,3 +72,7 @@ A non-loopback `--listen` prints `dashboard: warning: ... is not loopback; anyon
 ## 5. Draw the real route on the plan view
 
 With `--mmaps-dir`, the plan view (`#/plan/<name>`) draws the path the bots walk, not just the plan file's points: every walk leg to leg (`link: true`), pull-group approaches cut at the look point, amber dotted `direct` hops, violet `check_skip` and `gm_cross` hops, and unpathable segments dashed red with the reason on hover. Without a navmesh the endpoint answers 503.
+
+## 6. Real route numbers
+
+The real-route endpoint (`GET /api/plan/<name>/route[?agent]`) re-anchors plan stops to the navmesh and restyles hops: plain walks, `direct` amber dotted, `check_skip`/`gm_cross` violet, unpathable red dashed with the reason on hover. One route computes at a time; the answer caches by plan SHA (≤48 kept). Route editing versions feed the same view; see [Turn on route editing](/observability/route-editing-guide.md).

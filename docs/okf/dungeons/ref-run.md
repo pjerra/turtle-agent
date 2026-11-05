@@ -90,6 +90,8 @@ All calls go through `turtle-agent rpc <dir> <method> '<json>'`. Every field is 
 
 No fields. `dungeon_status` answers `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), the `report`, and `last_progress_at`, `stalled_for_s`, `stall_level` (`none`, `warn`, `recover`, `fail`). `dungeon_stop` ends the run (and with no run going, unbinds a kept binding). `dungeon_pause` halts a commander run with its binding kept (group mode: refused; idle: no-op). `dungeon_resume` and `dungeon_skip` go to the run leader of an observe run; otherwise refused.
 
+`dungeon_status` is one snapshot. The end event (`dungeon_done` or `dungeon_failed`) is emitted before the report says `done`, `failed` or `stopped`: a final state is never read before its event. A non-final state always has `running: true`; `running` stays true for a moment after a final state while the run's goroutine lets go of the brain.
+
 ## dungeon_stage
 
 `name` and `leg` (number from 0 or name) are required. Refused while a run or another staging goes.

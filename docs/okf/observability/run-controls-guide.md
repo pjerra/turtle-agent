@@ -54,3 +54,7 @@ curl -X POST http://127.0.0.1:8790/api/control/<slot>/run \
 ## 4. Read the control log
 
 Each control appends two lines: the request (who, via, agent, verb) and the result (`ok`, `error`, or `indeterminate` when the RPC answer could not be read). The page's `GET /api/control/<id>/log?n=20` shows the last result lines, newest last. An `indeterminate` answer means the command may already have run: read the run state before repeating it.
+
+## 5. Contract and codes
+
+`GET /api/control/status` says whether controls are on; `GET /api/control/<id>/log?n=` shows the log. Controls need a fresh `dungeon_status`: a stale read refuses the verb. The page sends `confirm: true` for pause/stop; an embedded page stays inert. Verbs map to `dungeon_pause/resume/skip/stop`; at most one runs per agent (409 busy), 30 per token label per minute (429). HTTP codes: 400 bad verb/JSON, 401 no token, 403 cross-origin, 404 unknown agent/action, 409 busy or missing confirm, 429 too many, 500 log/scrub error, 502 agent error.

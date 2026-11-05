@@ -65,3 +65,7 @@ Every flag and its default:
 ## 4. Read the map
 
 The background is the navmesh floor under the run (ground, water, lava and slime told apart by colour). One line per member (a leap of 60 yd or more is a dashed pink teleport arrow; a hole over 30 s is dotted). Hostile creatures are dots where first seen: killed red, evaded orange, fought-but-alive purple, skipped hollow, bosses as stars with names. Pulls are numbered diamonds, deaths are crosses, leg starts and teleports are marked, and the plan overlay shows the planned walk under the real one. A north arrow, a scale bar and a legend say what is missing.
+
+## 5. What the colours, floors, and HTML mean (and limits)
+
+Floors split where the navmesh stacks 6+ yd apart (2% of walkable area to count) and write `NAME-f1.svg`, `NAME-f2.svg`, …; `--floors off` keeps one map, `--floors -30,-10` cuts at those heights. Route ticks pick the finest 15 s–4 h step leaving ≤12 ticks; holes over 30 s are dotted, teleports (60 yd+ leaps) pink dashed arrows. Hostile dots colour by fate (killed red, evaded orange, left purple, skipped hollow); packs within 10 yd join, bosses are stars. Pulls are diamonds after 15 s quiet; deaths crosses; game objects, teleports/GM shortcuts and leg starts are marked, GM flags from the report. The HTML replay adds a slider, play, 1–600x, floor tabs, an event list, `#t=`/`#f=` links. Writes are 0600; `--force` replaces an SVG, never a capture. The map sees view distance only: first-seen dots, no flight following, no textures or doors.

@@ -47,6 +47,8 @@ Answer: `result` (`arrived`, `partial` or `no_path`), `reason`, `goal`, `positio
 
 Walks a straight line to a nearby point, no navmesh involved. Params: `x`, `y`, `z`. Answer: empty.
 
+At most 40 yd (`maxWalk`) within 30 s (`maxWalkTime`), timed on the 3D distance at run speed; farther or slower is refused before anything walks. `teleport` below takes a GM account instead.
+
 ## teleport
 
 A GM `.go xyz` to a point, optionally on another map. Needs a GM account. Params: `x`, `y`, `z`, optional `map`. Answer: empty.
@@ -65,6 +67,8 @@ Draws the run so far as a top-down map (see [Watch the run live with map_snapsho
 | `pad` | `25` | Yards of margin round what the run covers; 0 or less means 25. | `40` |
 
 Answer: `map`, `floor`, `floors` (their names), `seconds`, `members`, `creatures`, `events`, `background` (whether the navmesh is drawn), `notes`, `svg` (one floor), optional `html`.
+
+The recorder samples the session every 2 s (`mapSampleEvery`); memory is bounded (40k samples per member, 6k creatures). The background loads in a scratch planner of its own, closed when the call returns, so live plans keep their tiles. The plan's bosses mark this image only. An out-of-range `floor` is refused (`floor: this map has floors 0 to N`).
 
 ## plan_check
 

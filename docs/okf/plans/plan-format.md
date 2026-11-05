@@ -30,10 +30,28 @@ A plan is `dungeons/<name>.json`, format version 1. Every position is an `{"x", 
 
 A leg is one stretch: walk `via` points, then `to`, clear `pull_groups` in order, run `steps` in order, kill `boss`[^plan-struct]. Every part is optional, but a leg must hold at least one of groups, steps, boss, or `after_boss` (steps done once the boss is dead).
 
-- `via` waypoints are walked in order before `to`. A plain waypoint follows the navmesh path. `"direct": true` is a straight-line step for a gap the navmesh does not bridge (at most 25 yd across, 8 yd down). `"exact": true` marks the launch point a straight step starts from. `"gm_cross": true` means a GM moves the party there; two plans use it (`naxxramas` on 2 waypoints, `upper_karazhan_halls` on 3) and the export refuses them without `--gm-cross-direct`. `"check_skip": "why"` exempts the hop from the plan check.
-- `skip` lists creature entries the leg never waits for (rares, escorts). `leave` lists spawns the run never pulls, fights, or walks up to, with a `why` each.
-- `optional: {item, name}` names the item the leg needs. At the leg's start the run looks for the item entry in the lead bot's and the carrier's bags (a remote run; the group driver checks the leader's bags) and skips the whole leg when neither carries it; a bag read that fails is an error, not a skip. `item` is the entry (required), `name` the name for the messages. `skip_export: true` leaves the leg out of the run leader rows unless asked for by name.
-- `companions_loot: false` turns corpse and object looting off for the whole leg. `leftover_entries` names summoned creatures the driver sweeps before the next batch of chests.
+- `via` `direct` steps are at most 25 yd long, drop at most 8 yd, and need ground within 3 yd of the landing point. The loader refuses a longer step or one with no prior `via` gather point. Followers gather within 5 yd horizontally (1 yd, 1.5 yd on stairs) before a direct step or the lead sends `cmd move <lead>`, then `cmd stay` every 3 s for 9 s; it never sends `cmd summon` there. The step caps at 25 s.
+- `exact: true` turns a plain waypoint into a walked straight step (never a GM cross). Both ends walk along the travelled path at least ~6 yd (2D) and the landing proof needs looks within 1.5 yd and 0.5 yd of the anchor, 2 s apart. The step fails after 25 s (at most 3 rounds).
+- `gm_cross: true` rides a direct step the party never walks: a GM `.appear`/`.go` moves the party. The step is refused unless the landing is GM-reachable. Naxxramas (2 waypoints) and Upper Karazhan Halls (3) still use it.
+- Leg order is `via`, `to`, pulls, steps, boss, `after_boss`. Each part is optional but a leg needs at least one of groups, steps, boss, or `after_boss`. `boss.first` entries die in order before the boss.
+- `summon_open_step` is the 1-based `use_object` step of the leg that summons the boss; the loader refuses any other step kind or number there.
+- A pull group's `equiv` names equivalent packs (at most 40 characters). Its `radius` is 1-60 yd (default 25). A `patrol` loops its `path` (at least 2 points, last back to first) with `period_s` 1-900 s; `period_estimate: true` means the round is estimated, so the driver never predicts its phase and the check warns.
+- `stand_pull` needs an `approach` list and never combines with `hold` or `ambush`. `clear_yd` is 1-60 (0 means the run leader's 40).
+- `companions_loot: false` on a leg turns `.bot behavior loot off` for the whole leg and back on after; the group driver refuses it. It differs from the boss's `companions_loot`, which only mutes around the boss pull.
+- `leave` entries need `{entry, at, why}` (plus `spawn` when set) and cover the whole run; the loader refuses a leave that names the leg's own pull position.
+- `optional: {item, name}` skips the whole leg when neither carrier nor lead carries the item. The item must be a `requires_item` of a `use_object` step or the loader refuses it. `via_item: true` on a `use_object` step sends `cmd use <item> <bot> <object>` from within 4.5 yd; the export refuses it for the run leader. `proof` names exactly one of a game object or a creature (radius 0-20 yd).
+- `use_object` checks the carrier's bags before the run and the step (backpack plus bags); an empty bag still loading waits 3 s (`ItemsWait`) and is not a missing item.
+- `wait_for` on a game object takes `state` `ready`, `active`, or `active_alt` and `timeout_s` (default 60, at most 600). `fail_text` is at most 400 characters on one line. A unit wait names `entries` and one of seen, hostile, dead, or gone, and is never exported. `gone_ok` (default false) needs `near`, and the export sets flag 256 on the wait row.
+- A unit wait on its own is never exported; with `agent_only` it runs on the agent only and never writes a row (with a warning).
+- `area_trigger {id, center, radius, stand, by, expect, timeout_s}`: `stand` must sit inside the trigger (the loader refuses it outside) and within 30 yd of the boss when set; the default `by` is the lead via `BotAreaTriggers` entry 1002.
+- `loot_object` is a `use_object` plus a spawn GUID and `expect_item`; the driver fails when the item is not taken within 8 s and retries once.
+- `ritual {entry, position, participants}` takes 2-5 participants; the carrier calls first, then dps, healer, tank, and lead. The module holds until the object is active and never waits after.
+- `gossip {npc, near, option|text, by, stand, retry_s, fail_text}`: `npc` must be the nearest spawn within 15 yd; `option` and `text` never combine. `stand` is within 5 yd of `near`. The default `by` is `agent`. `dead_is_done` sets flag 512 on the row. `retry_s` is 1-120 s (default 15). Text gossip matches one word per option word from the set `_ . , : + -`.
+- `use_item {entry, name}` uses the item on the carrier itself; a second `requires_item` is consumed and pre-checked. A step that makes an item (loot, `use_item`, boss loot) exempts the leg-start check for it.
+- `boss.loot_item {entry, name}` fails the run when the walk-loot check finds the corpse refused or empty. Loot method is one of `round_robin`, `group`, `need`, or `free_for_all`.
+- The boss's `companions_loot: false` orders `.bot action loot off` before the pull and on again after the leader loots; a crash can leave looting off.
+- A boss or group `team` skips the fight for the other team with a note; unknown races run everything.
+- A bad file reports every problem with its path (`legs[2].steps[5]...`), refuses unknown fields, and refuses `skip` combined with a pull group or `first`.
 
 ## Pull groups
 
@@ -57,12 +75,25 @@ A step does exactly one thing: `use_object`, `wait_for` (game object state, no h
 
 ## Plan-wide lists
 
-- `cc_priority`, `cc_always`, `no_cc`: which entries the pack crowd control takes, avoids, or never takes.
-- `kill_first`: entries the party kills before the rest; `summoned_kill_first` is the summoned subset, never crowd-controlled.
-- `fleers`: entries that flee at low health and are killed before they get away.
-- `pull_ceiling`: plan-wide pull body cap (default 6, 8 for raids).
-- `avoid`: boxes of deadly ground the party never stands in or walks through.
+- `cc_priority`, `cc_always`, `no_cc`: which entries the pack crowd control takes, avoids, or never takes. Entries below the big pack still count, but the pull target is never crowd-controlled. Bosses, `first` entries, `kill_first` entries, and pets are never crowd-controlled.
+- `kill_first`: entries the party kills before the rest; the list is stable-sorted after the tank rank and only orders targets that exist. The loader refuses a plan whose entries sit only in `cc_priority`. `summoned_kill_first` is the summoned subset inside `kill_first`: living hostiles within 10 yd of the encounter, never reactively crowd-controlled.
+- `fleers`: entries that flee at low health (EventAI flees at 15% health) and are killed before they get away.
+- `pull_ceiling`: plan-wide pull body cap, 1-80 (default 6, 8 for raids). `max_bodies` is the per-group ceiling, 1-80.
+- `tank_min_hp`: 0 or 100-20000; a tank below it warns (strict preflight refuses). 0 or absent means no check. Every banded dungeon carries one; raids carry none.
+- `hire_composition`: the hired party when `prepare.hire.composition` gives none, as `class` or `class:role` entries — 1 tank, 1 healer, 2-5 bots, for example `["warrior:tank", "priest:healer", "mage", "hunter"]`. Never on a raid plan.
+- `watchdog {warn_s, recover_s, fail_s}`: warn < recover < fail must hold; zero keeps the default (120/240/420) and the run's watchdog wins field by field.
+- `entrance_tele` and `outside_tele` are `game_tele` names (letters, digits, `_`). Without any trigger or teleports you walk in by hand.
+- `avoid`: boxes of deadly ground the party never stands in or walks through; at most 32, refused when `min` is outside `max`, wider than 400 yd, or holding a plan point. See Deadly ground below.
 - `raid: {size, tanks, healers, dps}`: required on raid plans.
+- `boss.wait_s` is 1-600 s (default 60). `rest` percents are 1-100 and `max_s` is 1-600 s; 0 or absent keeps the driver's value.
+
+## Deadly ground
+
+The planner marks a clipped polygon lava when the `avoid` box covers at least a quarter of it. The driver never pulls round a box (past twice the distance plus 25 yd), never summons onto boxed ground, and walks the lead back along the travelled path when it stands boxed. A silent out-of-combat death at 80% health or more inside a box is only noted.
+
+## Stepper
+
+The stepper (`NewStepper`, `Next`) walks one leg without any network: states are walk, pull, `use_object`, `loot_object`, `use_item`, `ritual`, `area_trigger`, `gossip`, `kill_boss`, wait, done, and failed. It skips unneeded walks, ends timed-out waits, and walks first when a target is out of reach (at most 4 walks and 120 s per step).
 
 ## Other fields
 

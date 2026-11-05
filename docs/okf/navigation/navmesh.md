@@ -40,3 +40,11 @@ Partial is a normal answer, not an error: the status says how far the mesh goes,
 ## Without cgo
 
 The Detour engine needs cgo and a C++ compiler. A binary built without cgo has the stub engine (`engineName "none"`): every map load fails with `navmesh: this turtle-agent was built without cgo, so it has no Detour engine; rebuild with CGO_ENABLED=1 and a C++ compiler`, and map drawing falls back to a white background.
+
+## Walk execution, tiles, engine, limits
+
+The engine runs the server's own Detour sources (vendored `detour/`, zlib) over mmap version 6 tiles holding Detour version 7 data with 64-bit poly refs, through cgo. It mirrors the server's `PathFinder`: `findNearestPoly` with 5 yd round / 10 yd height extents and never a floor more than 3 yd above the point, the on-foot filter (ground and water in, lava/slime/steep out), then `findPath` and `findStraightPath`. A goal over 7 yd from the mesh ends the path incomplete.
+
+`walk_path` walks the plan's corners at run speed with the facing of a real client: `MSG_MOVE_SET_FACING` for turns of 0.01 rad or more (cumulative), heartbeats every 500 ms on a 100 ms tick, `STOP` at the end. It waits out roots up to 15 s (`rootWait`), plans again at most 8 times (the 9th server move ends the walk `partial`), and plans on from a partial path's end up to 32 times (`maxHops`) while each hop gains 10 yd (`minHop`). Landing on another map ends the walk `partial`; a missing navmesh, planner error, lost connection or cancelled call fails the call itself. Each step lands in `trace` (`t_ms`, `kind` plan/walk/interrupted, `status`, `from`/`to`, `points`, `length`, `text`).
+
+Limits: closed doors and game objects are not on the mesh (untested); run speed applies in water; the walked line is straight corner to corner, not smoothed, through a 2–8 yd corridor.

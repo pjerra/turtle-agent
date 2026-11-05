@@ -9,7 +9,7 @@ One agent process plays one character: its session, its brain, and the RPC calls
 
 - [Session and world connection](/agent/session-concept.md) — login states, client-authentic packets, logout outcomes, reconnect.
 - [World state](/agent/world-concept.md) — status, units, party, raid icons, the event log.
-- [The brain](/agent/brain-concept.md) — the trigger-action engine, presets, roles.
+- [Unit positions and unit state](/agent/units-state.md) — where x/y/z/o come from, pos_age_ms, distance, auras, casting.
 
 ## Guides
 
@@ -24,7 +24,6 @@ One agent process plays one character: its session, its brain, and the RPC calls
 
 - [RPC reference](/agent/rpc-reference.md) — every core method: params, result, errors.
 - [Dungeon and party RPC](/agent/rpc-dungeon-reference.md) — commander, dungeon_run, stage, teardown, bot_view.
-- [Addons, LFG and tuning RPC](/agent/rpc-advanced-reference.md) — tbm, addon host, tt, LFG, tune.
 
 ## Fixing things
 

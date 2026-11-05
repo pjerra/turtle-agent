@@ -24,7 +24,7 @@ One-line intro: dungeon and raid plans are the JSON routes parties run, and the 
 ## Understand plans
 - [Anatomy of a plan file](/plans/plan-format.md) — legs, pull groups, steps, bosses, and the plan-wide lists.
 - [Draft, mapped, live-checked](/plans/plan-lifecycle.md) — plan statuses and the mapping walk.
-- [From plan to run leader rows](/plans/run-leader-rows.md) — what the export writes and what the run leader cannot do.
+- [Dungeon notes](/plans/dungeon-notes.md) — RFC/ZF/Uldaman/WC/Deadmines evidence and first-run risks.
 
 ## Reference
 - [plan-check, trash-check, path-check](/plans/ref-check-tools.md) — every flag, default and exit code.

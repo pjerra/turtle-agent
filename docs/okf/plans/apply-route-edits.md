@@ -42,3 +42,11 @@ turtle-agent route-edits promote --worktree <path> <plan> <vN>
 ```
 
 `promote` writes the version over `dungeons/<plan>.json` of a worktree for a PR and prints the commit message (`--message-file FILE` also writes it to a file). The version's base must match the worktree file: when it does not, edit again from the new file instead of forcing it.
+
+## 4. Regenerate a leg
+
+```sh
+dungeongen route-regen --mmaps <mmaps-dir> --leg 3 [--dry-run] <plan>
+```
+
+`route-regen` moves the failing points of the named legs (default: all) to walkable ground. It keeps anchors (`to` points, GM crosses, stand-last approaches, bosses), moves each failing point at most 25 yd to the cheapest spot (dry over wall, aggro plus 8 yd, patrol plus 5), and orders the walk by the path matrix (one-way legs past twice the distance lose; no uphill return). New hops run 8-45 yd (one hop may run 110 yd). Water is dry-only (a crossing is one hop dry to dry). It keeps the change when the leg passes and drops it with a note else. Spawns default to `testdata/mapN`; the cutter uses the same Cgo Detour as the check.

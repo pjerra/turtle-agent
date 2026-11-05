@@ -78,3 +78,31 @@ Only a `checked` (or accepted) version can be exported or promoted. A version st
 ## `route-edits: the plan file is not the one its record names (sha256 differs): it was changed after it was written`
 
 The stored version file (`vNNNN.json`) changed after it was written. Record a new version from the current file instead of exporting or promoting the changed one.
+
+## `plan-check: no-item ...` / missing key
+
+A locked object names no item: add `requires_item: {entry, name}` to the step, and make sure an earlier step (or a boss `loot_item`, or an `optional` leg's item) makes it.
+
+## `plan-scout` slot, server, and cap errors
+
+Slot 3 is never used (exit 15); the live pass only runs on the named test servers (exit 18). Exit 26 means the instance cap fired before anything started; exit 27 means a step failed or the apply was refused; exit 28 means the live pass aborted part-way (report and fixes are still written). A `rows_sha256` mismatch with `--sql` exits 2.
+
+## `plan-probe: the navmesh cannot answer` (exit 1)
+
+The build has no Cgo engine or no tiles for the map. Install the mmaps tiles and rebuild with the navmesh engine.
+
+## `plan-export` draft, mute, and name errors
+
+A draft needs `--allow-draft` (exit 2). A `companions_loot: false` leg needs `--drop-companions-loot`. An unknown `--skip-legs`, `--with-optional`, or `--with-legs` name (exit 2) matches no leg of that kind. An existing `--out` file needs `--force`.
+
+## `plan-diff ... exists` (exit 2)
+
+`--out` never replaces files. Diff into a fresh folder.
+
+## `route-oracle` mode and objectives
+
+`--mode` takes `walk` (default) or `bosses`; `--objectives` takes `plan` (default) or `bosses`, and `bosses` objectives need `bosses` mode. Exit 12 means not every plan walked fully; exit 2 means usage.
+
+## `trash-check` mesh and cap notes
+
+A mesh the navmesh cannot answer fails like the plan check (exit 2 through the shared unavailable path); usage errors exit 2; `--fail-on` findings exit 21.

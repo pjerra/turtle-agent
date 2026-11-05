@@ -13,6 +13,11 @@ turtle-agent fights with data: spell tables, priority-list rotations, per-boss t
 - [Queue through LFT](/combat/guide-queue-lft.md) — join the group finder, answer checks and offers.
 - [Drive the addon host](/combat/guide-addon-host.md) — start the headless addon and click its buttons.
 - [Score a fight](/combat/guide-score-fight.md) — judge finished fights and compare pull tests.
+- [Heal and play a priest](/combat/guide-healer-priest.md) — triage, dispels, healer feet, priest shield/fear/buffs/shadow.
+- [Rogue, hunter, ret, warlock](/combat/guide-dps-rogue-hunter-ret-warlock.md) — what each damage rotation casts and where it stands.
+- [Pets and their orders](/combat/guide-pets.md) — attack, recall, stance, summon, revive, mend.
+- [Pets, druids, shamans](/combat/guide-druid-shaman.md) — the shared pet strategy plus forms and totems.
+- [Holy paladin and resurrection](/combat/guide-holy-paladin-rez.md) — blessings by role, emergencies, the shared rez.
 
 ## Concepts
 

@@ -17,7 +17,7 @@ status: draft
 
 # Write a plan file
 
-Most drafts start as a generated skeleton from the world database export (legs, pull groups, bosses, entrance, portal, level band), with the boss order from game knowledge[^plans-doc]. You then correct it by hand. Keep [Anatomy of a plan file](/plans/plan-format.md) open for the field meanings.
+The generator reads the world export over read-only ssh (never from a laptop credential) and writes three TSV files plus auras. `dungeongen -dir -name -map -bosses -out` writes a one-leg-per-boss skeleton: creature groups become clusters, friendly, `npc_flags`, and rare entries are skipped, and stealthed packs become `ambush`. The output is byte-repeatable. `-format` rewrites a plan into canonical form. `testdata/map5` (Uldaman) is the checked-in source example.
 
 ## 1. Copy the smallest plan as a skeleton
 
@@ -37,7 +37,7 @@ Each leg holds the packs on the way to its boss, the boss itself, and any doors 
 
 ## 4. Name doors, keys, and events in the notes
 
-Read the core's instance script for the dungeon and list every door, key, gossip, and summon in the plan's notes or the `docs/PLANS.md` entry: that list is the mapping walk's checklist, not a verified claim[^plans-doc]. A boss the script summons gets no spawn row — note that instead.
+The spec (`-spec plans.json -out-dir -table PLANS.md`) covers 46 drafts with one table row each: map and trigger become entrance and portal, bosses order the route, the bounding box sets the wings, the band runs median-2 to p90, teles past 80 yd are dropped, scripted `npc_flags` and faction-35 entries become needs, and specials become the Needs column. Each map testdata folder holds 5 files (portals, movement, and the rest). Tests regenerate byte-identical files, reload every plan, and re-check scripted entries.
 
 ## 5. Validate with plan-check
 
@@ -45,4 +45,4 @@ Read the core's instance script for the dungeon and list every door, key, gossip
 turtle-agent plan-check --mmaps <mmaps-dir> <name>
 ```
 
-Fix every failing point: move it onto the mesh, mark it `needs_walk` if no floor is near, or exempt the hop with `check_skip` and a reason. A plan that loads and checks is a draft; the mapping walk makes it mapped.
+Fix every failing point: move it onto the mesh, mark it `needs_walk` if no floor is near, or exempt the hop with `check_skip` and a reason. A bad file names its path (`legs[2].steps[5]...`) and refuses `skip` combined with a pull group or a `first` entry. A plan that loads and checks is a draft; the mapping walk makes it mapped.

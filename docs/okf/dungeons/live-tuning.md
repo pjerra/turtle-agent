@@ -126,3 +126,5 @@ Units: `yd` yards, `s` seconds, `pct` percent (whole numbers), `count` (whole nu
 | `respawn_settle_s` | 1–30 s | Pull test: wait after `.respawn` for the pack to show |
 
 Tied values are checked together: `pull_standoff` within `pull_range`, `rest_min_health_pct` within `rest_health_pct`, `move_arrive` and `look_ahead` within `move_leg`.
+
+The file boundary is the run start: changes land at the next leg or pull-group start, and a bad file fails once per version (`tune_change ok:false`). A plan reload matches legs by position; `ignored` rows stay out, and header/entrance/teleport/watchdog rows never reload. Pulltest reads the tunables before each try without reloading the plan.

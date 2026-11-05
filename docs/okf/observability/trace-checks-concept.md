@@ -29,7 +29,7 @@ The scorer runs 13 checks over a trace. Each returns an `id`, a verdict (`pass`,
 | `gm_shortcuts` | the run used any GM shortcut or was set up with `setup` commands | 0, no threshold | never |
 | `stuck` | a member that should move stood still for this long | 5 s, any stall | no walk of the plan, or no frames |
 | `facing` | a bot in melee range of its hostile target stood turned away (over 90 degrees) for this long | 2 s | no `facing` capability, or no such frame |
-| `spells` | report only: what each class cast and did, as readings of 1 Hz samples (cast episodes from the `cs` spell field, action mix, idle share, interrupts matched to enemy casts by proximity, taunts, crowd-control holds) | warn at `idle_share` 15 %, `interrupt_cover` 30 %, `taunt_latency` 3 s, `cc_hold` 50 %, `pet_threat` 5 % | no party bot with casts |
+| `spells` | report only: what each class cast and did, as readings of 1 Hz samples (cast episodes from the `cs` spell field, action mix, idle share, interrupts matched to enemy casts by proximity, taunts, crowd-control holds, pet threat) | warn at `idle_share` 15%, `interrupt_cover` 30%, `taunt_latency` 3 s, `cc_hold` 50%, `pet_threat` 5% (`--set` each) | no party bot with casts |
 | `spell_oracle` | report only: each bot's casts judged against its Turtle WoW knowledge-base spec (a missing core spell warns once the bot fought for this long; a never-cast spell always warns) | 60 s (fight data: 20 s) | no party bot with casts, or none active long enough |
 | `oom_in_fight` | report only: a mana user sat under 5 % mana in combat for this long | 10 s | no mana user in combat |
 

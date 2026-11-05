@@ -85,6 +85,18 @@ Usage: `turtle-agent raid-walk <plan> [--server <server>] [--slot N] ...` or `tu
 | `--gm-instance-data` | none | Repeatable: `"<leg>:<a> <b>[;<a> <b>...]"` — send each as `.debug instancedata` when the walk first starts the leg. Test servers only. | `--gm-instance-data "<leg>:1 3"` |
 | `--inject` | none | Repeatable (at most 4, each kind at most once): `kill-mt`, `runaway`, `add-pack` or `lag`, each with `@from=N` and its keys. Refused with `--place`. | `--inject kill-mt` |
 
+## GM and toolkit allow-lists
+
+Every GM line passes the allow-list before it is sent; a refused line is a programming error and stops the walk. The walk may send: `.gm on` (the place phase's probe) and `.gm visible off` (the revive hides the commander); `.go xyz <x> <y> <z> <map>`; `.pinfo [<hire>]` (the instance ledger's account read; a name must be a hire); `.tele name <hire> <word>`; `.summon <hire>` and `.revive <hire>`; `.appear <hire>` (into the raid's copy); `.instance unbind <plan map>` (that map and no other) and `.instance listbinds`; `.debug instancedata <a> <b>` (the `--gm-instance-data` tool, two integers, nothing else); `.bot hire raid ... level=<n>[ t<tier>]`; `.bot gear raid <commander> tier <N>`; `.bot role <hire> <spec>`; `.bot run stop[ time limit reached (raid-walk <m>m)]` and `.bot run resume`. Nothing else: no `.die`, no `.npc`, no `.kick` through this path (the `--gm-clear` kill goes through the agent's `gm_kill` RPC instead).[^walk-cmd]
+
+Every toolkit line passes its own allow-list too: one line, at most 200 characters, no `#`. The walk may send `q inst`, `q floor <x> <y> <z>`, `q group of=<hire>`, `q units <r<=80> <x> <y> <z> all [dead] [e=<entry>]`, `quiet <r<=50> <x> <y> <z> w=<0..30> dz=<1..15> [skip=<ids>]`, `place <x> <y> <z> spread=<0..8> of=<hire>`, and `clearto <map> <x> <y> <z> <r<=30> dz=<1..15> all=1 [skip=<ids>]` (the map must be the plan's). Never `kill`, `boss`, `force`, `me`, `reset` or `here`; never a `clearto` without `dz=`; never another map; never a name that is not a hire. At most 16 entries ride one `skip=`; a plan whose legs' skip union is longer is refused before any GM line.[^walk-cmd]
+
+## Output files
+
+The out dir holds `run.log` (every phase line with `HH:MM:SS.mmm` stamps), `commanders-NNNN-<reason>.json`, `combat-fight-*.json` with the full `combat-fight-detail` beside it (the detail stays live while the fight runs), `frames.jsonl` (one frame per 10 s idle, one per 2 s in fight; `power_type` 0-3, 0 omitted; tier recorded), `pulljoiners.json` (one record per pull attempt by pull time: the frames' own count of engaged hostiles outside the pulled pack within 10 s of the pull), `slot-setup.txt`, `teardown.json`, `summary.json` (v1) and `summary.txt`.[^walk-cmd]
+
+`summary.json` carries `boss_kill{entry, step, engaged, killed, skipped, phase, phase_entry, evidence}` for the last engaged boss (the run leader's own kill report, the phase the boss unit was seen with, and the evidence or the reason it does not hold), one `boss_kills[]` record per boss step the run's statuses showed, and `teardown{failed, hires_left, reason}` (the first failing step, empty when nothing failed). A `--place` walk adds `place{start_step, leg, until_step, instance, circles[], not_cleared[], quiet, placed, hires, summoned[], notes[]}`; a `--gm-clear` walk adds `assisted` and `gm_clear[]`; an `--inject` walk adds `injections[]`, `incidents[]` and `deaths.injected`.[^walk-cmd]
+
 ## Capture
 
 | Flag | Default | What it does | Example |

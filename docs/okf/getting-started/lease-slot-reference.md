@@ -33,6 +33,8 @@ turtle-agent lease acquire <server> (--slot ID | --any) --holder NAME [--ttl MIN
 - `--ttl MIN`: lease length in minutes, 1-720. Default `180`. Example: `--ttl 60`.
 - `--slots FILE`: slot table file. Default: the default slot table path. Example: `--slots <slots-file>`.
 
+Pass `--slot <slot>` or `--any` (never the reserved slot). `acquire` refuses a port that already has a listener.
+
 Prints `leased <server>/<slot> to <holder> until <time>: account <account>, character <character>, port <port>, lease <id>`, plus `(already yours: expiry renewed)` when you re-acquire your own slot, or a `took over a stale lease ...` line first when the old lease was stale. Refusals exit 15: `lease: <server>/<slot> is reserved (...)`, `is held by <holder> since ... until ...`, or a busy port line naming the listener. Usage errors exit 2.
 
 ## lease renew
@@ -82,13 +84,11 @@ turtle-agent slot setup <server> <slot> --holder NAME [--dir DIR] [--binary PATH
 - `--holder NAME`: required, same shape as above.
 - `--dir DIR`: client dir. Default: `ta-<holder>` under the home folder. Must be new or empty; setup never overwrites and never writes through a symlink. Example: `--dir <walk-dir>`.
 - `--binary PATH`: turtle-agent binary to install. Default: the running binary. Example: `--binary bin/turtle-agent`.
-- `--dungeons-dir DIR`: dungeons dir. Default: `<dir>/dungeons`. Example: `--dungeons-dir <plans-dir>`.
-- `--mmaps-dir DIR`: navmesh folder written to `settings.json` `mmaps_dir`. Must exist and be a folder. Default: the server's or the source settings' folder. Example: `--mmaps-dir <mmaps-dir>`.
 - `--dungeons-from DIR`: folder of `*.json` plans copied into the slot's dungeons dir (plain files only; a symlink is refused). Default: none. Example: `--dungeons-from <plans-dir>`.
 - `--character NAME`: character to play. Default: the slot's. Must be one of the slot's characters. Example: `--character <character>`.
 - `--slots FILE`: slot table file. Default: the default slot table path.
 
-Prints five lines (ready, account/character/port, start, rpc, teardown), plus `mmaps: <dir>` and `dungeons: <n> plans copied from <dir>` when those flags were given. The dir holds `turtle-agent`, `settings.json`, `slot.json`, `dungeons/` and `traces/`. Refusals exit 15 (not leased by you, reserved, busy port, bad maps folder, lease lost before the write). Usage and safety refusals exit 2.
+`slot setup` also takes `--mmaps-dir DIR` and `--dungeons-from DIR` (not in the usage line above). `DIR` must exist and be a directory (a leading `~` is the home folder), else setup refuses with exit 15. Workers pass the checked-out `dungeons/` folder so `follow_start`/`dungeon_run` find their plans.
 
 ## teardown
 
@@ -104,3 +104,5 @@ turtle-agent teardown [--keep-lease] [--release-anyway] [--gm off|on|keep] [--dr
 - `--slots FILE`: slot table file. Default: the dir's own recorded path.
 
 Runs game-side steps over RPC (run, binding, hires, GM, logout), then agent exit, port, other-process, file and lease steps. A dead agent leaves an `agent pid ... is gone without a clean exit` failure. Exit `0` when every step passed or was skipped; exit `14` when any failed. With game-side failures the lease is kept unless `--release-anyway` is passed.
+
+Runs the RPC `teardown` first (snapshot, the player follow, `agent_run`, brain, `run stop`, unbind, `.bot remove` of listed hires, leave, gone, `.gm off`, logout), then ends the agent by its pid file, closes the port, deletes only the secrets and releases the lease. Exit 14 on any failed step, 15 on a refused lease.

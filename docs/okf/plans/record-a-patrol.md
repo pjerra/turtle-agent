@@ -23,7 +23,9 @@ status: draft
 turtle-agent patrol-record <slot-dir> --map <M> --area <x>,<y>,<r> --minutes <N>
 ```
 
-`--area` is the circle to watch (`x,y,r`); the radius must be 10-200 yd. `--minutes` is 1 to 60. `--entries e1,e2` records only those creature entries (default: every creature). `--sample-ms` (default 1000, 500–5000) sets the sample gap.
+The recorder never fights: it sends `.gm on` and `.gm visible off`, teleports once with `.go xyz`, and sends `.gm visible on` at the end (or when it stops early). It never attacks, casts, targets, or moves the character.
+
+Each sample reads the agent status, the own unit, and the units within the area radius plus 60 yd. A creature records once seen within the circle (2D) and while it stays in range. The run stops at once — file written, exit 22 — on combat, death, being targeted, a map change, or losing the world.
 
 ## 2. Settle the floor question
 
@@ -35,7 +37,7 @@ When the navmesh has several floors at your `x, y`, pass `--z <z>` for the floor
 turtle-agent patrol-record <slot-dir> --map <M> --area <x>,<y>,<r> --minutes <N> --out <file>
 ```
 
-The default output is `./patrols-<map>-<stamp>.json`; `--out` names the file and is refused when it exists. `--spawns DIR` names the world's `creatures.tsv` export so the recording names the patrols' spawns.
+`--spawns DIR` names the world's `creatures.tsv` export so the recording names each patrol after its nearest spawn within 40 yd (else the hex guid). The file is `tb-patrols v1`: path, `period_s`, estimate, cycles, waits, phase epoch, and completeness, plus static and wandering creatures. A complete run prints `recorded ...: period ... (N cycles), M points, matches spawn ...` and exits 0. Exit 15 means refused, grouped, or not in the world; 16 means the RPC call failed; 2 means usage.
 
 ## 4. Copy the loop into the plan
 

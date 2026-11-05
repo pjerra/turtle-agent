@@ -51,6 +51,14 @@ status: draft
 - `logout: ...; the character may stay in world for a while` (exit 10): the socket died before the server accepted the logout. The core keeps a dropped character in world for about 20 seconds; this is not a logout.
 - `rpc: serving status for 30s after the disconnect (Ctrl-C to quit now)`: the session dropped but the RPC stays up read-only so `status` and `events` show why. Ctrl-C quits.
 
+## One Warden timeout line per session
+
+The agent drops `SMSG_WARDEN_DATA` and never sends `CMSG_WARDEN_DATA`. With no Windows module file in the server's module dir you see no Warden packet at all; with a module the server logs one `WARDEN: ... timeout` line per session and treats it as noise.
+
+With a module the clock runs out after `Warden.Timeout` seconds (default 30). The core logs the timeout once per session and its `KickPlayer()` next to it is commented out. That commented line is the only thing keeping an agent online: a server that enables it kicks every agent about `Timeout` seconds after login. No config key does that; it is a source change. Other Warden kicks (failed challenge, failed module load, unknown opcode) need a client reply, which the agent never sends. Answering Warden is not implemented.
+
+`WinEnabled` / `OSXEnabled` (`0` in the template and on the test server) gate the older non-`USE_ANTICHEAT` code; there `0` means no Warden. In the `USE_ANTICHEAT` build `WinEnabled` only feeds an assert, so `0` does not stop the request when a module is present. `Warden.Enable` is read but nothing tests it as far as the code shows. The old code kicks after `ClientResponseDelay` (120 s) without an answer. `PlayersOnly` and level gates only matter once scans are answered.
+
 ## Lease and slot setup
 
 - `lease: --holder must be 1-64 letters, digits, . _ -` (exit 2): fix the holder name.

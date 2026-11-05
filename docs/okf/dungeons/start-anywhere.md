@@ -66,3 +66,7 @@ turtle-agent rpc <dir> dungeon_stage '{"name":"<plan>","leg":"velratha"}'
 ```
 
 The answer carries `staged`, the point, `kind` (`leg_first`, `before_leg`, or `forced`), `refusal` (empty when the start is safe), a `proposal` for a safer leg when it is not, `warnings`, `notes`, the `gm_commands` it sent, and the `party` with each bot's distance and arrival. Add `"dry_run":true` to check without moving, `"use_safe_point":true` to stand off, `"force":true` to stage past a refusal. With `"start":true` the staging ends in a run start (`speed` 1.0–3.0 appends to the run start line; `quiet_wait_s` 0–60, default 20, waits the party out); `start` and `resume` exclude each other.
+
+### How the GM move and z check work
+
+The commander's GM move is 4 steps: `.appear` to the start, `.go xyz` (Teleport navmesh) onto it, `.bot summon` for the lead plus `cmd move` holds, `cmd summon` for the rest. A GM start is booked in `setup_shortcuts` (`GM start point`), and the report's `start{point,kind entrance/leg_start/pull_gather,map,GM,summoned,seconds,skipped[]}` says what moved. Already within 20/25 yd needs no move; already in the leg within 60/80 yd resumes. A `.gps` ground/floor split over 0.5 yd refuses with the z texts; plan-z notes stay best-effort.

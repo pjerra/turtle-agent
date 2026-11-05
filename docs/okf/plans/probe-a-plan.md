@@ -43,8 +43,10 @@ The migration holds the exact rows the server runs, so prefer it when one exists
 turtle-agent plan-probe --mmaps <mmaps-dir> --out <dir> <plan>
 ```
 
-`--out` writes `probe-<plan>.json` and `probe-<plan>.txt`; `--json` prints the report as JSON. `--from-step N` only reports the segments that end at run-leader step `N` or later, for iterating on one stretch.
+## Read the segment
+
+Each segment reports the straight line, the server query (type, `CheckMove`, length, end distance, polygon distances), the offline status and length (a disagreement is noted), the server-over-straight ratio, the floors over the end (`floor_dz`, snap), water and lava yards, climb and drop, steepness, the floor-index box, hops past 60 yd, and a verdict with reasons. Distances are 3D yards at two decimals.
 
 ## 4. Fix bad segments
 
-A `bad` segment is a hop the run leader should not walk as it stands (exit 20 when at least one exists). Cut it with `via` points along the walkable path, reroute it around the obstacle, or — for a gap the mesh cannot link — make it a `direct` step with a `check_skip` reason. Re-probe until no bad segment is left.
+A `bad` segment is `NOPATH` (or unreachable, or off-mesh) or ends more than 5 yd off the floor (`no floor within 5 yd (row z ..., floor ...)`). Pull and boss rows are exempt: in range but off the pack still works, and off-mesh within radius plus 5 yd works (0 means 15 yd for pulls, 30 for bosses). Warn when the ratio tops 1.6, on any water or lava, on steep ground or a drop of 6 yd or more, on a snap past 2 yd, on differing floors, on 2 or more floors (`multi-floor x,y: row z picks floor z=...`), on an offline/server disagreement, or on a hop past 60 yd. On a multi-floor map the 2D overlays mislead; the z decides. Cut it with `via` points along the walkable path, reroute it around the obstacle, or — for a gap the mesh cannot link — make it a `direct` step with a `check_skip` reason. Re-probe until no bad segment is left.

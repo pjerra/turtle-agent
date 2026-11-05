@@ -55,20 +55,34 @@ status: draft
 
 ## LFG
 
-`roles` letters are `t` (tank), `h` (healer), `d` (damage). Every call answers `{since, sent, state{phase idle\|rolecheck\|queued\|offer\|grouped\|left\|error, instances, responses, offer, counts, listings, history}}` — read on from `since` with `events`. The guild channel prefix is `TW_LFG`.
+`roles` letters are `t` (tank), `h` (healer), `d` (damage). Every call answers `{since, sent, state{phase idle|rolecheck|queued|offer|grouped|left|error, instances, responses, offer, counts, listings, history}}` — read on from `since` with `events`. The guild channel prefix is `TW_LFG`.
 
-| Method | Params |
-|---|---|
-| `lfg_join` | `instances*` (1–10 lowercase names), `roles*`, `force?`, `wait_ms?` |
-| `lfg_role_check_answer` | `roles*`, `force?`, `wait_ms?` |
-| `lfg_proposal_answer` | `accept*`, `force?`, `wait_ms?` |
-| `lfg_leave` | `wait_ms?` |
-| `lfg_status` | `refresh?`, `wait_ms?` |
-| `lfg_listings` | `refresh?`, `id?`, `wait_ms?` |
-| `lfg_listing_role` | `role*` (`t`, `h` or `d`), `wait_ms?` |
-| `lfg_auto` | `roles?`, `accept?`, `delay_ms?` (default 1500, 0–30000), `off?`. Answers `{..., auto{on, roles?, accept?, delay_ms}}`. |
+`wait_ms` defaults to 5000 and caps at 25000 on every LFG call. A wrong-phase answer needs `force: true`:
 
-Wrong-phase answers need `force: true`: `phase is <now>, not <want>: cannot <action> (force overrides)`. Classes gate their roles: `roles "<r>" are not allowed for a <class> (allowed: <...>)`.
+`phase is <now>, not <want>: cannot <action> (force overrides)`
+
+| Method | Params | Waits for |
+|---|---|---|
+| `lfg_join` | `instances*` (1–10 lowercase names), `roles*`, `force?`, `wait_ms?` | `S2C_ROLECHECK_START`, `S2C_QUEUE_ERROR` or `S2C_QUEUE_JOINED`. |
+| `lfg_role_check_answer` | `roles*`, `force?`, `wait_ms?` | `S2C_QUEUE_JOINED`, or a `S2C_ROLECHECK_INFO` row naming you. |
+| `lfg_proposal_answer` | `accept*`, `force?`, `wait_ms?` | `S2C_OFFER_UPDATE_COUNT`, `S2C_OFFER_COMPLETE` or `S2C_QUEUE_LEFT`. There is no decline message: `accept: false` leaves the queue. |
+| `lfg_leave` | `wait_ms?` | `S2C_QUEUE_LEFT`. |
+| `lfg_status` | `refresh?`, `wait_ms?` | Nothing unless `refresh` is true; then `S2C_UPDATE_QUEUE_STATUS`. An idle player gets no answer at all from the core. |
+| `lfg_listings` | `refresh?`, `id?`, `wait_ms?` | With `refresh` and no `id`: every `S2C_GROUPS_LIST_UPDATE` line until the `end` marker. With `id`: `S2C_UPDATE_GROUP` lines for that id until its `end`. Without either: no send, only the folded state. |
+| `lfg_listing_role` | `role*` (`t`, `h` or `d`), `wait_ms?` | `S2C_GROUPS_LIST_UPDATE`. Confirms the role on the party channel (`C2C_ROLECHECK_RESPONSE`), not the guild one; empty or anything but `t`/`h`/`d` sends `0` and removes the row. |
+| `lfg_auto` | `roles?`, `accept?`, `delay_ms?` (default 1500, 0–30000), `off?`. Answers `{..., auto{on, roles?, accept?, delay_ms}}`. | Nothing: starts or stops the background answerer. |
+
+Join names 1–10 instances of 1–32 lowercase letters or digits, deduplicated in order; `roles` is normalised to the `t,h,d` subset in that order. The join text after the prefix caps at 248 bytes (255 with the prefix, the chat limit). Role checks and offers stay open 90 s on the core side.
+
+Classes gate their roles before anything is sent: `roles "<r>" are not allowed for a <class> (allowed: <...>)`. An empty role mask is a param error (`roles "<r>" name none of t, h, d`); the core itself silently ignores a zero mask, which would only time the check out. A class the agent has not seen yet answers `the character's class is not known yet`. Read your class id from your own `units` row (byte 1 of `UNIT_FIELD_BYTES_0`).
+
+Spoof guard: the core answers as yourself (`Player::SendAddonMessage` from your own GUID on the guild channel), so only lines from your own GUID fold into `state`. A guild-mate's forged `S2C_*` line carries his GUID and is ignored.
+
+`state` fields beyond the phase: `rolecheck_since`/`rolecheck_deadline` and `offer_since`/`offer_deadline` bound the 90 s windows; `responses` maps each answerer's name to roles; `offer` is `{instance, role, counts}`; `queued_since` and `counts[t,h,d]` track the queue; `last_error` keeps the latest `S2C_QUEUE_ERROR` reason; `listings` maps each id to its detail rows once fetched; `history` keeps the last 50 folded lines (`auto:`-prefixed lines are the auto answerer's own sends, kept for the view only).
+
+`lfg_auto delay_ms` must sit in 0–30000 (`delay_ms <n> is outside 0-30000` otherwise) and needs non-empty `roles`. A reconnect or logout stops it; `off: true` stops it at once. `lfg_status` without `refresh` and `lfg_listings` without `refresh` or `id` send nothing and only report the folded state.
+
+Wire shape: every line is `TW_LFG\t<body>` on the guild channel (answers arrive as guild chat from yourself). Bodies are `;`-separated with empty fields kept; listing and signup payloads are JSON and may hold `;` themselves, so only the leading fields split. Unknown `S2C_*` kinds fold into `history` only.
 
 ## Live tuning
 

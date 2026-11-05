@@ -43,7 +43,17 @@ An unknown name is refused with the full list:
 
 `strategy "<name>" is unknown (presets: <...>; strategies: <...>)`
 
-`role` is `dps`, `tank` or `healer` and must match the strategies: a tank needs the `role_tank` strategy, a healer needs `role_healer`. `tank` names the tank to follow as DPS; `rotation` swaps in a rotation file; `no_move: true` lets the brain fight but never walk; `run_id` names the session (letters, digits, dot, underscore, dash, at most 64 chars)[^controller-go].
+`role` defaults to `dps` when no strategy names one. The resolution errors name the fix:
+
+`role "tank" does not match the strategies [...] (which play dps)`
+
+`role "tank" needs the role_tank strategy (presets tank_warrior, bear_tank_druid)`
+
+`role "healer" needs the role_healer strategy (presets holy_priest, holy_paladin, resto_druid, resto_shaman)`
+
+`role "bard": want dps, tank or healer`
+
+`tank` names the party member whose target you fight; empty finds the tank by class and target. `no_move: true` keeps the brain from walking you (positioning, stepping out of ground effects, running to the tank) while it still fights, interrupts and dispels; a dungeon run sets it until the driver holds the move lock around its own walks. Blink is a spell, not a walk, and is not held back.
 
 ## Status
 
@@ -54,6 +64,24 @@ Starting twice is refused; stopping a run-owned brain is refused too (stop the r
 `the brain is running: brain_stop it first`
 
 `brain_stop: a dungeon run owns the brain (dungeon_stop it first)`
+
+### Dungeon-run ownership
+
+A dungeon run owns the brain while it goes, so your idea of whether the brain runs cannot drift from the run's. Starting or stopping by hand meanwhile is refused:
+
+`<method>: a dungeon run owns the brain (dungeon_stop it first)`
+
+Starting a run while a hand-started brain runs is refused the other way:
+
+`a bot brain that was started by hand is running: brain_stop it first`
+
+And a run that has not finished ending still owns it:
+
+`the previous dungeon run still owns the brain (it is ending): try again in a moment`
+
+`brain_status` always answers, owned or not. The run's own brain preset rides in `dungeon_run brain` — see the combat run guides for the preset links.
+
+Preset details live with the combat guides: start and watch a run-owned brain in the run-brain guide, the engine bands and timing in the brain-engine concept, and boss behaviour in the boss-tactics guide.
 
 ## What the brain does not do
 

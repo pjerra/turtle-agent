@@ -46,11 +46,18 @@ status: draft
    turtle-agent rpc --raw <walk-dir> status
    ```
 
-## Exit codes
+### HTTP shape
 
-- `0`: the call answered; only the result was printed.
-- `2`: bad flags, arguments or slot dir.
-- `15`: the agent cannot be reached, answered a bad reply, or the token file is not an agent token (the content is never printed).
-- `16`: the agent answered with a JSON-RPC error, printed as `error: <code> <message>`.
+`rpc` posts to `<loopback>:<port>/rpc` with `Content-Type: application/json`. Only `POST /rpc` works: a wrong path answers `404`, a non-POST answers `405` (with `Allow: POST`). Arrays (batches) answer `Invalid Request`. The body cap is 64 KiB. Answers carry `Cache-Control: no-store`.
 
-The calls themselves, with parameters and results, live in [The agent and its RPC](/agent/index.md).
+Browser or off-host requests are refused with `403 local process requests only`: any `Origin` header, any `Sec-Fetch-Site` header, or a non-loopback `Host`. Auth runs before the body or method lookup, so `401` is answered before the body is read.
+
+A wrong or missing token gets `401` with the body `unauthorized` and a `WWW-Authenticate: Bearer` header. The token check is case-insensitive on the `Bearer` scheme and compares SHA-256 digests in constant time.
+
+There is no Python client in this repository. The RPC needs the token file, so a client must read it: read `rpc-<port>.token` from the settings folder (or take an `rpc_token` you set), strip the trailing newline, and send it as the `Authorization: Bearer <token>` header.
+
+```sh
+TOKEN=$(cat <settings-dir>/rpc-8765.token)
+curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"status"}' http://127.0.0.1:8765/rpc
+```

@@ -36,7 +36,9 @@ When the character is not in the world, most other RPC calls answer `-32001` (`C
 
 Each row is one unit the server has shown the agent: `guid`, `type` (`player` or `creature`), `entry`, `name`, position, `distance` (3D yards, -1 when unknown), health, power, level, `hostile`, `in_combat`, `in_party`, `auras` (up to 48 slots; remaining time only for the player's own auras), and the current `casting` spell[^objects-go]. Health can be a percent (1–100 with max 100) where the server hides the real value.
 
-Filter with `within` (3D yards; `near` is the older name), `entry`, `hostile`, `name` (substring) and `limit` (0 means the default 100). `bound: true` keeps only the bots of the commander's binding, taken from the newest `TBM:VIEW` frame no older than 60 seconds.
+## Game objects
+
+`gameobjects` reads the same update stream as `units`, nearest first, but game objects never appear in `units`. Each row carries `type`/`type_name` (the `GameobjectTypes` id and name), `state` (`ready` for a closed door, `active` for open or used, `active_alt`), `flags` and `dyn_flags` (bit 0 is the interact sparkle), `locked` (`GO_FLAG_LOCKED`), `usable` (a hint from the update fields, false for generic, no-interact, in-use or interact-condition objects), `display_id`, and `created_by` (the unit that summoned it, when any). `name` stays empty until the `SMSG_GAMEOBJECT_QUERY_RESPONSE` for that entry arrives. Objects whose position the server never sent (ships, elevators on a transport path) report `distance` -1. Drive them with `use_object` (doors, levers, quest objects) and `open_object` (chests, nodes) — see [Talking, trading and the world](/agent/social-guide.md) §§6,9.
 
 ## party and group
 

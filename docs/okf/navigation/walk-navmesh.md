@@ -53,6 +53,10 @@ The agent walks the plan's corners at run speed, facing into each turn the way a
 
 When the server moves the player (fear, a scripted move, a knockback) or roots it, the walk waits for the server to let go, plans again from the new position, and walks on. It plans again at most 8 times; the 9th interruption ends the walk with a `partial` result and a reason like `the server moved the player 9 times; gave up`. Only a lost connection, a cancelled call, a missing navmesh or a planner error fails the call itself.
 
+## 4. Numbers the walk keeps
+
+Roots wait up to 15 s (`rootWait`); a partial path that gained 10 yd (`minHop`) plans on from its end up to 32 times (`maxHops`). Turns of 0.01 rad or more (`minTurn`, cumulative) send `MSG_MOVE_SET_FACING` with forward still set, the way a pathing client does; the next heartbeat comes 500 ms after a turn. Landing on another map ends the walk `partial` (`another map`). Every plan, walk and interruption lands in `trace` with `t_ms`, `kind`, `status`, `from`/`to`, `points`, `length` and `text`.
+
 ## Short walks without the mesh
 
 `walk_to` walks a straight line to a nearby point, with no navmesh involved:

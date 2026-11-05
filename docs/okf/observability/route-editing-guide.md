@@ -51,3 +51,7 @@ The server applies your ops to a copy of the base file it reads itself, snaps ea
 ## 5. Skip typing the token on your own laptop
 
 Add `--edit-trust-local` (needs `--edit`). Then a save with no `Authorization` header, from a loopback socket owned by the dashboard's user or from a literal Tailscale address in `--allow-host`, is made as the `--edit-trust-label` token's owner. The token itself never reaches the page. Start with the threat model in the README ("No token typing on your own laptop"): names are never trusted as callers, a relay of another user is not trusted, and any request carrying `Authorization` is judged by that token alone.
+
+## 6. Ops, gates, limits
+
+A save posts `{base_sha256, note, ops[{leg, kind: move|insert|delete, index, x, y}]}`; points snap to the navmesh floor nearest the old height (±25 yd window; a choice is flagged `floor_picked`) and must lie within 200 yd of the plan's own points. Locked kinds (packs, bosses, steps, `direct`/`check_skip` via points) stay grey. A version covering a plan that already has plan-check issues is `unchecked`; edits adding a new issue get HTTP 422. `route-edits list/export/promote` moves a version into the run folders; the trace records it as `trace_meta.route_edit`.

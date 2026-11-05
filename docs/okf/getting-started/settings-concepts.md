@@ -33,6 +33,10 @@ The slot table names each server's slots: their account, character, laptop RPC p
 
 Leases live beside the slot table, one file per server and slot, so a `--slots FILE` outside the default directory keeps its own leases. Two ledgers cannot see each other, so mixing them for one server is refused.
 
+A `--slots FILE` outside the default directory keeps its leases (`<dir>/leases`), its instance-cap ledger and its `instance-cap-per-account.json` there. Two ledgers cannot see each other, so mixing them for one server is refused: the walk refuses to start (exit 2, `one ledger per server`) when the default directory holds a live lease for the same server. `--allow-split-ledger` overrides it for test sandboxes only.
+
+The per-server core instance cap lives beside the table in `instance-cap-per-account.json` (`{"<server>": 30}`), never in the slot table: older binaries refuse unknown fields there.
+
 ## Fleet file
 
 The fleet file lists one member per character: `account`, `character` and `rpc`. The account is a key into the settings file, which holds the password; the fleet file never carries a secret. Members may add `reconnect` (overrides the fleet flag) and `create` (the `login --create` spec for a missing character).

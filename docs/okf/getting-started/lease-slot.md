@@ -47,6 +47,8 @@ On a shared laptop each test character belongs to a slot, and a lease hands that
 
    Setup refuses unless the slot is leased to you. It prints five lines: the ready line, the account/character/port line, the start line, the rpc line, and the teardown line, plus one `mmaps:` line when `--mmaps-dir` was given and one `dungeons:` line when `--dungeons-from` was given. The ready dir holds `turtle-agent`, `settings.json` (mode `0600`), `slot.json`, `agent.out`, `dungeons/` and `traces/`.
 
+   Setup copies no settings file: it builds `<dir>/settings.json` from scratch (one account, a fresh token file per run) plus `slot.json`, the binary and the `dungeons/`/`traces/` folders, and prints the login line. Settings contents are never printed.
+
 4. Start the agent with the printed start line (it passes the slot dir's own settings and pid file):
 
    ```sh
@@ -67,10 +69,6 @@ On a shared laptop each test character belongs to a slot, and a lease hands that
 
    Teardown ends the game presence over RPC (run, binding, hires, GM mode, logout), stops the agent, deletes the derived files, and releases the lease. `--keep-lease` keeps the lease; `--dry-run` only prints the plan.
 
-7. If the lease runs long, renew it before it expires:
+## Real players
 
-   ```sh
-   turtle-agent lease renew <server> <slot> --holder <name> --lease-id <id>
-   ```
-
-Lease states, reservations, and the stale-takeover rule are in [Slots and leases](/getting-started/slots-leases-concepts.md). Every flag is in [lease, slot setup, teardown](/getting-started/lease-slot-reference.md).
+A group holding a real player (any member the `commander status` listing does not name) gets no `.bot remove` at all: a GM's remove reaches any bot, so leaving the group — which ends only your own hires — does the cleanup instead. Known limit: a classic bind (commander outside the lead's group) with a real player inside the lead's group is not detectable from the client; bot-only test runs never have that shape.

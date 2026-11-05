@@ -12,7 +12,7 @@ Walk a raid plan with hired bots using `raid-walk`, keep many raids running with
 - [Recover from wipes](/raids/recover-wipe.md) — `--wipe-resume`, `--wipe-rest`, `--revive-at-raid` and the revive quiet check.
 - [Supervise raids with the autopilot](/raids/run-autopilot.md) — write `targets.txt`, run the supervisor, stop one raid or all of them.
 - [Regression-check plans with the suite](/raids/run-raid-suite.md) — walk every plan and judge it against its last good walk.
-- [Stay under the instance cap](/raids/manage-instance-cap.md) — the ledger, waiting, `--instance-cap-reset` and `--reuse-instance`.
+- [Follow the lead bot as a player](/raids/follow-player.md) — trail, holds and stops.
 
 ## Concepts
 - [How placement works](/raids/placement.md) — corridor clear, quiet check, landing check and the four tries in one instance.
@@ -26,5 +26,5 @@ Walk a raid plan with hired bots using `raid-walk`, keep many raids running with
 - [`raid-suite` reference](/raids/raid-suite-reference.md) — flags, suite file, verdicts, exit codes.
 - [`raid-walk report` reference](/raids/report-reference.md) — flags, inputs, the per-pull table and `report.json`.
 - [Roster file format](/raids/roster-format.md) — `tb-raid-roster` v1 and v2 batches, specs and faction.
-- [Two raids at once](/raids/pair-reference.md) — the `--slot A,B` pair and multi form, `pair.json`, exit order.
+- [Fault injection](/raids/fault-injection.md) — kill-mt, runaway, add-pack, lag.
 - [Troubleshooting raids](/raids/troubleshooting.md) — real error messages, what they mean, the fix.

@@ -67,3 +67,7 @@ A folder of `commanders-*.json` and `combat-fight-*.json` API dumps becomes `<ou
 ## 5. A replay file, in brief
 
 Line 1 is the header (`format: tb-dash-replay`, `version: 1`, datagram counts by type); each following line is `{"t_ms": <ms since start>, "dg": <the UDP datagram>}`. A datagram over the 65507-byte UDP limit cannot be replayed.
+
+## 6. Safety
+
+The target defaults to loopback unless `--to` names another: a non-loopback target is refused (exit 17) without `--i-know`. Point a replay at a test daemon only: its session is newer than a live module's and shadows the live page until the module restarts. This agent command plays and converts only; recording is the daemon's job, not a subcommand here.

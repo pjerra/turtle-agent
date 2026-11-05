@@ -31,6 +31,8 @@ Commander mode owns the largest option set: the party (`lead_bot`, `bots`, `tank
 
 Your character is in the party, leads it, and fights, played by the bot brain. The run walks with your character's own movement and loots with its own hands. `mode: "leader"` picks the class preset when `brain` is empty; the old group form leaves the brain off unless named. Leader mode keeps the GM options (`teleport`, `buffs`, `gm`, `gm_level`, `recover_wipe` defaulting off) and refuses everything commander-only. The result answers `mode: "group"`, `run_mode: "leader"`.
 
+`mode: "leader"` with named commander bots (`lead_bot`/`bots`) is not live-checked: leader mode walks the party itself, so it refuses the commander party fields.
+
 ## Observe: the server plays
 
 A TortoiseBots run leader on the server clears the dungeon; your agent prepares, binds, and enters exactly like a commander run, sends `.bot run start`, and then only reads the `TBM:RUN` status. No order follows the start, so every option that steers bots is refused. What remains besides the shared fields: where the run leader starts (`from_leg`, `from_pull_group`, `from_step`), when the watch ends (`observe.until`, `max_run_s`, `stall_s`, `paused_wait_s`), and how it behaves (`auto_resume`, `maintenance`, `allow_far_start`, `keep_loot_setting`). Raid plans run in observe mode only, with a hired party: leading a raid of bots from outside is the server's job.

@@ -28,7 +28,7 @@ status: draft
 turtle-agent rpc <walk-dir> brain_start '{"strategies": ["frost_mage"]}'
 ```
 
-Use one preset (see [the brain](/agent/brain-concept.md)) or list strategies. Add `"role": "tank"` or `"role": "healer"` only when the preset supports it, `"tank": "<name>"` to assist a tank as DPS, `"no_move": true` to fight without walking. The call needs the character in world:
+Use one preset (see [the brain](/agent/brain-concept.md)) or list strategies. Add `"role": "tank"` or `"role": "healer"` only when the preset supports it (`role_tank` for tank, `role_healer` for healer — the call names the fix otherwise), `"tank": "<name>"` to assist a tank as DPS, `"no_move": true` to fight without walking. The call needs the character in world:
 
 `brain_start needs the character in the world (state <state>)`
 
@@ -57,4 +57,4 @@ turtle-agent rpc <walk-dir> follow_stop
 turtle-agent rpc <walk-dir> brain_stop
 ```
 
-`follow_stop` settles the loop and returns its final status (`state: "ending"` while it drains). `brain_stop` is refused while a dungeon run owns the brain — stop the run first. A dungeon run and a follow can never hold movement together; the second starter is refused until the first ends.
+`follow_stop` settles the loop and returns its final status (`state: "ending"` while it drains). `brain_stop` is refused while a dungeon run owns the brain — stop the run first (`<method>: a dungeon run owns the brain (dungeon_stop it first)`; a hand-started brain blocks the run the other way: `a bot brain that was started by hand is running: brain_stop it first`). A dungeon run and a follow can never hold movement together; the second starter is refused until the first ends.

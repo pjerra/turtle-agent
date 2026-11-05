@@ -49,7 +49,10 @@ Format `tb-raid-suite` v1, walked in file order (`dir` is required, `sql` and `h
   {"plan":"<plan>","dir":"<plans-dir>","sql":"<world-sql>","hires":""}]}
 ```
 
-`--dry-run` prints `<plan> tier <N> (<source>) until <until> out <history>/<plan>/<stamp>` per raid, or `<plan>: refused: <reason>`.
+`--dry-run` prints `<plan> tier <N> (<source>) until <until> out <history>/<plan>/<stamp>` per raid, or `<plan>: refused: <reason>`. `--json` prints the report as JSON on stdout while the walks' own output goes to stderr.
+
+A duplicate plan in the suite file is a usage error. Hand-placed walks in the history count like any other walk. Ctrl-C marks the running raid `interrupted` and skips it.[^suite-cmd]
+
 
 ## Verdicts and exit codes
 
