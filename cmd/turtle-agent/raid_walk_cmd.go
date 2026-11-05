@@ -1015,10 +1015,16 @@ type walk struct {
 	gmClearUsed bool
 	// --gm-instance-data: the specs validate resolved against the rows, in flag order; the markers in the out dir
 	// say which legs already fired (and the ledger, which outlives the attempt, says it per instance).
-	gmInstanceData []raidwalk.GMInstanceSpec
-	// gmInstanceDataEntryInst is the instance id read the way the cap ledger reads it at entry, for firing
-	// outside the walk's own placement ("" until read, "unreadable" when the read failed).
+	gmInstanceData          []raidwalk.GMInstanceSpec
 	gmInstanceDataEntryInst string
+	// gmInstanceDataTries counts, per leg and command line, how many times the
+	// command went out without the server confirming it; after
+	// gmInstanceDataMaxTries the walk logs the NOT-confirmed line and stops
+	// retrying it (the walk never fails on this).
+	gmInstanceDataTries map[string]int
+	// gmInstanceDataOZeroWarned says the `q inst` 0 read already WARNed once
+	// (a 0 read is not cached: the next firing retries the read).
+	gmInstanceDataOZeroWarned bool
 	// gongReruns counts the run restarts at a leg's summoning open row (a boss that despawns after a wipe comes back with the
 	// object: Zul'Gurub's Arlokk). bossGongReruns bounds them. gongRerunAt/-Boss/-Open name the last one that went out: the
 	// next "boss not found" pause reads whether the frames saw the boss alive since, which tells the gong summoning him again

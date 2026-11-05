@@ -174,6 +174,29 @@ func (m InstanceMarks) Record(inst, leg string, cmd [2]int) error {
 	return err
 }
 
+// Write rewrites the leg's marker with exactly cmds, in order (an empty
+// list removes the marker). The walk rewrites the confirmed commands every
+// pass, so a refire never duplicates lines and LegDone reads back once
+// every command of the spec is confirmed.
+func (m InstanceMarks) Write(inst, leg string, cmds [][2]int) error {
+	if err := os.MkdirAll(m.dir, 0o700); err != nil {
+		return err
+	}
+	p := filepath.Join(m.dir, markName(inst, leg))
+	if len(cmds) == 0 {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	var b strings.Builder
+	for _, cmd := range cmds {
+		b.WriteString(GMInstanceDataLine(cmd))
+		b.WriteByte('\n')
+	}
+	return os.WriteFile(p, []byte(b.String()), 0o600)
+}
+
 // LegLog returns the leg marker's lines ("": none yet).
 func (m InstanceMarks) LegLog(inst, leg string) ([]string, error) {
 	raw, err := os.ReadFile(filepath.Join(m.dir, markName(inst, leg)))

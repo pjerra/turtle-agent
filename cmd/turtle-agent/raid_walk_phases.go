@@ -141,13 +141,29 @@ func (w *walk) phases(ctx context.Context) int {
 	// starts, in every --until mode including --until none (instance data
 	// is no until: it needs no label). It fires on the placement's leg
 	// after place+enter fixed the instance, so `run start` (phaseStart
-	// below) always follows the lines. An explicit --from step names no
-	// leg: nothing fires here — the run's first status still precedes the
-	// first pull, and pollOnce's hold covers it. (checkStartLine stays
-	// clean: the run's own label checks run there, the lines go out here.)
-	if w.place != nil && len(w.gmInstanceData) > 0 {
-		if err := w.gmInstanceDataStart(ctx, w.gmInstanceDataInst(ctx), w.place.Leg); err != nil {
-			return w.stop(err, true)
+	// below) always follows the lines. An explicit --from step N inside the
+	// leg fires the same way: PlaceLegName(w.rows, N) resolves the leg the
+	// row belongs to (even a pull row: the gate is the leg's, not the
+	// row's). (checkStartLine stays clean: the run's own label checks run
+	// there, the lines go out here.)
+	if len(w.gmInstanceData) > 0 {
+		leg := ""
+		if w.place != nil {
+			leg = w.place.Leg
+			if leg == "" {
+				// An explicit --from step N names no leg (PlaceStart
+				// returns "" for step starts): PlaceLegName(w.rows, N)
+				// resolves the leg the staged row belongs to, even a
+				// pull row — the gate is the leg's, not the row's.
+				leg = raidwalk.PlaceLegName(w.rows, w.place.Start)
+			}
+		} else if n, err := raidwalk.FromStartStep(w.rows, w.fromWords); err == nil && n >= 1 && n <= len(w.rows.Steps) {
+			leg = raidwalk.PlaceLegName(w.rows, n)
+		}
+		if leg != "" {
+			if err := w.gmInstanceDataStart(ctx, w.gmInstanceDataInst(ctx), leg); err != nil {
+				return w.stop(err, true)
+			}
 		}
 	}
 	if err := w.phaseStart(ctx); err != nil {
@@ -1180,11 +1196,15 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 	// The page's lines get sequence numbers above pollSeq0: handleWipe's self-regroup rule uses the
 	// watermark to tell a line of the wipe's own page from an older one (walk 19 r6).
 	w.pollSeq0 = w.statusSeq
-	lines, err := w.pump(ctx, 5000)
+	evs, err := w.pumpEvents(ctx, 5000)
 	if err != nil {
 		return nil, err
 	}
-	for _, line := range lines {
+	for _, e := range evs {
+		line, ok := tbm.Line(e)
+		if !ok {
+			continue
+		}
 		w.logLine(now, line)
 		st, ok := raidwalk.ParseRun(line)
 		if !ok || st.Plan != w.plan.Name {
@@ -1217,14 +1237,27 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 		// here, once per instance, when a walk reaches the leg mid-run. A
 		// failing send breaks the walk. The 3 s gaps between the lines run
 		// inline in pollOnce and stall its polling for ~6 s once per
-		// instance; nothing is lost (the poll loop re-reads the feed).
-		// A status that names the leg while the run is already past the
-		// pull gate's first pull is too late to help it: the walk pauses
+		// instance. A status that names the leg while the run is already past
+		// the pull gate's first pull is too late to help it: the walk pauses
 		// the run first (`.bot run pause`, resumed after the last line),
 		// so the next pull waits for the lines. The walk fires at most one
-		// spec per poll this way; the next poll fires the next.
-		if err := w.gmInstanceDataSendPending(ctx, st); err != nil {
+		// spec per poll this way; the next poll fires the next. After a
+		// firing the cursor rewinds to the firing line (the way
+		// waitTBMMatch rewinds to its matched line) and the loop breaks:
+		// the firing's reply read already advanced the cursor past newer
+		// lines, but it only logged them — the next poll re-reads the
+		// unfired tail in order, so no status after the firing ever
+		// processes past an adopted newer one (a rewind to the page start
+		// would re-feed the pre-fire statuses instead, regressing
+		// lastStatus; the rerunStale filter above re-applies to the
+		// re-read lines unchanged).
+		fired, err := w.gmInstanceDataSendPending(ctx, st)
+		if err != nil {
 			return nil, err
+		}
+		if fired {
+			w.eventsAt = e.Seq
+			break
 		}
 		if st.Note != "" {
 			w.newNotes = append(w.newNotes, st.Note)
