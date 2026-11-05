@@ -308,3 +308,26 @@ func TestRosterHunterSpecAliasAndTalentBuilds(t *testing.T) {
 		}
 	}
 }
+func TestRosterTankSeats(t *testing.T) {
+	cases := []struct {
+		name string
+		json string
+		want int
+	}{
+		{"mt and ot", `{"format":"tb-raid-roster","version":1,"level":60,
+			"batches":[{"role":"mt","hire":"1 warrior:tank"},{"role":"ot","hire":"1t"},{"role":"rest","hire":"5h 13d"}]}`, 2},
+		{"class tokens", `{"format":"tb-raid-roster","version":1,"level":60,
+			"batches":[{"role":"mt","hire":"1 warrior:tank"},{"role":"ot","hire":"1 druid:tank 1 warrior:tank"},{"role":"rest","hire":"18d"}]}`, 3},
+		{"rest holds a tank", `{"format":"tb-raid-roster","version":1,"level":60,
+			"batches":[{"role":"mt","hire":"1 warrior:tank"},{"role":"rest","hire":"2t 18d"}]}`, 3},
+	}
+	for _, c := range cases {
+		r, err := ParseRoster([]byte(c.json))
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if got := r.TankSeats(); got != c.want {
+			t.Errorf("%s: TankSeats = %d, want %d", c.name, got, c.want)
+		}
+	}
+}

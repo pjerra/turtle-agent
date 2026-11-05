@@ -1,5 +1,9 @@
 # Change log
 
+## 2026-11-11
+
+- **Added**: `walk-preflight` checks a walk directory before any raid-walk starts: binaries, `slots.json` and its path, the per-account instance cap, the leases, `--place`/`--gm-clear`, the plan against its deployed export, the server config keys and the raid rosters, one OK/WARN/FAIL line per subject (exit 0/1/2). Read-only: nothing in the walk directory, the slot table or the server configs is written.
+
 ## 2026-11-08
 
 - **Update**: `raid-walk --practice` round 3. A reset whose `run pause` is refused, not ACKed, or not confirmed by a paused status on this plan within 10 s ends the practice before any GM action (`run pause refused`); the boss binds to the one engaged guid (a client unit list without it refuses before any GM action), and a failed reset is counted once per reset. The sustain skips stale/absent/0 boss HP samples and only ends the attempt after 3 consecutive "unit not in view" misses (never exit 18); an already-read events page keeps its unread tail; `fight_ids` reach 15 s before the bind so the first pull's fight is included. The autopilot's practice relaunch passes the remaining cycles, counts every other non-zero exit under the same 2-relaunch cap, treats exit 0 with `never engaged` as an exit-18 relaunch (not a boss death), and keeps the boss-death fresh relaunch out of the failed-placement count.
