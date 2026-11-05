@@ -16,6 +16,7 @@ status: draft
 # Start and run the dashboard
 
 The dashboard polls running agents over loopback RPC and serves one page. It is read-only unless you add `--edit` or `--control`.
+The agents it watches are covered in [the agent and its RPC](/agent/index.md); the dungeon and raid runs it shows in [dungeon runs](/dungeons/index.md) and [raids](/raids/index.md).
 
 ## 1. Serve the page for every agent in your settings
 

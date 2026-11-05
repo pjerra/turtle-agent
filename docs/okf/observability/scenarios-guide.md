@@ -18,6 +18,7 @@ status: draft
 # Repeat a live test with scenarios
 
 A scenario is a repeatable live test: steps drive 1–8 running agents over JSON-RPC, built-in checks print PASS/FAIL, and `raw.txt` plus `norm.txt` diff cleanly before and after a deploy. The examples are `scenarios/lft-addon-path.json` and `scenarios/itemleg3-g1-items.json`.
+Scenarios drive the same RPC the agent pages document ([the agent and its RPC](/agent/index.md)) and the combat they exercise is scored as in [trace checks](/observability/trace-checks-concept.md).
 
 ## 1. Write the file
 
