@@ -462,6 +462,43 @@ func TestAutoInitSeq(t *testing.T) {
 	}
 }
 
+// Review round 1: the rows cache is keyed by the migration's path, mtime and size, so a redeployed migration is read
+// again (the resume step is then adjusted against the rows a walk now places against).
+func TestAutoRowsCacheRereadsAChangedMigration(t *testing.T) {
+	f := newAutoFixture(t)
+	fallback, err := os.ReadFile("testdata/zg-place-fallback-20000000.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployed, err := os.ReadFile("testdata/zg-20261101093000.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "walk.sql")
+	if err := os.WriteFile(path, fallback, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := &autoSupervisor{o: autoOptions{walkDir: f.walk}}
+	target := raidwalk.AutoTarget{ID: "a", Args: []string{"zul_gurub", "--sql", path}}
+	first, ok := s.targetRows(target)
+	if !ok || len(first.Steps) == 0 {
+		t.Fatalf("the fixture migration was not read (ok=%v)", ok)
+	}
+	if again, ok := s.targetRows(target); !ok || len(again.Steps) != len(first.Steps) {
+		t.Fatalf("a cache hit changed the rows: %d then %d", len(first.Steps), len(again.Steps))
+	}
+	if err := os.WriteFile(path, deployed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second, ok := s.targetRows(target)
+	if !ok {
+		t.Fatal("the redeployed migration was not read")
+	}
+	if len(second.Steps) == len(first.Steps) {
+		t.Fatalf("the redeployed migration was served from the cache (%d steps)", len(second.Steps))
+	}
+}
+
 func TestAutoSummaryReadsTheSingularBossKill(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "summary.json")

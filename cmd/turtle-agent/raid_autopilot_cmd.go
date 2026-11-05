@@ -274,11 +274,8 @@ func raidAutopilotCmd(ctx context.Context, args []string, stdout, stderr io.Writ
 	s.states = groupAutoTargets(targets)
 	s.noteTargetsStat()
 	s.initSeq()
-	// The resume rows are read before the loop: a restart's step adjustment must not parse a migration while it
-	// holds the id's state mutex (a YIELD stops every id through it).
-	for _, t := range targets {
-		s.targetRows(t)
-	}
+	// The resume rows are read before each launch, outside the id's state mutex (preReadRows): an id a targets
+	// re-read adds has no cache entry yet, and a YIELD stops every id through that mutex.
 	// A YIELD-DONE from an earlier YIELD is stale at this start (M6): this run writes its own only if a YIELD comes.
 	_ = os.Remove(filepath.Join(o.walkDir, autoYieldDone))
 	if err := s.reconcile(); err != nil {
@@ -445,9 +442,21 @@ func autoReadRows(t raidwalk.AutoTarget) (planexport.Rows, bool) {
 	return planexport.Rows{}, false
 }
 
-// targetRows is autoReadRows once per plan + --dir + --sql.
+// targetRows is autoReadRows once per plan + --dir + --sql. The cache key carries the migration's mtime and size, so a
+// redeployed migration is read again instead of keeping the rows of the file it replaced (the resume step is then
+// adjusted against the rows a walk now places against). A --sql that cannot be stat'ed is not cached: it may appear.
 func (s *autoSupervisor) targetRows(t raidwalk.AutoTarget) (planexport.Rows, bool) {
-	key := t.Args[0] + "\x00" + autoFlag(t.Args, "--dir") + "\x00" + autoFlag(t.Args, "--sql")
+	sql := autoFlag(t.Args, "--sql")
+	path := slots.ExpandTilde(sql)
+	key := t.Args[0] + "\x00" + autoFlag(t.Args, "--dir") + "\x00" + sql
+	if path == "" {
+		return autoReadRows(t)
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		return autoReadRows(t)
+	}
+	key += fmt.Sprintf("\x00%s\x00%d", st.ModTime().UTC().Format(time.RFC3339Nano), st.Size())
 	s.rowsMu.Lock()
 	if e, ok := s.rowsCache[key]; ok {
 		s.rowsMu.Unlock()
@@ -462,6 +471,21 @@ func (s *autoSupervisor) targetRows(t raidwalk.AutoTarget) (planexport.Rows, boo
 	s.rowsCache[key] = autoRows{rows: rows, ok: ok}
 	s.rowsMu.Unlock()
 	return rows, ok
+}
+
+// preReadRows reads one id's rows before its launch, outside the id's state mutex: an id added or changed by a
+// targets re-read has no cache entry, and parsing its migration while st.mu is held would keep a YIELD's stop of that
+// id waiting on the parse.
+func (s *autoSupervisor) preReadRows(st *autoState) {
+	st.mu.Lock()
+	var t raidwalk.AutoTarget
+	if st.current < len(st.goals) {
+		t = st.goals[st.current].target
+	}
+	st.mu.Unlock()
+	if t.ID != "" {
+		s.targetRows(t)
+	}
 }
 
 // autoResumeStart makes a --from "step N" a start raid-walk takes: a restart resumes at the furthest step a run
@@ -1042,6 +1066,7 @@ func (s *autoSupervisor) tickState(st *autoState) {
 			st.done, st.stopped = true, true
 			st.mu.Unlock()
 		case due:
+			s.preReadRows(st)
 			s.launch(st)
 		}
 		return
