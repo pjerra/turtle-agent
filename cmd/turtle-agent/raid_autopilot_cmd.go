@@ -182,6 +182,8 @@ type autoState struct {
 	// finish (the slot is torn down as a YIELD would) and it is never launched again.
 	stopping bool
 	stopWhy  string
+	// stopped says a STOP-<id> file (or a removed line) ended this id: it is done, but not because its goals were met.
+	stopped bool
 	// remove says the id's targets.txt lines are gone (or changed): once the stop is done the state is dropped.
 	remove bool
 }
@@ -707,7 +709,7 @@ func (s *autoSupervisor) allDone() bool {
 func (s *autoSupervisor) allGoalsMet() bool {
 	for _, st := range s.stateList() {
 		st.mu.Lock()
-		met := st.done
+		met := st.done && !st.stopped
 		st.mu.Unlock()
 		if !met {
 			return false
@@ -726,7 +728,7 @@ func (s *autoSupervisor) finishAll() int {
 		s.event("all", "done", "every target's goals are met")
 		return exitOK
 	}
-	escalated, refused := 0, 0
+	escalated, refused, stopped := 0, 0, 0
 	for _, st := range s.stateList() {
 		st.mu.Lock()
 		if st.escalated {
@@ -735,9 +737,12 @@ func (s *autoSupervisor) finishAll() int {
 		if st.refused {
 			refused++
 		}
+		if st.stopped {
+			stopped++
+		}
 		st.mu.Unlock()
 	}
-	s.event("all", "finished", fmt.Sprintf("not every target's goals are met (%d escalated, %d refused)", escalated, refused))
+	s.event("all", "finished", fmt.Sprintf("not every target's goals are met (%d escalated, %d refused, %d stopped)", escalated, refused, stopped))
 	if escalated > 0 {
 		return exitAutoEscalated
 	}
@@ -956,7 +961,7 @@ func (s *autoSupervisor) requestStop(st *autoState, why string) {
 	if r != nil && r.pending == nil {
 		r.pending = &raidwalk.AutoDecision{Action: raidwalk.AutoStop, Reason: why}
 	} else if r == nil {
-		st.done = true
+		st.done, st.stopped = true, true
 	}
 	st.mu.Unlock()
 	if r == nil {
@@ -985,7 +990,7 @@ func (s *autoSupervisor) tickState(st *autoState) {
 		case stopping:
 			// requestStop already marked it done; a state whose run was gone keeps the stop.
 			st.mu.Lock()
-			st.done = true
+			st.done, st.stopped = true, true
 			st.mu.Unlock()
 		case due:
 			s.launch(st)
@@ -1126,6 +1131,9 @@ func (s *autoSupervisor) finish(st *autoState) {
 			esc = "stop: " + d.Reason
 		} else {
 			st.done = true
+			if st.stopping {
+				st.stopped = true
+			}
 		}
 	case raidwalk.AutoRestart:
 		st.last.reuse = d.Reuse
@@ -2250,6 +2258,8 @@ func (s *autoSupervisor) writeStatus() {
 		switch {
 		case st.escalated || st.refused:
 			fmt.Fprintf(&b, "ESCALATE %s\n", st.escalation)
+		case st.stopped:
+			fmt.Fprintf(&b, "%s goal=%s stopped (%s)\n", st.id, g, st.stopWhy)
 		case st.done:
 			fmt.Fprintf(&b, "%s goal=%s done\n", st.id, g)
 		case st.run == nil:

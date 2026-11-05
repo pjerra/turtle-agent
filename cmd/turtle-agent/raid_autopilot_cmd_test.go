@@ -801,6 +801,35 @@ func TestAutoStopFileStopsOnlyItsRaid(t *testing.T) {
 	}
 }
 
+// A stopped id is done, but its goals were not met: when it is the last id the supervisor does not claim "every
+// target's goals are met", and it still exits 0 (a person asked for the stop; nothing needs one).
+func TestAutoStopFileIsNotAMetGoal(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return len(f.args()) >= 1 })
+	if err := os.WriteFile(filepath.Join(f.walk, "STOP-a"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "a stopped", func() bool {
+		done, _ := runState(s.states[0])
+		return done
+	})
+	if code := s.finishAll(); code != exitOK {
+		t.Fatalf("exit %d after a clean stop, want 0", code)
+	}
+	if strings.Contains(f.events(), "all done: every target's goals are met") {
+		t.Fatalf("a stopped id claimed every goal was met:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "1 stopped") {
+		t.Fatalf("the finished line does not count the stop:\n%s", f.events())
+	}
+	if status, _ := os.ReadFile(filepath.Join(f.walk, autoStatusFile)); !strings.Contains(string(status), "stopped (STOP-a)") {
+		t.Fatalf("status.txt does not name the stop:\n%s", status)
+	}
+}
+
 // Walk 39: targets.txt was read once at start, so every added raid needed another autopilot dir (the ramp-* dirs,
 // one per re-added raid). A line appended while the supervisor runs starts that raid without a restart, and a removed
 // line stops its raid cleanly (its slot torn down), with no ESCALATE and no re-read of the goals of an unchanged id.

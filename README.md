@@ -2895,8 +2895,9 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   it in place. A `YIELD` file in the walk dir (checked at least once a second) tears every run down, releases every
   lease, writes `YIELD-DONE` and exits 0; SIGINT/SIGTERM does the same without `YIELD-DONE`. A `STOP-<raid id>` file
   (checked every tick) stops just that raid the same clean way — its run stopped, its slot torn down and verified,
-  the id marked done and never relaunched — while the other ids keep running; the file stays and is harmless once the
-  id is done. A refused id (nothing
+  the id marked **stopped** and never relaunched — while the other ids keep running; the file stays and is harmless
+  once the id is stopped. A stopped id is not a met goal: when it is the last one, the supervisor ends with
+  `not every target's goals are met (0 escalated, 0 refused, 1 stopped)` and exit 0 (`status.txt` names the stop). A refused id (nothing
   was launched) and a done id (its slot was torn down when the goal was met) are skipped: their stale slot dirs are
   never torn down by a YIELD, and neither blocks `YIELD-DONE`. A stale `YIELD-DONE` is
   removed at start and before a new YIELD's shutdown; a `YIELD` whose teardown does not verify writes no `YIELD-DONE`
