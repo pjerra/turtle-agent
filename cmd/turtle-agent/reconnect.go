@@ -183,7 +183,13 @@ func (r *reconnector) login(ctx context.Context) (*worldSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := session.New(conn, sessionOptions(r.character, r.log, r.stderr, []string{ticket.Account, r.account}, r.password, r.planner, r.create))
+	so := sessionOptions(r.character, r.log, r.stderr, []string{ticket.Account, r.account}, r.password, r.planner, r.create)
+	gmOK, gmWhy := gmKillAuthorize(r.st, addr)
+	if gmWhy != "" {
+		fmt.Fprintln(r.stderr, "gm_kill: refused: "+gmWhy)
+	}
+	so.AllowGMKill = gmOK
+	s := session.New(conn, so)
 	runErr := make(chan error, 1)
 	go func() { runErr <- s.Run(context.Background()) }()
 	timeout := time.NewTimer(reconnectReadyWait)

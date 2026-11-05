@@ -28,11 +28,17 @@ const Version = 1
 
 // Limits the loader enforces, so a typo cannot ask for an hour-long wait or a 3-mile radius.
 const (
-	DefaultTimeoutS    = 60
-	MaxTimeoutS        = 600
+	DefaultTimeoutS = 60
+	MaxTimeoutS     = 600
+	// MaxHoldTimeoutS caps an event hold's timeout (and the timeout of a wait_for that carries one). An event can outlast any single
+	// wait: Rajaxx's seven waves run about 1272 s on the server, so a 600 s cap would fail a healthy event. TortoiseBots'
+	// kPlanMaxTimeoutS must allow the same for the hold kind (the migration's side).
+	MaxHoldTimeoutS    = 1800
 	DefaultObjectRange = 8   // yards around Near an object is looked for
 	MaxRadius          = 300 // yards
 	MaxFailText        = 400 // characters of a wait's fail_text
+	// MaxProofRadius is the most yards a use_object's proof is searched around the object (TortoiseBots kPlanMaxProofRadius).
+	MaxProofRadius = 20
 )
 
 // Point is a position in the map's coordinates.
@@ -76,7 +82,12 @@ type Plan struct {
 	// Kind is "dungeon" (the default when absent) or "raid".
 	Kind string `json:"kind,omitempty"`
 	// Status says how far the plan has been checked: draft, mapped or live-checked, then free text (see StatusDraft). Absent: not said.
-	Status   string `json:"status,omitempty"`
+	Status string `json:"status,omitempty"`
+	// Team is the party the plan needs ("alliance" or "horde"), when some of its steps only work for one: Shadowfang Keep's
+	// courtyard_door gossip (Deathstalker Adamant 3849, faction template 68 = Undercity) is refused to an Alliance party, whose
+	// tank gets `npc-busy`; the run leader has no team column on a gossip row, so dungeon_run refuses the other team before the
+	// first order (checkTeam). Empty: either team.
+	Team     string `json:"team,omitempty"`
 	Map      uint32 `json:"map"`
 	Entrance Point  `json:"entrance"`
 	// EntranceTrigger is the id of the area trigger of the dungeon's entrance portal (areatrigger_teleport in the world
@@ -127,6 +138,11 @@ type Plan struct {
 	// Raid is the raid group of a raid plan (kind "raid"): its size and a placeholder role split.
 	Raid  *RaidSpec `json:"raid,omitempty"`
 	Notes []string  `json:"notes,omitempty"`
+	// PullCeiling is the plan-wide pull size ceiling in bodies (the run leader's
+	// bodies count including the target): a pull row whose estimate is above it
+	// (or above the group's MaxBodies) is warned about by plan-check's pull_size
+	// lint. 0: the lint's default (8 for raids, 6 for parties).
+	PullCeiling int `json:"pull_ceiling,omitempty"`
 	// Watchdog sets the plan's stall levels (see WatchdogConfig); dungeon_run's watchdog parameter wins field by field. Absent: 120/240/420 s.
 	Watchdog *WatchdogConfig `json:"watchdog,omitempty"`
 	// Avoid are the regions of the map the party must never stand in or walk through: ground that kills although the navmesh calls it
@@ -181,8 +197,13 @@ type Leg struct {
 	// the plan LeaveClearYd away from them (leave_clear_test.go). The run leader's rows have no place for it yet: plan-export writes it into
 	// the leg row's comment and warns.
 	Leave []Leave `json:"leave,omitempty"`
-	Steps []Step  `json:"steps,omitempty"`
-	Boss  *Boss   `json:"boss,omitempty"`
+	// SkipExport leaves the leg out of the run leader's rows unless plan-export is asked for it by name (--with-legs): skipped
+	// unless asked for, like an optional leg without an item (Zul'Farrak's farraki_arena and zeljeb, Turtle-custom wings mapped
+	// offline and never fought live: the default export keeps today's leg numbers). The driver runs such a leg as written; only
+	// plan-export skips it. Never with Optional (an optional leg is already skipped unless asked for, by its item).
+	SkipExport bool   `json:"skip_export,omitempty"`
+	Steps      []Step `json:"steps,omitempty"`
+	Boss       *Boss  `json:"boss,omitempty"`
 	// CompanionsLoot false has the driver order the party's corpse and object looting off (".bot behavior <bot> loot off") from the start
 	// of the leg to its end, and on again after: the Zul'Farrak graveyard, where a bot that loots opens a Shallow Grave chest and wakes
 	// what lies in it. It is the leg's whole stretch, not only the boss fight (Boss.CompanionsLoot, which the boss's own loot_item needs).
@@ -349,6 +370,12 @@ type PullGroup struct {
 	// ClearYd is how far from the lead bot another patrol must be for a StandPull group's pull to go out (yards, 1-60, the
 	// pull row's param; 0: the run leader's 40). Only with StandPull.
 	ClearYd int `json:"clear_yd,omitempty"`
+	// MaxBodies is the pull row's bodies ceiling (the run leader's bodies count
+	// including the target): the pull_size lint warns when the estimate is above
+	// it, and the run leader's plan ceiling replaces the config one on this row.
+	// 0: the plan's PullCeiling (or the lint default). The pull row carries it in
+	// item (unused on pull rows today); 1-80 (kPlanMaxPullBodies).
+	MaxBodies int `json:"max_bodies,omitempty"`
 }
 
 // Hold is a scripted event that the TortoiseBots run leader fights out on one spot (its `hold` step, TortoiseBots #1041): the party
@@ -362,20 +389,53 @@ type PullGroup struct {
 // A wait_for may carry one too (WaitFor.Hold): it is that wait's run leader form, for an event whose script keeps its progress in an
 // instance data value the agent's driver does not read (Zul'Farrak's pyramid phase, instance data 1). plan-export then writes the hold
 // row in place of the wait (which the run leader could not run), and the agent's driver runs the wait as written.
+//
+// A boss's hold may leave Data out (0): the event is then DONE BY ITS UNITS, for a boss that is friendly until a script turns him (Zul'Farrak's
+// Sergeant Bly, 10 s after his gossip option). plan-export writes entry 0, param 0, flags 0 (the run leader's hold with neither done flag:
+// every unit of its entries within Radius dead, after one was seen hostile) with the boss's entry first, so he counts while still friendly
+// (TortoiseBots DungeonRunPolicy.h EventUnitCounts). A boss row would leave a friendly boss alone at once. A pull group's or a wait's hold
+// still needs Data, and a Value needs Data.
 type Hold struct {
-	Data uint32 `json:"instance_data"`
+	Data uint32 `json:"instance_data,omitempty"`
+	// Object, when set, makes the hold's done condition a game object state instead of an instance data value: plan-export
+	// writes entry Object.Entry, param the state's index (0 ready, 1 active, 2 active_alt) and flag 16 (done by object), and
+	// the run leader reads that object near the hold's spot. Data stays 0 then. A hold with neither Object nor a Data value is
+	// refused. The first user is Dire Maul West's five crystals: each is used when its four Mana Remnants die, and the hold
+	// fights them and ends when the crystal reads active - the crystals spawn ready (tw_world_gameobject.sql state 0) and the
+	// script's DoUseDoorOrButton leaves that state as it is counted, so `active` is the done sign (r39s2 slotC waited for
+	// `ready` for 4 x 120 s on a crystal that was already active; r40 slot6 passed all five holds at once on `active`). The
+	// lookup also needs the spot within 30 yd of the object (TortoiseBots' kEntryPointRadius); the plan check does not measure
+	// that.
+	Object *ObjectRef `json:"object,omitempty"`
+	State  string     `json:"state,omitempty"`
 	// Value, when set, is the value of instance data Data that ends the event, read as the script's own number, not as an encounter state:
 	// plan-export writes param Value with flags 8 alone (done by instance data), without the encounter flag 32, so the run leader neither
 	// reads a FAIL nor a reset into it (TortoiseBots DungeonPlanPolicy.h: a hold with flag 8 and not 32 takes any param). The run leader
 	// ends the hold when the data reads exactly Value, so it must be a value the script keeps for a while (a wave that is being fought),
-	// not one it passes through in a single update. Nil: the encounter state DONE (3), flags 40, as before. Only a wait_for's hold takes a
-	// value, and never 0 (the value instance data starts at): the plan check refuses both.
+	// not one it passes through in a single update. Nil: the encounter state DONE (3), flags 40, as before. A wait_for's or a boss's hold
+	// may take a value (scarlet_cathedral's Mograine/Whitemane pair reads instance data 1 at 4 in the TB-shipped plan); a pull group's
+	// never does, and no hold takes 0 (the value instance data starts at): the plan check refuses both.
 	Value    *uint32 `json:"value,omitempty"`
 	Spot     Point   `json:"spot"`
 	Radius   float32 `json:"radius"`
 	TimeoutS int     `json:"timeout_s"`
 	// Entries are more creature entries of the event (a boss's waking statues and guardians); a group's own entries are always in.
 	Entries []uint32 `json:"entries,omitempty"`
+	// SkipIfDeadOfGossip lets a units hold end without a fight when the encounter's starting NPC was already dead at its gossip step
+	// (that step must name the hold's boss and carry DeadIsDone). The core turns a friendly crew hostile only from that NPC's own
+	// script: zulfarrak.cpp npc_sergeant_blyAI turns Bly and, in the same update, Raven, Oro and Murta 10 s after his option, and
+	// switchFactionIfAlive is called from nowhere else, so a dead Bly leaves the survivors friendly for good (they cannot be pulled).
+	// The run leader (TortoiseBots, plan-export flag 32768) then ends the hold when no unit of it is hostile: at once when the whole
+	// crew lies dead, and with a note when only friendly survivors are left, instead of waiting TimeoutS for a hostility that cannot
+	// come (dungeons/zulfarrak.json's bly hold). Only a boss's hold done by its units takes it.
+	SkipIfDeadOfGossip bool `json:"skip_if_dead_of_gossip,omitempty"`
+	// ResetToGossip lets a units hold follow its event's script when it resets: when every unit of it is friendly again after
+	// the event started, the run leader goes back to the gossip step that started it instead of waiting out TimeoutS
+	// (TortoiseBots plan-export flag 16384, kPlanFlagResetToGossip). The leg needs that gossip step (npc the boss) before the
+	// hold, and the hold never carries SkipIfDeadOfGossip: a starting NPC already dead starts no event to reset. Only a boss's
+	// hold done by its units takes it (dungeons/zulfarrak.json's farraki_arena hold: farraki_arena.cpp ResetArena makes Razjal,
+	// Kath'zen and Juthza friendly and restores the gossip on a wipe or an evade).
+	ResetToGossip bool `json:"reset_to_gossip,omitempty"`
 }
 
 // The limits of a Hold and of Approach.
@@ -466,6 +526,14 @@ type Boss struct {
 	// swims a pool whose bed navmesh is cut off from the shore; specs/sw-eldermaw.md): plan-export sets the run leader's
 	// skip-unreachable flag on the boss row and carries the reason in its comment. Required to be non-empty when set.
 	SkipUnreachable string `json:"skip_unreachable,omitempty"`
+	// SummonOpenStep names the use_object step of this leg that summons the boss: its 1-based place in the leg's `steps`
+	// (that step is the open row, or the open_proof row when it carries a proof creature). The object brings the boss
+	// back — Zul'Gurub's Arlokk 14515 despawns after a wipe and only the gong 180526 starts her script again — so
+	// raid-walk may restart its run at that row instead of waiting a "boss not found" pause out. The place is a step of
+	// the plan, not a row number: the export renumbers row seqs with every cut point (Arlokk's gong is row seq 62
+	// without mmaps and 185 with), so a row number would break on the next export. Only raid-walk reads it; the driver
+	// and plan-export do not carry it (the rows have no field for it).
+	SummonOpenStep int `json:"summon_open_step,omitempty"`
 }
 
 // The two teams a Team field can name. The driver learns the leader's from its race (session.Team).
@@ -579,6 +647,10 @@ type Gossip struct {
 	Stand    *Point  `json:"stand,omitempty"`
 	RetryS   int     `json:"retry_s,omitempty"`
 	FailText string  `json:"fail_text,omitempty"`
+	// DeadIsDone says a dead NPC is the end of the step (the run leader's row carries the module's kPlanFlagDeadNpcIsDone): Sergeant Bly
+	// and his crew die in the pyramid event's troll waves in some runs, and talking to a corpse then stops the run for nothing. Only
+	// plan-export reads it; the agent's own driver still fails on a dead NPC.
+	DeadIsDone bool `json:"dead_is_done,omitempty"`
 }
 
 // Talker is who talks, By or its default.
@@ -631,7 +703,18 @@ type UseObject struct {
 	// rung that way: the Mallet of Zul'Farrak's on-use spell 11434 (SPELL_EFFECT_OPEN_LOCK_ITEM, target the game object) opens the gong's lock
 	// 459 (Gahz'ridian) and the gong's event 2488 runs; a plain use of the gong object does nothing (live 2026-10-15, round 3: no answer, no
 	// Gahz'rilla). It needs requires_item, and a stand within UseRange of the object, since the spell's range is short. Remote runs only.
-	ViaItem bool `json:"via_item,omitempty"`
+	ViaItem bool      `json:"via_item,omitempty"`
+	Proof   *UseProof `json:"proof,omitempty"`
+}
+
+// UseProof names what shows that a use_object took when the object itself changes no state (Sunken Temple's Atal'ai statues
+// 148830-148835: the script only sets NO_INTERACT on the right one and respawns the green light 148883 beside it). Exactly one of
+// GameObject (a spawned object) and Creature (a living one), within Radius yards of the object's near point. plan-export writes the
+// run leader's open_proof row (TortoiseBots DungeonPlanPolicy.h kPlanKindOpenProof). The agent's own driver does not read it.
+type UseProof struct {
+	GameObject uint32  `json:"gameobject,omitempty"`
+	Creature   uint32  `json:"creature,omitempty"`
+	Radius     float32 `json:"radius"`
 }
 
 // LootObject opens a chest or a node and takes what is in it: the leader walks next to it (to Stand when given), casts the Opening
@@ -698,12 +781,24 @@ type WaitFor struct {
 	// Hold is this wait's form for the TortoiseBots run leader (see Hold): plan-export writes it as a hold row instead of the wait. The
 	// agent's own driver does not read it.
 	Hold *Hold `json:"hold,omitempty"`
+	// AgentOnly says why the TortoiseBots run leader needs no row for this wait (a unit wait, which it cannot run: an earlier or a later row
+	// covers what the wait checks). plan-export leaves the wait out with a warning that quotes it, instead of cutting the plan there. Only a
+	// unit wait without a hold takes it. The agent's own driver runs the wait as written.
+	AgentOnly string `json:"agent_only,omitempty"`
 }
 
 // ObjectState waits for a game object to be in a state: ready (a door closed), active (open or used) or active_alt.
 type ObjectState struct {
 	ObjectRef
 	State string `json:"state"`
+	// GoneOK counts the object being gone as the wanted state, once the run has seen it: a wait that reads the object found (in any
+	// state) and later missing is done, when the miss is the object's (the agent within GoneReadYd of Near, or the module's `not-found`
+	// answer, never a refusal) and has held for GoneConfirm; a wait with no Near is never judged gone. A script that sets the object active and then removes it (Shadowfang Keep's Courtyard
+	// Door 18895, which Deathstalker Adamant's escort opens and despawns a few waypoints later) never reads "active" for long. An object
+	// never seen is not gone, only not there yet: the wait runs out its timeout as before. plan-export writes it as the wait_object
+	// row's flag 256 (the TortoiseBots module's kPlanFlagGoneIsDone, the same flag a loot or open row carries). Not with state ready: a
+	// gone object is not closed.
+	GoneOK bool `json:"gone_ok,omitempty"`
 }
 
 // HostilesGone waits until no hostile unit is within Radius yards of Center (the player when nil).
@@ -779,30 +874,32 @@ type rawPoint struct {
 }
 
 type rawPlan struct {
-	Version    *int              `json:"version"`
-	Name       string            `json:"name"`
-	Kind       string            `json:"kind"`
-	Status     string            `json:"status"`
-	Fleers     []uint32          `json:"fleers"`
-	Raid       *RaidSpec         `json:"raid"`
-	Map        *uint32           `json:"map"`
-	Entrance   *rawPoint         `json:"entrance"`
-	Trigger    uint32            `json:"entrance_trigger"`
-	Tele       string            `json:"entrance_tele"`
-	Outside    string            `json:"outside_tele"`
-	Portal     *rawPortal        `json:"portal"`
-	Band       []int             `json:"level_band"`
-	TankMinHP  *uint32           `json:"tank_min_hp"`
-	Hire       []string          `json:"hire_composition"`
-	CCPrio     []uint32          `json:"cc_priority"`
-	CCAlways   []uint32          `json:"cc_always"`
-	NoCC       []uint32          `json:"no_cc"`
-	KillFirst  []uint32          `json:"kill_first"`
-	SummonedKF []uint32          `json:"summoned_kill_first"`
-	Notes      []string          `json:"notes"`
-	Watchdog   *WatchdogConfig   `json:"watchdog"`
-	Avoid      []rawAvoid        `json:"avoid"`
-	Legs       []json.RawMessage `json:"legs"`
+	Version     *int              `json:"version"`
+	Name        string            `json:"name"`
+	Kind        string            `json:"kind"`
+	Status      string            `json:"status"`
+	Team        string            `json:"team"`
+	Fleers      []uint32          `json:"fleers"`
+	Raid        *RaidSpec         `json:"raid"`
+	Map         *uint32           `json:"map"`
+	Entrance    *rawPoint         `json:"entrance"`
+	Trigger     uint32            `json:"entrance_trigger"`
+	Tele        string            `json:"entrance_tele"`
+	Outside     string            `json:"outside_tele"`
+	Portal      *rawPortal        `json:"portal"`
+	Band        []int             `json:"level_band"`
+	TankMinHP   *uint32           `json:"tank_min_hp"`
+	Hire        []string          `json:"hire_composition"`
+	CCPrio      []uint32          `json:"cc_priority"`
+	CCAlways    []uint32          `json:"cc_always"`
+	NoCC        []uint32          `json:"no_cc"`
+	KillFirst   []uint32          `json:"kill_first"`
+	SummonedKF  []uint32          `json:"summoned_kill_first"`
+	Notes       []string          `json:"notes"`
+	PullCeiling *int              `json:"pull_ceiling"`
+	Watchdog    *WatchdogConfig   `json:"watchdog"`
+	Avoid       []rawAvoid        `json:"avoid"`
+	Legs        []json.RawMessage `json:"legs"`
 }
 
 type rawPortal struct {
@@ -832,9 +929,11 @@ type rawLeg struct {
 	CompanionsLoot *bool        `json:"companions_loot"`
 	Leftover       []uint32     `json:"leftover_entries"`
 	Optional       *OptionalLeg `json:"optional"`
-	Rest           *RestSpec    `json:"rest"`
-	Notes          []string     `json:"notes"`
-	NeedsWalk      bool         `json:"needs_walk"`
+	// SkipExport is Leg.SkipExport.
+	SkipExport bool      `json:"skip_export"`
+	Rest       *RestSpec `json:"rest"`
+	Notes      []string  `json:"notes"`
+	NeedsWalk  bool      `json:"needs_walk"`
 }
 
 type rawLeave struct {
@@ -859,15 +958,23 @@ type rawPullGroup struct {
 	StandPull bool `json:"stand_pull"`
 	// ClearYd is PullGroup.ClearYd.
 	ClearYd int `json:"clear_yd"`
+	// MaxBodies is PullGroup.MaxBodies.
+	MaxBodies *int `json:"max_bodies"`
 }
 
 type rawHold struct {
 	Data     uint32    `json:"instance_data"`
+	Object   *rawRef   `json:"object"`
+	State    string    `json:"state"`
 	Spot     *rawPoint `json:"spot"`
 	Radius   float32   `json:"radius"`
 	TimeoutS int       `json:"timeout_s"`
 	Entries  []uint32  `json:"entries"`
 	Value    *uint32   `json:"value"`
+	// SkipIfDeadOfGossip is Hold.SkipIfDeadOfGossip.
+	SkipIfDeadOfGossip bool `json:"skip_if_dead_of_gossip"`
+	// ResetToGossip is Hold.ResetToGossip.
+	ResetToGossip bool `json:"reset_to_gossip"`
 }
 
 type rawPatrol struct {
@@ -902,6 +1009,8 @@ type rawBoss struct {
 	WaitS int `json:"wait_s"`
 	// SkipUnreachable is Boss.SkipUnreachable.
 	SkipUnreachable string `json:"skip_unreachable"`
+	// SummonOpenStep is Boss.SummonOpenStep.
+	SummonOpenStep int `json:"summon_open_step"`
 }
 
 type rawStep struct {
@@ -933,6 +1042,8 @@ type rawGossip struct {
 	Stand    *rawPoint `json:"stand"`
 	RetryS   *int      `json:"retry_s"`
 	FailText string    `json:"fail_text"`
+	// DeadIsDone: see Gossip.DeadIsDone.
+	DeadIsDone bool `json:"dead_is_done"`
 }
 
 type rawUnitWait struct {
@@ -993,6 +1104,13 @@ type rawUse struct {
 	Stand        *rawPoint `json:"stand"`
 	RequiresItem *rawItem  `json:"requires_item"`
 	ViaItem      bool      `json:"via_item"`
+	Proof        *rawProof `json:"proof"`
+}
+
+type rawProof struct {
+	GameObject uint32  `json:"gameobject"`
+	Creature   uint32  `json:"creature"`
+	Radius     float32 `json:"radius"`
 }
 
 type rawItem struct {
@@ -1007,11 +1125,13 @@ type rawWait struct {
 	TimeoutS     *int         `json:"timeout_s"`
 	FailText     string       `json:"fail_text"`
 	Hold         *rawHold     `json:"hold"`
+	AgentOnly    *string      `json:"agent_only"`
 }
 
 type rawObjState struct {
 	rawRef
-	State string `json:"state"`
+	State  string `json:"state"`
+	GoneOK bool   `json:"gone_ok"`
 }
 
 type rawHostiles struct {
@@ -1140,6 +1260,13 @@ func Parse(name string, data []byte) (*Plan, error) {
 	if len(rp.SummonedKF) > 0 {
 		p.SummonedKillFirst = slices.Clone(rp.SummonedKF)
 	}
+	if rp.PullCeiling != nil {
+		if v := *rp.PullCeiling; v < 1 || v > 80 {
+			c.fail("pull_ceiling", "%d: use 1-80 bodies (or omit it for the lint default)", v)
+		} else {
+			p.PullCeiling = v
+		}
+	}
 	if rp.Portal != nil {
 		if rp.Portal.Map == nil {
 			c.fail("portal.map", "required (the outer map id)")
@@ -1247,6 +1374,8 @@ func (c *checker) kindStatus(p *Plan, rp *rawPlan) {
 			p.Status = rp.Status
 		}
 	}
+	c.team("team", rp.Team)
+	p.Team = rp.Team
 	c.entries("fleers", rp.Fleers, false)
 	p.Fleers = rp.Fleers
 	if len(rp.Hire) > 0 {
@@ -1332,13 +1461,16 @@ func (c *checker) entries(path string, es []uint32, need bool) {
 }
 
 func (c *checker) leg(path string, r *rawLeg) Leg {
-	l := Leg{Name: r.Name, Skip: r.Skip, Notes: r.Notes, NeedsWalk: r.NeedsWalk, CompanionsLoot: r.CompanionsLoot, LeftoverEntries: r.Leftover}
+	l := Leg{Name: r.Name, Skip: r.Skip, Notes: r.Notes, NeedsWalk: r.NeedsWalk, CompanionsLoot: r.CompanionsLoot, LeftoverEntries: r.Leftover, SkipExport: r.SkipExport}
 	for i, e := range r.Leftover {
 		if e == 0 {
 			c.fail(fmt.Sprintf("%s.leftover_entries[%d]", path, i), "0 is not a creature entry")
 		}
 	}
 	l.To = c.point(path+".to", r.To)
+	if r.SkipExport && r.Optional != nil {
+		c.fail(path+".skip_export", "never with optional (an optional leg is already skipped unless asked for, by its item)")
+	}
 	if o := r.Optional; o != nil {
 		l.Optional = &OptionalLeg{Item: o.Item, Name: o.Name}
 		if o.Item == 0 {
@@ -1425,7 +1557,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 			pg.Patrol = pat
 		}
 		pg.Approach = c.approach(gp+".approach", g.Approach)
-		pg.Hold = c.hold(gp+".hold", g.Hold, false)
+		pg.Hold = c.hold(gp+".hold", g.Hold, false, false)
 		pg.StandPull, pg.ClearYd = g.StandPull, g.ClearYd
 		if g.StandPull && len(g.Approach) == 0 {
 			c.fail(gp+".stand_pull", "a stand_pull group needs an approach point (its stand)")
@@ -1452,6 +1584,13 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		if g.ClearYd < 0 || g.ClearYd > MaxStandPullClearYd {
 			c.fail(gp+".clear_yd", "%d: use 0 (the run leader's 40) or 1-%d yards", g.ClearYd, MaxStandPullClearYd)
+		}
+		if g.MaxBodies != nil {
+			if v := *g.MaxBodies; v < 1 || v > 80 {
+				c.fail(gp+".max_bodies", "%d: use 1-80 bodies (the pull row's item; kPlanMaxPullBodies)", v)
+			} else {
+				pg.MaxBodies = v
+			}
 		}
 		l.PullGroups = append(l.PullGroups, pg)
 	}
@@ -1525,7 +1664,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		}
 		b.WaitS = r.Boss.WaitS
 		b.Approach = c.approach(bp+".approach", r.Boss.Approach)
-		b.Hold = c.hold(bp+".hold", r.Boss.Hold, false)
+		b.Hold = c.hold(bp+".hold", r.Boss.Hold, true, true)
 		if b.Hold != nil && b.LootItem != nil {
 			c.fail(bp+".hold", "a boss with a hold has no loot_item: the run leader's hold row has no loot")
 		}
@@ -1544,6 +1683,7 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		if r.Boss.SkipUnreachable != "" && strings.TrimSpace(r.Boss.SkipUnreachable) == "" {
 			c.fail(bp+".skip_unreachable", "required to be non-empty when set (why the boss may stand out of the party's reach)")
 		}
+		b.SummonOpenStep = r.Boss.SummonOpenStep
 
 		l.Boss = &b
 	}
@@ -1557,6 +1697,69 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 		l.Steps = append(l.Steps, c.step(sp, &s))
 	}
 	c.batches(path, l.Steps)
+	// A summoning open row: the plan names the use_object step whose object brings the boss back (raid-walk restarts its run
+	// there when the boss is gone), so the pointer has to be a step of this leg that exports to an open/open_proof row. A
+	// via_item step exports to a use_on row, which the run leader cannot repeat as an open.
+	if l.Boss != nil && l.Boss.SummonOpenStep != 0 {
+		sp := path + ".boss.summon_open_step"
+		switch step := l.Boss.SummonOpenStep; {
+		case step < 1 || step > len(l.Steps):
+			c.fail(sp, "%d is no step of this leg (it has %d): name the step that holds the open object, counted from 1", step, len(l.Steps))
+		case l.Steps[step-1].UseObject == nil:
+			c.fail(sp, "steps[%d] is a %s step, not a use_object step: the row that summons the boss is an open or open_proof row", step-1, planStepKind(l.Steps[step-1]))
+		case l.Steps[step-1].UseObject.ViaItem:
+			c.fail(sp, "steps[%d] is a use_on step (via_item): it exports to a use_on row, not an open the run leader can repeat", step-1)
+		}
+	}
+	// A hold that ends when its starting NPC was already dead needs that NPC's gossip step to allow a dead NPC: the run leader only
+	// knows the hold may end without a fight from the gossip row it counted done, and the step must name the boss the hold fights.
+	if l.Boss != nil && l.Boss.Hold != nil && l.Boss.Hold.SkipIfDeadOfGossip {
+		start := -1
+		for i, s := range l.Steps {
+			if s.Gossip != nil && s.Gossip.NPC == l.Boss.Entry {
+				start = i
+			}
+		}
+		switch {
+		case start < 0:
+			c.fail(path+".boss.hold.skip_if_dead_of_gossip", "needs a gossip step of this leg that starts the encounter (npc %d, the boss) before the hold", l.Boss.Entry)
+		case !l.Steps[start].Gossip.DeadIsDone:
+			c.fail(path+".boss.hold.skip_if_dead_of_gossip", "the gossip step of npc %d does not carry dead_is_done: the run leader would pause on the dead NPC before the hold", l.Boss.Entry)
+		}
+	}
+	// A units hold that goes back to its gossip when the script resets it needs that gossip step to be the row TB's walk-back
+	// lands on: DungeonRunPolicy.h EventStartStep walks back from the hold over move, move_direct, rest and wait_object rows
+	// only, and the first Ritual, Open, UseItem, Gossip or UseOn row wins; anything else between refuses (TB stays on the hold).
+	// In plan steps: ritual, gossip, use_object (open or use_on) and use_item steps that export are event starters; a rest row
+	// (a leg's rest gates) and a wait_object row (a gameobject wait) are passed; an area_trigger step exports to a move row (the
+	// walk into the zone), so it is passed too. A loot_object step exports to a loot row (no walk-back); a hostiles_gone or unit
+	// wait has no usable row (wait_clear is not walked back over, a unit wait cuts or is agent_only); a wait's own hold row is a
+	// second hold (the walk-back from the boss hold passes it first and lands on that wait's event instead).
+	if l.Boss != nil && l.Boss.Hold != nil && l.Boss.Hold.ResetToGossip {
+		start, stop := -1, ""
+		for i, s := range l.Steps {
+			starter := s.Ritual != nil || s.Gossip != nil || s.UseObject != nil || s.UseItem != nil
+			pass := (s.AreaTrigger != nil && s.AreaTrigger.By != TriggerAgent) ||
+				(s.WaitFor != nil && s.WaitFor.GameObject != nil && s.WaitFor.Hold == nil)
+			switch {
+			case starter:
+				start, stop = i, ""
+			case pass:
+				// A move, rest or wait_object row: the walk-back passes it.
+			default:
+				start, stop = -1, fmt.Sprintf("steps[%d] (%s)", i, planStepKind(s))
+			}
+		}
+		switch {
+		case start < 0 && stop != "":
+			c.fail(path+".boss.hold.reset_to_gossip", "the run leader walks back from the hold over move, move_direct, rest and wait_object rows only: %s comes between the gossip and the hold, so TB's EventStartStep would stay on the hold through a reset instead of going back to the gossip (npc %d, the boss)", stop, l.Boss.Entry)
+		case start < 0:
+			c.fail(path+".boss.hold.reset_to_gossip", "needs a gossip step of this leg that starts the encounter (npc %d, the boss) right before the hold: that is the step the run leader goes back to", l.Boss.Entry)
+		case l.Steps[start].Gossip == nil || l.Steps[start].Gossip.NPC != l.Boss.Entry:
+			c.fail(path+".boss.hold.reset_to_gossip", "the last step of this leg that starts an event is not the gossip of npc %d (the boss): the run leader would go back to that step", l.Boss.Entry)
+		}
+	}
+
 	for i, rs := range r.AfterBoss {
 		sp := fmt.Sprintf("%s.after_boss[%d]", path, i)
 		var s rawStep
@@ -1595,6 +1798,37 @@ func (c *checker) leg(path string, r *rawLeg) Leg {
 	return l
 }
 
+// planStepKind names a parsed step for the reset_to_gossip walk-back refusal: the step kind a reader of the plan file looks for.
+func planStepKind(s Step) string {
+	switch {
+	case s.Ritual != nil:
+		return "ritual"
+	case s.Gossip != nil:
+		return "gossip"
+	case s.UseObject != nil:
+		return "use_object"
+	case s.UseItem != nil:
+		return "use_item"
+	case s.LootObject != nil:
+		return "loot_object"
+	case s.AreaTrigger != nil:
+		return "area_trigger"
+	case s.WaitFor != nil:
+		if s.WaitFor.GameObject != nil {
+			return "wait_for gameobject"
+		}
+		if s.WaitFor.HostilesGone != nil {
+			return "wait_for hostiles_gone"
+		}
+		if s.WaitFor.Unit != nil {
+			return "wait_for unit"
+		}
+		return "wait_for"
+	default:
+		return "step"
+	}
+}
+
 // approach reads a pull group's or a boss's approach points.
 func (c *checker) approach(path string, ps []rawPoint) []Point {
 	if len(ps) > MaxApproach {
@@ -1607,27 +1841,64 @@ func (c *checker) approach(path string, ps []rawPoint) []Point {
 	return out
 }
 
-// hold reads a pull group's, a boss's or a wait's hold. A value is allowed on a wait's hold only (a pull group's or a boss's hold is an
-// encounter that ends DONE), and never 0: an instance data value starts at 0, so such a hold would end the moment it begins.
-func (c *checker) hold(path string, r *rawHold, valueAllowed bool) *Hold {
+// hold reads a pull group's, a boss's or a wait's hold. A value is allowed on a wait's or a boss's hold, never on a pull group's, and
+// never 0: an instance data value starts at 0, so such a hold would end the moment it begins. unitsAllowed (a boss's hold only) lets
+// instance_data be left out: the event is done by its units (see Hold).
+func (c *checker) hold(path string, r *rawHold, valueAllowed, unitsAllowed bool) *Hold {
 	if r == nil {
 		return nil
 	}
-	h := &Hold{Data: r.Data, Radius: r.Radius, TimeoutS: r.TimeoutS, Entries: r.Entries, Value: r.Value}
+	h := &Hold{Data: r.Data, Radius: r.Radius, TimeoutS: r.TimeoutS, Entries: r.Entries, Value: r.Value, SkipIfDeadOfGossip: r.SkipIfDeadOfGossip, ResetToGossip: r.ResetToGossip}
 	h.Spot = c.point(path+".spot", r.Spot)
-	if r.Data == 0 {
-		c.fail(path+".instance_data", "required (the index of the event's instance data, 1 or more)")
+	if r.Object != nil {
+		h.State = r.State
+		h.Object = &ObjectRef{Entry: r.Object.Entry, Spawn: r.Object.Spawn}
+		if r.Data != 0 {
+			c.fail(path+".instance_data", "is for a hold done by instance data; an object hold names object and state instead")
+		}
+		if r.Object.Entry == 0 {
+			c.fail(path+".object.entry", "required (the game object whose state ends the hold)")
+		}
+		if r.Object.Near != nil {
+			p := c.point(path+".object.near", r.Object.Near)
+			h.Object.Near = &p
+		}
+		if !slices.Contains(ObjectStates, r.State) {
+			c.fail(path+".state", "%q is none of %s", r.State, strings.Join(ObjectStates, ", "))
+		}
+		if r.Value != nil {
+			c.fail(path+".value", "an object hold ends on the object's state; it takes no value")
+		}
+		if r.SkipIfDeadOfGossip || r.ResetToGossip {
+			c.fail(path, "an object hold ends on the object's state; it takes neither skip_if_dead_of_gossip nor reset_to_gossip")
+		}
+	} else {
+		switch {
+		case r.Data == 0 && r.Value != nil:
+			c.fail(path+".instance_data", "required with a value (the value is of that instance data)")
+		case r.Data == 0 && !unitsAllowed:
+			c.fail(path+".instance_data", "required (the index of the event's instance data, 1 or more); only a boss's hold may leave it out (done by its units), or give object and state")
+		}
+		if r.SkipIfDeadOfGossip && (!unitsAllowed || r.Data != 0) {
+			c.fail(path+".skip_if_dead_of_gossip", "only a boss's hold done by its units (instance_data left out) takes it: a hold done by instance data ends by that data")
+		}
+		if r.ResetToGossip && (!unitsAllowed || r.Data != 0) {
+			c.fail(path+".reset_to_gossip", "only a boss's hold done by its units (instance_data left out) takes it: a hold done by instance data ends by that data")
+		}
+		if r.ResetToGossip && r.SkipIfDeadOfGossip {
+			c.fail(path+".reset_to_gossip", "cannot be combined with skip_if_dead_of_gossip: a starting NPC already dead starts no event to reset")
+		}
 	}
 	if r.Radius <= 0 || r.Radius > 100 {
 		c.fail(path+".radius", "%g: 1-100 yards (how far from the spot the event's mobs are fought)", r.Radius)
 	}
-	if r.TimeoutS <= 0 || r.TimeoutS > MaxTimeoutS {
-		c.fail(path+".timeout_s", "%d s is outside 1-%d", r.TimeoutS, MaxTimeoutS)
+	if r.TimeoutS <= 0 || r.TimeoutS > MaxHoldTimeoutS {
+		c.fail(path+".timeout_s", "%d s is outside 1-%d", r.TimeoutS, MaxHoldTimeoutS)
 	}
 	c.entries(path+".entries", r.Entries, false)
 	switch {
 	case r.Value != nil && !valueAllowed:
-		c.fail(path+".value", "only a wait_for's hold takes a value; a pull group's or a boss's hold ends on the encounter state DONE")
+		c.fail(path+".value", "only a wait_for's or a boss's hold takes a value; a pull group's hold ends on the encounter state DONE")
 	case r.Value != nil && *r.Value == 0:
 		c.fail(path+".value", "0 is the value instance data starts at, so the hold would end at once: give the value the event reaches")
 	}
@@ -1705,6 +1976,23 @@ func (c *checker) step(path string, r *rawStep) Step {
 				c.fail(path+".use_object.via_item", "needs near and stand: the item's spell has a short range, so the stand must be within %g yd of the object", UseRange)
 			case dist3(*u.Stand, *u.Near) > UseRange:
 				c.fail(path+".use_object.stand", "is %.1f yd from near; with via_item the stand must be within %g yd (the item's spell range)", dist3(*u.Stand, *u.Near), UseRange)
+			}
+		}
+		if p := r.UseObject.Proof; p != nil {
+			pp := path + ".use_object.proof"
+			switch {
+			case (p.GameObject == 0) == (p.Creature == 0):
+				c.fail(pp, "name exactly one of gameobject and creature: the entry whose spawn shows that the use took")
+			case p.Radius <= 0 || p.Radius > MaxProofRadius:
+				c.fail(pp+".radius", "%g: more than 0 and at most %d yards around near", p.Radius, MaxProofRadius)
+			case u.ViaItem:
+				c.fail(pp, "a via_item use is the run leader's use_on, which takes no proof")
+			case u.Near == nil || u.Entry == 0:
+				c.fail(pp, "needs the object's entry and near: the proof is searched around the object's point")
+			case p.GameObject != 0 && p.GameObject == u.Entry:
+				c.fail(pp+".gameobject", "%d is the used object itself: the proof is another object", p.GameObject)
+			default:
+				u.Proof = &UseProof{GameObject: p.GameObject, Creature: p.Creature, Radius: p.Radius}
 			}
 		}
 		s.UseObject = u
@@ -1808,7 +2096,7 @@ func (c *checker) ritual(path string, r *rawRitual) *Ritual {
 }
 
 func (c *checker) gossip(path string, r *rawGossip) *Gossip {
-	out := &Gossip{NPC: r.NPC, By: r.By}
+	out := &Gossip{NPC: r.NPC, By: r.By, DeadIsDone: r.DeadIsDone}
 	if r.NPC == 0 {
 		c.fail(path+".npc", "required (the entry of the creature to talk to)")
 	}
@@ -1877,8 +2165,12 @@ func (c *checker) wait(path string, r *rawWait) *WaitFor {
 		w.FailText = r.FailText
 	}
 	if r.TimeoutS != nil {
-		if *r.TimeoutS <= 0 || *r.TimeoutS > MaxTimeoutS {
-			c.fail(path+".timeout_s", "%d s is outside 1-%d", *r.TimeoutS, MaxTimeoutS)
+		limit := MaxTimeoutS
+		if r.Hold != nil {
+			limit = MaxHoldTimeoutS // an event hold can run past 600 s (see MaxHoldTimeoutS)
+		}
+		if *r.TimeoutS <= 0 || *r.TimeoutS > limit {
+			c.fail(path+".timeout_s", "%d s is outside 1-%d", *r.TimeoutS, limit)
 		} else {
 			w.TimeoutS = *r.TimeoutS
 		}
@@ -1894,9 +2186,12 @@ func (c *checker) wait(path string, r *rawWait) *WaitFor {
 		w.Unit = c.unitWait(path+".unit", r.Unit)
 	case r.GameObject != nil:
 		gp := path + ".gameobject"
-		g := &ObjectState{ObjectRef: c.ref(gp, &r.GameObject.rawRef), State: r.GameObject.State}
+		g := &ObjectState{ObjectRef: c.ref(gp, &r.GameObject.rawRef), State: r.GameObject.State, GoneOK: r.GameObject.GoneOK}
 		if !validState(g.State) {
 			c.fail(gp+".state", "%q is none of %s", g.State, strings.Join(ObjectStates, ", "))
+		}
+		if r.GameObject.GoneOK && g.State == "ready" {
+			c.fail(gp+".gone_ok", "a gone object is not closed: gone_ok needs state active or active_alt")
 		}
 		w.GameObject = g
 	default:
@@ -1916,7 +2211,19 @@ func (c *checker) wait(path string, r *rawWait) *WaitFor {
 		}
 		w.HostilesGone = h
 	}
-	w.Hold = c.hold(path+".hold", r.Hold, true)
+	w.Hold = c.hold(path+".hold", r.Hold, true, false)
+	if a := r.AgentOnly; a != nil {
+		switch {
+		case r.Unit == nil:
+			c.fail(path+".agent_only", "only a unit wait takes it (the other waits are rows of their own)")
+		case r.Hold != nil:
+			c.fail(path+".agent_only", "a wait with a hold is the hold's row: it cannot also be left out")
+		case strings.TrimSpace(*a) == "" || len(*a) > MaxFailText || strings.ContainsAny(*a, "\r\n\t"):
+			c.fail(path+".agent_only", "say why the run leader needs no row for it, on one line of at most %d characters", MaxFailText)
+		default:
+			w.AgentOnly = *a
+		}
+	}
 	return w
 }
 

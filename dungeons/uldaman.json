@@ -14,6 +14,7 @@
     "z": 213.686
   },
   "level_band": [41, 45],
+  "tank_min_hp": 2850,
   "hire_composition": [
     "warrior:tank",
     "priest:healer",
@@ -571,7 +572,7 @@
             {"x": -23.3, "y": 337.9, "z": -45.5}
           ],
           "approach": [
-            {"x": -17.5, "y": 292.5, "z": -46.6}
+            {"x": -20, "y": 321, "z": -40}
           ]
         },
         {
@@ -620,7 +621,8 @@
       "notes": [
         "North out of the central hall's east side: Rocksmashers/Sculptors/a Steward, then the nest of ten Deadly Cleft Scorpids (7405, level 42-43, wander 1) 6.7 yd off the route at -21 331, then the two Shadowforge Sharpshooters (7290) at the foot of the ramp, then the two pairs of Darkcaster (4848) and Archaeologist (4849) that stand 10-12 yd off the approach to the Galgann room. The casters of the Shadowforge groups run at 15 % health (EventAI 'Flee at 15% HP'), so a wounded one can bring the next group.",
         "Galgann Firehammer (7291, level 45, 13302 hp, faction 54, EventAI) stands with two Shadowforge Geologists (7030) in one creature group (leader guid 27491): the plan kills the Geologists first (boss.first). He yells on aggro and casts Amplify Flames (9482); his spell list is 3356, 8053 and 11969. Turtle-custom data: none found (the entries are untouched by the database updates read).",
-        "Its first pull groups (the Stone Steward and the Sculptor trio at -44 .. -39 / 255-273) were moved to the ancient_stone_keeper leg, where they are pulled before the Keeper (PLAN-ULDAMAN-GRIMLOK.txt, #1); the leg starts at the Rocksmasher pack at -23.8 278.5."
+        "Its first pull groups (the Stone Steward and the Sculptor trio at -44 .. -39 / 255-273) were moved to the ancient_stone_keeper leg, where they are pulled before the Keeper (PLAN-ULDAMAN-GRIMLOK.txt, #1); the leg starts at the Rocksmasher pack at -23.8 278.5.",
+        "r10 regression: the pull-group-3 approach (the ten scorpids) moves from -17.5 292.5 -46.6 to the ramp top -20 321 -40, where the r9 run waited and pulled cleanly; from the old spot the healer and the mage were 27-30 yd behind the tank when the scorpids engaged at step 79 in r10 (~/TortoiseBots-audit/PLAN-ULDAMAN-R10-REGRESSION.txt, F2)."
       ]
     },
     {
@@ -666,7 +668,8 @@
           ],
           "radius": 18,
           "approach": [
-            {"x": 19.1, "y": 366.4, "z": -40.6}
+            {"x": 19.1, "y": 366.4, "z": -40.6},
+            {"x": 37.5, "y": 363.5, "z": -42.5}
           ]
         },
         {
@@ -910,7 +913,7 @@
     },
     {
       "name": "descent",
-      "to": {"x": 141, "y": 290, "z": -26.4},
+      "to": {"x": 128, "y": 281, "z": -26.4},
       "via": [
         {"x": 121, "y": 280.5, "z": -26.3}
       ],
@@ -980,7 +983,8 @@
       "notes": [
         "Out through the Temple Door 124367 (open now) and down the long ramp that runs round the east side of the hall and the Vault: the squad east of the door (144-154 / 288-306), the patrolling Stone Steward at 165.6 261.4, the squad at the bend (118-132 / 220-230, z -42), the Steward patrol at 76 214 (z -55) and, in the room in front of Archaedas' door, the squad of seven (four Stonebreakers, two Stonecarvers, a Steward at 48-65 / 238-261, z -52). The two Vault Warders (10120) at 48.5 251.1 and 52 243.8 in that room are statues (faction 35, stoned) that Archaedas' script despawns at 33 % health; the plan leaves them.",
         "The way from the Keepers' hall to Archaedas is only this ramp: the navmesh has no other link between the Hall and the Vault level, and the ramp starts at the door 124367.",
-        "The leg walks via 121 280.5 -26.3 in the Keepers' hall before the door (TortoiseBots run 3, uldaman-events-3): the move to 141 290 paused with \"no walkable path toward the next point\" with the lead bot at 82.3 252.4 after a fight. On the mesh (floor -26.30); navmesh paths complete: hold spot 101.5 271.2 -\u003e via 21.6 yd, 82.3 252.4 -\u003e via 49.2 yd, via -\u003e to 22.1 yd. As at baelog pull group 5, the pause was the run leader reading no approach hop on the tick a walk ended (fixed in TortoiseBots fix/uldaman-run3-findings); the via point keeps each walk short."
+        "The leg walks via 121 280.5 -26.3 in the Keepers' hall before the door (TortoiseBots run 3, uldaman-events-3): the move to 141 290 paused with \"no walkable path toward the next point\" with the lead bot at 82.3 252.4 after a fight. On the mesh (floor -26.30); navmesh paths complete: hold spot 101.5 271.2 -\u003e via 21.6 yd, 82.3 252.4 -\u003e via 49.2 yd, via -\u003e to 22.1 yd. As at baelog pull group 5, the pause was the run leader reading no approach hop on the tick a walk ended (fixed in TortoiseBots fix/uldaman-run3-findings); the via point keeps each walk short.",
+        "The leg ends at 128 281 -26.4, 21-30 yd from every member of the squad east of the door, so pull group 0 is pulled to the party there (TortoiseBots run r9-19z26). Until then it ended at 141 290 -26.4, 7 yd from the squad's 7396 at 148.1 287.9: the tank engaged the squad on arrival (r8 and r9 alike) and fought at its west edge, and in r9 its combat moves ('reach spell', 'tank face away') took it 3.5 yd west onto the raised rubble at 132-139 / 296-304, a patch of mesh at z -23.8 with no link to the -26.5 floor round it: from 137.3 298.7 -23.3 every path (to 141 290, to the via, to 158.8 243.8) ended within 0.2-1.8 yd of the tank, both moves after it were refused and the run paused at step 127 until stopped. The new end is 15 yd from that patch, on the same floor; navmesh paths complete: via to end 7.0 yd, end to the squad's centre 149.08 297.32 26.7 yd, end to 158.8 243.8 (the next approach) 68.9 yd."
       ]
     },
     {

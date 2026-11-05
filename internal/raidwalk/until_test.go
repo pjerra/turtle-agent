@@ -76,7 +76,7 @@ func TestBossDoneUntil(t *testing.T) {
 		{"boss last", []planexport.StepRow{step("move"), step(planexport.KindBoss)}, "none", 2},
 	}
 	for _, c := range cases {
-		got, boss, err := BossDoneUntil(planexport.Rows{Steps: c.steps})
+		got, boss, err := BossDoneUntil(planexport.Rows{Steps: c.steps}, 1)
 		if err != nil || got != c.want || boss != c.boss {
 			t.Errorf("%s: %q, %d, %v; want %q, %d", c.name, got, boss, err, c.want, c.boss)
 		}
@@ -85,7 +85,7 @@ func TestBossDoneUntil(t *testing.T) {
 			t.Errorf("%s: ParseUntil(%q): %v", c.name, got, err)
 		}
 	}
-	if _, _, err := BossDoneUntil(planexport.Rows{Steps: []planexport.StepRow{step("move")}}); err == nil || !strings.Contains(err.Error(), "no boss step") {
+	if _, _, err := BossDoneUntil(planexport.Rows{Steps: []planexport.StepRow{step("move")}}, 1); err == nil || !strings.Contains(err.Error(), "no boss step") {
 		t.Errorf("a plan without a boss: %v", err)
 	}
 	if _, _, err := ParseUntil("boss-done"); err == nil || !strings.Contains(err.Error(), "BossDoneUntil") {
@@ -93,5 +93,53 @@ func TestBossDoneUntil(t *testing.T) {
 	}
 	if !IsBossDone(" boss-done ") || IsBossDone("boss") {
 		t.Error("IsBossDone")
+	}
+}
+
+// --from past a boss must not make boss-done resolve to the boss behind the start (spec 5.2): the walk would be
+// "until step <the start>" and the run would end at once.
+func TestBossDoneUntilFromStart(t *testing.T) {
+	step := func(kind string) planexport.StepRow { return planexport.StepRow{Kind: kind} }
+	var steps []planexport.StepRow
+	for range 40 {
+		steps = append(steps, step(planexport.KindMove))
+	}
+	steps[4] = step(planexport.KindBoss)  // step 5
+	steps[29] = step(planexport.KindBoss) // step 30
+	rows := planexport.Rows{Steps: steps}
+	got, boss, err := BossDoneUntil(rows, 10)
+	if err != nil || got != "step 31" || boss != 30 {
+		t.Fatalf("from 10: %q, %d, %v; want \"step 31\", 30", got, boss, err)
+	}
+	if got, boss, err := BossDoneUntil(rows, 1); err != nil || got != "step 6" || boss != 5 {
+		t.Fatalf("from 1: %q, %d, %v; want \"step 6\", 5", got, boss, err)
+	}
+	if _, _, err := BossDoneUntil(rows, 31); err == nil || !strings.Contains(err.Error(), "no boss step at or after step 31") {
+		t.Fatalf("no boss after the start: %v", err)
+	}
+	last := planexport.Rows{Steps: []planexport.StepRow{step(planexport.KindMove), step(planexport.KindBoss)}}
+	if got, boss, err := BossDoneUntil(last, 1); err != nil || got != "none" || boss != 2 {
+		t.Fatalf("the boss is the last step: %q, %d, %v", got, boss, err)
+	}
+}
+
+// TestBossNotFound pins the note the run leader sends when it cannot find a boss (walk 24 test2 r2):
+// "boss <N> not found: ..." names the boss entry; other notes do not.
+func TestBossNotFound(t *testing.T) {
+	for _, c := range []struct {
+		note  string
+		entry uint32
+		ok    bool
+	}{
+		{"boss 14599 not found: not alive or dead within 30.0 yd of -11703.2 -1996.8 62.1 for 60 s nor anywhere in the instance (.bot run skip if he is already dead)", 14599, true},
+		{"boss 12118 not found: not alive or dead within 30.0 yd of a b c", 12118, true},
+		{"boss 14599 not at his spot: waiting for him", 0, false},
+		{"pack 14599 not found: x", 0, false},
+		{"", 0, false},
+	} {
+		entry, ok := BossNotFound(c.note)
+		if ok != c.ok || entry != c.entry {
+			t.Errorf("BossNotFound(%q) = %d, %v; want %d, %v", c.note, entry, ok, c.entry, c.ok)
+		}
 	}
 }

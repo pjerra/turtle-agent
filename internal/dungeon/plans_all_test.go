@@ -53,18 +53,83 @@ func TestPlanKindStatusAndParty(t *testing.T) {
 	}
 }
 
-// offlineMapped are the plans whose legs, doors and steps were written by hand offline (no live walk yet), so they carry steps and are still
-// drafts. A plan leaves the list when its status moves on: TestOfflineMappedPlansAreStillDrafts fails for one that does not.
-var offlineMapped = map[string]bool{"deadmines": true, "molten_core": true, "blackwing_lair": true, "wailing_caverns-extra": true, "temple_of_ahnqiraj": true, "ruins_of_ahnqiraj": true, "lower_karazhan_halls": true, "emerald_sanctum": true, "naxxramas": true}
+// offlineMapped are the plans whose legs, doors and steps were written by hand (from the export, the scripts and the walks), so they carry
+// steps and are still drafts. A plan leaves the list when its status moves on: TestOfflineMappedPlansAreStillDrafts fails for one that does not.
+var offlineMapped = map[string]bool{"blackfathom_deeps": true, "deadmines": true, "molten_core": true, "blackwing_lair": true, "wailing_caverns-extra": true, "temple_of_ahnqiraj": true, "ruins_of_ahnqiraj": true, "lower_karazhan_halls": true, "emerald_sanctum": true, "naxxramas": true}
 
-// Ragefire Chasm is the one plan with measured hire data: 800 is the issue's tank floor for its level band (#266).
-func TestRagefireChasmPlanCarriesTheTankFloor(t *testing.T) {
-	p, err := Load(filepath.Join(plansDir, "ragefire_chasm.json"))
-	if err != nil {
-		t.Fatal(err)
+// Every plan with a level band carries its tank_min_hp, from the tank's max health in the 2026-10 test runs
+// (~/TortoiseBots-audit/specs/ta-266-tank-floors.md: 0.9 x the weakest clean run of the plan, scaled to the hire level; Ragefire
+// Chasm keeps the issue's own 800). A raid carries none (its tank's gear tier is the raid roster's), and neither does a plan
+// without a band.
+func TestDungeonPlansCarryTheTankFloor(t *testing.T) {
+	want := map[string]uint32{
+		"black_morass":          5300,
+		"blackfathom_deeps":     1500,
+		"blackrock_depths":      5000,
+		"crescent_grove":        2700,
+		"deadmines":             1200,
+		"dire_maul_east":        5100,
+		"dire_maul_north":       5300,
+		"dire_maul_west":        5200,
+		"dragonmaw_retreat":     2050,
+		"frostmane_hollow":      750,
+		"gilneas_city":          3450,
+		"gnomeregan":            2250,
+		"hateforge_quarry":      4600,
+		"karazhan_crypt":        5300,
+		"lower_blackrock_spire": 5200,
+		"maraudon_orange":       3700,
+		"maraudon_purple":       3250,
+		"ragefire_chasm":        800,
+		"razorfen_downs":        3100,
+		"razorfen_kraul":        2050,
+		"scarlet_armory":        3100,
+		"scarlet_cathedral":     3150,
+		"scarlet_graveyard":     2550,
+		"scarlet_library":       2850,
+		"scholomance":           5300,
+		"shadowfang_keep":       1350,
+		"stormwind_stockade":    1550,
+		"stormwind_vault":       5300,
+		"stormwrought_ruins":    2850,
+		"stratholme_live":       5300,
+		"stratholme_undead":     5300,
+		"sunken_temple":         4000,
+		"uldaman":               2850,
+		"wailing_caverns":       850,
+		"windhorn_canyon":       1750,
+		"zulfarrak":             2700,
 	}
-	if p.TankMinHP != 800 {
-		t.Fatalf("ragefire_chasm tank_min_hp is %d, want 800", p.TankMinHP)
+	files, err := filepath.Glob(filepath.Join(plansDir, "*.json"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("%d plan files: %v", len(files), err)
+	}
+	seen := map[string]bool{}
+	for _, f := range files {
+		p, err := Load(f)
+		if err != nil {
+			t.Errorf("%v", err)
+			continue
+		}
+		seen[p.Name] = true
+		if floor, ok := want[p.Name]; ok {
+			if p.TankMinHP != floor {
+				t.Errorf("%s tank_min_hp is %d, want %d", f, p.TankMinHP, floor)
+			}
+			continue
+		}
+		if lo, _ := p.Band(); !p.IsRaid() && lo != 0 {
+			t.Errorf("%s has a level band but no floor in the table: give it a tank_min_hp or take it off the band", f)
+			continue
+		}
+		if p.TankMinHP != 0 {
+			t.Errorf("%s carries tank_min_hp %d but is a raid or has no band", f, p.TankMinHP)
+		}
+	}
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("the floor table names %s.json, which does not load", name)
+		}
 	}
 }
 
@@ -174,7 +239,7 @@ func TestPlansOnNavmeshWhereTheMachineHasIt(t *testing.T) {
 			pts, labels, _ := planPoints(l)
 			flagged := needsWalkPoints(l)
 			for j, w := range pts {
-				if flagged[w] {
+				if flagged[w] || navmeshKnownOff[p.Name][labels[j]] {
 					walk++
 					continue
 				}
@@ -209,6 +274,15 @@ func TestPlansOnNavmeshWhereTheMachineHasIt(t *testing.T) {
 	if !checkedAny {
 		t.Skip("no draft plan's map has navmesh files here")
 	}
+}
+
+// navmeshKnownOff are the exact TB-shipped walk points the CI's mmaps copy has no floor under (the server navmesh the
+// live export was checked against and the m910q mmaps differ there by about a yard). The TB guard pins these coordinates,
+// so they cannot be snapped or flagged without making a valid pull "needs a mapping walk".
+var navmeshKnownOff = map[string]map[string]bool{
+	"crescent_grove": {"pull_groups[49].approach[1]": true},
+	"razorfen_downs": {"pull_groups[6].positions[5]": true},
+	"scholomance":    {"pull_groups[18].approach[0]": true},
 }
 
 // needsWalkPoints are the points of a leg marked needs_walk: its To, a flagged pull group's positions, a flagged boss's position,

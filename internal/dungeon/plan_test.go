@@ -107,6 +107,7 @@ func TestParseErrors(t *testing.T) {
 		{"bad stand", step(`{"use_object":{"entry":1,"stand":{"x":0,"y":0}}}`), "legs[0].steps[0].use_object.stand.z: required"},
 		{"wait nothing", step(`{"wait_for":{}}`), "legs[0].steps[0].wait_for: needs gameobject, hostiles_gone or unit"},
 		{"wait both", step(`{"wait_for":{"gameobject":{"entry":1,"state":"active"},"hostiles_gone":{"radius":5}}}`), "legs[0].steps[0].wait_for: has both gameobject and hostiles_gone"},
+		{"gone_ok is a flag", step(`{"wait_for":{"gameobject":{"entry":1,"state":"active","gone_ok":"yes"}}}`), "gone_ok"},
 		{"bad state", step(`{"wait_for":{"gameobject":{"entry":1,"state":"open"}}}`), `legs[0].steps[0].wait_for.gameobject.state: "open" is none of ready, active, active_alt`},
 		{"no state", step(`{"wait_for":{"gameobject":{"entry":1}}}`), `wait_for.gameobject.state: "" is none of`},
 		{"no radius", step(`{"wait_for":{"hostiles_gone":{}}}`), "legs[0].steps[0].wait_for.hostiles_gone.radius: required"},
@@ -122,6 +123,9 @@ func TestParseErrors(t *testing.T) {
 		{"bad boss team", leg(`{"to":{"x":0,"y":0,"z":0},"boss":{"entry":4,"team":"Horde","position":{"x":0,"y":0,"z":0}}}`), `legs[1].boss.team: "Horde" is neither`},
 		{"boss loot item no entry", leg(`{"to":{"x":0,"y":0,"z":0},"boss":{"entry":4,"loot_item":{"name":"x"},"position":{"x":0,"y":0,"z":0}}}`), "legs[1].boss.loot_item.entry: required"},
 		{"timeout", step(`{"wait_for":{"timeout_s":9999,"hostiles_gone":{"radius":5}}}`), "legs[0].steps[0].wait_for.timeout_s: 9999 s is outside 1-600"},
+		{"group max_bodies zero", leg(`{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[5],"positions":[{"x":0,"y":0,"z":0}],"max_bodies":0}]}`), "legs[1].pull_groups[0].max_bodies: 0: use 1-80"},
+		{"group max_bodies past 80", leg(`{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[5],"positions":[{"x":0,"y":0,"z":0}],"max_bodies":81}]}`), "legs[1].pull_groups[0].max_bodies: 81: use 1-80"},
+		{"plan pull_ceiling past 80", `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"pull_ceiling":81,"legs":[{"to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[5],"positions":[{"x":0,"y":0,"z":0}]}]}]}`, "pull_ceiling: 81: use 1-80"},
 	}
 	for _, c := range cases {
 		_, err := Parse("t.json", []byte(c.in))
@@ -221,6 +225,34 @@ func TestParseLootUseAndTeam(t *testing.T) {
 	}
 }
 
+// gone_ok on a wait_for gameobject is read, written back and refused on a wait that has no object.
+func TestParseWaitGoneOK(t *testing.T) {
+	const src = `{"version":1,"name":"t","map":33,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"to":{"x":1,"y":0,"z":0},"steps":[{"wait_for":{"gameobject":{"entry":18895,"near":{"x":-242.58,"y":2159.05,"z":90.62},"state":"active","gone_ok":true},"timeout_s":25}},
+  {"wait_for":{"gameobject":{"entry":18972,"state":"active"},"timeout_s":60}}]}]}`
+	p, err := Parse("t.json", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := p.Legs[0].Steps[0].WaitFor.GameObject, p.Legs[0].Steps[1].WaitFor.GameObject
+	if !a.GoneOK || b.GoneOK {
+		t.Fatalf("%+v %+v", a, b)
+	}
+	out, err := Marshal(p)
+	if err != nil || strings.Count(string(out), `"gone_ok": true`) != 1 {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	q, err := Parse("t.json", out)
+	if err != nil || !q.Legs[0].Steps[0].WaitFor.GameObject.GoneOK {
+		t.Fatalf("%v", err)
+	}
+	// hostiles_gone has no object to be gone: the key is unknown there.
+	bad := strings.Replace(src, `"gameobject":{"entry":18972,"state":"active"}`, `"hostiles_gone":{"radius":5,"gone_ok":true}`, 1)
+	if _, err := Parse("t.json", []byte(bad)); err == nil || !strings.Contains(err.Error(), "gone_ok") {
+		t.Fatalf("%v", err)
+	}
+}
+
 // after_boss holds the same kinds of steps, is checked like steps and counts as something to do for a leg.
 func TestParseAfterBoss(t *testing.T) {
 	const src = `{"version":1,"name":"t","map":1,"entrance":{"x":0,"y":0,"z":0},"legs":[
@@ -292,12 +324,16 @@ func TestApproachAndHoldAreRead(t *testing.T) {
 	if len(g.Approach) != 1 || g.Approach[0].X != 20 || g.Hold == nil || g.Hold.Data != 1 || g.Hold.Spot.X != 40 || g.Hold.Radius != 30 || g.Hold.TimeoutS != 600 || len(g.Hold.Entries) != 1 {
 		t.Fatalf("%+v %+v", g, g.Hold)
 	}
+	// An event hold may run past 600 s (Rajaxx's seven waves take about 1272 s): up to MaxHoldTimeoutS.
+	if _, err := Parse("t.json", []byte(fmt.Sprintf(base, `,"hold":{"instance_data":1,"spot":{"x":40,"y":0,"z":0},"radius":30,"timeout_s":1500}`))); err != nil {
+		t.Fatalf("a 1500 s hold was refused: %v", err)
+	}
 	for _, bad := range []string{
 		`,"approach":[{"x":1,"y":0,"z":0},{"x":2,"y":0,"z":0},{"x":3,"y":0,"z":0},{"x":4,"y":0,"z":0},{"x":5,"y":0,"z":0}]`,
 		`,"approach":[{"x":1,"y":0}]`,
 		`,"hold":{"spot":{"x":40,"y":0,"z":0},"radius":30,"timeout_s":600}`,
 		`,"hold":{"instance_data":1,"spot":{"x":40,"y":0,"z":0},"radius":0,"timeout_s":600}`,
-		`,"hold":{"instance_data":1,"spot":{"x":40,"y":0,"z":0},"radius":30,"timeout_s":601}`,
+		`,"hold":{"instance_data":1,"spot":{"x":40,"y":0,"z":0},"radius":30,"timeout_s":1801}`,
 		`,"hold":{"instance_data":1,"radius":30,"timeout_s":600}`,
 	} {
 		if _, err := Parse("t.json", []byte(fmt.Sprintf(base, bad))); err == nil {
@@ -365,5 +401,18 @@ func TestParsePhaseEntriesClashes(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err %v, want %q", tc.name, err, tc.want)
 		}
+	}
+}
+
+// The plan's required team: "alliance" or "horde" only, read into Plan.Team (Shadowfang Keep's courtyard_door gossip is
+// Horde-only). Anything else is refused like the groups' and bosses' team fields.
+func TestParsePlanTeam(t *testing.T) {
+	p, err := Parse("t.json", []byte(strings.Replace(validPlan, `"version": 1,`, `"version": 1, "team": "horde",`, 1)))
+	if err != nil || p.Team != TeamHorde {
+		t.Fatalf("%v %+v", err, p)
+	}
+	if _, err := Parse("t.json", []byte(strings.Replace(validPlan, `"version": 1,`, `"version": 1, "team": "neutral",`, 1))); err == nil ||
+		!strings.Contains(err.Error(), `"neutral" is neither "alliance" nor "horde"`) {
+		t.Fatalf("%v", err)
 	}
 }

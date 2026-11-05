@@ -30,6 +30,10 @@ import (
 // entryStatePoll is the time between two `cmd state` orders of a game-object wait.
 const entryStatePoll = 2 * time.Second
 
+// goneCarrierYd is how near the carrier must stand to the last seen point of a gone_ok object for a not-found to count as gone, when the
+// wait's ObjectRef gives no Range of its own.
+const goneCarrierYd = 20.0
+
 // entryState is the driver's state of the entry targets.
 type entryState struct {
 	probed bool
@@ -39,6 +43,11 @@ type entryState struct {
 	waitKey    [2]int
 	waitPolled time.Time
 	waitLast   string
+	// The targets a wait has had a `cmd state` answer for in this run (entry and point): with gone_ok, not-found later counts as done
+	// once it has held for GoneConfirm while the carrier stands in range of the object (carrierNear). missSince is the first counted
+	// not-found of an unbroken run of them, for the wait waitKey names.
+	seen      sightings
+	missSince time.Time
 }
 
 // entryPlanScan is what the plan's object steps (from fromLeg on) offer a probe, and whether all of them can be named by entry.
@@ -223,7 +232,7 @@ func (d *RemoteDriver) waitOnState(ctx context.Context, a Action, w *ObjectState
 	defer release()
 	key := [2]int{a.Leg, a.Step}
 	if d.entry.waitKey != key {
-		d.entry.waitKey, d.entry.waitPolled, d.entry.waitLast = key, time.Time{}, ""
+		d.entry.waitKey, d.entry.waitPolled, d.entry.waitLast, d.entry.missSince = key, time.Time{}, "", time.Time{}
 	}
 	if now := d.clk.Now(); d.entry.waitPolled.IsZero() || now.Sub(d.entry.waitPolled) >= entryStatePoll {
 		d.entry.waitPolled = now
@@ -237,6 +246,7 @@ func (d *RemoteDriver) waitOnState(ctx context.Context, a Action, w *ObjectState
 		switch {
 		case res.Kind == tbm.KindAck && res.State != nil:
 			d.entry.waitLast = fmt.Sprintf("state:%s flags:%s", res.State.State, res.State.Flags)
+			d.entry.seen.add(&w.ObjectRef)
 			if strings.EqualFold(res.State.State, wantedState(w.State)) {
 				d.rep.note(fmt.Sprintf("%s: cmd state says %s is %s (guid %d)", a.Label, describeRef(&w.ObjectRef), res.State.State, res.State.GUID))
 				d.st.SkipStep()
@@ -247,6 +257,23 @@ func (d *RemoteDriver) waitOnState(ctx context.Context, a Action, w *ObjectState
 			d.entry.waitLast = "an answer cmd state could not be read: " + res.Final
 		case res.Code() == "not-found":
 			d.entry.waitLast = "not-found: no spawned object of that entry there yet (or out of the bots' reach)"
+			if w.GoneOK && d.entry.seen.has(&w.ObjectRef) {
+				// A miss proves the object gone only while the carrier stands where it could see the object (carrierNear). Out of that
+				// range a not-found may be only the distance: the confirmation window restarts when the carrier is back in range.
+				if !d.carrierNear(w.Near, w.Range) {
+					d.entry.missSince = time.Time{}
+					d.entry.waitLast = "not-found: the carrier is out of the object's range, so the miss does not count"
+				} else if d.entry.missSince.IsZero() {
+					d.entry.missSince = now
+				}
+			}
+			if w.GoneOK && d.entry.seen.has(&w.ObjectRef) && !d.entry.missSince.IsZero() && now.Sub(d.entry.missSince) >= GoneConfirm {
+				// Seen by an earlier answer and gone now for GoneConfirm: the script removed it after using it (gone_ok).
+				d.rep.note(fmt.Sprintf("%s: cmd state says %s is gone after it was seen: counted as done (gone_ok)", a.Label, describeRef(&w.ObjectRef)))
+				d.st.SkipStep()
+				d.entry.waitKey = [2]int{-1, -1}
+				return
+			}
 		case res.Code() == "too-far":
 			d.entry.waitLast = "too-far: the point is farther from the bots than ReactDistance"
 		case res.Code() == "not-bound" || res.Code() == "disabled":
@@ -261,10 +288,31 @@ func (d *RemoteDriver) waitOnState(ctx context.Context, a Action, w *ObjectState
 		default:
 			d.entry.waitLast = res.Describe()
 		}
+		if res.Kind == tbm.KindAck || res.Code() != "not-found" {
+			d.entry.missSince = time.Time{} // any answer but a not-found breaks the run of misses
+		}
 	}
 	if err := d.tick(ctx, min(d.cfg.WaitPoll, a.Remaining)); err != nil {
 		d.stepFailedRecover(ctx, err)
 	}
+}
+
+// carrierNear says whether the carrier stands within the object's range of the wait's last seen point (near; the module answers by entry
+// and point, so the point is where the object was): the wait's Range when the plan gives one, else goneCarrierYd. No point, or no carrier
+// in the feed, is no proof: the miss does not count.
+func (d *RemoteDriver) carrierNear(near *Point, rng float32) bool {
+	if near == nil {
+		return false
+	}
+	m, err := d.carrierBot()
+	if err != nil {
+		return false
+	}
+	radius := float64(goneCarrierYd)
+	if rng > 0 {
+		radius = float64(rng)
+	}
+	return dist3(partyPoint(m), *near) <= radius
 }
 
 // stateWaitError is the failure of a game-object wait that timed out in entry mode: the Stepper's text plus what the module said last.

@@ -94,11 +94,14 @@ turtle-agent capture-stats <capture>
 turtle-agent capture events [--from RFC3339] [--to RFC3339] [--kinds a,b] [--out FILE [--force]] <capture>
 turtle-agent map [--capture FILE] [--events FILE] [--report FILE] [--botwatch FILE [--members a,b]] [--plan dungeons/x.json] [--out run.svg] [--html] [--force] [--mmaps DIR | --config FILE] [--map N] [--box x0,y0,x1,y1] [--from RFC3339] [--to RFC3339] [--pad YD] [--floors auto|off|z,z] [--background=false] [--width PX]
 turtle-agent tune-diff <trace.jsonl>
-turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--skip-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
-turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--json] <plan>...
+turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--approach-hops] [--floor-aware] [--skip-legs NAME,...] [--with-optional NAME,...] [--with-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
+turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--spawns DIR] [--floor-aware] [--approach-hops] [--strict] [--json] <plan>...
+turtle-agent plan-check --mmaps DIR --sql FILE [--plan NAME] [--spawns DIR] [--strict] [--json]
+turtle-agent plan-scout <dungeon> [--dir dungeons] [--sql FILE] [--mmaps DIR] [--spawns DIR] [--from LEG] [--until LEG] [--party-level N] [--out DIR] [--json] [--fix-out FILE] [--apply-fixes DIR] [--fail-on fail|warn] [--instance-cap-per-account N] [--live SERVER --slot N ...]
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
-turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--dry-run]
+turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--gm-instance-data LEG:"A B[;A B]"] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-per-account N] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--reuse-instance] [--dry-run]
+turtle-agent raid-autopilot [--foreground] [--binary PATH] [--poll D] [--stall D] [--settle D] [--status-every D] [--instance-cap-per-account N] [--dry-run] <walk-dir>
 turtle-agent trash-check [--dir dungeons] [--sql FILE [--plan NAME]] [--spawns DIR] [--patrols FILE]... [--mmaps DIR] [--level N] [--spread YD] [--aggro-rate R] [--assist-yd 10] [--json] [--out DIR] [--dash-out FILE] [--fail-on danger|patrol|any] [<plan>|<path.json>]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent scenario check [--var NAME=VALUE]... <file>
@@ -225,7 +228,7 @@ with `ALLOW_TURTLE_ADDONS`); add them there if you want to look like that. This 
 
 ## Test slots, leases and teardown
 
-One slot per worker. The slot table (`~/.config/turtle-agent/slots.json`, `--slots FILE`) names each server's slots with their account, character, laptop RPC port and the `settings_from` file that holds the account's password; it holds no passwords itself. `lease acquire --any` (or `--slot N`, never 3) takes a free slot for a holder name and a ttl (default 180 min); a lease is stale only when it is expired AND its client dir has no live agent, and `acquire` refuses a port that already has a listener. `slot setup` copies no settings file: it builds `<dir>/settings.json` from scratch (one account, a fresh token file per run) plus `slot.json`, the binary and the `dungeons/`/`traces/` folders, and prints the login line. `teardown <dir>` runs the RPC `teardown` first (snapshot, the player follow, `agent_run`, brain, `run stop`, unbind, `.bot remove` of listed hires, leave, gone, `.gm off`, logout), then ends the agent by its pid file, closes the port, deletes only the secrets and releases the lease (exit 14 on any fail, 15 on a refused lease). m910q slot 3 (and tortoise-test2 slot 3) is never leasable on either server. A group holding a real player (any member the `commander status` listing does not name) gets no `.bot remove` at all: a GM's remove reaches any bot, so leaving the group — which ends only your own hires — does the cleanup instead. Known limit: a classic bind (commander outside the lead's group) with a real player inside the lead's group is not detectable from the client; bot-only test runs never have that shape.
+One slot per worker. The slot table (`~/.config/turtle-agent/slots.json`, `--slots FILE`) names each server's slots with their account, character, laptop RPC port and the `settings_from` file that holds the account's password; it holds no passwords itself. A `--slots FILE` outside the default directory keeps its leases (`<dir>/leases`), its instance-cap ledger and its `instance-cap-per-account.json` there: raid-walk refuses to start (exit 2, `one ledger per server`) when the default directory holds a live lease for the same server, because the two ledgers cannot see each other (walk 38: two raids took one slot). `--allow-split-ledger` overrides it for test sandboxes. The per-server core instance cap lives beside it in `instance-cap-per-account.json` (`{"m910q": 30}`), never in the slot table (older binaries refuse unknown fields there; see `--instance-cap-per-account` below). `lease acquire --any` (or `--slot N`, never 3) takes a free slot for a holder name and a ttl (default 180 min); a lease is stale only when it is expired AND its client dir has no live agent, and `acquire` refuses a port that already has a listener. `slot setup` copies no settings file: it builds `<dir>/settings.json` from scratch (one account, a fresh token file per run) plus `slot.json`, the binary and the `dungeons/`/`traces/` folders, and prints the login line. `teardown <dir>` runs the RPC `teardown` first (snapshot, the player follow, `agent_run`, brain, `run stop`, unbind, `.bot remove` of listed hires, leave, gone, `.gm off`, logout), then ends the agent by its pid file, closes the port, deletes only the secrets and releases the lease (exit 14 on any fail, 15 on a refused lease). m910q slot 3 (and tortoise-test2 slot 3) is never leasable on either server. A group holding a real player (any member the `commander status` listing does not name) gets no `.bot remove` at all: a GM's remove reaches any bot, so leaving the group — which ends only your own hires — does the cleanup instead. Known limit: a classic bind (commander outside the lead's group) with a real player inside the lead's group is not detectable from the client; bot-only test runs never have that shape.
 
 `rpc <dir> <method> [<params-json>]` drives the agent of a slot dir with one JSON-RPC call, for live-test workers that must never read its token file: the command reads `slot.json`, checks it like `teardown` does (the dir must match, the port must be valid, outside paths are refused), reads the token file derived from the port itself, refuses it unless it has exactly the shape the agent generates (32 random bytes as 43 base64url characters; anything else gets `rpc: the token file is not an agent token`, exit 15, with the content never printed), and posts to `127.0.0.1:<port>` with the token as `Authorization: Bearer` and `Content-Type: application/json`. It prints only the `result` as JSON (pretty; `--raw` for one line), a JSON-RPC error as `error: <code> <message>` on stderr (exit 16), an unreachable agent as exit 15, usage errors as exit 2. A reply that is not a 2.0 envelope for the request (any non-200 status; a body that is not an object with `"jsonrpc":"2.0"`, `"id"` 1 and exactly one of a present `"result"` or an `"error"` object with a numeric code and a string message) is `rpc: bad reply from the agent: <reason>` on stderr, exit 15, never 0. `params-json` is an object or an array; `-` reads it from stdin; omitted means no params; `--timeout DUR` (default 30 s) bounds the call. The token never appears in output, errors or help: it is redacted from every printed line. Examples:
 
@@ -290,9 +293,10 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `status` | | state, character, map, x/y/z, `falling`, `z_unknown`, `dead`/`ghost`, health, power, `combo_points`/`combo_target`, `gcd_ms` (see [Agent state](#agent-state)), target, last event seq, `mono_ms`, `base_time` and `wall_offset_ms` (the monotonic axis of events: `base_time` is the wall time of mono_ms 0; `wall_offset_ms` is the wall clock now minus `base_time` + `mono_ms`, so host clock steps and drift show) |
+| `status` | | state, character, `team` (`alliance` or `horde`, from the character's race; empty until its create block arrives), map, x/y/z, `falling`, `z_unknown`, `dead`/`ghost`, health, power, `combo_points`/`combo_target`, `gcd_ms` (see [Agent state](#agent-state)), target, last event seq, `mono_ms`, `base_time` and `wall_offset_ms` (the monotonic axis of events: `base_time` is the wall time of mono_ms 0; `wall_offset_ms` is the wall clock now minus `base_time` + `mono_ms`, so host clock steps and drift show) |
 | `chat` | `type` (say, party, yell, emote, guild, raid, whisper, channel), `text`, `to` (whisper target or channel name) | |
 | `gm` | `text` (a `.`-command; the dot is added if missing) | |
+| `gm_kill` | `guid` (a creature) | selects the creature, waits until the server shows the selection, and sends `.die` (account level 3): the test tool of [`raid-walk --gm-clear`](#--gm-clear-test-servers-only). Refuses a player guid. It is authorized from the connection, not from settings: the agent may send `.die` only when the host it dialled (the realm's world address, or settings `world_addr`) equals the configured `world_addr` of the test server that settings `server_name` names (`m910q` or `tortoise-test2`) in the slots table; a slots entry without a `world_addr` refuses `gm_kill` at every address (its `realmd` is never a stand-in: walk 32's table had none, so every `--gm-clear` kill was refused). `server_name` alone never authorizes; a mismatch refuses with a `gm_kill: refused:` line on stderr at login (checked in the session, not only in raid-walk). It does not read the death; the caller checks the unit's `dead` |
 | `events` | `since`, `kinds`, `limit`, `wait_ms` | page: `events`, `next`, `more`, `dropped` |
 | `chat_log` | `since`, `limit` | chat and system events only |
 | `invite` / `accept_invite` / `leave_group` | `name` / – / – | |
@@ -319,7 +323,7 @@ Python (`urllib`): read the token file, strip it, and add `"Authorization": "Bea
 | `area_trigger` | `id` | CMSG_AREATRIGGER, as the client sends it on stepping into a trigger's volume (the server checks the position); a ghost uses it at a dungeon's portal |
 | `pet` | | The player's pet, from `UNIT_FIELD_SUMMON` of the player and the pet's own unit row: `present` (false: no pet), `guid`, `entry`, `name`, `level`, `dead`, `health`, `max_health`, `power_type` (2 focus for a hunter's pet, 0 mana for a demon), `power`, `max_power`, `happiness` (the pet's POWER5, 0 to 1,000,000) and `happiness_state` (1 unhappy, 2 content, 3 happy; absent for a demon), `loyalty`, `in_combat`, `target` (what it attacks), `distance`, `moving`; and its action bar, from `SMSG_PET_SPELLS`: `bar` (the session has it), `react` (`passive`, `defensive`, `aggressive`), `command` (`stay`, `follow`), `enabled` (false while the bar is off, e.g. mounted), `spells[]` (`spell_id`, `name`, `slot` 3 to 6 or -1 off the bar, `autocast`, `passive`), `refused` (the reason of its last refused cast). See [Pets](#pets) |
 | `pet_action` | `action` (`attack`, `follow`, `stay`, `passive`, `defensive`, `aggressive`, `cast`, `autocast_on`, `autocast_off`), `target` (guid; `attack` and `cast` default to the player's target), `slot` / `spell_id` / `name` (which spell, for `cast` and the autocast actions; it must be on the pet's bar) | CMSG_PET_ACTION (or CMSG_PET_SPELL_AUTOCAST for the autocast actions), as a client sends them from the pet bar; returns the `pet` result with the order applied. Errors without a pet, with a dead pet, while the bar is off, and for a spell not on the bar. The server drops what it refuses (a target the player may not attack: `pet_error` event with `data.feedback`) |
-| `plan_check` | `name` (a plan in `dungeons_dir`), `from_leg` (as `dungeon_run`), `from_pull_group` (with it; 0-based) | `checked` (false: `skipped` says why, no navmesh files or planner), `plan`, `map`, `points`, `issues` (each `leg`, `leg_name`, `part`, `pull_group` / `pull_groups`, `point`, `from`, `reason`, `detail`), `warnings`, `exempt`, `run_leader` (the same rows); see [Plan check](#plan-check) |
+| `plan_check` | `name` (a plan in `dungeons_dir`), `from_leg` (as `dungeon_run`), `from_pull_group` (with it; 0-based) | `checked` (false: `skipped` says why, no navmesh files or planner), `plan`, `map`, `points`, `issues` (each `leg`, `leg_name`, `part`, `pull_group` / `pull_groups`, `point`, `from`, `reason`, `detail`, `reanchored_after`), `reanchored` (how many issues followed a re-anchor), `warnings`, `exempt`, `run_leader` (the same rows); see [Plan check](#plan-check) |
 | `dungeon_stage` | `name`, `leg` (number from 0 or name), `cleared_through`, `use_safe_point`, `force`, `dry_run`, `start`, `resume`, `speed` (with start, 1.0-3.0), `quiet_wait_s` (0-60, default 20) | `staged`, `started`, `dry_run`, `plan`, `map`, `leg`, `leg_name`, `first`, `first_source`, `point`, `kind` (`leg_first`, `before_leg`, `forced`), `back_yd`, `floor_z`, `refusal`, `proposal` (`kind` `before_leg` or `earlier_leg`, `leg`, `leg_name`, `point`, `back_yd`), `warnings`, `notes`, `gm_commands`, `party[]`, `run` (`sent`, `start_step`, `steps`, `leg`, `line`), `seconds`; see [Staging a leg](#staging-a-leg-for-the-run-leader) |
 | `dungeon_status` | | `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), `report`, and the [run watchdog](#run-watchdog)'s view for a poller: `last_progress_at`, `stalled_for_s`, `stall_level` (`none`, `warn`, `recover`, `fail`) |
 | `dungeon_stop` | | the same as `dungeon_status`, after the run has ended |
@@ -654,7 +658,7 @@ leaving range is not reported either.
 A dungeon plan is a JSON file, `dungeons/<name>.json`, that says where a dungeon leader walks, which packs it pulls, which doors it
 opens and which boss it kills (issue #73). The format, the loader and a pure stepper over it live in `internal/dungeon`; the driver
 that carries a plan out through the RPC is described under [Dungeon runs](#dungeon-runs). `dungeons/uldaman.json` is the first one (all of Uldaman, see
-[The Uldaman plan](#the-uldaman-plan)). `dungeons/zulfarrak.json` (Zul'Farrak, map 209) is the second: eighteen legs (the road to Antu'sul in six: `antusul_a`, `antusul_a2`, `antusul_a3`, `antusul`, `antusul_c`, which starts with the hop to 1633 868 so that the walk to the pack at 1680 871 passes 30 yd south of the Shadowcaster camp, and `antusul_b`, which starts over the ledge 1769 803 and ends with Antu'sul; then Theka the Martyr and Hydromancer Velratha in two legs, `velratha` (the west road, ending at the pack of four at 1601-1610 1104-1111) and `velratha_b` (starting at the north stand 1645 1144, with the pack of five at 1636 1105, which is walled off from the west, then Velratha); then the optional `gahzrilla` leg (the Gong with the Mallet of Zul'Farrak, see [Zul'Farrak events](#zulfarrak-events-gahzrilla-the-courtyard-and-zumrah)), then, PR B, the `courtyard` after it and `zumrah`, the Witch Doctor behind an `area_trigger` step, then six legs written from the instance script, [the stairs event](#zulfarrak-the-stairs-event-bly-and-ukorz): `stairs`, `stairs_top`, `stairs_base`, `weegli_door`, `bly` and `ukorz`), written from the world database export in `tools/dungeongen/testdata/zulfarrak`; it has no `entrance_tele` (the game has no teleport inside the instance) and a remote run enters by `cmd enter 924` at the `portal` (TortoiseBots #939; on a module without that order the entry fails and the run says so: the module takes an area trigger only from the master's `CMSG_AREATRIGGER`, `PlayerbotAI.cpp:304`, `TeleportAction.cpp:41-47`, a headless bot never sends one, `.tele name` takes `game_tele` names only and `.go xyz` moves only the caller). The plan's `entrance_trigger` 924 targets map 209 at the plan's `entrance`. The plan holds every part of the instance but the Turtle-custom Farraki Arena wing: the Gong is the optional `gahzrilla` leg, Witch Doctor Zum'rah (faction 35 until area trigger 962 fires) is in it since PR B, and the stairs event, Bly's crew, the End Door and Ukorz with Ruuzlu were moved into it from the retired `zulfarrak-extra.json` when the `gossip` step and the unit waits made them runnable. The positions were checked live on 2026-10-14 by a GM-invisible walk of the whole instance (about 3130 yd, nothing attacked): static spawns match the export, Theka and Velratha patrol (the plan meets them on their patrol, boss fights search 80 yd), the End Door is shut and no leg routes through it, the graveyard of trapped Shallow Grave chests is avoided (the `zumrah` leg goes in and the `stairs` leg out, both with the bots' looting off). The six legs after Zum'rah have not run live. The tests (`TestZulfarrakOnNavmesh`; map 209 mmaps in `$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle209` or `~/tortoise-wow-server/data/mmaps`) put every waypoint on the map 209 navmesh.
+`dungeons/zulfarrak.json` (Zul'Farrak, map 209) is the second: twenty legs (the road to Antu'sul in six: `antusul_a`, `antusul_a2`, `antusul_a3`, `antusul`, `antusul_c`, which starts with the hop to 1633 868 so that the walk to the pack at 1680 871 passes 30 yd south of the Shadowcaster camp, and `antusul_b`, which starts over the ledge 1769 803 and ends with Antu'sul; then Theka the Martyr and Hydromancer Velratha in two legs, `velratha` (the west road, ending at the pack of four at 1601-1610 1104-1111) and `velratha_b` (starting at the north stand 1645 1144, with the pack of five at 1636 1105, which is walled off from the west, then Velratha); then, #243, the Turtle legs `farraki_arena` (Champion Razjal the Quick, his gossip option 0 by the tank and the units hold over the arena, between `velratha` and `velratha_b`) and `zeljeb` (the wing north of Velratha's pool and Zel'jeb the Ancient, 90 % less damage from all but Fire, between `velratha_b` and `gahzrilla`; both mapped offline on the ta243 walk, neither fought live; +~12-19 min per run; both `skip_export`: the default export leaves them out so its leg numbers stay today's, `--with-legs farraki_arena,zeljeb` includes them), then the optional `gahzrilla` leg (the Gong with the Mallet of Zul'Farrak, see [Zul'Farrak events](#zulfarrak-events-gahzrilla-the-courtyard-and-zumrah)), then, PR B, the `courtyard` after it and `zumrah`, the Witch Doctor behind an `area_trigger` step, then six legs written from the instance script, [the stairs event](#zulfarrak-the-stairs-event-bly-and-ukorz): `stairs`, `stairs_top`, `stairs_base`, `weegli_door`, `bly` and `ukorz`), written from the world database export in `tools/dungeongen/testdata/zulfarrak`; it has no `entrance_tele` (the game has no teleport inside the instance) and a remote run enters by `cmd enter 924` at the `portal` (TortoiseBots #939; on a module without that order the entry fails and the run says so: the module takes an area trigger only from the master's `CMSG_AREATRIGGER`, `PlayerbotAI.cpp:304`, `TeleportAction.cpp:41-47`, a headless bot never sends one, `.tele name` takes `game_tele` names only and `.go xyz` moves only the caller). The plan's `entrance_trigger` 924 targets map 209 at the plan's `entrance`. The plan holds every part of the instance but the Turtle-custom Farraki Arena wing: the Gong is the optional `gahzrilla` leg, Witch Doctor Zum'rah (faction 35 until area trigger 962 fires) is in it since PR B, and the stairs event, Bly's crew, the End Door and Ukorz with Ruuzlu were moved into it from the retired `zulfarrak-extra.json` when the `gossip` step and the unit waits made them runnable. The positions were checked live on 2026-10-14 by a GM-invisible walk of the whole instance (about 3130 yd, nothing attacked): static spawns match the export, Theka and Velratha patrol (the plan meets them on their patrol, boss fights search 80 yd), the End Door is shut and no leg routes through it, the graveyard of trapped Shallow Grave chests is avoided (the `zumrah` leg goes in and the `stairs` leg out, both with the bots' looting off). The six legs after Zum'rah have not run live. The tests (`TestZulfarrakOnNavmesh`; map 209 mmaps in `$TURTLE_AGENT_MMAPS`, `~/tb-ci/mmaps-turtle209` or `~/tortoise-wow-server/data/mmaps`) put every waypoint on the map 209 navmesh.
 
 ```json
 {
@@ -672,7 +676,9 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
 }
 ```
 
-- `kind` (`"dungeon"`, the default, or `"raid"`), `status` (`draft`, `mapped` or `live-checked`, then free text: how far the plan has been checked), `hire_composition`
+- `kind` (`"dungeon"`, the default, or `"raid"`), `status` (`draft`, `mapped` or `live-checked`, then free text: how far the plan has been checked), `team`
+  (optional, `"alliance"` or `"horde"`: the party the plan needs when some of its steps only work for one, Shadowfang Keep's `courtyard_door` gossip with
+  Deathstalker Adamant 3849, a Horde NPC; `dungeon_run` refuses the other team before it sends anything, and an unknown team only gets a note), `hire_composition`
   (a dungeon's party, `class:role` each, the same rules as `prepare.hire.composition`; the [hired party](#hired-party-prepare-party-hire) takes it when the prepare block gives none), `fleers`
   (creature entries that run at low health, EventAI "flee at 15 % HP"; remote mode kills them before they are out of reach and waits for one that got away, see *Runners* under tank first) and `raid`
   (`{"size": 40, "tanks": 4, "healers": 10, "dps": 26}`, required for a raid plan, size 10, 20 or 40, the roles a placeholder). A **draft** is the skeleton `tools/dungeongen` writes from the world export
@@ -687,8 +693,14 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   `prepare.fresh` step teleports the bots and the agent to before it unbinds them. A plan without them can only be entered by hand.
 - `level_band` (optional, `[low, high]`, 1 to 60; Uldaman `[41, 45]`, Zul'Farrak `[44, 48]`) is the levels the dungeon is meant for: the
   [hired party](#hired-party-prepare-party-hire) takes the middle of it as its level and accepts no other level than the band's.
-- `tank_min_hp` (optional, `0` or `100` to `20000`) is the least max health the hired tank should have for the plan's level band (Ragefire
-  Chasm `800` at 13-18); the [kit check](#remote-leader) warns below it. `0` or absent: no check.
+- `tank_min_hp` (optional, `0` or `100` to `20000`) is the least max health the hired tank should have for the plan's level band; the
+  [kit check](#remote-leader) **warns** below it, and the run refuses only with `preflight` `strict` (a warning fails the run there). The
+  floor is set at the middle of the plan's band and scaled to the hired tank's own level with the 2026-10 test runs' per-level health
+  curve, so a level-45 tank is judged against a level-45 floor. The level-60 curve jump assumes tier gear: the warning says so.
+  Every dungeon plan with a `level_band` carries one, derived from the
+  tank's max health in the 2026-10 test runs (0.9 x the weakest clean run of the plan, scaled to the plan's hire level; Ragefire Chasm
+  keeps the issue's `800` at 13-18). Raids carry none: a raid tank's health is the raid roster's gear tier, not the plan's band. `0` or
+  absent: no check.
 - `hire_composition` (optional, the form of `prepare.hire.composition`) is the hired party when the run's `prepare.hire` gives none; the loader
   checks it like the run's (one tank, one healer, two to five bots). Zul'Farrak hires `warrior:tank`, `priest:healer`, `mage`, `hunter`, `warlock`:
   the mage is the cc bot of its big packs.
@@ -706,7 +718,8 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   then sent at with no threat wait (a planned healer with no target still waits for the tank's threat) and is never a target of the reactive CC.
   Zul'Farrak (issue #190, from nine commander runs where every wipe was on a pack with a healer): `cc_priority` [7246, 5648] and
   `cc_always` [7246] (the mage sheeps the Shadowhunter that Hexes, in every pack it is in; the Witch Doctor is killed first and never sheeped: owner decision 2026-10-15), `kill_first`
-  [7785, 8179, 5650, 7247] (Zum'rah's Ward, the Greater Healing Ward the Witch Doctor's Healing Ward summons, the Witch Doctor, the Soul Eater), `summoned_kill_first` [7785, 8179].
+  [7785, 8179, 5650, 7247, 7608, 7606, 7605] (Zum'rah's Ward, the Greater Healing Ward the Witch Doctor's Healing Ward summons, the Witch Doctor, the Soul Eater, then Bly's crew in
+  his `boss.first` order: Murta, Oro, Raven, because the run leader's hold for Bly has no kill order of its own), `summoned_kill_first` [7785, 8179].
 - `watchdog` (optional, `{"warn_s": .., "recover_s": .., "fail_s": ..}`) sets the plan's stall levels for the [run watchdog](#run-watchdog);
   the loader refuses levels that are not in order (`warn_s` < `recover_s` < `fail_s`, defaults filled in). `dungeon_run`'s `watchdog` wins field by field.
 - `avoid` (optional, at most 32) lists regions of the map that kill although the navmesh calls them ground:
@@ -768,12 +781,24 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   being where it stands to engage: `plan-export` writes them as `move` rows before the pull, the plan check walks them, and the agent's own driver does not use them (it looks at the pack
   from its path); `stand_pull` (optional, also on `boss`; needs `approach`, never with `hold` or `ambush`) makes the run leader hold at the last approach point and pull the pack from there
   once a unit of it is in the tank's shot and, on a pull group, no other patrol stands within `clear_yd` (1-60, 0: the run leader's 40) of the lead bot: `plan-export` sets flag 8192
-  on the pull row and writes `clear_yd` as its `param` (TortoiseBots `specs/rl-patrol-timed-pull.md`, for formations that walk loops near other formations); `hold` (optional, also on `boss`: `{"instance_data": 1, "spot": {..}, "radius": 30, "timeout_s": 600, "entries": [..]}`) makes the run leader's row for the group a
+  on the pull row and writes `clear_yd` as its `param` (TortoiseBots `specs/rl-patrol-timed-pull.md`, for formations that walk loops near other formations);
+  `max_bodies` (optional, 1-80) sizes the pull in bodies including the target: `plan-export` writes it as the pull row's `item` (unused on pull rows
+  otherwise; the run leader's plan ceiling, replacing its joiner ceiling on that row) and the `pull_size` lint warns when its estimate is above it;
+  `hold` (optional, also on `boss`: `{"instance_data": 1, "spot": {..}, "radius": 30, "timeout_s": 600, "entries": [..]}`) makes the run leader's row for the group a
   scripted event's `hold` (TortoiseBots #1041: stand on `spot`, fight what the event sends within `radius` until instance data `instance_data` reads DONE; `entries` are more of the
-  event's mobs, the group's own and a boss's entry and `first` are always in); the agent's driver ignores it; run `steps` in order; walk to `boss.position` and kill the
+  event's mobs, the group's own and a boss's entry and `first` are always in; a hold may instead be done by a game object's state: `{"object": {"entry": 179505}, "state": "active", ...}`
+  with `instance_data` left out ends when that object near `spot` reads `state` (`ready`, `active` or `active_alt`), for a script whose event never touches an instance data (Dire Maul West's
+  five crystals, which spawn ready and read active once their four Mana Remnants are counted; `plan-export` writes the object as the row's `entry`, the state's index as `param` and flag 16); a boss's hold may leave `instance_data` out: the event is then done by its units, every unit of the
+  boss, its `first` and `entries` dead within `radius` after one turned hostile, the boss counting while still friendly, for a boss a script turns hostile later: Sergeant Bly; such a
+  hold may also carry `skip_if_dead_of_gossip` (optional, `true`): when the gossip step that starts the encounter (`npc` the boss, `dead_is_done` set) found the boss already dead, the
+  run leader ends the hold as soon as no unit of it is hostile — at once when the crew lies dead, with a note when only friendly survivors are left, since the core turns the crew
+  hostile only from the dead boss's own script (Zul'Farrak's Bly, 2026-11-02), so they can never be fought; the plan check requires that gossip step); such a hold may instead carry
+  `reset_to_gossip` (optional, `true`, never with `skip_if_dead_of_gossip`): the event's script resets it on a wipe or an evade, so when every unit of it is friendly again after the
+  event started the run leader goes back to the gossip step that started it, instead of waiting out `timeout_s` (Zul'Farrak's Farraki Arena; the plan check requires that the step
+  right before the hold that starts an event is the boss's gossip, the step the run leader goes back to); the agent's driver ignores it; run `steps` in order; walk to `boss.position` and kill the
   boss; run `after_boss` (steps of the same kinds, done once the boss is dead or skipped). Each part is optional, but a leg needs at least one of pull groups, steps, a boss and after_boss steps. `skip` lists creature entries the leg
   never waits for (rares, escorts, friendly NPCs, adds that die with the boss). `boss.first` lists entries to kill before the boss,
-  in order. `boss.phase_entries` (optional) lists entries the encounter turns into or summons that no other field names (Zul'Gurub's Thekal: 14509, 15068); only raid-walk's boss gates read them, the driver and plan-export ignore them. `boss.wait_s` (seconds 1-600) is how long the TortoiseBots run leader waits at `boss.position` for a boss who
+  in order. `boss.phase_entries` (optional) lists entries the encounter turns into or summons that no other field names (Zul'Gurub's Thekal: 14509, 15068); only raid-walk's boss gates read them, the driver and plan-export ignore them. `boss.summon_open_step` (optional, the 1-based place of a `use_object` step of the same leg) names the object that summons the boss: raid-walk restarts its run at that step's open row when the boss is gone (Zul'Gurub's Arlokk 14515 and the gong 180526, walk 35); the loader refuses a place that is no `use_object` step or is a `via_item` one, and a step of a plan, not a row number, keeps the pointer true across exports (cut points renumber row seqs). Only raid-walk reads it; the driver and plan-export ignore it (the rows have no field for it). A boss whose script changes his entry mid-fight keeps his guid (core `UpdateEntry`), so raid-walk follows the boss by GUID: a frame row whose guid the walk saw as the boss's own entry is the boss whatever entry it now reads, and such a guid is never an add (the summary's `boss_kill`, its `phase`/`phase_entry`, Sagiroth/TortoiseBots#1453). `boss.wait_s` (seconds 1-600) is how long the TortoiseBots run leader waits at `boss.position` for a boss who
   patrols before it searches the instance for him and pauses (written as the row's `timeout_s`; absent: the run leader's 60 s):
   a round longer than that needs it (Wailing Caverns' Kresh walks 525.9 yd in the river, about 210 s, and passes his point within
   the row's 30 yd radius at most 96 s apart; his row carries 300). `rest` overrides the leg's rest gates (all keys optional, `0` or absent keeps the default): `{"health": 90, "healer_mana": 50, "mana": 35, "max_s": 60}`
@@ -783,8 +808,9 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
 - `optional` on a **leg** (`{"item": 9240, "name": "Mallet of Zul'Farrak"}`) marks a leg that needs an item no honest run carries (Zul'Farrak's gong needs the Mallet of Zul'Farrak): at the leg's start a remote run
   reads the bags (`.bot inv`) of the carrier and the lead bot and, when neither has the item, **skips the whole leg**: nothing of it is walked, pulled or used, its `legs[i].result` is `skipped: no Mallet of Zul'Farrak (item 9240) in the bags of <carrier> or <lead> (...)`,
   a note says so, and the run goes on at the next leg; it is never a failure. A bag that cannot be read is an error, not a skip. A group-mode run does the same with the leader's bags. The run-start checks of `requires_item` (a start past the leg that makes the item,
-  the leader-mode bag check) leave an optional leg out, and the leg's item must be the `requires_item` of one of its `use_object` steps (the plan is refused otherwise). The step that uses the key is done by the bot that carries it (the carrier, else the lead bot), never by the agent's GM character (`use_object.via_item: true` makes the step `cmd use <item> <bot> <object>`: the required item is used ON the object, and the `stand` must be within 4.5 yd of `near`; remote runs only, and `plan-export` refuses it). Every order of an object step is a trace event `object_order` with its command, result (`ack` or the error code) and reply: a GM
+  the leader-mode bag check) leave an optional leg out, and the leg's item must be the `requires_item` of one of its `use_object` steps (the plan is refused otherwise). The step that uses the key is done by the bot that carries it (the carrier, else the lead bot), never by the agent's GM character (`use_object.via_item: true` makes the step `cmd use <item> <bot> <object>`: the required item is used ON the object, and the `stand` must be within 4.5 yd of `near`; remote runs only, and `plan-export` refuses it). A `use_object` may carry `proof` (`{"gameobject": 148883, "radius": 10}` or `{"creature": 8580, "radius": 10}`): what shows the use took when the object itself changes no state (Sunken Temple's Atal'ai statues 148830-148835 only set `NO_INTERACT` on the right one and respawn the green light 148883 beside it). Exactly one of `gameobject` (a spawned object) and `creature` (a living one) names the proof entry, searched within `radius` yards (over 0, at most 20) of the object's `near` point; `plan-export` writes the run leader's `open_proof` row for it (flag 2048 for a creature proof), and the agent's own driver does not read it. Every order of an object step is a trace event `object_order` with its command, result (`ack` or the error code) and reply: a GM
   in GM mode goes through a lock without the item and would prove nothing about it. `plan-export` leaves an optional leg out of the run leader's rows with a warning (its bots carry no such item) and the later legs close up. `give_items` (see **Give items** under [Prepare](#prepare-one-step-before-the-bind)) puts the item in a bot's bags for a test.
+- `skip_export` on a **leg** (`true`) leaves the leg out of the run leader's rows unless `plan-export` is asked for it by name (`--with-legs farraki_arena,zeljeb`, comma list or repeated), skipped unless asked for like an `optional` leg but without an item: the driver runs such a leg as written (only `plan-export` skips it), and `plan-check`, `trash-check`, `route-oracle`, staging and observe map it as written. Zul'Farrak's `farraki_arena` and `zeljeb` carry it (Turtle-custom wings, mapped offline and never fought live). Never with `optional` (an optional leg is already skipped unless asked for, by its item); a name that is no `skip_export` leg is refused.
 - A **step** is exactly one of `use_object`, `wait_for`, `loot_object`, `use_item`, `ritual`, `area_trigger` and `gossip`. `use_object` names a game object by `entry`, by `near` (a position;
   the object nearest to it within `range` yards, default 8) or both, and may give a `stand` position to use it from (otherwise the
   driver walks next to it), and `requires_item` (`{"entry": 7733, "name": "Staff of Prehistoria"}`): the item a non-GM leader must carry
@@ -796,8 +822,14 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   (the inventory not sent yet) or has items still loading is not taken for a missing item: the check before the run lets it pass, and the
   one before the use waits up to 3 s (`ItemsWait`) for an empty list to fill, then fails if it stays bare. `wait_for` is a `gameobject` condition (the same reference plus `state`: `ready`, `active` or
   `active_alt`, the `state` of a `gameobjects` row) or `hostiles_gone` (`radius`, optional `center`: no hostile living unit that
-  close) or `unit` (a creature's state, below), with a `timeout_s` (default 60, at most 600) after which the plan fails, and an optional `fail_text` (up to 400 characters, one line) that is added to that failure: the reason a person should read (Uldaman's altar waits name the three-participant ritual). A door that a lever or key opens may do so well after
-  the use (the Seal of Khaz'Mul took 27 s live): keep the 60 s.
+  close) or `unit` (a creature's state, below), with a `timeout_s` (default 60, at most 600) after which the plan fails, and an optional `fail_text` (up to 400 characters, one line) that is added to that failure: the reason a person should read (Uldaman's altar waits name the three-participant ritual). A `unit` wait may carry `agent_only` (one line, up to 400 characters, never with a `hold`): why the TortoiseBots run leader needs no row for it (an earlier or later row covers it); `plan-export` leaves it out with a warning that quotes the reason, and the agent's driver runs the wait as written. A door that a lever or key opens may do so well after
+  the use (the Seal of Khaz'Mul took 27 s live): keep the 60 s. A `gameobject` wait may carry `"gone_ok": true` (default false): the object being **gone** then counts as the wanted
+  state, once the run has seen that target (entry and point, within 10 yd) found, in any state, in this run, and the miss is the object's: the agent's own copy of the world counts a miss only
+  while the agent stands within 50 yd of the `near` point (a `gone_ok` wait needs a `near`), and a remote run counts only a `cmd state` answer of `not-found` (a `too-far` or any other answer is no proof);
+  either way the miss must hold 3 s without a break (a blip of the object starts it over): a script that sets a door active and removes it a few waypoints later (Shadowfang Keep's Courtyard Door 18895, which
+  Deathstalker Adamant's escort opens and despawns) is passed by not finding it again. An object never seen is not gone, only not there yet: the wait runs out its `timeout_s` and fails as
+  before. In an export it is the `wait_object` row's flag 256, the same bit a `loot` or `open` row carries for a gone chest (TortoiseBots `kPlanFlagGoneIsDone`; a module without the
+  `wait_object` reading refuses the flag on that kind and skips the row).
 - `wait_for` a `unit`: `{"wait_for": {"unit": {"entries": [7271], "near": {"x": 1909, "y": 1015, "z": 11.5}, "radius": 40, "state": "hostile"}, "timeout_s": 20}}`. `entries` are creature
   entries (at least one), `state` is one of `seen` (a living unit of the entries is in view), `hostile` (one is in view and hostile to the party), `dead` (a unit of the entries is dead, as a corpse in
   view or as the run's kill ledger saw it, and none is alive in view) and `gone` (no living unit of the entries is in view; a corpse does not count). **`gone` holds only after a matching unit was seen alive in this wait**, and then only after two whole new frames without one (none truncated or stale): an empty or stale feed is unknown, not an answer, and a blink of the feed does not pass it. With `near`, the death the run saw (its kill ledger) counts for `dead` only when it happened within `radius` of `near`: an earlier kill of the same entry elsewhere proves nothing. `near` and `radius` (yards, default 50, only with `near`) narrow it to
@@ -828,6 +860,9 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
   own index, as `gossip_hello` shows it) or **`text`** (a case-insensitive substring of the line; a text that two lines hold fails the step, the plan has to say which): exactly one of the two.
   A coded option (the client asks for a code) fails the step. `by` says who talks: `agent` (the default), `carrier` or `tank`. `stand` is optional: where the talker stands, within 5 yd of
   `near` (the core answers a hello only within about 5 yd: live 2026-10-15, Weegli and Bly answered at 3.6 yd and not at 9-10); without it the agent stops 2.5 yd short of the NPC.
+  `dead_is_done` (optional, `true`) is read by **plan-export only**: the run leader's row carries the module's flag 512 (kPlanFlagDeadNpcIsDone), and a dead NPC (the order refused with
+  the dead-NPC wording) counts the step as done with a note instead of pausing the run. Set it only where a dead NPC is no loss (Zul'Farrak's Sergeant Bly, whose crew the pyramid event's
+  troll waves kill in some runs; not Weegli, without whom the End Door stays shut). The agent's own driver still fails on a dead NPC.
   `retry_s` (1-120, default 15) is how long a menu that **lacks the option** is asked again (every 2 s): the NPC's phase lags one update behind the event that adds the option. `fail_text`
   (one line, up to 400 characters) is the reason a person should read when it still lacks it. The step fails at once, without a retry, for an NPC that is not in view within 15 yd of `near`
   (missing) or is dead, and for another panel (a vendor list) in the place of the menu.
@@ -873,7 +908,9 @@ that carries a plan out through the RPC is described under [Dungeon runs](#dunge
 - **Team gate**: `boss.team` and a pull group's `team` (`"alliance"` or `"horde"`). The driver takes the leader's team from its race (human, dwarf, night elf, gnome and high elf
   are the Alliance; orc, undead, tauren, troll and goblin the Horde: `Player::TeamForRace`) and skips what is gated to the other team, with a line in the report's
   `notes` and a `dungeon_step` event (`action: skip_team`). A leader whose race is not known yet runs everything. Uldaman's Baelog, Eric and Olaf (6906-6908) are faction 122
-  quest givers, friendly to the Alliance and hostile to the Horde only: their boss is `"team": "horde"`.
+  quest givers, friendly to the Alliance and hostile to the Horde only: their boss is `"team": "horde"`. A plan's own `team` is the party it needs: a run of the other
+  team is refused before the first order (`plan shadowfang_keep needs a horde party ...`), because a step no team flag can carry (Shadowfang Keep's courtyard gossip) only
+  works for that team.
 - A bad file is refused with every problem at once, each with its path: `uldaman.json: legs[2].steps[0].use_object: needs an entry,
   a near position, or both`. Unknown fields are errors too, and so is an entry that is in `skip` and also in a pull group or in
   `boss.first` (the leg would fight it and never wait for it).
@@ -904,6 +941,19 @@ median level - 2 up to their 90th percentile), `size` of a raid, the hired party
 hand-written and live-checked and `ragefire_chasm` is hand-written with an offline route but still a draft (not mapped), none of them regenerated. The tests regenerate every draft and compare it byte for byte with `dungeons/`, load it, run the creature check (`-check`, with `-scripted`) and compare the table; the
 navmesh test for the drafts (`TestPlansOnNavmeshWhereTheMachineHasIt`) logs how many plan points are on the mesh for every map whose `<map>.mmap` and tiles are present and lists the maps that are not.
 
+`go run ./tools/dungeongen route-regen --mmaps DIR --leg N [--leg N...] [--dry-run] [--dir dungeons] [--spawns DIR] [--out FILE] [--force] <plan>`
+regenerates one leg's route from the navmesh (the method of the Zul'Gurub waypoint audit, `research/zg-waypoints/WAYPOINT-AUDIT.md` §4.2): it keeps the leg's anchors (its `to`, gm_cross
+vias, every pull group's stand or last approach point, the boss), moves a failing anchor to the cheapest passing point within 25 yd (dry plain ground, a stand's wall and ledge clearance,
+aggro + 8 of every unpulled unit, patrol + 5), orders the pulls by a navmesh path-length matrix on the walkable mesh (so a stop across a lake has a finite distance) that flags
+one-way pairs (a path over twice its reverse) and scores the original, nearest-neighbour and constrained orders so no uphill
+return is scheduled while a downhill one exists, ending the leg at the next leg's first point, plans each anchor pair round the packs not pulled yet and the patrol lanes,
+string-pulls the path with clearance, spaces the kept points 8-45 yd apart (one hop up to 110 yd where a split cannot pass), and writes them as the groups' `approach` points (or the
+leg's `via`), so the exporter has nothing to cut. Water is left out of the planning where the plain ground reaches: a point in or under a liquid fails the placement rule (the
+mmaps' own `NavWater` floors, `navmesh.LiquidAt`), so an anchor or a written point avoids the lake beds and the canals the mmaps flag, and a crossing stays one hop between dry banks. A stand whose route cannot
+be kept clear keeps the written approach when that passes the rules (dry, no hop the exporter would cut) and is otherwise dropped for the run leader to approach itself, with a note.
+The pull set never changes: only the order and the route do. Each leg's run prints a diff (old and new walked length, anchors, water rows, hops over 45 yd and the authored rows' lints),
+`--dry-run` prints it without writing. `--spawns` defaults to `tools/dungeongen/testdata/map<N>`. It needs a cgo build (Detour), as `plan-check` does.
+
 `go run ./tools/dungeongen -check dungeons/uldaman.json -dir tools/dungeongen/testdata/uldaman -team alliance -friendly-factions 122 -awakened 2748,4857 -strict` lints a plan against
 the export (`creatures.tsv`) and prints a warning for each boss, `boss.first` entry or pack member that has `npc_flags` (a quest giver, vendor or trainer is no
 mob) or a faction named friendly to the leader's team; what is gated to the other team is not looked at, and the flags of a part gated to a team are not repeated.
@@ -912,7 +962,19 @@ dungeongen cannot tell friend from foe by itself: that is in `FactionTemplate.db
 the Ironforge dwarves': friendly to the Alliance, and nothing says it is hostile to the Horde but the data of the users of 122 (Bael'dun soldiers are Horde kill targets).
 `-awakened` names creature entries that spawn friendly (faction 35, stoned) and that the encounter's script turns hostile, so a plan that fights them is not warned about as if it
 asked the party to kill a friend: Uldaman's Stone Keepers (4857, woken one by one by the Altar of the Keepers) and Archaedas (2748, woken by the Altar of Archaedas); their `npc_flags` are
-still looked at. `-strict` makes any warning exit status 1, for CI. Generating a skeleton puts `WARNING:` lines in the leg notes for a boss with `npc_flags` or a faction of `-friendly-factions`.
+still looked at. `-strict` makes a creature-check warning or a pull row with no target exit status 1, for CI. Generating a skeleton puts `WARNING:` lines in the leg notes for a boss with `npc_flags` or a faction of `-friendly-factions`.
+
+The same `-check` run also lints pull sizes (`internal/aggroest`, the offline twin of the run leader's aggro-count estimator): for every pull row of the
+live-export rows it estimates the bodies that would join and warns `leg L pull P: N bodies (ceiling M): guids ...` when `N` is over the row's
+`max_bodies` (the row's `item`), else the plan's `pull_ceiling` (1-80, optional), else 8 for a raid plan and 6 for a party. Only hostile mobs count
+(no `npc_flags`, no ignored `--ignore-factions` or friendly `--friendly-factions` faction, no critters; 35 is friendly to all), and a row gated to the
+other `-team` is not pulled at all. The target is the row's own
+creature (the spawns the row owns by entry and radius, `kill_first` rank first, then the nearest to the party point); a row that owns nothing warns
+`leg L pull P: no target`. Every pull row of the leg is numbered in route order, under its ceiling or not. The geometry is the previous
+row's party point to this row's party point (a straight 2 yd sampled segment; the navmesh polyline needs mmaps and the straight line is the documented
+approximation, high side), the stand is the party point, and sight is always seen (high side: without mmaps there is no collision geometry to raycast
+against). An over-ceiling row never fails `-strict`: `-pull-size-strict` opts into the ceiling. A world or export the lint cannot read fails the check,
+strict or not, and the run prints `N warning(s) for <plan> as team "<team>"` after the warnings. The plan's own numbers live in the plan JSON: a `pull_group`'s `max_bodies` and the plan-wide `pull_ceiling`.
 
 `internal/dungeon`'s `TestUldamanOnNavmesh` plans a `path_to` route through every waypoint of `dungeons/uldaman.json` in the order
 a run goes and asks for status `complete`; `TestUldamanPlanMatchesTheWorldExport` checks that each pack member, boss and door
@@ -948,6 +1010,7 @@ What it checks:
   the lead bot may stop `look_arrive`, 3 yd, short of it, and frames from beyond 25 yd do not count; on a path shorter than the standoff the lead bot stays put when the pack is in view and otherwise moves up the path the same way; the moved point is put on the navmesh floor by the driver and the check alike). The positions of a group are looked at in order, each look starting where the one before ended, and the next group goes on from the last; a position within 25 yd of the party needs no look. No ray is cast to a pack: the navmesh ray is only a stand-in for sight and
   called most packs blind that were pulled fine live. A pull group or boss gated to a `team` is checked like the rest (the commander driver looks at it before it skips the fight); its issues name the team;
 - a leg `to`, pull group or boss marked `needs_walk` (never snapped to the navmesh: its mapping walk is still to do) is a failing point (`needs a mapping walk`), not a silent skip; Zul'Farrak and Uldaman have none;
+- a failure that leaves the party off the plan's point (a look that cannot see its pack, a `needs_walk` point) re-anchors it on the **next plan point that is on the mesh**, as the route trace does for a walk it cannot path. The look's stand point goes on the mesh floor first (the nearest walkable point within the walk rule, else the path's end: the standoff of a path over a ramp or a drop is interpolated and can float). The issues measured after the re-anchor say `re-anchored after step N` in `detail` and carry `reanchored_after` in JSON; the command's line and the `dungeon_run` refusal count them apart from the plan's own (`N of M points fail (R root, K re-anchored after an earlier failure)`), and the `plan_check` result has `reanchored` for K. One bad point no longer fails every point after it;
 - the `stand` points of `use_object`, `loot_object`, `ritual`, `area_trigger` and `gossip` steps (before the boss, and the `after_boss` ones), walked like `via` points;
 - an `area_trigger`'s `stand` inside its zone (`outside the zone`: its distance from the `center` must not exceed the `radius`; nobody who stands outside takes the trigger), and, when the leg has a boss, within 30 yd of the boss (`too far`: the trigger would start a fight the party is not at).; the `stand` of a `gossip` must also lie within 5 yd of the NPC's `near` (`too far` otherwise), and a gossip step `by` the agent does not move the party's point for the hops after it.
 
@@ -960,8 +1023,27 @@ What it checks:
   server leaves the party (an incomplete path's end, or where it stood). An offline-partial hop keeps the established offline reason and never asks the server query. A `direct` hop within the arrival radius (`ArriveYd`, 3 yd: `DungeonRunPolicy.h kArriveYd`) of the point before it
   fails as `hop inside the arrival radius`: the run leader counts it reached without sending an order, so the party stays behind. Replay one hop of a live refusal from the logged lead
   position with `turtle-agent path-check --mmaps DIR --map N x y z x y z`: two lines, the offline `Plan` answer and the server's type, verdict, end and distances to each end's walk poly.
-Limits (what the check does not model): the bot's real z and the vmap floor snap of the goal (a ledge whose mesh floats 2-3 yd above the game floor still passes); swimming (underwater
-  shortcut paths, which need liquid data); tiles unloaded on the server (the core loads mmtiles per loaded grid; the check covers only the start and end); the module's 25 yd stand-in
+**Placement lints.** The command also lints the **exported rows**, not only the plan's own points: it rebuilds the plan's rows with the exporter (the same cutter, `--floor-aware` and `--approach-hops` are passed through) and checks every `move` row; `--sql FILE` lints a deployed migration's rows directly instead (`--plan NAME` picks one plan). A finding's own severity decides the check's exit status: `severity: "error"` findings fail it without `--strict` (the JSON carries the field); the warning lints keep report-only, and `--strict` turns them into failures too (exit 11). Each finding names the row's step number (counted from 1 in file order, as `.bot run status` prints it) and the point, and the counts are printed per lint (`lints` and `lint_counts` in JSON):
+
+- `water`: the floor under the point is `NavWater`, or the point stands under a nearby one (a `NavWater` floor 2 yd or more above it within 6 yd: the mmap generator flags a liquid's bed, not its surface, so the lake bed a walk dips into reads as ground) (`internal/navmesh/liquid.go`). The exporter's cutter writes no cut point in or under a liquid (`--floor-aware` and the plain cut alike), so the water stays a crossing: one hop between the dry points either side;
+- `off-floor`: the nearest walkable floor is more than 1.5 yd away (or there is none within 4 yd);
+- `edge`: a mesh edge is closer than 2.5 yd (4 yd at a gather or stand point, the `move` row right before a pull, boss or hold);
+- `ledge`: another floor stands 4.5-8 yd above or below within 4.5 yd;
+- `short hop`: the point is under 8 yd from the row before it (the arrival radius is 3 yd, so one goal never needs two rows that close);
+- `aggro`: a gather or stand point is inside the core aggro radius at party level 60 (detection 20 yd unless the export carries `detection_range`) plus 8 yd of a hostile unit no earlier pull or boss row owns, with the target pack left out;
+- `boss_aggro`: a stand or path row before a boss's own row stands inside that boss's script aggro range (Moam 60, Ossirian 45, Ayamiss 40 yd; error). The boss's own approach row, the stand of a pull that lists the boss entry, and rows after the boss row are exempt (`internal/worldspawn/scriptaggro.go`, `BossAggroYd`);
+- `patrol`: a move point is inside a patrol lane's aggro radius plus 5 yd and the run has not pulled that patroller yet;
+- `reach`: the server's own query answers NOPATH, unreachable or off-mesh (the pull/boss tolerance of `plan-probe` kept);
+- `hop_len`: a walked row is over 120 yd from the row before it (warning) or over 140 yd, the move cap minus the drift margin (error); a pull or boss row's eight-point drift ring is measured too;
+- `arrival`: the server's path to a `move` row ends more than 3 yd short (warning: only the stall rule arrives) or more than 6 yd short (error);
+- `climb_anchor`: the stand of a stand pull, or the point of a plain pull, stands more than 8 yd above or below its anchor (error: `CheckAnchor` says Off and the run loops gathering; a plain move's climb only warns);
+- `joiners`: the target pack's pull wakes 1-2 bodies of other packs (warning) or 3+, or over the row's `item` ceiling (error), by the `aggroest` estimate (`dungeongen`'s `pull_size` lint now calls the same `planlint.PullSizes`).
+
+The aggro, patrol and joiner lints need the map's world export (`--spawns DIR`, default `<dir>/../tools/dungeongen/testdata/mapN`); without one they are skipped with a note. The Zul'Gurub plan of 2026-11-03 (`--floor-aware --approach-hops`, 752 rows) has no water row left: its other lints are edge 274, ledge 49, short hop 111, aggro 7 and patrol 27.
+
+**CI gate policy (`tools/ci/plan-check-all.sh`).** Every error-severity placement lint (`water`, `off-floor`, `edge`, `ledge`, `short hop`, `aggro`, `boss_aggro`, `patrol`, `joiners`, `reach`, `arrival`, `hop_len`, `climb_anchor`) is reported as `WARN` with a count per plan and does not fail the job. They stay findings until each plan gets its own fix round (lead's decisions, 2026-11-03; the second extends the first to the navmesh lints). `--strict-lints` makes them fail the gate. Only a plan-check point failure (unreachable, too far, needs a mapping walk) fails it. Plan statuses are not changed by this policy.
+
+Limits (what the check does not model): the bot's real z and the vmap floor snap of the goal (a ledge whose mesh floats 2-3 yd above the game floor still passes); swimming (the water lint reads the mmaps' own `NavWater` floors, but an underwater shortcut the run leader's path takes between two dry points is not a row the lint sees); tiles unloaded on the server (the core loads mmtiles per loaded grid; the check covers only the start and end); the module's 25 yd stand-in
   search (`NearestReachablePoint`, `MoveFallbackYd`) and the `leadSpotGather` / `kMoveHereYd` branch, and a too-far refusal, are NOT modelled either: a `server unreachable` can still be
   saved live when the run leader's ring point around the goal (up to 25 yd out) takes a path the direct hop's query refuses.
 
@@ -1000,6 +1082,20 @@ The file is `tb-patrols` v1 (`internal/patrols`): per patrol the measured path, 
 estimate, and raid-walk's revive quiet check (`--patrols`) keeps the revive point clear of patrol paths. A complete recording prints one line
 per patrol (`52050 Onyxian Warder: period 33.4 s (3 cycles), 7 points, matches spawn 52050`) and exits 0. Exit 15 is a refused slot, a
 grouped agent or an agent that is not in the world; 16 is an RPC error, 2 a usage error and 22 a safety stop.
+
+### Plan scout
+
+`turtle-agent plan-scout <dungeon> [--dir dungeons] [--sql FILE] [--mmaps DIR] [--spawns DIR] [--from LEG] [--until LEG] [--party-level N] [--out DIR] [--json] [--fix-out FILE] [--apply-fixes DIR] [--fail-on fail|warn]` checks a raid or dungeon plan point by point before a walk. The offline pass is `plan-check`'s lint entry point, `planlint.Lint`, over the plan's exported rows (or a migration's rows with `--sql`): every finding becomes a step check named after the lint, `source: "offline"`, its severity mapped error -> `fail` and warning -> `warn`. The rows are rebuilt with the exporter's cutter unless `--sql` gives the deployed rows. The report (`tb-plan-scout` v1: `<out>/scout-<plan>.json` and `.txt`, `<out>` default `./plan-scout-<plan>-<stamp>`) lists every step with its verdict, the plan element it came from (`origin`, from `planexport`'s row origins) and the checks that were not ok; the text has one line per non-ok step, then the counts and the runtime. `--from`/`--until` take an exported leg number (0-based, as the rows carry it) or a leg name, inclusive.
+
+The fix file (`--fix-out FILE`, `tb-scout-fix` v1, also written with no fixes) proposes corrections: `snap_point` (a row moved to the nearest walkable floor), `insert_via` (vias along the offline server path every 50 yd, and every 6 yd of climb), `dry_detour` (a wet gather point moved to dry ground, or a hop re-planned around the water polygons), `move_stand` (a stand at 24 bearings and 15-55 yd that keeps every other pack clear) and `split_pull` (the joiner packs and the plan group that owns each later, `apply: false`: a new pull group changes ownership and the step pins). Each fix names its plan element through the row origin; a row without one is coordinate-only and `apply: false`.
+
+`--apply-fixes DIR` writes `DIR/<plan>.json` and `DIR/<plan>.diff`, never in place: `DIR` must not exist or be empty, and a `DIR` inside a `dungeons/` folder (or a slot's plan folder) is refused. The fixes are applied by `routeedit.Clone` and checked with `routeedit.Evaluate`: a fix set that adds a plan-check issue is refused as a whole (exit 27, nothing written). With `--sql`, the rows must equal the plan's own export (`rows_sha256`) or the apply is refused (exit 2).
+
+`--live <server>` (`m910q` or `tortoise-test2` only) adds the live pass after the offline one (spec `plan-scout-mode.md` 5.6): one GM character, never slot 3, the raid-walk lease and instance ledger, `.gm on` + `.gm visible off`, `.instance unbind <map>`, a fresh instance, then `.bot scout cfg|path|walk|where` (the TortoiseBots module) and `.tt q inst|units|los` (the Eluna test toolkit). It asks the server's own path query for every hop origin of the step before it (8 in flight, replies matched by id, one retry), reads `q units`/`q los` at every stand, gather anchor and pull row (a spot more than 120 yd from the GM is reached by its own `.go xyz` first, acked by the session's `TeleportSeq`; a read the toolkit refuses as `point_far` gets one teleport to its point and one retry), and really walks the ranked risky hops (`climb_anchor` > `water` > `arrival` > `drop`) within `--walk-budget` (default 5m) and `--max-minutes` (20). Its answers merge into the same report as `source: "live"` checks: `live_path` (verdict, type 0x80 swim line, swimmable ends), `live_walk` (where the walk stopped, and CheckAnchor's rule for an anchor->stand hop), `live_aggro` (live units within reach, `q los` decides fail or warn), `live_los` and `live_joiners` (live positions and live sight; it replaces the offline `joiners`). `<out>/scout.log` has every line sent and every `TBM:SCOUT_*`/`TTJSON` reply. The live flags are `--slot N`, `--holder NAME`, `--slots FILE`, `--binary PATH`, `--walk-budget`, `--max-minutes`, `--instance-cap-wait`, `--instance-cap-fail` and `--instance-cap-reset` (the instance ledger counts the scout's GM as one of the account's 5 fresh instances per hour). The GM and toolkit lines pass a strict allow-list before they are sent (`.gm on`, `.gm visible off`, `.go xyz` on the plan's or portal's map, `.instance unbind <plan map>`, `.bot scout ...`; `q inst`, `q units r<=60 ... all`, `q los` with 1-8 hex guids): no `.die`, `.tele`, `.bot run`, `.bot cmd`, hire or `.appear`. The server is also checked by the address the session dialled (the slot settings' `world_addr` must equal the test server's slots-table `world_addr`), so a live realm is refused before anything is sent.
+
+`--instance-cap-per-account N` is the live pass's core limit of fresh instance ids per account and hour (stock 5; the local test core is patched to 30). It uses the server's entry in `instance-cap-per-account.json` beside the slots file when the flag is not given, and the flag wins.
+
+Exit codes: 0 no failing step (warnings allowed unless `--fail-on warn`); 27 a failing step or a refused `--apply-fixes`; 28 the live pass stopped part-way (time ceiling, disconnect, the instance changed, the lease lost): the report and fix file are written and the live checks from there are `skip`; 1 the navmesh cannot answer; 2 usage or an unreadable plan/sql/spawns; 15 slot 3 (the flag, or a lease that came back as slot 3, which is released at once) or no free slot; 18 a live phase refused (server not a test server, GM mode refused, a module without `.bot scout`, no toolkit, the instance check failed); 26 `--instance-cap-fail` and the ledger is at the cap (nothing started). Live fixes for a live-confirmed finding use the same kinds as its offline twin; `--apply-fixes` is unchanged.
 
 ### Plan probe
 
@@ -1134,22 +1230,27 @@ turtle-agent plan-export --all-live --out ./migrations/ --stamp 20261014200000  
 | `--out FILE\|DIR` | the migration, or a folder (the file is then `<stamp>_world.sql`). An existing file is never replaced without `--force`: a migration that is applied is never edited, export a new one |
 | `<plan>...` / `--all-live` | named plans of `--dir` (default `dungeons`), or every plan whose status starts with `live-checked`. A `draft` plan is refused unless `--allow-draft` |
 | `--mmaps DIR` | a navmesh folder: a hop of more than 60 yd between two moves (the module logs these) is cut into `move` rows along the planned path, at most 50 yd apart. Without it the long hops are listed on stderr and left |
-| `--approach-hops` | with `--mmaps`, also cut the hop to a pull, boss or hold more than 50 yd from the anchor before it (the move, or the fight the party stood at) into `move` rows along the navmesh path (comment `approach path`), the last at least 25 yd short of the pack. Without it such a hop is left to the run leader's own navmesh hops (at most 8 of 40 yd, stopping 30 yd short), which a plan of long corridors outruns. Not on by default: it would change the rows of the plans already exported |
-| `--skip-legs NAME,...` | leave the named legs out of the rows (each with a warning; the later legs close up, as for an optional leg), for a leg the run leader cannot do while the legs after it can: Zul'Farrak's `bly` (a boss that turns hostile after its gossip) stands between Weegli's gossip, which opens the End Door, and `ukorz` behind it. A name that is no leg of the plan is refused |
-| `--gm-cross-direct` | export a `gm_cross` waypoint as a `move_direct` (a straight walk to the landing point) instead of refusing the plan; the run leader has no GM move. Written for Wailing Caverns' ramp to Lord Serpentis (6 yd down over 3.9 yd), which the plan now crosses with a plain direct step and a `check_skip`, so no plan needs it now; the row's comment and a warning say it is not tried live |
+| `--floor-aware` | with `--mmaps`, cut the floor-aware way: a hop up to 110 yd stays one hop (no mechanical 50 yd splits), a path corner under 8 yd from the point before it or under a 20° turn gets no row, every kept corner is pushed 3 yd off the nearest mesh edge (then snapped and re-checked as plain ground), and a split point takes its z from the navmesh floor: it is dropped when no ground lies within 1.5 yd of the straight line's z (a dip or a liquid bed), with a warning naming the step, the old point, the new one or the drop and the reason. Every dropped or moved cut point has such a warning. Off by default: it changes the rows of every plan. The Zul'Gurub export of 2026-11-03 uses it (911 steps against 1163, 3 rows off the floor against 50) |
+| `--approach-hops` | with `--mmaps`, also cut the hop to a pull, boss or hold more than 50 yd from the anchor before it (the move, or the fight the party stood at) into `move` rows along the navmesh path (comment `approach path`), the last at least 25 yd short of the pack. Without it such a hop is left to the run leader's own navmesh hops (at most 8 of 40 yd, stopping 30 yd short), which a plan of long corridors outruns. Not on by default: it would change the rows of the plans already exported. A cut (approach or plain `path` cut) whose points would come within `LeaveClearYd` (15 yd) of a leg's `leave` spawn is not written: the hop stays uncut and the run leader hops it itself, with a warning (Zul'Farrak's island Shadowhunter) |
+| `--skip-legs NAME,...` | leave the named legs out of the rows (each with a warning; the later legs close up, as for an optional leg), for a leg the run leader cannot do while the legs after it can (Zul'Farrak's `bly` was exported this way until 2026-10-21, when it got a boss hold done by its units). A name that is no leg of the plan is refused |
+| `--with-optional NAME,...` | write the named optional legs into the rows anyway (Zul'Farrak's `gahzrilla`), each with a warning: the item the leg needs (the Mallet of Zul'Farrak 9240) is the operator's to give to the lead bot before `.bot run start` (a GM `.additem`); the run leader has no GM step and pauses at the leg's `use_on` when no party bot carries it. A name that is no optional leg of the plan is refused |
+| `--with-legs NAME,...` | write the named `skip_export` legs into the rows anyway (Zul'Farrak's `farraki_arena`, `zeljeb`), each with a warning. The two Turtle-custom wings are opt-in: mapped offline, never fought live, and their holds need a server with TortoiseBots PR #1477 (see the 2026-11-02 compatibility note); the default export leaves them out so its leg numbers stay today's. A name that is no `skip_export` leg of the plan is refused |
 | `--rev`, `--stamp` | the commit named in `ai_dungeon_plan.source` (default: `git rev-parse` of the plan folder, `+local` when it has changes) and the file's timestamp (default now) |
 
 Per leg the rows are, in the order the driver does them: the `via` waypoints (`move`, or `move_direct` for `direct`; an `exact` via is a `move` with flags 64, the run leader's exact waypoint: done only once the lead bot stands within 1.5 yd of it, still for 2 s, and only then the direct step after it goes out, TortoiseBots `docs/guides/dungeon-run-leader.md` "Exact waypoints"; that direct step is written as kind `move_hop_exact`, which an older TortoiseBots does not know: its loader skips the row, so a rolled-back binary never sends the hop from short of the foot (it fails closed); the export refuses rows where anything comes between the two, an exact move before a plain `move_direct`, or a `move_hop_exact` not right after an exact move; a via's `check_skip` is the plan check's only and is not written, without a warning), `to` (`move`), each pull group (`pull`: the centre is the
 mean of its positions, the radius is its `radius` or the farthest position plus 10 yd, `entries` once each in first-seen order, flags 1 ambush / 2 alliance / 4 horde from `ambush`
-and `team`, 8192 with `param` = `clear_yd` from `stand_pull`), the `steps` (`use_object` as a `move` to its `stand` and an `open` whose `item` is `requires_item`; `wait_for.gameobject` as `wait_object` with `param` 0/1/2 for
-ready/active/active_alt; `hostiles_gone` as `wait_clear`, centred on its `center` or on the last point of the leg; `loot_object` as `loot` with `item` the `expect_item`; `use_item` with
-`item` the `expect_item` and `param` the `requires_item` (the second item the use consumes; the run leader sends the use to the bot that carries both); `ritual`; a `gossip` step with an `option` number and `by` `tank` or `carrier` as a `gossip` row (`entry` the NPC, x,y,z its `near`, `param` = `option` + 1, flags 0, `timeout_s` 0; the lead bot talks, the `stand`, `by` and `retry_s` are warnings, `fail_text` is in the comment); a `gossip` by `text` or `by` `agent`, and a `wait_for` `unit` without a `hold`, are **refused** in the first leg and **cut** the export before a later leg that has one (see **a step the run leader cannot do** below): the run leader has none; `area_trigger` as a `move` to its `stand`, because the run leader has no such step and a bot that walks into the zone takes the trigger itself when the module lists it (`BotAreaTriggers`; `by` `agent` and the `wait_for` `unit` are refused with that reason)), the `boss` (`entries` = `first`, `flags` from `team`; its `loot_item` as a `loot` of the boss entry right after it) and the `after_boss` steps. A pull group's or boss's
+and `team`, 8192 with `param` = `clear_yd` from `stand_pull`), the `steps` (`use_object` as a `move` to its `stand` and an `open` whose `item` is `requires_item`; with `via_item` the `open` is a `use_on` row instead (TortoiseBots kind `use_on`, 2026-10-21: `entry` the object, x,y,z its `near`, `item` the `requires_item`; the order `cmd use <item> <carrier> entry:<obj>@x,y,z`; a module from before the kind skips the row); `wait_for.gameobject` as `wait_object` with `param` 0/1/2 for
+ready/active/active_alt (flags 256 with `gone_ok`); `hostiles_gone` as `wait_clear`, centred on its `center` or on the last point of the leg; `loot_object` as `loot` with `item` the `expect_item`; `use_item` with
+`item` the `expect_item` and `param` the `requires_item` (the second item the use consumes; the run leader sends the use to the bot that carries both); `ritual`; a `gossip` step with an `option` number and `by` `tank` or `carrier` as a `gossip` row (`entry` the NPC, x,y,z its `near`, `param` = `option` + 1, flags 0 (512 with `dead_is_done`), `timeout_s` 0; the lead bot talks, the `stand`, `by` and `retry_s` are warnings, `fail_text` is in the comment); a `gossip` by `text` or `by` `agent`, and a `wait_for` `unit` without a `hold` or `agent_only` (an `agent_only` wait has no row, with a warning), are **refused** in the first leg and **cut** the export before a later leg that has one (see **a step the run leader cannot do** below): the run leader has none; `area_trigger` as a `move` to its `stand`, because the run leader has no such step and a bot that walks into the zone takes the trigger itself when the module lists it (`BotAreaTriggers`; `by` `agent` and the `wait_for` `unit` are refused with that reason)), the `boss` (`entries` = `first`, `flags` from `team`; its `loot_item` as a `loot` of the boss entry right after it) and the `after_boss` steps. A pull group's or boss's
 `approach` points are `move` rows right before its row (comment `pull group N approach`); a `hold` is a `hold` row in its place (`entry` the instance data, `param` 3 = DONE, `flags` 40 =
-done by instance data 8 + encounter states 32, `radius`, `timeout_s`, `entries` the group's, or the boss entry, its `first` and the hold's `entries`); a `move` straight before it to its
+done by instance data 8 + encounter states 32, `radius`, `timeout_s`, `entries` the group's, or the boss entry, its `first` and the hold's `entries`; a boss's hold without
+`instance_data` is the hold done by its units: `entry` 0, `param` 0, `flags` 0, the boss entry first; with `skip_if_dead_of_gossip` the flags are 32768
+instead, the module's `kPlanFlagDeadGossipOk` (16384 there is `kPlanFlagResetToGossip`): done when the gossip row before it counted its dead NPC as done and no unit of it is hostile anymore; with
+`reset_to_gossip` the flags are 16384, the module's `kPlanFlagResetToGossip`: the hold goes back to the gossip row before it when every unit of it is friendly again after the event started; a `move` straight before it to its
 own spot is left out (the hold walks there, and the fight that starts with a ritual stays the hold's), and a `wait_for.gameobject` straight after it waits at most 60 s (the event's DONE
 opens the door). A `ritual` row carries its `participants` in `param`. With `--mmaps` a long hop is measured from the last pull, boss or hold row when one comes after the last move (the
 party fought there), so a leg's first move after a boss is not walked back from the move before the fight. Every `run leader hop` warning of the plan check is printed too. **Avoid boxes**: the run leader does not know a plan's `avoid` boxes (the rows have no column for them), so with `--mmaps` and a plan that has boxes the export checks every hop between two anchors (the entrance, move, pull, boss and hold rows) on the plain navmesh, the one the server walks: a hop whose path enters a box gets the corners of the avoid-aware path as `move` rows (comment `path (keeps out of an avoid box)`, hops of at most 25 yd, refined until each hop's plain path is clear), and a hop that cannot be made safe fails the export. Ragefire Chasm needs none (its plain paths already keep out of the basin).
-`skip`, `rest` and `watchdog` are not carried over, as the guide says. **Nothing is dropped silently**: every plan attribute the rows cannot carry is a warning on stderr, one per attribute, naming each place it stands and what the run leader does instead (`skip`, `leave`, `leftover_entries`, a leg's `rest`, `needs_walk`, `patrol`, `boss.tactics`, `boss.companions_loot`, a dropped `companions_loot: false`, `fleers`, `no_cc`, `summoned_kill_first`, `hire_composition`, `level_band`, `raid`, `watchdog`, the entrance and teleports, `avoid` without `--mmaps`, a `stand` of a `loot_object` or `ritual`, an object's `spawn` or `range`, a `loot_object` `batch`, an `area_trigger`'s expect check and timeout); the migration's header should list them. Not warned: what is no run attribute (name, version, status, kind, map, notes, a via's `check_skip`, a pull group's `equiv`, which only the pull-test scenario reads, and a boss's `phase_entries`, which only raid-walk's boss gates read). A **leg's `companions_loot: false`** cannot be carried either (the rows have no column for it, so the run leader's bots would loot the Zul'Farrak graveyard's chests): such a plan is **refused**, naming the leg, unless `--drop-companions-loot` says to export it without. With `--carrier-chests` (which needs `--drop-companions-loot`) such a leg's `loot_object` steps are in the rows instead: one chest per triple, a `move` to the step's `stand`, a `loot` row at the chest's point (its expected item; flags 256, gone is done: a chest of `spawntimesecs` 7200 despawns once looted, so a run resumed after a wipe at one of these rows takes the gone chest as done) and — when the leg has `leftover_entries` — their pull at the chest's point, radius 15, comment `sweep` (the chest's linked trap raises its adds on the opener in the same server call the loot ACK answers, and round 3's eleven idle leftovers aggroed the walk to the next chest: a batch of 3+ chests wiped twice, so `loot_object batch` stays unexpressed and one chest a row keeps the adds two at a time); the run leader's `cmd loot` runs itself, and the four companions' looting still has to be turned off for the leg in the setup, or a module with a trapped-chest rule has to skip them — the warned `companions_loot false` text says so: the setup is looting off for every bot, party loot method free-for-all, the Executioner's Key 8444 on the lead bot, at least 16 free bag slots on the lead bot and a fresh instance (a looted grave respawns after 2 h). The loot row's flags 256 need a TortoiseBots module with the gone-is-done step flag: an older module ignores them and pauses on a despawned grave after a wipe (then a .bot run skip skips the row). Without the option the steps are left out as before. An `area_trigger` is exported as a `move`, and its comment says `needs AiPlayerbot.BotAreaTriggers = 962 (TortoiseBots #1002)`. A row the module's loader would skip (radius over 100, timeout over 600, more than 16 entries, a
+`skip`, `rest` and `watchdog` are not carried over, as the guide says. **Nothing is dropped silently**: every plan attribute the rows cannot carry is a warning on stderr, one per attribute, naming each place it stands and what the run leader does instead (`skip`, `leave`, `leftover_entries`, a leg's `rest`, `needs_walk`, `patrol`, `boss.tactics`, `boss.companions_loot`, a dropped `companions_loot: false`, `fleers`, `no_cc`, `summoned_kill_first`, `hire_composition`, `level_band`, `team`, `raid`, `watchdog`, the entrance and teleports, `avoid` without `--mmaps`, a `stand` of a `loot_object` or `ritual`, an object's `spawn` or `range`, a `loot_object` `batch`, an `area_trigger`'s expect check and timeout, an `agent_only` unit wait, a `boss.first` under a `hold`, which is no kill order); the migration's header should list them. Not warned: what is no run attribute (name, version, status, kind, map, notes, a via's `check_skip`, a pull group's `equiv`, which only the pull-test scenario reads, and a boss's `phase_entries`, which only raid-walk's boss gates read). A **leg's `companions_loot: false`** cannot be carried either (the rows have no column for it, so the run leader's bots would loot the Zul'Farrak graveyard's chests): such a plan is **refused**, naming the leg, unless `--drop-companions-loot` says to export it without. With `--carrier-chests` (which needs `--drop-companions-loot`) such a leg's `loot_object` steps are in the rows instead: one chest per triple, a `move` to the step's `stand`, a `loot` row at the chest's point (its expected item; flags 256, gone is done: a chest of `spawntimesecs` 7200 despawns once looted, so a run resumed after a wipe at one of these rows takes the gone chest as done) and — when the leg has `leftover_entries` — their pull at the chest's point, radius 15, comment `sweep` (the chest's linked trap raises its adds on the opener in the same server call the loot ACK answers, and round 3's eleven idle leftovers aggroed the walk to the next chest: a batch of 3+ chests wiped twice, so `loot_object batch` stays unexpressed and one chest a row keeps the adds two at a time); the run leader's `cmd loot` runs itself, and the four companions' looting still has to be turned off for the leg in the setup, or a module with a trapped-chest rule has to skip them — the warned `companions_loot false` text says so: the setup is looting off for every bot, party loot method free-for-all, the Executioner's Key 8444 on the lead bot, at least 16 free bag slots on the lead bot and a fresh instance (a looted grave respawns after 2 h). The loot row's flags 256 need a TortoiseBots module with the gone-is-done step flag: an older module ignores them and pauses on a despawned grave after a wipe (then a .bot run skip skips the row). Without the option the steps are left out as before. An `area_trigger` is exported as a `move`, and its comment says `needs AiPlayerbot.BotAreaTriggers = 962 (TortoiseBots #1002)`. A row the module's loader would skip (radius over 100, timeout over 600, more than 16 entries, a
 step without its entry) is refused here. The written SQL is read back and compared with the rows before the file is written. Uldaman exports 148 rows (14 legs, 133 steps, two
 of them holds); with its approach points and the hop measured from the last fight no move is more than 60 yd from the party, so `--mmaps` cuts nothing (the export of dd05724 cut 7 hops into 220 rows, walking the party back from the leg before's last move).
 
@@ -1178,8 +1279,9 @@ The terrace exemptions (`ragefireExemptions` in `ragefire_test.go`, settled with
 
 **The pyramid phase in the plan (2026-10-21, feat/zf-full-module-plan).** The stairs event's phase is instance data **1** (`EVENT_PYRAMID`, 0-8 in `zulfarrak.h`: 3 = `PYRAMID_WAVE_1`, 7 = `PYRAMID_WAVE_3`). The agent's own driver still cannot read it: its `wait_for` holds on units, objects and hostiles, so `stairs_top` waits for the proxy (Nekrum 7796 seen at the foot). For the TortoiseBots run leader the waits carry a `hold` (`wait_for.hold`, the wait's run leader form: plan-export writes the hold row in place of the wait) with a `value` (`hold.value`: the instance data value that ends the event, written as a script value, flags 8 without the encounter flag 32): the cage leg's Weegli wait holds the stairs top to 3, `stairs_top`'s Nekrum wait to 7. The run leader compares for equality, so a value must last (3 and 7 last a whole wave; 2 lasts one instance update). A value is refused on a pull group's or a boss's hold and when it is 0.
 
-**Plan format compatibility (2026-10-21).** `wait_for.hold` and `hold.value` are new fields of plan format version 1; the version number is unchanged (every plan file would have to change with it). The plan reader refuses unknown fields (`DisallowUnknownFields`), so a turtle-agent binary built before feat/zf-full-module-plan (f11df6d) refuses `dungeons/zulfarrak.json` from that branch on (`unknown field "hold"` / `"value"`): run Zul'Farrak with a binary built from this branch or later. Other plan files do not use the fields and load in either build.
+**Plan format compatibility (2026-10-21).** `wait_for.hold`, `hold.value` and `wait_for.agent_only` are new fields, and a boss's `hold` without `instance_data` a new form, of plan format version 1; the version number is unchanged (every plan file would have to change with it). The plan reader refuses unknown fields (`DisallowUnknownFields`), so a turtle-agent binary built before feat/zf-full-module-plan (f11df6d) refuses `dungeons/zulfarrak.json` from that branch on (`unknown field "hold"` / `"value"`): run Zul'Farrak with a binary built from this branch or later. Other plan files do not use the fields and load in either build.
 
+**Plan format compatibility (2026-11-02).** `hold.skip_if_dead_of_gossip` and `hold.reset_to_gossip` are new fields of version 1 (as above, the version number is unchanged), so a turtle-agent binary built before them refuses `dungeons/zulfarrak.json` (`unknown field "skip_if_dead_of_gossip"` / `"reset_to_gossip"`): it and the TortoiseBots module that reads flags 32768 (`kPlanFlagDeadGossipOk`) and 16384 (`kPlanFlagResetToGossip`) go together. A module built before a flag ignores the unknown bit on the hold row (DungeonPlanPolicy.h's Hold case reads only the flags it knows), so the row loads but the hold waits for a hostility that cannot come (32768) or out its timeout through a reset (16384): the module and the exported rows must go together. Do not deploy ZF exports with these legs (the `farraki_arena` hold carries 16384, Bly's 32768) to a server without TortoiseBots PR #1477 (the `fix/units-hold-reset` fix): the reset and the dead-NPC end need the module fix, and without it the holds hang.
 **Gahz'rilla (PR A, stacked on PR B).** The optional `gahzrilla` leg sits between `velratha_b` and `courtyard`: it walks to the gong stand (1652.84 1168.99 10.67, 3.5 yd from the gong), pulls the eight packs on and near the walk Gahz'rilla takes out of his pool, then the `use_object` step with `via_item` rings the
 Gong of Zul'Farrak (141832, spawn row 27140 at 1650.91 1171.88 10.9, lock 459): a bot that carries the Mallet of Zul'Farrak (9240) gets `cmd use 9240 <bot> entry:141832@1650.9,1171.9,10.9` (the Mallet is used ON the gong: its on-use spell 11434 is an open-lock effect aimed at a game object; round 3 of the live test sent `cmd open` of the gong, which did nothing and answered nothing); a `wait_for` waits up to 30 s for a living Gahz'rilla (7273) in the bots' view, and the boss fight kills him at 1702.58 1224.19 8.88. Without a Mallet in the lead bot's or the carrier's bags the leg is skipped (see `optional` above); a test gives it with `give_items`.
 What the world database says (tortoise-wow-cbspin 4f133ab): the gong is a goober with lock 459 and event 2488, the client shows it usable, so the Mallet is checked on the server when it is used. Event 2488 respawns the other gong object (guid 209001, entry 20901, a Turtle decoration copy with no lock and no event; the plan never targets it) and 2 s later summons Gahz'rilla (7273, level 46, faction 107, no spawn row)
@@ -1211,12 +1313,12 @@ The six legs after `zumrah` were written from the instance script (`src/scripts/
 - **`stairs_top`**: the party holds 1887 1274 42, the spot the climbing trolls are sent to, and a `wait_for` `unit` 7796 (`seen`, 600 s) ends when Nekrum is in view. A wait does not fight: the bots defend themselves, and no formation (tank on the stairs, healer behind) can be asked of them. Waves 1 (23 trolls) and 2 (24) come up in groups of 2, 3, 4, ... every 10 s; wave 3 spawns the instant wave 2 is dead. The Wowhead Classic comments say the same: stay on top of the temple while the waves climb.
 - **`stairs_base`**: wave 3 (Nekrum Gutchewer 7796, Shadowpriest Sezz'ziz 7275 and five trolls, none with a spawn row) is not sent up: Bly's crew goes down to the foot of the stairs and the party goes down too. `boss` Sezz'ziz with Nekrum first, then an `after_boss` `hostiles_gone` over the foot of the stairs, which is what ends the event (`PYRAMID_KILLED_ALL_TROLLS`). The order is the Wowhead guide's (burn Nekrum down first, he has the fewer abilities and the lower level; a melee interrupts Sezz'ziz's Heal; she also has Renew, Psychic Scream and Shadow Bolt); the script gives none, and the bots cannot be told to interrupt. If her Heal keeps him up, swap the two (boss 7796, first 7275).
 - **`weegli_door`**: a unit wait for Weegli at his place (1877.5 1199.6; for the run leader it carries a `hold` on instance data 1 = 8, `PYRAMID_KILLED_ALL_TROLLS`), the `gossip` by the tank (`option` 0: "Will you blow up that door now?", the only line of his menu, offered only after the event; plan-export writes it as the gossip row with param 1), then a `wait_for` the End Door (146084) `active`. He walks to 1858.6 1146.4, plants a barrel, runs back to 1863.8 1177, the door is used and he despawns at 1827 1184. The plan talks to Weegli before Bly, as the Wowhead comments advise ("talk to the goblin first"): he is gone and the door open before the crew turns hostile, so the fight cannot kill him (a dead or fighting Weegli opens nothing, and the event cannot be restarted). The script has no preference (both orders run the same `DestroyDoor`); the wait for him to be gone, the first step of the `bly` leg, keeps Bly's later `DoAction` from planting a second barrel. If Weegli died in the waves nothing opens the door and the first wait fails.
-- **`bly`**: a unit wait for Weegli `gone`, a unit wait for Bly at his place (1883.8 1200.8), the `gossip` by the tank (`text` "settled": his only option is "That's it! I'm tired of helping you out. It's time we settled things on the battlefield!"; a menu that lacks it is asked again for 30 s), a unit wait for him hostile (the script turns him, Raven, Oro and Murta hostile 10 s after the option), then `boss` Bly with Murta, Oro and Raven first. Wowhead: Oro's area damage and Murta's healing make the fight hard, so they die before Bly; Murta is a priest (Holy Smite, Renew, Heal, Power Word: Shield), Oro a warlock (Shadow Bolt, Immolate, Rain of Fire, Curse of Weakness), Raven a rogue (Poison, Backstab, Gouge); Bly has 18k health, Revenge and Shield Bash and no loot but the quest's Divino-matic Rod. Differences: a comment says the crew uses Hearthstones and leaves if the party rests, and that talking to Weegli first then waiting leaves Bly to fight alone; the script has nothing of the kind.
+- **`bly`**: a unit wait for Weegli `gone`, a unit wait for Bly at his place (1883.8 1200.8), the `gossip` by the tank (`option` 0: his only option is "That's it! I'm tired of helping you out. It's time we settled things on the battlefield!"; a menu that lacks it is asked again for 30 s), a unit wait for him hostile (the script turns him, Raven, Oro and Murta hostile 10 s after the option), then `boss` Bly with Murta, Oro and Raven first. The gossip carries `dead_is_done` and the boss's units hold `skip_if_dead_of_gossip`: a Bly killed by the pyramid waves before the option leaves the crew friendly for good (the core turns them only from his own script: `switchFactionIfAlive` is called nowhere else), so the hold ends at once when all four lie dead and with a note when only friendly survivors are left, instead of waiting 300 s for a hostility that cannot come. Wowhead: Oro's area damage and Murta's healing make the fight hard, so they die before Bly; Murta is a priest (Holy Smite, Renew, Heal, Power Word: Shield), Oro a warlock (Shadow Bolt, Immolate, Rain of Fire, Curse of Weakness), Raven a rogue (Poison, Backstab, Gouge); Bly has 18k health, Revenge and Shield Bash and no loot but the quest's Divino-matic Rod. Differences: a comment says the crew uses Hearthstones and leaves if the party rests, and that talking to Weegli first then waiting leaves Bly to fight alone; the script has nothing of the kind. For the run leader (2026-10-21) the three unit waits are `agent_only` and the boss has a `hold` without `instance_data` on the leg's spot 1884 1212 9 (radius 25, 300 s): plan-export writes a gossip row (7604, param 1) and a hold done by its units (Bly, Murta, Oro, Raven; Bly counts while still friendly), since a boss row would leave the friendly Bly alone at once; the crew is in the plan's `kill_first`, as the hold has no kill order. Needs 7604 in `AiPlayerbot.BotGossipNpcs`.
 - **`ukorz`**: from the doorstep up the spiral ramp (193 yd, the plan check walks through the door because the navmesh has none), the Shadowhunters, Guardians and Abominations of the ramp as pull groups, then `boss` Chief Ukorz Sandscalp (7267) with Ruuzlu (7797) first. Wowhead: Ukorz has Cleave, Wide Slash, Enrage and Berserker Stance, Ruuzlu Cleave and Execute; face them away from the group, melee behind them, kill Ruuzlu first, both are immune to CC and the tank holds both; a comment says Ukorz runs back to his spawn and heals at about 6 %. The bots cannot be told to stand behind them. The comments say the serpents at the top need not be killed; the plan still pulls the two Abomination groups (8120) because the ramp passes within their aggro range.
 
 The event is not restartable in an instance (the script keeps its phase), and the door stays open for the later entries of the same instance (`EVENT_END_DOOR` is saved).
 
-**A step the run leader cannot do** (a `gossip` by `text` or `by` `agent`, a `wait_for` `unit` without a `hold`, an `area_trigger` `by` `agent`): `plan-export` exports the plan up to, not including, the first leg that has one, and says so: a note on stderr (`plan zulfarrak: exported legs 0-14 (weegli_door) only; cut before leg 15 (bly), which has a step the run leader cannot do: steps[0]: wait_for.unit has no run leader step (unit 7607 gone); that leg and the 1 after it are not in the rows`), a `CUT:` line on stdout, and the end of the plan row's comment in the SQL. `--all-live` goes on with the other plans (exit 0). A plan whose first leg has such a step is refused, as before. The legs of `bly` and `ukorz` are therefore not in the rows the run leader reads; they run only from the agent's `dungeon_run`, unless the export is made with `--skip-legs bly` (Bly's crew turns hostile after his gossip, which the run leader cannot wait for): then `weegli_door` (the hold on phase 8, Weegli's gossip, the End Door wait) and `ukorz` follow `stairs_base`.
+**A step the run leader cannot do** (a `gossip` by `text` or `by` `agent`, a `wait_for` `unit` without a `hold`, an `area_trigger` `by` `agent`): `plan-export` exports the plan up to, not including, the first leg that has one, and says so: a note on stderr (as Zul'Farrak's was until 2026-10-21: `plan zulfarrak: exported legs 0-14 (weegli_door) only; cut before leg 15 (bly), which has a step the run leader cannot do: steps[0]: wait_for.unit has no run leader step (unit 7607 gone); that leg and the 1 after it are not in the rows`), a `CUT:` line on stdout, and the end of the plan row's comment in the SQL. `--all-live` goes on with the other plans (exit 0). A plan whose first leg has such a step is refused, as before. Since the `bly` leg's unit waits became `agent_only` and its boss a hold done by its units (2026-10-21), the whole Zul'Farrak plan exports without a cut: `weegli_door`, `bly` and `ukorz` follow `stairs_base`; the optional `gahzrilla` leg is in the rows only with `--with-optional gahzrilla` (its gong is a `use_on` row; the Mallet is GM-added to the lead bot before the run). The shipped TortoiseBots migration is exported without it (a player's or an unattended run has no Mallet and would pause at the gong); the export with it is TortoiseBots' opt-in `tools/optional-plans/zulfarrak-gahzrilla.sql`, applied by hand on a test box. The End Door wait is for `active_alt` (state 2): Weegli's blast opens the door with the alternative state (`zulfarrak.cpp:423`), and the module run r8 paused twice at a wait for `active` on an open door.
 
 ### The Uldaman plan
 
@@ -2148,17 +2250,168 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   the summary says so.
 - `--until` is `boss` (default: a trash walk never wakes a boss: it stops before the first boss step), `boss-done` (stops after the
   first boss step has completed: resolved to `step <the step after the boss>` from the rows, so it needs `--sql` or a plan JSON whose export has the
-  server's step count, else the walk stops the run and exits 18), `none` (a full clear), `step N` or `leg L`; the word
-  goes to `run start` and the server's status label must show `until <clause> (step N)`. `--from leg L|step N` is only
+  server's step count, else the walk stops the run and exits 18), `none` (a full clear: the run leader fights every
+  boss and no boss or until rule stops the run), `step N` or `leg L`; the word goes to `run start` and the server's
+  status label must show `until <clause> (step N)`. `--from leg L|step N` is only
   for a raid already standing at that point (for example after a hold): raid-walk does not stage.
+- `--place` (needs `--from` and `--sql`, and only on `m910q`/`tortoise-test2`) starts the raid **partway into its
+  instance** instead of at the door: several raids on one server can then each work a different boss leg (`--slot 2,4`
+  with `--from 2="leg L" --place 2=on` in the pair form). It uses the Eluna test toolkit (`.tt`) on the slot agent, so
+  it is refused with `--inject` (the injector assumes the commander in another copy) and on any other server. `--sql` is
+  required: the placed start step and the corridor are checked against the deployed rows, so a plan JSON whose export
+  numbers the steps differently cannot fail the walk after a placement has cost a hire. `--from "leg L"` is staged: the
+  walk starts at the highest move row before the leg's first pull that has no later creature row within 50 yd of it
+  (Zul'Gurub leg 3: step 231 of the deployed rows, not the leg's first row 214, which stands inside Marli's room).
+  The first leg needs no placement: `--place --from leg <first leg>` starts at step 1 from the door exactly as a
+  non-placed run does, and the notes carry `place: leg X is the first leg; starting from the door`. When the leg
+  holds no such row, the walk places at the LAST quiet move row before that point, searching backward through the
+  earlier legs, and the notes carry `place: leg X has no quiet row; placing at step N (leg Y)`; only when no quiet
+  row stands anywhere before the first pull is the placement refused (`leg X has no quiet move row before its first
+  pull: pass --from "step N"`, exit 2). The fallback is refused too when a boss or hold row (or the move into an
+  event) lies between it and the leg's first row: the raid would re-fight it on its way in. A fallback start
+  stands before the leg, so `boss` and `boss-done` untils resolve from the leg's first row, never from the
+  fallback start. `--reuse-instance` (with `--place`) re-places the raid in the instance it is already in: when the
+  raid is alive, every hired bot must be in the plan's map, then the walk sends no entry order (which would open a
+  fresh copy), binds the commander with `.appear <mt>`, goes to the start point in that copy and teleports every hire
+  there with the GM `.summon`; no corridor clear and no quiet check run (the area is the raid's own instance), and the
+  instance ledger is neither checked nor written, so a re-place never waits at the cap. When the previous party has
+  logged out but the commander's own bind to the map is still alive (`.instance listbinds`: a map line with TTR left),
+  the walk resumes that instance: `.go xyz ... <map>` lands in the bound copy and `.summon` pulls the fresh hires in,
+  with no `.appear` and no entry order; the notes say `resuming it`. With no live bind the walk says
+  `no live bind for map N is left: falling back to a fresh instance`, runs the cap check it skipped for the reuse and
+  enters normally. `--reuse-instance` may be combined with `--gm-clear` (the named packs are killed in the kept copy).
+  `--from "step N"` is taken as given; a positioned move row is placed at its own point, and a pull
+  row at that pull's own stand point (the row's point; the nearest move row before it when the row has none), the
+  notes naming the point (`place: step N is a pull row; placing at the pull's own stand point` — walk 32 refused
+  steps 237 and 560 as pull rows, and the operator had to find 238/559 by hand). A `q floor` answer of **0.0** (or a
+  value at the core's `INVALID_HEIGHT`, -100000) is the toolkit's *unknown*, not a wrong floor: the toolkit asks the
+  caller's `GetClosePoint`, and the core leaves z at 0 when the height lookup finds nothing (an unloaded grid, no
+  vmap, the wrong map), so the reply is 0.0 — walk 39 refused Jeklik's steps 44/46/48 as `the start step's floor is
+  0.0, not 130.7` on m910q and test2. The check reads `q floor` once more after 2 s; when it is still unknown **and
+  the placed point is a walk/move row's own point** (`PlaceWalkRow`: the row came from a real walk through that point;
+  a pull row's stand point or any other row's point does not qualify), the plan's z is used and
+  `place: floor unknown, using plan z ...` is written to `run.log` and the notes; otherwise the placement refuses
+  (`place: the start step's floor is unknown ... and the point is not a recorded walk row`). A reply that carries no
+  `floor` at all (a null) is not the toolkit's unknown height but no answer: it refuses with
+  `the start step's floor was not found (q floor gave none)`. A floor the toolkit does know, and
+  that differs from the plan, still refuses the placement as before. Before a fresh instance is entered,
+  the start is also chosen offline: from the requested row the walk walks BACK along the plan's positioned move rows
+  to the nearest one whose point stands at least `AggroRadius + 8 yd` from every static (non-patrol) spawn of the packs
+  a row at or after the start pulls, using the world export `--gm-clear`/the placement lints read (a missing export
+  only notes that the offline check is skipped). The note names the refused row, the spawn and what it needs, and the
+  chosen row. A boss or hold row still refuses
+  (a plain `--from`, without `--place` or `--until boss-done`, still goes to the server unresolved). `validate` refuses a plan
+  whose legs' skip lists hold more
+  than the toolkit's 16 entries or whose longest toolkit line would overflow the toolkit's 200-char cap, both before any
+  GM command. The walk then clears the corridor of the legs it skips — every pull row before the start whose circle
+  comes within 45 yd of the route to the `until` stop, despawned with `.tt clearto ... all=1` after a pre-read of the
+  units there (never `kill`, never `boss`; a boss or hold row of an earlier leg within 30 yd of the route refuses the
+  placement when the route passes it in the start step's own leg; when it passes in a later leg and the operator asked
+  for an `until` clause, the walk shortens that clause to stop before the segment, the corridor ending one positioned
+  step earlier — a placed run is a fresh copy, so those bosses are alive; every segment of the route is tested, not
+  only its closest point, and the dry run's header and the summary print the asked-for until and the effective one.
+  `--until none` is never replaced with a step: the corridor still ends one positioned step earlier, but the run walks
+  the whole plan and the run leader fights whatever it meets) — quiets
+  the start point — the walk judges the quiet itself, not the toolkit's flag: a unit blocks only when it is not a skip
+  entry, not a rank-0 critter of at most 100 HP and either stands within 25 yd of the point or belongs to a BEHIND row's
+  circle by its **home** (the spawn point the toolkit sends with the unit; without one the unit has no owner), which the
+  extra rounds take (they also take BEHIND trash inside the quiet's 50 yd: a unit whose entry a pull row before the
+  start holds and whose home that row owns, within its radius + 6 yd and outside every AHEAD row, provided it is not
+  boss evidence); the roamers (units that moved between the
+  quiet's two reads, which the toolkit lists without a position) are joined to one `q units` read of 80 yd, and a roamer
+  that read misses is looked up in the quiet's own near lists (which carry its position and home) and blocks only inside
+  the 25 yd landing reach; a near list the toolkit cut short (`n_near` above the units it listed) refuses the placement
+  when its last listed unit stands at those 25 yd or nearer, since the dropped ones may stand where the raid lands; a
+  unit no extra round could take that stands beyond those 25 yd is left alive — moves the
+  raid onto it
+  (`.tt place ... of=<mt>`), verifies it by the walk's own frames and only then starts the run, whose status line must
+  show exactly that step and step count. A hire counts as placed when its freshest frame is inside the landing area:
+  within 25 yd (2D) of the point and within 8 yd of its floor, the same opening the quiet protects. A missing hire
+  gets a GM `.summon`, after the wave has settled (4 s: the teleport lands a moment after the line),
+  and the walk sends up to three waves, each with its own 10 s window, before it fails (walk 37: one wave of a 20-hire
+  raid was still landing when the old 10 s window closed, and the 12 yd 3D check failed placements whose hires stood
+  inside the landing area). Before the first teleport the commander must be in GM mode: `.gm on` is sent and the walk refuses the
+  placement when its reply is not `GM mode is ON`. The commander stays inside the raid's copy for the whole walk (his own `.instance unbind` before the
+  hire, and again at teardown for a stale personal bind; under `--reuse-instance` the teardown keeps the bind while
+  `.instance listbinds` names the plan's map with TTR left, since a walk-super restart of the same cmd resumes it, and
+  drops an expired one as before), so a wipe revives at the place point, not at the entrance.
+  `--dry-run` prints the staged step, the point and every circle. `summary.json`'s `place` object carries the start step,
+  the instance, the circles with their removed counts, the not-cleared list, the quiet result and the placed count.
+  **Known limit:** the pre-read (`q units`) and the `clearto` are two commands, so a unit that walks into a circle
+  between them can be despawned along with the row's own. Hence test servers only; the quiet check and the placed-start
+  check catch a broken run, and the walk report lists every clear (`place.circles[]`, the `place:` notes). The corridor
+  pre-read does not refuse a circle for a BEHIND-trash unit of another row: its entry is a pull row's (one before the
+  start, whether or not the corridor clears that row) and its home lies within that row's radius + 6 yd, outside every
+  AHEAD row, and it is not boss evidence. Ownership is positive but still inferred from the spawn: entries repeat
+  across legs, so a later leg's unit whose home lies inside a BEHIND pull row's own area and carries one of that row's
+  entries is taken as trash of the skipped leg and can be thinned with it. A walk-super restart that starts inside
+  the leg a shortened `until` stopped in is refused with exit 2: its own route reaches the guarded segment in the start
+  step's own leg, so restart before that leg or walk from the door. The quiet
+  step's two extra rounds keep away from any circle the corridor refused (a unit within that circle's radius + 6 yd is
+  not cleared) and clear a unit a BEHIND row owns by entry and by its home, or BEHIND trash; a reply without a `home`
+  gives no owner (fail closed): the unit is never cleared, and inside those 25 yd the walk refuses the placement. AHEAD
+  rows of later legs and unowned units beyond those 25 yd never block: a run from the door has them alive at this step
+  too, and a unit no extra round could take and that stands beyond those 25 yd is left alive with a note. When the only
+  units left inside the 25 yd are ones the toolkit listed as roamers (patrols walking through), the quiet is read again
+  twice, 20 s apart. A quiet refusal, a `fighting after the place` after the move, or hires that did not arrive
+  (`not at the start`) does NOT end the walk: in the SAME instance the placement gets up to four tries.
+  While a move row stands before the start inside its leg, the attempt moves one move row back (up to three rows:
+  walk 36 b's Arlokk start would otherwise step back over Thekal's boss row and the run would re-fight him), re-runs the
+  corridor and quiet there and teleports the party with the GM summons; after that it retries the same point, with the
+  units the last quiet named GM-killed first when `--gm-clear`/`--gm-clear-boss` is given. Only when every try fails
+  does the walk give up, with exit 29 (`place: 4 tries in the same instance ...`), which walk-super stops on: a
+  restart of that cmd would enter a fresh instance, and walk 37's eight `not at the start` exits each burned one of the
+  four an hour per server, locking m910q for an hour. No second instance is ever entered for the same placement (walk 33
+  burned one per refusal and the hourly cap queued the next try 20 minutes). Every unit the quiet acts on or refuses is
+  noted with its spawn guid (`db`), where it stands and its home.
 - `--speed 1.0` sends nothing; `1.1` to `3.0` sends `speed=X` (a GM test run, marked `test speed` in the summary).
 - The hire gear tier comes from the committed table `raid -> minimum hire tier` in `internal/raidwalk/tiers.go`
   (Sagiroth's rule: hire and refit at the kit a player holds when the raid is next, from the mercenary unlock quests).
   `onyxias_lair` is **2**: the tier-3 quest is her own kill's reward, so a player fighting her holds the Zul'Gurub kit.
   A raid with no sourced tier (the other eleven, a 0 row and a `TODO` each in that file) refuses to run without
   `--tier N`. `--tier-override N` replaces a known tier and marks the run **comparison, not a tier proof** in the
-  notes and in `summary.json` (`roster.tier_comparison`). The walk refits after the hire with
-  `.bot gear raid <commander> tier <N>`.
+  notes and in `summary.json` (`roster.tier_comparison`). The walk waits `--hire-settle` (default 20s) after the last
+  hire for its join summon, then refits with `.bot gear raid <commander> tier <N>`. A hire whose join lands after the
+  bind is removed from the group, so `--hire-settle 0` skips the wait (run.log says
+  `no wait for the hires' join summons (--hire-settle 0)`) for a walk that proves the bind keeps every late joiner;
+  with 0 a late joiner can miss the refit, so that walk's numbers are a comparison only. Any `--hire-settle` below the
+  default marks the summary `roster.settle_short: true` (with `roster.hire_settle_s`), and the suite's baseline pick
+  skips it.
+- `--instance-cap-per-account N` (default 5 = the stock core), `--instance-cap-wait 20m`, `--instance-cap-fail`,
+  `--instance-cap-reset`, `--instance-cap-unsafe`: the core lets an account enter only N distinct instance ids an hour
+  (`MAX_INSTANCE_PER_ACCOUNT_PER_HOUR`), and its list lives in the worldserver's memory. The local test core is patched
+  to 30. The flag is also read per server from `instance-cap-per-account.json` beside the slots file
+  (`{"m910q": 30}`; the flag wins), and without either N is 5. Hires pack up to 10 a pool account, so a
+  re-placed raid (`--place`, a `walk-super.sh` restart, an idle-raid re-placement) soon meets the cap, which is
+  refused and fails the summons. Every walk that enters a fresh instance is written to a per-server ledger (`instance-cap.json` beside the slots file;
+  entries are timestamps, the plan and now the pool accounts of the party). The count is the core's own: **per pool
+  account**, N fresh instance ids in the last hour. After the last hire the walk reads the party's accounts with one
+  read-only `.pinfo <hire>` per hire (the reply's `Account: ... (id: N)`; names are never stored, only ids) and records
+  them on the entry. A ledger whose live entries all name their accounts counts the busiest account and waits at N (the
+  N+1th is refused); before the hires it takes the busiest account the window knows, then checks the hired party
+  exactly before it enters. With an older entry that names no accounts (or a live reservation of a walk that has not
+  hired yet) it keeps the conservative raid count at N-1, because a raid packs 2-3 pool accounts: that was walk 37's
+  12-47 minute waits. Both lines name the count, the cap and the earliest free time, e.g. `instance cap: a hired
+  account already has 5 fresh instances in the last hour on <server>; the core's cap is 5` or `instance cap: 4 fresh
+  instances in the last hour on <server>; the core's cap is 5 per account and hour`. A walk never starts a fresh
+  instance without a reservation: when the wait runs out it
+  exits 26 (`instance cap: waited ... still N on <server>`), and `--instance-cap-wait 0` exits 26 at the count at
+  once. `--instance-cap-fail` exits 26 at the count instead of waiting (`walk-super.sh` does not restart a 26).
+  `--instance-cap-unsafe` is the explicit override: it goes on without a reservation at the wait's end (or with an
+  unreadable ledger, or past a hired account's cap), logs it, and concurrent walks may then each create a fresh
+  instance.
+  The wait line names the earliest free time as well (`instance cap: waiting 16m5s (earliest free time
+  2026-11-03T12:34:56Z) for the oldest of 4 ...`), so the operator can plan around it. `--reuse-instance` (with
+  `--place`) is the way around a full ledger: it keeps the raid's CURRENT instance (see `--place` above), so nothing is
+  entered, reserved or counted and the cap is not touched.
+  The check and the admission are one step under the ledger's lock: a walk below N-1 reserves a place (holder + pid,
+  30 minutes), the reservation counts like an entry, becomes the entry once the raid has entered and is released on
+  every exit before that, so walks that start together cannot all pass at the last place. A corrupt ledger is moved to
+  `instance-cap.json.corrupt-<stamp>` with a warning and a new one started; one that cannot be read at all is never
+  written over: the walk waits one minute (when `--instance-cap-wait` allows) and then exits 26; `--instance-cap-unsafe` goes on without it instead.
+  A worldserver restart clears the core's list, so the ledger must be cleared too: `--instance-cap-reset` forgets the
+  server's entries, and the ledger drops every entry older than a worldserver start time when one is read (no status
+  read exposes it yet, so the reset flag is the way today).
 - `--enter auto|near|tele`: `auto` is `cmd enter near` and falls back to `.tele name <hire> <entrance_tele>` once when
   the server answers `requirement`; `tele` needs the plan's `entrance_tele`.
 - `--max-run-minutes` (90) is the ceiling from `run start`; `--hold-minutes` keeps the raid bound afterwards;
@@ -2172,14 +2425,16 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   run, tears down and exits 18 (`lease lost`). SIGINT/SIGTERM stops the run, tears down and exits 18 (`interrupted`);
   during the hold it exits 0.
 
-The roster (`--hires FILE`, format `tb-raid-roster` v1) hires batches in order and learns the names of each batch by
-diffing `party` before and after the hire:
+The roster (`--hires FILE`, format `tb-raid-roster` v1 or v2) hires batches in order and learns the names of each
+batch by diffing `party` before and after the hire:
 
 ```json
-{"format":"tb-raid-roster","version":1,"level":60,"tier":2,
- "batches":[{"role":"mt","hire":"1 warrior:tank"},
-            {"role":"ot","hire":"1 druid:tank 1 paladin:tank"},
-            {"role":"rest","hire":"10h 27d"}]}
+{"format":"tb-raid-roster","version":2,"level":60,"tier":2,
+ "batches":[{"role":"mt","hire":"1 warrior:tank","spec":"protection"},
+            {"role":"ot","hire":"1 paladin:tank","spec":"protection"},
+            {"role":"rest","hire":"1 priest:healer","spec":"holy"},
+            {"role":"rest","hire":"2 hunter","spec":"mm"},
+            {"role":"rest","hire":"14d"}]}
 ```
 
 `hire` is `<n>t`, `<n>h`, `<n>d` or `<n> <class>[:<role>]`; a preset (`onyxia`, `mc`, ...) is refused because it fills
@@ -2191,6 +2446,23 @@ commander stands outside the group, so every raid seat is a hire). `level` defau
 `1 warrior:tank`, `<tanks-1>t`, `<healers>h <size-tanks-healers>d` (Onyxia's plan gives `1 warrior:tank`, `3t`,
 `10h 26d` = 40) and the table's tier (2 for Onyxia; 0, "no tier sourced yet", for the other eleven raids until
 their unlock quests are written into `tiers.go`).
+
+Version 2 adds `spec` (a class-spec id) and an optional `count` to a batch. After the batch's hire the walk sends
+`.bot role <name> <spec>` for every bot it added, waits for the server's `role set` answer, and only then runs the
+tier refit (`.bot gear raid <commander> tier N`), which follows the bot's own spec; each bot logs a
+`roster: <name> <class> <spec>` line. The batch must name one class (`1 priest:healer`, not `5h`), because the spec is
+validated against that class before anything is sent, and the spec's role must match the hire's (a `bear` needs
+`1 druid:tank`). The ids are TortoiseBots' `.bot role` ids: warrior `arms fury protection`, paladin
+`holy protection retribution`, hunter `bm mm survival`, rogue `assa combat subtlety`, priest
+`discipline holy shadow hybrid`, shaman `ele enh restoration`, mage `arcane fire frost`, warlock
+`affliction demonology destruction`, druid `balance boomkin cat bear restoration` (a shaman tank is `.bot role tank`,
+not a spec id). `count`, when present, must be the batch's size. A version 1 roster takes neither field.
+
+Version 2 also takes `commander_faction` (`"alliance"` or `"horde"`): TortoiseBots' hire fills the commander's own
+faction only, so a Horde roster cannot be hired from an Alliance commander (no shaman) and the other way round (no
+paladin). The walk reads the logged-in commander's `status.team` before the first hire and fails at once when it is
+the other side (`roster: the roster wants a horde commander, but <name> is alliance`), instead of buying a party the
+roster's classes cannot fill. A roster without the field is not checked, as in version 1.
 
 The server's hire cap is 39 bots (TortoiseBots `HireMaxBotsPerPlayer`, onyxia-kill-plan C6), so a 40-man roster asks
 for all 40 and gets 39: the summary notes `hire cap 39` and the walk goes on. A shortfall below the cap is a failed
@@ -2204,20 +2476,61 @@ watch, hold, `commander status` and `teardown --json`, summary.
 
 While watching, the walk reads the run's `TBM:RUN` lines (always through the raw event text, never the colour-stripped
 one), the `bot_view` frames every 2 s and the dashboard every 10/15 s. A wipe (every hire dead with fresh states) stops
-the run, waits for the instance to reset (5m at most: nothing with a party target, every hostile seen in the last
-minute at 100 % or gone, held 20 s), then revives: GM to step 1's point, a quiet check (no living hostile within 45 yd,
-no moving hostile within 80 yd, no patrol path within 45 yd, rechecked every 5 s for 120 s) and the plan's entrance
-once, `.summon` then `.revive` every hire. A wipe or a near-wipe stop outside a boss fight recovers while
+the run, waits for the instance to reset (5m at most: nothing with a party target, every non-critter hostile seen in the last
+minute at 100 % or gone — critters never count: the frame's own critter flag (turtle-agent#379) — held 20 s), then revives: GM to the revive point (step 1's, or with `--place` the start point the raid was put at), a quiet check
+(no living hostile within 45 yd, no moving hostile within 80 yd, no patrol path within 45 yd, rechecked every 5 s for
+120 s; **critters** never count at any distance or state — the fallback is a level-1 unit whose max health is absolute
+and inside the place phase's critter band (at most 100 max HP, so a MaxHealth of exactly 100 still blocks: it is
+ambiguous with a percent read), so a moving snake 72 yd out cannot make the refusal's `all_idle` false (turtle-agent#379); a
+hostile that is **idle** — not in combat, no target, not moving — and farther out than the placement's own
+25 yd landing reach does not block it once two reads 5 s apart saw it idle at the same spot and it stands at its
+proven home — within 3 yd of a plan spawn of its entry (by spawn guid when the plan names one), never for a patrol
+group's unit, and never without plan spawn data (then the 45 yd rule holds): stillness alone is no proof of home
+(turtle-agent#360). A run from the door has it alive at this step too (walk 25)) and the plan's entrance once, and,
+`deadline - --wipe-rest - 30 s`, so the rest and the resume that follow still fit before the recovery's deadline (a
+revive outside a recovery, the wipe's own ending, has no deadline and does not wait). Then `.summon` then `.revive`
+every hire. A revive that never finds a quiet point ends the walk with exit 19 (`not revived: <why>` as before),
+writes a `run.log` line per failed read whose blocker set changed, naming each blocker's entry, guid, name, distance,
+`moving`, `in_combat` and target (walk 25: the evidence for whether a blocking mob leashes), and records
+`revive_refusal` in the summary. A wipe or a near-wipe stop outside a boss fight recovers while
 `--wipe-resume` has recoveries left: no `run stop`, the dead raid is revived, it rests `--wipe-rest` out of combat
 (wall time: the quiet window is measured on the clock, not counted in poll turns, and it counts from the last poll
 that was not quiet; `--wipe-rest` below 30s is refused) and the run resumes (the server must
 show running again within 60 s); the summary notes each recovery
 (`wipe-resume <n>/<K> at step <s>: revived <d>, rested <m>, resumed`) and counts them in `wipe_resumes`, and the end
 stays truthful. When the run regroups by itself after a wipe (`regrouping by itself`), the walk revives the raid and
-lets the run go on: no rest, no `run resume`; it still counts as one `--wipe-resume`. Every wipe that does not recover
+lets the run go on: no rest, no `run resume`; it still counts as one `--wipe-resume`. Such a revive summons nobody (not
+the lead, not a dead hire; it notes `self-regroup: no summons, revived in place`): no `.revive` goes out until 10 s after
+TB's `regrouping by itself` line (the released bots' graveyard repop must not meet a living bot), then only the hires a
+fresh frame still shows dead are `.revive`d where they lie, and TB's regroup gathers them. A hire TB has already brought
+up is never revived; the note `revive after the regroup: N hire(s) still dead (revived), M alive ..., K not in the frame`
+counts them. `--revive-at-raid` (default on, `--revive-at-raid=false` gives exactly this old flow) changes
+the self-regroup revive after walk 29, where TB's `revive party` released every bot, the ghosts ran their corpse
+run from the graveyard and the revives landed 300-650 yd from the raid, in uncleared packs: the revive then waits
+only until 10 s after TB's regroup line (no summon wait), and after the revives (and a fresh look at the frames) every living hire more than 100 yd (or on
+another map) from the revive point is brought to it with the GM `.summon <hire>` (the commander stands on the point;
+the 3 s portal summon of TB cancels on combat, this does not). The `run.log` line is `revive: <bot> brought back from
+<dist> yd`; a hire not within 10 yd after 15 s gets one more summon, and one that still does not come is named in a note.
+Before the recovery returns (the self-regroup one, and the resume of the other wipe path) it waits up to 60 s for every
+hire to be in range (100 yd of the revive point or of the living lead bot) and out of combat, then goes on with a note
+naming the ones still missing. A near-wipe stop does the same for the hires it revives at their corpses: the commander `.appear`s at a living hire (the lead
+first) and `.summon`s every revived hire more than 100 yd from it, and the resume waits for the raid to gather. A lead that is
+not fresh, alive and on the plan's map is not the raid's place: it is brought back and named like any other straggler. The summary counts `revive_brought`, `revive_unreached` and `revive_gather_missed`. Every revive's `.go xyz` must have landed (a settled status, no `z_unknown`, not falling, x/y within 10 yd
+and z within 30 yd of the point) before any summon leaves, and a landing that never comes ends the walk with exit 19
+(`not revived: the commander did not land at the revive point`). Every wipe that does not recover
 says why in the notes (`wipe resume skipped: ...`, `second wipe at step N during the wipe-resume of step M`). It never
 revives while a boss row has a target: a boss engagement stops the run at once and waits up to 15 minutes for a kill,
-a reset or a wipe. A wipe or a boss engagement with no recovery left ends the walk with exit 19. Recovery fails closed
+a reset or a wipe. The one exception is a wipe ON THE BOSS'S OWN STEP whose boss the RUN LEADER fights (the same
+`runFightsBoss` hand-over the watch loop uses: a boss step under `--until none`, or an until that goes past the boss
+step, as `--until boss-done`'s resolved clause does): there the walk owns no boss attempt, so the wipe follows the
+ordinary wipe-resume flow — revive, rest (the self-regroup revive when TB says `regrouping by itself`), retry, one
+`--wipe-resume` — and never sends `run stop` at the wipe (walk 32: a Mar'li boss-step wipe under `--until none` was
+stopped 0.7 s after the `20 dead ... regrouping by itself` line, and a Hakkar one 42 ms after it, so boss retries were
+impossible). A boss row still in the frames when the run wipes on TRASH keeps the old gate: that fight is not the
+step's. The boss gate and the unknown-boss gate are skipped for the boss-step fight only, and the post-recovery boss
+re-check accepts the fight as the run's without a new status line (the boss was not newly engaged during the
+recovery). A wipe or a boss
+engagement with no recovery left ends the walk with exit 19. Recovery fails closed
 on unknown boss state (no dashboard, a stale or errored fights read, or a boss latched in the last 120 s: the old
 ending with the note `wipe resume skipped: boss state unknown`); the rest needs a complete quiet view (every roster
 hire present, fresh, out of combat and alive in `bot_view`, polled every 5 s — any gap restarts the window); and the
@@ -2225,13 +2538,19 @@ recovery has an absolute deadline (the walk ceiling or start + 3 x `--wipe-rest`
 restarts the quiet window but never moves it, and past it the walk ends with the original incident's exit and
 `wipe recovery timed out after <dur>`). A boss fight still `live` in the dashboard's fights list blocks recovery
 before any revive; finished boss fights in the list do not, and a boss killed earlier in the walk does not block a
-later trash wipe's recovery, while a boss ENGAGED in the frames in the last 120 s (alive and holding a target or
-below 100 %) still blocks recovery; a plan boss or boss add merely in view at full health with no target, or a boss
+latter trash wipe's recovery, while a boss ENGAGED in the frames in the last 120 s (alive and holding a target or
+below 100 %) still blocks recovery — unless the frames already settle it: a HP-0 row is the kill (the walk
+advances as killed; the row has no freshness cap, so a boss that died and then despawned still counts — the
+frames' last view of that guid was dead — but only inside the current attempt: a live row of the family must
+have been seen since the last wipe recovery, and a 1-5 % row alive is never a kill) and a fresh full-HP row
+with no target and no live target is the reset (the walk resumes normally); only with neither in the frames does
+the 120 s unknown wait hold. A plan boss or boss add merely in view at full health with no target, or a boss
 corpse, does not. After the rest and the resume the walk checks what the frames say now: a newly engaged boss routes
 to the boss path exactly as a watch-loop engagement does, so the run never reports a clean wipe-resume while a boss
 fight is live. The run-leader-fights-its-boss exception needs a run status received after the resume went out: a
 retained pre-resume boss-kind line does not hide a newly engaged boss, while a fresh post-resume boss-kind status
-keeps the old behaviour. A skipped near-wipe recovery is not retried for the same pause. Known limits: the wipe path
+keeps the old behaviour; the exception a boss-step wipe decided before the recovery needs no new line. A skipped
+near-wipe recovery is not retried for the same pause. Known limits: the wipe path
 does not check that the run is paused before reviving, and the 60 s running check can pass on a status line from
 before the resume; the timeout note always names 3 x `--wipe-rest` even when the walk ceiling cut it shorter; a boss's
 `first` add that is engaged as ordinary trash (for example a Zulian Tiger pack in ZG) still counts as a boss for 120 s
@@ -2245,10 +2564,66 @@ a near-wipe rest still drops `IncidentBossEngaged` and writes no dashboard saves
 boss afterwards); and the tracker's boss latch fires
 once per walk, so a boss engaged after an earlier one reaches the walk only through the wipe gate.
 
+A boss the frames show ENGAGED while the run is running stops the run and goes to the boss path (wipe, kill, reset),
+with one exception: when the run's own status is on its boss step and its `until` goes past it, or (walk 24) when the
+run stands at most two steps before its next boss step in the same leg (under `--until boss-done` any number of steps
+back in the same leg: a boss-done walk never stops the run on an engage of its own boss), its `until` goes past that
+boss step, the engaged entry belongs to that boss (its entry, phase entries, `first` adds or hold entries), and the main tank stands
+within 60 yd (2D) of the boss row's plan position in a frame younger than 10 s, the run leader fights it and the walk
+only notes the hand-over. Under `--until none` the exception needs none of that: the run walks to the plan's end, so the
+run leader fights every boss it meets and the walk never sends `.bot run stop` because of a boss or until rule (walk 31:
+Mandokir woke five steps before his row). A boss that engages while the run is PAUSED on its boss step still stops the
+walk for every other until: the hand-over needs a running status.
+
+When the run leader pauses with `boss <N> not found` on that boss's own row (walk 24 test2 r2: Thekal's phase 1 ends
+in a fake death and TB finds no corpse of 14599), the walk reads the frames for the kill: a boss UNIT at 0 % (the
+boss's own entry or a phase entry that is the boss reborn, judged per guid — never an add that exists several at
+once, such as Thekal's two Zulian Guardians 15068, nor a `first` add), or a corpse the toolkit proves within 40 yd
+of the boss row (`.tt q units 40 <x> <y> <z> all dead e=<entry>`, for a boss that died out of the party's sight and
+so left no frame row): the corpse's guid must equal a boss guid the frames showed alive in this attempt, and a
+second toolkit read at least 15 s later must still show it dead with no alive frame for that guid in between (a
+fake death raised again voids the wait; a wipe recovery clears it). A stale low-hp sighting alone is NEVER a kill:
+a 0 % frame row counts only when it was seen at or after the current attempt began (the frames' first sighting of
+a boss unit of that family engaged, judged like the tracker's own latch: below 100 % or holding a party target,
+cleared by a wipe recovery) and no boss unit of the family was seen alive after it (the frames are never pruned,
+so an earlier attempt's corpse stays in them after a reset or a respawn), no boss unit may be seen alive in the
+last 15 s, and a hire must be alive. With that evidence the walk sends one `.bot run skip` (retried once if the
+send fails); the evidence is re-read on every tick while the pause lasts, and without it the pause path is unchanged.
+With no kill evidence and the boss's plan row annotated with `summon_open_step` (the leg's `use_object` step that holds the object
+summoning the boss), the walk restarts its own run at that step's row (the `open`/`open_proof` row of the same leg before the boss
+row) instead of waiting the pause out (walk 35: Arlokk 14515 despawns after a wipe with no spawn row left, and b3/e3 paused `boss
+14515 not found` until an operator repeated the gong): `.bot run stop`, then `run start <plan> from step <the open row>` with the
+walk's own `until` and speed, so the run leader walks back to the object, opens it (the gong 180526) and meets the boss again; a
+fresh pause re-arms the same handling, and at most 3 such restarts are sent per walk (past them the pause ends the walk as before).
+A boss with no annotation is never restarted, whatever open row stands before it. The stop's send is not the run stopping: after
+`.bot run stop` the walk polls the run's own status (`run status`, up to 15 s) and only a status with no active run (state `none`,
+or a `done` line of its own plan) lets the `run start` go out; a status still running or paused, or none at all, sends no start,
+leaves the cleanup's own stop in place and ends the walk 18. The new run's own status line is adopted and checked (running at the
+open row, the walk's row count, the walk's until label); the reply can also carry the OLD run's final line, whose stop reaches the
+server after the start went out (walk 37 b: the walk read it as "the new run is done", stopped the run it had just started and ended
+0), so a done or none line of the plan is no evidence about the new run and the walk waits up to 15 s for its own running line at
+the open row. A refused stop, a refused start, or a start whose RPC timed out, whose status never came or came malformed or wrong is
+noted, the run then counts as possibly live (`.bot run stop` goes out again, and the walk's cleanup is not skipped), and the walk
+ends 18 (the pause path's restartable code), never 0: the walk has stopped its own run, and walk-super restarts only 18/19, so a 0
+there leaves the raid dead (walk 37 b sat 67 minutes). The note and run.log line say `re-running step N` and `the run restarted at
+step N`.
+
+The gong is not usable twice in an instance whose encounter state still counts the boss started: the core's script returns before the
+goober's spell while the instance says `IN_PROGRESS` or `DONE` (`boss_arlokk.cpp`, `GOHello_go_gong_of_bethekk`), and only the boss
+reaching home (`JustReachedHome`) resets it. So a re-run whose gong summons nothing (no unit of the boss's family alive in the frames
+since it went out) is reported as such ("the re-run at step N did not summon him again ... a fresh instance is needed") and ends the
+walk 18 at once, instead of sending the other re-runs and waiting the pause out; walk-super then re-places the walk, and the cmd must
+not carry `--reuse-instance` for such a boss, or the restart re-enters the copy whose gong is spent (a boss the frames DID show alive
+after the re-run did come back, and a fresh pause re-runs the gong again).
+
 Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
 `.bot gear raid <commander> tier <N>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,
-`.bot run stop[ time limit reached (raid-walk <n>m)]`); everything else goes through the `commander` RPC. Nothing names
-a creature or changes the world for others.
+`.bot run stop[ time limit reached (raid-walk <n>m)]`, and, with `--place`, `.appear <hire>` and
+`.instance unbind <the plan's map>`); everything else goes through the `commander` RPC. With `--place` the Eluna test
+toolkit's `.tt` lines go through a second allow-list of their own (`q inst|floor|group|units`, `quiet`, `place`,
+`clearto`, with the radius, `dz=` and `all=1` bounds, and the boss-kill read's `q units ... all dead e=<entry>`; never
+`kill`, `boss`, `force`, `me`, `reset` or another map).
+Nothing names a creature or changes the world for others.
 
 The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused if it exists; 0700, files 0600):
 
@@ -2257,9 +2632,14 @@ The output dir (`--out`, default `./raid-walk-<plan>-<YYYYmmdd-HHMMSS>`, refused
 | `run.log` | every `TBM:RUN` line (control bytes escaped) and the walk's own notes, `HH:MM:SS.mmm <text>` |
 | `commanders-<NNNN>-<reason>.json` | GET `/api/v1/commanders` (`reason`: walk, pause, wipe, boss, hold) |
 | `combat-fights.json`, `combat-fight-<id>.json` | the fights list and one detail per new fight key (a `live` row, a fight still running, is left for the next read: its finished fight comes back under the same id) |
-| `frames.jsonl` | one `bot_view` frame per 10 s (positions, hp, dead, hostiles; every line carries the walk's `tier`) |
+| `frames.jsonl` | one `bot_view` frame every 10 s, and every 2 s while a party member is in combat (positions, hp, `power`, `max_power`, `power_type` (0 mana, 1 rage, 2 focus, 3 energy; written even at 0; omitted when the bot has no power pool, `max_power` 0, so an absent `power_type` is not mana), dead, state, and each bot's `target`, `spell`, `action` and `result`; hostiles; every line carries the walk's `tier`) |
+| `pulljoiners.json` | one record per pull attempt (`step`, `at`, `count`, `guids`, plus `boss_adds` for the engaged boss-encounter adds and `no_row` when no plan row was in range): the engaged hostiles outside the pulled pack within 10 s of the pull order (the `pulling` line, or a boss's first `fighting` line; the waiting line opens no window; a stand pull ordered on a move step takes its pack row from the pulled unit's entry and position within row radius + 15 yd, else the seed's mates within 15 yd; the boss row's entries and the plan's hold/add entries count as `boss_adds`, not joiners); `raid-walk report` shows each attempt's record in the joined column of the fight whose window holds its `at` |
 | `slot-setup.txt`, `teardown.json` | what slot setup printed, and teardown's report |
-| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, `wipe_resumes`, boss, pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`) and `roster.tier_comparison` |
+| `summary.json`, `summary.txt` | format `tb-raid-walk` v1: end reason, steps, timeline, legs, deaths, wipes, `wipe_resumes`, boss, `boss_kill` (the last boss the walk engaged: `entry`, `step` (the boss's own row), `engaged`, `killed`, `skipped` (the walk's own `.bot run skip`, also kill evidence), `phase` (1 + the entry changes the frames saw on the boss's guid), `phase_entry` (the entry that guid read last) and `evidence` (the run leader's `boss down` note, the run's end right after the boss step when TB overwrites that note — `run ended right after the boss step; engaged` or `; frames`, the walk's own skip evidence, or the reason the kill does not hold); `boss_kills` lists one such record per boss step the run's statuses showed (`summary.txt` carries one `boss kill: ...` line for the single field, plus a `boss steps:` list when more than one boss step was seen), pauses, fights, injections, blocking incidents, dashboard, teardown, exit code, notes; `roster.tier`, `roster.tier_source` (`table`, `roster`, `--tier`, `--tier-override`), `roster.tier_comparison`, `roster.hire_settle_s` and `roster.settle_short` (`hire_settle_s` is absent, not 0, in a summary written before the field existed); `place` (a `--place` walk only: `start_step`, `leg`, `point`, `until_step`, `instance`, `circles[]` with their removed counts, `not_cleared[]`, `quiet`, `placed`, `hires`, `summoned[]`); `until_effective` (a `--place` walk whose route guard shortened the `until`: the clause the run actually walked, `until` staying the one asked for); `revive_refusal` (a revive the walk refused: `wipe_step`, `start_step` (the step of the revive point the walk used), `tried_steps`, `entrance_tried` (the entrance fallback's go went out), `waited_s`, `blockers[]` with `entry`, `name`, `dist`, `idle`, `in_combat` and `all_idle`; `summary.txt` carries one `revive refusal: ...` line for it); `assisted` and `gm_clear[]` (a [`--gm-clear`](#--gm-clear-test-servers-only) walk only; the walk is not a real clear) |
+
+The summary's `teardown` field carries `failed`, `hires_left` and `reason` (the first failing teardown step with its
+detail, e.g. `gone: still in view after 10 s: ...`; a `Character '<name>' not found` remove counts as already gone,
+not a failure).
 
 Exit codes: 0 the run ended by its `until` (or the hold); 18 a phase failed or was refused (setup, login, hire, bind,
 enter, start, the server has no `until`, a stall, the ceiling, an interrupt, `lease lost`); 19 the walk ran and was
@@ -2272,6 +2652,81 @@ Dashboard capture is optional: `--dash-url` (or `TBDASH_URL`) plus `--dash-pass-
 symlink, `privfile.Read`), never printed and never written to the output; a failed login is a warning
 (`dashboard: login failed (HTTP 401)`) and the walk goes on. Without a URL and a password file the capture is off and
 the summary says so.
+
+### --gm-clear (test servers only)
+
+A TEST tool, off by default: `raid-walk <plan> --place --from "leg L" --sql FILE --gm-clear "<leg>:<group>[,<group>...]"` (repeatable)
+and `--gm-clear-boss <leg>` (repeatable). After the placement and before the raid moves, the commander kills by GM command every live
+unit of the named pull groups (or the boss of the leg), so a later leg can be tested while a trash wipe is still being fixed. Example: the
+AQ20 walk starts at Rajaxx with `--gm-clear-boss kurinnaxx` so Kurinnaxx is dead and Rajaxx's event and Buru can be placed.
+
+- **Refused** unless the server is `m910q` or `tortoise-test2` (the `--place` allow-list, `placeServers`) and `--place` is on; a bad spec,
+  a leg or group the plan does not have, or a missing world export is a usage error before any GM line goes out. A group
+  whose row clears no hostile pack (a boss's or an event's units, such as walk 31's Mandokir group 18, the Vilebranch
+  Speaker) is skipped with a `gm-clear: WARN: skipped ...` note and the other groups go on: a boss group is never cleared,
+  and one bad group never aborts the run.
+- **Groups** are 1-based, in route order among the leg's `pull` and `hold` rows (the dry run lists them as `8c gm-clear:` lines); the
+  leg is its row number or its name. **Whole packs:** each group expands to every pack its row clears (the trash check's rule: the row's
+  entries and its reach) and each pack to all its members, a `creature_groups` AGGRO_TOGETHER group and both directions of every aggro
+  link, wherever the members stand (`internal/worldspawn` packs, the pull estimator's model). The packs come from the world export
+  under `~/.local/share/turtle-agent/world/map<N>` (the per-user data dir an installed binary reads; a checkout's
+  `<dir>/../tools/dungeongen/testdata/map<N>` is the fallback; `--gm-clear-spawns DIR` names another).
+- **Mechanism:** every expected member of a pack gets one entry. The commander visits the pack's stops (`.go xyz` to a member's spawn
+  point; a pack wider than the 100 yd a stop covers gets several), reads the units its client holds within 150 yd, and for each live
+  member whose spawn guid and entry match calls the agent's `gm_kill` RPC: it selects the creature by guid, waits until the server shows
+  that selection (the same select-confirm path as `.additem`), and sends `.die` (core: `Chat.cpp:885`, `SEC_DEVELOPER` = account level 3,
+  `HandleDieCommand` at `Commands.cpp:2795` kills the selected unit). The death is read from the unit's frames (`dead`, 5 s); a unit
+  that is still alive gets up to three more `.die` lines, 3 s apart. Every stop is visited and read in two rounds, always (an empty read
+  ends nothing). A member never seen is recorded `killed: false, reason: "not seen"`, one that would not die `reason: "alive"`, one
+  already dead `reason: "already dead"` (killed, 0 tries), one **this walk's own corridor clear already despawned**
+  `reason: "despawned by the corridor clear"` (killed, 0 tries, no line sent: the clearto reply's `removed` list names those units, and
+  the server no longer has them while the client's object store still shows them alive, so a `.die` on their guid is a no-op — that was
+  walk 35's 52 `alive after 4 tries` members in the Jin'do hall, ~25 min of retries per placement), and one the tool's **budget** left
+  untried `reason: "not tried: the gm-clear budget ran out"` (5 minutes for the whole tool, checked before every `.die` line, so
+  the budget is a real ceiling; past it no more lines go out, a `gm-clear: WARN: gave up after 5m0s ...` line names it, and the
+  placement goes on — a member already mid-retry when it ran out keeps `reason: "alive"`). A not-seen, alive or not-tried member makes the
+  clear **PARTIAL**: noted, in the summary
+  (`gm_clear_partial: true`, `ASSISTED PARTIAL` on the result line, `groups not cleared: <leg>:<groups>` with a leg's consecutive
+  numbers as a range, e.g. `high_priestess_arlokk:12-17`) and in the report. A group that is still alive after its retries never fails
+  the placement: a `gm-clear: WARN: <leg>:<group> not cleared ...` line names it, and the quiet and the landing read skip that pack's
+  entries (`skip=`), so an alive member cannot make the area "not quiet" and burn an instance (walk 32: every `gm_kill` was refused for
+  a slots table without `world_addr`, and the failed groups then failed the placement with exit 18). The commander then returns to the
+  start point. `gm_kill` itself refuses on an agent that is not a slot of `m910q`/`tortoise-test2`.
+- **Recorded:** `run.log` gets `gm-clear: killed <entry> <guid> (<leg>:<group>)` per kill (and `gm-clear: FAILED ...`),
+  plus one `gm-clear: <leg>:<group>: ...` line per named group (a group with nothing to kill says `nothing to clear`),
+  so a supervisor-restarted placement shows the flag acted even when the corridor clear already despawned the pack.
+  `summary.json` gets `assisted: true` and `gm_clear[]` (`leg`, `group`, `entry`, `guid`, `killed`, `tries`) and
+  `assisted: true` on each leg it killed in, `summary.txt` and the result line end with `ASSISTED`, and `raid-walk report`
+  (which reads `summary.json` from the walk folder) prints an **ASSISTED** line and the table. An ASSISTED walk is never
+  a real clear. In the pair form the flags apply to every walk.
+
+### --gm-instance-data (test servers only)
+
+ A TEST tool, off by default: `raid-walk <plan> [--place] --from "leg L" --sql FILE --gm-instance-data "<leg>:<a> <b>[;<a> <b>...]"`
+ (repeatable, one leg per value). A placed start inside the named leg sends the lines BEFORE the run starts — ahead of `run start`
+ in every `--until mode` including `--until none` — so the gate is satisfied before the first pull. An explicit `--from step N`
+ inside the leg fires the same way, on the leg the row belongs to. A walk that reaches the leg
+ mid-run pauses the run first (`.bot run pause`, always resumed after the last line, even when the pause itself was refused),
+ so the next pull waits for the lines. The commander
+ sends each command as `.debug instancedata <a> <b>`, in order, 3 s apart, once per instance.
+ Example: `--gm-instance-data "hakkar:1 3;6 3;0 0"` marks Hakkar's five priests done at
+ the pull gate. The lines go out through the walk's own `gm` RPC path (the same allow-listed chat the walk's other GM lines use),
+ so a refused or failed send breaks the walk instead of losing the gate silently. Refused unless the server is `m910q` or
+ `tortoise-test2`; a malformed command (not two integers) or an unknown leg is a usage error before anything
+ goes out. After each line the walk reads the chat/system events for up to 2 s and logs the server's reply in the event line
+ (`gm-instance-data: <leg>: .debug instancedata <a> <b> -> <reply>`); the core's debug handler prints nothing on success, so
+ silence logs `-> sent` and counts as confirmed. A refusal line (`There is no such command`, `Incorrect syntax.`, ...) logs
+ `-> <refusal> (REFUSED)`: the command is NOT recorded and is retried on the next status, at most 3 times per walk, then the walk
+ logs `gm-instance-data: <leg>: <cmd> NOT confirmed after 3 tries` and continues (never failing the walk on this). A marker file
+ per instance and leg in the walk's out dir — plus that mark in the
+ instance-cap ledger, which outlives the attempt's out dir — remembers the confirmed commands, so a resumed walk in the same instance
+ (`--reuse-instance`) never resends; only `--reuse-instance` walks consult the ledger (a fresh walk always sends — the core reuses
+ instance ids across copies). Marks carry the hash of the exact command list — a changed list resends — and drop on a server restart
+ or reset. Without `--place` the instance id is read the way the cap ledger reads it at entry;
+ when it cannot be read the walk WARNs once and fires marker-only (per out dir); a read of 0 is retried on the next status instead.
+ Old ledgers with bare `"<id>/<leg>"` string marks still load.
+`targets.txt` takes the flag like any other: its value holds spaces but the file is split on whitespace with no quoting, so the
+words after the flag (up to the next flag) are joined back into one value. In the pair form the flags apply to every walk.
 
 ### Walk report
 
@@ -2295,13 +2750,16 @@ turtle-agent raid-walk report ~/walks/zg10 --spell 24024 --clock-offset 1h --out
 One row per fight: step, fight id, kind and boss, start, duration, outcome, the engaged units by name and count, the deaths (name,
 seconds into the fight), **contact before pull** (`YES` when a status line of the step says the tank engages a unit "on arrival"
 before any `pulling` line of the step; `no` when a `pulling` line came first or neither did), **joined mid-fight** (the `a new unit
-joined` status lines inside the fight, with the seconds into the fight, and the `N joiners expected` text), and the **stand wait**
+joined` status lines inside the fight, with the seconds into the fight, the `N joiners expected` text, and — while the walk watches —
+the frames' own count `frames: joiners N (guids...)` of engaged hostiles outside the pulled pack within 10 s of the pull, from the
+pull's structured record `pulljoiners.json`, placed by its pull time on the fight of the step whose window holds it; a record
+outside every window is left off the table and counted in a `joiners unmatched` note), and the **stand wait**
 (from the first stand-pull status line of the pull to its `pulling` line, or to the fight's start). Below the table: the stand-pull
 status lines of each pull merged by text with digits and guids as `#` (first and last time, span, lines and runs; the lines of a
 step with no fight go last), the pauses, resumes (with how long the pause lasted), stops and the end of the run, and the watched
 casts. `report.json` (format `tb-raid-walk-report` v1) carries the same rows: `pulls[]` (`engaged`, `deaths`,
-`contact_before_pull`, `contact_text`, `neighbour_joins`, `stand_pull`, `stand_wait_s`, `casts`), `control[]`, `casts[]`,
-`stand_pull_unattached[]` and `totals`.
+`contact_before_pull`, `contact_text`, `neighbour_joins`, `joiners_seen`, `joiner_guids`, `stand_pull`, `stand_wait_s`, `casts`), `control[]`, `casts[]`,
+`stand_pull_unattached[]`, `totals` and `notes[]` (including the `joiners unmatched` count).
 
 ### Fault injection
 
@@ -2374,6 +2832,140 @@ one fault in `fail` exits **23**; 18 and 19 keep their meaning and win over 23. 
 lower exit code to **23** as well, and that 23 outranks 18 and 19 too (a bot left frozen must never hide). A fault
 that never fired is `not-fired`; one that could not be caused or measured is
 `inconclusive`; neither changes the exit code.
+### Raid autopilot
+
+`turtle-agent raid-autopilot <walk-dir>` keeps a walk dir's raids running without a worker watching them (walk 37:
+18:00-19:25 idle while no worker watched, rests of 15-90 minutes on the instance cap, eight failed placements burning
+instances). It reads `<walk-dir>/targets.txt`, one goal per line:
+
+```
+# id   server          slot holder goal        -- raid-walk args...
+a      tortoise-test2  1    zg37-a full        -- zul_gurub --dir /plans --hires roster-best.json --sql zg.sql
+b      tortoise-test2  2    zg37-b boss:14515  -- zul_gurub --dir /plans --hires roster.json --sql zg.sql --from step 405
+c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /plans --hires roster.json --sql zg.sql
+```
+
+- **Targets.** Blank lines and `#` lines are skipped. The header is exactly `id server slot holder goal --`; the rest
+  is the raid-walk args, starting with the plan. A goal is `full` (walk to the plan's end), `leg:<L>` (`--until "leg
+  L"`) or `boss:<ENTRY>` (`--until boss-done`, done when that boss's `boss_kills` entry reads killed, whatever the
+  exit code and whatever the end reason — an incident after the kill, 19, counts, and so does a `stopped: ...` end
+  such as the 90-minute limit firing after the kill; a full clear the same). A goal boss matches a kill of any entry
+  of that boss: the summary's `entry` and its `phase_entry` both count, and so do the entries of a boss the walk
+  reports under another entry (Zul'Gurub's Thekal: the row and the kill are 14599, his reborn form 14509, so
+  `boss:14509` and `boss:14599` are the same goal; `GoalBossIDs` in `internal/raidwalk/autopilot.go`). An id may repeat: its lines are
+  walked in file order, and a met goal advances to the next line. `--sql FILE` is required: every goal may be
+  re-placed, and raid-walk refuses `--place` without it. `--from` in a line is the goal's own start (a restart with
+  no step reached uses it); a restart inside the goal starts at the furthest step the run reached, and never sends
+  `--reuse-instance` without a `--from`/`--place` (raid-walk refuses that combination).
+  `--server/--slot/--holder/--until/--place/--reuse-instance/--out` are managed and dropped if present; slot 3,
+  `--instance-cap-unsafe` and `--inject` are refused before anything runs. Two ids may not name the same server and
+  slot: one slot runs one walk at a time. `targets.txt` is **re-read while the supervisor runs** (when its mtime or
+  size changes, every tick): an added id is queued and starts as soon as its slot is free, a removed id is stopped
+  cleanly like `STOP-<id>` (its run stopped, its slot torn down), and an id whose goal lines changed is stopped and
+  re-added from the new lines; an unchanged id keeps its goal, attempt, backoff and run. A new or changed id is
+  numbered past the `<id>-<n>` out dirs already on disk, so its first run never reads an earlier attempt's
+  `summary.json`. A removed line drops the state only when the id is idle and done: an escalated or refused id stays
+  (its `ESCALATE` line stays in `status.txt`, `finishAll` still exits 31, and a YIELD still writes no `YIELD-DONE`),
+  and so does an id whose slot is still leased (or whose lease cannot be verified). An unreadable or invalid
+  file keeps the targets already loaded and logs one `targets` warning per distinct error (a half-written file is not
+  a stop order).
+- **Instance cap.** `--instance-cap-per-account N` is passed to every raid-walk it starts; without the flag each walk
+  resolves the target server's entry in `instance-cap-per-account.json` beside the slots file and then the stock 5.
+  The per-account gates keep one place of headroom (below `N-1`), and a `--reuse-instance` placement that re-hires
+  records the new accounts for the instance it reuses (the core counts an instance id once per account).
+- **Keep running.** On ANY end (any exit code, including the walk's own `.bot run stop` exit 0), on a used-up restart
+  budget, or on a **stall** (no `TBM:RUN` step and no hostile HP change in `run.log`/`frames.jsonl` for `--stall`,
+  default 15m) it stops the walk (SIGTERM; never `.bot run stop`), tears the slot down, picks a new `--out`
+  (`<walk-dir>/<id>-<n>`), and re-places: the same instance first (`--place --from "step N" --reuse-instance`), a
+  fresh instance only when that placement failed (the old bind is gone), and that fresh decision survives a reached
+  step: the retry keeps `--from step N --place` without `--reuse-instance`. A restart inside a goal starts at the
+  furthest step the run reached; when that row is one raid-walk refuses as a place start (a boss row — which is where
+  every wipe at a boss ends — a hold row, a row inside an event), the restart resumes from the nearest earlier row of
+  the same leg the walk takes, else from the leg's own start (`--from leg L`), and logs a `resume` line: exit 2 for a
+  refused resume start is never escalated. The rows are read from the target's `--sql` migration (the numbering the
+  walk places against; the plan JSON numbers ZG's steps differently), cached by path then re-read whenever the
+  migration's mtime or size changes (a redeployed migration), and when it cannot be read the step is kept. A goal boss that is already dead ends the goal as **DONE**, never an
+  ESCALATE: any attempt's summary that reports the boss dead (the summary's `boss_kills`, or the walk's own
+  boss-done/corpse evidence it records there) sets `boss_dead` for the goal in the checkpoint, which advances to the
+  id's next goal line or finishes the id, and the run that saw the death is torn down (its slot freed) as for any met
+  goal. A legitimate instance-cap wait (`earliest
+  free time` as the run's last line) is not a stall; its stall clock starts when the wait ends. Exit 2 (the walk
+  refused its arguments) and exit 29 (the placement failed every try in the same instance; a fresh-instance retry
+  would only burn the hourly budget) stop that id with an `ESCALATE` line and no retry, and so does exit 15 three
+  times (the slot's lease is held by another holder). Three consecutive placement failures on one id escalate it as
+  well. Other exits re-place with a backoff of 20 s, 1 m, 2 m, 5 m and then 10 m per consecutive attempt that
+  reached no further step; a step further resets it. A hire the server's shared pool refused ("No mercenary of that
+  kind is available right now": several big raids on one server starve each other) is not such a failure: the raid
+  waits 5 minutes (`AutoHirePoolWaitBackoff`), logs `hire-pool-wait`, re-places the same instance, and neither the
+  backoff nor the escalation counts move — a refused run that had already walked past the goal's best step still
+  moves that step, and the wait leaves `noProgress` and `placeFails` exactly as they were. The wait loop has an end:
+  six consecutive hire-pool waits (`AutoHirePoolWaitMax`, about 30 minutes) `ESCALATE` the id with
+  `hire pool: 6 waits`; a launch that ends any other way resets the count. There is no cross-raid scheduling beyond
+  that wait. Exit 26 keeps its cap wait and re-places later. A **launch**
+  that cannot start (the attempt log or the child) is not completion: the goal stays, the retry uses the same
+  backoff (20 s at first), and the third consecutive launch failure escalates the id. A supervisor whose every id
+  met its goals says `every target's goals are met` and exits 0; one with an escalated id ends with
+  `not every target's goals are met` and exits **31**.
+- **Teardown.** `teardown <out>/slot`; when the lease is still held or the teardown failed, a second run with
+  `--release-anyway` (the brief's "twice if the lease is kept"). The walk's own teardown has already released the
+  lease in the normal case. A teardown is only done when it is verified: the walk's process **and its whole process
+  group** are gone (a login child left behind counts) **and** `lease list` says the slot's lease is released (a lease
+  it cannot verify counts as held). A teardown that fails keeps the run active — same `--out`, no relaunch on that
+  slot, no `YIELD-DONE` — and the next tick retries it; after three failed ticks the autopilot writes `ESCALATE
+  teardown <raid> <slot>` to `EVENTS.txt` and `status.txt` and leaves the slot alone until a person clears it (no
+  relaunch, no further teardown, no `YIELD-DONE`). The stops and teardowns of the ids run at the same time, so one
+  slow slot never delays another.
+- **Durable state.** `<walk-dir>/autopilot-state.json` is rewritten atomically (temp file written and fsynced, renamed,
+  then the directory fsynced) on every transition: per id its current goal, the goals met, the last reached step, the
+  reuse/fresh decision, the attempt number, the child's pid/out dir, and a `stopped` id's flag and reason. A
+  checkpoint that does not parse (a
+  truncated write, disk damage) is a refusal at start: exit 2, the file is named, and the message says to fix or
+  remove it — nothing is launched over it and the file is not overwritten with empty progress. A start loads it and
+  reconciles it with the attempts' `summary.json` and the slots' leases: a
+  goal the last run met before a crash is advanced, not walked again; a live walk of ours on its slot (its
+  `<out>/walk.pid` is alive and the lease is ours) is adopted and watched as the current run. A slot that is not ours
+  — a lease held by another holder, or a live walk that is not ours — refuses that id with an `ESCALATE start` line
+  and launches nothing on it.
+- **Files.** `<walk-dir>/EVENTS.txt` gets one line per action (UTC, id, action, reason); `status.txt` is written at
+  start and every `--status-every` (1m): id, goal, attempt, out, state, step, progress age, reuse (an escalated id is
+  one `ESCALATE <kind> <raid> <slot>: <reason>` line). `<id>-<n>.out` is the walk's own stdout/stderr; `autopilot.log`
+  is the detached supervisor's; the walk writes its own pid to `<out>/walk.pid`.
+- **Detached and YIELD.** By default the launcher re-execs itself with `setsid`, waits until the child holds the lock
+  (its pid file names it) and returns (pid + log); a child that exits first reports its refusal instead. The
+  supervisor writes `autopilot.pid` and takes an exclusive `flock` on `<walk-dir>/autopilot.lock` for its lifetime,
+  so a second start on the same walk dir refuses (exit 2) instead of running beside it — the pid file is
+  informational. The OS drops the lock when the process ends, so a crash leaves no stale guard. `--foreground` runs
+  it in place. A `YIELD` file in the walk dir (checked at least once a second) tears every run down, releases every
+  lease, writes `YIELD-DONE` and exits 0; SIGINT/SIGTERM does the same without `YIELD-DONE`. A `STOP-<raid id>` file
+  (checked every tick) stops just that raid the same clean way — its run stopped, its slot torn down and verified,
+  the id marked **stopped** and never relaunched — while the other ids keep running; once the id acted on it the
+  file is renamed `STOP-<id>.done` (one `stop: STOP-<id> consumed` line in `EVENTS.txt`), so a re-added id of the
+  same name starts instead of meeting the order again, and a `.done` file is never acted on. A stopped id is not a
+  met goal: when it is the last one, the supervisor ends with
+  `not every target's goals are met (0 escalated, 0 refused, 1 stopped)` and exit 0 (`status.txt` names the stop). A refused id (nothing
+  was launched) and a done id (its slot was torn down when the goal was met) are skipped: their stale slot dirs are
+  never torn down by a YIELD, and neither blocks `YIELD-DONE`. A stale `YIELD-DONE` is
+  removed at start and before a new YIELD's shutdown; a `YIELD` whose teardown does not verify writes no `YIELD-DONE`
+  (the event log says why).
+- **Dry run.** `--dry-run` validates `targets.txt` and prints each goal's first command; nothing is launched.
+- **Tests.** The decision rule is pure (`internal/raidwalk/autopilot.go`): exit 0 after a run stop, a 65-minute
+  no-progress fight, a failed placement, exit 2/29 and three exit 15s are the walk 37 fixtures. The command's tests
+  drive the real launch -> exit -> next-args path through a stub walk. `--poll`, `--stall`, `--settle` and
+  `--status-every` are the timings; `--binary` picks the turtle-agent the walks run.
+- **Known limits.** Adoption trusts `<out>/walk.pid` plus `kill(0)`: a SIGKILLed walk leaves its pid file behind, and
+  a reused pid would adopt an unrelated process and later signal its group (check `/proc/<pid>/cmdline` for
+  `raid-walk` and the out dir). The checkpoint maps goals by index only: a restart after editing an id's goal lines
+  resumes the new list at the saved index (a re-read while running stops the id and re-adds it from the new lines
+  with a fresh goal state). `writeStatus` has no lock, so a finish goroutine (through `escalate`) and the main loop can write
+  `status.txt.tmp` at the same time and the file can be briefly garbled. The `processAlive` group check covers the
+  walk's own process group, not the `login` child that `startSlotAgent` starts in its own group. The instance-cap
+  file is read only from beside `--slots`: with `--slots` elsewhere plus `--allow-split-ledger`, or with no live
+  default leases, the cap falls back to 5 (the split-ledger refusal covers the dangerous case). The first tick after
+  adoption reads all of `frames.jsonl` from offset 0 while holding the state mutex, so a large file can stall YIELD
+  and status handling for that tick. When there is no earlier out dir, the startup lease check asks the default
+  slots store and ignores a `--slots` in the target's arguments. A walk-super-style dir is safe to use: `initSeq`
+  ignores `f4-r1` (`Atoi` fails) and `cmd-*` files, and a leftover walk-super lease on a slot refuses that id with
+  an `ESCALATE` line.
 ### Raid suite
 
 `turtle-agent raid-suite` walks a list of raid plans one after another, each with `raid-walk`, and judges each walk
@@ -2432,8 +3024,10 @@ A cleanup step counts as done only when it succeeded (release returned no error;
 back is named in the pair's notes.
 
 Per-walk flags may carry the slot id as a prefix: `--sql 1=a.sql --sql 2=b.sql`, `--inject 2=lag`. An unprefixed
-`--sql --hires --dir --patrols --until --from --tier --tier-override --holder --inject` applies to both walks (a
-repeated `--inject` stays per walk). Every other flag is global and refuses a slot prefix (exit 2).
+`--sql --hires --dir --patrols --until --from --place --tier --tier-override --holder --inject` applies to both walks (a
+repeated `--inject` stays per walk). `--place` is a switch: a bare `--place` turns it on for every walk, `--place 2=on`
+(or `2=off`) for one of them, and each placed walk needs its own `--from` (`--from 2="leg L"`). Every other flag is
+global and refuses a slot prefix (exit 2).
 
 `pair.json` (format `tb-raid-walk-pair` v1) has one entry per walk (slot, the id as given, e.g. `"1"` or `"A"`;
 plan, character, out, exit code, end reason, steps, deaths, fights, pauses, tier, and the dashboard tab
@@ -2580,7 +3174,7 @@ With entry targets on:
 - A boss's `loot_item` is `cmd loot entry:<boss>@x,y,z <carrier> <item>` at the place the kill was seen (else the plan's boss position); it no longer needs the corpse in anyone's view. The corpse GUID,
   when the feed or the agent's store has one, is the retry after `not-found`.
 - A `wait_for` a game object with an entry polls `cmd state entry:<id>@x,y,z` every 2 s and ends when `state` is the plan's (`active`, `ready`, `active_alt` = the module's `alternative`).
-  `not-found` is "not there yet", `too-far` is noted; the step's own `timeout_s` ends the polling with "waited N s for ..." plus `last cmd state answer: ...`. The watchdog does not count the wait.
+  `not-found` is "not there yet" (with `gone_ok`, after an earlier answer that found the object it is done, with the note `is gone after it was seen: counted as done (gone_ok)`), `too-far` is noted; the step's own `timeout_s` ends the polling with "waited N s for ..." plus `last cmd state answer: ...`. The watchdog does not count the wait.
   A `cmd state` refused as `invalid` in the middle of the run turns entry targets off from then on.
 - **Keep-near is off** when every object step of the plan has an entry (no `.appear`, no walk behind the party before object steps and boss steps; `run_gm_assists` is 0, `agent_walks` 0 for them). A boss
   step still brings the agent up once (`.appear` or a walk, a counted `run_gm_assists`), but only when this run has no evidence the boss died (no kill, no ledger entry, no corpse in the agent's view): a boss killed before the run (a resume) can be shown dead only by the agent's view. A read-only check would need a `cmd state` for creature entries (follow-up in TortoiseBots). With a step that names no entry (a position only) it stays on, with a note.
@@ -2840,6 +3434,21 @@ with it (a new hire has no saved instance and is online). `hire` is optional and
 5. **Bind** `commander bind <tank> <others>` (the shared bind code of `fresh`, checked with `commander status`), then wait (10 s) for the commander to be
    out of every group; still in one means a server before #935 and fails. The run's own bind then finds the binding (`already-bound`, the same lead
    and count) and reuses it. The hires stay in the commander's raid afterwards (`unbind` returns them), so a later run finds them.
+   **The step refuses two hire spots** (#266, and nothing is dismissed, hired or bound): a commander whose navmesh floor is more than 5 yd
+   below the **portal ground**, and a commander of the **other team** than the run's `team` (the module hires the commander's own faction, so a
+   mismatched commander would only get hires that fight for the other side; start the run from a commander of that team, or drop `team`).
+   The hires appear and muster where the commander stands, so inside 15 yd of the plan's `portal` point the step compares floors: the portal
+   ground is the navmesh floor at the portal's x/y nearest **below** the trigger centre. A height the server settled picks the navmesh floor
+   at the commander's own x/y nearest that height and refuses when it stands on the wrong floor. A guessed `status.z_unknown` height (a far
+   teleport leaves it guessed: no floor drop follows, and the core never sends the player its own position) over two floors more than 5 yd
+   apart is settled first: the commander walks one short navmesh move (3 yd on the mesh), which clears `z_unknown` when it ends on the mesh,
+   and the settled height is judged like a known one (refuse on the wrong floor, hire on the right one). One floor, or floors within 5 yd,
+   needs no walk and hires. A height still a guess after the one try refuses (`commander height unknown over two floors; move the commander
+   and retry`). Only a known floor more than 5 yd below the portal's refuses; a
+   trigger centre a few yards above the ground, or a commander on the same ground, is allowed. No navmesh for the map (or no agent
+   position): no check, noted (`hire: portal ground not checked (no navmesh)`). A
+   **kept binding** (or every slot kept, only the bind redone) is not checked: a resume hires nothing new there. No option turns either refusal off:
+   move the commander.
 
 Every wait has its ceiling (`wait_s`, 8 s per hire reply, 6 s per `.bot` line, 3 s per spell question, 60 s for the pet (a bot with no pet at 20 s is told once to `summon voidwalker`, a hunter to `call pet`), 12 s for dismissals, a hire of a **kept binding** (a resume into the group the run before left: it is bound, so it answers no `.bot` line) is not checked again for gear, spells, talents or pet (a warning each; what the first run read is kept in the hire memory), 240 s for the
 whole step); no loop is extended by a retry (a hire line is sent at most three times: the raid conversion and the level fallback are one try each).
@@ -4055,9 +4664,11 @@ except through the movement packets it sent; and there are no textures or models
 ## Live dashboard
 
 `turtle-agent dashboard` serves one web page on the laptop that shows every running commander live: where its party is on
-the dungeon map, what the run is doing, and the numbers and orders behind it. It is for watching runs, so it is
+the dungeon map, what the run is doing, and the numbers and orders behind it. It is for watching runs, so by default it is
 **read-only**: it calls four RPC methods (`status`, `dungeon_status`, `tune_list`, `bot_view`, the last one without its
-`log_every` switch) and nothing else, and the client refuses every other method name. Plain Go standard library, the page
+`log_every` switch) and nothing else, and the read client refuses every other method name. Started with `--edit` or
+`--control` the page can write too — a checked version of a plan's route, or a run control — each an opt-in of its own with
+its own token file (below). Plain Go standard library, the page
 is embedded in the binary (no CDN, no build step). The header's "Refresh every" picker (1 / 2 / 5 / 10 / 30 s / paused, default 2 s —
 saved per browser) sets how often the page polls; "paused" freezes the map for a close look.
 
@@ -4089,7 +4700,8 @@ the same look point as `plan-check`) and answers the stops in run order and the 
 - the stops numbered `1, 2, 3...` across the whole plan: via points, stage points (`to`), packs, steps that have a stand point, bosses;
 - a segment the planner cannot path (`ok: false`, with the plan check's reason: `unreachable`, `off the mesh`, `too far`, `no line of sight`)
   is drawn dashed red from its start to its end, with the reason on hover. Each segment is judged from where the plan means the party to stand, so
-  one unreachable point does not turn the segments after it red (`plan-check` stays where it was and reports its own issues).
+  one unreachable point does not turn the segments after it red (`plan-check` follows the same re-anchor after a failed look or a `needs_walk` point;
+  after a walk it cannot path it stays where it was and reports its own issues).
   A `needs_walk` point or a stand outside its trigger zone has no segment of its own: its number turns red. `direct` hops are straight (amber dotted),
   `check_skip` and `gm_cross` hops are dotted violet (not walked on the mesh).
 
@@ -4217,10 +4829,56 @@ worktree for a PR and prints the commit message (who, when, what moved, what it 
 longer the one the edit started from. The brief rule for the lead: before copying plans for a run, `route-edits list <plan>`; when a checked
 version is newer than the golden or worktree copy, export it into the slot's fresh `dungeons_dir` instead.
 
+**Controls (`--control`).** Off by default: without `--control` the page is GET/HEAD only, exactly as above. With it every agent
+card gets a "Controls" box whose buttons pause, resume, skip a step or stop that agent's run through `POST
+/api/control/<agent id>/run`, with a control token of its own:
+
+```
+turtle-agent dashboard --listen 127.0.0.1:8790 --control --control-tokens ~/.config/turtle-agent/dashboard-control-tokens
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--control` | off | turns the run controls on. `--listen` must then be loopback or a literal Tailscale address: `0.0.0.0`, `::` and LAN addresses are refused at start-up, since a control token must not cross a LAN in plain HTTP |
+| `--control-tokens` | `~/.config/turtle-agent/dashboard-control-tokens` | lines of `label token`, mode 0600, owned by you: its own file, **never** `--edit-tokens` (an editing token must not press run buttons); the label is the `who` in the control log |
+| `--control-trust-local` | off | a control from this machine, or from a Tailscale address you named, needs no token typed (the rules are the route editor's, above; its own nonce, sent in `X-Control-Nonce`). Needs `--control` |
+| `--control-trust-label` | `owner` | with `--control-trust-local`: the label in the `--control-tokens` file the trusted controls are made as |
+| `--control-log` | `~/.local/state/turtle-agent/dashboard-control.jsonl` | every control appends two JSON lines (the request before the RPC, the result after); the folder is made 0700 (an existing folder must be yours and not writable by others, or `--control` refuses to start), the file 0600 (a link at the path is refused), and a log that cannot be opened stops `--control` |
+
+The contract: `GET /api/control/status` -> `200 {"enabled":true,"local_trusted":bool,"trust_nonce"?:string,"actions":["run"]}`
+(404 without `--control`); `POST /api/control/<id>/run` `{"verb":"pause"|"resume"|"skip"|"stop","confirm":bool}`; `GET
+/api/control/<id>/log?n=20` -> `{"lines":[...]}`, the last 1..50 result lines of that agent, newest last. `<id>` is an agent's
+normalized RPC address (`host:port`, an IPv6 host in brackets), the card's `id`: two agents on different loopback hosts that share a
+port have different ids. It must be an agent the dashboard itself discovered (`auto`): an id it does not watch is 404. A success answers `200
+{"status":"ok","action","verb","rpc","result":<the agent's answer, scrubbed>}`; an error is `{"status":"error","message"}` with
+400 bad request (unknown verb, unknown field, trailing data), 401 auth, 403 Host / Origin / Sec-Fetch-Site, 404 agent or path,
+409 state, a missing confirm or another control for that agent still running, 413 body, 415 type, 429 more than 30 controls a
+minute per label, 500 the log could not be written, or 502 the agent's RPC failed (its message passed back).
+
+Every control first asks that agent a **fresh** `dungeon_status` (never the poller's cache), a live check: the page greys
+buttons, the server is the gate. `pause` and `stop` always need `"confirm": true`. The page asks first with the browser's own
+confirm dialog; inside a cross-origin embed (a page framed through `--embed-from`) browsers silence that dialog and treat it as
+"no", so the pause and stop buttons are inert there — `resume` and `skip`, which need no confirm, still work. A pause can
+**end** a run (any mode but `observe`; the party and the instance are kept) or stop the leader in `observe` mode, and the
+status read can go stale before the RPC lands, which carries no expected state to guard with; `stop` unbinds (the hires go
+back and the instance is lost).
+`resume` and `skip` are for observe runs; the agent refuses them on others and its message is passed back. What is **not**
+there: no way to start or resume a run (`dungeon_run` is never called), no live tuning and no party orders (later slices), and
+no GM verb of any kind.
+
+Safety: every control — token or trusted — must be `application/json`, at most 4 KiB, with an `Origin` (if present) equal to
+its Host and a `Sec-Fetch-Site` of `same-origin` or `none`; the token is in the `Authorization` header only (never a cookie or
+the URL), OPTIONS stays 405, and the Host check is the unchanged one. One control runs at a time per agent (a second is 409).
+The log holds who sent it, how (`token` or `trusted`), the peer, the agent, the verb and what the agent answered — never a
+token: the agent's token is blanked in a message and any JSON answer is scrubbed before it is logged or returned. A log read
+shows the `peer` only to a caller who could send a control itself (a valid control token, or the trusted nonce); the page
+reads the log with no token, so it never sees one.
+
 **Over Tailscale.** Listen on the machine's tailnet address (`tailscale ip -4`) and open the page from another tailnet device at
 `http://100.101.102.103:8790/`: that IP is accepted as `Host` by itself. A name the page is opened by (the MagicDNS name,
-`<machine>.<tailnet>.ts.net`) is refused with 403 until it is listed in `--allow-host`. The page stays read-only, and the scrub
-and the file limits are unchanged. A wildcard `--listen` (`0.0.0.0`) takes no address by itself: name the hosts you open it by.
+`<machine>.<tailnet>.ts.net`) is refused with 403 until it is listed in `--allow-host`. The page stays as it was opted in
+(`--edit`, `--control` or neither), and the scrub and the file limits are unchanged. A wildcard `--listen` (`0.0.0.0`) takes
+no address by itself: name the hosts you open it by.
 
 **What it reads.** From a settings file only the `rpc` and `dungeons_dir` fields (accounts, passwords and every other field are skipped by the
 decoder). Each agent's bearer token comes from its `rpc-<port>.token` file and is used for the calls only. Every 1.5 s each
@@ -4268,7 +4926,7 @@ served (the state, the raw panel) is scrubbed: any JSON member whose name matche
 is dropped at any depth, and a string that contains the agent's token is replaced. A test walks the card model for such
 names and another runs a full poll against a fake agent whose replies are full of them. Files are served only from
 `--tests-dir`: dot-dot segments, absolute paths, backslashes, NUL bytes, symlinks that leave the folder and directories are
-refused (a 404 that does not say why). Only GET and HEAD are answered, a request whose `Host` is neither a loopback name nor one named with
+refused (a 404 that does not say why). Only GET and HEAD are answered (plus `POST /api/edit/*` and `POST /api/control/*` when those are on), a request whose `Host` is neither a loopback name nor one named with
 `--allow-host` (or the `--listen` IP) is refused (DNS rebinding), and the page may be framed only by a loopback page or an origin named with `--embed-from` (the TortoiseBots observability
 dashboard's Commanders tab embeds it that way when `TBDASH_COMMANDER_URL` points here; a dashboard on another machine, for
 example `--embed-from http://m910q:8095`, must be named).
@@ -4280,8 +4938,8 @@ to the middle of the party at every update and keeps the zoom (first the party p
 (a yellow "Following paused, click to resume" chip) and the toggle resumes it. A click on a bot's name in the party table centres the map
 on it. **Dim map** darkens the game picture under the drawing (0-80 %). The drawing's colours are fixed and bright with dark outlines
 (route cyan, current leg thicker, tank blue, healer green, damage orange, commander purple, hostile red, neutral grey, packs dashed yellow,
-bosses magenta, doors and objects white), and its labels keep one size at every zoom. The page is read-only and loads no outside script or
-font. The wording is plain: the state line reads "Sentinel · pack 4 of 5 · fighting Stone Steward", counters have a short name and a hover
+bosses magenta, doors and objects white), and its labels keep one size at every zoom. The page sends nothing unless it was started with
+`--edit` or `--control`, and it loads no outside script or font. The wording is plain: the state line reads "Sentinel · pack 4 of 5 · fighting Stone Steward", counters have a short name and a hover
 explanation, orders read "Attack Stone Steward -> OK" with the raw line on hover. The dashboard has no creature names of its own: it takes
 them from the "Name (entry)" mentions in the plan's notes and says "creature <id>" otherwise.
 

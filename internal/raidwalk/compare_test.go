@@ -95,6 +95,8 @@ func TestLastGoodSkipsBadAndMismatched(t *testing.T) {
 		mk("exit19", 59, func(s *Summary) { s.ExitCode = 19 }),
 		mk("stopped", 58, func(s *Summary) { s.EndReason = "stopped: stalled" }),
 		mk("comparison", 57, func(s *Summary) { s.Roster.TierComparison = true }),
+		// Newer than good-new, and otherwise good: a --hire-settle 0 run is no baseline (spec raid-walk-addons 2.2).
+		mk("settle-short", 30, func(s *Summary) { zero := 0.0; s.Roster.SettleShort = true; s.Roster.HireSettleS = &zero }),
 		mk("tier3", 56, func(s *Summary) { s.Roster.Tier = 3 }),
 		mk("until-step", 55, func(s *Summary) { s.Until = "step 12" }),
 		mk("speed2", 54, func(s *Summary) { s.Speed = 2 }),

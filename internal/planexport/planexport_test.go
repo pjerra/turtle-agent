@@ -3,6 +3,7 @@ package planexport
 import (
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -207,8 +208,8 @@ func TestLongHopsAreListedOrCut(t *testing.T) {
 	if err != nil || len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "leg 1 step 0") {
 		t.Fatalf("%v %v", res.Warnings, err)
 	}
-	cut := func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, error) {
-		return []dungeon.Point{{X: 50}, {X: 100}, {X: 150}}, nil
+	cut := func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return []dungeon.Point{{X: 50}, {X: 100}, {X: 150}}, nil, nil
 	}
 	res, err = Build(p, Options{Cut: cut})
 	if err != nil || len(res.Warnings) != 0 {
@@ -346,7 +347,7 @@ func TestUldamanPullOrderExport(t *testing.T) {
 		"pull [4853 4855] 35.8,370.6 r16",
 		"move 28.0,360.0", "pull [4855 4853] 49.1,343.5 r12.8",
 		"move 33.0,354.0", "pull [4855] 39.5,327.5 r15.1",
-		"move 19.1,366.4", "pull [4855 4853] 58.6,374.4 r18",
+		"move 19.1,366.4", "move 37.5,363.5", "pull [4855 4853] 58.6,374.4 r18",
 		"move 50.8,379.3", "pull [4855 4853] 83.2,401.9 r15.3",
 		"pull [4855 4853] 51.7,420.1 r16",
 		"move 48.0,419.0", "pull [4853 4855] 38.8,442.0 r13.5",
@@ -368,7 +369,7 @@ func TestZulfarrakExportCarriesTheUnitLists(t *testing.T) {
 		t.Fatalf("plan row %+v: all three lists must be set", r.Plan)
 	}
 	sql := WriteSQL([]Rows{r})
-	want := "INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `cc_priority`, `cc_always`, `kill_first`, `source`, `comment`) VALUES\n('zulfarrak', 209, '7246,5648', '7246', '7785,8179,5650,7247', 'test', "
+	want := "INSERT INTO `ai_dungeon_plan` (`plan`, `map`, `cc_priority`, `cc_always`, `kill_first`, `source`, `comment`) VALUES\n('zulfarrak', 209, '7246,5648', '7246', '7785,8179,5650,7247,7608,7606,7605,62499', 'test', "
 	if !strings.Contains(sql, want) {
 		t.Fatalf("the migration lacks %q", want)
 	}
@@ -379,7 +380,7 @@ func TestZulfarrakExportCarriesTheUnitLists(t *testing.T) {
 	if err := Equal([]Rows{r}, back); err != nil {
 		t.Fatal(err)
 	}
-	if fmt.Sprint(back[0].Plan.KillFirst) != "[7785 8179 5650 7247]" {
+	if fmt.Sprint(back[0].Plan.KillFirst) != "[7785 8179 5650 7247 7608 7606 7605 62499]" {
 		t.Fatalf("read back %+v", back[0].Plan)
 	}
 }
@@ -438,11 +439,13 @@ func zulfarrakThroughZumrah(t *testing.T) *dungeon.Plan {
 	return nil
 }
 
-// The whole shipped Zul'Farrak plan is exported up to the weegli_door leg: the two waits of the stairs event carry their holds (instance
-// data 1, the pyramid phase), Weegli's wait carries the hold on phase 8, and his gossip is a gossip row by option number. The bly leg begins with
-// a unit wait without a hold (Weegli gone), which the run leader has no step for, so the export is cut before it, with a note that names the leg
-// and the step (the plan's gahzrilla leg is optional and takes no row number, so bly is row leg 15 of plan leg 16); ukorz after it is not in the rows (TestZulfarrakWithoutBlyReachesUkorz).
-func TestZulfarrakIsCutAtBly(t *testing.T) {
+// The whole shipped Zul'Farrak plan exports without a cut (2026-10-21; before, the bly leg's unit waits cut it there): the bly leg is
+// the move to its spot, the gossip 7604 option 1 (the plan's option 0), and the boss's hold done by its units (entry 0, param 0, flags
+// 32768 with skip_if_dead_of_gossip; Bly first, then Murta, Oro and Raven), and ukorz follows it. Bly's three unit waits are agent_only,
+// each listed with its reason, and boss.first under the hold is warned as no kill order. The plan's gahzrilla leg is optional and the
+// farraki_arena and zeljeb legs are skip_export, and all three take no row number, so bly is row leg 15 of plan leg 18 and ukorz row
+// leg 16.
+func TestZulfarrakExportsBlyAndReachesUkorz(t *testing.T) {
 	p, err := dungeon.Load("../../dungeons/zulfarrak.json")
 	if err != nil {
 		t.Fatal(err)
@@ -451,25 +454,70 @@ func TestZulfarrakIsCutAtBly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	whole := buildWhole(t, zulfarrakThrough(t, "weegli_door"))
-	if len(res.Rows.Legs) != 15 || res.Rows.Legs[14].Name != "weegli_door" || len(res.Rows.Steps) != len(whole.Rows.Steps) || res.Rows.Count() != whole.Rows.Count() {
-		t.Fatalf("%d legs, %d steps (the plan through weegli_door: %d)", len(res.Rows.Legs), len(res.Rows.Steps), len(whole.Rows.Steps))
+	if res.Cut != "" {
+		t.Fatalf("cut: %s", res.Cut)
 	}
-	for _, want := range []string{"exported legs 0-14 (weegli_door) only", "cut before leg 15 (bly)", "steps[0]: wait_for.unit has no run leader step (unit 7607 gone)", "1 after it"} {
-		if !strings.Contains(res.Cut, want) {
-			t.Errorf("the cut note lacks %q: %s", want, res.Cut)
+	legs := res.Rows.Legs
+	if len(legs) != 17 || legs[14].Name != "weegli_door" || legs[15].Name != "bly" || legs[16].Name != "ukorz" {
+		t.Fatalf("legs %+v", legs)
+	}
+	var bly []string
+	for _, s := range res.Rows.Steps {
+		if s.Leg == 15 {
+			bly = append(bly, fmt.Sprintf("%s %d %g %g %g r%g p%d f%d t%d %v", s.Kind, s.Entry, s.X, s.Y, s.Z, s.Radius, s.Param, s.Flags, s.TimeoutS, s.Entries))
 		}
 	}
-	if !slices.Contains(res.Warnings, res.Cut) || !strings.Contains(res.Rows.Plan.Comment, "cut before leg 15 (bly)") {
-		t.Errorf("warnings %v, plan comment %q", res.Warnings, res.Rows.Plan.Comment)
+	want := []string{
+		"move 0 1884 1212 9 r0 p0 f0 t0 []",
+		"gossip 7604 1883.82 1200.83 8.87 r0 p1 f512 t0 []", // dead_is_done: his crew can be dead before the leg
+		"hold 0 1884 1212 9 r25 p0 f32768 t300 [7604 7608 7606 7605]",
+	}
+	if !slices.Equal(bly, want) {
+		t.Errorf("bly rows:\n%s\nwant\n%s", strings.Join(bly, "\n"), strings.Join(want, "\n"))
+	}
+	// Only Bly's gossip carries the flag: without Weegli (7607) the End Door stays shut, so a dead Weegli must pause the run.
+	for _, s := range res.Rows.Steps {
+		if s.Kind == KindGossip && (s.Flags == FlagDeadNpcIsDone) != (s.Entry == 7604) {
+			t.Errorf("gossip %d has flags %d", s.Entry, s.Flags)
+		}
+	}
+	for _, s := range res.Rows.Steps {
+		if s.Leg == 15 && s.Kind == KindHold && (!strings.Contains(s.Comment, "until every unit of it is dead (7604 counts while still friendly)") ||
+			!strings.Contains(s.Comment, "done when its NPC was dead, with only friendly units left")) {
+			t.Errorf("the units hold's comment: %q", s.Comment)
+		}
+	}
+	if ukorz := kinds(res.Rows, 16); len(ukorz) == 0 || ukorz[len(ukorz)-1] != KindBoss {
+		t.Errorf("ukorz kinds %v", ukorz)
+	}
+	if fmt.Sprint(res.Rows.Plan.KillFirst) != "[7785 8179 5650 7247 7608 7606 7605 62499]" {
+		t.Errorf("kill_first %v: the crew is focused by the plan's list (the hold has no kill order)", res.Rows.Plan.KillFirst)
+	}
+	w := strings.Join(res.Warnings, "\n")
+	for _, want := range []string{
+		"wait_for agent_only (",
+		`leg 18 (bly) steps[0] "the End Door wait of weegli_door`,
+		`leg 18 (bly) steps[1] "the weegli_door hold waited for instance data 1 = 8`,
+		`leg 18 (bly) steps[3] "the boss hold waits for it`,
+		"boss.first under a hold (",
+		"leg 18 (bly) boss 7604 first [7608 7606 7605]): not in the rows",
+		"leg 8 (farraki_arena): skip_export (an opt-in wing): left out of the export; pass --with-legs farraki_arena to include it",
+		"leg 10 (zeljeb): skip_export (an opt-in wing): left out of the export; pass --with-legs zeljeb to include it",
+	} {
+		if !strings.Contains(w, want) {
+			t.Errorf("the warnings lack %q:\n%s", want, w)
+		}
 	}
 	back, err := Parse(WriteSQL([]Rows{res.Rows}))
-	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
-		t.Fatalf("%v", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Equal([]Rows{res.Rows}, back); err != nil {
+		t.Fatal(err)
 	}
 }
 
-// With the bly leg left out (the exporter's skip-legs option: the run leader has no boss that turns hostile after his gossip) the shipped plan
+// With the bly leg left out (the exporter's skip-legs option, as the export was made before the bly leg got its units hold) the shipped plan
 // exports whole: the weegli_door leg is the hold on the pyramid phase 8 at Weegli's place, the gossip 7607 option 1 (the plan's option 0), and the
 // End Door wait; the ukorz leg follows it in plain kinds.
 func TestZulfarrakWithoutBlyReachesUkorz(t *testing.T) {
@@ -498,7 +546,7 @@ func TestZulfarrakWithoutBlyReachesUkorz(t *testing.T) {
 		"move 0 1884 1212 9 r0 p0 f0 t0 []",
 		"hold 1 1877.5 1199.6 8.9 r30 p8 f8 t600 [7787 7788 7789 8876 8877]",
 		"gossip 7607 1877.52 1199.63 8.87 r0 p1 f0 t0 []",
-		"wait_object 146084 1854.5 1142.9 16.1 r0 p1 f0 t60 []",
+		"wait_object 146084 1854.5 1142.9 16.1 r0 p2 f0 t60 []",
 	}
 	if !slices.Equal(door, want) {
 		t.Errorf("weegli_door rows:\n%s\nwant\n%s", strings.Join(door, "\n"), strings.Join(want, "\n"))
@@ -508,13 +556,13 @@ func TestZulfarrakWithoutBlyReachesUkorz(t *testing.T) {
 		t.Errorf("ukorz kinds %v", ukorz)
 	}
 	if !slices.ContainsFunc(res.Warnings, func(w string) bool {
-		return strings.Contains(w, "leg 16 (bly): left out of the export by the exporter's skip-legs option")
+		return strings.Contains(w, "leg 18 (bly): left out of the export by the exporter's skip-legs option")
 	}) {
 		t.Errorf("no warning for the skipped leg: %v", res.Warnings)
 	}
 	// The skipped leg's attributes are not warned about: its gossip stand, its skip list and the like are not in any row.
 	for _, w := range res.Warnings {
-		if strings.Contains(w, "leg 16 (bly)") && !strings.Contains(w, "left out of the export") {
+		if strings.Contains(w, "leg 18 (bly)") && !strings.Contains(w, "left out of the export") {
 			t.Errorf("a warning about the skipped leg: %s", w)
 		}
 	}
@@ -535,19 +583,6 @@ func zulfarrakThrough(t *testing.T, last string) *dungeon.Plan {
 	}
 	t.Fatalf("the plan has no %s leg", last)
 	return nil
-}
-
-// buildWhole builds a plan that has to export whole.
-func buildWhole(t *testing.T, p *dungeon.Plan) Result {
-	t.Helper()
-	res, err := Build(p, Options{Source: "test", DropCompanionsLoot: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Cut != "" {
-		t.Fatalf("cut: %s", res.Cut)
-	}
-	return res
 }
 
 // The cut: a step the run leader cannot do in a later leg ends the export before that leg (its rows, and the warnings it made, are gone); in
@@ -582,9 +617,9 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The optional gahzrilla leg is left out of the run leader's rows (its bots carry no Mallet), so the rows have one leg fewer and the later
-	// legs close up: the last leg is the plan's last, one number lower.
-	if len(res.Rows.Legs) != len(p.Legs)-1 {
+	// The optional gahzrilla leg (its bots carry no Mallet) and the skip_export farraki_arena and zeljeb legs are left out of the run
+	// leader's rows, so the rows have three legs fewer and the later legs close up: zumrah is the plan's last, three numbers lower.
+	if len(res.Rows.Legs) != len(p.Legs)-3 {
 		t.Fatalf("%d rows legs for %d plan legs", len(res.Rows.Legs), len(p.Legs))
 	}
 	last := len(res.Rows.Legs) - 1
@@ -592,8 +627,8 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 		t.Fatalf("%s", p.Legs[len(p.Legs)-1].Name)
 	}
 	for _, l := range res.Rows.Legs {
-		if l.Name == "gahzrilla" {
-			t.Errorf("the optional leg is in the rows: %+v", l)
+		if l.Name == "gahzrilla" || l.Name == "farraki_arena" || l.Name == "zeljeb" {
+			t.Errorf("the skipped leg is in the rows: %+v", l)
 		}
 	}
 	for _, s := range res.Rows.Steps {
@@ -608,8 +643,15 @@ func TestZulfarrakWithZumrahExports(t *testing.T) {
 	if len(res.Warnings) == 0 || !strings.Contains(strings.Join(res.Warnings, "\n"), "31 loot_object steps left out") {
 		t.Fatalf("warnings %v", res.Warnings)
 	}
-	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "leg 9 (gahzrilla): optional (needs Mallet of Zul'Farrak (item 9240)") {
-		t.Fatalf("no warning for the optional leg: %v", res.Warnings)
+	w := strings.Join(res.Warnings, "\n")
+	for _, want := range []string{
+		"leg 11 (gahzrilla): optional (needs Mallet of Zul'Farrak (item 9240)",
+		"leg 8 (farraki_arena): skip_export (an opt-in wing): left out of the export; pass --with-legs farraki_arena to include it",
+		"leg 10 (zeljeb): skip_export (an opt-in wing): left out of the export; pass --with-legs zeljeb to include it",
+	} {
+		if !strings.Contains(w, want) {
+			t.Fatalf("no warning for the skipped leg %q: %v", want, res.Warnings)
+		}
 	}
 	back, err := Parse(WriteSQL([]Rows{res.Rows}))
 	if err != nil || Equal([]Rows{res.Rows}, back) != nil {
@@ -729,11 +771,13 @@ func TestOptionalLegIsLeftOut(t *testing.T) {
 	}
 }
 
-// A use_object whose item is used ON the object (via_item) has no row in the run leader's tables: the export is refused, naming the step.
-func TestViaItemUseObjectIsRefused(t *testing.T) {
+// A use_object whose item is used ON the object (via_item) is a use_on row (TestViaItemIsAUseOnRowOnlyWithOptional); one without the
+// object's point has none: the row names the object by its point, so the export is refused, naming the step.
+func TestViaItemUseObjectWithoutAPointIsRefused(t *testing.T) {
 	p := parsePlan(t, `{"version":1,"name":"vi","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
  {"name":"gong","to":{"x":30,"y":0,"z":0},"steps":[{"use_object":{"entry":141832,"near":{"x":31,"y":0,"z":0},"stand":{"x":32,"y":0,"z":0},"requires_item":{"entry":9240},"via_item":true}}]}]}`)
-	if _, err := Build(p, Options{}); err == nil || !strings.Contains(err.Error(), "via_item") {
+	p.Legs[0].Steps[0].UseObject.Near = nil // the plan check asks for near; a plan built in code may lack it
+	if _, err := Build(p, Options{}); err == nil || !strings.Contains(err.Error(), "via_item needs requires_item (the item used on it) and near") {
 		t.Fatalf("%v", err)
 	}
 }
@@ -772,12 +816,12 @@ func TestGMCrossDirect(t *testing.T) {
 func TestApproachHops(t *testing.T) {
 	const js = `{"version":1,"name":"far","status":"live-checked (test)","map":43,"entrance":{"x":0,"y":0,"z":0},
  "legs":[{"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":100,"y":0,"z":0}]},{"entries":[101],"positions":[{"x":120,"y":0,"z":0}]}]}]}`
-	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
 		var out []dungeon.Point
 		for x := a.X + 40; x < b.X; x += 40 {
 			out = append(out, dungeon.Point{X: x})
 		}
-		return out, nil
+		return out, nil, nil
 	}
 	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut, ApproachHops: true})
 	if err != nil {
@@ -792,6 +836,125 @@ func TestApproachHops(t *testing.T) {
 	}
 	res, err = Build(parsePlan(t, js), Options{Source: "test", Cut: cut})
 	if err != nil || strings.Join(kinds(res.Rows, 0), " ") != "move pull pull" {
+		t.Fatalf("%v %v", err, kinds(res.Rows, 0))
+	}
+}
+
+// A pull on another level needs approach points though it stands within the run leader's straight-line reach: its way is the
+// navmesh path down the ledge (maraudon_purple round 35: 42 yd away, 20 yd down, 216 yd along the mesh), and the leader's own hops
+// could not take the party there. A pull at the same level within the reach is still left uncut.
+func TestApproachHopsCutAPullOnAnotherLevel(t *testing.T) {
+	const js = `{"version":1,"name":"ledge","status":"live-checked (test)","map":349,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[
+  {"entries":[100],"positions":[{"x":100,"y":0,"z":0}]},
+  {"entries":[101],"positions":[{"x":140,"y":0,"z":-20}]},
+  {"entries":[102],"positions":[{"x":200,"y":0,"z":-20}]},
+  {"entries":[103],"positions":[{"x":205,"y":0,"z":-20}]}]}]}`
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		// One corner off to the side: the way is a detour around the ledge, not the straight line.
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 60, Z: (a.Z + b.Z) / 2}}, nil, nil
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The pull 20 yd down (42 yd away, so within the straight-line reach) gets an approach row; the one 5 yd away does not.
+	idx := -1
+	for i, s := range res.Rows.Steps {
+		if s.Kind == KindPull && len(s.Entries) == 1 && s.Entries[0] == 101 {
+			idx = i
+		}
+	}
+	if idx < 0 || res.Rows.Steps[idx-1].Kind != KindMove || res.Rows.Steps[idx-1].Comment != "approach path" {
+		t.Fatalf("a pull 20 yd down got no approach points: %v", kinds(res.Rows, 0))
+	}
+	for i, s := range res.Rows.Steps {
+		if s.Kind == KindPull && len(s.Entries) == 1 && s.Entries[0] == 103 {
+			if i > 0 && res.Rows.Steps[i-1].Kind == KindMove && res.Rows.Steps[i-1].Comment == "approach path" {
+				t.Fatalf("a pull 5 yd away at the same level was cut: %v", kinds(res.Rows, 0))
+			}
+		}
+	}
+}
+
+// The last approach row must stand where the run leader sees the pack or boss (at most RunLeaderReachYd away): the floor-aware
+// cutter's hop or the 25 yd standoff can leave the kept corner 70+ yd out (razorfen_kraul round 35: the boss row 73.5 yd from the
+// last approach row). A point on the path just past the standoff is the last row then; a cutter whose corner is already within the
+// reach gets no extra point.
+func TestApproachHopsEndWithinTheRunLeaderReach(t *testing.T) {
+	const js = `{"version":1,"name":"far","status":"live-checked (test)","map":47,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":100,"y":0,"z":0}]}]}]}`
+	// One corner 70 yd from the pack: the standoff keeps it, and it is beyond the reach.
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return []dungeon.Point{{X: a.X + 10, Y: 0, Z: 0}, {X: 30, Y: 0, Z: 0}, {X: 95, Y: 0, Z: 0}}, nil, nil
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last *StepRow
+	for i, s := range res.Rows.Steps {
+		if s.Kind == KindPull {
+			last = &res.Rows.Steps[i-1]
+		}
+	}
+	if last == nil || last.Kind != KindMove {
+		t.Fatalf("no approach row: %v", kinds(res.Rows, 0))
+	}
+	if d := math.Hypot(float64(last.X-100), float64(last.Y)); d > dungeon.RunLeaderReachYd {
+		t.Fatalf("the last approach row is %.1f yd from the pack (row %+.1f): %v", d, last.X, kinds(res.Rows, 0))
+	}
+	if last.X != 70 {
+		t.Fatalf("the last approach row is %.1f, within %d yd wanted: %v", last.X, 30, kinds(res.Rows, 0))
+	}
+
+	// A corner 40 yd out is within the reach: no extra row.
+	near := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return []dungeon.Point{{X: 60, Y: 0, Z: 0}}, nil, nil
+	}
+	res, err = Build(parsePlan(t, js), Options{Source: "test", Cut: near, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(res.Rows.Steps); n != 3 {
+		t.Fatalf("%d rows, an extra approach row for a near corner: %v", n, kinds(res.Rows, 0))
+	}
+}
+
+// The opening move of leg 0 is cut from the plan's entrance: the run leader stands there before its first row, and a leg whose
+// `to` is hundreds of yards in was otherwise one uncut move walked in the leader's own hops (razorfen_downs round 35: 449 yd).
+// A plan whose entrance is near its first point gets no extra row.
+func TestFirstLegMoveIsCutFromTheEntrance(t *testing.T) {
+	const js = `{"version":1,"name":"open","status":"live-checked (test)","map":129,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"a","to":{"x":200,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":200,"y":0,"z":0}]}]}]}`
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		var out []dungeon.Point
+		for x := a.X + 40; x < b.X; x += 40 {
+			out = append(out, dungeon.Point{X: x})
+		}
+		return out, nil, nil
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paths, to int
+	for _, s := range res.Rows.Steps {
+		if s.Kind == KindMove && s.Comment == "path" {
+			paths++
+		}
+		if s.Kind == KindMove && s.Comment == "to" {
+			to++
+		}
+	}
+	if paths == 0 || to != 1 {
+		t.Fatalf("the opening move from the entrance is not cut: %v", kinds(res.Rows, 0))
+	}
+
+	const near = `{"version":1,"name":"open","status":"live-checked (test)","map":129,"entrance":{"x":190,"y":0,"z":0},
+ "legs":[{"name":"a","to":{"x":200,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":205,"y":0,"z":0}]}]}]}`
+	res, err = Build(parsePlan(t, near), Options{Source: "test", Cut: cut})
+	if err != nil || strings.Join(kinds(res.Rows, 0), " ") != "move pull" {
 		t.Fatalf("%v %v", err, kinds(res.Rows, 0))
 	}
 }
@@ -897,6 +1060,51 @@ func TestApproachAndHold(t *testing.T) {
 	}
 }
 
+// TestObjectHold: a hold done by a game object state writes the object's entry, the state's index and flag 16, and reads back equal.
+// The crystal event of Dire Maul West is the first user: the hold fights the four Mana Remnants on the spot and ends when the crystal
+// reads active.
+func TestObjectHold(t *testing.T) {
+	js := `{"version":1,"name":"crystals","status":"live-checked","map":429,"entrance":{"x":0,"y":0,"z":0},"legs":[
+	 {"name":"a","to":{"x":10,"y":0,"z":0},
+	  "pull_groups":[{"entries":[11483,11483,11483,11483],"positions":[{"x":40,"y":0,"z":0},{"x":60,"y":0,"z":0},{"x":60,"y":20,"z":0},{"x":40,"y":20,"z":0}],"radius":18,
+	   "approach":[{"x":30,"y":-10,"z":0}]},
+	   {"entries":[11483],"positions":[{"x":50,"y":10,"z":0}],
+	    "hold":{"object":{"entry":177259,"near":{"x":50,"y":10,"z":0}},"state":"active","spot":{"x":30,"y":-10,"z":0},"radius":40,"timeout_s":120}}]}]}`
+	r := build(t, parsePlan(t, js))
+	if got := strings.Join(kinds(r, 0), " "); got != "move move pull hold" {
+		t.Fatalf("leg 0 %s", got)
+	}
+	var hold StepRow
+	for _, s := range r.Steps {
+		if s.Kind == KindHold {
+			hold = s
+		}
+	}
+	if hold.Entry != 177259 || hold.Param != 1 || hold.Flags != FlagDoneObject || hold.Radius != 40 || hold.TimeoutS != 120 ||
+		hold.X != 30 || hold.Y != -10 || fmt.Sprint(hold.Entries) != "[11483]" {
+		t.Fatalf("object hold %+v", hold)
+	}
+	if hold.Comment != "pull group 1 hold: the event's mobs are fought on the spot until object 177259 is active" {
+		t.Fatalf("comment %q", hold.Comment)
+	}
+	back, err := Parse(WriteSQL([]Rows{r}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Equal([]Rows{r}, back); err != nil {
+		t.Fatal(err)
+	}
+	// The plan refuses a state it does not know, and data next to an object.
+	bad := strings.Replace(js, `"state":"active"`, `"state":"open"`, 1)
+	if _, err := dungeon.Parse("test.json", []byte(bad)); err == nil {
+		t.Fatal("state open accepted")
+	}
+	bad = strings.Replace(js, `"object":{"entry":177259,"near":{"x":50,"y":10,"z":0}}`, `"instance_data":1,"object":{"entry":177259,"near":{"x":50,"y":10,"z":0}}`, 1)
+	if _, err := dungeon.Parse("test.json", []byte(bad)); err == nil {
+		t.Fatal("instance data next to an object accepted")
+	}
+}
+
 // TestLongHopStartsAtTheLastFight: the hop to a leg's first move is measured from the boss (or pack) the party fought last, not from the
 // last move before that fight: Uldaman's export of dd05724 walked the party from the scorpid pit to the Sentinel's hall and back because
 // leg 6's `to` was measured from leg 5's ramp top.
@@ -905,9 +1113,9 @@ func TestLongHopStartsAtTheLastFight(t *testing.T) {
 	 {"name":"a","to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[3],"positions":[{"x":40,"y":0,"z":0}],"approach":[{"x":30,"y":0,"z":0}]}],
 	  "boss":{"entry":1,"position":{"x":100,"y":0,"z":0},"approach":[{"x":60,"y":0,"z":0}]}},
 	 {"name":"b","to":{"x":110,"y":0,"z":0},"boss":{"entry":2,"position":{"x":120,"y":0,"z":0}}}]}`
-	res, err := Build(parsePlan(t, js), Options{Cut: func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, error) {
+	res, err := Build(parsePlan(t, js), Options{Cut: func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, []CutNote, error) {
 		t.Fatalf("cut from %v to %v: the boss at 100 is 10 yd from the next move", from, to)
-		return nil, nil
+		return nil, nil, nil
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -991,18 +1199,18 @@ func TestGroupStepStartsAtTheWalkBeforeTheGroup(t *testing.T) {
 func TestGroupStepWithApproachHops(t *testing.T) {
 	p := parsePlan(t, `{"version":1,"name":"Hops","status":"live-checked (test)","map":43,"entrance":{"x":0,"y":0,"z":0},"legs":[
 	 {"name":"first","to":{"x":0,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":200,"y":0,"z":0}]}]}]}`)
-	cut := func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, error) {
-		return []dungeon.Point{{X: 60, Y: 0, Z: 0}, {X: 120, Y: 0, Z: 0}, {X: 180, Y: 0, Z: 0}}, nil
+	cut := func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return []dungeon.Point{{X: 60, Y: 0, Z: 0}, {X: 120, Y: 0, Z: 0}, {X: 180, Y: 0, Z: 0}}, nil, nil
 	}
 	res, err := Build(p, Options{Source: "test", Cut: cut, ApproachHops: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := kinds(res.Rows, 0); strings.Join(got, " ") != "move move move pull" {
+	if got := kinds(res.Rows, 0); strings.Join(got, " ") != "move move move move pull" {
 		t.Fatalf("kinds %v", got)
 	}
 	if n, ok := res.Rows.GroupStep(p, 0, 0); !ok || n != 2 {
-		t.Fatalf("group 0: step %d ok %v, want 2 (the first approach path row, not the pull row 4)", n, ok)
+		t.Fatalf("group 0: step %d ok %v, want 2 (the first approach path row, not the pull row 5)", n, ok)
 	}
 }
 
@@ -1103,6 +1311,81 @@ func TestWailingCavernsSerpentisFootIsExact(t *testing.T) {
 	}
 	if strings.Contains(w, "check_skip") {
 		t.Fatalf("check_skip is the plan check's only and is not warned:\n%s", w)
+	}
+}
+
+// A cut hop is the exporter's own walk, so it keeps off the plan's leave spawns too (the plan check holds the plan's own points and
+// segments to dungeon.LeaveClearYd). A hop whose cut path would come within 15 yd of one is left uncut, with a warning: the run leader
+// walks that hop itself, as it did before --approach-hops made the exporter cut hops. A clear cut is written as before.
+func TestCutHopsKeepOffALeftAloneSpawn(t *testing.T) {
+	const js = `{"version":1,"name":"lv","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"leave":[{"entry":7246,"spawn":81610,"at":{"x":1591,"y":1047.7,"z":9},"why":"island Shadowhunter"}],
+  "pull_groups":[{"entries":[100],"positions":[{"x":1650,"y":1047.7,"z":9}]}]}]}`
+	cut := func(p dungeon.Point) func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+			return []dungeon.Point{p}, nil, nil
+		}
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", ApproachHops: true, Cut: cut(dungeon.Point{X: 1600, Y: 1045, Z: 9})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows.Steps) != 2 {
+		t.Fatalf("a hop 9 yd from the left-alone spawn was cut:\n%+v", res.Rows.Steps)
+	}
+	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "would pass within 15 yd of the left-alone 7246 (spawn 81610)") || !strings.Contains(w, "not cut, the run leader walks it itself") {
+		t.Errorf("warnings %v", res.Warnings)
+	}
+	clear, err := Build(parsePlan(t, js), Options{Source: "test", ApproachHops: true, Cut: cut(dungeon.Point{X: 1625, Y: 1047.7, Z: 9})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clear.Rows.Steps) != 3 || clear.Rows.Steps[1].Comment != "approach path" {
+		t.Fatalf("a clear cut is not written: %+v", clear.Rows.Steps)
+	}
+}
+
+// Only the current leg's leave spawns refuse a cut: a spawn another leg leaves alone is that leg's own stretch (the plan check
+// holds every leg's points to every leg's list already), so a hop cut past it is written as before.
+func TestCutHopIgnoresAnotherLegsLeave(t *testing.T) {
+	const js = `{"version":1,"name":"lv","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"leave":[{"entry":7246,"spawn":81610,"at":{"x":1591,"y":1047.7,"z":9},"why":"island Shadowhunter"}],
+  "pull_groups":[{"entries":[100],"positions":[{"x":1650,"y":1047.7,"z":9}]}]},
+ {"name":"b","to":{"x":20,"y":0,"z":0},"pull_groups":[{"entries":[101],"positions":[{"x":1650,"y":1047.7,"z":9}]}]}]}`
+	cut := func(p dungeon.Point) func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+			return []dungeon.Point{p}, nil, nil
+		}
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", ApproachHops: true, Cut: cut(dungeon.Point{X: 1600, Y: 1047.7, Z: 9})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows.Steps) != 6 {
+		t.Fatalf("a hop 9 yd from another leg's left-alone spawn was left uncut:\n%+v", res.Rows.Steps)
+	}
+}
+
+// The clearance is the walk's: the polyline start, via points, destination, measured to each of its segments. Here the via point and the
+// destination both stand 40 yd from spawn 81610 and the straight run between them passes through it: the hop is not cut.
+func TestCutHopSegmentKeepsOffALeftAloneSpawn(t *testing.T) {
+	const js = `{"version":1,"name":"lv","status":"live-checked (test)","map":209,"entrance":{"x":0,"y":0,"z":0},"legs":[
+ {"name":"a","to":{"x":10,"y":0,"z":0},"leave":[{"entry":7246,"spawn":81610,"at":{"x":1591,"y":1047.7,"z":9},"why":"island Shadowhunter"}],
+  "pull_groups":[{"entries":[100],"positions":[{"x":1591,"y":1087.7,"z":9}]}]}]}`
+	cut := func(p dungeon.Point) func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return func(uint32, dungeon.Point, dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+			return []dungeon.Point{p}, nil, nil
+		}
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", ApproachHops: true, Cut: cut(dungeon.Point{X: 1591, Y: 1007.7, Z: 9})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows.Steps) != 2 {
+		t.Fatalf("a hop whose segment passes 0 yd from the left-alone spawn was cut:\n%+v", res.Rows.Steps)
+	}
+	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "would pass within 15 yd of the left-alone 7246 (spawn 81610)") || !strings.Contains(w, "not cut, the run leader walks it itself") {
+		t.Errorf("warnings %v", res.Warnings)
 	}
 }
 
@@ -1236,9 +1519,9 @@ func TestCutterLeavesTheExactHopAlone(t *testing.T) {
 	p := parsePlan(t, js)
 	p.Legs[0].Via[1].X = 70
 	calls := 0
-	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
 		calls++
-		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 1, Z: b.Z}}, nil
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 1, Z: b.Z}}, nil, nil
 	}
 	res, err := Build(p, Options{Source: "test", Cut: cut})
 	if err != nil {
@@ -1432,8 +1715,8 @@ func TestBossStandPullNoApproachHops(t *testing.T) {
 	  "boss":{"entry":62661,"position":{"x":200,"y":0,"z":0},"stand_pull":true,
 	   "approach":[{"x":10,"y":0,"z":0}]}},
 	  {"name":"next","to":{"x":400,"y":0,"z":0},"boss":{"entry":62662,"position":{"x":410,"y":0,"z":0}}}]}`
-	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
-		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 999, Z: 0}}, nil
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 999, Z: 0}}, nil, nil
 	}
 	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut, ApproachHops: true})
 	if err != nil {
@@ -1484,8 +1767,8 @@ func TestPullGroupStandPullFlagParamAndStand(t *testing.T) {
 	}
 	const good = `{"entries":[11368,14750],"positions":[{"x":200,"y":0,"z":0}],"radius":4,"stand_pull":true,"clear_yd":35,
 	  "approach":[{"x":150,"y":0,"z":0}]}`
-	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, error) {
-		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 999, Z: 0}}, nil
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return []dungeon.Point{{X: (a.X + b.X) / 2, Y: 999, Z: 0}}, nil, nil
 	}
 	res, err := Build(parsePlan(t, plan(good)), Options{Source: "test", Cut: cut, ApproachHops: true})
 	if err != nil {
@@ -1542,5 +1825,60 @@ func TestPullGroupStandPullFlagParamAndStand(t *testing.T) {
 	}
 	if err := (&builder{}).pull(0, dungeon.PullGroup{Entries: []uint32{1}, Positions: []dungeon.Point{{X: 1}}, StandPull: true}); err == nil {
 		t.Fatal("builder: a stand_pull group with no approach was exported")
+	}
+}
+
+// A pull group's max_bodies lands in the pull row's item column (the run
+// leader's plan ceiling, kPlanMaxPullBodies 80); absent, the item stays 0.
+func TestPullGroupMaxBodiesIsTheRowItem(t *testing.T) {
+	plan := func(group string) string {
+		return `{"version":1,"name":"zg","status":"live-checked (test)","map":309,"entrance":{"x":0,"y":0,"z":0},
+	 "legs":[{"name":"arlokk","to":{"x":300,"y":0,"z":0},"pull_groups":[` + group + `]}]}`
+	}
+	pullItem := func(group string) uint32 {
+		t.Helper()
+		for _, s := range build(t, parsePlan(t, plan(group))).Steps {
+			if s.Kind == KindPull {
+				return s.Item
+			}
+		}
+		t.Fatal("no pull row")
+		return 0
+	}
+	const group = `{"entries":[11365],"positions":[{"x":200,"y":0,"z":0}],"radius":4}`
+	if got := pullItem(group); got != 0 {
+		t.Fatalf("no max_bodies: item %d, want 0", got)
+	}
+	if got := pullItem(`{"entries":[11365],"positions":[{"x":200,"y":0,"z":0}],"radius":4,"max_bodies":27}`); got != 27 {
+		t.Fatalf("max_bodies 27: item %d, want 27", got)
+	}
+}
+
+// A wait_for gameobject with gone_ok exports the gone-is-done flag on the wait_object row (an object a script opens and then
+// removes: Shadowfang Keep's Courtyard Door), and the row validates; without it the flags stay 0.
+func TestObjectWaitGoneOKCarriesTheGoneIsDoneFlag(t *testing.T) {
+	plan := func(extra string) *dungeon.Plan {
+		return parsePlan(t, `{"version":1,"name":"sfk","status":"live-checked (test)","map":33,"entrance":{"x":0,"y":0,"z":0},
+		 "legs":[{"name":"door","to":{"x":10,"y":0,"z":0},"steps":[{"wait_for":{"gameobject":{"entry":18895,"near":{"x":11,"y":0,"z":0},"state":"active"`+extra+`},"timeout_s":60}}]}]}`)
+	}
+	row := func(p *dungeon.Plan) StepRow {
+		t.Helper()
+		for _, s := range build(t, p).Steps {
+			if s.Kind == KindWaitObject {
+				return s
+			}
+		}
+		t.Fatal("no wait_object row")
+		return StepRow{}
+	}
+	with := row(plan(`,"gone_ok":true`))
+	if with.Flags&FlagGoneIsDone == 0 || with.Param != 1 || !strings.Contains(with.Comment, "active or gone") {
+		t.Fatalf("gone_ok row %+v", with)
+	}
+	if err := Validate(Rows{Plan: PlanRow{Plan: "sfk"}, Steps: []StepRow{with}}); err != nil {
+		t.Fatalf("the gone_ok wait row is refused: %v", err)
+	}
+	if plain := row(plan("")); plain.Flags != 0 {
+		t.Fatalf("a plain wait_object row carries flags %d", plain.Flags)
 	}
 }

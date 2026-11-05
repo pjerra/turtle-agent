@@ -22,8 +22,12 @@ import (
 //   - ZG walk 19 test2 s4: Zulian Tigers 11361 (Thekal's first adds, also ZG trash) fought as trash at step 89 on
 //     Venoxis's leg, ~330 yd from Thekal's position, latched the walk's boss gate and blocked a trash-wipe recovery.
 //   - Thekal phase 2: Thekal 14599 dies in phase 1 and comes back as 14509 with Zulian Guardians 15068 (plan
-//     boss.phase_entries); TB marks the step done (bossDeadNearSpot, TortoiseBots runtime/DungeonRunPolicy.h:1404) and
-//     the status moves on to arlokk while the fight goes on at Thekal's spot. A leg rule would fail open there.
+//     boss.phase_entries). TB used to be blind to him (no dead creature of the boss's own entry 14599 is left) and
+//     paused with "boss 14599 not found: ..." (walk 24 test2 r2, walk 25 test2); since #1453 TortoiseBots follows
+//     the boss by guid, so the run leader reports the kill himself ("boss down: he died as 14509") and the walk
+//     records it (the summary's boss_kill). The frames still decide for an older module that pauses: bossKilled
+//     counts a row whose guid the frames showed as the boss's own entry whatever entry it now reads, and the walk
+//     skips the step once. A leg rule would fail open there.
 //
 // The nearest 11361 trash pull group in zul_gurub.json stands 56.5 yd from Thekal's position (on his own leg).
 const FirstAddBossRadius = 40
@@ -45,13 +49,14 @@ type firstOf struct {
 type BossRows struct {
 	set       map[uint32]bool
 	core      map[uint32]bool
+	own       map[uint32]bool
 	first     map[uint32][]firstOf
 	ambiguous map[uint32]bool
 }
 
 // NewBossRows builds the rule from the plan (nil: no entry is a boss row).
 func NewBossRows(plan *dungeon.Plan) *BossRows {
-	b := &BossRows{set: map[uint32]bool{}, core: map[uint32]bool{}, first: map[uint32][]firstOf{}, ambiguous: map[uint32]bool{}}
+	b := &BossRows{set: map[uint32]bool{}, core: map[uint32]bool{}, own: map[uint32]bool{}, first: map[uint32][]firstOf{}, ambiguous: map[uint32]bool{}}
 	if plan == nil {
 		return b
 	}
@@ -69,6 +74,7 @@ func NewBossRows(plan *dungeon.Plan) *BossRows {
 			continue
 		}
 		b.core[leg.Boss.Entry] = true
+		b.own[leg.Boss.Entry] = true
 		for _, e := range leg.Boss.PhaseEntries {
 			b.core[e] = true
 		}
@@ -103,6 +109,11 @@ func (b *BossRows) Ambiguous() []uint32 {
 
 // Listed says whether the plan names the entry as a boss, a first add or a hold entry (position not considered).
 func (b *BossRows) Listed(entry uint32) bool { return b != nil && b.set[entry] }
+
+// Owns says whether the entry is a plan boss's OWN entry (a leg's Boss.Entry): not a phase entry, a first add or a
+// hold entry. The walk keys its guid rule on it (spec 6, D5 b, #1453): a hostile row of that entry tells it the row's
+// guid is the boss, so later rows of the same guid are the boss whatever entry they read.
+func (b *BossRows) Owns(entry uint32) bool { return b != nil && b.own[entry] }
 
 // Counts says whether a row of this entry standing at x, y is boss evidence.
 func (b *BossRows) Counts(entry uint32, x, y float32) bool {

@@ -279,7 +279,7 @@ func TestRaidWalkInjectRunawayLineOrder(t *testing.T) {
 	}
 	order := []string{
 		".gm visible off",
-		".go xyz 49.8206 -114.607 -24.3112 249",
+		".go xyz 30.89 -54.08 -4.65 249",
 		".go xyz -52.97 -96.88 -38.64 249",
 		".summon " + victim,
 		".freeze " + victim,
@@ -465,7 +465,7 @@ func TestRaidWalkInjectEveryLinePassesAnAllowList(t *testing.T) {
 			}
 			continue
 		}
-		if !raidwalk.AllowedLine(line, hires) {
+		if !raidwalk.AllowedLine(line, hires, 249) {
 			t.Fatalf("gm line %q (send %d) passes no allow-list", line, i)
 		}
 	}

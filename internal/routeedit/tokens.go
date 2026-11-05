@@ -90,6 +90,19 @@ func (t *Tokens) Has(label string) bool {
 	return false
 }
 
+// SharesToken reports the label of a token this file holds that other holds too. The dashboard's controls refuse a control file that shares a
+// token with the route editor's: an editing token must never press run buttons.
+func (t *Tokens) SharesToken(other *Tokens) (label string, ok bool) {
+	for _, a := range t.list {
+		for _, b := range other.list {
+			if a.token == b.token {
+				return a.label, true
+			}
+		}
+	}
+	return "", false
+}
+
 // Failure limit: a host that fails this many times in the window is answered 429 without its token being looked at.
 const (
 	maxFails   = 10

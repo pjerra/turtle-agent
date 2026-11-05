@@ -16,11 +16,18 @@ const UntilBossDone = "boss-done"
 // IsBossDone says whether s is the boss-done word.
 func IsBossDone(s string) bool { return strings.TrimSpace(s) == UntilBossDone }
 
-// BossDoneUntil resolves boss-done against a plan's rows: the clause for ParseUntil ("step N", N being the step after the first boss
-// step; "none" when the boss is the plan's last step, which then runs to its end) and the boss step's number (1-based, the run leader's
-// own numbering). The rows must be the ones the server runs: the caller compares the step count with the one the server shows.
-func BossDoneUntil(rows planexport.Rows) (clause string, bossStep int, err error) {
-	for i, st := range rows.Steps {
+// BossDoneUntil resolves boss-done against a plan's rows from startStep on: the clause for ParseUntil ("step N", N being
+// the step after the first boss step at or after startStep; "none" when that boss is the plan's last step, which then runs
+// to its end) and the boss step's number (1-based, the run leader's own numbering). The rows must be the ones the server
+// runs: the caller compares the step count with the one the server shows. startStep is the step the run starts at (1 for a
+// door-to-end run): a boss before it is skipped by a partway run, so its "until" would be answered at the start and the
+// run would end at once (the --from bug of spec 5.2).
+func BossDoneUntil(rows planexport.Rows, startStep int) (clause string, bossStep int, err error) {
+	if startStep < 1 {
+		startStep = 1
+	}
+	for i := startStep - 1; i >= 0 && i < len(rows.Steps); i++ {
+		st := rows.Steps[i]
 		if st.Kind != planexport.KindBoss {
 			continue
 		}
@@ -29,6 +36,9 @@ func BossDoneUntil(rows planexport.Rows) (clause string, bossStep int, err error
 			return "none", bossStep, nil
 		}
 		return fmt.Sprintf("step %d", bossStep+1), bossStep, nil
+	}
+	if startStep > 1 {
+		return "", 0, fmt.Errorf("--until boss-done: the plan has no boss step at or after step %d", startStep)
 	}
 	return "", 0, errors.New("--until boss-done: the plan has no boss step")
 }

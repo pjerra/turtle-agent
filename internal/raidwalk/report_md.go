@@ -70,6 +70,25 @@ func (r *Report) Markdown() string {
 		fmt.Fprintf(&b, ", %d pulls with contact before the pull order, %d with a neighbour joining, %d pauses, %d resumes, %d stops", r.Totals.ContactBeforePull, r.Totals.FightsWithJoins, r.Totals.Pauses, r.Totals.Resumes, r.Totals.Stops)
 	}
 	b.WriteString(".\n\n")
+	if r.Assisted {
+		legs := assistedLegs(&Summary{GMClear: r.GMClear})
+		fmt.Fprintf(&b, "**%s**\n\n", GMClearSummaryLine(r.GMClear, legs))
+		if len(r.GMClear) > 0 {
+			b.WriteString("| leg | group | entry | guid | killed | tries | reason |\n| --- | --- | ---: | --- | --- | ---: | --- |\n")
+			for _, e := range r.GMClear {
+				killed := "yes"
+				if !e.Killed {
+					killed = "NO"
+				}
+				reason := "-"
+				if e.Reason != "" {
+					reason = e.Reason
+				}
+				fmt.Fprintf(&b, "| %s | %s | %d | %s | %s | %d | %s |\n", mdCell(e.Leg), mdCell(e.Group), e.Entry, e.GUID, killed, e.Tries, reason)
+			}
+			b.WriteString("\n")
+		}
+	}
 	for _, n := range r.Notes {
 		fmt.Fprintf(&b, "- %s\n", n)
 	}
@@ -88,16 +107,23 @@ func (r *Report) Markdown() string {
 				contact = "YES: " + p.ContactText
 			}
 		}
-		joins := "-"
+		var joined []string
 		if len(p.Joins) > 0 {
 			js := make([]string, len(p.Joins))
 			for i, j := range p.Joins {
 				js[i] = fmt.Sprintf("+%.0fs", j.TS)
 			}
-			joins = fmt.Sprintf("%d (%s)", len(p.Joins), strings.Join(js, ", "))
+			joined = append(joined, fmt.Sprintf("%d (%s)", len(p.Joins), strings.Join(js, ", ")))
 		}
 		if p.JoinersExpected != "" {
-			joins += "; " + p.JoinersExpected
+			joined = append(joined, p.JoinersExpected)
+		}
+		if len(p.JoinerGUIDs) > 0 {
+			joined = append(joined, fmt.Sprintf("frames: joiners %d (%s)", p.JoinersSeen, strings.Join(p.JoinerGUIDs, " ")))
+		}
+		joins := "-"
+		if len(joined) > 0 {
+			joins = strings.Join(joined, "; ")
 		}
 		stand := "-"
 		if len(p.StandRuns) > 0 {

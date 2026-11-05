@@ -61,13 +61,13 @@ func observeStartFrom(plan *dungeon.Plan, leg int, group *int, step int, planner
 			if err != nil {
 				return dungeon.PartialStart{}, err
 			}
-			rowLeg, _ := planexport.LegNumber(plan, leg)
+			rowLeg, _ := planexport.LegNumber(planexport.ExportedLegs(plan, planexport.Options{}), leg)
 			return dungeon.PartialStart{Words: "from step " + strconv.Itoa(n), Step: n, Leg: leg, LegNumber: rowLeg, ExpectLeg: plan.Legs[leg].Name, Point: at, HavePoint: ok}, nil
 		default:
 			if leg < 0 || leg >= len(plan.Legs) {
 				return dungeon.PartialStart{}, fmt.Errorf("from_leg %d: the plan has legs %v (numbers 0-%d)", leg, legNames(plan), len(plan.Legs)-1)
 			}
-			rowLeg, ok := planexport.LegNumber(plan, leg)
+			rowLeg, ok := planexport.LegNumber(planexport.ExportedLegs(plan, planexport.Options{}), leg)
 			if !ok {
 				return dungeon.PartialStart{}, fmt.Errorf("from_leg %d: leg %q is optional (it needs item %d) and the exporter leaves optional legs out of the run leader's rows; start at a later leg, or pass observe.from_step", leg, plan.Legs[leg].Name, plan.Legs[leg].Optional.Item)
 			}
@@ -115,7 +115,7 @@ func observeUntil(plan *dungeon.Plan, until string, planner *navmesh.Planner) du
 			if r.StepCount() != serverSteps {
 				continue
 			}
-			c, _, err := raidwalk.BossDoneUntil(r)
+			c, _, err := raidwalk.BossDoneUntil(r, 1)
 			if err != nil {
 				return dungeon.UntilClause{}, fmt.Errorf("observe.until: %w", err)
 			}
@@ -245,7 +245,7 @@ func observeStepInfo(plan *dungeon.Plan, planner *navmesh.Planner, serverSteps, 
 			at, have = dungeon.Point{}, false
 		}
 		name := ""
-		if pi, ok := planexport.PlanLeg(plan, s.Leg); ok {
+		if pi, ok := planexport.PlanLeg(r.LegMap(plan), s.Leg); ok {
 			name = plan.Legs[pi].Name
 		}
 		if !haveLeg {
@@ -286,7 +286,7 @@ func observePlanRows(p *dungeon.Plan, planner *navmesh.Planner) ([]planexport.Ro
 	if len(boxes) > 0 {
 		aware.SetAvoid(p.Map, boxes)
 	}
-	cut := cutWith(aware)
+	cut := cutWith(aware, false)
 	o := base
 	o.Cut = cut
 	add(o, "cut hops")

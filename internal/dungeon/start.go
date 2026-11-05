@@ -230,6 +230,9 @@ func (d *RemoteDriver) startGroup() int {
 // checkStart refuses a start the plan does not have and a start past an item the plan needs from a leg it skips. It
 // runs before anything is sent; so does the unsafe-start gate (checkStartSafety).
 func (d *RemoteDriver) checkStart(fromLeg int) error {
+	if err := d.checkTeam(); err != nil {
+		return err
+	}
 	if d.opt.FromPullGroup != nil {
 		g := d.startGroup()
 		if fromLeg < 0 || fromLeg >= len(d.plan.Legs) {

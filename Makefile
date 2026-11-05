@@ -8,8 +8,10 @@ export GOTOOLCHAIN := local
 
 .PHONY: test fuzz fmt fmt-check vet nocgo build opcodes spellnames tbm-contract addon-host
 
+# The package timeout is 20m: cmd/turtle-agent runs about 700 tests under -race and takes 8-10 minutes, so Go's 10m
+# default leaves no room on a loaded machine.
 test: fmt-check vet nocgo
-	$(GO) test -race -count=1 ./...
+	$(GO) test -race -count=1 -timeout 20m ./...
 
 fmt:
 	$(GOFMT) -w .

@@ -331,7 +331,7 @@ func serveRoute(w http.ResponseWriter, r *http.Request, p *Poller, name string) 
 		return
 	}
 	agent := ""
-	if id := r.URL.Query().Get("agent"); agentID.MatchString(id) {
+	if id := r.URL.Query().Get("agent"); validAgentID(id) {
 		agent = id
 	}
 	plan, src, errText := p.planAndSource(name, agent)

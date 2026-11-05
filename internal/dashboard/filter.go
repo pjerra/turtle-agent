@@ -1,5 +1,6 @@
-// Package dashboard is the read-only live dashboard of the running agents (README "Live dashboard"): it polls each
-// agent's RPC for status, never sends a command, and serves one page that shows every commander's run and map.
+// Package dashboard is the live dashboard of the running agents (README "Live dashboard"): it polls each agent's RPC
+// for status and serves one page that shows every commander's run and map. Read-only unless it is started with --edit
+// (the route editor) or --control (the run controls), the only two things it can write.
 package dashboard
 
 import (

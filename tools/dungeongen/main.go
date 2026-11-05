@@ -7,6 +7,7 @@
 //	dungeongen -dir testdata/uldaman -name uldaman -map 70 -bosses 6906,6910,7228 -out /tmp/uldaman.skeleton.json
 //	dungeongen -format dungeons/uldaman.json            # check a plan and print it in the form the files are kept in
 //	dungeongen -spec tools/dungeongen/plans.json -out-dir dungeons -table docs/PLANS.md   # every draft dungeon and raid plan, and their table
+//	dungeongen route-regen --mmaps DIR --leg 7 dungeons/zul_gurub.json   # one leg's route rewritten from the navmesh (see route_regen.go)
 //
 // What the skeleton is: one leg per boss, in the order of -bosses; each pack of hostile creatures (spawns within -cluster
 // yards of each other, or in one creature_groups group) goes into the leg of the boss nearest to it, packs ordered by a
@@ -29,6 +30,7 @@ import (
 	"strings"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
 type creature struct {
@@ -43,6 +45,18 @@ type creature struct {
 	GroupLeader uint64
 	Patrol      bool
 	Auras       []uint32 // spell ids of the auras the creature spawns with (template and spawn row)
+	// DetectionRange is the creature_template detection_range (the yards at which a spawn of the entry engages, 0 when the
+	// export has none: draft exports predate the column). RouteIntoLaterPacks defaults 0 to 20 yd, then applies the core
+	// aggro rule (party level, spread, wander).
+	DetectionRange float64
+	// Wander is the spawn's wander_distance: how far it walks from its spot, added to the aggro reach (as the trash check does).
+	Wander float32
+	// FlagsExtra is the creature_template flags_extra: RouteIntoLaterPacks skips NO_AGGRO spawns outright (0 when the
+	// export has none: draft exports predate the column).
+	FlagsExtra uint32
+	// patrolPoint marks a copy of a patrolling spawn at one waypoint of its loop (the plan tests expand a lone
+	// patroller's path into the pack): it demands the patrol clearance, not the plain spawn one.
+	patrolPoint bool
 }
 
 type object struct {
@@ -74,6 +88,9 @@ type Options struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "route-regen" {
+		os.Exit(routeRegenCmd(os.Args[2:]))
+	}
 	dir := flag.String("dir", "", "folder holding creatures.tsv, gameobjects.tsv and entrances.tsv (written by export.sh)")
 	out := flag.String("out", "", "plan file to write (default: standard output)")
 	name := flag.String("name", "", "plan name (the file is dungeons/<name>.json)")
@@ -85,7 +102,8 @@ func main() {
 	skip := flag.String("skip", "", "entries to add to every leg's skip list, comma separated")
 	check := flag.String("check", "", "plan file to lint against -dir's creatures.tsv: warn for a boss or pack member with npc_flags or a faction friendly to -team (no generation)")
 	team := flag.String("team", "", "with -check: the leader's team, alliance or horde; what the plan gates to the other team is not looked at")
-	strict := flag.Bool("strict", false, "with -check: exit 1 when there is any warning (for CI)")
+	strict := flag.Bool("strict", false, "with -check: exit 1 on a creature-check warning or a pull row with no target (for CI)")
+	pullSizeStrict := flag.Bool("pull-size-strict", false, "with -check: exit 1 when a pull row is over its bodies ceiling (a pull_size finding is a warning otherwise)")
 	friendly := flag.String("friendly-factions", "", "comma separated factions known to be friendly to the leader's team (FactionTemplate.dbc is not in the export, so dungeongen cannot tell; 35 always is)")
 	awakened := flag.String("awakened", "", "with -check: comma separated creature entries that spawn friendly (faction 35, stoned) and that the encounter's script turns hostile, so they are no warning (Uldaman: 4857 Stone Keeper, 2748 Archaedas)")
 	spec := flag.String("spec", "", "plan spec (tools/dungeongen/plans.json): with -out-dir writes every draft plan it lists, with -table docs/PLANS.md")
@@ -104,7 +122,7 @@ func main() {
 		os.Exit(formatFile(*format, *out))
 	}
 	if *check != "" {
-		os.Exit(checkFile(*check, *dir, *team, *friendly, *awakened, *scripted, *strict))
+		os.Exit(checkFile(*check, *dir, *team, *friendly, *awakened, *scripted, *strict, *ignore, *pullSizeStrict))
 	}
 	if *dir == "" || *name == "" || *mapID == 0 || *bosses == "" {
 		fmt.Fprintln(os.Stderr, "usage: dungeongen -dir DIR -name NAME -map ID -bosses E1,E2,... [-entrance x,y,z] [-cluster 12] [-ignore-factions 35] [-skip E,...] [-out FILE]")
@@ -184,9 +202,11 @@ func parseFactions(s string) (map[int]bool, error) {
 	return m, err
 }
 
-// checkFile lints a plan against dir's creatures.tsv and prints the warnings; the exit status is 1 for a plan that does not load or
-// an export that cannot be read, 0 otherwise (warnings are for a person to read), and 1 with strict when there is a warning.
-func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool) int {
+// checkFile lints a plan against dir's creatures.tsv and prints the warnings; the exit status is 1 for a plan that does not load, an
+// export that cannot be read, or a world or pull_size load error (strict or not: a lint that cannot read its inputs fails the check),
+// 0 otherwise (warnings are for a person to read), 1 with strict when a creature-check warning or a pull row with no target fires,
+// and 1 with pull-size-strict when a pull row is over its ceiling.
+func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool, ignore string, pullSizeStrict bool) int {
 	fail := func(err error) int {
 		fmt.Fprintln(os.Stderr, "dungeongen:", err)
 		return 1
@@ -222,11 +242,48 @@ func checkFile(path, dir, team, friendly, awakened, scripted string, strict bool
 		return fail(err)
 	}
 	ws := Check(p, cs, CheckOptions{Team: team, Friendly: fm, Awakened: am, Scripted: toSet(sc)})
+	strictFails := len(ws) // creature-check warnings fail -strict
+	overCeiling := 0       // over-ceiling rows fail only -pull-size-strict
+	// The pull_size lint: the run leader's aggro-count estimate per pull row,
+	// over the row's max_bodies (or the plan's pull_ceiling, else 8/6), with
+	// the check's ignore and friendly factions and team (a spawn friendly to
+	// the run is nothing to pull; a row gated to the other team is not
+	// pulled). Mmaps-free: straight 2 yd samples between rows, LOS always
+	// seen (high side, documented in pull_size.go). A plan that fails to
+	// export, or a world that fails to load, fails the check: a lint that
+	// cannot read its inputs is an error, not an empty report.
+	w, _, werr := worldspawn.Load(dir, p.Map)
+	if werr != nil {
+		return fail(fmt.Errorf("pull_size: %w", werr))
+	}
+	im, err := parseFactions(ignore)
+	if err != nil {
+		return fail(err)
+	}
+	sized, serr := PullSizes(p, cs, w, PullFilter{Ignore: im, Friendly: fm, Awakened: am, Scripted: toSet(sc), Team: team})
+	if serr != nil {
+		return fail(fmt.Errorf("pull_size: %w", serr))
+	}
+	for _, f := range sized {
+		ws = append(ws, f.Summary)
+		// An over-ceiling row is a warning for a person: it never fails
+		// -strict (only -pull-size-strict opts in). A row with no target, and
+		// a lint that cannot read its inputs, fail -strict like any other
+		// warning.
+		if f.NoTarget {
+			strictFails++
+		} else {
+			overCeiling++
+		}
+	}
 	for _, w := range ws {
 		fmt.Println("warning:", w)
 	}
 	fmt.Printf("%d warning(s) for %s as team %q\n", len(ws), path, team)
-	if strict && len(ws) > 0 {
+	if strict && strictFails > 0 {
+		return 1
+	}
+	if pullSizeStrict && overCeiling > 0 {
 		return 1
 	}
 	return 0
@@ -356,6 +413,21 @@ func readCreatures(path string) ([]creature, error) {
 			Patrol: m["patrol"] == "1", Auras: parseAuras(m["auras"])}
 		if l, err := strconv.Atoi(m["level_max"]); err == nil { // optional: only the band of a spec plan needs it
 			c.LevelMax = l
+		}
+		if s, ok := m["detection_range"]; ok && s != "" { // optional: draft exports predate the column
+			if v, err := strconv.ParseFloat(s, 64); err == nil {
+				c.DetectionRange = v
+			}
+		}
+		if s, ok := m["wander"]; ok && s != "" { // optional: draft exports predate the column
+			if v, err := strconv.ParseFloat(s, 32); err == nil {
+				c.Wander = float32(v)
+			}
+		}
+		if s, ok := m["flags_extra"]; ok && s != "" { // optional: draft exports predate the column
+			if v, err := strconv.ParseUint(s, 10, 32); err == nil {
+				c.FlagsExtra = uint32(v)
+			}
 		}
 		out = append(out, c)
 	}

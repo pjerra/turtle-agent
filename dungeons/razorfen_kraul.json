@@ -15,6 +15,7 @@
     "z": 86.1095
   },
   "level_band": [26, 31],
+  "tank_min_hp": 2050,
   "hire_composition": [
     "warrior:tank",
     "priest:healer",
@@ -22,6 +23,8 @@
     "rogue:dps",
     "hunter:dps"
   ],
+  "cc_priority": [4427, 4515, 4522, 4440],
+  "cc_always": [4427],
   "notes": [
     "DRAFT: a skeleton from the world database export of map 47 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
     "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
@@ -31,38 +34,48 @@
   "legs": [
     {
       "name": "roogug",
-      "to": {"x": 1987.53, "y": 1600.03, "z": 79.8027},
+      "to": {"x": 1994, "y": 1615, "z": 83.2},
+      "via": [
+        {"x": 1954.5, "y": 1582.3, "z": 82.61}
+      ],
       "pull_groups": [
         {
           "entries": [4530],
           "positions": [
             {"x": 1987.53, "y": 1600.03, "z": 79.8027}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [4436, 4436],
           "positions": [
             {"x": 1996.96, "y": 1606.41, "z": 81.8151},
             {"x": 2005.06, "y": 1597.86, "z": 81.3098}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [4520],
           "positions": [
             {"x": 1996.25, "y": 1630.64, "z": 80.9216}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [4436, 4436],
           "positions": [
             {"x": 2000.94, "y": 1646.68, "z": 80.5056},
             {"x": 2012.39, "y": 1646.38, "z": 80.4228}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [4520],
           "positions": [
             {"x": 2019.32, "y": 1660.39, "z": 82.7042}
+          ],
+          "approach": [
+            {"x": 2000, "y": 1635, "z": 81}
           ]
         },
         {
@@ -71,18 +84,19 @@
             {"x": 2032.3, "y": 1650.53, "z": 81.4707},
             {"x": 2044.06, "y": 1648.99, "z": 81.998},
             {"x": 2048.13, "y": 1655.96, "z": 81.6141}
-          ]
+          ],
+          "radius": 10
         },
         {
-          "entries": [4541],
+          "entries": [4514],
           "positions": [
-            {"x": 2061.45, "y": 1646.19, "z": 61.9304}
-          ]
-        },
-        {
-          "entries": [4511],
-          "positions": [
-            {"x": 2065.89, "y": 1633.15, "z": 64.296}
+            {"x": 2067.24, "y": 1599.55, "z": 62.8485}
+          ],
+          "approach": [
+            {"x": 2016, "y": 1554, "z": 81.24},
+            {"x": 2049.6, "y": 1549.07, "z": 73.21},
+            {"x": 2058.85, "y": 1576.51, "z": 64.28},
+            {"x": 2059, "y": 1582, "z": 64.16}
           ]
         },
         {
@@ -93,9 +107,15 @@
           ]
         },
         {
-          "entries": [4514],
+          "entries": [4511],
           "positions": [
-            {"x": 2067.24, "y": 1599.55, "z": 62.8485}
+            {"x": 2065.89, "y": 1633.15, "z": 64.296}
+          ]
+        },
+        {
+          "entries": [4541],
+          "positions": [
+            {"x": 2061.45, "y": 1646.19, "z": 61.9304}
           ]
         },
         {
@@ -113,20 +133,12 @@
           ]
         },
         {
-          "entries": [4516, 4442, 4442, 4516],
-          "positions": [
-            {"x": 2121.33, "y": 1569.75, "z": 80.5072},
-            {"x": 2132.31, "y": 1584.01, "z": 81.5},
-            {"x": 2131.74, "y": 1573.88, "z": 81.4973},
-            {"x": 2139.5, "y": 1588.47, "z": 80.7736}
-          ]
-        },
-        {
           "entries": [4516, 4519],
           "positions": [
             {"x": 2111.93, "y": 1550.17, "z": 81.6238},
             {"x": 2106.03, "y": 1551.15, "z": 81.6238}
-          ]
+          ],
+          "radius": 9
         },
         {
           "entries": [4519],
@@ -165,13 +177,6 @@
           ]
         },
         {
-          "entries": [4512, 4511],
-          "positions": [
-            {"x": 2069.06, "y": 1701.43, "z": 57.604},
-            {"x": 2061.73, "y": 1701.93, "z": 58.3124}
-          ]
-        },
-        {
           "entries": [4511],
           "positions": [
             {"x": 2115.27, "y": 1665.87, "z": 59.4845}
@@ -181,6 +186,9 @@
           "entries": [4532],
           "positions": [
             {"x": 2138.38, "y": 1630.94, "z": 81.7384}
+          ],
+          "approach": [
+            {"x": 2110, "y": 1600, "z": 82.1}
           ]
         },
         {
@@ -200,6 +208,10 @@
           "entries": [4440],
           "positions": [
             {"x": 2183.11, "y": 1596.42, "z": 79.9248}
+          ],
+          "radius": 10,
+          "approach": [
+            {"x": 2110, "y": 1600, "z": 82.1}
           ]
         },
         {
@@ -250,8 +262,12 @@
       "skip": [4438, 4842],
       "boss": {
         "entry": 6168,
-        "position": {"x": 2142.99, "y": 1581.57, "z": 80.3842}
-      }
+        "position": {"x": 2142.99, "y": 1581.57, "z": 80.3842},
+        "first": [4516, 4442]
+      },
+      "notes": [
+        "opening stand (r19-19z37 live run 1, stopped at step 4): the party stood at 1987.5 1600, where the formation slot's ground lookup finds the upper walkway at about z 95 (floors at 1988 1608: 95.0 and 1975 1600: 92.9). The two ranged bots walked the corridor west to the ramp foot at 1949.9 1594.4 and up it while idle after the fight (targets were themselves, activity 'formation station'), not chasing a runner: no mob of the run ever stood above z 83. The stand is now 1994 1615, a lower-floor pocket whose 2 yd ring has no upper polygon (1992-1996, 1613-1617 all z 83.0-83.7), so the formation slots do not pull the bots up. The ramp is STEEP-flagged above z 87 for the agent's filter; the server's own filter (steep included) paths both ways. Run 2 (r20-19z39, stopped at step 42 of 634): step 1 still fought at the corridor mouth (the Handler's summoned Tamed Battleboar 4535, and group 0's radius 25 owned both 4436 Quilguards of the next group as well), and pulls 39 (4532 at 2138.38 1630.94) and 42 (4440 at 2183.11 1596.42) paused with '8 approach hops did not bring the party within 60.0 yd of the pack' (nearest 61.0, 69.8 and 107.3 yd) while the run leader's own hops walked the long way round the west hall. Now the five corridor groups (0-5) all have radius 10 (group 0 was 25; group 5's default was 19.3), so each is pulled from the 1994 1615 stand on its own; group 4's approach 2000 1635 stays. Pull 39's pack has the approach stand 2110 1600 82.1: 42.0 yd from the pack, on the hall floor, 17.3 yd from the corridor point 2113 1617 where run 2's tank did pull it (navmesh probe 2026-10-22: complete path, same floor; the room east of x about 2135 is a navmesh pocket of its own and 710 yd by path from the corridor, so a stand inside it would only be walked the long way round). Pull 42's pack keeps radius 10 (its own unit only) and gets the approach stand 2180 1610 81.3: 14.0 yd 3-D from the pack, on the hall floor (probe: complete path, 14.0 yd to the pack), so the approach is not left to the run leader's 8 hops and the fight is not fought down the slope toward 2150 1475 67. The room floor east of x about 2115 is a navmesh pocket of its own: from the corridor's pocket the probe walks 640-730 yd round the west hall and the lower hall to reach either stand, the same route run 2's own hops tried; the packs in it are pulled from the west across the 15-25 yd gap (the mobs walk it, as they did live)."
+      ]
     },
     {
       "name": "aggem_thorncurse",
@@ -404,18 +420,6 @@
           ]
         },
         {
-          "entries": [4515],
-          "positions": [
-            {"x": 2140.53, "y": 1413.85, "z": 73.8868}
-          ]
-        },
-        {
-          "entries": [4523],
-          "positions": [
-            {"x": 2154.74, "y": 1414.62, "z": 74.248}
-          ]
-        },
-        {
           "entries": [4523, 4440],
           "positions": [
             {"x": 2155.1, "y": 1429.69, "z": 74.3329},
@@ -457,7 +461,8 @@
       "skip": [4438, 4842],
       "boss": {
         "entry": 4428,
-        "position": {"x": 2146.43, "y": 1411.24, "z": 73.9538}
+        "position": {"x": 2146.43, "y": 1411.24, "z": 73.9538},
+        "first": [4515, 4523]
       }
     },
     {
@@ -494,13 +499,18 @@
           "positions": [
             {"x": 2132.34, "y": 1657.14, "z": 82.0877},
             {"x": 2125.63, "y": 1658.24, "z": 82.385}
+          ],
+          "approach": [
+            {"x": 2136.98, "y": 1638.69, "z": 82.2}
           ]
         },
         {
-          "entries": [4525],
+          "entries": [4525, 4842],
           "positions": [
-            {"x": 2117.18, "y": 1693.67, "z": 80.5766}
-          ]
+            {"x": 2117.18, "y": 1693.67, "z": 80.5766},
+            {"x": 2118.6, "y": 1695.3, "z": 80.3}
+          ],
+          "radius": 10
         },
         {
           "entries": [4525, 6035, 4518],
@@ -508,62 +518,29 @@
             {"x": 2122.63, "y": 1707.94, "z": 80.495},
             {"x": 2133.73, "y": 1699, "z": 80.8284},
             {"x": 2129.74, "y": 1707.63, "z": 80.1145}
-          ]
-        },
-        {
-          "entries": [4511, 4514],
-          "positions": [
-            {"x": 2149.51, "y": 1685.73, "z": 58.4076},
-            {"x": 2149.64, "y": 1674.07, "z": 58.9446}
-          ]
-        },
-        {
-          "entries": [4511],
-          "positions": [
-            {"x": 2166, "y": 1686.35, "z": 58.7368}
-          ]
-        },
-        {
-          "entries": [4511],
-          "positions": [
-            {"x": 2167.05, "y": 1701.62, "z": 55.0645}
-          ]
-        },
-        {
-          "entries": [4514],
-          "positions": [
-            {"x": 2152.54, "y": 1722.03, "z": 52.0952}
-          ]
-        },
-        {
-          "entries": [4511],
-          "positions": [
-            {"x": 2138.32, "y": 1744.36, "z": 52.5633}
-          ]
-        },
-        {
-          "entries": [4511],
-          "positions": [
-            {"x": 2122.66, "y": 1738.86, "z": 52.8069}
-          ]
+          ],
+          "radius": 12
         },
         {
           "entries": [4518, 4518],
           "positions": [
             {"x": 2207.6, "y": 1611.83, "z": 81.6424},
             {"x": 2213.49, "y": 1602.72, "z": 81.305}
+          ],
+          "approach": [
+            {"x": 2129.3, "y": 1716, "z": 80.9}
           ]
         }
       ],
-      "skip": [4438, 4842],
       "boss": {
         "entry": 4420,
-        "position": {"x": 2203.13, "y": 1640.05, "z": 85.9022}
+        "position": {"x": 2203.13, "y": 1640.05, "z": 85.9022},
+        "first": [4438]
       }
     },
     {
       "name": "rotthorn",
-      "to": {"x": 2091.51, "y": 1747.41, "z": 77.6711},
+      "to": {"x": 2102.67, "y": 1728, "z": 78.19},
       "pull_groups": [
         {
           "entries": [4623, 4623],
@@ -573,46 +550,26 @@
           ]
         },
         {
-          "entries": [4623],
+          "entries": [4623, 4623],
           "positions": [
-            {"x": 2090.83, "y": 1774.64, "z": 78.2311}
-          ]
-        },
-        {
-          "entries": [4514],
-          "positions": [
-            {"x": 2080.08, "y": 1784.59, "z": 54.7743}
-          ]
-        },
-        {
-          "entries": [4511],
-          "positions": [
-            {"x": 2046.61, "y": 1765.31, "z": 59.4647}
-          ]
-        },
-        {
-          "entries": [4514],
-          "positions": [
-            {"x": 2034.61, "y": 1761.75, "z": 60.3106}
-          ]
-        },
-        {
-          "entries": [4541],
-          "positions": [
-            {"x": 2033.69, "y": 1758.07, "z": 60.359}
-          ]
-        },
-        {
-          "entries": [4514],
-          "positions": [
-            {"x": 2032.57, "y": 1727.98, "z": 60.6265}
-          ]
-        },
-        {
-          "entries": [4514],
-          "positions": [
-            {"x": 2044.24, "y": 1709.91, "z": 59.7183}
-          ]
+            {"x": 2090.83, "y": 1774.64, "z": 78.2311},
+            {"x": 2094.39, "y": 1773.56, "z": 78.3322}
+          ],
+          "radius": 6,
+          "patrol": {
+            "entries": [4623],
+            "path": [
+              {"x": 2094.39, "y": 1773.56, "z": 78.3322},
+              {"x": 2101.64, "y": 1795.12, "z": 73.9417},
+              {"x": 2110.83, "y": 1822.64, "z": 79.9046},
+              {"x": 2114.72, "y": 1858.61, "z": 73.3104},
+              {"x": 2110.83, "y": 1822.64, "z": 79.9046},
+              {"x": 2101.64, "y": 1795.12, "z": 73.9417}
+            ],
+            "period_s": 70,
+            "period_estimate": true,
+            "source": "creature_movement of spawns 87430/87431 (Quilguard Champions, 6 points, 176 yd round trip at 2.5 yd/s); period_s is an estimate, not timed"
+          }
         },
         {
           "entries": [62501],
@@ -621,17 +578,13 @@
           ]
         },
         {
-          "entries": [62502],
+          "entries": [62502, 62501, 62501],
           "positions": [
-            {"x": 1981.83, "y": 1699.79, "z": 60.3062}
-          ]
-        },
-        {
-          "entries": [62501, 62501],
-          "positions": [
+            {"x": 1981.83, "y": 1699.79, "z": 60.3062},
             {"x": 1978.79, "y": 1700.15, "z": 59.5642},
             {"x": 1982.02, "y": 1703.46, "z": 59.3463}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [62502],
@@ -640,17 +593,13 @@
           ]
         },
         {
-          "entries": [62502],
+          "entries": [62502, 62501, 62501],
           "positions": [
-            {"x": 1990.26, "y": 1769.43, "z": 55.3571}
-          ]
-        },
-        {
-          "entries": [62501, 62501],
-          "positions": [
+            {"x": 1990.26, "y": 1769.43, "z": 55.3571},
             {"x": 1990.71, "y": 1769.31, "z": 55.4114},
             {"x": 1992.7, "y": 1771.78, "z": 55.1992}
-          ]
+          ],
+          "radius": 10
         },
         {
           "entries": [62501],
@@ -663,7 +612,8 @@
           "positions": [
             {"x": 1994, "y": 1809.72, "z": 50.9461},
             {"x": 1993.54, "y": 1817.08, "z": 50.7325}
-          ]
+          ],
+          "radius": 12
         },
         {
           "entries": [62502, 62501, 62501],
@@ -671,27 +621,30 @@
             {"x": 1996.69, "y": 1800.02, "z": 79.1142},
             {"x": 2001.93, "y": 1800.87, "z": 80.002},
             {"x": 1999.02, "y": 1797.51, "z": 80.2721}
-          ]
+          ],
+          "radius": 11
         },
         {
           "entries": [4514, 4514],
           "positions": [
             {"x": 2038.64, "y": 1851.96, "z": 56.2026},
             {"x": 2037.19, "y": 1861.59, "z": 55.9585}
+          ],
+          "approach": [
+            {"x": 1989.7, "y": 1801.5, "z": 77.78},
+            {"x": 1983.1, "y": 1800, "z": 76.2},
+            {"x": 1976.4, "y": 1798.4, "z": 74.69},
+            {"x": 1970.9, "y": 1797.1, "z": 73.09}
           ]
         },
         {
-          "entries": [4512, 4514],
+          "entries": [4512, 4514, 4541],
           "positions": [
             {"x": 2067.03, "y": 1848.41, "z": 55.3226},
-            {"x": 2070.68, "y": 1850.47, "z": 54.8515}
-          ]
-        },
-        {
-          "entries": [4541],
-          "positions": [
+            {"x": 2070.68, "y": 1850.47, "z": 54.8515},
             {"x": 2070.68, "y": 1846.22, "z": 55.0831}
-          ]
+          ],
+          "radius": 12
         },
         {
           "entries": [6035, 4525, 4518],
@@ -710,18 +663,24 @@
     },
     {
       "name": "agathelos_the_raging",
-      "to": {"x": 2056.44, "y": 1920.13, "z": 69.4711},
+      "to": {"x": 2090.7, "y": 1922.9, "z": 66.3},
       "pull_groups": [
         {
           "entries": [4538],
           "positions": [
             {"x": 2056.44, "y": 1920.13, "z": 69.4711}
+          ],
+          "approach": [
+            {"x": 2074, "y": 1921, "z": 68.24}
           ]
         },
         {
           "entries": [4538],
           "positions": [
             {"x": 2062.59, "y": 1938.86, "z": 64.7527}
+          ],
+          "approach": [
+            {"x": 2074, "y": 1927, "z": 66.21}
           ]
         },
         {
@@ -735,18 +694,27 @@
           "entries": [4538],
           "positions": [
             {"x": 2078.21, "y": 1962.31, "z": 63.0147}
+          ],
+          "approach": [
+            {"x": 2076, "y": 1945, "z": 64.6}
           ]
         },
         {
           "entries": [4538],
           "positions": [
             {"x": 2092.03, "y": 1966.71, "z": 64.9646}
+          ],
+          "approach": [
+            {"x": 2078, "y": 1957, "z": 63.23}
           ]
         },
         {
           "entries": [4539],
           "positions": [
             {"x": 2077.04, "y": 1981.47, "z": 63.4643}
+          ],
+          "approach": [
+            {"x": 2078, "y": 1961, "z": 63.11}
           ]
         },
         {
@@ -790,7 +758,7 @@
       ]
     },
     {
-      "name": "charlga_razorflank",
+      "name": "charlga_den",
       "to": {"x": 2135.6, "y": 1978.41, "z": 60.1695},
       "pull_groups": [
         {
@@ -833,7 +801,47 @@
             {"x": 2116.88, "y": 1883.83, "z": 71.6591},
             {"x": 2110.01, "y": 1886.77, "z": 72.0235}
           ]
-        },
+        }
+      ],
+      "skip": [4438, 4842]
+    },
+    {
+      "name": "charlga_pit",
+      "to": {"x": 2095, "y": 1845, "z": 50.8},
+      "via": [
+        {"x": 2112, "y": 1877.3, "z": 72.8},
+        {"x": 2110.4, "y": 1831.4, "z": 79.9},
+        {"x": 2110.1, "y": 1827.2, "z": 80.4},
+        {"x": 2099.1, "y": 1788.7, "z": 75.4},
+        {"x": 2093.1, "y": 1767.5, "z": 79.8},
+        {"x": 2102.7, "y": 1728, "z": 78.2},
+        {"x": 2124.8, "y": 1686.9, "z": 81.6},
+        {"x": 2139.5, "y": 1642.7, "z": 82.1},
+        {"x": 2177.6, "y": 1616.5, "z": 83},
+        {"x": 2178.1, "y": 1610.4, "z": 82.4},
+        {"x": 2176.5, "y": 1570.4, "z": 75.3},
+        {"x": 2176, "y": 1557.3, "z": 72.2},
+        {"x": 2166.1, "y": 1516.3, "z": 68.4},
+        {"x": 2145.9, "y": 1475.5, "z": 68.5},
+        {"x": 2113.6, "y": 1444.5, "z": 65.6},
+        {"x": 2078.1, "y": 1446.4, "z": 66.8},
+        {"x": 2043.2, "y": 1479.3, "z": 68.9},
+        {"x": 2030.9, "y": 1490.9, "z": 70.7},
+        {"x": 2036.8, "y": 1536, "z": 81.2},
+        {"x": 2057.6, "y": 1567.7, "z": 66.2},
+        {"x": 2061.9, "y": 1607.5, "z": 63.1},
+        {"x": 2066.1, "y": 1646.1, "z": 61.6},
+        {"x": 2069.3, "y": 1664, "z": 61},
+        {"x": 2108, "y": 1674.2, "z": 59.7},
+        {"x": 2125.1, "y": 1678.7, "z": 59.9},
+        {"x": 2118.4, "y": 1722.4, "z": 53.7},
+        {"x": 2080.8, "y": 1708.3, "z": 56.6},
+        {"x": 2045.3, "y": 1740, "z": 61},
+        {"x": 2054.1, "y": 1761.6, "z": 58.7},
+        {"x": 2090.7, "y": 1792, "z": 52.6},
+        {"x": 2126.9, "y": 1824, "z": 47.8}
+      ],
+      "pull_groups": [
         {
           "entries": [4511],
           "positions": [
@@ -844,12 +852,18 @@
           "entries": [4511],
           "positions": [
             {"x": 2117.48, "y": 1851.08, "z": 49.4163}
+          ],
+          "approach": [
+            {"x": 2100, "y": 1855, "z": 49.7}
           ]
         },
         {
           "entries": [4514],
           "positions": [
             {"x": 2136.7, "y": 1847.94, "z": 48.7465}
+          ],
+          "approach": [
+            {"x": 2120, "y": 1840, "z": 48.8}
           ]
         },
         {
@@ -863,19 +877,6 @@
           "positions": [
             {"x": 2161.58, "y": 1861.86, "z": 56.8861},
             {"x": 2163.72, "y": 1852.09, "z": 56.9746}
-          ]
-        },
-        {
-          "entries": [4517, 4517],
-          "positions": [
-            {"x": 2178.34, "y": 1855.08, "z": 58.1964},
-            {"x": 2178.31, "y": 1844.27, "z": 58.402}
-          ]
-        },
-        {
-          "entries": [4517],
-          "positions": [
-            {"x": 2190.8, "y": 1862.36, "z": 58.5014}
           ]
         },
         {
@@ -919,16 +920,163 @@
           ]
         },
         {
+          "entries": [4514],
+          "positions": [
+            {"x": 2080.08, "y": 1784.59, "z": 54.7743}
+          ],
+          "approach": [
+            {"x": 2094.36, "y": 1794.12, "z": 51.52}
+          ]
+        },
+        {
+          "entries": [4511],
+          "positions": [
+            {"x": 2046.61, "y": 1765.31, "z": 59.4647}
+          ],
+          "approach": [
+            {"x": 2065.61, "y": 1779.31, "z": 57.78}
+          ]
+        },
+        {
+          "entries": [4514, 4541],
+          "positions": [
+            {"x": 2034.61, "y": 1761.75, "z": 60.3106},
+            {"x": 2033.69, "y": 1758.07, "z": 60.359}
+          ],
+          "radius": 10,
+          "approach": [
+            {"x": 2053.15, "y": 1774.91, "z": 59.18}
+          ]
+        },
+        {
+          "entries": [4514],
+          "positions": [
+            {"x": 2032.57, "y": 1727.98, "z": 60.6265}
+          ],
+          "approach": [
+            {"x": 2039.57, "y": 1750.98, "z": 60.36}
+          ]
+        },
+        {
+          "entries": [4514],
+          "positions": [
+            {"x": 2044.24, "y": 1709.91, "z": 59.7183}
+          ],
+          "approach": [
+            {"x": 2036.24, "y": 1732.91, "z": 60.75}
+          ]
+        },
+        {
+          "entries": [4512, 4511],
+          "positions": [
+            {"x": 2069.06, "y": 1701.43, "z": 57.604},
+            {"x": 2061.73, "y": 1701.93, "z": 58.3124}
+          ],
+          "approach": [
+            {"x": 2050.06, "y": 1710.43, "z": 59.58}
+          ]
+        },
+        {
+          "entries": [4511],
+          "positions": [
+            {"x": 2122.66, "y": 1738.86, "z": 52.8069}
+          ],
+          "radius": 10,
+          "approach": [
+            {"x": 2106.66, "y": 1724.86, "z": 54.26}
+          ]
+        },
+        {
+          "entries": [4511],
+          "positions": [
+            {"x": 2138.32, "y": 1744.36, "z": 52.5633}
+          ],
+          "radius": 10,
+          "approach": [
+            {"x": 2126.32, "y": 1728.36, "z": 52.18}
+          ]
+        },
+        {
+          "entries": [4514],
+          "positions": [
+            {"x": 2152.54, "y": 1722.03, "z": 52.0952}
+          ],
+          "radius": 10,
+          "approach": [
+            {"x": 2136.54, "y": 1734.03, "z": 51.88}
+          ]
+        },
+        {
+          "entries": [4511],
+          "positions": [
+            {"x": 2167.05, "y": 1701.62, "z": 55.0645}
+          ],
+          "radius": 10,
+          "approach": [
+            {"x": 2149.73, "y": 1711.63, "z": 55.01}
+          ]
+        },
+        {
+          "entries": [4511, 4514],
+          "positions": [
+            {"x": 2149.51, "y": 1685.73, "z": 58.4076},
+            {"x": 2149.64, "y": 1674.07, "z": 58.9446}
+          ],
+          "radius": 15.9,
+          "approach": [
+            {"x": 2133.51, "y": 1673.73, "z": 58.83}
+          ]
+        },
+        {
+          "entries": [4511],
+          "positions": [
+            {"x": 2166, "y": 1686.35, "z": 58.7368}
+          ],
+          "radius": 10,
+          "approach": [
+            {"x": 2155, "y": 1705.35, "z": 55.37}
+          ]
+        }
+      ],
+      "skip": [4438, 4842]
+    },
+    {
+      "name": "charlga_razorflank",
+      "to": {"x": 2093.1, "y": 1767.5, "z": 79.8},
+      "via": [
+        {"x": 2117.1, "y": 1807.5, "z": 48},
+        {"x": 2084.8, "y": 1783.9, "z": 54.4},
+        {"x": 2054.1, "y": 1761.6, "z": 58.7},
+        {"x": 2048.8, "y": 1721.1, "z": 60.3},
+        {"x": 2085.6, "y": 1712.3, "z": 56.5},
+        {"x": 2133.3, "y": 1725.9, "z": 52.5},
+        {"x": 2125.1, "y": 1678.7, "z": 59.9},
+        {"x": 2086.1, "y": 1665.6, "z": 62.9},
+        {"x": 2069.3, "y": 1634.4, "z": 64.8},
+        {"x": 2062.4, "y": 1589.2, "z": 64},
+        {"x": 2057.6, "y": 1567.7, "z": 66.2},
+        {"x": 2036.8, "y": 1536, "z": 81.2},
+        {"x": 2030.9, "y": 1490.9, "z": 70.7},
+        {"x": 2061.1, "y": 1453.3, "z": 68.8},
+        {"x": 2104.8, "y": 1441.9, "z": 64.3},
+        {"x": 2112, "y": 1443.5, "z": 65.2},
+        {"x": 2145.9, "y": 1475.5, "z": 68.5},
+        {"x": 2165.6, "y": 1514.7, "z": 67.9},
+        {"x": 2176, "y": 1557.3, "z": 72.2},
+        {"x": 2176, "y": 1578.7, "z": 76.6},
+        {"x": 2176, "y": 1600, "z": 81.2},
+        {"x": 2177.3, "y": 1604.8, "z": 82.9},
+        {"x": 2143.7, "y": 1638.9, "z": 82.1},
+        {"x": 2133.9, "y": 1649.3, "z": 82.9},
+        {"x": 2124.8, "y": 1686.9, "z": 81.6},
+        {"x": 2102.7, "y": 1728, "z": 78.2}
+      ],
+      "pull_groups": [
+        {
           "entries": [4623, 4623],
           "positions": [
             {"x": 2105.5, "y": 1822.47, "z": 79.8917},
             {"x": 2112.36, "y": 1822.53, "z": 80.5358}
-          ]
-        },
-        {
-          "entries": [4623],
-          "positions": [
-            {"x": 2094.39, "y": 1773.56, "z": 78.3322}
           ]
         },
         {
@@ -938,10 +1086,12 @@
           ]
         },
         {
-          "entries": [4539],
+          "entries": [4539, 4425],
           "positions": [
-            {"x": 2200.76, "y": 1978.19, "z": 56.7228}
-          ]
+            {"x": 2200.76, "y": 1978.19, "z": 56.7228},
+            {"x": 2200.8, "y": 1978.2, "z": 56.7}
+          ],
+          "radius": 10
         },
         {
           "entries": [4539, 4538],
@@ -954,7 +1104,8 @@
       "skip": [4438, 4842],
       "boss": {
         "entry": 4421,
-        "position": {"x": 2189.11, "y": 1860.55, "z": 79.056}
+        "position": {"x": 2189.11, "y": 1860.55, "z": 79.056},
+        "first": [4517]
       }
     }
   ]

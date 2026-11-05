@@ -75,14 +75,16 @@
     "Factory Door (13965) opens when Rhahk'Zor dies; Heavy Doors at -262.7 -482.4 and -243.0 -578.6 have no script (clicked open, not verified); Sneed's death (643, ejected by the Shredder 642) and Gilnid's death open the other two",
     "Iron Clad Door: loot the Defias Gunpowder (17155, item 5397, summons an Overseer), fire the Defias Cannon (16398) with it, the door goes to active_alt",
     "Mr. Smite: three phases, stealthed Blackguards (ambush group); Captain Greenskin walks a loop; VanCleef's Allies at 50 %",
-    "Masterpiece Harvester (61963) is Turtle's Foe Reaper replacement on the z 51 plateau (side branch); Jared Voss (61961) and Cookie (645) are named mobs, not legs"
+    "Masterpiece Harvester (61963) is Turtle's Foe Reaper replacement on the z 51 plateau (side branch); Jared Voss (61961) is Turtle's laboratory boss (the lab_tunnel and laboratory legs); Cookie (645) is a named mob, not a leg"
    ]
   },
   {
    "name": "shadowfang_keep",
+   "handwritten": true,
    "title": "Shadowfang Keep",
    "map": 33,
    "kind": "dungeon",
+   "tank_min_hp": 1350,
    "data": "map33",
    "trigger": 145,
    "bosses": [
@@ -99,17 +101,21 @@
    "outside_tele": "ShadowFangKeep",
    "special": [
     "courtyard door, Sorcerer's door and Arugal's door (GO_COURTYARD_DOOR, GO_SORCERER_DOOR, GO_ARUGAL_DOOR) opened by the keep script as bosses die",
-    "Arugal's summoning focus (GO_ARUGAL_FOCUS)"
+    "Arugal's summoning focus (GO_ARUGAL_FOCUS)",
+    "the courtyard_door gossip (Deathstalker Adamant 3849, faction template 68 Undercity) is Horde-only: the plan is `team: horde` and a run of the other team is refused before its first order (the run leader has no team column on a gossip row)"
    ],
    "notes": [
     "Turtle adds Sever (14682), Prelate Ironmane (61969) and a second Arugal row (10000) that are not legs."
-   ]
+   ],
+   "handwritten": true
   },
   {
    "name": "blackfathom_deeps",
+   "handwritten": true,
    "title": "Blackfathom Deeps",
    "map": 48,
    "kind": "dungeon",
+   "tank_min_hp": 1500,
    "data": "map48",
    "trigger": 257,
    "bosses": [
@@ -134,6 +140,8 @@
    "title": "The Stockade",
    "map": 34,
    "kind": "dungeon",
+   "handwritten": true,
+   "tank_min_hp": 1550,
    "data": "map34",
    "trigger": 101,
    "bosses": [
@@ -149,9 +157,11 @@
   },
   {
    "name": "gnomeregan",
+   "handwritten": true,
    "title": "Gnomeregan",
    "map": 90,
    "kind": "dungeon",
+   "tank_min_hp": 2250,
    "data": "map90",
    "trigger": 324,
    "bosses": [
@@ -177,6 +187,8 @@
    "title": "Razorfen Kraul",
    "map": 47,
    "kind": "dungeon",
+   "handwritten": true,
+   "tank_min_hp": 2050,
    "data": "map47",
    "trigger": 244,
    "bosses": [
@@ -200,6 +212,7 @@
    "title": "Scarlet Monastery: Graveyard",
    "map": 189,
    "kind": "dungeon",
+   "tank_min_hp": 2550,
    "data": "map189",
    "trigger": 45,
    "bosses": [
@@ -221,13 +234,15 @@
    "notes": [
     "One of four wings of map 189; the packs are the ones inside the wing's box.",
     "Duke Dreadmoore (61972) is a Turtle addition in the crypt level (z -3.7): script npc_duke_dreadmoore sets him to 20 % health on reset and yells on aggro and death; his crypt pack is needs_walk until the mapping walk"
-   ]
+   ],
+   "handwritten": true
   },
   {
    "name": "scarlet_library",
    "title": "Scarlet Monastery: Library",
    "map": 189,
    "kind": "dungeon",
+   "tank_min_hp": 2850,
    "data": "map189",
    "trigger": 614,
    "bosses": [
@@ -251,13 +266,15 @@
    ],
    "notes": [
     "One of four wings of map 189."
-   ]
+   ],
+   "handwritten": true
   },
   {
    "name": "scarlet_armory",
    "title": "Scarlet Monastery: Armory",
    "map": 189,
    "kind": "dungeon",
+   "tank_min_hp": 3100,
    "data": "map189",
    "trigger": 612,
    "bosses": [
@@ -279,13 +296,15 @@
    ],
    "notes": [
     "One of four wings of map 189; Armory Quartermaster Daghelm (61982) is Turtle's addition."
-   ]
+   ],
+   "handwritten": true
   },
   {
    "name": "scarlet_cathedral",
    "title": "Scarlet Monastery: Cathedral",
    "map": 189,
    "kind": "dungeon",
+   "tank_min_hp": 3150,
    "data": "map189",
    "trigger": 610,
    "bosses": [
@@ -309,13 +328,16 @@
    ],
    "notes": [
     "One of four wings of map 189."
-   ]
+   ],
+   "handwritten": true
   },
   {
    "name": "razorfen_downs",
+   "handwritten": true,
    "title": "Razorfen Downs",
    "map": 129,
    "kind": "dungeon",
+   "tank_min_hp": 3100,
    "data": "map129",
    "trigger": 442,
    "bosses": [
@@ -353,13 +375,17 @@
     "stairs event with Sergeant Bly's crew, Nekrum and Sezz'ziz (its phase is instance data 1 = 7; the plan waits on Nekrum seen, no phase step yet)",
     "Weegli's gossip (or Bly's) has him blow the End Door for Ukorz and Ruuzlu",
     "Gahz'rilla: the optional gahzrilla leg (Gong with the Mallet of Zul'Farrak, 9240; it drops from Qiaga the Keeper 7996 outside the instance and 9241 must be used to make 9240, so no bot run can obtain it; skipped without give_items)"
-   ]
+   ,
+    "Farraki Arena: Razjal's gossip (option 0) starts Kath'zen, Juthza, Razjal and the scorpid intermission; the run leader holds the arena until all are dead (units hold; skip_export: left out unless --with-legs farraki_arena names it)",
+    "Zel'jeb the Ancient: Turtle wing north of Velratha; 90 % less damage from all but Fire (skip_export: left out unless --with-legs zeljeb names it)"]
   },
   {
    "name": "maraudon_orange",
    "title": "Maraudon: Orange",
    "map": 349,
    "kind": "dungeon",
+   "handwritten": true,
+   "tank_min_hp": 3700,
    "data": "map349",
    "trigger": 3133,
    "bosses": [
@@ -399,6 +425,8 @@
    "title": "Maraudon: Purple",
    "map": 349,
    "kind": "dungeon",
+   "handwritten": true,
+   "tank_min_hp": 3250,
    "data": "map349",
    "trigger": 3134,
    "bosses": [
@@ -435,9 +463,11 @@
   },
   {
    "name": "sunken_temple",
+   "handwritten": true,
    "title": "The Temple of Atal'Hakkar",
    "map": 109,
    "kind": "dungeon",
+   "tank_min_hp": 4000,
    "data": "map109",
    "trigger": 446,
    "bosses": [
@@ -471,6 +501,8 @@
    "title": "Blackrock Depths",
    "map": 230,
    "kind": "dungeon",
+   "handwritten": true,
+   "tank_min_hp": 5000,
    "data": "map230",
    "trigger": 1466,
    "bosses": [
@@ -499,9 +531,11 @@
   },
   {
    "name": "lower_blackrock_spire",
+   "handwritten": true,
    "title": "Lower Blackrock Spire",
    "map": 229,
    "kind": "dungeon",
+   "tank_min_hp": 5200,
    "data": "map229",
    "trigger": 1468,
    "bosses": [
@@ -540,9 +574,11 @@
   },
   {
    "name": "dire_maul_east",
+   "handwritten": true,
    "title": "Dire Maul: East",
    "map": 429,
    "kind": "dungeon",
+   "tank_min_hp": 5100,
    "data": "map429",
    "trigger": 3184,
    "bosses": [
@@ -572,9 +608,11 @@
   },
   {
    "name": "dire_maul_west",
+   "handwritten": true,
    "title": "Dire Maul: West",
    "map": 429,
    "kind": "dungeon",
+   "tank_min_hp": 5200,
    "data": "map429",
    "trigger": 3186,
    "bosses": [
@@ -608,6 +646,8 @@
    "title": "Dire Maul: North",
    "map": 429,
    "kind": "dungeon",
+   "handwritten": true,
+   "tank_min_hp": 5300,
    "data": "map429",
    "trigger": 3189,
    "bosses": [
@@ -653,6 +693,8 @@
    "title": "Stratholme: Live side",
    "map": 329,
    "kind": "dungeon",
+   "handwritten": true,
+   "tank_min_hp": 5300,
    "data": "map329",
    "trigger": 2216,
    "bosses": [
@@ -686,6 +728,8 @@
    "title": "Stratholme: Undead side",
    "map": 329,
    "kind": "dungeon",
+   "handwritten": true,
+   "tank_min_hp": 5300,
    "data": "map329",
    "trigger": 2214,
    "bosses": [
@@ -717,6 +761,8 @@
    "title": "Scholomance",
    "map": 289,
    "kind": "dungeon",
+   "handwritten": true,
+   "tank_min_hp": 5300,
    "data": "map289",
    "trigger": 2567,
    "bosses": [
@@ -755,9 +801,11 @@
   },
   {
    "name": "frostmane_hollow",
+   "handwritten": true,
    "title": "Frostmane Hollow",
    "map": 822,
    "kind": "dungeon",
+   "tank_min_hp": 750,
    "data": "map822",
    "trigger": 5662,
    "bosses": [
@@ -780,6 +828,8 @@
    "title": "Windhorn Canyon",
    "map": 820,
    "kind": "dungeon",
+   "handwritten": true,
+   "tank_min_hp": 1750,
    "data": "map820",
    "trigger": 5611,
    "bosses": [
@@ -804,6 +854,8 @@
    "title": "Crescent Grove",
    "map": 802,
    "kind": "dungeon",
+   "handwritten": true,
+   "tank_min_hp": 2700,
    "data": "map802",
    "trigger": 5004,
    "bosses": [
@@ -829,6 +881,8 @@
    "title": "Dragonmaw Retreat",
    "map": 816,
    "kind": "dungeon",
+   "handwritten": true,
+   "tank_min_hp": 2050,
    "data": "map816",
    "trigger": 5343,
    "bosses": [
@@ -850,6 +904,8 @@
    "title": "Stormwrought Ruins",
    "map": 818,
    "kind": "dungeon",
+   "handwritten": true,
+   "tank_min_hp": 2850,
    "data": "map818",
    "trigger": 5347,
    "bosses": [
@@ -868,7 +924,8 @@
    "route": true,
    "special": [
     "secret door and four switches (GO_SECRET_DOOR_GUID, GO_SECRET_SWITCH_1-4), Nether altar (GO_NETHER_ALTAR_GUID)",
-    "Librarian Theodorus' elemental (SPELL_SUMMON_THEODORUS_ELEMENTAL), volatile fungus (GO_VOLATILE_FUNGUS)"
+    "Librarian Theodorus' elemental (SPELL_SUMMON_THEODORUS_ELEMENTAL), volatile fungus (GO_VOLATILE_FUNGUS)",
+    "waypoint pass 2026-11-03: leg starts moved off mesh edges and water, entry vias for the legs the server query would not walk to in one hop; the generator's nearest-neighbour route would clobber them, so the plan stays hand-maintained"
    ],
    "notes": [
     "Turtle custom with a front (5347) and a back entrance (5605); eleven bosses, the order is a nearest-neighbour walk from the front."
@@ -879,6 +936,8 @@
    "title": "Gilneas City",
    "map": 815,
    "kind": "dungeon",
+   "handwritten": true,
+   "tank_min_hp": 3450,
    "data": "map815",
    "trigger": 5014,
    "bosses": [
@@ -909,6 +968,8 @@
    "title": "Hateforge Quarry",
    "map": 808,
    "kind": "dungeon",
+   "handwritten": true,
+   "tank_min_hp": 4600,
    "data": "map808",
    "trigger": 5009,
    "bosses": [
@@ -955,9 +1016,11 @@
   },
   {
    "name": "stormwind_vault",
+   "handwritten": true,
    "title": "Stormwind Vault",
    "map": 35,
    "kind": "dungeon",
+   "tank_min_hp": 5300,
    "data": "map35",
    "trigger": 107,
    "bosses": [
@@ -987,6 +1050,8 @@
    "title": "Black Morass",
    "map": 269,
    "kind": "dungeon",
+   "handwritten": true,
+   "tank_min_hp": 5300,
    "data": "map269",
    "trigger": 1632,
    "bosses": [
@@ -1013,6 +1078,7 @@
    "map": 249,
    "kind": "raid",
    "data": "map249",
+   "handwritten": true,
    "trigger": 2848,
    "bosses": [
     10184
@@ -1117,7 +1183,7 @@
    "size": 20,
    "entrance_tele": "zg",
    "special": [
-    "Handwritten prep: 168 merged packs (L22; leg 0 re-spaced after walks 1 to 7), boss order Jeklik, Venoxis, Mar'li, Thekal, Arlokk, Mandokir, Jin'do, Hakkar; Gahz'ranka is optional and has no step (fishing summon not expressible); Edge of Madness has no spawn (SpawnRandomBoss deactivated).",
+    "Handwritten prep: 168 merged packs (L22; leg 0 re-spaced after walks 1 to 7), boss order Jeklik, Venoxis, Mar'li, Thekal, Arlokk, Mandokir, Jin'do, Hakkar; Gahz'ranka is optional and has no step (fishing summon not expressible); Edge of Madness has no spawn (SpawnRandomBoss deactivated). WALK 29 (2026-11-02, legs 5 and 6; walk 28 runs b and c): the Mandokir terrace is a ring sweep from the ramp top (18, 17, 4, the 5/6/7 knot, 12, 11, 16, 15, 13, 14, 10, 9, 8, 3, 2, 1, 19, 20, 21, 22) and the Jin'do leg pulls the two packs that straddle its walk (49741, then 49119, taken off the Hakkar leg) before 49114, every group from its own stand 20-27 yd from its pack and >= 20 yd from every pack pulled later; walk 28's steps 431 and 531 each fought 14 attackers with 24 hostiles in view.",
     "Arlokk (14515) has no spawn row; the gong 180526 runs event script 9066 and summons her at -11540.7 -1627.71 41.27. The gong step is open for the mapping walk (no walkable server path to it)."
    ],
    "handwritten": true
@@ -1240,6 +1306,7 @@
    "title": "Upper Blackrock Spire",
    "map": 229,
    "kind": "raid",
+   "handwritten": true,
    "data": "map229",
    "entrance": [
     138.726,

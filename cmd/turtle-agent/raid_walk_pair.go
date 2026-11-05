@@ -45,7 +45,9 @@ const pairMaxSlots = 8
 const pairUsage = `usage: turtle-agent raid-walk <plan> [<plan2> ...] --slot A,B[,C...] [--stagger 30s] [--out DIR] [walk flags]
     two to 8 slots, never slot 3; one plan for every slot, or one plan per slot, in the slots' order. Each slot is its
     own commander, group and instance. Per-walk flags take a slot prefix: --sql A=a.sql --sql B=b.sql (--sql --hires
-    --dir --patrols --until --from --tier --tier-override --holder --inject); every other raid-walk flag is global`
+    --dir --patrols --until --from --place --tier --tier-override --holder --inject --decisions --decisions-max-mib);
+    every other raid-walk flag is global. --place and --decisions are switches: --place turns it on for every walk,
+    --place A=on / --place B=off for one of them`
 
 // pairSlotRe is a slot id: the slots config's own shape.
 var pairSlotRe = regexp.MustCompile(`^[A-Za-z0-9]{1,8}$`)
@@ -53,11 +55,17 @@ var pairSlotRe = regexp.MustCompile(`^[A-Za-z0-9]{1,8}$`)
 // pairDigitsRe tells a slot-prefix attempt from a value that merely holds '=' (an inject spec, a path).
 var pairDigitsRe = regexp.MustCompile(`^[0-9]+$`)
 
-// pairPerWalkFlags are the raid-walk flags a slot prefix may narrow to one walk (spec 4.1).
+// pairPerWalkFlags are the raid-walk flags a slot prefix may narrow to one walk (spec 4.1). "place" is a switch: it
+// takes on/off rather than a plain value (pairSwitchFlags).
 var pairPerWalkFlags = map[string]bool{
 	"sql": true, "hires": true, "dir": true, "patrols": true, "until": true, "from": true,
-	"tier": true, "tier-override": true, "holder": true, "inject": true,
+	"place": true, "tier": true, "tier-override": true, "holder": true, "inject": true,
+	"decisions": true, "decisions-max-mib": true,
 }
+
+// pairSwitchFlags are the per-walk flags that are switches: a bare flag means on for every walk, and the word after a
+// slot prefix is on or off.
+var pairSwitchFlags = map[string]bool{"place": true, "decisions": true, "allow-split-ledger": true}
 
 // pairFlag is one flag of the pair command line, before distribution to the walks.
 type pairFlag struct {
@@ -537,6 +545,16 @@ func parsePairArgs(args []string, stderr io.Writer) (pairOptions, int) {
 			dryRun = true
 			continue
 		}
+		if !has && pairSwitchFlags[name] {
+			// A switch: `--place` alone turns it on for every walk; `--place A=on` (or A=off) narrows it to one.
+			if i+1 < len(args) && pairSwitchValue(args[i+1]) {
+				i++
+				val, has = args[i], true
+			} else {
+				flags = append(flags, pairFlag{name: name, value: "on"})
+				continue
+			}
+		}
 		if !has {
 			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
 				return usage("--%s needs a value", name)
@@ -634,9 +652,17 @@ func parsePairArgs(args []string, stderr io.Writer) (pairOptions, int) {
 			walkArgs = append(walkArgs, "--dry-run")
 		}
 		for _, f := range global {
+			if pairSwitchFlags[f.name] {
+				walkArgs = append(walkArgs, "--"+f.name+"="+f.value)
+				continue
+			}
 			walkArgs = append(walkArgs, "--"+f.name, f.value)
 		}
 		for _, f := range perWalk[i] {
+			if pairSwitchFlags[f.name] {
+				walkArgs = append(walkArgs, "--"+f.name+"="+f.value)
+				continue
+			}
 			walkArgs = append(walkArgs, "--"+f.name, f.value)
 		}
 		walkArgs = append(walkArgs, plan)
@@ -659,6 +685,18 @@ func parsePairArgs(args []string, stderr io.Writer) (pairOptions, int) {
 	return oa, exitOK
 }
 
+// pairSwitchValue says whether an argument is a switch flag's value: on, off, or a slot-prefixed on/off. Anything else
+// (a plan name, another flag) leaves the switch bare, which turns it on for every walk.
+func pairSwitchValue(s string) bool {
+	if s == "on" || s == "off" {
+		return true
+	}
+	if i := strings.IndexByte(s, '='); i > 0 {
+		return s[i+1:] == "on" || s[i+1:] == "off"
+	}
+	return false
+}
+
 // pairHasFlag returns the flag (nil when absent).
 func pairHasFlag(flags []pairFlag, name string) bool {
 	for _, f := range flags {
@@ -671,11 +709,12 @@ func pairHasFlag(flags []pairFlag, name string) bool {
 
 // pairWorstExit is the pair's exit: the first that occurs in this order over the walks' codes (spec 4.1). A blocking
 // incident - a walk that exits 23 because a bot was left frozen - ranks above 18 and 19, so it never hides (spec 0.5,
-// lead amendment); every other 23 keeps its place.
+// lead amendment); every other 23 keeps its place. A placement that exhausted its tries (29) ranks first among the
+// walk codes: reporting 18 or 19 instead would let walk-super restart it into the fresh instance the 29 stops.
 func pairWorstExit(blocking bool, codes ...int) int {
-	order := []int{exitUsage, exitSlotRefused, exitRaidWalkInjectFailed, exitRaidWalkFailed, exitRaidWalkIncident, exitOK}
+	order := []int{exitUsage, exitSlotRefused, exitRaidWalkPlaceFailed, exitRaidWalkInjectFailed, exitRaidWalkFailed, exitRaidWalkIncident, exitOK}
 	if !blocking {
-		order = []int{exitUsage, exitSlotRefused, exitRaidWalkFailed, exitRaidWalkIncident, exitRaidWalkInjectFailed, exitOK}
+		order = []int{exitUsage, exitSlotRefused, exitRaidWalkPlaceFailed, exitRaidWalkFailed, exitRaidWalkIncident, exitRaidWalkInjectFailed, exitOK}
 	}
 	for _, p := range order {
 		for _, c := range codes {

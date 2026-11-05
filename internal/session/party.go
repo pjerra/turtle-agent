@@ -180,6 +180,10 @@ func (s *Session) AcceptInvite(ctx context.Context) error {
 	return err
 }
 
+// ErrNotInGroup reports that LeaveGroup had no group to leave (the server
+// disbanded it first); teardown treats it as clean, not a failure.
+var ErrNotInGroup = errors.New("not in a group")
+
 // LeaveGroup sends CMSG_GROUP_DISBAND, which removes the player from the group (GroupHandler.cpp:354-370).
 func (s *Session) LeaveGroup(ctx context.Context) error {
 	_, err := s.do(ctx, func() (any, error) {
@@ -187,7 +191,7 @@ func (s *Session) LeaveGroup(ctx context.Context) error {
 			return nil, err
 		}
 		if !s.Party().InGroup {
-			return nil, errors.New("not in a group")
+			return nil, ErrNotInGroup
 		}
 		return nil, s.conn.WritePacket(opcode.CMSGGroupDisband, nil)
 	})
