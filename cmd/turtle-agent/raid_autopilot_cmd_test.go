@@ -1452,3 +1452,66 @@ func TestAutoPlacementFailuresEscalateAfterThree(t *testing.T) {
 		t.Fatalf("no ESCALATE stop for the placements:\n%s", f.events())
 	}
 }
+
+// M1: an adopted run has no Wait goroutine, so its exit comes from the pid: a YIELD after the walk died is clean and
+// writes YIELD-DONE instead of waiting out the 60 s grace, SIGKILLing a dead pid and calling the teardown unclean.
+func TestAutoAdoptedRunYieldIsClean(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.lease("zg-a", "held")
+	out := filepath.Join(f.walk, "a-1")
+	if err := os.MkdirAll(filepath.Join(out, "slot"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "slot", "slot.json"), []byte(fmt.Sprintf(`{"server":"srv","slot":"1","holder":"zg-a","slots_path":%q}`, f.slotsPath)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "run.log"), []byte("19:46:05.696 TBM:RUN|zul_gurub|running|51/761|jeklik|boss|begin|fighting\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	live := exec.Command("sleep", "30")
+	live.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := live.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = live.Process.Kill(); _ = live.Wait() }()
+	if err := os.WriteFile(filepath.Join(out, "walk.pid"), []byte(strconv.Itoa(live.Process.Pid)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	saved := autoSavedState{Format: autoStateFormat, Version: autoStateVersion, IDs: []autoSavedID{{
+		ID: "a", Goal: 0, LastStep: 51, Reuse: true, Attempt: 1, ChildPID: live.Process.Pid, OutDir: out,
+	}}}
+	raw, _ := json.Marshal(saved)
+	if err := os.WriteFile(filepath.Join(f.walk, autoStateFile), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := f.supervisor()
+	st := s.states[0]
+	st.mu.Lock()
+	adopted := st.run != nil && st.run.adopted
+	st.mu.Unlock()
+	if !adopted {
+		t.Fatalf("the live walk was not adopted:\n%s", f.events())
+	}
+	if err := live.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = live.Wait()
+	f.lease("", "")
+	closed := make(chan struct{})
+	go func() {
+		s.shutdown("YIELD")
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the YIELD waited for the kill grace on an adopted walk that already died:\n%s", f.events())
+	}
+	if _, err := os.Stat(filepath.Join(f.walk, autoYieldDone)); err != nil {
+		t.Fatalf("no YIELD-DONE after a clean adopted shutdown:\n%s", f.events())
+	}
+	if strings.Contains(f.events(), "SIGKILL") {
+		t.Fatalf("a dead adopted walk was SIGKILLed:\n%s", f.events())
+	}
+}

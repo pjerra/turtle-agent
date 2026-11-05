@@ -1173,7 +1173,7 @@ func processAlive(pid int) bool {
 // down), then SIGKILL after the grace. The autopilot never sends `.bot run stop`.
 func (s *autoSupervisor) stopRun(st *autoState, r *autoRun) {
 	st.mu.Lock()
-	if r.exited || r.stopped || r.pidN <= 0 {
+	if runExitedLocked(r) || r.stopped || r.pidN <= 0 {
 		r.stopped = true
 		st.mu.Unlock()
 		return
@@ -1189,12 +1189,22 @@ func (s *autoSupervisor) stopRun(st *autoState, r *autoRun) {
 	}
 }
 
+// runExitedLocked says the run's walk ended (the state's mutex is held). An adopted run has no Wait goroutine, so
+// its pid (and its group) is the source: the exit is not observed by anyone else, and treating it as running would
+// SIGKILL a dead pid and call the teardown unclean on a YIELD.
+func runExitedLocked(r *autoRun) bool {
+	if r.exited {
+		return true
+	}
+	return r.adopted && !processAlive(r.pidN)
+}
+
 // waitPidGone waits until the run's pid (and its group) is gone, bounded by d.
 func (s *autoSupervisor) waitPidGone(st *autoState, r *autoRun, pid int, d time.Duration) bool {
 	deadline := time.Now().Add(d)
 	for {
 		st.mu.Lock()
-		exited := r.exited
+		exited := runExitedLocked(r)
 		st.mu.Unlock()
 		if exited && !processAlive(pid) {
 			return true
@@ -1241,7 +1251,7 @@ func (s *autoSupervisor) teardown(st *autoState, r *autoRun) error {
 		return nil
 	}
 	r.tearing = true
-	pid, exited := r.pidN, r.exited
+	pid, exited := r.pidN, runExitedLocked(r)
 	st.mu.Unlock()
 
 	slotDir := filepath.Join(r.out, "slot")
