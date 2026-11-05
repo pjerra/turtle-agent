@@ -6,7 +6,7 @@ name: navmesh
 # repository's contents only (docs/CI.md). Without the secret (forks, a fresh clone) the job says so and does nothing.
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, "ci/**"]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
