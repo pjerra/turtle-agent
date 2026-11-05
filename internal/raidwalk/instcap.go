@@ -378,10 +378,6 @@ func (l *CapLedger) Confirm(name, owner string, e CapEntry, now time.Time) {
 	l.Record(name, e, now)
 }
 
-// gmInstanceDataMark is the old ledger's bare mark of a leg fired in an
-// instance ("<instance id>/<leg>").
-func gmInstanceDataMark(inst, leg string) string { return inst + "/" + leg }
-
 // gmMarkKey splits a mark back into its instance and leg ("": no key).
 func gmMarkKey(m GMInstanceMark) (inst, leg string) {
 	if m.Inst != "" || m.Leg != "" {

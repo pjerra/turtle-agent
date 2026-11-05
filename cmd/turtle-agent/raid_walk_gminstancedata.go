@@ -453,22 +453,25 @@ func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus) 
 		return false, nil
 	}
 	inst := w.gmInstanceDataInst(ctx)
-	for _, spec := range w.gmInstanceDataPending(inst, st) {
-		pauseAttempted := st.State == tbm.RunRunning
-		if pauseAttempted {
-			if _, err := w.commander(ctx, commanderReq{Op: "run", Verb: "pause", WaitMS: 10000}); err != nil {
-				w.note("gm-instance-data: WARN: the run pause before %s was refused (%v): the lines go out unheld", spec.Leg, err)
-			}
-		}
-		if err := w.gmInstanceDataFire(ctx, inst, spec); err != nil {
-			return true, err
-		}
-		if pauseAttempted {
-			if _, err := w.commander(ctx, commanderReq{Op: "run", Verb: "resume", WaitMS: 10000}); err != nil {
-				return true, stopf(exitRaidWalkFailed, "gm-instance-data: %s: the run resume after the lines failed: %v", spec.Leg, err)
-			}
-		}
-		return true, nil
+	pending := w.gmInstanceDataPending(inst, st)
+	if len(pending) == 0 {
+		return false, nil
 	}
-	return false, nil
+	// one spec per poll; the next poll fires the rest
+	spec := pending[0]
+	pauseAttempted := st.State == tbm.RunRunning
+	if pauseAttempted {
+		if _, err := w.commander(ctx, commanderReq{Op: "run", Verb: "pause", WaitMS: 10000}); err != nil {
+			w.note("gm-instance-data: WARN: the run pause before %s was refused (%v): the lines go out unheld", spec.Leg, err)
+		}
+	}
+	if err := w.gmInstanceDataFire(ctx, inst, spec); err != nil {
+		return true, err
+	}
+	if pauseAttempted {
+		if _, err := w.commander(ctx, commanderReq{Op: "run", Verb: "resume", WaitMS: 10000}); err != nil {
+			return true, stopf(exitRaidWalkFailed, "gm-instance-data: %s: the run resume after the lines failed: %v", spec.Leg, err)
+		}
+	}
+	return true, nil
 }
