@@ -13,13 +13,12 @@ The dashboard, captures, traces, events and scenarios: watch a run live, record 
 
 ## Record what happened
 
-- [Captures](/observability/captures-concept.md) — what a capture file holds and what it never holds.
+- [Captures](/observability/captures-concept.md) — what a capture file holds, what it never holds, and the test fixtures.
 - [Record and decode a capture](/observability/captures-guide.md) — `login --capture`, `scrub-check`, `capture-stats`, `capture events`.
 - [Run traces](/observability/traces-concept.md) — the `bt-trace` file, its records, its summary.
 - [Read the live event log](/observability/events-concept.md) — the `events` RPC, kinds, paging.
 - [Draw the run map](/observability/map-guide.md) — `turtle-agent map` from a capture to SVG and HTML.
 - [Decision captures](/observability/decisions-concept.md) — what the TortoiseBots daemon records and how to pull it.
-- [Test fixtures](/observability/fixtures-concept.md) — the recorded captures the unit tests play back.
 
 ## Check it afterwards
 

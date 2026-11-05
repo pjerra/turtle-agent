@@ -7,6 +7,8 @@ tags: [captures, fixtures]
 sources:
   - id: capture
     resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/capture/capture.go
+  - id: testfixture
+    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/testfixture/testfixture.go
 generated:
   by: muse-spark-1.3/omp
   at: 2026-11-05T21:41:00+01:00
@@ -27,4 +29,8 @@ What it never holds:
 
 The file is mode 0600 and is never overwritten. A capture of an agent that was killed ends in a cut-off record; readers decode what is there and say so.
 
-Three tools read captures: `capture-stats` counts packets by opcode, `capture events` replays the server packets through the session's own handlers into the event rows the `events` RPC would have returned, and `turtle-agent map` draws the run's positions from them. The unit tests play committed fixtures back through `internal/testfixture`.
+Three tools read captures: `capture-stats` counts packets by opcode, `capture events` replays the server packets through the session's own handlers into the event rows the `events` RPC would have returned, and `turtle-agent map` draws the run's positions from them.
+
+## Test fixtures
+
+The parser and session tests play back committed captures (`testdata/captures/m1-login.twcap` through `m7-gameobjects.twcap`, one per milestone's live step) through `internal/testfixture`: `Load(t, name)` reads one and fails the test when it is missing — the message says to record it with the milestone's live step. Run `scrub-check` on every fixture before committing. For fuzzing, `Bodies(t, ops...)` returns up to 12 distinct server bodies per opcode, and `FuzzBody` feeds arbitrary bytes to a parse function, failing on a panic or on no result after 5 s.
