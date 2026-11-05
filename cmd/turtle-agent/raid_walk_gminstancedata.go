@@ -325,6 +325,14 @@ func (w *walk) gmInstanceDataStart(ctx context.Context, inst, leg string) error 
 // failed send). At most one spec fires per poll: the next poll fires the
 // next.
 func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus) error {
+	// Idle fast path: no specs, or a state with no leg to name — never
+	// touch the toolkit. The instance read below is a real `q inst`.
+	if len(w.gmInstanceData) == 0 {
+		return nil
+	}
+	if st.State != tbm.RunRunning && st.State != tbm.RunPaused {
+		return nil
+	}
 	inst := w.gmInstanceDataInst(ctx)
 	for _, spec := range w.gmInstanceDataPending(inst, st) {
 		paused := false

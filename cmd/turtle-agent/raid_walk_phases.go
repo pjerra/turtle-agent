@@ -145,7 +145,7 @@ func (w *walk) phases(ctx context.Context) int {
 	// leg: nothing fires here — the run's first status still precedes the
 	// first pull, and pollOnce's hold covers it. (checkStartLine stays
 	// clean: the run's own label checks run there, the lines go out here.)
-	if w.place != nil {
+	if w.place != nil && len(w.gmInstanceData) > 0 {
 		if err := w.gmInstanceDataStart(ctx, w.gmInstanceDataInst(ctx), w.place.Leg); err != nil {
 			return w.stop(err, true)
 		}
