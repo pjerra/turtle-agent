@@ -174,9 +174,16 @@ type StepRow struct {
 	Entries  []uint32
 	Comment  string
 	// PatrolEntries are the entries of a patrol the plan attaches to this pull group (dungeon.PullGroup.Patrol): not a
-	// column of ai_dungeon_step. raid-walk's --gm-clear clears them too, because a patroller's spawn may stand outside
-	// the row's radius while its loop comes by the pull (ZG's 11352 patrol at Arlokk's north stair).
+	// column of ai_dungeon_step. raid-walk's --gm-clear clears the row's own patrol, because a patroller's spawn may stand
+	// outside the row's radius while its loop comes by the pull (ZG's 11352 patrol at Arlokk's north stair).
 	PatrolEntries []uint32
+	// PatrolSource is the plan patrol's source string (dungeon.Patrol.Source: "creature_movement <guid>", "spawn <guid>"
+	// or a note) and PatrolPath its waypoints, in plan order. Neither is a column: --gm-clear matches the world export's
+	// patrol to the row by the source's creature_movement guid (or, when the source names none, by an exact path match),
+	// never by entry and distance (several patrols share an entry: ZG's 11352 walks at Jeklik's stair, at Arlokk's and
+	// at Mandokir's).
+	PatrolSource string
+	PatrolPath   []dungeon.Point
 }
 
 // Rows are the three tables' rows of one plan.
@@ -649,10 +656,14 @@ func (b *builder) pull(gi int, g dungeon.PullGroup) error {
 	}
 	b.at("pull", gi, 0)
 	var patrol []uint32
+	var patrolSource string
+	var patrolPath []dungeon.Point
 	if g.Patrol != nil {
 		patrol = uniq(g.Patrol.Entries)
+		patrolSource = g.Patrol.Source
+		patrolPath = g.Patrol.Path
 	}
-	b.add(StepRow{Kind: KindPull, X: f32(cx), Y: f32(cy), Z: f32(cz), Radius: radius, Item: uint32(g.MaxBodies), Flags: flags, Param: param, Entries: uniq(g.Entries), Comment: c, PatrolEntries: patrol})
+	b.add(StepRow{Kind: KindPull, X: f32(cx), Y: f32(cy), Z: f32(cz), Radius: radius, Item: uint32(g.MaxBodies), Flags: flags, Param: param, Entries: uniq(g.Entries), Comment: c, PatrolEntries: patrol, PatrolSource: patrolSource, PatrolPath: patrolPath})
 	b.last, b.haveLast = dungeon.Point{X: f32(cx), Y: f32(cy), Z: f32(cz)}, true
 	if g.StandPull {
 		b.last = g.Approach[len(g.Approach)-1] // the party fights from its stand: the next move's hop is measured from there
