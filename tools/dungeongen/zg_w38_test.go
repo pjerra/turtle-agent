@@ -404,6 +404,28 @@ func TestZgW38HakkarOuterRowsWalkable(t *testing.T) {
 	if len(pts) < 10 {
 		t.Fatalf("%d rows in the hakkar_outer leg", len(pts))
 	}
+	// Every row stands on the floor. The walk-38 f2 row (-11752.0 -1741.9 14.3) was 4.1 yd under the
+	// mesh floor, but the planner re-anchors an off-mesh end point, so the path check above still saw a
+	// complete path to it: the row check is the floor under the point itself. Fails on dev, whose cutter
+	// writes that row (M4).
+	for _, pt := range pts {
+		fl, err := pl.Floors(309, pt.at.X, pt.at.Y, pt.at.Z-8, pt.at.Z+8)
+		if err != nil {
+			t.Errorf("%s (%.1f %.1f %.1f): floors: %v", pt.what, pt.at.X, pt.at.Y, pt.at.Z, err)
+			continue
+		}
+		above := 0.0
+		for _, f := range fl {
+			if d := float64(f.Z) - float64(pt.at.Z); d > above {
+				above = d
+			}
+		}
+		// The mesh's detail error is under 1 yd and a pack's DB spawn z can sit ~2 yd off the floor (the group-22
+		// pull's centroid at -11822.3 -1510.4 15.7 is 1.9 yd under its floor); 3 yd under is off the mesh.
+		if above > 3 {
+			t.Errorf("%s (%.1f %.1f %.1f) stands %.1f yd under the mesh floor: the row is off the mesh", pt.what, pt.at.X, pt.at.Y, pt.at.Z, above)
+		}
+	}
 	for i := 0; i+1 < len(pts); i++ {
 		a, b := pts[i].at, pts[i+1].at
 		path, err := pl.Plan(309, navmesh.Vec3{a.X, a.Y, a.Z}, navmesh.Vec3{b.X, b.Y, b.Z})
