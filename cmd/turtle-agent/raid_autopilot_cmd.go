@@ -1911,6 +1911,10 @@ type autoSavedID struct {
 	OutDir    string `json:"out_dir,omitempty"`
 	Done      bool   `json:"done,omitempty"`
 	Escalated bool   `json:"escalated,omitempty"`
+	// Stopped and StopWhy say a STOP file (or a removed targets line) ended this id: it is done, but not because its
+	// goals were met. The checkpoint keeps them so a restart still reports the id as stopped (not as a met goal).
+	Stopped bool   `json:"stopped,omitempty"`
+	StopWhy string `json:"stop_why,omitempty"`
 	// BossDead says the current goal's boss is dead in the instance: the goal is DONE at a start, never placed again.
 	BossDead bool   `json:"boss_dead,omitempty"`
 	NextAt   string `json:"next_at,omitempty"`
@@ -1934,6 +1938,7 @@ func (s *autoSupervisor) saveState() {
 		e := autoSavedID{
 			ID: st.id, Goal: st.current, GoalsDone: st.current,
 			Done: st.done, Escalated: st.escalated, Reuse: st.nextReuse,
+			Stopped: st.stopped, StopWhy: st.stopWhy,
 		}
 		if st.current < len(st.goals) {
 			g := st.goals[st.current]
@@ -2052,6 +2057,7 @@ func (s *autoSupervisor) reconcile() error {
 				st.goals[st.current].dead = sv.BossDead
 			}
 			st.done, st.escalated = sv.Done, sv.Escalated
+			st.stopped, st.stopWhy = sv.Stopped, sv.StopWhy
 			st.nextReuse = sv.Reuse
 			if at, err := time.Parse(time.RFC3339, sv.NextAt); err == nil {
 				st.nextAt = at

@@ -830,6 +830,46 @@ func TestAutoStopFileIsNotAMetGoal(t *testing.T) {
 	}
 }
 
+// Review round 1: the checkpoint keeps the stop. A restarted supervisor of a STOP-completed id still reports it as
+// stopped (not as a met goal), never relaunches it, and its finish line does not claim every goal was met.
+func TestAutoStoppedStateSurvivesARestart(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return len(f.args()) >= 1 })
+	if err := os.WriteFile(filepath.Join(f.walk, "STOP-a"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "a stopped", func() bool {
+		done, _ := runState(s.states[0])
+		return done
+	})
+	s.saveState()
+	// A fresh supervisor reads the checkpoint as a start does.
+	s2 := f.supervisor()
+	st := f.stateByID(s2, "a")
+	if st == nil {
+		t.Fatalf("the restart dropped a:\n%s", f.events())
+	}
+	st.mu.Lock()
+	stopped, why := st.stopped, st.stopWhy
+	st.mu.Unlock()
+	if !stopped || why != "STOP-a" {
+		t.Fatalf("the restart lost the stop (stopped=%v why=%q):\n%s", stopped, why, f.events())
+	}
+	if s2.allGoalsMet() {
+		t.Fatalf("a stopped id counted as a met goal after the restart:\n%s", f.events())
+	}
+	s2.writeStatus()
+	if status := f.statusFile(); !strings.Contains(status, "a goal=full stopped (STOP-a)") {
+		t.Fatalf("status.txt does not report the restored stop:\n%s", status)
+	}
+	if n := len(f.args()); n != 1 {
+		t.Fatalf("the restarted supervisor relaunched a (%d launches):\n%s", n, strings.Join(f.args(), "\n"))
+	}
+}
+
 // Walk 39: targets.txt was read once at start, so every added raid needed another autopilot dir (the ramp-* dirs,
 // one per re-added raid). A line appended while the supervisor runs starts that raid without a restart, and a removed
 // line stops its raid cleanly (its slot torn down), with no ESCALATE and no re-read of the goals of an unchanged id.

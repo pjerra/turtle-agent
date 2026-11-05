@@ -2876,7 +2876,8 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   slow slot never delays another.
 - **Durable state.** `<walk-dir>/autopilot-state.json` is rewritten atomically (temp file written and fsynced, renamed,
   then the directory fsynced) on every transition: per id its current goal, the goals met, the last reached step, the
-  reuse/fresh decision, the attempt number and the child's pid/out dir. A checkpoint that does not parse (a
+  reuse/fresh decision, the attempt number, the child's pid/out dir, and a `stopped` id's flag and reason. A
+  checkpoint that does not parse (a
   truncated write, disk damage) is a refusal at start: exit 2, the file is named, and the message says to fix or
   remove it — nothing is launched over it and the file is not overwritten with empty progress. A start loads it and
   reconciles it with the attempts' `summary.json` and the slots' leases: a
