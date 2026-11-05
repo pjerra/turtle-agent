@@ -1130,8 +1130,12 @@ func (s *autoSupervisor) checkStopFiles() {
 }
 
 // noteRefusedStop logs one refused STOP file once (the person's file stays across the ticks, and a tick must not
-// repeat the line).
+// repeat the line). A file a finish goroutine consumed after the directory was read is gone by now: it is not
+// refused, it completed.
 func (s *autoSupervisor) noteRefusedStop(name string, st *autoState) {
+	if _, err := os.Stat(filepath.Join(s.o.walkDir, name)); err != nil {
+		return
+	}
 	s.stopMu.Lock()
 	if s.stopNoted[name] {
 		s.stopMu.Unlock()
