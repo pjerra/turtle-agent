@@ -1,0 +1,53 @@
+---
+type: Overview
+title: Raid walks, autopilot and suite
+description: What raid-walk, raid-autopilot and raid-suite do and how they fit together.
+resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_walk_cmd.go
+tags: [raids, raid-walk, autopilot, suite]
+sources:
+  - id: walk-cmd
+    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_walk_cmd.go
+  - id: auto-cmd
+    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_autopilot_cmd.go
+  - id: suite-cmd
+    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_suite_cmd.go
+generated:
+  by: muse-spark-1.3/omp
+  at: 2026-11-05T21:30:00+01:00
+status: draft
+---
+
+# Raid walks, autopilot and suite
+
+Three commands drive TortoiseBots parties through raids for testing.
+
+- `turtle-agent raid-walk <plan>` walks one raid plan with hired bots and the TortoiseBots run leader. It leases a slot, logs the slot agent in, puts the commander outside the entrance, hires the roster, binds the raid to its main tank, enters, starts the run with an `until` clause, watches it and tears everything down.[^walk-cmd]
+- `turtle-agent raid-autopilot <walk-dir>` keeps a walk dir's raids running without a worker watching them. It reads one goal per line from `targets.txt`, launches a `raid-walk` per id, and re-places any walk that ends, stalls or loses progress until every goal is met.[^auto-cmd]
+- `turtle-agent raid-suite` walks a list of raid plans one after another with `raid-walk` and judges each walk against the last good walk of the same plan in a history dir. It is the regression check for the raid plans.[^suite-cmd]
+
+A walk never takes slot 3 (owner rule), and it never walks without `until`: a server without the run-leader `until` support is refused with exit 18.
+
+## How a walk runs
+
+A walk moves through phases in order: validate (no network), lease, `slot setup`, `login`, GM `.go xyz` to the plan's portal, hire and gear, `commander bind <MT> raid`, enter, `run start`, watch, hold, `commander status` and `teardown`, then a summary. The output dir (default `./raid-walk-<plan>-<stamp>`, mode 0700) holds `run.log`, `frames.jsonl`, `summary.json` and `summary.txt`, the combat fight dumps, `pulljoiners.json`, `slot-setup.txt` and `teardown.json`.[^walk-cmd]
+
+While watching, the walk reads the run's `TBM:RUN` lines, the `bot_view` frames and the dashboard. A wipe revives the raid and optionally resumes the run (see [Recover from wipes](/raids/recover-wipe.md)). A boss engagement stops the run and waits for a kill, a reset or a wipe.
+
+Exit codes: 0 means the run ended by its `until` (or the hold). 18 means a phase failed or was refused. 19 means the walk ran and was torn down but a wipe or a boss engagement happened. 23 means a fault verdict failed or a cleanup left a bot frozen. 15 means the lease was refused (including slot 3). 26 means the instance cap ledger is at the cap. 29 means a placement failed every try in the same instance. 2 is a usage error.[^walk-cmd]
+
+## The test-server tools
+
+Two flags change what the raid fights, and both only work on the test servers with `--place`:
+
+- `--place` with `--from "leg L"` or `--from "step N"` starts the raid partway into its instance instead of at the door, clearing the legs it skips (see [Start partway into an instance](/raids/place-mid-raid.md)).
+- `--gm-clear` and `--gm-clear-boss` GM-kill named pull groups or a leg's boss after the placement, so a later leg can be tested while a trash wipe is still being fixed. A walk that used them is marked **ASSISTED**, never a real clear.
+- `--gm-instance-data` sends `.debug instancedata` lines when the walk first starts the named leg, for gates like a boss's priest gate.
+
+`--inject` makes the walk inject a controlled fault (kill the main tank, run a hire away, pull an extra pack, freeze a hire for lag) and measure what the raid does about it. Faults are never combined with `--place`, and the autopilot refuses `--inject` lines.
+
+## Where to go next
+
+- First walk: [Walk your first raid](/raids/first-raid-walk.md).
+- Concepts you will need: [Until clauses and autopilot goals](/raids/until-and-goals.md), [Hire gear tiers](/raids/tiers.md), [The instance cap ledger](/raids/instance-cap.md).
+- Every flag: [`raid-walk` flags](/raids/raid-walk-reference.md), [`raid-autopilot` reference](/raids/raid-autopilot-reference.md).
+- Something failed: [Troubleshooting raids](/raids/troubleshooting.md).
