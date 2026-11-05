@@ -97,6 +97,8 @@ type walkFakeAgent struct {
 	entered  bool
 	status   session.StatusInfo
 	lines    []queuedEvent
+	history  []queuedEvent // every served line, in serve order (seq i+1); a cursor rewind re-serves from it
+	since    uint64        // the `since` cursor of the in-flight events call
 	next     uint64
 	viewN    int
 	views    int // bot_view calls, for the fault hooks' one Tick per watch loop
@@ -133,9 +135,12 @@ type walkFakeAgent struct {
 	onResume func()
 	// runVerbs records every `run` commander request's verb, in order, and onSkip runs for one whose verb is skip
 	// (walk 24 B: the boss-not-found skip). skipErr makes that skip answer an error (a refusal).
+	// (walk 24 B: the boss-not-found skip). skipErr makes that skip answer an error (a refusal). pauseErr, when
+	// non-nil, makes `run pause` fail while it points at true (a refused pause: the gm-instance-data resume test).
 	runVerbs []string
 	onSkip   func()
 	skipErr  bool
+	pauseErr *bool
 	// onStart runs after a `run start` was answered and its startQueue was pushed (a test that needs lines after a
 	// later start: the boss-not-found re-run). nil: nothing.
 	onStart func()
@@ -406,6 +411,11 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 			_ = json.Unmarshal(raw, &ep)
 			f.gmOnKinds = append([]string{}, ep.Kinds...)
 		}
+		var sp struct {
+			Since uint64 `json:"since"`
+		}
+		_ = json.Unmarshal(raw, &sp)
+		f.since = sp.Since
 		f.mu.Unlock()
 		v = f.eventsPage()
 	case "bot_view":
@@ -961,8 +971,45 @@ type hireBatchState struct {
 	missT, missH, missD int
 }
 
+// eventsPage pops the next page off the queue, but retains every served
+// line in history: a cursor rewind to an older `since` (waitTBMMatch, the
+// gm-instance-data firing) re-serves the tail from history instead of
+// losing it, the way the live agent's cursor does.
 func (f *walkFakeAgent) eventsPage() events.Page {
+	return f.eventsPageSince(f.since)
+}
+
+func (f *walkFakeAgent) eventsPageSince(since uint64) events.Page {
 	f.mu.Lock()
+	if since > 0 && since < uint64(len(f.history)) {
+		n := 1
+		if f.pageSize > n {
+			n = f.pageSize
+		}
+		if n > len(f.history)-int(since) {
+			n = len(f.history) - int(since)
+		}
+		batch := append([]queuedEvent{}, f.history[since:since+uint64(n)]...)
+		evs := make([]events.Event, 0, n)
+		for i, q := range batch {
+			ev := events.Event{Seq: since + uint64(i) + 1, Kind: events.KindSystem, Text: q.raw, Data: map[string]any{"raw": q.raw}}
+			if q.text != "" {
+				ev.Text = q.text
+			}
+			evs = append(evs, ev)
+		}
+		next := since + uint64(n)
+		// Next is the last served seq, not the high-water mark: the caller
+		// re-reads forward from here, re-serving whatever history holds.
+		hook := f.eventsHook
+		f.mu.Unlock()
+		if hook != nil {
+			for _, q := range batch {
+				hook(q.raw)
+			}
+		}
+		return events.Page{Events: evs, Next: next}
+	}
 	if len(f.lines) == 0 {
 		next := f.next
 		f.mu.Unlock()
@@ -977,6 +1024,7 @@ func (f *walkFakeAgent) eventsPage() events.Page {
 	}
 	batch := append([]queuedEvent{}, f.lines[:n]...)
 	f.lines = f.lines[n:]
+	f.history = append(f.history, batch...)
 	evs := make([]events.Event, 0, n)
 	for _, q := range batch {
 		f.next++
@@ -1149,6 +1197,15 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 		f.mu.Lock()
 		f.runVerbs = append(f.runVerbs, p.Verb)
 		f.mu.Unlock()
+		if p.Verb == "pause" {
+			f.mu.Lock()
+			fail := f.pauseErr != nil && *f.pauseErr
+			f.mu.Unlock()
+			if fail {
+				return commanderReply{Reply: tbm.Reply{Kind: "err", Err: &tbm.Err{Intent: "run pause", Code: "refused",
+					Message: "the run is busy"}}}
+			}
+		}
 		if p.Verb == "skip" {
 			f.mu.Lock()
 			hook, refuse := f.onSkip, f.skipErr

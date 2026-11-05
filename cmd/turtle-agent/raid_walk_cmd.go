@@ -62,7 +62,7 @@ const (
 const walkPIDFile = "walk.pid"
 
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
-    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--speed X] [--hires FILE] [--tier N|--tier-override N]
+    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--gm-instance-data LEG:"A B[;A B]"] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
     [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-per-account N] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--decisions on|off] [--decisions-max-mib N]
@@ -77,35 +77,36 @@ var raidWalkSpeedRe = regexp.MustCompile(`^[1-3](?:\.[0-9])?$`)
 
 // raidWalkOptions are the command's flags.
 type raidWalkOptions struct {
-	plan          string
-	server        string
-	slot          string // "" leases any free slot
-	holder        string
-	dir           string
-	sql           string
-	until         string
-	from          string
-	place         bool       // --place: start the raid partway into its instance, at the --from start (spec 3)
-	reuseInstance bool       // --reuse-instance: a re-place keeps the raid's current instance (no fresh one is entered or counted)
-	gmClear       stringList // --gm-clear "<leg>:<group>[,<group>...]", repeatable: GM-kill those pull groups after the placement (test servers only)
-	gmClearBoss   stringList // --gm-clear-boss <leg>, repeatable: GM-kill the leg's boss and its pack
-	gmClearSpawns string     // --gm-clear-spawns: the world export dir (default ~/.local/share/turtle-agent/world/map<N>, else the checkout's tools/dungeongen/testdata/map<N>)
-	speed         float64
-	hires         string
-	tier          int // --tier: the kit of a raid the committed table leaves unknown
-	tierOverride  int // --tier-override: a comparison, not a tier proof
-	enter         string
-	holdMinutes   int
-	maxRunMinutes int
-	pausedWait    time.Duration
-	autoResume    int
-	resetWait     time.Duration
-	wipeResume    int
-	wipeRest      time.Duration
-	reviveAtRaid  bool          // --revive-at-raid (default on): a wipe recovery brings far hires to the revive point and waits for the raid to gather
-	hireSettle    time.Duration // --hire-settle: the wait after the last hire; 0 skips it (the #1367 live proof)
-	capPerAccount int           // --instance-cap-per-account: the core's fresh instances per account and hour (stock 5)
-	capGiven      bool          // --instance-cap-per-account was given: it wins over instance-cap-per-account.json's value
+	plan           string
+	server         string
+	slot           string // "" leases any free slot
+	holder         string
+	dir            string
+	sql            string
+	until          string
+	from           string
+	place          bool       // --place: start the raid partway into its instance, at the --from start (spec 3)
+	reuseInstance  bool       // --reuse-instance: a re-place keeps the raid's current instance (no fresh one is entered or counted)
+	gmClear        stringList // --gm-clear "<leg>:<group>[,<group>...]", repeatable: GM-kill those pull groups after the placement (test servers only)
+	gmClearBoss    stringList // --gm-clear-boss <leg>, repeatable: GM-kill the leg's boss and its pack
+	gmClearSpawns  string     // --gm-clear-spawns: the world export dir (default ~/.local/share/turtle-agent/world/map<N>, else the checkout's tools/dungeongen/testdata/map<N>)
+	gmInstanceData stringList // --gm-instance-data "<leg>:<a> <b>[;<a> <b>...]", repeatable: send each as .debug instancedata when the walk first starts the leg (test servers only)
+	speed          float64
+	hires          string
+	tier           int // --tier: the kit of a raid the committed table leaves unknown
+	tierOverride   int // --tier-override: a comparison, not a tier proof
+	enter          string
+	holdMinutes    int
+	maxRunMinutes  int
+	pausedWait     time.Duration
+	autoResume     int
+	resetWait      time.Duration
+	wipeResume     int
+	wipeRest       time.Duration
+	reviveAtRaid   bool          // --revive-at-raid (default on): a wipe recovery brings far hires to the revive point and waits for the raid to gather
+	hireSettle     time.Duration // --hire-settle: the wait after the last hire; 0 skips it (the #1367 live proof)
+	capPerAccount  int           // --instance-cap-per-account: the core's fresh instances per account and hour (stock 5)
+	capGiven       bool          // --instance-cap-per-account was given: it wins over instance-cap-per-account.json's value
 	// allowSplitLedger lets a --slots file outside the default dir run although the default leases hold a live lease
 	// for the server (test sandboxes). Production keeps one ledger per server.
 	allowSplitLedger bool
@@ -266,6 +267,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.patrols, "patrols", "", "a tb-patrols file for the revive quiet check")
 	fs.Var(&o.gmClear, "gm-clear", "TEST SERVERS ONLY, needs --place: after the placement the commander GM-kills every live unit of these pull groups of a leg, \"<leg>:<group>[,<group>...]\" (whole packs, links included); repeatable; the walk is then ASSISTED, never a real clear")
 	fs.Var(&o.gmClearBoss, "gm-clear-boss", "TEST SERVERS ONLY, needs --place: like --gm-clear for the boss of a leg (and its pack); repeatable")
+	fs.Var(&o.gmInstanceData, "gm-instance-data", "TEST SERVERS ONLY: when the walk first starts the named leg the commander sends each \".debug instancedata <a> <b>\" of \"<leg>:<a> <b>[;<a> <b>...]\", in order, 3 s apart, once per instance; with --place it is the placement's copy, without it the entry's (read as q inst; unreadable: fires once per out dir with a WARN); repeatable")
 	fs.StringVar(&o.gmClearSpawns, "gm-clear-spawns", "", "the world export dir --gm-clear reads the packs from (default: ~/.local/share/turtle-agent/world/map<N>, else the checkout's <dir>/../tools/dungeongen/testdata/map<N>)")
 	fs.StringVar(&o.out, "out", "", "the output dir (default ./raid-walk-<plan>-<stamp>)")
 	fs.StringVar(&o.dashURL, "dash-url", "", "the dashboard URL (or TBDASH_URL)")
@@ -429,6 +431,18 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 		if _, err := parseGMClearSpecs(o.gmClear, o.gmClearBoss); err != nil {
 			fmt.Fprintf(stderr, "raid-walk: %v\n", err)
 			return o, exitUsage
+		}
+	}
+	if len(o.gmInstanceData) > 0 {
+		if !placeServers[o.server] {
+			fmt.Fprintf(stderr, "raid-walk: --gm-instance-data sends GM commands: test servers only (%s)\n", strings.Join(placeServerList(), ", "))
+			return o, exitUsage
+		}
+		for _, v := range o.gmInstanceData {
+			if _, err := raidwalk.ParseGMInstanceData(v); err != nil {
+				fmt.Fprintf(stderr, "raid-walk: %v\n", err)
+				return o, exitUsage
+			}
 		}
 	}
 	return o, exitOK
@@ -999,6 +1013,18 @@ type walk struct {
 	gmClearWarn []string // groups the plan skipped (no hostile spawn near the row): a WARN note and run.log line
 	gmClearLog  []raidwalk.GMClearEntry
 	gmClearUsed bool
+	// --gm-instance-data: the specs validate resolved against the rows, in flag order; the markers in the out dir
+	// say which legs already fired (and the ledger, which outlives the attempt, says it per instance).
+	gmInstanceData          []raidwalk.GMInstanceSpec
+	gmInstanceDataEntryInst string
+	// gmInstanceDataTries counts, per leg and command line, how many times the
+	// command went out without the server confirming it; after
+	// gmInstanceDataMaxTries the walk logs the NOT-confirmed line and stops
+	// retrying it (the walk never fails on this).
+	gmInstanceDataTries map[string]int
+	// gmInstanceDataOZeroWarned says the `q inst` 0 read already WARNed once
+	// (a 0 read is not cached: the next firing retries the read).
+	gmInstanceDataOZeroWarned bool
 	// gongReruns counts the run restarts at a leg's summoning open row (a boss that despawns after a wipe comes back with the
 	// object: Zul'Gurub's Arlokk). bossGongReruns bounds them. gongRerunAt/-Boss/-Open name the last one that went out: the
 	// next "boss not found" pause reads whether the frames saw the boss alive since, which tells the gong summoning him again
@@ -1388,6 +1414,11 @@ func (w *walk) validate() error {
 		}
 	}
 
+	if len(w.opts.gmInstanceData) > 0 {
+		if err := w.validateGMInstanceData(); err != nil {
+			return err
+		}
+	}
 	if len(w.opts.injects) > 0 {
 		if newWalkInjector == nil {
 			return stopf(exitUsage, "this build has no fault injection (--inject)")
@@ -1784,6 +1815,13 @@ func (w *walk) printPlan(out io.Writer) {
 	for _, pk := range w.gmClear {
 		fmt.Fprintf(out, "  8c gm-clear: %s pack %d, %d members, around %s %s %s: select each live member by guid, .die, read its death\n",
 			raidwalk.GMClearLabel(pk.Leg, pk.Group), pk.ID, len(pk.Members), num32(pk.Centroid.X), num32(pk.Centroid.Y), num32(pk.Centroid.Z))
+	}
+	for _, sp := range w.gmInstanceData {
+		fmt.Fprintf(out, "  8c gm-instance-data: %s:", sp.Leg)
+		for _, cmd := range sp.Cmds {
+			fmt.Fprintf(out, " .debug instancedata %d %d;", cmd[0], cmd[1])
+		}
+		fmt.Fprintf(out, " in order, 3 s apart, once per instance, before run start when placed in the leg (mid-run: paused first)\n")
 	}
 	start := []string{w.plan.Name}
 	start = append(start, w.fromWords...)

@@ -84,6 +84,10 @@ func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
 			return true
 		}
 		return len(f) == 3 && f[1] == "unbind" && f[2] == strconv.FormatUint(uint64(mapID), 10)
+	case ".debug":
+		// The --gm-instance-data test tool (opt-in, test servers only): `.debug instancedata <a> <b>` through the
+		// walk's own gm path. Two integers, nothing else: no other `.debug` form passes.
+		return isGMInstanceDataLine(line)
 	case ".bot":
 		if len(f) < 3 {
 			return false
@@ -101,6 +105,21 @@ func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
 		}
 	}
 	return false
+}
+
+// isGMInstanceDataLine says whether line is the one `.debug` form the walk may send: `.debug instancedata <a> <b>`
+// with two integers (the --gm-instance-data test tool). Every other `.debug` form is refused.
+func isGMInstanceDataLine(line string) bool {
+	f := strings.Fields(line)
+	if len(f) != 4 || f[0] != ".debug" || f[1] != "instancedata" {
+		return false
+	}
+	for _, v := range f[2:] {
+		if _, err := strconv.Atoi(v); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // allowedHireRaid checks `<hire> level=<n>[ <tier>]`.

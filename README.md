@@ -100,7 +100,7 @@ turtle-agent plan-check --mmaps DIR --sql FILE [--plan NAME] [--spawns DIR] [--s
 turtle-agent plan-scout <dungeon> [--dir dungeons] [--sql FILE] [--mmaps DIR] [--spawns DIR] [--from LEG] [--until LEG] [--party-level N] [--out DIR] [--json] [--fix-out FILE] [--apply-fixes DIR] [--fail-on fail|warn] [--instance-cap-per-account N] [--live SERVER --slot N ...]
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
-turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-per-account N] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--reuse-instance] [--dry-run]
+turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--gm-instance-data LEG:"A B[;A B]"] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-per-account N] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--reuse-instance] [--dry-run]
 turtle-agent raid-autopilot [--foreground] [--binary PATH] [--poll D] [--stall D] [--settle D] [--status-every D] [--instance-cap-per-account N] [--dry-run] <walk-dir>
 turtle-agent trash-check [--dir dungeons] [--sql FILE [--plan NAME]] [--spawns DIR] [--patrols FILE]... [--mmaps DIR] [--level N] [--spread YD] [--aggro-rate R] [--assist-yd 10] [--json] [--out DIR] [--dash-out FILE] [--fail-on danger|patrol|any] [<plan>|<path.json>]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
@@ -2699,6 +2699,34 @@ AQ20 walk starts at Rajaxx with `--gm-clear-boss kurinnaxx` so Kurinnaxx is dead
   `assisted: true` on each leg it killed in, `summary.txt` and the result line end with `ASSISTED`, and `raid-walk report`
   (which reads `summary.json` from the walk folder) prints an **ASSISTED** line and the table. An ASSISTED walk is never
   a real clear. In the pair form the flags apply to every walk.
+
+### --gm-instance-data (test servers only)
+
+ A TEST tool, off by default: `raid-walk <plan> [--place] --from "leg L" --sql FILE --gm-instance-data "<leg>:<a> <b>[;<a> <b>...]"`
+ (repeatable, one leg per value). A placed start inside the named leg sends the lines BEFORE the run starts — ahead of `run start`
+ in every `--until mode` including `--until none` — so the gate is satisfied before the first pull. An explicit `--from step N`
+ inside the leg fires the same way, on the leg the row belongs to. A walk that reaches the leg
+ mid-run pauses the run first (`.bot run pause`, always resumed after the last line, even when the pause itself was refused),
+ so the next pull waits for the lines. The commander
+ sends each command as `.debug instancedata <a> <b>`, in order, 3 s apart, once per instance.
+ Example: `--gm-instance-data "hakkar:1 3;6 3;0 0"` marks Hakkar's five priests done at
+ the pull gate. The lines go out through the walk's own `gm` RPC path (the same allow-listed chat the walk's other GM lines use),
+ so a refused or failed send breaks the walk instead of losing the gate silently. Refused unless the server is `m910q` or
+ `tortoise-test2`; a malformed command (not two integers) or an unknown leg is a usage error before anything
+ goes out. After each line the walk reads the chat/system events for up to 2 s and logs the server's reply in the event line
+ (`gm-instance-data: <leg>: .debug instancedata <a> <b> -> <reply>`); the core's debug handler prints nothing on success, so
+ silence logs `-> sent` and counts as confirmed. A refusal line (`There is no such command`, `Incorrect syntax.`, ...) logs
+ `-> <refusal> (REFUSED)`: the command is NOT recorded and is retried on the next status, at most 3 times per walk, then the walk
+ logs `gm-instance-data: <leg>: <cmd> NOT confirmed after 3 tries` and continues (never failing the walk on this). A marker file
+ per instance and leg in the walk's out dir — plus that mark in the
+ instance-cap ledger, which outlives the attempt's out dir — remembers the confirmed commands, so a resumed walk in the same instance
+ (`--reuse-instance`) never resends; only `--reuse-instance` walks consult the ledger (a fresh walk always sends — the core reuses
+ instance ids across copies). Marks carry the hash of the exact command list — a changed list resends — and drop on a server restart
+ or reset. Without `--place` the instance id is read the way the cap ledger reads it at entry;
+ when it cannot be read the walk WARNs once and fires marker-only (per out dir); a read of 0 is retried on the next status instead.
+ Old ledgers with bare `"<id>/<leg>"` string marks still load.
+`targets.txt` takes the flag like any other: its value holds spaces but the file is split on whitespace with no quoting, so the
+words after the flag (up to the next flag) are joined back into one value. In the pair form the flags apply to every walk.
 
 ### Walk report
 

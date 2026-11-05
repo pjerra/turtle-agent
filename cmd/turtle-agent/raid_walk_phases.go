@@ -129,12 +129,42 @@ func (w *walk) phases(ctx context.Context) int {
 	if err := w.phasePlace(ctx); err != nil {
 		return w.stop(err, true)
 	}
-	// The placement read the instance id: a fresh entry records it (a later reuse's dedupe needs it), a reuse
-	// placement records the accounts it re-hired into the raid's instance (M5).
+	// The placement read the instance id: a fresh entry records it (a later
+	// reuse's dedupe needs it), a reuse placement records the accounts it
+	// re-hired into the raid's instance (M5).
 	if w.opts.reuseInstance && w.reuseMode != "fresh" {
 		w.recordReuseInstance()
 	} else {
 		w.stampInstance()
+	}
+	// --gm-instance-data: a placed start inside the leg fires BEFORE the run
+	// starts, in every --until mode including --until none (instance data
+	// is no until: it needs no label). It fires on the placement's leg
+	// after place+enter fixed the instance, so `run start` (phaseStart
+	// below) always follows the lines. An explicit --from step N inside the
+	// leg fires the same way: PlaceLegName(w.rows, N) resolves the leg the
+	// row belongs to (even a pull row: the gate is the leg's, not the
+	// row's). (checkStartLine stays clean: the run's own label checks run
+	// there, the lines go out here.)
+	if len(w.gmInstanceData) > 0 {
+		leg := ""
+		if w.place != nil {
+			leg = w.place.Leg
+			if leg == "" {
+				// An explicit --from step N names no leg (PlaceStart
+				// returns "" for step starts): PlaceLegName(w.rows, N)
+				// resolves the leg the staged row belongs to, even a
+				// pull row — the gate is the leg's, not the row's.
+				leg = raidwalk.PlaceLegName(w.rows, w.place.Start)
+			}
+		} else if n, err := raidwalk.FromStartStep(w.rows, w.fromWords); err == nil && n >= 1 && n <= len(w.rows.Steps) {
+			leg = raidwalk.PlaceLegName(w.rows, n)
+		}
+		if leg != "" {
+			if err := w.gmInstanceDataStart(ctx, w.gmInstanceDataInst(ctx), leg); err != nil {
+				return w.stop(err, true)
+			}
+		}
 	}
 	if err := w.phaseStart(ctx); err != nil {
 		return w.stop(err, true)
@@ -970,6 +1000,10 @@ func (w *walk) checkStartLine(ctx context.Context, line string) error {
 		w.runStopped = true
 		return stopf(exitRaidWalkFailed, "--until boss-done: the server's plan has %d steps, the rows the boss step was found in have %d (pass --sql with the deployed migration, or use --until leg L)", st.Steps, len(w.rows.Steps))
 	}
+	// (No --gm-instance-data here: it fires in phases after phaseStart
+	// adopts this status, BEFORE the run starts, so the lines precede the
+	// run start in every --until mode including --until none — and in
+	// pollOnce, which holds the next pull while a mid-run firing sends.)
 	if len(w.untilWords) == 0 {
 		return nil
 	}
@@ -1162,11 +1196,15 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 	// The page's lines get sequence numbers above pollSeq0: handleWipe's self-regroup rule uses the
 	// watermark to tell a line of the wipe's own page from an older one (walk 19 r6).
 	w.pollSeq0 = w.statusSeq
-	lines, err := w.pump(ctx, 5000)
+	evs, err := w.pumpEvents(ctx, 5000)
 	if err != nil {
 		return nil, err
 	}
-	for _, line := range lines {
+	for _, e := range evs {
+		line, ok := tbm.Line(e)
+		if !ok {
+			continue
+		}
 		w.logLine(now, line)
 		st, ok := raidwalk.ParseRun(line)
 		if !ok || st.Plan != w.plan.Name {
@@ -1195,6 +1233,32 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 		w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
 		w.recordRunLine(st, now)
 		w.noteLabel(st)
+		// --gm-instance-data: the first status that names the leg fires
+		// here, once per instance, when a walk reaches the leg mid-run. A
+		// failing send breaks the walk. The 3 s gaps between the lines run
+		// inline in pollOnce and stall its polling for ~6 s once per
+		// instance. A status that names the leg while the run is already past
+		// the pull gate's first pull is too late to help it: the walk pauses
+		// the run first (`.bot run pause`, resumed after the last line),
+		// so the next pull waits for the lines. The walk fires at most one
+		// spec per poll this way; the next poll fires the next. After a
+		// firing the cursor rewinds to the firing line (the way
+		// waitTBMMatch rewinds to its matched line) and the loop breaks:
+		// the firing's reply read already advanced the cursor past newer
+		// lines, but it only logged them — the next poll re-reads the
+		// unfired tail in order, so no status after the firing ever
+		// processes past an adopted newer one (a rewind to the page start
+		// would re-feed the pre-fire statuses instead, regressing
+		// lastStatus; the rerunStale filter above re-applies to the
+		// re-read lines unchanged).
+		fired, err := w.gmInstanceDataSendPending(ctx, st)
+		if err != nil {
+			return nil, err
+		}
+		if fired {
+			w.eventsAt = e.Seq
+			break
+		}
 		if st.Note != "" {
 			w.newNotes = append(w.newNotes, st.Note)
 		}
