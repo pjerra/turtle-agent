@@ -52,7 +52,7 @@ status: draft          # draft until a person has checked it
 ## Folders and links
 
 - One folder per area. Each folder has an `index.md` with no header: a short intro line, then grouped bullet links, each with a one-line description.
-- Links use paths from the bundle root, for example `[raid-walk](/raids/raid-walk.md)`. A link to a page that does not exist yet is fine; it marks a page still to write.
+- Links use paths from the bundle root, for example `[raid-walk](/raids/raid-walk-reference.md)`. A link to a page that does not exist yet is fine; it marks a page still to write.
 - `log.md` at the root records changes, newest date first.
 
 ## Writing style
