@@ -21,6 +21,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -234,7 +235,10 @@ func raidAutopilotCmd(ctx context.Context, args []string, stdout, stderr io.Writ
 	s.initSeq()
 	// A YIELD-DONE from an earlier YIELD is stale at this start (M6): this run writes its own only if a YIELD comes.
 	_ = os.Remove(filepath.Join(o.walkDir, autoYieldDone))
-	s.reconcile()
+	if err := s.reconcile(); err != nil {
+		fmt.Fprintf(stderr, "raid-autopilot: %v\n", err)
+		return exitUsage
+	}
 	s.writeStatus()
 	for _, st := range s.states {
 		st.mu.Lock()
@@ -1493,24 +1497,32 @@ func (s *autoSupervisor) saveState() {
 	}
 }
 
-// loadState reads the checkpoint (a missing file is no state; a corrupt one is reported and ignored).
-func (s *autoSupervisor) loadState() autoSavedState {
+// loadState reads the checkpoint: a missing file is no state, and a corrupt or truncated one is an error (the start
+// refuses instead of replacing it with empty progress, which would walk already-killed bosses again).
+func (s *autoSupervisor) loadState() (autoSavedState, error) {
 	var saved autoSavedState
-	raw, err := os.ReadFile(filepath.Join(s.o.walkDir, autoStateFile))
+	path := filepath.Join(s.o.walkDir, autoStateFile)
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return saved, nil
+	}
 	if err != nil {
-		return saved
+		return saved, err
 	}
 	if err := json.Unmarshal(raw, &saved); err != nil || saved.Format != autoStateFormat {
-		s.event("", "state", "autopilot-state.json is not a readable checkpoint; starting without it")
-		return autoSavedState{}
+		return autoSavedState{}, fmt.Errorf("%s is not a readable checkpoint: fix or remove it (a start would otherwise re-walk met goals)", path)
 	}
-	return saved
+	return saved, nil
 }
 
 // reconcile loads the checkpoint and makes it agree with what is on disk: a goal the last run met before a crash is
 // advanced (not walked again), a live walk on the id's slot is adopted, and a slot that is not ours refuses the id.
-func (s *autoSupervisor) reconcile() {
-	saved := s.loadState()
+// An unreadable checkpoint is returned as an error and is never overwritten.
+func (s *autoSupervisor) reconcile() error {
+	saved, err := s.loadState()
+	if err != nil {
+		return err
+	}
 	byID := map[string]*autoSavedID{}
 	for i := range saved.IDs {
 		byID[saved.IDs[i].ID] = &saved.IDs[i]
@@ -1546,6 +1558,7 @@ func (s *autoSupervisor) reconcile() {
 		s.reconcileSlot(st, sv)
 	}
 	s.saveState()
+	return nil
 }
 
 // reconcileSlot reconciles one id's slot: a goal the saved run met is advanced, a live walk that is ours is adopted,

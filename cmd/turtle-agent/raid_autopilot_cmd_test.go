@@ -243,7 +243,9 @@ func (f *autoFixture) supervisorOpts(o autoOptions) *autoSupervisor {
 	f.t.Cleanup(s.close)
 	s.states = groupAutoTargets(targets)
 	s.initSeq()
-	s.reconcile()
+	if err := s.reconcile(); err != nil {
+		f.t.Fatal(err)
+	}
 	// Leave no walk or finish goroutine writing into the temp dir when the test's cleanup removes it.
 	f.t.Cleanup(func() { s.shutdown("signal") })
 	return s
@@ -1369,5 +1371,37 @@ func TestAutoLaunchFailureRetriesThenEscalates(t *testing.T) {
 	}
 	if !strings.Contains(f.statusFile(), "ESCALATE launch a 1") {
 		t.Fatalf("status.txt has no launch escalation:\n%s", f.statusFile())
+	}
+}
+
+// A corrupt (truncated) checkpoint fails closed: the start refuses with exit 2, names the file and says to fix or
+// remove it, and leaves the file untouched (a start must not replace it with empty progress).
+func TestAutoCorruptCheckpointRefusesToStart(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	path := filepath.Join(f.walk, autoStateFile)
+	truncated := []byte(`{"format":"tb-raid-autopilot-state","version":1,"ids":[{"id":"a","goal":1`)
+	if err := os.WriteFile(path, truncated, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	code := raidAutopilotCmd(context.Background(), []string{"--foreground", "--binary", f.stub, "--poll", "5ms", f.walk}, &out, &errOut)
+	if code != exitUsage {
+		t.Fatalf("exit %d, want %d (refuse the corrupt checkpoint)", code, exitUsage)
+	}
+	for _, want := range []string{path, "fix or remove it"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("the refusal does not name %q:\n%s", want, errOut.String())
+		}
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the corrupt checkpoint was removed: %v", err)
+	}
+	if !bytes.Equal(after, truncated) {
+		t.Fatalf("the corrupt checkpoint was overwritten:\n%s", after)
+	}
+	if args := f.args(); len(args) != 0 {
+		t.Fatalf("a walk was launched over a corrupt checkpoint:\n%s", strings.Join(args, "\n"))
 	}
 }
