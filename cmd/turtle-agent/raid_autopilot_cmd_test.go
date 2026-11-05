@@ -1207,6 +1207,48 @@ func TestAutoEscalatedCountsAsDoneAndFirstStatus(t *testing.T) {
 	}
 }
 
+// Review round 1: a removed targets line must not drop the state of an escalated id. Its ESCALATE line stays in
+// status.txt, finishAll still exits for a person, and a YIELD over that slot writes no YIELD-DONE.
+func TestAutoRemovedLineKeepsAnEscalatedID(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.target("z srv 2 zg-z full -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 2, 0, "bad --sql")
+	f.running("z-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a escalated", func() bool {
+		st := f.stateByID(s, "a")
+		if st == nil {
+			return false
+		}
+		_, escalated := runState(st)
+		return escalated
+	})
+	// a's line goes; z's keeps the file valid (an empty targets.txt is refused as unreadable).
+	path := filepath.Join(f.walk, autoTargetsFile)
+	if err := os.WriteFile(path, []byte("z srv 2 zg-z full -- zul_gurub --sql /zg.sql\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 5 {
+		s.tick(context.Background())
+		time.Sleep(2 * time.Millisecond)
+	}
+	if st := f.stateByID(s, "a"); st == nil {
+		t.Fatalf("the removed line dropped an escalated id:\n%s", f.events())
+	}
+	s.writeStatus()
+	if status := f.statusFile(); !strings.Contains(status, "ESCALATE") {
+		t.Fatalf("status.txt dropped the ESCALATE line:\n%s", status)
+	}
+	if code := s.finishAll(); code != exitAutoEscalated {
+		t.Fatalf("finishAll = %d, want %d", code, exitAutoEscalated)
+	}
+	s.shutdown("YIELD")
+	if _, err := os.Stat(filepath.Join(f.walk, autoYieldDone)); err == nil {
+		t.Fatalf("a YIELD wrote YIELD-DONE over an escalated slot:\n%s", f.events())
+	}
+}
+
 // M6: a YIELD-DONE from an earlier YIELD is removed at start.
 func TestAutoStaleYieldDoneRemovedAtStart(t *testing.T) {
 	f := newAutoFixture(t)

@@ -768,21 +768,53 @@ func (s *autoSupervisor) addState(st *autoState) {
 	s.statesMu.Unlock()
 }
 
-// dropRemoved removes the states whose targets.txt lines are gone and whose stop has finished. A stopped id of a STOP
-// file is kept (it owns a done line in status.txt); a removed line is not.
+// dropRemoved removes the states whose targets.txt lines are gone and whose stop has finished. Only an idle, done
+// state goes: an escalated or refused id stays in status.txt (and in finishAll's exit code and shutdown's slot check),
+// and so does a state whose slot is still leased — dropping it would lose the ESCALATE line and let a YIELD claim a
+// clean end over a slot that is not ours. A stopped id of a STOP file is kept too (it owns a done line in status.txt);
+// a removed line is not.
 func (s *autoSupervisor) dropRemoved() {
-	s.statesMu.Lock()
-	defer s.statesMu.Unlock()
-	kept := s.states[:0]
-	for _, st := range s.states {
+	ids := s.stateList()
+	kept := ids[:0]
+	for _, st := range ids {
 		st.mu.Lock()
-		drop := st.remove && (st.done || st.escalated || st.refused)
+		drop := st.remove && st.done && !st.escalated && !st.refused && st.run == nil
 		st.mu.Unlock()
-		if !drop {
-			kept = append(kept, st)
+		if drop && !s.stateSlotHeld(st) {
+			continue
 		}
+		kept = append(kept, st)
 	}
+	s.statesMu.Lock()
+	// Only the tick goroutine adds states (adoptPending), so the snapshot is the whole list.
 	s.states = kept
+	s.statesMu.Unlock()
+}
+
+// stateSlotHeld says the state's slot dir is still leased. true when it cannot be verified either: a removed state is
+// never dropped on a lease whose state is unknown (its slot may be in use by a walk we no longer watch).
+func (s *autoSupervisor) stateSlotHeld(st *autoState) bool {
+	st.mu.Lock()
+	out := st.lastOut
+	if st.last != nil && st.last.out != "" {
+		out = st.last.out
+	}
+	if st.run != nil && st.run.out != "" {
+		out = st.run.out
+	}
+	st.mu.Unlock()
+	if out == "" {
+		return false
+	}
+	slotDir := filepath.Join(out, "slot")
+	if _, err := os.Stat(slotDir); errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	held, err := s.leaseHeld(slotDir)
+	if err != nil {
+		return true
+	}
+	return held
 }
 
 // noteTargetsStat remembers the targets.txt the loaded targets came from.

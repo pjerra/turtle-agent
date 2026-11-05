@@ -2832,7 +2832,9 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   cleanly like `STOP-<id>` (its run stopped, its slot torn down), and an id whose goal lines changed is stopped and
   re-added from the new lines; an unchanged id keeps its goal, attempt, backoff and run. A new or changed id is
   numbered past the `<id>-<n>` out dirs already on disk, so its first run never reads an earlier attempt's
-  `summary.json`. An unreadable or invalid
+  `summary.json`. A removed line drops the state only when the id is idle and done: an escalated or refused id stays
+  (its `ESCALATE` line stays in `status.txt`, `finishAll` still exits 31, and a YIELD still writes no `YIELD-DONE`),
+  and so does an id whose slot is still leased (or whose lease cannot be verified). An unreadable or invalid
   file keeps the targets already loaded and logs one `targets` warning per distinct error (a half-written file is not
   a stop order).
 - **Instance cap.** `--instance-cap-per-account N` is passed to every raid-walk it starts; without the flag each walk
