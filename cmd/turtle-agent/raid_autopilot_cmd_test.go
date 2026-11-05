@@ -2232,3 +2232,92 @@ func TestAutoUnchangedGoalsRestoreTheDoneCheckpoint(t *testing.T) {
 		t.Fatalf("the restart did not restore the boss-dead goal:\n%s", f.events())
 	}
 }
+
+// Review round 2: a supervisor stopped between a STOP file's request and its finish (killed, or its teardown still
+// running) must finish the stop after a restart: the checkpoint's stopping state keeps the id stopped, never relaunched,
+// and the order file is consumed only then.
+func TestAutoRestoredStopFinishesTheStop(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	// The crashed supervisor requested the stop but died before its finish: the slot lease is still the stopped
+	// walk's (the teardown never ran) and nothing is launching on it.
+	f.lease("zg-a", "held")
+	out := filepath.Join(f.walk, "a-1")
+	if err := os.MkdirAll(filepath.Join(out, "slot"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "slot", "slot.json"), []byte(fmt.Sprintf(`{"server":"srv","slot":"1","holder":"zg-a","slots_path":%q}`, f.slotsPath)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "run.log"), []byte("19:46:05.696 TBM:RUN|zul_gurub|running|51/761|jeklik|boss|begin|fighting\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The checkpoint of a supervisor that was killed after it read STOP-a and before its finish: stopping, no run.
+	raw := fmt.Sprintf(`{"format":%q,"version":1,"ids":[{"id":"a","goal":0,"last_step":51,"attempt":1,"out_dir":%q,"stopping":true,"stop_why":"STOP-a"}]}`,
+		autoStateFormat, out)
+	if err := os.WriteFile(filepath.Join(f.walk, autoStateFile), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.walk, "STOP-a"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := f.supervisor()
+	tickUntil(t, s, "the restored stop to complete", func() bool {
+		done, _ := runState(s.states[0])
+		return done
+	})
+	st := s.states[0]
+	st.mu.Lock()
+	stopped := st.stopped
+	st.mu.Unlock()
+	if !stopped {
+		t.Fatalf("the restored stop did not mark the id stopped:\n%s", f.events())
+	}
+	if _, err := os.Stat(filepath.Join(f.walk, "STOP-a.done")); err != nil {
+		t.Fatalf("the completed stop did not consume STOP-a: %v\n%s", err, f.events())
+	}
+	if _, err := os.Stat(filepath.Join(f.walk, "STOP-a")); err == nil {
+		t.Fatalf("STOP-a stayed beside its .done copy:\n%s", f.events())
+	}
+	if launches := f.args(); len(launches) != 0 {
+		t.Fatalf("the restart relaunched a stopped id:\n%s", strings.Join(launches, "\n"))
+	}
+	if strings.Contains(f.events(), "ESCALATE") {
+		t.Fatalf("a stop in progress was refused:\n%s", f.events())
+	}
+	if status := f.statusFile(); !strings.Contains(status, "a goal=full stopped (STOP-a)") {
+		t.Fatalf("status.txt does not report the restored stop:\n%s", status)
+	}
+}
+
+// Review round 2: a STOP file is consumed when the stop completes, not when it is read. For an escalated id a person
+// owns, the order is refused: the file stays and one line says so (a stop the id cannot act on needs a person).
+func TestAutoStopFileOnAnEscalatedIDIsKept(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "a escalated", func() bool {
+		_, escalated := runState(s.states[0])
+		return escalated
+	})
+	if err := os.WriteFile(filepath.Join(f.walk, "STOP-a"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 5 {
+		s.tick(context.Background())
+		time.Sleep(2 * time.Millisecond)
+	}
+	if _, err := os.Stat(filepath.Join(f.walk, "STOP-a")); err != nil {
+		t.Fatalf("the refused STOP-a was consumed: %v\n%s", err, f.events())
+	}
+	if _, err := os.Stat(filepath.Join(f.walk, "STOP-a.done")); err == nil {
+		t.Fatalf("the refused STOP-a was renamed to .done:\n%s", f.events())
+	}
+	if got := strings.Count(f.events(), "STOP-a not applied: escalated, needs a person"); got != 1 {
+		t.Fatalf("%d refusal lines for STOP-a, want 1:\n%s", got, f.events())
+	}
+	if strings.Contains(f.events(), "STOP-a consumed") {
+		t.Fatalf("a refused STOP-a was logged as consumed:\n%s", f.events())
+	}
+}

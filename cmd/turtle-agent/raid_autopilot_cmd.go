@@ -211,6 +211,11 @@ type autoSupervisor struct {
 	// pending holds the states of target lines added (or changed) by a re-read: they are adopted once the old state
 	// of the same id is gone (its slot torn down).
 	pending []*autoState
+	// stopMu guards stopNoted: the tick goroutine reads the STOP files, and a finish goroutine consumes the
+	// file of a completed stop.
+	// stopNoted is the refused STOP files already logged: the person's file stays, so a tick must not log it again.
+	stopMu    sync.Mutex
+	stopNoted map[string]bool
 	// targetsMod/targetsSize are the targets.txt the loaded targets came from; targetsWarn is the last read error
 	// (logged once, and the loaded targets are kept meanwhile).
 	targetsMod  time.Time
@@ -1020,9 +1025,11 @@ func (s *autoSupervisor) tick(ctx context.Context) {
 }
 
 // checkStopFiles handles the per-raid stop files: <walk-dir>/STOP-<id> stops just that raid (its run stopped, its
-// slot torn down as a YIELD would, the id done and never relaunched). YIELD stays the whole-dir stop. A STOP file an
-// id acted on is renamed STOP-<id>.done, so a re-added id of the same name is not stopped by the order a person
-// already used (walk 39's re-added raid would have been stopped by its old file at the first tick).
+// slot torn down as a YIELD would, the id done and never relaunched). YIELD stays the whole-dir stop. The file stays
+// until the stop completes (finish, after the teardown; or at once for an id with no run), then it is renamed
+// STOP-<id>.done, so a re-added id of the same name is not stopped by the order a person already used (walk 39's
+// re-added raid would have been stopped by its old file at the first tick). A STOP for a person's id (escalated,
+// refused or done) is not applied: the file stays and one line says so.
 func (s *autoSupervisor) checkStopFiles() {
 	entries, err := os.ReadDir(s.o.walkDir)
 	if err != nil {
@@ -1032,33 +1039,94 @@ func (s *autoSupervisor) checkStopFiles() {
 	for _, st := range s.stateList() {
 		byID[st.id] = st
 	}
+	seen := map[string]bool{}
 	for _, e := range entries {
 		id, ok := strings.CutPrefix(e.Name(), "STOP-")
 		if !ok || id == "" || strings.HasSuffix(id, ".done") {
 			continue
 		}
+		seen[e.Name()] = true
 		st := byID[id]
 		if st == nil {
 			continue
 		}
-		s.requestStop(st, "STOP-"+id)
-		path := filepath.Join(s.o.walkDir, e.Name())
-		if err := os.Rename(path, path+".done"); err != nil {
-			s.event(st.id, "stop", fmt.Sprintf("STOP-%s could not be consumed: %v", id, err))
+		if s.requestStop(st, "STOP-"+id) {
 			continue
 		}
-		s.event(st.id, "stop", fmt.Sprintf("STOP-%s consumed (renamed STOP-%s.done)", id, id))
+		s.noteRefusedStop(e.Name(), st)
 	}
+	s.stopMu.Lock()
+	for name := range s.stopNoted {
+		if !seen[name] {
+			delete(s.stopNoted, name)
+		}
+	}
+	s.stopMu.Unlock()
+}
+
+// noteRefusedStop logs one refused STOP file once (the person's file stays across the ticks, and a tick must not
+// repeat the line).
+func (s *autoSupervisor) noteRefusedStop(name string, st *autoState) {
+	s.stopMu.Lock()
+	if s.stopNoted[name] {
+		s.stopMu.Unlock()
+		return
+	}
+	if s.stopNoted == nil {
+		s.stopNoted = map[string]bool{}
+	}
+	s.stopNoted[name] = true
+	s.stopMu.Unlock()
+	s.event(st.id, "stop", fmt.Sprintf("%s not applied: %s, needs a person", name, autoStateWord(st)))
+}
+
+// autoStateWord names the state a refused STOP found (the id is a person's, or its goals were already met).
+func autoStateWord(st *autoState) string {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	switch {
+	case st.escalated:
+		return "escalated"
+	case st.refused:
+		return "refused"
+	case st.done:
+		return "done"
+	}
+	return "not stopping"
+}
+
+// consumeStopFile renames an applied STOP-<id> to STOP-<id>.done. It is a no-op when there is no such file (a removed
+// targets line, or a stop the rule itself decided): only an order a person wrote is consumed.
+func (s *autoSupervisor) consumeStopFile(id string) {
+	path := filepath.Join(s.o.walkDir, "STOP-"+id)
+	if _, err := os.Stat(path); err != nil {
+		return
+	}
+	if err := os.Rename(path, path+".done"); err != nil {
+		s.event(id, "stop", fmt.Sprintf("STOP-%s could not be consumed: %v", id, err))
+		return
+	}
+	s.stopMu.Lock()
+	delete(s.stopNoted, "STOP-"+id)
+	s.stopMu.Unlock()
+	s.event(id, "stop", fmt.Sprintf("STOP-%s consumed (renamed STOP-%s.done)", id, id))
 }
 
 // requestStop stops one id cleanly: a run gets an AutoStop finish (the walk is stopped and the slot is torn down,
 // verified, exactly as a met goal's teardown), and an id with no run is done at once. An escalated or refused id is
-// left alone: a person owns it.
-func (s *autoSupervisor) requestStop(st *autoState, why string) {
+// left alone: a person owns it, so the order is refused (false) and the caller keeps its file. An id already stopping
+// is accepted: its finish consumes the file.
+func (s *autoSupervisor) requestStop(st *autoState, why string) bool {
 	st.mu.Lock()
-	if st.done || st.escalated || st.refused || st.stopping {
+	if st.done || st.escalated || st.refused {
 		st.mu.Unlock()
-		return
+		return false
+	}
+	if st.stopping {
+		// The stop is already in progress (the file is consumed when it completes) or was restored from the
+		// checkpoint: nothing to request twice.
+		st.mu.Unlock()
+		return true
 	}
 	st.stopping, st.stopWhy = true, why
 	r := st.run
@@ -1070,9 +1138,11 @@ func (s *autoSupervisor) requestStop(st *autoState, why string) {
 	st.mu.Unlock()
 	if r == nil {
 		s.event(st.id, "stop", why+": the id is done")
+		s.consumeStopFile(st.id)
 		s.saveState()
 		s.writeStatus()
 	}
+	return true
 }
 
 // tickState observes one id and either launches its next attempt or hands a decided finish to its own goroutine: a
@@ -1089,13 +1159,17 @@ func (s *autoSupervisor) tickState(st *autoState) {
 		due := !time.Now().Before(st.nextAt)
 		st.mu.Unlock()
 		switch {
-		case dead:
-			s.deadGoal(st)
 		case stopping:
-			// requestStop already marked it done; a state whose run was gone keeps the stop.
+			// requestStop already marked it done; a state whose run was gone (a stop restored from the checkpoint,
+			// or a finish that ran before the order was seen) keeps the stop, and the order file is consumed now.
 			st.mu.Lock()
 			st.done, st.stopped = true, true
 			st.mu.Unlock()
+			s.consumeStopFile(st.id)
+			s.saveState()
+			s.writeStatus()
+		case dead:
+			s.deadGoal(st)
 		case due:
 			s.preReadRows(st)
 			s.launch(st)
@@ -1107,6 +1181,11 @@ func (s *autoSupervisor) tickState(st *autoState) {
 	if r.escalated || r.finishing {
 		st.mu.Unlock()
 		return
+	}
+	// A stop restored from the checkpoint (the supervisor died between the order and the finish) whose run survived
+	// or was adopted still needs its finish: the run is stopped and the slot torn down now, not when the walk ends.
+	if st.stopping && r.pending == nil {
+		r.pending = &raidwalk.AutoDecision{Action: raidwalk.AutoStop, Reason: st.stopWhy}
 	}
 	if r.pending == nil {
 		obs := s.observe(st)
@@ -1226,6 +1305,7 @@ func (s *autoSupervisor) finish(st *autoState) {
 		st.placeFails = 0
 	}
 	var esc string
+	stopping := st.stopping
 	switch d.Action {
 	case raidwalk.AutoAdvance:
 		if st.current+1 < len(st.goals) {
@@ -1274,6 +1354,11 @@ func (s *autoSupervisor) finish(st *autoState) {
 	if d.Action == raidwalk.AutoStop && d.Escalate {
 		s.escalate(st, "stop", fmt.Sprintf("%s: %s", slot, d.Reason))
 		return
+	}
+	// The stop is complete only now, after the verified teardown: the order file is consumed then (not when it is
+	// read), so a restart mid-stop still finds the order.
+	if d.Action == raidwalk.AutoStop && stopping {
+		s.consumeStopFile(st.id)
 	}
 	s.saveState()
 	s.writeStatus()
@@ -2019,6 +2104,9 @@ type autoSavedID struct {
 	// goals were met. The checkpoint keeps them so a restart still reports the id as stopped (not as a met goal).
 	Stopped bool   `json:"stopped,omitempty"`
 	StopWhy string `json:"stop_why,omitempty"`
+	// Stopping says a STOP file (or a removed line) asked this id to stop and the stop is not complete: a restart
+	// finishes it instead of relaunching the run it was stopping.
+	Stopping bool `json:"stopping,omitempty"`
 	// Fingerprint is the sha256 of the id's ordered goal lines this checkpoint was written for (empty in a checkpoint
 	// from before it, which is taken as the same lines). A start restores the goal and step progress only when it
 	// matches targets.txt now.
@@ -2046,7 +2134,7 @@ func (s *autoSupervisor) saveState() {
 		e := autoSavedID{
 			ID: st.id, Goal: st.current, GoalsDone: st.current,
 			Done: st.done, Escalated: st.escalated, Reuse: st.nextReuse,
-			Stopped: st.stopped, StopWhy: st.stopWhy,
+			Stopped: st.stopped, StopWhy: st.stopWhy, Stopping: st.stopping,
 			Fingerprint: autoTargetFingerprint(st),
 		}
 		if st.current < len(st.goals) {
@@ -2176,6 +2264,7 @@ func (s *autoSupervisor) reconcile() error {
 			}
 			st.done, st.escalated = sv.Done, sv.Escalated
 			st.stopped, st.stopWhy = sv.Stopped, sv.StopWhy
+			st.stopping = sv.Stopping
 			st.nextReuse = sv.Reuse
 			if at, err := time.Parse(time.RFC3339, sv.NextAt); err == nil {
 				st.nextAt = at
@@ -2202,12 +2291,16 @@ func (s *autoSupervisor) reconcile() error {
 }
 
 // reconcileSlot reconciles one id's slot: a goal the saved run met is advanced, a live walk that is ours is adopted,
-// anything else on the slot refuses the id (H2: never launch on a slot with a live walk or a lease).
+// anything else on the slot refuses the id (H2: never launch on a slot with a live walk or a lease). An id whose
+// checkpoint says a stop is in progress is never launched again: its live walk (if any) is still adopted so the stop
+// tears it down, but a lease left by the crashed stop or a foreign holder does not refuse it (a person's stop is not
+// a launch decision).
 func (s *autoSupervisor) reconcileSlot(st *autoState, sv *autoSavedID) {
 	st.mu.Lock()
 	t := st.goals[st.current].target
 	out := st.lastOut
 	reuse := st.nextReuse
+	stopping := st.stopping
 	if st.last != nil && st.last.out != "" {
 		out = st.last.out
 	}
@@ -2223,6 +2316,9 @@ func (s *autoSupervisor) reconcileSlot(st *autoState, sv *autoSavedID) {
 	}
 	holder, held, err := s.slotLease(t.Server, t.Slot, slotsPath)
 	if err != nil {
+		if stopping {
+			return
+		}
 		s.refuse(st, "the slot's lease cannot be verified: "+err.Error())
 		return
 	}
@@ -2232,6 +2328,10 @@ func (s *autoSupervisor) reconcileSlot(st *autoState, sv *autoSavedID) {
 	}
 	live := pid > 0 && processAlive(pid)
 	if !held && !live {
+		if stopping {
+			// Nothing runs: the stop completes at once (tickState marks it stopped and consumes the order).
+			return
+		}
 		// Nothing runs on the slot. A saved attempt whose summary shows the goal met is advanced instead of walked
 		// again (a crash between the summary and the checkpoint).
 		s.reconcileSummary(st, sv)
@@ -2247,6 +2347,9 @@ func (s *autoSupervisor) reconcileSlot(st *autoState, sv *autoSavedID) {
 		st.last = nil
 		st.mu.Unlock()
 		s.event(st.id, "adopt", fmt.Sprintf("watching the live walk pid %d in %s (goal %s)", pid, out, t.Goal))
+		return
+	}
+	if stopping {
 		return
 	}
 	why := fmt.Sprintf("the slot is not free: lease %s", autoLeaseWords(holder, held))
