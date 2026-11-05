@@ -34,12 +34,11 @@ const (
 	// gmClearRounds is how many sweeps are made over the members still unseen: a member seen (alive or dead) in round one is not
 	// visited again, so a sweep where every member showed costs one round, not two.
 	gmClearRounds = 2
-	// gmClearSettlePoll, gmClearSettleMax and gmClearSettleRetry replace the fixed 2 s the commander used to wait after every `.go`:
-	// the units are read every gmClearSettlePoll and the read is used the moment every unseen member near the stop shows, or after
-	// gmClearSettleMax (gmClearSettleRetry in round two) when one does not (a corpse that already despawned never shows).
-	gmClearSettlePoll  = 250 * time.Millisecond
-	gmClearSettleMax   = 2 * time.Second
-	gmClearSettleRetry = time.Second
+	// gmClearSettlePoll and gmClearSettleMax replace the fixed 2 s the commander used to wait after every `.go`: the units are read
+	// every gmClearSettlePoll and the read is used the moment every unseen member near the stop shows, or after gmClearSettleMax
+	// when one does not (a corpse that already despawned never shows), in both rounds.
+	gmClearSettlePoll = 250 * time.Millisecond
+	gmClearSettleMax  = 2 * time.Second
 	// gmClearDeathWait and gmClearDeathPoll are how long the kills of one batch are given to show in the units' frames, and how
 	// often they are read (one `units` read for the whole batch, not one `unit` read per kill).
 	gmClearDeathWait = 5 * time.Second
@@ -458,9 +457,6 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 func (w *walk) gmClearSweep(ctx context.Context, states []*gmClearPackState, deadline time.Time) (budgetHit bool, err error) {
 	for round := 0; round < gmClearRounds; round++ {
 		max := gmClearSettleMax
-		if round > 0 {
-			max = gmClearSettleRetry
-		}
 		visited := map[*gmClearMember]bool{}
 		for {
 			// The next stop: the first member (pack order, then spawn guid) that no read has shown and no stop of this round covered.

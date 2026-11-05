@@ -480,6 +480,57 @@ func TestPlaceGMClearNothingInViewIsPartial(t *testing.T) {
 	}
 }
 
+// Members reach the object store a moment after a `.go`: here five of the nine show at the first settle read of a stop, and the other four
+// two polls (500 ms) later. The settle waits for them, so all nine are killed and none is reported not seen.
+func TestPlaceGMClearSettleWaitsForLateMembers(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
+	if len(guids) != 9 || len(pack.Stops()) != 1 {
+		t.Fatalf("the test pack must be one stop of nine members, has %d members and %d stops", len(guids), len(pack.Stops()))
+	}
+	// The polls are counted from the commander's latest `.go`: every settle read after one is a poll of that stop.
+	goSeen, polls := 0, 0
+	f.agent.unitsFn = func(int) []objects.Unit {
+		if n := gmClearGoCount(f); n != goSeen {
+			goSeen, polls = n, 0
+		}
+		polls++
+		shown := guids
+		if polls < 3 {
+			shown = guids[:5]
+		}
+		return gmClearView(f, pack, shown, func(g packet.GUID) bool {
+			f.agent.mu.Lock()
+			defer f.agent.mu.Unlock()
+			return f.agent.killed[g]
+		})
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	kills := 0
+	for _, l := range f.agentLog() {
+		if strings.HasPrefix(l, "gm_kill ") {
+			kills++
+		}
+	}
+	if kills != len(guids) {
+		t.Fatalf("%d kill lines, want %d (every member)", kills, len(guids))
+	}
+	sum := f.summary()
+	if sum.GMClearPartial || len(sum.GMClear) != len(guids) {
+		t.Fatalf("partial %v, gm_clear %+v", sum.GMClearPartial, sum.GMClear)
+	}
+	for _, e := range sum.GMClear {
+		if !e.Killed || e.Reason == raidwalk.GMClearNotSeen {
+			t.Errorf("entry %+v", e)
+		}
+	}
+}
+
 // Walk 37 raid e (ZG walk 37): the supervisor's restart kept --gm-clear and the
 // tool ran, but run.log held no gm-clear: line for the group, so the report
 // could not tell whether the flag acted on this placement. Every named group
