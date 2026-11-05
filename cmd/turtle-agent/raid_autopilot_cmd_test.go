@@ -846,6 +846,12 @@ func TestAutoStopFileIsNotAMetGoal(t *testing.T) {
 	f.running("a-1", 30)
 	s := f.supervisor()
 	tickUntil(t, s, "a launched", func() bool { return len(f.args()) >= 1 })
+	// The stub logs its argv before it writes its slot files: wait for slot.json, or the STOP's teardown cannot verify
+	// the lease and escalates (a flake, not a stop bug).
+	tickUntil(t, s, "a's slot.json written", func() bool {
+		_, err := os.Stat(filepath.Join(f.walk, "a-1", "slot", "slot.json"))
+		return err == nil
+	})
 	if err := os.WriteFile(filepath.Join(f.walk, "STOP-a"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
