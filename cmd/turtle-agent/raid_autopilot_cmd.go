@@ -1083,8 +1083,11 @@ func (s *autoSupervisor) finish(st *autoState) {
 	r.lastStep = lastStep
 	st.last = r
 	g := &st.goals[st.current]
-	// Progress resets the backoff; a run that reached no further step grows it (M1).
-	if lastStep > g.bestStep {
+	// Progress resets the backoff; a run that reached no further step grows it (M1). A hire-pool wait is neither:
+	// the pool refused the hires before the run started, so it never counts as a failed attempt (walk 39).
+	if d.Action == raidwalk.AutoHirePoolWait {
+		g.noProgress = 0
+	} else if lastStep > g.bestStep {
 		g.bestStep = lastStep
 		g.noProgress = 0
 	} else {
@@ -1132,6 +1135,14 @@ func (s *autoSupervisor) finish(st *autoState) {
 		}
 		st.nextAt = time.Now().Add(wait)
 		esc = fmt.Sprintf("restart: %s; next %s after %s", d.Reason, s.nextPlacement(d.Reuse), wait.Round(time.Second))
+	case raidwalk.AutoHirePoolWait:
+		st.last.reuse = true
+		wait := d.Backoff
+		if s.o.settle > wait {
+			wait = s.o.settle
+		}
+		st.nextAt = time.Now().Add(wait)
+		esc = fmt.Sprintf("hire-pool-wait: %s; next same instance after %s", d.Reason, wait.Round(time.Second))
 	}
 	st.mu.Unlock()
 
@@ -1371,6 +1382,7 @@ func (s *autoSupervisor) observe(st *autoState) raidwalk.AutoObservation {
 		return o
 	}
 	o.StepsReached, o.StepsTotal, o.EndReason = sum.StepsReached, sum.StepsTotal, sum.EndReason
+	o.HirePoolWait = raidwalk.HirePoolRefused(sum.EndReason)
 	if sum.ExitCode != 0 {
 		o.ExitCode = sum.ExitCode
 	}

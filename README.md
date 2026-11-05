@@ -2849,7 +2849,10 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   would only burn the hourly budget) stop that id with an `ESCALATE` line and no retry, and so does exit 15 three
   times (the slot's lease is held by another holder). Three consecutive placement failures on one id escalate it as
   well. Other exits re-place with a backoff of 20 s, 1 m, 2 m, 5 m and then 10 m per consecutive attempt that
-  reached no further step; a step further resets it. Exit 26 keeps its cap wait and re-places later. A **launch**
+  reached no further step; a step further resets it. A hire the server's shared pool refused ("No mercenary of that
+  kind is available right now": several big raids on one server starve each other) is not such a failure: the raid
+  waits 5 minutes (`AutoHirePoolWaitBackoff`), logs `hire-pool-wait`, re-places the same instance, and neither the
+  backoff nor the escalation counts move. There is no cross-raid scheduling beyond that wait. Exit 26 keeps its cap wait and re-places later. A **launch**
   that cannot start (the attempt log or the child) is not completion: the goal stays, the retry uses the same
   backoff (20 s at first), and the third consecutive launch failure escalates the id. A supervisor whose every id
   met its goals says `every target's goals are met` and exits 0; one with an escalated id ends with

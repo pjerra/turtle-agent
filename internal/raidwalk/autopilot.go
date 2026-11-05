@@ -23,7 +23,16 @@ const (
 	AutoAdvance = "advance"
 	// AutoStop: the target cannot run (bad flags); stop supervising it instead of re-placing in a loop.
 	AutoStop = "stop"
+	// AutoHirePoolWait: the server's shared hire pool refused this raid ("No mercenary of that kind is available right
+	// now"); wait AutoHirePoolWaitBackoff and re-place the same instance. Walk 39: several big raids on one server
+	// starved each other, and each refusal counted as a no-progress attempt (m5's rest grew to 10m, m1's hit 20s then
+	// 1m, and the failures moved the ids toward ESCALATE).
+	AutoHirePoolWait = "hire-pool-wait"
 )
+
+// AutoHirePoolWaitBackoff is how long a raid backs off after the shared hire pool refused its hires: enough for the
+// other raids of the server to finish hiring, and no cross-raid scheduling beyond it.
+const AutoHirePoolWaitBackoff = 5 * time.Minute
 
 // AutoGoal is one target's goal: the plan walked whole, a leg stopped at, or one boss killed.
 type AutoGoal struct {
@@ -238,11 +247,19 @@ type AutoObservation struct {
 	// StallAfter is the earliest the stall rule may fire: a run that logged a legitimate wait (the instance cap's
 	// "earliest free time") is not stalled before it. Zero: the usual rule.
 	StallAfter time.Time
+	// HirePoolWait says the end was the shared hire pool's refusal (no mercenary of that kind): a wait, not a failure.
+	HirePoolWait bool
 }
 
 // PlacementFailed says the run never started: it ended in the place phase.
 func (o AutoObservation) PlacementFailed() bool {
 	return o.StepsReached == 0 && strings.HasPrefix(strings.TrimSpace(o.EndReason), "place:")
+}
+
+// HirePoolRefused says a run's end reason is the server's shared hire pool refusing a hire ("No mercenary of that
+// kind is available right now", a partial hire's TBM:HIRE_RAID line; walk 39: m5 03:58 and 04:12, m1 04:20).
+func HirePoolRefused(reason string) bool {
+	return strings.Contains(strings.ToLower(reason), "no mercenary of that kind")
 }
 
 // RunStopped says the walk's own run stop ended the run (walk 37's b3-r1: exit 0, no boss kill).
@@ -381,6 +398,12 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 	}
 	if GoalAchieved(r.Goal, o) {
 		return AutoDecision{Action: AutoAdvance, Reason: "goal met: " + r.Goal.String()}
+	}
+	if o.HirePoolWait {
+		return AutoDecision{
+			Action: AutoHirePoolWait, Reuse: true, Backoff: AutoHirePoolWaitBackoff,
+			Reason: "the shared hire pool has no mercenary of that kind: another raid of the server holds them",
+		}
 	}
 	if o.ExitCode == 2 {
 		return AutoDecision{Action: AutoStop, Escalate: true, Reason: "exit 2: the walk refused its arguments (" + shortReason(o.EndReason) + ")"}

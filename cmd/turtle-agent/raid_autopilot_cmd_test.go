@@ -866,6 +866,43 @@ func TestAutoInvalidTargetsKeepTheOldOnes(t *testing.T) {
 	}
 }
 
+// Walk 39: the shared hire pool refused one raid while others hired ("No mercenary of that kind is available right
+// now"; m5 and m1 in EVENTS.txt). The raid backs off 5 minutes and the refusal is not a failed attempt: repeated
+// refusals never grow the backoff toward 10 minutes nor escalate the id.
+func TestAutoHirePoolWaitBacksOffWithoutCountingAFailure(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:11380 -- zul_gurub --sql /zg.sql")
+	reason := "hire 2 priest:healer: TBM:HIRE_RAID|partial|1|2|0|1|0|2|0|No mercenary of that kind is available right now. Try again"
+	for n := 1; n <= 4; n++ {
+		f.attempt(fmt.Sprintf("a-%d", n), 18, 0, reason)
+	}
+	s := f.supervisor()
+	for n := 1; n <= 4; n++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", n), func() bool { return len(f.args()) >= n })
+		tickUntil(t, s, fmt.Sprintf("attempt %d to finish", n), func() bool {
+			st := s.states[0]
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			return st.run == nil
+		})
+		st := s.states[0]
+		st.mu.Lock()
+		wait := time.Until(st.nextAt)
+		escalated := st.escalated
+		st.mu.Unlock()
+		if escalated || strings.Contains(f.events(), "ESCALATE") {
+			t.Fatalf("refusal %d escalated the id:\n%s", n, f.events())
+		}
+		if wait < 4*time.Minute || wait > 6*time.Minute {
+			t.Fatalf("refusal %d backed off %s, want 5m", n, wait.Round(time.Second))
+		}
+		clearWait(st)
+	}
+	if got := strings.Count(f.events(), "hire-pool-wait: "); got != 4 {
+		t.Fatalf("%d hire-pool-wait lines, want 4:\n%s", got, f.events())
+	}
+}
+
 // The state file is written on every transition; a supervisor killed after goal 1 was met does not walk it again.
 func TestAutoStateSurvivesASupervisorKill(t *testing.T) {
 	f := newAutoFixture(t)

@@ -289,3 +289,28 @@ func TestAutoGoalBossMatchesTheBossOtherEntry(t *testing.T) {
 		t.Fatal("a Zulian Guardian's death meets the goal boss:14509")
 	}
 }
+
+// Walk 39: several big raids on one server starved each other of hires ("No mercenary of that kind is available
+// right now", m5 at 03:58/04:12, m1 at 04:20 and t1/t3 in their own dirs), and each refusal counted as a no-progress
+// attempt, growing the backoff toward 10 minutes and the ESCALATE thresholds. The refusal is a 5-minute pool wait
+// for that raid, not a failure.
+func TestAutoHirePoolWaitBacksOffFiveMinutes(t *testing.T) {
+	o := AutoObservation{
+		Exited: true, ExitCode: 18, StepsReached: 0, StepsTotal: 733,
+		EndReason: "hire 2 priest:healer: TBM:HIRE_RAID|partial|1|2|0|1|0|2|0|No mercenary of that kind is available right now. Try again",
+	}
+	if !HirePoolRefused(o.EndReason) {
+		t.Fatalf("the evidence's refusal was not read: %q", o.EndReason)
+	}
+	o.HirePoolWait = true
+	d := DecideAutoAction(o, AutoRunState{Goal: AutoGoal{Kind: "boss", Boss: 11380}, FastFailures: 4}, autoNow, time.Hour)
+	if d.Action != "hire-pool-wait" {
+		t.Fatalf("action %q, want hire-pool-wait (%+v)", d.Action, d)
+	}
+	if d.Backoff != 5*time.Minute || d.Escalate {
+		t.Fatalf("decision %+v, want a 5m backoff and no escalate", d)
+	}
+	if d.Action == AutoStop {
+		t.Fatal("a hire-pool wait stopped the id")
+	}
+}
