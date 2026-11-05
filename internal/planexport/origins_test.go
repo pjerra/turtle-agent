@@ -131,7 +131,7 @@ func TestSQLUnchangedByOrigins(t *testing.T) {
 		plan string
 		sha  string
 	}{
-		{"zul_gurub", "a3ea6eb75dfd6ffda43d549520e7ee38b39c3283a21dddd5774511e2ec5b0cae"}, // merge of origin/dev (#409) with walk 37 on the branch, 14826 out of cc_priority; walk 36: the honour guard is pulled first from -11562 -1306, the two north packs are one 8-body stand pull, the -11603 -1229 pull beside the respawn pit is dropped, and the boss stand is -11536.8 -1261.5; the venoxis group 9 stand routes south of the boss
+		{"zul_gurub", "ff505ce5a2f4d8d39a96aea3c7c8b70cd60d0bc042d75e3c4e22e453e518eddf"}, // walk 39: the Jeklik leg's five moving Bat Riders (49147/49155/49189/49185/49130) are patrol stand pulls, F1 from -12080 -1461, the west camps split into the south Headhunter camp (3), F5 (6) and the north camp + F6 (11). merge of origin/dev (#409) with walk 37 on the branch, 14826 out of cc_priority; walk 36: the honour guard is pulled first from -11562 -1306, the two north packs are one 8-body stand pull, the -11603 -1229 pull beside the respawn pit is dropped, and the boss stand is -11536.8 -1261.5; the venoxis group 9 stand routes south of the boss
 		{"onyxias_lair", "142c1d58928ad1efd9aca2b773c4762e2ddcbae05c308540080a1fedd6e3b38e"},
 	} {
 		p, err := dungeon.Load(filepath.Join("..", "..", "dungeons", c.plan+".json"))
