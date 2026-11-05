@@ -271,6 +271,11 @@ func raidAutopilotCmd(ctx context.Context, args []string, stdout, stderr io.Writ
 	s.states = groupAutoTargets(targets)
 	s.noteTargetsStat()
 	s.initSeq()
+	// The resume rows are read before the loop: a restart's step adjustment must not parse a migration while it
+	// holds the id's state mutex (a YIELD stops every id through it).
+	for _, t := range targets {
+		s.targetRows(t)
+	}
 	// A YIELD-DONE from an earlier YIELD is stale at this start (M6): this run writes its own only if a YIELD comes.
 	_ = os.Remove(filepath.Join(o.walkDir, autoYieldDone))
 	if err := s.reconcile(); err != nil {
