@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
@@ -124,24 +123,14 @@ func TestZulGurubArlokkLegRoute(t *testing.T) {
 	rows := zgArlokkRows(t, p, pl)
 	pairs := zgArlokkPairs(t, rows, pl)
 
-	// The last pull row ends the pull route; the gong step and the boss follow it (the arena descent is checked below as a
-	// complete path only: it is one object-bound walk the run leader makes itself, and no plan row may carry a via list).
-	lastPull := len(pairs) - 1
-	for i := len(pairs) - 1; i >= 0; i-- {
-		if strings.Contains(pairs[i].to, " (pull ") {
-			lastPull = i
-			break
-		}
-	}
+	// Every pair is checked, the last pull->stand hop and the arena descent included: the gong step's stand and the boss
+	// approach carry the descent's via points, so the run leader walks no uncut detour of its own.
 	total := 0.0
-	for i, pr := range pairs {
+	for _, pr := range pairs {
 		total += pr.length
 		if pr.err != nil || pr.path.Status != navmesh.Complete {
 			t.Errorf("%s -> %s: no complete navmesh path: %v (%s)", pr.from, pr.to, pr.err, pr.path.Reason)
 			continue
-		}
-		if i > lastPull {
-			continue // the gong's arena walk: complete is the rule, the ratio is the run leader's own navmesh
 		}
 		sd := zgArlokkDist3(pr.a, pr.b)
 		if pr.length > 1.5*sd {
@@ -190,8 +179,14 @@ func TestZulGurubArlokkLegRoute(t *testing.T) {
 	if open < 0 {
 		t.Fatalf("no gong open row 180526")
 	}
-	if open < 0 || open != len(rows)-3 {
-		t.Errorf("the gong 180526 is row %d of %d, want the open row just before the boss approach and the boss", open+1, len(rows))
+	// The gong is opened right after the last pull; the boss approach's arena descent and the boss follow it.
+	for i := open + 1; i < len(rows)-1; i++ {
+		if rows[i].Kind != planexport.KindMove || rows[i].Comment != "boss approach" {
+			t.Errorf("row %d (%s %q) stands between the gong 180526 (row %d) and the boss, want only the boss approach", i+1, rows[i].Kind, rows[i].Comment, open+1)
+		}
+	}
+	if open+1 >= len(rows) {
+		t.Errorf("the gong 180526 is the last row")
 	}
 }
 
