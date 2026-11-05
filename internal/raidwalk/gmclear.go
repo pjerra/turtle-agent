@@ -2,6 +2,8 @@ package raidwalk
 
 import (
 	"fmt"
+	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -114,6 +116,11 @@ type GMClearPack struct {
 // GMClearStopYd is how far a member may stand from a visit stop and still be inside the commander's view and read radius there.
 const GMClearStopYd = 100
 
+// GMPatrolReachYd is how far a patrol loop (or a spawn of a patrol entry) may stand from a pull row's point and still be
+// that row's patroller. A patroller walks its loop: its spawn may lie outside the row's radius while the loop comes by the
+// pull. --gm-clear clears it too, so a cleared leg does not wait at the stand for a patrol that is already dead.
+const GMPatrolReachYd = 30
+
 // Stops are the points the commander visits to see every member: a member within GMClearStopYd (2D) of an earlier stop is covered by
 // it, else it gets a stop of its own, taken in spawn-guid order so the list is the same every time. A pack that fits one view has one
 // stop (its first member's spawn); a pack wider than the view has several, each at a member.
@@ -204,33 +211,179 @@ func PlanGMClear(rows planexport.Rows, world *worldspawn.World, specs []GMClearS
 		for _, t := range targets {
 			row := rows.Steps[t.row]
 			// The step number is the row's place in (leg, seq) order plus one, as the server numbers it; the rows slice is in that order.
-			packs := trashcheck.ClearedPacks(world, row)
-			if len(packs) == 0 {
-				warnings = append(warnings, fmt.Sprintf("gm-clear: WARN: skipped leg %s group %s (step %d): the world export holds no spawn of its entries near the row; the walk goes on without it", name, t.group, t.row+1))
-				continue
-			}
-			for _, p := range packs {
+			n := 0
+			for _, p := range trashcheck.ClearedPacks(world, row) {
 				if seen[p.ID] {
 					continue
 				}
 				seen[p.ID] = true
-				members := map[uint64]uint32{}
-				positions := map[uint64]dungeon.Point{}
-				for _, g := range p.Members {
-					for _, s := range world.Spawns {
-						if s.GUID == g {
-							members[g] = s.Entry
-							positions[g] = s.Pos
-							break
-						}
-					}
-				}
+				members, positions := gmMemberMaps(world, p.Members)
 				out = append(out, GMClearPack{Leg: name, Group: t.group, Step: t.row + 1, ID: p.ID,
 					Centroid: p.Centroid, Radius: p.Radius, Members: members, Positions: positions})
+				n++
+			}
+			// The row's patrols: a patroller's spawn may stand outside the row's radius, but its loop comes by the pull.
+			patrols, pw, err := gmPatrolPacks(world, row, name, t.group, t.row+1, seen)
+			if err != nil {
+				return nil, nil, err
+			}
+			warnings = append(warnings, pw...)
+			out = append(out, patrols...)
+			n += len(patrols)
+			if n == 0 {
+				warnings = append(warnings, fmt.Sprintf("gm-clear: WARN: skipped leg %s group %s (step %d): the world export holds no spawn of its entries near the row; the walk goes on without it", name, t.group, t.row+1))
 			}
 		}
 	}
 	return out, warnings, nil
+}
+
+// gmMemberMaps reads a pack's members: spawn guid -> entry and spawn point.
+func gmMemberMaps(world *worldspawn.World, guids []uint64) (map[uint64]uint32, map[uint64]dungeon.Point) {
+	members := map[uint64]uint32{}
+	positions := map[uint64]dungeon.Point{}
+	for _, g := range guids {
+		for _, s := range world.Spawns {
+			if s.GUID == g {
+				members[g] = s.Entry
+				positions[g] = s.Pos
+				break
+			}
+		}
+	}
+	return members, positions
+}
+
+// gmPatrolPacks is the world patrol a pull row waits for: the one the plan's patrol names, never one that merely shares
+// its entry. StepRow.PatrolSource is the plan's source string (dungeon.Patrol.Source); when it names a creature_movement
+// guid the patrol is the world loop of that guid (a spawn's own loop, or a template loop of the same guid), and when it
+// names none the patrol is the world loop whose path is the plan's, point for point. The row's entry and radius play no
+// part: several patrols share an entry (ZG's 11352 walks at Jeklik's stair, at Arlokk's and at Mandokir's), so an entry
+// and distance match cleared another leg's patrol. A row whose plan names no patrol it can find is a warning, not a
+// failure: its own packs are still cleared and the walk goes on.
+func gmPatrolPacks(world *worldspawn.World, row planexport.StepRow, leg, group string, step int, seen map[uint64]bool) ([]GMClearPack, []string, error) {
+	if len(row.PatrolEntries) == 0 && row.PatrolSource == "" && len(row.PatrolPath) == 0 {
+		return nil, nil, nil
+	}
+	if world == nil {
+		return nil, nil, fmt.Errorf("gm-clear: leg %s group %s (step %d) names a patrol (%q) but there is no world export", leg, group, step, row.PatrolSource)
+	}
+	guid, hasGUID := gmPatrolGUID(row.PatrolSource)
+	// The anchor: the world loop the plan's source names, or (when it names no guid) the loop that is the plan's path.
+	anchor := -1
+	for i := range world.Patrols {
+		p := &world.Patrols[i]
+		if len(p.Path) == 0 {
+			continue
+		}
+		if hasGUID {
+			if slices.Contains(p.SpawnGUIDs, guid) {
+				anchor = i
+				break
+			}
+			if g, ok := gmPatrolGUID(p.Source); ok && g == guid {
+				anchor = i
+				break
+			}
+			continue
+		}
+		if len(row.PatrolPath) > 0 && gmSamePath(p.Path, row.PatrolPath) {
+			anchor = i
+			break
+		}
+	}
+	var out []GMClearPack
+	var warnings []string
+	if anchor < 0 {
+		what := fmt.Sprintf("source %q", row.PatrolSource)
+		if !hasGUID {
+			what = fmt.Sprintf("%d waypoints", len(row.PatrolPath))
+		}
+		warnings = append(warnings, fmt.Sprintf("gm-clear: WARN: leg %s group %s (step %d): no world patrol matches the plan's patrol (%s, entries %v); it is not cleared",
+			leg, group, step, what, row.PatrolEntries))
+		return out, warnings, nil
+	}
+	// The anchor's loop is the loop its formation walks: every world patrol on the same path walks it too (the formation's
+	// followers carry their own movement rows in some exports, or are merged into the leader's patrol in others).
+	for i := range world.Patrols {
+		p := &world.Patrols[i]
+		if len(p.Path) == 0 || !gmSamePath(p.Path, world.Patrols[anchor].Path) {
+			continue
+		}
+		guids := append([]uint64(nil), p.SpawnGUIDs...)
+		members, positions := gmMemberMaps(world, guids)
+		if len(members) == 0 {
+			continue
+		}
+		id := uint64(math.MaxUint64)
+		for _, g := range guids {
+			if _, ok := members[g]; ok && g < id {
+				id = g
+			}
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, GMClearPack{Leg: leg, Group: group, Step: step, ID: id,
+			Centroid: p.Path[0], Radius: float32(row.Radius), Members: members, Positions: positions})
+	}
+	return out, warnings, nil
+}
+
+// gmPatrolGUID reads the creature_movement (or spawn) guid a plan patrol's source names: the first number in the string
+// ("creature_movement 91493 (27 points...)", "creature_movement guid 2574092", "creature_movement of spawn 155626",
+// "spawn 88074", or the bare guid). A template loop's source names its entry instead, not a spawn: ok is false then.
+func gmPatrolGUID(source string) (uint64, bool) {
+	s := strings.ToLower(source)
+	if strings.Contains(s, "creature_movement_template") {
+		return 0, false
+	}
+	i := strings.IndexFunc(s, func(r rune) bool { return r >= '0' && r <= '9' })
+	if i < 0 {
+		return 0, false
+	}
+	j := i
+	for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+		j++
+	}
+	n, err := strconv.ParseUint(s[i:j], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// gmSamePath says two patrol loops are the same loop: as many points, each within gmSamePathYd of the other's (the plan's
+// points are the export's, so this is a rounding tolerance, not a similarity test).
+func gmSamePath(a, b []dungeon.Point) bool {
+	if len(a) != len(b) || len(a) == 0 {
+		return false
+	}
+	for i := range a {
+		dx, dy, dz := float64(a[i].X-b[i].X), float64(a[i].Y-b[i].Y), float64(a[i].Z-b[i].Z)
+		if math.Sqrt(dx*dx+dy*dy+dz*dz) > gmSamePathYd {
+			return false
+		}
+	}
+	return true
+}
+
+// gmSamePathYd is how far apart two points of a "same path" pair may lie: the plan writes the export's numbers, rounded.
+const gmSamePathYd = 0.05
+
+func gmSpawn(w *worldspawn.World, guid uint64) (worldspawn.Spawn, bool) {
+	for _, s := range w.Spawns {
+		if s.GUID == guid {
+			return s, true
+		}
+	}
+	return worldspawn.Spawn{}, false
+}
+
+func gmDist2(a, b dungeon.Point) float64 {
+	dx, dy := float64(a.X-b.X), float64(a.Y-b.Y)
+	return math.Hypot(dx, dy)
 }
 
 // SpawnGUID is the DB spawn guid of a creature's world guid: its low 24 bits (ObjectGuid.h: high, entry, counter), the number the world

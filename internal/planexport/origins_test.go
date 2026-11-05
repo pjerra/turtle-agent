@@ -131,7 +131,7 @@ func TestSQLUnchangedByOrigins(t *testing.T) {
 		plan string
 		sha  string
 	}{
-		{"zul_gurub", "a59f74d860ee6c8585a17a7625d90263528d95f464e84977625c6895f103598b"}, // review round 2: the Jin'do boss-row fold is undone (the guard, the north camp and the two lone mistresses are their own pull groups again, the corridor's 49714 row keeps max_bodies 9), the 49363 south approach point and the 49185 bat pack stay; walk 38: the 49363 stand and Jeklik's 49131/49135 patrol split
+		{"zul_gurub", "5d59de0cfa3a73bf9e67ee9906c1d5c03b3e9c8f92d186b286c9da8f3a77f73c"}, // combined 2026-11-05: walk 38's Jin'do hall staging (49363 stand, 1173082 plain centroid, the guard and north camp stands, the lone mistresses with west approaches), its review round 2 (the fold is undone: the guard, the north camp and the two lone mistresses are their own pull groups again, the corridor's 49714 row keeps max_bodies 9) and Jeklik's 49131/49135 patrol split; the Arlokk leg's loop order, the ledge's stands, the one-ascent temple walk and the arena descent in the gong's rows; walk 37's dropped -11603 -1229 pull and the boss stand at -11536.8 -1261.5 stay
 		{"onyxias_lair", "142c1d58928ad1efd9aca2b773c4762e2ddcbae05c308540080a1fedd6e3b38e"},
 	} {
 		p, err := dungeon.Load(filepath.Join("..", "..", "dungeons", c.plan+".json"))

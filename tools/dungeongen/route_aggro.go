@@ -24,6 +24,9 @@ import (
 )
 
 const (
+	// maxWanderYd is the furthest a spawn may wander from its spot: a larger export value is a corrupted row, not a
+	// walk (a map is about 6000 yd across).
+	maxWanderYd = 100
 	// defaultDetectionYd is the yards at which a spawn engages when the export carries no detection_range (draft exports
 	// predate the column).
 	defaultDetectionYd = 20
@@ -233,8 +236,14 @@ func routeReach(p *dungeon.Plan, c creature) float64 {
 	if det <= 0 {
 		det = defaultDetectionYd
 	}
-	s := worldspawn.Spawn{LevelMax: c.LevelMax, DetectionYd: float32(det), FlagsExtra: c.FlagsExtra, Wander: c.Wander}
-	return float64(worldspawn.AggroRadius(s, routePartyLevel(p), routeAggroRate)) + routePartySpread(p) + float64(c.Wander)
+	// A wander farther than a map's width is a corrupted export row (ZG's champion 49794 carries its entry, 11356, in
+	// wander): it would put every route segment in that spawn's reach. Ignored, as the core would never walk it.
+	wander := c.Wander
+	if wander > maxWanderYd {
+		wander = 0
+	}
+	s := worldspawn.Spawn{LevelMax: c.LevelMax, DetectionYd: float32(det), FlagsExtra: c.FlagsExtra, Wander: wander}
+	return float64(worldspawn.AggroRadius(s, routePartyLevel(p), routeAggroRate)) + routePartySpread(p) + float64(wander)
 }
 
 // RouteIntoLaterPacks lists every spawn within aggro of a straight route segment that a later row pulls (or that no
