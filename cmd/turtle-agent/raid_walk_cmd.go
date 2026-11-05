@@ -267,7 +267,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.patrols, "patrols", "", "a tb-patrols file for the revive quiet check")
 	fs.Var(&o.gmClear, "gm-clear", "TEST SERVERS ONLY, needs --place: after the placement the commander GM-kills every live unit of these pull groups of a leg, \"<leg>:<group>[,<group>...]\" (whole packs, links included); repeatable; the walk is then ASSISTED, never a real clear")
 	fs.Var(&o.gmClearBoss, "gm-clear-boss", "TEST SERVERS ONLY, needs --place: like --gm-clear for the boss of a leg (and its pack); repeatable")
-	fs.Var(&o.gmInstanceData, "gm-instance-data", "TEST SERVERS ONLY, needs --place: when the walk first starts the named leg the commander sends each \".debug instancedata <a> <b>\" of \"<leg>:<a> <b>[;<a> <b>...]\", in order, 3 s apart, once per instance; repeatable")
+	fs.Var(&o.gmInstanceData, "gm-instance-data", "TEST SERVERS ONLY: when the walk first starts the named leg the commander sends each \".debug instancedata <a> <b>\" of \"<leg>:<a> <b>[;<a> <b>...]\", in order, 3 s apart, once per instance; with --place it is the placement's copy, without it the entry's (read as q inst; unreadable: fires once per out dir with a WARN); repeatable")
 	fs.StringVar(&o.gmClearSpawns, "gm-clear-spawns", "", "the world export dir --gm-clear reads the packs from (default: ~/.local/share/turtle-agent/world/map<N>, else the checkout's <dir>/../tools/dungeongen/testdata/map<N>)")
 	fs.StringVar(&o.out, "out", "", "the output dir (default ./raid-walk-<plan>-<stamp>)")
 	fs.StringVar(&o.dashURL, "dash-url", "", "the dashboard URL (or TBDASH_URL)")
@@ -436,10 +436,6 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	if len(o.gmInstanceData) > 0 {
 		if !placeServers[o.server] {
 			fmt.Fprintf(stderr, "raid-walk: --gm-instance-data sends GM commands: test servers only (%s)\n", strings.Join(placeServerList(), ", "))
-			return o, exitUsage
-		}
-		if !o.place {
-			fmt.Fprintf(stderr, "raid-walk: --gm-instance-data needs --place (and --from): the lines run in the raid's copy when the walk starts the leg\n")
 			return o, exitUsage
 		}
 		for _, v := range o.gmInstanceData {
@@ -1018,8 +1014,11 @@ type walk struct {
 	gmClearLog  []raidwalk.GMClearEntry
 	gmClearUsed bool
 	// --gm-instance-data: the specs validate resolved against the rows, in flag order; the markers in the out dir
-	// say which legs already fired in the placement's instance.
+	// say which legs already fired (and the ledger, which outlives the attempt, says it per instance).
 	gmInstanceData []raidwalk.GMInstanceSpec
+	// gmInstanceDataEntryInst is the instance id read the way the cap ledger reads it at entry, for firing
+	// outside the walk's own placement ("" until read, "unreadable" when the read failed).
+	gmInstanceDataEntryInst string
 	// gongReruns counts the run restarts at a leg's summoning open row (a boss that despawns after a wipe comes back with the
 	// object: Zul'Gurub's Arlokk). bossGongReruns bounds them. gongRerunAt/-Boss/-Open name the last one that went out: the
 	// next "boss not found" pause reads whether the frames saw the boss alive since, which tells the gong summoning him again
@@ -1816,7 +1815,7 @@ func (w *walk) printPlan(out io.Writer) {
 		for _, cmd := range sp.Cmds {
 			fmt.Fprintf(out, " .debug instancedata %d %d;", cmd[0], cmd[1])
 		}
-		fmt.Fprintf(out, " in order, 3 s apart, once per instance, at the first status naming the leg\n")
+		fmt.Fprintf(out, " in order, 3 s apart, once per instance, before run start when placed in the leg (mid-run: paused first)\n")
 	}
 	start := []string{w.plan.Name}
 	start = append(start, w.fromWords...)

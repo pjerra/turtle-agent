@@ -129,12 +129,26 @@ func (w *walk) phases(ctx context.Context) int {
 	if err := w.phasePlace(ctx); err != nil {
 		return w.stop(err, true)
 	}
-	// The placement read the instance id: a fresh entry records it (a later reuse's dedupe needs it), a reuse
-	// placement records the accounts it re-hired into the raid's instance (M5).
+	// The placement read the instance id: a fresh entry records it (a later
+	// reuse's dedupe needs it), a reuse placement records the accounts it
+	// re-hired into the raid's instance (M5).
 	if w.opts.reuseInstance && w.reuseMode != "fresh" {
 		w.recordReuseInstance()
 	} else {
 		w.stampInstance()
+	}
+	// --gm-instance-data: a placed start inside the leg fires BEFORE the run
+	// starts, in every --until mode including --until none (instance data
+	// is no until: it needs no label). It fires on the placement's leg
+	// after place+enter fixed the instance, so `run start` (phaseStart
+	// below) always follows the lines. An explicit --from step names no
+	// leg: nothing fires here — the run's first status still precedes the
+	// first pull, and pollOnce's hold covers it. (checkStartLine stays
+	// clean: the run's own label checks run there, the lines go out here.)
+	if w.place != nil {
+		if err := w.gmInstanceDataStart(ctx, w.gmInstanceDataInst(ctx), w.place.Leg); err != nil {
+			return w.stop(err, true)
+		}
 	}
 	if err := w.phaseStart(ctx); err != nil {
 		return w.stop(err, true)
@@ -970,6 +984,10 @@ func (w *walk) checkStartLine(ctx context.Context, line string) error {
 		w.runStopped = true
 		return stopf(exitRaidWalkFailed, "--until boss-done: the server's plan has %d steps, the rows the boss step was found in have %d (pass --sql with the deployed migration, or use --until leg L)", st.Steps, len(w.rows.Steps))
 	}
+	// (No --gm-instance-data here: it fires in phases after phaseStart
+	// adopts this status, BEFORE the run starts, so the lines precede the
+	// run start in every --until mode including --until none — and in
+	// pollOnce, which holds the next pull while a mid-run firing sends.)
 	if len(w.untilWords) == 0 {
 		return nil
 	}
@@ -986,11 +1004,6 @@ func (w *walk) checkStartLine(ctx context.Context, line string) error {
 		if m := walkUntilStepRe.FindStringSubmatch(clean[i+len(w.untilLabel):]); m != nil {
 			w.untilStep, _ = strconv.Atoi(m[1])
 		}
-	}
-	// --gm-instance-data: a placed start inside the leg fires here, before the
-	// first pull (the start line is the first line that names the leg).
-	if err := w.gmInstanceDataStart(ctx, st); err != nil {
-		return err
 	}
 	return nil
 }
@@ -1200,9 +1213,17 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 		w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
 		w.recordRunLine(st, now)
 		w.noteLabel(st)
-		// --gm-instance-data: the first status that names the leg fires here,
-		// once per instance. A failing send breaks the walk.
-		if err := w.gmInstanceDataStart(ctx, st); err != nil {
+		// --gm-instance-data: the first status that names the leg fires
+		// here, once per instance, when a walk reaches the leg mid-run. A
+		// failing send breaks the walk. The 3 s gaps between the lines run
+		// inline in pollOnce and stall its polling for ~6 s once per
+		// instance; nothing is lost (the poll loop re-reads the feed).
+		// A status that names the leg while the run is already past the
+		// pull gate's first pull is too late to help it: the walk pauses
+		// the run first (`.bot run pause`, resumed after the last line),
+		// so the next pull waits for the lines. The walk fires at most one
+		// spec per poll this way; the next poll fires the next.
+		if err := w.gmInstanceDataSendPending(ctx, st); err != nil {
 			return nil, err
 		}
 		if st.Note != "" {

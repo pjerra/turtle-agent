@@ -2702,16 +2702,23 @@ AQ20 walk starts at Rajaxx with `--gm-clear-boss kurinnaxx` so Kurinnaxx is dead
 
 ### --gm-instance-data (test servers only)
 
-A TEST tool, off by default: `raid-walk <plan> --place --from "leg L" --sql FILE --gm-instance-data "<leg>:<a> <b>[;<a> <b>...]"`
-(repeatable, one leg per value). When the walk first starts the named leg — the first run-status line that names it, or the start
-line itself when the placed start stands inside the leg — the commander sends each command as `.debug instancedata <a> <b>`,
-in order, 3 s apart, once per instance. Example: `--gm-instance-data "hakkar:1 3;6 3;0 0"` marks Hakkar's five priests done at
+A TEST tool, off by default: `raid-walk <plan> [--place] --from "leg L" --sql FILE --gm-instance-data "<leg>:<a> <b>[;<a> <b>...]"`
+(repeatable, one leg per value). A placed start inside the named leg sends the lines BEFORE the run starts — ahead of `run start`
+in every `--until` mode including `--until none` — so the gate is satisfied before the first pull. A walk that reaches the leg
+mid-run pauses the run first (`.bot run pause`, resumed after the last line), so the next pull waits for the lines. The commander
+sends each command as `.debug instancedata <a> <b>`, in order, 3 s apart, once per instance.
+Example: `--gm-instance-data "hakkar:1 3;6 3;0 0"` marks Hakkar's five priests done at
 the pull gate. The lines go out through the walk's own `gm` RPC path (the same allow-listed chat the walk's other GM lines use),
 so a refused or failed send breaks the walk instead of losing the gate silently. Refused unless the server is `m910q` or
-`tortoise-test2` and `--place` is on; a malformed command (not two integers) or an unknown leg is a usage error before anything
-goes out. Every sent command is one event line in `run.log` (`gm-instance-data: <leg>: .debug instancedata <a> <b> -> sent`),
-and a marker file per instance and leg in the walk's out dir — plus a mark in the instance-cap ledger, which outlives the
-attempt's out dir — remembers the sent commands, so a resumed walk in the same instance (`--reuse-instance`) never resends.
+`tortoise-test2`; a malformed command (not two integers) or an unknown leg is a usage error before anything
+goes out. After each line the walk reads the chat/system events for up to 2 s and logs the server's reply in the event line
+(`gm-instance-data: <leg>: .debug instancedata <a> <b> -> <reply>`); with no reply it logs `-> no reply (WARN)`. A mark is written
+only after EVERY command of the spec has been sent (an interrupt after the first command resends the rest), carrying the hash of
+the exact command list — a changed list resends. A marker file per instance and leg in the walk's out dir — plus that mark in the
+instance-cap ledger, which outlives the attempt's out dir — remembers the sent commands, so a resumed walk in the same instance
+(`--reuse-instance`) never resends; marks drop on a server restart or reset, and a mark older than the instance's own entry does not
+count (the core reuses instance ids). Without `--place` the instance id is read the way the cap ledger reads it at entry;
+when it cannot be read the walk WARNs once and fires marker-only (per out dir).
 `targets.txt` takes the flag like any other: its value holds spaces but the file is split on whitespace with no quoting, so the
 words after the flag (up to the next flag) are joined back into one value. In the pair form the flags apply to every walk.
 

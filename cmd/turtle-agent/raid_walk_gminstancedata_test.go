@@ -2,18 +2,21 @@ package main
 
 // The raid-walk --gm-instance-data test tool (replaces walk 39's hkgmall.sh):
 // the commander sends `.debug instancedata <a> <b>` through the walk's own gm
-// path (the commander's gm RPC, allow-listed), one event line per command, in
-// order, 3 s apart, once per instance, when the walk first starts the named
-// leg. A placed start inside the leg fires right after placement. A resumed
-// walk in the same instance never refires: the markers live in the out dir.
+// path (the commander's gm RPC, allow-listed), one event line per command in
+// run.log, in order, 3 s apart (plus the 2 s reply wait), once per instance.
+// A placed start inside the leg fires BEFORE the run starts; a mid-run reach
+// fires under a run pause. A resumed walk in the same instance never refires:
+// the markers live in the out dir (and the ledger, which outlives it).
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
@@ -51,13 +54,20 @@ func TestParseGMInstanceDataRefusals(t *testing.T) {
 		want string
 	}{
 		{"production server", []string{"zul_gurub", "--place", "--from", "leg hakkar", "--sql", "walk.sql", "--server", "tortoise", "--gm-instance-data", "hakkar:1 3"}, "test servers only"},
-		{"no place", []string{"zul_gurub", "--gm-instance-data", "hakkar:1 3"}, "needs --place"},
+		{"unplaced flag parses", []string{"zul_gurub", "--from", "leg hakkar", "--sql", "walk.sql", "--gm-instance-data", "hakkar:1 3"}, ""},
 		{"no leg", []string{"zul_gurub", "--place", "--from", "leg hakkar", "--sql", "walk.sql", "--gm-instance-data", "1 3"}, "want \"<leg>:"},
 		{"bad cmd", []string{"zul_gurub", "--place", "--from", "leg hakkar", "--sql", "walk.sql", "--gm-instance-data", "hakkar:1"}, "not two integers"},
 		{"extra word", []string{"zul_gurub", "--place", "--from", "leg hakkar", "--sql", "walk.sql", "--gm-instance-data", "hakkar:1 2 3"}, "not two integers"},
 	} {
 		var stderr bytes.Buffer
-		if _, code := parseRaidWalkArgs(tc.args, &stderr); code != exitUsage || !strings.Contains(stderr.String(), tc.want) {
+		_, code := parseRaidWalkArgs(tc.args, &stderr)
+		if tc.want == "" {
+			if code != exitOK {
+				t.Errorf("%s: exit %d, want %d (stderr %q)", tc.name, code, exitOK, stderr.String())
+			}
+			continue
+		}
+		if code != exitUsage || !strings.Contains(stderr.String(), tc.want) {
 			t.Errorf("%s: exit %d, stderr %q (want %q)", tc.name, code, stderr.String(), tc.want)
 		}
 	}
@@ -71,9 +81,9 @@ func TestParseGMInstanceDataRefusals(t *testing.T) {
 }
 
 // The placed walk whose start stands in the named leg fires the lines right
-// after placement, before the run goes on: through w.gm (the allow-listed
-// commander gm RPC), in order, 3 s apart on the fake clock, one event line
-// per command in run.log.
+// after placement, BEFORE the run starts: through w.gm (the allow-listed
+// commander gm RPC), in order, 3 s apart (plus the 2 s reply wait) on the
+// fake clock, one event line per command in run.log.
 // instDataStartReply is the run start's answer with the plan's full leg
 // name in the status lines, as the live server sends
 // (walk39 run.log: TBM:RUN|zul_gurub|running|215/733|high_priest_thekal).
@@ -118,8 +128,9 @@ func TestGMInstanceDataFiresAfterPlacement(t *testing.T) {
 		t.Fatalf("times %v for %q", at, want)
 	}
 	for i := 1; i < len(at); i++ {
-		if gap := at[i] - at[i-1]; gap != old.Nanoseconds() {
-			t.Fatalf("gap %d is %v, want %v: %v", i, gap, old.Nanoseconds(), at)
+		gap := time.Duration(at[i] - at[i-1])
+		if gap != old+gmInstanceDataReplyWait {
+			t.Fatalf("gap %d is %v, want the %v gap + the %v reply wait: %v", i, gap, old, gmInstanceDataReplyWait, at)
 		}
 	}
 	by, err := os.ReadFile(filepath.Join(f.out, "run.log"))
@@ -127,9 +138,9 @@ func TestGMInstanceDataFiresAfterPlacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"gm-instance-data: high_priest_thekal: .debug instancedata 1 3 -> sent",
-		"gm-instance-data: high_priest_thekal: .debug instancedata 6 3 -> sent",
-		"gm-instance-data: high_priest_thekal: .debug instancedata 0 0 -> sent",
+		"gm-instance-data: high_priest_thekal: .debug instancedata 1 3 -> no reply (WARN)",
+		"gm-instance-data: high_priest_thekal: .debug instancedata 6 3 -> no reply (WARN)",
+		"gm-instance-data: high_priest_thekal: .debug instancedata 0 0 -> no reply (WARN)",
 	} {
 		if !strings.Contains(string(by), want) {
 			t.Fatalf("run.log lacks %q:\n%s", want, by)
@@ -259,6 +270,241 @@ func TestGMInstanceDataUnknownLegRefused(t *testing.T) {
 	if strings.Contains(f.stdout.String(), "nosuchleg") {
 		t.Fatalf("a refusal printed before the out dir: %q", f.stdout.String())
 	}
+}
+
+// An interrupt after the FIRST command resends the rest: the ledger's mark
+// is written only after EVERY command of the spec has been sent (review
+// item 1). The sleep between the lines fails, the walk ends, and a fresh
+// out dir with --reuse-instance sends the whole list again (the run's leg
+// line-up is the reuse fixture's kept instance 103).
+func TestGMInstanceDataInterruptResendsRest(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "instance-cap.json")
+	n := zgPlaceSteps(t)
+	old := gmInstanceDataGap
+	gmInstanceDataGap = time.Nanosecond
+	defer func() { gmInstanceDataGap = old }()
+	interrupted := errors.New("interrupted for the firing test")
+	first, _ := newPlaceFixture(t)
+	first.opts.gmInstanceData = stringList{"high_priest_thekal:1 3;6 3"}
+	first.opts.reuseInstance = true
+	first.env.capLedger = ledger
+	first.agent.entered = true
+	first.agent.startReply = instDataStartReply(t, n)
+	first.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+	first.env.sleep = func(ctx context.Context, d time.Duration) error {
+		if d == gmInstanceDataGap {
+			return interrupted
+		}
+		return first.clock.sleep(ctx, d)
+	}
+	if code := first.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d (the gap sleep fails the walk): %s", code, exitRaidWalkFailed, first.stderr.String())
+	}
+	if n := countPrefix(first.agent.gmLines(), ".debug instancedata"); n != 1 {
+		t.Fatalf("interrupted walk sent %d lines, want exactly the first: %q", n, first.agent.gmLines())
+	}
+	// The ledger has no mark yet: nothing was complete.
+	l, err := raidwalk.LoadCapLedger(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.GMInstanceDataDone("m910q", "103", "high_priest_thekal", raidwalk.GMInstanceDataHash(raidwalk.GMInstanceSpec{Leg: "high_priest_thekal", Cmds: [][2]int{{1, 3}, {6, 3}}}), time.Now()) {
+		t.Fatal("a half-sent leg must not mark the ledger done")
+	}
+	second, _ := newPlaceFixture(t)
+	second.opts.gmInstanceData = stringList{"high_priest_thekal:1 3;6 3"}
+	second.opts.reuseInstance = true
+	second.env.capLedger = ledger
+	second.agent.entered = true
+	second.agent.startReply = instDataStartReply(t, n)
+	second.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+	if code := second.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, second.stderr.String(), second.stdout.String())
+	}
+	var got []string
+	for _, l := range second.agent.gmLines() {
+		if strings.HasPrefix(l, ".debug instancedata") {
+			got = append(got, l)
+		}
+	}
+	if strings.Join(got, "|") != ".debug instancedata 1 3|.debug instancedata 6 3" {
+		t.Fatalf("resumed walk sent %q, want the whole list again", got)
+	}
+}
+
+// A placed start inside the leg sends the lines BEFORE the run starts, in
+// every --until mode including --until none (review item 3): the lines
+// precede `run start` in the call order, and the until-none walk carries
+// no until clause.
+func TestGMInstanceDataPlacedStartSendsBeforeRunStart(t *testing.T) {
+	for _, until := range []string{"boss", "none"} {
+		f, _ := newPlaceFixture(t)
+		f.opts.until = until
+		f.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
+		n := zgPlaceSteps(t)
+		f.agent.startReply = instDataStartReply(t, n)
+		f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("until %s: exit %d: %s\n%s", until, code, f.stderr.String(), f.stdout.String())
+		}
+		log := f.agentLog()
+		inst, run := -1, -1
+		for i, line := range log {
+			if strings.HasPrefix(line, "gm .debug instancedata") && inst < 0 {
+				inst = i
+			}
+			if strings.HasPrefix(line, "cmdr run start ") && run < 0 {
+				run = i
+			}
+		}
+		if inst < 0 {
+			t.Fatalf("until %s: no instance-data line went out: %q", until, log)
+		}
+		if run < 0 {
+			t.Fatalf("until %s: no run start went out: %q", until, log)
+		}
+		if inst > run {
+			t.Fatalf("until %s: the line went out after the run start (gm %d, run %d): %q", until, inst, run, log)
+		}
+		if until == "none" && strings.Contains(f.agent.startArgs, "until") {
+			t.Fatalf("until none: the run start carries an until clause: %q", f.agent.startArgs)
+		}
+	}
+}
+
+// A walk that reaches the leg mid-run holds the next pull until the lines
+// are sent (review item 3): the run is paused first, resumed after the
+// last line. The fixture places at the thekal leg while the flag names the
+// NEXT leg (arlokk), which no pre-start firing touches; the run's own next
+// line names arlokk mid-run and fires it there with the hold. (Jeklik-path
+// note: the walk stays placed at thekal — the mid line only names the leg,
+// it does not move the raid.)
+func TestGMInstanceDataMidRunHoldsNextPull(t *testing.T) {
+	n := zgPlaceSteps(t)
+	f, _ := newPlaceFixture(t)
+	f.opts.gmInstanceData = stringList{"high_priestess_arlokk:1 3"}
+	f.agent.startReply = instDataStartReply(t, n)
+	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+	mid := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|move|walk|walking|until boss (step %d)", n.start+1, n.total, n.until)
+	f.agent.mu.Lock()
+	last := f.agent.startQueue[len(f.agent.startQueue)-1]
+	f.agent.startQueue = append(f.agent.startQueue[:len(f.agent.startQueue)-1], queuedEvent{raw: mid}, last)
+	f.agent.mu.Unlock()
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	pause, resume := -1, -1
+	for i, v := range verbs {
+		if v == "pause" && pause < 0 {
+			pause = i
+		}
+		if v == "resume" && resume < 0 {
+			resume = i
+		}
+	}
+	if pause < 0 || resume < 0 || resume < pause {
+		t.Fatalf("pause %d resume %d in run verbs %q: the mid-run firing must pause and resume", pause, resume, verbs)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".debug instancedata"); n != 1 {
+		t.Fatalf("%d lines, want the mid-run firing's one: %q", n, f.agent.gmLines())
+	}
+}
+
+// After each line the walk logs the server's reply in the event line
+// (`-> <reply>`), and `-> no reply (WARN)` with no reply (review item 4).
+// A fake reply on the wire lands in the line; without one the WARN does.
+// Neither ever fails the walk.
+func TestGMInstanceDataLogsServerReply(t *testing.T) {
+	n := zgPlaceSteps(t)
+	t.Run("fake reply", func(t *testing.T) {
+		f, _ := newPlaceFixture(t)
+		f.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
+		f.agent.startReply = instDataStartReply(t, n)
+		f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+		// The reply the server sends for the line: pushed the moment the
+		// line goes out, so the walk's own reply read finds it on the wire.
+		f.agent.onGM = func(line string) {
+			if strings.HasPrefix(line, ".debug instancedata") {
+				f.agent.push("Instance data updated", "")
+			}
+		}
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+		}
+		by, _ := os.ReadFile(filepath.Join(f.out, "run.log"))
+		if !strings.Contains(string(by), "gm-instance-data: high_priest_thekal: .debug instancedata 1 3 -> Instance data updated") {
+			t.Fatalf("run.log lacks the reply line:\n%s", by)
+		}
+	})
+	t.Run("no reply", func(t *testing.T) {
+		f, _ := newPlaceFixture(t)
+		f.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
+		f.agent.startReply = instDataStartReply(t, n)
+		f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+		}
+		by, _ := os.ReadFile(filepath.Join(f.out, "run.log"))
+		if !strings.Contains(string(by), "gm-instance-data: high_priest_thekal: .debug instancedata 1 3 -> no reply (WARN)") {
+			t.Fatalf("run.log lacks the no-reply WARN line:\n%s", by)
+		}
+	})
+}
+
+// instDataOnyxiaReply is a run start answer for the unplaced onyxia
+// fixture: the run's own leg name is "onyxia" (defaultRun's lines).
+func instDataOnyxiaReply() *commanderReply {
+	line := "TBM:RUN|onyxias_lair|running|2/29|onyxia|move|walk|walking|until boss (step 29)"
+	return &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: line, Lines: []string{line, "TBM:ACTION_ACK|run start|party|1|-"}}}
+}
+
+// Without --place the flag still fires: the instance id is read the way
+// the cap ledger reads it at entry (review item 5). The unplaced onyxia
+// fixture answers `q inst` through its tt fake; the run's own leg (onyxia)
+// fires once per entry instance. When the read fails, the walk WARNs once
+// and falls back to the per-out-dir marker only.
+func TestGMInstanceDataWithoutPlace(t *testing.T) {
+	t.Run("entry instance", func(t *testing.T) {
+		f := newFixture(t)
+		f.opts.gmInstanceData = stringList{"onyxia:1 3"}
+		f.agent.ttFn = func(cmd string) (ttResult, error) {
+			if cmd == "q inst" {
+				return ttReplyOf(t, map[string]any{"map": 249, "inst": 77}), nil
+			}
+			return ttResult{}, nil
+		}
+		f.agent.startReply = instDataOnyxiaReply()
+		f.defaultRun("onyxias_lair")
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+		}
+		if n := countPrefix(f.agent.gmLines(), ".debug instancedata"); n != 1 {
+			t.Fatalf("%d lines, want the entry instance's one: %q", n, f.agent.gmLines())
+		}
+	})
+	t.Run("unreadable falls back", func(t *testing.T) {
+		f := newFixture(t)
+		f.opts.gmInstanceData = stringList{"onyxia:1 3"}
+		f.agent.ttFn = func(cmd string) (ttResult, error) {
+			return ttResult{}, errors.New("toolkit down")
+		}
+		f.agent.startReply = instDataOnyxiaReply()
+		f.defaultRun("onyxias_lair")
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+		}
+		if n := countPrefix(f.agent.gmLines(), ".debug instancedata"); n != 1 {
+			t.Fatalf("%d lines, want the marker-only one: %q", n, f.agent.gmLines())
+		}
+		if !strings.Contains(strings.Join(f.summary().Notes, "\n"), "WARN") {
+			t.Fatalf("notes %q, want the WARN", f.summary().Notes)
+		}
+	})
 }
 
 // instDataTimes is when each want line went out through the fake's gm RPC.
