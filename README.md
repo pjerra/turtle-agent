@@ -2834,7 +2834,11 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   furthest step the run reached; when that row is one raid-walk refuses as a place start (a boss row — which is where
   every wipe at a boss ends — a hold row, a row inside an event), the restart resumes from the nearest earlier row of
   the same leg the walk takes, else from the leg's own start (`--from leg L`), and logs a `resume` line: exit 2 for a
-  refused resume start is never escalated. A legitimate instance-cap wait (`earliest
+  refused resume start is never escalated. A goal boss that is already dead ends the goal as **DONE**, never an
+  ESCALATE: any attempt's summary that reports the boss dead (the summary's `boss_kills`, or the walk's own
+  boss-done/corpse evidence it records there) sets `boss_dead` for the goal in the checkpoint, which advances to the
+  id's next goal line or finishes the id, and the run that saw the death is torn down (its slot freed) as for any met
+  goal. A legitimate instance-cap wait (`earliest
   free time` as the run's last line) is not a stall; its stall clock starts when the wait ends. Exit 2 (the walk
   refused its arguments) and exit 29 (the placement failed every try in the same instance; a fresh-instance retry
   would only burn the hourly budget) stop that id with an `ESCALATE` line and no retry, and so does exit 15 three
@@ -2874,7 +2878,10 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   so a second start on the same walk dir refuses (exit 2) instead of running beside it — the pid file is
   informational. The OS drops the lock when the process ends, so a crash leaves no stale guard. `--foreground` runs
   it in place. A `YIELD` file in the walk dir (checked at least once a second) tears every run down, releases every
-  lease, writes `YIELD-DONE` and exits 0; SIGINT/SIGTERM does the same without `YIELD-DONE`. A refused id (nothing
+  lease, writes `YIELD-DONE` and exits 0; SIGINT/SIGTERM does the same without `YIELD-DONE`. A `STOP-<raid id>` file
+  (checked every tick) stops just that raid the same clean way — its run stopped, its slot torn down and verified,
+  the id marked done and never relaunched — while the other ids keep running; the file stays and is harmless once the
+  id is done. A refused id (nothing
   was launched) and a done id (its slot was torn down when the goal was met) are skipped: their stale slot dirs are
   never torn down by a YIELD, and neither blocks `YIELD-DONE`. A stale `YIELD-DONE` is
   removed at start and before a new YIELD's shutdown; a `YIELD` whose teardown does not verify writes no `YIELD-DONE`

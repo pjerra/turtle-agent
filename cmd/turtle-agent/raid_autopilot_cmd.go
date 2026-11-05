@@ -115,6 +115,9 @@ type autoGoalState struct {
 	noProgress int
 	// leaseFails counts the consecutive attempts that ended in exit 15 (the slot is held by someone else).
 	leaseFails int
+	// dead says an attempt's summary reported this goal's boss dead: the goal is met and DONE, never placed again
+	// (walk 39: a re-added raid kept walking a boss another raid had already killed).
+	dead bool
 }
 
 // autoRun is one live or finished raid-walk attempt. Its fields are guarded by its state's mutex.
@@ -175,6 +178,10 @@ type autoState struct {
 	refused bool
 	// escalation is the "kind id slot: detail" tail status.txt prints after ESCALATE.
 	escalation string
+	// stopping says a STOP-<id> file (or a removed target line) asked this id to stop: its run gets an AutoStop
+	// finish (the slot is torn down as a YIELD would) and it is never launched again.
+	stopping bool
+	stopWhy  string
 }
 
 // autoSupervisor owns the processes and files.
@@ -718,10 +725,57 @@ func (s *autoSupervisor) finishAll() int {
 
 // tick advances every id once.
 func (s *autoSupervisor) tick(ctx context.Context) {
+	s.checkStopFiles()
 	for _, st := range s.states {
 		s.tickState(st)
 	}
 	s.saveState()
+}
+
+// checkStopFiles handles the per-raid stop files: <walk-dir>/STOP-<id> stops just that raid (its run stopped, its
+// slot torn down as a YIELD would, the id done and never relaunched). YIELD stays the whole-dir stop.
+func (s *autoSupervisor) checkStopFiles() {
+	entries, err := os.ReadDir(s.o.walkDir)
+	if err != nil {
+		return
+	}
+	byID := map[string]*autoState{}
+	for _, st := range s.states {
+		byID[st.id] = st
+	}
+	for _, e := range entries {
+		id, ok := strings.CutPrefix(e.Name(), "STOP-")
+		if !ok || id == "" {
+			continue
+		}
+		if st := byID[id]; st != nil {
+			s.requestStop(st, "STOP-"+id)
+		}
+	}
+}
+
+// requestStop stops one id cleanly: a run gets an AutoStop finish (the walk is stopped and the slot is torn down,
+// verified, exactly as a met goal's teardown), and an id with no run is done at once. An escalated or refused id is
+// left alone: a person owns it.
+func (s *autoSupervisor) requestStop(st *autoState, why string) {
+	st.mu.Lock()
+	if st.done || st.escalated || st.refused || st.stopping {
+		st.mu.Unlock()
+		return
+	}
+	st.stopping, st.stopWhy = true, why
+	r := st.run
+	if r != nil && r.pending == nil {
+		r.pending = &raidwalk.AutoDecision{Action: raidwalk.AutoStop, Reason: why}
+	} else if r == nil {
+		st.done = true
+	}
+	st.mu.Unlock()
+	if r == nil {
+		s.event(st.id, "stop", why+": the id is done")
+		s.saveState()
+		s.writeStatus()
+	}
 }
 
 // tickState observes one id and either launches its next attempt or hands a decided finish to its own goroutine: a
@@ -733,9 +787,19 @@ func (s *autoSupervisor) tickState(st *autoState) {
 		return
 	}
 	if st.run == nil {
+		dead := st.current < len(st.goals) && st.goals[st.current].dead
+		stopping := st.stopping
 		due := !time.Now().Before(st.nextAt)
 		st.mu.Unlock()
-		if due {
+		switch {
+		case dead:
+			s.deadGoal(st)
+		case stopping:
+			// requestStop already marked it done; a state whose run was gone keeps the stop.
+			st.mu.Lock()
+			st.done = true
+			st.mu.Unlock()
+		case due:
 			s.launch(st)
 		}
 		return
@@ -753,6 +817,11 @@ func (s *autoSupervisor) tickState(st *autoState) {
 			return
 		}
 		g := st.goals[st.current]
+		// A goal boss the summary reports dead is the goal met, whatever this rule would do with the end: the goal is
+		// never placed again (the checkpoint keeps the flag across a restart).
+		if raidwalk.GoalBossDead(g.target.Goal, obs) {
+			st.goals[st.current].dead = true
+		}
 		// The backoff counts the consecutive no-progress attempts that ended before this one: a run that reached a
 		// further step resets the count even though its own finish has not run yet.
 		fast := g.noProgress
@@ -888,6 +957,34 @@ func (s *autoSupervisor) finish(st *autoState) {
 	s.writeStatus()
 }
 
+// deadGoal ends the current goal whose boss is already dead: the id's next goal line, else DONE. It is a DONE state,
+// never an ESCALATE, and the slot is free (the run that saw the death was torn down before this). The checkpoint's
+// boss_dead keeps it across a supervisor restart.
+func (s *autoSupervisor) deadGoal(st *autoState) {
+	st.mu.Lock()
+	if st.done || st.escalated || st.refused || st.stopping || st.current >= len(st.goals) || !st.goals[st.current].dead {
+		st.mu.Unlock()
+		return
+	}
+	goal := st.goals[st.current].target.Goal.String()
+	if st.current+1 < len(st.goals) {
+		next := st.goals[st.current+1].target.Goal.String()
+		st.current++
+		st.last = nil
+		st.nextReuse = false
+		st.goals[st.current] = autoGoalState{target: st.goals[st.current].target}
+		st.nextAt = time.Now().Add(s.o.settle)
+		st.mu.Unlock()
+		s.event(st.id, "already dead", fmt.Sprintf("goal %s is dead; next goal %s", goal, next))
+	} else {
+		st.done = true
+		st.mu.Unlock()
+		s.event(st.id, "already dead", fmt.Sprintf("goal %s is dead; the last goal is done", goal))
+	}
+	s.saveState()
+	s.writeStatus()
+}
+
 // runLastStep is the furthest step the run reached: the live reading, else its log, else its summary.
 func (s *autoSupervisor) runLastStep(st *autoState, r *autoRun) int {
 	st.mu.Lock()
@@ -930,6 +1027,14 @@ func (s *autoSupervisor) launch(st *autoState) {
 		st.mu.Unlock()
 		s.event(st.id, "done", "no goal line left")
 		s.saveState()
+		return
+	}
+	if st.stopping || st.goals[st.current].dead {
+		stopping, dead := st.stopping, st.goals[st.current].dead
+		st.mu.Unlock()
+		if dead && !stopping {
+			s.deadGoal(st)
+		}
 		return
 	}
 	g := &st.goals[st.current]
@@ -1587,7 +1692,9 @@ type autoSavedID struct {
 	OutDir    string `json:"out_dir,omitempty"`
 	Done      bool   `json:"done,omitempty"`
 	Escalated bool   `json:"escalated,omitempty"`
-	NextAt    string `json:"next_at,omitempty"`
+	// BossDead says the current goal's boss is dead in the instance: the goal is DONE at a start, never placed again.
+	BossDead bool   `json:"boss_dead,omitempty"`
+	NextAt   string `json:"next_at,omitempty"`
 }
 
 // autoSavedState is <walk-dir>/autopilot-state.json.
@@ -1611,7 +1718,7 @@ func (s *autoSupervisor) saveState() {
 		}
 		if st.current < len(st.goals) {
 			g := st.goals[st.current]
-			e.Attempt, e.LastStep = g.attempt, g.bestStep
+			e.Attempt, e.LastStep, e.BossDead = g.attempt, g.bestStep, g.dead
 		}
 		if st.last != nil {
 			e.OutDir, e.Reuse = st.last.out, st.last.reuse
@@ -1723,6 +1830,7 @@ func (s *autoSupervisor) reconcile() error {
 				st.current = sv.Goal
 				st.goals[st.current].attempt = sv.Attempt
 				st.goals[st.current].bestStep = sv.LastStep
+				st.goals[st.current].dead = sv.BossDead
 			}
 			st.done, st.escalated = sv.Done, sv.Escalated
 			st.nextReuse = sv.Reuse
@@ -1739,7 +1847,7 @@ func (s *autoSupervisor) reconcile() error {
 				st.last = &autoRun{out: sv.OutDir, slot: t.Slot, reuse: sv.Reuse, lastStep: sv.LastStep, exited: true, adopted: true, pidN: sv.ChildPID, tornDown: true}
 			}
 		}
-		done := st.done || st.escalated
+		done := st.done || st.escalated || (st.current < len(st.goals) && st.goals[st.current].dead)
 		st.mu.Unlock()
 		if done {
 			continue

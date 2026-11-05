@@ -716,6 +716,79 @@ func TestAutoBossKillWithIncidentAdvances(t *testing.T) {
 	}
 }
 
+// Walk 39: a raid re-added after its goal boss was already dead kept running (t6 kept placing a Mar'li another raid
+// had already killed; t7 restarted Thekal 9 s after the kill). A goal the checkpoint records as dead is DONE at start:
+// nothing is launched and the slot stays free, instead of a re-place whose start the walk refuses (exit 2, ESCALATE).
+func TestAutoStartSkipsAGoalWhoseBossIsDead(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14509 -- zul_gurub --sql /zg.sql")
+	saved := autoSavedState{
+		Format: autoStateFormat, Version: autoStateVersion, Updated: "2026-11-05T04:06:20Z",
+		IDs: []autoSavedID{{ID: "a", BossDead: true}},
+	}
+	raw, err := json.Marshal(saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.walk, autoStateFile), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := f.supervisor()
+	tickUntil(t, s, "a to finish", func() bool {
+		done, escalated := runState(s.states[0])
+		return done || escalated
+	})
+	if done, escalated := runState(s.states[0]); !done || escalated {
+		t.Fatalf("done %v escalated %v, want done and no escalate", done, escalated)
+	}
+	if launches := f.args(); len(launches) != 0 {
+		t.Fatalf("a dead goal launched %d walk(s):\n%s", len(launches), strings.Join(launches, "\n"))
+	}
+	if st := s.states[0]; st.run != nil {
+		t.Fatalf("a dead goal kept a run: %+v", st.run)
+	}
+	if !strings.Contains(f.events(), "a already dead: goal boss:14509 is dead") {
+		t.Fatalf("no dead-boss event:\n%s", f.events())
+	}
+}
+
+// Walk 39: the only per-dir stop was YIELD, which stops every raid. STOP-<raid id> stops just that raid cleanly
+// (the run is stopped and its slot torn down) and never relaunches it; the other id keeps running.
+func TestAutoStopFileStopsOnlyItsRaid(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.target("b srv 2 zg-b full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	f.running("b-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "both raids launched", func() bool { return len(f.args()) >= 2 })
+	if err := os.WriteFile(filepath.Join(f.walk, "STOP-a"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "a stopped", func() bool {
+		done, _ := runState(s.states[0])
+		return done
+	})
+	if _, escalated := runState(s.states[0]); escalated {
+		t.Fatalf("STOP-a escalated a:\n%s", f.events())
+	}
+	if done, _ := runState(s.states[1]); done {
+		t.Fatalf("STOP-a stopped b too:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "a stop: STOP-a") {
+		t.Fatalf("no STOP-a event:\n%s", f.events())
+	}
+	before := len(f.args())
+	waitForN(t, time.Second, "a's teardown", func() bool { return len(f.teardowns()) >= 1 })
+	tickUntil(t, s, "b to keep running", func() bool {
+		done, _ := runState(s.states[1])
+		return !done
+	})
+	if after := len(f.args()); after != before {
+		t.Fatalf("a was relaunched after its STOP file (%d -> %d):\n%s", before, after, strings.Join(f.args(), "\n"))
+	}
+}
+
 // The state file is written on every transition; a supervisor killed after goal 1 was met does not walk it again.
 func TestAutoStateSurvivesASupervisorKill(t *testing.T) {
 	f := newAutoFixture(t)
