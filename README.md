@@ -228,7 +228,7 @@ with `ALLOW_TURTLE_ADDONS`); add them there if you want to look like that. This 
 
 ## Test slots, leases and teardown
 
-One slot per worker. The slot table (`~/.config/turtle-agent/slots.json`, `--slots FILE`) names each server's slots with their account, character, laptop RPC port and the `settings_from` file that holds the account's password; it holds no passwords itself. The per-server core instance cap lives beside it in `instance-cap-per-account.json` (`{"m910q": 30}`), never in the slot table (older binaries refuse unknown fields there; see `--instance-cap-per-account` below). `lease acquire --any` (or `--slot N`, never 3) takes a free slot for a holder name and a ttl (default 180 min); a lease is stale only when it is expired AND its client dir has no live agent, and `acquire` refuses a port that already has a listener. `slot setup` copies no settings file: it builds `<dir>/settings.json` from scratch (one account, a fresh token file per run) plus `slot.json`, the binary and the `dungeons/`/`traces/` folders, and prints the login line. `teardown <dir>` runs the RPC `teardown` first (snapshot, the player follow, `agent_run`, brain, `run stop`, unbind, `.bot remove` of listed hires, leave, gone, `.gm off`, logout), then ends the agent by its pid file, closes the port, deletes only the secrets and releases the lease (exit 14 on any fail, 15 on a refused lease). m910q slot 3 (and tortoise-test2 slot 3) is never leasable on either server. A group holding a real player (any member the `commander status` listing does not name) gets no `.bot remove` at all: a GM's remove reaches any bot, so leaving the group — which ends only your own hires — does the cleanup instead. Known limit: a classic bind (commander outside the lead's group) with a real player inside the lead's group is not detectable from the client; bot-only test runs never have that shape.
+One slot per worker. The slot table (`~/.config/turtle-agent/slots.json`, `--slots FILE`) names each server's slots with their account, character, laptop RPC port and the `settings_from` file that holds the account's password; it holds no passwords itself. A `--slots FILE` outside the default directory keeps its leases (`<dir>/leases`), its instance-cap ledger and its `instance-cap-per-account.json` there: raid-walk refuses to start (exit 2, `one ledger per server`) when the default directory holds a live lease for the same server, because the two ledgers cannot see each other (walk 38: two raids took one slot). `--allow-split-ledger` overrides it for test sandboxes. The per-server core instance cap lives beside it in `instance-cap-per-account.json` (`{"m910q": 30}`), never in the slot table (older binaries refuse unknown fields there; see `--instance-cap-per-account` below). `lease acquire --any` (or `--slot N`, never 3) takes a free slot for a holder name and a ttl (default 180 min); a lease is stale only when it is expired AND its client dir has no live agent, and `acquire` refuses a port that already has a listener. `slot setup` copies no settings file: it builds `<dir>/settings.json` from scratch (one account, a fresh token file per run) plus `slot.json`, the binary and the `dungeons/`/`traces/` folders, and prints the login line. `teardown <dir>` runs the RPC `teardown` first (snapshot, the player follow, `agent_run`, brain, `run stop`, unbind, `.bot remove` of listed hires, leave, gone, `.gm off`, logout), then ends the agent by its pid file, closes the port, deletes only the secrets and releases the lease (exit 14 on any fail, 15 on a refused lease). m910q slot 3 (and tortoise-test2 slot 3) is never leasable on either server. A group holding a real player (any member the `commander status` listing does not name) gets no `.bot remove` at all: a GM's remove reaches any bot, so leaving the group — which ends only your own hires — does the cleanup instead. Known limit: a classic bind (commander outside the lead's group) with a real player inside the lead's group is not detectable from the client; bot-only test runs never have that shape.
 
 `rpc <dir> <method> [<params-json>]` drives the agent of a slot dir with one JSON-RPC call, for live-test workers that must never read its token file: the command reads `slot.json`, checks it like `teardown` does (the dir must match, the port must be valid, outside paths are refused), reads the token file derived from the port itself, refuses it unless it has exactly the shape the agent generates (32 random bytes as 43 base64url characters; anything else gets `rpc: the token file is not an agent token`, exit 15, with the content never printed), and posts to `127.0.0.1:<port>` with the token as `Authorization: Bearer` and `Content-Type: application/json`. It prints only the `result` as JSON (pretty; `--raw` for one line), a JSON-RPC error as `error: <code> <message>` on stderr (exit 16), an unreachable agent as exit 15, usage errors as exit 2. A reply that is not a 2.0 envelope for the request (any non-200 status; a body that is not an object with `"jsonrpc":"2.0"`, `"id"` 1 and exactly one of a present `"result"` or an `"error"` object with a numeric code and a string message) is `rpc: bad reply from the agent: <reason>` on stderr, exit 15, never 0. `params-json` is an object or an array; `-` reads it from stdin; omitted means no params; `--timeout DUR` (default 30 s) bounds the call. The token never appears in output, errors or help: it is redacted from every printed line. Examples:
 
@@ -2658,7 +2658,8 @@ AQ20 walk starts at Rajaxx with `--gm-clear-boss kurinnaxx` so Kurinnaxx is dead
   leg is its row number or its name. **Whole packs:** each group expands to every pack its row clears (the trash check's rule: the row's
   entries and its reach) and each pack to all its members, a `creature_groups` AGGRO_TOGETHER group and both directions of every aggro
   link, wherever the members stand (`internal/worldspawn` packs, the pull estimator's model). The packs come from the world export
-  under `<dir>/../tools/dungeongen/testdata/map<N>` (`--gm-clear-spawns DIR` names another).
+  under `~/.local/share/turtle-agent/world/map<N>` (the per-user data dir an installed binary reads; a checkout's
+  `<dir>/../tools/dungeongen/testdata/map<N>` is the fallback; `--gm-clear-spawns DIR` names another).
 - **Mechanism:** every expected member of a pack gets one entry. The commander visits the pack's stops (`.go xyz` to a member's spawn
   point; a pack wider than the 100 yd a stop covers gets several), reads the units its client holds within 150 yd, and for each live
   member whose spawn guid and entry match calls the agent's `gm_kill` RPC: it selects the creature by guid, waits until the server shows
@@ -2802,46 +2803,68 @@ instances). It reads `<walk-dir>/targets.txt`, one goal per line:
 # id   server          slot holder goal        -- raid-walk args...
 a      tortoise-test2  1    zg37-a full        -- zul_gurub --dir /plans --hires roster-best.json --sql zg.sql
 b      tortoise-test2  2    zg37-b boss:14515  -- zul_gurub --dir /plans --hires roster.json --sql zg.sql --from step 405
-c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /plans --hires roster.json
+c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /plans --hires roster.json --sql zg.sql
 ```
 
 - **Targets.** Blank lines and `#` lines are skipped. The header is exactly `id server slot holder goal --`; the rest
   is the raid-walk args, starting with the plan. A goal is `full` (walk to the plan's end), `leg:<L>` (`--until "leg
-  L"`) or `boss:<ENTRY>` (`--until boss-done`, done when that boss's `boss_kills` entry reads killed). An id may
-  repeat: its lines are walked in file order, and a met goal advances to the next line. `--from` in a line is the
-  goal's own start (first placement); a restart inside the goal starts at the furthest step the run reached.
-  `--server/--slot/--holder/--until/--place/--reuse-instance/--out` are managed and dropped if present; slot 3 and
-  `--instance-cap-unsafe` are refused before anything runs.
+  L"`) or `boss:<ENTRY>` (`--until boss-done`, done when that boss's `boss_kills` entry reads killed, whatever the
+  exit code — an incident after the kill, 19, still counts; a full clear the same). An id may repeat: its lines are
+  walked in file order, and a met goal advances to the next line. `--sql FILE` is required: every goal may be
+  re-placed, and raid-walk refuses `--place` without it. `--from` in a line is the goal's own start (a restart with
+  no step reached uses it); a restart inside the goal starts at the furthest step the run reached, and never sends
+  `--reuse-instance` without a `--from`/`--place` (raid-walk refuses that combination).
+  `--server/--slot/--holder/--until/--place/--reuse-instance/--out` are managed and dropped if present; slot 3,
+  `--instance-cap-unsafe` and `--inject` are refused before anything runs. Two ids may not name the same server and
+  slot: one slot runs one walk at a time.
 - **Instance cap.** `--instance-cap-per-account N` is passed to every raid-walk it starts; without the flag each walk
   resolves the target server's entry in `instance-cap-per-account.json` beside the slots file and then the stock 5.
+  The per-account gates keep one place of headroom (below `N-1`), and a `--reuse-instance` placement that re-hires
+  records the new accounts for the instance it reuses (the core counts an instance id once per account).
 - **Keep running.** On ANY end (any exit code, including the walk's own `.bot run stop` exit 0), on a used-up restart
   budget, or on a **stall** (no `TBM:RUN` step and no hostile HP change in `run.log`/`frames.jsonl` for `--stall`,
   default 15m) it stops the walk (SIGTERM; never `.bot run stop`), tears the slot down, picks a new `--out`
   (`<walk-dir>/<id>-<n>`), and re-places: the same instance first (`--place --from "step N" --reuse-instance`), a
   fresh instance only when that placement failed (the old bind is gone). A legitimate instance-cap wait (`earliest
-  free time` in `run.log`) is not a stall. Exit 2 stops that id (bad arguments); other exits re-place with a backoff
-  (20 s doubling to 10 min after fast failures). Exit 26 keeps its cap wait and re-places later.
+  free time` as the run's last line) is not a stall; its stall clock starts when the wait ends. Exit 2 (the walk
+  refused its arguments) and exit 29 (the placement failed every try in the same instance; a fresh-instance retry
+  would only burn the hourly budget) stop that id with an `ESCALATE` line and no retry, and so does exit 15 three
+  times (the slot's lease is held by another holder). Other exits re-place with a backoff of 20 s, 1 m, 2 m, 5 m and
+  then 10 m per consecutive attempt that reached no further step; a step further resets it. Exit 26 keeps its cap
+  wait and re-places later.
 - **Teardown.** `teardown <out>/slot`; when the lease is still held or the teardown failed, a second run with
   `--release-anyway` (the brief's "twice if the lease is kept"). The walk's own teardown has already released the
-  lease in the normal case. A teardown is only done when it is verified: the walk's process is gone **and** `lease
-  list` says the slot's lease is released (a lease it cannot verify counts as held). A teardown that fails keeps the
-  run active — same `--out`, no relaunch on that slot, no `YIELD-DONE` — and the next tick retries it; after three
-  failed ticks the autopilot writes `ESCALATE teardown <raid> <slot>` to `EVENTS.txt` and `status.txt` and leaves the
-  slot alone until a person clears it (no relaunch, no further teardown, no `YIELD-DONE`).
-- **Files.** `<walk-dir>/EVENTS.txt` gets one line per action (UTC, id, action, reason); `status.txt` is rewritten
-  every `--status-every` (1m): id, goal, attempt, out, state, step, progress age, reuse (an escalated slot is one
-  `ESCALATE teardown <raid> <slot>` line). `<id>-<n>.out` is the walk's own stdout/stderr; `autopilot.log` is the
-  detached supervisor's.
-- **Detached and YIELD.** By default the launcher re-execs itself with `setsid` and returns (pid + log); the supervisor
-  writes `autopilot.pid` and takes an exclusive `flock` on `<walk-dir>/autopilot.lock` for its lifetime, so a second
-  start on the same walk dir refuses (exit 2) instead of running beside it — the pid file is informational. The OS
-  drops the lock when the process ends, so a crash leaves no stale guard. `--foreground` runs it in place. A `YIELD`
-  file in the walk dir tears every run down, releases every lease, writes `YIELD-DONE` and exits 0; SIGINT/SIGTERM
-  does the same without `YIELD-DONE`. A `YIELD` whose teardown does not verify writes no `YIELD-DONE` (the event log
-  says why).
+  lease in the normal case. A teardown is only done when it is verified: the walk's process **and its whole process
+  group** are gone (a login child left behind counts) **and** `lease list` says the slot's lease is released (a lease
+  it cannot verify counts as held). A teardown that fails keeps the run active — same `--out`, no relaunch on that
+  slot, no `YIELD-DONE` — and the next tick retries it; after three failed ticks the autopilot writes `ESCALATE
+  teardown <raid> <slot>` to `EVENTS.txt` and `status.txt` and leaves the slot alone until a person clears it (no
+  relaunch, no further teardown, no `YIELD-DONE`). The stops and teardowns of the ids run at the same time, so one
+  slow slot never delays another.
+- **Durable state.** `<walk-dir>/autopilot-state.json` is rewritten atomically (temp + rename) on every transition:
+  per id its current goal, the goals met, the last reached step, the reuse/fresh decision, the attempt number and the
+  child's pid/out dir. A start loads it and reconciles it with the attempts' `summary.json` and the slots' leases: a
+  goal the last run met before a crash is advanced, not walked again; a live walk of ours on its slot (its
+  `<out>/walk.pid` is alive and the lease is ours) is adopted and watched as the current run. A slot that is not ours
+  — a lease held by another holder, or a live walk that is not ours — refuses that id with an `ESCALATE start` line
+  and launches nothing on it.
+- **Files.** `<walk-dir>/EVENTS.txt` gets one line per action (UTC, id, action, reason); `status.txt` is written at
+  start and every `--status-every` (1m): id, goal, attempt, out, state, step, progress age, reuse (an escalated id is
+  one `ESCALATE <kind> <raid> <slot>: <reason>` line). `<id>-<n>.out` is the walk's own stdout/stderr; `autopilot.log`
+  is the detached supervisor's; the walk writes its own pid to `<out>/walk.pid`.
+- **Detached and YIELD.** By default the launcher re-execs itself with `setsid`, waits until the child holds the lock
+  (its pid file names it) and returns (pid + log); a child that exits first reports its refusal instead. The
+  supervisor writes `autopilot.pid` and takes an exclusive `flock` on `<walk-dir>/autopilot.lock` for its lifetime,
+  so a second start on the same walk dir refuses (exit 2) instead of running beside it — the pid file is
+  informational. The OS drops the lock when the process ends, so a crash leaves no stale guard. `--foreground` runs
+  it in place. A `YIELD` file in the walk dir (checked at least once a second) tears every run down, releases every
+  lease, writes `YIELD-DONE` and exits 0; SIGINT/SIGTERM does the same without `YIELD-DONE`. A stale `YIELD-DONE` is
+  removed at start and before a new YIELD's shutdown; a `YIELD` whose teardown does not verify writes no `YIELD-DONE`
+  (the event log says why).
 - **Dry run.** `--dry-run` validates `targets.txt` and prints each goal's first command; nothing is launched.
-- **Tests.** The decision rule is pure (`internal/raidwalk/autopilot.go`): exit 0 after a run stop, restarts 3/3, a
-  65-minute no-progress fight and a failed placement are the walk 37 fixtures. `--poll`, `--stall`, `--settle` and
+- **Tests.** The decision rule is pure (`internal/raidwalk/autopilot.go`): exit 0 after a run stop, a 65-minute
+  no-progress fight, a failed placement, exit 2/29 and three exit 15s are the walk 37 fixtures. The command's tests
+  drive the real launch -> exit -> next-args path through a stub walk. `--poll`, `--stall`, `--settle` and
   `--status-every` are the timings; `--binary` picks the turtle-agent the walks run.
 ### Raid suite
 
