@@ -801,7 +801,14 @@ func (s *autoSupervisor) noteTargetsStat() {
 func (s *autoSupervisor) reloadTargets() {
 	path := filepath.Join(s.o.walkDir, autoTargetsFile)
 	st, err := os.Stat(path)
-	if err != nil || (st.ModTime().Equal(s.targetsMod) && st.Size() == s.targetsSize) {
+	if err != nil {
+		if s.targetsWarn != err.Error() {
+			s.targetsWarn = err.Error()
+			s.event("all", "targets", fmt.Sprintf("targets.txt is unreadable, keeping the %d loaded target(s): %v", len(s.stateList()), err))
+		}
+		return
+	}
+	if st.ModTime().Equal(s.targetsMod) && st.Size() == s.targetsSize {
 		return
 	}
 	targets, err := readAutoTargets(s.o.walkDir)
