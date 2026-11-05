@@ -2645,7 +2645,10 @@ AQ20 walk starts at Rajaxx with `--gm-clear-boss kurinnaxx` so Kurinnaxx is dead
   leg is its row number or its name. **Whole packs:** each group expands to every pack its row clears (the trash check's rule: the row's
   entries and its reach) and each pack to all its members, a `creature_groups` AGGRO_TOGETHER group and both directions of every aggro
   link, wherever the members stand (`internal/worldspawn` packs, the pull estimator's model). The packs come from the world export
-  under `<dir>/../tools/dungeongen/testdata/map<N>` (`--gm-clear-spawns DIR` names another).
+  under `<dir>/../tools/dungeongen/testdata/map<N>` (`--gm-clear-spawns DIR` names another). A row whose plan attaches a **patrol**
+  (`patrol.source`) also clears that patrol's own loop — the `creature_movement` guid the source names, or, when it names none, a path
+  equal point for point — with the loop's formation (every world patrol on the same path walks it too). Never a patrol that merely
+  shares the entry: ZG's 11352 walks seven loops, and matching by entry and distance killed other legs' patrollers.
 - **Mechanism:** every expected member of a pack gets one entry. The commander visits the pack's stops (`.go xyz` to a member's spawn
   point; a pack wider than the 100 yd a stop covers gets several), reads the units its client holds within 150 yd, and for each live
   member whose spawn guid and entry match calls the agent's `gm_kill` RPC: it selects the creature by guid, waits until the server shows
