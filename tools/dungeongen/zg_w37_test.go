@@ -417,12 +417,29 @@ func TestZgW37PatrolPullsClearOfLaterPacks(t *testing.T) {
 		group int
 	}{
 		{"high_priest_venoxis", 10}, {"high_priest_venoxis", 18}, {"high_priest_venoxis", 19},
-		{"high_priest_thekal", 3}, {"high_priestess_arlokk", 21},
+		{"high_priest_thekal", 3}, {"high_priestess_arlokk", -1}, // the patrol group is found by its patrol block (its pull number moved with the 2026-11-05 re-route)
 	} {
 		leg, legNo := zgW37LegByName(t, p, want.leg)
 		rows := zgW37BuildRows(t, p, cs, legNo)
 		where := fmt.Sprintf("%s pull group %d", want.leg, want.group)
-		g := &leg.PullGroups[want.group]
+		var g *dungeon.PullGroup
+		groupNo := want.group
+		if want.group >= 0 {
+			g = &leg.PullGroups[want.group]
+		}
+		if want.group < 0 {
+			for i := range leg.PullGroups {
+				if leg.PullGroups[i].Patrol != nil {
+					g = &leg.PullGroups[i]
+					groupNo = i
+					where = fmt.Sprintf("%s patrol pull group %d", want.leg, i)
+					break
+				}
+			}
+		}
+		if g == nil {
+			t.Fatalf("%s: no pull group found", where)
+		}
 		if !g.StandPull {
 			t.Errorf("%s: a patrol row is not a stand pull: the party walks to its DB spawn and the exporter cuts approach paths through the pack field", where)
 			continue
@@ -482,7 +499,7 @@ func TestZgW37PatrolPullsClearOfLaterPacks(t *testing.T) {
 		found := -1
 		for i := range rows.rows {
 			s := rows.rows[i]
-			if s.Kind == planexport.KindPull && strings.HasPrefix(s.Comment, fmt.Sprintf("pull group %d", want.group)) {
+			if s.Kind == planexport.KindPull && strings.HasPrefix(s.Comment, fmt.Sprintf("pull group %d", groupNo)) {
 				found = i
 			}
 		}

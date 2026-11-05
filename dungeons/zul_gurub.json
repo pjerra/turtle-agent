@@ -1173,7 +1173,7 @@
           ],
           "radius": 6.5,
           "approach": [
-            {"x": -11704.277, "y": -1851.5815, "z": 40.715126}
+            {"x": -11700.538, "y": -1839.5809, "z": 42.402306}
           ]
         },
         {
@@ -1184,7 +1184,7 @@
           ],
           "radius": 2.2,
           "approach": [
-            {"x": -11635.779, "y": -1848.5455, "z": 40.633053}
+            {"x": -11621.561, "y": -1848.6757, "z": 41.266438}
           ]
         },
         {
@@ -1196,7 +1196,7 @@
           ],
           "radius": 7.5,
           "approach": [
-            {"x": -11601.235, "y": -1814.5369, "z": 42.29896}
+            {"x": -11589.852, "y": -1816.2811, "z": 41.735485}
           ]
         },
         {
@@ -1206,7 +1206,7 @@
           ],
           "radius": 1,
           "approach": [
-            {"x": -11595.546, "y": -1807.892, "z": 41.25699}
+            {"x": -11583.939, "y": -1798.6742, "z": 46.901524}
           ]
         },
         {
@@ -1218,7 +1218,7 @@
           ],
           "radius": 6.9,
           "approach": [
-            {"x": -11575, "y": -1793, "z": 50.6}
+            {"x": -11562.221, "y": -1794.5469, "z": 56.947502}
           ]
         },
         {
@@ -1228,7 +1228,7 @@
           ],
           "radius": 1,
           "approach": [
-            {"x": -11562, "y": -1782, "z": 55.84}
+            {"x": -11549.356, "y": -1790.7802, "z": 63.205063}
           ]
         },
         {
@@ -1245,9 +1245,9 @@
           ],
           "radius": 18,
           "approach": [
-            {"x": -11572.7, "y": -1794.9, "z": 53},
-            {"x": -11595.5, "y": -1807.9, "z": 41.3},
-            {"x": -11576, "y": -1778, "z": 46.3}
+            {"x": -11571.2, "y": -1783.2001, "z": 50.925404},
+            {"x": -11584, "y": -1764.8, "z": 39.425404},
+            {"x": -11593.771, "y": -1753.653, "z": 39.551548}
           ],
           "stand_pull": true,
           "max_bodies": 9
@@ -1262,7 +1262,7 @@
           ],
           "radius": 7.6,
           "approach": [
-            {"x": -11573.13, "y": -1754.6578, "z": 40.149597}
+            {"x": -11564.237, "y": -1738.7512, "z": 39.25584}
           ]
         },
         {
@@ -1274,161 +1274,9 @@
           ],
           "radius": 2.7,
           "approach": [
-            {"x": -11627.513, "y": -1702.9896, "z": 39.1019}
-          ]
-        },
-        {
-          "entries": [11353, 11353, 11365, 11365, 11365, 11365],
-          "positions": [
-            {"x": -11585.8, "y": -1663.11, "z": 51.11},
-            {"x": -11588, "y": -1663.91, "z": 51.62},
-            {"x": -11576.6, "y": -1666.62, "z": 49.26},
-            {"x": -11573.4, "y": -1665.55, "z": 49.61},
-            {"x": -11573, "y": -1667.54, "z": 49.47},
-            {"x": -11573.4, "y": -1669.59, "z": 49.33}
-          ],
-          "radius": 10.5,
-          "approach": [
-            {"x": -11581.087, "y": -1649.2527, "z": 49.674316}
-          ]
-        },
-        {
-          "entries": [11365, 11365, 11365, 11365, 11339, 11339],
-          "positions": [
-            {"x": -11526.2, "y": -1683.66, "z": 49.38},
-            {"x": -11525, "y": -1685.19, "z": 49.85},
-            {"x": -11524.2, "y": -1683.65, "z": 49.55},
-            {"x": -11523, "y": -1686.1, "z": 50.24},
-            {"x": -11521.2, "y": -1684.87, "z": 50.11},
-            {"x": -11519.9, "y": -1685.07, "z": 50.27}
-          ],
-          "radius": 3.9,
-          "approach": [
-            {"x": -11544.204, "y": -1674.9517, "z": 49.632042}
-          ]
-        },
-        {
-          "entries": [11365, 11365, 11365, 11365],
-          "positions": [
-            {"x": -11519, "y": -1664.11, "z": 71.33},
-            {"x": -11510.4, "y": -1663.15, "z": 71.33},
-            {"x": -11524.2, "y": -1670.44, "z": 71.33},
-            {"x": -11511.1, "y": -1670.26, "z": 71.33}
-          ],
-          "radius": 9.2,
-          "approach": [
-            {"x": -11521.8, "y": -1663.4, "z": 71.3}
-          ]
-        },
-        {
-          "entries": [11339, 11339, 11339, 11339, 11365, 11365, 11365, 11365, 11339, 11339],
-          "positions": [
-            {"x": -11518.3, "y": -1613.51, "z": 71.33},
-            {"x": -11518.3, "y": -1629.19, "z": 71.33},
-            {"x": -11511.3, "y": -1613.84, "z": 71.33},
-            {"x": -11511.4, "y": -1628.43, "z": 71.36},
-            {"x": -11492, "y": -1607.23, "z": 71.33},
-            {"x": -11491.8, "y": -1609.3, "z": 71.33},
-            {"x": -11491.9, "y": -1612.31, "z": 71.33},
-            {"x": -11491.2, "y": -1612.34, "z": 71.33},
-            {"x": -11496.8, "y": -1621.54, "z": 71.33},
-            {"x": -11496.3, "y": -1621.55, "z": 71.33}
-          ],
-          "radius": 14,
-          "approach": [
-            {"x": -11520, "y": -1621.3, "z": 71},
-            {"x": -11505, "y": -1652, "z": 71.3}
-          ],
-          "stand_pull": true,
-          "max_bodies": 14
-        },
-        {
-          "entries": [11353, 11353],
-          "positions": [
-            {"x": -11498.3, "y": -1640.75, "z": 60.43},
-            {"x": -11498.4, "y": -1641.72, "z": 60.43}
-          ],
-          "radius": 6,
-          "approach": [
-            {"x": -11513.4, "y": -1664.6, "z": 71.3}
-          ],
-          "max_bodies": 2
-        },
-        {
-          "entries": [11365, 11365, 11365, 11365],
-          "positions": [
-            {"x": -11525.1, "y": -1582.7, "z": 71.34},
-            {"x": -11511.2, "y": -1580.07, "z": 71.34},
-            {"x": -11523.6, "y": -1573.28, "z": 71.34},
-            {"x": -11511.8, "y": -1573.41, "z": 71.34}
-          ],
-          "radius": 9.4,
-          "approach": [
-            {"x": -11505, "y": -1596, "z": 71.33}
-          ]
-        },
-        {
-          "entries": [11365, 11365, 11365, 11339, 11365],
-          "positions": [
-            {"x": -11534.8, "y": -1613.09, "z": 60.43},
-            {"x": -11536, "y": -1611.98, "z": 60.43},
-            {"x": -11534.6, "y": -1610.75, "z": 60.43},
-            {"x": -11542.2, "y": -1609.78, "z": 60.43},
-            {"x": -11538.1, "y": -1607.61, "z": 60.43}
-          ],
-          "radius": 6,
-          "approach": [
-            {"x": -11546.7, "y": -1630, "z": 60.9}
-          ],
-          "max_bodies": 5
-        },
-        {
-          "entries": [11365, 11365, 11365, 11365, 11339, 11339],
-          "positions": [
-            {"x": -11517.4, "y": -1637.71, "z": 49.63},
-            {"x": -11515.6, "y": -1638.36, "z": 49.63},
-            {"x": -11517.3, "y": -1638.4, "z": 49.63},
-            {"x": -11521.2, "y": -1637.47, "z": 49.61},
-            {"x": -11511.8, "y": -1643.48, "z": 49.63},
-            {"x": -11526.9, "y": -1643.49, "z": 49.53}
-          ],
-          "radius": 10,
-          "approach": [
-            {"x": -11520, "y": -1665, "z": 49.6}
-          ],
-          "max_bodies": 6
-        },
-        {
-          "entries": [11365, 11365, 11365, 11365, 11365, 11365, 11365, 11339, 11339],
-          "positions": [
-            {"x": -11559.7, "y": -1565.21, "z": 49.33},
-            {"x": -11559.4, "y": -1563.97, "z": 49.31},
-            {"x": -11568.5, "y": -1559.21, "z": 49.97},
-            {"x": -11549.3, "y": -1554.1, "z": 50.74},
-            {"x": -11547.4, "y": -1554.03, "z": 50.85},
-            {"x": -11546.5, "y": -1552.91, "z": 51},
-            {"x": -11547.6, "y": -1549.76, "z": 51.27},
-            {"x": -11545.4, "y": -1549.98, "z": 51.33},
-            {"x": -11545.1, "y": -1550.04, "z": 51.34}
-          ],
-          "radius": 17.3,
-          "approach": [
-            {"x": -11551.2, "y": -1563.8, "z": 49.5}
-          ]
-        },
-        {
-          "entries": [11353, 11353, 11365, 11365, 11365, 11365],
-          "positions": [
-            {"x": -11580.1, "y": -1581.38, "z": 49.85},
-            {"x": -11579.8, "y": -1582.05, "z": 49.77},
-            {"x": -11583.4, "y": -1578.33, "z": 50.62},
-            {"x": -11584.2, "y": -1576.76, "z": 50.83},
-            {"x": -11586.7, "y": -1576.85, "z": 51.07},
-            {"x": -11587, "y": -1580.33, "z": 51.41}
-          ],
-          "radius": 5.2,
-          "approach": [
-            {"x": -11567.948, "y": -1574.3823, "z": 49.708595}
+            {"x": -11594.133, "y": -1719.7334, "z": 39.525406},
+            {"x": -11598.666, "y": -1716.5333, "z": 40.125404},
+            {"x": -11627.932, "y": -1685.6764, "z": 39.82167}
           ]
         },
         {
@@ -1440,7 +1288,8 @@
           ],
           "radius": 2.4,
           "approach": [
-            {"x": -11612.098, "y": -1588.4896, "z": 39.402847}
+            {"x": -11626.666, "y": -1642.6667, "z": 39.325405},
+            {"x": -11614.155, "y": -1572.6831, "z": 39.166206}
           ]
         },
         {
@@ -1453,7 +1302,19 @@
           ],
           "radius": 6.7,
           "approach": [
-            {"x": -11625.076, "y": -1582.0726, "z": 39.17823}
+            {"x": -11642.609, "y": -1569.9508, "z": 39.10029}
+          ]
+        },
+        {
+          "entries": [11830, 11351],
+          "positions": [
+            {"x": -11612.5, "y": -1515.44, "z": 43.78},
+            {"x": -11606.1, "y": -1513.56, "z": 45.65}
+          ],
+          "radius": 4,
+          "approach": [
+            {"x": -11615.2, "y": -1526.6667, "z": 42.536133},
+            {"x": -11611.877, "y": -1519.8405, "z": 43.919926}
           ]
         },
         {
@@ -1461,7 +1322,7 @@
           "positions": [
             {"x": -11583, "y": -1528, "z": 51.65}
           ],
-          "radius": 54,
+          "radius": 60,
           "patrol": {
             "entries": [11352],
             "path": [
@@ -1493,21 +1354,88 @@
             "source": "creature_movement 91444 (22 points, 258.9 yd at 1.67 yd/s)"
           },
           "approach": [
-            {"x": -11587.115, "y": -1549.5, "z": 52.615},
-            {"x": -11587, "y": -1542, "z": 53.07}
+            {"x": -11580.5, "y": -1521, "z": 51.619255}
           ],
           "stand_pull": true,
           "max_bodies": 1
         },
         {
-          "entries": [11830, 11351],
+          "entries": [11353, 11353, 11365, 11365, 11365, 11365],
           "positions": [
-            {"x": -11612.5, "y": -1515.44, "z": 43.78},
-            {"x": -11606.1, "y": -1513.56, "z": 45.65}
+            {"x": -11580.1, "y": -1581.38, "z": 49.85},
+            {"x": -11579.8, "y": -1582.05, "z": 49.77},
+            {"x": -11583.4, "y": -1578.33, "z": 50.62},
+            {"x": -11584.2, "y": -1576.76, "z": 50.83},
+            {"x": -11586.7, "y": -1576.85, "z": 51.07},
+            {"x": -11587, "y": -1580.33, "z": 51.41}
           ],
-          "radius": 4,
+          "radius": 5.2,
           "approach": [
-            {"x": -11612.42, "y": -1532.3314, "z": 40.546005}
+            {"x": -11617.066, "y": -1546.1333, "z": 40.836132},
+            {"x": -11612, "y": -1607.7334, "z": 39.525406},
+            {"x": -11594.133, "y": -1611.2001, "z": 47.625404},
+            {"x": -11584.49, "y": -1585.2047, "z": 50.59876}
+          ]
+        },
+        {
+          "entries": [11365, 11365, 11365, 11365, 11365, 11365, 11365, 11339, 11339],
+          "positions": [
+            {"x": -11559.7, "y": -1565.21, "z": 49.33},
+            {"x": -11559.4, "y": -1563.97, "z": 49.31},
+            {"x": -11568.5, "y": -1559.21, "z": 49.97},
+            {"x": -11549.3, "y": -1554.1, "z": 50.74},
+            {"x": -11547.4, "y": -1554.03, "z": 50.85},
+            {"x": -11546.5, "y": -1552.91, "z": 51},
+            {"x": -11547.6, "y": -1549.76, "z": 51.27},
+            {"x": -11545.4, "y": -1549.98, "z": 51.33},
+            {"x": -11545.1, "y": -1550.04, "z": 51.34}
+          ],
+          "radius": 17.3,
+          "approach": [
+            {"x": -11556.882, "y": -1559.0911, "z": 49.724884}
+          ]
+        },
+        {
+          "entries": [11353, 11353, 11365, 11365, 11365, 11365],
+          "positions": [
+            {"x": -11585.8, "y": -1663.11, "z": 51.11},
+            {"x": -11588, "y": -1663.91, "z": 51.62},
+            {"x": -11576.6, "y": -1666.62, "z": 49.26},
+            {"x": -11573.4, "y": -1665.55, "z": 49.61},
+            {"x": -11573, "y": -1667.54, "z": 49.47},
+            {"x": -11573.4, "y": -1669.59, "z": 49.33}
+          ],
+          "radius": 10.5,
+          "approach": [
+            {"x": -11584, "y": -1621.3334, "z": 49.625404},
+            {"x": -11584, "y": -1642.6667, "z": 50.025406},
+            {"x": -11579.772, "y": -1660.2208, "z": 49.853245}
+          ]
+        },
+        {
+          "entries": [11365, 11365, 11365, 11365, 11339, 11339],
+          "positions": [
+            {"x": -11526.2, "y": -1683.66, "z": 49.38},
+            {"x": -11525, "y": -1685.19, "z": 49.85},
+            {"x": -11524.2, "y": -1683.65, "z": 49.55},
+            {"x": -11523, "y": -1686.1, "z": 50.24},
+            {"x": -11521.2, "y": -1684.87, "z": 50.11},
+            {"x": -11519.9, "y": -1685.07, "z": 50.27}
+          ],
+          "radius": 3.9,
+          "approach": [
+            {"x": -11528.932, "y": -1682.8286, "z": 48.93757}
+          ]
+        },
+        {
+          "entries": [15067],
+          "positions": [
+            {"x": -11464, "y": -1650.71, "z": 49.63}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -11472.267, "y": -1665.8667, "z": 49.625404},
+            {"x": -11466.873, "y": -1655.9774, "z": 49.625404}
           ]
         },
         {
@@ -1522,21 +1450,124 @@
           ],
           "radius": 12.7,
           "approach": [
-            {"x": -11612, "y": -1607.7, "z": 39.5},
-            {"x": -11562.7, "y": -1578.7, "z": 49.6},
-            {"x": -11493.3, "y": -1575.5, "z": 49.6},
-            {"x": -11470.577, "y": -1578.4039, "z": 49.65362}
+            {"x": -11456.237, "y": -1609.8822, "z": 49.069748}
           ]
         },
         {
-          "entries": [15067],
+          "entries": [11365, 11365, 11365, 11365, 11353, 11353],
           "positions": [
-            {"x": -11464, "y": -1650.71, "z": 49.63}
+            {"x": -11498.3, "y": -1640.75, "z": 60.43},
+            {"x": -11498.4, "y": -1641.72, "z": 60.43},
+            {"x": -11495.2, "y": -1616.76, "z": 60.4903},
+            {"x": -11495.2, "y": -1621.51, "z": 60.4075},
+            {"x": -11496, "y": -1619.55, "z": 60.4075},
+            {"x": -11495.1, "y": -1618.88, "z": 60.4074}
           ],
-          "radius": 1,
+          "radius": 16,
           "approach": [
-            {"x": -11465.812, "y": -1630.7922, "z": 49.673286}
+            {"x": -11544, "y": -1575.7334, "z": 49.63613},
+            {"x": -11561.866, "y": -1576.8, "z": 49.63613},
+            {"x": -11508.533, "y": -1624.8, "z": 62.325405},
+            {"x": -11502.237, "y": -1625.6943, "z": 60.425407}
+          ],
+          "max_bodies": 6
+        },
+        {
+          "entries": [11339, 11339, 11339, 11339],
+          "positions": [
+            {"x": -11518.3, "y": -1613.51, "z": 71.33},
+            {"x": -11518.3, "y": -1629.19, "z": 71.33},
+            {"x": -11511.3, "y": -1613.84, "z": 71.33},
+            {"x": -11511.4, "y": -1628.43, "z": 71.36}
+          ],
+          "radius": 10,
+          "approach": [
+            {"x": -11540, "y": -1621, "z": 71.315254}
+          ],
+          "stand_pull": true,
+          "max_bodies": 4
+        },
+        {
+          "entries": [11339, 11339, 11365, 11365, 11365, 11365],
+          "positions": [
+            {"x": -11492, "y": -1607.23, "z": 71.33},
+            {"x": -11491.8, "y": -1609.3, "z": 71.33},
+            {"x": -11491.9, "y": -1612.31, "z": 71.33},
+            {"x": -11491.2, "y": -1612.34, "z": 71.33},
+            {"x": -11496.8, "y": -1621.54, "z": 71.33},
+            {"x": -11496.3, "y": -1621.55, "z": 71.33}
+          ],
+          "radius": 9,
+          "approach": [
+            {"x": -11530.133, "y": -1634.9333, "z": 71.32541},
+            {"x": -11498, "y": -1645, "z": 71.32541}
+          ],
+          "stand_pull": true,
+          "max_bodies": 6
+        },
+        {
+          "entries": [11365, 11365, 11365, 11365],
+          "positions": [
+            {"x": -11525.1, "y": -1582.7, "z": 71.34},
+            {"x": -11511.2, "y": -1580.07, "z": 71.34},
+            {"x": -11523.6, "y": -1573.28, "z": 71.34},
+            {"x": -11511.8, "y": -1573.41, "z": 71.34}
+          ],
+          "radius": 9.4,
+          "approach": [
+            {"x": -11498.666, "y": -1621.3334, "z": 71.32541},
+            {"x": -11514.748, "y": -1582.4548, "z": 71.33613}
           ]
+        },
+        {
+          "entries": [11365, 11365, 11365, 11365],
+          "positions": [
+            {"x": -11519, "y": -1664.11, "z": 71.33},
+            {"x": -11510.4, "y": -1663.15, "z": 71.33},
+            {"x": -11524.2, "y": -1670.44, "z": 71.33},
+            {"x": -11511.1, "y": -1670.26, "z": 71.33}
+          ],
+          "radius": 9.2,
+          "approach": [
+            {"x": -11500.8, "y": -1604.8, "z": 71.32541},
+            {"x": -11499.733, "y": -1630.9333, "z": 71.32541},
+            {"x": -11513.413, "y": -1661.6633, "z": 71.32541}
+          ]
+        },
+        {
+          "entries": [11365, 11365, 11365, 11339, 11365],
+          "positions": [
+            {"x": -11534.8, "y": -1613.09, "z": 60.43},
+            {"x": -11536, "y": -1611.98, "z": 60.43},
+            {"x": -11534.6, "y": -1610.75, "z": 60.43},
+            {"x": -11542.2, "y": -1609.78, "z": 60.43},
+            {"x": -11538.1, "y": -1607.61, "z": 60.43}
+          ],
+          "radius": 6,
+          "approach": [
+            {"x": -11533.066, "y": -1636.8, "z": 71.32541},
+            {"x": -11508.533, "y": -1624.8, "z": 62.325405},
+            {"x": -11520, "y": -1639.2001, "z": 57.725407},
+            {"x": -11535.724, "y": -1616.4725, "z": 60.425407}
+          ],
+          "max_bodies": 5
+        },
+        {
+          "entries": [11365, 11365, 11365, 11365, 11339, 11339],
+          "positions": [
+            {"x": -11517.4, "y": -1637.71, "z": 49.63},
+            {"x": -11515.6, "y": -1638.36, "z": 49.63},
+            {"x": -11517.3, "y": -1638.4, "z": 49.63},
+            {"x": -11521.2, "y": -1637.47, "z": 49.61},
+            {"x": -11511.8, "y": -1643.48, "z": 49.63},
+            {"x": -11526.9, "y": -1643.49, "z": 49.53}
+          ],
+          "radius": 10,
+          "approach": [
+            {"x": -11520, "y": -1599.2, "z": 55.536133},
+            {"x": -11517.733, "y": -1633.8556, "z": 49.625404}
+          ],
+          "max_bodies": 6
         }
       ],
       "skip": [14758, 15091],
@@ -1558,7 +1589,7 @@
         "summon_open_step": 1
       },
       "notes": [
-        "Pull group 12 (27 units): walk 29 validates this pull live; revert to split pulls if the raid cannot hold 27.",
+        "ARLOKK RE-ROUTE (2026-11-05, leg 4; research/zg-w38/arlokk-rows.txt and research/zg-bosses/ARLOKK.md §0-1): the walk climbed the temple four times over (34 of 134 rows a hop over 40 yd or a z jump over 6 yd; step 290 climbed z 49.9 to 71.3 in 21 yd, steps 292-299 crossed the 71 terrace with 46/34/35/49/36 yd hops that cross each other, and steps 299-326 bounced between z 50, 60 and 71; the raids stalled at 292-294). The pulls are in one ascent now, each floor's groups in walking order: bottom floor 0-22 (the west stair 3-5 is a spur up to z 65 and back), the 21 patrol from its loop's ledge, the z 50 landing 18 then the ring 17, 9, 10, 24 and 23, the z 60 landing 13, the z 71 top's west 4 (51353) and east 6 (51369) as two stand pulls, then 14 at the north edge and 11 at the south edge, then the 15 landing and the 16 ledge by the arena stair. Every approach point is a navmesh point of the walk, each group's staging point is on its pack's floor, and the leg's walk is 2099 yd against 3582. The 10-body 71 pack is two stand pulls under the ceiling, each stand 23-28 yd from its formation and out of the other's: west 4x11339 from -11540 -1621, east 2x11339+4x11365 from -11498 -1645, max_bodies 4 and 6, radii 10 and 9 so the split is not undone by an auto radius. The z 60 landing's row now carries its whole formation (4 Panthers 49343-49346 + the two Blood Drinkers 51594/51595, radius 16, max_bodies 6): the old z 71 row's radius 14 owned the Panthers through the floor and the split would have left them to nobody. The 21 patrol's radius is 60 (its spawn 91444 lies 54 yd 3D from the row) and its stand -11580.5 -1521 is on the loop's z 51 ledge, 8.6 yd from a loop point with line of sight, so the stand pull sees it come. The gong's stand is the boss fight point in the arena; the run leader walks to the gong itself. Test: TestZulGurubArlokkLegRoute, TestZulGurubArlokkPatrolStandInShot (tools/dungeongen).",
         "WALK 29 FIX 4 (2026-11-03, leg 4; research/zg-w29/WALK29-FIX-PLAN.md §2): step 295's move to the bats' approach walked the party through two leg-7 tiger formations no leg-4 row owned: on arrival (b 00:37:52) formation 49699 (Tigers 49699/49700, Axe Thrower 91464, Witch Doctor 91465; its spawn 18.6 yd from the approach) and 49716 (Tigers 49716/49717, Axe Thrower 91511, Priest 91512) plus the Bloodseeker bats 51873 and their summons were 12 bodies at once; peak 14-15, 53/3/9/22 dead in b/b-r1/g/g-r1. The two formations and the patroller 91435 (11352, movement 2, 8.8 yd from them) are one leg-4 row now, ahead of the bats: 9 bodies, max_bodies 9, stand_pull. Its stand -11576 -1778 46.3 (walked by the party in b/g) is 21.7 yd from the nearest tiger and 43.5 yd from the bat formation; it lies on the ramp down from group 6 (-11562.6 -1792.5 z 56.4). The leg-7 group 38 and its 4-point approach chain are gone. Today's bats approach -11573.13 -1754.66 keeps a dead neighbourhood but is still 18.6 yd from 49699's spawn: it is used only after the tigers are dead, as the row now ensures.",
         "WALK 29 FIX 4b (2026-11-03, leg 4; research/zg-w29/WALK29-FIX-PLAN.md §2, lead decision): the 27-unit row (walk 28's answer to the 11-20 yd cluster) did not hold live: walk 29 wiped at 14 engaged (b-r1 01:16:37-01:17:46, 20 dead in 55 s) and at 11 (g 01:17:03, 18 dead in 40 s), and its 34 yd circle let the run leader pick a unit on another height level, which walked the raid down into the next packs (g). The pieces that held were formation-sized (g, g-r1: 4-8 bodies). The row is split per formation, not walk 28's stampede split: (A) upper B + upper east as one row of 10 (formation 51353's 4 Shadow Hunters + 51369's 4 Panthers and 2 Shadow Hunters, 16.8 yd apart and inseparable), from the upper stand -11505 -1652 71.3 (24.4 yd 3D from its nearest spawn, 35.3 from the row centre, 72.2 from upper north; the old -11505 -1608.5 stood 8.3 yd from 51353 and 22.8 from upper north), radius 12 (one member of each formation; it stays 12.8 yd 3D from middle east's panthers), max_bodies 10, stand_pull so the hold point and the three Polymorphs run; (B) middle east (formation 49343: 4 Panthers + the two Blood Drinkers 51594/51595 that walk 25's radius missed), from the upper edge -11509 -1603 71.33 (23.5 yd 3D), max_bodies 6, 11353 kill_first; (C) upper north, unchanged from -11505 -1596 71.33; (D) middle west (formation 49329, 5) from -11546.7 -1630 60.9 on the middle ring (20.7 yd 3D), max_bodies 5; (E) lower (formation 51365, 6) from -11520 -1665 49.6 (22.6-27.6 yd), max_bodies 6. Every row has its own approach; the D and E stands sit on their pack's own level, and the C -\u003e D walk is the middle-ring route (148.5 yd; the straight drop has no navmesh link), \u003e= 23 yd from E (the 30.6 yd D/E pair needs the off-tank on the stand)."
       ]

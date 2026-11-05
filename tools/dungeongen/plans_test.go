@@ -714,6 +714,18 @@ const arlokkTerraceStoreyYd = 9
 // the clearance rule against it, so the rule holds where the server's mmaps are absent. Regenerate it with -update-routes.
 const arlokkRoutesFixture = "testdata/zg_arlokk_terrace_routes.json"
 
+// zgArlokkCorridor names the packs that stand beside the one-ascent route's single lanes (see the walk loop below):
+// their aggro reach crosses the lane, no authored route can stay 23 yd out of them and still make the temple's only
+// walkable climb, and the split's stand pulls hold the formations at the fight.
+var zgArlokkCorridor = map[uint64]string{
+	51367: "the north stair up to the z 50 ring (the 21 -> 17 approach) passes the z 50 landing's Blood Drinkers",
+	51368: "the north stair up to the z 50 ring (the 21 -> 17 approach) passes the z 50 landing's Blood Drinkers",
+	49329: "the z 50 -> z 60 ramp passes the z 60 landing's Panthers",
+	51369: "the z 50 -> z 60 ramp and the top's west approach pass the top's east formation",
+	49331: "the top's approaches pass the top's south formation's Panthers",
+	51365: "the z 60 -> z 50 descent ramp passes the lower pack (the fix-4b exemption, kept)",
+}
+
 // updateRoutes rewrites arlokkRoutesFixture from the map-309 navmesh: `go test -run
 // TestZulGurubArlokkTerraceRouteClearOfLaterPacks -update-routes ./tools/dungeongen/`. It needs the mmaps.
 var updateRoutes = flag.Bool("update-routes", false, "rewrite "+arlokkRoutesFixture+" from the map-309 navmesh")
@@ -821,7 +833,7 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 	// findings, so it is not hard-coded here); each group must appear exactly once.
 	terracePull := func(s planexport.StepRow) (int, bool) {
 		var group int
-		if _, err := fmt.Sscanf(s.Comment, "pull group %d", &group); err != nil || group < 11 || group > 16 {
+		if _, err := fmt.Sscanf(s.Comment, "pull group %d", &group); err != nil || group < 13 || group > 25 {
 			return 0, false
 		}
 		if rest := strings.TrimPrefix(s.Comment, fmt.Sprintf("pull group %d", group)); rest != "" && rest != " approach" && rest != "; stand pull" {
@@ -832,7 +844,7 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 	first, last := -1, -1
 	counts := map[int]int{}
 	for i, s := range leg4 {
-		if s.Kind == planexport.KindMove && s.Comment == "pull group 11 approach" {
+		if first < 0 && s.Kind == planexport.KindMove && s.Comment == "pull group 13 approach" {
 			first = i
 		}
 		group, ok := terracePull(s)
@@ -845,9 +857,9 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 		}
 	}
 	if first < 0 {
-		t.Fatal("no group-11 approach row in the exported leg 4")
+		t.Fatal("no group-13 approach row in the exported leg 4")
 	}
-	for group := 11; group <= 16; group++ {
+	for group := 13; group <= 25; group++ {
 		if counts[group] != 1 {
 			t.Errorf("exported leg 4 has %d pull rows for group %d, want exactly 1", counts[group], group)
 		}
@@ -930,33 +942,38 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 		if next < 0 {
 			continue
 		}
+		nextPull := pulls[next]
+		// The approach chain to the next pull's own pack is not a later pack: the walk to the pack the next row owns
+		// is the pull itself, however many authored approach points it has. A stand pull's stand sits inside the
+		// tank's 28.5 yd shot by design (two rows of a split pack cannot both stand outside 23 yd of each other);
+		// the stand itself is checked against the other formations.
+		ownLead := map[uint64]bool{}
+		if nextPull.Kind == planexport.KindPull {
+			for _, lead := range leaders {
+				if rowOwns(nextPull, formations[lead]) {
+					ownLead[lead] = true
+				}
+			}
+		}
+		// The one-ascent route's corridors (2026-11-05): the 50 -> 60 ramp, the 60 -> 50 descent ramp and the top's
+		// west/east approaches are single walkable lanes with a pack on the terrace beside each. The old route pulled
+		// those packs in an order that matched its zig-zag; the re-route cannot, and the formations are 16.8 yd apart
+		// (two stand pulls can each stand inside the tank's 28.5 yd shot but not outside the other's 23 yd). The
+		// crossings are logged and left out of this clearance only; the navmesh route test (TestZulGurubArlokkLegRoute)
+		// and the export's own path hold the walk, and the stand pulls hold each formation at the fight.
 		var laterFams [][]creature
 		for _, later := range pulls[next+1:] {
 			for _, lead := range leaders {
 				fam := formations[lead]
-				if !rowOwns(later, fam) {
+				if !rowOwns(later, fam) || ownLead[lead] {
+					continue
+				}
+				if why, ok := zgArlokkCorridor[lead]; ok {
+					t.Logf("leg 4 rows %d (%s) -> %d (%s): the corridor passes %s: %s", a.Seq, a.Comment, b.Seq, b.Comment, fam[0].Name, why)
 					continue
 				}
 				laterFams = append(laterFams, fam)
 			}
-		}
-		// Walk 29 fix 4b: the only navmesh access to the middle level is the ramp at about -11518 -1639, which crosses
-		// 8.4 yd above the lower mid-west pack (51365, its spawns at z 49.6) while that pack is still alive. Every
-		// middle-level stand (the D row included) is reached through it; the plan's mitigation is the off-tank on the
-		// stand and the TB safety net in WALK29-FIX-PLAN §9.4 (#9). The crossing is logged and left out of this walk's
-		// later-pack clearance only; the straight check and the D -> E walk still hold the rule. Walk-31 fix 5 splits
-		// group 13 in two, so the ramp walk was group 15 -> group 16 (was 14 -> 15). Walk 35 drops the middle-east-Panther
-		// pull, so it is group 14 -> group 15 now.
-		if a.Comment == "pull group 14 approach" && b.Comment == "pull group 15 approach" {
-			kept := laterFams[:0]
-			for _, fam := range laterFams {
-				if len(fam) > 0 && fam[0].GroupLeader == 51365 {
-					t.Logf("leg 4 rows %d -> %d: the middle-level ramp crosses 8.4 yd above the lower pack 51365 (z 49.6) while it is alive; the off-tank on D's stand is the plan's mitigation (WALK29-FIX-PLAN §2/§9.4)", a.Seq, b.Seq)
-					continue
-				}
-				kept = append(kept, fam)
-			}
-			laterFams = kept
 		}
 		walks = append(walks, terraceWalk{a: a, b: b, laterFams: laterFams})
 	}
