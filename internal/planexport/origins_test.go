@@ -131,7 +131,7 @@ func TestSQLUnchangedByOrigins(t *testing.T) {
 		plan string
 		sha  string
 	}{
-		{"zul_gurub", "1578e96420daaece30935eba0b6c44326638664b98f4b17ba257462e1e4bc191"}, // walk-38 review: Jin'do's hall east side (the guard, the north camp's east four, the lone mistresses) is the boss row's adds, the 49363 stand gains a south approach point, the 49185 bat pack is pulled before the north camp; walk 38: the 49363 stand and Jeklik's 49131/49135 patrol split
+		{"zul_gurub", "f3b4231ecaafeccdb213552b442a617f665f7784f9a197a07d349235e9d5e915"}, // walk-38 review: Jin'do's hall east side (the guard, the north camp's east four, the lone mistresses) is the boss row's adds, the 49363 stand gains a south approach point, the 49185 bat pack is pulled before the north camp; walk 38: the 49363 stand and Jeklik's 49131/49135 patrol split
 		{"onyxias_lair", "142c1d58928ad1efd9aca2b773c4762e2ddcbae05c308540080a1fedd6e3b38e"},
 	} {
 		p, err := dungeon.Load(filepath.Join("..", "..", "dungeons", c.plan+".json"))
