@@ -526,6 +526,21 @@ func PlacePoint(rows planexport.Rows, step int) (dungeon.Point, bool) {
 	return dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}, true
 }
 
+// PlaceWalkRow is the recorded walk row a place point came from: a walk/move row whose own point is p (false when no
+// move row stands there). The floor-unknown fallback takes the plan's z only for such a point; a pull stand point or
+// any other row's point is not a recorded walk, so its unknown floor stays a failure.
+func PlaceWalkRow(rows planexport.Rows, p dungeon.Point) (int, bool) {
+	for i, s := range rows.Steps {
+		if !moveRow(s) || !placedRow(s) {
+			continue
+		}
+		if s.X == p.X && s.Y == p.Y && s.Z == p.Z {
+			return i + 1, true
+		}
+	}
+	return 0, false
+}
+
 // routePoints is the route of the corridor: the positioned rows from start to stop, in order (spec 4.3).
 func routePoints(rows planexport.Rows, start, stop int) []dungeon.Point {
 	if start < 1 {

@@ -276,18 +276,54 @@ func TestPlaceFloorUnknownUsesThePlansZ(t *testing.T) {
 	}
 }
 
-// The toolkit's other unknown shape: TT.floorNear found no floor at all, so `floor` is null (a caller standing 0.05
-// above the floor also reads this way). It is "unknown" too, not "the start step's floor was not found" as a failure.
-func TestPlaceFloorNullUsesThePlansZ(t *testing.T) {
+// A reply with no `floor` at all is not the toolkit's "height unknown": it is no answer, and it fails with the
+// message it failed with before the unknown floor was tolerated (a null `floor`, or a caller standing 0.05 above the
+// floor, reads this way).
+func TestPlaceFloorNullFails(t *testing.T) {
 	f, p := newPlaceFixture(t)
 	p.floorVal = func(string) (float64, bool) { return 0, false }
-	f.agent.startReply = zgPlaceReply(t)
-	if code := f.run(context.Background()); code != exitOK {
-		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	code := f.run(context.Background())
+	if code == exitOK {
+		t.Fatalf("exit 0 on a reply with no floor: %s", f.stdout.String())
 	}
-	log, _ := os.ReadFile(filepath.Join(f.out, "run.log"))
-	if !strings.Contains(string(log), "place: floor unknown, using plan z") {
-		t.Fatalf("no floor-unknown line in run.log:\n%s", log)
+	raw, _ := os.ReadFile(filepath.Join(f.out, "summary.json"))
+	if !strings.Contains(string(raw), "the start step's floor was not found (q floor gave none)") {
+		t.Fatalf("no not-found failure in the summary:\n%s", raw)
+	}
+	if len(p.places) != 0 {
+		t.Fatalf("the raid was placed after a reply with no floor:\n%v", p.places)
+	}
+}
+
+// The plan-z fallback is only for a recorded walk row's own point: a pull row's stand point has no walk behind it to
+// vouch for its z, so an unknown floor there still fails (the gate used to accept any placed row, so every pull stand
+// silently took the plan's z).
+func TestPlaceFloorUnknownAtAPullStandDoesNotUseThePlansZ(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	rows, _ := placePlanRows(t)
+	step := 0
+	for i, s := range rows.Steps {
+		if s.Kind == planexport.KindPull && (s.X != 0 || s.Y != 0 || s.Z != 0) {
+			step = i + 1
+			break
+		}
+	}
+	if step == 0 {
+		t.Fatal("the fixture plan has no pull row with a point")
+	}
+	f.opts.from = fmt.Sprintf("step %d", step)
+	p.floorVal = func(string) (float64, bool) { return 0, true } // the toolkit's unknown: a 0.0 floor
+	f.agent.startReply = placeStartReply("zul_gurub", step, len(rows.Steps), len(rows.Steps))
+	code := f.run(context.Background())
+	if code == exitOK {
+		t.Fatalf("exit 0 with an unknown floor at a pull stand point: %s", f.stdout.String())
+	}
+	raw, _ := os.ReadFile(filepath.Join(f.out, "summary.json"))
+	if !strings.Contains(string(raw), "is not a recorded walk row") {
+		t.Fatalf("no floor-unknown failure in the summary:\n%s", raw)
+	}
+	if log, _ := os.ReadFile(filepath.Join(f.out, "run.log")); strings.Contains(string(log), "place: floor unknown, using plan z") {
+		t.Fatalf("a pull stand point took the plan's z:\n%s", log)
 	}
 }
 

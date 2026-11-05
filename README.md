@@ -2287,9 +2287,13 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   value at the core's `INVALID_HEIGHT`, -100000) is the toolkit's *unknown*, not a wrong floor: the toolkit asks the
   caller's `GetClosePoint`, and the core leaves z at 0 when the height lookup finds nothing (an unloaded grid, no
   vmap, the wrong map), so the reply is 0.0 — walk 39 refused Jeklik's steps 44/46/48 as `the start step's floor is
-  0.0, not 130.7` on m910q and test2. The check reads `q floor` once more after 2 s; when it is still unknown (or the
-  reply carries no floor) and the start row is a recorded walk point, the plan's z is used and
-  `place: floor unknown, using plan z ...` is written to `run.log` and the notes. A floor the toolkit does know, and
+  0.0, not 130.7` on m910q and test2. The check reads `q floor` once more after 2 s; when it is still unknown **and
+  the placed point is a walk/move row's own point** (`PlaceWalkRow`: the row came from a real walk through that point;
+  a pull row's stand point or any other row's point does not qualify), the plan's z is used and
+  `place: floor unknown, using plan z ...` is written to `run.log` and the notes; otherwise the placement refuses
+  (`place: the start step's floor is unknown ... and the point is not a recorded walk row`). A reply that carries no
+  `floor` at all (a null) is not the toolkit's unknown height but no answer: it refuses with
+  `the start step's floor was not found (q floor gave none)`. A floor the toolkit does know, and
   that differs from the plan, still refuses the placement as before. Before a fresh instance is entered,
   the start is also chosen offline: from the requested row the walk walks BACK along the plan's positioned move rows
   to the nearest one whose point stands at least `AggroRadius + 8 yd` from every static (non-patrol) spawn of the packs
