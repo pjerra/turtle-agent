@@ -131,7 +131,7 @@ func TestSQLUnchangedByOrigins(t *testing.T) {
 		plan string
 		sha  string
 	}{
-		{"zul_gurub", "a3ea6eb75dfd6ffda43d549520e7ee38b39c3283a21dddd5774511e2ec5b0cae"}, // merge of origin/dev (#409) with walk 37 on the branch, 14826 out of cc_priority; walk 36: the honour guard is pulled first from -11562 -1306, the two north packs are one 8-body stand pull, the -11603 -1229 pull beside the respawn pit is dropped, and the boss stand is -11536.8 -1261.5; the venoxis group 9 stand routes south of the boss
+		{"zul_gurub", "99b3573acddc52a3b72c55ec872a1098791ca5af3a18d37461938aae7805d5cb"}, // WALK 39 trash CC: cc_priority is the 19-entry TRASH-TACTICS.md section 4 list (Blood Drinker 11353 in, out of kill_first), kill_first drops to six
 		{"onyxias_lair", "142c1d58928ad1efd9aca2b773c4762e2ddcbae05c308540080a1fedd6e3b38e"},
 	} {
 		p, err := dungeon.Load(filepath.Join("..", "..", "dungeons", c.plan+".json"))

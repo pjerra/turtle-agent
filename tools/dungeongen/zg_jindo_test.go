@@ -23,7 +23,7 @@ func TestZgJindoKillFirstTotemWardFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []uint32{15112, 14987, 14750, 15146, 11830, 14883, 11353}
+	want := []uint32{15112, 14987, 14750, 15146, 11830, 14883}
 	if len(p.KillFirst) != len(want) {
 		t.Fatalf("kill_first is %v, want %v (the Jin'do totem and ward first)", p.KillFirst, want)
 	}
