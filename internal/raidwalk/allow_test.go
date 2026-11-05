@@ -194,3 +194,22 @@ func TestAllowedTT(t *testing.T) {
 		t.Errorf("accepted %d skip entries", MaxSkipEntries+1)
 	}
 }
+
+// `.debug instancedata <type> <value>` is the --gm-instance-data tool (HAKKAR 2.4 T2): the only .debug form the walk
+// may send, with two plain numbers and nothing else.
+func TestAllowedLineDebugInstanceData(t *testing.T) {
+	hires := map[string]bool{"Tankbot": true}
+	for _, line := range []string{".debug instancedata 1 3", ".debug instancedata 6 3", ".debug instancedata 0 0"} {
+		if !AllowedLine(line, hires, 309) {
+			t.Errorf("refused an allowed line %q", line)
+		}
+	}
+	for _, line := range []string{
+		".debug instancedata 1", ".debug instancedata 1 3 4", ".debug instancedata x 3",
+		".debug instancedata 1 -1", ".debug instancedata", ".debug fields 1 2", ".debug", ".debug instancedata 1 3 #",
+	} {
+		if AllowedLine(line, hires, 309) {
+			t.Errorf("accepted a forbidden line %q", line)
+		}
+	}
+}

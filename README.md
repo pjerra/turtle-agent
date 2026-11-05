@@ -100,7 +100,7 @@ turtle-agent plan-check --mmaps DIR --sql FILE [--plan NAME] [--spawns DIR] [--s
 turtle-agent plan-scout <dungeon> [--dir dungeons] [--sql FILE] [--mmaps DIR] [--spawns DIR] [--from LEG] [--until LEG] [--party-level N] [--out DIR] [--json] [--fix-out FILE] [--apply-fixes DIR] [--fail-on fail|warn] [--live SERVER --slot N ...]
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
-turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--reuse-instance] [--dry-run]
+turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--gm-clear-spawns DIR] [--gm-instance-data TYPE=VALUE] [--allow-priests-alive] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--reuse-instance] [--dry-run]
 turtle-agent trash-check [--dir dungeons] [--sql FILE [--plan NAME]] [--spawns DIR] [--patrols FILE]... [--mmaps DIR] [--level N] [--spread YD] [--aggro-rate R] [--assist-yd 10] [--json] [--out DIR] [--dash-out FILE] [--fail-on danger|patrol|any] [<plan>|<path.json>]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent scenario check [--var NAME=VALUE]... <file>
@@ -2277,6 +2277,8 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   with no `.appear` and no entry order; the notes say `resuming it`. With no live bind the walk says
   `no live bind for map N is left: falling back to a fresh instance`, runs the cap check it skipped for the reuse and
   enters normally. `--reuse-instance` may be combined with `--gm-clear` (the named packs are killed in the kept copy).
+  When the plan's next boss is Hakkar, the placement reads the instance's saved priest state and refuses unless the five High
+  Priests are DONE (see [`--gm-instance-data`](#--gm-instance-data-and-the-hakkar-priest-refusal-test-servers-only)).
   `--from "step N"` is taken as given; a positioned move row is placed at its own point, and a pull
   row at that pull's own stand point (the row's point; the nearest move row before it when the row has none), the
   notes naming the point (`place: step N is a pull row; placing at the pull's own stand point` — walk 32 refused
@@ -2594,8 +2596,9 @@ after the re-run did come back, and a fresh pause re-runs the gong again).
 
 Every GM line goes through the allow-list in `internal/raidwalk` (`.go xyz`, `.bot hire raid <grammar> level=<n>`,
 `.bot gear raid <commander> tier <N>`, `.tele name <hire> <word>`, `.summon <hire>`, `.revive <hire>`,
-`.bot run stop[ time limit reached (raid-walk <n>m)]`, and, with `--place`, `.appear <hire>` and
-`.instance unbind <the plan's map>`); everything else goes through the `commander` RPC. With `--place` the Eluna test
+`.bot run stop[ time limit reached (raid-walk <n>m)]`, and, with `--place`, `.appear <hire>`, `.gm on`,
+`.instance unbind <the plan's map>`, `.instance listbinds` and the `--gm-instance-data` path's
+`.debug instancedata <type> <value>`); everything else goes through the `commander` RPC. With `--place` the Eluna test
 toolkit's `.tt` lines go through a second allow-list of their own (`q inst|floor|group|units`, `quiet`, `place`,
 `clearto`, with the radius, `dz=` and `all=1` bounds, and the boss-kill read's `q units ... all dead e=<entry>`; never
 `kill`, `boss`, `force`, `me`, `reset` or another map).
@@ -2645,7 +2648,10 @@ AQ20 walk starts at Rajaxx with `--gm-clear-boss kurinnaxx` so Kurinnaxx is dead
   leg is its row number or its name. **Whole packs:** each group expands to every pack its row clears (the trash check's rule: the row's
   entries and its reach) and each pack to all its members, a `creature_groups` AGGRO_TOGETHER group and both directions of every aggro
   link, wherever the members stand (`internal/worldspawn` packs, the pull estimator's model). The packs come from the world export
-  under `<dir>/../tools/dungeongen/testdata/map<N>` (`--gm-clear-spawns DIR` names another).
+  under the first place that holds one: `<the binary's dir>/spawns/map<N>`, then
+  `<dir>/../tools/dungeongen/testdata/map<N>`, then `~/.config/turtle-agent/spawns/map<N>` (`--gm-clear-spawns DIR`
+  names one and only that one; a miss names every folder tried). An installed agent therefore finds its own export with no
+  flag, and a checkout finds the repo's.
 - **Mechanism:** every expected member of a pack gets one entry. The commander visits the pack's stops (`.go xyz` to a member's spawn
   point; a pack wider than the 100 yd a stop covers gets several), reads the units its client holds within 150 yd, and for each live
   member whose spawn guid and entry match calls the agent's `gm_kill` RPC: it selects the creature by guid, waits until the server shows
@@ -2674,6 +2680,27 @@ AQ20 walk starts at Rajaxx with `--gm-clear-boss kurinnaxx` so Kurinnaxx is dead
   `assisted: true` on each leg it killed in, `summary.txt` and the result line end with `ASSISTED`, and `raid-walk report`
   (which reads `summary.json` from the walk folder) prints an **ASSISTED** line and the table. An ASSISTED walk is never
   a real clear. In the pair form the flags apply to every walk.
+
+### --gm-instance-data and the Hakkar priest refusal (test servers only)
+
+Hakkar the Soulflayer (ZG 309, entry 14834) wears **Hakkar Power** (24692) while any of the five High Priests is alive: one stack
+per living priest, +20 % damage each and an Aspect on the raid. The TortoiseBots run leader's `pull_gate` row allows 0 stacks, so a
+pull with a living priest is refused and the run ends after 30 s (`boss gate:`); walks 32/33 wiped in 7-76 s pulling with stacks.
+The walk now closes both gaps that kept priests alive after a placement (walk 38: Arlokk has no spawn row, so `--gm-clear-boss` skips
+her, and a phase-1 `.die` on Thekal is a fake death: he revives as 14509):
+
+- **`--gm-instance-data <type>=<value>`** (repeatable, needs `--place` and `m910q`/`tortoise-test2`): after `--gm-clear`/`--gm-clear-boss`
+  and before the corridor's quiet, the commander sends `.debug instancedata <type> <value>` once per flag **in the flag order**, then
+  one `.debug instancedata 0 0` (the refresh: only `SetData(0, 0)` makes the core recompute Hakkar Power's stacks). Every line and
+  every system line the server answers goes into `run.log`; the summary gets
+  `instance-data: <n> flag(s) and the 0 0 refresh sent by GM command (test tool; the walk is ASSISTED)`. Type 0 is refused (it is the
+  walk's own refresh line). Example for a Hakkar-only test: `--gm-instance-data 1=3 --gm-instance-data 6=3` (Arlokk and Thekal DONE).
+- **The refusal:** when the plan's next boss (the first boss row at or after the placed start) is Hakkar, the walk reads the instance's
+  saved fields with `.tt q inst` *before the raid moves* and exits 18 with `hakkar: priests alive: fields <list>` unless saved fields
+  0-4 are all `3` (DONE). The numbers are the toolkit's own, so an operator can compare them with `.tt q inst` by hand. A reply with no
+  `saved` field is refused too ("the instance data is unreadable"): the walk will not pull a boss it cannot prove is safe.
+  `--allow-priests-alive` (with `--place`) skips the refusal with a note — the walk-32/33 deliberate repro, where the wipe is the point.
+  A pass notes `hakkar: the five High Priests are DONE in this instance (saved ...)`.
 
 ### Walk report
 

@@ -9268,3 +9268,33 @@ func TestWaitTBMMatchKeepsThePageTail(t *testing.T) {
 		t.Fatalf("next pump %q, want the page's done line", lines)
 	}
 }
+
+// --gm-instance-data's values are "<type>=<value>", the flag needs --place, and the test-server guard is --gm-clear's.
+func TestParseGmInstanceData(t *testing.T) {
+	var stderr bytes.Buffer
+	base := []string{"zul_gurub", "--place", "--from", "leg hakkar", "--sql", "walk.sql"}
+	if _, code := parseRaidWalkArgs(append(append([]string{}, base...), "--gm-instance-data", "1=3", "--gm-instance-data", "6=3"), &stderr); code != exitOK {
+		t.Fatalf("exit %d, stderr %q", code, stderr.String())
+	}
+	stderr.Reset()
+	if _, code := parseRaidWalkArgs(append(append([]string{}, base...), "--gm-instance-data", "1"), &stderr); code != exitUsage ||
+		!strings.Contains(stderr.String(), `want "<type>=<value>"`) {
+		t.Fatalf("exit %d, stderr %q", code, stderr.String())
+	}
+	stderr.Reset()
+	if _, code := parseRaidWalkArgs(append(append([]string{}, base...), "--gm-instance-data", "0=0"), &stderr); code != exitUsage ||
+		!strings.Contains(stderr.String(), "type 0 is the walk's own refresh line") {
+		t.Fatalf("exit %d, stderr %q", code, stderr.String())
+	}
+	stderr.Reset()
+	if _, code := parseRaidWalkArgs([]string{"zul_gurub", "--place=off", "--gm-instance-data", "1=3"}, &stderr); code != exitUsage ||
+		!strings.Contains(stderr.String(), "--gm-instance-data needs --place") {
+		t.Fatalf("exit %d, stderr %q", code, stderr.String())
+	}
+	stderr.Reset()
+	if _, code := parseRaidWalkArgs([]string{"zul_gurub", "--server", "tortoise", "--place", "--from", "leg hakkar",
+		"--sql", "walk.sql", "--gm-instance-data", "1=3"}, &stderr); code != exitUsage ||
+		!strings.Contains(stderr.String(), "test servers only") {
+		t.Fatalf("exit %d, stderr %q", code, stderr.String())
+	}
+}

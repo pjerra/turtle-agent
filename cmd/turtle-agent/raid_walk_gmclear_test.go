@@ -877,3 +877,76 @@ func TestPlaceGMClearStopsAtTheBudget(t *testing.T) {
 		t.Fatalf("summary.txt:\n%s", text)
 	}
 }
+
+// The default world export is looked up where an installed binary keeps it: beside the binary first, then the repo's
+// testdata beside the plan folder, then ~/.config/turtle-agent/spawns/map<N>. An explicit --gm-clear-spawns is the
+// only path tried, and a miss names every path that was.
+func TestWorldExportDirDefaults(t *testing.T) {
+	creatures := "guid\tentry\tname\tlevel_max\trank\tfaction\tnpc_flags\tx\ty\tz\twander\tmovement_type\tgroup_leader\n"
+	writeExport := func(dir string) {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "creatures.tsv"), []byte(creatures), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	exeDir := t.TempDir()
+	old := walkExecutable
+	walkExecutable = func() (string, error) { return filepath.Join(exeDir, "turtle-agent"), nil }
+	t.Cleanup(func() { walkExecutable = old })
+
+	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub", Map: 309}, opts: raidWalkOptions{dir: "../../dungeons"}}
+
+	// 1. Beside the binary wins over the repo's testdata (which exists in this checkout).
+	beside := filepath.Join(exeDir, "spawns", "map309")
+	writeExport(beside)
+	dir, tried := w.worldExportDir()
+	if dir != beside {
+		t.Fatalf("dir %q, want the binary's %q (tried %v)", dir, beside, tried)
+	}
+
+	// 2. No spawns beside the binary: the repo's testdata.
+	if err := os.RemoveAll(filepath.Join(exeDir, "spawns")); err != nil {
+		t.Fatal(err)
+	}
+	dir, _ = w.worldExportDir()
+	if dir != filepath.Join("../../dungeons", "..", "tools", "dungeongen", "testdata", "map309") {
+		t.Fatalf("dir %q, want the repo testdata", dir)
+	}
+
+	// 3. Neither: ~/.config/turtle-agent/spawns/map309.
+	w.opts.dir = t.TempDir()
+	cfg := filepath.Join(home, ".config", "turtle-agent", "spawns", "map309")
+	writeExport(cfg)
+	dir, _ = w.worldExportDir()
+	if dir != cfg {
+		t.Fatalf("dir %q, want %q", dir, cfg)
+	}
+
+	// 4. Nothing anywhere: no dir, and every candidate path named.
+	if err := os.RemoveAll(cfg); err != nil {
+		t.Fatal(err)
+	}
+	dir, tried = w.worldExportDir()
+	if dir != "" {
+		t.Fatalf("dir %q, want none", dir)
+	}
+	if len(tried) != 3 {
+		t.Fatalf("tried %v, want three candidates", tried)
+	}
+	for _, want := range []string{filepath.Join(exeDir, "spawns", "map309"), cfg, filepath.Join(w.opts.dir, "..", "tools", "dungeongen", "testdata", "map309")} {
+		found := false
+		for _, got := range tried {
+			if got == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("tried %v, want %q", tried, want)
+		}
+	}
+}

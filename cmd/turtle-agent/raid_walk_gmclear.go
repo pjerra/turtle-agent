@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/objects"
@@ -49,15 +50,49 @@ const (
 // cause; this is the ceiling for an unknown one. A var so a test can shorten it.
 var gmClearBudget = 5 * time.Minute
 
-// worldExportDir is the world export the placement and --gm-clear read: --gm-clear-spawns, else the map's testdata
-// beside the plan folder (tools/dungeongen/testdata/map<N>).
-func (w *walk) worldExportDir() string {
-	dir := w.opts.gmClearSpawns
-	if dir == "" {
-		dir = filepath.Join(slots.ExpandTilde(w.opts.dir), "..", "tools", "dungeongen", "testdata", fmt.Sprintf("map%d", w.plan.Map))
+// worldExportDir is the world export the placement and --gm-clear read: --gm-clear-spawns when it is given (that path
+// and no other), else the first of the places an installed binary can find one:
+//
+//  1. <the binary's dir>/spawns/map<N> (an installed agent ships its export beside itself),
+//  2. <dir>/../tools/dungeongen/testdata/map<N> (a checkout: the repo's own export),
+//  3. ~/.config/turtle-agent/spawns/map<N> (the per-user copy).
+//
+// An export is a folder holding creatures.tsv. dir is "" when none of the tried folders holds one; tried is every
+// folder looked at, in order, so the refusal (or the note) names them.
+func (w *walk) worldExportDir() (dir string, tried []string) {
+	dirFor := func(base string) string {
+		return filepath.Join(base, fmt.Sprintf("map%d", w.plan.Map))
+	}
+	if w.opts.gmClearSpawns != "" {
+		d := w.opts.gmClearSpawns
+		return hasWorldExport(d), []string{d}
+	}
+	cands := []string{}
+	if exe, err := walkExecutable(); err == nil {
+		cands = append(cands, dirFor(filepath.Join(filepath.Dir(exe), "spawns")))
+	}
+	cands = append(cands, filepath.Join(slots.ExpandTilde(w.opts.dir), "..", "tools", "dungeongen", "testdata",
+		fmt.Sprintf("map%d", w.plan.Map)))
+	cands = append(cands, dirFor(filepath.Join(slots.ExpandTilde("~"), ".config", "turtle-agent", "spawns")))
+	for _, c := range cands {
+		if hasWorldExport(c) != "" {
+			return c, cands
+		}
+	}
+	return "", cands
+}
+
+// hasWorldExport is dir when it holds a world export (creatures.tsv), "" otherwise.
+func hasWorldExport(dir string) string {
+	if _, err := os.Stat(filepath.Join(dir, "creatures.tsv")); err != nil {
+		return ""
 	}
 	return dir
 }
+
+// walkExecutable is os.Executable as the world export default reads it: the folder beside the running binary is the
+// first place an installed agent keeps its export (a test seam).
+var walkExecutable = os.Executable
 
 // loadPlaceWorld reads the world export the offline quiet start judges (once per walk). A missing export is a note,
 // never a refusal: the placement still works, it just cannot walk the start back.
@@ -65,9 +100,9 @@ func (w *walk) loadPlaceWorld() *worldspawn.World {
 	if w.placeWorld != nil {
 		return w.placeWorld
 	}
-	dir := w.worldExportDir()
-	if _, err := os.Stat(filepath.Join(dir, "creatures.tsv")); err != nil {
-		w.note("place: no world export in %s: the offline quiet start is skipped (pass --gm-clear-spawns DIR)", dir)
+	dir, tried := w.worldExportDir()
+	if dir == "" {
+		w.note("place: no world export found (tried %s): the offline quiet start is skipped (pass --gm-clear-spawns DIR)", strings.Join(tried, ", "))
 		return nil
 	}
 	world, _, err := worldspawn.Load(dir, w.plan.Map)
@@ -85,9 +120,9 @@ func (w *walk) validateGMClear() error {
 	if err != nil {
 		return stopf(exitUsage, "%v", err)
 	}
-	dir := w.worldExportDir()
-	if _, err := os.Stat(filepath.Join(dir, "creatures.tsv")); err != nil {
-		return stopf(exitUsage, "--gm-clear: no world export in %s: pass --gm-clear-spawns DIR (tools/dungeongen/export.sh writes it)", dir)
+	dir, tried := w.worldExportDir()
+	if dir == "" {
+		return stopf(exitUsage, "--gm-clear: no world export found (tried %s): pass --gm-clear-spawns DIR (tools/dungeongen/export.sh writes it, or ~/.config/turtle-agent/spawns/map%d)", strings.Join(tried, ", "), w.plan.Map)
 	}
 	world, _, err := worldspawn.Load(dir, w.plan.Map)
 	if err != nil {

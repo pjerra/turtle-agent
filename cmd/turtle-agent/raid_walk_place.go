@@ -1631,6 +1631,11 @@ func (w *walk) placeTry(ctx context.Context, retry bool) error {
 		if err := w.placeGMClear(ctx); err != nil {
 			return err
 		}
+		// --gm-instance-data and the Hakkar priest refusal: after the clear (so a cleared boss's .die cannot overwrite
+		// the data) and before the quiet and the raid's move, which is before any boss pull.
+		if err := w.placeInstanceData(ctx); err != nil {
+			return err
+		}
 	}
 	if err := w.placeQuiet(ctx); err != nil {
 		return err
@@ -1894,6 +1899,9 @@ func (w *walk) placeReuse(ctx context.Context) error {
 	if err := w.placeGMClear(ctx); err != nil {
 		return err
 	}
+	if err := w.placeInstanceData(ctx); err != nil {
+		return err
+	}
 	if err := w.goPlace(ctx, p.X, p.Y, p.Z+2); err != nil {
 		return err
 	}
@@ -1961,6 +1969,9 @@ func (w *walk) placeResume(ctx context.Context) error {
 		w.logLine(w.env.now(), warn)
 	}
 	if err := w.placeGMClear(ctx); err != nil {
+		return err
+	}
+	if err := w.placeInstanceData(ctx); err != nil {
 		return err
 	}
 	w.note("place: --reuse-instance: resumed instance %.0f from the commander's existing bind (expires in %s); no fresh instance is entered or counted",

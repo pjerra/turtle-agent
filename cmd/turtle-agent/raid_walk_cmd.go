@@ -58,7 +58,7 @@ const (
 )
 
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
-    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--speed X] [--hires FILE] [--tier N|--tier-override N]
+    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--gm-clear-spawns DIR] [--gm-instance-data TYPE=VALUE] [--allow-priests-alive] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
     [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--decisions on|off] [--decisions-max-mib N]
@@ -73,49 +73,51 @@ var raidWalkSpeedRe = regexp.MustCompile(`^[1-3](?:\.[0-9])?$`)
 
 // raidWalkOptions are the command's flags.
 type raidWalkOptions struct {
-	plan            string
-	server          string
-	slot            string // "" leases any free slot
-	holder          string
-	dir             string
-	sql             string
-	until           string
-	from            string
-	place           bool       // --place: start the raid partway into its instance, at the --from start (spec 3)
-	reuseInstance   bool       // --reuse-instance: a re-place keeps the raid's current instance (no fresh one is entered or counted)
-	gmClear         stringList // --gm-clear "<leg>:<group>[,<group>...]", repeatable: GM-kill those pull groups after the placement (test servers only)
-	gmClearBoss     stringList // --gm-clear-boss <leg>, repeatable: GM-kill the leg's boss and its pack
-	gmClearSpawns   string     // --gm-clear-spawns: the world export dir (default <dir>/../tools/dungeongen/testdata/map<N>)
-	speed           float64
-	hires           string
-	tier            int // --tier: the kit of a raid the committed table leaves unknown
-	tierOverride    int // --tier-override: a comparison, not a tier proof
-	enter           string
-	holdMinutes     int
-	maxRunMinutes   int
-	pausedWait      time.Duration
-	autoResume      int
-	resetWait       time.Duration
-	wipeResume      int
-	wipeRest        time.Duration
-	reviveAtRaid    bool          // --revive-at-raid (default on): a wipe recovery brings far hires to the revive point and waits for the raid to gather
-	hireSettle      time.Duration // --hire-settle: the wait after the last hire; 0 skips it (the #1367 live proof)
-	capWait         time.Duration // --instance-cap-wait: the longest the walk waits for the server's hourly instance-id count to fall
-	capFail         bool          // --instance-cap-fail: exit exitRaidWalkInstanceCap at the cap instead of waiting
-	capUnsafe       bool          // --instance-cap-unsafe: when the wait runs out or the ledger is unreadable, go on without a reservation (logged) instead of exiting exitRaidWalkInstanceCap
-	capReset        bool          // --instance-cap-reset: forget this server's ledger first (its worldserver restarted)
-	patrols         string
-	out             string
-	dashURL         string
-	dashUser        string
-	dashPassFile    string
-	decisions       bool // --decisions: pull decision captures after teardown (on by default)
-	decisionsMaxMiB int  // --decisions-max-mib: budget for the decisions pull in MiB
-	mmaps           string
-	slotsPath       string
-	binary          string
-	injects         stringList // --inject, repeatable
-	dryRun          bool
+	plan              string
+	server            string
+	slot              string // "" leases any free slot
+	holder            string
+	dir               string
+	sql               string
+	until             string
+	from              string
+	place             bool       // --place: start the raid partway into its instance, at the --from start (spec 3)
+	reuseInstance     bool       // --reuse-instance: a re-place keeps the raid's current instance (no fresh one is entered or counted)
+	gmClear           stringList // --gm-clear "<leg>:<group>[,<group>...]", repeatable: GM-kill those pull groups after the placement (test servers only)
+	gmClearBoss       stringList // --gm-clear-boss <leg>, repeatable: GM-kill the leg's boss and its pack
+	gmClearSpawns     string     // --gm-clear-spawns: the world export dir (default: beside the binary, the repo testdata, ~/.config/turtle-agent/spawns/map<N>)
+	gmInstanceData    stringList // --gm-instance-data "<type>=<value>", repeatable: test servers only, needs --place (the Hakkar priest state)
+	allowPriestsAlive bool       // --allow-priests-alive: skip the Hakkar priest-state refusal (a deliberate repro, walk 32/33 style)
+	speed             float64
+	hires             string
+	tier              int // --tier: the kit of a raid the committed table leaves unknown
+	tierOverride      int // --tier-override: a comparison, not a tier proof
+	enter             string
+	holdMinutes       int
+	maxRunMinutes     int
+	pausedWait        time.Duration
+	autoResume        int
+	resetWait         time.Duration
+	wipeResume        int
+	wipeRest          time.Duration
+	reviveAtRaid      bool          // --revive-at-raid (default on): a wipe recovery brings far hires to the revive point and waits for the raid to gather
+	hireSettle        time.Duration // --hire-settle: the wait after the last hire; 0 skips it (the #1367 live proof)
+	capWait           time.Duration // --instance-cap-wait: the longest the walk waits for the server's hourly instance-id count to fall
+	capFail           bool          // --instance-cap-fail: exit exitRaidWalkInstanceCap at the cap instead of waiting
+	capUnsafe         bool          // --instance-cap-unsafe: when the wait runs out or the ledger is unreadable, go on without a reservation (logged) instead of exiting exitRaidWalkInstanceCap
+	capReset          bool          // --instance-cap-reset: forget this server's ledger first (its worldserver restarted)
+	patrols           string
+	out               string
+	dashURL           string
+	dashUser          string
+	dashPassFile      string
+	decisions         bool // --decisions: pull decision captures after teardown (on by default)
+	decisionsMaxMiB   int  // --decisions-max-mib: budget for the decisions pull in MiB
+	mmaps             string
+	slotsPath         string
+	binary            string
+	injects           stringList // --inject, repeatable
+	dryRun            bool
 	// noPlaceRetreat is a test seam: the unit tests that pin one placement attempt turn the same-instance retreat off
 	// (the walk's own TestPlaceQuietFailureRetreatsInTheSameInstance runs it).
 	noPlaceRetreat bool
@@ -256,7 +258,9 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.patrols, "patrols", "", "a tb-patrols file for the revive quiet check")
 	fs.Var(&o.gmClear, "gm-clear", "TEST SERVERS ONLY, needs --place: after the placement the commander GM-kills every live unit of these pull groups of a leg, \"<leg>:<group>[,<group>...]\" (whole packs, links included); repeatable; the walk is then ASSISTED, never a real clear")
 	fs.Var(&o.gmClearBoss, "gm-clear-boss", "TEST SERVERS ONLY, needs --place: like --gm-clear for the boss of a leg (and its pack); repeatable")
-	fs.StringVar(&o.gmClearSpawns, "gm-clear-spawns", "", "the world export dir --gm-clear reads the packs from (default: <dir>/../tools/dungeongen/testdata/map<N>)")
+	fs.StringVar(&o.gmClearSpawns, "gm-clear-spawns", "", "the world export dir the placement and --gm-clear read (default: <binary dir>/spawns/map<N>, then <dir>/../tools/dungeongen/testdata/map<N>, then ~/.config/turtle-agent/spawns/map<N>)")
+	fs.Var(&o.gmInstanceData, "gm-instance-data", "TEST SERVERS ONLY, needs --place: after --gm-clear and before the first boss pull the commander sends .debug instancedata <type> <value> for each flag, in this order, then .debug instancedata 0 0 once; repeatable, \"<type>=<value>\"")
+	fs.BoolVar(&o.allowPriestsAlive, "allow-priests-alive", false, "with --place: skip the refusal when the plan's next boss is Hakkar and the instance's five High Priests are not all DONE (a deliberate repro only)")
 	fs.StringVar(&o.out, "out", "", "the output dir (default ./raid-walk-<plan>-<stamp>)")
 	fs.StringVar(&o.dashURL, "dash-url", "", "the dashboard URL (or TBDASH_URL)")
 	fs.StringVar(&o.dashUser, "dash-user", "", "the dashboard login (or TBDASH_USER; default TADASH)")
@@ -410,6 +414,26 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 			fmt.Fprintf(stderr, "raid-walk: %v\n", err)
 			return o, exitUsage
 		}
+	}
+	// --gm-instance-data (the Hakkar priest state): the same test-server and --place guard as --gm-clear, and the
+	// values are checked before anything moves.
+	if len(o.gmInstanceData) > 0 {
+		if !placeServers[o.server] {
+			fmt.Fprintf(stderr, "raid-walk: --gm-instance-data sets instance data by GM command: test servers only (%s)\n", strings.Join(placeServerList(), ", "))
+			return o, exitUsage
+		}
+		if !o.place {
+			fmt.Fprintf(stderr, "raid-walk: --gm-instance-data needs --place (and --from): the lines run in the raid's copy after the placement\n")
+			return o, exitUsage
+		}
+		if _, err := parseInstanceDataSpecs(o.gmInstanceData); err != nil {
+			fmt.Fprintf(stderr, "raid-walk: %v\n", err)
+			return o, exitUsage
+		}
+	}
+	if o.allowPriestsAlive && !o.place {
+		fmt.Fprintf(stderr, "raid-walk: --allow-priests-alive needs --place: the check it skips runs in the placement\n")
+		return o, exitUsage
 	}
 	return o, exitOK
 }

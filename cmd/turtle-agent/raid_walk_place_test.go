@@ -98,6 +98,8 @@ type placeToolkit struct {
 	// cleartoRemoved is the `removed` list a clearto reply carries (the units the server despawned, each with its world guid
 	// "g"). nil: an empty list.
 	cleartoRemoved func(cmd string) []any
+	// saved is the instance's saved-data words `q inst` reports (the Hakkar priest check reads them); "" omits the field.
+	saved string
 	// place, when set, replaces the default place handler.
 	place func(cmd string) error
 	// placeAll says the default place handler moves every hire (the zero value leaves the last one behind).
@@ -130,7 +132,11 @@ func (p *placeToolkit) answer(cmd string) (ttResult, error) {
 		if armed {
 			inst = other
 		}
-		return ttReplyOf(p.t, map[string]any{"map": 309, "inst": inst}), nil
+		body := map[string]any{"map": 309, "inst": inst}
+		if p.saved != "" {
+			body["saved"] = p.saved
+		}
+		return ttReplyOf(p.t, body), nil
 	case strings.HasPrefix(cmd, "q group of="):
 		return ttReplyOf(p.t, map[string]any{"map": 309, "inst": p.inst, "members": p.members()}), nil
 	case strings.HasPrefix(cmd, "q floor"):
@@ -3706,5 +3712,109 @@ func TestPlaceStartStepOnAPullRow(t *testing.T) {
 	f.agent.mu.Unlock()
 	if want := fmt.Sprintf("from|step|%d", n); !strings.Contains(startArgs, want) {
 		t.Fatalf("run start args %q, want %q", startArgs, want)
+	}
+}
+
+// The Hakkar priest refusal (spec hakkar-mechanics 3.0, HAKKAR 2.4 T2): a placement whose next boss is Hakkar reads
+// the instance's saved fields before the raid moves and stops with exit 18 unless all five High Priests are DONE.
+// A living priest is a Hakkar Power stack the run leader's pull gate refuses, and the gate then ends the run after
+// 30 s (walk 38: Arlokk and Thekal left undead, 2 stacks, `boss gate:`). --allow-priests-alive skips the check (the
+// walk-32/33 deliberate repro).
+func TestPlaceRefusesHakkarWithPriestsAlive(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.from = "leg hakkar"
+	p.saved = "3 3 3 3 0 1 0 0"
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if !strings.Contains(f.summary().EndReason, "hakkar: priests alive: fields 3 3 3 3 0") {
+		t.Fatalf("end reason %q, want the priests refusal\nstdout:\n%s", f.summary().EndReason, f.stdout.String())
+	}
+	if f.agent.runStarted {
+		t.Fatal("the run started although the five High Priests are not DONE")
+	}
+	// The refusal comes before the quiet and the move: the raid never reaches the boss's leg.
+	for _, cmd := range f.agent.ttCalls {
+		if strings.HasPrefix(cmd, "quiet") || strings.HasPrefix(cmd, "place ") {
+			t.Fatalf("the raid was moved before the refusal: %q", cmd)
+		}
+	}
+
+	// All five DONE: the placement goes ahead.
+	f2, p2 := newPlaceFixture(t)
+	f2.opts.from = "leg hakkar"
+	p2.saved = "3 3 3 3 3 1 0 0"
+	n := placeStepsFrom(t, "hakkar")
+	f2.agent.startReply = placeStartReplyLeg("zul_gurub", "hakkar", n.start, n.total, n.until)
+	if code := f2.run(context.Background()); code != exitOK {
+		t.Fatalf("all DONE: exit %d, want 0: %s\n%s", code, f2.stderr.String(), f2.stdout.String())
+	}
+}
+
+// --allow-priests-alive skips the Hakkar refusal (the walk-32/33 style test): the walk places and the run starts.
+func TestPlaceAllowPriestsAliveSkipsTheHakkarRefusal(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.from = "leg hakkar"
+	f.opts.allowPriestsAlive = true
+	p.saved = "3 3 3 3 0 1 0 0"
+	n := placeStepsFrom(t, "hakkar")
+	f.agent.startReply = placeStartReplyLeg("zul_gurub", "hakkar", n.start, n.total, n.until)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if !hasNote(f.summary(), "--allow-priests-alive") {
+		t.Fatalf("notes %q, want the --allow-priests-alive note", f.summary().Notes)
+	}
+}
+
+// --gm-instance-data: after --gm-clear and before the first boss pull the commander sends one .debug instancedata
+// line per flag, in the flag order, then one .debug instancedata 0 0 refresh (Hakkar Power is only recomputed by a
+// SetData(0, 0)), and every line's answer is logged.
+func TestGmInstanceDataSendsInOrderThenRefresh(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
+	f.opts.gmInstanceData = stringList{"1=3", "6=3"}
+	f.agent.unitsFn = func(int) []objects.Unit {
+		return gmClearView(f, pack, guids, func(g packet.GUID) bool {
+			f.agent.mu.Lock()
+			defer f.agent.mu.Unlock()
+			return f.agent.killed[g]
+		})
+	}
+	n := zgPlaceSteps(t)
+	f.agent.startReply = placeStartReply("zul_gurub", n.start, n.total, n.until)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	log := f.agentLog()
+	orderedAt(t, log, []string{
+		"gm .debug instancedata 1 3",
+		"gm .debug instancedata 6 3",
+		"gm .debug instancedata 0 0",
+		"tt quiet",
+	})
+	// After the clear: no .debug line may go out before the last kill of the clear.
+	first := -1
+	lastKill := -1
+	for i, line := range log {
+		if line == "gm .debug instancedata 1 3" && first < 0 {
+			first = i
+		}
+		if strings.HasPrefix(line, "gm_kill ") {
+			lastKill = i
+		}
+	}
+	if lastKill < 0 || first < lastKill {
+		t.Fatalf("the instance data went out before the clear ended (%d < %d)\nlog:\n%s", first, lastKill, strings.Join(log, "\n"))
+	}
+	if !hasNote(f.summary(), "instance-data: 2 flag(s) and the 0 0 refresh") {
+		t.Fatalf("notes %q", f.summary().Notes)
+	}
+	// No sounding-out of the running server: a run start follows the data, as everything else does.
+	if !f.agent.runStarted {
+		t.Fatal("the run never started")
 	}
 }

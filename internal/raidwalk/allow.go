@@ -80,6 +80,19 @@ func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
 			return true
 		}
 		return len(f) == 3 && f[1] == "unbind" && f[2] == strconv.FormatUint(uint64(mapID), 10)
+	case ".debug":
+		// `.debug instancedata <type> <value>`: the --gm-instance-data test path of the Hakkar priest state (HAKKAR 2.4
+		// T2, spec hakkar-mechanics 3.0). Both words are the flag's own numbers (type 0 is the walk's refresh line), and
+		// nothing else typed into the debug console passes.
+		if len(f) != 4 || f[1] != "instancedata" {
+			return false
+		}
+		for _, v := range f[2:] {
+			if !ttUint(v) {
+				return false
+			}
+		}
+		return true
 	case ".bot":
 		if len(f) < 3 {
 			return false
@@ -233,6 +246,15 @@ func ttKVNum(s, key string, lo, hi float64) bool {
 func ttHire(s string, hires map[string]bool) bool {
 	name, ok := strings.CutPrefix(s, "of=")
 	return ok && hires[name]
+}
+
+// ttUint says s is a plain decimal uint32: digits only, no sign, no spaces.
+func ttUint(s string) bool {
+	if s == "" {
+		return false
+	}
+	_, err := strconv.ParseUint(s, 10, 32)
+	return err == nil
 }
 
 // MaxSkipEntries is the toolkit's own skip= cap (ttSkip): a plan whose legs' skip union is longer would make every
