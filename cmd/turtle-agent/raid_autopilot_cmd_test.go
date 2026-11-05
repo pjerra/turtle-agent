@@ -2155,6 +2155,28 @@ func TestAutoSaveStateLeavesNoTempAndReadsBack(t *testing.T) {
 	}
 }
 
+// autoSavedHireWaits reads the checkpoint's hire_waits through a shape of its own: it compiles without the field the
+// fix adds, so this test fails on the behavior (an empty checkpoint value), not on a build.
+func autoSavedHireWaits(t *testing.T, walk string) int {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(walk, autoStateFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved struct {
+		IDs []struct {
+			HireWaits int `json:"hire_waits"`
+		} `json:"ids"`
+	}
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.IDs) != 1 {
+		t.Fatalf("the checkpoint holds %d id(s), want 1", len(saved.IDs))
+	}
+	return saved.IDs[0].HireWaits
+}
+
 // Review round 2: the checkpoint's goal and step belong to the goal lines it was written for. A person edits the
 // lines under a crashed supervisor; the old done/boss-dead state must not mark the new lines done, it must not be
 // restored: the new goals run.
@@ -2398,4 +2420,30 @@ func TestAutoChangedLineWaitsForTheSlotLease(t *testing.T) {
 	}
 	f.lease("", "")
 	tickUntil(t, s, "the new lines to launch after the release", func() bool { return launched("a-2") })
+}
+
+// Review round 2: the hire-pool waits are part of the checkpoint: the sixth refusal still leaves the id for a person
+// when the first five happened before a restart.
+func TestAutoHireWaitsSurviveARestart(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:11380 -- zul_gurub --sql /zg.sql")
+	reason := "hire 2 priest:healer: TBM:HIRE_RAID|partial|1|2|0|1|0|2|0|No mercenary of that kind is available right now. Try again"
+	s := f.supervisor()
+	st := s.states[0]
+	st.mu.Lock()
+	st.goals[0].hireWaits = raidwalk.AutoHirePoolWaitMax - 1
+	st.mu.Unlock()
+	s.saveState()
+	if got := autoSavedHireWaits(t, f.walk); got != raidwalk.AutoHirePoolWaitMax-1 {
+		t.Fatalf("the checkpoint saved hire_waits=%d, want %d", got, raidwalk.AutoHirePoolWaitMax-1)
+	}
+	f.attempt("a-1", 18, 0, reason)
+	s2 := f.supervisor()
+	tickUntil(t, s2, "the refusal after the restart to escalate", func() bool {
+		_, escalated := runState(s2.states[0])
+		return escalated
+	})
+	if !strings.Contains(f.events(), "hire pool: 6 waits") {
+		t.Fatalf("the restored wait count did not reach the sixth wait:\n%s", f.events())
+	}
 }

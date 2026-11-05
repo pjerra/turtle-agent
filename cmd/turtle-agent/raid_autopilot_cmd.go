@@ -2176,6 +2176,9 @@ type autoSavedID struct {
 	// from before it, which is taken as the same lines). A start restores the goal and step progress only when it
 	// matches targets.txt now.
 	Fingerprint string `json:"fingerprint,omitempty"`
+	// HireWaits is the current goal's consecutive hire-pool waits: the sixth stops the id for a person, across a
+	// restart too.
+	HireWaits int `json:"hire_waits,omitempty"`
 	// BossDead says the current goal's boss is dead in the instance: the goal is DONE at a start, never placed again.
 	BossDead bool   `json:"boss_dead,omitempty"`
 	NextAt   string `json:"next_at,omitempty"`
@@ -2204,7 +2207,7 @@ func (s *autoSupervisor) saveState() {
 		}
 		if st.current < len(st.goals) {
 			g := st.goals[st.current]
-			e.Attempt, e.LastStep, e.BossDead = g.attempt, g.bestStep, g.dead
+			e.Attempt, e.LastStep, e.BossDead, e.HireWaits = g.attempt, g.bestStep, g.dead, g.hireWaits
 		}
 		if st.last != nil {
 			e.OutDir, e.Reuse = st.last.out, st.last.reuse
@@ -2326,6 +2329,7 @@ func (s *autoSupervisor) reconcile() error {
 				st.goals[st.current].attempt = sv.Attempt
 				st.goals[st.current].bestStep = sv.LastStep
 				st.goals[st.current].dead = sv.BossDead
+				st.goals[st.current].hireWaits = sv.HireWaits
 			}
 			st.done, st.escalated = sv.Done, sv.Escalated
 			st.stopped, st.stopWhy = sv.Stopped, sv.StopWhy
