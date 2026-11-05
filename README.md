@@ -2820,7 +2820,12 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   `--reuse-instance` without a `--from`/`--place` (raid-walk refuses that combination).
   `--server/--slot/--holder/--until/--place/--reuse-instance/--out` are managed and dropped if present; slot 3,
   `--instance-cap-unsafe` and `--inject` are refused before anything runs. Two ids may not name the same server and
-  slot: one slot runs one walk at a time.
+  slot: one slot runs one walk at a time. `targets.txt` is **re-read while the supervisor runs** (when its mtime or
+  size changes, every tick): an added id is queued and starts as soon as its slot is free, a removed id is stopped
+  cleanly like `STOP-<id>` (its run stopped, its slot torn down), and an id whose goal lines changed is stopped and
+  re-added from the new lines; an unchanged id keeps its goal, attempt, backoff and run. An unreadable or invalid
+  file keeps the targets already loaded and logs one `targets` warning per distinct error (a half-written file is not
+  a stop order).
 - **Instance cap.** `--instance-cap-per-account N` is passed to every raid-walk it starts; without the flag each walk
   resolves the target server's entry in `instance-cap-per-account.json` beside the slots file and then the stock 5.
   The per-account gates keep one place of headroom (below `N-1`), and a `--reuse-instance` placement that re-hires
@@ -2893,9 +2898,9 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   `--status-every` are the timings; `--binary` picks the turtle-agent the walks run.
 - **Known limits.** Adoption trusts `<out>/walk.pid` plus `kill(0)`: a SIGKILLed walk leaves its pid file behind, and
   a reused pid would adopt an unrelated process and later signal its group (check `/proc/<pid>/cmdline` for
-  `raid-walk` and the out dir). The checkpoint maps goals by index only: editing `targets.txt` between restarts
-  points the saved goal at the wrong line, and a done id ignores goal lines appended later — use a fresh walk dir
-  per walk. `writeStatus` has no lock, so a finish goroutine (through `escalate`) and the main loop can write
+  `raid-walk` and the out dir). The checkpoint maps goals by index only: a restart after editing an id's goal lines
+  resumes the new list at the saved index (a re-read while running stops the id and re-adds it from the new lines
+  with a fresh goal state). `writeStatus` has no lock, so a finish goroutine (through `escalate`) and the main loop can write
   `status.txt.tmp` at the same time and the file can be briefly garbled. The `processAlive` group check covers the
   walk's own process group, not the `login` child that `startSlotAgent` starts in its own group. The instance-cap
   file is read only from beside `--slots`: with `--slots` elsewhere plus `--allow-split-ledger`, or with no live

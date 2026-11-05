@@ -251,6 +251,18 @@ func (f *autoFixture) supervisorOpts(o autoOptions) *autoSupervisor {
 	return s
 }
 
+// stateByID is the supervisor's state of one id (nil once a removed target is dropped).
+func (f *autoFixture) stateByID(s *autoSupervisor, id string) *autoState {
+	s.statesMu.Lock()
+	defer s.statesMu.Unlock()
+	for _, st := range s.states {
+		if st.id == id {
+			return st
+		}
+	}
+	return nil
+}
+
 // run calls the real command in this process until every id is done/escalated or the deadline passes.
 func (f *autoFixture) run(extra ...string) int {
 	f.t.Helper()
@@ -786,6 +798,71 @@ func TestAutoStopFileStopsOnlyItsRaid(t *testing.T) {
 	})
 	if after := len(f.args()); after != before {
 		t.Fatalf("a was relaunched after its STOP file (%d -> %d):\n%s", before, after, strings.Join(f.args(), "\n"))
+	}
+}
+
+// Walk 39: targets.txt was read once at start, so every added raid needed another autopilot dir (the ramp-* dirs,
+// one per re-added raid). A line appended while the supervisor runs starts that raid without a restart, and a removed
+// line stops its raid cleanly (its slot torn down), with no ESCALATE and no re-read of the goals of an unchanged id.
+func TestAutoTargetsFileIsReread(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	f.running("b-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return len(f.args()) >= 1 })
+	f.target("b srv 2 zg-b full -- zul_gurub --sql /zg.sql")
+	tickUntil(t, s, "b launched", func() bool { return len(f.args()) >= 2 })
+	// Remove a's line: the id stops like STOP-a (its run stopped, its slot torn down), and b keeps running.
+	path := filepath.Join(f.walk, autoTargetsFile)
+	if err := os.WriteFile(path, []byte("b srv 2 zg-b full -- zul_gurub --sql /zg.sql\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "a to stop", func() bool {
+		st := f.stateByID(s, "a")
+		if st == nil {
+			return true
+		}
+		done, _ := runState(st)
+		return done
+	})
+	if done, _ := runState(f.stateByID(s, "b")); done {
+		t.Fatalf("removing a stopped b too:\n%s", f.events())
+	}
+	if strings.Contains(f.events(), "ESCALATE") {
+		t.Fatalf("the targets re-read escalated an id:\n%s", f.events())
+	}
+	before := len(f.args())
+	waitForN(t, time.Second, "a's teardown", func() bool { return len(f.teardowns()) >= 1 })
+	for range 20 {
+		s.tick(context.Background())
+		time.Sleep(2 * time.Millisecond)
+	}
+	if after := len(f.args()); after != before {
+		t.Fatalf("a was relaunched after its line was removed:\n%s", strings.Join(f.args(), "\n"))
+	}
+}
+
+// An unparseable targets.txt keeps the targets the supervisor has (a half-written file is not a stop order) and logs
+// one warning; the next valid write is applied.
+func TestAutoInvalidTargetsKeepTheOldOnes(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return len(f.args()) >= 1 })
+	if err := os.WriteFile(filepath.Join(f.walk, autoTargetsFile), []byte("not a target line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 20 {
+		s.tick(context.Background())
+		time.Sleep(2 * time.Millisecond)
+	}
+	if got := strings.Count(f.events(), "targets"); strings.Count(f.events(), "invalid targets file") != 1 {
+		t.Fatalf("a invalid targets.txt warned %d times (want once):\n%s", got, f.events())
+	}
+	if done, _ := runState(f.stateByID(s, "a")); done {
+		t.Fatalf("an invalid targets.txt stopped a:\n%s", f.events())
 	}
 }
 

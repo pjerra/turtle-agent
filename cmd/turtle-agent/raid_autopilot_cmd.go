@@ -182,6 +182,8 @@ type autoState struct {
 	// finish (the slot is torn down as a YIELD would) and it is never launched again.
 	stopping bool
 	stopWhy  string
+	// remove says the id's targets.txt lines are gone (or changed): once the stop is done the state is dropped.
+	remove bool
 }
 
 // autoSupervisor owns the processes and files.
@@ -198,6 +200,18 @@ type autoSupervisor struct {
 	// rowsMu guards rowsCache: one rows read per target's plan + --dir + --sql (they do not change under a walk).
 	rowsMu    sync.Mutex
 	rowsCache map[string]autoRows
+	// statesMu guards states and pending: targets.txt is re-read while the loop runs, so ids come and go.
+	statesMu sync.Mutex
+	// pending holds the states of target lines added (or changed) by a re-read: they are adopted once the old state
+	// of the same id is gone (its slot torn down).
+	pending []*autoState
+	// targetsMod/targetsSize are the targets.txt the loaded targets came from; targetsWarn is the last read error
+	// (logged once, and the loaded targets are kept meanwhile).
+	targetsMod  time.Time
+	targetsSize int64
+	targetsWarn string
+	// notBefore delays the first targets re-read a little: a write racing the start is still picked up.
+	notBefore time.Time
 }
 
 // autoRows is one target's rows, read once: ok is false when neither its --sql migration nor its plan file can be
@@ -254,6 +268,7 @@ func raidAutopilotCmd(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	defer s.close()
 	s.states = groupAutoTargets(targets)
+	s.noteTargetsStat()
 	s.initSeq()
 	// A YIELD-DONE from an earlier YIELD is stale at this start (M6): this run writes its own only if a YIELD comes.
 	_ = os.Remove(filepath.Join(o.walkDir, autoYieldDone))
@@ -262,7 +277,7 @@ func raidAutopilotCmd(ctx context.Context, args []string, stdout, stderr io.Writ
 		return exitUsage
 	}
 	s.writeStatus()
-	for _, st := range s.states {
+	for _, st := range s.stateList() {
 		st.mu.Lock()
 		goal, n := st.goals[0].target.Goal.String(), len(st.goals)
 		st.mu.Unlock()
@@ -475,7 +490,7 @@ func (s *autoSupervisor) initSeq() {
 		return
 	}
 	byID := map[string]*autoState{}
-	for _, st := range s.states {
+	for _, st := range s.stateList() {
 		byID[st.id] = st
 	}
 	for _, e := range entries {
@@ -671,7 +686,13 @@ func (s *autoSupervisor) yieldNow() bool {
 
 // allDone says every id is finished or left for a person (L5: an escalated or refused id counts as done).
 func (s *autoSupervisor) allDone() bool {
-	for _, st := range s.states {
+	s.statesMu.Lock()
+	pending := len(s.pending)
+	s.statesMu.Unlock()
+	if pending > 0 {
+		return false
+	}
+	for _, st := range s.stateList() {
 		st.mu.Lock()
 		finished := st.done || st.escalated || st.refused
 		st.mu.Unlock()
@@ -684,7 +705,7 @@ func (s *autoSupervisor) allDone() bool {
 
 // allGoalsMet says every id met its goals. An escalated or refused id did not, so the global done event is not for it.
 func (s *autoSupervisor) allGoalsMet() bool {
-	for _, st := range s.states {
+	for _, st := range s.stateList() {
 		st.mu.Lock()
 		met := st.done
 		st.mu.Unlock()
@@ -706,7 +727,7 @@ func (s *autoSupervisor) finishAll() int {
 		return exitOK
 	}
 	escalated, refused := 0, 0
-	for _, st := range s.states {
+	for _, st := range s.stateList() {
 		st.mu.Lock()
 		if st.escalated {
 			escalated++
@@ -723,12 +744,179 @@ func (s *autoSupervisor) finishAll() int {
 	return exitOK
 }
 
+// stateList is a snapshot of the ids: the loop, the checkpoint and the status writer must not walk the slice while a
+// targets re-read adds or drops an id.
+func (s *autoSupervisor) stateList() []*autoState {
+	s.statesMu.Lock()
+	defer s.statesMu.Unlock()
+	return append([]*autoState(nil), s.states...)
+}
+
+// addState appends one id (under statesMu).
+func (s *autoSupervisor) addState(st *autoState) {
+	s.statesMu.Lock()
+	s.states = append(s.states, st)
+	s.statesMu.Unlock()
+}
+
+// dropRemoved removes the states whose targets.txt lines are gone and whose stop has finished. A stopped id of a STOP
+// file is kept (it owns a done line in status.txt); a removed line is not.
+func (s *autoSupervisor) dropRemoved() {
+	s.statesMu.Lock()
+	defer s.statesMu.Unlock()
+	kept := s.states[:0]
+	for _, st := range s.states {
+		st.mu.Lock()
+		drop := st.remove && (st.done || st.escalated || st.refused)
+		st.mu.Unlock()
+		if !drop {
+			kept = append(kept, st)
+		}
+	}
+	s.states = kept
+}
+
+// noteTargetsStat remembers the targets.txt the loaded targets came from.
+func (s *autoSupervisor) noteTargetsStat() {
+	st, err := os.Stat(filepath.Join(s.o.walkDir, autoTargetsFile))
+	if err != nil {
+		return
+	}
+	s.targetsMod, s.targetsSize = st.ModTime(), st.Size()
+}
+
+// reloadTargets re-reads targets.txt when it changed (mtime or size): new ids start, removed ids stop cleanly, and an
+// id whose goal lines changed is stopped and re-added from the new lines. An unreadable or invalid file keeps the
+// targets already loaded and logs one warning (a half-written file is not a stop order). The brief's walk 39 added
+// every raid in its own autopilot dir because the file was read once.
+func (s *autoSupervisor) reloadTargets() {
+	path := filepath.Join(s.o.walkDir, autoTargetsFile)
+	st, err := os.Stat(path)
+	if err != nil || (st.ModTime().Equal(s.targetsMod) && st.Size() == s.targetsSize) {
+		return
+	}
+	targets, err := readAutoTargets(s.o.walkDir)
+	if err != nil {
+		if s.targetsWarn != err.Error() {
+			s.targetsWarn = err.Error()
+			s.event("all", "targets", fmt.Sprintf("invalid targets file, keeping the %d loaded target(s): %v", len(s.stateList()), err))
+		}
+		return
+	}
+	s.targetsWarn = ""
+	s.targetsMod, s.targetsSize = st.ModTime(), st.Size()
+	s.applyTargets(targets)
+}
+
+// autoSameTargets says two states walk the same goal lines with the same arguments: a re-read leaves such an id alone.
+func autoSameTargets(a, b *autoState) bool {
+	if len(a.goals) != len(b.goals) {
+		return false
+	}
+	for i := range a.goals {
+		x, y := a.goals[i].target, b.goals[i].target
+		if x.ID != y.ID || x.Server != y.Server || x.Slot != y.Slot || x.Holder != y.Holder || x.Goal != y.Goal || x.Start != y.Start {
+			return false
+		}
+		if len(x.Args) != len(y.Args) {
+			return false
+		}
+		for j := range x.Args {
+			if x.Args[j] != y.Args[j] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// applyTargets reconciles the loaded ids with a new read: an unchanged id keeps its state (its goal, attempt, backoff
+// and run); a removed id is stopped like STOP-<id>; a new or changed id waits in pending until its old state is gone,
+// then starts (a changed id's slot is still the old run's until that teardown is verified).
+func (s *autoSupervisor) applyTargets(targets []raidwalk.AutoTarget) {
+	fresh := groupAutoTargets(targets)
+	newByID := map[string]*autoState{}
+	for _, st := range fresh {
+		newByID[st.id] = st
+	}
+	oldByID := map[string]*autoState{}
+	for _, st := range s.stateList() {
+		oldByID[st.id] = st
+		if next, ok := newByID[st.id]; ok {
+			if autoSameTargets(st, next) {
+				continue
+			}
+			s.requestStop(st, "targets.txt changed the id's goals")
+			st.mu.Lock()
+			st.remove = true
+			st.mu.Unlock()
+			s.queueState(next)
+			continue
+		}
+		s.requestStop(st, "removed from targets.txt")
+		st.mu.Lock()
+		st.remove = true
+		st.mu.Unlock()
+	}
+	for _, st := range fresh {
+		if _, ok := oldByID[st.id]; !ok {
+			s.queueState(st)
+		}
+	}
+}
+
+// queueState holds a new (or changed) id's state until its id is free.
+func (s *autoSupervisor) queueState(st *autoState) {
+	s.statesMu.Lock()
+	for i, p := range s.pending {
+		if p.id == st.id {
+			s.pending[i] = st
+			s.statesMu.Unlock()
+			s.event(st.id, "targets", "queued: the new lines replace an id still stopping")
+			return
+		}
+	}
+	s.pending = append(s.pending, st)
+	s.statesMu.Unlock()
+	s.event(st.id, "targets", "queued: the id starts when its slot is free")
+}
+
+// adoptPending adds the queued ids whose id is no longer running: the old state was dropped after its clean stop.
+func (s *autoSupervisor) adoptPending() {
+	s.statesMu.Lock()
+	queued := s.pending
+	s.pending = nil
+	s.statesMu.Unlock()
+	if len(queued) == 0 {
+		return
+	}
+	busy := map[string]bool{}
+	for _, st := range s.stateList() {
+		busy[st.id] = true
+	}
+	for _, st := range queued {
+		if busy[st.id] {
+			s.statesMu.Lock()
+			s.pending = append(s.pending, st)
+			s.statesMu.Unlock()
+			continue
+		}
+		s.initSeq()
+		s.reconcileSlot(st, nil)
+		s.addState(st)
+		s.event(st.id, "targets", "added from targets.txt")
+	}
+}
+
 // tick advances every id once.
 func (s *autoSupervisor) tick(ctx context.Context) {
+	s.reloadTargets()
 	s.checkStopFiles()
-	for _, st := range s.states {
+	for _, st := range s.stateList() {
 		s.tickState(st)
 	}
+	s.dropRemoved()
+	s.adoptPending()
 	s.saveState()
 }
 
@@ -740,7 +928,7 @@ func (s *autoSupervisor) checkStopFiles() {
 		return
 	}
 	byID := map[string]*autoState{}
-	for _, st := range s.states {
+	for _, st := range s.stateList() {
 		byID[st.id] = st
 	}
 	for _, e := range entries {
@@ -1710,7 +1898,7 @@ func (s *autoSupervisor) saveState() {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	saved := autoSavedState{Format: autoStateFormat, Version: autoStateVersion, Updated: time.Now().UTC().Format(time.RFC3339)}
-	for _, st := range s.states {
+	for _, st := range s.stateList() {
 		st.mu.Lock()
 		e := autoSavedID{
 			ID: st.id, Goal: st.current, GoalsDone: st.current,
@@ -1821,7 +2009,7 @@ func (s *autoSupervisor) reconcile() error {
 	for i := range saved.IDs {
 		byID[saved.IDs[i].ID] = &saved.IDs[i]
 	}
-	for _, st := range s.states {
+	for _, st := range s.stateList() {
 		st.mu.Lock()
 		t := st.goals[0].target
 		sv := byID[st.id]
@@ -1966,7 +2154,7 @@ func (s *autoSupervisor) reconcileSummary(st *autoState, sv *autoSavedID) {
 // teardowns run per id at the same time, so one slow slot never delays the others (M7).
 func (s *autoSupervisor) shutdown(why string) {
 	var wg sync.WaitGroup
-	for _, st := range s.states {
+	for _, st := range s.stateList() {
 		st.mu.Lock()
 		r := st.run
 		escalated, refused, done := st.escalated, st.refused, st.done
@@ -1993,7 +2181,7 @@ func (s *autoSupervisor) shutdown(why string) {
 	s.wg.Wait()
 	clean := true
 	var mu sync.Mutex
-	for _, st := range s.states {
+	for _, st := range s.stateList() {
 		st.mu.Lock()
 		target := st.run
 		if target == nil {
@@ -2041,7 +2229,7 @@ func (s *autoSupervisor) shutdown(why string) {
 func (s *autoSupervisor) writeStatus() {
 	var b strings.Builder
 	fmt.Fprintf(&b, "raid-autopilot %s\n", time.Now().UTC().Format(time.RFC3339))
-	for _, st := range s.states {
+	for _, st := range s.stateList() {
 		st.mu.Lock()
 		g := "none"
 		if st.current < len(st.goals) {
