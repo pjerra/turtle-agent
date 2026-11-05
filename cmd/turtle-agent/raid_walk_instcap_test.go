@@ -55,13 +55,25 @@ func TestInstanceCapBelowFourGoesOn(t *testing.T) {
 	}
 }
 
+// Six fresh raids in the hour pass the walk's gate on a core patched to 30 per account, where the stock 5 would wait.
+func TestInstanceCapThirtyGoesOnAtSixRaids(t *testing.T) {
+	w, _, slept, stderr := capWalk(t, raidWalkOptions{capWait: 20 * time.Minute, capPerAccount: 30},
+		5*time.Minute, 10*time.Minute, 15*time.Minute, 20*time.Minute, 25*time.Minute, 30*time.Minute)
+	if err := w.phaseInstanceCap(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(*slept) != 0 || stderr.Len() != 0 || !w.capReserved {
+		t.Fatalf("6 in the hour below a cap of 30: slept %v stderr %q reserved %v", *slept, stderr.String(), w.capReserved)
+	}
+}
+
 func TestInstanceCapWaitsForTheOldestToAgeOut(t *testing.T) {
 	w, now, slept, stderr := capWalk(t, raidWalkOptions{capWait: 20 * time.Minute},
 		55*time.Minute, 30*time.Minute, 20*time.Minute, 10*time.Minute)
 	if err := w.phaseInstanceCap(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stderr.String(), "instance cap: 4 fresh instances in the last hour on m910q; the 6th is refused by the core") {
+	if !strings.Contains(stderr.String(), "instance cap: 4 fresh instances in the last hour on m910q; the core's cap is 5 per account and hour") {
 		t.Fatalf("warning missing: %q", stderr.String())
 	}
 	if len(*slept) != 1 || (*slept)[0] != 5*time.Minute+capWaitMargin {
@@ -191,7 +203,7 @@ func TestInstanceCapFailExitsWithItsOwnCode(t *testing.T) {
 	if len(*slept) != 0 {
 		t.Fatalf("--instance-cap-fail must not wait: %v", *slept)
 	}
-	if !strings.Contains(stderr.String(), "the 6th is refused by the core") {
+	if !strings.Contains(stderr.String(), "the core's cap is 5") {
 		t.Fatalf("warning missing: %q", stderr.String())
 	}
 }
@@ -381,5 +393,104 @@ func TestInstanceCapCorruptLedgerIsMovedAsideAndLogged(t *testing.T) {
 	}
 	if len(w.notes) == 0 {
 		t.Fatal("the history loss is not in the walk's notes")
+	}
+}
+
+// The instance cap resolves flag first, then instance-cap-per-account.json beside the slots file, then the stock 5.
+func TestWalkInstanceCapFromFlagAndFile(t *testing.T) {
+	// A --slots in a temp dir must not meet the machine's own default leases: this test is about the cap only.
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	path := filepath.Join(dir, "slots.json")
+	body := `{"version":1,"servers":[
+		{"name":"m910q","realmd":"10.0.0.1:3724","slots":[
+			{"id":"1","account":"A","character":"Gbmage","port":8771,"settings_from":"/s.json"}]},
+		{"name":"tortoise-test2","realmd":"10.0.0.2:3724","slots":[
+			{"id":"1","account":"A","character":"Gbmage","port":8772,"settings_from":"/s.json"}]}]}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "instance-cap-per-account.json"), []byte(`{"m910q":30}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		o    raidWalkOptions
+		want int
+	}{
+		{"the server's file entry", raidWalkOptions{slotsPath: path, server: "m910q"}, 30},
+		{"an unset server is the stock 5", raidWalkOptions{slotsPath: path, server: "tortoise-test2"}, raidwalk.InstanceCapPerAccount},
+		{"the flag wins", raidWalkOptions{slotsPath: path, server: "m910q", capPerAccount: 5, capGiven: true}, 5},
+	}
+	for _, c := range cases {
+		o := c.o
+		env, _, err := defaultWalkEnv(&o)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if o.capPerAccount != c.want || env.capPerAccount != c.want {
+			t.Fatalf("%s: opts %d env %d, want %d", c.name, o.capPerAccount, env.capPerAccount, c.want)
+		}
+	}
+}
+
+// The live finding on 6f4018b: with the per-server caps in the DEFAULT slots dir (~/.config/turtle-agent/
+// instance-cap-per-account.json = {"m910q": 30, "tortoise-test2": 30}) a walk still printed "the core's cap is 5"
+// and waited on "the oldest of 4". The resolution must read the file beside the default slots file, not only beside
+// an explicit --slots.
+func TestWalkInstanceCapUsesTheDefaultSlotsDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".config", "turtle-agent")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	slotsBody := `{"version":1,"servers":[
+		{"name":"m910q","realmd":"10.0.0.1:3724","slots":[
+			{"id":"1","account":"A","character":"Gbmage","port":8771,"settings_from":"/s.json"}]},
+		{"name":"tortoise-test2","realmd":"10.0.0.2:3724","slots":[
+			{"id":"1","account":"A","character":"Gbmage","port":8772,"settings_from":"/s.json"}]}]}`
+	if err := os.WriteFile(filepath.Join(dir, "slots.json"), []byte(slotsBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "instance-cap-per-account.json"), []byte(`{"m910q":30,"tortoise-test2":30}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// No --slots and no --instance-cap-per-account: the walk resolves both defaults.
+	o := raidWalkOptions{server: "m910q", capPerAccount: raidwalk.InstanceCapPerAccount}
+	env, _, err := defaultWalkEnv(&o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := &walk{opts: o, env: env}
+	if got := w.instanceCap(); got != 30 {
+		t.Fatalf("instanceCap = %d, want 30 from the default dir's instance-cap-per-account.json", got)
+	}
+	if got := env.capPerAccount; got != 30 {
+		t.Fatalf("env.capPerAccount = %d, want 30", got)
+	}
+	// The ledger lives beside the default slots file too, and its gate admits the fourth raid at 30.
+	if want := filepath.Join(dir, raidwalk.InstanceCapFile); env.capLedger != want {
+		t.Fatalf("capLedger = %q, want %q", env.capLedger, want)
+	}
+	if err := os.WriteFile(env.capLedger, []byte(`{"servers":{"m910q":{"entries":[
+		{"at":"2026-11-03T11:50:00Z"},{"at":"2026-11-03T11:55:00Z"},{"at":"2026-11-03T11:58:00Z"},{"at":"2026-11-03T11:59:00Z"}]}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	admitted, n, wait := func() (bool, int, time.Duration) {
+		var a bool
+		var c int
+		var d time.Duration
+		_, err := raidwalk.UpdateCapLedger(env.capLedger, func(l *raidwalk.CapLedger) {
+			a, c, d = l.TryReserve("m910q", "zg-a#1", w.instanceCap(), now)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a, c, d
+	}()
+	if !admitted || n != 4 || wait != 0 {
+		t.Fatalf("four raids with cap 30: admitted %v count %d wait %s, want true 4 0", admitted, n, wait)
 	}
 }

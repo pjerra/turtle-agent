@@ -18,6 +18,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/planscout"
+	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/routeedit"
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
@@ -49,7 +50,7 @@ const planScoutUsage = `usage: turtle-agent plan-scout <dungeon> [--dir dungeons
     [--from LEG] [--until LEG] [--party-level N] [--out DIR] [--json]
     [--fix-out FILE] [--apply-fixes DIR] [--fail-on fail|warn]
     [--live <server>] [--slot N] [--holder NAME] [--slots FILE] [--binary PATH]
-    [--walk-budget 5m] [--max-minutes 20] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset]`
+    [--walk-budget 5m] [--max-minutes 20] [--instance-cap-per-account N] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset]`
 
 // planScoutOptions are the command's flags.
 type planScoutOptions struct {
@@ -72,6 +73,10 @@ type planScoutOptions struct {
 	instanceCapWait  string
 	instanceCapFail  bool
 	instanceCapReset bool
+	// instanceCapPerAccount is the core's fresh instances per account and hour; instanceCapSet tells a flag from the
+	// default (the flag wins over instance-cap-per-account.json's per-server value).
+	instanceCapPerAccount int
+	instanceCapSet        bool
 	// walkBudgetD and capWaitD are walkBudget and instanceCapWait parsed (the live pass's waits).
 	walkBudgetD time.Duration
 	capWaitD    time.Duration
@@ -103,6 +108,7 @@ func planScoutCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	fs.StringVar(&o.binary, "binary", "", "the server binary path")
 	fs.StringVar(&o.walkBudget, "walk-budget", "5m", "live walk budget")
 	fs.IntVar(&o.maxMinutes, "max-minutes", 20, "live time ceiling in minutes")
+	fs.IntVar(&o.instanceCapPerAccount, "instance-cap-per-account", raidwalk.InstanceCapPerAccount, "the core's limit of fresh instance ids one account may enter in an hour (stock 5; the server's entry in instance-cap-per-account.json is used when this flag is not given)")
 	fs.StringVar(&o.instanceCapWait, "instance-cap-wait", "20m", "how long to wait for a free instance place")
 	fs.BoolVar(&o.instanceCapFail, "instance-cap-fail", false, "fail when the instance ledger is at its cap")
 	fs.BoolVar(&o.instanceCapReset, "instance-cap-reset", false, "reset the instance ledger entry")
@@ -113,6 +119,11 @@ func planScoutCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	if err := fs.Parse(flags); err != nil {
 		return exitUsage
 	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "instance-cap-per-account" {
+			o.instanceCapSet = true
+		}
+	})
 	fail := func(format string, a ...any) int {
 		fmt.Fprintf(stderr, "plan-scout: "+format+"\n", a...)
 		return exitUsage
@@ -131,6 +142,9 @@ func planScoutCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	if o.slot == 3 {
 		fmt.Fprintln(stderr, "plan-scout: slot 3 is never used")
 		return exitSlotRefused
+	}
+	if o.instanceCapPerAccount < 1 {
+		return fail("--instance-cap-per-account must be 1 or more, not %d", o.instanceCapPerAccount)
 	}
 	if o.live != "" && !placeServers[o.live] {
 		fmt.Fprintf(stderr, "plan-scout: %q is not a test server (the live pass runs on %s only)\n", o.live, strings.Join(placeServerList(), ", "))

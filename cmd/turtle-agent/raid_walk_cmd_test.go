@@ -686,6 +686,8 @@ func (f *walkFakeAgent) gmSide(line string) {
 		f.gpsSide()
 	case line == ".pinfo":
 		f.pinfoSide()
+	case strings.HasPrefix(line, ".pinfo "):
+		f.pinfoNameSide(strings.TrimPrefix(line, ".pinfo "))
 	case line == ".die":
 		f.dieSide()
 	case strings.HasPrefix(line, ".summon "):
@@ -750,6 +752,19 @@ func (f *walkFakeAgent) gpsSide() {
 	}
 	f.mu.Lock()
 	f.lines = append(reply, f.lines...)
+	f.mu.Unlock()
+}
+
+// pinfoNameSide pushes the `.pinfo <name>` reply (the instance ledger's account read). The account id is stable
+// per name, so a test can read the ledger entry back; no account name is put in the reply (the redactor would scrub
+// it anyway).
+func (f *walkFakeAgent) pinfoNameSide(name string) {
+	id := 100
+	for _, c := range name {
+		id += int(c)
+	}
+	f.mu.Lock()
+	f.lines = append([]queuedEvent{{raw: fmt.Sprintf("Human Warrior |cffffffff|Hplayer:%s|h[%s]|h|r (guid: 7) Account: acct (id: %d) GMLevel: 3", name, name, id)}}, f.lines...)
 	f.mu.Unlock()
 }
 

@@ -877,3 +877,56 @@ func TestPlaceGMClearStopsAtTheBudget(t *testing.T) {
 		t.Fatalf("summary.txt:\n%s", text)
 	}
 }
+
+// The world export default must work for an installed binary: the per-user data dir is the default, and a checkout's
+// tools/dungeongen/testdata is the fallback (never the binary's own directory).
+func TestWorldExportDirDefaultsToTheInstalledDataDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	installed := filepath.Join(home, ".local", "share", "turtle-agent", "world", "map309")
+	if err := os.MkdirAll(installed, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installed, "creatures.tsv"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	planDir := filepath.Join(t.TempDir(), "dungeons")
+	if err := os.MkdirAll(planDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	w := &walk{opts: raidWalkOptions{dir: planDir}, plan: &dungeon.Plan{Map: 309}}
+	if got := w.worldExportDir(); got != installed {
+		t.Fatalf("worldExportDir = %q, want the installed %q", got, installed)
+	}
+	// A checkout beside the plan folder is the fallback when the installed dir has no export.
+	repo := filepath.Join(filepath.Dir(planDir), "tools", "dungeongen", "testdata", "map309")
+	if err := os.MkdirAll(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "creatures.tsv"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(installed); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.worldExportDir(); got != repo {
+		t.Fatalf("worldExportDir = %q, want the checkout %q", got, repo)
+	}
+	// With neither, the refusal names the installed path (the one an installed binary can have) and the checkout.
+	if err := os.RemoveAll(repo); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.worldExportDir(); got != installed {
+		t.Fatalf("worldExportDir = %q, want the installed %q when neither exists", got, installed)
+	}
+	for _, want := range []string{installed, repo} {
+		if !strings.Contains(w.worldExportWhere(), want) {
+			t.Fatalf("worldExportWhere = %q, missing %q", w.worldExportWhere(), want)
+		}
+	}
+	// --gm-clear-spawns wins.
+	w.opts.gmClearSpawns = "/exports/map309"
+	if got := w.worldExportDir(); got != "/exports/map309" {
+		t.Fatalf("--gm-clear-spawns not used: %q", got)
+	}
+}

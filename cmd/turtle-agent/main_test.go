@@ -8,8 +8,12 @@ import (
 	"testing"
 )
 
-// TestMain keeps the run traces that dungeon_run writes by default out of the source tree.
+// TestMain keeps the run traces that dungeon_run writes by default out of the source tree. With AUTO_TEST_CHILD=1
+// the process re-executes as the raid autopilot instead (the detached launcher and the durable-state tests spawn it).
 func TestMain(m *testing.M) {
+	if os.Getenv("AUTO_TEST_CHILD") == "1" {
+		os.Exit(raidAutopilotCmd(context.Background(), os.Args[2:], os.Stdout, os.Stderr))
+	}
 	dir, err := os.MkdirTemp("", "turtle-agent-traces-")
 	if err != nil {
 		os.Exit(1)

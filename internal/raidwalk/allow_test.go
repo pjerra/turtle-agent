@@ -194,3 +194,18 @@ func TestAllowedTT(t *testing.T) {
 		t.Errorf("accepted %d skip entries", MaxSkipEntries+1)
 	}
 }
+
+// TestAllowedPInfo pins the instance ledger's account read: read-only, the walk's own hires only.
+func TestAllowedPInfo(t *testing.T) {
+	hires := map[string]bool{"Tankbot": true, "Healbot": true}
+	for _, line := range []string{".pinfo", ".pinfo Tankbot", ".pinfo Healbot"} {
+		if !AllowedLine(line, hires, 309) {
+			t.Errorf("refused %q", line)
+		}
+	}
+	for _, line := range []string{".pinfo Stranger", ".pinfo Tankbot extra", ".pinfoo", ".pinfo Tankbot\\n.die"} {
+		if AllowedLine(line, hires, 309) {
+			t.Errorf("allowed %q", line)
+		}
+	}
+}

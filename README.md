@@ -97,10 +97,11 @@ turtle-agent tune-diff <trace.jsonl>
 turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--approach-hops] [--floor-aware] [--skip-legs NAME,...] [--with-optional NAME,...] [--with-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)
 turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--spawns DIR] [--floor-aware] [--approach-hops] [--strict] [--json] <plan>...
 turtle-agent plan-check --mmaps DIR --sql FILE [--plan NAME] [--spawns DIR] [--strict] [--json]
-turtle-agent plan-scout <dungeon> [--dir dungeons] [--sql FILE] [--mmaps DIR] [--spawns DIR] [--from LEG] [--until LEG] [--party-level N] [--out DIR] [--json] [--fix-out FILE] [--apply-fixes DIR] [--fail-on fail|warn] [--live SERVER --slot N ...]
+turtle-agent plan-scout <dungeon> [--dir dungeons] [--sql FILE] [--mmaps DIR] [--spawns DIR] [--from LEG] [--until LEG] [--party-level N] [--out DIR] [--json] [--fix-out FILE] [--apply-fixes DIR] [--fail-on fail|warn] [--instance-cap-per-account N] [--live SERVER --slot N ...]
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
-turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--reuse-instance] [--dry-run]
+turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-per-account N] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--reuse-instance] [--dry-run]
+turtle-agent raid-autopilot [--foreground] [--binary PATH] [--poll D] [--stall D] [--settle D] [--status-every D] [--instance-cap-per-account N] [--dry-run] <walk-dir>
 turtle-agent trash-check [--dir dungeons] [--sql FILE [--plan NAME]] [--spawns DIR] [--patrols FILE]... [--mmaps DIR] [--level N] [--spread YD] [--aggro-rate R] [--assist-yd 10] [--json] [--out DIR] [--dash-out FILE] [--fail-on danger|patrol|any] [<plan>|<path.json>]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent scenario check [--var NAME=VALUE]... <file>
@@ -227,7 +228,7 @@ with `ALLOW_TURTLE_ADDONS`); add them there if you want to look like that. This 
 
 ## Test slots, leases and teardown
 
-One slot per worker. The slot table (`~/.config/turtle-agent/slots.json`, `--slots FILE`) names each server's slots with their account, character, laptop RPC port and the `settings_from` file that holds the account's password; it holds no passwords itself. `lease acquire --any` (or `--slot N`, never 3) takes a free slot for a holder name and a ttl (default 180 min); a lease is stale only when it is expired AND its client dir has no live agent, and `acquire` refuses a port that already has a listener. `slot setup` copies no settings file: it builds `<dir>/settings.json` from scratch (one account, a fresh token file per run) plus `slot.json`, the binary and the `dungeons/`/`traces/` folders, and prints the login line. `teardown <dir>` runs the RPC `teardown` first (snapshot, the player follow, `agent_run`, brain, `run stop`, unbind, `.bot remove` of listed hires, leave, gone, `.gm off`, logout), then ends the agent by its pid file, closes the port, deletes only the secrets and releases the lease (exit 14 on any fail, 15 on a refused lease). m910q slot 3 (and tortoise-test2 slot 3) is never leasable on either server. A group holding a real player (any member the `commander status` listing does not name) gets no `.bot remove` at all: a GM's remove reaches any bot, so leaving the group — which ends only your own hires — does the cleanup instead. Known limit: a classic bind (commander outside the lead's group) with a real player inside the lead's group is not detectable from the client; bot-only test runs never have that shape.
+One slot per worker. The slot table (`~/.config/turtle-agent/slots.json`, `--slots FILE`) names each server's slots with their account, character, laptop RPC port and the `settings_from` file that holds the account's password; it holds no passwords itself. A `--slots FILE` outside the default directory keeps its leases (`<dir>/leases`), its instance-cap ledger and its `instance-cap-per-account.json` there: raid-walk refuses to start (exit 2, `one ledger per server`) when the default directory holds a live lease for the same server, because the two ledgers cannot see each other (walk 38: two raids took one slot). `--allow-split-ledger` overrides it for test sandboxes. The per-server core instance cap lives beside it in `instance-cap-per-account.json` (`{"m910q": 30}`), never in the slot table (older binaries refuse unknown fields there; see `--instance-cap-per-account` below). `lease acquire --any` (or `--slot N`, never 3) takes a free slot for a holder name and a ttl (default 180 min); a lease is stale only when it is expired AND its client dir has no live agent, and `acquire` refuses a port that already has a listener. `slot setup` copies no settings file: it builds `<dir>/settings.json` from scratch (one account, a fresh token file per run) plus `slot.json`, the binary and the `dungeons/`/`traces/` folders, and prints the login line. `teardown <dir>` runs the RPC `teardown` first (snapshot, the player follow, `agent_run`, brain, `run stop`, unbind, `.bot remove` of listed hires, leave, gone, `.gm off`, logout), then ends the agent by its pid file, closes the port, deletes only the secrets and releases the lease (exit 14 on any fail, 15 on a refused lease). m910q slot 3 (and tortoise-test2 slot 3) is never leasable on either server. A group holding a real player (any member the `commander status` listing does not name) gets no `.bot remove` at all: a GM's remove reaches any bot, so leaving the group — which ends only your own hires — does the cleanup instead. Known limit: a classic bind (commander outside the lead's group) with a real player inside the lead's group is not detectable from the client; bot-only test runs never have that shape.
 
 `rpc <dir> <method> [<params-json>]` drives the agent of a slot dir with one JSON-RPC call, for live-test workers that must never read its token file: the command reads `slot.json`, checks it like `teardown` does (the dir must match, the port must be valid, outside paths are refused), reads the token file derived from the port itself, refuses it unless it has exactly the shape the agent generates (32 random bytes as 43 base64url characters; anything else gets `rpc: the token file is not an agent token`, exit 15, with the content never printed), and posts to `127.0.0.1:<port>` with the token as `Authorization: Bearer` and `Content-Type: application/json`. It prints only the `result` as JSON (pretty; `--raw` for one line), a JSON-RPC error as `error: <code> <message>` on stderr (exit 16), an unreachable agent as exit 15, usage errors as exit 2. A reply that is not a 2.0 envelope for the request (any non-200 status; a body that is not an object with `"jsonrpc":"2.0"`, `"id"` 1 and exactly one of a present `"result"` or an `"error"` object with a numeric code and a string message) is `rpc: bad reply from the agent: <reason>` on stderr, exit 15, never 0. `params-json` is an object or an array; `-` reads it from stdin; omitted means no params; `--timeout DUR` (default 30 s) bounds the call. The token never appears in output, errors or help: it is redacted from every printed line. Examples:
 
@@ -1091,6 +1092,8 @@ The fix file (`--fix-out FILE`, `tb-scout-fix` v1, also written with no fixes) p
 `--apply-fixes DIR` writes `DIR/<plan>.json` and `DIR/<plan>.diff`, never in place: `DIR` must not exist or be empty, and a `DIR` inside a `dungeons/` folder (or a slot's plan folder) is refused. The fixes are applied by `routeedit.Clone` and checked with `routeedit.Evaluate`: a fix set that adds a plan-check issue is refused as a whole (exit 27, nothing written). With `--sql`, the rows must equal the plan's own export (`rows_sha256`) or the apply is refused (exit 2).
 
 `--live <server>` (`m910q` or `tortoise-test2` only) adds the live pass after the offline one (spec `plan-scout-mode.md` 5.6): one GM character, never slot 3, the raid-walk lease and instance ledger, `.gm on` + `.gm visible off`, `.instance unbind <map>`, a fresh instance, then `.bot scout cfg|path|walk|where` (the TortoiseBots module) and `.tt q inst|units|los` (the Eluna test toolkit). It asks the server's own path query for every hop origin of the step before it (8 in flight, replies matched by id, one retry), reads `q units`/`q los` at every stand, gather anchor and pull row (a spot more than 120 yd from the GM is reached by its own `.go xyz` first, acked by the session's `TeleportSeq`; a read the toolkit refuses as `point_far` gets one teleport to its point and one retry), and really walks the ranked risky hops (`climb_anchor` > `water` > `arrival` > `drop`) within `--walk-budget` (default 5m) and `--max-minutes` (20). Its answers merge into the same report as `source: "live"` checks: `live_path` (verdict, type 0x80 swim line, swimmable ends), `live_walk` (where the walk stopped, and CheckAnchor's rule for an anchor->stand hop), `live_aggro` (live units within reach, `q los` decides fail or warn), `live_los` and `live_joiners` (live positions and live sight; it replaces the offline `joiners`). `<out>/scout.log` has every line sent and every `TBM:SCOUT_*`/`TTJSON` reply. The live flags are `--slot N`, `--holder NAME`, `--slots FILE`, `--binary PATH`, `--walk-budget`, `--max-minutes`, `--instance-cap-wait`, `--instance-cap-fail` and `--instance-cap-reset` (the instance ledger counts the scout's GM as one of the account's 5 fresh instances per hour). The GM and toolkit lines pass a strict allow-list before they are sent (`.gm on`, `.gm visible off`, `.go xyz` on the plan's or portal's map, `.instance unbind <plan map>`, `.bot scout ...`; `q inst`, `q units r<=60 ... all`, `q los` with 1-8 hex guids): no `.die`, `.tele`, `.bot run`, `.bot cmd`, hire or `.appear`. The server is also checked by the address the session dialled (the slot settings' `world_addr` must equal the test server's slots-table `world_addr`), so a live realm is refused before anything is sent.
+
+`--instance-cap-per-account N` is the live pass's core limit of fresh instance ids per account and hour (stock 5; the local test core is patched to 30). It uses the server's entry in `instance-cap-per-account.json` beside the slots file when the flag is not given, and the flag wins.
 
 Exit codes: 0 no failing step (warnings allowed unless `--fail-on warn`); 27 a failing step or a refused `--apply-fixes`; 28 the live pass stopped part-way (time ceiling, disconnect, the instance changed, the lease lost): the report and fix file are written and the live checks from there are `skip`; 1 the navmesh cannot answer; 2 usage or an unreadable plan/sql/spawns; 15 slot 3 (the flag, or a lease that came back as slot 3, which is released at once) or no free slot; 18 a live phase refused (server not a test server, GM mode refused, a module without `.bot scout`, no toolkit, the instance check failed); 26 `--instance-cap-fail` and the ledger is at the cap (nothing started). Live fixes for a live-confirmed finding use the same kinds as its offline twin; `--apply-fixes` is unchanged.
 
@@ -2363,26 +2366,36 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   with 0 a late joiner can miss the refit, so that walk's numbers are a comparison only. Any `--hire-settle` below the
   default marks the summary `roster.settle_short: true` (with `roster.hire_settle_s`), and the suite's baseline pick
   skips it.
-- `--instance-cap-wait 20m`, `--instance-cap-fail`, `--instance-cap-reset`, `--instance-cap-unsafe`: the core lets an account enter only 5
-  distinct instance ids an hour, and its list lives in the worldserver's memory. Hires pack up to 10 a pool account, so
-  a re-placed raid (`--place`, a `walk-super.sh` restart, an idle-raid re-placement) soon meets the 6th, which is
-  refused and fails the summons. Every walk that enters a fresh instance is written to a per-server ledger
-  (`instance-cap.json` beside the slots file; entries are timestamps and the plan, the hire output does not name the
-  pool accounts, so it counts raids and can only over-count). Before the lease the walk counts the entries of the last
-  60 minutes on `--server`; at 4 or more it prints `instance cap: N fresh instances in the last hour on <server>; the
-  6th is refused by the core` and waits for the oldest to age out, at most `--instance-cap-wait`. A walk never starts a
-  fresh instance without a reservation: when the wait runs out it exits 26 (`instance cap: waited ... still N on <server>`),
-  and `--instance-cap-wait 0` exits 26 at the count at once. `--instance-cap-fail` exits 26 at the count instead of
-  waiting (`walk-super.sh` does not restart a 26). `--instance-cap-unsafe` is the explicit override: it goes on without a
-  reservation at the wait's end (or with an unreadable ledger), logs it, and concurrent walks may then each create a
-  fresh instance.
+- `--instance-cap-per-account N` (default 5 = the stock core), `--instance-cap-wait 20m`, `--instance-cap-fail`,
+  `--instance-cap-reset`, `--instance-cap-unsafe`: the core lets an account enter only N distinct instance ids an hour
+  (`MAX_INSTANCE_PER_ACCOUNT_PER_HOUR`), and its list lives in the worldserver's memory. The local test core is patched
+  to 30. The flag is also read per server from `instance-cap-per-account.json` beside the slots file
+  (`{"m910q": 30}`; the flag wins), and without either N is 5. Hires pack up to 10 a pool account, so a
+  re-placed raid (`--place`, a `walk-super.sh` restart, an idle-raid re-placement) soon meets the cap, which is
+  refused and fails the summons. Every walk that enters a fresh instance is written to a per-server ledger (`instance-cap.json` beside the slots file;
+  entries are timestamps, the plan and now the pool accounts of the party). The count is the core's own: **per pool
+  account**, N fresh instance ids in the last hour. After the last hire the walk reads the party's accounts with one
+  read-only `.pinfo <hire>` per hire (the reply's `Account: ... (id: N)`; names are never stored, only ids) and records
+  them on the entry. A ledger whose live entries all name their accounts counts the busiest account and waits at N (the
+  N+1th is refused); before the hires it takes the busiest account the window knows, then checks the hired party
+  exactly before it enters. With an older entry that names no accounts (or a live reservation of a walk that has not
+  hired yet) it keeps the conservative raid count at N-1, because a raid packs 2-3 pool accounts: that was walk 37's
+  12-47 minute waits. Both lines name the count, the cap and the earliest free time, e.g. `instance cap: a hired
+  account already has 5 fresh instances in the last hour on <server>; the core's cap is 5` or `instance cap: 4 fresh
+  instances in the last hour on <server>; the core's cap is 5 per account and hour`. A walk never starts a fresh
+  instance without a reservation: when the wait runs out it
+  exits 26 (`instance cap: waited ... still N on <server>`), and `--instance-cap-wait 0` exits 26 at the count at
+  once. `--instance-cap-fail` exits 26 at the count instead of waiting (`walk-super.sh` does not restart a 26).
+  `--instance-cap-unsafe` is the explicit override: it goes on without a reservation at the wait's end (or with an
+  unreadable ledger, or past a hired account's cap), logs it, and concurrent walks may then each create a fresh
+  instance.
   The wait line names the earliest free time as well (`instance cap: waiting 16m5s (earliest free time
   2026-11-03T12:34:56Z) for the oldest of 4 ...`), so the operator can plan around it. `--reuse-instance` (with
   `--place`) is the way around a full ledger: it keeps the raid's CURRENT instance (see `--place` above), so nothing is
   entered, reserved or counted and the cap is not touched.
-  The check and the admission are one step under the ledger's lock: a walk below 4 reserves a place (holder + pid,
+  The check and the admission are one step under the ledger's lock: a walk below N-1 reserves a place (holder + pid,
   30 minutes), the reservation counts like an entry, becomes the entry once the raid has entered and is released on
-  every exit before that, so walks that start together cannot all pass at a count of 3. A corrupt ledger is moved to
+  every exit before that, so walks that start together cannot all pass at the last place. A corrupt ledger is moved to
   `instance-cap.json.corrupt-<stamp>` with a warning and a new one started; one that cannot be read at all is never
   written over: the walk waits one minute (when `--instance-cap-wait` allows) and then exits 26; `--instance-cap-unsafe` goes on without it instead.
   A worldserver restart clears the core's list, so the ledger must be cleared too: `--instance-cap-reset` forgets the
@@ -2645,7 +2658,8 @@ AQ20 walk starts at Rajaxx with `--gm-clear-boss kurinnaxx` so Kurinnaxx is dead
   leg is its row number or its name. **Whole packs:** each group expands to every pack its row clears (the trash check's rule: the row's
   entries and its reach) and each pack to all its members, a `creature_groups` AGGRO_TOGETHER group and both directions of every aggro
   link, wherever the members stand (`internal/worldspawn` packs, the pull estimator's model). The packs come from the world export
-  under `<dir>/../tools/dungeongen/testdata/map<N>` (`--gm-clear-spawns DIR` names another).
+  under `~/.local/share/turtle-agent/world/map<N>` (the per-user data dir an installed binary reads; a checkout's
+  `<dir>/../tools/dungeongen/testdata/map<N>` is the fallback; `--gm-clear-spawns DIR` names another).
 - **Mechanism:** every expected member of a pack gets one entry. The commander visits the pack's stops (`.go xyz` to a member's spawn
   point; a pack wider than the 100 yd a stop covers gets several), reads the units its client holds within 150 yd, and for each live
   member whose spawn guid and entry match calls the agent's `gm_kill` RPC: it selects the creature by guid, waits until the server shows
@@ -2779,6 +2793,104 @@ one fault in `fail` exits **23**; 18 and 19 keep their meaning and win over 23. 
 lower exit code to **23** as well, and that 23 outranks 18 and 19 too (a bot left frozen must never hide). A fault
 that never fired is `not-fired`; one that could not be caused or measured is
 `inconclusive`; neither changes the exit code.
+### Raid autopilot
+
+`turtle-agent raid-autopilot <walk-dir>` keeps a walk dir's raids running without a worker watching them (walk 37:
+18:00-19:25 idle while no worker watched, rests of 15-90 minutes on the instance cap, eight failed placements burning
+instances). It reads `<walk-dir>/targets.txt`, one goal per line:
+
+```
+# id   server          slot holder goal        -- raid-walk args...
+a      tortoise-test2  1    zg37-a full        -- zul_gurub --dir /plans --hires roster-best.json --sql zg.sql
+b      tortoise-test2  2    zg37-b boss:14515  -- zul_gurub --dir /plans --hires roster.json --sql zg.sql --from step 405
+c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /plans --hires roster.json --sql zg.sql
+```
+
+- **Targets.** Blank lines and `#` lines are skipped. The header is exactly `id server slot holder goal --`; the rest
+  is the raid-walk args, starting with the plan. A goal is `full` (walk to the plan's end), `leg:<L>` (`--until "leg
+  L"`) or `boss:<ENTRY>` (`--until boss-done`, done when that boss's `boss_kills` entry reads killed, whatever the
+  exit code and whatever the end reason — an incident after the kill, 19, counts, and so does a `stopped: ...` end
+  such as the 90-minute limit firing after the kill; a full clear the same). An id may repeat: its lines are
+  walked in file order, and a met goal advances to the next line. `--sql FILE` is required: every goal may be
+  re-placed, and raid-walk refuses `--place` without it. `--from` in a line is the goal's own start (a restart with
+  no step reached uses it); a restart inside the goal starts at the furthest step the run reached, and never sends
+  `--reuse-instance` without a `--from`/`--place` (raid-walk refuses that combination).
+  `--server/--slot/--holder/--until/--place/--reuse-instance/--out` are managed and dropped if present; slot 3,
+  `--instance-cap-unsafe` and `--inject` are refused before anything runs. Two ids may not name the same server and
+  slot: one slot runs one walk at a time.
+- **Instance cap.** `--instance-cap-per-account N` is passed to every raid-walk it starts; without the flag each walk
+  resolves the target server's entry in `instance-cap-per-account.json` beside the slots file and then the stock 5.
+  The per-account gates keep one place of headroom (below `N-1`), and a `--reuse-instance` placement that re-hires
+  records the new accounts for the instance it reuses (the core counts an instance id once per account).
+- **Keep running.** On ANY end (any exit code, including the walk's own `.bot run stop` exit 0), on a used-up restart
+  budget, or on a **stall** (no `TBM:RUN` step and no hostile HP change in `run.log`/`frames.jsonl` for `--stall`,
+  default 15m) it stops the walk (SIGTERM; never `.bot run stop`), tears the slot down, picks a new `--out`
+  (`<walk-dir>/<id>-<n>`), and re-places: the same instance first (`--place --from "step N" --reuse-instance`), a
+  fresh instance only when that placement failed (the old bind is gone), and that fresh decision survives a reached
+  step: the retry keeps `--from step N --place` without `--reuse-instance`. A legitimate instance-cap wait (`earliest
+  free time` as the run's last line) is not a stall; its stall clock starts when the wait ends. Exit 2 (the walk
+  refused its arguments) and exit 29 (the placement failed every try in the same instance; a fresh-instance retry
+  would only burn the hourly budget) stop that id with an `ESCALATE` line and no retry, and so does exit 15 three
+  times (the slot's lease is held by another holder). Three consecutive placement failures on one id escalate it as
+  well. Other exits re-place with a backoff of 20 s, 1 m, 2 m, 5 m and then 10 m per consecutive attempt that
+  reached no further step; a step further resets it. Exit 26 keeps its cap wait and re-places later. A **launch**
+  that cannot start (the attempt log or the child) is not completion: the goal stays, the retry uses the same
+  backoff (20 s at first), and the third consecutive launch failure escalates the id. A supervisor whose every id
+  met its goals says `every target's goals are met` and exits 0; one with an escalated id ends with
+  `not every target's goals are met` and exits **31**.
+- **Teardown.** `teardown <out>/slot`; when the lease is still held or the teardown failed, a second run with
+  `--release-anyway` (the brief's "twice if the lease is kept"). The walk's own teardown has already released the
+  lease in the normal case. A teardown is only done when it is verified: the walk's process **and its whole process
+  group** are gone (a login child left behind counts) **and** `lease list` says the slot's lease is released (a lease
+  it cannot verify counts as held). A teardown that fails keeps the run active — same `--out`, no relaunch on that
+  slot, no `YIELD-DONE` — and the next tick retries it; after three failed ticks the autopilot writes `ESCALATE
+  teardown <raid> <slot>` to `EVENTS.txt` and `status.txt` and leaves the slot alone until a person clears it (no
+  relaunch, no further teardown, no `YIELD-DONE`). The stops and teardowns of the ids run at the same time, so one
+  slow slot never delays another.
+- **Durable state.** `<walk-dir>/autopilot-state.json` is rewritten atomically (temp file written and fsynced, renamed,
+  then the directory fsynced) on every transition: per id its current goal, the goals met, the last reached step, the
+  reuse/fresh decision, the attempt number and the child's pid/out dir. A checkpoint that does not parse (a
+  truncated write, disk damage) is a refusal at start: exit 2, the file is named, and the message says to fix or
+  remove it — nothing is launched over it and the file is not overwritten with empty progress. A start loads it and
+  reconciles it with the attempts' `summary.json` and the slots' leases: a
+  goal the last run met before a crash is advanced, not walked again; a live walk of ours on its slot (its
+  `<out>/walk.pid` is alive and the lease is ours) is adopted and watched as the current run. A slot that is not ours
+  — a lease held by another holder, or a live walk that is not ours — refuses that id with an `ESCALATE start` line
+  and launches nothing on it.
+- **Files.** `<walk-dir>/EVENTS.txt` gets one line per action (UTC, id, action, reason); `status.txt` is written at
+  start and every `--status-every` (1m): id, goal, attempt, out, state, step, progress age, reuse (an escalated id is
+  one `ESCALATE <kind> <raid> <slot>: <reason>` line). `<id>-<n>.out` is the walk's own stdout/stderr; `autopilot.log`
+  is the detached supervisor's; the walk writes its own pid to `<out>/walk.pid`.
+- **Detached and YIELD.** By default the launcher re-execs itself with `setsid`, waits until the child holds the lock
+  (its pid file names it) and returns (pid + log); a child that exits first reports its refusal instead. The
+  supervisor writes `autopilot.pid` and takes an exclusive `flock` on `<walk-dir>/autopilot.lock` for its lifetime,
+  so a second start on the same walk dir refuses (exit 2) instead of running beside it — the pid file is
+  informational. The OS drops the lock when the process ends, so a crash leaves no stale guard. `--foreground` runs
+  it in place. A `YIELD` file in the walk dir (checked at least once a second) tears every run down, releases every
+  lease, writes `YIELD-DONE` and exits 0; SIGINT/SIGTERM does the same without `YIELD-DONE`. A refused id (nothing
+  was launched) and a done id (its slot was torn down when the goal was met) are skipped: their stale slot dirs are
+  never torn down by a YIELD, and neither blocks `YIELD-DONE`. A stale `YIELD-DONE` is
+  removed at start and before a new YIELD's shutdown; a `YIELD` whose teardown does not verify writes no `YIELD-DONE`
+  (the event log says why).
+- **Dry run.** `--dry-run` validates `targets.txt` and prints each goal's first command; nothing is launched.
+- **Tests.** The decision rule is pure (`internal/raidwalk/autopilot.go`): exit 0 after a run stop, a 65-minute
+  no-progress fight, a failed placement, exit 2/29 and three exit 15s are the walk 37 fixtures. The command's tests
+  drive the real launch -> exit -> next-args path through a stub walk. `--poll`, `--stall`, `--settle` and
+  `--status-every` are the timings; `--binary` picks the turtle-agent the walks run.
+- **Known limits.** Adoption trusts `<out>/walk.pid` plus `kill(0)`: a SIGKILLed walk leaves its pid file behind, and
+  a reused pid would adopt an unrelated process and later signal its group (check `/proc/<pid>/cmdline` for
+  `raid-walk` and the out dir). The checkpoint maps goals by index only: editing `targets.txt` between restarts
+  points the saved goal at the wrong line, and a done id ignores goal lines appended later — use a fresh walk dir
+  per walk. `writeStatus` has no lock, so a finish goroutine (through `escalate`) and the main loop can write
+  `status.txt.tmp` at the same time and the file can be briefly garbled. The `processAlive` group check covers the
+  walk's own process group, not the `login` child that `startSlotAgent` starts in its own group. The instance-cap
+  file is read only from beside `--slots`: with `--slots` elsewhere plus `--allow-split-ledger`, or with no live
+  default leases, the cap falls back to 5 (the split-ledger refusal covers the dangerous case). The first tick after
+  adoption reads all of `frames.jsonl` from offset 0 while holding the state mutex, so a large file can stall YIELD
+  and status handling for that tick. When there is no earlier out dir, the startup lease check asks the default
+  slots store and ignores a `--slots` in the target's arguments. A walk-super-style dir is safe to use: `initSeq`
+  ignores `f4-r1` (`Atoi` fails) and `cmd-*` files, and a leftover walk-super lease on a slot refuses that id with
+  an `ESCALATE` line.
 ### Raid suite
 
 `turtle-agent raid-suite` walks a list of raid plans one after another, each with `raid-walk`, and judges each walk

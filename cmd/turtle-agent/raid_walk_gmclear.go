@@ -49,14 +49,47 @@ const (
 // cause; this is the ceiling for an unknown one. A var so a test can shorten it.
 var gmClearBudget = 5 * time.Minute
 
-// worldExportDir is the world export the placement and --gm-clear read: --gm-clear-spawns, else the map's testdata
-// beside the plan folder (tools/dungeongen/testdata/map<N>).
-func (w *walk) worldExportDir() string {
-	dir := w.opts.gmClearSpawns
-	if dir == "" {
-		dir = filepath.Join(slots.ExpandTilde(w.opts.dir), "..", "tools", "dungeongen", "testdata", fmt.Sprintf("map%d", w.plan.Map))
+// installedWorldDir is the per-user data dir an installed binary reads the world export from (export.sh's out dir on
+// a machine without a checkout): ~/.local/share/turtle-agent/world/map<N>.
+func installedWorldDir(mapID uint32) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
 	}
-	return dir
+	return filepath.Join(home, ".local", "share", "turtle-agent", "world", fmt.Sprintf("map%d", mapID))
+}
+
+// repoWorldDir is the world export of a checkout beside the plan folder: <dir>/../tools/dungeongen/testdata/map<N>.
+func (w *walk) repoWorldDir() string {
+	return filepath.Join(slots.ExpandTilde(w.opts.dir), "..", "tools", "dungeongen", "testdata", fmt.Sprintf("map%d", w.plan.Map))
+}
+
+// worldExportDir is the world export the placement and --gm-clear read: --gm-clear-spawns, else the installed data
+// dir when it holds creatures.tsv, else the checkout's tools/dungeongen/testdata/map<N>. With neither, the installed
+// dir is named: it is the path an installed binary can have (the checkout path only exists beside a source tree).
+func (w *walk) worldExportDir() string {
+	if dir := w.opts.gmClearSpawns; dir != "" {
+		return slots.ExpandTilde(dir)
+	}
+	installed := installedWorldDir(w.plan.Map)
+	if installed != "" {
+		if _, err := os.Stat(filepath.Join(installed, "creatures.tsv")); err == nil {
+			return installed
+		}
+	}
+	repo := w.repoWorldDir()
+	if _, err := os.Stat(filepath.Join(repo, "creatures.tsv")); err == nil {
+		return repo
+	}
+	if installed != "" {
+		return installed
+	}
+	return repo
+}
+
+// worldExportWhere names every place the walk looks, for a note or a refusal.
+func (w *walk) worldExportWhere() string {
+	return fmt.Sprintf("%s (installed) or %s (checkout)", installedWorldDir(w.plan.Map), w.repoWorldDir())
 }
 
 // loadPlaceWorld reads the world export the offline quiet start judges (once per walk). A missing export is a note,
@@ -67,7 +100,7 @@ func (w *walk) loadPlaceWorld() *worldspawn.World {
 	}
 	dir := w.worldExportDir()
 	if _, err := os.Stat(filepath.Join(dir, "creatures.tsv")); err != nil {
-		w.note("place: no world export in %s: the offline quiet start is skipped (pass --gm-clear-spawns DIR)", dir)
+		w.note("place: no world export in %s: the offline quiet start is skipped (pass --gm-clear-spawns DIR)", w.worldExportWhere())
 		return nil
 	}
 	world, _, err := worldspawn.Load(dir, w.plan.Map)
@@ -87,7 +120,7 @@ func (w *walk) validateGMClear() error {
 	}
 	dir := w.worldExportDir()
 	if _, err := os.Stat(filepath.Join(dir, "creatures.tsv")); err != nil {
-		return stopf(exitUsage, "--gm-clear: no world export in %s: pass --gm-clear-spawns DIR (tools/dungeongen/export.sh writes it)", dir)
+		return stopf(exitUsage, "--gm-clear: no world export in %s: pass --gm-clear-spawns DIR (tools/dungeongen/export.sh writes it)", w.worldExportWhere())
 	}
 	world, _, err := worldspawn.Load(dir, w.plan.Map)
 	if err != nil {
