@@ -226,10 +226,15 @@ func TestAutoFullClearAdvancesAndBadArgsStop(t *testing.T) {
 	if d := DecideAutoAction(bad, AutoRunState{Goal: AutoGoal{Kind: "full"}}, autoNow, 15*time.Minute); d.Action != AutoStop || !d.Escalate {
 		t.Fatalf("decision %+v, want a stop with an ESCALATE line", d)
 	}
-	// Exit 29: the placement failed every try in the same instance; a fresh-instance retry is never asked for.
+	// Exit 29 on a same-instance placement: ONE automatic fresh-instance retry (walk 40: 45 ids stopped here).
 	placeFailed := AutoObservation{Exited: true, ExitCode: 29, EndReason: "place: 4 tries in the same instance, start step 582"}
-	if d := DecideAutoAction(placeFailed, AutoRunState{Goal: AutoGoal{Kind: "boss", Boss: 14507}, Reuse: true, HasRun: true}, autoNow, 15*time.Minute); d.Action != AutoStop || !d.Escalate {
-		t.Fatalf("decision %+v, want a stop with an ESCALATE line and no retry", d)
+	d := DecideAutoAction(placeFailed, AutoRunState{Goal: AutoGoal{Kind: "boss", Boss: 14507}, Reuse: true, HasRun: true}, autoNow, 15*time.Minute)
+	if d.Action != AutoRestart || d.Reuse || d.Escalate || !strings.Contains(d.Reason, "fresh-instance retry after exit 29") {
+		t.Fatalf("decision %+v, want a restart in a fresh instance", d)
+	}
+	// A second exit 29, from the fresh-instance attempt (Reuse false), stops the id with an ESCALATE line.
+	if d := DecideAutoAction(placeFailed, AutoRunState{Goal: AutoGoal{Kind: "boss", Boss: 14507}, Reuse: false, HasRun: true}, autoNow, 15*time.Minute); d.Action != AutoStop || !d.Escalate {
+		t.Fatalf("decision %+v, want a stop with an ESCALATE line after the fresh retry also failed", d)
 	}
 }
 
@@ -355,5 +360,46 @@ func TestAutoHirePoolWaitBacksOffFiveMinutes(t *testing.T) {
 	}
 	if d.Action == AutoStop {
 		t.Fatal("a hire-pool wait stopped the id")
+	}
+}
+
+// Walk 40: a done id kept its slot, so a new line naming it made the whole file invalid. An inactive id holds no slot;
+// an id still holding one does.
+func TestParseAutoTargetsLenientInactiveIDFreesItsSlot(t *testing.T) {
+	text := "mh5 test2 6 h boss:14515 -- zg --sql /zg.sql\nnew test2 6 h2 full -- zg --sql /zg.sql\n"
+	ts, issues, err := ParseAutoTargetsLenient(strings.NewReader(text), nil)
+	if err != nil || len(issues) != 1 || issues[0].ID != "new" || issues[0].Line != 2 || len(ts) != 1 || ts[0].ID != "mh5" {
+		t.Fatalf("holding id: targets %v issues %+v err %v, want mh5 kept and the new line skipped", ts, issues, err)
+	}
+	ts, issues, err = ParseAutoTargetsLenient(strings.NewReader(text), func(id string) bool { return id == "mh5" })
+	if err != nil || len(issues) != 0 || len(ts) != 2 {
+		t.Fatalf("inactive id: targets %v issues %+v err %v, want both lines accepted", ts, issues, err)
+	}
+}
+
+// One bad line is skipped with its line number and id; the other lines still parse, and the bad id's other lines
+// are left out too (its caller keeps the old state whole).
+func TestParseAutoTargetsLenientSkipsOnlyTheBadLine(t *testing.T) {
+	text := "a test2 1 h full -- zg --sql /zg.sql\n" +
+		"b test2 2 h full -- zg\n" + // no --sql
+		"b test2 2 h full -- zg --sql /zg.sql --from step 5\n" +
+		"c test2 4 h full -- zg --sql /zg.sql\n"
+	ts, issues, err := ParseAutoTargetsLenient(strings.NewReader(text), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || issues[0].Line != 2 || issues[0].ID != "b" || !strings.Contains(issues[0].Err.Error(), "line 2") {
+		t.Fatalf("issues %+v, want one for line 2 of b", issues)
+	}
+	if len(ts) != 2 || ts[0].ID != "a" || ts[1].ID != "c" {
+		t.Fatalf("targets %v, want a and c only", ts)
+	}
+	// Strict read: the same file fails as a whole, naming the line.
+	if _, err := ParseAutoTargets(strings.NewReader(text)); err == nil || !strings.Contains(err.Error(), "line 2") {
+		t.Fatalf("strict read err %v, want a line 2 error", err)
+	}
+	// Nothing valid at all is an error, as before.
+	if _, _, err := ParseAutoTargetsLenient(strings.NewReader("garbage\n"), nil); err == nil {
+		t.Fatal("a file with no valid line parsed")
 	}
 }

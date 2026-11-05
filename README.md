@@ -2859,16 +2859,24 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   `--reuse-instance` without a `--from`/`--place` (raid-walk refuses that combination).
   `--server/--slot/--holder/--until/--place/--reuse-instance/--out` are managed and dropped if present; slot 3,
   `--instance-cap-unsafe` and `--inject` are refused before anything runs. Two ids may not name the same server and
-  slot: one slot runs one walk at a time. `targets.txt` is **re-read while the supervisor runs** (when its mtime or
+  slot: one slot runs one walk at a time. An id that is **done or stopped** with no live run and no held lease
+  holds no slot for that check, so a new line may name the slot of a finished id (walk 40: it made the whole file
+  invalid until the done line was deleted); an escalated or refused id, a running id and a leased slot still hold
+  theirs. `targets.txt` is **re-read while the supervisor runs** (when its mtime or
   size changes, every tick): an added id is queued and starts as soon as its slot is free, a removed id is stopped
   cleanly like `STOP-<id>` (its run stopped, its slot torn down), and an id whose goal lines changed is stopped and
   re-added from the new lines; an unchanged id keeps its goal, attempt, backoff and run. A new or changed id is
   numbered past the `<id>-<n>` out dirs already on disk, so its first run never reads an earlier attempt's
   `summary.json`. A removed line drops the state only when the id is idle and done: an escalated or refused id stays
   (its `ESCALATE` line stays in `status.txt`, `finishAll` still exits 31, and a YIELD still writes no `YIELD-DONE`),
-  and so does an id whose slot is still leased (or whose lease cannot be verified). An unreadable or invalid
-  file keeps the targets already loaded and logs one `targets` warning per distinct error (a half-written file is not
-  a stop order).
+  and so does an id whose slot is still leased (or whose lease cannot be verified). An unreadable file, or one
+  with no valid line, keeps the targets already loaded and logs one `targets` warning per distinct error (a
+  half-written file is not a stop order). **One bad line does not reject the file** (walk 40: every edit was ignored
+  for ~60 minutes): the line is skipped with an `invalid targets line skipped` event naming the line and id (logged
+  once), every other line applies, and the bad line's id keeps its old state whole (all its lines are left out of
+  that read, so it is neither stopped nor changed). A skipped line is read again every tick, so one skipped for a
+  slot that a running id still holds starts by itself when that id finishes. The first read at start is strict:
+  any bad line there refuses to start.
 - **Instance cap.** `--instance-cap-per-account N` is passed to every raid-walk it starts; without the flag each walk
   resolves the target server's entry in `instance-cap-per-account.json` beside the slots file and then the stock 5.
   The per-account gates keep one place of headroom (below `N-1`), and a `--reuse-instance` placement that re-hires
@@ -2889,10 +2897,14 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   boss-done/corpse evidence it records there) sets `boss_dead` for the goal in the checkpoint, which advances to the
   id's next goal line or finishes the id, and the run that saw the death is torn down (its slot freed) as for any met
   goal. A legitimate instance-cap wait (`earliest
-  free time` as the run's last line) is not a stall; its stall clock starts when the wait ends. Exit 2 (the walk
-  refused its arguments) and exit 29 (the placement failed every try in the same instance; a fresh-instance retry
-  would only burn the hourly budget) stop that id with an `ESCALATE` line and no retry, and so does exit 15 three
-  times (the slot's lease is held by another holder). Three consecutive placement failures on one id escalate it as
+  free time` as the run's last line) is not a stall; its stall clock starts when the wait ends. Exit 29 (a same-instance
+  placement failed every try, typically after a wipe at a boss row) is retried **once** automatically in a fresh
+  instance: the next launch keeps `--from step N --place` without `--reuse-instance`, logs `fresh-instance retry
+  after exit 29`, waits the usual backoff, and the new instance counts toward the instance cap like any other (the
+  walk's own cap wait applies); if that fresh attempt also ends in exit 29 the id stops with an `ESCALATE` line
+  (walk 40: 45 ids stopped on the first 29 and a person re-added each by hand). Exit 2 (the walk refused its
+  arguments) stops that id with an `ESCALATE` line and no retry, and so does exit 15 three times (the slot's lease is
+  held by another holder). Three consecutive placement failures on one id escalate it as
   well. Other exits re-place with a backoff of 20 s, 1 m, 2 m, 5 m and then 10 m per consecutive attempt that
   reached no further step; a step further resets it. A hire the server's shared pool refused ("No mercenary of that
   kind is available right now": several big raids on one server starve each other) is not such a failure: the raid
@@ -2949,7 +2961,8 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   (the event log says why).
 - **Dry run.** `--dry-run` validates `targets.txt` and prints each goal's first command; nothing is launched.
 - **Tests.** The decision rule is pure (`internal/raidwalk/autopilot.go`): exit 0 after a run stop, a 65-minute
-  no-progress fight, a failed placement, exit 2/29 and three exit 15s are the walk 37 fixtures. The command's tests
+  no-progress fight, a failed placement, exit 2, exit 29 (retried once in a fresh instance, then stopped) and three exit 15s are the
+  walk 37 and 40 fixtures. The command's tests
   drive the real launch -> exit -> next-args path through a stub walk. `--poll`, `--stall`, `--settle` and
   `--status-every` are the timings; `--binary` picks the turtle-agent the walks run.
 - **Known limits.** Adoption trusts `<out>/walk.pid` plus `kill(0)`: a SIGKILLed walk leaves its pid file behind, and

@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -117,9 +118,36 @@ type AutoTarget struct {
 //
 // --sql is required: every goal may be re-placed (a restart asks for --place --from ...), and raid-walk refuses
 // --place without --sql. Two ids may not name the same server and slot: one slot runs one walk at a time.
+//
+// This is the strict read (the start): the first bad line fails the whole file.
 func ParseAutoTargets(r io.Reader) ([]AutoTarget, error) {
-	var out []AutoTarget
-	slotOwner := map[string]string{}
+	out, issues, err := ParseAutoTargetsLenient(r, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(issues) > 0 {
+		return nil, issues[0].Err
+	}
+	return out, nil
+}
+
+// AutoTargetIssue is one line (or id) a lenient read skipped. Err already carries the "line N: " prefix.
+type AutoTargetIssue struct {
+	Line int
+	ID   string
+	Err  error
+}
+
+// ParseAutoTargetsLenient is the re-read of a running autopilot (walk 40: one bad line made the whole file invalid
+// and every other edit was ignored for ~60 minutes). A bad line is returned as an issue and every other line still
+// parses; all lines of the bad line's id are left out of the result too, so the caller keeps that id's old state
+// whole instead of acting on half its lines. inactive says an id holds no slot any more (done or stopped, no live
+// run, no lease): its lines do not count in the one-walk-per-slot check, so a new id may take its slot. nil: every
+// id holds its slot. A file with no valid line left is an error (a half-written file is not a stop order).
+func ParseAutoTargetsLenient(r io.Reader, inactive func(id string) bool) ([]AutoTarget, []AutoTargetIssue, error) {
+	var parsed []AutoTarget
+	var issues []AutoTargetIssue
+	bad := map[string]bool{}
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for n := 1; sc.Scan(); n++ {
@@ -127,65 +155,97 @@ func ParseAutoTargets(r io.Reader) ([]AutoTarget, error) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		fields := strings.Fields(line)
-		sep := -1
-		for i, f := range fields {
-			if f == "--" {
-				sep = i
-				break
-			}
-		}
-		if sep < 0 {
-			return nil, fmt.Errorf("line %d: no `--` between the header (id server slot holder goal) and the raid-walk args", n)
-		}
-		if sep != 5 {
-			return nil, fmt.Errorf("line %d: the header is `id server slot holder goal --`, got %d words before `--`", n, sep)
-		}
-		id, server, slot, holder := fields[0], fields[1], fields[2], fields[3]
-		if id == "" || strings.ContainsAny(id, " \t/") {
-			return nil, fmt.Errorf("line %d: bad raid id %q", n, id)
-		}
-		if server == "" {
-			return nil, fmt.Errorf("line %d: no server", n)
-		}
-		if slotN, err := strconv.Atoi(slot); err != nil {
-			return nil, fmt.Errorf("line %d: bad slot %q", n, slot)
-		} else if slotN == 3 {
-			return nil, fmt.Errorf("line %d: the owner rule: slot 3 is never used", n)
-		}
-		if holder == "" {
-			return nil, fmt.Errorf("line %d: no holder", n)
-		}
-		goal, err := ParseAutoGoal(fields[4])
+		t, err := parseAutoTargetLine(n, line)
 		if err != nil {
-			return nil, fmt.Errorf("line %d: %v", n, err)
+			id := strings.Fields(line)[0]
+			issues = append(issues, AutoTargetIssue{Line: n, ID: id, Err: err})
+			bad[id] = true
+			continue
 		}
-		key := server + "/" + slot
-		if owner, ok := slotOwner[key]; ok && owner != id {
-			return nil, fmt.Errorf("line %d: %s slot %s is already %s's: one slot runs one walk at a time", n, server, slot, owner)
-		}
-		slotOwner[key] = id
-		t := AutoTarget{ID: id, Server: server, Slot: slot, Holder: holder, Goal: goal, Line: n}
-		args, start, err := parseAutoArgs(fields[sep+1:])
-		if err != nil {
-			return nil, fmt.Errorf("line %d: %v", n, err)
-		}
-		if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-			return nil, fmt.Errorf("line %d: the raid-walk args must start with the plan name", n)
-		}
-		if !hasAutoFlag(args, "--sql") {
-			return nil, fmt.Errorf("line %d: --sql FILE is required: every goal may be re-placed, and raid-walk refuses --place without --sql", n)
-		}
-		t.Args, t.Start = args, start
-		out = append(out, t)
+		parsed = append(parsed, t)
 	}
 	if err := sc.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	// The one-walk-per-slot check, in file order: the first id that holds a slot keeps it, a later id naming it is
+	// the bad one. An inactive id holds nothing.
+	slotOwner := map[string]string{}
+	for _, t := range parsed {
+		if bad[t.ID] || (inactive != nil && inactive(t.ID)) {
+			continue
+		}
+		key := t.Server + "/" + t.Slot
+		if owner, ok := slotOwner[key]; ok && owner != t.ID {
+			issues = append(issues, AutoTargetIssue{Line: t.Line, ID: t.ID, Err: fmt.Errorf("line %d: %s slot %s is already %s's: one slot runs one walk at a time", t.Line, t.Server, t.Slot, owner)})
+			bad[t.ID] = true
+			continue
+		}
+		slotOwner[key] = t.ID
+	}
+	var out []AutoTarget
+	for _, t := range parsed {
+		if !bad[t.ID] {
+			out = append(out, t)
+		}
+	}
+	sort.SliceStable(issues, func(i, j int) bool { return issues[i].Line < issues[j].Line })
 	if len(out) == 0 {
-		return nil, fmt.Errorf("no targets")
+		if len(issues) > 0 {
+			return nil, issues, issues[0].Err
+		}
+		return nil, nil, fmt.Errorf("no targets")
 	}
-	return out, nil
+	return out, issues, nil
+}
+
+// parseAutoTargetLine parses one non-blank, non-comment line (n is its 1-based number).
+func parseAutoTargetLine(n int, line string) (AutoTarget, error) {
+	fields := strings.Fields(line)
+	sep := -1
+	for i, f := range fields {
+		if f == "--" {
+			sep = i
+			break
+		}
+	}
+	if sep < 0 {
+		return AutoTarget{}, fmt.Errorf("line %d: no `--` between the header (id server slot holder goal) and the raid-walk args", n)
+	}
+	if sep != 5 {
+		return AutoTarget{}, fmt.Errorf("line %d: the header is `id server slot holder goal --`, got %d words before `--`", n, sep)
+	}
+	id, server, slot, holder := fields[0], fields[1], fields[2], fields[3]
+	if id == "" || strings.ContainsAny(id, " \t/") {
+		return AutoTarget{}, fmt.Errorf("line %d: bad raid id %q", n, id)
+	}
+	if server == "" {
+		return AutoTarget{}, fmt.Errorf("line %d: no server", n)
+	}
+	if slotN, err := strconv.Atoi(slot); err != nil {
+		return AutoTarget{}, fmt.Errorf("line %d: bad slot %q", n, slot)
+	} else if slotN == 3 {
+		return AutoTarget{}, fmt.Errorf("line %d: the owner rule: slot 3 is never used", n)
+	}
+	if holder == "" {
+		return AutoTarget{}, fmt.Errorf("line %d: no holder", n)
+	}
+	goal, err := ParseAutoGoal(fields[4])
+	if err != nil {
+		return AutoTarget{}, fmt.Errorf("line %d: %v", n, err)
+	}
+	t := AutoTarget{ID: id, Server: server, Slot: slot, Holder: holder, Goal: goal, Line: n}
+	args, start, err := parseAutoArgs(fields[sep+1:])
+	if err != nil {
+		return AutoTarget{}, fmt.Errorf("line %d: %v", n, err)
+	}
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return AutoTarget{}, fmt.Errorf("line %d: the raid-walk args must start with the plan name", n)
+	}
+	if !hasAutoFlag(args, "--sql") {
+		return AutoTarget{}, fmt.Errorf("line %d: --sql FILE is required: every goal may be re-placed, and raid-walk refuses --place without --sql", n)
+	}
+	t.Args, t.Start = args, start
+	return t, nil
 }
 
 // parseAutoArgs drops the flags the autopilot manages and returns the rest, plus the target's --from.
@@ -382,7 +442,7 @@ type AutoDecision struct {
 	Backoff time.Duration
 	Reason  string
 	// Escalate says the id stops and needs a person: an exit 2 (the walk refused its arguments), an exit 29 (the
-	// placement failed every try in the same instance; a fresh-instance retry would only burn the hourly budget), or
+	// placement failed every try in the fresh instance of its automatic retry), or
 	// three consecutive exit 15s (the slot's lease is held by someone else).
 	Escalate bool
 }
@@ -402,9 +462,9 @@ func AutoBackoff(fast int) time.Duration {
 
 // DecideAutoAction is the whole rule: any end, a used-up restart budget, or a stall tears down and re-places; a met
 // goal advances; a placement that failed on the old bind asks for a fresh instance next. A stall is no step and no
-// boss-HP change for stall, counted from the end of a legitimate instance-cap wait. Exit 2 and 29 stop the id for a
-// person, and so does the third consecutive exit 15 or the sixth consecutive hire-pool wait. Every restart carries the
-// backoff of its no-progress count.
+// boss-HP change for stall, counted from the end of a legitimate instance-cap wait. Exit 2 stops the id for a
+// person, exit 29 retries once in a fresh instance (a second one stops it), and so does the third consecutive exit 15
+// or the sixth consecutive hire-pool wait. Every restart carries the backoff of its no-progress count.
 func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall time.Duration) AutoDecision {
 	if !o.Exited {
 		// A run waiting on the instance cap is not stalled: its clock starts when the wait ends.
@@ -446,7 +506,13 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 		return AutoDecision{Action: AutoStop, Escalate: true, Reason: "exit 2: the walk refused its arguments (" + shortReason(o.EndReason) + ")"}
 	}
 	if o.ExitCode == 29 {
-		return AutoDecision{Action: AutoStop, Escalate: true, Reason: "exit 29: the placement failed every try in the same instance; no fresh-instance retry (" + shortReason(o.EndReason) + ")"}
+		// Walk 40: 45 ids stopped here after a wipe and a person re-added each one (a changed line starts a fresh
+		// instance). A same-instance placement that failed every try gets ONE automatic fresh-instance retry; a
+		// fresh one that also ended in 29 stops the id.
+		if r.Reuse {
+			return AutoDecision{Action: AutoRestart, Reuse: false, Backoff: AutoBackoff(r.FastFailures), Reason: "fresh-instance retry after exit 29: the placement failed every try in the same instance (" + shortReason(o.EndReason) + ")"}
+		}
+		return AutoDecision{Action: AutoStop, Escalate: true, Reason: "exit 29: the placement failed in a fresh instance too; no further retry (" + shortReason(o.EndReason) + ")"}
 	}
 	if o.ExitCode == 15 && r.LeaseFails+1 >= 3 {
 		return AutoDecision{Action: AutoStop, Escalate: true, Reason: "exit 15 three times: the slot's lease is held by another holder (" + shortReason(o.EndReason) + ")"}

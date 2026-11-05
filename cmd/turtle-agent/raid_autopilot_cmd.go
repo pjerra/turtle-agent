@@ -1,7 +1,7 @@
 // raid-autopilot: keep the raids of a walk dir running without a worker watching them. The targets file names one
 // goal per line; the autopilot launches raid-walk for each, watches the step and the bosses' HP, and on ANY end, a used
 // -up restart budget or a stall tears the slot down and re-places: the same instance first (--place --from
-// --reuse-instance), a fresh one only when the old bind is gone (a failed placement). A boss kill advances to the id's
+// --reuse-instance), a fresh one only when the old bind is gone (a failed placement) or after an exit 29 (once). A boss kill advances to the id's
 // next goal. It never uses slot 3, never sends `.bot run stop` and never passes --instance-cap-unsafe or --inject; it
 // runs detached (setsid) and stops cleanly on a YIELD file (tear down, release leases, YIELD-DONE).
 //
@@ -174,7 +174,7 @@ type autoState struct {
 	placeFails int
 	nextAt     time.Time // no launch before this (the settle after a teardown, or a backoff)
 	done       bool
-	// escalated is an id left for a person (a teardown that never verified, an exit 2/29, three exit 15s): it counts
+	// escalated is an id left for a person (a teardown that never verified, an exit 2, a second exit 29, three exit 15s): it counts
 	// as done for allDone, is never launched again and is kept in the checkpoint until a person clears it.
 	escalated bool
 	// refused is this start's refusal (H2: the slot is not ours). It counts as done for this run but is not kept in
@@ -896,7 +896,12 @@ func (s *autoSupervisor) reloadTargets() {
 	if st.ModTime().Equal(s.targetsMod) && st.Size() == s.targetsSize {
 		return
 	}
-	targets, err := readAutoTargets(s.o.walkDir)
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	targets, issues, err := raidwalk.ParseAutoTargetsLenient(f, s.slotInactive)
+	f.Close()
 	if err != nil {
 		if s.targetsWarn != err.Error() {
 			s.targetsWarn = err.Error()
@@ -904,9 +909,27 @@ func (s *autoSupervisor) reloadTargets() {
 		}
 		return
 	}
-	s.targetsWarn = ""
-	s.targetsMod, s.targetsSize = st.ModTime(), st.Size()
-	s.applyTargets(targets)
+	// A bad line is skipped with a warning naming it; the other lines apply, and the bad line's id keeps its old
+	// state (walk 40: one bad line made the whole file invalid and every edit was ignored for ~60 minutes).
+	skip := map[string]bool{}
+	var warn []string
+	for _, is := range issues {
+		skip[is.ID] = true
+		warn = append(warn, fmt.Sprintf("id %s: %v", is.ID, is.Err))
+	}
+	if key := strings.Join(warn, "\n"); key != s.targetsWarn {
+		s.targetsWarn = key
+		for _, w := range warn {
+			s.event("all", "targets", fmt.Sprintf("invalid targets line skipped, the other lines apply and the id keeps its old state: %s", w))
+		}
+	}
+	if len(issues) == 0 {
+		s.targetsWarn = ""
+		s.targetsMod, s.targetsSize = st.ModTime(), st.Size()
+	}
+	// With a skipped line the file is read again every tick: a slot conflict clears when the id holding the slot
+	// finishes, with no further edit. The re-read is idempotent (an unchanged id is left alone).
+	s.applyTargets(targets, skip)
 }
 
 // autoSameTargets says two states walk the same goal lines with the same arguments: a re-read leaves such an id alone.
@@ -933,8 +956,9 @@ func autoSameTargets(a, b *autoState) bool {
 
 // applyTargets reconciles the loaded ids with a new read: an unchanged id keeps its state (its goal, attempt, backoff
 // and run); a removed id is stopped like STOP-<id>; a new or changed id waits in pending until its old state is gone,
-// then starts (a changed id's slot is still the old run's until that teardown is verified).
-func (s *autoSupervisor) applyTargets(targets []raidwalk.AutoTarget) {
+// then starts (a changed id's slot is still the old run's until that teardown is verified). An id in skip had a bad
+// line: its old state is left alone and nothing of it is queued.
+func (s *autoSupervisor) applyTargets(targets []raidwalk.AutoTarget, skip map[string]bool) {
 	fresh := groupAutoTargets(targets)
 	newByID := map[string]*autoState{}
 	for _, st := range fresh {
@@ -943,6 +967,10 @@ func (s *autoSupervisor) applyTargets(targets []raidwalk.AutoTarget) {
 	oldByID := map[string]*autoState{}
 	for _, st := range s.stateList() {
 		oldByID[st.id] = st
+		if skip[st.id] {
+			// A bad line of this id: its old state runs on untouched.
+			continue
+		}
 		if next, ok := newByID[st.id]; ok {
 			if autoSameTargets(st, next) {
 				continue
@@ -966,11 +994,36 @@ func (s *autoSupervisor) applyTargets(targets []raidwalk.AutoTarget) {
 	}
 }
 
+// slotInactive says an id holds no slot for the duplicate-slot check of a targets re-read: it is done or stopped with
+// no live run and no held lease (walk 40: a finished id kept its slot, so a new line naming it made the whole file
+// invalid). An escalated or refused id, an unknown id and a slot whose lease is still held count as holding it.
+func (s *autoSupervisor) slotInactive(id string) bool {
+	var st *autoState
+	for _, c := range s.stateList() {
+		if c.id == id {
+			st = c
+			break
+		}
+	}
+	if st == nil {
+		return false
+	}
+	st.mu.Lock()
+	idle := (st.done || st.stopped) && !st.escalated && !st.refused && st.run == nil
+	st.mu.Unlock()
+	return idle && !s.stateSlotHeld(st)
+}
+
 // queueState holds a new (or changed) id's state until its id is free.
 func (s *autoSupervisor) queueState(st *autoState) {
 	s.statesMu.Lock()
 	for i, p := range s.pending {
 		if p.id == st.id {
+			if autoSameTargets(p, st) {
+				// A re-read every tick (a skipped line) queues the same lines again: nothing to replace or log.
+				s.statesMu.Unlock()
+				return
+			}
 			s.pending[i] = st
 			s.statesMu.Unlock()
 			s.event(st.id, "targets", "queued: the new lines replace an id still stopping")
