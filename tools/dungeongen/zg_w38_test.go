@@ -56,10 +56,10 @@ func zgW38Party(t *testing.T, pl *navmesh.Planner, rows *zgW37Rows, i int, cs []
 // or walked step is inside Jin'do's own route-aggro reach (35 yd: 25 aggro at the plan's party level 58
 // plus the raid's 10 yd spread). The bodies are aggroest's estimate over the spawns still alive when the
 // row is pulled (earlier rows' packs are dead): proximity along the rows the exporter walks plus every
-// formation (AGGRO_TOGETHER/link) a woken unit closes. The call-for-help ring is not used: the core's
-// creature_template call_for_help_range is 5 yd (the run leader's 20 yd kAggroRingYd is the high-side
-// estimate that names the whole hall one pull, in which no plan can keep the boss out), and the walk-38
-// fights show the formations, not the ring, are what came.
+// formation (AGGRO_TOGETHER/link) a woken unit closes, and the family-assist hop the run leader really
+// uses (aggroest.AssistYd: RingYd 10 = the core's CreatureFamilyAssistanceRadius, RingHops 1), which is
+// what brings Jin'do in the walk-38 plan: the lone mistresses stand 7.2/8.6 yd from him, so any pull that
+// wakes them has them call him on that one hop.
 func TestZgW38JindosHallPullsStayUnderTheirCeilings(t *testing.T) {
 	p, cs := zgLoadPlanAndExport(t)
 	pl := zgPlannerOrNil(t)
