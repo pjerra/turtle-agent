@@ -1405,3 +1405,50 @@ func TestAutoCorruptCheckpointRefusesToStart(t *testing.T) {
 		t.Fatalf("a walk was launched over a corrupt checkpoint:\n%s", strings.Join(args, "\n"))
 	}
 }
+
+// M3: a fresh-instance decision is not lost when the goal has reached a step: the retry keeps --from step N --place
+// but no --reuse-instance (the old bind is gone, and reuse would loop on it with minutes of backoff).
+func TestAutoFreshInstanceAfterAFailedPlacementKeepsTheFrom(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 5, 51, "server closed the connection")
+	f.attempt("a-2", 1, 0, "place: --reuse-instance: the old bind is gone")
+	f.attempt("a-3", 2, 51, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the reuse re-place", func() bool { return len(f.args()) >= 2 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the fresh re-place", func() bool { return len(f.args()) >= 3 })
+	args := f.args()
+	if !strings.Contains(args[1], "--from step 51 --place --reuse-instance") {
+		t.Fatalf("the first re-place did not reuse: %s", args[1])
+	}
+	if !strings.Contains(args[2], "--from step 51 --place") || strings.Contains(args[2], "--reuse-instance") {
+		t.Fatalf("the fresh-instance decision was lost: %s", args[2])
+	}
+}
+
+// M3: three consecutive placement failures on one id escalate it and stop the id instead of looping forever.
+func TestAutoPlacementFailuresEscalateAfterThree(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --from step 405")
+	for i := 1; i <= 3; i++ {
+		f.attempt(fmt.Sprintf("a-%d", i), 1, 0, "place: the old bind is gone")
+	}
+	s := f.supervisor()
+	st := s.states[0]
+	for i := 1; i <= 3; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+	}
+	if args := f.args(); len(args) != 3 {
+		t.Fatalf("%d launches, want 3:\n%s", len(args), strings.Join(args, "\n"))
+	}
+	if done, escalated := runState(st); done || !escalated {
+		t.Fatalf("three placement failures: done=%v escalated=%v, want escalated only:\n%s", done, escalated, f.events())
+	}
+	if !strings.Contains(f.events(), "ESCALATE stop a 1") || !strings.Contains(f.events(), "place failed 3 times in a row") {
+		t.Fatalf("no ESCALATE stop for the placements:\n%s", f.events())
+	}
+}

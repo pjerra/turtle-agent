@@ -160,6 +160,9 @@ type autoState struct {
 	// launchFails counts the consecutive launches that could not start (the attempt log or the child): the backoff
 	// grows and the third escalates instead of recording a launch failure as completion.
 	launchFails int
+	// placeFails counts the consecutive attempts that ended in the place phase: the third escalates (a dead bind is
+	// re-placed fresh, but a bind that keeps failing must not loop with minutes of backoff forever).
+	placeFails int
 	nextAt      time.Time // no launch before this (the settle after a teardown, or a backoff)
 	done      bool
 	// escalated is an id left for a person (a teardown that never verified, an exit 2/29, three exit 15s): it counts
@@ -658,7 +661,7 @@ func (s *autoSupervisor) tickState(st *autoState) {
 		}
 		d := raidwalk.DecideAutoAction(obs, raidwalk.AutoRunState{
 			Goal: r.goal, Attempt: g.attempt, Reuse: r.reuse, HasRun: g.attempt > 0,
-			FastFailures: fast, LeaseFails: g.leaseFails,
+			FastFailures: fast, LeaseFails: g.leaseFails, PlaceFails: st.placeFails,
 		}, time.Now(), s.o.stall)
 		if d.Action == raidwalk.AutoContinue {
 			st.mu.Unlock()
@@ -730,6 +733,13 @@ func (s *autoSupervisor) finish(st *autoState) {
 		g.leaseFails++
 	} else {
 		g.leaseFails = 0
+	}
+	// A fresh-instance restart is a placement that failed on the old bind: count those in a row, and reset the count
+	// on every other end (a run that placed, advanced or stopped broke the streak).
+	if d.Action == raidwalk.AutoRestart && !d.Reuse {
+		st.placeFails++
+	} else {
+		st.placeFails = 0
 	}
 	var esc string
 	switch d.Action {
@@ -819,10 +829,13 @@ func (s *autoSupervisor) launch(st *autoState) {
 		return
 	}
 	g := &st.goals[st.current]
-	step, reuse := 0, st.nextReuse
+	step, reuse, fresh := 0, st.nextReuse, false
 	if st.last != nil {
 		step = st.last.lastStep
 		reuse = st.last.reuse
+		// A fresh-instance decision (a placement that failed on the old bind) survives a reached step: the retry
+		// keeps --from step N --place but must not ask for --reuse-instance, or it loops on the dead bind forever.
+		fresh = !st.last.reuse
 	}
 	if g.bestStep > step {
 		step = g.bestStep
@@ -830,7 +843,7 @@ func (s *autoSupervisor) launch(st *autoState) {
 	from := g.target.Start
 	if step > 0 {
 		from = fmt.Sprintf("step %d", step)
-		reuse = true
+		reuse = !fresh
 	}
 	if from == "" {
 		reuse = false

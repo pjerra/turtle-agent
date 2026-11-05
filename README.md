@@ -2825,12 +2825,14 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   budget, or on a **stall** (no `TBM:RUN` step and no hostile HP change in `run.log`/`frames.jsonl` for `--stall`,
   default 15m) it stops the walk (SIGTERM; never `.bot run stop`), tears the slot down, picks a new `--out`
   (`<walk-dir>/<id>-<n>`), and re-places: the same instance first (`--place --from "step N" --reuse-instance`), a
-  fresh instance only when that placement failed (the old bind is gone). A legitimate
+  fresh instance only when that placement failed (the old bind is gone), and that fresh decision survives a reached
+  step: the retry keeps `--from step N --place` without `--reuse-instance`. A legitimate
   instance-cap wait (`earliest
   free time` as the run's last line) is not a stall; its stall clock starts when the wait ends. Exit 2 (the walk
   refused its arguments) and exit 29 (the placement failed every try in the same instance; a fresh-instance retry
   would only burn the hourly budget) stop that id with an `ESCALATE` line and no retry, and so does exit 15 three
-  times (the slot's lease is held by another holder). Other exits re-place with a backoff of 20 s, 1 m, 2 m, 5 m and
+  times (the slot's lease is held by another holder). Three consecutive placement failures on one id escalate it as
+  well. Other exits re-place with a backoff of 20 s, 1 m, 2 m, 5 m and
   then 10 m per consecutive attempt that reached no further step; a step further resets it. Exit 26 keeps its cap
   wait and re-places later. A **launch**
   that cannot start (the attempt log or the child) is not completion: the goal stays, the retry uses the same

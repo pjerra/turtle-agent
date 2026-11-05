@@ -282,6 +282,9 @@ type AutoRunState struct {
 	// LeaseFails counts the consecutive attempts that ended in exit 15 (the slot's lease is held by another holder):
 	// the third stops the id for a person.
 	LeaseFails int
+	// PlaceFails counts the consecutive attempts that ended in the place phase: the third stops the id for a person
+	// (a dead bind is re-placed fresh, but a placement that keeps failing must not loop forever with a backoff).
+	PlaceFails int
 }
 
 // AutoDecision is the next step.
@@ -349,6 +352,9 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 	}
 	backoff := AutoBackoff(r.FastFailures)
 	if o.PlacementFailed() {
+		if r.PlaceFails+1 >= 3 {
+			return AutoDecision{Action: AutoStop, Escalate: true, Reason: fmt.Sprintf("place failed %d times in a row: %s", r.PlaceFails+1, shortReason(o.EndReason))}
+		}
 		if r.Reuse {
 			return AutoDecision{Action: AutoRestart, Reuse: false, Backoff: backoff, Reason: "place failed on the old bind: a fresh instance next (" + shortReason(o.EndReason) + ")"}
 		}
