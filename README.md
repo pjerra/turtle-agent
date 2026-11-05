@@ -2863,9 +2863,17 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   **done or stopped** with no live run holds no slot (whoever holds the slot's lease now), so a new line may name the
   slot of a finished id (walk 40: it made the whole file invalid until the done line was deleted); every other known id
   (running, in a restart wait, escalated, refused, queued) claims its slots first, then new lines take what is left,
-  so a new line inserted above a running id's line is the one skipped. A rejected id releases the slots its other
-  lines had claimed. The start applies the same rule from the checkpoint (done or stopped ids hold nothing, other
-  checkpointed ids claim first), so a file the running autopilot accepted is accepted after a restart too.
+  so a new line inserted above a running id's line is the one skipped. An id is claimed **as a unit**: it is accepted
+  only if every slot its lines name is free or already its own, all its claims are committed at once, and an accepted
+  id is never rejected later (so a rejected id never takes a valid one down with it; the skip names the id that holds
+  the slot). The slot a **live state holds now** (its current goal's slot) stays that id's whatever its lines say: an
+  id with one malformed line keeps its run and its slot, so a new line on that slot is skipped. An id whose lines
+  **changed** is a new id for the check and keeps only the slot its state holds now: an edited done id cannot take a
+  slot another id runs on, and an edited running id moving onto an occupied slot is skipped (its old run goes on). A
+  queued id also never starts while another live id holds one of its slots. The start applies the same rule from the
+  checkpoint (done or stopped ids, and an id whose last goal's boss is dead, hold nothing; other checkpointed ids
+  claim first; an id whose lines changed since the checkpoint is new), so a file the running autopilot accepted is
+  accepted after a restart too.
   `targets.txt` is **re-read while the supervisor runs** (when its mtime or
   size changes, every tick): an added id is queued and starts as soon as its slot is free, a removed id is stopped
   cleanly like `STOP-<id>` (its run stopped, its slot torn down), and an id whose goal lines changed is stopped and

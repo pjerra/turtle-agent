@@ -151,17 +151,29 @@ const (
 	AutoSlotInactive
 )
 
+// AutoSlotKey is the "server/slot" key of the one-walk-per-slot check (the held map of ParseAutoTargetsHeld).
+func AutoSlotKey(server, slot string) string { return server + "/" + slot }
+
 // ParseAutoTargetsLenient is the re-read of a running autopilot (walk 40: one bad line made the whole file invalid
 // and every other edit was ignored for ~60 minutes). A bad line is returned as an issue and every other line still
 // parses; all lines of the bad line's id are left out of the result too, so the caller keeps that id's old state
-// whole instead of acting on half its lines.
-//
-// The one-walk-per-slot check goes by claim, not by file order: active ids claim their slots first (in file order
-// among themselves), then new ids, and an inactive id claims nothing, so a new line inserted above a running id's line
-// is the skipped one, and a new line may take a finished id's slot. An id whose line is rejected releases every slot
-// it had claimed (the claims are recomputed without it). claim is asked once per id; nil: every id is new, the first
-// line in file order wins. A file with no valid line left is an error (a half-written file is not a stop order).
+// whole instead of acting on half its lines. It is ParseAutoTargetsHeld with no slot held.
 func ParseAutoTargetsLenient(r io.Reader, claim func(id string) AutoSlotClaim) ([]AutoTarget, []AutoTargetIssue, error) {
+	return ParseAutoTargetsHeld(r, claim, nil)
+}
+
+// ParseAutoTargetsHeld is ParseAutoTargetsLenient with the slots the caller's live states hold now: held maps an
+// AutoSlotKey to the id whose current state holds that slot (a running, waiting, escalated or stopping id). A held
+// slot is that id's before any line is read, so a new line never takes it, whatever the file order, and whether or
+// not the holder's own lines parse (review round 3: an id with one malformed line kept its live run, but its slot
+// dropped out of the check and a new id on it was accepted and launched beside it).
+//
+// The one-walk-per-slot check goes by id, not by line: the ids are walked active first, then new (file order of their
+// first line within each class), and an id is accepted only if every slot its lines name is free or already its own;
+// its claims are then committed all at once, and an accepted id is never rejected later. An inactive id claims
+// nothing (a new line may take a finished id's slot). claim is asked once per id; nil: every id is new. A file with no
+// valid line left is an error (a half-written file is not a stop order).
+func ParseAutoTargetsHeld(r io.Reader, claim func(id string) AutoSlotClaim, held map[string]string) ([]AutoTarget, []AutoTargetIssue, error) {
 	var parsed []AutoTarget
 	var issues []AutoTargetIssue
 	bad := map[string]bool{}
@@ -184,36 +196,51 @@ func ParseAutoTargetsLenient(r io.Reader, claim func(id string) AutoSlotClaim) (
 	if err := sc.Err(); err != nil {
 		return nil, nil, err
 	}
-	kinds := map[string]AutoSlotClaim{}
-	kindOf := func(id string) AutoSlotClaim {
-		k, ok := kinds[id]
-		if !ok {
-			if claim != nil {
-				k = claim(id)
-			}
-			kinds[id] = k
+	// The ids in file order of their first valid line, each with its lines.
+	var order []string
+	lines := map[string][]AutoTarget{}
+	for _, t := range parsed {
+		if bad[t.ID] {
+			continue
 		}
-		return k
+		if _, ok := lines[t.ID]; !ok {
+			order = append(order, t.ID)
+		}
+		lines[t.ID] = append(lines[t.ID], t)
 	}
-	// Recompute the claims until no line conflicts: a rejected id is marked bad and the next round starts without
-	// its claims, so it cannot invalidate a later id (the bad set only grows, so this ends).
-	for conflict := true; conflict; {
-		conflict = false
-		owner := map[string]string{}
-	passes:
-		for _, want := range []AutoSlotClaim{AutoSlotActive, AutoSlotNew} {
-			for _, t := range parsed {
-				if bad[t.ID] || kindOf(t.ID) != want {
-					continue
+	kinds := map[string]AutoSlotClaim{}
+	for _, id := range order {
+		k := AutoSlotNew
+		if claim != nil {
+			k = claim(id)
+		}
+		kinds[id] = k
+	}
+	owner := map[string]string{}
+	for k, id := range held {
+		owner[k] = id
+	}
+	for _, want := range []AutoSlotClaim{AutoSlotActive, AutoSlotNew} {
+		for _, id := range order {
+			if kinds[id] != want {
+				continue
+			}
+			var conflict *AutoTarget
+			for i, t := range lines[id] {
+				if o, ok := owner[AutoSlotKey(t.Server, t.Slot)]; ok && o != id {
+					conflict = &lines[id][i]
+					break
 				}
-				key := t.Server + "/" + t.Slot
-				if o, ok := owner[key]; ok && o != t.ID {
-					issues = append(issues, AutoTargetIssue{Line: t.Line, ID: t.ID, Err: fmt.Errorf("line %d: %s slot %s is already %s's: one slot runs one walk at a time", t.Line, t.Server, t.Slot, o)})
-					bad[t.ID] = true
-					conflict = true
-					break passes
-				}
-				owner[key] = t.ID
+			}
+			if conflict != nil {
+				t := *conflict
+				o := owner[AutoSlotKey(t.Server, t.Slot)]
+				issues = append(issues, AutoTargetIssue{Line: t.Line, ID: id, Err: fmt.Errorf("line %d: %s slot %s is already %s's: one slot runs one walk at a time", t.Line, t.Server, t.Slot, o)})
+				bad[id] = true
+				continue
+			}
+			for _, t := range lines[id] {
+				owner[AutoSlotKey(t.Server, t.Slot)] = id
 			}
 		}
 	}

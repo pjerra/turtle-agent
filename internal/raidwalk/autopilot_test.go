@@ -465,3 +465,58 @@ func TestParseAutoTargetsLenientSkipsOnlyTheBadLine(t *testing.T) {
 		t.Fatal("a file with no valid line parsed")
 	}
 }
+
+// Opus round 2 (LOW-1): an id is claimed as a unit. P (active) holds srv/2; O (new) names srv/1 and srv/2; X (new)
+// names srv/1. O cannot have srv/2, so it is rejected whole and X gets srv/1: a rejected id never takes a valid one
+// down with it. The issue names the owner that holds the slot (P), not an id that was dropped later.
+func TestParseAutoTargetsLenientClaimsPerIDAsAUnit(t *testing.T) {
+	text := "O test2 1 h full -- zg --sql /zg.sql\n" +
+		"X test2 1 h full -- zg --sql /zg.sql\n" +
+		"O test2 2 h full -- zg --sql /zg.sql\n" +
+		"P test2 2 h full -- zg --sql /zg.sql\n"
+	claim := func(id string) AutoSlotClaim {
+		if id == "P" {
+			return AutoSlotActive
+		}
+		return AutoSlotNew
+	}
+	ts, issues, err := ParseAutoTargetsLenient(strings.NewReader(text), claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, x := range ts {
+		ids = append(ids, x.ID+"@"+x.Slot)
+	}
+	if strings.Join(ids, ",") != "X@1,P@2" {
+		t.Fatalf("targets %v issues %+v, want X on srv/1 and P on srv/2", ids, issues)
+	}
+	if len(issues) != 1 || issues[0].ID != "O" || issues[0].Line != 3 || !strings.Contains(issues[0].Err.Error(), "already P's") {
+		t.Fatalf("issues %+v, want one for O's line 3 naming P", issues)
+	}
+}
+
+// Codex round 2 (HIGH): a slot the caller's live state holds is that id's before any line is read, even when the
+// holder's own lines are skipped as malformed: a new id on it is rejected.
+func TestParseAutoTargetsHeldSlotStaysWithABadLinesID(t *testing.T) {
+	text := "a test2 1 h full -- zg --sql /zg.sql\n" +
+		"a test2 1 h leg:2 -- zg\n" + // no --sql: every line of a is left out
+		"b test2 1 h full -- zg --sql /zg.sql\n" +
+		"c test2 2 h full -- zg --sql /zg.sql\n"
+	claim := func(id string) AutoSlotClaim {
+		if id == "a" {
+			return AutoSlotActive
+		}
+		return AutoSlotNew
+	}
+	ts, issues, err := ParseAutoTargetsHeld(strings.NewReader(text), claim, map[string]string{AutoSlotKey("test2", "1"): "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ts) != 1 || ts[0].ID != "c" {
+		t.Fatalf("targets %v, want only c", ts)
+	}
+	if len(issues) != 2 || issues[0].ID != "a" || issues[1].ID != "b" || !strings.Contains(issues[1].Err.Error(), "already a's") {
+		t.Fatalf("issues %+v, want a's bad line and b's slot taken by a", issues)
+	}
+}
