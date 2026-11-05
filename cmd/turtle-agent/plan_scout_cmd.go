@@ -74,7 +74,7 @@ type planScoutOptions struct {
 	instanceCapFail  bool
 	instanceCapReset bool
 	// instanceCapPerAccount is the core's fresh instances per account and hour; instanceCapSet tells a flag from the
-	// default (the flag wins over slots.json's per-server value).
+	// default (the flag wins over instance-cap-per-account.json's per-server value).
 	instanceCapPerAccount int
 	instanceCapSet        bool
 	// walkBudgetD and capWaitD are walkBudget and instanceCapWait parsed (the live pass's waits).

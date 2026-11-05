@@ -310,8 +310,8 @@ func (sl *scoutLive) logReply(line string) {
 	}
 }
 
-// capPerAccount is the core's fresh instances per account and hour: the flag's value, else the slots.json server
-// entry's, else the stock 5.
+// capPerAccount is the core's fresh instances per account and hour: the flag's value, else the server's entry in
+// instance-cap-per-account.json, else the stock 5.
 func (sl *scoutLive) capPerAccount() int {
 	if sl.opts.instanceCapSet && sl.opts.instanceCapPerAccount > 0 {
 		return sl.opts.instanceCapPerAccount

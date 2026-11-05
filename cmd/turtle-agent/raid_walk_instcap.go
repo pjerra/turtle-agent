@@ -29,8 +29,9 @@ const (
 // capOwnerName is this walk's reservation owner.
 func (w *walk) capOwnerName() string { return fmt.Sprintf("%s#%d", w.opts.holder, os.Getpid()) }
 
-// instanceCap is the core's fresh instances per account and hour: the flag's value, else the slots.json server entry's,
-// else the stock 5 (defaultWalkEnv resolves the first two into opts and env; tests may set neither).
+// instanceCap is the core's fresh instances per account and hour: the flag's value, else the server's entry in
+// instance-cap-per-account.json, else the stock 5 (defaultWalkEnv resolves the first two into opts and env; tests may
+// set neither).
 func (w *walk) instanceCap() int {
 	if w.opts.capPerAccount > 0 {
 		return w.opts.capPerAccount
@@ -161,9 +162,10 @@ func (w *walk) phaseInstanceCap(ctx context.Context) error {
 }
 
 // waitHireAccountCap is the exact gate after the hires: the core refuses an account's sixth fresh instance in an
-// hour, so when the busiest hired account is at the cap the walk waits (--instance-cap-wait) before it enters, or
-// exits 26 with --instance-cap-fail. A ledger that cannot count per account (an older entry without accounts) is not
-// a second gate: phaseInstanceCap's raid count already ran. --instance-cap-unsafe goes on, logged, as before.
+// hour, and the walk keeps one place of headroom (RaidLimit(cap)), so when the busiest hired account is at that limit
+// the walk waits (--instance-cap-wait) before it enters, or exits 26 with --instance-cap-fail. A ledger that cannot
+// count per account (an older entry without accounts) is not a second gate: phaseInstanceCap's raid count already
+// ran. --instance-cap-unsafe goes on, logged, as before.
 func (w *walk) waitHireAccountCap(ctx context.Context) error {
 	if w.env.capLedger == "" || len(w.hireAccounts) == 0 {
 		return nil
@@ -192,14 +194,14 @@ func (w *walk) waitHireAccountCap(ctx context.Context) error {
 			w.note("instance cap: an entry in the hour names no accounts, so the hired accounts are counted as raids")
 			return nil
 		}
-		if peak < w.instanceCap() {
+		if peak < raidwalk.RaidLimit(w.instanceCap()) {
 			if warned {
 				w.say(now, fmt.Sprintf("instance cap: the busiest hired account has %d fresh instance(s) in the last hour; going on", peak))
 			}
 			return nil
 		}
 		if !warned {
-			msg := fmt.Sprintf("instance cap: a hired account already has %d fresh instances in the last hour on %s; the core's cap is %d", peak, server, w.instanceCap())
+			msg := fmt.Sprintf("instance cap: a hired account already has %d fresh instances in the last hour on %s; the core's cap is %d and the walk keeps one place free", peak, server, w.instanceCap())
 			w.say(now, msg)
 			w.note("%s", msg)
 			warned = true
@@ -222,12 +224,16 @@ func (w *walk) waitHireAccountCap(ctx context.Context) error {
 			w.note("%s; --instance-cap-unsafe: going on", msg)
 			return nil
 		}
+		freeAt := now.Add(wait)
 		if wait > left {
 			wait = left
 		} else {
 			wait += capWaitMargin
 		}
-		w.say(now, fmt.Sprintf("instance cap: waiting %s for a hired account's oldest instance to age out of the hour", wait.Round(time.Second)))
+		// The earliest free time is on the line so the autopilot's stall rule can start its clock when the wait ends
+		// (M4), not while the walk is legitimately idle.
+		w.say(now, fmt.Sprintf("instance cap: waiting %s (earliest free time %s) for a hired account's oldest instance to age out of the hour",
+			wait.Round(time.Second), freeAt.UTC().Format(time.RFC3339)))
 		if err := w.env.sleep(ctx, wait); err != nil {
 			return stopf(exitRaidWalkFailed, "interrupted")
 		}
@@ -254,7 +260,42 @@ func (w *walk) recordFreshInstance() {
 	if err != nil {
 		w.note("instance cap: ledger entry not written: %v", err)
 	}
+	w.capEntryAt = e.At
 	w.capReserved = false
+}
+
+// stampInstance records the instance id on the entry the walk just made, once the placement has read it: a later
+// reuse placement's entry can then skip the accounts already counted for that instance.
+func (w *walk) stampInstance() {
+	if w.capEntryAt.IsZero() || w.placeInst == 0 || w.env.capLedger == "" {
+		return
+	}
+	at, inst, server := w.capEntryAt, w.placeInst, w.opts.server
+	w.capEntryAt = time.Time{}
+	if err := w.capUpdate(func(l *raidwalk.CapLedger) { l.SetInstance(server, at, inst) }); err != nil {
+		w.note("instance cap: the entry's instance not recorded: %v", err)
+	}
+}
+
+// recordReuseInstance records the accounts a --reuse-instance placement re-hired into the raid's instance. The core
+// counts an instance id once per account, so only accounts not already recorded for that instance count (M5).
+func (w *walk) recordReuseInstance() {
+	if w.env.capLedger == "" || len(w.hireAccounts) == 0 {
+		return
+	}
+	inst := w.placeInst
+	now := w.env.now()
+	n := 0
+	err := w.capUpdate(func(l *raidwalk.CapLedger) {
+		n = l.RecordReuse(w.opts.server, inst, w.hireAccounts, w.plan.Name, now)
+	})
+	if err != nil {
+		w.note("instance cap: the reuse placement's entry not written: %v", err)
+		return
+	}
+	if n > 0 {
+		w.note("instance cap: %d newly hired account(s) counted for the reused instance %.0f", n, inst)
+	}
 }
 
 // releaseCapReservation gives the reservation back when the walk ended before its raid entered.

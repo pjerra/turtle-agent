@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -51,6 +53,49 @@ func NewStore(cfg *Config, slotsPath string) *Store {
 		Now:   time.Now,
 		Probe: LinuxProbe{},
 	}
+}
+
+// LeasesDir is where the store of slotsPath keeps its leases: beside the slot table, one file per server and slot.
+func LeasesDir(slotsPath string) string {
+	return filepath.Join(filepath.Dir(slotsPath), "leases")
+}
+
+// LiveLeaseHolders names the holders of server's live leases in dir (a store's leases dir). A lease is live unless the
+// store would call it stale (expired AND no live agent in its dir). A missing dir is no leases; an unreadable file is
+// an error, because an unknown ledger is not called empty.
+func LiveLeaseHolders(dir, server string, now time.Time, probe Probe) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(dir, server))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, server, e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		var l Lease
+		if err := json.Unmarshal(raw, &l); err != nil {
+			return nil, fmt.Errorf("lease %s: %w", e.Name(), err)
+		}
+		live := !now.After(l.Expires)
+		if !live && l.Dir != "" && probe != nil {
+			if _, alive := probe.AgentPID(l.Dir); alive {
+				live = true
+			}
+		}
+		if live {
+			out = append(out, l.Holder)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 type Acquired struct {

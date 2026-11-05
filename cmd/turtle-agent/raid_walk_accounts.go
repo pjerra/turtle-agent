@@ -1,5 +1,6 @@
 // raid_walk_accounts.go: the pool accounts of the hired party, for the instance ledger. The core's cap is N fresh
-// instance ids per ACCOUNT per hour (stock 5, --instance-cap-per-account or slots.json); the hire reply does not name
+// instance ids per ACCOUNT per hour (stock 5, --instance-cap-per-account or instance-cap-per-account.json); the hire
+// reply does not name
 // them, so the walk reads them with a GM probe (`.pinfo <hire>`, read-only) after the hires and records them on the
 // ledger entry. An entry that carries them is counted per account; one that does not keeps the older conservative raid
 // count, one below the cap (instcap.go).

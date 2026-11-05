@@ -57,6 +57,10 @@ const (
 	exitRaidWalkPlaceFailed = 29
 )
 
+// walkPIDFile is the walk's own pid in its out dir (0600): the autopilot adopts a live walk on its slot at startup
+// by it, and removes it at exit.
+const walkPIDFile = "walk.pid"
+
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
     [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
@@ -73,51 +77,54 @@ var raidWalkSpeedRe = regexp.MustCompile(`^[1-3](?:\.[0-9])?$`)
 
 // raidWalkOptions are the command's flags.
 type raidWalkOptions struct {
-	plan            string
-	server          string
-	slot            string // "" leases any free slot
-	holder          string
-	dir             string
-	sql             string
-	until           string
-	from            string
-	place           bool       // --place: start the raid partway into its instance, at the --from start (spec 3)
-	reuseInstance   bool       // --reuse-instance: a re-place keeps the raid's current instance (no fresh one is entered or counted)
-	gmClear         stringList // --gm-clear "<leg>:<group>[,<group>...]", repeatable: GM-kill those pull groups after the placement (test servers only)
-	gmClearBoss     stringList // --gm-clear-boss <leg>, repeatable: GM-kill the leg's boss and its pack
-	gmClearSpawns   string     // --gm-clear-spawns: the world export dir (default <dir>/../tools/dungeongen/testdata/map<N>)
-	speed           float64
-	hires           string
-	tier            int // --tier: the kit of a raid the committed table leaves unknown
-	tierOverride    int // --tier-override: a comparison, not a tier proof
-	enter           string
-	holdMinutes     int
-	maxRunMinutes   int
-	pausedWait      time.Duration
-	autoResume      int
-	resetWait       time.Duration
-	wipeResume      int
-	wipeRest        time.Duration
-	reviveAtRaid    bool          // --revive-at-raid (default on): a wipe recovery brings far hires to the revive point and waits for the raid to gather
-	hireSettle      time.Duration // --hire-settle: the wait after the last hire; 0 skips it (the #1367 live proof)
-	capPerAccount   int           // --instance-cap-per-account: the core's fresh instances per account and hour (stock 5)
-	capGiven        bool          // --instance-cap-per-account was given: it wins over slots.json's per-server value
-	capWait         time.Duration // --instance-cap-wait: the longest the walk waits for the server's hourly instance-id count to fall
-	capFail         bool          // --instance-cap-fail: exit exitRaidWalkInstanceCap at the cap instead of waiting
-	capUnsafe       bool          // --instance-cap-unsafe: when the wait runs out or the ledger is unreadable, go on without a reservation (logged) instead of exiting exitRaidWalkInstanceCap
-	capReset        bool          // --instance-cap-reset: forget this server's ledger first (its worldserver restarted)
-	patrols         string
-	out             string
-	dashURL         string
-	dashUser        string
-	dashPassFile    string
-	decisions       bool // --decisions: pull decision captures after teardown (on by default)
-	decisionsMaxMiB int  // --decisions-max-mib: budget for the decisions pull in MiB
-	mmaps           string
-	slotsPath       string
-	binary          string
-	injects         stringList // --inject, repeatable
-	dryRun          bool
+	plan          string
+	server        string
+	slot          string // "" leases any free slot
+	holder        string
+	dir           string
+	sql           string
+	until         string
+	from          string
+	place         bool       // --place: start the raid partway into its instance, at the --from start (spec 3)
+	reuseInstance bool       // --reuse-instance: a re-place keeps the raid's current instance (no fresh one is entered or counted)
+	gmClear       stringList // --gm-clear "<leg>:<group>[,<group>...]", repeatable: GM-kill those pull groups after the placement (test servers only)
+	gmClearBoss   stringList // --gm-clear-boss <leg>, repeatable: GM-kill the leg's boss and its pack
+	gmClearSpawns string     // --gm-clear-spawns: the world export dir (default ~/.local/share/turtle-agent/world/map<N>, else the checkout's tools/dungeongen/testdata/map<N>)
+	speed         float64
+	hires         string
+	tier          int // --tier: the kit of a raid the committed table leaves unknown
+	tierOverride  int // --tier-override: a comparison, not a tier proof
+	enter         string
+	holdMinutes   int
+	maxRunMinutes int
+	pausedWait    time.Duration
+	autoResume    int
+	resetWait     time.Duration
+	wipeResume    int
+	wipeRest      time.Duration
+	reviveAtRaid  bool          // --revive-at-raid (default on): a wipe recovery brings far hires to the revive point and waits for the raid to gather
+	hireSettle    time.Duration // --hire-settle: the wait after the last hire; 0 skips it (the #1367 live proof)
+	capPerAccount int           // --instance-cap-per-account: the core's fresh instances per account and hour (stock 5)
+	capGiven      bool          // --instance-cap-per-account was given: it wins over instance-cap-per-account.json's value
+	// allowSplitLedger lets a --slots file outside the default dir run although the default leases hold a live lease
+	// for the server (test sandboxes). Production keeps one ledger per server.
+	allowSplitLedger bool
+	capWait          time.Duration // --instance-cap-wait: the longest the walk waits for the server's hourly instance-id count to fall
+	capFail          bool          // --instance-cap-fail: exit exitRaidWalkInstanceCap at the cap instead of waiting
+	capUnsafe        bool          // --instance-cap-unsafe: when the wait runs out or the ledger is unreadable, go on without a reservation (logged) instead of exiting exitRaidWalkInstanceCap
+	capReset         bool          // --instance-cap-reset: forget this server's ledger first (its worldserver restarted)
+	patrols          string
+	out              string
+	dashURL          string
+	dashUser         string
+	dashPassFile     string
+	decisions        bool // --decisions: pull decision captures after teardown (on by default)
+	decisionsMaxMiB  int  // --decisions-max-mib: budget for the decisions pull in MiB
+	mmaps            string
+	slotsPath        string
+	binary           string
+	injects          stringList // --inject, repeatable
+	dryRun           bool
 	// noPlaceRetreat is a test seam: the unit tests that pin one placement attempt turn the same-instance retreat off
 	// (the walk's own TestPlaceQuietFailureRetreatsInTheSameInstance runs it).
 	noPlaceRetreat bool
@@ -259,7 +266,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.patrols, "patrols", "", "a tb-patrols file for the revive quiet check")
 	fs.Var(&o.gmClear, "gm-clear", "TEST SERVERS ONLY, needs --place: after the placement the commander GM-kills every live unit of these pull groups of a leg, \"<leg>:<group>[,<group>...]\" (whole packs, links included); repeatable; the walk is then ASSISTED, never a real clear")
 	fs.Var(&o.gmClearBoss, "gm-clear-boss", "TEST SERVERS ONLY, needs --place: like --gm-clear for the boss of a leg (and its pack); repeatable")
-	fs.StringVar(&o.gmClearSpawns, "gm-clear-spawns", "", "the world export dir --gm-clear reads the packs from (default: <dir>/../tools/dungeongen/testdata/map<N>)")
+	fs.StringVar(&o.gmClearSpawns, "gm-clear-spawns", "", "the world export dir --gm-clear reads the packs from (default: ~/.local/share/turtle-agent/world/map<N>, else the checkout's <dir>/../tools/dungeongen/testdata/map<N>)")
 	fs.StringVar(&o.out, "out", "", "the output dir (default ./raid-walk-<plan>-<stamp>)")
 	fs.StringVar(&o.dashURL, "dash-url", "", "the dashboard URL (or TBDASH_URL)")
 	fs.StringVar(&o.dashUser, "dash-user", "", "the dashboard login (or TBDASH_USER; default TADASH)")
@@ -269,6 +276,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.IntVar(&o.decisionsMaxMiB, "decisions-max-mib", 1024, "the decisions pull budget in MiB")
 	fs.StringVar(&o.mmaps, "mmaps", "", "the navmesh dir for slot setup")
 	fs.StringVar(&o.slotsPath, "slots", "", "the slots file (default ~/.config/turtle-agent/slots.json)")
+	fs.Var(onOffFlag{v: &o.allowSplitLedger, name: "allow-split-ledger"}, "allow-split-ledger", "allow a --slots file outside the default dir although the default leases hold a live lease for the server: test sandboxes only (the leases and the cap ledger would be split)")
 	fs.StringVar(&o.binary, "binary", "", "the agent binary slot setup copies (default: this executable)")
 	fs.Var(&o.injects, "inject", "a fault to inject, repeatable (at most 4): kill-mt, runaway, add-pack or lag, each with @from=N and its keys")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "validate and print the phase plan, send nothing")
@@ -606,7 +614,7 @@ type walkEnv struct {
 	// --instance-cap-reset is the operator's way.
 	capLedger string
 	// capPerAccount is the core's fresh instances per account and hour the ledger's gate uses (defaultWalkEnv resolves
-	// the flag, slots.json and the stock 5); 0 in tests that do not exercise the cap.
+	// the flag, instance-cap-per-account.json and the stock 5); 0 in tests that do not exercise the cap.
 	capPerAccount int
 	serverStart   func(ctx context.Context, server string) (time.Time, bool)
 }
@@ -626,6 +634,21 @@ func defaultWalkEnv(o *raidWalkOptions) (walkEnv, walkDeps, error) {
 	cfg, err := slots.Load(path)
 	if err != nil {
 		return walkEnv{}, walkDeps{}, err
+	}
+	// A --slots file outside the default dir keeps its leases, its cap ledger and its instance-cap-per-account.json
+	// there, so a walk on it cannot see the default ledger's leases (walk 38: two raids took one slot because each
+	// looked at its own leases). Refuse to start beside live default leases for the same server.
+	if o.slotsPath != "" && !o.allowSplitLedger {
+		if def := slots.DefaultPath(); def != "" && !sameSlotsDir(path, def) {
+			holders, err := slots.LiveLeaseHolders(slots.LeasesDir(def), o.server, time.Now(), slots.LinuxProbe{})
+			if err != nil {
+				return walkEnv{}, walkDeps{}, fmt.Errorf("the default lease ledger %s cannot be read: %v", slots.LeasesDir(def), err)
+			}
+			if len(holders) > 0 {
+				return walkEnv{}, walkDeps{}, fmt.Errorf("--slots %s keeps its leases in %s; live leases for %s exist in %s (%s): one ledger per server (--allow-split-ledger overrides, test sandboxes only)",
+					path, slots.LeasesDir(path), o.server, slots.LeasesDir(def), strings.Join(holders, ", "))
+			}
+		}
 	}
 	store := slots.NewStore(cfg, path)
 	// The instance cap: the flag when given, else the server's entry in instance-cap-per-account.json beside the
@@ -669,6 +692,21 @@ func defaultWalkEnv(o *raidWalkOptions) (walkEnv, walkDeps, error) {
 		},
 	}
 	return env, deps, nil
+}
+
+// sameSlotsDir reports whether two slot table paths live in the same directory (absolute, symlinks resolved).
+func sameSlotsDir(a, b string) bool {
+	dir := func(p string) string {
+		d := filepath.Dir(p)
+		if abs, err := filepath.Abs(d); err == nil {
+			d = abs
+		}
+		if resolved, err := filepath.EvalSymlinks(d); err == nil {
+			d = resolved
+		}
+		return d
+	}
+	return dir(a) == dir(b)
 }
 
 // fillDefaults lets a test override only the fields it needs.
@@ -920,6 +958,8 @@ type walk struct {
 	mt    string
 	ots   []string
 	rest  []string
+	// capEntryAt is the At of the ledger entry recordFreshInstance made, so stampInstance can name its instance.
+	capEntryAt time.Time
 	// hireAccounts are the pool accounts behind the hires (read with `.pinfo` after the last batch, ids only): the
 	// instance ledger counts the core's five-per-account cap on them instead of the conservative raid count. Empty
 	// when the server refused the read; the entry then carries none and counts as before.
@@ -1072,6 +1112,12 @@ func (w *walk) main(ctx context.Context) int {
 		return w.reportBeforeOut(err)
 	}
 	defer w.closeOut()
+	// The walk's pid in its out dir: the autopilot adopts a live walk on its slot at startup by this pid (H2).
+	if remove, err := writePIDFile(filepath.Join(w.outDir, walkPIDFile)); err != nil {
+		w.note("walk pid file: %v", err)
+	} else {
+		defer remove()
+	}
 	w.started = w.env.now()
 	w.logLine(w.started, fmt.Sprintf("tier %d (%s) for %s", w.roster.Tier, w.tierSource, w.plan.Name))
 	w.openDashboard(ctx)

@@ -65,7 +65,7 @@ var pairPerWalkFlags = map[string]bool{
 
 // pairSwitchFlags are the per-walk flags that are switches: a bare flag means on for every walk, and the word after a
 // slot prefix is on or off.
-var pairSwitchFlags = map[string]bool{"place": true, "decisions": true}
+var pairSwitchFlags = map[string]bool{"place": true, "decisions": true, "allow-split-ledger": true}
 
 // pairFlag is one flag of the pair command line, before distribution to the walks.
 type pairFlag struct {

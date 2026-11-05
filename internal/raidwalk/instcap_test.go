@@ -228,33 +228,34 @@ func TestCapUpdateNeverWritesOverAnUnreadableLedger(t *testing.T) {
 }
 
 // TestCapCountsPerAccountWhenEveryEntryNamesThem is the walk 37 fix: the old count blocked a walk at four RAIDS on
-// the server although the busiest pool account had only four fresh instances, and the core refuses the sixth.
+// the server although the busiest pool account had only three fresh instances. The per-account gate keeps one place of
+// headroom (RaidLimit(5) = 4), so the fourth is the last admitted one.
 func TestCapCountsPerAccountWhenEveryEntryNamesThem(t *testing.T) {
 	l := &CapLedger{}
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 3; i++ {
 		l.Record("s", CapEntry{At: capT0.Add(-time.Duration(50-10*i) * time.Minute), Accounts: []string{"a1", "a2"}}, capT0)
 	}
-	if n, known := l.Busiest("s", capT0); !known || n != 4 {
-		t.Fatalf("busiest = %d known %v, want 4 true", n, known)
+	if n, known := l.Busiest("s", capT0); !known || n != 3 {
+		t.Fatalf("busiest = %d known %v, want 3 true", n, known)
 	}
-	// Four raids on the server used to fill the ledger; per account the fifth is still allowed.
-	if admitted, n, _ := l.TryReserve("s", "w1", InstanceCapPerAccount, capT0); !admitted || n != 4 {
-		t.Fatalf("admission at four per account: admitted %v count %d, want true 4", admitted, n)
+	// Three raids on the server used to fill the ledger; per account the fourth is still allowed.
+	if admitted, n, _ := l.TryReserve("s", "w1", InstanceCapPerAccount, capT0); !admitted || n != 3 {
+		t.Fatalf("admission at three per account: admitted %v count %d, want true 3", admitted, n)
 	}
 	l.Release("s", "w1")
 	l.Record("s", CapEntry{At: capT0.Add(-5 * time.Minute), Accounts: []string{"a1"}}, capT0)
-	if n, known := l.Busiest("s", capT0); !known || n != 5 {
-		t.Fatalf("busiest after a fifth entry = %d known %v, want 5 true", n, known)
+	if n, known := l.Busiest("s", capT0); !known || n != 4 {
+		t.Fatalf("busiest after a fourth entry = %d known %v, want 4 true", n, known)
 	}
-	// Five is the core's cap: the sixth is refused, so the walk waits for the oldest a1 entry (50 min old).
+	// Four is the per-account limit (cap-1 headroom): the walk waits for the oldest a1 entry (50 min old).
 	admitted, n, wait := l.TryReserve("s", "w1", InstanceCapPerAccount, capT0)
-	if admitted || n != 5 || wait != 10*time.Minute {
-		t.Fatalf("admission at five per account: admitted %v count %d wait %s, want false 5 10m", admitted, n, wait)
+	if admitted || n != 4 || wait != 10*time.Minute {
+		t.Fatalf("admission at four per account: admitted %v count %d wait %s, want false 4 10m", admitted, n, wait)
 	}
-	// At six the second-oldest a1 entry must leave (the one 40 min old leaves in 20).
+	// At five the second-oldest a1 entry must leave (the one 40 min old leaves in 20).
 	l.Record("s", CapEntry{At: capT0.Add(-time.Minute), Accounts: []string{"a1"}}, capT0)
 	if w := l.WaitForBusiest("s", InstanceCapPerAccount, capT0); w != 20*time.Minute {
-		t.Fatalf("wait at six = %s, want 20m", w)
+		t.Fatalf("wait at five = %s, want 20m", w)
 	}
 }
 
@@ -265,9 +266,53 @@ func TestCapTiedBusiestAccountsAllHaveToLeaveOne(t *testing.T) {
 		l.Record("s", CapEntry{At: capT0.Add(-age), Accounts: []string{"a1"}}, capT0)
 		l.Record("s", CapEntry{At: capT0.Add(-age - time.Minute), Accounts: []string{"a2"}}, capT0)
 	}
-	// a1's oldest leaves in 10m, a2's in 9m; the busiest is still five until both left one (10m).
-	if w := l.WaitForBusiest("s", InstanceCapPerAccount, capT0); w != 10*time.Minute {
-		t.Fatalf("wait with two tied busiest accounts = %s, want 10m", w)
+	// The limit is four: a1's second-oldest leaves in 20m, a2's in 19m; the busiest is still five until both left
+	// one (20m).
+	if w := l.WaitForBusiest("s", InstanceCapPerAccount, capT0); w != 20*time.Minute {
+		t.Fatalf("wait with two tied busiest accounts = %s, want 20m", w)
+	}
+}
+
+// A reuse placement re-hires accounts into the instance the raid already has: the core counts that instance once per
+// account, so only the accounts not recorded for it are counted.
+func TestCapReuseRecordsOnlyTheNewAccountsOfTheInstance(t *testing.T) {
+	l := &CapLedger{}
+	l.Record("s", CapEntry{At: capT0.Add(-10 * time.Minute), Accounts: []string{"a1", "a2"}, Instance: 101}, capT0)
+	if n := l.RecordReuse("s", 101, []string{"a1", "a2"}, "zg", capT0); n != 0 {
+		t.Fatalf("re-hiring the same accounts counted %d, want 0", n)
+	}
+	if n := l.RecordReuse("s", 101, []string{"a2", "a3"}, "zg", capT0); n != 1 {
+		t.Fatalf("re-hiring one new account counted %d, want 1", n)
+	}
+	if n, known := l.Busiest("s", capT0); !known || n != 1 {
+		t.Fatalf("busiest = %d known %v, want 1 (a1 and a2 once each, a3 once)", n, known)
+	}
+	// Another instance counts its accounts again (a new instance id per account).
+	if n := l.RecordReuse("s", 102, []string{"a1"}, "zg", capT0); n != 1 {
+		t.Fatalf("a1 in another instance counted %d, want 1", n)
+	}
+	if n, known := l.Busiest("s", capT0); !known || n != 2 {
+		t.Fatalf("busiest after a1's second instance = %d known %v, want 2", n, known)
+	}
+	// An entry whose instance is unknown cannot be deduped: every account counts, as before.
+	l.Record("s", CapEntry{At: capT0.Add(-time.Minute), Accounts: []string{"a9"}}, capT0)
+	if n := l.RecordReuse("s", 0, []string{"a9"}, "zg", capT0); n != 1 {
+		t.Fatalf("an unknown instance deduped an account: counted %d, want 1", n)
+	}
+}
+
+func TestCapSetInstanceStampsTheEntry(t *testing.T) {
+	l := &CapLedger{}
+	at := capT0.Add(-time.Minute)
+	l.Record("s", CapEntry{At: at, Accounts: []string{"a1"}}, capT0)
+	if !l.SetInstance("s", at, 77) {
+		t.Fatal("SetInstance did not find the entry")
+	}
+	if e := l.Servers["s"].Entries[0]; e.Instance != 77 {
+		t.Fatalf("instance = %v, want 77", e.Instance)
+	}
+	if l.SetInstance("s", capT0, 78) {
+		t.Fatal("SetInstance stamped an entry that does not exist")
 	}
 }
 
@@ -279,11 +324,12 @@ func TestCapPerAccountWaitForTheHiredParty(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		l.Record("s", CapEntry{At: capT0.Add(-time.Duration(40-5*i) * time.Minute), Accounts: []string{"a2"}}, capT0)
 	}
-	if w := l.WaitForAccounts("s", []string{"a2"}, InstanceCapPerAccount, capT0); w != 20*time.Minute {
-		t.Fatalf("wait for a2 = %s, want 20m (its oldest entry leaves)", w)
+	// The limit is four (cap-1 headroom): a2's second-oldest entry leaves in 25m.
+	if w := l.WaitForAccounts("s", []string{"a2"}, InstanceCapPerAccount, capT0); w != 25*time.Minute {
+		t.Fatalf("wait for a2 = %s, want 25m (its second-oldest entry leaves)", w)
 	}
-	if w := l.WaitForAccounts("s", []string{"a1", "a2"}, InstanceCapPerAccount, capT0); w != 20*time.Minute {
-		t.Fatalf("wait for both = %s, want the later of the two (20m)", w)
+	if w := l.WaitForAccounts("s", []string{"a1", "a2"}, InstanceCapPerAccount, capT0); w != 25*time.Minute {
+		t.Fatalf("wait for both = %s, want the later of the two (25m)", w)
 	}
 	if n, known := l.PeakFor("s", []string{"a1", "a2"}, capT0); !known || n != 5 {
 		t.Fatalf("peak known %v count %d, want true 5", known, n)
@@ -327,19 +373,20 @@ func TestCapThirtyLetsSixRaidsAnHour(t *testing.T) {
 	}
 }
 
-// TestCapFiveKeepsTheSixthOut is the stock core's behaviour, unchanged by the flag's default.
-func TestCapFiveKeepsTheSixthOut(t *testing.T) {
+// TestCapFiveKeepsTheFifthOut is the stock core's behaviour with the per-account headroom: the gate admits below
+// RaidLimit(5) = 4 per account, so the fifth placement waits.
+func TestCapFiveKeepsTheFifthOut(t *testing.T) {
 	l := &CapLedger{}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 4; i++ {
 		owner := "w" + string(rune('0'+i))
 		if admitted, n, _ := l.TryReserve("m910q", owner, 5, capT0); !admitted {
-			t.Fatalf("raid %d refused at count %d, want admitted below 5", i+1, n)
+			t.Fatalf("raid %d refused at count %d, want admitted below 4", i+1, n)
 		}
 		l.Confirm("m910q", owner, CapEntry{At: capT0, Accounts: []string{"a1", "a2"}}, capT0)
 	}
-	admitted, n, wait := l.TryReserve("m910q", "w5", 5, capT0)
-	if admitted || n != 5 || wait != time.Hour {
-		t.Fatalf("sixth: admitted %v count %d wait %s, want false 5 1h", admitted, n, wait)
+	admitted, n, wait := l.TryReserve("m910q", "w4", 5, capT0)
+	if admitted || n != 4 || wait != time.Hour {
+		t.Fatalf("fifth: admitted %v count %d wait %s, want false 4 1h", admitted, n, wait)
 	}
 }
 

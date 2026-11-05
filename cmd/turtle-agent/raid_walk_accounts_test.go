@@ -45,9 +45,10 @@ func TestInstanceCapHiredAccountsGate(t *testing.T) {
 	if err := w.waitHireAccountCap(context.Background()); err != nil {
 		t.Fatalf("waitHireAccountCap: %v", err)
 	}
-	// a1's oldest entry (50 min old) leaves in 10 min, then the busiest account is below the cap.
-	if len(slept) != 1 || slept[0] != 10*time.Minute+capWaitMargin {
-		t.Fatalf("slept %v, want one wait of 10m + margin", slept)
+	// The gate keeps one place of headroom (RaidLimit(5) = 4): a1's second-oldest entry (40 min old) leaves in 20 min,
+	// and only then is the busiest account below 4.
+	if len(slept) != 1 || slept[0] != 20*time.Minute+capWaitMargin {
+		t.Fatalf("slept %v, want one wait of 20m + margin", slept)
 	}
 	if !strings.Contains(stderr.String(), "a hired account already has 5 fresh instances") {
 		t.Fatalf("no cap warning: %q", stderr.String())
@@ -69,5 +70,39 @@ func TestRecordFreshInstanceNamesTheHiredAccounts(t *testing.T) {
 	}
 	if n, known := l.PeakFor("m910q", []string{"17"}, *now); !known || n != 1 {
 		t.Fatalf("peak for 17 = %d known %v, want 1 true", n, known)
+	}
+}
+
+// M5: a --reuse-instance placement re-hires into the instance the raid already has. The core counts that instance id
+// once per account, so the ledger entry names only the accounts that were not recorded for it yet.
+func TestReusePlacementRecordsOnlyTheNewAccounts(t *testing.T) {
+	w, now, _, _ := capWalk(t, raidWalkOptions{})
+	w.placeInst = 101
+	w.capReserved = true
+	w.hireAccounts = []string{"17", "23"}
+	w.recordFreshInstance()
+	w.stampInstance()
+	l, err := raidwalk.LoadCapLedger(w.env.capLedger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := l.Servers["m910q"].Entries[0]; e.Instance != 101 {
+		t.Fatalf("fresh entry instance = %v, want 101 (stamped after the placement)", e.Instance)
+	}
+	// The next reuse placement re-hires 23 and a new account 29: only 29 is a new (account, instance) pair.
+	w.hireAccounts = []string{"23", "29"}
+	w.recordReuseInstance()
+	l, err = raidwalk.LoadCapLedger(w.env.capLedger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, known := l.PeakFor("m910q", []string{"23"}, *now); !known || n != 1 {
+		t.Fatalf("account 23 counted %d known %v, want 1 true (already in instance 101)", n, known)
+	}
+	if n, known := l.PeakFor("m910q", []string{"29"}, *now); !known || n != 1 {
+		t.Fatalf("account 29 counted %d known %v, want 1 true (new in instance 101)", n, known)
+	}
+	if !strings.Contains(w.notes[len(w.notes)-1], "1 newly hired account(s) counted for the reused instance 101") {
+		t.Fatalf("notes %v, want the reuse entry line", w.notes)
 	}
 }

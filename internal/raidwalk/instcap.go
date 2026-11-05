@@ -55,6 +55,10 @@ type CapEntry struct {
 	At       time.Time `json:"at"`
 	Plan     string    `json:"plan,omitempty"`
 	Accounts []string  `json:"accounts,omitempty"`
+	// Instance is the instance id the placement entered (0 when the walk could not read it, e.g. an older entry).
+	// The core counts an instance id once per account, so a reuse placement that re-hires only counts accounts not
+	// already recorded for that instance.
+	Instance float64 `json:"instance,omitempty"`
 }
 
 // CapReservation is a place held for a walk that was admitted and has not entered its instance yet. It counts like an
@@ -223,12 +227,10 @@ func (l *CapLedger) PeakFor(name string, accounts []string, now time.Time) (peak
 	return peak, true
 }
 
-// WaitForAccounts is how long until every account in accounts is below cap: zero when they all are, else until the
-// entry that has to leave does (an account's oldest at a count of 5 for cap 5, its second at 6).
+// WaitForAccounts is how long until every account in accounts is below the per-account limit (RaidLimit(cap), one
+// place of headroom): zero when they all are, else until the entry that has to leave does.
 func (l *CapLedger) WaitForAccounts(name string, accounts []string, cap int, now time.Time) time.Duration {
-	if cap <= 0 {
-		cap = InstanceCapPerAccount
-	}
+	limit := RaidLimit(cap)
 	set := map[string]bool{}
 	for _, a := range accounts {
 		set[a] = true
@@ -243,11 +245,11 @@ func (l *CapLedger) WaitForAccounts(name string, accounts []string, cap int, now
 	}
 	var until time.Time
 	for _, ts := range per {
-		if len(ts) < cap {
+		if len(ts) < limit {
 			continue
 		}
 		sort.Slice(ts, func(i, j int) bool { return ts[i].Before(ts[j]) })
-		if at := ts[len(ts)-cap]; at.After(until) {
+		if at := ts[len(ts)-limit]; at.After(until) {
 			until = at
 		}
 	}
@@ -257,12 +259,11 @@ func (l *CapLedger) WaitForAccounts(name string, accounts []string, cap int, now
 	return until.Sub(now)
 }
 
-// WaitForBusiest is how long until the busiest pool account is below cap: zero when the ledger cannot count per
-// account (WaitFor then) or one already is, else until that account's entry that has to leave does.
+// WaitForBusiest is how long until the busiest pool account is below the per-account limit (RaidLimit(cap), one place
+// of headroom): zero when the ledger cannot count per account (WaitFor then) or one already is, else until that
+// account's entry that has to leave does.
 func (l *CapLedger) WaitForBusiest(name string, cap int, now time.Time) time.Duration {
-	if cap <= 0 {
-		cap = InstanceCapPerAccount
-	}
+	limit := RaidLimit(cap)
 	if !l.accountsKnown(name, now) {
 		return l.WaitFor(name, cap, now)
 	}
@@ -278,17 +279,17 @@ func (l *CapLedger) WaitForBusiest(name string, cap int, now time.Time) time.Dur
 			peak = len(ts)
 		}
 	}
-	if peak < cap {
+	if peak < limit {
 		return 0
 	}
-	// Every account at the peak has to lose one before the busiest is below the cap: the latest of those leaves.
+	// Every account at the peak has to lose one before the busiest is below the limit: the latest of those leaves.
 	var until time.Time
 	for _, ts := range per {
 		if len(ts) != peak {
 			continue
 		}
 		sort.Slice(ts, func(i, j int) bool { return ts[i].Before(ts[j]) })
-		if at := ts[len(ts)-cap]; at.After(until) {
+		if at := ts[len(ts)-limit]; at.After(until) {
 			until = at
 		}
 	}
@@ -296,9 +297,9 @@ func (l *CapLedger) WaitForBusiest(name string, cap int, now time.Time) time.Dur
 }
 
 // TryReserve is the admission step, to run inside UpdateCapLedger so it is atomic with the count. When the ledger
-// names every live entry's accounts it counts per pool account (cap) and the busiest account must be below it;
-// otherwise it keeps the conservative raid count (RaidLimit(cap)), because a raid packs 2-3 pool accounts. On
-// admission it holds a place for owner; otherwise it reports the count and the wait until it falls.
+// names every live entry's accounts it counts per pool account and the busiest account must be below RaidLimit(cap)
+// (one place of headroom); otherwise it keeps the same conservative raid count, because a raid packs 2-3 pool
+// accounts. On admission it holds a place for owner; otherwise it reports the count and the wait until it falls.
 func (l *CapLedger) TryReserve(name, owner string, cap int, now time.Time) (admitted bool, count int, wait time.Duration) {
 	l.Release(name, owner)
 	if cap <= 0 {
@@ -306,9 +307,6 @@ func (l *CapLedger) TryReserve(name, owner string, cap int, now time.Time) (admi
 	}
 	limit := RaidLimit(cap)
 	count, known := l.Busiest(name, now)
-	if known {
-		limit = cap
-	}
 	if count >= limit {
 		if known {
 			return false, count, l.WaitForBusiest(name, cap, now)
@@ -339,6 +337,53 @@ func (l *CapLedger) Release(name, owner string) {
 func (l *CapLedger) Confirm(name, owner string, e CapEntry, now time.Time) {
 	l.Release(name, owner)
 	l.Record(name, e, now)
+}
+
+// RecordReuse adds the accounts a reuse placement newly hired into the instance the raid already had. The core counts
+// an instance id once per account, so an account already recorded for that instance is not counted again. A placement
+// whose instance is unknown (0) cannot be deduped: it counts every account, as before.
+func (l *CapLedger) RecordReuse(name string, inst float64, accounts []string, plan string, now time.Time) int {
+	if len(accounts) == 0 {
+		return 0
+	}
+	seen := map[string]bool{}
+	if inst != 0 {
+		for _, e := range l.live(name, now) {
+			if e.Instance != inst {
+				continue
+			}
+			for _, a := range e.Accounts {
+				seen[a] = true
+			}
+		}
+	}
+	fresh := make([]string, 0, len(accounts))
+	for _, a := range accounts {
+		if !seen[a] {
+			fresh = append(fresh, a)
+		}
+	}
+	if len(fresh) == 0 {
+		return 0
+	}
+	l.Record(name, CapEntry{At: now.UTC(), Plan: plan, Accounts: fresh, Instance: inst}, now)
+	return len(fresh)
+}
+
+// SetInstance stamps the entry made at at with the instance id the raid entered: a reuse placement's dedupe needs it.
+// It reports whether the entry was still live.
+func (l *CapLedger) SetInstance(name string, at time.Time, inst float64) bool {
+	s := l.Servers[name]
+	if s == nil {
+		return false
+	}
+	for i := range s.Entries {
+		if s.Entries[i].At.Equal(at) {
+			s.Entries[i].Instance = inst
+			return true
+		}
+	}
+	return false
 }
 
 // Record adds an entry for the server and prunes the entries that aged out.
