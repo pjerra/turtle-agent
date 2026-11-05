@@ -1,6 +1,5 @@
 // The Jin'do fixes (spec TortoiseBots-audit/specs/jindo-mechanics.md §6, plan worker step 1, and the
-// walk-38 review rounds): the plan's kill_first leads with the Brain Wash Totem 15112 and the Powerful
-// Healing Ward 14987, the hall's east side (the honour guard, the north camp's east four and the two lone
+// walk-38 review rounds): the plan's kill_first leads with the Powerful Healing Ward 14987, then the Brain Wash Totem 15112, the hall's east side (the honour guard, the north camp's east four and the two lone
 // mistresses) is its own four gm-clearable pull groups again (round 2 undid the boss-row fold; each pull is
 // over its original ceiling by a pinned known limit, see the plan note's WALK 38 REVIEW R2), and every leg-6
 // route segment to the boss row clears each of the ten Sacrificed Troll spawns (guids 49078-49087, the
@@ -16,21 +15,21 @@ import (
 	"github.com/pjerra/turtle-agent/internal/planexport"
 )
 
-// TestZgJindoKillFirstTotemWardFirst: the plan's kill_first opens with the Brain Wash Totem 15112
-// (a charmed bot kills raid members) and the Powerful Healing Ward 14987 (3 333 hp/s out-heals the
-// raid's 2.2-3.0 k dps), then the old order unchanged.
+// TestZgJindoKillFirstTotemWardFirst: the plan's kill_first opens with the Powerful Healing Ward 14987
+// (3 333 hp/s out-heals the raid's 2.2-3.0 k dps) BEFORE the Brain Wash Totem 15112 (research
+// zg-bosses/JINDO-WIPES.md: ranked first, a new ward preempts a held totem), then the old order unchanged.
 func TestZgJindoKillFirstTotemWardFirst(t *testing.T) {
 	p, err := dungeon.Load(zgPlan)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []uint32{15112, 14987, 14750, 15146, 11830, 14883, 11353}
+	want := []uint32{14987, 15112, 14750, 15146, 11830, 14883}
 	if len(p.KillFirst) != len(want) {
-		t.Fatalf("kill_first is %v, want %v (the Jin'do totem and ward first)", p.KillFirst, want)
+		t.Fatalf("kill_first is %v, want %v (the Jin'do ward, then the totem, first)", p.KillFirst, want)
 	}
 	for i, e := range want {
 		if p.KillFirst[i] != e {
-			t.Fatalf("kill_first is %v, want %v (the Jin'do totem and ward first)", p.KillFirst, want)
+			t.Fatalf("kill_first is %v, want %v (the Jin'do ward, then the totem, first)", p.KillFirst, want)
 		}
 	}
 }

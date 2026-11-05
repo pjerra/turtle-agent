@@ -1696,8 +1696,11 @@ func TestZulGurubMarliStep203StandClearOfPack0(t *testing.T) {
 	if d := dist(approach, rowPoint(approachRow)); d > 0.1 {
 		t.Errorf("the plan's group 0 approach %.1f %.1f %.1f and the exported row %d (%.1f %.1f %.1f) differ by %.2f yd", approach.X, approach.Y, approach.Z, approachRow.Seq, approachRow.X, approachRow.Y, approachRow.Z, d)
 	}
-	// The pick the run leader makes for the row: the row's pack minus the entries the plan's CC takes, in the tank's
-	// 28.5 yd shot first, then the nearest.
+	// The pick the run leader makes for the row: its three pre-pull Polymorphs (one per free mage, REVIEW R2
+	// section 2.2) mark the three best-ranked nearest spawns, and the pull takes the nearest spawn left, in the
+	// tank's 28.5 yd shot first, then the nearest. TRASH-TACTICS.md keeps 14532 first, so all three still land on
+	// Venombroods and the pick stays the Broodwidow 49250 (adding 11370 and 11338 to the list changes nothing: rank
+	// 0 outranks them, so no Broodwidow or Shadowcaster takes a Polymorph while a Venombrood is free).
 	ccRank := func(entry uint32) int {
 		for i, e := range p.CCAlways {
 			if e == entry {
@@ -1712,12 +1715,23 @@ func TestZulGurubMarliStep203StandClearOfPack0(t *testing.T) {
 				return len(p.CCAlways) + i
 			}
 		}
-		return -1
+		return len(p.CCAlways) + len(p.CCPriority)
+	}
+	byCc := append([]creature{}, pack1...)
+	slices.SortStableFunc(byCc, func(a, b creature) int {
+		if ra, rb := ccRank(a.Entry), ccRank(b.Entry); ra != rb {
+			return ra - rb
+		}
+		return int(dist(approach, a.Pos)*1000) - int(dist(approach, b.Pos)*1000)
+	})
+	cced := map[uint64]bool{}
+	for i := 0; i < 3 && i < len(byCc); i++ {
+		cced[byCc[i].GUID] = true
 	}
 	var pick *creature
 	for i := range pack1 {
 		c := &pack1[i]
-		if ccRank(c.Entry) >= 0 {
+		if cced[c.GUID] {
 			continue
 		}
 		if pick == nil {
