@@ -223,8 +223,6 @@ type autoSupervisor struct {
 	targetsMod  time.Time
 	targetsSize int64
 	targetsWarn string
-	// notBefore delays the first targets re-read a little: a write racing the start is still picked up.
-	notBefore time.Time
 }
 
 // autoRows is one target's rows, read once: ok is false when neither its --sql migration nor its plan file can be
