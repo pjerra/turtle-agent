@@ -2,6 +2,8 @@ package raidwalk
 
 import (
 	"fmt"
+	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -114,6 +116,11 @@ type GMClearPack struct {
 // GMClearStopYd is how far a member may stand from a visit stop and still be inside the commander's view and read radius there.
 const GMClearStopYd = 100
 
+// GMPatrolReachYd is how far a patrol loop (or a spawn of a patrol entry) may stand from a pull row's point and still be
+// that row's patroller. A patroller walks its loop: its spawn may lie outside the row's radius while the loop comes by the
+// pull. --gm-clear clears it too, so a cleared leg does not wait at the stand for a patrol that is already dead.
+const GMPatrolReachYd = 30
+
 // Stops are the points the commander visits to see every member: a member within GMClearStopYd (2D) of an earlier stop is covered by
 // it, else it gets a stop of its own, taken in spawn-guid order so the list is the same every time. A pack that fits one view has one
 // stop (its first member's spawn); a pack wider than the view has several, each at a member.
@@ -204,33 +211,131 @@ func PlanGMClear(rows planexport.Rows, world *worldspawn.World, specs []GMClearS
 		for _, t := range targets {
 			row := rows.Steps[t.row]
 			// The step number is the row's place in (leg, seq) order plus one, as the server numbers it; the rows slice is in that order.
-			packs := trashcheck.ClearedPacks(world, row)
-			if len(packs) == 0 {
-				warnings = append(warnings, fmt.Sprintf("gm-clear: WARN: skipped leg %s group %s (step %d): the world export holds no spawn of its entries near the row; the walk goes on without it", name, t.group, t.row+1))
-				continue
-			}
-			for _, p := range packs {
+			n := 0
+			for _, p := range trashcheck.ClearedPacks(world, row) {
 				if seen[p.ID] {
 					continue
 				}
 				seen[p.ID] = true
-				members := map[uint64]uint32{}
-				positions := map[uint64]dungeon.Point{}
-				for _, g := range p.Members {
-					for _, s := range world.Spawns {
-						if s.GUID == g {
-							members[g] = s.Entry
-							positions[g] = s.Pos
-							break
-						}
-					}
-				}
+				members, positions := gmMemberMaps(world, p.Members)
 				out = append(out, GMClearPack{Leg: name, Group: t.group, Step: t.row + 1, ID: p.ID,
 					Centroid: p.Centroid, Radius: p.Radius, Members: members, Positions: positions})
+				n++
+			}
+			// The row's patrols: a patroller's spawn may stand outside the row's radius, but its loop comes by the pull.
+			patrols, pw, err := gmPatrolPacks(world, row, name, t.group, t.row+1, seen)
+			if err != nil {
+				return nil, nil, err
+			}
+			warnings = append(warnings, pw...)
+			out = append(out, patrols...)
+			n += len(patrols)
+			if n == 0 {
+				warnings = append(warnings, fmt.Sprintf("gm-clear: WARN: skipped leg %s group %s (step %d): the world export holds no spawn of its entries near the row; the walk goes on without it", name, t.group, t.row+1))
 			}
 		}
 	}
 	return out, warnings, nil
+}
+
+// gmMemberMaps reads a pack's members: spawn guid -> entry and spawn point.
+func gmMemberMaps(world *worldspawn.World, guids []uint64) (map[uint64]uint32, map[uint64]dungeon.Point) {
+	members := map[uint64]uint32{}
+	positions := map[uint64]dungeon.Point{}
+	for _, g := range guids {
+		for _, s := range world.Spawns {
+			if s.GUID == g {
+				members[g] = s.Entry
+				positions[g] = s.Pos
+				break
+			}
+		}
+	}
+	return members, positions
+}
+
+// gmPatrolPacks are the patrols a pull row waits for (StepRow.PatrolEntries): a patrol of the world whose entries hold one of
+// the row's patrol entries and whose loop (or a member's spawn) comes within the row's reach of the row's point. A patrol
+// with no loop near the row is a warning, not a failure: the row's own packs are still cleared and the walk goes on.
+func gmPatrolPacks(world *worldspawn.World, row planexport.StepRow, leg, group string, step int, seen map[uint64]bool) ([]GMClearPack, []string, error) {
+	if len(row.PatrolEntries) == 0 {
+		return nil, nil, nil
+	}
+	if world == nil {
+		return nil, nil, fmt.Errorf("gm-clear: leg %s group %s (step %d) names patrol entries %v but there is no world export", leg, group, step, row.PatrolEntries)
+	}
+	reach := float64(row.Radius)
+	if reach == 0 {
+		reach = 50
+	}
+	reach += GMPatrolReachYd
+	var out []GMClearPack
+	var warnings []string
+	for _, entry := range row.PatrolEntries {
+		found := false
+		for _, p := range world.Patrols {
+			if !slices.Contains(p.Entries, entry) {
+				continue
+			}
+			if len(p.Path) == 0 {
+				continue
+			}
+			near := false
+			for _, q := range p.Path {
+				if gmDist2(q, dungeon.Point{X: row.X, Y: row.Y}) <= reach {
+					near = true
+					break
+				}
+			}
+			if !near {
+				for _, g := range p.SpawnGUIDs {
+					if s, ok := gmSpawn(world, g); ok && gmDist2(s.Pos, dungeon.Point{X: row.X, Y: row.Y}) <= reach {
+						near = true
+						break
+					}
+				}
+			}
+			if !near {
+				continue
+			}
+			found = true
+			guids := append([]uint64(nil), p.SpawnGUIDs...)
+			members, positions := gmMemberMaps(world, guids)
+			if len(members) == 0 {
+				continue
+			}
+			id := uint64(math.MaxUint64)
+			for _, g := range guids {
+				if _, ok := members[g]; ok && g < id {
+					id = g
+				}
+			}
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			out = append(out, GMClearPack{Leg: leg, Group: group, Step: step, ID: id,
+				Centroid: p.Path[0], Radius: float32(reach), Members: members, Positions: positions})
+		}
+		if !found {
+			warnings = append(warnings, fmt.Sprintf("gm-clear: WARN: patrol entry %d of leg %s group %s (step %d): no patrol loop comes within %.0f yd of the row; it is not cleared", entry, leg, group, step, reach))
+		}
+	}
+	return out, warnings, nil
+}
+
+func gmSpawn(w *worldspawn.World, guid uint64) (worldspawn.Spawn, bool) {
+	for _, s := range w.Spawns {
+		if s.GUID == guid {
+			return s, true
+		}
+	}
+	return worldspawn.Spawn{}, false
+}
+
+func gmDist2(a, b dungeon.Point) float64 {
+	dx, dy := float64(a.X-b.X), float64(a.Y-b.Y)
+	return math.Hypot(dx, dy)
 }
 
 // SpawnGUID is the DB spawn guid of a creature's world guid: its low 24 bits (ObjectGuid.h: high, entry, counter), the number the world

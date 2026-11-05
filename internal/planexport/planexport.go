@@ -173,6 +173,10 @@ type StepRow struct {
 	TimeoutS int
 	Entries  []uint32
 	Comment  string
+	// PatrolEntries are the entries of a patrol the plan attaches to this pull group (dungeon.PullGroup.Patrol): not a
+	// column of ai_dungeon_step. raid-walk's --gm-clear clears them too, because a patroller's spawn may stand outside
+	// the row's radius while its loop comes by the pull (ZG's 11352 patrol at Arlokk's north stair).
+	PatrolEntries []uint32
 }
 
 // Rows are the three tables' rows of one plan.
@@ -644,7 +648,11 @@ func (b *builder) pull(gi int, g dungeon.PullGroup) error {
 		c += "; stand pull"
 	}
 	b.at("pull", gi, 0)
-	b.add(StepRow{Kind: KindPull, X: f32(cx), Y: f32(cy), Z: f32(cz), Radius: radius, Item: uint32(g.MaxBodies), Flags: flags, Param: param, Entries: uniq(g.Entries), Comment: c})
+	var patrol []uint32
+	if g.Patrol != nil {
+		patrol = uniq(g.Patrol.Entries)
+	}
+	b.add(StepRow{Kind: KindPull, X: f32(cx), Y: f32(cy), Z: f32(cz), Radius: radius, Item: uint32(g.MaxBodies), Flags: flags, Param: param, Entries: uniq(g.Entries), Comment: c, PatrolEntries: patrol})
 	b.last, b.haveLast = dungeon.Point{X: f32(cx), Y: f32(cy), Z: f32(cz)}, true
 	if g.StandPull {
 		b.last = g.Approach[len(g.Approach)-1] // the party fights from its stand: the next move's hop is measured from there

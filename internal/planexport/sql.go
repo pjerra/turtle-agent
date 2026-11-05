@@ -390,6 +390,8 @@ func Equal(want, got []Rows) error {
 				return fmt.Errorf("plan %s step %d: entries %v, read back %v", w.Plan.Plan, j, a.Entries, b.Entries)
 			}
 			a.Entries, b.Entries = nil, nil
+			// PatrolEntries is not a column: raid-walk reads it from the built rows (the plan's patrol), never from SQL.
+			a.PatrolEntries, b.PatrolEntries = nil, nil
 			if fmt.Sprintf("%+v", a) != fmt.Sprintf("%+v", b) {
 				return fmt.Errorf("plan %s step %d: %+v, read back %+v", w.Plan.Plan, j, a, b)
 			}
