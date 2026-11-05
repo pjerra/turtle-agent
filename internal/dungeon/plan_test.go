@@ -154,23 +154,23 @@ func TestParseErrors(t *testing.T) {
 	}
 }
 
-// The example in the README is a plan the loader accepts.
+// The example in the plan format page (docs/okf/plans/plan-format.md) is a plan the loader accepts.
 func TestReadmeExampleParses(t *testing.T) {
-	b, err := os.ReadFile("../../README.md")
+	b, err := os.ReadFile("../../docs/okf/plans/plan-format.md")
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := string(b)
-	i := strings.Index(s, "## Dungeon plans")
+	i := strings.Index(s, "## Example")
 	if i < 0 {
-		t.Fatal("no Dungeon plans section")
+		t.Fatal("no Example section")
 	}
 	start := strings.Index(s[i:], "```json\n")
 	end := strings.Index(s[i+start+8:], "```")
 	if start < 0 || end < 0 {
 		t.Fatal("no json example")
 	}
-	if _, err := Parse("README.md", []byte(s[i+start+8:i+start+8+end])); err != nil {
+	if _, err := Parse("plan-format.md", []byte(s[i+start+8:i+start+8+end])); err != nil {
 		t.Fatal(err)
 	}
 }
