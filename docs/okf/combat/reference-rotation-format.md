@@ -45,8 +45,8 @@ Version 1. `rotation check` enforces all of this against the spell data. Unknown
 | `level` | Level of the first rank, checked against the spell data | Optional | `6` |
 | `talent` | `true`: the spell is a talent | `false` | `true` |
 | `rank` | Cast exactly rank N; never falls back (a missing rank means the entry cannot run) | Highest rank | `1` |
-| `target` | `fight`, `melee_mob`, `self`, or `heal` (the triage's pick this tick) | check: default follows the kind; say so only for `heal` entries | `"melee_mob"` |
-| `band` | `low`, `normal`, `high`, `move`, `emergency` | check: Normal unless set; confirm with `rotation show` | `"high"` |
+| `target` | `fight`, `melee_mob`, `self`, or `heal` (the triage's pick this tick) | `fight` | `"melee_mob"` |
+| `band` | `low`, `normal`, `high`, `move`, `emergency` | `normal` | `"high"` |
 | `threat` | Threat note (e.g. `aoe`) | Optional | `"aoe"` |
 | `harmful` | Override the spell's harmful flag | From spell data | `false` |
 | `alt` | Alternate spells | Optional | `["..."]` |

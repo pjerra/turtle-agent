@@ -25,6 +25,8 @@ status: draft
 turtle-agent plan-check --mmaps <mmaps-dir> <plan>...
 ```
 
+Put flags before the plan names: this command uses plain flag parsing, which stops at the first plan name. On/off flags (every `false` default in the reference table) take `=` when you give a value.
+
 `--mmaps` is required. The check walks entrance, `via`, `to`, pull group positions, boss, step stands, and boss from-steps.
 
 ## 2. Start from a later leg when iterating

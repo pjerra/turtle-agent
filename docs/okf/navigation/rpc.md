@@ -62,7 +62,7 @@ Draws the run so far as a top-down map (see [Watch the run live with map_snapsho
 | `floors` | `"auto"` | `auto`, `off`, or heights like `"-30,-10"`. | `"off"` |
 | `background` | `true` | `false` leaves the navmesh out (smaller, faster). | `false` |
 | `html` | `false` | Also return the single-file replay. | `true` |
-| `pad` | `25` | Yards of margin round what the run covers; 25 or less means 25. | `40` |
+| `pad` | `25` | Yards of margin round what the run covers; 0 or less means 25. | `40` |
 
 Answer: `map`, `floor`, `floors` (their names), `seconds`, `members`, `creatures`, `events`, `background` (whether the navmesh is drawn), `notes`, `svg` (one floor), optional `html`.
 
@@ -72,4 +72,4 @@ Checks a plan on the navmesh from inside the run (the offline `plan-check` comma
 
 ## Follow the lead bot
 
-`follow_start` walks the agent behind the run leader's tank along the plan's route. Params: `plan` (required), `lead` (the lead bot's name; required, never yourself), `near` (default 8.0, 3–30 yd), `far` (default 15.0, near+2 to 45), `assist` (default from the plan), `lost_s` (default 30, 10–120). `follow_status` and `follow_stop` take no params; the status answers `running`, `state`, `plan`, `lead`, positions, `walks`, `walk_fails`, `max_lead_yd`, `stopped_reason` and notes.
+`follow_start` walks the agent behind the run leader's tank along the plan's route. Params: `plan` (required), `lead` (the lead bot's name; required, never yourself), `near` (default 8.0, 3–30 yd), `far` (default 15.0, near+2 to 45), `assist` (default false), `lost_s` (default 30, 10–120). `follow_status` and `follow_stop` take no params; the status answers `running`, `state`, `plan`, `lead`, positions, `walks`, `walk_fails`, `max_lead_yd`, `stopped_reason` and notes.

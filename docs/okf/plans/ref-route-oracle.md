@@ -15,13 +15,13 @@ status: draft
 
 # route-oracle
 
-Usage: `turtle-agent route-oracle --plans DIR --mmaps DIR --out DIR [--mode walk|bosses] [--objectives plan|bosses] [--plan NAME]...`[^route-oracle].
+Usage: `turtle-agent route-oracle --plans DIR --mmaps DIR --out DIR [--mode walk|bosses] [--objectives plan|bosses] [--plan NAME]...`[^route-oracle]. Flags come before any other word: this command uses plain flag parsing, which stops at the first non-flag. On/off flags: none on this page.
 
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--plans` | `dungeons` | Folder with the plan files. Example: `--plans dungeons`. |
 | `--mmaps` | _(required)_ | Folder with the server's mmaps. |
-| `--out` | _(required)_ | Folder for `<plan>.txt` and `<plan>.json` (`<plan>-bosses.*` in bosses mode). |
+| `--out` | _(required)_ | Folder for `<plan>.txt` and `<plan>.json` (`<plan>-bosses.*` in bosses mode, `<plan>-bosses-only.*` with `--objectives bosses`). |
 | `--objectives` | `plan` | Bosses mode only. `plan`: each leg's own objective (its boss, else its `to` point). `bosses`: only the chain entrance to boss 1 to boss 2 (a leg without a boss folds into the next). |
 | `--mode` | `walk` | `walk`: score the plan's stored hops on the navmesh. `bosses`: plan entrance to each boss live, with no hand points. |
 | `--plan` | _(repeatable)_ | A plan name; repeatable (default: `wailing_caverns,ragefire_chasm,uldaman,zulfarrak,deadmines`). Example: `--plan zulfarrak --plan uldaman`. |

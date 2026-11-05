@@ -22,7 +22,7 @@ Scenarios drive the same RPC the agent pages document ([the agent and its RPC](/
 
 ## 1. Write the file
 
-Strict JSON, no comments. The top level holds `scenario` (lower-case name), `sessions` (each `{rpc, token_file}`; RPC must be loopback), and `steps`. Each step has `do` plus its fields:
+Strict JSON, no comments. The top level holds `scenario` (lower-case name), `sessions` (each `{rpc, token_file}`; RPC must be loopback), `steps`, and these optional keys: `description` (printed as a `#` header line), `db` (`{host, container}` for the read-only `check_db` counts), `vars` (overridden by `--var`), `addon_prefix` (default `prefix` for addon-kind matchers), `settle_s` (default 1; 0–60), `timeout_s` (default 10; 1–3600), `on_fail` (`continue` or `stop`, default `continue`), `max_minutes` (default 30; 1–360), `record` (matchers saved to the transcript), `normalise` (at most 50 `match`/`replace` rules rewriting each norm line), and `finally` (at most 50 action steps: `section`, `mark`, `gm`, `bot`, `addon_send`, `rpc`, `sleep`). Each step has `do` plus its fields, and every step takes `note`; checks (`expect`, `expect_not`, `check_db`, `check_rpc`) also take `name` and `on_fail`:
 
 | `do` | Does |
 | --- | --- |
@@ -32,10 +32,12 @@ Strict JSON, no comments. The top level holds `scenario` (lower-case name), `ses
 | `bot` | a `.bot` command without `.bot` (`command`) |
 | `addon_send` | an addon message (`text`, `channel`, `prefix`, `to`) |
 | `rpc` | any agent method (`method`, `params`, `save`, `record_result`, `ignore_error`) |
-| `sleep` | waits `seconds` (0–3600) |
-| `wait` / `expect` / `expect_not` | match event lines (`session`, `kind`, `prefix`, `channel`, `source`, `match`, `capture`, `timeout_s`) |
-| `check_db` | row counts or item counts over ssh (`table`, `where`, `rows`, `op`; or `item`, `count`) |
-| `check_rpc` | `equals`, `match` or `len` over a result path |
+| `sleep` | waits `seconds` (1–3600) |
+| `wait` / `expect` / `expect_not` | match event lines (`session`, `kind`, `prefix`, `channel`, `source`, `match`, `capture`, `timeout_s`); `expect_not` needs `within_s` (0–600) instead of `timeout_s` (1–3600) |
+| `check_db` | row counts or item counts over ssh (`table`, `where`, `rows`, `op`; or `item`, `count`); optional `within_s` (0–600) |
+| `check_rpc` | `equals`, `match` or `len` over a result path; optional `within_s` (0–600) and `timeout_s` (1–600) |
+
+`gm`, `bot`, `addon_send` and `rpc` steps also take `settle_s` (0–60): the wait after the action before the log is drained, defaulting to the top-level `settle_s`.
 
 Matching is ordered per session: each `expect` sees only later lines, while `expect_not` scans everything since the window. A failed check is FAIL (`on_fail` `continue` or `stop`); anything unevaluatable — an RPC or DB error, an unset var, a denied GM command, the deadline — is ERROR and aborts. World-changing GM commands (AGENTS.md) are refused at load and at run time. Variables are `${name}`: file `vars` (overridden by `--var`), `${S.character}` built-ins, `capture` groups and `save` paths; `$$` is a literal `$`.
 
@@ -65,7 +67,7 @@ Every `run` flag and its default:
 | `--var` | none, repeatable | override a file var (the name must exist) |
 | `--session` | none, repeatable | override a session: `NAME=ADDR[@TOKENFILE]` (the name must exist; the address is re-checked for loopback) |
 
-The run writes `raw.txt` (seq, times, expanded text), `norm.txt` (templates, no timings, DB counts kept), `transcript.jsonl` (one object per line) and `result.json`. Exit 0 when every check passed, 14 when a check failed, 15 on abort or error, 2 on usage.
+The run writes `raw.txt` (seq, times, expanded text), `norm.txt` (templates, no timings, DB counts kept), `transcript.jsonl` (one object per line) and `result.json`. Exit 0 when every check passed, 14 when a check failed, 15 on abort or error, 2 on usage. `scenario` uses plain flag parsing: put flags before the file name. On/off flags take `=` (`--force=true`); a space-separated value is read as the file instead.
 
 ## 4. Re-apply changed normaliser rules
 

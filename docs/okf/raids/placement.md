@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: How placement works
-description: What --place does inside the instance: the staged start, the corridor clear, the quiet check and the four tries.
+description: "What --place does inside the instance: the staged start, the corridor clear, the quiet check and the four tries."
 resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/place.go
 tags: [raids, placement]
 sources:

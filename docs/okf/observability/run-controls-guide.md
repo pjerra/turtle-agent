@@ -33,9 +33,9 @@ Every flag and its default:
 
 | Flag | Default | What it does |
 | --- | --- | --- |
-| `--control` | off | turns run controls on |
+| `--control` | off | turns run controls on (on/off: takes `=`, e.g. `--control=true`) |
 | `--control-tokens` | `~/.config/turtle-agent/dashboard-control-tokens` | `label token` lines, mode 0600; the label is the who in the control log |
-| `--control-trust-local` | off | controls from this machine need no token typed |
+| `--control-trust-local` | off | controls from this machine need no token typed (on/off: takes `=`, e.g. `--control-trust-local=true`) |
 | `--control-trust-label` | `owner` | the token label trusted controls are made as |
 | `--control-log` | `~/.local/state/turtle-agent/dashboard-control.jsonl` | every control appends a request and a result line; the folder is made 0700, the file 0600 |
 

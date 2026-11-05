@@ -25,6 +25,8 @@ status: draft
 turtle-agent plan-probe --mmaps <mmaps-dir> <plan>
 ```
 
+Put flags before the plan name here too (plain flag parsing). On/off flags (`--json`) take `=` when you give a value.
+
 `--mmaps` is required. `--dir` (default `dungeons`) changes the plan folder.
 
 ## 2. Probe the deployed rows instead

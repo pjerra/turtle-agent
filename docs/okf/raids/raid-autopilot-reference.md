@@ -39,7 +39,7 @@ Usage: `turtle-agent raid-autopilot [--foreground] [--binary PATH] [--poll D] [-
 ```text
 # id   server    slot holder  goal         -- raid-walk args...
 <id-a> <server>  1    <holder> full        -- <plan> --dir <dir> --hires <file> --sql <file>
-<id-b> <server>  2    <holder> boss:<entry> -- <plan> --dir <dir> --hires <file> --sql <file> --from "step <n>"
+<id-b> <server>  2    <holder> boss:<entry> -- <plan> --dir <dir> --hires <file> --sql <file> --from step <n>
 ```
 
 - Blank lines and `#` lines are skipped. The header is exactly `id server slot holder goal`, then `--`, then the raid-walk args starting with the plan.
@@ -47,7 +47,7 @@ Usage: `turtle-agent raid-autopilot [--foreground] [--binary PATH] [--poll D] [-
 - `--sql FILE` is required on every line: every goal may be re-placed. `--from` in a line is the goal's own start.
 - Managed and dropped if present: `--server`, `--slot`, `--holder`, `--until`, `--from`, `--place`, `--reuse-instance`, `--out`.
 - Refused: slot 3, `--instance-cap-unsafe`, `--inject`, two ids on the same server and slot, a `--gm-instance-data` value with nothing after it.
-- An id may repeat: its lines walk in file order, and a met goal advances to the next line.
+- A line holds bare words only, never quotes: the line is split on whitespace with no quote handling, so write `--from step <n>` (two words) and `--gm-instance-data <leg>:<a> <b>[;<a> <b>...]` as bare words (for example `--gm-instance-data hakkar:1 3;6 3;0 0`); the words after that flag are joined back into one value.
 
 ## STOP and YIELD
 
@@ -69,4 +69,4 @@ Six consecutive hire-pool waits (about 30 minutes: another raid of the server ho
 
 ## Exit codes
 
-0: every target's goals are met — or a clean YIELD, or a finish with only done, stopped or refused ids (no escalated ones). 2: bad flags, targets or startup (including a second start on the same walk dir, which the lock refuses). 31: at least one id was escalated for a person. The walks' own exits drive the restart decision: 0 any end, 2 refused arguments (escalate, no retry), 29 placement failed every try (escalate, no fresh-instance retry), 15 lease held (third consecutive escalates), 26 cap wait (re-place later), anything else a backoff restart of 20s, 1m, 2m, 5m then 10m per consecutive attempt that reached no further step.
+0: every target's goals are met — or a clean YIELD, or a finish with only done, stopped or refused ids (no escalated ones). 2: bad flags, targets or startup (including a second start on the same walk dir, which the lock refuses). 31: at least one id was escalated for a person. The walks' own exits drive the restart decision: 0 any end, 2 refused arguments (escalate, no retry), 29 placement failed every try (escalate, no fresh-instance retry), 15 lease held (third consecutive escalates), 26 cap wait (restarts later after the cap wait, no backoff), anything else a backoff restart of 20s, 1m, 2m, 5m then 10m per consecutive attempt that reached no further step.

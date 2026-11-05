@@ -51,16 +51,16 @@ Serves the live page. Read-only unless `--edit` or `--control` is given. Exits 2
 | `--embed-from` | none | extra `http://host:port` origins that may frame the page |
 | `--config-dir` | `~/.config/turtle-agent` | settings files and `rpc-<port>.token` files |
 | `--mmaps-dir` | none | navmesh folder of the server the plans run on; enables the real-route view, required with `--edit` |
-| `--edit` | off | turn on the route editor (`POST /api/edit/<plan>`) |
+| `--edit` | off | turn on the route editor (`POST /api/edit/<plan>`) (on/off: takes `=`, e.g. `--edit=true`) |
 | `--edit-dir` | `~/turtle-agent-route-edits` | where versions go (`<plan>/vNNNN.json`, `.meta.json`, `.diff`) |
 | `--edit-source` | the first `--plans-dir` | whose plan files an edit starts from |
 | `--edit-tokens` | `~/.config/turtle-agent/route-edit-tokens` | `label token` lines, mode 0600 |
 | `--edit-allow-default-dir` | none | settings files with an `rpc` but no `dungeons_dir` vouched as not the edits folder |
-| `--edit-trust-local` | off | saves from this machine need no token typed (needs `--edit`) |
+| `--edit-trust-local` | off | saves from this machine need no token typed (needs `--edit`) (on/off: takes `=`, e.g. `--edit-trust-local=true`) |
 | `--edit-trust-label` | `owner` | token label trusted saves are made as |
-| `--control` | off | turn on run controls (`POST /api/control/<id>/run`) |
+| `--control` | off | turn on run controls (`POST /api/control/<id>/run`) (on/off: takes `=`, e.g. `--control=true`) |
 | `--control-tokens` | `~/.config/turtle-agent/dashboard-control-tokens` | `label token` lines, mode 0600; never the editor's file |
-| `--control-trust-local` | off | controls from this machine need no token typed (needs `--control`) |
+| `--control-trust-local` | off | controls from this machine need no token typed (needs `--control`) (on/off: takes `=`, e.g. `--control-trust-local=true`) |
 | `--control-trust-label` | `owner` | token label trusted controls are made as |
 | `--control-log` | `~/.local/state/turtle-agent/dashboard-control.jsonl` | every control appends a request and a result line |
 
@@ -79,9 +79,9 @@ Play: `turtle-agent dashboard-replay <recording-dir|file.jsonl> [--to host:port]
 | `--to` | `127.0.0.1:9195` | the daemon's UDP address |
 | `--speed` | `1` | play this many times faster than recorded; must be above 0 |
 | `--max-gap` | `10s` | longest pause between two datagrams |
-| `--loop` | off | start over with a newer session after the last datagram |
-| `--dry-run` | off | print the schedule; send nothing |
-| `--i-know` | off | allow a non-loopback target (a test dashboard) |
+| `--loop` | off | start over with a newer session after the last datagram (on/off: takes `=`, e.g. `--loop=true`) |
+| `--dry-run` | off | print the schedule; send nothing (on/off: takes `=`, e.g. `--dry-run=true`) |
+| `--i-know` | off | allow a non-loopback target (a test dashboard) (on/off: takes `=`, e.g. `--i-know=true`) |
 
 Convert: `turtle-agent dashboard-replay convert <api-dump-dir> [--out <dir>]`; `--out` defaults to the dump folder itself and writes `<dir>/replay.jsonl` (mode 0600).
 
@@ -120,7 +120,7 @@ turtle-agent decisions pull --dash-url <server> --dash-pass-file <walk-dir>/pass
 | `--from`, `--to` | none | only events in this RFC 3339 window |
 | `--kinds` | none | only these event kinds, comma separated |
 | `--out` | none | write to this file (mode 0600) instead of stdout; needs `--force` when it exists |
-| `--force` | off | let `--out` replace an existing file (never a capture) |
+| `--force` | off | let `--out` replace an existing file (never a capture) (on/off: takes `=`, e.g. `--force=true`) |
 
 ```sh
 turtle-agent capture events --kinds chat,spell_go --out <walk-dir>/events.jsonl <walk-dir>/run.twcap
@@ -128,12 +128,12 @@ turtle-agent capture events --kinds chat,spell_go --out <walk-dir>/events.jsonl 
 
 ## `turtle-agent trace-score`
 
-Scores trace files with the current checks. Exit 11 when any check failed, 0 otherwise, 2 on usage.
+Scores trace files with the current checks. Exit 11 when any check failed, 0 otherwise, 2 on usage. Put flags before the file names: this command uses plain flag parsing.
 
 | Flag | Default | What it does |
 | --- | --- | --- |
-| `--json` | off | print the verdicts as JSON, one object per trace |
-| `--summary` | off | write `<run_id>.summary.json` beside each trace |
+| `--json` | off | print the verdicts as JSON, one object per trace (on/off: takes `=`, e.g. `--json=true`) |
+| `--summary` | off | write `<run_id>.summary.json` beside each trace (on/off: takes `=`, e.g. `--summary=true`) |
 | `--set` | none, repeatable | change a threshold: `check=value` |
 
 ```sh
@@ -142,14 +142,14 @@ turtle-agent trace-score --summary --set rest_share=30 <walk-dir>/traces/live-1.
 
 ## `turtle-agent fight-score`
 
-Scores finished fights like the dashboard fight debugger. Reads files only. Exit 0 whatever the warnings say; 2 on usage.
+Scores finished fights like the dashboard fight debugger. Reads files only. Exit 0 whatever the warnings say; 2 on usage. Put flags before the file names: this command uses plain flag parsing.
 
 | Flag | Default | What it does |
 | --- | --- | --- |
-| `--json` | off | print the reading as JSON |
+| `--json` | off | print the reading as JSON (on/off: takes `=`, e.g. `--json=true`) |
 | `--mt` | the first tank in the fight | main tank name |
 | `--ot` | the other tanks | off-tank names, comma separated |
-| `--set` | none, repeatable | change a threshold: `check=value` (`spell_oracle`) |
+| `--set` | none, repeatable | change a threshold: `check=value`; takes any known trace-score threshold id, but only `spell_oracle` changes a fight score; an unknown id is refused (`--set: no threshold for check "x" (have ...)`) |
 
 ```sh
 turtle-agent fight-score --mt <tank> --ot <ot1>,<ot2> <walk-dir>/fight.json
@@ -165,7 +165,7 @@ Checks where staging would put the party for one leg (index or name). Exit 0 whe
 | `--mmaps` | none, required | folder with the server's mmaps |
 | `--cleared-through` | none | legs 0..this one count as cleared |
 | `--server-steps` | `0` | the step count `.bot run list` shows for the plan |
-| `--json` | off | print the result as JSON |
+| `--json` | off | print the result as JSON (on/off: takes `=`, e.g. `--json=true`) |
 
 ```sh
 turtle-agent stage-check --mmaps <walk-dir>/mmaps uldaman keystone
@@ -173,7 +173,7 @@ turtle-agent stage-check --mmaps <walk-dir>/mmaps uldaman keystone
 
 ## `turtle-agent trash-check`
 
-Reports what one walk of a plan wakes. Reads files only. Exit 0 normally, 21 with a `--fail-on` match, 1 when the navmesh is unavailable, 2 on usage.
+Reports what one walk of a plan wakes. Reads files only. Exit 0 normally, 21 with a `--fail-on` match, 2 on usage (including when the navmesh cannot answer: the check refuses instead of silently walking straight lines).
 
 | Flag | Default | What it does |
 | --- | --- | --- |
@@ -187,7 +187,7 @@ Reports what one walk of a plan wakes. Reads files only. Exit 0 normally, 21 wit
 | `--spread` | `0` (10 for a raid plan, else 3) | how far the party spreads from the route, in yards |
 | `--aggro-rate` | `1` | scales every aggro radius |
 | `--assist-yd` | `10` | the family assist hop's radius, in yards |
-| `--json` | off | print the report as JSON |
+| `--json` | off | print the report as JSON (on/off: takes `=`, e.g. `--json=true`) |
 | `--out` | none | write `trash-<plan>.json` and `trash-<plan>.txt` there |
 | `--dash-out` | none | write the patrols as the dashboard's patrol data file |
 | `--fail-on` | none | exit 21 when a finding of class `danger`, `patrol` or `any` exists |
@@ -198,6 +198,8 @@ turtle-agent trash-check --sql <walk-dir>/mig.sql --plan uldaman --mmaps <walk-d
 
 ## `turtle-agent scenario check|run|norm`
 
+`scenario` uses plain flag parsing: put flags before the file name. On/off flags take `=` (`--force=true`); a space-separated value is read as the file instead.
+
 - `scenario check [--var NAME=VALUE]... <file>`: load the file and print each step. Exit 2 on any load error.
 - `scenario run [--out DIR] [--force] [--quiet] [--var NAME=VALUE]... [--session NAME=ADDR[@TOKENFILE]]... <file>`: run it. Exit 0 when every check passed, 14 when a check failed, 15 on abort or error, 2 on usage.
 - `scenario norm <file> <dir>`: re-apply the file's `normalise` rules to the stored transcript and rewrite `norm.txt`.
@@ -205,8 +207,8 @@ turtle-agent trash-check --sql <walk-dir>/mig.sql --plan uldaman --mmaps <walk-d
 | Flag (`run`) | Default | What it does |
 | --- | --- | --- |
 | `--out` | `scenario-out/<scenario>-<UTC yyyymmddThhmmss>` | output directory; a non-empty one needs `--force` |
-| `--force` | off | write into a non-empty `--out` |
-| `--quiet` | off | print only PASS/FAIL/ERROR/SKIP lines and the summary |
+| `--force` | off | write into a non-empty `--out` (on/off: takes `=`, e.g. `--force=true`) |
+| `--quiet` | off | print only PASS/FAIL/ERROR/SKIP lines and the summary (on/off: takes `=`, e.g. `--quiet=true`) |
 | `--var` | none, repeatable | override a file var (the name must exist) |
 | `--session` | none, repeatable | override a session: `NAME=ADDR[@TOKENFILE]` (the name must exist; loopback is re-checked) |
 
@@ -227,8 +229,8 @@ Draws a run as a top-down SVG map. Needs `--capture` and/or `--botwatch`, else e
 | `--members` | none | with `--botwatch`, only these bots, comma separated |
 | `--plan` | none | a dungeon plan drawn over the run |
 | `--out` | `map.svg` | the SVG to write; several floors write `NAME-f1.svg`, ... |
-| `--html` | off | also write the single-file HTML replay |
-| `--force` | off | let `--out` replace an existing file (never a capture) |
+| `--html` | off | also write the single-file HTML replay (on/off: takes `=`, e.g. `--html=true`) |
+| `--force` | off | let `--out` replace an existing file (never a capture) (on/off: takes `=`, e.g. `--force=true`) |
 | `--config` | the settings file | its `mmaps_dir` gives the navmesh background |
 | `--mmaps` | none | folder with the server's mmaps (overrides `mmaps_dir`) |
 | `--map` | `-1` | the map to draw (default: the one with most positions) |
@@ -236,7 +238,7 @@ Draws a run as a top-down SVG map. Needs `--capture` and/or `--botwatch`, else e
 | `--from`, `--to` | none | only what happened in this RFC 3339 window, both inclusive |
 | `--pad` | `25` | yards of margin round what the run covers |
 | `--floors` | `auto` | split stacked floors from the navmesh, `off`, or cut heights |
-| `--background` | on | draw the navmesh floor (off: white, smaller and quicker) |
+| `--background` | on | draw the navmesh floor (off: white, smaller and quicker; on/off: takes `=`, e.g. `--background=false`) |
 | `--width` | `960` | the longest side of the map in pixels |
 
 ```sh

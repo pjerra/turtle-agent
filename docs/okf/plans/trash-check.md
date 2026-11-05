@@ -25,6 +25,8 @@ status: draft
 turtle-agent trash-check <plan>
 ```
 
+Put flags before the plan name: this command uses plain flag parsing, which stops at the first non-flag word, so a flag after the plan name is never read.
+
 By default it rebuilds the rows from the plan file and walks straight lines between them. Pass `--mmaps <mmaps-dir>` to walk the server's own path instead.
 
 ## 2. Check the deployed rows

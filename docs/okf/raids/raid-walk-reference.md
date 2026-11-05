@@ -15,13 +15,13 @@ status: draft
 
 # `raid-walk` flags
 
-Usage: `turtle-agent raid-walk <plan> [--server <server>] [--slot N] ...` or `turtle-agent raid-walk report <dir> ...`. A leading plan moves past the flags before parsing, so flags-first callers parse as before.[^walk-cmd]
+Usage: `turtle-agent raid-walk <plan> [--server <server>] [--slot N] ...` or `turtle-agent raid-walk report <dir> ...`. A leading plan moves past the flags before parsing, so flags-first callers parse as before. On/off flags (`--place`, `--decisions`, `--allow-split-ledger`) take `=`: `--flag=off` turns one off, and a bare flag means on.[^walk-cmd]
 
 ## Identity and inputs
 
 | Flag | Default | What it does | Example |
 |---|---|---|---|
-| `--server` | the agent default | The slot server. | `--server <server>` |
+| `--server` | none: always pass it | The slot server. Pass `--server <server>` on every run: the built-in default is a test server name, so always set it. | `--server <server>` |
 | `--slot` | any free slot | The slot id. `3` is refused before anything (owner rule, exit 15). | `--slot 2` |
 | `--holder` | `raid-walk-<plan>` | The lease holder (1-64 letters, digits, `.` `_` `-`). Two equal holders in the pair form are refused. | `--holder <holder>` |
 | `--dir` | `dungeons` | The folder of plan files; the plan JSON is `<dir>/<plan>.json`. | `--dir <plans-dir>` |
@@ -29,7 +29,7 @@ Usage: `turtle-agent raid-walk <plan> [--server <server>] [--slot N] ...` or `tu
 | `--out` | `./raid-walk-<plan>-<stamp>` | The output dir, refused if it exists. Mode 0700, files 0600. | `--out <walk-dir>` |
 | `--binary` | this executable | The agent binary slot setup copies. | `--binary ./turtle-agent` |
 | `--mmaps` | none | The navmesh dir for slot setup. | `--mmaps <nav-dir>` |
-| `--slots` | slots file | The slots file. `--allow-split-ledger on` permits a file outside the default dir (test sandboxes only). | `--slots <file>` |
+| `--slots` | slots file | The slots file. `--allow-split-ledger=on` permits a file outside the default dir (test sandboxes only). | `--slots <file>` |
 
 ## Where the run goes
 
@@ -92,7 +92,7 @@ Usage: `turtle-agent raid-walk <plan> [--server <server>] [--slot N] ...` or `tu
 | `--dash-url` | none (or `TBDASH_URL`) | The dashboard URL. Without a URL and a password file the capture is off. | `--dash-url <url>` |
 | `--dash-user` | `TADASH` (or `TBDASH_USER`) | The dashboard login. | `--dash-user <user>` |
 | `--dash-pass-file` | none (or `TBDASH_PASS_FILE`) | The dashboard password file (0600, not a symlink; never printed). A failed login is a warning and the walk goes on. | `--dash-pass-file <file>` |
-| `--decisions` | on | Pull decision captures after teardown (`on` or `off`). | `--decisions off` |
+| `--decisions` | on | Pull decision captures after teardown (`on` or `off`). | `--decisions=off` |
 | `--decisions-max-mib` | `1024` | The decisions pull budget in MiB. | `--decisions-max-mib 512` |
 
 ## Other

@@ -23,7 +23,7 @@ One slot per worker. The slot table names each server's test characters; a lease
 
 ## Lease identity
 
-Every acquisition mints an unguessable 128-bit lease identity (32 hex characters). `renew`, `release` and `slot setup` must present the exact id: a holder name alone is never enough. Print it down when you acquire; `lease list` does not show it.
+Every acquisition mints an unguessable 128-bit lease identity (32 hex characters). `renew` and `release` must present the exact id with `--lease-id`: a holder name alone is never enough. `slot setup` takes no id; it is checked against the holder. Print the id down when you acquire; `lease list` does not show it.
 
 A lease records the server, slot, holder, lease id, acquire time, expiry, and the worker's dir once `slot setup` claims it. The default lease is 180 minutes (1-720). Renewing extends the expiry.
 

@@ -53,7 +53,7 @@ A `tb-patrols` file (format `tb-patrols`, version 1) holds the map, the area, th
 Feed it to the checks:
 
 ```sh
-turtle-agent trash-check deadmines --mmaps <walk-dir> --patrols /tmp/patrols-36.json
+turtle-agent trash-check --mmaps <walk-dir> --patrols /tmp/patrols-36.json deadmines
 ```
 
-A recording replaces the world-export patrol it matches and is otherwise added.
+A recording replaces the world-export patrol it matches and is otherwise added. Put every flag before the plan name: `trash-check` stops reading flags at the first positional argument, so a flag after the plan name is never applied.

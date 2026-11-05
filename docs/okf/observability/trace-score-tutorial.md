@@ -17,7 +17,7 @@ status: draft
 
 # Check a run with trace-score
 
-A dungeon run scores its own trace when it ends. This tutorial re-scores one by hand: run the scorer, tune a threshold, and write the summary file back beside the trace.
+A dungeon run scores its own trace when it ends. This tutorial re-scores one by hand: run the scorer, tune a threshold, and write the summary file back beside the trace. Put flags before the file names: this command uses plain flag parsing.
 
 ## 1. Score the trace
 

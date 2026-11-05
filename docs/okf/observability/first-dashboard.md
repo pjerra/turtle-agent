@@ -43,7 +43,7 @@ You see one card per agent: character name, level, map and position, and, while 
 
 ## 4. Read the run card
 
-Each card shows the run's state at the last poll (every 1.5 s by default): orders the commander sent, the party list with health and power, recent events, and the trail of where the party walked. A stall shows yellow after 2 minutes and red after 5.
+Each card shows the run's state at the last fetch: the server samples each agent every 1.5 s, and the page fetches the state every 2 s by default. What you read is at most one page interval old: orders the commander sent, the party list with health and power, recent events, and the trail of where the party walked. A stall shows yellow after 2 minutes and red after 5.
 
 ## 5. Change the refresh rate
 

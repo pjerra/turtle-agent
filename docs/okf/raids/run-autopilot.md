@@ -26,7 +26,7 @@ One goal per line. Blank lines and `#` lines are skipped:
 ```text
 # id   server    slot holder  goal         -- raid-walk args...
 <id-a> <server>  1    <holder> full        -- <plan> --dir <dir> --hires <file> --sql <file>
-<id-b> <server>  2    <holder> boss:<entry> -- <plan> --dir <dir> --hires <file> --sql <file> --from "step <n>"
+<id-b> <server>  2    <holder> boss:<entry> -- <plan> --dir <dir> --hires <file> --sql <file> --from step <n>
 <id-c> <server>  5    <holder> leg:<leg>    -- <plan> --dir <dir> --hires <file> --sql <file>
 ```
 
@@ -51,7 +51,7 @@ The walk dir holds the supervisor's state:
 - `autopilot-state.json` — the checkpoint: per id its current goal, goals met, last reached step, the reuse/fresh decision, attempt number, child pid and out dir. Missing at start means fresh; a file that does not parse refuses the start with exit 2.
 - `<id>-<n>.out` — the walk's own stdout/stderr. `autopilot.log` is the detached supervisor's log.
 
-On any end (any exit code, a used-up restart budget, or a stall) the autopilot stops the walk, tears the slot down, picks a new `--out` (`<walk-dir>/<id>-<n>`) and re-places: the same instance first (`--place --from "step N" --reuse-instance`), a fresh instance only when that placement failed. Exit 2 (bad arguments) and exit 29 (placement failed every try in the same instance) stop that id with an `ESCALATE` line and no retry; exit 26 keeps its cap wait and re-places later.
+On any end (any exit code, a used-up restart budget, or a stall) the autopilot stops the walk, tears the slot down, picks a new `--out` (`<walk-dir>/<id>-<n>`) and re-places: the same instance first (`--place --from "step N" --reuse-instance`), a fresh instance only when that placement failed. Exit 2 (bad arguments) and exit 29 (placement failed every try in the same instance) stop that id with an `ESCALATE` line and no retry; on an exit 26 the autopilot restarts later after the cap wait, with no backoff.
 
 ## 4. Stop one raid
 

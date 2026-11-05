@@ -31,4 +31,4 @@ Some steps need the agent's own character: a gossip by `agent`, a `wait_for` on 
 
 - `companions_loot: false` has no run leader column: export of such a leg is refused unless you pass `--drop-companions-loot` (then the bots' looting must be turned off in the run setup instead).
 - `skip_export` legs stay out unless named with `--with-legs`; `optional` legs stay out unless named with `--with-optional` (and their item is yours to hand to the lead bot).
-- A `gm_cross` waypoint has no run leader step and is refused (check: `--gm-cross-direct` force-exports it as a plain straight step).
+- A `gm_cross` waypoint has no run leader step and is refused. `--gm-cross-direct` exports it as a `move_direct` (a straight walk to the landing point) instead, only for a gap that is a drop the line crosses; the row's comment and a warning say it was never tried live.

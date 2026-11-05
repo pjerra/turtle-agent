@@ -51,11 +51,11 @@ Every combat call, what it takes, what it defaults to, and one example. All call
 
 | Method | Params | Defaults | Example |
 |---|---|---|---|
-| `brain_start` | `strategies` (list, required), `role` (string, optional), `tank` (string, optional), `no_move` (bool, optional), `rotation` (string, optional), `run_id` (string, optional), `trace` (bool, optional), `trace_meta` (object, optional) | Role from the strategies; generated run id; trace on | `{"strategies": ["frost_mage"], "rotation": "my_frost"}` |
+| `brain_start` | `strategies` (list, required), `role` (string, optional), `tank` (string, optional), `no_move` (bool, optional), `rotation` (string, optional), `run_id` (string, optional), `trace` (bool, optional), `trace_meta` (string-to-string object, optional, at most 16 entries) | Role from the strategies; generated run id; trace on | `{"strategies": ["frost_mage"], "rotation": "my_frost"}` |
 | `brain_stop` | None | — | Stops the brain |
 | `brain_status` | None | — | Always answers, even mid-run |
 
-`role` is `dps`, `tank` or `healer`. `rotation` names a built-in or `rotations_dir` file. `run_id` allows letters, digits, dot, underscore and dash, at most 64 characters. Refused while a dungeon run owns the brain, except `brain_status`. Full walkthrough in [Run the brain](/combat/guide-run-brain.md).
+`role` is `dps`, `tank` or `healer`. `rotation` names a built-in or `rotations_dir` file. `run_id` allows letters, digits, dot, underscore and dash, at most 64 characters. `trace_meta` is an object of string to string with at most 16 entries; keys and values need 1–200 characters each. Refused while a dungeon run owns the brain, except `brain_status`. Full walkthrough in [Run the brain](/combat/guide-run-brain.md).
 
 ## The addon host
 

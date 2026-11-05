@@ -26,7 +26,7 @@ Usage: `turtle-agent raid-suite (--suite FILE | --dir DIR) --history DIR [--serv
 | `--suite` | none | The `tb-raid-suite` v1 file: its raids, in order. Exactly one of `--suite` and `--dir` is required. | `--suite <file>` |
 | `--dir` | none | A folder of plan files: every raid plan in it, by plan name. | `--dir <plans-dir>` |
 | `--history` | none (required) | The history dir: each walk lives at `<history>/<plan>/<stamp>/`. | `--history <dir>` |
-| `--server` | the agent default | The slot server. | `--server <server>` |
+| `--server` | none: always pass it | The slot server. Pass `--server <server>` on every run: the built-in default is a test server name, so always set it. | `--server <server>` |
 | `--slot` | any free slot | The slot id; `3` is refused before anything (exit 15). `--slot A,B` is refused: the suite walks one raid at a time. | `--slot 2` |
 | `--only` | every raid | Plan names to walk, comma separated. An unknown name is a usage error. | `--only <plan-a>,<plan-b>` |
 | `--speed` | `1.0` | The run's test speed, 1.0 to 3.0. | `--speed 3.0` |

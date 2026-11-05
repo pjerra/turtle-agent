@@ -17,7 +17,7 @@ status: draft
 
 # Run the brain
 
-The brain is off until you start it. You give it strategies (or nothing, for the class default), a role, and optionally a rotation file that replaces the class strategy.
+The brain is off until you start it. You name at least one strategy and optionally a role, plus a rotation file that replaces the class strategy when you play data instead of Go.
 
 ## 1. Check the character is in the world
 

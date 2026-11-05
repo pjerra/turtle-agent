@@ -80,4 +80,15 @@ Commander runs only. `tune_set` takes `key` (required) and `value` (a number, or
 
 ## lfg_join, lfg_role_check_answer, lfg_proposal_answer, lfg_leave, lfg_status, lfg_auto, lfg_listings, lfg_listing_role
 
-The group-finder calls; see [Find a group](/dungeons/lft.md). `wait_ms` defaults to 5000 everywhere. `lfg_auto`'s `delay_ms` defaults to 1500 (0–30000); `accept` omitted leaves offers alone; `off` stops the answerer. Every call answers `since`, `sent`, and the folded `state` (`lfg_auto` adds `auto`).
+The group-finder calls; see [Find a group](/dungeons/lft.md). `roles` letters are `t` (tank), `h` (healer), `d` (damage); a role your class cannot play is refused unless `force` is true. `wait_ms` defaults to 5000 everywhere. Every call answers `since`, `sent`, and the folded `state`.
+
+| Call | Params | Example |
+|---|---|---|
+| `lfg_join` | `instances*` (1–10 lowercase names), `roles*`, `force?`, `wait_ms?` | `{"instances":["ragefirechasm"],"roles":"d"}` |
+| `lfg_role_check_answer` | `roles*`, `force?`, `wait_ms?` | `{"roles":"d"}` |
+| `lfg_proposal_answer` | `accept*` (`false` leaves the queue), `force?`, `wait_ms?` | `{"accept":true}` |
+| `lfg_leave` | `wait_ms?` | `{}` |
+| `lfg_status` | `refresh?` (ask the server first; idle answers nothing), `wait_ms?` | `{"refresh":true}` |
+| `lfg_listings` | `refresh?`, `id?`, `wait_ms?` | `{"refresh":true}` |
+| `lfg_listing_role` | `role*` (`t`, `h` or `d`), `wait_ms?` | `{"role":"d"}` |
+| `lfg_auto` | `roles?`, `accept?` (omitted leaves offers alone), `delay_ms?` (default 1500, 0–30000), `off?` (stops the answerer). Answers `auto{on, roles?, accept?, delay_ms}` | `{"roles":"d","accept":true}` |

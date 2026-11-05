@@ -29,7 +29,7 @@ turtle-agent plan-scout <dungeon> [--dir dungeons] [--sql FILE] [--mmaps DIR] [-
     [--fix-out FILE] [--apply-fixes DIR] [--fail-on fail|warn]
     [--live <server>] [--slot N] [--holder NAME] [--slots FILE] [--binary PATH]
     [--walk-budget 5m] [--max-minutes 20] [--instance-cap-per-account N] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset]
-```
+`plan-scout` takes its plan name anywhere (flags before, between, or after); the table below lists every flag. On/off flags (every `false` default below) take `=` when you give a value (`--json=true`); a bare `--json` turns the flag on.
 
 [^plan-scout]
 
@@ -63,7 +63,7 @@ Exits: 0 clean; 27 a step fails (or warns with `--fail-on warn`); 28 the live pa
 
 ## plan-probe
 
-Usage: `turtle-agent plan-probe [--dir dungeons] [--sql FILE [--plan NAME]] --mmaps DIR [--json] [--out DIR] [--from-step N] [<plan>|<path.json>]`[^plan-probe].
+Usage: `turtle-agent plan-probe [--dir dungeons] [--sql FILE [--plan NAME]] --mmaps DIR [--json] [--out DIR] [--from-step N] [<plan>|<path.json>]`[^plan-probe]. Put flags before the plan name: this command uses plain flag parsing, which stops at the first non-flag. On/off flags (`--json`) take `=` when you give a value.
 
 | Flag | Default | What it does |
 | --- | --- | --- |
@@ -84,8 +84,8 @@ Usage: `turtle-agent patrol-record <slot-dir> --map M --area x,y,r [--z Z] --min
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--map` | _(required)_ | Map id, numeric. Example: `--map 249`. |
-| `--area` | _(required)_ | The circle to watch, `x,y,r`. Example: `--area 100,-200,60`. |
-| `--z` | _(empty)_ | The floor's z; needed when the navmesh has several floors at `x, y`. |
+| `--area` | _(required)_ | The circle to watch, `x,y,r`; the radius must be 10-200 yd. Example: `--area 100,-200,60`. |
+| `--z` | _(empty)_ | The floor's z; required without `--mmaps`, and with `--mmaps` only when the navmesh has several floors at `x, y`. |
 | `--minutes` | _(required)_ | Recording length, 1–60 minutes. Example: `--minutes 10`. |
 | `--sample-ms` | `1000` | Milliseconds between samples (500–5000). |
 | `--out` | _(empty)_ | Output file (default `./patrols-<map>-<stamp>.json`); refused when it exists. |

@@ -89,7 +89,7 @@ Key errors: `dungeon_run needs the character in the world (state <s>)`; `a dunge
 
 ## dungeon_status, dungeon_stop, dungeon_pause, dungeon_resume, dungeon_skip
 
-No params. Result: `{running, state idle\|running\|done\|failed\|stopped, report?, last_progress_at?, stalled_for_s, stall_level none\|warn\|recover\|fail}`. `dungeon_pause` on a leader-mode run is refused (`dungeon_pause: the run is a group-mode run with no commander binding to keep; dungeon_stop it ends it`); with no run: `dungeon_<verb>: no dungeon run is going`.
+No params. Result: `{running, state idle\|running\|done\|failed\|stopped, report?, last_progress_at?, stalled_for_s, stall_level none\|warn\|recover\|fail}`. `dungeon_pause` on a leader-mode run is refused (`dungeon_pause: the run is a group-mode run with no commander binding to keep; dungeon_stop ends it`); with no run: `dungeon_<verb>: no dungeon run is going`.
 
 ## plan_check
 

@@ -25,10 +25,10 @@ status: draft
 
    ```json
    {
-     "members": [
-       { "account": "<account>", "character": "<character>", "rpc": "127.0.0.1:8771" },
- - realmd takes about 14 logins per 300 seconds from one address, so the fleet shares one login budget: a start that would be the 15th waits and says how long (`fleet: waiting 4m12s to log in ...: realmd allows 14 logins per 5m0s from one address ...`). `--wait` (default 2 minutes) bounds the wait for every character to reach the world.
-     ]
+    "members": [
+      { "account": "<account>", "character": "<character>", "rpc": "127.0.0.1:8771" },
+      { "account": "<account>", "character": "<character>", "rpc": "127.0.0.1:8772" }
+    ]
    }
    ```
 

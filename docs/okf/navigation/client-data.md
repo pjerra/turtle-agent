@@ -1,6 +1,6 @@
 ---
 type: Concept
-title: Client data: MPQ and BLP
+title: "Client data: MPQ and BLP"
 description: The game client's archives and textures the minimap pictures come from.
 resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/mpq/mpq.go
 tags: [navigation, minimap, client]

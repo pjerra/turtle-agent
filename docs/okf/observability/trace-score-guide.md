@@ -24,12 +24,14 @@ turtle-agent trace-score <walk-dir>/traces/r-20261014T093012-a1b2.jsonl
 turtle-agent trace-score --json <walk-dir>/traces/live-1.jsonl
 ```
 
+Put flags before the file names: this command uses plain flag parsing.
+
 Every flag and its default:
 
 | Flag | Default | What it does |
 | --- | --- | --- |
-| `--json` | off | print the verdicts as JSON, one object per trace (`run`, `file`, `verdict`, `failed`, `checks`, `spells`) |
-| `--summary` | off | write `<run_id>.summary.json` beside each trace |
+| `--json` | off | print the verdicts as JSON, one object per trace (`run`, `file`, `verdict`, `failed`, `checks`, `spells`) (on/off: takes `=`, e.g. `--json=true`) |
+| `--summary` | off | write `<run_id>.summary.json` beside each trace (on/off: takes `=`, e.g. `--summary=true`) |
 | `--set` | none | change a threshold: `check=value`, repeatable |
 
 A bad `--set` fails at once: `--set "rest_share"` prints `--set "rest_share": want check=number`; an unknown check prints `--set: no threshold for check "nope" (have rest_share, ...)`. Exit codes: 0 when no check failed, 11 when one did, 2 on usage.

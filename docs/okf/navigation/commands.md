@@ -21,7 +21,7 @@ status: draft
 
 # Navigation commands
 
-Every flag of the four navigation commands. All flags have the defaults shown; a flag marked required has no working default. Exit 0 draws, records or replays; exit 2 is a usage error; other exits are listed per command.
+Every flag of the four navigation commands. All flags have the defaults shown; a flag marked required has no working default. Exit 0 draws, records or replays; exit 2 is a usage error; other exits are listed per command. `patrol-record` accepts flags before or after the slot dir; `map`, `path-check` and `minimap-extract` take no positional arguments besides `path-check`'s coordinates after `--`. On/off flags take `=` when you give a value (for example `--background=false`); a space-separated value after an on/off flag is not read as its value.
 
 ## map
 
@@ -77,7 +77,7 @@ Exit 1 when a query fails (`path-check: ...` on stderr).
 | `--out` | `""` (required) | Folder to write `<map>.png` and `<map>.json` into. | `--out ~/turtle-agent-minimaps` |
 | `--maps` | `all-instances` | Map ids, comma separated, or `all-instances` (every dungeon and raid of `Map.dbc`). | `--maps 70,209` |
 | `--mmaps` | `""` | Server mmaps folder(s), comma separated: a map with no minimap tiles gets a height-shaded floor render of its navmesh. | `--mmaps <walk-dir>` |
-| `--prefer` | `worldmap,minimap,navmesh` | Order of the image sources for `<map>.png`, comma separated: `minimap`, `worldmap`, `navmesh`. | `--prefer minimap,worldmap,navmesh` |
+| `--prefer` | `""` (empty means `worldmap,minimap,navmesh`) | Order of the image sources for `<map>.png`, comma separated: `minimap`, `worldmap`, `navmesh`. | `--prefer minimap,worldmap,navmesh` |
 | `--list` | `false` | Only report what each map would get; write nothing. | `--list` |
 | `--verbose` | `false` | Log every map and every skipped tile to stderr. | `--verbose` |
 

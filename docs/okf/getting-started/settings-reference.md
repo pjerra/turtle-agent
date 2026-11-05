@@ -39,7 +39,7 @@ JSON file, mode `0600`, default `<home>/.config/turtle-agent/settings.json`. Unk
   "server_name": "<server>",
   "state_dir": "<state-dir>",
   "shared_fingerprint": false,
- - `realm` (optional): realm to pick (case-insensitive) when the list has several. Default: the first realm. A named realm that is offline or missing refuses the login.
+  "run_meta": {"model": "<model>", "effort": "<effort>", "run": "<label>"}
 }
 ```
 

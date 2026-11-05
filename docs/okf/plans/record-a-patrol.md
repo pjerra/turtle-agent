@@ -23,11 +23,11 @@ status: draft
 turtle-agent patrol-record <slot-dir> --map <M> --area <x>,<y>,<r> --minutes <N>
 ```
 
-`--area` is the circle to watch (`x,y,r`); `--minutes` is 1 to 60. `--entries e1,e2` records only those creature entries (default: every creature). `--sample-ms` (default 1000, 500–5000) sets the sample gap.
+`--area` is the circle to watch (`x,y,r`); the radius must be 10-200 yd. `--minutes` is 1 to 60. `--entries e1,e2` records only those creature entries (default: every creature). `--sample-ms` (default 1000, 500–5000) sets the sample gap.
 
 ## 2. Settle the floor question
 
-When the navmesh has several floors at your `x, y`, pass `--z <z>` for the floor to watch. `--mmaps DIR` lets the recorder find it when `--z` is absent.
+When the navmesh has several floors at your `x, y`, pass `--z <z>` for the floor to watch. `--z` is required without `--mmaps`; with `--mmaps` only when several floors sit at one `x,y`. `--mmaps DIR` lets the recorder find it when `--z` is absent.
 
 ## 3. Save with a fresh name
 

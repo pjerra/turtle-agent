@@ -25,6 +25,8 @@ status: draft
 turtle-agent plan-export --out <file.sql> <plan>
 ```
 
+Put flags before the plan names here too (plain flag parsing). On/off flags (every `false` default in the plan-export table) take `=` when you give a value.
+
 `--out` is required: a file, or a folder (the file is then named `<stamp>_world.sql`). Only TortoiseBots' updater takes a `YYYYMMDDHHMMSS_world.sql` name — anything else gets a note on stderr. `--out` never replaces an existing file; pass `--force` to overwrite (never edit a migration that is applied).
 
 ## 2. Export a mapped plan on the navmesh

@@ -23,6 +23,8 @@ status: draft
 turtle-agent route-oracle --plans <dir> --mmaps <mmaps-dir> --out <dir> --plan <plan>
 ```
 
+Flags come first on this command too (plain flag parsing).
+
 Walk mode (the default) plans each plan's own stored sequence hop by hop and scores the stored hops against the navmesh, twice: plain, and on a scratch planner with the plan's avoid boxes. The report's metrics use the avoid-aware path — the one a run plans with. `--plan` is repeatable; the default set is `wailing_caverns`, `ragefire_chasm`, `uldaman`, `zulfarrak`, and `deadmines`.
 
 ## 2. Run bosses mode

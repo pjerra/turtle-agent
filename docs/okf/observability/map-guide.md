@@ -50,8 +50,8 @@ Every flag and its default:
 | `--members` | none | with `--botwatch`, only these bots |
 | `--plan` | none | a dungeon plan drawn over the run |
 | `--out` | `map.svg` | the SVG to write; several floors write `NAME-f1.svg`, `NAME-f2.svg`, ... |
-| `--html` | off | also write the single-file HTML replay next to the SVG |
-| `--force` | off | let `--out` replace an existing file (never a capture) |
+| `--html` | off | also write the single-file HTML replay next to the SVG (on/off: takes `=`, e.g. `--html=true`) |
+| `--force` | off | let `--out` replace an existing file (never a capture) (on/off: takes `=`, e.g. `--force=true`) |
 | `--config` | the settings file | its `mmaps_dir` gives the navmesh background |
 | `--mmaps` | none | folder with the server's mmaps (overrides `mmaps_dir`) |
 | `--map` | -1 | the map to draw (default: the one with most positions) |
@@ -59,7 +59,7 @@ Every flag and its default:
 | `--from`, `--to` | none | only what happened between these RFC 3339 times, both inclusive |
 | `--pad` | 25 | yards of margin round what the run covers |
 | `--floors` | `auto` | split stacked floors from the navmesh, `off`, or cut heights like `-30,-10` |
-| `--background` | on | draw the navmesh floor (off: white, smaller and quicker) |
+| `--background` | on | draw the navmesh floor (off: white, smaller and quicker; on/off: takes `=`, e.g. `--background=false`) |
 | `--width` | 960 | the longest side of the map in pixels |
 
 ## 4. Read the map

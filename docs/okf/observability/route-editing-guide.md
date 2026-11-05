@@ -31,13 +31,13 @@ Every flag and its default:
 
 | Flag | Default | What it does |
 | --- | --- | --- |
-| `--edit` | off | turns the editor on |
+| `--edit` | off | turns the editor on (on/off: takes `=`, e.g. `--edit=true`) |
 | `--mmaps-dir` | none, required with `--edit` | the navmesh of the server the plans run on; every version records it |
 | `--edit-source` | the first `--plans-dir` | whose plan files an edit starts from; must not lie inside any slot's `dungeons_dir` |
 | `--edit-dir` | `~/turtle-agent-route-edits` | where versions go: `<plan>/vNNNN.json`, `vNNNN.meta.json`, `vNNNN.diff` |
 | `--edit-tokens` | `~/.config/turtle-agent/route-edit-tokens` | `label token` lines, mode 0600 |
 | `--edit-allow-default-dir` | none | settings files with an `rpc` but no `dungeons_dir` you vouch are not the edits folder; any other such file stops the editor |
-| `--edit-trust-local` | off | saves from this machine need no token typed (read the threat model first) |
+| `--edit-trust-local` | off | saves from this machine need no token typed (read the threat model first) (on/off: takes `=`, e.g. `--edit-trust-local=true`) |
 | `--edit-trust-label` | `owner` | the token label trusted saves are made as |
 
 ## 3. Edit a route on the plan view

@@ -55,6 +55,8 @@ Every flag and its default:
 | `--config-dir` | `~/.config/turtle-agent` | settings files and the `rpc-<port>.token` files |
 | `--mmaps-dir` | none | the navmesh folder of the server the plans run on; enables the real-route plan view |
 
+The table above leaves out the `--edit*` and `--control*` flags on purpose: route editing lives in [Turn on route editing](/observability/route-editing-guide.md) and run controls in [Control a run from the dashboard](/observability/run-controls-guide.md), with every flag also listed in [Command and flag reference](/observability/commands-reference.md).
+
 The page polls each agent every 1.5 s (`Interval`), with a 2 s bound per agent (`CallTimeout`). It calls four RPC methods only: `status`, `dungeon_status`, `tune_list`, and `bot_view`.
 
 ## 4. Open the page from another machine

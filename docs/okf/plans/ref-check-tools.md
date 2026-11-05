@@ -23,6 +23,7 @@ status: draft
 
 Usage: `turtle-agent plan-check [--dir dungeons] --mmaps DIR [--from-leg N [--from-pull-group N]] [--spawns DIR] [--floor-aware] [--approach-hops] [--strict] [--json] <plan>... | turtle-agent plan-check --mmaps DIR --sql FILE [--plan NAME] [--spawns DIR] [--strict] [--json]`[^plan-check].
 
+Put flags before the plan names: these commands use plain flag parsing, which stops at the first plan name, so a flag after it is never read. On/off flags (every `false` default on this page) take `=` when you give a value (`--strict=true`); a bare `--strict` turns the flag on.
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--dir` | `dungeons` | Folder with the plan files. Example: `--dir dungeons`. |
@@ -43,6 +44,8 @@ Exits: 0 clean; 11 a point fails (or a lint errors, or `--strict` with lints); 2
 
 Usage: `turtle-agent trash-check [--dir dungeons] [--sql FILE [--plan NAME]] [--spawns DIR] [--patrols FILE]... [--mmaps DIR] [--level N] [--spread YD] [--aggro-rate R] [--assist-yd 10] [--json] [--out DIR] [--dash-out FILE] [--fail-on danger|patrol|any] [<plan>|<path.json>]`[^trash-check].
 
+Put flags before the plan name here too: this command also uses plain flag parsing, so a flag after the plan name is never read. On/off flags (`--json`) take `=` when you give a value.
+
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--dir` | `dungeons` | Folder with the plan files. Example: `--dir dungeons`. |
@@ -60,11 +63,9 @@ Usage: `turtle-agent trash-check [--dir dungeons] [--sql FILE [--plan NAME]] [--
 | `--dash-out` | _(empty)_ | Write the patrols as the dashboard's patrol data file. |
 | `--fail-on` | _(empty)_ | Exit 21 when a finding of this class exists: `danger`, `patrol`, or `any`. Example: `--fail-on danger`. |
 
-Exits: 0; 21 with `--fail-on` when the named class exists; 2 usage.
+Exits: 0; 21 with `--fail-on` when the named class exists; 2 usage (including when the navmesh cannot answer: the check refuses instead of silently walking straight lines).
 
-## path-check
-
-Usage: `turtle-agent path-check --mmaps DIR --map N [--json] -- x y z x y z`[^path-check]. Replays one hop with the offline planner and the server's exact query — how a live refusal is replayed from the logged lead position.
+Usage: `turtle-agent path-check --mmaps DIR --map N [--json] -- x y z x y z`[^path-check]. Put flags before the coordinates (plain flag parsing). `--json` takes `=` when you give a value. Replays one hop with the offline planner and the server's exact query — how a live refusal is replayed from the logged lead position.
 
 | Flag | Default | What it does |
 | --- | --- | --- |

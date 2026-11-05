@@ -23,7 +23,7 @@ A plan's `status` field is the truth about how far it has been checked[^plans-do
 - **Mapped**: the route is corrected from a mapping walk (below).
 - **Live-checked**: a party has run it live.
 
-`dungeon_run` refuses a draft unless you pass `allow_draft`, and it refuses raid plans (no raid driver exists yet)[^plans-doc].
+`dungeon_run` refuses a draft unless you pass `allow_draft`. A raid plan runs in mode `observe` with `prepare.party "hire"` only: the server's run leader leads the bound raid while you hire, gear, and bind it[^plans-doc].
 
 ## The mapping walk
 

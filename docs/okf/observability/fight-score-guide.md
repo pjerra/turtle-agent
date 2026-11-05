@@ -31,14 +31,16 @@ The input is `{fight, warnings}` as `GET /api/v1/combat/fight/<key>` returns it,
 turtle-agent fight-score --mt <tank> --ot <ot1>,<ot2> --json <walk-dir>/fight.json
 ```
 
+Put flags before the file names: this command uses plain flag parsing.
+
 Every flag and its default:
 
 | Flag | Default | What it does |
 | --- | --- | --- |
-| `--json` | off | print the reading as JSON |
+| `--json` | off | print the reading as JSON (on/off: takes `=`, e.g. `--json=true`) |
 | `--mt` | none (the first tank in the fight) | main tank name |
 | `--ot` | none (the other tanks) | off-tank names, comma separated |
-| `--set` | none | change a threshold: `check=value` (`spell_oracle`) |
+| `--set` | none | change a threshold: `check=value`; takes any known trace-score threshold id, but only `spell_oracle` changes a fight score; an unknown id is refused (`--set: no threshold for check "x" (have ...)`) |
 
 ## 3. Read the verdicts
 

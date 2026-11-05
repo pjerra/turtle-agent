@@ -23,7 +23,7 @@ status: draft
 
 # Check commands
 
-Every flag of the five offline check commands. All run with no server and no login. Exits: 0 clean, 2 usage error; per-command finding exits are listed.
+Every flag of the five offline check commands. All run with no server and no login. Exits: 0 clean, 2 usage error; per-command finding exits are listed. Put every flag before the plan names: `trash-check`, `plan-check` and `stage-check` stop reading flags at the first positional argument, so a flag after a plan name is never applied. (`plan-diff` accepts flags anywhere.) On/off flags take `=` when you give a value (for example `--background=false`); a space-separated value after an on/off flag is not read as its value.
 
 ## trash-check
 
@@ -77,7 +77,6 @@ One plan name or `.json` path, or `--sql`; not both.
 | Flag | Default | What it does | Example |
 |---|---|---|---|
 | `--dir` | `dungeons` | The folder with the plan files. | `--dir dungeons` |
-| `--mmaps` | `""` (required) | Folder with the server's mmaps. | `--mmaps <walk-dir>` |
 | `--cleared-through` | `""` | Legs 0 through this one count as cleared (their packs dead). | `--cleared-through 2` |
 | `--server-steps` | `0` | The step count `.bot run list` shows for the plan (picks the exporter option set). | `--server-steps 40` |
 | `--json` | `false` | Print the result as JSON. | `--json` |

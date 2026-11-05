@@ -49,12 +49,12 @@ usage: turtle-agent pulltest [--json] <result.json>
 | `--compare` | Print the change from the first result to the second | Off: print one result as a table | `turtle-agent pulltest --compare a.json b.json` |
 | `--json` | Print the result (or, with `--compare`, the two summaries) as JSON | Off: human table | `turtle-agent pulltest --json a.json` |
 
-A result is the `<run id>.pulltest.json` file beside the trace, or a `dungeon_status` answer saved as JSON.
+A result is the `<trace without .jsonl>.pulltest.json` file beside the trace, or a `dungeon_status` answer saved as JSON. `pulltest` and `rotation show` use plain flag parsing: put flags before the file names (`turtle-agent pulltest --json a.json`, `turtle-agent rotation show --level 30 frost_mage`). On/off flags take `=` (`--json=true`); a space-separated value is read as the next file instead.
 
 ## fight-score
 
 ```
-usage: turtle-agent fight-score [--json] [--mt NAME] [--ot A,B] [--set spell_oracle=S] <combat-fight.json>...
+usage: turtle-agent fight-score [--json] [--mt NAME] [--ot A,B] [--set check=value] <combat-fight.json>...
 ```
 
 | Flag | What it does | Default | Example |
@@ -64,4 +64,6 @@ usage: turtle-agent fight-score [--json] [--mt NAME] [--ot A,B] [--set spell_ora
 | `--ot A,B` | Off-tank names, comma separated | The other tanks | `turtle-agent fight-score --ot <a>,<b> f.json` |
 | `--set check=value` | Change a threshold | `spell_oracle=20` | `turtle-agent fight-score --set spell_oracle=20 f.json` |
 
-`--set` only knows `spell_oracle`: seconds of a fight a bot must be active before it is judged. Anything else is refused (`--set: ...`). Warnings never fail: exit 0 with findings, 2 on usage.
+`--set` takes any known trace-score threshold (`rest_share`, `stale_party`, `walk_stops`, `threat_off_tank`, `order_refusals`, `feed_stalls`, `stuck`, `facing`, `idle_share`, `interrupt_cover`, `taunt_latency`, `cc_hold`, `pet_threat`, `spell_oracle`, `oom_in_fight`); only the oracle threshold changes a fight score, and an unknown id is refused (`--set: no threshold for check "x" (have ...)`). Warnings never fail: exit 0 with findings, 2 on usage.
+
+Fight-score, like `trace-score`, `scenario`, and `pulltest`, uses plain flag parsing: put flags before the file names. On/off flags take `=` (`--json=true`); a space-separated value is read as the next file instead.

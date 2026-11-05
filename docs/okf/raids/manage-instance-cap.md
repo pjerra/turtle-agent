@@ -26,7 +26,7 @@ instance cap: 4 fresh instances in the last hour on <server>; the core's cap is 
 instance cap: waiting 16m5s (earliest free time <time>) for the oldest of 4 ...
 ```
 
-At the cap's raid count (one below `--instance-cap-per-account`) the walk waits up to `--instance-cap-wait` (default 20m) for the oldest entry to age out, then exits 26. `--instance-cap-wait 0` exits 26 at the count at once; `--instance-cap-fail` exits 26 at the count instead of waiting (the autopilot does not restart a 26: it keeps the cap wait and re-places later).
+At the cap's raid count (one below `--instance-cap-per-account`) the walk waits up to `--instance-cap-wait` (default 20m) for the oldest entry to age out, then exits 26. `--instance-cap-wait 0` exits 26 at the count at once; `--instance-cap-fail` exits 26 at the count instead of waiting. On an exit 26 the autopilot restarts later after the cap wait, with no backoff.
 
 ## 2. Set the cap for your server
 

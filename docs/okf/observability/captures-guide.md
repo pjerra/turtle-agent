@@ -49,6 +49,6 @@ Every flag and its default:
 | `--to` | none | only events at or before this RFC 3339 time |
 | `--kinds` | none | only these event kinds, comma separated |
 | `--out` | none | write to this file (mode 0600) instead of stdout; an existing file needs `--force` |
-| `--force` | off | let `--out` replace an existing file (never a capture) |
+| `--force` | off | let `--out` replace an existing file (never a capture) (on/off: takes `=`, e.g. `--force=true`) |
 
 Stderr always ends with the summary: `capture events: N of M events for <character>, from R records (Rr redacted, U server packets without a handler)`, the `kinds:` counts, and, for a capture cut off mid-record, `capture events: replay stopped early: ...`. Exit code is 2 on usage errors.

@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: RPC reference
-description: Every core RPC method: params, result, and what can go wrong.
+description: "Every core RPC method: params, result, and what can go wrong."
 resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
 tags: [agent, rpc, reference, status, movement, combat]
 sources:

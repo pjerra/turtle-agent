@@ -43,7 +43,7 @@ Without `--mt` the first tank in the fight is the main tank; without `--ot` the 
 turtle-agent fight-score --set spell_oracle=20 combat-fight-1.json
 ```
 
-`--set` changes a threshold as `check=value`. `spell_oracle` (default 20) is the seconds of a fight a bot must be active before it is judged. `--json` prints the reading as JSON instead of a table.
+`--set` changes a threshold as `check=value`. `spell_oracle` (default 20) is the seconds of a fight a bot must be active before it is judged. `--set` takes any known trace-score threshold id, but only the oracle one changes a fight score; an unknown id is refused (`--set: no threshold for check "x" (have ...)`). `--json` prints the reading as JSON instead of a table. Put flags before the file names: this command uses plain flag parsing.
 
 ## 4. Compare two pull tests
 
@@ -51,4 +51,4 @@ turtle-agent fight-score --set spell_oracle=20 combat-fight-1.json
 turtle-agent pulltest --compare a.json b.json
 ```
 
-A result is the `<run id>.pulltest.json` file beside the trace, or a `dungeon_status` answer saved as JSON. The comparison prints which brain and rotation digest each side played, warns for fewer than 3 scored tries and when the two are not the same pull, then the party and character rows, each marked better, worse or same. Without `--compare`, `turtle-agent pulltest <result.json>` prints one result as a table; `--json` prints JSON.
+A result is the `<trace without .jsonl>.pulltest.json` file beside the trace, or a `dungeon_status` answer saved as JSON. The comparison prints which brain and rotation digest each side played, warns for fewer than 3 scored tries and when the two are not the same pull, then the party and character rows, each marked better, worse or same. Without `--compare`, `turtle-agent pulltest <result.json>` prints one result as a table; `--json` prints JSON. Put flags before the file names: this command uses plain flag parsing.

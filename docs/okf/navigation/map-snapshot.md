@@ -36,6 +36,6 @@ Floors are 0-based; floor 0 is the lowest. Pass `floor` for another floor, `plan
 turtle-agent rpc <slot-dir> map_snapshot '{"floor": 1, "plan": "uldaman"}'
 ```
 
-Pass `"background": false` for a smaller, faster image without the navmesh, `"html": true` to also get the single-file replay, and `"pad"` (yards of margin; 25 or less means 25) to frame the picture. An unknown floor fails with `floor: this map has floors 0 to N`.
+Pass `"background": false` for a smaller, faster image without the navmesh, `"html": true` to also get the single-file replay, and `"pad"` (yards of margin; 0 or less means 25) to frame the picture. An unknown floor fails with `floor: this map has floors 0 to N`.
 
 The snapshot reads the navmesh on its own tile cache, closed when the call returns, so a walk going on at the same time keeps its tiles.

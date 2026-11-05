@@ -45,7 +45,7 @@ Each entry is a message the code really sends (RPC error text, report note, or s
 - **`from_pull_group <n>: the gather spot ... is <d> yd from pull group <m> ... alive in a fresh instance: pass force_start to start there anyway`.** The unsafe-start gate: the party would land next to live mobs. Fix: start earlier, clear first, or pass `force_start`.
 - **`plan check failed: ...` / `plan check could not run: ...`.** The navmesh check refused the plan (or could not run: no navmesh files or planner). Fix: fix the plan, or pass `force` to run past it (the failures land in the result's `plan_check`).
 - **`commander bind refused: <reason>`.** The module refused the bind (another commander holds the party, a bot is offline, the group is a raid, ...). Fix: read the reason, free the party, retry.
-- **`the account entered 5 new instances in the last hour (limit 5); the oldest was at ...`.** The hourly entry ledger is full. Fix: wait for the oldest entry to age out, or pass `ignore_entry_limit`.
+- **`enter: the account entered 5 new instances in the last hour (limit 5); the oldest was at ...`.** The hourly entry ledger is full. Fix: wait for the oldest entry to age out, or pass `ignore_entry_limit`.
 - **`enter: the lead bot <name> is still on map <m>, <n> s after it was sent in ...`.** The party did not get through the portal. Likely causes the message lists: the hourly instance cap, a missing requirement, or a stuck bot. Fix: work through the listed causes.
 
 ## The run failed or stalled

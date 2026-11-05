@@ -56,7 +56,7 @@ tools/run-uldaman.sh --mode leader --pulltest 0:0:5 --rotation frost_mage
 tools/run-uldaman.sh --mode leader --pulltest 0:0:5 --rotation my_frost
 ```
 
-Keep the brain preset, the role, the party, the pull and the character the same. Each run leaves a `pulltest.json` beside its trace.
+Keep the brain preset, the role, the party, the pull and the character the same. Each run leaves a `<trace without .jsonl>.pulltest.json` file beside its trace. Put flags before the file names: `pulltest` uses plain flag parsing.
 
 ## 5. Compare
 

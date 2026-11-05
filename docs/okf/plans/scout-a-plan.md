@@ -51,4 +51,4 @@ turtle-agent plan-scout <plan> --mmaps <mmaps-dir> --out <dir> --fix-out <file>
 turtle-agent plan-scout <plan> --mmaps <mmaps-dir> --live <server> --slot <n>
 ```
 
-The live pass walks the route on a test server (check: the exact server names allowed). Slot 3 is never used. `--walk-budget` (default `5m`) bounds the walk and `--max-minutes` (default 20) the whole pass. The instance-cap flags (`--instance-cap-per-account`, `--instance-cap-wait`, `--instance-cap-fail`, `--instance-cap-reset`) handle the core's fresh-instance limit.
+The live pass walks the route on a test server (pass `--live <server>`; without it only the offline pass runs). The server must be a test server — any other name is refused. Slot 3 is never used. `--walk-budget` (default `5m`) bounds the walk and `--max-minutes` (default 20) the whole pass. The instance-cap flags (`--instance-cap-per-account`, `--instance-cap-wait`, `--instance-cap-fail`, `--instance-cap-reset`) handle the core's fresh-instance limit.

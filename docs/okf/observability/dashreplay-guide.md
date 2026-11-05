@@ -50,9 +50,9 @@ Every flag and its default:
 | `--to` | `127.0.0.1:9195` | the daemon's UDP address |
 | `--speed` | `1` | play this many times faster than recorded; must be above 0 |
 | `--max-gap` | `10s` | longest pause between two datagrams (kept under the daemon's 12 s commanders staleness) |
-| `--loop` | off | start over with a newer session after the last datagram |
-| `--dry-run` | off | print the schedule; send nothing |
-| `--i-know` | off | allow a non-loopback target (a test dashboard) |
+| `--loop` | off | start over with a newer session after the last datagram (on/off: takes `=`, e.g. `--loop=true`) |
+| `--dry-run` | off | print the schedule; send nothing (on/off: takes `=`, e.g. `--dry-run=true`) |
+| `--i-know` | off | allow a non-loopback target (a test dashboard) (on/off: takes `=`, e.g. `--i-know=true`) |
 
 Each datagram is rewritten on the way out: `session` becomes the replay's, `ts` becomes now, `seq` is renumbered from 1, and `replay: true` is added. A replay's session is newer than a running module's, so a replay overwrites what a live daemon shows until the module restarts: point it at a test daemon. Exit code 17 means the target was refused: anything whose host does not resolve only to a loopback address needs `--i-know`.
 

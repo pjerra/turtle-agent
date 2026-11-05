@@ -37,7 +37,7 @@ A draft plan is refused without opting in. Pass `--allow-draft` for a named plan
 
 ## `plan-export: companions_loot is false ... plan not exported`
 
-The leg turns looting off and the rows cannot carry that. Either pass `--drop-companions-loot` (and turn the bots' looting off in the run setup), or add `--carrier-chests` to export the chest steps as carrier rows.
+The leg turns looting off and the rows cannot carry that. Pass `--drop-companions-loot` (and turn the bots' looting off in the run setup); add `--carrier-chests` as well to export the chest steps as carrier rows.
 
 ## `plan-export: ... names "X", which is no ... leg of the plan`
 
@@ -73,8 +73,8 @@ The probe needs the navmesh tiles. Pass `--mmaps <mmaps-dir>`.
 
 ## `route-edits: ... has no checked version` / `is unchecked: ... no edit proven`
 
-Only a `checked` (or accepted) version can be exported or promoted. A version with plan-check issues the base plan did not have stays `unchecked`: fix the route and record a new version.
+Only a `checked` (or accepted) version can be exported or promoted. A version stays `unchecked` when the plan already has plan-check issues of its own, so no edit of it is proven: fix the route's own issues and record a new version.
 
-## `route-edits: plan file is not the one the record names (sha256 differs)`
+## `route-edits: the plan file is not the one its record names (sha256 differs): it was changed after it was written`
 
-The worktree's plan changed since the version's base. Rebase your edit: record a new version from the current file instead of promoting the stale one.
+The stored version file (`vNNNN.json`) changed after it was written. Record a new version from the current file instead of exporting or promoting the changed one.

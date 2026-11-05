@@ -36,7 +36,7 @@ Every flag and its default:
 | `--mmaps` | none, required | folder with the server's mmaps |
 | `--cleared-through` | none | legs 0..this one count as cleared (their packs dead) |
 | `--server-steps` | 0 | the step count `.bot run list` shows for the plan (picks the exporter option set) |
-| `--json` | off | print the result as JSON |
+| `--json` | off | print the result as JSON (on/off: takes `=`, e.g. `--json=true`) |
 
 Text output names the staging point (`stage at <x> <y> <z>`) or the refusal (`refused: <reason>`), plus proposals and notes. Exit 0 when the leg stages, 13 when it refuses (`exitStageRefused`), 2 on usage.
 
@@ -63,9 +63,9 @@ Every flag and its default:
 | `--spread` | 0 (10 for a raid plan, else 3) | how far the party spreads from the route, in yards |
 | `--aggro-rate` | 1 | scales every aggro radius |
 | `--assist-yd` | 10 | the family assist hop's radius, in yards |
-| `--json` | off | print the report as JSON |
+| `--json` | off | print the report as JSON (on/off: takes `=`, e.g. `--json=true`) |
 | `--out` | none | write `trash-<plan>.json` and `trash-<plan>.txt` there |
 | `--dash-out` | none | write the patrols as the dashboard's patrol data file |
 | `--fail-on` | none | exit 21 when a finding of class `danger`, `patrol` or `any` exists |
 
-Exit 0 normally, 21 with a `--fail-on` match, 1 when the navmesh is unavailable, 2 on usage. The last text line summarizes: steps, segments, and how many are clear, own, patrol, or danger.
+Exit 0 normally, 21 with a `--fail-on` match, 2 on usage (including when the navmesh cannot answer: the check refuses instead of silently walking straight lines). The last text line summarizes: steps, segments, and how many are clear, own, patrol, or danger.

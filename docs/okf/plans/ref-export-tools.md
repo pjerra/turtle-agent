@@ -21,7 +21,7 @@ status: draft
 
 ## plan-export
 
-Usage: `turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--gm-cross-direct] [--approach-hops] [--floor-aware] [--skip-legs NAME,...] [--with-optional NAME,...] [--with-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)`[^plan-export].
+Usage: `turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--gm-cross-direct] [--approach-hops] [--floor-aware] [--skip-legs NAME,...] [--with-optional NAME,...] [--with-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)`[^plan-export]. Put flags before the plan names: this command uses plain flag parsing, which stops at the first plan name. On/off flags (every `false` default above) take `=` when you give a value (`--allow-draft=true`); a bare `--allow-draft` turns the flag on.
 
 | Flag | Default | What it does |
 | --- | --- | --- |
@@ -42,7 +42,7 @@ Usage: `turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-compan
 | `--with-legs` | _(empty)_ | `skip_export` leg names written into the rows anyway. |
 | `--force` | `false` | Let `--out` replace an existing file (never edit an applied migration). |
 
-Exits: 0 exported (a `CUT:` line on stdout still means legs were cut — read why); 2 usage. A draft without `--allow-draft`, an unknown leg name in `--skip-legs`/`--with-optional`/`--with-legs`, or a `companions_loot: false` leg without `--drop-companions-loot` refuses the plan.
+Exits: 0 exported (a `CUT:` line on stdout still means legs were cut — read why); 2 usage. A draft without `--allow-draft`, an unknown leg name in `--skip-legs`/`--with-optional`/`--with-legs`, `--all-live` with named plans, or a `companions_loot: false` leg without `--drop-companions-loot` refuses the plan. `--carrier-chests` without `--drop-companions-loot` is a usage error. Under `--all-live` a plan with a `companions_loot: false` leg is skipped with a note instead of failing the export.
 
 ## plan-diff
 
