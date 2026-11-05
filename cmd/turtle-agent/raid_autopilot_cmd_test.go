@@ -974,8 +974,8 @@ func TestAutoInvalidTargetsKeepTheOldOnes(t *testing.T) {
 }
 
 // Walk 39: the shared hire pool refused one raid while others hired ("No mercenary of that kind is available right
-// now"; m5 and m1 in EVENTS.txt). The raid backs off 5 minutes and the refusal is not a failed attempt: repeated
-// refusals never grow the backoff toward 10 minutes nor escalate the id.
+// now"; m5 and m1 in EVENTS.txt). The raid backs off 5 minutes and the refusal is not a failed attempt: refusals
+// never grow the backoff toward 10 minutes, and the first five never escalate the id (the sixth does, its own test).
 func TestAutoHirePoolWaitBacksOffWithoutCountingAFailure(t *testing.T) {
 	f := newAutoFixture(t)
 	f.target("a srv 1 zg-a boss:11380 -- zul_gurub --sql /zg.sql")
@@ -1008,6 +1008,75 @@ func TestAutoHirePoolWaitBacksOffWithoutCountingAFailure(t *testing.T) {
 	if got := strings.Count(f.events(), "hire-pool-wait: "); got != 4 {
 		t.Fatalf("%d hire-pool-wait lines, want 4:\n%s", got, f.events())
 	}
+}
+
+// Review round 1: the wait loop has an end. Six consecutive hire-pool refusals (~30 min of 5-minute waits) leave the id
+// for a person instead of waiting forever.
+func TestAutoHirePoolWaitEscalatesAfterSixWaits(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:11380 -- zul_gurub --sql /zg.sql")
+	reason := "hire 2 priest:healer: TBM:HIRE_RAID|partial|1|2|0|1|0|2|0|No mercenary of that kind is available right now. Try again"
+	for n := 1; n <= 6; n++ {
+		f.attempt(fmt.Sprintf("a-%d", n), 18, 0, reason)
+	}
+	s := f.supervisor()
+	for n := 1; n <= 6; n++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", n), func() bool { return len(f.args()) >= n })
+		tickUntil(t, s, fmt.Sprintf("attempt %d to finish", n), func() bool {
+			st := s.states[0]
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			return st.run == nil || st.escalated
+		})
+		clearWait(s.states[0])
+	}
+	if _, escalated := runState(s.states[0]); !escalated {
+		t.Fatalf("six hire-pool waits did not escalate the id:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "ESCALATE stop a 1") || !strings.Contains(f.events(), "hire pool: 6 waits") {
+		t.Fatalf("the ESCALATE line does not name the sixth wait:\n%s", f.events())
+	}
+	if code := s.finishAll(); code != exitAutoEscalated {
+		t.Fatalf("finishAll = %d, want %d", code, exitAutoEscalated)
+	}
+}
+
+// Review round 1: a hire-pool wait is no attempt at all — it leaves noProgress and placeFails as they were (it used to
+// wipe both) and moves bestStep only when the refused run had already walked past it.
+func TestAutoHirePoolWaitKeepsTheFailureCounts(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:11380 -- zul_gurub --sql /zg.sql")
+	reason := "hire 2 priest:healer: TBM:HIRE_RAID|partial|1|2|0|1|0|2|0|No mercenary of that kind is available right now. Try again"
+	f.attempt("a-1", 5, 0, "place: the corridor is not clear")
+	f.attempt("a-2", 18, 0, reason)
+	f.attempt("a-3", 5, 90, "server closed the connection")
+	f.attempt("a-4", 18, 95, reason)
+	s := f.supervisor()
+	counts := func() (noProgress, bestStep, placeFails int) {
+		st := s.states[0]
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		return st.goals[0].noProgress, st.goals[0].bestStep, st.placeFails
+	}
+	finish := func(n int, wantNoProgress, wantBest, wantPlaces int) {
+		t.Helper()
+		tickUntil(t, s, fmt.Sprintf("launch %d", n), func() bool { return len(f.args()) >= n })
+		tickUntil(t, s, fmt.Sprintf("attempt %d to finish", n), func() bool {
+			st := s.states[0]
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			return st.run == nil
+		})
+		clearWait(s.states[0])
+		if np, best, pf := counts(); np != wantNoProgress || best != wantBest || pf != wantPlaces {
+			t.Fatalf("after attempt %d: noProgress=%d bestStep=%d placeFails=%d, want %d/%d/%d:\n%s",
+				n, np, best, pf, wantNoProgress, wantBest, wantPlaces, f.events())
+		}
+	}
+	finish(1, 1, 0, 1)
+	finish(2, 1, 0, 1)  // the wait leaves both counts alone
+	finish(3, 0, 90, 0) // progress resets them
+	finish(4, 0, 95, 0) // the refused run had progressed: bestStep moves, the counts stand
 }
 
 // The state file is written on every transition; a supervisor killed after goal 1 was met does not walk it again.

@@ -2864,7 +2864,11 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   reached no further step; a step further resets it. A hire the server's shared pool refused ("No mercenary of that
   kind is available right now": several big raids on one server starve each other) is not such a failure: the raid
   waits 5 minutes (`AutoHirePoolWaitBackoff`), logs `hire-pool-wait`, re-places the same instance, and neither the
-  backoff nor the escalation counts move. There is no cross-raid scheduling beyond that wait. Exit 26 keeps its cap wait and re-places later. A **launch**
+  backoff nor the escalation counts move — a refused run that had already walked past the goal's best step still
+  moves that step, and the wait leaves `noProgress` and `placeFails` exactly as they were. The wait loop has an end:
+  six consecutive hire-pool waits (`AutoHirePoolWaitMax`, about 30 minutes) `ESCALATE` the id with
+  `hire pool: 6 waits`; a launch that ends any other way resets the count. There is no cross-raid scheduling beyond
+  that wait. Exit 26 keeps its cap wait and re-places later. A **launch**
   that cannot start (the attempt log or the child) is not completion: the goal stays, the retry uses the same
   backoff (20 s at first), and the third consecutive launch failure escalates the id. A supervisor whose every id
   met its goals says `every target's goals are met` and exits 0; one with an escalated id ends with

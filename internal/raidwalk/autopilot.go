@@ -34,6 +34,11 @@ const (
 // other raids of the server to finish hiring, and no cross-raid scheduling beyond it.
 const AutoHirePoolWaitBackoff = 5 * time.Minute
 
+// AutoHirePoolWaitMax is how many consecutive hire-pool refusals (~30 min at AutoHirePoolWaitBackoff) an id waits
+// before it is left for a person: a pool that refuses six times in a row needs a person, not another wait, and no
+// backoff loop ends by itself otherwise.
+const AutoHirePoolWaitMax = 6
+
 // AutoGoal is one target's goal: the plan walked whole, a leg stopped at, or one boss killed.
 type AutoGoal struct {
 	Kind string // "full", "leg" or "boss"
@@ -343,6 +348,8 @@ type AutoRunState struct {
 	// PlaceFails counts the consecutive attempts that ended in the place phase: the third stops the id for a person
 	// (a dead bind is re-placed fresh, but a placement that keeps failing must not loop forever with a backoff).
 	PlaceFails int
+	// HireWaits counts the consecutive hire-pool waits of this goal: the sixth stops the id for a person.
+	HireWaits int
 }
 
 // AutoDecision is the next step.
@@ -373,7 +380,8 @@ func AutoBackoff(fast int) time.Duration {
 // DecideAutoAction is the whole rule: any end, a used-up restart budget, or a stall tears down and re-places; a met
 // goal advances; a placement that failed on the old bind asks for a fresh instance next. A stall is no step and no
 // boss-HP change for stall, counted from the end of a legitimate instance-cap wait. Exit 2 and 29 stop the id for a
-// person, and so does the third consecutive exit 15. Every restart carries the backoff of its no-progress count.
+// person, and so does the third consecutive exit 15 or the sixth consecutive hire-pool wait. Every restart carries the
+// backoff of its no-progress count.
 func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall time.Duration) AutoDecision {
 	if !o.Exited {
 		// A run waiting on the instance cap is not stalled: its clock starts when the wait ends.
@@ -400,6 +408,12 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 		return AutoDecision{Action: AutoAdvance, Reason: "goal met: " + r.Goal.String()}
 	}
 	if o.HirePoolWait {
+		if r.HireWaits+1 >= AutoHirePoolWaitMax {
+			return AutoDecision{
+				Action: AutoStop, Escalate: true,
+				Reason: fmt.Sprintf("hire pool: %d waits", r.HireWaits+1),
+			}
+		}
 		return AutoDecision{
 			Action: AutoHirePoolWait, Reuse: true, Backoff: AutoHirePoolWaitBackoff,
 			Reason: "the shared hire pool has no mercenary of that kind: another raid of the server holds them",

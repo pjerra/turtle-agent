@@ -114,6 +114,9 @@ type autoGoalState struct {
 	noProgress int
 	// leaseFails counts the consecutive attempts that ended in exit 15 (the slot is held by someone else).
 	leaseFails int
+	// hireWaits counts the consecutive hire-pool waits of this goal: the sixth stops the id for a person (a pool that
+	// refuses six times in a row needs a person, not another 5-minute wait).
+	hireWaits int
 	// dead says an attempt's summary reported this goal's boss dead: the goal is met and DONE, never placed again
 	// (walk 39: a re-added raid kept walking a boss another raid had already killed).
 	dead bool
@@ -1073,7 +1076,7 @@ func (s *autoSupervisor) tickState(st *autoState) {
 		}
 		d := raidwalk.DecideAutoAction(obs, raidwalk.AutoRunState{
 			Goal: r.goal, Attempt: g.attempt, Reuse: r.reuse, HasRun: g.attempt > 0,
-			FastFailures: fast, LeaseFails: g.leaseFails, PlaceFails: st.placeFails,
+			FastFailures: fast, LeaseFails: g.leaseFails, PlaceFails: st.placeFails, HireWaits: g.hireWaits,
 		}, time.Now(), s.o.stall)
 		if d.Action == raidwalk.AutoContinue {
 			st.mu.Unlock()
@@ -1134,15 +1137,22 @@ func (s *autoSupervisor) finish(st *autoState) {
 	r.lastStep = lastStep
 	st.last = r
 	g := &st.goals[st.current]
-	// Progress resets the backoff; a run that reached no further step grows it (M1). A hire-pool wait is neither:
-	// the pool refused the hires before the run started, so it never counts as a failed attempt (walk 39).
-	if d.Action == raidwalk.AutoHirePoolWait {
-		g.noProgress = 0
-	} else if lastStep > g.bestStep {
+	// Progress resets the backoff; a run that reached no further step grows it (M1). A hire-pool wait is neither: the
+	// pool refused the hires before the run started, so it leaves the counts as they were and only moves bestStep when
+	// the refused run had already walked past it (walk 39).
+	prevBest := g.bestStep
+	if lastStep > g.bestStep {
 		g.bestStep = lastStep
-		g.noProgress = 0
+	}
+	if d.Action == raidwalk.AutoHirePoolWait {
+		g.hireWaits++
 	} else {
-		g.noProgress++
+		g.hireWaits = 0
+		if lastStep > prevBest {
+			g.noProgress = 0
+		} else {
+			g.noProgress++
+		}
 	}
 	if r.exitCode == 15 {
 		g.leaseFails++
@@ -1150,10 +1160,13 @@ func (s *autoSupervisor) finish(st *autoState) {
 		g.leaseFails = 0
 	}
 	// A fresh-instance restart is a placement that failed on the old bind: count those in a row, and reset the count
-	// on every other end (a run that placed, advanced or stopped broke the streak).
-	if d.Action == raidwalk.AutoRestart && !d.Reuse {
+	// on every other end (a run that placed, advanced or stopped broke the streak). A hire-pool wait is no attempt at
+	// all, so it leaves the count alone.
+	switch {
+	case d.Action == raidwalk.AutoHirePoolWait:
+	case d.Action == raidwalk.AutoRestart && !d.Reuse:
 		st.placeFails++
-	} else {
+	default:
 		st.placeFails = 0
 	}
 	var esc string
