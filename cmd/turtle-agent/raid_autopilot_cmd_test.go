@@ -463,6 +463,26 @@ func TestAutoSummaryReadsTheSingularBossKill(t *testing.T) {
 	}
 }
 
+// Walk 39 t7-1: the summary credited Thekal's kill to entry 14599 with phase_entry 14509 (the reborn form). Both
+// entries count for a goal, and a boss that was not killed (a guardian row) counts for neither.
+func TestAutoBossKillCountsBothEntriesOfTheBoss(t *testing.T) {
+	m := map[uint32]bool{}
+	autoBossKill{Entry: 14599, Killed: true, PhaseEntry: 14509}.deadEntries(m)
+	if !m[14599] || !m[14509] {
+		t.Fatalf("a killed 14599/14509 record left %v", m)
+	}
+	plain := map[uint32]bool{}
+	autoBossKill{Entry: 15068, Killed: true}.deadEntries(plain)
+	if len(plain) != 1 || !plain[15068] {
+		t.Fatalf("a plain record left %v", plain)
+	}
+	unkilled := map[uint32]bool{}
+	autoBossKill{Entry: 14599, Killed: false, PhaseEntry: 14509}.deadEntries(unkilled)
+	if len(unkilled) != 0 {
+		t.Fatalf("an unkilled record counted as dead: %v", unkilled)
+	}
+}
+
 // H1: a restart with no step and no target --from is a fresh start; --reuse-instance without --place/--from would be
 // refused by raid-walk, so it is never sent. The real launch -> exit -> next-args path runs the stub.
 func TestAutoRestartWithoutFromNeverReuses(t *testing.T) {

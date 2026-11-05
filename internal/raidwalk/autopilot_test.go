@@ -268,3 +268,24 @@ func TestAutoStoppedEndStillMeetsAKilledBoss(t *testing.T) {
 		t.Fatal("a stopped run met a leg goal")
 	}
 }
+
+// Walk 39 t7/m6: the goal was boss:14509 (Thekal's reborn form) and the walk's summary credited the kill to 14599,
+// his boss row's entry, with phase_entry 14509. The goal never matched, so the autopilot restarted a raid whose boss
+// was already dead (t7 restarted 9 s after the kill and later escalated). A goal boss matches any entry of that boss.
+func TestAutoGoalBossMatchesTheBossOtherEntry(t *testing.T) {
+	o := AutoObservation{
+		Exited: true, ExitCode: 0, StepsReached: 257, StepsTotal: 733, EndReason: "until",
+		KilledBosses: map[uint32]bool{14599: true},
+	}
+	if !GoalAchieved(AutoGoal{Kind: "boss", Boss: 14509}, o) {
+		t.Fatal("a kill of Thekal 14599 does not meet the goal boss:14509")
+	}
+	if d := DecideAutoAction(o, AutoRunState{Goal: AutoGoal{Kind: "boss", Boss: 14509}}, autoNow, time.Hour); d.Action != AutoAdvance {
+		t.Fatalf("decision %+v, want advance", d)
+	}
+	// The goal's own entry still matches, and a Zulian Guardian (15068, Thekal's phase_entries add) is not the boss.
+	o2 := AutoObservation{Exited: true, KilledBosses: map[uint32]bool{15068: true}}
+	if GoalAchieved(AutoGoal{Kind: "boss", Boss: 14509}, o2) {
+		t.Fatal("a Zulian Guardian's death meets the goal boss:14509")
+	}
+}

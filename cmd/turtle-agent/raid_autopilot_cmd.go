@@ -1082,31 +1082,42 @@ func (s *autoSupervisor) observe(st *autoState) raidwalk.AutoObservation {
 		o.ExitCode = sum.ExitCode
 	}
 	for _, b := range sum.BossKills {
-		if b.Killed {
-			o.KilledBosses[b.Entry] = true
-		}
+		b.deadEntries(o.KilledBosses)
 	}
-	if sum.BossKill != nil && sum.BossKill.Killed {
-		o.KilledBosses[sum.BossKill.Entry] = true
+	if sum.BossKill != nil {
+		sum.BossKill.deadEntries(o.KilledBosses)
 	}
 	return o
 }
 
 // autoSummary is the part of summary.json the autopilot reads.
 type autoSummary struct {
-	ExitCode     int    `json:"exit_code"`
-	StepsReached int    `json:"steps_reached"`
-	StepsTotal   int    `json:"steps_total"`
-	EndReason    string `json:"end_reason"`
-	BossKills    []struct {
-		Entry  uint32 `json:"entry"`
-		Killed bool   `json:"killed"`
-	} `json:"boss_kills"`
+	ExitCode     int            `json:"exit_code"`
+	StepsReached int            `json:"steps_reached"`
+	StepsTotal   int            `json:"steps_total"`
+	EndReason    string         `json:"end_reason"`
+	BossKills    []autoBossKill `json:"boss_kills"`
 	// BossKill is the last boss the walk engaged (older summaries only; boss_kills has all of them).
-	BossKill *struct {
-		Entry  uint32 `json:"entry"`
-		Killed bool   `json:"killed"`
-	} `json:"boss_kill"`
+	BossKill *autoBossKill `json:"boss_kill"`
+}
+
+// autoBossKill is one summary boss record. phase_entry is the entry the boss's guid read last (Thekal's row is
+// 14599, his reborn form 14509): a kill counts for a goal that names either entry.
+type autoBossKill struct {
+	Entry      uint32 `json:"entry"`
+	Killed     bool   `json:"killed"`
+	PhaseEntry uint32 `json:"phase_entry,omitempty"`
+}
+
+// deadEntries adds one summary record's entries to a kill map.
+func (b autoBossKill) deadEntries(m map[uint32]bool) {
+	if !b.Killed {
+		return
+	}
+	m[b.Entry] = true
+	if b.PhaseEntry != 0 && b.PhaseEntry != b.Entry {
+		m[b.PhaseEntry] = true
+	}
 }
 
 func autoReadSummary(path string) (autoSummary, error) {
@@ -1817,12 +1828,10 @@ func (s *autoSupervisor) reconcileSummary(st *autoState, sv *autoSavedID) {
 	}
 	o := raidwalk.AutoObservation{Exited: true, ExitCode: sum.ExitCode, StepsReached: sum.StepsReached, StepsTotal: sum.StepsTotal, EndReason: sum.EndReason, KilledBosses: map[uint32]bool{}}
 	for _, b := range sum.BossKills {
-		if b.Killed {
-			o.KilledBosses[b.Entry] = true
-		}
+		b.deadEntries(o.KilledBosses)
 	}
-	if sum.BossKill != nil && sum.BossKill.Killed {
-		o.KilledBosses[sum.BossKill.Entry] = true
+	if sum.BossKill != nil {
+		sum.BossKill.deadEntries(o.KilledBosses)
 	}
 	st.mu.Lock()
 	if st.current >= len(st.goals) || !raidwalk.GoalAchieved(st.goals[st.current].target.Goal, o) {

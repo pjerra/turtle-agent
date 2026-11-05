@@ -2810,7 +2810,10 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   is the raid-walk args, starting with the plan. A goal is `full` (walk to the plan's end), `leg:<L>` (`--until "leg
   L"`) or `boss:<ENTRY>` (`--until boss-done`, done when that boss's `boss_kills` entry reads killed, whatever the
   exit code and whatever the end reason — an incident after the kill, 19, counts, and so does a `stopped: ...` end
-  such as the 90-minute limit firing after the kill; a full clear the same). An id may repeat: its lines are
+  such as the 90-minute limit firing after the kill; a full clear the same). A goal boss matches a kill of any entry
+  of that boss: the summary's `entry` and its `phase_entry` both count, and so do the entries of a boss the walk
+  reports under another entry (Zul'Gurub's Thekal: the row and the kill are 14599, his reborn form 14509, so
+  `boss:14509` and `boss:14599` are the same goal; `GoalBossIDs` in `internal/raidwalk/autopilot.go`). An id may repeat: its lines are
   walked in file order, and a met goal advances to the next line. `--sql FILE` is required: every goal may be
   re-placed, and raid-walk refuses `--place` without it. `--from` in a line is the goal's own start (a restart with
   no step reached uses it); a restart inside the goal starts at the furthest step the run reached, and never sends
