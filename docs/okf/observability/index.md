@@ -19,6 +19,7 @@ The dashboard, captures, traces, events and scenarios: watch a run live, record 
 - [Read the live event log](/observability/events-concept.md) — the `events` RPC, kinds, paging.
 - [Draw the run map](/observability/map-guide.md) — `turtle-agent map` from a capture to SVG and HTML.
 - [Decision captures](/observability/decisions-concept.md) — what the TortoiseBots daemon records and how to pull it.
+- [Test fixtures](/observability/fixtures-concept.md) — the recorded captures the unit tests play back.
 
 ## Check it afterwards
 
@@ -28,7 +29,9 @@ The dashboard, captures, traces, events and scenarios: watch a run live, record 
 - [Score a finished fight](/observability/fight-score-guide.md) — `fight-score` and the debugger's tank readings.
 - [Offline plan checks](/observability/offline-checks-guide.md) — `stage-check` and `trash-check` without a server.
 - [Repeat a live test with scenarios](/observability/scenarios-guide.md) — the scenario file, `check`, `run`, `norm`.
-- [Test fixtures](/observability/fixtures-concept.md) — the recorded captures the unit tests play back.
+
+## Reference
+- [Command and flag reference](/observability/commands-reference.md) — every command and flag in this area, with defaults.
 
 ## When it breaks
 
