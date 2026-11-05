@@ -742,7 +742,11 @@ func (s *autoSupervisor) finishAll() int {
 		}
 		st.mu.Unlock()
 	}
-	s.event("all", "finished", fmt.Sprintf("not every target's goals are met (%d escalated, %d refused, %d stopped)", escalated, refused, stopped))
+	counts := fmt.Sprintf("%d escalated, %d refused", escalated, refused)
+	if stopped > 0 {
+		counts += fmt.Sprintf(", %d stopped", stopped)
+	}
+	s.event("all", "finished", "not every target's goals are met ("+counts+")")
 	if escalated > 0 {
 		return exitAutoEscalated
 	}
