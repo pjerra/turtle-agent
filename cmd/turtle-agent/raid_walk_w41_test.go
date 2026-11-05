@@ -1,0 +1,133 @@
+// Walk 41 (TortoiseBots-audit research/zg-bosses/JEKLIK-W41.md §2/§3 fix 3): a boss that engages while the run is
+// paused on its own boss row resumes the run instead of stopping it, and a dashboard boss fight that ended "kill"
+// credits the goal boss even though the run had stopped.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/pjerra/turtle-agent/internal/tbm"
+)
+
+// TestBossEngagedWhilePausedOnBossRowResumes is walk 41 tj-8. The run stood on Jeklik's own boss step and paused
+// there when the pullback was refused ("no safe stand 35.0-25.0 yd from it"); the tank's own pull went out two
+// seconds later and woke her under the pause. The walk used to read that as "boss engaged while paused" and send
+// `.bot run stop` (exit 19), so the raid killed her without the run leader and the summary said not killed. The
+// walk now sends `.bot run resume` and the run leader fights her: one resume, no run stop, the walk ends at its
+// until.
+func TestBossEngagedWhilePausedOnBossRowResumes(t *testing.T) {
+	boss := zgBossStepOf(t, 14517)
+	total := len(zgRows(t).Steps)
+	f := newFixture(t)
+	f.opts.plan, f.opts.holder = "zul_gurub", "raid-walk-zul_gurub"
+	f.opts.until = fmt.Sprintf("step %d", boss+1)
+	p, err := dungeon.Load(filepath.Join(f.opts.dir, "zul_gurub.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.agent.instMap = p.Map
+	start := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_jeklik|move|begin|started|until step %d (step %d)", boss-1, total, boss+1, boss+1)
+	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: start, Lines: []string{start, "TBM:ACTION_ACK|run start|party|1|-"}}}
+	// The pause on her own row: walk 41 tj-8's 22:14:55.577 line.
+	pause := fmt.Sprintf("TBM:RUN|zul_gurub|paused|%d/%d|high_priestess_jeklik|boss|begin|cmd pullback 17379391205577637935 refused: unreachable: The tank could not start moving to a firing position for the pull; the boss at -12289.1 -1384.1 134.3 is not reachable from this floor: no safe stand 35.0-25.0 yd from it (the lead bot 49.9 yd from it)|until step %d (step %d)", boss, total, boss+1, boss+1)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{{raw: pause}}
+	f.agent.mu.Unlock()
+	// Her own late pull: the frames hold her engaged (a target, 40 %) under the pause.
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 9, Entry: 14517, HPPct: 40, Target: packet.GUID(1000), X: -12289.1, Y: -1384.1, Z: 134.3}}
+	}
+	// The resume's answer: the run goes on at her step, then ends at its until.
+	f.agent.onResume = func() {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_jeklik|boss|fight|fighting|until step %d (step %d)", boss, total, boss+1, boss+1)},
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_jeklik|boss|fight|stopped before step %d (until step %d): the party stays where it stands", boss+1, total, boss+1, boss+1)})
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if n := countPrefix(verbs, "resume"); n != 1 {
+		t.Fatalf("run verbs %v: %d resumes, want 1 (the run paused on its boss row and the boss engaged)", verbs, n)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want 0: the run leader fights its own boss\n%s", n, f.stdout.String())
+	}
+	if sum := f.summary(); !hasNote(sum, "resumed the run so the run leader fights it") {
+		t.Fatalf("notes %q, want the resume note", sum.Notes)
+	}
+}
+
+// TestFightRecordKillCountsAsBossKill is walk 41 tj-8/tj-9. The run stopped on Jeklik's boss step (exit 19) two
+// seconds before the tank's late pull landed; the raid killed her 153.7 s later and the dashboard filed
+// combat-fight-68-1.json outcome "kill" for step 50. The next walk's summary carried that fight row but said
+// boss_kill null, so the autopilot relaunched walks for a dead boss. A kill record of the goal boss's own row now
+// credits the summary's boss_kills as killed; a record of another boss's row does not.
+func TestFightRecordKillCountsAsBossKill(t *testing.T) {
+	p, err := dungeon.Load("../../dungeons/zul_gurub.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	goal := zgBossStepOf(t, 14517)
+	other := zgBossStepOf(t, 14507)
+	if other == goal {
+		t.Fatal("the fixture rows give Jeklik and Venoxis the same step")
+	}
+	w := bossSummaryWalk(t)
+	now := time.Now()
+	w.env = walkEnv{now: func() time.Time { return now }}
+	w.plan = p
+	w.outDir = t.TempDir()
+	w.stdout = io.Discard
+	w.started, w.ended = now, now
+	w.opts.until = fmt.Sprintf("step %d", goal+1)
+	w.startStep, w.untilStep = goal, goal+1
+	// The run stopped on her own row (walk 41's exit 19), so the frames never reported a kill.
+	feedStatus(w, tbm.RunStatus{Step: goal, Kind: "boss", Note: "fighting"}, now)
+	feedStatus(w, tbm.RunStatus{State: tbm.RunPaused, Step: goal, Kind: "boss", Note: "cmd pullback 17379391205577637935 refused: unreachable"}, now)
+	w.fights = []raidwalk.FightSummary{
+		{ID: "68-1", Step: goal, Leg: "high_priestess_jeklik", DurMS: 153656, Outcome: "kill", BossName: "High Priestess Jeklik", BossPhase: 1, BossPhaseEntry: 14517},
+		{ID: "99-1", Step: other, Leg: "high_priest_venoxis", DurMS: 90000, Outcome: "kill", BossName: "High Priestess Venoxis", BossPhase: 1, BossPhaseEntry: 14507},
+	}
+	w.finish(exitRaidWalkIncident)
+	raw, err := os.ReadFile(filepath.Join(w.outDir, "summary.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sum raidwalk.Summary
+	if err := json.Unmarshal(raw, &sum); err != nil {
+		t.Fatal(err)
+	}
+	k := sum.BossKill
+	if k == nil || k.Step != goal || k.Entry != 14517 || !k.Killed {
+		t.Fatalf("boss_kill %+v, want step %d entry 14517 killed by the fight record", k, goal)
+	}
+	if want := "fight 68-1: High Priestess Jeklik killed (outcome kill)"; k.Evidence != want {
+		t.Fatalf("boss_kill evidence %q, want %q", k.Evidence, want)
+	}
+	if len(sum.BossKills) != 1 || sum.BossKills[0].Step != goal || !sum.BossKills[0].Killed {
+		t.Fatalf("boss_kills %+v, want only the goal boss's killed record", sum.BossKills)
+	}
+	// The other boss's kill record is no goal boss: no track, no credit.
+	for _, b := range sum.BossKills {
+		if b.Step == other {
+			t.Fatalf("boss_kills %+v credits the non-goal boss at step %d", sum.BossKills, other)
+		}
+	}
+}

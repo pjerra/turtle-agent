@@ -1040,11 +1040,15 @@ type walk struct {
 	rerunStaleStep  int
 	rerunStaleUntil time.Time
 
-	started     time.Time
-	ended       time.Time
-	runStarted  bool
-	runStopped  bool
-	wipeResumes int // wipes and near-wipe stops recovered so far (--wipe-resume bounds them)
+	started    time.Time
+	ended      time.Time
+	runStarted bool
+	runStopped bool
+	// pausedBossResume is the pause (step and note) the walk's own `.bot run resume` went out for: a boss that
+	// engages while the run is paused on its own boss row resumes the run instead of stopping it (walk 41 tj-8),
+	// and the same paused line must not send another resume on every tick.
+	pausedBossResume string
+	wipeResumes      int // wipes and near-wipe stops recovered so far (--wipe-resume bounds them)
 	// --revive-at-raid bookkeeping (raid_walk_reviveraid.go): the point the commander stood at for the last revive, and
 	// the distinct hires brought back to it, not reached by two summons, and still missing when a resume went out.
 	reviveSpot                                         *dungeon.Point
@@ -1906,6 +1910,9 @@ func (w *walk) finish(code int) {
 			}
 		}
 	}
+	// The dashboard's fight records are the raid's own verdict when the walk's frames stopped with the run: a goal
+	// boss fight that ended "kill" credits its boss row even though the run had stopped (walk 41 tj-8/tj-9).
+	w.creditFightKills()
 	untilEffective := ""
 	if w.placeShortened {
 		untilEffective = w.untilLabel

@@ -1082,7 +1082,7 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 					return err
 				}
 			case raidwalk.IncidentBossEngaged:
-				if ok, early := w.runFightsBoss(v.Entry); ok {
+				if ok, early := w.runFightsBoss(v.Entry, true); ok {
 					switch {
 					case strings.TrimSpace(w.opts.until) == "none":
 						w.note("boss %d engaged at step %d under --until none: the run leader fights it", v.Entry, v.Step)
@@ -2490,7 +2490,7 @@ func (w *walk) runLeaderFightsEngagedBoss(step int) bool {
 	if b := w.bossStepOf(entry); b == 0 || b != step {
 		return false
 	}
-	ok, _ = w.runFightsBoss(entry)
+	ok, _ = w.runFightsBoss(entry, false)
 	return ok
 }
 
@@ -3028,6 +3028,98 @@ func (w *walk) bossKillSummaryFor(t *bossStepTrack) raidwalk.BossKillSummary {
 		k.Evidence = "the run leader never reported boss down"
 	}
 	return k
+}
+
+// goalBossStep is the boss row the run walks to, 1-based (0: no goal boss): the first boss row from the run's start
+// step (--from or --place, else step 1) that the until still walks to. The server stops BEFORE the until's step, so
+// the pass must test the rows from startStep to one below the stop. --until boss stops before its boss and has no
+// goal boss; --until none walks to the end, so every row is in range (the first boss row is the run's next goal).
+func (w *walk) goalBossStep() int {
+	limit := len(w.rows.Steps) + 1
+	switch {
+	case w.untilStep > 0:
+		limit = w.untilStep
+	case w.bossDoneStep > 0:
+		limit = w.bossDoneStep + 1
+	case len(w.untilWords) > 0:
+		return 0 // until boss (or an until whose step is not known yet): no goal boss
+	}
+	from := w.startStep
+	if from < 1 {
+		from = 1
+	}
+	for i := from - 1; i < len(w.rows.Steps) && i+1 < limit; i++ {
+		if w.rows.Steps[i].Kind == planexport.KindBoss {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// bossRowForFight is the 1-based boss row a dashboard fight record names: its own step when that step is a boss row
+// of the rows the walk reads and the record's leg (when it has one) is that row's leg, else the leg's boss row. 0
+// when neither names a boss row.
+func bossRowForFight(rows planexport.Rows, f raidwalk.FightSummary) int {
+	legName := func(leg int) string {
+		if leg >= 0 && leg < len(rows.Legs) {
+			return rows.Legs[leg].Name
+		}
+		return ""
+	}
+	if f.Step >= 1 && f.Step <= len(rows.Steps) {
+		s := rows.Steps[f.Step-1]
+		if s.Kind == planexport.KindBoss && (f.Leg == "" || legName(s.Leg) == f.Leg) {
+			return f.Step
+		}
+	}
+	if f.Leg == "" {
+		return 0
+	}
+	for i, s := range rows.Steps {
+		if s.Kind == planexport.KindBoss && legName(s.Leg) == f.Leg {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// creditFightKills credits the dashboard's own boss fight records (combat-fight-*.json, one per fight the walk's
+// polls wrote) to the boss tracks before the summary reads them: an outcome "kill" record of the goal boss's own
+// row means the goal boss is dead even when the walk never saw it — its frames stopped with the run (walk 41: tj-8
+// ended exit 19 "boss 14517 engaged at step 50" two seconds before the tank's late pull landed, and the raid killed
+// Jeklik 153.7 s later in fight 68-1; the next walk's summary carried that fight yet said boss_kill null, so the
+// autopilot relaunched walks for a dead boss). A record whose phase entry is not the row's boss family is not this
+// row's kill (Thekal's reborn 14509 is a phase entry of 14599).
+func (w *walk) creditFightKills() {
+	if len(w.fights) == 0 || len(w.rows.Steps) == 0 {
+		return
+	}
+	goal := w.goalBossStep()
+	for _, f := range w.fights {
+		if !strings.EqualFold(strings.TrimSpace(f.Outcome), "kill") {
+			continue
+		}
+		step := bossRowForFight(w.rows, f)
+		if step == 0 || goal == 0 || step != goal {
+			continue
+		}
+		row := w.rows.Steps[step-1]
+		if f.BossPhaseEntry != 0 && !w.bossFamily(row.Entry)[f.BossPhaseEntry] {
+			continue
+		}
+		t := w.bossTrackAt(step, row.Entry)
+		if t.killed {
+			continue
+		}
+		who := f.BossName
+		if who == "" {
+			who = strconv.Itoa(int(row.Entry))
+		}
+		t.engaged = true
+		t.killed = true
+		t.evidence = fmt.Sprintf("fight %s: %s killed (outcome kill)", f.ID, who)
+		w.logLine(w.env.now(), fmt.Sprintf("boss %d killed at step %d: fight %s %s (outcome kill)", row.Entry, step, f.ID, who))
+	}
 }
 
 // bossKillSummaries is the summary's boss_kills list: one record per boss step the run's statuses showed, ordered by
@@ -3686,6 +3778,55 @@ const (
 	earlyEngageFresh = 10 * time.Second
 )
 
+// pausedOnBossOwnRow says the run is paused on the engaged boss's own row: the step of the run's last status is a
+// boss row of the rows the walk reads, and the engaged entry is that row's boss (its own entry or a phase/hold form
+// of it, never a `first` add). Walk 41 tj-8: the run paused at step 50 "cmd pullback ... refused ... no safe stand
+// 35.0-25.0 yd from it" on Jeklik's own row.
+func (w *walk) pausedOnBossOwnRow(entry uint32) bool {
+	if w.lastStatus.Steps != len(w.rows.Steps) {
+		return false // rows not the server's: step numbers mean nothing
+	}
+	row, ok := w.bossRowAt(w.lastStatus.Step)
+	if !ok {
+		return false
+	}
+	return w.bossFamily(row.Entry)[entry]
+}
+
+// resumePausedBossRun sends `.bot run resume` for a boss that engaged while the run paused on the boss's own row,
+// and says whether the resume went out: a refused or dropped resume keeps the old ending (the caller's handleBoss
+// stops the run). The pause's step and note are the key, so the same pause sends one resume however many ticks see
+// it. The wait for the running line is the watch loop's own next poll; this only sends and checks the ACK.
+func (w *walk) resumePausedBossRun(entry uint32) bool {
+	if w.agent == nil {
+		return false
+	}
+	key := fmt.Sprintf("%d|%s", w.lastStatus.Step, w.lastStatus.Note)
+	if w.pausedBossResume == key {
+		return true // this pause already resumed the run: it is on its way
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "resume", WaitMS: 5000})
+	if err != nil {
+		w.note("boss %d engaged at step %d while the run is paused on its boss row: the run resume failed (%v)", entry, w.lastStatus.Step, err)
+		return false
+	}
+	if rep.Reply.Err != nil || (!rep.Reply.OK && rep.Reply.Kind != tbm.KindAck) {
+		line := rep.Reply.Line
+		if rep.Reply.Err != nil {
+			line = rep.Reply.Err.Message
+		}
+		w.note("boss %d engaged at step %d while the run is paused on its boss row: the run resume was refused (%s)", entry, w.lastStatus.Step, line)
+		return false
+	}
+	w.pausedBossResume = key
+	w.logLine(w.env.now(), "> .bot run resume")
+	w.note("boss %d engaged at step %d while the run is paused on its boss row: resumed the run so the run leader fights it", entry, w.lastStatus.Step)
+	w.logLine(w.env.now(), fmt.Sprintf("boss %d engaged at step %d while the run is paused on its boss row: resumed the run so the run leader fights it", entry, w.lastStatus.Step))
+	return true
+}
+
 // runFightsBoss says whether the run leader itself fights the engaged boss: true when the run's
 // own status kind is boss and its until goes past that step (walk 12: Jeklik engaged at step 40
 // with --until "step 41", and raid-walk stopped the run from under the fight); or, for the walk-24
@@ -3695,14 +3836,20 @@ const (
 // boss.approach[0] 19.9 yd from him, walk 24) would otherwise stop the run under the fight.
 //
 // early is the boss step the early rule fired for (0: the status kind was boss). False when
-// --until boss (a trash walk that wakes a boss never fights one), when the run is not running
-// (a boss that engages while the run is paused on its boss step still stops the walk), when the
-// rows are not the server's (step numbers mean nothing), when the next boss step is in another
-// leg, when the until does not go past the boss step, when the run stands more than
-// earlyEngageSteps steps before that boss step (not under boss-done, which never stops on its own
-// boss's engage), or when the main tank is not within earlyEngageYd of the boss row (review round 1,
+// --until boss (a trash walk that wakes a boss never fights one), when the run is paused anywhere
+// but on that boss's own row, when the rows are not the server's (step numbers mean nothing), when the
+// next boss step is in another leg, when the until does not go past the boss step, when the run stands
+// more than earlyEngageSteps steps before that boss step (not under boss-done, which never stops on its
+// own boss's engage), or when the main tank is not within earlyEngageYd of the boss row (review round 1,
 // item 3). --until none is true from the first check: a full clear never stops the run on a boss.
-func (w *walk) runFightsBoss(entry uint32) (ok bool, early int) {
+//
+// A run PAUSED on that boss's own row is the walk-41 case (tj-6/7/8, mj-4..8): the run leader paused there
+// because its pullback had no firing position, the tank's own pull went out seconds later and woke the boss
+// under the pause. With resumePaused the walk resumes the run (`.bot run resume`) and the run leader fights
+// it; with the old `.bot run stop` the raid killed Jeklik without the run, the summary said not killed and
+// the autopilot relaunched walks for a dead boss. resumePaused is false on the wipe and recovery paths: a
+// dead raid must not be resumed, and a recovery sends its own resume.
+func (w *walk) runFightsBoss(entry uint32, resumePaused bool) (ok bool, early int) {
 	if w.opts.until == "boss" {
 		return false, 0
 	}
@@ -3712,7 +3859,16 @@ func (w *walk) runFightsBoss(entry uint32) (ok bool, early int) {
 	if strings.TrimSpace(w.opts.until) == "none" {
 		return true, 0
 	}
-	if !w.haveStatus || w.lastStatus.State != tbm.RunRunning {
+	if !w.haveStatus {
+		return false, 0
+	}
+	if w.lastStatus.State == tbm.RunPaused {
+		if resumePaused && w.pausedOnBossOwnRow(entry) && w.resumePausedBossRun(entry) {
+			return true, 0
+		}
+		return false, 0
+	}
+	if w.lastStatus.State != tbm.RunRunning {
 		return false, 0
 	}
 	if w.lastStatus.Kind == "boss" {
@@ -4671,7 +4827,7 @@ func (w *walk) recoveredBoss(ctx context.Context, step int, knownFight bool) err
 	// post-resume boss-kind status keeps the old behaviour: the run leader
 	// fights its boss step.
 	if knownFight || w.statusSeq > w.resumeStatusSeq {
-		if ok, early := w.runFightsBoss(entry); ok {
+		if ok, early := w.runFightsBoss(entry, false); ok {
 			switch {
 			case strings.TrimSpace(w.opts.until) == "none":
 				w.note("boss %d engaged at step %d under --until none: the run leader fights it", entry, step)
