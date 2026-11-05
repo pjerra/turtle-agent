@@ -131,7 +131,7 @@ func TestSQLUnchangedByOrigins(t *testing.T) {
 		plan string
 		sha  string
 	}{
-		{"zul_gurub", "5d59de0cfa3a73bf9e67ee9906c1d5c03b3e9c8f92d186b286c9da8f3a77f73c"}, // combined 2026-11-05: walk 38's Jin'do hall staging (49363 stand, 1173082 plain centroid, the guard and north camp stands, the lone mistresses with west approaches), its review round 2 (the fold is undone: the guard, the north camp and the two lone mistresses are their own pull groups again, the corridor's 49714 row keeps max_bodies 9) and Jeklik's 49131/49135 patrol split; the Arlokk leg's loop order, the ledge's stands, the one-ascent temple walk and the arena descent in the gong's rows; walk 37's dropped -11603 -1229 pull and the boss stand at -11536.8 -1261.5 stay
+		{"zul_gurub", "b2969c9ba673931343e6f657ff8942fdc0f2cb1c793ec0a20affc29b2f15969d"}, // walk 41 (2026-11-05): Jeklik's last boss approach moved from -12241.56 -1399.14 to the walked floor point -12269.3 -1389.4 131.5 (one move row, no row count change). Combined 2026-11-05: walk 38's Jin'do hall staging (49363 stand, 1173082 plain centroid, the guard and north camp stands, the lone mistresses with west approaches), its review round 2 (the fold is undone: the guard, the north camp and the two lone mistresses are their own pull groups again, the corridor's 49714 row keeps max_bodies 9) and Jeklik's 49131/49135 patrol split; the Arlokk leg's loop order, the ledge's stands, the one-ascent temple walk and the arena descent in the gong's rows; walk 37's dropped -11603 -1229 pull and the boss stand at -11536.8 -1261.5 stay
 		{"onyxias_lair", "142c1d58928ad1efd9aca2b773c4762e2ddcbae05c308540080a1fedd6e3b38e"},
 	} {
 		p, err := dungeon.Load(filepath.Join("..", "..", "dungeons", c.plan+".json"))
