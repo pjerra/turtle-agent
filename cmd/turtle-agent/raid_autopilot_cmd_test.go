@@ -884,6 +884,12 @@ func TestAutoYieldFailedTeardownWritesNoYieldDone(t *testing.T) {
 		done <- raidAutopilotCmd(ctx, []string{"--foreground", "--binary", f.stub, "--poll", "50ms", "--settle", "0", "--status-every", "1h", f.walk}, io.Discard, io.Discard)
 	}()
 	waitForN(t, 10*time.Second, "the walk to launch", func() bool { return len(f.args()) >= 1 })
+	// The stub creates its slot dir after the launch event; a YIELD before that leaves no slot dir to fail on, and
+	// the teardown is then (correctly) clean. Wait for the dir so the test exercises the failed teardown.
+	waitForN(t, 10*time.Second, "the walk's slot dir", func() bool {
+		_, err := os.Stat(filepath.Join(f.walk, "a-1", "slot"))
+		return err == nil
+	})
 	yieldDone := filepath.Join(f.walk, autoYieldDone)
 	if err := os.WriteFile(yieldDone, nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -1085,6 +1091,10 @@ func TestAutoTeardownFailureKeepsTheRunActive(t *testing.T) {
 		st.mu.Lock()
 		defer st.mu.Unlock()
 		return st.run != nil && st.run.teardownFails > 0
+	})
+	// teardownFails is set before the event line is written (and the tick may return in between): poll the line.
+	waitForN(t, 5*time.Second, "the teardown-failed event", func() bool {
+		return strings.Contains(f.events(), "teardown-failed")
 	})
 	st := s.states[0]
 	st.mu.Lock()
