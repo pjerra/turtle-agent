@@ -2321,3 +2321,81 @@ func TestAutoStopFileOnAnEscalatedIDIsKept(t *testing.T) {
 		t.Fatalf("a refused STOP-a was logged as consumed:\n%s", f.events())
 	}
 }
+
+// Review round 2: an edited line could not replace an escalated id (it stayed escalated forever and the new goals
+// never ran). With no live run and a free slot, the new lines replace the old state and start in a fresh out dir.
+func TestAutoChangedLineReplacesAnEscalatedID(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.target("z srv 2 zg-z full -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 2, 0, "bad --sql")
+	f.running("z-1", 30)
+	launched := func(name string) bool {
+		want := "--out " + filepath.Join(f.walk, name)
+		for _, a := range f.args() {
+			if strings.Contains(a, want) {
+				return true
+			}
+		}
+		return false
+	}
+	s := f.supervisor()
+	tickUntil(t, s, "a escalated", func() bool {
+		_, escalated := runState(f.stateByID(s, "a"))
+		return escalated
+	})
+	// The person edits a's line (a new --from): the new lines must replace the escalated state, not wait forever.
+	path := filepath.Join(f.walk, autoTargetsFile)
+	if err := os.WriteFile(path, []byte("a srv 1 zg-a full -- zul_gurub --sql /zg.sql --from step 100\nz srv 2 zg-z full -- zul_gurub --sql /zg.sql\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "the new lines of a to launch", func() bool { return launched("a-2") })
+	if !strings.Contains(f.events(), "the new goal lines replace the escalated state") {
+		t.Fatalf("no replacement line:\n%s", f.events())
+	}
+	s.writeStatus()
+	if status := f.statusFile(); strings.Contains(status, "ESCALATE") {
+		t.Fatalf("status.txt kept the replaced id's ESCALATE line:\n%s", status)
+	}
+}
+
+// Review round 2: while the replaced id's slot lease is still held, the new lines wait; the wait is logged once, and
+// the lines start when the lease is released (not before).
+func TestAutoChangedLineWaitsForTheSlotLease(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.target("z srv 2 zg-z full -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 2, 0, "bad --sql")
+	f.running("z-1", 30)
+	launched := func(name string) bool {
+		want := "--out " + filepath.Join(f.walk, name)
+		for _, a := range f.args() {
+			if strings.Contains(a, want) {
+				return true
+			}
+		}
+		return false
+	}
+	s := f.supervisor()
+	tickUntil(t, s, "a escalated", func() bool {
+		_, escalated := runState(f.stateByID(s, "a"))
+		return escalated
+	})
+	f.lease("zg-a", "held")
+	path := filepath.Join(f.walk, autoTargetsFile)
+	if err := os.WriteFile(path, []byte("a srv 1 zg-a full -- zul_gurub --sql /zg.sql --from step 100\nz srv 2 zg-z full -- zul_gurub --sql /zg.sql\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 5 {
+		s.tick(context.Background())
+		time.Sleep(2 * time.Millisecond)
+	}
+	if launched("a-2") {
+		t.Fatalf("the new lines launched on a held lease:\n%s", strings.Join(f.args(), "\n"))
+	}
+	if got := strings.Count(f.events(), "id a: new lines wait for the slot lease"); got != 1 {
+		t.Fatalf("%d wait lines, want 1:\n%s", got, f.events())
+	}
+	f.lease("", "")
+	tickUntil(t, s, "the new lines to launch after the release", func() bool { return launched("a-2") })
+}

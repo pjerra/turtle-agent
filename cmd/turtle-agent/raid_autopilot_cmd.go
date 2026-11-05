@@ -211,11 +211,13 @@ type autoSupervisor struct {
 	// pending holds the states of target lines added (or changed) by a re-read: they are adopted once the old state
 	// of the same id is gone (its slot torn down).
 	pending []*autoState
-	// stopMu guards stopNoted: the tick goroutine reads the STOP files, and a finish goroutine consumes the
-	// file of a completed stop.
+	// stopMu guards stopNoted and waitNoted: the tick goroutine reads the STOP files and adopts the pending lines,
+	// while a finish goroutine consumes the file of a completed stop.
 	// stopNoted is the refused STOP files already logged: the person's file stays, so a tick must not log it again.
+	// waitNoted is the ids whose new lines were logged once as waiting for their old run or lease.
 	stopMu    sync.Mutex
 	stopNoted map[string]bool
+	waitNoted map[string]bool
 	// targetsMod/targetsSize are the targets.txt the loaded targets came from; targetsWarn is the last read error
 	// (logged once, and the loaded targets are kept meanwhile).
 	targetsMod  time.Time
@@ -983,6 +985,9 @@ func (s *autoSupervisor) queueState(st *autoState) {
 }
 
 // adoptPending adds the queued ids whose id is no longer running: the old state was dropped after its clean stop.
+// An escalated or refused id is never dropped, so a changed line's new lines replace its state once it has no live
+// run and its slot is free (review round 2: an edited line could not replace a refused id); while the old run or
+// lease keeps the slot, the lines wait and the wait is logged once.
 func (s *autoSupervisor) adoptPending() {
 	s.statesMu.Lock()
 	queued := s.pending
@@ -991,16 +996,22 @@ func (s *autoSupervisor) adoptPending() {
 	if len(queued) == 0 {
 		return
 	}
-	busy := map[string]bool{}
+	byID := map[string]*autoState{}
 	for _, st := range s.stateList() {
-		busy[st.id] = true
+		byID[st.id] = st
 	}
 	for _, st := range queued {
-		if busy[st.id] {
-			s.statesMu.Lock()
-			s.pending = append(s.pending, st)
-			s.statesMu.Unlock()
-			continue
+		if old := byID[st.id]; old != nil {
+			if !s.replaceEscalated(old) {
+				s.statesMu.Lock()
+				s.pending = append(s.pending, st)
+				s.statesMu.Unlock()
+				continue
+			}
+			// The old state is dropped before the new one is numbered: initSeq counts the dirs on disk, so the new
+			// lines start past the old run's outs.
+			s.dropState(old)
+			delete(byID, old.id)
 		}
 		s.addState(st)
 		// The id is in the list before initSeq numbers it: a state added after the numbering would keep seq 0 and
@@ -1010,6 +1021,60 @@ func (s *autoSupervisor) adoptPending() {
 		s.reconcileSlot(st, nil)
 		s.event(st.id, "targets", "added from targets.txt")
 	}
+}
+
+// replaceEscalated says a queued id's new lines may replace its escalated or refused state: the id has no live run
+// and the slot of its old lines is free. An id still stopping, or whose run or lease still holds the slot, keeps the
+// old state (the lines stay queued and the wait is logged once).
+func (s *autoSupervisor) replaceEscalated(old *autoState) bool {
+	old.mu.Lock()
+	escalated, refused, stopping, run := old.escalated, old.refused, old.stopping, old.run
+	old.mu.Unlock()
+	if !escalated && !refused {
+		return false
+	}
+	switch {
+	case stopping || run != nil:
+		s.noteLinesWait(old.id, "new lines wait for the run to end")
+		return false
+	case s.stateSlotHeld(old):
+		s.noteLinesWait(old.id, "new lines wait for the slot lease")
+		return false
+	}
+	s.stopMu.Lock()
+	delete(s.waitNoted, old.id)
+	s.stopMu.Unlock()
+	s.event(old.id, "targets", "the new goal lines replace the escalated state")
+	return true
+}
+
+// noteLinesWait logs one id's waiting new lines once: the replacement is retried every tick, and the person needs
+// the line once, not every poll.
+func (s *autoSupervisor) noteLinesWait(id, why string) {
+	s.stopMu.Lock()
+	if s.waitNoted[id] {
+		s.stopMu.Unlock()
+		return
+	}
+	if s.waitNoted == nil {
+		s.waitNoted = map[string]bool{}
+	}
+	s.waitNoted[id] = true
+	s.stopMu.Unlock()
+	s.event(id, "targets", fmt.Sprintf("id %s: %s", id, why))
+}
+
+// dropState removes one state from the list (adoptPending's replaced escalated id).
+func (s *autoSupervisor) dropState(st *autoState) {
+	s.statesMu.Lock()
+	kept := s.states[:0]
+	for _, x := range s.states {
+		if x != st {
+			kept = append(kept, x)
+		}
+	}
+	s.states = kept
+	s.statesMu.Unlock()
 }
 
 // tick advances every id once.
