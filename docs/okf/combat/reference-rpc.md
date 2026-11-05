@@ -45,7 +45,7 @@ Every combat call, what it takes, what it defaults to, and one example. All call
 | `spells` | `spell_id` (number, optional), `name` (string, optional, part of the name, case-insensitive), `highest` (bool, optional), `passive` (bool, optional) | No filter: every active spell, all ranks; passives excluded | `{"name": "Frostbolt", "highest": true}` |
 | `cast_state` | None | — | Reports the cast (`idle`/`casting`/`channelling`), last success and failure, the GCD, and combo points |
 
-`spells` rows carry the spell's metadata (level, flags, cast time, ranges, cost, cooldowns, school, effects) plus whether it can be cast now. `cast_state` mirrors the live tracker in [Spell data and spell state](/combat/concept-spell-data.md).
+`spells` rows carry the spell's metadata (level, flags, cast time, ranges, cost, cooldowns, school, effects) plus whether it can be cast now. `cast_state` mirrors the live tracker in [Spell data and spell state](concept-spell-data.md).
 
 ## The brain
 
@@ -55,7 +55,7 @@ Every combat call, what it takes, what it defaults to, and one example. All call
 | `brain_stop` | None | — | Stops the brain |
 | `brain_status` | None | — | Always answers, even mid-run |
 
-`role` is `dps`, `tank` or `healer`. `rotation` names a built-in or `rotations_dir` file. `run_id` allows letters, digits, dot, underscore and dash, at most 64 characters. `trace_meta` is an object of string to string with at most 16 entries; keys and values need 1–200 characters each. Refused while a dungeon run owns the brain, except `brain_status`. Full walkthrough in [Run the brain](/combat/guide-run-brain.md).
+`role` is `dps`, `tank` or `healer`. `rotation` names a built-in or `rotations_dir` file. `run_id` allows letters, digits, dot, underscore and dash, at most 64 characters. `trace_meta` is an object of string to string with at most 16 entries; keys and values need 1–200 characters each. Refused while a dungeon run owns the brain, except `brain_status`. Full walkthrough in [Run the brain](guide-run-brain.md).
 
 ## The addon host
 
@@ -67,7 +67,7 @@ Every combat call, what it takes, what it defaults to, and one example. All call
 | `addon_tick` | `ms` (number, required) | 1–120000 | `{"ms": 1000}` steps one second (manual clock) |
 | `addon_click` | `button` (string, optional), `tab` + `label` (strings, optional), row selectors (`bot`, `name`, `names`, `mark`, `row`, `view`, `bag`, `slot`), `before` (string, optional), `force` (bool, optional), `wait_ms` (number, optional) | `wait_ms` default 8000 | `{"button": "Fight.AoE"}` |
 
-One of `button` or `tab` + `label` is required; tabs are `Fight`, `Camp`, `Party`, `Roster`, `Guild`, `Raid`, `Log`, `BotPanel`. Full walkthrough in [Drive the addon host](/combat/guide-addon-host.md).
+One of `button` or `tab` + `label` is required; tabs are `Fight`, `Camp`, `Party`, `Roster`, `Guild`, `Raid`, `Log`, `BotPanel`. Full walkthrough in [Drive the addon host](guide-addon-host.md).
 
 ## Eluna
 
@@ -75,7 +75,7 @@ One of `button` or `tab` + `label` is required; tabs are `Fight`, `Camp`, `Party
 |---|---|---|---|
 | `tt` | `cmd` (string, required) | — | `{"cmd": "q units 40"}` |
 
-`cmd` carries no `.tt` prefix and no `#id`; at most 200 characters, one line. The result is `replies`: the raw reply objects in order. See [Eluna test hooks](/combat/concept-eluna.md).
+`cmd` carries no `.tt` prefix and no `#id`; at most 200 characters, one line. The result is `replies`: the raw reply objects in order. See [Eluna test hooks](concept-eluna.md).
 
 ## LFT
 
@@ -90,4 +90,4 @@ One of `button` or `tab` + `label` is required; tabs are `Fight`, `Camp`, `Party
 | `lfg_listings` | `refresh` (bool, optional), `id` (number, optional), `wait_ms` (number, optional) | `wait_ms` default 5000 | `{"refresh": true}` then `{"id": 7}` |
 | `lfg_listing_role` | `role` (string, required), `wait_ms` (number, optional) | `wait_ms` default 5000 | `{"role": "t"}` |
 
-Every answer returns `since` (the log cursor before the request), `sent` (the text sent), and `state` (the folded queue state). `roles` is the subset of `t`, `h`, `d`. `lfg_auto` with `"off": true` stops the answerer. Full walkthrough in [Queue through LFT](/combat/guide-queue-lft.md).
+Every answer returns `since` (the log cursor before the request), `sent` (the text sent), and `state` (the folded queue state). `roles` is the subset of `t`, `h`, `d`. `lfg_auto` with `"off": true` stops the answerer. Full walkthrough in [Queue through LFT](guide-queue-lft.md).

@@ -21,7 +21,7 @@ A plan is `dungeons/<name>.json`, format version 1. Every position is an `{"x", 
 
 - `version` is 1. `name` matches the file stem (`a-z`, `0-9`, `_`, `-`).
 - `kind` is `dungeon` (the default) or `raid`.
-- `status` is the truth about readiness, for example `draft (not mapped, not live-checked)`. See [Draft, mapped, live-checked](/plans/plan-lifecycle.md).
+- `status` is the truth about readiness, for example `draft (not mapped, not live-checked)`. See [Draft, mapped, live-checked](plan-lifecycle.md).
 - `map` is the instance map id. `entrance` is where the party starts inside; `entrance_trigger` is the area trigger at the portal; `entrance_tele` and `outside_tele` are `game_tele` names; `portal` is the entrance portal on the outer map.
 - `level_band` is `[low, high]`; the hired party takes the middle as its level.
 - `legs` is the run in order. You need at least one leg.
@@ -71,7 +71,7 @@ A boss is `entry` plus `position`, with `first` entries killed before the boss i
 
 ## Steps
 
-A step does exactly one thing: `use_object`, `wait_for` (game object state, no hostiles, or a unit in a state), `loot_object` (optionally in a `batch` opened back to back), `use_item`, `ritual` (several bots together; remote runs only), `gossip` (talk to an NPC and pick `option` or `text`), or `area_trigger` (someone steps into the zone until `expect` holds)[^plan-struct]. A step the run leader cannot do (agent gossip, a unit wait without a hold) cuts the export at its leg; see [From plan to run leader rows](/plans/run-leader-rows.md).
+A step does exactly one thing: `use_object`, `wait_for` (game object state, no hostiles, or a unit in a state), `loot_object` (optionally in a `batch` opened back to back), `use_item`, `ritual` (several bots together; remote runs only), `gossip` (talk to an NPC and pick `option` or `text`), or `area_trigger` (someone steps into the zone until `expect` holds)[^plan-struct]. A step the run leader cannot do (agent gossip, a unit wait without a hold) cuts the export at its leg; see [From plan to run leader rows](run-leader-rows.md).
 
 ## Plan-wide lists
 

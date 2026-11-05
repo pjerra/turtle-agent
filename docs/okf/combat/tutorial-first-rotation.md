@@ -68,4 +68,4 @@ The table prints which brain and rotation digest each side played, then party nu
 
 Keep a rotation only if it is better on the rows you care about and nothing is worse. Run one arm twice first to see the spread: a difference inside it is noise. A try with a death or wipe counts in the sums, not the means.
 
-Next: [Write a rotation](/combat/guide-write-rotation.md) for the file format, and [Score a fight](/combat/guide-score-fight.md) for judging finished fights.
+Next: [Write a rotation](guide-write-rotation.md) for the file format, and [Score a fight](guide-score-fight.md) for judging finished fights.

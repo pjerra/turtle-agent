@@ -19,7 +19,7 @@ status: draft
 
 # Your first RPC calls
 
-You drive a running agent with `turtle-agent rpc <walk-dir> <method> [params]`. This walkthrough logs the character in, asks where it is, and logs it out. It assumes the slot is already set up (see [logging in](/agent/login-guide.md)); it leaves nothing running.
+You drive a running agent with `turtle-agent rpc <walk-dir> <method> [params]`. This walkthrough logs the character in, asks where it is, and logs it out. It assumes the slot is already set up (see [logging in](login-guide.md)); it leaves nothing running.
 
 ## 1. Log the character in
 
@@ -63,4 +63,4 @@ turtle-agent rpc <walk-dir> logout
 
 The answer is `{"outcome": "complete"}` and the agent process exits. A `timeout` or `lost` outcome arrives as an error with `data.outcome` — the character may stay in the world for a while either way.
 
-You have now done the whole loop: start, observe, stop. Next try [moving](/agent/movement-guide.md) the character.
+You have now done the whole loop: start, observe, stop. Next try [moving](movement-guide.md) the character.

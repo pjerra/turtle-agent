@@ -27,7 +27,7 @@ status: draft
 - `step N`: stop at that step.
 - `leg L`: stop when that leg starts (the suite uses the first leg's end: a boss in leg 0 stops at the boss, else the walk stops when leg 2 starts, else it runs to the end).
 
-A plain `--from` without `--place` or `--until boss-done` goes to the server unresolved. A placed run inside a later leg shortens an explicit clause that would cross a guarded segment (see [How placement works](/raids/placement.md)).
+A plain `--from` without `--place` or `--until boss-done` goes to the server unresolved. A placed run inside a later leg shortens an explicit clause that would cross a guarded segment (see [How placement works](placement.md)).
 
 ## How the autopilot maps its goals
 

@@ -26,12 +26,12 @@ One `turtle-agent login` process plays one character: it holds the world connect
 
 The parts:
 
-- **Session and world connection** — login, logout, reconnect, and the client-authentic packets ([session and world connection](/agent/session-concept.md)). The login command and its flags are in [logging in](/agent/login-guide.md).
-- **The world as the agent sees it** — `status`, `units`, `party`, positions, auras ([world state](/agent/world-concept.md)).
-- **Movement** — `walk_to`, `path_to`, `walk_path`, `teleport` ([moving](/agent/movement-guide.md)).
-- **The brain** — the trigger-action engine that fights, rests and rezzes ([brain](/agent/brain-concept.md)); start it with [brain and follow](/agent/brain-guide.md).
-- **Death** — release, corpse run, resurrect ([dying and coming back](/agent/death-guide.md)).
-- **Every RPC call** — params, results, errors ([RPC reference](/agent/rpc-reference.md), [dungeon and party RPC](/agent/rpc-dungeon-reference.md), [addons, LFG and tuning RPC](/agent/rpc-advanced-reference.md)).
-- **When something goes wrong** — exact error strings and fixes ([troubleshooting](/agent/troubleshooting.md)).
+- **Session and world connection** — login, logout, reconnect, and the client-authentic packets ([session and world connection](session-concept.md)). The login command and its flags are in [logging in](login-guide.md).
+- **The world as the agent sees it** — `status`, `units`, `party`, positions, auras ([world state](world-concept.md)).
+- **Movement** — `walk_to`, `path_to`, `walk_path`, `teleport` ([moving](movement-guide.md)).
+- **The brain** — the trigger-action engine that fights, rests and rezzes ([brain](brain-concept.md)); start it with [brain and follow](brain-guide.md).
+- **Death** — release, corpse run, resurrect ([dying and coming back](death-guide.md)).
+- **Every RPC call** — params, results, errors ([RPC reference](rpc-reference.md), [dungeon and party RPC](rpc-dungeon-reference.md), [addons, LFG and tuning RPC](rpc-advanced-reference.md)).
+- **When something goes wrong** — exact error strings and fixes ([troubleshooting](troubleshooting.md)).
 
-Start with [your first RPC calls](/agent/first-rpc-tutorial.md) if you have never driven an agent.
+Start with [your first RPC calls](first-rpc-tutorial.md) if you have never driven an agent.

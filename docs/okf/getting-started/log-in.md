@@ -77,4 +77,4 @@ A logout from Ctrl-C, `--stay` or the `logout` RPC always ends the process at on
 
 The 1.18.1 core sometimes closes the socket right after a GM's logout request without sending either packet, in the open world and inside instances. That ends as `lost`, although the server's `char.log` recorded a normal logout each time it was checked.
 
-Every flag is listed in [login](/getting-started/login-reference.md).
+Every flag is listed in [login](login-reference.md).

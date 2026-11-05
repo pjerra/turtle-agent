@@ -26,7 +26,7 @@ turtle-agent raid-walk <plan> --server <server> --slot <slot> \
     --dir <plans-dir> --sql <world-sql> --from "leg <leg>" --place
 ```
 
-`--from "leg L"` is staged: the walk starts at the highest quiet move row before the leg's first pull (see [How placement works](/raids/placement.md)). The first leg needs no placement: `--place --from "leg <first leg>"` starts at step 1 from the door exactly as a non-placed run does.
+`--from "leg L"` is staged: the walk starts at the highest quiet move row before the leg's first pull (see [How placement works](placement.md)). The first leg needs no placement: `--place --from "leg <first leg>"` starts at step 1 from the door exactly as a non-placed run does.
 
 ## 2. Place at an exact step
 

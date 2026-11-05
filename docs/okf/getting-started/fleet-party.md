@@ -61,4 +61,4 @@ status: draft
 - A child that exits non-zero is reported and the others keep running. `--stop-on-failure` stops the rest instead. An exit 10 (a logout that did not complete) never stops the others.
 - Exit 0 only when every child exited 0; exit 9 when any child failed, was killed or could not be launched, or when the fleet is not fully in world after `--wait`.
 
-Every flag is listed in [rpc, fleet, version](/getting-started/rpc-fleet-reference.md).
+Every flag is listed in [rpc, fleet, version](rpc-fleet-reference.md).

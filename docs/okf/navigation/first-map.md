@@ -62,4 +62,4 @@ turtle-agent map --capture testdata/captures/m6-fight.twcap --mmaps <walk-dir> -
 
 ## What you learned
 
-The `map` command reads positions from a capture, an events file or botwatch samples, and draws routes, creatures and events over the navmesh. Next, read [Draw a run map](/navigation/draw-map.md) for every input and flag, or [The navmesh and the planner](/navigation/navmesh.md) to understand the background you just drew.
+The `map` command reads positions from a capture, an events file or botwatch samples, and draws routes, creatures and events over the navmesh. Next, read [Draw a run map](draw-map.md) for every input and flag, or [The navmesh and the planner](navmesh.md) to understand the background you just drew.

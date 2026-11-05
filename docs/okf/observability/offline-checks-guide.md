@@ -18,7 +18,7 @@ status: draft
 # Check a plan without a server
 
 Both commands read files only: plan rows, a world export, optionally the navmesh. No server, no login.
-They complement the plan checks in [plans](/plans/index.md): `stage-check` answers where staging puts the party, `trash-check` what the walk wakes.
+They complement the plan checks in [plans](../plans/index.md): `stage-check` answers where staging puts the party, `trash-check` what the walk wakes.
 
 ## 1. Check where staging would put the party
 

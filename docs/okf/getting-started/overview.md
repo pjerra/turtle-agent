@@ -30,11 +30,11 @@ Use it only on servers you run or are allowed to test on.
 
 ## How the pieces fit
 
-1. **Install** it: `make build` gives you `bin/turtle-agent`. See [Install and build](/getting-started/install.md).
-2. **Write the settings file**: the server address, your accounts and passwords, and folder paths. See [The config files](/getting-started/settings-concepts.md) and [Write the settings file](/getting-started/write-settings.md).
-3. **Log a character in**: `turtle-agent login` puts one character in the world and serves RPC on a loopback address. See [Log a character in](/getting-started/log-in.md).
-4. **Drive the character**: `turtle-agent rpc` sends one JSON-RPC call to a running agent. See [Drive the agent with RPC](/getting-started/drive-rpc.md). The calls themselves live in [The agent and its RPC](/agent/index.md).
-5. **Share test characters**: on a shared laptop, slots name each server's characters and leases hand them to one worker at a time. See [Slots and leases](/getting-started/slots-leases-concepts.md) and [Lease a slot and set it up](/getting-started/lease-slot.md).
-6. **Log several characters in**: `turtle-agent fleet` starts one login process per party member. See [Log several characters in](/getting-started/fleet-party.md).
+1. **Install** it: `make build` gives you `bin/turtle-agent`. See [Install and build](install.md).
+2. **Write the settings file**: the server address, your accounts and passwords, and folder paths. See [The config files](settings-concepts.md) and [Write the settings file](write-settings.md).
+3. **Log a character in**: `turtle-agent login` puts one character in the world and serves RPC on a loopback address. See [Log a character in](log-in.md).
+4. **Drive the character**: `turtle-agent rpc` sends one JSON-RPC call to a running agent. See [Drive the agent with RPC](drive-rpc.md). The calls themselves live in [The agent and its RPC](../agent/index.md).
+5. **Share test characters**: on a shared laptop, slots name each server's characters and leases hand them to one worker at a time. See [Slots and leases](slots-leases-concepts.md) and [Lease a slot and set it up](lease-slot.md).
+6. **Log several characters in**: `turtle-agent fleet` starts one login process per party member. See [Log several characters in](fleet-party.md).
 
-New here? Start with [First login](/getting-started/first-login.md): it walks the whole path once, start to finish.
+New here? Start with [First login](first-login.md): it walks the whole path once, start to finish.

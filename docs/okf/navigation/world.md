@@ -34,4 +34,4 @@ One folder per map (for example `tools/dungeongen/testdata/map36`). The full exp
 
 ## Patrols
 
-The export's waypoint loops become patrols: the loop's path and waits, the period (loop length at 2.5 yd/s plus waits), and the source (`creature_movement <guid>` or `creature_movement_template <entry>`). Formation followers attach to their leader's loop. The DB gives positions, not phases: the checks know where a patrol walks, not where it is right now, so [Record patrols](/navigation/patrols.md) exists to measure real loops and feed them in.
+The export's waypoint loops become patrols: the loop's path and waits, the period (loop length at 2.5 yd/s plus waits), and the source (`creature_movement <guid>` or `creature_movement_template <entry>`). Formation followers attach to their leader's loop. The DB gives positions, not phases: the checks know where a patrol walks, not where it is right now, so [Record patrols](patrols.md) exists to measure real loops and feed them in.

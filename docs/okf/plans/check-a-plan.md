@@ -29,7 +29,7 @@ Put flags before the plan names: this command uses plain flag parsing, which sto
 
 The gate: the check refuses a live-checked plan that fails, cannot run, or starts from a bad leg unless you pass `force` (then it notes `forced past ...`). A draft only warns (`warning (... draft ... so it runs)`) and runs on. Leader, group, observe, and pull-test runs are never checked — only the commander's remote run is.
 
-Keys: a locked object needs its item in `requires_item`, and every `requires_item` needs a maker (an earlier step, a boss `loot_item`, or an `optional` leg's item). A lock without an item fails with `no-item`; see [Plan troubleshooting](/plans/troubleshooting.md).
+Keys: a locked object needs its item in `requires_item`, and every `requires_item` needs a maker (an earlier step, a boss `loot_item`, or an `optional` leg's item). A lock without an item fails with `no-item`; see [Plan troubleshooting](troubleshooting.md).
 
 ## 2. Start from a later leg when iterating
 

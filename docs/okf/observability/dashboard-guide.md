@@ -16,7 +16,7 @@ status: draft
 # Start and run the dashboard
 
 The dashboard polls running agents over loopback RPC and serves one page. It is read-only unless you add `--edit` or `--control`.
-The agents it watches are covered in [the agent and its RPC](/agent/index.md); the dungeon and raid runs it shows in [dungeon runs](/dungeons/index.md) and [raids](/raids/index.md).
+The agents it watches are covered in [the agent and its RPC](../agent/index.md); the dungeon and raid runs it shows in [dungeon runs](../dungeons/index.md) and [raids](../raids/index.md).
 
 ## 1. Serve the page for every agent in your settings
 
@@ -55,7 +55,7 @@ Every flag and its default:
 | `--config-dir` | `~/.config/turtle-agent` | settings files and the `rpc-<port>.token` files |
 | `--mmaps-dir` | none | the navmesh folder of the server the plans run on; enables the real-route plan view |
 
-The table above leaves out the `--edit*` and `--control*` flags on purpose: route editing lives in [Turn on route editing](/observability/route-editing-guide.md) and run controls in [Control a run from the dashboard](/observability/run-controls-guide.md), with every flag also listed in [Command and flag reference](/observability/commands-reference.md).
+The table above leaves out the `--edit*` and `--control*` flags on purpose: route editing lives in [Turn on route editing](route-editing-guide.md) and run controls in [Control a run from the dashboard](run-controls-guide.md), with every flag also listed in [Command and flag reference](commands-reference.md).
 
 The page polls each agent every 1.5 s (`Interval`), with a 2 s bound per agent (`CallTimeout`). It calls four RPC methods only: `status`, `dungeon_status`, `tune_list`, and `bot_view`.
 
@@ -75,4 +75,4 @@ With `--mmaps-dir`, the plan view (`#/plan/<name>`) draws the path the bots walk
 
 ## 6. Real route numbers
 
-The real-route endpoint (`GET /api/plan/<name>/route[?agent]`) re-anchors plan stops to the navmesh and restyles hops: plain walks, `direct` amber dotted, `check_skip`/`gm_cross` violet, unpathable red dashed with the reason on hover. One route computes at a time; the answer caches by plan SHA (≤48 kept). Route editing versions feed the same view; see [Turn on route editing](/observability/route-editing-guide.md).
+The real-route endpoint (`GET /api/plan/<name>/route[?agent]`) re-anchors plan stops to the navmesh and restyles hops: plain walks, `direct` amber dotted, `check_skip`/`gm_cross` violet, unpathable red dashed with the reason on hover. One route computes at a time; the answer caches by plan SHA (≤48 kept). Route editing versions feed the same view; see [Turn on route editing](route-editing-guide.md).

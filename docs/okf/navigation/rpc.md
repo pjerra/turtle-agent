@@ -55,7 +55,7 @@ A GM `.go xyz` to a point, optionally on another map. Needs a GM account. Params
 
 ## map_snapshot
 
-Draws the run so far as a top-down map (see [Watch the run live with map_snapshot](/navigation/map-snapshot.md)). Params:
+Draws the run so far as a top-down map (see [Watch the run live with map_snapshot](map-snapshot.md)). Params:
 
 | Field | Default | What it does | Example |
 |---|---|---|---|

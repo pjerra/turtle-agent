@@ -21,9 +21,9 @@ A plan is one JSON file in `dungeons/` that describes a whole dungeon or raid ru
 
 Everything else in this area turns a plan file into something a party can run, or checks that it is safe to run:
 
-- You **write** a plan by hand or from a world-database export, then correct it on a mapping walk ([Draft, mapped, live-checked](/plans/plan-lifecycle.md)).
-- You **check** it offline: [plan-check](/plans/check-a-plan.md) walks every point on the navmesh, [plan scout](/plans/scout-a-plan.md) lints the exported rows, [plan-probe](/plans/probe-a-plan.md) scores the run leader's hops, [trash-check](/plans/trash-check.md) lists what a walk wakes, and [route-oracle](/plans/route-oracle.md) compares the stored route with what the navmesh would plan.
-- You **ship** it: [plan-export](/plans/export-a-plan.md) writes the TortoiseBots world migration, and [plan-diff](/plans/export-a-plan.md) shows what changed between two exports.
-- You **fix routes in place**: the dashboard route editor records versions, and `route-edits` moves a checked version back into `dungeons/` ([Apply route edits](/plans/apply-route-edits.md)).
+- You **write** a plan by hand or from a world-database export, then correct it on a mapping walk ([Draft, mapped, live-checked](plan-lifecycle.md)).
+- You **check** it offline: [plan-check](check-a-plan.md) walks every point on the navmesh, [plan scout](scout-a-plan.md) lints the exported rows, [plan-probe](probe-a-plan.md) scores the run leader's hops, [trash-check](trash-check.md) lists what a walk wakes, and [route-oracle](route-oracle.md) compares the stored route with what the navmesh would plan.
+- You **ship** it: [plan-export](export-a-plan.md) writes the TortoiseBots world migration, and [plan-diff](export-a-plan.md) shows what changed between two exports.
+- You **fix routes in place**: the dashboard route editor records versions, and `route-edits` moves a checked version back into `dungeons/` ([Apply route edits](apply-route-edits.md)).
 
-A plan never runs by itself. The commander reads it for dungeon runs, and the run leader rows the export writes are what TortoiseBots executes. Read [Anatomy of a plan file](/plans/plan-format.md) for the format, then [Check your first plan](/plans/first-plan-check.md) to run the checks.
+A plan never runs by itself. The commander reads it for dungeon runs, and the run leader rows the export writes are what TortoiseBots executes. Read [Anatomy of a plan file](plan-format.md) for the format, then [Check your first plan](first-plan-check.md) to run the checks.

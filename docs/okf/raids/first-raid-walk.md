@@ -21,7 +21,7 @@ You walk a raid plan the server knows, with hired bots and the TortoiseBots run 
 
 ## Before you start
 
-You need a slot on a test server, a folder with the raid plan JSON (`<walk-dir>/<plan>.json`), and the deployed migration (`--sql`) so step numbers come from the server's rows. Some raids already have a sourced hire tier in the committed table; any other raid needs `--tier N` (see [Hire gear tiers](/raids/tiers.md)).[^tiers]
+You need a slot on a test server, a folder with the raid plan JSON (`<walk-dir>/<plan>.json`), and the deployed migration (`--sql`) so step numbers come from the server's rows. Some raids already have a sourced hire tier in the committed table; any other raid needs `--tier N` (see [Hire gear tiers](tiers.md)).[^tiers]
 
 ## 1. Dry-run the walk
 
@@ -53,6 +53,6 @@ The output dir (default `./raid-walk-<plan>-<stamp>`) holds `summary.txt` and `s
 turtle-agent raid-walk report <walk-dir> --clock-offset 1h
 ```
 
-This reads the walk's files only (no server, no login) and prints the per-pull table: step, fight, engaged units, deaths, contacts before the pull order and neighbours that joined mid-fight (see [`raid-walk report` reference](/raids/report-reference.md)).
+This reads the walk's files only (no server, no login) and prints the per-pull table: step, fight, engaged units, deaths, contacts before the pull order and neighbours that joined mid-fight (see [`raid-walk report` reference](report-reference.md)).
 
-Next: [Run a raid walk](/raids/run-a-raid-walk.md) for the full `until` choice and the other flags.
+Next: [Run a raid walk](run-a-raid-walk.md) for the full `until` choice and the other flags.

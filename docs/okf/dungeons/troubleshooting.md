@@ -50,7 +50,7 @@ Each entry is a message the code really sends (RPC error text, report note, or s
 
 ## The run failed or stalled
 
-- **`stalled: <phase> <step> for <n> s, last progress <what>`.** The watchdog gave up after warn and recover. Fix: read the phase and step in the report, tune the matching key (see [Tune a live run](/dungeons/live-tuning.md)), and retry.
+- **`stalled: <phase> <step> for <n> s, last progress <what>`.** The watchdog gave up after warn and recover. Fix: read the phase and step in the report, tune the matching key (see [Tune a live run](live-tuning.md)), and retry.
 - **`wipe`.** The whole party died with `recover_wipe` off (the group-mode default). Fix: pass `recover_wipe: true`, or fix the pull that kills the party (a pull test isolates it).
 - **`party short: the party has <n> of <m> bots, <names> left the group`.** A bot left mid-run. Fix: rebind and resume, or check why the bot left.
 - **`the commander binding ended: <reason>`.** The module ended the binding mid-run. Fix: rebind (resume keeps the instance when the binding was kept) and look at the reason.

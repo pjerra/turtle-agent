@@ -39,4 +39,4 @@ A TortoiseBots run leader on the server clears the dungeon; your agent prepares,
 
 ## How to choose
 
-Testing a dungeon plan or a TortoiseBots build: commander. Testing your character's rotation against a pack: leader with a pull test. Keeping many raids running or checking a raid plan: observe; see [Raids](/raids/index.md).
+Testing a dungeon plan or a TortoiseBots build: commander. Testing your character's rotation against a pack: leader with a pull test. Keeping many raids running or checking a raid plan: observe; see [Raids](../raids/index.md).

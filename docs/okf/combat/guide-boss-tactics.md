@@ -44,7 +44,7 @@ Load the plan (`plan_check`, or run the leader). Spell names are checked against
 
 ## 4. Know what plays it
 
-The encounter turns on when a boss or `first` entry is in view, hostile, and in combat. Then the brain aims `kill_first` targets within 40 yd, interrupts planned casts first, dispels planned auras first at any mana, and walks out of `move_out` circles (tanks hold their ground). Commander and group runs ignore the block except through plan-level kill order; see [Combat troubleshooting](/combat/troubleshooting.md) if a rule never seems to fire.
+The encounter turns on when a boss or `first` entry is in view, hostile, and in combat. Then the brain aims `kill_first` targets within 40 yd, interrupts planned casts first, dispels planned auras first at any mana, and walks out of `move_out` circles (tanks hold their ground). Commander and group runs ignore the block except through plan-level kill order; see [Combat troubleshooting](troubleshooting.md) if a rule never seems to fire.
 
 ## 5. Limits and shipped bosses
 

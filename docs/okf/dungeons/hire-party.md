@@ -73,7 +73,7 @@ turtle-agent rpc <dir> dungeon_run '{"name":"<plan>","mode":"commander","prepare
 `enter` is `auto` (the default: teleport with `.tele name` when your account is a developer-level GM and the plan names a destination, else walk into the portal), `gm`, `walk`, `cmd` (the `cmd enter` order at the portal), or `off` (a party outside the dungeon fails the run). After entering, the run sends `.bot behavior <bot> loot on` for every bot (undoing a crashed run's `loot off`), then the preflight kit check: `.bot maintenance` and `.bot inv` per bot.
 
 - `preflight` is `warn` (the default: report and go on), `strict` (a warning fails the run), or `off`.
-- `ignore_entry_limit` lets the run try a 6th new instance within the hour; see [Refusals, the watchdog, and the entry ledger](/dungeons/refusals-watchdog.md).
+- `ignore_entry_limit` lets the run try a 6th new instance within the hour; see [Refusals, the watchdog, and the entry ledger](refusals-watchdog.md).
 
 ### Enter ceilings
 

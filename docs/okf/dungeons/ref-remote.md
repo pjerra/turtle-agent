@@ -76,11 +76,11 @@ Reads the latest `TBM:VIEW` frame (`have`, `n`, `age_ms`, `frame` with `seq`, `l
 
 ## tune_set, tune_list
 
-Commander runs only. `tune_set` takes `key` (required) and `value` (a number, or `"default"` to put the key back); a value outside the key's limits is refused. `tune_list` takes nothing and shows every key with its limits and current value. See [Tune a live run](/dungeons/live-tuning.md).
+Commander runs only. `tune_set` takes `key` (required) and `value` (a number, or `"default"` to put the key back); a value outside the key's limits is refused. `tune_list` takes nothing and shows every key with its limits and current value. See [Tune a live run](live-tuning.md).
 
 ## lfg_join, lfg_role_check_answer, lfg_proposal_answer, lfg_leave, lfg_status, lfg_auto, lfg_listings, lfg_listing_role
 
-The group-finder calls; see [Find a group](/dungeons/lft.md). `roles` letters are `t` (tank), `h` (healer), `d` (damage); a role your class cannot play is refused unless `force` is true. `wait_ms` defaults to 5000 everywhere. Every call answers `since`, `sent`, and the folded `state`.
+The group-finder calls; see [Find a group](lft.md). `roles` letters are `t` (tank), `h` (healer), `d` (damage); a role your class cannot play is refused unless `force` is true. `wait_ms` defaults to 5000 everywhere. Every call answers `since`, `sent`, and the folded `state`.
 
 | Call | Params | Example |
 |---|---|---|

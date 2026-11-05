@@ -33,4 +33,4 @@ A bot stays `na` when it was active too briefly (under a minute in a trace, unde
 
 ## The shared lists
 
-Beside the per-spec lists, the oracle holds what every class shares: the taunts the fight debugger counts, the consumables and item effects bots use, each class's generic buffs, forms and utility, and the debugger's limits. The `fight-score` command prints the debugger's two tank checks with the same numbers, then one oracle line per bot. Start from [Score a fight](/combat/guide-score-fight.md).
+Beside the per-spec lists, the oracle holds what every class shares: the taunts the fight debugger counts, the consumables and item effects bots use, each class's generic buffs, forms and utility, and the debugger's limits. The `fight-score` command prints the debugger's two tank checks with the same numbers, then one oracle line per bot. Start from [Score a fight](guide-score-fight.md).

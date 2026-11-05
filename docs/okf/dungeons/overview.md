@@ -26,7 +26,7 @@ A dungeon run walks a five-player party through a dungeon from a plan file (`dun
 
 ## The three modes
 
-The `mode` field picks who does the fighting. See [Run modes](/dungeons/modes.md) for the full comparison.
+The `mode` field picks who does the fighting. See [Run modes](modes.md) for the full comparison.
 
 - **Commander** (`mode: "commander"`, old name `"remote"`): your character stands outside the group and drives hired or named bots through the TortoiseBots remote commander (`.bot commander bind`, `.bot cmd ...` orders, the `TBM:VIEW` perception feed). This is the main mode for testing dungeons.
 - **Leader** (`mode: "leader"`, old name `"group"`): your character is in the party, leads it, and fights, played by the bot brain. Omit `mode` for the older group form, where the brain is optional.
@@ -38,11 +38,11 @@ The answer names both: `mode` is `group`, `remote`, or `observe`; `run_mode` is 
 
 A commander run goes through these phases, in order:
 
-1. **Prepare.** Bring the bots online, reset their instances, hire a fresh party if asked. See [Hire the party and enter](/dungeons/hire-party.md).
+1. **Prepare.** Bring the bots online, reset their instances, hire a fresh party if asked. See [Hire the party and enter](hire-party.md).
 2. **Bind.** Take command of the party (`commander bind`) and turn the perception feed on (`commander view on`).
-3. **Enter.** Get the party into the dungeon: teleport (GM), walk through the portal, or `cmd enter`. The hourly entry cap applies; see [Refusals, the watchdog, and the entry ledger](/dungeons/refusals-watchdog.md).
-4. **Start.** Move the party to the first step (`from_leg`, `from_pull_group`), or the whole plan from leg 0. See [Start anywhere](/dungeons/start-anywhere.md).
-5. **Steps.** Walk, pull, kill bosses, loot, talk to NPCs. The carrier bot does object steps; gossip steps go to a bot or your character. See [Loot and gossip](/dungeons/loot-gossip.md).
+3. **Enter.** Get the party into the dungeon: teleport (GM), walk through the portal, or `cmd enter`. The hourly entry cap applies; see [Refusals, the watchdog, and the entry ledger](refusals-watchdog.md).
+4. **Start.** Move the party to the first step (`from_leg`, `from_pull_group`), or the whole plan from leg 0. See [Start anywhere](start-anywhere.md).
+5. **Steps.** Walk, pull, kill bosses, loot, talk to NPCs. The carrier bot does object steps; gossip steps go to a bot or your character. See [Loot and gossip](loot-gossip.md).
 6. **End.** `cmd stay`, unbind, optional logout. The report keeps everything: steps, orders, refusals, loot, timings.
 
 Two guards watch every run: the **plan check** walks the plan on the navmesh before a commander run starts (refused plans fail unless you pass `force`), and the **progress watchdog** warns, recovers, then fails a run that stops making progress.
@@ -52,11 +52,11 @@ Two guards watch every run: the **plan check** walks the plan on the navmesh bef
 - `dungeon_run` starts, `dungeon_status` polls, `dungeon_stop` ends. `dungeon_pause` halts a commander run with its binding kept so the next `dungeon_run` resumes the same instance; `dungeon_resume` and `dungeon_skip` belong to observe mode only.
 - `dungeon_stage` walks the party to a leg start and optionally starts the run there.
 - `plan_check` runs the navmesh check by hand.
-- `tune_set` and `tune_list` change a running commander run's tunables; see [Tune a live run](/dungeons/live-tuning.md).
-- `commander` and `bot_view` drive the remote commander and read its feed by hand; see [Remote-control calls](/dungeons/ref-remote.md).
+- `tune_set` and `tune_list` change a running commander run's tunables; see [Tune a live run](live-tuning.md).
+- `commander` and `bot_view` drive the remote commander and read its feed by hand; see [Remote-control calls](ref-remote.md).
 
 ## Variants that replace the plan loop
 
-- **Pull test** (`pulltest` inside `dungeon_run`): pull one pull group several times and score each try. Minutes instead of a full clear; see [Score one pack](/dungeons/pulltest.md).
-- **Many characters** (`fleet` shell command): log a whole fleet in at once; see [Run a fleet](/dungeons/fleet.md).
-- **Group finder** (`lfg_*` calls): queue through Turtle's LFT instead of commanding bots; see [Find a group](/dungeons/lft.md).
+- **Pull test** (`pulltest` inside `dungeon_run`): pull one pull group several times and score each try. Minutes instead of a full clear; see [Score one pack](pulltest.md).
+- **Many characters** (`fleet` shell command): log a whole fleet in at once; see [Run a fleet](fleet.md).
+- **Group finder** (`lfg_*` calls): queue through Turtle's LFT instead of commanding bots; see [Find a group](lft.md).

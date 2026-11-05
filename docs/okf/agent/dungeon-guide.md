@@ -111,4 +111,4 @@ turtle-agent rpc <walk-dir> teardown
 
 `a teardown is going`
 
-Related: the commander's own calls (`commander`, `bot_view`, `tbm_*`, `addon_*`, `tt`, `map_snapshot`) are listed with every param in [addons, LFG and tuning RPC](/agent/rpc-advanced-reference.md).
+Related: the commander's own calls (`commander`, `bot_view`, `tbm_*`, `addon_*`, `tt`, `map_snapshot`) are listed with every param in [addons, LFG and tuning RPC](rpc-advanced-reference.md).

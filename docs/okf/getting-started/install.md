@@ -53,7 +53,7 @@ status: draft
 
 ## Build variants
 
-- `CGO_ENABLED=0` still builds, but `path_to` and `walk_path` then answer that the binary has no navmesh engine. Copying the server's navmesh files is covered in [Write the settings file](/getting-started/write-settings.md).
+- `CGO_ENABLED=0` still builds, but `path_to` and `walk_path` then answer that the binary has no navmesh engine. Copying the server's navmesh files is covered in [Write the settings file](write-settings.md).
 - `make tbm-contract` checks the addon protocol against the real TortoiseBotsManager addon (needs lua5.1; not part of `make test`).
 
 ## Branches

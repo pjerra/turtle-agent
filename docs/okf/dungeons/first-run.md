@@ -58,10 +58,10 @@ turtle-agent rpc <dir> dungeon_stop
 
 ## 4. Read the trace
 
-The report's `trace_file` points at the run's trace. Score a finished fight from it with `fight-score`, or print a pull-test table with `pulltest`; see [Score one pack](/dungeons/pulltest.md) and [Dungeon shell commands](/dungeons/ref-cli.md).
+The report's `trace_file` points at the run's trace. Score a finished fight from it with `fight-score`, or print a pull-test table with `pulltest`; see [Score one pack](pulltest.md) and [Dungeon shell commands](ref-cli.md).
 
 ## What to try next
 
-- Run a plan you mapped yourself: drop the `prepare` block and name your bots with `lead_bot` and `bots`; see [Run a commander dungeon](/dungeons/run-commander.md).
-- Start halfway in: pick a leg with `from_leg`; see [Start anywhere](/dungeons/start-anywhere.md).
-- Change a number mid-run without restarting: [Tune a live run](/dungeons/live-tuning.md).
+- Run a plan you mapped yourself: drop the `prepare` block and name your bots with `lead_bot` and `bots`; see [Run a commander dungeon](run-commander.md).
+- Start halfway in: pick a leg with `from_leg`; see [Start anywhere](start-anywhere.md).
+- Change a number mid-run without restarting: [Tune a live run](live-tuning.md).

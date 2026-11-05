@@ -37,7 +37,7 @@ turtle-agent plan-check --mmaps <mmaps-dir> ragefire_chasm
 turtle-agent plan-probe --mmaps <mmaps-dir> ragefire_chasm
 ```
 
-The probe measures each run leader hop on the navmesh and marks segments `bad` or worth a look. A bad segment is a hop the run leader should not walk as it stands — cut it with via points or reroute it. See [Probe the run leader's rows](/plans/probe-a-plan.md).
+The probe measures each run leader hop on the navmesh and marks segments `bad` or worth a look. A bad segment is a hop the run leader should not walk as it stands — cut it with via points or reroute it. See [Probe the run leader's rows](probe-a-plan.md).
 
 ## 3. See what a walk wakes with trash-check
 
@@ -45,8 +45,8 @@ The probe measures each run leader hop on the navmesh and marks segments `bad` o
 turtle-agent trash-check ragefire_chasm
 ```
 
-The report lists what one walk of the plan wakes: packs a body pull brings, the family assist hop, and the windows in which patrolling packs cross the route or a stand. `danger` means the segment wakes a pack no row pulls there; `patrol` means a patrol crosses while you stand there. See [See what a walk wakes](/plans/trash-check.md).
+The report lists what one walk of the plan wakes: packs a body pull brings, the family assist hop, and the windows in which patrolling packs cross the route or a stand. `danger` means the segment wakes a pack no row pulls there; `patrol` means a patrol crosses while you stand there. See [See what a walk wakes](trash-check.md).
 
 ## What you have
 
-A plan with a clean plan-check, no bad probe segments, and no unexplained `danger` findings is ready for the next step: a scout pass ([Scout a plan before a run](/plans/scout-a-plan.md)) or, if it is still a draft, its mapping walk ([Draft, mapped, live-checked](/plans/plan-lifecycle.md)).
+A plan with a clean plan-check, no bad probe segments, and no unexplained `danger` findings is ready for the next step: a scout pass ([Scout a plan before a run](scout-a-plan.md)) or, if it is still a draft, its mapping walk ([Draft, mapped, live-checked](plan-lifecycle.md)).

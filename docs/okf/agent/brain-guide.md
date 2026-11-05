@@ -28,7 +28,7 @@ status: draft
 turtle-agent rpc <walk-dir> brain_start '{"strategies": ["frost_mage"]}'
 ```
 
-Use one preset (see [the brain](/agent/brain-concept.md)) or list strategies. Add `"role": "tank"` or `"role": "healer"` only when the preset supports it (`role_tank` for tank, `role_healer` for healer — the call names the fix otherwise), `"tank": "<name>"` to assist a tank as DPS, `"no_move": true` to fight without walking. The call needs the character in world:
+Use one preset (see [the brain](brain-concept.md)) or list strategies. Add `"role": "tank"` or `"role": "healer"` only when the preset supports it (`role_tank` for tank, `role_healer` for healer — the call names the fix otherwise), `"tank": "<name>"` to assist a tank as DPS, `"no_move": true` to fight without walking. The call needs the character in world:
 
 `brain_start needs the character in the world (state <state>)`
 

@@ -68,4 +68,4 @@ Each row is the exact message, what it means, and the fix. Messages from command
 
 ## Check findings are not errors
 
-`trash-check` lines (`DANGER`, `PATROL`), `plan-check` issues and lint warnings describe the plan, not a broken tool. A `plan-check` exit 11, `trash-check` exit 21 with `--fail-on`, `stage-check` exit 13 and `route-oracle` exit 12 mean the check found something, not that the command failed. Read them in [Check a route before the run](/navigation/checks.md).
+`trash-check` lines (`DANGER`, `PATROL`), `plan-check` issues and lint warnings describe the plan, not a broken tool. A `plan-check` exit 11, `trash-check` exit 21 with `--fail-on`, `stage-check` exit 13 and `route-oracle` exit 12 mean the check found something, not that the command failed. Read them in [Check a route before the run](checks.md).

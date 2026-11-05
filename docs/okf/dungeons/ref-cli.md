@@ -36,7 +36,7 @@ These run in a shell, not through `rpc`. Exit code is 0 on success, 2 on bad fla
 turtle-agent fleet --config FILE [--settings FILE] [--stagger D] [--wait D] [--reconnect N] [--stop-on-failure]
 ```
 
-Starts one `login` child per fleet-file member and supervises them; see [Run a fleet](/dungeons/fleet.md).
+Starts one `login` child per fleet-file member and supervises them; see [Run a fleet](fleet.md).
 
 | Flag | Default | What it does | Example |
 |---|---|---|---|
@@ -54,7 +54,7 @@ turtle-agent pulltest [--json] <result.json>
 turtle-agent pulltest --compare <a.json> <b.json>
 ```
 
-Prints a pull-test result (`<run id>.pulltest.json` beside the trace, or a `dungeon_status` answer saved as JSON) as a table, or the change from a to b. See [Score one pack](/dungeons/pulltest.md).
+Prints a pull-test result (`<run id>.pulltest.json` beside the trace, or a `dungeon_status` answer saved as JSON) as a table, or the change from a to b. See [Score one pack](pulltest.md).
 
 | Flag | Default | What it does | Example |
 |---|---|---|---|
@@ -82,7 +82,7 @@ Scores finished fights the way the dashboard's fight debugger reads them: the `m
 turtle-agent tune-diff <trace.jsonl>
 ```
 
-No flags. Prints what the live tuning of a run changed as JSON patches for the tunables file and the plan file; see [Tune a live run](/dungeons/live-tuning.md).
+No flags. Prints what the live tuning of a run changed as JSON patches for the tunables file and the plan file; see [Tune a live run](live-tuning.md).
 
 ## plan-check
 

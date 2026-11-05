@@ -38,4 +38,4 @@ The dashboard can draw the real game map under the run. That picture comes from 
 
 Map ids are the server's: 0 is Eastern Kingdoms, 1 is Kalimdor, and each dungeon has its own number (70 is Uldaman, 389 is Ragefire Chasm).
 
-Start with [Draw your first run map](/navigation/first-map.md), or read the checks in [Check a route before the run](/navigation/checks.md).
+Start with [Draw your first run map](first-map.md), or read the checks in [Check a route before the run](checks.md).

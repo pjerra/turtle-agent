@@ -49,7 +49,7 @@ A class without a preset for the role is refused with the list. Name another pre
 
 ## 3. Score your own pull
 
-A leader-mode pull test runs where the party stands, at the pack: leave `teleport` and `resume` out, and pass a `brain` (or `mode: "leader"`, which picks one). See [Score one pack](/dungeons/pulltest.md).
+A leader-mode pull test runs where the party stands, at the pack: leave `teleport` and `resume` out, and pass a `brain` (or `mode: "leader"`, which picks one). See [Score one pack](pulltest.md).
 
 ## 4. Where the run starts
 

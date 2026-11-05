@@ -33,7 +33,7 @@ turtle-agent rpc <dir> dungeon_run '{"name":"<plan>","mode":"commander","lead_bo
 turtle-agent rpc <dir> dungeon_run '{"name":"<plan>","mode":"commander","prepare":{"party":"hire"}}'
 ```
 
-With `prepare.party "hire"`, leave `lead_bot`, `bots`, `tank`, and `healer` out: the hire step names them. See [Hire the party and enter](/dungeons/hire-party.md).
+With `prepare.party "hire"`, leave `lead_bot`, `bots`, `tank`, and `healer` out: the hire step names them. See [Hire the party and enter](hire-party.md).
 
 ## 2. Name the tank, healer, and carrier when the defaults are wrong
 
@@ -71,7 +71,7 @@ turtle-agent rpc <dir> dungeon_stop
 turtle-agent rpc <dir> dungeon_pause
 ```
 
-Then continue with `dungeon_run` plus `resume` and `from_leg`; see [Start anywhere](/dungeons/start-anywhere.md). With no run going, `dungeon_pause` changes nothing.
+Then continue with `dungeon_run` plus `resume` and `from_leg`; see [Start anywhere](start-anywhere.md). With no run going, `dungeon_pause` changes nothing.
 
 ## What commander mode refuses
 

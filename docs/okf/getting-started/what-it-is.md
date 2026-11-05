@@ -27,5 +27,5 @@ Three facts shape everything else in these docs:
 
 - **One process, one character.** `login` owns a single session. For a party, run one process per character with `fleet`, or one slot dir per worker with `lease` and `slot setup`.
 - **The RPC server is local only.** It binds a loopback address, refuses browsers (`Origin` header) and other host names, and every call carries a bearer token. Remote players never reach it.
-- **The agent behaves like a real 1.12 client.** It sends only packets a real client sends and keeps movement anticheat-clean. It never answers Warden: expect one `WARDEN: ... timeout` line per session on a server that ships a module, and treat it as noise. See [Log a character in](/getting-started/log-in.md) for logout outcomes that look like disconnects.
+- **The agent behaves like a real 1.12 client.** It sends only packets a real client sends and keeps movement anticheat-clean. It never answers Warden: expect one `WARDEN: ... timeout` line per session on a server that ships a module, and treat it as noise. See [Log a character in](log-in.md) for logout outcomes that look like disconnects.
 - **It does almost no client side.** It does no rendering and no inventory management beyond listing the bags, using and equipping items, taking corpse loot, and buying and selling.

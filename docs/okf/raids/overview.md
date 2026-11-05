@@ -35,7 +35,7 @@ A raid plan runs in observe mode only, with `prepare.party: hire`. The hire step
 
 A walk moves through phases in order: validate (no network), lease, `slot setup`, `login`, GM `.go xyz` to the plan's portal, hire and gear, `commander bind <MT> raid`, enter, `run start`, watch, hold, `commander status` and `teardown`, then a summary. The output dir (default `./raid-walk-<plan>-<stamp>`, mode 0700) holds `run.log`, `frames.jsonl`, `summary.json` and `summary.txt`, the combat fight dumps, `pulljoiners.json`, `slot-setup.txt` and `teardown.json`.[^walk-cmd]
 
-While watching, the walk reads the run's `TBM:RUN` lines, the `bot_view` frames and the dashboard. A wipe revives the raid and optionally resumes the run (see [Recover from wipes](/raids/recover-wipe.md)). A boss engagement stops the run and waits for a kill, a reset or a wipe.
+While watching, the walk reads the run's `TBM:RUN` lines, the `bot_view` frames and the dashboard. A wipe revives the raid and optionally resumes the run (see [Recover from wipes](recover-wipe.md)). A boss engagement stops the run and waits for a kill, a reset or a wipe.
 
 Exit codes: 0 means the run ended by its `until` (or the hold). 18 means a phase failed or was refused. 19 means the walk ran and was torn down but a wipe or a boss engagement happened. 23 means a fault verdict failed or a cleanup left a bot frozen. 15 means the lease was refused (including slot 3). 26 means the instance cap ledger is at the cap. 29 means a placement failed every try in the same instance. 2 is a usage error.[^walk-cmd]
 
@@ -43,7 +43,7 @@ Exit codes: 0 means the run ended by its `until` (or the hold). 18 means a phase
 
 Two flags change what the raid fights, and both only work on the test servers with `--place`:
 
-- `--place` with `--from "leg L"` or `--from "step N"` starts the raid partway into its instance instead of at the door, clearing the legs it skips (see [Start partway into an instance](/raids/place-mid-raid.md)).
+- `--place` with `--from "leg L"` or `--from "step N"` starts the raid partway into its instance instead of at the door, clearing the legs it skips (see [Start partway into an instance](place-mid-raid.md)).
 - `--gm-clear` and `--gm-clear-boss` GM-kill named pull groups or a leg's boss after the placement, so a later leg can be tested while a trash wipe is still being fixed. A walk that used them is marked **ASSISTED**, never a real clear.
 - `--gm-instance-data` sends `.debug instancedata` lines when the walk first starts the named leg, for gates like a boss's priest gate.
 
@@ -51,7 +51,7 @@ Two flags change what the raid fights, and both only work on the test servers wi
 
 ## Where to go next
 
-- First walk: [Walk your first raid](/raids/first-raid-walk.md).
-- Concepts you will need: [Until clauses and autopilot goals](/raids/until-and-goals.md), [Hire gear tiers](/raids/tiers.md), [The instance cap ledger](/raids/instance-cap.md).
-- Every flag: [`raid-walk` flags](/raids/raid-walk-reference.md), [`raid-autopilot` reference](/raids/raid-autopilot-reference.md).
-- Something failed: [Troubleshooting raids](/raids/troubleshooting.md).
+- First walk: [Walk your first raid](first-raid-walk.md).
+- Concepts you will need: [Until clauses and autopilot goals](until-and-goals.md), [Hire gear tiers](tiers.md), [The instance cap ledger](instance-cap.md).
+- Every flag: [`raid-walk` flags](raid-walk-reference.md), [`raid-autopilot` reference](raid-autopilot-reference.md).
+- Something failed: [Troubleshooting raids](troubleshooting.md).

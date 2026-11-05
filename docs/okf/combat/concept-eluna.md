@@ -35,4 +35,4 @@ You send the toolkit command without the `.tt` prefix and without a request id; 
 
 ## Failures
 
-A refused command keeps its toolkit code in the error data (`err`) with the refusing reply, so you can see what the server said. No answer in time is a timeout, with whatever replies did arrive. See [Combat troubleshooting](/combat/troubleshooting.md) for the exact texts.
+A refused command keeps its toolkit code in the error data (`err`) with the refusing reply, so you can see what the server said. No answer in time is a timeout, with whatever replies did arrive. See [Combat troubleshooting](troubleshooting.md) for the exact texts.

@@ -21,7 +21,7 @@ A plan's `status` field is the truth about how far it has been checked[^plans-do
 
 - **Draft** (`draft (not mapped, not live-checked)`): a skeleton from the world database export alone — legs, pull groups, bosses, entrance, portal, level band, hired party. Waypoints, pull order, doors, and events are unchecked. Most plans are drafts.
 - **Mapped**: the route is corrected from a mapping walk (below).
-- **Live-checked**: a party has run it live. Per-dungeon evidence lives in [Dungeon notes](/plans/dungeon-notes.md).
+- **Live-checked**: a party has run it live. Per-dungeon evidence lives in [Dungeon notes](dungeon-notes.md).
 
 `dungeon_run` refuses a draft unless you pass `allow_draft`. A raid plan runs in mode `observe` with `prepare.party "hire"` only: the server's run leader leads the bound raid while you hire, gear, and bind it[^plans-doc].
 

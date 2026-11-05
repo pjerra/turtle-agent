@@ -23,7 +23,7 @@ This tutorial takes you from a fresh checkout to a character standing in the wor
 
 ## What you need
 
-- A checkout of turtle-agent and a Go toolchain (see [Install and build](/getting-started/install.md)).
+- A checkout of turtle-agent and a Go toolchain (see [Install and build](install.md)).
 - A reachable test server and one account with a character on it.
 
 ## Steps
@@ -52,7 +52,7 @@ This tutorial takes you from a fresh checkout to a character standing in the wor
    }
    ```
 
-   Only `realmd` and `accounts` are required. Every key is listed in [Settings file](/getting-started/settings-reference.md).
+   Only `realmd` and `accounts` are required. Every key is listed in [Settings file](settings-reference.md).
 
 4. Log the character in:
 
@@ -71,7 +71,7 @@ This tutorial takes you from a fresh checkout to a character standing in the wor
      http://127.0.0.1:8765/rpc
    ```
 
-   The answer names your character and its position. (Slot workers use `turtle-agent rpc` instead, which reads the token file for you; see [Drive the agent with RPC](/getting-started/drive-rpc.md).)
+   The answer names your character and its position. (Slot workers use `turtle-agent rpc` instead, which reads the token file for you; see [Drive the agent with RPC](drive-rpc.md).)
 
 6. Log out cleanly: press Ctrl-C in the login shell. The agent logs the character out and exits 0. If the server refuses the logout (you are in combat), the agent retries for 35 seconds; a second Ctrl-C quits at once.
 
@@ -79,6 +79,6 @@ This tutorial takes you from a fresh checkout to a character standing in the wor
 
 A built binary, a settings file with one account, and a character you can log in and drive. Next steps:
 
-- [Log a character in](/getting-started/log-in.md) for staying online, timeouts and exit codes.
-- [Write the settings file](/getting-started/write-settings.md) for folders (navmesh, plans, traces) and RPC tokens.
-- [The agent and its RPC](/agent/index.md) for everything the agent can do once it is online.
+- [Log a character in](log-in.md) for staying online, timeouts and exit codes.
+- [Write the settings file](write-settings.md) for folders (navmesh, plans, traces) and RPC tokens.
+- [The agent and its RPC](../agent/index.md) for everything the agent can do once it is online.

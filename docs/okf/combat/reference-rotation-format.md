@@ -32,7 +32,7 @@ Version 1. `rotation check` enforces all of this against the spell data. Unknown
 | `notes` | What it plays and why | Optional | `"..."` |
 | `sources` | Where the idea comes from | Optional | `["..."]` |
 | `priorities` | The entries, first to last | Required | See below |
-| `kb` | Where a generated file came from: guide `file`, its `sha256`, the `preset` it plays in, the `recipe`, and `unexpressed` rows (`row`, `text`, `why`) | Optional | See [Write a rotation](/combat/guide-write-rotation.md) |
+| `kb` | Where a generated file came from: guide `file`, its `sha256`, the `preset` it plays in, the `recipe`, and `unexpressed` rows (`row`, `text`, `why`) | Optional | See [Write a rotation](guide-write-rotation.md) |
 
 ## One priority
 
