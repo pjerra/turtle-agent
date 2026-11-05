@@ -2154,3 +2154,81 @@ func TestAutoSaveStateLeavesNoTempAndReadsBack(t *testing.T) {
 		t.Fatalf("state = %+v", saved.IDs)
 	}
 }
+
+// Review round 2: the checkpoint's goal and step belong to the goal lines it was written for. A person edits the
+// lines under a crashed supervisor; the old done/boss-dead state must not mark the new lines done, it must not be
+// restored: the new goals run.
+func TestAutoEditedGoalsRunDespiteADoneCheckpoint(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.target("a srv 1 zg-a boss:14507 -- zul_gurub --sql /zg.sql")
+	s := f.supervisor()
+	st := s.states[0]
+	st.mu.Lock()
+	st.current = 1
+	st.goals[1].dead = true
+	st.mu.Unlock()
+	s.saveState()
+	// The person rewrites both lines into two other goals before the restart: the saved goal 1 (boss dead) is about
+	// lines targets.txt no longer holds, and its index 1 still exists in the new file.
+	path := filepath.Join(f.walk, autoTargetsFile)
+	if err := os.WriteFile(path, []byte("a srv 1 zg-a boss:14509 -- zul_gurub --sql /zg.sql\na srv 1 zg-a boss:14506 -- zul_gurub --sql /zg.sql\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.attempt("a-1", 2, 0, "bad --sql")
+	s2 := f.supervisor()
+	tickUntil(t, s2, "the edited goal to run", func() bool { return len(f.args()) >= 1 })
+	if args := f.args(); len(args) != 1 || !strings.Contains(args[0], filepath.Join(f.walk, "a-1")) {
+		t.Fatalf("the edited goal did not run fresh:\n%s", strings.Join(args, "\n"))
+	}
+	if strings.Contains(f.events(), "already dead") {
+		t.Fatalf("the checkpoint's boss-dead state was applied to the edited goals:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "the goal lines changed since the checkpoint; its progress is not restored") {
+		t.Fatalf("the start did not say the checkpoint was stale:\n%s", f.events())
+	}
+}
+
+// Review round 2: the other half of the fingerprint rule: unchanged lines still restore their done/boss-dead
+// progress across a restart, and the checkpoint carries the lines' fingerprint.
+func TestAutoUnchangedGoalsRestoreTheDoneCheckpoint(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.target("a srv 1 zg-a boss:14507 -- zul_gurub --sql /zg.sql")
+	s := f.supervisor()
+	st := s.states[0]
+	st.mu.Lock()
+	st.current = 1
+	st.goals[1].dead = true
+	st.mu.Unlock()
+	s.saveState()
+	var saved struct {
+		IDs []struct {
+			Fingerprint string `json:"fingerprint"`
+		} `json:"ids"`
+	}
+	raw, err := os.ReadFile(filepath.Join(f.walk, autoStateFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.IDs) != 1 || saved.IDs[0].Fingerprint == "" {
+		t.Fatalf("the checkpoint does not fingerprint the id's goal lines: %s", raw)
+	}
+	if len(f.args()) != 0 {
+		t.Fatalf("the first supervisor launched a walk:\n%s", strings.Join(f.args(), "\n"))
+	}
+	s2 := f.supervisor()
+	tickUntil(t, s2, "the restored dead goal to be done", func() bool {
+		done, _ := runState(f.stateByID(s2, "a"))
+		return done
+	})
+	if len(f.args()) != 0 {
+		t.Fatalf("an unchanged line's boss-dead goal was walked again:\n%s", strings.Join(f.args(), "\n"))
+	}
+	if !strings.Contains(f.events(), "already dead: goal boss:14507 is dead; the last goal is done") {
+		t.Fatalf("the restart did not restore the boss-dead goal:\n%s", f.events())
+	}
+}

@@ -20,6 +20,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -359,6 +361,25 @@ func groupAutoTargets(targets []raidwalk.AutoTarget) []*autoState {
 		st.goals = append(st.goals, autoGoalState{target: t})
 	}
 	return out
+}
+
+// autoTargetFingerprint is the sha256 of a state's ordered, normalised goal lines: id, server, slot, holder, goal,
+// start and the raid-walk args, one line per goal (the line numbers of targets.txt are not part of it). The
+// checkpoint stores it per id, so a start can tell whether a saved goal and step belongs to the lines targets.txt
+// holds now: a person may edit the goals under a crashed supervisor, and a checkpoint written for the old lines must
+// not mark the new ones done or place them from an old step.
+func autoTargetFingerprint(st *autoState) string {
+	var b strings.Builder
+	for _, g := range st.goals {
+		t := g.target
+		fmt.Fprintf(&b, "%q %q %q %q %q %q", t.ID, t.Server, t.Slot, t.Holder, t.Goal.String(), t.Start)
+		for _, a := range t.Args {
+			fmt.Fprintf(&b, " %q", a)
+		}
+		b.WriteByte('\n')
+	}
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
 }
 
 // forwardInstanceCap is the --instance-cap-per-account to pass on, 0 when the flag was not given (raid-walk then
@@ -1998,6 +2019,10 @@ type autoSavedID struct {
 	// goals were met. The checkpoint keeps them so a restart still reports the id as stopped (not as a met goal).
 	Stopped bool   `json:"stopped,omitempty"`
 	StopWhy string `json:"stop_why,omitempty"`
+	// Fingerprint is the sha256 of the id's ordered goal lines this checkpoint was written for (empty in a checkpoint
+	// from before it, which is taken as the same lines). A start restores the goal and step progress only when it
+	// matches targets.txt now.
+	Fingerprint string `json:"fingerprint,omitempty"`
 	// BossDead says the current goal's boss is dead in the instance: the goal is DONE at a start, never placed again.
 	BossDead bool   `json:"boss_dead,omitempty"`
 	NextAt   string `json:"next_at,omitempty"`
@@ -2022,6 +2047,7 @@ func (s *autoSupervisor) saveState() {
 			ID: st.id, Goal: st.current, GoalsDone: st.current,
 			Done: st.done, Escalated: st.escalated, Reuse: st.nextReuse,
 			Stopped: st.stopped, StopWhy: st.stopWhy,
+			Fingerprint: autoTargetFingerprint(st),
 		}
 		if st.current < len(st.goals) {
 			g := st.goals[st.current]
@@ -2132,6 +2158,15 @@ func (s *autoSupervisor) reconcile() error {
 		st.mu.Lock()
 		t := st.goals[0].target
 		sv := byID[st.id]
+		if sv != nil && sv.Fingerprint != "" && sv.Fingerprint != autoTargetFingerprint(st) {
+			// The lines changed under the checkpoint (a person edited targets.txt while no supervisor ran): the
+			// saved goal, step and stop belong to other goal lines. Only the slot is reconciled (a live walk or a
+			// held lease still refuses the id); the new lines start fresh.
+			st.mu.Unlock()
+			s.event(st.id, "checkpoint", "the goal lines changed since the checkpoint; its progress is not restored")
+			s.reconcileSlot(st, nil)
+			continue
+		}
 		if sv != nil {
 			if sv.Goal >= 0 && sv.Goal < len(st.goals) {
 				st.current = sv.Goal
