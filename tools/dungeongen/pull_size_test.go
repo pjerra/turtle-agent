@@ -9,9 +9,10 @@ import (
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
-// The Arlokk terrace rows (leg 4, pulls 20-26 after the 2026-11-05 re-route) are per formation: 20 the middle landing's
-// 4 Panthers + 2 Blood Drinkers (formation 49343), 21 the top's west 4 Shadow Hunters (51353), 22 the top's east 4 Panthers
-// + 2 Shadow Hunters (51369), 24 the middle-west 5, 25 the lower 5 and 26 the lower ledge's 6. The ring estimate (mmaps-free
+// The Arlokk terrace rows (leg 4, pulls 20-26 after the 2026-11-05 re-route) are per formation, in the loop's walking
+// order: 20 the top's west 4 Shadow Hunters (formation 51353), 21 the top's east 4 Panthers + 2 Shadow Hunters (51369),
+// 22 the top's south 4 Panthers (49331), 23 the top's north 4 Panthers (51588), 24 the middle landing's 4 Panthers + 2
+// Blood Drinkers (49343), 25 the middle-west 5 (49329) and 26 the lower ledge's 6 (51365). The ring estimate (mmaps-free
 // path, LOS always seen) still joins the whole 11-20 yd cluster, so each row estimates 27-32 bodies: that is the walk-28
 // finding the split does not remove by itself (the neighbours are within the 20 yd family-assist ring), and the pin holds
 // the rows' numbers, ceilings and estimates so a ring or reach change that breaks the set shows up here, not just in the
@@ -41,12 +42,13 @@ func TestZulGurubArlokkTerraceIsSplitPerFormation(t *testing.T) {
 		}
 	}
 	want := map[int]struct{ bodies, ceiling int }{
-		20: {27, 6}, // middle landing: 4 Panthers + 2 Blood Drinkers (formation 49343), max_bodies 6
-		21: {27, 4}, // top west: 4 Shadow Hunters (51353), stand pull, max_bodies 4
-		22: {31, 6}, // top east: 4 Panthers + 2 Shadow Hunters (51369), stand pull, max_bodies 6
-		24: {32, 8}, // middle west: unsized (the lint's raid default 8)
-		25: {27, 5}, // lower ledge: max_bodies 5
-		26: {27, 6}, // arena-stair ledge: max_bodies 6
+		20: {31, 4}, // top west: 4 Shadow Hunters (formation 51353), stand pull, max_bodies 4
+		21: {31, 6}, // top east: 4 Panthers + 2 Shadow Hunters (51369), stand pull, max_bodies 6
+		22: {37, 8}, // top south: 4 Panthers (49331), unsized (the lint's raid default 8)
+		23: {31, 8}, // top north: 4 Panthers (51588), unsized
+		24: {32, 6}, // middle landing: 4 Panthers + 2 Blood Drinkers (49343), stand pull, max_bodies 6
+		25: {27, 5}, // middle west: 5 (49329), max_bodies 5
+		26: {27, 6}, // lower ledge: 6 (51365), max_bodies 6
 	}
 	seen := map[int]bool{}
 	for _, f := range found {
@@ -80,7 +82,7 @@ var pullSizeKnownCounts = map[string]int{
 	"ragefire_chasm": 27, "wailing_caverns": 52, "deadmines": 144, // ci-lint fix round (was 28/54): the ramp approach points pull from closer, joining fewer neighbour packs. deadmines 132 -> 146: the ported lab_tunnel and laboratory legs add 14 pulls over the ceiling.
 	// zulfarrak re-pinned for the waypoint lint fixes (was 53): leg 8 pull 1 (12 bodies) now crosses the ceiling and leg 3 pull 1 grows 11 -> 14 bodies.
 	"uldaman": 58, "zulfarrak": 54, "karazhan_crypt": 125, // ci-lint fix round (was 57): the snapped ramp approaches join one fewer neighbour pack.
-	"molten_core": 19, "blackwing_lair": 40, "zul_gurub": 87, // arlokk re-route (was 90): the one-ascent order and the split's own radii put three fewer rows over their ceilings; walk 38 (was 92): the honour guard (14), the north camp (10), the two lone mistresses and the Jeklik patrol rows carry their measured ceilings now, so their estimates no longer sit over an unset one. merge with walk 37 (was 93 on the branch, 87 on dev): Mandokir 440 fix (was 88): group 0 is one stand-pull row now (its old plain pull had no over-ceiling estimate either way). walk 36 (was 90): the two north hall packs are one pull now (8 bodies, one over-ceiling row instead of two) and the -11603 -1229 pull beside the respawn pit is dropped. Walk 35 (was 91): the dropped middle-east-Panther pull takes its over-ceiling row with it (its pack is owned by the terrace row now).
+	"molten_core": 19, "blackwing_lair": 40, "zul_gurub": 88, // arlokk route fix round 1 (was 87): the loop order\'s top stands moved north, so one more row (the top\'s south, 37 bodies) estimates over its ceiling; arlokk re-route (was 90): the one-ascent order and the split's own radii put three fewer rows over their ceilings; walk 38 (was 92): the honour guard (14), the north camp (10), the two lone mistresses and the Jeklik patrol rows carry their measured ceilings now, so their estimates no longer sit over an unset one. merge with walk 37 (was 93 on the branch, 87 on dev): Mandokir 440 fix (was 88): group 0 is one stand-pull row now (its old plain pull had no over-ceiling estimate either way). walk 36 (was 90): the two north hall packs are one pull now (8 bodies, one over-ceiling row instead of two) and the -11603 -1229 pull beside the respawn pit is dropped. Walk 35 (was 91): the dropped middle-east-Panther pull takes its over-ceiling row with it (its pack is owned by the terrace row now).
 	"ruins_of_ahnqiraj": 29, "temple_of_ahnqiraj": 74, "naxxramas": 150, // re-pinned for the AQ waypoint pass (was 32): three over-ceiling estimates are gone, the leg-0 stands moved out of the wasp ring, the leg-3 stand off the Rajaxx cluster walk, and leg-6 pull 4 drops 15 bodies to 9.
 	"stormwrought_ruins":   169,                            // hand-maintained from the generated draft (waypoint pass 2026-11-03): dense custom packs warn on most pulls.
 	"lower_karazhan_halls": 78, "upper_karazhan_halls": 30, // waypoint pass (was 79): one moved stand pulls its pack from one body fewer.

@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -22,7 +23,7 @@ const zgArlokkLeg = 4
 const zgArlokkDevWalkYd = 3582.2
 
 // zgArlokkMaxWalkYd caps the re-routed leg, so a later edit that adds a detour is a failure and not just a print.
-const zgArlokkMaxWalkYd = 2200.0
+const zgArlokkMaxWalkYd = 2100.0
 
 // zgArlokkPatrolShotYd is the tank's shot the stand-pull gate waits for a patroller in (TortoiseBots
 // DungeonRunPolicy.h's kStandPullShotYd): a stand must lie within it of a loop point for the gate to fire.
@@ -186,8 +187,70 @@ func TestZulGurubArlokkLegRoute(t *testing.T) {
 			open = i
 		}
 	}
+	if open < 0 {
+		t.Fatalf("no gong open row 180526")
+	}
 	if open < 0 || open != len(rows)-3 {
 		t.Errorf("the gong 180526 is row %d of %d, want the open row just before the boss approach and the boss", open+1, len(rows))
+	}
+}
+
+// TestZulGurubArlokkApproachesClearOfLaterPacks: no authored stand or approach point of the leg's pull groups stands
+// within 20 yd (3D) of a spawn of a pack that a later pull group owns. The temple's floors do not stop the proximity
+// wake (walk 25: the move to a z 60 approach 13.3 yd 3D from 51354 on the z 71 terrace woke four packs), so the check
+// is 3D and not floor-aware: the landing's old last approach point (-11502.2 -1625.7 60.4) lay 13.1 yd under the top's
+// east six, and the party's arrival woke them before their pull row. A point is compared with the spawns no earlier row
+// owns: a group's own pack and the packs already pulled are out (the party walks into them on purpose).
+func TestZulGurubArlokkApproachesClearOfLaterPacks(t *testing.T) {
+	p, err := dungeon.Load(filepath.Join(plansDirT, "zul_gurub.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = 20.0
+	leg := p.Legs[zgArlokkLeg]
+	type spawn struct {
+		at    dungeon.Point
+		entry uint32
+		group int
+	}
+	var pulled []spawn
+	n := 0
+	for gi, g := range leg.PullGroups {
+		var later []spawn
+		for j := gi + 1; j < len(leg.PullGroups); j++ {
+			for _, q := range leg.PullGroups[j].Positions {
+				own, dead := false, false
+				for _, q2 := range g.Positions {
+					if q == q2 {
+						own = true
+					}
+				}
+				for _, s := range pulled {
+					if s.at == q {
+						dead = true
+					}
+				}
+				if own || dead {
+					continue
+				}
+				later = append(later, spawn{at: q, group: j})
+			}
+		}
+		for ai, a := range g.Approach {
+			for _, s := range later {
+				if d := zgArlokkDist3(a, s.at); d < want {
+					n++
+					t.Errorf("group %d approach %d (%.1f %.1f %.1f) stands %.1f yd from a later group's spawn %.1f %.1f %.1f (group %d): want %.0f yd (3D)",
+						gi, ai, a.X, a.Y, a.Z, d, s.at.X, s.at.Y, s.at.Z, s.group, want)
+				}
+			}
+		}
+		for _, q := range g.Positions {
+			pulled = append(pulled, spawn{at: q, group: gi})
+		}
+	}
+	if n == 0 {
+		t.Logf("every stand and approach point of the leg's %d pull groups is %.0f yd (3D) clear of the packs a later row pulls", len(leg.PullGroups), want)
 	}
 }
 

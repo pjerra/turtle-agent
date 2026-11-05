@@ -714,16 +714,22 @@ const arlokkTerraceStoreyYd = 9
 // the clearance rule against it, so the rule holds where the server's mmaps are absent. Regenerate it with -update-routes.
 const arlokkRoutesFixture = "testdata/zg_arlokk_terrace_routes.json"
 
-// zgArlokkCorridor names the packs that stand beside the one-ascent route's single lanes (see the walk loop below):
-// their aggro reach crosses the lane, no authored route can stay 23 yd out of them and still make the temple's only
-// walkable climb, and the split's stand pulls hold the formations at the fight.
+// zgArlokkCorridor names the packs whose aggro reach crosses the one-ascent route's single lanes (see the walk loop
+// below): each is listed with the measured crossing and why no authored route can stay arlokkTerraceRowYd out of it.
+// The 2026-11-05 re-route (the top pulled before the z 60 ledge, the ledge's packs from the ledge) removed the old
+// exemptions for the z 50 landing's Blood Drinkers (51367/51368, no longer walked past) and for the top's east six
+// (51369, pulled before the ledge's stair is walked).
 var zgArlokkCorridor = map[uint64]string{
-	51367: "the north stair up to the z 50 ring (the 21 -> 17 approach) passes the z 50 landing's Blood Drinkers",
-	51368: "the north stair up to the z 50 ring (the 21 -> 17 approach) passes the z 50 landing's Blood Drinkers",
-	49329: "the z 50 -> z 60 ramp passes the z 60 landing's Panthers",
-	51369: "the z 50 -> z 60 ramp and the top's west approach pass the top's east formation",
-	49331: "the top's approaches pass the top's south formation's Panthers",
-	51365: "the z 60 -> z 50 descent ramp passes the lower pack (the fix-4b exemption, kept)",
+	// The west ramp is the temple's only climb to the top: it runs from the ring's west end up past the z 60 ledge, and
+	// its straight line passes 2.9-8.9 yd from the ledge's west pack (the walked polyline 15.9-21.2 yd), whose navmesh
+	// ray is CLEAR. No authored route can climb without it, and the ledge's west row pulls that pack two rows later.
+	49329: "the west ramp — the only climb — passes 3-21 yd from the ledge's west pack with line of sight; the ledge's west row pulls it next",
+	// The top is one open floor: its four formations stand 17-30 yd apart, so the walks between its stands pass 20-23 yd
+	// from the neighbouring formation (the west stand 21.9 yd from the east's Panthers, the walks to the south 20.5-22.9
+	// from the north's). Two stand pulls cannot both stand outside the other's 23 yd (the split's own limit), and each
+	// row's stand holds its own formation.
+	51369: "the top is one floor: the walk to the west stand passes 21.9 yd from the east's Panthers",
+	51588: "the top is one floor: the walks between its stands pass 20.5-22.9 yd from the north's Panthers",
 }
 
 // updateRoutes rewrites arlokkRoutesFixture from the map-309 navmesh: `go test -run
@@ -763,8 +769,12 @@ type arlokkRoutes struct {
 // group: 11 upper A, 12 upper B + upper east + middle east + lower + middle west (from the upper-east stand, before the
 // bridge), 13 upper north. Walk 29 then wiped at 14 engaged (b-r1) and at 11 (g): the row is split per formation (fix
 // 4b): 12 upper B + upper east, 13 middle east, 14 upper north, 15 middle west, 16 lower, each with its own stand and
-// max_bodies. The test walks the exported leg-4 rows from group 11's approach through the LAST terrace pull
-// (the max seq among the pull rows for groups 11-16, each of which must appear exactly once): for every pair
+// max_bodies. The 2026-11-05 route fix round 1 walked the mesh's loop instead: the ring's west end, the west ramp, the
+// z 71 top (west 4, then east 6, then south 4, then north 4), the ledge's stair down to the z 60 ledge (the landing's 6
+// from the stair, then the west 5), the north stair down to the ring's 6, and the arena. Each pack is pulled where the
+// mesh reaches it, and the remaining crossings are the two zgArlokkCorridor names below.
+// The test walks the exported leg-4 rows from group 13's approach through the LAST terrace pull
+// (the max seq among the pull rows for groups 13-25, each of which must appear exactly once): for every pair
 // of consecutive move rows, every spawn of a formation that a later pull row owns stays arlokkTerraceRowYd out of the walk.
 // "Later" leaves out the pack the walk is approaching: its own pull row comes after the move, and its firing stand is
 // 12-25 yd from it by design. The big cluster's row must own its middle-east Blood Drinkers 51594/51595 (leader 49343)
