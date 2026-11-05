@@ -1,6 +1,6 @@
-// Walk-37 fixes (TortoiseBots-audit tests/raid-zg-walk37): the Jin'do hall's honour guard, the Jeklik
-// plateau's empty bat row, and the five patrol rows the exporter cut through the pack fields (Venoxis
-// groups 10/18/19, Thekal group 3, Arlokk group 21). The rows are built with the live export flags
+// Walk-37 fixes (TortoiseBots-audit tests/raid-zg-walk37): the Jeklik plateau's empty bat row and the five
+// patrol rows the exporter cut through the pack fields (Venoxis groups 10/18/19, Thekal group 3, Arlokk group
+// 21). Its row model (zgW37Rows) is shared with zg_w38_test.go. The rows are built with the live export flags
 // (plan-export --approach-hops --floor-aware), so the approach-path rows the run leader actually walks
 // are the ones checked: zgParties' model (the party stands at the last approach point) cannot see them.
 package main
@@ -319,87 +319,6 @@ func (r *zgW37Rows) later(i int, cs []creature) []creature {
 		out = append(out, c)
 	}
 	return out
-}
-
-// TestZgW37JindoHonourGuardKeepsTheBossReach: walk 37 e/e2 (step 552, three wipes) and walk 36 f/f3/c3
-// had the honour-guard row engage Jin'do: the stand pull's stand sat 35+ yd from its own pack, past the
-// tank's 28.5 yd shot, so the row plain-pulled and walked the party to the pack 13 yd from him. The fix
-// splits the camp (the 8-body formation 49421 and the two lone mistresses 49402/49403) so each row's
-// stand is inside its pack's shot and out of Jin'do's reach (routeReach: 25 + the raid's 10 yd spread).
-// The rows are the live export's: every move row of the leg before the boss approach and every pull
-// or boss row keeps that reach from 11380.
-func TestZgW37JindoHonourGuardKeepsTheBossReach(t *testing.T) {
-	p, cs := zgLoadPlanAndExport(t)
-	leg, legNo := zgW37LegByName(t, p, "jindo_the_hexxer")
-	var jindo *creature
-	for i := range cs {
-		if cs[i].Entry == 11380 {
-			jindo = &cs[i]
-		}
-	}
-	if jindo == nil {
-		t.Fatal("no Jin'do spawn in the map-309 export")
-	}
-	bossReach := routeReach(p, *jindo)
-	if math.Abs(bossReach-35) > 0.01 {
-		t.Fatalf("Jin'do's reach is %.1f yd, want 35 (25 aggro at party level 58 + 10 raid spread)", bossReach)
-	}
-	rows := zgW37BuildRows(t, p, cs, legNo)
-	// The boss row's own approach is exempt (it walks to the boss): stop at its first approach row.
-	stop := len(rows.rows)
-	for i, s := range rows.rows {
-		if s.Kind == planexport.KindBoss && s.Entry == 11380 {
-			stop = i
-			for stop > 0 && rows.rows[stop-1].Kind == planexport.KindMove {
-				stop--
-			}
-			break
-		}
-	}
-	if stop == len(rows.rows) {
-		t.Fatal("no boss row for 11380 in the exported leg 6")
-	}
-	for i := 0; i < stop; i++ {
-		s := rows.rows[i]
-		if s.Kind != planexport.KindPull && s.Kind != planexport.KindMove {
-			continue
-		}
-		at := rows.party(i)
-		if s.Kind == planexport.KindPull {
-			// A stand pull whose stand cannot shoot the whole pack plain-pulls: the party walks to
-			// the row's point (the pack's centroid) instead of standing at the stand.
-			if ok, _ := rows.standInShot(i, cs); !ok {
-				at = dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
-			}
-		}
-		if d := dist(at, jindo.Pos); d < bossReach {
-			t.Errorf("exported leg 6 row %d (%s %.1f %.1f %.1f) is %.1f yd from Jin'do 11380, want >= %g: the fight would wake him",
-				i, s.Comment, at.X, at.Y, at.Z, d, bossReach)
-		}
-	}
-	// The three guard rows are real stand pulls: the stand is inside the tank's shot of the whole pack
-	// (else PatrolStandPullGate plain-pulls to the pack, which is what walked into Jin'do) and the fight
-	// is 35+ yd from him.
-	for _, want := range []struct {
-		guid uint64
-		name string
-	}{{49421, "49421's guard formation"}, {49402, "the lone 49402"}, {49403, "the lone 49403"}} {
-		owner := -1
-		if o, ok := rows.owner[want.guid]; ok {
-			owner = o
-		}
-		if owner < 0 {
-			t.Errorf("no exported leg 6 pull row owns %s (guid %d): the pack is pulled by no step", want.name, want.guid)
-			continue
-		}
-		if ok, why := rows.standInShot(owner, cs); !ok {
-			t.Errorf("exported leg 6 row %d (%s) owns %s: %s", owner, rows.rows[owner].Comment, want.name, why)
-		}
-		if d := dist(rows.party(owner), jindo.Pos); d < bossReach {
-			t.Errorf("exported leg 6 row %d (%s) owns %s and fights %.1f yd from Jin'do, want >= %g", owner, rows.rows[owner].Comment, want.name, d, bossReach)
-		}
-	}
-	_ = leg
 }
 
 // TestZgW37PatrolPullsClearOfLaterPacks is the MANDOKIR-440 method on the five ZG patrol rows that were a

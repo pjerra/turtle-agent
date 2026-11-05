@@ -131,7 +131,7 @@ func TestSQLUnchangedByOrigins(t *testing.T) {
 		plan string
 		sha  string
 	}{
-		{"zul_gurub", "a3ea6eb75dfd6ffda43d549520e7ee38b39c3283a21dddd5774511e2ec5b0cae"}, // merge of origin/dev (#409) with walk 37 on the branch, 14826 out of cc_priority; walk 36: the honour guard is pulled first from -11562 -1306, the two north packs are one 8-body stand pull, the -11603 -1229 pull beside the respawn pit is dropped, and the boss stand is -11536.8 -1261.5; the venoxis group 9 stand routes south of the boss
+		{"zul_gurub", "a59f74d860ee6c8585a17a7625d90263528d95f464e84977625c6895f103598b"}, // review round 2: the Jin'do boss-row fold is undone (the guard, the north camp and the two lone mistresses are their own pull groups again, the corridor's 49714 row keeps max_bodies 9), the 49363 south approach point and the 49185 bat pack stay; walk 38: the 49363 stand and Jeklik's 49131/49135 patrol split
 		{"onyxias_lair", "142c1d58928ad1efd9aca2b773c4762e2ddcbae05c308540080a1fedd6e3b38e"},
 	} {
 		p, err := dungeon.Load(filepath.Join("..", "..", "dungeons", c.plan+".json"))

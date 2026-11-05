@@ -1203,8 +1203,20 @@ func (b *builder) cutLongHops() error {
 				// The leader must see the target from its last row: the floor-aware cutter keeps hops up to 110 yd, so the corner
 				// left after the 25 yd standoff can stand beyond its 60 yd sight (razorfen_kraul round 35: the boss row 73.5 yd
 				// from the last approach row, and its stand discipline walked back there into a no-LOS hold). A point on the path
-				// at approachLeadYd past the standoff is the last row then.
-				if len(via) > 0 && dist3(via[len(via)-1], c) > dungeon.RunLeaderReachYd {
+				// at approachLeadYd past the standoff is the last row then. The interpolation needs a path polyline to take it
+				// from: when the cutter kept a single point and dropped the rest as water (walk 38's Hakkar lake crossing), the
+				// straight line from that point to the target is not the walk the run leader takes, so no row is written there
+				// and the run leader paths the gap itself.
+				waterGap := false
+				if len(full) <= 1 {
+					for _, n := range notes {
+						if n.Dropped && strings.Contains(n.Reason, "NavWater") {
+							waterGap = true
+							break
+						}
+					}
+				}
+				if len(via) > 0 && !waterGap && dist3(via[len(via)-1], c) > dungeon.RunLeaderReachYd {
 					if p, ok := pointBefore(full, c, approachStandoffYd+approachLeadYd); ok {
 						via = append(via, p)
 					}
