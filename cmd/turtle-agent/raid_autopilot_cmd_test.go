@@ -506,6 +506,30 @@ func TestAutoRestartFromTheLastReachedStep(t *testing.T) {
 	}
 }
 
+// Walk 39: every wipe at a boss resumed at the boss row the wipe died on. raid-walk refused that start (exit 2:
+// "--place --from step N: step N is a boss row") and the autopilot escalated the id. The restart steps back to the
+// nearest row of the same leg the walk takes (the fixture migration's Arlokk boss row is step 397, the move row 396).
+func TestAutoRestartFromABossRowStepsBack(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql")
+	f.attempt("a-1", 18, 397, "paused: 15 dead: 21")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	args := f.args()
+	if len(args) != 2 {
+		t.Fatalf("%d launches, want 2:\n%s", len(args), strings.Join(args, "\n"))
+	}
+	if !strings.Contains(args[1], "--from step 396 --place --reuse-instance") {
+		t.Fatalf("the restart did not step back from the boss row 397: %s", args[1])
+	}
+	if !strings.Contains(f.events(), "a resume: \"step 397\" is not a place start: resuming from \"step 396\"") {
+		t.Fatalf("no resume event:\n%s", f.events())
+	}
+}
+
 // H1: with no step reached, a restart starts at the target's own --from, still in the same instance.
 func TestAutoRestartFromTheTargetFrom(t *testing.T) {
 	f := newAutoFixture(t)

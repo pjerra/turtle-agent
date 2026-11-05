@@ -35,6 +35,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/slots"
 )
@@ -186,6 +188,16 @@ type autoSupervisor struct {
 	// wg tracks the finish/teardown goroutines; stateMu serializes the checkpoint writes.
 	wg      sync.WaitGroup
 	stateMu sync.Mutex
+	// rowsMu guards rowsCache: one rows read per target's plan + --dir + --sql (they do not change under a walk).
+	rowsMu    sync.Mutex
+	rowsCache map[string]autoRows
+}
+
+// autoRows is one target's rows, read once: ok is false when neither its --sql migration nor its plan file can be
+// read, and a resume start then keeps the step it had.
+type autoRows struct {
+	rows planexport.Rows
+	ok   bool
 }
 
 func raidAutopilotCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -354,6 +366,98 @@ func autoCommandArgs(binary string, t raidwalk.AutoTarget, out, from string, reu
 		args = append(args, "--instance-cap-per-account", strconv.Itoa(instanceCap))
 	}
 	return args
+}
+
+// autoFlag reads a target argument's value, bare or as name=value.
+func autoFlag(args []string, name string) string {
+	for i, a := range args {
+		n, v, has := strings.Cut(a, "=")
+		if n != name {
+			continue
+		}
+		if has {
+			return v
+		}
+		if i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+// autoReadRows reads the rows a target's raid-walk places against: the plan in its --sql migration (the deployed rows,
+// which the walk itself reads), else the plan file's built rows. ok is false when neither can be read.
+func autoReadRows(t raidwalk.AutoTarget) (planexport.Rows, bool) {
+	var plan string
+	if len(t.Args) > 0 {
+		plan = t.Args[0]
+	}
+	dir := autoFlag(t.Args, "--dir")
+	if dir == "" {
+		dir = "dungeons"
+	}
+	if sql := autoFlag(t.Args, "--sql"); sql != "" {
+		if raw, err := os.ReadFile(slots.ExpandTilde(sql)); err == nil {
+			if plans, _, err := planexport.ParseMigration(string(raw)); err == nil {
+				for _, r := range plans {
+					if r.Plan.Plan == plan {
+						return r, true
+					}
+				}
+			}
+		}
+	}
+	p, err := dungeon.Load(filepath.Join(slots.ExpandTilde(dir), plan+".json"))
+	if err != nil {
+		return planexport.Rows{}, false
+	}
+	res, err := planexport.Build(p, planexport.Options{})
+	if err != nil {
+		return planexport.Rows{}, false
+	}
+	return res.Rows, true
+}
+
+// targetRows is autoReadRows once per plan + --dir + --sql.
+func (s *autoSupervisor) targetRows(t raidwalk.AutoTarget) (planexport.Rows, bool) {
+	key := t.Args[0] + "\x00" + autoFlag(t.Args, "--dir") + "\x00" + autoFlag(t.Args, "--sql")
+	s.rowsMu.Lock()
+	if e, ok := s.rowsCache[key]; ok {
+		s.rowsMu.Unlock()
+		return e.rows, e.ok
+	}
+	s.rowsMu.Unlock()
+	rows, ok := autoReadRows(t)
+	s.rowsMu.Lock()
+	if s.rowsCache == nil {
+		s.rowsCache = map[string]autoRows{}
+	}
+	s.rowsCache[key] = autoRows{rows: rows, ok: ok}
+	s.rowsMu.Unlock()
+	return rows, ok
+}
+
+// autoResumeStart makes a --from "step N" a start raid-walk takes: a restart resumes at the furthest step a run
+// reached, and after a wipe at a boss that row is the boss row raid-walk refuses with exit 2 (walk 39: every wipe at
+// a boss escalated the id). PlaceResumeStart steps back to the nearest accepted row of the same leg, else the leg's
+// own start. Any other --from is returned unchanged.
+func (s *autoSupervisor) autoResumeStart(t raidwalk.AutoTarget, from string) string {
+	step, ok := strings.CutPrefix(from, "step ")
+	if !ok {
+		return from
+	}
+	n, err := strconv.Atoi(step)
+	if err != nil {
+		return from
+	}
+	rows, ok := s.targetRows(t)
+	if !ok {
+		return from
+	}
+	if words, ok := raidwalk.PlaceResumeStart(rows, n); ok {
+		return words
+	}
+	return from
 }
 
 // initSeq continues the out numbering after the dirs an earlier autopilot made: the walk refuses an existing --out,
@@ -845,6 +949,15 @@ func (s *autoSupervisor) launch(st *autoState) {
 		from = fmt.Sprintf("step %d", step)
 		reuse = !fresh
 	}
+	resumeFrom := ""
+	if from != "" {
+		// A step raid-walk refuses as a start (the boss row a wipe died on) is not a reason to escalate: resume
+		// from the nearest row of the same leg it takes.
+		if adjusted := s.autoResumeStart(g.target, from); adjusted != from {
+			resumeFrom = fmt.Sprintf("%q is not a place start: resuming from %q", from, adjusted)
+			from = adjusted
+		}
+	}
 	if from == "" {
 		reuse = false
 	}
@@ -895,6 +1008,9 @@ func (s *autoSupervisor) launch(st *autoState) {
 	st.lastOut = out
 	st.launchFails = 0
 	st.mu.Unlock()
+	if resumeFrom != "" {
+		s.event(st.id, "resume", resumeFrom)
+	}
 	s.event(st.id, "launch", fmt.Sprintf("attempt %d goal %s out %s from %q reuse %v", attempt, target.Goal, out, from, reuse))
 	s.saveState()
 }

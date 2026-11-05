@@ -2827,7 +2827,11 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   default 15m) it stops the walk (SIGTERM; never `.bot run stop`), tears the slot down, picks a new `--out`
   (`<walk-dir>/<id>-<n>`), and re-places: the same instance first (`--place --from "step N" --reuse-instance`), a
   fresh instance only when that placement failed (the old bind is gone), and that fresh decision survives a reached
-  step: the retry keeps `--from step N --place` without `--reuse-instance`. A legitimate instance-cap wait (`earliest
+  step: the retry keeps `--from step N --place` without `--reuse-instance`. A restart inside a goal starts at the
+  furthest step the run reached; when that row is one raid-walk refuses as a place start (a boss row — which is where
+  every wipe at a boss ends — a hold row, a row inside an event), the restart resumes from the nearest earlier row of
+  the same leg the walk takes, else from the leg's own start (`--from leg L`), and logs a `resume` line: exit 2 for a
+  refused resume start is never escalated. A legitimate instance-cap wait (`earliest
   free time` as the run's last line) is not a stall; its stall clock starts when the wait ends. Exit 2 (the walk
   refused its arguments) and exit 29 (the placement failed every try in the same instance; a fresh-instance retry
   would only burn the hourly budget) stop that id with an `ESCALATE` line and no retry, and so does exit 15 three
