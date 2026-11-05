@@ -2848,7 +2848,8 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   teardown <raid> <slot>` to `EVENTS.txt` and `status.txt` and leaves the slot alone until a person clears it (no
   relaunch, no further teardown, no `YIELD-DONE`). The stops and teardowns of the ids run at the same time, so one
   slow slot never delays another.
-- **Durable state.** `<walk-dir>/autopilot-state.json` is rewritten atomically (temp + rename) on every transition:
+- **Durable state.** `<walk-dir>/autopilot-state.json` is rewritten atomically (temp file written and fsynced, renamed,
+  then the directory fsynced) on every transition:
   per id its current goal, the goals met, the last reached step, the reuse/fresh decision, the attempt number and the
   child's pid/out dir. A checkpoint that does not parse (a
   truncated write, disk damage) is a refusal at start: exit 2, the file is named, and the message says to fix or

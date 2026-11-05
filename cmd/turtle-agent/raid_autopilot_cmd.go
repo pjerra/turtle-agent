@@ -1511,13 +1511,50 @@ func (s *autoSupervisor) saveState() {
 	}
 	path := filepath.Join(s.o.walkDir, autoStateFile)
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(raw, '\n'), 0o600); err != nil {
+	if err := writeFileSync(tmp, append(raw, '\n')); err != nil {
 		s.event("", "state", err.Error())
 		return
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		s.event("", "state", err.Error())
+		return
 	}
+	// The rename is durable only once the directory entry is on disk: without this a WSL/VM crash can leave no
+	// checkpoint (or the old one) although the write returned.
+	if err := syncDir(s.o.walkDir); err != nil {
+		s.event("", "state", err.Error())
+	}
+}
+
+// writeFileSync writes a file, fsyncs it and closes it: the tmp file of an atomic replace must be on disk before the
+// rename, or a crash can leave an empty or torn checkpoint.
+func writeFileSync(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// syncDir fsyncs a directory, making a rename inside it durable.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		d.Close()
+		return err
+	}
+	return d.Close()
 }
 
 // loadState reads the checkpoint: a missing file is no state, and a corrupt or truncated one is an error (the start

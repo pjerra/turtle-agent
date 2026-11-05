@@ -1573,3 +1573,21 @@ func TestAutoYieldSkipsRefusedAndDoneIDs(t *testing.T) {
 		t.Fatalf("no YIELD-DONE although nothing needed a teardown:\n%s", f.events())
 	}
 }
+
+// The state file is complete and atomic after saveState, and no temp file is left behind (the fsync path).
+func TestAutoSaveStateLeavesNoTempAndReadsBack(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	s := f.supervisor()
+	s.saveState()
+	if _, err := os.Stat(filepath.Join(f.walk, autoStateFile) + ".tmp"); err == nil {
+		t.Fatal("saveState left its temp file behind")
+	}
+	saved, err := s.loadState()
+	if err != nil {
+		t.Fatalf("the checkpoint it wrote does not read back: %v", err)
+	}
+	if len(saved.IDs) != 1 || saved.IDs[0].ID != "a" {
+		t.Fatalf("state = %+v", saved.IDs)
+	}
+}
