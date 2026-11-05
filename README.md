@@ -2283,7 +2283,18 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   `--from "step N"` is taken as given; a positioned move row is placed at its own point, and a pull
   row at that pull's own stand point (the row's point; the nearest move row before it when the row has none), the
   notes naming the point (`place: step N is a pull row; placing at the pull's own stand point` — walk 32 refused
-  steps 237 and 560 as pull rows, and the operator had to find 238/559 by hand). Before a fresh instance is entered,
+  steps 237 and 560 as pull rows, and the operator had to find 238/559 by hand). A `q floor` answer of **0.0** (or a
+  value at the core's `INVALID_HEIGHT`, -100000) is the toolkit's *unknown*, not a wrong floor: the toolkit asks the
+  caller's `GetClosePoint`, and the core leaves z at 0 when the height lookup finds nothing (an unloaded grid, no
+  vmap, the wrong map), so the reply is 0.0 — walk 39 refused Jeklik's steps 44/46/48 as `the start step's floor is
+  0.0, not 130.7` on m910q and test2. The check reads `q floor` once more after 2 s; when it is still unknown **and
+  the placed point is a walk/move row's own point** (`PlaceWalkRow`: the row came from a real walk through that point;
+  a pull row's stand point or any other row's point does not qualify), the plan's z is used and
+  `place: floor unknown, using plan z ...` is written to `run.log` and the notes; otherwise the placement refuses
+  (`place: the start step's floor is unknown ... and the point is not a recorded walk row`). A reply that carries no
+  `floor` at all (a null) is not the toolkit's unknown height but no answer: it refuses with
+  `the start step's floor was not found (q floor gave none)`. A floor the toolkit does know, and
+  that differs from the plan, still refuses the placement as before. Before a fresh instance is entered,
   the start is also chosen offline: from the requested row the walk walks BACK along the plan's positioned move rows
   to the nearest one whose point stands at least `AggroRadius + 8 yd` from every static (non-patrol) spawn of the packs
   a row at or after the start pulls, using the world export `--gm-clear`/the placement lints read (a missing export
@@ -2810,14 +2821,26 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   is the raid-walk args, starting with the plan. A goal is `full` (walk to the plan's end), `leg:<L>` (`--until "leg
   L"`) or `boss:<ENTRY>` (`--until boss-done`, done when that boss's `boss_kills` entry reads killed, whatever the
   exit code and whatever the end reason — an incident after the kill, 19, counts, and so does a `stopped: ...` end
-  such as the 90-minute limit firing after the kill; a full clear the same). An id may repeat: its lines are
+  such as the 90-minute limit firing after the kill; a full clear the same). A goal boss matches a kill of any entry
+  of that boss: the summary's `entry` and its `phase_entry` both count, and so do the entries of a boss the walk
+  reports under another entry (Zul'Gurub's Thekal: the row and the kill are 14599, his reborn form 14509, so
+  `boss:14509` and `boss:14599` are the same goal; `GoalBossIDs` in `internal/raidwalk/autopilot.go`). An id may repeat: its lines are
   walked in file order, and a met goal advances to the next line. `--sql FILE` is required: every goal may be
   re-placed, and raid-walk refuses `--place` without it. `--from` in a line is the goal's own start (a restart with
   no step reached uses it); a restart inside the goal starts at the furthest step the run reached, and never sends
   `--reuse-instance` without a `--from`/`--place` (raid-walk refuses that combination).
   `--server/--slot/--holder/--until/--place/--reuse-instance/--out` are managed and dropped if present; slot 3,
   `--instance-cap-unsafe` and `--inject` are refused before anything runs. Two ids may not name the same server and
-  slot: one slot runs one walk at a time.
+  slot: one slot runs one walk at a time. `targets.txt` is **re-read while the supervisor runs** (when its mtime or
+  size changes, every tick): an added id is queued and starts as soon as its slot is free, a removed id is stopped
+  cleanly like `STOP-<id>` (its run stopped, its slot torn down), and an id whose goal lines changed is stopped and
+  re-added from the new lines; an unchanged id keeps its goal, attempt, backoff and run. A new or changed id is
+  numbered past the `<id>-<n>` out dirs already on disk, so its first run never reads an earlier attempt's
+  `summary.json`. A removed line drops the state only when the id is idle and done: an escalated or refused id stays
+  (its `ESCALATE` line stays in `status.txt`, `finishAll` still exits 31, and a YIELD still writes no `YIELD-DONE`),
+  and so does an id whose slot is still leased (or whose lease cannot be verified). An unreadable or invalid
+  file keeps the targets already loaded and logs one `targets` warning per distinct error (a half-written file is not
+  a stop order).
 - **Instance cap.** `--instance-cap-per-account N` is passed to every raid-walk it starts; without the flag each walk
   resolves the target server's entry in `instance-cap-per-account.json` beside the slots file and then the stock 5.
   The per-account gates keep one place of headroom (below `N-1`), and a `--reuse-instance` placement that re-hires
@@ -2827,13 +2850,30 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   default 15m) it stops the walk (SIGTERM; never `.bot run stop`), tears the slot down, picks a new `--out`
   (`<walk-dir>/<id>-<n>`), and re-places: the same instance first (`--place --from "step N" --reuse-instance`), a
   fresh instance only when that placement failed (the old bind is gone), and that fresh decision survives a reached
-  step: the retry keeps `--from step N --place` without `--reuse-instance`. A legitimate instance-cap wait (`earliest
+  step: the retry keeps `--from step N --place` without `--reuse-instance`. A restart inside a goal starts at the
+  furthest step the run reached; when that row is one raid-walk refuses as a place start (a boss row — which is where
+  every wipe at a boss ends — a hold row, a row inside an event), the restart resumes from the nearest earlier row of
+  the same leg the walk takes, else from the leg's own start (`--from leg L`), and logs a `resume` line: exit 2 for a
+  refused resume start is never escalated. The rows are read from the target's `--sql` migration (the numbering the
+  walk places against; the plan JSON numbers ZG's steps differently), cached by path then re-read whenever the
+  migration's mtime or size changes (a redeployed migration), and when it cannot be read the step is kept. A goal boss that is already dead ends the goal as **DONE**, never an
+  ESCALATE: any attempt's summary that reports the boss dead (the summary's `boss_kills`, or the walk's own
+  boss-done/corpse evidence it records there) sets `boss_dead` for the goal in the checkpoint, which advances to the
+  id's next goal line or finishes the id, and the run that saw the death is torn down (its slot freed) as for any met
+  goal. A legitimate instance-cap wait (`earliest
   free time` as the run's last line) is not a stall; its stall clock starts when the wait ends. Exit 2 (the walk
   refused its arguments) and exit 29 (the placement failed every try in the same instance; a fresh-instance retry
   would only burn the hourly budget) stop that id with an `ESCALATE` line and no retry, and so does exit 15 three
   times (the slot's lease is held by another holder). Three consecutive placement failures on one id escalate it as
   well. Other exits re-place with a backoff of 20 s, 1 m, 2 m, 5 m and then 10 m per consecutive attempt that
-  reached no further step; a step further resets it. Exit 26 keeps its cap wait and re-places later. A **launch**
+  reached no further step; a step further resets it. A hire the server's shared pool refused ("No mercenary of that
+  kind is available right now": several big raids on one server starve each other) is not such a failure: the raid
+  waits 5 minutes (`AutoHirePoolWaitBackoff`), logs `hire-pool-wait`, re-places the same instance, and neither the
+  backoff nor the escalation counts move — a refused run that had already walked past the goal's best step still
+  moves that step, and the wait leaves `noProgress` and `placeFails` exactly as they were. The wait loop has an end:
+  six consecutive hire-pool waits (`AutoHirePoolWaitMax`, about 30 minutes) `ESCALATE` the id with
+  `hire pool: 6 waits`; a launch that ends any other way resets the count. There is no cross-raid scheduling beyond
+  that wait. Exit 26 keeps its cap wait and re-places later. A **launch**
   that cannot start (the attempt log or the child) is not completion: the goal stays, the retry uses the same
   backoff (20 s at first), and the third consecutive launch failure escalates the id. A supervisor whose every id
   met its goals says `every target's goals are met` and exits 0; one with an escalated id ends with
@@ -2849,7 +2889,8 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   slow slot never delays another.
 - **Durable state.** `<walk-dir>/autopilot-state.json` is rewritten atomically (temp file written and fsynced, renamed,
   then the directory fsynced) on every transition: per id its current goal, the goals met, the last reached step, the
-  reuse/fresh decision, the attempt number and the child's pid/out dir. A checkpoint that does not parse (a
+  reuse/fresh decision, the attempt number, the child's pid/out dir, and a `stopped` id's flag and reason. A
+  checkpoint that does not parse (a
   truncated write, disk damage) is a refusal at start: exit 2, the file is named, and the message says to fix or
   remove it — nothing is launched over it and the file is not overwritten with empty progress. A start loads it and
   reconciles it with the attempts' `summary.json` and the slots' leases: a
@@ -2867,7 +2908,13 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   so a second start on the same walk dir refuses (exit 2) instead of running beside it — the pid file is
   informational. The OS drops the lock when the process ends, so a crash leaves no stale guard. `--foreground` runs
   it in place. A `YIELD` file in the walk dir (checked at least once a second) tears every run down, releases every
-  lease, writes `YIELD-DONE` and exits 0; SIGINT/SIGTERM does the same without `YIELD-DONE`. A refused id (nothing
+  lease, writes `YIELD-DONE` and exits 0; SIGINT/SIGTERM does the same without `YIELD-DONE`. A `STOP-<raid id>` file
+  (checked every tick) stops just that raid the same clean way — its run stopped, its slot torn down and verified,
+  the id marked **stopped** and never relaunched — while the other ids keep running; once the id acted on it the
+  file is renamed `STOP-<id>.done` (one `stop: STOP-<id> consumed` line in `EVENTS.txt`), so a re-added id of the
+  same name starts instead of meeting the order again, and a `.done` file is never acted on. A stopped id is not a
+  met goal: when it is the last one, the supervisor ends with
+  `not every target's goals are met (0 escalated, 0 refused, 1 stopped)` and exit 0 (`status.txt` names the stop). A refused id (nothing
   was launched) and a done id (its slot was torn down when the goal was met) are skipped: their stale slot dirs are
   never torn down by a YIELD, and neither blocks `YIELD-DONE`. A stale `YIELD-DONE` is
   removed at start and before a new YIELD's shutdown; a `YIELD` whose teardown does not verify writes no `YIELD-DONE`
@@ -2879,9 +2926,9 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   `--status-every` are the timings; `--binary` picks the turtle-agent the walks run.
 - **Known limits.** Adoption trusts `<out>/walk.pid` plus `kill(0)`: a SIGKILLed walk leaves its pid file behind, and
   a reused pid would adopt an unrelated process and later signal its group (check `/proc/<pid>/cmdline` for
-  `raid-walk` and the out dir). The checkpoint maps goals by index only: editing `targets.txt` between restarts
-  points the saved goal at the wrong line, and a done id ignores goal lines appended later — use a fresh walk dir
-  per walk. `writeStatus` has no lock, so a finish goroutine (through `escalate`) and the main loop can write
+  `raid-walk` and the out dir). The checkpoint maps goals by index only: a restart after editing an id's goal lines
+  resumes the new list at the saved index (a re-read while running stops the id and re-adds it from the new lines
+  with a fresh goal state). `writeStatus` has no lock, so a finish goroutine (through `escalate`) and the main loop can write
   `status.txt.tmp` at the same time and the file can be briefly garbled. The `processAlive` group check covers the
   walk's own process group, not the `login` child that `startSlotAgent` starts in its own group. The instance-cap
   file is read only from beside `--slots`: with `--slots` elsewhere plus `--allow-split-ledger`, or with no live

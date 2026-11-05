@@ -428,24 +428,82 @@ func (w *walk) placeInstanceIs(ctx context.Context, want float64) error {
 	return nil
 }
 
-// placeFloor checks the toolkit's floor under the start point (spec 5 step 5).
+// placeFloorGap is how long the one retry of an unknown floor waits: the toolkit's height lookup can miss on a grid
+// that is still loading, and a second read usually answers.
+const placeFloorGap = 2 * time.Second
+
+// placeFloorInvalid is the core's INVALID_HEIGHT (-100000, VMAP_INVALID_HEIGHT; the value stored for an unknown height
+// is -200000): a floor at or below it is no floor.
+const placeFloorInvalid = -100000
+
+// placeFloor checks the toolkit's floor under the start point (spec 5 step 5). A 0.0 floor, or one at the core's
+// INVALID_HEIGHT, is the toolkit's "height unknown", not a wrong floor: TT.floorNear asks the caller's
+// GetClosePoint/UpdateGroundPositionZ, and the core leaves z at 0 when the height lookup finds nothing (an unloaded
+// grid, no vmap, the wrong map), so the answer comes back 0.0 (walk 39: Jeklik's steps 44/46/48 on m910q and test2
+// were refused as "the start step's floor is 0.0, not 130.7" every try, and the autopilot escalated the id after
+// three failed placements). An unknown floor is read once more after placeFloorGap; if it is still unknown the plan's
+// z is taken only when p is a recorded walk row's own point (PlaceWalkRow: the row came from a real walk through that
+// point), with the line "place: floor unknown, using plan z ..." in run.log and the summary's notes. A pull stand
+// point or any other row's point keeps its failure: nothing walked through it to vouch for its z. A floor the toolkit
+// does know, and that differs from the plan, still refuses as before, and a reply with no floor at all (a null
+// `floor`) is no answer: it fails as it did before the unknown floor was tolerated.
 func (w *walk) placeFloor(ctx context.Context, p dungeon.Point) error {
-	out, err := w.tt(ctx, fmt.Sprintf("q floor %s %s %s", num32(p.X), num32(p.Y), num32(p.Z)))
+	floor, known, err := w.placeFloorRead(ctx, p)
 	if err != nil {
-		return stopf(exitRaidWalkFailed, "place: q floor: %v", err)
+		return err
 	}
-	body, ok := ttLast(out)
-	if !ok {
-		return stopf(exitRaidWalkFailed, "place: q floor gave no reply")
+	if !known {
+		if err := w.placeSleep(ctx, placeFloorGap); err != nil {
+			return err
+		}
+		if floor, known, err = w.placeFloorRead(ctx, p); err != nil {
+			return err
+		}
 	}
-	floor, ok := body.num("floor")
-	if !ok {
-		return stopf(exitRaidWalkFailed, "place: the start step's floor was not found (q floor gave none)")
+	if !known {
+		if w.place != nil {
+			if step, ok := raidwalk.PlaceWalkRow(w.rows, p); ok {
+				line := fmt.Sprintf("place: floor unknown, using plan z %.1f at step %d (%s %s)", p.Z, step, num32(p.X), num32(p.Y))
+				w.note("%s", line)
+				w.logLine(w.env.now(), line)
+				return nil
+			}
+		}
+		return stopf(exitRaidWalkFailed, "place: the start step's floor is unknown (q floor gave %.1f) and the point is not a recorded walk row", floor)
 	}
 	if d := floor - float64(p.Z); d > raidwalk.PlaceFloorYd || d < -raidwalk.PlaceFloorYd {
 		return stopf(exitRaidWalkFailed, "place: the start step's floor is %.1f, not %.1f", floor, p.Z)
 	}
 	return nil
+}
+
+// placeFloorRead is one `q floor` read: the floor and whether the toolkit knows it. A floor of exactly 0.0, or one at
+// or below the core's INVALID_HEIGHT, is the toolkit's "height unknown" (known false, see placeFloor). A reply with no
+// `floor` at all is not an unknown height: it is no answer, and it fails here.
+func (w *walk) placeFloorRead(ctx context.Context, p dungeon.Point) (floor float64, known bool, err error) {
+	out, err := w.tt(ctx, fmt.Sprintf("q floor %s %s %s", num32(p.X), num32(p.Y), num32(p.Z)))
+	if err != nil {
+		return 0, false, stopf(exitRaidWalkFailed, "place: q floor: %v", err)
+	}
+	body, ok := ttLast(out)
+	if !ok {
+		return 0, false, stopf(exitRaidWalkFailed, "place: q floor gave no reply")
+	}
+	// A `floor` of null is no answer (TT.floorNear found none): it must not read as 0.0 through a plain float
+	// unmarshal, which leaves 0 and no error.
+	raw, ok := body.raw["floor"]
+	if !ok {
+		return 0, false, stopf(exitRaidWalkFailed, "place: the start step's floor was not found (q floor gave none)")
+	}
+	var v *float64
+	if err := json.Unmarshal(raw, &v); err != nil || v == nil {
+		return 0, false, stopf(exitRaidWalkFailed, "place: the start step's floor was not found (q floor gave none)")
+	}
+	floor = *v
+	if floor == 0 || floor <= placeFloorInvalid {
+		return floor, false, nil
+	}
+	return floor, true, nil
 }
 
 // placeUnits is the pre-read of one circle (spec 5 step 6): the units the toolkit sees, and whether the reply was cut.

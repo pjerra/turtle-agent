@@ -251,6 +251,18 @@ func (f *autoFixture) supervisorOpts(o autoOptions) *autoSupervisor {
 	return s
 }
 
+// stateByID is the supervisor's state of one id (nil once a removed target is dropped).
+func (f *autoFixture) stateByID(s *autoSupervisor, id string) *autoState {
+	s.statesMu.Lock()
+	defer s.statesMu.Unlock()
+	for _, st := range s.states {
+		if st.id == id {
+			return st
+		}
+	}
+	return nil
+}
+
 // run calls the real command in this process until every id is done/escalated or the deadline passes.
 func (f *autoFixture) run(extra ...string) int {
 	f.t.Helper()
@@ -450,6 +462,43 @@ func TestAutoInitSeq(t *testing.T) {
 	}
 }
 
+// Review round 1: the rows cache is keyed by the migration's path, mtime and size, so a redeployed migration is read
+// again (the resume step is then adjusted against the rows a walk now places against).
+func TestAutoRowsCacheRereadsAChangedMigration(t *testing.T) {
+	f := newAutoFixture(t)
+	fallback, err := os.ReadFile("testdata/zg-place-fallback-20000000.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployed, err := os.ReadFile("testdata/zg-20261101093000.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "walk.sql")
+	if err := os.WriteFile(path, fallback, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := &autoSupervisor{o: autoOptions{walkDir: f.walk}}
+	target := raidwalk.AutoTarget{ID: "a", Args: []string{"zul_gurub", "--sql", path}}
+	first, ok := s.targetRows(target)
+	if !ok || len(first.Steps) == 0 {
+		t.Fatalf("the fixture migration was not read (ok=%v)", ok)
+	}
+	if again, ok := s.targetRows(target); !ok || len(again.Steps) != len(first.Steps) {
+		t.Fatalf("a cache hit changed the rows: %d then %d", len(first.Steps), len(again.Steps))
+	}
+	if err := os.WriteFile(path, deployed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second, ok := s.targetRows(target)
+	if !ok {
+		t.Fatal("the redeployed migration was not read")
+	}
+	if len(second.Steps) == len(first.Steps) {
+		t.Fatalf("the redeployed migration was served from the cache (%d steps)", len(second.Steps))
+	}
+}
+
 func TestAutoSummaryReadsTheSingularBossKill(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "summary.json")
@@ -460,6 +509,26 @@ func TestAutoSummaryReadsTheSingularBossKill(t *testing.T) {
 	}
 	if sum.BossKill == nil || !sum.BossKill.Killed || sum.BossKill.Entry != 14517 {
 		t.Fatalf("boss_kill = %+v", sum.BossKill)
+	}
+}
+
+// Walk 39 t7-1: the summary credited Thekal's kill to entry 14599 with phase_entry 14509 (the reborn form). Both
+// entries count for a goal, and a boss that was not killed (a guardian row) counts for neither.
+func TestAutoBossKillCountsBothEntriesOfTheBoss(t *testing.T) {
+	m := map[uint32]bool{}
+	autoBossKill{Entry: 14599, Killed: true, PhaseEntry: 14509}.deadEntries(m)
+	if !m[14599] || !m[14509] {
+		t.Fatalf("a killed 14599/14509 record left %v", m)
+	}
+	plain := map[uint32]bool{}
+	autoBossKill{Entry: 15068, Killed: true}.deadEntries(plain)
+	if len(plain) != 1 || !plain[15068] {
+		t.Fatalf("a plain record left %v", plain)
+	}
+	unkilled := map[uint32]bool{}
+	autoBossKill{Entry: 14599, Killed: false, PhaseEntry: 14509}.deadEntries(unkilled)
+	if len(unkilled) != 0 {
+		t.Fatalf("an unkilled record counted as dead: %v", unkilled)
 	}
 }
 
@@ -503,6 +572,30 @@ func TestAutoRestartFromTheLastReachedStep(t *testing.T) {
 	}
 	if !strings.Contains(args[1], "--from step 77 --place --reuse-instance") {
 		t.Fatalf("restart did not start at step 77: %s", args[1])
+	}
+}
+
+// Walk 39: every wipe at a boss resumed at the boss row the wipe died on. raid-walk refused that start (exit 2:
+// "--place --from step N: step N is a boss row") and the autopilot escalated the id. The restart steps back to the
+// nearest row of the same leg the walk takes (the fixture migration's Arlokk boss row is step 397, the move row 396).
+func TestAutoRestartFromABossRowStepsBack(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql")
+	f.attempt("a-1", 18, 397, "paused: 15 dead: 21")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	args := f.args()
+	if len(args) != 2 {
+		t.Fatalf("%d launches, want 2:\n%s", len(args), strings.Join(args, "\n"))
+	}
+	if !strings.Contains(args[1], "--from step 396 --place --reuse-instance") {
+		t.Fatalf("the restart did not step back from the boss row 397: %s", args[1])
+	}
+	if !strings.Contains(f.events(), "a resume: \"step 397\" is not a place start: resuming from \"step 396\"") {
+		t.Fatalf("no resume event:\n%s", f.events())
 	}
 }
 
@@ -670,6 +763,421 @@ func TestAutoBossKillWithIncidentAdvances(t *testing.T) {
 	if !strings.Contains(f.events(), "advance: goal met: boss:14515") {
 		t.Fatalf("no advance after the exit-19 kill:\n%s", f.events())
 	}
+}
+
+// Walk 39: a raid re-added after its goal boss was already dead kept running (t6 kept placing a Mar'li another raid
+// had already killed; t7 restarted Thekal 9 s after the kill). A goal the checkpoint records as dead is DONE at start:
+// nothing is launched and the slot stays free, instead of a re-place whose start the walk refuses (exit 2, ESCALATE).
+func TestAutoStartSkipsAGoalWhoseBossIsDead(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14509 -- zul_gurub --sql /zg.sql")
+	saved := autoSavedState{
+		Format: autoStateFormat, Version: autoStateVersion, Updated: "2026-11-05T04:06:20Z",
+		IDs: []autoSavedID{{ID: "a", BossDead: true}},
+	}
+	raw, err := json.Marshal(saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.walk, autoStateFile), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := f.supervisor()
+	tickUntil(t, s, "a to finish", func() bool {
+		done, escalated := runState(s.states[0])
+		return done || escalated
+	})
+	if done, escalated := runState(s.states[0]); !done || escalated {
+		t.Fatalf("done %v escalated %v, want done and no escalate", done, escalated)
+	}
+	if launches := f.args(); len(launches) != 0 {
+		t.Fatalf("a dead goal launched %d walk(s):\n%s", len(launches), strings.Join(launches, "\n"))
+	}
+	if st := s.states[0]; st.run != nil {
+		t.Fatalf("a dead goal kept a run: %+v", st.run)
+	}
+	if !strings.Contains(f.events(), "a already dead: goal boss:14509 is dead") {
+		t.Fatalf("no dead-boss event:\n%s", f.events())
+	}
+}
+
+// Walk 39: the only per-dir stop was YIELD, which stops every raid. STOP-<raid id> stops just that raid cleanly
+// (the run is stopped and its slot torn down) and never relaunches it; the other id keeps running.
+func TestAutoStopFileStopsOnlyItsRaid(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.target("b srv 2 zg-b full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	f.running("b-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "both raids launched", func() bool { return len(f.args()) >= 2 })
+	if err := os.WriteFile(filepath.Join(f.walk, "STOP-a"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "a stopped", func() bool {
+		done, _ := runState(s.states[0])
+		return done
+	})
+	if _, escalated := runState(s.states[0]); escalated {
+		t.Fatalf("STOP-a escalated a:\n%s", f.events())
+	}
+	if done, _ := runState(s.states[1]); done {
+		t.Fatalf("STOP-a stopped b too:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "a stop: STOP-a") {
+		t.Fatalf("no STOP-a event:\n%s", f.events())
+	}
+	before := len(f.args())
+	waitForN(t, time.Second, "a's teardown", func() bool { return len(f.teardowns()) >= 1 })
+	tickUntil(t, s, "b to keep running", func() bool {
+		done, _ := runState(s.states[1])
+		return !done
+	})
+	if after := len(f.args()); after != before {
+		t.Fatalf("a was relaunched after its STOP file (%d -> %d):\n%s", before, after, strings.Join(f.args(), "\n"))
+	}
+}
+
+// A stopped id is done, but its goals were not met: when it is the last id the supervisor does not claim "every
+// target's goals are met", and it still exits 0 (a person asked for the stop; nothing needs one).
+func TestAutoStopFileIsNotAMetGoal(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return len(f.args()) >= 1 })
+	if err := os.WriteFile(filepath.Join(f.walk, "STOP-a"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "a stopped", func() bool {
+		done, _ := runState(s.states[0])
+		return done
+	})
+	if code := s.finishAll(); code != exitOK {
+		t.Fatalf("exit %d after a clean stop, want 0", code)
+	}
+	if strings.Contains(f.events(), "all done: every target's goals are met") {
+		t.Fatalf("a stopped id claimed every goal was met:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "1 stopped") {
+		t.Fatalf("the finished line does not count the stop:\n%s", f.events())
+	}
+	if status, _ := os.ReadFile(filepath.Join(f.walk, autoStatusFile)); !strings.Contains(string(status), "stopped (STOP-a)") {
+		t.Fatalf("status.txt does not name the stop:\n%s", status)
+	}
+}
+
+// Review round 1: the checkpoint keeps the stop. A restarted supervisor of a STOP-completed id still reports it as
+// stopped (not as a met goal), never relaunches it, and its finish line does not claim every goal was met.
+func TestAutoStoppedStateSurvivesARestart(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return len(f.args()) >= 1 })
+	if err := os.WriteFile(filepath.Join(f.walk, "STOP-a"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "a stopped", func() bool {
+		done, _ := runState(s.states[0])
+		return done
+	})
+	s.saveState()
+	// A fresh supervisor reads the checkpoint as a start does.
+	s2 := f.supervisor()
+	st := f.stateByID(s2, "a")
+	if st == nil {
+		t.Fatalf("the restart dropped a:\n%s", f.events())
+	}
+	st.mu.Lock()
+	stopped, why := st.stopped, st.stopWhy
+	st.mu.Unlock()
+	if !stopped || why != "STOP-a" {
+		t.Fatalf("the restart lost the stop (stopped=%v why=%q):\n%s", stopped, why, f.events())
+	}
+	if s2.allGoalsMet() {
+		t.Fatalf("a stopped id counted as a met goal after the restart:\n%s", f.events())
+	}
+	s2.writeStatus()
+	if status := f.statusFile(); !strings.Contains(status, "a goal=full stopped (STOP-a)") {
+		t.Fatalf("status.txt does not report the restored stop:\n%s", status)
+	}
+	if n := len(f.args()); n != 1 {
+		t.Fatalf("the restarted supervisor relaunched a (%d launches):\n%s", n, strings.Join(f.args(), "\n"))
+	}
+}
+
+// Review round 1: a STOP file an id acted on is consumed (renamed STOP-<id>.done, one line in EVENTS.txt), so a
+// re-added id of the same name starts instead of being stopped again by an order that already ran.
+func TestAutoConsumedStopFileDoesNotStopAReAddedID(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.target("z srv 2 zg-z full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	f.running("a-2", 30)
+	f.attempt("z-1", 2, 0, "bad --sql")
+	launched := func(name string) bool {
+		want := "--out " + filepath.Join(f.walk, name)
+		for _, a := range f.args() {
+			if strings.Contains(a, want) {
+				return true
+			}
+		}
+		return false
+	}
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return launched("a-1") })
+	tickUntil(t, s, "z escalated", func() bool {
+		st := f.stateByID(s, "z")
+		if st == nil {
+			return false
+		}
+		_, escalated := runState(st)
+		return escalated
+	})
+	if err := os.WriteFile(filepath.Join(f.walk, "STOP-a"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "a stopped", func() bool {
+		st := f.stateByID(s, "a")
+		if st == nil {
+			return false
+		}
+		done, _ := runState(st)
+		return done
+	})
+	if _, err := os.Stat(filepath.Join(f.walk, "STOP-a.done")); err != nil {
+		t.Fatalf("STOP-a was not consumed: %v\n%s", err, f.events())
+	}
+	if n := strings.Count(f.events(), "STOP-a consumed"); n != 1 {
+		t.Fatalf("%d consumed lines, want 1:\n%s", n, f.events())
+	}
+	// Remove a's line (the stopped state goes; z keeps the file valid) and add it again: the re-added id must run.
+	path := filepath.Join(f.walk, autoTargetsFile)
+	if err := os.WriteFile(path, []byte("z srv 2 zg-z full -- zul_gurub --sql /zg.sql\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "the stopped a to be dropped", func() bool { return f.stateByID(s, "a") == nil })
+	if err := os.WriteFile(path, []byte("a srv 1 zg-a full -- zul_gurub --sql /zg.sql\nz srv 2 zg-z full -- zul_gurub --sql /zg.sql\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "the re-added a to launch", func() bool { return launched("a-2") })
+	st := f.stateByID(s, "a")
+	if st == nil {
+		t.Fatalf("the re-added a is not supervised:\n%s", f.events())
+	}
+	if done, _ := runState(st); done {
+		t.Fatalf("the re-added a was stopped before it ran:\n%s", f.events())
+	}
+}
+
+// Walk 39: targets.txt was read once at start, so every added raid needed another autopilot dir (the ramp-* dirs,
+// one per re-added raid). A line appended while the supervisor runs starts that raid without a restart, and a removed
+// line stops its raid cleanly (its slot torn down), with no ESCALATE and no re-read of the goals of an unchanged id.
+func TestAutoTargetsFileIsReread(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	f.running("b-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return len(f.args()) >= 1 })
+	f.target("b srv 2 zg-b full -- zul_gurub --sql /zg.sql")
+	tickUntil(t, s, "b launched", func() bool { return len(f.args()) >= 2 })
+	// Remove a's line: the id stops like STOP-a (its run stopped, its slot torn down), and b keeps running.
+	path := filepath.Join(f.walk, autoTargetsFile)
+	if err := os.WriteFile(path, []byte("b srv 2 zg-b full -- zul_gurub --sql /zg.sql\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "a to stop", func() bool {
+		st := f.stateByID(s, "a")
+		if st == nil {
+			return true
+		}
+		done, _ := runState(st)
+		return done
+	})
+	if done, _ := runState(f.stateByID(s, "b")); done {
+		t.Fatalf("removing a stopped b too:\n%s", f.events())
+	}
+	if strings.Contains(f.events(), "ESCALATE") {
+		t.Fatalf("the targets re-read escalated an id:\n%s", f.events())
+	}
+	before := len(f.args())
+	waitForN(t, time.Second, "a's teardown", func() bool { return len(f.teardowns()) >= 1 })
+	for range 20 {
+		s.tick(context.Background())
+		time.Sleep(2 * time.Millisecond)
+	}
+	if after := len(f.args()); after != before {
+		t.Fatalf("a was relaunched after its line was removed:\n%s", strings.Join(f.args(), "\n"))
+	}
+}
+
+// Review round 1: a changed id was numbered from a state added after initSeq, so it launched <id>-1 again and read
+// the old attempt's summary.json (a kill of the same boss) as its own: the changed goal looked met. The new run is
+// numbered past the out dirs on disk.
+func TestAutoChangedIDNeverRereadsAnOldOut(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 0, 417, "boss 14515 down")
+	f.attempt("a-2", 5, 0, "server closed the connection")
+	s := f.supervisor()
+	tickUntil(t, s, "a's first launch", func() bool { return len(f.args()) >= 1 })
+	tickUntil(t, s, "a done", func() bool {
+		done, _ := runState(s.states[0])
+		return done
+	})
+	// The line changes (a new --from): the id stops, is dropped, and starts again in a new out dir.
+	path := filepath.Join(f.walk, autoTargetsFile)
+	if err := os.WriteFile(path, []byte("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --from step 100\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "the changed a to launch", func() bool { return len(f.args()) >= 2 })
+	args := f.args()
+	if !strings.Contains(args[1], filepath.Join(f.walk, "a-2")) {
+		t.Fatalf("the changed goal reused an old out dir: %s", args[1])
+	}
+	st := f.stateByID(s, "a")
+	tickUntil(t, s, "the new attempt to end", func() bool {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		return st.run == nil
+	})
+	if done, _ := runState(st); done {
+		t.Fatalf("the changed goal read a-1's old summary and called itself met:\n%s", f.events())
+	}
+	if got := strings.Count(f.events(), "done: the last goal is met"); got != 1 {
+		t.Fatalf("%d met-goal lines, want only the first goal's:\n%s", got, f.events())
+	}
+}
+
+// An unparseable targets.txt keeps the targets the supervisor has (a half-written file is not a stop order) and logs
+// one warning; the next valid write is applied.
+func TestAutoInvalidTargetsKeepTheOldOnes(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return len(f.args()) >= 1 })
+	if err := os.WriteFile(filepath.Join(f.walk, autoTargetsFile), []byte("not a target line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 20 {
+		s.tick(context.Background())
+		time.Sleep(2 * time.Millisecond)
+	}
+	if got := strings.Count(f.events(), "targets"); strings.Count(f.events(), "invalid targets file") != 1 {
+		t.Fatalf("a invalid targets.txt warned %d times (want once):\n%s", got, f.events())
+	}
+	if done, _ := runState(f.stateByID(s, "a")); done {
+		t.Fatalf("an invalid targets.txt stopped a:\n%s", f.events())
+	}
+}
+
+// Walk 39: the shared hire pool refused one raid while others hired ("No mercenary of that kind is available right
+// now"; m5 and m1 in EVENTS.txt). The raid backs off 5 minutes and the refusal is not a failed attempt: refusals
+// never grow the backoff toward 10 minutes, and the first five never escalate the id (the sixth does, its own test).
+func TestAutoHirePoolWaitBacksOffWithoutCountingAFailure(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:11380 -- zul_gurub --sql /zg.sql")
+	reason := "hire 2 priest:healer: TBM:HIRE_RAID|partial|1|2|0|1|0|2|0|No mercenary of that kind is available right now. Try again"
+	for n := 1; n <= 4; n++ {
+		f.attempt(fmt.Sprintf("a-%d", n), 18, 0, reason)
+	}
+	s := f.supervisor()
+	for n := 1; n <= 4; n++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", n), func() bool { return len(f.args()) >= n })
+		tickUntil(t, s, fmt.Sprintf("attempt %d to finish", n), func() bool {
+			st := s.states[0]
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			return st.run == nil
+		})
+		st := s.states[0]
+		st.mu.Lock()
+		wait := time.Until(st.nextAt)
+		escalated := st.escalated
+		st.mu.Unlock()
+		if escalated || strings.Contains(f.events(), "ESCALATE") {
+			t.Fatalf("refusal %d escalated the id:\n%s", n, f.events())
+		}
+		if wait < 4*time.Minute || wait > 6*time.Minute {
+			t.Fatalf("refusal %d backed off %s, want 5m", n, wait.Round(time.Second))
+		}
+		clearWait(st)
+	}
+	if got := strings.Count(f.events(), "hire-pool-wait: "); got != 4 {
+		t.Fatalf("%d hire-pool-wait lines, want 4:\n%s", got, f.events())
+	}
+}
+
+// Review round 1: the wait loop has an end. Six consecutive hire-pool refusals (~30 min of 5-minute waits) leave the id
+// for a person instead of waiting forever.
+func TestAutoHirePoolWaitEscalatesAfterSixWaits(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:11380 -- zul_gurub --sql /zg.sql")
+	reason := "hire 2 priest:healer: TBM:HIRE_RAID|partial|1|2|0|1|0|2|0|No mercenary of that kind is available right now. Try again"
+	for n := 1; n <= 6; n++ {
+		f.attempt(fmt.Sprintf("a-%d", n), 18, 0, reason)
+	}
+	s := f.supervisor()
+	for n := 1; n <= 6; n++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", n), func() bool { return len(f.args()) >= n })
+		tickUntil(t, s, fmt.Sprintf("attempt %d to finish", n), func() bool {
+			st := s.states[0]
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			return st.run == nil || st.escalated
+		})
+		clearWait(s.states[0])
+	}
+	if _, escalated := runState(s.states[0]); !escalated {
+		t.Fatalf("six hire-pool waits did not escalate the id:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "ESCALATE stop a 1") || !strings.Contains(f.events(), "hire pool: 6 waits") {
+		t.Fatalf("the ESCALATE line does not name the sixth wait:\n%s", f.events())
+	}
+	if code := s.finishAll(); code != exitAutoEscalated {
+		t.Fatalf("finishAll = %d, want %d", code, exitAutoEscalated)
+	}
+}
+
+// Review round 1: a hire-pool wait is no attempt at all — it leaves noProgress and placeFails as they were (it used to
+// wipe both) and moves bestStep only when the refused run had already walked past it.
+func TestAutoHirePoolWaitKeepsTheFailureCounts(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:11380 -- zul_gurub --sql /zg.sql")
+	reason := "hire 2 priest:healer: TBM:HIRE_RAID|partial|1|2|0|1|0|2|0|No mercenary of that kind is available right now. Try again"
+	f.attempt("a-1", 5, 0, "place: the corridor is not clear")
+	f.attempt("a-2", 18, 0, reason)
+	f.attempt("a-3", 5, 90, "server closed the connection")
+	f.attempt("a-4", 18, 95, reason)
+	s := f.supervisor()
+	counts := func() (noProgress, bestStep, placeFails int) {
+		st := s.states[0]
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		return st.goals[0].noProgress, st.goals[0].bestStep, st.placeFails
+	}
+	finish := func(n int, wantNoProgress, wantBest, wantPlaces int) {
+		t.Helper()
+		tickUntil(t, s, fmt.Sprintf("launch %d", n), func() bool { return len(f.args()) >= n })
+		tickUntil(t, s, fmt.Sprintf("attempt %d to finish", n), func() bool {
+			st := s.states[0]
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			return st.run == nil
+		})
+		clearWait(s.states[0])
+		if np, best, pf := counts(); np != wantNoProgress || best != wantBest || pf != wantPlaces {
+			t.Fatalf("after attempt %d: noProgress=%d bestStep=%d placeFails=%d, want %d/%d/%d:\n%s",
+				n, np, best, pf, wantNoProgress, wantBest, wantPlaces, f.events())
+		}
+	}
+	finish(1, 1, 0, 1)
+	finish(2, 1, 0, 1)  // the wait leaves both counts alone
+	finish(3, 0, 90, 0) // progress resets them
+	finish(4, 0, 95, 0) // the refused run had progressed: bestStep moves, the counts stand
 }
 
 // The state file is written on every transition; a supervisor killed after goal 1 was met does not walk it again.
@@ -866,6 +1374,48 @@ func TestAutoEscalatedCountsAsDoneAndFirstStatus(t *testing.T) {
 	}
 	if status := f.statusFile(); !strings.Contains(status, "ESCALATE stop a 1") {
 		t.Fatalf("status.txt has no ESCALATE line:\n%s", status)
+	}
+}
+
+// Review round 1: a removed targets line must not drop the state of an escalated id. Its ESCALATE line stays in
+// status.txt, finishAll still exits for a person, and a YIELD over that slot writes no YIELD-DONE.
+func TestAutoRemovedLineKeepsAnEscalatedID(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.target("z srv 2 zg-z full -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 2, 0, "bad --sql")
+	f.running("z-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a escalated", func() bool {
+		st := f.stateByID(s, "a")
+		if st == nil {
+			return false
+		}
+		_, escalated := runState(st)
+		return escalated
+	})
+	// a's line goes; z's keeps the file valid (an empty targets.txt is refused as unreadable).
+	path := filepath.Join(f.walk, autoTargetsFile)
+	if err := os.WriteFile(path, []byte("z srv 2 zg-z full -- zul_gurub --sql /zg.sql\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 5 {
+		s.tick(context.Background())
+		time.Sleep(2 * time.Millisecond)
+	}
+	if st := f.stateByID(s, "a"); st == nil {
+		t.Fatalf("the removed line dropped an escalated id:\n%s", f.events())
+	}
+	s.writeStatus()
+	if status := f.statusFile(); !strings.Contains(status, "ESCALATE") {
+		t.Fatalf("status.txt dropped the ESCALATE line:\n%s", status)
+	}
+	if code := s.finishAll(); code != exitAutoEscalated {
+		t.Fatalf("finishAll = %d, want %d", code, exitAutoEscalated)
+	}
+	s.shutdown("YIELD")
+	if _, err := os.Stat(filepath.Join(f.walk, autoYieldDone)); err == nil {
+		t.Fatalf("a YIELD wrote YIELD-DONE over an escalated slot:\n%s", f.events())
 	}
 }
 
@@ -1602,5 +2152,298 @@ func TestAutoSaveStateLeavesNoTempAndReadsBack(t *testing.T) {
 	}
 	if len(saved.IDs) != 1 || saved.IDs[0].ID != "a" {
 		t.Fatalf("state = %+v", saved.IDs)
+	}
+}
+
+// autoSavedHireWaits reads the checkpoint's hire_waits through a shape of its own: it compiles without the field the
+// fix adds, so this test fails on the behavior (an empty checkpoint value), not on a build.
+func autoSavedHireWaits(t *testing.T, walk string) int {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(walk, autoStateFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved struct {
+		IDs []struct {
+			HireWaits int `json:"hire_waits"`
+		} `json:"ids"`
+	}
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.IDs) != 1 {
+		t.Fatalf("the checkpoint holds %d id(s), want 1", len(saved.IDs))
+	}
+	return saved.IDs[0].HireWaits
+}
+
+// Review round 2: the checkpoint's goal and step belong to the goal lines it was written for. A person edits the
+// lines under a crashed supervisor; the old done/boss-dead state must not mark the new lines done, it must not be
+// restored: the new goals run.
+func TestAutoEditedGoalsRunDespiteADoneCheckpoint(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.target("a srv 1 zg-a boss:14507 -- zul_gurub --sql /zg.sql")
+	s := f.supervisor()
+	st := s.states[0]
+	st.mu.Lock()
+	st.current = 1
+	st.goals[1].dead = true
+	st.mu.Unlock()
+	s.saveState()
+	// The person rewrites both lines into two other goals before the restart: the saved goal 1 (boss dead) is about
+	// lines targets.txt no longer holds, and its index 1 still exists in the new file.
+	path := filepath.Join(f.walk, autoTargetsFile)
+	if err := os.WriteFile(path, []byte("a srv 1 zg-a boss:14509 -- zul_gurub --sql /zg.sql\na srv 1 zg-a boss:14506 -- zul_gurub --sql /zg.sql\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.attempt("a-1", 2, 0, "bad --sql")
+	s2 := f.supervisor()
+	tickUntil(t, s2, "the edited goal to run", func() bool { return len(f.args()) >= 1 })
+	if args := f.args(); len(args) != 1 || !strings.Contains(args[0], filepath.Join(f.walk, "a-1")) {
+		t.Fatalf("the edited goal did not run fresh:\n%s", strings.Join(args, "\n"))
+	}
+	if strings.Contains(f.events(), "already dead") {
+		t.Fatalf("the checkpoint's boss-dead state was applied to the edited goals:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "the goal lines changed since the checkpoint; its progress is not restored") {
+		t.Fatalf("the start did not say the checkpoint was stale:\n%s", f.events())
+	}
+}
+
+// Review round 2: the other half of the fingerprint rule: unchanged lines still restore their done/boss-dead
+// progress across a restart, and the checkpoint carries the lines' fingerprint.
+func TestAutoUnchangedGoalsRestoreTheDoneCheckpoint(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.target("a srv 1 zg-a boss:14507 -- zul_gurub --sql /zg.sql")
+	s := f.supervisor()
+	st := s.states[0]
+	st.mu.Lock()
+	st.current = 1
+	st.goals[1].dead = true
+	st.mu.Unlock()
+	s.saveState()
+	var saved struct {
+		IDs []struct {
+			Fingerprint string `json:"fingerprint"`
+		} `json:"ids"`
+	}
+	raw, err := os.ReadFile(filepath.Join(f.walk, autoStateFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.IDs) != 1 || saved.IDs[0].Fingerprint == "" {
+		t.Fatalf("the checkpoint does not fingerprint the id's goal lines: %s", raw)
+	}
+	if len(f.args()) != 0 {
+		t.Fatalf("the first supervisor launched a walk:\n%s", strings.Join(f.args(), "\n"))
+	}
+	s2 := f.supervisor()
+	tickUntil(t, s2, "the restored dead goal to be done", func() bool {
+		done, _ := runState(f.stateByID(s2, "a"))
+		return done
+	})
+	if len(f.args()) != 0 {
+		t.Fatalf("an unchanged line's boss-dead goal was walked again:\n%s", strings.Join(f.args(), "\n"))
+	}
+	if !strings.Contains(f.events(), "already dead: goal boss:14507 is dead; the last goal is done") {
+		t.Fatalf("the restart did not restore the boss-dead goal:\n%s", f.events())
+	}
+}
+
+// Review round 2: a supervisor stopped between a STOP file's request and its finish (killed, or its teardown still
+// running) must finish the stop after a restart: the checkpoint's stopping state keeps the id stopped, never relaunched,
+// and the order file is consumed only then.
+func TestAutoRestoredStopFinishesTheStop(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	// The crashed supervisor requested the stop but died before its finish: the slot lease is still the stopped
+	// walk's (the teardown never ran) and nothing is launching on it.
+	f.lease("zg-a", "held")
+	out := filepath.Join(f.walk, "a-1")
+	if err := os.MkdirAll(filepath.Join(out, "slot"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "slot", "slot.json"), []byte(fmt.Sprintf(`{"server":"srv","slot":"1","holder":"zg-a","slots_path":%q}`, f.slotsPath)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "run.log"), []byte("19:46:05.696 TBM:RUN|zul_gurub|running|51/761|jeklik|boss|begin|fighting\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The checkpoint of a supervisor that was killed after it read STOP-a and before its finish: stopping, no run.
+	raw := fmt.Sprintf(`{"format":%q,"version":1,"ids":[{"id":"a","goal":0,"last_step":51,"attempt":1,"out_dir":%q,"stopping":true,"stop_why":"STOP-a"}]}`,
+		autoStateFormat, out)
+	if err := os.WriteFile(filepath.Join(f.walk, autoStateFile), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.walk, "STOP-a"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := f.supervisor()
+	tickUntil(t, s, "the restored stop to complete", func() bool {
+		done, _ := runState(s.states[0])
+		return done
+	})
+	st := s.states[0]
+	st.mu.Lock()
+	stopped := st.stopped
+	st.mu.Unlock()
+	if !stopped {
+		t.Fatalf("the restored stop did not mark the id stopped:\n%s", f.events())
+	}
+	if _, err := os.Stat(filepath.Join(f.walk, "STOP-a.done")); err != nil {
+		t.Fatalf("the completed stop did not consume STOP-a: %v\n%s", err, f.events())
+	}
+	if _, err := os.Stat(filepath.Join(f.walk, "STOP-a")); err == nil {
+		t.Fatalf("STOP-a stayed beside its .done copy:\n%s", f.events())
+	}
+	if launches := f.args(); len(launches) != 0 {
+		t.Fatalf("the restart relaunched a stopped id:\n%s", strings.Join(launches, "\n"))
+	}
+	if strings.Contains(f.events(), "ESCALATE") {
+		t.Fatalf("a stop in progress was refused:\n%s", f.events())
+	}
+	if status := f.statusFile(); !strings.Contains(status, "a goal=full stopped (STOP-a)") {
+		t.Fatalf("status.txt does not report the restored stop:\n%s", status)
+	}
+}
+
+// Review round 2: a STOP file is consumed when the stop completes, not when it is read. For an escalated id a person
+// owns, the order is refused: the file stays and one line says so (a stop the id cannot act on needs a person).
+func TestAutoStopFileOnAnEscalatedIDIsKept(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "a escalated", func() bool {
+		_, escalated := runState(s.states[0])
+		return escalated
+	})
+	if err := os.WriteFile(filepath.Join(f.walk, "STOP-a"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 5 {
+		s.tick(context.Background())
+		time.Sleep(2 * time.Millisecond)
+	}
+	if _, err := os.Stat(filepath.Join(f.walk, "STOP-a")); err != nil {
+		t.Fatalf("the refused STOP-a was consumed: %v\n%s", err, f.events())
+	}
+	if _, err := os.Stat(filepath.Join(f.walk, "STOP-a.done")); err == nil {
+		t.Fatalf("the refused STOP-a was renamed to .done:\n%s", f.events())
+	}
+	if got := strings.Count(f.events(), "STOP-a not applied: escalated, needs a person"); got != 1 {
+		t.Fatalf("%d refusal lines for STOP-a, want 1:\n%s", got, f.events())
+	}
+	if strings.Contains(f.events(), "STOP-a consumed") {
+		t.Fatalf("a refused STOP-a was logged as consumed:\n%s", f.events())
+	}
+}
+
+// Review round 2: an edited line could not replace an escalated id (it stayed escalated forever and the new goals
+// never ran). With no live run and a free slot, the new lines replace the old state and start in a fresh out dir.
+func TestAutoChangedLineReplacesAnEscalatedID(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.target("z srv 2 zg-z full -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 2, 0, "bad --sql")
+	f.running("z-1", 30)
+	launched := func(name string) bool {
+		want := "--out " + filepath.Join(f.walk, name)
+		for _, a := range f.args() {
+			if strings.Contains(a, want) {
+				return true
+			}
+		}
+		return false
+	}
+	s := f.supervisor()
+	tickUntil(t, s, "a escalated", func() bool {
+		_, escalated := runState(f.stateByID(s, "a"))
+		return escalated
+	})
+	// The person edits a's line (a new --from): the new lines must replace the escalated state, not wait forever.
+	path := filepath.Join(f.walk, autoTargetsFile)
+	if err := os.WriteFile(path, []byte("a srv 1 zg-a full -- zul_gurub --sql /zg.sql --from step 100\nz srv 2 zg-z full -- zul_gurub --sql /zg.sql\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "the new lines of a to launch", func() bool { return launched("a-2") })
+	if !strings.Contains(f.events(), "the new goal lines replace the escalated state") {
+		t.Fatalf("no replacement line:\n%s", f.events())
+	}
+	s.writeStatus()
+	if status := f.statusFile(); strings.Contains(status, "ESCALATE") {
+		t.Fatalf("status.txt kept the replaced id's ESCALATE line:\n%s", status)
+	}
+}
+
+// Review round 2: while the replaced id's slot lease is still held, the new lines wait; the wait is logged once, and
+// the lines start when the lease is released (not before).
+func TestAutoChangedLineWaitsForTheSlotLease(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.target("z srv 2 zg-z full -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 2, 0, "bad --sql")
+	f.running("z-1", 30)
+	launched := func(name string) bool {
+		want := "--out " + filepath.Join(f.walk, name)
+		for _, a := range f.args() {
+			if strings.Contains(a, want) {
+				return true
+			}
+		}
+		return false
+	}
+	s := f.supervisor()
+	tickUntil(t, s, "a escalated", func() bool {
+		_, escalated := runState(f.stateByID(s, "a"))
+		return escalated
+	})
+	f.lease("zg-a", "held")
+	path := filepath.Join(f.walk, autoTargetsFile)
+	if err := os.WriteFile(path, []byte("a srv 1 zg-a full -- zul_gurub --sql /zg.sql --from step 100\nz srv 2 zg-z full -- zul_gurub --sql /zg.sql\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 5 {
+		s.tick(context.Background())
+		time.Sleep(2 * time.Millisecond)
+	}
+	if launched("a-2") {
+		t.Fatalf("the new lines launched on a held lease:\n%s", strings.Join(f.args(), "\n"))
+	}
+	if got := strings.Count(f.events(), "id a: new lines wait for the slot lease"); got != 1 {
+		t.Fatalf("%d wait lines, want 1:\n%s", got, f.events())
+	}
+	f.lease("", "")
+	tickUntil(t, s, "the new lines to launch after the release", func() bool { return launched("a-2") })
+}
+
+// Review round 2: the hire-pool waits are part of the checkpoint: the sixth refusal still leaves the id for a person
+// when the first five happened before a restart.
+func TestAutoHireWaitsSurviveARestart(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:11380 -- zul_gurub --sql /zg.sql")
+	reason := "hire 2 priest:healer: TBM:HIRE_RAID|partial|1|2|0|1|0|2|0|No mercenary of that kind is available right now. Try again"
+	s := f.supervisor()
+	st := s.states[0]
+	st.mu.Lock()
+	st.goals[0].hireWaits = raidwalk.AutoHirePoolWaitMax - 1
+	st.mu.Unlock()
+	s.saveState()
+	if got := autoSavedHireWaits(t, f.walk); got != raidwalk.AutoHirePoolWaitMax-1 {
+		t.Fatalf("the checkpoint saved hire_waits=%d, want %d", got, raidwalk.AutoHirePoolWaitMax-1)
+	}
+	f.attempt("a-1", 18, 0, reason)
+	s2 := f.supervisor()
+	tickUntil(t, s2, "the refusal after the restart to escalate", func() bool {
+		_, escalated := runState(s2.states[0])
+		return escalated
+	})
+	if !strings.Contains(f.events(), "hire pool: 6 waits") {
+		t.Fatalf("the restored wait count did not reach the sixth wait:\n%s", f.events())
 	}
 }

@@ -373,6 +373,35 @@ func PlaceStart(rows planexport.Rows, from []string) (step int, leg, fallbackFro
 	return 0, "", "", false, fmt.Errorf("--place: --from wants \"leg L\" or \"step N\", not %q", strings.Join(from, " "))
 }
 
+// PlaceResumeStart is the --from words a restart at a reached step resumes with. A restart resumes at the furthest step
+// a run reached; when that row is one PlaceStart refuses (a boss row, a hold row, a move row in an event, a move row
+// without a point), raid-walk exits 2 and the autopilot would escalate an id that only wiped at the boss (walk 39:
+// Arlokk 390, Hakkar 733, Jin'do 555, Mar'li 202, Mandokir 469, Venoxis 174, all boss rows). So the start falls back to
+// the nearest earlier row of the SAME leg that PlaceStart accepts; with no such row the leg itself is the start
+// ("leg L") and PlaceStart stages it at the leg's quiet row. The fallback may itself be a pull row whose own stand
+// point is a move row before it; that start is in the leg too, else the row is skipped. ok is false for a step outside
+// the rows: the caller then keeps the words it had.
+func PlaceResumeStart(rows planexport.Rows, step int) (string, bool) {
+	if step < 1 || step > len(rows.Steps) {
+		return "", false
+	}
+	leg := rows.Steps[step-1].Leg
+	accepts := func(n int) bool {
+		start, _, _, _, err := PlaceStart(rows, []string{"from", "step", strconv.Itoa(n)})
+		return err == nil && start >= 1 && start <= len(rows.Steps) && rows.Steps[start-1].Leg == leg
+	}
+	if accepts(step) {
+		return "step " + strconv.Itoa(step), true
+	}
+	lo, _ := legSpan(rows, leg)
+	for i := step - 2; i >= lo && i >= 0; i-- {
+		if accepts(i + 1) {
+			return "step " + strconv.Itoa(i+1), true
+		}
+	}
+	return "leg " + strconv.Itoa(leg), true
+}
+
 // startLegName is the leg a fallback start row belongs to, as the messages name it.
 func startLegName(rows planexport.Rows, leg int) string {
 	for _, l := range rows.Legs {
@@ -495,6 +524,21 @@ func PlacePoint(rows planexport.Rows, step int) (dungeon.Point, bool) {
 		return dungeon.Point{}, false
 	}
 	return dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}, true
+}
+
+// PlaceWalkRow is the recorded walk row a place point came from: a walk/move row whose own point is p (false when no
+// move row stands there). The floor-unknown fallback takes the plan's z only for such a point; a pull stand point or
+// any other row's point is not a recorded walk, so its unknown floor stays a failure.
+func PlaceWalkRow(rows planexport.Rows, p dungeon.Point) (int, bool) {
+	for i, s := range rows.Steps {
+		if !moveRow(s) || !placedRow(s) {
+			continue
+		}
+		if s.X == p.X && s.Y == p.Y && s.Z == p.Z {
+			return i + 1, true
+		}
+	}
+	return 0, false
 }
 
 // routePoints is the route of the corridor: the positioned rows from start to stop, in order (spec 4.3).

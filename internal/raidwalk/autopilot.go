@@ -23,7 +23,21 @@ const (
 	AutoAdvance = "advance"
 	// AutoStop: the target cannot run (bad flags); stop supervising it instead of re-placing in a loop.
 	AutoStop = "stop"
+	// AutoHirePoolWait: the server's shared hire pool refused this raid ("No mercenary of that kind is available right
+	// now"); wait AutoHirePoolWaitBackoff and re-place the same instance. Walk 39: several big raids on one server
+	// starved each other, and each refusal counted as a no-progress attempt (m5's rest grew to 10m, m1's hit 20s then
+	// 1m, and the failures moved the ids toward ESCALATE).
+	AutoHirePoolWait = "hire-pool-wait"
 )
+
+// AutoHirePoolWaitBackoff is how long a raid backs off after the shared hire pool refused its hires: enough for the
+// other raids of the server to finish hiring, and no cross-raid scheduling beyond it.
+const AutoHirePoolWaitBackoff = 5 * time.Minute
+
+// AutoHirePoolWaitMax is how many consecutive hire-pool refusals (~30 min at AutoHirePoolWaitBackoff) an id waits
+// before it is left for a person: a pool that refuses six times in a row needs a person, not another wait, and no
+// backoff loop ends by itself otherwise.
+const AutoHirePoolWaitMax = 6
 
 // AutoGoal is one target's goal: the plan walked whole, a leg stopped at, or one boss killed.
 type AutoGoal struct {
@@ -238,11 +252,19 @@ type AutoObservation struct {
 	// StallAfter is the earliest the stall rule may fire: a run that logged a legitimate wait (the instance cap's
 	// "earliest free time") is not stalled before it. Zero: the usual rule.
 	StallAfter time.Time
+	// HirePoolWait says the end was the shared hire pool's refusal (no mercenary of that kind): a wait, not a failure.
+	HirePoolWait bool
 }
 
 // PlacementFailed says the run never started: it ended in the place phase.
 func (o AutoObservation) PlacementFailed() bool {
 	return o.StepsReached == 0 && strings.HasPrefix(strings.TrimSpace(o.EndReason), "place:")
+}
+
+// HirePoolRefused says a run's end reason is the server's shared hire pool refusing a hire ("No mercenary of that
+// kind is available right now", a partial hire's TBM:HIRE_RAID line; walk 39: m5 03:58 and 04:12, m1 04:20).
+func HirePoolRefused(reason string) bool {
+	return strings.Contains(strings.ToLower(reason), "no mercenary of that kind")
 }
 
 // RunStopped says the walk's own run stop ended the run (walk 37's b3-r1: exit 0, no boss kill).
@@ -251,15 +273,49 @@ func RunStopped(reason string) bool {
 	return strings.Contains(r, ".bot run stop") || strings.HasPrefix(r, "stopped:")
 }
 
+// autoBossIDs is the id set of a boss the walk reports under another entry than a goal may name. Zul'Gurub's Thekal
+// is the case walk 39 found: his boss row and the summary's kill are 14599 (the plan's boss entry, phase 2), and a
+// goal of boss:14509 (his reborn form) never matched, so t7 restarted a raid whose boss was already dead (t7-1's kill
+// at 04:06:06Z was followed by a restart launch at 04:06:42Z, and t7 escalated at 04:47:56Z). The plan's boss.phase_entries is
+// not the set: it also lists Thekal's Zulian Guardians 15068, which exist several at once and are never the boss's own
+// unit (the walk's bossUnits excludes them). Only entries the evidence shows as the same boss go here.
+var autoBossIDs = map[uint32][]uint32{
+	14509: {14509, 14599}, // Thekal: the row is 14599, the reborn form 14509
+	14599: {14599, 14509},
+}
+
+// GoalBossIDs is the entries a kill of which meets a goal boss: the goal's own entry (always) and the entries of the
+// boss the walk reports it as.
+func GoalBossIDs(boss uint32) []uint32 {
+	if ids := autoBossIDs[boss]; len(ids) > 0 {
+		return ids
+	}
+	return []uint32{boss}
+}
+
+// GoalBossDead says the run's summary reported the goal boss dead (a kill of any entry of it, see GoalBossIDs).
+func GoalBossDead(g AutoGoal, o AutoObservation) bool {
+	if g.Kind != "boss" {
+		return false
+	}
+	for _, e := range GoalBossIDs(g.Boss) {
+		if o.KilledBosses[e] {
+			return true
+		}
+	}
+	return false
+}
+
 // GoalAchieved says the run met its goal. A boss the summary's boss_kills says was killed counts whatever the exit
 // code and whatever the end reason: an incident after the kill (19) or a "stopped: ..." ending (the 90-minute limit
-// firing after the kill) still met the goal. A full clear and a leg goal still need a run that was not stopped by
-// the walk's own run stop and did not fail in the place phase; a leg goal needs exit 0.
+// firing after the kill) still met the goal. A kill of any entry of the boss counts (GoalBossIDs): Thekal's 14509 and
+// 14599 are one boss. A full clear and a leg goal still need a run that was not stopped by the walk's own run stop
+// and did not fail in the place phase; a leg goal needs exit 0.
 func GoalAchieved(g AutoGoal, o AutoObservation) bool {
 	if !o.Exited {
 		return false
 	}
-	if g.Kind == "boss" && o.KilledBosses[g.Boss] {
+	if GoalBossDead(g, o) {
 		return true
 	}
 	if RunStopped(o.EndReason) || o.PlacementFailed() {
@@ -292,6 +348,8 @@ type AutoRunState struct {
 	// PlaceFails counts the consecutive attempts that ended in the place phase: the third stops the id for a person
 	// (a dead bind is re-placed fresh, but a placement that keeps failing must not loop forever with a backoff).
 	PlaceFails int
+	// HireWaits counts the consecutive hire-pool waits of this goal: the sixth stops the id for a person.
+	HireWaits int
 }
 
 // AutoDecision is the next step.
@@ -322,7 +380,8 @@ func AutoBackoff(fast int) time.Duration {
 // DecideAutoAction is the whole rule: any end, a used-up restart budget, or a stall tears down and re-places; a met
 // goal advances; a placement that failed on the old bind asks for a fresh instance next. A stall is no step and no
 // boss-HP change for stall, counted from the end of a legitimate instance-cap wait. Exit 2 and 29 stop the id for a
-// person, and so does the third consecutive exit 15. Every restart carries the backoff of its no-progress count.
+// person, and so does the third consecutive exit 15 or the sixth consecutive hire-pool wait. Every restart carries the
+// backoff of its no-progress count.
 func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall time.Duration) AutoDecision {
 	if !o.Exited {
 		// A run waiting on the instance cap is not stalled: its clock starts when the wait ends.
@@ -347,6 +406,18 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 	}
 	if GoalAchieved(r.Goal, o) {
 		return AutoDecision{Action: AutoAdvance, Reason: "goal met: " + r.Goal.String()}
+	}
+	if o.HirePoolWait {
+		if r.HireWaits+1 >= AutoHirePoolWaitMax {
+			return AutoDecision{
+				Action: AutoStop, Escalate: true,
+				Reason: fmt.Sprintf("hire pool: %d waits", r.HireWaits+1),
+			}
+		}
+		return AutoDecision{
+			Action: AutoHirePoolWait, Reuse: true, Backoff: AutoHirePoolWaitBackoff,
+			Reason: "the shared hire pool has no mercenary of that kind: another raid of the server holds them",
+		}
 	}
 	if o.ExitCode == 2 {
 		return AutoDecision{Action: AutoStop, Escalate: true, Reason: "exit 2: the walk refused its arguments (" + shortReason(o.EndReason) + ")"}

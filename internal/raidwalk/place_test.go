@@ -947,3 +947,46 @@ func TestPlaceStartAcceptsAPullRow(t *testing.T) {
 		t.Errorf("a move row was refused: %v", err)
 	}
 }
+
+// Walk 39: a restart resumed at the furthest step a run reached, and every wipe at a boss reached the boss row. The
+// walk refused "--place --from step N: step N is a boss row" with exit 2 and the autopilot escalated the id (Arlokk
+// 390, Hakkar 733, Jin'do 555, Mar'li 202, Mandokir 469, Venoxis 174). The resume start steps back to the nearest row
+// of the same leg the walk takes, and to the leg itself when the leg has no such row before the boss.
+func TestPlaceResumeStartStepsBackFromABossRow(t *testing.T) {
+	rows := placeRows([]planexport.LegRow{
+		{Plan: "t", Leg: 0, Name: "one"},
+		{Plan: "t", Leg: 1, Name: "two"},
+		{Plan: "t", Leg: 2, Name: "three"},
+	},
+		placeMove(0, 0, 10, 0),
+		placeMove(0, 0, 20, 0),
+		placeMove(1, 0, 30, 0),                               // 3
+		placeRow(planexport.KindBoss, 1, 0, 35, 0, 0, 14515), // 4: the boss row the wipe reached
+		placeMove(1, 0, 40, 0),                               // 5
+		placeRow(planexport.KindBoss, 2, 0, 50, 0, 0, 11380), // 6: a leg whose boss is its first point
+		placeMove(2, 0, 60, 0),                               // 7
+	)
+	if _, _, _, _, err := PlaceStart(rows, []string{"from", "step", "4"}); err == nil || !strings.Contains(err.Error(), "is a boss row") {
+		t.Fatalf("the fixture's boss row is accepted as a start: %v", err)
+	}
+	for _, c := range []struct {
+		step int
+		want string
+	}{
+		{4, "step 3"}, // the nearest earlier move row, same leg
+		{5, "step 5"}, // a row the walk takes is kept
+		{3, "step 3"},
+		{6, "leg 2"}, // no row before the boss in its leg: the leg's own start
+	} {
+		got, ok := PlaceResumeStart(rows, c.step)
+		if !ok || got != c.want {
+			t.Errorf("PlaceResumeStart(%d) = %q %v, want %q", c.step, got, ok, c.want)
+		}
+	}
+	if _, ok := PlaceResumeStart(rows, 0); ok {
+		t.Error("step 0 has no resume start")
+	}
+	if _, ok := PlaceResumeStart(rows, len(rows.Steps)+1); ok {
+		t.Error("a step past the rows has no resume start")
+	}
+}
