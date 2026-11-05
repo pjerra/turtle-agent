@@ -56,8 +56,9 @@
     "WALK 37 FIX 1 (2026-11-04, leg 6; TortoiseBots-audit tests/raid-zg-walk37 e/e2: Jin'do 11380 engaged at step 552 in three wipes, 69 deaths in e). The honour guard's ten-body row (stand -11562 -1306) was a stand pull whose stand stood 35.5-52.2 yd from its own pack, past the run leader's 28.5 yd shot (\"patrol pull: not waiting for units that walk no patrol and stand out of the 28.5 yd shot\"), so the row plain-pulled and walked the party to the pack 12.9 yd from Jin'do. No stand serves the ten: they span 13 yd, so a stand in shot of all of them is at most 34.8 yd from Jin'do, and one 35+ yd out is out of shot of the two lone Withered Mistresses 49402/49403, who stand 8-10 yd from him (routeReach 35: 25 aggro at the plan's party level 58 plus the raid's 10 yd spread). The camp is three rows now, each a stand pull in shot of its whole pack: formation 49421's eight bodies from -11552 -1277 (27.2 yd from its farthest unit, 36.3 from Jin'do, line of sight to all eight; 18.1 yd from its nearest, the camp cannot keep 19.5 and stay in shot), 49403 from -11548.5 -1291 (27.8, 36.2) and 49402 from -11546.5 -1257 (27.9, 35.8); the two north packs (49383-49386, 1173080; 8 bodies) keep their stand -11558 -1304 and are pulled first (the guard stands 10-19 yd from them, so a stand in the guard's shot is inside their reach). tools/dungeongen/zg_w37_test.go checks the live export: no leg-6 pull row's party point and no move row before the boss approach is inside Jin'do's reach, and the three guard rows are stand pulls in shot of their packs. The row's own point (its pack's centroid) stays 14.4 yd from Jin'do: TortoiseBots scopes a stand pull's pack from that point, and the north pack's nearest spawn stands 13.8 yd from the guard's stand, so no circle scopes the guard's formation without the north pack's (pulled first, dead by then). The party fights from the stand, which the gate fires from with all eight in its 28.5 yd shot; walk 37 e2-r1's gm-clear evidence (--gm-clear jindo_the_hexxer:8, no gm-clear line in its run.log, Jin'do engaged at step 552) is the gate NOT firing: that row plain-pulled and walked the party to the centroid. Not covered: the fight starts 30-33 yd from Jin'do when the north packs wake the party on the walk into the guard's stand (the same 11-19 yd entanglement); the rows keep the pull out of his reach, not every metre of the fight.",
     "WALK 37 FIX 2 (2026-11-04, leg 0; TortoiseBots-audit tests/raid-zg-walk37 d/d-r1: both runs paused at step 42, \"the walk to it passes 14750 at 0.9 yd\"). The leg's old group 13 (-12228 -1478, radius 10) owned nothing alive: every 11368/14750 spawn inside its radius belongs to the static pack formation 49137, pulled by the group before it. The run leader then chased the residue of formation 49185 (the west camp's bats) to a point of its loop and the walk crossed another bat's lane. The empty row is dropped; formation 49185 (six spawns: 49185, 49157, 49158, 49167, 49186 and the lone 49140 that stands at the static camp) is one plain pull, placed last on the plateau after F6's row: its row point is the formation's centroid (-12270 -1456) and its radius 40 holds the whole formation plus 49140 (48.1 yd, inside the 50 yd pack band), so the fight happens at the west camp with every other plateau formation dead by then and 49140's own pull follows from the same step. A stand pull is impossible for it: one of its members, 49140, stands 48 yd from the others, and the stand gate needs the whole pack in the tank's shot. tools/dungeongen/zg_w35_test.go pins the row's 49185 loop and its six spawns; zg_mandokir_jindo_test.go checks the corridor's live rows.",
     "WALK 37 FIX 3 (2026-11-04, legs 1, 3 and 4; the MANDOKIR-440 method, research/zg-w36/MANDOKIR-440.md \"Also found\"). Five patrol rows were plain pulls at a roaming Berserker 11352's DB spawn with their stand 68-174 yd behind it, so plan-export --approach-hops cut the hop into approach-path rows through the pack field (the exporter lists the row as \"patrol: not in the rows\"). Each is a stand pull now, its pack scoped from a centre the run leader sees (\u003c= 60 yd from the stand) with a radius up to 100 that holds the patroller's spawn: leg 1 group 10 (49698; centre -11977 -1751 r 61, stand -11986.9 -1731.7 54.5, 24.5 yd from its loop), group 18 (91493; centre -12058.1 -1786.9 r 94, stand -12032 -1781 58.83, 23.5 yd from its loop) and group 19 (51962; centre -12128 -1764 r 96, stand -12115 -1819 80.4, 27.6 yd from its loop; the circle also holds 91493's spawn, which group 18 pulls first), leg 3 group 3 (91435; centre is the stand -11636 -1759 36.19, r 35, 23.5 yd from its loop; the stand moved 141 yd north-east from -11739 -1855, which stood 174 yd from the spawn, past the 60 + 100 yd rule) and leg 4 group 21 (91444; centre -11583 -1528 r 54, stand -11587 -1542 53.07, 23.3 yd from its loop). The party holds at the stand and the run leader shoots the patroller as its loop comes into the 28.5 yd shot (loop periods 155-348 s, inside the gate's 600 s wait). The five approach paths are gone from the export (leg 1's 51962 row needs three staging moves for the terrace ramp, which the cut used to place off the mesh): route-aggro drops from 831 to 810 segments. tools/dungeongen/zg_w37_test.go checks each row's centre, radius, stand and loop, that no approach-path row is exported before it, and that the walk to it keeps 20 yd from every pack pulled later.",
-    "WALK 39 (2026-11-05, leg 0; TortoiseBots-audit tests/raid-zg-walk39, jeklik-notes.txt): plain full clears wiped at steps 29 and 43 with 20-23 deaths, the killers Gurubashi Bat Rider 14750; the raid fought 4 riders, 10-12 bats, 1-2 Headhunters and a Witch Doctor at once (m1-6 step 29 estimates 11 bodies; step 43 brings 13 and joins 16: 11368 x10, 11831 x2, 14750 x4). Batcap over 11 distinct 14750 guids shows five moving riders, each a creature_movement loop: F1 49147 (4 points, 87.8 yd + 20 s wait), F3 49155 (8/184.9), F4 49189 (6/176.8), F5 49185 (7/168.9) and F6 49130 (7/227.3); the other six 14750s have no waypoint loop (49141, 49142 and 49193 stand still, 49154, 49167 and 49129 wander). Each formation is now a stand pull that carries its rider's loop: F1 from -12080 -1461 130.3 (walked; 11.5 yd from the nearest segment of F1's east lane (14.4-20.9 yd to its waypoints), 37.8+ from the 49135/49155/49189 lanes), F3 from -12110 -1490 130.7 (26.5 yd from its east waypoint, 33+ from F4's), F4 from -12140 -1490 130.7 (26.6 yd from its east waypoint, F3 dead first), F5 from -12268 -1488 131.23 (walked; 26.5 from its loop; the gate holds while 49130's loop is within its 40 yd clear) and the north camp + F6 (10 bodies) from -12250 -1418 130.65 (walked; 25.1 from 49130's loop, its units in shot), after F5. F7's combined radius-33 row (which also owned F2's loop and F6) is split: the south Headhunter camp 49134/35/36 is its own 3-body row from -12219 -1491 132.45 with the 49135 loop. Order: F1, F2, F3, F4, S5, south camp, F5, north camp + F6, boss. The old step-46 row (11368 49123 at -12228 -1440, stand -12175.4 -1447.4, 53.1 yd out) is the north camp + F6 row at step 46 now (row point -12238.93 -1418.93, stand -12250 -1418, walked: j3d-1 -12248.3 -1417, 2.0 yd; 49123 is 22.5 yd from it). The old plain F5 row (step 47) is a stand pull at step 44 from the walked -12268 -1488 (m1-6 -12265.4 -1484.8, 4.1 yd), so both pulls have a firing position. j2's step-29 wipe was not a plan failure: its command asked for leg 1 from the door, and raid-walk skips --place (and so --gm-clear) when the start is the first leg, so none of its 26 packs was cleared; j2-1 has no gm_clear/assisted field, unlike j4-2/j3d-1. A placed start at steps 44/48 is a move row (#418 takes the plan z on an unknown floor); step 46 is a pull row, so its unknown floor is still refused by design.",
-    "WALK 39 FIX 1 (2026-11-05, leg 0; review of the walk-39 plan). F4's row point was the south bat 49151's spawn with radius 1, so the rider 49189 that its loop marks stood 27.7 yd outside the scoped circle and came in only through the shared group_leader (the review's finding); the point is 49189's DB spawn -12170.5 -1467.25 130.725 now, radius 10 (its two bats 49187/49188 are 5.2 yd out, the south pair 49151/49153 27.7 yd and are scoped as its formation through the position; F3's 49150, 24.8 yd out but 3.0 from 49151, stays out, and F3 is pulled first anyway). F5's radius drops 40 -\u003e 20: its six spawns are within 17.6 yd of the row point (49140 joins as a formation member at 48.1), F6's nearest spawn 49128 is 39.4 yd out and the 49131 witch-doctor camp 50.9, so the step-43 13-body pull (F5 6 + F6 7) cannot happen again. The south Headhunter camp row (entries 11351/11351/11831, point -12217.7 -1465.7, radius 6, the 49135 loop) is dropped: 49134/35/36 are owned by the radius-72 row before it (they are 70.4 yd from its point -12148 -1458) and pull_size printed 'leg 0 pull 14: no target'; an empty row makes the run leader chase the residue (walk-37 FIX 2). NOT DONE and escalated: pulling the north camp + F6 row before F5 from a stand clear of F5's loop. The reviewer's candidate -12274 -1512 is 50.8 yd from 49185's loop but 99.5 yd from the row's point (plan limit 60, Load refuses), 88.2 yd from the nearest of its units (out of the 28.5 yd tank shot: nothing to pull) and off the mesh at the plateau z. A grid over the plateau (every yard, 309.mmap, z 130.6) finds 3844 mesh points within 60 yd of the row point with a pack unit in shot; the largest clearance from 49185's loop among them is 40.4 yd, at -12241 -1381 133.55 (31.6 from the 49131 loop, 35.8 from the row point, 28.0 from its nearest unit), only 0.4 yd past the run leader's 40 yd clear_yd gate and 2.4 yd past the rider's 38 yd wake reach (routeReach: 23 aggro + 10 raid spread + 5 wander), and every walk to it from the previous stand (-12183 -1488) that the mesh cuts runs at 8-35 yd from 49185's loop; the in-shot stands with 25+ yd from both loops (-12205 -1407 and its neighbours, 35.4/32.7) are reached by a cut that passes 19.4 yd from 49185's loop, inside the rider's reach. The walked frames' only points 25+ yd from both loops are 70-80 yd south (-12244.7 -1497), past the 60 yd sight rule. The order stays F5, then the north camp + F6 (stand -12250 -1418, 12.0 from the row point): the plan format cannot place the F6 pull clear of F5's loop and still scope its camp, so the maintainer decides (a TortoiseBots clear/wake rule change, or splitting the camp)."
+    "WALK 39 (2026-11-05, leg 0; TortoiseBots-audit tests/raid-zg-walk39, jeklik-notes.txt): plain full clears wiped at steps 29 and 43 with 20-23 deaths, the killers Gurubashi Bat Rider 14750; the raid fought 4 riders, 10-12 bats, 1-2 Headhunters and a Witch Doctor at once (m1-6 step 29 estimates 11 bodies; step 43 brings 13 and joins 16: 11368 x10, 11831 x2, 14750 x4). Batcap over 11 distinct 14750 guids shows five moving riders, each a creature_movement loop: F1 49147 (4 points, 87.8 yd + 20 s wait), F3 49155 (8/184.9), F4 49189 (6/176.8), F5 49185 (7/168.9) and F6 49130 (7/227.3); the other six 14750s have no waypoint loop (49141, 49142 and 49193 stand still, 49154, 49167 and 49129 wander). Each formation is now a stand pull that carries its rider's loop: F1 from -12080 -1461 130.3 (walked; 11.5 yd from the nearest segment of F1's east lane (14.4-20.9 yd to its waypoints), 37.8+ from the 49135/49155/49189 lanes), F3 from -12110 -1490 130.7 (26.5 yd from its east waypoint, 33+ from F4's), F4 from -12140 -1490 130.7 (26.6 yd from its east waypoint, F3 dead first), F5 from -12268 -1488 131.23 (walked; 26.5 from its loop; the gate holds while 49130's loop is within its 40 yd clear) and the north camp + F6 (10 bodies) from -12250 -1418 130.65 (walked; 25.1 from 49130's loop, its units in shot), after F5. F7's combined radius-33 row (which also owned F2's loop and F6) is split: the south Headhunter camp 49134/35/36 is its own 3-body row from -12219 -1491 132.45 with the 49135 loop. Order: F1, F2, F3, F4, S5, south camp, F5, north camp + F6, boss (fixed by WALK 39 FIX 2: S5, F6, north camp, F5, boss). The old step-46 row (11368 49123 at -12228 -1440, stand -12175.4 -1447.4, 53.1 yd out) is the north camp + F6 row at step 46 now (row point -12238.93 -1418.93, stand -12250 -1418, walked: j3d-1 -12248.3 -1417, 2.0 yd; 49123 is 22.5 yd from it). The old plain F5 row (step 47) is a stand pull at step 44 from the walked -12268 -1488 (m1-6 -12265.4 -1484.8, 4.1 yd), so both pulls have a firing position. j2's step-29 wipe was not a plan failure: its command asked for leg 1 from the door, and raid-walk skips --place (and so --gm-clear) when the start is the first leg, so none of its 26 packs was cleared; j2-1 has no gm_clear/assisted field, unlike j4-2/j3d-1. A placed start at steps 44/48 is a move row (#418 takes the plan z on an unknown floor); step 46 is a pull row, so its unknown floor is still refused by design.",
+    "WALK 39 FIX 1 (2026-11-05, leg 0; review of the walk-39 plan). F4's row point was the south bat 49151's spawn with radius 1, so the rider 49189 that its loop marks stood 27.7 yd outside the scoped circle and came in only through the shared group_leader (the review's finding); the point is 49189's DB spawn -12170.5 -1467.25 130.725 now, radius 10 (its two bats 49187/49188 are 5.2 yd out, the south pair 49151/49153 27.7 yd and are scoped as its formation through the position; F3's 49150, 24.8 yd out but 3.0 from 49151, stays out, and F3 is pulled first anyway). F5's radius drops 40 -\u003e 20 (and 20 -\u003e 14 in WALK 39 FIX 2: 3D scoping puts the lone ledge bat 91551 14.5 yd out, not 7.4, and 14 keeps all six of formation 49185): its six spawns are within 17.6 yd of the row point (49140 joins as a formation member at 48.1), F6's nearest spawn 49128 is 39.4 yd out and the 49131 witch-doctor camp 50.9, so the step-43 13-body pull (F5 6 + F6 7) cannot happen again. The south Headhunter camp row (entries 11351/11351/11831, point -12217.7 -1465.7, radius 6, the 49135 loop) is dropped: 49134/35/36 are owned by the radius-72 row before it (they are 70.4 yd from its point -12148 -1458) and pull_size printed 'leg 0 pull 14: no target'; an empty row makes the run leader chase the residue (walk-37 FIX 2). NOT DONE and escalated: pulling the north camp + F6 row before F5 from a stand clear of F5's loop. The reviewer's candidate -12274 -1512 is 50.8 yd from 49185's loop but 99.5 yd from the row's point (plan limit 60, Load refuses), 88.2 yd from the nearest of its units (out of the 28.5 yd tank shot: nothing to pull) and off the mesh at the plateau z. A grid over the plateau (every yard, 309.mmap, z 130.6) finds 3844 mesh points within 60 yd of the row point with a pack unit in shot; the largest clearance from 49185's loop among them is 40.4 yd, at -12241 -1381 133.55 (31.6 from the 49131 loop, 35.8 from the row point, 28.0 from its nearest unit), only 0.4 yd past the run leader's 40 yd clear_yd gate and 2.4 yd past the rider's 38 yd wake reach (routeReach: 23 aggro + 10 raid spread + 5 wander), and every walk to it from the previous stand (-12183 -1488) that the mesh cuts runs at 8-35 yd from 49185's loop; the in-shot stands with 25+ yd from both loops (-12205 -1407 and its neighbours, 35.4/32.7) are reached by a cut that passes 19.4 yd from 49185's loop, inside the rider's reach. The walked frames' only points 25+ yd from both loops are 70-80 yd south (-12244.7 -1497), past the 60 yd sight rule. The order stays F5, then the north camp + F6 (stand -12250 -1418, 12.0 from the row point): the plan format cannot place the F6 pull clear of F5's loop and still scope its camp, so the maintainer decides (a TortoiseBots clear/wake rule change, or splitting the camp).",
+    "WALK 39 FIX 2 (2026-11-05, leg 0; review of fix 1, round 2). F6 (rider 49130's formation, 7 spawns) is its own row now, pulled BEFORE F5 and before the north camp, and the north camp (49131/49132/49133, 3 bodies) is its own 3-body row after it: the 10-body combined row and its raised max_bodies 11 are gone (that row was the north camp + F6, never F5's; the step-43 13-body pull was F5 6 + F6 7). Order in this part of leg 0: S5, F6, north camp, F5, boss. F6's row point is the formation's own spawns' mean (-12239.37 -1420.85 130.9), radius 13: five of its spawns are inside the circle (49130 5.1, 49124 1.3, 49129 2.4, 49127 5.2, 49128 5.5) and the formation carries 49125 (16.3) and 49123 (13.7), so the row scopes 49123-49130 alone: the camp's three are other entries, and the lone ledge bat 91552 (15.4 yd in 2D, 23.5 in 3D) is outside the circle and pulled by no row. Its stand is the terrace point -12207 -1408 132.83 (mesh z): 33.4 yd from 49185's loop and 30.7 from the 49131 camp loop (the two \u003e= 30 yd rules), 34.8 from its row point (\u003c= 60), 30.6 from the camp's nearest spawn, 23.8 from 49125, the nearest of its pack (the stand-pull gate's 28.5 yd shot fires on the bats; 49130's loop is 32.4 yd out, and no mesh point that meets the two 30 yd rules comes within 28.5 of it). Approach: three points up the east shelf (-12193 -1466 131.31, -12192 -1448 131.56, -12196 -1436 132.81) then the stand; every hop's navmesh path stays 20.8+ yd from 49185's loop, 20.1+ from 49130's, 20.1+ from the camp's loop and 31.8+ from the camp's spawns (45.1+ from F5's), and the rows' straight segments 20.8-24.8 / 20.1-25.7 / 20.0-26.1 / 31.8-67.3. The north camp's stand is -12235 -1394 132.28: 19.6 yd from 49131 and 21.5 from the camp's loop (31.0 from 49185's), 37.8 from the ledge bat 91550, whose aggro+8 the previous candidate -12227 -1399 132.91 sat on (0.0 yd inside); max_bodies 3 is its real count. F5's radius is 14, not 20: the run leader scopes a stand pull by PlanDistance (3D, DungeonRunPolicy.h ScopeStandPullFacts, radius + kSpawnOwnTolYd), and the lone ledge bat 91551 is 14.5 yd out in 3D (7.4 in 2D) -- a radius that scopes 49185 (13.5) cannot exclude it, so it is pulled with F5, and max_bodies stays 6 for the six of formation 49185 (91553, 14.2 yd out in 2D, is 31.6 in 3D and was never scoped). F5's approach is the corridor point -12238 -1436 130.7, the gate -12249 -1480 130.74 (17.3 yd from 49140, 23.9 from 49186) and the walked -12268 -1488 131.23: without the gate the walk from the north cut the corner 7.4 yd from 49186, and with it every hop stays under the exporter's 60 yd cut (no path rows: the cut row pair the plan check found at -12237 -1448 was 0.3 yd apart and its second had no server path). The walk from S5 to F6's stand no longer goes west along y -1488, where it passed F5's static bat 49140 at 2.2 yd (the reviewer's finding): it climbs the east shelf instead. Test: TestZgW39JeklikMoversOwnedByTheirRows (d) pins the order (F6, then the camp, then F5) and, for every walk segment of that part of leg 0, 15 yd (3D, sampled every yard) off every spawn of a formation pulled after the segment's end row and 20 yd (2D) off every rider loop pulled after it; it fails on c3c690e with the order, 49140 at 2.1 yd and 49130's loop at 2.3, and (a2) pins each row's max_bodies to its 3D pack. TestZgW39JeklikNorthCampIsItsOwnRow replaces TestZgW39JeklikNorthCampStandPulls49123 (the row 49123 is in is F6's now, its stand 23.8 yd from its nearest unit 49125); TestZgW39JeklikBatRidersArePatrollers' loop-shot rule keeps F6 as its one exception, on the pack units instead. The scan: a 1 yd grid of 309.mmap over x -12300..-12140 y -1500..-1360, filtered by the rules above, finds 39 stands; the best by the sum of margins is -12206 -1404 133.37 (F5 37.3, camp 33.6, unit 24.9) but it stands 0.0 yd off the mesh edge (the shelf's tip; the plan check's edge rule is 4 yd at a gather point), so the stand sits 2 yd back at -12207 -1408 (edge 2.9); its neighbours -12205 -1406..-12204 -1408 differ by under 2 yd. The reviewer's grid candidate -12214 -1384 is off the mesh (Planner.Nearest finds no floor within 4 yd round and 6 up and down) and has no path from S5's stand. Pins: route-aggro 783 -\u003e 801 (leg 0 113 -\u003e 131: the new walk rows pass the ledge bats that no row owns, the stand pulls' own pack aggro and the boss approach's cut rows, all of which the model counts), pull_size 90 -\u003e 92 (F6's 11-body estimate and the camp's 10 join each other in the lint's 20 yd ring: the packs are interleaved, so the split rows each estimate the other's), the raidwalk ZG fixture 399 -\u003e 406 steps, export 780 -\u003e 787 steps (790 -\u003e 797 rows), plan-check lints 1218 -\u003e 1219 with the same 184 failing and 19 warnings (--approach-hops: one more joiners finding at F6's row; the plain run 985 -\u003e 986 / 167 failing)."
   ],
   "legs": [
     {
@@ -312,48 +313,13 @@
           "stand_pull": true
         },
         {
-          "entries": [14750, 11368, 11368, 11368, 11368, 11368],
+          "entries": [11368, 11368, 11368, 11368, 11368, 14750, 14750],
           "positions": [
-            {"x": -12277.5, "y": -1444.66, "z": 130.725},
-            {"x": -12279.2, "y": -1446.06, "z": 130.725},
-            {"x": -12281.7, "y": -1451.19, "z": 130.725},
-            {"x": -12281.9, "y": -1443, "z": 130.725},
-            {"x": -12265.8, "y": -1463.01, "z": 130.601},
-            {"x": -12233.1, "y": -1486.77, "z": 132.874}
-          ],
-          "radius": 20,
-          "patrol": {
-            "entries": [14750],
-            "path": [
-              {"x": -12279.9, "y": -1448.8, "z": 130.601},
-              {"x": -12274.9, "y": -1430.43, "z": 130.601},
-              {"x": -12244.5, "y": -1423.55, "z": 130.601},
-              {"x": -12224.5, "y": -1436.45, "z": 130.601},
-              {"x": -12213, "y": -1451.35, "z": 130.6},
-              {"x": -12233.3, "y": -1465.46, "z": 130.6},
-              {"x": -12255.3, "y": -1464.75, "z": 130.601}
-            ],
-            "period_s": 67.6,
-            "period_estimate": true,
-            "source": "creature_movement 49185 (7 points, 168.9 yd at 2.5 yd/s)"
-          },
-          "approach": [
-            {"x": -12268, "y": -1488, "z": 131.23}
-          ],
-          "stand_pull": true,
-          "max_bodies": 6
-        },
-        {
-          "entries": [11831, 11831, 11351, 11368, 11368, 11368, 11368, 11368, 14750, 14750],
-          "positions": [
-            {"x": -12236.9, "y": -1414.1, "z": 131.2},
-            {"x": -12238.7, "y": -1413.2, "z": 130.7},
-            {"x": -12238.1, "y": -1416, "z": 130.8},
-            {"x": -12233.9, "y": -1433.4, "z": 130.7},
-            {"x": -12240.5, "y": -1420.3, "z": 130.7},
             {"x": -12230.7, "y": -1407, "z": 131.6},
-            {"x": -12243.6, "y": -1424.6, "z": 130.8},
+            {"x": -12240.5, "y": -1420.3, "z": 130.7},
             {"x": -12245.2, "y": -1425.1, "z": 131},
+            {"x": -12243.6, "y": -1424.6, "z": 130.8},
+            {"x": -12233.9, "y": -1433.4, "z": 130.7},
             {"x": -12237.4, "y": -1413.4, "z": 130.9},
             {"x": -12244.3, "y": -1422.2, "z": 130.8}
           ],
@@ -374,10 +340,61 @@
             "source": "creature_movement 49130 (7 points, 227.3 yd at 2.5 yd/s)"
           },
           "approach": [
-            {"x": -12250, "y": -1418, "z": 130.65}
+            {"x": -12193, "y": -1466, "z": 131.31},
+            {"x": -12192, "y": -1448, "z": 131.56},
+            {"x": -12196, "y": -1436, "z": 132.81},
+            {"x": -12207, "y": -1408, "z": 132.83}
           ],
           "stand_pull": true,
-          "max_bodies": 11
+          "max_bodies": 7
+        },
+        {
+          "entries": [11831, 11831, 11351],
+          "positions": [
+            {"x": -12236.9, "y": -1414.1, "z": 131.2},
+            {"x": -12238.7, "y": -1413.2, "z": 130.7},
+            {"x": -12238.1, "y": -1416, "z": 130.8}
+          ],
+          "radius": 6,
+          "approach": [
+            {"x": -12235, "y": -1394, "z": 132.28}
+          ],
+          "stand_pull": true,
+          "max_bodies": 3
+        },
+        {
+          "entries": [14750, 11368, 11368, 11368, 11368, 11368],
+          "positions": [
+            {"x": -12277.5, "y": -1444.66, "z": 130.725},
+            {"x": -12279.2, "y": -1446.06, "z": 130.725},
+            {"x": -12281.7, "y": -1451.19, "z": 130.725},
+            {"x": -12281.9, "y": -1443, "z": 130.725},
+            {"x": -12265.8, "y": -1463.01, "z": 130.601},
+            {"x": -12233.1, "y": -1486.77, "z": 132.874}
+          ],
+          "radius": 14,
+          "patrol": {
+            "entries": [14750],
+            "path": [
+              {"x": -12279.9, "y": -1448.8, "z": 130.601},
+              {"x": -12274.9, "y": -1430.43, "z": 130.601},
+              {"x": -12244.5, "y": -1423.55, "z": 130.601},
+              {"x": -12224.5, "y": -1436.45, "z": 130.601},
+              {"x": -12213, "y": -1451.35, "z": 130.6},
+              {"x": -12233.3, "y": -1465.46, "z": 130.6},
+              {"x": -12255.3, "y": -1464.75, "z": 130.601}
+            ],
+            "period_s": 67.6,
+            "period_estimate": true,
+            "source": "creature_movement 49185 (7 points, 168.9 yd at 2.5 yd/s)"
+          },
+          "approach": [
+            {"x": -12238, "y": -1436, "z": 130.7},
+            {"x": -12249, "y": -1480, "z": 130.74},
+            {"x": -12268, "y": -1488, "z": 131.23}
+          ],
+          "stand_pull": true,
+          "max_bodies": 6
         }
       ],
       "skip": [14758, 15091],

@@ -679,7 +679,7 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 // approach row and nets one fewer row elsewhere on leg 6, 406; fix 1 makes groups 8/9 stand pulls with south hops and
 // moves the group-11 stand south past the pit, 408; walk 35 drops the Arlokk middle-east-Panther pull and its approach row, 406; walk 36
 // merges the two north hall packs into one pull (one fewer group), pulls the honour guard before them and drops the -11603 -1229 pull
-// beside the respawn pit (one fewer group and its three approach rows), 399; the Mandokir 440 fix makes group 0 a stand pull (no approach-path rows) and deletes group 1's first approach point, 398; walk 39's five Jeklik patrol stand pulls and the split south camp, 401; walk 39 fix 1 drops the empty south Headhunter camp row (its move and pull rows), 399), a placed
+// beside the respawn pit (one fewer group and its three approach rows), 399; the Mandokir 440 fix makes group 0 a stand pull (no approach-path rows) and deletes group 1's first approach point, 398; walk 39's five Jeklik patrol stand pulls and the split south camp, 401; walk 39 fix 1 drops the empty south Headhunter camp row (its move and pull rows), 399; walk 39 fix 2 pulls F6 from the terrace (four approach rows) and splits the north camp out of it (its move and pull rows) and gives F5 two more approach points, 406), a placed
 // `--until none` run from Marli stops before the segment on leg 6 that passes Venoxis, and the shortened corridor
 // clears clean.
 
@@ -690,8 +690,8 @@ func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	if len(rows.Steps) != 399 {
-		t.Fatalf("the fixture has %d steps, want 399", len(rows.Steps))
+	if len(rows.Steps) != 406 {
+		t.Fatalf("the fixture has %d steps, want 406", len(rows.Steps))
 	}
 	start, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
 	if err != nil {
