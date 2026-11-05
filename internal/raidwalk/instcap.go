@@ -74,6 +74,10 @@ type CapServer struct {
 	ServerStart  time.Time        `json:"server_start,omitempty"`
 	Entries      []CapEntry       `json:"entries"`
 	Reservations []CapReservation `json:"reservations,omitempty"`
+	// GMInstanceData are the "<instance id>/<leg>" marks of --gm-instance-data lines already sent in that
+	// instance. A --reuse-instance restart runs a fresh out dir per attempt, so the out dir's marker cannot tell
+	// it: the ledger outlives the attempt, and resending is noisy (not harmful: the gate just stays satisfied).
+	GMInstanceData []string `json:"gm_instance_data,omitempty"`
 }
 
 // CapLedger is the ledger file: one CapServer per server name.
@@ -337,6 +341,37 @@ func (l *CapLedger) Release(name, owner string) {
 func (l *CapLedger) Confirm(name, owner string, e CapEntry, now time.Time) {
 	l.Release(name, owner)
 	l.Record(name, e, now)
+}
+
+// gmInstanceDataMark is the mark of a leg whose lines went out in an instance.
+func gmInstanceDataMark(inst, leg string) string { return inst + "/" + leg }
+
+// NoteGMInstanceData remembers that leg's lines went out in inst (once: a mark
+// read back counts as done).
+func (l *CapLedger) NoteGMInstanceData(name, inst, leg string) {
+	s := l.server(name)
+	mark := gmInstanceDataMark(inst, leg)
+	for _, m := range s.GMInstanceData {
+		if m == mark {
+			return
+		}
+	}
+	s.GMInstanceData = append(s.GMInstanceData, mark)
+}
+
+// GMInstanceDataDone says leg's lines already went out in inst.
+func (l *CapLedger) GMInstanceDataDone(name, inst, leg string) bool {
+	s := l.Servers[name]
+	if s == nil {
+		return false
+	}
+	mark := gmInstanceDataMark(inst, leg)
+	for _, m := range s.GMInstanceData {
+		if m == mark {
+			return true
+		}
+	}
+	return false
 }
 
 // RecordReuse adds the accounts a reuse placement newly hired into the instance the raid already had. The core counts

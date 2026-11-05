@@ -987,6 +987,11 @@ func (w *walk) checkStartLine(ctx context.Context, line string) error {
 			w.untilStep, _ = strconv.Atoi(m[1])
 		}
 	}
+	// --gm-instance-data: a placed start inside the leg fires here, before the
+	// first pull (the start line is the first line that names the leg).
+	if err := w.gmInstanceDataStart(ctx, st); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1195,6 +1200,11 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 		w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
 		w.recordRunLine(st, now)
 		w.noteLabel(st)
+		// --gm-instance-data: the first status that names the leg fires here,
+		// once per instance. A failing send breaks the walk.
+		if err := w.gmInstanceDataStart(ctx, st); err != nil {
+			return nil, err
+		}
 		if st.Note != "" {
 			w.newNotes = append(w.newNotes, st.Note)
 		}

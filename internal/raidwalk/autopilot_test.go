@@ -41,6 +41,49 @@ func TestParseAutoTargets(t *testing.T) {
 	}
 }
 
+// --gm-instance-data holds spaces in its value, but targets.txt is split
+// on whitespace with no quoting: the words after the flag are joined back,
+// and one `--gm-instance-data=<value>` argv reaches the walk whole.
+func TestParseAutoTargetsGMInstanceData(t *testing.T) {
+	ts, err := ParseAutoTargets(strings.NewReader("a test2 1 h full -- zul_gurub --sql /zg.sql --gm-instance-data hakkar:1 3;6 3;0 0 --hires /r.json\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ts) != 1 || len(ts[0].Args) == 0 {
+		t.Fatalf("%+v", ts)
+	}
+	want := "--gm-instance-data=hakkar:1 3;6 3;0 0"
+	found := false
+	for _, a := range ts[0].Args {
+		if a == want {
+			found = true
+		}
+		if strings.HasPrefix(a, "--gm-instance-data") && a != want {
+			t.Fatalf("split value argv %q", a)
+		}
+	}
+	if !found {
+		t.Fatalf("no joined argv in %q", ts[0].Args)
+	}
+	// The = form joins the same way, and a bare flag is refused.
+	ts, err = ParseAutoTargets(strings.NewReader("a test2 1 h full -- zul_gurub --sql /zg.sql --gm-instance-data=hakkar:1 3 --hires /r.json\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found = false
+	for _, a := range ts[0].Args {
+		if a == want[:len("--gm-instance-data=hakkar:1 3")] {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no joined = argv in %q", ts[0].Args)
+	}
+	if _, err := ParseAutoTargets(strings.NewReader("a test2 1 h full -- zul_gurub --sql /zg.sql --gm-instance-data\n")); err == nil {
+		t.Fatal("a bare --gm-instance-data parsed")
+	}
+}
+
 func TestParseAutoTargetsRefusals(t *testing.T) {
 	cases := map[string]string{
 		"slot 3":       "a test2 3 h full -- zg --sql /zg.sql",

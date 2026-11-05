@@ -220,6 +220,29 @@ func parseAutoArgs(in []string) (args []string, start string, err error) {
 			continue
 		case "--place", "--reuse-instance":
 			continue
+		case "--gm-instance-data":
+			// The flag's value holds spaces (`<leg>:<a> <b>[;<a> <b>...]`), but targets.txt is split on
+			// whitespace with no quoting: the words after the flag (up to the next flag) are its value, joined
+			// back with single spaces. One argv (`--gm-instance-data=<value>`) reaches the walk whole, since the
+			// supervisor launches it directly (no shell re-split).
+			val := ""
+			if hasEq {
+				_, val, _ = strings.Cut(a, "=")
+			}
+			var words []string
+			if val != "" {
+				words = append(words, val)
+			}
+			for i+1 < len(in) && !strings.HasPrefix(in[i+1], "-") {
+				i++
+				words = append(words, in[i])
+			}
+			val = strings.Join(words, " ")
+			if strings.TrimSpace(val) == "" {
+				return nil, "", fmt.Errorf("--gm-instance-data needs a value (\"<leg>:<a> <b>[;<a> <b>...]\")")
+			}
+			args = append(args, "--gm-instance-data="+val)
+			continue
 		}
 		args = append(args, a)
 	}
