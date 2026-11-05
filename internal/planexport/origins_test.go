@@ -131,7 +131,7 @@ func TestSQLUnchangedByOrigins(t *testing.T) {
 		plan string
 		sha  string
 	}{
-		{"zul_gurub", "b9e5bc5e17bdddfadf720267bf038b46459e81cb103ae1776f3968204f1493c9"}, // arlokk route fix round 1 (2026-11-05): the loop order, the ledge's stands and the arena descent in the gong's rows; arlokk re-route: the one-ascent leg and the split top pack; walk 38: the Jin'do hall is staged (49363 stand, 1173082 plain centroid, the guard and north camp stands, the lone mistresses with west approaches) and Jeklik's 49131/49135 patrol camps are split; walk 37: the -11603 -1229 pull is dropped and the boss stand is -11536.8 -1261.5
+		{"zul_gurub", "1c104ae873deeaf9aed8dca4d1ebccdfe818b538d1394e6d61992492ec952dc8"}, // arlokk route fix round 1 (2026-11-05): the loop order, the ledge's stands and the arena descent in the gong's rows; arlokk re-route: the one-ascent leg and the split top pack; walk 38: the Jin'do hall is staged (49363 stand, 1173082 plain centroid, the guard and north camp stands, the lone mistresses with west approaches) and Jeklik's 49131/49135 patrol camps are split; walk 37: the -11603 -1229 pull is dropped and the boss stand is -11536.8 -1261.5
 		{"onyxias_lair", "142c1d58928ad1efd9aca2b773c4762e2ddcbae05c308540080a1fedd6e3b38e"},
 	} {
 		p, err := dungeon.Load(filepath.Join("..", "..", "dungeons", c.plan+".json"))
