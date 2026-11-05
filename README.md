@@ -101,6 +101,7 @@ turtle-agent plan-scout <dungeon> [--dir dungeons] [--sql FILE] [--mmaps DIR] [-
 turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
 turtle-agent path-check --mmaps DIR --map N x y z x y z [--json]
 turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--reuse-instance] [--dry-run]
+turtle-agent walk-preflight [--server NAME]... [--json] <walk-dir>
 turtle-agent trash-check [--dir dungeons] [--sql FILE [--plan NAME]] [--spawns DIR] [--patrols FILE]... [--mmaps DIR] [--level N] [--spread YD] [--aggro-rate R] [--assist-yd 10] [--json] [--out DIR] [--dash-out FILE] [--fail-on danger|patrol|any] [<plan>|<path.json>]
 turtle-agent stage-check [--dir dungeons] --mmaps DIR [--cleared-through LEG] [--server-steps N] [--json] <plan> <leg>
 turtle-agent scenario check [--var NAME=VALUE]... <file>
@@ -2867,6 +2868,65 @@ names every character; `null` with the dashboard off), `exit_code`, `notes` and 
 (exit code not 0), `steps_reached`, `deaths`, `fights`, `pauses`. `multi.txt` is one line per walk, the `note:` lines, a
 `total:` line and `multi: exit <c>`; the exit code is picked by the same order as the pair's. N full raids are N times the hires:
 plan the worldserver's memory (two 40-man raids are already up to 80 bots).
+
+## Walk preflight
+
+`turtle-agent walk-preflight <walk-dir>` checks a walk directory before any raid-walk starts. It reads every `cmd-*.txt`
+file and the autopilot's `targets.txt` (one command per file, one command or target per line; blank and `#` lines are
+skipped), and prints one `OK`/`WARN`/`FAIL` line per subject with a fix hint. It writes nothing: leases, the instance
+ledger and the slot table are only read, and the server checks are read-only ssh calls.
+
+```
+turtle-agent walk-preflight [--server NAME]... [--json] <walk-dir>
+```
+
+`--server` (repeatable, or a comma list) keeps only the commands of those servers; a named server with no command is a
+failure, so a typo does not silently pass. `--json` prints the report as one JSON object (`dir`, `results[]` with
+`check`, `status`, `subject`, `detail`, `fix`). Exit codes: `0` every check OK, `1` warnings only, `2` any failure (or
+a bad flag or unreadable walk directory).
+
+| # | Check | Passes when |
+| --- | --- | --- |
+| 1 | binary | Every binary the commands name exists, runs `--help`, and prints a version; the report adds its Go build commit when the binary has one. One walk may not mix binaries (WARN). |
+| 2 | slots schema | The binary parses `slots.json` (`lease list` on a private copy, so no lock or lease in the real folder); an unknown field is a FAIL. |
+| 3 | slots path | No command passes a `--slots` other than the default path: a split lease table also splits the instance-cap ledger (FAIL). |
+| 4 | instance cap | `instance-cap-per-account.json` beside the slot table (`{"m910q": 30}`) parses and the resolved cap is printed per binary and server. A binary that would use the stock 5 while the file says more is a FAIL; an explicit `--instance-cap-per-account` on a binary without that flag is a FAIL. The binary's support is read from the flag in its `raid-walk --help`. A missing file is a WARN (and 5 everywhere). |
+| 5 | lease | Every server/slot of the commands is free, or held by a live agent of this walk (same `--holder`, and the lease dir under the command's `--out`). Two commands on one slot are a FAIL; slot 3 is always a FAIL; a held slot is a FAIL; a stale lease is a WARN (acquire takes it over). |
+| 6 | gm-clear | `--place` needs `--sql`, the `--sql` file exists, and `--gm-clear`/`--gm-clear-boss` resolve a spawns dir that has `creatures.tsv`: `--gm-clear-spawns DIR`, else `<--dir>/../tools/dungeongen/testdata/map<map>` (the plan's map). |
+| 7 | plan | The plan JSON `<--dir>/<plan>.json` loads and, with `--sql`, the deployed migration exports the same plan: name, map, leg names in order, and the plan row's `source` (commit and plan path). A plan edited after the migration's filename stamp is a WARN, and so is an export from another commit. |
+| 8 | server keys | The required keys file lists `key: value` pairs; every server's effective `aiplayerbot.conf` and `tortoise_bots.conf` lines (last active line wins) match. A missing keys file is a WARN, a missing or different value is a FAIL. Values of keys whose names contain `PASS`, `KEY` or `SECRET` are never printed (a mismatch is shown as `(hidden)`). |
+| 9 | roster | Every `--hires` file exists, parses and validates against the plan. A roster with fewer than 3 tanks is a WARN when the command will fight Arlokk (14515) or Hakkar (14834) in `zul_gurub` — read from `--from`/`--until` (raid-walk's default `--until boss` fights no boss), or from a `boss:<entry>`/`leg:<name>` goal. |
+
+Commands using the multi-raid form (`--slot 2,4`, per-slot `4=...` values) are split into one subject per slot, exactly
+as raid-walk splits them; the per-slot holder and out dir use the same defaults.
+
+Relative paths (`--dir` defaults to `dungeons`, `--sql`, `--hires`, `--out`, `--slots`) are resolved against the walk
+directory, which is also where the commands are meant to run. `--sql` named by a `--from`-less full clear is still
+checked for existence; `--place` alone is enough to demand it.
+
+### targets.txt
+
+The same file `raid-autopilot` reads: one goal per line, `id server slot holder goal -- <plan> [raid-walk flags...]`,
+where the goal is `full`, `leg:<leg name>` or `boss:<entry>`. A line that starts with a turtle-agent binary and
+`raid-walk` is taken as a full command instead. The preflight adds `--server`, `--slot` and `--holder` from the header.
+
+### preflight-keys.json
+
+```json
+{"keys": {"AiPlayerbot.TeleportLandingFall": "1", "AiPlayerbot.HireMaxBotsPerPlayer": "39"}}
+```
+
+The file lives in `~/.config/turtle-agent/preflight-keys.json`. The ssh host is the slot table's server name
+(`m910q`, `tortoise-test2`): that is the name in the owner's ssh config, while realmd may carry a NAT address only the
+host reaches. The call is `ssh -o BatchMode=yes -o ConnectTimeout=10 <server>` and reads
+`~/tortoise-wow-server/etc/aiplayerbot.conf` and `~/tortoise-wow-server/etc/modules/tortoise_bots.conf`.
+
+```
+OK   1 binary         /home/perzi/ta-zg17-bin/turtle-agent: turtle-agent 0.1.0 (commit 35c7dc2f92bd)
+FAIL 4 instance cap   m910q (/home/perzi/ta-zg17-bin/turtle-agent): this binary would use 5, but instance-cap-per-account.json says 30 for m910q -- fix: use a binary that reads instance-cap-per-account.json (or pass --instance-cap-per-account)
+FAIL 5 lease          cmd-a.txt m910q/2: held by zg38-jx6 since 00:34:02Z, expires 06:04:02Z (agent pid 3607035 running) -- fix: wait for the holder or run teardown on its dir
+WARN 7 plan           zul_gurub: the plan was edited 2026-11-05 00:11, after the export 2026-11-01 03:00 -- fix: export the plan again (turtle-agent plan-export) and redeploy it
+```
 
 ## Remote leader
 

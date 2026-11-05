@@ -126,6 +126,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return rpcCmd(args[1:], stdout, stderr)
 	case "raid-walk":
 		return raidWalkCmd(ctx, args[1:], stdout, stderr)
+	case "walk-preflight":
+		return walkPreflightCmd(ctx, args[1:], stdout, stderr)
 	case "decisions":
 		return decisionsCmd(ctx, args[1:], stdout, stderr)
 	case "plan-diff":
@@ -164,6 +166,7 @@ func usage(w io.Writer) {
   turtle-agent plan-probe [--dir dungeons] [--sql FILE [--plan NAME]] --mmaps DIR [--json] [--out DIR] [--from-step N] [<plan>|<path.json>]
 
   turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE] [--until boss|none|step N|leg L] [--from leg L|step N] [--speed X] [--hires FILE] [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K] [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH] [--decisions on|off] [--decisions-max-mib N] [--mmaps DIR] [--slots FILE] [--binary PATH] [--reuse-instance] [--dry-run]
+  turtle-agent walk-preflight [--server NAME]... [--json] <walk-dir>
   turtle-agent decisions pull --dash-url URL --dash-user U --dash-pass-file FILE --commander C [--since T] [--until T] --out DIR [--max-mib N]
   turtle-agent plan-diff <old> <new> [--plan NAME] [--json] [--out DIR] [--svg FILE] [--minimaps DIR] [--picture worldmap|minimap|navmesh|none] [--fail-on-change]
   turtle-agent raid-suite (--suite FILE | --dir DIR) --history DIR [--server m910q] [--slot N] [--only p1,p2] [--speed X] [--gap 60s] [--out DIR] [--dash-url URL] [--dash-user U] [--dash-pass-file PATH] [--mmaps DIR] [--slots FILE] [--binary PATH] [--compare-only] [--dry-run] [--json]
