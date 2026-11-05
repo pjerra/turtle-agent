@@ -226,11 +226,17 @@ func (f *autoFixture) opts(extra ...string) autoOptions {
 // exactly as a real start does).
 func (f *autoFixture) supervisor(extra ...string) *autoSupervisor {
 	f.t.Helper()
+	return f.supervisorOpts(f.opts(extra...))
+}
+
+// supervisorOpts is supervisor with the options chosen by the test (a broken --binary, for one).
+func (f *autoFixture) supervisorOpts(o autoOptions) *autoSupervisor {
+	f.t.Helper()
 	targets, err := readAutoTargets(f.walk)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	s := &autoSupervisor{o: f.opts(extra...), stderr: io.Discard}
+	s := &autoSupervisor{o: o, stderr: io.Discard}
 	if err := s.open(); err != nil {
 		f.t.Fatal(err)
 	}
@@ -521,7 +527,7 @@ func TestAutoGoalAdvanceUsesTheNewGoalsStart(t *testing.T) {
 	f.target("a srv 1 zg-a boss:14507 -- zul_gurub --sql /zg.sql --from step 200")
 	f.attempt("a-1", 0, 417, "boss 14515 down")
 	f.attempt("a-2", 0, 300, "boss 14507 down")
-	f.run()
+	code := f.run()
 	args := f.args()
 	if len(args) != 2 {
 		t.Fatalf("%d launches, want 2:\n%s", len(args), strings.Join(args, "\n"))
@@ -532,6 +538,13 @@ func TestAutoGoalAdvanceUsesTheNewGoalsStart(t *testing.T) {
 	if !strings.Contains(f.events(), "a advance: goal met: boss:14515") {
 		t.Fatalf("no advance event:\n%s", f.events())
 	}
+	// Every id met its goals: the global done event and exit 0.
+	if code != exitOK {
+		t.Fatalf("exit %d after every goal was met, want 0", code)
+	}
+	if !strings.Contains(f.events(), "all done: every target's goals are met") {
+		t.Fatalf("no global done event:\n%s", f.events())
+	}
 }
 
 // H1: exit 2 is the walk refusing its arguments: the id stops with an ESCALATE line, not a silent done.
@@ -539,8 +552,8 @@ func TestAutoExitTwoEscalates(t *testing.T) {
 	f := newAutoFixture(t)
 	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
 	f.attempt("a-1", 2, 0, "bad --sql")
-	if code := f.run(); code != exitOK {
-		t.Fatalf("exit %d, want 0", code)
+	if code := f.run(); code != exitAutoEscalated {
+		t.Fatalf("exit %d, want %d (an escalated id did not meet its goal)", code, exitAutoEscalated)
 	}
 	if args := f.args(); len(args) != 1 {
 		t.Fatalf("exit 2 was retried: %d launches", len(args))
@@ -549,6 +562,12 @@ func TestAutoExitTwoEscalates(t *testing.T) {
 		if !strings.Contains(path, "ESCALATE stop a 1") || !strings.Contains(path, "exit 2") {
 			t.Fatalf("%s has no ESCALATE stop line:\n%s", path, path)
 		}
+	}
+	if strings.Contains(f.events(), "all done: every target's goals are met") {
+		t.Fatalf("an escalated id produced the global done event:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "not every target's goals are met (1 escalated, 0 refused)") {
+		t.Fatalf("the final line does not explain the non-zero exit:\n%s", f.events())
 	}
 }
 
@@ -824,8 +843,8 @@ func TestAutoEscalatedCountsAsDoneAndFirstStatus(t *testing.T) {
 	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
 	f.attempt("a-1", 2, 0, "bad --sql")
 	start := time.Now()
-	if code := f.run(); code != exitOK {
-		t.Fatalf("exit %d, want 0", code)
+	if code := f.run(); code != exitAutoEscalated {
+		t.Fatalf("exit %d, want %d", code, exitAutoEscalated)
 	}
 	if time.Since(start) > 10*time.Second {
 		t.Fatal("the escalated id kept the supervisor spinning")
@@ -1298,5 +1317,57 @@ func TestAutoTwoForegroundStarts(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no refusal named the running autopilot: %v", stderrs)
+	}
+}
+
+// H1 launch: a launch that cannot start is not completion. It retries with the restart backoff and the third
+// consecutive failure escalates the id (no done, no relaunch, exit 31 from the supervisor).
+func TestAutoLaunchFailureRetriesThenEscalates(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	s := f.supervisor()
+	// The startup reconciliation verifies the slot's lease with the stub; only the launches get the broken binary.
+	s.o.binary = filepath.Join(f.dir, "missing-turtle-agent")
+	st := s.states[0]
+	for i := 1; i <= autoLaunchTries; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch failure %d", i), func() bool {
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			return st.launchFails >= i || st.escalated
+		})
+		st.mu.Lock()
+		wait := time.Until(st.nextAt)
+		escalated := st.escalated
+		st.mu.Unlock()
+		if i < autoLaunchTries {
+			want := raidwalk.AutoBackoff(i - 1)
+			if wait < want-5*time.Second || wait > want+time.Second {
+				t.Fatalf("launch failure %d retries after %s, want %s", i, wait.Round(time.Second), want)
+			}
+		}
+		if escalated && i < autoLaunchTries {
+			t.Fatalf("launch failure %d escalated before %d failures:\n%s", i, autoLaunchTries, f.events())
+		}
+		clearWait(st)
+	}
+	done, escalated := runState(st)
+	if done {
+		t.Fatal("a launch failure was recorded as a met goal")
+	}
+	if !escalated {
+		t.Fatalf("%d launch failures did not escalate:\n%s", autoLaunchTries, f.events())
+	}
+	events := f.events()
+	if !strings.Contains(events, "a launch-failed:") || !strings.Contains(events, "retrying in 20s (fail 1 of 3)") {
+		t.Fatalf("no launch-failed retry line:\n%s", events)
+	}
+	if !strings.Contains(events, "ESCALATE launch a 1") {
+		t.Fatalf("no ESCALATE launch line:\n%s", events)
+	}
+	if got := len(f.args()); got != 0 {
+		t.Fatalf("%d walks started although every launch failed", got)
+	}
+	if !strings.Contains(f.statusFile(), "ESCALATE launch a 1") {
+		t.Fatalf("status.txt has no launch escalation:\n%s", f.statusFile())
 	}
 }

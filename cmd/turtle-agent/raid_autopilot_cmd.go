@@ -44,6 +44,9 @@ const raidAutopilotUsage = `usage: turtle-agent raid-autopilot [--foreground] [-
 // autoChildEnv marks the re-exec'd detached process.
 const autoChildEnv = "TURTLE_RAID_AUTOPILOT_CHILD"
 
+// exitAutoEscalated is the supervisor's exit when at least one id was escalated for a person: its goals were not met.
+const exitAutoEscalated = 31
+
 // The autopilot's files in the walk dir.
 const (
 	autoTargetsFile = "targets.txt"
@@ -75,6 +78,8 @@ const (
 	autoTeardownTries = 3
 	// autoYieldPoll is how often a YIELD file is looked for: a YIELD is handled within 5 s even with a long --poll.
 	autoYieldPoll = time.Second
+	// autoLaunchTries is how many consecutive launches may fail before the id is escalated and left for a person.
+	autoLaunchTries = 3
 	// autoDetachWait is how long the detached launcher waits for the child to hold the lock (or report its refusal).
 	autoDetachWait = 10 * time.Second
 	// autoLeaseTimeout bounds the `lease list` read the startup reconciliation and the teardown verification make.
@@ -151,7 +156,10 @@ type autoState struct {
 	run       *autoRun
 	last      *autoRun
 	nextReuse bool
-	nextAt    time.Time // no launch before this (the settle after a teardown, or a backoff)
+	// launchFails counts the consecutive launches that could not start (the attempt log or the child): the backoff
+	// grows and the third escalates instead of recording a launch failure as completion.
+	launchFails int
+	nextAt      time.Time // no launch before this (the settle after a teardown, or a backoff)
 	done      bool
 	// escalated is an id left for a person (a teardown that never verified, an exit 2/29, three exit 15s): it counts
 	// as done for allDone, is never launched again and is kept in the checkpoint until a person clears it.
@@ -506,12 +514,7 @@ func (s *autoSupervisor) run(ctx context.Context) int {
 	}
 	s.tick(ctx)
 	if s.allDone() {
-		// A finish that just set the last id done may still be writing the checkpoint: let it, so nothing writes
-		// into a walk dir after the supervisor has returned.
-		s.wg.Wait()
-		s.writeStatus()
-		s.event("all", "done", "every target's goals are met")
-		return exitOK
+		return s.finishAll()
 	}
 	for {
 		select {
@@ -532,10 +535,7 @@ func (s *autoSupervisor) run(ctx context.Context) int {
 				s.lastStat = time.Now()
 			}
 			if s.allDone() {
-				s.wg.Wait()
-				s.writeStatus()
-				s.event("all", "done", "every target's goals are met")
-				return exitOK
+				return s.finishAll()
 			}
 		}
 	}
@@ -562,6 +562,47 @@ func (s *autoSupervisor) allDone() bool {
 		}
 	}
 	return true
+}
+
+// allGoalsMet says every id met its goals. An escalated or refused id did not, so the global done event is not for it.
+func (s *autoSupervisor) allGoalsMet() bool {
+	for _, st := range s.states {
+		st.mu.Lock()
+		met := st.done
+		st.mu.Unlock()
+		if !met {
+			return false
+		}
+	}
+	return true
+}
+
+// finishAll ends the supervisor: a finish goroutine may still be writing the checkpoint, so it waits for the
+// goroutines, writes status.txt, and only says "every target's goals are met" when every id met them. An escalated
+// id makes the exit non-zero (31), so a supervisor chain sees that the run ended for a person.
+func (s *autoSupervisor) finishAll() int {
+	s.wg.Wait()
+	s.writeStatus()
+	if s.allGoalsMet() {
+		s.event("all", "done", "every target's goals are met")
+		return exitOK
+	}
+	escalated, refused := 0, 0
+	for _, st := range s.states {
+		st.mu.Lock()
+		if st.escalated {
+			escalated++
+		}
+		if st.refused {
+			refused++
+		}
+		st.mu.Unlock()
+	}
+	s.event("all", "finished", fmt.Sprintf("not every target's goals are met (%d escalated, %d refused)", escalated, refused))
+	if escalated > 0 {
+		return exitAutoEscalated
+	}
+	return exitOK
 }
 
 // tick advances every id once.
@@ -835,16 +876,27 @@ func (s *autoSupervisor) launch(st *autoState) {
 	st.mu.Lock()
 	st.run = run
 	st.lastOut = out
+	st.launchFails = 0
 	st.mu.Unlock()
 	s.event(st.id, "launch", fmt.Sprintf("attempt %d goal %s out %s from %q reuse %v", attempt, target.Goal, out, from, reuse))
 	s.saveState()
 }
 
+// failLaunch schedules the retry of a launch that could not start. A launch failure is not completion: the id keeps
+// its goal and retries with the restart backoff. The third consecutive failure escalates the id, so a broken binary
+// or an unwritable walk dir ends at a person instead of spinning or claiming the goal was met.
 func (s *autoSupervisor) failLaunch(st *autoState, err error) {
 	st.mu.Lock()
-	st.done = true
+	st.launchFails++
+	fails := st.launchFails
+	wait := raidwalk.AutoBackoff(fails - 1)
+	st.nextAt = time.Now().Add(wait)
 	st.mu.Unlock()
-	s.event(st.id, "launch-failed", err.Error())
+	if fails >= autoLaunchTries {
+		s.escalate(st, "launch", err.Error())
+		return
+	}
+	s.event(st.id, "launch-failed", fmt.Sprintf("%v; retrying in %s (fail %d of %d)", err, wait.Round(time.Second), fails, autoLaunchTries))
 	s.saveState()
 }
 

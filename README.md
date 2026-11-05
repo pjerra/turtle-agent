@@ -2825,13 +2825,18 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   budget, or on a **stall** (no `TBM:RUN` step and no hostile HP change in `run.log`/`frames.jsonl` for `--stall`,
   default 15m) it stops the walk (SIGTERM; never `.bot run stop`), tears the slot down, picks a new `--out`
   (`<walk-dir>/<id>-<n>`), and re-places: the same instance first (`--place --from "step N" --reuse-instance`), a
-  fresh instance only when that placement failed (the old bind is gone). A legitimate instance-cap wait (`earliest
+  fresh instance only when that placement failed (the old bind is gone). A legitimate
+  instance-cap wait (`earliest
   free time` as the run's last line) is not a stall; its stall clock starts when the wait ends. Exit 2 (the walk
   refused its arguments) and exit 29 (the placement failed every try in the same instance; a fresh-instance retry
   would only burn the hourly budget) stop that id with an `ESCALATE` line and no retry, and so does exit 15 three
   times (the slot's lease is held by another holder). Other exits re-place with a backoff of 20 s, 1 m, 2 m, 5 m and
   then 10 m per consecutive attempt that reached no further step; a step further resets it. Exit 26 keeps its cap
-  wait and re-places later.
+  wait and re-places later. A **launch**
+  that cannot start (the attempt log or the child) is not completion: the goal stays, the retry uses the same
+  backoff (20 s at first), and the third consecutive launch failure escalates the id. A supervisor whose every id
+  met its goals says `every target's goals are met` and exits 0; one with an escalated id ends with
+  `not every target's goals are met` and exits **31**.
 - **Teardown.** `teardown <out>/slot`; when the lease is still held or the teardown failed, a second run with
   `--release-anyway` (the brief's "twice if the lease is kept"). The walk's own teardown has already released the
   lease in the normal case. A teardown is only done when it is verified: the walk's process **and its whole process
