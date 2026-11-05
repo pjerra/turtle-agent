@@ -340,7 +340,7 @@
             "source": "creature_movement 49185 (7 points, 168.9 yd at 2.5 yd/s)"
           },
           "approach": [
-            {"x": -12241, "y": -1491, "z": 132.18}
+            {"x": -12268, "y": -1488, "z": 131.23}
           ],
           "stand_pull": true
         },
@@ -406,7 +406,7 @@
       },
       "notes": [
         "WALK 38 FIX 3 (2026-11-05, leg 0; TortoiseBots-audit tests/raid-zg-walk38 d/h2/a/h3 and the 22:13 MAPPING): step 43's stand pull stalled the raids at 40-47. The row held the 49131 witch-doctor camp and the 49135 headhunter camp (54 yd apart) in one radius-33 row with no patrol block, and its stand (-12219 -1494) stood 29.6 yd from the headhunter spawn and 54 from the witch doctor's, so no single shot reached the row's pack and the gate waited on units whose patrol the run leader could not read. Split: the south camp (49134/49135/49136, entries 11351/11351/11831) is its own stand pull from (-12219 -1491 132.45), its 49135 loop (28 points, 240.0 yd, 143.7 s) in shot (24.8 yd); the north camp (49131/49132/49133) joins the bat camp 8 yd away in one row (10 bodies, radius 13, the 49130 formation) from (-12250 -1418 130.65), its 49131 loop (21 points, 188.1 yd, 112.6 s) in shot (8.1 yd), max_bodies 10; every unit of each row is within the 28.5 yd shot with line of sight (TestZgW38JeklikPatrolStands).",
-        "WALK 38 REVIEW (2026-11-05, leg 0; review M2/M3). The bat formation 49185 (6 units, its 7-point 67.6 s loop) is pulled before the north camp: its loop encircles the camp and came within 7.8 yd of the camp's stand, so the patrol crossed the party. The row is a stand pull from -12241 -1491 132.18 now (26.5 yd from its nearest waypoint, 45.5 from its row point), the south camp (49135) stands at -12211 -1491 132.6 (outside the 49131 112.6 s loop at 23.6+ yd and the 49130 bat loop), and the north camp's stand stays at -12250 -1418 130.65. The plan carries one patrol block per row, so the loops of 49130 (7 points) and 49131 (21 points) are read from movement.tsv by the check: zg_w38_test.go tests both camp stands against every loop of every later group (23 yd = 20 detection + 3 spread)."
+        "WALK 38 REVIEW (2026-11-05, leg 0; review M2/M3). The bat formation 49185 (6 units, its 7-point 67.6 s loop) is pulled before the north camp: its loop encircles the camp and came within 7.8 yd of the camp's stand, so the patrol crossed the party. The row is a stand pull from -12268 -1488 131.23 now (26.1 yd from its nearest waypoint, 34.0 from its row point, 25.1 from its nearest unit), the south camp (49135) stands at -12211 -1491 132.6 (outside the 49131 112.6 s loop at 23.6+ yd and the 49130 bat loop), and the north camp's stand stays at -12250 -1418 130.65. The plan carries one patrol block per row, so the loops of 49130 (7 points) and 49131 (21 points) are read from movement.tsv by the check: zg_w38_test.go tests both camp stands against every loop of every later group (23 yd = 20 detection + 3 spread)."
       ]
     },
     {
