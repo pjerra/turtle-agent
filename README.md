@@ -2283,7 +2283,14 @@ turtle-agent raid-walk onyxias_lair --slot 2 --dir ~/ta-wt-raid-ony/dungeons \
   `--from "step N"` is taken as given; a positioned move row is placed at its own point, and a pull
   row at that pull's own stand point (the row's point; the nearest move row before it when the row has none), the
   notes naming the point (`place: step N is a pull row; placing at the pull's own stand point` — walk 32 refused
-  steps 237 and 560 as pull rows, and the operator had to find 238/559 by hand). Before a fresh instance is entered,
+  steps 237 and 560 as pull rows, and the operator had to find 238/559 by hand). A `q floor` answer of **0.0** (or a
+  value at the core's `INVALID_HEIGHT`, -100000) is the toolkit's *unknown*, not a wrong floor: the toolkit asks the
+  caller's `GetClosePoint`, and the core leaves z at 0 when the height lookup finds nothing (an unloaded grid, no
+  vmap, the wrong map), so the reply is 0.0 — walk 39 refused Jeklik's steps 44/46/48 as `the start step's floor is
+  0.0, not 130.7` on m910q and test2. The check reads `q floor` once more after 2 s; when it is still unknown (or the
+  reply carries no floor) and the start row is a recorded walk point, the plan's z is used and
+  `place: floor unknown, using plan z ...` is written to `run.log` and the notes. A floor the toolkit does know, and
+  that differs from the plan, still refuses the placement as before. Before a fresh instance is entered,
   the start is also chosen offline: from the requested row the walk walks BACK along the plan's positioned move rows
   to the nearest one whose point stands at least `AggroRadius + 8 yd` from every static (non-patrol) spawn of the packs
   a row at or after the start pulls, using the world export `--gm-clear`/the placement lints read (a missing export

@@ -100,6 +100,9 @@ type placeToolkit struct {
 	cleartoRemoved func(cmd string) []any
 	// place, when set, replaces the default place handler.
 	place func(cmd string) error
+	// floorVal, when set, answers `q floor`: the floor and whether the toolkit knows it (false: `floor` comes back
+	// null, what the toolkit sends when TT.floorNear finds none).
+	floorVal func(cmd string) (float64, bool)
 	// placeAll says the default place handler moves every hire (the zero value leaves the last one behind).
 	placeAll bool
 
@@ -134,6 +137,13 @@ func (p *placeToolkit) answer(cmd string) (ttResult, error) {
 	case strings.HasPrefix(cmd, "q group of="):
 		return ttReplyOf(p.t, map[string]any{"map": 309, "inst": p.inst, "members": p.members()}), nil
 	case strings.HasPrefix(cmd, "q floor"):
+		if p.floorVal != nil {
+			if v, known := p.floorVal(cmd); known {
+				return ttReplyOf(p.t, map[string]any{"map": 309, "inst": p.inst, "floor": v}), nil
+			}
+			// The toolkit could not find a floor: `floor` is null in its reply.
+			return ttReplyOf(p.t, map[string]any{"map": 309, "inst": p.inst, "floor": nil}), nil
+		}
 		f := strings.Fields(cmd)
 		var z float64
 		if len(f) >= 5 {
@@ -237,6 +247,63 @@ func newPlaceFixture(t *testing.T) (*fixture, *placeToolkit) {
 		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|thekal|move|walk|stopped before step %d (until boss): the party stays where it stands", n.start+1, n.total, n.until)},
 	}
 	return f, p
+}
+
+// Walk 39 Jeklik: the toolkit answered `q floor` 0.0 at steps 44/46/48 (m910q and test2), which placeFloor read as a
+// real floor ("the start step's floor is 0.0, not 130.7") and the placement failed every time. 0.0 is the toolkit's
+// "unknown" (TT.floorNear answers 0 when the height lookup finds nothing): it retries once, then takes the plan's z
+// of the recorded walk row, with a note, instead of failing.
+func TestPlaceFloorUnknownUsesThePlansZ(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	calls := 0
+	p.floorVal = func(string) (float64, bool) {
+		calls++
+		return 0, true // the toolkit's unknown: a 0.0 floor
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if calls < 2 {
+		t.Fatalf("q floor was asked %d time(s), want the retry", calls)
+	}
+	log, _ := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if !strings.Contains(string(log), "place: floor unknown, using plan z") {
+		t.Fatalf("no floor-unknown line in run.log:\n%s", log)
+	}
+	if len(p.places) == 0 {
+		t.Fatal("the raid was never placed after the unknown floor")
+	}
+}
+
+// The toolkit's other unknown shape: TT.floorNear found no floor at all, so `floor` is null (a caller standing 0.05
+// above the floor also reads this way). It is "unknown" too, not "the start step's floor was not found" as a failure.
+func TestPlaceFloorNullUsesThePlansZ(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	p.floorVal = func(string) (float64, bool) { return 0, false }
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	log, _ := os.ReadFile(filepath.Join(f.out, "run.log"))
+	if !strings.Contains(string(log), "place: floor unknown, using plan z") {
+		t.Fatalf("no floor-unknown line in run.log:\n%s", log)
+	}
+}
+
+// A floor the toolkit does know, and that differs from the plan, still refuses as before (the point is not on the
+// plan's floor: the wrong map or a wrong row).
+func TestPlaceFloorMismatchStillFails(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	p.floorVal = func(cmd string) (float64, bool) { return 100, true } // a real floor, 30 yd under the row's z
+	code := f.run(context.Background())
+	if code == exitOK {
+		t.Fatalf("exit 0 on a wrong floor: %s", f.stdout.String())
+	}
+	raw, _ := os.ReadFile(filepath.Join(f.out, "summary.json"))
+	if !strings.Contains(string(raw), "floor is 100.0, not") {
+		t.Fatalf("no floor mismatch in the summary:\n%s", raw)
+	}
 }
 
 // placeStartReply is the run start's answer for a placed walk: the run running at step of steps, with the until label.
