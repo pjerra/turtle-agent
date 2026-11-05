@@ -3057,9 +3057,12 @@ func (w *walk) goalBossStep() int {
 }
 
 // bossRowForFight is the 1-based boss row a dashboard fight record names: its own step when that step is a boss row
-// of the rows the walk reads and the record's leg (when it has one) is that row's leg, else the leg's boss row. 0
-// when neither names a boss row.
+// of the rows the walk reads and the record's leg is that row's leg, else the leg's boss row. 0 when the record
+// names no plan leg or no boss row (a record without a leg cannot be tied to these rows).
 func bossRowForFight(rows planexport.Rows, f raidwalk.FightSummary) int {
+	if f.Leg == "" {
+		return 0
+	}
 	legName := func(leg int) string {
 		if leg >= 0 && leg < len(rows.Legs) {
 			return rows.Legs[leg].Name
@@ -3068,12 +3071,9 @@ func bossRowForFight(rows planexport.Rows, f raidwalk.FightSummary) int {
 	}
 	if f.Step >= 1 && f.Step <= len(rows.Steps) {
 		s := rows.Steps[f.Step-1]
-		if s.Kind == planexport.KindBoss && (f.Leg == "" || legName(s.Leg) == f.Leg) {
+		if s.Kind == planexport.KindBoss && legName(s.Leg) == f.Leg {
 			return f.Step
 		}
-	}
-	if f.Leg == "" {
-		return 0
 	}
 	for i, s := range rows.Steps {
 		if s.Kind == planexport.KindBoss && legName(s.Leg) == f.Leg {
