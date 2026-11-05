@@ -119,6 +119,9 @@ type autoGoalState struct {
 	// hireWaits counts the consecutive hire-pool waits of this goal: the sixth stops the id for a person (a pool that
 	// refuses six times in a row needs a person, not another 5-minute wait).
 	hireWaits int
+	// exit29Retries counts the fresh-instance retries after an exit 29 this goal already made (one per goal; a new goal
+	// line starts a new goalState, so an advance resets it).
+	exit29Retries int
 	// dead says an attempt's summary reported this goal's boss dead: the goal is met and DONE, never placed again
 	// (walk 39: a re-added raid kept walking a boss another raid had already killed).
 	dead bool
@@ -223,6 +226,11 @@ type autoSupervisor struct {
 	targetsMod  time.Time
 	targetsSize int64
 	targetsWarn string
+	// targetsReads counts the parses of targets.txt (a test pins that a skipped line is not re-read while idle).
+	targetsReads int
+	// targetsSkipped says the last read skipped a line; targetsSig is the ids' claims at that read (see reloadTargets).
+	targetsSkipped bool
+	targetsSig     string
 }
 
 // autoRows is one target's rows, read once: ok is false when neither its --sql migration nor its plan file can be
@@ -343,13 +351,51 @@ func parseAutoArgs(args []string, stderr io.Writer) (autoOptions, int) {
 	return o, exitOK
 }
 
+// readAutoTargets is the strict read of a start: any bad line refuses it. The slot check goes by the checkpoint like
+// the live re-read does: an id the checkpoint holds as done or stopped holds no slot (so a file the running
+// autopilot accepted, a done id plus a new id on its slot, is accepted after a restart too), every other checkpointed
+// id claims its slot before a new line does. A done id whose goal lines changed since the checkpoint is not restored
+// (reconcile starts it fresh), so it is a new id here.
 func readAutoTargets(dir string) ([]raidwalk.AutoTarget, error) {
-	f, err := os.Open(filepath.Join(dir, autoTargetsFile))
+	read := func(claim func(string) raidwalk.AutoSlotClaim) ([]raidwalk.AutoTarget, []raidwalk.AutoTargetIssue, error) {
+		f, err := os.Open(filepath.Join(dir, autoTargetsFile))
+		if err != nil {
+			return nil, nil, err
+		}
+		defer f.Close()
+		return raidwalk.ParseAutoTargetsLenient(f, claim)
+	}
+	saved, _ := autoLoadCheckpoint(dir) // an unreadable checkpoint is reconcile's refusal, not this read's
+	kinds := map[string]raidwalk.AutoSlotClaim{}
+	fingerprints := map[string]string{}
+	for _, sv := range saved.IDs {
+		kinds[sv.ID] = raidwalk.AutoSlotActive
+		if (sv.Done || sv.Stopped) && !sv.Escalated {
+			kinds[sv.ID] = raidwalk.AutoSlotInactive
+		}
+		fingerprints[sv.ID] = sv.Fingerprint
+	}
+	claim := func(id string) raidwalk.AutoSlotClaim { return kinds[id] }
+	targets, issues, err := read(claim)
+	if err == nil && len(issues) == 0 && len(kinds) > 0 {
+		changed := false
+		for _, st := range groupAutoTargets(targets) {
+			if fp := fingerprints[st.id]; fp != "" && fp != autoTargetFingerprint(st) && kinds[st.id] != raidwalk.AutoSlotNew {
+				delete(kinds, st.id)
+				changed = true
+			}
+		}
+		if changed {
+			targets, issues, err = read(claim)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	return raidwalk.ParseAutoTargets(f)
+	if len(issues) > 0 {
+		return nil, issues[0].Err
+	}
+	return targets, nil
 }
 
 // groupAutoTargets keeps the file's id order and each id's goal order.
@@ -879,10 +925,44 @@ func (s *autoSupervisor) noteTargetsStat() {
 	s.targetsMod, s.targetsSize = st.ModTime(), st.Size()
 }
 
+// slotClaims classifies every known id for the duplicate-slot check of a re-read: done or stopped with no live run is
+// inactive whoever holds its slot's lease now (walk 40: a finished id kept its slot, and a new id running on it must
+// not make it active again); every other state, including a queued id, is active. sig is the claims as one string, so
+// a caller can tell whether any id changed state since the last read.
+func (s *autoSupervisor) slotClaims() (claims map[string]raidwalk.AutoSlotClaim, sig string) {
+	claims = map[string]raidwalk.AutoSlotClaim{}
+	for _, st := range s.stateList() {
+		st.mu.Lock()
+		idle := (st.done || st.stopped) && !st.escalated && !st.refused && st.run == nil
+		st.mu.Unlock()
+		if idle {
+			claims[st.id] = raidwalk.AutoSlotInactive
+		} else {
+			claims[st.id] = raidwalk.AutoSlotActive
+		}
+	}
+	s.statesMu.Lock()
+	for _, p := range s.pending {
+		claims[p.id] = raidwalk.AutoSlotActive
+	}
+	s.statesMu.Unlock()
+	ids := make([]string, 0, len(claims))
+	for id := range claims {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	var b strings.Builder
+	for _, id := range ids {
+		fmt.Fprintf(&b, "%s=%d;", id, claims[id])
+	}
+	return claims, b.String()
+}
+
 // reloadTargets re-reads targets.txt when it changed (mtime or size): new ids start, removed ids stop cleanly, and an
-// id whose goal lines changed is stopped and re-added from the new lines. An unreadable or invalid file keeps the
-// targets already loaded and logs one warning (a half-written file is not a stop order). The brief's walk 39 added
-// every raid in its own autopilot dir because the file was read once.
+// id whose goal lines changed is stopped and re-added from the new lines. An unreadable file, or one with no valid
+// line, keeps the targets already loaded and logs one warning (a half-written file is not a stop order). A bad line
+// is skipped with a warning naming it, the other lines apply and the bad line's id keeps its old state. The brief's
+// walk 39 added every raid in its own autopilot dir because the file was read once.
 func (s *autoSupervisor) reloadTargets() {
 	path := filepath.Join(s.o.walkDir, autoTargetsFile)
 	st, err := os.Stat(path)
@@ -893,14 +973,20 @@ func (s *autoSupervisor) reloadTargets() {
 		}
 		return
 	}
+	claims, sig := s.slotClaims()
 	if st.ModTime().Equal(s.targetsMod) && st.Size() == s.targetsSize {
-		return
+		// Unchanged file. A skipped line is read again only when some id's state changed since the last read: a slot
+		// conflict clears when the id holding the slot finishes, with no further edit.
+		if !s.targetsSkipped || sig == s.targetsSig {
+			return
+		}
 	}
 	f, err := os.Open(path)
 	if err != nil {
 		return
 	}
-	targets, issues, err := raidwalk.ParseAutoTargetsLenient(f, s.slotInactive)
+	s.targetsReads++
+	targets, issues, err := raidwalk.ParseAutoTargetsLenient(f, func(id string) raidwalk.AutoSlotClaim { return claims[id] })
 	f.Close()
 	if err != nil {
 		if s.targetsWarn != err.Error() {
@@ -923,12 +1009,8 @@ func (s *autoSupervisor) reloadTargets() {
 			s.event("all", "targets", fmt.Sprintf("invalid targets line skipped, the other lines apply and the id keeps its old state: %s", w))
 		}
 	}
-	if len(issues) == 0 {
-		s.targetsWarn = ""
-		s.targetsMod, s.targetsSize = st.ModTime(), st.Size()
-	}
-	// With a skipped line the file is read again every tick: a slot conflict clears when the id holding the slot
-	// finishes, with no further edit. The re-read is idempotent (an unchanged id is left alone).
+	s.targetsMod, s.targetsSize = st.ModTime(), st.Size()
+	s.targetsSkipped, s.targetsSig = len(issues) > 0, sig
 	s.applyTargets(targets, skip)
 }
 
@@ -992,26 +1074,6 @@ func (s *autoSupervisor) applyTargets(targets []raidwalk.AutoTarget, skip map[st
 			s.queueState(st)
 		}
 	}
-}
-
-// slotInactive says an id holds no slot for the duplicate-slot check of a targets re-read: it is done or stopped with
-// no live run and no held lease (walk 40: a finished id kept its slot, so a new line naming it made the whole file
-// invalid). An escalated or refused id, an unknown id and a slot whose lease is still held count as holding it.
-func (s *autoSupervisor) slotInactive(id string) bool {
-	var st *autoState
-	for _, c := range s.stateList() {
-		if c.id == id {
-			st = c
-			break
-		}
-	}
-	if st == nil {
-		return false
-	}
-	st.mu.Lock()
-	idle := (st.done || st.stopped) && !st.escalated && !st.refused && st.run == nil
-	st.mu.Unlock()
-	return idle && !s.stateSlotHeld(st)
 }
 
 // queueState holds a new (or changed) id's state until its id is free.
@@ -1331,7 +1393,7 @@ func (s *autoSupervisor) tickState(st *autoState) {
 		}
 		d := raidwalk.DecideAutoAction(obs, raidwalk.AutoRunState{
 			Goal: r.goal, Attempt: g.attempt, Reuse: r.reuse, HasRun: g.attempt > 0,
-			FastFailures: fast, LeaseFails: g.leaseFails, PlaceFails: st.placeFails, HireWaits: g.hireWaits,
+			FastFailures: fast, LeaseFails: g.leaseFails, PlaceFails: st.placeFails, HireWaits: g.hireWaits, Exit29Retries: g.exit29Retries,
 		}, time.Now(), s.o.stall)
 		if d.Action == raidwalk.AutoContinue {
 			st.mu.Unlock()
@@ -1408,6 +1470,9 @@ func (s *autoSupervisor) finish(st *autoState) {
 		} else {
 			g.noProgress++
 		}
+	}
+	if d.Exit29Retry {
+		g.exit29Retries++
 	}
 	if r.exitCode == 15 {
 		g.leaseFails++
@@ -2234,6 +2299,8 @@ type autoSavedID struct {
 	// HireWaits is the current goal's consecutive hire-pool waits: the sixth stops the id for a person, across a
 	// restart too.
 	HireWaits int `json:"hire_waits,omitempty"`
+	// Exit29Retries is the current goal's fresh-instance retries after an exit 29 (one per goal), across a restart too.
+	Exit29Retries int `json:"exit29_retries,omitempty"`
 	// BossDead says the current goal's boss is dead in the instance: the goal is DONE at a start, never placed again.
 	BossDead bool   `json:"boss_dead,omitempty"`
 	NextAt   string `json:"next_at,omitempty"`
@@ -2263,6 +2330,7 @@ func (s *autoSupervisor) saveState() {
 		if st.current < len(st.goals) {
 			g := st.goals[st.current]
 			e.Attempt, e.LastStep, e.BossDead, e.HireWaits = g.attempt, g.bestStep, g.dead, g.hireWaits
+			e.Exit29Retries = g.exit29Retries
 		}
 		if st.last != nil {
 			e.OutDir, e.Reuse = st.last.out, st.last.reuse
@@ -2338,8 +2406,13 @@ func syncDir(dir string) error {
 // loadState reads the checkpoint: a missing file is no state, and a corrupt or truncated one is an error (the start
 // refuses instead of replacing it with empty progress, which would walk already-killed bosses again).
 func (s *autoSupervisor) loadState() (autoSavedState, error) {
+	return autoLoadCheckpoint(s.o.walkDir)
+}
+
+// autoLoadCheckpoint reads <dir>/autopilot-state.json (no supervisor needed: the start's targets read uses it too).
+func autoLoadCheckpoint(dir string) (autoSavedState, error) {
 	var saved autoSavedState
-	path := filepath.Join(s.o.walkDir, autoStateFile)
+	path := filepath.Join(dir, autoStateFile)
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return saved, nil
@@ -2385,6 +2458,7 @@ func (s *autoSupervisor) reconcile() error {
 				st.goals[st.current].bestStep = sv.LastStep
 				st.goals[st.current].dead = sv.BossDead
 				st.goals[st.current].hireWaits = sv.HireWaits
+				st.goals[st.current].exit29Retries = sv.Exit29Retries
 			}
 			st.done, st.escalated = sv.Done, sv.Escalated
 			st.stopped, st.stopWhy = sv.Stopped, sv.StopWhy

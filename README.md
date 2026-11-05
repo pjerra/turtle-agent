@@ -2859,10 +2859,14 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   `--reuse-instance` without a `--from`/`--place` (raid-walk refuses that combination).
   `--server/--slot/--holder/--until/--place/--reuse-instance/--out` are managed and dropped if present; slot 3,
   `--instance-cap-unsafe` and `--inject` are refused before anything runs. Two ids may not name the same server and
-  slot: one slot runs one walk at a time. An id that is **done or stopped** with no live run and no held lease
-  holds no slot for that check, so a new line may name the slot of a finished id (walk 40: it made the whole file
-  invalid until the done line was deleted); an escalated or refused id, a running id and a leased slot still hold
-  theirs. `targets.txt` is **re-read while the supervisor runs** (when its mtime or
+  slot: one slot runs one walk at a time. The check goes by claim, not file order: an id that is
+  **done or stopped** with no live run holds no slot (whoever holds the slot's lease now), so a new line may name the
+  slot of a finished id (walk 40: it made the whole file invalid until the done line was deleted); every other known id
+  (running, in a restart wait, escalated, refused, queued) claims its slots first, then new lines take what is left,
+  so a new line inserted above a running id's line is the one skipped. A rejected id releases the slots its other
+  lines had claimed. The start applies the same rule from the checkpoint (done or stopped ids hold nothing, other
+  checkpointed ids claim first), so a file the running autopilot accepted is accepted after a restart too.
+  `targets.txt` is **re-read while the supervisor runs** (when its mtime or
   size changes, every tick): an added id is queued and starts as soon as its slot is free, a removed id is stopped
   cleanly like `STOP-<id>` (its run stopped, its slot torn down), and an id whose goal lines changed is stopped and
   re-added from the new lines; an unchanged id keeps its goal, attempt, backoff and run. A new or changed id is
@@ -2874,9 +2878,12 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   half-written file is not a stop order). **One bad line does not reject the file** (walk 40: every edit was ignored
   for ~60 minutes): the line is skipped with an `invalid targets line skipped` event naming the line and id (logged
   once), every other line applies, and the bad line's id keeps its old state whole (all its lines are left out of
-  that read, so it is neither stopped nor changed). A skipped line is read again every tick, so one skipped for a
-  slot that a running id still holds starts by itself when that id finishes. The first read at start is strict:
-  any bad line there refuses to start.
+  that read, so it is neither stopped nor changed). A skipped line is read again, on an unchanged file, whenever some id's state changed
+  since the last read, so one skipped for a slot that a running id still holds starts by itself when that id
+  finishes; an idle supervisor does not re-parse it. The first read at start is strict: any bad line there refuses
+  to start. **A typo in a line's id field** makes the real id vanish from the read (the line now names an id that
+  does not exist), so the real id is stopped as removed from `targets.txt`, and the typo'd line starts a new id on the
+  same slot once the stop is done: check `EVENTS.txt` after an edit.
 - **Instance cap.** `--instance-cap-per-account N` is passed to every raid-walk it starts; without the flag each walk
   resolves the target server's entry in `instance-cap-per-account.json` beside the slots file and then the stock 5.
   The per-account gates keep one place of headroom (below `N-1`), and a `--reuse-instance` placement that re-hires
@@ -2898,10 +2905,10 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   id's next goal line or finishes the id, and the run that saw the death is torn down (its slot freed) as for any met
   goal. A legitimate instance-cap wait (`earliest
   free time` as the run's last line) is not a stall; its stall clock starts when the wait ends. Exit 29 (a same-instance
-  placement failed every try, typically after a wipe at a boss row) is retried **once** automatically in a fresh
-  instance: the next launch keeps `--from step N --place` without `--reuse-instance`, logs `fresh-instance retry
+  placement failed every try, typically after a wipe at a boss row) is retried **once per goal** automatically in a
+  fresh instance (the count is kept in the checkpoint and resets when the goal advances): the next launch keeps `--from step N --place` without `--reuse-instance`, logs `fresh-instance retry
   after exit 29`, waits the usual backoff, and the new instance counts toward the instance cap like any other (the
-  walk's own cap wait applies); if that fresh attempt also ends in exit 29 the id stops with an `ESCALATE` line
+  walk's own cap wait applies); if that fresh attempt also ends in exit 29, or the goal hits another exit 29 later, the id stops with an `ESCALATE` line
   (walk 40: 45 ids stopped on the first 29 and a person re-added each by hand). Exit 2 (the walk refused its
   arguments) stops that id with an `ESCALATE` line and no retry, and so does exit 15 three times (the slot's lease is
   held by another holder). Three consecutive placement failures on one id escalate it as

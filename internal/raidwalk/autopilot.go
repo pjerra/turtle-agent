@@ -138,13 +138,30 @@ type AutoTargetIssue struct {
 	Err  error
 }
 
+// AutoSlotClaim is how a caller classifies an id for the one-walk-per-slot check.
+type AutoSlotClaim int
+
+const (
+	// AutoSlotNew: an id the caller does not know yet; its lines get a slot only if no known active id holds it.
+	AutoSlotNew AutoSlotClaim = iota
+	// AutoSlotActive: an id with a live state (running, in a restart wait, escalated, refused, queued): it claims its
+	// slots before any new line, whatever the file order.
+	AutoSlotActive
+	// AutoSlotInactive: an id that is done or stopped with no run: it holds no slot at all.
+	AutoSlotInactive
+)
+
 // ParseAutoTargetsLenient is the re-read of a running autopilot (walk 40: one bad line made the whole file invalid
 // and every other edit was ignored for ~60 minutes). A bad line is returned as an issue and every other line still
 // parses; all lines of the bad line's id are left out of the result too, so the caller keeps that id's old state
-// whole instead of acting on half its lines. inactive says an id holds no slot any more (done or stopped, no live
-// run, no lease): its lines do not count in the one-walk-per-slot check, so a new id may take its slot. nil: every
-// id holds its slot. A file with no valid line left is an error (a half-written file is not a stop order).
-func ParseAutoTargetsLenient(r io.Reader, inactive func(id string) bool) ([]AutoTarget, []AutoTargetIssue, error) {
+// whole instead of acting on half its lines.
+//
+// The one-walk-per-slot check goes by claim, not by file order: active ids claim their slots first (in file order
+// among themselves), then new ids, and an inactive id claims nothing, so a new line inserted above a running id's line
+// is the skipped one, and a new line may take a finished id's slot. An id whose line is rejected releases every slot
+// it had claimed (the claims are recomputed without it). claim is asked once per id; nil: every id is new, the first
+// line in file order wins. A file with no valid line left is an error (a half-written file is not a stop order).
+func ParseAutoTargetsLenient(r io.Reader, claim func(id string) AutoSlotClaim) ([]AutoTarget, []AutoTargetIssue, error) {
 	var parsed []AutoTarget
 	var issues []AutoTargetIssue
 	bad := map[string]bool{}
@@ -167,20 +184,38 @@ func ParseAutoTargetsLenient(r io.Reader, inactive func(id string) bool) ([]Auto
 	if err := sc.Err(); err != nil {
 		return nil, nil, err
 	}
-	// The one-walk-per-slot check, in file order: the first id that holds a slot keeps it, a later id naming it is
-	// the bad one. An inactive id holds nothing.
-	slotOwner := map[string]string{}
-	for _, t := range parsed {
-		if bad[t.ID] || (inactive != nil && inactive(t.ID)) {
-			continue
+	kinds := map[string]AutoSlotClaim{}
+	kindOf := func(id string) AutoSlotClaim {
+		k, ok := kinds[id]
+		if !ok {
+			if claim != nil {
+				k = claim(id)
+			}
+			kinds[id] = k
 		}
-		key := t.Server + "/" + t.Slot
-		if owner, ok := slotOwner[key]; ok && owner != t.ID {
-			issues = append(issues, AutoTargetIssue{Line: t.Line, ID: t.ID, Err: fmt.Errorf("line %d: %s slot %s is already %s's: one slot runs one walk at a time", t.Line, t.Server, t.Slot, owner)})
-			bad[t.ID] = true
-			continue
+		return k
+	}
+	// Recompute the claims until no line conflicts: a rejected id is marked bad and the next round starts without
+	// its claims, so it cannot invalidate a later id (the bad set only grows, so this ends).
+	for conflict := true; conflict; {
+		conflict = false
+		owner := map[string]string{}
+	passes:
+		for _, want := range []AutoSlotClaim{AutoSlotActive, AutoSlotNew} {
+			for _, t := range parsed {
+				if bad[t.ID] || kindOf(t.ID) != want {
+					continue
+				}
+				key := t.Server + "/" + t.Slot
+				if o, ok := owner[key]; ok && o != t.ID {
+					issues = append(issues, AutoTargetIssue{Line: t.Line, ID: t.ID, Err: fmt.Errorf("line %d: %s slot %s is already %s's: one slot runs one walk at a time", t.Line, t.Server, t.Slot, o)})
+					bad[t.ID] = true
+					conflict = true
+					break passes
+				}
+				owner[key] = t.ID
+			}
 		}
-		slotOwner[key] = t.ID
 	}
 	var out []AutoTarget
 	for _, t := range parsed {
@@ -433,6 +468,8 @@ type AutoRunState struct {
 	PlaceFails int
 	// HireWaits counts the consecutive hire-pool waits of this goal: the sixth stops the id for a person.
 	HireWaits int
+	// Exit29Retries counts the fresh-instance retries this goal already made after an exit 29: one per goal.
+	Exit29Retries int
 }
 
 // AutoDecision is the next step.
@@ -445,6 +482,8 @@ type AutoDecision struct {
 	// placement failed every try in the fresh instance of its automatic retry), or
 	// three consecutive exit 15s (the slot's lease is held by someone else).
 	Escalate bool
+	// Exit29Retry marks the restart as the goal's fresh-instance retry after an exit 29 (the caller counts it).
+	Exit29Retry bool
 }
 
 // AutoBackoff is the wait before a restart after FastFailures consecutive no-progress attempts: 20 s, 1 m, 2 m, 5 m,
@@ -463,7 +502,7 @@ func AutoBackoff(fast int) time.Duration {
 // DecideAutoAction is the whole rule: any end, a used-up restart budget, or a stall tears down and re-places; a met
 // goal advances; a placement that failed on the old bind asks for a fresh instance next. A stall is no step and no
 // boss-HP change for stall, counted from the end of a legitimate instance-cap wait. Exit 2 stops the id for a
-// person, exit 29 retries once in a fresh instance (a second one stops it), and so does the third consecutive exit 15
+// person, exit 29 retries once per goal in a fresh instance (a second one stops it), and so does the third consecutive exit 15
 // or the sixth consecutive hire-pool wait. Every restart carries the backoff of its no-progress count.
 func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall time.Duration) AutoDecision {
 	if !o.Exited {
@@ -507,12 +546,12 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 	}
 	if o.ExitCode == 29 {
 		// Walk 40: 45 ids stopped here after a wipe and a person re-added each one (a changed line starts a fresh
-		// instance). A same-instance placement that failed every try gets ONE automatic fresh-instance retry; a
-		// fresh one that also ended in 29 stops the id.
-		if r.Reuse {
-			return AutoDecision{Action: AutoRestart, Reuse: false, Backoff: AutoBackoff(r.FastFailures), Reason: "fresh-instance retry after exit 29: the placement failed every try in the same instance (" + shortReason(o.EndReason) + ")"}
+		// instance). A same-instance placement that failed every try gets ONE automatic fresh-instance retry per
+		// goal; a fresh one that also ended in 29, or a second 29 of the same goal, stops the id.
+		if r.Reuse && r.Exit29Retries == 0 {
+			return AutoDecision{Action: AutoRestart, Reuse: false, Exit29Retry: true, Backoff: AutoBackoff(r.FastFailures), Reason: "fresh-instance retry after exit 29: the placement failed every try in the same instance (" + shortReason(o.EndReason) + ")"}
 		}
-		return AutoDecision{Action: AutoStop, Escalate: true, Reason: "exit 29: the placement failed in a fresh instance too; no further retry (" + shortReason(o.EndReason) + ")"}
+		return AutoDecision{Action: AutoStop, Escalate: true, Reason: "exit 29: the placement failed again after this goal's one fresh-instance retry; no further retry (" + shortReason(o.EndReason) + ")"}
 	}
 	if o.ExitCode == 15 && r.LeaseFails+1 >= 3 {
 		return AutoDecision{Action: AutoStop, Escalate: true, Reason: "exit 15 three times: the slot's lease is held by another holder (" + shortReason(o.EndReason) + ")"}

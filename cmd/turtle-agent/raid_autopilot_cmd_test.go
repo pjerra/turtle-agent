@@ -1186,6 +1186,126 @@ func TestAutoOneBadLineDoesNotBlockTheOtherEdits(t *testing.T) {
 	}
 }
 
+// Opus round 1 (HIGH): the live re-read accepts done a + new b on a's slot, so the restart that follows must too. The
+// start marks the ids the checkpoint holds as done or stopped as inactive, like the re-read does.
+func TestAutoRestartAcceptsADoneIDsSlotTaken(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 0, 417, "boss 14515 down")
+	s := f.supervisor()
+	tickUntil(t, s, "a done", func() bool {
+		done, _ := runState(s.states[0])
+		return done
+	})
+	s.saveState()
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	s2 := f.supervisor() // fails the test when the start refuses the file
+	if f.stateByID(s2, "b") == nil || f.stateByID(s2, "a") == nil {
+		t.Fatalf("the restart lost a or b:\n%s", f.events())
+	}
+	if done, _ := runState(f.stateByID(s2, "a")); !done {
+		t.Fatalf("the restart did not restore a as done:\n%s", f.events())
+	}
+}
+
+// Opus round 1 (HIGH): the first line in file order must not win a slot over a live id. A new line inserted ABOVE the
+// running id's line is the skipped one; the running id keeps its slot and never gets a second launch beside it.
+func TestAutoNewLineAboveARunningIDDoesNotTakeItsSlot(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	f.running("b-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return len(f.args()) >= 1 })
+	path := filepath.Join(f.walk, autoTargetsFile)
+	text := "b srv 1 zg-b full -- zul_gurub --sql /zg.sql\na srv 1 zg-a full -- zul_gurub --sql /zg.sql\n"
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 20 {
+		s.tick(context.Background())
+		time.Sleep(2 * time.Millisecond)
+	}
+	if len(f.args()) != 1 || f.stateByID(s, "b") != nil {
+		t.Fatalf("b took a running id's slot:\n%s", f.events())
+	}
+	if done, esc := runState(f.stateByID(s, "a")); done || esc {
+		t.Fatalf("a was stopped or escalated by the insert:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "id b: line 1") {
+		t.Fatalf("the skipped line is not b's line 1:\n%s", f.events())
+	}
+}
+
+// Opus round 1 (MEDIUM): a done id is inactive whoever holds its slot's lease now. b runs on a's slot (lease held by
+// b), and an unrelated new line must not make a count as active again and warn about b.
+func TestAutoDoneIDStaysInactiveWhileANewIDHoldsItsLease(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 0, 417, "boss 14515 down")
+	f.running("b-1", 30)
+	f.running("c-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a done", func() bool {
+		done, _ := runState(s.states[0])
+		return done
+	})
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	tickUntil(t, s, "b launched", func() bool { return len(f.args()) >= 2 })
+	f.lease("zg-b", "held")
+	f.target("c srv 2 zg-c full -- zul_gurub --sql /zg.sql")
+	tickUntil(t, s, "c launched", func() bool { return len(f.args()) >= 3 })
+	if strings.Contains(f.events(), "invalid targets") {
+		t.Fatalf("a done id counted as active while b held its lease:\n%s", f.events())
+	}
+}
+
+// Opus round 1 (MEDIUM): a skipped line is re-read every tick only while some id's state changed; an idle supervisor
+// with a skipped line does not re-parse the file (and so does not take a lease check per tick).
+func TestAutoSkippedLineIsNotRereadWhileNothingChanges(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return len(f.args()) >= 1 })
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	s.tick(context.Background())
+	if s.targetsReads == 0 {
+		t.Fatal("the edited file was not read")
+	}
+	before := s.targetsReads
+	for range 20 {
+		s.tick(context.Background())
+	}
+	if s.targetsReads != before {
+		t.Fatalf("the file was re-read %d times while no id changed", s.targetsReads-before)
+	}
+}
+
+// Opus round 1 (MEDIUM): the fresh-instance retry after exit 29 is once per GOAL, not once per streak: a goal whose
+// fresh retry placed and ran, then hit exit 29 again on a later reuse placement, stops the id.
+func TestAutoExit29RetryIsOncePerGoal(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 5, 51, "server closed the connection")
+	f.attempt("a-2", 29, 0, "place: 4 tries in the same instance, start step 51")
+	f.attempt("a-3", 5, 60, "server closed the connection")
+	f.attempt("a-4", 29, 0, "place: 4 tries in the same instance, start step 60")
+	s := f.supervisor()
+	for i := 1; i <= 3; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+	}
+	tickUntil(t, s, "launch 4", func() bool { return len(f.args()) >= 4 })
+	finishAttempt(t, s)
+	if done, esc := runState(s.states[0]); done || !esc {
+		t.Fatalf("second exit 29 of the goal: done=%v escalated=%v, want escalated:\n%s", done, esc, f.events())
+	}
+	if n := len(f.args()); n != 4 {
+		t.Fatalf("%d launches, want 4 (one fresh retry per goal):\n%s", n, f.events())
+	}
+}
+
 // Walk 39: the shared hire pool refused one raid while others hired ("No mercenary of that kind is available right
 // now"; m5 and m1 in EVENTS.txt). The raid backs off 5 minutes and the refusal is not a failed attempt: refusals
 // never grow the backoff toward 10 minutes, and the first five never escalate the id (the sixth does, its own test).
