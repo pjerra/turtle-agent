@@ -506,6 +506,10 @@ func (s *autoSupervisor) run(ctx context.Context) int {
 	}
 	s.tick(ctx)
 	if s.allDone() {
+		// A finish that just set the last id done may still be writing the checkpoint: let it, so nothing writes
+		// into a walk dir after the supervisor has returned.
+		s.wg.Wait()
+		s.writeStatus()
 		s.event("all", "done", "every target's goals are met")
 		return exitOK
 	}
@@ -528,6 +532,7 @@ func (s *autoSupervisor) run(ctx context.Context) int {
 				s.lastStat = time.Now()
 			}
 			if s.allDone() {
+				s.wg.Wait()
 				s.writeStatus()
 				s.event("all", "done", "every target's goals are met")
 				return exitOK

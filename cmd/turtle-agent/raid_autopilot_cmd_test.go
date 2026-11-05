@@ -904,19 +904,25 @@ func TestAutoYieldWithinFiveSeconds(t *testing.T) {
 		done <- raidAutopilotCmd(ctx, []string{"--foreground", "--binary", f.stub, "--poll", "50ms", "--settle", "0", "--status-every", "1h", f.walk}, io.Discard, io.Discard)
 	}()
 	waitForN(t, 10*time.Second, "both walks to launch", func() bool { return len(f.args()) >= 2 })
+	pids := make([]int, 2)
+	for i, id := range []string{"a-1", "b-1"} {
+		waitForN(t, 10*time.Second, id+"'s walk pid", func() bool {
+			pids[i] = autoReadPID(filepath.Join(f.walk, id, "walk.pid"))
+			return pids[i] > 0
+		})
+	}
 	if err := os.WriteFile(filepath.Join(f.walk, autoYieldFile), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// The requirement is that the YIELD is HANDLED within 5 s: both ids stopped and their teardowns started, even
-	// while one teardown is slow. The completion (YIELD-DONE) is bounded by the slow teardown instead.
-	waitForN(t, 5*time.Second, "both teardowns to start", func() bool {
-		starts := 0
-		for _, line := range f.teardowns() {
-			if strings.HasPrefix(line, "start ") {
-				starts++
+	// The requirement is that the YIELD reaches every walk within 5 s: both pids are gone, even while one slot's
+	// teardown is slow. The teardowns and YIELD-DONE follow and are bounded by the slow teardown instead.
+	waitForN(t, 5*time.Second, "both walks to stop", func() bool {
+		for _, pid := range pids {
+			if processAlive(pid) {
+				return false
 			}
 		}
-		return starts >= 2
+		return true
 	})
 	waitForN(t, 20*time.Second, "the YIELD-DONE", func() bool {
 		_, err := os.Stat(filepath.Join(f.walk, autoYieldDone))
