@@ -61,6 +61,17 @@ func TestAsDeletesOnlyTheShadow(t *testing.T) {
 	}
 }
 
+// The shadow export carries no ai_dungeon_boss block: the boss table is byte-identical (absent) between the
+// base and shadow exports, so applying the shadow migration cannot disturb the map's boss rows.
+func TestAsLeavesBossTableIdentical(t *testing.T) {
+	r := build(t, parsePlan(t, small))
+	for _, sql := range []string{WriteSQL([]Rows{r}), WriteSQL([]Rows{As(r, "tiny_cave_x1").Rows})} {
+		if strings.Contains(sql, "ai_dungeon_boss") {
+			t.Fatalf("export writes boss-table statements: %.200q", sql)
+		}
+	}
+}
+
 func TestBasePlan(t *testing.T) {
 	for _, c := range []struct{ in, want string }{
 		{"zul_gurub_x1", "zul_gurub"}, {"zul_gurub_x2", "zul_gurub"}, {"tiny_cave_x1", "tiny_cave"},
