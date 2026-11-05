@@ -707,9 +707,9 @@ func TestJSONDiffArrays(t *testing.T) {
 	}
 }
 
-// The README table lists every tunable with its unit, limits and default, as the code has them.
+// The live-tuning page's table lists every tunable with its unit, limits and default, as the code has them.
 func TestReadmeListsEveryTunable(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "okf", "dungeons", "live-tuning.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -717,7 +717,7 @@ func TestReadmeListsEveryTunable(t *testing.T) {
 	for _, s := range tuneSpecs {
 		prefix := fmt.Sprintf("| `%s` | %s | %v to %v | %v |", s.Key, s.Unit, s.Min, s.Max, def[s.Key])
 		if !strings.Contains(string(b), prefix) {
-			t.Errorf("README has no row %q", prefix)
+			t.Errorf("live-tuning.md has no row %q", prefix)
 		}
 	}
 }

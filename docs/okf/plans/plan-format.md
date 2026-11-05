@@ -17,6 +17,26 @@ status: draft
 
 A plan is `dungeons/<name>.json`, format version 1. Every position is an `{"x", "y", "z"}` point in map coordinates; every `*_s` field is seconds[^plan-struct].
 
+## Example
+
+The first leg of `dungeons/uldaman.json`, as the loader reads it. A test parses this block, so it stays a valid plan.
+
+```json
+{
+  "version": 1, "name": "uldaman", "map": 70,
+  "entrance": {"x": -228.9, "y": 46.1, "z": -46},
+  "legs": [
+    {"name": "keystone", "to": {"x": -247.5, "y": 173.1, "z": -43.5},
+     "pull_groups": [{"entries": [4850, 4850], "ambush": true, "positions": [{"x": -232, "y": 198.1, "z": -44.5}, {"x": -223.6, "y": 198, "z": -44.5}]}],
+     "skip": [11073],
+     "steps": [
+       {"use_object": {"entry": 124371, "near": {"x": -234.7, "y": 239.6, "z": -50.9}, "stand": {"x": -234.7, "y": 237, "z": -50.4}}},
+       {"wait_for": {"gameobject": {"entry": 124372, "state": "active"}, "timeout_s": 60}}],
+     "boss": {"entry": 7228, "position": {"x": -235.7, "y": 309.6, "z": -47.6}, "first": []}}
+  ]
+}
+```
+
 ## Top level
 
 - `version` is 1. `name` matches the file stem (`a-z`, `0-9`, `_`, `-`).
