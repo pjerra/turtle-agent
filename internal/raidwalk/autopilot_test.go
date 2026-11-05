@@ -43,14 +43,18 @@ func TestParseAutoTargets(t *testing.T) {
 
 func TestParseAutoTargetsRefusals(t *testing.T) {
 	cases := map[string]string{
-		"slot 3":       "a test2 3 h full -- zg",
-		"unsafe":       "a test2 1 h full -- zg --instance-cap-unsafe",
+		"slot 3":       "a test2 3 h full -- zg --sql /zg.sql",
+		"unsafe":       "a test2 1 h full -- zg --sql /zg.sql --instance-cap-unsafe",
+		"inject":       "a test2 1 h full -- zg --sql /zg.sql --inject kill-mt",
+		"no sql":       "a test2 1 h full -- zg",
 		"no separator": "a test2 1 h full zg",
-		"bad goal":     "a test2 1 h boss -- zg",
-		"no plan":      "a test2 1 h full -- --dir /plans",
-		"bad from":     "a test2 1 h full -- zg --from 42",
-		"bad slot":     "a test2 x h full -- zg",
+		"bad goal":     "a test2 1 h boss -- zg --sql /zg.sql",
+		"no plan":      "a test2 1 h full -- --sql /zg.sql --dir /plans",
+		"bad from":     "a test2 1 h full -- zg --sql /zg.sql --from 42",
+		"bad slot":     "a test2 x h full -- zg --sql /zg.sql",
 		"no goals":     "# only a comment",
+		// One slot runs one walk at a time: two ids may not name the same server and slot.
+		"duplicate slot": "a test2 1 h full -- zg --sql /zg.sql\nb test2 1 h2 full -- zg --sql /zg.sql",
 	}
 	for what, text := range cases {
 		if _, err := ParseAutoTargets(strings.NewReader(text)); err == nil {
@@ -125,13 +129,13 @@ func TestAutoFailedPlacementSwitchesToFresh(t *testing.T) {
 	if d.Action != AutoRestart || d.Reuse {
 		t.Fatalf("decision %+v, want a restart without --reuse-instance", d)
 	}
-	if d.Backoff != 0 {
-		t.Fatalf("first failed fresh attempt backoff = %s, want 0 (the switch itself is the next try)", d.Backoff)
+	if d.Backoff != time.Minute {
+		t.Fatalf("first failed fresh attempt backoff = %s, want 1m (one no-progress attempt)", d.Backoff)
 	}
-	// The fresh attempt fails too: back off.
+	// The fresh attempt fails too: the backoff grows.
 	d = DecideAutoAction(o, AutoRunState{Goal: AutoGoal{Kind: "boss", Boss: 11380}, Reuse: false, HasRun: true, FastFailures: 2}, autoNow, 15*time.Minute)
-	if d.Action != AutoRestart || d.Reuse || d.Backoff != 80*time.Second {
-		t.Fatalf("decision %+v, want a fresh restart with an 80 s backoff", d)
+	if d.Action != AutoRestart || d.Reuse || d.Backoff != 2*time.Minute {
+		t.Fatalf("decision %+v, want a fresh restart with a 2m backoff", d)
 	}
 }
 
@@ -151,6 +155,15 @@ func TestAutoBossKillAdvances(t *testing.T) {
 	if d.Action != AutoRestart {
 		t.Fatalf("decision %+v, want restart for the unkilled boss", d)
 	}
+	// The kill counts whatever the exit code: an incident after it (19) still met the goal.
+	o.ExitCode = 19
+	o.EndReason = "wipe after the boss went down"
+	if !GoalAchieved(AutoGoal{Kind: "boss", Boss: 14507}, o) {
+		t.Fatal("a boss killed in an exit-19 run did not meet the boss goal")
+	}
+	if d := DecideAutoAction(o, AutoRunState{Goal: AutoGoal{Kind: "boss", Boss: 14507}, Reuse: true}, autoNow, 15*time.Minute); d.Action != AutoAdvance {
+		t.Fatalf("decision %+v, want advance after the exit-19 kill", d)
+	}
 }
 
 func TestAutoFullClearAdvancesAndBadArgsStop(t *testing.T) {
@@ -161,16 +174,63 @@ func TestAutoFullClearAdvancesAndBadArgsStop(t *testing.T) {
 	if d := DecideAutoAction(full, AutoRunState{Goal: AutoGoal{Kind: "full"}}, autoNow, 15*time.Minute); d.Action != AutoAdvance {
 		t.Fatalf("decision %+v, want advance", d)
 	}
+	// A clear that ended in an incident (19) is still a clear.
+	full.ExitCode = 19
+	if !GoalAchieved(AutoGoal{Kind: "full"}, full) {
+		t.Fatal("an exit-19 full clear did not meet the full goal")
+	}
 	bad := AutoObservation{Exited: true, ExitCode: 2, EndReason: "bad --sql"}
-	if d := DecideAutoAction(bad, AutoRunState{Goal: AutoGoal{Kind: "full"}}, autoNow, 15*time.Minute); d.Action != AutoStop {
-		t.Fatalf("decision %+v, want stop", d)
+	if d := DecideAutoAction(bad, AutoRunState{Goal: AutoGoal{Kind: "full"}}, autoNow, 15*time.Minute); d.Action != AutoStop || !d.Escalate {
+		t.Fatalf("decision %+v, want a stop with an ESCALATE line", d)
+	}
+	// Exit 29: the placement failed every try in the same instance; a fresh-instance retry is never asked for.
+	placeFailed := AutoObservation{Exited: true, ExitCode: 29, EndReason: "place: 4 tries in the same instance, start step 582"}
+	if d := DecideAutoAction(placeFailed, AutoRunState{Goal: AutoGoal{Kind: "boss", Boss: 14507}, Reuse: true, HasRun: true}, autoNow, 15*time.Minute); d.Action != AutoStop || !d.Escalate {
+		t.Fatalf("decision %+v, want a stop with an ESCALATE line and no retry", d)
 	}
 }
 
-func TestAutoBackoffDoublesToTenMinutes(t *testing.T) {
-	for fast, want := range map[int]time.Duration{0: 20 * time.Second, 1: 40 * time.Second, 2: 80 * time.Second, 10: 10 * time.Minute} {
+// Exit 15 is the slot's lease held by another holder: three consecutive attempts stop the id for a person.
+func TestAutoLeaseHeldThreeTimesEscalates(t *testing.T) {
+	o := AutoObservation{Exited: true, ExitCode: 15, EndReason: "lease: srv/1 is not leased by zg-a"}
+	for i := 0; i < 2; i++ {
+		d := DecideAutoAction(o, AutoRunState{Goal: AutoGoal{Kind: "full"}, LeaseFails: i}, autoNow, 15*time.Minute)
+		if d.Action != AutoRestart {
+			t.Fatalf("exit 15 #%d: decision %+v, want a restart", i+1, d)
+		}
+	}
+	if d := DecideAutoAction(o, AutoRunState{Goal: AutoGoal{Kind: "full"}, LeaseFails: 2}, autoNow, 15*time.Minute); d.Action != AutoStop || !d.Escalate {
+		t.Fatalf("third exit 15: decision %+v, want a stop with an ESCALATE line", d)
+	}
+}
+
+func TestAutoBackoffTwentySecondsToOneMinuteSteps(t *testing.T) {
+	for fast, want := range map[int]time.Duration{
+		0: 20 * time.Second, 1: time.Minute, 2: 2 * time.Minute, 3: 5 * time.Minute, 4: 10 * time.Minute, 10: 10 * time.Minute,
+	} {
 		if got := AutoBackoff(fast); got != want {
 			t.Errorf("AutoBackoff(%d) = %s, want %s", fast, got, want)
 		}
+	}
+}
+
+// A restart carries the backoff of its no-progress count; the stall clock of a run waiting on the instance cap starts
+// when the wait ends, not when the run last moved.
+func TestAutoBackoffAndStallAfterTheCapWait(t *testing.T) {
+	o := AutoObservation{Exited: true, ExitCode: 5, StepsReached: 51, EndReason: "server closed the connection"}
+	if d := DecideAutoAction(o, AutoRunState{Goal: AutoGoal{Kind: "full"}, FastFailures: 2}, autoNow, 15*time.Minute); d.Backoff != 2*time.Minute {
+		t.Fatalf("restart backoff = %s, want 2m at two no-progress attempts", d.Backoff)
+	}
+	// The cap wait ended 10 minutes ago; the run moved 40 minutes ago. The stall clock starts at the wait's end.
+	o = AutoObservation{
+		Exited: false, StepsReached: 51, LastProgress: autoNow.Add(-40 * time.Minute),
+		StallAfter: autoNow.Add(-10 * time.Minute),
+	}
+	if d := DecideAutoAction(o, AutoRunState{Goal: AutoGoal{Kind: "full"}}, autoNow, 15*time.Minute); d.Action != AutoContinue {
+		t.Fatalf("decision %+v, want continue 10m after the cap wait ended", d)
+	}
+	o.StallAfter = autoNow.Add(-20 * time.Minute)
+	if d := DecideAutoAction(o, AutoRunState{Goal: AutoGoal{Kind: "full"}}, autoNow, 15*time.Minute); d.Action != AutoRestart {
+		t.Fatalf("decision %+v, want a stall restart 20m after the cap wait ended", d)
 	}
 }

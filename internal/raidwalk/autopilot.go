@@ -99,9 +99,13 @@ type AutoTarget struct {
 // One line per goal; an id may repeat, and its lines are walked in file order. Blank lines and lines starting with #
 // are skipped. The goal is a single token (full, leg:<L>, boss:<ENTRY>); the `--` separates it from the raid-walk
 // arguments. The autopilot manages --server/--slot/--holder/--from/--until/--place/--reuse-instance/--out, refuses
-// slot 3 and --instance-cap-unsafe, and reads a --from in the arguments as the goal's start.
+// slot 3, --instance-cap-unsafe and --inject, and reads a --from in the arguments as the goal's start.
+//
+// --sql is required: every goal may be re-placed (a restart asks for --place --from ...), and raid-walk refuses
+// --place without --sql. Two ids may not name the same server and slot: one slot runs one walk at a time.
 func ParseAutoTargets(r io.Reader) ([]AutoTarget, error) {
 	var out []AutoTarget
+	slotOwner := map[string]string{}
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for n := 1; sc.Scan(); n++ {
@@ -142,6 +146,11 @@ func ParseAutoTargets(r io.Reader) ([]AutoTarget, error) {
 		if err != nil {
 			return nil, fmt.Errorf("line %d: %v", n, err)
 		}
+		key := server + "/" + slot
+		if owner, ok := slotOwner[key]; ok && owner != id {
+			return nil, fmt.Errorf("line %d: %s slot %s is already %s's: one slot runs one walk at a time", n, server, slot, owner)
+		}
+		slotOwner[key] = id
 		t := AutoTarget{ID: id, Server: server, Slot: slot, Holder: holder, Goal: goal, Line: n}
 		args, start, err := parseAutoArgs(fields[sep+1:])
 		if err != nil {
@@ -149,6 +158,9 @@ func ParseAutoTargets(r io.Reader) ([]AutoTarget, error) {
 		}
 		if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 			return nil, fmt.Errorf("line %d: the raid-walk args must start with the plan name", n)
+		}
+		if !hasAutoFlag(args, "--sql") {
+			return nil, fmt.Errorf("line %d: --sql FILE is required: every goal may be re-placed, and raid-walk refuses --place without --sql", n)
 		}
 		t.Args, t.Start = args, start
 		out = append(out, t)
@@ -170,6 +182,8 @@ func parseAutoArgs(in []string) (args []string, start string, err error) {
 		switch name {
 		case "--instance-cap-unsafe":
 			return nil, "", fmt.Errorf("--instance-cap-unsafe is never used by the autopilot")
+		case "--inject":
+			return nil, "", fmt.Errorf("--inject is never used by the autopilot: the walk's own faults are not a supervised run")
 		case "--server", "--slot", "--holder", "--until", "--out":
 			if hasEq {
 				continue
@@ -196,6 +210,16 @@ func parseAutoArgs(in []string) (args []string, start string, err error) {
 		args = append(args, a)
 	}
 	return args, start, nil
+}
+
+// hasAutoFlag reports whether name is among args, bare or as name=value.
+func hasAutoFlag(args []string, name string) bool {
+	for _, a := range args {
+		if n, _, _ := strings.Cut(a, "="); n == name {
+			return true
+		}
+	}
+	return false
 }
 
 // AutoObservation is what the autopilot read of one run.
@@ -227,9 +251,11 @@ func RunStopped(reason string) bool {
 	return strings.Contains(r, ".bot run stop") || strings.HasPrefix(r, "stopped:")
 }
 
-// GoalAchieved says the run met its goal.
+// GoalAchieved says the run met its goal. A boss the summary's boss_kills says was killed, and a full clear, count
+// whatever the exit code: an incident after the kill (19) still met the goal. The walk's own run stop and a failed
+// placement never count. A leg goal needs the walk to have ended on its own until clause (exit 0).
 func GoalAchieved(g AutoGoal, o AutoObservation) bool {
-	if !o.Exited || o.ExitCode != 0 || RunStopped(o.EndReason) || o.PlacementFailed() {
+	if !o.Exited || RunStopped(o.EndReason) || o.PlacementFailed() {
 		return false
 	}
 	switch g.Kind {
@@ -238,7 +264,7 @@ func GoalAchieved(g AutoGoal, o AutoObservation) bool {
 	case "full":
 		return o.StepsTotal > 0 && o.StepsReached >= o.StepsTotal
 	case "leg":
-		return o.StepsReached > 0
+		return o.ExitCode == 0 && o.StepsReached > 0
 	}
 	return false
 }
@@ -251,8 +277,11 @@ type AutoRunState struct {
 	Reuse bool
 	// HasRun says an earlier attempt of this goal exists: a restart is a re-place, not a first placement.
 	HasRun bool
-	// FastFailures counts the consecutive ends under two minutes with no step progress: the backoff doubles.
+	// FastFailures counts the consecutive attempts of this goal that reached no further step: the backoff grows.
 	FastFailures int
+	// LeaseFails counts the consecutive attempts that ended in exit 15 (the slot's lease is held by another holder):
+	// the third stops the id for a person.
+	LeaseFails int
 }
 
 // AutoDecision is the next step.
@@ -261,33 +290,47 @@ type AutoDecision struct {
 	Reuse   bool
 	Backoff time.Duration
 	Reason  string
+	// Escalate says the id stops and needs a person: an exit 2 (the walk refused its arguments), an exit 29 (the
+	// placement failed every try in the same instance; a fresh-instance retry would only burn the hourly budget), or
+	// three consecutive exit 15s (the slot's lease is held by someone else).
+	Escalate bool
 }
 
-// AutoBackoff is the wait before a restart after FastFailures fast failures: 20 s doubling to 10 minutes.
+// AutoBackoff is the wait before a restart after FastFailures consecutive no-progress attempts: 20 s, 1 m, 2 m, 5 m,
+// then 10 minutes for every further one. The count resets when an attempt reaches a further step.
 func AutoBackoff(fast int) time.Duration {
-	d := 20 * time.Second
-	for i := 0; i < fast && d < 10*time.Minute; i++ {
-		d *= 2
+	steps := [...]time.Duration{20 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute}
+	if fast < 0 {
+		fast = 0
 	}
-	if d > 10*time.Minute {
-		d = 10 * time.Minute
+	if fast >= len(steps) {
+		fast = len(steps) - 1
 	}
-	return d
+	return steps[fast]
 }
 
 // DecideAutoAction is the whole rule: any end, a used-up restart budget, or a stall tears down and re-places; a met
 // goal advances; a placement that failed on the old bind asks for a fresh instance next. A stall is no step and no
-// boss-HP change for stall.
+// boss-HP change for stall, counted from the end of a legitimate instance-cap wait. Exit 2 and 29 stop the id for a
+// person, and so does the third consecutive exit 15. Every restart carries the backoff of its no-progress count.
 func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall time.Duration) AutoDecision {
 	if !o.Exited {
-		if !o.StallAfter.IsZero() && now.Before(o.StallAfter) {
-			return AutoDecision{Action: AutoContinue, Reason: "waiting on the instance cap until " + o.StallAfter.UTC().Format(time.RFC3339)}
+		// A run waiting on the instance cap is not stalled: its clock starts when the wait ends.
+		progress := o.LastProgress
+		if !o.StallAfter.IsZero() {
+			if now.Before(o.StallAfter) {
+				return AutoDecision{Action: AutoContinue, Reason: "waiting on the instance cap until " + o.StallAfter.UTC().Format(time.RFC3339)}
+			}
+			if o.StallAfter.After(progress) {
+				progress = o.StallAfter
+			}
 		}
-		if !o.LastProgress.IsZero() && now.Sub(o.LastProgress) >= stall {
+		if !progress.IsZero() && now.Sub(progress) >= stall {
 			return AutoDecision{
-				Action: AutoRestart,
-				Reuse:  true,
-				Reason: fmt.Sprintf("stalled: no step or boss-HP change for %s (step %d)", now.Sub(o.LastProgress).Round(time.Second), o.StepsReached),
+				Action:  AutoRestart,
+				Reuse:   true,
+				Backoff: AutoBackoff(r.FastFailures),
+				Reason:  fmt.Sprintf("stalled: no step or boss-HP change for %s (step %d)", now.Sub(progress).Round(time.Second), o.StepsReached),
 			}
 		}
 		return AutoDecision{Action: AutoContinue, Reason: fmt.Sprintf("running, step %d", o.StepsReached)}
@@ -296,23 +339,26 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 		return AutoDecision{Action: AutoAdvance, Reason: "goal met: " + r.Goal.String()}
 	}
 	if o.ExitCode == 2 {
-		return AutoDecision{Action: AutoStop, Reason: "exit 2: the walk refused its arguments"}
+		return AutoDecision{Action: AutoStop, Escalate: true, Reason: "exit 2: the walk refused its arguments (" + shortReason(o.EndReason) + ")"}
 	}
+	if o.ExitCode == 29 {
+		return AutoDecision{Action: AutoStop, Escalate: true, Reason: "exit 29: the placement failed every try in the same instance; no fresh-instance retry (" + shortReason(o.EndReason) + ")"}
+	}
+	if o.ExitCode == 15 && r.LeaseFails+1 >= 3 {
+		return AutoDecision{Action: AutoStop, Escalate: true, Reason: "exit 15 three times: the slot's lease is held by another holder (" + shortReason(o.EndReason) + ")"}
+	}
+	backoff := AutoBackoff(r.FastFailures)
 	if o.PlacementFailed() {
 		if r.Reuse {
-			return AutoDecision{Action: AutoRestart, Reuse: false, Reason: "place failed on the old bind: a fresh instance next (" + shortReason(o.EndReason) + ")"}
+			return AutoDecision{Action: AutoRestart, Reuse: false, Backoff: backoff, Reason: "place failed on the old bind: a fresh instance next (" + shortReason(o.EndReason) + ")"}
 		}
-		return AutoDecision{Action: AutoRestart, Reuse: false, Backoff: AutoBackoff(r.FastFailures), Reason: "place failed again: " + shortReason(o.EndReason)}
-	}
-	switch o.ExitCode {
-	case 3, 4, 5, 6, 26:
-		return AutoDecision{Action: AutoRestart, Reuse: true, Backoff: AutoBackoff(r.FastFailures), Reason: fmt.Sprintf("exit %d: %s", o.ExitCode, shortReason(o.EndReason))}
+		return AutoDecision{Action: AutoRestart, Reuse: false, Backoff: backoff, Reason: "place failed again: " + shortReason(o.EndReason)}
 	}
 	reason := fmt.Sprintf("exit %d: %s", o.ExitCode, shortReason(o.EndReason))
 	if RunStopped(o.EndReason) {
 		reason = "the run stopped by itself (exit 0), the goal is not met"
 	}
-	return AutoDecision{Action: AutoRestart, Reuse: true, Reason: reason}
+	return AutoDecision{Action: AutoRestart, Reuse: true, Backoff: backoff, Reason: reason}
 }
 
 // shortReason clips a run's end reason for an EVENT line.
