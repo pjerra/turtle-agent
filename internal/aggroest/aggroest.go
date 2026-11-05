@@ -52,9 +52,12 @@ const (
 	TankSpreadYd = 1.5
 	// MaxPullBodies is the most bodies a plan may size a pull at (kPlanMaxPullBodies, 80).
 	MaxPullBodies = 80
+	// AssistYd is the server's CreatureFamilyAssistanceRadius (10 yd): the
+	// radius the family assist hop uses live. RingYd below it still reaches it.
+	AssistYd = 10.0
 	// assistYdFloor is the server's CreatureFamilyAssistanceRadius: the pure
 	// function takes max(server, ringYd), so a ring below 10 still reaches 10.
-	assistYdFloor = 10.0
+	assistYdFloor = AssistYd
 	// walkSampleYd samples the walk polylines; dragSampleYd the drag polyline.
 	walkSampleYd = 2.0
 	dragSampleYd = 4.0

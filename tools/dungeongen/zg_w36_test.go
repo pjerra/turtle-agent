@@ -1,5 +1,6 @@
-// Walk-36 fixes (TortoiseBots-audit tests/raid-zg-walk36): the Jin'do hall's stand pulls (items 1 and 2), the
-// two water strands (item 3) and the boss's authored stand (item 5). Run step N is the deployed 753-row export
+// Walk-36 fixes (TortoiseBots-audit tests/raid-zg-walk36): the two water strands (item 3) and the boss's
+// authored stand (item 5; the hall's own stand rules are in zg_w38_test.go now, the walk-38 review pulled the
+// hall's east side with the boss row). Run step N is the deployed 753-row export
 // (20261105101000_world.sql, plan 2db51e2); leg 6 is 10 rows further in the current export (run 543 = dev 553).
 //
 // The reach used here is the route-aggro model's own (routeReach: AggroRadius at the plan's party level plus the
@@ -14,7 +15,6 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/planexport"
-	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
 // zgW36JindoLeg finds the Jin'do leg.
@@ -120,104 +120,6 @@ func zgW36ApproachPoints(g dungeon.PullGroup) []dungeon.Point {
 		out = append(out, zgW36Centroid(g))
 	}
 	return out
-}
-
-// TestZgW36JindoHallStandsKeepTheBossReach: walk 36 f/f3 (10:01, 11:03, 12:33) and c3 (11:35) had the group-8 stand
-// pull (run step 543, stand -11560 -1280) engage Jin'do: the stand and its approach stand 25.2-28.4 yd from the
-// honour guard's western units (reach 30) and the guard lives 8-18 yd from the boss, so the guard's fight brings him
-// in (f3 11:03:44 "engaged 15 over 6" and "boss 11380 engaged at step 543"). It fails today: the group-8 stand is
-// 25.2 yd from -11528.5 -1270.3 (14825, reach 30), and the guard's own stand is 17.5 yd from group 9's units.
-//
-// The rule: every point a hall group stands on keeps the route-aggro reach of every hostile it does not pull, and
-// of Jin'do (reach 33 at party level 60), measured 3D as the check measures it.
-func TestZgW36JindoHallStandsKeepTheBossReach(t *testing.T) {
-	p, err := dungeon.Load(zgPlan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cs, err := readCreatures("testdata/map309/creatures.tsv")
-	if err != nil {
-		t.Fatal(err)
-	}
-	leg := zgW36JindoLeg(t, p)
-	boss := leg.Boss.Position
-	var jindo *creature
-	for i := range cs {
-		if cs[i].Entry == 11380 {
-			jindo = &cs[i]
-		}
-	}
-	if jindo == nil {
-		t.Fatal("no Jin'do spawn in the map-309 export")
-	}
-	// The route-aggro model's own reach: AggroRadius at the plan's party level (58) plus the raid spread.
-	bossReach := routeReach(p, *jindo)
-	if math.Abs(bossReach-35) > 0.01 {
-		t.Fatalf("Jin'do's reach is %.1f yd, want 35 (25 aggro at party level 58 + 10 raid spread)", bossReach)
-	}
-	groups := zgW36HallGroups(p, leg)
-	if len(groups) < 2 {
-		t.Fatalf("%d hall pull groups, want the north packs and the honour guard", len(groups))
-	}
-	owner := zgW36Owner(p, cs)
-	pl := zgPlannerOrNil(t)
-	if pl == nil {
-		t.Skip("needs the map-309 mmaps (the stand line-of-sight check)")
-	}
-	defer pl.Close()
-	li := 6
-	for _, gi := range groups {
-		g := leg.PullGroups[gi]
-		for pi, q := range zgW36ApproachPoints(g) {
-			what := "approach"
-			if pi == len(zgW36ApproachPoints(g))-1 {
-				what = "stand"
-			}
-			for _, c := range cs {
-				if o, ok := owner[c.GUID]; ok && o <= zgW36Order(li, gi) {
-					continue // this pull's own pack, or one pulled before it
-				}
-				if !hostileMob(c, map[int]bool{35: true}, nil) || c.FlagsExtra&worldspawn.NoAggro != 0 {
-					continue
-				}
-				if c.Wander > 50 {
-					continue // the export's wander typo (11356 yd): planlint caps it
-				}
-				if dist(c.Pos, boss) < bossReach {
-					continue // a guard standing at Jin'do's own side: no stand can be out of his reach and in shot of it (the w37 guard rows pin where it is fought instead)
-				}
-				reach := routeReach(p, c)
-				if reach <= 0 {
-					continue
-				}
-				if d := dist(q, c.Pos); d < reach {
-					t.Errorf("leg 6 pull group %d %s (%.1f %.1f %.1f) stands %.1f yd from %s %d (guid %d, %.1f %.1f %.1f): the reach is %.1f yd and the run has not pulled it: the fight would drag it in",
-						gi, what, q.X, q.Y, q.Z, d, c.Name, c.Entry, c.GUID, c.Pos.X, c.Pos.Y, c.Pos.Z, reach)
-				}
-			}
-			if d := dist(q, boss); d < bossReach {
-				t.Errorf("leg 6 pull group %d %s (%.1f %.1f %.1f) stands %.1f yd from Jin'do 11380: the reach is %.1f yd",
-					gi, what, q.X, q.Y, q.Z, d, bossReach)
-			}
-		}
-		// A stand pull's stand must see its pack: with no line of sight the run leader searches a firing stand 25-35 yd
-		// from the pack and moves the party there (walk 36 f3 11:03:23 "no LOS from the authored stand after 20 s;
-		// searching a firing stand"), which is how the party entered the guard's reach.
-		if g.StandPull && len(g.Approach) > 0 {
-			stand := g.Approach[len(g.Approach)-1]
-			seen := 0
-			for _, u := range g.Positions {
-				r, err := pl.Raycast(309, navmesh.Vec3{stand.X, stand.Y, stand.Z + 1.5}, navmesh.Vec3{u.X, u.Y, u.Z + 1})
-				if err == nil && r.Known && r.Clear {
-					seen++
-				}
-			}
-			if seen == 0 {
-				t.Errorf("leg 6 pull group %d's stand (%.1f %.1f %.1f) sees none of its %d units: the run leader searches a firing stand and walks the party into the next pack",
-					gi, stand.X, stand.Y, stand.Z, len(g.Positions))
-			}
-		}
-	}
 }
 
 // TestZgW36JindoNoPullBesideTheRespawnPit: walk 36 d 09:40:05 and e3 11:48:19 pulled the -11603 -1229 pack (run step

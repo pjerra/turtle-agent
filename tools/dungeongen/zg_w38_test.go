@@ -1,13 +1,16 @@
-// Walk-38 fixes (TortoiseBots-audit tests/raid-zg-walk38): the Jin'do hall's honour guard and the three
-// packs beside it, the Hakkar outer leg's step-601 wall, and the Jeklik step-43 patrol pull. The hall test
-// below is the brief's rule: a pull row before the boss row must not bring Jin'do, and it must not bring
-// more bodies than its own ceiling, by the route-aggro model (proximity with each formation's social
-// link) on the live-flag export.
+// Walk-38 fixes (TortoiseBots-audit tests/raid-zg-walk38) and the review round that followed them: the
+// Jin'do hall (the review's H1/H2: the run leader's real family-assist model, RingYd 10 and one hop, so the
+// hall's east side is pulled with Jin'do by the boss row), the Hakkar outer leg's step-601 wall (M4, on the
+// real export in cmd/turtle-agent), the Jeklik step-43 patrol pull and its camp stands against every loop
+// (M3), and the corridor's stand coverage (L2). The hall test below is the rule: a pull row before the boss
+// row must not bring Jin'do, and it must not bring more bodies than its own ceiling, by that assist model
+// on the live-flag export.
 package main
 
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 
@@ -188,7 +191,7 @@ func TestZgW38JindosHallPullsStayUnderTheirCeilings(t *testing.T) {
 		res := aggroest.Estimate(mobs, target, aggroest.Geometry{
 			Walk: walk, WalkSpreadYd: aggroest.WalkSpreadYd,
 			Stand: party, StandSpreadYd: aggroest.StandSpreadRaidYd,
-		}, aggroest.Params{PartyLevel: 58, Rate: 1, RingYd: aggroest.RingYd, RingHops: 0, FloorDz: aggroest.FloorDz})
+		}, aggroest.Params{PartyLevel: 58, Rate: 1, RingYd: aggroest.AssistYd, RingHops: 1, FloorDz: aggroest.FloorDz})
 		ceiling := int(s.Item)
 		if ceiling == 0 {
 			ceiling = zgW38PullCeiling
@@ -202,38 +205,43 @@ func TestZgW38JindosHallPullsStayUnderTheirCeilings(t *testing.T) {
 			}
 			t.Errorf("leg 6 row %d (%s) brings %d bodies over its ceiling %d: %v", i, s.Comment, res.Bodies, ceiling, why)
 		}
-		// The guard's raised ceiling names exactly the bodies the stand wakes: its own eight, the north
-		// camp's east formation (1173078-81) and the two lone mistresses. Nothing else may pad it.
-		if gi, ok := rows.owner[49421]; ok && gi == i {
-			want := map[uint32]bool{49402: true, 49403: true,
-				1173078: true, 1173079: true, 1173080: true, 1173081: true}
-			for _, c := range cs {
-				if (c.GUID == 49421 || c.GroupLeader == 49421) && zgHostile(c) {
-					want[uint32(c.GUID)] = true
-				}
-			}
-			got := map[uint32]bool{}
-			for _, m := range res.Members {
-				got[m.Guid] = true
-				if !want[m.Guid] {
-					t.Errorf("leg 6 row %d (the honour guard) wakes %s %d, not one of its own eight, the north camp's east four or the two lone mistresses", i, zgW38Creature(cs, uint64(m.Guid)).Name, m.Guid)
-				}
-			}
-			for g := range want {
-				if !got[g] {
-					t.Errorf("leg 6 row %d (the honour guard) does not wake %d, which its ceiling counts", i, g)
-				}
-			}
-			if s.Item != uint32(len(want)) {
-				t.Errorf("leg 6 row %d (the honour guard) max_bodies %d, want %d (its eight, the east four, the two mistresses)", i, s.Item, len(want))
-			}
-		}
 		for _, m := range res.Members {
 			if m.Guid == uint32(boss.GUID) {
 				t.Errorf("leg 6 row %d (%s) brings Jin'do 11380 before its boss row: the pull's bodies are %d over the ceiling %d", i, s.Comment, res.Bodies, ceiling)
 			}
 		}
 		prevPull = i
+	}
+	// H1/H2 of the walk-38 review: the hall's east side is pulled WITH Jin'do, never before him. The
+	// lone mistresses 49402/49403 stand 7.2/8.6 yd from him and the guard's eight 11-17 yd; the guard's
+	// nearest unit is 5.9 yd from 49402, so the 10 yd family assist of any guard pull wakes the
+	// mistresses, and a party point inside their own reach (22 aggro + the raid's 10 yd spread) has
+	// them call him on the same hop. No stand keeps the party 32 yd from them and in the tank's 28.5 yd
+	// shot of the guard (the guard spans 9.5 yd: a stand in shot of its farthest is at most 28.5+9.5 yd
+	// from the nearest), and the north camp can only be shot from inside the Sacrificed Trolls'
+	// respawning pit (18.4 yd at best). So the boss row owns the whole east side and pulls it as its
+	// adds: entries 14825/14882/14883 within its radius.
+	wantOwned := map[uint64]string{
+		49402: "the lone mistress", 49403: "the lone mistress",
+		1173078: "the north camp's east four", 1173079: "the north camp's east four",
+		1173080: "the north camp's east four", 1173081: "the north camp's east four",
+		49421: "the honour guard", 49573: "the honour guard", 49574: "the honour guard",
+		49575: "the honour guard", 49576: "the honour guard", 49577: "the honour guard",
+		49609: "the honour guard", 49650: "the honour guard",
+		49383: "the north camp", 49384: "the north camp", 49385: "the north camp", 49386: "the north camp",
+	}
+	for guid, what := range wantOwned {
+		o, ok := rows.owner[guid]
+		if !ok || o != bossRow {
+			t.Errorf("%s %d is pulled by row %d (owned %v), want the Jin'do boss row %d: it is pulled with him, never before him", what, guid, o, ok, bossRow)
+		}
+	}
+	br := rows.rows[bossRow]
+	if !slices.Contains(br.Entries, 14825) || !slices.Contains(br.Entries, 14883) {
+		t.Errorf("the boss row's entries are %v, want 14825 (the hall's mistresses and guard) and 14883 (their Voodoo Slaves) so the adds are scoped to his row", br.Entries)
+	}
+	if br.Radius < 47 {
+		t.Errorf("the boss row's radius is %g, want >= 47 (the north camp's 49385 stands 45.8 yd from him)", br.Radius)
 	}
 }
 
@@ -417,6 +425,81 @@ func TestZgW38JeklikPatrolStands(t *testing.T) {
 				r, err := pl.Raycast(309, navmesh.Vec3{stand.X, stand.Y, stand.Z + 1.5}, navmesh.Vec3{c.Pos.X, c.Pos.Y, c.Pos.Z + 1})
 				if err != nil || !r.Known || !r.Clear {
 					t.Errorf("pull group %d: no line of sight from the stand to %s %d", gi, c.Name, c.GUID)
+				}
+			}
+		}
+	}
+}
+
+// TestZgW38JeklikCampsClearEveryLoop is the walk-38 review's M3: the two Jeklik camp stands (the south
+// headhunter camp 49135 and the north camp that holds the witch doctor 49131 and the bat formation 49130)
+// are tested against ALL of the leg's patrol loops, not only the one their row carries. A plan group holds
+// one patrol block, so the loops come from movement.tsv: 49131's 112.6 s loop (21 points) and 49130's
+// 7-point loop were never read from the south stand, which sat 21.5 yd from 49131's loop (20 yd detection
+// + 3 yd spread is the minimum). The rule is zgCheckStands': a camp stand keeps 23 yd from every waypoint of
+// every unpulled patrol of a LATER group. It fails on dev (the south stand -12219 -1491 stands 21.5 yd from
+// 49131's loop); the plan pulls the 49185 bat formation before the north camp and stages the south camp
+// outside the other loops.
+func TestZgW38JeklikCampsClearEveryLoop(t *testing.T) {
+	p, cs := zgLoadPlanAndExport(t)
+	leg := p.Legs[0]
+	packs := zgPacks(t, leg, cs)
+	movement, err := zgReadMovementPaths("testdata/map309/movement.tsv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loops := map[int][]struct {
+		c    creature
+		loop []dungeon.Point
+	}{}
+	for gi, pk := range packs {
+		seen := map[uint64]bool{}
+		for _, c := range pk {
+			if !c.Patrol || seen[c.GUID] {
+				continue
+			}
+			seen[c.GUID] = true
+			if lp, ok := movement[c.GUID]; ok && len(lp) > 0 {
+				loops[gi] = append(loops[gi], struct {
+					c    creature
+					loop []dungeon.Point
+				}{c, lp})
+			}
+		}
+	}
+	var camps []int
+	for gi := range leg.PullGroups {
+		holds := map[uint64]bool{}
+		for _, c := range packs[gi] {
+			if c.GUID == 49131 || c.GUID == 49135 || c.GroupLeader == 49131 || c.GroupLeader == 49135 {
+				holds[c.GUID] = true
+			}
+		}
+		if len(holds) > 0 {
+			camps = append(camps, gi)
+		}
+	}
+	if len(camps) < 2 {
+		t.Fatalf("the leg's camp rows are %v, want the south (49135) and north (49131 + 49130) camps", camps)
+	}
+	for _, gi := range camps {
+		g := leg.PullGroups[gi]
+		if len(g.Approach) == 0 {
+			t.Errorf("pull group %d (a Jeklik camp) has no stand", gi)
+			continue
+		}
+		stand := g.Approach[len(g.Approach)-1]
+		for gj := gi + 1; gj < len(leg.PullGroups); gj++ {
+			for _, l := range loops[gj] {
+				nearest := math.Inf(1)
+				for _, q := range l.loop {
+					if d := dist(stand, q); d < nearest {
+						nearest = d
+					}
+				}
+				if nearest < zgLaterYd+zgPatrolSpreadYd {
+					t.Errorf("pull group %d stand (%.1f %.1f %.1f) is %.1f yd from a waypoint of %s %d's loop (pull group %d), want >= %g: the patrol walks the party",
+						gi, stand.X, stand.Y, stand.Z, nearest, l.c.Name, l.c.GUID, gj, zgLaterYd+zgPatrolSpreadYd)
 				}
 			}
 		}

@@ -1,10 +1,11 @@
-// The Jin'do fixes (spec TortoiseBots-audit/specs/jindo-mechanics.md §6, plan worker step 1):
-// the plan's kill_first leads with the Brain Wash Totem 15112 and the Powerful Healing Ward 14987,
-// the honour-guard group is a stand pull shot from its approach 42 yd from Jin'do, and every leg-6
-// route segment from group 8's approach to the boss row clears each of the ten Sacrificed Troll
-// spawns (guids 49078-49087, the dropped pit pull group: respawn 10 s) by the route-aggro model's
-// own reach (routeReach: AggroRadius at the plan's party level plus the raid spread and the
-// spawn's wander). The pit pull group is gone.
+// The Jin'do fixes (spec TortoiseBots-audit/specs/jindo-mechanics.md §6, plan worker step 1, and the
+// walk-38 review): the plan's kill_first leads with the Brain Wash Totem 15112 and the Powerful Healing
+// Ward 14987, the hall's east side (the honour guard, the north camp's east four and the two lone
+// mistresses) is the boss row's add list and radius rather than pull rows (the 10 yd family assist of any
+// guard pull wakes them, and they live 6-17 yd from Jin'do), and every leg-6 route segment to the boss row
+// clears each of the ten Sacrificed Troll spawns (guids 49078-49087, the dropped pit pull group: respawn
+// 10 s) by the route-aggro model's own reach (routeReach: AggroRadius at the plan's party level plus the
+// raid spread and the spawn's wander). The pit pull group is gone.
 package main
 
 import (
@@ -34,13 +35,15 @@ func TestZgJindoKillFirstTotemWardFirst(t *testing.T) {
 	}
 }
 
-// TestZgJindoGuardIsStandPull: the honour guard's camp is three rows now (walk 37 e/e2 wiped three
-// times at step 552 on the old ten-body row whose stand sat 52 yd from its pack, past the tank's
-// 28.5 yd shot, so the row plain-pulled to the pack 13 yd from Jin'do): formation 49421's eight units
-// and the two lone Withered Mistresses 49402/49403, each a stand pull whose stand is inside the tank's
-// shot of its whole pack and 35+ yd from Jin'do. A stand covering all ten cannot exist: they span 13 yd
-// and a stand in shot of the two lone mistresses (8-10 yd from Jin'do) is at most 34.8 yd from him.
-func TestZgJindoGuardIsStandPull(t *testing.T) {
+// TestZgJindoGuardIsTheBossRowsAdds: the walk-38 review's H1/H2. The honour guard's eight (formation
+// 49421) and the two lone Withered Mistresses 49402/49403 stand 6-17 yd from Jin'do. The guard's nearest
+// unit is 5.9 yd from 49402, so the 10 yd family assist (CreatureFamilyAssistanceRadius) of any guard pull
+// wakes the mistresses, and their assist reaches Jin'do from a party point inside their own 22+10 yd reach:
+// with the real assist model no guard stand keeps them out (rows 56/58/61/64 of the walk-38 export brought
+// him). So no pre-boss row pulls them: the plan has no pull group for 49421/49402/49403, and the Jin'do
+// boss row's First list and radius scope them, i.e. they are pulled with him. zg_w38_test.go pins the
+// exported rows (the boss row owns each unit; no earlier row brings him or more bodies than its ceiling).
+func TestZgJindoGuardIsTheBossRowsAdds(t *testing.T) {
 	p, err := dungeon.Load(zgPlan)
 	if err != nil {
 		t.Fatal(err)
@@ -59,62 +62,31 @@ func TestZgJindoGuardIsStandPull(t *testing.T) {
 		t.Fatal(err)
 	}
 	packs := zgPacks(t, *leg, cs)
-	jindo := dungeon.Point{X: -11515.8, Y: -1275.48, Z: 79.66}
-	for _, want := range []struct {
-		lead uint64
-		size int
-	}{
-		{49421, 8}, // the guard formation (creature_groups flags 2: it comes as one)
-		{49402, 1},
-		{49403, 1},
-	} {
-		found := -1
-		for gi := range leg.PullGroups {
-			leads := map[uint64]bool{}
-			for _, m := range packs[gi] {
-				lead := m.GroupLeader
-				if lead == 0 {
-					lead = m.GUID
-				}
-				leads[lead] = true
+	for gi := range leg.PullGroups {
+		for _, m := range packs[gi] {
+			lead := m.GroupLeader
+			if lead == 0 {
+				lead = m.GUID
 			}
-			if leads[want.lead] {
-				found = gi
-				break
+			if lead == 49421 || m.GUID == 49402 || m.GUID == 49403 {
+				t.Errorf("pull group %d holds %s %d: the hall's east side is pulled with Jin'do by the boss row, never before it", gi, m.Name, m.GUID)
 			}
 		}
-		if found < 0 {
-			t.Fatalf("no pull group owns the honour-guard formation %d (with 49402/49403 split out)", want.lead)
+	}
+	if leg.Boss == nil || leg.Boss.Entry != 11380 {
+		t.Fatalf("the leg's boss is %+v, want Jin'do 11380", leg.Boss)
+	}
+	first := map[uint32]bool{}
+	for _, e := range leg.Boss.First {
+		first[e] = true
+	}
+	for _, e := range []uint32{14825, 14882, 14883} {
+		if !first[e] {
+			t.Errorf("the Jin'do boss row's First list is %v, missing %d: the guard and mistresses are not scoped to his row", leg.Boss.First, e)
 		}
-		g := leg.PullGroups[found]
-		if !g.StandPull {
-			t.Errorf("pull group %d (lead %d) is not a stand pull: the fight must happen at its stand, not where it stands 8-20 yd from Jin'do", found, want.lead)
-		}
-		if len(packs[found]) != want.size {
-			t.Errorf("pull group %d (lead %d) owns %d units, want %d", found, want.lead, len(packs[found]), want.size)
-		}
-		if g.MaxBodies > 0 && g.MaxBodies < want.size {
-			t.Errorf("pull group %d (lead %d): max_bodies %d is under its %d bodies", found, want.lead, g.MaxBodies, want.size)
-		}
-		if len(g.Approach) == 0 {
-			t.Errorf("pull group %d (lead %d) has no approach (no stand to shoot from)", found, want.lead)
-			continue
-		}
-		stand := g.Approach[len(g.Approach)-1]
-		if d := dist(stand, jindo); d < 35 {
-			t.Errorf("pull group %d (lead %d) stand %.1f %.1f %.1f is %.1f yd from Jin'do, want >= 35", found, want.lead, stand.X, stand.Y, stand.Z, d)
-		}
-		// The run leader's shot from the stand must reach the whole pack, or PatrolStandPullGate
-		// leaves it to a plain pull (the walk-37 message names the units out of the 28.5 yd shot).
-		worst, who := 0.0, creature{}
-		for _, m := range packs[found] {
-			if d := dist(stand, m.Pos); d > worst {
-				worst, who = d, m
-			}
-		}
-		if worst > 28.5 {
-			t.Errorf("pull group %d (lead %d): its farthest unit %s is %.1f yd from the stand, past the 28.5 yd shot: the row would plain-pull to the pack", found, want.lead, who.Name, worst)
-		}
+	}
+	if leg.Boss.Radius < 47 {
+		t.Errorf("the Jin'do boss row's radius is %g, want >= 47 (the north camp's 49385 stands 45.8 yd from him and comes with him)", leg.Boss.Radius)
 	}
 }
 

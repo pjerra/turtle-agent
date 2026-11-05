@@ -669,12 +669,15 @@ func zgApproachMin(samples []dungeon.Point, pack []creature, endAtStand bool) (f
 // pull; the w36/w37 tests pin the stands).
 func zgCheckWalk(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, packs [][]creature, minNext ...float64) {
 	t.Helper()
-	zgCheckWalkExcept(t, p, pl, w, packs, nil, minNext...)
+	zgCheckWalkExcept(t, p, pl, w, packs, nil, nil, minNext...)
 }
 
 // zgCheckWalkExcept is zgCheckWalk with pairs to leave out: the hall's knot is pinned by the live-flag walks
-// (zg_w37_test.go, zg_w38_test.go) and its stands sit 8-30 yd from the neighbours by necessity.
-func zgCheckWalkExcept(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, packs [][]creature, except func(i int) bool, minNext ...float64) {
+// (zg_w37_test.go, zg_w38_test.go) and its stands sit 8-30 yd from the neighbours by necessity. ownApproach
+// (nil: nothing) leaves out only the "walk into the next pack before its stand" rule for the pairs it
+// names: a plain pull's point is its pack's centroid and a stand pull's stand sits inside its own pack by
+// design (the walk-38 review), so the party does walk in; the later-pull clearance is still checked.
+func zgCheckWalkExcept(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgWalk, packs [][]creature, except, ownApproach func(i int) bool, minNext ...float64) {
 	t.Helper()
 	nextYd := zgLaterYd
 	if len(minNext) > 0 {
@@ -727,7 +730,7 @@ func zgCheckWalkExcept(t *testing.T, p *dungeon.Plan, pl *navmesh.Planner, w zgW
 			}
 			break
 		}
-		if g, stand, ok := zgNextPull(w, i); ok && g >= 0 && g < len(packs) && !roaming {
+		if g, stand, ok := zgNextPull(w, i); ok && g >= 0 && g < len(packs) && !roaming && (ownApproach == nil || !ownApproach(i)) {
 			atStand := dist(b.P, stand) < 0.01
 			static, patrol := zgSplit(packs[g])
 			if d, at, who, found := zgApproachMin(samples, static, atStand); found && d < nextYd {
@@ -905,18 +908,21 @@ func TestZulGurubMandokirSweepClearOfLaterPacks(t *testing.T) {
 	zgCheckWalk(t, p, pl, w, packs)
 }
 
-// TestZulGurubJindoCorridorClearOfLaterPacks covers the Jin'do corridor through the group-13 pull (the Venombroods at the
-// south hall's entry): the two packs that straddle the walk, the `to` moved off 49114's spawn, the swept north corridor,
-// the 1173080 split and the 49421 group's radius. The south hall's pulls 14-17 keep their existing stands (not touched).
+// TestZulGurubJindoCorridorClearOfLaterPacks covers the Jin'do corridor through the Venombrood pull (the south hall's
+// entry): the two packs that straddle the walk, the `to` moved off 49114's spawn, the swept north corridor and the
+// 1173080 split. The hall's east side (the honour guard, the north camp's east four and the two lone mistresses) has no
+// pre-boss row since the walk-38 review: they are unknown to this sweep (the boss row owns them, see zg_w38_test.go),
+// so the corridor's own rows keep the full 20 and 19.5 yd rules.
 func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 	p, cs := zgLoadPlanAndExport(t)
 	leg := p.Legs[6]
 	packs := zgPacks(t, leg, cs)
-	// The hall's camp rows (5-11) are pinned by zg_w38_test.go (the bodies against each row's ceiling and
-	// Jin'do out of every pre-boss pull) and zg_w37_test.go (each guard row's stand is inside the tank's shot
-	// of its whole pack and 35+ yd from Jin'do); their stands sit 14-30 yd from their own packs' neighbours
-	// by necessity, outside this sweep's 19.5 yd own-pack band.
-	zgCheckStands(t, "jindo_the_hexxer", leg, packs, true, 4)
+	// The corridor's own rows (groups 0-3) keep the generic stand sweep. The hall's camp rows (4-6) cannot:
+	// a stand pull's pack closes to its stand and a plain pull's party point is its pack's centroid, so the
+	// 19.5 yd own-pack band does not apply to them; zgCheckHallRows below checks what does (the tank's shot,
+	// the row's reach and 20 yd from every later pack). The Venombrood row (7) is checked with them.
+	zgCheckStands(t, "jindo_the_hexxer", leg, packs, true, 3)
+	zgCheckHallRows(t, leg, packs)
 	// the order: the corridor packs 49741 and 49119 first, then 49114 and west; the Jin'do fix drops the
 	// Sacrificed Troll pack (group 8 on the old base: respawn 10 s, wasted pull) and reroutes the walk
 	// east of the pit, up to 49387-96's pack (group 11)
@@ -926,10 +932,7 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 		{49397, 49398, 49399, 49400}, // 4
 		{49373, 49374, 49375, 49376, 49377, 49378, 49379, 49380, 49381, 49382}, // 5
 		{49363}, {1173082}, // 6, 7 (walk 38: the 10-unit 49363 camp from its south stand, then the 4-unit 1173082 formation; the 20 yd apart camps cannot be split)
-		{49421},                               // 8 (walk 38: the guard first, then the north camp; the guard's stand is 33+ yd from the camp)
-		{49383, 49384, 49385, 49386, 1173080}, // 9 (walk 36: the two north packs are one pull; walk 38: pulled after the guard, from its south stand)
-		{49403}, {49402},                      // 10, 11 (walk 37: one row each: a stand in shot of both is at most 34.8 yd from Jin'do)
-		{51875}, // 12 (the Venombrood pack; walk 36 dropped the -11603 -1229 pull beside the respawn pit)
+		{51875}, // 8 (the Venombrood pack; walk 36 dropped the -11603 -1229 pull beside the respawn pit. The honour guard, the north camp's east four and the lone mistresses follow it as the boss row's adds, review H1/H2)
 	}
 	if len(packs) < len(want) {
 		t.Fatalf("%d pull groups, want at least %d", len(packs), len(want))
@@ -956,53 +959,25 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 	if dist(leg.To, to) > 0.01 {
 		t.Errorf("the leg's `to` %.1f %.1f %.1f is not the first stand %.1f %.1f %.1f", leg.To.X, leg.To.Y, leg.To.Z, to.X, to.Y, to.Z)
 	}
-	// the 49421 group's circle must not reach Jin'do or another group's spawns. Found by formation, not by index:
-	// walk 36 merged the two north packs into one and pulled the honour guard first, so the indices after 7 moved.
-	guard := -1
+	// The hall's east side is no pre-boss row (review H1/H2): the 49421 formation and the two lone
+	// mistresses must belong to no pull group of the leg, and the leg must hold no row whose stand stands
+	// inside Jin'do's 35 yd reach. zg_w38_test.go pins that they are the boss row's adds.
 	for gi := range leg.PullGroups {
 		for _, c := range packs[gi] {
-			if c.GUID == 49421 {
-				guard = gi
+			if c.GUID == 49421 || c.GUID == 49402 || c.GUID == 49403 {
+				t.Errorf("pull group %d holds %s %d: the hall's east side is pulled with Jin'do, never before him", gi, c.Name, c.GUID)
 			}
-		}
-	}
-	if guard < 0 {
-		t.Fatal("no pull group holds the 49421 honour-guard formation")
-	}
-	g := leg.PullGroups[guard]
-	var cen dungeon.Point
-	for _, c := range packs[guard] {
-		cen.X += c.Pos.X
-		cen.Y += c.Pos.Y
-		cen.Z += c.Pos.Z
-	}
-	cn := float32(len(packs[guard]))
-	cen.X, cen.Y, cen.Z = cen.X/cn, cen.Y/cn, cen.Z/cn
-	for _, c := range packs[guard] {
-		if d := dist(cen, c.Pos); d > float64(g.Radius)+3 {
-			t.Errorf("the honour-guard pull is %.1f yd from its own %s %d, radius %g + 3", d, c.Name, c.Entry, g.Radius)
 		}
 	}
 	if boss := leg.Boss; boss != nil {
-		if d := dist(cen, boss.Position); d <= float64(g.Radius)+3 {
-			t.Errorf("the honour-guard circle is %.1f yd from Jin'do at %.1f %.1f %.1f: the pull would wake him (radius %g + 3)", d, boss.Position.X, boss.Position.Y, boss.Position.Z, g.Radius)
-		}
-		// and no other pack's spawn inside the circle
-		for gi := range leg.PullGroups {
-			if gi == guard {
-				continue
-			}
-			for _, c := range packs[gi] {
-				if d := dist(cen, c.Pos); d <= float64(g.Radius) {
-					t.Errorf("the honour-guard circle (radius %g) holds %s %d of pull group %d at %.1f yd", g.Radius, c.Name, c.Entry, gi, d)
-				}
-			}
+		if len(boss.First) == 0 {
+			t.Error("the Jin'do boss row has no First entries: its guard and mistresses are not scoped to it")
 		}
 	}
 	parties := zgParties(t, p, 6)
 	last := -1
 	for i, q := range parties {
-		if q.Turn && q.Group == 12 { // the 51875 Venombrood pull closes the corridor (group 13 before walk 36's merge and the pit pack's drop, 10 before walk 37's two rows)
+		if q.Turn && q.Group == 8 { // the 51875 Venombrood pull closes the corridor (group 8 after the walk-38 restaging)
 			last = i
 			break
 		}
@@ -1021,12 +996,93 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 		}
 		zgWriteRoutes(t, p, pl, w)
 	}
-	// The Jin'do hall's knock (plan groups 5-11) is pinned by the live-flag walks in zg_w37_test.go and
-	// zg_w38_test.go: its packs stand 8-30 yd from each other and no route between its stands keeps 20 yd.
-	// The corridor's own rows (0-4 and 12-17) keep the 20 yd rule.
-	hall := func(i int) bool {
-		q := w.Parties[i].P
+	// The hall's three camp rows (4-6) are inside the sweep now: the walk-38 review's staging (the south
+	// approach into the 49363 stand, the 1173082 camp pulled at its own centroid) keeps each walk 20 yd
+	// from every pack pulled later. Only the rule that a walk must not enter the pack it is about to pull
+	// is left out inside the hall: a plain pull's party point is its pack's centroid (groups 4 and 5) and
+	// a stand pull's stand sits inside its pack (group 6), so those walks end inside a pack by design.
+	hall := func(q dungeon.Point) bool {
 		return q.X >= -11630 && q.X <= -11515 && q.Y >= -1370 && q.Y <= -1235
 	}
-	zgCheckWalkExcept(t, p, pl, w, packs, hall)
+	ownApproach := func(i int) bool {
+		return hall(w.Parties[i].P) && hall(w.Parties[i+1].P)
+	}
+	zgCheckWalkExcept(t, p, pl, w, packs, nil, ownApproach)
+}
+
+// zgCheckHallRows is the Jin'do hall's own stand rule, per group (the walk-38 review's L2: the generic
+// zgCheckStands sweep stops at the corridor because a stand pull's stand sits inside its own pack by
+// design, and a plain pull's party point is its pack's centroid). For each hall row (the three camps and
+// the Venombrood pull) it checks:
+//   - a stand pull's last approach is inside the run leader's 28.5 yd shot of every unit of its pack with
+//     line of sight, and within 50 yd of the row's point (the run leader sees the point from its stand);
+//   - a plain pull's point is on its pack (its centroid, radius covering it);
+//   - the walk from the previous stand stays >= 20 yd from every pack pulled later (the route-aggro rule
+//     at the plan level, no mmaps).
+func zgCheckHallRows(t *testing.T, leg dungeon.Leg, packs [][]creature) {
+	t.Helper()
+	pl := zgPlannerOrNil(t)
+	if pl != nil {
+		defer pl.Close()
+	}
+	for gi := 4; gi < len(leg.PullGroups); gi++ {
+		g := leg.PullGroups[gi]
+		var cen dungeon.Point
+		for _, q := range g.Positions {
+			cen.X += q.X
+			cen.Y += q.Y
+			cen.Z += q.Z
+		}
+		n := float32(len(g.Positions))
+		cen.X, cen.Y, cen.Z = cen.X/n, cen.Y/n, cen.Z/n
+		if g.StandPull {
+			if len(g.Approach) == 0 {
+				t.Errorf("jindo_the_hexxer pull group %d: a stand pull with no stand", gi)
+				continue
+			}
+			stand := g.Approach[len(g.Approach)-1]
+			if d := dist(stand, cen); d > zgCentreYd {
+				t.Errorf("jindo_the_hexxer pull group %d: stand is %.1f yd from the row's point, want <= %g", gi, d, zgCentreYd)
+			}
+			for _, c := range packs[gi] {
+				if d := dist(stand, c.Pos); d > zgW37TankShotYd {
+					t.Errorf("jindo_the_hexxer pull group %d: %s %d is %.1f yd from the stand, past the %g yd shot: the row plain-pulls", gi, c.Name, c.GUID, d, zgW37TankShotYd)
+				}
+				if pl != nil {
+					r, err := pl.Raycast(309, navmesh.Vec3{stand.X, stand.Y, stand.Z + 1.5}, navmesh.Vec3{c.Pos.X, c.Pos.Y, c.Pos.Z + 1})
+					if err != nil || !r.Known || !r.Clear {
+						t.Errorf("jindo_the_hexxer pull group %d: no line of sight from the stand to %s %d", gi, c.Name, c.GUID)
+					}
+				}
+			}
+		} else if len(packs[gi]) == 0 {
+			t.Errorf("jindo_the_hexxer pull group %d: a plain pull that owns nothing", gi)
+		}
+		// the walk in: through the row's approach points, from the previous row's stand (or point), and
+		// >= 20 yd from every pack pulled later (the exported move rows, straight between them)
+		from := cen
+		if gi > 0 {
+			pg := leg.PullGroups[gi-1]
+			if len(pg.Approach) > 0 {
+				from = pg.Approach[len(pg.Approach)-1]
+			} else {
+				from = pg.Positions[0]
+			}
+		}
+		stops := append([]dungeon.Point(nil), g.Approach...)
+		if len(stops) == 0 {
+			stops = []dungeon.Point{cen}
+		}
+		for _, to := range stops {
+			for _, c := range zgLater(packs, gi) {
+				for _, q := range zgSamplesAlong(from, to, zgSampleStep) {
+					if d := dist(q, c.Pos); d < zgLaterYd {
+						t.Errorf("jindo_the_hexxer pull group %d: the walk (%.1f %.1f -> %.1f %.1f) passes %.1f yd from %s %d of a later group, want >= %g", gi, from.X, from.Y, to.X, to.Y, d, c.Name, c.GUID, zgLaterYd)
+						break
+					}
+				}
+			}
+			from = to
+		}
+	}
 }
