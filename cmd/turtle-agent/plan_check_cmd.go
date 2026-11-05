@@ -143,7 +143,8 @@ type planLintReport struct {
 // lintOrder is the order the lints are counted and printed in.
 var lintOrder = []string{planlint.LintWater, planlint.LintOffFloor, planlint.LintEdge, planlint.LintLedge,
 	planlint.LintShortHop, planlint.LintAggro, planlint.LintBossAggro, planlint.LintPatrol, planlint.LintReach, planlint.LintHop,
-	planlint.LintArrival, planlint.LintClimb, planlint.LintJoiners}
+	planlint.LintArrival, planlint.LintClimb, planlint.LintJoiners,
+	planlint.LintPathRatio, planlint.LintNoPath, planlint.LintZJump, planlint.LintBacktrack, planlint.LintLongHop}
 
 // lintErrors counts the findings the lints call errors: they fail plan-check without --strict.
 func lintErrors(fs []planlint.Finding) int {

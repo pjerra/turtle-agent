@@ -29,7 +29,7 @@ func bossStep(entry uint32) planexport.StepRow {
 func TestBossAggroFlagsPathPastOssirian(t *testing.T) {
 	w := bossWorld()
 	b := bossStep(15339)
-	rows := rowsOf(move(100, 0, 0), move(9, 0, 0), move(60, 0, 0), b)
+	rows := rowsOf(move(65, 0, 0), move(9, 0, 0), move(60, 0, 0), b)
 	fs := lintOne(t, rows, fakeNav{}, w)
 	wantOnly(t, fs, LintBossAggro)
 	if fs[0].Step != 2 {
@@ -78,7 +78,7 @@ func countLint(t *testing.T, rows planexport.Rows, w *worldspawn.World, lint str
 func TestBossApproachExempt(t *testing.T) {
 	w := bossWorld()
 	b := bossStep(15339)
-	if fs := lintOne(t, rowsOf(move(100, 0, 0), move(9, 0, 0), b), fakeNav{}, w); len(fs) != 0 {
+	if fs := lintOne(t, rowsOf(move(65, 0, 0), move(9, 0, 0), b), fakeNav{}, w); len(fs) != 0 {
 		t.Fatalf("approach findings %v, want none", fs)
 	}
 }

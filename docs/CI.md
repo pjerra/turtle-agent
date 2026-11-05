@@ -23,7 +23,9 @@ It downloads the server's navmesh files from the **private** `pjerra/tb-server-d
   `live-checked` or `mapped` (“live or prep”: a `draft` has not had its mapping walk and is left out of the navmesh gate).
 
 The gate fails only on a point failure (plan-check's navmesh FAIL: a point unreachable, too far, or needing a mapping
-walk). Every error-severity placement lint (`water`, `off-floor`, `edge`, `ledge`, `short hop`, `aggro`, `boss_aggro`, `patrol`,
+walk) or a NEW error-severity route lint (`path_ratio`, `no_path`, `zjump`): `tools/ci/route-baseline.txt` lists the
+route errors the gate already knows, so only findings it does not list fail; `--refresh-baseline` rewrites the file
+after a route fix round (commit it with the plan). Every error-severity placement lint (`water`, `off-floor`, `edge`, `ledge`, `short hop`, `aggro`, `boss_aggro`, `patrol`,
 `joiners`, `reach`, `arrival`, `hop_len`, `climb_anchor`) is printed as `WARN <plan>: N placement lint finding(s) do not
 fail the gate` with a count per kind, and the job stays green (lead's decisions, 2026-11-03). `--strict-lints` on
 `plan-check-all.sh` makes every lint error fail the job, which is how to see them as blockers before a plan's fix round.

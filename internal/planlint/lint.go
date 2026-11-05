@@ -151,6 +151,8 @@ func Lint(rows planexport.Rows, nav Nav, opt Options) ([]Finding, error) {
 		out = append(out, c.checkBothEndsWater(i, s)...)
 		out = append(out, c.checkRiverBelow(i, s)...)
 		out = append(out, c.checkJoiners(i, s)...)
+		out = append(out, c.checkRoutePath(i, s)...)
+		out = append(out, c.checkRouteGeometry(i, s)...)
 	}
 	return out, nil
 }
