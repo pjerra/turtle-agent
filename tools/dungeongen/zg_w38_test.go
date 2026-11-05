@@ -540,15 +540,21 @@ func TestZgW38JeklikPatrolStands(t *testing.T) {
 	}
 }
 
-// TestZgW38JeklikCampsClearEveryLoop is the walk-38 review's M3: the two Jeklik camp stands (the south
-// headhunter camp 49135 and the north camp that holds the witch doctor 49131 and the bat formation 49130)
-// are tested against ALL of the leg's patrol loops, not only the one their row carries. A plan group holds
-// one patrol block, so the loops come from movement.tsv: 49131's 112.6 s loop (21 points) and 49130's
-// 7-point loop were never read from the south stand, which sat 21.5 yd from 49131's loop (20 yd detection
-// + 3 yd spread is the minimum). The rule is zgCheckStands': a camp stand keeps 23 yd from every waypoint of
-// every unpulled patrol of a LATER group. It fails on dev (the south stand -12219 -1491 stands 21.5 yd from
-// 49131's loop); the plan pulls the 49185 bat formation before the north camp and stages the south camp
-// outside the other loops.
+// TestZgW38JeklikCampsClearEveryLoop is the walk-38 review's M3 and the round-2 A-5: the Jeklik plateau's
+// camp rows (the south headhunter camp 49135, the north witch-doctor camp 49131 with its bat formation 49130,
+// and the north bat formation 49185) are tested against ALL of movement.tsv's loops, owned by a plan row or
+// not, and their walk-in segments too, not only the stand. A plan row carries one patrol block, so a stand
+// that only reads its own loop misses the others: 49131's 112.6 s loop (21 points) and 49130's 7-point loop
+// were never read from the south stand, which sat 21.5 yd from 49131's loop (20 yd detection + 3 yd spread is
+// the minimum). The rule: a camp row's stand and every 2 yd sample of its walk-in (from the previous row's
+// stand through its own approach points) keep 23 yd from every waypoint of every loop not pulled yet, except
+// the row's own pack and the next row's own pack (a patrol stand sits inside its own loop by design: the run
+// leader waits there for a waypoint to come into the 28.5 yd shot), and except a waypoint more than
+// aggroest.FloorDz above the sample (the flying Bloodseeker Bats 91548-91555 fly 13-30 yd over the plateau;
+// the run leader's own aggro ring reads that 12 yd vertical band, so they never join a ground pull). It fails
+// on dev (the bat formation 49185 has no row or stand there, and the round-1 south stage -12219 -1491 stood
+// 21.5 yd from 49131's loop); the plan pulls the 49185 bat formation before the north camp and stages the
+// south camp outside the other loops.
 func TestZgW38JeklikCampsClearEveryLoop(t *testing.T) {
 	p, cs := zgLoadPlanAndExport(t)
 	leg := p.Legs[0]
@@ -557,39 +563,74 @@ func TestZgW38JeklikCampsClearEveryLoop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	loops := map[int][]struct {
-		c    creature
-		loop []dungeon.Point
-	}{}
+	owner := map[uint64]int{}
 	for gi, pk := range packs {
-		seen := map[uint64]bool{}
 		for _, c := range pk {
-			if !c.Patrol || seen[c.GUID] {
-				continue
-			}
-			seen[c.GUID] = true
-			if lp, ok := movement[c.GUID]; ok && len(lp) > 0 {
-				loops[gi] = append(loops[gi], struct {
-					c    creature
-					loop []dungeon.Point
-				}{c, lp})
+			if _, ok := owner[c.GUID]; !ok {
+				owner[c.GUID] = gi
 			}
 		}
 	}
+	// The camp rows: every group that holds one of the plateau's camp formations (49135, 49131, 49130) or
+	// the north bat formation 49185.
 	var camps []int
-	for gi := range leg.PullGroups {
-		holds := map[uint64]bool{}
-		for _, c := range packs[gi] {
-			if c.GUID == 49131 || c.GUID == 49135 || c.GroupLeader == 49131 || c.GroupLeader == 49135 {
-				holds[c.GUID] = true
+	for gi, pk := range packs {
+		for _, c := range pk {
+			lead := c.GroupLeader
+			if lead == 0 {
+				lead = c.GUID
+			}
+			if c.GUID == 49131 || c.GUID == 49135 || c.GUID == 49185 || lead == 49131 || lead == 49130 || lead == 49185 {
+				camps = append(camps, gi)
+				break
 			}
 		}
-		if len(holds) > 0 {
-			camps = append(camps, gi)
-		}
 	}
-	if len(camps) < 2 {
-		t.Fatalf("the leg's camp rows are %v, want the south (49135) and north (49131 + 49130) camps", camps)
+	if len(camps) < 3 {
+		t.Fatalf("the leg's camp rows are %v, want the south (49135), the north camp (49131 + 49130) and the bat formation 49185", camps)
+	}
+	own := func(gi int, guid uint64) bool {
+		for _, c := range packs[gi] {
+			if c.GUID == guid {
+				return true
+			}
+		}
+		return false
+	}
+	byGUID := map[uint64]creature{}
+	for _, c := range cs {
+		byGUID[c.GUID] = c
+	}
+	check := func(gi int, what string, q dungeon.Point) {
+		for guid, loop := range movement {
+			if o, ok := owner[guid]; ok && o <= gi {
+				continue // pulled and dead by now
+			}
+			if own(gi, guid) {
+				continue // this row's own patrol: the stand is in its loop by design
+			}
+			if gi+1 < len(packs) && own(gi+1, guid) {
+				continue // the next pull's own patrol: its stand is in its loop by design
+			}
+			for _, w := range loop {
+				if d := math.Abs(float64(w.Z - q.Z)); d > aggroest.FloorDz {
+					continue // a flying loop above the party (the run leader's ring band is 12 yd)
+				}
+				if d := dist(q, w); d < zgLaterYd+zgPatrolSpreadYd {
+					who := fmt.Sprintf("%d", guid)
+					if c, ok := byGUID[guid]; ok {
+						who = fmt.Sprintf("%s %d", c.Name, c.Entry)
+					}
+					owned := "unowned"
+					if o, ok := owner[guid]; ok {
+						owned = fmt.Sprintf("pull group %d", o)
+					}
+					t.Errorf("jindo_the_hexxer pull group %d %s (%.1f %.1f %.1f) is %.1f yd from waypoint %.1f %.1f %.1f of %s's loop (%s), want >= %g: the patrol walks the party",
+						gi, what, q.X, q.Y, q.Z, d, w.X, w.Y, w.Z, who, owned, zgLaterYd+zgPatrolSpreadYd)
+					return
+				}
+			}
+		}
 	}
 	for _, gi := range camps {
 		g := leg.PullGroups[gi]
@@ -598,18 +639,20 @@ func TestZgW38JeklikCampsClearEveryLoop(t *testing.T) {
 			continue
 		}
 		stand := g.Approach[len(g.Approach)-1]
-		for gj := gi + 1; gj < len(leg.PullGroups); gj++ {
-			for _, l := range loops[gj] {
-				nearest := math.Inf(1)
-				for _, q := range l.loop {
-					if d := dist(stand, q); d < nearest {
-						nearest = d
-					}
-				}
-				if nearest < zgLaterYd+zgPatrolSpreadYd {
-					t.Errorf("pull group %d stand (%.1f %.1f %.1f) is %.1f yd from a waypoint of %s %d's loop (pull group %d), want >= %g: the patrol walks the party",
-						gi, stand.X, stand.Y, stand.Z, nearest, l.c.Name, l.c.GUID, gj, zgLaterYd+zgPatrolSpreadYd)
-				}
+		check(gi, "stand", stand)
+		from := leg.To
+		if gi > 0 {
+			prev := leg.PullGroups[gi-1]
+			if len(prev.Approach) > 0 {
+				from = prev.Approach[len(prev.Approach)-1]
+			} else {
+				from = prev.Positions[0]
+			}
+		}
+		stops := append([]dungeon.Point{from}, g.Approach...)
+		for k := 0; k+1 < len(stops); k++ {
+			for _, q := range zgSamplesAlong(stops[k], stops[k+1], zgSampleStep) {
+				check(gi, "walk-in", q)
 			}
 		}
 	}
