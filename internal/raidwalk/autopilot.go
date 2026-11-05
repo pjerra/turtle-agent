@@ -270,8 +270,8 @@ func RunStopped(reason string) bool {
 
 // autoBossIDs is the id set of a boss the walk reports under another entry than a goal may name. Zul'Gurub's Thekal
 // is the case walk 39 found: his boss row and the summary's kill are 14599 (the plan's boss entry, phase 2), and a
-// goal of boss:14509 (his reborn form) never matched, so t7 restarted a raid whose boss was already dead (its kill at
-// 05:06 local was followed by a restart 9 s later and then an ESCALATE at 04:47:56Z). The plan's boss.phase_entries is
+// goal of boss:14509 (his reborn form) never matched, so t7 restarted a raid whose boss was already dead (t7-1's kill
+// at 04:06:06Z was followed by a restart launch at 04:06:42Z, and t7 escalated at 04:47:56Z). The plan's boss.phase_entries is
 // not the set: it also lists Thekal's Zulian Guardians 15068, which exist several at once and are never the boss's own
 // unit (the walk's bossUnits excludes them). Only entries the evidence shows as the same boss go here.
 var autoBossIDs = map[uint32][]uint32{
