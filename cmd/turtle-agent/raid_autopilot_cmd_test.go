@@ -1515,3 +1515,51 @@ func TestAutoAdoptedRunYieldIsClean(t *testing.T) {
 		t.Fatalf("a dead adopted walk was SIGKILLed:\n%s", f.events())
 	}
 }
+
+// M2: a YIELD does not tear down the stale slot dirs of refused and done ids, and the synthetic last attempt from
+// reconcile is torn down already.
+func TestAutoYieldSkipsRefusedAndDoneIDs(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.target("b srv 2 zg-b boss:14515 -- zul_gurub --sql /zg.sql")
+	f.lease("someone-else", "held")
+	for _, id := range []string{"a-1", "b-1"} {
+		out := filepath.Join(f.walk, id)
+		if err := os.MkdirAll(filepath.Join(out, "slot"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(out, "slot", "slot.json"), []byte(fmt.Sprintf(`{"server":"srv","slot":"1","holder":"someone-else","slots_path":%q}`, f.slotsPath)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	saved := autoSavedState{Format: autoStateFormat, Version: autoStateVersion, IDs: []autoSavedID{
+		{ID: "a", Goal: 0, OutDir: filepath.Join(f.walk, "a-1")},
+		{ID: "b", Goal: 0, Done: true, OutDir: filepath.Join(f.walk, "b-1")},
+	}}
+	raw, _ := json.Marshal(saved)
+	if err := os.WriteFile(filepath.Join(f.walk, autoStateFile), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := f.supervisor()
+	for _, st := range s.states {
+		st.mu.Lock()
+		tornDown := st.last != nil && st.last.tornDown
+		st.mu.Unlock()
+		if !tornDown {
+			t.Fatalf("the synthetic last attempt of %s is not torn down", st.id)
+		}
+	}
+	s.states[0].mu.Lock()
+	refused := s.states[0].refused
+	s.states[0].mu.Unlock()
+	if !refused {
+		t.Fatalf("the foreign slot did not refuse a:\n%s", f.events())
+	}
+	s.shutdown("YIELD")
+	if got := len(f.teardowns()); got != 0 {
+		t.Fatalf("a YIELD tore down the stale slots of refused/done ids (%d teardown lines)", got)
+	}
+	if _, err := os.Stat(filepath.Join(f.walk, autoYieldDone)); err != nil {
+		t.Fatalf("no YIELD-DONE although nothing needed a teardown:\n%s", f.events())
+	}
+}

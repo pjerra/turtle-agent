@@ -1569,8 +1569,10 @@ func (s *autoSupervisor) reconcile() error {
 				st.lastOut = sv.OutDir
 			}
 			if sv.LastStep > 0 || sv.OutDir != "" {
-				// The last attempt, as the checkpoint saw it: its step is where a restart starts.
-				st.last = &autoRun{out: sv.OutDir, slot: t.Slot, reuse: sv.Reuse, lastStep: sv.LastStep, exited: true, adopted: true, pidN: sv.ChildPID}
+				// The last attempt, as the checkpoint saw it: its step is where a restart starts. It is torn
+				// down already (the checkpoint writes only after a verified teardown), so a YIELD must not tear
+				// the stale slot dir down again.
+				st.last = &autoRun{out: sv.OutDir, slot: t.Slot, reuse: sv.Reuse, lastStep: sv.LastStep, exited: true, adopted: true, pidN: sv.ChildPID, tornDown: true}
 			}
 		}
 		done := st.done || st.escalated
@@ -1697,13 +1699,16 @@ func (s *autoSupervisor) shutdown(why string) {
 	for _, st := range s.states {
 		st.mu.Lock()
 		r := st.run
-		escalated := st.escalated
+		escalated, refused, done := st.escalated, st.refused, st.done
 		st.mu.Unlock()
 		if escalated {
 			s.event(st.id, "escalated", "the slot is left alone: no teardown, no relaunch")
 			continue
 		}
-		if r == nil {
+		// A refused id never launched, and a done id's slot was torn down when its goal was met: neither has a run
+		// of this supervisor to stop, and tearing their stale slot dir down would use --release-anyway on a slot
+		// another agent may hold (M2).
+		if refused || done || r == nil {
 			continue
 		}
 		s.event(st.id, "shutdown", why)
@@ -1724,14 +1729,16 @@ func (s *autoSupervisor) shutdown(why string) {
 		if target == nil {
 			target = st.last
 		}
-		escalated := st.escalated
+		escalated, refused, done := st.escalated, st.refused, st.done
 		st.mu.Unlock()
 		if escalated {
 			// An escalated slot is left alone: it is not clean, so no YIELD-DONE may claim the run ended.
 			clean = false
 			continue
 		}
-		if target == nil {
+		// Only a run this supervisor still owns is torn down: a refused id never launched, and a done id's last
+		// attempt was torn down when its goal was met (M2).
+		if refused || done || target == nil {
 			continue
 		}
 		wg.Add(1)

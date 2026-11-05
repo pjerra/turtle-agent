@@ -2868,7 +2868,9 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   so a second start on the same walk dir refuses (exit 2) instead of running beside it — the pid file is
   informational. The OS drops the lock when the process ends, so a crash leaves no stale guard. `--foreground` runs
   it in place. A `YIELD` file in the walk dir (checked at least once a second) tears every run down, releases every
-  lease, writes `YIELD-DONE` and exits 0; SIGINT/SIGTERM does the same without `YIELD-DONE`. A stale `YIELD-DONE` is
+  lease, writes `YIELD-DONE` and exits 0; SIGINT/SIGTERM does the same without `YIELD-DONE`. A refused id (nothing
+  was launched) and a done id (its slot was torn down when the goal was met) are skipped: their stale slot dirs are
+  never torn down by a YIELD, and neither blocks `YIELD-DONE`. A stale `YIELD-DONE` is
   removed at start and before a new YIELD's shutdown; a `YIELD` whose teardown does not verify writes no `YIELD-DONE`
   (the event log says why).
 - **Dry run.** `--dry-run` validates `targets.txt` and prints each goal's first command; nothing is launched.
