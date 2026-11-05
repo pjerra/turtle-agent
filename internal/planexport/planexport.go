@@ -301,6 +301,37 @@ type Result struct {
 
 var planNameRe = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
 
+// ShadowNameRe is a shadow plan name (`plan-export --as`): the lab's side-by-side experiment arm (<plan>_x1).
+// A shadow maps to its base plan's json and map (see BasePlan), so it carries no dash: ^[a-z0-9_]+$.
+var ShadowNameRe = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
+
+// BasePlan maps a shadow plan name to its base plan: zul_gurub_x1 -> zul_gurub (the file and the map behind the
+// shadow). ok is false for a plain plan name (not only _x1/_x2: the lab seeds exactly those two). A dash never maps:
+// shadow names carry none.
+func BasePlan(name string) (base string, ok bool) {
+	for _, s := range []string{"_x1", "_x2"} {
+		if b, found := strings.CutSuffix(name, s); found && b != "" && ShadowNameRe.MatchString(name) && !strings.Contains(b, "-") {
+			return b, true
+		}
+	}
+	return "", false
+}
+
+// As renames built rows to a shadow plan name: every table row's plan column moves, nothing else (the map, the row
+// shapes, the counts). The migration then DELETES only the shadow's rows: the base plan's rows survive (reset-to-copy,
+// never delete, so the reload always finds every plan; see spec piece 4).
+func As(r Rows, name string) Result {
+	r.Plan.Plan = name
+	r.Plan.Source = clip("shadow of "+r.Plan.Source, MaxSource)
+	for i := range r.Legs {
+		r.Legs[i].Plan = name
+	}
+	for i := range r.Steps {
+		r.Steps[i].Plan = name
+	}
+	return Result{Rows: r}
+}
+
 // Refusal says why a plan is not exported, or "": a draft plan is a skeleton that has had no mapping walk and must not be put on the
 // server as a route to run, unless the caller says allowDraft.
 func Refusal(p *dungeon.Plan, allowDraft bool) string {

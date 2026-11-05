@@ -68,6 +68,34 @@ const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--
 // raidWalkPlanRe is the plan name as the server knows it (spec 3.1).
 var raidWalkPlanRe = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
 
+// tierRaid is the raid the tier table resolves: a shadow walk hires at its base plan's tier.
+func (w *walk) tierRaid() string {
+	if w.shadowBase != "" {
+		return w.shadowBase
+	}
+	return w.runPlan()
+}
+
+// runPlan is the plan name the server runs: the walk's plan flag, or the loaded plan's name when the flag is
+// empty (unit fixtures build the walk struct directly).
+func (w *walk) runPlan() string {
+	if w.opts.plan != "" {
+		return w.opts.plan
+	}
+	if w.plan != nil {
+		return w.plan.Name
+	}
+	return ""
+}
+
+// shadowBaseOr names the walk's geometry: the base plan of a shadow walk, else the plan itself.
+func (w *walk) shadowBaseOr(plan string) string {
+	if w.shadowBase != "" {
+		return "shadow walk of base plan " + w.shadowBase
+	}
+	return "plan " + plan
+}
+
 // raidWalkSpeedRe is --speed: 1.0 to 3.0 with at most one decimal.
 var raidWalkSpeedRe = regexp.MustCompile(`^[1-3](?:\.[0-9])?$`)
 
@@ -713,6 +741,10 @@ type walk struct {
 	plan   *dungeon.Plan
 	rows   planexport.Rows
 	roster *raidwalk.Roster
+	// shadowBase is the base plan a shadow walk maps to (onyxias_lair for onyxias_lair_x1): the json and map behind
+	// the shadow. "": a plain plan walk.
+	shadowBase string
+	// (shadowBase above; the rows and roster follow it.)
 
 	untilWords []string
 	untilLabel string
@@ -1054,7 +1086,22 @@ func (w *walk) validate() error {
 	path := filepath.Join(w.opts.dir, w.opts.plan+".json")
 	p, err := dungeon.Load(path)
 	if err != nil {
+		// A shadow plan (<plan>_x1) maps to its base plan's file and map: the B dir of piece 5 holds the
+		// shadow file itself (the walk of piece 5 writes it), so the json load above finds it; this
+		// fallback is for a dir that holds only the base plan (the row names still come from --sql).
+		if base, ok := planexport.BasePlan(w.opts.plan); ok {
+			if bp, berr := dungeon.Load(filepath.Join(w.opts.dir, base+".json")); berr == nil {
+				w.shadowBase = base
+				p, err = bp, nil
+			}
+		}
+	}
+	if err != nil {
 		return stopf(exitUsage, "%v", err)
+	}
+	if base, ok := planexport.BasePlan(w.opts.plan); ok && w.shadowBase == "" {
+		// The shadow file itself loaded (the B dir of piece 5): the base plan is still its json and map.
+		w.shadowBase = base
 	}
 	if !p.IsRaid() {
 		return stopf(exitUsage, "raid-walk is for raid plans; a 5-man uses dungeon_run observe")
@@ -1085,17 +1132,17 @@ func (w *walk) validate() error {
 		w.roster = r
 	}
 
-	tier, source, err := raidwalk.ResolveTier(p.Name, w.roster.Tier, w.opts.tier, w.opts.tierOverride)
+	tier, source, err := raidwalk.ResolveTier(w.tierRaid(), w.roster.Tier, w.opts.tier, w.opts.tierOverride)
 	if err != nil {
 		return stopf(exitUsage, "%v", err)
 	}
 	w.roster.Tier = tier
 	w.tierSource = source
 	if source == raidwalk.TierSourceOverride {
-		if min, ok := raidwalk.MinimumTier(p.Name); ok {
-			w.note("tier %d by --tier-override: a comparison, not a tier proof (raid %s's minimum is %d)", tier, p.Name, min)
+		if min, ok := raidwalk.MinimumTier(w.tierRaid()); ok {
+			w.note("tier %d by --tier-override: a comparison, not a tier proof (raid %s's minimum is %d)", tier, w.tierRaid(), min)
 		} else {
-			w.note("tier %d by --tier-override: a comparison, not a tier proof (raid %s has no sourced tier)", tier, p.Name)
+			w.note("tier %d by --tier-override: a comparison, not a tier proof (raid %s has no sourced tier)", tier, w.tierRaid())
 		}
 	}
 
@@ -1128,13 +1175,19 @@ func (w *walk) validate() error {
 	w.bossRule = raidwalk.NewBossRows(p)
 
 	if w.opts.sql != "" {
-		rows, notes, err := readRaidMigration(slots.ExpandTilde(w.opts.sql), w.plan.Name)
+		rows, notes, err := readRaidMigration(slots.ExpandTilde(w.opts.sql), w.opts.plan)
 		if err != nil {
 			return stopf(exitUsage, "%v", err)
+		}
+		if rows.Plan.Map != w.plan.Map {
+			return stopf(exitUsage, "%s is a %s walk: --sql holds map %d, the base plan's map is %d", w.opts.plan, w.shadowBaseOr(w.opts.plan), rows.Plan.Map, w.plan.Map)
 		}
 		w.rows = rows
 		for _, n := range notes {
 			w.note("%s", n)
+		}
+		if w.shadowBase != "" {
+			w.note("shadow %s: base plan %s from %s (%s)", w.opts.plan, w.shadowBase, w.opts.dir, w.plan.Name)
 		}
 	} else {
 		res, err := planexport.Build(p, planexport.Options{})
@@ -1343,7 +1396,7 @@ func (w *walk) validate() error {
 func (w *walk) prepareOut() error {
 	dir := slots.ExpandTilde(w.opts.out)
 	if dir == "" {
-		dir = fmt.Sprintf("raid-walk-%s-%s", w.plan.Name, w.env.now().Format("20060102-150405"))
+		dir = fmt.Sprintf("raid-walk-%s-%s", w.runPlan(), w.env.now().Format("20060102-150405"))
 	}
 	if _, err := os.Lstat(dir); err == nil {
 		return stopf(exitUsage, "--out %s exists: pick a new dir", dir)
@@ -1600,8 +1653,11 @@ func readPatrolsFile(path string) ([]raidwalk.QuietPatrol, []map[string]bool, ui
 
 // printPlan is --dry-run: every line the walk would send, with <hire> placeholders.
 func (w *walk) printPlan(out io.Writer) {
-	fmt.Fprintf(out, "raid-walk %s: dry run, nothing is sent\n", w.plan.Name)
-	src := filepath.Join(w.opts.dir, w.plan.Name+".json")
+	fmt.Fprintf(out, "raid-walk %s: dry run, nothing is sent\n", w.opts.plan)
+	src := filepath.Join(w.opts.dir, w.opts.plan+".json")
+	if w.shadowBase != "" {
+		fmt.Fprintf(out, "shadow %s of base plan %s (map %d; rows from --sql)\n", w.opts.plan, w.shadowBase, w.plan.Map)
+	}
 	fmt.Fprintf(out, "plan %s, map %d, %d legs, %d steps, raid %d\n", src, w.plan.Map, len(w.plan.Legs), len(w.rows.Steps), w.plan.Raid.Size)
 	ot := "-"
 	if len(w.roster.Batches) > 1 && w.roster.Batches[1].Role == raidwalk.RoleOT {
@@ -1703,7 +1759,7 @@ func (w *walk) printPlan(out io.Writer) {
 		fmt.Fprintf(out, "  8c gm-clear: %s pack %d, %d members, around %s %s %s: select each live member by guid, .die, read its death\n",
 			raidwalk.GMClearLabel(pk.Leg, pk.Group), pk.ID, len(pk.Members), num32(pk.Centroid.X), num32(pk.Centroid.Y), num32(pk.Centroid.Z))
 	}
-	start := []string{w.plan.Name}
+	start := []string{w.runPlan()}
 	start = append(start, w.fromWords...)
 	start = append(start, w.untilWords...)
 	if w.opts.speed != 1.0 {
@@ -1798,7 +1854,7 @@ func (w *walk) finish(code int) {
 		}
 	}
 	meta := raidwalk.SummaryMeta{
-		Plan: w.plan.Name, Map: w.plan.Map, Server: w.opts.server, Slot: w.slotNumber(), Character: w.manifest.Character,
+		Plan: w.runPlan(), Map: w.plan.Map, Server: w.opts.server, Slot: w.slotNumber(), Character: w.manifest.Character,
 		Until: w.opts.until, UntilEffective: untilEffective, From: w.opts.from, Speed: w.opts.speed, TestSpeed: w.opts.speed != 1.0,
 		RowsSHA256: rowsSHA256(w.rows), UntilStep: w.untilStep, RunLabel: w.runLabel, SpeedFellBack: w.speedFellBack,
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights, Decisions: w.decisions,

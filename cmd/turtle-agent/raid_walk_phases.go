@@ -856,7 +856,7 @@ func (w *walk) phaseStart(ctx context.Context) error {
 			return err
 		}
 	}
-	args := []string{w.plan.Name}
+	args := []string{w.runPlan()}
 	args = append(args, w.fromWords...)
 	args = append(args, w.untilWords...)
 	if w.opts.speed != 1.0 {
@@ -885,16 +885,16 @@ func (w *walk) phaseStart(ctx context.Context) error {
 			w.note("place: %s", strings.TrimSpace(raidwalk.CleanLine(l)))
 		}
 	}
-	line, ok := firstRunLine(rep.Reply.Lines, w.plan.Name)
+	line, ok := firstRunLine(rep.Reply.Lines, w.runPlan())
 	if !ok {
 		var werr error
-		line, ok, werr = w.waitTBM(ctx, "TBM:RUN|"+w.plan.Name+"|", 15*time.Second)
+		line, ok, werr = w.waitTBM(ctx, "TBM:RUN|"+w.runPlan()+"|", 15*time.Second)
 		if werr != nil {
 			return werr
 		}
 	}
 	if !ok {
-		return stopf(exitRaidWalkFailed, "run start: no TBM:RUN line for %s in 15 s", w.plan.Name)
+		return stopf(exitRaidWalkFailed, "run start: no TBM:RUN line for %s in 15 s", w.runPlan())
 	}
 	return w.checkStartLine(ctx, line)
 }
@@ -1156,7 +1156,7 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 	for _, line := range lines {
 		w.logLine(now, line)
 		st, ok := raidwalk.ParseRun(line)
-		if !ok || st.Plan != w.plan.Name {
+		if !ok || st.Plan != w.runPlan() {
 			continue
 		}
 		if w.rerunStale {
@@ -3356,7 +3356,7 @@ func (w *walk) waitRunStopped(ctx context.Context, timeout time.Duration) (bool,
 			switch {
 			case !ok:
 				why = "the run status answer has no TBM:RUN line"
-			case st.State == tbm.RunNone, st.State == tbm.RunDone && (st.Plan == "" || st.Plan == w.plan.Name):
+			case st.State == tbm.RunNone, st.State == tbm.RunDone && (st.Plan == "" || st.Plan == w.runPlan()):
 				w.logLine(w.env.now(), line)
 				return true, ""
 			case st.State == tbm.RunDone:
@@ -3418,7 +3418,7 @@ func (w *walk) rerunOpenStep(ctx context.Context, openStep int, bossEntry uint32
 	if err := w.env.sleep(ctx, 2*time.Second); err != nil {
 		return nil // interrupted: the phase loop's own ctx check ends the walk; the run is stopped
 	}
-	args := []string{w.plan.Name, "from", "step", strconv.Itoa(openStep)}
+	args := []string{w.runPlan(), "from", "step", strconv.Itoa(openStep)}
 	args = append(args, w.untilWords...)
 	if w.opts.speed != 1.0 {
 		args = append(args, fmt.Sprintf("speed=%.1f", w.opts.speed))
@@ -3486,7 +3486,7 @@ func (w *walk) rerunStartLine(lines []string, openStep int) (string, tbm.RunStat
 	var wrong tbm.RunStatus
 	for _, l := range lines {
 		clean := raidwalk.CleanLine(l)
-		if !strings.HasPrefix(clean, "TBM:RUN|"+w.plan.Name+"|") {
+		if !strings.HasPrefix(clean, "TBM:RUN|"+w.runPlan()+"|") {
 			continue
 		}
 		st, ok := raidwalk.ParseRun(clean)
@@ -3514,7 +3514,7 @@ func (w *walk) rerunStartLine(lines []string, openStep int) (string, tbm.RunStat
 func (w *walk) waitRerunStart(ctx context.Context, openStep int) (string, tbm.RunStatus, string, error) {
 	line, ok, err := w.waitTBMMatch(ctx, 15*time.Second, func(l string) bool {
 		clean := raidwalk.CleanLine(l)
-		if !strings.HasPrefix(clean, "TBM:RUN|"+w.plan.Name+"|") {
+		if !strings.HasPrefix(clean, "TBM:RUN|"+w.runPlan()+"|") {
 			return false
 		}
 		st, ok := raidwalk.ParseRun(clean)
@@ -4835,7 +4835,7 @@ func (w *walk) pollRunRunning(ctx context.Context, step int) (bool, error) {
 			return false, stopf(exitRaidWalkIncident, "wipe at step %d", wipe.Step)
 		}
 	}
-	return w.haveStatus && w.lastStatus.State == tbm.RunRunning && w.lastStatus.Plan == w.plan.Name, nil
+	return w.haveStatus && w.lastStatus.State == tbm.RunRunning && w.lastStatus.Plan == w.runPlan(), nil
 }
 
 // nearWipeStop says whether a paused note is the run stopping after a wipe or a near wipe (walk 13 s7: "19 dead:

@@ -71,7 +71,12 @@ func planCheckCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "plan-check: %q is not a plan name (a-z, 0-9, _ and -)\n", n)
 			return exitUsage
 		}
-		p, err := dungeon.Load(filepath.Join(*dir, n+".json"))
+		// A shadow name (<plan>_x1) maps to its base plan's file and map (see planexport.BasePlan).
+		checkN, loadN := n, n
+		if base, ok := planexport.BasePlan(n); ok {
+			loadN = base
+		}
+		p, err := dungeon.Load(filepath.Join(*dir, loadN+".json"))
 		if err != nil {
 			fmt.Fprintf(stderr, "plan-check: %v\n", err)
 			return exitUsage
@@ -91,6 +96,9 @@ func planCheckCmd(args []string, stdout, stderr io.Writer) int {
 			return exitUsage
 		}
 		rep := planCheckReport{PlanCheck: *res, Lints: lints, LintCounts: planlint.Counts(lints), LintNote: note}
+		if checkN != loadN {
+			rep.LintNote = strings.TrimSpace(rep.LintNote + "; shadow " + checkN + " of base plan " + loadN)
+		}
 		results = append(results, rep)
 		failed = failed || !res.OK() || *strict && len(lints) > 0 || lintErrors(lints) > 0
 		if *asJSON {

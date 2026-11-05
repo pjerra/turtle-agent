@@ -19,7 +19,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/planexport"
 )
 
-const planExportUsage = "usage: turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--gm-cross-direct] [--approach-hops] [--floor-aware] [--skip-legs NAME,...] [--with-optional NAME,...] [--with-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--force] --out FILE|DIR (<plan>... | --all-live)"
+const planExportUsage = "usage: turtle-agent plan-export [--dir dungeons] [--allow-draft] [--drop-companions-loot] [--carrier-chests] [--gm-cross-direct] [--approach-hops] [--floor-aware] [--skip-legs NAME,...] [--with-optional NAME,...] [--with-legs NAME,...] [--mmaps DIR] [--rev SHA] [--stamp YYYYMMDDHHMMSS] [--as NAME] [--force] --out FILE|DIR (<plan>... | --all-live)"
 
 // migrationName is what a TortoiseBots world migration is called (data/sql/world/).
 var migrationName = regexp.MustCompile(`^\d{14}_world\.sql$`)
@@ -45,6 +45,7 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 	skipLegs := fs.String("skip-legs", "", "leg names (comma list) left out of the rows, each with a warning; the later legs close up. An unknown name is refused")
 	withOptional := fs.String("with-optional", "", "optional leg names (comma list) written into the rows anyway (Zul'Farrak's gahzrilla), each with a warning: the item the leg needs is the operator's to give to the lead bot before .bot run start (a GM .additem); a name that is no optional leg is refused")
 	withLegs := fs.String("with-legs", "", "skip_export leg names (comma list) written into the rows anyway (Zul'Farrak's farraki_arena, zeljeb), each with a warning; a name that is no skip_export leg is refused")
+	asName := fs.String("as", "", "write the plan under this shadow name (every row's plan column): a side-by-side experiment arm (the lab's <plan>_x1); refused past 32 chars or outside a-z 0-9 _; never with --all-live")
 	force := fs.Bool("force", false, "let --out replace an existing file (never edit a migration that is applied)")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -66,6 +67,15 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 	case *carrierChests && !*dropLoot:
 		fmt.Fprintln(stderr, planExportUsage)
 		return fail("--carrier-chests needs --drop-companions-loot (the companions_loot-false leg's chest rows are not exported without it)")
+	case *asName != "" && *allLive:
+		fmt.Fprintln(stderr, planExportUsage)
+		return fail("--as takes one named plan, not --all-live: a batch export never mixes shadows in")
+	case *asName != "" && len(names) != 1:
+		fmt.Fprintln(stderr, planExportUsage)
+		return fail("--as takes one named plan, not %d", len(names))
+	case *asName != "" && !planexport.ShadowNameRe.MatchString(*asName):
+		fmt.Fprintln(stderr, planExportUsage)
+		return fail("--as %q: a shadow name is 1-32 of a-z 0-9 _ (no dash: the shadow maps to its base plan's json and map)", *asName)
 	}
 	if *allLive {
 		m, err := filepath.Glob(filepath.Join(*dir, "*.json"))
@@ -177,9 +187,17 @@ func planExportCmd(args []string, stdout, stderr io.Writer) int {
 		for _, w := range res.Warnings {
 			fmt.Fprintf(stderr, "plan-export: %s: %s\n", n, w)
 		}
-		all = append(all, res.Rows)
-		total += res.Rows.Count()
-		fmt.Fprintf(stdout, "%s: map %d, %d legs, %d steps (%d rows)\n", n, p.Map, len(res.Rows.Legs), len(res.Rows.Steps), res.Rows.Count())
+		rows := res.Rows
+		if *asName != "" {
+			rows = planexport.As(rows, *asName).Rows
+		}
+		all = append(all, rows)
+		total += rows.Count()
+		if *asName != "" {
+			fmt.Fprintf(stdout, "%s: map %d, %d legs, %d steps (%d rows) as %s\n", n, p.Map, len(rows.Legs), len(rows.Steps), rows.Count(), *asName)
+		} else {
+			fmt.Fprintf(stdout, "%s: map %d, %d legs, %d steps (%d rows)\n", n, p.Map, len(rows.Legs), len(rows.Steps), rows.Count())
+		}
 		if res.Cut != "" {
 			fmt.Fprintf(stdout, "%s: CUT: %d of %d legs exported (see the note above)\n", n, len(res.Rows.Legs), len(p.Legs))
 		}
