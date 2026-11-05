@@ -2879,6 +2879,20 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   no-progress fight, a failed placement, exit 2/29 and three exit 15s are the walk 37 fixtures. The command's tests
   drive the real launch -> exit -> next-args path through a stub walk. `--poll`, `--stall`, `--settle` and
   `--status-every` are the timings; `--binary` picks the turtle-agent the walks run.
+- **Known limits.** Adoption trusts `<out>/walk.pid` plus `kill(0)`: a SIGKILLed walk leaves its pid file behind, and
+  a reused pid would adopt an unrelated process and later signal its group (check `/proc/<pid>/cmdline` for
+  `raid-walk` and the out dir). The checkpoint maps goals by index only: editing `targets.txt` between restarts
+  points the saved goal at the wrong line, and a done id ignores goal lines appended later — use a fresh walk dir
+  per walk. `writeStatus` has no lock, so a finish goroutine (through `escalate`) and the main loop can write
+  `status.txt.tmp` at the same time and the file can be briefly garbled. The `processAlive` group check covers the
+  walk's own process group, not the `login` child that `startSlotAgent` starts in its own group. The instance-cap
+  file is read only from beside `--slots`: with `--slots` elsewhere plus `--allow-split-ledger`, or with no live
+  default leases, the cap falls back to 5 (the split-ledger refusal covers the dangerous case). The first tick after
+  adoption reads all of `frames.jsonl` from offset 0 while holding the state mutex, so a large file can stall YIELD
+  and status handling for that tick. When there is no earlier out dir, the startup lease check asks the default
+  slots store and ignores a `--slots` in the target's arguments. A walk-super-style dir is safe to use: `initSeq`
+  ignores `f4-r1` (`Atoi` fails) and `cmd-*` files, and a leftover walk-super lease on a slot refuses that id with
+  an `ESCALATE` line.
 ### Raid suite
 
 `turtle-agent raid-suite` walks a list of raid plans one after another, each with `raid-walk`, and judges each walk
