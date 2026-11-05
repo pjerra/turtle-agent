@@ -1222,6 +1222,11 @@ turtle-agent plan-export --mmaps ~/mmaps --out 20261014200000_world.sql uldaman 
 turtle-agent plan-export --all-live --out ./migrations/ --stamp 20261014200000     # every plan whose status is live-checked
 ```
 
+The Zul'Gurub migration delivered for the walk-38 review (`~/TortoiseBots-audit/tests/zg-w38/20261105190000_world.sql`) is checked by
+`make zg-export`: the target exports the shipped plan from the current head with the live flags (`--mmaps --approach-hops --floor-aware
+--gm-cross-direct`, the stamp above) and fails unless the delivered file is byte-identical. Run it at the delivered commit: the plan row's
+`source` names the exporting commit.
+
 | Flag | |
 | :--- | :--- |
 | `--out FILE\|DIR` | the migration, or a folder (the file is then `<stamp>_world.sql`). An existing file is never replaced without `--force`: a migration that is applied is never edited, export a new one |
