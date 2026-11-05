@@ -2671,13 +2671,19 @@ AQ20 walk starts at Rajaxx with `--gm-clear-boss kurinnaxx` so Kurinnaxx is dead
   link, wherever the members stand (`internal/worldspawn` packs, the pull estimator's model). The packs come from the world export
   under `~/.local/share/turtle-agent/world/map<N>` (the per-user data dir an installed binary reads; a checkout's
   `<dir>/../tools/dungeongen/testdata/map<N>` is the fallback; `--gm-clear-spawns DIR` names another).
-- **Mechanism:** every expected member of a pack gets one entry. The commander visits the pack's stops (`.go xyz` to a member's spawn
-  point; a pack wider than the 100 yd a stop covers gets several), reads the units its client holds within 150 yd, and for each live
-  member whose spawn guid and entry match calls the agent's `gm_kill` RPC: it selects the creature by guid, waits until the server shows
-  that selection (the same select-confirm path as `.additem`), and sends `.die` (core: `Chat.cpp:885`, `SEC_DEVELOPER` = account level 3,
-  `HandleDieCommand` at `Commands.cpp:2795` kills the selected unit). The death is read from the unit's frames (`dead`, 5 s); a unit
-  that is still alive gets up to three more `.die` lines, 3 s apart. Every stop is visited and read in two rounds, always (an empty read
-  ends nothing). A member never seen is recorded `killed: false, reason: "not seen"`, one that would not die `reason: "alive"`, one
+- **Mechanism:** every expected member of a pack gets one entry. The commander sweeps all named packs together: it goes (`.go xyz`)
+  to the first member no read has shown yet, reads the units its client holds within 150 yd (again every 0.25 s, for 2 s at most, until
+  every unseen member that stop covers shows), and kills every live member of **any** named pack that read shows, then goes on to the
+  next unseen member, so groups that stand near each other share one visit. A member seen dead is never sent a line (a re-place in the
+  same instance finds most of them dead), and a member seen once is not visited again; round two (`gmClearRounds`) revisits only members
+  no read has shown. The kill is the agent's `gm_kill` RPC for each live member of the read, one after the other (it selects the
+  creature by guid, waits until the server shows that selection, the same select-confirm path as `.additem`, and sends `.die`; core:
+  `Chat.cpp:885`, `SEC_DEVELOPER` = account level 3, `HandleDieCommand` at `Commands.cpp:2795` kills the selected unit). The deaths of the
+  whole batch are then read together from one `units` read every 0.25 s (5 s at most; a unit that read does not list is asked for by
+  guid), and the units still alive get up to three more `.die` lines, 3 s after the last. Timing (walk 41 measured ~3-4 s a group: a
+  fixed 2 s after every `.go`, two rounds always, and 0.5 s after every kill line): a fresh instance now costs one `gm_kill` round trip
+  per live unit plus about half a second per stop visited, so a 35-group sweep takes well under a minute, and a same-instance re-place
+  (corpses already dead) a few seconds. A unit that belongs to no named pack is never sent a line. The `gm-clear: <leg>:<group>: ...` line of each group is written once the sweep is over. A member never seen is recorded `killed: false, reason: "not seen"`, one that would not die `reason: "alive"`, one
   already dead `reason: "already dead"` (killed, 0 tries), one **this walk's own corridor clear already despawned**
   `reason: "despawned by the corridor clear"` (killed, 0 tries, no line sent: the clearto reply's `removed` list names those units, and
   the server no longer has them while the client's object store still shows them alive, so a `.die` on their guid is a no-op — that was

@@ -249,10 +249,12 @@ func TestPlaceGMClearKillsWholePackAndMarksSummary(t *testing.T) {
 		t.Error("a unit outside the pack was killed")
 	}
 	// The order: teleport to the pack, the kill, the read of the death, then back to the start before the quiet and the move.
-	orderedAt(t, log, []string{"tt clearto ", "gm .go xyz ", "gm_kill 0xF130", "unit 0xF130", "gm .go xyz ", "tt quiet ", "tt place "})
-	// Every kill is confirmed by a read of the unit after the line.
-	for g := range kills {
-		orderedAt(t, log, []string{"gm_kill " + g, "unit " + g})
+	orderedAt(t, log, []string{"tt clearto ", "gm .go xyz ", "gm_kill 0xF130", "gm .go xyz ", "tt quiet ", "tt place "})
+	// The kills are confirmed by the batched `units` read (which lists the pack), not by a `unit` read after every line.
+	for _, l := range log {
+		if strings.HasPrefix(l, "unit ") {
+			t.Errorf("a per-unit death read went out: %q (the batch is read with one units call)", l)
+		}
 	}
 
 	sum := f.summary()
@@ -820,18 +822,21 @@ func TestPlaceGMClearSkipsMembersTheCorridorClearRemoved(t *testing.T) {
 	}
 }
 
-// A member that cannot die costs gmClearTries * (gmClearDeathWait + gmClearRetryGap) = 32 s. The clear's budget stops the tool
-// after five minutes instead of running for half an hour: the rest of the pack is recorded as not tried, a WARN names the budget,
-// and the placement still goes on.
+// The clear's budget stops the tool instead of running for half an hour: the members it never sent a line are recorded as not tried,
+// a WARN names the budget, and the placement still goes on. Every kill takes 2 s of the fake clock here, so a 5 s budget sends three
+// lines (at 0, 2 and 4 s) and the check before the fourth stops the batch.
 func TestPlaceGMClearStopsAtTheBudget(t *testing.T) {
 	old := gmClearBudget
-	gmClearBudget = 40 * time.Second
+	gmClearBudget = 5 * time.Second
 	t.Cleanup(func() { gmClearBudget = old })
 	f, _ := newPlaceFixture(t)
 	f.opts.gmClear = stringList{"2:2"}
 	f.opts.gmClearSpawns = gmClearZGSpawns
 	pack, guids := gmClearPack(t, gmClearZGSpawns)
-	f.agent.killFn = func(packet.GUID, int) bool { return false } // nothing dies
+	f.agent.killFn = func(packet.GUID, int) bool {
+		_ = f.agent.clock.sleep(context.Background(), 2*time.Second)
+		return false
+	} // nothing dies
 	f.agent.unitsFn = func(int) []objects.Unit {
 		return gmClearView(f, pack, guids, func(packet.GUID) bool { return false })
 	}
@@ -845,9 +850,8 @@ func TestPlaceGMClearStopsAtTheBudget(t *testing.T) {
 			lines++
 		}
 	}
-	// 40 s: the first member's four tries take 32 s (4 x 5 s death wait + 3 x 3 s gap); the second one gets its first line
-	// at 29 s and a second at 37 s (5 s + 3 s gap), and the check at 45 s stops it. No line goes out past the budget.
-	if want := 6; lines != want {
+	// No line goes out past the budget.
+	if want := 3; lines != want {
 		t.Fatalf("%d kill lines, want %d (the budget is %s)", lines, want, gmClearBudget)
 	}
 	sum := f.summary()
@@ -863,10 +867,10 @@ func TestPlaceGMClearStopsAtTheBudget(t *testing.T) {
 			}
 		}
 	}
-	if untried != len(guids)-2 {
-		t.Errorf("%d untried members, want %d: %+v", untried, len(guids)-2, sum.GMClear)
+	if untried != len(guids)-3 {
+		t.Errorf("%d untried members, want %d: %+v", untried, len(guids)-3, sum.GMClear)
 	}
-	if !hasNote(sum, "gave up after 40s") && !hasNote(sum, "gave up after 40.0s") {
+	if !hasNote(sum, "gave up after 5s") && !hasNote(sum, "gave up after 5.0s") {
 		t.Errorf("notes %q do not name the budget", sum.Notes)
 	}
 	text, err := os.ReadFile(filepath.Join(f.out, "summary.txt"))
@@ -928,5 +932,251 @@ func TestWorldExportDirDefaultsToTheInstalledDataDir(t *testing.T) {
 	w.opts.gmClearSpawns = "/exports/map309"
 	if got := w.worldExportDir(); got != "/exports/map309" {
 		t.Fatalf("--gm-clear-spawns not used: %q", got)
+	}
+}
+
+// gmClearPacksFor plans the ZG packs of the specs from the export in dir and returns them with every member's world guid.
+func gmClearPacksFor(t *testing.T, dir string, specs ...raidwalk.GMClearSpec) ([]raidwalk.GMClearPack, []packet.GUID) {
+	t.Helper()
+	res, err := planexport.Build(zgPlan(t), planexport.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	world, _, err := worldspawn.Load(dir, 309)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packs, _, err := raidwalk.PlanGMClear(res.Rows, world, specs)
+	if err != nil || len(packs) == 0 {
+		t.Fatalf("packs %v, err %v", packs, err)
+	}
+	var guids []packet.GUID
+	for _, pk := range packs {
+		for _, g := range pk.SpawnGUIDs() {
+			guids = append(guids, packet.GUID(uint64(packet.HighUnit)<<48|uint64(pk.Members[g])<<24|g))
+		}
+	}
+	return packs, guids
+}
+
+// gmClearViewAll is gmClearView over several packs: every member whose spawn point lies within the read radius of the commander.
+func gmClearViewAll(f *fixture, packs []raidwalk.GMClearPack, guids []packet.GUID, dead func(packet.GUID) bool) []objects.Unit {
+	f.agent.mu.Lock()
+	cx, cy := float64(f.agent.x), float64(f.agent.y)
+	f.agent.mu.Unlock()
+	var out []objects.Unit
+	for _, g := range guids {
+		var pt dungeon.Point
+		for _, pk := range packs {
+			if p, ok := pk.Positions[raidwalk.SpawnGUID(g)]; ok {
+				pt = p
+			}
+		}
+		if math.Hypot(float64(pt.X)-cx, float64(pt.Y)-cy) > gmClearReadYd {
+			continue
+		}
+		out = append(out, objects.Unit{GUID: g, Type: "creature", Entry: g.Entry(), Dead: dead(g)})
+	}
+	return out
+}
+
+// gmClearSweepSpan is how long the sweep took on the fake clock: from the first `.go xyz` to a pack stop until the last `.go xyz`
+// before the quiet check that follows it (the commander's way back to the start point).
+func gmClearSweepSpan(t *testing.T, f *fixture, firstStop dungeon.Point) time.Duration {
+	t.Helper()
+	f.agent.mu.Lock()
+	defer f.agent.mu.Unlock()
+	prefix := "gm .go xyz " + num32(firstStop.X) + " " + num32(firstStop.Y) + " "
+	gms, first, last := 0, -1, -1
+	for _, l := range f.agent.log {
+		switch {
+		case strings.HasPrefix(l, prefix) && first < 0:
+			first, last = gms, gms
+			gms++
+		case strings.HasPrefix(l, "gm "):
+			if first >= 0 && strings.HasPrefix(l, "gm .go xyz ") {
+				last = gms
+			}
+			gms++
+		case strings.HasPrefix(l, "tt quiet ") && first >= 0:
+			return f.agent.gmAt[last].Sub(f.agent.gmAt[first])
+		}
+	}
+	t.Fatalf("no sweep found in the log (first %d)", first)
+	return 0
+}
+
+func gmClearGoCount(f *fixture) int {
+	n := 0
+	for _, g := range f.agentLog() {
+		if strings.HasPrefix(g, "gm .go xyz ") {
+			n++
+		}
+	}
+	return n
+}
+
+// A re-place in the same instance finds the pack dead already. Nothing is sent, every member is "already dead", and the commander
+// goes to the pack ONCE (the old tool visited and read every stop twice, always: ~6 s a group). Without a corpse in the first read the
+// walk would still read again, but a read that shows everything ends the visit.
+func TestPlaceGMClearAllDeadIsOneQuickVisit(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
+	f.agent.unitsFn = func(int) []objects.Unit {
+		return gmClearView(f, pack, guids, func(packet.GUID) bool { return true })
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	for _, l := range f.agentLog() {
+		if strings.HasPrefix(l, "gm_kill") {
+			t.Fatalf("a dead member was sent a kill line: %s", l)
+		}
+	}
+	sum := f.summary()
+	if sum.GMClearPartial || len(sum.GMClear) != len(guids) {
+		t.Fatalf("partial %v, gm_clear %+v", sum.GMClearPartial, sum.GMClear)
+	}
+	for _, e := range sum.GMClear {
+		if !e.Killed || e.Tries != 0 || e.Reason != raidwalk.GMClearAlreadyDead {
+			t.Errorf("entry %+v, want already dead with no line", e)
+		}
+	}
+	stops := len(pack.Stops())
+	if n := gmClearStopGoes(f, pack); n != stops {
+		t.Errorf("%d visits for %d stops: each stop must be visited once", n, stops)
+	}
+	if span := gmClearSweepSpan(t, f, pack.Stops()[0]); span > time.Second {
+		t.Errorf("the all-dead sweep took %s, want under 1 s", span)
+	}
+}
+
+// gmClearStopGoes is how many `.go xyz` lines went to one of the pack's stops.
+func gmClearStopGoes(f *fixture, pack raidwalk.GMClearPack) int {
+	n := 0
+	for _, l := range f.agentLog() {
+		for _, st := range pack.Stops() {
+			if strings.HasPrefix(l, "gm .go xyz "+num32(st.X)+" "+num32(st.Y)+" ") {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// A fresh instance: the pack is alive, every kill takes a moment to show, and the sweep still ends within seconds. The old tool slept
+// 2 s after every teleport, 0.5 s after every kill line and visited each stop twice (about 9 s for this pack).
+func TestPlaceGMClearFreshPackIsSwept(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
+	f.agent.unitsFn = func(int) []objects.Unit {
+		return gmClearView(f, pack, guids, func(g packet.GUID) bool { f.agent.mu.Lock(); defer f.agent.mu.Unlock(); return f.agent.killed[g] })
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if span := gmClearSweepSpan(t, f, pack.Stops()[0]); span > 3*time.Second {
+		t.Errorf("the sweep of one fresh pack took %s, want under 3 s", span)
+	}
+	sum := f.summary()
+	if sum.GMClearPartial || len(sum.GMClear) != len(guids) {
+		t.Fatalf("partial %v, gm_clear %+v", sum.GMClearPartial, sum.GMClear)
+	}
+}
+
+// Several named groups that stand near each other are served by the same visit: the read around one stop holds the members of all of
+// them, they are killed in one batch, and the stops of the other packs are not visited again. The kill set is exactly the live members
+// of the named packs: a corpse is not sent a line, and neither is a unit of the same entry whose spawn is in no named pack, nor one of
+// another entry.
+func TestPlaceGMClearBatchKillsExactlyTheNamedLiveMembers(t *testing.T) {
+	packs, guids := gmClearPacksFor(t, gmClearZGSpawns, raidwalk.GMClearSpec{Leg: "4", Groups: []int{1, 2, 3, 4, 5, 6}})
+	if len(packs) < 6 {
+		t.Fatalf("want several packs, got %d", len(packs))
+	}
+	f, _ := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"4:1,2,3,4,5,6"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
+	corpse := guids[1]
+	// The look-alikes stand beside the first pack: the same entry as a member but a spawn guid that is in no named pack, and a unit of
+	// a foreign entry.
+	member := guids[0]
+	lookalike := packet.GUID(uint64(packet.HighUnit)<<48 | uint64(member.Entry())<<24 | 0xABCDE)
+	stranger := packet.GUID(uint64(packet.HighUnit)<<48 | 11111<<24 | 777)
+	f.agent.unitsFn = func(int) []objects.Unit {
+		us := gmClearViewAll(f, packs, guids, func(g packet.GUID) bool {
+			f.agent.mu.Lock()
+			defer f.agent.mu.Unlock()
+			return f.agent.killed[g] || g == corpse
+		})
+		return append(us, objects.Unit{GUID: lookalike, Type: "creature", Entry: lookalike.Entry()}, objects.Unit{GUID: stranger, Type: "creature", Entry: 11111})
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	got := map[string]int{}
+	for _, l := range f.agentLog() {
+		if g, ok := strings.CutPrefix(l, "gm_kill "); ok {
+			got[g]++
+		}
+	}
+	want := map[string]int{} // the golden list: every member of a named pack but the corpse, once
+	for _, g := range guids {
+		if g != corpse {
+			want[g.String()] = 1
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("%d units killed, want %d", len(got), len(want))
+	}
+	for g, n := range want {
+		if got[g] != n {
+			t.Errorf("member %s got %d kill lines, want %d", g, got[g], n)
+		}
+	}
+	for g, n := range got {
+		if want[g] == 0 {
+			t.Errorf("%s was killed %d times and is not a live member of a named pack", g, n)
+		}
+	}
+	if got[lookalike.String()] != 0 || got[stranger.String()] != 0 || got[corpse.String()] != 0 {
+		t.Errorf("a unit outside the named groups (or a corpse) was touched: %v", got)
+	}
+	sum := f.summary()
+	if sum.GMClearPartial || len(sum.GMClear) != len(guids) {
+		t.Fatalf("partial %v, gm_clear %d entries for %d members", sum.GMClearPartial, len(sum.GMClear), len(guids))
+	}
+	stops := 0
+	for _, pk := range packs {
+		stops += len(pk.Stops())
+	}
+	// One visit serves the packs around it: fewer teleports than the packs' own stops added up (plus the return and the corridor's).
+	if n := gmClearGoCount(f); n >= stops {
+		t.Errorf("%d .go lines for %d pack stops: the packs near each other must share a visit", n, stops)
+	}
+}
+
+// The fresh sweep of 35-odd groups is bounded in seconds, not minutes: the Arlokk legs's six groups (8 packs, 15 members) take under
+// 10 s of the fake clock, where the old tool took ~4 s a pack.
+func TestPlaceGMClearManyGroupsSweepIsFast(t *testing.T) {
+	packs, guids := gmClearPacksFor(t, gmClearZGSpawns, raidwalk.GMClearSpec{Leg: "4", Groups: []int{1, 2, 3, 4, 5, 6}})
+	f, _ := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"4:1,2,3,4,5,6"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
+	f.agent.unitsFn = func(int) []objects.Unit {
+		return gmClearViewAll(f, packs, guids, func(g packet.GUID) bool { f.agent.mu.Lock(); defer f.agent.mu.Unlock(); return f.agent.killed[g] })
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if span := gmClearSweepSpan(t, f, packs[0].Stops()[0]); span > 10*time.Second {
+		t.Errorf("the sweep took %s, want under 10 s", span)
 	}
 }
