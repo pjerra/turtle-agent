@@ -917,9 +917,12 @@ func (s *autoSupervisor) adoptPending() {
 			s.statesMu.Unlock()
 			continue
 		}
+		s.addState(st)
+		// The id is in the list before initSeq numbers it: a state added after the numbering would keep seq 0 and
+		// launch <id>-1, whose out dir may already hold an earlier run's summary.json (a changed goal would read it
+		// and call itself met). initSeq counts the dirs on disk, so the new run starts past them.
 		s.initSeq()
 		s.reconcileSlot(st, nil)
-		s.addState(st)
 		s.event(st.id, "targets", "added from targets.txt")
 	}
 }

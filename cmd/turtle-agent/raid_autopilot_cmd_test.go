@@ -912,6 +912,44 @@ func TestAutoTargetsFileIsReread(t *testing.T) {
 	}
 }
 
+// Review round 1: a changed id was numbered from a state added after initSeq, so it launched <id>-1 again and read
+// the old attempt's summary.json (a kill of the same boss) as its own: the changed goal looked met. The new run is
+// numbered past the out dirs on disk.
+func TestAutoChangedIDNeverRereadsAnOldOut(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 0, 417, "boss 14515 down")
+	f.attempt("a-2", 5, 0, "server closed the connection")
+	s := f.supervisor()
+	tickUntil(t, s, "a's first launch", func() bool { return len(f.args()) >= 1 })
+	tickUntil(t, s, "a done", func() bool {
+		done, _ := runState(s.states[0])
+		return done
+	})
+	// The line changes (a new --from): the id stops, is dropped, and starts again in a new out dir.
+	path := filepath.Join(f.walk, autoTargetsFile)
+	if err := os.WriteFile(path, []byte("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --from step 100\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "the changed a to launch", func() bool { return len(f.args()) >= 2 })
+	args := f.args()
+	if !strings.Contains(args[1], filepath.Join(f.walk, "a-2")) {
+		t.Fatalf("the changed goal reused an old out dir: %s", args[1])
+	}
+	st := f.stateByID(s, "a")
+	tickUntil(t, s, "the new attempt to end", func() bool {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		return st.run == nil
+	})
+	if done, _ := runState(st); done {
+		t.Fatalf("the changed goal read a-1's old summary and called itself met:\n%s", f.events())
+	}
+	if got := strings.Count(f.events(), "done: the last goal is met"); got != 1 {
+		t.Fatalf("%d met-goal lines, want only the first goal's:\n%s", got, f.events())
+	}
+}
+
 // An unparseable targets.txt keeps the targets the supervisor has (a half-written file is not a stop order) and logs
 // one warning; the next valid write is applied.
 func TestAutoInvalidTargetsKeepTheOldOnes(t *testing.T) {

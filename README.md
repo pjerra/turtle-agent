@@ -2830,7 +2830,9 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   slot: one slot runs one walk at a time. `targets.txt` is **re-read while the supervisor runs** (when its mtime or
   size changes, every tick): an added id is queued and starts as soon as its slot is free, a removed id is stopped
   cleanly like `STOP-<id>` (its run stopped, its slot torn down), and an id whose goal lines changed is stopped and
-  re-added from the new lines; an unchanged id keeps its goal, attempt, backoff and run. An unreadable or invalid
+  re-added from the new lines; an unchanged id keeps its goal, attempt, backoff and run. A new or changed id is
+  numbered past the `<id>-<n>` out dirs already on disk, so its first run never reads an earlier attempt's
+  `summary.json`. An unreadable or invalid
   file keeps the targets already loaded and logs one `targets` warning per distinct error (a half-written file is not
   a stop order).
 - **Instance cap.** `--instance-cap-per-account N` is passed to every raid-walk it starts; without the flag each walk
