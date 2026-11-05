@@ -95,14 +95,24 @@ type GMInstanceMark struct {
 	Leg  string `json:"leg,omitempty"`
 	// Mark is the old ledger's bare "<inst>/<leg>" string ("": a new mark).
 	Mark string `json:"mark,omitempty"`
-	// At is when the leg's lines went out. A mark only counts when it is
-	// newer than that instance's cap-ledger entry's first-seen time: the
-	// core reuses instance ids, so a mark in instance 7 counts only for
-	// the instance 7 the entry recorded.
+	// At is when the leg's lines went out.
 	At time.Time `json:"at,omitempty"`
 	// Hash is the hash of the exact command list sent. A changed list
 	// (another hash) is a new firing, not a done one.
 	Hash string `json:"hash,omitempty"`
+}
+
+// UnmarshalJSON accepts both the current object form and the old ledger's
+// bare "<instance id>/<leg>" strings, so an old ledger is read, not moved
+// aside as corrupt.
+func (m *GMInstanceMark) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		*m = GMInstanceMark{Mark: s}
+		return nil
+	}
+	type plain GMInstanceMark
+	return json.Unmarshal(data, (*plain)(m))
 }
 
 // CapLedger is the ledger file: one CapServer per server name.
@@ -400,38 +410,24 @@ func (l *CapLedger) NoteGMInstanceData(name, inst, leg string, at time.Time, has
 }
 
 // GMInstanceDataDone says leg's lines already went out in inst for this
-// command-list hash. A mark only counts when it is not older than that
-// instance's first-seen cap-ledger entry time (the instance's own At): the
-// core reuses instance ids, so a mark from an older instance 7 is not a
-// firing in the new instance 7. A mark whose stored hash names another
-// command list is not done either: the list changed, resend. An old bare
-// mark (no time, no hash) reads back as done, as before. now bounds the
-// first-seen read to live entries.
-func (l *CapLedger) GMInstanceDataDone(name, inst, leg, hash string, now time.Time) bool {
+// command-list hash. Callers consult the ledger ONLY on a --reuse-instance
+// walk (it continues the same instance in a fresh out dir, so the out dir's
+// marker cannot tell it): every other walk decides by its own out-dir marker
+// alone, so a fresh walk always sends even when an old mark names the same
+// id — the core reuses instance ids across copies. A mark whose stored hash
+// names another command list is not done: the list changed, resend. An old
+// bare mark (no time, no hash) reads back as done, as before. A restart drops
+// every mark with the entries (NoteServerStart, Reset).
+func (l *CapLedger) GMInstanceDataDone(name, inst, leg, hash string) bool {
 	s := l.Servers[name]
 	if s == nil {
 		return false
-	}
-	first := time.Time{}
-	for _, e := range s.Entries {
-		if now.Sub(e.At) >= InstanceCapWindow {
-			continue
-		}
-		if fmt.Sprintf("%.0f", e.Instance) != inst {
-			continue
-		}
-		if first.IsZero() || e.At.Before(first) {
-			first = e.At
-		}
 	}
 	for _, m := range s.GMInstanceData {
 		if mi, ml := gmMarkKey(m); mi != inst || ml != leg {
 			continue
 		}
 		if m.Hash != "" && hash != "" && m.Hash != hash {
-			continue
-		}
-		if !m.At.IsZero() && !first.IsZero() && m.At.Before(first) {
 			continue
 		}
 		return true

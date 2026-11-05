@@ -70,11 +70,13 @@ func (w *walk) validateGMInstanceData() error {
 // gmInstanceDataInst is the instance id as the markers key it. With a
 // placement it is the placement's copy ("" when unknown: no firing);
 // without one (or a door start, which places nothing) it is read the way
-// the cap ledger reads it at entry (the caller's `q inst`), once per walk
-// and kept. "unreadable" means the read failed: the walk already WARNed
-// once and fires marker-only (the ledger keys on instances, so it is
-// skipped). A read failure never fails the walk: ttInst would, so the
-// toolkit is asked directly and any failure falls back.
+// the cap ledger reads it at entry (the caller's `q inst`), kept once read.
+// "unreadable" means the read errored: the walk WARNs once and fires
+// marker-only (the ledger keys on instances, so it is skipped). A read of
+// 0 (the toolkit answered but named no instance) is NOT cached: the next
+// firing retries the read, and the walk WARNs once. A read failure never
+// fails the walk: ttInst would, so the toolkit is asked directly and any
+// failure falls back.
 func (w *walk) gmInstanceDataInst(ctx context.Context) string {
 	if w.place != nil {
 		if w.placeInst == 0 {
@@ -92,26 +94,31 @@ func (w *walk) gmInstanceDataInst(ctx context.Context) string {
 			inst, _ = body.num("inst")
 		}
 	}
-	if err != nil || inst == 0 {
+	if err != nil {
 		w.gmInstanceDataEntryInst = "unreadable"
-		if err != nil {
-			w.note("gm-instance-data: WARN: the walk has no placement, and the instance id could not be read (%v): the lines fire once per out dir, not per instance", err)
-		} else {
-			w.note("gm-instance-data: WARN: the walk has no placement, and the toolkit gave no instance id: the lines fire once per out dir, not per instance")
-		}
+		w.note("gm-instance-data: WARN: the walk has no placement, and the instance id could not be read (%v): the lines fire once per out dir, not per instance", err)
 		return w.gmInstanceDataEntryInst
+	}
+	if inst == 0 {
+		if !w.gmInstanceDataOZeroWarned {
+			w.gmInstanceDataOZeroWarned = true
+			w.note("gm-instance-data: WARN: the walk has no placement, and the toolkit gave no instance id: retrying the read on the next status")
+		}
+		return ""
 	}
 	w.gmInstanceDataEntryInst = fmt.Sprintf("%.0f", inst)
 	return w.gmInstanceDataEntryInst
 }
 
-// gmInstanceDataDone says the leg's lines already went out in this instance:
-// the out dir's marker says so (keyed by the instance, or by "unplaced"
-// when the id could not be read), or the ledger does (a --reuse-instance
-// restart runs in a fresh out dir, but the ledger outlives the attempt). A
-// changed command list is never done: the ledger's mark carries the hash it
-// was sent with, and the marker carries the list itself. An "unreadable"
-// instance is marker-only: the ledger keys on instances.
+// gmInstanceDataDone says the leg's lines already went out in this instance.
+// The out dir's marker always counts (keyed by the instance, or by "unplaced"
+// when the id could not be read). The ledger counts ONLY on a --reuse-instance
+// walk: it continues the same instance in a fresh out dir, so the out dir's
+// marker cannot tell it — but a fresh walk always sends, even when an old mark
+// names the same instance id (the core reuses ids across copies). A changed
+// command list is never done: the ledger's mark carries the hash it was sent
+// with, and the marker carries the list itself. An "unreadable" instance is
+// marker-only: the ledger keys on instances.
 func (w *walk) gmInstanceDataDone(inst string, spec raidwalk.GMInstanceSpec) bool {
 	key := inst
 	if key == "unreadable" {
@@ -120,54 +127,141 @@ func (w *walk) gmInstanceDataDone(inst string, spec raidwalk.GMInstanceSpec) boo
 	if key != "" && raidwalk.NewInstanceMarks(w.outDir).LegDone(key, spec.Leg, spec) {
 		return true
 	}
-	if inst == "" || inst == "unreadable" || w.env.capLedger == "" {
+	if !w.opts.reuseInstance || inst == "" || inst == "unreadable" || w.env.capLedger == "" {
 		return false
 	}
 	l, err := raidwalk.LoadCapLedger(w.env.capLedger)
 	if err != nil {
 		return false
 	}
-	return l.GMInstanceDataDone(w.opts.server, inst, spec.Leg, raidwalk.GMInstanceDataHash(spec), w.env.now())
+	return l.GMInstanceDataDone(w.opts.server, inst, spec.Leg, raidwalk.GMInstanceDataHash(spec))
 }
 
+// gmInstanceDataMaxTries bounds the per-command retries: a command the
+// server never confirms is tried at most 3 times per walk, then the walk
+// logs `gm-instance-data: <leg>: <cmd> NOT confirmed after 3 tries` and
+// continues with the next command (never failing the walk on this).
+const gmInstanceDataMaxTries = 3
+
 // gmInstanceDataFire sends one spec's commands in order, gmInstanceDataGap
-// apart, and remembers them in the out dir's marker (keyed by the instance,
-// or by "unplaced" when the id could not be read) and the ledger only
-// after EVERY command of the spec has been sent: an interrupt after the
-// first command resends the rest on the next firing. The ledger's mark
-// carries the hash of the exact command list sent, so a changed list is
-// resent too.
-//
-// After each line the walk reads the chat/system events for up to
-// gmInstanceDataReplyWait and logs the server's reply in the event line
-// (`-> <reply>`); with no reply it logs `-> no reply (WARN)`. The walk
-// never fails on a reply: the reply is evidence, not a gate.
+// apart. Each command is recorded in the out dir's marker (keyed by the
+// instance, or by "unplaced" when the id could not be read) ONLY when the
+// server confirms it: a refused command is NOT recorded, so the next firing
+// retries it, at most gmInstanceDataMaxTries times per walk. Silence counts
+// as confirmed: the debug handler in the core
+// (Commands.cpp:17778 HandleDebugSetInstanceDataCommand, Chat.cpp:172)
+// prints nothing on success — it calls pInstData->SetData and returns
+// true, and ExecuteCommand sends nothing on a true return — so no system
+// line in 2 s is the success path (the shell loop it replaces never read a
+// reply either). The marker always holds the confirmed commands of the spec
+// in spec order (rewritten every pass), so a refire never duplicates and
+// LegDone reads back once every command is confirmed. A refire skips the
+// already-confirmed commands' sends. The ledger's mark goes out only then,
+// so an interrupt or a refusal before the last command resends the rest on
+// the next firing. A changed command list is never done: the ledger's mark
+// carries the hash it was sent with, and the marker carries the list
+// itself.
 func (w *walk) gmInstanceDataFire(ctx context.Context, inst string, spec raidwalk.GMInstanceSpec) error {
 	key := inst
 	if key == "unreadable" {
 		key = "unplaced"
 	}
+	marks := raidwalk.NewInstanceMarks(w.outDir)
+	confirmed := gmInstanceDataConfirmedSet(marks, key, spec.Leg, spec)
 	for i, cmd := range spec.Cmds {
 		line := raidwalk.GMInstanceDataLine(cmd)
+		if confirmed[line] || w.gmInstanceDataTriedOut(spec.Leg, line) {
+			continue
+		}
 		if err := w.gm(ctx, line); err != nil {
 			return err
 		}
-		reply := w.gmInstanceDataReply(ctx)
-		if reply == "" {
-			reply = "no reply (WARN)"
+		reply, ok := w.gmInstanceDataReply(ctx)
+		if ok {
+			confirmed[line] = true
+			w.logLine(w.env.now(), raidwalk.GMInstanceDataLogLine(spec.Leg, cmd, reply))
+			w.gmInstanceDataNoteTry(lineKey(spec.Leg, line), true)
+			// Persist after every command: an interrupt before the last
+			// command keeps the confirmed prefix, and the next firing
+			// resends only the rest.
+			if err := gmInstanceDataWriteConfirmed(marks, key, spec.Leg, spec, confirmed); err != nil {
+				return stopf(exitRaidWalkFailed, "gm-instance-data: %s: %v", spec.Leg, err)
+			}
+		} else {
+			w.logLine(w.env.now(), raidwalk.GMInstanceDataLogLine(spec.Leg, cmd, reply+" (REFUSED)"))
+			w.note("gm-instance-data: WARN: %s: %s not confirmed (%s): retrying on the next status", spec.Leg, line, reply)
+			if n := w.gmInstanceDataNoteTry(lineKey(spec.Leg, line), false); n >= gmInstanceDataMaxTries {
+				w.logLine(w.env.now(), fmt.Sprintf("gm-instance-data: %s: %s NOT confirmed after %d tries", spec.Leg, line, gmInstanceDataMaxTries))
+				w.note("gm-instance-data: %s: %s NOT confirmed after %d tries", spec.Leg, line, gmInstanceDataMaxTries)
+			}
 		}
-		if err := raidwalk.NewInstanceMarks(w.outDir).Record(key, spec.Leg, cmd); err != nil {
-			return stopf(exitRaidWalkFailed, "gm-instance-data: %s: %v", spec.Leg, err)
-		}
-		w.logLine(w.env.now(), raidwalk.GMInstanceDataLogLine(spec.Leg, cmd, reply))
 		if i+1 < len(spec.Cmds) {
 			if err := w.env.sleep(ctx, gmInstanceDataGap); err != nil {
 				return stopf(exitRaidWalkFailed, "gm-instance-data: %s: interrupted", spec.Leg)
 			}
 		}
 	}
-	w.noteGMInstanceData(inst, spec.Leg, raidwalk.GMInstanceDataHash(spec))
+	if key != "" && marks.LegDone(key, spec.Leg, spec) {
+		w.noteGMInstanceData(inst, spec.Leg, raidwalk.GMInstanceDataHash(spec))
+	}
 	return nil
+}
+
+// lineKey identifies one command's retry count: the leg plus the exact line.
+func lineKey(leg, line string) string { return leg + "\x00" + line }
+
+// gmInstanceDataNoteTry records one command's attempt: confirmed resets its
+// count, unconfirmed increments it and reports the new count.
+func (w *walk) gmInstanceDataNoteTry(key string, confirmed bool) int {
+	if confirmed {
+		if w.gmInstanceDataTries != nil {
+			delete(w.gmInstanceDataTries, key)
+		}
+		return 0
+	}
+	if w.gmInstanceDataTries == nil {
+		w.gmInstanceDataTries = map[string]int{}
+	}
+	w.gmInstanceDataTries[key]++
+	return w.gmInstanceDataTries[key]
+}
+
+// gmInstanceDataTriedOut says the command already used its tries: the
+// firing skips it (its NOT-confirmed line is already in run.log).
+func (w *walk) gmInstanceDataTriedOut(leg, line string) bool {
+	return w.gmInstanceDataTries[lineKey(leg, line)] >= gmInstanceDataMaxTries
+}
+
+// gmInstanceDataConfirmedSet reads which commands of the spec the marker
+// already holds as confirmed (a set of exact command lines).
+func gmInstanceDataConfirmedSet(marks raidwalk.InstanceMarks, key, leg string, spec raidwalk.GMInstanceSpec) map[string]bool {
+	out := map[string]bool{}
+	have, err := marks.LegLog(key, leg)
+	if err != nil {
+		return out
+	}
+	for _, h := range have {
+		h = strings.TrimSpace(h)
+		for _, cmd := range spec.Cmds {
+			if h == raidwalk.GMInstanceDataLine(cmd) {
+				out[h] = true
+			}
+		}
+	}
+	return out
+}
+
+// gmInstanceDataWriteConfirmed rewrites the marker with the confirmed
+// commands in spec order, so a refire never duplicates lines and LegDone
+// reads back once every command is confirmed.
+func gmInstanceDataWriteConfirmed(marks raidwalk.InstanceMarks, key, leg string, spec raidwalk.GMInstanceSpec, confirmed map[string]bool) error {
+	var cmds [][2]int
+	for _, cmd := range spec.Cmds {
+		if confirmed[raidwalk.GMInstanceDataLine(cmd)] {
+			cmds = append(cmds, cmd)
+		}
+	}
+	return marks.Write(key, leg, cmds)
 }
 
 // noteGMInstanceData marks the leg's lines sent in the instance-cap ledger,
@@ -187,63 +281,83 @@ func (w *walk) noteGMInstanceData(inst, leg, hash string) {
 }
 
 // gmInstanceDataReplyWait is the server reply's window: up to 2 s after
-// each line. The reader takes one no-wait page per line and the 3 s gap
-// before the next line is the window: a reply that lands within it is the
-// next line's poll read back. Each line's own poll keeps the walk's event
-// cursor moving, so the run's own status lines behind a reply are never
-// skipped unlogged.
+// each line. The reader polls one no-wait page at a time; each page keeps
+// the walk's event cursor moving, so the run's own status lines behind a
+// reply are never skipped unlogged. The 3 s gap before the next line is
+// extra window: a reply that lands within it is the next poll's own read.
 const gmInstanceDataReplyWait = 2 * time.Second
 
-// gmInstanceDataReply returns the server's reply to the line just sent
-// ("": none in 2 s). It polls one no-wait events page at a time until the
-// first plain system line or the 2 s bound, sleeping 200 ms between polls;
-// the 3 s gap before the next line is the rest of the window. It never fails
-// the walk: a missing reply is a WARN in the event line, not an error.
-// Every TBM:RUN line on a page goes through the walk's own pipeline the way
-// pollOnce does (logged, fed to the tracker and the boss rule, the status
-// adopted, pull windows armed, the frame read skipped: the page is the
-// reply's, not the poll's): a run line behind the reply is not lost
-// (page.Next already advanced past it).
-func (w *walk) gmInstanceDataReply(ctx context.Context) string {
+// gmInstanceDataRefusal says whether the system line refuses the command
+// instead of confirming it. The debug handler in the core
+// (Commands.cpp:17778 HandleDebugSetInstanceDataCommand, Chat.cpp:172)
+// prints nothing on success: it calls pInstData->SetData only. What the
+// walk may see instead is ExecuteCommand's failure text (the handler's
+// false return sends the command's Help or LANG_CMD_SYNTAX
+// "Incorrect syntax.", sql base entry 10), an unknown/low-security refusal
+// ("There is no such command", "There is no such subcommand",
+// "This command is not available to you.", "You can use the command"),
+// or a GM-mode line ("GM mode is OFF"/"GM mode is ON" head).
+func gmInstanceDataRefusal(text string) bool {
+	l := strings.ToLower(text)
+	for _, s := range []string{
+		"there is no such command",
+		"there is no such subcommand",
+		"incorrect syntax.",
+		"this command is not available to you.",
+		"you can use the command",
+		"no such command",
+		"gm mode is off",
+		"gm mode is on",
+		"not a gm account",
+	} {
+		if strings.Contains(l, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// gmInstanceDataReply waits up to gmInstanceDataReplyWait for the server's
+// answer to the line just sent. It returns the first plain system line
+// when one arrives (a refusal line means NOT confirmed), or "sent" when
+// the window passes silently: the handler prints nothing on success, so
+// silence IS the success path and counts as confirmed. An unconfirmed
+// command is retried on the next status poll, at most
+// gmInstanceDataMaxTries times per walk. It never fails the walk: a
+// refusing reply is a REFUSED event line and a retry, not an error.
+// The reader only advances the cursor and scans for the reply: TBM:RUN
+// lines on its pages are NOT logged, fed or adopted here — the firing's
+// caller (pollOnce) rewinds the cursor to the firing line, so the next
+// poll re-reads the tail in order and adopts it exactly once. (Feeding
+// newer lines here while the caller still processed its older page is what
+// regressed lastStatus.)
+func (w *walk) gmInstanceDataReply(ctx context.Context) (string, bool) {
 	deadline := w.env.now().Add(gmInstanceDataReplyWait)
 	for {
 		var page events.Page
 		params := map[string]any{"since": w.eventsAt, "kinds": []string{"system", "addon"}, "wait_ms": 0}
 		if err := w.agent.Call(ctx, "events", params, &page, 15*time.Second); err != nil {
-			return ""
+			return "sent", true
 		}
 		w.eventsAt = page.Next
-		var reply string
 		for _, e := range page.Events {
-			if line, ok := tbm.Line(e); ok {
-				now := w.env.now()
-				w.logLine(now, line)
-				if st, ok := raidwalk.ParseRun(line); ok && st.Plan == w.plan.Name && w.tracker != nil {
-					w.tracker.Feed(now, st)
-					w.observeBossStatus(st, now)
-					w.pullStarted(now, st)
-					w.lastStatus, w.haveStatus, w.statusSeq = st, true, w.statusSeq+1
-					w.recordRunLine(st, now)
-					w.noteLabel(st)
-					if st.Note != "" {
-						w.newNotes = append(w.newNotes, st.Note)
-					}
-				}
+			if _, ok := tbm.Line(e); ok {
 				continue
 			}
-			if reply != "" || e.Kind != events.KindSystem || e.Text == "" {
+			if e.Kind != events.KindSystem || e.Text == "" {
 				continue
 			}
-			reply = raidwalk.CleanLine(e.Text)
-		}
-		if reply != "" {
-			return reply
+			text := raidwalk.CleanLine(e.Text)
+			if gmInstanceDataRefusal(text) {
+				return text, false
+			}
+			return text, true
 		}
 		if !w.env.now().Before(deadline) {
-			return ""
+			return "sent", true
 		}
 		if err := w.env.sleep(ctx, 200*time.Millisecond); err != nil {
-			return ""
+			return "sent", true
 		}
 	}
 }
@@ -318,40 +432,43 @@ func (w *walk) gmInstanceDataStart(ctx context.Context, inst, leg string) error 
 // mid-run. A firing here holds the run's next pull until the lines are
 // sent: the walk pauses the run first (`.bot run pause`, through the
 // commander's own run verbs) and resumes it after the last line, so the
-// pull gate's lines land before the next pull. Pause and resume go through
-// the same path the walk's other run controls use; a refused pause still
-// fires the lines (late is better than never), and a refused resume is a
-// failed walk (the raid would stand paused: that must be loud, like a
-// failed send). At most one spec fires per poll: the next poll fires the
-// next.
-func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus) error {
+// pull gate's lines land before the next pull. Whenever the status was
+// running before the pause attempt, the walk always sends the resume
+// afterwards — even when the pause call errored or timed out (a mid-run
+// pause may still have landed server-side; leaving the run paused stops
+// the raid silently). A pause that was never attempted (the status was
+// already paused) sends no resume. A refused resume is a failed walk (the
+// raid would stand paused: that must be loud, like a failed send). At most
+// one spec fires per poll: the next poll fires the next. It reports whether
+// a firing happened: pollOnce then breaks out of its line loop for this
+// poll (the next poll re-reads from the cursor), so the rest of the old
+// page's lines never process past the adopted statuses of the firing.
+func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus) (bool, error) {
 	// Idle fast path: no specs, or a state with no leg to name — never
 	// touch the toolkit. The instance read below is a real `q inst`.
 	if len(w.gmInstanceData) == 0 {
-		return nil
+		return false, nil
 	}
 	if st.State != tbm.RunRunning && st.State != tbm.RunPaused {
-		return nil
+		return false, nil
 	}
 	inst := w.gmInstanceDataInst(ctx)
 	for _, spec := range w.gmInstanceDataPending(inst, st) {
-		paused := false
-		if st.State == tbm.RunRunning {
-			if _, err := w.commander(ctx, commanderReq{Op: "run", Verb: "pause", WaitMS: 10000}); err == nil {
-				paused = true
-			} else {
+		pauseAttempted := st.State == tbm.RunRunning
+		if pauseAttempted {
+			if _, err := w.commander(ctx, commanderReq{Op: "run", Verb: "pause", WaitMS: 10000}); err != nil {
 				w.note("gm-instance-data: WARN: the run pause before %s was refused (%v): the lines go out unheld", spec.Leg, err)
 			}
 		}
 		if err := w.gmInstanceDataFire(ctx, inst, spec); err != nil {
-			return err
+			return true, err
 		}
-		if paused {
+		if pauseAttempted {
 			if _, err := w.commander(ctx, commanderReq{Op: "run", Verb: "resume", WaitMS: 10000}); err != nil {
-				return stopf(exitRaidWalkFailed, "gm-instance-data: %s: the run resume after the lines failed: %v", spec.Leg, err)
+				return true, stopf(exitRaidWalkFailed, "gm-instance-data: %s: the run resume after the lines failed: %v", spec.Leg, err)
 			}
 		}
-		return nil
+		return true, nil
 	}
-	return nil
+	return false, nil
 }
