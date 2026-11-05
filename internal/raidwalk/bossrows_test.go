@@ -77,7 +77,7 @@ func TestBossRowsAmbiguousRealPlans(t *testing.T) {
 		plan string
 		want []uint32
 	}{
-		{"zul_gurub", []uint32{11361, 14825, 14882, 14883}}, // walk-38 review: the honour guard (14825/14882/14883) is the Jin'do boss row's adds within its radius, and the same entries are the hall's trash camps elsewhere (60-120 yd from him, outside the 40 yd rule)
+		{"zul_gurub", []uint32{11361}}, // review round 2: the hall's east side (the guard, the north camp and the lone mistresses) is its own pull groups again, so the Jin'do boss row has no First list or radius and 14825/14882/14883 are not its adds; only Thekal's tiger 11361 is trash that is also a boss add
 		{"deadmines", []uint32{657, 1731, 3450}},
 		{"uldaman", []uint32{4847, 4853, 4855, 4863, 7030}},
 		{"wailing_caverns", []uint32{3840, 5053, 5056, 5756, 5761, 8886, 61966, 61967}},

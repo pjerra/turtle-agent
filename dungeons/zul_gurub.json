@@ -2078,6 +2078,70 @@
           "max_bodies": 4
         },
         {
+          "entries": [14883, 14883, 14882, 14882, 14882, 14882, 14825, 14825],
+          "positions": [
+            {"x": -11534.8, "y": -1282.44, "z": 78.7332},
+            {"x": -11534.2, "y": -1269.71, "z": 78.6456},
+            {"x": -11532, "y": -1270.02, "z": 79.115},
+            {"x": -11532, "y": -1282.05, "z": 79.074},
+            {"x": -11528.5, "y": -1270.31, "z": 79.4239},
+            {"x": -11528.7, "y": -1281.83, "z": 79.4193},
+            {"x": -11525.6, "y": -1270.86, "z": 79.571},
+            {"x": -11525.4, "y": -1281.18, "z": 79.6252}
+          ],
+          "radius": 7,
+          "approach": [
+            {"x": -11550.8, "y": -1283.6, "z": 77.9}
+          ],
+          "stand_pull": true,
+          "max_bodies": 14
+        },
+        {
+          "entries": [14825, 14825, 14882, 14825, 14825, 14825, 14825, 14825],
+          "positions": [
+            {"x": -11547, "y": -1250.59, "z": 78.55},
+            {"x": -11552, "y": -1248.28, "z": 78.6},
+            {"x": -11545.2, "y": -1246.18, "z": 78.71},
+            {"x": -11549.8, "y": -1243.92, "z": 78.41},
+            {"x": -11543.8, "y": -1265.9, "z": 78.38},
+            {"x": -11546.3, "y": -1262.71, "z": 78.54},
+            {"x": -11544.3, "y": -1263.2, "z": 78.48},
+            {"x": -11542.2, "y": -1263.87, "z": 78.45}
+          ],
+          "radius": 13,
+          "approach": [
+            {"x": -11552, "y": -1270, "z": 78.26}
+          ],
+          "stand_pull": true,
+          "max_bodies": 10
+        },
+        {
+          "entries": [14825],
+          "positions": [
+            {"x": -11522.8, "y": -1280.45, "z": 79.6704}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -11558, "y": -1290, "z": 77.96},
+            {"x": -11548.2, "y": -1292.3, "z": 78.18}
+          ],
+          "stand_pull": true,
+          "max_bodies": 1
+        },
+        {
+          "entries": [14825],
+          "positions": [
+            {"x": -11522.8, "y": -1271.63, "z": 79.6408}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -11556, "y": -1282, "z": 77.91},
+            {"x": -11547, "y": -1257.6, "z": 78.81}
+          ],
+          "stand_pull": true,
+          "max_bodies": 1
+        },
+        {
           "entries": [14532, 11351, 11830, 14532],
           "positions": [
             {"x": -11653.8, "y": -1450.25, "z": 58.93},
@@ -2128,7 +2192,7 @@
           "approach": [
             {"x": -11573.384, "y": -1482.5585, "z": 60.001575}
           ],
-          "max_bodies": 10
+          "max_bodies": 9
         },
         {
           "entries": [11350, 11831, 14821],
@@ -2158,8 +2222,6 @@
       "boss": {
         "entry": 11380,
         "position": {"x": -11515.8, "y": -1275.48, "z": 79.66},
-        "first": [14825, 14882, 14883],
-        "radius": 47,
         "approach": [
           {"x": -11584, "y": -1472, "z": 63.9},
           {"x": -11600.3, "y": -1391.5, "z": 70},
@@ -2169,13 +2231,13 @@
       },
       "notes": [
         "WALK 29 FIX 3 (2026-11-03, leg 6; research/zg-w29/WALK29-FIX-PLAN.md §4, lead decision): step 528 (group 6) pulled the 10 lone 14825/14882/14883 units of the 49373-49382 cluster from an approach 26.1 yd out; d 00:41:06 aggroed 49377 on arrival and 12 bodies (with the Corrupted Infernals from Voodoo Slave spell 23426) were in at 00:41:08, 19 dead in 38 s, no CC (the units were not in cc_priority and the row was not a stand_pull). Step 532 (group 8, formation 49363, 10 units) repeated it from 24.0 yd: 11-12 engaged, 21+23 dead. Step 534 walked to group 9's approach -11566 -1270, 21.1 yd from the Sacrificed Troll pack (group 12): 9 trolls woke on the walk and group 9 added 8, 17 engaged, 21 dead. Rows 6, 8 and 12 are stand_pull now with max_bodies 10, and their approaches sit 30+ yd from their own packs with the party's spread clear: group 6 at -11632 -1322 78.1 (40.3 yd from its nearest unit, 43.6 from the row centre), group 8 at -11606.5 -1302.8 79.3 (34.9, 37.0) and the trolls at -11563 -1282.6 77.9 (32.9, 37.0). The troll pack (Sacrificed Trolls 49078-49087) is pulled before group 9, from its own stand, which removes the walk exposure at step 534 entirely. 14882 Atal'ai Mistress is in cc_priority; 14883 Voodoo Slave is kill_first (its creature_spells entry 148830 casts 23426 Summon Infernals).",
-        "JIN'DO (2026-11-04, spec TortoiseBots-audit/specs/jindo-mechanics.md §§D1/D6/D7): kill_first leads with the Brain Wash Totem 15112 (a charmed bot kills raid members) and the Powerful Healing Ward 14987 (3 333 hp/s, out-heals the raid's 2.2-3.0 k dps), then 14750, 15146, 11830, 14883, 11353. Sacrificed Troll 14826 respawn in 10 s (tw_world_creature.sql 49078-49087); the pit pull group is dropped and the route keeps 22 yd from the pit (-11583, -1251). Jin'do proof walks place at the boss approach's last row (the stand -11536.8 -1261.5), plain, never from a pre-boss pull row: the hall's east side is the boss row's adds now (WALK 38 REVIEW).",
+        "JIN'DO (2026-11-04, spec TortoiseBots-audit/specs/jindo-mechanics.md §§D1/D6/D7): kill_first leads with the Brain Wash Totem 15112 (a charmed bot kills raid members) and the Powerful Healing Ward 14987 (3 333 hp/s, out-heals the raid's 2.2-3.0 k dps), then 14750, 15146, 11830, 14883, 11353. Sacrificed Troll 14826 respawn in 10 s (tw_world_creature.sql 49078-49087); the pit pull group is dropped and the route keeps 22 yd from the pit (-11583, -1251). Jin'do proof walks place at the boss approach's last row (the stand -11536.8 -1261.5), plain, never from a pre-boss pull row (the hall's own four groups are gm-cleared; WALK 38 REVIEW R2).",
         "JIN'DO GUARD (2026-11-04, spec §D6): the honour-guard group (10 bodies incl. 49402/49403, approach -11558 -1276 78.06, 42.2 yd from Jin'do) is a stand pull with max_bodies 10, shot from its approach so the fight happens there and not 13 yd from him.",
         "WALK 36 FIX 1 (2026-11-04, leg 6; TortoiseBots-audit tests/raid-zg-walk36): the group-8 stand pull (run step 543, stand -11560 -1280) engaged Jin'do in f, f3 twice and c3 (f 10:01, f3 11:03 and 12:33, c3 11:35; f3 \"pull estimate: 15 bodies over the ceiling 10\", \"engaged 15 over 6\", then \"boss 11380 engaged\"). The stand and its approach stood 25.2-28.4 yd from the honour guard's western units (route reach 30-32 yd at the plan's party level 58) and the guard lives 8-18 yd from Jin'do, so the guard's fight brought him in; the stand was also 33 yd from its own pack, past the run leader's 28.5 yd shot, so the row plain-pulled and dragged the guard in. The hall is now: the honour guard pulled FIRST from a stand at -11562 -1306 (44+ yd from the north packs, 56 yd from Jin'do), its radius 9.5 now owns the two 14883 Voodoo Slaves 9.3 yd out that radius 8 missed (max_bodies 12), and the two north packs are ONE stand pull (8 bodies, radius 9.5, stand -11558 -1304, 44+ yd from the guard's units). Every stand and approach point of the hall keeps the reach of every pack it does not pull and of Jin'do (tools/dungeongen/zg_w36_test.go).",
         "WALK 36 FIX 2 (2026-11-04, leg 6; TortoiseBots-audit tests/raid-zg-walk36): the -11603 -1229 pull (run step 552) is dropped. Its stand was 41-45 yd out, past the run leader's 28.5 yd shot, so d 09:40:05 and e3 11:48:19 pulled it as \"a plain pull\"; the party then stood 10.9 yd from a Sacrificed Troll (d 09:40:30) and the pit's 10 s respawns kept the fight open until d 09:54:16 and e3 11:48:21 paused with \"a fight lasted more than 180 s (kept on by nothing hostile engaged)\"; 20 dead in d2/e3. No stand fixes it: in shot (26-28 yd, with line of sight) only the hall's east side works and the walk there passes 18.4 yd from a troll (navmesh), and the pack's north and west sides have no floor. The pack is 80+ yd from the corridor and off the boss route; the group after the hall starts with a hop point at -11582 -1322 that held its approach. tools/dungeongen/zg_w36_test.go pins that no leg-6 pull lists it.",
         "WALK 36 FIX 5 (2026-11-04, leg 6; TortoiseBots-audit tests/raid-zg-walk36): the boss row's last approach was (-11545.6 -1289, 30.6 yd from Jin'do) with no line of sight to him: f3-r1 11:57:14 \"no LOS from the authored stand; holding\", 11:57:30 \"searching a firing stand\", 11:57:35 \"to firing stand 1 for 11380 ... 24.5 yd from it; was 32.1 yd, los yes\". The fight drifted (the lead chased a spell target to -11582.9 -1251.2 90, the pit's upper rim) and at 12:00:32 the boss begin paused \"no walkable path toward the boss ... no safe stand 35.0-25.0 yd from it the lead bot has a path to (the lead bot 72.1 yd from it)\". The stand is now (-11536.8 -1261.5): 25.2 yd from him, dry, with line of sight (raycast), inside the run leader's own 25-35 yd window, so it never searches. tools/dungeongen/zg_w36_test.go pins the distance and the sight.",
-        "WALK 38 FIX 1 (2026-11-05, leg 6; TortoiseBots-audit tests/raid-zg-walk38 bj/bj2): step 514 pulled groups 5/6/7 at once (27 bodies, 21 dead) and step 520's north-pack row plain-pulled from a stand 54 yd out, walking the party inside Jin'do's 35 yd reach (boss engaged at 520; bj2 at 525 on the lone-mistress walk). The hall is staged now: group 5 is a plain pull at its own camp (its old stand had no line of sight); the 49363 camp is a stand pull from (-11581 -1334.8) (28.0 yd from its farthest unit, 88 from Jin'do), pulled before the 1173082 camp, which is a plain pull at its own centroid once 49363 is dead (the camps are 20 yd apart and no stand splits them); the honour guard is a stand pull from (-11550.8 -1283.6) (28.3 yd shot, 36.0 from Jin'do) with max_bodies 14 (its proximity wakes the north camp's east four and the lone mistresses); the north camp is a stand pull from (-11552 -1270) (26.2 yd shot, 36.6 from Jin'do, 32.4 from the troll pit) with max_bodies 10; the lone mistresses keep rows from (-11548.2 -1292.3) and (-11547 -1257.6) (36.5/36.0 from him) with the west approach points that keep the walk at 35+ (both walks dipped to 34.8 before). Every pre-boss row now brings at most its ceiling and none brings Jin'do (TestZgW38JindosHallPullsStayUnderTheirCeilings).",
-        "WALK 38 REVIEW (2026-11-05, leg 6; review of the walk-38 staging with the run leader's real assist model: RingYd 10 = CreatureFamilyAssistanceRadius, one hop). The lone Withered Mistresses 49402/49403 stand 7.2/8.6 yd from Jin'do and the honour guard's 49421 formation stands 5.9 yd from 49402, so the 10 yd family assist of any guard pull wakes the mistresses, and their assist reaches him from a party point inside their own 22 + 10 yd reach: with that model the guard, the north camp and the two mistress rows all brought him (rows 56/58/61/64 of the staged export). No stand keeps the party 32 yd from the mistresses and inside the tank's 28.5 yd shot of the guard (the guard spans 9.5 yd), and the north camp's four can only be shot from inside the Sacrificed Trolls' respawning pit (18.4 yd at best). So the hall's east side has no pre-boss row anymore: the Jin'do boss row owns the guard's eight (14825/14882 within 47 yd), the north camp's east four (1173078-81), the four north-camp mistresses (49383-86) and the two lone mistresses, plus the guard's two Voodoo Slaves (14883, their pack), i.e. first [14825, 14882, 14883] radius 47: they are pulled with him at the boss row. The 49363 stand is reached from a south approach point (-11614 -1330) so its walk does not pass the 1173082 camp (22.7 yd before), and the corridor's 49714 row carries the 10 bodies its own centroid rings in (the 51881/51946 pair 29 yd north-east). Ceilings: every pre-boss pull is at or under its max_bodies; the guard's raised 14 is gone. The three camps' walks to their stands are 114-135 yd of navmesh and keep 20 yd from every later pack (zgCheckHallRows), and zg_w38_test.go pins all of it on the live-flag export."
+        "WALK 38 FIX 1 (2026-11-05, leg 6; TortoiseBots-audit tests/raid-zg-walk38 bj/bj2): step 514 pulled groups 5/6/7 at once (27 bodies, 21 dead) and step 520's north-pack row plain-pulled from a stand 54 yd out, walking the party inside Jin'do's 35 yd reach (boss engaged at 520; bj2 at 525 on the lone-mistress walk). The hall is staged now: group 5 is a plain pull at its own camp (its old stand had no line of sight); the 49363 camp is a stand pull from (-11581 -1334.8) (28.0 yd from its farthest unit, 88 from Jin'do), pulled before the 1173082 camp, which is a plain pull at its own centroid once 49363 is dead (the camps are 20 yd apart and no stand splits them); the honour guard is a stand pull from (-11550.8 -1283.6) (28.3 yd shot, 36.0 from Jin'do) with max_bodies 14 (its proximity wakes the north camp's east four and the lone mistresses); the north camp is a stand pull from (-11552 -1270) (26.2 yd shot, 36.6 from Jin'do, 32.4 from the troll pit) with max_bodies 10; the lone mistresses keep rows from (-11548.2 -1292.3) and (-11547 -1257.6) (36.5/36.0 from him) with the west approach points that keep the walk at 35+ (both walks dipped to 34.8 before). With the run leader's real assist model the hall's own rows are over their ceilings by 1-2 and wake Jin'do: the fold that followed this staging is undone (WALK 38 REVIEW R2), and walk 39 gm-clears those groups.",
+        "WALK 38 REVIEW R2 (2026-11-05, leg 6; review round 2, decided: undo the boss-row fold; RingYd 10 = CreatureFamilyAssistanceRadius, one hop). The hall's east side is its own pull groups again and the Jin'do boss row carries no adds (no first, no radius): group 8 the honour guard 49421's eight (max_bodies 14, stand -11550.8 -1283.6, 36.0 yd from him), group 9 the north camp (the east four 1173078-81 and the mistresses 49383-86, max_bodies 10, stand -11552 -1270, 36.6 yd), group 10 the lone 49403 (max_bodies 1, stand -11548.2 -1292.3, 36.5 yd) and group 11 the lone 49402 (max_bodies 1, stand -11547 -1257.6, 36.0 yd). Each is a stand pull with its walk-38-fix-1 stand, no stand is inside his 35 yd route reach, and each group is gm-clearable on its own (the lone rows' radius 1 keeps the guard's 49576/49577 out of them). No geometry stages them under their ceilings: a stand in the tank's 28.5 yd shot of the guard (it spans 9.5 yd) or of the 22 yd north camp is inside the lone mistresses' 22+10 yd reach, and a stand in a lone mistress's shot is inside the 10 yd family ring of the other and of the guard (49421 stands 5.9 yd from 49402), so each pull's assist wakes Jin'do. The known limit is pinned per group by TestZgW38JindosHallPullsStayUnderTheirCeilings, which keeps the assist model: group 8 brings 15 bodies over its ceiling 14 (+1: the north camp's east four join), group 9 11 over 10 (+1), group 10 3 over 1 (+2: 49402 and Jin'do) and group 11 2 over 1 (+1: Jin'do). The corridor's 49714 row keeps its original max_bodies 9: its pull rings in the 51881/51946 pair, 10 bodies over 9 (+1). Walk 39 gm-clears leg 6 pull groups 9-12 (the guard, the north camp and the two lone mistresses) and 16 (the 49714 row) instead of pulling them. A-6: 49402/49403 are members of their own rows only, and no pre-boss stand is inside Jin'do's reach."
       ]
     },
     {

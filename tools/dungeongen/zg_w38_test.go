@@ -1,16 +1,17 @@
-// Walk-38 fixes (TortoiseBots-audit tests/raid-zg-walk38) and the review round that followed them: the
-// Jin'do hall (the review's H1/H2: the run leader's real family-assist model, RingYd 10 and one hop, so the
-// hall's east side is pulled with Jin'do by the boss row), the Hakkar outer leg's step-601 wall (M4, on the
-// real export in cmd/turtle-agent), the Jeklik step-43 patrol pull and its camp stands against every loop
-// (M3), and the corridor's stand coverage (L2). The hall test below is the rule: a pull row before the boss
-// row must not bring Jin'do, and it must not bring more bodies than its own ceiling, by that assist model
-// on the live-flag export.
+// Walk-38 fixes (TortoiseBots-audit tests/raid-zg-walk38) and the review rounds that followed them: the
+// Jin'do hall (the review's H1/H2 and the round-2 A-1/A-6: the run leader's real family-assist model, RingYd
+// 10 and one hop; the hall's east side is its own four pull groups again, each over its original ceiling by a
+// pinned known limit, and walk 39 GM-clears them), the Hakkar outer leg's step-601 wall (M4, on the real
+// export in cmd/turtle-agent), the Jeklik step-43 patrol pull and its camp stands and walks against every
+// loop (M3/A-5), and the corridor's stand coverage (L2). The hall test below is the rule: a pull row before
+// the boss row must not bring more bodies than its ceiling unless the plan note pins the known limit, it must
+// not bring Jin'do unless the note does, and the hall's lone mistresses and stands keep their own groups.
 package main
 
 import (
 	"fmt"
 	"math"
-	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -51,15 +52,52 @@ func zgW38Party(t *testing.T, pl *navmesh.Planner, rows *zgW37Rows, i int, cs []
 	return stand
 }
 
-// TestZgW38JindosHallPullsStayUnderTheirCeilings: from the leg start to the boss row, no pull row brings
-// Jin'do and no pull row brings more bodies than its ceiling (its max_bodies, else 7), and no party point
-// or walked step is inside Jin'do's own route-aggro reach (35 yd: 25 aggro at the plan's party level 58
-// plus the raid's 10 yd spread). The bodies are aggroest's estimate over the spawns still alive when the
-// row is pulled (earlier rows' packs are dead): proximity along the rows the exporter walks plus every
-// formation (AGGRO_TOGETHER/link) a woken unit closes, and the family-assist hop the run leader really
-// uses (aggroest.AssistYd: RingYd 10 = the core's CreatureFamilyAssistanceRadius, RingHops 1), which is
-// what brings Jin'do in the walk-38 plan: the lone mistresses stand 7.2/8.6 yd from him, so any pull that
-// wakes them has them call him on that one hop.
+// zgW38HallLimit is one documented known limit of the hall's own rows (the plan note's WALK 38 REVIEW R2):
+// Over is how many bodies the pull brings over its original max_bodies under the run leader's real family-assist
+// model, and Boss says the pull wakes Jin'do too. The key is the plan's pull group index, which the export's
+// "pull group N" comment names.
+type zgW38HallLimit struct {
+	Over int
+	Boss bool
+}
+
+// zgW38HallLimits pins each hall pull's overage: no stand stages them under their ceilings (a stand in the
+// tank's 28.5 yd shot of the guard or the north camp is inside the lone mistresses' 22+10 yd reach, and a stand
+// in a lone mistress's shot is inside the 10 yd family ring of the other and of the guard), so the plan keeps
+// the original ceilings and walk 39 GM-clears these groups (leg 6 pull groups 9-12 and 16).
+var zgW38HallLimits = map[int]zgW38HallLimit{
+	8:  {Over: 1, Boss: true},  // the guard's eight + the north camp's east four + Jin'do: 15 over 14
+	9:  {Over: 1, Boss: true},  // the north camp's eight + the two lone mistresses + Jin'do: 11 over 10
+	10: {Over: 2, Boss: true},  // the lone 49403 + 49402 + Jin'do: 3 over 1
+	11: {Over: 1, Boss: true},  // the lone 49402 + Jin'do: 2 over 1
+	15: {Over: 1, Boss: false}, // the corridor's 49714 row + the 51881/51946 pair: 10 over 9 (A-3's 10 is reverted)
+}
+
+// zgW38Group is the plan pull group an exported row's comment names ("pull group 8; stand pull" -> 8), or -1.
+func zgW38Group(comment string) int {
+	f := strings.Fields(comment)
+	if len(f) < 3 || f[0] != "pull" || f[1] != "group" {
+		return -1
+	}
+	n, err := strconv.Atoi(strings.TrimSuffix(f[2], ";"))
+	if err != nil {
+		return -1
+	}
+	return n
+}
+
+// TestZgW38JindosHallPullsStayUnderTheirCeilings is the walk-38 review's H1/A-6 on the live-flag export. The
+// bodies are aggroest's estimate with the run leader's real family-assist model (aggroest.AssistYd: RingYd 10 =
+// the core's CreatureFamilyAssistanceRadius, RingHops 1): over the spawns still alive when the row is pulled
+// (earlier rows' packs are dead), proximity along the rows the exporter walks plus every formation a woken unit
+// closes, and the one assist hop. A pre-boss pull row must stay at or under its ceiling (max_bodies, else 7),
+// and bring no Jin'do, unless the plan note pins its known limit (zgW38HallLimits: the hall's four own groups
+// and the corridor's 49714 row, whose stands cannot stage them under their ceilings); those rows are asserted at
+// exactly their pinned overage so a change of geometry fails here. A-6: the two lone mistresses 49402/49403 are
+// members of no pull but their own (no row owns them, and no other row's radius reaches their formation) and no
+// stand a pre-boss pull uses is inside Jin'do's own route-aggro reach (35 yd: 25 aggro at the plan's party level
+// 58 plus the raid's 10 yd spread). The hall's four groups are also asserted to own exactly their own units, so
+// `raid-walk --gm-clear 6:9-12` clears each whole pack.
 func TestZgW38JindosHallPullsStayUnderTheirCeilings(t *testing.T) {
 	p, cs := zgLoadPlanAndExport(t)
 	pl := zgPlannerOrNil(t)
@@ -86,10 +124,16 @@ func TestZgW38JindosHallPullsStayUnderTheirCeilings(t *testing.T) {
 	bossRow := -1
 	stop := -1 // the first boss-approach row: the walk to the boss is meant to enter his reach
 	parties := map[int]dungeon.Point{}
+	groupRow := map[int]int{}
 	for i := range rows.rows {
 		parties[i] = zgW38Party(t, pl, rows, i, cs)
 		if stop < 0 && strings.HasPrefix(rows.rows[i].Comment, "boss approach") {
 			stop = i
+		}
+		if g := zgW38Group(rows.rows[i].Comment); g >= 0 && rows.rows[i].Kind == planexport.KindPull {
+			if _, ok := groupRow[g]; !ok {
+				groupRow[g] = i
+			}
 		}
 		if rows.rows[i].Kind == planexport.KindBoss {
 			bossRow = i
@@ -101,6 +145,19 @@ func TestZgW38JindosHallPullsStayUnderTheirCeilings(t *testing.T) {
 	}
 	if stop < 0 {
 		stop = bossRow
+	}
+	// A-6 (direct): no stand of a pre-boss pull is inside Jin'do's own reach. A stand-pull row's stand is the
+	// move row right before it; every other row's point is where the party goes.
+	for i := 0; i < stop; i++ {
+		s := rows.rows[i]
+		if s.Kind != planexport.KindPull && s.Kind != planexport.KindBoss {
+			continue
+		}
+		stand := rows.party(i)
+		if d := dist(stand, boss.Pos); d < bossReach {
+			t.Errorf("leg 6 pull row %d (%s, pull group %d) has its stand %.1f %.1f %.1f %.1f yd from Jin'do 11380, want >= %g: no pre-boss stand reaches him",
+				i, s.Comment, zgW38Group(s.Comment), stand.X, stand.Y, stand.Z, d, bossReach)
+		}
 	}
 	// The boss's own reach: every party point and every walked step before the boss row.
 	prev := dungeon.Point{}
@@ -196,7 +253,20 @@ func TestZgW38JindosHallPullsStayUnderTheirCeilings(t *testing.T) {
 		if ceiling == 0 {
 			ceiling = zgW38PullCeiling
 		}
-		if res.Bodies > ceiling {
+		group := zgW38Group(s.Comment)
+		limit, known := zgW38HallLimits[group]
+		if known {
+			if res.Bodies != ceiling+limit.Over {
+				var why []string
+				for _, m := range res.Members {
+					if c := zgW38Creature(cs, uint64(m.Guid)); c != nil {
+						why = append(why, fmt.Sprintf("%s/%d[%s]", c.Name, c.GUID, m.Why))
+					}
+				}
+				t.Errorf("leg 6 row %d (%s, pull group %d) brings %d bodies; the plan note's WALK 38 REVIEW R2 pins it at its ceiling %d plus %d = %d: %v",
+					i, s.Comment, group, res.Bodies, ceiling, limit.Over, ceiling+limit.Over, why)
+			}
+		} else if res.Bodies > ceiling {
 			var why []string
 			for _, m := range res.Members {
 				if c := zgW38Creature(cs, uint64(m.Guid)); c != nil {
@@ -205,43 +275,60 @@ func TestZgW38JindosHallPullsStayUnderTheirCeilings(t *testing.T) {
 			}
 			t.Errorf("leg 6 row %d (%s) brings %d bodies over its ceiling %d: %v", i, s.Comment, res.Bodies, ceiling, why)
 		}
+		brought := false
 		for _, m := range res.Members {
 			if m.Guid == uint32(boss.GUID) {
-				t.Errorf("leg 6 row %d (%s) brings Jin'do 11380 before its boss row: the pull's bodies are %d over the ceiling %d", i, s.Comment, res.Bodies, ceiling)
+				brought = true
 			}
+		}
+		switch {
+		case !known && brought:
+			t.Errorf("leg 6 row %d (%s) brings Jin'do 11380 before its boss row: the pull's bodies are %d over the ceiling %d", i, s.Comment, res.Bodies, ceiling)
+		case known && limit.Boss && !brought:
+			t.Errorf("leg 6 row %d (%s, pull group %d): the plan note's known limit says the pull wakes Jin'do, but it does not (bodies %d over ceiling %d): re-measure it", i, s.Comment, group, res.Bodies, ceiling)
+		case known && !limit.Boss && brought:
+			t.Errorf("leg 6 row %d (%s, pull group %d) brings Jin'do 11380: its pinned limit does not", i, s.Comment, group)
 		}
 		prevPull = i
 	}
-	// H1/H2 of the walk-38 review: the hall's east side is pulled WITH Jin'do, never before him. The
-	// lone mistresses 49402/49403 stand 7.2/8.6 yd from him and the guard's eight 11-17 yd; the guard's
-	// nearest unit is 5.9 yd from 49402, so the 10 yd family assist of any guard pull wakes the
-	// mistresses, and a party point inside their own reach (22 aggro + the raid's 10 yd spread) has
-	// them call him on the same hop. No stand keeps the party 32 yd from them and in the tank's 28.5 yd
-	// shot of the guard (the guard spans 9.5 yd: a stand in shot of its farthest is at most 28.5+9.5 yd
-	// from the nearest), and the north camp can only be shot from inside the Sacrificed Trolls'
-	// respawning pit (18.4 yd at best). So the boss row owns the whole east side and pulls it as its
-	// adds: entries 14825/14882/14883 within its radius.
-	wantOwned := map[uint64]string{
-		49402: "the lone mistress", 49403: "the lone mistress",
-		1173078: "the north camp's east four", 1173079: "the north camp's east four",
-		1173080: "the north camp's east four", 1173081: "the north camp's east four",
-		49421: "the honour guard", 49573: "the honour guard", 49574: "the honour guard",
-		49575: "the honour guard", 49576: "the honour guard", 49577: "the honour guard",
-		49609: "the honour guard", 49650: "the honour guard",
-		49383: "the north camp", 49384: "the north camp", 49385: "the north camp", 49386: "the north camp",
+	// H1/A-6: the hall's east side is its own pull groups again (the boss-row fold is undone). Each group owns
+	// exactly its units, so a GM clear of one group kills one whole pack; 49402/49403 belong to their own row
+	// only and the boss row carries no adds.
+	wantOwned := map[int][]uint64{
+		8:  {49421, 49573, 49574, 49575, 49576, 49577, 49609, 49650},         // the honour guard's eight
+		9:  {49383, 49384, 49385, 49386, 1173078, 1173079, 1173080, 1173081}, // the north camp
+		10: {49403},                                                          // the lone mistress
+		11: {49402},                                                          // the lone mistress
 	}
-	for guid, what := range wantOwned {
+	for group, guids := range wantOwned {
+		row, ok := groupRow[group]
+		if !ok {
+			t.Errorf("no exported pull row for leg 6 pull group %d", group)
+			continue
+		}
+		for _, guid := range guids {
+			if o, ok := rows.owner[guid]; !ok || o != row {
+				t.Errorf("leg 6 pull group %d: %d is pulled by row %d (owned %v), want its own row %d (%s): the hall's east side is not the boss row's adds",
+					group, guid, o, ok, row, rows.rows[row].Comment)
+			}
+		}
+	}
+	for _, guid := range []uint64{49402, 49403} {
 		o, ok := rows.owner[guid]
-		if !ok || o != bossRow {
-			t.Errorf("%s %d is pulled by row %d (owned %v), want the Jin'do boss row %d: it is pulled with him, never before him", what, guid, o, ok, bossRow)
+		if !ok {
+			t.Errorf("the lone mistress %d is pulled by no row: its group is empty", guid)
+			continue
+		}
+		if o == bossRow {
+			t.Errorf("the lone mistress %d is owned by the Jin'do boss row: it must be its own pull group", guid)
+		}
+		if g := zgW38Group(rows.rows[o].Comment); g != 10 && g != 11 {
+			t.Errorf("the lone mistress %d is owned by row %d (%s): it is a member of a pull other than its own group", guid, o, rows.rows[o].Comment)
 		}
 	}
 	br := rows.rows[bossRow]
-	if !slices.Contains(br.Entries, 14825) || !slices.Contains(br.Entries, 14883) {
-		t.Errorf("the boss row's entries are %v, want 14825 (the hall's mistresses and guard) and 14883 (their Voodoo Slaves) so the adds are scoped to his row", br.Entries)
-	}
-	if br.Radius < 47 {
-		t.Errorf("the boss row's radius is %g, want >= 47 (the north camp's 49385 stands 45.8 yd from him)", br.Radius)
+	if len(br.Entries) != 0 || br.Radius != 0 {
+		t.Errorf("the Jin'do boss row carries adds (entries %v, radius %g): the hall's east side is its own pull groups", br.Entries, br.Radius)
 	}
 }
 
