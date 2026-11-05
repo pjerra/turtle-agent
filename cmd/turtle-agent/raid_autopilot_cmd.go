@@ -999,7 +999,9 @@ func (s *autoSupervisor) tick(ctx context.Context) {
 }
 
 // checkStopFiles handles the per-raid stop files: <walk-dir>/STOP-<id> stops just that raid (its run stopped, its
-// slot torn down as a YIELD would, the id done and never relaunched). YIELD stays the whole-dir stop.
+// slot torn down as a YIELD would, the id done and never relaunched). YIELD stays the whole-dir stop. A STOP file an
+// id acted on is renamed STOP-<id>.done, so a re-added id of the same name is not stopped by the order a person
+// already used (walk 39's re-added raid would have been stopped by its old file at the first tick).
 func (s *autoSupervisor) checkStopFiles() {
 	entries, err := os.ReadDir(s.o.walkDir)
 	if err != nil {
@@ -1011,12 +1013,20 @@ func (s *autoSupervisor) checkStopFiles() {
 	}
 	for _, e := range entries {
 		id, ok := strings.CutPrefix(e.Name(), "STOP-")
-		if !ok || id == "" {
+		if !ok || id == "" || strings.HasSuffix(id, ".done") {
 			continue
 		}
-		if st := byID[id]; st != nil {
-			s.requestStop(st, "STOP-"+id)
+		st := byID[id]
+		if st == nil {
+			continue
 		}
+		s.requestStop(st, "STOP-"+id)
+		path := filepath.Join(s.o.walkDir, e.Name())
+		if err := os.Rename(path, path+".done"); err != nil {
+			s.event(st.id, "stop", fmt.Sprintf("STOP-%s could not be consumed: %v", id, err))
+			continue
+		}
+		s.event(st.id, "stop", fmt.Sprintf("STOP-%s consumed (renamed STOP-%s.done)", id, id))
 	}
 }
 

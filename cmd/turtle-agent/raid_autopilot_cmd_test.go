@@ -907,6 +907,70 @@ func TestAutoStoppedStateSurvivesARestart(t *testing.T) {
 	}
 }
 
+// Review round 1: a STOP file an id acted on is consumed (renamed STOP-<id>.done, one line in EVENTS.txt), so a
+// re-added id of the same name starts instead of being stopped again by an order that already ran.
+func TestAutoConsumedStopFileDoesNotStopAReAddedID(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.target("z srv 2 zg-z full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	f.running("a-2", 30)
+	f.attempt("z-1", 2, 0, "bad --sql")
+	launched := func(name string) bool {
+		want := "--out " + filepath.Join(f.walk, name)
+		for _, a := range f.args() {
+			if strings.Contains(a, want) {
+				return true
+			}
+		}
+		return false
+	}
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return launched("a-1") })
+	tickUntil(t, s, "z escalated", func() bool {
+		st := f.stateByID(s, "z")
+		if st == nil {
+			return false
+		}
+		_, escalated := runState(st)
+		return escalated
+	})
+	if err := os.WriteFile(filepath.Join(f.walk, "STOP-a"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "a stopped", func() bool {
+		st := f.stateByID(s, "a")
+		if st == nil {
+			return false
+		}
+		done, _ := runState(st)
+		return done
+	})
+	if _, err := os.Stat(filepath.Join(f.walk, "STOP-a.done")); err != nil {
+		t.Fatalf("STOP-a was not consumed: %v\n%s", err, f.events())
+	}
+	if n := strings.Count(f.events(), "STOP-a consumed"); n != 1 {
+		t.Fatalf("%d consumed lines, want 1:\n%s", n, f.events())
+	}
+	// Remove a's line (the stopped state goes; z keeps the file valid) and add it again: the re-added id must run.
+	path := filepath.Join(f.walk, autoTargetsFile)
+	if err := os.WriteFile(path, []byte("z srv 2 zg-z full -- zul_gurub --sql /zg.sql\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "the stopped a to be dropped", func() bool { return f.stateByID(s, "a") == nil })
+	if err := os.WriteFile(path, []byte("a srv 1 zg-a full -- zul_gurub --sql /zg.sql\nz srv 2 zg-z full -- zul_gurub --sql /zg.sql\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "the re-added a to launch", func() bool { return launched("a-2") })
+	st := f.stateByID(s, "a")
+	if st == nil {
+		t.Fatalf("the re-added a is not supervised:\n%s", f.events())
+	}
+	if done, _ := runState(st); done {
+		t.Fatalf("the re-added a was stopped before it ran:\n%s", f.events())
+	}
+}
+
 // Walk 39: targets.txt was read once at start, so every added raid needed another autopilot dir (the ramp-* dirs,
 // one per re-added raid). A line appended while the supervisor runs starts that raid without a restart, and a removed
 // line stops its raid cleanly (its slot torn down), with no ESCALATE and no re-read of the goals of an unchanged id.
