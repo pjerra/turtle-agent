@@ -163,8 +163,8 @@ type autoState struct {
 	// placeFails counts the consecutive attempts that ended in the place phase: the third escalates (a dead bind is
 	// re-placed fresh, but a bind that keeps failing must not loop with minutes of backoff forever).
 	placeFails int
-	nextAt      time.Time // no launch before this (the settle after a teardown, or a backoff)
-	done      bool
+	nextAt     time.Time // no launch before this (the settle after a teardown, or a backoff)
+	done       bool
 	// escalated is an id left for a person (a teardown that never verified, an exit 2/29, three exit 15s): it counts
 	// as done for allDone, is never launched again and is kept in the checkpoint until a person clears it.
 	escalated bool

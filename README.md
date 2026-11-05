@@ -2809,7 +2809,8 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
 - **Targets.** Blank lines and `#` lines are skipped. The header is exactly `id server slot holder goal --`; the rest
   is the raid-walk args, starting with the plan. A goal is `full` (walk to the plan's end), `leg:<L>` (`--until "leg
   L"`) or `boss:<ENTRY>` (`--until boss-done`, done when that boss's `boss_kills` entry reads killed, whatever the
-  exit code — an incident after the kill, 19, still counts; a full clear the same). An id may repeat: its lines are
+  exit code and whatever the end reason — an incident after the kill, 19, counts, and so does a `stopped: ...` end
+  such as the 90-minute limit firing after the kill; a full clear the same). An id may repeat: its lines are
   walked in file order, and a met goal advances to the next line. `--sql FILE` is required: every goal may be
   re-placed, and raid-walk refuses `--place` without it. `--from` in a line is the goal's own start (a restart with
   no step reached uses it); a restart inside the goal starts at the furthest step the run reached, and never sends
@@ -2826,15 +2827,13 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   default 15m) it stops the walk (SIGTERM; never `.bot run stop`), tears the slot down, picks a new `--out`
   (`<walk-dir>/<id>-<n>`), and re-places: the same instance first (`--place --from "step N" --reuse-instance`), a
   fresh instance only when that placement failed (the old bind is gone), and that fresh decision survives a reached
-  step: the retry keeps `--from step N --place` without `--reuse-instance`. A legitimate
-  instance-cap wait (`earliest
+  step: the retry keeps `--from step N --place` without `--reuse-instance`. A legitimate instance-cap wait (`earliest
   free time` as the run's last line) is not a stall; its stall clock starts when the wait ends. Exit 2 (the walk
   refused its arguments) and exit 29 (the placement failed every try in the same instance; a fresh-instance retry
   would only burn the hourly budget) stop that id with an `ESCALATE` line and no retry, and so does exit 15 three
   times (the slot's lease is held by another holder). Three consecutive placement failures on one id escalate it as
-  well. Other exits re-place with a backoff of 20 s, 1 m, 2 m, 5 m and
-  then 10 m per consecutive attempt that reached no further step; a step further resets it. Exit 26 keeps its cap
-  wait and re-places later. A **launch**
+  well. Other exits re-place with a backoff of 20 s, 1 m, 2 m, 5 m and then 10 m per consecutive attempt that
+  reached no further step; a step further resets it. Exit 26 keeps its cap wait and re-places later. A **launch**
   that cannot start (the attempt log or the child) is not completion: the goal stays, the retry uses the same
   backoff (20 s at first), and the third consecutive launch failure escalates the id. A supervisor whose every id
   met its goals says `every target's goals are met` and exits 0; one with an escalated id ends with
@@ -2849,9 +2848,8 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   relaunch, no further teardown, no `YIELD-DONE`). The stops and teardowns of the ids run at the same time, so one
   slow slot never delays another.
 - **Durable state.** `<walk-dir>/autopilot-state.json` is rewritten atomically (temp file written and fsynced, renamed,
-  then the directory fsynced) on every transition:
-  per id its current goal, the goals met, the last reached step, the reuse/fresh decision, the attempt number and the
-  child's pid/out dir. A checkpoint that does not parse (a
+  then the directory fsynced) on every transition: per id its current goal, the goals met, the last reached step, the
+  reuse/fresh decision, the attempt number and the child's pid/out dir. A checkpoint that does not parse (a
   truncated write, disk damage) is a refusal at start: exit 2, the file is named, and the message says to fix or
   remove it — nothing is launched over it and the file is not overwritten with empty progress. A start loads it and
   reconciles it with the attempts' `summary.json` and the slots' leases: a
