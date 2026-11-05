@@ -35,7 +35,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/slots"
@@ -409,37 +408,33 @@ func autoFlag(args []string, name string) string {
 	return ""
 }
 
-// autoReadRows reads the rows a target's raid-walk places against: the plan in its --sql migration (the deployed rows,
-// which the walk itself reads), else the plan file's built rows. ok is false when neither can be read.
+// autoReadRows reads the rows a target's raid-walk places against: the plan in its --sql migration. The plan file is
+// not a fallback: its export numbers the steps differently (ZG: 401 rows against the deployed 733), and a resume step
+// adjusted against those numbers would place the raid somewhere else. ok is false when the migration cannot be read
+// or does not hold the plan, and the resume then keeps the step it had.
 func autoReadRows(t raidwalk.AutoTarget) (planexport.Rows, bool) {
 	var plan string
 	if len(t.Args) > 0 {
 		plan = t.Args[0]
 	}
-	dir := autoFlag(t.Args, "--dir")
-	if dir == "" {
-		dir = "dungeons"
+	sql := autoFlag(t.Args, "--sql")
+	if sql == "" {
+		return planexport.Rows{}, false
 	}
-	if sql := autoFlag(t.Args, "--sql"); sql != "" {
-		if raw, err := os.ReadFile(slots.ExpandTilde(sql)); err == nil {
-			if plans, _, err := planexport.ParseMigration(string(raw)); err == nil {
-				for _, r := range plans {
-					if r.Plan.Plan == plan {
-						return r, true
-					}
-				}
-			}
+	raw, err := os.ReadFile(slots.ExpandTilde(sql))
+	if err != nil {
+		return planexport.Rows{}, false
+	}
+	plans, _, err := planexport.ParseMigration(string(raw))
+	if err != nil {
+		return planexport.Rows{}, false
+	}
+	for _, r := range plans {
+		if r.Plan.Plan == plan {
+			return r, true
 		}
 	}
-	p, err := dungeon.Load(filepath.Join(slots.ExpandTilde(dir), plan+".json"))
-	if err != nil {
-		return planexport.Rows{}, false
-	}
-	res, err := planexport.Build(p, planexport.Options{})
-	if err != nil {
-		return planexport.Rows{}, false
-	}
-	return res.Rows, true
+	return planexport.Rows{}, false
 }
 
 // targetRows is autoReadRows once per plan + --dir + --sql.

@@ -2846,7 +2846,8 @@ c      tortoise-test2  5    zg37-c leg:high_priestess_marli -- zul_gurub --dir /
   furthest step the run reached; when that row is one raid-walk refuses as a place start (a boss row — which is where
   every wipe at a boss ends — a hold row, a row inside an event), the restart resumes from the nearest earlier row of
   the same leg the walk takes, else from the leg's own start (`--from leg L`), and logs a `resume` line: exit 2 for a
-  refused resume start is never escalated. A goal boss that is already dead ends the goal as **DONE**, never an
+  refused resume start is never escalated. The rows are read from the target's `--sql` migration (the numbering the
+  walk places against; the plan JSON numbers ZG's steps differently), and when it cannot be read the step is kept. A goal boss that is already dead ends the goal as **DONE**, never an
   ESCALATE: any attempt's summary that reports the boss dead (the summary's `boss_kills`, or the walk's own
   boss-done/corpse evidence it records there) sets `boss_dead` for the goal in the checkpoint, which advances to the
   id's next goal line or finishes the id, and the run that saw the death is torn down (its slot freed) as for any met
