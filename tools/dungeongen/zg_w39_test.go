@@ -5,20 +5,24 @@
 // 14750 x4). These tests pin the MANDOKIR-440 handling the walk-37 patrol rows use: each
 // rider's movement.tsv loop is the patrol block of the group that pulls its formation, the
 // group is a stand pull, and its stand is in the tank's shot of that loop.
+// TestZgW39JeklikMoversOwnedByTheirRows adds the ownership half (fix round 1): the run
+// leader's own scoping of a stand pull from the row's centre and radius, 2D.
 package main
 
 import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 )
 
-// zgW39Movers are the 14750 spawns with a creature_movement path (the other six 14750s stand):
-// F1 49147, F3 49155, F4 49189, F5 49185 and F6 49130.
+// zgW39Movers are the 14750 spawns with a creature_movement waypoint loop: F1 49147, F3 49155,
+// F4 49189, F5 49185 and F6 49130. The other six have none: 49141, 49142 and 49193 stand still
+// (movement type 0, wander 0) and 49154, 49167 and 49129 wander (movement type 1, wander 5).
 var zgW39Movers = []uint64{49147, 49155, 49189, 49185, 49130}
 
 // TestZgW39JeklikBatRidersArePatrollers: every moving Bat Rider's loop is carried by the
@@ -189,5 +193,142 @@ func TestZgW39JeklikNorthCampStandPulls49123(t *testing.T) {
 	cen.X, cen.Y, cen.Z = cen.X/n, cen.Y/n, cen.Z/n
 	if d := dist(cen, stand); d > dungeon.RunLeaderSeeYd {
 		t.Errorf("the 49123 row's stand is %.1f yd from its point, want <= %d", d, dungeon.RunLeaderSeeYd)
+	}
+}
+
+// zgW39Centre is a pull group's row point: the mean of its positions (planexport writes it, and the run leader scopes a
+// stand pull from it).
+func zgW39Centre(g dungeon.PullGroup) dungeon.Point {
+	var c dungeon.Point
+	for _, p := range g.Positions {
+		c.X += p.X
+		c.Y += p.Y
+		c.Z += p.Z
+	}
+	if n := float32(len(g.Positions)); n > 0 {
+		c.X, c.Y, c.Z = c.X/n, c.Y/n, c.Z/n
+	}
+	return c
+}
+
+// zgW39Named is the set of spawns a row means to pull: for every position, the nearest spawn when it is one of the row's
+// entries (the plan lists one spawn per member), expanded to that spawn's group_leader formation.
+func zgW39Named(g dungeon.PullGroup, cs []creature, forms map[uint64]*zgFormation) map[uint64]bool {
+	out := map[uint64]bool{}
+	for _, pos := range g.Positions {
+		best, bd := -1, math.Inf(1)
+		for i := range cs {
+			if !zgHostile(cs[i]) {
+				continue
+			}
+			if d := dist(pos, cs[i].Pos); d < bd {
+				bd, best = d, i
+			}
+		}
+		if best < 0 || !slices.Contains(g.Entries, cs[best].Entry) {
+			continue
+		}
+		lead := cs[best].GroupLeader
+		if lead == 0 {
+			lead = cs[best].GUID
+		}
+		if f := forms[lead]; f != nil {
+			for _, m := range f.Member {
+				out[m.GUID] = true
+			}
+		}
+	}
+	return out
+}
+
+// TestZgW39JeklikMoversOwnedByTheirRows is the Jeklik leg's ownership check, the walk-37 patrol rows' half: the run
+// leader scopes a stand pull from the row's centre (the positions' mean) and radius, 2D, expanding every scoped spawn to
+// its group_leader formation (DungeonRunPolicy.h ScopeStandPullFacts; routeOwnerOf's rule in route_aggro.go). Three
+// things must hold or the row does not pull what it says. (a) Every moving rider's DB spawn lies inside its own row's 2D
+// radius: F4's row stood at the south bat 49151's spawn with radius 1, 27.7 yd from 49189, so the rider the loop marks
+// was outside the row. (b) A row must not scope a spawn that a LATER row's own positions name: F5's radius 40 reached
+// F6's seven spawns 39.4-62.6 yd out, so the step-43 pull was 13 bodies (F5 6 + F6 7, the walk-39 wipe). (c) Every pull
+// row must own at least one spawn: the south Headhunter camp row at -12219 -1491 named none (49134/35/36 belong to the
+// radius-72 row pulled before it), pull_size printed "leg 0 pull 14: no target", and the run leader chased the residue
+// (walk-37 FIX 2).
+func TestZgW39JeklikMoversOwnedByTheirRows(t *testing.T) {
+	p, err := dungeon.Load(filepath.Join(plansDirT, "zul_gurub.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, err := readCreatures(filepath.Join("testdata", "map309", "creatures.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	leg := zgW35Leg(t, p, "high_priestess_jeklik")
+	forms := zgFormations(cs)
+	groups := leg.PullGroups
+	packs := make([][]creature, len(groups))
+	owner := map[uint64]int{}
+	for gi := range groups {
+		pack, err := zgPack(groups[gi], cs, forms)
+		if err != nil {
+			t.Errorf("pull group %d: %v: the run leader has no target for the row", gi, err)
+			continue
+		}
+		packs[gi] = pack
+		for _, c := range pack {
+			if _, ok := owner[c.GUID]; !ok {
+				owner[c.GUID] = gi
+			}
+		}
+	}
+	// (a) the five movers' own spawns inside their rows' 2D radius.
+	for _, guid := range zgW39Movers {
+		gi := -1
+		for i := range groups {
+			if pt := groups[i].Patrol; pt != nil && strings.Contains(pt.Source, fmt.Sprintf("creature_movement %d", guid)) {
+				gi = i
+			}
+		}
+		if gi < 0 {
+			t.Errorf("%d has no loop-carrying row", guid)
+			continue
+		}
+		var c *creature
+		for i := range cs {
+			if cs[i].GUID == guid {
+				c = &cs[i]
+			}
+		}
+		if c == nil {
+			t.Fatalf("%d is not in the map-309 export", guid)
+		}
+		cen := zgW39Centre(groups[gi])
+		if d := math.Hypot(float64(c.Pos.X-cen.X), float64(c.Pos.Y-cen.Y)); d > float64(groups[gi].Radius) {
+			t.Errorf("pull group %d (%d's row): its spawn is %.1f yd from the row centre, past radius %g: the row cannot scope its rider", gi, guid, d, groups[gi].Radius)
+		}
+	}
+	// (b) no row scopes a spawn a later row's positions name.
+	named := make([]map[uint64]bool, len(groups))
+	for gi := range groups {
+		named[gi] = zgW39Named(groups[gi], cs, forms)
+	}
+	for gi := range groups {
+		for _, c := range packs[gi] {
+			for gj := gi + 1; gj < len(groups); gj++ {
+				if named[gj][c.GUID] {
+					t.Errorf("pull group %d scopes %s %d, which pull group %d's own positions name: the row pulls another formation (%d and %d together)", gi, c.Name, c.GUID, gj, gi, gj)
+					break
+				}
+			}
+		}
+	}
+	// (c) every pull row owns at least one spawn.
+	for gi := range groups {
+		n := 0
+		for _, c := range packs[gi] {
+			if owner[c.GUID] == gi {
+				n++
+			}
+		}
+		if n == 0 {
+			t.Errorf("pull group %d (%.1f %.1f, radius %g) owns no spawn: the run leader has no target and chases the residue", gi, zgW39Centre(groups[gi]).X, zgW39Centre(groups[gi]).Y, groups[gi].Radius)
+		}
 	}
 }
