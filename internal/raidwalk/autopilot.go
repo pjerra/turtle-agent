@@ -251,16 +251,23 @@ func RunStopped(reason string) bool {
 	return strings.Contains(r, ".bot run stop") || strings.HasPrefix(r, "stopped:")
 }
 
-// GoalAchieved says the run met its goal. A boss the summary's boss_kills says was killed, and a full clear, count
-// whatever the exit code: an incident after the kill (19) still met the goal. The walk's own run stop and a failed
-// placement never count. A leg goal needs the walk to have ended on its own until clause (exit 0).
+// GoalAchieved says the run met its goal. A boss the summary's boss_kills says was killed counts whatever the exit
+// code and whatever the end reason: an incident after the kill (19) or a "stopped: ..." ending (the 90-minute limit
+// firing after the kill) still met the goal. A full clear and a leg goal still need a run that was not stopped by
+// the walk's own run stop and did not fail in the place phase; a leg goal needs exit 0.
 func GoalAchieved(g AutoGoal, o AutoObservation) bool {
-	if !o.Exited || RunStopped(o.EndReason) || o.PlacementFailed() {
+	if !o.Exited {
+		return false
+	}
+	if g.Kind == "boss" && o.KilledBosses[g.Boss] {
+		return true
+	}
+	if RunStopped(o.EndReason) || o.PlacementFailed() {
 		return false
 	}
 	switch g.Kind {
 	case "boss":
-		return o.KilledBosses[g.Boss]
+		return false
 	case "full":
 		return o.StepsTotal > 0 && o.StepsReached >= o.StepsTotal
 	case "leg":

@@ -234,3 +234,37 @@ func TestAutoBackoffAndStallAfterTheCapWait(t *testing.T) {
 		t.Fatalf("decision %+v, want a stall restart 20m after the cap wait ended", d)
 	}
 }
+
+// L5: a boss in boss_kills meets its goal even when the run ended with a "stopped: ..." reason (the 90-minute limit
+// firing after the kill). A run stop or a failed placement still does not make a boss goal without the kill.
+func TestAutoStoppedEndStillMeetsAKilledBoss(t *testing.T) {
+	goal := AutoGoal{Kind: "boss", Boss: 14515}
+	o := AutoObservation{
+		Exited:       true,
+		ExitCode:     0,
+		StepsReached: 417,
+		StepsTotal:   761,
+		EndReason:    "stopped: the 90-minute limit",
+		KilledBosses: map[uint32]bool{14515: true},
+	}
+	if !GoalAchieved(goal, o) {
+		t.Fatal("a killed boss did not meet its goal because the run ended stopped")
+	}
+	d := DecideAutoAction(o, AutoRunState{Goal: goal, Reuse: true, HasRun: true}, autoNow, 15*time.Minute)
+	if d.Action != AutoAdvance {
+		t.Fatalf("decision %+v, want an advance", d)
+	}
+	// The kill is the boss's: another boss's goal is not met by it.
+	if GoalAchieved(AutoGoal{Kind: "boss", Boss: 14507}, o) {
+		t.Fatal("another boss's goal was met by 14515's kill")
+	}
+	// Without the kill, a stopped end still fails the boss goal.
+	o.KilledBosses = map[uint32]bool{}
+	if GoalAchieved(goal, o) {
+		t.Fatal("a stopped run without the kill met the boss goal")
+	}
+	// A leg goal is still not met by a stopped end.
+	if GoalAchieved(AutoGoal{Kind: "leg", Leg: "high_priestess_marli"}, o) {
+		t.Fatal("a stopped run met a leg goal")
+	}
+}
