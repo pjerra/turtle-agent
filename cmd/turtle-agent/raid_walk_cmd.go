@@ -1042,6 +1042,12 @@ type walk struct {
 	// gmInstanceDataOZeroWarned says the `q inst` 0 read already WARNed once
 	// (a 0 read is not cached: the next firing retries the read).
 	gmInstanceDataOZeroWarned bool
+	// gmInstanceDataBossSent holds the boss rows (steps) whose pre-pull resend already went out in this walk.
+	gmInstanceDataBossSent map[int]bool
+	// gmInstanceDataDeferred holds the legs (lower case -> name) with a send deferred by the allowlist; gmInstanceDataUnsent
+	// counts the legs reported as never sent.
+	gmInstanceDataDeferred map[string]string
+	gmInstanceDataUnsent   int
 	// gongReruns counts the run restarts at a leg's summoning open row (a boss that despawns after a wipe comes back with the
 	// object: Zul'Gurub's Arlokk). bossGongReruns bounds them. gongRerunAt/-Boss/-Open name the last one that went out: the
 	// next "boss not found" pause reads whether the frames saw the boss alive since, which tells the gong summoning him again
@@ -1918,6 +1924,7 @@ func (w *walk) finish(code int) {
 		code = exitRaidWalkInjectFailed
 	}
 	w.exitCode = code
+	w.gmInstanceDataFlushUnsent()
 	// The tracker's one-shot latch is the fallback when the run's statuses never named a boss step's kind as boss.
 	// It is inserted before the summary reads the tracks, so the single boss_kill field and the boss_kills list both
 	// carry it; a boss entry none of the rows is a boss row of (bossStepOf 0) is not recorded (L4).
@@ -1957,8 +1964,9 @@ func (w *walk) finish(code int) {
 		ReviveRefusal: w.reviveRefusal,
 		TierSource:    w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
 		HireSettle: w.opts.hireSettle, SettleShort: w.opts.hireSettle < hireSettleWait,
-		WipeResumes:   w.wipeResumes,
-		ReviveBrought: len(w.reviveBrought), ReviveUnreached: len(w.reviveUnreached), ReviveGatherMissed: len(w.reviveGatherMissed),
+		WipeResumes:          w.wipeResumes,
+		GMInstanceDataUnsent: w.gmInstanceDataUnsent,
+		ReviveBrought:        len(w.reviveBrought), ReviveUnreached: len(w.reviveUnreached), ReviveGatherMissed: len(w.reviveGatherMissed),
 	}
 	if w.inj != nil {
 		meta.Injections, meta.InjectedDeaths = w.inj.Results()
