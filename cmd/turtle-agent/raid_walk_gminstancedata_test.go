@@ -216,6 +216,46 @@ func TestGMInstanceDataFreshWalkIgnoresLedgerMark(t *testing.T) {
 		t.Fatalf("fresh walk with an old mark sent %d lines, want 1: %q", n, g.agent.gmLines())
 	}
 }
+// A --reuse-instance walk that falls back to a fresh instance sends the
+// lines again: the new copy is not the one the data was confirmed for, even
+// when the core hands out the same instance id (it reuses ids across
+// copies). The ledger mark names the old copy, so it must not suppress the
+// new copy's firing. The first walk fires in 103 (alive reuse, ledger
+// marked); the second finds the raid gone and no bind, enters fresh, and the
+// toolkit reports 103 again for the new copy.
+func TestGMInstanceDataRefiresAfterReuseFreshFallback(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "instance-cap.json")
+	n := zgPlaceSteps(t)
+	first, _ := newPlaceFixture(t)
+	first.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
+	first.opts.reuseInstance = true
+	first.env.capLedger = ledger
+	first.agent.entered = true
+	first.agent.startReply = instDataStartReply(t, n)
+	first.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+	if code := first.run(context.Background()); code != exitOK {
+		t.Fatalf("first walk exit %d: %s\n%s", code, first.stderr.String(), first.stdout.String())
+	}
+	if n := countPrefix(first.agent.gmLines(), ".debug instancedata"); n != 1 {
+		t.Fatalf("first walk sent %d lines, want 1: %q", n, first.agent.gmLines())
+	}
+	// The raid is gone and no bind is left: the walk falls back to a fresh
+	// entry. The core reuses the id, so the new copy is 103 again.
+	second, _ := newPlaceFixture(t)
+	second.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
+	second.opts.reuseInstance = true
+	second.env.capLedger = ledger
+	second.agent.entered = false
+	second.agent.startReply = instDataStartReply(t, n)
+	second.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+	if code := second.run(context.Background()); code != exitOK {
+		t.Fatalf("second walk exit %d: %s\n%s", code, second.stderr.String(), second.stdout.String())
+	}
+	if n := countPrefix(second.agent.gmLines(), ".debug instancedata"); n != 1 {
+		t.Fatalf("fresh fallback sent %d lines, want the new copy's one: %q", n, second.agent.gmLines())
+	}
+}
+
 
 // One walk fires its leg once even when the run passes the leg twice, and a
 // leg that already fired in the same instance (marker in the out dir) does

@@ -21,7 +21,10 @@
 // dir, plus a mark (with the command list's hash) in the instance-cap ledger
 // (the walk's existing state file, which outlives the attempt's out dir),
 // remembers the sent commands, so a resumed walk in the same instance
-// (--reuse-instance) never refires: resending is harmless but noisy.
+// (--reuse-instance keeping it) never refires: resending is harmless (the
+// core's SetData is idempotent) but noisy. A fresh entry is a new copy even
+// when the core reuses the id, so every launch without --reuse-instance and
+// every --reuse-instance fresh fallback sends again for its own copy.
 package main
 
 import (
@@ -113,12 +116,14 @@ func (w *walk) gmInstanceDataInst(ctx context.Context) string {
 // gmInstanceDataDone says the leg's lines already went out in this instance.
 // The out dir's marker always counts (keyed by the instance, or by "unplaced"
 // when the id could not be read). The ledger counts ONLY on a --reuse-instance
-// walk: it continues the same instance in a fresh out dir, so the out dir's
-// marker cannot tell it — but a fresh walk always sends, even when an old mark
-// names the same instance id (the core reuses ids across copies). A changed
-// command list is never done: the ledger's mark carries the hash it was sent
-// with, and the marker carries the list itself. An "unreadable" instance is
-// marker-only: the ledger keys on instances.
+// walk that kept its instance ("alive" or "bind"): it continues the same copy
+// in a fresh out dir, so the out dir's marker cannot tell it. A fresh entry
+// is a new copy even when the core reuses the id across copies, so it decides
+// by its own out-dir marker alone and always sends: a launch without
+// --reuse-instance, or a --reuse-instance walk that fell back to a fresh
+// instance. A changed command list is never done: the ledger's mark carries
+// the hash it was sent with, and the marker carries the list itself. An
+// "unreadable" instance is marker-only: the ledger keys on instances.
 func (w *walk) gmInstanceDataDone(inst string, spec raidwalk.GMInstanceSpec) bool {
 	key := inst
 	if key == "unreadable" {
@@ -127,7 +132,7 @@ func (w *walk) gmInstanceDataDone(inst string, spec raidwalk.GMInstanceSpec) boo
 	if key != "" && raidwalk.NewInstanceMarks(w.outDir).LegDone(key, spec.Leg, spec) {
 		return true
 	}
-	if !w.opts.reuseInstance || inst == "" || inst == "unreadable" || w.env.capLedger == "" {
+	if !w.opts.reuseInstance || w.reuseMode == "fresh" || inst == "" || inst == "unreadable" || w.env.capLedger == "" {
 		return false
 	}
 	l, err := raidwalk.LoadCapLedger(w.env.capLedger)

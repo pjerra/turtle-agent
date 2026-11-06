@@ -706,6 +706,32 @@ func TestAutoExit29RetriesOnceInAFreshInstance(t *testing.T) {
 		t.Fatalf("no ESCALATE stop for the second exit 29:\n%s", f.events())
 	}
 }
+// The exit-29 fresh-instance retry keeps the target's --gm-instance-data: the
+// new copy needs the lines, so the relaunch args carry the flag through (as
+// does the same-instance re-place before it).
+func TestAutoExit29RetryCarriesGMInstanceData(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --gm-instance-data hakkar:1 3;6 3;0 0")
+	f.attempt("a-1", 5, 51, "server closed the connection")
+	f.attempt("a-2", 29, 0, "place: 4 tries in the same instance, start step 51")
+	f.attempt("a-3", 29, 0, "place: 4 tries in the same instance, start step 51")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the reuse re-place", func() bool { return len(f.args()) >= 2 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the fresh-instance retry", func() bool { return len(f.args()) >= 3 })
+	args := f.args()
+	const want = "--gm-instance-data=hakkar:1 3;6 3;0 0"
+	if !strings.Contains(args[1], want) {
+		t.Fatalf("the reuse re-place dropped the flag: %s", args[1])
+	}
+	if !strings.Contains(args[2], want) {
+		t.Fatalf("the fresh-instance retry dropped the flag: %s", args[2])
+	}
+	finishAttempt(t, s)
+}
+
 
 func (f *autoFixture) statusFile() string {
 	raw, _ := os.ReadFile(filepath.Join(f.walk, autoStatusFile))
