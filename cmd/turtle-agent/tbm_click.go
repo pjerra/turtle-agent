@@ -163,7 +163,10 @@ func (c *tbmClient) prepare(ctx context.Context, s *session.Session, want, key s
 // tracker.
 func (c *tbmClient) pollRoster(ctx context.Context, s *session.Session, transport, key string, wait time.Duration) error {
 	var st tbm.Status
-	_, err := c.exchange(ctx, s, transport, "roster", key, wait, func(line string) bool {
+	if err := c.sendSlot(ctx); err != nil {
+		return err
+	}
+	_, err := c.exchange(ctx, s, transport, "roster", key, s.Log().Last(), wait, func(line string) bool {
 		return strings.HasPrefix(line, "TBM:") && st.Add(line)
 	}, nil)
 	return err
@@ -175,21 +178,28 @@ type exchanged struct {
 	sentAt      time.Time
 }
 
-// exchange sends command on transport (after the addon's send throttle) and feeds the lines
-// that come back on that transport to feed until it returns true or wait runs out; with quiet,
-// a quiet gap of that length also ends it. Every TBM: line also goes into the tracker. The
-// caller holds c.mu.
-func (c *tbmClient) exchange(ctx context.Context, s *session.Session, transport, command, key string, wait time.Duration,
-	feed func(line string) bool, quiet func() time.Duration) (exchanged, error) {
+// sendSlot waits out the addon's send throttle: SEND_DELAY between requests, whichever
+// transport they take. The caller holds c.mu.
+func (c *tbmClient) sendSlot(ctx context.Context) error {
 	if d := c.tr.Throttle(time.Now()); d > 0 {
 		select {
 		case <-time.After(d):
 		case <-ctx.Done():
-			return exchanged{}, ctx.Err()
+			return ctx.Err()
 		}
 	}
+	return nil
+}
+
+// exchange sends command on transport and feeds the lines that come back on that transport to
+// feed until it returns true or wait runs out; with quiet, a quiet gap of that length also ends
+// it. Every TBM: line also goes into the tracker. It reads from the log cursor since, which lets
+// a request see a late reply that arrived before it was sent; the caller has waited out the
+// send throttle and holds c.mu.
+func (c *tbmClient) exchange(ctx context.Context, s *session.Session, transport, command, key string, since uint64, wait time.Duration,
+	feed func(line string) bool, quiet func() time.Duration) (exchanged, error) {
 	log := s.Log()
-	x := exchanged{since: log.Last()}
+	x := exchanged{since: since}
 	x.next = x.since
 	if verb, _, _ := strings.Cut(command, " "); verb == "roster" || verb == "list" {
 		c.tr.NoteRoster(time.Now())
@@ -319,6 +329,10 @@ func (c *tbmClient) click(ctx context.Context, p clickParams) (clickResult, erro
 	c.tr.Reset(s)
 	wait := waitBound(p.WaitMS, tbm.ActionTimeoutMS)
 	key := groupKey(s)
+	// Before the drain: an ACK that lands while prepare runs (its roster exchange, the send
+	// throttle) answers an earlier request, and this click owes it, so the exchange below must
+	// read it from here to pass over it instead of its own reply.
+	since := s.Log().Last()
 	c.drain(s, key)
 	tgt := c.target(s)
 
@@ -355,7 +369,11 @@ func (c *tbmClient) click(ctx context.Context, p clickParams) (clickResult, erro
 	}
 
 	res := clickResult{Button: btn.Name, Why: why, Refreshed: polled, Sent: sentFor(transport, cmd.Text), Scope: scopeOf(btn, cmd, targetBot)}
-	x, err := c.exchange(ctx, s, transport, cmd.Text, key, wait, m.Feed, m.Quiet)
+	if err := c.sendSlot(ctx); err != nil {
+		res.Since, res.Next = since, since
+		return res, err
+	}
+	x, err := c.exchange(ctx, s, transport, cmd.Text, key, since, wait, m.Feed, m.Quiet)
 	res.Since, res.Next = x.since, x.next
 	if err != nil {
 		return res, err
@@ -386,7 +404,10 @@ func (c *tbmClient) click(ctx context.Context, p clickParams) (clickResult, erro
 			}
 		}
 		var st tbm.Status
-		fx, err := c.exchange(ctx, s, transport, "roster", key, wait, func(line string) bool {
+		if err := c.sendSlot(ctx); err != nil {
+			return res, err
+		}
+		fx, err := c.exchange(ctx, s, transport, "roster", key, s.Log().Last(), wait, func(line string) bool {
 			return strings.HasPrefix(line, "TBM:") && st.Add(line)
 		}, nil)
 		if err != nil {
@@ -446,7 +467,12 @@ func (c *tbmClient) sendRaw(ctx context.Context, p sendParams) (clickResult, err
 	}
 	m := tbm.NewAnyMatcher()
 	res := clickResult{Why: why, Refreshed: polled, Sent: sentFor(transport, command)}
-	x, err := c.exchange(ctx, s, transport, command, key, waitBound(p.WaitMS, tbm.ActionTimeoutMS), m.Feed, nil)
+	// From after the throttle: the any-reply matcher cannot pass over a late ACK, so it must
+	// not be offered one.
+	if err := c.sendSlot(ctx); err != nil {
+		return res, err
+	}
+	x, err := c.exchange(ctx, s, transport, command, key, s.Log().Last(), waitBound(p.WaitMS, tbm.ActionTimeoutMS), m.Feed, nil)
 	res.Since, res.Next = x.since, x.next
 	res.Reply = m.Reply()
 	return res, err
