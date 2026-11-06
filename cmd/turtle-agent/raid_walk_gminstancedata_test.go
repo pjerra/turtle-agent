@@ -1174,3 +1174,71 @@ func TestGMInstanceDataRestResendOncePerBossRow(t *testing.T) {
 		t.Fatalf("%d instancedata lines, want the launch send + one rest resend: %q", got, f.agent.gmLines())
 	}
 }
+
+// instDataLegBossStep is the step of a leg's boss row in the ZG rows.
+func instDataLegBossStep(t *testing.T, leg string) int {
+	t.Helper()
+	rows := zgRows(t)
+	for i, s := range rows.Steps {
+		if s.Kind == planexport.KindBoss && strings.EqualFold(raidwalk.PlaceLegName(rows, i+1), leg) {
+			return i + 1
+		}
+	}
+	t.Fatalf("no %s boss row in the ZG rows", leg)
+	return 0
+}
+
+// The boss row is the FIRST status that names the leg and nothing was sent for
+// it yet (the walk was placed in another leg): the initial send must not fire
+// at the boss row, where the pause lands mid-pull. One skip note, no pause, no
+// line. The lines go out at the next out-of-combat rest of that leg, and not at
+// the walking status in between.
+func TestGMInstanceDataFirstLegStatusAtBossRowSendsNothingUntilARest(t *testing.T) {
+	n := zgPlaceSteps(t)
+	boss := instDataLegBossStep(t, "high_priestess_arlokk")
+	st := func(step int, kind, phase, note string) queuedEvent {
+		return queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|%s|%s|%s", step, n.total, kind, phase, note)}
+	}
+	for _, withRest := range []bool{false, true} {
+		name := "no rest"
+		if withRest {
+			name = "later rest"
+		}
+		t.Run(name, func(t *testing.T) {
+			f, _ := newPlaceFixture(t)
+			f.opts.gmInstanceData = stringList{"high_priestess_arlokk:1 3"}
+			f.agent.startReply = instDataStartReply(t, n)
+			f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+			q := []queuedEvent{
+				st(boss, "boss", "begin", "starting the boss row"),
+				st(boss+1, "move", "walk", "walking"),
+			}
+			if withRest {
+				q = append(q, st(boss+1, "move", "rest", "resting"))
+			}
+			q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_arlokk|move|walk|stopped before step %d (until boss): the party stays where it stands", boss+1, n.total, n.until)})
+			f.agent.startQueue = q
+			if code := f.run(context.Background()); code != exitOK {
+				t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+			}
+			got := countPrefix(f.agent.gmLines(), ".debug instancedata")
+			verbs := strings.Join(f.agent.runVerbs, " ")
+			if withRest {
+				if got != 1 || verbs != "start pause resume" {
+					t.Fatalf("%d lines, run verbs %q, want the rest's one send under one pause", got, verbs)
+				}
+			} else if got != 0 || verbs != "start" {
+				t.Fatalf("%d lines, run verbs %q, want nothing sent and no pause", got, verbs)
+			}
+			warns := 0
+			for _, note := range f.summary().Notes {
+				if strings.Contains(note, "gm-instance-data: no out-of-combat rest before boss row") {
+					warns++
+				}
+			}
+			if warns != 1 {
+				t.Fatalf("%d skip notes, want 1: %q", warns, f.summary().Notes)
+			}
+		})
+	}
+}

@@ -1044,6 +1044,8 @@ type walk struct {
 	gmInstanceDataOZeroWarned bool
 	// gmInstanceDataBossSent holds the boss rows (steps) whose pre-pull resend already went out in this walk.
 	gmInstanceDataBossSent map[int]bool
+	// gmInstanceDataHeld holds the legs (lower case) whose first send was due at a boss row and was skipped: they send at the next out-of-combat rest.
+	gmInstanceDataHeld map[string]bool
 	// gongReruns counts the run restarts at a leg's summoning open row (a boss that despawns after a wipe comes back with the
 	// object: Zul'Gurub's Arlokk). bossGongReruns bounds them. gongRerunAt/-Boss/-Open name the last one that went out: the
 	// next "boss not found" pause reads whether the frames saw the boss alive since, which tells the gong summoning him again

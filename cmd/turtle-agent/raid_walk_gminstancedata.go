@@ -454,6 +454,7 @@ func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus, 
 			pending = w.gmInstanceDataBossResend(inst, st)
 		}
 	}
+	pending = w.gmInstanceDataHold(st, pending, later)
 	if len(pending) == 0 {
 		return false, nil
 	}
@@ -468,6 +469,7 @@ func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus, 
 	if err := w.gmInstanceDataFire(ctx, inst, spec); err != nil {
 		return true, err
 	}
+	delete(w.gmInstanceDataHeld, strings.ToLower(spec.Leg))
 	if pauseAttempted {
 		if _, err := w.commander(ctx, commanderReq{Op: "run", Verb: "resume", WaitMS: 10000}); err != nil {
 			return true, stopf(exitRaidWalkFailed, "gm-instance-data: %s: the run resume after the lines failed: %v", spec.Leg, err)
@@ -604,6 +606,40 @@ func (w *walk) gmInstanceDataBossResend(inst string, st tbm.RunStatus) []raidwal
 		}
 		for _, cmd := range spec.Cmds {
 			delete(w.gmInstanceDataTries, lineKey(spec.Leg, raidwalk.GMInstanceDataLine(cmd)))
+		}
+		out = append(out, spec)
+	}
+	return out
+}
+
+// gmInstanceDataHold drops the pending sends that must not fire on this status.
+// While the status is a plan boss row nothing fires, the initial send
+// included: the boss row becomes current about 1 s before the run can pull, so
+// a pause there lands mid-pull (the lines belong before `run start` or at the
+// confirmed rest before the row). A leg whose lines were due at a boss row is
+// held: they go out at the next out-of-combat rest or gather of that leg (the
+// pre-pull gate), not at any walking status in between.
+func (w *walk) gmInstanceDataHold(st tbm.RunStatus, pending []raidwalk.GMInstanceSpec, later bool) []raidwalk.GMInstanceSpec {
+	if len(pending) == 0 {
+		return pending
+	}
+	if _, ok := w.bossRowAt(st.Step); ok && st.Kind == planexport.KindBoss {
+		if w.gmInstanceDataHeld == nil {
+			w.gmInstanceDataHeld = map[string]bool{}
+		}
+		for _, spec := range pending {
+			w.gmInstanceDataHeld[strings.ToLower(spec.Leg)] = true
+		}
+		return nil
+	}
+	restOK := false
+	if p := strings.ToLower(st.Phase); p == "rest" || p == "gather" {
+		restOK = w.gmInstanceDataPrePull(st, later, w.env.now())
+	}
+	var out []raidwalk.GMInstanceSpec
+	for _, spec := range pending {
+		if w.gmInstanceDataHeld[strings.ToLower(spec.Leg)] && !restOK {
+			continue
 		}
 		out = append(out, spec)
 	}
