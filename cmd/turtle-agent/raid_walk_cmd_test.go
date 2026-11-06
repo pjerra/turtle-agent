@@ -1305,6 +1305,10 @@ type fakeDash struct {
 	decFileErr    map[string]error
 	decRequested  []string // every DecisionFile file name requested, in order
 	decCalls      int      // Decisions calls (the ended wait polls again)
+	// fightsStallFirst is how many of the first Fights calls block until their context ends (or fightsStall passes).
+	fightsStallFirst int
+	fightsStall      time.Duration
+	fightsCalls      int
 }
 
 func (d *fakeDash) Login(ctx context.Context) error { return nil }
@@ -1334,6 +1338,20 @@ func (d *fakeDash) commandersCalls() int {
 }
 
 func (d *fakeDash) Fights(ctx context.Context, commander string) (json.RawMessage, error) {
+	d.mu.Lock()
+	d.fightsCalls++
+	stall := d.fightsStallFirst > 0
+	if stall {
+		d.fightsStallFirst--
+	}
+	d.mu.Unlock()
+	if stall {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(d.fightsStall):
+		}
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.fightsErr != nil {

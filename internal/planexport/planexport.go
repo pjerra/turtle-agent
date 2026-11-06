@@ -110,19 +110,24 @@ const (
 	// MaxHoldTimeoutS is the cap of a hold row (dungeon.MaxHoldTimeoutS): Rajaxx's event runs about 1272 s. The module's
 	// kPlanMaxTimeoutS must allow it for the hold kind.
 	MaxHoldTimeoutS = dungeon.MaxHoldTimeoutS
-	MaxEntries      = 16    // creature entries of a pull or boss
-	MaxKind         = 16    // ai_dungeon_step.kind is a varchar(16): a longer kind fails the INSERT (or is cut)
-	MaxPlanName     = 32    // ai_dungeon_plan.plan
-	MaxLegName      = 32    // ai_dungeon_leg.name
-	MaxPlanList     = 255   // ai_dungeon_plan.cc_priority, cc_always, kill_first (varchar(255))
-	MaxSource       = 64    // ai_dungeon_plan.source
-	MaxComment      = 255   // every comment column
-	MaxLegs         = 255   // ai_dungeon_leg.leg is a tinyint unsigned
-	MaxSteps        = 65535 // ai_dungeon_step.seq is a smallint unsigned
-	DefaultPullYd   = 15    // the module's pull radius for 0
-	PullSlackYd     = 10    // added to the farthest position of a group when the plan gives no radius
-	MoveGapWarnYd   = 60    // the module logs consecutive moves farther apart than this
-	MoveGapCutYd    = 50    // the longest hop the exporter leaves when it cuts a leg into via points
+	MaxEntries      = 16 // creature entries of a pull or boss
+	// MaxPlanEntries is the cap of each plan unit list (cc_priority, cc_always, kill_first): TortoiseBots'
+	// kPlanMaxEntries = 16 (ai/playerbot/DungeonPlanPolicy.h:197). ParsePlanEntries refuses a longer list and
+	// DungeonPlanMgr::SetUnits then keeps NONE of the four lists, so the plan runs without crowd control and
+	// kill-first targets (Zul'Gurub's 19-entry cc_priority, t1105c: no kill_first and no CC for a whole night).
+	MaxPlanEntries = 16
+	MaxKind        = 16    // ai_dungeon_step.kind is a varchar(16): a longer kind fails the INSERT (or is cut)
+	MaxPlanName    = 32    // ai_dungeon_plan.plan
+	MaxLegName     = 32    // ai_dungeon_leg.name
+	MaxPlanList    = 255   // ai_dungeon_plan.cc_priority, cc_always, kill_first (varchar(255))
+	MaxSource      = 64    // ai_dungeon_plan.source
+	MaxComment     = 255   // every comment column
+	MaxLegs        = 255   // ai_dungeon_leg.leg is a tinyint unsigned
+	MaxSteps       = 65535 // ai_dungeon_step.seq is a smallint unsigned
+	DefaultPullYd  = 15    // the module's pull radius for 0
+	PullSlackYd    = 10    // added to the farthest position of a group when the plan gives no radius
+	MoveGapWarnYd  = 60    // the module logs consecutive moves farther apart than this
+	MoveGapCutYd   = 50    // the longest hop the exporter leaves when it cuts a leg into via points
 	// The floor-aware cut (plan-export --floor-aware): a hop up to FloorAwareHopYd stays one hop, corners under FloorAwareMergeYd
 	// from the point before them and turns under FloorAwareTurnDeg get no row, a kept corner is pushed FloorAwarePushYd off the wall
 	// it sees within FloorAwareEdgeScanYd, and a split point takes the floor within FloorAwareFloorYd of its straight-line z or is
@@ -173,6 +178,17 @@ type StepRow struct {
 	TimeoutS int
 	Entries  []uint32
 	Comment  string
+	// PatrolEntries are the entries of a patrol the plan attaches to this pull group (dungeon.PullGroup.Patrol): not a
+	// column of ai_dungeon_step. raid-walk's --gm-clear clears the row's own patrol, because a patroller's spawn may stand
+	// outside the row's radius while its loop comes by the pull (ZG's 11352 patrol at Arlokk's north stair).
+	PatrolEntries []uint32
+	// PatrolSource is the plan patrol's source string (dungeon.Patrol.Source: "creature_movement <guid>", "spawn <guid>"
+	// or a note) and PatrolPath its waypoints, in plan order. Neither is a column: --gm-clear matches the world export's
+	// patrol to the row by the source's creature_movement guid (or, when the source names none, by an exact path match),
+	// never by entry and distance (several patrols share an entry: ZG's 11352 walks at Jeklik's stair, at Arlokk's and
+	// at Mandokir's).
+	PatrolSource string
+	PatrolPath   []dungeon.Point
 }
 
 // Rows are the three tables' rows of one plan.
@@ -331,6 +347,9 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 		col string
 		es  []uint32
 	}{{"cc_priority", p.CCPriority}, {"cc_always", p.CCAlways}, {"kill_first", p.KillFirst}} {
+		if n := len(l.es); n > MaxPlanEntries {
+			return Result{}, fmt.Errorf("plan %s: %s has %d entries (TortoiseBots kPlanMaxEntries is %d, DungeonPlanPolicy.h:197: the loader then keeps none of the four lists); trim it", name, l.col, n, MaxPlanEntries)
+		}
 		if n := len(entriesText(l.es)); n > MaxPlanList {
 			return Result{}, fmt.Errorf("plan %s: %s is %d characters as a comma list (ai_dungeon_plan.%s holds %d)", name, l.col, n, l.col, MaxPlanList)
 		}
@@ -644,7 +663,15 @@ func (b *builder) pull(gi int, g dungeon.PullGroup) error {
 		c += "; stand pull"
 	}
 	b.at("pull", gi, 0)
-	b.add(StepRow{Kind: KindPull, X: f32(cx), Y: f32(cy), Z: f32(cz), Radius: radius, Item: uint32(g.MaxBodies), Flags: flags, Param: param, Entries: uniq(g.Entries), Comment: c})
+	var patrol []uint32
+	var patrolSource string
+	var patrolPath []dungeon.Point
+	if g.Patrol != nil {
+		patrol = uniq(g.Patrol.Entries)
+		patrolSource = g.Patrol.Source
+		patrolPath = g.Patrol.Path
+	}
+	b.add(StepRow{Kind: KindPull, X: f32(cx), Y: f32(cy), Z: f32(cz), Radius: radius, Item: uint32(g.MaxBodies), Flags: flags, Param: param, Entries: uniq(g.Entries), Comment: c, PatrolEntries: patrol, PatrolSource: patrolSource, PatrolPath: patrolPath})
 	b.last, b.haveLast = dungeon.Point{X: f32(cx), Y: f32(cy), Z: f32(cz)}, true
 	if g.StandPull {
 		b.last = g.Approach[len(g.Approach)-1] // the party fights from its stand: the next move's hop is measured from there
@@ -1203,8 +1230,20 @@ func (b *builder) cutLongHops() error {
 				// The leader must see the target from its last row: the floor-aware cutter keeps hops up to 110 yd, so the corner
 				// left after the 25 yd standoff can stand beyond its 60 yd sight (razorfen_kraul round 35: the boss row 73.5 yd
 				// from the last approach row, and its stand discipline walked back there into a no-LOS hold). A point on the path
-				// at approachLeadYd past the standoff is the last row then.
-				if len(via) > 0 && dist3(via[len(via)-1], c) > dungeon.RunLeaderReachYd {
+				// at approachLeadYd past the standoff is the last row then. The interpolation needs a path polyline to take it
+				// from: when the cutter kept a single point and dropped the rest as water (walk 38's Hakkar lake crossing), the
+				// straight line from that point to the target is not the walk the run leader takes, so no row is written there
+				// and the run leader paths the gap itself.
+				waterGap := false
+				if len(full) <= 1 {
+					for _, n := range notes {
+						if n.Dropped && strings.Contains(n.Reason, "NavWater") {
+							waterGap = true
+							break
+						}
+					}
+				}
+				if len(via) > 0 && !waterGap && dist3(via[len(via)-1], c) > dungeon.RunLeaderReachYd {
 					if p, ok := pointBefore(full, c, approachStandoffYd+approachLeadYd); ok {
 						via = append(via, p)
 					}

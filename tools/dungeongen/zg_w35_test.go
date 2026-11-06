@@ -176,36 +176,30 @@ func TestZgW35JeklikGroup13KnowsTheBatLoop(t *testing.T) {
 	}
 }
 
-// TestZgW35ArlokkTerraceOwnsTheLowerPanther: walk 35 run-310 (leg-4 group 12)
-// waited twice for the "patroller" 11365 49345 (60 s each) then paused: the
-// straggler walk to it crosses its packmate at 0.6 yd. 49345's spawn stands
-// 12.7-13.6 yd (3D over the level gap) from the row point, outside the
-// radius-12 pull. Radius 14 owns it (3D 12.7-13.6 < 14), so it fights with the pack.
-//
-// Radius 14 reaches entry-gated members of three formations: the four lower
-// Panthers (formation 49343's 11365s), the four upper-B Shadow Hunters
-// (formation 51353's 11339s) and the upper-east pack (formation 51369: four
-// 11365s and two 11339s). The row's pull is 14 bodies, so max_bodies must be
-// 14: 10 leaves four owned bodies over the run leader's plan ceiling.
+// TestZgW35ArlokkTerraceOwnsTheLowerPanther: walk 35 run-310 waited twice for the "patroller" 11365 49345
+// (60 s each) then paused: the straggler walk to it crosses its packmate at 0.6 yd. 49345 stands on the z 60
+// landing with its formation (formation 49343: four Panthers and the two Blood Drinkers 51594/51595). The
+// 2026-11-05 re-route gives that formation its own row (its six spawns, radius 16, max_bodies 6), so the pull
+// owns 49345 outright instead of relying on the z 71 terrace row's radius.
 func TestZgW35ArlokkTerraceOwnsTheLowerPanther(t *testing.T) {
 	p, err := dungeon.Load(filepath.Join(plansDirT, "zul_gurub.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cs, err := readCreatures(filepath.Join("testdata", "map309", "creatures.tsv"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	leg := zgW35Leg(t, p, "high_priestess_arlokk")
+	// The z 60 landing's formation: its positions include 49345's spawn.
+	spawn := dungeon.Point{X: -11496, Y: -1619.55, Z: 60.4075}
 	var g *dungeon.PullGroup
 	for i := range leg.PullGroups {
-		if len(leg.PullGroups[i].Positions) == 10 {
-			g = &leg.PullGroups[i]
-			break
+		for _, q := range leg.PullGroups[i].Positions {
+			if dist(q, spawn) < 0.5 {
+				g = &leg.PullGroups[i]
+				break
+			}
 		}
 	}
 	if g == nil {
-		t.Fatal("no leg-4 group 12 (the 10-position terrace cluster)")
+		t.Fatalf("no leg-4 group holds 49345's spawn %.1f %.1f %.1f", spawn.X, spawn.Y, spawn.Z)
 	}
 	var cen dungeon.Point
 	for _, q := range g.Positions {
@@ -217,71 +211,11 @@ func TestZgW35ArlokkTerraceOwnsTheLowerPanther(t *testing.T) {
 	cen.X /= n
 	cen.Y /= n
 	cen.Z /= n
-	// 49345's spawn below the terrace (the run's "spawned 12.7 yd from the centre").
-	spawn := dungeon.Point{X: -11496, Y: -1619.55, Z: 60.4075}
 	d3 := math.Sqrt(float64((spawn.X-cen.X)*(spawn.X-cen.X) + (spawn.Y-cen.Y)*(spawn.Y-cen.Y) + (spawn.Z-cen.Z)*(spawn.Z-cen.Z)))
 	if d3 > float64(g.Radius) {
-		t.Errorf("group 12 radius %g does not own 49345 (3D %.1f yd from the row point): the run waits 60 s for it, then pauses on the straggler walk", g.Radius, d3)
+		t.Errorf("the z 60 row's radius %g does not own 49345 (3D %.1f yd from the row point): the run waits 60 s for it, then pauses on the straggler walk", g.Radius, d3)
 	}
-	byLeader := map[uint64][]creature{}
-	for _, c := range cs {
-		if c.GroupLeader != 0 {
-			byLeader[c.GroupLeader] = append(byLeader[c.GroupLeader], c)
-		}
-	}
-	entries := map[uint32]bool{}
-	for _, e := range g.Entries {
-		entries[e] = true
-	}
-	rowDist := func(c creature) float64 {
-		return dist(cen, c.Pos)
-	}
-	owned := 0
-	for _, c := range cs {
-		if !entries[c.Entry] {
-			continue
-		}
-		fam := byLeader[c.GroupLeader]
-		if len(fam) == 0 {
-			fam = []creature{c}
-		}
-		for _, m := range fam {
-			if rowDist(m) <= float64(g.Radius) {
-				owned++
-				break
-			}
-		}
-	}
-	// All four absorbed Panthers (formation 49343's 11365s) are owned.
-	for _, guid := range []uint64{49343, 49344, 49345, 49346} {
-		var c *creature
-		for i := range cs {
-			if cs[i].GUID == guid {
-				c = &cs[i]
-				break
-			}
-		}
-		if c == nil {
-			t.Fatalf("no spawn %d in the map-309 export", guid)
-		}
-		if !entries[c.Entry] || rowDist(*c) > float64(g.Radius) {
-			// The formation rule owns through any member in reach: check the pack.
-			hit := false
-			for _, m := range byLeader[c.GroupLeader] {
-				if entries[m.Entry] && rowDist(m) <= float64(g.Radius) {
-					hit = true
-					break
-				}
-			}
-			if !hit {
-				t.Errorf("group 12 (radius %g) does not own its Panther %d at %.1f %.1f %.1f: %.1f yd out", g.Radius, guid, c.Pos.X, c.Pos.Y, c.Pos.Z, rowDist(*c))
-			}
-		}
-	}
-	if owned != 14 {
-		t.Errorf("group 12 owns %d bodies, want 14 (upper B 4 + upper east 6 + the four lower Panthers)", owned)
-	}
-	if g.MaxBodies != 14 {
-		t.Errorf("group 12 max_bodies %d, want 14 (the row's owned pull size)", g.MaxBodies)
+	if len(g.Positions) != 6 || g.MaxBodies != 6 {
+		t.Errorf("the z 60 row has %d positions and max_bodies %d, want the formation's 6 and 6", len(g.Positions), g.MaxBodies)
 	}
 }

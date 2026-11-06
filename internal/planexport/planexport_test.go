@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -382,6 +383,66 @@ func TestZulfarrakExportCarriesTheUnitLists(t *testing.T) {
 	}
 	if fmt.Sprint(back[0].Plan.KillFirst) != "[7785 8179 5650 7247 7608 7606 7605 62499]" {
 		t.Fatalf("read back %+v", back[0].Plan)
+	}
+}
+
+// TestPlanListOverMaxEntriesIsRefused: TortoiseBots' plan loader caps each unit list at kPlanMaxEntries = 16
+// (ai/playerbot/DungeonPlanPolicy.h:197); past the cap ParsePlanEntries refuses the list and SetUnits keeps NONE of
+// the four lists, so the plan runs with no crowd control and no kill-first targets. A 17-entry list must fail the
+// export, 16 must pass.
+func TestPlanListOverMaxEntriesIsRefused(t *testing.T) {
+	entries := func(n int) []uint32 {
+		es := make([]uint32, n)
+		for i := range es {
+			es[i] = 10000 + uint32(i)
+		}
+		return es
+	}
+	set := func(p *dungeon.Plan, col string, es []uint32) {
+		switch col {
+		case "cc_priority":
+			p.CCPriority = es
+		case "cc_always":
+			p.CCAlways = es
+		case "kill_first":
+			p.KillFirst = es
+		}
+	}
+	for _, col := range []string{"cc_priority", "cc_always", "kill_first"} {
+		p := parsePlan(t, small)
+		set(p, col, entries(17))
+		if _, err := Build(p, Options{}); err == nil || !strings.Contains(err.Error(), col) || !strings.Contains(err.Error(), "16") {
+			t.Errorf("%s with 17 entries must be refused naming the list and the cap: %v", col, err)
+		}
+		q := parsePlan(t, small)
+		set(q, col, entries(16))
+		if _, err := Build(q, Options{}); err != nil {
+			t.Errorf("%s with 16 entries must pass: %v", col, err)
+		}
+	}
+}
+
+// TestEveryPlanListFitsThePlanCap runs the cap over every plan in dungeons/: one list over it would export a migration
+// whose loader keeps none of the four lists.
+func TestEveryPlanListFitsThePlanCap(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("..", "..", "dungeons", "*.json"))
+	if err != nil || len(files) < 40 {
+		t.Fatalf("%d plan files: %v", len(files), err)
+	}
+	for _, f := range files {
+		p, err := dungeon.Load(f)
+		if err != nil {
+			t.Errorf("%v", err)
+			continue
+		}
+		for _, l := range []struct {
+			col string
+			es  []uint32
+		}{{"cc_priority", p.CCPriority}, {"cc_always", p.CCAlways}, {"kill_first", p.KillFirst}} {
+			if len(l.es) > MaxPlanEntries {
+				t.Errorf("%s: %s has %d entries (max %d, DungeonPlanPolicy.h:197)", f, l.col, len(l.es), MaxPlanEntries)
+			}
+		}
 	}
 }
 
@@ -1880,5 +1941,47 @@ func TestObjectWaitGoneOKCarriesTheGoneIsDoneFlag(t *testing.T) {
 	}
 	if plain := row(plan("")); plain.Flags != 0 {
 		t.Fatalf("a plain wait_object row carries flags %d", plain.Flags)
+	}
+}
+
+// TestApproachHopsDoesNotInterpolateACutGap: a cutter that keeps a single point far from the pack (the floor-aware
+// cut drops the wet corners, so its via can be one dry point) leaves that point as the last approach row. Walk 38 f2
+// paused at step 601 "no walkable path toward -11752.0 -1741.9 14.3": the exporter took the straight line from that
+// point to the pack, 30 yd before it, and wrote a row 4 yd under the floor (the straight line crosses a ridge the
+// navmesh does not). With no second cut point there is no path polyline to interpolate, and the run leader walks its
+// own complete path to the pack.
+func TestApproachHopsDoesNotInterpolateACutGap(t *testing.T) {
+	const js = `{"version":1,"name":"gap","status":"live-checked (test)","map":309,"entrance":{"x":0,"y":0,"z":0},
+ "legs":[{"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":100,"y":0,"z":0}]}]}]}`
+	cut := func(_ uint32, a, b dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		// One dry corner near the start; the rest of the path is wet and dropped.
+		return []dungeon.Point{{X: a.X + 10, Y: 0, Z: 0}},
+			[]CutNote{{Old: dungeon.Point{X: a.X + 20}, Dropped: true, Reason: "the point's own floor is NavWater: the water is crossed in one hop between dry points"}}, nil
+	}
+	res, err := Build(parsePlan(t, js), Options{Source: "test", Cut: cut, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var moves []float32
+	pull := -1
+	for i, s := range res.Rows.Steps {
+		if s.Leg != 0 {
+			continue
+		}
+		switch s.Kind {
+		case KindMove:
+			moves = append(moves, s.X)
+		case KindPull:
+			pull = i
+		}
+	}
+	if pull < 0 {
+		t.Fatalf("no pull row: %v", kinds(res.Rows, 0))
+	}
+	if len(moves) != 2 { // the leg's `to` move and the cutter's one point
+		t.Fatalf("approach rows at %v, want only the cutter's point (no straight-line interpolation across the wet gap)", moves)
+	}
+	if moves[len(moves)-1] != 20 {
+		t.Fatalf("the last approach row is at %.1f, want 20 (the cutter's point, 80 yd from the pack): %v", moves[len(moves)-1], moves)
 	}
 }

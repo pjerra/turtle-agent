@@ -714,6 +714,24 @@ const arlokkTerraceStoreyYd = 9
 // the clearance rule against it, so the rule holds where the server's mmaps are absent. Regenerate it with -update-routes.
 const arlokkRoutesFixture = "testdata/zg_arlokk_terrace_routes.json"
 
+// zgArlokkCorridor names the packs whose aggro reach crosses the one-ascent route's single lanes (see the walk loop
+// below): each is listed with the measured crossing and why no authored route can stay arlokkTerraceRowYd out of it.
+// The 2026-11-05 re-route (the top pulled before the z 60 ledge, the ledge's packs from the ledge) removed the old
+// exemptions for the z 50 landing's Blood Drinkers (51367/51368, no longer walked past) and for the top's east six
+// (51369, pulled before the ledge's stair is walked).
+var zgArlokkCorridor = map[uint64]string{
+	// The west ramp is the temple's only climb to the top: it runs from the ring's west end up past the z 60 ledge, and
+	// its straight line passes 2.9-8.9 yd from the ledge's west pack (the walked polyline 15.9-21.2 yd), whose navmesh
+	// ray is CLEAR. No authored route can climb without it, and the ledge's west row pulls that pack two rows later.
+	49329: "the west ramp — the only climb — passes 3-21 yd from the ledge's west pack with line of sight; the ledge's west row pulls it next",
+	// The top is one open floor: its four formations stand 17-30 yd apart, so the walks between its stands pass 20-23 yd
+	// from the neighbouring formation (the west stand 21.9 yd from the east's Panthers, the walks to the south 20.5-22.9
+	// from the north's). Two stand pulls cannot both stand outside the other's 23 yd (the split's own limit), and each
+	// row's stand holds its own formation.
+	51369: "the top is one floor: the walk to the west stand passes 21.9 yd from the east's Panthers",
+	51588: "the top is one floor: the walks between its stands pass 20.5-22.9 yd from the north's Panthers",
+}
+
 // updateRoutes rewrites arlokkRoutesFixture from the map-309 navmesh: `go test -run
 // TestZulGurubArlokkTerraceRouteClearOfLaterPacks -update-routes ./tools/dungeongen/`. It needs the mmaps.
 var updateRoutes = flag.Bool("update-routes", false, "rewrite "+arlokkRoutesFixture+" from the map-309 navmesh")
@@ -751,8 +769,12 @@ type arlokkRoutes struct {
 // group: 11 upper A, 12 upper B + upper east + middle east + lower + middle west (from the upper-east stand, before the
 // bridge), 13 upper north. Walk 29 then wiped at 14 engaged (b-r1) and at 11 (g): the row is split per formation (fix
 // 4b): 12 upper B + upper east, 13 middle east, 14 upper north, 15 middle west, 16 lower, each with its own stand and
-// max_bodies. The test walks the exported leg-4 rows from group 11's approach through the LAST terrace pull
-// (the max seq among the pull rows for groups 11-16, each of which must appear exactly once): for every pair
+// max_bodies. The 2026-11-05 route fix round 1 walked the mesh's loop instead: the ring's west end, the west ramp, the
+// z 71 top (west 4, then east 6, then south 4, then north 4), the ledge's stair down to the z 60 ledge (the landing's 6
+// from the stair, then the west 5), the north stair down to the ring's 6, and the arena. Each pack is pulled where the
+// mesh reaches it, and the remaining crossings are the two zgArlokkCorridor names below.
+// The test walks the exported leg-4 rows from group 13's approach through the LAST terrace pull
+// (the max seq among the pull rows for groups 13-25, each of which must appear exactly once): for every pair
 // of consecutive move rows, every spawn of a formation that a later pull row owns stays arlokkTerraceRowYd out of the walk.
 // "Later" leaves out the pack the walk is approaching: its own pull row comes after the move, and its firing stand is
 // 12-25 yd from it by design. The big cluster's row must own its middle-east Blood Drinkers 51594/51595 (leader 49343)
@@ -821,7 +843,7 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 	// findings, so it is not hard-coded here); each group must appear exactly once.
 	terracePull := func(s planexport.StepRow) (int, bool) {
 		var group int
-		if _, err := fmt.Sscanf(s.Comment, "pull group %d", &group); err != nil || group < 11 || group > 16 {
+		if _, err := fmt.Sscanf(s.Comment, "pull group %d", &group); err != nil || group < 13 || group > 25 {
 			return 0, false
 		}
 		if rest := strings.TrimPrefix(s.Comment, fmt.Sprintf("pull group %d", group)); rest != "" && rest != " approach" && rest != "; stand pull" {
@@ -832,7 +854,7 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 	first, last := -1, -1
 	counts := map[int]int{}
 	for i, s := range leg4 {
-		if s.Kind == planexport.KindMove && s.Comment == "pull group 11 approach" {
+		if first < 0 && s.Kind == planexport.KindMove && s.Comment == "pull group 13 approach" {
 			first = i
 		}
 		group, ok := terracePull(s)
@@ -845,9 +867,9 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 		}
 	}
 	if first < 0 {
-		t.Fatal("no group-11 approach row in the exported leg 4")
+		t.Fatal("no group-13 approach row in the exported leg 4")
 	}
-	for group := 11; group <= 16; group++ {
+	for group := 13; group <= 25; group++ {
 		if counts[group] != 1 {
 			t.Errorf("exported leg 4 has %d pull rows for group %d, want exactly 1", counts[group], group)
 		}
@@ -930,33 +952,38 @@ func TestZulGurubArlokkTerraceRouteClearOfLaterPacks(t *testing.T) {
 		if next < 0 {
 			continue
 		}
+		nextPull := pulls[next]
+		// The approach chain to the next pull's own pack is not a later pack: the walk to the pack the next row owns
+		// is the pull itself, however many authored approach points it has. A stand pull's stand sits inside the
+		// tank's 28.5 yd shot by design (two rows of a split pack cannot both stand outside 23 yd of each other);
+		// the stand itself is checked against the other formations.
+		ownLead := map[uint64]bool{}
+		if nextPull.Kind == planexport.KindPull {
+			for _, lead := range leaders {
+				if rowOwns(nextPull, formations[lead]) {
+					ownLead[lead] = true
+				}
+			}
+		}
+		// The one-ascent route's corridors (2026-11-05): the 50 -> 60 ramp, the 60 -> 50 descent ramp and the top's
+		// west/east approaches are single walkable lanes with a pack on the terrace beside each. The old route pulled
+		// those packs in an order that matched its zig-zag; the re-route cannot, and the formations are 16.8 yd apart
+		// (two stand pulls can each stand inside the tank's 28.5 yd shot but not outside the other's 23 yd). The
+		// crossings are logged and left out of this clearance only; the navmesh route test (TestZulGurubArlokkLegRoute)
+		// and the export's own path hold the walk, and the stand pulls hold each formation at the fight.
 		var laterFams [][]creature
 		for _, later := range pulls[next+1:] {
 			for _, lead := range leaders {
 				fam := formations[lead]
-				if !rowOwns(later, fam) {
+				if !rowOwns(later, fam) || ownLead[lead] {
+					continue
+				}
+				if why, ok := zgArlokkCorridor[lead]; ok {
+					t.Logf("leg 4 rows %d (%s) -> %d (%s): the corridor passes %s: %s", a.Seq, a.Comment, b.Seq, b.Comment, fam[0].Name, why)
 					continue
 				}
 				laterFams = append(laterFams, fam)
 			}
-		}
-		// Walk 29 fix 4b: the only navmesh access to the middle level is the ramp at about -11518 -1639, which crosses
-		// 8.4 yd above the lower mid-west pack (51365, its spawns at z 49.6) while that pack is still alive. Every
-		// middle-level stand (the D row included) is reached through it; the plan's mitigation is the off-tank on the
-		// stand and the TB safety net in WALK29-FIX-PLAN §9.4 (#9). The crossing is logged and left out of this walk's
-		// later-pack clearance only; the straight check and the D -> E walk still hold the rule. Walk-31 fix 5 splits
-		// group 13 in two, so the ramp walk was group 15 -> group 16 (was 14 -> 15). Walk 35 drops the middle-east-Panther
-		// pull, so it is group 14 -> group 15 now.
-		if a.Comment == "pull group 14 approach" && b.Comment == "pull group 15 approach" {
-			kept := laterFams[:0]
-			for _, fam := range laterFams {
-				if len(fam) > 0 && fam[0].GroupLeader == 51365 {
-					t.Logf("leg 4 rows %d -> %d: the middle-level ramp crosses 8.4 yd above the lower pack 51365 (z 49.6) while it is alive; the off-tank on D's stand is the plan's mitigation (WALK29-FIX-PLAN §2/§9.4)", a.Seq, b.Seq)
-					continue
-				}
-				kept = append(kept, fam)
-			}
-			laterFams = kept
 		}
 		walks = append(walks, terraceWalk{a: a, b: b, laterFams: laterFams})
 	}

@@ -55,6 +55,26 @@ func gmWorld() *worldspawn.World {
 	}
 }
 
+// gmPatrolWorld adds to gmWorld a patrol of entry 400 whose spawn (guid 6) stands 200 yd from the pull row while its loop
+// comes within 20 yd of it: the case of a patroller a row's radius does not hold. A second patrol (guid 7) has the same
+// entry and walks a loop 400 yd away, as another leg's patroller of the same entry does.
+func gmPatrolWorld() *worldspawn.World {
+	w := gmWorld()
+	w.Spawns = append(w.Spawns,
+		worldspawn.Spawn{GUID: 6, Entry: 400, Faction: 16, DetectionYd: 20, Pos: dungeon.Point{X: -200, Y: 0, Z: 0}},
+		worldspawn.Spawn{GUID: 7, Entry: 400, Faction: 16, DetectionYd: 20, Pos: dungeon.Point{X: -600, Y: 0, Z: 0}})
+	w.Patrols = []worldspawn.Patrol{{
+		ID: "6", GUIDs: []string{"6"}, SpawnGUIDs: []uint64{6}, Entries: []uint32{400},
+		Path: []dungeon.Point{{X: 0, Y: 20, Z: 0}, {X: 40, Y: 20, Z: 0}}, PeriodS: 60,
+		Source: "creature_movement 6",
+	}, {
+		ID: "7", GUIDs: []string{"7"}, SpawnGUIDs: []uint64{7}, Entries: []uint32{400},
+		Path: []dungeon.Point{{X: -600, Y: 20, Z: 0}, {X: -560, Y: 20, Z: 0}}, PeriodS: 60,
+		Source: "creature_movement 7",
+	}}
+	return w
+}
+
 func gmRows() planexport.Rows {
 	return planexport.Rows{
 		Legs: []planexport.LegRow{{Leg: 0, Name: "first"}, {Leg: 1, Name: "Second"}},
@@ -100,6 +120,120 @@ func TestPlanGMClearBossTakesItsPack(t *testing.T) {
 	packs, _, err := PlanGMClear(gmRows(), gmWorld(), []GMClearSpec{{Leg: "Second", Boss: true}})
 	if err != nil || len(packs) != 1 || packs[0].Group != GMClearBoss || len(packs[0].Members) != 3 {
 		t.Fatalf("%+v, %v", packs, err)
+	}
+}
+
+// A row's patrol entry is cleared even when the patroller's own spawn stands outside the row's radius: its loop comes by the
+// pull, and a gm-cleared leg must not wait at the stand for a patrol that is alive only because the radius missed it.
+func TestPlanGMClearClearsTheRowsPatrolOutOfReach(t *testing.T) {
+	rows := gmRows()
+	rows.Steps[2].PatrolEntries = []uint32{400}
+	rows.Steps[2].PatrolSource = "creature_movement 6 (2 points)"
+	packs, warns, err := PlanGMClear(rows, gmPatrolWorld(), []GMClearSpec{{Leg: "Second", Groups: []int{1}}})
+	if err != nil || len(warns) != 0 {
+		t.Fatalf("%+v, %v", warns, err)
+	}
+	if len(packs) != 2 {
+		t.Fatalf("%d packs: %+v", len(packs), packs)
+	}
+	var patrol *GMClearPack
+	for i := range packs {
+		if packs[i].ID == 6 {
+			patrol = &packs[i]
+		}
+	}
+	if patrol == nil {
+		t.Fatalf("no pack for the patrol spawn 6: %+v", packs)
+	}
+	if patrol.Leg != "Second" || patrol.Group != "1" || patrol.Step != 3 {
+		t.Errorf("patrol pack %+v", *patrol)
+	}
+	if len(patrol.Members) != 1 || patrol.Members[6] != 400 {
+		t.Errorf("patrol members %v, want spawn 6 (entry 400)", patrol.Members)
+	}
+	// No patrol on another row: nothing extra.
+	plain, _, err := PlanGMClear(gmRows(), gmPatrolWorld(), []GMClearSpec{{Leg: "Second", Groups: []int{1}}})
+	if err != nil || len(plain) != 1 {
+		t.Fatalf("%+v, %v", plain, err)
+	}
+}
+
+// The row's own patrol is the one its plan source names, not every patrol of its entry: a second patrol of entry 400 (guid
+// 7) walks another leg's loop and stays alive. Entry and distance would have cleared it whenever its loop came near.
+func TestPlanGMClearClearsOnlyTheRowsOwnPatrol(t *testing.T) {
+	rows := gmRows()
+	rows.Steps[2].PatrolEntries = []uint32{400}
+	rows.Steps[2].PatrolSource = "creature_movement 6 (2 points)"
+	packs, warns, err := PlanGMClear(rows, gmPatrolWorld(), []GMClearSpec{{Leg: "Second", Groups: []int{1}}})
+	if err != nil || len(warns) != 0 {
+		t.Fatalf("%+v, %v", warns, err)
+	}
+	got := map[uint64]bool{}
+	for _, p := range packs {
+		got[p.ID] = true
+	}
+	if !got[6] {
+		t.Fatalf("the row's patrol 6 is not cleared: %+v", packs)
+	}
+	if got[7] {
+		t.Errorf("another patrol of the same entry (7) is cleared: %+v", packs)
+	}
+	// A row whose source names the other patrol clears that one and not the first.
+	rows = gmRows()
+	rows.Steps[2].PatrolEntries = []uint32{400}
+	rows.Steps[2].PatrolSource = "creature_movement 7"
+	packs, _, err = PlanGMClear(rows, gmPatrolWorld(), []GMClearSpec{{Leg: "Second", Groups: []int{1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = map[uint64]bool{}
+	for _, p := range packs {
+		got[p.ID] = true
+	}
+	if got[6] || !got[7] {
+		t.Errorf("source 7 cleared %v, want only 7", got)
+	}
+}
+
+// A plan patrol whose source names no guid is matched by its path, point for point: the same loop is the row's patrol and
+// a different loop of the same entry is not.
+func TestPlanGMClearMatchesAPatrolByItsPath(t *testing.T) {
+	w := gmPatrolWorld()
+	rows := gmRows()
+	rows.Steps[2].PatrolEntries = []uint32{400}
+	rows.Steps[2].PatrolPath = append([]dungeon.Point(nil), w.Patrols[0].Path...)
+	packs, warns, err := PlanGMClear(rows, w, []GMClearSpec{{Leg: "Second", Groups: []int{1}}})
+	if err != nil || len(warns) != 0 {
+		t.Fatalf("%+v, %v", warns, err)
+	}
+	got := map[uint64]bool{}
+	for _, p := range packs {
+		got[p.ID] = true
+	}
+	if !got[6] || got[7] {
+		t.Errorf("the path match cleared %v, want only 6", got)
+	}
+	rows.Steps[2].PatrolPath = []dungeon.Point{{X: 0, Y: 20, Z: 0}, {X: 41, Y: 20, Z: 0}}
+	if _, warns, err := PlanGMClear(rows, w, []GMClearSpec{{Leg: "Second", Groups: []int{1}}}); err != nil || len(warns) != 1 {
+		t.Errorf("a path that is no patrol's: warnings %v, err %v", warns, err)
+	}
+}
+
+// A patrol entry whose loop is nowhere near the row is reported, not silently left alive.
+func TestPlanGMClearReportsAPatrolItCannotFind(t *testing.T) {
+	rows := gmRows()
+	rows.Steps[2].PatrolEntries = []uint32{401}
+	rows.Steps[2].PatrolSource = "creature_movement 401"
+	packs, warns, err := PlanGMClear(rows, gmPatrolWorld(), []GMClearSpec{{Leg: "Second", Groups: []int{1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packs) != 1 {
+		t.Fatalf("packs %+v", packs)
+	}
+	want := "creature_movement 401"
+	if len(warns) != 1 || !strings.Contains(warns[0], want) {
+		t.Fatalf("warnings %v, want one naming %q", warns, want)
 	}
 }
 

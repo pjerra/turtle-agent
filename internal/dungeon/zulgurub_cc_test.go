@@ -21,15 +21,18 @@ func TestZulGurubNoCCOnSacrificedTrolls(t *testing.T) {
 }
 
 // TestZulGurubTrashCcLists pins the WALK 39 trash CC lists (research/zg-trash/TRASH-TACTICS.md
-// section 4, decided data change): cc_priority is the exact 19-entry list, cc_always stays empty,
-// and kill_first drops the Blood Drinker 11353 to cc_priority.
+// section 4, decided data change): cc_priority is the exact 16-entry list, cc_always stays empty,
+// and kill_first drops the Blood Drinker 11353 to cc_priority. The list is the WALK 39 19-entry
+// order cut to the TortoiseBots plan-list cap (kPlanMaxEntries 16, DungeonPlanPolicy.h:197): the
+// 20261106030100 export first shipped all 19, the loader dropped all four lists and ZG ran with no
+// kill_first and no CC from t1105c on.
 func TestZulGurubTrashCcLists(t *testing.T) {
 	p, err := Load(filepath.Join("..", "..", "dungeons", "zul_gurub.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantCC := []uint32{14532, 14882, 14825, 11353, 11338, 11357, 11356, 11350, 14821, 11351, 11831, 11340, 11339, 11359, 15111, 15043, 11370, 11365, 11361}
-	wantKill := []uint32{15112, 14987, 14750, 15146, 11830, 14883}
+	wantCC := []uint32{14532, 14882, 14825, 11353, 11338, 11357, 11356, 11350, 14821, 11351, 11831, 11340, 11339, 11359, 15111, 15043}
+	wantKill := []uint32{14987, 15112, 14750, 15146, 11830, 14883}
 	if !slices.Equal(p.CCPriority, wantCC) {
 		t.Errorf("cc_priority is %v, want %v (TRASH-TACTICS.md section 4)", p.CCPriority, wantCC)
 	}
@@ -71,8 +74,7 @@ func TestZulGurubTrashCcLists(t *testing.T) {
 		{11356, 7, 608834276}, {11350, 7, 4160}, {14821, 1, 4160},
 		{11351, 7, 4160}, {11831, 7, 4160}, {11340, 7, 4160},
 		{11339, 7, 4160}, {11359, 1, 0}, {15111, 3, 4160},
-		{15043, 1, 1024}, {11370, 1, 4160}, {11365, 1, 4160},
-		{11361, 1, 4160},
+		{15043, 1, 1024},
 	}
 	bit := func(mechanic uint32) uint32 { return 1 << (mechanic - 1) }
 	// Auto CC families and their mechanics: Polymorph 17 (humanoid, beast),
