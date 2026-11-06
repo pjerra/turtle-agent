@@ -1788,10 +1788,8 @@ func (w *walk) placeFreshNeeded(now time.Time) string {
 		}
 	}
 	for _, h := range w.hostiles {
-		if !boss[h.entry] || now.Sub(h.at) > 10*time.Second || !bossRowEngaged(h.hppct, h.target) {
-			continue
-		}
-		if h.target == 0 || hire[h.target] {
+		// Engaged means he targets a hire: an evading boss healing up with no target is not on the party.
+		if boss[h.entry] && now.Sub(h.at) <= 10*time.Second && h.hppct > 0 && h.target != 0 && hire[h.target] {
 			return fmt.Sprintf("boss engaged with the party: %d at %d%%", h.entry, h.hppct)
 		}
 	}

@@ -325,3 +325,32 @@ func TestReuseGatherStopsAtOnceWhenTheBossIsEngaged(t *testing.T) {
 		t.Fatalf("the placement retried beside the boss: %q", sum.Notes)
 	}
 }
+
+// Round 1 (LOW): a boss with no target that is only healing (an evading boss under 100 %) is not engaged with the
+// party: the placement keeps its ordinary tries.
+func TestReuseGatherIgnoresABossWithNoTarget(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.reuseInstance = true
+	f.opts.noPlaceRetreat = false
+	f.agent.entered = false
+	f.agent.instanceBinds = []fakeBind{{inst: 107, ttr: "1h 0m"}}
+	p.inst = 107
+	f.agent.combatAllFn = func(int) bool { return true }
+	rows, _ := placePlanRows(t)
+	var boss uint32
+	for _, r := range rows.Steps {
+		if r.Kind == planexport.KindBoss && r.Leg == rows.Steps[zgPlaceSteps(t).start-1].Leg {
+			boss = r.Entry
+		}
+	}
+	f.agent.hostilesFn = func(int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 0xF130002C5800CAFA, Entry: boss, X: -12228.3, Y: -1680.7, Z: 126.7, HPPct: 90}}
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitRaidWalkPlaceFailed {
+		t.Fatalf("exit %d, want 29: %s", code, f.stderr.String())
+	}
+	if reason := f.summary().EndReason; strings.Contains(reason, "fresh instance needed") || !strings.Contains(reason, "4 tries in the same instance") {
+		t.Fatalf("end reason %q, want the ordinary 4-try failure: the boss has no target", reason)
+	}
+}
