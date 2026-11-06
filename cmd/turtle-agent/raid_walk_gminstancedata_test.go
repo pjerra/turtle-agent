@@ -1001,69 +1001,6 @@ func instDataThekalBossStep(t *testing.T) int {
 	return 0
 }
 
-// walk 45 hk7m: the launch send went out at 14:27, the priests' groups
-// respawned by the time the run reached Hakkar's row, and a respawned priest's
-// Reset() overwrote its DONE data. The walk resends once when the leg's BOSS
-// row becomes current, under the usual pause and resume, so the lines land
-// before the boss pull. The same boss row's later statuses (the pull itself,
-// the fight) send nothing more.
-func TestGMInstanceDataResendsBeforeTheBossPull(t *testing.T) {
-	n := zgPlaceSteps(t)
-	boss := instDataThekalBossStep(t)
-	if boss <= n.start {
-		t.Fatalf("boss row %d is not after the placed start %d", boss, n.start)
-	}
-	f, _ := newPlaceFixture(t)
-	f.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
-	f.agent.startReply = instDataStartReply(t, n)
-	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
-	st := func(state string, step int, kind, phase, note string) queuedEvent {
-		return queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|%s|%d/%d|high_priest_thekal|%s|%s|%s", state, step, n.total, kind, phase, note)}
-	}
-	f.agent.startQueue = []queuedEvent{
-		st("running", n.start, "move", "walk", "walking"),
-		st("running", boss, "boss", "begin", "starting the boss row"),
-		st("running", boss, "boss", "pull", "pulling"),
-		st("running", boss, "boss", "pull", "fighting"),
-		st("done", boss, "boss", "pull", fmt.Sprintf("stopped before step %d (until boss): the party stays where it stands", n.until)),
-	}
-	if code := f.run(context.Background()); code != exitOK {
-		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
-	}
-	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 2 {
-		t.Fatalf("%d instancedata lines, want 2 (the launch send + one boss-row resend): %q", got, f.agent.gmLines())
-	}
-	if got := strings.Join(f.agent.runVerbs, " "); got != "start pause resume" {
-		t.Fatalf("run verbs %q, want the boss-row resend's pause and resume after the start", got)
-	}
-}
-
-// The boss row resend is once per boss row per walk: a second visit to the
-// same boss row (the run stepped back and forward again) sends nothing more.
-func TestGMInstanceDataBossRowResendOncePerRow(t *testing.T) {
-	n := zgPlaceSteps(t)
-	boss := instDataThekalBossStep(t)
-	f, _ := newPlaceFixture(t)
-	f.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
-	f.agent.startReply = instDataStartReply(t, n)
-	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
-	st := func(state string, step int, kind, phase, note string) queuedEvent {
-		return queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|%s|%d/%d|high_priest_thekal|%s|%s|%s", state, step, n.total, kind, phase, note)}
-	}
-	f.agent.startQueue = []queuedEvent{
-		st("running", boss, "boss", "begin", "starting the boss row"),
-		st("running", boss-1, "move", "walk", "walking"),
-		st("running", boss, "boss", "begin", "starting the boss row again"),
-		st("done", boss, "boss", "pull", fmt.Sprintf("stopped before step %d (until boss): the party stays where it stands", n.until)),
-	}
-	if code := f.run(context.Background()); code != exitOK {
-		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
-	}
-	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 2 {
-		t.Fatalf("%d instancedata lines, want 2 (launch + one resend for the boss row): %q", got, f.agent.gmLines())
-	}
-}
-
 // bossRowFixture is the thekal-leg walk the boss-row resend tests drive: the
 // launch send goes out before the run starts, then the queued statuses play.
 func bossRowFixture(t *testing.T, pageSize int, build func(st func(state string, step int, kind, phase, note string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent) *fixture {
@@ -1087,48 +1024,6 @@ func bossRowFixture(t *testing.T, pageSize int, build func(st func(state string,
 
 func bossRowDone(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) queuedEvent {
 	return st("done", boss, "boss", "pull", fmt.Sprintf("stopped before step %d (until boss): the party stays where it stands", n.until))
-}
-
-// The boss row's first status already shows the pull: the boss fight is on, and
-// a pause now would drop the focus mid-fight. The resend is skipped with a
-// WARN, no pause goes out, and the row counts as handled.
-func TestGMInstanceDataBossRowSkippedWhenAlreadyPulling(t *testing.T) {
-	f := bossRowFixture(t, 1, func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent {
-		return []queuedEvent{
-			st("running", boss, "boss", "pull", "pulling"),
-			st("running", boss, "boss", "pull", "fighting"),
-			bossRowDone(st, boss, n),
-		}
-	})
-	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 1 {
-		t.Fatalf("%d instancedata lines, want only the launch send: %q", got, f.agent.gmLines())
-	}
-	if got := strings.Join(f.agent.runVerbs, " "); got != "start" {
-		t.Fatalf("run verbs %q, want no pause", got)
-	}
-	if !hasNote(f.summary(), "gm-instance-data: WARN: boss row already pulling, resend skipped") {
-		t.Fatalf("notes %q, want the skip WARN", f.summary().Notes)
-	}
-}
-
-// A fight carried over from the last pull row is still going when the boss row
-// becomes current (phase begin, note fighting): skipped too.
-func TestGMInstanceDataBossRowSkippedOnFightCarryOver(t *testing.T) {
-	f := bossRowFixture(t, 1, func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent {
-		return []queuedEvent{
-			st("running", boss, "boss", "begin", "fighting"),
-			bossRowDone(st, boss, n),
-		}
-	})
-	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 1 {
-		t.Fatalf("%d instancedata lines, want only the launch send: %q", got, f.agent.gmLines())
-	}
-	if got := strings.Join(f.agent.runVerbs, " "); got != "start" {
-		t.Fatalf("run verbs %q, want no pause", got)
-	}
-	if !hasNote(f.summary(), "boss row already pulling, resend skipped") {
-		t.Fatalf("notes %q, want the skip WARN", f.summary().Notes)
-	}
 }
 
 // gmInstanceDataPrePull is the boss-row resend's gate: the status is before
@@ -1204,9 +1099,8 @@ func TestGMInstanceDataResendsAtTheRestBeforeTheBossRow(t *testing.T) {
 	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 2 {
 		t.Fatalf("%d instancedata lines, want the launch send + one resend at the rest: %q", got, f.agent.gmLines())
 	}
-	// The boss row came in already pulling: had the rest not handled it, the
-	// row would have been skipped with a WARN. It was handled, so no WARN.
-	if hasNote(f.summary(), "boss row already pulling") {
+	// The rest handled the boss row: it does not warn when the row arrives.
+	if hasNote(f.summary(), "no out-of-combat rest before boss row") {
 		t.Fatalf("notes %q: the boss row was handled at the rest, it must not warn", f.summary().Notes)
 	}
 	if got := strings.Join(f.agent.runVerbs, " "); got != "start pause resume" {
@@ -1214,20 +1108,69 @@ func TestGMInstanceDataResendsAtTheRestBeforeTheBossRow(t *testing.T) {
 	}
 }
 
-// The first line looks safe (begin), but the same event page already holds the
-// pull of that step: the status is older than the pull, so it is skipped.
-func TestGMInstanceDataBossRowSkippedWhenThePageHoldsThePull(t *testing.T) {
-	f := bossRowFixture(t, 3, func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent {
+// No out-of-combat rest came before the boss row: a quiet begin status is the
+// LAST line of its page and the pull arrives on the next page, which no
+// look-ahead can see. The boss row never sends: one WARN, no pause.
+func TestGMInstanceDataBossRowWithoutRestWarnsAndSkips(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		build func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent
+	}{
+		{"begin last in page, pull on the next", func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent {
+			return []queuedEvent{
+				st("running", boss-1, "move", "walk", "walking"),
+				st("running", boss, "boss", "begin", "starting the boss row"),
+				st("running", boss, "boss", "pull", "pulling"),
+				bossRowDone(st, boss, n),
+			}
+		}},
+		{"already pulling", func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent {
+			return []queuedEvent{
+				st("running", boss, "boss", "pull", "pulling"),
+				bossRowDone(st, boss, n),
+			}
+		}},
+		{"fight carried over at begin", func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent {
+			return []queuedEvent{
+				st("running", boss, "boss", "begin", "fighting"),
+				bossRowDone(st, boss, n),
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := bossRowFixture(t, 1, tc.build)
+			if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 1 {
+				t.Fatalf("%d instancedata lines, want only the launch send: %q", got, f.agent.gmLines())
+			}
+			if got := strings.Join(f.agent.runVerbs, " "); got != "start" {
+				t.Fatalf("run verbs %q, want no pause", got)
+			}
+			warns := 0
+			for _, n := range f.summary().Notes {
+				if strings.Contains(n, "gm-instance-data: no out-of-combat rest before boss row") &&
+					strings.Contains(n, "resend skipped") {
+					warns++
+				}
+			}
+			if warns != 1 {
+				t.Fatalf("%d skip WARNs, want exactly 1: %q", warns, f.summary().Notes)
+			}
+		})
+	}
+}
+
+// The rest resend is once per boss row per walk: a second rest of the step
+// before the same boss row sends nothing more.
+func TestGMInstanceDataRestResendOncePerBossRow(t *testing.T) {
+	f := bossRowFixture(t, 1, func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent {
 		return []queuedEvent{
-			st("running", boss, "boss", "begin", "starting the boss row"),
-			st("running", boss, "boss", "pull", "pulling"),
+			st("running", boss-1, "move", "rest", "resting"),
+			st("running", boss-1, "move", "walk", "walking"),
+			st("running", boss-1, "move", "rest", "resting again"),
 			bossRowDone(st, boss, n),
 		}
 	})
-	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 1 {
-		t.Fatalf("%d instancedata lines, want only the launch send: %q", got, f.agent.gmLines())
-	}
-	if got := strings.Join(f.agent.runVerbs, " "); got != "start" {
-		t.Fatalf("run verbs %q, want no pause", got)
+	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 2 {
+		t.Fatalf("%d instancedata lines, want the launch send + one rest resend: %q", got, f.agent.gmLines())
 	}
 }

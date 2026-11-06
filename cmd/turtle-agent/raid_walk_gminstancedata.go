@@ -26,9 +26,9 @@
 // overwrite their own slot on Reset (boss_jeklik.cpp:105-106,
 // boss_venoxis.cpp:152-153), see docs/okf/raids/raid-walk-reference.md.
 // Resending into data that did survive is harmless (SetData is idempotent).
-// A walk also resends once per boss row, before the boss pull (at the out of
-// combat rest before the row, or at the row's own pre-pull status; a row
-// already pulling is skipped): a GM kill does not stop the respawn, and a
+// A walk also resends once per boss row, only at the out of combat rest or
+// gather of the step before the row (never at the boss row itself, which warns
+// and skips when no such rest came): a GM kill does not stop the respawn, and a
 // respawned priest's Reset() overwrites its data (walk 45 hk7m).
 package main
 
@@ -445,7 +445,7 @@ func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus, 
 	pending := w.gmInstanceDataPending(inst, st)
 	if bossStep, resend := w.gmInstanceDataBossRow(inst, st, later); bossStep > 0 {
 		// Once per boss row per walk, whether the leg's lines were pending (they
-		// go out now) or resent here (or skipped: the boss was already pulling).
+		// go out now), resent at the rest before the row, or skipped (WARN).
 		if w.gmInstanceDataBossSent == nil {
 			w.gmInstanceDataBossSent = map[int]bool{}
 		}
@@ -480,20 +480,20 @@ func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus, 
 // for the "party is out of combat" check of the boss-row resend.
 const gmInstanceDataFrameFresh = 15 * time.Second
 
-// gmInstanceDataBossRow decides the boss-row resend for a status. Walk 45
+// gmInstanceDataBossRow decides the pre-boss resend for a status. Walk 45
 // hk7m: the launch send went out at 14:27, but a GM `.die` does not stop the
-// respawn, and a respawned priest's Reset() overwrote its DONE data before the
-// run reached Hakkar's row. So the lines go out again, once per boss row per
-// walk, at the latest safe moment before the boss pull:
-//   - the step BEFORE the boss row at an out-of-combat rest/gather status
-//     (the usual hook: the run is idle there), or
-//   - the boss row's own status while it is still before the pull.
+// respawn, and a respawned priest's Reset() overwrites its DONE data before the
+// run reaches Hakkar's row. So the lines go out again, once per boss row per
+// walk, but ONLY at a confirmed out-of-combat rest/gather status of the step
+// before the boss row (the run is idle there, the pause costs nothing).
 //
-// The boss row becomes current about 1 s before the run's FightStep can pull
-// (DungeonRunPolicy.h:5661, Commander.cpp:6886), and a mid-fight pause drops the
-// focus and holds ~7 s inside the boss (DungeonRunPolicy.h:3542-3567). So a boss
-// row status that is already pulling or fighting is SKIPPED with a WARN and
-// counts as handled: the walk never pauses mid-fight.
+// The boss row's own status is never a place to send: it becomes current about
+// 1 s before the run's FightStep can pull (DungeonRunPolicy.h:5661,
+// Commander.cpp:6886), a pause during a fight drops the focus and holds ~7 s
+// inside the boss (DungeonRunPolicy.h:3542-3567), and a quiet begin status can
+// be followed by the pull on the next event page, which no look-ahead sees. A
+// boss row that becomes current with no pre-boss resend logs one WARN and
+// counts as handled: the walk never pauses at the boss.
 //
 // It returns the boss step to mark as handled (0: nothing to do) and whether
 // the lines go out now.
@@ -513,15 +513,11 @@ func (w *walk) gmInstanceDataBossRow(inst string, st tbm.RunStatus, later bool) 
 	if !legSpec {
 		return 0, false
 	}
-	now := w.env.now()
 	if st.Kind == planexport.KindBoss {
 		if _, ok := w.bossRowAt(st.Step); !ok || w.gmInstanceDataBossSent[st.Step] {
 			return 0, false
 		}
-		if w.gmInstanceDataPrePull(st, later, now) {
-			return st.Step, true
-		}
-		w.note("gm-instance-data: WARN: boss row already pulling, resend skipped (step %d: %s %s)", st.Step, st.Phase, st.Note)
+		w.note("gm-instance-data: no out-of-combat rest before boss row %d; resend skipped", st.Step)
 		return st.Step, false
 	}
 	// The step before a boss row, resting or gathering out of combat.
@@ -532,7 +528,7 @@ func (w *walk) gmInstanceDataBossRow(inst string, st tbm.RunStatus, later bool) 
 	if p := strings.ToLower(st.Phase); p != "rest" && p != "gather" {
 		return 0, false
 	}
-	if !w.gmInstanceDataPrePull(st, later, now) {
+	if !w.gmInstanceDataPrePull(st, later, w.env.now()) {
 		return 0, false
 	}
 	return next, true
