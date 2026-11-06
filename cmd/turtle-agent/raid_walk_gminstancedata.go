@@ -7,7 +7,7 @@
 //
 // A walk with `--gm-instance-data "<leg>:<a> <b>[;<a> <b>...]"` (repeatable,
 // one leg per value) has the commander send each command as
-// `.debug instancedata <a> <b>`, in order, 3 s apart, once per instance: a
+// `.debug instancedata <a> <b>`, in order, 3 s apart, on every launch: a
 // placed start inside the leg fires on the placement's leg BEFORE the run
 // starts, and a walk that reaches the leg mid-run fires under a run pause
 // (the next pull waits). Without --place the entry's instance is read the
@@ -397,7 +397,7 @@ func (w *walk) gmInstanceDataStart(ctx context.Context, inst, leg string) error 
 }
 
 // gmInstanceDataSendPending is pollOnce's firing: a spec whose leg this
-// status names fires here, once per instance, when a walk reaches the leg
+// status names fires here, once per walk, when a walk reaches the leg
 // mid-run. A firing here holds the run's next pull until the lines are
 // sent: the walk pauses the run first (`.bot run pause`, through the
 // commander's own run verbs) and resumes it after the last line, so the
