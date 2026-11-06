@@ -260,30 +260,42 @@ func TestFollowCancelsAWalkWhenAFightBegins(t *testing.T) {
 		}
 		f.now = f.now.Add(FollowTick)
 	}
+	// The fake's units, position and aggro target are read by the walk's combat watch from another goroutine, so nothing here
+	// touches them once the walk runs: the party member stands in the list from the start, calm, and the atomic aggro flag is
+	// what puts it in combat (driver_test.go: walkHook must not touch the units).
+	f.aggroGUID = healer
+	m := f.add(healer, 0, Point{30, 0, 0})
+	m.Type, m.Name, m.Hostile, m.InParty, m.InCombat = "player", "Heal", false, true, false
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	f.walkHook = func(ctx context.Context, g *fakeGame, to Point) (WalkResult, error) {
 		started <- struct{}{}
 		select {
 		case <-release:
-			g.pos = to
 			return WalkResult{Result: "arrived"}, nil
 		case <-ctx.Done():
 			return WalkResult{}, ctx.Err()
 		}
 	}
+	var fired bool
 	walkDone := make(chan struct{})
 	go func() {
 		defer close(walkDone)
-		_, _, _ = fr.walkTo(context.Background(), Point{18, 0, 0}, "follow")
+		_, fired, _ = fr.walkTo(context.Background(), Point{18, 0, 0}, "follow")
 	}()
 	<-started
 	f.aggro.Store(true)
-	f.aggroGUID = healer
-	m := f.add(healer, 0, Point{30, 0, 0})
-	m.Type, m.Name, m.Hostile, m.InParty, m.InCombat = "player", "Heal", false, true, true
-	close(release)
-	<-walkDone
+	// The fight must end the walk by itself: release stays open until the deadline, so only the watch's cancel can end it.
+	select {
+	case <-walkDone:
+	case <-time.After(10 * time.Second):
+		close(release)
+		<-walkDone
+		t.Fatal("the walk was not cancelled when the fight began")
+	}
+	if !fired {
+		t.Fatal("the walk ended, but not by the combat watch")
+	}
 	f.walkHook = nil
 	f.aggro.Store(false)
 	if st := fr.Status(); st.WalkFails != 0 {
