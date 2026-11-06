@@ -1481,8 +1481,8 @@ func TestAutoStateSurvivesASupervisorKill(t *testing.T) {
 		t.Fatalf("the restarted supervisor launched nothing:\n%s", f.events())
 	}
 	for _, a := range after {
-		if !strings.Contains(a, "--from step 200") {
-			t.Fatalf("the restarted supervisor walked goal 1 again: %s", a)
+		if !strings.Contains(a, "--from step 200") || !strings.Contains(a, "--place") || !strings.Contains(a, "--reuse-instance") {
+			t.Fatalf("the restarted supervisor did not resume goal 2 in its instance: %s", a)
 		}
 	}
 	if got := strings.Count(f.events(), "advance: goal met: boss:14515"); got != 1 {
