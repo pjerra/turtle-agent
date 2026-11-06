@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -699,5 +700,161 @@ func TestPausedPullbackRefusedUnreachableMatcher(t *testing.T) {
 		if got := pausedPullbackRefusedUnreachable(tc.note); got != tc.want {
 			t.Errorf("pausedPullbackRefusedUnreachable(%q) = %v, want %v", tc.note, got, tc.want)
 		}
+	}
+}
+
+// fightCreditWalk is a bare walk set up the way TestFightRecordKillAtWalkStartNeedsNoLiveSighting builds one,
+// with the fake dashboard wired so saveFights itself runs.
+func fightCreditWalk(t *testing.T, goal, startStep int, now time.Time) (*walk, *fakeDash) {
+	t.Helper()
+	p, err := dungeon.Load("../../dungeons/zul_gurub.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := bossSummaryWalk(t)
+	w.env = walkEnv{now: func() time.Time { return now }}
+	w.plan = p
+	w.outDir = t.TempDir()
+	w.stdout = io.Discard
+	w.started, w.ended = now, now
+	w.opts.until = fmt.Sprintf("step %d", goal+1)
+	w.startStep, w.untilStep = startStep, goal+1
+	w.hostiles = map[string]hostileState{}
+	w.botAt = map[string]botPos{}
+	w.partyG = map[uint64]bool{}
+	w.bossRule = raidwalk.NewBossRows(p)
+	w.bossAttemptAt = map[uint32]time.Time{}
+	w.bossRows = map[uint32]hostileState{}
+	w.seenFights = map[string]bool{}
+	w.pendingFights = map[string]int{}
+	d := &fakeDash{}
+	w.dash = d
+	return w, d
+}
+
+func creditedBoss(t *testing.T, w *walk, goal int) *raidwalk.BossKillSummary {
+	t.Helper()
+	w.finish(exitRaidWalkIncident)
+	raw, err := os.ReadFile(filepath.Join(w.outDir, "summary.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sum raidwalk.Summary
+	if err := json.Unmarshal(raw, &sum); err != nil {
+		t.Fatal(err)
+	}
+	return sum.BossKill
+}
+
+// TestFightRecordAtStartNeedsTheRunToReachTheBossRow is round 6 item 1 (Opus HIGH): a kill record listed when the walk
+// began credits the goal boss only when this run reached the goal row. A walk that ended on earlier trash (a stall, a
+// wipe, the time limit) never reached the boss, and the record (Jin'do 18-4 sits in later walks' lists) must neither
+// credit it nor create a boss track.
+func TestFightRecordAtStartNeedsTheRunToReachTheBossRow(t *testing.T) {
+	goal := zgBossStepOf(t, 14517)
+	rows := zgRows(t)
+	if goal < 3 || rows.Steps[goal-2].Kind == "boss" {
+		t.Fatalf("fixture: step %d before the goal is a boss row", goal-1)
+	}
+	for _, tc := range []struct {
+		name    string
+		reached bool
+		want    bool
+	}{
+		{"walk ended on earlier trash", false, false},
+		{"walk stood on the boss row", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			w, _ := fightCreditWalk(t, goal, goal-1, now)
+			feedStatus(w, tbm.RunStatus{Step: goal - 1, Kind: "move", Note: "walking"}, now)
+			if tc.reached {
+				feedStatus(w, tbm.RunStatus{Step: goal, Kind: "boss", Note: "fighting"}, now)
+			}
+			w.fightIDsAtStart = map[string]bool{"68-1": true}
+			w.fights = []raidwalk.FightSummary{
+				{ID: "68-1", Step: goal, Leg: "high_priestess_jeklik", DurMS: 153656, Outcome: "kill", BossName: "High Priestess Jeklik", BossPhase: 1, BossPhaseEntry: 14517},
+			}
+			k := creditedBoss(t, w, goal)
+			if tc.want && (k == nil || !k.Killed) {
+				t.Fatalf("boss_kill %+v, want credited (notes %q)", k, w.notes)
+			}
+			if !tc.want {
+				if k != nil && k.Killed {
+					t.Fatalf("boss_kill %+v: an at-start record must not credit a boss the run never reached (notes %q)", k, w.notes)
+				}
+				if len(w.bossTracks) != 0 {
+					t.Fatalf("boss tracks %v: creditFightKills created a track for a boss the run never reached", w.bossTracks)
+				}
+			}
+		})
+	}
+}
+
+func jeklikKillRow(id string, live bool, start int64) walkFightRow {
+	r := walkFightRow{ID: id, Key: "Bot\x00" + id, Dur: 153656, Outcome: "kill", BossName: "High Priestess Jeklik",
+		Leg: "high_priestess_jeklik", Step: 0, BossPhase: 1, BossPhaseEntry: 14517, Start: start}
+	if live {
+		r.Outcome, r.Live = "live", true
+	}
+	return r
+}
+
+// TestSaveFightsFailedFirstReadThenKillIsCredited is round 6 item 2 (Codex HIGH): the first dashboard read failed, so
+// the first successful read came after the walk's own fight had been filed, and that read must not file this walk's
+// kill as history. With no read before placement the set comes from the record's start time against the walk's start.
+func TestSaveFightsFailedFirstReadThenKillIsCredited(t *testing.T) {
+	goal := zgBossStepOf(t, 14517)
+	for _, tc := range []struct {
+		name  string
+		start func(now time.Time) int64
+		want  bool
+	}{
+		{"record started after the walk", func(now time.Time) int64 { return now.Unix() + 60 }, true},
+		{"record started before the walk", func(now time.Time) int64 { return now.Unix() - 3600 }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			w, d := fightCreditWalk(t, goal, goal, now)
+			w.manifest.Character = "Bot"
+			w.trackFrame(now, &tbm.ViewFrame{Hostiles: []tbm.HostileRec{{GUID: 9, Entry: 14517, HPPct: 40, Target: packet.GUID(1000)}}})
+			feedStatus(w, tbm.RunStatus{Step: goal, Kind: "boss", Note: "fighting"}, now)
+			d.fightsErr = errors.New("dashboard timeout")
+			w.saveFightsAtStart() // the pre-placement read fails
+			d.fightsErr = nil
+			row := jeklikKillRow("68-1", false, tc.start(now))
+			row.Step = uint32(goal)
+			d.fights = []walkFightRow{row}
+			w.saveFights() // the first successful read comes after the kill
+			k := creditedBoss(t, w, goal)
+			if tc.want && (k == nil || !k.Killed) {
+				t.Fatalf("boss_kill %+v, want this walk's own kill credited (notes %q)", k, w.notes)
+			}
+			if !tc.want && k != nil && k.Killed {
+				t.Fatalf("boss_kill %+v: a record that started before the walk is history (notes %q)", k, w.notes)
+			}
+		})
+	}
+}
+
+// TestSaveFightsLiveAtStartRecordStaysAtStart: a record still live when the walk first read the list is part of the
+// at-start set, so when it later finishes as a kill it is history, not this walk's.
+func TestSaveFightsLiveAtStartRecordStaysAtStart(t *testing.T) {
+	goal := zgBossStepOf(t, 14517)
+	now := time.Now()
+	w, d := fightCreditWalk(t, goal, goal, now)
+	w.manifest.Character = "Bot"
+	w.trackFrame(now, &tbm.ViewFrame{Hostiles: []tbm.HostileRec{{GUID: 9, Entry: 14517, HPPct: 40, Target: packet.GUID(1000)}}})
+	feedStatus(w, tbm.RunStatus{Step: goal, Kind: "boss", Note: "fighting"}, now)
+	live := jeklikKillRow("68-1", true, now.Unix()-600)
+	live.Step = uint32(goal)
+	d.fights = []walkFightRow{live}
+	w.saveFightsAtStart()
+	done := jeklikKillRow("68-1", false, now.Unix()-600)
+	done.Step = uint32(goal)
+	d.fights = []walkFightRow{done}
+	w.saveFights()
+	if k := creditedBoss(t, w, goal); k != nil && k.Killed {
+		t.Fatalf("boss_kill %+v: a record live at the walk's start finished as a kill, which is history (notes %q)", k, w.notes)
 	}
 }

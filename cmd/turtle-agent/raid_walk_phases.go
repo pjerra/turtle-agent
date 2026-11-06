@@ -894,6 +894,9 @@ func (w *walk) missingHires(now time.Time) []string {
 
 // phaseStart is phase 9: run start, and the until label the server must show.
 func (w *walk) phaseStart(ctx context.Context) error {
+	if w.dash != nil {
+		w.saveFightsAtStart()
+	}
 	if w.place != nil {
 		if err := w.placeMTReady(ctx); err != nil {
 			return err
@@ -2361,6 +2364,8 @@ type walkFightRow struct {
 	Step     uint32 `json:"step"`
 	Deaths   int    `json:"deaths"`
 	Warnings int    `json:"warnings"`
+	// Start is the fight's start time in unix seconds (the dashboard's own "start").
+	Start int64 `json:"start"`
 	// BossPhase and BossPhaseEntry are the boss's phase in the fight (spec 6, D5): TortoiseBots' COMBAT_FIGHT
 	// payload carries them after boss_name when the boss changed entry, and the summary passes them through.
 	BossPhase      int    `json:"boss_phase,omitempty"`
@@ -2381,6 +2386,16 @@ func (r walkFightRow) bossLive() bool {
 // the review-1 boss evidence fresh (the same fields freshWipeRest and the
 // bossUnknown gate read): every attempt records its fetch/parse error (or nil),
 // and a success records the read time and the parsed rows.
+// saveFightsAtStart is the walk's read of the fight list BEFORE its first placement and run start: the walk has filed
+// no fight yet, so every record listed (live ones included) is an earlier walk's or instance's history. Only a
+// successful read here builds fightIDsAtStart from ids; a failed read leaves the set to the first later successful
+// read, which falls back to the records' start times (saveFights).
+func (w *walk) saveFightsAtStart() {
+	w.fightsPrePlacement = true
+	defer func() { w.fightsPrePlacement = false }()
+	w.saveFights()
+}
+
 func (w *walk) saveFights() {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -2403,15 +2418,27 @@ func (w *walk) saveFights() {
 	w.bossCheckErr = nil
 	w.bossReadAt = now
 	w.fightRows = rows
-	// The first successful read of the commander's fight list is the walk's own starting point: everything
-	// listed now is an earlier walk's or instance's history (the walk has filed no fight yet, and a live
-	// record is skipped below). creditFightKills gates exactly these records on this walk's frames.
+	// The at-start set (creditFightKills reads it): everything the commander's fight list held before this walk filed
+	// a fight is an earlier walk's or instance's history. Built once, from the first successful read, and a live
+	// record is part of it (it may later finish as a kill that is still history). A read made before the first
+	// placement (saveFightsAtStart) lists history only, so every id in it counts. When no read succeeded before
+	// placement, a later first read may already hold this walk's own fights: only the records that started before the
+	// walk began count then, by their start time (a record without one counts, the conservative side).
 	if w.fightIDsAtStart == nil {
 		w.fightIDsAtStart = make(map[string]bool, len(rows))
+		startUnix := w.started.Unix()
+		byTime := !w.fightsPrePlacement
 		for _, r := range rows {
-			if r.ID != "" && !r.Live {
-				w.fightIDsAtStart[r.ID] = true
+			if r.ID == "" {
+				continue
 			}
+			if byTime && r.Start != 0 && r.Start >= startUnix {
+				continue
+			}
+			w.fightIDsAtStart[r.ID] = true
+		}
+		if byTime {
+			w.note("fight records: no dashboard read before the walk's placement, so the at-start set (%d of %d records) came from their start times", len(w.fightIDsAtStart), len(rows))
 		}
 	}
 	for _, r := range rows {
@@ -2858,6 +2885,9 @@ func (w *walk) bossTrackAt(step int, entry uint32) *bossStepTrack {
 // all (bossEndStatus reads the end), and a boss-kind status that matches no boss row at its step records nothing
 // (the rows the walk reads are not the deployed ones then).
 func (w *walk) observeBossStatus(st tbm.RunStatus, now time.Time) {
+	if st.Step > w.maxStatusStep {
+		w.maxStatusStep = st.Step
+	}
 	// The run ending right after the boss step (see bossEndStatus) is read first: a plan whose last row is the boss
 	// reports the end ON the boss step, so the boss-row branch below would swallow it.
 	if t := w.bossEndStatus(st, now); t != nil {
@@ -3166,6 +3196,13 @@ func (w *walk) creditFightKills() {
 			w.logLine(w.env.now(), fmt.Sprintf("boss %d at step %d: fight %s's kill is not this walk's (listed before the walk began, and the frames saw the boss alive)", row.Entry, step, f.ID))
 			continue
 		}
+		// A record listed before the walk began credits only a run that reached the goal row: a status at or past
+		// that step, or a boss track the statuses (or the tracker's engage latch) already made. A walk that ended
+		// on earlier trash never saw the boss, and the record must not make a track for it (round 6, Opus HIGH).
+		if w.fightIDsAtStart[f.ID] && !w.reachedBossRow(step, row.Entry) {
+			w.logLine(w.env.now(), fmt.Sprintf("boss %d at step %d: fight %s's kill is not this walk's (listed before the walk began, and the run never reached the boss row)", row.Entry, step, f.ID))
+			continue
+		}
 		t := w.bossTrackAt(step, row.Entry)
 		if t.killed {
 			continue
@@ -3179,6 +3216,19 @@ func (w *walk) creditFightKills() {
 		t.evidence = fmt.Sprintf("fight %s: %s killed (outcome kill)", f.ID, who)
 		w.logLine(w.env.now(), fmt.Sprintf("boss %d killed at step %d: fight %s %s (outcome kill)", row.Entry, step, f.ID, who))
 	}
+}
+
+// reachedBossRow says this run got to the boss row: a status at or past its step, or an existing boss track for it
+// (looked up, never created).
+func (w *walk) reachedBossRow(step int, entry uint32) bool {
+	if w.maxStatusStep >= step {
+		return true
+	}
+	if _, ok := w.bossTracks[bossKey{step: step}]; ok {
+		return true
+	}
+	_, ok := w.bossTracks[bossKey{entry: entry}]
+	return ok
 }
 
 // bossAliveThisWalk says the frames showed a unit of the boss's family (bossUnits: its own entry and the phase

@@ -839,6 +839,11 @@ type walk struct {
 	// (creditFightKills). A record that first appears during the walk is this walk's and credits freely.
 	// nil until the first successful read.
 	fightIDsAtStart map[string]bool
+	// fightsPrePlacement is set while saveFightsAtStart reads the list before the walk's first placement.
+	fightsPrePlacement bool
+	// maxStatusStep is the highest step any run status showed (observeBossStatus): creditFightKills reads whether
+	// the run reached the goal boss row.
+	maxStatusStep int
 	// pendingFights are fights listed but whose detail is not loaded yet: fight id to its index in fights.
 	pendingFights map[string]int
 	hostiles      map[string]hostileState
