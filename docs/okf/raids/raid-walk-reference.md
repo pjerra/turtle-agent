@@ -37,7 +37,7 @@ Usage: `turtle-agent raid-walk <plan> [--server <server>] [--slot N] ...` or `tu
 |---|---|---|---|
 | `--until` | `boss` | `boss` stops before the first boss step, `boss-done` after it, `none` is a full clear, `step N` or `leg L` stop there. | `--until boss-done` |
 | `--from` | none | `"leg L"` or `"step N"` for the run leader; only for a raid already standing there, unless `--place` stages it. | `--from "leg <leg>"` |
-| `--place` | off | With `--from`: put the raid at that start inside the instance. Test servers only, needs `--sql`, refused with `--inject`. Bare `--place` is on; `--place=off` turns it off. | `--from "leg <leg>" --place` |
+| `--place` | off | With `--from`: put the raid at that start inside the instance. Test servers only, needs `--sql`, refused with `--inject`. Bare `--place` is on; `--place=off` turns it off. A same-instance try that finds half the hires dead or the start leg's boss fighting the party ends the placement at once with exit 29 (`place: party dead ...` / `place: boss engaged with the party ...: fresh instance needed`), where the autopilot relaunches a fresh instance instead of feeding the boss. | `--from "leg <leg>" --place` |
 | `--reuse-instance` | off | With `--place`: keep the raid's current instance (no fresh entry, no cap count). Combines with `--gm-clear`. | `--place --reuse-instance` |
 | `--speed` | `1.0` | The run's test speed, 1.0 to 3.0 with one decimal. Above 1.0 sends `speed=X` and marks a test run. | `--speed 3.0` |
 | `--enter` | `auto` | `auto` tries `near` and falls back to `tele` once on `requirement`; `tele` needs the plan's `entrance_tele`. | `--enter tele` |
