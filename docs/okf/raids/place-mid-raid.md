@@ -1,0 +1,76 @@
+---
+type: Guide
+title: Start partway into an instance
+description: Place the raid at a leg or step with --place, re-place without burning the cap, and clear packs with --gm-clear.
+resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_walk_cmd.go
+tags: [raids, placement, gm-clear]
+sources:
+  - id: walk-cmd
+    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/raid_walk_cmd.go
+  - id: place
+    resource: https://github.com/pjerra/turtle-agent/blob/dev/internal/raidwalk/place.go
+generated:
+  by: muse-spark-1.3/omp
+  at: 2026-11-05T21:35:00+01:00
+status: draft
+---
+
+# Start partway into an instance
+
+`--place` (with `--from`) starts the raid partway into its instance instead of at the door, so several raids on one server can each work a different boss leg. It only runs on the test servers, needs `--sql`, and is refused with `--inject`.[^walk-cmd]
+
+## 1. Place at a leg
+
+```sh
+turtle-agent raid-walk <plan> --server <server> --slot <slot> \
+    --dir <plans-dir> --sql <world-sql> --from "leg <leg>" --place
+```
+
+`--from "leg L"` is staged: the walk starts at the highest quiet move row before the leg's first pull (see [How placement works](placement.md)). The first leg needs no placement: `--place --from "leg <first leg>"` starts at step 1 from the door exactly as a non-placed run does.
+
+## 2. Place at an exact step
+
+```sh
+turtle-agent raid-walk <plan> --server <server> --slot <slot> \
+    --dir <plans-dir> --sql <world-sql> --from "step <n>" --place
+```
+
+`--from "step N"` is taken as given: a positioned move row is placed at its own point, and a pull row at that pull's own stand point. A boss or hold row (or a row inside an event) is refused — the raid would re-fight it on the way in.
+
+## 3. Re-place in the same instance
+
+```sh
+turtle-agent raid-walk <plan> --server <server> --slot <slot> \
+    --dir <plans-dir> --sql <world-sql> --from "step <n>" --place --reuse-instance
+```
+
+`--reuse-instance` keeps the raid's current instance: nothing is entered, reserved or counted, so the instance cap is untouched. A live raid is kept; a logged-out raid resumes from the commander's live bind. With no live bind the walk says `no live bind for map <n> is left: falling back to a fresh instance` and enters normally. Never combine a re-place with a fresh-instance retry for a boss whose summon is spent: re-entering the same copy re-meets the dead trigger.
+
+## 4. Clear packs with GM commands (test servers only)
+
+```sh
+turtle-agent raid-walk <plan> --server <server> --slot <slot> \
+    --dir <plans-dir> --sql <world-sql> --from "leg <leg>" --place \
+    --gm-clear "<leg>:<group>[,<group>...]" --gm-clear-boss <leg>
+```
+
+After the placement and before the raid moves, the commander GM-kills every live unit of the named pull groups (or the leg's boss), so a later leg can be tested while a trash wipe is still being fixed. Groups are 1-based, in route order among the leg's pull and hold rows; `--dry-run` lists them as `8c gm-clear:` lines. A group that clears no hostile pack (a boss's or event's units) is skipped with a `gm-clear: WARN: skipped ...` note and the other groups go on. Every walk that used it is marked **ASSISTED** in `summary.json` and the result line: never a real clear.
+Each named group expands to its whole pack: the row's entries and reach, the export's `AGGRO_TOGETHER` links, and both aggro-link directions. A bad spec, an unknown leg, or a missing world export is a usage error before any GM line goes out. Spawn positions come from `--gm-clear-spawns` first, else the installed export (`~/.local/share/turtle-agent/world/map<N>`) when it holds `creatures.tsv`, else the checkout's `tools/dungeongen/testdata/map<N>`.[^place]
+
+The commander visits stops (each covering members within 100 yd, read from 150 yd out, two rounds always) and kills by guid plus entry with select-confirm; a `.die` goes through the `SEC_DEVELOPER` path. A member gets retries (5 s reads, then up to three 3 s retries); the whole tool has a 5-minute budget, and members it never reaches are recorded `not tried: the gm-clear budget ran out`. Reasons name what happened: `not seen`, `alive`, `already dead`, `despawned by the corridor clear` (the walk's own clear already removed it: the frames still show it alive and every `.die` is a no-op), or the budget reason. A `.die` on a slot's own character is refused.[^place]
+
+A clear with a member left is `PARTIAL`: `summary.json` carries `gm_clear_partial`, and the result line says `ASSISTED ... PARTIAL` with the uncleared `leg:range` groups. Failed groups never fail the placement: they warn with `skip=` so the quiet and the landing skip them too. The commander returns to the start point before the quiet check. Every kill and failure is recorded: `run.log` (`gm-clear: killed ...`, `FAILED`, per-group lines), `summary.json` (`gm_clear[]`, `assisted`), and the walk report's ASSISTED table. In the pair form the flags apply to both walks when unprefixed, or to one walk with a slot prefix.[^place]
+
+## 5. Send instance data for a gate
+
+```sh
+turtle-agent raid-walk <plan> --server <server> --slot <slot> \
+    --dir <plans-dir> --sql <world-sql> --from "leg <leg>" --place \
+    --gm-instance-data "<leg>:<a> <b>[;<a> <b>...]"
+```
+
+The lines go out as `.debug instancedata <a> <b>`, in order, 3 s apart, once per instance, ahead of `run start` — so the gate is satisfied before the first pull. A walk that reaches the leg mid-run pauses the run first and resumes after the last line. A refused command is retried on the next status, at most 3 times per walk, and never fails the walk.
+
+A malformed value (not two integers) or an unknown leg is a usage error before any GM line goes out; two specs for one leg are one firing in flag order. Each line is confirmed by the server's chat: 2 s of silence counts as `sent` (the core's debug handler prints nothing on success), a refusal reads `REFUSED` and is retried on the next status, at most 3 times per walk, then logged `NOT confirmed after 3 tries` while the walk continues.[^place]
+
+One marker file per instance and leg in the out dir, plus a mark (with the command list's short hash) in the instance-cap ledger, remembers the sent commands. A fresh walk always sends, even when an old mark names the same instance id (the core reuses ids across copies); only a `--reuse-instance` walk consults the ledger, and a changed command list resends. A restart drops the marks with the entries. Without `--place` the instance id is read the way the cap ledger reads it at entry; when that read fails the walk warns once and fires marker-only (the ledger keys on instances, so it is skipped), and a read of 0 is never cached: the next firing retries it.[^place]

@@ -7,7 +7,7 @@ Every dungeon and raid of the server has a plan (`dungeons/<name>.json`, format:
 TortoiseBots self-clear. Most are **drafts**: the legs, pull groups, bosses, entrance, portal, level band and hired party come from the world
 database export alone (`tools/dungeongen/export.sh`, one folder per map under `tools/dungeongen/testdata/map<id>`), with the usual boss order from game knowledge. A draft
 has not had its **mapping walk** (a GM-invisible walk of the route before the first live run, AUTO-IMPROVE step 0), so its waypoints, pull order, doors and events are
-unchecked; `dungeon_run` refuses it unless `allow_draft` is passed, and refuses raid plans (no raid driver yet).
+unchecked; `dungeon_run` refuses it unless `allow_draft` is passed. A raid plan runs in mode `observe` with `prepare.party "hire"` only: the server's run leader leads the bound raid.
 
 **Needs besides killing** is read from the game object and item names of the core's instance scripts (`src/scripts/dungeons/<dungeon>`) and from vanilla knowledge; none of it has been walked
 or run, so treat it as the checklist for the mapping walk, not as a verified list. "No spawn row" means the boss is summoned by a script and is not in a leg.
