@@ -69,7 +69,7 @@ turtle-agent raid-walk <plan> --server <server> --slot <slot> \
     --gm-instance-data "<leg>:<a> <b>[;<a> <b>...]"
 ```
 
-The lines go out as `.debug instancedata <a> <b>`, in order, 3 s apart, once per instance, ahead of `run start` — so the gate is satisfied before the first pull. A walk that reaches the leg mid-run pauses the run first and resumes after the last line. A refused command is retried on the next status, at most 3 times per walk, and never fails the walk.
+The lines go out as `.debug instancedata <a> <b>`, in order, 3 s apart, on every launch and again after each recovered wipe (a same-instance `--reuse-instance` restart included, because a boss `Reset()` can overwrite the priest data on a wipe), ahead of `run start` — so the gate is satisfied before the first pull. A walk that reaches the leg mid-run pauses the run first and resumes after the last line. A refused command is retried on the next status, at most 3 times per walk, and never fails the walk.
 
 A malformed value (not two integers) or an unknown leg is a usage error before any GM line goes out; two specs for one leg are one firing in flag order. Each line is confirmed by the server's chat: 2 s of silence counts as `sent` (the core's debug handler prints nothing on success), a refusal reads `REFUSED` and is retried on the next status, at most 3 times per walk, then logged `NOT confirmed after 3 tries` while the walk continues.[^place]
 

@@ -18,7 +18,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -75,44 +74,6 @@ type CapServer struct {
 	ServerStart  time.Time        `json:"server_start,omitempty"`
 	Entries      []CapEntry       `json:"entries"`
 	Reservations []CapReservation `json:"reservations,omitempty"`
-	// GMInstanceData are one mark per fired --gm-instance-data leg. An old
-	// ledger holds the bare "<instance id>/<leg>" strings instead of
-	// GMInstanceMark objects; both read back as done. A --reuse-instance
-	// restart runs a fresh out dir per attempt, so the out dir's marker
-	// cannot tell it: the ledger outlives the attempt, and resending is
-	// noisy (not harmful: the gate just stays satisfied).
-	GMInstanceData []GMInstanceMark `json:"gm_instance_data,omitempty"`
-}
-
-// GMInstanceMark is one --gm-instance-data firing: the leg's lines went out
-// in inst at At, with the hash of the exact command list sent. The hash
-// makes a CHANGED command list resend: Done compares it, and a changed list
-// is not done. A repeat of the same list stays silent.
-type GMInstanceMark struct {
-	// Inst and Leg are the mark's key: a bare "<inst>/<leg>" string in an
-	// old ledger reads back as this with zero At and empty Hash.
-	Inst string `json:"inst,omitempty"`
-	Leg  string `json:"leg,omitempty"`
-	// Mark is the old ledger's bare "<inst>/<leg>" string ("": a new mark).
-	Mark string `json:"mark,omitempty"`
-	// At is when the leg's lines went out.
-	At time.Time `json:"at,omitempty"`
-	// Hash is the hash of the exact command list sent. A changed list
-	// (another hash) is a new firing, not a done one.
-	Hash string `json:"hash,omitempty"`
-}
-
-// UnmarshalJSON accepts both the current object form and the old ledger's
-// bare "<instance id>/<leg>" strings, so an old ledger is read, not moved
-// aside as corrupt.
-func (m *GMInstanceMark) UnmarshalJSON(data []byte) error {
-	var s string
-	if err := json.Unmarshal(data, &s); err == nil {
-		*m = GMInstanceMark{Mark: s}
-		return nil
-	}
-	type plain GMInstanceMark
-	return json.Unmarshal(data, (*plain)(m))
 }
 
 // CapLedger is the ledger file: one CapServer per server name.
@@ -378,64 +339,6 @@ func (l *CapLedger) Confirm(name, owner string, e CapEntry, now time.Time) {
 	l.Record(name, e, now)
 }
 
-// gmMarkKey splits a mark back into its instance and leg ("": no key).
-func gmMarkKey(m GMInstanceMark) (inst, leg string) {
-	if m.Inst != "" || m.Leg != "" {
-		return m.Inst, m.Leg
-	}
-	if i := strings.LastIndex(m.Mark, "/"); i >= 0 {
-		return m.Mark[:i], m.Mark[i+1:]
-	}
-	return "", ""
-}
-
-// NoteGMInstanceData remembers that leg's lines went out in inst (once: a
-// mark read back counts as done). at is when they went out, hash the hash
-// of the exact command list sent (GMInstanceDataHash): a changed list is a
-// new firing, not a done one.
-func (l *CapLedger) NoteGMInstanceData(name, inst, leg string, at time.Time, hash string) {
-	s := l.server(name)
-	mark := GMInstanceMark{Inst: inst, Leg: leg, At: at.UTC(), Hash: hash}
-	for i, m := range s.GMInstanceData {
-		if mi, ml := gmMarkKey(m); mi == inst && ml == leg {
-			s.GMInstanceData[i] = mark
-			return
-		}
-	}
-	s.GMInstanceData = append(s.GMInstanceData, mark)
-}
-
-// GMInstanceDataDone says leg's lines already went out in inst for this
-// command-list hash. Callers consult the ledger ONLY on a --reuse-instance
-// walk that kept its instance (alive or bind: it continues the same instance
-// in a fresh out dir, so the out dir's marker cannot tell it): every other
-// walk decides by its own out-dir marker alone, so a fresh walk always sends
-// even when an old mark names the same id — the core reuses instance ids
-// across copies. The fresh-fallback launch inside a --reuse-instance run is
-// that fresh walk: a new copy that must fire, never done by the ledger — it
-// is excluded in cmd/turtle-agent (reuseMode == "fresh"), not here. A mark
-// whose stored hash names another command list is not done: the list changed,
-// resend. An old bare mark (no time, no hash) reads back as done, as before.
-// A restart drops every mark with the entries (NoteServerStart, Reset), and
-// recording a fresh entry for an id clears that id's marks: the id names a
-// new copy (SetInstance).
-func (l *CapLedger) GMInstanceDataDone(name, inst, leg, hash string) bool {
-	s := l.Servers[name]
-	if s == nil {
-		return false
-	}
-	for _, m := range s.GMInstanceData {
-		if mi, ml := gmMarkKey(m); mi != inst || ml != leg {
-			continue
-		}
-		if m.Hash != "" && hash != "" && m.Hash != hash {
-			continue
-		}
-		return true
-	}
-	return false
-}
-
 // RecordReuse adds the accounts a reuse placement newly hired into the instance the raid already had. The core counts
 // an instance id once per account, so an account already recorded for that instance is not counted again. A placement
 // whose instance is unknown (0) cannot be deduped: it counts every account, as before.
@@ -468,9 +371,7 @@ func (l *CapLedger) RecordReuse(name string, inst float64, accounts []string, pl
 }
 
 // SetInstance stamps the entry made at at with the instance id the raid entered: a reuse placement's dedupe needs it.
-// It reports whether the entry was still live. A stamp is a fresh entry (only stampInstance calls it, and only for a
-// fresh placement): the id may reuse an older copy's (the core reuses ids across copies), so the stamped id's
-// --gm-instance-data marks are dropped with it — they name the old copy, and the new copy must fire again.
+// It reports whether the entry was still live.
 func (l *CapLedger) SetInstance(name string, at time.Time, inst float64) bool {
 	s := l.Servers[name]
 	if s == nil {
@@ -479,15 +380,6 @@ func (l *CapLedger) SetInstance(name string, at time.Time, inst float64) bool {
 	for i := range s.Entries {
 		if s.Entries[i].At.Equal(at) {
 			s.Entries[i].Instance = inst
-			key := fmt.Sprintf("%.0f", inst)
-			kept := s.GMInstanceData[:0:0]
-			for _, m := range s.GMInstanceData {
-				if mi, _ := gmMarkKey(m); mi == key {
-					continue
-				}
-				kept = append(kept, m)
-			}
-			s.GMInstanceData = kept
 			return true
 		}
 	}
@@ -518,9 +410,8 @@ func (s *CapServer) pruneReservations(now time.Time) {
 }
 
 // NoteServerStart tells the ledger when the server's worldserver started. The core's list lives in memory, so every
-// entry from before that start no longer counts: it is dropped, and so is every --gm-instance-data mark in those
-// instances (an id the core reuses after a restart names a new copy). It reports whether the server had restarted
-// since the ledger last saw it (an entry or mark dropped, or a changed start time).
+// entry from before that start no longer counts: it is dropped.
+// It reports whether the server had restarted since the ledger last saw it (an entry dropped, or a changed start time).
 func (l *CapLedger) NoteServerStart(name string, start time.Time) bool {
 	if start.IsZero() {
 		return false
@@ -539,27 +430,16 @@ func (l *CapLedger) NoteServerStart(name string, start time.Time) bool {
 		keep = append(keep, e)
 	}
 	s.Entries = keep
-	kept := s.GMInstanceData[:0:0]
-	for _, m := range s.GMInstanceData {
-		if !m.At.IsZero() && m.At.Before(start) {
-			restarted = true
-			continue
-		}
-		kept = append(kept, m)
-	}
-	s.GMInstanceData = kept
 	s.ServerStart = start
 	return restarted
 }
 
 // Reset forgets every entry of the server (the operator knows the worldserver
-// restarted), and every --gm-instance-data mark with it: the ids may be
-// reused by new copies.
+// restarted).
 func (l *CapLedger) Reset(name string) {
 	if s := l.Servers[name]; s != nil {
 		s.Entries = nil
 		s.Reservations = nil
-		s.GMInstanceData = nil
 	}
 }
 
