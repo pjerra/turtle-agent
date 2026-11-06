@@ -3,8 +3,9 @@
 // -up restart budget or a stall tears the slot down and re-places: the same instance first (--place --from
 // --reuse-instance), a fresh one only when the old bind is gone (a failed placement) or after an exit 29 (once), and at
 // once after a wipe at a boss for a --gm-instance-data goal (up to the goal's --boss-wipe-max, default 3). An exit 26
-// (no fresh instance place) waits out the goal's --instance-cap-wait and tries a fresh instance again. A boss kill
-// advances to the id's next goal. It never uses slot 3, never sends `.bot run stop` and never passes --instance-cap-unsafe or --inject; it
+// (no fresh instance place) relaunches a fresh instance at once: raid-walk waited out its own --instance-cap-wait
+// inside the run, so the autopilot has no second wait, and the fourth refusal in a row escalates the id for a person.
+// A boss kill advances to the id's next goal. It never uses slot 3, never sends `.bot run stop` and never passes --instance-cap-unsafe or --inject; it
 // runs detached (setsid) and stops cleanly on a YIELD file (tear down, release leases, YIELD-DONE).
 //
 // A teardown that does not verify (the walk gone and the lease released) is not completion: the run stays put and is
@@ -151,8 +152,11 @@ type autoRun struct {
 	// progress: the last step, the boss-HP signature, and when either changed.
 	lastStep     int
 	lastProgress time.Time
-	frameOff     int64
-	frameSig     string
+	// placed says the run got past the place phase (it placed and started walking, or ended after a placement): a
+	// cap refusal and a place-phase end are neither, and only a placement breaks an id's streak of cap refusals.
+	placed   bool
+	frameOff int64
+	frameSig string
 	// pending is the finish the decision rule asked for; a failed teardown holds it back and the next tick retries
 	// instead of deciding again. finishing says a finish goroutine is on it.
 	pending       *raidwalk.AutoDecision
@@ -181,8 +185,11 @@ type autoState struct {
 	// placeFails counts the consecutive attempts that ended in the place phase: the third escalates (a dead bind is
 	// re-placed fresh, but a bind that keeps failing must not loop with minutes of backoff forever).
 	placeFails int
-	nextAt     time.Time // no launch before this (the settle after a teardown, or a backoff)
-	done       bool
+	// capWaits counts the consecutive instance-cap refusals (exit 26) of this id: the fourth escalates. A launch that
+	// got past placement breaks the streak.
+	capWaits int
+	nextAt   time.Time // no launch before this (the settle after a teardown, or a backoff)
+	done     bool
 	// escalated is an id left for a person (a teardown that never verified, an exit 2, a second exit 29, three exit 15s): it counts
 	// as done for allDone, is never launched again and is kept in the checkpoint until a person clears it.
 	escalated bool
@@ -456,17 +463,6 @@ func autoTargetFingerprint(st *autoState) string {
 	}
 	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:])
-}
-
-// autoCapWait is how long the autopilot waits for a fresh instance place after raid-walk's exit 26: the goal's own
-// --instance-cap-wait (the walk waited that long for a place inside the run), else the walk's default.
-func autoCapWait(t raidwalk.AutoTarget) time.Duration {
-	if v := autoFlag(t.Args, "--instance-cap-wait"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			return d
-		}
-	}
-	return raidwalk.InstanceCapDefaultWait
 }
 
 // forwardInstanceCap is the --instance-cap-per-account to pass on, 0 when the flag was not given (raid-walk then
@@ -1535,6 +1531,9 @@ func (s *autoSupervisor) tickState(st *autoState) {
 				step = obs.StepsReached
 			}
 			r.lastStep = step
+			// Past the place phase: this run breaks the id's streak of instance-cap refusals. A cap refusal and a
+			// place-phase end never got that far.
+			r.placed = !obs.InstanceCapWait && !obs.PlacementFailed()
 			if step > g.bestStep {
 				fast = 0
 				progressed = true
@@ -1556,7 +1555,7 @@ func (s *autoSupervisor) tickState(st *autoState) {
 		d := raidwalk.DecideAutoAction(obs, raidwalk.AutoRunState{
 			Goal: r.goal, Attempt: g.attempt, Reuse: r.reuse, HasRun: g.attempt > 0,
 			FastFailures: fast, LeaseFails: g.leaseFails, PlaceFails: st.placeFails, HireWaits: g.hireWaits, Exit29Retries: g.exit29Retries,
-			BossWipes: g.bossWipes, BossWipeMax: g.target.BossWipeMax, Progressed: progressed,
+			BossWipes: g.bossWipes, BossWipeMax: g.target.BossWipeMax, Progressed: progressed, CapWaits: st.capWaits,
 		}, time.Now(), s.o.stall)
 		if d.Action == raidwalk.AutoContinue {
 			st.mu.Unlock()
@@ -1638,6 +1637,14 @@ func (s *autoSupervisor) finish(st *autoState) {
 			g.noProgress++
 		}
 	}
+	// The cap-refusal streak counts per id, not per goal, and only a launch that got past placement breaks it: a
+	// refused place, a place-phase end or a hire-pool wait leaves it as it is (the escalation is in the decision rule).
+	switch {
+	case d.Action == raidwalk.AutoCapWait:
+		st.capWaits++
+	case r.placed:
+		st.capWaits = 0
+	}
 	if d.Exit29Retry {
 		g.exit29Retries++
 	}
@@ -1706,11 +1713,12 @@ func (s *autoSupervisor) finish(st *autoState) {
 		st.nextAt = time.Now().Add(wait)
 		esc = fmt.Sprintf("hire-pool-wait: %s; next same instance after %s", d.Reason, wait.Round(time.Second))
 	case raidwalk.AutoCapWait:
-		// A fresh instance is what the cap refused: the retry asks for one again, after the goal's own cap wait.
+		// A fresh instance is what the cap refused, and the retry asks for one again at once: raid-walk waited out its
+		// own --instance-cap-wait before the exit, so a second wait here would double it (and with a 0 there would be
+		// a 20 m wait that was meant to be none).
 		st.last.reuse = false
-		wait := autoCapWait(g.target)
-		st.nextAt = time.Now().Add(wait)
-		esc = fmt.Sprintf("instance-cap-wait: %s; next fresh instance after %s", d.Reason, wait.Round(time.Second))
+		st.nextAt = time.Now()
+		esc = fmt.Sprintf("instance-cap-wait: %s; next fresh instance at once (refusal %d of %d)", d.Reason, st.capWaits, raidwalk.AutoCapRefuseMax)
 	}
 	st.mu.Unlock()
 
@@ -2508,7 +2516,10 @@ type autoSavedID struct {
 	// restart too (a checkpoint from before it reads 0).
 	BossWipes int `json:"boss_wipes,omitempty"`
 	// BossDead says the current goal's boss is dead in the instance: the goal is DONE at a start, never placed again.
-	BossDead bool   `json:"boss_dead,omitempty"`
+	BossDead bool `json:"boss_dead,omitempty"`
+	// CapWaits is the id's consecutive instance-cap refusals (exit 26): the fourth stops it for a person, across a
+	// restart too.
+	CapWaits int    `json:"cap_waits,omitempty"`
 	NextAt   string `json:"next_at,omitempty"`
 }
 
@@ -2531,7 +2542,7 @@ func (s *autoSupervisor) saveState() {
 			ID: st.id, Goal: st.current, GoalsDone: st.current,
 			Done: st.done, Escalated: st.escalated, Reuse: st.nextReuse,
 			Stopped: st.stopped, StopWhy: st.stopWhy, Stopping: st.stopping,
-			Fingerprint: autoTargetFingerprint(st),
+			Fingerprint: autoTargetFingerprint(st), CapWaits: st.capWaits,
 		}
 		if st.current < len(st.goals) {
 			g := st.goals[st.current]
@@ -2671,6 +2682,7 @@ func (s *autoSupervisor) reconcile() error {
 			st.done, st.escalated = sv.Done, sv.Escalated
 			st.stopped, st.stopWhy = sv.Stopped, sv.StopWhy
 			st.stopping = sv.Stopping
+			st.capWaits = sv.CapWaits
 			st.nextReuse = sv.Reuse
 			if at, err := time.Parse(time.RFC3339, sv.NextAt); err == nil {
 				st.nextAt = at

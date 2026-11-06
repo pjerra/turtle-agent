@@ -533,6 +533,9 @@ type AutoRunState struct {
 	PlaceFails int
 	// HireWaits counts the consecutive hire-pool waits of this goal: the sixth stops the id for a person.
 	HireWaits int
+	// CapWaits counts the consecutive instance-cap refusals (exit 26) of this id: the fourth in a row stops it for a
+	// person. The caller breaks the streak on a launch that got past placement.
+	CapWaits int
 	// Exit29Retries counts the fresh-instance retries this goal already made after an exit 29: one per goal.
 	Exit29Retries int
 	// BossWipes counts the fresh-instance relaunches after a wipe at a boss this goal made since its last progress.
@@ -547,6 +550,11 @@ type AutoRunState struct {
 // instead of taking another fresh instance (the core allows 5 fresh instances per account and hour). A goal line may
 // raise its own budget with --boss-wipe-max (the ZG Hakkar goals use 5).
 const AutoBossWipeMax = 3
+
+// AutoCapRefuseMax is how many consecutive exit-26 instance-cap refusals relaunch an id before it stops for a person.
+// Every one of them already waited raid-walk's --instance-cap-wait (20 m by default), so four in a row is over an hour
+// at the cap without a place: the autopilot's own wait was the second one, and the loop would never end.
+const AutoCapRefuseMax = 4
 
 // AutoDecision is the next step.
 type AutoDecision struct {
@@ -582,8 +590,9 @@ func AutoBackoff(fast int) time.Duration {
 // goal advances; a placement that failed on the old bind asks for a fresh instance next. A stall is no step and no
 // boss-HP change for stall, counted from the end of a legitimate instance-cap wait. Exit 2 stops the id for a
 // person, exit 29 retries once per goal in a fresh instance (a second one stops it), and so does the third consecutive exit 15
-// or the sixth consecutive hire-pool wait. Exit 26 (the instance cap refused a fresh place) waits for the cap. Every
-// restart carries the backoff of its no-progress count; a boss wipe escalates at the goal's boss-wipe budget.
+// or the sixth consecutive hire-pool wait. Exit 26 (the instance cap refused a fresh place) relaunches at once, since
+// the walk waited its own cap wait already, and the fourth in a row stops the id. Every restart carries the backoff of
+// its no-progress count; a boss wipe escalates at the goal's boss-wipe budget.
 func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall time.Duration) AutoDecision {
 	if !o.Exited {
 		// A run waiting on the instance cap is not stalled: its clock starts when the wait ends.
@@ -610,8 +619,13 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 		return AutoDecision{Action: AutoAdvance, Reason: "goal met: " + r.Goal.String()}
 	}
 	if o.InstanceCapWait {
-		// The run never started: no fresh place was free. The caller waits for the cap and relaunches a fresh instance;
-		// nothing was attempted, so nothing counts and nothing escalates.
+		// The run never started: no fresh place was free. raid-walk waited out its own --instance-cap-wait before this
+		// exit, so the caller relaunches at once (no wait of its own); four refusals in a row mean the cap will not
+		// lift for this id and a person has to look (the caller breaks the streak on a launch that got past placement).
+		if r.CapWaits+1 >= AutoCapRefuseMax {
+			return AutoDecision{Action: AutoStop, Escalate: true,
+				Reason: fmt.Sprintf("instance cap: %d refusals in a row, no fresh instance place (the core's cap on the account); no further retry", r.CapWaits+1)}
+		}
 		return AutoDecision{Action: AutoCapWait, Reuse: false, Reason: "instance cap: no fresh instance place is free (" + shortReason(o.EndReason) + ")"}
 	}
 	if o.HirePoolWait {

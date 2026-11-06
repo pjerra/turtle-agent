@@ -3162,48 +3162,43 @@ func TestAutoBossWipeBudgetPerGoal(t *testing.T) {
 	}
 }
 
-// Exit 26 (no fresh instance place) is a cap wait: the autopilot waits out the goal's --instance-cap-wait, relaunches
-// a fresh instance and neither counts a boss wipe nor escalates.
-func TestAutoInstanceCapRefusalWaits(t *testing.T) {
+// Exit 26 (no fresh instance place) is a cap refusal: raid-walk already waited out its own --instance-cap-wait inside
+// the run, so the autopilot relaunches a fresh instance at once, with no wait of its own, and neither counts a boss
+// wipe nor escalates before the fourth refusal in a row.
+func TestAutoInstanceCapRefusalRelaunchesAtOnce(t *testing.T) {
+	const capEnd = "instance cap: waited 30m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation"
 	f := newAutoFixture(t)
 	f.target(bossWipeTarget + " --instance-cap-wait 30m")
 	f.attempt("a-1", 19, 397, "wipe: the raid died")
-	f.attempt("a-2", 26, 0, "instance cap: waited 30m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation")
-	f.attempt("a-3", 26, 0, "instance cap: waited 30m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation")
-	f.attempt("a-4", 26, 0, "instance cap: waited 30m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation")
+	f.attempt("a-2", 26, 0, capEnd)
+	f.attempt("a-3", 26, 0, capEnd)
+	f.attempt("a-4", 26, 0, capEnd)
 	f.attempt("a-5", 2, 0, "bad --sql")
 	s := f.supervisor()
 	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
 	finishAttempt(t, s) // the wipe: a fresh instance next, one wipe counted
-	for i := 0; i < 3; i++ {
-		tickUntil(t, s, "the cap wait", func() bool {
-			st := s.states[0]
+	for i := range 3 {
+		// No clearWait here: the relaunch must come at once, not after a second 30m wait of the autopilot's own.
+		start := time.Now()
+		tickUntil(t, s, fmt.Sprintf("the relaunch after cap refusal %d", i+1), func() bool { return len(f.args()) >= i+2 })
+		if d := time.Since(start); d > 5*time.Second {
+			t.Fatalf("the relaunch after cap refusal %d waited %v: the autopilot repeated raid-walk's wait", i+1, d)
+		}
+		if a := f.args()[i+1]; strings.Contains(a, "--reuse-instance") {
+			t.Fatalf("launch %d after the cap refusal reused the instance: %s", i+2, a)
+		}
+		st := s.states[0]
+		tickUntil(t, s, fmt.Sprintf("cap refusal %d to finish", i+1), func() bool {
 			st.mu.Lock()
 			defer st.mu.Unlock()
-			return st.run == nil && !st.nextAt.IsZero()
+			return st.run == nil
 		})
-		st := s.states[0]
-		st.mu.Lock()
-		left := time.Until(st.nextAt)
-		st.mu.Unlock()
-		if left < 25*time.Minute || left > 31*time.Minute {
-			t.Fatalf("the cap wait is %v, want the goal's --instance-cap-wait 30m", left)
+		if _, esc := runState(st); esc {
+			t.Fatalf("a cap refusal escalated the id:\n%s", f.events())
 		}
 		if !strings.Contains(f.events(), "instance-cap-wait") {
 			t.Fatalf("no instance-cap-wait event:\n%s", f.events())
 		}
-		if n := len(f.args()); n != i+2 {
-			t.Fatalf("%d launches during cap wait %d, want %d", n, i+1, i+2)
-		}
-		if _, esc := runState(st); esc {
-			t.Fatalf("a cap refusal escalated the id:\n%s", f.events())
-		}
-		clearWait(st)
-		tickUntil(t, s, "the launch after the cap wait", func() bool { return len(f.args()) >= i+2 })
-		if a := f.args()[i+1]; strings.Contains(a, "--reuse-instance") {
-			t.Fatalf("launch %d after the cap wait reused the instance: %s", i+2, a)
-		}
-		finishAttempt(t, s)
 	}
 	s.saveState()
 	raw, err := os.ReadFile(filepath.Join(f.walk, autoStateFile))
@@ -3219,6 +3214,82 @@ func TestAutoInstanceCapRefusalWaits(t *testing.T) {
 	}
 	if _, esc := runState(s.states[0]); esc {
 		t.Fatalf("three cap refusals escalated the id:\n%s", f.events())
+	}
+}
+
+// Four cap refusals in a row escalate the id with an EVENTS line naming the cap: the loop must not run forever.
+func TestAutoInstanceCapRefusalsEscalate(t *testing.T) {
+	const capEnd = "instance cap: waited 20m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation"
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	for i := 1; i <= 5; i++ {
+		f.attempt(fmt.Sprintf("a-%d", i), 26, 0, capEnd)
+	}
+	f.attempt("a-6", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 3; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+		if _, esc := runState(s.states[0]); esc {
+			t.Fatalf("escalated at cap refusal %d of 4:\n%s", i, f.events())
+		}
+	}
+	tickUntil(t, s, "launch 4", func() bool { return len(f.args()) >= 4 })
+	finishAttempt(t, s)
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("four cap refusals in a row did not escalate:\n%s", f.events())
+	}
+	if ev := f.events(); !strings.Contains(ev, "ESCALATE stop a 1") || !strings.Contains(ev, "instance cap") {
+		t.Fatalf("no ESCALATE line naming the cap:\n%s", ev)
+	}
+	if n := len(f.args()); n != 4 {
+		t.Fatalf("%d launches, want 4 (no launch after the escalation):\n%s", n, f.events())
+	}
+}
+
+// A launch that got past placement breaks the streak: three refusals, a run that walked, three refusals again is not
+// four in a row.
+func TestAutoInstanceCapRefusalStreakBreaksPastPlacement(t *testing.T) {
+	const capEnd = "instance cap: waited 20m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation"
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	for i := 1; i <= 3; i++ {
+		f.attempt(fmt.Sprintf("a-%d", i), 26, 0, capEnd)
+	}
+	f.attempt("a-4", 19, 12, "wipe: the raid died")
+	for i := 5; i <= 7; i++ {
+		f.attempt(fmt.Sprintf("a-%d", i), 26, 0, capEnd)
+	}
+	f.attempt("a-8", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 7; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+		if _, esc := runState(s.states[0]); esc {
+			t.Fatalf("escalated after cap refusal %d with a placement in between:\n%s", i, f.events())
+		}
+	}
+}
+
+// --instance-cap-wait 0 means raid-walk does not wait for the cap at all, so the autopilot must not fall back to a
+// 20 m wait of its own on the relaunch.
+func TestAutoInstanceCapWaitZeroDoesNotWait(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql --instance-cap-wait 0")
+	f.attempt("a-1", 26, 0, "instance cap: waited 0s (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	tickUntil(t, s, "the cap refusal to finish", func() bool {
+		st := s.states[0]
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		return st.run == nil
+	})
+	start := time.Now()
+	tickUntil(t, s, "the relaunch", func() bool { return len(f.args()) >= 2 })
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("--instance-cap-wait 0 relaunched after %v, want no wait at all", d)
 	}
 }
 

@@ -591,15 +591,20 @@ func TestAutoBossWipeBudgetPerGoal(t *testing.T) {
 	}
 }
 
-// An instance-cap refusal (exit 26: no fresh place) is a wait, not a wipe and not a failure: it neither escalates nor
-// moves the boss-wipe count, whatever the goal's other counts say.
+// An instance-cap refusal (exit 26: no fresh place) is a relaunch, not a wipe and not a failure: it neither escalates
+// nor moves the boss-wipe count, whatever the goal's other counts say, until the fourth in a row.
 func TestAutoInstanceCapWait(t *testing.T) {
 	g := AutoGoal{Kind: "boss", Boss: 14834}
 	capRefused := AutoObservation{Exited: true, ExitCode: 26, EndReason: "instance cap: waited 30m (--instance-cap-wait), still 3 on srv", InstanceCapWait: true}
 	r := AutoRunState{Goal: g, Reuse: false, HasRun: true, Exit29Retries: 1, BossWipes: 2, PlaceFails: 2}
 	d := DecideAutoAction(capRefused, r, autoNow, 15*time.Minute)
 	if d.Action != AutoCapWait || d.Escalate || d.FreshAfterWipe || d.Exit29Retry || d.Reuse {
-		t.Fatalf("instance-cap refusal: %+v, want a wait for a fresh instance and nothing else", d)
+		t.Fatalf("instance-cap refusal: %+v, want a relaunch of a fresh instance and nothing else", d)
+	}
+	// The fourth refusal in a row stops the id, and the reason names the cap.
+	r.CapWaits = AutoCapRefuseMax - 1
+	if d := DecideAutoAction(capRefused, r, autoNow, 15*time.Minute); d.Action != AutoStop || !d.Escalate || !strings.Contains(d.Reason, "instance cap") {
+		t.Fatalf("the fourth instance-cap refusal: %+v, want an escalation naming the cap", d)
 	}
 	// The same run without the flag keeps the old rule.
 	capRefused.InstanceCapWait = false
