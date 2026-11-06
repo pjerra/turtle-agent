@@ -312,6 +312,10 @@ func (c *tbmClient) target(s *session.Session) targetInfo {
 	return targetInfo{exists: true, player: u.Type == "player", dead: u.Dead, name: u.Name}
 }
 
+// clickBeforeDrain is a test seam: it runs inside a click right after its cursor read and before its drain, the window
+// where a late ACK of an earlier request can land.
+var clickBeforeDrain func()
+
 func (c *tbmClient) click(ctx context.Context, p clickParams) (clickResult, error) {
 	btn, err := tbm.Find(p.Button)
 	if err != nil {
@@ -329,11 +333,15 @@ func (c *tbmClient) click(ctx context.Context, p clickParams) (clickResult, erro
 	c.tr.Reset(s)
 	wait := waitBound(p.WaitMS, tbm.ActionTimeoutMS)
 	key := groupKey(s)
-	// Before the drain: an ACK that lands while prepare runs (its roster exchange, the send
-	// throttle) answers an earlier request, and this click owes it, so the exchange below must
-	// read it from here to pass over it instead of its own reply.
-	since := s.Log().Last()
+	// Where the drain stopped: an ACK that lands while prepare runs (its roster exchange, the send throttle) answers an
+	// earlier request, and this click owes it, so the exchange below must read it from here to pass over it instead of
+	// its own reply. Anything already in the log belongs to the earlier requests and the drain has settled it; reading
+	// from before the drain fed those lines to this click's matcher again (a late ACK counted as this click's reply).
+	if clickBeforeDrain != nil {
+		clickBeforeDrain()
+	}
 	c.drain(s, key)
+	since := c.tr.Cursor()
 	tgt := c.target(s)
 
 	// What the addon would know before a click: a fresh roster for bot names, switch states and
