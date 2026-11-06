@@ -1110,8 +1110,13 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 					continue
 				}
 				if ok {
-					w.note("boss %d engaged at step %d while the run is paused on its boss row: resumed the run so the run leader fights it", v.Entry, v.Step)
-					w.logLine(now, fmt.Sprintf("boss %d engaged at step %d while the run is paused on its boss row: resumed the run so the run leader fights it", v.Entry, v.Step))
+					// The resume note only when the resume's wait really saw the run running again: a plain
+					// running-handoff (no resume went out) and a --until none handoff must not claim one
+					// (round 4, Opus MEDIUM).
+					if waitOut.running {
+						w.note("boss %d engaged at step %d while the run is paused on its boss row: resumed the run so the run leader fights it", v.Entry, v.Step)
+						w.logLine(now, fmt.Sprintf("boss %d engaged at step %d while the run is paused on its boss row: resumed the run so the run leader fights it", v.Entry, v.Step))
+					}
 					switch {
 					case strings.TrimSpace(w.opts.until) == "none":
 						w.note("boss %d engaged at step %d under --until none: the run leader fights it", v.Entry, v.Step)
@@ -1829,6 +1834,10 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 			w.bossAliveSeen = map[string]time.Time{}
 		}
 		w.bossAliveSeen[h.GUID.String()] = now
+		if w.bossAliveWalk == nil {
+			w.bossAliveWalk = map[uint32]bool{}
+		}
+		w.bossAliveWalk[h.Entry] = true
 		if w.bossCorpseSeen != nil {
 			delete(w.bossCorpseSeen, h.GUID.String())
 		}
@@ -2392,6 +2401,17 @@ func (w *walk) saveFights() {
 	w.bossCheckErr = nil
 	w.bossReadAt = now
 	w.fightRows = rows
+	// The first successful read of the commander's fight list is the walk's own starting point: everything
+	// listed now is an earlier walk's or instance's history (the walk has filed no fight yet, and a live
+	// record is skipped below). creditFightKills gates exactly these records on this walk's frames.
+	if w.fightIDsAtStart == nil {
+		w.fightIDsAtStart = make(map[string]bool, len(rows))
+		for _, r := range rows {
+			if r.ID != "" && !r.Live {
+				w.fightIDsAtStart[r.ID] = true
+			}
+		}
+	}
 	for _, r := range rows {
 		if r.ID == "" || r.Live || w.seenFights[r.ID] {
 			continue
@@ -3136,6 +3156,14 @@ func (w *walk) creditFightKills() {
 		if f.BossPhaseEntry != 0 && !w.bossFamily(row.Entry)[f.BossPhaseEntry] {
 			continue
 		}
+		// The commander's fight list is its whole history: a record already listed when the walk first read it
+		// may be an earlier walk's or instance's kill. It credits this walk only when the walk's own frames
+		// never showed the boss alive (tj-9's shape: the record is the only evidence); a record that first
+		// appeared during the walk is this walk's and credits freely (round 4, Opus MEDIUM).
+		if w.fightIDsAtStart[f.ID] && w.bossAliveThisWalk(row.Entry) {
+			w.logLine(w.env.now(), fmt.Sprintf("boss %d at step %d: fight %s's kill is not this walk's (listed before the walk began, and the frames saw the boss alive)", row.Entry, step, f.ID))
+			continue
+		}
 		t := w.bossTrackAt(step, row.Entry)
 		if t.killed {
 			continue
@@ -3149,6 +3177,18 @@ func (w *walk) creditFightKills() {
 		t.evidence = fmt.Sprintf("fight %s: %s killed (outcome kill)", f.ID, who)
 		w.logLine(w.env.now(), fmt.Sprintf("boss %d killed at step %d: fight %s %s (outcome kill)", row.Entry, step, f.ID, who))
 	}
+}
+
+// bossAliveThisWalk says the frames showed a unit of the boss's family (bossUnits: its own entry and the phase
+// units) alive at some point in this walk, never reset by an attempt or a recovery (w.bossAliveWalk): the frame
+// evidence that contradicts a pre-walk dashboard kill record (creditFightKills).
+func (w *walk) bossAliveThisWalk(boss uint32) bool {
+	for _, e := range w.bossUnits(boss) {
+		if w.bossAliveWalk[e] {
+			return true
+		}
+	}
+	return false
 }
 
 // bossKillSummaries is the summary's boss_kills list: one record per boss step the run's statuses showed, ordered by
@@ -3827,6 +3867,28 @@ func (w *walk) pausedOnBossOwnRow(entry uint32) bool {
 	return w.bossFamily(row.Entry)[entry]
 }
 
+// pausedPullbackRefusedUnreachable says the run's pause is the ONE pause the paused-boss resume exists for: the
+// run leader's own pullback refused because the tank found no firing stand ("cmd pullback <guid> refused:
+// unreachable: The tank could not start moving to a firing position for the pull ...": TortoiseBots'
+// DungeonRunPolicy PullbackRefusedUnreachable, which routes it through ApproachNoWay and pauses with that text).
+// The party is at the boss and alive, so a resume can hand the pull to the run leader. A near-wipe stop, a
+// self-regroup or any other pause on the boss row is NOT this pause: resuming one would send a half-dead raid
+// into the boss ("Dead raid must not be resumed").
+func pausedPullbackRefusedUnreachable(note string) bool {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(note), "cmd pullback ")
+	if !ok {
+		return false
+	}
+	i := 0
+	for i < len(rest) && rest[i] >= '0' && rest[i] <= '9' {
+		i++
+	}
+	if i == 0 {
+		return false
+	}
+	return strings.HasPrefix(rest[i:], " refused: unreachable")
+}
+
 // pausedBossResumeWaitResult is what the resume's wait drained while it polled: the tracker's
 // incidents in drain order (a wipe, a stall), and whether a FRESH RunRunning status of the boss
 // row arrived. The wait cannot act on a wipe or a stall itself (it returns bool, not error), so
@@ -3937,13 +3999,23 @@ func (w *walk) runFightsBoss(ctx context.Context, entry uint32, resumePaused boo
 	// boss it meets, however many steps before the boss row the engage came from (walk 31: Mandokir woke five steps
 	// before his row, and the auto-shortened until made the walk send `.bot run stop` ~10 s into the fight).
 	if strings.TrimSpace(w.opts.until) == "none" {
+		// A PAUSED run is not fighting, whatever the until says. The one pause the walk may undo on the boss's own
+		// row is the refused firing stand (pausedPullbackRefusedUnreachable): the same resume as an until that goes
+		// past the row, or the run stands in an active boss fight until --paused-wait ends the walk. Every other
+		// pause, and a resume that did not take, keeps the old --until none path: no resume note, no boss stop, and
+		// the watch loop's own pause and wipe rules decide (--until none never stops the run on a boss).
+		if resumePaused && w.haveStatus && w.lastStatus.State == tbm.RunPaused && w.pausedOnBossOwnRow(entry) &&
+			pausedPullbackRefusedUnreachable(w.lastStatus.Note) {
+			_, waitOut = w.resumePausedBossRun(ctx, entry)
+			return true, 0, waitOut
+		}
 		return true, 0, pausedBossResumeWaitResult{}
 	}
 	if !w.haveStatus {
 		return false, 0, pausedBossResumeWaitResult{}
 	}
 	if w.lastStatus.State == tbm.RunPaused {
-		if resumePaused && w.pausedOnBossOwnRow(entry) {
+		if resumePaused && w.pausedOnBossOwnRow(entry) && pausedPullbackRefusedUnreachable(w.lastStatus.Note) {
 			ok, waitOut = w.resumePausedBossRun(ctx, entry)
 			if ok {
 				return true, 0, waitOut

@@ -833,6 +833,12 @@ type walk struct {
 	decisions *raidwalk.DecisionsSummary
 
 	seenFights map[string]bool
+	// fightIDsAtStart is the fight ids the dashboard listed when the walk first read its fights: the
+	// commander's whole history includes earlier walks' and instances' fights, so a kill record already
+	// listed there is credited only when this walk's frames never showed the goal boss alive
+	// (creditFightKills). A record that first appears during the walk is this walk's and credits freely.
+	// nil until the first successful read.
+	fightIDsAtStart map[string]bool
 	// pendingFights are fights listed but whose detail is not loaded yet: fight id to its index in fights.
 	pendingFights map[string]int
 	hostiles      map[string]hostileState
@@ -873,6 +879,12 @@ type walk struct {
 	// the current attempt: the wait's first sighting (revive r6). A live frame for that guid clears it,
 	// as does a wipe recovery.
 	bossCorpseSeen map[string]time.Time
+	// bossAliveWalk is every boss-unit entry (bossUnit) the frames showed ALIVE at any point in this walk,
+	// never reset by an attempt or a recovery (unlike bossAliveSeen): creditFightKills reads it to tell a
+	// dashboard kill record the walk's own frames contradict (the boss stood alive in this instance, so the
+	// record is an earlier walk's or instance's) from one the walk never saw alive (walk 41 tj-9's shape:
+	// the record is the only evidence, and it credits).
+	bossAliveWalk map[uint32]bool
 	// bossGUIDs is the guid -> plan boss entry of the units the frames showed with a plan boss's OWN entry
 	// (trackFrame): a script that changes a creature's entry (core UpdateEntry) keeps its guid, so a unit whose
 	// guid the frames showed as the boss entry is the boss whatever entry it now reads (spec 6, D5 b, #1453).

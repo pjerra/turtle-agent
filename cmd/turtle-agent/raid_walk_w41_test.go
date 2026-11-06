@@ -430,3 +430,226 @@ func TestPausedBossResumeWipeRecoveredInsideWaitKeepsWatching(t *testing.T) {
 		t.Fatalf("%d resumes, want 1 (the wipe's recovery resumed nothing: the run regroups by itself)", n)
 	}
 }
+
+// TestNearWipePauseOnBossRowSendsNoResume is round 4 item 1 (Opus HIGH): the paused-boss resume
+// exists for ONE pause, the run leader's pullback refused unreachable ("cmd pullback <guid> refused:
+// unreachable: ...", DungeonRunPolicy PullbackRefusedUnreachable's ApproachNoWay pause). A near-wipe
+// stop on the same boss row ("... near wipes ... the run stops here") with the boss engaged must NOT
+// send `.bot run resume` into the boss with a half-dead raid: it takes the old boss path (handleBoss
+// stops the run and ends on the encounter).
+func TestNearWipePauseOnBossRowSendsNoResume(t *testing.T) {
+	f, boss, _ := pausedBossFixture(t, func(f *fixture, boss, total int) {
+		nearWipe := fmt.Sprintf("TBM:RUN|zul_gurub|paused|%d/%d|high_priestess_jeklik|boss|begin|19 dead: 3 near wipes within 10 min (54): the run stops here. Regroup (c...)|until step %d (step %d)", boss, total, boss+1, boss+1)
+		f.agent.mu.Lock()
+		f.agent.startQueue = []queuedEvent{{raw: nearWipe}}
+		f.agent.mu.Unlock()
+	})
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if n := countPrefix(verbs, "resume"); n != 0 {
+		t.Fatalf("run verbs %v: %d resumes, want 0 (a near-wipe stop is no pullback pause)", verbs, n)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
+		t.Fatalf("%d run stops, want 1: the old boss path owns the engaged boss\n%s", n, f.stdout.String())
+	}
+	sum := f.summary()
+	if hasNote(sum, "resumed the run so the run leader fights it") {
+		t.Fatalf("notes %q: the near-wipe pause was resumed", sum.Notes)
+	}
+	if !strings.Contains(sum.EndReason, fmt.Sprintf("boss 14517 engaged at step %d", boss)) {
+		t.Fatalf("end %q, want the boss path's ending (notes %q)", sum.EndReason, sum.Notes)
+	}
+}
+
+// TestPausedBossResumeUnderUntilNoneResumesTheRun is round 4 item 2 (Codex HIGH): --until none used
+// to bypass the paused-boss resume entirely, leaving the pullback-paused run standing in an active
+// boss fight until --paused-wait ended the walk. The same pullback-only resume applies there.
+func TestPausedBossResumeUnderUntilNoneResumesTheRun(t *testing.T) {
+	f, _, _ := pausedBossFixture(t, func(f *fixture, boss, total int) {
+		f.opts.until = "none"
+		f.agent.onResume = func() {
+			f.agent.mu.Lock()
+			defer f.agent.mu.Unlock()
+			f.agent.lines = append(f.agent.lines, queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_jeklik|boss|fight|fighting", boss, total)})
+			f.agent.viewHook = func() {
+				f.agent.mu.Lock()
+				defer f.agent.mu.Unlock()
+				if len(f.agent.lines) == 0 {
+					f.agent.lines = append(f.agent.lines,
+						queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_jeklik|boss|fight|plan done (speed 1.0 (test); 0 wipes this run)", total, total)})
+				}
+			}
+		}
+	})
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (notes %v): %s\n%s", code, f.summaryNotes(), f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if n := countPrefix(verbs, "resume"); n != 1 {
+		t.Fatalf("run verbs %v: %d resumes, want 1 (the pullback pause on the boss row resumes under --until none)", verbs, n)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want 0: the resumed run leader fights its own boss\n%s", n, f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, "resumed the run so the run leader fights it") {
+		t.Fatalf("notes %q, want the resume handoff note", sum.Notes)
+	}
+	if sum.EndReason != "plan done" {
+		t.Fatalf("end %q, want the run's own plan done", sum.EndReason)
+	}
+}
+
+// TestRunningBossHandoffHasNoResumeNote is round 4 item 3 (Opus MEDIUM): the watch loop used to note
+// "while the run is paused on its boss row: resumed the run" on every ok handoff, including a plain
+// running boss handoff where no resume went out. The note is gated on waitOut.running.
+func TestRunningBossHandoffHasNoResumeNote(t *testing.T) {
+	boss := zgBossStepOf(t, 14517)
+	total := len(zgRows(t).Steps)
+	f := newFixture(t)
+	f.opts.plan, f.opts.holder = "zul_gurub", "raid-walk-zul_gurub"
+	f.opts.until = fmt.Sprintf("step %d", boss+1)
+	p, err := dungeon.Load(filepath.Join(f.opts.dir, "zul_gurub.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.agent.instMap = p.Map
+	f.agent.enterMap = p.Map
+	start := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_jeklik|boss|fight|fighting|until step %d (step %d)", boss, total, boss+1, boss+1)
+	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: start, Lines: []string{start, "TBM:ACTION_ACK|run start|party|1|-"}}}
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 9, Entry: 14517, HPPct: 40, Target: packet.GUID(1000)}}
+	}
+	// The run is RUNNING on her row when the boss incident fires; its own ending arrives after that.
+	f.agent.viewHook = func() {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		if !f.agent.runStarted || len(f.agent.lines) != 0 {
+			return
+		}
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_jeklik|boss|fight|stopped before step %d (until step %d): the party stays where it stands", boss+1, total, boss+1, boss+1)})
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (notes %v): %s\n%s", code, f.summaryNotes(), f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if hasNote(sum, "resumed the run so the run leader fights it") {
+		t.Fatalf("notes %q: no resume went out on a running boss handoff", sum.Notes)
+	}
+	if !hasNote(sum, fmt.Sprintf("boss 14517 engaged at step %d: the run is on its boss step", boss)) {
+		t.Fatalf("notes %q, want the plain handoff note", sum.Notes)
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if n := countPrefix(verbs, "resume"); n != 0 {
+		t.Fatalf("run verbs %v: %d resumes, want 0", verbs, n)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want 0: the run leader fights its own boss\n%s", n, f.stdout.String())
+	}
+}
+
+// TestFightRecordKillAtWalkStartNeedsNoLiveSighting is round 4 item 4 (Opus MEDIUM): w.fights is the
+// commander's whole dashboard history, so a "kill" record already listed when the walk began may be
+// an earlier walk's or instance's. Such a record credits the goal only when this walk's frames never
+// showed the boss alive; a record that first appears during the walk credits freely.
+func TestFightRecordKillAtWalkStartNeedsNoLiveSighting(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		alive        bool
+		wantCredited bool
+	}{
+		{"stale pre-walk kill, boss seen alive this walk", true, false},
+		{"pre-walk record the walk never contradicted (tj-9)", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := dungeon.Load("../../dungeons/zul_gurub.json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			goal := zgBossStepOf(t, 14517)
+			w := bossSummaryWalk(t)
+			now := time.Now()
+			w.env = walkEnv{now: func() time.Time { return now }}
+			w.plan = p
+			w.outDir = t.TempDir()
+			w.stdout = io.Discard
+			w.started, w.ended = now, now
+			w.opts.until = fmt.Sprintf("step %d", goal+1)
+			w.startStep, w.untilStep = goal, goal+1
+			w.hostiles = map[string]hostileState{}
+			w.botAt = map[string]botPos{}
+			w.partyG = map[uint64]bool{}
+			w.bossRule = raidwalk.NewBossRows(p)
+			w.bossAttemptAt = map[uint32]time.Time{}
+			w.bossRows = map[uint32]hostileState{}
+			if tc.alive {
+				// The walk's own frames hold Jeklik alive (and engaged) on her row.
+				w.trackFrame(now, &tbm.ViewFrame{Hostiles: []tbm.HostileRec{{GUID: 9, Entry: 14517, HPPct: 40, Target: packet.GUID(1000)}}})
+			}
+			// The run stopped on her own row before any kill: the frames never reported the kill.
+			feedStatus(w, tbm.RunStatus{Step: goal, Kind: "boss", Note: "fighting"}, now)
+			feedStatus(w, tbm.RunStatus{State: tbm.RunPaused, Step: goal, Kind: "boss", Note: "cmd pullback 17379391205577637935 refused: unreachable"}, now)
+			// The dashboard listed the goal boss's kill when the walk began (an earlier walk's or instance's).
+			w.fightIDsAtStart = map[string]bool{"68-1": true}
+			w.fights = []raidwalk.FightSummary{
+				{ID: "68-1", Step: goal, Leg: "high_priestess_jeklik", DurMS: 153656, Outcome: "kill", BossName: "High Priestess Jeklik", BossPhase: 1, BossPhaseEntry: 14517},
+			}
+			w.finish(exitRaidWalkIncident)
+			raw, err := os.ReadFile(filepath.Join(w.outDir, "summary.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var sum raidwalk.Summary
+			if err := json.Unmarshal(raw, &sum); err != nil {
+				t.Fatal(err)
+			}
+			k := sum.BossKill
+			if tc.wantCredited {
+				if k == nil || k.Step != goal || k.Entry != 14517 || !k.Killed {
+					t.Fatalf("boss_kill %+v, want step %d entry 14517 killed by the pre-walk record (notes %q)", k, goal, sum.Notes)
+				}
+				return
+			}
+			if k != nil && k.Killed {
+				t.Fatalf("boss_kill %+v: a pre-walk kill record must not credit a boss the frames saw alive (notes %q)", k, sum.Notes)
+			}
+		})
+	}
+}
+
+// TestPausedPullbackRefusedUnreachableMatcher pins the one pause text the paused-boss resume may
+// undo (round 4 item 1): TortoiseBots' DungeonRunPolicy PullbackRefusedUnreachable note. Another
+// refusal of the same pullback (a busy tank, no tank) and any other pause are not it.
+func TestPausedPullbackRefusedUnreachableMatcher(t *testing.T) {
+	for _, tc := range []struct {
+		note string
+		want bool
+	}{
+		{"cmd pullback 17379391205577637935 refused: unreachable: The tank could not start moving to a firing position for the pull; the boss at -12289.1 -1384.1 134.3 is not reachable from this floor: no safe stand 35.0-25.0 yd from it (the lead bot 49.9 yd from it)", true},
+		{"cmd pullback 12 refused: unreachable", true},
+		{"cmd pullback 12 refused: unreachable: The tank could not start moving; the boss at 1 2 3 is not reachable from this floor: no safe stand 15.0-25.0 yd from it the lead bot has a path to (the lead bot 60.0 yd from it)", true},
+		{"cmd pullback 12 refused: tank-busy", false},
+		{"cmd pullback 12 refused: too-far", false},
+		{"cmd pullback refused: unreachable", false},
+		{"cmd pullback 12 refused: invalid-target", false},
+		{"19 dead: 3 near wipes within 10 min (54): the run stops here. Regroup (c...)", false},
+		{"no run is active", false},
+		{"", false},
+	} {
+		if got := pausedPullbackRefusedUnreachable(tc.note); got != tc.want {
+			t.Errorf("pausedPullbackRefusedUnreachable(%q) = %v, want %v", tc.note, got, tc.want)
+		}
+	}
+}
