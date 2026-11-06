@@ -18,6 +18,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
@@ -1064,6 +1065,12 @@ func (w *walk) placeQuietJudge(read *placeQuietRead, p dungeon.Point) placeQuiet
 			if s.dist <= placeReachYd {
 				w.note("place: the quiet refuses %d %s: %s (%s)", u.Entry, u.Name, w.placeQuietBlock(u, s.dist), u.placeWhere())
 				j.Block = append(j.Block, u)
+			} else if w.placeBossNear(u, s.dist) {
+				// Walk 46 Jin'do: the boss stood 25.2 yd from the start, past the landing reach, and the walk said
+				// nothing: the next note named a far Crocolisk. The boss is not refused (the offline start choice
+				// judges it), but it is no longer silent.
+				w.note("place: the quiet sees boss %d %s %.1f yd from the start point, beyond the %d yd landing reach: inside a boss's detection range the placement can pull it (%s)",
+					u.Entry, u.Name, s.dist, placeReachYd, u.placeWhere())
 			} else if !u.HomeOK {
 				// Beyond the landing reach an unowned unit is ignored, but a missing home is still noted: the extra
 				// round never clears a unit without a spawn (fail closed), and the live run can tell the two apart.
@@ -1073,6 +1080,28 @@ func (w *walk) placeQuietJudge(read *placeQuietRead, p dungeon.Point) placeQuiet
 		}
 	}
 	return j
+}
+
+// placeBossNoteYd is how far past the start point a boss unit is still worth a note: a boss's detection range is 20 yd
+// plus the level difference and the placement's spread, so a boss up to here can wake while the raid lands.
+const placeBossNoteYd = 30
+
+// placeBossNear says a unit beyond the landing reach is a boss of the plan's rows ahead, within placeBossNoteYd of the
+// start point.
+func (w *walk) placeBossNear(u ttUnit, dist float64) bool {
+	if dist > placeBossNoteYd {
+		return false
+	}
+	start := 1
+	if w.place != nil && w.place.Start > 0 {
+		start = w.place.Start
+	}
+	for i := start - 1; i < len(w.rows.Steps); i++ {
+		if st := w.rows.Steps[i]; st.Kind == planexport.KindBoss && st.Entry == u.Entry {
+			return true
+		}
+	}
+	return false
 }
 
 // roamWords says how the toolkit reported a unit of the quiet list that moved between the two reads.

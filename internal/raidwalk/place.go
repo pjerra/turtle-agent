@@ -402,6 +402,58 @@ func PlaceResumeStart(rows planexport.Rows, step int) (string, bool) {
 	return "leg " + strconv.Itoa(leg), true
 }
 
+// bossApproachComment is the comment the plan exporter gives a boss's approach point rows.
+const bossApproachComment = "boss approach"
+
+// PlaceResumeGoalStart is the --from words a restart takes when the run reached a goal's boss row or one of its
+// boss-approach rows (a move row the plan marks "boss approach"). Resuming one row before the boss row lands the raid
+// on the boss's last approach point, inside his reach, and the placement pulls him (walk 46 Jin'do: step 518 wiped,
+// step 517 stood 25.2 yd from his spawn, 16 of 16 retries failed; all 9 starts at the goal's own step 516 placed 20/20).
+// So the restart starts at the goal's own start, goalStart ("step N" or "leg L"), when it stands in the reached row's
+// leg at or before it with no boss or hold row between (a boss earlier in the leg would be fought again). ok is false
+// for any other reached row, a goal without a start, or a start that does not qualify: the caller then keeps
+// PlaceResumeStart's answer.
+func PlaceResumeGoalStart(rows planexport.Rows, step int, goalStart string) (string, bool) {
+	if step < 1 || step > len(rows.Steps) || goalStart == "" {
+		return "", false
+	}
+	reached := rows.Steps[step-1]
+	if reached.Kind != planexport.KindBoss && !(moveRow(reached) && reached.Comment == bossApproachComment) {
+		return "", false
+	}
+	words := strings.Fields(goalStart)
+	if len(words) != 2 {
+		return "", false
+	}
+	var from int // the first row (1-based) the goal's start covers
+	switch words[0] {
+	case "step":
+		n, err := strconv.Atoi(words[1])
+		if err != nil || n < 1 || n > step || rows.Steps[n-1].Leg != reached.Leg {
+			return "", false
+		}
+		from = n
+	case "leg":
+		leg, _, err := findLeg(rows, words[1])
+		if err != nil || leg != reached.Leg {
+			return "", false
+		}
+		lo, _ := legSpan(rows, leg)
+		if lo < 0 {
+			return "", false
+		}
+		from = lo + 1
+	default:
+		return "", false
+	}
+	for i := from - 1; i < step-1; i++ {
+		if k := rows.Steps[i].Kind; k == planexport.KindBoss || k == planexport.KindHold {
+			return "", false
+		}
+	}
+	return goalStart, true
+}
+
 // startLegName is the leg a fallback start row belongs to, as the messages name it.
 func startLegName(rows planexport.Rows, leg int) string {
 	for _, l := range rows.Legs {

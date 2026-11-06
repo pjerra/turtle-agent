@@ -31,7 +31,18 @@ const (
 type placeQuietHazard struct {
 	spawn    worldspawn.Spawn
 	fromStep int
+	// plainReach, when above zero, is the aggro radius of a boss the world export holds no spawn of: the default
+	// detection range, whatever the party's level (a spawn with no stats cannot be judged by level).
+	plainReach float64
 }
+
+// placeQuietBossDetectYd is the detection range a boss row's hazard gets when the world holds no spawn of the boss
+// (creature_template.detection_range's default, the same 20 yd a pack member without the column gets).
+const placeQuietBossDetectYd = 20
+
+// placeQuietBossSpawnYd is how far from the boss row a world spawn of the boss's entry may stand and still be the boss
+// (the row's position is the plan's boss.position, not always the exact spawn point).
+const placeQuietBossSpawnYd = 30
 
 // placeQuietRowReach is how near a creature row may stand to a member of a pack it pulls (trashcheck's targetReach).
 func placeQuietRowReach(s planexport.StepRow) float64 {
@@ -92,11 +103,49 @@ func placeQuietHazards(world *worldspawn.World, rows planexport.Rows, start int)
 			}
 		}
 	}
+	// A boss stands alone: no pack owns it, so the pack loop above never sees it (walk 46 Jin'do: the start 25.2 yd from
+	// his spawn pulled him). Each boss row at or after start is a hazard at the plan's boss position, with the stats
+	// of the export's spawn of that entry when one stands near, else the default detection range.
+	for i := start - 1; i < len(rows.Steps); i++ {
+		s := rows.Steps[i]
+		if s.Kind != planexport.KindBoss || !placedRow(s) {
+			continue
+		}
+		out = append(out, placeQuietBossHazard(world, s, i+1))
+	}
 	return out
+}
+
+// placeQuietBossHazard is the hazard of one boss row, standing at the row's position.
+func placeQuietBossHazard(world *worldspawn.World, s planexport.StepRow, step int) placeQuietHazard {
+	pos := dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
+	var best worldspawn.Spawn
+	bestD, found := math.Inf(1), false
+	for _, sp := range world.Spawns {
+		if sp.Entry != s.Entry {
+			continue
+		}
+		dx, dy, dz := float64(sp.Pos.X-pos.X), float64(sp.Pos.Y-pos.Y), float64(sp.Pos.Z-pos.Z)
+		if d := math.Sqrt(dx*dx + dy*dy + dz*dz); d <= placeQuietBossSpawnYd && d < bestD {
+			best, bestD, found = sp, d, true
+		}
+	}
+	if !found {
+		return placeQuietHazard{
+			spawn:      worldspawn.Spawn{Entry: s.Entry, Name: "boss", Pos: pos},
+			fromStep:   step,
+			plainReach: placeQuietBossDetectYd,
+		}
+	}
+	best.Pos = pos
+	return placeQuietHazard{spawn: best, fromStep: step}
 }
 
 // placeQuietNeed is the distance a point must keep from a hazard at the party's level.
 func placeQuietNeed(h placeQuietHazard, partyLevel int) float64 {
+	if h.plainReach > 0 {
+		return h.plainReach + PlaceQuietGap
+	}
 	level := partyLevel
 	if level <= 0 {
 		level = h.spawn.LevelMax

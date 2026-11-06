@@ -599,6 +599,46 @@ func TestAutoRestartFromABossRowStepsBack(t *testing.T) {
 	}
 }
 
+// Walk 46 Jin'do: a wipe at the boss resumed one row before the boss row, the last approach point, which stands inside
+// the boss's reach, so the placement pulled him again and again. When the reached step is the goal's boss row or one of
+// its approach rows, the restart starts at the goal's own --from. The fixture's Arlokk boss row is step 397 and its
+// approach row 396; a trash or path row still resumes where it was reached.
+func TestAutoRestartFromTheBossResumesAtTheGoalStart(t *testing.T) {
+	for _, reached := range []int{397, 396} {
+		t.Run(fmt.Sprint(reached), func(t *testing.T) {
+			f := newAutoFixture(t)
+			f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from step 390")
+			f.attempt("a-1", 18, reached, "paused: 15 dead: 21")
+			f.attempt("a-2", 2, 0, "bad --sql")
+			s := f.supervisor()
+			tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+			finishAttempt(t, s)
+			tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+			args := f.args()
+			if !strings.Contains(args[1], "--from step 390 --place --reuse-instance") {
+				t.Fatalf("the restart did not start at the goal's step 390: %s", args[1])
+			}
+			if !strings.Contains(f.events(), "resuming from the goal's start") {
+				t.Fatalf("no resume event:\n%s", f.events())
+			}
+		})
+	}
+}
+
+func TestAutoRestartFromATrashStepKeepsTheReachedStep(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from step 390")
+	f.attempt("a-1", 18, 393, "paused: 15 dead: 21")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	if args := f.args(); !strings.Contains(args[1], "--from step 393 --place --reuse-instance") {
+		t.Fatalf("the restart left the reached step 393: %s", args[1])
+	}
+}
+
 // H1: with no step reached, a restart starts at the target's own --from, still in the same instance.
 func TestAutoRestartFromTheTargetFrom(t *testing.T) {
 	f := newAutoFixture(t)

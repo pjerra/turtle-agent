@@ -129,3 +129,51 @@ func TestPlaceBackInLegStopsAtABossRowAndAtTheLeg(t *testing.T) {
 		t.Fatalf("PlaceBack from 3: %d %v, want 1", got, ok)
 	}
 }
+
+// Walk 46 Jin'do: the boss stands alone and no pack owns it, so the offline check never saw it; the autopilot's
+// resume start (the last approach row) stood 25.2 yd from his spawn and pulled him. The leg's boss row is a hazard.
+func quietStartBossRows() planexport.Rows {
+	boss := placeRow(planexport.KindBoss, 0, 0, 125.2, 0, 0, 11380)
+	boss.Entry = 11380
+	return placeRows(nil,
+		placeMove(0, 0, 10, 0),
+		placeMove(0, 0, 40, 0),
+		placeMove(0, 0, 100, 0),
+		boss,
+	)
+}
+
+func TestPlaceQuietStartMovesBackFromABossInReach(t *testing.T) {
+	// The world holds no spawn of the boss: the row's own entry and position are the hazard (detection 20 + gap 8).
+	rows := quietStartBossRows()
+	got, note := PlaceQuietStart(rows, &worldspawn.World{Map: 309}, 3, 60)
+	if got != 2 {
+		t.Fatalf("start %d, want step 2 (step 3 stands 25.2 yd from the boss, step 2 85.2)", got)
+	}
+	if !strings.Contains(note, "11380") || !strings.Contains(note, "step 3") || !strings.Contains(note, "step 2") {
+		t.Fatalf("note %q, want the boss entry, the refused row and the chosen row", note)
+	}
+}
+
+func TestPlaceQuietStartKeepsAStartFarFromTheBoss(t *testing.T) {
+	rows := quietStartBossRows()
+	rows.Steps[3].Y = 169 // the boss is 69 yd from step 3
+	got, note := PlaceQuietStart(rows, &worldspawn.World{Map: 309}, 3, 60)
+	if got != 3 {
+		t.Fatalf("start %d, want the requested step 3 (the boss is 69 yd away): %s", got, note)
+	}
+}
+
+func TestPlaceQuietStartUsesTheBossSpawnsOwnStats(t *testing.T) {
+	// A boss spawn in the export keeps its own detection range: 30 yd at the party's level needs 30 + 8 yd.
+	rows := quietStartBossRows()
+	rows.Steps[3].Y = 135 // 35 yd from step 3: clear at 28, inside 38
+	world := &worldspawn.World{Map: 309, Spawns: []worldspawn.Spawn{{
+		GUID: 9, Entry: 11380, Name: "Jin'do the Hexxer", LevelMax: 60, Rank: 3, Faction: 16,
+		Pos: dungeon.Point{X: 0, Y: 135, Z: 0}, DetectionYd: 30,
+	}}}
+	got, _ := PlaceQuietStart(rows, world, 3, 60)
+	if got != 2 {
+		t.Fatalf("start %d, want step 2 (the spawn's detection range is 30)", got)
+	}
+}

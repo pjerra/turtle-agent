@@ -990,3 +990,54 @@ func TestPlaceResumeStartStepsBackFromABossRow(t *testing.T) {
 		t.Error("a step past the rows has no resume start")
 	}
 }
+
+// Walk 46 Jin'do: every id wiped at the boss row (step 518) and the autopilot resumed from the reached step minus
+// one, the last boss-approach row 25.2 yd from the boss, so the placement pulled him. A wipe at the goal's boss row or
+// at one of its approach rows resumes from the goal's own start instead.
+func TestPlaceResumeGoalStartFromABossOrItsApproach(t *testing.T) {
+	approach := func(leg int, x, y, z float32) planexport.StepRow {
+		s := placeMove(leg, x, y, z)
+		s.Comment = "boss approach"
+		return s
+	}
+	rows := placeRows([]planexport.LegRow{
+		{Plan: "t", Leg: 0, Name: "one"},
+		{Plan: "t", Leg: 1, Name: "two"},
+		{Plan: "t", Leg: 2, Name: "three"},
+	},
+		placeMove(0, 0, 10, 0),
+		placeMove(1, 0, 20, 0),                               // 2
+		placeMove(1, 0, 30, 0),                               // 3: the goal's start
+		placeRow(planexport.KindPull, 1, 0, 35, 0, 10, 777),  // 4: trash
+		placeMove(1, 0, 40, 0),                               // 5
+		approach(1, 0, 45, 0),                                // 6
+		approach(1, 0, 50, 0),                                // 7
+		placeRow(planexport.KindBoss, 1, 0, 55, 0, 0, 14515), // 8
+		placeMove(2, 0, 60, 0),                               // 9
+		placeRow(planexport.KindBoss, 2, 0, 70, 0, 0, 11380), // 10
+	)
+	for _, c := range []struct {
+		name  string
+		step  int
+		start string
+		want  string
+		ok    bool
+	}{
+		{"the boss row", 8, "step 3", "step 3", true},
+		{"the last approach row", 7, "step 3", "step 3", true},
+		{"the first approach row", 6, "step 3", "step 3", true},
+		{"a leg start", 8, "leg two", "leg two", true},
+		{"a trash row keeps the reached step", 4, "step 3", "", false},
+		{"a plain move row keeps the reached step", 5, "step 3", "", false},
+		{"no goal start", 8, "", "", false},
+		{"a start in another leg", 10, "step 3", "", false},
+		{"a start after the reached step", 7, "step 9", "", false},
+		{"a boss between the start and the step", 10, "step 8", "", false},
+		{"a step outside the rows", 99, "step 3", "", false},
+	} {
+		got, ok := PlaceResumeGoalStart(rows, c.step, c.start)
+		if ok != c.ok || got != c.want {
+			t.Errorf("%s: PlaceResumeGoalStart(%d, %q) = %q %v, want %q %v", c.name, c.step, c.start, got, ok, c.want, c.ok)
+		}
+	}
+}
