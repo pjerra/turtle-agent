@@ -3837,6 +3837,7 @@ func (w *walk) bossFamilyWithFirst(boss uint32) map[uint32]bool {
 	}
 	return fam
 }
+
 const (
 	// earlyEngageSteps is how many steps before its boss step the run may stand for the hand-over: the boss's own
 	// approach point sits inside the pull, one or two steps back (walk 24).
@@ -3902,7 +3903,7 @@ type pausedBossResumeWaitResult struct {
 	// failed: --until none tried the refused-stand resume and it did not end in a fresh RunRunning. The walk
 	// keeps its pre-resume --until none path (no run stop, the pause handling owns the run) and claims no handoff.
 	failed bool
-	incs    []raidwalk.Incident
+	incs   []raidwalk.Incident
 }
 
 // resumePausedBossRun sends `.bot run resume` for a boss that engaged while the run paused on the boss's own row,
