@@ -908,10 +908,12 @@ func TestSavesAreBounded(t *testing.T) {
 		}
 	})
 	t.Run("disk floor counts the save", func(t *testing.T) {
-		// free space just above the floor, but not by the size of the version: refused
+		// free space just above the floor, but not by the size of the version: refused. The reading is injected: the real
+		// free space of the machine moves between the test's read and the save's (other packages, the runner), which let a
+		// save through when it grew by more than the version's size.
+		const free = 10 << 30
 		r := rigWith(t, func(c *EditConfig) {
-			free, err := c.Store.FreeBytes()
-			must(t, err)
+			c.FreeBytes = func() (uint64, error) { return free, nil }
 			c.MinFree = free - 4096
 		})
 		before := tree(t, r.edits)
