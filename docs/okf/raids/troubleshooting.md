@@ -37,7 +37,7 @@ No quiet move row stands anywhere before the leg's first pull. Pass an exact `--
 
 ## `place: 4 tries in the same instance ...`
 
-The placement failed every try it makes in the same instance (quiet refusals, fights after the place, or hires not arriving). Exit 29. The autopilot stops that id on this code: a restart would only enter a fresh instance and burn the hourly cap. Walk from the door, or fix the blockers the notes name, before you re-place.
+The placement failed every try it makes in the same instance (quiet refusals, fights after the place, or hires not arriving). Exit 29. The autopilot retries once per goal in a fresh instance; if that also ends in 29 it stops the id with an `ESCALATE` line. Walk from the door, or fix the blockers the notes name, before you re-place.
 
 ## `instance cap: ...`
 
@@ -69,7 +69,7 @@ The autopilot validates `targets.txt` before anything runs (exit 2): `no -- betw
 
 ## `ESCALATE <kind> <id> <slot>: <reason>` in status.txt
 
-That id is left for a person: exit 2 or 29, three exit 15s, three placement failures, six hire-pool waits or three teardown failures. Clear the cause (arguments, placement, lease holder, pool pressure, slot state), then remove or fix the id's lines.
+That id is left for a person: exit 2, a repeated exit 29, three exit 15s, three placement failures, six hire-pool waits or three teardown failures. Clear the cause (arguments, placement, lease holder, pool pressure, slot state), then remove or fix the id's lines.
 
 ## `fighting after the place` / `not at the start`
 
