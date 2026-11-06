@@ -520,3 +520,52 @@ func TestParseAutoTargetsHeldSlotStaysWithABadLinesID(t *testing.T) {
 		t.Fatalf("issues %+v, want a's bad line and b's slot taken by a", issues)
 	}
 }
+
+// Walk 44 / 46 (Hakkar): a wipe (exit 19) that ended at a boss row, or the row before it, relaunches into a FRESH
+// instance: the dead or unplaced bots would otherwise stand beside the live boss while the placement retries. It is
+// not the goal's exit-29 retry (that stays once per goal), and a wipe elsewhere keeps the same instance.
+func TestAutoWipeAtBossRelaunchesFresh(t *testing.T) {
+	g := AutoGoal{Kind: "boss", Boss: 11397}
+	wipe := AutoObservation{Exited: true, ExitCode: 19, StepsReached: 694, EndReason: "wipe", WipeAtBoss: true}
+	run := AutoRunState{Goal: g, Reuse: true, HasRun: true}
+	d := DecideAutoAction(wipe, run, autoNow, 15*time.Minute)
+	if d.Action != AutoRestart || d.Reuse || !d.FreshAfterWipe || d.Exit29Retry {
+		t.Fatalf("wipe at a boss: %+v, want a fresh restart that is not the exit-29 retry", d)
+	}
+	// It does not use up the goal's one exit-29 fresh retry.
+	exit29 := AutoObservation{Exited: true, ExitCode: 29, EndReason: "place: 4 tries in the same instance, start step 693"}
+	if d := DecideAutoAction(exit29, run, autoNow, 15*time.Minute); d.Action != AutoRestart || !d.Exit29Retry {
+		t.Fatalf("exit 29 after a boss wipe: %+v, want the counted fresh retry", d)
+	}
+	wipe.WipeAtBoss = false
+	if d := DecideAutoAction(wipe, run, autoNow, 15*time.Minute); d.Action != AutoRestart || !d.Reuse || d.FreshAfterWipe {
+		t.Fatalf("wipe away from a boss: %+v, want the same instance", d)
+	}
+	// Only exit 19 is a wipe: a disconnect at a boss row keeps the old rule.
+	crash := AutoObservation{Exited: true, ExitCode: 5, StepsReached: 694, EndReason: "server closed", WipeAtBoss: true}
+	if d := DecideAutoAction(crash, run, autoNow, 15*time.Minute); !d.Reuse {
+		t.Fatalf("exit 5 at a boss: %+v, want the same instance", d)
+	}
+}
+
+// Round 1 (HIGH): the third boss wipe in a row without progress stops the id; progress restarts the count.
+func TestAutoBossWipeBudget(t *testing.T) {
+	g := AutoGoal{Kind: "boss", Boss: 14515}
+	wipe := AutoObservation{Exited: true, ExitCode: 19, StepsReached: 694, EndReason: "wipe", WipeAtBoss: true}
+	decide := func(prior int, progressed bool) AutoDecision {
+		return DecideAutoAction(wipe, AutoRunState{Goal: g, Reuse: true, HasRun: true, BossWipes: prior, Progressed: progressed}, autoNow, 15*time.Minute)
+	}
+	if d := decide(0, true); d.Action != AutoRestart || !d.FreshAfterWipe {
+		t.Fatalf("first wipe: %+v", d)
+	}
+	if d := decide(1, false); d.Action != AutoRestart || !d.FreshAfterWipe {
+		t.Fatalf("second wipe: %+v", d)
+	}
+	d := decide(2, false)
+	if d.Action != AutoStop || !d.Escalate || !strings.Contains(d.Reason, "boss wipe x3 without progress") {
+		t.Fatalf("third wipe: %+v, want an ESCALATE stop", d)
+	}
+	if d := decide(2, true); d.Action != AutoRestart || !d.FreshAfterWipe {
+		t.Fatalf("third wipe after progress: %+v, want the count restarted", d)
+	}
+}

@@ -1041,3 +1041,24 @@ func TestPlaceResumeGoalStartFromABossOrItsApproach(t *testing.T) {
 		}
 	}
 }
+
+// A wipe that ends at a boss row, or the row before it, is a wipe at that boss: the autopilot launches the next
+// attempt in a fresh instance (walk 44 hk7m-3, walk 46 hk4m-3). Any other step, or a step outside the rows, is not.
+func TestPlaceStepAtBoss(t *testing.T) {
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}},
+		placeMove(0, 0, 10, 0),                               // 1
+		placeMove(0, 0, 20, 0),                               // 2
+		placeMove(0, 0, 30, 0),                               // 3: the row before the boss
+		placeRow(planexport.KindBoss, 0, 0, 35, 0, 0, 14515), // 4: the boss row
+		placeMove(0, 0, 40, 0),                               // 5
+		placeMove(0, 0, 50, 0),                               // 6
+	)
+	for _, c := range []struct {
+		step int
+		want bool
+	}{{1, false}, {2, false}, {3, true}, {4, true}, {5, false}, {6, false}, {0, false}, {7, false}} {
+		if got := PlaceStepAtBoss(rows, c.step); got != c.want {
+			t.Errorf("PlaceStepAtBoss(%d) = %v, want %v", c.step, got, c.want)
+		}
+	}
+}
