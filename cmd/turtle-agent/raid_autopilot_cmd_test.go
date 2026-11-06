@@ -2934,6 +2934,33 @@ func TestAutoEditedActiveIDMovingOntoAnOccupiedSlotIsSkipped(t *testing.T) {
 	}
 }
 
+// Opus round 2 (fix 2): an escalated id whose checkpoint's child still answers holds its slot at a restart. The
+// escalation is a person's decision, not a teardown: a run that is still live keeps its slot, or a new line would be
+// launched beside it. A dead child frees the slot.
+func TestAutoStartEscalatedIDWithALiveChildHoldsItsSlot(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	live := exec.Command("sleep", "30")
+	live.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := live.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = live.Process.Kill(); _ = live.Wait() }()
+	f.checkpoint(autoSavedID{ID: "a", Goal: 0, Attempt: 1, Escalated: true, ChildPID: live.Process.Pid})
+	if _, err := readAutoTargets(f.walk); err == nil || !strings.Contains(err.Error(), "line 2") || !strings.Contains(err.Error(), "already a's") {
+		t.Fatalf("err %v, want b's line 2 refused as a's slot: a's escalated walk is still alive", err)
+	}
+	if err := live.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = live.Wait()
+	targets, err := readAutoTargets(f.walk)
+	if err != nil || len(targets) != 2 {
+		t.Fatalf("targets %v err %v, want a and b accepted once a's walk is gone", targets, err)
+	}
+}
+
 // Opus round 2 (LOW-2): a checkpointed id whose last goal's boss is dead (not yet marked done) holds no slot at a
 // start: a new id on its slot is accepted.
 func TestAutoStartBossDeadLastGoalIsInactive(t *testing.T) {

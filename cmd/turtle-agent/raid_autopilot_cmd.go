@@ -358,11 +358,12 @@ func parseAutoArgs(args []string, stderr io.Writer) (autoOptions, int) {
 }
 
 // readAutoTargets is the strict read of a start: any bad line refuses it. The slot check goes by the checkpoint like
-// the live re-read does: an id the checkpoint holds as done, stopped or escalated holds no slot (so a file the running
-// autopilot accepted, a done id plus a new id on its slot, is accepted after a restart too), and so does an id whose
-// last goal's boss is dead (reconcile never places it again); every other checkpointed id claims its slot before a
-// new line does. An id whose goal lines changed since the checkpoint is not restored (reconcile starts it fresh), so
-// it is a new id here.
+// the live re-read does: an id the checkpoint holds as done, stopped, or escalated with no live child holds no slot (so
+// a file the running autopilot accepted, a done id plus a new id on its slot, is accepted after a restart too), and so
+// does an id whose last goal's boss is dead (reconcile never places it again); every other checkpointed id claims its
+// slot before a new line does. An escalated id whose checkpoint's child still answers keeps its slot: the escalation
+// left that run in place, and a new line on the slot would launch beside a live walk. An id whose goal lines changed
+// since the checkpoint is not restored (reconcile starts it fresh), so it is a new id here.
 func readAutoTargets(dir string) ([]raidwalk.AutoTarget, error) {
 	read := func(claim func(string) raidwalk.AutoSlotClaim) ([]raidwalk.AutoTarget, []raidwalk.AutoTargetIssue, error) {
 		f, err := os.Open(filepath.Join(dir, autoTargetsFile))
@@ -377,7 +378,10 @@ func readAutoTargets(dir string) ([]raidwalk.AutoTarget, error) {
 	byID := map[string]autoSavedID{}
 	for _, sv := range saved.IDs {
 		kinds[sv.ID] = raidwalk.AutoSlotActive
-		if sv.Done || sv.Stopped || sv.Escalated {
+		if sv.Done || sv.Stopped || (sv.Escalated && !savedChildAlive(sv)) {
+			// An escalated id holds its slot while the walk it escalated on still answers (the same pid check
+			// reconcile makes): the escalation left the run in place, and a new line on that slot would launch beside
+			// a live walk. Once the child is gone the slot is free.
 			kinds[sv.ID] = raidwalk.AutoSlotInactive
 		}
 		byID[sv.ID] = sv
@@ -414,6 +418,10 @@ func readAutoTargets(dir string) ([]raidwalk.AutoTarget, error) {
 	}
 	return targets, nil
 }
+
+// savedChildAlive says the walk a checkpointed id last launched still answers: its pid or a process of its group, the
+// same check reconcile's slot decision makes. A checkpoint from before ChildPID existed says no, as a released run does.
+func savedChildAlive(sv autoSavedID) bool { return processAlive(sv.ChildPID) }
 
 // groupAutoTargets keeps the file's id order and each id's goal order.
 func groupAutoTargets(targets []raidwalk.AutoTarget) []*autoState {
