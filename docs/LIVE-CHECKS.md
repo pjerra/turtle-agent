@@ -15,7 +15,7 @@ so every live run so far (GM level 3) never exercised the flag-based checks.
 
 ## Warden timeout and addon fingerprint (issue #47)
 
-What to expect is in the README, "What the server sees". Grep the server's anticheat log after a run:
+What to expect is in [What turtle-agent is](okf/getting-started/what-it-is.md). Grep the server's anticheat log after a run:
 
 1. `grep -c 'WARDEN: Account .* timeout'`: at most one line per agent session, and only when `Warden.ModuleDir` holds a
    Windows module. Note it as expected; it is not a failure of the run. If the agent is disconnected (exit 6) about
@@ -43,7 +43,7 @@ spell on an enemy-faction player) and compare the text.
 
 ## Falling after `.go xyz` and after a knockback (final review M13, #23)
 
-Since #23 the agent falls and lands on the navmesh floor (README "Falling and knockbacks"). Run on m910q build 17,
+Since #23 the agent falls and lands on the navmesh floor ([Moving](okf/agent/movement-guide.md)). Run on m910q build 17,
 2026-10-12 (PR #31):
 
 - `.go xyz` 20 yd above flat ground (GM account): fell 1439 ms, landed at the mesh floor 26.82; the server's `.gps`
@@ -97,10 +97,10 @@ It reached Ironaya once (554 s, 0 deaths, only with a trimmed plan) and failed f
 
 | Finding | Change |
 | --- | --- |
-| Stonevault Cave Lurkers (4850) spawn stealthed (aura 5916 *Shadowstalker Stealth*, `creature_addon.auras`; the template also has *Faded* 6408); the companions never attack them, so `pullback` drew no fight (keystone groups 2 and 4, 3 pulls each) | Stealthed packs are walked through, not pulled (`ambush`, see README "Dungeon runs"); `tools/dungeongen` exports the auras and flags all-stealthed packs |
+| Stonevault Cave Lurkers (4850) spawn stealthed (aura 5916 *Shadowstalker Stealth*, `creature_addon.auras`; the template also has *Faded* 6408); the companions never attack them, so `pullback` drew no fight (keystone groups 2 and 4, 3 pulls each) | Stealthed packs are walked through, not pulled (`ambush`, see [Run a leader dungeon](okf/dungeons/run-leader.md)); `tools/dungeongen` exports the auras and flags all-stealthed packs |
 | The Seal of Khaz'Mul became active 27 s after the Keystone use; the wait was 20 s | `uldaman.json` waits 60 s (also the loader's default) |
 | The rest gate burned 150 s every time: the priest sat at 49% mana and never drank | A caster whose mana does not rise for 30 s no longer holds the gate; noted in the report (report to TortoiseBots). A healer below 30% mana still waits the whole gate out; the whole gate is capped (150 s + 2 x 300 s) |
-| Live Uldaman run 4: rest took 2620 s of 3170 s (14 gates of 150 s; the healer read 29% mana, see the next row) | Targets instead of "full" (health 90%, healer mana 50%, other mana 35%), a 60 s cap, one `.bot command <Name> u drink` for a member whose mana does not rise in 15 s (or at once when the party `rest` order is refused), per-gate `rest_gates[]` and a run `rest_seconds` in the report; a leg's `rest` overrides the targets (README "Dungeon runs"). **Not yet seen live:** whether `.bot command <Name> u drink` (the `u` command with the item text `drink`) makes a priest drink, what the server answers, and the real seconds per gate |
+| Live Uldaman run 4: rest took 2620 s of 3170 s (14 gates of 150 s; the healer read 29% mana, see the next row) | Targets instead of "full" (health 90%, healer mana 50%, other mana 35%), a 60 s cap, one `.bot command <Name> u drink` for a member whose mana does not rise in 15 s (or at once when the party `rest` order is refused), per-gate `rest_gates[]` and a run `rest_seconds` in the report; a leg's `rest` overrides the targets ([Run a commander dungeon](okf/dungeons/run-commander.md)). **Not yet seen live:** whether `.bot command <Name> u drink` (the `u` command with the item text `drink`) makes a priest drink, what the server answers, and the real seconds per gate |
 | Root cause of those 150 s waits: `Party()` took mana from the last party-stats packet, which the server stops sending for a member in range (Player.cpp:21101); the priest drank to full while the gate read 29% | `Party()` reads power type, power and max power from the unit fields of members in view (health already was), the stats values only for members out of view; `TestPartyPowerFollowsTheUnitFields`. Remote mode reads the TBM feed, unaffected |
 | The gate gave up with "not rested" while the party was still winning a fight | The gate waits for the fight to end, its timeout counts from then |
 | A GM `.revive` was judged "still dead" 3 s later although the party list followed a moment after | The dead flag is polled for 5 s after a revive; one revive per look |
@@ -123,7 +123,7 @@ fixes from the second Uldaman live run", refs #73):
 | The driver never read the bots' `TBM:ACTION_ERR` replies, so it saw "no fight" | The driver reads them (and the `<mob> is evading` / `is dead` whisper): `unreachable`/evading skips the mob and pulls the next member, a group with nothing left counts as cleared after the bounded tries, `dead-target`/`no-target` picks again; all in the report's `refusals[]` |
 | Keystone group 3, Stonevault Ambushers (7175): "pull 1 evaded, pull 2 evaded, pull 3 drew no fight" (86 s, twice) | **They do not evade.** The event log shows the tank fighting them and 5 of the 6 dying (kills 18:36:04, :06, :32, :33, :37). The world export has them as six stationary spawns (movement_type 0, wander 0), no stealth or other aura (creature_template, creature_addon), no creature group: two rows of three at y 215 +-5, so a pull brings one or two and the others stand idle. The driver counted the idle ones (inside the 25 yd the tracked set takes) as part of the fight and ended each pull as "evaded" after 12 s, using one of 3 tries per partial kill. Now a pull in which a member died is progress and does not use up a try, a mob that drew no fight is passed over for the next try, and a group that made progress counts as cleared when the rest will not come (noted). The plan has the east row as its own pull group (`radius` 10 yd on both rows: they are 14 yd apart, inside the default 25). The 6th Ambusher ((-212, 220); never took damage in 22 s of `attack_start` in A, still alive in the retry) is not explained: the export shows nothing special about it (inferred: a spot the tank cannot melee; only a unit-row dump of it, with `flags`, would tell). Baelog group 3's 7175 is another spawn: a wanderer (movement_type 1, wander 3), also unstealthed |
 | Pre-run: the first `.aura` of the 4th companion's batch (Rallying Cry) landed on the leader (1 of 3 starts) | Cause not proven (the server may drop a selection of a unit that is not yet in the leader's view; the batch for the 3 others in the same second was fine). The batch now waits for the companion to be in the leader's object store within 80 yd, checks the first `.aura` (companion shows it within 3 s, else: the leader's own aura list is read), selects again and resends once, stops the batch and fails the run on a second miss; an aura on the leader is never a success. Every resend is flagged as a `buff` |
-| `from_leg keystone` from the entrance: 167 s of walking with 7 walk-aggro fights | `from_leg` assumes the earlier legs are cleared; use `"teleport": true` with it to start at the leg start (GM, flagged `teleport_to_leg_start`). Without teleport the report now says so in a note. Documented in README "Dungeon runs" |
+| `from_leg keystone` from the entrance: 167 s of walking with 7 walk-aggro fights | `from_leg` assumes the earlier legs are cleared; use `"teleport": true` with it to start at the leg start (GM, flagged `teleport_to_leg_start`). Without teleport the report now says so in a note. Documented in [Run a commander dungeon](okf/dungeons/run-commander.md) |
 | `setup[7]: needs 1-200 characters` | The cap is 400 characters |
 
 Still open from run 2: the instance did not reset for a GM leader leaving to Badlands for 2.5 min with `.instance unbind all`, so a clean retry needs a
@@ -159,7 +159,7 @@ Still to check live with the new driver (a free slot, a GM leader and a hired pa
 
 ## Agent state: cooldowns, channels, combo points (issue #80 step 1)
 
-The spell state (README "Agent state") was written from the core's source and tested against the committed captures
+The spell state ([Spell data and spell state](okf/combat/concept-spell-data.md)) was written from the core's source and tested against the committed captures
 (`SMSG_INITIAL_SPELLS`, `SMSG_SPELL_START`/`GO`, `SMSG_CAST_RESULT`, `SMSG_SPELL_FAILED_OTHER`) and `gametest` packets.
 These have not been seen on a live server, because the captures hold none: `SMSG_LEARNED_SPELL` for a trainer purchase,
 `SMSG_SUPERCEDED_SPELL`, `SMSG_REMOVED_SPELL`, `SMSG_SPELL_COOLDOWN`, `SMSG_COOLDOWN_EVENT`, `SMSG_CLEAR_COOLDOWN`,
@@ -595,8 +595,7 @@ Run again with a level 40 character of each class that has its spells (`.learn a
 
 ## Run traces and checks (issue #73, data-collection step 1)
 
-The trace writer, the recorder and the eleven checks run only against the fake game, the fake feed and hand-made traces (README "Run traces
-and checks"). Nothing below has run live. Use the agent slot only, `trace_meta` to note the build, and keep the traces: they are the data.
+The trace writer, the recorder and the eleven checks run only against the fake game, the fake feed and hand-made traces ([Run traces](okf/observability/traces-concept.md)). Nothing below has run live. Use the agent slot only, `trace_meta` to note the build, and keep the traces: they are the data.
 
 1. **A short group run.** `dungeon_run {"name":"uldaman","gm":false,"run_id":"live-1","trace_meta":{"tb_sha":"<sha>","build":"<n>"}}` with a
    hired party, for two legs. The result has `run_id` and `trace_file`; `<traces_dir>/live-1.jsonl` grows while it goes (`tail -f`) with a frame about every
@@ -683,7 +682,7 @@ is in the agent's group (or owned by it) and standing within 10 yd, and a Tortoi
 2. **Split.** The same with a smaller count than the stack: the stack is split into a free slot first (`inventory` shows the odd stack until the
    trade completes), `gave[0].split` is true, and the rest stays. Check `back_to_trade` is not mistaken for a refusal (it should be one per change, then the accept).
 3. **Gold and items together**, then **gold only**, to a bot of each kind: one the agent owns, one in the party that is a random-pool bot. Record which accept and which time out
-   (the README predicts that a random-pool bot refuses gold with no item and items it has no use for).
+   ([Talking, trading and the world](okf/agent/social-guide.md) predicts that a random-pool bot refuses gold with no item and items it has no use for).
 4. **Range.** Stand 15 yd away: the error names the distance, no packet is sent. At 10 to 11 yd the call is accepted by the agent; note whether the core completes it
    (`too_far` status on the accept would mean the bot moved).
 5. **Refusals.** A soulbound item: expect `cancelled` (the core refuses `CMSG_SET_TRADE_ITEM` with a cancel). A bot that is not in the group: expect the window not to open, `timeout` after `open_wait_ms` and a cancel sent.
@@ -893,8 +892,7 @@ tools/run-uldaman.sh --relogin        # log the agent out and in again with the 
 2. **Login.** Only if `status` on the settings file's RPC port (`rpc`, read from the settings with `jq -r .rpc`, or `python3`) does not say `in_world`.
    An agent that is logged in keeps the binary it started with (`--relogin` to change that); the agent stays online after the run so the next one skips
    this. The settings file is read only for `rpc` and `rpc_token`; the token goes to `curl` on stdin, and nothing secret is printed.
-3. **Run.** `dungeon_run` for Uldaman with `prepare` (`online` + `fresh` + `gm_setup: ["gm visible off"]`, see README "Prepare: one step before
-   the bind"), the party of the remote runs (`Lcwarra` tank and lead, `Lcpriest` healer, `Lchunter`, `Lcrogue`, `Lcwarlock`; `LEAD`, `BOTS`, `TANK`, `HEALER` change it).
+3. **Run.** `dungeon_run` for Uldaman with `prepare` (`online` + `fresh` + `gm_setup: ["gm visible off"]`, see [Hire the party and enter](okf/dungeons/hire-party.md)), the party of the remote runs (`Lcwarra` tank and lead, `Lcpriest` healer, `Lchunter`, `Lcrogue`, `Lcwarlock`; `LEAD`, `BOTS`, `TANK`, `HEALER` change it).
 4. **Poll** `dungeon_status` every 30 s and print `state`, the watchdog's phase, the step and `stalled_for_s`; after `MAX_MIN` (90) minutes
    `dungeon_stop`.
 5. **End.** Prints `setup_s`, `report.prepare` (the seconds of each step), `preflight_s` and `enter_s`, then runs `turtle-agent trace-score` on the
@@ -908,7 +906,7 @@ tools/run-uldaman.sh --hire --rehire     # dismiss the current hires first: a cl
 tools/run-uldaman.sh --hire --level 44   # default: the middle of the plan's level_band (43)
 ```
 
-The agent hires a warrior tank, a priest healer and a hunter, a rogue and a warlock, checks each of them (README "Hired party") and binds them; the script
+The agent hires a warrior tank, a priest healer and a hunter, a rogue and a warlock, checks each of them ([Hire the party and enter](okf/dungeons/hire-party.md)) and binds them; the script
 prints a `ready:` line (level, `ok`, `hire_s`, `setup_s`, who was hired and kept) and the run's report has the whole `ready` block. The commander needs
 the hire rights of a player of that level (`AiPlayerbot.HireMaxBotsPerPlayer` 5, `HireAnywhere` 1 away from a recruiter), a TortoiseBots with #935 (the
 bind of own hires; the step says so when the server refuses it, or leaves the commander in the group) and, for the level, #940 (`level=<n>`; without it
@@ -947,7 +945,7 @@ group) and the run's own bind reusing the binding; (6) a second run with `--hire
 
 ## Uldaman legs 4-13: scorpid cave to Archaedas (#73, #83; written from the world data, walked by a GM, not run as a party)
 
-`dungeons/uldaman.json` goes on past Ironaya to Archaedas (README, "The Uldaman plan"). Legs 4-13 come from the world database of tortoise-wow 5d79486, its C++ scripts and the
+`dungeons/uldaman.json` goes on past Ironaya to Archaedas ([Dungeon notes](okf/plans/dungeon-notes.md)). Legs 4-13 come from the world database of tortoise-wow 5d79486, its C++ scripts and the
 map 70 navmesh, and were compared with the live map walk (`tests/uldaman-map/MAP.md` of the audit repo; nothing fought or used). What a first live run has to settle, in the order it
 meets them:
 
@@ -1000,7 +998,7 @@ commander at developer level (`.respawn` needs it) and `gm visible off`. What th
    the run fails with "does not hold still after .bot summon", and the order of choice (`cmd move` to the spot, else `cmd stay`) is wrong. A refusal ("in combat", "pending") is retried three times; record how often it happens.
 4. **`cmd summon` for the others** brings them to the lead bot in about 3 s each (`SummonGap` 6 s between orders); the run waits 30 s, summons the stragglers once more and waits another 30 s.
 5. **The report**: `start` (kind, point, `gm_commands` = `.appear <lead>` and `.go xyz ...`), `remote.gm_commands` 2, `setup_shortcuts` with the `(GM start point)` lines, `legs[]` before the
-   start `skipped (from_leg)`, and that nothing of them was pulled or walked. In a fresh instance a start under 30 yd from a live pack or boss of those legs is refused before anything is sent (README "Start anywhere"; `--force-start` runs it); in a kept or cleared one it only warns (`start: warning:` notes): write down whether such a pack aggroed.
+   start `skipped (from_leg)`, and that nothing of them was pulled or walked. In a fresh instance a start under 30 yd from a live pack or boss of those legs is refused before anything is sent ([Start anywhere](okf/dungeons/start-anywhere.md); `--force-start` runs it); in a kept or cleared one it only warns (`start: warning:` notes): write down whether such a pack aggroed.
 6. **Gather spots** (`from_pull_group`): 55 yd short of the pack on the navmesh path from the leg's `to`. Check on Uldaman that the spot is on the mesh, out of sight of other packs, not in a
    pit (`start.warning`), and that the first pull from it needs no more than one approach (`pack_looks`, the walk after the rest gate).
 7. **`.respawn` as the commander** (`reset: respawn`, `pulltest.gm_commands`): the agent clears its selection first (look for `CMSG_SET_SELECTION` with GUID 0 in the capture and the server's
@@ -1016,7 +1014,7 @@ commander at developer level (`.respawn` needs it) and `gm visible off`. What th
 
 ## Run modes, rotations as data and boss tactics (`mode`, `rotation`, `bosses[].tactics`; tested against fakes only, never run live)
 
-README "Run modes", "Rotations as data" and "Boss tactics". Use a Glacienne-like character in a party with a tank bot and a healer bot inside the instance (leader mode has no hiring or binding yet),
+[Run modes](okf/dungeons/modes.md), [Rotation file format](okf/combat/reference-rotation-format.md) and [Add boss tactics](okf/combat/guide-boss-tactics.md). Use a Glacienne-like character in a party with a tank bot and a healer bot inside the instance (leader mode has no hiring or binding yet),
 `mmaps_dir` set. What the first live use has to settle:
 
 1. **`mode: "leader"` without `brain`**: the preset of the character's class is taken (`brain` in the result and the report); a class or role without a default is refused with the list. `mode: "observe"` is the observe mode, see
@@ -1033,7 +1031,7 @@ README "Run modes", "Rotations as data" and "Boss tactics". Use a Glacienne-like
 5. **`move_out`** has no shipped plan yet (needs the radius of a real cast, from the spell's `SpellRadius`): try `{"cast": "Fire Nova", "yards": 10}` on Galgann and a `ground` rule on a boss's ground effect; the character must leave on the navmesh and not
    leave the tank (a tank ignores `cast` circles), and must not stand in the circle at the end of the cast.
 6. **`dispel`** with a healer preset on a real aura of a boss (Antu'sul's, Velratha's): dispelled before a slow, at 20 % mana.
-7. **The pull test in leader mode** (`mode: "leader"`, `pulltest`; README "Pull test in leader mode"): hired or named party and the character in the instance at an Uldaman pack (leg 0, the Baelog
+7. **The pull test in leader mode** (`mode: "leader"`, `pulltest`; [Score one pack](okf/dungeons/pulltest.md)): hired or named party and the character in the instance at an Uldaman pack (leg 0, the Baelog
    trash is cheap), `gm: true` for `.respawn`. `tools/run-uldaman.sh --mode leader --pulltest 0:0:3 --rotation frost_mage`, then the same with no `--rotation` and `turtle-agent pulltest --compare`. Check: the three tries kill the pack and the
    pack comes back (`reset` `respawn`, `gm_commands` `.respawn`, within 80 yd of the pack; the selection is cleared first); `time_to_kill_s` against the trace's `pull_start`/`pull_end`;
    `damage_done` against the sum of the `spell_damage`/`melee` events with the character as the source (and that a wand shot, a pet's damage and a DoT tick are or are not in it);
@@ -1042,7 +1040,7 @@ README "Run modes", "Rotations as data" and "Boss tactics". Use a Glacienne-like
 
 ## KB rotations: one A/B pull test per role (tested against fakes only, never run live)
 
-The `kb_*` rotations written from the Turtle WoW knowledge base (stevemcqueenz), https://stevemcqueenz.github.io/turtle-knowledge-base/#/ are generated from recipes and played like any rotation file (README "Rotations as data"; `docs/ROTATIONS.md`, "Rotations from the Turtle knowledge base"). None has played live, and which one - if any - becomes a preset's default is the maintainer's decision after these tests. Use the pull-test mechanics of item 7 above (leader mode, hired or named party, Uldaman leg 0, `--pulltest 0:0:5`, three or more tries per arm, the same pull and party, `.respawn` between tries) and change only the rotation: arm A the preset with no `--rotation`, arm B the same preset with `--rotation kb_<spec>_<class>`. When the preset itself already names the KB list (`protection_paladin`, `tank_shaman`, the hunter, rogue and warlock specs), arm A is the sibling preset it was cloned from, whose class strategy is still in Go. One item per role:
+The `kb_*` rotations written from the Turtle WoW knowledge base (stevemcqueenz), https://stevemcqueenz.github.io/turtle-knowledge-base/#/ are generated from recipes and played like any rotation file ([Rotation file format](okf/combat/reference-rotation-format.md); `docs/ROTATIONS.md`, "Rotations from the Turtle knowledge base"). None has played live, and which one - if any - becomes a preset's default is the maintainer's decision after these tests. Use the pull-test mechanics of item 7 above (leader mode, hired or named party, Uldaman leg 0, `--pulltest 0:0:5`, three or more tries per arm, the same pull and party, `.respawn` between tries) and change only the rotation: arm A the preset with no `--rotation`, arm B the same preset with `--rotation kb_<spec>_<class>`. When the preset itself already names the KB list (`protection_paladin`, `tank_shaman`, the hunter, rogue and warlock specs), arm A is the sibling preset it was cloned from, whose class strategy is still in Go. One item per role:
 
 1. **Tank**: `tank_warrior` with `--rotation kb_protection_warrior` against no rotation (the Go `warrior_tank`), and the same with `--rotation kb_fury_tank_warrior` on the second try set. The KB's tank list is a threat rotation (Shield Slam on cooldown, Sunder upkeep, Revenge/Shield Block); taunting still belongs to the preset's `role_tank`: check `mobs_on_me` and the party's mobs taken off the tank against the Go arm, damage per power, deaths, and whether the pull holds when a mob leaves the tank; `off_tank_s` for the fury-tank arm. On a paladin, `kb_protection_paladin` on the `protection_paladin` preset against `ret_paladin` (the preset it clones): the KB list's `Consecration`, `Holy Shield` and seal upkeep against the retribution list, `role_tank` taunting in both.
 2. **Healer**: `holy_priest` with `--rotation kb_holy_priest`, `holy_paladin` with `kb_holy_paladin`, `resto_druid` with `kb_restoration_druid` and `resto_shaman` with `kb_restoration_shaman` (all `mode: "add"`: the entries play right after `role_healer`), each against the preset without the rotation. Check healing per second and per power, mana left at the end, the tank's lowest health, deaths, and that the rank-1 entries fire only where the KB says (`renew_rank1` on the picked member while it has no Renew): `brain_decision` names the entry id.
@@ -1051,7 +1049,7 @@ The `kb_*` rotations written from the Turtle WoW knowledge base (stevemcqueenz),
 
 ## Observe mode: the agent watches a TortoiseBots run leader (`mode: "observe"`, `plan-export`; tested against fakes only, never run live)
 
-README "Observe mode" and "Exporting plans for the TortoiseBots run leader". Needs a server build with TortoiseBots PRs #962 and #963 (the run leader and the plan tables),
+[Watch a run leader](okf/dungeons/run-observe.md) and [Export a migration](okf/plans/export-a-plan.md). Needs a server build with TortoiseBots PRs #962 and #963 (the run leader and the plan tables),
 `AiPlayerbot.DungeonSelfClear = 1` and `AiPlayerbot.RemoteCommander = 1`, and a GM commander account as for a commander run. What the first live use has to settle:
 
 1. **The export applies.** `turtle-agent plan-export --mmaps <dir> --out <TortoiseBots>/data/sql/world/ uldaman` (the stamp must sort after `20261014150000`), restart the server: the log has no
@@ -1070,8 +1068,7 @@ README "Observe mode" and "Exporting plans for the TortoiseBots run leader". Nee
 
 ## Dashboard replay: walk 2 through a local daemon
 
-`turtle-agent dashboard-replay` feeds a recording to the observability daemon's real UDP port (README "Dashboard
-replay"). The walk-2 recording replays without a server, but its views were only fetched as JSON here, not looked at in
+`turtle-agent dashboard-replay` feeds a recording to the observability daemon's real UDP port ([Replay a recording](okf/observability/dashreplay-guide.md)). The walk-2 recording replays without a server, but its views were only fetched as JSON here, not looked at in
 the page:
 
 1. From `tools/observability`: `go run ./cmd/server -udp-port 9195 -http-port 8095 -accept-replay -dev-no-auth`, then
@@ -1093,7 +1090,7 @@ the page:
 
 ## raid-walk: the whole walk as one command (tested against fakes only, never run live until E2)
 
-README "Raid walks". Needs a server image with TortoiseBots `feat/run-until` (the run start's `until`) and the raid
+[Run a raid walk](okf/raids/run-a-raid-walk.md). Needs a server image with TortoiseBots `feat/run-until` (the run start's `until`) and the raid
 tools' slot setup. What the first live use has to settle:
 
 1. **Start and label.** `raid-walk onyxias_lair --hold-minutes 5` reaches `running 1/29` and the status line's trailing
@@ -1120,7 +1117,7 @@ tools' slot setup. What the first live use has to settle:
 
 ## raid-walk --inject: fault injection (tested against fakes only, never run live until L1)
 
-README "Raid walks", "Fault injection". Needs a server where `.freeze`/`.unfreeze`/`.die` and `.gps` behave as the P0
+[Run a raid walk](okf/raids/run-a-raid-walk.md), [Fault injection](okf/raids/fault-injection.md). Needs a server where `.freeze`/`.unfreeze`/`.die` and `.gps` behave as the P0
 probe found (2026-10-29, `tests/raid-inject-probe-20261029-042517/probe.md`). What L1 has to settle:
 
 1. **Prepare.** `.gm visible off` and the `.go xyz` to step 1 leave the commander in its own instance copy (P0: bot
@@ -1146,7 +1143,7 @@ probe found (2026-10-29, `tests/raid-inject-probe-20261029-042517/probe.md`). Wh
 
 ## raid-walk --place: a raid that starts partway into its instance (P1 2026-11-01: refused in the quiet step, exit 18; re-run open)
 
-README "Raid walks", `--place`. Needs a test server (m910q or tortoise-test2) whose image carries the Eluna test
+[Run a raid walk](okf/raids/run-a-raid-walk.md), [Start partway into an instance](okf/raids/place-mid-raid.md). Needs a test server (m910q or tortoise-test2) whose image carries the Eluna test
 toolkit (`.tt place`, `clearto`, `quiet`, `q inst|group|units|floor`) and TortoiseBots with `feat/run-until`. The first
 live run (Zul'Gurub leg 3, slot 2, 2026-11-01) reached the quiet step and stopped there: the toolkit's own quiet rule
 counted units a door-to-end run has alive at this step too, so the walk now judges the quiet itself (item 4; the
@@ -1211,7 +1208,7 @@ teleport. What it has to settle:
 
 ## raid-suite: one walk per raid, judged against the history (tested against fakes only, never run live until L2)
 
-README "Raid suite". Needs `raid-walk` (the `until` clause, `feat/run-until` on the server) and at least one raid whose tier
+[Regression-check plans with the suite](okf/raids/run-raid-suite.md). Needs `raid-walk` (the `until` clause, `feat/run-until` on the server) and at least one raid whose tier
 is sourced in `internal/raidwalk/tiers.go` (onyxias_lair, tier 2). What the first live use has to settle:
 
 1. **Dry run.** `raid-suite --dir <the 11 prep plans> --history <dir> --dry-run` prints onyxias_lair as `tier 2 (table) until

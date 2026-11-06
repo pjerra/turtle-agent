@@ -226,10 +226,15 @@ func TestAutoFullClearAdvancesAndBadArgsStop(t *testing.T) {
 	if d := DecideAutoAction(bad, AutoRunState{Goal: AutoGoal{Kind: "full"}}, autoNow, 15*time.Minute); d.Action != AutoStop || !d.Escalate {
 		t.Fatalf("decision %+v, want a stop with an ESCALATE line", d)
 	}
-	// Exit 29: the placement failed every try in the same instance; a fresh-instance retry is never asked for.
+	// Exit 29 on a same-instance placement: ONE automatic fresh-instance retry (walk 40: 45 ids stopped here).
 	placeFailed := AutoObservation{Exited: true, ExitCode: 29, EndReason: "place: 4 tries in the same instance, start step 582"}
-	if d := DecideAutoAction(placeFailed, AutoRunState{Goal: AutoGoal{Kind: "boss", Boss: 14507}, Reuse: true, HasRun: true}, autoNow, 15*time.Minute); d.Action != AutoStop || !d.Escalate {
-		t.Fatalf("decision %+v, want a stop with an ESCALATE line and no retry", d)
+	d := DecideAutoAction(placeFailed, AutoRunState{Goal: AutoGoal{Kind: "boss", Boss: 14507}, Reuse: true, HasRun: true}, autoNow, 15*time.Minute)
+	if d.Action != AutoRestart || d.Reuse || d.Escalate || !strings.Contains(d.Reason, "fresh-instance retry after exit 29") {
+		t.Fatalf("decision %+v, want a restart in a fresh instance", d)
+	}
+	// A second exit 29, from the fresh-instance attempt (Reuse false), stops the id with an ESCALATE line.
+	if d := DecideAutoAction(placeFailed, AutoRunState{Goal: AutoGoal{Kind: "boss", Boss: 14507}, Reuse: false, HasRun: true}, autoNow, 15*time.Minute); d.Action != AutoStop || !d.Escalate {
+		t.Fatalf("decision %+v, want a stop with an ESCALATE line after the fresh retry also failed", d)
 	}
 }
 
@@ -355,5 +360,163 @@ func TestAutoHirePoolWaitBacksOffFiveMinutes(t *testing.T) {
 	}
 	if d.Action == AutoStop {
 		t.Fatal("a hire-pool wait stopped the id")
+	}
+}
+
+// Walk 40: a done id kept its slot, so a new line naming it made the whole file invalid. An inactive id holds no slot;
+// an active id does, and claims it before a new line whatever the file order (a new line inserted ABOVE the running
+// id's line is the skipped one).
+func TestParseAutoTargetsLenientClaimsDecideTheSlot(t *testing.T) {
+	text := "mh5 test2 6 h boss:14515 -- zg --sql /zg.sql\nnew test2 6 h2 full -- zg --sql /zg.sql\n"
+	ts, issues, err := ParseAutoTargetsLenient(strings.NewReader(text), nil)
+	if err != nil || len(issues) != 1 || issues[0].ID != "new" || issues[0].Line != 2 || len(ts) != 1 || ts[0].ID != "mh5" {
+		t.Fatalf("no claims: targets %v issues %+v err %v, want the first line kept and the second skipped", ts, issues, err)
+	}
+	claim := func(m map[string]AutoSlotClaim) func(string) AutoSlotClaim {
+		return func(id string) AutoSlotClaim { return m[id] }
+	}
+	ts, issues, err = ParseAutoTargetsLenient(strings.NewReader(text), claim(map[string]AutoSlotClaim{"mh5": AutoSlotInactive}))
+	if err != nil || len(issues) != 0 || len(ts) != 2 {
+		t.Fatalf("inactive id: targets %v issues %+v err %v, want both lines accepted", ts, issues, err)
+	}
+	// The new line is FIRST in the file, the running id second: the running id keeps the slot.
+	above := "new test2 6 h2 full -- zg --sql /zg.sql\nmh5 test2 6 h boss:14515 -- zg --sql /zg.sql\n"
+	ts, issues, err = ParseAutoTargetsLenient(strings.NewReader(above), claim(map[string]AutoSlotClaim{"mh5": AutoSlotActive}))
+	if err != nil || len(issues) != 1 || issues[0].ID != "new" || issues[0].Line != 1 || len(ts) != 1 || ts[0].ID != "mh5" {
+		t.Fatalf("active id below a new line: targets %v issues %+v err %v, want the new line skipped", ts, issues, err)
+	}
+}
+
+// Codex round 1: a rejected id released nothing, so the slots it had claimed on its other lines invalidated later ids.
+// x claims slot 2 on its first line and is rejected on its second (slot 1 belongs to the active a): z may take slot 2.
+func TestParseAutoTargetsLenientRejectedIDReleasesItsClaims(t *testing.T) {
+	text := "x test2 2 h full -- zg --sql /zg.sql\n" +
+		"x test2 1 h full -- zg --sql /zg.sql\n" +
+		"z test2 2 h full -- zg --sql /zg.sql\n" +
+		"a test2 1 h full -- zg --sql /zg.sql\n"
+	claim := func(id string) AutoSlotClaim {
+		if id == "a" {
+			return AutoSlotActive
+		}
+		return AutoSlotNew
+	}
+	ts, issues, err := ParseAutoTargetsLenient(strings.NewReader(text), claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, x := range ts {
+		ids = append(ids, x.ID)
+	}
+	if len(issues) != 1 || issues[0].ID != "x" || strings.Join(ids, ",") != "z,a" {
+		t.Fatalf("targets %v issues %+v, want z and a kept and only x skipped", ids, issues)
+	}
+}
+
+// The claim callback is asked once per id, not once per goal line.
+func TestParseAutoTargetsLenientAsksOncePerID(t *testing.T) {
+	text := "a test2 1 h boss:1 -- zg --sql /zg.sql\na test2 1 h boss:2 -- zg --sql /zg.sql\na test2 1 h boss:3 -- zg --sql /zg.sql\n"
+	asked := 0
+	if _, _, err := ParseAutoTargetsLenient(strings.NewReader(text), func(string) AutoSlotClaim { asked++; return AutoSlotActive }); err != nil {
+		t.Fatal(err)
+	}
+	if asked != 1 {
+		t.Fatalf("claim asked %d times for one id", asked)
+	}
+}
+
+// Exit 29 is retried in a fresh instance once per GOAL: a goal that already made its retry stops the id on the next 29,
+// whichever placement it came from.
+func TestAutoExit29RetryOncePerGoalRule(t *testing.T) {
+	placeFailed := AutoObservation{Exited: true, ExitCode: 29, EndReason: "place: 4 tries in the same instance, start step 582"}
+	g := AutoGoal{Kind: "boss", Boss: 14507}
+	d := DecideAutoAction(placeFailed, AutoRunState{Goal: g, Reuse: true, HasRun: true}, autoNow, 15*time.Minute)
+	if d.Action != AutoRestart || !d.Exit29Retry {
+		t.Fatalf("first 29 of a goal: %+v, want the counted fresh retry", d)
+	}
+	if d := DecideAutoAction(placeFailed, AutoRunState{Goal: g, Reuse: true, HasRun: true, Exit29Retries: 1}, autoNow, 15*time.Minute); d.Action != AutoStop || !d.Escalate {
+		t.Fatalf("second 29 of the same goal: %+v, want a stop with an ESCALATE line", d)
+	}
+}
+
+// One bad line is skipped with its line number and id; the other lines still parse, and the bad id's other lines
+// are left out too (its caller keeps the old state whole).
+func TestParseAutoTargetsLenientSkipsOnlyTheBadLine(t *testing.T) {
+	text := "a test2 1 h full -- zg --sql /zg.sql\n" +
+		"b test2 2 h full -- zg\n" + // no --sql
+		"b test2 2 h full -- zg --sql /zg.sql --from step 5\n" +
+		"c test2 4 h full -- zg --sql /zg.sql\n"
+	ts, issues, err := ParseAutoTargetsLenient(strings.NewReader(text), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || issues[0].Line != 2 || issues[0].ID != "b" || !strings.Contains(issues[0].Err.Error(), "line 2") {
+		t.Fatalf("issues %+v, want one for line 2 of b", issues)
+	}
+	if len(ts) != 2 || ts[0].ID != "a" || ts[1].ID != "c" {
+		t.Fatalf("targets %v, want a and c only", ts)
+	}
+	// Strict read: the same file fails as a whole, naming the line.
+	if _, err := ParseAutoTargets(strings.NewReader(text)); err == nil || !strings.Contains(err.Error(), "line 2") {
+		t.Fatalf("strict read err %v, want a line 2 error", err)
+	}
+	// Nothing valid at all is an error, as before.
+	if _, _, err := ParseAutoTargetsLenient(strings.NewReader("garbage\n"), nil); err == nil {
+		t.Fatal("a file with no valid line parsed")
+	}
+}
+
+// Opus round 2 (LOW-1): an id is claimed as a unit. P (active) holds srv/2; O (new) names srv/1 and srv/2; X (new)
+// names srv/1. O cannot have srv/2, so it is rejected whole and X gets srv/1: a rejected id never takes a valid one
+// down with it. The issue names the owner that holds the slot (P), not an id that was dropped later.
+func TestParseAutoTargetsLenientClaimsPerIDAsAUnit(t *testing.T) {
+	text := "O test2 1 h full -- zg --sql /zg.sql\n" +
+		"X test2 1 h full -- zg --sql /zg.sql\n" +
+		"O test2 2 h full -- zg --sql /zg.sql\n" +
+		"P test2 2 h full -- zg --sql /zg.sql\n"
+	claim := func(id string) AutoSlotClaim {
+		if id == "P" {
+			return AutoSlotActive
+		}
+		return AutoSlotNew
+	}
+	ts, issues, err := ParseAutoTargetsLenient(strings.NewReader(text), claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, x := range ts {
+		ids = append(ids, x.ID+"@"+x.Slot)
+	}
+	if strings.Join(ids, ",") != "X@1,P@2" {
+		t.Fatalf("targets %v issues %+v, want X on srv/1 and P on srv/2", ids, issues)
+	}
+	if len(issues) != 1 || issues[0].ID != "O" || issues[0].Line != 3 || !strings.Contains(issues[0].Err.Error(), "already P's") {
+		t.Fatalf("issues %+v, want one for O's line 3 naming P", issues)
+	}
+}
+
+// Codex round 2 (HIGH): a slot the caller's live state holds is that id's before any line is read, even when the
+// holder's own lines are skipped as malformed: a new id on it is rejected.
+func TestParseAutoTargetsHeldSlotStaysWithABadLinesID(t *testing.T) {
+	text := "a test2 1 h full -- zg --sql /zg.sql\n" +
+		"a test2 1 h leg:2 -- zg\n" + // no --sql: every line of a is left out
+		"b test2 1 h full -- zg --sql /zg.sql\n" +
+		"c test2 2 h full -- zg --sql /zg.sql\n"
+	claim := func(id string) AutoSlotClaim {
+		if id == "a" {
+			return AutoSlotActive
+		}
+		return AutoSlotNew
+	}
+	ts, issues, err := ParseAutoTargetsHeld(strings.NewReader(text), claim, map[string]string{AutoSlotKey("test2", "1"): "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ts) != 1 || ts[0].ID != "c" {
+		t.Fatalf("targets %v, want only c", ts)
+	}
+	if len(issues) != 2 || issues[0].ID != "a" || issues[1].ID != "b" || !strings.Contains(issues[1].Err.Error(), "already a's") {
+		t.Fatalf("issues %+v, want a's bad line and b's slot taken by a", issues)
 	}
 }
