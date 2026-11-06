@@ -405,6 +405,12 @@ func PlaceResumeStart(rows planexport.Rows, step int) (string, bool) {
 // bossApproachComment is the comment the plan exporter gives a boss's approach point rows.
 const bossApproachComment = "boss approach"
 
+// isBossRow says a row is a boss's row: a boss row, or the hold row of a boss fought on the spot (comment "boss hold").
+// The one rule the wipe-at-boss checks (PlaceStepAtBoss, PlaceResumeGoalStart) share.
+func isBossRow(s planexport.StepRow) bool {
+	return s.Kind == planexport.KindBoss || (s.Kind == planexport.KindHold && strings.HasPrefix(s.Comment, bossHoldComment))
+}
+
 // bossHoldComment starts the comment of a boss's hold row (planexport: b.hold(bs.Hold, ..., "boss hold")).
 const bossHoldComment = "boss hold"
 
@@ -421,11 +427,7 @@ func PlaceResumeGoalStart(rows planexport.Rows, step int, goalStart string) (str
 		return "", false
 	}
 	reached := rows.Steps[step-1]
-	// A boss's hold row ("boss hold: ...") is the boss row of a boss fought on the spot.
-	atBoss := reached.Kind == planexport.KindBoss ||
-		(reached.Kind == planexport.KindHold && strings.HasPrefix(reached.Comment, bossHoldComment)) ||
-		(moveRow(reached) && reached.Comment == bossApproachComment)
-	if !atBoss {
+	if !isBossRow(reached) && !(moveRow(reached) && reached.Comment == bossApproachComment) {
 		return "", false
 	}
 	words := strings.Fields(goalStart)
@@ -468,10 +470,10 @@ func PlaceStepAtBoss(rows planexport.Rows, step int) bool {
 	if step < 1 || step > len(rows.Steps) {
 		return false
 	}
-	if rows.Steps[step-1].Kind == planexport.KindBoss {
+	if isBossRow(rows.Steps[step-1]) {
 		return true
 	}
-	return step < len(rows.Steps) && rows.Steps[step].Kind == planexport.KindBoss
+	return step < len(rows.Steps) && isBossRow(rows.Steps[step])
 }
 
 // startLegName is the leg a fallback start row belongs to, as the messages name it.

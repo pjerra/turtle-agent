@@ -1083,3 +1083,25 @@ func TestPlaceResumeGoalStartFromABossHoldRow(t *testing.T) {
 		t.Errorf("event hold row resumed at %q", got)
 	}
 }
+
+// A boss fought on the spot is a hold row commented "boss hold": a wipe there is a wipe at that boss too.
+func TestPlaceStepAtBossHoldRow(t *testing.T) {
+	hold := placeRow(planexport.KindHold, 0, 0, 35, 0, 5, 14515)
+	hold.Comment = "boss hold: fought on the spot"
+	event := placeRow(planexport.KindHold, 0, 0, 60, 0, 5, 777)
+	event.Comment = "hold: an event"
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}},
+		placeMove(0, 0, 30, 0), // 1: the row before the boss hold
+		hold,                   // 2
+		placeMove(0, 0, 50, 0), // 3
+		event,                  // 4
+	)
+	for _, c := range []struct {
+		step int
+		want bool
+	}{{1, true}, {2, true}, {3, false}, {4, false}} {
+		if got := PlaceStepAtBoss(rows, c.step); got != c.want {
+			t.Errorf("PlaceStepAtBoss(%d) = %v, want %v", c.step, got, c.want)
+		}
+	}
+}

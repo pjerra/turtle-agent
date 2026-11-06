@@ -2942,6 +2942,35 @@ func TestAutoWipeAtBossRelaunchesInAFreshInstance(t *testing.T) {
 	}
 }
 
+// A boss fought on the spot is a hold row commented "boss hold": a wipe on it goes to a fresh instance like one on a
+// boss row. The fixture migration's Arlokk boss row (step 397) is rewritten as such a hold row.
+func TestAutoWipeAtBossHoldRowRelaunchesInAFreshInstance(t *testing.T) {
+	src, err := os.ReadFile("testdata/zg-20261101093000.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const boss = "'boss', 14515, -11540.7, -1627.71, 41.27, 0, 0, 0, 0, 0, '', 'boss'"
+	if !strings.Contains(string(src), boss) {
+		t.Fatal("the fixture's Arlokk boss row changed")
+	}
+	path := filepath.Join(t.TempDir(), "zg-hold.sql")
+	mod := strings.Replace(string(src), boss, "'hold', 14515, -11540.7, -1627.71, 41.27, 5, 0, 0, 0, 0, '', 'boss hold: fought on the spot'", 1)
+	if err := os.WriteFile(path, []byte(mod), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql " + path + " --gm-instance-data hakkar:1 3;6 3;0 0")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	if a := f.args()[1]; strings.Contains(a, "--reuse-instance") {
+		t.Fatalf("a wipe on a boss hold row kept the instance: %s\n%s", a, f.events())
+	}
+}
+
 // The fresh-after-wipe rule is for goals whose target line carries --gm-instance-data (ZG Hakkar today): that flag
 // re-applies the boss prerequisites in the new copy. A fresh instance throws away earlier kills, so every other
 // goal keeps the same-instance relaunch after a boss wipe.
