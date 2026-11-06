@@ -1488,20 +1488,24 @@ func (s *autoSupervisor) tickState(st *autoState) {
 		// The backoff counts the consecutive no-progress attempts that ended before this one: a run that reached a
 		// further step resets the count even though its own finish has not run yet.
 		fast := g.noProgress
+		// ONE effective step for an ended run: the larger of the live/log reading and the summary's steps_reached.
+		// The wipe-at-boss check, the progress test, the fast-failure reset and the finish bookkeeping all use it.
+		step, progressed := 0, false
 		if obs.Exited {
-			step := s.runLastStepLocked(r)
+			step = s.runLastStepLocked(r)
+			if obs.StepsReached > step {
+				step = obs.StepsReached
+			}
 			r.lastStep = step
 			if step > g.bestStep {
 				fast = 0
+				progressed = true
 			}
 		}
 		if obs.Exited && obs.ExitCode == 19 && autoHasGMInstanceData(g.target.Args) {
 			// A wipe whose last step is a boss row, or the row before it: the next launch takes a fresh instance.
 			// The rows are read outside the id's mutex (a first parse must not hold up a YIELD's stop).
-			target, step := g.target, r.lastStep
-			if obs.StepsReached > step {
-				step = obs.StepsReached
-			}
+			target := g.target
 			st.mu.Unlock()
 			rows, ok := s.targetRows(target)
 			st.mu.Lock()
@@ -1514,7 +1518,7 @@ func (s *autoSupervisor) tickState(st *autoState) {
 		d := raidwalk.DecideAutoAction(obs, raidwalk.AutoRunState{
 			Goal: r.goal, Attempt: g.attempt, Reuse: r.reuse, HasRun: g.attempt > 0,
 			FastFailures: fast, LeaseFails: g.leaseFails, PlaceFails: st.placeFails, HireWaits: g.hireWaits, Exit29Retries: g.exit29Retries,
-			BossWipes: g.bossWipes, Progressed: obs.Exited && s.runLastStepLocked(r) > g.bestStep,
+			BossWipes: g.bossWipes, Progressed: progressed,
 		}, time.Now(), s.o.stall)
 		if d.Action == raidwalk.AutoContinue {
 			st.mu.Unlock()

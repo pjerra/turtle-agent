@@ -3034,3 +3034,35 @@ func TestAutoBossWipeRestartLeavesPlaceFailsAlone(t *testing.T) {
 		t.Fatalf("placeFails %d after a boss-wipe restart, want 2 (untouched)", got)
 	}
 }
+
+// Round 2 (Codex HIGH): the wipe-at-boss check used max(run.log step, summary step) but Progressed read only the
+// cached run.log step, so a summary step beyond it counted as a boss wipe with NO progress and could escalate an id
+// that advanced. One effective step (the larger of the two) now drives all of it. Here attempt 2's run.log is behind
+// its summary (100 vs 397); the summary's 397 is progress over attempt 1's 396, so the count restarts and the id is
+// stopped only by the third wipe after it (attempt 4), not attempt 3.
+func TestAutoBossWipeProgressReadsTheSummaryStepToo(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(bossWipeTarget)
+	f.attempt("a-1", 19, 396, "wipe: the raid died")
+	f.attempt("a-2", 19, 397, "wipe: the raid died")
+	f.writeSpec("a-2.runlog", "19:46:05.696 TBM:RUN|zul_gurub|running|100/761|jeklik|boss|begin|fighting\n")
+	f.attempt("a-3", 19, 397, "wipe: the raid died")
+	f.attempt("a-4", 19, 397, "wipe: the raid died")
+	f.attempt("a-5", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 3; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+	}
+	if _, esc := runState(s.states[0]); esc {
+		t.Fatalf("escalated after attempt 3: the summary's step 397 was progress over 396:\n%s", f.events())
+	}
+	tickUntil(t, s, "launch 4", func() bool { return len(f.args()) >= 4 })
+	finishAttempt(t, s)
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("no escalation after the third wipe since the progress:\n%s", f.events())
+	}
+	if n := len(f.args()); n != 4 {
+		t.Fatalf("%d launches, want 4:\n%s", n, f.events())
+	}
+}
