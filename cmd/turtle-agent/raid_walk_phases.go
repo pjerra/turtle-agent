@@ -1118,6 +1118,8 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 						w.logLine(now, fmt.Sprintf("boss %d engaged at step %d while the run is paused on its boss row: resumed the run so the run leader fights it", v.Entry, v.Step))
 					}
 					switch {
+					case waitOut.failed:
+						// --until none, resume did not take: no handoff note; the watch loop's pause rules own the run.
 					case strings.TrimSpace(w.opts.until) == "none":
 						w.note("boss %d engaged at step %d under --until none: the run leader fights it", v.Entry, v.Step)
 						w.logLine(now, fmt.Sprintf("boss %d engaged at step %d under --until none: the run leader fights it", v.Entry, v.Step))
@@ -3897,6 +3899,9 @@ func pausedPullbackRefusedUnreachable(note string) bool {
 // handoff, and its normal handler runs.
 type pausedBossResumeWaitResult struct {
 	running bool
+	// failed: --until none tried the refused-stand resume and it did not end in a fresh RunRunning. The walk
+	// keeps its pre-resume --until none path (no run stop, the pause handling owns the run) and claims no handoff.
+	failed bool
 	incs    []raidwalk.Incident
 }
 
@@ -4006,7 +4011,11 @@ func (w *walk) runFightsBoss(ctx context.Context, entry uint32, resumePaused boo
 		// the watch loop's own pause and wipe rules decide (--until none never stops the run on a boss).
 		if resumePaused && w.haveStatus && w.lastStatus.State == tbm.RunPaused && w.pausedOnBossOwnRow(entry) &&
 			pausedPullbackRefusedUnreachable(w.lastStatus.Note) {
-			_, waitOut = w.resumePausedBossRun(ctx, entry)
+			resumed, waitOut := w.resumePausedBossRun(ctx, entry)
+			// A handoff only on a fresh RunRunning of the boss row, the same rule as the other modes. A resume
+			// that did not take keeps the old --until none path (ok, no boss stop) but is marked failed so the
+			// caller claims no handoff for a run that is still paused, done or gone.
+			waitOut.failed = !resumed
 			return true, 0, waitOut
 		}
 		return true, 0, pausedBossResumeWaitResult{}

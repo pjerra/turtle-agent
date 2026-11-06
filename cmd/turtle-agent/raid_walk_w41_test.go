@@ -507,6 +507,54 @@ func TestPausedBossResumeUnderUntilNoneResumesTheRun(t *testing.T) {
 	}
 }
 
+// TestPausedBossResumeUnderUntilNoneFailedResumeIsNoHandoff is round 5 (Codex HIGH): under --until none a resume
+// whose wait ends without a fresh RunRunning (ACK only, the run stays paused) used to be reported as a successful
+// boss handoff. It is no handoff: neither handoff note fires, no run stop (--until none never stops the run on a
+// boss), and the old path owns the paused run: the watch loop's pause handling ends the walk on the pause.
+func TestPausedBossResumeUnderUntilNoneFailedResumeIsNoHandoff(t *testing.T) {
+	f, _, _ := pausedBossFixture(t, func(f *fixture, boss, total int) {
+		f.opts.until = "none"
+	})
+	code := f.run(context.Background())
+	sum := f.summary()
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if n := countPrefix(verbs, "resume"); n != 1 {
+		t.Fatalf("run verbs %v: %d resumes, want 1", verbs, n)
+	}
+	if hasNote(sum, "resumed the run so the run leader fights it") || hasNote(sum, "under --until none: the run leader fights it") {
+		t.Fatalf("notes %q: a failed resume must not claim a boss handoff", sum.Notes)
+	}
+	if code == exitOK {
+		t.Fatalf("exit 0 (notes %q): the paused run was reported as a handoff and the walk ended clean", sum.Notes)
+	}
+	if !strings.Contains(sum.EndReason, "paused: ") {
+		t.Fatalf("end %q, want the generic pause ending (notes %q)", sum.EndReason, sum.Notes)
+	}
+}
+
+// TestPausedBossResumeUnderUntilNoneRePausedIsNoHandoff: the same under --until none when the run pauses again on
+// the same pullback line inside the wait: no handoff note, the pause ending owns the run.
+func TestPausedBossResumeUnderUntilNoneRePausedIsNoHandoff(t *testing.T) {
+	f, _, _ := pausedBossFixture(t, func(f *fixture, boss, total int) {
+		f.opts.until = "none"
+		f.agent.onResume = func() {
+			f.agent.mu.Lock()
+			defer f.agent.mu.Unlock()
+			f.agent.lines = append(f.agent.lines, queuedEvent{raw: f.agent.history[len(f.agent.history)-1].raw})
+		}
+	})
+	code := f.run(context.Background())
+	sum := f.summary()
+	if hasNote(sum, "resumed the run so the run leader fights it") || hasNote(sum, "under --until none: the run leader fights it") {
+		t.Fatalf("notes %q: a re-paused resume must not claim a boss handoff", sum.Notes)
+	}
+	if code == exitOK || !strings.Contains(sum.EndReason, "paused: ") {
+		t.Fatalf("exit %d end %q, want the generic pause ending (notes %q)", code, sum.EndReason, sum.Notes)
+	}
+}
+
 // TestRunningBossHandoffHasNoResumeNote is round 4 item 3 (Opus MEDIUM): the watch loop used to note
 // "while the run is paused on its boss row: resumed the run" on every ok handoff, including a plain
 // running boss handoff where no resume went out. The note is gated on waitOut.running.
