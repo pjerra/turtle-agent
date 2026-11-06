@@ -3091,6 +3091,110 @@ func TestAutoBossWipeThreeTimesWithoutProgressEscalates(t *testing.T) {
 	}
 }
 
+// An edit of only --boss-wipe-max is a changed goal line (the flag is taken out of the raid-walk args, so the args
+// alone would look the same).
+func TestAutoSameTargetsSeesABossWipeMaxEdit(t *testing.T) {
+	line := func(max int) *autoState {
+		g := raidwalk.AutoGoal{Kind: "boss", Boss: 14834}
+		return &autoState{goals: []autoGoalState{{target: raidwalk.AutoTarget{ID: "a", Server: "srv", Slot: "1", Holder: "h", Goal: g, Start: "leg hakkar", Args: []string{"zg", "--sql", "/zg.sql"}, BossWipeMax: max}}}}
+	}
+	if !autoSameTargets(line(5), line(5)) {
+		t.Fatal("the same goal lines differ")
+	}
+	if autoSameTargets(line(5), line(3)) {
+		t.Fatal("a --boss-wipe-max edit is not seen as a changed goal line")
+	}
+}
+
+// A goal line may raise its own boss-wipe budget: --boss-wipe-max 5 escalates on the fifth wipe, not the third.
+func TestAutoBossWipeBudgetPerGoal(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(bossWipeTarget + " --boss-wipe-max 5")
+	for i := 1; i <= 5; i++ {
+		f.attempt(fmt.Sprintf("a-%d", i), 19, 397, "wipe: the raid died")
+	}
+	f.attempt("a-6", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 4; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+		if _, esc := runState(s.states[0]); esc {
+			t.Fatalf("escalated at wipe %d of a budget of 5:\n%s", i, f.events())
+		}
+	}
+	tickUntil(t, s, "launch 5", func() bool { return len(f.args()) >= 5 })
+	finishAttempt(t, s)
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("the fifth boss wipe of a budget of 5 did not escalate:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "boss wipe x5 without progress") {
+		t.Fatalf("no ESCALATE line for the fifth wipe:\n%s", f.events())
+	}
+	if n := len(f.args()); n != 5 {
+		t.Fatalf("%d launches, want 5:\n%s", n, f.events())
+	}
+}
+
+// Exit 26 (no fresh instance place) is a cap wait: the autopilot waits out the goal's --instance-cap-wait, relaunches
+// a fresh instance and neither counts a boss wipe nor escalates.
+func TestAutoInstanceCapRefusalWaits(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(bossWipeTarget + " --instance-cap-wait 30m")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 26, 0, "instance cap: waited 30m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation")
+	f.attempt("a-3", 26, 0, "instance cap: waited 30m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation")
+	f.attempt("a-4", 26, 0, "instance cap: waited 30m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation")
+	f.attempt("a-5", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s) // the wipe: a fresh instance next, one wipe counted
+	for i := 0; i < 3; i++ {
+		tickUntil(t, s, "the cap wait", func() bool {
+			st := s.states[0]
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			return st.run == nil && !st.nextAt.IsZero()
+		})
+		st := s.states[0]
+		st.mu.Lock()
+		left := time.Until(st.nextAt)
+		st.mu.Unlock()
+		if left < 25*time.Minute || left > 31*time.Minute {
+			t.Fatalf("the cap wait is %v, want the goal's --instance-cap-wait 30m", left)
+		}
+		if !strings.Contains(f.events(), "instance-cap-wait") {
+			t.Fatalf("no instance-cap-wait event:\n%s", f.events())
+		}
+		if n := len(f.args()); n != i+2 {
+			t.Fatalf("%d launches during cap wait %d, want %d", n, i+1, i+2)
+		}
+		if _, esc := runState(st); esc {
+			t.Fatalf("a cap refusal escalated the id:\n%s", f.events())
+		}
+		clearWait(st)
+		tickUntil(t, s, "the launch after the cap wait", func() bool { return len(f.args()) >= i+2 })
+		if a := f.args()[i+1]; strings.Contains(a, "--reuse-instance") {
+			t.Fatalf("launch %d after the cap wait reused the instance: %s", i+2, a)
+		}
+		finishAttempt(t, s)
+	}
+	s.saveState()
+	raw, err := os.ReadFile(filepath.Join(f.walk, autoStateFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved autoSavedState
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.IDs) != 1 || saved.IDs[0].BossWipes != 1 {
+		t.Fatalf("checkpoint %s, want boss_wipes 1 (the cap refusals are no wipes)", raw)
+	}
+	if _, esc := runState(s.states[0]); esc {
+		t.Fatalf("three cap refusals escalated the id:\n%s", f.events())
+	}
+}
+
 // A wipe that got further than any before it (progress) restarts the count.
 func TestAutoBossWipeProgressResetsTheCount(t *testing.T) {
 	f := newAutoFixture(t)

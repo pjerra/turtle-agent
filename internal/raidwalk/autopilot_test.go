@@ -569,3 +569,64 @@ func TestAutoBossWipeBudget(t *testing.T) {
 		t.Fatalf("third wipe after progress: %+v, want the count restarted", d)
 	}
 }
+
+// A goal line may raise its own boss-wipe budget (--boss-wipe-max, the ZG Hakkar goals): 5 escalates on the fifth wipe,
+// and a goal without the setting keeps the stock 3.
+func TestAutoBossWipeBudgetPerGoal(t *testing.T) {
+	g := AutoGoal{Kind: "boss", Boss: 14834}
+	wipe := AutoObservation{Exited: true, ExitCode: 19, StepsReached: 694, EndReason: "wipe", WipeAtBoss: true}
+	decide := func(prior, budget int) AutoDecision {
+		return DecideAutoAction(wipe, AutoRunState{Goal: g, Reuse: true, HasRun: true, BossWipes: prior, BossWipeMax: budget}, autoNow, 15*time.Minute)
+	}
+	for prior := 0; prior < 4; prior++ {
+		if d := decide(prior, 5); d.Action != AutoRestart || !d.FreshAfterWipe {
+			t.Fatalf("wipe %d of a budget of 5: %+v, want another fresh instance", prior+1, d)
+		}
+	}
+	if d := decide(4, 5); d.Action != AutoStop || !d.Escalate || !strings.Contains(d.Reason, "boss wipe x5 without progress") {
+		t.Fatalf("fifth wipe of a budget of 5: %+v, want an ESCALATE stop", d)
+	}
+	if d := decide(2, 0); d.Action != AutoStop || !d.Escalate {
+		t.Fatalf("goal without a budget: %+v, want the stock third wipe to escalate", d)
+	}
+}
+
+// An instance-cap refusal (exit 26: no fresh place) is a wait, not a wipe and not a failure: it neither escalates nor
+// moves the boss-wipe count, whatever the goal's other counts say.
+func TestAutoInstanceCapWait(t *testing.T) {
+	g := AutoGoal{Kind: "boss", Boss: 14834}
+	capRefused := AutoObservation{Exited: true, ExitCode: 26, EndReason: "instance cap: waited 30m (--instance-cap-wait), still 3 on srv", InstanceCapWait: true}
+	r := AutoRunState{Goal: g, Reuse: false, HasRun: true, Exit29Retries: 1, BossWipes: 2, PlaceFails: 2}
+	d := DecideAutoAction(capRefused, r, autoNow, 15*time.Minute)
+	if d.Action != AutoCapWait || d.Escalate || d.FreshAfterWipe || d.Exit29Retry || d.Reuse {
+		t.Fatalf("instance-cap refusal: %+v, want a wait for a fresh instance and nothing else", d)
+	}
+	// The same run without the flag keeps the old rule.
+	capRefused.InstanceCapWait = false
+	if d := DecideAutoAction(capRefused, r, autoNow, 15*time.Minute); d.Action != AutoRestart || d.Escalate {
+		t.Fatalf("exit 26 without the cap flag: %+v, want the plain restart", d)
+	}
+}
+
+// --boss-wipe-max is a goal option: it is read off the target line and never reaches raid-walk.
+func TestParseAutoTargetsBossWipeMax(t *testing.T) {
+	text := "a srv 1 h boss:14834 -- zg --sql /zg.sql --boss-wipe-max 5 --instance-cap-wait 90m\n" +
+		"b srv 2 h boss:14834 -- zg --sql /zg.sql\n"
+	ts, err := ParseAutoTargets(strings.NewReader(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ts[0].BossWipeMax != 5 || ts[1].BossWipeMax != 0 {
+		t.Fatalf("budgets %d and %d, want 5 and the default 0", ts[0].BossWipeMax, ts[1].BossWipeMax)
+	}
+	for _, a := range ts[0].Args {
+		if strings.HasPrefix(a, "--boss-wipe-max") {
+			t.Fatalf("--boss-wipe-max reached the raid-walk args: %v", ts[0].Args)
+		}
+	}
+	for _, bad := range []string{"0", "-2", "many"} {
+		if _, err := ParseAutoTargets(strings.NewReader("a srv 1 h full -- zg --sql /zg.sql --boss-wipe-max " + bad + "\n")); err == nil || !strings.Contains(err.Error(), "line 1") {
+			t.Fatalf("--boss-wipe-max %s: err %v, want a line 1 error", bad, err)
+		}
+	}
+}

@@ -1,8 +1,10 @@
 // raid-autopilot: keep the raids of a walk dir running without a worker watching them. The targets file names one
 // goal per line; the autopilot launches raid-walk for each, watches the step and the bosses' HP, and on ANY end, a used
 // -up restart budget or a stall tears the slot down and re-places: the same instance first (--place --from
-// --reuse-instance), a fresh one only when the old bind is gone (a failed placement) or after an exit 29 (once). A boss kill advances to the id's
-// next goal. It never uses slot 3, never sends `.bot run stop` and never passes --instance-cap-unsafe or --inject; it
+// --reuse-instance), a fresh one only when the old bind is gone (a failed placement) or after an exit 29 (once), and at
+// once after a wipe at a boss for a --gm-instance-data goal (up to the goal's --boss-wipe-max, default 3). An exit 26
+// (no fresh instance place) waits out the goal's --instance-cap-wait and tries a fresh instance again. A boss kill
+// advances to the id's next goal. It never uses slot 3, never sends `.bot run stop` and never passes --instance-cap-unsafe or --inject; it
 // runs detached (setsid) and stops cleanly on a YIELD file (tear down, release leases, YIELD-DONE).
 //
 // A teardown that does not verify (the walk gone and the lease released) is not completion: the run stays put and is
@@ -446,6 +448,17 @@ func autoTargetFingerprint(st *autoState) string {
 	}
 	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:])
+}
+
+// autoCapWait is how long the autopilot waits for a fresh instance place after raid-walk's exit 26: the goal's own
+// --instance-cap-wait (the walk waited that long for a place inside the run), else the walk's default.
+func autoCapWait(t raidwalk.AutoTarget) time.Duration {
+	if v := autoFlag(t.Args, "--instance-cap-wait"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return raidwalk.InstanceCapDefaultWait
 }
 
 // forwardInstanceCap is the --instance-cap-per-account to pass on, 0 when the flag was not given (raid-walk then
@@ -1106,7 +1119,9 @@ func autoSameTargets(a, b *autoState) bool {
 	}
 	for i := range a.goals {
 		x, y := a.goals[i].target, b.goals[i].target
-		if x.ID != y.ID || x.Server != y.Server || x.Slot != y.Slot || x.Holder != y.Holder || x.Goal != y.Goal || x.Start != y.Start {
+		// The boss-wipe budget is a goal option (--boss-wipe-max is taken out of Args), so an edit of it alone is a
+		// changed goal line too.
+		if x.ID != y.ID || x.Server != y.Server || x.Slot != y.Slot || x.Holder != y.Holder || x.Goal != y.Goal || x.Start != y.Start || x.BossWipeMax != y.BossWipeMax {
 			return false
 		}
 		if len(x.Args) != len(y.Args) {
@@ -1533,7 +1548,7 @@ func (s *autoSupervisor) tickState(st *autoState) {
 		d := raidwalk.DecideAutoAction(obs, raidwalk.AutoRunState{
 			Goal: r.goal, Attempt: g.attempt, Reuse: r.reuse, HasRun: g.attempt > 0,
 			FastFailures: fast, LeaseFails: g.leaseFails, PlaceFails: st.placeFails, HireWaits: g.hireWaits, Exit29Retries: g.exit29Retries,
-			BossWipes: g.bossWipes, Progressed: progressed,
+			BossWipes: g.bossWipes, BossWipeMax: g.target.BossWipeMax, Progressed: progressed,
 		}, time.Now(), s.o.stall)
 		if d.Action == raidwalk.AutoContinue {
 			st.mu.Unlock()
@@ -1601,9 +1616,12 @@ func (s *autoSupervisor) finish(st *autoState) {
 	if lastStep > g.bestStep {
 		g.bestStep = lastStep
 	}
-	if d.Action == raidwalk.AutoHirePoolWait {
+	switch d.Action {
+	case raidwalk.AutoHirePoolWait:
 		g.hireWaits++
-	} else {
+	case raidwalk.AutoCapWait:
+		// Waiting for an instance place is no attempt: neither a failure nor progress, as the hire-pool wait.
+	default:
 		g.hireWaits = 0
 		if lastStep > prevBest {
 			g.noProgress = 0
@@ -1628,6 +1646,8 @@ func (s *autoSupervisor) finish(st *autoState) {
 	// all, so it leaves the count alone.
 	switch {
 	case d.Action == raidwalk.AutoHirePoolWait:
+	case d.Action == raidwalk.AutoCapWait:
+		// The cap refused a place before anything was placed: no failed placement, no broken streak.
 	case d.FreshAfterWipe:
 		// A fresh instance after a boss wipe is no failed placement: it neither adds to the count nor breaks a streak.
 	case d.Action == raidwalk.AutoRestart && !d.Reuse:
@@ -1677,6 +1697,12 @@ func (s *autoSupervisor) finish(st *autoState) {
 		}
 		st.nextAt = time.Now().Add(wait)
 		esc = fmt.Sprintf("hire-pool-wait: %s; next same instance after %s", d.Reason, wait.Round(time.Second))
+	case raidwalk.AutoCapWait:
+		// A fresh instance is what the cap refused: the retry asks for one again, after the goal's own cap wait.
+		st.last.reuse = false
+		wait := autoCapWait(g.target)
+		st.nextAt = time.Now().Add(wait)
+		esc = fmt.Sprintf("instance-cap-wait: %s; next fresh instance after %s", d.Reason, wait.Round(time.Second))
 	}
 	st.mu.Unlock()
 
@@ -1945,6 +1971,9 @@ func (s *autoSupervisor) observe(st *autoState) raidwalk.AutoObservation {
 	if sum.ExitCode != 0 {
 		o.ExitCode = sum.ExitCode
 	}
+	// Exit 26 is the cap refusing a fresh place, except when the ledger could not be read at all: that is no cap to
+	// wait out, and the walk has already waited its minute for it.
+	o.InstanceCapWait = o.ExitCode == exitRaidWalkInstanceCap && !strings.Contains(sum.EndReason, "cannot be read")
 	for _, b := range sum.BossKills {
 		b.deadEntries(o.KilledBosses)
 	}
