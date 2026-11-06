@@ -26,6 +26,9 @@
 // overwrite their own slot on Reset (boss_jeklik.cpp:105-106,
 // boss_venoxis.cpp:152-153), see docs/okf/raids/raid-walk-reference.md.
 // Resending into data that did survive is harmless (SetData is idempotent).
+// A walk also resends once per boss row, when a status makes the leg's boss row
+// current (before its pull): a GM kill does not stop the respawn, and a
+// respawned priest's Reset() overwrites its data (walk 45 hk7m).
 package main
 
 import (
@@ -35,6 +38,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
@@ -438,6 +442,18 @@ func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus) 
 	}
 	inst := w.gmInstanceDataInst(ctx)
 	pending := w.gmInstanceDataPending(inst, st)
+	bossStep := w.gmInstanceDataBossStep(inst, st)
+	if len(pending) == 0 && bossStep > 0 {
+		pending = w.gmInstanceDataBossResend(inst, st)
+	}
+	if bossStep > 0 {
+		// Once per boss row per walk, whether the leg's lines were already
+		// pending (nothing went out before: they go out now) or resent here.
+		if w.gmInstanceDataBossSent == nil {
+			w.gmInstanceDataBossSent = map[int]bool{}
+		}
+		w.gmInstanceDataBossSent[bossStep] = true
+	}
 	if len(pending) == 0 {
 		return false, nil
 	}
@@ -458,4 +474,55 @@ func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus) 
 		}
 	}
 	return true, nil
+}
+
+// gmInstanceDataBossStep is the boss row the status makes current when the
+// walk has not yet sent the leg's lines for it (0: none). Walk 45 hk7m: the
+// launch send went out at 14:27, but a GM `.die` does not stop the respawn, and
+// a respawned priest's Reset() overwrote its DONE data before the run reached
+// Hakkar's row. The boss row becoming current (status kind boss on a plan boss
+// row, bossRowAt) is the last status before the boss pull, so the lines are
+// sent again there, once per boss row per walk.
+func (w *walk) gmInstanceDataBossStep(inst string, st tbm.RunStatus) int {
+	if len(w.gmInstanceData) == 0 || inst == "" || st.Kind != planexport.KindBoss {
+		return 0
+	}
+	if st.State != tbm.RunRunning && st.State != tbm.RunPaused {
+		return 0
+	}
+	if _, ok := w.bossRowAt(st.Step); !ok || w.gmInstanceDataBossSent[st.Step] {
+		return 0
+	}
+	for _, spec := range w.gmInstanceData {
+		if raidwalk.LegMatchesStatus(spec.Leg, st.Leg) {
+			return st.Step
+		}
+	}
+	return 0
+}
+
+// gmInstanceDataBossResend forgets the marker and the retry counts of the
+// status leg's specs (which the launch send marked done) and returns them for
+// the firing, so gmInstanceDataFire sends every line again.
+func (w *walk) gmInstanceDataBossResend(inst string, st tbm.RunStatus) []raidwalk.GMInstanceSpec {
+	key := inst
+	if key == "unreadable" {
+		key = "unplaced"
+	}
+	marks := raidwalk.NewInstanceMarks(w.outDir)
+	var out []raidwalk.GMInstanceSpec
+	for _, spec := range w.gmInstanceData {
+		if !raidwalk.LegMatchesStatus(spec.Leg, st.Leg) {
+			continue
+		}
+		if err := marks.Write(key, spec.Leg, nil); err != nil {
+			w.note("gm-instance-data: WARN: the %s marker could not be cleared for the boss-row resend (%v): the lines may not go out again", spec.Leg, err)
+			continue
+		}
+		for _, cmd := range spec.Cmds {
+			delete(w.gmInstanceDataTries, lineKey(spec.Leg, raidwalk.GMInstanceDataLine(cmd)))
+		}
+		out = append(out, spec)
+	}
+	return out
 }

@@ -1042,6 +1042,8 @@ type walk struct {
 	// gmInstanceDataOZeroWarned says the `q inst` 0 read already WARNed once
 	// (a 0 read is not cached: the next firing retries the read).
 	gmInstanceDataOZeroWarned bool
+	// gmInstanceDataBossSent holds the boss rows (steps) whose pre-pull resend already went out in this walk.
+	gmInstanceDataBossSent map[int]bool
 	// gongReruns counts the run restarts at a leg's summoning open row (a boss that despawns after a wipe comes back with the
 	// object: Zul'Gurub's Arlokk). bossGongReruns bounds them. gongRerunAt/-Boss/-Open name the last one that went out: the
 	// next "boss not found" pause reads whether the frames saw the boss alive since, which tells the gong summoning him again

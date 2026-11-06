@@ -985,3 +985,79 @@ func TestGMInstanceDataReuseResumeFromStepSendsOnceBeforeRunStart(t *testing.T) 
 		})
 	}
 }
+
+// instDataThekalBossStep is the step of the ZG thekal leg's boss row.
+func instDataThekalBossStep(t *testing.T) int {
+	t.Helper()
+	rows := zgRows(t)
+	for i, s := range rows.Steps {
+		if s.Kind == planexport.KindBoss && strings.EqualFold(raidwalk.PlaceLegName(rows, i+1), "high_priest_thekal") {
+			return i + 1
+		}
+	}
+	t.Fatal("no thekal boss row in the ZG rows")
+	return 0
+}
+
+// walk 45 hk7m: the launch send went out at 14:27, the priests' groups
+// respawned by the time the run reached Hakkar's row, and a respawned priest's
+// Reset() overwrote its DONE data. The walk resends once when the leg's BOSS
+// row becomes current, under the usual pause and resume, so the lines land
+// before the boss pull. The same boss row's later statuses (the pull itself,
+// the fight) send nothing more.
+func TestGMInstanceDataResendsBeforeTheBossPull(t *testing.T) {
+	n := zgPlaceSteps(t)
+	boss := instDataThekalBossStep(t)
+	if boss <= n.start {
+		t.Fatalf("boss row %d is not after the placed start %d", boss, n.start)
+	}
+	f, _ := newPlaceFixture(t)
+	f.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
+	f.agent.startReply = instDataStartReply(t, n)
+	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+	st := func(state string, step int, kind, phase, note string) queuedEvent {
+		return queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|%s|%d/%d|high_priest_thekal|%s|%s|%s", state, step, n.total, kind, phase, note)}
+	}
+	f.agent.startQueue = []queuedEvent{
+		st("running", n.start, "move", "walk", "walking"),
+		st("running", boss, "boss", "begin", "starting the boss row"),
+		st("running", boss, "boss", "pull", "pulling"),
+		st("running", boss, "boss", "pull", "fighting"),
+		st("done", boss, "boss", "pull", fmt.Sprintf("stopped before step %d (until boss): the party stays where it stands", n.until)),
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 2 {
+		t.Fatalf("%d instancedata lines, want 2 (the launch send + one boss-row resend): %q", got, f.agent.gmLines())
+	}
+	if got := strings.Join(f.agent.runVerbs, " "); got != "start pause resume" {
+		t.Fatalf("run verbs %q, want the boss-row resend's pause and resume after the start", got)
+	}
+}
+
+// The boss row resend is once per boss row per walk: a second visit to the
+// same boss row (the run stepped back and forward again) sends nothing more.
+func TestGMInstanceDataBossRowResendOncePerRow(t *testing.T) {
+	n := zgPlaceSteps(t)
+	boss := instDataThekalBossStep(t)
+	f, _ := newPlaceFixture(t)
+	f.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
+	f.agent.startReply = instDataStartReply(t, n)
+	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+	st := func(state string, step int, kind, phase, note string) queuedEvent {
+		return queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|%s|%d/%d|high_priest_thekal|%s|%s|%s", state, step, n.total, kind, phase, note)}
+	}
+	f.agent.startQueue = []queuedEvent{
+		st("running", boss, "boss", "begin", "starting the boss row"),
+		st("running", boss-1, "move", "walk", "walking"),
+		st("running", boss, "boss", "begin", "starting the boss row again"),
+		st("done", boss, "boss", "pull", fmt.Sprintf("stopped before step %d (until boss): the party stays where it stands", n.until)),
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 2 {
+		t.Fatalf("%d instancedata lines, want 2 (launch + one resend for the boss row): %q", got, f.agent.gmLines())
+	}
+}
