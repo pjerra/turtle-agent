@@ -706,6 +706,7 @@ func TestAutoExit29RetriesOnceInAFreshInstance(t *testing.T) {
 		t.Fatalf("no ESCALATE stop for the second exit 29:\n%s", f.events())
 	}
 }
+
 // The exit-29 fresh-instance retry keeps the target's --gm-instance-data: the
 // new copy needs the lines, so the relaunch args carry the flag through (as
 // does the same-instance re-place before it).
@@ -731,7 +732,6 @@ func TestAutoExit29RetryCarriesGMInstanceData(t *testing.T) {
 	}
 	finishAttempt(t, s)
 }
-
 
 func (f *autoFixture) statusFile() string {
 	raw, _ := os.ReadFile(filepath.Join(f.walk, autoStatusFile))

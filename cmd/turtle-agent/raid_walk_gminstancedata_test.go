@@ -216,6 +216,7 @@ func TestGMInstanceDataFreshWalkIgnoresLedgerMark(t *testing.T) {
 		t.Fatalf("fresh walk with an old mark sent %d lines, want 1: %q", n, g.agent.gmLines())
 	}
 }
+
 // A --reuse-instance walk that falls back to a fresh instance sends the
 // lines again: the new copy is not the one the data was confirmed for, even
 // when the core hands out the same instance id (it reuses ids across
@@ -255,7 +256,6 @@ func TestGMInstanceDataRefiresAfterReuseFreshFallback(t *testing.T) {
 		t.Fatalf("fresh fallback sent %d lines, want the new copy's one: %q", n, second.agent.gmLines())
 	}
 }
-
 
 // One walk fires its leg once even when the run passes the leg twice, and a
 // leg that already fired in the same instance (marker in the out dir) does
