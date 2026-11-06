@@ -205,7 +205,6 @@ func TestZulGurubArlokkApproachesClearOfLaterPacks(t *testing.T) {
 	leg := p.Legs[zgArlokkLeg]
 	type spawn struct {
 		at    dungeon.Point
-		entry uint32
 		group int
 	}
 	var pulled []spawn
@@ -274,16 +273,9 @@ func TestZulGurubArlokkPatrolStandInShot(t *testing.T) {
 		t.Fatalf("the patrol group is not a stand pull with an approach: %+v", *patrol)
 	}
 	stand := patrol.Approach[len(patrol.Approach)-1]
-	// Its spawn is in the row's radius, so the run leader owns the patroller's formation (the gate's spawnOwned).
-	cx, cy, cz := 0.0, 0.0, 0.0
-	for _, q := range patrol.Positions {
-		cx, cy, cz = cx+float64(q.X), cy+float64(q.Y), cz+float64(q.Z)
-	}
-	n := float64(len(patrol.Positions))
 	if len(patrol.Positions) == 0 {
 		t.Fatal("the patrol group has no position")
 	}
-	cx, cy, cz = cx/n, cy/n, cz/n
 	spawnOK := false
 	// The loop itself: a point in the tank's shot, reachable and in line of sight.
 	best, bestD := dungeon.Point{}, math.Inf(1)

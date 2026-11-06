@@ -372,20 +372,6 @@ func gmSamePath(a, b []dungeon.Point) bool {
 // gmSamePathYd is how far apart two points of a "same path" pair may lie: the plan writes the export's numbers, rounded.
 const gmSamePathYd = 0.05
 
-func gmSpawn(w *worldspawn.World, guid uint64) (worldspawn.Spawn, bool) {
-	for _, s := range w.Spawns {
-		if s.GUID == guid {
-			return s, true
-		}
-	}
-	return worldspawn.Spawn{}, false
-}
-
-func gmDist2(a, b dungeon.Point) float64 {
-	dx, dy := float64(a.X-b.X), float64(a.Y-b.Y)
-	return math.Hypot(dx, dy)
-}
-
 // SpawnGUID is the DB spawn guid of a creature's world guid: its low 24 bits (ObjectGuid.h: high, entry, counter), the number the world
 // export lists as the spawn's guid.
 func SpawnGUID(g packet.GUID) uint64 { return uint64(g) & 0x00FFFFFF }
