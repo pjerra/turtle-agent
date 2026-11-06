@@ -2859,3 +2859,44 @@ func TestAutoStartActiveIDBelowANewLineWinsItsSlot(t *testing.T) {
 		t.Fatalf("err %v, want a refusal naming n's line 1 and b", err)
 	}
 }
+
+// Walk 44 hk7m-3 / walk 46 hk4m-3: Hakkar wiped the raid at step 694 and the autopilot relaunched into the SAME
+// instance (--reuse-instance), where the dead and unplaced bots stood beside the live boss and fought him with no run.
+// A wipe (exit 19) at a boss row, or the row before it, goes to a fresh instance (the fixture migration's Arlokk boss
+// row is step 397, the move row 396); a wipe elsewhere keeps the same instance.
+func TestAutoWipeAtBossRelaunchesInAFreshInstance(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		step  int
+		reuse bool
+		from  string
+	}{
+		{"the boss row", 397, false, "--from step 396 --place"},
+		{"the row before the boss", 396, false, "--from step 396 --place"},
+		{"away from a boss", 300, true, "--from step 300 --place"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newAutoFixture(t)
+			f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql")
+			f.attempt("a-1", 19, c.step, "wipe: the raid died")
+			f.attempt("a-2", 2, 0, "bad --sql")
+			s := f.supervisor()
+			tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+			finishAttempt(t, s)
+			tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+			args := f.args()
+			if !strings.Contains(args[1], c.from) {
+				t.Fatalf("the restart did not start at %q: %s", c.from, args[1])
+			}
+			if got := strings.Contains(args[1], "--reuse-instance"); got != c.reuse {
+				t.Fatalf("--reuse-instance = %v, want %v: %s\n%s", got, c.reuse, args[1], f.events())
+			}
+			if !c.reuse && !strings.Contains(f.events(), "fresh instance") {
+				t.Fatalf("no fresh-instance restart event:\n%s", f.events())
+			}
+			if st := s.states[0]; st.goals[st.current].exit29Retries != 0 {
+				t.Fatalf("the boss wipe used the goal's exit-29 retry")
+			}
+		})
+	}
+}

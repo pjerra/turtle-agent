@@ -1481,6 +1481,22 @@ func (s *autoSupervisor) tickState(st *autoState) {
 				fast = 0
 			}
 		}
+		if obs.Exited && obs.ExitCode == 19 {
+			// A wipe whose last step is a boss row, or the row before it: the next launch takes a fresh instance.
+			// The rows are read outside the id's mutex (a first parse must not hold up a YIELD's stop).
+			target, step := g.target, r.lastStep
+			if obs.StepsReached > step {
+				step = obs.StepsReached
+			}
+			st.mu.Unlock()
+			rows, ok := s.targetRows(target)
+			st.mu.Lock()
+			if st.run != r || r.pending != nil || r.finishing {
+				st.mu.Unlock()
+				return
+			}
+			obs.WipeAtBoss = ok && raidwalk.PlaceStepAtBoss(rows, step)
+		}
 		d := raidwalk.DecideAutoAction(obs, raidwalk.AutoRunState{
 			Goal: r.goal, Attempt: g.attempt, Reuse: r.reuse, HasRun: g.attempt > 0,
 			FastFailures: fast, LeaseFails: g.leaseFails, PlaceFails: st.placeFails, HireWaits: g.hireWaits, Exit29Retries: g.exit29Retries,
@@ -1574,7 +1590,7 @@ func (s *autoSupervisor) finish(st *autoState) {
 	// all, so it leaves the count alone.
 	switch {
 	case d.Action == raidwalk.AutoHirePoolWait:
-	case d.Action == raidwalk.AutoRestart && !d.Reuse:
+	case d.Action == raidwalk.AutoRestart && !d.Reuse && !d.FreshAfterWipe:
 		st.placeFails++
 	default:
 		st.placeFails = 0

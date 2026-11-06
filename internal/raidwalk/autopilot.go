@@ -399,6 +399,9 @@ type AutoObservation struct {
 	StallAfter time.Time
 	// HirePoolWait says the end was the shared hire pool's refusal (no mercenary of that kind): a wait, not a failure.
 	HirePoolWait bool
+	// WipeAtBoss says the run ended at a boss row (or the row before it): the caller read the plan's rows
+	// (PlaceStepAtBoss). With exit 19 it is a wipe at that boss.
+	WipeAtBoss bool
 }
 
 // PlacementFailed says the run never started: it ended in the place phase.
@@ -511,6 +514,9 @@ type AutoDecision struct {
 	Escalate bool
 	// Exit29Retry marks the restart as the goal's fresh-instance retry after an exit 29 (the caller counts it).
 	Exit29Retry bool
+	// FreshAfterWipe marks the restart as the fresh-instance relaunch after a wipe at a boss. It is not the goal's
+	// exit-29 retry and not a failed placement: the caller counts neither.
+	FreshAfterWipe bool
 }
 
 // AutoBackoff is the wait before a restart after FastFailures consecutive no-progress attempts: 20 s, 1 m, 2 m, 5 m,
@@ -584,6 +590,14 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 		return AutoDecision{Action: AutoStop, Escalate: true, Reason: "exit 15 three times: the slot's lease is held by another holder (" + shortReason(o.EndReason) + ")"}
 	}
 	backoff := AutoBackoff(r.FastFailures)
+	if o.ExitCode == 19 && o.WipeAtBoss && !o.PlacementFailed() {
+		// Walks 44 and 46 (Hakkar): the raid wiped at the boss, the relaunch went into the SAME instance, the
+		// placement found the dead and unplaced bots beside the live boss, and they fought him with no run. After a
+		// wipe at a boss the next launch takes a fresh instance at once, the way an exit-29 retry does. It is a
+		// separate path: the goal's one exit-29 retry stays available.
+		return AutoDecision{Action: AutoRestart, Reuse: false, FreshAfterWipe: true, Backoff: backoff,
+			Reason: "fresh instance after a wipe at a boss (step " + fmt.Sprint(o.StepsReached) + "): the old copy still holds the boss and the dead bots (" + shortReason(o.EndReason) + ")"}
+	}
 	if o.PlacementFailed() {
 		if r.PlaceFails+1 >= 3 {
 			return AutoDecision{Action: AutoStop, Escalate: true, Reason: fmt.Sprintf("place failed %d times in a row: %s", r.PlaceFails+1, shortReason(o.EndReason))}

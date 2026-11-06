@@ -402,6 +402,19 @@ func PlaceResumeStart(rows planexport.Rows, step int) (string, bool) {
 	return "leg " + strconv.Itoa(leg), true
 }
 
+// PlaceStepAtBoss says a run that ended at step (1-based) ended at a boss: the row is a boss row, or the next row is
+// (the run died on the way in). The autopilot reads a wipe there as a wipe at that boss (walk 44 hk7m-3, walk 46
+// hk4m-3: Hakkar). A step outside the rows is not at a boss.
+func PlaceStepAtBoss(rows planexport.Rows, step int) bool {
+	if step < 1 || step > len(rows.Steps) {
+		return false
+	}
+	if rows.Steps[step-1].Kind == planexport.KindBoss {
+		return true
+	}
+	return step < len(rows.Steps) && rows.Steps[step].Kind == planexport.KindBoss
+}
+
 // startLegName is the leg a fallback start row belongs to, as the messages name it.
 func startLegName(rows planexport.Rows, leg int) string {
 	for _, l := range rows.Legs {

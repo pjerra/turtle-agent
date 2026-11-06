@@ -18,6 +18,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
@@ -1742,6 +1743,15 @@ func (w *walk) placeGather(ctx context.Context) error {
 		if !retryable || w.opts.noPlaceRetreat {
 			return err
 		}
+		// Walks 44 and 46 (Hakkar): after a wipe at the boss the same copy still holds him, and the summoned hires
+		// land beside him and die. More tries here only feed him, so the first try that finds the party dead or the
+		// boss on it ends the placement and asks the autopilot for a fresh instance.
+		if why := w.placeFreshNeeded(w.env.now()); why != "" {
+			_, detail := stopInfo(err)
+			return stopf(exitRaidWalkPlaceFailed,
+				"place: %s: fresh instance needed, no further try in this instance (try %d, start step %d: %s)",
+				why, try, w.place.Start, strings.TrimPrefix(detail, "place: "))
+		}
 		if try >= placeTryLimit {
 			_, detail := stopInfo(err)
 			return stopf(exitRaidWalkPlaceFailed,
@@ -1751,6 +1761,41 @@ func (w *walk) placeGather(ctx context.Context) error {
 		w.note("place: %s; summoning the party at step %d again (try %d of %d, no fresh instance)",
 			reason, w.place.Start, try+1, placeTryLimit)
 	}
+}
+
+// placeFreshNeeded says the same-instance placement cannot work and why, "" when another try may help: at least half
+// of the hires are dead in the freshest frames, or the boss of the start leg is fighting the party. The reason is the
+// first words of the exit-29 end reason the autopilot reads.
+func (w *walk) placeFreshNeeded(now time.Time) string {
+	hires := w.hireList()
+	if dead := w.placeDead(now); len(hires) > 0 && len(dead)*2 >= len(hires) {
+		return fmt.Sprintf("party dead: %d of %d hires", len(dead), len(hires))
+	}
+	if w.place == nil || w.place.Start < 1 || w.place.Start > len(w.rows.Steps) {
+		return ""
+	}
+	leg := w.rows.Steps[w.place.Start-1].Leg
+	boss := map[uint32]bool{}
+	for _, r := range w.rows.Steps {
+		if r.Kind == planexport.KindBoss && r.Leg == leg && r.Entry != 0 {
+			boss[r.Entry] = true
+		}
+	}
+	hire := map[uint64]bool{}
+	for _, b := range w.botAt {
+		if b.guid != 0 {
+			hire[uint64(b.guid)] = true
+		}
+	}
+	for _, h := range w.hostiles {
+		if !boss[h.entry] || now.Sub(h.at) > 10*time.Second || !bossRowEngaged(h.hppct, h.target) {
+			continue
+		}
+		if h.target == 0 || hire[h.target] {
+			return fmt.Sprintf("boss engaged with the party: %d at %d%%", h.entry, h.hppct)
+		}
+	}
+	return ""
 }
 
 // placeKillBlockers GM-kills only the units the last quiet named, and only when --gm-clear is on. It looks every
