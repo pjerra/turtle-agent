@@ -26,9 +26,10 @@
 // overwrite their own slot on Reset (boss_jeklik.cpp:105-106,
 // boss_venoxis.cpp:152-153), see docs/okf/raids/raid-walk-reference.md.
 // Resending into data that did survive is harmless (SetData is idempotent).
-// A walk also resends once per boss row, only at the out of combat rest or
-// gather of the step before the row (never at the boss row itself, which warns
-// and skips when no such rest came): a GM kill does not stop the respawn, and a
+// After `run start` the lines go out ONLY at a rest or gather status that passes
+// the pre-pull gate (gmInstanceDataMayFire): any other status defers a pending
+// send. A walk also resends once per boss row, at that rest of the step before
+// the row (a boss row with no such rest warns and skips): a GM kill does not stop the respawn, and a
 // respawned priest's Reset() overwrites its data (walk 45 hk7m).
 package main
 
@@ -418,7 +419,8 @@ func (w *walk) gmInstanceDataStart(ctx context.Context, inst, leg string) error 
 
 // gmInstanceDataSendPending is pollOnce's firing: a spec whose leg this
 // status names fires here, once per walk, when a walk reaches the leg
-// mid-run. A firing here holds the run's next pull until the lines are
+// mid-run, but only at an allowlisted status (gmInstanceDataMayFire: a
+// pre-pull-gated rest or gather); every other status defers it. A firing here holds the run's next pull until the lines are
 // sent: the walk pauses the run first (`.bot run pause`, through the
 // commander's own run verbs) and resumes it after the last line, so the
 // pull gate's lines land before the next pull. Whenever the status was
@@ -454,7 +456,9 @@ func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus, 
 			pending = w.gmInstanceDataBossResend(inst, st)
 		}
 	}
-	pending = w.gmInstanceDataHold(st, pending, later)
+	if !w.gmInstanceDataMayFire(st, later) {
+		pending = nil
+	}
 	if len(pending) == 0 {
 		return false, nil
 	}
@@ -469,7 +473,6 @@ func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus, 
 	if err := w.gmInstanceDataFire(ctx, inst, spec); err != nil {
 		return true, err
 	}
-	delete(w.gmInstanceDataHeld, strings.ToLower(spec.Leg))
 	if pauseAttempted {
 		if _, err := w.commander(ctx, commanderReq{Op: "run", Verb: "resume", WaitMS: 10000}); err != nil {
 			return true, stopf(exitRaidWalkFailed, "gm-instance-data: %s: the run resume after the lines failed: %v", spec.Leg, err)
@@ -612,36 +615,20 @@ func (w *walk) gmInstanceDataBossResend(inst string, st tbm.RunStatus) []raidwal
 	return out
 }
 
-// gmInstanceDataHold drops the pending sends that must not fire on this status.
-// While the status is a plan boss row nothing fires, the initial send
-// included: the boss row becomes current about 1 s before the run can pull, so
-// a pause there lands mid-pull (the lines belong before `run start` or at the
-// confirmed rest before the row). A leg whose lines were due at a boss row is
-// held: they go out at the next out-of-combat rest or gather of that leg (the
-// pre-pull gate), not at any walking status in between.
-func (w *walk) gmInstanceDataHold(st tbm.RunStatus, pending []raidwalk.GMInstanceSpec, later bool) []raidwalk.GMInstanceSpec {
-	if len(pending) == 0 {
-		return pending
+// gmInstanceDataMayFire is the allowlist for every send after `run start`: the
+// lines may go out ONLY at a rest or gather status that passes the pre-pull gate
+// (no pulling or fighting note, no later pull line in the page, no bot of the
+// party in combat in a frame under gmInstanceDataFrameFresh old). The launch send
+// before `run start` (phases) is the only other place. At any other status a
+// pending send is deferred and never fires: walking, begin, pull, fight, hold,
+// boss rows and phases the walk does not know a pause there could land
+// mid-pull. A deferred send stays pending (its marker is not done) and goes out
+// at the next allowed status of the leg; the wipe recovery's cleared markers wait
+// the same way.
+func (w *walk) gmInstanceDataMayFire(st tbm.RunStatus, later bool) bool {
+	switch strings.ToLower(st.Phase) {
+	case "rest", "gather":
+		return w.gmInstanceDataPrePull(st, later, w.env.now())
 	}
-	if _, ok := w.bossRowAt(st.Step); ok && st.Kind == planexport.KindBoss {
-		if w.gmInstanceDataHeld == nil {
-			w.gmInstanceDataHeld = map[string]bool{}
-		}
-		for _, spec := range pending {
-			w.gmInstanceDataHeld[strings.ToLower(spec.Leg)] = true
-		}
-		return nil
-	}
-	restOK := false
-	if p := strings.ToLower(st.Phase); p == "rest" || p == "gather" {
-		restOK = w.gmInstanceDataPrePull(st, later, w.env.now())
-	}
-	var out []raidwalk.GMInstanceSpec
-	for _, spec := range pending {
-		if w.gmInstanceDataHeld[strings.ToLower(spec.Leg)] && !restOK {
-			continue
-		}
-		out = append(out, spec)
-	}
-	return out
+	return false
 }

@@ -460,7 +460,7 @@ func TestGMInstanceDataMidRunHoldsNextPull(t *testing.T) {
 	f.opts.gmInstanceData = stringList{"high_priestess_arlokk:1 3"}
 	f.agent.startReply = instDataStartReply(t, n)
 	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
-	mid := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|move|walk|walking|until boss (step %d)", n.start+1, n.total, n.until)
+	mid := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|move|rest|resting|until boss (step %d)", n.start+1, n.total, n.until)
 	f.agent.mu.Lock()
 	last := f.agent.startQueue[len(f.agent.startQueue)-1]
 	f.agent.startQueue = append(f.agent.startQueue[:len(f.agent.startQueue)-1], queuedEvent{raw: mid}, last)
@@ -532,6 +532,24 @@ func TestGMInstanceDataLogsServerReply(t *testing.T) {
 
 // instDataOnyxiaReply is a run start answer for the unplaced onyxia
 // fixture: the run's own leg name is "onyxia" (defaultRun's lines).
+// instDataOnyxiaRestQueue replaces the fixture's default statuses by two
+// walking statuses, an out-of-combat rest and the end: the mid-run sends only
+// fire at the rest.
+func instDataOnyxiaRestQueue(f *fixture, plan string) {
+	st := func(state string, step int, phase, note string) queuedEvent {
+		return queuedEvent{raw: fmt.Sprintf("TBM:RUN|%s|%s|%d/29|onyxia|move|%s|%s", plan, state, step, phase, note)}
+	}
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		st("running", 3, "walk", "walking"),
+		st("running", 4, "walk", "walking"),
+		st("running", 5, "rest", "resting"),
+		st("running", 6, "walk", "walking"),
+		st("done", 6, "walk", "stopped before step 29 (until boss): the party stays where it stands"),
+	}
+	f.agent.mu.Unlock()
+}
+
 func instDataOnyxiaReply() *commanderReply {
 	line := "TBM:RUN|onyxias_lair|running|2/29|onyxia|move|walk|walking|until boss (step 29)"
 	return &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
@@ -556,6 +574,7 @@ func TestGMInstanceDataWithoutPlace(t *testing.T) {
 		}
 		f.agent.startReply = instDataOnyxiaReply()
 		f.defaultRun("onyxias_lair")
+		instDataOnyxiaRestQueue(f, "onyxias_lair")
 		if code := f.run(context.Background()); code != exitOK {
 			t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
 		}
@@ -571,6 +590,7 @@ func TestGMInstanceDataWithoutPlace(t *testing.T) {
 		}
 		f.agent.startReply = instDataOnyxiaReply()
 		f.defaultRun("onyxias_lair")
+		instDataOnyxiaRestQueue(f, "onyxias_lair")
 		if code := f.run(context.Background()); code != exitOK {
 			t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
 		}
@@ -705,7 +725,7 @@ func TestGMInstanceDataResumesAfterFailedPause(t *testing.T) {
 	f.opts.gmInstanceData = stringList{"high_priestess_arlokk:1 3"}
 	f.agent.startReply = instDataStartReply(t, n)
 	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
-	mid := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|move|walk|walking|until boss (step %d)", n.start+1, n.total, n.until)
+	mid := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|move|rest|resting|until boss (step %d)", n.start+1, n.total, n.until)
 	f.agent.mu.Lock()
 	last := f.agent.startQueue[len(f.agent.startQueue)-1]
 	f.agent.startQueue = append(f.agent.startQueue[:len(f.agent.startQueue)-1], queuedEvent{raw: mid}, last)
@@ -752,7 +772,7 @@ func TestGMInstanceDataFiringBreaksPollLoop(t *testing.T) {
 	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
 	f.agent.pageSize = 2
 	run := func(step int) queuedEvent {
-		return queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|move|walk|walking|until boss (step %d)", step, n.total, n.until)}
+		return queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|move|rest|resting|until boss (step %d)", step, n.total, n.until)}
 	}
 	f.agent.mu.Lock()
 	last := f.agent.startQueue[len(f.agent.startQueue)-1]
@@ -858,6 +878,7 @@ func TestGMInstanceDataZeroInstRetries(t *testing.T) {
 	}
 	f.agent.startReply = instDataOnyxiaReply()
 	f.defaultRun("onyxias_lair")
+	instDataOnyxiaRestQueue(f, "onyxias_lair")
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
 	}
@@ -906,7 +927,7 @@ func TestGMInstanceDataResendsAfterWipeRecovery(t *testing.T) {
 		f.agent.lines = append(f.agent.lines,
 			queuedEvent{raw: leg("running", n.start+1, "resumed")},
 			queuedEvent{raw: leg("running", n.start+1, "walking")},
-			queuedEvent{raw: leg("running", n.start+1, "walking")},
+			queuedEvent{raw: strings.Replace(leg("running", n.start+1, "resting"), "|move|walk|", "|move|rest|", 1)},
 			queuedEvent{raw: leg("done", n.start+1, fmt.Sprintf("stopped before step %d (until boss): the party stays where it stands", n.until))})
 	}
 	if code := f.run(context.Background()); code != exitOK {
@@ -1238,6 +1259,123 @@ func TestGMInstanceDataFirstLegStatusAtBossRowSendsNothingUntilARest(t *testing.
 			}
 			if warns != 1 {
 				t.Fatalf("%d skip notes, want 1: %q", warns, f.summary().Notes)
+			}
+		})
+	}
+}
+
+// Allowlist: a pending instance-data send fires ONLY at a rest or gather status
+// that passes the pre-pull gate (or as the launch send before `run start`). At
+// any other status, a boss row, a pull, a fight, a walking status, an unknown
+// phase, it is deferred and never fires. The walk is placed in the thekal leg
+// and the flag names the arlokk leg, so no launch send happens and the first
+// arlokk status finds the send pending.
+func TestGMInstanceDataFiresOnlyAtAnOutOfCombatRest(t *testing.T) {
+	n := zgPlaceSteps(t)
+	boss := instDataLegBossStep(t, "high_priestess_arlokk")
+	cases := []struct {
+		name              string
+		step              int
+		kind, phase, note string
+		wantLines         int
+	}{
+		{"walking", boss - 2, "move", "walk", "walking", 0},
+		{"begin", boss - 2, "move", "begin", "starting", 0},
+		{"boss row begin", boss, "boss", "begin", "starting the boss row", 0},
+		{"boss row rest", boss, "boss", "rest", "resting", 1},
+		{"pull", boss - 2, "pull", "pull", "pulling", 0},
+		{"fight", boss - 2, "pull", "pull", "fighting", 0},
+		{"hold", boss - 2, "hold", "hold", "holding", 0},
+		{"task", boss - 2, "move", "task", "task", 0},
+		{"wait", boss - 2, "move", "wait", "waiting", 0},
+		{"unknown phase", boss - 2, "move", "somethingnew", "walking", 0},
+		{"empty phase", boss - 2, "move", "", "walking", 0},
+		{"rest with a fight note", boss - 2, "move", "rest", "fighting", 0},
+		{"rest", boss - 2, "move", "rest", "resting", 1},
+		{"gather", boss - 2, "move", "gather", "gathering", 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f, _ := newPlaceFixture(t)
+			f.opts.gmInstanceData = stringList{"high_priestess_arlokk:1 3"}
+			f.agent.startReply = instDataStartReply(t, n)
+			f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+			f.agent.startQueue = []queuedEvent{
+				{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|%s|%s|%s", c.step, n.total, c.kind, c.phase, c.note)},
+				{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_arlokk|move|walk|stopped before step %d (until boss): the party stays where it stands", c.step, n.total, n.until)},
+			}
+			if code := f.run(context.Background()); code != exitOK {
+				t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+			}
+			if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != c.wantLines {
+				t.Fatalf("%d lines, want %d: %q", got, c.wantLines, f.agent.gmLines())
+			}
+			wantVerbs := "start"
+			if c.wantLines > 0 {
+				wantVerbs = "start pause resume"
+			}
+			if got := strings.Join(f.agent.runVerbs, " "); got != wantVerbs {
+				t.Fatalf("run verbs %q, want %q", got, wantVerbs)
+			}
+		})
+	}
+}
+
+// Codex's bypass: `q inst` answers 0 on the first reads, so nothing could fire
+// (and nothing was held); when the id arrives at a plain walking status the send
+// must still wait for a rest.
+func TestGMInstanceDataZeroInstThenWalkingWaitsForARest(t *testing.T) {
+	for _, withRest := range []bool{false, true} {
+		name := "no rest"
+		if withRest {
+			name = "rest"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.opts.gmInstanceData = stringList{"onyxia:1 3"}
+			reads := 0
+			f.agent.ttFn = func(cmd string) (ttResult, error) {
+				if cmd == "q inst" {
+					reads++
+					if reads <= 2 {
+						return ttReplyOf(t, map[string]any{"map": 249, "inst": 0}), nil
+					}
+					return ttReplyOf(t, map[string]any{"map": 249, "inst": 77}), nil
+				}
+				return ttResult{}, nil
+			}
+			f.agent.startReply = instDataOnyxiaReply()
+			st := func(state, phase, note string) queuedEvent {
+				return queuedEvent{raw: fmt.Sprintf("TBM:RUN|onyxias_lair|%s|3/29|onyxia|move|%s|%s", state, phase, note)}
+			}
+			q := []queuedEvent{
+				st("running", "walk", "walking"),
+				st("running", "walk", "walking"),
+				st("running", "walk", "walking"),
+			}
+			if withRest {
+				q = append(q, st("running", "rest", "resting"))
+			}
+			q = append(q, st("done", "walk", "stopped before step 29 (until boss): the party stays where it stands"))
+			f.defaultRun("onyxias_lair")
+			f.agent.mu.Lock()
+			f.agent.startQueue = q
+			f.agent.mu.Unlock()
+			if code := f.run(context.Background()); code != exitOK {
+				t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+			}
+			if reads < 3 {
+				t.Fatalf("q inst read %d time(s), want the id read at the walking statuses", reads)
+			}
+			want, verbs := 0, "start"
+			if withRest {
+				want, verbs = 1, "start pause resume"
+			}
+			if n := countPrefix(f.agent.gmLines(), ".debug instancedata"); n != want {
+				t.Fatalf("%d lines, want %d: %q", n, want, f.agent.gmLines())
+			}
+			if got := strings.Join(f.agent.runVerbs, " "); got != verbs {
+				t.Fatalf("run verbs %q, want %q", got, verbs)
 			}
 		})
 	}
