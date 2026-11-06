@@ -921,3 +921,67 @@ func TestGMInstanceDataResendsAfterWipeRecovery(t *testing.T) {
 		t.Fatalf("run verbs %q, want the recovery's resume then the resend's pause and resume", got)
 	}
 }
+
+// instDataThekalStep is a placeable thekal pull row of the ZG rows, the
+// "resume from step N" start of an autopilot restart.
+func instDataThekalStep(t *testing.T) int {
+	t.Helper()
+	rows := zgRows(t)
+	for i, s := range rows.Steps {
+		if s.Kind != planexport.KindPull {
+			continue
+		}
+		if _, ok := raidwalk.PlacePoint(rows, i+1); !ok {
+			continue
+		}
+		if strings.EqualFold(raidwalk.PlaceLegName(rows, i+1), "high_priest_thekal") {
+			return i + 1
+		}
+	}
+	t.Fatal("no placeable thekal pull row in the ZG rows")
+	return 0
+}
+
+// A --reuse-instance launch that resumes from a step (the autopilot's
+// `--from step N --place --reuse-instance`, no leg words) sends the lines
+// exactly once, before `run start`, in both reuse modes: the raid still
+// inside (alive) and the logged-out raid resumed from the commander's bind.
+func TestGMInstanceDataReuseResumeFromStepSendsOnceBeforeRunStart(t *testing.T) {
+	for _, mode := range []string{"alive", "bind"} {
+		t.Run(mode, func(t *testing.T) {
+			step := instDataThekalStep(t)
+			f, p := newPlaceFixture(t)
+			f.opts.from = fmt.Sprintf("step %d", step)
+			f.opts.reuseInstance = true
+			f.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
+			if mode == "alive" {
+				f.agent.entered = true
+			} else {
+				f.agent.entered = false
+				f.agent.instanceBinds = []fakeBind{{inst: 107, ttr: "1h 0m"}}
+				p.inst = 107
+			}
+			n := zgPlaceSteps(t)
+			f.agent.startReply = placeStartReply("zul_gurub", step, n.total, n.until)
+			f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+			if code := f.run(context.Background()); code != exitOK {
+				t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+			}
+			inst, run := -1, -1
+			for i, line := range f.agentLog() {
+				if strings.HasPrefix(line, "gm .debug instancedata") && inst < 0 {
+					inst = i
+				}
+				if strings.HasPrefix(line, "cmdr run start ") && run < 0 {
+					run = i
+				}
+			}
+			if inst < 0 || run < 0 || inst > run {
+				t.Fatalf("instance-data at %d, run start at %d (want both, data first): %q", inst, run, f.agentLog())
+			}
+			if n := countPrefix(f.agent.gmLines(), ".debug instancedata"); n != 1 {
+				t.Fatalf("%d lines, want exactly 1: %q", n, f.agent.gmLines())
+			}
+		})
+	}
+}
