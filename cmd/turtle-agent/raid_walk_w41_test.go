@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
@@ -50,13 +51,21 @@ func TestBossEngagedWhilePausedOnBossRowResumes(t *testing.T) {
 	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
 		return []tbm.HostileRec{{GUID: 9, Entry: 14517, HPPct: 40, Target: packet.GUID(1000), X: -12289.1, Y: -1384.1, Z: 134.3}}
 	}
-	// The resume's answer: the run goes on at her step, then ends at its until.
+	// The resume's answer: the run goes on at her step (its own page, so the wait's
+	// newest-status check sees running), then ends at its until on a later poll.
 	f.agent.onResume = func() {
 		f.agent.mu.Lock()
 		defer f.agent.mu.Unlock()
 		f.agent.lines = append(f.agent.lines,
-			queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_jeklik|boss|fight|fighting|until step %d (step %d)", boss, total, boss+1, boss+1)},
-			queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_jeklik|boss|fight|stopped before step %d (until step %d): the party stays where it stands", boss+1, total, boss+1, boss+1)})
+			queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_jeklik|boss|fight|fighting|until step %d (step %d)", boss, total, boss+1, boss+1)})
+		f.agent.viewHook = func() {
+			f.agent.mu.Lock()
+			defer f.agent.mu.Unlock()
+			if len(f.agent.lines) == 0 {
+				f.agent.lines = append(f.agent.lines,
+					queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_jeklik|boss|fight|stopped before step %d (until step %d): the party stays where it stands", boss+1, total, boss+1, boss+1)})
+			}
+		}
 	}
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
@@ -237,15 +246,23 @@ func TestPausedBossResumeSamePauseAgainRoutesToHandleBoss(t *testing.T) {
 
 // TestPausedBossResumeFreshRunningKeepsTheHandoff pins the existing behaviour the brief keeps: the resume is ACKed
 // and a FRESH RunRunning status for the boss row follows, so the run leader fights it (no handleBoss run stop, the
-// walk ends at its until).
+// walk ends at its until). The running line stands alone in its page: a done line in the same page is the newest
+// status, and the handoff must not fire on the older line.
 func TestPausedBossResumeFreshRunningKeepsTheHandoff(t *testing.T) {
 	f, _, _ := pausedBossFixture(t, func(f *fixture, boss, total int) {
 		f.agent.onResume = func() {
 			f.agent.mu.Lock()
 			defer f.agent.mu.Unlock()
 			f.agent.lines = append(f.agent.lines,
-				queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_jeklik|boss|fight|fighting|until step %d (step %d)", boss, total, boss+1, boss+1)},
-				queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_jeklik|boss|fight|stopped before step %d (until step %d): the party stays where it stands", boss+1, total, boss+1, boss+1)})
+				queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_jeklik|boss|fight|fighting|until step %d (step %d)", boss, total, boss+1, boss+1)})
+			f.agent.viewHook = func() {
+				f.agent.mu.Lock()
+				defer f.agent.mu.Unlock()
+				if len(f.agent.lines) == 0 {
+					f.agent.lines = append(f.agent.lines,
+						queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_jeklik|boss|fight|stopped before step %d (until step %d): the party stays where it stands", boss+1, total, boss+1, boss+1)})
+				}
+			}
 		}
 	})
 	if code := f.run(context.Background()); code != exitOK {
@@ -262,5 +279,81 @@ func TestPausedBossResumeFreshRunningKeepsTheHandoff(t *testing.T) {
 	}
 	if sum := f.summary(); !hasNote(sum, "resumed the run so the run leader fights it") {
 		t.Fatalf("notes %q, want the resume note", sum.Notes)
+	}
+}
+
+// TestPausedBossResumeRunningThenDoneInOnePageRoutesToHandleBoss is round-2 item 2: the wait
+// succeeds only on the NEWEST accepted status. A running line of the boss row followed by a done
+// line in ONE page (pageSize 2) while the boss stays engaged is a failed handoff: handleBoss runs
+// (exit 19 with the boss note), and the resume handoff note never fires.
+func TestPausedBossResumeRunningThenDoneInOnePageRoutesToHandleBoss(t *testing.T) {
+	f, boss, total := pausedBossFixture(t, func(f *fixture, boss, total int) {
+		f.agent.pageSize = 2
+		f.agent.onResume = func() {
+			f.agent.mu.Lock()
+			defer f.agent.mu.Unlock()
+			f.agent.lines = append(f.agent.lines,
+				queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_jeklik|boss|fight|fighting|until step %d (step %d)", boss, total, boss+1, boss+1)},
+				queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_jeklik|boss|fight|stopped before step %d (until step %d): the party stays where it stands", boss+1, total, boss+1, boss+1)})
+		}
+	})
+	_ = total
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, fmt.Sprintf("boss 14517 engaged at step %d", boss)) {
+		t.Fatalf("end %q, want the handleBoss stop reason for the engaged boss (notes %q)", sum.EndReason, sum.Notes)
+	}
+	if hasNote(f.summary(), "resumed the run so the run leader fights it") {
+		t.Fatalf("notes %q: a stale running line behind a done line must not hand off", f.summary().Notes)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
+		t.Fatalf("%d run stops, want 1: handleBoss stops the run for the engaged boss\n%s", n, f.stdout.String())
+	}
+}
+
+// TestPausedBossResumeWipeInsideWaitRunsWipeRecovery is round-2 item 1: a wipe during the resume's
+// 10 s wait is collected and fed to the normal handler exactly as phaseWatch would, before deciding
+// the handoff. The wipe handler runs (the wipe note, no handoff note, no handleBoss ending): any
+// wipe during the wait is a failed handoff.
+func TestPausedBossResumeWipeInsideWaitRunsWipeRecovery(t *testing.T) {
+	f, boss, total := pausedBossFixture(t, func(f *fixture, boss, total int) {
+		f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+		running := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_jeklik|boss|fight|fighting|until step %d (step %d)", boss, total, boss+1, boss+1)
+		// The resume's answer: the run goes on at her step — and the whole raid dies on that
+		// same poll, so the wait drains both the running line and the wipe.
+		f.agent.onResume = func() {
+			f.agent.mu.Lock()
+			defer f.agent.mu.Unlock()
+			f.agent.lines = append(f.agent.lines, queuedEvent{raw: running})
+			prev := f.agent.eventsHook
+			f.agent.eventsHook = func(raw string) {
+				if prev != nil {
+					prev(raw)
+				}
+				if raw != running {
+					return
+				}
+				for _, n := range f.agent.party {
+					f.agent.dead[n] = true
+				}
+			}
+		}
+	})
+	_ = total
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if hasNote(sum, "resumed the run so the run leader fights it") {
+		t.Fatalf("notes %q: the wait's running line must not hand off when a wipe drained in the same wait", sum.Notes)
+	}
+	if !hasNote(sum, fmt.Sprintf("wipe at step %d", boss)) {
+		t.Fatalf("notes %q, want the wipe ending (the drained wipe ran its normal handler)", sum.Notes)
+	}
+	if strings.Contains(sum.EndReason, fmt.Sprintf("boss 14517 engaged at step %d", boss)) {
+		t.Fatalf("end %q: the drained wipe owns the ending, not handleBoss", sum.EndReason)
 	}
 }
