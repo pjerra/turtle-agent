@@ -29,6 +29,9 @@ const (
 	// starved each other, and each refusal counted as a no-progress attempt (m5's rest grew to 10m, m1's hit 20s then
 	// 1m, and the failures moved the ids toward ESCALATE).
 	AutoHirePoolWait = "hire-pool-wait"
+	// AutoCapWait: no fresh instance place was free (the walk's exit 26). Wait for the core's instance cap and relaunch
+	// a fresh instance: the run never started, so this is no wipe, no failed placement and no no-progress attempt.
+	AutoCapWait = "cap-wait"
 )
 
 // AutoHirePoolWaitBackoff is how long a raid backs off after the shared hire pool refused its hires: enough for the
@@ -104,7 +107,10 @@ type AutoTarget struct {
 	// Start is the target's own --from ("step N" or "leg L"), used for a goal's first placement; a restart inside the
 	// goal starts at the furthest step the run reached instead.
 	Start string
-	Line  int
+	// BossWipeMax is the goal's boss-wipe budget from --boss-wipe-max: the wipes in a row without progress that stop
+	// the id (0: AutoBossWipeMax).
+	BossWipeMax int
+	Line        int
 }
 
 // ParseAutoTargets reads the targets file:
@@ -144,10 +150,10 @@ type AutoSlotClaim int
 const (
 	// AutoSlotNew: an id the caller does not know yet; its lines get a slot only if no known active id holds it.
 	AutoSlotNew AutoSlotClaim = iota
-	// AutoSlotActive: an id with a live state (running, in a restart wait, escalated, refused, queued): it claims its
-	// slots before any new line, whatever the file order.
+	// AutoSlotActive: an id with a live state (running, in a restart wait, a queued line, refused, or escalated with
+	// its run still there): it claims its slots before any new line, whatever the file order.
 	AutoSlotActive
-	// AutoSlotInactive: an id that is done or stopped with no run: it holds no slot at all.
+	// AutoSlotInactive: an id that is done, stopped or escalated with no live run: it holds no slot at all.
 	AutoSlotInactive
 )
 
@@ -296,49 +302,73 @@ func parseAutoTargetLine(n int, line string) (AutoTarget, error) {
 		return AutoTarget{}, fmt.Errorf("line %d: %v", n, err)
 	}
 	t := AutoTarget{ID: id, Server: server, Slot: slot, Holder: holder, Goal: goal, Line: n}
-	args, start, err := parseAutoArgs(fields[sep+1:])
+	a, err := parseAutoArgs(fields[sep+1:])
 	if err != nil {
 		return AutoTarget{}, fmt.Errorf("line %d: %v", n, err)
 	}
-	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+	if len(a.Args) == 0 || strings.HasPrefix(a.Args[0], "-") {
 		return AutoTarget{}, fmt.Errorf("line %d: the raid-walk args must start with the plan name", n)
 	}
-	if !hasAutoFlag(args, "--sql") {
+	if !hasAutoFlag(a.Args, "--sql") {
 		return AutoTarget{}, fmt.Errorf("line %d: --sql FILE is required: every goal may be re-placed, and raid-walk refuses --place without --sql", n)
 	}
-	t.Args, t.Start = args, start
+	t.Args, t.Start, t.BossWipeMax = a.Args, a.Start, a.BossWipeMax
 	return t, nil
 }
 
-// parseAutoArgs drops the flags the autopilot manages and returns the rest, plus the target's --from.
-func parseAutoArgs(in []string) (args []string, start string, err error) {
+// autoArgs are a target line's raid-walk arguments after the flags the autopilot manages are taken out.
+type autoArgs struct {
+	Args        []string
+	Start       string
+	BossWipeMax int // --boss-wipe-max, 0 when the line names none
+}
+
+// parseAutoArgs drops the flags the autopilot manages: it returns the raid-walk arguments left, the target's --from
+// and its boss-wipe budget.
+func parseAutoArgs(in []string) (autoArgs, error) {
+	var out autoArgs
+	args, start := &out.Args, &out.Start
 	for i := 0; i < len(in); i++ {
 		a := in[i]
 		name, _, hasEq := strings.Cut(a, "=")
 		switch name {
 		case "--instance-cap-unsafe":
-			return nil, "", fmt.Errorf("--instance-cap-unsafe is never used by the autopilot")
+			return autoArgs{}, fmt.Errorf("--instance-cap-unsafe is never used by the autopilot")
 		case "--inject":
-			return nil, "", fmt.Errorf("--inject is never used by the autopilot: the walk's own faults are not a supervised run")
+			return autoArgs{}, fmt.Errorf("--inject is never used by the autopilot: the walk's own faults are not a supervised run")
 		case "--server", "--slot", "--holder", "--until", "--out":
 			if hasEq {
 				continue
 			}
 			if i+1 >= len(in) {
-				return nil, "", fmt.Errorf("%s needs a value", a)
+				return autoArgs{}, fmt.Errorf("%s needs a value", a)
 			}
 			i++
 			continue
 		case "--from":
 			if hasEq {
-				start = strings.Trim(strings.TrimPrefix(a, name+"="), `"`)
+				*start = strings.Trim(strings.TrimPrefix(a, name+"="), `"`)
 				continue
 			}
 			if i+2 >= len(in) || (in[i+1] != "step" && in[i+1] != "leg") {
-				return nil, "", fmt.Errorf("--from wants `leg L` or `step N` (two words: --from leg L)")
+				return autoArgs{}, fmt.Errorf("--from wants `leg L` or `step N` (two words: --from leg L)")
 			}
-			start = in[i+1] + " " + in[i+2]
+			*start = in[i+1] + " " + in[i+2]
 			i += 2
+			continue
+		case "--boss-wipe-max":
+			val := ""
+			if hasEq {
+				_, val, _ = strings.Cut(a, "=")
+			} else if i+1 < len(in) {
+				i++
+				val = in[i]
+			}
+			n, err := strconv.Atoi(val)
+			if err != nil || n < 1 {
+				return autoArgs{}, fmt.Errorf("--boss-wipe-max wants a number of 1 or more, not %q", val)
+			}
+			out.BossWipeMax = n
 			continue
 		case "--place", "--reuse-instance":
 			continue
@@ -361,14 +391,14 @@ func parseAutoArgs(in []string) (args []string, start string, err error) {
 			}
 			val = strings.Join(words, " ")
 			if strings.TrimSpace(val) == "" {
-				return nil, "", fmt.Errorf("--gm-instance-data needs a value (\"<leg>:<a> <b>[;<a> <b>...]\")")
+				return autoArgs{}, fmt.Errorf("--gm-instance-data needs a value (\"<leg>:<a> <b>[;<a> <b>...]\")")
 			}
-			args = append(args, "--gm-instance-data="+val)
+			*args = append(*args, "--gm-instance-data="+val)
 			continue
 		}
-		args = append(args, a)
+		*args = append(*args, a)
 	}
-	return args, start, nil
+	return out, nil
 }
 
 // hasAutoFlag reports whether name is among args, bare or as name=value.
@@ -399,6 +429,9 @@ type AutoObservation struct {
 	StallAfter time.Time
 	// HirePoolWait says the end was the shared hire pool's refusal (no mercenary of that kind): a wait, not a failure.
 	HirePoolWait bool
+	// InstanceCapWait says the end was the core's fresh-instance cap refusing the placement (the walk's exit 26): a
+	// wait for a place, not a failure and not a wipe.
+	InstanceCapWait bool
 	// WipeAtBoss says the run ended at a boss row (or the row before it): the caller read the plan's rows
 	// (PlaceStepAtBoss). With exit 19 it is a wipe at that boss. The caller sets it only for a goal whose target line
 	// carries --gm-instance-data (ZG Hakkar today): that flag re-applies the boss prerequisites in the new copy. A
@@ -500,17 +533,28 @@ type AutoRunState struct {
 	PlaceFails int
 	// HireWaits counts the consecutive hire-pool waits of this goal: the sixth stops the id for a person.
 	HireWaits int
+	// CapWaits counts the consecutive instance-cap refusals (exit 26) of this id: the fourth in a row stops it for a
+	// person. The caller breaks the streak on a launch that got past placement.
+	CapWaits int
 	// Exit29Retries counts the fresh-instance retries this goal already made after an exit 29: one per goal.
 	Exit29Retries int
 	// BossWipes counts the fresh-instance relaunches after a wipe at a boss this goal made since its last progress.
 	BossWipes int
+	// BossWipeMax is this goal's boss-wipe budget (its --boss-wipe-max); 0 is AutoBossWipeMax.
+	BossWipeMax int
 	// Progressed says the attempt that just ended reached a step further than any earlier attempt of this goal.
 	Progressed bool
 }
 
-// AutoBossWipeMax is the boss wipes in a row without progress that stop the id: the third wipe escalates instead of
-// taking another fresh instance (the core allows 5 fresh instances per account and hour).
+// AutoBossWipeMax is the default boss wipes in a row without progress that stop the id: the third wipe escalates
+// instead of taking another fresh instance (the core allows 5 fresh instances per account and hour). A goal line may
+// raise its own budget with --boss-wipe-max (the ZG Hakkar goals use 5).
 const AutoBossWipeMax = 3
+
+// AutoCapRefuseMax is how many consecutive exit-26 instance-cap refusals relaunch an id before it stops for a person.
+// Every one of them already waited raid-walk's --instance-cap-wait (20 m by default), so four in a row is over an hour
+// at the cap without a place: the autopilot's own wait was the second one, and the loop would never end.
+const AutoCapRefuseMax = 4
 
 // AutoDecision is the next step.
 type AutoDecision struct {
@@ -546,7 +590,9 @@ func AutoBackoff(fast int) time.Duration {
 // goal advances; a placement that failed on the old bind asks for a fresh instance next. A stall is no step and no
 // boss-HP change for stall, counted from the end of a legitimate instance-cap wait. Exit 2 stops the id for a
 // person, exit 29 retries once per goal in a fresh instance (a second one stops it), and so does the third consecutive exit 15
-// or the sixth consecutive hire-pool wait. Every restart carries the backoff of its no-progress count.
+// or the sixth consecutive hire-pool wait. Exit 26 (the instance cap refused a fresh place) relaunches at once, since
+// the walk waited its own cap wait already, and the fourth in a row stops the id. Every restart carries the backoff of
+// its no-progress count; a boss wipe escalates at the goal's boss-wipe budget.
 func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall time.Duration) AutoDecision {
 	if !o.Exited {
 		// A run waiting on the instance cap is not stalled: its clock starts when the wait ends.
@@ -571,6 +617,16 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 	}
 	if GoalAchieved(r.Goal, o) {
 		return AutoDecision{Action: AutoAdvance, Reason: "goal met: " + r.Goal.String()}
+	}
+	if o.InstanceCapWait {
+		// The run never started: no fresh place was free. raid-walk waited out its own --instance-cap-wait before this
+		// exit, so the caller relaunches at once (no wait of its own); four refusals in a row mean the cap will not
+		// lift for this id and a person has to look (the caller breaks the streak on a launch that got past placement).
+		if r.CapWaits+1 >= AutoCapRefuseMax {
+			return AutoDecision{Action: AutoStop, Escalate: true,
+				Reason: fmt.Sprintf("instance cap: %d refusals in a row, no fresh instance place (the core's cap on the account); no further retry", r.CapWaits+1)}
+		}
+		return AutoDecision{Action: AutoCapWait, Reuse: false, Reason: "instance cap: no fresh instance place is free (" + shortReason(o.EndReason) + ")"}
 	}
 	if o.HirePoolWait {
 		if r.HireWaits+1 >= AutoHirePoolWaitMax {
@@ -610,12 +666,16 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 		if r.Progressed {
 			prior = 0
 		}
-		if prior+1 >= AutoBossWipeMax {
+		maxWipes := r.BossWipeMax
+		if maxWipes <= 0 {
+			maxWipes = AutoBossWipeMax
+		}
+		if prior+1 >= maxWipes {
 			return AutoDecision{Action: AutoStop, Escalate: true,
 				Reason: fmt.Sprintf("boss wipe x%d without progress (step %d): no further fresh instance (%s)", prior+1, o.StepsReached, shortReason(o.EndReason))}
 		}
 		return AutoDecision{Action: AutoRestart, Reuse: false, FreshAfterWipe: true, Backoff: backoff,
-			Reason: "fresh instance after a wipe at a boss (step " + fmt.Sprint(o.StepsReached) + ", wipe " + fmt.Sprint(prior+1) + " of " + fmt.Sprint(AutoBossWipeMax-1) + " before escalation): the old copy still holds the boss and the dead bots (" + shortReason(o.EndReason) + ")"}
+			Reason: "fresh instance after a wipe at a boss (step " + fmt.Sprint(o.StepsReached) + ", wipe " + fmt.Sprint(prior+1) + " of " + fmt.Sprint(maxWipes-1) + " before escalation): the old copy still holds the boss and the dead bots (" + shortReason(o.EndReason) + ")"}
 	}
 	if o.PlacementFailed() {
 		if r.PlaceFails+1 >= 3 {

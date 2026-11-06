@@ -296,6 +296,68 @@ func TestTBMLateAckOfATimedOutClick(t *testing.T) {
 	}
 }
 
+// The late ACK of a timed-out click lands while the next click's prepare is waiting for the
+// roster: the click must still see it (it arrived before the click went out), so it answers
+// the timed-out request instead of eating this click's own ACK.
+func TestTBMLateAckDuringPrepare(t *testing.T) {
+	noRosterThrottle(t)
+	r := newRig(t)
+	ch := r.callAsync("tbm_click", `{"button":"Fight.Stay","wait_ms":200}`)
+	r.expectBody(opcode.CMSGMessagechat, say(".bot action stay"))
+	if reply := result(t, ch)["reply"].(map[string]any); reply["kind"] != "timeout" {
+		t.Fatalf("%v", reply)
+	}
+
+	// A new group has no verdict yet, so the next click polls the roster in prepare first.
+	r.groupWith("Gorm")
+	ch = r.callAsync("tbm_click", `{"button":"Fight.Stay","wait_ms":3000}`)
+	r.expectBody(opcode.CMSGMessagechat, say(".bot roster"))
+	r.addon("TBM:ACTION_ACK|stay|party|1|-") // the ACK of the timed-out click, during prepare
+	r.system("TBM:ROSTER_BEGIN|1", "TBM:ROSTER|7|Gorm|1|online|1|-", "TBM:ROSTER_END", "TBM:TRANSPORT|party")
+	r.expectBody(opcode.CMSGMessagechat, r.addonBody("action stay"))
+	r.addon("TBM:ACTION_ACK|stay|party|2|-")
+	if reply := result(t, ch)["reply"].(map[string]any); reply["kind"] != "ack" || reply["ack"].(map[string]any)["count"] != float64(2) {
+		t.Fatalf("%v", reply)
+	}
+
+	// Nothing is owed now: a single ACK answers the click on its own.
+	ch = r.callAsync("tbm_click", `{"button":"Fight.Stay","wait_ms":3000}`)
+	r.expectBody(opcode.CMSGMessagechat, r.addonBody("action stay"))
+	r.addon("TBM:ACTION_ACK|stay|party|3|-")
+	if reply := result(t, ch)["reply"].(map[string]any); reply["kind"] != "ack" || reply["ack"].(map[string]any)["count"] != float64(3) {
+		t.Fatalf("%v", reply)
+	}
+}
+
+// An ACK that lands in the window between the click's cursor read and its drain is settled by the drain, and it must
+// not answer the click as well: reading the log from before the drain fed it to the matcher again, so a late ACK of a
+// timed-out click became the next click's reply.
+func TestTBMAckBetweenTheCursorReadAndTheDrainIsNotTheReply(t *testing.T) {
+	r := newRig(t)
+	ch := r.callAsync("tbm_click", `{"button":"Fight.Stay","wait_ms":200}`)
+	r.expectBody(opcode.CMSGMessagechat, say(".bot action stay"))
+	if reply := result(t, ch)["reply"].(map[string]any); reply["kind"] != "timeout" {
+		t.Fatalf("%v", reply)
+	}
+
+	defer func() { clickBeforeDrain = nil }()
+	clickBeforeDrain = func() {
+		// The timed-out click's ACK, landed where the next click's cursor read already passed: the drain finds it, and
+		// the exchange must start after it.
+		before := r.s.Log().Last()
+		r.system("TBM:ACTION_ACK|stay|party|1|-")
+		for i := 0; i < 1000 && r.s.Log().Last() == before; i++ { // the session logs the line on its own goroutine
+			time.Sleep(time.Millisecond)
+		}
+	}
+	ch = r.callAsync("tbm_click", `{"button":"Fight.Stay","wait_ms":3000}`)
+	r.expectBody(opcode.CMSGMessagechat, say(".bot action stay"))
+	r.system("TBM:ACTION_ACK|stay|party|2|-")
+	if reply := result(t, ch)["reply"].(map[string]any); reply["kind"] != "ack" || reply["ack"].(map[string]any)["count"] != float64(2) {
+		t.Fatalf("%v", reply)
+	}
+}
+
 // Raid status is one ACK per bot with no end marker: the reply keeps them all and closes on a
 // quiet gap, well before wait_ms.
 func TestTBMClickMultiAck(t *testing.T) {

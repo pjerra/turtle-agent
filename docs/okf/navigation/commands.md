@@ -53,7 +53,7 @@ Needs `--capture` and/or `--botwatch`; no positional arguments.
 
 ## path-check
 
-`usage: turtle-agent path-check --mmaps DIR --map N [--json] -- x y z x y z`
+`usage: turtle-agent path-check --mmaps DIR --map N [--ray] [--json] -- x y z x y z`
 
 Both `--mmaps` and `--map` are required; exactly 6 coordinates follow `--`.
 
@@ -61,6 +61,7 @@ Both `--mmaps` and `--map` are required; exactly 6 coordinates follow `--`.
 |---|---|---|---|
 | `--mmaps` | `""` (required) | Folder with the server's mmaps (`<map>.mmap` and `<map>*.mmtile`). | `--mmaps <walk-dir>` |
 | `--map` | `""` (required) | Map id, numeric; negative refused. | `--map 1` |
+| `--ray` | `false` | Also cast the walkability ray between the two points (`navmesh.Planner.Raycast`, the agent's line-of-sight stand-in): a third line (clear, or blocked after N of M yd; unknown when an end is off the mesh or a tile is missing) and `"ray":{known,clear,hit}` in `--json`. | `--ray` |
 | `--json` | `false` | Print the results as JSON instead of text. | `--json` |
 
 Exit 1 when a query fails (`path-check: ...` on stderr).

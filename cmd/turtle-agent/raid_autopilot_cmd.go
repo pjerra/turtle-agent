@@ -1,8 +1,11 @@
 // raid-autopilot: keep the raids of a walk dir running without a worker watching them. The targets file names one
 // goal per line; the autopilot launches raid-walk for each, watches the step and the bosses' HP, and on ANY end, a used
 // -up restart budget or a stall tears the slot down and re-places: the same instance first (--place --from
-// --reuse-instance), a fresh one only when the old bind is gone (a failed placement) or after an exit 29 (once). A boss kill advances to the id's
-// next goal. It never uses slot 3, never sends `.bot run stop` and never passes --instance-cap-unsafe or --inject; it
+// --reuse-instance), a fresh one only when the old bind is gone (a failed placement) or after an exit 29 (once), and at
+// once after a wipe at a boss for a --gm-instance-data goal (up to the goal's --boss-wipe-max, default 3). An exit 26
+// (no fresh instance place) relaunches a fresh instance at once: raid-walk waited out its own --instance-cap-wait
+// inside the run, so the autopilot has no second wait, and the fourth refusal in a row escalates the id for a person.
+// A boss kill advances to the id's next goal. It never uses slot 3, never sends `.bot run stop` and never passes --instance-cap-unsafe or --inject; it
 // runs detached (setsid) and stops cleanly on a YIELD file (tear down, release leases, YIELD-DONE).
 //
 // A teardown that does not verify (the walk gone and the lease released) is not completion: the run stays put and is
@@ -149,8 +152,11 @@ type autoRun struct {
 	// progress: the last step, the boss-HP signature, and when either changed.
 	lastStep     int
 	lastProgress time.Time
-	frameOff     int64
-	frameSig     string
+	// placed says the run got past the place phase (it placed and started walking, or ended after a placement): a
+	// cap refusal and a place-phase end are neither, and only a placement breaks an id's streak of cap refusals.
+	placed   bool
+	frameOff int64
+	frameSig string
 	// pending is the finish the decision rule asked for; a failed teardown holds it back and the next tick retries
 	// instead of deciding again. finishing says a finish goroutine is on it.
 	pending       *raidwalk.AutoDecision
@@ -179,8 +185,11 @@ type autoState struct {
 	// placeFails counts the consecutive attempts that ended in the place phase: the third escalates (a dead bind is
 	// re-placed fresh, but a bind that keeps failing must not loop with minutes of backoff forever).
 	placeFails int
-	nextAt     time.Time // no launch before this (the settle after a teardown, or a backoff)
-	done       bool
+	// capWaits counts the consecutive instance-cap refusals (exit 26) of this id: the fourth escalates. A launch that
+	// got past placement breaks the streak.
+	capWaits int
+	nextAt   time.Time // no launch before this (the settle after a teardown, or a backoff)
+	done     bool
 	// escalated is an id left for a person (a teardown that never verified, an exit 2, a second exit 29, three exit 15s): it counts
 	// as done for allDone, is never launched again and is kept in the checkpoint until a person clears it.
 	escalated bool
@@ -356,11 +365,12 @@ func parseAutoArgs(args []string, stderr io.Writer) (autoOptions, int) {
 }
 
 // readAutoTargets is the strict read of a start: any bad line refuses it. The slot check goes by the checkpoint like
-// the live re-read does: an id the checkpoint holds as done or stopped holds no slot (so a file the running
-// autopilot accepted, a done id plus a new id on its slot, is accepted after a restart too), and so does an id whose
-// last goal's boss is dead (reconcile never places it again); every other checkpointed id claims its slot before a
-// new line does. An id whose goal lines changed since the checkpoint is not restored (reconcile starts it fresh), so
-// it is a new id here.
+// the live re-read does: an id the checkpoint holds as done, stopped, or escalated with no live child holds no slot (so
+// a file the running autopilot accepted, a done id plus a new id on its slot, is accepted after a restart too), and so
+// does an id whose last goal's boss is dead (reconcile never places it again); every other checkpointed id claims its
+// slot before a new line does. An escalated id whose checkpoint's child still answers keeps its slot: the escalation
+// left that run in place, and a new line on the slot would launch beside a live walk. An id whose goal lines changed
+// since the checkpoint is not restored (reconcile starts it fresh), so it is a new id here.
 func readAutoTargets(dir string) ([]raidwalk.AutoTarget, error) {
 	read := func(claim func(string) raidwalk.AutoSlotClaim) ([]raidwalk.AutoTarget, []raidwalk.AutoTargetIssue, error) {
 		f, err := os.Open(filepath.Join(dir, autoTargetsFile))
@@ -375,7 +385,10 @@ func readAutoTargets(dir string) ([]raidwalk.AutoTarget, error) {
 	byID := map[string]autoSavedID{}
 	for _, sv := range saved.IDs {
 		kinds[sv.ID] = raidwalk.AutoSlotActive
-		if (sv.Done || sv.Stopped) && !sv.Escalated {
+		if sv.Done || sv.Stopped || (sv.Escalated && !savedChildAlive(sv)) {
+			// An escalated id holds its slot while the walk it escalated on still answers (the same pid check
+			// reconcile makes): the escalation left the run in place, and a new line on that slot would launch beside
+			// a live walk. Once the child is gone the slot is free.
 			kinds[sv.ID] = raidwalk.AutoSlotInactive
 		}
 		byID[sv.ID] = sv
@@ -412,6 +425,10 @@ func readAutoTargets(dir string) ([]raidwalk.AutoTarget, error) {
 	}
 	return targets, nil
 }
+
+// savedChildAlive says the walk a checkpointed id last launched still answers: its pid or a process of its group, the
+// same check reconcile's slot decision makes. A checkpoint from before ChildPID existed says no, as a released run does.
+func savedChildAlive(sv autoSavedID) bool { return processAlive(sv.ChildPID) }
 
 // groupAutoTargets keeps the file's id order and each id's goal order.
 func groupAutoTargets(targets []raidwalk.AutoTarget) []*autoState {
@@ -965,9 +982,10 @@ func (s *autoSupervisor) noteTargetsStat() {
 	s.targetsMod, s.targetsSize = st.ModTime(), st.Size()
 }
 
-// slotClaims classifies every known id for the duplicate-slot check of a re-read: done or stopped with no live run is
-// inactive whoever holds its slot's lease now (walk 40: a finished id kept its slot, and a new id running on it must
-// not make it active again); every other state, including a queued id, is active. held is the slot each live state
+// slotClaims classifies every known id for the duplicate-slot check of a re-read: done, stopped or escalated with no
+// live run is inactive whoever holds its slot's lease now (walk 40: a finished id kept its slot, and a new id running
+// on it must not make it active again; an escalated id kept its slot until its line was edited, so the next goal could
+// not start there); every other state, including a queued id, is active. held is the slot each live state
 // holds now (its current goal's server and slot): that slot stays the id's in the check even when the id's own lines
 // are skipped or changed (review round 3). sig is the claims and holds as one string, so a caller can tell whether any
 // id changed state since the last read.
@@ -976,7 +994,7 @@ func (s *autoSupervisor) slotClaims() (claims map[string]raidwalk.AutoSlotClaim,
 	held = map[string]string{}
 	for _, st := range s.stateList() {
 		st.mu.Lock()
-		idle := (st.done || st.stopped) && !st.escalated && !st.refused && st.run == nil
+		idle := (st.done || st.stopped || st.escalated) && !st.refused && st.run == nil
 		var key string
 		if !idle && st.current < len(st.goals) {
 			t := st.goals[st.current].target
@@ -1105,7 +1123,9 @@ func autoSameTargets(a, b *autoState) bool {
 	}
 	for i := range a.goals {
 		x, y := a.goals[i].target, b.goals[i].target
-		if x.ID != y.ID || x.Server != y.Server || x.Slot != y.Slot || x.Holder != y.Holder || x.Goal != y.Goal || x.Start != y.Start {
+		// The boss-wipe budget is a goal option (--boss-wipe-max is taken out of Args), so an edit of it alone is a
+		// changed goal line too.
+		if x.ID != y.ID || x.Server != y.Server || x.Slot != y.Slot || x.Holder != y.Holder || x.Goal != y.Goal || x.Start != y.Start || x.BossWipeMax != y.BossWipeMax {
 			return false
 		}
 		if len(x.Args) != len(y.Args) {
@@ -1241,7 +1261,7 @@ func (s *autoSupervisor) slotHeldByOther(st *autoState) string {
 			continue
 		}
 		o.mu.Lock()
-		idle := (o.done || o.stopped) && !o.escalated && !o.refused && o.run == nil
+		idle := (o.done || o.stopped || o.escalated) && !o.refused && o.run == nil
 		var key string
 		if o.current < len(o.goals) {
 			key = raidwalk.AutoSlotKey(o.goals[o.current].target.Server, o.goals[o.current].target.Slot)
@@ -1511,6 +1531,9 @@ func (s *autoSupervisor) tickState(st *autoState) {
 				step = obs.StepsReached
 			}
 			r.lastStep = step
+			// Past the place phase: this run breaks the id's streak of instance-cap refusals. A cap refusal and a
+			// place-phase end never got that far.
+			r.placed = !obs.InstanceCapWait && !obs.PlacementFailed()
 			if step > g.bestStep {
 				fast = 0
 				progressed = true
@@ -1532,7 +1555,7 @@ func (s *autoSupervisor) tickState(st *autoState) {
 		d := raidwalk.DecideAutoAction(obs, raidwalk.AutoRunState{
 			Goal: r.goal, Attempt: g.attempt, Reuse: r.reuse, HasRun: g.attempt > 0,
 			FastFailures: fast, LeaseFails: g.leaseFails, PlaceFails: st.placeFails, HireWaits: g.hireWaits, Exit29Retries: g.exit29Retries,
-			BossWipes: g.bossWipes, Progressed: progressed,
+			BossWipes: g.bossWipes, BossWipeMax: g.target.BossWipeMax, Progressed: progressed, CapWaits: st.capWaits,
 		}, time.Now(), s.o.stall)
 		if d.Action == raidwalk.AutoContinue {
 			st.mu.Unlock()
@@ -1600,9 +1623,12 @@ func (s *autoSupervisor) finish(st *autoState) {
 	if lastStep > g.bestStep {
 		g.bestStep = lastStep
 	}
-	if d.Action == raidwalk.AutoHirePoolWait {
+	switch d.Action {
+	case raidwalk.AutoHirePoolWait:
 		g.hireWaits++
-	} else {
+	case raidwalk.AutoCapWait:
+		// Waiting for an instance place is no attempt: neither a failure nor progress, as the hire-pool wait.
+	default:
 		g.hireWaits = 0
 		if lastStep > prevBest {
 			g.noProgress = 0
@@ -1610,6 +1636,14 @@ func (s *autoSupervisor) finish(st *autoState) {
 		} else {
 			g.noProgress++
 		}
+	}
+	// The cap-refusal streak counts per id, not per goal, and only a launch that got past placement breaks it: a
+	// refused place, a place-phase end or a hire-pool wait leaves it as it is (the escalation is in the decision rule).
+	switch {
+	case d.Action == raidwalk.AutoCapWait:
+		st.capWaits++
+	case r.placed:
+		st.capWaits = 0
 	}
 	if d.Exit29Retry {
 		g.exit29Retries++
@@ -1627,6 +1661,8 @@ func (s *autoSupervisor) finish(st *autoState) {
 	// all, so it leaves the count alone.
 	switch {
 	case d.Action == raidwalk.AutoHirePoolWait:
+	case d.Action == raidwalk.AutoCapWait:
+		// The cap refused a place before anything was placed: no failed placement, no broken streak.
 	case d.FreshAfterWipe:
 		// A fresh instance after a boss wipe is no failed placement: it neither adds to the count nor breaks a streak.
 	case d.Action == raidwalk.AutoRestart && !d.Reuse:
@@ -1676,6 +1712,13 @@ func (s *autoSupervisor) finish(st *autoState) {
 		}
 		st.nextAt = time.Now().Add(wait)
 		esc = fmt.Sprintf("hire-pool-wait: %s; next same instance after %s", d.Reason, wait.Round(time.Second))
+	case raidwalk.AutoCapWait:
+		// A fresh instance is what the cap refused, and the retry asks for one again at once: raid-walk waited out its
+		// own --instance-cap-wait before the exit, so a second wait here would double it (and with a 0 there would be
+		// a 20 m wait that was meant to be none).
+		st.last.reuse = false
+		st.nextAt = time.Now()
+		esc = fmt.Sprintf("instance-cap-wait: %s; next fresh instance at once (refusal %d of %d)", d.Reason, st.capWaits, raidwalk.AutoCapRefuseMax)
 	}
 	st.mu.Unlock()
 
@@ -1944,6 +1987,9 @@ func (s *autoSupervisor) observe(st *autoState) raidwalk.AutoObservation {
 	if sum.ExitCode != 0 {
 		o.ExitCode = sum.ExitCode
 	}
+	// Exit 26 is the cap refusing a fresh place, except when the ledger could not be read at all: that is no cap to
+	// wait out, and the walk has already waited its minute for it.
+	o.InstanceCapWait = o.ExitCode == exitRaidWalkInstanceCap && !strings.Contains(sum.EndReason, "cannot be read")
 	for _, b := range sum.BossKills {
 		b.deadEntries(o.KilledBosses)
 	}
@@ -2470,7 +2516,10 @@ type autoSavedID struct {
 	// restart too (a checkpoint from before it reads 0).
 	BossWipes int `json:"boss_wipes,omitempty"`
 	// BossDead says the current goal's boss is dead in the instance: the goal is DONE at a start, never placed again.
-	BossDead bool   `json:"boss_dead,omitempty"`
+	BossDead bool `json:"boss_dead,omitempty"`
+	// CapWaits is the id's consecutive instance-cap refusals (exit 26): the fourth stops it for a person, across a
+	// restart too.
+	CapWaits int    `json:"cap_waits,omitempty"`
 	NextAt   string `json:"next_at,omitempty"`
 }
 
@@ -2493,7 +2542,7 @@ func (s *autoSupervisor) saveState() {
 			ID: st.id, Goal: st.current, GoalsDone: st.current,
 			Done: st.done, Escalated: st.escalated, Reuse: st.nextReuse,
 			Stopped: st.stopped, StopWhy: st.stopWhy, Stopping: st.stopping,
-			Fingerprint: autoTargetFingerprint(st),
+			Fingerprint: autoTargetFingerprint(st), CapWaits: st.capWaits,
 		}
 		if st.current < len(st.goals) {
 			g := st.goals[st.current]
@@ -2633,6 +2682,7 @@ func (s *autoSupervisor) reconcile() error {
 			st.done, st.escalated = sv.Done, sv.Escalated
 			st.stopped, st.stopWhy = sv.Stopped, sv.StopWhy
 			st.stopping = sv.Stopping
+			st.capWaits = sv.CapWaits
 			st.nextReuse = sv.Reuse
 			if at, err := time.Parse(time.RFC3339, sv.NextAt); err == nil {
 				st.nextAt = at
