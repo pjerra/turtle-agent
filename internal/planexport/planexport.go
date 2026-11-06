@@ -110,19 +110,24 @@ const (
 	// MaxHoldTimeoutS is the cap of a hold row (dungeon.MaxHoldTimeoutS): Rajaxx's event runs about 1272 s. The module's
 	// kPlanMaxTimeoutS must allow it for the hold kind.
 	MaxHoldTimeoutS = dungeon.MaxHoldTimeoutS
-	MaxEntries      = 16    // creature entries of a pull or boss
-	MaxKind         = 16    // ai_dungeon_step.kind is a varchar(16): a longer kind fails the INSERT (or is cut)
-	MaxPlanName     = 32    // ai_dungeon_plan.plan
-	MaxLegName      = 32    // ai_dungeon_leg.name
-	MaxPlanList     = 255   // ai_dungeon_plan.cc_priority, cc_always, kill_first (varchar(255))
-	MaxSource       = 64    // ai_dungeon_plan.source
-	MaxComment      = 255   // every comment column
-	MaxLegs         = 255   // ai_dungeon_leg.leg is a tinyint unsigned
-	MaxSteps        = 65535 // ai_dungeon_step.seq is a smallint unsigned
-	DefaultPullYd   = 15    // the module's pull radius for 0
-	PullSlackYd     = 10    // added to the farthest position of a group when the plan gives no radius
-	MoveGapWarnYd   = 60    // the module logs consecutive moves farther apart than this
-	MoveGapCutYd    = 50    // the longest hop the exporter leaves when it cuts a leg into via points
+	MaxEntries      = 16 // creature entries of a pull or boss
+	// MaxPlanEntries is the cap of each plan unit list (cc_priority, cc_always, kill_first): TortoiseBots'
+	// kPlanMaxEntries = 16 (ai/playerbot/DungeonPlanPolicy.h:197). ParsePlanEntries refuses a longer list and
+	// DungeonPlanMgr::SetUnits then keeps NONE of the four lists, so the plan runs without crowd control and
+	// kill-first targets (Zul'Gurub's 19-entry cc_priority, t1105c: no kill_first and no CC for a whole night).
+	MaxPlanEntries = 16
+	MaxKind        = 16    // ai_dungeon_step.kind is a varchar(16): a longer kind fails the INSERT (or is cut)
+	MaxPlanName    = 32    // ai_dungeon_plan.plan
+	MaxLegName     = 32    // ai_dungeon_leg.name
+	MaxPlanList    = 255   // ai_dungeon_plan.cc_priority, cc_always, kill_first (varchar(255))
+	MaxSource      = 64    // ai_dungeon_plan.source
+	MaxComment     = 255   // every comment column
+	MaxLegs        = 255   // ai_dungeon_leg.leg is a tinyint unsigned
+	MaxSteps       = 65535 // ai_dungeon_step.seq is a smallint unsigned
+	DefaultPullYd  = 15    // the module's pull radius for 0
+	PullSlackYd    = 10    // added to the farthest position of a group when the plan gives no radius
+	MoveGapWarnYd  = 60    // the module logs consecutive moves farther apart than this
+	MoveGapCutYd   = 50    // the longest hop the exporter leaves when it cuts a leg into via points
 	// The floor-aware cut (plan-export --floor-aware): a hop up to FloorAwareHopYd stays one hop, corners under FloorAwareMergeYd
 	// from the point before them and turns under FloorAwareTurnDeg get no row, a kept corner is pushed FloorAwarePushYd off the wall
 	// it sees within FloorAwareEdgeScanYd, and a split point takes the floor within FloorAwareFloorYd of its straight-line z or is
@@ -342,6 +347,9 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 		col string
 		es  []uint32
 	}{{"cc_priority", p.CCPriority}, {"cc_always", p.CCAlways}, {"kill_first", p.KillFirst}} {
+		if n := len(l.es); n > MaxPlanEntries {
+			return Result{}, fmt.Errorf("plan %s: %s has %d entries (TortoiseBots kPlanMaxEntries is %d, DungeonPlanPolicy.h:197: the loader then keeps none of the four lists); trim it", name, l.col, n, MaxPlanEntries)
+		}
 		if n := len(entriesText(l.es)); n > MaxPlanList {
 			return Result{}, fmt.Errorf("plan %s: %s is %d characters as a comma list (ai_dungeon_plan.%s holds %d)", name, l.col, n, l.col, MaxPlanList)
 		}
