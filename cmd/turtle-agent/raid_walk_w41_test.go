@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,5 +130,137 @@ func TestFightRecordKillCountsAsBossKill(t *testing.T) {
 		if b.Step == other {
 			t.Fatalf("boss_kills %+v credits the non-goal boss at step %d", sum.BossKills, other)
 		}
+	}
+}
+
+// Codex HIGH: the watch loop must not trust the resume's ACK. The ACK only says the command arrived; the run can
+// stay paused or pause again at once on the same pullback failure. Until a FRESH RunRunning status for the boss
+// row arrives, the incident still routes through handleBoss (no unmanaged fight), within pausedBossResumeWait.
+// A fresh RunRunning status inside the deadline hands the fight to the run leader (the existing handoff).
+
+// pausedBossFixture is TestBossEngagedWhilePausedOnBossRowResumes with the resume's answer scripted by answer
+// (nil: ACK only, the run never shows running again after the resume).
+func pausedBossFixture(t *testing.T, answer func(f *fixture, boss, total int)) (*fixture, int, int) {
+	t.Helper()
+	boss := zgBossStepOf(t, 14517)
+	total := len(zgRows(t).Steps)
+	f := newFixture(t)
+	f.opts.plan, f.opts.holder = "zul_gurub", "raid-walk-zul_gurub"
+	f.opts.until = fmt.Sprintf("step %d", boss+1)
+	f.opts.pausedWait = 4 * time.Second
+	p, err := dungeon.Load(filepath.Join(f.opts.dir, "zul_gurub.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.agent.instMap = p.Map
+	f.agent.enterMap = p.Map
+	start := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_jeklik|move|begin|started|until step %d (step %d)", boss-1, total, boss+1, boss+1)
+	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
+		Line: start, Lines: []string{start, "TBM:ACTION_ACK|run start|party|1|-"}}}
+	// The pause on her own row: walk 41 tj-8's 22:14:55.577 line.
+	pause := fmt.Sprintf("TBM:RUN|zul_gurub|paused|%d/%d|high_priestess_jeklik|boss|begin|cmd pullback 17379391205577637935 refused: unreachable: The tank could not start moving to a firing position for the pull; the boss at -12289.1 -1384.1 134.3 is not reachable from this floor: no safe stand 35.0-25.0 yd from it (the lead bot 49.9 yd from it)|until step %d (step %d)", boss, total, boss+1, boss+1)
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{{raw: pause}}
+	f.agent.mu.Unlock()
+	// Her own late pull: the frames hold her engaged (a target, 40 %) under the pause.
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 9, Entry: 14517, HPPct: 40, Target: packet.GUID(1000), X: -12289.1, Y: -1384.1, Z: 134.3}}
+	}
+	if answer != nil {
+		answer(f, boss, total)
+	}
+	return f, boss, total
+}
+
+// TestPausedBossResumeAckWithoutRunningStillStopsTheRun is the Codex HIGH case: the resume is ACKed but the run
+// never shows running again, so the walk must route the engaged boss through handleBoss (exit 19 with the boss
+// note) instead of handing an unmanaged fight to the run leader (exit 18 on the pause).
+func TestPausedBossResumeAckWithoutRunningStillStopsTheRun(t *testing.T) {
+	f, boss, total := pausedBossFixture(t, nil)
+	_ = total
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if n := countPrefix(verbs, "resume"); n != 1 {
+		t.Fatalf("run verbs %v: %d resumes, want 1 (the walk still tries the resume once)", verbs, n)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
+		t.Fatalf("%d run stops, want 1: handleBoss stops the run for the engaged boss (an ACK proves nothing)\n%s", n, f.stdout.String())
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, fmt.Sprintf("boss 14517 engaged at step %d", boss)) {
+		t.Fatalf("end %q, want the handleBoss stop reason for the engaged boss (notes %q)", sum.EndReason, sum.Notes)
+	}
+	if hasNote(f.summary(), "resumed the run so the run leader fights it") {
+		t.Fatalf("notes %q: the resume note claims a handoff the run never showed", f.summary().Notes)
+	}
+}
+
+// TestPausedBossResumeSamePauseAgainRoutesToHandleBoss: the resume is ACKed, then the run pauses again at once on
+// the SAME pause line (the pullback failure repeats), inside the wait. The re-paused incident must route through
+// handleBoss at once (exit 19), not wait out pausedWait, and the walk must not send a second resume for the row.
+func TestPausedBossResumeSamePauseAgainRoutesToHandleBoss(t *testing.T) {
+	pauseNote := ""
+	f, boss, total := pausedBossFixture(t, func(f *fixture, boss, total int) {
+		f.agent.onResume = func() {
+			f.agent.mu.Lock()
+			defer f.agent.mu.Unlock()
+			pauseNote = f.agent.history[len(f.agent.history)-1].raw
+			f.agent.lines = append(f.agent.lines, queuedEvent{raw: pauseNote})
+		}
+	})
+	_ = total
+	code := f.run(context.Background())
+	if code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if n := countPrefix(verbs, "resume"); n != 1 {
+		t.Fatalf("run verbs %v: %d resumes, want 1 (no second resume for the same row)", verbs, n)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 1 {
+		t.Fatalf("%d run stops, want 1: handleBoss stops the run for the re-paused engage\n%s", n, f.stdout.String())
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, fmt.Sprintf("boss 14517 engaged at step %d", boss)) {
+		t.Fatalf("end %q, want the handleBoss stop reason for the engaged boss (notes %q)", sum.EndReason, sum.Notes)
+	}
+	if sum := f.summary(); strings.Contains(sum.EndReason, "paused: ") {
+		t.Fatalf("end %q: the re-paused run exits through handleBoss, not the generic pause wait", sum.EndReason)
+	}
+}
+
+// TestPausedBossResumeFreshRunningKeepsTheHandoff pins the existing behaviour the brief keeps: the resume is ACKed
+// and a FRESH RunRunning status for the boss row follows, so the run leader fights it (no handleBoss run stop, the
+// walk ends at its until).
+func TestPausedBossResumeFreshRunningKeepsTheHandoff(t *testing.T) {
+	f, _, _ := pausedBossFixture(t, func(f *fixture, boss, total int) {
+		f.agent.onResume = func() {
+			f.agent.mu.Lock()
+			defer f.agent.mu.Unlock()
+			f.agent.lines = append(f.agent.lines,
+				queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_jeklik|boss|fight|fighting|until step %d (step %d)", boss, total, boss+1, boss+1)},
+				queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_jeklik|boss|fight|stopped before step %d (until step %d): the party stays where it stands", boss+1, total, boss+1, boss+1)})
+		}
+	})
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if n := countPrefix(verbs, "resume"); n != 1 {
+		t.Fatalf("run verbs %v: %d resumes, want 1 (the walk resumes the run once)", verbs, n)
+	}
+	if n := countPrefix(f.agent.gmLines(), ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want 0: the run leader fights its own boss\n%s", n, f.stdout.String())
+	}
+	if sum := f.summary(); !hasNote(sum, "resumed the run so the run leader fights it") {
+		t.Fatalf("notes %q, want the resume note", sum.Notes)
 	}
 }

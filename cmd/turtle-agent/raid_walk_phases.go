@@ -1082,7 +1082,7 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 					return err
 				}
 			case raidwalk.IncidentBossEngaged:
-				if ok, early := w.runFightsBoss(v.Entry, true); ok {
+				if ok, early := w.runFightsBoss(ctx, v.Entry, true); ok {
 					switch {
 					case strings.TrimSpace(w.opts.until) == "none":
 						w.note("boss %d engaged at step %d under --until none: the run leader fights it", v.Entry, v.Step)
@@ -2453,7 +2453,7 @@ func (w *walk) handleWipe(ctx context.Context, step int) error {
 	// ever happen.
 	runLeaderFights := false
 	if w.bossEngagedNow() {
-		runLeaderFights = w.runLeaderFightsEngagedBoss(step)
+		runLeaderFights = w.runLeaderFightsEngagedBoss(ctx, step)
 		if !runLeaderFights {
 			w.note("wipe resume skipped: %s engaged", w.engagedBossWords())
 			return w.endWipe(ctx, step)
@@ -2482,7 +2482,7 @@ func (w *walk) handleWipe(ctx context.Context, step int) error {
 // step), so the walk owns no boss attempt and the wipe is an ordinary wipe (walk 32's Mar'li and Hakkar wipes). A boss
 // row the frames still hold while the run wipes on TRASH keeps the old gate: that fight is not the step's, and reviving
 // under it is not this rule's business. False for an unknown step (rows not the plan's) or no named engagement.
-func (w *walk) runLeaderFightsEngagedBoss(step int) bool {
+func (w *walk) runLeaderFightsEngagedBoss(ctx context.Context, step int) bool {
 	entry, ok := w.engagedBossEntry()
 	if !ok {
 		return false
@@ -2490,7 +2490,7 @@ func (w *walk) runLeaderFightsEngagedBoss(step int) bool {
 	if b := w.bossStepOf(entry); b == 0 || b != step {
 		return false
 	}
-	ok, _ = w.runFightsBoss(entry, false)
+	ok, _ = w.runFightsBoss(ctx, entry, false)
 	return ok
 }
 
@@ -3766,7 +3766,6 @@ func (w *walk) bossFamilyWithFirst(boss uint32) map[uint32]bool {
 	}
 	return fam
 }
-
 const (
 	// earlyEngageSteps is how many steps before its boss step the run may stand for the hand-over: the boss's own
 	// approach point sits inside the pull, one or two steps back (walk 24).
@@ -3776,6 +3775,12 @@ const (
 	earlyEngageYd = 60
 	// earlyEngageFresh is how old the main tank's frame may be for the hand-over: a stale position says nothing.
 	earlyEngageFresh = 10 * time.Second
+	// pausedBossResumeWait is how long the walk waits, after the ACK of its own `.bot run resume`, for a FRESH
+	// RunRunning status of the boss row before it trusts the resume: an ACK only proves the command arrived, and
+	// the run can stay paused or pause again at once on the same pullback failure. No named constant of this
+	// meaning exists (resumeRun waits 60 s for the recovery's resume; the other 10 s names are frame, corpse and
+	// freshness windows), so this is its own.
+	pausedBossResumeWait = 10 * time.Second
 )
 
 // pausedOnBossOwnRow says the run is paused on the engaged boss's own row: the step of the run's last status is a
@@ -3794,22 +3799,24 @@ func (w *walk) pausedOnBossOwnRow(entry uint32) bool {
 }
 
 // resumePausedBossRun sends `.bot run resume` for a boss that engaged while the run paused on the boss's own row,
-// and says whether the resume went out: a refused or dropped resume keeps the old ending (the caller's handleBoss
-// stops the run). The pause's step and note are the key, so the same pause sends one resume however many ticks see
-// it. The wait for the running line is the watch loop's own next poll; this only sends and checks the ACK.
-func (w *walk) resumePausedBossRun(entry uint32) bool {
+// then waits on the status poll for a FRESH RunRunning status of the boss row: an ACK only proves the command
+// arrived, and the run can stay paused or pause again at once on the same pullback failure. True only when that
+// fresh running line arrives within pausedBossResumeWait; a refused or dropped resume, a re-pause inside the wait,
+// or no running line by the deadline keeps the old ending (the caller's handleBoss stops the run: the boss-engaged
+// incident is one-shot, so without this the engaged boss would be left with no run-leader control). The boss row's
+// step is the key, so the same row never sends a second resume however many ticks or pauses see it.
+func (w *walk) resumePausedBossRun(ctx context.Context, entry uint32) bool {
 	if w.agent == nil {
 		return false
 	}
-	key := fmt.Sprintf("%d|%s", w.lastStatus.Step, w.lastStatus.Note)
+	step := w.lastStatus.Step
+	key := strconv.Itoa(step)
 	if w.pausedBossResume == key {
-		return true // this pause already resumed the run: it is on its way
+		return false // this row already tried its resume: no retry, the boss path owns it
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
 	rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "resume", WaitMS: 5000})
 	if err != nil {
-		w.note("boss %d engaged at step %d while the run is paused on its boss row: the run resume failed (%v)", entry, w.lastStatus.Step, err)
+		w.note("boss %d engaged at step %d while the run is paused on its boss row: the run resume failed (%v)", entry, step, err)
 		return false
 	}
 	if rep.Reply.Err != nil || (!rep.Reply.OK && rep.Reply.Kind != tbm.KindAck) {
@@ -3817,14 +3824,44 @@ func (w *walk) resumePausedBossRun(entry uint32) bool {
 		if rep.Reply.Err != nil {
 			line = rep.Reply.Err.Message
 		}
-		w.note("boss %d engaged at step %d while the run is paused on its boss row: the run resume was refused (%s)", entry, w.lastStatus.Step, line)
+		w.note("boss %d engaged at step %d while the run is paused on its boss row: the run resume was refused (%s)", entry, step, line)
 		return false
 	}
 	w.pausedBossResume = key
 	w.logLine(w.env.now(), "> .bot run resume")
-	w.note("boss %d engaged at step %d while the run is paused on its boss row: resumed the run so the run leader fights it", entry, w.lastStatus.Step)
-	w.logLine(w.env.now(), fmt.Sprintf("boss %d engaged at step %d while the run is paused on its boss row: resumed the run so the run leader fights it", entry, w.lastStatus.Step))
-	return true
+	seq0 := w.statusSeq
+	deadline := w.env.now().Add(pausedBossResumeWait)
+	for {
+		if w.leaseLost.Load() {
+			return false
+		}
+		if err := ctx.Err(); err != nil {
+			return false
+		}
+		incs, err := w.pollOnce(ctx, false)
+		if err != nil {
+			return false
+		}
+		_ = incs // any other incident the wait drains (a wipe, a stall) still meets the boss path below
+		if w.statusSeq > seq0 && w.haveStatus && w.lastStatus.State == tbm.RunPaused {
+			w.note("boss %d engaged at step %d while the run is paused on its boss row: the run paused again after the resume, so the walk fights it", entry, step)
+			return false // re-paused inside the wait: at once through handleBoss, no retry for this row
+		}
+		for _, r := range w.runLines {
+			if r.seq > seq0 && r.step == step {
+				w.note("boss %d engaged at step %d while the run is paused on its boss row: resumed the run so the run leader fights it", entry, step)
+				w.logLine(w.env.now(), fmt.Sprintf("boss %d engaged at step %d while the run is paused on its boss row: resumed the run so the run leader fights it", entry, step))
+				return true
+			}
+		}
+		if !w.env.now().Before(deadline) {
+			w.note("boss %d engaged at step %d while the run is paused on its boss row: the run is not running %s after the resume, so the walk fights it", entry, step, durWords(pausedBossResumeWait))
+			return false
+		}
+		if err := w.env.sleep(ctx, 2*time.Second); err != nil {
+			return false
+		}
+	}
 }
 
 // runFightsBoss says whether the run leader itself fights the engaged boss: true when the run's
@@ -3845,11 +3882,13 @@ func (w *walk) resumePausedBossRun(entry uint32) bool {
 //
 // A run PAUSED on that boss's own row is the walk-41 case (tj-6/7/8, mj-4..8): the run leader paused there
 // because its pullback had no firing position, the tank's own pull went out seconds later and woke the boss
-// under the pause. With resumePaused the walk resumes the run (`.bot run resume`) and the run leader fights
-// it; with the old `.bot run stop` the raid killed Jeklik without the run, the summary said not killed and
-// the autopilot relaunched walks for a dead boss. resumePaused is false on the wipe and recovery paths: a
+// under the pause. With resumePaused the walk resumes the run (`.bot run resume`) and, once a FRESH RunRunning
+// status of the boss row arrives within pausedBossResumeWait, the run leader fights it; with the old
+// `.bot run stop` the raid killed Jeklik without the run, the summary said not killed and the autopilot relaunched
+// walks for a dead boss. An ACK alone is no handoff: a run that stays paused or pauses again inside the wait goes
+// through handleBoss at once (Codex HIGH). resumePaused is false on the wipe and recovery paths: a
 // dead raid must not be resumed, and a recovery sends its own resume.
-func (w *walk) runFightsBoss(entry uint32, resumePaused bool) (ok bool, early int) {
+func (w *walk) runFightsBoss(ctx context.Context, entry uint32, resumePaused bool) (ok bool, early int) {
 	if w.opts.until == "boss" {
 		return false, 0
 	}
@@ -3863,7 +3902,7 @@ func (w *walk) runFightsBoss(entry uint32, resumePaused bool) (ok bool, early in
 		return false, 0
 	}
 	if w.lastStatus.State == tbm.RunPaused {
-		if resumePaused && w.pausedOnBossOwnRow(entry) && w.resumePausedBossRun(entry) {
+		if resumePaused && w.pausedOnBossOwnRow(entry) && w.resumePausedBossRun(ctx, entry) {
 			return true, 0
 		}
 		return false, 0
@@ -4827,7 +4866,7 @@ func (w *walk) recoveredBoss(ctx context.Context, step int, knownFight bool) err
 	// post-resume boss-kind status keeps the old behaviour: the run leader
 	// fights its boss step.
 	if knownFight || w.statusSeq > w.resumeStatusSeq {
-		if ok, early := w.runFightsBoss(entry, false); ok {
+		if ok, early := w.runFightsBoss(ctx, entry, false); ok {
 			switch {
 			case strings.TrimSpace(w.opts.until) == "none":
 				w.note("boss %d engaged at step %d under --until none: the run leader fights it", entry, step)

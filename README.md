@@ -2579,10 +2579,13 @@ only notes the hand-over. Under `--until none` the exception needs none of that:
 run leader fights every boss it meets and the walk never sends `.bot run stop` because of a boss or until rule (walk 31:
 Mandokir woke five steps before his row). A boss that engages while the run is PAUSED on that boss's own row (the run
 leader paused there, e.g. its pullback found no firing stand, and the tank's own late pull woke the boss under the
-pause) is the walk-41 case: with an until that goes past the row the walk sends `.bot run resume` and lets the run
-leader fight it (once per pause line), instead of the old `.bot run stop` (tj-6/7/8, mj-4..8: seven pauses in walk 41,
-and tj-8's raid killed Jeklik without the run, so the summary said not killed). A paused run anywhere else, or a
-refused resume, still stops the walk for every other until: the hand-over needs a running status.
+pause) is the walk-41 case: with an until that goes past the row the walk sends `.bot run resume` (once per boss
+row) and lets the run leader fight it, instead of the old `.bot run stop` (tj-6/7/8, mj-4..8: seven pauses in walk 41,
+and tj-8's raid killed Jeklik without the run, so the summary said not killed). The ACK alone is no hand-over: the
+walk trusts the resume only once a fresh running status of the boss row arrives within 10 s; a run that stays paused
+or pauses again inside the wait goes through the boss path at once, so the engaged boss is never left without
+run-leader control. A paused run anywhere else, or a refused resume, still stops the walk for every other until:
+the hand-over needs a running status.
 
 When the run leader pauses with `boss <N> not found` on that boss's own row (walk 24 test2 r2: Thekal's phase 1 ends
 in a fake death and TB finds no corpse of 14599), the walk reads the frames for the kill: a boss UNIT at 0 % (the

@@ -1044,9 +1044,10 @@ type walk struct {
 	ended      time.Time
 	runStarted bool
 	runStopped bool
-	// pausedBossResume is the pause (step and note) the walk's own `.bot run resume` went out for: a boss that
-	// engages while the run is paused on its own boss row resumes the run instead of stopping it (walk 41 tj-8),
-	// and the same paused line must not send another resume on every tick.
+	// pausedBossResume is the boss ROW (step) the walk's own `.bot run resume` went out for: a boss that
+	// engages while the run is paused on its own boss row resumes the run instead of stopping it (walk 41 tj-8).
+	// One resume per row, and the ACK alone is no handoff: the walk trusts it only once a FRESH RunRunning status
+	// of the row arrives within pausedBossResumeWait (Codex HIGH); anything else routes through handleBoss.
 	pausedBossResume string
 	wipeResumes      int // wipes and near-wipe stops recovered so far (--wipe-resume bounds them)
 	// --revive-at-raid bookkeeping (raid_walk_reviveraid.go): the point the commander stood at for the last revive, and
