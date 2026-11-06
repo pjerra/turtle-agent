@@ -2397,11 +2397,20 @@ func (w *walk) saveFightsAtStart() {
 }
 
 func (w *walk) saveFights() {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	limit := 20 * time.Second
+	if w.fightsPrePlacement {
+		// The read before placement is optional (the fallback is the records' start times): a slow or unreachable
+		// dashboard must not hold the run start for the full 20 s.
+		limit = preplacementFightsTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	raw, err := w.dash.Fights(ctx, w.manifest.Character)
 	if err != nil {
 		w.bossCheckErr = err
+		if w.fightsPrePlacement && (errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil) {
+			w.note("fight records: the pre-placement dashboard read timed out after %s: %v", durWords(limit), err)
+		}
 		if !w.dashWarned {
 			w.note("dashboard: %v", err)
 			w.dashWarned = true
@@ -5969,3 +5978,7 @@ func durWords(d time.Duration) string {
 	}
 	return fmt.Sprintf("%ds", int(d/time.Second))
 }
+
+// preplacementFightsTimeout is the deadline of the fight-list read made before the walk's placement (a variable so a
+// test can shorten it).
+var preplacementFightsTimeout = 3 * time.Second

@@ -858,3 +858,32 @@ func TestSaveFightsLiveAtStartRecordStaysAtStart(t *testing.T) {
 		t.Fatalf("boss_kill %+v: a record live at the walk's start finished as a kill, which is history (notes %q)", k, w.notes)
 	}
 }
+
+// TestPhaseStartPreplacementFightReadHasItsOwnShortDeadline is the last Codex MEDIUM: the optional dashboard read
+// before the walk's placement used to share saveFights' 20 s limit, so a slow or unreachable dashboard could hold the
+// run start for 20 s. It has its own short deadline now (injected here), and on a timeout the at-start set falls back
+// to the records' start times on the first later successful read, with one note that the read timed out.
+func TestPhaseStartPreplacementFightReadHasItsOwnShortDeadline(t *testing.T) {
+	old := preplacementFightsTimeout
+	preplacementFightsTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { preplacementFightsTimeout = old })
+	f := newFixture(t)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	f.dash.fightsStallFirst, f.dash.fightsStall = 1, 15*time.Second // the first Fights call (the pre-placement read) stalls
+	f.defaultRun("onyxias_lair")
+	began := time.Now()
+	code := f.run(context.Background())
+	if took := time.Since(began); took > 5*time.Second {
+		t.Fatalf("the walk took %v: the stalled pre-placement dashboard read held it", took)
+	}
+	if code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !hasNote(sum, "pre-placement dashboard read timed out") {
+		t.Fatalf("notes %q, want the one line that the pre-placement read timed out", sum.Notes)
+	}
+	if !hasNote(sum, "came from their start times") {
+		t.Fatalf("notes %q, want the timestamp fallback for the at-start set", sum.Notes)
+	}
+}
