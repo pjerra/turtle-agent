@@ -15,7 +15,9 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
 // reuseCapLedger fills a ledger to the warn threshold at now and returns its path.
@@ -252,5 +254,103 @@ func TestTeardownKeepsTheReuseBind(t *testing.T) {
 				t.Fatalf("%d unbinds, want one: %v (notes %q)", unbinds, f.agent.gmLines(), w.notes)
 			}
 		})
+	}
+}
+
+// Walk 44 hk7m-3 / walk 46 hk4m-3: the raid wiped at Hakkar, the autopilot relaunched into the same instance, the
+// summoned hires landed beside the live boss and died (19 of 20), and the placement burned all four tries there
+// while the survivors fought him with no run. When a try finds half the party dead the walk stops at once with exit 29
+// and a reason that asks for a fresh instance: no second summon wave, no "try 2 of 4".
+func TestReuseGatherStopsAtOnceWhenMostOfThePartyIsDead(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.reuseInstance = true
+	f.opts.noPlaceRetreat = false
+	f.agent.entered = false
+	f.agent.instanceBinds = []fakeBind{{inst: 107, ttr: "1h 0m"}}
+	p.inst = 107
+	f.agent.onGM = func(line string) {
+		if name, ok := strings.CutPrefix(line, ".summon "); ok {
+			f.agent.mu.Lock()
+			if !strings.HasSuffix(name, "01") { // all but one die at the boss
+				f.agent.dead[name] = true
+			}
+			f.agent.mu.Unlock()
+		}
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitRaidWalkPlaceFailed {
+		t.Fatalf("exit %d, want 29: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !strings.Contains(sum.EndReason, "fresh instance needed") || !strings.Contains(sum.EndReason, "party dead") {
+		t.Fatalf("end reason %q, want the party-dead / fresh-instance reason", sum.EndReason)
+	}
+	if strings.Contains(sum.EndReason, "tries in the same instance") || hasNote(sum, "try 2 of") {
+		t.Fatalf("the placement retried in the dead instance: %q %q", sum.EndReason, sum.Notes)
+	}
+}
+
+// The same stop when the boss of the start leg is fighting the party (walk 46: Hakkar at 90 % targeting a hire).
+func TestReuseGatherStopsAtOnceWhenTheBossIsEngaged(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.reuseInstance = true
+	f.opts.noPlaceRetreat = false
+	f.agent.entered = false
+	f.agent.instanceBinds = []fakeBind{{inst: 107, ttr: "1h 0m"}}
+	p.inst = 107
+	f.agent.combatAllFn = func(int) bool { return true }
+	rows, _ := placePlanRows(t)
+	var boss uint32
+	for _, r := range rows.Steps {
+		if r.Kind == planexport.KindBoss && r.Leg == rows.Steps[zgPlaceSteps(t).start-1].Leg {
+			boss = r.Entry
+		}
+	}
+	if boss == 0 {
+		t.Fatal("the start leg has no boss row")
+	}
+	f.agent.hostilesFn = func(int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 0xF130002C5800CAFA, Entry: boss, X: -12228.3, Y: -1680.7, Z: 126.7,
+			HPPct: 90, Target: packet.GUID(1000)}}
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitRaidWalkPlaceFailed {
+		t.Fatalf("exit %d, want 29: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if !strings.Contains(sum.EndReason, "fresh instance needed") || !strings.Contains(sum.EndReason, "boss engaged") {
+		t.Fatalf("end reason %q, want the boss-engaged / fresh-instance reason", sum.EndReason)
+	}
+	if hasNote(sum, "try 2 of") {
+		t.Fatalf("the placement retried beside the boss: %q", sum.Notes)
+	}
+}
+
+// Round 1 (LOW): a boss with no target that is only healing (an evading boss under 100 %) is not engaged with the
+// party: the placement keeps its ordinary tries.
+func TestReuseGatherIgnoresABossWithNoTarget(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.reuseInstance = true
+	f.opts.noPlaceRetreat = false
+	f.agent.entered = false
+	f.agent.instanceBinds = []fakeBind{{inst: 107, ttr: "1h 0m"}}
+	p.inst = 107
+	f.agent.combatAllFn = func(int) bool { return true }
+	rows, _ := placePlanRows(t)
+	var boss uint32
+	for _, r := range rows.Steps {
+		if r.Kind == planexport.KindBoss && r.Leg == rows.Steps[zgPlaceSteps(t).start-1].Leg {
+			boss = r.Entry
+		}
+	}
+	f.agent.hostilesFn = func(int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: 0xF130002C5800CAFA, Entry: boss, X: -12228.3, Y: -1680.7, Z: 126.7, HPPct: 90}}
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitRaidWalkPlaceFailed {
+		t.Fatalf("exit %d, want 29: %s", code, f.stderr.String())
+	}
+	if reason := f.summary().EndReason; strings.Contains(reason, "fresh instance needed") || !strings.Contains(reason, "4 tries in the same instance") {
+		t.Fatalf("end reason %q, want the ordinary 4-try failure: the boss has no target", reason)
 	}
 }

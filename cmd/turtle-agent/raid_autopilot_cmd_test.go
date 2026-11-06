@@ -2859,3 +2859,210 @@ func TestAutoStartActiveIDBelowANewLineWinsItsSlot(t *testing.T) {
 		t.Fatalf("err %v, want a refusal naming n's line 1 and b", err)
 	}
 }
+
+// Walk 44 hk7m-3 / walk 46 hk4m-3: Hakkar wiped the raid at step 694 and the autopilot relaunched into the SAME
+// instance (--reuse-instance), where the dead and unplaced bots stood beside the live boss and fought him with no run.
+// A wipe (exit 19) at a boss row, or the row before it, goes to a fresh instance (the fixture migration's Arlokk boss
+// row is step 397, the move row 396); a wipe elsewhere keeps the same instance.
+func TestAutoWipeAtBossRelaunchesInAFreshInstance(t *testing.T) {
+	const gmData = " --gm-instance-data hakkar:1 3;6 3;0 0"
+	for _, c := range []struct {
+		name  string
+		step  int
+		reuse bool
+		from  string
+	}{
+		{"the boss row", 397, false, "--from step 396 --place"},
+		{"the row before the boss", 396, false, "--from step 396 --place"},
+		{"away from a boss", 300, true, "--from step 300 --place"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newAutoFixture(t)
+			f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql" + gmData)
+			f.attempt("a-1", 19, c.step, "wipe: the raid died")
+			f.attempt("a-2", 2, 0, "bad --sql")
+			s := f.supervisor()
+			tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+			finishAttempt(t, s)
+			tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+			args := f.args()
+			if !strings.Contains(args[1], c.from) {
+				t.Fatalf("the restart did not start at %q: %s", c.from, args[1])
+			}
+			if got := strings.Contains(args[1], "--reuse-instance"); got != c.reuse {
+				t.Fatalf("--reuse-instance = %v, want %v: %s\n%s", got, c.reuse, args[1], f.events())
+			}
+			if !c.reuse && !strings.Contains(f.events(), "fresh instance") {
+				t.Fatalf("no fresh-instance restart event:\n%s", f.events())
+			}
+			if st := s.states[0]; st.goals[st.current].exit29Retries != 0 {
+				t.Fatalf("the boss wipe used the goal's exit-29 retry")
+			}
+		})
+	}
+}
+
+// The fresh-after-wipe rule is for goals whose target line carries --gm-instance-data (ZG Hakkar today): that flag
+// re-applies the boss prerequisites in the new copy. A fresh instance throws away earlier kills, so every other
+// goal keeps the same-instance relaunch after a boss wipe.
+func TestAutoWipeAtBossWithoutGMInstanceDataKeepsTheInstance(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	if a := f.args()[1]; !strings.Contains(a, "--from step 396 --place --reuse-instance") {
+		t.Fatalf("a boss wipe without --gm-instance-data left the same instance: %s", a)
+	}
+}
+
+const bossWipeTarget = "a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --gm-instance-data hakkar:1 3;6 3;0 0"
+
+// Round 1 (HIGH): every boss wipe took a fresh instance with no budget, so a raid that cannot beat the boss spent
+// ~6 instances an hour forever (the cap is 5 per account). The third boss wipe in a row without progress stops the id.
+func TestAutoBossWipeThreeTimesWithoutProgressEscalates(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(bossWipeTarget)
+	for i := 1; i <= 3; i++ {
+		f.attempt(fmt.Sprintf("a-%d", i), 19, 397, "wipe: the raid died")
+	}
+	f.attempt("a-4", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 3; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+	}
+	args := f.args()
+	if len(args) != 3 {
+		t.Fatalf("%d launches, want 3 (the third boss wipe stops the id):\n%s", len(args), f.events())
+	}
+	for i, a := range args[1:] {
+		if strings.Contains(a, "--reuse-instance") {
+			t.Fatalf("launch %d reused the instance after a boss wipe: %s", i+2, a)
+		}
+	}
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("three boss wipes without progress did not escalate:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "ESCALATE stop a 1") || !strings.Contains(f.events(), "boss wipe x3 without progress") {
+		t.Fatalf("no ESCALATE line for the boss wipes:\n%s", f.events())
+	}
+}
+
+// A wipe that got further than any before it (progress) restarts the count.
+func TestAutoBossWipeProgressResetsTheCount(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(bossWipeTarget)
+	// 396 (progress), 396 (none), 397 (progress: count restarts), 397 (none), 397 (none: the third since progress).
+	for i, step := range []int{396, 396, 397, 397, 397} {
+		f.attempt(fmt.Sprintf("a-%d", i+1), 19, step, "wipe: the raid died")
+	}
+	f.attempt("a-6", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 5; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		if _, esc := runState(s.states[0]); esc {
+			t.Fatalf("escalated before launch %d:\n%s", i, f.events())
+		}
+		finishAttempt(t, s)
+	}
+	if n := len(f.args()); n != 5 {
+		t.Fatalf("%d launches, want 5:\n%s", n, f.events())
+	}
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("no escalation after three wipes since the last progress:\n%s", f.events())
+	}
+}
+
+// The count is in the checkpoint: a restarted supervisor continues it (an old checkpoint without it starts at 0).
+func TestAutoBossWipeCountSurvivesARestart(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(bossWipeTarget)
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 19, 397, "wipe: the raid died")
+	s := f.supervisor()
+	for i := 1; i <= 2; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+	}
+	s.saveState()
+	raw, err := os.ReadFile(filepath.Join(f.walk, autoStateFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved autoSavedState
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.IDs) != 1 || saved.IDs[0].BossWipes != 2 {
+		t.Fatalf("checkpoint %s, want boss_wipes 2", raw)
+	}
+	// A new supervisor reads it: one more wipe without progress is the third.
+	f.attempt("a-3", 19, 397, "wipe: the raid died")
+	f.attempt("a-4", 2, 0, "bad --sql")
+	s2 := f.supervisor()
+	tickUntil(t, s2, "the launch after the restart", func() bool { return len(f.args()) >= 3 })
+	finishAttempt(t, s2)
+	if _, esc := runState(s2.states[0]); !esc || !strings.Contains(f.events(), "boss wipe x3 without progress") {
+		t.Fatalf("the restarted supervisor lost the count:\n%s", f.events())
+	}
+	if n := len(f.args()); n != 3 {
+		t.Fatalf("%d launches, want 3:\n%s", n, f.events())
+	}
+}
+
+// Round 1 (LOW): a fresh-after-wipe restart is not a failed placement: it neither adds to nor resets placeFails.
+func TestAutoBossWipeRestartLeavesPlaceFailsAlone(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(bossWipeTarget)
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	st := s.states[0]
+	st.mu.Lock()
+	st.placeFails = 2
+	st.mu.Unlock()
+	finishAttempt(t, s)
+	st.mu.Lock()
+	got := st.placeFails
+	st.mu.Unlock()
+	if got != 2 {
+		t.Fatalf("placeFails %d after a boss-wipe restart, want 2 (untouched)", got)
+	}
+}
+
+// Round 2 (Codex HIGH): the wipe-at-boss check used max(run.log step, summary step) but Progressed read only the
+// cached run.log step, so a summary step beyond it counted as a boss wipe with NO progress and could escalate an id
+// that advanced. One effective step (the larger of the two) now drives all of it. Here attempt 2's run.log is behind
+// its summary (100 vs 397); the summary's 397 is progress over attempt 1's 396, so the count restarts and the id is
+// stopped only by the third wipe after it (attempt 4), not attempt 3.
+func TestAutoBossWipeProgressReadsTheSummaryStepToo(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(bossWipeTarget)
+	f.attempt("a-1", 19, 396, "wipe: the raid died")
+	f.attempt("a-2", 19, 397, "wipe: the raid died")
+	f.writeSpec("a-2.runlog", "19:46:05.696 TBM:RUN|zul_gurub|running|100/761|jeklik|boss|begin|fighting\n")
+	f.attempt("a-3", 19, 397, "wipe: the raid died")
+	f.attempt("a-4", 19, 397, "wipe: the raid died")
+	f.attempt("a-5", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 3; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+	}
+	if _, esc := runState(s.states[0]); esc {
+		t.Fatalf("escalated after attempt 3: the summary's step 397 was progress over 396:\n%s", f.events())
+	}
+	tickUntil(t, s, "launch 4", func() bool { return len(f.args()) >= 4 })
+	finishAttempt(t, s)
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("no escalation after the third wipe since the progress:\n%s", f.events())
+	}
+	if n := len(f.args()); n != 4 {
+		t.Fatalf("%d launches, want 4:\n%s", n, f.events())
+	}
+}

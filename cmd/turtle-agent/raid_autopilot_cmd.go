@@ -123,6 +123,9 @@ type autoGoalState struct {
 	// exit29Retries counts the fresh-instance retries after an exit 29 this goal already made (one per goal; a new goal
 	// line starts a new goalState, so an advance resets it).
 	exit29Retries int
+	// bossWipes counts the fresh-instance relaunches after a wipe at a boss since this goal last made progress (a
+	// step beyond bestStep); a goal advance starts a new goalState.
+	bossWipes int
 	// dead says an attempt's summary reported this goal's boss dead: the goal is met and DONE, never placed again
 	// (walk 39: a re-added raid kept walking a boss another raid had already killed).
 	dead bool
@@ -478,6 +481,17 @@ func autoCommandArgs(binary string, t raidwalk.AutoTarget, out, from string, reu
 		args = append(args, "--instance-cap-per-account", strconv.Itoa(instanceCap))
 	}
 	return args
+}
+
+// autoHasGMInstanceData says the target line carries --gm-instance-data: the goals that re-apply the boss
+// prerequisites in a fresh copy (ZG Hakkar today), the only ones a boss wipe may relaunch in a fresh instance.
+func autoHasGMInstanceData(args []string) bool {
+	for _, a := range args {
+		if a == "--gm-instance-data" || strings.HasPrefix(a, "--gm-instance-data=") {
+			return true
+		}
+	}
+	return false
 }
 
 // autoFlag reads a target argument's value, bare or as name=value.
@@ -1474,16 +1488,37 @@ func (s *autoSupervisor) tickState(st *autoState) {
 		// The backoff counts the consecutive no-progress attempts that ended before this one: a run that reached a
 		// further step resets the count even though its own finish has not run yet.
 		fast := g.noProgress
+		// ONE effective step for an ended run: the larger of the live/log reading and the summary's steps_reached.
+		// The wipe-at-boss check, the progress test, the fast-failure reset and the finish bookkeeping all use it.
+		step, progressed := 0, false
 		if obs.Exited {
-			step := s.runLastStepLocked(r)
+			step = s.runLastStepLocked(r)
+			if obs.StepsReached > step {
+				step = obs.StepsReached
+			}
 			r.lastStep = step
 			if step > g.bestStep {
 				fast = 0
+				progressed = true
 			}
+		}
+		if obs.Exited && obs.ExitCode == 19 && autoHasGMInstanceData(g.target.Args) {
+			// A wipe whose last step is a boss row, or the row before it: the next launch takes a fresh instance.
+			// The rows are read outside the id's mutex (a first parse must not hold up a YIELD's stop).
+			target := g.target
+			st.mu.Unlock()
+			rows, ok := s.targetRows(target)
+			st.mu.Lock()
+			if st.run != r || r.pending != nil || r.finishing {
+				st.mu.Unlock()
+				return
+			}
+			obs.WipeAtBoss = ok && raidwalk.PlaceStepAtBoss(rows, step)
 		}
 		d := raidwalk.DecideAutoAction(obs, raidwalk.AutoRunState{
 			Goal: r.goal, Attempt: g.attempt, Reuse: r.reuse, HasRun: g.attempt > 0,
 			FastFailures: fast, LeaseFails: g.leaseFails, PlaceFails: st.placeFails, HireWaits: g.hireWaits, Exit29Retries: g.exit29Retries,
+			BossWipes: g.bossWipes, Progressed: progressed,
 		}, time.Now(), s.o.stall)
 		if d.Action == raidwalk.AutoContinue {
 			st.mu.Unlock()
@@ -1557,12 +1592,16 @@ func (s *autoSupervisor) finish(st *autoState) {
 		g.hireWaits = 0
 		if lastStep > prevBest {
 			g.noProgress = 0
+			g.bossWipes = 0
 		} else {
 			g.noProgress++
 		}
 	}
 	if d.Exit29Retry {
 		g.exit29Retries++
+	}
+	if d.FreshAfterWipe {
+		g.bossWipes++
 	}
 	if r.exitCode == 15 {
 		g.leaseFails++
@@ -1574,6 +1613,8 @@ func (s *autoSupervisor) finish(st *autoState) {
 	// all, so it leaves the count alone.
 	switch {
 	case d.Action == raidwalk.AutoHirePoolWait:
+	case d.FreshAfterWipe:
+		// A fresh instance after a boss wipe is no failed placement: it neither adds to the count nor breaks a streak.
 	case d.Action == raidwalk.AutoRestart && !d.Reuse:
 		st.placeFails++
 	default:
@@ -2406,6 +2447,9 @@ type autoSavedID struct {
 	HireWaits int `json:"hire_waits,omitempty"`
 	// Exit29Retries is the current goal's fresh-instance retries after an exit 29 (one per goal), across a restart too.
 	Exit29Retries int `json:"exit29_retries,omitempty"`
+	// BossWipes is the current goal's fresh-instance relaunches after a boss wipe since its last progress, across a
+	// restart too (a checkpoint from before it reads 0).
+	BossWipes int `json:"boss_wipes,omitempty"`
 	// BossDead says the current goal's boss is dead in the instance: the goal is DONE at a start, never placed again.
 	BossDead bool   `json:"boss_dead,omitempty"`
 	NextAt   string `json:"next_at,omitempty"`
@@ -2436,6 +2480,7 @@ func (s *autoSupervisor) saveState() {
 			g := st.goals[st.current]
 			e.Attempt, e.LastStep, e.BossDead, e.HireWaits = g.attempt, g.bestStep, g.dead, g.hireWaits
 			e.Exit29Retries = g.exit29Retries
+			e.BossWipes = g.bossWipes
 		}
 		if st.last != nil {
 			e.OutDir, e.Reuse = st.last.out, st.last.reuse
@@ -2564,6 +2609,7 @@ func (s *autoSupervisor) reconcile() error {
 				st.goals[st.current].dead = sv.BossDead
 				st.goals[st.current].hireWaits = sv.HireWaits
 				st.goals[st.current].exit29Retries = sv.Exit29Retries
+				st.goals[st.current].bossWipes = sv.BossWipes
 			}
 			st.done, st.escalated = sv.Done, sv.Escalated
 			st.stopped, st.stopWhy = sv.Stopped, sv.StopWhy
