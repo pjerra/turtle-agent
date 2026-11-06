@@ -1094,15 +1094,22 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 						_ = w.stopRun(context.Background(), "")
 						return stopf(exitRaidWalkFailed, "stalled at step %d (the same status line for 10 min)", wv.Step)
 					case raidwalk.IncidentWipe:
-						waitWipe = true
 						if err := w.handleWipe(ctx, wv.Step); err != errWipeRecovered {
 							return err
 						}
+						waitWipe = true
 					case raidwalk.IncidentBossEngaged:
 						// The boss incident the wait drained is this one: the decision below owns it.
 					}
 				}
-				if ok && !waitWipe {
+				// A wipe the wait drained that RECOVERED has already revived, rested and resumed the
+				// run: normal watching resumes, so the stale pre-wipe incident v must never reach
+				// handleBoss (it would stop the freshly recovered run and end the walk on the wrong
+				// encounter, Codex HIGH round 3). Any other wipe-handler error ended the walk above.
+				if waitWipe {
+					continue
+				}
+				if ok {
 					w.note("boss %d engaged at step %d while the run is paused on its boss row: resumed the run so the run leader fights it", v.Entry, v.Step)
 					w.logLine(now, fmt.Sprintf("boss %d engaged at step %d while the run is paused on its boss row: resumed the run so the run leader fights it", v.Entry, v.Step))
 					switch {
@@ -3919,8 +3926,9 @@ func (w *walk) resumePausedBossRun(ctx context.Context, entry uint32) (bool, pau
 // status of the boss row arrives within pausedBossResumeWait, the run leader fights it; with the old
 // `.bot run stop` the raid killed Jeklik without the run, the summary said not killed and the autopilot relaunched
 // walks for a dead boss. An ACK alone is no handoff: a run that stays paused or pauses again inside the wait goes
-// through handleBoss at once (Codex HIGH). Any wipe or stall the wait drained runs its normal handler first, and
-// dead raid must not be resumed, and a recovery sends its own resume.
+// through handleBoss at once (Codex HIGH). Any wipe or stall the wait drained runs its normal handler first: a
+// recovered wipe returns the walk to its watch loop (the drained boss incident is stale), any other wipe failure
+// ends the walk there, a stall ends it stalled. Dead raid must not be resumed, and a recovery sends its own resume.
 func (w *walk) runFightsBoss(ctx context.Context, entry uint32, resumePaused bool) (ok bool, early int, waitOut pausedBossResumeWaitResult) {
 	if w.opts.until == "boss" {
 		return false, 0, pausedBossResumeWaitResult{}

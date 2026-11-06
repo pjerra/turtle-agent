@@ -357,3 +357,76 @@ func TestPausedBossResumeWipeInsideWaitRunsWipeRecovery(t *testing.T) {
 		t.Fatalf("end %q: the drained wipe owns the ending, not handleBoss", sum.EndReason)
 	}
 }
+
+// TestPausedBossResumeWipeRecoveredInsideWaitKeepsWatching is round 3 (Codex HIGH): a wipe drained
+// inside the resume wait that RECOVERS (--wipe-resume; the run regroups by itself) must send the walk
+// back to its watch loop. The pre-wipe boss-engaged incident is stale: handleBoss with it stops the
+// freshly resumed run and ends the walk on the wrong encounter. The walk must run to its until
+// instead (the done line after the recovery), with no run stop and no boss-incident ending.
+func TestPausedBossResumeWipeRecoveredInsideWaitKeepsWatching(t *testing.T) {
+	f, boss, _ := pausedBossFixture(t, func(f *fixture, boss, total int) {
+		f.opts.wipeResume = 2
+		f.opts.wipeRest = 5 * time.Minute
+		f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+		// The resume's answer: the run goes on at her step, and the whole raid dies on that same
+		// poll. The line is the run's own self-regroup ("regrouping by itself", walk 17b), so the
+		// drained wipe recovers without a rest and without a second resume.
+		wipe := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_jeklik|boss|fight|20 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)|until step %d (step %d)", boss, total, boss+1, boss+1)
+		f.agent.onResume = func() {
+			f.agent.mu.Lock()
+			defer f.agent.mu.Unlock()
+			f.agent.lines = append(f.agent.lines, queuedEvent{raw: wipe})
+			prev := f.agent.eventsHook
+			f.agent.eventsHook = func(raw string) {
+				if prev != nil {
+					prev(raw)
+				}
+				if raw != wipe {
+					return
+				}
+				for _, n := range f.agent.party {
+					f.agent.dead[n] = true
+				}
+			}
+			// Once the wipe line is served, the next page carries the run's own end at its until:
+			// the watch loop must be there to read it.
+			f.agent.viewHook = func() {
+				f.agent.mu.Lock()
+				defer f.agent.mu.Unlock()
+				if len(f.agent.lines) == 0 {
+					f.agent.lines = append(f.agent.lines,
+						queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_jeklik|boss|fight|stopped before step %d (until step %d): the party stays where it stands", boss+1, total, boss+1, boss+1)})
+				}
+			}
+		}
+	})
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (notes %v): %s\n%s", code, f.summaryNotes(), f.stderr.String(), f.stdout.String())
+	}
+	gm := f.agent.gmLines()
+	if n := countPrefix(gm, ".bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want 0: a wipe recovered inside the wait must not end on the stale boss incident (gm %q)", n, gm)
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1: the wait's wipe recovered (notes %q)", sum.WipeResumes, sum.Notes)
+	}
+	if !hasNote(sum, "the run regroups by itself") {
+		t.Fatalf("notes %q, want the self-regroup recovery note", sum.Notes)
+	}
+	if hasNote(sum, "resumed the run so the run leader fights it") {
+		t.Fatalf("notes %q: a recovered wipe is no handoff, the note must not fire", sum.Notes)
+	}
+	if strings.Contains(sum.EndReason, fmt.Sprintf("boss 14517 engaged at step %d", boss)) {
+		t.Fatalf("end %q: the recovered wipe must return to the watch loop, not end on the pre-wipe incident", sum.EndReason)
+	}
+	if !strings.Contains(sum.EndReason, "until") || sum.StepsReached != boss+1 {
+		t.Fatalf("end %q at step %d, want the run's own until ending after the recovery (step %d)", sum.EndReason, sum.StepsReached, boss+1)
+	}
+	f.agent.mu.Lock()
+	verbs := append([]string{}, f.agent.runVerbs...)
+	f.agent.mu.Unlock()
+	if n := countPrefix(verbs, "resume"); n != 1 {
+		t.Fatalf("%d resumes, want 1 (the wipe's recovery resumed nothing: the run regroups by itself)", n)
+	}
+}
