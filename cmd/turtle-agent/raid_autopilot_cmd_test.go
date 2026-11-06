@@ -1982,6 +1982,9 @@ func TestAutoTeardownEscalatesAfterThreeFailedTicks(t *testing.T) {
 	s := f.supervisor()
 	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
 	tickUntil(t, s, "the escalation", func() bool { _, esc := runState(s.states[0]); return esc })
+	// escalate marks the id first and writes EVENTS.txt, status.txt and the checkpoint after, on the finish goroutine: the flag alone
+	// does not mean the lines are there. Wait for that goroutine to end before reading them.
+	s.wg.Wait()
 	// Each teardown call logs a start and a done line; every failed tick runs two calls (plain, then --release-anyway).
 	if got := len(f.teardowns()); got != 4*autoTeardownTries {
 		t.Fatalf("teardown log lines = %d, want %d (two calls per failed tick)", got, 4*autoTeardownTries)
