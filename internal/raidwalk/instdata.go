@@ -122,6 +122,21 @@ func markName(inst, leg string) string {
 	return fmt.Sprintf("gm-instance-data-%s-%s", safe, leg)
 }
 
+// Clear removes every marker of the out dir, so every leg reads as not done.
+// A missing dir is fine.
+func (m InstanceMarks) Clear() error {
+	files, err := filepath.Glob(filepath.Join(m.dir, "gm-instance-data-*"))
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
 // LegDone says the marker already holds every command of the spec.
 func (m InstanceMarks) LegDone(inst, leg string, spec GMInstanceSpec) bool {
 	raw, err := os.ReadFile(filepath.Join(m.dir, markName(inst, leg)))

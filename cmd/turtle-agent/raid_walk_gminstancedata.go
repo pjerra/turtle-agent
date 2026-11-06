@@ -127,6 +127,21 @@ func (w *walk) gmInstanceDataDone(inst string, spec raidwalk.GMInstanceSpec) boo
 	return key != "" && raidwalk.NewInstanceMarks(w.outDir).LegDone(key, spec.Leg, spec)
 }
 
+// gmInstanceDataClear forgets what this walk sent, markers and retry counts,
+// so the next status naming a leg with instance-data lines sends them again.
+// A wipe recovery calls it: the revive is in place, the walk keeps its out
+// dir, and the marker would otherwise call the lines done. Without
+// --gm-instance-data it touches nothing.
+func (w *walk) gmInstanceDataClear() {
+	if len(w.gmInstanceData) == 0 {
+		return
+	}
+	if err := raidwalk.NewInstanceMarks(w.outDir).Clear(); err != nil {
+		w.note("gm-instance-data: WARN: the markers could not be cleared after the wipe recovery (%v): the lines may not go out again", err)
+	}
+	w.gmInstanceDataTries = nil
+}
+
 // gmInstanceDataMaxTries bounds the per-command retries: a command the
 // server never confirms is tried at most 3 times per walk, then the walk
 // logs `gm-instance-data: <leg>: <cmd> NOT confirmed after 3 tries` and

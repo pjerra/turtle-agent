@@ -2417,6 +2417,16 @@ func fightFileID(id string) string {
 // watching. Anything else out of the recovery ends the walk with its own reason.
 var errWipeRecovered = errors.New("wipe recovered")
 
+// wipeRecovered is every recovery's success return. The raid was revived in
+// place, and a boss script's Reset() may have rewritten the instance data
+// meanwhile (the zulgurub bosses do: boss_jeklik.cpp:105, boss_venoxis.cpp:152),
+// so the --gm-instance-data markers are cleared: the next status that names
+// the leg resends the lines under their own pause and resume.
+func (w *walk) wipeRecovered() error {
+	w.gmInstanceDataClear()
+	return errWipeRecovered
+}
+
 // errRunWentOn is the rest's defence-in-depth signal: a status after the rest began shows the run
 // running again and either "regrouped" or on a later step, so the rest and the resume are skipped.
 var errRunWentOn = errors.New("the run went on by itself")
@@ -4286,7 +4296,7 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup, runLeader
 		}
 		w.wipeResumes++
 		w.note("wipe-resume %d/%d at step %d: revived %d; the run regroups by itself (no rest, no resume)", w.wipeResumes, w.opts.wipeResume, step, revived)
-		return errWipeRecovered
+		return w.wipeRecovered()
 	}
 	rest := w.opts.wipeRest
 	if !runLeaderFights {
@@ -4311,7 +4321,7 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup, runLeader
 			}
 			w.wipeResumes++
 			w.note("wipe-resume %d/%d at step %d: revived %d; the run went on by itself during the rest (no resume)", w.wipeResumes, w.opts.wipeResume, step, revived)
-			return errWipeRecovered
+			return w.wipeRecovered()
 		}
 		return err
 	}
@@ -4336,7 +4346,7 @@ func (w *walk) recoverWipe(ctx context.Context, step int, selfRegroup, runLeader
 	}
 	w.wipeResumes++
 	w.note("wipe-resume %d/%d at step %d: revived %d, rested %s, resumed", w.wipeResumes, w.opts.wipeResume, step, revived, durWords(w.opts.wipeRest))
-	return errWipeRecovered
+	return w.wipeRecovered()
 }
 
 // recoverNearWipe resumes after a near-wipe stop: someone is still alive (or the raid was revived by hand, walk
@@ -4381,7 +4391,7 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 			}
 			w.wipeResumes++
 			w.note("wipe-resume %d/%d at step %d: revived %d; the run went on by itself during the rest (no resume)", w.wipeResumes, w.opts.wipeResume, step, revived)
-			return errWipeRecovered
+			return w.wipeRecovered()
 		}
 		return err
 	}
@@ -4405,7 +4415,7 @@ func (w *walk) recoverNearWipe(ctx context.Context, step int) error {
 	}
 	w.wipeResumes++
 	w.note("wipe-resume %d/%d at step %d: revived %d, rested %s, resumed", w.wipeResumes, w.opts.wipeResume, step, revived, durWords(w.opts.wipeRest))
-	return errWipeRecovered
+	return w.wipeRecovered()
 }
 
 // recoverNearWipeRevive revives what the near-wipe path revives: every hire when all are dead,

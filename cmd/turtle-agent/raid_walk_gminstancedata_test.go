@@ -869,3 +869,55 @@ func TestGMInstanceDataZeroInstRetries(t *testing.T) {
 		t.Fatalf("notes %q, want the zero-read WARN", f.summary().Notes)
 	}
 }
+
+// A wipe recovered inside ONE running walk revives the raid in place. The
+// boss scripts may have rewritten the priest data meanwhile, so the recovery
+// clears the walk's markers and the next status that names the leg resends
+// the lines under their own pause and resume: exactly one resend per
+// recovery, on top of the placement's first send.
+func TestGMInstanceDataResendsAfterWipeRecovery(t *testing.T) {
+	n := zgPlaceSteps(t)
+	f, _ := newPlaceFixture(t)
+	f.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
+	f.opts.wipeResume = 1
+	f.agent.startReply = instDataStartReply(t, n)
+	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+	// The run's own status lines name the plan's full leg, as the live server
+	// does. One running line before the wipe; the run goes on after the raid
+	// was revived.
+	leg := func(state string, step int, note string) string {
+		return fmt.Sprintf("TBM:RUN|zul_gurub|%s|%d/%d|high_priest_thekal|move|walk|%s", state, step, n.total, note)
+	}
+	f.agent.startQueue = []queuedEvent{{raw: leg("running", n.start, "walking")}}
+	// The raid dies once the run has started, and the run goes on once the
+	// recovery resumed it.
+	f.agent.onStart = func() {
+		f.agent.mu.Lock()
+		for _, name := range f.agent.party {
+			f.agent.dead[name] = true
+		}
+		f.agent.mu.Unlock()
+	}
+	f.agent.onResume = func() {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: leg("running", n.start+1, "resumed")},
+			queuedEvent{raw: leg("running", n.start+1, "walking")},
+			queuedEvent{raw: leg("running", n.start+1, "walking")},
+			queuedEvent{raw: leg("done", n.start+1, fmt.Sprintf("stopped before step %d (until boss): the party stays where it stands", n.until))})
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if sum := f.summary(); sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (end %q): %s", sum.WipeResumes, sum.EndReason, strings.Join(sum.Notes[len(sum.Notes)-8:], " | "))
+	}
+	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 2 {
+		t.Fatalf("%d instancedata lines, want 2 (placement + one resend after the recovery): %q", got, f.agent.gmLines())
+	}
+	// The resend runs under its own pause and resume (after the recovery's own resume).
+	if got := strings.Join(f.agent.runVerbs, " "); got != "start resume pause resume" {
+		t.Fatalf("run verbs %q, want the recovery's resume then the resend's pause and resume", got)
+	}
+}
