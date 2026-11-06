@@ -45,7 +45,7 @@ Two flags change what the raid fights, and both only work on the test servers wi
 
 - `--place` with `--from "leg L"` or `--from "step N"` starts the raid partway into its instance instead of at the door, clearing the legs it skips (see [Start partway into an instance](place-mid-raid.md)).
 - `--gm-clear` and `--gm-clear-boss` GM-kill named pull groups or a leg's boss after the placement, so a later leg can be tested while a trash wipe is still being fixed. A walk that used them is marked **ASSISTED**, never a real clear.
-- `--gm-instance-data` sends `.debug instancedata` lines when the walk first starts the named leg, for gates like a boss's priest gate.
+- `--gm-instance-data` sends `.debug instancedata` lines when each launch first starts the named leg (a `--reuse-instance` restart sends them again: the data does not survive a wipe), for gates like a boss's priest gate.
 
 `--inject` makes the walk inject a controlled fault (kill the main tank, run a hire away, pull an extra pack, freeze a hire for lag) and measure what the raid does about it. Faults are never combined with `--place`, and the autopilot refuses `--inject` lines.
 

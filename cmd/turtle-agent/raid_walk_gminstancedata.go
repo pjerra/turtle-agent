@@ -18,13 +18,14 @@
 // the walk instead of losing the pull gate silently. Every sent command is
 // one event line in run.log (`gm-instance-data: <leg>: .debug instancedata
 // <a> <b> -> <reply>`). A marker file per instance and leg in the walk's out
-// dir, plus a mark (with the command list's hash) in the instance-cap ledger
-// (the walk's existing state file, which outlives the attempt's out dir),
-// remembers the sent commands, so a resumed walk in the same instance
-// (--reuse-instance keeping it) never refires: resending is harmless (the
-// core's SetData is idempotent) but noisy. A fresh entry is a new copy even
-// when the core reuses the id, so every launch without --reuse-instance and
-// every --reuse-instance fresh fallback sends again for its own copy.
+// dir remembers the sent commands, so ONE walk never fires the same leg twice.
+// Every launch sends, whatever the reuse mode: a --reuse-instance restart after
+// a wipe runs in a fresh out dir and resends, because the instance data does
+// NOT survive a wipe (walk 44, raid hk7m attempt -3: no lines on the restart,
+// and Hakkar cast Aspect of Jeklik/Venoxis again). The zulgurub boss scripts
+// overwrite their own slot on Reset (boss_jeklik.cpp:105-106,
+// boss_venoxis.cpp:152-153), see docs/okf/raids/raid-walk-reference.md.
+// Resending into data that did survive is harmless (SetData is idempotent).
 package main
 
 import (
@@ -75,7 +76,7 @@ func (w *walk) validateGMInstanceData() error {
 // without one (or a door start, which places nothing) it is read the way
 // the cap ledger reads it at entry (the caller's `q inst`), kept once read.
 // "unreadable" means the read errored: the walk WARNs once and fires
-// marker-only (the ledger keys on instances, so it is skipped). A read of
+// marker-only. A read of
 // 0 (the toolkit answered but named no instance) is NOT cached: the next
 // firing retries the read, and the walk WARNs once. A read failure never
 // fails the walk: ttInst would, so the toolkit is asked directly and any
@@ -113,33 +114,17 @@ func (w *walk) gmInstanceDataInst(ctx context.Context) string {
 	return w.gmInstanceDataEntryInst
 }
 
-// gmInstanceDataDone says the leg's lines already went out in this instance.
-// The out dir's marker always counts (keyed by the instance, or by "unplaced"
-// when the id could not be read). The ledger counts ONLY on a --reuse-instance
-// walk that kept its instance ("alive" or "bind"): it continues the same copy
-// in a fresh out dir, so the out dir's marker cannot tell it. A fresh entry
-// is a new copy even when the core reuses the id across copies, so it decides
-// by its own out-dir marker alone and always sends: a launch without
-// --reuse-instance, or a --reuse-instance walk that fell back to a fresh
-// instance. A changed command list is never done: the ledger's mark carries
-// the hash it was sent with, and the marker carries the list itself. An
-// "unreadable" instance is marker-only: the ledger keys on instances.
+// gmInstanceDataDone says the leg's lines already went out in this walk's
+// instance. Only the out dir's marker counts (keyed by the instance, or by
+// "unplaced" when the id could not be read): it is per launch, so every new
+// launch, a --reuse-instance restart included, sends again. A changed command
+// list is never done: the marker carries the list itself.
 func (w *walk) gmInstanceDataDone(inst string, spec raidwalk.GMInstanceSpec) bool {
 	key := inst
 	if key == "unreadable" {
 		key = "unplaced"
 	}
-	if key != "" && raidwalk.NewInstanceMarks(w.outDir).LegDone(key, spec.Leg, spec) {
-		return true
-	}
-	if !w.opts.reuseInstance || w.reuseMode == "fresh" || inst == "" || inst == "unreadable" || w.env.capLedger == "" {
-		return false
-	}
-	l, err := raidwalk.LoadCapLedger(w.env.capLedger)
-	if err != nil {
-		return false
-	}
-	return l.GMInstanceDataDone(w.opts.server, inst, spec.Leg, raidwalk.GMInstanceDataHash(spec))
+	return key != "" && raidwalk.NewInstanceMarks(w.outDir).LegDone(key, spec.Leg, spec)
 }
 
 // gmInstanceDataMaxTries bounds the per-command retries: a command the
@@ -161,11 +146,9 @@ const gmInstanceDataMaxTries = 3
 // reply either). The marker always holds the confirmed commands of the spec
 // in spec order (rewritten every pass), so a refire never duplicates and
 // LegDone reads back once every command is confirmed. A refire skips the
-// already-confirmed commands' sends. The ledger's mark goes out only then,
-// so an interrupt or a refusal before the last command resends the rest on
-// the next firing. A changed command list is never done: the ledger's mark
-// carries the hash it was sent with, and the marker carries the list
-// itself.
+// already-confirmed commands' sends. An interrupt or a refusal before the last
+// command resends the rest on the next firing. A changed command list is
+// never done: the marker carries the list itself.
 func (w *walk) gmInstanceDataFire(ctx context.Context, inst string, spec raidwalk.GMInstanceSpec) error {
 	key := inst
 	if key == "unreadable" {
@@ -205,9 +188,6 @@ func (w *walk) gmInstanceDataFire(ctx context.Context, inst string, spec raidwal
 				return stopf(exitRaidWalkFailed, "gm-instance-data: %s: interrupted", spec.Leg)
 			}
 		}
-	}
-	if key != "" && marks.LegDone(key, spec.Leg, spec) {
-		w.noteGMInstanceData(inst, spec.Leg, raidwalk.GMInstanceDataHash(spec))
 	}
 	return nil
 }
@@ -267,22 +247,6 @@ func gmInstanceDataWriteConfirmed(marks raidwalk.InstanceMarks, key, leg string,
 		}
 	}
 	return marks.Write(key, leg, cmds)
-}
-
-// noteGMInstanceData marks the leg's lines sent in the instance-cap ledger,
-// so a resumed walk in the same instance does not resend. Without a ledger
-// (tests that do not exercise the cap) or without a readable instance id
-// the out dir's marker is the memory.
-func (w *walk) noteGMInstanceData(inst, leg, hash string) {
-	if w.env.capLedger == "" || inst == "" || inst == "unreadable" {
-		return
-	}
-	at := w.env.now()
-	if err := w.capUpdate(func(l *raidwalk.CapLedger) {
-		l.NoteGMInstanceData(w.opts.server, inst, leg, at, hash)
-	}); err != nil {
-		w.note("instance cap: the gm-instance-data mark not written: %v", err)
-	}
 }
 
 // gmInstanceDataReplyWait is the server reply's window: up to 2 s after

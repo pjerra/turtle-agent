@@ -5,8 +5,8 @@ package main
 // path (the commander's gm RPC, allow-listed), one event line per command in
 // run.log, in order, 3 s apart (plus the 2 s reply wait), once per instance.
 // A placed start inside the leg fires BEFORE the run starts; a mid-run reach
-// fires under a run pause. A resumed walk in the same instance never refires:
-// the markers live in the out dir (and the ledger, which outlives it).
+// fires under a run pause. One walk never refires a leg (the marker lives in
+// its out dir); every new launch, a --reuse-instance restart included, sends.
 import (
 	"bytes"
 	"context"
@@ -149,11 +149,13 @@ func TestGMInstanceDataFiresAfterPlacement(t *testing.T) {
 	}
 }
 
-// A resumed walk in the same instance does not refire: a --reuse-instance
-// restart runs in a fresh out dir, so the out dir's marker cannot tell it,
-// and the ledger (which outlives the attempt) carries the mark. The reuse
+// A --reuse-instance restart in the same instance DOES resend. Walk 44 (raid
+// hk7m attempt -3) showed the instance data does not survive a wipe: the
+// restart's run.log had no gm-instance-data lines and Hakkar cast Aspect of
+// Jeklik/Venoxis again. Each launch runs in a fresh out dir, so its own marker
+// is empty, and nothing else (no ledger) may suppress the lines. The reuse
 // fixture's kept instance is the place toolkit's answer (inst 103).
-func TestGMInstanceDataNoRefireAfterReuseRestart(t *testing.T) {
+func TestGMInstanceDataResendsAfterReuseRestart(t *testing.T) {
 	ledger := filepath.Join(t.TempDir(), "instance-cap.json")
 	n := zgPlaceSteps(t)
 	run := func() *fixture {
@@ -174,18 +176,22 @@ func TestGMInstanceDataNoRefireAfterReuseRestart(t *testing.T) {
 		t.Fatalf("first walk: %d lines, want 1: %q", n, first.agent.gmLines())
 	}
 	second := run()
-	if n := countPrefix(second.agent.gmLines(), ".debug instancedata"); n != 0 {
-		t.Fatalf("resumed walk in the same instance resent: %q", second.agent.gmLines())
+	if n := countPrefix(second.agent.gmLines(), ".debug instancedata"); n != 1 {
+		t.Fatalf("same-instance --reuse-instance restart sent %d lines, want 1: %q", n, second.agent.gmLines())
 	}
-	if by, _ := os.ReadFile(filepath.Join(second.out, "run.log")); strings.Contains(string(by), ".debug instancedata") {
-		t.Fatalf("resumed walk logged a line it never sent:\n%s", by)
+	by, _ := os.ReadFile(filepath.Join(second.out, "run.log"))
+	if !strings.Contains(string(by), "gm-instance-data: high_priest_thekal: .debug instancedata 1 3 -> sent") {
+		t.Fatalf("restart run.log lacks the instance-data line:\n%s", by)
+	}
+	// A third restart resends too.
+	third := run()
+	if n := countPrefix(third.agent.gmLines(), ".debug instancedata"); n != 1 {
+		t.Fatalf("third launch sent %d lines, want 1: %q", n, third.agent.gmLines())
 	}
 }
 
-// Item 1: the ledger mark is consulted ONLY on a --reuse-instance walk. A
-// fresh walk with an old mark for the same id still sends (a fresh walk is
-// a new copy; the core reuses ids), while a reuse walk with the mark skips.
-func TestGMInstanceDataFreshWalkIgnoresLedgerMark(t *testing.T) {
+// A fresh walk (no --reuse-instance) in the same instance id sends too.
+func TestGMInstanceDataFreshWalkSends(t *testing.T) {
 	ledger := filepath.Join(t.TempDir(), "instance-cap.json")
 	n := zgPlaceSteps(t)
 	f, _ := newPlaceFixture(t)
@@ -202,7 +208,7 @@ func TestGMInstanceDataFreshWalkIgnoresLedgerMark(t *testing.T) {
 		t.Fatalf("setup walk sent %d, want 1: %q", n, f.agent.gmLines())
 	}
 	// A fresh walk (no --reuse-instance) in the same instance id sends
-	// again, even though the ledger carries the mark.
+	// again.
 	g, _ := newPlaceFixture(t)
 	g.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
 	g.env.capLedger = ledger
@@ -220,9 +226,7 @@ func TestGMInstanceDataFreshWalkIgnoresLedgerMark(t *testing.T) {
 // A --reuse-instance walk that falls back to a fresh instance sends the
 // lines again: the new copy is not the one the data was confirmed for, even
 // when the core hands out the same instance id (it reuses ids across
-// copies). The ledger mark names the old copy, so it must not suppress the
-// new copy's firing. The first walk fires in 103 (alive reuse, ledger
-// marked); the second finds the raid gone and no bind, enters fresh, and the
+// copies). The first walk fires in 103 (alive reuse); the second finds the raid gone and no bind, enters fresh, and the
 // toolkit reports 103 again for the new copy.
 func TestGMInstanceDataRefiresAfterReuseFreshFallback(t *testing.T) {
 	ledger := filepath.Join(t.TempDir(), "instance-cap.json")
@@ -348,10 +352,9 @@ func TestGMInstanceDataUnknownLegRefused(t *testing.T) {
 	}
 }
 
-// An interrupt after the FIRST command resends the rest: the ledger's mark
-// is written only after EVERY command of the spec has been sent (review
-// item 1). The sleep between the lines fails, the walk ends, and a fresh
-// out dir with --reuse-instance sends the whole list again (the run's leg
+// An interrupt after the FIRST command resends the rest. The sleep between
+// the lines fails, the walk ends, and a fresh out dir with --reuse-instance
+// sends the whole list again (the run's leg
 // line-up is the reuse fixture's kept instance 103).
 func TestGMInstanceDataInterruptResendsRest(t *testing.T) {
 	ledger := filepath.Join(t.TempDir(), "instance-cap.json")
@@ -379,14 +382,6 @@ func TestGMInstanceDataInterruptResendsRest(t *testing.T) {
 	if n := countPrefix(first.agent.gmLines(), ".debug instancedata"); n != 1 {
 		t.Fatalf("interrupted walk sent %d lines, want exactly the first: %q", n, first.agent.gmLines())
 	}
-	// The ledger has no mark yet: nothing was complete.
-	l, err := raidwalk.LoadCapLedger(ledger)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if l.GMInstanceDataDone("m910q", "103", "high_priest_thekal", raidwalk.GMInstanceDataHash(raidwalk.GMInstanceSpec{Leg: "high_priest_thekal", Cmds: [][2]int{{1, 3}, {6, 3}}})) {
-		t.Fatal("a half-sent leg must not mark the ledger done")
-	}
 	second, _ := newPlaceFixture(t)
 	second.opts.gmInstanceData = stringList{"high_priest_thekal:1 3;6 3"}
 	second.opts.reuseInstance = true
@@ -404,8 +399,7 @@ func TestGMInstanceDataInterruptResendsRest(t *testing.T) {
 		}
 	}
 	// A fresh out dir has no marker: the whole list goes out again (the
-	// first walk confirmed `1 3` in its own out dir only; the ledger marks
-	// whole specs, not prefixes).
+	// first walk confirmed `1 3` in its own out dir only).
 	if strings.Join(got, "|") != ".debug instancedata 1 3|.debug instancedata 6 3" {
 		t.Fatalf("resumed walk sent %q, want the whole list again", got)
 	}
