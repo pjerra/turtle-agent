@@ -26,8 +26,9 @@
 // overwrite their own slot on Reset (boss_jeklik.cpp:105-106,
 // boss_venoxis.cpp:152-153), see docs/okf/raids/raid-walk-reference.md.
 // Resending into data that did survive is harmless (SetData is idempotent).
-// A walk also resends once per boss row, when a status makes the leg's boss row
-// current (before its pull): a GM kill does not stop the respawn, and a
+// A walk also resends once per boss row, before the boss pull (at the out of
+// combat rest before the row, or at the row's own pre-pull status; a row
+// already pulling is skipped): a GM kill does not stop the respawn, and a
 // respawned priest's Reset() overwrites its data (walk 45 hk7m).
 package main
 
@@ -431,7 +432,7 @@ func (w *walk) gmInstanceDataStart(ctx context.Context, inst, leg string) error 
 // a firing happened: pollOnce then breaks out of its line loop for this
 // poll (the next poll re-reads from the cursor), so the rest of the old
 // page's lines never process past the adopted statuses of the firing.
-func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus) (bool, error) {
+func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus, later bool) (bool, error) {
 	// Idle fast path: no specs, or a state with no leg to name — never
 	// touch the toolkit. The instance read below is a real `q inst`.
 	if len(w.gmInstanceData) == 0 {
@@ -442,17 +443,16 @@ func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus) 
 	}
 	inst := w.gmInstanceDataInst(ctx)
 	pending := w.gmInstanceDataPending(inst, st)
-	bossStep := w.gmInstanceDataBossStep(inst, st)
-	if len(pending) == 0 && bossStep > 0 {
-		pending = w.gmInstanceDataBossResend(inst, st)
-	}
-	if bossStep > 0 {
-		// Once per boss row per walk, whether the leg's lines were already
-		// pending (nothing went out before: they go out now) or resent here.
+	if bossStep, resend := w.gmInstanceDataBossRow(inst, st, later); bossStep > 0 {
+		// Once per boss row per walk, whether the leg's lines were pending (they
+		// go out now) or resent here (or skipped: the boss was already pulling).
 		if w.gmInstanceDataBossSent == nil {
 			w.gmInstanceDataBossSent = map[int]bool{}
 		}
 		w.gmInstanceDataBossSent[bossStep] = true
+		if len(pending) == 0 && resend {
+			pending = w.gmInstanceDataBossResend(inst, st)
+		}
 	}
 	if len(pending) == 0 {
 		return false, nil
@@ -476,29 +476,116 @@ func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus) 
 	return true, nil
 }
 
-// gmInstanceDataBossStep is the boss row the status makes current when the
-// walk has not yet sent the leg's lines for it (0: none). Walk 45 hk7m: the
-// launch send went out at 14:27, but a GM `.die` does not stop the respawn, and
-// a respawned priest's Reset() overwrote its DONE data before the run reached
-// Hakkar's row. The boss row becoming current (status kind boss on a plan boss
-// row, bossRowAt) is the last status before the boss pull, so the lines are
-// sent again there, once per boss row per walk.
-func (w *walk) gmInstanceDataBossStep(inst string, st tbm.RunStatus) int {
-	if len(w.gmInstanceData) == 0 || inst == "" || st.Kind != planexport.KindBoss {
-		return 0
+// gmInstanceDataFrameFresh is how old a bot_view frame may be and still count
+// for the "party is out of combat" check of the boss-row resend.
+const gmInstanceDataFrameFresh = 15 * time.Second
+
+// gmInstanceDataBossRow decides the boss-row resend for a status. Walk 45
+// hk7m: the launch send went out at 14:27, but a GM `.die` does not stop the
+// respawn, and a respawned priest's Reset() overwrote its DONE data before the
+// run reached Hakkar's row. So the lines go out again, once per boss row per
+// walk, at the latest safe moment before the boss pull:
+//   - the step BEFORE the boss row at an out-of-combat rest/gather status
+//     (the usual hook: the run is idle there), or
+//   - the boss row's own status while it is still before the pull.
+//
+// The boss row becomes current about 1 s before the run's FightStep can pull
+// (DungeonRunPolicy.h:5661, Commander.cpp:6886), and a mid-fight pause drops the
+// focus and holds ~7 s inside the boss (DungeonRunPolicy.h:3542-3567). So a boss
+// row status that is already pulling or fighting is SKIPPED with a WARN and
+// counts as handled: the walk never pauses mid-fight.
+//
+// It returns the boss step to mark as handled (0: nothing to do) and whether
+// the lines go out now.
+func (w *walk) gmInstanceDataBossRow(inst string, st tbm.RunStatus, later bool) (int, bool) {
+	if len(w.gmInstanceData) == 0 || inst == "" {
+		return 0, false
 	}
 	if st.State != tbm.RunRunning && st.State != tbm.RunPaused {
-		return 0
+		return 0, false
 	}
-	if _, ok := w.bossRowAt(st.Step); !ok || w.gmInstanceDataBossSent[st.Step] {
-		return 0
-	}
+	legSpec := false
 	for _, spec := range w.gmInstanceData {
 		if raidwalk.LegMatchesStatus(spec.Leg, st.Leg) {
-			return st.Step
+			legSpec = true
 		}
 	}
-	return 0
+	if !legSpec {
+		return 0, false
+	}
+	now := w.env.now()
+	if st.Kind == planexport.KindBoss {
+		if _, ok := w.bossRowAt(st.Step); !ok || w.gmInstanceDataBossSent[st.Step] {
+			return 0, false
+		}
+		if w.gmInstanceDataPrePull(st, later, now) {
+			return st.Step, true
+		}
+		w.note("gm-instance-data: WARN: boss row already pulling, resend skipped (step %d: %s %s)", st.Step, st.Phase, st.Note)
+		return st.Step, false
+	}
+	// The step before a boss row, resting or gathering out of combat.
+	next := st.Step + 1
+	if _, ok := w.bossRowAt(next); !ok || w.gmInstanceDataBossSent[next] {
+		return 0, false
+	}
+	if p := strings.ToLower(st.Phase); p != "rest" && p != "gather" {
+		return 0, false
+	}
+	if !w.gmInstanceDataPrePull(st, later, now) {
+		return 0, false
+	}
+	return next, true
+}
+
+// gmInstanceDataPrePull says the status is still before the pull: phase begin,
+// gather, walk or rest, no pulling or fighting note, no later line of the same
+// event page showing the pull (later), and no live bot of the party in combat in
+// a recent frame.
+func (w *walk) gmInstanceDataPrePull(st tbm.RunStatus, later bool, now time.Time) bool {
+	if later {
+		return false
+	}
+	switch strings.ToLower(st.Phase) {
+	case "begin", "gather", "walk", "rest":
+	default:
+		return false
+	}
+	if gmInstanceDataPullNote(st.Note) {
+		return false
+	}
+	for _, b := range w.botAt {
+		if b.inCombat && !b.dead && now.Sub(b.at) <= gmInstanceDataFrameFresh {
+			return false
+		}
+	}
+	return true
+}
+
+// gmInstanceDataPullNote says a run note names a pull or a fight.
+func gmInstanceDataPullNote(note string) bool {
+	n := strings.ToLower(note)
+	return strings.Contains(n, "pulling") || strings.Contains(n, "fighting")
+}
+
+// gmInstanceDataLaterPull says a later line of the same event page shows the
+// pull or the fight of the same step (a pull phase or a pulling/fighting note):
+// the status being handled is older than the pull.
+func (w *walk) gmInstanceDataLaterPull(rest []events.Event, step int) bool {
+	for _, e := range rest {
+		line, ok := tbm.Line(e)
+		if !ok {
+			continue
+		}
+		st, ok := raidwalk.ParseRun(line)
+		if !ok || st.Plan != w.plan.Name || st.Step != step {
+			continue
+		}
+		if strings.EqualFold(st.Phase, "pull") || gmInstanceDataPullNote(st.Note) {
+			return true
+		}
+	}
+	return false
 }
 
 // gmInstanceDataBossResend forgets the marker and the retry counts of the

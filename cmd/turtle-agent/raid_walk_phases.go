@@ -1239,7 +1239,7 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 	if err != nil {
 		return nil, err
 	}
-	for _, e := range evs {
+	for i, e := range evs {
 		line, ok := tbm.Line(e)
 		if !ok {
 			continue
@@ -1290,7 +1290,7 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 		// would re-feed the pre-fire statuses instead, regressing
 		// lastStatus; the rerunStale filter above re-applies to the
 		// re-read lines unchanged).
-		fired, err := w.gmInstanceDataSendPending(ctx, st)
+		fired, err := w.gmInstanceDataSendPending(ctx, st, w.gmInstanceDataLaterPull(evs[i+1:], st.Step))
 		if err != nil {
 			return nil, err
 		}

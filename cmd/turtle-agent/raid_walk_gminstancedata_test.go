@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
@@ -1059,5 +1061,173 @@ func TestGMInstanceDataBossRowResendOncePerRow(t *testing.T) {
 	}
 	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 2 {
 		t.Fatalf("%d instancedata lines, want 2 (launch + one resend for the boss row): %q", got, f.agent.gmLines())
+	}
+}
+
+// bossRowFixture is the thekal-leg walk the boss-row resend tests drive: the
+// launch send goes out before the run starts, then the queued statuses play.
+func bossRowFixture(t *testing.T, pageSize int, build func(st func(state string, step int, kind, phase, note string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent) *fixture {
+	t.Helper()
+	n := zgPlaceSteps(t)
+	boss := instDataThekalBossStep(t)
+	f, _ := newPlaceFixture(t)
+	f.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
+	f.agent.startReply = instDataStartReply(t, n)
+	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+	st := func(state string, step int, kind, phase, note string) queuedEvent {
+		return queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|%s|%d/%d|high_priest_thekal|%s|%s|%s", state, step, n.total, kind, phase, note)}
+	}
+	f.agent.startQueue = build(st, boss, n)
+	f.agent.pageSize = pageSize
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	return f
+}
+
+func bossRowDone(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) queuedEvent {
+	return st("done", boss, "boss", "pull", fmt.Sprintf("stopped before step %d (until boss): the party stays where it stands", n.until))
+}
+
+// The boss row's first status already shows the pull: the boss fight is on, and
+// a pause now would drop the focus mid-fight. The resend is skipped with a
+// WARN, no pause goes out, and the row counts as handled.
+func TestGMInstanceDataBossRowSkippedWhenAlreadyPulling(t *testing.T) {
+	f := bossRowFixture(t, 1, func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent {
+		return []queuedEvent{
+			st("running", boss, "boss", "pull", "pulling"),
+			st("running", boss, "boss", "pull", "fighting"),
+			bossRowDone(st, boss, n),
+		}
+	})
+	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 1 {
+		t.Fatalf("%d instancedata lines, want only the launch send: %q", got, f.agent.gmLines())
+	}
+	if got := strings.Join(f.agent.runVerbs, " "); got != "start" {
+		t.Fatalf("run verbs %q, want no pause", got)
+	}
+	if !hasNote(f.summary(), "gm-instance-data: WARN: boss row already pulling, resend skipped") {
+		t.Fatalf("notes %q, want the skip WARN", f.summary().Notes)
+	}
+}
+
+// A fight carried over from the last pull row is still going when the boss row
+// becomes current (phase begin, note fighting): skipped too.
+func TestGMInstanceDataBossRowSkippedOnFightCarryOver(t *testing.T) {
+	f := bossRowFixture(t, 1, func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent {
+		return []queuedEvent{
+			st("running", boss, "boss", "begin", "fighting"),
+			bossRowDone(st, boss, n),
+		}
+	})
+	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 1 {
+		t.Fatalf("%d instancedata lines, want only the launch send: %q", got, f.agent.gmLines())
+	}
+	if got := strings.Join(f.agent.runVerbs, " "); got != "start" {
+		t.Fatalf("run verbs %q, want no pause", got)
+	}
+	if !hasNote(f.summary(), "boss row already pulling, resend skipped") {
+		t.Fatalf("notes %q, want the skip WARN", f.summary().Notes)
+	}
+}
+
+// gmInstanceDataPrePull is the boss-row resend's gate: the status is before
+// the pull (phase begin/gather/walk/rest, no pulling or fighting note), no later
+// line of the same page shows the pull, and no live bot of the party is in
+// combat in a frame no older than gmInstanceDataFrameFresh.
+func TestGMInstanceDataPrePullGate(t *testing.T) {
+	now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	status := func(phase, note string) tbm.RunStatus {
+		return tbm.RunStatus{State: tbm.RunRunning, Step: 700, Kind: "boss", Phase: phase, Note: note}
+	}
+	cases := []struct {
+		name  string
+		st    tbm.RunStatus
+		later bool
+		bots  map[string]botPos
+		want  bool
+	}{
+		{"begin", status("begin", "starting"), false, nil, true},
+		{"gather", status("gather", "gathering"), false, nil, true},
+		{"rest", status("rest", "resting"), false, nil, true},
+		{"walk", status("walk", "walking"), false, nil, true},
+		{"pull phase", status("pull", "pulling"), false, nil, false},
+		{"hold phase", status("hold", "holding"), false, nil, false},
+		{"fighting note at begin", status("begin", "fighting"), false, nil, false},
+		{"pulling note at walk", status("walk", "pulling Hakkar"), false, nil, false},
+		{"later pull line", status("begin", "starting"), true, nil, false},
+		{"bot in combat", status("begin", "starting"), false, map[string]botPos{"A": {inCombat: true, at: now.Add(-3 * time.Second)}}, false},
+		{"dead bot flagged combat", status("begin", "starting"), false, map[string]botPos{"A": {inCombat: true, dead: true, at: now.Add(-3 * time.Second)}}, true},
+		{"stale combat frame", status("begin", "starting"), false, map[string]botPos{"A": {inCombat: true, at: now.Add(-time.Minute)}}, true},
+		{"quiet bots", status("begin", "starting"), false, map[string]botPos{"A": {at: now.Add(-3 * time.Second)}}, true},
+	}
+	for _, c := range cases {
+		w := &walk{botAt: c.bots}
+		if got := w.gmInstanceDataPrePull(c.st, c.later, now); got != c.want {
+			t.Errorf("%s: pre-pull %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// A later line of the same event page that shows the pull or fight of the same
+// step blocks the resend, even when the first line looks safe.
+func TestGMInstanceDataLaterPullInPage(t *testing.T) {
+	line := func(step int, phase, note string) events.Event {
+		return events.Event{Kind: events.KindSystem, Text: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/733|high_priest_thekal|boss|%s|%s", step, phase, note)}
+	}
+	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub"}}
+	if w.gmInstanceDataLaterPull([]events.Event{line(700, "begin", "starting"), line(701, "pull", "pulling")}, 700) {
+		t.Fatal("another step's pull must not block")
+	}
+	if !w.gmInstanceDataLaterPull([]events.Event{line(700, "begin", "starting"), line(700, "pull", "pulling")}, 700) {
+		t.Fatal("a later pull line of the same step must block")
+	}
+	if !w.gmInstanceDataLaterPull([]events.Event{line(700, "begin", "fighting")}, 700) {
+		t.Fatal("a later fighting note of the same step must block")
+	}
+	if w.gmInstanceDataLaterPull([]events.Event{line(700, "begin", "starting")}, 700) {
+		t.Fatal("a quiet later line must not block")
+	}
+}
+
+// The step before the boss row reaches an out-of-combat rest: the resend goes
+// out there (well before the boss pull) and the boss row does not resend again.
+func TestGMInstanceDataResendsAtTheRestBeforeTheBossRow(t *testing.T) {
+	f := bossRowFixture(t, 1, func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent {
+		return []queuedEvent{
+			st("running", boss-1, "move", "walk", "walking"),
+			st("running", boss-1, "move", "rest", "resting"),
+			st("running", boss, "boss", "pull", "pulling"),
+			bossRowDone(st, boss, n),
+		}
+	})
+	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 2 {
+		t.Fatalf("%d instancedata lines, want the launch send + one resend at the rest: %q", got, f.agent.gmLines())
+	}
+	// The boss row came in already pulling: had the rest not handled it, the
+	// row would have been skipped with a WARN. It was handled, so no WARN.
+	if hasNote(f.summary(), "boss row already pulling") {
+		t.Fatalf("notes %q: the boss row was handled at the rest, it must not warn", f.summary().Notes)
+	}
+	if got := strings.Join(f.agent.runVerbs, " "); got != "start pause resume" {
+		t.Fatalf("run verbs %q, want one pause and resume", got)
+	}
+}
+
+// The first line looks safe (begin), but the same event page already holds the
+// pull of that step: the status is older than the pull, so it is skipped.
+func TestGMInstanceDataBossRowSkippedWhenThePageHoldsThePull(t *testing.T) {
+	f := bossRowFixture(t, 3, func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent {
+		return []queuedEvent{
+			st("running", boss, "boss", "begin", "starting the boss row"),
+			st("running", boss, "boss", "pull", "pulling"),
+			bossRowDone(st, boss, n),
+		}
+	})
+	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 1 {
+		t.Fatalf("%d instancedata lines, want only the launch send: %q", got, f.agent.gmLines())
+	}
+	if got := strings.Join(f.agent.runVerbs, " "); got != "start" {
+		t.Fatalf("run verbs %q, want no pause", got)
 	}
 }
