@@ -100,3 +100,32 @@ func TestGMInstanceDataOldStringLedgerLoads(t *testing.T) {
 		t.Fatal("both mark forms must read back as done")
 	}
 }
+
+// TestGMInstanceDataFreshIdReuseClearsMark: fresh copy B reuses old copy A's
+// instance id. A's hakkar mark must not suppress B's firing: stamping B's
+// fresh entry (Confirm + SetInstance, the stampInstance path) clears that
+// id's marks. B exits before the hakkar leg, so no new mark exists, and a
+// --reuse-instance re-place that finds B "alive" consults the ledger: Done
+// must be false so the lines go out. Marks for other ids survive.
+func TestGMInstanceDataFreshIdReuseClearsMark(t *testing.T) {
+	l := &CapLedger{}
+	l.Record("m910q", CapEntry{At: capT0, Instance: 7}, capT0)
+	fired := capT0.Add(time.Minute)
+	l.NoteGMInstanceData("m910q", "7", "hakkar", fired, "h")
+	l.NoteGMInstanceData("m910q", "8", "hakkar", fired, "h")
+	if !l.GMInstanceDataDone("m910q", "7", "hakkar", "h") {
+		t.Fatal("A's own mark must read back as done")
+	}
+	// Fresh copy B enters; the core hands out A's id again.
+	at := capT0.Add(10 * time.Minute)
+	l.Confirm("m910q", "walk-b", CapEntry{At: at}, at)
+	if !l.SetInstance("m910q", at, 7) {
+		t.Fatal("SetInstance did not find B's entry")
+	}
+	if l.GMInstanceDataDone("m910q", "7", "hakkar", "h") {
+		t.Fatal("B is a new copy: A's mark must not read back as done")
+	}
+	if !l.GMInstanceDataDone("m910q", "8", "hakkar", "h") {
+		t.Fatal("stamping id 7 must not drop other ids' marks")
+	}
+}
