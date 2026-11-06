@@ -1434,9 +1434,11 @@ func TestAutoStateSurvivesASupervisorKill(t *testing.T) {
 		_ = cmd.Wait()
 	}()
 	waitForN(t, 10*time.Second, "the second attempt to launch", func() bool { return len(f.args()) >= 2 })
-	// saveState runs asynchronously after the launch event: wait until the checkpoint itself records the advanced
-	// goal, so the kill cannot land in that window and leave the test reading the pre-advance checkpoint.
-	waitForN(t, 10*time.Second, "the checkpoint to record the advanced goal", func() bool {
+	// The checkpoint is written on the launch tick (Goal 1, step 0), but a-2's canned 51/761 progress line is
+	// already on disk: the supervisor learns step 51 on a later tick and rewrites the checkpoint with LastStep 51.
+	// A kill in that window restarts goal 2 from step 51 instead of its --from step 200. Wait until the checkpoint
+	// itself records the advanced goal AND the observed progress, so the kill cannot land in that window.
+	waitForN(t, 10*time.Second, "the checkpoint to record the advanced goal and its progress", func() bool {
 		raw, err := os.ReadFile(filepath.Join(f.walk, autoStateFile))
 		if err != nil {
 			return false
@@ -1445,7 +1447,7 @@ func TestAutoStateSurvivesASupervisorKill(t *testing.T) {
 		if json.Unmarshal(raw, &saved) != nil || len(saved.IDs) != 1 {
 			return false
 		}
-		return saved.IDs[0].Goal == 1
+		return saved.IDs[0].Goal == 1 && saved.IDs[0].LastStep == 51
 	})
 	// Kill the supervisor while a-2 runs; its walk is killed too, as a crash would leave it dead on the slot.
 	if err := cmd.Process.Kill(); err != nil {

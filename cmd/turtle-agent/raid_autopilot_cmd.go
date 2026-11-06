@@ -1733,6 +1733,19 @@ func (s *autoSupervisor) launch(st *autoState) {
 	}
 	from := g.target.Start
 	if step > 0 {
+		// A reached step below the goal's own step start belongs to an earlier goal's walk, not this one (a crash
+		// between the advance and the progress it observed): the goal starts at its --from, never behind it. A leg
+		// start has no step number, so only a step start clamps.
+		if start, ok := strings.CutPrefix(g.target.Start, "step "); ok {
+			if want, err := strconv.Atoi(start); err == nil && step < want {
+				s.event(st.id, "resume", fmt.Sprintf("ignoring step %d below the goal's start %q", step, g.target.Start))
+				st.last = nil
+				g.bestStep = 0
+				step, reuse = 0, false
+			}
+		}
+	}
+	if step > 0 {
 		from = fmt.Sprintf("step %d", step)
 		reuse = !fresh
 	}
