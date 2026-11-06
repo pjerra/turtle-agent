@@ -407,13 +407,18 @@ func (l *CapLedger) NoteGMInstanceData(name, inst, leg string, at time.Time, has
 
 // GMInstanceDataDone says leg's lines already went out in inst for this
 // command-list hash. Callers consult the ledger ONLY on a --reuse-instance
-// walk (it continues the same instance in a fresh out dir, so the out dir's
-// marker cannot tell it): every other walk decides by its own out-dir marker
-// alone, so a fresh walk always sends even when an old mark names the same
-// id — the core reuses instance ids across copies. A mark whose stored hash
-// names another command list is not done: the list changed, resend. An old
-// bare mark (no time, no hash) reads back as done, as before. A restart drops
-// every mark with the entries (NoteServerStart, Reset).
+// walk that kept its instance (alive or bind: it continues the same instance
+// in a fresh out dir, so the out dir's marker cannot tell it): every other
+// walk decides by its own out-dir marker alone, so a fresh walk always sends
+// even when an old mark names the same id — the core reuses instance ids
+// across copies. The fresh-fallback launch inside a --reuse-instance run is
+// that fresh walk: a new copy that must fire, never done by the ledger — it
+// is excluded in cmd/turtle-agent (reuseMode == "fresh"), not here. A mark
+// whose stored hash names another command list is not done: the list changed,
+// resend. An old bare mark (no time, no hash) reads back as done, as before.
+// A restart drops every mark with the entries (NoteServerStart, Reset), and
+// recording a fresh entry for an id clears that id's marks: the id names a
+// new copy (SetInstance).
 func (l *CapLedger) GMInstanceDataDone(name, inst, leg, hash string) bool {
 	s := l.Servers[name]
 	if s == nil {
@@ -463,7 +468,9 @@ func (l *CapLedger) RecordReuse(name string, inst float64, accounts []string, pl
 }
 
 // SetInstance stamps the entry made at at with the instance id the raid entered: a reuse placement's dedupe needs it.
-// It reports whether the entry was still live.
+// It reports whether the entry was still live. A stamp is a fresh entry (only stampInstance calls it, and only for a
+// fresh placement): the id may reuse an older copy's (the core reuses ids across copies), so the stamped id's
+// --gm-instance-data marks are dropped with it — they name the old copy, and the new copy must fire again.
 func (l *CapLedger) SetInstance(name string, at time.Time, inst float64) bool {
 	s := l.Servers[name]
 	if s == nil {
@@ -472,6 +479,15 @@ func (l *CapLedger) SetInstance(name string, at time.Time, inst float64) bool {
 	for i := range s.Entries {
 		if s.Entries[i].At.Equal(at) {
 			s.Entries[i].Instance = inst
+			key := fmt.Sprintf("%.0f", inst)
+			kept := s.GMInstanceData[:0:0]
+			for _, m := range s.GMInstanceData {
+				if mi, _ := gmMarkKey(m); mi == key {
+					continue
+				}
+				kept = append(kept, m)
+			}
+			s.GMInstanceData = kept
 			return true
 		}
 	}

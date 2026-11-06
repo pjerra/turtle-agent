@@ -82,7 +82,7 @@ Usage: `turtle-agent raid-walk <plan> [--server <server>] [--slot N] ...` or `tu
 | `--gm-clear` | none | Repeatable: `"<leg>:<group>[,<group>...]"` — GM-kill those pull groups after the placement. Needs `--place`; the walk is then ASSISTED. | `--gm-clear "<leg>:1,2"` |
 | `--gm-clear-boss` | none | Repeatable: `<leg>` — GM-kill the leg's boss and its pack. Needs `--place`. | `--gm-clear-boss <leg>` |
 | `--gm-clear-spawns` | pack default | The world export dir the clears read the packs from. | `--gm-clear-spawns <dir>` |
-| `--gm-instance-data` | none | Repeatable: `"<leg>:<a> <b>[;<a> <b>...]"` — send each as `.debug instancedata` when the walk first starts the leg. Test servers only. | `--gm-instance-data "<leg>:1 3"` |
+| `--gm-instance-data` | none | Repeatable: `"<leg>:<a> <b>[;<a> <b>...]"` — send each as `.debug instancedata` when the walk first starts the leg. Test servers only. A fresh instance always gets the lines again, even under `--reuse-instance` when the walk falls back to a fresh entry. | `--gm-instance-data "<leg>:1 3"` |
 | `--inject` | none | Repeatable (at most 4, each kind at most once): `kill-mt`, `runaway`, `add-pack` or `lag`, each with `@from=N` and its keys. Refused with `--place`. | `--inject kill-mt` |
 
 ## GM and toolkit allow-lists
