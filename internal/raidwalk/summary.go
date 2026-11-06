@@ -44,6 +44,8 @@ type Summary struct {
 	Incidents     []InjectIncident `json:"incidents"`
 	Wipes         []int            `json:"wipes"`
 	WipeResumes   int              `json:"wipe_resumes"`
+	// GMInstanceDataUnsent counts the --gm-instance-data legs whose lines were never sent (no out-of-combat rest/gather in the leg).
+	GMInstanceDataUnsent int `json:"gm_instance_data_unsent,omitempty"`
 	// The --revive-at-raid counts (omitted when the walk never needed it): hires summoned back to the revive point,
 	// hires two summons did not bring within 10 yd, and hires still out of range or in combat when a resume went out.
 	ReviveBrought      int          `json:"revive_brought,omitempty"`
@@ -369,6 +371,7 @@ type SummaryMeta struct {
 	SettleShort bool
 	// WipeResumes is the walk's recovered wipes and near-wipe stops (--wipe-resume).
 	WipeResumes                                        int
+	GMInstanceDataUnsent                               int
 	ReviveBrought, ReviveUnreached, ReviveGatherMissed int
 	Layout                                             LayoutSummary
 	Started                                            time.Time
@@ -401,44 +404,45 @@ type SummaryMeta struct {
 // BuildSummary fills the tb-raid-walk v1 summary from the tracker and the command's own facts.
 func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 	s := &Summary{
-		Format:         "tb-raid-walk",
-		Version:        1,
-		Plan:           m.Plan,
-		Map:            m.Map,
-		Server:         m.Server,
-		Slot:           m.Slot,
-		Character:      m.Character,
-		Until:          m.Until,
-		UntilEffective: m.UntilEffective,
-		From:           m.From,
-		Speed:          m.Speed,
-		TestSpeed:      m.TestSpeed,
-		RowsSHA256:     m.RowsSHA256,
-		UntilStep:      m.UntilStep,
-		RunLabel:       m.RunLabel,
-		SpeedFellBack:  m.SpeedFellBack,
-		Layout:         m.Layout,
-		Started:        m.Started,
-		Ended:          m.Ended,
-		EndReason:      m.EndReason,
-		Fights:         nonNilFights(m.Fights),
-		Decisions:      m.Decisions,
-		Injections:     nonNilInjections(m.Injections),
-		Incidents:      nonNilIncidents(m.Incidents),
-		Roster:         RosterSummary{OT: []string{}, Rest: []string{}},
-		Dashboard:      m.Dashboard,
-		Teardown:       m.Teardown,
-		Place:          m.Place,
-		Assisted:       m.GMClearUsed,
-		GMClear:        m.GMClear,
-		GMClearPartial: GMClearPartial(m.GMClear),
-		BossKill:       m.BossKill,
-		BossKills:      m.BossKills,
-		ReviveRefusal:  m.ReviveRefusal,
-		ExitCode:       m.ExitCode,
-		Notes:          nonNilStrings(m.Notes),
-		WipeResumes:    m.WipeResumes,
-		ReviveBrought:  m.ReviveBrought, ReviveUnreached: m.ReviveUnreached, ReviveGatherMissed: m.ReviveGatherMissed,
+		Format:               "tb-raid-walk",
+		Version:              1,
+		Plan:                 m.Plan,
+		Map:                  m.Map,
+		Server:               m.Server,
+		Slot:                 m.Slot,
+		Character:            m.Character,
+		Until:                m.Until,
+		UntilEffective:       m.UntilEffective,
+		From:                 m.From,
+		Speed:                m.Speed,
+		TestSpeed:            m.TestSpeed,
+		RowsSHA256:           m.RowsSHA256,
+		UntilStep:            m.UntilStep,
+		RunLabel:             m.RunLabel,
+		SpeedFellBack:        m.SpeedFellBack,
+		Layout:               m.Layout,
+		Started:              m.Started,
+		Ended:                m.Ended,
+		EndReason:            m.EndReason,
+		Fights:               nonNilFights(m.Fights),
+		Decisions:            m.Decisions,
+		Injections:           nonNilInjections(m.Injections),
+		Incidents:            nonNilIncidents(m.Incidents),
+		Roster:               RosterSummary{OT: []string{}, Rest: []string{}},
+		Dashboard:            m.Dashboard,
+		Teardown:             m.Teardown,
+		Place:                m.Place,
+		Assisted:             m.GMClearUsed,
+		GMClear:              m.GMClear,
+		GMClearPartial:       GMClearPartial(m.GMClear),
+		BossKill:             m.BossKill,
+		BossKills:            m.BossKills,
+		ReviveRefusal:        m.ReviveRefusal,
+		ExitCode:             m.ExitCode,
+		Notes:                nonNilStrings(m.Notes),
+		WipeResumes:          m.WipeResumes,
+		GMInstanceDataUnsent: m.GMInstanceDataUnsent,
+		ReviveBrought:        m.ReviveBrought, ReviveUnreached: m.ReviveUnreached, ReviveGatherMissed: m.ReviveGatherMissed,
 		StepTimeline: []StepSummary{},
 		Legs:         []LegSummary{},
 		Wipes:        []int{},
@@ -610,6 +614,9 @@ func (s *Summary) Text() string {
 		b.WriteString(s.ReviveRefusal.Line() + "\n")
 	}
 	fmt.Fprintf(&b, "wipes %d; boss engaged: %s\n", len(s.Wipes), bossLine(s.BossEngaged))
+	if s.GMInstanceDataUnsent > 0 {
+		fmt.Fprintf(&b, "gm_instance_data_unsent=%d\n", s.GMInstanceDataUnsent)
+	}
 	if s.BossKill != nil {
 		b.WriteString(s.BossKill.Line() + "\n")
 	}

@@ -440,6 +440,7 @@ func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus, 
 	if len(w.gmInstanceData) == 0 {
 		return false, nil
 	}
+	w.gmInstanceDataLegLeft(st)
 	if st.State != tbm.RunRunning && st.State != tbm.RunPaused {
 		return false, nil
 	}
@@ -457,6 +458,7 @@ func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus, 
 		}
 	}
 	if !w.gmInstanceDataMayFire(st, later) {
+		w.gmInstanceDataDefer(pending)
 		pending = nil
 	}
 	if len(pending) == 0 {
@@ -473,6 +475,7 @@ func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus, 
 	if err := w.gmInstanceDataFire(ctx, inst, spec); err != nil {
 		return true, err
 	}
+	delete(w.gmInstanceDataDeferred, strings.ToLower(spec.Leg))
 	if pauseAttempted {
 		if _, err := w.commander(ctx, commanderReq{Op: "run", Verb: "resume", WaitMS: 10000}); err != nil {
 			return true, stopf(exitRaidWalkFailed, "gm-instance-data: %s: the run resume after the lines failed: %v", spec.Leg, err)
@@ -631,4 +634,45 @@ func (w *walk) gmInstanceDataMayFire(st tbm.RunStatus, later bool) bool {
 		return w.gmInstanceDataPrePull(st, later, w.env.now())
 	}
 	return false
+}
+
+// gmInstanceDataDefer remembers the legs whose send the allowlist deferred.
+func (w *walk) gmInstanceDataDefer(pending []raidwalk.GMInstanceSpec) {
+	for _, spec := range pending {
+		if w.gmInstanceDataDeferred == nil {
+			w.gmInstanceDataDeferred = map[string]string{}
+		}
+		w.gmInstanceDataDeferred[strings.ToLower(spec.Leg)] = spec.Leg
+	}
+}
+
+// gmInstanceDataLegLeft reports the deferred legs the walk has just left (the
+// status names another leg): their lines were never sent.
+func (w *walk) gmInstanceDataLegLeft(st tbm.RunStatus) {
+	if len(w.gmInstanceDataDeferred) == 0 || st.Leg == "" {
+		return
+	}
+	for key, leg := range w.gmInstanceDataDeferred {
+		if !raidwalk.LegMatchesStatus(leg, st.Leg) {
+			w.gmInstanceDataReportUnsent(key, leg)
+		}
+	}
+}
+
+// gmInstanceDataFlushUnsent reports the legs still deferred when the walk ends.
+func (w *walk) gmInstanceDataFlushUnsent() {
+	for key, leg := range w.gmInstanceDataDeferred {
+		w.gmInstanceDataReportUnsent(key, leg)
+	}
+}
+
+// gmInstanceDataReportUnsent is the loud end of a deferred send that never got
+// its out-of-combat rest or gather: a summary note, a WARN line in run.log and
+// the summary count. It never fails the walk.
+func (w *walk) gmInstanceDataReportUnsent(key, leg string) {
+	delete(w.gmInstanceDataDeferred, key)
+	w.gmInstanceDataUnsent++
+	msg := fmt.Sprintf("gm-instance-data: %s lines NOT sent (no out-of-combat rest/gather in the leg)", leg)
+	w.note("%s", msg)
+	w.logLine(w.env.now(), msg)
 }

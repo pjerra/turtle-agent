@@ -1380,3 +1380,60 @@ func TestGMInstanceDataZeroInstThenWalkingWaitsForARest(t *testing.T) {
 		})
 	}
 }
+
+// A deferred send must not vanish silently: when the leg has no qualifying
+// rest/gather, the walk says so (a note + WARN line in run.log) and counts it in
+// the summary as gm_instance_data_unsent, whether the walk leaves the leg or the
+// run ends inside it. It never fails the walk, and a leg that did get its rest
+// is not counted.
+func TestGMInstanceDataUnsentIsReported(t *testing.T) {
+	n := zgPlaceSteps(t)
+	boss := instDataLegBossStep(t, "high_priestess_arlokk")
+	st := func(leg string, step int, phase, note string) queuedEvent {
+		return queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|%s|move|%s|%s", step, n.total, leg, phase, note)}
+	}
+	done := queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_arlokk|move|walk|stopped before step %d (until boss): the party stays where it stands", boss, n.total, n.until)}
+	cases := []struct {
+		name  string
+		queue []queuedEvent
+		want  int
+	}{
+		{"leaves the leg", []queuedEvent{
+			st("high_priestess_arlokk", boss-2, "walk", "walking"),
+			st("high_priestess_arlokk", boss-1, "begin", "starting"),
+			st("high_priest_thekal", boss+5, "walk", "walking"),
+			done}, 1},
+		{"run ends in the leg", []queuedEvent{
+			st("high_priestess_arlokk", boss-2, "walk", "walking"),
+			done}, 1},
+		{"leg got its rest", []queuedEvent{
+			st("high_priestess_arlokk", boss-2, "walk", "walking"),
+			st("high_priestess_arlokk", boss-1, "rest", "resting"),
+			st("high_priest_thekal", boss+5, "walk", "walking"),
+			done}, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f, _ := newPlaceFixture(t)
+			f.opts.gmInstanceData = stringList{"high_priestess_arlokk:1 3"}
+			f.agent.startReply = instDataStartReply(t, n)
+			f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+			f.agent.startQueue = c.queue
+			if code := f.run(context.Background()); code != exitOK {
+				t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+			}
+			sum := f.summary()
+			if sum.GMInstanceDataUnsent != c.want {
+				t.Fatalf("gm_instance_data_unsent %d, want %d", sum.GMInstanceDataUnsent, c.want)
+			}
+			const warn = "gm-instance-data: high_priestess_arlokk lines NOT sent (no out-of-combat rest/gather in the leg)"
+			by, _ := os.ReadFile(filepath.Join(f.out, "run.log"))
+			if got := strings.Count(string(by), warn); got != c.want {
+				t.Fatalf("%d WARN lines in run.log, want %d:\n%s", got, c.want, by)
+			}
+			if got := hasNote(sum, warn); got != (c.want > 0) {
+				t.Fatalf("note present %v, want %v: %q", got, c.want > 0, sum.Notes)
+			}
+		})
+	}
+}
