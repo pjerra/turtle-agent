@@ -405,6 +405,9 @@ func PlaceResumeStart(rows planexport.Rows, step int) (string, bool) {
 // bossApproachComment is the comment the plan exporter gives a boss's approach point rows.
 const bossApproachComment = "boss approach"
 
+// bossHoldComment starts the comment of a boss's hold row (planexport: b.hold(bs.Hold, ..., "boss hold")).
+const bossHoldComment = "boss hold"
+
 // PlaceResumeGoalStart is the --from words a restart takes when the run reached a goal's boss row or one of its
 // boss-approach rows (a move row the plan marks "boss approach"). Resuming one row before the boss row lands the raid
 // on the boss's last approach point, inside his reach, and the placement pulls him (walk 46 Jin'do: step 518 wiped,
@@ -418,7 +421,11 @@ func PlaceResumeGoalStart(rows planexport.Rows, step int, goalStart string) (str
 		return "", false
 	}
 	reached := rows.Steps[step-1]
-	if reached.Kind != planexport.KindBoss && !(moveRow(reached) && reached.Comment == bossApproachComment) {
+	// A boss's hold row ("boss hold: ...") is the boss row of a boss fought on the spot.
+	atBoss := reached.Kind == planexport.KindBoss ||
+		(reached.Kind == planexport.KindHold && strings.HasPrefix(reached.Comment, bossHoldComment)) ||
+		(moveRow(reached) && reached.Comment == bossApproachComment)
+	if !atBoss {
 		return "", false
 	}
 	words := strings.Fields(goalStart)

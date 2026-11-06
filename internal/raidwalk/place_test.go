@@ -1062,3 +1062,24 @@ func TestPlaceStepAtBoss(t *testing.T) {
 		}
 	}
 }
+
+// A wipe on a boss's hold row (a boss fought on the spot) resumes from the goal's start like one on a boss row; the
+// hold row of a plain event does not.
+func TestPlaceResumeGoalStartFromABossHoldRow(t *testing.T) {
+	bossHold := placeRow(planexport.KindHold, 0, 0, 50, 0, 5, 14515)
+	bossHold.Comment = "boss hold: the event's mobs are fought on the spot"
+	event := placeRow(planexport.KindHold, 0, 0, 70, 0, 5, 777)
+	event.Comment = "hold: an event"
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}},
+		placeMove(0, 0, 10, 0),
+		placeMove(0, 0, 30, 0),
+		bossHold, // 3
+		event,    // 4
+	)
+	if got, ok := PlaceResumeGoalStart(rows, 3, "step 1"); !ok || got != "step 1" {
+		t.Errorf("boss hold row: %q %v, want step 1", got, ok)
+	}
+	if got, ok := PlaceResumeGoalStart(rows, 4, "step 1"); ok {
+		t.Errorf("event hold row resumed at %q", got)
+	}
+}

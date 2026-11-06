@@ -104,19 +104,27 @@ func placeQuietHazards(world *worldspawn.World, rows planexport.Rows, start int)
 		}
 	}
 	// A boss stands alone: no pack owns it, so the pack loop above never sees it (walk 46 Jin'do: the start 25.2 yd from
-	// his spawn pulled him). Each boss row at or after start is a hazard at the plan's boss position, with the stats
-	// of the export's spawn of that entry when one stands near, else the default detection range.
-	for i := start - 1; i < len(rows.Steps); i++ {
-		s := rows.Steps[i]
-		if s.Kind != planexport.KindBoss || !placedRow(s) {
-			continue
+	// his spawn pulled him). The NEXT boss row of the start's own leg is a hazard, standing where the export's spawn of
+	// that entry stands (with its stats) when one is near the row, else at the row. Later bosses and other legs'
+	// bosses are not judged: a row near one of those is a fine start for the leg it belongs to.
+	if start >= 1 && start <= len(rows.Steps) {
+		leg := rows.Steps[start-1].Leg
+		for i := start - 1; i < len(rows.Steps); i++ {
+			s := rows.Steps[i]
+			if s.Leg != leg {
+				break
+			}
+			if s.Kind == planexport.KindBoss && placedRow(s) {
+				out = append(out, placeQuietBossHazard(world, s, i+1))
+				break
+			}
 		}
-		out = append(out, placeQuietBossHazard(world, s, i+1))
 	}
 	return out
 }
 
-// placeQuietBossHazard is the hazard of one boss row, standing at the row's position.
+// placeQuietBossHazard is the hazard of one boss row: the export's nearest spawn of the boss's entry within
+// placeQuietBossSpawnYd of the row (its position and stats), else the row's own position with the default detection.
 func placeQuietBossHazard(world *worldspawn.World, s planexport.StepRow, step int) placeQuietHazard {
 	pos := dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}
 	var best worldspawn.Spawn
@@ -137,7 +145,6 @@ func placeQuietBossHazard(world *worldspawn.World, s planexport.StepRow, step in
 			plainReach: placeQuietBossDetectYd,
 		}
 	}
-	best.Pos = pos
 	return placeQuietHazard{spawn: best, fromStep: step}
 }
 
@@ -194,8 +201,24 @@ func PlaceQuietStart(rows planexport.Rows, world *worldspawn.World, start, party
 	var best int
 	var bestDist, bestNeed float64
 	found := false
+	stop := "" // what ended the walk-back
+	leg := point.Leg
 	for i := start - 2; i >= 0; i-- {
 		s := rows.Steps[i]
+		// Never past a boss or hold row, nor out of the start's leg (PlaceBackInLeg's rule): a start moved behind
+		// one would have the raid fight it again.
+		if s.Kind == planexport.KindBoss {
+			stop = fmt.Sprintf("no quiet move row before boss %d (step %d)", s.Entry, i+1)
+			break
+		}
+		if s.Kind == planexport.KindHold {
+			stop = fmt.Sprintf("no quiet move row before the hold row at step %d", i+1)
+			break
+		}
+		if s.Leg != leg {
+			stop = "no quiet move row stands before it in its leg"
+			break
+		}
 		if !moveRow(s) || !placedRow(s) {
 			continue
 		}
@@ -212,7 +235,10 @@ func PlaceQuietStart(rows planexport.Rows, world *worldspawn.World, start, party
 		break
 	}
 	if !found {
-		return start, why + "; no quiet move row stands before it"
+		if stop == "" {
+			stop = "no quiet move row stands before it"
+		}
+		return start, why + "; " + stop
 	}
 	return best, fmt.Sprintf("%s; the nearest quiet move row is step %d, %.1f yd from it (needs %.1f)", why, best, bestDist, bestNeed)
 }
