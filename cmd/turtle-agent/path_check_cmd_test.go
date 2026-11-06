@@ -103,3 +103,49 @@ func TestPathCheckCmdOk(t *testing.T) {
 		}
 	}
 }
+
+// --ray adds the walkability ray as a third line (the agent's line-of-sight stand-in) and a "ray" object to the JSON;
+// without it neither is printed. The pocket-to-boss hop here is the blocked case (the steep pocket's lip).
+func TestPathCheckCmdRay(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	dir := ""
+	for _, d := range []string{os.Getenv("TURTLE_AGENT_MMAPS"), filepath.Join(home, "tortoise-wow-server", "data", "mmaps")} {
+		if d == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(d, "808.mmap")); err == nil {
+			dir = d
+			break
+		}
+	}
+	if dir == "" {
+		t.Skip("no map 808 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 808.mmap and the tiles")
+	}
+	hop := []string{"--", "-8321.5", "-3447.5", "181.0", "-8309.45", "-3460.42", "194.43"}
+	var out, errOut bytes.Buffer
+	args := append([]string{"--mmaps", dir, "--map", "808", "--ray"}, hop...)
+	if code := pathCheckCmd(args, &out, &errOut); code != exitOK {
+		t.Fatalf("exit %d (%s)", code, errOut.String())
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("want 3 lines (offline, server, ray), got %d: %q", len(lines), out.String())
+	}
+	if !strings.HasPrefix(lines[2], "ray: blocked after ") {
+		t.Errorf("third line %q, want the blocked ray", lines[2])
+	}
+	var js bytes.Buffer
+	if code := pathCheckCmd(append([]string{"--mmaps", dir, "--map", "808", "--json", "--ray"}, hop...), &js, &errOut); code != exitOK {
+		t.Fatalf("json exit %d (%s)", code, errOut.String())
+	}
+	if !strings.Contains(js.String(), `"ray":{"known":true,"clear":false`) {
+		t.Errorf("no blocked ray in the JSON: %q", js.String())
+	}
+	var plain bytes.Buffer
+	if code := pathCheckCmd(append([]string{"--mmaps", dir, "--map", "808", "--json"}, hop...), &plain, &errOut); code != exitOK {
+		t.Fatalf("json exit %d (%s)", code, errOut.String())
+	}
+	if strings.Contains(plain.String(), `"ray"`) {
+		t.Errorf("no --ray, but the JSON carries one: %q", plain.String())
+	}
+}
