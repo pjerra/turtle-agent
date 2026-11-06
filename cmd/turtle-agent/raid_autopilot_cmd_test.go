@@ -1188,6 +1188,76 @@ func TestAutoNewIDTakesADoneIDsSlot(t *testing.T) {
 	}
 }
 
+// An escalated id with no live run holds no slot either: the next goal naming that slot starts there, instead of the
+// person reusing the escalated id with a changed line to free it.
+func TestAutoNewIDTakesAnEscalatedIDsSlot(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 5, 51, "server closed the connection")
+	f.attempt("a-2", 29, 0, "place: 4 tries in the same instance, start step 51")
+	f.attempt("a-3", 29, 0, "place: 4 tries in the same instance, start step 51")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the reuse re-place", func() bool { return len(f.args()) >= 2 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the fresh-instance retry", func() bool { return len(f.args()) >= 3 })
+	finishAttempt(t, s)
+	done, escalated := runState(s.states[0])
+	if done || !escalated {
+		t.Fatalf("the second exit 29 did not escalate a: done=%v escalated=%v:\n%s", done, escalated, f.events())
+	}
+	s.states[0].mu.Lock()
+	live := s.states[0].run != nil
+	s.states[0].mu.Unlock()
+	if live {
+		t.Fatalf("the escalated id kept a run:\n%s", f.events())
+	}
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	tickUntil(t, s, "b launched on a's slot", func() bool { return len(f.args()) >= 4 })
+	if strings.Contains(f.events(), "invalid targets") {
+		t.Fatalf("an escalated id's slot made the file invalid:\n%s", f.events())
+	}
+	if f.stateByID(s, "b") == nil {
+		t.Fatalf("b is not supervised:\n%s", f.events())
+	}
+	// The start reads its checkpoint the same way: a's escalation holds no slot there either.
+	s.saveState()
+	s2 := f.supervisor()
+	if f.stateByID(s2, "a") == nil || f.stateByID(s2, "b") == nil {
+		t.Fatalf("the restart lost a or b:\n%s", f.events())
+	}
+}
+
+// An escalated id whose run is still there (a teardown that never verified) holds its slot: the new line is skipped
+// with a warning naming it, and the escalated id is left alone.
+func TestAutoNewIDOnALiveEscalatedIDsSlotWaits(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 5, 51, "server closed the connection")
+	if err := os.WriteFile(f.failTear, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	tickUntil(t, s, "the escalation", func() bool { _, esc := runState(s.states[0]); return esc })
+	s.wg.Wait()
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	for range 20 {
+		s.tick(context.Background())
+		time.Sleep(2 * time.Millisecond)
+	}
+	if len(f.args()) != 1 || f.stateByID(s, "b") != nil {
+		t.Fatalf("b started on a live escalated id's slot:\n%s", f.events())
+	}
+	if got := strings.Count(f.events(), "invalid targets line skipped"); got != 1 || !strings.Contains(f.events(), "line 2") {
+		t.Fatalf("%d warnings, want one naming line 2:\n%s", got, f.events())
+	}
+	if _, escalated := runState(s.states[0]); !escalated {
+		t.Fatalf("the skipped line cleared a's escalation:\n%s", f.events())
+	}
+}
+
 // A slot still held by a live run keeps the one-walk-per-slot rule: the new line is skipped with a warning naming
 // it, the running id is untouched, and the line starts once the run is over.
 func TestAutoNewIDOnARunningIDsSlotWaits(t *testing.T) {

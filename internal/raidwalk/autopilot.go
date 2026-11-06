@@ -144,10 +144,10 @@ type AutoSlotClaim int
 const (
 	// AutoSlotNew: an id the caller does not know yet; its lines get a slot only if no known active id holds it.
 	AutoSlotNew AutoSlotClaim = iota
-	// AutoSlotActive: an id with a live state (running, in a restart wait, escalated, refused, queued): it claims its
-	// slots before any new line, whatever the file order.
+	// AutoSlotActive: an id with a live state (running, in a restart wait, a queued line, refused, or escalated with
+	// its run still there): it claims its slots before any new line, whatever the file order.
 	AutoSlotActive
-	// AutoSlotInactive: an id that is done or stopped with no run: it holds no slot at all.
+	// AutoSlotInactive: an id that is done, stopped or escalated with no live run: it holds no slot at all.
 	AutoSlotInactive
 )
 
