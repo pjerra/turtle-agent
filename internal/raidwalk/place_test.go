@@ -991,6 +991,57 @@ func TestPlaceResumeStartStepsBackFromABossRow(t *testing.T) {
 	}
 }
 
+// Walk 46 Jin'do: every id wiped at the boss row (step 518) and the autopilot resumed from the reached step minus
+// one, the last boss-approach row 25.2 yd from the boss, so the placement pulled him. A wipe at the goal's boss row or
+// at one of its approach rows resumes from the goal's own start instead.
+func TestPlaceResumeGoalStartFromABossOrItsApproach(t *testing.T) {
+	approach := func(leg int, x, y, z float32) planexport.StepRow {
+		s := placeMove(leg, x, y, z)
+		s.Comment = "boss approach"
+		return s
+	}
+	rows := placeRows([]planexport.LegRow{
+		{Plan: "t", Leg: 0, Name: "one"},
+		{Plan: "t", Leg: 1, Name: "two"},
+		{Plan: "t", Leg: 2, Name: "three"},
+	},
+		placeMove(0, 0, 10, 0),
+		placeMove(1, 0, 20, 0),                               // 2
+		placeMove(1, 0, 30, 0),                               // 3: the goal's start
+		placeRow(planexport.KindPull, 1, 0, 35, 0, 10, 777),  // 4: trash
+		placeMove(1, 0, 40, 0),                               // 5
+		approach(1, 0, 45, 0),                                // 6
+		approach(1, 0, 50, 0),                                // 7
+		placeRow(planexport.KindBoss, 1, 0, 55, 0, 0, 14515), // 8
+		placeMove(2, 0, 60, 0),                               // 9
+		placeRow(planexport.KindBoss, 2, 0, 70, 0, 0, 11380), // 10
+	)
+	for _, c := range []struct {
+		name  string
+		step  int
+		start string
+		want  string
+		ok    bool
+	}{
+		{"the boss row", 8, "step 3", "step 3", true},
+		{"the last approach row", 7, "step 3", "step 3", true},
+		{"the first approach row", 6, "step 3", "step 3", true},
+		{"a leg start", 8, "leg two", "leg two", true},
+		{"a trash row keeps the reached step", 4, "step 3", "", false},
+		{"a plain move row keeps the reached step", 5, "step 3", "", false},
+		{"no goal start", 8, "", "", false},
+		{"a start in another leg", 10, "step 3", "", false},
+		{"a start after the reached step", 7, "step 9", "", false},
+		{"a boss between the start and the step", 10, "step 8", "", false},
+		{"a step outside the rows", 99, "step 3", "", false},
+	} {
+		got, ok := PlaceResumeGoalStart(rows, c.step, c.start)
+		if ok != c.ok || got != c.want {
+			t.Errorf("%s: PlaceResumeGoalStart(%d, %q) = %q %v, want %q %v", c.name, c.step, c.start, got, ok, c.want, c.ok)
+		}
+	}
+}
+
 // A wipe that ends at a boss row, or the row before it, is a wipe at that boss: the autopilot launches the next
 // attempt in a fresh instance (walk 44 hk7m-3, walk 46 hk4m-3). Any other step, or a step outside the rows, is not.
 func TestPlaceStepAtBoss(t *testing.T) {
@@ -1006,6 +1057,49 @@ func TestPlaceStepAtBoss(t *testing.T) {
 		step int
 		want bool
 	}{{1, false}, {2, false}, {3, true}, {4, true}, {5, false}, {6, false}, {0, false}, {7, false}} {
+		if got := PlaceStepAtBoss(rows, c.step); got != c.want {
+			t.Errorf("PlaceStepAtBoss(%d) = %v, want %v", c.step, got, c.want)
+		}
+	}
+}
+
+// A wipe on a boss's hold row (a boss fought on the spot) resumes from the goal's start like one on a boss row; the
+// hold row of a plain event does not.
+func TestPlaceResumeGoalStartFromABossHoldRow(t *testing.T) {
+	bossHold := placeRow(planexport.KindHold, 0, 0, 50, 0, 5, 14515)
+	bossHold.Comment = "boss hold: the event's mobs are fought on the spot"
+	event := placeRow(planexport.KindHold, 0, 0, 70, 0, 5, 777)
+	event.Comment = "hold: an event"
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}},
+		placeMove(0, 0, 10, 0),
+		placeMove(0, 0, 30, 0),
+		bossHold, // 3
+		event,    // 4
+	)
+	if got, ok := PlaceResumeGoalStart(rows, 3, "step 1"); !ok || got != "step 1" {
+		t.Errorf("boss hold row: %q %v, want step 1", got, ok)
+	}
+	if got, ok := PlaceResumeGoalStart(rows, 4, "step 1"); ok {
+		t.Errorf("event hold row resumed at %q", got)
+	}
+}
+
+// A boss fought on the spot is a hold row commented "boss hold": a wipe there is a wipe at that boss too.
+func TestPlaceStepAtBossHoldRow(t *testing.T) {
+	hold := placeRow(planexport.KindHold, 0, 0, 35, 0, 5, 14515)
+	hold.Comment = "boss hold: fought on the spot"
+	event := placeRow(planexport.KindHold, 0, 0, 60, 0, 5, 777)
+	event.Comment = "hold: an event"
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}},
+		placeMove(0, 0, 30, 0), // 1: the row before the boss hold
+		hold,                   // 2
+		placeMove(0, 0, 50, 0), // 3
+		event,                  // 4
+	)
+	for _, c := range []struct {
+		step int
+		want bool
+	}{{1, true}, {2, true}, {3, false}, {4, false}} {
 		if got := PlaceStepAtBoss(rows, c.step); got != c.want {
 			t.Errorf("PlaceStepAtBoss(%d) = %v, want %v", c.step, got, c.want)
 		}

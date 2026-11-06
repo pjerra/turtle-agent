@@ -609,6 +609,20 @@ func (s *autoSupervisor) autoResumeStart(t raidwalk.AutoTarget, from string) str
 	return from
 }
 
+// autoGoalResumeStart is the goal's own --from when the reached step is its boss row or one of the boss's approach
+// rows (raidwalk.PlaceResumeGoalStart); "" for any other step, so the caller resumes from the reached step.
+func (s *autoSupervisor) autoGoalResumeStart(t raidwalk.AutoTarget, step int) string {
+	if step < 1 || t.Start == "" {
+		return ""
+	}
+	rows, ok := s.targetRows(t)
+	if !ok {
+		return ""
+	}
+	words, _ := raidwalk.PlaceResumeGoalStart(rows, step, t.Start)
+	return words
+}
+
 // initSeq continues the out numbering after the dirs an earlier autopilot made: the walk refuses an existing --out,
 // and a relaunch must not think every attempt is the first. It also remembers each id's latest out dir.
 func (s *autoSupervisor) initSeq() {
@@ -1796,7 +1810,12 @@ func (s *autoSupervisor) launch(st *autoState) {
 	if from != "" {
 		// A step raid-walk refuses as a start (the boss row a wipe died on) is not a reason to escalate: resume
 		// from the nearest row of the same leg it takes.
-		if adjusted := s.autoResumeStart(g.target, from); adjusted != from {
+		if goalFrom := s.autoGoalResumeStart(g.target, step); step > 0 && goalFrom != "" {
+			// A wipe at the goal's boss (or on its approach rows) resumes at the goal's own start: the row before
+			// the boss row stands inside his reach and the placement pulls him (walk 46 Jin'do).
+			resumeFrom = fmt.Sprintf("step %d is the boss or its approach: resuming from the goal's start %q", step, goalFrom)
+			from = goalFrom
+		} else if adjusted := s.autoResumeStart(g.target, from); adjusted != from {
 			resumeFrom = fmt.Sprintf("%q is not a place start: resuming from %q", from, adjusted)
 			from = adjusted
 		}

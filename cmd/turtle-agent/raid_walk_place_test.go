@@ -3811,3 +3811,32 @@ func TestPlaceStartStepOnAPullRow(t *testing.T) {
 		t.Fatalf("run start args %q, want %q", startArgs, want)
 	}
 }
+
+// Walk 46 Jin'do: the quiet ignores a unit beyond the 25 yd landing reach without a word, so the note named a far
+// Crocolisk while the boss stood 25.2 yd from the start. A boss unit within 30 yd is logged with its distance.
+func TestPlaceQuietNotesABossBeyondTheReach(t *testing.T) {
+	for _, c := range []struct {
+		d    float32
+		want bool
+	}{{27, true}, {60, false}} {
+		f, p := newPlaceFixture(t)
+		rows, plan := placePlanRows(t)
+		boss := rows.Steps[nextBossStep(rows, plan.Start)-1]
+		f.agent.ttFn = func(cmd string) (ttResult, error) {
+			if strings.HasPrefix(cmd, "quiet") {
+				near := []any{map[string]any{"g": "0xF130000000D001", "e": boss.Entry, "n": "The Boss",
+					"p": []float32{plan.Point.X + c.d, plan.Point.Y, plan.Point.Z}, "d": c.d, "home": []float32{plan.Point.X + c.d, plan.Point.Y, plan.Point.Z}}}
+				return ttReplyOf(t, map[string]any{"map": 309, "read": 2, "final": true, "quiet": false, "near": near, "n_near": 1, "roamers": []any{}}), nil
+			}
+			return p.answer(cmd)
+		}
+		f.agent.startReply = placeStartReply("zul_gurub", plan.Start, len(rows.Steps), plan.Stop)
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("d %v: exit %d, want 0: %s", c.d, code, f.summary().EndReason)
+		}
+		want := fmt.Sprintf("the quiet sees boss %d The Boss %.1f yd", boss.Entry, c.d)
+		if got := hasNote(f.summary(), want); got != c.want {
+			t.Fatalf("d %v: note %q present %v, want %v: %v", c.d, want, got, c.want, f.summary().Notes)
+		}
+	}
+}
