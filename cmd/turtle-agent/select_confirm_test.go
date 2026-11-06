@@ -69,20 +69,37 @@ func TestGMLineWaitsForTheServerToShowTheSelection(t *testing.T) {
 		t.Fatalf("a line went out without a confirmed selection: %q", c)
 	}
 
-	// The selection lands late (after 150 ms): the line goes out after it.
+	// The selection lands late, after the server has seen the select: the line goes out only after it. The late echo is sent when the
+	// select arrives (not after a fixed sleep), and the wait is long: a loaded machine can take longer than 300 ms to deliver it.
+	gmSelectConfirmWait = 30 * time.Second
 	r = newRig(t)
 	r.srv.Send(opcode.SMSGUpdateObject, selfBlock(stranger))
-	waitUntil(t, func() bool { g, ok := r.s.ServerSelection(); return ok && g == stranger }) // the field is known: no neutral selection
+	waitUntil(t, func() bool { return !r.s.SelectionAmbiguous(lead) }) // the session has taken the stranger in: no neutral selection
 	g = remoteGame{c: &commanderService{cur: func() *session.Session { return r.s }}}
-	go func() {
-		time.Sleep(150 * time.Millisecond)
-		r.srv.Send(opcode.SMSGUpdateObject, selfValues(lead))
-	}()
-	if err := g.selectThenGM(context.Background(), lead, ".instance groupunbind all"); err != nil {
+	done := make(chan error, 1)
+	go func() { done <- g.selectThenGM(context.Background(), lead, ".instance groupunbind all") }()
+	for {
+		p, err := r.srv.Next(10 * time.Second)
+		if err != nil {
+			t.Fatalf("the select never reached the server: %v", err)
+		}
+		if p.Op == opcode.CMSGSetSelection {
+			break
+		}
+	}
+	if c := chats(r, 150*time.Millisecond); len(c) != 0 {
+		t.Fatalf("a line went out before the selection landed: %q", c)
+	}
+	r.srv.Send(opcode.SMSGUpdateObject, selfValues(lead))
+	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if c := chats(r, 400*time.Millisecond); len(c) != 1 || !strings.Contains(c[0], ".instance groupunbind all") {
-		t.Fatalf("chat lines %q", c)
+	p, err := r.srv.Expect(opcode.CMSGMessagechat, 10*time.Second)
+	if err != nil {
+		t.Fatalf("no chat line after the selection landed: %v", err)
+	}
+	if !strings.Contains(string(p.Body), ".instance groupunbind all") {
+		t.Fatalf("chat line %q", p.Body)
 	}
 }
 
@@ -380,8 +397,17 @@ func ownSelection(t *testing.T, r *agentRig, g packet.GUID) {
 	}
 	r.srv.Send(opcode.SMSGUpdateObject, selfValues(g))
 	waitUntil(t, func() bool { return r.s.SelectionConfirmed(g) })
-	if ops := selOps(r, 100*time.Millisecond); len(ops) != 1 {
-		t.Fatalf("ops %v", ops)
+	// The select packet is waited for (a starved machine can hold it back far longer than a quiet window); only the check that
+	// nothing else was sent uses a short window.
+	for done := false; !done; {
+		p, err := r.srv.Next(5 * time.Second)
+		if err != nil {
+			t.Fatalf("the select of %v never reached the server: %v", g, err)
+		}
+		done = p.Op == opcode.CMSGSetSelection
+	}
+	if ops := selOps(r, 100*time.Millisecond); len(ops) != 0 {
+		t.Fatalf("more than one select: %v", ops)
 	}
 }
 
@@ -421,6 +447,10 @@ func (c *coreLike) rewrite(t *testing.T, field packet.GUID) {
 	c.field = field
 	c.r.srv.Send(opcode.SMSGUpdateObject, selfValues(field))
 	waitUntil(t, func() bool { g, _ := c.r.s.ServerSelection(); return g == field })
+	// ServerSelection reads the object store, which the session updates BEFORE it records the observation the selection log works from: a
+	// select sent in that gap is judged against the old log and skips the neutral selection. A rewritten field the log has not seen is
+	// one a select of it must work around, so the observation has landed once SelectionAmbiguous says so.
+	waitUntil(t, func() bool { return c.r.s.SelectionAmbiguous(field) })
 }
 
 // Unit::AttackStop (the mob the agent fought and had selected died) writes 0 into the target field and leaves the selection on the mob. The
@@ -545,7 +575,7 @@ func TestGMLineInCombatPastTheWaitSendsNothing(t *testing.T) {
 
 func waitUntil(t *testing.T, ok func() bool) {
 	t.Helper()
-	for i := 0; i < 200; i++ {
+	for i := 0; i < 1000; i++ { // a 10 s deadline: it only matters on a starved machine, a satisfied condition returns at once
 		if ok() {
 			return
 		}

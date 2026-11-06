@@ -272,7 +272,11 @@ func TestTBMLateAckOfATimedOutClick(t *testing.T) {
 	if reply := result(t, ch)["reply"].(map[string]any); reply["kind"] != "timeout" {
 		t.Fatalf("%v", reply)
 	}
-	r.system("TBM:ACTION_ACK|stay|party|1|-") // late, before the next click
+	// Late, before the next click. The session logs the line on its own goroutine after the pipe took it, so wait until the log has
+	// it: the next click's drain must find it there, as it does for an ACK that really was late.
+	lastSeq := r.s.Log().Last()
+	r.system("TBM:ACTION_ACK|stay|party|1|-")
+	waitUntil(t, func() bool { return r.s.Log().Last() > lastSeq })
 	ch = r.callAsync("tbm_click", `{"button":"Fight.Stay","wait_ms":3000}`)
 	r.expectBody(opcode.CMSGMessagechat, say(".bot action stay"))
 	r.system("TBM:ACTION_ACK|stay|party|2|-")
