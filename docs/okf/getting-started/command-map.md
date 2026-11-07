@@ -21,7 +21,7 @@ Every `turtle-agent` subcommand, and where it is documented. This area owns `log
 
 - `login [<account>] <character>` — log one character in ([log in](log-in.md), [login flags](login-reference.md)).
 - `fleet --config FILE` — log several characters in ([fleet](fleet-party.md), [flags](rpc-fleet-reference.md)).
-- `lease acquire|renew|release|list` — manage slot leases ([leases](lease-slot.md), [flags](lease-slot-reference.md)).
+- `lease acquire|renew|release|list|reap` — manage slot leases ([leases](lease-slot.md), [flags](lease-slot-reference.md)).
 - `slot setup <server> <slot> --holder NAME` — build a slot's client dir ([leases](lease-slot.md), [flags](lease-slot-reference.md)).
 - `teardown <dir>` — end a slot run and free it ([leases](lease-slot.md), [flags](lease-slot-reference.md)).
 - `rpc <dir> <method> [<params>]` — call a slot agent ([drive](drive-rpc.md), [flags](rpc-fleet-reference.md)).

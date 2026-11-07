@@ -32,6 +32,54 @@ type Lease struct {
 	Expires       time.Time `json:"expires"`       // UTC
 	Dir           string    `json:"dir,omitempty"` // set by slot setup: the client dir (absolute)
 	TakenOverFrom string    `json:"taken_over_from,omitempty"`
+	// The holder's process, recorded when a long-lived holder (a walk) takes the lease: another reader on the same
+	// host can then prove the holder is gone (reap) instead of waiting out the TTL. An old-format lease has none and
+	// keeps the expiry rule.
+	HolderPID   int       `json:"holder_pid,omitempty"`
+	HolderHost  string    `json:"holder_host,omitempty"`
+	HolderStart uint64    `json:"holder_start,omitempty"` // /proc/<pid>/stat start time: tells a reused pid from the holder
+	Renewed     time.Time `json:"renewed,omitzero"`       // UTC, the last acquire/renew
+}
+
+// leaseHost is this machine's name, as leases record it.
+var leaseHost = func() string {
+	h, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	return h
+}
+
+// holderProc reads a pid's start time and whether it is alive; a test replaces it. exact is false when the
+// platform cannot tell, and an unknown holder is never called dead.
+var holderProc = procStart
+
+type holderLiveness int
+
+const (
+	holderUnknown holderLiveness = iota // not recorded, another host, or the platform cannot tell
+	holderAlive
+	holderDead
+)
+
+// holderState says whether the lease's recorded holder process still holds it here. A lease of another host, an
+// old-format lease without the fields and one this platform cannot check are unknown: only the expiry frees them.
+// A local pid that is gone, or alive with a different start time (the pid was reused), is dead.
+func holderState(l *Lease) holderLiveness {
+	if l == nil || l.HolderPID <= 0 || l.HolderHost == "" || l.HolderHost != leaseHost() {
+		return holderUnknown
+	}
+	start, alive, exact := holderProc(l.HolderPID)
+	if !exact {
+		return holderUnknown
+	}
+	if !alive {
+		return holderDead
+	}
+	if l.HolderStart > 0 && l.HolderStart != start {
+		return holderDead
+	}
+	return holderAlive
 }
 
 type Probe interface {
@@ -44,6 +92,9 @@ type Store struct {
 	Dir   string
 	Now   func() time.Time
 	Probe Probe
+	// HolderPID, when > 0, is recorded in every lease this store acquires or renews as the holder's process (a walk
+	// sets its own pid). A CLI acquire leaves it 0: that process exits at once, so only the expiry frees its lease.
+	HolderPID int
 }
 
 func NewStore(cfg *Config, slotsPath string) *Store {
@@ -61,8 +112,8 @@ func LeasesDir(slotsPath string) string {
 }
 
 // LiveLeaseHolders names the holders of server's live leases in dir (a store's leases dir). A lease is live unless the
-// store would call it stale (expired AND no live agent in its dir). A missing dir is no leases; an unreadable file is
-// an error, because an unknown ledger is not called empty.
+// store would call it stale (expired AND no live agent in its dir) or its recorded local holder process is dead. A
+// missing dir is no leases; an unreadable file is an error, because an unknown ledger is not called empty.
 func LiveLeaseHolders(dir, server string, now time.Time, probe Probe) ([]string, error) {
 	entries, err := os.ReadDir(filepath.Join(dir, server))
 	if err != nil {
@@ -85,7 +136,9 @@ func LiveLeaseHolders(dir, server string, now time.Time, probe Probe) ([]string,
 			return nil, fmt.Errorf("lease %s: %w", e.Name(), err)
 		}
 		live := !now.After(l.Expires)
-		if !live && l.Dir != "" && probe != nil {
+		if holderState(&l) == holderDead {
+			live = false
+		} else if !live && l.Dir != "" && probe != nil {
 			if _, alive := probe.AgentPID(l.Dir); alive {
 				live = true
 			}
@@ -112,6 +165,9 @@ type SlotState struct {
 	Lease      *Lease
 	AgentPID   int
 	AgentAlive bool
+	// HolderDead says the lease's recorded local holder process is gone (its pid is dead or reused): the slot is
+	// free at once, whatever the expiry says.
+	HolderDead bool
 }
 
 type Refusal struct {
@@ -166,9 +222,28 @@ func (s *Store) agentAlive(dir string) (int, bool) {
 	return s.Probe.AgentPID(dir)
 }
 
+// stampHolder writes the acquire/renew side of a lease: the renewal clock always, and this store's holder process
+// (pid, host, start time) when one was recorded. A walk's lease can then be freed at once when the walk dies; a
+// CLI lease (HolderPID 0) keeps the expiry rule.
+func (s *Store) stampHolder(l *Lease, now time.Time) {
+	l.Renewed = now.UTC()
+	if s.HolderPID <= 0 {
+		return
+	}
+	l.HolderPID = s.HolderPID
+	l.HolderHost = leaseHost()
+	l.HolderStart = 0
+	if start, alive, exact := holderProc(s.HolderPID); exact && alive {
+		l.HolderStart = start
+	}
+}
+
 func (s *Store) isStale(l *Lease) bool {
 	if l == nil {
 		return false
+	}
+	if holderState(l) == holderDead {
+		return true
 	}
 	if !s.Now().After(l.Expires) {
 		return false
@@ -177,8 +252,7 @@ func (s *Store) isStale(l *Lease) bool {
 	return !alive
 }
 
-// IsStale reports whether a lease read by Get needs a takeover: expired AND
-// no live agent in its dir.
+// IsStale reports whether a lease read by Get needs a takeover: a dead local holder, or an expiry with no live agent.
 func (s *Store) IsStale(l *Lease) bool { return s.isStale(l) }
 
 func (s *Store) withLock(fn func() error) error {
@@ -237,6 +311,7 @@ func (s *Store) acquireLocked(server, slot string, any bool, holder string, ttl 
 				return Acquired{}, err
 			}
 			l := &Lease{Server: server, Slot: sl.ID, Holder: holder, LeaseID: id, Acquired: now, Expires: now.Add(ttl)}
+			s.stampHolder(l, now)
 			if existing != nil {
 				old := *existing
 				out := Acquired{Lease: *l, Slot: sl, TookOver: &old}
@@ -303,6 +378,7 @@ func (s *Store) acquireLocked(server, slot string, any bool, holder string, ttl 
 		}
 		existing.LeaseID = id
 		existing.Expires = now.Add(ttl)
+		s.stampHolder(existing, now)
 		if err := s.writeLease(existing); err != nil {
 			return Acquired{}, err
 		}
@@ -325,6 +401,7 @@ func (s *Store) acquireLocked(server, slot string, any bool, holder string, ttl 
 		return Acquired{}, err
 	}
 	l := &Lease{Server: server, Slot: slot, Holder: holder, LeaseID: id, Acquired: now, Expires: now.Add(ttl)}
+	s.stampHolder(l, now)
 	if existing != nil {
 		old := *existing
 		took = &old
@@ -359,7 +436,9 @@ func (s *Store) Renew(server, slot, holder, leaseID string, ttl time.Duration) (
 		if existing.LeaseID != leaseID {
 			return &Refusal{Msg: fmt.Sprintf("%s/%s is not leased by %s (lease id mismatch: it was re-acquired)", server, slot, holder)}
 		}
-		existing.Expires = s.Now().UTC().Add(ttl)
+		now := s.Now().UTC()
+		existing.Expires = now.Add(ttl)
+		s.stampHolder(existing, now)
 		if err := s.writeLease(existing); err != nil {
 			return err
 		}
@@ -441,6 +520,7 @@ func (s *Store) List(server string) ([]SlotState, error) {
 				}
 				l := *existing
 				st.Lease = &l
+				st.HolderDead = holderState(existing) == holderDead
 				if pid, alive := s.agentAlive(existing.Dir); alive || pid != 0 {
 					st.AgentPID = pid
 					st.AgentAlive = alive
@@ -503,6 +583,82 @@ func (s *Store) Get(server, slot string) (*Lease, error) {
 		return nil
 	})
 	return out, err
+}
+
+// ReapedLease is one lease a reap removed, or with dryRun would remove.
+type ReapedLease struct {
+	Server    string
+	Slot      string
+	Holder    string
+	HolderPID int
+	Expires   time.Time
+	Path      string
+}
+
+// ReapDeadLeases removes the leases in dir (a store's leases dir, every server under it) whose recorded holder ran
+// on this host and is gone: its pid is dead or was reused, so no renewal can come. A lease of another host, an
+// old-format lease without the holder fields, and one this platform cannot check are left to their expiry. dryRun
+// lists them and removes nothing. A missing dir is no leases. The store's lock keeps the reap from racing an acquire
+// or a renewal, and the whole ledger is read before anything is removed, so an unreadable lease changes nothing.
+func ReapDeadLeases(dir string, dryRun bool) ([]ReapedLease, error) {
+	if _, err := os.Stat(dir); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	unlock, err := lockDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	servers, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var out []ReapedLease
+	for _, srv := range servers {
+		if !srv.IsDir() {
+			continue
+		}
+		entries, err := os.ReadDir(filepath.Join(dir, srv.Name()))
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+				continue
+			}
+			path := filepath.Join(dir, srv.Name(), e.Name())
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return nil, err
+			}
+			var l Lease
+			if err := json.Unmarshal(raw, &l); err != nil {
+				return nil, fmt.Errorf("lease %s: %w", path, err)
+			}
+			if holderState(&l) != holderDead {
+				continue
+			}
+			out = append(out, ReapedLease{Server: l.Server, Slot: l.Slot, Holder: l.Holder, HolderPID: l.HolderPID, Expires: l.Expires, Path: path})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Server != out[j].Server {
+			return out[i].Server < out[j].Server
+		}
+		return out[i].Slot < out[j].Slot
+	})
+	if dryRun {
+		return out, nil
+	}
+	for _, l := range out {
+		if err := os.Remove(l.Path); err != nil && !os.IsNotExist(err) {
+			return out, err
+		}
+	}
+	return out, nil
 }
 
 func joinComma(parts []string) string {

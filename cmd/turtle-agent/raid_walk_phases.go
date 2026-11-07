@@ -22,6 +22,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/session"
+	"github.com/pjerra/turtle-agent/internal/slots"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -218,35 +219,71 @@ func (w *walk) stop(err error, teardown bool) int {
 	return w.exitCode
 }
 
-// phaseLease is phase 2: the slot lease, renewed every 30 minutes.
+// phaseLease is phase 2: the slot lease, taken short and renewed every walkLeaseRenew while the walk runs, so a dead
+// holder's slot is free within minutes and a live walk never loses it.
 func (w *walk) phaseLease(ctx context.Context) error {
-	ttl := time.Duration(w.opts.ttlMinutes()) * time.Minute
 	anySlot := w.opts.slot == ""
-	acq, err := w.env.acquire(w.opts.server, w.opts.slot, anySlot, w.opts.holder, ttl)
+	acq, err := w.env.acquire(w.opts.server, w.opts.slot, anySlot, w.opts.holder, walkLeaseTTL)
 	if err != nil {
 		return stopf(exitSlotRefused, "lease %s/%s: %v", w.opts.server, w.opts.slot, err)
 	}
 	w.lease = acq.Lease
-	w.logLine(w.env.now(), fmt.Sprintf("lease %s/%s (holder %s) until %s", w.lease.Server, w.lease.Slot, w.lease.Holder, w.lease.Expires.UTC().Format(time.RFC3339)))
-	go func() {
-		t := time.NewTicker(30 * time.Minute)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
+	w.logLine(w.env.now(), fmt.Sprintf("lease %s/%s (holder %s) until %s, renewed every %s", w.lease.Server, w.lease.Slot,
+		w.lease.Holder, w.lease.Expires.UTC().Format(time.RFC3339), walkLeaseRenew))
+	go w.renewLease(ctx)
+	return nil
+}
+
+// renewLease extends the walk's lease every walkLeaseRenew until the walk ends or loses it.
+func (w *walk) renewLease(ctx context.Context) {
+	t := time.NewTicker(walkLeaseRenew)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if w.renewLeaseOnce(ctx) {
 				return
-			case <-t.C:
-				if _, err := w.env.renew(w.lease.Server, w.lease.Slot, w.lease.Holder, w.lease.LeaseID, ttl); err != nil {
-					w.leaseLost.Store(true)
-					if w.cancel != nil {
-						w.cancel()
-					}
-					return
-				}
 			}
 		}
-	}()
-	return nil
+	}
+}
+
+// renewLeaseOnce renews until it succeeds, is refused or ctx ends; true says the walk must stop. A failure that may
+// pass (a lock timeout, an I/O error) is logged loudly and retried every walkLeaseRenewRetry: the lease is never
+// silently dropped and the walk never runs on past an expiry it could have avoided. A refusal is not transient — the
+// lease was re-acquired or released — so walking on would be another holder's slot: that ends the walk.
+func (w *walk) renewLeaseOnce(ctx context.Context) bool {
+	for {
+		_, err := w.env.renew(w.lease.Server, w.lease.Slot, w.lease.Holder, w.lease.LeaseID, walkLeaseTTL)
+		if err == nil {
+			w.logLine(w.env.now(), fmt.Sprintf("lease renewed until %s", w.env.now().Add(walkLeaseTTL).UTC().Format(time.RFC3339)))
+			return false
+		}
+		if _, refused := err.(*slots.Refusal); refused {
+			w.leaseLost.Store(true)
+			w.leaseMessage("lease %s/%s is not ours any more: %v", w.lease.Server, w.lease.Slot, err)
+			if w.cancel != nil {
+				w.cancel()
+			}
+			return true
+		}
+		w.leaseMessage("lease renew %s/%s failed: %v; retrying in %s", w.lease.Server, w.lease.Slot, err, walkLeaseRenewRetry)
+		select {
+		case <-ctx.Done():
+			return true
+		case <-time.After(walkLeaseRenewRetry):
+		}
+	}
+}
+
+// leaseMessage makes a heartbeat problem loud: the run log, the summary notes and stderr (the autopilot's attempt log).
+func (w *walk) leaseMessage(format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	w.logLine(w.env.now(), msg)
+	w.note("%s", msg)
+	fmt.Fprintln(w.stderr, "raid-walk: "+msg)
 }
 
 // releaseLease gives the lease back when the walk never reached teardown (teardown releases it itself).

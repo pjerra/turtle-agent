@@ -58,6 +58,30 @@ func (LinuxProbe) PortListening(port int) bool {
 	return true
 }
 
+// procStart reports a process's start time (field 22 of /proc/<pid>/stat, clock ticks since boot), whether the pid
+// exists now, and whether this platform could tell. A parse failure is "cannot tell", not "dead": an unknown ledger
+// is never freed.
+func procStart(pid int) (start uint64, alive, exact bool) {
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return 0, false, true // the pid is gone (ESRCH): this platform can tell
+	}
+	s := string(raw)
+	rparen := strings.LastIndex(s, ")")
+	if rparen < 0 {
+		return 0, false, false
+	}
+	fields := strings.Fields(s[rparen+1:])
+	if len(fields) < 20 {
+		return 0, false, false
+	}
+	ticks, err := strconv.ParseUint(fields[19], 10, 64)
+	if err != nil {
+		return 0, false, false
+	}
+	return ticks, true, true
+}
+
 func ProcStart(pid int) (time.Time, error) {
 	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {

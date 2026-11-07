@@ -15,7 +15,7 @@ import (
 // exitSlotRefused is the exit code of a lease/setup refusal (exit 15).
 const exitSlotRefused = 15
 
-const leaseUsage = "usage: turtle-agent lease acquire <server> (--slot ID | --any) --holder NAME [--ttl MIN] [--slots FILE] | renew <server> <slot> --holder NAME --lease-id ID [--ttl MIN] [--slots FILE] | release <server> <slot> --holder NAME [--lease-id ID] [--force] [--slots FILE] | list [<server>] [--json] [--slots FILE]"
+const leaseUsage = "usage: turtle-agent lease acquire <server> (--slot ID | --any) --holder NAME [--ttl MIN] [--slots FILE] | renew <server> <slot> --holder NAME --lease-id ID [--ttl MIN] [--slots FILE] | release <server> <slot> --holder NAME [--lease-id ID] [--force] [--slots FILE] | list [<server>] [--json] [--slots FILE] | reap [--dry-run] [--slots FILE]"
 
 var leaseHolderRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 
@@ -36,6 +36,8 @@ func leaseCmd(args []string, stdout, stderr io.Writer) int {
 		return leaseReleaseCmd(args[1:], stdout, stderr)
 	case "list":
 		return leaseListCmd(args[1:], stdout, stderr)
+	case "reap":
+		return leaseReapCmd(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintln(stderr, leaseUsage)
 		return exitUsage
@@ -200,6 +202,42 @@ func leaseReleaseCmd(args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
+// leaseReapCmd frees the slots of holders that died on this host (a worker or a laptop restart): their leases are
+// removed at once instead of blocking the next walk until the TTL. Another host's lease is left to its expiry.
+func leaseReapCmd(args []string, stdout, stderr io.Writer) int {
+	o, code := parseLeaseReapArgs(args, stderr)
+	if code != exitOK {
+		return code
+	}
+	slotsPath := o.slotsPath
+	if slotsPath == "" {
+		slotsPath = slots.DefaultPath()
+	}
+	if slotsPath == "" {
+		fmt.Fprintln(stderr, "lease reap: no slots file (pass --slots)")
+		return exitUsage
+	}
+	dir := slots.LeasesDir(slotsPath)
+	got, err := slots.ReapDeadLeases(dir, o.dryRun)
+	if err != nil {
+		fmt.Fprintf(stderr, "lease reap: %v\n", err)
+		return exitUsage
+	}
+	if len(got) == 0 {
+		fmt.Fprintf(stdout, "no dead-holder leases in %s\n", dir)
+		return exitOK
+	}
+	for _, l := range got {
+		verb := "reaped"
+		if o.dryRun {
+			verb = "would reap"
+		}
+		fmt.Fprintf(stdout, "%s %s/%s held by %s (holder pid %d gone or reused, lease expired %s)\n",
+			verb, l.Server, l.Slot, l.Holder, l.HolderPID, l.Expires.UTC().Format("15:04:05Z"))
+	}
+	return exitOK
+}
+
 // leaseListRedacted is the --json view of a SlotState without the account name.
 type leaseListRedacted struct {
 	Server     string        `json:"server"`
@@ -286,8 +324,13 @@ func leaseStateText(s slots.SlotState) string {
 	case "free":
 		return "free"
 	case "stale":
-		detail := fmt.Sprintf("stale: held by %s, expired %s",
-			s.Lease.Holder, s.Lease.Expires.UTC().Format("15:04:05Z"))
+		detail := fmt.Sprintf("stale: held by %s", s.Lease.Holder)
+		if s.HolderDead {
+			detail += fmt.Sprintf(", holder pid %d gone or reused (was due %s)",
+				s.Lease.HolderPID, s.Lease.Expires.UTC().Format("15:04:05Z"))
+			return detail + " (acquire takes it over)"
+		}
+		detail += fmt.Sprintf(", expired %s", s.Lease.Expires.UTC().Format("15:04:05Z"))
 		if s.AgentAlive {
 			detail += fmt.Sprintf(", agent pid %d running", s.AgentPID)
 		} else {
