@@ -1,7 +1,7 @@
 ---
 type: Guide
 title: Talking, trading and the world
-description: Chat, whispers, group control, spells, items, loot, vendors, trainers, quests and pets.
+description: Chat, whispers, group control, spells, items, loot, vendors, trainers, quests, flights and pets.
 resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/methods.go
 tags: [agent, chat, group, trade, spells, loot, quests, pets]
 sources:
@@ -13,7 +13,7 @@ sources:
     title: promote, assistant, convert_raid, raid_move, loot_method, disband
   - id: social-methods-go
     resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/social_methods.go
-    title: addon_send, tbm, channels, gossip
+    title: addon_send, tbm, channels, gossip, taxi
   - id: trade-methods-go
     resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/trade_methods.go
     title: trade params and result
@@ -154,7 +154,7 @@ turtle-agent rpc <walk-dir> quest_hello '{"guid": "0x..."}'
 turtle-agent rpc <walk-dir> quest_accept '{"guid": "0x...", "quest_id": 123}'
 ```
 
-`gossip_hello` opens the menu; `gossip_select` picks `option` (with `code` when the option asks). `buy` takes `count` (at most 255) and an optional bag slot; `sell` takes an entry or a slot, and one sale runs at a time (a second `sell` while the first waits is refused). `train` teaches a `spell_id`. Quest calls return `since` plus the first matching event (`quest_details`, `quest_request_items`, `quest_offer_reward`, ...): read on from `since` with `events`. Without an open menu:
+`gossip_hello` opens the menu; `gossip_select` picks `option` (with `code` when the option asks). `taxi` asks a flight master for a flight: `guid` plus `nodes` (taxi node ids, source first — two nodes fly direct, more fly multi-hop); `wait_ms` waits for the `taxi_reply` event (`ok` when the flight was accepted). `buy` takes `count` (at most 255) and an optional bag slot; `sell` takes an entry or a slot, and one sale runs at a time (a second `sell` while the first waits is refused). `train` teaches a `spell_id`. Quest calls return `since` plus the first matching event (`quest_details`, `quest_request_items`, `quest_offer_reward`, ...): read on from `since` with `events`. Without an open menu:
 
 `gossip: no menu is open; call gossip_hello first`
 
