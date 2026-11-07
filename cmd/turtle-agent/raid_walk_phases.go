@@ -2533,12 +2533,32 @@ func (w *walk) saveFightsCtx(ctx context.Context, limit time.Duration) {
 			fs.History = true
 			// r.Dur is in ms (DurMS above); r.Start and w.started are unix seconds.
 			if w.liveAtStart[r.ID] || (r.Start != 0 && r.Start+int64(r.Dur)/1000 >= w.started.Unix()) {
+				// A qualifying history fight uses the same pending/retry handling as an ordinary
+				// fight below: seen only after its detail was fetched and parsed, otherwise kept in
+				// pendingFights (still History) for the next poll, including the teardown wait, so one
+				// dashboard timeout does not lose its file for good.
+				idx, pending := w.pendingFights[r.ID]
+				got := false
 				if detail, derr := w.dash.Fight(ctx, r.Key); derr == nil {
 					_ = w.writeOut("combat-fight-"+fightFileID(r.ID)+".json", detail)
 					if d, ok := raidwalk.FightDetailOf(detail); ok {
 						fs.Detail = &d
+						got = true
 					}
 				}
+				if pending {
+					w.fights[idx] = fs
+				} else {
+					w.fights = append(w.fights, fs)
+					idx = len(w.fights) - 1
+				}
+				if got {
+					w.seenFights[r.ID] = true
+					delete(w.pendingFights, r.ID)
+				} else {
+					w.pendingFights[r.ID] = idx
+				}
+				continue
 			}
 			w.fights = append(w.fights, fs)
 			w.seenFights[r.ID] = true

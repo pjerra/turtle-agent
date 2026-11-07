@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
 // TestSaveFightsSkipsHistoryDetail: the first read (pre-placement, saveFightsAtStart) lists id A; a later read
@@ -274,5 +276,60 @@ func TestHistoryLiveAtStartFinishedGetsFile(t *testing.T) {
 	}
 	if len(d.fightKeys) != 1 || d.fightKeys[0] != "Bot\x0068-1" {
 		t.Fatalf("fight details fetched %q, want only the live-started history fight 68-1", d.fightKeys)
+	}
+}
+
+// TestHistoryQualifyingFightDetailRetry: the first detail request for a qualifying history fight fails, the
+// next succeeds. The file is written exactly once with History=true, and the fight is credited once (no
+// duplicate row on the retry poll).
+func TestHistoryQualifyingFightDetailRetry(t *testing.T) {
+	goal := zgBossStepOf(t, 14517)
+	now := time.Now()
+	w, d := fightCreditWalk(t, goal, goal, now)
+	w.manifest.Character = "Bot"
+	// The run stood on the goal boss row (a qualifying history kill credits only then).
+	feedStatus(w, tbm.RunStatus{Step: goal, Kind: "boss", Note: "fighting"}, now)
+	live := jeklikKillRow("68-1", true, now.Unix()-600)
+	live.Step = uint32(goal)
+	d.fights = []walkFightRow{live}
+	w.saveFightsAtStart() // 68-1 is history, live at start
+	done := jeklikKillRow("68-1", false, now.Unix()-600)
+	done.Step = uint32(goal)
+	d.fights = []walkFightRow{done}
+	d.failFight = 1 // the first detail request fails
+	w.saveFights()
+	if _, err := os.Stat(filepath.Join(w.outDir, "combat-fight-68-1.json")); !os.IsNotExist(err) {
+		t.Fatalf("combat-fight-68-1.json err %v: no file yet, the first detail request failed", err)
+	}
+	if w.seenFights["68-1"] {
+		t.Fatalf("seenFights %+v: a qualifying history fight is seen only after its detail parses", w.seenFights)
+	}
+	if _, ok := w.pendingFights["68-1"]; !ok {
+		t.Fatalf("pendingFights %+v: the failed history fight must wait for a retry", w.pendingFights)
+	}
+	w.saveFights() // the retry succeeds
+	if _, err := os.Stat(filepath.Join(w.outDir, "combat-fight-68-1.json")); err != nil {
+		t.Fatalf("combat-fight-68-1.json: %v (the retry must write the history file)", err)
+	}
+	count := 0
+	for _, f := range w.fights {
+		if f.ID == "68-1" {
+			count++
+			if !f.History {
+				t.Fatalf("w.fights %+v: the retried fight must keep History=true", w.fights)
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("w.fights %+v: the history fight must be recorded exactly once", w.fights)
+	}
+	if !w.seenFights["68-1"] {
+		t.Fatalf("seenFights %+v: the retried history fight must be seen now", w.seenFights)
+	}
+	if len(d.fightKeys) != 2 {
+		t.Fatalf("fight details fetched %q, want exactly two requests", d.fightKeys)
+	}
+	if k := creditedBoss(t, w, goal); k == nil || !k.Killed {
+		t.Fatalf("boss_kill %+v, want the retried history kill credited (notes %q)", k, w.notes)
 	}
 }
