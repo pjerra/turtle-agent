@@ -96,9 +96,10 @@ func (s *Session) GMEvade(ctx context.Context, g packet.GUID) error {
 	return s.GMOn(ctx, g, line)
 }
 
-// GMSetHP sets the creature g's max and current health to hp through GMOn. hp must be above 0 and no higher than the
-// unit's MaxHealth as the client holds it: restoring a boss is a full heal, never a smaller maximum than its own.
-func (s *Session) GMSetHP(ctx context.Context, g packet.GUID, hp uint32) error {
+// GMSetHP restores the creature g to its OWN max health through GMOn. The value is read here, from the unit the
+// client holds, and `.modify hp <max> <max>` sends it for both values: restoring a boss is a full heal, and no caller
+// can lower a unit's maximum (gm_set_hp takes no health argument at all).
+func (s *Session) GMSetHP(ctx context.Context, g packet.GUID) error {
 	if err := s.gmRefuse(); err != nil {
 		return err
 	}
@@ -109,10 +110,13 @@ func (s *Session) GMSetHP(ctx context.Context, g packet.GUID, hp uint32) error {
 	if err != nil {
 		return fmt.Errorf("gm set hp: %w", err)
 	}
-	if hp == 0 || u.MaxHealth == 0 || hp > u.MaxHealth {
-		return fmt.Errorf("gm set hp: %d is not above 0 and at most the unit's max %d", hp, u.MaxHealth)
+	if u.MaxHealth == 0 {
+		return fmt.Errorf("gm set hp: the client holds no max health for %s", g)
 	}
-	line, err := PracticeGMLine(PracticeGMSetHP, strconv.FormatUint(uint64(hp), 10))
+	if u.MaxHealth < u.Health {
+		return fmt.Errorf("gm set hp: the client's max %d is below the current %d for %s", u.MaxHealth, u.Health, g)
+	}
+	line, err := PracticeGMLine(PracticeGMSetHP, strconv.FormatUint(uint64(u.MaxHealth), 10))
 	if err != nil {
 		return err
 	}

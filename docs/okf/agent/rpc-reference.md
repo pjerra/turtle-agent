@@ -84,7 +84,7 @@ Error codes: `-32700` parse, `-32600` invalid request, `-32601` method not found
 | `gm` | `text*` (dot added when missing) | `{}`. |
 | `gm_kill` | `guid*` (creature) | `{}`. Refused outside the agent's test setup. |
 | `gm_evade` | `guid*` (creature) | `{}`: `.npc evade` on the selected unit (leaves combat, walks home and resets). Refused outside the agent's test setup. |
-| `gm_set_hp` | `guid*` (creature), `hp*` (1..the unit's MaxHealth) | `{}`: `.modify hp <hp> <hp>`. A value over the client's max, or 0, is refused with nothing sent. |
+| `gm_set_hp` | `guid*` (creature). No `hp`: an explicit one is refused. | `{}`: the session reads the unit's MaxHealth from the client and sends `.modify hp <max> <max>` (a full heal to its own max, never a lower maximum). A unit the client does not hold, or one with max 0, is refused with nothing sent. |
 | `gm_respawn` | `guid*` (creature) | `{}`: `.respawn` on the selected dead unit. Refused when the client shows the unit alive (the unselected form would respawn every dead creature in range). |
 | `gm_revive` | `name*` (a character name) | `{}`: `.revive <name>`, full health. No selection. |
 | `invite` | `name*` | `{}`. |

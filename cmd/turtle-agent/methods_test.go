@@ -657,3 +657,23 @@ func TestPathMethodsWithoutMmapsDir(t *testing.T) {
 		}
 	}
 }
+
+// gm_set_hp carries the guid only: the session restores the unit to its own MaxHealth, and an explicit hp is refused
+// before anything is selected or sent (Codex HIGH: no caller can lower a unit's max health).
+func TestGMSetHPRPCRefusesHPArgument(t *testing.T) {
+	r := newRig(t)
+	guid := packet.GUID(uint64(packet.HighUnit)<<48 | 14834<<24 | 0x77)
+	for _, params := range []string{
+		`{"guid":"` + guid.String() + `","hp":1}`,
+		`{"guid":"` + guid.String() + `","hp":0}`,
+		`{"guid":"` + guid.String() + `","hp":100}`,
+	} {
+		out := r.call("gm_set_hp", params)
+		if out["error"] == nil {
+			t.Fatalf("gm_set_hp accepted an hp argument: %s → %v", params, out)
+		}
+		if msg, _ := out["error"].(map[string]any)["message"].(string); !strings.Contains(msg, "hp argument is refused") {
+			t.Fatalf("gm_set_hp %s: %v, want the hp refusal", params, out)
+		}
+	}
+}

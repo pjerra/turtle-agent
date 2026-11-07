@@ -34,9 +34,24 @@ func noGMOut(t *testing.T, h *harness) {
 	}
 }
 
-// TestGMSetHPRefusesOverMax: restoring a boss is a full heal. A value above the client's MaxHealth (or 0) is refused
-// before the selection, so no line can lower a boss's maximum.
-func TestGMSetHPRefusesOverMax(t *testing.T) {
+// waitUnit polls the session until it holds the creature g: the create block is applied on the owner goroutine, and a
+// read straight after h.send races it.
+func (h *harness) waitUnit(ctx context.Context, g packet.GUID) objects.Unit {
+	h.t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		u, err := h.s.Unit(g, "")
+		if err == nil {
+			return u
+		}
+		if time.Now().After(deadline) {
+			h.t.Fatalf("the session did not hold unit %s within 5s: %v", g, err)
+		}
+	}
+}
+
+// TestGMSetHPRestoresOwnMax: restoring a boss is a full heal to its OWN MaxHealth. The hand takes no health argument,
+// reads the unit the client holds, and sends `.modify hp <max> <max>`: nothing can lower the unit's maximum.
+func TestGMSetHPRestoresOwnMax(t *testing.T) {
 	ctx := context.Background()
 	h := start(t, Options{AllowGMKill: true})
 	h.enterWorld()
@@ -44,17 +59,79 @@ func TestGMSetHPRefusesOverMax(t *testing.T) {
 		map[uint16]uint32{objects.UnitHealth: 800, objects.UnitMaxHealth: 800}))
 	h.waitSelfCreated(ctx)
 	g := practiceCreature()
+	// A hurt boss: 50 of 100.
 	h.send(opcode.SMSGUpdateObject, unitCreate(g, objects.TypeUnit, me.X+5, me.Y, me.Z,
-		map[uint16]uint32{objects.FieldEntry: 14834, objects.UnitHealth: 100, objects.UnitMaxHealth: 100}))
-	if _, err := h.s.Unit(g, ""); err != nil {
-		t.Fatalf("the creature is not in view: %v", err)
+		map[uint16]uint32{objects.FieldEntry: 14834, objects.UnitHealth: 50, objects.UnitMaxHealth: 100}))
+	u := h.waitUnit(ctx, g)
+	if u.MaxHealth != 100 || u.Health != 50 {
+		t.Fatalf("the creature reads %d/%d, want 50/100", u.Health, u.MaxHealth)
 	}
-	for _, hp := range []uint32{0, 101, 1000} {
-		if err := h.s.GMSetHP(ctx, g, hp); err == nil {
-			t.Fatalf("GMSetHP accepted %d over the unit's max 100", hp)
-		} else if !strings.Contains(err.Error(), "max 100") {
-			t.Fatalf("the refusal does not name the max: %v", err)
+	line := make(chan string, 1)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		inForce := packet.GUID(0)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			p, err := h.srv.Next(50 * time.Millisecond)
+			if err != nil {
+				continue
+			}
+			switch p.Op {
+			case opcode.CMSGSetSelection:
+				sg := packet.NewReader(p.Body).GUID()
+				if sg != inForce {
+					inForce = sg
+					h.send(opcode.SMSGUpdateObject, targetEcho(sg))
+				}
+			case opcode.CMSGMessagechat:
+				line <- string(p.Body)
+			}
 		}
+	}()
+	if err := h.s.GMSetHP(ctx, g); err != nil {
+		close(stop)
+		<-done
+		t.Fatal(err)
+	}
+	var text string
+	select {
+	case text = <-line:
+	case <-time.After(5 * time.Second):
+		close(stop)
+		<-done
+		t.Fatal("the server did not read the .modify hp line within 5s")
+	}
+	close(stop)
+	<-done
+	if !strings.Contains(text, ".modify hp 100 100") {
+		t.Fatalf("the line %q does not restore the unit's own max 100 for both values", text)
+	}
+}
+
+// TestGMSetHPRefusesUnheldUnit: a unit the client does not hold (or one with no max) is refused before any selection:
+// the max the line would carry is never guessed.
+func TestGMSetHPRefusesUnheldUnit(t *testing.T) {
+	ctx := context.Background()
+	h := start(t, Options{AllowGMKill: true})
+	h.enterWorld()
+	h.send(opcode.SMSGUpdateObject, unitCreate(me.GUID, objects.TypePlayer, me.X, me.Y, me.Z,
+		map[uint16]uint32{objects.UnitHealth: 800, objects.UnitMaxHealth: 800}))
+	h.waitSelfCreated(ctx)
+	g := practiceCreature()
+	if err := h.s.GMSetHP(ctx, g); err == nil {
+		t.Fatal("GMSetHP accepted a unit the client does not hold")
+	}
+	h.send(opcode.SMSGUpdateObject, unitCreate(g, objects.TypeUnit, me.X+5, me.Y, me.Z,
+		map[uint16]uint32{objects.FieldEntry: 14834, objects.UnitHealth: 0, objects.UnitMaxHealth: 0}))
+	h.waitUnit(ctx, g)
+	if err := h.s.GMSetHP(ctx, g); err == nil || !strings.Contains(err.Error(), "no max health") {
+		t.Fatalf("GMSetHP on a unit with no max: %v", err)
 	}
 	noGMOut(t, h)
 }
@@ -71,6 +148,7 @@ func TestGMRespawnRefusesLiveUnit(t *testing.T) {
 	g := practiceCreature()
 	h.send(opcode.SMSGUpdateObject, unitCreate(g, objects.TypeUnit, me.X+5, me.Y, me.Z,
 		map[uint16]uint32{objects.FieldEntry: 11357, objects.UnitHealth: 50, objects.UnitMaxHealth: 50}))
+	h.waitUnit(ctx, g)
 	if err := h.s.GMRespawn(ctx, g); err == nil || !strings.Contains(err.Error(), "is alive") {
 		t.Fatalf("GMRespawn on a live unit: %v, want the alive refusal", err)
 	}
@@ -87,7 +165,7 @@ func TestPracticeHandsRefusedWithoutAuthorize(t *testing.T) {
 	for name, err := range map[string]error{
 		"GMKill":    h.s.GMKill(ctx, g),
 		"GMEvade":   h.s.GMEvade(ctx, g),
-		"GMSetHP":   h.s.GMSetHP(ctx, g, 100),
+		"GMSetHP":   h.s.GMSetHP(ctx, g),
 		"GMRespawn": h.s.GMRespawn(ctx, g),
 		"GMRevive":  h.s.GMRevive(ctx, "Bottle"),
 	} {
