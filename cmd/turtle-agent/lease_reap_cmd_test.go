@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,6 +35,16 @@ func hostName(t *testing.T) string {
 		t.Skip("no hostname")
 	}
 	return h
+}
+
+// selfPIDNamespace is the pid namespace identity the test process's leases record.
+func selfPIDNamespace(t *testing.T) string {
+	t.Helper()
+	ns, err := os.Readlink("/proc/self/ns/pid")
+	if err != nil || ns == "" {
+		t.Skip("no pid namespace identity")
+	}
+	return ns
 }
 
 // writeLeaseFile writes one lease file into the store of slotsPath.
@@ -62,12 +73,12 @@ func TestLeaseReapDryRunThenRemoves(t *testing.T) {
 	deadPath := writeLeaseFile(t, slotsPath, slots.Lease{
 		Server: "m910q", Slot: "1", Holder: "w-dead", LeaseID: "dead-id",
 		Acquired: now, Expires: now.Add(time.Hour), Renewed: now,
-		HolderPID: deadProcessPID(t), HolderHost: hostName(t),
+		HolderPID: deadProcessPID(t), HolderHost: hostName(t), HolderNS: selfPIDNamespace(t),
 	})
 	livePath := writeLeaseFile(t, slotsPath, slots.Lease{
 		Server: "m910q", Slot: "2", Holder: "w-live", LeaseID: "live-id",
 		Acquired: now, Expires: now.Add(time.Hour), Renewed: now,
-		HolderPID: os.Getpid(), HolderHost: hostName(t),
+		HolderPID: os.Getpid(), HolderHost: hostName(t), HolderNS: selfPIDNamespace(t),
 	})
 
 	code, out, errOut := runCLI("lease", "reap", "--dry-run", "--slots", slotsPath)
@@ -101,24 +112,46 @@ func TestLeaseReapDryRunThenRemoves(t *testing.T) {
 	}
 }
 
-// The heartbeat: a walk takes a short lease and renews it while it runs; a transient renewal failure is logged and
-// retried, never dropped, and a refusal (the lease is no longer ours) stops the walk.
+// Phase 2 takes the SHORT lease (walkLeaseTTL, 15m), not the old max-run+hold TTL: a dead holder's slot is free
+// within minutes. The heartbeat itself is exercised by the tests below, which own its goroutine.
+func TestRaidWalkLeaseTakesTheShortTTL(t *testing.T) {
+	var ttl time.Duration
+	sb := &syncBuffer{}
+	w := &walk{opts: raidWalkOptions{server: "m910q", holder: "w-a"}, stderr: sb,
+		env: walkEnv{
+			now: time.Now,
+			acquire: func(server, slot string, any bool, holder string, got time.Duration) (slots.Acquired, error) {
+				ttl = got
+				return slots.Acquired{Lease: slots.Lease{Server: server, Slot: "1", Holder: holder, LeaseID: "lid"},
+					Slot: slots.Slot{ID: "1"}}, nil
+			},
+			renew: func(server, slot, holder, leaseID string, got time.Duration) (slots.Lease, error) {
+				return slots.Lease{}, nil
+			},
+		}}
+	ctx, cancel := context.WithCancel(context.Background())
+	w.cancel = cancel
+	if err := w.phaseLease(ctx); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	<-w.leaseDone
+	if ttl != walkLeaseTTL || ttl != 15*time.Minute {
+		t.Fatalf("the walk leased for %v, want the short 15m", ttl)
+	}
+}
+
+// A transient renewal failure is logged and retried, never dropped: the lease stays the walk's.
 func TestRaidWalkLeaseHeartbeatRetriesAndNeverDrops(t *testing.T) {
 	oldRenew, oldRetry := walkLeaseRenew, walkLeaseRenewRetry
 	walkLeaseRenew, walkLeaseRenewRetry = 2*time.Millisecond, time.Millisecond
-	t.Cleanup(func() { walkLeaseRenew, walkLeaseRenewRetry = oldRenew, oldRetry })
+	defer func() { walkLeaseRenew, walkLeaseRenewRetry = oldRenew, oldRetry }()
 
 	var mu sync.Mutex
 	calls := 0
-	var ttl time.Duration
-	env := walkEnv{
-		now: time.Now,
-		acquire: func(server, slot string, any bool, holder string, got time.Duration) (slots.Acquired, error) {
-			ttl = got
-			return slots.Acquired{Lease: slots.Lease{Server: server, Slot: "1", Holder: holder, LeaseID: "lid"},
-				Slot: slots.Slot{ID: "1"}}, nil
-		},
-		renew: func(server, slot, holder, leaseID string, got time.Duration) (slots.Lease, error) {
+	sb := &syncBuffer{}
+	w := &walk{opts: raidWalkOptions{server: "m910q", slot: "1", holder: "w-a"}, stdout: io.Discard, stderr: sb,
+		env: walkEnv{now: time.Now, renew: func(server, slot, holder, leaseID string, got time.Duration) (slots.Lease, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			calls++
@@ -126,25 +159,19 @@ func TestRaidWalkLeaseHeartbeatRetriesAndNeverDrops(t *testing.T) {
 				return slots.Lease{}, errors.New("flock: timeout")
 			}
 			return slots.Lease{}, nil
-		},
-	}
-	sb := &syncBuffer{}
-	w := &walk{opts: raidWalkOptions{server: "m910q", slot: "1", holder: "w-a"}, env: env,
-		stdout: io.Discard, stderr: sb}
+		}}}
+	w.lease = slots.Lease{Server: "m910q", Slot: "1", Holder: "w-a", LeaseID: "lid"}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	w.cancel = cancel
-	if err := w.phaseLease(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if ttl != 15*time.Minute {
-		t.Fatalf("the walk leased for %v, want the short 15m", ttl)
-	}
+	done := make(chan struct{})
+	go func() { defer close(done); w.renewLease(ctx) }()
 	waitFor(t, "three renew attempts", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		return calls >= 3
 	})
+	cancel()
+	<-done
 	if w.leaseLost.Load() {
 		t.Fatal("a transient renewal failure lost the lease")
 	}
@@ -153,36 +180,29 @@ func TestRaidWalkLeaseHeartbeatRetriesAndNeverDrops(t *testing.T) {
 	}
 }
 
+// A refusal (the lease is no longer ours) is not transient: it is logged loudly and the walk is cancelled.
 func TestRaidWalkLeaseRefusalStopsTheWalk(t *testing.T) {
 	oldRenew, oldRetry := walkLeaseRenew, walkLeaseRenewRetry
 	walkLeaseRenew, walkLeaseRenewRetry = 2*time.Millisecond, time.Millisecond
-	t.Cleanup(func() { walkLeaseRenew, walkLeaseRenewRetry = oldRenew, oldRetry })
+	defer func() { walkLeaseRenew, walkLeaseRenewRetry = oldRenew, oldRetry }()
 
-	env := walkEnv{
-		now: time.Now,
-		acquire: func(server, slot string, any bool, holder string, got time.Duration) (slots.Acquired, error) {
-			return slots.Acquired{Lease: slots.Lease{Server: server, Slot: "1", Holder: holder, LeaseID: "lid"},
-				Slot: slots.Slot{ID: "1"}}, nil
-		},
-		renew: func(server, slot, holder, leaseID string, got time.Duration) (slots.Lease, error) {
-			return slots.Lease{}, &slots.Refusal{Msg: "leased to someone else"}
-		},
-	}
 	sb := &syncBuffer{}
-	w := &walk{opts: raidWalkOptions{server: "m910q", slot: "1", holder: "w-a"}, env: env,
-		stdout: io.Discard, stderr: sb}
+	w := &walk{opts: raidWalkOptions{server: "m910q", slot: "1", holder: "w-a"}, stdout: io.Discard, stderr: sb,
+		env: walkEnv{now: time.Now, renew: func(server, slot, holder, leaseID string, got time.Duration) (slots.Lease, error) {
+			return slots.Lease{}, &slots.Refusal{Msg: "leased to someone else"}
+		}}}
+	w.lease = slots.Lease{Server: "m910q", Slot: "1", Holder: "w-a", LeaseID: "lid"}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	w.cancel = cancel
-	if err := w.phaseLease(ctx); err != nil {
-		t.Fatal(err)
-	}
+	done := make(chan struct{})
+	go func() { defer close(done); w.renewLease(ctx) }()
 	waitFor(t, "the refusal to stop the walk", func() bool { return w.leaseLost.Load() })
 	select {
 	case <-ctx.Done():
 	case <-time.After(5 * time.Second):
 		t.Fatal("a refused renewal did not cancel the walk")
 	}
+	<-done
 	if !strings.Contains(sb.String(), "not ours") {
 		t.Fatalf("the refusal was not loud: %q", sb.String())
 	}
@@ -198,7 +218,7 @@ func TestAutoStartReapsADeadHoldersLease(t *testing.T) {
 	path := writeLeaseFile(t, f.slotsPath, slots.Lease{
 		Server: "srv", Slot: "1", Holder: "w-dead", LeaseID: "dead-id",
 		Acquired: now, Expires: now.Add(time.Hour), Renewed: now,
-		HolderPID: dead, HolderHost: hostName(t),
+		HolderPID: dead, HolderHost: hostName(t), HolderNS: selfPIDNamespace(t),
 	})
 	if code := f.run(); code != exitOK {
 		t.Fatalf("exit %d, want %d (a refused id is not an escalation):\n%s", code, exitOK, f.events())
@@ -208,5 +228,62 @@ func TestAutoStartReapsADeadHoldersLease(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("the dead holder's lease is still there: %v", err)
+	}
+}
+
+// The heartbeat goroutine shares the walk's output state (notes, run.log, stderr) with the walk loop: the race
+// detector must see that state guarded (walk 47 review, medium). The test owns the goroutine and joins it before the
+// shortened intervals are restored.
+func TestRaidWalkLeaseHeartbeatSharesWalkState(t *testing.T) {
+	oldRenew, oldRetry := walkLeaseRenew, walkLeaseRenewRetry
+	walkLeaseRenew, walkLeaseRenewRetry = 200*time.Microsecond, 100*time.Microsecond
+	defer func() { walkLeaseRenew, walkLeaseRenewRetry = oldRenew, oldRetry }()
+
+	var renews atomic.Int64
+	sb := &syncBuffer{}
+	w := &walk{opts: raidWalkOptions{server: "m910q", slot: "1", holder: "w-a"}, stdout: io.Discard, stderr: sb,
+		env: walkEnv{now: time.Now, renew: func(server, slot, holder, leaseID string, got time.Duration) (slots.Lease, error) {
+			renews.Add(1)
+			return slots.Lease{}, errors.New("flock: timeout")
+		}}}
+	w.lease = slots.Lease{Server: "m910q", Slot: "1", Holder: "w-a", LeaseID: "lid"}
+	logPath := filepath.Join(t.TempDir(), "run.log")
+	logF, err := os.Create(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.logF = logF
+	ctx, cancel := context.WithCancel(context.Background())
+	w.cancel = cancel
+	done := make(chan struct{})
+	go func() { defer close(done); w.renewLease(ctx) }()
+	stop := make(chan struct{})
+	written := make(chan struct{})
+	go func() {
+		defer close(written)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				w.note("main loop note")
+				w.logLine(time.Now(), "main loop line")
+			}
+		}
+	}()
+	waitFor(t, "twenty renewal failures", func() bool { return renews.Load() >= 20 })
+	close(stop)
+	<-written
+	cancel()
+	<-done
+	w.outMu.Lock()
+	if err := w.logF.Close(); err != nil {
+		w.outMu.Unlock()
+		t.Fatal(err)
+	}
+	w.logF = nil
+	w.outMu.Unlock()
+	if !strings.Contains(sb.String(), "retrying") {
+		t.Fatalf("the failures were not logged: %q", sb.String())
 	}
 }

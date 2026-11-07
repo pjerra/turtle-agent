@@ -230,7 +230,11 @@ func (w *walk) phaseLease(ctx context.Context) error {
 	w.lease = acq.Lease
 	w.logLine(w.env.now(), fmt.Sprintf("lease %s/%s (holder %s) until %s, renewed every %s", w.lease.Server, w.lease.Slot,
 		w.lease.Holder, w.lease.Expires.UTC().Format(time.RFC3339), walkLeaseRenew))
-	go w.renewLease(ctx)
+	w.leaseDone = make(chan struct{})
+	go func() {
+		defer close(w.leaseDone)
+		w.renewLease(ctx)
+	}()
 	return nil
 }
 
@@ -256,6 +260,9 @@ func (w *walk) renewLease(ctx context.Context) {
 // lease was re-acquired or released — so walking on would be another holder's slot: that ends the walk.
 func (w *walk) renewLeaseOnce(ctx context.Context) bool {
 	for {
+		if ctx.Err() != nil {
+			return true
+		}
 		_, err := w.env.renew(w.lease.Server, w.lease.Slot, w.lease.Holder, w.lease.LeaseID, walkLeaseTTL)
 		if err == nil {
 			w.logLine(w.env.now(), fmt.Sprintf("lease renewed until %s", w.env.now().Add(walkLeaseTTL).UTC().Format(time.RFC3339)))
@@ -278,12 +285,15 @@ func (w *walk) renewLeaseOnce(ctx context.Context) bool {
 	}
 }
 
-// leaseMessage makes a heartbeat problem loud: the run log, the summary notes and stderr (the autopilot's attempt log).
+// leaseMessage makes a heartbeat problem loud: the run log, the summary notes and stderr (the autopilot's attempt
+// log). The heartbeat goroutine writes the walk's output state, so every write takes the walk's outMu.
 func (w *walk) leaseMessage(format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
-	w.logLine(w.env.now(), msg)
-	w.note("%s", msg)
+	w.outMu.Lock()
+	w.notes = append(w.notes, msg)
+	w.logLineLocked(w.env.now(), msg)
 	fmt.Fprintln(w.stderr, "raid-walk: "+msg)
+	w.outMu.Unlock()
 }
 
 // releaseLease gives the lease back when the walk never reached teardown (teardown releases it itself).

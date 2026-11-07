@@ -37,6 +37,7 @@ type Lease struct {
 	// keeps the expiry rule.
 	HolderPID   int       `json:"holder_pid,omitempty"`
 	HolderHost  string    `json:"holder_host,omitempty"`
+	HolderNS    string    `json:"holder_ns,omitempty"`    // pid namespace identity: every WSL distro reports the same hostname
 	HolderStart uint64    `json:"holder_start,omitempty"` // /proc/<pid>/stat start time: tells a reused pid from the holder
 	Renewed     time.Time `json:"renewed,omitzero"`       // UTC, the last acquire/renew
 }
@@ -48,6 +49,18 @@ var leaseHost = func() string {
 		return ""
 	}
 	return h
+}
+
+// leasePIDNamespace is this process's pid namespace identity (readlink /proc/self/ns/pid, e.g. "pid:[4026531836]").
+// A pid names the same process only in the same host AND the same pid namespace: every WSL distro and Windows report
+// the same hostname, and a pid from another namespace is not the holder here. "" when the platform cannot tell, and
+// a lease without it is never reaped by pid.
+var leasePIDNamespace = func() string {
+	b, err := os.Readlink("/proc/self/ns/pid")
+	if err != nil {
+		return ""
+	}
+	return b
 }
 
 // holderProc reads a pid's start time and whether it is alive; a test replaces it. exact is false when the
@@ -62,11 +75,15 @@ const (
 	holderDead
 )
 
-// holderState says whether the lease's recorded holder process still holds it here. A lease of another host, an
-// old-format lease without the fields and one this platform cannot check are unknown: only the expiry frees them.
-// A local pid that is gone, or alive with a different start time (the pid was reused), is dead.
+// holderState says whether the lease's recorded holder process still holds it here. A lease of another host, one
+// without the holder fields (or without the pid namespace, which round-1 leases and older files lack), and one this
+// platform cannot check are unknown: only the expiry frees them. A local pid in this pid namespace that is gone, or
+// alive with a different start time (the pid was reused), is dead.
 func holderState(l *Lease) holderLiveness {
 	if l == nil || l.HolderPID <= 0 || l.HolderHost == "" || l.HolderHost != leaseHost() {
+		return holderUnknown
+	}
+	if l.HolderNS == "" || l.HolderNS != leasePIDNamespace() {
 		return holderUnknown
 	}
 	start, alive, exact := holderProc(l.HolderPID)
@@ -232,6 +249,7 @@ func (s *Store) stampHolder(l *Lease, now time.Time) {
 	}
 	l.HolderPID = s.HolderPID
 	l.HolderHost = leaseHost()
+	l.HolderNS = leasePIDNamespace()
 	l.HolderStart = 0
 	if start, alive, exact := holderProc(s.HolderPID); exact && alive {
 		l.HolderStart = start

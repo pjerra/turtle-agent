@@ -4,6 +4,7 @@ package slots
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -212,5 +213,99 @@ func TestReapDeadLeases(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(st.Dir, "m910q", "1.json")); !os.IsNotExist(err) {
 		t.Fatalf("lease file still present: %v", err)
+	}
+}
+
+// Codex HIGH: an unreadable /proc/<pid>/stat is NOT a dead holder. Under hidepid, or for another user's process,
+// the read fails while the process runs; only ESRCH (kill 0) says the pid is gone.
+func TestUnreadableHolderStatIsAlive(t *testing.T) {
+	st := testStore(t, twoSlotCfg)
+	st.HolderPID = os.Getpid()
+	old := readProcStat
+	readProcStat = func(pid int) ([]byte, error) { return nil, fs.ErrPermission }
+	defer func() { readProcStat = old }()
+	if _, err := st.Acquire("m910q", "1", false, "w-a", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	l, err := st.readLease("m910q", "1")
+	if err != nil || l == nil {
+		t.Fatalf("read lease: %v", err)
+	}
+	if l.HolderNS == "" {
+		t.Fatal("the lease records no pid namespace")
+	}
+	if st.IsStale(l) {
+		t.Fatal("a live holder whose stat is unreadable (hidepid, another user) was called dead")
+	}
+	got, err := ReapDeadLeases(st.Dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("reap removed %+v, want nothing", got)
+	}
+}
+
+// The same unreadable stat with a pid that is gone (kill 0 -> ESRCH) still frees the slot.
+func TestUnreadableHolderStatWithESRCHIsDead(t *testing.T) {
+	st := testStore(t, twoSlotCfg)
+	st.HolderPID = finishedPID(t)
+	old := readProcStat
+	readProcStat = func(pid int) ([]byte, error) { return nil, fs.ErrPermission }
+	defer func() { readProcStat = old }()
+	if _, err := st.Acquire("m910q", "1", false, "w-dead", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReapDeadLeases(st.Dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Slot != "1" {
+		t.Fatalf("reap removed %+v, want m910q/1", got)
+	}
+}
+
+// Opus hardening: every WSL distro reports the same hostname, so the pid namespace must match too. A lease from
+// another namespace (or one written before the field existed) is never reaped by pid, only by its expiry.
+func TestLeaseNeedsTheSamePIDNamespaceToReap(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ns   string
+	}{
+		{"another namespace", "pid:[1]"},
+		{"round-1 lease without a namespace", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := testStore(t, twoSlotCfg)
+			st.HolderPID = finishedPID(t)
+			if _, err := st.Acquire("m910q", "1", false, "w-dead", time.Hour); err != nil {
+				t.Fatal(err)
+			}
+			l, err := st.readLease("m910q", "1")
+			if err != nil || l == nil {
+				t.Fatalf("read lease: %v", err)
+			}
+			if l.HolderNS == "" {
+				t.Fatal("the acquired lease records no pid namespace")
+			}
+			l.HolderNS = tc.ns
+			if err := st.writeLease(l); err != nil {
+				t.Fatal(err)
+			}
+			if st.IsStale(l) {
+				t.Fatal("a lease with a dead pid but another pid namespace was called stale")
+			}
+			got, err := ReapDeadLeases(st.Dir, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 0 {
+				t.Fatalf("reap named %+v, want nothing", got)
+			}
+			setNow(st, st.Now().Add(2*time.Hour))
+			if _, err := st.Acquire("m910q", "1", false, "w-b", time.Hour); err != nil {
+				t.Fatalf("the expired lease was not taken over: %v", err)
+			}
+		})
 	}
 }

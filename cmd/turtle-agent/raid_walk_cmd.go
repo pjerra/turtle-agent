@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -800,6 +801,8 @@ type walk struct {
 
 	stdout io.Writer
 	stderr io.Writer
+	// outMu guards the output the walk loop shares with the lease heartbeat goroutine: notes, run.log and stderr.
+	outMu sync.Mutex
 
 	plan   *dungeon.Plan
 	rows   planexport.Rows
@@ -1086,7 +1089,10 @@ type walk struct {
 	reviveBrought, reviveUnreached, reviveGatherMissed map[string]bool
 	lease                                              slots.Lease
 	leaseLost                                          atomic.Bool
-	cancel                                             context.CancelFunc
+	// leaseDone is closed when the renewal goroutine returns (phaseLease starts it): tests join it, and no reader of
+	// the walk's output has to guess whether the heartbeat is still running.
+	leaseDone chan struct{}
+	cancel    context.CancelFunc
 
 	endReason  string
 	exitCode   int
@@ -1519,6 +1525,8 @@ func (w *walk) prepareOut() error {
 }
 
 func (w *walk) closeOut() {
+	w.outMu.Lock()
+	defer w.outMu.Unlock()
 	if w.framesF != nil {
 		_ = w.framesF.Close()
 		w.framesF = nil
@@ -1536,11 +1544,29 @@ func (w *walk) writeOut(name string, data []byte) error {
 
 // note appends a note to the summary and run.log.
 func (w *walk) note(format string, a ...any) {
-	w.notes = append(w.notes, fmt.Sprintf(format, a...))
+	msg := fmt.Sprintf(format, a...)
+	w.outMu.Lock()
+	w.notes = append(w.notes, msg)
+	w.outMu.Unlock()
+}
+
+// notesCopy is the notes as they stand now: the summary and the injector read a snapshot, never the slice the
+// heartbeat goroutine may be appending to.
+func (w *walk) notesCopy() []string {
+	w.outMu.Lock()
+	defer w.outMu.Unlock()
+	return append([]string(nil), w.notes...)
 }
 
 // logLine writes one line to run.log ("HH:MM:SS.mmm <text>"), control bytes escaped.
 func (w *walk) logLine(now time.Time, text string) {
+	w.outMu.Lock()
+	defer w.outMu.Unlock()
+	w.logLineLocked(now, text)
+}
+
+// logLineLocked is logLine for a caller that already holds outMu.
+func (w *walk) logLineLocked(now time.Time, text string) {
 	if w.logF == nil {
 		return
 	}
@@ -1962,7 +1988,7 @@ func (w *walk) finish(code int) {
 		Until: w.opts.until, UntilEffective: untilEffective, From: w.opts.from, Speed: w.opts.speed, TestSpeed: w.opts.speed != 1.0,
 		RowsSHA256: rowsSHA256(w.rows), UntilStep: w.untilStep, RunLabel: w.runLabel, SpeedFellBack: w.speedFellBack,
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights, Decisions: w.decisions,
-		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
+		Dashboard: w.dashNote, ExitCode: code, Notes: w.notesCopy(),
 		Place:         w.placeSum,
 		GMClearUsed:   w.gmClearUsed,
 		GMClear:       w.gmClearLog,
