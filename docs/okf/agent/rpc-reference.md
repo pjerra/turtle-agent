@@ -159,6 +159,7 @@ Error codes: `-32700` parse, `-32600` invalid request, `-32601` method not found
 | `quest_log` | `{}` | `{quests[]}`. Never fails. |
 | `gossip_hello` | `guid*`, `option?`, `code?`, `wait_ms?` | `{since, event?}` (null on timeout when `wait_ms` ≤ 0). |
 | `gossip_select` | same (`option` required) | Same envelope. `gossip: no menu is open; call gossip_hello first`. |
+| `taxi` | `guid*` (flight master), `nodes*` (taxi node ids, source first) | `{since}`. Two nodes send a direct flight request, more send a multi-hop one, as the client does. `taxi: need at least a source and a destination node`. The flight shows up as movement and `position`; a refusal comes from the server. |
 | `join_channel` | `name*`, `password?` | `{}`. Answers arrive as `channel_notify` events. |
 | `leave_channel` | same | `{}`. |
 | `pet` | `{}` | `{present, guid?, entry?, name?, level?, dead, health, max_health, power_type, power, max_power, happiness?, happiness_state?, loyalty?, in_combat, target?, distance, moving, bar, react?, command?, enabled, spells?[], refused?}`. Never fails. `power_type` is 0 mana (a demon) or 2 focus (a hunter pet). `happiness`/`happiness_state`/`loyalty` are set for a hunter pet only (demons read 0). `react` is `passive`, `defensive` or `aggressive`; `command` is `stay` or `follow`. `spells[]` rows are `{spell_id, name?, slot, autocast, passive?}`; `slot` is the bar button 3–6, -1 when the spell is known but not on the bar. `refused` is the last `SMSG_PET_CAST_FAILED` reason, kept until the next summon. |
