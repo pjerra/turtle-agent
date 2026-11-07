@@ -71,8 +71,8 @@ func TestParseGMClearRefusals(t *testing.T) {
 			t.Errorf("%s: exit %d, stderr %q (want %q)", tc.name, code, stderr.String(), tc.want)
 		}
 	}
-	// Both test servers pass.
-	for _, server := range []string{"m910q", "tortoise-test2"} {
+	// Every test server passes.
+	for _, server := range []string{"m910q", "tortoise-test2", "tortoise-test3"} {
 		var stderr bytes.Buffer
 		if _, code := parseRaidWalkArgs(gmClearArgs("--server", server, "--gm-clear", "2:1"), &stderr); code != exitOK {
 			t.Errorf("%s: exit %d, stderr %q", server, code, stderr.String())
@@ -696,6 +696,7 @@ func TestGMKillAllowedNeedsTheConfiguredAddress(t *testing.T) {
 	servers := []slots.Server{
 		{Name: "m910q", Realmd: "10.1.1.1:3724", WorldAddr: "10.1.1.1:8085"},
 		{Name: "tortoise-test2", Realmd: "10.2.2.2:3724", WorldAddr: "10.2.2.3:8085"},
+		{Name: "tortoise-test3", Realmd: "10.3.3.3:3724", WorldAddr: "10.3.3.4:8085"},
 	}
 	cases := []struct {
 		name, server, dialed string
@@ -704,15 +705,18 @@ func TestGMKillAllowedNeedsTheConfiguredAddress(t *testing.T) {
 	}{
 		{"test2 dialled at its world_addr", "tortoise-test2", "10.2.2.3:8085", true, ""},
 		{"m910q dialled at its world_addr", "m910q", "10.1.1.1:8085", true, ""},
+		{"test3 dialled at its world_addr", "tortoise-test3", "10.3.3.4:8085", true, ""},
 		{"m910q same host, its realmd port", "m910q", "10.1.1.1:3724", false, "gm_kill refused"},
 		{"m910q same host, another port", "m910q", "10.1.1.1:9999", false, "gm_kill refused"},
 		{"test2 same host, another port", "tortoise-test2", "10.2.2.3:8086", false, "gm_kill refused"},
 		{"settings say tortoise-test2, session dialled a live host", "tortoise-test2", "203.0.113.9:8085", false, "gm_kill refused"},
 		{"settings say tortoise-test2, dialled its realmd host, not its world_addr", "tortoise-test2", "10.2.2.2:8085", false, "gm_kill refused"},
 		{"settings say m910q, dialled the other test server", "m910q", "10.2.2.3:8085", false, "gm_kill refused"},
+		{"settings say test3, dialled another test server", "tortoise-test3", "10.1.1.1:8085", false, "gm_kill refused"},
 		{"dialled address without a port", "m910q", "10.1.1.1", false, "gm_kill refused"},
 		{"ordinary agent", "tortoise", "10.1.1.1:8085", false, ""},
 		{"no server_name", "", "10.1.1.1:8085", false, ""},
+		{"unknown server", "prod-realm", "10.3.3.4:8085", false, ""},
 		{"server_name case differs", "M910Q", "10.1.1.1:8085", false, ""},
 		{"server_name has a trailing space", "m910q ", "10.1.1.1:8085", false, ""},
 	}
@@ -761,18 +765,24 @@ func TestGMKillAuthorizeReadsTheSlotsTable(t *testing.T) {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	table := `{"version":1,"servers":[{"name":"tortoise-test2","realmd":"10.2.2.2:3724","world_addr":"10.2.2.3:8085","slots":[]}]}`
+	table := `{"version":1,"servers":[{"name":"tortoise-test2","realmd":"10.2.2.2:3724","world_addr":"10.2.2.3:8085","slots":[]},{"name":"tortoise-test3","realmd":"10.3.3.3:3724","world_addr":"10.3.3.4:8085","slots":[]}]}`
 	if err := os.WriteFile(filepath.Join(dir, "slots.json"), []byte(table), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if got, why := gmKillAuthorize(st, "10.2.2.3:8085"); !got || why != "" {
 		t.Fatalf("matching host: allowed %v, reason %q", got, why)
 	}
+	if got, why := gmKillAuthorize(config.Settings{ServerName: "tortoise-test3"}, "10.3.3.4:8085"); !got || why != "" {
+		t.Fatalf("test3 matching host: allowed %v, reason %q", got, why)
+	}
 	if got, why := gmKillAuthorize(st, "203.0.113.9:8085"); got || !strings.Contains(why, "gm_kill refused") {
 		t.Fatalf("live host under a test server_name: allowed %v, reason %q", got, why)
 	}
 	if got, why := gmKillAuthorize(config.Settings{ServerName: "tortoise"}, "203.0.113.9:8085"); got || why != "" {
 		t.Fatalf("ordinary agent: allowed %v, reason %q", got, why)
+	}
+	if got, why := gmKillAuthorize(config.Settings{ServerName: "prod-realm"}, "10.3.3.4:8085"); got || why != "" {
+		t.Fatalf("unknown server: allowed %v, reason %q", got, why)
 	}
 }
 

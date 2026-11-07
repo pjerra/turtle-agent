@@ -456,16 +456,18 @@ func TestParsePlaceRefusesInject(t *testing.T) {
 
 func TestParsePlaceServerGuard(t *testing.T) {
 	var stderr bytes.Buffer
-	for _, server := range []string{"m910q", "tortoise-test2"} {
+	for _, server := range []string{"m910q", "tortoise-test2", "tortoise-test3"} {
 		stderr.Reset()
 		if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--server", server, "--place", "--from", "step 5", "--sql", "walk.sql"}, &stderr); code != exitOK {
 			t.Fatalf("%s: exit %d, stderr %q", server, code, stderr.String())
 		}
 	}
-	stderr.Reset()
-	if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--server", "tortoise", "--place", "--from", "step 5", "--sql", "walk.sql"}, &stderr); code != exitUsage ||
-		!strings.Contains(stderr.String(), "test servers only") {
-		t.Fatalf("exit %d, stderr %q", code, stderr.String())
+	for _, server := range []string{"tortoise", "prod-realm"} {
+		stderr.Reset()
+		if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--server", server, "--place", "--from", "step 5", "--sql", "walk.sql"}, &stderr); code != exitUsage ||
+			!strings.Contains(stderr.String(), "test servers only") {
+			t.Fatalf("%s: exit %d, stderr %q", server, code, stderr.String())
+		}
 	}
 }
 
