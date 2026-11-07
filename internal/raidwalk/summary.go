@@ -312,6 +312,10 @@ type FightSummary struct {
 	Warnings int `json:"warnings,omitempty"`
 	// Detail is the digest of the fight's detail file (fights.go); nil when it could not be read.
 	Detail *FightDetail `json:"detail,omitempty"`
+	// History is true when the dashboard already listed the fight before this walk filed one: an earlier
+	// walk's or instance's record. The walk keeps it for the kill credit and the summary but never copies
+	// its detail file into this walk's dir (fights-run.json names the at-start set).
+	History bool `json:"history,omitempty"`
 }
 
 // DecisionsFileSummary is one file of the decisions pull: its name, bytes and sha256 hex.

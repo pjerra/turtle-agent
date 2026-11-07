@@ -1398,6 +1398,8 @@ type fakeDash struct {
 	fightsStallFirst int
 	fightsStall      time.Duration
 	fightsCalls      int
+	// fightsSeq are the /api/v1/combat/fights answers in order, the last one repeating (nil: d.fights).
+	fightsSeq [][]walkFightRow
 }
 
 func (d *fakeDash) Login(ctx context.Context) error { return nil }
@@ -1446,7 +1448,14 @@ func (d *fakeDash) Fights(ctx context.Context, commander string) (json.RawMessag
 	if d.fightsErr != nil {
 		return nil, d.fightsErr
 	}
-	raw, err := json.Marshal(d.fights)
+	fights := d.fights
+	if len(d.fightsSeq) > 1 {
+		fights = d.fightsSeq[0]
+		d.fightsSeq = d.fightsSeq[1:]
+	} else if len(d.fightsSeq) == 1 {
+		fights = d.fightsSeq[0]
+	}
+	raw, err := json.Marshal(fights)
 	return raw, err
 }
 
@@ -5829,7 +5838,8 @@ func TestRaidWalkDashboardOffStillWalks(t *testing.T) {
 func TestRaidWalkSavesFightsOncePerKey(t *testing.T) {
 	f := newFixture(t)
 	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
-	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "win", BossName: "Onyxia", Leg: "onyxia", Step: 3, Deaths: 1}}
+	// The dashboard starts empty (the pre-placement read), so the walk's own fight files mid-walk.
+	f.dash.fightsSeq = [][]walkFightRow{{}, {{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "win", BossName: "Onyxia", Leg: "onyxia", Step: 3, Deaths: 1}}}
 	f.defaultRun("onyxias_lair")
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s", code, f.stderr.String())
@@ -5866,7 +5876,8 @@ func TestRaidWalkSkipsLiveFightRows(t *testing.T) {
 	}
 	f = newFixture(t)
 	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
-	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "k", Dur: 1200, Outcome: "win", Step: 3, Deaths: 1, Warnings: 2}}
+	// The pre-placement read is empty; the walk's own fight is live first, then finished.
+	f.dash.fightsSeq = [][]walkFightRow{{}, {{ID: "4-5", Key: "k", Live: true}}, {{ID: "4-5", Key: "k", Dur: 1200, Outcome: "win", Step: 3, Deaths: 1, Warnings: 2}}}
 	f.defaultRun("onyxias_lair")
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s", code, f.stderr.String())
@@ -5885,7 +5896,7 @@ func TestRaidWalkRetriesAFailedFightDetail(t *testing.T) {
 	f := newFixture(t)
 	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
 	f.dash.failFight = 1
-	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "k", Dur: 1200, Outcome: "win", Step: 3, Deaths: 1}}
+	f.dash.fightsSeq = [][]walkFightRow{{}, {{ID: "4-5", Key: "k", Dur: 1200, Outcome: "win", Step: 3, Deaths: 1}}}
 	f.defaultRun("onyxias_lair")
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s", code, f.stderr.String())
