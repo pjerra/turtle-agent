@@ -43,7 +43,7 @@ Usage: `turtle-agent raid-autopilot [--foreground] [--binary PATH] [--poll D] [-
 ```
 
 - Blank lines and `#` lines are skipped. The header is exactly `id server slot holder goal`, then `--`, then the raid-walk args starting with the plan.
-- `goal` is one token: `full`, `leg:<L>` or `boss:<ENTRY>` (a creature entry number after the prefix).
+- `goal` is one token: `full`, `leg:<L>`, `boss:<ENTRY>` or `practice:<ENTRY>:<CYCLES>` (a creature entry and a cycle count). A practice goal launches `--practice <ENTRY> --practice-cycles <CYCLES> --until none` and is met by the summary's `practice.cycles`, never by a boss kill.
 - `--sql FILE` is required on every line: every goal may be re-placed. `--from` in a line is the goal's own start.
 - Managed and dropped if present: `--server`, `--slot`, `--holder`, `--until`, `--from`, `--place`, `--reuse-instance`, `--out`, and `--boss-wipe-max` (read as the goal's boss-wipe budget, default 3).
 - Slot claims go by state, not file order: an id that is done, stopped or escalated with no live run holds no slot, so a new line may name a finished or escalated id's slot (an escalated id whose teardown never verified keeps its run and so keeps the slot). Every other known id (running, in a restart wait, refused, queued) claims its slots first, then new lines take what is left, so a new line inserted above a running id's line is the one skipped. An id is claimed as a unit (accepted only if every slot it names is free or already its own). The slot a live state holds now stays that id's, and an id whose lines changed keeps only the slot its state holds now. The start applies the same rule from the checkpoint, so a file the running autopilot accepted is accepted after a restart too.

@@ -36,5 +36,6 @@ A `targets.txt` goal is one token:[^autopilot]
 - `full` — walk to the plan's end.
 - `leg:<L>` — `--until "leg L"`.
 - `boss:<ENTRY>` — `--until boss-done`, done when that boss's `boss_kills` entry reads killed. A goal boss matches a kill of any entry of that boss: the summary's `entry` and its `phase_entry` both count, and so do the entries of a boss the walk reports under another entry.
+- `practice:<ENTRY>:<CYCLES>` — `--until none` and `--practice <ENTRY> --practice-cycles <CYCLES>`; done when the summary's `practice.cycles` reaches CYCLES. It is never met by a boss kill (a practice run credits none), and the practice loop, not the run's until, ends the walk.
 
 A goal met by any attempt advances to the id's next goal line; a goal boss already dead ends the goal as done, never escalated — even when the walk ended some other way afterwards.

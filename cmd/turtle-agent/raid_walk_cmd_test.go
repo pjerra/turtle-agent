@@ -64,6 +64,12 @@ type queuedEvent struct {
 	text string
 }
 
+// queuedSpell is one cast event the practice loop reads through the events RPC (kinds spell_start/spell_go).
+type queuedSpell struct {
+	at time.Time
+	ev events.Event
+}
+
 type timelineEntry struct {
 	Text     string
 	Targeted bool
@@ -153,6 +159,15 @@ type walkFakeAgent struct {
 
 	// hireCap is the server's hire limit (0: raidwalk.HireCap, the 39 of onyxia-kill-plan C6).
 	hireCap int
+
+	// The practice hands' game side (raid-walk --practice): each hook models what the GM command does to the test
+	// scenario; nil leaves the world unchanged. spellQueue holds the cast events the practice loop's own events read
+	// (kinds spell_start/spell_go) delivers once the fake clock reaches their time.
+	onEvade    func(g packet.GUID)
+	onSetHP    func(g packet.GUID, hp uint32)
+	onRespawn  func(g packet.GUID)
+	onRevive   func(name string)
+	spellQueue []queuedSpell
 
 	// hireShort withholds hireShort[batch] bots on the batch's first reply (dps first, then healers,
 	// then tanks). The first answer is partial; the retry hires the rest.
@@ -412,12 +427,23 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 			f.gmOnKinds = append([]string{}, ep.Kinds...)
 		}
 		var sp struct {
-			Since uint64 `json:"since"`
+			Since uint64   `json:"since"`
+			Kinds []string `json:"kinds"`
 		}
 		_ = json.Unmarshal(raw, &sp)
 		f.since = sp.Since
+		spells := false
+		for _, k := range sp.Kinds {
+			if k == events.KindSpellStart || k == events.KindSpellGo {
+				spells = true
+			}
+		}
 		f.mu.Unlock()
-		v = f.eventsPage()
+		if spells {
+			v = f.spellPage(sp.Since)
+		} else {
+			v = f.eventsPage()
+		}
 	case "bot_view":
 		if f.viewHook != nil {
 			f.viewHook()
@@ -454,6 +480,51 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 			f.killed[g] = true
 		}
 		f.mu.Unlock()
+	case "gm_evade", "gm_respawn":
+		var p struct {
+			GUID string `json:"guid"`
+		}
+		_ = json.Unmarshal(raw, &p)
+		g, err := packet.ParseGUID(p.GUID)
+		if err != nil {
+			f.t.Errorf("%s %q: %v", method, p.GUID, err)
+		}
+		f.mu.Lock()
+		f.log = append(f.log, method+" "+g.String())
+		h := map[string]func(packet.GUID){"gm_evade": f.onEvade, "gm_respawn": f.onRespawn}[method]
+		f.mu.Unlock()
+		if h != nil {
+			h(g)
+		}
+	case "gm_set_hp":
+		var p struct {
+			GUID string `json:"guid"`
+			HP   uint32 `json:"hp"`
+		}
+		_ = json.Unmarshal(raw, &p)
+		g, err := packet.ParseGUID(p.GUID)
+		if err != nil {
+			f.t.Errorf("gm_set_hp %q: %v", p.GUID, err)
+		}
+		f.mu.Lock()
+		f.log = append(f.log, fmt.Sprintf("gm_set_hp %s %d", g, p.HP))
+		h := f.onSetHP
+		f.mu.Unlock()
+		if h != nil {
+			h(g, p.HP)
+		}
+	case "gm_revive":
+		var p struct {
+			Name string `json:"name"`
+		}
+		_ = json.Unmarshal(raw, &p)
+		f.mu.Lock()
+		f.log = append(f.log, "gm_revive "+p.Name)
+		h := f.onRevive
+		f.mu.Unlock()
+		if h != nil {
+			h(p.Name)
+		}
 	case "unit":
 		var p struct {
 			GUID string `json:"guid"`
@@ -1041,6 +1112,28 @@ func (f *walkFakeAgent) eventsPageSince(since uint64) events.Page {
 		for _, q := range batch {
 			hook(q.raw)
 		}
+	}
+	return events.Page{Events: evs, Next: next}
+}
+
+// spellPage delivers the queued cast events whose time the fake clock reached. It shares f.next with the system
+// events, so both cursors move forward without ever re-reading a line.
+func (f *walkFakeAgent) spellPage(since uint64) events.Page {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	now := f.clock.now()
+	var evs []events.Event
+	for len(f.spellQueue) > 0 && !f.spellQueue[0].at.After(now) {
+		q := f.spellQueue[0]
+		f.spellQueue = f.spellQueue[1:]
+		f.next++
+		ev := q.ev
+		ev.Seq = f.next
+		evs = append(evs, ev)
+	}
+	next := f.next
+	if next < since {
+		next = since
 	}
 	return events.Page{Events: evs, Next: next}
 }
