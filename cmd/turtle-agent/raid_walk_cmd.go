@@ -853,6 +853,9 @@ type walk struct {
 	// (creditFightKills). A record that first appears during the walk is this walk's and credits freely.
 	// nil until the first successful read.
 	fightIDsAtStart map[string]bool
+	// liveAtStart is the at-start ids whose row was Live in the first successful read (built next to
+	// fightIDsAtStart): when such a fight later finishes, its detail file is still written, tagged History.
+	liveAtStart map[string]bool
 	// fightsPrePlacement is set while saveFightsAtStart reads the list before the walk's first placement.
 	fightsPrePlacement bool
 	// maxStatusStep is the highest step any run status showed (observeBossStatus): creditFightKills reads whether
