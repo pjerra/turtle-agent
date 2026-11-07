@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/game"
 	"github.com/pjerra/turtle-agent/internal/opcode"
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/worldconn"
 )
 
 // flightMasterGUID is a creature of entry 0x8C1.
@@ -136,14 +138,19 @@ func TestActivateTaxiTimeoutFreesTheSession(t *testing.T) {
 	h := start(t, Options{})
 	h.enterWorld()
 	clock := &taxiClock{at: h.s.now()}
-	h.s.clockFn = clock.now
 	ctx := context.Background()
+	// The session's clock is read on the owner loop (and by the spell state), so the
+	// test swaps it on the owner loop too: a plain assignment here would race Run.
+	if _, err := h.s.do(ctx, func() (any, error) { h.s.clockFn = clock.now; return nil, nil }); err != nil {
+		t.Fatal(err)
+	}
 	if err := h.s.ActivateTaxi(ctx, flightMasterGUID, []uint32{2, 6}); err != nil {
 		t.Fatal(err)
 	}
 	h.expect(opcode.CMSGActivatetaxi)
-	if err := h.s.ActivateTaxi(ctx, flightMasterGUID, []uint32{2, 6}); err == nil {
-		t.Fatal("second request before the window accepted")
+	if err := h.s.ActivateTaxi(ctx, flightMasterGUID, []uint32{2, 6}); err == nil ||
+		err.Error() != "taxi: previous request still unanswered (retry after 10 s)" {
+		t.Fatalf("%v", err)
 	}
 	drainTaxi(t, h)
 	clock.advance(taxiWait)
@@ -196,6 +203,48 @@ func TestActivateTaxiConcurrentSendsOnce(t *testing.T) {
 	}
 	h.expect(opcode.CMSGActivatetaxi)
 	drainTaxi(t, h)
+}
+
+// More than maxTaxiNodes nodes are refused before anything is built or sent, so the
+// refusal sets no window: a valid call right after still sends.
+func TestActivateTaxiRejectsTooManyNodes(t *testing.T) {
+	h := start(t, Options{})
+	h.enterWorld()
+	ctx := context.Background()
+	nodes := make([]uint32, maxTaxiNodes+1)
+	for i := range nodes {
+		nodes[i] = uint32(i + 2)
+	}
+	if err := h.s.ActivateTaxi(ctx, flightMasterGUID, nodes); err == nil ||
+		!strings.Contains(err.Error(), "taxi: too many nodes (max 64)") {
+		t.Fatalf("%v", err)
+	}
+	drainTaxi(t, h)
+	if err := h.s.ActivateTaxi(ctx, flightMasterGUID, []uint32{2, 6}); err != nil {
+		t.Fatal(err)
+	}
+	h.expect(opcode.CMSGActivatetaxi)
+}
+
+// A request the socket refuses to take sets no window: the next call fails on the dead
+// socket, not as "still unanswered". (A failed write closes the conn, so no follow-up
+// call can send; what matters is the refusal is the write error, not the window.)
+func TestActivateTaxiWriteFailureSetsNoWindow(t *testing.T) {
+	var bw *brokenWrites
+	h := startWrapped(t, Options{}, testKey, testKey, func(c net.Conn) net.Conn {
+		bw = &brokenWrites{Conn: c}
+		return bw
+	})
+	h.enterWorld()
+	ctx := context.Background()
+	bw.broken.Store(true)
+	if err := h.s.ActivateTaxi(ctx, flightMasterGUID, []uint32{2, 6}); !errors.Is(err, worldconn.ErrWrite) {
+		t.Fatalf("%v", err)
+	}
+	if err := h.s.ActivateTaxi(ctx, flightMasterGUID, []uint32{2, 6}); err == nil ||
+		strings.Contains(err.Error(), "still unanswered") {
+		t.Fatalf("%v", err)
+	}
 }
 
 // drainTaxi reads packets until 200 ms pass with nothing new, so a check for "nothing

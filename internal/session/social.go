@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
@@ -143,6 +144,10 @@ func (s *Session) onGossipComplete([]byte) error {
 // reach, an unknown node, disabled movement), so the timeout is what frees those.
 const taxiWait = 10 * time.Second
 
+// maxTaxiNodes caps a taxi route: real routes are a handful of nodes, and 64 keep the
+// body far below the packet limit.
+const maxTaxiNodes = 64
+
 // ActivateTaxi asks the flight master npc for a flight along nodes (source first): two nodes
 // send CMSG_ACTIVATETAXI, more send CMSG_ACTIVATETAXIEXPRESS, as the client does. The
 // server's answer comes back as a taxi_reply event. A reply names no request, so one call
@@ -153,6 +158,9 @@ func (s *Session) ActivateTaxi(ctx context.Context, npc packet.GUID, nodes []uin
 	}
 	if len(nodes) < 2 {
 		return errors.New("taxi: need at least a source and a destination node")
+	}
+	if len(nodes) > maxTaxiNodes {
+		return fmt.Errorf("taxi: too many nodes (max %d)", maxTaxiNodes)
 	}
 	var op uint16
 	var body []byte
@@ -168,10 +176,15 @@ func (s *Session) ActivateTaxi(ctx context.Context, npc packet.GUID, nodes []uin
 		now := s.now()
 		if now.Before(s.taxiPendingUntil) {
 			return nil, fmt.Errorf("taxi: previous request still unanswered (retry after %d s)",
-				int(s.taxiPendingUntil.Sub(now).Seconds()))
+				int(math.Ceil(s.taxiPendingUntil.Sub(now).Seconds())))
+		}
+		// The window starts only once the request is out: a failed write leaves it
+		// untouched, so the next call is not refused for a flight never asked for.
+		if err := s.conn.WritePacket(op, body); err != nil {
+			return nil, err
 		}
 		s.taxiPendingUntil = now.Add(taxiWait)
-		return nil, s.conn.WritePacket(op, body)
+		return nil, nil
 	})
 	return err
 }
