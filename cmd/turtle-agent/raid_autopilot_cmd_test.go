@@ -41,15 +41,18 @@ lease)
   exit 0
   ;;
 raid-walk)
+  out=""; prev=""
+  for a in "$@"; do if [ "$prev" = "--out" ]; then out=$a; fi; prev=$a; done
+  base=$(basename "$out")
+  # A gated attempt waits for its release file before it records or runs anything: the test releases each attempt
+  # only after the previous attempt's finish is observed, so the supervisor can never run ahead of the driver's
+  # launch-finish pairing (a whole launch-finish cycle fits between two level polls under load, and every later
+  # iteration then observes the wrong attempt). Attempts without a .gate marker run at once, as before.
+  if [ -f "$AUTO_SPEC_DIR/$base.gate" ]; then while [ ! -f "$AUTO_SPEC_DIR/$base.go" ]; do sleep 0.02; done; fi
   printf '%s\n' "$*" >> "$AUTO_ARGS_LOG"
-  out=""
-  while [ $# -gt 0 ]; do
-    if [ "$1" = "--out" ]; then out=$2; shift 2; else shift; fi
-  done
   mkdir -p "$out/slot"
   printf '{"server":"srv","slot":"1","holder":"zg-a","slots_path":"%s"}\n' "$AUTO_SLOTS" > "$out/slot/slot.json"
   printf '%s\n' "$$" > "$out/walk.pid"
-  base=$(basename "$out")
   if [ -f "$AUTO_SPEC_DIR/$base.runlog" ]; then cp "$AUTO_SPEC_DIR/$base.runlog" "$out/run.log"; fi
   if [ -f "$AUTO_SPEC_DIR/$base.summary" ]; then cp "$AUTO_SPEC_DIR/$base.summary" "$out/summary.json"; fi
   if [ -f "$AUTO_SPEC_DIR/$base.sleep" ]; then sleep "$(cat "$AUTO_SPEC_DIR/$base.sleep")"; fi
@@ -153,6 +156,20 @@ func (f *autoFixture) attempt(base string, exit, steps int, endReason string) {
 	if steps > 0 {
 		f.writeSpec(base+".runlog", fmt.Sprintf("19:46:05.696 TBM:RUN|zul_gurub|running|%d/761|jeklik|boss|begin|fighting\n", steps))
 	}
+}
+
+// gateAttempt holds one attempt at the stub's gate until releaseAttempt runs: the supervisor's launch of it blocks
+// before recording or running anything, so the driver pairs every launch with its own finish whatever the tick
+// timing is. Attempts without a gate run at once, as before.
+func (f *autoFixture) gateAttempt(base string) {
+	f.t.Helper()
+	f.writeSpec(base+".gate", "")
+}
+
+// releaseAttempt lets one gated attempt run.
+func (f *autoFixture) releaseAttempt(base string) {
+	f.t.Helper()
+	f.writeSpec(base+".go", "1")
 }
 
 // running plans an attempt that stays up until the test stops it.
@@ -324,6 +341,25 @@ func finishAttempt(t *testing.T, s *autoSupervisor) {
 		st.mu.Lock()
 		defer st.mu.Unlock()
 		return st.run == nil || st.escalated
+	})
+	clearWait(s.states[0])
+}
+
+// finishAttemptN advances the supervisor until attempt n's own finish is applied, then skips the restart backoff.
+// The level conditions other tests use (another launch's argv line, st.run == nil) can skip a whole launch-finish
+// cycle under load: a finish goroutine delayed by a slow tick lets the next attempt launch and finish before the
+// driver sees the quiescent point, so every later iteration observes the wrong attempt (attempt 8's exit-2 finish
+// blamed on attempt 7 here). The supervisor numbers every launch (st.seq, st.last.seq), so waiting for attempt n's
+// own sequence edge keeps the 1:1 launch-finish pairing whatever the tick timing is. Only st.last.seq is used (not
+// st.run == nil as well): with the test's gated attempts the next attempt's stub cannot exit until it is released,
+// so nothing overwrites the finished run before the driver sees it.
+func finishAttemptN(t *testing.T, s *autoSupervisor, n int) {
+	t.Helper()
+	tickUntil(t, s, fmt.Sprintf("attempt %d to finish", n), func() bool {
+		st := s.states[0]
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		return (st.last != nil && st.last.seq == n) || st.escalated
 	})
 	clearWait(s.states[0])
 }
@@ -3261,10 +3297,22 @@ func TestAutoInstanceCapRefusalStreakBreaksPastPlacement(t *testing.T) {
 		f.attempt(fmt.Sprintf("a-%d", i), 26, 0, capEnd)
 	}
 	f.attempt("a-8", 2, 0, "bad --sql")
+	// Gate every attempt: the supervisor can launch attempt i only after the driver released it, and the driver
+	// releases it only after attempt i-1's finish is observed. The pairing is then exact whatever the tick timing
+	// is (no release, no launch, no overrun). Attempt 8 is never released: the loop ends after attempt 7's finish.
+	for i := 1; i <= 8; i++ {
+		f.gateAttempt(fmt.Sprintf("a-%d", i))
+	}
+	f.t.Cleanup(func() {
+		for i := 1; i <= 8; i++ {
+			_ = os.WriteFile(filepath.Join(f.specDir, fmt.Sprintf("a-%d.go", i)), []byte("1"), 0o600)
+		}
+	})
 	s := f.supervisor()
 	for i := 1; i <= 7; i++ {
+		f.releaseAttempt(fmt.Sprintf("a-%d", i))
 		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
-		finishAttempt(t, s)
+		finishAttemptN(t, s, i)
 		if _, esc := runState(s.states[0]); esc {
 			t.Fatalf("escalated after cap refusal %d with a placement in between:\n%s", i, f.events())
 		}
