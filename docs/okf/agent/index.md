@@ -17,7 +17,7 @@ One agent process plays one character: its session, its brain, and the RPC calls
 - [Moving](movement-guide.md) — walk_to, path_to, walk_path, teleport.
 - [Brain and follow](brain-guide.md) — start the brain, follow a lead bot.
 - [Dying and coming back](death-guide.md) — release, corpse run, resurrect.
-- [Talking, trading and the world](social-guide.md) — chat, group, spells, loot, vendors, quests, pets.
+- [Talking, trading and the world](social-guide.md) — chat, group, spells, loot, vendors, quests, flights.
 - [Running dungeons with the agent](dungeon-guide.md) — dungeon_run, stage, tune, LFG, teardown.
 
 ## Reference

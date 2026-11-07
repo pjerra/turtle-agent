@@ -39,6 +39,10 @@ No quiet move row stands anywhere before the leg's first pull. Pass an exact `--
 
 The placement failed every try it makes in the same instance (quiet refusals, fights after the place, or hires not arriving). Exit 29. The autopilot retries once per goal in a fresh instance; if that also ends in 29 it stops the id with an `ESCALATE` line. Walk from the door, or fix the blockers the notes name, before you re-place.
 
+## `place: ... fresh instance needed`
+
+A same-instance placement try found at least half the hires dead or the start leg's boss engaged with a hire. The walk stops trying in that copy at once with exit 29 (`party dead` or `boss engaged with the party`) instead of feeding the boss more tries; the autopilot relaunches the goal in a fresh instance. Re-place fresh; never retry the spent copy for that start.
+
 ## `instance cap: ...`
 
 At the cap's raid count the walk waits up to `--instance-cap-wait` for the oldest entry to age out, then exits 26. Either wait for the earliest free time the wait line names, or re-place with `--reuse-instance` (untouched by the cap), or — only after a worldserver restart — clear the stale ledger with `--instance-cap-reset`.
@@ -69,7 +73,7 @@ The autopilot validates `targets.txt` before anything runs (exit 2): `no -- betw
 
 ## `ESCALATE <kind> <id> <slot>: <reason>` in status.txt
 
-That id is left for a person: exit 2, a repeated exit 29, three exit 15s, three placement failures, six hire-pool waits or three teardown failures. Clear the cause (arguments, placement, lease holder, pool pressure, slot state), then remove or fix the id's lines.
+That id is left for a person: exit 2, a repeated exit 29, three exit 15s, a boss-wipe budget spent (`boss wipe xN without progress`, default 3: `--boss-wipe-max` raises it), three placement failures, four instance-cap refusals, six hire-pool waits or three teardown failures. Clear the cause (arguments, placement, lease holder, pool pressure, slot state), then remove or fix the id's lines.
 
 ## `fighting after the place` / `not at the start`
 

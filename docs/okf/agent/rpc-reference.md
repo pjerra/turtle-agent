@@ -25,7 +25,7 @@ sources:
     title: Group methods
   - id: social-methods-go
     resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/social_methods.go
-    title: addon_send, tbm, channels, gossip
+    title: addon_send, tbm, channels, gossip, taxi
   - id: item-methods-go
     resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/item_methods.go
     title: use_item, loot, open_object, mount

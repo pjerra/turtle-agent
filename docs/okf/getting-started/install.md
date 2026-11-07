@@ -58,4 +58,4 @@ status: draft
 
 ## Branches
 
-Work goes feature branch -> `dev` -> `main`. Open pull requests against `dev`. The `test` check must be green to merge into either branch. `main` only takes `dev` after the owner's review.
+Work goes feature branch -> `dev` -> `main`. Open pull requests against `dev`. The `test` check must be green to merge into either branch. `main` only takes `dev` after the owner's review. To run the full CI on a branch without a PR, push it to `ci/<name>` (same `test` and `navmesh` jobs as `dev`/`main`); delete the `ci/` branch after the result.
