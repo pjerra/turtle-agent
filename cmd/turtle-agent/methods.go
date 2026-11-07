@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"time"
 
@@ -78,11 +79,12 @@ type guidParams struct {
 	GUID packet.GUID `json:"guid"`
 }
 
-// gmSetHPParams is gm_set_hp: the creature and the health to set as BOTH its max and its current value (the practice
-// run passes its own MaxHealth).
+// gmSetHPParams is gm_set_hp: the creature only. The session restores the unit to its own MaxHealth (it reads the unit
+// and sends `.modify hp <max> <max>`), so an explicit hp is refused: no caller can lower a unit's maximum.
 type gmSetHPParams struct {
 	GUID packet.GUID `json:"guid"`
-	HP   uint32      `json:"hp"`
+	// HP is refused when present, whatever its value: the parameter was removed from the RPC.
+	HP *uint32 `json:"hp,omitempty"`
 }
 
 type walkParams struct {
@@ -203,7 +205,10 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 		return empty{}, rpcErr(cur().GMEvade(ctx, p.GUID))
 	}))
 	srv.Register("gm_set_hp", rpc.Typed(func(ctx context.Context, p gmSetHPParams) (empty, error) {
-		return empty{}, rpcErr(cur().GMSetHP(ctx, p.GUID, p.HP))
+		if p.HP != nil {
+			return empty{}, fmt.Errorf("gm_set_hp: the hp argument is refused (the unit is restored to its own max health): got %d", *p.HP)
+		}
+		return empty{}, rpcErr(cur().GMSetHP(ctx, p.GUID))
 	}))
 	srv.Register("gm_respawn", rpc.Typed(func(ctx context.Context, p guidParams) (empty, error) {
 		return empty{}, rpcErr(cur().GMRespawn(ctx, p.GUID))
