@@ -44,17 +44,21 @@ raid-walk)
   out=""; prev=""
   for a in "$@"; do if [ "$prev" = "--out" ]; then out=$a; fi; prev=$a; done
   base=$(basename "$out")
-  # A gated attempt waits for its release file before it records or runs anything: the test releases each attempt
+  # A gated attempt waits for its release file before it stages or records anything: the test releases each attempt
   # only after the previous attempt's finish is observed, so the supervisor can never run ahead of the driver's
   # launch-finish pairing (a whole launch-finish cycle fits between two level polls under load, and every later
   # iteration then observes the wrong attempt). Attempts without a .gate marker run at once, as before.
   if [ -f "$AUTO_SPEC_DIR/$base.gate" ]; then while [ ! -f "$AUTO_SPEC_DIR/$base.go" ]; do sleep 0.02; done; fi
-  printf '%s\n' "$*" >> "$AUTO_ARGS_LOG"
+  # The launch line is logged only after the attempt is fully staged: a driver that saw the launch knows the slot
+  # dir, slot.json, walk.pid, run.log and summary.json are on disk, so a STOP (or YIELD, or a removed targets line)
+  # on the next tick always finds a slot the teardown can verify. Logging first left a window where the stop killed
+  # the walk between mkdir and slot.json and every teardown failed the lease check (escalated, never stopped).
   mkdir -p "$out/slot"
   printf '{"server":"srv","slot":"1","holder":"zg-a","slots_path":"%s"}\n' "$AUTO_SLOTS" > "$out/slot/slot.json"
   printf '%s\n' "$$" > "$out/walk.pid"
   if [ -f "$AUTO_SPEC_DIR/$base.runlog" ]; then cp "$AUTO_SPEC_DIR/$base.runlog" "$out/run.log"; fi
   if [ -f "$AUTO_SPEC_DIR/$base.summary" ]; then cp "$AUTO_SPEC_DIR/$base.summary" "$out/summary.json"; fi
+  printf '%s\n' "$*" >> "$AUTO_ARGS_LOG"
   if [ -f "$AUTO_SPEC_DIR/$base.sleep" ]; then sleep "$(cat "$AUTO_SPEC_DIR/$base.sleep")"; fi
   rm -f "$out/walk.pid"
   code=0
@@ -1853,8 +1857,8 @@ func TestAutoYieldFailedTeardownWritesNoYieldDone(t *testing.T) {
 		done <- raidAutopilotCmd(ctx, []string{"--foreground", "--binary", f.stub, "--poll", "50ms", "--settle", "0", "--status-every", "1h", f.walk}, io.Discard, io.Discard)
 	}()
 	waitForN(t, 10*time.Second, "the walk to launch", func() bool { return len(f.args()) >= 1 })
-	// The stub creates its slot dir after the launch event; a YIELD before that leaves no slot dir to fail on, and
-	// the teardown is then (correctly) clean. Wait for the dir so the test exercises the failed teardown.
+	// The stub logs the launch only after the slot dir and its files exist; a YIELD before that finds nothing to
+	// fail on and the teardown is (correctly) clean. Wait for the dir so the test exercises the failed teardown.
 	waitForN(t, 10*time.Second, "the walk's slot dir", func() bool {
 		_, err := os.Stat(filepath.Join(f.walk, "a-1", "slot"))
 		return err == nil
