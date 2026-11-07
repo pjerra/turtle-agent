@@ -135,3 +135,24 @@ func (s *Session) onGossipComplete([]byte) error {
 	s.emit(events.Event{Kind: events.KindGossipComplete, SourceGUID: npc})
 	return nil
 }
+
+// ActivateTaxi asks the flight master npc for a flight along nodes (source first): two nodes
+// send CMSG_ACTIVATETAXI, more send CMSG_ACTIVATETAXIEXPRESS, as the client does.
+func (s *Session) ActivateTaxi(ctx context.Context, npc packet.GUID, nodes []uint32) error {
+	if npc == 0 {
+		return errors.New("taxi: no flight master guid")
+	}
+	if len(nodes) < 2 {
+		return errors.New("taxi: need at least a source and a destination node")
+	}
+	_, err := s.do(ctx, func() (any, error) {
+		if err := s.inWorld(); err != nil {
+			return nil, err
+		}
+		if len(nodes) == 2 {
+			return nil, s.conn.WritePacket(opcode.CMSGActivatetaxi, game.BuildActivateTaxi(npc, nodes[0], nodes[1]))
+		}
+		return nil, s.conn.WritePacket(opcode.CMSGActivatetaxiexpress, game.BuildActivateTaxiExpress(npc, nodes))
+	})
+	return err
+}

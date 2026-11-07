@@ -78,3 +78,19 @@ func ParseGossipMessage(body []byte) (GossipMenu, error) {
 	}
 	return m, nil
 }
+
+// BuildActivateTaxi is CMSG_ACTIVATETAXI: flight master GUID, source node, destination node
+// (TaxiHandler.cpp HandleActivateTaxiOpcode).
+func BuildActivateTaxi(npc packet.GUID, from, to uint32) []byte {
+	return packet.NewWriter().GUID(npc).U32(from).U32(to).Bytes()
+}
+
+// BuildActivateTaxiExpress is CMSG_ACTIVATETAXIEXPRESS: flight master GUID, total cost (the
+// server recomputes it), node count, then the route's nodes from source to destination.
+func BuildActivateTaxiExpress(npc packet.GUID, nodes []uint32) []byte {
+	w := packet.NewWriter().GUID(npc).U32(0).U32(uint32(len(nodes)))
+	for _, n := range nodes {
+		w.U32(n)
+	}
+	return w.Bytes()
+}
