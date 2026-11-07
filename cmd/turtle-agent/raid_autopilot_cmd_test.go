@@ -3666,3 +3666,39 @@ func TestAutoBossWipeProgressReadsTheSummaryStepToo(t *testing.T) {
 		t.Fatalf("%d launches, want 4:\n%s", n, f.events())
 	}
 }
+
+// A practice goal launches raid-walk with the mechanic entry and its cycle budget, and its until is none.
+func TestAutoCommandArgsPracticeGoal(t *testing.T) {
+	target := raidwalk.AutoTarget{
+		ID: "p", Server: "tortoise-test2", Slot: "1", Holder: "zg-p",
+		Goal: raidwalk.AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10},
+		Args: []string{"zul_gurub", "--dir", "/plans", "--sql", "/zg.sql"},
+	}
+	got := strings.Join(autoCommandArgs("/bin/ta", target, "/walk/p-1", "", false, 0), " ")
+	want := "raid-walk zul_gurub --dir /plans --sql /zg.sql --server tortoise-test2 --slot 1 --holder zg-p --until none --out /walk/p-1 --practice 14834 --practice-cycles 10"
+	if got != want {
+		t.Fatalf("args:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// The autopilot reads the summary's practice cycles, and a practice goal is met only by them.
+func TestAutoObservationPracticeCycles(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/summary.json"
+	raw := `{"exit_code":0,"steps_reached":700,"steps_total":733,"end_reason":"practice: cycles",
+		"practice":{"entry":14834,"attempts":2,"cycles":10,"ended":"cycles","rows":"practice.jsonl"}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := autoReadSummary(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.PracticeCycles != 10 {
+		t.Fatalf("practice cycles %d, want 10", sum.PracticeCycles)
+	}
+	o := raidwalk.AutoObservation{Exited: true, PracticeCycles: sum.PracticeCycles}
+	if !raidwalk.GoalAchieved(raidwalk.AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}, o) {
+		t.Fatal("10 practice cycles did not meet the autopilot's goal")
+	}
+}

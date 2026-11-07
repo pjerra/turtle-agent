@@ -43,14 +43,16 @@ const AutoHirePoolWaitBackoff = 5 * time.Minute
 // backoff loop ends by itself otherwise.
 const AutoHirePoolWaitMax = 6
 
-// AutoGoal is one target's goal: the plan walked whole, a leg stopped at, or one boss killed.
+// AutoGoal is one target's goal: the plan walked whole, a leg stopped at, one boss killed, or a boss-mechanic
+// practice run of cycles cycles.
 type AutoGoal struct {
-	Kind string // "full", "leg" or "boss"
-	Leg  string // Kind leg: the leg name or number
-	Boss uint32 // Kind boss: the boss's creature entry
+	Kind   string // "full", "leg", "boss" or "practice"
+	Leg    string // Kind leg: the leg name or number
+	Boss   uint32 // Kind boss and practice: the boss's creature entry
+	Cycles int    // Kind practice: the mechanic cycles the run must collect
 }
 
-// ParseAutoGoal reads a goal token: full, leg:<L> or boss:<ENTRY>.
+// ParseAutoGoal reads a goal token: full, leg:<L>, boss:<ENTRY> or practice:<ENTRY>:<CYCLES>.
 func ParseAutoGoal(s string) (AutoGoal, error) {
 	switch {
 	case s == "full":
@@ -67,8 +69,20 @@ func ParseAutoGoal(s string) (AutoGoal, error) {
 			return AutoGoal{}, fmt.Errorf("goal %q: boss wants a creature entry after the boss: prefix", s)
 		}
 		return AutoGoal{Kind: "boss", Boss: uint32(n)}, nil
+	case strings.HasPrefix(s, "practice:"):
+		rest := strings.TrimPrefix(s, "practice:")
+		entry, cycles, ok := strings.Cut(rest, ":")
+		n, err := strconv.ParseUint(entry, 10, 32)
+		if !ok || err != nil || n == 0 {
+			return AutoGoal{}, fmt.Errorf("goal %q: practice wants practice:<ENTRY>:<CYCLES>", s)
+		}
+		k, err := strconv.Atoi(cycles)
+		if err != nil || k < 1 {
+			return AutoGoal{}, fmt.Errorf("goal %q: practice wants 1 or more cycles after practice:<ENTRY>:", s)
+		}
+		return AutoGoal{Kind: "practice", Boss: uint32(n), Cycles: k}, nil
 	}
-	return AutoGoal{}, fmt.Errorf("goal %q: want full, leg:<L> or boss:<ENTRY>", s)
+	return AutoGoal{}, fmt.Errorf("goal %q: want full, leg:<L>, boss:<ENTRY> or practice:<ENTRY>:<CYCLES>", s)
 }
 
 // String prints the goal as the targets file writes it.
@@ -78,6 +92,8 @@ func (g AutoGoal) String() string {
 		return "leg:" + g.Leg
 	case "boss":
 		return "boss:" + strconv.FormatUint(uint64(g.Boss), 10)
+	case "practice":
+		return "practice:" + strconv.FormatUint(uint64(g.Boss), 10) + ":" + strconv.Itoa(g.Cycles)
 	}
 	return "full"
 }
@@ -90,6 +106,9 @@ func (g AutoGoal) Until() string {
 	case "boss":
 		// The boss goal is a kill: boss-done stops after it, not at its step.
 		return "boss-done"
+	case "practice":
+		// The practice loop ends the walk itself (its own cycle budget, time limit and resets): the run has no until.
+		return "none"
 	}
 	return "none"
 }
@@ -451,6 +470,9 @@ type AutoObservation struct {
 	// carries --gm-instance-data (ZG Hakkar today): that flag re-applies the boss prerequisites in the new copy. A
 	// fresh instance throws away earlier kills, so every other goal keeps the same-instance relaunch.
 	WipeAtBoss bool
+	// PracticeCycles is the summary's practice.cycles of a practice run (0 for every other run). A practice goal is
+	// met by these cycles, never by a boss kill.
+	PracticeCycles int
 }
 
 // PlacementFailed says the run never started: it ended in the place phase.
@@ -511,6 +533,12 @@ func GoalBossDead(g AutoGoal, o AutoObservation) bool {
 func GoalAchieved(g AutoGoal, o AutoObservation) bool {
 	if !o.Exited {
 		return false
+	}
+	// A practice goal is met by the cycles its summary recorded, whatever the exit code or end reason (a walk that
+	// stopped on its own time limit after 10 cycles met it). A boss death during practice ends the practice without
+	// crediting a kill, so boss_kills never meets it.
+	if g.Kind == "practice" {
+		return g.Cycles > 0 && o.PracticeCycles >= g.Cycles
 	}
 	if GoalBossDead(g, o) {
 		return true

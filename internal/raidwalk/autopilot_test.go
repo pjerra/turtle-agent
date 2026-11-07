@@ -668,3 +668,71 @@ func TestParseAutoTargetsBossWipeFreshNeedsFrom(t *testing.T) {
 		t.Fatalf("err %v, want the needs---from error", err)
 	}
 }
+// The practice goal token round-trips, and every malformed form is refused rather than guessed at (a typo must not
+// silently launch a full clear).
+func TestPracticeGoalParse(t *testing.T) {
+	for _, c := range []struct {
+		token  string
+		boss   uint32
+		cycles int
+	}{
+		{"practice:14834:10", 14834, 10},
+		{"practice:14509:1", 14509, 1},
+	} {
+		g, err := ParseAutoGoal(c.token)
+		if err != nil {
+			t.Fatalf("%q: %v", c.token, err)
+		}
+		if g.Kind != "practice" || g.Boss != c.boss || g.Cycles != c.cycles {
+			t.Fatalf("%q parsed as %+v", c.token, g)
+		}
+		if got := g.String(); got != c.token {
+			t.Fatalf("%q printed as %q", c.token, got)
+		}
+		if g.Until() != "none" {
+			t.Fatalf("%q until %q, want none (the practice loop ends the walk)", c.token, g.Until())
+		}
+	}
+	for _, bad := range []string{"practice", "practice:", "practice:14834", "practice::10", "practice:0:10",
+		"practice:14834:0", "practice:14834:-1", "practice:14834:x", "practice:14834:10:2"} {
+		if g, err := ParseAutoGoal(bad); err == nil {
+			t.Fatalf("%q parsed as %+v, want a refusal", bad, g)
+		}
+	}
+}
+
+// A practice goal is met by the summary's practice cycles, never by a boss kill: practice ends on a boss death without
+// crediting one.
+func TestPracticeGoalNotMetByKill(t *testing.T) {
+	o := AutoObservation{Exited: true, ExitCode: 0, KilledBosses: map[uint32]bool{14834: true}}
+	if GoalAchieved(AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}, o) {
+		t.Fatal("a boss kill met a practice goal")
+	}
+	o.PracticeCycles = 10
+	if !GoalAchieved(AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}, o) {
+		t.Fatal("10 practice cycles did not meet a 10-cycle goal")
+	}
+	o.PracticeCycles = 9
+	if GoalAchieved(AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}, o) {
+		t.Fatal("9 cycles met a 10-cycle goal")
+	}
+}
+
+// The practice mechanics' table is the core's own timing, cited in practice.go.
+func TestPracticeMechanicsTable(t *testing.T) {
+	m, ok := PracticeMechanicFor(14834)
+	if !ok {
+		t.Fatal("Hakkar 14834 is not in the table")
+	}
+	if m.SpellID != 24324 || m.FirstAtS != 90 || m.EverySec != 90 || m.BerserkS != 600 || m.CyclesPerAttempt != 5 ||
+		len(m.RespawnEntries) != 1 || m.RespawnEntries[0] != 11357 {
+		t.Fatalf("Hakkar mechanic %+v is not the sourced timing", m)
+	}
+	if m.IsWindow() {
+		t.Fatal("Hakkar is window mode")
+	}
+	w := PracticeWindowMechanic(99999, 120*time.Second)
+	if !w.IsWindow() || w.CyclesPerAttempt != 3 || w.EverySec != 120 || w.BerserkS != 0 {
+		t.Fatalf("window mechanic %+v", w)
+	}
+}
