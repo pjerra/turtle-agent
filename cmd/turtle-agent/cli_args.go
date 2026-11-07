@@ -170,6 +170,31 @@ func parseLeaseReleaseArgs(args []string, stderr io.Writer) (leaseReleaseOptions
 	return o, exitOK
 }
 
+// leaseReapOptions is the parsed `lease reap` command line.
+type leaseReapOptions struct {
+	dryRun    bool
+	slotsPath string
+}
+
+// parseLeaseReapArgs parses lease reap flags. Failures are reported to stderr;
+// the result is exitOK with the options, or exitUsage.
+func parseLeaseReapArgs(args []string, stderr io.Writer) (leaseReapOptions, int) {
+	var o leaseReapOptions
+	fs := flag.NewFlagSet("lease reap", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.BoolVar(&o.dryRun, "dry-run", false, "list the dead holders' leases, remove nothing")
+	fs.StringVar(&o.slotsPath, "slots", "", "slot table file")
+	pos, rest := splitPositionals(fs, args, 0)
+	if err := fs.Parse(rest); err != nil {
+		return o, exitUsage
+	}
+	if len(pos) != 0 || fs.NArg() != 0 {
+		fmt.Fprintln(stderr, leaseUsage)
+		return o, exitUsage
+	}
+	return o, exitOK
+}
+
 // leaseListOptions is the parsed `lease list` command line.
 type leaseListOptions struct {
 	server    string

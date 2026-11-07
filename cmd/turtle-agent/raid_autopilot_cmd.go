@@ -302,6 +302,9 @@ func raidAutopilotCmd(ctx context.Context, args []string, stdout, stderr io.Writ
 	s.states = groupAutoTargets(targets)
 	s.noteTargetsStat()
 	s.initSeq()
+	// A walk whose worker died (a laptop restart, walk 47) leaves its lease behind: free it before the reconciliation
+	// reads the slots, so a dead holder cannot refuse an id. Leases of another host stay until their expiry.
+	s.reapLeases(targets)
 	// The resume rows are read before each launch, outside the id's state mutex (preReadRows): an id a targets
 	// re-read adds has no cache entry yet, and a YIELD stops every id through that mutex.
 	// A YIELD-DONE from an earlier YIELD is stale at this start (M6): this run writes its own only if a YIELD comes.
@@ -2420,6 +2423,39 @@ func autoReadSlotJSON(slotDir string) (autoSlotJSON, error) {
 		return m, fmt.Errorf("slot.json does not name the server and the slot")
 	}
 	return m, nil
+}
+
+// reapLeases frees the slots of holders that died on this host, once per lease ledger the targets can use: the
+// default ledger, plus a --slots file a target names. A dead holder is a walk whose process is gone (its pid dead or
+// reused): its lease is removed at once instead of blocking the slot until the TTL, which is how walk 47's 12 slots
+// stayed taken for two hours. A lease of another host is left to its expiry. A reap error is logged and never blocks
+// the start: an unreadable ledger is a person's problem, not a reason to leave every raid unwatched.
+func (s *autoSupervisor) reapLeases(targets []raidwalk.AutoTarget) {
+	dirs := map[string]bool{}
+	if def := slots.DefaultPath(); def != "" {
+		dirs[slots.LeasesDir(def)] = true
+	}
+	for _, t := range targets {
+		if p := autoFlag(t.Args, "--slots"); p != "" {
+			dirs[slots.LeasesDir(slots.ExpandTilde(p))] = true
+		}
+	}
+	names := make([]string, 0, len(dirs))
+	for d := range dirs {
+		names = append(names, d)
+	}
+	sort.Strings(names)
+	for _, dir := range names {
+		got, err := slots.ReapDeadLeases(dir, false)
+		if err != nil {
+			s.event("all", "reap", fmt.Sprintf("%s: %v (leaving every lease it names)", dir, err))
+			continue
+		}
+		for _, l := range got {
+			s.event("all", "reap", fmt.Sprintf("freed %s/%s (holder %s pid %d is gone or reused)",
+				l.Server, l.Slot, l.Holder, l.HolderPID))
+		}
+	}
 }
 
 // leaseHeld asks the slots store whether the slot's lease is still there. An error means the lease state cannot be

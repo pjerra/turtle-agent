@@ -175,7 +175,7 @@ func usage(w io.Writer) {
   turtle-agent scenario check [--var NAME=VALUE]... <file>
   turtle-agent scenario run [--out DIR] [--force] [--quiet] [--var NAME=VALUE]... [--session NAME=ADDR[@TOKENFILE]]... <file>
   turtle-agent scenario norm <file> <dir>
-  turtle-agent lease acquire <server> (--slot ID | --any) --holder NAME [--ttl MIN] | renew <server> <slot> --holder NAME --lease-id ID [--ttl MIN] | release <server> <slot> --holder NAME [--lease-id ID] [--force] | list [<server>] [--json]   [--slots FILE]
+  turtle-agent lease acquire <server> (--slot ID | --any) --holder NAME [--ttl MIN] | renew <server> <slot> --holder NAME --lease-id ID [--ttl MIN] | release <server> <slot> --holder NAME [--lease-id ID] [--force] | list [<server>] [--json] | reap [--dry-run]   [--slots FILE]
   turtle-agent slot setup <server> <slot> --holder NAME [--dir DIR] [--binary PATH] [--dungeons-dir DIR] [--character NAME] [--slots FILE]
   turtle-agent teardown [--keep-lease] [--release-anyway] [--gm off|on|keep] [--dry-run] [--json] [--slots FILE] <dir>
   turtle-agent rpc [--timeout DUR] [--raw] <dir> <method> [<params-json>|-]

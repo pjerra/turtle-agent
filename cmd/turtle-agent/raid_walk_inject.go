@@ -679,7 +679,7 @@ func (r *raidInjector) finalize() {
 
 // wiped says whether the walk lost the party: the wipe a fault at that moment is blamed for (spec 1.2).
 func (r *raidInjector) wiped() bool {
-	for _, n := range r.w.notes {
+	for _, n := range r.w.notesCopy() {
 		if strings.HasPrefix(n, "wipe at step ") {
 			return true
 		}

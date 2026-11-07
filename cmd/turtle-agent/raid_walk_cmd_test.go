@@ -1821,7 +1821,7 @@ until boss; from -; enter auto; server m910q slot any holder raid-walk-onyxias_l
 out ` + f.out + `
 phases:
   1 validate: plan, roster, until, 7 steps
-  2 lease: m910q any --holder raid-walk-onyxias_lair --ttl 120m
+  2 lease: m910q any --holder raid-walk-onyxias_lair --ttl 15m (renewed every 5m)
   3 slot setup: slot setup m910q <slot> --holder raid-walk-onyxias_lair --dir ` + f.out + `/slot --binary <bin> --dungeons-from ../../dungeons
   4 login: ` + f.out + `/slot/turtle-agent login --config ` + f.out + `/slot/settings.json --pid-file ` + f.out + `/slot/agent.pid <commander>
   5 gm: .go xyz -4768.61 -3752.11 53.4317 1

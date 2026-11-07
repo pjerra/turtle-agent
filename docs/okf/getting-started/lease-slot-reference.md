@@ -73,7 +73,18 @@ turtle-agent lease list [<server>] [--json] [--slots FILE]
 - `--json`: print the slot states as JSON (account names redacted). Default: off.
 - `--slots FILE`: slot table file. Default: the default slot table path.
 
-Text form prints one line per slot: server, slot, character, port, and state (`free`, `reserved: <reason>`, `stale: held by ...`, `held by ... since ..., expires ...`, each with agent and dir detail).
+Text form prints one line per slot: server, slot, character, port, and state (`free`, `reserved: <reason>`, `stale: held by ...`, `held by ... since ..., expires ...`, each with agent and dir detail). A lease names its holder process (`holder_pid`, `holder_host`, `holder_ns`, `holder_start`) when a walk took it: a lease taken on this host, in this pid namespace, whose holder is gone — the pid is dead or was reused — reads `stale` at once, whatever its expiry says, and the next acquire takes it over. A lease of another host or pid namespace, and one written before `holder_ns` existed, is freed only by its expiry; an unreadable `/proc/<pid>/stat` (hidepid, another user's process) is never called dead.
+
+## lease reap
+
+```text
+turtle-agent lease reap [--dry-run] [--slots FILE]
+```
+
+- `--dry-run`: list the leases a reap would remove, remove nothing. Default: off.
+- `--slots FILE`: slot table file (its `leases/` dir is the ledger). Default: the default slot table path.
+
+Removes the leases whose holder ran on this host and in this pid namespace and is gone, across every server in the ledger, and prints `reaped <server>/<slot> held by <holder> (holder pid <pid> gone or reused, lease expired <time>)` per line (`would reap ...` in a dry run). A lease of another host or pid namespace, a lease written before the holder fields (or `holder_ns`) existed, a holder whose `/proc/<pid>/stat` cannot be read (hidepid, another user), and a ledger this platform cannot read are left for their expiry. `raid-walk` takes a 15-minute lease and renews it every 5 minutes while it runs; `raid-autopilot` runs the reap at start.
 
 ## slot setup
 

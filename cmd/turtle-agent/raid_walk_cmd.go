@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -55,6 +56,17 @@ const (
 	// retries are the budget; a walk-super restart would only enter another fresh instance, so the supervisor stops on
 	// this code (walk 37: eight "not at the start" failures at step 582 each burned one of the 4 fresh instances an hour).
 	exitRaidWalkPlaceFailed = 29
+)
+
+// The walk's lease heartbeat (walk 47: a walk's worker died with the laptop and its leases blocked the next walk
+// for hours). The lease is short, so a dead holder frees its slot within minutes — by the reap, or by the expiry
+// when the holder ran elsewhere — and the walk renews it every few minutes while it runs, so a live walk never
+// loses it. A failed renewal is retried every walkLeaseRenewRetry and logged; only a refusal (the lease is no longer
+// ours) stops the walk. Variables rather than constants so tests can shorten the clock.
+var (
+	walkLeaseTTL        = 15 * time.Minute
+	walkLeaseRenew      = 5 * time.Minute
+	walkLeaseRenewRetry = time.Minute
 )
 
 // walkPIDFile is the walk's own pid in its out dir (0600): the autopilot adopts a live walk on its slot at startup
@@ -385,10 +397,6 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 		fmt.Fprintf(stderr, "raid-walk: --instance-cap-wait must be 0 or more\n")
 		return o, exitUsage
 	}
-	if ttl := o.ttlMinutes(); ttl > 720 {
-		fmt.Fprintf(stderr, "raid-walk: the lease would last %d min (max-run + hold + 30); the limit is 720: lower --max-run-minutes or --hold-minutes\n", ttl)
-		return o, exitUsage
-	}
 	// --place (spec 3): it needs a start, it is not combined with the fault injector, and it is for the test servers
 	// whose Eluna toolkit can move a raid.
 	if o.place {
@@ -570,9 +578,6 @@ func (f onOffFlag) Set(s string) error {
 // IsBoolFlag lets a bare `--place` stand without a value.
 func (f onOffFlag) IsBoolFlag() bool { return true }
 
-// ttlMinutes is the lease's length: the run ceiling, the hold and 30 minutes (spec 3.3 phase 2).
-func (o *raidWalkOptions) ttlMinutes() int { return o.maxRunMinutes + o.holdMinutes + 30 }
-
 // walkStop ends a phase with an exit code and the reason the summary carries.
 type walkStop struct {
 	code   int
@@ -665,6 +670,9 @@ func defaultWalkEnv(o *raidWalkOptions) (walkEnv, walkDeps, error) {
 		}
 	}
 	store := slots.NewStore(cfg, path)
+	// The walk is the lease's holder process: the record lets a later reader free the slot the moment this walk is
+	// gone (walk 47), instead of waiting out the TTL.
+	store.HolderPID = os.Getpid()
 	// The instance cap: the flag when given, else the server's entry in instance-cap-per-account.json beside the
 	// slots file, else the stock core's 5.
 	capPerAccount := o.capPerAccount
@@ -793,6 +801,8 @@ type walk struct {
 
 	stdout io.Writer
 	stderr io.Writer
+	// outMu guards the output the walk loop shares with the lease heartbeat goroutine: notes, run.log and stderr.
+	outMu sync.Mutex
 
 	plan   *dungeon.Plan
 	rows   planexport.Rows
@@ -1079,7 +1089,10 @@ type walk struct {
 	reviveBrought, reviveUnreached, reviveGatherMissed map[string]bool
 	lease                                              slots.Lease
 	leaseLost                                          atomic.Bool
-	cancel                                             context.CancelFunc
+	// leaseDone is closed when the renewal goroutine returns (phaseLease starts it): tests join it, and no reader of
+	// the walk's output has to guess whether the heartbeat is still running.
+	leaseDone chan struct{}
+	cancel    context.CancelFunc
 
 	endReason  string
 	exitCode   int
@@ -1512,6 +1525,8 @@ func (w *walk) prepareOut() error {
 }
 
 func (w *walk) closeOut() {
+	w.outMu.Lock()
+	defer w.outMu.Unlock()
 	if w.framesF != nil {
 		_ = w.framesF.Close()
 		w.framesF = nil
@@ -1529,11 +1544,29 @@ func (w *walk) writeOut(name string, data []byte) error {
 
 // note appends a note to the summary and run.log.
 func (w *walk) note(format string, a ...any) {
-	w.notes = append(w.notes, fmt.Sprintf(format, a...))
+	msg := fmt.Sprintf(format, a...)
+	w.outMu.Lock()
+	w.notes = append(w.notes, msg)
+	w.outMu.Unlock()
+}
+
+// notesCopy is the notes as they stand now: the summary and the injector read a snapshot, never the slice the
+// heartbeat goroutine may be appending to.
+func (w *walk) notesCopy() []string {
+	w.outMu.Lock()
+	defer w.outMu.Unlock()
+	return append([]string(nil), w.notes...)
 }
 
 // logLine writes one line to run.log ("HH:MM:SS.mmm <text>"), control bytes escaped.
 func (w *walk) logLine(now time.Time, text string) {
+	w.outMu.Lock()
+	defer w.outMu.Unlock()
+	w.logLineLocked(now, text)
+}
+
+// logLineLocked is logLine for a caller that already holds outMu.
+func (w *walk) logLineLocked(now time.Time, text string) {
 	if w.logF == nil {
 		return
 	}
@@ -1780,7 +1813,8 @@ func (w *walk) printPlan(out io.Writer) {
 	fmt.Fprintf(out, "out %s\n", outDir)
 	fmt.Fprintf(out, "phases:\n")
 	fmt.Fprintf(out, "  1 validate: plan, roster, until, %d steps\n", len(w.rows.Steps))
-	fmt.Fprintf(out, "  2 lease: %s %s --holder %s --ttl %dm\n", w.opts.server, slot, w.opts.holder, w.opts.ttlMinutes())
+	fmt.Fprintf(out, "  2 lease: %s %s --holder %s --ttl %dm (renewed every %dm)\n", w.opts.server, slot, w.opts.holder,
+		int(walkLeaseTTL/time.Minute), int(walkLeaseRenew/time.Minute))
 	bin := w.opts.binary
 	if bin == "" {
 		bin = "<bin>"
@@ -1954,7 +1988,7 @@ func (w *walk) finish(code int) {
 		Until: w.opts.until, UntilEffective: untilEffective, From: w.opts.from, Speed: w.opts.speed, TestSpeed: w.opts.speed != 1.0,
 		RowsSHA256: rowsSHA256(w.rows), UntilStep: w.untilStep, RunLabel: w.runLabel, SpeedFellBack: w.speedFellBack,
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights, Decisions: w.decisions,
-		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
+		Dashboard: w.dashNote, ExitCode: code, Notes: w.notesCopy(),
 		Place:         w.placeSum,
 		GMClearUsed:   w.gmClearUsed,
 		GMClear:       w.gmClearLog,
