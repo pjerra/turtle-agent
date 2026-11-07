@@ -243,39 +243,40 @@ type Session struct {
 	teleportSeq  uint64 // server teleports acked (StatusInfo.TeleportSeq)
 
 	// owner-loop only
-	finished        bool
-	nextPing        time.Time
-	pingSent        time.Time
-	pingSeq         uint32
-	pongWait        bool
-	logout          *logoutOp
-	logoutDeadline  time.Time
-	logoutAccepted  bool // SMSG_LOGOUT_RESPONSE reason 0 for the pending logout
-	loginRetries    int
-	createSent      bool // CMSG_CHAR_CREATE sent once (Options.Create)
-	loginRetryAt    time.Time
-	names           *nameCache
-	itemInfo        itemCache // item prototypes by entry (iteminfo.go)
-	walk            *walkState
-	runSpeed        float32
-	rooted          bool
-	splineUntil     time.Time // a server spline moves the player until then
-	teleportWaiters []chan struct{}
-	corpseWaiters   []chan game.Corpse // calls waiting for MSG_CORPSE_QUERY (death.go)
-	markWaiters     []markWaiter
-	rolls           map[rollKey]*openRoll
-	lastRollID      uint64
-	loot            lootState        // the open loot window (lootwindow.go)
-	mount           mountState       // the player's mount (useitem.go)
-	gossip          *game.GossipMenu // the open gossip menu, nil once closed
-	npc             npcState         // vendor, trainer and quest requests awaiting their results
-	fall            *fallState
-	traceSeq        uint64    // the last floor search sent off the loop (fall.go)
-	placed          uint64    // counts the positions the server put the player at (serverPosition)
-	last            lastMove  // what the server has for the player
-	lastClock       uint32    // the last MovementInfo client time sent
-	mclock          moveClock // the movement client time, in step with real time (clock.go)
-	toggles         uint32    // water walking, hover, feather fall as the server applied them
+	finished         bool
+	nextPing         time.Time
+	pingSent         time.Time
+	pingSeq          uint32
+	pongWait         bool
+	logout           *logoutOp
+	logoutDeadline   time.Time
+	logoutAccepted   bool // SMSG_LOGOUT_RESPONSE reason 0 for the pending logout
+	loginRetries     int
+	createSent       bool // CMSG_CHAR_CREATE sent once (Options.Create)
+	loginRetryAt     time.Time
+	names            *nameCache
+	itemInfo         itemCache // item prototypes by entry (iteminfo.go)
+	walk             *walkState
+	runSpeed         float32
+	rooted           bool
+	splineUntil      time.Time // a server spline moves the player until then
+	teleportWaiters  []chan struct{}
+	corpseWaiters    []chan game.Corpse // calls waiting for MSG_CORPSE_QUERY (death.go)
+	markWaiters      []markWaiter
+	rolls            map[rollKey]*openRoll
+	lastRollID       uint64
+	loot             lootState        // the open loot window (lootwindow.go)
+	mount            mountState       // the player's mount (useitem.go)
+	gossip           *game.GossipMenu // the open gossip menu, nil once closed
+	npc              npcState         // vendor, trainer and quest requests awaiting their results
+	taxiPendingUntil time.Time        // a taxi request waits for its reply until then; a second one is refused (social.go)
+	fall             *fallState
+	traceSeq         uint64    // the last floor search sent off the loop (fall.go)
+	placed           uint64    // counts the positions the server put the player at (serverPosition)
+	last             lastMove  // what the server has for the player
+	lastClock        uint32    // the last MovementInfo client time sent
+	mclock           moveClock // the movement client time, in step with real time (clock.go)
+	toggles          uint32    // water walking, hover, feather fall as the server applied them
 
 	// spellState is the agent's spellbook, cooldowns and cast state (internal/spellstate); it
 	// locks itself, so RPC calls read it directly.

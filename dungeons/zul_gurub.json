@@ -14,8 +14,8 @@
     "z": 96.1502
   },
   "level_band": [58, 60],
-  "cc_priority": [14532, 11356, 11339, 14882, 11361, 11365, 11350, 14825],
-  "kill_first": [15112, 14987, 14750, 15146, 11830, 14883, 11353],
+  "cc_priority": [14532, 14882, 14825, 11353, 11338, 11357, 11356, 11350, 14821, 11351, 11831, 11340, 11339, 11359, 15111, 15043],
+  "kill_first": [14987, 15112, 14750, 15146, 11830, 14883],
   "raid": {
     "size": 20,
     "tanks": 3,
@@ -55,7 +55,9 @@
     "WALK 33 WATER (2026-11-03; TortoiseBots-audit tests/raid-zg-walk33 e/f: the lead stuck in water at step 626 (-11862.4 -1508.5 -8.1, the Hakkar lake bed) and the canal at -11944.3 -1353.8 62.3): the mmaps flag the lake bed water (NavWater floors 2-4 yd above the bed round it) and the canal (its floor is NavWater), but planlint only read the point's own floor and the exporter kept the navmesh corners as rows, so neither the lake-bed rows nor the river paths were flagged. planlint's water lint now also reads a nearby NavWater floor above the point (navmesh.LiquidAt), and the exporter writes no cut point in or under a liquid, so the lake is crossed in one hop and no row stands in water: the walk is 752 steps (762 rows), no water lint. Leg 5's river vias 9-13 are the navmesh's dry route round the gorge instead (via the south bank, 405.7 yd; the old crossing was 266.5 yd of water), leg 6 drops its river via -11998.1 -1597.6 25.85, and the Venoxis approach starts at -11990.3 -1565.8 25.86, off the waterline.",
     "WALK 37 FIX 1 (2026-11-04, leg 6; TortoiseBots-audit tests/raid-zg-walk37 e/e2: Jin'do 11380 engaged at step 552 in three wipes, 69 deaths in e). The honour guard's ten-body row (stand -11562 -1306) was a stand pull whose stand stood 35.5-52.2 yd from its own pack, past the run leader's 28.5 yd shot (\"patrol pull: not waiting for units that walk no patrol and stand out of the 28.5 yd shot\"), so the row plain-pulled and walked the party to the pack 12.9 yd from Jin'do. No stand serves the ten: they span 13 yd, so a stand in shot of all of them is at most 34.8 yd from Jin'do, and one 35+ yd out is out of shot of the two lone Withered Mistresses 49402/49403, who stand 8-10 yd from him (routeReach 35: 25 aggro at the plan's party level 58 plus the raid's 10 yd spread). The camp is three rows now, each a stand pull in shot of its whole pack: formation 49421's eight bodies from -11552 -1277 (27.2 yd from its farthest unit, 36.3 from Jin'do, line of sight to all eight; 18.1 yd from its nearest, the camp cannot keep 19.5 and stay in shot), 49403 from -11548.5 -1291 (27.8, 36.2) and 49402 from -11546.5 -1257 (27.9, 35.8); the two north packs (49383-49386, 1173080; 8 bodies) keep their stand -11558 -1304 and are pulled first (the guard stands 10-19 yd from them, so a stand in the guard's shot is inside their reach). tools/dungeongen/zg_w37_test.go checks the live export: no leg-6 pull row's party point and no move row before the boss approach is inside Jin'do's reach, and the three guard rows are stand pulls in shot of their packs. The row's own point (its pack's centroid) stays 14.4 yd from Jin'do: TortoiseBots scopes a stand pull's pack from that point, and the north pack's nearest spawn stands 13.8 yd from the guard's stand, so no circle scopes the guard's formation without the north pack's (pulled first, dead by then). The party fights from the stand, which the gate fires from with all eight in its 28.5 yd shot; walk 37 e2-r1's gm-clear evidence (--gm-clear jindo_the_hexxer:8, no gm-clear line in its run.log, Jin'do engaged at step 552) is the gate NOT firing: that row plain-pulled and walked the party to the centroid. Not covered: the fight starts 30-33 yd from Jin'do when the north packs wake the party on the walk into the guard's stand (the same 11-19 yd entanglement); the rows keep the pull out of his reach, not every metre of the fight.",
     "WALK 37 FIX 2 (2026-11-04, leg 0; TortoiseBots-audit tests/raid-zg-walk37 d/d-r1: both runs paused at step 42, \"the walk to it passes 14750 at 0.9 yd\"). The leg's old group 13 (-12228 -1478, radius 10) owned nothing alive: every 11368/14750 spawn inside its radius belongs to the static pack formation 49137, pulled by the group before it. The run leader then chased the residue of formation 49185 (the west camp's bats) to a point of its loop and the walk crossed another bat's lane. The empty row is dropped; formation 49185 (six spawns: 49185, 49157, 49158, 49167, 49186 and the lone 49140 that stands at the static camp) is one plain pull, placed last on the plateau after F6's row: its row point is the formation's centroid (-12270 -1456) and its radius 40 holds the whole formation plus 49140 (48.1 yd, inside the 50 yd pack band), so the fight happens at the west camp with every other plateau formation dead by then and 49140's own pull follows from the same step. A stand pull is impossible for it: one of its members, 49140, stands 48 yd from the others, and the stand gate needs the whole pack in the tank's shot. tools/dungeongen/zg_w35_test.go pins the row's 49185 loop and its six spawns; zg_mandokir_jindo_test.go checks the corridor's live rows.",
-    "WALK 37 FIX 3 (2026-11-04, legs 1, 3 and 4; the MANDOKIR-440 method, research/zg-w36/MANDOKIR-440.md \"Also found\"). Five patrol rows were plain pulls at a roaming Berserker 11352's DB spawn with their stand 68-174 yd behind it, so plan-export --approach-hops cut the hop into approach-path rows through the pack field (the exporter lists the row as \"patrol: not in the rows\"). Each is a stand pull now, its pack scoped from a centre the run leader sees (\u003c= 60 yd from the stand) with a radius up to 100 that holds the patroller's spawn: leg 1 group 10 (49698; centre -11977 -1751 r 61, stand -11986.9 -1731.7 54.5, 24.5 yd from its loop), group 18 (91493; centre -12058.1 -1786.9 r 94, stand -12032 -1781 58.83, 23.5 yd from its loop) and group 19 (51962; centre -12128 -1764 r 96, stand -12115 -1819 80.4, 27.6 yd from its loop; the circle also holds 91493's spawn, which group 18 pulls first), leg 3 group 3 (91435; centre is the stand -11636 -1759 36.19, r 35, 23.5 yd from its loop; the stand moved 141 yd north-east from -11739 -1855, which stood 174 yd from the spawn, past the 60 + 100 yd rule) and leg 4 group 21 (91444; centre -11583 -1528 r 54, stand -11587 -1542 53.07, 23.3 yd from its loop). The party holds at the stand and the run leader shoots the patroller as its loop comes into the 28.5 yd shot (loop periods 155-348 s, inside the gate's 600 s wait). The five approach paths are gone from the export (leg 1's 51962 row needs three staging moves for the terrace ramp, which the cut used to place off the mesh): route-aggro drops from 831 to 810 segments. tools/dungeongen/zg_w37_test.go checks each row's centre, radius, stand and loop, that no approach-path row is exported before it, and that the walk to it keeps 20 yd from every pack pulled later."
+    "WALK 37 FIX 3 (2026-11-04, legs 1, 3 and 4; the MANDOKIR-440 method, research/zg-w36/MANDOKIR-440.md \"Also found\"). Five patrol rows were plain pulls at a roaming Berserker 11352's DB spawn with their stand 68-174 yd behind it, so plan-export --approach-hops cut the hop into approach-path rows through the pack field (the exporter lists the row as \"patrol: not in the rows\"). Each is a stand pull now, its pack scoped from a centre the run leader sees (\u003c= 60 yd from the stand) with a radius up to 100 that holds the patroller's spawn: leg 1 group 10 (49698; centre -11977 -1751 r 61, stand -11986.9 -1731.7 54.5, 24.5 yd from its loop), group 18 (91493; centre -12058.1 -1786.9 r 94, stand -12032 -1781 58.83, 23.5 yd from its loop) and group 19 (51962; centre -12128 -1764 r 96, stand -12115 -1819 80.4, 27.6 yd from its loop; the circle also holds 91493's spawn, which group 18 pulls first), leg 3 group 3 (91435; centre is the stand -11636 -1759 36.19, r 35, 23.5 yd from its loop; the stand moved 141 yd north-east from -11739 -1855, which stood 174 yd from the spawn, past the 60 + 100 yd rule) and leg 4 group 21 (91444; centre -11583 -1528 r 54, stand -11587 -1542 53.07, 23.3 yd from its loop). The party holds at the stand and the run leader shoots the patroller as its loop comes into the 28.5 yd shot (loop periods 155-348 s, inside the gate's 600 s wait). The five approach paths are gone from the export (leg 1's 51962 row needs three staging moves for the terrace ramp, which the cut used to place off the mesh): route-aggro drops from 831 to 810 segments. tools/dungeongen/zg_w37_test.go checks each row's centre, radius, stand and loop, that no approach-path row is exported before it, and that the walk to it keeps 20 yd from every pack pulled later.",
+    "WALK 39 TRASH CC (2026-11-04; research/zg-trash/TRASH-TACTICS.md section 4, decided data change): cc_priority is the 19-entry list [14532, 14882, 14825, 11353, 11338, 11357, 11356, 11350, 14821, 11351, 11831, 11340, 11339, 11359, 15111, 15043, 11370, 11365, 11361] and kill_first drops the Blood Drinker to [15112, 14987, 14750, 15146, 11830, 14883]; cc_always stays unset (it only duplicates the head of cc_priority). Blood Drinker 11353 moves from kill_first to cc_priority rank 3: walks 35-38 blame 316 bot deaths on it, and the Mandokir step-440 knot wiped 16 times with nine drinkers all active because kill_first forbids CC; it only heals itself by draining, so a sheeped drinker stops draining and dies last. The Jin'do hall pair 14882/14825 (top killers at 368/362 deaths; 14825 dispels our CC) leads, casters and the worst pack-wipers come next, and Axe Thrower 11350 (Polymorph stops its Axe Flurry channel) sits at rank 7 after the drinkers and the Champion with Panthers and Tigers last. Berserker 11352 and Bat Rider 14750 stay out (Polymorph-immune, and auto-CC never picks Freezing Trap), as do Sacrificed Troll 14826 (respawns every 10 s) and Bloodseeker Bat 11368 (non-elite AoE fodder). TestZulGurubTrashCcLists pins the lists.",
+    "WALK 42 PLAN LISTS (2026-11-06; TortoiseBots-audit research/zg-bosses/JINDO-W42.md section 0): cc_priority is cut to its first 16 entries - Razzashi Broodwidow 11370, Zulian Panther 11365 and Zulian Tiger 11361 drop - because TortoiseBots caps every plan list at kPlanMaxEntries = 16 (ai/playerbot/DungeonPlanPolicy.h:197) and ParsePlanEntries then dropped ALL FOUR lists: every ZG raid since t1105c ran with no kill_first and no CC, so the Jin'do ward-first fix never ran. kill_first and cc_never are unchanged. plan-export now refuses a plan list over 16 entries."
   ],
   "legs": [
     {
@@ -264,27 +266,54 @@
           "stand_pull": true
         },
         {
-          "entries": [11351, 11831, 11831],
+          "entries": [11351, 11351, 11831],
           "positions": [
-            {"x": -12218, "y": -1440, "z": 131.2}
+            {"x": -12215.5, "y": -1465.1, "z": 130.6},
+            {"x": -12219.2, "y": -1464.7, "z": 130.7},
+            {"x": -12218.4, "y": -1467.4, "z": 130.7}
           ],
-          "radius": 33,
+          "radius": 6,
+          "patrol": {
+            "entries": [11351],
+            "path": [
+              {"x": -12211.2, "y": -1464.01, "z": 130.758},
+              {"x": -12204.5, "y": -1469.99, "z": 130.645},
+              {"x": -12194.7, "y": -1471.39, "z": 130.601},
+              {"x": -12185.1, "y": -1472.76, "z": 130.605},
+              {"x": -12168.8, "y": -1474.02, "z": 130.601},
+              {"x": -12156.8, "y": -1474.55, "z": 130.601},
+              {"x": -12147, "y": -1474.99, "z": 130.601},
+              {"x": -12136.1, "y": -1475.47, "z": 130.601},
+              {"x": -12126.5, "y": -1473.02, "z": 130.601},
+              {"x": -12118, "y": -1470.85, "z": 130.601},
+              {"x": -12117.4, "y": -1467.62, "z": 130.601},
+              {"x": -12117.7, "y": -1463.21, "z": 130.601},
+              {"x": -12125.6, "y": -1459.74, "z": 130.601},
+              {"x": -12140.7, "y": -1457.79, "z": 130.601},
+              {"x": -12150.5, "y": -1457.39, "z": 130.601},
+              {"x": -12159.3, "y": -1457.03, "z": 130.601},
+              {"x": -12169.1, "y": -1456.63, "z": 130.6},
+              {"x": -12175.6, "y": -1456.36, "z": 130.6},
+              {"x": -12186.5, "y": -1455.91, "z": 130.647},
+              {"x": -12192.7, "y": -1454.04, "z": 130.602},
+              {"x": -12199.5, "y": -1450.44, "z": 130.602},
+              {"x": -12207.2, "y": -1446.37, "z": 130.6},
+              {"x": -12212.9, "y": -1443.36, "z": 130.6},
+              {"x": -12219.6, "y": -1439.78, "z": 130.6},
+              {"x": -12224, "y": -1443.05, "z": 130.6},
+              {"x": -12224.2, "y": -1453.88, "z": 130.603},
+              {"x": -12221.2, "y": -1462.1, "z": 130.601},
+              {"x": -12219.8, "y": -1466.18, "z": 130.601}
+            ],
+            "period_s": 143.7,
+            "period_estimate": true,
+            "source": "creature_movement 49135 (28 points, 240.0 yd at 1.67 yd/s)"
+          },
           "approach": [
-            {"x": -12180, "y": -1494, "z": 131.2},
-            {"x": -12219, "y": -1494, "z": 133.3}
+            {"x": -12211, "y": -1491, "z": 132.6}
           ],
-          "stand_pull": true
-        },
-        {
-          "entries": [11368, 14750],
-          "positions": [
-            {"x": -12228, "y": -1440, "z": 131.2}
-          ],
-          "radius": 9,
-          "approach": [
-            {"x": -12175.4, "y": -1447.4, "z": 131.6}
-          ],
-          "stand_pull": true
+          "stand_pull": true,
+          "max_bodies": 3
         },
         {
           "entries": [14750, 11368, 11368, 11368, 11368, 11368],
@@ -311,7 +340,61 @@
             "period_s": 67.6,
             "period_estimate": true,
             "source": "creature_movement 49185 (7 points, 168.9 yd at 2.5 yd/s)"
-          }
+          },
+          "approach": [
+            {"x": -12268, "y": -1488, "z": 131.23}
+          ],
+          "stand_pull": true
+        },
+        {
+          "entries": [11831, 11831, 11351, 11368, 11368, 11368, 11368, 11368, 14750, 14750],
+          "positions": [
+            {"x": -12236.9, "y": -1414.1, "z": 131.2},
+            {"x": -12238.7, "y": -1413.2, "z": 130.7},
+            {"x": -12238.1, "y": -1416, "z": 130.8},
+            {"x": -12233.9, "y": -1433.4, "z": 130.7},
+            {"x": -12240.5, "y": -1420.3, "z": 130.7},
+            {"x": -12230.7, "y": -1407, "z": 131.6},
+            {"x": -12243.6, "y": -1424.6, "z": 130.8},
+            {"x": -12245.2, "y": -1425.1, "z": 131},
+            {"x": -12237.4, "y": -1413.4, "z": 130.9},
+            {"x": -12244.3, "y": -1422.2, "z": 130.8}
+          ],
+          "radius": 13,
+          "patrol": {
+            "entries": [11831],
+            "path": [
+              {"x": -12244.2, "y": -1414.8, "z": 130.6},
+              {"x": -12252.9, "y": -1414.63, "z": 130.6},
+              {"x": -12255.9, "y": -1415.99, "z": 130.6},
+              {"x": -12269.8, "y": -1422.26, "z": 130.6},
+              {"x": -12276.4, "y": -1428.02, "z": 130.6},
+              {"x": -12278.9, "y": -1440.74, "z": 130.6},
+              {"x": -12274.9, "y": -1450.91, "z": 130.6},
+              {"x": -12268.2, "y": -1456.64, "z": 130.6},
+              {"x": -12257.4, "y": -1462.01, "z": 130.601},
+              {"x": -12247.9, "y": -1464.61, "z": 130.601},
+              {"x": -12235.2, "y": -1468.09, "z": 130.601},
+              {"x": -12225.8, "y": -1470.68, "z": 130.601},
+              {"x": -12218.4, "y": -1468.61, "z": 130.601},
+              {"x": -12213.5, "y": -1460, "z": 130.736},
+              {"x": -12212.3, "y": -1450.2, "z": 130.602},
+              {"x": -12215.3, "y": -1442.02, "z": 130.6},
+              {"x": -12221, "y": -1435.33, "z": 130.6},
+              {"x": -12227.2, "y": -1432.96, "z": 130.6},
+              {"x": -12234, "y": -1429.51, "z": 130.618},
+              {"x": -12238.5, "y": -1420.7, "z": 130.627},
+              {"x": -12237.6, "y": -1415.32, "z": 130.73}
+            ],
+            "period_s": 112.6,
+            "period_estimate": true,
+            "source": "creature_movement 49131 (21 points, 188.1 yd at 1.67 yd/s)"
+          },
+          "approach": [
+            {"x": -12250, "y": -1418, "z": 130.65}
+          ],
+          "stand_pull": true,
+          "max_bodies": 10
         }
       ],
       "skip": [14758, 15091],
@@ -320,9 +403,14 @@
         "position": {"x": -12289.1, "y": -1384.13, "z": 134.27},
         "approach": [
           {"x": -12210, "y": -1445, "z": 130.7},
-          {"x": -12241.56, "y": -1399.14, "z": 131.58357}
+          {"x": -12269.3, "y": -1389.4, "z": 131.5}
         ]
-      }
+      },
+      "notes": [
+        "WALK 38 FIX 3 (2026-11-05, leg 0; TortoiseBots-audit tests/raid-zg-walk38 d/h2/a/h3 and the 22:13 MAPPING): step 43's stand pull stalled the raids at 40-47. The row held the 49131 witch-doctor camp and the 49135 headhunter camp (54 yd apart) in one radius-33 row with no patrol block, and its stand (-12219 -1494) stood 29.6 yd from the headhunter spawn and 54 from the witch doctor's, so no single shot reached the row's pack and the gate waited on units whose patrol the run leader could not read. Split: the south camp (49134/49135/49136, entries 11351/11351/11831) is its own stand pull from (-12219 -1491 132.45), its 49135 loop (28 points, 240.0 yd, 143.7 s) in shot (24.8 yd); the north camp (49131/49132/49133) joins the bat camp 8 yd away in one row (10 bodies, radius 13, the 49130 formation) from (-12250 -1418 130.65), its 49131 loop (21 points, 188.1 yd, 112.6 s) in shot (8.1 yd), max_bodies 10; every unit of each row is within the 28.5 yd shot with line of sight (TestZgW38JeklikPatrolStands).",
+        "WALK 38 REVIEW (2026-11-05, leg 0; review M2/M3). The bat formation 49185 (6 units, its 7-point 67.6 s loop) is pulled before the north camp: its loop encircles the camp and came within 7.8 yd of the camp's stand, so the patrol crossed the party. The row is a stand pull from -12268 -1488 131.23 now (26.1 yd from its nearest waypoint, 34.0 from its row point, 25.1 from its nearest unit), the south camp (49135) stands at -12211 -1491 132.6 (outside the 49131 112.6 s loop at 23.6+ yd and the 49130 bat loop), and the north camp's stand stays at -12250 -1418 130.65. The plan carries one patrol block per row, so the loops of 49130 (7 points) and 49131 (21 points) are read from movement.tsv by the check: zg_w38_test.go tests both camp stands against every loop of every later group (23 yd = 20 detection + 3 spread).",
+        "WALK 41 FIX (2026-11-05, leg 0; TortoiseBots-audit research/zg-bosses/JEKLIK-W41.md §1 and §3 fix 1): the last boss approach was -12241.56 -1399.14, 51.0 yd 2D and 52.7 yd 3D from Jeklik's hover point -12289.7 -1382.2 144.6, so the run leader's reach pull found no firing position and paused on the boss row (tj-6/7/8 and mj-4..8: 7 pauses in walk 41). It is the walk-39 j4-2 floor point -12269.3 -1389.4 131.5 now: 21.6 yd 2D and 25.3 yd 3D from the hover point, inside Faerie Fire (Feral)'s 29.5 yd and outside the 25 yd firing stand, so PullWalkStarted's distance check passes even with no move; the floor is 131.0 (the point stands 0.5 yd over it) and the group-15 stand walks to it on a complete navmesh path. Every plateau loop stays out: 26.1 yd from 49130's nearest waypoint and 29.8 from 49131's, and the 91555 bat loop that flies 17.5 yd overhead is out of the run leader's 12 yd band (TestZgJeklikBossApproachInPullRange)."
+      ]
     },
     {
       "name": "high_priest_venoxis",
@@ -1093,7 +1181,7 @@
           ],
           "radius": 6.5,
           "approach": [
-            {"x": -11704.277, "y": -1851.5815, "z": 40.715126}
+            {"x": -11700.538, "y": -1839.5809, "z": 42.402306}
           ]
         },
         {
@@ -1104,7 +1192,7 @@
           ],
           "radius": 2.2,
           "approach": [
-            {"x": -11635.779, "y": -1848.5455, "z": 40.633053}
+            {"x": -11621.561, "y": -1848.6757, "z": 41.266438}
           ]
         },
         {
@@ -1116,7 +1204,7 @@
           ],
           "radius": 7.5,
           "approach": [
-            {"x": -11601.235, "y": -1814.5369, "z": 42.29896}
+            {"x": -11589.852, "y": -1816.2811, "z": 41.735485}
           ]
         },
         {
@@ -1126,7 +1214,7 @@
           ],
           "radius": 1,
           "approach": [
-            {"x": -11595.546, "y": -1807.892, "z": 41.25699}
+            {"x": -11583.939, "y": -1798.6742, "z": 46.901524}
           ]
         },
         {
@@ -1138,7 +1226,7 @@
           ],
           "radius": 6.9,
           "approach": [
-            {"x": -11575, "y": -1793, "z": 50.6}
+            {"x": -11562.221, "y": -1794.5469, "z": 56.947502}
           ]
         },
         {
@@ -1148,7 +1236,7 @@
           ],
           "radius": 1,
           "approach": [
-            {"x": -11562, "y": -1782, "z": 55.84}
+            {"x": -11549.356, "y": -1790.7802, "z": 63.205063}
           ]
         },
         {
@@ -1165,9 +1253,9 @@
           ],
           "radius": 18,
           "approach": [
-            {"x": -11572.7, "y": -1794.9, "z": 53},
-            {"x": -11595.5, "y": -1807.9, "z": 41.3},
-            {"x": -11576, "y": -1778, "z": 46.3}
+            {"x": -11571.2, "y": -1783.2001, "z": 50.925404},
+            {"x": -11584, "y": -1764.8, "z": 39.425404},
+            {"x": -11593.771, "y": -1753.653, "z": 39.551548}
           ],
           "stand_pull": true,
           "max_bodies": 9
@@ -1182,7 +1270,7 @@
           ],
           "radius": 7.6,
           "approach": [
-            {"x": -11573.13, "y": -1754.6578, "z": 40.149597}
+            {"x": -11564.237, "y": -1738.7512, "z": 39.25584}
           ]
         },
         {
@@ -1194,161 +1282,9 @@
           ],
           "radius": 2.7,
           "approach": [
-            {"x": -11627.513, "y": -1702.9896, "z": 39.1019}
-          ]
-        },
-        {
-          "entries": [11353, 11353, 11365, 11365, 11365, 11365],
-          "positions": [
-            {"x": -11585.8, "y": -1663.11, "z": 51.11},
-            {"x": -11588, "y": -1663.91, "z": 51.62},
-            {"x": -11576.6, "y": -1666.62, "z": 49.26},
-            {"x": -11573.4, "y": -1665.55, "z": 49.61},
-            {"x": -11573, "y": -1667.54, "z": 49.47},
-            {"x": -11573.4, "y": -1669.59, "z": 49.33}
-          ],
-          "radius": 10.5,
-          "approach": [
-            {"x": -11581.087, "y": -1649.2527, "z": 49.674316}
-          ]
-        },
-        {
-          "entries": [11365, 11365, 11365, 11365, 11339, 11339],
-          "positions": [
-            {"x": -11526.2, "y": -1683.66, "z": 49.38},
-            {"x": -11525, "y": -1685.19, "z": 49.85},
-            {"x": -11524.2, "y": -1683.65, "z": 49.55},
-            {"x": -11523, "y": -1686.1, "z": 50.24},
-            {"x": -11521.2, "y": -1684.87, "z": 50.11},
-            {"x": -11519.9, "y": -1685.07, "z": 50.27}
-          ],
-          "radius": 3.9,
-          "approach": [
-            {"x": -11544.204, "y": -1674.9517, "z": 49.632042}
-          ]
-        },
-        {
-          "entries": [11365, 11365, 11365, 11365],
-          "positions": [
-            {"x": -11519, "y": -1664.11, "z": 71.33},
-            {"x": -11510.4, "y": -1663.15, "z": 71.33},
-            {"x": -11524.2, "y": -1670.44, "z": 71.33},
-            {"x": -11511.1, "y": -1670.26, "z": 71.33}
-          ],
-          "radius": 9.2,
-          "approach": [
-            {"x": -11521.8, "y": -1663.4, "z": 71.3}
-          ]
-        },
-        {
-          "entries": [11339, 11339, 11339, 11339, 11365, 11365, 11365, 11365, 11339, 11339],
-          "positions": [
-            {"x": -11518.3, "y": -1613.51, "z": 71.33},
-            {"x": -11518.3, "y": -1629.19, "z": 71.33},
-            {"x": -11511.3, "y": -1613.84, "z": 71.33},
-            {"x": -11511.4, "y": -1628.43, "z": 71.36},
-            {"x": -11492, "y": -1607.23, "z": 71.33},
-            {"x": -11491.8, "y": -1609.3, "z": 71.33},
-            {"x": -11491.9, "y": -1612.31, "z": 71.33},
-            {"x": -11491.2, "y": -1612.34, "z": 71.33},
-            {"x": -11496.8, "y": -1621.54, "z": 71.33},
-            {"x": -11496.3, "y": -1621.55, "z": 71.33}
-          ],
-          "radius": 14,
-          "approach": [
-            {"x": -11520, "y": -1621.3, "z": 71},
-            {"x": -11505, "y": -1652, "z": 71.3}
-          ],
-          "stand_pull": true,
-          "max_bodies": 14
-        },
-        {
-          "entries": [11353, 11353],
-          "positions": [
-            {"x": -11498.3, "y": -1640.75, "z": 60.43},
-            {"x": -11498.4, "y": -1641.72, "z": 60.43}
-          ],
-          "radius": 6,
-          "approach": [
-            {"x": -11513.4, "y": -1664.6, "z": 71.3}
-          ],
-          "max_bodies": 2
-        },
-        {
-          "entries": [11365, 11365, 11365, 11365],
-          "positions": [
-            {"x": -11525.1, "y": -1582.7, "z": 71.34},
-            {"x": -11511.2, "y": -1580.07, "z": 71.34},
-            {"x": -11523.6, "y": -1573.28, "z": 71.34},
-            {"x": -11511.8, "y": -1573.41, "z": 71.34}
-          ],
-          "radius": 9.4,
-          "approach": [
-            {"x": -11505, "y": -1596, "z": 71.33}
-          ]
-        },
-        {
-          "entries": [11365, 11365, 11365, 11339, 11365],
-          "positions": [
-            {"x": -11534.8, "y": -1613.09, "z": 60.43},
-            {"x": -11536, "y": -1611.98, "z": 60.43},
-            {"x": -11534.6, "y": -1610.75, "z": 60.43},
-            {"x": -11542.2, "y": -1609.78, "z": 60.43},
-            {"x": -11538.1, "y": -1607.61, "z": 60.43}
-          ],
-          "radius": 6,
-          "approach": [
-            {"x": -11546.7, "y": -1630, "z": 60.9}
-          ],
-          "max_bodies": 5
-        },
-        {
-          "entries": [11365, 11365, 11365, 11365, 11339, 11339],
-          "positions": [
-            {"x": -11517.4, "y": -1637.71, "z": 49.63},
-            {"x": -11515.6, "y": -1638.36, "z": 49.63},
-            {"x": -11517.3, "y": -1638.4, "z": 49.63},
-            {"x": -11521.2, "y": -1637.47, "z": 49.61},
-            {"x": -11511.8, "y": -1643.48, "z": 49.63},
-            {"x": -11526.9, "y": -1643.49, "z": 49.53}
-          ],
-          "radius": 10,
-          "approach": [
-            {"x": -11520, "y": -1665, "z": 49.6}
-          ],
-          "max_bodies": 6
-        },
-        {
-          "entries": [11365, 11365, 11365, 11365, 11365, 11365, 11365, 11339, 11339],
-          "positions": [
-            {"x": -11559.7, "y": -1565.21, "z": 49.33},
-            {"x": -11559.4, "y": -1563.97, "z": 49.31},
-            {"x": -11568.5, "y": -1559.21, "z": 49.97},
-            {"x": -11549.3, "y": -1554.1, "z": 50.74},
-            {"x": -11547.4, "y": -1554.03, "z": 50.85},
-            {"x": -11546.5, "y": -1552.91, "z": 51},
-            {"x": -11547.6, "y": -1549.76, "z": 51.27},
-            {"x": -11545.4, "y": -1549.98, "z": 51.33},
-            {"x": -11545.1, "y": -1550.04, "z": 51.34}
-          ],
-          "radius": 17.3,
-          "approach": [
-            {"x": -11551.2, "y": -1563.8, "z": 49.5}
-          ]
-        },
-        {
-          "entries": [11353, 11353, 11365, 11365, 11365, 11365],
-          "positions": [
-            {"x": -11580.1, "y": -1581.38, "z": 49.85},
-            {"x": -11579.8, "y": -1582.05, "z": 49.77},
-            {"x": -11583.4, "y": -1578.33, "z": 50.62},
-            {"x": -11584.2, "y": -1576.76, "z": 50.83},
-            {"x": -11586.7, "y": -1576.85, "z": 51.07},
-            {"x": -11587, "y": -1580.33, "z": 51.41}
-          ],
-          "radius": 5.2,
-          "approach": [
-            {"x": -11567.948, "y": -1574.3823, "z": 49.708595}
+            {"x": -11594.133, "y": -1719.7334, "z": 39.525406},
+            {"x": -11598.666, "y": -1716.5333, "z": 40.125404},
+            {"x": -11627.932, "y": -1685.6764, "z": 39.82167}
           ]
         },
         {
@@ -1360,7 +1296,8 @@
           ],
           "radius": 2.4,
           "approach": [
-            {"x": -11612.098, "y": -1588.4896, "z": 39.402847}
+            {"x": -11626.666, "y": -1642.6667, "z": 39.325405},
+            {"x": -11614.155, "y": -1572.6831, "z": 39.166206}
           ]
         },
         {
@@ -1373,7 +1310,19 @@
           ],
           "radius": 6.7,
           "approach": [
-            {"x": -11625.076, "y": -1582.0726, "z": 39.17823}
+            {"x": -11642.609, "y": -1569.9508, "z": 39.10029}
+          ]
+        },
+        {
+          "entries": [11830, 11351],
+          "positions": [
+            {"x": -11612.5, "y": -1515.44, "z": 43.78},
+            {"x": -11606.1, "y": -1513.56, "z": 45.65}
+          ],
+          "radius": 4,
+          "approach": [
+            {"x": -11615.2, "y": -1526.6667, "z": 42.536133},
+            {"x": -11611.877, "y": -1519.8405, "z": 43.919926}
           ]
         },
         {
@@ -1381,7 +1330,7 @@
           "positions": [
             {"x": -11583, "y": -1528, "z": 51.65}
           ],
-          "radius": 54,
+          "radius": 60,
           "patrol": {
             "entries": [11352],
             "path": [
@@ -1413,21 +1362,88 @@
             "source": "creature_movement 91444 (22 points, 258.9 yd at 1.67 yd/s)"
           },
           "approach": [
-            {"x": -11587.115, "y": -1549.5, "z": 52.615},
-            {"x": -11587, "y": -1542, "z": 53.07}
+            {"x": -11580.5, "y": -1521, "z": 51.619255}
           ],
           "stand_pull": true,
           "max_bodies": 1
         },
         {
-          "entries": [11830, 11351],
+          "entries": [11353, 11353, 11365, 11365, 11365, 11365],
           "positions": [
-            {"x": -11612.5, "y": -1515.44, "z": 43.78},
-            {"x": -11606.1, "y": -1513.56, "z": 45.65}
+            {"x": -11580.1, "y": -1581.38, "z": 49.85},
+            {"x": -11579.8, "y": -1582.05, "z": 49.77},
+            {"x": -11583.4, "y": -1578.33, "z": 50.62},
+            {"x": -11584.2, "y": -1576.76, "z": 50.83},
+            {"x": -11586.7, "y": -1576.85, "z": 51.07},
+            {"x": -11587, "y": -1580.33, "z": 51.41}
           ],
-          "radius": 4,
+          "radius": 5.2,
           "approach": [
-            {"x": -11612.42, "y": -1532.3314, "z": 40.546005}
+            {"x": -11617.066, "y": -1546.1333, "z": 40.836132},
+            {"x": -11612, "y": -1607.7334, "z": 39.525406},
+            {"x": -11594.133, "y": -1611.2001, "z": 47.625404},
+            {"x": -11584.49, "y": -1585.2047, "z": 50.59876}
+          ]
+        },
+        {
+          "entries": [11365, 11365, 11365, 11365, 11365, 11365, 11365, 11339, 11339],
+          "positions": [
+            {"x": -11559.7, "y": -1565.21, "z": 49.33},
+            {"x": -11559.4, "y": -1563.97, "z": 49.31},
+            {"x": -11568.5, "y": -1559.21, "z": 49.97},
+            {"x": -11549.3, "y": -1554.1, "z": 50.74},
+            {"x": -11547.4, "y": -1554.03, "z": 50.85},
+            {"x": -11546.5, "y": -1552.91, "z": 51},
+            {"x": -11547.6, "y": -1549.76, "z": 51.27},
+            {"x": -11545.4, "y": -1549.98, "z": 51.33},
+            {"x": -11545.1, "y": -1550.04, "z": 51.34}
+          ],
+          "radius": 17.3,
+          "approach": [
+            {"x": -11556.882, "y": -1559.0911, "z": 49.724884}
+          ]
+        },
+        {
+          "entries": [11353, 11353, 11365, 11365, 11365, 11365],
+          "positions": [
+            {"x": -11585.8, "y": -1663.11, "z": 51.11},
+            {"x": -11588, "y": -1663.91, "z": 51.62},
+            {"x": -11576.6, "y": -1666.62, "z": 49.26},
+            {"x": -11573.4, "y": -1665.55, "z": 49.61},
+            {"x": -11573, "y": -1667.54, "z": 49.47},
+            {"x": -11573.4, "y": -1669.59, "z": 49.33}
+          ],
+          "radius": 10.5,
+          "approach": [
+            {"x": -11584, "y": -1621.3334, "z": 49.625404},
+            {"x": -11584, "y": -1642.6667, "z": 50.025406},
+            {"x": -11579.772, "y": -1660.2208, "z": 49.853245}
+          ]
+        },
+        {
+          "entries": [11365, 11365, 11365, 11365, 11339, 11339],
+          "positions": [
+            {"x": -11526.2, "y": -1683.66, "z": 49.38},
+            {"x": -11525, "y": -1685.19, "z": 49.85},
+            {"x": -11524.2, "y": -1683.65, "z": 49.55},
+            {"x": -11523, "y": -1686.1, "z": 50.24},
+            {"x": -11521.2, "y": -1684.87, "z": 50.11},
+            {"x": -11519.9, "y": -1685.07, "z": 50.27}
+          ],
+          "radius": 3.9,
+          "approach": [
+            {"x": -11528.932, "y": -1682.8286, "z": 48.93757}
+          ]
+        },
+        {
+          "entries": [15067],
+          "positions": [
+            {"x": -11464, "y": -1650.71, "z": 49.63}
+          ],
+          "radius": 1,
+          "approach": [
+            {"x": -11472.267, "y": -1665.8667, "z": 49.625404},
+            {"x": -11466.873, "y": -1655.9774, "z": 49.625404}
           ]
         },
         {
@@ -1442,21 +1458,120 @@
           ],
           "radius": 12.7,
           "approach": [
-            {"x": -11612, "y": -1607.7, "z": 39.5},
-            {"x": -11562.7, "y": -1578.7, "z": 49.6},
-            {"x": -11493.3, "y": -1575.5, "z": 49.6},
-            {"x": -11470.577, "y": -1578.4039, "z": 49.65362}
+            {"x": -11456.237, "y": -1609.8822, "z": 49.069748}
           ]
         },
         {
-          "entries": [15067],
+          "entries": [11339, 11339, 11339, 11339],
           "positions": [
-            {"x": -11464, "y": -1650.71, "z": 49.63}
+            {"x": -11518.3, "y": -1613.51, "z": 71.33},
+            {"x": -11518.3, "y": -1629.19, "z": 71.33},
+            {"x": -11511.3, "y": -1613.84, "z": 71.33},
+            {"x": -11511.4, "y": -1628.43, "z": 71.36}
           ],
-          "radius": 1,
+          "radius": 10,
           "approach": [
-            {"x": -11465.812, "y": -1630.7922, "z": 49.673286}
-          ]
+            {"x": -11561.9, "y": -1576.8, "z": 49.625404},
+            {"x": -11576, "y": -1615.7, "z": 52.825405},
+            {"x": -11513, "y": -1601, "z": 71.32541}
+          ],
+          "stand_pull": true,
+          "max_bodies": 4
+        },
+        {
+          "entries": [11339, 11339, 11365, 11365, 11365, 11365],
+          "positions": [
+            {"x": -11492, "y": -1607.23, "z": 71.33},
+            {"x": -11491.8, "y": -1609.3, "z": 71.33},
+            {"x": -11491.9, "y": -1612.31, "z": 71.33},
+            {"x": -11491.2, "y": -1612.34, "z": 71.33},
+            {"x": -11496.8, "y": -1621.54, "z": 71.33},
+            {"x": -11496.3, "y": -1621.55, "z": 71.33}
+          ],
+          "radius": 9,
+          "approach": [
+            {"x": -11500, "y": -1600, "z": 71.32541}
+          ],
+          "stand_pull": true,
+          "max_bodies": 6
+        },
+        {
+          "entries": [11365, 11365, 11365, 11365],
+          "positions": [
+            {"x": -11519, "y": -1664.11, "z": 71.33},
+            {"x": -11510.4, "y": -1663.15, "z": 71.33},
+            {"x": -11524.2, "y": -1670.44, "z": 71.33},
+            {"x": -11511.1, "y": -1670.26, "z": 71.33}
+          ],
+          "radius": 9.2,
+          "approach": [
+            {"x": -11513.413, "y": -1661.6633, "z": 71.32541}
+          ],
+          "stand_pull": true
+        },
+        {
+          "entries": [11365, 11365, 11365, 11365],
+          "positions": [
+            {"x": -11525.1, "y": -1582.7, "z": 71.34},
+            {"x": -11511.2, "y": -1580.07, "z": 71.34},
+            {"x": -11523.6, "y": -1573.28, "z": 71.34},
+            {"x": -11511.8, "y": -1573.41, "z": 71.34}
+          ],
+          "radius": 9.4,
+          "approach": [
+            {"x": -11514.748, "y": -1582.4548, "z": 71.33613}
+          ],
+          "stand_pull": true
+        },
+        {
+          "entries": [11365, 11365, 11365, 11365, 11353, 11353],
+          "positions": [
+            {"x": -11498.3, "y": -1640.75, "z": 60.43},
+            {"x": -11498.4, "y": -1641.72, "z": 60.43},
+            {"x": -11495.2, "y": -1616.76, "z": 60.4903},
+            {"x": -11495.2, "y": -1621.51, "z": 60.4075},
+            {"x": -11496, "y": -1619.55, "z": 60.4075},
+            {"x": -11495.1, "y": -1618.88, "z": 60.4074}
+          ],
+          "radius": 16,
+          "approach": [
+            {"x": -11495, "y": -1650, "z": 60.866}
+          ],
+          "stand_pull": true,
+          "max_bodies": 6
+        },
+        {
+          "entries": [11365, 11365, 11365, 11339, 11365],
+          "positions": [
+            {"x": -11534.8, "y": -1613.09, "z": 60.43},
+            {"x": -11536, "y": -1611.98, "z": 60.43},
+            {"x": -11534.6, "y": -1610.75, "z": 60.43},
+            {"x": -11542.2, "y": -1609.78, "z": 60.43},
+            {"x": -11538.1, "y": -1607.61, "z": 60.43}
+          ],
+          "radius": 6,
+          "approach": [
+            {"x": -11535.724, "y": -1616.4725, "z": 60.425407}
+          ],
+          "stand_pull": true,
+          "max_bodies": 5
+        },
+        {
+          "entries": [11365, 11365, 11365, 11365, 11339, 11339],
+          "positions": [
+            {"x": -11517.4, "y": -1637.71, "z": 49.63},
+            {"x": -11515.6, "y": -1638.36, "z": 49.63},
+            {"x": -11517.3, "y": -1638.4, "z": 49.63},
+            {"x": -11521.2, "y": -1637.47, "z": 49.61},
+            {"x": -11511.8, "y": -1643.48, "z": 49.63},
+            {"x": -11526.9, "y": -1643.49, "z": 49.53}
+          ],
+          "radius": 10,
+          "approach": [
+            {"x": -11530.9, "y": -1600, "z": 60.425407},
+            {"x": -11517.733, "y": -1633.8556, "z": 49.625404}
+          ],
+          "max_bodies": 6
         }
       ],
       "skip": [14758, 15091],
@@ -1465,7 +1580,7 @@
           "use_object": {
             "entry": 180526,
             "near": {"x": -11569.2, "y": -1627.87, "z": 41.2767},
-            "stand": {"x": -11521.645, "y": -1621.636, "z": 41.325405}
+            "stand": {"x": -11502.9, "y": -1609.1, "z": 49.625404}
           }
         }
       ],
@@ -1473,12 +1588,15 @@
         "entry": 14515,
         "position": {"x": -11540.7, "y": -1627.71, "z": 41.27},
         "approach": [
+          {"x": -11492.3, "y": -1634.9, "z": 49.525},
+          {"x": -11491.2, "y": -1621.3, "z": 41.325},
           {"x": -11521.645, "y": -1621.636, "z": 41.325405}
         ],
         "summon_open_step": 1
       },
       "notes": [
-        "Pull group 12 (27 units): walk 29 validates this pull live; revert to split pulls if the raid cannot hold 27.",
+        "ARLOKK ROUTE FIX 1 (2026-11-05, leg 4; the mesh's loop): the re-route above still walked the z 60 landing's last approach -11502.2 -1625.7 60.4 13.1 yd 3D under the top's east six, so the party woke them before their pull row. The temple's only climb is the west ramp from the ring's west end (-11576 -1615.7 52.8) up past the z 60 ledge to the top, and its only ways down are the ledge's stair (-11508.5 -1624.8 62.3) and the north stair (-11530.9 -1600 60.4), so the pulls follow the loop: the ring's groups, then the top's west 4 (51353) from its stand -11513 -1601, the top's east 6 (51369) from -11500 -1600, the top's south 4 (49331) and north 4 (51588), the z 60 ledge's landing 6 (49343) from the ledge's stair and its west 5 (49329) from -11535.7 -1616.5, the ring's 6 (51365) down the north stair, then the arena. Every stand and approach point is 20 yd (3D) clear of every pack a later row pulls (TestZulGurubArlokkApproachesClearOfLaterPacks); the two crossings left are named in zgArlokkCorridor (the west ramp passes the ledge's west pack, and the top is one floor so its stands are 20-23 yd from the neighbouring formation). The gong's arena walk is authored now: the stand (-11502.9 -1609.1) and the boss approach's vias (-11492.3 -1634.9 49.5, -11491.2 -1621.3 41.3, -11521.6 -1621.6 41.3) carry the descent, so the last pull-to-stand hop is 1.2x, the worst hop of the leg is 1.43x (the north stair's last step), and the leg walks 2029 yd.",
+        "ARLOKK RE-ROUTE (2026-11-05, leg 4; research/zg-w38/arlokk-rows.txt and research/zg-bosses/ARLOKK.md §0-1): the walk climbed the temple four times over (34 of 134 rows a hop over 40 yd or a z jump over 6 yd; step 290 climbed z 49.9 to 71.3 in 21 yd, steps 292-299 crossed the 71 terrace with 46/34/35/49/36 yd hops that cross each other, and steps 299-326 bounced between z 50, 60 and 71; the raids stalled at 292-294). The pulls are in one ascent now, each floor's groups in walking order: bottom floor 0-22 (the west stair 3-5 is a spur up to z 65 and back), the 21 patrol from its loop's ledge, the z 50 landing 18 then the ring 17, 9, 10, 24 and 23, the z 60 landing 13, the z 71 top's west 4 (51353) and east 6 (51369) as two stand pulls, then 14 at the north edge and 11 at the south edge, then the 15 landing and the 16 ledge by the arena stair. Every approach point is a navmesh point of the walk, each group's staging point is on its pack's floor, and the leg's walk is 2099 yd against 3582. The 10-body 71 pack is two stand pulls under the ceiling, each stand 23-28 yd from its formation and out of the other's: west 4x11339 from -11540 -1621, east 2x11339+4x11365 from -11498 -1645, max_bodies 4 and 6, radii 10 and 9 so the split is not undone by an auto radius. The z 60 landing's row now carries its whole formation (4 Panthers 49343-49346 + the two Blood Drinkers 51594/51595, radius 16, max_bodies 6): the old z 71 row's radius 14 owned the Panthers through the floor and the split would have left them to nobody. The 21 patrol's radius is 60 (its spawn 91444 lies 54 yd 3D from the row) and its stand -11580.5 -1521 is on the loop's z 51 ledge, 8.6 yd from a loop point with line of sight, so the stand pull sees it come. The gong's stand is the boss fight point in the arena; the run leader walks to the gong itself. Test: TestZulGurubArlokkLegRoute, TestZulGurubArlokkPatrolStandInShot (tools/dungeongen).",
         "WALK 29 FIX 4 (2026-11-03, leg 4; research/zg-w29/WALK29-FIX-PLAN.md §2): step 295's move to the bats' approach walked the party through two leg-7 tiger formations no leg-4 row owned: on arrival (b 00:37:52) formation 49699 (Tigers 49699/49700, Axe Thrower 91464, Witch Doctor 91465; its spawn 18.6 yd from the approach) and 49716 (Tigers 49716/49717, Axe Thrower 91511, Priest 91512) plus the Bloodseeker bats 51873 and their summons were 12 bodies at once; peak 14-15, 53/3/9/22 dead in b/b-r1/g/g-r1. The two formations and the patroller 91435 (11352, movement 2, 8.8 yd from them) are one leg-4 row now, ahead of the bats: 9 bodies, max_bodies 9, stand_pull. Its stand -11576 -1778 46.3 (walked by the party in b/g) is 21.7 yd from the nearest tiger and 43.5 yd from the bat formation; it lies on the ramp down from group 6 (-11562.6 -1792.5 z 56.4). The leg-7 group 38 and its 4-point approach chain are gone. Today's bats approach -11573.13 -1754.66 keeps a dead neighbourhood but is still 18.6 yd from 49699's spawn: it is used only after the tigers are dead, as the row now ensures.",
         "WALK 29 FIX 4b (2026-11-03, leg 4; research/zg-w29/WALK29-FIX-PLAN.md §2, lead decision): the 27-unit row (walk 28's answer to the 11-20 yd cluster) did not hold live: walk 29 wiped at 14 engaged (b-r1 01:16:37-01:17:46, 20 dead in 55 s) and at 11 (g 01:17:03, 18 dead in 40 s), and its 34 yd circle let the run leader pick a unit on another height level, which walked the raid down into the next packs (g). The pieces that held were formation-sized (g, g-r1: 4-8 bodies). The row is split per formation, not walk 28's stampede split: (A) upper B + upper east as one row of 10 (formation 51353's 4 Shadow Hunters + 51369's 4 Panthers and 2 Shadow Hunters, 16.8 yd apart and inseparable), from the upper stand -11505 -1652 71.3 (24.4 yd 3D from its nearest spawn, 35.3 from the row centre, 72.2 from upper north; the old -11505 -1608.5 stood 8.3 yd from 51353 and 22.8 from upper north), radius 12 (one member of each formation; it stays 12.8 yd 3D from middle east's panthers), max_bodies 10, stand_pull so the hold point and the three Polymorphs run; (B) middle east (formation 49343: 4 Panthers + the two Blood Drinkers 51594/51595 that walk 25's radius missed), from the upper edge -11509 -1603 71.33 (23.5 yd 3D), max_bodies 6, 11353 kill_first; (C) upper north, unchanged from -11505 -1596 71.33; (D) middle west (formation 49329, 5) from -11546.7 -1630 60.9 on the middle ring (20.7 yd 3D), max_bodies 5; (E) lower (formation 51365, 6) from -11520 -1665 49.6 (22.6-27.6 yd), max_bodies 6. Every row has its own approach; the D and E stands sit on their pack's own level, and the C -\u003e D walk is the middle-ring route (148.5 yd; the straight drop has no navmesh link), \u003e= 23 yd from E (the 30.6 yd D/E pair needs the off-tank on the stand)."
       ]
@@ -1952,23 +2070,9 @@
           ],
           "radius": 4.4,
           "approach": [
-            {"x": -11632, "y": -1322, "z": 78.1}
+            {"x": -11614.4, "y": -1282.1, "z": 79.4}
           ],
-          "stand_pull": true,
           "max_bodies": 10
-        },
-        {
-          "entries": [14825, 14825, 14825, 14825],
-          "positions": [
-            {"x": -11580.1, "y": -1294.22, "z": 77.77},
-            {"x": -11577.9, "y": -1294.89, "z": 77.8},
-            {"x": -11577, "y": -1291.6, "z": 77.76},
-            {"x": -11574.8, "y": -1293.52, "z": 77.81}
-          ],
-          "radius": 12,
-          "approach": [
-            {"x": -11606, "y": -1290, "z": 79.34}
-          ]
         },
         {
           "entries": [14883, 14882, 14883, 14825, 14882, 14882, 14825, 14825, 14825, 14883],
@@ -1986,29 +2090,25 @@
           ],
           "radius": 6.2,
           "approach": [
-            {"x": -11606.5, "y": -1302.8, "z": 79.3}
+            {"x": -11614, "y": -1330, "z": 78.46},
+            {"x": -11581, "y": -1334.8, "z": 81.1}
           ],
           "stand_pull": true,
           "max_bodies": 10
         },
         {
-          "entries": [14825, 14825, 14882, 14825, 14825, 14825, 14825, 14825],
+          "entries": [14825, 14825, 14825, 14825],
           "positions": [
-            {"x": -11547, "y": -1250.59, "z": 78.55},
-            {"x": -11552, "y": -1248.28, "z": 78.6},
-            {"x": -11545.2, "y": -1246.18, "z": 78.71},
-            {"x": -11549.8, "y": -1243.92, "z": 78.41},
-            {"x": -11543.8, "y": -1265.9, "z": 78.38},
-            {"x": -11546.3, "y": -1262.71, "z": 78.54},
-            {"x": -11544.3, "y": -1263.2, "z": 78.48},
-            {"x": -11542.2, "y": -1263.87, "z": 78.45}
+            {"x": -11580.1, "y": -1294.22, "z": 77.77},
+            {"x": -11577.9, "y": -1294.89, "z": 77.8},
+            {"x": -11577, "y": -1291.6, "z": 77.76},
+            {"x": -11574.8, "y": -1293.52, "z": 77.81}
           ],
-          "radius": 13,
+          "radius": 12,
           "approach": [
-            {"x": -11558, "y": -1304, "z": 78.1}
+            {"x": -11577.5, "y": -1293.6, "z": 77.8}
           ],
-          "stand_pull": true,
-          "max_bodies": 8
+          "max_bodies": 4
         },
         {
           "entries": [14883, 14883, 14882, 14882, 14882, 14882, 14825, 14825],
@@ -2024,19 +2124,39 @@
           ],
           "radius": 7,
           "approach": [
-            {"x": -11552, "y": -1277, "z": 78}
+            {"x": -11550.8, "y": -1283.6, "z": 77.9}
           ],
           "stand_pull": true,
-          "max_bodies": 8
+          "max_bodies": 14
+        },
+        {
+          "entries": [14825, 14825, 14882, 14825, 14825, 14825, 14825, 14825],
+          "positions": [
+            {"x": -11547, "y": -1250.59, "z": 78.55},
+            {"x": -11552, "y": -1248.28, "z": 78.6},
+            {"x": -11545.2, "y": -1246.18, "z": 78.71},
+            {"x": -11549.8, "y": -1243.92, "z": 78.41},
+            {"x": -11543.8, "y": -1265.9, "z": 78.38},
+            {"x": -11546.3, "y": -1262.71, "z": 78.54},
+            {"x": -11544.3, "y": -1263.2, "z": 78.48},
+            {"x": -11542.2, "y": -1263.87, "z": 78.45}
+          ],
+          "radius": 13,
+          "approach": [
+            {"x": -11552, "y": -1270, "z": 78.26}
+          ],
+          "stand_pull": true,
+          "max_bodies": 10
         },
         {
           "entries": [14825],
           "positions": [
             {"x": -11522.8, "y": -1280.45, "z": 79.6704}
           ],
-          "radius": 4,
+          "radius": 1,
           "approach": [
-            {"x": -11548.5, "y": -1291, "z": 78.1}
+            {"x": -11558, "y": -1290, "z": 77.96},
+            {"x": -11548.2, "y": -1292.3, "z": 78.18}
           ],
           "stand_pull": true,
           "max_bodies": 1
@@ -2046,9 +2166,10 @@
           "positions": [
             {"x": -11522.8, "y": -1271.63, "z": 79.6408}
           ],
-          "radius": 4,
+          "radius": 1,
           "approach": [
-            {"x": -11546.5, "y": -1257, "z": 78.77}
+            {"x": -11556, "y": -1282, "z": 77.91},
+            {"x": -11547, "y": -1257.6, "z": 78.81}
           ],
           "stand_pull": true,
           "max_bodies": 1
@@ -2103,7 +2224,8 @@
           "radius": 5.9,
           "approach": [
             {"x": -11573.384, "y": -1482.5585, "z": 60.001575}
-          ]
+          ],
+          "max_bodies": 9
         },
         {
           "entries": [11350, 11831, 14821],
@@ -2142,11 +2264,13 @@
       },
       "notes": [
         "WALK 29 FIX 3 (2026-11-03, leg 6; research/zg-w29/WALK29-FIX-PLAN.md §4, lead decision): step 528 (group 6) pulled the 10 lone 14825/14882/14883 units of the 49373-49382 cluster from an approach 26.1 yd out; d 00:41:06 aggroed 49377 on arrival and 12 bodies (with the Corrupted Infernals from Voodoo Slave spell 23426) were in at 00:41:08, 19 dead in 38 s, no CC (the units were not in cc_priority and the row was not a stand_pull). Step 532 (group 8, formation 49363, 10 units) repeated it from 24.0 yd: 11-12 engaged, 21+23 dead. Step 534 walked to group 9's approach -11566 -1270, 21.1 yd from the Sacrificed Troll pack (group 12): 9 trolls woke on the walk and group 9 added 8, 17 engaged, 21 dead. Rows 6, 8 and 12 are stand_pull now with max_bodies 10, and their approaches sit 30+ yd from their own packs with the party's spread clear: group 6 at -11632 -1322 78.1 (40.3 yd from its nearest unit, 43.6 from the row centre), group 8 at -11606.5 -1302.8 79.3 (34.9, 37.0) and the trolls at -11563 -1282.6 77.9 (32.9, 37.0). The troll pack (Sacrificed Trolls 49078-49087) is pulled before group 9, from its own stand, which removes the walk exposure at step 534 entirely. 14882 Atal'ai Mistress is in cc_priority; 14883 Voodoo Slave is kill_first (its creature_spells entry 148830 casts 23426 Summon Infernals).",
-        "JIN'DO (2026-11-04, spec TortoiseBots-audit/specs/jindo-mechanics.md §§D1/D6/D7): kill_first leads with the Brain Wash Totem 15112 (a charmed bot kills raid members) and the Powerful Healing Ward 14987 (3 333 hp/s, out-heals the raid's 2.2-3.0 k dps), then 14750, 15146, 11830, 14883, 11353. Sacrificed Troll 14826 respawn in 10 s (tw_world_creature.sql 49078-49087); the pit pull group is dropped and the route keeps 22 yd from the pit (-11583, -1251). Jin'do proof walks place at 'pull group 9 approach', plain, never from the boss approach.",
+        "JIN'DO (2026-11-04, spec TortoiseBots-audit/specs/jindo-mechanics.md §§D1/D6/D7): kill_first leads with the Brain Wash Totem 15112 (a charmed bot kills raid members) and the Powerful Healing Ward 14987 (3 333 hp/s, out-heals the raid's 2.2-3.0 k dps), then 14750, 15146, 11830, 14883, 11353. Sacrificed Troll 14826 respawn in 10 s (tw_world_creature.sql 49078-49087); the pit pull group is dropped and the route keeps 22 yd from the pit (-11583, -1251). Jin'do proof walks place at the boss approach's last row (the stand -11536.8 -1261.5), plain, never from a pre-boss pull row (the hall's own four groups are gm-cleared; WALK 38 REVIEW R2).",
         "JIN'DO GUARD (2026-11-04, spec §D6): the honour-guard group (10 bodies incl. 49402/49403, approach -11558 -1276 78.06, 42.2 yd from Jin'do) is a stand pull with max_bodies 10, shot from its approach so the fight happens there and not 13 yd from him.",
         "WALK 36 FIX 1 (2026-11-04, leg 6; TortoiseBots-audit tests/raid-zg-walk36): the group-8 stand pull (run step 543, stand -11560 -1280) engaged Jin'do in f, f3 twice and c3 (f 10:01, f3 11:03 and 12:33, c3 11:35; f3 \"pull estimate: 15 bodies over the ceiling 10\", \"engaged 15 over 6\", then \"boss 11380 engaged\"). The stand and its approach stood 25.2-28.4 yd from the honour guard's western units (route reach 30-32 yd at the plan's party level 58) and the guard lives 8-18 yd from Jin'do, so the guard's fight brought him in; the stand was also 33 yd from its own pack, past the run leader's 28.5 yd shot, so the row plain-pulled and dragged the guard in. The hall is now: the honour guard pulled FIRST from a stand at -11562 -1306 (44+ yd from the north packs, 56 yd from Jin'do), its radius 9.5 now owns the two 14883 Voodoo Slaves 9.3 yd out that radius 8 missed (max_bodies 12), and the two north packs are ONE stand pull (8 bodies, radius 9.5, stand -11558 -1304, 44+ yd from the guard's units). Every stand and approach point of the hall keeps the reach of every pack it does not pull and of Jin'do (tools/dungeongen/zg_w36_test.go).",
         "WALK 36 FIX 2 (2026-11-04, leg 6; TortoiseBots-audit tests/raid-zg-walk36): the -11603 -1229 pull (run step 552) is dropped. Its stand was 41-45 yd out, past the run leader's 28.5 yd shot, so d 09:40:05 and e3 11:48:19 pulled it as \"a plain pull\"; the party then stood 10.9 yd from a Sacrificed Troll (d 09:40:30) and the pit's 10 s respawns kept the fight open until d 09:54:16 and e3 11:48:21 paused with \"a fight lasted more than 180 s (kept on by nothing hostile engaged)\"; 20 dead in d2/e3. No stand fixes it: in shot (26-28 yd, with line of sight) only the hall's east side works and the walk there passes 18.4 yd from a troll (navmesh), and the pack's north and west sides have no floor. The pack is 80+ yd from the corridor and off the boss route; the group after the hall starts with a hop point at -11582 -1322 that held its approach. tools/dungeongen/zg_w36_test.go pins that no leg-6 pull lists it.",
-        "WALK 36 FIX 5 (2026-11-04, leg 6; TortoiseBots-audit tests/raid-zg-walk36): the boss row's last approach was (-11545.6 -1289, 30.6 yd from Jin'do) with no line of sight to him: f3-r1 11:57:14 \"no LOS from the authored stand; holding\", 11:57:30 \"searching a firing stand\", 11:57:35 \"to firing stand 1 for 11380 ... 24.5 yd from it; was 32.1 yd, los yes\". The fight drifted (the lead chased a spell target to -11582.9 -1251.2 90, the pit's upper rim) and at 12:00:32 the boss begin paused \"no walkable path toward the boss ... no safe stand 35.0-25.0 yd from it the lead bot has a path to (the lead bot 72.1 yd from it)\". The stand is now (-11536.8 -1261.5): 25.2 yd from him, dry, with line of sight (raycast), inside the run leader's own 25-35 yd window, so it never searches. tools/dungeongen/zg_w36_test.go pins the distance and the sight."
+        "WALK 36 FIX 5 (2026-11-04, leg 6; TortoiseBots-audit tests/raid-zg-walk36): the boss row's last approach was (-11545.6 -1289, 30.6 yd from Jin'do) with no line of sight to him: f3-r1 11:57:14 \"no LOS from the authored stand; holding\", 11:57:30 \"searching a firing stand\", 11:57:35 \"to firing stand 1 for 11380 ... 24.5 yd from it; was 32.1 yd, los yes\". The fight drifted (the lead chased a spell target to -11582.9 -1251.2 90, the pit's upper rim) and at 12:00:32 the boss begin paused \"no walkable path toward the boss ... no safe stand 35.0-25.0 yd from it the lead bot has a path to (the lead bot 72.1 yd from it)\". The stand is now (-11536.8 -1261.5): 25.2 yd from him, dry, with line of sight (raycast), inside the run leader's own 25-35 yd window, so it never searches. tools/dungeongen/zg_w36_test.go pins the distance and the sight.",
+        "WALK 38 FIX 1 (2026-11-05, leg 6; TortoiseBots-audit tests/raid-zg-walk38 bj/bj2): step 514 pulled groups 5/6/7 at once (27 bodies, 21 dead) and step 520's north-pack row plain-pulled from a stand 54 yd out, walking the party inside Jin'do's 35 yd reach (boss engaged at 520; bj2 at 525 on the lone-mistress walk). The hall is staged now: group 5 is a plain pull at its own camp (its old stand had no line of sight); the 49363 camp is a stand pull from (-11581 -1334.8) (28.0 yd from its farthest unit, 88 from Jin'do), pulled before the 1173082 camp, which is a plain pull at its own centroid once 49363 is dead (the camps are 20 yd apart and no stand splits them); the honour guard is a stand pull from (-11550.8 -1283.6) (28.3 yd shot, 36.0 from Jin'do) with max_bodies 14 (its proximity wakes the north camp's east four and the lone mistresses); the north camp is a stand pull from (-11552 -1270) (26.2 yd shot, 36.6 from Jin'do, 32.4 from the troll pit) with max_bodies 10; the lone mistresses keep rows from (-11548.2 -1292.3) and (-11547 -1257.6) (36.5/36.0 from him) with the west approach points that keep the walk at 35+ (both walks dipped to 34.8 before). With the run leader's real assist model the hall's own rows are over their ceilings by 1-2 and wake Jin'do: the fold that followed this staging is undone (WALK 38 REVIEW R2), and walk 39 gm-clears those groups.",
+        "WALK 38 REVIEW R2 (2026-11-05, leg 6; review round 2, decided: undo the boss-row fold; RingYd 10 = CreatureFamilyAssistanceRadius, one hop). The hall's east side is its own pull groups again and the Jin'do boss row carries no adds (no first, no radius): group 8 the honour guard 49421's eight (max_bodies 14, stand -11550.8 -1283.6, 36.0 yd from him), group 9 the north camp (the east four 1173078-81 and the mistresses 49383-86, max_bodies 10, stand -11552 -1270, 36.6 yd), group 10 the lone 49403 (max_bodies 1, stand -11548.2 -1292.3, 36.5 yd) and group 11 the lone 49402 (max_bodies 1, stand -11547 -1257.6, 36.0 yd). Each is a stand pull with its walk-38-fix-1 stand, no stand is inside his 35 yd route reach, and each group is gm-clearable on its own (the lone rows' radius 1 keeps the guard's 49576/49577 out of them). No geometry stages them under their ceilings: a stand in the tank's 28.5 yd shot of the guard (it spans 9.5 yd) or of the 22 yd north camp is inside the lone mistresses' 22+10 yd reach, and a stand in a lone mistress's shot is inside the 10 yd family ring of the other and of the guard (49421 stands 5.9 yd from 49402), so each pull's assist wakes Jin'do. The known limit is pinned per group by TestZgW38JindosHallPullsStayUnderTheirCeilings, which keeps the assist model: group 8 brings 15 bodies over its ceiling 14 (+1: the north camp's east four join), group 9 11 over 10 (+1), group 10 3 over 1 (+2: 49402 and Jin'do) and group 11 2 over 1 (+1: Jin'do). The corridor's 49714 row keeps its original max_bodies 9: its pull rings in the 51881/51946 pair, 10 bodies over 9 (+1). Walk 39 gm-clears leg 6 pull groups 9-12 (the guard, the north camp and the two lone mistresses) and 16 (the 49714 row) instead of pulling them. A-6: 49402/49403 are members of their own rows only, and no pre-boss stand is inside Jin'do's reach."
       ]
     },
     {
@@ -2406,7 +2530,8 @@
       "skip": [11374, 14758, 15091],
       "notes": [
         "WALK 29 FIX 6 (2026-11-03, leg 7; research/zg-w29/WALK29-FIX-PLAN.md §5, lead decision): rows 620-637 walked the raid into the lake to pull single Hooktooth Frenzies (11374), which are fish: 14 of the leg's 38 groups were 11374-only (groups 3, 4, 5, 7, 8, 16, 17, 24, 25, 26, 30, 31, 33 and 37 at z -14.4 to +2.6) and all 30 spawns are in water. Runs e/e-r1..r3 had 0 deaths but stopped for good: the lead sat at -11855..-11858 -1506..-1508 z -13 at step 624 and -11885.5 -1488.1 z 7.8 at step 628, stuck 35.3-36.7 yd from the goal with its own move failing (lead in water: yes; cmd move path type 0x81). 11374 is in the leg's skip now and the 14 fish-only groups and their approach rows are gone; every remaining point of the leg is on land (z 2.2 and above in the lake basin). The leg's own route (vias z 78.7/65.3/51.0, to z 19.7) is unchanged.",
-        "ROUTE-REGEN 0dec623+local (2026-11-03, audit §4.2): 8 points, minimum aggro margin 9.3 yd, minimum wall 4.0 yd; pull order regen from the navmesh path-length matrix (0 one-way pairs flagged); every point authored, no exporter cut"
+        "ROUTE-REGEN 0dec623+local (2026-11-03, audit §4.2): 8 points, minimum aggro margin 9.3 yd, minimum wall 4.0 yd; pull order regen from the navmesh path-length matrix (0 one-way pairs flagged); every point authored, no exporter cut",
+        "WALK 38 FIX 2 (2026-11-05, leg 7; TortoiseBots-audit tests/raid-zg-walk38 f2/f3): every Hakkar attempt paused at step 601 \"no walkable path toward -11752 -1741.9 14.3\". The row was not a plan point: the approach-hop cutter's last-approach interpolation took the straight line from the floor-aware cut's only kept point (the wet south-lake corners are dropped) to the group-6 pull and stood 4.1 yd under the floor there, off the navmesh. The cutter no longer interpolates when its kept list is a single point (internal/planexport, TestApproachHopsDoesNotInterpolateACutGap); the group-6 pull is 114 yd from the last row and the run leader walks its own complete 199.8 yd path around the lake (TestZgW38HakkarOuterRowsWalkable)."
       ]
     },
     {
@@ -2509,10 +2634,12 @@
         "entry": 14834,
         "position": {"x": -11787.4, "y": -1649.34, "z": 54.1},
         "approach": [
-          {"x": -11802.733, "y": -1679.4271, "z": 52.943153}
+          {"x": -11807.651, "y": -1691.3049, "z": 52.111286},
+          {"x": -11790, "y": -1662, "z": 53.11}
         ]
       },
       "notes": [
+        "WALK 42 FIX 1 (2026-11-06, leg 8; research/zg-bosses/HAKKAR-RESETS.md, spec hakkar-anchor-t1105e Part B): Hakkar's boss approach moves off the SW slope (-11802.733 -1679.4271 52.943153, 34 yd from his spawn, on ground that falls to his z 45.8 evade line 45-50 yd SW) onto his platform: the ramp's top lip -11807.651 -1691.3049 52.111286 (the old export's own path row there, now a plan point) and the stand -11790 -1662 53.11, 12.7 yd S of -11787.4 -1649.34 54.1. That stand is what the resets came from: 100 of walk 41's 130 Hakkar ends and 15 of walk 42's 16 were his own script reset (boss_hakkar.cpp:140-145 fires below z 45.8), and the raid stood 34-50 yd SW of him. Proof (turtle-agent, mmaps map 309): plan-probe on this export reads the stand's floor as 53.11 (dz 0.00, snap 0.00), the hop from the lip as server ok 22.05 yd and the hop on to the boss as ok 34.33 yd (both the straight line), and path-check --ray from the stand to his z+2 is clear over 13.0 yd. The platform's mesh runs 52.99 at the Sons' line (y -1674) up to 53.98 at his feet, so 53.11 is the floor at 13 yd; the spec's 53.5-55 band only starts about 5 yd from him, which is no stand. plan-check still reports one aggro finding on the stand (13.0 yd from him, inside his ~23 yd script aggro), the same class as Jin'do's stand at 25.2 yd. Leg 8 is 80 rows (one fewer than before: the lip is a plan point now, so the cutter has no separate path row for it) and the plan 694 steps. Part A's 20261106030000 moves the seek_aura stand to -11787.4 -1664.3 54.0 to match.",
         "WALK 29 FIX 6 (2026-11-03, leg 8; research/zg-w29/WALK29-FIX-PLAN.md §5, lead decision): the leg's `to` was the boss position -11647.14 -1562.50, so a placed Hakkar run started beside Arlokk's tiger group (row 860 at -11601 -1741) and rows 860-866 walked through leg 7's packs; --from \"leg hakkar\" was refused in k because the route passed 47 earlier-leg packs. The `to` is the quiet point -11750.4 -1490.4 39.85 now: 67.4 yd from the nearest non-critter spawn (11374, in water) and 56.5 yd from the nearest patrol loop (49726, a fish), on the leg's own navmesh path (the party walked it). The leg's rows run from there to the temple through groups 0-9 and the boss; the entrance-pack detour (groups 10-14 at -11866..-11933 -1313..-1395 z 78) and the approach chain in rows 1034-1083 are gone, since the boss route does not need them. 11374 joins the leg's skip with leg 7's.",
         "ROUTE-REGEN 0dec623+local (2026-11-03, audit §4.2): 3 points, minimum aggro margin 29.2 yd, minimum wall 3.5 yd; pull order regen from the navmesh path-length matrix (0 one-way pairs flagged); every point authored, no exporter cut"
       ]

@@ -5,8 +5,8 @@ package main
 // path (the commander's gm RPC, allow-listed), one event line per command in
 // run.log, in order, 3 s apart (plus the 2 s reply wait), once per instance.
 // A placed start inside the leg fires BEFORE the run starts; a mid-run reach
-// fires under a run pause. A resumed walk in the same instance never refires:
-// the markers live in the out dir (and the ledger, which outlives it).
+// fires under a run pause. One walk never refires a leg (the marker lives in
+// its out dir); every new launch, a --reuse-instance restart included, sends.
 import (
 	"bytes"
 	"context"
@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
@@ -149,11 +151,13 @@ func TestGMInstanceDataFiresAfterPlacement(t *testing.T) {
 	}
 }
 
-// A resumed walk in the same instance does not refire: a --reuse-instance
-// restart runs in a fresh out dir, so the out dir's marker cannot tell it,
-// and the ledger (which outlives the attempt) carries the mark. The reuse
+// A --reuse-instance restart in the same instance DOES resend. Walk 44 (raid
+// hk7m attempt -3) showed the instance data does not survive a wipe: the
+// restart's run.log had no gm-instance-data lines and Hakkar cast Aspect of
+// Jeklik/Venoxis again. Each launch runs in a fresh out dir, so its own marker
+// is empty, and nothing else (no ledger) may suppress the lines. The reuse
 // fixture's kept instance is the place toolkit's answer (inst 103).
-func TestGMInstanceDataNoRefireAfterReuseRestart(t *testing.T) {
+func TestGMInstanceDataResendsAfterReuseRestart(t *testing.T) {
 	ledger := filepath.Join(t.TempDir(), "instance-cap.json")
 	n := zgPlaceSteps(t)
 	run := func() *fixture {
@@ -174,18 +178,22 @@ func TestGMInstanceDataNoRefireAfterReuseRestart(t *testing.T) {
 		t.Fatalf("first walk: %d lines, want 1: %q", n, first.agent.gmLines())
 	}
 	second := run()
-	if n := countPrefix(second.agent.gmLines(), ".debug instancedata"); n != 0 {
-		t.Fatalf("resumed walk in the same instance resent: %q", second.agent.gmLines())
+	if n := countPrefix(second.agent.gmLines(), ".debug instancedata"); n != 1 {
+		t.Fatalf("same-instance --reuse-instance restart sent %d lines, want 1: %q", n, second.agent.gmLines())
 	}
-	if by, _ := os.ReadFile(filepath.Join(second.out, "run.log")); strings.Contains(string(by), ".debug instancedata") {
-		t.Fatalf("resumed walk logged a line it never sent:\n%s", by)
+	by, _ := os.ReadFile(filepath.Join(second.out, "run.log"))
+	if !strings.Contains(string(by), "gm-instance-data: high_priest_thekal: .debug instancedata 1 3 -> sent") {
+		t.Fatalf("restart run.log lacks the instance-data line:\n%s", by)
+	}
+	// A third restart resends too.
+	third := run()
+	if n := countPrefix(third.agent.gmLines(), ".debug instancedata"); n != 1 {
+		t.Fatalf("third launch sent %d lines, want 1: %q", n, third.agent.gmLines())
 	}
 }
 
-// Item 1: the ledger mark is consulted ONLY on a --reuse-instance walk. A
-// fresh walk with an old mark for the same id still sends (a fresh walk is
-// a new copy; the core reuses ids), while a reuse walk with the mark skips.
-func TestGMInstanceDataFreshWalkIgnoresLedgerMark(t *testing.T) {
+// A fresh walk (no --reuse-instance) in the same instance id sends too.
+func TestGMInstanceDataFreshWalkSends(t *testing.T) {
 	ledger := filepath.Join(t.TempDir(), "instance-cap.json")
 	n := zgPlaceSteps(t)
 	f, _ := newPlaceFixture(t)
@@ -202,7 +210,7 @@ func TestGMInstanceDataFreshWalkIgnoresLedgerMark(t *testing.T) {
 		t.Fatalf("setup walk sent %d, want 1: %q", n, f.agent.gmLines())
 	}
 	// A fresh walk (no --reuse-instance) in the same instance id sends
-	// again, even though the ledger carries the mark.
+	// again.
 	g, _ := newPlaceFixture(t)
 	g.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
 	g.env.capLedger = ledger
@@ -214,6 +222,44 @@ func TestGMInstanceDataFreshWalkIgnoresLedgerMark(t *testing.T) {
 	}
 	if n := countPrefix(g.agent.gmLines(), ".debug instancedata"); n != 1 {
 		t.Fatalf("fresh walk with an old mark sent %d lines, want 1: %q", n, g.agent.gmLines())
+	}
+}
+
+// A --reuse-instance walk that falls back to a fresh instance sends the
+// lines again: the new copy is not the one the data was confirmed for, even
+// when the core hands out the same instance id (it reuses ids across
+// copies). The first walk fires in 103 (alive reuse); the second finds the raid gone and no bind, enters fresh, and the
+// toolkit reports 103 again for the new copy.
+func TestGMInstanceDataRefiresAfterReuseFreshFallback(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "instance-cap.json")
+	n := zgPlaceSteps(t)
+	first, _ := newPlaceFixture(t)
+	first.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
+	first.opts.reuseInstance = true
+	first.env.capLedger = ledger
+	first.agent.entered = true
+	first.agent.startReply = instDataStartReply(t, n)
+	first.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+	if code := first.run(context.Background()); code != exitOK {
+		t.Fatalf("first walk exit %d: %s\n%s", code, first.stderr.String(), first.stdout.String())
+	}
+	if n := countPrefix(first.agent.gmLines(), ".debug instancedata"); n != 1 {
+		t.Fatalf("first walk sent %d lines, want 1: %q", n, first.agent.gmLines())
+	}
+	// The raid is gone and no bind is left: the walk falls back to a fresh
+	// entry. The core reuses the id, so the new copy is 103 again.
+	second, _ := newPlaceFixture(t)
+	second.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
+	second.opts.reuseInstance = true
+	second.env.capLedger = ledger
+	second.agent.entered = false
+	second.agent.startReply = instDataStartReply(t, n)
+	second.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+	if code := second.run(context.Background()); code != exitOK {
+		t.Fatalf("second walk exit %d: %s\n%s", code, second.stderr.String(), second.stdout.String())
+	}
+	if n := countPrefix(second.agent.gmLines(), ".debug instancedata"); n != 1 {
+		t.Fatalf("fresh fallback sent %d lines, want the new copy's one: %q", n, second.agent.gmLines())
 	}
 }
 
@@ -308,10 +354,9 @@ func TestGMInstanceDataUnknownLegRefused(t *testing.T) {
 	}
 }
 
-// An interrupt after the FIRST command resends the rest: the ledger's mark
-// is written only after EVERY command of the spec has been sent (review
-// item 1). The sleep between the lines fails, the walk ends, and a fresh
-// out dir with --reuse-instance sends the whole list again (the run's leg
+// An interrupt after the FIRST command resends the rest. The sleep between
+// the lines fails, the walk ends, and a fresh out dir with --reuse-instance
+// sends the whole list again (the run's leg
 // line-up is the reuse fixture's kept instance 103).
 func TestGMInstanceDataInterruptResendsRest(t *testing.T) {
 	ledger := filepath.Join(t.TempDir(), "instance-cap.json")
@@ -339,14 +384,6 @@ func TestGMInstanceDataInterruptResendsRest(t *testing.T) {
 	if n := countPrefix(first.agent.gmLines(), ".debug instancedata"); n != 1 {
 		t.Fatalf("interrupted walk sent %d lines, want exactly the first: %q", n, first.agent.gmLines())
 	}
-	// The ledger has no mark yet: nothing was complete.
-	l, err := raidwalk.LoadCapLedger(ledger)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if l.GMInstanceDataDone("m910q", "103", "high_priest_thekal", raidwalk.GMInstanceDataHash(raidwalk.GMInstanceSpec{Leg: "high_priest_thekal", Cmds: [][2]int{{1, 3}, {6, 3}}})) {
-		t.Fatal("a half-sent leg must not mark the ledger done")
-	}
 	second, _ := newPlaceFixture(t)
 	second.opts.gmInstanceData = stringList{"high_priest_thekal:1 3;6 3"}
 	second.opts.reuseInstance = true
@@ -364,8 +401,7 @@ func TestGMInstanceDataInterruptResendsRest(t *testing.T) {
 		}
 	}
 	// A fresh out dir has no marker: the whole list goes out again (the
-	// first walk confirmed `1 3` in its own out dir only; the ledger marks
-	// whole specs, not prefixes).
+	// first walk confirmed `1 3` in its own out dir only).
 	if strings.Join(got, "|") != ".debug instancedata 1 3|.debug instancedata 6 3" {
 		t.Fatalf("resumed walk sent %q, want the whole list again", got)
 	}
@@ -424,7 +460,7 @@ func TestGMInstanceDataMidRunHoldsNextPull(t *testing.T) {
 	f.opts.gmInstanceData = stringList{"high_priestess_arlokk:1 3"}
 	f.agent.startReply = instDataStartReply(t, n)
 	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
-	mid := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|move|walk|walking|until boss (step %d)", n.start+1, n.total, n.until)
+	mid := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|move|rest|resting|until boss (step %d)", n.start+1, n.total, n.until)
 	f.agent.mu.Lock()
 	last := f.agent.startQueue[len(f.agent.startQueue)-1]
 	f.agent.startQueue = append(f.agent.startQueue[:len(f.agent.startQueue)-1], queuedEvent{raw: mid}, last)
@@ -496,6 +532,24 @@ func TestGMInstanceDataLogsServerReply(t *testing.T) {
 
 // instDataOnyxiaReply is a run start answer for the unplaced onyxia
 // fixture: the run's own leg name is "onyxia" (defaultRun's lines).
+// instDataOnyxiaRestQueue replaces the fixture's default statuses by two
+// walking statuses, an out-of-combat rest and the end: the mid-run sends only
+// fire at the rest.
+func instDataOnyxiaRestQueue(f *fixture, plan string) {
+	st := func(state string, step int, phase, note string) queuedEvent {
+		return queuedEvent{raw: fmt.Sprintf("TBM:RUN|%s|%s|%d/29|onyxia|move|%s|%s", plan, state, step, phase, note)}
+	}
+	f.agent.mu.Lock()
+	f.agent.startQueue = []queuedEvent{
+		st("running", 3, "walk", "walking"),
+		st("running", 4, "walk", "walking"),
+		st("running", 5, "rest", "resting"),
+		st("running", 6, "walk", "walking"),
+		st("done", 6, "walk", "stopped before step 29 (until boss): the party stays where it stands"),
+	}
+	f.agent.mu.Unlock()
+}
+
 func instDataOnyxiaReply() *commanderReply {
 	line := "TBM:RUN|onyxias_lair|running|2/29|onyxia|move|walk|walking|until boss (step 29)"
 	return &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
@@ -520,6 +574,7 @@ func TestGMInstanceDataWithoutPlace(t *testing.T) {
 		}
 		f.agent.startReply = instDataOnyxiaReply()
 		f.defaultRun("onyxias_lair")
+		instDataOnyxiaRestQueue(f, "onyxias_lair")
 		if code := f.run(context.Background()); code != exitOK {
 			t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
 		}
@@ -535,6 +590,7 @@ func TestGMInstanceDataWithoutPlace(t *testing.T) {
 		}
 		f.agent.startReply = instDataOnyxiaReply()
 		f.defaultRun("onyxias_lair")
+		instDataOnyxiaRestQueue(f, "onyxias_lair")
 		if code := f.run(context.Background()); code != exitOK {
 			t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
 		}
@@ -669,7 +725,7 @@ func TestGMInstanceDataResumesAfterFailedPause(t *testing.T) {
 	f.opts.gmInstanceData = stringList{"high_priestess_arlokk:1 3"}
 	f.agent.startReply = instDataStartReply(t, n)
 	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
-	mid := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|move|walk|walking|until boss (step %d)", n.start+1, n.total, n.until)
+	mid := fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|move|rest|resting|until boss (step %d)", n.start+1, n.total, n.until)
 	f.agent.mu.Lock()
 	last := f.agent.startQueue[len(f.agent.startQueue)-1]
 	f.agent.startQueue = append(f.agent.startQueue[:len(f.agent.startQueue)-1], queuedEvent{raw: mid}, last)
@@ -716,7 +772,7 @@ func TestGMInstanceDataFiringBreaksPollLoop(t *testing.T) {
 	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
 	f.agent.pageSize = 2
 	run := func(step int) queuedEvent {
-		return queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|move|walk|walking|until boss (step %d)", step, n.total, n.until)}
+		return queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|move|rest|resting|until boss (step %d)", step, n.total, n.until)}
 	}
 	f.agent.mu.Lock()
 	last := f.agent.startQueue[len(f.agent.startQueue)-1]
@@ -822,6 +878,7 @@ func TestGMInstanceDataZeroInstRetries(t *testing.T) {
 	}
 	f.agent.startReply = instDataOnyxiaReply()
 	f.defaultRun("onyxias_lair")
+	instDataOnyxiaRestQueue(f, "onyxias_lair")
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
 	}
@@ -833,5 +890,550 @@ func TestGMInstanceDataZeroInstRetries(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(f.summary().Notes, "\n"), "WARN") {
 		t.Fatalf("notes %q, want the zero-read WARN", f.summary().Notes)
+	}
+}
+
+// A wipe recovered inside ONE running walk revives the raid in place. The
+// boss scripts may have rewritten the priest data meanwhile, so the recovery
+// clears the walk's markers and the next status that names the leg resends
+// the lines under their own pause and resume: exactly one resend per
+// recovery, on top of the placement's first send.
+func TestGMInstanceDataResendsAfterWipeRecovery(t *testing.T) {
+	n := zgPlaceSteps(t)
+	f, _ := newPlaceFixture(t)
+	f.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
+	f.opts.wipeResume = 1
+	f.agent.startReply = instDataStartReply(t, n)
+	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+	// The run's own status lines name the plan's full leg, as the live server
+	// does. One running line before the wipe; the run goes on after the raid
+	// was revived.
+	leg := func(state string, step int, note string) string {
+		return fmt.Sprintf("TBM:RUN|zul_gurub|%s|%d/%d|high_priest_thekal|move|walk|%s", state, step, n.total, note)
+	}
+	f.agent.startQueue = []queuedEvent{{raw: leg("running", n.start, "walking")}}
+	// The raid dies once the run has started, and the run goes on once the
+	// recovery resumed it.
+	f.agent.onStart = func() {
+		f.agent.mu.Lock()
+		for _, name := range f.agent.party {
+			f.agent.dead[name] = true
+		}
+		f.agent.mu.Unlock()
+	}
+	f.agent.onResume = func() {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.lines = append(f.agent.lines,
+			queuedEvent{raw: leg("running", n.start+1, "resumed")},
+			queuedEvent{raw: leg("running", n.start+1, "walking")},
+			queuedEvent{raw: strings.Replace(leg("running", n.start+1, "resting"), "|move|walk|", "|move|rest|", 1)},
+			queuedEvent{raw: leg("done", n.start+1, fmt.Sprintf("stopped before step %d (until boss): the party stays where it stands", n.until))})
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	if sum := f.summary(); sum.WipeResumes != 1 {
+		t.Fatalf("wipe_resumes %d, want 1 (end %q): %s", sum.WipeResumes, sum.EndReason, strings.Join(sum.Notes[len(sum.Notes)-8:], " | "))
+	}
+	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 2 {
+		t.Fatalf("%d instancedata lines, want 2 (placement + one resend after the recovery): %q", got, f.agent.gmLines())
+	}
+	// The resend runs under its own pause and resume (after the recovery's own resume).
+	if got := strings.Join(f.agent.runVerbs, " "); got != "start resume pause resume" {
+		t.Fatalf("run verbs %q, want the recovery's resume then the resend's pause and resume", got)
+	}
+}
+
+// instDataThekalStep is a placeable thekal pull row of the ZG rows, the
+// "resume from step N" start of an autopilot restart.
+func instDataThekalStep(t *testing.T) int {
+	t.Helper()
+	rows := zgRows(t)
+	for i, s := range rows.Steps {
+		if s.Kind != planexport.KindPull {
+			continue
+		}
+		if _, ok := raidwalk.PlacePoint(rows, i+1); !ok {
+			continue
+		}
+		if strings.EqualFold(raidwalk.PlaceLegName(rows, i+1), "high_priest_thekal") {
+			return i + 1
+		}
+	}
+	t.Fatal("no placeable thekal pull row in the ZG rows")
+	return 0
+}
+
+// A --reuse-instance launch that resumes from a step (the autopilot's
+// `--from step N --place --reuse-instance`, no leg words) sends the lines
+// exactly once, before `run start`, in both reuse modes: the raid still
+// inside (alive) and the logged-out raid resumed from the commander's bind.
+func TestGMInstanceDataReuseResumeFromStepSendsOnceBeforeRunStart(t *testing.T) {
+	for _, mode := range []string{"alive", "bind"} {
+		t.Run(mode, func(t *testing.T) {
+			step := instDataThekalStep(t)
+			f, p := newPlaceFixture(t)
+			f.opts.from = fmt.Sprintf("step %d", step)
+			f.opts.reuseInstance = true
+			f.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
+			if mode == "alive" {
+				f.agent.entered = true
+			} else {
+				f.agent.entered = false
+				f.agent.instanceBinds = []fakeBind{{inst: 107, ttr: "1h 0m"}}
+				p.inst = 107
+			}
+			n := zgPlaceSteps(t)
+			f.agent.startReply = placeStartReply("zul_gurub", step, n.total, n.until)
+			f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+			if code := f.run(context.Background()); code != exitOK {
+				t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+			}
+			inst, run := -1, -1
+			for i, line := range f.agentLog() {
+				if strings.HasPrefix(line, "gm .debug instancedata") && inst < 0 {
+					inst = i
+				}
+				if strings.HasPrefix(line, "cmdr run start ") && run < 0 {
+					run = i
+				}
+			}
+			if inst < 0 || run < 0 || inst > run {
+				t.Fatalf("instance-data at %d, run start at %d (want both, data first): %q", inst, run, f.agentLog())
+			}
+			if n := countPrefix(f.agent.gmLines(), ".debug instancedata"); n != 1 {
+				t.Fatalf("%d lines, want exactly 1: %q", n, f.agent.gmLines())
+			}
+		})
+	}
+}
+
+// instDataThekalBossStep is the step of the ZG thekal leg's boss row.
+func instDataThekalBossStep(t *testing.T) int {
+	t.Helper()
+	rows := zgRows(t)
+	for i, s := range rows.Steps {
+		if s.Kind == planexport.KindBoss && strings.EqualFold(raidwalk.PlaceLegName(rows, i+1), "high_priest_thekal") {
+			return i + 1
+		}
+	}
+	t.Fatal("no thekal boss row in the ZG rows")
+	return 0
+}
+
+// bossRowFixture is the thekal-leg walk the boss-row resend tests drive: the
+// launch send goes out before the run starts, then the queued statuses play.
+func bossRowFixture(t *testing.T, pageSize int, build func(st func(state string, step int, kind, phase, note string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent) *fixture {
+	t.Helper()
+	n := zgPlaceSteps(t)
+	boss := instDataThekalBossStep(t)
+	f, _ := newPlaceFixture(t)
+	f.opts.gmInstanceData = stringList{"high_priest_thekal:1 3"}
+	f.agent.startReply = instDataStartReply(t, n)
+	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+	st := func(state string, step int, kind, phase, note string) queuedEvent {
+		return queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|%s|%d/%d|high_priest_thekal|%s|%s|%s", state, step, n.total, kind, phase, note)}
+	}
+	f.agent.startQueue = build(st, boss, n)
+	f.agent.pageSize = pageSize
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	return f
+}
+
+func bossRowDone(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) queuedEvent {
+	return st("done", boss, "boss", "pull", fmt.Sprintf("stopped before step %d (until boss): the party stays where it stands", n.until))
+}
+
+// gmInstanceDataPrePull is the boss-row resend's gate: the status is before
+// the pull (phase begin/gather/walk/rest, no pulling or fighting note), no later
+// line of the same page shows the pull, and no live bot of the party is in
+// combat in a frame no older than gmInstanceDataFrameFresh.
+func TestGMInstanceDataPrePullGate(t *testing.T) {
+	now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	status := func(phase, note string) tbm.RunStatus {
+		return tbm.RunStatus{State: tbm.RunRunning, Step: 700, Kind: "boss", Phase: phase, Note: note}
+	}
+	cases := []struct {
+		name  string
+		st    tbm.RunStatus
+		later bool
+		bots  map[string]botPos
+		want  bool
+	}{
+		{"begin", status("begin", "starting"), false, nil, true},
+		{"gather", status("gather", "gathering"), false, nil, true},
+		{"rest", status("rest", "resting"), false, nil, true},
+		{"walk", status("walk", "walking"), false, nil, true},
+		{"pull phase", status("pull", "pulling"), false, nil, false},
+		{"hold phase", status("hold", "holding"), false, nil, false},
+		{"fighting note at begin", status("begin", "fighting"), false, nil, false},
+		{"pulling note at walk", status("walk", "pulling Hakkar"), false, nil, false},
+		{"later pull line", status("begin", "starting"), true, nil, false},
+		{"bot in combat", status("begin", "starting"), false, map[string]botPos{"A": {inCombat: true, at: now.Add(-3 * time.Second)}}, false},
+		{"dead bot flagged combat", status("begin", "starting"), false, map[string]botPos{"A": {inCombat: true, dead: true, at: now.Add(-3 * time.Second)}}, true},
+		{"stale combat frame", status("begin", "starting"), false, map[string]botPos{"A": {inCombat: true, at: now.Add(-time.Minute)}}, true},
+		{"quiet bots", status("begin", "starting"), false, map[string]botPos{"A": {at: now.Add(-3 * time.Second)}}, true},
+	}
+	for _, c := range cases {
+		w := &walk{botAt: c.bots}
+		if got := w.gmInstanceDataPrePull(c.st, c.later, now); got != c.want {
+			t.Errorf("%s: pre-pull %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// A later line of the same event page that shows the pull or fight of the same
+// step blocks the resend, even when the first line looks safe.
+func TestGMInstanceDataLaterPullInPage(t *testing.T) {
+	line := func(step int, phase, note string) events.Event {
+		return events.Event{Kind: events.KindSystem, Text: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/733|high_priest_thekal|boss|%s|%s", step, phase, note)}
+	}
+	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub"}}
+	if w.gmInstanceDataLaterPull([]events.Event{line(700, "begin", "starting"), line(701, "pull", "pulling")}, 700) {
+		t.Fatal("another step's pull must not block")
+	}
+	if !w.gmInstanceDataLaterPull([]events.Event{line(700, "begin", "starting"), line(700, "pull", "pulling")}, 700) {
+		t.Fatal("a later pull line of the same step must block")
+	}
+	if !w.gmInstanceDataLaterPull([]events.Event{line(700, "begin", "fighting")}, 700) {
+		t.Fatal("a later fighting note of the same step must block")
+	}
+	if w.gmInstanceDataLaterPull([]events.Event{line(700, "begin", "starting")}, 700) {
+		t.Fatal("a quiet later line must not block")
+	}
+}
+
+// The step before the boss row reaches an out-of-combat rest: the resend goes
+// out there (well before the boss pull) and the boss row does not resend again.
+func TestGMInstanceDataResendsAtTheRestBeforeTheBossRow(t *testing.T) {
+	f := bossRowFixture(t, 1, func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent {
+		return []queuedEvent{
+			st("running", boss-1, "move", "walk", "walking"),
+			st("running", boss-1, "move", "rest", "resting"),
+			st("running", boss, "boss", "pull", "pulling"),
+			bossRowDone(st, boss, n),
+		}
+	})
+	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 2 {
+		t.Fatalf("%d instancedata lines, want the launch send + one resend at the rest: %q", got, f.agent.gmLines())
+	}
+	// The rest handled the boss row: it does not warn when the row arrives.
+	if hasNote(f.summary(), "no out-of-combat rest before boss row") {
+		t.Fatalf("notes %q: the boss row was handled at the rest, it must not warn", f.summary().Notes)
+	}
+	if got := strings.Join(f.agent.runVerbs, " "); got != "start pause resume" {
+		t.Fatalf("run verbs %q, want one pause and resume", got)
+	}
+}
+
+// No out-of-combat rest came before the boss row: a quiet begin status is the
+// LAST line of its page and the pull arrives on the next page, which no
+// look-ahead can see. The boss row never sends: one WARN, no pause.
+func TestGMInstanceDataBossRowWithoutRestWarnsAndSkips(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		build func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent
+	}{
+		{"begin last in page, pull on the next", func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent {
+			return []queuedEvent{
+				st("running", boss-1, "move", "walk", "walking"),
+				st("running", boss, "boss", "begin", "starting the boss row"),
+				st("running", boss, "boss", "pull", "pulling"),
+				bossRowDone(st, boss, n),
+			}
+		}},
+		{"already pulling", func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent {
+			return []queuedEvent{
+				st("running", boss, "boss", "pull", "pulling"),
+				bossRowDone(st, boss, n),
+			}
+		}},
+		{"fight carried over at begin", func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent {
+			return []queuedEvent{
+				st("running", boss, "boss", "begin", "fighting"),
+				bossRowDone(st, boss, n),
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := bossRowFixture(t, 1, tc.build)
+			if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 1 {
+				t.Fatalf("%d instancedata lines, want only the launch send: %q", got, f.agent.gmLines())
+			}
+			if got := strings.Join(f.agent.runVerbs, " "); got != "start" {
+				t.Fatalf("run verbs %q, want no pause", got)
+			}
+			warns := 0
+			for _, n := range f.summary().Notes {
+				if strings.Contains(n, "gm-instance-data: no out-of-combat rest before boss row") &&
+					strings.Contains(n, "resend skipped") {
+					warns++
+				}
+			}
+			if warns != 1 {
+				t.Fatalf("%d skip WARNs, want exactly 1: %q", warns, f.summary().Notes)
+			}
+		})
+	}
+}
+
+// The rest resend is once per boss row per walk: a second rest of the step
+// before the same boss row sends nothing more.
+func TestGMInstanceDataRestResendOncePerBossRow(t *testing.T) {
+	f := bossRowFixture(t, 1, func(st func(string, int, string, string, string) queuedEvent, boss int, n zgPlaceNums) []queuedEvent {
+		return []queuedEvent{
+			st("running", boss-1, "move", "rest", "resting"),
+			st("running", boss-1, "move", "walk", "walking"),
+			st("running", boss-1, "move", "rest", "resting again"),
+			bossRowDone(st, boss, n),
+		}
+	})
+	if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != 2 {
+		t.Fatalf("%d instancedata lines, want the launch send + one rest resend: %q", got, f.agent.gmLines())
+	}
+}
+
+// instDataLegBossStep is the step of a leg's boss row in the ZG rows.
+func instDataLegBossStep(t *testing.T, leg string) int {
+	t.Helper()
+	rows := zgRows(t)
+	for i, s := range rows.Steps {
+		if s.Kind == planexport.KindBoss && strings.EqualFold(raidwalk.PlaceLegName(rows, i+1), leg) {
+			return i + 1
+		}
+	}
+	t.Fatalf("no %s boss row in the ZG rows", leg)
+	return 0
+}
+
+// The boss row is the FIRST status that names the leg and nothing was sent for
+// it yet (the walk was placed in another leg): the initial send must not fire
+// at the boss row, where the pause lands mid-pull. One skip note, no pause, no
+// line. The lines go out at the next out-of-combat rest of that leg, and not at
+// the walking status in between.
+func TestGMInstanceDataFirstLegStatusAtBossRowSendsNothingUntilARest(t *testing.T) {
+	n := zgPlaceSteps(t)
+	boss := instDataLegBossStep(t, "high_priestess_arlokk")
+	st := func(step int, kind, phase, note string) queuedEvent {
+		return queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|%s|%s|%s", step, n.total, kind, phase, note)}
+	}
+	for _, withRest := range []bool{false, true} {
+		name := "no rest"
+		if withRest {
+			name = "later rest"
+		}
+		t.Run(name, func(t *testing.T) {
+			f, _ := newPlaceFixture(t)
+			f.opts.gmInstanceData = stringList{"high_priestess_arlokk:1 3"}
+			f.agent.startReply = instDataStartReply(t, n)
+			f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+			q := []queuedEvent{
+				st(boss, "boss", "begin", "starting the boss row"),
+				st(boss+1, "move", "walk", "walking"),
+			}
+			if withRest {
+				q = append(q, st(boss+1, "move", "rest", "resting"))
+			}
+			q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_arlokk|move|walk|stopped before step %d (until boss): the party stays where it stands", boss+1, n.total, n.until)})
+			f.agent.startQueue = q
+			if code := f.run(context.Background()); code != exitOK {
+				t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+			}
+			got := countPrefix(f.agent.gmLines(), ".debug instancedata")
+			verbs := strings.Join(f.agent.runVerbs, " ")
+			if withRest {
+				if got != 1 || verbs != "start pause resume" {
+					t.Fatalf("%d lines, run verbs %q, want the rest's one send under one pause", got, verbs)
+				}
+			} else if got != 0 || verbs != "start" {
+				t.Fatalf("%d lines, run verbs %q, want nothing sent and no pause", got, verbs)
+			}
+			warns := 0
+			for _, note := range f.summary().Notes {
+				if strings.Contains(note, "gm-instance-data: no out-of-combat rest before boss row") {
+					warns++
+				}
+			}
+			if warns != 1 {
+				t.Fatalf("%d skip notes, want 1: %q", warns, f.summary().Notes)
+			}
+		})
+	}
+}
+
+// Allowlist: a pending instance-data send fires ONLY at a rest or gather status
+// that passes the pre-pull gate (or as the launch send before `run start`). At
+// any other status, a boss row, a pull, a fight, a walking status, an unknown
+// phase, it is deferred and never fires. The walk is placed in the thekal leg
+// and the flag names the arlokk leg, so no launch send happens and the first
+// arlokk status finds the send pending.
+func TestGMInstanceDataFiresOnlyAtAnOutOfCombatRest(t *testing.T) {
+	n := zgPlaceSteps(t)
+	boss := instDataLegBossStep(t, "high_priestess_arlokk")
+	cases := []struct {
+		name              string
+		step              int
+		kind, phase, note string
+		wantLines         int
+	}{
+		{"walking", boss - 2, "move", "walk", "walking", 0},
+		{"begin", boss - 2, "move", "begin", "starting", 0},
+		{"boss row begin", boss, "boss", "begin", "starting the boss row", 0},
+		{"boss row rest", boss, "boss", "rest", "resting", 1},
+		{"pull", boss - 2, "pull", "pull", "pulling", 0},
+		{"fight", boss - 2, "pull", "pull", "fighting", 0},
+		{"hold", boss - 2, "hold", "hold", "holding", 0},
+		{"task", boss - 2, "move", "task", "task", 0},
+		{"wait", boss - 2, "move", "wait", "waiting", 0},
+		{"unknown phase", boss - 2, "move", "somethingnew", "walking", 0},
+		{"empty phase", boss - 2, "move", "", "walking", 0},
+		{"rest with a fight note", boss - 2, "move", "rest", "fighting", 0},
+		{"rest", boss - 2, "move", "rest", "resting", 1},
+		{"gather", boss - 2, "move", "gather", "gathering", 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f, _ := newPlaceFixture(t)
+			f.opts.gmInstanceData = stringList{"high_priestess_arlokk:1 3"}
+			f.agent.startReply = instDataStartReply(t, n)
+			f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+			f.agent.startQueue = []queuedEvent{
+				{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|high_priestess_arlokk|%s|%s|%s", c.step, n.total, c.kind, c.phase, c.note)},
+				{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_arlokk|move|walk|stopped before step %d (until boss): the party stays where it stands", c.step, n.total, n.until)},
+			}
+			if code := f.run(context.Background()); code != exitOK {
+				t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+			}
+			if got := countPrefix(f.agent.gmLines(), ".debug instancedata"); got != c.wantLines {
+				t.Fatalf("%d lines, want %d: %q", got, c.wantLines, f.agent.gmLines())
+			}
+			wantVerbs := "start"
+			if c.wantLines > 0 {
+				wantVerbs = "start pause resume"
+			}
+			if got := strings.Join(f.agent.runVerbs, " "); got != wantVerbs {
+				t.Fatalf("run verbs %q, want %q", got, wantVerbs)
+			}
+		})
+	}
+}
+
+// Codex's bypass: `q inst` answers 0 on the first reads, so nothing could fire
+// (and nothing was held); when the id arrives at a plain walking status the send
+// must still wait for a rest.
+func TestGMInstanceDataZeroInstThenWalkingWaitsForARest(t *testing.T) {
+	for _, withRest := range []bool{false, true} {
+		name := "no rest"
+		if withRest {
+			name = "rest"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.opts.gmInstanceData = stringList{"onyxia:1 3"}
+			reads := 0
+			f.agent.ttFn = func(cmd string) (ttResult, error) {
+				if cmd == "q inst" {
+					reads++
+					if reads <= 2 {
+						return ttReplyOf(t, map[string]any{"map": 249, "inst": 0}), nil
+					}
+					return ttReplyOf(t, map[string]any{"map": 249, "inst": 77}), nil
+				}
+				return ttResult{}, nil
+			}
+			f.agent.startReply = instDataOnyxiaReply()
+			st := func(state, phase, note string) queuedEvent {
+				return queuedEvent{raw: fmt.Sprintf("TBM:RUN|onyxias_lair|%s|3/29|onyxia|move|%s|%s", state, phase, note)}
+			}
+			q := []queuedEvent{
+				st("running", "walk", "walking"),
+				st("running", "walk", "walking"),
+				st("running", "walk", "walking"),
+			}
+			if withRest {
+				q = append(q, st("running", "rest", "resting"))
+			}
+			q = append(q, st("done", "walk", "stopped before step 29 (until boss): the party stays where it stands"))
+			f.defaultRun("onyxias_lair")
+			f.agent.mu.Lock()
+			f.agent.startQueue = q
+			f.agent.mu.Unlock()
+			if code := f.run(context.Background()); code != exitOK {
+				t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+			}
+			if reads < 3 {
+				t.Fatalf("q inst read %d time(s), want the id read at the walking statuses", reads)
+			}
+			want, verbs := 0, "start"
+			if withRest {
+				want, verbs = 1, "start pause resume"
+			}
+			if n := countPrefix(f.agent.gmLines(), ".debug instancedata"); n != want {
+				t.Fatalf("%d lines, want %d: %q", n, want, f.agent.gmLines())
+			}
+			if got := strings.Join(f.agent.runVerbs, " "); got != verbs {
+				t.Fatalf("run verbs %q, want %q", got, verbs)
+			}
+		})
+	}
+}
+
+// A deferred send must not vanish silently: when the leg has no qualifying
+// rest/gather, the walk says so (a note + WARN line in run.log) and counts it in
+// the summary as gm_instance_data_unsent, whether the walk leaves the leg or the
+// run ends inside it. It never fails the walk, and a leg that did get its rest
+// is not counted.
+func TestGMInstanceDataUnsentIsReported(t *testing.T) {
+	n := zgPlaceSteps(t)
+	boss := instDataLegBossStep(t, "high_priestess_arlokk")
+	st := func(leg string, step int, phase, note string) queuedEvent {
+		return queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|%s|move|%s|%s", step, n.total, leg, phase, note)}
+	}
+	done := queuedEvent{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|high_priestess_arlokk|move|walk|stopped before step %d (until boss): the party stays where it stands", boss, n.total, n.until)}
+	cases := []struct {
+		name  string
+		queue []queuedEvent
+		want  int
+	}{
+		{"leaves the leg", []queuedEvent{
+			st("high_priestess_arlokk", boss-2, "walk", "walking"),
+			st("high_priestess_arlokk", boss-1, "begin", "starting"),
+			st("high_priest_thekal", boss+5, "walk", "walking"),
+			done}, 1},
+		{"run ends in the leg", []queuedEvent{
+			st("high_priestess_arlokk", boss-2, "walk", "walking"),
+			done}, 1},
+		{"leg got its rest", []queuedEvent{
+			st("high_priestess_arlokk", boss-2, "walk", "walking"),
+			st("high_priestess_arlokk", boss-1, "rest", "resting"),
+			st("high_priest_thekal", boss+5, "walk", "walking"),
+			done}, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f, _ := newPlaceFixture(t)
+			f.opts.gmInstanceData = stringList{"high_priestess_arlokk:1 3"}
+			f.agent.startReply = instDataStartReply(t, n)
+			f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+			f.agent.startQueue = c.queue
+			if code := f.run(context.Background()); code != exitOK {
+				t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+			}
+			sum := f.summary()
+			if sum.GMInstanceDataUnsent != c.want {
+				t.Fatalf("gm_instance_data_unsent %d, want %d", sum.GMInstanceDataUnsent, c.want)
+			}
+			const warn = "gm-instance-data: high_priestess_arlokk lines NOT sent (no out-of-combat rest/gather in the leg)"
+			by, _ := os.ReadFile(filepath.Join(f.out, "run.log"))
+			if got := strings.Count(string(by), warn); got != c.want {
+				t.Fatalf("%d WARN lines in run.log, want %d:\n%s", got, c.want, by)
+			}
+			if got := hasNote(sum, warn); got != (c.want > 0) {
+				t.Fatalf("note present %v, want %v: %q", got, c.want > 0, sum.Notes)
+			}
+		})
 	}
 }

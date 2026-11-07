@@ -6,13 +6,11 @@
 // slot's rpc, 3 s apart. A glob bug in that loop cost ~4 h of Hakkar attempts
 // in walk 39. Raid-walk owns it now: one GMInstanceSpec per named leg, sent
 // through the walk's own gm path (OrderedLine allow-listed), in order, 3 s
-// apart, once per instance: a placed start inside the leg fires BEFORE the
+// apart, once per launch: a placed start inside the leg fires BEFORE the
 // run starts, a mid-run reach fires under a run pause.
 package raidwalk
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -61,22 +59,6 @@ func ParseGMInstanceData(v string) (GMInstanceSpec, error) {
 // GMInstanceDataLine is the `.debug instancedata` line of one command.
 func GMInstanceDataLine(cmd [2]int) string {
 	return fmt.Sprintf(".debug instancedata %d %d", cmd[0], cmd[1])
-}
-
-// GMInstanceDataHash is the short hash of the exact command list sent: a
-// changed command list (another hash) is a new firing, not a done one. The
-// out dir's marker carries the list itself; the ledger's mark carries only
-// this hash.
-func GMInstanceDataHash(spec GMInstanceSpec) string {
-	h := sha256.New()
-	for _, cmd := range spec.Cmds {
-		fmt.Fprintf(h, "%s\n", GMInstanceDataLine(cmd))
-	}
-	sum := hex.EncodeToString(h.Sum(nil))
-	if len(sum) > 12 {
-		sum = sum[:12]
-	}
-	return sum
 }
 
 // GMInstanceDataLogLine is the run.log line of one sent command.
@@ -138,6 +120,21 @@ func markName(inst, leg string) string {
 		return '_'
 	}, inst)
 	return fmt.Sprintf("gm-instance-data-%s-%s", safe, leg)
+}
+
+// Clear removes every marker of the out dir, so every leg reads as not done.
+// A missing dir is fine.
+func (m InstanceMarks) Clear() error {
+	files, err := filepath.Glob(filepath.Join(m.dir, "gm-instance-data-*"))
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 // LegDone says the marker already holds every command of the spec.

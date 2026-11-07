@@ -2,9 +2,15 @@
 
 The workflows under `.github/workflows/` run four checks beside the `test` gate.
 
+## Running CI on a branch without a PR
+
+Push a branch to `ci/<name>` to run the full CI on GitHub without a PR.
+Delete the `ci/` branch after the result.
+Push-only: PR gating is unchanged (`test` and `navmesh` run on pushes to `ci/**`, same as on `dev`/`main`).
+
 ## `test.yml` — the PR gate
 
-`test` runs on every push to `dev`/`main` and every non-draft PR whose base is either branch (or a stacked feature
+`test` runs on every push to `dev`/`main`/`ci/**` and every non-draft PR whose base is either branch (or a stacked feature
 branch). It runs `make fmt-check vet test` (gofmt, `go vet`, a no-cgo build, `go test -race ./...`), then a cgo build,
 and `staticcheck ./...` with the pinned release **2026.2.2** (`go install honnef.co/go/tools/cmd/staticcheck@2026.2.2`).
 The repo has no suppressions: a staticcheck finding is fixed in the code or, when a check is a false positive, disabled
@@ -12,7 +18,7 @@ one check at a time in a commented `staticcheck.conf` (never a whole category).
 
 ## `navmesh.yml` — the real map files
 
-Runs on pushes to `dev`/`main`, on non-draft PRs (`opened`, `synchronize`, `reopened`, `ready_for_review`) and by hand.
+Runs on pushes to `dev`/`main`/`ci/**`, on non-draft PRs (`opened`, `synchronize`, `reopened`, `ready_for_review`) and by hand.
 It downloads the server's navmesh files from the **private** `pjerra/tb-server-data` repository, release tag
 `data-2026-10-29`, into `$RUNNER_TEMP/mmaps`, then:
 

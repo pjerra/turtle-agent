@@ -7,7 +7,7 @@
 //
 // A walk with `--gm-instance-data "<leg>:<a> <b>[;<a> <b>...]"` (repeatable,
 // one leg per value) has the commander send each command as
-// `.debug instancedata <a> <b>`, in order, 3 s apart, once per instance: a
+// `.debug instancedata <a> <b>`, in order, 3 s apart, on every launch: a
 // placed start inside the leg fires on the placement's leg BEFORE the run
 // starts, and a walk that reaches the leg mid-run fires under a run pause
 // (the next pull waits). Without --place the entry's instance is read the
@@ -18,10 +18,19 @@
 // the walk instead of losing the pull gate silently. Every sent command is
 // one event line in run.log (`gm-instance-data: <leg>: .debug instancedata
 // <a> <b> -> <reply>`). A marker file per instance and leg in the walk's out
-// dir, plus a mark (with the command list's hash) in the instance-cap ledger
-// (the walk's existing state file, which outlives the attempt's out dir),
-// remembers the sent commands, so a resumed walk in the same instance
-// (--reuse-instance) never refires: resending is harmless but noisy.
+// dir remembers the sent commands, so ONE walk never fires the same leg twice.
+// Every launch sends, whatever the reuse mode: a --reuse-instance restart after
+// a wipe runs in a fresh out dir and resends, because the instance data does
+// NOT survive a wipe (walk 44, raid hk7m attempt -3: no lines on the restart,
+// and Hakkar cast Aspect of Jeklik/Venoxis again). The zulgurub boss scripts
+// overwrite their own slot on Reset (boss_jeklik.cpp:105-106,
+// boss_venoxis.cpp:152-153), see docs/okf/raids/raid-walk-reference.md.
+// Resending into data that did survive is harmless (SetData is idempotent).
+// After `run start` the lines go out ONLY at a rest or gather status that passes
+// the pre-pull gate (gmInstanceDataMayFire): any other status defers a pending
+// send. A walk also resends once per boss row, at that rest of the step before
+// the row (a boss row with no such rest warns and skips): a GM kill does not stop the respawn, and a
+// respawned priest's Reset() overwrites its data (walk 45 hk7m).
 package main
 
 import (
@@ -31,6 +40,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
@@ -72,7 +82,7 @@ func (w *walk) validateGMInstanceData() error {
 // without one (or a door start, which places nothing) it is read the way
 // the cap ledger reads it at entry (the caller's `q inst`), kept once read.
 // "unreadable" means the read errored: the walk WARNs once and fires
-// marker-only (the ledger keys on instances, so it is skipped). A read of
+// marker-only. A read of
 // 0 (the toolkit answered but named no instance) is NOT cached: the next
 // firing retries the read, and the walk WARNs once. A read failure never
 // fails the walk: ttInst would, so the toolkit is asked directly and any
@@ -110,31 +120,32 @@ func (w *walk) gmInstanceDataInst(ctx context.Context) string {
 	return w.gmInstanceDataEntryInst
 }
 
-// gmInstanceDataDone says the leg's lines already went out in this instance.
-// The out dir's marker always counts (keyed by the instance, or by "unplaced"
-// when the id could not be read). The ledger counts ONLY on a --reuse-instance
-// walk: it continues the same instance in a fresh out dir, so the out dir's
-// marker cannot tell it — but a fresh walk always sends, even when an old mark
-// names the same instance id (the core reuses ids across copies). A changed
-// command list is never done: the ledger's mark carries the hash it was sent
-// with, and the marker carries the list itself. An "unreadable" instance is
-// marker-only: the ledger keys on instances.
+// gmInstanceDataDone says the leg's lines already went out in this walk's
+// instance. Only the out dir's marker counts (keyed by the instance, or by
+// "unplaced" when the id could not be read): it is per launch, so every new
+// launch, a --reuse-instance restart included, sends again. A changed command
+// list is never done: the marker carries the list itself.
 func (w *walk) gmInstanceDataDone(inst string, spec raidwalk.GMInstanceSpec) bool {
 	key := inst
 	if key == "unreadable" {
 		key = "unplaced"
 	}
-	if key != "" && raidwalk.NewInstanceMarks(w.outDir).LegDone(key, spec.Leg, spec) {
-		return true
+	return key != "" && raidwalk.NewInstanceMarks(w.outDir).LegDone(key, spec.Leg, spec)
+}
+
+// gmInstanceDataClear forgets what this walk sent, markers and retry counts,
+// so the next status naming a leg with instance-data lines sends them again.
+// A wipe recovery calls it: the revive is in place, the walk keeps its out
+// dir, and the marker would otherwise call the lines done. Without
+// --gm-instance-data it touches nothing.
+func (w *walk) gmInstanceDataClear() {
+	if len(w.gmInstanceData) == 0 {
+		return
 	}
-	if !w.opts.reuseInstance || inst == "" || inst == "unreadable" || w.env.capLedger == "" {
-		return false
+	if err := raidwalk.NewInstanceMarks(w.outDir).Clear(); err != nil {
+		w.note("gm-instance-data: WARN: the markers could not be cleared after the wipe recovery (%v): the lines may not go out again", err)
 	}
-	l, err := raidwalk.LoadCapLedger(w.env.capLedger)
-	if err != nil {
-		return false
-	}
-	return l.GMInstanceDataDone(w.opts.server, inst, spec.Leg, raidwalk.GMInstanceDataHash(spec))
+	w.gmInstanceDataTries = nil
 }
 
 // gmInstanceDataMaxTries bounds the per-command retries: a command the
@@ -156,11 +167,9 @@ const gmInstanceDataMaxTries = 3
 // reply either). The marker always holds the confirmed commands of the spec
 // in spec order (rewritten every pass), so a refire never duplicates and
 // LegDone reads back once every command is confirmed. A refire skips the
-// already-confirmed commands' sends. The ledger's mark goes out only then,
-// so an interrupt or a refusal before the last command resends the rest on
-// the next firing. A changed command list is never done: the ledger's mark
-// carries the hash it was sent with, and the marker carries the list
-// itself.
+// already-confirmed commands' sends. An interrupt or a refusal before the last
+// command resends the rest on the next firing. A changed command list is
+// never done: the marker carries the list itself.
 func (w *walk) gmInstanceDataFire(ctx context.Context, inst string, spec raidwalk.GMInstanceSpec) error {
 	key := inst
 	if key == "unreadable" {
@@ -200,9 +209,6 @@ func (w *walk) gmInstanceDataFire(ctx context.Context, inst string, spec raidwal
 				return stopf(exitRaidWalkFailed, "gm-instance-data: %s: interrupted", spec.Leg)
 			}
 		}
-	}
-	if key != "" && marks.LegDone(key, spec.Leg, spec) {
-		w.noteGMInstanceData(inst, spec.Leg, raidwalk.GMInstanceDataHash(spec))
 	}
 	return nil
 }
@@ -262,22 +268,6 @@ func gmInstanceDataWriteConfirmed(marks raidwalk.InstanceMarks, key, leg string,
 		}
 	}
 	return marks.Write(key, leg, cmds)
-}
-
-// noteGMInstanceData marks the leg's lines sent in the instance-cap ledger,
-// so a resumed walk in the same instance does not resend. Without a ledger
-// (tests that do not exercise the cap) or without a readable instance id
-// the out dir's marker is the memory.
-func (w *walk) noteGMInstanceData(inst, leg, hash string) {
-	if w.env.capLedger == "" || inst == "" || inst == "unreadable" {
-		return
-	}
-	at := w.env.now()
-	if err := w.capUpdate(func(l *raidwalk.CapLedger) {
-		l.NoteGMInstanceData(w.opts.server, inst, leg, at, hash)
-	}); err != nil {
-		w.note("instance cap: the gm-instance-data mark not written: %v", err)
-	}
 }
 
 // gmInstanceDataReplyWait is the server reply's window: up to 2 s after
@@ -428,8 +418,9 @@ func (w *walk) gmInstanceDataStart(ctx context.Context, inst, leg string) error 
 }
 
 // gmInstanceDataSendPending is pollOnce's firing: a spec whose leg this
-// status names fires here, once per instance, when a walk reaches the leg
-// mid-run. A firing here holds the run's next pull until the lines are
+// status names fires here, once per walk, when a walk reaches the leg
+// mid-run, but only at an allowlisted status (gmInstanceDataMayFire: a
+// pre-pull-gated rest or gather); every other status defers it. A firing here holds the run's next pull until the lines are
 // sent: the walk pauses the run first (`.bot run pause`, through the
 // commander's own run verbs) and resumes it after the last line, so the
 // pull gate's lines land before the next pull. Whenever the status was
@@ -443,17 +434,33 @@ func (w *walk) gmInstanceDataStart(ctx context.Context, inst, leg string) error 
 // a firing happened: pollOnce then breaks out of its line loop for this
 // poll (the next poll re-reads from the cursor), so the rest of the old
 // page's lines never process past the adopted statuses of the firing.
-func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus) (bool, error) {
+func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus, later bool) (bool, error) {
 	// Idle fast path: no specs, or a state with no leg to name — never
 	// touch the toolkit. The instance read below is a real `q inst`.
 	if len(w.gmInstanceData) == 0 {
 		return false, nil
 	}
+	w.gmInstanceDataLegLeft(st)
 	if st.State != tbm.RunRunning && st.State != tbm.RunPaused {
 		return false, nil
 	}
 	inst := w.gmInstanceDataInst(ctx)
 	pending := w.gmInstanceDataPending(inst, st)
+	if bossStep, resend := w.gmInstanceDataBossRow(inst, st, later); bossStep > 0 {
+		// Once per boss row per walk, whether the leg's lines were pending (they
+		// go out now), resent at the rest before the row, or skipped (WARN).
+		if w.gmInstanceDataBossSent == nil {
+			w.gmInstanceDataBossSent = map[int]bool{}
+		}
+		w.gmInstanceDataBossSent[bossStep] = true
+		if len(pending) == 0 && resend {
+			pending = w.gmInstanceDataBossResend(inst, st)
+		}
+	}
+	if !w.gmInstanceDataMayFire(st, later) {
+		w.gmInstanceDataDefer(pending)
+		pending = nil
+	}
 	if len(pending) == 0 {
 		return false, nil
 	}
@@ -468,10 +475,204 @@ func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus) 
 	if err := w.gmInstanceDataFire(ctx, inst, spec); err != nil {
 		return true, err
 	}
+	delete(w.gmInstanceDataDeferred, strings.ToLower(spec.Leg))
 	if pauseAttempted {
 		if _, err := w.commander(ctx, commanderReq{Op: "run", Verb: "resume", WaitMS: 10000}); err != nil {
 			return true, stopf(exitRaidWalkFailed, "gm-instance-data: %s: the run resume after the lines failed: %v", spec.Leg, err)
 		}
 	}
 	return true, nil
+}
+
+// gmInstanceDataFrameFresh is how old a bot_view frame may be and still count
+// for the "party is out of combat" check of the boss-row resend.
+const gmInstanceDataFrameFresh = 15 * time.Second
+
+// gmInstanceDataBossRow decides the pre-boss resend for a status. Walk 45
+// hk7m: the launch send went out at 14:27, but a GM `.die` does not stop the
+// respawn, and a respawned priest's Reset() overwrites its DONE data before the
+// run reaches Hakkar's row. So the lines go out again, once per boss row per
+// walk, but ONLY at a confirmed out-of-combat rest/gather status of the step
+// before the boss row (the run is idle there, the pause costs nothing).
+//
+// The boss row's own status is never a place to send: it becomes current about
+// 1 s before the run's FightStep can pull (DungeonRunPolicy.h:5661,
+// Commander.cpp:6886), a pause during a fight drops the focus and holds ~7 s
+// inside the boss (DungeonRunPolicy.h:3542-3567), and a quiet begin status can
+// be followed by the pull on the next event page, which no look-ahead sees. A
+// boss row that becomes current with no pre-boss resend logs one WARN and
+// counts as handled: the walk never pauses at the boss.
+//
+// It returns the boss step to mark as handled (0: nothing to do) and whether
+// the lines go out now.
+func (w *walk) gmInstanceDataBossRow(inst string, st tbm.RunStatus, later bool) (int, bool) {
+	if len(w.gmInstanceData) == 0 || inst == "" {
+		return 0, false
+	}
+	if st.State != tbm.RunRunning && st.State != tbm.RunPaused {
+		return 0, false
+	}
+	legSpec := false
+	for _, spec := range w.gmInstanceData {
+		if raidwalk.LegMatchesStatus(spec.Leg, st.Leg) {
+			legSpec = true
+		}
+	}
+	if !legSpec {
+		return 0, false
+	}
+	if st.Kind == planexport.KindBoss {
+		if _, ok := w.bossRowAt(st.Step); !ok || w.gmInstanceDataBossSent[st.Step] {
+			return 0, false
+		}
+		w.note("gm-instance-data: no out-of-combat rest before boss row %d; resend skipped", st.Step)
+		return st.Step, false
+	}
+	// The step before a boss row, resting or gathering out of combat.
+	next := st.Step + 1
+	if _, ok := w.bossRowAt(next); !ok || w.gmInstanceDataBossSent[next] {
+		return 0, false
+	}
+	if p := strings.ToLower(st.Phase); p != "rest" && p != "gather" {
+		return 0, false
+	}
+	if !w.gmInstanceDataPrePull(st, later, w.env.now()) {
+		return 0, false
+	}
+	return next, true
+}
+
+// gmInstanceDataPrePull says the status is still before the pull: phase begin,
+// gather, walk or rest, no pulling or fighting note, no later line of the same
+// event page showing the pull (later), and no live bot of the party in combat in
+// a recent frame.
+func (w *walk) gmInstanceDataPrePull(st tbm.RunStatus, later bool, now time.Time) bool {
+	if later {
+		return false
+	}
+	switch strings.ToLower(st.Phase) {
+	case "begin", "gather", "walk", "rest":
+	default:
+		return false
+	}
+	if gmInstanceDataPullNote(st.Note) {
+		return false
+	}
+	for _, b := range w.botAt {
+		if b.inCombat && !b.dead && now.Sub(b.at) <= gmInstanceDataFrameFresh {
+			return false
+		}
+	}
+	return true
+}
+
+// gmInstanceDataPullNote says a run note names a pull or a fight.
+func gmInstanceDataPullNote(note string) bool {
+	n := strings.ToLower(note)
+	return strings.Contains(n, "pulling") || strings.Contains(n, "fighting")
+}
+
+// gmInstanceDataLaterPull says a later line of the same event page shows the
+// pull or the fight of the same step (a pull phase or a pulling/fighting note):
+// the status being handled is older than the pull.
+func (w *walk) gmInstanceDataLaterPull(rest []events.Event, step int) bool {
+	for _, e := range rest {
+		line, ok := tbm.Line(e)
+		if !ok {
+			continue
+		}
+		st, ok := raidwalk.ParseRun(line)
+		if !ok || st.Plan != w.plan.Name || st.Step != step {
+			continue
+		}
+		if strings.EqualFold(st.Phase, "pull") || gmInstanceDataPullNote(st.Note) {
+			return true
+		}
+	}
+	return false
+}
+
+// gmInstanceDataBossResend forgets the marker and the retry counts of the
+// status leg's specs (which the launch send marked done) and returns them for
+// the firing, so gmInstanceDataFire sends every line again.
+func (w *walk) gmInstanceDataBossResend(inst string, st tbm.RunStatus) []raidwalk.GMInstanceSpec {
+	key := inst
+	if key == "unreadable" {
+		key = "unplaced"
+	}
+	marks := raidwalk.NewInstanceMarks(w.outDir)
+	var out []raidwalk.GMInstanceSpec
+	for _, spec := range w.gmInstanceData {
+		if !raidwalk.LegMatchesStatus(spec.Leg, st.Leg) {
+			continue
+		}
+		if err := marks.Write(key, spec.Leg, nil); err != nil {
+			w.note("gm-instance-data: WARN: the %s marker could not be cleared for the boss-row resend (%v): the lines may not go out again", spec.Leg, err)
+			continue
+		}
+		for _, cmd := range spec.Cmds {
+			delete(w.gmInstanceDataTries, lineKey(spec.Leg, raidwalk.GMInstanceDataLine(cmd)))
+		}
+		out = append(out, spec)
+	}
+	return out
+}
+
+// gmInstanceDataMayFire is the allowlist for every send after `run start`: the
+// lines may go out ONLY at a rest or gather status that passes the pre-pull gate
+// (no pulling or fighting note, no later pull line in the page, no bot of the
+// party in combat in a frame under gmInstanceDataFrameFresh old). The launch send
+// before `run start` (phases) is the only other place. At any other status a
+// pending send is deferred and never fires: walking, begin, pull, fight, hold,
+// boss rows and phases the walk does not know a pause there could land
+// mid-pull. A deferred send stays pending (its marker is not done) and goes out
+// at the next allowed status of the leg; the wipe recovery's cleared markers wait
+// the same way.
+func (w *walk) gmInstanceDataMayFire(st tbm.RunStatus, later bool) bool {
+	switch strings.ToLower(st.Phase) {
+	case "rest", "gather":
+		return w.gmInstanceDataPrePull(st, later, w.env.now())
+	}
+	return false
+}
+
+// gmInstanceDataDefer remembers the legs whose send the allowlist deferred.
+func (w *walk) gmInstanceDataDefer(pending []raidwalk.GMInstanceSpec) {
+	for _, spec := range pending {
+		if w.gmInstanceDataDeferred == nil {
+			w.gmInstanceDataDeferred = map[string]string{}
+		}
+		w.gmInstanceDataDeferred[strings.ToLower(spec.Leg)] = spec.Leg
+	}
+}
+
+// gmInstanceDataLegLeft reports the deferred legs the walk has just left (the
+// status names another leg): their lines were never sent.
+func (w *walk) gmInstanceDataLegLeft(st tbm.RunStatus) {
+	if len(w.gmInstanceDataDeferred) == 0 || st.Leg == "" {
+		return
+	}
+	for key, leg := range w.gmInstanceDataDeferred {
+		if !raidwalk.LegMatchesStatus(leg, st.Leg) {
+			w.gmInstanceDataReportUnsent(key, leg)
+		}
+	}
+}
+
+// gmInstanceDataFlushUnsent reports the legs still deferred when the walk ends.
+func (w *walk) gmInstanceDataFlushUnsent() {
+	for key, leg := range w.gmInstanceDataDeferred {
+		w.gmInstanceDataReportUnsent(key, leg)
+	}
+}
+
+// gmInstanceDataReportUnsent is the loud end of a deferred send that never got
+// its out-of-combat rest or gather: a summary note, a WARN line in run.log and
+// the summary count. It never fails the walk.
+func (w *walk) gmInstanceDataReportUnsent(key, leg string) {
+	delete(w.gmInstanceDataDeferred, key)
+	w.gmInstanceDataUnsent++
+	msg := fmt.Sprintf("gm-instance-data: %s lines NOT sent (no out-of-combat rest/gather in the leg)", leg)
+	w.note("%s", msg)
+	w.logLine(w.env.now(), msg)
 }

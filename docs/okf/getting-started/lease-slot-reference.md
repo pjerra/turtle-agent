@@ -1,0 +1,119 @@
+---
+type: Reference
+title: lease, slot setup, teardown
+description: Every lease, slot setup and teardown flag, printed line, and refusal, with defaults.
+resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/lease_cmd.go
+tags: [getting-started, reference, lease, slots, teardown]
+sources:
+  - id: lease
+    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/lease_cmd.go
+  - id: slot-setup
+    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/slot_setup_cmd.go
+  - id: teardown
+    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/teardown_cmd.go
+  - id: cli-args
+    resource: https://github.com/pjerra/turtle-agent/blob/dev/cmd/turtle-agent/cli_args.go
+generated:
+  by: muse-spark-1.3/omp
+  at: 2026-11-05T21:25:00+01:00
+status: draft
+---
+
+# lease, slot setup, teardown
+
+## lease acquire
+
+```text
+turtle-agent lease acquire <server> (--slot ID | --any) --holder NAME [--ttl MIN] [--slots FILE]
+```
+
+- `--slot ID`: slot id to take. Example: `--slot 1`. Pass this or `--any`.
+- `--any`: take the first free slot of the server. Example: `--any`.
+- `--holder NAME`: lease holder name (required). 1-64 letters, digits, `.` `_` `-`. Example: `--holder <name>`.
+- `--ttl MIN`: lease length in minutes, 1-720. Default `180`. Example: `--ttl 60`.
+- `--slots FILE`: slot table file. Default: the default slot table path. Example: `--slots <slots-file>`.
+
+Pass `--slot <slot>` or `--any` (never the reserved slot). `acquire` refuses a port that already has a listener.
+
+Prints `leased <server>/<slot> to <holder> until <time>: account <account>, character <character>, port <port>, lease <id>`, plus `(already yours: expiry renewed)` when you re-acquire your own slot, or a `took over a stale lease ...` line first when the old lease was stale. Refusals exit 15: `lease: <server>/<slot> is reserved (...)`, `is held by <holder> since ... until ...`, or a busy port line naming the listener. Usage errors exit 2.
+
+## lease renew
+
+```text
+turtle-agent lease renew <server> <slot> --holder NAME --lease-id ID [--ttl MIN] [--slots FILE]
+```
+
+- `--holder NAME`: required, same shape as above.
+- `--lease-id ID`: lease id from acquire (required; the holder alone is not enough). Example: `--lease-id <id>`.
+- `--ttl MIN`: new length in minutes, 1-720. Default `180`.
+- `--slots FILE`: slot table file. Default: the default slot table path.
+
+Prints `renewed <server>/<slot> for <holder> until <time>`. Refusals exit 15 (`is not leased by ... (free|held by ...|lease id mismatch|stale)`). Forgetting `--lease-id` exits 2.
+
+## lease release
+
+```text
+turtle-agent lease release <server> <slot> --holder NAME [--lease-id ID] [--force] [--slots FILE]
+```
+
+- `--holder NAME`: required, same shape as above.
+- `--lease-id ID`: required unless `--force` is passed. Example: `--lease-id <id>`.
+- `--force`: release another holder's or a live lease. Default: off. Example: `--force`.
+- `--slots FILE`: slot table file. Default: the default slot table path.
+
+Prints `released <server>/<slot> (was <holder>)`, plus ` (forced)` with `--force`. Refusals exit 15 (`only the holder releases it`, `lease id mismatch`, `its agent ... is still running: run turtle-agent teardown <dir> first`).
+
+## lease list
+
+```text
+turtle-agent lease list [<server>] [--json] [--slots FILE]
+```
+
+- `[<server>]`: optional server filter. Example: `lease list <server>`.
+- `--json`: print the slot states as JSON (account names redacted). Default: off.
+- `--slots FILE`: slot table file. Default: the default slot table path.
+
+Text form prints one line per slot: server, slot, character, port, and state (`free`, `reserved: <reason>`, `stale: held by ...`, `held by ... since ..., expires ...`, each with agent and dir detail). A lease names its holder process (`holder_pid`, `holder_host`, `holder_ns`, `holder_start`) when a walk took it: a lease taken on this host, in this pid namespace, whose holder is gone — the pid is dead or was reused — reads `stale` at once, whatever its expiry says, and the next acquire takes it over. A lease of another host or pid namespace, and one written before `holder_ns` existed, is freed only by its expiry; an unreadable `/proc/<pid>/stat` (hidepid, another user's process) is never called dead.
+
+## lease reap
+
+```text
+turtle-agent lease reap [--dry-run] [--slots FILE]
+```
+
+- `--dry-run`: list the leases a reap would remove, remove nothing. Default: off.
+- `--slots FILE`: slot table file (its `leases/` dir is the ledger). Default: the default slot table path.
+
+Removes the leases whose holder ran on this host and in this pid namespace and is gone, across every server in the ledger, and prints `reaped <server>/<slot> held by <holder> (holder pid <pid> gone or reused, lease expired <time>)` per line (`would reap ...` in a dry run). A lease of another host or pid namespace, a lease written before the holder fields (or `holder_ns`) existed, a holder whose `/proc/<pid>/stat` cannot be read (hidepid, another user), and a ledger this platform cannot read are left for their expiry. `raid-walk` takes a 15-minute lease and renews it every 5 minutes while it runs; `raid-autopilot` runs the reap at start.
+
+## slot setup
+
+```text
+turtle-agent slot setup <server> <slot> --holder NAME [--dir DIR] [--binary PATH] [--dungeons-dir DIR] [--mmaps-dir DIR] [--dungeons-from DIR] [--character NAME] [--slots FILE]
+```
+
+- `--holder NAME`: required, same shape as above.
+- `--dir DIR`: client dir. Default: `ta-<holder>` under the home folder. Must be new or empty; setup never overwrites and never writes through a symlink. Example: `--dir <walk-dir>`.
+- `--binary PATH`: turtle-agent binary to install. Default: the running binary. Example: `--binary bin/turtle-agent`.
+- `--dungeons-from DIR`: folder of `*.json` plans copied into the slot's dungeons dir (plain files only; a symlink is refused). Default: none. Example: `--dungeons-from <plans-dir>`.
+- `--character NAME`: character to play. Default: the slot's. Must be one of the slot's characters. Example: `--character <character>`.
+- `--slots FILE`: slot table file. Default: the default slot table path.
+
+`slot setup` also takes `--mmaps-dir DIR` and `--dungeons-from DIR` (not in the usage line above). `DIR` must exist and be a directory (a leading `~` is the home folder), else setup refuses with exit 15. Workers pass the checked-out `dungeons/` folder so `follow_start`/`dungeon_run` find their plans.
+
+## teardown
+
+```text
+turtle-agent teardown [--keep-lease] [--release-anyway] [--gm off|on|keep] [--dry-run] [--json] [--slots FILE] <dir>
+```
+
+- `--keep-lease`: keep the slot lease. Default: off (released).
+- `--release-anyway`: release the lease even when game-side steps failed. Default: off.
+- `--gm MODE`: GM mode at the end: `off`, `on` or `keep`. Default `off`. Example: `--gm on`.
+- `--dry-run`: ask the agent for a plan, change nothing. Default: off.
+- `--json`: print the result as JSON. Default: off (text table plus `teardown: <ok> ok, <skipped> skipped, <failed> failed`).
+- `--slots FILE`: slot table file. Default: the dir's own recorded path.
+
+Runs game-side steps over RPC (run, binding, hires, GM, logout), then agent exit, port, other-process, file and lease steps. A dead agent leaves an `agent pid ... is gone without a clean exit` failure. Exit `0` when every step passed or was skipped; exit `14` when any failed. With game-side failures the lease is kept unless `--release-anyway` is passed.
+
+Runs the RPC `teardown` first (snapshot, the player follow, `agent_run`, brain, `run stop`, unbind, `.bot remove` of listed hires, leave, gone, `.gm off`, logout), then ends the agent by its pid file, closes the port, deletes only the secrets and releases the lease. Exit 14 on any failed step, 15 on a refused lease.

@@ -66,6 +66,9 @@ type EditConfig struct {
 	MaxPerMinute int
 	MaxPerDay    int
 	MinFree      uint64
+	// FreeBytes reads the store's free space (nil = the store's own fstatfs reading); tests inject a fixed value, because the real
+	// reading moves under a busy machine.
+	FreeBytes func() (uint64, error)
 }
 
 // The default abuse bounds.
@@ -108,6 +111,9 @@ func NewEditor(p *Poller, cfg EditConfig) (*Editor, error) {
 	}
 	if cfg.MinFree == 0 {
 		cfg.MinFree = defaultMinFree
+	}
+	if cfg.FreeBytes == nil {
+		cfg.FreeBytes = cfg.Store.FreeBytes
 	}
 	src, err := routeedit.OpenSource(cfg.Source)
 	if err != nil {
@@ -589,7 +595,7 @@ func (e *Editor) diskFloor(meta *routeedit.Meta, planJSON []byte, diff string) (
 		return http.StatusInternalServerError, err.Error()
 	}
 	need := uint64(len(planJSON)+len(diff)+len(mb)) + 3*fileSlack
-	free, err := e.cfg.Store.FreeBytes()
+	free, err := e.cfg.FreeBytes()
 	if err != nil {
 		return http.StatusInsufficientStorage, "the free space of the edits folder cannot be told: " + err.Error()
 	}

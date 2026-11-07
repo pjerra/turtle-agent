@@ -41,6 +41,13 @@ type gossipParams struct {
 	WaitMS int         `json:"wait_ms,omitempty"`
 }
 
+// taxiParams is a flight master and the route's taxi nodes, source first.
+type taxiParams struct {
+	GUID   packet.GUID `json:"guid"`
+	Nodes  []uint32    `json:"nodes"`
+	WaitMS int         `json:"wait_ms,omitempty"`
+}
+
 // gossipResult is the log cursor before the request and, with wait_ms, the first gossip
 // or gossip_complete event after it (nil when none arrived in time).
 type gossipResult struct {
@@ -103,6 +110,14 @@ func registerSocialMethods(srv *rpc.Server, cur func() *session.Session) {
 		res.Event = nextGossip(ctx, log, res.Since, p.WaitMS)
 		return res, nil
 	}))
+	srv.Register("taxi", rpc.Typed(func(ctx context.Context, p taxiParams) (gossipResult, error) {
+		res := gossipResult{Since: log.Last()}
+		if err := cur().ActivateTaxi(ctx, p.GUID, p.Nodes); err != nil {
+			return res, rpcErr(err)
+		}
+		res.Event = firstEvent(ctx, log, res.Since, taxiKinds, p.WaitMS)
+		return res, nil
+	}))
 	srv.Register("gossip_select", rpc.Typed(func(ctx context.Context, p gossipParams) (gossipResult, error) {
 		res := gossipResult{Since: log.Last()}
 		if err := cur().GossipSelect(ctx, p.GUID, p.Option, p.Code); err != nil {
@@ -117,6 +132,9 @@ func registerSocialMethods(srv *rpc.Server, cur func() *session.Session) {
 // option opens (a vendor or trainer list, or a quest panel).
 var gossipKinds = []string{events.KindGossip, events.KindGossipComplete, events.KindVendorList, events.KindTrainerList,
 	events.KindQuestList, events.KindQuestDetails, events.KindQuestRequestItems, events.KindQuestOfferReward}
+
+// taxiKinds is the flight master's answer to a taxi call; a refusal is only this event.
+var taxiKinds = []string{events.KindTaxiReply}
 
 // nextGossip waits up to waitMS for the first answer event after since; waitMS 0 does not
 // look at all.

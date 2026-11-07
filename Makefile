@@ -45,6 +45,18 @@ build:
 opcodes:
 	$(GO) run ./tools/opcodegen -in $(CORE)/src/game/Protocol/Opcodes_1_12_1.h -out internal/opcode/opcodes_gen.go
 
+# The delivered Zul'Gurub migration must be an export of THIS head, not of an older plan or cutter: export the
+# shipped plan with the live flags and diff it against the delivered file. Run it at the delivered commit: the
+# plan row's source column names the exporting commit.
+ZG_SQL ?= $(HOME)/TortoiseBots-audit/tests/zg-w38/20261105190000_world.sql
+MMAPS ?= $(HOME)/turtle-agent-mmaps
+zg-export:
+	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	$(GO) run ./cmd/turtle-agent plan-export --dir dungeons --mmaps "$(MMAPS)" --approach-hops --floor-aware --gm-cross-direct \
+		--stamp 20261105190000 --out "$$tmp" zul_gurub >/dev/null && \
+	diff -u "$(ZG_SQL)" "$$tmp/20261105190000_world.sql" && \
+	echo "zg-export: $(ZG_SQL) is this head's export"
+
 spellnames:
 	$(GO) run ./tools/spellnamegen -in $(CORE)/sql/base/tw_world_spell_template.sql -updates $(CORE)/sql/database_updates/world -out internal/spells/names.tsv.gz -mounts internal/spells/mounts.txt.gz -meta internal/spells/meta.tsv.gz -dbc $(DBC)
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/game"
@@ -16,6 +18,7 @@ func (s *Session) registerSocial() {
 	s.handlers[opcode.SMSGChannelNotify] = s.onChannelNotify
 	s.handlers[opcode.SMSGGossipMessage] = s.onGossipMessage
 	s.handlers[opcode.SMSGGossipComplete] = s.onGossipComplete
+	s.handlers[opcode.SMSGActivatetaxireply] = s.onActivateTaxiReply
 }
 
 // JoinChannel joins a chat channel (CMSG_JOIN_CHANNEL); the server answers with
@@ -133,5 +136,70 @@ func (s *Session) onGossipComplete([]byte) error {
 	}
 	s.gossip = nil
 	s.emit(events.Event{Kind: events.KindGossipComplete, SourceGUID: npc})
+	return nil
+}
+
+// taxiWait is how long a taxi request waits for the flight master's answer before the
+// session takes another one: some refusals get no reply at all (the flight master out of
+// reach, an unknown node, disabled movement), so the timeout is what frees those.
+const taxiWait = 10 * time.Second
+
+// maxTaxiNodes caps a taxi route: real routes are a handful of nodes, and 64 keep the
+// body far below the packet limit.
+const maxTaxiNodes = 64
+
+// ActivateTaxi asks the flight master npc for a flight along nodes (source first): two nodes
+// send CMSG_ACTIVATETAXI, more send CMSG_ACTIVATETAXIEXPRESS, as the client does. The
+// server's answer comes back as a taxi_reply event. A reply names no request, so one call
+// waits for its answer before the next goes out.
+func (s *Session) ActivateTaxi(ctx context.Context, npc packet.GUID, nodes []uint32) error {
+	if npc == 0 {
+		return errors.New("taxi: no flight master guid")
+	}
+	if len(nodes) < 2 {
+		return errors.New("taxi: need at least a source and a destination node")
+	}
+	if len(nodes) > maxTaxiNodes {
+		return fmt.Errorf("taxi: too many nodes (max %d)", maxTaxiNodes)
+	}
+	var op uint16
+	var body []byte
+	if len(nodes) == 2 {
+		op, body = opcode.CMSGActivatetaxi, game.BuildActivateTaxi(npc, nodes[0], nodes[1])
+	} else {
+		op, body = opcode.CMSGActivatetaxiexpress, game.BuildActivateTaxiExpress(npc, nodes)
+	}
+	_, err := s.do(ctx, func() (any, error) {
+		if err := s.inWorld(); err != nil {
+			return nil, err
+		}
+		now := s.now()
+		if now.Before(s.taxiPendingUntil) {
+			return nil, fmt.Errorf("taxi: previous request still unanswered (retry after %d s)",
+				int(math.Ceil(s.taxiPendingUntil.Sub(now).Seconds())))
+		}
+		// The window starts only once the request is out: a failed write leaves it
+		// untouched, so the next call is not refused for a flight never asked for.
+		if err := s.conn.WritePacket(op, body); err != nil {
+			return nil, err
+		}
+		s.taxiPendingUntil = now.Add(taxiWait)
+		return nil, nil
+	})
+	return err
+}
+
+// onActivateTaxiReply logs the flight master's answer: 0 means the flight was accepted
+// and shows up as movement instead; anything else names the refusal. The reply clears the
+// pending request, so the session takes the next one.
+func (s *Session) onActivateTaxiReply(body []byte) error {
+	t, err := game.ParseActivateTaxiReply(body)
+	if err != nil {
+		return err
+	}
+	s.taxiPendingUntil = time.Time{}
+	s.emit(events.Event{Kind: events.KindTaxiReply,
+		Text: "taxi reply: " + game.TaxiReplyName(t.Result),
+		Data: map[string]any{"result": t.Result, "reason": game.TaxiReplyName(t.Result)}})
 	return nil
 }

@@ -170,3 +170,49 @@ func TestGossipMethods(t *testing.T) {
 	}
 	r.expect(opcode.CMSGGossipHello)
 }
+
+// Without wait_ms the result is only the cursor; with it, the flight master's answer
+// rides along, and a 1-node route is a game error with nothing sent.
+func TestTaxiMethod(t *testing.T) {
+	r := newRig(t)
+	const master = "0xF1300008C1000042"
+	ev := resultEvent(t, r, "taxi", `{"guid":"`+master+`","nodes":[2,6],"wait_ms":2000}`, func() {
+		r.expectBody(opcode.CMSGActivatetaxi, game.BuildActivateTaxi(0xF1300008C1000042, 2, 6))
+		r.srv.Send(opcode.SMSGActivatetaxireply, packet.NewWriter().U32(3).Bytes())
+	})
+	if d := ev["data"].(map[string]any); ev["kind"] != "taxi_reply" || d["reason"] != "not_enough_money" || d["result"] != float64(3) {
+		t.Fatalf("%v", ev)
+	}
+	out := r.call("taxi", `{"guid":"`+master+`","nodes":[2,5,6]}`)
+	if res := out["result"].(map[string]any); out["error"] != nil || res["event"] != nil || res["since"] == nil {
+		t.Fatalf("%v", out)
+	}
+	r.expectBody(opcode.CMSGActivatetaxiexpress, game.BuildActivateTaxiExpress(0xF1300008C1000042, []uint32{2, 5, 6}))
+	if out := r.call("taxi", `{"guid":"`+master+`","nodes":[2]}`); errCode(out) != rpc.CodeGame {
+		t.Fatalf("single node: %v", out)
+	}
+}
+
+// The wait_ms path reads only replies logged after since: a stale reply from before the
+// call does not match.
+func TestTaxiMethodSkipsStaleReply(t *testing.T) {
+	r := newRig(t)
+	const master = "0xF1300008C1000042"
+	r.srv.Send(opcode.SMSGActivatetaxireply, packet.NewWriter().U32(0).Bytes())
+	// The fake server's packets reach the log on the session goroutine, a moment after
+	// they were sent: wait for the stale reply before the call takes its since.
+	deadline := time.Now().Add(3 * time.Second)
+	for r.s.Log().Last() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("stale reply never logged")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	ev := resultEvent(t, r, "taxi", `{"guid":"`+master+`","nodes":[2,6],"wait_ms":2000}`, func() {
+		r.expectBody(opcode.CMSGActivatetaxi, game.BuildActivateTaxi(0xF1300008C1000042, 2, 6))
+		r.srv.Send(opcode.SMSGActivatetaxireply, packet.NewWriter().U32(3).Bytes())
+	})
+	if d := ev["data"].(map[string]any); ev["kind"] != "taxi_reply" || d["reason"] != "not_enough_money" || d["result"] != float64(3) {
+		t.Fatalf("%v", ev)
+	}
+}

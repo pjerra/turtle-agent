@@ -41,17 +41,24 @@ lease)
   exit 0
   ;;
 raid-walk)
-  printf '%s\n' "$*" >> "$AUTO_ARGS_LOG"
-  out=""
-  while [ $# -gt 0 ]; do
-    if [ "$1" = "--out" ]; then out=$2; shift 2; else shift; fi
-  done
+  out=""; prev=""
+  for a in "$@"; do if [ "$prev" = "--out" ]; then out=$a; fi; prev=$a; done
+  base=$(basename "$out")
+  # A gated attempt waits for its release file before it stages or records anything: the test releases each attempt
+  # only after the previous attempt's finish is observed, so the supervisor can never run ahead of the driver's
+  # launch-finish pairing (a whole launch-finish cycle fits between two level polls under load, and every later
+  # iteration then observes the wrong attempt). Attempts without a .gate marker run at once, as before.
+  if [ -f "$AUTO_SPEC_DIR/$base.gate" ]; then while [ ! -f "$AUTO_SPEC_DIR/$base.go" ]; do sleep 0.02; done; fi
+  # The launch line is logged only after the attempt is fully staged: a driver that saw the launch knows the slot
+  # dir, slot.json, walk.pid, run.log and summary.json are on disk, so a STOP (or YIELD, or a removed targets line)
+  # on the next tick always finds a slot the teardown can verify. Logging first left a window where the stop killed
+  # the walk between mkdir and slot.json and every teardown failed the lease check (escalated, never stopped).
   mkdir -p "$out/slot"
   printf '{"server":"srv","slot":"1","holder":"zg-a","slots_path":"%s"}\n' "$AUTO_SLOTS" > "$out/slot/slot.json"
   printf '%s\n' "$$" > "$out/walk.pid"
-  base=$(basename "$out")
   if [ -f "$AUTO_SPEC_DIR/$base.runlog" ]; then cp "$AUTO_SPEC_DIR/$base.runlog" "$out/run.log"; fi
   if [ -f "$AUTO_SPEC_DIR/$base.summary" ]; then cp "$AUTO_SPEC_DIR/$base.summary" "$out/summary.json"; fi
+  printf '%s\n' "$*" >> "$AUTO_ARGS_LOG"
   if [ -f "$AUTO_SPEC_DIR/$base.sleep" ]; then sleep "$(cat "$AUTO_SPEC_DIR/$base.sleep")"; fi
   rm -f "$out/walk.pid"
   code=0
@@ -153,6 +160,20 @@ func (f *autoFixture) attempt(base string, exit, steps int, endReason string) {
 	if steps > 0 {
 		f.writeSpec(base+".runlog", fmt.Sprintf("19:46:05.696 TBM:RUN|zul_gurub|running|%d/761|jeklik|boss|begin|fighting\n", steps))
 	}
+}
+
+// gateAttempt holds one attempt at the stub's gate until releaseAttempt runs: the supervisor's launch of it blocks
+// before recording or running anything, so the driver pairs every launch with its own finish whatever the tick
+// timing is. Attempts without a gate run at once, as before.
+func (f *autoFixture) gateAttempt(base string) {
+	f.t.Helper()
+	f.writeSpec(base+".gate", "")
+}
+
+// releaseAttempt lets one gated attempt run.
+func (f *autoFixture) releaseAttempt(base string) {
+	f.t.Helper()
+	f.writeSpec(base+".go", "1")
 }
 
 // running plans an attempt that stays up until the test stops it.
@@ -324,6 +345,25 @@ func finishAttempt(t *testing.T, s *autoSupervisor) {
 		st.mu.Lock()
 		defer st.mu.Unlock()
 		return st.run == nil || st.escalated
+	})
+	clearWait(s.states[0])
+}
+
+// finishAttemptN advances the supervisor until attempt n's own finish is applied, then skips the restart backoff.
+// The level conditions other tests use (another launch's argv line, st.run == nil) can skip a whole launch-finish
+// cycle under load: a finish goroutine delayed by a slow tick lets the next attempt launch and finish before the
+// driver sees the quiescent point, so every later iteration observes the wrong attempt (attempt 8's exit-2 finish
+// blamed on attempt 7 here). The supervisor numbers every launch (st.seq, st.last.seq), so waiting for attempt n's
+// own sequence edge keeps the 1:1 launch-finish pairing whatever the tick timing is. Only st.last.seq is used (not
+// st.run == nil as well): with the test's gated attempts the next attempt's stub cannot exit until it is released,
+// so nothing overwrites the finished run before the driver sees it.
+func finishAttemptN(t *testing.T, s *autoSupervisor, n int) {
+	t.Helper()
+	tickUntil(t, s, fmt.Sprintf("attempt %d to finish", n), func() bool {
+		st := s.states[0]
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		return (st.last != nil && st.last.seq == n) || st.escalated
 	})
 	clearWait(s.states[0])
 }
@@ -599,6 +639,46 @@ func TestAutoRestartFromABossRowStepsBack(t *testing.T) {
 	}
 }
 
+// Walk 46 Jin'do: a wipe at the boss resumed one row before the boss row, the last approach point, which stands inside
+// the boss's reach, so the placement pulled him again and again. When the reached step is the goal's boss row or one of
+// its approach rows, the restart starts at the goal's own --from. The fixture's Arlokk boss row is step 397 and its
+// approach row 396; a trash or path row still resumes where it was reached.
+func TestAutoRestartFromTheBossResumesAtTheGoalStart(t *testing.T) {
+	for _, reached := range []int{397, 396} {
+		t.Run(fmt.Sprint(reached), func(t *testing.T) {
+			f := newAutoFixture(t)
+			f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from step 390")
+			f.attempt("a-1", 18, reached, "paused: 15 dead: 21")
+			f.attempt("a-2", 2, 0, "bad --sql")
+			s := f.supervisor()
+			tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+			finishAttempt(t, s)
+			tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+			args := f.args()
+			if !strings.Contains(args[1], "--from step 390 --place --reuse-instance") {
+				t.Fatalf("the restart did not start at the goal's step 390: %s", args[1])
+			}
+			if !strings.Contains(f.events(), "resuming from the goal's start") {
+				t.Fatalf("no resume event:\n%s", f.events())
+			}
+		})
+	}
+}
+
+func TestAutoRestartFromATrashStepKeepsTheReachedStep(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from step 390")
+	f.attempt("a-1", 18, 393, "paused: 15 dead: 21")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	if args := f.args(); !strings.Contains(args[1], "--from step 393 --place --reuse-instance") {
+		t.Fatalf("the restart left the reached step 393: %s", args[1])
+	}
+}
+
 // H1: with no step reached, a restart starts at the target's own --from, still in the same instance.
 func TestAutoRestartFromTheTargetFrom(t *testing.T) {
 	f := newAutoFixture(t)
@@ -666,19 +746,71 @@ func TestAutoExitTwoEscalates(t *testing.T) {
 	}
 }
 
-// Exit 29 is the placement failing every try in the same instance: the id stops with an ESCALATE line and no
-// fresh-instance retry (walk 37 burned four fresh instances an hour this way).
-func TestAutoExit29EscalatesWithoutRetry(t *testing.T) {
+// Exit 29 on a same-instance (--reuse-instance) placement: the autopilot retries ONCE in a fresh instance (no
+// --reuse-instance, same --from) and logs it; a second exit 29 stops the id with an ESCALATE line (walk 40: 45 ids
+// stopped on the first one and a person re-added each).
+func TestAutoExit29RetriesOnceInAFreshInstance(t *testing.T) {
 	f := newAutoFixture(t)
-	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --from step 582")
-	f.attempt("a-1", 29, 0, "place: 4 tries in the same instance, start step 582")
-	f.run()
-	if args := f.args(); len(args) != 1 {
-		t.Fatalf("exit 29 was retried into a fresh instance: %d launches", len(args))
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 5, 51, "server closed the connection")
+	f.attempt("a-2", 29, 0, "place: 4 tries in the same instance, start step 51")
+	f.attempt("a-3", 29, 0, "place: 4 tries in the same instance, start step 51")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the reuse re-place", func() bool { return len(f.args()) >= 2 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the fresh-instance retry", func() bool { return len(f.args()) >= 3 })
+	args := f.args()
+	if !strings.Contains(args[1], "--from step 51 --place --reuse-instance") {
+		t.Fatalf("the re-place did not reuse the instance: %s", args[1])
 	}
-	if !strings.Contains(f.events(), "ESCALATE stop a 1") || !strings.Contains(f.events(), "no fresh-instance retry") {
-		t.Fatalf("no ESCALATE stop for exit 29:\n%s", f.events())
+	if !strings.Contains(args[2], "--from step 51 --place") || strings.Contains(args[2], "--reuse-instance") {
+		t.Fatalf("the retry after exit 29 was not a fresh-instance placement: %s", args[2])
 	}
+	if !strings.Contains(f.events(), "fresh-instance retry after exit 29") {
+		t.Fatalf("the retry is not logged:\n%s", f.events())
+	}
+	if done, escalated := runState(s.states[0]); done || escalated {
+		t.Fatalf("one exit 29 stopped the id: done=%v escalated=%v", done, escalated)
+	}
+	// The fresh attempt fails with exit 29 too: only now the id stops.
+	finishAttempt(t, s)
+	if done, escalated := runState(s.states[0]); done || !escalated {
+		t.Fatalf("second exit 29: done=%v escalated=%v, want escalated only:\n%s", done, escalated, f.events())
+	}
+	if args := f.args(); len(args) != 3 {
+		t.Fatalf("the id was retried again after the fresh attempt failed: %d launches", len(args))
+	}
+	if !strings.Contains(f.events(), "ESCALATE stop a 1") || !strings.Contains(f.events(), "exit 29") {
+		t.Fatalf("no ESCALATE stop for the second exit 29:\n%s", f.events())
+	}
+}
+
+// The exit-29 fresh-instance retry keeps the target's --gm-instance-data: the
+// new copy needs the lines, so the relaunch args carry the flag through (as
+// does the same-instance re-place before it).
+func TestAutoExit29RetryCarriesGMInstanceData(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --gm-instance-data hakkar:1 3;6 3;0 0")
+	f.attempt("a-1", 5, 51, "server closed the connection")
+	f.attempt("a-2", 29, 0, "place: 4 tries in the same instance, start step 51")
+	f.attempt("a-3", 29, 0, "place: 4 tries in the same instance, start step 51")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the reuse re-place", func() bool { return len(f.args()) >= 2 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the fresh-instance retry", func() bool { return len(f.args()) >= 3 })
+	args := f.args()
+	const want = "--gm-instance-data=hakkar:1 3;6 3;0 0"
+	if !strings.Contains(args[1], want) {
+		t.Fatalf("the reuse re-place dropped the flag: %s", args[1])
+	}
+	if !strings.Contains(args[2], want) {
+		t.Fatalf("the fresh-instance retry dropped the flag: %s", args[2])
+	}
+	finishAttempt(t, s)
 }
 
 func (f *autoFixture) statusFile() string {
@@ -1074,6 +1206,282 @@ func TestAutoInvalidTargetsKeepTheOldOnes(t *testing.T) {
 	}
 }
 
+// Walk 40: a finished id kept its slot, so a new line naming that slot made the whole file invalid and every edit was
+// ignored. A done id with no run and no lease holds nothing: the new id starts on its slot.
+func TestAutoNewIDTakesADoneIDsSlot(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 0, 417, "boss 14515 down")
+	f.running("b-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a done", func() bool {
+		done, _ := runState(s.states[0])
+		return done
+	})
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	tickUntil(t, s, "b launched on a's slot", func() bool { return len(f.args()) >= 2 })
+	if strings.Contains(f.events(), "invalid targets") {
+		t.Fatalf("a done id's slot made the file invalid:\n%s", f.events())
+	}
+	if f.stateByID(s, "b") == nil {
+		t.Fatalf("b is not supervised:\n%s", f.events())
+	}
+}
+
+// An escalated id with no live run holds no slot either: the next goal naming that slot starts there, instead of the
+// person reusing the escalated id with a changed line to free it.
+func TestAutoNewIDTakesAnEscalatedIDsSlot(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 5, 51, "server closed the connection")
+	f.attempt("a-2", 29, 0, "place: 4 tries in the same instance, start step 51")
+	f.attempt("a-3", 29, 0, "place: 4 tries in the same instance, start step 51")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the reuse re-place", func() bool { return len(f.args()) >= 2 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the fresh-instance retry", func() bool { return len(f.args()) >= 3 })
+	finishAttempt(t, s)
+	done, escalated := runState(s.states[0])
+	if done || !escalated {
+		t.Fatalf("the second exit 29 did not escalate a: done=%v escalated=%v:\n%s", done, escalated, f.events())
+	}
+	s.states[0].mu.Lock()
+	live := s.states[0].run != nil
+	s.states[0].mu.Unlock()
+	if live {
+		t.Fatalf("the escalated id kept a run:\n%s", f.events())
+	}
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	tickUntil(t, s, "b launched on a's slot", func() bool { return len(f.args()) >= 4 })
+	if strings.Contains(f.events(), "invalid targets") {
+		t.Fatalf("an escalated id's slot made the file invalid:\n%s", f.events())
+	}
+	if f.stateByID(s, "b") == nil {
+		t.Fatalf("b is not supervised:\n%s", f.events())
+	}
+	// The start reads its checkpoint the same way: a's escalation holds no slot there either.
+	s.saveState()
+	s2 := f.supervisor()
+	if f.stateByID(s2, "a") == nil || f.stateByID(s2, "b") == nil {
+		t.Fatalf("the restart lost a or b:\n%s", f.events())
+	}
+}
+
+// An escalated id whose run is still there (a teardown that never verified) holds its slot: the new line is skipped
+// with a warning naming it, and the escalated id is left alone.
+func TestAutoNewIDOnALiveEscalatedIDsSlotWaits(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 5, 51, "server closed the connection")
+	if err := os.WriteFile(f.failTear, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	tickUntil(t, s, "the escalation", func() bool { _, esc := runState(s.states[0]); return esc })
+	s.wg.Wait()
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	for range 20 {
+		s.tick(context.Background())
+		time.Sleep(2 * time.Millisecond)
+	}
+	if len(f.args()) != 1 || f.stateByID(s, "b") != nil {
+		t.Fatalf("b started on a live escalated id's slot:\n%s", f.events())
+	}
+	if got := strings.Count(f.events(), "invalid targets line skipped"); got != 1 || !strings.Contains(f.events(), "line 2") {
+		t.Fatalf("%d warnings, want one naming line 2:\n%s", got, f.events())
+	}
+	if _, escalated := runState(s.states[0]); !escalated {
+		t.Fatalf("the skipped line cleared a's escalation:\n%s", f.events())
+	}
+}
+
+// A slot still held by a live run keeps the one-walk-per-slot rule: the new line is skipped with a warning naming
+// it, the running id is untouched, and the line starts once the run is over.
+func TestAutoNewIDOnARunningIDsSlotWaits(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	f.running("b-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return len(f.args()) >= 1 })
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	for range 20 {
+		s.tick(context.Background())
+		time.Sleep(2 * time.Millisecond)
+	}
+	if len(f.args()) != 1 || f.stateByID(s, "b") != nil {
+		t.Fatalf("b started on a running id's slot:\n%s", f.events())
+	}
+	if got := strings.Count(f.events(), "invalid targets line skipped"); got != 1 || !strings.Contains(f.events(), "line 2") {
+		t.Fatalf("%d warnings, want one naming line 2:\n%s", got, f.events())
+	}
+	if done, _ := runState(f.stateByID(s, "a")); done {
+		t.Fatalf("the skipped line stopped a:\n%s", f.events())
+	}
+}
+
+// Walk 40: one bad line must not block the other edits. The bad line is skipped with a warning naming it (once),
+// the other new lines start, and the bad line's id keeps its old state.
+func TestAutoOneBadLineDoesNotBlockTheOtherEdits(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	f.running("b-1", 30)
+	f.running("c-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return len(f.args()) >= 1 })
+	// a's line is edited into a bad one (no --sql), b is new and valid, line 3 is garbage, c is new and valid.
+	path := filepath.Join(f.walk, autoTargetsFile)
+	text := "a srv 1 zg-a full -- zul_gurub\nb srv 2 zg-b full -- zul_gurub --sql /zg.sql\nnot a target line\nc srv 4 zg-c full -- zul_gurub --sql /zg.sql\n"
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tickUntil(t, s, "b and c launched", func() bool { return len(f.args()) >= 3 })
+	for range 10 {
+		s.tick(context.Background())
+		time.Sleep(2 * time.Millisecond)
+	}
+	if got := strings.Count(f.events(), "invalid targets line skipped"); got != 2 {
+		t.Fatalf("%d warnings, want 2 (lines 1 and 3), once each:\n%s", got, f.events())
+	}
+	for _, want := range []string{"line 1", "line 3"} {
+		if !strings.Contains(f.events(), want) {
+			t.Fatalf("no warning naming %s:\n%s", want, f.events())
+		}
+	}
+	if st := f.stateByID(s, "a"); st == nil {
+		t.Fatalf("a lost its state to its bad line:\n%s", f.events())
+	} else if done, esc := runState(st); done || esc {
+		t.Fatalf("a was stopped by its bad line:\n%s", f.events())
+	}
+	if len(f.args()) != 3 {
+		t.Fatalf("%d launches, want 3 (a, b, c):\n%s", len(f.args()), strings.Join(f.args(), "\n"))
+	}
+}
+
+// Opus round 1 (HIGH): the live re-read accepts done a + new b on a's slot, so the restart that follows must too. The
+// start marks the ids the checkpoint holds as done or stopped as inactive, like the re-read does.
+func TestAutoRestartAcceptsADoneIDsSlotTaken(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 0, 417, "boss 14515 down")
+	s := f.supervisor()
+	tickUntil(t, s, "a done", func() bool {
+		done, _ := runState(s.states[0])
+		return done
+	})
+	s.saveState()
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	s2 := f.supervisor() // fails the test when the start refuses the file
+	if f.stateByID(s2, "b") == nil || f.stateByID(s2, "a") == nil {
+		t.Fatalf("the restart lost a or b:\n%s", f.events())
+	}
+	if done, _ := runState(f.stateByID(s2, "a")); !done {
+		t.Fatalf("the restart did not restore a as done:\n%s", f.events())
+	}
+}
+
+// Opus round 1 (HIGH): the first line in file order must not win a slot over a live id. A new line inserted ABOVE the
+// running id's line is the skipped one; the running id keeps its slot and never gets a second launch beside it.
+func TestAutoNewLineAboveARunningIDDoesNotTakeItsSlot(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	f.running("b-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return len(f.args()) >= 1 })
+	path := filepath.Join(f.walk, autoTargetsFile)
+	text := "b srv 1 zg-b full -- zul_gurub --sql /zg.sql\na srv 1 zg-a full -- zul_gurub --sql /zg.sql\n"
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 20 {
+		s.tick(context.Background())
+		time.Sleep(2 * time.Millisecond)
+	}
+	if len(f.args()) != 1 || f.stateByID(s, "b") != nil {
+		t.Fatalf("b took a running id's slot:\n%s", f.events())
+	}
+	if done, esc := runState(f.stateByID(s, "a")); done || esc {
+		t.Fatalf("a was stopped or escalated by the insert:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "id b: line 1") {
+		t.Fatalf("the skipped line is not b's line 1:\n%s", f.events())
+	}
+}
+
+// Opus round 1 (MEDIUM): a done id is inactive whoever holds its slot's lease now. b runs on a's slot (lease held by
+// b), and an unrelated new line must not make a count as active again and warn about b.
+func TestAutoDoneIDStaysInactiveWhileANewIDHoldsItsLease(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 0, 417, "boss 14515 down")
+	f.running("b-1", 30)
+	f.running("c-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a done", func() bool {
+		done, _ := runState(s.states[0])
+		return done
+	})
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	tickUntil(t, s, "b launched", func() bool { return len(f.args()) >= 2 })
+	f.lease("zg-b", "held")
+	f.target("c srv 2 zg-c full -- zul_gurub --sql /zg.sql")
+	tickUntil(t, s, "c launched", func() bool { return len(f.args()) >= 3 })
+	if strings.Contains(f.events(), "invalid targets") {
+		t.Fatalf("a done id counted as active while b held its lease:\n%s", f.events())
+	}
+}
+
+// Opus round 1 (MEDIUM): a skipped line is re-read every tick only while some id's state changed; an idle supervisor
+// with a skipped line does not re-parse the file (and so does not take a lease check per tick).
+func TestAutoSkippedLineIsNotRereadWhileNothingChanges(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return len(f.args()) >= 1 })
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	s.tick(context.Background())
+	if s.targetsReads == 0 {
+		t.Fatal("the edited file was not read")
+	}
+	before := s.targetsReads
+	for range 20 {
+		s.tick(context.Background())
+	}
+	if s.targetsReads != before {
+		t.Fatalf("the file was re-read %d times while no id changed", s.targetsReads-before)
+	}
+}
+
+// Opus round 1 (MEDIUM): the fresh-instance retry after exit 29 is once per GOAL, not once per streak: a goal whose
+// fresh retry placed and ran, then hit exit 29 again on a later reuse placement, stops the id.
+func TestAutoExit29RetryIsOncePerGoal(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 5, 51, "server closed the connection")
+	f.attempt("a-2", 29, 0, "place: 4 tries in the same instance, start step 51")
+	f.attempt("a-3", 5, 60, "server closed the connection")
+	f.attempt("a-4", 29, 0, "place: 4 tries in the same instance, start step 60")
+	s := f.supervisor()
+	for i := 1; i <= 3; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+	}
+	tickUntil(t, s, "launch 4", func() bool { return len(f.args()) >= 4 })
+	finishAttempt(t, s)
+	if done, esc := runState(s.states[0]); done || !esc {
+		t.Fatalf("second exit 29 of the goal: done=%v escalated=%v, want escalated:\n%s", done, esc, f.events())
+	}
+	if n := len(f.args()); n != 4 {
+		t.Fatalf("%d launches, want 4 (one fresh retry per goal):\n%s", n, f.events())
+	}
+}
+
 // Walk 39: the shared hire pool refused one raid while others hired ("No mercenary of that kind is available right
 // now"; m5 and m1 in EVENTS.txt). The raid backs off 5 minutes and the refusal is not a failed attempt: refusals
 // never grow the backoff toward 10 minutes, and the first five never escalate the id (the sixth does, its own test).
@@ -1202,9 +1610,11 @@ func TestAutoStateSurvivesASupervisorKill(t *testing.T) {
 		_ = cmd.Wait()
 	}()
 	waitForN(t, 10*time.Second, "the second attempt to launch", func() bool { return len(f.args()) >= 2 })
-	// saveState runs asynchronously after the launch event: wait until the checkpoint itself records the advanced
-	// goal, so the kill cannot land in that window and leave the test reading the pre-advance checkpoint.
-	waitForN(t, 10*time.Second, "the checkpoint to record the advanced goal", func() bool {
+	// The checkpoint is written on the launch tick (Goal 1, step 0), but a-2's canned 51/761 progress line is
+	// already on disk: the supervisor learns step 51 on a later tick and rewrites the checkpoint with LastStep 51.
+	// A kill in that window restarts goal 2 from step 51 instead of its --from step 200. Wait until the checkpoint
+	// itself records the advanced goal AND the observed progress, so the kill cannot land in that window.
+	waitForN(t, 10*time.Second, "the checkpoint to record the advanced goal and its progress", func() bool {
 		raw, err := os.ReadFile(filepath.Join(f.walk, autoStateFile))
 		if err != nil {
 			return false
@@ -1213,7 +1623,7 @@ func TestAutoStateSurvivesASupervisorKill(t *testing.T) {
 		if json.Unmarshal(raw, &saved) != nil || len(saved.IDs) != 1 {
 			return false
 		}
-		return saved.IDs[0].Goal == 1
+		return saved.IDs[0].Goal == 1 && saved.IDs[0].LastStep == 51
 	})
 	// Kill the supervisor while a-2 runs; its walk is killed too, as a crash would leave it dead on the slot.
 	if err := cmd.Process.Kill(); err != nil {
@@ -1247,8 +1657,8 @@ func TestAutoStateSurvivesASupervisorKill(t *testing.T) {
 		t.Fatalf("the restarted supervisor launched nothing:\n%s", f.events())
 	}
 	for _, a := range after {
-		if !strings.Contains(a, "--from step 200") {
-			t.Fatalf("the restarted supervisor walked goal 1 again: %s", a)
+		if !strings.Contains(a, "--from step 200") || !strings.Contains(a, "--place") || !strings.Contains(a, "--reuse-instance") {
+			t.Fatalf("the restarted supervisor did not resume goal 2 in its instance: %s", a)
 		}
 	}
 	if got := strings.Count(f.events(), "advance: goal met: boss:14515"); got != 1 {
@@ -1447,8 +1857,8 @@ func TestAutoYieldFailedTeardownWritesNoYieldDone(t *testing.T) {
 		done <- raidAutopilotCmd(ctx, []string{"--foreground", "--binary", f.stub, "--poll", "50ms", "--settle", "0", "--status-every", "1h", f.walk}, io.Discard, io.Discard)
 	}()
 	waitForN(t, 10*time.Second, "the walk to launch", func() bool { return len(f.args()) >= 1 })
-	// The stub creates its slot dir after the launch event; a YIELD before that leaves no slot dir to fail on, and
-	// the teardown is then (correctly) clean. Wait for the dir so the test exercises the failed teardown.
+	// The stub logs the launch only after the slot dir and its files exist; a YIELD before that finds nothing to
+	// fail on and the teardown is (correctly) clean. Wait for the dir so the test exercises the failed teardown.
 	waitForN(t, 10*time.Second, "the walk's slot dir", func() bool {
 		_, err := os.Stat(filepath.Join(f.walk, "a-1", "slot"))
 		return err == nil
@@ -1722,6 +2132,9 @@ func TestAutoTeardownEscalatesAfterThreeFailedTicks(t *testing.T) {
 	s := f.supervisor()
 	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
 	tickUntil(t, s, "the escalation", func() bool { _, esc := runState(s.states[0]); return esc })
+	// escalate marks the id first and writes EVENTS.txt, status.txt and the checkpoint after, on the finish goroutine: the flag alone
+	// does not mean the lines are there. Wait for that goroutine to end before reading them.
+	s.wg.Wait()
 	// Each teardown call logs a start and a done line; every failed tick runs two calls (plain, then --release-anyway).
 	if got := len(f.teardowns()); got != 4*autoTeardownTries {
 		t.Fatalf("teardown log lines = %d, want %d (two calls per failed tick)", got, 4*autoTeardownTries)
@@ -2445,5 +2858,604 @@ func TestAutoHireWaitsSurviveARestart(t *testing.T) {
 	})
 	if !strings.Contains(f.events(), "hire pool: 6 waits") {
 		t.Fatalf("the restored wait count did not reach the sixth wait:\n%s", f.events())
+	}
+}
+
+// rewriteTargets replaces targets.txt whole.
+func (f *autoFixture) rewriteTargets(text string) {
+	f.t.Helper()
+	if err := os.WriteFile(filepath.Join(f.walk, autoTargetsFile), []byte(text), 0o600); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// checkpoint writes autopilot-state.json with these ids.
+func (f *autoFixture) checkpoint(ids ...autoSavedID) {
+	f.t.Helper()
+	raw, err := json.Marshal(autoSavedState{Format: autoStateFormat, Version: autoStateVersion, IDs: ids})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.walk, autoStateFile), raw, 0o600); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// tickN ticks the supervisor n times.
+func tickN(s *autoSupervisor, n int) {
+	for range n {
+		s.tick(context.Background())
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// Codex round 2 (HIGH): a running a gains one malformed line, and a new b is added on a's slot. a's bad line keeps
+// its live state, and that state keeps its slot: b is skipped, never launched beside a (only c, on its own slot, is).
+func TestAutoBadLineIDKeepsItsSlotFromANewID(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	f.running("b-1", 30)
+	f.running("c-1", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a launched", func() bool { return len(f.args()) >= 1 })
+	f.rewriteTargets("a srv 1 zg-a full -- zul_gurub --sql /zg.sql\n" +
+		"a srv 1 zg-a leg:2 -- zul_gurub\n" + // no --sql
+		"b srv 1 zg-b full -- zul_gurub --sql /zg.sql\n" +
+		"c srv 2 zg-c full -- zul_gurub --sql /zg.sql\n") // a valid line, so the file applies
+	tickUntil(t, s, "c launched", func() bool { return len(f.args()) >= 2 })
+	tickN(s, 20)
+	if len(f.args()) != 2 || f.stateByID(s, "b") != nil {
+		t.Fatalf("b launched on the slot of a's live run (%d launches):\n%s", len(f.args()), f.events())
+	}
+	if done, esc := runState(f.stateByID(s, "a")); done || esc {
+		t.Fatalf("a was stopped or escalated:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "already a's") {
+		t.Fatalf("b's skip does not name a as the slot's owner:\n%s", f.events())
+	}
+}
+
+// Opus round 2 (HIGH-1): a is done, b runs on a's slot, and a's goal line is edited. The edited done id is a new id
+// for the slot check: its line is skipped as b's slot, and it is never queued to launch beside b.
+func TestAutoEditedDoneIDDoesNotTakeARunningIDsSlot(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.attempt("a-1", 0, 417, "boss 14515 down")
+	f.running("b-1", 30)
+	f.running("a-2", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a done", func() bool {
+		done, _ := runState(s.states[0])
+		return done
+	})
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	tickUntil(t, s, "b launched", func() bool { return len(f.args()) >= 2 })
+	f.rewriteTargets("a srv 1 zg-a boss:14516 -- zul_gurub --sql /zg.sql\nb srv 1 zg-b full -- zul_gurub --sql /zg.sql\n")
+	tickN(s, 20)
+	if len(f.args()) != 2 {
+		t.Fatalf("%d launches, want 2 (a's edited line launched beside b):\n%s", len(f.args()), strings.Join(f.args(), "\n"))
+	}
+	if !strings.Contains(f.events(), "id a: line 1") || !strings.Contains(f.events(), "already b's") {
+		t.Fatalf("a's edited line is not skipped as b's slot:\n%s", f.events())
+	}
+	if done, esc := runState(f.stateByID(s, "b")); done || esc || strings.Contains(f.events(), "exit 15") {
+		t.Fatalf("b was stopped:\n%s", f.events())
+	}
+}
+
+// Opus round 2 (MEDIUM-1): an edited active id moving onto a slot another live id runs on is skipped, whatever the
+// file order; both runs go on and nothing is launched.
+func TestAutoEditedActiveIDMovingOntoAnOccupiedSlotIsSkipped(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	f.target("c srv 2 zg-c full -- zul_gurub --sql /zg.sql")
+	f.running("a-1", 30)
+	f.running("c-1", 30)
+	f.running("a-2", 30)
+	s := f.supervisor()
+	tickUntil(t, s, "a and c launched", func() bool { return len(f.args()) >= 2 })
+	f.rewriteTargets("a srv 2 zg-a full -- zul_gurub --sql /zg.sql\nc srv 2 zg-c full -- zul_gurub --sql /zg.sql\n")
+	tickN(s, 20)
+	if len(f.args()) != 2 {
+		t.Fatalf("%d launches, want 2 (a moved onto c's running slot):\n%s", len(f.args()), strings.Join(f.args(), "\n"))
+	}
+	for _, id := range []string{"a", "c"} {
+		st := f.stateByID(s, id)
+		st.mu.Lock()
+		stopping := st.stopping
+		st.mu.Unlock()
+		if done, esc := runState(st); done || esc || stopping {
+			t.Fatalf("%s was stopped by the move:\n%s", id, f.events())
+		}
+	}
+	if !strings.Contains(f.events(), "id a: line 1") || !strings.Contains(f.events(), "already c's") {
+		t.Fatalf("a's move is not skipped as c's slot:\n%s", f.events())
+	}
+}
+
+// Opus round 2 (fix 2): an escalated id whose checkpoint's child still answers holds its slot at a restart. The
+// escalation is a person's decision, not a teardown: a run that is still live keeps its slot, or a new line would be
+// launched beside it. A dead child frees the slot.
+func TestAutoStartEscalatedIDWithALiveChildHoldsItsSlot(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	live := exec.Command("sleep", "30")
+	live.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := live.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = live.Process.Kill(); _ = live.Wait() }()
+	f.checkpoint(autoSavedID{ID: "a", Goal: 0, Attempt: 1, Escalated: true, ChildPID: live.Process.Pid})
+	if _, err := readAutoTargets(f.walk); err == nil || !strings.Contains(err.Error(), "line 2") || !strings.Contains(err.Error(), "already a's") {
+		t.Fatalf("err %v, want b's line 2 refused as a's slot: a's escalated walk is still alive", err)
+	}
+	if err := live.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = live.Wait()
+	targets, err := readAutoTargets(f.walk)
+	if err != nil || len(targets) != 2 {
+		t.Fatalf("targets %v err %v, want a and b accepted once a's walk is gone", targets, err)
+	}
+}
+
+// Opus round 2 (LOW-2): a checkpointed id whose last goal's boss is dead (not yet marked done) holds no slot at a
+// start: a new id on its slot is accepted.
+func TestAutoStartBossDeadLastGoalIsInactive(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql")
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	f.checkpoint(autoSavedID{ID: "a", Goal: 0, BossDead: true})
+	targets, err := readAutoTargets(f.walk)
+	if err != nil || len(targets) != 2 {
+		t.Fatalf("targets %v err %v, want a and b accepted", targets, err)
+	}
+}
+
+// A restart where a done id's lines changed and an active id holds its slot refuses: the changed id is a new id.
+func TestAutoStartChangedDoneIDOnATakenSlotRefuses(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14516 -- zul_gurub --sql /zg.sql")
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	f.checkpoint(autoSavedID{ID: "a", Done: true, Fingerprint: "old-lines"}, autoSavedID{ID: "b", Attempt: 1})
+	if _, err := readAutoTargets(f.walk); err == nil || !strings.Contains(err.Error(), "line 1") || !strings.Contains(err.Error(), "already b's") {
+		t.Fatalf("err %v, want a refusal naming a's line 1 and b", err)
+	}
+}
+
+// A restart where an active checkpointed id sits below a new line on its slot: the checkpointed id wins the slot, the
+// new line is the one refused.
+func TestAutoStartActiveIDBelowANewLineWinsItsSlot(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("n srv 1 zg-n full -- zul_gurub --sql /zg.sql")
+	f.target("b srv 1 zg-b full -- zul_gurub --sql /zg.sql")
+	f.checkpoint(autoSavedID{ID: "b", Attempt: 1})
+	if _, err := readAutoTargets(f.walk); err == nil || !strings.Contains(err.Error(), "line 1") || !strings.Contains(err.Error(), "already b's") {
+		t.Fatalf("err %v, want a refusal naming n's line 1 and b", err)
+	}
+}
+
+// Walk 44 hk7m-3 / walk 46 hk4m-3: Hakkar wiped the raid at step 694 and the autopilot relaunched into the SAME
+// instance (--reuse-instance), where the dead and unplaced bots stood beside the live boss and fought him with no run.
+// A wipe (exit 19) at a boss row, or the row before it, goes to a fresh instance (the fixture migration's Arlokk boss
+// row is step 397, the move row 396); a wipe elsewhere keeps the same instance.
+func TestAutoWipeAtBossRelaunchesInAFreshInstance(t *testing.T) {
+	const gmData = " --gm-instance-data hakkar:1 3;6 3;0 0"
+	for _, c := range []struct {
+		name  string
+		step  int
+		reuse bool
+		from  string
+	}{
+		{"the boss row", 397, false, "--from step 396 --place"},
+		{"the row before the boss", 396, false, "--from step 396 --place"},
+		{"away from a boss", 300, true, "--from step 300 --place"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newAutoFixture(t)
+			f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql" + gmData)
+			f.attempt("a-1", 19, c.step, "wipe: the raid died")
+			f.attempt("a-2", 2, 0, "bad --sql")
+			s := f.supervisor()
+			tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+			finishAttempt(t, s)
+			tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+			args := f.args()
+			if !strings.Contains(args[1], c.from) {
+				t.Fatalf("the restart did not start at %q: %s", c.from, args[1])
+			}
+			if got := strings.Contains(args[1], "--reuse-instance"); got != c.reuse {
+				t.Fatalf("--reuse-instance = %v, want %v: %s\n%s", got, c.reuse, args[1], f.events())
+			}
+			if !c.reuse && !strings.Contains(f.events(), "fresh instance") {
+				t.Fatalf("no fresh-instance restart event:\n%s", f.events())
+			}
+			if st := s.states[0]; st.goals[st.current].exit29Retries != 0 {
+				t.Fatalf("the boss wipe used the goal's exit-29 retry")
+			}
+		})
+	}
+}
+
+// A boss fought on the spot is a hold row commented "boss hold": a wipe on it goes to a fresh instance like one on a
+// boss row. The fixture migration's Arlokk boss row (step 397) is rewritten as such a hold row.
+func TestAutoWipeAtBossHoldRowRelaunchesInAFreshInstance(t *testing.T) {
+	src, err := os.ReadFile("testdata/zg-20261101093000.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const boss = "'boss', 14515, -11540.7, -1627.71, 41.27, 0, 0, 0, 0, 0, '', 'boss'"
+	if !strings.Contains(string(src), boss) {
+		t.Fatal("the fixture's Arlokk boss row changed")
+	}
+	path := filepath.Join(t.TempDir(), "zg-hold.sql")
+	mod := strings.Replace(string(src), boss, "'hold', 14515, -11540.7, -1627.71, 41.27, 5, 0, 0, 0, 0, '', 'boss hold: fought on the spot'", 1)
+	if err := os.WriteFile(path, []byte(mod), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql " + path + " --gm-instance-data hakkar:1 3;6 3;0 0")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	if a := f.args()[1]; strings.Contains(a, "--reuse-instance") {
+		t.Fatalf("a wipe on a boss hold row kept the instance: %s\n%s", a, f.events())
+	}
+}
+
+// The fresh-after-wipe rule is for goals whose target line carries --gm-instance-data (ZG Hakkar today): that flag
+// re-applies the boss prerequisites in the new copy. A fresh instance throws away earlier kills, so every other
+// goal keeps the same-instance relaunch after a boss wipe.
+func TestAutoWipeAtBossWithoutGMInstanceDataKeepsTheInstance(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	if a := f.args()[1]; !strings.Contains(a, "--from step 396 --place --reuse-instance") {
+		t.Fatalf("a boss wipe without --gm-instance-data left the same instance: %s", a)
+	}
+}
+
+const bossWipeTarget = "a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --gm-instance-data hakkar:1 3;6 3;0 0"
+
+// Round 1 (HIGH): every boss wipe took a fresh instance with no budget, so a raid that cannot beat the boss spent
+// ~6 instances an hour forever (the cap is 5 per account). The third boss wipe in a row without progress stops the id.
+func TestAutoBossWipeThreeTimesWithoutProgressEscalates(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(bossWipeTarget)
+	for i := 1; i <= 3; i++ {
+		f.attempt(fmt.Sprintf("a-%d", i), 19, 397, "wipe: the raid died")
+	}
+	f.attempt("a-4", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 3; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+	}
+	args := f.args()
+	if len(args) != 3 {
+		t.Fatalf("%d launches, want 3 (the third boss wipe stops the id):\n%s", len(args), f.events())
+	}
+	for i, a := range args[1:] {
+		if strings.Contains(a, "--reuse-instance") {
+			t.Fatalf("launch %d reused the instance after a boss wipe: %s", i+2, a)
+		}
+	}
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("three boss wipes without progress did not escalate:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "ESCALATE stop a 1") || !strings.Contains(f.events(), "boss wipe x3 without progress") {
+		t.Fatalf("no ESCALATE line for the boss wipes:\n%s", f.events())
+	}
+}
+
+// An edit of only --boss-wipe-max is a changed goal line (the flag is taken out of the raid-walk args, so the args
+// alone would look the same).
+func TestAutoSameTargetsSeesABossWipeMaxEdit(t *testing.T) {
+	line := func(max int) *autoState {
+		g := raidwalk.AutoGoal{Kind: "boss", Boss: 14834}
+		return &autoState{goals: []autoGoalState{{target: raidwalk.AutoTarget{ID: "a", Server: "srv", Slot: "1", Holder: "h", Goal: g, Start: "leg hakkar", Args: []string{"zg", "--sql", "/zg.sql"}, BossWipeMax: max}}}}
+	}
+	if !autoSameTargets(line(5), line(5)) {
+		t.Fatal("the same goal lines differ")
+	}
+	if autoSameTargets(line(5), line(3)) {
+		t.Fatal("a --boss-wipe-max edit is not seen as a changed goal line")
+	}
+}
+
+// A goal line may raise its own boss-wipe budget: --boss-wipe-max 5 escalates on the fifth wipe, not the third.
+func TestAutoBossWipeBudgetPerGoal(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(bossWipeTarget + " --boss-wipe-max 5")
+	for i := 1; i <= 5; i++ {
+		f.attempt(fmt.Sprintf("a-%d", i), 19, 397, "wipe: the raid died")
+	}
+	f.attempt("a-6", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 4; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+		if _, esc := runState(s.states[0]); esc {
+			t.Fatalf("escalated at wipe %d of a budget of 5:\n%s", i, f.events())
+		}
+	}
+	tickUntil(t, s, "launch 5", func() bool { return len(f.args()) >= 5 })
+	finishAttempt(t, s)
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("the fifth boss wipe of a budget of 5 did not escalate:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "boss wipe x5 without progress") {
+		t.Fatalf("no ESCALATE line for the fifth wipe:\n%s", f.events())
+	}
+	if n := len(f.args()); n != 5 {
+		t.Fatalf("%d launches, want 5:\n%s", n, f.events())
+	}
+}
+
+// Exit 26 (no fresh instance place) is a cap refusal: raid-walk already waited out its own --instance-cap-wait inside
+// the run, so the autopilot relaunches a fresh instance at once, with no wait of its own, and neither counts a boss
+// wipe nor escalates before the fourth refusal in a row.
+func TestAutoInstanceCapRefusalRelaunchesAtOnce(t *testing.T) {
+	const capEnd = "instance cap: waited 30m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation"
+	f := newAutoFixture(t)
+	f.target(bossWipeTarget + " --instance-cap-wait 30m")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 26, 0, capEnd)
+	f.attempt("a-3", 26, 0, capEnd)
+	f.attempt("a-4", 26, 0, capEnd)
+	f.attempt("a-5", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s) // the wipe: a fresh instance next, one wipe counted
+	for i := range 3 {
+		// No clearWait here: the relaunch must come at once, not after a second 30m wait of the autopilot's own.
+		start := time.Now()
+		tickUntil(t, s, fmt.Sprintf("the relaunch after cap refusal %d", i+1), func() bool { return len(f.args()) >= i+2 })
+		if d := time.Since(start); d > 5*time.Second {
+			t.Fatalf("the relaunch after cap refusal %d waited %v: the autopilot repeated raid-walk's wait", i+1, d)
+		}
+		if a := f.args()[i+1]; strings.Contains(a, "--reuse-instance") {
+			t.Fatalf("launch %d after the cap refusal reused the instance: %s", i+2, a)
+		}
+		st := s.states[0]
+		tickUntil(t, s, fmt.Sprintf("cap refusal %d to finish", i+1), func() bool {
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			return st.run == nil
+		})
+		if _, esc := runState(st); esc {
+			t.Fatalf("a cap refusal escalated the id:\n%s", f.events())
+		}
+		if !strings.Contains(f.events(), "instance-cap-wait") {
+			t.Fatalf("no instance-cap-wait event:\n%s", f.events())
+		}
+	}
+	s.saveState()
+	raw, err := os.ReadFile(filepath.Join(f.walk, autoStateFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved autoSavedState
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.IDs) != 1 || saved.IDs[0].BossWipes != 1 {
+		t.Fatalf("checkpoint %s, want boss_wipes 1 (the cap refusals are no wipes)", raw)
+	}
+	if _, esc := runState(s.states[0]); esc {
+		t.Fatalf("three cap refusals escalated the id:\n%s", f.events())
+	}
+}
+
+// Four cap refusals in a row escalate the id with an EVENTS line naming the cap: the loop must not run forever.
+func TestAutoInstanceCapRefusalsEscalate(t *testing.T) {
+	const capEnd = "instance cap: waited 20m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation"
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	for i := 1; i <= 5; i++ {
+		f.attempt(fmt.Sprintf("a-%d", i), 26, 0, capEnd)
+	}
+	f.attempt("a-6", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 3; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+		if _, esc := runState(s.states[0]); esc {
+			t.Fatalf("escalated at cap refusal %d of 4:\n%s", i, f.events())
+		}
+	}
+	tickUntil(t, s, "launch 4", func() bool { return len(f.args()) >= 4 })
+	finishAttempt(t, s)
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("four cap refusals in a row did not escalate:\n%s", f.events())
+	}
+	if ev := f.events(); !strings.Contains(ev, "ESCALATE stop a 1") || !strings.Contains(ev, "instance cap") {
+		t.Fatalf("no ESCALATE line naming the cap:\n%s", ev)
+	}
+	if n := len(f.args()); n != 4 {
+		t.Fatalf("%d launches, want 4 (no launch after the escalation):\n%s", n, f.events())
+	}
+}
+
+// A launch that got past placement breaks the streak: three refusals, a run that walked, three refusals again is not
+// four in a row.
+func TestAutoInstanceCapRefusalStreakBreaksPastPlacement(t *testing.T) {
+	const capEnd = "instance cap: waited 20m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation"
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql")
+	for i := 1; i <= 3; i++ {
+		f.attempt(fmt.Sprintf("a-%d", i), 26, 0, capEnd)
+	}
+	f.attempt("a-4", 19, 12, "wipe: the raid died")
+	for i := 5; i <= 7; i++ {
+		f.attempt(fmt.Sprintf("a-%d", i), 26, 0, capEnd)
+	}
+	f.attempt("a-8", 2, 0, "bad --sql")
+	// Gate every attempt: the supervisor can launch attempt i only after the driver released it, and the driver
+	// releases it only after attempt i-1's finish is observed. The pairing is then exact whatever the tick timing
+	// is (no release, no launch, no overrun). Attempt 8 is never released: the loop ends after attempt 7's finish.
+	for i := 1; i <= 8; i++ {
+		f.gateAttempt(fmt.Sprintf("a-%d", i))
+	}
+	f.t.Cleanup(func() {
+		for i := 1; i <= 8; i++ {
+			_ = os.WriteFile(filepath.Join(f.specDir, fmt.Sprintf("a-%d.go", i)), []byte("1"), 0o600)
+		}
+	})
+	s := f.supervisor()
+	for i := 1; i <= 7; i++ {
+		f.releaseAttempt(fmt.Sprintf("a-%d", i))
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttemptN(t, s, i)
+		if _, esc := runState(s.states[0]); esc {
+			t.Fatalf("escalated after cap refusal %d with a placement in between:\n%s", i, f.events())
+		}
+	}
+}
+
+// --instance-cap-wait 0 means raid-walk does not wait for the cap at all, so the autopilot must not fall back to a
+// 20 m wait of its own on the relaunch.
+func TestAutoInstanceCapWaitZeroDoesNotWait(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a full -- zul_gurub --sql /zg.sql --instance-cap-wait 0")
+	f.attempt("a-1", 26, 0, "instance cap: waited 0s (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	tickUntil(t, s, "the cap refusal to finish", func() bool {
+		st := s.states[0]
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		return st.run == nil
+	})
+	start := time.Now()
+	tickUntil(t, s, "the relaunch", func() bool { return len(f.args()) >= 2 })
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("--instance-cap-wait 0 relaunched after %v, want no wait at all", d)
+	}
+}
+
+// A wipe that got further than any before it (progress) restarts the count.
+func TestAutoBossWipeProgressResetsTheCount(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(bossWipeTarget)
+	// 396 (progress), 396 (none), 397 (progress: count restarts), 397 (none), 397 (none: the third since progress).
+	for i, step := range []int{396, 396, 397, 397, 397} {
+		f.attempt(fmt.Sprintf("a-%d", i+1), 19, step, "wipe: the raid died")
+	}
+	f.attempt("a-6", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 5; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		if _, esc := runState(s.states[0]); esc {
+			t.Fatalf("escalated before launch %d:\n%s", i, f.events())
+		}
+		finishAttempt(t, s)
+	}
+	if n := len(f.args()); n != 5 {
+		t.Fatalf("%d launches, want 5:\n%s", n, f.events())
+	}
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("no escalation after three wipes since the last progress:\n%s", f.events())
+	}
+}
+
+// The count is in the checkpoint: a restarted supervisor continues it (an old checkpoint without it starts at 0).
+func TestAutoBossWipeCountSurvivesARestart(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(bossWipeTarget)
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 19, 397, "wipe: the raid died")
+	s := f.supervisor()
+	for i := 1; i <= 2; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+	}
+	s.saveState()
+	raw, err := os.ReadFile(filepath.Join(f.walk, autoStateFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved autoSavedState
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.IDs) != 1 || saved.IDs[0].BossWipes != 2 {
+		t.Fatalf("checkpoint %s, want boss_wipes 2", raw)
+	}
+	// A new supervisor reads it: one more wipe without progress is the third.
+	f.attempt("a-3", 19, 397, "wipe: the raid died")
+	f.attempt("a-4", 2, 0, "bad --sql")
+	s2 := f.supervisor()
+	tickUntil(t, s2, "the launch after the restart", func() bool { return len(f.args()) >= 3 })
+	finishAttempt(t, s2)
+	if _, esc := runState(s2.states[0]); !esc || !strings.Contains(f.events(), "boss wipe x3 without progress") {
+		t.Fatalf("the restarted supervisor lost the count:\n%s", f.events())
+	}
+	if n := len(f.args()); n != 3 {
+		t.Fatalf("%d launches, want 3:\n%s", n, f.events())
+	}
+}
+
+// Round 1 (LOW): a fresh-after-wipe restart is not a failed placement: it neither adds to nor resets placeFails.
+func TestAutoBossWipeRestartLeavesPlaceFailsAlone(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(bossWipeTarget)
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	st := s.states[0]
+	st.mu.Lock()
+	st.placeFails = 2
+	st.mu.Unlock()
+	finishAttempt(t, s)
+	st.mu.Lock()
+	got := st.placeFails
+	st.mu.Unlock()
+	if got != 2 {
+		t.Fatalf("placeFails %d after a boss-wipe restart, want 2 (untouched)", got)
+	}
+}
+
+// Round 2 (Codex HIGH): the wipe-at-boss check used max(run.log step, summary step) but Progressed read only the
+// cached run.log step, so a summary step beyond it counted as a boss wipe with NO progress and could escalate an id
+// that advanced. One effective step (the larger of the two) now drives all of it. Here attempt 2's run.log is behind
+// its summary (100 vs 397); the summary's 397 is progress over attempt 1's 396, so the count restarts and the id is
+// stopped only by the third wipe after it (attempt 4), not attempt 3.
+func TestAutoBossWipeProgressReadsTheSummaryStepToo(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(bossWipeTarget)
+	f.attempt("a-1", 19, 396, "wipe: the raid died")
+	f.attempt("a-2", 19, 397, "wipe: the raid died")
+	f.writeSpec("a-2.runlog", "19:46:05.696 TBM:RUN|zul_gurub|running|100/761|jeklik|boss|begin|fighting\n")
+	f.attempt("a-3", 19, 397, "wipe: the raid died")
+	f.attempt("a-4", 19, 397, "wipe: the raid died")
+	f.attempt("a-5", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 3; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+	}
+	if _, esc := runState(s.states[0]); esc {
+		t.Fatalf("escalated after attempt 3: the summary's step 397 was progress over 396:\n%s", f.events())
+	}
+	tickUntil(t, s, "launch 4", func() bool { return len(f.args()) >= 4 })
+	finishAttempt(t, s)
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("no escalation after the third wipe since the progress:\n%s", f.events())
+	}
+	if n := len(f.args()); n != 4 {
+		t.Fatalf("%d launches, want 4:\n%s", n, f.events())
 	}
 }

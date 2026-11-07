@@ -1,6 +1,7 @@
 package raidwalk
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -8,7 +9,8 @@ import (
 // The raid-walk --gm-instance-data test tool: one instance-data command per
 // leg of the run, sent as `.debug instancedata` by the commander's GM chat
 // path (the same gm RPC raid-walk's own gm() uses), in order, 3 s apart, once
-// per instance, when the walk first starts the named leg.
+// per launch (and again after a recovered wipe), when the walk first starts
+// the named leg.
 func TestParseGMInstanceData(t *testing.T) {
 	sp, err := ParseGMInstanceData("hakkar:1 3;6 3;0 0")
 	if err != nil || sp.Leg != "hakkar" || len(sp.Cmds) != 3 {
@@ -112,5 +114,26 @@ func TestInstanceMarksOncePerLeg(t *testing.T) {
 	lines, err := m2.LegLog("inst-7", "hakkar")
 	if err != nil || len(lines) != 2 || !strings.Contains(lines[0], ".debug instancedata 1 3") {
 		t.Fatalf("leg log %+v, %v", lines, err)
+	}
+}
+
+func TestInstanceMarksClear(t *testing.T) {
+	dir := t.TempDir()
+	m := NewInstanceMarks(dir)
+	spec := GMInstanceSpec{Leg: "hakkar", Cmds: [][2]int{{1, 3}}}
+	if err := m.Write("7", "hakkar", spec.Cmds); err != nil {
+		t.Fatal(err)
+	}
+	if !m.LegDone("7", "hakkar", spec) {
+		t.Fatal("the written marker must read back as done")
+	}
+	if err := m.Clear(); err != nil {
+		t.Fatal(err)
+	}
+	if m.LegDone("7", "hakkar", spec) {
+		t.Fatal("a cleared marker must not read back as done")
+	}
+	if err := NewInstanceMarks(filepath.Join(dir, "missing")).Clear(); err != nil {
+		t.Fatalf("Clear on a missing dir: %v", err)
 	}
 }

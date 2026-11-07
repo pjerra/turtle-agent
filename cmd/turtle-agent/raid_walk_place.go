@@ -18,6 +18,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
@@ -1064,6 +1065,12 @@ func (w *walk) placeQuietJudge(read *placeQuietRead, p dungeon.Point) placeQuiet
 			if s.dist <= placeReachYd {
 				w.note("place: the quiet refuses %d %s: %s (%s)", u.Entry, u.Name, w.placeQuietBlock(u, s.dist), u.placeWhere())
 				j.Block = append(j.Block, u)
+			} else if w.placeBossNear(u, s.dist) {
+				// Walk 46 Jin'do: the boss stood 25.2 yd from the start, past the landing reach, and the walk said
+				// nothing: the next note named a far Crocolisk. The boss is not refused (the offline start choice
+				// judges it), but it is no longer silent.
+				w.note("place: the quiet sees boss %d %s %.1f yd from the start point, beyond the %d yd landing reach: inside a boss's detection range the placement can pull it (%s)",
+					u.Entry, u.Name, s.dist, placeReachYd, u.placeWhere())
 			} else if !u.HomeOK {
 				// Beyond the landing reach an unowned unit is ignored, but a missing home is still noted: the extra
 				// round never clears a unit without a spawn (fail closed), and the live run can tell the two apart.
@@ -1073,6 +1080,28 @@ func (w *walk) placeQuietJudge(read *placeQuietRead, p dungeon.Point) placeQuiet
 		}
 	}
 	return j
+}
+
+// placeBossNoteYd is how far past the start point a boss unit is still worth a note: a boss's detection range is 20 yd
+// plus the level difference and the placement's spread, so a boss up to here can wake while the raid lands.
+const placeBossNoteYd = 30
+
+// placeBossNear says a unit beyond the landing reach is a boss of the plan's rows ahead, within placeBossNoteYd of the
+// start point.
+func (w *walk) placeBossNear(u ttUnit, dist float64) bool {
+	if dist > placeBossNoteYd {
+		return false
+	}
+	start := 1
+	if w.place != nil && w.place.Start > 0 {
+		start = w.place.Start
+	}
+	for i := start - 1; i < len(w.rows.Steps); i++ {
+		if st := w.rows.Steps[i]; st.Kind == planexport.KindBoss && st.Entry == u.Entry {
+			return true
+		}
+	}
+	return false
 }
 
 // roamWords says how the toolkit reported a unit of the quiet list that moved between the two reads.
@@ -1742,6 +1771,15 @@ func (w *walk) placeGather(ctx context.Context) error {
 		if !retryable || w.opts.noPlaceRetreat {
 			return err
 		}
+		// Walks 44 and 46 (Hakkar): after a wipe at the boss the same copy still holds him, and the summoned hires
+		// land beside him and die. More tries here only feed him, so the first try that finds the party dead or the
+		// boss on it ends the placement and asks the autopilot for a fresh instance.
+		if why := w.placeFreshNeeded(w.env.now()); why != "" {
+			_, detail := stopInfo(err)
+			return stopf(exitRaidWalkPlaceFailed,
+				"place: %s: fresh instance needed, no further try in this instance (try %d, start step %d: %s)",
+				why, try, w.place.Start, strings.TrimPrefix(detail, "place: "))
+		}
 		if try >= placeTryLimit {
 			_, detail := stopInfo(err)
 			return stopf(exitRaidWalkPlaceFailed,
@@ -1751,6 +1789,39 @@ func (w *walk) placeGather(ctx context.Context) error {
 		w.note("place: %s; summoning the party at step %d again (try %d of %d, no fresh instance)",
 			reason, w.place.Start, try+1, placeTryLimit)
 	}
+}
+
+// placeFreshNeeded says the same-instance placement cannot work and why, "" when another try may help: at least half
+// of the hires are dead in the freshest frames, or the boss of the start leg is fighting the party. The reason is the
+// first words of the exit-29 end reason the autopilot reads.
+func (w *walk) placeFreshNeeded(now time.Time) string {
+	hires := w.hireList()
+	if dead := w.placeDead(now); len(hires) > 0 && len(dead)*2 >= len(hires) {
+		return fmt.Sprintf("party dead: %d of %d hires", len(dead), len(hires))
+	}
+	if w.place == nil || w.place.Start < 1 || w.place.Start > len(w.rows.Steps) {
+		return ""
+	}
+	leg := w.rows.Steps[w.place.Start-1].Leg
+	boss := map[uint32]bool{}
+	for _, r := range w.rows.Steps {
+		if r.Kind == planexport.KindBoss && r.Leg == leg && r.Entry != 0 {
+			boss[r.Entry] = true
+		}
+	}
+	hire := map[uint64]bool{}
+	for _, b := range w.botAt {
+		if b.guid != 0 {
+			hire[uint64(b.guid)] = true
+		}
+	}
+	for _, h := range w.hostiles {
+		// Engaged means he targets a hire: an evading boss healing up with no target is not on the party.
+		if boss[h.entry] && now.Sub(h.at) <= 10*time.Second && h.hppct > 0 && h.target != 0 && hire[h.target] {
+			return fmt.Sprintf("boss engaged with the party: %d at %d%%", h.entry, h.hppct)
+		}
+	}
+	return ""
 }
 
 // placeKillBlockers GM-kills only the units the last quiet named, and only when --gm-clear is on. It looks every

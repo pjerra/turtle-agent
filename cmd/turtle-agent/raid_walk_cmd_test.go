@@ -1305,6 +1305,10 @@ type fakeDash struct {
 	decFileErr    map[string]error
 	decRequested  []string // every DecisionFile file name requested, in order
 	decCalls      int      // Decisions calls (the ended wait polls again)
+	// fightsStallFirst is how many of the first Fights calls block until their context ends (or fightsStall passes).
+	fightsStallFirst int
+	fightsStall      time.Duration
+	fightsCalls      int
 }
 
 func (d *fakeDash) Login(ctx context.Context) error { return nil }
@@ -1334,6 +1338,20 @@ func (d *fakeDash) commandersCalls() int {
 }
 
 func (d *fakeDash) Fights(ctx context.Context, commander string) (json.RawMessage, error) {
+	d.mu.Lock()
+	d.fightsCalls++
+	stall := d.fightsStallFirst > 0
+	if stall {
+		d.fightsStallFirst--
+	}
+	d.mu.Unlock()
+	if stall {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(d.fightsStall):
+		}
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.fightsErr != nil {
@@ -1803,7 +1821,7 @@ until boss; from -; enter auto; server m910q slot any holder raid-walk-onyxias_l
 out ` + f.out + `
 phases:
   1 validate: plan, roster, until, 7 steps
-  2 lease: m910q any --holder raid-walk-onyxias_lair --ttl 120m
+  2 lease: m910q any --holder raid-walk-onyxias_lair --ttl 15m (renewed every 5m)
   3 slot setup: slot setup m910q <slot> --holder raid-walk-onyxias_lair --dir ` + f.out + `/slot --binary <bin> --dungeons-from ../../dungeons
   4 login: ` + f.out + `/slot/turtle-agent login --config ` + f.out + `/slot/settings.json --pid-file ` + f.out + `/slot/agent.pid <commander>
   5 gm: .go xyz -4768.61 -3752.11 53.4317 1

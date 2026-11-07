@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -39,6 +40,7 @@ type fakeEvent struct {
 type fakeGame struct {
 	now    time.Time
 	pos    Point
+	posMu  sync.Mutex // pos: a walk moves it while the combat watch (another goroutine) reads it through Units
 	mapID  uint32
 	units  []*fakeUnit
 	objs   []objects.GameObject
@@ -161,8 +163,21 @@ func (g *fakeGame) add(guid packet.GUID, entry uint32, at Point) *fakeUnit {
 	return u
 }
 
-func (g *fakeGame) Position() Point { return g.pos }
-func (g *fakeGame) Map() uint32     { return g.mapID }
+func (g *fakeGame) Position() Point { return g.at() }
+
+// at and moveTo are the locked reads and writes of pos that the walk and the watches share.
+func (g *fakeGame) at() Point {
+	g.posMu.Lock()
+	defer g.posMu.Unlock()
+	return g.pos
+}
+
+func (g *fakeGame) moveTo(p Point) {
+	g.posMu.Lock()
+	g.pos = p
+	g.posMu.Unlock()
+}
+func (g *fakeGame) Map() uint32 { return g.mapID }
 func (g *fakeGame) Self() Self {
 	// The first look at the leader is the run's start, the second the first rest gate's: afterGate runs there, so
 	// that what it starts is met by the first walk, not by the gate.
@@ -175,7 +190,7 @@ func (g *fakeGame) Party() []Member { return append([]Member(nil), g.party...) }
 func (g *fakeGame) GameObjects() []objects.GameObject {
 	out := append([]objects.GameObject(nil), g.objs...)
 	for i := range out {
-		out[i].Distance = float32(dist3(g.pos, Point{out[i].X, out[i].Y, out[i].Z}))
+		out[i].Distance = float32(dist3(g.at(), Point{out[i].X, out[i].Y, out[i].Z}))
 	}
 	return out
 }
@@ -187,7 +202,7 @@ func (g *fakeGame) Units() []objects.Unit {
 		if g.aggro.Load() && c.GUID == g.aggroGUID && !c.Dead {
 			c.InCombat, c.Target = true, leader
 		}
-		c.Distance = float32(dist3(g.pos, Point{c.X, c.Y, c.Z}))
+		c.Distance = float32(dist3(g.at(), Point{c.X, c.Y, c.Z}))
 		if c.Distance <= 150 {
 			out = append(out, c)
 		}
@@ -223,7 +238,7 @@ func (g *fakeGame) WalkPath(ctx context.Context, to Point) (WalkResult, error) {
 		return r, nil
 	}
 	if !g.walkNeverMoves {
-		g.pos = to
+		g.moveTo(to)
 	}
 	if g.onWalk != nil {
 		g.onWalk(g, to)
@@ -235,7 +250,7 @@ func (g *fakeGame) PathPoints(ctx context.Context, to Point) ([]Point, error) {
 	if g.pathErr != nil {
 		return nil, g.pathErr
 	}
-	return []Point{g.pos, to}, nil
+	return []Point{g.at(), to}, nil
 }
 
 func (g *fakeGame) UseObject(ctx context.Context, guid packet.GUID) error {
@@ -363,7 +378,8 @@ func (u *fakeUnit) stealth() *fakeUnit {
 func (g *fakeGame) Teleport(ctx context.Context, to Point, mapID uint32) error {
 	g.moved("teleport")
 	g.teleports = append(g.teleports, to)
-	g.pos, g.mapID = to, mapID
+	g.moveTo(to)
+	g.mapID = mapID
 	return nil
 }
 

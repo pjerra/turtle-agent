@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -55,6 +56,17 @@ const (
 	// retries are the budget; a walk-super restart would only enter another fresh instance, so the supervisor stops on
 	// this code (walk 37: eight "not at the start" failures at step 582 each burned one of the 4 fresh instances an hour).
 	exitRaidWalkPlaceFailed = 29
+)
+
+// The walk's lease heartbeat (walk 47: a walk's worker died with the laptop and its leases blocked the next walk
+// for hours). The lease is short, so a dead holder frees its slot within minutes — by the reap, or by the expiry
+// when the holder ran elsewhere — and the walk renews it every few minutes while it runs, so a live walk never
+// loses it. A failed renewal is retried every walkLeaseRenewRetry and logged; only a refusal (the lease is no longer
+// ours) stops the walk. Variables rather than constants so tests can shorten the clock.
+var (
+	walkLeaseTTL        = 15 * time.Minute
+	walkLeaseRenew      = 5 * time.Minute
+	walkLeaseRenewRetry = time.Minute
 )
 
 // walkPIDFile is the walk's own pid in its out dir (0600): the autopilot adopts a live walk on its slot at startup
@@ -243,7 +255,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.sql, "sql", "", "the deployed migration: step numbers and the first point come from it")
 	fs.StringVar(&o.until, "until", "boss", "boss (stops before it), boss-done (after the boss step), none, \"step N\" or \"leg L\"")
 	fs.StringVar(&o.from, "from", "", "\"leg L\" or \"step N\" for the run leader")
-	fs.Var(onOffFlag{v: &o.place, name: "--place"}, "place", "with --from: put the raid at that start inside the instance, clearing the legs it skips (Eluna test toolkit: m910q or tortoise-test2 only)")
+	fs.Var(onOffFlag{v: &o.place, name: "--place"}, "place", "with --from: put the raid at that start inside the instance, clearing the legs it skips; a same-instance placement ends at once with exit 29 (`fresh instance needed`) when half the hires are dead or the start leg's boss is fighting the party (Eluna test toolkit: m910q or tortoise-test2 only)")
 	fs.BoolVar(&o.reuseInstance, "reuse-instance", false, "with --place: keep the raid's CURRENT instance (no fresh instance is entered or counted, so the instance cap is untouched). A live raid is kept; a logged-out raid is resumed from the commander's live bind; with no bind the walk says so and falls back to a fresh entry. Combines with --gm-clear")
 	fs.StringVar(&speed, "speed", "1.0", "the run's test speed, 1.0 to 3.0")
 	fs.StringVar(&o.hires, "hires", "", "the tb-raid-roster v1 file (default: from the plan's raid block)")
@@ -267,7 +279,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.patrols, "patrols", "", "a tb-patrols file for the revive quiet check")
 	fs.Var(&o.gmClear, "gm-clear", "TEST SERVERS ONLY, needs --place: after the placement the commander GM-kills every live unit of these pull groups of a leg, \"<leg>:<group>[,<group>...]\" (whole packs, links included); repeatable; the walk is then ASSISTED, never a real clear")
 	fs.Var(&o.gmClearBoss, "gm-clear-boss", "TEST SERVERS ONLY, needs --place: like --gm-clear for the boss of a leg (and its pack); repeatable")
-	fs.Var(&o.gmInstanceData, "gm-instance-data", "TEST SERVERS ONLY: when the walk first starts the named leg the commander sends each \".debug instancedata <a> <b>\" of \"<leg>:<a> <b>[;<a> <b>...]\", in order, 3 s apart, once per instance; with --place it is the placement's copy, without it the entry's (read as q inst; unreadable: fires once per out dir with a WARN); repeatable")
+	fs.Var(&o.gmInstanceData, "gm-instance-data", "TEST SERVERS ONLY: when the walk first starts the named leg the commander sends each \".debug instancedata <a> <b>\" of \"<leg>:<a> <b>[;<a> <b>...]\", in order, 3 s apart, sent after placement on every launch, including same-instance --reuse-instance restarts (a boss Reset() can overwrite priest data on a wipe), and again after each recovered wipe; after run start a send goes out only at an out-of-combat rest or gather before the pull, and the lines are resent once per boss row at the rest of the step before it (a boss row without such a rest warns and skips); with --place it is the placement's copy, without it the entry's (read as q inst; unreadable: fires once per out dir with a WARN); repeatable")
 	fs.StringVar(&o.gmClearSpawns, "gm-clear-spawns", "", "the world export dir --gm-clear reads the packs from (default: ~/.local/share/turtle-agent/world/map<N>, else the checkout's <dir>/../tools/dungeongen/testdata/map<N>)")
 	fs.StringVar(&o.out, "out", "", "the output dir (default ./raid-walk-<plan>-<stamp>)")
 	fs.StringVar(&o.dashURL, "dash-url", "", "the dashboard URL (or TBDASH_URL)")
@@ -383,10 +395,6 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	}
 	if o.capWait < 0 {
 		fmt.Fprintf(stderr, "raid-walk: --instance-cap-wait must be 0 or more\n")
-		return o, exitUsage
-	}
-	if ttl := o.ttlMinutes(); ttl > 720 {
-		fmt.Fprintf(stderr, "raid-walk: the lease would last %d min (max-run + hold + 30); the limit is 720: lower --max-run-minutes or --hold-minutes\n", ttl)
 		return o, exitUsage
 	}
 	// --place (spec 3): it needs a start, it is not combined with the fault injector, and it is for the test servers
@@ -570,9 +578,6 @@ func (f onOffFlag) Set(s string) error {
 // IsBoolFlag lets a bare `--place` stand without a value.
 func (f onOffFlag) IsBoolFlag() bool { return true }
 
-// ttlMinutes is the lease's length: the run ceiling, the hold and 30 minutes (spec 3.3 phase 2).
-func (o *raidWalkOptions) ttlMinutes() int { return o.maxRunMinutes + o.holdMinutes + 30 }
-
 // walkStop ends a phase with an exit code and the reason the summary carries.
 type walkStop struct {
 	code   int
@@ -665,6 +670,9 @@ func defaultWalkEnv(o *raidWalkOptions) (walkEnv, walkDeps, error) {
 		}
 	}
 	store := slots.NewStore(cfg, path)
+	// The walk is the lease's holder process: the record lets a later reader free the slot the moment this walk is
+	// gone (walk 47), instead of waiting out the TTL.
+	store.HolderPID = os.Getpid()
 	// The instance cap: the flag when given, else the server's entry in instance-cap-per-account.json beside the
 	// slots file, else the stock core's 5.
 	capPerAccount := o.capPerAccount
@@ -793,6 +801,8 @@ type walk struct {
 
 	stdout io.Writer
 	stderr io.Writer
+	// outMu guards the output the walk loop shares with the lease heartbeat goroutine: notes, run.log and stderr.
+	outMu sync.Mutex
 
 	plan   *dungeon.Plan
 	rows   planexport.Rows
@@ -833,6 +843,17 @@ type walk struct {
 	decisions *raidwalk.DecisionsSummary
 
 	seenFights map[string]bool
+	// fightIDsAtStart is the fight ids the dashboard listed when the walk first read its fights: the
+	// commander's whole history includes earlier walks' and instances' fights, so a kill record already
+	// listed there is credited only when this walk's frames never showed the goal boss alive
+	// (creditFightKills). A record that first appears during the walk is this walk's and credits freely.
+	// nil until the first successful read.
+	fightIDsAtStart map[string]bool
+	// fightsPrePlacement is set while saveFightsAtStart reads the list before the walk's first placement.
+	fightsPrePlacement bool
+	// maxStatusStep is the highest step any run status showed (observeBossStatus): creditFightKills reads whether
+	// the run reached the goal boss row.
+	maxStatusStep int
 	// pendingFights are fights listed but whose detail is not loaded yet: fight id to its index in fights.
 	pendingFights map[string]int
 	hostiles      map[string]hostileState
@@ -873,6 +894,12 @@ type walk struct {
 	// the current attempt: the wait's first sighting (revive r6). A live frame for that guid clears it,
 	// as does a wipe recovery.
 	bossCorpseSeen map[string]time.Time
+	// bossAliveWalk is every boss-unit entry (bossUnit) the frames showed ALIVE at any point in this walk,
+	// never reset by an attempt or a recovery (unlike bossAliveSeen): creditFightKills reads it to tell a
+	// dashboard kill record the walk's own frames contradict (the boss stood alive in this instance, so the
+	// record is an earlier walk's or instance's) from one the walk never saw alive (walk 41 tj-9's shape:
+	// the record is the only evidence, and it credits).
+	bossAliveWalk map[uint32]bool
 	// bossGUIDs is the guid -> plan boss entry of the units the frames showed with a plan boss's OWN entry
 	// (trackFrame): a script that changes a creature's entry (core UpdateEntry) keeps its guid, so a unit whose
 	// guid the frames showed as the boss entry is the boss whatever entry it now reads (spec 6, D5 b, #1453).
@@ -1025,6 +1052,12 @@ type walk struct {
 	// gmInstanceDataOZeroWarned says the `q inst` 0 read already WARNed once
 	// (a 0 read is not cached: the next firing retries the read).
 	gmInstanceDataOZeroWarned bool
+	// gmInstanceDataBossSent holds the boss rows (steps) whose pre-pull resend already went out in this walk.
+	gmInstanceDataBossSent map[int]bool
+	// gmInstanceDataDeferred holds the legs (lower case -> name) with a send deferred by the allowlist; gmInstanceDataUnsent
+	// counts the legs reported as never sent.
+	gmInstanceDataDeferred map[string]string
+	gmInstanceDataUnsent   int
 	// gongReruns counts the run restarts at a leg's summoning open row (a boss that despawns after a wipe comes back with the
 	// object: Zul'Gurub's Arlokk). bossGongReruns bounds them. gongRerunAt/-Boss/-Open name the last one that went out: the
 	// next "boss not found" pause reads whether the frames saw the boss alive since, which tells the gong summoning him again
@@ -1040,18 +1073,26 @@ type walk struct {
 	rerunStaleStep  int
 	rerunStaleUntil time.Time
 
-	started     time.Time
-	ended       time.Time
-	runStarted  bool
-	runStopped  bool
-	wipeResumes int // wipes and near-wipe stops recovered so far (--wipe-resume bounds them)
+	started    time.Time
+	ended      time.Time
+	runStarted bool
+	runStopped bool
+	// pausedBossResume is the boss ROW (step) the walk's own `.bot run resume` went out for: a boss that
+	// engages while the run is paused on its own boss row resumes the run instead of stopping it (walk 41 tj-8).
+	// One resume per row, and the ACK alone is no handoff: the walk trusts it only once a FRESH RunRunning status
+	// of the row arrives within pausedBossResumeWait (Codex HIGH); anything else routes through handleBoss.
+	pausedBossResume string
+	wipeResumes      int // wipes and near-wipe stops recovered so far (--wipe-resume bounds them)
 	// --revive-at-raid bookkeeping (raid_walk_reviveraid.go): the point the commander stood at for the last revive, and
 	// the distinct hires brought back to it, not reached by two summons, and still missing when a resume went out.
 	reviveSpot                                         *dungeon.Point
 	reviveBrought, reviveUnreached, reviveGatherMissed map[string]bool
 	lease                                              slots.Lease
 	leaseLost                                          atomic.Bool
-	cancel                                             context.CancelFunc
+	// leaseDone is closed when the renewal goroutine returns (phaseLease starts it): tests join it, and no reader of
+	// the walk's output has to guess whether the heartbeat is still running.
+	leaseDone chan struct{}
+	cancel    context.CancelFunc
 
 	endReason  string
 	exitCode   int
@@ -1484,6 +1525,8 @@ func (w *walk) prepareOut() error {
 }
 
 func (w *walk) closeOut() {
+	w.outMu.Lock()
+	defer w.outMu.Unlock()
 	if w.framesF != nil {
 		_ = w.framesF.Close()
 		w.framesF = nil
@@ -1501,11 +1544,29 @@ func (w *walk) writeOut(name string, data []byte) error {
 
 // note appends a note to the summary and run.log.
 func (w *walk) note(format string, a ...any) {
-	w.notes = append(w.notes, fmt.Sprintf(format, a...))
+	msg := fmt.Sprintf(format, a...)
+	w.outMu.Lock()
+	w.notes = append(w.notes, msg)
+	w.outMu.Unlock()
+}
+
+// notesCopy is the notes as they stand now: the summary and the injector read a snapshot, never the slice the
+// heartbeat goroutine may be appending to.
+func (w *walk) notesCopy() []string {
+	w.outMu.Lock()
+	defer w.outMu.Unlock()
+	return append([]string(nil), w.notes...)
 }
 
 // logLine writes one line to run.log ("HH:MM:SS.mmm <text>"), control bytes escaped.
 func (w *walk) logLine(now time.Time, text string) {
+	w.outMu.Lock()
+	defer w.outMu.Unlock()
+	w.logLineLocked(now, text)
+}
+
+// logLineLocked is logLine for a caller that already holds outMu.
+func (w *walk) logLineLocked(now time.Time, text string) {
 	if w.logF == nil {
 		return
 	}
@@ -1752,7 +1813,8 @@ func (w *walk) printPlan(out io.Writer) {
 	fmt.Fprintf(out, "out %s\n", outDir)
 	fmt.Fprintf(out, "phases:\n")
 	fmt.Fprintf(out, "  1 validate: plan, roster, until, %d steps\n", len(w.rows.Steps))
-	fmt.Fprintf(out, "  2 lease: %s %s --holder %s --ttl %dm\n", w.opts.server, slot, w.opts.holder, w.opts.ttlMinutes())
+	fmt.Fprintf(out, "  2 lease: %s %s --holder %s --ttl %dm (renewed every %dm)\n", w.opts.server, slot, w.opts.holder,
+		int(walkLeaseTTL/time.Minute), int(walkLeaseRenew/time.Minute))
 	bin := w.opts.binary
 	if bin == "" {
 		bin = "<bin>"
@@ -1821,7 +1883,7 @@ func (w *walk) printPlan(out io.Writer) {
 		for _, cmd := range sp.Cmds {
 			fmt.Fprintf(out, " .debug instancedata %d %d;", cmd[0], cmd[1])
 		}
-		fmt.Fprintf(out, " in order, 3 s apart, once per instance, before run start when placed in the leg (mid-run: paused first)\n")
+		fmt.Fprintf(out, " in order, 3 s apart, on every launch (restarts included), before run start when placed in the leg (mid-run: paused first)\n")
 	}
 	start := []string{w.plan.Name}
 	start = append(start, w.fromWords...)
@@ -1896,6 +1958,7 @@ func (w *walk) finish(code int) {
 		code = exitRaidWalkInjectFailed
 	}
 	w.exitCode = code
+	w.gmInstanceDataFlushUnsent()
 	// The tracker's one-shot latch is the fallback when the run's statuses never named a boss step's kind as boss.
 	// It is inserted before the summary reads the tracks, so the single boss_kill field and the boss_kills list both
 	// carry it; a boss entry none of the rows is a boss row of (bossStepOf 0) is not recorded (L4).
@@ -1906,6 +1969,9 @@ func (w *walk) finish(code int) {
 			}
 		}
 	}
+	// The dashboard's fight records are the raid's own verdict when the walk's frames stopped with the run: a goal
+	// boss fight that ended "kill" credits its boss row even though the run had stopped (walk 41 tj-8/tj-9).
+	w.creditFightKills()
 	untilEffective := ""
 	if w.placeShortened {
 		untilEffective = w.untilLabel
@@ -1922,7 +1988,7 @@ func (w *walk) finish(code int) {
 		Until: w.opts.until, UntilEffective: untilEffective, From: w.opts.from, Speed: w.opts.speed, TestSpeed: w.opts.speed != 1.0,
 		RowsSHA256: rowsSHA256(w.rows), UntilStep: w.untilStep, RunLabel: w.runLabel, SpeedFellBack: w.speedFellBack,
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights, Decisions: w.decisions,
-		Dashboard: w.dashNote, ExitCode: code, Notes: w.notes,
+		Dashboard: w.dashNote, ExitCode: code, Notes: w.notesCopy(),
 		Place:         w.placeSum,
 		GMClearUsed:   w.gmClearUsed,
 		GMClear:       w.gmClearLog,
@@ -1932,8 +1998,9 @@ func (w *walk) finish(code int) {
 		ReviveRefusal: w.reviveRefusal,
 		TierSource:    w.tierSource, TierComparison: w.tierSource == raidwalk.TierSourceOverride,
 		HireSettle: w.opts.hireSettle, SettleShort: w.opts.hireSettle < hireSettleWait,
-		WipeResumes:   w.wipeResumes,
-		ReviveBrought: len(w.reviveBrought), ReviveUnreached: len(w.reviveUnreached), ReviveGatherMissed: len(w.reviveGatherMissed),
+		WipeResumes:          w.wipeResumes,
+		GMInstanceDataUnsent: w.gmInstanceDataUnsent,
+		ReviveBrought:        len(w.reviveBrought), ReviveUnreached: len(w.reviveUnreached), ReviveGatherMissed: len(w.reviveGatherMissed),
 	}
 	if w.inj != nil {
 		meta.Injections, meta.InjectedDeaths = w.inj.Results()

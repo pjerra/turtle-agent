@@ -280,7 +280,11 @@ func (d *RemoteDriver) agentWalk(ctx context.Context, f Follower, stand Point, l
 		}
 		if limit > 0 && d.clk.Now().Sub(began) >= limit {
 			cancel()
-			<-done
+			// A walk that got there as the limit ran out has arrived: the cancel came too late to matter, and throwing the
+			// arrival away would fail the step for a walk that worked.
+			if res := <-done; res.err == nil && res.r.Result == "arrived" {
+				return true, ctx.Err()
+			}
 			d.rep.note(fmt.Sprintf("keep near: the agent's walk took longer than %.0f s: stopped", limit.Seconds()))
 			return false, nil
 		}

@@ -679,7 +679,10 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 // approach row and nets one fewer row elsewhere on leg 6, 406; fix 1 makes groups 8/9 stand pulls with south hops and
 // moves the group-11 stand south past the pit, 408; walk 35 drops the Arlokk middle-east-Panther pull and its approach row, 406; walk 36
 // merges the two north hall packs into one pull (one fewer group), pulls the honour guard before them and drops the -11603 -1229 pull
-// beside the respawn pit (one fewer group and its three approach rows), 399; the Mandokir 440 fix makes group 0 a stand pull (no approach-path rows) and deletes group 1's first approach point, 398), a placed
+// beside the respawn pit (one fewer group and its three approach rows), 399; the Mandokir 440 fix makes group 0 a stand pull (no approach-path rows) and deletes group 1's first approach point, 398; walk 38 stages the Jin'do hall (two more approach rows on the lone mistresses, one fewer plain-pull approach) and splits Jeklik's patrol camps (two more rows), 402; the Arlokk re-route's authored approaches, its z 60 formation row and the split top pack, 420; the Arlokk route fix round 1 walks the mesh's loop and pulls each pack from a single stand (one approach row each) and authors the arena descent in the gong step's stand and the boss approach, 414; combined, both row sets are in one plan (walk 38's hall rows, review round 2's undo included, the Arlokk leg's loop and descent), 416), a placed
+// The Arlokk route fix round 2 and the later rounds bring it to 416 (t1105c). t1105e: 417, Hakkar's approach is two
+// plan points now (the ramp lip -11807.651 -1691.3049 52.111286 and the stand -11790 -1662 53.11; the exported rows are
+// 694, one fewer, because the lip replaces a path row the cutter used to add).
 // `--until none` run from Marli stops before the segment on leg 6 that passes Venoxis, and the shortened corridor
 // clears clean.
 
@@ -690,8 +693,8 @@ func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	if len(rows.Steps) != 401 {
-		t.Fatalf("the fixture has %d steps, want 401", len(rows.Steps))
+	if len(rows.Steps) != 417 {
+		t.Fatalf("the fixture has %d steps, want 417", len(rows.Steps))
 	}
 	start, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
 	if err != nil {
@@ -988,5 +991,120 @@ func TestPlaceResumeStartStepsBackFromABossRow(t *testing.T) {
 	}
 	if _, ok := PlaceResumeStart(rows, len(rows.Steps)+1); ok {
 		t.Error("a step past the rows has no resume start")
+	}
+}
+
+// Walk 46 Jin'do: every id wiped at the boss row (step 518) and the autopilot resumed from the reached step minus
+// one, the last boss-approach row 25.2 yd from the boss, so the placement pulled him. A wipe at the goal's boss row or
+// at one of its approach rows resumes from the goal's own start instead.
+func TestPlaceResumeGoalStartFromABossOrItsApproach(t *testing.T) {
+	approach := func(leg int, x, y, z float32) planexport.StepRow {
+		s := placeMove(leg, x, y, z)
+		s.Comment = "boss approach"
+		return s
+	}
+	rows := placeRows([]planexport.LegRow{
+		{Plan: "t", Leg: 0, Name: "one"},
+		{Plan: "t", Leg: 1, Name: "two"},
+		{Plan: "t", Leg: 2, Name: "three"},
+	},
+		placeMove(0, 0, 10, 0),
+		placeMove(1, 0, 20, 0),                               // 2
+		placeMove(1, 0, 30, 0),                               // 3: the goal's start
+		placeRow(planexport.KindPull, 1, 0, 35, 0, 10, 777),  // 4: trash
+		placeMove(1, 0, 40, 0),                               // 5
+		approach(1, 0, 45, 0),                                // 6
+		approach(1, 0, 50, 0),                                // 7
+		placeRow(planexport.KindBoss, 1, 0, 55, 0, 0, 14515), // 8
+		placeMove(2, 0, 60, 0),                               // 9
+		placeRow(planexport.KindBoss, 2, 0, 70, 0, 0, 11380), // 10
+	)
+	for _, c := range []struct {
+		name  string
+		step  int
+		start string
+		want  string
+		ok    bool
+	}{
+		{"the boss row", 8, "step 3", "step 3", true},
+		{"the last approach row", 7, "step 3", "step 3", true},
+		{"the first approach row", 6, "step 3", "step 3", true},
+		{"a leg start", 8, "leg two", "leg two", true},
+		{"a trash row keeps the reached step", 4, "step 3", "", false},
+		{"a plain move row keeps the reached step", 5, "step 3", "", false},
+		{"no goal start", 8, "", "", false},
+		{"a start in another leg", 10, "step 3", "", false},
+		{"a start after the reached step", 7, "step 9", "", false},
+		{"a boss between the start and the step", 10, "step 8", "", false},
+		{"a step outside the rows", 99, "step 3", "", false},
+	} {
+		got, ok := PlaceResumeGoalStart(rows, c.step, c.start)
+		if ok != c.ok || got != c.want {
+			t.Errorf("%s: PlaceResumeGoalStart(%d, %q) = %q %v, want %q %v", c.name, c.step, c.start, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+// A wipe that ends at a boss row, or the row before it, is a wipe at that boss: the autopilot launches the next
+// attempt in a fresh instance (walk 44 hk7m-3, walk 46 hk4m-3). Any other step, or a step outside the rows, is not.
+func TestPlaceStepAtBoss(t *testing.T) {
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}},
+		placeMove(0, 0, 10, 0),                               // 1
+		placeMove(0, 0, 20, 0),                               // 2
+		placeMove(0, 0, 30, 0),                               // 3: the row before the boss
+		placeRow(planexport.KindBoss, 0, 0, 35, 0, 0, 14515), // 4: the boss row
+		placeMove(0, 0, 40, 0),                               // 5
+		placeMove(0, 0, 50, 0),                               // 6
+	)
+	for _, c := range []struct {
+		step int
+		want bool
+	}{{1, false}, {2, false}, {3, true}, {4, true}, {5, false}, {6, false}, {0, false}, {7, false}} {
+		if got := PlaceStepAtBoss(rows, c.step); got != c.want {
+			t.Errorf("PlaceStepAtBoss(%d) = %v, want %v", c.step, got, c.want)
+		}
+	}
+}
+
+// A wipe on a boss's hold row (a boss fought on the spot) resumes from the goal's start like one on a boss row; the
+// hold row of a plain event does not.
+func TestPlaceResumeGoalStartFromABossHoldRow(t *testing.T) {
+	bossHold := placeRow(planexport.KindHold, 0, 0, 50, 0, 5, 14515)
+	bossHold.Comment = "boss hold: the event's mobs are fought on the spot"
+	event := placeRow(planexport.KindHold, 0, 0, 70, 0, 5, 777)
+	event.Comment = "hold: an event"
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}},
+		placeMove(0, 0, 10, 0),
+		placeMove(0, 0, 30, 0),
+		bossHold, // 3
+		event,    // 4
+	)
+	if got, ok := PlaceResumeGoalStart(rows, 3, "step 1"); !ok || got != "step 1" {
+		t.Errorf("boss hold row: %q %v, want step 1", got, ok)
+	}
+	if got, ok := PlaceResumeGoalStart(rows, 4, "step 1"); ok {
+		t.Errorf("event hold row resumed at %q", got)
+	}
+}
+
+// A boss fought on the spot is a hold row commented "boss hold": a wipe there is a wipe at that boss too.
+func TestPlaceStepAtBossHoldRow(t *testing.T) {
+	hold := placeRow(planexport.KindHold, 0, 0, 35, 0, 5, 14515)
+	hold.Comment = "boss hold: fought on the spot"
+	event := placeRow(planexport.KindHold, 0, 0, 60, 0, 5, 777)
+	event.Comment = "hold: an event"
+	rows := placeRows([]planexport.LegRow{{Plan: "t", Leg: 0, Name: "one"}},
+		placeMove(0, 0, 30, 0), // 1: the row before the boss hold
+		hold,                   // 2
+		placeMove(0, 0, 50, 0), // 3
+		event,                  // 4
+	)
+	for _, c := range []struct {
+		step int
+		want bool
+	}{{1, true}, {2, true}, {3, false}, {4, false}} {
+		if got := PlaceStepAtBoss(rows, c.step); got != c.want {
+			t.Errorf("PlaceStepAtBoss(%d) = %v, want %v", c.step, got, c.want)
+		}
 	}
 }

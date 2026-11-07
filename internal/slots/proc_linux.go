@@ -3,6 +3,7 @@
 package slots
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -56,6 +57,36 @@ func (LinuxProbe) PortListening(port int) bool {
 	}
 	conn.Close()
 	return true
+}
+
+// readProcStat reads /proc/<pid>/stat; a test replaces it to make the read fail.
+var readProcStat = func(pid int) ([]byte, error) { return os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)) }
+
+// procStart reports a process's start time (field 22 of /proc/<pid>/stat, clock ticks since boot), whether the pid
+// exists now, and whether this platform could tell. An unreadable stat (hidepid, another user's process) is NOT a
+// dead pid: only kill 0's ESRCH says it is gone, so a live holder is never reaped. A parse failure is "cannot tell".
+func procStart(pid int) (start uint64, alive, exact bool) {
+	raw, err := readProcStat(pid)
+	if err != nil {
+		if kerr := syscall.Kill(pid, 0); errors.Is(kerr, syscall.ESRCH) {
+			return 0, false, true
+		}
+		return 0, true, false
+	}
+	s := string(raw)
+	rparen := strings.LastIndex(s, ")")
+	if rparen < 0 {
+		return 0, false, false
+	}
+	fields := strings.Fields(s[rparen+1:])
+	if len(fields) < 20 {
+		return 0, false, false
+	}
+	ticks, err := strconv.ParseUint(fields[19], 10, 64)
+	if err != nil {
+		return 0, false, false
+	}
+	return ticks, true, true
 }
 
 func ProcStart(pid int) (time.Time, error) {

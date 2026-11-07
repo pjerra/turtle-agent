@@ -1,10 +1,11 @@
 name: test
 
 # Gate for dev and main: every PR (to dev, main or a stacked feature branch) and every push runs the
-# job `test`; branch protection on dev and main requires it.
+# job `test`; branch protection on dev and main requires it. A push to a ci/** branch runs it too, so a worker can
+# run the full CI without a PR (docs/CI.md).
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, "ci/**"]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 

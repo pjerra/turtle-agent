@@ -19,6 +19,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/slots"
+	"github.com/pjerra/turtle-agent/internal/trashcheck"
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
@@ -116,6 +117,103 @@ func TestValidateGMClearSkipsBossGroupWithWarn(t *testing.T) {
 	}
 	if !strings.Contains(notes, "1 packs to kill") {
 		t.Fatalf("notes %q, want group 1 planned", notes)
+	}
+}
+
+// gmPatrolGUIDOf reads the creature_movement guid a plan patrol's source names (the first number in it).
+func gmPatrolGUIDOf(source string) uint64 {
+	i := strings.IndexFunc(source, func(r rune) bool { return r >= '0' && r <= '9' })
+	if i < 0 {
+		return 0
+	}
+	j := i
+	for j < len(source) && source[j] >= '0' && source[j] <= '9' {
+		j++
+	}
+	n, _ := strconv.ParseUint(source[i:j], 10, 64)
+	return n
+}
+
+// TestGMClearClearsOnlyTheRowsOwnZGPatrol: a --gm-clear group clears the patrol its own row's plan names and no other.
+// ZG's 11352 walks seven loops (49761 at Jeklik's stair, 49698/51947/51962/91493 at Venoxis's, 91435 at Thekal's, 91444
+// at Arlokk's, 49705 at Mandokir's, 51948 at Jin'do's); matching by entry and distance cleared every loop whose path came
+// near the row, so clearing one leg's group killed other legs' patrollers (Mandokir's row cleared Venoxis's 91493, and
+// every Venoxis patrol row cleared 91493 as well). The invariant: the cleared spawns are the row's trash packs' plus its
+// own patrol's, nothing else.
+func TestGMClearClearsOnlyTheRowsOwnZGPatrol(t *testing.T) {
+	res, err := planexport.Build(zgPlan(t), planexport.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	world, _, err := worldspawn.Load(gmClearZGSpawns, 309)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ownPatrol is the world patrol a plan source names: the one holding that spawn guid, or the one whose source is it.
+	ownPatrol := func(guid uint64) *worldspawn.Patrol {
+		for i := range world.Patrols {
+			p := &world.Patrols[i]
+			for _, g := range p.SpawnGUIDs {
+				if g == guid {
+					return p
+				}
+			}
+			if gmPatrolGUIDOf(p.Source) == guid {
+				return p
+			}
+		}
+		return nil
+	}
+	ordinal := map[int]int{}
+	checked := 0
+	for _, st := range res.Rows.Steps {
+		if st.Kind != planexport.KindPull && st.Kind != planexport.KindHold {
+			continue
+		}
+		ordinal[st.Leg]++
+		if st.PatrolSource == "" {
+			continue
+		}
+		guid := gmPatrolGUIDOf(st.PatrolSource)
+		own := ownPatrol(guid)
+		if own == nil {
+			t.Errorf("leg %d seq %d: the plan's patrol %q names no world patrol", st.Leg, st.Seq, st.PatrolSource)
+			continue
+		}
+		packs, warns, err := raidwalk.PlanGMClear(res.Rows, world, []raidwalk.GMClearSpec{{Leg: strconv.Itoa(st.Leg), Groups: []int{ordinal[st.Leg]}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(warns) != 0 {
+			t.Errorf("leg %d seq %d (%q): warnings %v", st.Leg, st.Seq, st.PatrolSource, warns)
+		}
+		got := map[uint64]bool{}
+		for _, p := range packs {
+			for g := range p.Members {
+				got[g] = true
+			}
+		}
+		allowed := map[uint64]bool{}
+		for _, p := range trashcheck.ClearedPacks(world, st) {
+			for _, g := range p.Members {
+				allowed[g] = true
+			}
+		}
+		for _, g := range own.SpawnGUIDs {
+			allowed[g] = true
+			if !got[g] {
+				t.Errorf("leg %d seq %d (%q): its own patrol's spawn %d is not cleared", st.Leg, st.Seq, st.PatrolSource, g)
+			}
+		}
+		for g := range got {
+			if !allowed[g] {
+				t.Errorf("leg %d seq %d (%q): spawn %d is neither the row's trash nor its own patrol (patrol %d)", st.Leg, st.Seq, st.PatrolSource, g, guid)
+			}
+		}
+		checked++
+	}
+	if checked < 10 {
+		t.Errorf("only %d patrol rows checked", checked)
 	}
 }
 
