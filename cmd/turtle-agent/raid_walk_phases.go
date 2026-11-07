@@ -2497,6 +2497,10 @@ func (w *walk) saveFights() {
 			w.note("fight records: no dashboard read before the walk's placement, so the at-start set (%d of %d records) came from their start times", len(w.fightIDsAtStart), len(rows))
 		}
 	}
+	// fights-run.json names this walk's at-start set (Problem 1, item 3): an analyser can filter the raw
+	// combat-fights.json list without START.epoch. The stamp is the walk's start (the same clock the
+	// at-start set's start-time fallback reads), not the read time.
+	_ = w.writeOut("fights-run.json", fightsRunJSON(w.started, w.fightIDsAtStart))
 	for _, r := range rows {
 		if r.ID == "" || r.Live || w.seenFights[r.ID] {
 			continue
@@ -2504,6 +2508,16 @@ func (w *walk) saveFights() {
 		fs := raidwalk.FightSummary{ID: r.ID, Step: int(r.Step), Leg: r.Leg, DurMS: int64(r.Dur),
 			Deaths: r.Deaths, Outcome: r.Outcome, BossName: r.BossName, Warnings: r.Warnings,
 			BossPhase: r.BossPhase, BossPhaseEntry: r.BossPhaseEntry}
+		if w.fightIDsAtStart[r.ID] {
+			// History (an earlier walk's or instance's finished record): tag it and keep it for
+			// creditFightKills and summary.json, but never fetch its detail or write
+			// combat-fight-<id>.json into this walk's dir. A still-live history row is skipped like
+			// any live row; when it finishes it is still in the at-start set, so it lands here.
+			fs.History = true
+			w.fights = append(w.fights, fs)
+			w.seenFights[r.ID] = true
+			continue
+		}
 		idx, pending := w.pendingFights[r.ID] // the row's fields are read fresh on every poll
 		// A fight whose detail could not be loaded or read is kept without it and fetched again on the next poll (and at teardown),
 		// so one dashboard timeout does not lose its death recap for good.
@@ -2528,6 +2542,21 @@ func (w *walk) saveFights() {
 			w.pendingFights[r.ID] = idx
 		}
 	}
+}
+
+// fightsRunJSON is the fights-run.json body: the walk's start and the sorted at-start (history) ids, so an
+// analyser can filter combat-fights.json's raw list without START.epoch.
+func fightsRunJSON(now time.Time, atStart map[string]bool) []byte {
+	ids := make([]string, 0, len(atStart))
+	for id := range atStart {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	raw, _ := json.Marshal(struct {
+		WalkStarted int64    `json:"walk_started"`
+		HistoryIDs  []string `json:"history_ids"`
+	}{WalkStarted: now.Unix(), HistoryIDs: ids})
+	return append(raw, '\n')
 }
 
 // fightFileID keeps a fight id safe for a file name.
@@ -5966,6 +5995,7 @@ func (w *walk) phaseTeardown() {
 	if w.dash != nil {
 		w.saveCommanders("end")
 		w.saveFights()
+		w.waitTeardownLiveFight()
 	}
 	listedOK := false
 	if w.agent != nil {
@@ -6014,6 +6044,50 @@ func (w *walk) phaseTeardown() {
 	} else {
 		w.teardownWd.HiresLeft = []string{}
 	}
+}
+
+// teardownLiveFightWait is how long phaseTeardown waits for a still-live fight (the monitor ends a fight 3 s
+// after the group leaves combat, so the kill fight can still be open when the walk's last saveFights runs).
+const teardownLiveFightWait = 30 * time.Second
+
+// teardownLiveFightPoll is the gap between teardown's fight-list re-reads.
+const teardownLiveFightPoll = 3 * time.Second
+
+// teardownLiveFightID is the first still-live row of this walk in the last successful read ("": none). History
+// rows belong to earlier walks and are skipped.
+func (w *walk) teardownLiveFightID() string {
+	for _, r := range w.fightRows {
+		if r.ID == "" || !r.Live || w.fightIDsAtStart[r.ID] {
+			continue
+		}
+		return r.ID
+	}
+	return ""
+}
+
+// waitTeardownLiveFight re-reads the fight list while the last successful read holds a still-live row of this
+// walk: the kill fight may still be open when teardown's first saveFights runs (walk 52 hk13t-1). endWipe and
+// handleBoss keep running, so their later polls save the fight; they get no such wait.
+func (w *walk) waitTeardownLiveFight() {
+	live := w.teardownLiveFightID()
+	if live == "" {
+		return
+	}
+	first := live
+	used := time.Duration(0)
+	for used < teardownLiveFightWait {
+		if err := w.env.sleep(context.Background(), teardownLiveFightPoll); err != nil {
+			return
+		}
+		used += teardownLiveFightPoll
+		w.saveFights()
+		if live = w.teardownLiveFightID(); live == "" {
+			w.note("fight records: waited %d s at teardown for live fight %s to end", int(used/time.Second), first)
+			return
+		}
+		first = live
+	}
+	w.note("fight records: fight %s still live after 30 s at teardown: not saved", first)
 }
 
 // firstLine is a report's first line, for an error text.
