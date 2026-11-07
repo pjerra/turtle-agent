@@ -95,7 +95,7 @@ Usage: `turtle-agent raid-walk <plan> [--server <server>] [--slot N] ...` or `tu
 | `--practice-cycles` | `10` | The mechanic cycles the run collects before it ends. | `--practice-cycles 10` |
 | `--practice-max` | `20m` | The practice loop's wall-time ceiling. Reaching it stops the practice with exit 18 (`practice stopped: max time`). | `--practice-max 25m` |
 | `--practice-rest` | `30s` | The out-of-combat rest between attempts (restarts if a hire enters combat). | `--practice-rest 45s` |
-| `--practice-boss-floor` | `40` | The boss HP percent below which a cycle restores it to its own max. | `--practice-boss-floor 50` |
+| `--practice-boss-floor` | `40` | The boss HP percent below which it is restored to its own max: checked on every poll and at every cycle row. | `--practice-boss-floor 50` |
 | `--practice-sustain` | `on` | Revive dead hires and restore the boss at each cycle (`on` or `off`). | `--practice-sustain=off` |
 | `--practice-window` | `120s` | The cycle window of an entry the mechanic table does not know: one cycle per window, no spell detection, 3 cycles per attempt, no respawn set. | `--practice-window 90s` |
 
