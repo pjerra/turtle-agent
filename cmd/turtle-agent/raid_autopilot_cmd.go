@@ -491,6 +491,11 @@ func autoCommandArgs(binary string, t raidwalk.AutoTarget, out, from string, reu
 		"--until", t.Goal.Until(),
 		"--out", out,
 	)
+	if t.Goal.Kind == "practice" {
+		// The practice loop ends the walk itself: the run carries the mechanic entry and its cycle budget.
+		args = append(args, "--practice", strconv.FormatUint(uint64(t.Goal.Boss), 10),
+			"--practice-cycles", strconv.Itoa(t.Goal.Cycles))
+	}
 	if from != "" {
 		args = append(args, "--from", from, "--place")
 	}
@@ -1986,6 +1991,7 @@ func (s *autoSupervisor) observe(st *autoState) raidwalk.AutoObservation {
 		return o
 	}
 	o.StepsReached, o.StepsTotal, o.EndReason = sum.StepsReached, sum.StepsTotal, sum.EndReason
+	o.PracticeCycles = sum.PracticeCycles
 	o.HirePoolWait = raidwalk.HirePoolRefused(sum.EndReason)
 	if sum.ExitCode != 0 {
 		o.ExitCode = sum.ExitCode
@@ -2011,6 +2017,18 @@ type autoSummary struct {
 	BossKills    []autoBossKill `json:"boss_kills"`
 	// BossKill is the last boss the walk engaged (older summaries only; boss_kills has all of them).
 	BossKill *autoBossKill `json:"boss_kill"`
+	// Practice is the practice run's cycle object; PracticeCycles is its cycles (a practice goal's measure).
+	Practice       *autoPractice `json:"practice,omitempty"`
+	PracticeCycles int           `json:"-"`
+}
+
+// autoPractice is the summary practice object the autopilot reads.
+type autoPractice struct {
+	Entry    uint32 `json:"entry"`
+	Attempts int    `json:"attempts"`
+	Cycles   int    `json:"cycles"`
+	Ended    string `json:"ended"`
+	Rows     string `json:"rows,omitempty"`
 }
 
 // autoBossKill is one summary boss record. phase_entry is the entry the boss's guid read last (Thekal's row is
@@ -2040,6 +2058,9 @@ func autoReadSummary(path string) (autoSummary, error) {
 	}
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return s, err
+	}
+	if s.Practice != nil {
+		s.PracticeCycles = s.Practice.Cycles
 	}
 	return s, nil
 }
