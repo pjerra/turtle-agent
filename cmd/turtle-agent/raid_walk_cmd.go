@@ -255,7 +255,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.sql, "sql", "", "the deployed migration: step numbers and the first point come from it")
 	fs.StringVar(&o.until, "until", "boss", "boss (stops before it), boss-done (after the boss step), none, \"step N\" or \"leg L\"")
 	fs.StringVar(&o.from, "from", "", "\"leg L\" or \"step N\" for the run leader")
-	fs.Var(onOffFlag{v: &o.place, name: "--place"}, "place", "with --from: put the raid at that start inside the instance, clearing the legs it skips; a same-instance placement ends at once with exit 29 (`fresh instance needed`) when half the hires are dead or the start leg's boss is fighting the party (Eluna test toolkit: m910q or tortoise-test2 only)")
+	fs.Var(onOffFlag{v: &o.place, name: "--place"}, "place", "with --from: put the raid at that start inside the instance, clearing the legs it skips; a same-instance placement ends at once with exit 29 (`fresh instance needed`) when half the hires are dead or the start leg's boss is fighting the party (Eluna test toolkit: m910q, tortoise-test2 or tortoise-test3 only)")
 	fs.BoolVar(&o.reuseInstance, "reuse-instance", false, "with --place: keep the raid's CURRENT instance (no fresh instance is entered or counted, so the instance cap is untouched). A live raid is kept; a logged-out raid is resumed from the commander's live bind; with no bind the walk says so and falls back to a fresh entry. Combines with --gm-clear")
 	fs.StringVar(&speed, "speed", "1.0", "the run's test speed, 1.0 to 3.0")
 	fs.StringVar(&o.hires, "hires", "", "the tb-raid-roster v1 file (default: from the plan's raid block)")
@@ -477,7 +477,7 @@ func parseGMClearSpecs(groups, bosses []string) ([]raidwalk.GMClearSpec, error) 
 }
 
 // placeServers are the servers whose Eluna test toolkit can move a raid (spec 3). --place refuses every other one.
-var placeServers = map[string]bool{"m910q": true, "tortoise-test2": true}
+var placeServers = map[string]bool{"m910q": true, "tortoise-test2": true, "tortoise-test3": true}
 
 // gmKillAuthorize is gmKillAllowed with the slots table read from its default path (the file slot setup and teardown read;
 // slots.Load holds it to mode 0600 in a folder no one else can write). Login and reconnect call it with the address the
