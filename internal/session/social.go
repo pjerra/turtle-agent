@@ -16,6 +16,7 @@ func (s *Session) registerSocial() {
 	s.handlers[opcode.SMSGChannelNotify] = s.onChannelNotify
 	s.handlers[opcode.SMSGGossipMessage] = s.onGossipMessage
 	s.handlers[opcode.SMSGGossipComplete] = s.onGossipComplete
+	s.handlers[opcode.SMSGActivatetaxireply] = s.onActivateTaxiReply
 }
 
 // JoinChannel joins a chat channel (CMSG_JOIN_CHANNEL); the server answers with
@@ -137,7 +138,8 @@ func (s *Session) onGossipComplete([]byte) error {
 }
 
 // ActivateTaxi asks the flight master npc for a flight along nodes (source first): two nodes
-// send CMSG_ACTIVATETAXI, more send CMSG_ACTIVATETAXIEXPRESS, as the client does.
+// send CMSG_ACTIVATETAXI, more send CMSG_ACTIVATETAXIEXPRESS, as the client does. The
+// server's answer comes back as a taxi_reply event; a refusal is only that event.
 func (s *Session) ActivateTaxi(ctx context.Context, npc packet.GUID, nodes []uint32) error {
 	if npc == 0 {
 		return errors.New("taxi: no flight master guid")
@@ -145,14 +147,25 @@ func (s *Session) ActivateTaxi(ctx context.Context, npc packet.GUID, nodes []uin
 	if len(nodes) < 2 {
 		return errors.New("taxi: need at least a source and a destination node")
 	}
-	_, err := s.do(ctx, func() (any, error) {
-		if err := s.inWorld(); err != nil {
-			return nil, err
-		}
-		if len(nodes) == 2 {
-			return nil, s.conn.WritePacket(opcode.CMSGActivatetaxi, game.BuildActivateTaxi(npc, nodes[0], nodes[1]))
-		}
-		return nil, s.conn.WritePacket(opcode.CMSGActivatetaxiexpress, game.BuildActivateTaxiExpress(npc, nodes))
-	})
-	return err
+	var op uint16
+	var body []byte
+	if len(nodes) == 2 {
+		op, body = opcode.CMSGActivatetaxi, game.BuildActivateTaxi(npc, nodes[0], nodes[1])
+	} else {
+		op, body = opcode.CMSGActivatetaxiexpress, game.BuildActivateTaxiExpress(npc, nodes)
+	}
+	return s.send(ctx, op, body)
+}
+
+// onActivateTaxiReply logs the flight master's answer: 0 means the flight was accepted
+// and shows up as movement instead; anything else names the refusal.
+func (s *Session) onActivateTaxiReply(body []byte) error {
+	t, err := game.ParseActivateTaxiReply(body)
+	if err != nil {
+		return err
+	}
+	s.emit(events.Event{Kind: events.KindTaxiReply,
+		Text: "taxi reply: " + game.TaxiReplyName(t.Result),
+		Data: map[string]any{"result": t.Result, "reason": game.TaxiReplyName(t.Result)}})
+	return nil
 }

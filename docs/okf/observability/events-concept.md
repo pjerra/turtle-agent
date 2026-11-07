@@ -31,6 +31,7 @@ There are over eighty kinds. The ones you meet first:
 - Combat: `melee`, `spell_damage`, `periodic`, `heal`, `energize`, `spell_start`, `spell_go`, `spell_fail`, `spell_miss`, `aura_applied`, `aura_removed`, `death`, `kill`, `attack_start`, `attack_stop`, `cooldown_start`, `channel_start`.
 - Loot and vendors: `loot_roll_start`, `loot_roll`, `loot_roll_won`, `loot_open`, `loot_taken`, `loot_money`, `vendor_list`, `vendor_buy`, `vendor_sell`, `trainer_list`.
 - Quests and gossip: `gossip`, `gossip_complete`, `quest_list`, `quest_details`, `quest_accepted`, `quest_rewarded`, `quest_update`, `quest_error`.
+- Travel: `taxi_reply` (the flight master's answer: `{result, reason}`, `ok` when the flight was accepted).
 - The dungeon driver: `dungeon_leg`, `dungeon_step`, `dungeon_failed`, `dungeon_done`, `dungeon_leader`, `player_follow`.
 - The brain: `brain_decision`, `brain_idle`, `brain_state`, `bot_view_frame`.
 - Pets and trade: `pet_summoned`, `pet_died`, `pet_revived`, `pet_dismissed`, `pet_error`, `trade_status`.
