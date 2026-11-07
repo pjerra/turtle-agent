@@ -161,10 +161,15 @@ type PracticeSummary struct {
 	Attempts int    `json:"attempts"`
 	Cycles   int    `json:"cycles"`
 	// Ended is why the practice stopped: cycles, "max time", "boss killed during practice", "3 failed resets",
-	// "4 attempts" or "stalled at step N".
+	// "4 attempts", "stalled at step N", "boss not bound" (several units of the entry and no single engaged one),
+	// "resume timed out" (the run did not come back after a reset), or "never engaged" (a --practice walk whose loop
+	// never started: the boss never engaged).
 	Ended string `json:"ended"`
 	// Rows is the per-cycle JSONL file in the out dir (walk-report joins it to the server's siphon rows by time).
 	Rows string `json:"rows"`
+	// FightIDs are the dashboard fights that started at or after the practice start: the practice attempts, which the
+	// fight tools (zg-tally, reportcard, walk-report) skip. Always a list, never null.
+	FightIDs []string `json:"fight_ids"`
 }
 
 // PlaceSummary is the summary's `place` object (spec 5.11).

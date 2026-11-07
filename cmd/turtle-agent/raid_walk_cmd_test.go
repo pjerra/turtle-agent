@@ -137,8 +137,11 @@ type walkFakeAgent struct {
 	enterBusy    int // the first enterBusy enter orders answer ERR busy
 	enterCalls   int
 	onGM         func(line string)
-	// onResume runs when the walk sends `run resume` through the commander RPC (nil: ACK only).
+	// onResume runs when the walk sends `run resume` through the commander RPC (nil: ACK only). runEnded models the
+	// commander's run book: a `.bot run stop` ENDS the run and erases its slot, so a later `run resume` answers "No run
+	// is going" (the practice reset must pause, never stop).
 	onResume func()
+	runEnded bool
 	// runVerbs records every `run` commander request's verb, in order, and onSkip runs for one whose verb is skip
 	// (walk 24 B: the boss-not-found skip). skipErr makes that skip answer an error (a refusal).
 	// (walk 24 B: the boss-not-found skip). skipErr makes that skip answer an error (a refusal). pauseErr, when
@@ -164,7 +167,7 @@ type walkFakeAgent struct {
 	// scenario; nil leaves the world unchanged. spellQueue holds the cast events the practice loop's own events read
 	// (kinds spell_start/spell_go) delivers once the fake clock reaches their time.
 	onEvade    func(g packet.GUID)
-	onSetHP    func(g packet.GUID, hp uint32)
+	onSetHP    func(g packet.GUID)
 	onRespawn  func(g packet.GUID)
 	onRevive   func(name string)
 	spellQueue []queuedSpell
@@ -498,20 +501,24 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		}
 	case "gm_set_hp":
 		var p struct {
-			GUID string `json:"guid"`
-			HP   uint32 `json:"hp"`
+			GUID string  `json:"guid"`
+			HP   *uint32 `json:"hp"`
 		}
 		_ = json.Unmarshal(raw, &p)
+		if p.HP != nil {
+			// The RPC takes the guid only: any explicit hp is refused before the session reads the unit.
+			return fmt.Errorf("gm_set_hp: the hp argument is refused (the unit is restored to its own max health): got %d", *p.HP)
+		}
 		g, err := packet.ParseGUID(p.GUID)
 		if err != nil {
 			f.t.Errorf("gm_set_hp %q: %v", p.GUID, err)
 		}
 		f.mu.Lock()
-		f.log = append(f.log, fmt.Sprintf("gm_set_hp %s %d", g, p.HP))
+		f.log = append(f.log, "gm_set_hp "+g.String())
 		h := f.onSetHP
 		f.mu.Unlock()
 		if h != nil {
-			h(g, p.HP)
+			h(g)
 		}
 	case "gm_revive":
 		var p struct {
@@ -613,6 +620,12 @@ func (f *walkFakeAgent) goArrive(fromMap uint32) { // f.mu held
 
 // gmSide is what the game does for a GM line.
 func (f *walkFakeAgent) gmSide(line string) {
+	if strings.TrimSpace(line) == ".bot run stop" {
+		f.mu.Lock()
+		f.runEnded = true
+		f.mu.Unlock()
+		return
+	}
 	switch {
 	case strings.HasPrefix(line, ".bot hire raid ") && (len(f.hireShort) > 0 || len(f.hireReply) > 0):
 		f.hireSideShort(line)
@@ -1314,6 +1327,7 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 		if p.Verb == "start" {
 			f.mu.Lock()
 			f.runStarted = true
+			f.runEnded = false
 			f.startArgs = strings.Join(p.Args, "|")
 			q := f.startQueue
 			f.startQueue = nil
@@ -1347,8 +1361,13 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 		}
 		if p.Verb == "resume" {
 			f.mu.Lock()
+			ended := f.runEnded
 			hook := f.onResume
 			f.mu.Unlock()
+			if ended {
+				return commanderReply{Reply: tbm.Reply{Kind: "err", Err: &tbm.Err{Intent: "run resume", Code: "no-run",
+					Message: "No run is going"}}}
+			}
 			if hook != nil {
 				hook()
 			}

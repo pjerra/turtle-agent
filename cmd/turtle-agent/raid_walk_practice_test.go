@@ -3,7 +3,8 @@ package main
 // The practice loop's tests, on the walk's fake environment: the clock, the frames, the events and the fake agent's
 // practice GM hands. They pin the two-attempt shape (5 siphon cycles each, one reset with evade, revive, respawn and
 // resume), the timer fallback when the cast events are missing, a boss death ending the practice without a kill, the
-// three-failed-resets stop, the never-unselected respawn rule and the wall-time ceiling.
+// three-failed-resets stop, the never-unselected respawn rule and the wall-time ceiling, plus the re-engagement clock,
+// the spell_go-only cycle rule, the boss-guid binding, the never-engaged summary and the practice fight ids.
 
 import (
 	"context"
@@ -19,6 +20,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -30,24 +32,43 @@ func practiceSonGUID() packet.GUID {
 	return packet.GUID(uint64(packet.HighUnit)<<48 | 11357<<24 | 0x21)
 }
 
+// practiceTrashGUID is a second unit of the boss's own entry (a duplicate-entry trash unit): the practice must never
+// touch it.
+func practiceTrashGUID() packet.GUID {
+	return packet.GUID(uint64(packet.HighUnit)<<48 | 14834<<24 | 0x79)
+}
+
 // practiceScenario is the fake test server's practice state: the boss's HP and target, the Son's death and which hires
 // are dead. The hooks below model what each GM command does.
 type practiceScenario struct {
-	mu        sync.Mutex
-	armed     bool
-	bossHP    int
-	target    packet.GUID
-	sonDead   bool
-	dead      map[string]bool
-	dropAt    time.Time
-	dropped   bool
-	killBoss  bool
-	noCasts   bool
-	evadeN    int
-	respawnN  int
-	reviveN   int
-	onEvade   func()
-	attemptAt time.Time
+	mu       sync.Mutex
+	armed    bool
+	bossHP   int
+	target   packet.GUID
+	sonDead  bool
+	dead     map[string]bool
+	dropAt   time.Time
+	dropped  bool
+	killBoss bool
+	noCasts  bool
+	// firstCasts, when set, replaces the default cast queue of the first attempt (the START/GO and dedupe tests).
+	firstCasts func(start time.Time)
+	// pullDelay is how long after the evade the boss re-engages (a slow pull); noReengage never re-engages (a failed
+	// reset). reengageAt is the clock time the pull is due and castsAt the time the fake actually re-engaged.
+	pullDelay  time.Duration
+	noReengage bool
+	reengageAt time.Time
+	evadeAt    time.Time
+	castsAt    time.Time
+	reengaged  bool
+	// extraTrash adds a second unit of the boss's entry to the client's unit list (a duplicate-entry trash unit):
+	// nothing may touch its guid.
+	extraTrash bool
+	evadeN     int
+	respawnN   int
+	reviveN    int
+	onEvade    func()
+	attemptAt  time.Time
 }
 
 // practiceFixture is a Zul'Gurub walk that starts on Hakkar's boss row with the frames holding him engaged, ready for
@@ -81,7 +102,7 @@ func practiceFixture(t *testing.T, sc *practiceScenario, cycles int) (*fixture, 
 		for k := 1; k <= 5; k++ {
 			at := startAt.Add(time.Duration(k*90) * time.Second)
 			f.agent.spellQueue = append(f.agent.spellQueue, queuedSpell{at: at,
-				ev: events.Event{Kind: events.KindSpellStart, SourceGUID: practiceBossGUID(), SpellID: 24324, Time: at}})
+				ev: events.Event{Kind: events.KindSpellGo, SourceGUID: practiceBossGUID(), SpellID: 24324, Time: at}})
 		}
 	}
 
@@ -99,6 +120,20 @@ func practiceFixture(t *testing.T, sc *practiceScenario, cycles int) (*fixture, 
 				sc.dropAt = now.Add(95 * time.Second)
 			}
 			if !sc.killBoss && !sc.noCasts {
+				if sc.firstCasts != nil {
+					sc.firstCasts(now)
+				} else {
+					enqueue(now)
+				}
+			}
+		}
+		// The pull after a reset: the boss re-engages (targets a party member) once the delay passed, and its casts
+		// are queued from that moment (the core's Reset() restarts the timer at the pull).
+		if started && !sc.reengaged && !sc.reengageAt.IsZero() && !sc.noReengage && !now.Before(sc.reengageAt) {
+			sc.reengaged = true
+			sc.castsAt = now
+			sc.target = packet.GUID(1000)
+			if !sc.noCasts && !sc.killBoss {
 				enqueue(now)
 			}
 		}
@@ -128,27 +163,37 @@ func practiceFixture(t *testing.T, sc *practiceScenario, cycles int) (*fixture, 
 	}
 	f.agent.unitsFn = func(n int) []objects.Unit {
 		sc.mu.Lock()
-		hp, sonDead := sc.bossHP, sc.sonDead
+		hp, sonDead, trash := sc.bossHP, sc.sonDead, sc.extraTrash
 		sc.mu.Unlock()
-		return []objects.Unit{
+		out := []objects.Unit{
 			{GUID: practiceBossGUID(), Entry: 14834, Type: "creature", Health: uint32(hp * 420), MaxHealth: 42000, Dead: hp == 0},
 			{GUID: practiceSonGUID(), Entry: 11357, Type: "creature", Health: map[bool]uint32{true: 0, false: 100}[sonDead],
 				MaxHealth: 100, Dead: sonDead},
 		}
+		if trash {
+			// A second unit of the boss's entry the client holds (a duplicate-entry trash unit): never the boss.
+			out = append(out, objects.Unit{GUID: practiceTrashGUID(), Entry: 14834, Type: "creature", Health: 42000, MaxHealth: 42000})
+		}
+		return out
 	}
 	f.agent.onEvade = func(g packet.GUID) {
 		sc.mu.Lock()
 		sc.evadeN++
 		sc.bossHP, sc.target = 100, 0
+		sc.reengaged = false
+		sc.evadeAt = f.clock.now()
+		// The reset's own verdict is read from the next frame (the boss home, 100 %, no target): the pull cannot come
+		// before it, so the fake's base delay covers that observation.
+		sc.reengageAt = sc.evadeAt.Add(4*time.Second + sc.pullDelay)
 		hook := sc.onEvade
 		sc.mu.Unlock()
 		if hook != nil {
 			hook()
 		}
 	}
-	f.agent.onSetHP = func(g packet.GUID, hp uint32) {
+	f.agent.onSetHP = func(g packet.GUID) {
 		sc.mu.Lock()
-		sc.bossHP = int(hp / 420)
+		sc.bossHP = 100
 		sc.mu.Unlock()
 	}
 	f.agent.onRespawn = func(g packet.GUID) {
@@ -205,7 +250,8 @@ func countLog(log []string, prefix string) int {
 }
 
 // TestPracticeTwoAttemptsTenCycles: 5 siphon casts per attempt, one reset in between, 10 cycles total. The reset's
-// sequence is stop, evade, revive, respawn, resume; the sustain revives a dead hire and restores the boss's HP.
+// sequence is pause (the commander's run pause, never a run stop), evade, revive, respawn, resume; the sustain revives
+// a dead hire and restores the boss's HP.
 func TestPracticeTwoAttemptsTenCycles(t *testing.T) {
 	sc := &practiceScenario{sonDead: true}
 	f, _, _ := practiceFixture(t, sc, 10)
@@ -218,19 +264,6 @@ func TestPracticeTwoAttemptsTenCycles(t *testing.T) {
 		}
 		return ttResult{}, nil
 	}
-	// The next attempt's casts are queued when the boss is evaded, as the live core's Reset() starts them again.
-	sc.mu.Lock()
-	sc.onEvade = func() {
-		f.agent.mu.Lock()
-		defer f.agent.mu.Unlock()
-		start := f.clock.now()
-		for k := 1; k <= 5; k++ {
-			at := start.Add(time.Duration(k*90) * time.Second)
-			f.agent.spellQueue = append(f.agent.spellQueue, queuedSpell{at: at,
-				ev: events.Event{Kind: events.KindSpellStart, SourceGUID: practiceBossGUID(), SpellID: 24324, Time: at}})
-		}
-	}
-	sc.mu.Unlock()
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d, want 0 (notes %v): %s\n%s", code, f.summaryNotes(), f.stderr.String(), f.stdout.String())
 	}
@@ -264,12 +297,26 @@ func TestPracticeTwoAttemptsTenCycles(t *testing.T) {
 	if rows[0].Detect != "event" || rows[9].Detect != "event" {
 		t.Fatalf("detect %q/%q, want event", rows[0].Detect, rows[9].Detect)
 	}
-	if rows[0].SonsKnown != 1 || rows[0].BossHPPct >= f.opts.practiceBossFloor || !rows[0].Sustain.BossHPSet || len(rows[0].Sustain.Revived) != 1 {
+	// The hire died and the boss dipped to 30 % between the cast and the row: the poll's sustain revived the hire and
+	// the poll's floor check restored the boss before the row was written (not only at the row).
+	if rows[0].SonsKnown != 1 || rows[0].BossHPPct < f.opts.practiceBossFloor || len(rows[0].Sustain.Revived) != 1 {
 		t.Fatalf("cycle 1 row does not hold the sustain: %+v", rows[0])
 	}
+	if n := countLog(f.agent.log, "gm_set_hp "); n < 1 {
+		t.Fatalf("no hp restore went out (log %v)", f.agent.log)
+	}
+	if rows[0].Sustain.BossHPSet {
+		t.Fatal("the row itself restored the boss: the poll's floor check did not fire between the cast and the row")
+	}
+	if !strings.Contains(readFile(t, filepath.Join(f.out, "run.log")), "between rows: restored") {
+		t.Fatalf("the poll's floor restore is not in run.log")
+	}
 	log := f.agent.log
-	if n := countLog(log, "gm .bot run stop"); n != 1 {
-		t.Fatalf("%d run stops, want 1 (log %v)", n, log)
+	if n := countLog(log, "gm .bot run stop"); n != 0 {
+		t.Fatalf("%d run stops, want 0 (a stop ends the run and erases its slot; log %v)", n, log)
+	}
+	if n := countLog(log, "cmdr run pause"); n != 1 {
+		t.Fatalf("%d run pauses, want 1 (log %v)", n, log)
 	}
 	if sc.evadeN != 1 {
 		t.Fatalf("%d evades, want 1", sc.evadeN)
@@ -283,7 +330,7 @@ func TestPracticeTwoAttemptsTenCycles(t *testing.T) {
 	if n := countLog(f.agent.runVerbs, "resume"); n != 1 {
 		t.Fatalf("%d run resumes, want 1", n)
 	}
-	// The reset's order: stop, evade, revive, respawn, and the resume after them.
+	// The reset's order: pause, evade, revive, respawn, and the resume after them.
 	idx := func(prefix string) int {
 		for i, l := range log {
 			if strings.HasPrefix(l, prefix) {
@@ -292,9 +339,9 @@ func TestPracticeTwoAttemptsTenCycles(t *testing.T) {
 		}
 		return -1
 	}
-	stop, evade, respawn, inst := idx("gm .bot run stop"), idx("gm_evade "), idx("gm_respawn "), idx("gm .debug instancedata")
-	if stop < 0 || evade < 0 || respawn < 0 || inst < 0 || !(stop < evade && evade < respawn && respawn < inst) {
-		t.Fatalf("reset order stop %d, evade %d, respawn %d, instancedata %d (log %v)", stop, evade, respawn, inst, log)
+	pause, evade, respawn, inst := idx("cmdr run pause"), idx("gm_evade "), idx("gm_respawn "), idx("gm .debug instancedata")
+	if pause < 0 || evade < 0 || respawn < 0 || inst < 0 || !(pause < evade && evade < respawn && respawn < inst) {
+		t.Fatalf("reset order pause %d, evade %d, respawn %d, instancedata %d (log %v)", pause, evade, respawn, inst, log)
 	}
 	if !strings.Contains(log[inst], ".debug instancedata 1 3") {
 		t.Fatalf("the instance data was not the leg's line: %q", log[inst])
@@ -401,18 +448,6 @@ func TestPracticeFailedResetsStop(t *testing.T) {
 func TestPracticeNoUnselectedRespawn(t *testing.T) {
 	sc := &practiceScenario{sonDead: true}
 	f, _, _ := practiceFixture(t, sc, 10)
-	sc.mu.Lock()
-	sc.onEvade = func() {
-		f.agent.mu.Lock()
-		defer f.agent.mu.Unlock()
-		start := f.clock.now()
-		for k := 1; k <= 5; k++ {
-			at := start.Add(time.Duration(k*90) * time.Second)
-			f.agent.spellQueue = append(f.agent.spellQueue, queuedSpell{at: at,
-				ev: events.Event{Kind: events.KindSpellStart, SourceGUID: practiceBossGUID(), SpellID: 24324, Time: at}})
-		}
-	}
-	sc.mu.Unlock()
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s", code, f.stderr.String())
 	}
@@ -464,4 +499,235 @@ func lastLog(log []string, prefix string) string {
 		}
 	}
 	return ""
+}
+
+// TestPracticePullDelay: the attempt after a reset is clocked from the re-engagement, not from the reset. The boss is
+// pulled 20 s after it reset; the attempt's casts are 90 s after the pull (the core's Reset() timer starts then), so
+// the rows shift with the pull.
+func TestPracticePullDelay(t *testing.T) {
+	sc := &practiceScenario{pullDelay: 20 * time.Second}
+	f, _, _ := practiceFixture(t, sc, 10)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (notes %v): %s", code, f.summaryNotes(), f.stderr.String())
+	}
+	rows := f.practiceRows(t)
+	if len(rows) != 10 || rows[5].Attempt != 2 {
+		t.Fatalf("%d rows, want 10 with the second attempt at row 5: %+v", len(rows), rows)
+	}
+	if sc.evadeAt.IsZero() || sc.castsAt.IsZero() {
+		t.Fatal("the fake never evaded or re-engaged")
+	}
+	if d := sc.castsAt.Sub(sc.evadeAt); d < 20*time.Second {
+		t.Fatalf("the boss re-engaged %s after the reset, want at least the 20 s pull delay", d)
+	}
+	// The first cast of attempt 2 is 90 s after the RE-ENGAGEMENT, not 90 s after the reset (which would be early by
+	// the pull delay).
+	want := sc.castsAt.Add(90 * time.Second).Format(time.RFC3339)
+	if rows[5].CastAt != want {
+		t.Fatalf("attempt 2's first cast at %s, want %s (the re-engagement + FirstAtS)", rows[5].CastAt, want)
+	}
+	if rows[5].Detect != "event" {
+		t.Fatalf("detect %q, want event", rows[5].Detect)
+	}
+}
+
+// TestPracticeNoReengageIsFailedReset: a reset after which the boss never fights again is a failed reset. Three in a
+// row end the practice with "3 failed resets" (exit 18), even though the boss itself reset.
+func TestPracticeNoReengageIsFailedReset(t *testing.T) {
+	sc := &practiceScenario{noReengage: true}
+	f, _, _ := practiceFixture(t, sc, 10)
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d (notes %v): %s", code, exitRaidWalkFailed, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Ended != "3 failed resets" || sum.Practice.Cycles != 5 {
+		t.Fatalf("practice %+v, want 3 failed resets after the first attempt's 5 cycles", sum.Practice)
+	}
+	// 1 real attempt + 3 attempts whose reset never brought the boss back.
+	if sum.Practice.Attempts != 4 {
+		t.Fatalf("%d attempts, want 4", sum.Practice.Attempts)
+	}
+	if !hasNote(sum, "did not re-engage within") {
+		t.Fatalf("notes %v, want the failed re-engagement note", sum.Notes)
+	}
+}
+
+// TestPracticeSpellGoOnly: one cast is one spell_go. A spell_start and a duplicate spell_go within EverySec/2 are the
+// same cast, spread over separate events pages, and yield one cycle.
+func TestPracticeSpellGoOnly(t *testing.T) {
+	sc := &practiceScenario{}
+	casts := make(chan time.Time, 1)
+	var f *fixture
+	sc.firstCasts = func(start time.Time) {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		goAt := start.Add(90 * time.Second)
+		casts <- goAt
+		f.agent.spellQueue = append(f.agent.spellQueue,
+			queuedSpell{at: goAt, ev: events.Event{Kind: events.KindSpellStart, SourceGUID: practiceBossGUID(), SpellID: 24324, Time: goAt}},
+			queuedSpell{at: goAt.Add(time.Second), ev: events.Event{Kind: events.KindSpellGo, SourceGUID: practiceBossGUID(), SpellID: 24324, Time: goAt.Add(time.Second)}},
+			queuedSpell{at: goAt.Add(11 * time.Second), ev: events.Event{Kind: events.KindSpellGo, SourceGUID: practiceBossGUID(), SpellID: 24324, Time: goAt.Add(11 * time.Second)}},
+		)
+	}
+	f, _, _ = practiceFixture(t, sc, 1)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (notes %v): %s", code, f.summaryNotes(), f.stderr.String())
+	}
+	var goAt time.Time
+	select {
+	case goAt = <-casts:
+	default:
+		t.Fatal("the fake never queued the casts")
+	}
+	rows := f.practiceRows(t)
+	if len(rows) != 1 {
+		t.Fatalf("%d rows, want 1 (the spell_start and the duplicate spell_go are one cast): %+v", len(rows), rows)
+	}
+	if rows[0].Detect != "event" || rows[0].CastAt != goAt.Add(time.Second).Format(time.RFC3339) {
+		t.Fatalf("row %+v, want the spell_go at %s", rows[0], goAt.Add(time.Second).Format(time.RFC3339))
+	}
+}
+
+// TestPracticeNeverEngagedSummary: a --practice walk whose loop never started still carries the practice object (ended
+// "never engaged"), so the walk is ASSISTED and BuildSummary clears every boss kill.
+func TestPracticeNeverEngagedSummary(t *testing.T) {
+	w := &walk{opts: raidWalkOptions{practiceEntry: 14834}}
+	got := w.practiceSummary()
+	if got == nil || got.Entry != 14834 || got.Ended != "never engaged" || got.Rows != "practice.jsonl" || got.FightIDs == nil {
+		t.Fatalf("practiceSummary %+v, want the never-engaged object", got)
+	}
+	sum := raidwalk.BuildSummary(nil, raidwalk.SummaryMeta{
+		Plan: "zul_gurub", Practice: got,
+		BossKill:  &raidwalk.BossKillSummary{Entry: 14834, Killed: true},
+		BossKills: []raidwalk.BossKillSummary{{Entry: 14834, Killed: true}},
+	})
+	if !sum.Assisted || sum.Practice == nil || sum.Practice.Ended != "never engaged" {
+		t.Fatalf("summary %+v, want practice + assisted", sum.Practice)
+	}
+	if sum.BossKill != nil || len(sum.BossKills) != 0 {
+		t.Fatalf("a practice walk kept a boss kill: %+v %+v", sum.BossKill, sum.BossKills)
+	}
+}
+
+// TestPracticeFightIDs: the practice object names the dashboard fights that started at or after the practice start, and
+// fights-run.json marks the run as a practice one (the fight tools skip those).
+func TestPracticeFightIDs(t *testing.T) {
+	sc := &practiceScenario{sonDead: true}
+	f, _, _ := practiceFixture(t, sc, 10)
+	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
+	oldStart := f.clock.now().Add(-time.Hour).Unix()
+	newStart := f.clock.now().Add(time.Hour).Unix()
+	f.dash.fights = []walkFightRow{
+		{ID: "before-practice", Key: "k1", Start: oldStart, Outcome: "kill"},
+		{ID: "during-practice", Key: "k2", Start: newStart, Outcome: "kill"},
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (notes %v): %s", code, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || len(sum.Practice.FightIDs) != 1 || sum.Practice.FightIDs[0] != "during-practice" {
+		t.Fatalf("practice fight_ids %v, want [during-practice]", sum.Practice)
+	}
+	var run struct {
+		Practice bool `json:"practice"`
+	}
+	if err := json.Unmarshal([]byte(readFile(t, filepath.Join(f.out, "fights-run.json"))), &run); err != nil {
+		t.Fatalf("fights-run.json: %v", err)
+	}
+	if !run.Practice {
+		t.Fatalf("fights-run.json does not mark the practice run: %s", readFile(t, filepath.Join(f.out, "fights-run.json")))
+	}
+}
+
+// TestPracticeDuplicateEntryTrashUntouched: a second unit of the boss's entry (a duplicate-entry trash unit) is never
+// the boss. The practice binds the engaged one and every GM line names its guid, never the trash's.
+func TestPracticeDuplicateEntryTrashUntouched(t *testing.T) {
+	sc := &practiceScenario{sonDead: true, extraTrash: true}
+	f, _, _ := practiceFixture(t, sc, 10)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (notes %v): %s", code, f.summaryNotes(), f.stderr.String())
+	}
+	for _, line := range f.agent.log {
+		if strings.Contains(line, practiceTrashGUID().String()) {
+			t.Fatalf("a GM line touched the duplicate-entry trash unit: %q", line)
+		}
+	}
+	if n := countLog(f.agent.log, "gm_evade "+practiceBossGUID().String()); n != 1 {
+		t.Fatalf("%d evades of the bound boss, want 1 (log %v)", n, f.agent.log)
+	}
+}
+
+// TestPracticeAmbiguousEntryRefused: several units of the entry with no single engaged one cannot be told apart, so the
+// practice fails before ANY GM action (never resets a guessed creature).
+func TestPracticeAmbiguousEntryRefused(t *testing.T) {
+	sc := &practiceScenario{extraTrash: true}
+	f, _, row := practiceFixture(t, sc, 10)
+	// Both units of the entry are engaged (each targets a party member): no single guid is the boss.
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{
+			{GUID: practiceBossGUID(), Entry: 14834, X: row.X, Y: row.Y, Z: row.Z, HPPct: 100, Target: 1000, Flags: "-"},
+			{GUID: practiceTrashGUID(), Entry: 14834, X: row.X + 3, Y: row.Y, Z: row.Z, HPPct: 100, Target: 1000, Flags: "-"},
+		}
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d (notes %v): %s", code, exitRaidWalkFailed, f.summaryNotes(), f.stderr.String())
+	}
+	for _, meth := range []string{"gm_evade ", "gm_set_hp ", "gm_respawn ", "gm_revive "} {
+		if n := countLog(f.agent.log, meth); n != 0 {
+			t.Fatalf("%d %s calls before the boss was bound (log %v)", n, meth, f.agent.log)
+		}
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Ended != "boss not bound" {
+		t.Fatalf("practice %+v, want the not-bound ending", sum.Practice)
+	}
+	if !strings.Contains(sum.EndReason, "cannot tell the boss from the trash") {
+		t.Fatalf("end reason %q, want the ambiguity reason", sum.EndReason)
+	}
+}
+
+// TestPracticeCommanderRevived: a commander that died during the attempt is revived with the dead hires in the reset.
+func TestPracticeCommanderRevived(t *testing.T) {
+	sc := &practiceScenario{sonDead: true}
+	f, _, _ := practiceFixture(t, sc, 10)
+	f.agent.status.Health, f.agent.status.MaxHealth = 0, 100
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (notes %v): %s", code, f.summaryNotes(), f.stderr.String())
+	}
+	if n := countLog(f.agent.log, "gm_revive Commander"); n != 1 {
+		t.Fatalf("%d commander revives, want 1 (log %v)", n, f.agent.log)
+	}
+}
+
+// TestPracticeResumeTimeoutIs18: resumeRun's absolute-deadline failure is a *recoveryTimeout, which the wipe paths map
+// to exit 19. During practice it is a practice failure: exit 18 with its own reason, never a wipe.
+func TestPracticeResumeTimeoutIs18(t *testing.T) {
+	sc := &practiceScenario{sonDead: true}
+	f, _, _ := practiceFixture(t, sc, 10)
+	// The run's own time ceiling passes during the first attempt, and the resumed run does not come back: the resume's
+	// wait runs into the absolute recovery deadline.
+	f.opts.maxRunMinutes = 3
+	f.agent.onResume = func() {
+		f.agent.push("TBM:RUN|zul_gurub|paused|700/733|hakkar|boss|begin|the run did not come back", "")
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d (notes %v): %s", code, exitRaidWalkFailed, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.ExitCode != exitRaidWalkFailed || !strings.Contains(sum.EndReason, "the run did not resume after the reset") {
+		t.Fatalf("exit %d reason %q, want the practice resume timeout", sum.ExitCode, sum.EndReason)
+	}
+	if sum.Practice == nil || sum.Practice.Ended != "resume timed out" {
+		t.Fatalf("practice %+v, want the resume-timeout ending", sum.Practice)
+	}
+}
+
+// TestPracticeGMRefusesLostLease: a lost lease ends the practice before any GM action.
+func TestPracticeGMRefusesLostLease(t *testing.T) {
+	w := &walk{}
+	w.leaseLost.Store(true)
+	err := w.practiceGM(context.Background(), "gm_evade", map[string]any{"guid": practiceBossGUID().String()})
+	if err == nil || !strings.Contains(err.Error(), "lease lost") {
+		t.Fatalf("%v, want the lease-lost refusal", err)
+	}
 }
