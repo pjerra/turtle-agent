@@ -66,7 +66,7 @@ It reads the slot's token file itself and prints only the call's `result`. See
 
 - Drive one character over RPC: [the agent and its RPC](docs/okf/agent/index.md).
 - Run a bot party through a dungeon: [dungeon runs](docs/okf/dungeons/index.md).
-- Walk raids, supervise many, regression-check plans: [raids](docs/okf/raids/index.md).
+- Walk raids (boss-mechanic practice runs included), supervise many, regression-check plans: [raids](docs/okf/raids/index.md).
 - Write, check and ship run plans: [plans](docs/okf/plans/index.md).
 - Walk the navmesh and draw the run as a map: [navigation](docs/okf/navigation/index.md).
 - Fight with data: rotations, tactics, the brain: [combat](docs/okf/combat/index.md).

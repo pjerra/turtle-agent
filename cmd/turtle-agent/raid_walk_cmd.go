@@ -1110,6 +1110,9 @@ type walk struct {
 	gmClearWarn []string // groups the plan skipped (no hostile spawn near the row): a WARN note and run.log line
 	gmClearLog  []raidwalk.GMClearEntry
 	gmClearUsed bool
+	// practice is the --practice run's state (nil for every other walk): the mechanic, the cycles and attempts
+	// collected, the rows written and the closed GM actions taken.
+	practice *practiceState
 	// --gm-instance-data: the specs validate resolved against the rows, in flag order; the markers in the out dir
 	// say which legs already fired (and the ledger, which outlives the attempt, says it per instance).
 	gmInstanceData          []raidwalk.GMInstanceSpec
@@ -2060,6 +2063,7 @@ func (w *walk) finish(code int) {
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights, Decisions: w.decisions,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notesCopy(),
 		Place:         w.placeSum,
+		Practice:      w.practiceSummary(),
 		GMClearUsed:   w.gmClearUsed,
 		GMClear:       w.gmClearLog,
 		GMClearLegs:   raidwalk.GMClearLegs(w.gmClear),

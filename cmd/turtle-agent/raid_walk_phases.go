@@ -1146,6 +1146,11 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 					return err
 				}
 			case raidwalk.IncidentBossEngaged:
+				// --practice owns its boss: the loop keeps the fight alive and resets it, instead of the normal
+				// boss-stop rules (which would end the walk on the encounter).
+				if w.opts.practiceEntry != 0 && v.Entry == w.opts.practiceEntry && w.practice == nil {
+					return w.runPractice(ctx, v.Entry, v.Step)
+				}
 				ok, early, waitOut := w.runFightsBoss(ctx, v.Entry, true)
 				// The resume's wait drains the tracker's incidents while it polls: feed every drained
 				// incident to the normal handler exactly as phaseWatch would, in drain order, before
@@ -1198,6 +1203,11 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 				}
 				return w.handleBoss(ctx, v)
 			}
+		}
+		// --practice: an entry no plan boss row names (the window mode) has no IncidentBossEngaged: a fresh frame of
+		// the mechanic's entry starts the loop.
+		if w.opts.practiceEntry != 0 && w.practice == nil && w.practiceBossEngaged(w.opts.practiceEntry) {
+			return w.runPractice(ctx, w.opts.practiceEntry, 0)
 		}
 		now = w.env.now()
 		if w.inj != nil {
