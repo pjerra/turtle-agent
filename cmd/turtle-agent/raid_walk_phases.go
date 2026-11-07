@@ -2684,7 +2684,7 @@ func (w *walk) saveFightsCtx(ctx context.Context, limit time.Duration) {
 	// fights-run.json names this walk's at-start set (Problem 1, item 3): an analyser can filter the raw
 	// combat-fights.json list without START.epoch. The stamp is the walk's start (the same clock the
 	// at-start set's start-time fallback reads), not the read time.
-	_ = w.writeOut("fights-run.json", fightsRunJSON(w.started, w.fightIDsAtStart))
+	_ = w.writeOut("fights-run.json", fightsRunJSON(w.started, w.fightIDsAtStart, w.practice != nil))
 	for _, r := range rows {
 		if r.ID == "" || r.Live || w.seenFights[r.ID] {
 			continue
@@ -2759,8 +2759,9 @@ func (w *walk) saveFightsCtx(ctx context.Context, limit time.Duration) {
 }
 
 // fightsRunJSON is the fights-run.json body: the walk's start and the sorted at-start (history) ids, so an
-// analyser can filter combat-fights.json's raw list without START.epoch.
-func fightsRunJSON(now time.Time, atStart map[string]bool) []byte {
+// analyser can filter combat-fights.json's raw list without START.epoch. practice is true for a --practice walk: its
+// fights are practice attempts, and the fight tools skip the whole run.
+func fightsRunJSON(now time.Time, atStart map[string]bool, practice bool) []byte {
 	ids := make([]string, 0, len(atStart))
 	for id := range atStart {
 		ids = append(ids, id)
@@ -2769,7 +2770,8 @@ func fightsRunJSON(now time.Time, atStart map[string]bool) []byte {
 	raw, _ := json.Marshal(struct {
 		WalkStarted int64    `json:"walk_started"`
 		HistoryIDs  []string `json:"history_ids"`
-	}{WalkStarted: now.Unix(), HistoryIDs: ids})
+		Practice    bool     `json:"practice,omitempty"`
+	}{WalkStarted: now.Unix(), HistoryIDs: ids, Practice: practice})
 	return append(raw, '\n')
 }
 
