@@ -132,6 +132,15 @@ type autoGoalState struct {
 	// dead says an attempt's summary reported this goal's boss dead: the goal is met and DONE, never placed again
 	// (walk 39: a re-added raid kept walking a boss another raid had already killed).
 	dead bool
+	// practiceCycles is the practice goal's summed cycles over its finished runs: the goal is met when the sum reaches
+	// the target, across relaunches. A practice walk that dies (exit 18, a boss death) restarts with what it collected.
+	practiceCycles int
+	// practiceRelaunches counts this practice goal's exit-18 relaunches (the third exit 18 gives up); the checkpoint
+	// keeps it across a supervisor restart.
+	practiceRelaunches int
+	// practiceKilledRetry says the practice goal already took its one fresh-instance relaunch after the boss died
+	// during the practice before the cycle target.
+	practiceKilledRetry bool
 }
 
 // autoRun is one live or finished raid-walk attempt. Its fields are guarded by its state's mutex.
@@ -157,6 +166,8 @@ type autoRun struct {
 	placed   bool
 	frameOff int64
 	frameSig string
+	// practiceCycles is the last observation's practice cycles (this run's own): finish adds them to the goal's sum.
+	practiceCycles int
 	// pending is the finish the decision rule asked for; a failed teardown holds it back and the next tick retries
 	// instead of deciding again. finishing says a finish goroutine is on it.
 	pending       *raidwalk.AutoDecision
@@ -1560,10 +1571,16 @@ func (s *autoSupervisor) tickState(st *autoState) {
 			}
 			obs.WipeAtBoss = ok && raidwalk.PlaceStepAtBoss(rows, step)
 		}
+		// A practice goal's cycles are summed over its runs: the goal test and the relaunch rules read the sum, so
+		// the prior runs' cycles are folded into this run's observation.
+		if r.goal.Kind == "practice" {
+			obs.PracticeCycles += g.practiceCycles
+		}
 		d := raidwalk.DecideAutoAction(obs, raidwalk.AutoRunState{
 			Goal: r.goal, Attempt: g.attempt, Reuse: r.reuse, HasRun: g.attempt > 0,
 			FastFailures: fast, LeaseFails: g.leaseFails, PlaceFails: st.placeFails, HireWaits: g.hireWaits, Exit29Retries: g.exit29Retries,
 			BossWipes: g.bossWipes, BossWipeMax: g.target.BossWipeMax, Progressed: progressed, CapWaits: st.capWaits,
+			PracticeRelaunches: g.practiceRelaunches, PracticeKilledRetry: g.practiceKilledRetry,
 		}, time.Now(), s.o.stall)
 		if d.Action == raidwalk.AutoContinue {
 			st.mu.Unlock()
@@ -1658,6 +1675,17 @@ func (s *autoSupervisor) finish(st *autoState) {
 	}
 	if d.FreshAfterWipe {
 		g.bossWipes++
+	}
+	if g.target.Goal.Kind == "practice" {
+		// The practice goal's cycles accumulate over its runs, and its relaunch budget is kept with the goal: the
+		// decision reads both on the next end.
+		g.practiceCycles += r.practiceCycles
+		if d.PracticeRelaunch {
+			g.practiceRelaunches++
+		}
+		if d.PracticeKilledRetry {
+			g.practiceKilledRetry = true
+		}
 	}
 	if r.exitCode == 15 {
 		g.leaseFails++
@@ -1992,6 +2020,7 @@ func (s *autoSupervisor) observe(st *autoState) raidwalk.AutoObservation {
 	}
 	o.StepsReached, o.StepsTotal, o.EndReason = sum.StepsReached, sum.StepsTotal, sum.EndReason
 	o.PracticeCycles = sum.PracticeCycles
+	r.practiceCycles = sum.PracticeCycles
 	o.HirePoolWait = raidwalk.HirePoolRefused(sum.EndReason)
 	if sum.ExitCode != 0 {
 		o.ExitCode = sum.ExitCode
@@ -2574,6 +2603,11 @@ type autoSavedID struct {
 	BossWipes int `json:"boss_wipes,omitempty"`
 	// BossDead says the current goal's boss is dead in the instance: the goal is DONE at a start, never placed again.
 	BossDead bool `json:"boss_dead,omitempty"`
+	// PracticeCycles, PracticeRelaunches and PracticeKilledRetry are the practice goal's progress: its summed cycles
+	// over its runs, its exit-18 relaunches and whether its one fresh-instance relaunch after a boss death was taken.
+	PracticeCycles      int  `json:"practice_cycles,omitempty"`
+	PracticeRelaunches  int  `json:"practice_relaunches,omitempty"`
+	PracticeKilledRetry bool `json:"practice_killed_retry,omitempty"`
 	// CapWaits is the id's consecutive instance-cap refusals (exit 26): the fourth stops it for a person, across a
 	// restart too.
 	CapWaits int    `json:"cap_waits,omitempty"`
@@ -2606,6 +2640,7 @@ func (s *autoSupervisor) saveState() {
 			e.Attempt, e.LastStep, e.BossDead, e.HireWaits = g.attempt, g.bestStep, g.dead, g.hireWaits
 			e.Exit29Retries = g.exit29Retries
 			e.BossWipes = g.bossWipes
+			e.PracticeCycles, e.PracticeRelaunches, e.PracticeKilledRetry = g.practiceCycles, g.practiceRelaunches, g.practiceKilledRetry
 		}
 		if st.last != nil {
 			e.OutDir, e.Reuse = st.last.out, st.last.reuse
@@ -2735,6 +2770,9 @@ func (s *autoSupervisor) reconcile() error {
 				st.goals[st.current].hireWaits = sv.HireWaits
 				st.goals[st.current].exit29Retries = sv.Exit29Retries
 				st.goals[st.current].bossWipes = sv.BossWipes
+				st.goals[st.current].practiceCycles = sv.PracticeCycles
+				st.goals[st.current].practiceRelaunches = sv.PracticeRelaunches
+				st.goals[st.current].practiceKilledRetry = sv.PracticeKilledRetry
 			}
 			st.done, st.escalated = sv.Done, sv.Escalated
 			st.stopped, st.stopWhy = sv.Stopped, sv.StopWhy

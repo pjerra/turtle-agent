@@ -704,3 +704,47 @@ func TestPracticeMechanicsTable(t *testing.T) {
 		t.Fatalf("window mechanic %+v", w)
 	}
 }
+
+// A practice goal's exit 18 relaunches at most AutoPracticeRelaunches times, then stops for a person: the cycles it
+// collected are already summed by the caller, so the count is the only budget left.
+func TestPracticeRelaunchBudget(t *testing.T) {
+	goal := AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}
+	o := AutoObservation{Exited: true, ExitCode: 18, EndReason: "practice: max time", PracticeCycles: 4}
+	for n := 0; n < AutoPracticeRelaunches; n++ {
+		d := DecideAutoAction(o, AutoRunState{Goal: goal, PracticeRelaunches: n}, time.Unix(0, 0), time.Minute)
+		if d.Action != AutoRestart || !d.PracticeRelaunch || d.Escalate {
+			t.Fatalf("relaunch %d: %+v, want a practice relaunch", n+1, d)
+		}
+		if d.Reuse != true {
+			t.Fatalf("relaunch %d asked for a fresh instance: the practice resumes in the same copy (its cycles count)", n+1)
+		}
+	}
+	d := DecideAutoAction(o, AutoRunState{Goal: goal, PracticeRelaunches: AutoPracticeRelaunches}, time.Unix(0, 0), time.Minute)
+	if d.Action != AutoStop || !d.Escalate || !strings.Contains(d.Reason, "practice: gave up after 2 relaunches") {
+		t.Fatalf("%+v, want the practiced-out stop", d)
+	}
+}
+
+// A practice goal's exit 18 whose summed cycles already meet the target is met: no relaunch.
+func TestPracticeRelaunchNotNeededWhenTheSumMetTheGoal(t *testing.T) {
+	goal := AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}
+	o := AutoObservation{Exited: true, ExitCode: 18, EndReason: "practice: max time", PracticeCycles: 10}
+	d := DecideAutoAction(o, AutoRunState{Goal: goal}, time.Unix(0, 0), time.Minute)
+	if d.Action != AutoAdvance {
+		t.Fatalf("%+v, want the goal met by the summed cycles", d)
+	}
+}
+
+// A boss death during practice (exit 0 below the cycle target) gets ONE fresh-instance relaunch, then a person.
+func TestPracticeBossDeathOneFreshRelaunch(t *testing.T) {
+	goal := AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}
+	o := AutoObservation{Exited: true, ExitCode: 0, EndReason: "practice: boss killed during practice", PracticeCycles: 3}
+	d := DecideAutoAction(o, AutoRunState{Goal: goal}, time.Unix(0, 0), time.Minute)
+	if d.Action != AutoRestart || d.Reuse || !d.PracticeKilledRetry || d.Escalate {
+		t.Fatalf("%+v, want one fresh-instance relaunch", d)
+	}
+	d = DecideAutoAction(o, AutoRunState{Goal: goal, PracticeKilledRetry: true}, time.Unix(0, 0), time.Minute)
+	if d.Action != AutoStop || !d.Escalate || !strings.Contains(d.Reason, "the boss died again") {
+		t.Fatalf("%+v, want the stop after the second death", d)
+	}
+}

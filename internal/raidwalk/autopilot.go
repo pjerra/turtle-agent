@@ -572,7 +572,18 @@ type AutoRunState struct {
 	BossWipeMax int
 	// Progressed says the attempt that just ended reached a step further than any earlier attempt of this goal.
 	Progressed bool
+	// PracticeRelaunches is the practice goal's exit-18 relaunches made so far (across restarts, kept in the
+	// checkpoint): the third exit 18 gives up.
+	PracticeRelaunches int
+	// PracticeKilledRetry says the practice goal already took its one fresh-instance relaunch after the boss died
+	// during the practice before the cycle target.
+	PracticeKilledRetry bool
 }
+
+// AutoPracticeRelaunches is how many exit-18 relaunches a practice goal makes before it stops for a person: the third
+// exit 18 escalates instead of relaunching. A practice run's cycles accumulate across relaunches, so the relaunch is
+// how a run that hit its time ceiling (or a failed reset streak) still reaches the target.
+const AutoPracticeRelaunches = 2
 
 // AutoBossWipeMax is the default boss wipes in a row without progress that stop the id: the third wipe escalates
 // instead of taking another fresh instance (the core allows 5 fresh instances per account and hour). A goal line may
@@ -599,6 +610,12 @@ type AutoDecision struct {
 	// FreshAfterWipe marks the restart as the fresh-instance relaunch after a wipe at a boss. It is not the goal's
 	// exit-29 retry and not a failed placement: the caller counts neither.
 	FreshAfterWipe bool
+	// PracticeRelaunch marks the restart as the practice goal's exit-18 relaunch (the caller counts it in the goal's
+	// practice relaunches, kept in the checkpoint).
+	PracticeRelaunch bool
+	// PracticeKilledRetry marks the practice goal's one fresh-instance relaunch after the boss died during the
+	// practice before the cycle target (the caller records it; the second death gives up).
+	PracticeKilledRetry bool
 }
 
 // AutoBackoff is the wait before a restart after FastFailures consecutive no-progress attempts: 20 s, 1 m, 2 m, 5 m,
@@ -684,6 +701,30 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 		return AutoDecision{Action: AutoStop, Escalate: true, Reason: "exit 15 three times: the slot's lease is held by another holder (" + shortReason(o.EndReason) + ")"}
 	}
 	backoff := AutoBackoff(r.FastFailures)
+	if r.Goal.Kind == "practice" {
+		// A practice goal relaunches a bounded number of times: the cycles it collected are kept by the caller and
+		// the goal is met by their sum, so a run that hit its time ceiling (exit 18) or ended on a failed reset
+		// streak gets another run with the remaining budget. A boss death during the practice (exit 0 below the cycle
+		// target) gets ONE relaunch in a fresh instance: the old copy still holds the boss's death.
+		switch o.ExitCode {
+		case 18:
+			if r.PracticeRelaunches >= AutoPracticeRelaunches {
+				return AutoDecision{Action: AutoStop, Escalate: true,
+					Reason: fmt.Sprintf("practice: gave up after %d relaunches (%s)", r.PracticeRelaunches, shortReason(o.EndReason))}
+			}
+			return AutoDecision{Action: AutoRestart, Reuse: true, PracticeRelaunch: true, Backoff: backoff,
+				Reason: fmt.Sprintf("practice: exit 18 (%s): relaunch %d of %d", shortReason(o.EndReason), r.PracticeRelaunches+1, AutoPracticeRelaunches)}
+		case 0:
+			// The goal was not met (GoalAchieved above said so), so the boss died during the practice before the
+			// cycle target: one fresh instance, then a person.
+			if !r.PracticeKilledRetry {
+				return AutoDecision{Action: AutoRestart, Reuse: false, PracticeKilledRetry: true, Backoff: backoff,
+					Reason: "practice: the boss died before the cycle target: one fresh-instance relaunch (" + shortReason(o.EndReason) + ")"}
+			}
+			return AutoDecision{Action: AutoStop, Escalate: true,
+				Reason: "practice: the boss died again in the fresh instance before the cycle target (" + shortReason(o.EndReason) + ")"}
+		}
+	}
 	if o.ExitCode == 19 && o.WipeAtBoss && !o.PlacementFailed() {
 		// Walks 44 and 46 (Hakkar): the raid wiped at the boss, the relaunch went into the SAME instance, the
 		// placement found the dead and unplaced bots beside the live boss, and they fought him with no run. After a
