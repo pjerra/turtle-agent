@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/game"
@@ -137,9 +138,15 @@ func (s *Session) onGossipComplete([]byte) error {
 	return nil
 }
 
+// taxiWait is how long a taxi request waits for the flight master's answer before the
+// session takes another one: some refusals get no reply at all (the flight master out of
+// reach, an unknown node, disabled movement), so the timeout is what frees those.
+const taxiWait = 10 * time.Second
+
 // ActivateTaxi asks the flight master npc for a flight along nodes (source first): two nodes
 // send CMSG_ACTIVATETAXI, more send CMSG_ACTIVATETAXIEXPRESS, as the client does. The
-// server's answer comes back as a taxi_reply event; a refusal is only that event.
+// server's answer comes back as a taxi_reply event. A reply names no request, so one call
+// waits for its answer before the next goes out.
 func (s *Session) ActivateTaxi(ctx context.Context, npc packet.GUID, nodes []uint32) error {
 	if npc == 0 {
 		return errors.New("taxi: no flight master guid")
@@ -154,16 +161,30 @@ func (s *Session) ActivateTaxi(ctx context.Context, npc packet.GUID, nodes []uin
 	} else {
 		op, body = opcode.CMSGActivatetaxiexpress, game.BuildActivateTaxiExpress(npc, nodes)
 	}
-	return s.send(ctx, op, body)
+	_, err := s.do(ctx, func() (any, error) {
+		if err := s.inWorld(); err != nil {
+			return nil, err
+		}
+		now := s.now()
+		if now.Before(s.taxiPendingUntil) {
+			return nil, fmt.Errorf("taxi: previous request still unanswered (retry after %d s)",
+				int(s.taxiPendingUntil.Sub(now).Seconds()))
+		}
+		s.taxiPendingUntil = now.Add(taxiWait)
+		return nil, s.conn.WritePacket(op, body)
+	})
+	return err
 }
 
 // onActivateTaxiReply logs the flight master's answer: 0 means the flight was accepted
-// and shows up as movement instead; anything else names the refusal.
+// and shows up as movement instead; anything else names the refusal. The reply clears the
+// pending request, so the session takes the next one.
 func (s *Session) onActivateTaxiReply(body []byte) error {
 	t, err := game.ParseActivateTaxiReply(body)
 	if err != nil {
 		return err
 	}
+	s.taxiPendingUntil = time.Time{}
 	s.emit(events.Event{Kind: events.KindTaxiReply,
 		Text: "taxi reply: " + game.TaxiReplyName(t.Result),
 		Data: map[string]any{"result": t.Result, "reason": game.TaxiReplyName(t.Result)}})

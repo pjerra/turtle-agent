@@ -11,12 +11,16 @@ import (
 // A direct flight carries the flight master and its two nodes; a multi-hop one carries
 // cost 0 (the server recomputes it), the node count and the route, source first.
 func TestBuildActivateTaxi(t *testing.T) {
-	const master packet.GUID = 0xF1300008C1000042
-	if b := game.BuildActivateTaxi(master, 2, 6); !bytes.Equal(b, packet.NewWriter().GUID(master).U32(2).U32(6).Bytes()) {
+	const master packet.GUID = 0x0102030405060708
+	direct := []byte{0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01,
+		0x02, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00}
+	if b := game.BuildActivateTaxi(master, 2, 6); !bytes.Equal(b, direct) {
 		t.Fatalf("direct % X", b)
 	}
-	nodes := []uint32{2, 5, 6}
-	if b := game.BuildActivateTaxiExpress(master, nodes); !bytes.Equal(b, packet.NewWriter().GUID(master).U32(0).U32(3).U32(2).U32(5).U32(6).Bytes()) {
+	express := []byte{0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01,
+		0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
+		0x02, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00}
+	if b := game.BuildActivateTaxiExpress(master, []uint32{2, 5, 6}); !bytes.Equal(b, express) {
 		t.Fatalf("express % X", b)
 	}
 }
@@ -35,5 +39,11 @@ func TestTaxiReplyName(t *testing.T) {
 	}
 	if _, err := game.ParseActivateTaxiReply(packet.NewWriter().U32(3).U32(4).Bytes()); err == nil {
 		t.Fatal("trailing bytes accepted")
+	}
+	// A short body (0-3 bytes) is an error, not a zero result.
+	for _, body := range [][]byte{nil, {0x03}, {0x03, 0x00}, {0x03, 0x00, 0x00}} {
+		if _, err := game.ParseActivateTaxiReply(body); err == nil {
+			t.Fatalf("%d bytes accepted", len(body))
+		}
 	}
 }

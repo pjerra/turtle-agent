@@ -3,7 +3,9 @@ package session
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,21 +40,47 @@ func TestActivateTaxi(t *testing.T) {
 	if p := h.expect(opcode.CMSGActivatetaxi); !bytes.Equal(p.Body, game.BuildActivateTaxi(flightMasterGUID, 2, 6)) {
 		t.Fatalf("direct % X", p.Body)
 	}
+	h.send(opcode.SMSGActivatetaxireply, packet.NewWriter().U32(0).Bytes())
+	e := lastOfKind(t, h.s.Log(), events.KindTaxiReply)
+	if e.Data["result"] != uint32(0) || e.Data["reason"] != "ok" {
+		t.Fatalf("%+v", e)
+	}
 	if err := h.s.ActivateTaxi(ctx, flightMasterGUID, []uint32{2, 5, 6}); err != nil {
 		t.Fatal(err)
 	}
 	if p := h.expect(opcode.CMSGActivatetaxiexpress); !bytes.Equal(p.Body, game.BuildActivateTaxiExpress(flightMasterGUID, []uint32{2, 5, 6})) {
 		t.Fatalf("express % X", p.Body)
 	}
-	h.send(opcode.SMSGActivatetaxireply, packet.NewWriter().U32(0).Bytes())
-	e := lastOfKind(t, h.s.Log(), events.KindTaxiReply)
-	if e.Data["result"] != uint32(0) || e.Data["reason"] != "ok" {
-		t.Fatalf("%+v", e)
-	}
 	h.send(opcode.SMSGActivatetaxireply, packet.NewWriter().U32(3).Bytes())
 	waitFor(t, func() bool { return len(ofKind(h.s.Log(), events.KindTaxiReply)) == 2 })
-	if e := ofKind(h.s.Log(), events.KindTaxiReply)[1]; e.Data["result"] != uint32(3) || e.Data["reason"] != "not_enough_money" {
+	e = ofKind(h.s.Log(), events.KindTaxiReply)[1]
+	if e.Data["result"] != uint32(3) || e.Data["reason"] != "not_enough_money" {
 		t.Fatalf("%+v", e)
+	}
+}
+
+// A short reply body is a parse error, not an event.
+func TestActivateTaxiReplyShortBodyEmitsNoEvent(t *testing.T) {
+	h := start(t, Options{})
+	h.enterWorld()
+	ctx := context.Background()
+	if err := h.s.ActivateTaxi(ctx, flightMasterGUID, []uint32{2, 6}); err != nil {
+		t.Fatal(err)
+	}
+	h.expect(opcode.CMSGActivatetaxi)
+	h.send(opcode.SMSGActivatetaxireply, []byte{0x03, 0x00})
+	waitFor(t, func() bool { return len(ofKind(h.s.Log(), events.KindParseError)) > 0 })
+	if n := len(ofKind(h.s.Log(), events.KindTaxiReply)); n != 0 {
+		t.Fatalf("%d taxi_reply events", n)
+	}
+}
+
+// A taxi call outside the world fails naming the state, like any other send.
+func TestActivateTaxiBeforeWorld(t *testing.T) {
+	h := start(t, Options{})
+	h.expect(opcode.CMSGCharEnum)
+	if err := h.s.ActivateTaxi(context.Background(), flightMasterGUID, []uint32{2, 6}); !errors.Is(err, ErrNotInWorld) {
+		t.Fatalf("err = %v", err)
 	}
 }
 
@@ -75,6 +103,112 @@ func TestActivateTaxiSendsNothingWhenRefused(t *testing.T) {
 		}
 		if p.Op == opcode.CMSGActivatetaxi || p.Op == opcode.CMSGActivatetaxiexpress {
 			t.Fatalf("a request went out: % X", p.Body)
+		}
+	}
+}
+
+// A second request while the first waits for its reply is refused with nothing sent;
+// the reply frees the session for the next one.
+func TestActivateTaxiWaitsForReply(t *testing.T) {
+	h := start(t, Options{})
+	h.enterWorld()
+	ctx := context.Background()
+	if err := h.s.ActivateTaxi(ctx, flightMasterGUID, []uint32{2, 6}); err != nil {
+		t.Fatal(err)
+	}
+	h.expect(opcode.CMSGActivatetaxi)
+	if err := h.s.ActivateTaxi(ctx, flightMasterGUID, []uint32{2, 6}); err == nil ||
+		!strings.Contains(err.Error(), "taxi: previous request still unanswered") {
+		t.Fatalf("%v", err)
+	}
+	drainTaxi(t, h)
+	h.send(opcode.SMSGActivatetaxireply, packet.NewWriter().U32(0).Bytes())
+	lastOfKind(t, h.s.Log(), events.KindTaxiReply)
+	if err := h.s.ActivateTaxi(ctx, flightMasterGUID, []uint32{2, 6}); err != nil {
+		t.Fatal(err)
+	}
+	h.expect(opcode.CMSGActivatetaxi)
+}
+
+// Some refusals get no reply, so the 10 s window is what frees the session: pinned to the
+// session's clock, not the wall's.
+func TestActivateTaxiTimeoutFreesTheSession(t *testing.T) {
+	h := start(t, Options{})
+	h.enterWorld()
+	clock := &taxiClock{at: h.s.now()}
+	h.s.clockFn = clock.now
+	ctx := context.Background()
+	if err := h.s.ActivateTaxi(ctx, flightMasterGUID, []uint32{2, 6}); err != nil {
+		t.Fatal(err)
+	}
+	h.expect(opcode.CMSGActivatetaxi)
+	if err := h.s.ActivateTaxi(ctx, flightMasterGUID, []uint32{2, 6}); err == nil {
+		t.Fatal("second request before the window accepted")
+	}
+	drainTaxi(t, h)
+	clock.advance(taxiWait)
+	if err := h.s.ActivateTaxi(ctx, flightMasterGUID, []uint32{2, 6}); err != nil {
+		t.Fatal(err)
+	}
+	h.expect(opcode.CMSGActivatetaxi)
+}
+
+// taxiClock is a session clock the test moves by hand; the owner loop reads it too, so a
+// lock guards the time.
+type taxiClock struct {
+	mu sync.Mutex
+	at time.Time
+}
+
+func (c *taxiClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.at
+}
+
+func (c *taxiClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.at = c.at.Add(d)
+}
+
+// Two calls at once: the owner loop serializes them, so exactly one sends.
+func TestActivateTaxiConcurrentSendsOnce(t *testing.T) {
+	h := start(t, Options{})
+	h.enterWorld()
+	ctx := context.Background()
+	res := make(chan error, 2)
+	for range 2 {
+		go func() { res <- h.s.ActivateTaxi(ctx, flightMasterGUID, []uint32{2, 6}) }()
+	}
+	var errs, oks int
+	for range 2 {
+		if err := <-res; err == nil {
+			oks++
+		} else if strings.Contains(err.Error(), "taxi: previous request still unanswered") {
+			errs++
+		} else {
+			t.Fatalf("%v", err)
+		}
+	}
+	if oks != 1 || errs != 1 {
+		t.Fatalf("oks %d errs %d", oks, errs)
+	}
+	h.expect(opcode.CMSGActivatetaxi)
+	drainTaxi(t, h)
+}
+
+// drainTaxi reads packets until 200 ms pass with nothing new, so a check for "nothing
+// sent" does not trip on a request the session already queued.
+func drainTaxi(t *testing.T, h *harness) {
+	t.Helper()
+	for {
+		p, err := h.srv.Next(200 * time.Millisecond)
+		if err != nil {
+			return
+		}
+		if p.Op == opcode.CMSGActivatetaxi || p.Op == opcode.CMSGActivatetaxiexpress {
+			t.Fatalf("a second request went out: % X", p.Body)
 		}
 	}
 }
