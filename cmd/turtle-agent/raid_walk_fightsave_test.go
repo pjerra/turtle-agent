@@ -140,7 +140,7 @@ func TestTeardownWaitsForLiveFight(t *testing.T) {
 	done := jeklikKillRow("68-9", false, now.Unix()-600)
 	done.Step = uint32(goal)
 	d.fightsSeq = [][]walkFightRow{{live}, {live}, {done}}
-	w.phaseTeardown()
+	w.phaseTeardown(context.Background())
 	if _, err := os.Stat(filepath.Join(w.outDir, "combat-fight-68-9.json")); err != nil {
 		t.Fatalf("combat-fight-68-9.json: %v (the live kill fight must be saved once it ends)", err)
 	}
@@ -173,13 +173,13 @@ func TestTeardownGivesUpAfter30s(t *testing.T) {
 	live := jeklikKillRow("68-9", true, now.Unix()-600)
 	live.Step = uint32(goal)
 	d.fightsSeq = [][]walkFightRow{{live}}
-	w.phaseTeardown()
+	w.phaseTeardown(context.Background())
 	if _, err := os.Stat(filepath.Join(w.outDir, "combat-fight-68-9.json")); !os.IsNotExist(err) {
 		t.Fatalf("combat-fight-68-9.json err %v: a fight still live after 30 s must not be saved", err)
 	}
 	var giveups []string
 	for _, n := range w.notes {
-		if strings.Contains(n, "still live after 30 s") {
+		if strings.Contains(n, "still live after") {
 			giveups = append(giveups, n)
 		}
 	}
@@ -189,6 +189,9 @@ func TestTeardownGivesUpAfter30s(t *testing.T) {
 	if !strings.Contains(giveups[0], "68-9") {
 		t.Fatalf("give-up note %q, want it to name live fight 68-9", giveups[0])
 	}
+	if !strings.Contains(giveups[0], "30s") {
+		t.Fatalf("give-up note %q, want the seconds from the const (30s)", giveups[0])
+	}
 	if slept != 30*time.Second {
 		t.Fatalf("slept %v, want 30 s", slept)
 	}
@@ -196,5 +199,80 @@ func TestTeardownGivesUpAfter30s(t *testing.T) {
 		if f.ID == "68-9" {
 			t.Fatalf("w.fights %+v: a still-live fight must not be recorded", w.fights)
 		}
+	}
+}
+
+// TestTeardownUnreachableDashboardStopsWait: every Fights call times out during the wait. The wait stops at
+// once on the first failed read (total wait bounded by the const), teardown proceeds, and a note says why.
+func TestTeardownUnreachableDashboardStopsWait(t *testing.T) {
+	goal := zgBossStepOf(t, 14517)
+	now := time.Now()
+	var slept time.Duration
+	w, d := teardownFightsWalk(t, now, &slept)
+	d.fights = nil
+	w.saveFightsAtStart() // the walk starts with an empty dashboard: nothing is history
+	live := jeklikKillRow("68-9", true, now.Unix()-600)
+	live.Step = uint32(goal)
+	d.fights = []walkFightRow{live}
+	w.saveFights()                                      // one successful read: the wait has a live row of this walk to wait on
+	d.fightsStallFirst, d.fightsStall = 1000, time.Hour // every later Fights call blocks until its context ends
+	before := time.Now()
+	w.phaseTeardown(context.Background())
+	if took := time.Since(before); took > 30*time.Second {
+		t.Fatalf("teardown took %v: an unreachable dashboard must not hold it past the wait", took)
+	}
+	if slept > teardownLiveFightWait {
+		t.Fatalf("slept %v, want at most %s", slept, durWords(teardownLiveFightWait))
+	}
+	var stopped []string
+	for _, n := range w.notes {
+		if strings.Contains(n, "the teardown live-fight wait stopped") {
+			stopped = append(stopped, n)
+		}
+	}
+	if len(stopped) != 1 {
+		t.Fatalf("stop notes %q, want exactly one naming the failed read", stopped)
+	}
+	if w.teardownWd.Failed {
+		t.Fatalf("teardown %+v: the wait's failed read must not fail teardown itself", w.teardownWd)
+	}
+}
+
+// TestHistoryLiveAtStartFinishedGetsFile: a history row live in the at-start read (walk 41 tj-8's shape: the
+// earlier raid tore down while the fight was still open) gets its detail file when it finishes during this
+// walk, still tagged History=true. An old finished history row gets no file.
+func TestHistoryLiveAtStartFinishedGetsFile(t *testing.T) {
+	goal := zgBossStepOf(t, 14517)
+	now := time.Now()
+	w, d := fightCreditWalk(t, goal, goal, now)
+	w.manifest.Character = "Bot"
+	live := jeklikKillRow("68-1", true, now.Unix()-600)
+	live.Step = uint32(goal)
+	old := jeklikKillRow("68-2", false, now.Unix()-7200)
+	old.Step = uint32(goal)
+	d.fights = []walkFightRow{live, old}
+	w.saveFightsAtStart() // both are history; 68-1 was still live
+	done := jeklikKillRow("68-1", false, now.Unix()-600)
+	done.Step = uint32(goal)
+	d.fights = []walkFightRow{done, old}
+	w.saveFights()
+	if _, err := os.Stat(filepath.Join(w.outDir, "combat-fight-68-1.json")); err != nil {
+		t.Fatalf("combat-fight-68-1.json: %v (a history fight live at start must be saved once it finishes)", err)
+	}
+	if _, err := os.Stat(filepath.Join(w.outDir, "combat-fight-68-2.json")); !os.IsNotExist(err) {
+		t.Fatalf("combat-fight-68-2.json err %v: an old finished history fight gets no file", err)
+	}
+	byID := map[string]bool{}
+	for _, f := range w.fights {
+		byID[f.ID] = f.History
+	}
+	if h, ok := byID["68-1"]; !ok || !h {
+		t.Fatalf("w.fights %+v: finished history fight 68-1 must be kept with History=true", w.fights)
+	}
+	if h, ok := byID["68-2"]; !ok || !h {
+		t.Fatalf("w.fights %+v: old history fight 68-2 must be kept with History=true", w.fights)
+	}
+	if len(d.fightKeys) != 1 || d.fightKeys[0] != "Bot\x0068-1" {
+		t.Fatalf("fight details fetched %q, want only the live-started history fight 68-1", d.fightKeys)
 	}
 }
