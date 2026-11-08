@@ -1093,3 +1093,130 @@ func TestCastOnTradeSlotRefusedDuringOneShotTrade(t *testing.T) {
 		}
 	}
 }
+
+// ---- one mutating step call at a time ----
+
+const inFlightMsg = "another trade step is in flight"
+
+// waitErr waits for a call that must return at once and returns its error.
+func waitSet(t *testing.T, ch chan setOut) setOut {
+	t.Helper()
+	select {
+	case o := <-ch:
+		return o
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("the call did not return at once")
+	}
+	return setOut{}
+}
+
+// Two overlapping sets would both wake on the first set's back_to_trade; the second is refused instead, and the first
+// succeeds on its own back_to_trade.
+func TestTradeSetItemRefusesAnOverlappingSet(t *testing.T) {
+	h := openedStep(t)
+	first := startSet(h, 6, bracersEntry)
+	h.expect(opcode.CMSGSetTradeItem)
+	o := waitSet(t, startSet(h, 5, bracersEntry))
+	if o.err == nil || !strings.Contains(o.err.Error(), inFlightMsg) {
+		t.Fatalf("second set: %+v %v", o.r, o.err)
+	}
+	if p, err := h.srv.Expect(opcode.CMSGSetTradeItem, 100*time.Millisecond); err == nil {
+		t.Fatalf("the refused set was sent % X", p.Body)
+	}
+	if st := h.s.TradeStatus(); !st.Active || !st.Open { // trade_status stays available during the set
+		t.Fatalf("%+v", st)
+	}
+	h.tradeStatus(game.TradeBackToTrade)
+	if o := <-first; o.err != nil || o.r.TradeSlot != 6 {
+		t.Fatalf("first set: %+v %v", o.r, o.err)
+	}
+	// The refused set left no record: it is sent when asked again.
+	again := startSet(h, 5, bracersEntry)
+	if p := h.expect(opcode.CMSGSetTradeItem); !bytes.Equal(p.Body, []byte{0x05, 0xFF, 0x17}) {
+		t.Fatalf("set % X", p.Body)
+	}
+	h.tradeStatus(game.TradeBackToTrade)
+	if o := <-again; o.err != nil || o.r.Unchanged {
+		t.Fatalf("%+v %v", o.r, o.err)
+	}
+}
+
+func TestTradeStepCallsRefuseEachOther(t *testing.T) {
+	h := openedStep(t)
+	// A set in flight refuses an accept and a trade-slot cast.
+	first := startSet(h, 6, bracersEntry)
+	h.expect(opcode.CMSGSetTradeItem)
+	if _, err := h.s.TradeAccept(context.Background(), time.Second); err == nil || !strings.Contains(err.Error(), inFlightMsg) {
+		t.Fatalf("accept during a set: %v", err)
+	}
+	if err := h.s.CastOnTradeSlot(context.Background(), enchantSpell, 6); err == nil || !strings.Contains(err.Error(), inFlightMsg) {
+		t.Fatalf("cast during a set: %v", err)
+	}
+	h.tradeStatus(game.TradeBackToTrade)
+	if o := <-first; o.err != nil {
+		t.Fatal(o.err)
+	}
+	// An accept in flight refuses a set.
+	acc := make(chan error, 1)
+	go func() { _, err := h.s.TradeAccept(context.Background(), 5*time.Second); acc <- err }()
+	h.expect(opcode.CMSGAcceptTrade)
+	if o := waitSet(t, startSet(h, 4, bracersEntry)); o.err == nil || !strings.Contains(o.err.Error(), inFlightMsg) {
+		t.Fatalf("set during an accept: %+v %v", o.r, o.err)
+	}
+	h.tradeStatus(game.TradeAccept)
+	h.tradeStatus(game.TradeComplete)
+	if err := <-acc; err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range h.srv.Skipped() {
+		if p.Op == opcode.CMSGCastSpell {
+			t.Fatalf("the refused cast was sent % X", p.Body)
+		}
+	}
+}
+
+// The mark ends with the call: after a timeout, a new call is accepted.
+func TestTradeStepMarkEndsWithTheCall(t *testing.T) {
+	h := openedStep(t)
+	acc := make(chan error, 1)
+	go func() { _, err := h.s.TradeAccept(context.Background(), 100*time.Millisecond); acc <- err }()
+	h.expect(opcode.CMSGAcceptTrade)
+	var tf *TradeFailed
+	if err := <-acc; !errors.As(err, &tf) || tf.Result.Result != "timeout" {
+		t.Fatalf("%v", err)
+	}
+	ch := startSet(h, 6, bracersEntry)
+	h.expect(opcode.CMSGUnacceptTrade)
+	h.expect(opcode.CMSGSetTradeItem)
+	h.tradeStatus(game.TradeBackToTrade)
+	if o := <-ch; o.err != nil {
+		t.Fatalf("%+v %v", o.r, o.err)
+	}
+}
+
+// A cancel ends the call in flight with "cancelled".
+func TestTradeCancelEndsASetInFlight(t *testing.T) {
+	h := openedStep(t)
+	first := startSet(h, 6, bracersEntry)
+	h.expect(opcode.CMSGSetTradeItem)
+	cancel := make(chan string, 1)
+	go func() { st, _ := h.s.TradeCancel(context.Background()); cancel <- st }()
+	h.expect(opcode.CMSGCancelTrade)
+	h.tradeStatus(game.TradeCancelled)
+	var tf *TradeFailed
+	if o := <-first; !errors.As(o.err, &tf) || tf.Result.Result != "cancelled" {
+		t.Fatalf("%+v %v", o.r, o.err)
+	}
+	if st := <-cancel; st != "cancelled" {
+		t.Fatalf("status %q", st)
+	}
+	// A cancel the core never answers also frees the call.
+	h = openedStep(t)
+	first = startSet(h, 6, bracersEntry)
+	h.expect(opcode.CMSGSetTradeItem)
+	go func() { h.s.TradeCancel(context.Background()) }()
+	h.expect(opcode.CMSGCancelTrade)
+	if o := <-first; !errors.As(o.err, &tf) || tf.Result.Result != "cancelled" {
+		t.Fatalf("unanswered cancel: %+v %v", o.r, o.err)
+	}
+}

@@ -27,6 +27,44 @@ const (
 	tradeSetItemWait = 3 * time.Second
 )
 
+// errStepInFlight is the answer to a mutating step call made while another one runs.
+var errStepInFlight = errors.New("trade: another trade step is in flight")
+
+// beginStep marks a mutating step call as running and returns its token; owner loop only. A second call is refused at once.
+func (s *Session) beginStep() (*struct{}, error) {
+	t := &s.trade
+	if t.inflight != nil {
+		return nil, errStepInFlight
+	}
+	t.inflight = new(struct{})
+	return t.inflight, nil
+}
+
+// endStep ends the mark of the call that holds tok; a fresh trade state has dropped it already.
+func (s *Session) endStep(tok *struct{}) {
+	if tok == nil {
+		return
+	}
+	bg, cancel := context.WithTimeout(context.Background(), 2*tradeCancelWait)
+	defer cancel()
+	_, _ = s.do(bg, func() (any, error) {
+		if s.trade.inflight == tok {
+			s.trade.inflight = nil
+		}
+		return nil, nil
+	})
+}
+
+// stepReleased reports whether the step trade was released (cancelled) under a waiting call. Owner loop only.
+func (s *Session) stepReleased() bool { return !s.trade.active && !s.trade.ended }
+
+// stepCancelled is the result of a waiting call whose trade was cancelled.
+func (s *Session) stepCancelled(res TradeResult) *TradeFailed {
+	r, _ := s.tradeSnapshot(res)
+	r.Result, r.Detail = "cancelled", "the trade was cancelled (trade_cancel)"
+	return &TradeFailed{r}
+}
+
 // errNoStepWindow is the answer to a step call made with no step trade open.
 var errNoStepWindow = errors.New("no trade window is open: trade_open or trade_expect first")
 
@@ -289,12 +327,17 @@ func (s *Session) TradeSetItem(ctx context.Context, tradeSlot uint8, ref EquipRe
 	}
 	var backs uint64
 	var unchanged bool
+	var tok *struct{}
+	defer func() { s.endStep(tok) }()
 	v, err := s.do(ctx, func() (any, error) {
 		if err := s.inWorld(); err != nil {
 			return nil, err
 		}
 		if err := s.stepWindow(); err != nil {
 			return nil, err
+		}
+		if s.trade.inflight != nil {
+			return nil, errStepInFlight
 		}
 		it, err := s.pickItem(ref)
 		if err != nil {
@@ -304,6 +347,7 @@ func (s *Session) TradeSetItem(ctx context.Context, tradeSlot uint8, ref EquipRe
 			unchanged = true
 			return it, nil
 		}
+		tok, _ = s.beginStep()
 		backs = s.trade.backs // the count is taken at the send, on the owner loop: only a later back_to_trade answers it
 		return it, s.conn.WritePacket(opcode.CMSGSetTradeItem, game.BuildSetTradeItem(tradeSlot, it.Bag, it.Slot))
 	})
@@ -316,9 +360,12 @@ func (s *Session) TradeSetItem(ctx context.Context, tradeSlot uint8, ref EquipRe
 		out.Unchanged = true
 		return out, nil
 	}
-	err = s.tradeWait(ctx, tradeSetItemWait, func() bool { return s.trade.ended || s.trade.backs > backs })
+	err = s.tradeWait(ctx, tradeSetItemWait, func() bool { return s.trade.ended || !s.trade.active || s.trade.backs > backs })
 	if r, ended := s.tradeSnapshot(s.stepBase()); ended {
 		return TradeSetResult{}, s.stepFailed(r, r.Result, r.Detail)
+	}
+	if v, _ := s.do(context.Background(), func() (any, error) { return s.stepReleased(), nil }); v == true {
+		return TradeSetResult{}, s.stepCancelled(s.stepBase())
 	}
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
 		return TradeSetResult{}, fmt.Errorf("trade_set_item: no back_to_trade within %s of the set: the core did not take the item (see inventory_error events)", tradeSetItemWait)
@@ -360,11 +407,18 @@ func (s *Session) TradeAccept(ctx context.Context, wait time.Duration) (TradeRes
 	if wait <= 0 {
 		wait = tradeDoneWait
 	}
+	var tok *struct{}
+	defer func() { s.endStep(tok) }()
 	if _, err := s.do(ctx, func() (any, error) {
 		if err := s.inWorld(); err != nil {
 			return nil, err
 		}
-		return nil, s.stepWindow()
+		if err := s.stepWindow(); err != nil {
+			return nil, err
+		}
+		var err error
+		tok, err = s.beginStep()
+		return nil, err
 	}); err != nil {
 		return TradeResult{}, err
 	}
@@ -379,13 +433,13 @@ func (s *Session) TradeAccept(ctx context.Context, wait time.Duration) (TradeRes
 		}
 		return r, &TradeFailed{r}
 	}
-	if err := s.tradeWait(ctx, s.opts.TradeSettle, func() bool { return s.trade.ended }); err != nil && !errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+	if err := s.tradeWait(ctx, s.opts.TradeSettle, func() bool { return s.trade.ended || !s.trade.active }); err != nil && !errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
 		return res, err
 	}
 	var backs uint64
 	var sent bool
 	if _, err := s.do(ctx, func() (any, error) {
-		if s.trade.ended {
+		if s.trade.ended || !s.trade.active {
 			return nil, nil
 		}
 		backs, sent = s.trade.backs, true
@@ -394,9 +448,12 @@ func (s *Session) TradeAccept(ctx context.Context, wait time.Duration) (TradeRes
 		return res, err
 	}
 	if !sent {
+		if v, _ := s.do(context.Background(), func() (any, error) { return s.stepReleased(), nil }); v == true {
+			return res, s.stepCancelled(res)
+		}
 		return ended()
 	}
-	err := s.tradeWait(ctx, time.Until(deadline), func() bool { return s.trade.ended || s.trade.backs > backs })
+	err := s.tradeWait(ctx, time.Until(deadline), func() bool { return s.trade.ended || !s.trade.active || s.trade.backs > backs })
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
 		s.unaccept()
 		r, _ := s.tradeSnapshot(res)
@@ -409,6 +466,9 @@ func (s *Session) TradeAccept(ctx context.Context, wait time.Duration) (TradeRes
 	}
 	if _, closed := s.tradeSnapshot(res); closed {
 		return ended()
+	}
+	if v, _ := s.do(context.Background(), func() (any, error) { return s.stepReleased(), nil }); v == true {
+		return res, s.stepCancelled(res)
 	}
 	r, _ := s.tradeSnapshot(res)
 	st := s.TradeStatus()
@@ -485,6 +545,9 @@ func (s *Session) CastOnTradeSlot(ctx context.Context, spell uint32, slot uint8)
 		}
 		if err := s.stepWindow(); err != nil {
 			return nil, err
+		}
+		if s.trade.inflight != nil {
+			return nil, errStepInFlight
 		}
 		return nil, s.conn.WritePacket(opcode.CMSGCastSpell, game.BuildCastSpellOnTradeItem(spell, slot))
 	})

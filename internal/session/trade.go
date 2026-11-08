@@ -73,6 +73,9 @@ type tradeState struct {
 	// sets is what the agent itself last put in each trade slot of this trade (TradeSetItem), so that setting the same item
 	// again, which the core ignores without a reply, is answered as unchanged. Ends with the trade.
 	sets map[uint8]tradeSet
+	// inflight marks the mutating step call that is running (TradeSetItem, TradeAccept); a second one is refused at once,
+	// because a back_to_trade has no sender and would wake both. Nil in a fresh state.
+	inflight *struct{}
 	// step is a step trade (trade_open, trade_expect): its window stays open between the calls that drive it.
 	step bool
 	// acceptFrom and acceptName arm the accept of one incoming trade request (trade_expect) until acceptUntil; any other
@@ -653,7 +656,11 @@ func (s *Session) releaseTrade() {
 	if err == nil && v.(bool) {
 		_ = s.tradeWait(bg, tradeCancelWait, func() bool { return s.trade.ended })
 	}
-	_, _ = s.do(bg, func() (any, error) { s.trade.active, s.trade.step, s.trade.sets = false, false, nil; return nil, nil })
+	_, _ = s.do(bg, func() (any, error) {
+		s.trade.active, s.trade.step, s.trade.sets = false, false, nil
+		s.trade.wakes.wake() // a step call waiting on this trade ends
+		return nil, nil
+	})
 }
 
 // splitStack splits st.Count off st.Src into st.Dst with CMSG_SPLIT_ITEM and waits for the new stack to show up.
