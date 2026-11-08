@@ -66,10 +66,26 @@ func loginHold(now time.Time) time.Duration {
 	return hourStartHold(now)
 }
 
-// loginHoldExtra is the most a login child that starts at now can spend in the hold and its jitter: what a parent adds to the
+// loginHoldAhead is how far past its own clock reading a parent looks for the window: the child it starts reads its clock a moment
+// later and may find the window open that the parent did not (a parent at hh:59:56.99, a child at hh:59:57).
+const loginHoldAhead = 5 * time.Second
+
+// loginHoldHorizon is how long, counted from now, until the window is over for a login child that starts at any moment in
+// [now, now+loginHoldAhead]: 0 when none of them is inside the window.
+func loginHoldHorizon(now time.Time) time.Duration {
+	var most time.Duration
+	for _, at := range []time.Time{now, now.Add(loginHoldAhead)} {
+		if h := loginHold(at); h > 0 {
+			most = max(most, at.Sub(now)+h)
+		}
+	}
+	return most
+}
+
+// loginHoldExtra is the most a login child that starts about now can spend in the hold and its jitter: what a parent adds to the
 // time it gives the child to reach the world.
 func loginHoldExtra(now time.Time) time.Duration {
-	if h := loginHold(now); h > 0 {
+	if h := loginHoldHorizon(now); h > 0 {
 		return h + loginHoldJitterMax
 	}
 	return 0
@@ -99,3 +115,6 @@ func holdLoginForHourStart(ctx context.Context, stderr io.Writer) error {
 	}
 	return nil
 }
+
+// elapsedSecs is d in whole seconds, for the "after N s" of a login timeout: the real wait, which with the hold is longer than the base.
+func elapsedSecs(d time.Duration) int { return int(d.Round(time.Second) / time.Second) }

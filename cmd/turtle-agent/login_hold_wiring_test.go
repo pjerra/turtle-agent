@@ -95,34 +95,96 @@ func TestReconnectorWaitIncludesTheHold(t *testing.T) {
 	}
 }
 
-// Fleet bookings: 15 members started at hh:00:00 are booked inside a window that begins at 03:05, so the 15th waits for the
-// throttle window (realmd lets 14 in, the 15th has to wait for the first to age out).
-func TestFleetBooksLoginsAfterTheHourStartHold(t *testing.T) {
+// Fleet bookings: 15 members started at hh:00:00 are booked inside a window that begins at 03:05, each at its own jittered time (the
+// fleet starts the child then, so the child adds no hold and no jitter of its own), and the throttle window counts from those
+// booked times: member 15 waits until the first booking has aged out.
+func TestFleetBooksLoginsAfterTheHourStartHoldWithJitter(t *testing.T) {
 	t.Setenv(loginHourHoldEnv, "")
+	oldJitter := loginHoldJitter
+	t.Cleanup(func() { loginHoldJitter = oldJitter })
+	n := 0
+	loginHoldJitter = func() time.Duration { n++; return time.Duration(n) * time.Second } // 1 s, 2 s, ...
 	b := newLoginBudget(realmdThrottleLogins-1, realmdThrottleWindow)
 	start := time.Date(2026, 11, 8, 14, 0, 0, 0, time.UTC)
 	open := start.Add(3*time.Minute + 5*time.Second)
-	var last time.Time
+	seen := map[time.Time]bool{}
+	var first, last time.Time
 	for i := 1; i <= 15; i++ {
 		at, hold := bookFleetLogin(b, start)
 		if hold != 185*time.Second {
 			t.Fatalf("member %d: hold %s, want 3m5s", i, hold)
 		}
-		if at.Before(open) {
-			t.Fatalf("member %d booked at %s, inside the hold (before %s)", i, at.Format("15:04:05"), open.Format("15:04:05"))
+		if i < 15 {
+			if want := open.Add(time.Duration(i) * time.Second); !at.Equal(want) {
+				t.Fatalf("member %d booked at %s, want %s (window end plus its own jitter)", i, at.Format("15:04:05"), want.Format("15:04:05"))
+			}
 		}
-		if i < 15 && !at.Equal(open) {
-			t.Fatalf("member %d booked at %s, want %s", i, at.Format("15:04:05"), open.Format("15:04:05"))
+		if seen[at] {
+			t.Fatalf("member %d booked at %s, the same instant as another", i, at.Format("15:04:05"))
+		}
+		seen[at] = true
+		if i == 1 {
+			first = at
 		}
 		last = at
 	}
-	if last.Before(open.Add(realmdThrottleWindow)) {
-		t.Errorf("member 15 booked at %s, want it at least %s after the window opened", last.Format("15:04:05"), realmdThrottleWindow)
+	// Member 15 asked for open+15 s and the 14 bookings fill the window: it waits until the first booked login (open+1 s) has aged out.
+	if last.Before(first.Add(realmdThrottleWindow)) {
+		t.Errorf("member 15 booked at %s, want at least %s after the first booking (%s)", last.Format("15:04:05"), realmdThrottleWindow, first.Format("15:04:05"))
 	}
-	// Off, or outside the window: booked now.
+	// Off, or outside the window: booked now, no jitter.
 	t.Setenv(loginHourHoldEnv, "0")
-	if at, hold := bookFleetLogin(newLoginBudget(14, realmdThrottleWindow), start); hold != 0 || !at.Equal(start) {
-		t.Errorf("env off: booked %s hold %s", at, hold)
+	n = 0
+	if at, hold := bookFleetLogin(newLoginBudget(14, realmdThrottleWindow), start); hold != 0 || !at.Equal(start) || n != 0 {
+		t.Errorf("env off: booked %s hold %s jitter calls %d", at, hold, n)
+	}
+}
+
+// N1: a parent that reads its clock just before the window (hh:59:56.99) still allows for the hold, because the child it starts
+// reads hh:59:57 or later. Deleting the lookahead fails this test.
+func TestParentAllowsForTheHoldJustBeforeTheWindow(t *testing.T) {
+	t.Setenv(loginHourHoldEnv, "")
+	oldJitter := loginHoldJitter
+	t.Cleanup(func() { loginHoldJitter = oldJitter })
+	loginHoldJitter = func() time.Duration { return 0 }
+	at := time.Date(2026, 11, 8, 13, 59, 56, 990_000_000, time.UTC)
+	if h := hourStartHold(at); h != 0 {
+		t.Fatalf("setup: the window is not open at %s yet (hold %s)", at, h)
+	}
+	// The window ends at 14:03:05, 188.01 s later.
+	want := 188*time.Second + 10*time.Millisecond
+	if got := loginHoldHorizon(at); got != want {
+		t.Errorf("horizon %s, want %s", got, want)
+	}
+	if got := loginDeadline(at, 90*time.Second); !got.Equal(at.Add(90*time.Second + want + loginHoldJitterMax)) {
+		t.Errorf("deadline %s does not include the hold", got)
+	}
+	if b, hold := bookFleetLogin(newLoginBudget(14, realmdThrottleWindow), at); hold != want || b.Before(at.Add(want)) {
+		t.Errorf("fleet booked %s (hold %s), want it at or after the window's end", b, hold)
+	}
+	// Well before the window: nothing.
+	if h := loginHoldHorizon(at.Add(-time.Minute)); h != 0 {
+		t.Errorf("a minute earlier the horizon is %s, want 0", h)
+	}
+}
+
+// N2: when the budget or this process's own window pushes the start into the hour-start window, the wait is extended again. Here
+// the window's busy time pushes a 5 s backoff to 14:00:00 exactly. Removing the second check fails this test.
+func TestReconnectorWaitRechecksTheHoldAfterThePush(t *testing.T) {
+	pinHold(t, time.Date(2026, 11, 8, 13, 50, 0, 0, time.UTC))
+	loginHoldJitter = func() time.Duration { return 4 * time.Second }
+	w := &loginWindow{busyUntil: time.Date(2026, 11, 8, 14, 0, 0, 0, time.UTC)}
+	r := &reconnector{used: 1, window: w, stderr: io.Discard}
+	want := 10*time.Minute + 185*time.Second + 4*time.Second
+	if got := r.wait(context.Background()); got != want {
+		t.Errorf("wait %s, want %s (the pushed start, the window, the jitter)", got, want)
+	}
+}
+
+// N3: the timeout messages carry the real elapsed time, which with the hold is more than the base wait.
+func TestElapsedSecs(t *testing.T) {
+	if got := elapsedSecs(277*time.Second + 400*time.Millisecond); got != 277 {
+		t.Errorf("elapsedSecs = %d, want 277", got)
 	}
 }
 
@@ -130,6 +192,9 @@ func TestFleetBooksLoginsAfterTheHourStartHold(t *testing.T) {
 // fails this test (the first member would start at once).
 func TestFleetHoldsStartsInsideTheHourStartWindow(t *testing.T) {
 	t.Setenv(loginHourHoldEnv, "")
+	oldJitter := loginHoldJitter
+	t.Cleanup(func() { loginHoldJitter = oldJitter })
+	loginHoldJitter = func() time.Duration { return 0 }
 	ff := newFakeFleet()
 	o := fastOpts
 	o.now = func() time.Time { return time.Date(2026, 11, 8, 14, 0, 0, 0, time.UTC) }
@@ -170,5 +235,18 @@ func TestPhaseLoginDoesNotTimeOutInTheHourStartHold(t *testing.T) {
 	f2.defaultRun("onyxias_lair")
 	if c := f2.run(context.Background()); c != exitRaidWalkFailed || !strings.Contains(f2.summary().EndReason, "not in world after 90 s") {
 		t.Fatalf("control: exit %d reason %q, want the 90 s timeout outside the window", c, f2.summary().EndReason)
+	}
+}
+
+// N3: a login that really does time out in the hold reports the time it waited (the 90 s plus the hold), not "90 s".
+func TestPhaseLoginTimeoutNamesTheRealElapsedTime(t *testing.T) {
+	t.Setenv(loginHourHoldEnv, "")
+	f := newFixture(t)
+	f.clock.t = time.Date(2026, 11, 8, 14, 1, 0, 0, time.UTC)
+	f.agent.statusFailNext = 1000
+	f.defaultRun("onyxias_lair")
+	// 90 s + 125 s of hold (14:01:00 to 14:03:05) + 20 s of jitter, then the next 2 s poll: 236 s.
+	if c, reason := f.run(context.Background()), f.summary().EndReason; c != exitRaidWalkFailed || !strings.Contains(reason, "not in world after 236 s") {
+		t.Fatalf("exit %d, reason %q, want it to name 236 s", c, reason)
 	}
 }

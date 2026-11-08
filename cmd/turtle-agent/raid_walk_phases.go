@@ -355,7 +355,7 @@ func (w *walk) phaseLogin(ctx context.Context) error {
 			break
 		}
 		if !w.env.now().Before(deadline) {
-			return stopf(exitRaidWalkFailed, "login: no agent in %s after 90 s (%v; see %s/agent.out)", w.slotDir, err, w.slotDir)
+			return stopf(exitRaidWalkFailed, "login: no agent in %s after %d s (%v; see %s/agent.out)", w.slotDir, elapsedSecs(w.env.now().Sub(started)), err, w.slotDir)
 		}
 		if err := w.env.sleep(ctx, time.Second); err != nil {
 			return stopf(exitRaidWalkFailed, "interrupted")
@@ -374,7 +374,7 @@ func (w *walk) phaseLogin(ctx context.Context) error {
 			w.logLine(w.env.now(), "login: waiting for the realmd hour-start window")
 		}
 		if !w.env.now().Before(deadline) {
-			return stopf(exitRaidWalkFailed, "login: not in world after 90 s (state %q; see %s/agent.out)", stateWord(st), w.slotDir)
+			return stopf(exitRaidWalkFailed, "login: not in world after %d s (state %q; see %s/agent.out)", elapsedSecs(w.env.now().Sub(started)), stateWord(st), w.slotDir)
 		}
 		if err := w.env.sleep(ctx, 2*time.Second); err != nil {
 			return stopf(exitRaidWalkFailed, "interrupted")

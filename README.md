@@ -44,6 +44,11 @@ do not all fire at once, and logs `login: waiting <s> s for the realmd hour-star
 child (raid-walk, plan-scout, fleet) allow for the hold in their own waits. The window assumes the database's `NOW()` uses a
 whole-hour time zone. Set `TA_LOGIN_HOUR_HOLD=0` to turn the hold off.
 
+Raid-walk rosters (`tb-raid-roster` v2) may name a `spec` per batch; for a hunter it also sets the talent build and reads it back
+(see [the roster format](docs/okf/raids/roster-format.md)). Known limit: the read-back checks that the spec's tree has the most
+points, not the premade's exact point spread, which depends on the hire's level; refusals in TB's answer are caught and a failed
+spec is listed in the walk's `spec_failed`.
+
 Log a character in and keep it online with the RPC server running:
 
 ```sh

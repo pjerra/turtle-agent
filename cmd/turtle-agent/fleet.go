@@ -241,11 +241,17 @@ func (goneChild) Kill()                   {}
 func (c goneChild) Done() <-chan struct{} { return c.done }
 func (goneChild) Code() int               { return 1 }
 
-// bookFleetLogin books a member's login in the budget: no earlier than now, and no earlier than the end of realmd's hour-start
-// window when now is inside it (login_hold.go). It returns the booked time and the hold that was added.
+// bookFleetLogin books a member's login in the budget: no earlier than now, and when now is in or just before realmd's hour-start
+// window (login_hold.go), no earlier than the window's end plus a jitter sampled here, so the members that were held do not all
+// start at the same instant. The fleet starts the child at the booked time, outside the window, so the child adds no hold of its
+// own. It returns the booked time and the hold that was added (the window part, without the jitter).
 func bookFleetLogin(b *loginBudget, now time.Time) (time.Time, time.Duration) {
-	hold := loginHold(now)
-	return b.reserve(now.Add(hold)), hold
+	hold := loginHoldHorizon(now)
+	earliest := now
+	if hold > 0 {
+		earliest = now.Add(hold + loginHoldJitter())
+	}
+	return b.reserve(earliest), hold
 }
 
 // clock is the options' clock.
