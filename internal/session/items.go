@@ -22,6 +22,11 @@ func (s *Session) Inventory() []objects.Item {
 	return s.store.Backpack(s.selfGUID())
 }
 
+// Equipment lists the worn items (inventory slots 0-18), occupied slots only, from the player's own update fields.
+func (s *Session) Equipment() []objects.Item {
+	return s.store.Equipment(s.selfGUID())
+}
+
 // EquipRef picks an item: the first item with Entry in the backpack or the bags, or
 // Bag/Slot (Bag defaults to the backpack, 255).
 type EquipRef struct {

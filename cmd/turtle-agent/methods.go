@@ -106,6 +106,26 @@ type inventoryParams struct {
 	Bags bool `json:"bags,omitempty"` // the items in the four bags too
 }
 
+// equipmentRow is one worn item of the equipment method. ItemEntry is 0 until the item's create block arrives, as in inventory.
+type equipmentRow struct {
+	Slot        uint8       `json:"slot"`
+	SlotName    string      `json:"slot_name"`
+	GUID        packet.GUID `json:"guid"`
+	ItemEntry   uint32      `json:"item_entry"`
+	TempEnchant uint32      `json:"temp_enchant,omitempty"`
+}
+
+// equipmentSlotNames are the worn slots 0-18 in index order (EQUIPMENT_SLOT_HEAD to EQUIPMENT_SLOT_TABARD).
+var equipmentSlotNames = [...]string{"head", "neck", "shoulders", "body", "chest", "waist", "legs", "feet", "wrists", "hands",
+	"finger1", "finger2", "trinket1", "trinket2", "back", "main_hand", "off_hand", "ranged", "tabard"}
+
+func equipmentSlotName(slot uint8) string {
+	if int(slot) < len(equipmentSlotNames) {
+		return equipmentSlotNames[slot]
+	}
+	return ""
+}
+
 type equipParams struct {
 	ItemEntry uint32 `json:"item_entry,omitempty"`
 	Bag       *uint8 `json:"bag,omitempty"`
@@ -267,6 +287,13 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 			inv = []objects.Item{}
 		}
 		return inv, nil
+	}))
+	srv.Register("equipment", rpc.Typed(func(ctx context.Context, _ empty) ([]equipmentRow, error) {
+		rows := []equipmentRow{}
+		for _, it := range cur().Equipment() {
+			rows = append(rows, equipmentRow{Slot: it.Slot, SlotName: equipmentSlotName(it.Slot), GUID: it.GUID, ItemEntry: it.Entry, TempEnchant: it.TempEnchant})
+		}
+		return rows, nil
 	}))
 	srv.Register("equip", rpc.Typed(func(ctx context.Context, p equipParams) (objects.Item, error) {
 		it, err := cur().Equip(ctx, session.EquipRef{Entry: p.ItemEntry, Bag: p.Bag, Slot: p.Slot})
