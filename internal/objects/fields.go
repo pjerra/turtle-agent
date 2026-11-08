@@ -104,11 +104,15 @@ const (
 // The backpack is bag INVENTORY_SLOT_BAG_0, slots 23-38; the four bags sit in inventory
 // slots 19-22 (Objects/Player.h:583, :612-613, :618-619).
 const (
-	BackpackBag   uint8 = 255
-	BackpackFirst uint8 = 23
-	BackpackEnd   uint8 = 39
-	BagFirst      uint8 = 19
-	BagEnd        uint8 = 23
+	// EquipmentFirst and EquipmentEnd bound the worn slots 0-18 (head to tabard, EQUIPMENT_SLOT_START/END), at
+	// PlayerInvSlotHead + 2*slot.
+	EquipmentFirst uint8 = 0
+	EquipmentEnd   uint8 = 19
+	BackpackBag    uint8 = 255
+	BackpackFirst  uint8 = 23
+	BackpackEnd    uint8 = 39
+	BagFirst       uint8 = 19
+	BagEnd         uint8 = 23
 )
 
 // Game object fields (Objects/UpdateFields.h:283-304, EGameObjectFields; OBJECT_END = 0x06).

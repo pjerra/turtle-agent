@@ -139,6 +139,7 @@ func (s *Session) onCharCreate(body []byte) error {
 	if body[0] != 46 { // CHAR_CREATE_SUCCESS
 		return &fatalError{fmt.Errorf("SMSG_CHAR_CREATE: create failed: %s", charCreateResult(body[0]))}
 	}
+	s.createOK = true
 	if err := s.conn.WritePacket(opcode.CMSGCharEnum, nil); err != nil {
 		return &fatalError{err}
 	}

@@ -671,6 +671,24 @@ with the remote commander, five owned alts in Uldaman, and `AiPlayerbot.OwnedBot
    with the agent far away (move it and see they do not follow). `on_end: "logout"`: the bots log out after the unbind (`logged_out`); check the
    module accepts `.bot logout` for a bot it was commanding a moment ago, and what happens to the party.
 
+## Trade steps (Eluna coverage)
+
+Passed live on 2026-11-08 against a vMaNGOS-based server (Eluna smoke round r6):
+
+- `trade_expect` on one agent and `trade_open` from the other: the window opened on both sides, `status open`.
+- `trade_set_item` with `trade_slot` 6 (the slot that is not traded): the partner's `trade_status` showed the item in slot 6.
+- `trade_status`: `their_spell` and `my_spell` both showed the enchant spell (7418) before the accept.
+- `cast` with `trade_slot` 6: the core applied the enchant to the slot 6 item.
+- `trade_accept` on both agents: both `completed`, `status complete`.
+- `equipment` on both agents: occupied slots only, slot names correct.
+
+Not yet live:
+
+- `trade_cancel`.
+- The `trade_expect` timeout and decline paths.
+- `trade_set_item` slots 0-5.
+- The create re-read: the create login worked, but the character list showed the new name on the first read, so the race did not happen.
+
 ## Trade (issue #80)
 
 `trade` is tested against the core's `TradeHandler.cpp` layouts and a scripted server only; nothing below has run live. Needs a bot that

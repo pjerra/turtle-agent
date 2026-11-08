@@ -102,6 +102,8 @@ type Options struct {
 	LogoutTimeout time.Duration // 0: 30 s
 	// LoginRetryDelay spaces the CMSG_PLAYER_LOGIN retries after a locked character; 0: 2 s.
 	LoginRetryDelay time.Duration
+	// CharEnumRetryDelay spaces the CMSG_CHAR_ENUM re-reads after a create whose character is not listed yet; 0: 500 ms.
+	CharEnumRetryDelay time.Duration
 	// NamesWait bounds how long an event waits for a source or target name before it is
 	// logged with the names known so far; 0: 2 s.
 	NamesWait time.Duration
@@ -125,6 +127,10 @@ type Options struct {
 // maxLoginRetries bounds the retries after SMSG_CHARACTER_LOGIN_FAILED code 1. With the
 // 2 s delay they cover the backup worker's 5 s cycle plus the dump (World.cpp:4841-4869).
 const maxLoginRetries = 5
+
+// maxEnumRetries bounds the CMSG_CHAR_ENUM re-reads after a successful create whose character the list does not show
+// yet (the core saves a new character asynchronously, after it has sent SMSG_CHAR_CREATE).
+const maxEnumRetries = 3
 
 type StatusInfo struct {
 	State     Status `json:"state"`
@@ -253,6 +259,9 @@ type Session struct {
 	logoutAccepted   bool // SMSG_LOGOUT_RESPONSE reason 0 for the pending logout
 	loginRetries     int
 	createSent       bool // CMSG_CHAR_CREATE sent once (Options.Create)
+	createOK         bool // SMSG_CHAR_CREATE said success: the character exists, the list may not show it yet
+	enumRetries      int  // CMSG_CHAR_ENUM re-reads after the create
+	enumRetryAt      time.Time
 	loginRetryAt     time.Time
 	names            *nameCache
 	itemInfo         itemCache // item prototypes by entry (iteminfo.go)
@@ -305,6 +314,9 @@ func New(conn *worldconn.Conn, opts Options) *Session {
 	}
 	if opts.LoginRetryDelay == 0 {
 		opts.LoginRetryDelay = 2 * time.Second
+	}
+	if opts.CharEnumRetryDelay == 0 {
+		opts.CharEnumRetryDelay = 500 * time.Millisecond
 	}
 	if opts.NamesWait == 0 {
 		opts.NamesWait = 2 * time.Second
@@ -603,6 +615,12 @@ func (s *Session) onTick(now time.Time) error {
 			return err
 		}
 	}
+	if !s.enumRetryAt.IsZero() && !now.Before(s.enumRetryAt) {
+		s.enumRetryAt = time.Time{}
+		if err := s.conn.WritePacket(opcode.CMSGCharEnum, nil); err != nil {
+			return err
+		}
+	}
 	if st := s.State(); st == StatusInWorld || st == StatusLoggingOut {
 		if s.pongWait && now.Sub(s.pingSent) > s.opts.PongTimeout {
 			return errNoPong
@@ -717,6 +735,19 @@ func (s *Session) onCharEnum(body []byte) error {
 			return &fatalError{err}
 		}
 		return nil
+	}
+	if s.createOK {
+		// The core sends SMSG_CHAR_CREATE before the async save of the new character shows in the list query
+		// (CharacterCreation.cpp SaveToDB, CharacterHandler.cpp HandleCharCreateOpcode): ask again a few times.
+		if s.enumRetries < maxEnumRetries {
+			s.enumRetries++
+			s.enumRetryAt = s.now().Add(s.opts.CharEnumRetryDelay)
+			s.emit(events.Event{Kind: events.KindSession, Text: fmt.Sprintf("character %q not listed yet after the create; asking again (%d of %d)",
+				s.opts.Character, s.enumRetries, maxEnumRetries)})
+			return nil
+		}
+		return &fatalError{fmt.Errorf("character %q was created but is still not listed after %d re-reads (characters: %s)",
+			s.opts.Character, maxEnumRetries, strings.Join(names, ", "))}
 	}
 	return &fatalError{fmt.Errorf("character %q is not on this account (characters: %s)", s.opts.Character, strings.Join(names, ", "))}
 }

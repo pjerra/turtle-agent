@@ -66,6 +66,8 @@ type targetParams struct {
 type castParams struct {
 	SpellID uint32      `json:"spell_id"`
 	Target  packet.GUID `json:"target,omitempty"`
+	// TradeSlot casts at the trade partner's item in that trade slot (0-6; an enchant takes slot 6) instead of at a target.
+	TradeSlot *uint8 `json:"trade_slot,omitempty"`
 }
 
 type cancelCastParams struct {
@@ -104,6 +106,26 @@ type rollParams struct {
 
 type inventoryParams struct {
 	Bags bool `json:"bags,omitempty"` // the items in the four bags too
+}
+
+// equipmentRow is one worn item of the equipment method. ItemEntry is 0 until the item's create block arrives, as in inventory.
+type equipmentRow struct {
+	Slot        uint8       `json:"slot"`
+	SlotName    string      `json:"slot_name"`
+	GUID        packet.GUID `json:"guid"`
+	ItemEntry   uint32      `json:"item_entry"`
+	TempEnchant uint32      `json:"temp_enchant,omitempty"`
+}
+
+// equipmentSlotNames are the worn slots 0-18 in index order (EQUIPMENT_SLOT_HEAD to EQUIPMENT_SLOT_TABARD).
+var equipmentSlotNames = [...]string{"head", "neck", "shoulders", "body", "chest", "waist", "legs", "feet", "wrists", "hands",
+	"finger1", "finger2", "trinket1", "trinket2", "back", "main_hand", "off_hand", "ranged", "tabard"}
+
+func equipmentSlotName(slot uint8) string {
+	if int(slot) < len(equipmentSlotNames) {
+		return equipmentSlotNames[slot]
+	}
+	return ""
 }
 
 type equipParams struct {
@@ -224,6 +246,15 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	srv.Register("attack", rpc.Typed(func(ctx context.Context, _ empty) (empty, error) { return empty{}, rpcErr(cur().Attack(ctx)) }))
 	srv.Register("stop_attack", rpc.Typed(func(ctx context.Context, _ empty) (empty, error) { return empty{}, rpcErr(cur().StopAttack(ctx)) }))
 	srv.Register("cast", rpc.Typed(func(ctx context.Context, p castParams) (empty, error) {
+		if p.TradeSlot != nil {
+			if p.Target != 0 {
+				return empty{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "invalid params: cast takes a target or a trade_slot, not both"}
+			}
+			if *p.TradeSlot > 6 {
+				return empty{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "invalid params: cast needs a trade_slot 0-6"}
+			}
+			return empty{}, rpcErr(cur().CastOnTradeSlot(ctx, p.SpellID, *p.TradeSlot))
+		}
 		return empty{}, rpcErr(cur().Cast(ctx, p.SpellID, p.Target))
 	}))
 	srv.Register("cancel_cast", rpc.Typed(func(ctx context.Context, p cancelCastParams) (empty, error) {
@@ -267,6 +298,13 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 			inv = []objects.Item{}
 		}
 		return inv, nil
+	}))
+	srv.Register("equipment", rpc.Typed(func(ctx context.Context, _ empty) ([]equipmentRow, error) {
+		rows := []equipmentRow{}
+		for _, it := range cur().Equipment() {
+			rows = append(rows, equipmentRow{Slot: it.Slot, SlotName: equipmentSlotName(it.Slot), GUID: it.GUID, ItemEntry: it.Entry, TempEnchant: it.TempEnchant})
+		}
+		return rows, nil
 	}))
 	srv.Register("equip", rpc.Typed(func(ctx context.Context, p equipParams) (objects.Item, error) {
 		it, err := cur().Equip(ctx, session.EquipRef{Entry: p.ItemEntry, Bag: p.Bag, Slot: p.Slot})

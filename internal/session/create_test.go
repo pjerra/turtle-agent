@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"github.com/pjerra/turtle-agent/internal/events"
 	"strings"
 	"testing"
 	"time"
@@ -171,5 +172,88 @@ func TestCreateEmptyReplyEndsSession(t *testing.T) {
 		}
 	case <-time.After(expectWait):
 		t.Fatal("session did not end")
+	}
+}
+
+// The core sends SMSG_CHAR_CREATE before the async save is visible to the character list query, so the list that
+// follows a successful create may lack the new name. The session asks again instead of ending.
+func TestCreateReReadsListUntilNameShows(t *testing.T) {
+	spec, err := ParseCreateSpec("1,1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := start(t, Options{Character: "Hirequest", Create: &spec, CharEnumRetryDelay: 20 * time.Millisecond})
+	h.expect(opcode.CMSGCharEnum)
+	alt := Character{GUID: 0x2B, Name: "Alt"}
+	h.send(opcode.SMSGCharEnum, charEnumBody(alt))
+	h.expect(opcode.CMSGCharCreate)
+	h.send(opcode.SMSGCharCreate, []byte{46})
+	h.expect(opcode.CMSGCharEnum)
+	h.send(opcode.SMSGCharEnum, charEnumBody(alt)) // the save is not visible yet
+	start := time.Now()
+	h.expect(opcode.CMSGCharEnum) // asked again after the delay, without any packet from the server
+	if d := time.Since(start); d < 15*time.Millisecond {
+		t.Fatalf("asked again after %s, before the retry delay", d)
+	}
+	newChar := Character{GUID: 0x2C, Name: "Hirequest", Race: 1, Class: 1}
+	h.send(opcode.SMSGCharEnum, charEnumBody(alt, newChar))
+	if p := h.expect(opcode.CMSGPlayerLogin); packet.NewReader(p.Body).GUID() != newChar.GUID {
+		t.Fatalf("logged in % X", p.Body)
+	}
+	if p, err := h.srv.Expect(opcode.CMSGCharCreate, 50*time.Millisecond); err == nil {
+		t.Fatalf("a second create % X", p.Body)
+	}
+	var seen bool
+	for _, e := range ofKind(h.s.Log(), events.KindSession) {
+		seen = seen || strings.Contains(e.Text, "not listed yet after the create; asking again (1 of 3)")
+	}
+	if !seen {
+		t.Fatalf("no session event for the re-read: %+v", ofKind(h.s.Log(), events.KindSession))
+	}
+}
+
+func TestCreateReReadGivesUpAfterThree(t *testing.T) {
+	spec, err := ParseCreateSpec("1,1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := start(t, Options{Character: "Hirequest", Create: &spec, CharEnumRetryDelay: 5 * time.Millisecond})
+	h.expect(opcode.CMSGCharEnum)
+	alt := Character{GUID: 0x2B, Name: "Alt"}
+	h.send(opcode.SMSGCharEnum, charEnumBody(alt))
+	h.expect(opcode.CMSGCharCreate)
+	h.send(opcode.SMSGCharCreate, []byte{46})
+	// The list after the create, then three re-reads: four lists without the name.
+	for i := 0; i <= maxEnumRetries; i++ {
+		h.expect(opcode.CMSGCharEnum)
+		h.send(opcode.SMSGCharEnum, charEnumBody(alt))
+	}
+	select {
+	case err := <-h.run:
+		if err == nil || !strings.Contains(err.Error(), "after 3 re-reads") || !strings.Contains(err.Error(), "Alt") {
+			t.Fatalf("err = %v", err)
+		}
+	case <-time.After(expectWait):
+		t.Fatal("session did not give up")
+	}
+	if n := len(h.srv.Skipped()); n != 0 {
+		t.Fatalf("%d unexpected client packets (an extra CMSG_CHAR_ENUM or a second create)", n)
+	}
+}
+
+func TestMissingCharacterWithoutCreateStillFatal(t *testing.T) {
+	h := start(t, Options{Character: "Hirequest", CharEnumRetryDelay: 5 * time.Millisecond})
+	h.expect(opcode.CMSGCharEnum)
+	h.send(opcode.SMSGCharEnum, charEnumBody(Character{GUID: 0x2B, Name: "Alt"}))
+	select {
+	case err := <-h.run:
+		if err == nil || !strings.Contains(err.Error(), "is not on this account") {
+			t.Fatalf("err = %v", err)
+		}
+	case <-time.After(expectWait):
+		t.Fatal("session did not end")
+	}
+	if p, err := h.srv.Expect(opcode.CMSGCharEnum, 50*time.Millisecond); err == nil {
+		t.Fatalf("the list was asked for again % X", p.Body)
 	}
 }

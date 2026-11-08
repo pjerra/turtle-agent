@@ -47,6 +47,13 @@ func BuildCastSpellOnItem(spell uint32, item packet.GUID) []byte {
 	return packet.NewWriter().U32(spell).U16(TargetFlagItem).PackedGUID(item).Bytes()
 }
 
+// BuildCastSpellOnTradeItem is CMSG_CAST_SPELL aimed at the trade partner's item in trade slot slot (TARGET_FLAG_TRADE_ITEM,
+// Spell.cpp:204-205 and 159-180): u32 spell, u16 0x1000, the slot number as a packed guid. The core casts only at slot 6
+// (TRADE_SLOT_NONTRADED, Spell.cpp:6833-6835) and only when the trade completes.
+func BuildCastSpellOnTradeItem(spell uint32, slot uint8) []byte {
+	return packet.NewWriter().U32(spell).U16(TargetFlagTradeItem).PackedGUID(packet.GUID(slot)).Bytes()
+}
+
 // BuildCastSpellOnObject is CMSG_CAST_SPELL aimed at a game object (TARGET_FLAG_OBJECT, Spell.cpp:198-199): u32 spell, u16 target mask
 // 0x0800, the object's guid packed. A locked chest or a node is opened this way with an Opening spell (SPELL_EFFECT_OPEN_LOCK,
 // SpellEffects.cpp:1915-1988); CMSG_GAMEOBJ_USE alone only runs a chest's scripts (GameObject.cpp:1493-1514).
