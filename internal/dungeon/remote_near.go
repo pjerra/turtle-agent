@@ -258,7 +258,7 @@ func (d *RemoteDriver) agentWalk(ctx context.Context, f Follower, stand Point, l
 	}()
 	<-started
 	if d.clk.Settle != nil {
-		d.clk.Settle()
+		d.clk.Settle(func() bool { return len(done) > 0 })
 	}
 	began := d.clk.Now() // the walk's time counts from here
 	for {
