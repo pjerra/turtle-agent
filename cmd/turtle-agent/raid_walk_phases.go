@@ -1105,6 +1105,7 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 	}
 	perStep := map[int]int{}
 	autoTotal := 0
+	defer w.placeUnfreezeFinish()
 	for {
 		if w.leaseLost.Load() {
 			return stopf(exitRaidWalkFailed, "lease lost")
@@ -1122,6 +1123,7 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		w.placeUnfreezeTick(ctx) // judges by w.pollAt, the poll's own time: the clock has moved on by its waits
 		for _, inc := range incs {
 			switch v := inc.(type) {
 			case raidwalk.IncidentStall:
@@ -1279,6 +1281,7 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 // pollOnce reads one events page, one bot_view frame and (on request) the dashboard, feeding the tracker.
 func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, error) {
 	now := w.env.now()
+	w.pollAt = now
 	// The page's lines get sequence numbers above pollSeq0: handleWipe's self-regroup rule uses the
 	// watermark to tell a line of the wipe's own page from an older one (walk 19 r6).
 	w.pollSeq0 = w.statusSeq
@@ -2580,6 +2583,7 @@ func (w *walk) handleWipe(ctx context.Context, step int) error {
 	// a paused or done last line is no self-regroup.
 	now := w.env.now()
 	w.wipeAt = now
+	w.placeUnfreezeStop("the raid wiped") // the revived raid stands at the start again: no frozen-seat judgement after a wipe
 	selfRegroup := false
 	w.regroupAt = time.Time{}
 	if w.haveStatus && w.lastStatus.State == tbm.RunRunning {
