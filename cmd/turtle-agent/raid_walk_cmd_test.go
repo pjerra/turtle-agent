@@ -165,13 +165,15 @@ type walkFakeAgent struct {
 	onResume func()
 	runEnded bool
 	// runVerbs records every `run` commander request's verb, in order, and onSkip runs for one whose verb is skip
-	// (walk 24 B: the boss-not-found skip). skipErr makes that skip answer an error (a refusal).
 	// (walk 24 B: the boss-not-found skip). skipErr makes that skip answer an error (a refusal). pauseErr, when
-	// non-nil, makes `run pause` fail while it points at true (a refused pause: the gm-instance-data resume test).
+	// non-nil, makes `run pause` fail while it points at true (a refused pause: the gm-instance-data resume test);
+	// onPause runs after an accepted pause (the fake server's TBM:RUN paused line) and nil models an ACK with no
+	// status, which the practice reset must refuse.
 	runVerbs []string
 	onSkip   func()
 	skipErr  bool
 	pauseErr *bool
+	onPause  func()
 	// onStart runs after a `run start` was answered and its startQueue was pushed (a test that needs lines after a
 	// later start: the boss-not-found re-run). nil: nothing.
 	onStart func()
@@ -188,8 +190,11 @@ type walkFakeAgent struct {
 	// The practice hands' game side (raid-walk --practice): each hook models what the GM command does to the test
 	// scenario; nil leaves the world unchanged. spellQueue holds the cast events the practice loop's own events read
 	// (kinds spell_start/spell_go) delivers once the fake clock reaches their time.
-	onEvade    func(g packet.GUID)
-	onSetHP    func(g packet.GUID)
+	onEvade func(g packet.GUID)
+	onSetHP func(g packet.GUID)
+	// setHPErr, when set, makes every gm_set_hp call answer it (a unit the client cannot find). It runs after the
+	// call is logged, so a test can count the attempts.
+	setHPErr   error
 	onRespawn  func(g packet.GUID)
 	onRevive   func(name string)
 	spellQueue []queuedSpell
@@ -538,7 +543,12 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		f.mu.Lock()
 		f.log = append(f.log, "gm_set_hp "+g.String())
 		h := f.onSetHP
+		hpErr := f.setHPErr
 		f.mu.Unlock()
+		if hpErr != nil {
+			// The client cannot find the unit: no restore happens, so the world is not touched either.
+			return hpErr
+		}
 		if h != nil {
 			h(g)
 		}
@@ -1395,10 +1405,14 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 		if p.Verb == "pause" {
 			f.mu.Lock()
 			fail := f.pauseErr != nil && *f.pauseErr
+			hook := f.onPause
 			f.mu.Unlock()
 			if fail {
 				return commanderReply{Reply: tbm.Reply{Kind: "err", Err: &tbm.Err{Intent: "run pause", Code: "refused",
 					Message: "the run is busy"}}}
+			}
+			if hook != nil {
+				hook()
 			}
 		}
 		if p.Verb == "skip" {

@@ -3833,3 +3833,65 @@ func TestAutoPracticeStateSurvivesARestart(t *testing.T) {
 		t.Fatalf("%d launches, want 3:\n%s", n, f.events())
 	}
 }
+
+// TestAutoPracticeRelaunchPassesRemainingCycles: a relaunch asks for what is LEFT of the goal (L3), not the full target
+// again: after four of ten cycles, the next walk is told six.
+func TestAutoPracticeRelaunchPassesRemainingCycles(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(practiceTarget)
+	f.practiceAttempt("p-1", 18, 4, "max time")
+	f.practiceAttempt("p-2", 18, 6, "max time")
+	f.practiceAttempt("p-3", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the relaunch", func() bool { return len(f.args()) >= 2 })
+	if args := f.args()[1]; !strings.Contains(args, "--practice-cycles 6") {
+		t.Fatalf("the relaunch asks for the full target again: %s", args)
+	}
+	finishAttempt(t, s)
+	if _, esc := runState(s.states[0]); esc {
+		t.Fatalf("escalated after the 4+6 cycles met the target:\n%s", f.events())
+	}
+}
+
+// TestAutoPracticeBossDeathRelaunchIsNoPlaceFailure: the fresh-instance relaunch after the boss died is no failed
+// placement (L4): placeFails stays as it was.
+func TestAutoPracticeBossDeathRelaunchIsNoPlaceFailure(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(practiceTarget)
+	f.practiceAttempt("p-1", 0, 4, "boss killed during practice")
+	f.practiceAttempt("p-2", 0, 6, "boss killed during practice")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the fresh relaunch", func() bool { return len(f.args()) >= 2 })
+	st := s.states[0]
+	st.mu.Lock()
+	got := st.placeFails
+	st.mu.Unlock()
+	if got != 0 {
+		t.Fatalf("placeFails %d after the boss-death fresh relaunch, want 0", got)
+	}
+}
+
+// TestAutoPracticeNeverEngagedRelaunches: the observation's practice ended reason reaches the rule: an exit 0 with
+// "never engaged" relaunches in the same instance (L4), never the one fresh-instance death retry.
+func TestAutoPracticeNeverEngagedRelaunches(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(practiceTarget)
+	f.practiceAttempt("p-1", 0, 0, "never engaged")
+	f.practiceAttempt("p-2", 18, 1, "max time")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the relaunch", func() bool { return len(f.args()) >= 2 })
+	args := f.args()[1]
+	if !strings.Contains(args, "--reuse-instance") || !strings.Contains(args, "--place") {
+		t.Fatalf("the never-engaged relaunch is not the same instance: %s", args)
+	}
+	if !strings.Contains(f.events(), "practice: never engaged") {
+		t.Fatalf("the event does not name the never-engaged relaunch:\n%s", f.events())
+	}
+	finishAttempt(t, s)
+}
