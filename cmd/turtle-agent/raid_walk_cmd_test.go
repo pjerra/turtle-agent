@@ -62,6 +62,21 @@ func (c *fakeClock) sleep(ctx context.Context, d time.Duration) error {
 type queuedEvent struct {
 	raw  string
 	text string
+	// kind and source make the line a bot's chat or whisper (events.KindChat, "BotName") instead of a system line.
+	kind   string
+	source string
+}
+
+// event is the served form of a queued line.
+func (q queuedEvent) event(seq uint64) events.Event {
+	ev := events.Event{Seq: seq, Kind: events.KindSystem, Text: q.raw, Data: map[string]any{"raw": q.raw}}
+	if q.text != "" {
+		ev.Text = q.text
+	}
+	if q.kind != "" {
+		ev.Kind, ev.Source, ev.Data = q.kind, q.source, map[string]any{}
+	}
+	return ev
 }
 
 type timelineEntry struct {
@@ -93,6 +108,11 @@ type walkFakeAgent struct {
 	roleLines  []string // every `.bot role` line, in order
 	roleFail   bool     // the server refuses every `.bot role` ("does not use that spec")
 	roleSilent bool     // the server never answers `.bot role`
+	// talentMode is how the fake game answers `.bot command <bot> talents [<path>]`: "" applies the build and reads it back,
+	// "silent" never answers, "stuck" answers but leaves the build as it was (Survival), "multiple" lists several specs.
+	talentMode  string
+	talentLines []string          // every `.bot command <bot> talents ...` line, in order
+	talentTrees map[string][3]int // the build each hire has (default: the Survival premade)
 
 	entered  bool
 	status   session.StatusInfo
@@ -570,6 +590,8 @@ func (f *walkFakeAgent) gmSide(line string) {
 		f.push("TBM:HIRE_RAID|ok|"+strconv.Itoa(n)+"|"+strconv.Itoa(n)+"|0|0|0|3|0|", "")
 	case strings.HasPrefix(line, ".bot gear raid "):
 		f.push("TBM:GEAR|ok|39|39|3|60|-|-|-|0|-|0", "")
+	case strings.HasPrefix(line, ".bot command ") && strings.Contains(line, " talents"):
+		f.talentSide(line)
 	case strings.HasPrefix(line, ".bot role "):
 		fields := strings.Fields(line)
 		f.mu.Lock()
@@ -851,6 +873,55 @@ func hireCount(hire string) int {
 	return n
 }
 
+// talentSide is the game side for `.bot command <bot> talents [<path>]` (ChangeTalentsAction): the apply says "Apply spec ..." and
+// the bare form reads the build back, both in the bot's own chat.
+func (f *walkFakeAgent) talentSide(line string) {
+	fields := strings.Fields(line)
+	if len(fields) < 4 {
+		return
+	}
+	name := fields[2]
+	say := func(text string) {
+		f.mu.Lock()
+		f.lines = append(f.lines, queuedEvent{text: text, kind: events.KindChat, source: name})
+		f.mu.Unlock()
+	}
+	f.mu.Lock()
+	f.talentLines = append(f.talentLines, line)
+	mode := f.talentMode
+	if f.talentTrees == nil {
+		f.talentTrees = map[string][3]int{}
+	}
+	trees, ok := f.talentTrees[name]
+	if !ok {
+		trees = [3]int{8, 0, 43}
+	}
+	if len(fields) == 5 && mode == "" {
+		switch fields[4] {
+		case "beastmastery":
+			trees = [3]int{45, 6, 0}
+		case "marksmanship":
+			trees = [3]int{9, 42, 0}
+		case "survival":
+			trees = [3]int{8, 0, 43}
+		}
+		f.talentTrees[name] = trees
+	}
+	f.mu.Unlock()
+	if mode == "silent" {
+		return
+	}
+	if len(fields) == 5 {
+		if mode == "multiple" {
+			say("Found multiple specs: marksmanship, survival")
+			return
+		}
+		say("Apply spec |h|cffffffff" + fields[4] + " 9/42/0")
+		return
+	}
+	say(fmt.Sprintf("My current talent spec is: |h|cffffffffHunter (%d/%d/%d) Link: http://x", trees[0], trees[1], trees[2]))
+}
+
 func (f *walkFakeAgent) push(raw, text string) {
 	f.mu.Lock()
 	f.lines = append(f.lines, queuedEvent{raw: raw, text: text})
@@ -992,11 +1063,7 @@ func (f *walkFakeAgent) eventsPageSince(since uint64) events.Page {
 		batch := append([]queuedEvent{}, f.history[since:since+uint64(n)]...)
 		evs := make([]events.Event, 0, n)
 		for i, q := range batch {
-			ev := events.Event{Seq: since + uint64(i) + 1, Kind: events.KindSystem, Text: q.raw, Data: map[string]any{"raw": q.raw}}
-			if q.text != "" {
-				ev.Text = q.text
-			}
-			evs = append(evs, ev)
+			evs = append(evs, q.event(since+uint64(i)+1))
 		}
 		next := since + uint64(n)
 		// Next is the last served seq, not the high-water mark: the caller
@@ -1028,11 +1095,7 @@ func (f *walkFakeAgent) eventsPageSince(since uint64) events.Page {
 	evs := make([]events.Event, 0, n)
 	for _, q := range batch {
 		f.next++
-		ev := events.Event{Seq: f.next, Kind: events.KindSystem, Text: q.raw, Data: map[string]any{"raw": q.raw}}
-		if q.text != "" {
-			ev.Text = q.text
-		}
-		evs = append(evs, ev)
+		evs = append(evs, q.event(f.next))
 	}
 	next := f.next
 	hook := f.eventsHook

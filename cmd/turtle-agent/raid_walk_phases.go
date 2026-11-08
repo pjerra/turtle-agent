@@ -543,6 +543,11 @@ func (w *walk) phaseHire(ctx context.Context) error {
 			// bot's own spec, so the spec has to be in place first.
 			class := b.Class()
 			for _, n := range added {
+				// The talents first (a changed build rebuilds the bot's strategies), then `.bot role` puts the
+				// spec's strategies on top. A talent build that does not take is logged, never a failed walk.
+				if err := w.applyTalents(ctx, n, class, b.Spec); err != nil {
+					return err
+				}
 				if err := w.applySpec(ctx, n, b.Spec); err != nil {
 					return err
 				}
@@ -1467,6 +1472,121 @@ func (w *walk) applySpec(ctx context.Context, name, spec string) error {
 		return stopf(exitRaidWalkFailed, "roster: %s", text)
 	}
 	return nil
+}
+
+// The waits of a roster spec's talent build: TortoiseBots answers `talents <path>` and a bare `talents` in the bot's own words.
+const (
+	talentApplyWait = 10 * time.Second
+	talentReadWait  = 15 * time.Second
+)
+
+// applyTalents sets the talent build a roster spec names (`.bot command <bot> talents <path>`, TortoiseBots'
+// ChangeTalentsAction) and verifies it the way TB reports it: a bare `talents` answers "My current talent spec is: ...
+// (a/b/c)", and the tree with the most points must be the spec's. A class the walk has no build for is skipped. A build
+// that does not take logs `hire: spec <x> not applied to <bot> (<reason>)` and the walk carries on; only a refused or
+// failed GM line stops it.
+func (w *walk) applyTalents(ctx context.Context, name, class, spec string) error {
+	build, ok := raidwalk.TalentFor(class, spec)
+	if !ok {
+		return nil
+	}
+	notApplied := func(reason string) {
+		w.logLine(w.env.now(), fmt.Sprintf("hire: spec %s not applied to %s (%s)", spec, name, reason))
+	}
+	if err := w.gm(ctx, fmt.Sprintf(".bot command %s talents %s", name, build.Path)); err != nil {
+		return err
+	}
+	// The apply answers "Apply spec ..." (or lists several specs when the path matches more than one); a silent bot is
+	// not a failure yet: the read-back below is the proof.
+	reply, _, err := w.waitBotWords(ctx, name, talentApplyWait, func(s string) bool {
+		l := strings.ToLower(s)
+		return strings.Contains(l, "apply spec") || strings.Contains(l, "apply talents") || strings.Contains(l, "found multiple specs") ||
+			strings.Contains(l, "talents are invalid")
+	})
+	if err != nil {
+		return err
+	}
+	if l := strings.ToLower(reply); strings.Contains(l, "found multiple specs") || strings.Contains(l, "talents are invalid") {
+		notApplied("TB answered: " + reply)
+		return nil
+	}
+	if err := w.gm(ctx, fmt.Sprintf(".bot command %s talents", name)); err != nil {
+		return err
+	}
+	var got tbm.Talents
+	_, found, err := w.waitBotWords(ctx, name, talentReadWait, func(s string) bool {
+		t, ok := tbm.ParseTalents([]string{s})
+		if ok {
+			got = t
+		}
+		return ok
+	})
+	if err != nil {
+		return err
+	}
+	if !found {
+		notApplied("no talent read-back in " + durWords(talentReadWait))
+		return nil
+	}
+	main := 0
+	for i, n := range got.Trees {
+		if n > got.Trees[main] {
+			main = i
+		}
+	}
+	if got.Total == 0 || main != build.Tree {
+		notApplied(fmt.Sprintf("talents read back %d/%d/%d, want tree %d on top", got.Trees[0], got.Trees[1], got.Trees[2], build.Tree+1))
+		return nil
+	}
+	w.logLine(w.env.now(), fmt.Sprintf("roster: %s %s %s talents %d/%d/%d", name, class, spec, got.Trees[0], got.Trees[1], got.Trees[2]))
+	return nil
+}
+
+// waitBotWords waits for a line the named bot said (whisper or chat) or a system or addon line that match accepts, logging
+// every line it reads. ok is false when timeout ran out first.
+func (w *walk) waitBotWords(ctx context.Context, bot string, timeout time.Duration, match func(string) bool) (string, bool, error) {
+	deadline := w.env.now().Add(timeout)
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", false, stopf(exitRaidWalkFailed, "interrupted")
+		}
+		var page events.Page
+		params := map[string]any{"since": w.eventsAt, "kinds": []string{"system", "addon", "whisper", "chat"}, "wait_ms": 1000}
+		if err := w.agent.Call(ctx, "events", params, &page, 15*time.Second); err != nil {
+			return "", false, stopf(exitRaidWalkFailed, "events: %v", err)
+		}
+		w.eventsAt = page.Next
+		for _, e := range page.Events {
+			var text string
+			switch e.Kind {
+			case events.KindWhisper, events.KindChat:
+				if !strings.EqualFold(e.Source, bot) || e.Data["type"] == "whisper_inform" {
+					continue
+				}
+				text = e.Text
+			default:
+				line, ok := tbm.LineOf(e)
+				if !ok {
+					continue
+				}
+				text = line
+			}
+			text = raidwalk.CleanLine(text)
+			if text == "" {
+				continue
+			}
+			w.logLine(w.env.now(), text)
+			if match(text) {
+				return text, true, nil
+			}
+		}
+		if !w.env.now().Before(deadline) {
+			return "", false, nil
+		}
+		if err := w.env.sleep(ctx, time.Second); err != nil {
+			return "", false, stopf(exitRaidWalkFailed, "interrupted")
+		}
+	}
 }
 
 // waitTBM waits for a line with prefix and logs the lines it reads on the way.
