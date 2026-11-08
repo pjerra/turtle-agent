@@ -117,3 +117,16 @@ func TestBuildStandStateChange(t *testing.T) {
 		t.Fatalf("% x", got)
 	}
 }
+
+// A trade-slot cast (an enchant on the partner's item) is the spell, mask 0x1000 (TARGET_FLAG_TRADE_ITEM) and the slot number as a
+// packed guid (Spell.cpp:204-205). The bytes are written out so a change of layout shows (Enchant Bracer - Minor Health 7418 = 0x1CFA).
+func TestBuildCastSpellOnTradeItem(t *testing.T) {
+	want := []byte{0xFA, 0x1C, 0x00, 0x00, 0x00, 0x10, 0x01, 0x06}
+	if b := BuildCastSpellOnTradeItem(7418, 6); !bytes.Equal(b, want) {
+		t.Fatalf("trade item cast % X, want % X", b, want)
+	}
+	want = []byte{0xFA, 0x1C, 0x00, 0x00, 0x00, 0x10, 0x00} // a packed zero guid is the mask byte alone
+	if b := BuildCastSpellOnTradeItem(7418, 0); !bytes.Equal(b, want) {
+		t.Fatalf("slot 0: % X, want % X", b, want)
+	}
+}
