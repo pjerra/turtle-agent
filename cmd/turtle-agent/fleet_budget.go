@@ -54,16 +54,33 @@ func newLoginBudget(limit int, window time.Duration) *loginBudget {
 // reserve books the first login time at or after earliest that keeps the budget, and
 // returns it.
 func (b *loginBudget) reserve(earliest time.Time) time.Time {
-	t, _ := b.book(earliest, 0)
+	t, _ := b.book(earliest, 0, nil)
+	return t
+}
+
+// reserveAdjusted is reserve with a final adjustment of the time: adjust maps a login time the budget would allow to the time the
+// login will really happen (realmd's hour-start hold plus jitter, login_hold.go). Under the budget's lock it finds the earliest
+// allowed time, applies adjust, and looks again from the adjusted time until adjust leaves the time alone, so the stored slot is
+// the time of the login itself and expires 300 s after that, not after the time before the adjustment.
+func (b *loginBudget) reserveAdjusted(earliest time.Time, adjust func(time.Time) time.Time) time.Time {
+	t, _ := b.book(earliest, 0, adjust)
 	return t
 }
 
 // tryReserve is reserve for a client of the port: false when maxBudgetSlots are booked.
 func (b *loginBudget) tryReserve(earliest time.Time) (time.Time, bool) {
-	return b.book(earliest, maxBudgetSlots)
+	return b.book(earliest, maxBudgetSlots, nil)
 }
 
-func (b *loginBudget) book(earliest time.Time, maxSlots int) (time.Time, bool) {
+// tryReserveAdjusted is reserveAdjusted for a client of the port.
+func (b *loginBudget) tryReserveAdjusted(earliest time.Time, adjust func(time.Time) time.Time) (time.Time, bool) {
+	return b.book(earliest, maxBudgetSlots, adjust)
+}
+
+// maxAdjustRounds bounds the adjust-and-look-again loop of book.
+const maxAdjustRounds = 8
+
+func (b *loginBudget) book(earliest time.Time, maxSlots int, adjust func(time.Time) time.Time) (time.Time, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	span := b.window + b.margin
@@ -82,7 +99,24 @@ func (b *loginBudget) book(earliest time.Time, maxSlots int) (time.Time, bool) {
 	if b.busyUntil.After(t) {
 		t = b.busyUntil
 	}
-	// The only times worth trying are t and the moments an old slot leaves the window.
+	t = b.firstFit(t, span)
+	for i := 0; adjust != nil && i < maxAdjustRounds; i++ {
+		a := adjust(t)
+		if !a.After(t) {
+			break
+		}
+		t = b.firstFit(a, span)
+	}
+	i := sort.Search(len(b.slots), func(i int) bool { return b.slots[i].After(t) })
+	b.slots = append(b.slots, time.Time{})
+	copy(b.slots[i+1:], b.slots[i:])
+	b.slots[i] = t
+	return t, true
+}
+
+// firstFit is the first login time at or after t that keeps the budget. The only times worth trying are t and the moments an old
+// slot leaves the window.
+func (b *loginBudget) firstFit(t time.Time, span time.Duration) time.Time {
 	cands := []time.Time{t}
 	for _, s := range b.slots {
 		if c := s.Add(span); c.After(t) {
@@ -92,15 +126,10 @@ func (b *loginBudget) book(earliest time.Time, maxSlots int) (time.Time, bool) {
 	sort.Slice(cands, func(i, j int) bool { return cands[i].Before(cands[j]) })
 	for _, c := range cands {
 		if b.fits(c, span) {
-			t = c
-			break
+			return c
 		}
 	}
-	i := sort.Search(len(b.slots), func(i int) bool { return b.slots[i].After(t) })
-	b.slots = append(b.slots, time.Time{})
-	copy(b.slots[i+1:], b.slots[i:])
-	b.slots[i] = t
-	return t, true
+	return t
 }
 
 // fits says whether a login at t leaves every span-long stretch with at most limit logins.
@@ -182,8 +211,9 @@ func serveLoginBudget(ctx context.Context, b *loginBudget, token string) (string
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		now := time.Now()
-		at, ok := b.tryReserve(now.Add(time.Duration(req.AfterMS) * time.Millisecond))
+		now := loginHoldNow()
+		// The hour-start hold and jitter are applied inside the booking, so the stored slot is the time the child will log in.
+		at, ok := b.tryReserveAdjusted(now.Add(time.Duration(req.AfterMS)*time.Millisecond), holdAdjuster())
 		if !ok {
 			http.Error(w, "too many bookings", http.StatusTooManyRequests)
 			return

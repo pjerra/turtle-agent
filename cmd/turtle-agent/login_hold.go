@@ -118,3 +118,21 @@ func holdLoginForHourStart(ctx context.Context, stderr io.Writer) error {
 
 // elapsedSecs is d in whole seconds, for the "after N s" of a login timeout: the real wait, which with the hold is longer than the base.
 func elapsedSecs(d time.Duration) int { return int(d.Round(time.Second) / time.Second) }
+
+// holdAdjuster is the adjustment a booking applies to a login time (loginBudget.reserveAdjusted): a time in or just before realmd's
+// hour-start window moves to the window's end plus a jitter, any other time stays. The jitter is sampled once per booking, the first
+// time it is needed. With the hold off nothing moves.
+func holdAdjuster() func(time.Time) time.Time {
+	var jitter time.Duration
+	sampled := false
+	return func(t time.Time) time.Time {
+		h := loginHoldHorizon(t)
+		if h <= 0 {
+			return t
+		}
+		if !sampled {
+			jitter, sampled = loginHoldJitter(), true
+		}
+		return t.Add(h + jitter)
+	}
+}

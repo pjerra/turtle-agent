@@ -247,11 +247,7 @@ func (goneChild) Code() int               { return 1 }
 // own. It returns the booked time and the hold that was added (the window part, without the jitter).
 func bookFleetLogin(b *loginBudget, now time.Time) (time.Time, time.Duration) {
 	hold := loginHoldHorizon(now)
-	earliest := now
-	if hold > 0 {
-		earliest = now.Add(hold + loginHoldJitter())
-	}
-	return b.reserve(earliest), hold
+	return b.reserveAdjusted(now, holdAdjuster()), hold
 }
 
 // clock is the options' clock.

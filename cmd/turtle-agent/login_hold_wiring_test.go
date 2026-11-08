@@ -250,3 +250,60 @@ func TestPhaseLoginTimeoutNamesTheRealElapsedTime(t *testing.T) {
 		t.Fatalf("exit %d, reason %q, want it to name 236 s", c, reason)
 	}
 }
+
+// Round 3: the budget stores the login's final time. When the budget pushes a login into the hour-start window, the stored slot is the
+// time after the hold and jitter, not the time before them (which would let the slot expire minutes early).
+func TestBudgetStoresTheFinalLoginTimeAfterTheHold(t *testing.T) {
+	t.Setenv(loginHourHoldEnv, "")
+	oldJitter := loginHoldJitter
+	t.Cleanup(func() { loginHoldJitter = oldJitter })
+	jitterCalls := 0
+	loginHoldJitter = func() time.Duration { jitterCalls++; return 4 * time.Second }
+	b := newLoginBudget(1, 300*time.Second) // margin 10 s: a slot at 13:54:50 leaves the window at 14:00:00
+	earlier := time.Date(2026, 11, 8, 13, 54, 50, 0, time.UTC)
+	b.reserve(earlier)
+	got := b.reserveAdjusted(time.Date(2026, 11, 8, 13, 55, 5, 0, time.UTC), holdAdjuster())
+	// The budget pushes the login to 14:00:00, inside the window; the hold moves it to 14:03:05 plus the 4 s jitter.
+	want := time.Date(2026, 11, 8, 14, 3, 9, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Fatalf("booked %s, want %s", got.Format("15:04:05"), want.Format("15:04:05"))
+	}
+	if len(b.slots) != 2 || !b.slots[0].Equal(earlier) || !b.slots[1].Equal(want) {
+		t.Fatalf("stored slots %v, want [%s %s]: the slot must be the final login time", b.slots, earlier.Format("15:04:05"), want.Format("15:04:05"))
+	}
+	if jitterCalls != 1 {
+		t.Errorf("the jitter was sampled %d times, want once per booking", jitterCalls)
+	}
+	// The next login can not come before the stored slot has left the window: 14:03:09 + 310 s.
+	if next := b.reserve(want); !next.Equal(want.Add(310 * time.Second)) {
+		t.Errorf("next login at %s, want %s", next.Format("15:04:05"), want.Add(310*time.Second).Format("15:04:05"))
+	}
+}
+
+// The same through a fleet child: the reconnector asks the supervisor's budget over the port, and the slot the supervisor stores is
+// the time the reconnect will really log in (now plus the wait it got). Booking at the pushed time and adding the hold afterwards
+// fails this test.
+func TestReconnectBudgetSlotIsTheFinalReconnectTime(t *testing.T) {
+	now := time.Date(2026, 11, 8, 13, 55, 0, 0, time.UTC)
+	pinHold(t, now)
+	loginHoldJitter = func() time.Duration { return 4 * time.Second }
+	b := newLoginBudget(1, 300*time.Second)
+	earlier := time.Date(2026, 11, 8, 13, 54, 50, 0, time.UTC)
+	b.reserve(earlier)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	addr, stop, err := serveLoginBudget(ctx, b, testBudgetToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	r := &reconnector{used: 1, window: &loginWindow{}, budget: newBudgetClient(addr, testBudgetToken), stderr: io.Discard}
+	wait := r.wait(ctx)
+	final := now.Add(wait)
+	if want := time.Date(2026, 11, 8, 14, 3, 9, 0, time.UTC); !final.Equal(want) {
+		t.Fatalf("the reconnect lands at %s, want %s (pushed to 14:00:00, then the hold and the jitter)", final.Format("15:04:05"), want.Format("15:04:05"))
+	}
+	if len(b.slots) != 2 || !b.slots[1].Equal(final) {
+		t.Fatalf("stored slots %v, want the second slot at the final reconnect time %s", b.slots, final.Format("15:04:05"))
+	}
+}

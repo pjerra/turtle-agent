@@ -145,21 +145,20 @@ func (r *reconnector) next(ctx context.Context) (*worldSession, bool) {
 func (r *reconnector) wait(ctx context.Context) time.Duration {
 	now := loginHoldNow()
 	wait := backoff(r.used)
-	// A login that would start in realmd's hour-start window is booked at the window's end, so the budget and this
-	// process's window count it where it really happens.
-	wait = withLoginHold(now, wait)
 	if r.budget != nil {
+		// The supervisor books the login and applies realmd's hour-start hold and jitter inside the booking (reserveAdjusted), so the
+		// slot it stores is the time of the login itself and the reply is the final wait.
 		d, err := r.budget.reserve(ctx, wait)
 		if err == nil {
 			if d > wait {
-				fmt.Fprintf(r.stderr, "reconnect: waiting %s for the fleet's share of realmd's login limit (%d logins per %s for all characters)\n",
+				fmt.Fprintf(r.stderr, "reconnect: waiting %s for the fleet's share of realmd's login limit and the hour-start window (%d logins per %s for all characters)\n",
 					d.Round(time.Second), realmdThrottleLogins-1, realmdThrottleWindow.Round(time.Second))
 			}
-			// The budget may have pushed the start into the window: check again.
-			return withLoginHold(now, max(wait, d))
+			return max(wait, d)
 		}
 		fmt.Fprintln(r.stderr, "reconnect: fleet login budget unavailable, using this process's own window:", err)
 	}
+	// Without the fleet's budget: this process's window, then the hold, once, on the final time.
 	return withLoginHold(now, max(wait, r.window.wait(now)))
 }
 
