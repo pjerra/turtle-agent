@@ -699,18 +699,14 @@ func startSet(h *harness, slot uint8, entry uint32) chan setOut {
 	return ch
 }
 
-// ownSide is the core's update of our own side of the window (trader_state 0) after we put the bracers in slot 6.
-func (h *harness) ownSide() {
-	h.send(opcode.SMSGTradeStatusExtended, gametest.TradeExtended(false, 0, gametest.TradeSide{Slot: 6, Entry: bracersEntry, Count: 1}))
-}
-
+// The core answers a set with SetAccepted(false), which sends back_to_trade to the setter (Player.cpp:529-541, 589-599); the
+// setter gets no view of its own side (Update(true) goes to the trader only).
 func TestTradeSetItemNonTradedSlot(t *testing.T) {
 	h := openedStep(t)
 	ch := startSet(h, 6, bracersEntry)
 	if p := h.expect(opcode.CMSGSetTradeItem); !bytes.Equal(p.Body, []byte{0x06, 0xFF, 0x17}) {
 		t.Fatalf("set trade item % X", p.Body)
 	}
-	h.ownSide()
 	h.tradeStatus(game.TradeBackToTrade)
 	o := <-ch
 	if o.err != nil || o.r != (TradeSetResult{TradeSlot: 6, Bag: 255, Slot: 23, GUID: bracersGUID, ItemEntry: bracersEntry}) {
@@ -729,9 +725,9 @@ func TestTradeSetItemNonTradedSlot(t *testing.T) {
 	}
 }
 
-// Only a back_to_trade after our own set counts, and only once our side shows the item: an older back_to_trade (the cast's)
-// or one that lands before the core took the item is not the answer. Setting the same item again changes nothing.
-func TestTradeSetItemWaitsForOwnSideAndSkipsUnchanged(t *testing.T) {
+// Only the first back_to_trade after our own send counts: one that came before it (the cast's reply, a partner's change) does
+// not. Setting the item the agent itself last set in that slot changes nothing and sends nothing; a record of it ends with the trade.
+func TestTradeSetItemCountsOnlyBackToTradeAfterSendAndSkipsUnchanged(t *testing.T) {
 	h := openedStep(t)
 	h.tradeStatus(game.TradeBackToTrade) // an earlier change's reply, before our set
 	waitFor(t, func() bool { return h.s.TradeStatus().Status == "back_to_trade" })
@@ -742,23 +738,44 @@ func TestTradeSetItemWaitsForOwnSideAndSkipsUnchanged(t *testing.T) {
 		t.Fatalf("returned on an older back_to_trade: %+v %v", o.r, o.err)
 	case <-time.After(150 * time.Millisecond):
 	}
-	h.tradeStatus(game.TradeBackToTrade) // after the set, but our side does not show the item yet
-	select {
-	case o := <-ch:
-		t.Fatalf("returned before our side showed the item: %+v %v", o.r, o.err)
-	case <-time.After(150 * time.Millisecond):
-	}
-	h.ownSide()
+	h.tradeStatus(game.TradeBackToTrade)
 	if o := <-ch; o.err != nil || o.r.Unchanged || o.r.ItemEntry != bracersEntry {
 		t.Fatalf("%+v %v", o.r, o.err)
 	}
-	// Same item, same slot: success without a packet or a wait.
+	// Same item, same slot, from the agent's own record: success without a packet or a wait.
 	o := <-startSet(h, 6, bracersEntry)
 	if o.err != nil || !o.r.Unchanged || o.r.TradeSlot != 6 || o.r.GUID != bracersGUID {
 		t.Fatalf("%+v %v", o.r, o.err)
 	}
 	if p, err := h.srv.Expect(opcode.CMSGSetTradeItem, 100*time.Millisecond); err == nil {
 		t.Fatalf("sent % X", p.Body)
+	}
+	// The same item in another slot is a change.
+	ch = startSet(h, 4, bracersEntry)
+	if p := h.expect(opcode.CMSGSetTradeItem); !bytes.Equal(p.Body, []byte{0x04, 0xFF, 0x17}) {
+		t.Fatalf("set % X", p.Body)
+	}
+	h.tradeStatus(game.TradeBackToTrade)
+	if o := <-ch; o.err != nil || o.r.Unchanged {
+		t.Fatalf("%+v %v", o.r, o.err)
+	}
+	// Cancelling ends the record: a new trade sends the set again.
+	cancel := make(chan string, 1)
+	go func() { st, _ := h.s.TradeCancel(context.Background()); cancel <- st }()
+	h.expect(opcode.CMSGCancelTrade)
+	h.tradeStatus(game.TradeCancelled)
+	<-cancel
+	done := startOpen(h, botGUID, "")
+	h.expect(opcode.CMSGInitiateTrade)
+	h.tradeStatus(game.TradeOpenWindow)
+	if o := <-done; o.err != nil {
+		t.Fatal(o.err)
+	}
+	ch = startSet(h, 6, bracersEntry)
+	h.expect(opcode.CMSGSetTradeItem)
+	h.tradeStatus(game.TradeBackToTrade)
+	if o := <-ch; o.err != nil || o.r.Unchanged {
+		t.Fatalf("a fresh trade must send the set: %+v %v", o.r, o.err)
 	}
 }
 

@@ -272,26 +272,14 @@ func (s *Session) TradeExpect(ctx context.Context, from packet.GUID, name string
 	return s.TradeStatus(), nil
 }
 
-// ownSideShows reports whether our side of the window (SMSG_TRADE_STATUS_EXTENDED, trader_state 0) shows an item of entry
-// in trade slot slot; count > 0 also wants that stack count. Owner loop only.
-func (s *Session) ownSideShows(slot uint8, entry, count uint32) bool {
-	m := s.trade.mine
-	if m == nil {
-		return false
-	}
-	for _, it := range m.Items {
-		if it.Slot == slot && it.Entry == entry && (count == 0 || it.Count == count) {
-			return true
-		}
-	}
-	return false
-}
-
 // TradeSetItem puts an item of the bags into trade slot tradeSlot (0-6; slot 6 is the one that is not traded, where an
-// enchant is cast at the partner's item) with CMSG_SET_TRADE_ITEM. It returns once the core took the item: a back_to_trade
-// after this set (an older one does not count) and our own side of the window showing the item in that slot, within 3 s. A
-// slot that already holds that item is left alone (nothing is sent) and the result says unchanged. A refused item (a
-// soulbound one) closes the window: the error is a *TradeFailed.
+// enchant is cast at the partner's item) with CMSG_SET_TRADE_ITEM. The core answers an effective change with
+// back_to_trade to the setter (TradeData::SetItem calls SetAccepted(false), Player.cpp:529-541 and 589-599; the setter gets
+// no view of its own side, Update(true) goes to the partner only), so the call returns on the first back_to_trade that
+// arrives after this call's send, within 3 s. A back_to_trade has no sender: a change the partner makes in the same
+// instant can be taken for the answer. The core ignores a set of the item already in the slot without any reply, so a slot
+// the agent itself last set to that item (entry, bag, slot, count and guid; the record ends with the trade) is answered as
+// unchanged without sending. A refused item (a soulbound one) closes the window: the error is a *TradeFailed.
 func (s *Session) TradeSetItem(ctx context.Context, tradeSlot uint8, ref EquipRef) (TradeSetResult, error) {
 	if tradeSlot > game.TradeSlotCount-1 {
 		return TradeSetResult{}, errors.New("trade_set_item needs trade_slot 0-6")
@@ -312,11 +300,11 @@ func (s *Session) TradeSetItem(ctx context.Context, tradeSlot uint8, ref EquipRe
 		if err != nil {
 			return nil, err
 		}
-		if s.ownSideShows(tradeSlot, it.Entry, it.Count) {
+		if rec, ok := s.trade.sets[tradeSlot]; ok && rec == (tradeSet{GUID: it.GUID, Entry: it.Entry, Bag: it.Bag, Slot: it.Slot, Count: it.Count}) {
 			unchanged = true
 			return it, nil
 		}
-		backs = s.trade.backs
+		backs = s.trade.backs // the count is taken at the send, on the owner loop: only a later back_to_trade answers it
 		return it, s.conn.WritePacket(opcode.CMSGSetTradeItem, game.BuildSetTradeItem(tradeSlot, it.Bag, it.Slot))
 	})
 	if err != nil {
@@ -328,17 +316,24 @@ func (s *Session) TradeSetItem(ctx context.Context, tradeSlot uint8, ref EquipRe
 		out.Unchanged = true
 		return out, nil
 	}
-	err = s.tradeWait(ctx, tradeSetItemWait, func() bool {
-		return s.trade.ended || (s.trade.backs > backs && s.ownSideShows(tradeSlot, it.Entry, 0))
-	})
+	err = s.tradeWait(ctx, tradeSetItemWait, func() bool { return s.trade.ended || s.trade.backs > backs })
 	if r, ended := s.tradeSnapshot(s.stepBase()); ended {
 		return TradeSetResult{}, s.stepFailed(r, r.Result, r.Detail)
 	}
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
-		return TradeSetResult{}, fmt.Errorf("trade_set_item: the core did not confirm the item within %s (no back_to_trade after the set, or our side of the window does not show it): the item was not taken (see inventory_error events)", tradeSetItemWait)
+		return TradeSetResult{}, fmt.Errorf("trade_set_item: no back_to_trade within %s of the set: the core did not take the item (see inventory_error events)", tradeSetItemWait)
 	} else if err != nil {
 		return TradeSetResult{}, err
 	}
+	_, _ = s.do(ctx, func() (any, error) {
+		if t := &s.trade; t.active && t.step && !t.ended {
+			if t.sets == nil {
+				t.sets = map[uint8]tradeSet{}
+			}
+			t.sets[tradeSlot] = tradeSet{GUID: it.GUID, Entry: it.Entry, Bag: it.Bag, Slot: it.Slot, Count: it.Count}
+		}
+		return nil, nil
+	})
 	return out, nil
 }
 

@@ -50,6 +50,14 @@ const (
 	tradeMaxAccepts = 4
 )
 
+// tradeSet is one trade slot as the agent last set it.
+type tradeSet struct {
+	GUID      packet.GUID
+	Entry     uint32
+	Bag, Slot uint8
+	Count     uint32
+}
+
 // tradeState follows the player's trade window. Owner loop only.
 type tradeState struct {
 	active      bool        // Trade is running
@@ -62,6 +70,9 @@ type tradeState struct {
 	theirs      *game.TradeView
 	mine        *game.TradeView // our own side of SMSG_TRADE_STATUS_EXTENDED (trader_state 0)
 	last        string          // the last SMSG_TRADE_STATUS, by name
+	// sets is what the agent itself last put in each trade slot of this trade (TradeSetItem), so that setting the same item
+	// again, which the core ignores without a reply, is answered as unchanged. Ends with the trade.
+	sets map[uint8]tradeSet
 	// step is a step trade (trade_open, trade_expect): its window stays open between the calls that drive it.
 	step bool
 	// acceptFrom and acceptName arm the accept of one incoming trade request (trade_expect) until acceptUntil; any other
@@ -129,7 +140,7 @@ func (s *Session) onTradeStatus(body []byte) error {
 		// A closing status ends the trade that is running; with none running (the reply to a decline) it only ends the
 		// pending decline, and must not touch the state an armed accept waits in.
 		if t.active {
-			t.ended, t.status, t.open = true, m.Status, false
+			t.ended, t.status, t.open, t.sets = true, m.Status, false, nil
 		}
 		t.incoming = 0
 	}
@@ -642,7 +653,7 @@ func (s *Session) releaseTrade() {
 	if err == nil && v.(bool) {
 		_ = s.tradeWait(bg, tradeCancelWait, func() bool { return s.trade.ended })
 	}
-	_, _ = s.do(bg, func() (any, error) { s.trade.active, s.trade.step = false, false; return nil, nil })
+	_, _ = s.do(bg, func() (any, error) { s.trade.active, s.trade.step, s.trade.sets = false, false, nil; return nil, nil })
 }
 
 // splitStack splits st.Count off st.Src into st.Dst with CMSG_SPLIT_ITEM and waits for the new stack to show up.
