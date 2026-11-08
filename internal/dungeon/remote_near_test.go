@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,21 +19,25 @@ import (
 // nearGame is a fakeCarrier whose game is also a Follower: the agent's character stands at agent.
 type nearGame struct {
 	*fakeCarrier
-	agent        Point
-	agentMap     uint32
-	level        int
-	known        bool
-	appears      []string
-	appearErr    []error // errors the next appears answer with
-	walks        []Point
-	walkErr      error
-	probes       int
-	onAppear     func(g *nearGame)
-	onWalk       func(g *nearGame, to Point)
-	blockWalk    bool        // WalkSelf waits for its context to end (a long walk)
-	walking      atomic.Bool // a walk is under way
-	units        []objects.Unit
-	noVisibleOff bool // the setup does not list `gm visible off`
+	agent     Point
+	agentMap  uint32
+	level     int
+	known     bool
+	appears   []string
+	appearErr []error // errors the next appears answer with
+	walks     []Point
+	walkErr   error
+	probes    int
+	onAppear  func(g *nearGame)
+	onWalk    func(g *nearGame, to Point)
+	blockWalk bool        // WalkSelf waits for its context to end (a long walk)
+	walking   atomic.Bool // a walk is under way
+	// walkLaunches counts the walks agentWalk started (one Clock.Settle each); walkSettled counts the walks that have returned or are
+	// blocked waiting for their context. The clock's Settle waits until they match, so the fake's time never runs ahead of a walk
+	// goroutine that has not had its turn (the CI flake: 60 virtual seconds passed before the goroutine ran).
+	walkLaunches, walkSettled atomic.Int32
+	units                     []objects.Unit
+	noVisibleOff              bool // the setup does not list `gm visible off`
 }
 
 func newNearGame(t *testing.T, level int) *nearGame {
@@ -67,17 +72,32 @@ func (n *nearGame) Appear(ctx context.Context, player string) error {
 	return nil
 }
 
+// clock is the fakeRemote's clock plus Settle, which holds virtual time until the walk goroutine agentWalk just started has settled.
+func (n *nearGame) clock() Clock {
+	c := n.fakeRemote.clock()
+	c.Settle = func() {
+		want := n.walkLaunches.Add(1)
+		deadline := time.Now().Add(30 * time.Second)
+		for n.walkSettled.Load() < want && time.Now().Before(deadline) {
+			runtime.Gosched()
+		}
+	}
+	return c
+}
+
 func (n *nearGame) WalkSelf(ctx context.Context, to Point) (WalkResult, error) {
 	n.agentMu.Lock()
 	n.walks = append(n.walks, to)
 	if n.blockWalk {
 		n.agentMu.Unlock()
 		n.walking.Store(true)
+		n.walkSettled.Add(1)
 		<-ctx.Done()
 		n.walking.Store(false)
 		return WalkResult{Result: "partial"}, ctx.Err()
 	}
 	defer n.agentMu.Unlock()
+	defer n.walkSettled.Add(1)
 	if n.walkErr != nil {
 		return WalkResult{}, n.walkErr
 	}
