@@ -84,6 +84,9 @@ func TestRaidWalkHunterSpecVerifiedFromTheTalentReadBack(t *testing.T) {
 	if strings.Contains(log, "not applied") {
 		t.Errorf("run.log reports a spec as not applied:\n%s", log)
 	}
+	if sum := f.summary(); len(sum.SpecFailed) != 0 || strings.Contains(f.stdout.String(), "WARN") {
+		t.Errorf("a verified spec is reported as failed: %+v", sum.SpecFailed)
+	}
 }
 
 // Verify fail: TB answers but the build stays Survival (a read-back 8/0/43 for an mm spec). The walk logs the reason and
@@ -92,7 +95,7 @@ func TestRaidWalkHunterSpecThatDoesNotTakeIsLoggedAndTheWalkGoesOn(t *testing.T)
 	cases := map[string]string{
 		"stuck":    "hire: spec mm not applied to Bot02 (talents read back 8/0/43, want tree 2 on top)",
 		"silent":   "hire: spec mm not applied to Bot02 (no talent read-back in 15s)",
-		"multiple": "hire: spec mm not applied to Bot02 (TB answered: Found multiple specs",
+		"multiple": "hire: spec mm not applied to Bot02 (apply refused: Found multiple specs",
 	}
 	for mode, want := range cases {
 		f := newFixture(t)
@@ -108,5 +111,97 @@ func TestRaidWalkHunterSpecThatDoesNotTakeIsLoggedAndTheWalkGoesOn(t *testing.T)
 		if got := f.agent.roleOrder(); len(got) != 2 || got[1] != ".bot role Bot02 mm" {
 			t.Errorf("%s: role lines %q, the hunter's role must still go out", mode, got)
 		}
+		// The failure is in the walk's result too, not only run.log; the exit code stays 0.
+		sum := f.summary()
+		if len(sum.SpecFailed) != 1 || sum.SpecFailed[0].Bot != "Bot02" || sum.SpecFailed[0].Spec != "mm" || sum.SpecFailed[0].Reason == "" {
+			t.Errorf("%s: summary spec_failed %+v, want one entry for Bot02 mm", mode, sum.SpecFailed)
+		}
+		if txt := f.summaryText(); !strings.Contains(txt, "WARN: hunter spec not applied: 1 (Bot02)") {
+			t.Errorf("%s: summary.txt lacks the WARN line:\n%s", mode, txt)
+		}
+		if !strings.Contains(f.stdout.String(), "WARN: hunter spec not applied: 1 (Bot02)") {
+			t.Errorf("%s: stdout lacks the WARN line:\n%s", mode, f.stdout.String())
+		}
+	}
+}
+
+// The apply is refused ("talent link is invalid") while the hunter already stands in the requested tree: it is still not applied.
+// Today's code did not know that refusal, read the (41/10/0) back and certified bm. The refusal is in the summary too.
+func TestRaidWalkHunterSpecApplyRefusedIsNotAppliedEvenIfTheReadBackLooksRight(t *testing.T) {
+	f := newFixture(t)
+	f.agent.talentMode = "refused"
+	f.agent.talentTrees = map[string][3]int{"Bot02": {41, 10, 0}}
+	talentRoster(t, f, "bm")
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.stderr.String())
+	}
+	log := runLog(t, f)
+	if !strings.Contains(log, "hire: spec bm not applied to Bot02 (apply refused: Apply talents [beastmastery] talent link is invalid)") {
+		t.Errorf("run.log lacks the refusal:\n%s", log)
+	}
+	if strings.Contains(log, "roster: Bot02 hunter bm talents") {
+		t.Errorf("run.log certifies a refused build:\n%s", log)
+	}
+	if sum := f.summary(); len(sum.SpecFailed) != 1 || !strings.Contains(sum.SpecFailed[0].Reason, "apply refused") {
+		t.Errorf("summary spec_failed %+v", sum.SpecFailed)
+	}
+}
+
+// The other refusals: not your bot, no AI yet.
+func TestRaidWalkTalentRefusalWords(t *testing.T) {
+	for _, s := range []string{"Found multiple specs: a, b", "talents are invalid. Needs atleast one number.", "Apply talents [x] talent link is invalid",
+		"You may only command an online bot on your account.", "Bot Bot02 has no AI yet."} {
+		if !talentRefused(s) {
+			t.Errorf("%q is not read as a refusal", s)
+		}
+	}
+	if talentRefused("Apply spec |h|cffffffffmarksmanship 9/42/0") {
+		t.Error("an apply answer is not a refusal")
+	}
+}
+
+// L4: TB's own colouring of the read-back, as the module writes it, parses.
+func TestRaidWalkHunterSpecReadBackInTBsColouredText(t *testing.T) {
+	f := newFixture(t)
+	f.agent.talentMode = "tbtext"
+	talentRoster(t, f, "bm")
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.stderr.String())
+	}
+	if log := runLog(t, f); !strings.Contains(log, "roster: Bot02 hunter bm talents 45/6/0") || strings.Contains(log, "not applied") {
+		t.Errorf("the coloured read-back was not accepted:\n%s", log)
+	}
+}
+
+// L5: the read-back counts only from the bot's own chat or whisper. Another bot's whisper and a system line (the forwarding ack, or a
+// reply that came as a system message) are ignored, so the spec reads as unverified.
+func TestRaidWalkHunterSpecReadBackOnlyFromThatBotsChat(t *testing.T) {
+	for _, mode := range []string{"otherbot", "systemonly"} {
+		f := newFixture(t)
+		f.agent.talentMode = mode
+		talentRoster(t, f, "mm")
+		f.defaultRun("onyxias_lair")
+		if code := f.run(context.Background()); code != exitOK {
+			t.Fatalf("%s: exit %d, want 0: %s", mode, code, f.stderr.String())
+		}
+		if log := runLog(t, f); !strings.Contains(log, "hire: spec mm not applied to Bot02 (no talent read-back in 15s)") {
+			t.Errorf("%s: the read-back from outside the bot's chat was accepted:\n%s", mode, log)
+		}
+	}
+}
+
+// M3: a line queued behind the talent read-back in the same events page is not lost: here the game's answer to the next command
+// (`.bot role`) came in that page, and the role wait finds it instead of failing after 30 s with "no answer".
+func TestRaidWalkTalentWaitKeepsTheRestOfTheEventPage(t *testing.T) {
+	f := newFixture(t)
+	f.agent.pageSize = 10
+	f.agent.roleSilentFor = "Bot02" // the hunter's answer is the line queued behind the read-back
+	f.agent.talentReadExtra = "Bot Bot02 role set to dps."
+	talentRoster(t, f, "mm")
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (the role answer sat behind the read-back): %s\n%s\n%s", code, f.stderr.String(), f.summary().EndReason, runLog(t, f))
 	}
 }

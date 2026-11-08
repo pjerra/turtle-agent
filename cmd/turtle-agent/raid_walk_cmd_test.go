@@ -97,22 +97,24 @@ type walkFakeAgent struct {
 	t          *testing.T
 	clock      *fakeClock
 
-	mu         sync.Mutex
-	calls      []string
-	gm         []string
-	gmUnits    []int
-	timeline   []timelineEntry
-	party      []string
-	nameSeq    int
-	startArgs  string
-	roleLines  []string // every `.bot role` line, in order
-	roleFail   bool     // the server refuses every `.bot role` ("does not use that spec")
-	roleSilent bool     // the server never answers `.bot role`
+	mu            sync.Mutex
+	calls         []string
+	gm            []string
+	gmUnits       []int
+	timeline      []timelineEntry
+	party         []string
+	nameSeq       int
+	startArgs     string
+	roleLines     []string // every `.bot role` line, in order
+	roleFail      bool     // the server refuses every `.bot role` ("does not use that spec")
+	roleSilentFor string   // the one bot whose `.bot role` is never answered
+	roleSilent    bool     // the server never answers `.bot role`
 	// talentMode is how the fake game answers `.bot command <bot> talents [<path>]`: "" applies the build and reads it back,
 	// "silent" never answers, "stuck" answers but leaves the build as it was (Survival), "multiple" lists several specs.
-	talentMode  string
-	talentLines []string          // every `.bot command <bot> talents ...` line, in order
-	talentTrees map[string][3]int // the build each hire has (default: the Survival premade)
+	talentMode      string
+	talentReadExtra string            // a system line the game sends right behind the talent read-back (the answer to the next command)
+	talentLines     []string          // every `.bot command <bot> talents ...` line, in order
+	talentTrees     map[string][3]int // the build each hire has (default: the Survival premade)
 
 	entered  bool
 	status   session.StatusInfo
@@ -597,7 +599,7 @@ func (f *walkFakeAgent) gmSide(line string) {
 		f.mu.Lock()
 		f.roleLines = append(f.roleLines, line)
 		fail := f.roleFail
-		silent := f.roleSilent
+		silent := f.roleSilent || (len(fields) > 2 && fields[2] == f.roleSilentFor)
 		f.mu.Unlock()
 		if len(fields) == 4 && !silent {
 			if fail {
@@ -881,14 +883,16 @@ func (f *walkFakeAgent) talentSide(line string) {
 		return
 	}
 	name := fields[2]
-	say := func(text string) {
+	queue := func(q queuedEvent) {
 		f.mu.Lock()
-		f.lines = append(f.lines, queuedEvent{text: text, kind: events.KindChat, source: name})
+		f.lines = append(f.lines, q)
 		f.mu.Unlock()
 	}
+	say := func(text string) { queue(queuedEvent{text: text, kind: events.KindChat, source: name}) }
 	f.mu.Lock()
 	f.talentLines = append(f.talentLines, line)
 	mode := f.talentMode
+	extra := f.talentReadExtra
 	if f.talentTrees == nil {
 		f.talentTrees = map[string][3]int{}
 	}
@@ -896,7 +900,9 @@ func (f *walkFakeAgent) talentSide(line string) {
 	if !ok {
 		trees = [3]int{8, 0, 43}
 	}
-	if len(fields) == 5 && mode == "" {
+	// The modes that leave the build alone: stuck (TB answers, nothing changes), silent, multiple, refused.
+	applies := mode == "" || mode == "tbtext" || mode == "otherbot" || mode == "systemonly"
+	if len(fields) == 5 && applies {
 		switch fields[4] {
 		case "beastmastery":
 			trees = [3]int{45, 6, 0}
@@ -908,18 +914,38 @@ func (f *walkFakeAgent) talentSide(line string) {
 		f.talentTrees[name] = trees
 	}
 	f.mu.Unlock()
+	// The forwarding command's own acknowledgement, a system line, as TB sends it.
+	queue(queuedEvent{raw: fmt.Sprintf("Forwarded command for %s: %s; action success is not guaranteed.", name, strings.Join(fields[3:], " ")), text: ""})
 	if mode == "silent" {
 		return
 	}
 	if len(fields) == 5 {
-		if mode == "multiple" {
+		switch mode {
+		case "multiple":
 			say("Found multiple specs: marksmanship, survival")
-			return
+		case "refused":
+			say("Apply talents [" + fields[4] + "] talent link is invalid")
+		default:
+			say("Apply spec |h|cffffffff" + fields[4] + " 9/42/0")
 		}
-		say("Apply spec |h|cffffffff" + fields[4] + " 9/42/0")
 		return
 	}
-	say(fmt.Sprintf("My current talent spec is: |h|cffffffffHunter (%d/%d/%d) Link: http://x", trees[0], trees[1], trees[2]))
+	text := fmt.Sprintf("My current talent spec is: |h|cffffffffHunter (%d/%d/%d) Link: http://x", trees[0], trees[1], trees[2])
+	switch mode {
+	case "tbtext":
+		// TB's own colouring (formatSpec): the numbers are coloured, the closing parenthesis carries a reset.
+		text = fmt.Sprintf("My current talent spec is: |h|cffffffffBM (|h|cff00ff00%d|h|cffffffff/|h|cff00ff00%d|h|cffffffff/%d|h|cffffffff)|r Hunter Link: http://x", trees[0], trees[1], trees[2])
+	case "otherbot":
+		queue(queuedEvent{text: text, kind: events.KindWhisper, source: "Bot03"})
+		return
+	case "systemonly":
+		queue(queuedEvent{raw: text})
+		return
+	}
+	say(text)
+	if extra != "" {
+		queue(queuedEvent{raw: extra})
+	}
 }
 
 func (f *walkFakeAgent) push(raw, text string) {

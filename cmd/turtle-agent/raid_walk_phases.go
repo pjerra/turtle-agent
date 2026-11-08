@@ -1487,11 +1487,26 @@ const (
 	talentReadWait  = 15 * time.Second
 )
 
+// talentRefusals are the words of TB's answers that say a `talents` command did not take: the apply's own refusals
+// (ChangeTalentsAction) and the forwarding command's (`.bot command`).
+var talentRefusals = []string{"found multiple specs", "talents are invalid", "talent link is invalid", "you may only command", "has no ai yet"}
+
+func talentRefused(s string) bool {
+	l := strings.ToLower(s)
+	for _, w := range talentRefusals {
+		if strings.Contains(l, w) {
+			return true
+		}
+	}
+	return false
+}
+
 // applyTalents sets the talent build a roster spec names (`.bot command <bot> talents <path>`, TortoiseBots'
 // ChangeTalentsAction) and verifies it the way TB reports it: a bare `talents` answers "My current talent spec is: ...
-// (a/b/c)", and the tree with the most points must be the spec's. A class the walk has no build for is skipped. A build
-// that does not take logs `hire: spec <x> not applied to <bot> (<reason>)` and the walk carries on; only a refused or
-// failed GM line stops it.
+// (a/b/c)" in the bot's own chat, and the tree with the most points must be the spec's. A class the walk has no build for is
+// skipped. A build that does not take (a refusal in the apply's answer, no read-back, the points in another tree) logs
+// `hire: spec <x> not applied to <bot> (<reason>)`, is listed in the summary's spec_failed and the walk carries on; only a
+// refused or failed GM line stops it.
 func (w *walk) applyTalents(ctx context.Context, name, class, spec string) error {
 	build, ok := raidwalk.TalentFor(class, spec)
 	if !ok {
@@ -1499,29 +1514,32 @@ func (w *walk) applyTalents(ctx context.Context, name, class, spec string) error
 	}
 	notApplied := func(reason string) {
 		w.logLine(w.env.now(), fmt.Sprintf("hire: spec %s not applied to %s (%s)", spec, name, reason))
+		w.specFailed = append(w.specFailed, raidwalk.SpecFailure{Bot: name, Spec: spec, Reason: reason})
 	}
 	if err := w.gm(ctx, fmt.Sprintf(".bot command %s talents %s", name, build.Path)); err != nil {
 		return err
 	}
-	// The apply answers "Apply spec ..." (or lists several specs when the path matches more than one); a silent bot is
-	// not a failure yet: the read-back below is the proof.
-	reply, _, err := w.waitBotWords(ctx, name, talentApplyWait, func(s string) bool {
+	// The apply answers "Apply spec ..." or a refusal (several specs for the path, an invalid link, not your bot, no AI yet); a
+	// silent bot is not a failure yet: the read-back below is the proof.
+	reply, _, err := w.waitBotWords(ctx, name, talentApplyWait, false, func(s string) bool {
 		l := strings.ToLower(s)
-		return strings.Contains(l, "apply spec") || strings.Contains(l, "apply talents") || strings.Contains(l, "found multiple specs") ||
-			strings.Contains(l, "talents are invalid")
+		return strings.Contains(l, "apply spec") || strings.Contains(l, "apply talents") || talentRefused(s)
 	})
 	if err != nil {
 		return err
 	}
-	if l := strings.ToLower(reply); strings.Contains(l, "found multiple specs") || strings.Contains(l, "talents are invalid") {
-		notApplied("TB answered: " + reply)
+	if talentRefused(reply) {
+		notApplied("apply refused: " + reply)
 		return nil
 	}
 	if err := w.gm(ctx, fmt.Sprintf(".bot command %s talents", name)); err != nil {
 		return err
 	}
 	var got tbm.Talents
-	_, found, err := w.waitBotWords(ctx, name, talentReadWait, func(s string) bool {
+	line, found, err := w.waitBotWords(ctx, name, talentReadWait, true, func(s string) bool {
+		if talentRefused(s) {
+			return true
+		}
 		t, ok := tbm.ParseTalents([]string{s})
 		if ok {
 			got = t
@@ -1531,8 +1549,12 @@ func (w *walk) applyTalents(ctx context.Context, name, class, spec string) error
 	if err != nil {
 		return err
 	}
-	if !found {
+	switch {
+	case !found:
 		notApplied("no talent read-back in " + durWords(talentReadWait))
+		return nil
+	case talentRefused(line):
+		notApplied("apply refused: " + line)
 		return nil
 	}
 	main := 0
@@ -1549,9 +1571,10 @@ func (w *walk) applyTalents(ctx context.Context, name, class, spec string) error
 	return nil
 }
 
-// waitBotWords waits for a line the named bot said (whisper or chat) or a system or addon line that match accepts, logging
-// every line it reads. ok is false when timeout ran out first.
-func (w *walk) waitBotWords(ctx context.Context, bot string, timeout time.Duration, match func(string) bool) (string, bool, error) {
+// waitBotWords waits for a line the named bot said (whisper or chat), or, unless botOnly, a system or addon line, that match
+// accepts, logging every line it reads. ok is false when timeout ran out first. On a match the cursor goes back to just after
+// the matched event, so the next wait reads the rest of the page (the walk 37 b fix, as waitTBMMatch does).
+func (w *walk) waitBotWords(ctx context.Context, bot string, timeout time.Duration, botOnly bool, match func(string) bool) (string, bool, error) {
 	deadline := w.env.now().Add(timeout)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -1572,6 +1595,9 @@ func (w *walk) waitBotWords(ctx context.Context, bot string, timeout time.Durati
 				}
 				text = e.Text
 			default:
+				if botOnly {
+					continue
+				}
 				line, ok := tbm.LineOf(e)
 				if !ok {
 					continue
@@ -1584,6 +1610,7 @@ func (w *walk) waitBotWords(ctx context.Context, bot string, timeout time.Durati
 			}
 			w.logLine(w.env.now(), text)
 			if match(text) {
+				w.eventsAt = e.Seq
 				return text, true, nil
 			}
 		}

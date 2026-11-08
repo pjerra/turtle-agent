@@ -46,6 +46,8 @@ type Summary struct {
 	WipeResumes   int              `json:"wipe_resumes"`
 	// GMInstanceDataUnsent counts the --gm-instance-data legs whose lines were never sent (no out-of-combat rest/gather in the leg).
 	GMInstanceDataUnsent int `json:"gm_instance_data_unsent,omitempty"`
+	// SpecFailed lists the roster specs whose talent build did not take (the walk carries on; the exit code is unchanged).
+	SpecFailed []SpecFailure `json:"spec_failed,omitempty"`
 	// The --revive-at-raid counts (omitted when the walk never needed it): hires summoned back to the revive point,
 	// hires two summons did not bring within 10 yd, and hires still out of range or in combat when a resume went out.
 	ReviveBrought      int          `json:"revive_brought,omitempty"`
@@ -372,6 +374,7 @@ type SummaryMeta struct {
 	// WipeResumes is the walk's recovered wipes and near-wipe stops (--wipe-resume).
 	WipeResumes                                        int
 	GMInstanceDataUnsent                               int
+	SpecFailed                                         []SpecFailure
 	ReviveBrought, ReviveUnreached, ReviveGatherMissed int
 	Layout                                             LayoutSummary
 	Started                                            time.Time
@@ -442,6 +445,7 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		Notes:                nonNilStrings(m.Notes),
 		WipeResumes:          m.WipeResumes,
 		GMInstanceDataUnsent: m.GMInstanceDataUnsent,
+		SpecFailed:           m.SpecFailed,
 		ReviveBrought:        m.ReviveBrought, ReviveUnreached: m.ReviveUnreached, ReviveGatherMissed: m.ReviveGatherMissed,
 		StepTimeline: []StepSummary{},
 		Legs:         []LegSummary{},
@@ -617,6 +621,9 @@ func (s *Summary) Text() string {
 	if s.GMInstanceDataUnsent > 0 {
 		fmt.Fprintf(&b, "gm_instance_data_unsent=%d\n", s.GMInstanceDataUnsent)
 	}
+	if line := SpecFailedLine(s.SpecFailed); line != "" {
+		b.WriteString(line + "\n")
+	}
 	if s.BossKill != nil {
 		b.WriteString(s.BossKill.Line() + "\n")
 	}
@@ -689,4 +696,23 @@ func assistedLegs(s *Summary) []string {
 		out = append(out, "no live unit found")
 	}
 	return out
+}
+
+// SpecFailure is a roster spec whose talent build the walk could not apply or verify: the bot, the spec id and why.
+type SpecFailure struct {
+	Bot    string `json:"bot"`
+	Spec   string `json:"spec"`
+	Reason string `json:"reason"`
+}
+
+// SpecFailedLine is the one-line warning for the walk's result: "WARN: hunter spec not applied: N (<bots>)", empty with none.
+func SpecFailedLine(f []SpecFailure) string {
+	if len(f) == 0 {
+		return ""
+	}
+	names := make([]string, len(f))
+	for i, x := range f {
+		names[i] = x.Bot
+	}
+	return fmt.Sprintf("WARN: hunter spec not applied: %d (%s)", len(f), strings.Join(names, ", "))
 }
