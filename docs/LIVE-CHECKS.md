@@ -671,6 +671,10 @@ with the remote commander, five owned alts in Uldaman, and `AiPlayerbot.OwnedBot
    with the agent far away (move it and see they do not follow). `on_end: "logout"`: the bots log out after the unbind (`logged_out`); check the
    module accepts `.bot logout` for a bot it was commanding a moment ago, and what happens to the party.
 
+## Trade steps (Eluna coverage)
+
+Step trades (`trade_open`, `trade_expect`, `trade_set_item`, `trade_accept`, `trade_cancel`, `trade_status`, `cast` with `trade_slot`) and the `equipment` RPC are tested against a scripted server only: trade steps: not yet live. The Eluna smoke round (r6) is the first live run: Elunamage `trade_open`s Elunasmoke, who `trade_expect`ed it; the warrior puts item 1420 in slot 6, the mage casts 7418 with `trade_slot` 6, both accept; expect `completed` on both and `their_spell` 7418 before the accept. Check `equipment` on both agents, and that a `--create` login survives the character list lagging the create (the re-read).
+
 ## Trade (issue #80)
 
 `trade` is tested against the core's `TradeHandler.cpp` layouts and a scripted server only; nothing below has run live. Needs a bot that

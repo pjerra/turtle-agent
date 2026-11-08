@@ -78,7 +78,7 @@ turtle-agent rpc <walk-dir> cast '{"spell_id": 116}'
 turtle-agent rpc <walk-dir> cast_state
 ```
 
-`cast` aims at `target` (default: current target, else self). `cancel_cast` takes an optional `spell_id` (0 cancels whatever is casting). `spells` lists the spellbook with cooldowns and costs; `attack` needs a selection first:
+`cast` aims at `target` (default: current target, else self); `trade_slot` (0-6) aims it at the trade partner's item instead, see §7. `cancel_cast` takes an optional `spell_id` (0 cancels whatever is casting). `spells` lists the spellbook with cooldowns and costs; `attack` needs a selection first:
 
 `no target selected; call target first`
 
@@ -143,6 +143,21 @@ Changes settle before the accept: the call waits 1.1 s after its last change (th
 ### Result
 
 `verified` is true when a completed trade shows in your bags and purse afterwards (checked for ~2.2 s after the close). A failed trade returns a `TradeFailed` error carrying the result: how far it got, what the other side had shown, and `detail` saying why. Every status step also lands as a `trade_status` event.
+
+### Step trades: expect, set an item, cast at it, accept
+
+`trade` does the whole conversation in one call. The step calls do it one at a time and leave the window open between them, which is what a test needs to drive a trade-slot enchant (for example Enchant Bracer - Minor Health, spell 7418, which the caster must have learned) or to receive a trade:
+
+```sh
+turtle-agent rpc <dir-a> trade_expect '{"from": "<caster>", "wait_ms": 15000}'   # waits for the request, answers it
+turtle-agent rpc <dir-b> trade_open   '{"to": "<owner>"}'                       # the caster opens it
+turtle-agent rpc <dir-a> trade_set_item '{"trade_slot": 6, "item_entry": 1420}' # slot 6 is not traded
+turtle-agent rpc <dir-b> cast '{"spell_id": 7418, "trade_slot": 6}'             # the enchant, pending until the trade completes
+turtle-agent rpc <dir-a> trade_status '{}'                                      # their_spell 7418
+turtle-agent rpc <dir-a> trade_accept '{}'   # and the same on <dir-b>: result completed on both
+```
+
+Incoming requests are declined unless `trade_expect` armed that player. The core casts a trade-slot spell only at slot 6 and only when both sides accept (`TradeHandler.cpp`, `Spell.cpp` `CheckCast`): the first `cast` shows no failure and no Lua hook, and each change to the window un-accepts both sides. A one-shot `trade` is refused (`trade: another trade is running`) while a step trade is open. `trade_cancel` closes the window; a step window the partner closed is released by the next step call.
 
 ## 8. Talk to NPCs: gossip, vendor, trainer, quests
 

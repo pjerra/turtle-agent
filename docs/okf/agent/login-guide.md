@@ -33,7 +33,7 @@ The account comes from the settings file when you pass only the character; pass 
 - `--rpc <addr>`: listen address for RPC. Default is the settings file's `rpc` value.
 - `--reconnect N`: log back in up to N times after an unplanned disconnect. Off by default; refuses to combine with `--capture`.
 - `--capture <file>`: record decrypted world packets to a new file. Never combine with `--reconnect`.
-- `--create <race>,<class>[,<gender>]`: create the character at login when the account lacks it (numbers).
+- `--create <race>,<class>[,<gender>]`: create the character at login when the account lacks it (numbers). The core answers the create before the new character shows in the character list, so the agent asks for the list again up to 3 times, 500 ms apart, before it gives up (`was created but is still not listed after 3 re-reads`).
 - `--follow <lead>` with `--follow-plan <plan>`: follow the lead bot of a bot-led run as a player; add `--follow-assist` to attack the lead's target.
 - `--tune <file>`: tunables file of remote dungeon runs that name none.
 - `--login-budget <addr>`: loopback address of the fleet's shared login budget (set by `fleet`).
