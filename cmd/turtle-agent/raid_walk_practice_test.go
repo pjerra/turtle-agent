@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
@@ -95,6 +97,15 @@ func practiceFixture(t *testing.T, sc *practiceScenario, cycles int) (*fixture, 
 		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
 		Line: start, Lines: []string{start, "TBM:ACTION_ACK|run start|party|1|-"}}}
 	sc.bossHP, sc.target, sc.dead = 100, packet.GUID(1000), map[string]bool{}
+	// The fake server's run-status lines for the practice reset: pauseRun waits for a status that shows this plan
+	// paused, and resumeRun for one that shows it running again. A test may replace either hook (an ACK with no
+	// status, a resume the server never confirms).
+	f.agent.onPause = func() {
+		f.agent.push(fmt.Sprintf("TBM:RUN|zul_gurub|paused|%d/%d|hakkar|boss|begin|paused for the practice reset", step, total), "")
+	}
+	f.agent.onResume = func() {
+		f.agent.push(fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|hakkar|boss|begin|fighting", step, total), "")
+	}
 
 	enqueue := func(startAt time.Time) {
 		f.agent.mu.Lock()
@@ -729,5 +740,230 @@ func TestPracticeGMRefusesLostLease(t *testing.T) {
 	err := w.practiceGM(context.Background(), "gm_evade", map[string]any{"guid": practiceBossGUID().String()})
 	if err == nil || !strings.Contains(err.Error(), "lease lost") {
 		t.Fatalf("%v, want the lease-lost refusal", err)
+	}
+}
+
+// TestPracticePauseRefusedNoReset: a pause the commander refuses ends the practice before ANY GM action of the reset
+// (H1): no evade, no revive, no respawn, no hp restore. The boss never dips, so the only GM hands of the run would be
+// the reset's.
+func TestPracticePauseRefusedNoReset(t *testing.T) {
+	sc := &practiceScenario{}
+	f, _, _ := practiceFixture(t, sc, 10)
+	sc.mu.Lock()
+	sc.dropAt = f.clock.now().Add(time.Hour)
+	sc.mu.Unlock()
+	fails := true
+	f.agent.pauseErr = &fails
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d (notes %v): %s", code, exitRaidWalkFailed, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Ended != "run pause refused" || sum.Practice.Attempts != 1 {
+		t.Fatalf("practice %+v, want one attempt ended run pause refused", sum.Practice)
+	}
+	if !strings.Contains(sum.EndReason, "the run pause before the reset failed") {
+		t.Fatalf("end reason %q, want the pause failure", sum.EndReason)
+	}
+	for _, meth := range []string{"gm_evade ", "gm_set_hp ", "gm_respawn ", "gm_revive "} {
+		if n := countLog(f.agent.log, meth); n != 0 {
+			t.Fatalf("%d %s calls after a refused pause (log %v)", n, meth, f.agent.log)
+		}
+	}
+}
+
+// TestPracticePauseACKWithoutStatusRefused: an ACK alone is no pause. With no paused status for this plan, the reset
+// is refused before any GM action (H2), with the wait's own reason.
+func TestPracticePauseACKWithoutStatusRefused(t *testing.T) {
+	sc := &practiceScenario{}
+	f, _, _ := practiceFixture(t, sc, 10)
+	sc.mu.Lock()
+	sc.dropAt = f.clock.now().Add(time.Hour)
+	sc.mu.Unlock()
+	// The commander ACKs but the server never sends the paused line.
+	f.agent.onPause = nil
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d (notes %v): %s", code, exitRaidWalkFailed, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Ended != "run pause refused" {
+		t.Fatalf("practice %+v, want the pause refusal", sum.Practice)
+	}
+	if !strings.Contains(sum.EndReason, "no paused status for zul_gurub") {
+		t.Fatalf("end reason %q, want the missing paused status", sum.EndReason)
+	}
+	for _, meth := range []string{"gm_evade ", "gm_set_hp ", "gm_respawn ", "gm_revive "} {
+		if n := countLog(f.agent.log, meth); n != 0 {
+			t.Fatalf("%d %s calls after an unconfirmed pause (log %v)", n, meth, f.agent.log)
+		}
+	}
+}
+
+// TestPracticeFailedResetCountedOnce: a reset that did not land is counted once. The pull after it never re-engages,
+// and that adds nothing (M1): the practice needs three bad resets, so it makes three, not two.
+func TestPracticeFailedResetCountedOnce(t *testing.T) {
+	sc := &practiceScenario{noCasts: true}
+	f, _, row := practiceFixture(t, sc, 10)
+	// Every hire is dead from the first frame on: each attempt ends at once. The evade leaves the boss at 100 % with
+	// no target but still flagged in combat, so the reset never sees it home and the pull never re-engages.
+	f.agent.onEvade = func(g packet.GUID) {
+		sc.mu.Lock()
+		sc.evadeN++
+		sc.bossHP, sc.target = 100, 0
+		sc.mu.Unlock()
+	}
+	f.agent.onRevive = func(name string) { sc.mu.Lock(); sc.reviveN++; sc.mu.Unlock() }
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		f.agent.mu.Lock()
+		party := append([]string{}, f.agent.party...)
+		started := f.agent.runStarted
+		if started {
+			for _, name := range party {
+				f.agent.dead[name] = true
+			}
+		}
+		sc.mu.Lock()
+		target := sc.target
+		sc.mu.Unlock()
+		f.agent.mu.Unlock()
+		return []tbm.HostileRec{{GUID: practiceBossGUID(), Entry: 14834, X: row.X, Y: row.Y, Z: row.Z,
+			HPPct: 100, Target: target, Flags: "e"}}
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d (notes %v): %s", code, exitRaidWalkFailed, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Ended != "3 failed resets" {
+		t.Fatalf("practice %+v, want 3 failed resets", sum.Practice)
+	}
+	// With the bad reset counted twice the practice would stop after two resets.
+	if sum.Practice.Attempts != 3 || sc.evadeN != 3 {
+		t.Fatalf("%d attempts, %d evades; want 3 and 3 (a bad reset is one failure, not two)", sum.Practice.Attempts, sc.evadeN)
+	}
+}
+
+// TestPracticeBindRefusesUnengagedCandidate: the frames name one engaged guid, but the client's units of the entry hold
+// only a different one (a single trash unit of the entry). The bind is refused before any GM action (M2).
+func TestPracticeBindRefusesUnengagedCandidate(t *testing.T) {
+	sc := &practiceScenario{}
+	f, _, row := practiceFixture(t, sc, 10)
+	f.agent.hostilesFn = func(n int) []tbm.HostileRec {
+		return []tbm.HostileRec{{GUID: practiceBossGUID(), Entry: 14834, X: row.X, Y: row.Y, Z: row.Z,
+			HPPct: 100, Target: 1000, Flags: "-"}}
+	}
+	f.agent.unitsFn = func(n int) []objects.Unit {
+		return []objects.Unit{
+			{GUID: practiceTrashGUID(), Entry: 14834, Type: "creature", Health: 42000, MaxHealth: 42000},
+			{GUID: practiceSonGUID(), Entry: 11357, Type: "creature", Health: 100, MaxHealth: 100},
+		}
+	}
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d (notes %v): %s", code, exitRaidWalkFailed, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Ended != "boss not bound" {
+		t.Fatalf("practice %+v, want the not-bound ending", sum.Practice)
+	}
+	if !strings.Contains(sum.EndReason, "is not among the client's") {
+		t.Fatalf("end reason %q, want the engaged-guid refusal", sum.EndReason)
+	}
+	for _, meth := range []string{"gm_evade ", "gm_set_hp ", "gm_respawn ", "gm_revive "} {
+		if n := countLog(f.agent.log, meth); n != 0 {
+			t.Fatalf("%d %s calls before the boss was bound (log %v)", n, meth, f.agent.log)
+		}
+	}
+}
+
+// TestPracticeKeptPageTail: the attempt stops at the first counted cast of an events page; the rest of that page is
+// kept for the next read (L1). Both casts are served in one page, 45 s apart (each a cycle), so the second row proves
+// the tail was not dropped.
+func TestPracticeKeptPageTail(t *testing.T) {
+	sc := &practiceScenario{}
+	var f *fixture
+	var firstAt time.Time
+	sc.firstCasts = func(start time.Time) {
+		firstAt = start
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		f.agent.spellQueue = append(f.agent.spellQueue,
+			queuedSpell{at: start, ev: events.Event{Kind: events.KindSpellGo, SourceGUID: practiceBossGUID(), SpellID: 24324,
+				Time: start.Add(90 * time.Second)}},
+			queuedSpell{at: start, ev: events.Event{Kind: events.KindSpellGo, SourceGUID: practiceBossGUID(), SpellID: 24324,
+				Time: start.Add(135 * time.Second)}},
+		)
+	}
+	f, _, _ = practiceFixture(t, sc, 2)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (notes %v): %s", code, f.summaryNotes(), f.stderr.String())
+	}
+	if firstAt.IsZero() {
+		t.Fatal("the fake never queued the casts")
+	}
+	rows := f.practiceRows(t)
+	if len(rows) != 2 {
+		t.Fatalf("%d rows, want 2 (the page's second cast was dropped): %+v", len(rows), rows)
+	}
+	if rows[0].CastAt != firstAt.Add(90*time.Second).Format(time.RFC3339) ||
+		rows[1].CastAt != firstAt.Add(135*time.Second).Format(time.RFC3339) {
+		t.Fatalf("rows %s / %s, want the two page casts", rows[0].CastAt, rows[1].CastAt)
+	}
+	if sum := f.summary(); sum.Practice == nil || sum.Practice.Attempts != 1 || sum.Practice.Cycles != 2 {
+		t.Fatalf("practice %+v, want one attempt and 2 cycles", sum.Practice)
+	}
+}
+
+// TestPracticeBossSampleFreshness: a stale or absent boss frame is no sample (L2): the sustain must not restore on it.
+func TestPracticeBossSampleFreshness(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w := &walk{env: walkEnv{now: func() time.Time { return now }},
+		hostiles: map[string]hostileState{practiceBossGUID().String(): {entry: 14834, hppct: 30, at: now.Add(-5 * time.Second)}}}
+	p := &practiceState{bossGUID: practiceBossGUID(), bossMax: 42000}
+	if hp, fresh := w.practiceBossSample(p); fresh || hp != 30 {
+		t.Fatalf("hp %d fresh %v on a 5 s old frame, want stale", hp, fresh)
+	}
+	h := w.hostiles[practiceBossGUID().String()]
+	h.at = now.Add(-time.Second)
+	w.hostiles[practiceBossGUID().String()] = h
+	if hp, fresh := w.practiceBossSample(p); !fresh || hp != 30 {
+		t.Fatalf("hp %d fresh %v on a 1 s old frame, want fresh 30", hp, fresh)
+	}
+	delete(w.hostiles, practiceBossGUID().String())
+	if _, fresh := w.practiceBossSample(p); fresh {
+		t.Fatal("an absent frame read as fresh")
+	}
+}
+
+// TestPracticeMissingUnitMissSkipsPoll: a gm_set_hp whose unit the client cannot find is a missed poll, not exit 18
+// (L2). Three misses in a row end the attempt, and the practice goes on to collect its cycles.
+func TestPracticeMissingUnitMissSkipsPoll(t *testing.T) {
+	sc := &practiceScenario{sonDead: true}
+	f, _, _ := practiceFixture(t, sc, 10)
+	f.agent.setHPErr = fmt.Errorf("gm set hp: %w", session.ErrUnitNotInView)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (notes %v): %s", code, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Ended != "cycles" || sum.Practice.Cycles != 10 {
+		t.Fatalf("practice %+v, want 10 cycles", sum.Practice)
+	}
+	if !hasNote(sum, "miss 3 of 3") || !hasNote(sum, "ending the attempt") {
+		t.Fatalf("notes %v, want the missing-unit misses and the attempt end", sum.Notes)
+	}
+	if n := countLog(f.agent.log, "gm_set_hp "); n != practiceHPMisses {
+		t.Fatalf("%d hp restores, want the %d missed polls of the first attempt (log %v)", n, practiceHPMisses, f.agent.log)
+	}
+}
+
+// TestPracticeFightIDsCoverThePull: the practice's fight_ids reach practiceFightIDBack before its own start, so the
+// first pull's fight (which starts at the engagement, a few seconds before the bind) is skipped by the tools too.
+func TestPracticeFightIDsCoverThePull(t *testing.T) {
+	start := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w := &walk{practice: &practiceState{startedAt: start}, fightRows: []walkFightRow{
+		{ID: "the-pull", Start: start.Add(-10 * time.Second).Unix()},
+		{ID: "long-before", Start: start.Add(-time.Minute).Unix()},
+		{ID: "during", Start: start.Add(time.Minute).Unix()},
+	}}
+	got := w.practiceFightIDs()
+	if len(got) != 2 || got[0] != "during" || got[1] != "the-pull" {
+		t.Fatalf("fight ids %v, want [during the-pull]", got)
 	}
 }

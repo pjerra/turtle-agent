@@ -643,12 +643,21 @@ func (f onOffFlag) IsBoolFlag() bool { return true }
 type walkStop struct {
 	code   int
 	reason string
+	// cause is the underlying error when the stop was decided on it: errors.Is/As reach it (the practice loop tells
+	// a missing unit from a real GM failure).
+	cause error
 }
 
 func (e *walkStop) Error() string { return e.reason }
+func (e *walkStop) Unwrap() error { return e.cause }
 
 func stopf(code int, format string, a ...any) error {
 	return &walkStop{code: code, reason: fmt.Sprintf(format, a...)}
+}
+
+// stopfCause is stopf with the underlying error kept for errors.Is/As.
+func stopfCause(code int, cause error, format string, a ...any) error {
+	return &walkStop{code: code, reason: fmt.Sprintf(format, a...), cause: cause}
 }
 
 // stopInfo reads a phase error: a *walkStop carries its own code and reason.

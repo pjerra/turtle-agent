@@ -4,23 +4,27 @@
 //
 //  1. Attempt start: the boss engaged (the walk's own IncidentBossEngaged, or a fresh frame of the mechanic's entry
 //     for an entry no plan row names). The boss guid is bound ONCE here, from the engagement: every GM action of the
-//     whole practice names that guid, so a trash unit of the same entry is never touched, and several units of the
-//     entry with no single engaged one fail the practice before any GM action. The Son set is the guids of the
-//     mechanic's RespawnEntries the client holds at that moment (alive or dead).
+//     whole practice names that guid, so a trash unit of the same entry is never touched. When the frames name one
+//     engaged guid, exactly that guid binds, and a candidate list that does not hold it fails the practice before any
+//     GM action; otherwise only a single unit of the entry binds, and several with no engaged one fail it too. The
+//     Son set is the guids of the mechanic's RespawnEntries the client holds at that moment (alive or dead).
 //  2. Cycles: the commander's spell_go events for the bound boss guid and the mechanic's SpellID (spell_start is
 //     ignored, and a cast within EverySec/2 of the last counted one is the same cast); when none is seen by
 //     FirstAtS+10 s the run falls back to the boss's own timer (pull + FirstAtS + k*EverySec) and marks the rows
 //     detect=timer, but keeps reading events so a late cast is still detected.
 //  3. A cycle row is written EvalAfterS after the cast to <out>/practice.jsonl, then the sustain acts: every dead
 //     hire is revived and a boss under the floor is restored to its own max. The floor is also checked on every poll,
-//     not only at the cycle rows.
+//     not only at the cycle rows; a stale (> 3 s) or 0 sample is skipped, and a client that cannot find the unit for
+//     3 polls in a row ends the attempt instead of failing the walk.
 //  4. Attempt end: CyclesPerAttempt cycles, BerserkS-60 s of attempt, every hire dead, or the boss dying (which ends
 //     the whole practice, without a respawn and without crediting a kill).
 //  5. Reset: pause the run with the commander's `run pause` (never `.bot run stop`: a stop ends the run and erases
-//     its slot), `.npc evade` the boss, wait up to 30 s for it at 100 % with no target, revive the dead hires and the
-//     commander, `.respawn` every dead Son the client still holds (a guid it no longer holds is skipped and noted),
-//     rest --practice-rest out of combat, resend the --gm-instance-data lines, and resume the run at the boss row.
-//     The next attempt's clock starts at its re-engagement (up to 60 s); no re-engagement is a failed reset.
+//     its slot); a pause that does not land (a refusal, no ACK, no paused status on this plan within 10 s) ends the
+//     practice before any GM action. Then `.npc evade` the boss, wait up to 30 s for it at 100 % with no target,
+//     revive the dead hires and the commander, `.respawn` every dead Son the client still holds (a guid it no longer
+//     holds is skipped and noted), rest --practice-rest out of combat, re-check the lease, resend the
+//     --gm-instance-data lines, and resume the run at the boss row. The next attempt's clock starts at its
+//     re-engagement (up to 60 s); no re-engagement is a failed reset, counted once per reset.
 //  6. End: the cycle budget, --practice-max, a boss death, 3 failed resets or 4 attempts; then the normal teardown.
 //
 // Safety: the loop runs only on a server in placeServers, re-checked before every GM action; the hands are the
@@ -42,6 +46,8 @@ import (
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/pjerra/turtle-agent/internal/session"
+	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
 // practiceMaxAttempts is the most boss attempts one practice run makes (each reset is a new attempt).
@@ -49,6 +55,22 @@ const practiceMaxAttempts = 4
 
 // practiceResetWait is how long a reset waits for the boss to show reset: home, at 100 % and with no target.
 const practiceResetWait = 30 * time.Second
+
+// practicePauseWait is how long the reset's `run pause` waits for a status that shows the run paused on this plan: an
+// ACK alone is no proof the pause landed, and a reset that starts unheld would fight the run's own pulls.
+const practicePauseWait = 10 * time.Second
+
+// practiceSampleFresh is how old a boss frame may be and still be read: an older sample says nothing about the boss
+// now (a target change, a dip between frames), so the sustain skips it instead of restoring on stale numbers.
+const practiceSampleFresh = 3 * time.Second
+
+// practiceFightIDBack is how far before the practice's own start its fight_ids reach: the first pull's fight starts
+// when the boss engages, which is a few seconds before the bind (and the dashboard's record may round earlier).
+const practiceFightIDBack = 15 * time.Second
+
+// practiceHPMisses is how many consecutive polls the client may fail to show the bound boss before the attempt ends:
+// one missing sample is a frame gap, a run of them is the boss gone (a despawn, another instance).
+const practiceHPMisses = 3
 
 // practiceReengageWait is how long an attempt that follows a reset waits for the pulled boss to fight again (below
 // 100 %, a party target, or the walk's IncidentBossEngaged) before its clock starts. No re-engagement in the wait is
@@ -94,6 +116,12 @@ type practiceState struct {
 	// lastResetOK is the reset's own verdict (the boss showed home, 100 % and no target): only a reset that landed
 	// plus a pull that fights again clears the failed-reset streak.
 	lastResetOK bool
+	// hpMisses counts the consecutive polls the client could not show the bound boss for the hp restore; the attempt
+	// ends after practiceHPMisses of them.
+	hpMisses int
+	// pending holds the tail of an events page the attempt did not consume (it stops at the first counted cast): the
+	// next read serves them before it asks for a new page, so no cast of the page is lost.
+	pending []events.Event
 	// deadAtLast is the dead set the previous cycle row recorded, for dead_since_last.
 	deadAtLast map[string]bool
 	// bossHPSet/revived are the current cycle's sustain actions, written into its row.
@@ -224,6 +252,8 @@ func (w *walk) runPractice(ctx context.Context, entry uint32, step int) error {
 		if !resetOK {
 			// The boss did not show reset in practiceResetWait. The next attempt's re-engagement decides whether
 			// the streak breaks: a pull that fights again after a reset that DID land clears it (practiceAttempt).
+			// The count is once per reset: a non-re-engagement after this one adds nothing (practiceAttempt only
+			// counts a reset that landed).
 			p.failedResets++
 			if p.failedResets >= 3 {
 				p.ended = "3 failed resets"
@@ -291,7 +321,11 @@ func (w *walk) practiceAttempt(ctx context.Context, p *practiceState, bossStep i
 			if p.ended != "" {
 				return nil
 			}
-			p.failedResets++
+			// One failed reset counts once: a reset that did not land was already counted by runPractice, so this
+			// pull adds nothing then. A reset that DID land but whose pull never fought again is counted here.
+			if p.lastResetOK {
+				p.failedResets++
+			}
 			if p.failedResets >= 3 {
 				p.ended = "3 failed resets"
 			}
@@ -304,6 +338,7 @@ func (w *walk) practiceAttempt(ctx context.Context, p *practiceState, bossStep i
 	started := w.env.now()
 	cyclesAtStart := p.cycles
 	p.cycleInAttempt = 0
+	p.hpMisses = 0
 	p.deadAtLast = w.practiceDeadSet()
 	seenEvent := false
 	useTimer := p.mech.IsWindow()
@@ -334,7 +369,7 @@ func (w *walk) practiceAttempt(ctx context.Context, p *practiceState, bossStep i
 			if err != nil {
 				return err
 			}
-			for _, e := range evs {
+			for i, e := range evs {
 				if !w.practiceCastOf(p, e) {
 					continue
 				}
@@ -350,6 +385,11 @@ func (w *walk) practiceAttempt(ctx context.Context, p *practiceState, bossStep i
 				rowCast, rowDue, rowDetect = cast, cast.Add(time.Duration(p.mech.EvalAfterS)*time.Second), "event"
 				useTimer = false
 				timerK = 0
+				// The rest of the page is kept for the next read: the loop stops at this cast, and dropping the
+				// tail would lose a cast the page already served.
+				if i+1 < len(evs) {
+					p.pending = append(p.pending, evs[i+1:]...)
+				}
 				break
 			}
 			// The timer fallback is only for an attempt that never saw a cast: after one event the schedule is the
@@ -399,9 +439,13 @@ func (w *walk) practiceAttempt(ctx context.Context, p *practiceState, bossStep i
 			return err
 		}
 		// The floor is checked on every poll, not only at the cycle rows: a boss that dips between rows is restored
-		// before the next mechanic, not after it.
-		if err := w.practiceSustainBoss(ctx, p); err != nil {
+		// before the next mechanic, not after it. A missing sample is skipped; a run of misses ends the attempt.
+		done, err := w.practiceSustainBoss(ctx, p)
+		if err != nil {
 			return err
+		}
+		if done {
+			return nil
 		}
 		for _, inc := range incs {
 			if v, ok := inc.(raidwalk.IncidentStall); ok {
@@ -416,8 +460,10 @@ func (w *walk) practiceAttempt(ctx context.Context, p *practiceState, bossStep i
 }
 
 // practiceAwaitReengage waits (bounded at practiceReengageWait, and by the attempt's deadline) for the boss to fight
-// again after a reset: its HP below 100 %, a party member as its target, or the walk's IncidentBossEngaged of its
-// entry. It keeps the practice's polls (and so its event reads) moving, so the pull's own casts are not lost.
+// again after a reset: a fresh frame of the bound guid below 100 % or holding a party target, or the walk's
+// IncidentBossEngaged of its entry. It only polls the walk (system events and frames) while it waits; the practice's
+// own cast cursor is not read here, so a cast made during the wait is before the next attempt's clock and is not
+// counted (the attempt's rows start from its re-engagement).
 func (w *walk) practiceAwaitReengage(ctx context.Context, p *practiceState, deadline time.Time) (bool, error) {
 	end := w.env.now().Add(practiceReengageWait)
 	if deadline.Before(end) {
@@ -476,25 +522,56 @@ func (w *walk) practiceCastCounted(p *practiceState, cast time.Time) bool {
 	return cast.Sub(p.lastCast) < half && cast.After(p.lastCast.Add(-half))
 }
 
-// practiceSustainBoss restores the bound boss to its own max whenever a poll shows it under the floor: the cycle rows
-// do the same, but a boss that dips between rows must be restored before the next mechanic too.
-func (w *walk) practiceSustainBoss(ctx context.Context, p *practiceState) error {
-	if !w.opts.practiceSustain || p.bossGUID == 0 || p.bossMax == 0 {
-		return nil
+// practiceBossSample is the bound boss's health percent in the newest frame and whether that frame is fresh (within
+// practiceSampleFresh): a stale or absent frame says nothing about the boss now, and a 0 there is no reading at all.
+func (w *walk) practiceBossSample(p *practiceState) (int, bool) {
+	if p == nil || p.bossGUID == 0 {
+		return 0, false
 	}
-	hp := w.practiceBossHP()
-	if hp <= 0 || hp >= w.opts.practiceBossFloor {
-		return nil
+	h, ok := w.hostiles[p.bossGUID.String()]
+	if !ok {
+		return 0, false
 	}
-	if err := w.practiceGMSetHP(ctx, p.bossGUID); err != nil {
-		return err
-	}
-	w.logLine(w.env.now(), fmt.Sprintf("practice: boss at %d%% between rows: restored to its max %d", hp, p.bossMax))
-	return nil
+	return h.hppct, w.env.now().Sub(h.at) <= practiceSampleFresh
 }
 
-// practiceSpellEvents reads the cast events since the practice cursor.
+// practiceSustainBoss restores the bound boss to its own max whenever a poll shows it under the floor: the cycle rows
+// do the same, but a boss that dips between rows must be restored before the next mechanic too. It never acts on a
+// stale or empty sample, and a client that cannot find the unit misses instead of failing the walk: only
+// practiceHPMisses misses in a row end the attempt (done true).
+func (w *walk) practiceSustainBoss(ctx context.Context, p *practiceState) (bool, error) {
+	if !w.opts.practiceSustain || p.bossGUID == 0 || p.bossMax == 0 {
+		return false, nil
+	}
+	hp, fresh := w.practiceBossSample(p)
+	if !fresh || hp <= 0 || hp >= w.opts.practiceBossFloor {
+		return false, nil
+	}
+	if err := w.practiceGMSetHP(ctx, p.bossGUID); err != nil {
+		if !errors.Is(err, session.ErrUnitNotInView) {
+			return false, err
+		}
+		p.hpMisses++
+		w.note("practice: the client does not hold the boss for the hp restore (%v): miss %d of %d", err, p.hpMisses, practiceHPMisses)
+		if p.hpMisses >= practiceHPMisses {
+			w.note("practice: the boss was missing from the client's units for %d polls in a row: ending the attempt", p.hpMisses)
+			return true, nil
+		}
+		return false, nil
+	}
+	p.hpMisses = 0
+	w.logLine(w.env.now(), fmt.Sprintf("practice: boss at %d%% between rows: restored to its max %d", hp, p.bossMax))
+	return false, nil
+}
+
+// practiceSpellEvents reads the cast events since the practice cursor. A page tail kept by the attempt (it stops at
+// the first counted cast) is served first, so no event of an already-read page is lost.
 func (w *walk) practiceSpellEvents(ctx context.Context, p *practiceState) ([]events.Event, error) {
+	if len(p.pending) > 0 {
+		out := p.pending
+		p.pending = nil
+		return out, nil
+	}
 	var page events.Page
 	params := map[string]any{"since": p.eventsAt, "kinds": []string{events.KindSpellStart, events.KindSpellGo}}
 	if err := w.agent.Call(ctx, "events", params, &page, 15*time.Second); err != nil {
@@ -546,7 +623,7 @@ func (w *walk) practiceCycleRow(ctx context.Context, p *practiceState, cast time
 			}
 			p.revived = append(p.revived, name)
 		}
-		if p.bossGUID != 0 && p.bossMax > 0 && row.BossHPPct < w.opts.practiceBossFloor {
+		if hp, fresh := w.practiceBossSample(p); p.bossGUID != 0 && p.bossMax > 0 && fresh && hp > 0 && hp < w.opts.practiceBossFloor {
 			if err := w.practiceGMSetHP(ctx, p.bossGUID); err != nil {
 				return err
 			}
@@ -615,9 +692,10 @@ func (w *walk) practiceAllHiresDead() bool {
 }
 
 // practiceBossBind resolves the practice boss's guid ONCE, at the practice start, and its MaxHealth: the client's unit
-// list holds the candidates, and when the entry appears more than once only the engaged one (hurt, or holding a party
-// target) is the boss. Several candidates with no single engaged one is a refusal before any GM action: the practice
-// never guesses which creature to reset (a trash unit of the same entry must never be touched).
+// list holds the candidates, and when an engaged unit is known (hurt, or holding a party target) that guid IS the
+// boss, whatever else the entry lists. A candidate list that does not hold the engaged guid is refused before any GM
+// action; only without an engaged guid does a single candidate of the entry bind. The practice never guesses which
+// creature to reset (a trash unit of the same entry must never be touched).
 func (w *walk) practiceBossBind(ctx context.Context) (packet.GUID, uint32, error) {
 	p := w.practice
 	engaged, engagedOK := w.practiceEngagedGUID(p.mech.Entry)
@@ -638,20 +716,21 @@ func (w *walk) practiceBossBind(ctx context.Context) (packet.GUID, uint32, error
 		}
 		return 0, 0, stopf(exitRaidWalkFailed, "practice: no unit of entry %d is in view: nothing to bind", p.mech.Entry)
 	}
-	if len(cands) > 1 {
-		if !engagedOK {
-			return 0, 0, stopf(exitRaidWalkFailed, "practice: %d units of entry %d and no single engaged one: cannot tell the boss from the trash", len(cands), p.mech.Entry)
-		}
-		var keep []objects.Unit
+	if engagedOK {
+		// The frames name one engaged unit: bind exactly that guid. A candidate list without it (a single different
+		// unit of the entry) is a refusal, never a reason to bind the other creature.
 		for _, u := range cands {
 			if u.GUID == engaged {
-				keep = append(keep, u)
+				if u.MaxHealth == 0 {
+					return u.GUID, w.practiceUnitMax(ctx, u.GUID), nil
+				}
+				return u.GUID, u.MaxHealth, nil
 			}
 		}
-		if len(keep) != 1 {
-			return 0, 0, stopf(exitRaidWalkFailed, "practice: the engaged unit %s is not among the client's %d units of entry %d: cannot bind the boss", engaged, len(cands), p.mech.Entry)
-		}
-		cands = keep
+		return 0, 0, stopf(exitRaidWalkFailed, "practice: the engaged unit %s is not among the client's %d units of entry %d: cannot bind the boss", engaged, len(cands), p.mech.Entry)
+	}
+	if len(cands) > 1 {
+		return 0, 0, stopf(exitRaidWalkFailed, "practice: %d units of entry %d and no single engaged one: cannot tell the boss from the trash", len(cands), p.mech.Entry)
 	}
 	u := cands[0]
 	if u.MaxHealth == 0 {
@@ -746,9 +825,12 @@ func (w *walk) practiceReset(ctx context.Context, p *practiceState, bossStep int
 		return true, nil
 	}
 	// `run pause` holds the run with its binding kept. Never `.bot run stop`: a stop ENDS the run and erases its slot,
-	// so the resume after the reset would find no run going.
+	// so the resume after the reset would find no run going. A pause that did not land (a refusal, no ACK, no paused
+	// status in practicePauseWait) ends the practice HERE: a reset whose evade and GM hands run while the still-running
+	// party fights would reset the boss under the raid. Nothing below this line may happen unheld.
 	if err := w.pauseRun(ctx); err != nil {
-		w.note("practice: WARN: the run pause before the reset was refused (%v): the reset goes on unheld", err)
+		p.ended = "run pause refused"
+		return false, stopf(exitRaidWalkFailed, "practice: the run pause before the reset failed: %v", err)
 	}
 	if err := w.practiceGMEvade(ctx, p.bossGUID); err != nil {
 		return false, err
@@ -777,7 +859,10 @@ func (w *walk) practiceReset(ctx context.Context, p *practiceState, bossStep int
 		return false, err
 	}
 	// The instance data a boss Reset() overwrites is sent again, as after a wipe (gmInstanceDataClear then the
-	// existing per-leg send).
+	// existing per-leg send). A lost lease ends the walk before those GM lines: another holder may own the slot now.
+	if w.leaseLost.Load() {
+		return false, stopf(exitRaidWalkFailed, "practice: lease lost")
+	}
 	w.gmInstanceDataClear()
 	if len(w.gmInstanceData) > 0 {
 		inst := w.gmInstanceDataInst(ctx)
@@ -805,13 +890,37 @@ func (w *walk) practiceReset(ctx context.Context, p *practiceState, bossStep int
 }
 
 // pauseRun holds the run with the commander's `run pause` (the binding is kept, and a later `run resume` finds it).
-// It is what the reset and the gm-instance-data firing use; `.bot run stop` is never a pause.
+// It is what the reset and the gm-instance-data firing use; `.bot run stop` is never a pause. The ACK is checked the
+// way resumeRun checks its own (an ERR or a non-ACK reply is a refusal), and only a status received AFTER the request
+// that shows this plan paused makes the pause a success: an ACK alone leaves the reset unheld.
 func (w *walk) pauseRun(ctx context.Context) error {
-	if _, err := w.commander(ctx, commanderReq{Op: "run", Verb: "pause", WaitMS: 10000}); err != nil {
+	seq0 := w.statusSeq
+	rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "pause", WaitMS: 10000})
+	if err != nil {
 		return err
 	}
+	if rep.Reply.Err != nil {
+		return fmt.Errorf("run pause: %s", rep.Reply.Err.Message)
+	}
+	if !rep.Reply.OK && rep.Reply.Kind != tbm.KindAck {
+		return fmt.Errorf("run pause: no ACK (%s)", rep.Reply.Line)
+	}
 	w.logLine(w.env.now(), "> .bot run pause")
-	return nil
+	deadline := w.env.now().Add(practicePauseWait)
+	for {
+		if w.statusSeq > seq0 && w.haveStatus && w.lastStatus.State == tbm.RunPaused && w.lastStatus.Plan == w.plan.Name {
+			return nil
+		}
+		if !w.env.now().Before(deadline) {
+			return fmt.Errorf("no paused status for %s in %s", w.plan.Name, durWords(practicePauseWait))
+		}
+		if _, err := w.pollOnce(ctx, false); err != nil {
+			return err
+		}
+		if err := w.env.sleep(ctx, 2*time.Second); err != nil {
+			return stopf(exitRaidWalkFailed, "practice: interrupted")
+		}
+	}
 }
 
 // practiceCommanderDead reads the commander's own status for a 0 health (a wipe that took the commander too).
@@ -936,7 +1045,7 @@ func (w *walk) practiceGM(ctx context.Context, method string, params any) error 
 	}
 	w.logLine(w.env.now(), fmt.Sprintf("> %s %v", method, params))
 	if err := w.agent.Call(ctx, method, params, nil, 20*time.Second); err != nil {
-		return stopf(exitRaidWalkFailed, "practice: %s: %v", method, err)
+		return stopfCause(exitRaidWalkFailed, err, "practice: %s: %v", method, err)
 	}
 	return nil
 }
@@ -983,19 +1092,21 @@ func (w *walk) practiceSummary() *raidwalk.PracticeSummary {
 	}
 }
 
-// practiceFightIDs is the dashboard fights that started at or after the practice's own start, sorted. The tools skip
-// them (they are the practice attempts, never a real raid fight).
+// practiceFightIDs is the dashboard fights that started at or after the practice's own start (back to the first
+// pull's engagement, practiceFightIDBack before the bind), sorted. The tools skip them (they are the practice
+// attempts, never a real raid fight).
 func (w *walk) practiceFightIDs() []string {
 	p := w.practice
 	if p == nil || p.startedAt.IsZero() {
 		return []string{}
 	}
+	cutoff := p.startedAt.Add(-practiceFightIDBack).Unix()
 	ids := make([]string, 0, len(w.fightRows))
 	for _, r := range w.fightRows {
 		if r.ID == "" || r.Start == 0 {
 			continue
 		}
-		if r.Start >= p.startedAt.Unix() {
+		if r.Start >= cutoff {
 			ids = append(ids, r.ID)
 		}
 	}

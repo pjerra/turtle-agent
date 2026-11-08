@@ -459,6 +459,9 @@ type AutoObservation struct {
 	// PracticeCycles is the summary's practice.cycles of a practice run (0 for every other run). A practice goal is
 	// met by these cycles, never by a boss kill.
 	PracticeCycles int
+	// PracticeEnded is the summary's practice.ended ("never engaged", "boss killed during practice", ...). An exit 0
+	// with "never engaged" is no boss death: the run never reached the mechanic, so it relaunches like an exit 18.
+	PracticeEnded string
 }
 
 // PlacementFailed says the run never started: it ended in the place phase.
@@ -705,16 +708,21 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 		// A practice goal relaunches a bounded number of times: the cycles it collected are kept by the caller and
 		// the goal is met by their sum, so a run that hit its time ceiling (exit 18) or ended on a failed reset
 		// streak gets another run with the remaining budget. A boss death during the practice (exit 0 below the cycle
-		// target) gets ONE relaunch in a fresh instance: the old copy still holds the boss's death.
-		switch o.ExitCode {
-		case 18:
+		// target) gets ONE relaunch in a fresh instance: the old copy still holds the boss's death. An exit 0 with
+		// "never engaged" is NOT that death: the run never reached the mechanic, so it is an exit-18 relaunch.
+		switch {
+		case o.ExitCode == 18 || (o.ExitCode == 0 && o.PracticeEnded == "never engaged"):
 			if r.PracticeRelaunches >= AutoPracticeRelaunches {
 				return AutoDecision{Action: AutoStop, Escalate: true,
 					Reason: fmt.Sprintf("practice: gave up after %d relaunches (%s)", r.PracticeRelaunches, shortReason(o.EndReason))}
 			}
+			who := fmt.Sprintf("exit %d", o.ExitCode)
+			if o.ExitCode == 0 {
+				who = "never engaged"
+			}
 			return AutoDecision{Action: AutoRestart, Reuse: true, PracticeRelaunch: true, Backoff: backoff,
-				Reason: fmt.Sprintf("practice: exit 18 (%s): relaunch %d of %d", shortReason(o.EndReason), r.PracticeRelaunches+1, AutoPracticeRelaunches)}
-		case 0:
+				Reason: fmt.Sprintf("practice: %s (%s): relaunch %d of %d", who, shortReason(o.EndReason), r.PracticeRelaunches+1, AutoPracticeRelaunches)}
+		case o.ExitCode == 0:
 			// The goal was not met (GoalAchieved above said so), so the boss died during the practice before the
 			// cycle target: one fresh instance, then a person.
 			if !r.PracticeKilledRetry {
@@ -724,6 +732,20 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 			return AutoDecision{Action: AutoStop, Escalate: true,
 				Reason: "practice: the boss died again in the fresh instance before the cycle target (" + shortReason(o.EndReason) + ")"}
 		}
+	}
+	// practiceRestart puts every OTHER non-zero end of a practice run under the same 2-relaunch cap as exit 18: a
+	// practice goal must not restart without a bound, whatever ended the run. The boss-death exit 0 keeps its own
+	// one-shot rule above; an exit 2/29/15 already escalated.
+	practiceRestart := func(d AutoDecision) AutoDecision {
+		if r.Goal.Kind != "practice" || o.ExitCode == 0 || d.Action != AutoRestart {
+			return d
+		}
+		if r.PracticeRelaunches >= AutoPracticeRelaunches {
+			return AutoDecision{Action: AutoStop, Escalate: true,
+				Reason: fmt.Sprintf("practice: gave up after %d relaunches (%s)", r.PracticeRelaunches, shortReason(o.EndReason))}
+		}
+		d.PracticeRelaunch = true
+		return d
 	}
 	if o.ExitCode == 19 && o.WipeAtBoss && !o.PlacementFailed() {
 		// Walks 44 and 46 (Hakkar): the raid wiped at the boss, the relaunch went into the SAME instance, the
@@ -743,23 +765,23 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 			return AutoDecision{Action: AutoStop, Escalate: true,
 				Reason: fmt.Sprintf("boss wipe x%d without progress (step %d): no further fresh instance (%s)", prior+1, o.StepsReached, shortReason(o.EndReason))}
 		}
-		return AutoDecision{Action: AutoRestart, Reuse: false, FreshAfterWipe: true, Backoff: backoff,
-			Reason: "fresh instance after a wipe at a boss (step " + fmt.Sprint(o.StepsReached) + ", wipe " + fmt.Sprint(prior+1) + " of " + fmt.Sprint(maxWipes-1) + " before escalation): the old copy still holds the boss and the dead bots (" + shortReason(o.EndReason) + ")"}
+		return practiceRestart(AutoDecision{Action: AutoRestart, Reuse: false, FreshAfterWipe: true, Backoff: backoff,
+			Reason: "fresh instance after a wipe at a boss (step " + fmt.Sprint(o.StepsReached) + ", wipe " + fmt.Sprint(prior+1) + " of " + fmt.Sprint(maxWipes-1) + " before escalation): the old copy still holds the boss and the dead bots (" + shortReason(o.EndReason) + ")"})
 	}
 	if o.PlacementFailed() {
 		if r.PlaceFails+1 >= 3 {
 			return AutoDecision{Action: AutoStop, Escalate: true, Reason: fmt.Sprintf("place failed %d times in a row: %s", r.PlaceFails+1, shortReason(o.EndReason))}
 		}
 		if r.Reuse {
-			return AutoDecision{Action: AutoRestart, Reuse: false, Backoff: backoff, Reason: "place failed on the old bind: a fresh instance next (" + shortReason(o.EndReason) + ")"}
+			return practiceRestart(AutoDecision{Action: AutoRestart, Reuse: false, Backoff: backoff, Reason: "place failed on the old bind: a fresh instance next (" + shortReason(o.EndReason) + ")"})
 		}
-		return AutoDecision{Action: AutoRestart, Reuse: false, Backoff: backoff, Reason: "place failed again: " + shortReason(o.EndReason)}
+		return practiceRestart(AutoDecision{Action: AutoRestart, Reuse: false, Backoff: backoff, Reason: "place failed again: " + shortReason(o.EndReason)})
 	}
 	reason := fmt.Sprintf("exit %d: %s", o.ExitCode, shortReason(o.EndReason))
 	if RunStopped(o.EndReason) {
 		reason = "the run stopped by itself (exit 0), the goal is not met"
 	}
-	return AutoDecision{Action: AutoRestart, Reuse: true, Backoff: backoff, Reason: reason}
+	return practiceRestart(AutoDecision{Action: AutoRestart, Reuse: true, Backoff: backoff, Reason: reason})
 }
 
 // shortReason clips a run's end reason for an EVENT line.

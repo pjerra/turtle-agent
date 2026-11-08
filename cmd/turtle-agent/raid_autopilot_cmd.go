@@ -1701,6 +1701,9 @@ func (s *autoSupervisor) finish(st *autoState) {
 		// The cap refused a place before anything was placed: no failed placement, no broken streak.
 	case d.FreshAfterWipe:
 		// A fresh instance after a boss wipe is no failed placement: it neither adds to the count nor breaks a streak.
+	case d.PracticeKilledRetry:
+		// The practice goal's fresh-instance relaunch after the boss died is no failed placement either: the run
+		// placed and reached the boss.
 	case d.Action == raidwalk.AutoRestart && !d.Reuse:
 		st.placeFails++
 	default:
@@ -1908,10 +1911,19 @@ func (s *autoSupervisor) launch(st *autoState) {
 	seq := st.seq
 	out := filepath.Join(s.o.walkDir, fmt.Sprintf("%s-%d", st.id, seq))
 	target := g.target
+	argsTarget := target
+	if target.Goal.Kind == "practice" {
+		// A relaunch asks for what is LEFT of the goal: the earlier runs' cycles are kept in the goal's sum, and a
+		// run told the full target again would collect past it (and spend the mechanic's practice on cycles no one
+		// asked for). The run's own goal stays the full target: the cycle sum is what the goal test reads.
+		if remaining := target.Goal.Cycles - g.practiceCycles; remaining > 0 && remaining < target.Goal.Cycles {
+			argsTarget.Goal.Cycles = remaining
+		}
+	}
 	attempt := g.attempt
 	st.mu.Unlock()
 
-	args := autoCommandArgs(s.o.binary, target, out, from, reuse, s.o.forwardInstanceCap())
+	args := autoCommandArgs(s.o.binary, argsTarget, out, from, reuse, s.o.forwardInstanceCap())
 	f, err := os.OpenFile(out+".out", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		s.failLaunch(st, err)
@@ -2021,6 +2033,9 @@ func (s *autoSupervisor) observe(st *autoState) raidwalk.AutoObservation {
 	o.StepsReached, o.StepsTotal, o.EndReason = sum.StepsReached, sum.StepsTotal, sum.EndReason
 	o.PracticeCycles = sum.PracticeCycles
 	r.practiceCycles = sum.PracticeCycles
+	if sum.Practice != nil {
+		o.PracticeEnded = sum.Practice.Ended
+	}
 	o.HirePoolWait = raidwalk.HirePoolRefused(sum.EndReason)
 	if sum.ExitCode != 0 {
 		o.ExitCode = sum.ExitCode

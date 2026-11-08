@@ -748,3 +748,40 @@ func TestPracticeBossDeathOneFreshRelaunch(t *testing.T) {
 		t.Fatalf("%+v, want the stop after the second death", d)
 	}
 }
+
+// Every other non-zero end of a practice run relaunches under the same 2-relaunch cap as exit 18 (L5): a practice
+// goal must not restart without a bound.
+func TestPracticeOtherExitsCountTowardRelaunchBudget(t *testing.T) {
+	goal := AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}
+	for _, code := range []int{3, 19, 20} {
+		o := AutoObservation{Exited: true, ExitCode: code, EndReason: "practice: something else", PracticeCycles: 2, StepsReached: 700}
+		for n := 0; n < AutoPracticeRelaunches; n++ {
+			d := DecideAutoAction(o, AutoRunState{Goal: goal, PracticeRelaunches: n}, time.Unix(0, 0), time.Minute)
+			if d.Action != AutoRestart || !d.PracticeRelaunch || d.Escalate {
+				t.Fatalf("exit %d relaunch %d: %+v, want a counted practice relaunch", code, n+1, d)
+			}
+		}
+		d := DecideAutoAction(o, AutoRunState{Goal: goal, PracticeRelaunches: AutoPracticeRelaunches}, time.Unix(0, 0), time.Minute)
+		if d.Action != AutoStop || !d.Escalate || !strings.Contains(d.Reason, "gave up after 2 relaunches") {
+			t.Fatalf("exit %d: %+v, want the practised-out stop", code, d)
+		}
+	}
+}
+
+// An exit 0 whose practice never engaged is no boss death (L4): the run never reached the mechanic, so it relaunches
+// like an exit 18, under the same 2-relaunch cap, and never takes the one fresh-instance death retry.
+func TestPracticeNeverEngagedIsNoBossDeath(t *testing.T) {
+	goal := AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}
+	o := AutoObservation{Exited: true, ExitCode: 0, EndReason: "practice: the run ended", PracticeCycles: 0, PracticeEnded: "never engaged"}
+	d := DecideAutoAction(o, AutoRunState{Goal: goal}, time.Unix(0, 0), time.Minute)
+	if d.Action != AutoRestart || !d.PracticeRelaunch || d.PracticeKilledRetry || !d.Reuse || d.Escalate {
+		t.Fatalf("%+v, want an exit-18 style relaunch (same instance, no fresh death retry)", d)
+	}
+	if !strings.Contains(d.Reason, "never engaged") {
+		t.Fatalf("reason %q, want it to say never engaged", d.Reason)
+	}
+	d = DecideAutoAction(o, AutoRunState{Goal: goal, PracticeRelaunches: AutoPracticeRelaunches}, time.Unix(0, 0), time.Minute)
+	if d.Action != AutoStop || !d.Escalate || !strings.Contains(d.Reason, "gave up after 2 relaunches") {
+		t.Fatalf("%+v, want the relaunch cap to stop it", d)
+	}
+}
