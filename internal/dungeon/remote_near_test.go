@@ -78,7 +78,11 @@ func (n *nearGame) clock() Clock {
 	c.Settle = func() {
 		want := n.walkLaunches.Add(1)
 		deadline := time.Now().Add(30 * time.Second)
-		for n.walkSettled.Load() < want && time.Now().Before(deadline) {
+		for n.walkSettled.Load() < want {
+			if !time.Now().Before(deadline) {
+				// Settle runs on the driver's goroutine, which is the test's.
+				n.t.Fatalf("the agent's walk goroutine did not settle in 30 s (%d launched, %d settled)", want, n.walkSettled.Load())
+			}
 			runtime.Gosched()
 		}
 	}
