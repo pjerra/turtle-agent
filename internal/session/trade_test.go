@@ -971,6 +971,12 @@ func TestTradeExpectSurvivesAStrangersClosingStatus(t *testing.T) {
 	h.begin(stranger)
 	h.expect(opcode.CMSGCancelTrade)
 	h.tradeStatus(game.TradeCancelled) // the core's reply to the decline
+	// The armed state is untouched by it: not ended, still armed.
+	waitFor(t, func() bool { return h.s.TradeStatus().Status == "cancelled" })
+	v, _ := h.s.do(context.Background(), func() (any, error) { return h.s.trade.ended || h.s.trade.open || h.s.trade.incoming != 0, nil })
+	if v == true || h.s.TradeStatus().ArmedFrom == "" {
+		t.Fatalf("the stranger's closing status reached the armed state: %+v", h.s.TradeStatus())
+	}
 	h.begin(botGUID)
 	h.expect(opcode.CMSGBeginTrade)
 	h.tradeStatus(game.TradeOpenWindow)
