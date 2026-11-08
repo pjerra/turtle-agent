@@ -39,8 +39,10 @@ Only `realmd` and `accounts` are required. `rpc` must be a loopback address. See
 
 Every realmd login waits out the first minutes of each UTC hour: the core's login throttle
 (`AuthSocket.cpp:439-457`) wrongly counts every account seen from the IP between hh:00:00 and hh:03:00, so a login that
-starts in that window is held until hh:03:05 and logs `login: waiting <s> s for the realmd hour-start window`. Set
-`TA_LOGIN_HOUR_HOLD=0` to turn the hold off.
+starts from hh:59:57 (3 s early, for clock skew) to hh:03:05 is held until hh:03:05, plus a random 0-20 s so held logins
+do not all fire at once, and logs `login: waiting <s> s for the realmd hour-start window`. The callers that start a login
+child (raid-walk, plan-scout, fleet) allow for the hold in their own waits. The window assumes the database's `NOW()` uses a
+whole-hour time zone. Set `TA_LOGIN_HOUR_HOLD=0` to turn the hold off.
 
 Log a character in and keep it online with the RPC server running:
 

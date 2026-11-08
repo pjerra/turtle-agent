@@ -114,7 +114,6 @@ func (r *reconnector) next(ctx context.Context) (*worldSession, bool) {
 			fmt.Fprintln(r.stderr, "reconnect: interrupted")
 			return nil, false
 		}
-		r.window.note(time.Now())
 		ws, err := r.login(ctx)
 		if err == nil {
 			r.log.Append(events.Event{Kind: events.KindSession, Data: map[string]any{"state": "reconnected", "attempt": r.used, "of": r.total}})
@@ -145,6 +144,11 @@ func (r *reconnector) next(ctx context.Context) (*worldSession, bool) {
 // it cannot be reached this process's own window is used.
 func (r *reconnector) wait(ctx context.Context) time.Duration {
 	wait := backoff(r.used)
+	// A login that would start in realmd's hour-start window is booked at the window's end, so the budget and this
+	// process's window count it where it really happens.
+	if h := loginHold(loginHoldNow().Add(wait)); h > 0 {
+		wait += h + loginHoldJitter()
+	}
 	if r.budget != nil {
 		d, err := r.budget.reserve(ctx, wait)
 		if err == nil {
@@ -166,6 +170,7 @@ func (r *reconnector) login(ctx context.Context) (*worldSession, error) {
 	if err := holdLoginForHourStart(ctx, r.stderr); err != nil {
 		return nil, err
 	}
+	r.window.note(time.Now()) // booked after the hold: the login starts now, not when the attempt began
 	actx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	ticket, err := authLogin(actx, r.st.Realmd, r.account, r.password)
 	cancel()

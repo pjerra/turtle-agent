@@ -344,7 +344,10 @@ func (w *walk) phaseLogin(ctx context.Context) error {
 		return stopf(exitRaidWalkFailed, "login: %v", err)
 	}
 	w.logLine(w.env.now(), fmt.Sprintf("login started (pid %d)", pid))
-	deadline := w.env.now().Add(90 * time.Second)
+	// The child holds its realmd login out of the hour-start window (login_hold.go): the deadline grows by that hold.
+	started := w.env.now()
+	deadline := loginDeadline(started, 90*time.Second)
+	held := loginHoldExtra(started) > 0
 	for {
 		agent, m, err := w.deps.openAgent(w.slotDir)
 		if err == nil {
@@ -365,6 +368,10 @@ func (w *walk) phaseLogin(ctx context.Context) error {
 		st, err := w.status(ctx)
 		if err == nil && st.State == session.StatusInWorld {
 			return nil
+		}
+		if held {
+			held = false
+			w.logLine(w.env.now(), "login: waiting for the realmd hour-start window")
 		}
 		if !w.env.now().Before(deadline) {
 			return stopf(exitRaidWalkFailed, "login: not in world after 90 s (state %q; see %s/agent.out)", stateWord(st), w.slotDir)
