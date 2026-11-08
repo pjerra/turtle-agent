@@ -154,10 +154,12 @@ turtle-agent rpc <dir-b> trade_open   '{"to": "<owner>"}'                       
 turtle-agent rpc <dir-a> trade_set_item '{"trade_slot": 6, "item_entry": 1420}' # slot 6 is not traded
 turtle-agent rpc <dir-b> cast '{"spell_id": 7418, "trade_slot": 6}'             # the enchant, pending until the trade completes
 turtle-agent rpc <dir-a> trade_status '{}'                                      # their_spell 7418
-turtle-agent rpc <dir-a> trade_accept '{}'   # and the same on <dir-b>: result completed on both
+turtle-agent rpc <dir-a> trade_accept '{}' &  turtle-agent rpc <dir-b> trade_accept '{}'; wait   # both sides at once: result completed on both
 ```
 
-Incoming requests are declined unless `trade_expect` armed that player. The core casts a trade-slot spell only at slot 6 and only when both sides accept (`TradeHandler.cpp`, `Spell.cpp` `CheckCast`): the first `cast` shows no failure and no Lua hook, and each change to the window un-accepts both sides. A one-shot `trade` is refused (`trade: another trade is running`) while a step trade is open. `trade_cancel` closes the window; a step window the partner closed is released by the next step call.
+`trade_accept` blocks until the partner accepts, so the two accepts must run in parallel (as above), not one after the other: the first would wait out its `wait_ms` and withdraw its accept (`CMSG_UNACCEPT_TRADE`, the window stays open).
+
+Incoming requests are declined unless `trade_expect` armed that player (by full name or guid; a part of a name is refused). While an arm is waiting, `trade_open`, `trade` and a second `trade_expect` are refused so they cannot wipe it; `trade_cancel` drops it. The core casts a trade-slot spell only at slot 6 and only when both sides accept (`TradeHandler.cpp`, `Spell.cpp` `CheckCast`): the first `cast` shows no failure and no Lua hook, and each change to the window un-accepts both sides. For that reason `trade_accept` never accepts again by itself: when a `back_to_trade` follows the accept it answers `result: changed` with the window in `trade_status`, and the caller accepts again or cancels. `trade_set_item` answers once your own side shows the item (`my_items`) after a `back_to_trade` that followed the set, and `unchanged: true` when the slot already held it. A one-shot `trade` is refused (`trade: another trade is running`) while a step trade is open. `trade_cancel` closes the window; a step window the partner closed is released by the next step call.
 
 ## 8. Talk to NPCs: gossip, vendor, trainer, quests
 
