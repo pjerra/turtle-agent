@@ -66,6 +66,8 @@ type targetParams struct {
 type castParams struct {
 	SpellID uint32      `json:"spell_id"`
 	Target  packet.GUID `json:"target,omitempty"`
+	// TradeSlot casts at the trade partner's item in that trade slot (0-6; an enchant takes slot 6) instead of at a target.
+	TradeSlot *uint8 `json:"trade_slot,omitempty"`
 }
 
 type cancelCastParams struct {
@@ -244,6 +246,15 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	srv.Register("attack", rpc.Typed(func(ctx context.Context, _ empty) (empty, error) { return empty{}, rpcErr(cur().Attack(ctx)) }))
 	srv.Register("stop_attack", rpc.Typed(func(ctx context.Context, _ empty) (empty, error) { return empty{}, rpcErr(cur().StopAttack(ctx)) }))
 	srv.Register("cast", rpc.Typed(func(ctx context.Context, p castParams) (empty, error) {
+		if p.TradeSlot != nil {
+			if p.Target != 0 {
+				return empty{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "invalid params: cast takes a target or a trade_slot, not both"}
+			}
+			if *p.TradeSlot > 6 {
+				return empty{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "invalid params: cast needs a trade_slot 0-6"}
+			}
+			return empty{}, rpcErr(cur().CastOnTradeSlot(ctx, p.SpellID, *p.TradeSlot))
+		}
 		return empty{}, rpcErr(cur().Cast(ctx, p.SpellID, p.Target))
 	}))
 	srv.Register("cancel_cast", rpc.Typed(func(ctx context.Context, p cancelCastParams) (empty, error) {
