@@ -60,6 +60,15 @@ type tradeState struct {
 	theirAccept bool   // status accepted came since the last back_to_trade
 	backs       uint64 // counts back_to_trade
 	theirs      *game.TradeView
+	mine        *game.TradeView // our own side of SMSG_TRADE_STATUS_EXTENDED (trader_state 0)
+	last        string          // the last SMSG_TRADE_STATUS, by name
+	// step is a step trade (trade_open, trade_expect): its window stays open between the calls that drive it.
+	step bool
+	// acceptFrom and acceptName arm the accept of one incoming trade request (trade_expect) until acceptUntil; any other
+	// request is declined as before.
+	acceptFrom  packet.GUID
+	acceptName  string
+	acceptUntil time.Time
 	incoming    packet.GUID // who started a trade with us (status begin) that the agent declined; cleared by the core's closing status
 	wakes       notifier
 }
@@ -76,18 +85,29 @@ func (s *Session) onTradeStatus(body []byte) error {
 	}
 	t := &s.trade
 	src := t.partner
-	declined := false
+	declined, accepted := false, false
+	t.last = m.Status.Name()
 	switch m.Status {
 	case game.TradeBegin:
 		// The core opens the trade on both sides (HandleInitiateTradeOpcode), and a player who has one open cannot start
 		// another. The agent takes no part in a trade the other side starts, so it declines like a client that closes the dialog.
+		// The exception is a request trade_expect armed: the agent answers that one with CMSG_BEGIN_TRADE.
 		src = m.Other
 		if !t.active {
-			t.incoming = m.Other
-			if err := s.conn.WritePacket(opcode.CMSGCancelTrade, game.BuildCancelTrade()); err != nil {
-				return err
+			if s.armedFor(m.Other) {
+				t.active, t.step, t.partner = true, true, m.Other
+				t.disarm()
+				if err := s.conn.WritePacket(opcode.CMSGBeginTrade, game.BuildBeginTrade()); err != nil {
+					return err
+				}
+				accepted = true
+			} else {
+				t.incoming = m.Other
+				if err := s.conn.WritePacket(opcode.CMSGCancelTrade, game.BuildCancelTrade()); err != nil {
+					return err
+				}
+				declined = true
 			}
-			declined = true
 		}
 	case game.TradeOpenWindow:
 		t.open = true
@@ -102,6 +122,9 @@ func (s *Session) onTradeStatus(body []byte) error {
 	d := map[string]any{"status": m.Status.Name(), "code": uint32(m.Status)}
 	if declined {
 		d["declined"] = true
+	}
+	if accepted {
+		d["accepted"] = true
 	}
 	if t.theirs != nil && (m.Status == game.TradeAccept || m.Status == game.TradeComplete) {
 		d["their_gold"], d["their_items"] = t.theirs.Gold, t.theirs.Items
@@ -122,8 +145,10 @@ func (s *Session) onTradeStatusExtended(body []byte) error {
 	}
 	if v.Theirs {
 		s.trade.theirs = &v
-		s.trade.wakes.wake()
+	} else {
+		s.trade.mine = &v
 	}
+	s.trade.wakes.wake()
 	return nil
 }
 
@@ -287,27 +312,9 @@ func (s *Session) tradeTarget(g packet.GUID, name string) (objects.Unit, string,
 		}
 		u.GUID = g
 	case strings.TrimSpace(name) != "":
-		var cands []objects.Unit
-		for _, c := range s.Units(objects.Filter{Name: name, Limit: 1 << 20}) {
-			if c.Type == "player" {
-				cands = append(cands, c)
-			}
-		}
-		for _, c := range cands {
-			if strings.EqualFold(c.Name, name) {
-				u = c
-				break
-			}
-		}
-		if u.GUID == 0 {
-			switch len(cands) {
-			case 0:
-				return u, "", fmt.Errorf("trade: no player named %q in view (walk up to them first)", name)
-			case 1:
-				u = cands[0]
-			default:
-				return u, "", fmt.Errorf("trade: %q matches %d players in view; use the full name or a guid", name, len(cands))
-			}
+		var err error
+		if u, err = s.playerByName(name); err != nil {
+			return u, "", err
 		}
 	default:
 		return u, "", errors.New("trade needs a player: a guid or a name")
@@ -332,6 +339,29 @@ func (s *Session) tradeTarget(g packet.GUID, name string) (objects.Unit, string,
 		return u, n, fmt.Errorf("trade: %s is dead", who)
 	}
 	return u, n, nil
+}
+
+// playerByName finds a player in view by name: an exact name (any case), else the only one whose name contains it.
+func (s *Session) playerByName(name string) (objects.Unit, error) {
+	var u objects.Unit
+	var cands []objects.Unit
+	for _, c := range s.Units(objects.Filter{Name: name, Limit: 1 << 20}) {
+		if c.Type == "player" {
+			cands = append(cands, c)
+		}
+	}
+	for _, c := range cands {
+		if strings.EqualFold(c.Name, name) {
+			return c, nil
+		}
+	}
+	switch len(cands) {
+	case 0:
+		return u, fmt.Errorf("trade: no player named %q in view (walk up to them first)", name)
+	case 1:
+		return cands[0], nil
+	}
+	return u, fmt.Errorf("trade: %q matches %d players in view; use the full name or a guid", name, len(cands))
 }
 
 // errStackMoved marks a plan the bags no longer match: the trade is cancelled, not the session.
@@ -371,7 +401,7 @@ func (s *Session) Trade(ctx context.Context, req TradeRequest) (TradeResult, err
 		if err := s.inWorld(); err != nil {
 			return nil, err
 		}
-		if s.trade.active {
+		if s.tradeBusy() {
 			return nil, errors.New("trade: another trade is running")
 		}
 		u, name, err := s.tradeTarget(req.To, req.Name)
@@ -471,8 +501,14 @@ func (s *Session) Trade(ctx context.Context, req TradeRequest) (TradeResult, err
 	}
 	res.Gold = req.Gold
 
-	// Accept once the scam-prevention delay has passed, and again when the core sends back_to_trade.
-	deadline := time.Now().Add(req.Wait)
+	return s.acceptLoop(ctx, req.Wait, res, finish)
+}
+
+// acceptLoop accepts once the scam-prevention delay has passed (Options.TradeSettle), and again when the core sends
+// back_to_trade, until the trade ends, wait runs out or tradeMaxAccepts accepts were answered with back_to_trade. It is the
+// accept half of Trade and of TradeAccept; finish ends a trade that did not complete the way it should.
+func (s *Session) acceptLoop(ctx context.Context, wait time.Duration, res TradeResult, finish func(result, detail string) (TradeResult, error)) (TradeResult, error) {
+	deadline := time.Now().Add(wait)
 	for attempt := 1; ; attempt++ {
 		err := s.tradeWait(ctx, s.opts.TradeSettle, func() bool { return s.trade.ended })
 		if err != nil && !errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
@@ -494,7 +530,7 @@ func (s *Session) Trade(ctx context.Context, req TradeRequest) (TradeResult, err
 		}
 		err = s.tradeWait(ctx, time.Until(deadline), func() bool { return s.trade.ended || s.trade.backs > backs })
 		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
-			return finish("timeout", fmt.Sprintf("the other side did not accept within %s (a bot that refuses a trade says why in a whisper: see chat_log)", req.Wait))
+			return finish("timeout", fmt.Sprintf("the other side did not accept within %s (a bot that refuses a trade says why in a whisper: see chat_log)", wait))
 		} else if err != nil {
 			return res, err
 		}
@@ -582,7 +618,7 @@ func (s *Session) releaseTrade() {
 	if err == nil && v.(bool) {
 		_ = s.tradeWait(bg, tradeCancelWait, func() bool { return s.trade.ended })
 	}
-	_, _ = s.do(bg, func() (any, error) { s.trade.active = false; return nil, nil })
+	_, _ = s.do(bg, func() (any, error) { s.trade.active, s.trade.step = false, false; return nil, nil })
 }
 
 // splitStack splits st.Count off st.Src into st.Dst with CMSG_SPLIT_ITEM and waits for the new stack to show up.
