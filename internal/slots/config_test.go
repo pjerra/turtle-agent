@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // 4. A loose slots file is refused: it decides which account a client gets.
@@ -83,6 +84,28 @@ func TestM910qSlot3IsAlwaysReserved(t *testing.T) {
 	}
 	if slot3.Reserved != "owner rule: never slot 3 on tortoise-test2" {
 		t.Fatalf("tortoise-test2/3 Reserved = %q", slot3.Reserved)
+	}
+}
+
+// tortoise-test3/3 is never leasable even when the file lists it as a normal slot:
+// the explicit path (Find) and the any-free-slot path (--any) both refuse it.
+func TestTortoiseTest3Slot3IsAlwaysReserved(t *testing.T) {
+	st := testStore(t, `{"version":1,"servers":[
+		{"name":"tortoise-test3","realmd":"10.0.0.3:3724","slots":[{"id":"3","account":"TAGENT3","character":"Tac","port":8773,"settings_from":"/s.json"}]}]}`)
+	_, slot, err := st.Cfg.Find("tortoise-test3", "3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slot.Reserved != "owner rule: never slot 3 on tortoise-test3" {
+		t.Fatalf("tortoise-test3/3 Reserved = %q", slot.Reserved)
+	}
+	// Slot 3 is the only slot, so --any has nothing to lease and names it as reserved.
+	_, err = st.Acquire("tortoise-test3", "", true, "w-a", 3*time.Hour)
+	if err == nil {
+		t.Fatal("--any leased tortoise-test3 slot 3, want a no-free-slot refusal")
+	}
+	if !strings.Contains(err.Error(), "3 reserved") {
+		t.Fatalf("message %q lacks %q", err.Error(), "3 reserved")
 	}
 }
 
