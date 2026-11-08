@@ -37,6 +37,11 @@ other users can read) with your server and account in it — placeholders below,
 Only `realmd` and `accounts` are required. `rpc` must be a loopback address. See
 [the settings reference](docs/okf/getting-started/settings-reference.md) for every key.
 
+Every realmd login waits out the first minutes of each UTC hour: the core's login throttle
+(`AuthSocket.cpp:439-457`) wrongly counts every account seen from the IP between hh:00:00 and hh:03:00, so a login that
+starts in that window is held until hh:03:05 and logs `login: waiting <s> s for the realmd hour-start window`. Set
+`TA_LOGIN_HOUR_HOLD=0` to turn the hold off.
+
 Log a character in and keep it online with the RPC server running:
 
 ```sh

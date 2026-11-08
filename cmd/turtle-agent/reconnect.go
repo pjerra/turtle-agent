@@ -163,6 +163,9 @@ func (r *reconnector) wait(ctx context.Context) time.Duration {
 // (--reconnect and --capture do not combine: the new session key is not in the capture's
 // redaction list).
 func (r *reconnector) login(ctx context.Context) (*worldSession, error) {
+	if err := holdLoginForHourStart(ctx, r.stderr); err != nil {
+		return nil, err
+	}
 	actx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	ticket, err := authLogin(actx, r.st.Realmd, r.account, r.password)
 	cancel()

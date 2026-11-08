@@ -291,6 +291,10 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		}
 	}
 
+	if err := holdLoginForHourStart(ctx, stderr); err != nil {
+		fmt.Fprintln(stderr, "login:", err)
+		return exitAuth
+	}
 	window := &loginWindow{}
 	window.note(time.Now())
 	actx, cancel := context.WithTimeout(ctx, 30*time.Second)
