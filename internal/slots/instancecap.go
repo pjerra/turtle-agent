@@ -14,7 +14,7 @@ import (
 // InstanceCapPerAccountFile is the file name of the per-server caps in the slot table's folder.
 const InstanceCapPerAccountFile = "instance-cap-per-account.json"
 
-// LoadInstanceCaps reads the per-server caps: {"m910q": 30, "tortoise-test2": 30}. A missing file is no caps (nil).
+// LoadInstanceCaps reads the per-server caps: {"m910q": 30, "tortoise-test2": 30, "tortoise-test3": 30}. A missing file is no caps (nil).
 // A value below 1 is refused. An unreadable or invalid file is an error, never "no caps".
 func LoadInstanceCaps(path string) (map[string]int, error) {
 	raw, err := os.ReadFile(path)

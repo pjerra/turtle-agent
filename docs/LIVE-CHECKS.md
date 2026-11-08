@@ -1161,7 +1161,7 @@ probe found (2026-10-29, `tests/raid-inject-probe-20261029-042517/probe.md`). Wh
 
 ## raid-walk --place: a raid that starts partway into its instance (P1 2026-11-01: refused in the quiet step, exit 18; re-run open)
 
-[Run a raid walk](okf/raids/run-a-raid-walk.md), [Start partway into an instance](okf/raids/place-mid-raid.md). Needs a test server (m910q or tortoise-test2) whose image carries the Eluna test
+[Run a raid walk](okf/raids/run-a-raid-walk.md), [Start partway into an instance](okf/raids/place-mid-raid.md). Needs a test server (m910q, tortoise-test2 or tortoise-test3) whose image carries the Eluna test
 toolkit (`.tt place`, `clearto`, `quiet`, `q inst|group|units|floor`) and TortoiseBots with `feat/run-until`. The first
 live run (Zul'Gurub leg 3, slot 2, 2026-11-01) reached the quiet step and stopped there: the toolkit's own quiet rule
 counted units a door-to-end run has alive at this step too, so the walk now judges the quiet itself (item 4; the

@@ -172,7 +172,7 @@ func (s *Session) GMOn(ctx context.Context, g packet.GUID, text string) error {
 }
 
 // ErrGMKillRefused is GMKill's refusal on an agent not authorized for gm_kill (the dialled host:port is not a test server's configured world_addr).
-var ErrGMKillRefused = errors.New("gm kill: refused: this agent is not a slot of a test server (m910q, tortoise-test2)")
+var ErrGMKillRefused = errors.New("gm kill: refused: this agent is not a slot of a test server (m910q, tortoise-test2, tortoise-test3)")
 
 // GMKillLine is the one GM line GMKill sends: the core's ".die" (Chat.cpp:885 `{ "die", SEC_DEVELOPER, ... HandleDieCommand }`, from account
 // level 3), which kills the SELECTED unit (Commands.cpp:2795, HandleDieCommand: GetSelectedUnit, then DealDamage for its whole health).

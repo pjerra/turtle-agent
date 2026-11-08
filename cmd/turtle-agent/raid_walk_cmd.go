@@ -256,7 +256,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.sql, "sql", "", "the deployed migration: step numbers and the first point come from it")
 	fs.StringVar(&o.until, "until", "boss", "boss (stops before it), boss-done (after the boss step), none, \"step N\" or \"leg L\"")
 	fs.StringVar(&o.from, "from", "", "\"leg L\" or \"step N\" for the run leader")
-	fs.Var(onOffFlag{v: &o.place, name: "--place"}, "place", "with --from: put the raid at that start inside the instance, clearing the legs it skips; a same-instance placement ends at once with exit 29 (`fresh instance needed`) when half the hires are dead or the start leg's boss is fighting the party (Eluna test toolkit: m910q or tortoise-test2 only)")
+	fs.Var(onOffFlag{v: &o.place, name: "--place"}, "place", "with --from: put the raid at that start inside the instance, clearing the legs it skips; a same-instance placement ends at once with exit 29 (`fresh instance needed`) when half the hires are dead or the start leg's boss is fighting the party (Eluna test toolkit: m910q, tortoise-test2 or tortoise-test3 only)")
 	fs.BoolVar(&o.noPlaceUnfreeze, "no-place-unfreeze", false, "with --place: turn off the unfreeze check. The `spread=5` place can drop two seats onto a small disconnected navmesh island beside the place point, where every move fails; by default, from the first watch poll after each placement move (the `.tt place`: an 11 yd ring, spread + 6; every GM summon wave of a retry, a retreat or the reuse/bind gather: a 6 yd ring at its own point) and for 120 s, sampled once per poll, a hire that is alive, not the main tank, has stood still (under 2 yd for 10 s) within the ring and more than 35 yd from the main tank while the main tank is more than 15 yd from the point is summoned onto the main tank once the commander's `.go` onto him has landed (5 s, 5 yd), at most twice per hire; a successful summon logs `placement: re-placed <hire> (frozen at x,y,z for <s>s)`, a failed one `placement: re-place failed <hire> (<reason>)` (at most 3 per hire, 5 s apart); three failed `.go` moves in a row, the main tank's death or a wipe stop it (`placement: unfreeze check stopped (<reason>)`), and it ends with `placement: frozen=<n> re-placed=<n>`")
 	fs.BoolVar(&o.reuseInstance, "reuse-instance", false, "with --place: keep the raid's CURRENT instance (no fresh instance is entered or counted, so the instance cap is untouched). A live raid is kept; a logged-out raid is resumed from the commander's live bind; with no bind the walk says so and falls back to a fresh entry. Combines with --gm-clear")
 	fs.StringVar(&speed, "speed", "1.0", "the run's test speed, 1.0 to 3.0")
@@ -479,7 +479,7 @@ func parseGMClearSpecs(groups, bosses []string) ([]raidwalk.GMClearSpec, error) 
 }
 
 // placeServers are the servers whose Eluna test toolkit can move a raid (spec 3). --place refuses every other one.
-var placeServers = map[string]bool{"m910q": true, "tortoise-test2": true}
+var placeServers = map[string]bool{"m910q": true, "tortoise-test2": true, "tortoise-test3": true}
 
 // gmKillAuthorize is gmKillAllowed with the slots table read from its default path (the file slot setup and teardown read;
 // slots.Load holds it to mode 0600 in a folder no one else can write). Login and reconnect call it with the address the
