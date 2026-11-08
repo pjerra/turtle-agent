@@ -685,31 +685,39 @@ func TestTradeOpenFailsWhenRefusedOrUnanswered(t *testing.T) {
 	}
 }
 
+type setOut struct {
+	r   TradeSetResult
+	err error
+}
+
+func startSet(h *harness, slot uint8, entry uint32) chan setOut {
+	ch := make(chan setOut, 1)
+	go func() {
+		r, err := h.s.TradeSetItem(context.Background(), slot, EquipRef{Entry: entry})
+		ch <- setOut{r, err}
+	}()
+	return ch
+}
+
+// ownSide is the core's update of our own side of the window (trader_state 0) after we put the bracers in slot 6.
+func (h *harness) ownSide() {
+	h.send(opcode.SMSGTradeStatusExtended, gametest.TradeExtended(false, 0, gametest.TradeSide{Slot: 6, Entry: bracersEntry, Count: 1}))
+}
+
 func TestTradeSetItemNonTradedSlot(t *testing.T) {
 	h := openedStep(t)
-	type setOut struct {
-		r   TradeSetResult
-		err error
-	}
-	set := func(slot uint8) chan setOut {
-		ch := make(chan setOut, 1)
-		go func() {
-			r, err := h.s.TradeSetItem(context.Background(), slot, EquipRef{Entry: bracersEntry})
-			ch <- setOut{r, err}
-		}()
-		return ch
-	}
-	ch := set(6)
+	ch := startSet(h, 6, bracersEntry)
 	if p := h.expect(opcode.CMSGSetTradeItem); !bytes.Equal(p.Body, []byte{0x06, 0xFF, 0x17}) {
 		t.Fatalf("set trade item % X", p.Body)
 	}
+	h.ownSide()
 	h.tradeStatus(game.TradeBackToTrade)
 	o := <-ch
 	if o.err != nil || o.r != (TradeSetResult{TradeSlot: 6, Bag: 255, Slot: 23, GUID: bracersGUID, ItemEntry: bracersEntry}) {
 		t.Fatalf("%+v %v", o.r, o.err)
 	}
 	// The core refuses an item (a soulbound one) by closing the window.
-	ch = set(6)
+	ch = startSet(h, 5, bracersEntry)
 	h.expect(opcode.CMSGSetTradeItem)
 	h.tradeStatus(game.TradeCancelled)
 	var tf *TradeFailed
@@ -718,6 +726,39 @@ func TestTradeSetItemNonTradedSlot(t *testing.T) {
 	}
 	if h.s.TradeStatus().Active {
 		t.Fatal("the closed window still counts as active")
+	}
+}
+
+// Only a back_to_trade after our own set counts, and only once our side shows the item: an older back_to_trade (the cast's)
+// or one that lands before the core took the item is not the answer. Setting the same item again changes nothing.
+func TestTradeSetItemWaitsForOwnSideAndSkipsUnchanged(t *testing.T) {
+	h := openedStep(t)
+	h.tradeStatus(game.TradeBackToTrade) // an earlier change's reply, before our set
+	waitFor(t, func() bool { return h.s.TradeStatus().Status == "back_to_trade" })
+	ch := startSet(h, 6, bracersEntry)
+	h.expect(opcode.CMSGSetTradeItem)
+	select {
+	case o := <-ch:
+		t.Fatalf("returned on an older back_to_trade: %+v %v", o.r, o.err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	h.tradeStatus(game.TradeBackToTrade) // after the set, but our side does not show the item yet
+	select {
+	case o := <-ch:
+		t.Fatalf("returned before our side showed the item: %+v %v", o.r, o.err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	h.ownSide()
+	if o := <-ch; o.err != nil || o.r.Unchanged || o.r.ItemEntry != bracersEntry {
+		t.Fatalf("%+v %v", o.r, o.err)
+	}
+	// Same item, same slot: success without a packet or a wait.
+	o := <-startSet(h, 6, bracersEntry)
+	if o.err != nil || !o.r.Unchanged || o.r.TradeSlot != 6 || o.r.GUID != bracersGUID {
+		t.Fatalf("%+v %v", o.r, o.err)
+	}
+	if p, err := h.srv.Expect(opcode.CMSGSetTradeItem, 100*time.Millisecond); err == nil {
+		t.Fatalf("sent % X", p.Body)
 	}
 }
 
@@ -794,8 +835,6 @@ func TestTradeAcceptStepCompletes(t *testing.T) {
 	if d := time.Since(start); d < 15*time.Millisecond {
 		t.Fatalf("accepted after %s, before the settle delay", d)
 	}
-	h.tradeStatus(game.TradeBackToTrade)
-	h.expect(opcode.CMSGAcceptTrade)
 	h.tradeStatus(game.TradeAccept)
 	h.tradeStatus(game.TradeComplete)
 	o := <-ch
@@ -810,7 +849,39 @@ func TestTradeAcceptStepCompletes(t *testing.T) {
 	}
 }
 
-// A step trade whose partner does not accept keeps its window: the caller decides (trade_accept again or trade_cancel).
+// A back_to_trade after our accept means the window changed: the step accept does not accept again by itself, it returns
+// result changed with the window so the caller sees what the partner did.
+func TestTradeAcceptStepReturnsChangedOnBackToTrade(t *testing.T) {
+	h := openedStep(t)
+	type accOut struct {
+		r   TradeResult
+		err error
+	}
+	ch := make(chan accOut, 1)
+	go func() {
+		r, err := h.s.TradeAccept(context.Background(), 5*time.Second)
+		ch <- accOut{r, err}
+	}()
+	h.expect(opcode.CMSGAcceptTrade)
+	h.send(opcode.SMSGTradeStatusExtended, gametest.TradeExtended(true, 7, gametest.TradeSide{Slot: 0, Entry: 2512, Count: 3}))
+	h.tradeStatus(game.TradeBackToTrade)
+	o := <-ch
+	if o.err != nil || o.r.Result != "changed" || o.r.TradeStatus == nil || o.r.TradeStatus.TheirGold != 7 || len(o.r.TradeStatus.TheirItems) != 1 || !o.r.TradeStatus.Open {
+		t.Fatalf("%+v %v", o.r, o.err)
+	}
+	if p, err := h.srv.Expect(opcode.CMSGAcceptTrade, 150*time.Millisecond); err == nil {
+		t.Fatalf("accepted again by itself % X", p.Body)
+	}
+	if p, err := h.srv.Expect(opcode.CMSGUnacceptTrade, 50*time.Millisecond); err == nil {
+		t.Fatalf("unaccepted a window the core already un-accepted % X", p.Body)
+	}
+	if st := h.s.TradeStatus(); !st.Active || !st.Open {
+		t.Fatalf("%+v", st)
+	}
+}
+
+// A step trade whose partner does not accept keeps its window, but our accept must not stand on the core: it is withdrawn
+// with CMSG_UNACCEPT_TRADE. The caller decides (trade_accept again or trade_cancel).
 func TestTradeAcceptStepTimeoutKeepsWindow(t *testing.T) {
 	h := openedStep(t)
 	ch := make(chan error, 1)
@@ -819,6 +890,9 @@ func TestTradeAcceptStepTimeoutKeepsWindow(t *testing.T) {
 	var tf *TradeFailed
 	if err := <-ch; !errors.As(err, &tf) || tf.Result.Result != "timeout" {
 		t.Fatalf("%v", err)
+	}
+	if p := h.expect(opcode.CMSGUnacceptTrade); len(p.Body) != 0 {
+		t.Fatalf("unaccept % X", p.Body)
 	}
 	if st := h.s.TradeStatus(); !st.Active || !st.Open {
 		t.Fatalf("%+v", st)
@@ -884,5 +958,115 @@ func TestOneShotTradeRefusedDuringStepTrade(t *testing.T) {
 	}
 	if p, err := h.srv.Expect(opcode.CMSGCancelTrade, 100*time.Millisecond); err == nil {
 		t.Fatalf("the refused call cancelled the step trade % X", p.Body)
+	}
+}
+
+// A stranger's request is declined and its closing status must not leak into the armed state: the armed player's request
+// that follows starts a clean trade.
+func TestTradeExpectSurvivesAStrangersClosingStatus(t *testing.T) {
+	h := tradeRig(t, 3)
+	stranger := tradeRigPlayer(h, 0x98, "Mallory", 4)
+	done := startExpect(h, botGUID, "", 5*time.Second)
+	armed(t, h)
+	h.begin(stranger)
+	h.expect(opcode.CMSGCancelTrade)
+	h.tradeStatus(game.TradeCancelled) // the core's reply to the decline
+	h.begin(botGUID)
+	h.expect(opcode.CMSGBeginTrade)
+	h.tradeStatus(game.TradeOpenWindow)
+	o := <-done
+	if o.err != nil || !o.st.Open || o.st.Partner != botGUID || o.st.Status != "open" {
+		t.Fatalf("%+v %v", o.st, o.err)
+	}
+	if st := h.s.TradeStatus(); !st.Active || !st.Open || !st.Step || st.Partner != botGUID {
+		t.Fatalf("%+v", st)
+	}
+	if p, err := h.srv.Expect(opcode.CMSGCancelTrade, 100*time.Millisecond); err == nil {
+		t.Fatalf("cancelled the armed trade % X", p.Body)
+	}
+}
+
+// A step window the partner closed counts as released: a stranger's request is declined again and our own trade starts.
+func TestStrangerDeclinedAfterAStepTradeEnded(t *testing.T) {
+	h := openedStep(t)
+	h.tradeStatus(game.TradeCancelled) // the partner closes the window; no step call released it
+	waitFor(t, func() bool { return h.s.TradeStatus().Status == "cancelled" })
+	stranger := tradeRigPlayer(h, 0x98, "Mallory", 4)
+	h.begin(stranger)
+	h.expect(opcode.CMSGCancelTrade)
+	h.tradeStatus(game.TradeCancelled) // the core's reply to the decline
+	if st := h.s.TradeStatus(); st.Active || st.Step || st.Open {
+		t.Fatalf("%+v", st)
+	}
+	done := startOpen(h, botGUID, "")
+	h.expect(opcode.CMSGInitiateTrade)
+	h.tradeStatus(game.TradeOpenWindow)
+	if o := <-done; o.err != nil || !o.st.Open {
+		t.Fatalf("%+v %v", o.st, o.err)
+	}
+}
+
+// trade_expect arms on a full name only: a part of a name that fits a player in view is an error, not an arm that never fires.
+func TestTradeExpectNeedsTheFullName(t *testing.T) {
+	h := tradeRig(t, 3)
+	o := <-startExpect(h, 0, "Gor", 200*time.Millisecond)
+	if o.err == nil || !strings.Contains(o.err.Error(), `no player named "Gor"`) {
+		t.Fatalf("%+v %v", o.st, o.err)
+	}
+	if h.s.TradeStatus().ArmedFrom != "" {
+		t.Fatal("armed on a partial name")
+	}
+	// A partial name also fails when two players in view contain it.
+	tradeRigPlayer(h, 0x96, "Gormley", 4)
+	if o := <-startExpect(h, 0, "gor", 200*time.Millisecond); o.err == nil || !strings.Contains(o.err.Error(), `no player named "gor"`) {
+		t.Fatalf("%+v %v", o.st, o.err)
+	}
+}
+
+// A live trade_expect arm is not wiped by another trade call.
+func TestLiveArmBlocksOtherTradeCalls(t *testing.T) {
+	h := tradeRig(t, 3)
+	done := startExpect(h, botGUID, "", 3*time.Second)
+	armed(t, h)
+	if o := <-startOpen(h, botGUID, ""); o.err == nil || !strings.Contains(o.err.Error(), "trade_expect is waiting") {
+		t.Fatalf("trade_open: %+v %v", o.st, o.err)
+	}
+	if _, err := h.s.Trade(context.Background(), TradeRequest{Name: "Gorm", Gold: 10}); err == nil || !strings.Contains(err.Error(), "trade_expect is waiting") {
+		t.Fatalf("trade: %v", err)
+	}
+	if o := <-startExpect(h, botGUID, "", 50*time.Millisecond); o.err == nil || !strings.Contains(o.err.Error(), "trade_expect is waiting") {
+		t.Fatalf("trade_expect: %+v %v", o.st, o.err)
+	}
+	if p, err := h.srv.Expect(opcode.CMSGInitiateTrade, 50*time.Millisecond); err == nil {
+		t.Fatalf("initiated % X", p.Body)
+	}
+	// The arm survived all three: the armed request is still taken.
+	h.begin(botGUID)
+	h.expect(opcode.CMSGBeginTrade)
+	h.tradeStatus(game.TradeOpenWindow)
+	if o := <-done; o.err != nil || !o.st.Open {
+		t.Fatalf("%+v %v", o.st, o.err)
+	}
+}
+
+// A one-shot trade is not a step window: a trade-slot cast is not sent during it.
+func TestCastOnTradeSlotRefusedDuringOneShotTrade(t *testing.T) {
+	h := tradeRig(t, 3)
+	done := startTrade(h, TradeRequest{Name: "Gorm", Gold: 10})
+	h.expect(opcode.CMSGInitiateTrade)
+	h.tradeStatus(game.TradeOpenWindow)
+	h.expect(opcode.CMSGSetTradeGold)
+	if err := h.s.CastOnTradeSlot(context.Background(), enchantSpell, 6); err == nil || !strings.Contains(err.Error(), "one-shot trade") {
+		t.Fatalf("err = %v", err)
+	}
+	h.expect(opcode.CMSGAcceptTrade)
+	h.tradeStatus(game.TradeComplete)
+	if o := <-done; o.err != nil {
+		t.Fatal(o.err)
+	}
+	for _, p := range h.srv.Skipped() {
+		if p.Op == opcode.CMSGCastSpell {
+			t.Fatalf("cast sent during a one-shot trade % X", p.Body)
+		}
 	}
 }

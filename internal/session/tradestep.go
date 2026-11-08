@@ -56,13 +56,33 @@ type TradeSetResult struct {
 	Slot      uint8       `json:"slot"`
 	GUID      packet.GUID `json:"guid"`
 	ItemEntry uint32      `json:"item_entry"`
+	// Unchanged is true when the slot already held that item: nothing was sent and nothing changed.
+	Unchanged bool `json:"unchanged,omitempty"`
 }
 
-// tradeBusy reports whether a trade is running that a new one must not replace. A step trade whose window has closed
-// is not (its state stays until the next call releases it).
-func (s *Session) tradeBusy() bool {
+// activeTrade reports whether a trade is running that a new one must not replace. A step trade whose window has closed
+// is not (its state stays until the next call, or the next request, releases it). Owner loop only.
+func (s *Session) activeTrade() bool {
 	t := &s.trade
 	return t.active && !(t.step && t.ended)
+}
+
+// armLive reports whether a trade_expect arm is waiting for its request. Owner loop only.
+func (s *Session) armLive() bool {
+	t := &s.trade
+	return !t.active && !t.acceptUntil.IsZero() && s.now().Before(t.acceptUntil)
+}
+
+// busyErr is the refusal of a call that would start or arm a trade while one is running or a trade_expect is waiting: a
+// new state would wipe the arm. Owner loop only.
+func (s *Session) busyErr() error {
+	switch {
+	case s.activeTrade():
+		return errors.New("trade: another trade is running")
+	case s.armLive():
+		return errors.New("trade: a trade_expect is waiting for a request (trade_cancel ends it)")
+	}
+	return nil
 }
 
 // armedFor reports whether an incoming trade request from g is the one trade_expect armed the accept for. Owner loop only.
@@ -154,8 +174,8 @@ func (s *Session) TradeOpen(ctx context.Context, to packet.GUID, name string, op
 		if err := s.inWorld(); err != nil {
 			return nil, err
 		}
-		if s.tradeBusy() {
-			return nil, errors.New("trade: another trade is running")
+		if err := s.busyErr(); err != nil {
+			return nil, err
 		}
 		u, n, err := s.tradeTarget(to, name)
 		if err != nil {
@@ -207,13 +227,21 @@ func (s *Session) TradeExpect(ctx context.Context, from packet.GUID, name string
 		if err := s.inWorld(); err != nil {
 			return nil, err
 		}
-		if s.tradeBusy() {
-			return nil, errors.New("trade: another trade is running")
+		if err := s.busyErr(); err != nil {
+			return nil, err
 		}
 		g, n := from, name
 		if g == 0 {
-			if u, err := s.playerByName(n); err == nil {
-				g, n = u.GUID, ""
+			// The arm takes a full name only: a part of a name never matches the cached name of the request, so it would
+			// arm for nobody. No one in view by that name arms on the cached name when the player shows up.
+			cands := s.playerCandidates(n)
+			for _, c := range cands {
+				if strings.EqualFold(c.Name, n) {
+					g, n = c.GUID, ""
+				}
+			}
+			if g == 0 && len(cands) > 0 {
+				return nil, fmt.Errorf("trade: no player named %q in view (trade_expect needs the full name; %d in view contain it)", n, len(cands))
 			}
 		}
 		if g == s.selfGUID() {
@@ -244,9 +272,26 @@ func (s *Session) TradeExpect(ctx context.Context, from packet.GUID, name string
 	return s.TradeStatus(), nil
 }
 
+// ownSideShows reports whether our side of the window (SMSG_TRADE_STATUS_EXTENDED, trader_state 0) shows an item of entry
+// in trade slot slot; count > 0 also wants that stack count. Owner loop only.
+func (s *Session) ownSideShows(slot uint8, entry, count uint32) bool {
+	m := s.trade.mine
+	if m == nil {
+		return false
+	}
+	for _, it := range m.Items {
+		if it.Slot == slot && it.Entry == entry && (count == 0 || it.Count == count) {
+			return true
+		}
+	}
+	return false
+}
+
 // TradeSetItem puts an item of the bags into trade slot tradeSlot (0-6; slot 6 is the one that is not traded, where an
-// enchant is cast at the partner's item) with CMSG_SET_TRADE_ITEM, and waits up to 3 s for the core's back_to_trade, which
-// every effective change causes. A refused item (a soulbound one) closes the window: the error is a *TradeFailed.
+// enchant is cast at the partner's item) with CMSG_SET_TRADE_ITEM. It returns once the core took the item: a back_to_trade
+// after this set (an older one does not count) and our own side of the window showing the item in that slot, within 3 s. A
+// slot that already holds that item is left alone (nothing is sent) and the result says unchanged. A refused item (a
+// soulbound one) closes the window: the error is a *TradeFailed.
 func (s *Session) TradeSetItem(ctx context.Context, tradeSlot uint8, ref EquipRef) (TradeSetResult, error) {
 	if tradeSlot > game.TradeSlotCount-1 {
 		return TradeSetResult{}, errors.New("trade_set_item needs trade_slot 0-6")
@@ -255,6 +300,7 @@ func (s *Session) TradeSetItem(ctx context.Context, tradeSlot uint8, ref EquipRe
 		return TradeSetResult{}, errors.New("trade_set_item needs an item_entry or a slot (bag defaults to the backpack, 255)")
 	}
 	var backs uint64
+	var unchanged bool
 	v, err := s.do(ctx, func() (any, error) {
 		if err := s.inWorld(); err != nil {
 			return nil, err
@@ -266,6 +312,10 @@ func (s *Session) TradeSetItem(ctx context.Context, tradeSlot uint8, ref EquipRe
 		if err != nil {
 			return nil, err
 		}
+		if s.ownSideShows(tradeSlot, it.Entry, it.Count) {
+			unchanged = true
+			return it, nil
+		}
 		backs = s.trade.backs
 		return it, s.conn.WritePacket(opcode.CMSGSetTradeItem, game.BuildSetTradeItem(tradeSlot, it.Bag, it.Slot))
 	})
@@ -273,22 +323,44 @@ func (s *Session) TradeSetItem(ctx context.Context, tradeSlot uint8, ref EquipRe
 		return TradeSetResult{}, err
 	}
 	it := v.(objects.Item)
-	err = s.tradeWait(ctx, tradeSetItemWait, func() bool { return s.trade.ended || s.trade.backs > backs })
+	out := TradeSetResult{TradeSlot: tradeSlot, Bag: it.Bag, Slot: it.Slot, GUID: it.GUID, ItemEntry: it.Entry}
+	if unchanged {
+		out.Unchanged = true
+		return out, nil
+	}
+	err = s.tradeWait(ctx, tradeSetItemWait, func() bool {
+		return s.trade.ended || (s.trade.backs > backs && s.ownSideShows(tradeSlot, it.Entry, 0))
+	})
 	if r, ended := s.tradeSnapshot(s.stepBase()); ended {
 		return TradeSetResult{}, s.stepFailed(r, r.Result, r.Detail)
 	}
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
-		return TradeSetResult{}, fmt.Errorf("trade_set_item: the core sent no back_to_trade within %s: the item was not taken (see inventory_error events)", tradeSetItemWait)
+		return TradeSetResult{}, fmt.Errorf("trade_set_item: the core did not confirm the item within %s (no back_to_trade after the set, or our side of the window does not show it): the item was not taken (see inventory_error events)", tradeSetItemWait)
 	} else if err != nil {
 		return TradeSetResult{}, err
 	}
-	return TradeSetResult{TradeSlot: tradeSlot, Bag: it.Bag, Slot: it.Slot, GUID: it.GUID, ItemEntry: it.Entry}, nil
+	return out, nil
 }
 
-// TradeAccept accepts the open step trade after Options.TradeSettle and again after each back_to_trade, and waits up to
-// wait (0: 12 s) for the partner's accept to complete it, as Trade does. A completed trade, or one the window closed on, is
-// done. When the partner does not accept in time the window stays open: the error is a *TradeFailed with result timeout,
-// and trade_accept again or trade_cancel decides.
+// unaccept withdraws our accept (CMSG_UNACCEPT_TRADE) from a window that is still open; best effort, on its own context so
+// that a cancelled call still takes its accept back.
+func (s *Session) unaccept() {
+	bg, cancel := context.WithTimeout(context.Background(), 2*tradeCancelWait)
+	defer cancel()
+	_, _ = s.do(bg, func() (any, error) {
+		if t := &s.trade; t.active && !t.ended && s.State() == StatusInWorld {
+			return nil, s.conn.WritePacket(opcode.CMSGUnacceptTrade, game.BuildUnacceptTrade())
+		}
+		return nil, nil
+	})
+}
+
+// TradeAccept accepts the open step trade after Options.TradeSettle and waits up to wait (0: 12 s) for the partner's accept
+// to complete it. Unlike Trade it does not accept again by itself: a back_to_trade after the accept means the window
+// changed (the core un-accepts both sides), and the result is "changed" with the window in trade_status so the caller sees
+// what changed and decides. A completed trade, or one the window closed on, is done. When the partner does not accept in
+// time the accept is withdrawn (CMSG_UNACCEPT_TRADE) and the window stays open: the error is a *TradeFailed with result
+// timeout, and trade_accept again or trade_cancel decides.
 func (s *Session) TradeAccept(ctx context.Context, wait time.Duration) (TradeResult, error) {
 	if wait <= 0 {
 		wait = tradeDoneWait
@@ -302,19 +374,52 @@ func (s *Session) TradeAccept(ctx context.Context, wait time.Duration) (TradeRes
 		return TradeResult{}, err
 	}
 	res := s.stepBase()
-	finish := func(result, detail string) (TradeResult, error) {
-		r, ended := s.tradeSnapshot(res)
-		if ended {
-			s.releaseTrade()
-			if r.Result == "completed" {
-				return r, nil
-			}
-			return r, &TradeFailed{r}
+	deadline := time.Now().Add(wait)
+	// ended turns a closed window into the result of a trade that did not complete (or did).
+	ended := func() (TradeResult, error) {
+		r, _ := s.tradeSnapshot(res)
+		s.releaseTrade()
+		if r.Result == "completed" {
+			return r, nil
 		}
-		r.Result, r.Detail = result, detail
 		return r, &TradeFailed{r}
 	}
-	return s.acceptLoop(ctx, wait, res, finish)
+	if err := s.tradeWait(ctx, s.opts.TradeSettle, func() bool { return s.trade.ended }); err != nil && !errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+		return res, err
+	}
+	var backs uint64
+	var sent bool
+	if _, err := s.do(ctx, func() (any, error) {
+		if s.trade.ended {
+			return nil, nil
+		}
+		backs, sent = s.trade.backs, true
+		return nil, s.conn.WritePacket(opcode.CMSGAcceptTrade, game.BuildAcceptTrade())
+	}); err != nil {
+		return res, err
+	}
+	if !sent {
+		return ended()
+	}
+	err := s.tradeWait(ctx, time.Until(deadline), func() bool { return s.trade.ended || s.trade.backs > backs })
+	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+		s.unaccept()
+		r, _ := s.tradeSnapshot(res)
+		r.Result = "timeout"
+		r.Detail = fmt.Sprintf("the other side did not accept within %s; our accept was withdrawn and the window is still open (a bot that refuses a trade says why in a whisper: see chat_log)", wait)
+		return r, &TradeFailed{r}
+	} else if err != nil {
+		s.unaccept()
+		return res, err
+	}
+	if _, closed := s.tradeSnapshot(res); closed {
+		return ended()
+	}
+	r, _ := s.tradeSnapshot(res)
+	st := s.TradeStatus()
+	r.Result, r.TradeStatus = "changed", &st
+	r.Detail = "the window changed after the accept (back_to_trade): both sides are un-accepted; read trade_status, then trade_accept again or trade_cancel"
+	return r, nil
 }
 
 // TradeCancel closes a step trade (CMSG_CANCEL_TRADE, then up to a second for the core's closing status), drops an armed
@@ -370,7 +475,7 @@ func (s *Session) TradeStatus() TradeStepState {
 
 // CastOnTradeSlot casts spell at the partner's item in trade slot slot (CMSG_CAST_SPELL with TARGET_FLAG_TRADE_ITEM, see
 // game.BuildCastSpellOnTradeItem): an enchant for the item the partner put in slot 6, which the core applies when the trade
-// completes. It needs an open trade window. Nothing else is checked here: slots 0-5 are sent too, and the core answers
+// completes. It needs an open step trade window (a one-shot trade is refused). Nothing else is checked here: slots 0-5 are sent too, and the core answers
 // them with a spell failure (ITEM_NOT_READY).
 func (s *Session) CastOnTradeSlot(ctx context.Context, spell uint32, slot uint8) error {
 	if spell == 0 {
@@ -383,8 +488,8 @@ func (s *Session) CastOnTradeSlot(ctx context.Context, spell uint32, slot uint8)
 		if err := s.inWorld(); err != nil {
 			return nil, err
 		}
-		if t := &s.trade; !t.active || !t.open || t.ended {
-			return nil, errNoStepWindow
+		if err := s.stepWindow(); err != nil {
+			return nil, err
 		}
 		return nil, s.conn.WritePacket(opcode.CMSGCastSpell, game.BuildCastSpellOnTradeItem(spell, slot))
 	})

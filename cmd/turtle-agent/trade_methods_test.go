@@ -166,6 +166,7 @@ func TestTradeStepMethodsFlow(t *testing.T) {
 
 	set := r.callAsync("trade_set_item", `{"trade_slot":6,"item_entry":1420}`)
 	r.expectBody(opcode.CMSGSetTradeItem, []byte{0x06, 0xFF, 0x17})
+	r.srv.Send(opcode.SMSGTradeStatusExtended, gametest.TradeExtended(false, 0, gametest.TradeSide{Slot: 6, Entry: 1420, Count: 1}))
 	r.srv.Send(opcode.SMSGTradeStatus, gametest.TradeStatus(game.TradeBackToTrade, 0))
 	got := (<-set)["result"].(map[string]any)
 	if got["trade_slot"] != float64(6) || got["bag"] != float64(255) || got["slot"] != float64(23) || got["item_entry"] != float64(1420) || got["guid"] != "0x4000000000000041" {

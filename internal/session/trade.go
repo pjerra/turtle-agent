@@ -86,39 +86,54 @@ func (s *Session) onTradeStatus(body []byte) error {
 	t := &s.trade
 	src := t.partner
 	declined, accepted := false, false
-	t.last = m.Status.Name()
 	switch m.Status {
 	case game.TradeBegin:
 		// The core opens the trade on both sides (HandleInitiateTradeOpcode), and a player who has one open cannot start
 		// another. The agent takes no part in a trade the other side starts, so it declines like a client that closes the dialog.
-		// The exception is a request trade_expect armed: the agent answers that one with CMSG_BEGIN_TRADE.
+		// The exception is a request trade_expect armed: the agent answers that one with CMSG_BEGIN_TRADE, in a fresh state.
+		// A step trade whose window already closed counts as released here.
 		src = m.Other
-		if !t.active {
-			if s.armedFor(m.Other) {
-				t.active, t.step, t.partner = true, true, m.Other
-				t.disarm()
-				if err := s.conn.WritePacket(opcode.CMSGBeginTrade, game.BuildBeginTrade()); err != nil {
-					return err
-				}
-				accepted = true
-			} else {
-				t.incoming = m.Other
-				if err := s.conn.WritePacket(opcode.CMSGCancelTrade, game.BuildCancelTrade()); err != nil {
-					return err
-				}
-				declined = true
+		switch {
+		case s.activeTrade():
+			// our own trade is running: the begin is only logged
+		case s.armedFor(m.Other):
+			*t = tradeState{active: true, step: true, partner: m.Other, wakes: t.wakes}
+			if err := s.conn.WritePacket(opcode.CMSGBeginTrade, game.BuildBeginTrade()); err != nil {
+				return err
 			}
+			accepted = true
+		default:
+			if t.active {
+				*t = tradeState{wakes: t.wakes}
+			}
+			t.incoming = m.Other
+			if err := s.conn.WritePacket(opcode.CMSGCancelTrade, game.BuildCancelTrade()); err != nil {
+				return err
+			}
+			declined = true
 		}
 	case game.TradeOpenWindow:
-		t.open = true
+		if t.active {
+			t.open = true
+		}
 	case game.TradeAccept:
-		t.theirAccept = true
+		if t.active {
+			t.theirAccept = true
+		}
 	case game.TradeBackToTrade:
-		t.backs++
-		t.theirAccept = false
+		if t.active {
+			t.backs++
+			t.theirAccept = false
+		}
 	default:
-		t.ended, t.status, t.open, t.incoming = true, m.Status, false, 0
+		// A closing status ends the trade that is running; with none running (the reply to a decline) it only ends the
+		// pending decline, and must not touch the state an armed accept waits in.
+		if t.active {
+			t.ended, t.status, t.open = true, m.Status, false
+		}
+		t.incoming = 0
 	}
+	t.last = m.Status.Name()
 	d := map[string]any{"status": m.Status.Name(), "code": uint32(m.Status)}
 	if declined {
 		d["declined"] = true
@@ -191,6 +206,9 @@ type TradeResult struct {
 	PartnerAccepted bool             `json:"partner_accepted"`
 	Verified        bool             `json:"verified"` // completed, and the bags and the purse show the items and gold gone
 	Detail          string           `json:"detail,omitempty"`
+	// TradeStatus is the window as it stands after a step trade_accept ended with result "changed": the other side (or the
+	// core) changed the window, so the accept no longer stands.
+	TradeStatus *TradeStepState `json:"trade_status,omitempty"`
 }
 
 // TradeFailed is the error of a trade that did not complete; Result says how far it got.
@@ -341,15 +359,21 @@ func (s *Session) tradeTarget(g packet.GUID, name string) (objects.Unit, string,
 	return u, n, nil
 }
 
-// playerByName finds a player in view by name: an exact name (any case), else the only one whose name contains it.
-func (s *Session) playerByName(name string) (objects.Unit, error) {
-	var u objects.Unit
+// playerCandidates lists the players in view whose name contains name (any case).
+func (s *Session) playerCandidates(name string) []objects.Unit {
 	var cands []objects.Unit
 	for _, c := range s.Units(objects.Filter{Name: name, Limit: 1 << 20}) {
 		if c.Type == "player" {
 			cands = append(cands, c)
 		}
 	}
+	return cands
+}
+
+// playerByName finds a player in view by name: an exact name (any case), else the only one whose name contains it.
+func (s *Session) playerByName(name string) (objects.Unit, error) {
+	var u objects.Unit
+	cands := s.playerCandidates(name)
 	for _, c := range cands {
 		if strings.EqualFold(c.Name, name) {
 			return c, nil
@@ -401,8 +425,8 @@ func (s *Session) Trade(ctx context.Context, req TradeRequest) (TradeResult, err
 		if err := s.inWorld(); err != nil {
 			return nil, err
 		}
-		if s.tradeBusy() {
-			return nil, errors.New("trade: another trade is running")
+		if err := s.busyErr(); err != nil {
+			return nil, err
 		}
 		u, name, err := s.tradeTarget(req.To, req.Name)
 		if err != nil {
