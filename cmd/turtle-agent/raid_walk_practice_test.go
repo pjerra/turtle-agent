@@ -932,24 +932,148 @@ func TestPracticeBossSampleFreshness(t *testing.T) {
 	}
 }
 
-// TestPracticeMissingUnitMissSkipsPoll: a gm_set_hp whose unit the client cannot find is a missed poll, not exit 18
-// (L2). Three misses in a row end the attempt, and the practice goes on to collect its cycles.
-func TestPracticeMissingUnitMissSkipsPoll(t *testing.T) {
+// TestPracticeMissingUnitEndsTheAttempt: a gm_set_hp the client cannot resolve is a missed poll. The boss stays below
+// the floor, so every poll misses, and three in a row end the practice: exit 18, ended "the boss is gone".
+func TestPracticeMissingUnitEndsTheAttempt(t *testing.T) {
 	sc := &practiceScenario{sonDead: true}
 	f, _, _ := practiceFixture(t, sc, 10)
 	f.agent.setHPErr = fmt.Errorf("gm set hp: %w", session.ErrUnitNotInView)
-	if code := f.run(context.Background()); code != exitOK {
-		t.Fatalf("exit %d, want 0 (notes %v): %s", code, f.summaryNotes(), f.stderr.String())
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d (notes %v): %s", code, exitRaidWalkFailed, f.summaryNotes(), f.stderr.String())
 	}
 	sum := f.summary()
-	if sum.Practice == nil || sum.Practice.Ended != "cycles" || sum.Practice.Cycles != 10 {
-		t.Fatalf("practice %+v, want 10 cycles", sum.Practice)
+	if sum.Practice == nil || sum.Practice.Ended != "the boss is gone" {
+		t.Fatalf("practice %+v, want the boss-is-gone ending", sum.Practice)
 	}
-	if !hasNote(sum, "miss 3 of 3") || !hasNote(sum, "ending the attempt") {
-		t.Fatalf("notes %v, want the missing-unit misses and the attempt end", sum.Notes)
+	if !strings.Contains(sum.EndReason, "practice: the boss is gone") {
+		t.Fatalf("end reason %q, want the boss-is-gone reason", sum.EndReason)
+	}
+	if !hasNote(sum, "miss 3 of 3") {
+		t.Fatalf("notes %v, want the three missed polls", sum.Notes)
 	}
 	if n := countLog(f.agent.log, "gm_set_hp "); n != practiceHPMisses {
-		t.Fatalf("%d hp restores, want the %d missed polls of the first attempt (log %v)", n, practiceHPMisses, f.agent.log)
+		t.Fatalf("%d hp restores, want the %d missed polls (log %v)", n, practiceHPMisses, f.agent.log)
+	}
+}
+
+// practiceMissAgent answers gm_set_hp with err and counts the calls: a client that cannot resolve the bound unit.
+type practiceMissAgent struct {
+	mu    sync.Mutex
+	calls int
+	err   error
+}
+
+func (a *practiceMissAgent) Call(ctx context.Context, method string, params, out any, timeout time.Duration) error {
+	if method != "gm_set_hp" {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.calls++
+	return a.err
+}
+
+// practiceMissWalk is a unit walk for the boss-miss rule: its frames hold the boss at hp with the frame at now-age,
+// and its gm_set_hp answers err.
+func practiceMissWalk(now time.Time, hp int, age time.Duration, err error) (*walk, *practiceState, *practiceMissAgent) {
+	a := &practiceMissAgent{err: err}
+	w := &walk{
+		env:      walkEnv{now: func() time.Time { return now }},
+		opts:     raidWalkOptions{server: "m910q", practiceSustain: true, practiceBossFloor: 40},
+		agent:    a,
+		hostiles: map[string]hostileState{practiceBossGUID().String(): {entry: 14834, hppct: hp, at: now.Add(-age)}},
+	}
+	return w, &practiceState{bossGUID: practiceBossGUID(), bossMax: 42000}, a
+}
+
+// TestPracticeAbsentBossEnds: a boss the frames never show is a miss on every poll; three in a row end the attempt
+// with "the boss is gone", not a poll that silently skips the check.
+func TestPracticeAbsentBossEnds(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w, p, _ := practiceMissWalk(now, 100, 0, nil)
+	delete(w.hostiles, practiceBossGUID().String())
+	for i := 1; i <= practiceHPMisses; i++ {
+		done, err := w.practiceSustainBoss(context.Background(), p)
+		if err != nil {
+			t.Fatalf("poll %d: %v", i, err)
+		}
+		if p.hpMisses != i {
+			t.Fatalf("poll %d: %d misses, want %d", i, p.hpMisses, i)
+		}
+		if want := i == practiceHPMisses; done != want {
+			t.Fatalf("poll %d: done %v, want %v", i, done, want)
+		}
+	}
+	if p.ended != "the boss is gone" {
+		t.Fatalf("ended %q, want the boss is gone", p.ended)
+	}
+	if !strings.Contains(strings.Join(w.notes, "\n"), "practice: the boss is gone") {
+		t.Fatalf("notes %v, want the boss-is-gone note", w.notes)
+	}
+}
+
+// TestPracticeStaleBossCounts: a frame older than practiceSampleFresh says nothing about the boss now, so it counts as
+// a miss; a fresh reading clears the streak, and three stale polls in a row end the attempt.
+func TestPracticeStaleBossCounts(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	stale := practiceSampleFresh + 2*time.Second
+	w, p, _ := practiceMissWalk(now, 100, stale, nil)
+	for i := 1; i <= 2; i++ {
+		done, err := w.practiceSustainBoss(context.Background(), p)
+		if err != nil || done || p.hpMisses != i {
+			t.Fatalf("stale poll %d: done %v err %v misses %d, want false nil %d", i, done, err, p.hpMisses, i)
+		}
+	}
+	key := practiceBossGUID().String()
+	h := w.hostiles[key]
+	h.at = now
+	w.hostiles[key] = h
+	if done, err := w.practiceSustainBoss(context.Background(), p); err != nil || done || p.hpMisses != 0 {
+		t.Fatalf("fresh poll: done %v err %v misses %d, want the streak cleared", done, err, p.hpMisses)
+	}
+	h.at = now.Add(-stale)
+	w.hostiles[key] = h
+	for i := 1; i <= practiceHPMisses; i++ {
+		done, err := w.practiceSustainBoss(context.Background(), p)
+		if err != nil {
+			t.Fatalf("stale poll %d: %v", i, err)
+		}
+		if want := i == practiceHPMisses; done != want {
+			t.Fatalf("stale poll %d: done %v, want %v", i, done, want)
+		}
+	}
+	if p.ended != "the boss is gone" {
+		t.Fatalf("ended %q, want the boss is gone", p.ended)
+	}
+}
+
+// TestPracticeFreshSampleBreaksMissStreak: two gm_set_hp misses with a valid fresh sample between them are not
+// consecutive, so the attempt goes on.
+func TestPracticeFreshSampleBreaksMissStreak(t *testing.T) {
+	now := time.Date(2026, 10, 29, 20, 0, 0, 0, time.Local)
+	w, p, a := practiceMissWalk(now, 30, 0, fmt.Errorf("gm set hp: %w", session.ErrUnitNotInView))
+	key := practiceBossGUID().String()
+	if done, err := w.practiceSustainBoss(context.Background(), p); err != nil || done || p.hpMisses != 1 {
+		t.Fatalf("first miss: done %v err %v misses %d, want 1", done, err, p.hpMisses)
+	}
+	// The boss shows full: no restore is due, and the poll is a reading, not a miss.
+	h := w.hostiles[key]
+	h.hppct = 100
+	w.hostiles[key] = h
+	if done, err := w.practiceSustainBoss(context.Background(), p); err != nil || done || p.hpMisses != 0 {
+		t.Fatalf("fresh sample: done %v err %v misses %d, want the streak cleared", done, err, p.hpMisses)
+	}
+	// It dips again and the RPC misses once more: one in a row, not two.
+	h.hppct = 30
+	w.hostiles[key] = h
+	if done, err := w.practiceSustainBoss(context.Background(), p); err != nil || done || p.hpMisses != 1 {
+		t.Fatalf("second miss: done %v err %v misses %d, want 1", done, err, p.hpMisses)
+	}
+	if p.ended != "" {
+		t.Fatalf("ended %q after two separated misses, want the attempt to go on", p.ended)
+	}
+	if a.calls != 2 {
+		t.Fatalf("%d gm_set_hp calls, want 2", a.calls)
 	}
 }
 

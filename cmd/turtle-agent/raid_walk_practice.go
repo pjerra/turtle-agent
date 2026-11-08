@@ -69,7 +69,8 @@ const practiceSampleFresh = 3 * time.Second
 const practiceFightIDBack = 15 * time.Second
 
 // practiceHPMisses is how many consecutive polls the client may fail to show the bound boss before the attempt ends:
-// one missing sample is a frame gap, a run of them is the boss gone (a despawn, another instance).
+// one missing sample is a frame gap, a run of them is the boss gone (a despawn, another instance). An absent or stale
+// sample and an unresolved gm_set_hp both count; any valid fresh sample clears the streak.
 const practiceHPMisses = 3
 
 // practiceReengageWait is how long an attempt that follows a reset waits for the pulled boss to fight again (below
@@ -116,8 +117,9 @@ type practiceState struct {
 	// lastResetOK is the reset's own verdict (the boss showed home, 100 % and no target): only a reset that landed
 	// plus a pull that fights again clears the failed-reset streak.
 	lastResetOK bool
-	// hpMisses counts the consecutive polls the client could not show the bound boss for the hp restore; the attempt
-	// ends after practiceHPMisses of them.
+	// hpMisses counts the consecutive polls that did not show the bound boss (an absent or stale sample, or a
+	// gm_set_hp the client could not resolve); a valid fresh sample clears it. The attempt ends after
+	// practiceHPMisses of them.
 	hpMisses int
 	// pending holds the tail of an events page the attempt did not consume (it stops at the first counted cast): the
 	// next read serves them before it asks for a new page, so no cast of the page is lost.
@@ -270,6 +272,10 @@ func (w *walk) runPractice(ctx context.Context, entry uint32, step int) error {
 	w.endReason = "practice: " + p.ended
 	if p.ended == "cycles" || p.ended == "boss killed during practice" {
 		return nil
+	}
+	if p.ended == "the boss is gone" {
+		// The bound boss left the client's frames for practiceHPMisses polls in a row: no attempt can go on.
+		return stopf(exitRaidWalkFailed, "practice: the boss is gone")
 	}
 	// The abnormal ends reuse the phase-failure code: the practice did not collect what it was asked to, and the
 	// summary carries the reason.
@@ -439,7 +445,7 @@ func (w *walk) practiceAttempt(ctx context.Context, p *practiceState, bossStep i
 			return err
 		}
 		// The floor is checked on every poll, not only at the cycle rows: a boss that dips between rows is restored
-		// before the next mechanic, not after it. A missing sample is skipped; a run of misses ends the attempt.
+		// before the next mechanic, not after it. Every poll is classified; three misses in a row end the attempt.
 		done, err := w.practiceSustainBoss(ctx, p)
 		if err != nil {
 			return err
@@ -536,32 +542,46 @@ func (w *walk) practiceBossSample(p *practiceState) (int, bool) {
 }
 
 // practiceSustainBoss restores the bound boss to its own max whenever a poll shows it under the floor: the cycle rows
-// do the same, but a boss that dips between rows must be restored before the next mechanic too. It never acts on a
-// stale or empty sample, and a client that cannot find the unit misses instead of failing the walk: only
-// practiceHPMisses misses in a row end the attempt (done true).
+// do the same, but a boss that dips between rows must be restored before the next mechanic too. Every poll is
+// classified for the bound boss, and exactly one of the three readings counts:
+//   - an absent or stale sample (or an empty one) is a miss: the frames say nothing about the boss now;
+//   - a gm_set_hp the client cannot resolve (ErrUnitNotInView) is a miss: the unit is not in the client's view;
+//   - any valid fresh sample, restored or not, clears the streak.
+//
+// Only practiceHPMisses misses in a row end the attempt (done true, p.ended "the boss is gone"): one is a frame gap,
+// a run of them is the boss gone (a despawn, another instance). A poll that is not a miss never leaves the streak
+// standing, so two misses with a reading between them are not consecutive.
 func (w *walk) practiceSustainBoss(ctx context.Context, p *practiceState) (bool, error) {
 	if !w.opts.practiceSustain || p.bossGUID == 0 || p.bossMax == 0 {
 		return false, nil
 	}
 	hp, fresh := w.practiceBossSample(p)
-	if !fresh || hp <= 0 || hp >= w.opts.practiceBossFloor {
-		return false, nil
+	if !fresh || hp <= 0 {
+		return w.practiceBossMiss(p, "the client's frames do not show the boss")
 	}
-	if err := w.practiceGMSetHP(ctx, p.bossGUID); err != nil {
-		if !errors.Is(err, session.ErrUnitNotInView) {
-			return false, err
+	if hp < w.opts.practiceBossFloor {
+		if err := w.practiceGMSetHP(ctx, p.bossGUID); err != nil {
+			if !errors.Is(err, session.ErrUnitNotInView) {
+				return false, err
+			}
+			return w.practiceBossMiss(p, fmt.Sprintf("the client does not hold the boss for the hp restore (%v)", err))
 		}
-		p.hpMisses++
-		w.note("practice: the client does not hold the boss for the hp restore (%v): miss %d of %d", err, p.hpMisses, practiceHPMisses)
-		if p.hpMisses >= practiceHPMisses {
-			w.note("practice: the boss was missing from the client's units for %d polls in a row: ending the attempt", p.hpMisses)
-			return true, nil
-		}
-		return false, nil
+		w.logLine(w.env.now(), fmt.Sprintf("practice: boss at %d%% between rows: restored to its max %d", hp, p.bossMax))
 	}
 	p.hpMisses = 0
-	w.logLine(w.env.now(), fmt.Sprintf("practice: boss at %d%% between rows: restored to its max %d", hp, p.bossMax))
 	return false, nil
+}
+
+// practiceBossMiss counts one poll without the bound boss and ends the attempt at practiceHPMisses in a row.
+func (w *walk) practiceBossMiss(p *practiceState, why string) (bool, error) {
+	p.hpMisses++
+	w.note("practice: %s: miss %d of %d", why, p.hpMisses, practiceHPMisses)
+	if p.hpMisses < practiceHPMisses {
+		return false, nil
+	}
+	p.ended = "the boss is gone"
+	w.note("practice: the boss is gone: %d polls in a row did not show it: ending the attempt", p.hpMisses)
+	return true, nil
 }
 
 // practiceSpellEvents reads the cast events since the practice cursor. A page tail kept by the attempt (it stops at
