@@ -61,6 +61,9 @@ const (
 	placeQuietWaitS = 20
 	// placeQuietR is the quiet's radius around the start point (spec 5 step 7).
 	placeQuietR = 50
+	// placeSpread is the `spread=` of the raid's `.tt place` (the ring the group is dropped on, in yards); the unfreeze check
+	// reads it for how far from the point a frozen hire can stand.
+	placeSpread = 5
 	// placeReachYd is how close to the start point any unit blocks the placement: the reach of `.tt place` with its
 	// spread-5 ring. Beyond it only a BEHIND-owned unit matters (item 3 of the proof findings).
 	placeReachYd = 25
@@ -1248,7 +1251,7 @@ func (w *walk) placeNearSkipped(u ttUnit) (raidwalk.ClearCircle, bool) {
 // placeMove is spec 5 step 8: the toolkit moves the raid's group onto the point.
 func (w *walk) placeMove(ctx context.Context) error {
 	p := w.place.Point
-	cmd := fmt.Sprintf("place %s %s %s spread=5 of=%s", num32(p.X), num32(p.Y), num32(p.Z), w.mt)
+	cmd := fmt.Sprintf("place %s %s %s spread=%d of=%s", num32(p.X), num32(p.Y), num32(p.Z), placeSpread, w.mt)
 	out, err := w.tt(ctx, cmd)
 	if err != nil {
 		if strings.Contains(err.Error(), "in_combat") {
@@ -1264,6 +1267,7 @@ func (w *walk) placeMove(ctx context.Context) error {
 			w.note("place: the toolkit's second read reports the party placed (%d members listed)", members)
 		}
 	}
+	w.placeUnfreezeStart(w.place.Point, placeSpread)
 	return nil
 }
 
@@ -1754,6 +1758,9 @@ func (w *walk) placeSummonParty(ctx context.Context) error {
 			w.placeSummonedOnce(name)
 		}
 	}
+	// The summon wave is a placement move of its own (a retry or a retreat sets a new point): the unfreeze check
+	// re-arms on it, a 6 yd ring around the point (the hires land on the commander, spread 0).
+	w.placeUnfreezeStart(w.place.Point, 0)
 	return w.placeVerify(ctx)
 }
 
@@ -2185,7 +2192,7 @@ func placeTTLines(p *raidwalk.PlacePlan, planMap uint32) []string {
 		fmt.Sprintf("q floor %s %s %s", px, py, pz),
 		fmt.Sprintf("quiet %d %s %s %s w=%d dz=%d%s", placeQuietR, px, py, pz, placeQuietWaitS, placeClearDz, tail),
 		fmt.Sprintf("q units %d %s %s %s all", placeLandingReadYd, px, py, pz), // M1b: the landing read after a clean quiet
-		fmt.Sprintf("place %s %s %s spread=5 of=%s", px, py, pz, mt),
+		fmt.Sprintf("place %s %s %s spread=%d of=%s", px, py, pz, placeSpread, mt),
 	}
 	if len(p.Circles) > 0 {
 		out = append(out,

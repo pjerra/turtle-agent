@@ -890,6 +890,16 @@ func TestPlaceSamePointRetryCountsTheHiresAlreadyInside(t *testing.T) {
 	if sum.Place.Placed != sum.Place.Hires-1 {
 		t.Fatalf("place summary %+v, want every hire but the straggler placed", sum.Place)
 	}
+	// The `.tt place` armed the unfreeze check (11 yd ring); the retry's summon wave armed it again (6 yd ring).
+	var armed []string
+	for _, n := range sum.Notes {
+		if strings.Contains(n, "unfreeze check armed") {
+			armed = append(armed, n)
+		}
+	}
+	if len(armed) < 2 || !strings.HasSuffix(armed[0], "(ring 11 yd)") || !strings.HasSuffix(armed[len(armed)-1], "(ring 6 yd)") {
+		t.Fatalf("armed notes %q, want the place's 11 yd ring re-armed as the summon wave's 6 yd ring", armed)
+	}
 }
 
 // The walk judges the place by its own frames, never by the toolkit's member lists (which truncate near a full raid).
@@ -3695,6 +3705,12 @@ func TestPlaceQuietFailureRetreatsInTheSameInstance(t *testing.T) {
 	wantPoint := fmt.Sprintf("quiet 50 %v %v", rows.Steps[back-1].X, rows.Steps[back-1].Y)
 	if !strings.HasPrefix(p.quiets[1], wantPoint) {
 		t.Fatalf("second quiet %q, want the retreat point %q", p.quiets[1], wantPoint)
+	}
+	// The retreat's summon wave arms the unfreeze check at the retreat point, a 6 yd ring (spread 0).
+	pt := sum.Place.Point
+	armed := fmt.Sprintf("placement: unfreeze check armed at %s %s %s (ring 6 yd)", num32(pt[0]), num32(pt[1]), num32(pt[2]))
+	if !hasNote(sum, armed) || hasNote(sum, "(ring 11 yd)") {
+		t.Fatalf("notes %q, want only %q", sum.Notes, armed)
 	}
 }
 
