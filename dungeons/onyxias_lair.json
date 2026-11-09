@@ -24,9 +24,9 @@
   },
   "notes": [
     "Core 1181dev (b26c3cc) changed the fight: Cindarion 50143 lands 15-28 s after Onyxia 10184 takes off at 65 % and must die before her (if she dies first he evades and is unkillable for the lockout); two Onyxian Hatchers 50144 come out of the egg caves 2-4 s after she lands at 40 % and die first in P3; the tunnel holds new trash, Onyxian Inciter 49016 and Onyxian Flamespawn 49017, next to the old Onyxian Warder 12129.",
-    "Pack 0 (entrance Warder, patrol 52050): pulled from the entrance platform (30.89 -54.08 -4.65), the leg's `to`, 28 yd from the patrol's north end and outside the warder lane.",
+    "Pack 0 (entrance Warder, patrol 52050): pulled from the mesh-floor stand (48.6 -99.8 -23.5), 15 yd from the pull; the entrance-platform stand the brief gave is 66 yd out and the loader refuses a stand_pull stand past 60 yd.",
     "Pack 1 (Warder, patrol 52049): fought from its approach stand (-33.05 -95.14 -36.06), 20 yd from the spawn.",
-    "Pack 2 (Flamespawn 49017, Inciter 49016 and patrol Warder 52052): the stand (-92.0 -112.0 -37.95) sits 32.8 yd 3D from the Flamespawn; the prep stand (-113.88 -127.47) sat 3 yd from it. The patrol block keeps its prep path (source guid 52052) with entries [12129].",
+    "Pack 2 (Flamespawn 49017, Inciter 49016 and patrol Warder 52052): the stand (-92.0 -112.0 -37.95) sits 32.8 yd 3D from the Flamespawn; the prep stand (-113.88 -127.47) sat 3 yd from it. The patrol block keeps its prep path (source guid 52052) with the pack's entries, so the walk's revive check can tie it to its pull row.",
     "Pack 3 (bend Warder, patrol 52048): fought from its approach stand (-163.15 -176.31 -63.21), 20 yd from the spawn.",
     "Pack 4 (last-bend pack: Warder and two Inciters): the prep stand (-184.95 -195.68) was 19.5 yd from Inciter 2593512, inside its ~19 yd aggro; the new stand (-170.9 -192.5 -66.0) is 32-34 yd from all three mobs and 37 yd from Flamespawn 2593523.",
     "Packs 5 and 6 (lone Flamespawn 2593523, then the room-mouth pack) are pulled into the corridor junction S (-149.46 -210.48 -66.7), about 150 yd from Onyxia, and fought there; pack 5 must die first because the Warder stand seats sit 18 yd from its spawn.",
