@@ -39,11 +39,11 @@ func dist3(a, b [3]float32) float64 {
 // agent stood on map 309 the whole time).
 func TestRaidWalkReviveSummonsOnlyAfterTheLanding(t *testing.T) {
 	f := newFixture(t)
-	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.startReply = startAt("onyxias_lair", 30)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	f.allDeadFromHires()
 	var resumeAt time.Time
-	resumeHook(f, 24, 28, &resumeAt)
+	resumeHook(f, 31, 37, &resumeAt)
 	// The go's map id takes effect at once, its position two status polls later: a wait on the map alone lets the
 	// summons out while the commander still stands at the old spot.
 	f.agent.mu.Lock()
@@ -623,11 +623,11 @@ func TestRaidWalkReviveWaitsForTheSettledLanding(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t)
-			f.agent.startReply = startAt("onyxias_lair", 23)
+			f.agent.startReply = startAt("onyxias_lair", 30)
 			f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 			f.allDeadFromHires()
 			var resumeAt time.Time
-			resumeHook(f, 24, 28, &resumeAt)
+			resumeHook(f, 31, 37, &resumeAt)
 			f.agent.mu.Lock()
 			f.agent.goUnsettled, f.agent.goUnsettledFalling = 3, falling
 			f.agent.enterMap = 249 // the live Q3 agent stood in the instance: its go was a near one
@@ -653,7 +653,7 @@ func TestRaidWalkReviveWaitsForTheSettledLanding(t *testing.T) {
 // landing (the old waitMap saw only the map id, already right, and summoned from the old spot).
 func TestRaidWalkEntranceFallbackWaitsForTheLanding(t *testing.T) {
 	f := newFixture(t)
-	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.startReply = startAt("onyxias_lair", 30)
 	var recoveryGos int
 	f.allDeadFromHires()
 	hire := f.agent.onGM
@@ -680,7 +680,7 @@ func TestRaidWalkEntranceFallbackWaitsForTheLanding(t *testing.T) {
 		return []objects.Unit{{Type: "creature", Name: "Onyxian Warder", Hostile: true, Moving: true, X: x + 60, Y: y, Z: z}}
 	}
 	var resumeAt time.Time
-	resumeHook(f, 24, 28, &resumeAt)
+	resumeHook(f, 31, 37, &resumeAt)
 	f.agent.mu.Lock()
 	f.agent.goLagEvery = 2
 	f.agent.mu.Unlock()
@@ -710,11 +710,11 @@ func TestRaidWalkEntranceFallbackWaitsForTheLanding(t *testing.T) {
 // `.appear <hire>` (the core binds a GM to the target's copy) so its `.go xyz` stays on the map and in the hires' copy.
 func TestRaidWalkReviveAppearsAtAHireFirst(t *testing.T) {
 	f := newFixture(t)
-	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.startReply = startAt("onyxias_lair", 30)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	f.allDeadFromHires()
 	var resumeAt time.Time
-	resumeHook(f, 24, 28, &resumeAt)
+	resumeHook(f, 31, 37, &resumeAt)
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
 	}
@@ -791,11 +791,11 @@ func TestRaidWalkReviveLandsAfterAFarTeleport(t *testing.T) {
 // after a FRESH landing next to the hire; here the appear lands 3 status reads late.
 func TestRaidWalkReviveWaitsForTheFreshAppearLanding(t *testing.T) {
 	f := newFixture(t)
-	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.startReply = startAt("onyxias_lair", 30)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	f.allDeadFromHires()
 	var resumeAt time.Time
-	resumeHook(f, 24, 28, &resumeAt)
+	resumeHook(f, 31, 37, &resumeAt)
 	f.agent.mu.Lock()
 	f.agent.enterMap, f.agent.appearLag = 249, 3
 	f.agent.mu.Unlock()
@@ -817,7 +817,7 @@ func TestRaidWalkReviveWaitsForTheFreshAppearLanding(t *testing.T) {
 // lands would quiet-check an empty copy, so it stops with exit 19 and sends no go, summon or revive.
 func TestRaidWalkReviveUnverifiedAppearStops(t *testing.T) {
 	f := newFixture(t)
-	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.startReply = startAt("onyxias_lair", 30)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	f.allDeadFromHires()
 	f.agent.mu.Lock()
@@ -880,11 +880,11 @@ func armStatusFails(f *fixture, n int) {
 // the plan's map to appear at.
 func ghostRevive(t *testing.T, statusFails int) (*fixture, int) {
 	f := newFixture(t)
-	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.startReply = startAt("onyxias_lair", 30)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	f.allDeadFromHires()
 	var resumeAt time.Time
-	resumeHook(f, 24, 28, &resumeAt)
+	resumeHook(f, 31, 37, &resumeAt)
 	f.agent.mu.Lock()
 	f.agent.ghostsOff = true
 	f.agent.mu.Unlock()
@@ -946,11 +946,11 @@ func TestRaidWalkReviveRetriesThePreAppearRead(t *testing.T) {
 		want  int
 	}{{1, exitOK}, {2, exitRaidWalkIncident}} {
 		f := newFixture(t)
-		f.agent.startReply = startAt("onyxias_lair", 23)
+		f.agent.startReply = startAt("onyxias_lair", 30)
 		f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 		f.allDeadFromHires()
 		var resumeAt time.Time
-		resumeHook(f, 24, 28, &resumeAt)
+		resumeHook(f, 31, 37, &resumeAt)
 		armStatusFails(f, c.fails)
 		if code := f.run(context.Background()); code != c.want {
 			t.Fatalf("%d failed reads: exit %d, want %d: %s\n%s", c.fails, code, c.want, f.stderr.String(), f.stdout.String())
@@ -1064,7 +1064,7 @@ func neverLanding(f *fixture) {
 // the commander did not land at the revive point", and nobody is summoned.
 func TestRaidWalkReviveNeverLanding(t *testing.T) {
 	f := newFixture(t)
-	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.startReply = startAt("onyxias_lair", 30)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	f.allDeadFromHires()
 	neverLanding(f)
@@ -1089,7 +1089,7 @@ func TestRaidWalkReviveNeverLanding(t *testing.T) {
 // timed-out note within a few seconds, not after the full 30 s landing wait.
 func TestRaidWalkReviveLandingHonoursTheRecoveryDeadline(t *testing.T) {
 	f := newFixture(t)
-	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.startReply = startAt("onyxias_lair", 30)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	f.opts.wipeRest = 30 * time.Second
 	f.allDeadFromHires()
@@ -1192,7 +1192,7 @@ func onyxiaReviveAwayFromEntrancePlan(t *testing.T) string {
 func TestRaidWalkEntranceGoNeverLands(t *testing.T) {
 	f := newFixture(t)
 	f.opts.dir = onyxiaReviveAwayFromEntrancePlan(t)
-	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.startReply = startAt("onyxias_lair", 30)
 	// An in-combat unit 30 yd from the revive point keeps it loud through the 120 s check; from the entrance go on
 	// the units are quiet, so the read the old code ran at the entrance would have said quiet.
 	f.agent.unitsFn = func(n int) []objects.Unit {
@@ -1269,7 +1269,7 @@ func TestRaidWalkQuietPatrolExemptionIsPerPoint(t *testing.T) {
 	f := newFixture(t)
 	f.opts.patrols = pat
 	f.opts.wipeResume = 0 // the boss-wipe ending: no D-C, so the refusal follows the reads themselves
-	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.startReply = startAt("onyxias_lair", 30)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{member} }
 	f.allDeadFromHires()
 	if code := f.run(context.Background()); code != exitRaidWalkIncident {
@@ -1319,7 +1319,7 @@ func TestRaidWalkReviveStepIsThePointUsed(t *testing.T) {
 // lose the revive, it was stopped.
 func TestRaidWalkQuietWaitInterrupt(t *testing.T) {
 	f := newFixture(t)
-	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.startReply = startAt("onyxias_lair", 30)
 	ctx, cancel := context.WithCancel(context.Background())
 	// The point never goes quiet, so the checks run out and D-C starts; the 50th units read is well inside the wait
 	// (the checks are 24 reads each, and the wait runs for many minutes).
