@@ -1904,12 +1904,12 @@ func TestRaidWalkDryRunPrintsThePhasePlan(t *testing.T) {
 	}
 	got := f.stdout.String()
 	want := `raid-walk onyxias_lair: dry run, nothing is sent
-plan ../../dungeons/onyxias_lair.json, map 249, 2 legs, 38 steps, raid 40
+plan ../../dungeons/onyxias_lair.json, map 249, 2 legs, 21 steps, raid 40
 roster 40 bots: mt 1 warrior:tank, ot 3t, rest 10h 26d, level 60, tier 2 (table)
 until boss; from -; enter auto; server m910q slot any holder raid-walk-onyxias_lair
 out ` + f.out + `
 phases:
-  1 validate: plan, roster, until, 38 steps
+  1 validate: plan, roster, until, 21 steps
   2 lease: m910q any --holder raid-walk-onyxias_lair --ttl 15m (renewed every 5m)
   3 slot setup: slot setup m910q <slot> --holder raid-walk-onyxias_lair --dir ` + f.out + `/slot --binary <bin> --dungeons-from ../../dungeons
   4 login: ` + f.out + `/slot/turtle-agent login --config ` + f.out + `/slot/settings.json --pid-file ` + f.out + `/slot/agent.pid <commander>
@@ -6448,7 +6448,7 @@ func TestRaidWalkBossWindowOpensOverOpenPullWindow(t *testing.T) {
 		case 1:
 			// The first frame after the pull line's poll: the pulled unit is here
 			// (the window seeds on it), and the fight line lands on the next poll.
-			f.agent.push("TBM:RUN|onyxias_lair|running|37/38|onyxia|move|walk|walking|until boss (step 38)", "")
+			f.agent.push("TBM:RUN|onyxias_lair|running|38/38|onyxia|boss|walk|fighting: the tank engages 10184 on arrival (1.0 yd)|until boss (step 38)", "")
 			return append([]tbm.HostileRec{pulled}, others...)
 		case 3:
 			f.agent.push("TBM:RUN|onyxias_lair|done|37/38|onyxia|move|walk|stopped before step 38 (until boss): the party stays where it stands|until boss (step 38)", "")
