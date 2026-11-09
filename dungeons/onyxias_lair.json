@@ -24,7 +24,7 @@
   },
   "notes": [
     "Core 1181dev (b26c3cc) changed the fight: Cindarion 50143 lands 15-28 s after Onyxia 10184 takes off at 65 % and must die before her (if she dies first he evades and is unkillable for the lockout); two Onyxian Hatchers 50144 come out of the egg caves 2-4 s after she lands at 40 % and die first in P3; the tunnel holds new trash, Onyxian Inciter 49016 and Onyxian Flamespawn 49017, next to the old Onyxian Warder 12129.",
-    "Pack 0 (entrance Warder, patrol 52050): pulled from the mesh-floor stand (48.6 -99.8 -23.5), 15 yd from the pull; the entrance-platform stand the brief gave is 66 yd out and the loader refuses a stand_pull stand past 60 yd.",
+    "Pack 0 (entrance Warder, patrol 52050): pulled from the entrance-platform stand (30.9 -68.0 -5.8), the leg's `to` end, 27 yd 3D from the nearest lane point and outside Fire Nova reach; its patrol block keeps the lane path (source guid 52050) with the pack's entries, so the walk's revive check can tie it to its pull row.",
     "Pack 1 (Warder, patrol 52049): fought from its approach stand (-33.05 -95.14 -36.06), 20 yd from the spawn.",
     "Pack 2 (Flamespawn 49017, Inciter 49016 and patrol Warder 52052): the stand (-92.0 -112.0 -37.95) sits 32.8 yd 3D from the Flamespawn; the prep stand (-113.88 -127.47) sat 3 yd from it. The patrol block keeps its prep path (source guid 52052) with the pack's entries, so the walk's revive check can tie it to its pull row.",
     "Pack 3 (bend Warder, patrol 52048): fought from its approach stand (-163.15 -176.31 -63.21), 20 yd from the spawn.",
@@ -46,9 +46,26 @@
           ],
           "radius": 1,
           "approach": [
-            {"x": 48.6, "y": -99.8, "z": -23.5}
+            {"x": 30.9, "y": -68.0, "z": -5.8}
           ],
-          "stand_pull": true
+          "stand_pull": true,
+          "clear_yd": 0,
+          "patrol": {
+            "entries": [12129],
+            "path": [
+              {"x": 52.29, "y": -105.33, "z": -24.8},
+              {"x": 52.44, "y": -97.07, "z": -25.11},
+              {"x": 50.33, "y": -90.02, "z": -25.79},
+              {"x": 46.18, "y": -77.35, "z": -26.59},
+              {"x": 50.56, "y": -90.4, "z": -25.74},
+              {"x": 52.57, "y": -97.47, "z": -25.09},
+              {"x": 52.5, "y": -105.63, "z": -24.78},
+              {"x": 46.47, "y": -114.82, "z": -24.69}
+            ],
+            "period_s": 32,
+            "period_estimate": true,
+            "source": "creature_movement guid 52050"
+          }
         },
         {
           "entries": [12129],
@@ -85,7 +102,7 @@
           ],
           "radius": 20,
           "patrol": {
-            "entries": [49017, 49016, 12129],
+            "entries": [12129],
             "path": [
               {"x": -135.8, "y": -142.14, "z": -53.38},
               {"x": -149.95, "y": -151.32, "z": -53.53},
