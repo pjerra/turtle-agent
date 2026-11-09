@@ -1324,7 +1324,7 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 				return *f.startReply
 			}
 			rep := ack("run start")
-			run := "TBM:RUN|" + p.Args[0] + "|running|1/38|onyxia|move|walk|walking|until boss (step 38)"
+			run := "TBM:RUN|" + p.Args[0] + "|running|1/21|onyxia|move|walk|walking|until boss (step 21)"
 			rep.Reply.Lines = append([]string{run}, rep.Reply.Lines...)
 			return rep
 		}
@@ -1620,10 +1620,10 @@ func (f *fixture) summary() raidwalk.Summary {
 // arrive once the run start has been answered, as on the server.
 func (f *fixture) defaultRun(plan string) {
 	var q []queuedEvent
-	for step := 2; step <= 37; step++ {
-		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|%s|running|%d/38|onyxia|move|walk|walking", plan, step)})
+	for step := 2; step <= 20; step++ {
+		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|%s|running|%d/21|onyxia|move|walk|walking", plan, step)})
 	}
-	q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|%s|done|37/38|onyxia|move|walk|stopped before step 38 (until boss): the party stays where it stands", plan)})
+	q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|%s|done|20/21|onyxia|move|walk|stopped before step 21 (until boss): the party stays where it stands", plan)})
 	f.agent.mu.Lock()
 	f.agent.startQueue = q
 	f.agent.mu.Unlock()
@@ -1635,7 +1635,7 @@ func startAt(plan string, step int) *commanderReply {
 		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
 		Line: "TBM:ACTION_ACK|run start|party|1|-",
 		Lines: []string{
-			fmt.Sprintf("TBM:RUN|%s|running|%d/38|onyxia|move|walk|walking|until boss (step 38)", plan, step),
+			fmt.Sprintf("TBM:RUN|%s|running|%d/21|onyxia|move|walk|walking|until boss (step 21)", plan, step),
 			"TBM:ACTION_ACK|run start|party|1|-",
 		}}}
 }
@@ -1943,7 +1943,7 @@ func TestRaidWalkHappyPathOnyxia(t *testing.T) {
 		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
 	}
 	sum := f.summary()
-	if sum.EndReason != "until" || sum.StepsReached != 37 || sum.StepsTotal != 38 {
+	if sum.EndReason != "until" || sum.StepsReached != 20 || sum.StepsTotal != 21 {
 		t.Fatalf("summary end %q steps %d/%d", sum.EndReason, sum.StepsReached, sum.StepsTotal)
 	}
 	if sum.ExitCode != exitOK || sum.Teardown.Failed {
@@ -1971,7 +1971,7 @@ func TestRaidWalkHappyPathOnyxia(t *testing.T) {
 	if f.agent.startArgs != "onyxias_lair|until|boss" {
 		t.Fatalf("run start args %q", f.agent.startArgs)
 	}
-	if !strings.Contains(f.stdout.String(), "raid-walk onyxias_lair: until; steps 37/38") {
+	if !strings.Contains(f.stdout.String(), "raid-walk onyxias_lair: until; steps 20/21") {
 		t.Fatalf("one-line result: %q", f.stdout.String())
 	}
 	// The tier of the committed table, in the summary and in every dump's meta (amendment G1).
@@ -2223,7 +2223,7 @@ func TestRaidWalkRefusesAServerWithoutUntil(t *testing.T) {
 			Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
 			Line: "TBM:ACTION_ACK|run start|party|1|-",
 			Lines: []string{
-				"TBM:RUN|onyxias_lair|running|1/38|onyxia|move|walk|walking",
+				"TBM:RUN|onyxias_lair|running|1/21|onyxia|move|walk|walking",
 				"TBM:ACTION_ACK|run start|party|1|-",
 			}}}
 		code := f.run(context.Background())
@@ -2264,13 +2264,13 @@ func startsAndSkips(verbs []string) []string {
 func TestRaidWalkReadsRawLinesNotStrippedText(t *testing.T) {
 	f := newFixture(t)
 	var q []queuedEvent
-	for step := 2; step <= 37; step++ {
-		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|onyxias_lair|running|%d/38|onyxia|move|walk|walking", step)})
+	for step := 2; step <= 20; step++ {
+		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|onyxias_lair|running|%d/21|onyxia|move|walk|walking", step)})
 	}
 	// The walk-3 lesson (spec 0.1): this event's text lost the "|r" of the plan name, the raw line did not.
 	q = append(q, queuedEvent{
-		raw:  "TBM:RUN|onyxias_lair|done|37/38|onyxia|move|walk|stopped before step 38 (until boss): the party stays where it stands",
-		text: "TBM:RUN|onyxias_lairunning|done|37/38|onyxia|move|walk|stopped before step 38 (until boss): the party stays where it stands",
+		raw:  "TBM:RUN|onyxias_lair|done|20/21|onyxia|move|walk|stopped before step 21 (until boss): the party stays where it stands",
+		text: "TBM:RUN|onyxias_lairunning|done|20/21|onyxia|move|walk|stopped before step 21 (until boss): the party stays where it stands",
 	})
 	f.agent.mu.Lock()
 	f.agent.startQueue = q
@@ -2279,7 +2279,7 @@ func TestRaidWalkReadsRawLinesNotStrippedText(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit %d: %s", code, f.stderr.String())
 	}
-	if sum := f.summary(); sum.EndReason != "until" || sum.StepsReached != 37 {
+	if sum := f.summary(); sum.EndReason != "until" || sum.StepsReached != 20 {
 		t.Fatalf("the walk did not read the raw done line: end %q steps %d", sum.EndReason, sum.StepsReached)
 	}
 }
@@ -2303,7 +2303,7 @@ func (f *fixture) allDeadFromHires() {
 func TestRaidWalkWipeRevivesOnlyWhenQuiet(t *testing.T) {
 	run := func(t *testing.T, neverQuiet bool) (*fixture, raidwalk.Summary) {
 		f := newFixture(t)
-		f.agent.startReply = startAt("onyxias_lair", 23)
+		f.agent.startReply = startAt("onyxias_lair", 13)
 		f.agent.unitsFn = func(n int) []objects.Unit {
 			if neverQuiet || n <= 3 {
 				f.agent.mu.Lock()
@@ -2317,7 +2317,7 @@ func TestRaidWalkWipeRevivesOnlyWhenQuiet(t *testing.T) {
 		if !neverQuiet {
 			// The wipe recovers (--wipe-resume 1): the run goes on, so the server must show it going.
 			var resumeAt time.Time
-			resumeHook(f, 24, 28, &resumeAt)
+			resumeHook(f, 14, 20, &resumeAt)
 		}
 		code := f.run(context.Background())
 		if neverQuiet {
@@ -2432,14 +2432,14 @@ func TestRaidWalkWipeRevivesPastIdleHomeMob(t *testing.T) {
 	// -96.9, 35 yd out), so the wipe recovers.
 	t.Run("at home revives", func(t *testing.T) {
 		f := newFixture(t)
-		f.agent.startReply = startAt("onyxias_lair", 23)
+		f.agent.startReply = startAt("onyxias_lair", 13)
 		f.agent.unitsFn = func(int) []objects.Unit {
 			return []objects.Unit{{Type: "creature", Name: "Onyxian Warder", Entry: 12129, Hostile: true,
 				X: -52.9699, Y: -96.8813, Z: -38.6419}}
 		}
 		f.allDeadFromHires()
 		var resumeAt time.Time
-		resumeHook(f, 24, 28, &resumeAt)
+		resumeHook(f, 14, 20, &resumeAt)
 		code := f.run(context.Background())
 		if code != exitOK {
 			t.Fatalf("exit %d, want 0: %s\n%s\n%s", code, f.stderr.String(), f.stdout.String(), f.summaryText())
@@ -2697,8 +2697,8 @@ func resumeHook(f *fixture, step, doneStep int, resumeAt *time.Time) {
 		f.agent.mu.Lock()
 		defer f.agent.mu.Unlock()
 		f.agent.lines = append(f.agent.lines,
-			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|" + strconv.Itoa(step) + "/38|onyxia|move|walk|resumed"},
-			queuedEvent{raw: "TBM:RUN|onyxias_lair|done|" + strconv.Itoa(doneStep) + "/38|onyxia|move|walk|stopped before step " + strconv.Itoa(doneStep+1) + " (until boss): the party stays where it stands"})
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|" + strconv.Itoa(step) + "/21|onyxia|move|walk|resumed"},
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|done|" + strconv.Itoa(doneStep) + "/21|onyxia|move|walk|stopped before step " + strconv.Itoa(doneStep+1) + " (until boss): the party stays where it stands"})
 	}
 }
 
@@ -2744,10 +2744,10 @@ func TestRaidWalkNearWipePauseResumes(t *testing.T) {
 	f.agent.startReply = startAt("onyxias_lair", 10)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	var resumeAt time.Time
-	resumeHook(f, 11, 28, &resumeAt)
+	resumeHook(f, 11, 20, &resumeAt)
 	f.agent.mu.Lock()
 	f.agent.startQueue = []queuedEvent{
-		{raw: "TBM:RUN|onyxias_lair|paused|10/38|onyxia|move|walk|19 dead: 3 near wipes within 10 min (54): the run stops here. Regroup (c...)"},
+		{raw: "TBM:RUN|onyxias_lair|paused|10/21|onyxia|move|walk|19 dead: 3 near wipes within 10 min (54): the run stops here. Regroup (c...)"},
 	}
 	f.agent.mu.Unlock()
 	code := f.run(context.Background())
@@ -2779,7 +2779,7 @@ func TestRaidWalkSecondWipeEndsTheWalk(t *testing.T) {
 	f.agent.startReply = startAt("onyxias_lair", 10)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	var resumeAt time.Time
-	resumeHook(f, 11, 28, &resumeAt)
+	resumeHook(f, 11, 20, &resumeAt)
 	f.allDeadFromHires()
 	// The second wipe: after the resume succeeds, every hire dies again two frames later, so the resumed
 	// watch (not the resume wait) sees it and ends the walk as today.
@@ -2801,7 +2801,7 @@ func TestRaidWalkSecondWipeEndsTheWalk(t *testing.T) {
 		f.agent.mu.Lock()
 		defer f.agent.mu.Unlock()
 		f.agent.lines = append(f.agent.lines,
-			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|11/38|onyxia|move|walk|resumed"})
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|11/21|onyxia|move|walk|resumed"})
 	}
 	code := f.run(context.Background())
 	if code != exitRaidWalkIncident {
@@ -2824,7 +2824,7 @@ func TestRaidWalkSecondWipeEndsTheWalk(t *testing.T) {
 func TestRaidWalkWipeResumeZeroKeepsOldBehaviour(t *testing.T) {
 	f := newFixture(t)
 	f.opts.wipeResume = 0
-	f.agent.startReply = startAt("onyxias_lair", 23)
+	f.agent.startReply = startAt("onyxias_lair", 13)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	f.allDeadFromHires()
 	code := f.run(context.Background())
@@ -2864,7 +2864,7 @@ func TestRaidWalkWipeResumesOnce(t *testing.T) {
 	f.agent.startReply = startAt("onyxias_lair", 10)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	var resumeAt time.Time
-	resumeHook(f, 11, 28, &resumeAt)
+	resumeHook(f, 11, 20, &resumeAt)
 	f.allDeadFromHires()
 	code := f.run(context.Background())
 	if code != exitOK {
@@ -2924,7 +2924,7 @@ func TestRaidWalkWipeResumeBossUnknownEndsOld(t *testing.T) {
 	// If the walk wrongly recovered, the resume must be able to complete, so the test
 	// visibly flips (exit 0, wipe_resumes 1) instead of failing later in the resume wait.
 	var resumeAt time.Time
-	resumeHook(f, 11, 28, &resumeAt)
+	resumeHook(f, 11, 20, &resumeAt)
 	code := f.run(context.Background())
 	if code != exitRaidWalkIncident {
 		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
@@ -2957,8 +2957,8 @@ func TestRaidWalkWipeResumeWithDashboardRecovers(t *testing.T) {
 		f.agent.mu.Lock()
 		defer f.agent.mu.Unlock()
 		f.agent.lines = append(f.agent.lines,
-			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|11/38|onyxia|move|walk|resumed"},
-			queuedEvent{raw: "TBM:RUN|onyxias_lair|done|37/38|onyxia|move|walk|stopped before step 38 (until boss): the party stays where it stands"})
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|11/21|onyxia|move|walk|resumed"},
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|done|20/21|onyxia|move|walk|stopped before step 21 (until boss): the party stays where it stands"})
 	}
 	f.allDeadFromHires()
 	code := f.run(context.Background())
@@ -3007,8 +3007,8 @@ func TestRaidWalkWipeResumeAfterBossWinRecovers(t *testing.T) {
 				f.agent.mu.Lock()
 				defer f.agent.mu.Unlock()
 				f.agent.lines = append(f.agent.lines,
-					queuedEvent{raw: "TBM:RUN|onyxias_lair|running|11/38|onyxia|move|walk|resumed"},
-					queuedEvent{raw: "TBM:RUN|onyxias_lair|done|37/38|onyxia|move|walk|stopped before step 38 (until boss): the party stays where it stands"})
+					queuedEvent{raw: "TBM:RUN|onyxias_lair|running|11/21|onyxia|move|walk|resumed"},
+					queuedEvent{raw: "TBM:RUN|onyxias_lair|done|20/21|onyxia|move|walk|stopped before step 21 (until boss): the party stays where it stands"})
 			}
 			f.allDeadFromHires()
 			f.run(context.Background())
@@ -4176,8 +4176,8 @@ func TestRaidWalkWipeResumeStaleViewRestartsQuiet(t *testing.T) {
 	f.agent.onResume = func() {
 		resumes++
 		resumeAt = f.clock.now()
-		f.agent.push("TBM:RUN|onyxias_lair|running|11/38|onyxia|move|walk|resumed", "")
-		f.agent.push("TBM:RUN|onyxias_lair|done|37/38|onyxia|move|walk|stopped before step 38 (until boss): the party stays where it stands", "")
+		f.agent.push("TBM:RUN|onyxias_lair|running|11/21|onyxia|move|walk|resumed", "")
+		f.agent.push("TBM:RUN|onyxias_lair|done|20/21|onyxia|move|walk|stopped before step 21 (until boss): the party stays where it stands", "")
 	}
 	// Bad polls cover the first ~60 s of the rest (viewN+30 at 2 polls per rest poll... the
 	// rest polls bot_view every 5 s of fake time, one view call per poll plus watch-loop polls;
@@ -4267,7 +4267,7 @@ func TestRaidWalkWipeRestCountsWallTime(t *testing.T) {
 	f.agent.startReply = startAt("onyxias_lair", 10)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	var resumeAt time.Time
-	resumeHook(f, 11, 28, &resumeAt)
+	resumeHook(f, 11, 20, &resumeAt)
 	f.allDeadFromHires()
 	f.agent.viewHook = func() {
 		f.clock.mu.Lock()
@@ -4850,15 +4850,15 @@ func TestRaidWalkWipeResumeRunWentOnDuringRest(t *testing.T) {
 		queued = true
 		f.agent.mu.Lock()
 		f.agent.lines = append(f.agent.lines,
-			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|11/38|onyxia|move|walk|regrouped"},
-			queuedEvent{raw: "TBM:RUN|onyxias_lair|done|37/38|onyxia|move|walk|stopped before step 38 (until boss): the party stays where it stands"})
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|11/21|onyxia|move|walk|regrouped"},
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|done|20/21|onyxia|move|walk|stopped before step 21 (until boss): the party stays where it stands"})
 		f.agent.mu.Unlock()
 	}
 	resumes := 0
 	f.agent.onResume = func() {
 		resumes++
-		f.agent.push("TBM:RUN|onyxias_lair|running|12/38|onyxia|move|walk|resumed", "")
-		f.agent.push("TBM:RUN|onyxias_lair|done|37/38|onyxia|move|walk|stopped before step 38 (until boss): the party stays where it stands", "")
+		f.agent.push("TBM:RUN|onyxias_lair|running|12/21|onyxia|move|walk|resumed", "")
+		f.agent.push("TBM:RUN|onyxias_lair|done|20/21|onyxia|move|walk|stopped before step 21 (until boss): the party stays where it stands", "")
 	}
 	code := f.run(context.Background())
 	if code != exitOK {
@@ -4911,9 +4911,9 @@ func TestRaidWalkWipeResumeRunWentOnMultipleLines(t *testing.T) {
 		queued = true
 		f.agent.mu.Lock()
 		f.agent.lines = append(f.agent.lines,
-			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|10/38|onyxia|move|walk|regrouped"},
-			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|10/38|onyxia|move|walk|walking"},
-			queuedEvent{raw: "TBM:RUN|onyxias_lair|done|37/38|onyxia|move|walk|stopped before step 38 (until boss): the party stays where it stands"})
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|10/21|onyxia|move|walk|regrouped"},
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|10/21|onyxia|move|walk|walking"},
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|done|20/21|onyxia|move|walk|stopped before step 21 (until boss): the party stays where it stands"})
 		f.agent.mu.Unlock()
 	}
 	resumes := 0
@@ -4967,8 +4967,8 @@ func TestRaidWalkWipeResumeRunWentOnLaterStep(t *testing.T) {
 		queued = true
 		f.agent.mu.Lock()
 		f.agent.lines = append(f.agent.lines,
-			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|11/38|onyxia|move|walk|walking"},
-			queuedEvent{raw: "TBM:RUN|onyxias_lair|done|37/38|onyxia|move|walk|stopped before step 38 (until boss): the party stays where it stands"})
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|running|11/21|onyxia|move|walk|walking"},
+			queuedEvent{raw: "TBM:RUN|onyxias_lair|done|20/21|onyxia|move|walk|stopped before step 21 (until boss): the party stays where it stands"})
 		f.agent.mu.Unlock()
 	}
 	resumes := 0
@@ -5001,11 +5001,11 @@ func TestRaidWalkWipeResumeRunWentOnBeforeNearWipe(t *testing.T) {
 	f.agent.startReply = startAt("onyxias_lair", 10)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	var resumeAt time.Time
-	resumeHook(f, 11, 28, &resumeAt)
+	resumeHook(f, 11, 20, &resumeAt)
 	f.agent.mu.Lock()
 	f.agent.startQueue = []queuedEvent{
-		{raw: "TBM:RUN|onyxias_lair|running|10/38|onyxia|move|walk|regrouped"},
-		{raw: "TBM:RUN|onyxias_lair|paused|10/38|onyxia|move|walk|19 dead: 3 near wipes within 10 min (54): the run stops here. Regroup (c...)"},
+		{raw: "TBM:RUN|onyxias_lair|running|10/21|onyxia|move|walk|regrouped"},
+		{raw: "TBM:RUN|onyxias_lair|paused|10/21|onyxia|move|walk|19 dead: 3 near wipes within 10 min (54): the run stops here. Regroup (c...)"},
 	}
 	f.agent.mu.Unlock()
 	code := f.run(context.Background())
@@ -5040,10 +5040,10 @@ func TestRaidWalkWipeResumeStaleSelfRegroupNote(t *testing.T) {
 	f.agent.startReply = startAt("onyxias_lair", 10)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	var resumeAt time.Time
-	resumeHook(f, 11, 28, &resumeAt)
+	resumeHook(f, 11, 20, &resumeAt)
 	f.agent.mu.Lock()
 	f.agent.startQueue = []queuedEvent{
-		{raw: "TBM:RUN|onyxias_lair|running|10/38|onyxia|move|walk|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)"},
+		{raw: "TBM:RUN|onyxias_lair|running|10/21|onyxia|move|walk|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)"},
 	}
 	f.agent.mu.Unlock()
 	// The wipe lands 45 s after the note: the run's frames die once the window has passed (once: the
@@ -5095,9 +5095,9 @@ func TestRaidWalkWipeResumeNoteAtPreviousStep(t *testing.T) {
 	f.agent.startReply = startAt("onyxias_lair", 9)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	var resumeAt time.Time
-	resumeHook(f, 11, 28, &resumeAt)
-	note := "TBM:RUN|onyxias_lair|running|9/38|onyxia|move|walk|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)"
-	walk := "TBM:RUN|onyxias_lair|running|10/38|onyxia|move|walk|walking"
+	resumeHook(f, 11, 20, &resumeAt)
+	note := "TBM:RUN|onyxias_lair|running|9/21|onyxia|move|walk|19 dead (1 wipe, 1 near wipe this run): regrouping by itself (1 of 2 at this step)"
+	walk := "TBM:RUN|onyxias_lair|running|10/21|onyxia|move|walk|walking"
 	f.agent.mu.Lock()
 	f.agent.startQueue = append(f.agent.startQueue, queuedEvent{raw: note}, queuedEvent{raw: walk})
 	// One line per events page (pageSize 0), so the note's page is not the wipe's page. The wipe lands
@@ -5826,7 +5826,7 @@ func TestRaidWalkSkipsLiveFightRows(t *testing.T) {
 	if len(sum.Fights) != 1 || sum.Fights[0].Warnings != 2 || sum.Fights[0].Detail == nil {
 		t.Fatalf("fights %+v", sum.Fights)
 	}
-	if sum.RunLabel != "until boss (step 38)" || sum.SpeedFellBack {
+	if sum.RunLabel != "until boss (step 21)" || sum.SpeedFellBack {
 		t.Fatalf("run label %q, fell back %v", sum.RunLabel, sum.SpeedFellBack)
 	}
 }
@@ -5850,8 +5850,8 @@ func TestRaidWalkRetriesAFailedFightDetail(t *testing.T) {
 func TestRaidWalkInterruptStopsRunAndTearsDown(t *testing.T) {
 	f := newFixture(t)
 	var q []queuedEvent
-	for step := 2; step <= 37; step++ {
-		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|onyxias_lair|running|%d/38|onyxia|move|walk|walking", step)})
+	for step := 2; step <= 20; step++ {
+		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|onyxias_lair|running|%d/21|onyxia|move|walk|walking", step)})
 	}
 	f.agent.mu.Lock()
 	f.agent.startQueue = q
@@ -6028,8 +6028,8 @@ func TestRaidWalkInjectorHookOrder(t *testing.T) {
 		f := newFixture(t)
 		f.opts.injects = stringList{"lag"}
 		var q []queuedEvent
-		for step := 2; step <= 37; step++ {
-			q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|onyxias_lair|running|%d/38|onyxia|move|walk|walking", step)})
+		for step := 2; step <= 20; step++ {
+			q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|onyxias_lair|running|%d/21|onyxia|move|walk|walking", step)})
 		}
 		f.agent.mu.Lock()
 		f.agent.startQueue = q
@@ -6068,7 +6068,7 @@ func TestRaidWalkInjectorHookOrder(t *testing.T) {
 		// No recoveries left: the wipe ends the walk as before (with --wipe-resume it would recover).
 		f.opts.wipeResume = 0
 		f.opts.injects = stringList{"kill-mt"}
-		f.agent.startReply = startAt("onyxias_lair", 23)
+		f.agent.startReply = startAt("onyxias_lair", 13)
 		f.allDeadFromHires()
 		teardownSawCleanup := false
 		real := f.env.teardown
@@ -6175,7 +6175,7 @@ func TestRaidWalkSlotListRoutesToPair(t *testing.T) {
 func joinerWalk(t *testing.T, hostiles []tbm.HostileRec) *fixture {
 	t.Helper()
 	return joinerWalkNote(t, hostiles,
-		"TBM:RUN|onyxias_lair|running|2/38|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 38)")
+		"TBM:RUN|onyxias_lair|running|2/21|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 21)")
 }
 
 // joinerWalkNote is joinerWalk with the pull's own status line, so a stand
@@ -6186,7 +6186,7 @@ func joinerWalkNote(t *testing.T, hostiles []tbm.HostileRec, pullLine string) *f
 	f.agent.startReply = startAt("onyxias_lair", 1)
 	f.agent.startQueue = []queuedEvent{
 		{raw: pullLine},
-		{raw: "TBM:RUN|onyxias_lair|done|37/38|onyxia|move|walk|stopped before step 38 (until boss): the party stays where it stands|until boss (step 38)"},
+		{raw: "TBM:RUN|onyxias_lair|done|20/21|onyxia|move|walk|stopped before step 21 (until boss): the party stays where it stands|until boss (step 21)"},
 	}
 	polls := 0
 	f.agent.viewHook = func() {
@@ -6276,7 +6276,7 @@ func TestRaidWalkCountsStandPullJoiners(t *testing.T) {
 		{GUID: 0xF130501, Entry: 12130, X: -52.9, Y: -96.9, HPPct: 100, Target: packet.GUID(1001)},
 		{GUID: 0xF130502, Entry: 12130, X: -53.1, Y: -97.0, HPPct: 100, Target: packet.GUID(1002)},
 		{GUID: 0xF130503, Entry: 12130, X: -52.8, Y: -97.4, HPPct: 100, Target: packet.GUID(1000)},
-	}, "TBM:RUN|onyxias_lair|running|2/38|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from firing stand 1); joiners not read|until boss (step 38)")
+	}, "TBM:RUN|onyxias_lair|running|2/21|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from firing stand 1); joiners not read|until boss (step 21)")
 	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
 	if err != nil {
 		t.Fatal(err)
@@ -6303,7 +6303,7 @@ func TestRaidWalkCountsStandPullJoinersOnMoveStep(t *testing.T) {
 		{GUID: 0xF130501, Entry: 12130, X: -52.9, Y: -96.9, HPPct: 100, Target: packet.GUID(1001)},
 		{GUID: 0xF130502, Entry: 12130, X: -53.1, Y: -97.0, HPPct: 100, Target: packet.GUID(1002)},
 		{GUID: 0xF130503, Entry: 12130, X: -52.8, Y: -97.4, HPPct: 100, Target: packet.GUID(1000)},
-	}, "TBM:RUN|onyxias_lair|running|1/38|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from firing stand 1); joiners not read|until boss (step 38)")
+	}, "TBM:RUN|onyxias_lair|running|1/21|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from firing stand 1); joiners not read|until boss (step 21)")
 	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
 	if err != nil {
 		t.Fatal(err)
@@ -6328,12 +6328,12 @@ func TestRaidWalkCountsBossPullJoiners(t *testing.T) {
 		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
 		Line: "TBM:ACTION_ACK|run start|party|1|-",
 		Lines: []string{
-			"TBM:RUN|onyxias_lair|running|37/38|onyxia|move|walk|walking|until boss (step 38)",
+			"TBM:RUN|onyxias_lair|running|20/21|onyxia|move|walk|walking|until boss (step 21)",
 			"TBM:ACTION_ACK|run start|party|1|-",
 		}}}
 	f.agent.startQueue = []queuedEvent{
-		{raw: "TBM:RUN|onyxias_lair|running|37/38|onyxia|move|walk|walking|until boss (step 38)"},
-		{raw: "TBM:RUN|onyxias_lair|done|37/38|onyxia|move|walk|stopped before step 38 (until boss): the party stays where it stands|until boss (step 38)"},
+		{raw: "TBM:RUN|onyxias_lair|running|20/21|onyxia|move|walk|walking|until boss (step 21)"},
+		{raw: "TBM:RUN|onyxias_lair|done|20/21|onyxia|move|walk|stopped before step 21 (until boss): the party stays where it stands|until boss (step 21)"},
 	}
 	polls := 0
 	f.agent.viewHook = func() {
@@ -6363,12 +6363,12 @@ func TestRaidWalkCountsBossPullJoiners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "step 37: joiners 3") {
+	if !strings.Contains(string(raw), "step 20: joiners 3") {
 		t.Fatalf("no boss-pull joiners line in run.log:\n%s", raw)
 	}
 	recs := readPullJoiners(t, f.out)
 	if len(recs) != 1 || recs[0].Step != 37 || recs[0].Count != 3 || len(recs[0].GUIDs) != 3 {
-		t.Fatalf("pulljoiners.json %+v, want one step-37 record with 3 guids", recs)
+		t.Fatalf("pulljoiners.json %+v, want one step-20 record with 3 guids", recs)
 	}
 }
 
@@ -6412,12 +6412,12 @@ func TestRaidWalkBossWindowOpensOverOpenPullWindow(t *testing.T) {
 		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
 		Line: "TBM:ACTION_ACK|run start|party|1|-",
 		Lines: []string{
-			"TBM:RUN|onyxias_lair|running|37/38|onyxia|move|walk|walking|until boss (step 38)",
+			"TBM:RUN|onyxias_lair|running|20/21|onyxia|move|walk|walking|until boss (step 21)",
 			"TBM:ACTION_ACK|run start|party|1|-",
 		}}}
 	// The pull line goes through the poll loop (startQueue), where pullStarted arms the window.
 	f.agent.startQueue = []queuedEvent{
-		{raw: "TBM:RUN|onyxias_lair|running|2/38|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 38)"},
+		{raw: "TBM:RUN|onyxias_lair|running|2/21|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 21)"},
 	}
 	polls := 0
 	f.agent.viewHook = func() {
@@ -6448,10 +6448,10 @@ func TestRaidWalkBossWindowOpensOverOpenPullWindow(t *testing.T) {
 		case 1:
 			// The first frame after the pull line's poll: the pulled unit is here
 			// (the window seeds on it), and the fight line lands on the next poll.
-			f.agent.push("TBM:RUN|onyxias_lair|running|38/38|onyxia|boss|walk|fighting: the tank engages 10184 on arrival (1.0 yd)|until boss (step 38)", "")
+			f.agent.push("TBM:RUN|onyxias_lair|running|21/21|onyxia|boss|walk|fighting: the tank engages 10184 on arrival (1.0 yd)|until boss (step 21)", "")
 			return append([]tbm.HostileRec{pulled}, others...)
 		case 3:
-			f.agent.push("TBM:RUN|onyxias_lair|done|37/38|onyxia|move|walk|stopped before step 38 (until boss): the party stays where it stands|until boss (step 38)", "")
+			f.agent.push("TBM:RUN|onyxias_lair|done|20/21|onyxia|move|walk|stopped before step 21 (until boss): the party stays where it stands|until boss (step 21)", "")
 		}
 		return others
 	}
@@ -6462,18 +6462,18 @@ func TestRaidWalkBossWindowOpensOverOpenPullWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "step 2: joiners 3") || !strings.Contains(string(raw), "step 37: joiners 3") {
+	if !strings.Contains(string(raw), "step 2: joiners 3") || !strings.Contains(string(raw), "step 20: joiners 3") {
 		t.Fatalf("run.log lacks a joiners line for both pulls:\n%s", raw)
 	}
 	recs := readPullJoiners(t, f.out)
 	if len(recs) != 2 {
-		t.Fatalf("pulljoiners.json %+v, want the step-2 and step-37 records", recs)
+		t.Fatalf("pulljoiners.json %+v, want the step-2 and step-20 records", recs)
 	}
 	byStep := map[int]raidwalk.PullJoiners{}
 	for _, r := range recs {
 		byStep[r.Step] = r
 	}
-	for _, step := range []int{2, 37} {
+	for _, step := range []int{2, 20} {
 		if r, ok := byStep[step]; !ok || r.Count != 3 || len(r.GUIDs) != 3 {
 			t.Fatalf("pulljoiners.json %+v, want a step-%d record with 3 guids", recs, step)
 		}
@@ -6489,7 +6489,7 @@ func TestRaidWalkPullWithNoRowUsesSeedMates(t *testing.T) {
 		{GUID: 0xF130002C6C00C24B, Entry: 77777, X: 49.8, Y: -114.6, HPPct: 90, Target: packet.GUID(1000)},
 		{GUID: 0xF130002, Entry: 77777, X: 52.0, Y: -114.6, HPPct: 100, Target: packet.GUID(1000)}, // mate 2 yd off
 		{GUID: 0xF130501, Entry: 12130, X: 0, Y: 0, HPPct: 100, Target: packet.GUID(1001)},
-	}, "TBM:RUN|onyxias_lair|running|1/38|onyxia|move|pull|pulling 77777 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 38)")
+	}, "TBM:RUN|onyxias_lair|running|1/21|onyxia|move|pull|pulling 77777 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 21)")
 	raw, err := os.ReadFile(filepath.Join(f.out, "run.log"))
 	if err != nil {
 		t.Fatal(err)
@@ -6511,8 +6511,8 @@ func TestRaidWalkPullSeedRetriesAfterFirstFrame(t *testing.T) {
 	f := newFixture(t)
 	f.agent.startReply = startAt("onyxias_lair", 1)
 	f.agent.startQueue = []queuedEvent{
-		{raw: "TBM:RUN|onyxias_lair|running|2/38|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 38)"},
-		{raw: "TBM:RUN|onyxias_lair|done|37/38|onyxia|move|walk|stopped before step 38 (until boss): the party stays where it stands|until boss (step 38)"},
+		{raw: "TBM:RUN|onyxias_lair|running|2/21|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 21)"},
+		{raw: "TBM:RUN|onyxias_lair|done|20/21|onyxia|move|walk|stopped before step 21 (until boss): the party stays where it stands|until boss (step 21)"},
 	}
 	polls := 0
 	f.agent.viewHook = func() {
@@ -6550,8 +6550,8 @@ func TestRaidWalkWaitingLineOpensNoWindow(t *testing.T) {
 	f := newFixture(t)
 	f.agent.startReply = startAt("onyxias_lair", 1)
 	f.agent.startQueue = []queuedEvent{
-		{raw: "TBM:RUN|onyxias_lair|running|2/38|onyxia|move|pull|waiting for the tank to stand still before pulling 12129 0xF130002C6C00C24B|until boss (step 38)"},
-		{raw: "TBM:RUN|onyxias_lair|done|37/38|onyxia|move|walk|stopped before step 38 (until boss): the party stays where it stands|until boss (step 38)"},
+		{raw: "TBM:RUN|onyxias_lair|running|2/21|onyxia|move|pull|waiting for the tank to stand still before pulling 12129 0xF130002C6C00C24B|until boss (step 21)"},
+		{raw: "TBM:RUN|onyxias_lair|done|20/21|onyxia|move|walk|stopped before step 21 (until boss): the party stays where it stands|until boss (step 21)"},
 	}
 	polls := 0
 	f.agent.viewHook = func() {
@@ -6803,7 +6803,7 @@ func TestSummaryCarriesRowsShaAndUntilStep(t *testing.T) {
 		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
 		Line: "TBM:ACTION_ACK|run start|party|1|-",
 		Lines: []string{
-			"TBM:RUN|onyxias_lair|running|1/38|onyxia|move|walk|regrouped at (step 5); until boss (step 38)",
+			"TBM:RUN|onyxias_lair|running|1/21|onyxia|move|walk|regrouped at (step 5); until boss (step 21)",
 			"TBM:ACTION_ACK|run start|party|1|-",
 		}}}
 	f.defaultRun("onyxias_lair")
