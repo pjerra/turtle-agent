@@ -2045,7 +2045,15 @@ func TestRaidWalkReadsDeployedOnyxiaMigration(t *testing.T) {
 func TestRaidWalkUsesTheDeployedMigration(t *testing.T) {
 	f := newFixture(t)
 	f.opts.sql = "../../internal/planexport/testdata/onyxias_lair-20261029130000.sql"
-	f.defaultRun("onyxias_lair")
+	// 29-world statuses for the 29-step fixture migration (the default run is the new plan's 21).
+	var q []queuedEvent
+	for step := 2; step <= 28; step++ {
+		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|%s|running|%d/29|onyxia|move|walk|walking", "onyxias_lair", step)})
+	}
+	q = append(q, queuedEvent{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands"})
+	f.agent.mu.Lock()
+	f.agent.startQueue = q
+	f.agent.mu.Unlock()
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s", code, f.stderr.String())
 	}
@@ -2851,7 +2859,7 @@ func TestRaidWalkWipeResumeZeroKeepsOldBehaviour(t *testing.T) {
 	if sum.WipeResumes != 0 {
 		t.Fatalf("wipe_resumes %d, want 0", sum.WipeResumes)
 	}
-	if sum.EndReason != "wipe at step 23" {
+	if sum.EndReason != "wipe at step 13" {
 		t.Fatalf("end %q, want the wipe ending", sum.EndReason)
 	}
 }
@@ -6332,7 +6340,7 @@ func TestRaidWalkCountsBossPullJoiners(t *testing.T) {
 			"TBM:ACTION_ACK|run start|party|1|-",
 		}}}
 	f.agent.startQueue = []queuedEvent{
-		{raw: "TBM:RUN|onyxias_lair|running|20/21|onyxia|move|walk|walking|until boss (step 21)"},
+		{raw: "TBM:RUN|onyxias_lair|running|21/21|onyxia|boss|walk|fighting: the tank engages 10184 on arrival (1.0 yd)|until boss (step 21)"},
 		{raw: "TBM:RUN|onyxias_lair|done|20/21|onyxia|move|walk|stopped before step 21 (until boss): the party stays where it stands|until boss (step 21)"},
 	}
 	polls := 0
@@ -6363,12 +6371,12 @@ func TestRaidWalkCountsBossPullJoiners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "step 20: joiners 3") {
+	if !strings.Contains(string(raw), "step 21: joiners 3") {
 		t.Fatalf("no boss-pull joiners line in run.log:\n%s", raw)
 	}
 	recs := readPullJoiners(t, f.out)
-	if len(recs) != 1 || recs[0].Step != 37 || recs[0].Count != 3 || len(recs[0].GUIDs) != 3 {
-		t.Fatalf("pulljoiners.json %+v, want one step-20 record with 3 guids", recs)
+	if len(recs) != 1 || recs[0].Step != 21 || recs[0].Count != 3 || len(recs[0].GUIDs) != 3 {
+		t.Fatalf("pulljoiners.json %+v, want one step-21 record with 3 guids", recs)
 	}
 }
 
@@ -6803,10 +6811,18 @@ func TestSummaryCarriesRowsShaAndUntilStep(t *testing.T) {
 		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
 		Line: "TBM:ACTION_ACK|run start|party|1|-",
 		Lines: []string{
-			"TBM:RUN|onyxias_lair|running|1/21|onyxia|move|walk|regrouped at (step 5); until boss (step 21)",
+			"TBM:RUN|onyxias_lair|running|1/29|onyxia|move|walk|regrouped at (step 5); until boss (step 29)",
 			"TBM:ACTION_ACK|run start|party|1|-",
 		}}}
-	f.defaultRun("onyxias_lair")
+	// 29-world statuses for the 29-step fixture migration.
+	var q []queuedEvent
+	for step := 2; step <= 28; step++ {
+		q = append(q, queuedEvent{raw: fmt.Sprintf("TBM:RUN|%s|running|%d/29|onyxia|move|walk|walking", "onyxias_lair", step)})
+	}
+	q = append(q, queuedEvent{raw: "TBM:RUN|onyxias_lair|done|28/29|onyxia|move|walk|stopped before step 29 (until boss): the party stays where it stands"})
+	f.agent.mu.Lock()
+	f.agent.startQueue = q
+	f.agent.mu.Unlock()
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s", code, f.stderr.String())
 	}
