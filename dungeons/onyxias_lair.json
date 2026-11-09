@@ -2,69 +2,557 @@
   "version": 1,
   "name": "onyxias_lair",
   "kind": "raid",
-  "status": "draft (not mapped, not live-checked)",
+  "status": "draft (prepped 2026-11-09 for core 1181dev b26c3cc; not mapped, not live-checked)",
   "map": 249,
-  "entrance": {"x": 30.8916, "y": -54.079, "z": -5.02784},
+  "entrance": {
+    "x": 30.8916,
+    "y": -54.079,
+    "z": -5.02784
+  },
   "entrance_trigger": 2848,
   "entrance_tele": "onyxia",
+  "outside_tele": "DustwallowMarsh",
   "portal": {
     "map": 1,
     "x": -4768.61,
     "y": -3752.11,
     "z": 53.4317
   },
-  "level_band": [60, 60],
+  "level_band": [
+    60,
+    60
+  ],
   "raid": {
     "size": 40,
     "tanks": 4,
     "healers": 10,
     "dps": 26
   },
+  "kill_first": [
+    12129
+  ],
   "notes": [
-    "DRAFT: a skeleton from the world database export of map 249 (tools/dungeongen, spec tools/dungeongen/plans.json). The boss order is the usual clear order, the packs are the spawn clusters nearest each boss; walls, doors, stairs and events are unknown to it. Not mapped, not live-checked: do the GM-invisible mapping walk and correct the route before the first run (AUTO-IMPROVE step 0); dungeon_run refuses it without allow_draft.",
-    "A wait_for on a door a lever or key opens needs timeout_s 60 (the default): a linked door can open 30 s after the use.",
-    "Raid plan: 40 players, the tank/healer/dps split is a placeholder. dungeon_run has no raid driver yet; the file is data for the raid leader.",
-    "Needs: lava traps (GO_LAVATRAP_1-2) and whelp spawners (GO_WHELP_SPAWNER) in phase 2"
+    "Core 1181dev (b26c3cc) changed the fight: Cindarion 50143 lands 15-28 s after Onyxia 10184 takes off at 65 % and must die before her (if she dies first he evades and is unkillable for the lockout); two Onyxian Hatchers 50144 come out of the egg caves 2-4 s after she lands at 40 % and die first in P3; the tunnel holds new trash, Onyxian Inciter 49016 and Onyxian Flamespawn 49017, next to the old Onyxian Warder 12129.",
+    "Pack 0 (entrance Warder, patrol 52050): pulled from the entrance platform (30.89 -54.08 -4.65), the leg's `to`, 28 yd from the patrol's north end and outside the warder lane.",
+    "Pack 1 (Warder, patrol 52049): fought from its approach stand (-33.05 -95.14 -36.06), 20 yd from the spawn.",
+    "Pack 2 (Flamespawn 49017, Inciter 49016 and patrol Warder 52052): the stand (-92.0 -112.0 -37.95) sits 32.8 yd 3D from the Flamespawn; the prep stand (-113.88 -127.47) sat 3 yd from it. The patrol block keeps its prep path (source guid 52052) with entries [12129].",
+    "Pack 3 (bend Warder, patrol 52048): fought from its approach stand (-163.15 -176.31 -63.21), 20 yd from the spawn.",
+    "Pack 4 (last-bend pack: Warder and two Inciters): the prep stand (-184.95 -195.68) was 19.5 yd from Inciter 2593512, inside its ~19 yd aggro; the new stand (-170.9 -192.5 -66.0) is 32-34 yd from all three mobs and 37 yd from Flamespawn 2593523.",
+    "Packs 5 and 6 (lone Flamespawn 2593523, then the room-mouth pack) are pulled into the corridor junction S (-149.46 -210.48 -66.7), about 150 yd from Onyxia, and fought there; pack 5 must die first because the Warder stand seats sit 18 yd from its spawn.",
+    "Kill order in every pack: the Onyxian Warder 12129 first (plan kill_first). Its Fire Nova 20203 is instant and hits everything within 20 yd; it killed 10 of 39 bots in the first look. Inciters and Flamespawns only melee.",
+    "Onyxia's pull respawns every dead Warder 12129 within 200 yd 2D (boss_onyxia.cpp Aggro), so the room-mouth Warder is back at (-113.6 -216.8) during the boss fight, 34 yd from the raid stand (-80 -211.4 -83).",
+    "The raid stand (-80 -211.4 -83) is 80.7 yd 3D from Onyxia's spawn (0.70 -211.97 -86.08), outside her ~62 yd 3D wake (58 yd plus bounding radii)."
   ],
   "legs": [
     {
-      "name": "onyxia",
-      "to": {"x": 30.89, "y": -54.08, "z": -4.65},
+      "name": "tunnel",
+      "to": {
+        "x": 30.89,
+        "y": -54.08,
+        "z": -4.65
+      },
       "pull_groups": [
         {
-          "entries": [12129],
+          "entries": [
+            12129
+          ],
           "positions": [
-            {"x": 49.8206, "y": -114.607, "z": -24.3112}
-          ]
+            {
+              "x": 49.8206,
+              "y": -114.607,
+              "z": -24.3112
+            }
+          ],
+          "radius": 1,
+          "approach": [
+            {
+              "x": 48.6,
+              "y": -99.8,
+              "z": -23.5
+            }
+          ],
+          "stand_pull": true,
+          "clear_yd": 0,
+          "patrol": {
+            "entries": [
+              12129
+            ],
+            "path": [
+              {
+                "x": 52.29,
+                "y": -105.33,
+                "z": -24.8
+              },
+              {
+                "x": 52.44,
+                "y": -97.07,
+                "z": -25.11
+              },
+              {
+                "x": 50.33,
+                "y": -90.02,
+                "z": -25.79
+              },
+              {
+                "x": 46.18,
+                "y": -77.35,
+                "z": -26.59
+              },
+              {
+                "x": 50.56,
+                "y": -90.4,
+                "z": -25.74
+              },
+              {
+                "x": 52.57,
+                "y": -97.47,
+                "z": -25.09
+              },
+              {
+                "x": 52.5,
+                "y": -105.63,
+                "z": -24.78
+              },
+              {
+                "x": 46.47,
+                "y": -114.82,
+                "z": -24.69
+              }
+            ],
+            "period_s": 32,
+            "period_estimate": true,
+            "source": "creature_movement guid 52050"
+          }
         },
         {
-          "entries": [12129],
+          "entries": [
+            12129
+          ],
           "positions": [
-            {"x": -52.9699, "y": -96.8813, "z": -38.6419}
-          ]
+            {
+              "x": -52.9699,
+              "y": -96.8813,
+              "z": -38.6419
+            }
+          ],
+          "radius": 1,
+          "approach": [
+            {
+              "x": -33.05,
+              "y": -95.14,
+              "z": -36.06
+            }
+          ],
+          "patrol": {
+            "entries": [
+              12129
+            ],
+            "path": [
+              {
+                "x": -52.14,
+                "y": -98.24,
+                "z": -38.65
+              },
+              {
+                "x": -74.76,
+                "y": -98.32,
+                "z": -34.99
+              },
+              {
+                "x": -86.22,
+                "y": -99.96,
+                "z": -36.58
+              },
+              {
+                "x": -96.56,
+                "y": -108.61,
+                "z": -39.22
+              },
+              {
+                "x": -101.85,
+                "y": -112.66,
+                "z": -41.54
+              },
+              {
+                "x": -96.86,
+                "y": -108.63,
+                "z": -39.29
+              },
+              {
+                "x": -85.81,
+                "y": -100.25,
+                "z": -36.52
+              },
+              {
+                "x": -74.63,
+                "y": -98.54,
+                "z": -34.98
+              }
+            ],
+            "period_s": 44,
+            "period_estimate": true,
+            "source": "creature_movement guid 52049"
+          }
         },
         {
-          "entries": [12129],
+          "entries": [
+            49017,
+            49016,
+            12129
+          ],
           "positions": [
-            {"x": -131.203, "y": -137.47, "z": -52.5151}
-          ]
+            {
+              "x": -116.7,
+              "y": -130.2,
+              "z": -49.5
+            },
+            {
+              "x": -121.1,
+              "y": -122.9,
+              "z": -49.1
+            },
+            {
+              "x": -131.203,
+              "y": -137.47,
+              "z": -52.5151
+            }
+          ],
+          "radius": 20,
+          "approach": [
+            {
+              "x": -82.4,
+              "y": -106.13,
+              "z": -35.25
+            },
+            {
+              "x": -92.0,
+              "y": -112.0,
+              "z": -37.95
+            }
+          ],
+          "stand_pull": true,
+          "clear_yd": 0,
+          "patrol": {
+            "entries": [
+              12129
+            ],
+            "path": [
+              {
+                "x": -135.8,
+                "y": -142.14,
+                "z": -53.38
+              },
+              {
+                "x": -149.95,
+                "y": -151.32,
+                "z": -53.53
+              },
+              {
+                "x": -159.63,
+                "y": -158.22,
+                "z": -57.46
+              },
+              {
+                "x": -164.14,
+                "y": -163.1,
+                "z": -59.32
+              },
+              {
+                "x": -169.92,
+                "y": -174,
+                "z": -63.47
+              },
+              {
+                "x": -164.28,
+                "y": -163.27,
+                "z": -59.37
+              },
+              {
+                "x": -159.71,
+                "y": -157.77,
+                "z": -57.41
+              },
+              {
+                "x": -149.38,
+                "y": -150.85,
+                "z": -53.54
+              },
+              {
+                "x": -135.62,
+                "y": -142.15,
+                "z": -53.35
+              },
+              {
+                "x": -125.86,
+                "y": -133.64,
+                "z": -51.44
+              },
+              {
+                "x": -113.42,
+                "y": -122.5,
+                "z": -49.03
+              },
+              {
+                "x": -125.62,
+                "y": -133.46,
+                "z": -51.43
+              }
+            ],
+            "period_s": 64,
+            "period_estimate": true,
+            "source": "creature_movement guid 52052"
+          }
         },
         {
-          "entries": [12129],
+          "entries": [
+            12129
+          ],
           "positions": [
-            {"x": -166.623, "y": -196.003, "z": -66.2619}
-          ]
+            {
+              "x": -166.623,
+              "y": -196.003,
+              "z": -66.2619
+            }
+          ],
+          "radius": 1,
+          "approach": [
+            {
+              "x": -163.15,
+              "y": -176.31,
+              "z": -63.21
+            }
+          ],
+          "patrol": {
+            "entries": [
+              12129
+            ],
+            "path": [
+              {
+                "x": -163.83,
+                "y": -204.6,
+                "z": -66.27
+              },
+              {
+                "x": -155.15,
+                "y": -212.38,
+                "z": -66.63
+              },
+              {
+                "x": -141.73,
+                "y": -213.38,
+                "z": -68.87
+              },
+              {
+                "x": -154.95,
+                "y": -212.48,
+                "z": -66.64
+              },
+              {
+                "x": -164.34,
+                "y": -204.27,
+                "z": -66.27
+              },
+              {
+                "x": -166.68,
+                "y": -190.9,
+                "z": -66.25
+              },
+              {
+                "x": -168.71,
+                "y": -181.38,
+                "z": -65.46
+              },
+              {
+                "x": -166.79,
+                "y": -190.46,
+                "z": -66.25
+              }
+            ],
+            "period_s": 39,
+            "period_estimate": true,
+            "source": "creature_movement guid 52048"
+          }
         },
         {
-          "entries": [12129],
+          "entries": [
+            12129,
+            49016,
+            49016
+          ],
           "positions": [
-            {"x": -199.097, "y": -209.826, "z": -68.9112}
-          ]
+            {
+              "x": -199.097,
+              "y": -209.826,
+              "z": -68.9112
+            },
+            {
+              "x": -203.2,
+              "y": -202.6,
+              "z": -69.5
+            },
+            {
+              "x": -193.7,
+              "y": -214.9,
+              "z": -68.0
+            }
+          ],
+          "radius": 10,
+          "approach": [
+            {
+              "x": -163.15,
+              "y": -176.31,
+              "z": -63.21
+            },
+            {
+              "x": -170.9,
+              "y": -192.5,
+              "z": -66.0
+            }
+          ],
+          "stand_pull": true,
+          "clear_yd": 0
+        },
+        {
+          "entries": [
+            49017
+          ],
+          "positions": [
+            {
+              "x": -181.8,
+              "y": -228.3,
+              "z": -65.7
+            }
+          ],
+          "radius": 3,
+          "approach": [
+            {
+              "x": -149.46,
+              "y": -210.48,
+              "z": -66.7
+            }
+          ],
+          "stand_pull": true,
+          "clear_yd": 0
+        },
+        {
+          "entries": [
+            49016,
+            49016,
+            49017,
+            12129
+          ],
+          "positions": [
+            {
+              "x": -108.4,
+              "y": -209.7,
+              "z": -75.9
+            },
+            {
+              "x": -108.2,
+              "y": -218.5,
+              "z": -76.3
+            },
+            {
+              "x": -113.9,
+              "y": -211.6,
+              "z": -73.8
+            },
+            {
+              "x": -113.6,
+              "y": -216.8,
+              "z": -74.1
+            }
+          ],
+          "radius": 8,
+          "approach": [
+            {
+              "x": -149.46,
+              "y": -210.48,
+              "z": -66.7
+            }
+          ],
+          "stand_pull": true,
+          "clear_yd": 0
         }
       ],
+      "leave": [
+        {
+          "entry": 12129,
+          "at": {
+            "x": -128.7,
+            "y": -41.0,
+            "z": -65.3
+          },
+          "why": "the north-passage patrol Warder (guid 2593525): its line y~-34 runs 72 yd from the route (path 155 yd)"
+        },
+        {
+          "entry": 49016,
+          "at": {
+            "x": -90.2,
+            "y": -30.8,
+            "z": -61.6
+          },
+          "why": "the north-passage Inciters (2593508, 2593511)"
+        },
+        {
+          "entry": 49017,
+          "at": {
+            "x": -230.1,
+            "y": -157.3,
+            "z": -61.2
+          },
+          "why": "the west alcove (2593514, 2593515, Inciter 2593516): 67 yd from the route, navmesh path 500 yd"
+        },
+        {
+          "entry": 12129,
+          "at": {
+            "x": -214.0,
+            "y": -200.4,
+            "z": -55.1
+          },
+          "why": "the ledge Warder 2593524, 13 yd above the bend (path 575 yd); 215 yd from Onyxia, so it never respawns"
+        },
+        {
+          "entry": 49018,
+          "at": {
+            "x": -189.6,
+            "y": -94.3,
+            "z": -67.8
+          },
+          "why": "Broodcommander Axelus: optional, not linked to Onyxia, not in this plan"
+        }
+      ]
+    },
+    {
+      "name": "onyxia",
+      "to": {
+        "x": -149.46,
+        "y": -210.48,
+        "z": -66.7
+      },
       "boss": {
         "entry": 10184,
-        "position": {"x": 0.69628, "y": -211.972, "z": -86.075}
+        "position": {
+          "x": 0.69628,
+          "y": -211.972,
+          "z": -86.075
+        },
+        "approach": [
+          {
+            "x": -114.73,
+            "y": -210.94,
+            "z": -72.4
+          },
+          {
+            "x": -80.0,
+            "y": -211.4,
+            "z": -83.0
+          }
+        ],
+        "phase_entries": [
+          50143,
+          50144
+        ]
       }
     }
   ]

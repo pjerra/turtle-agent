@@ -1086,7 +1086,7 @@
    "size": 40,
    "entrance_tele": "onyxia",
    "special": [
-    "lava traps (GO_LAVATRAP_1-2) and whelp spawners (GO_WHELP_SPAWNER) in phase 2"
+    "Cindarion (50143) lands at Onyxia's 65 % take-off and must die before her (boss_onyxia.cpp, core b26c3cc); two Onyxian Hatchers (50144) at the 40 % landing; no door, lever or key; Warders 12129 within 200 yd respawn on her pull"
    ]
   },
   {
