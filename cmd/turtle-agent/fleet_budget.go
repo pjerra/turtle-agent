@@ -67,11 +67,6 @@ func (b *loginBudget) reserveAdjusted(earliest time.Time, adjust func(time.Time)
 	return t
 }
 
-// tryReserve is reserve for a client of the port: false when maxBudgetSlots are booked.
-func (b *loginBudget) tryReserve(earliest time.Time) (time.Time, bool) {
-	return b.book(earliest, maxBudgetSlots, nil)
-}
-
 // tryReserveAdjusted is reserveAdjusted for a client of the port.
 func (b *loginBudget) tryReserveAdjusted(earliest time.Time, adjust func(time.Time) time.Time) (time.Time, bool) {
 	return b.book(earliest, maxBudgetSlots, adjust)
