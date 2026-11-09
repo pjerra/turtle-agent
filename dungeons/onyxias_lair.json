@@ -15,13 +15,13 @@
     "z": 53.4317
   },
   "level_band": [60, 60],
+  "kill_first": [12129],
   "raid": {
     "size": 40,
     "tanks": 4,
     "healers": 10,
     "dps": 26
   },
-  "kill_first": [12129],
   "notes": [
     "Core 1181dev (b26c3cc) changed the fight: Cindarion 50143 lands 15-28 s after Onyxia 10184 takes off at 65 % and must die before her (if she dies first he evades and is unkillable for the lockout); two Onyxian Hatchers 50144 come out of the egg caves 2-4 s after she lands at 40 % and die first in P3; the tunnel holds new trash, Onyxian Inciter 49016 and Onyxian Flamespawn 49017, next to the old Onyxian Warder 12129.",
     "Pack 0 (entrance Warder, patrol 52050): pulled from the entrance platform (30.89 -54.08 -4.65), the leg's `to`, 28 yd from the patrol's north end and outside the warder lane.",
@@ -57,9 +57,6 @@
             {"x": -52.9699, "y": -96.8813, "z": -38.6419}
           ],
           "radius": 1,
-          "approach": [
-            {"x": -33.05, "y": -95.14, "z": -36.06}
-          ],
           "patrol": {
             "entries": [12129],
             "path": [
@@ -75,7 +72,10 @@
             "period_s": 44,
             "period_estimate": true,
             "source": "creature_movement guid 52049"
-          }
+          },
+          "approach": [
+            {"x": -33.05, "y": -95.14, "z": -36.06}
+          ]
         },
         {
           "entries": [49017, 49016, 12129],
@@ -85,12 +85,6 @@
             {"x": -131.203, "y": -137.47, "z": -52.5151}
           ],
           "radius": 20,
-          "approach": [
-            {"x": -82.4, "y": -106.13, "z": -35.25},
-            {"x": -92.0, "y": -112.0, "z": -37.95}
-          ],
-          "stand_pull": true,
-          "clear_yd": 0,
           "patrol": {
             "entries": [49017, 49016, 12129],
             "path": [
@@ -110,7 +104,13 @@
             "period_s": 64,
             "period_estimate": true,
             "source": "creature_movement guid 52052"
-          }
+          },
+          "approach": [
+            {"x": -82.4, "y": -106.13, "z": -35.25},
+            {"x": -92.0, "y": -112.0, "z": -37.95}
+          ],
+          "stand_pull": true,
+          "clear_yd": 0
         },
         {
           "entries": [12129],
@@ -118,9 +118,6 @@
             {"x": -166.623, "y": -196.003, "z": -66.2619}
           ],
           "radius": 1,
-          "approach": [
-            {"x": -163.15, "y": -176.31, "z": -63.21}
-          ],
           "patrol": {
             "entries": [12129],
             "path": [
@@ -136,7 +133,10 @@
             "period_s": 39,
             "period_estimate": true,
             "source": "creature_movement guid 52048"
-          }
+          },
+          "approach": [
+            {"x": -163.15, "y": -176.31, "z": -63.21}
+          ]
         },
         {
           "entries": [12129, 49016, 49016],
@@ -215,11 +215,11 @@
       "boss": {
         "entry": 10184,
         "position": {"x": 0.69628, "y": -211.972, "z": -86.075},
+        "phase_entries": [50143, 50144],
         "approach": [
           {"x": -114.73, "y": -210.94, "z": -72.4},
           {"x": -80.0, "y": -211.4, "z": -83.0}
-        ],
-        "phase_entries": [50143, 50144]
+        ]
       }
     }
   ]
