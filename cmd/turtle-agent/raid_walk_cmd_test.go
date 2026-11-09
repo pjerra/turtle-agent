@@ -6470,18 +6470,18 @@ func TestRaidWalkBossWindowOpensOverOpenPullWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "step 2: joiners 3") || !strings.Contains(string(raw), "step 20: joiners 3") {
+	if !strings.Contains(string(raw), "step 2: joiners 3") || !strings.Contains(string(raw), "step 21: joiners 3") {
 		t.Fatalf("run.log lacks a joiners line for both pulls:\n%s", raw)
 	}
 	recs := readPullJoiners(t, f.out)
 	if len(recs) != 2 {
-		t.Fatalf("pulljoiners.json %+v, want the step-2 and step-20 records", recs)
+		t.Fatalf("pulljoiners.json %+v, want the step-2 and step-21 records", recs)
 	}
 	byStep := map[int]raidwalk.PullJoiners{}
 	for _, r := range recs {
 		byStep[r.Step] = r
 	}
-	for _, step := range []int{2, 20} {
+	for _, step := range []int{2, 21} {
 		if r, ok := byStep[step]; !ok || r.Count != 3 || len(r.GUIDs) != 3 {
 			t.Fatalf("pulljoiners.json %+v, want a step-%d record with 3 guids", recs, step)
 		}
@@ -6519,7 +6519,7 @@ func TestRaidWalkPullSeedRetriesAfterFirstFrame(t *testing.T) {
 	f := newFixture(t)
 	f.agent.startReply = startAt("onyxias_lair", 1)
 	f.agent.startQueue = []queuedEvent{
-		{raw: "TBM:RUN|onyxias_lair|running|2/21|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 21)"},
+		{raw: "TBM:RUN|onyxias_lair|running|3/21|onyxia|move|pull|pulling 12129 0xF130002C6C00C24B (order 1; shot from where it stands); joiners not read|until boss (step 21)"},
 		{raw: "TBM:RUN|onyxias_lair|done|20/21|onyxia|move|walk|stopped before step 21 (until boss): the party stays where it stands|until boss (step 21)"},
 	}
 	polls := 0
@@ -6546,8 +6546,8 @@ func TestRaidWalkPullSeedRetriesAfterFirstFrame(t *testing.T) {
 		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
 	}
 	recs := readPullJoiners(t, f.out)
-	if len(recs) != 1 || recs[0].Step != 2 || recs[0].Count != 1 || len(recs[0].GUIDs) != 1 {
-		t.Fatalf("pulljoiners.json %+v, want one step-2 record with 1 guid (the mate waited out the retry)", recs)
+	if len(recs) != 1 || recs[0].Step != 3 || recs[0].Count != 1 || len(recs[0].GUIDs) != 1 {
+		t.Fatalf("pulljoiners.json %+v, want one step-3 record with 1 guid (the mate waited out the retry)", recs)
 	}
 }
 
