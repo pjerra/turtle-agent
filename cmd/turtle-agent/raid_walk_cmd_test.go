@@ -6323,7 +6323,7 @@ func TestRaidWalkCountsStandPullJoinersOnMoveStep(t *testing.T) {
 // hostiles outside the boss row as joiners too.
 func TestRaidWalkCountsBossPullJoiners(t *testing.T) {
 	f := newFixture(t)
-	f.opts.until = "boss"
+	f.opts.until = "none"
 	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
 		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
 		Line: "TBM:ACTION_ACK|run start|party|1|-",
@@ -6363,12 +6363,12 @@ func TestRaidWalkCountsBossPullJoiners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "step 7: joiners 3") {
+	if !strings.Contains(string(raw), "step 37: joiners 3") {
 		t.Fatalf("no boss-pull joiners line in run.log:\n%s", raw)
 	}
 	recs := readPullJoiners(t, f.out)
-	if len(recs) != 1 || recs[0].Step != 7 || recs[0].Count != 3 || len(recs[0].GUIDs) != 3 {
-		t.Fatalf("pulljoiners.json %+v, want one step-7 record with 3 guids", recs)
+	if len(recs) != 1 || recs[0].Step != 37 || recs[0].Count != 3 || len(recs[0].GUIDs) != 3 {
+		t.Fatalf("pulljoiners.json %+v, want one step-37 record with 3 guids", recs)
 	}
 }
 
@@ -6407,7 +6407,7 @@ func TestBossAddsOfMarksRowHoldAndFirstEntries(t *testing.T) {
 // clock) sees it 0 s after the pull.
 func TestRaidWalkBossWindowOpensOverOpenPullWindow(t *testing.T) {
 	f := newFixture(t)
-	f.opts.until = "boss"
+	f.opts.until = "none"
 	f.agent.startReply = &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
 		Ack:  &tbm.Ack{Intent: "run start", Scope: "party", Count: 1, Executor: "-"},
 		Line: "TBM:ACTION_ACK|run start|party|1|-",
@@ -6462,18 +6462,18 @@ func TestRaidWalkBossWindowOpensOverOpenPullWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "step 2: joiners 3") || !strings.Contains(string(raw), "step 7: joiners 3") {
+	if !strings.Contains(string(raw), "step 2: joiners 3") || !strings.Contains(string(raw), "step 37: joiners 3") {
 		t.Fatalf("run.log lacks a joiners line for both pulls:\n%s", raw)
 	}
 	recs := readPullJoiners(t, f.out)
 	if len(recs) != 2 {
-		t.Fatalf("pulljoiners.json %+v, want the step-2 and step-7 records", recs)
+		t.Fatalf("pulljoiners.json %+v, want the step-2 and step-37 records", recs)
 	}
 	byStep := map[int]raidwalk.PullJoiners{}
 	for _, r := range recs {
 		byStep[r.Step] = r
 	}
-	for _, step := range []int{2, 7} {
+	for _, step := range []int{2, 37} {
 		if r, ok := byStep[step]; !ok || r.Count != 3 || len(r.GUIDs) != 3 {
 			t.Fatalf("pulljoiners.json %+v, want a step-%d record with 3 guids", recs, step)
 		}
