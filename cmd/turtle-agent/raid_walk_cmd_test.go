@@ -1943,7 +1943,7 @@ func TestRaidWalkHappyPathOnyxia(t *testing.T) {
 		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
 	}
 	sum := f.summary()
-	if sum.EndReason != "until" || sum.StepsReached != 28 || sum.StepsTotal != 29 {
+	if sum.EndReason != "until" || sum.StepsReached != 37 || sum.StepsTotal != 38 {
 		t.Fatalf("summary end %q steps %d/%d", sum.EndReason, sum.StepsReached, sum.StepsTotal)
 	}
 	if sum.ExitCode != exitOK || sum.Teardown.Failed {
@@ -2279,7 +2279,7 @@ func TestRaidWalkReadsRawLinesNotStrippedText(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit %d: %s", code, f.stderr.String())
 	}
-	if sum := f.summary(); sum.EndReason != "until" || sum.StepsReached != 28 {
+	if sum := f.summary(); sum.EndReason != "until" || sum.StepsReached != 37 {
 		t.Fatalf("the walk did not read the raw done line: end %q steps %d", sum.EndReason, sum.StepsReached)
 	}
 }
