@@ -340,6 +340,8 @@ var routeAggroKnownFailing = map[string]int{
 	// port is the same revanchion leg and the same door/courtyard legs, already in them); shadowfang_keep 382 -> 383 is the
 	// odo hop's launch point moved to -262.5 2150.3 (4.0 yd from the landing, outside kArriveYd 3).
 	"crescent_grove": 433, "dragonmaw_retreat": 382, "gilneas_city": 267, "black_morass": 385,
+	// fresh Onyxia plan for core 1181dev: the entrance-to-pack-0 walk passes the patrolling Warder 52050.
+	"onyxias_lair": 1,
 }
 
 // TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn
