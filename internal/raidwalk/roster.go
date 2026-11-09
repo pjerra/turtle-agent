@@ -107,6 +107,46 @@ var specRoles = map[string]string{
 	"restoration": "healer",
 }
 
+// talentPaths maps a `.bot role` spec id to the premade talent path TortoiseBots' `talents <path>` whisper applies
+// (AiPlayerbot.PremadeSpecName.<class>.<n>; the path is matched as a substring of the name) and the talent tree
+// (0-2, in the client's tab order) that build spends most points in, which is how the walk verifies it. Only
+// classes listed here get their talents set: `.bot role` alone changes strategies, not talents, and a hunter hired
+// with no spec arrives with the default premade (Survival), the weakest raid hunter.
+var talentPaths = map[string]map[string]TalentBuild{
+	"hunter": {
+		"bm":       {Path: "beastmastery", Tree: 0},
+		"mm":       {Path: "marksmanship", Tree: 1},
+		"survival": {Path: "survival", Tree: 2},
+	},
+}
+
+// TalentBuild is one premade talent build: the path name for `talents <path>` and its main tree.
+type TalentBuild struct {
+	Path string
+	Tree int
+}
+
+// TalentFor is the talent build a roster spec id sets for class, ok false when the walk sets no talents for it.
+func TalentFor(class, spec string) (TalentBuild, bool) {
+	b, ok := talentPaths[class][spec]
+	return b, ok
+}
+
+// IsTalentPath reports whether path is a talent path the walk may send in `talents <path>`.
+func IsTalentPath(path string) bool {
+	for _, specs := range talentPaths {
+		for _, b := range specs {
+			if b.Path == path {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// specAliases are short spec ids a roster may use; checkSpec rewrites them to the `.bot role` id.
+var specAliases = map[string]map[string]string{"hunter": {"sv": "survival"}}
+
 // SpecIDs are the spec ids a bot of class takes, in TortoiseBots' order. nil for an unknown class.
 func SpecIDs(class string) []string {
 	ids := classSpecs[class]
@@ -303,6 +343,9 @@ func (r *Roster) checkSpec(i int, b *Batch, n int) error {
 	if class == "" {
 		return fmt.Errorf("roster batch %d (%s): spec %q needs a class batch: name the class (\"1 priest\"), not a role count (\"5h\")",
 			i+1, b.Role, b.Spec)
+	}
+	if a, ok := specAliases[class][b.Spec]; ok {
+		b.Spec = a
 	}
 	if !ValidSpec(class, b.Spec) {
 		return fmt.Errorf("roster batch %d (%s): %q is not a %s spec; its specs are %s",

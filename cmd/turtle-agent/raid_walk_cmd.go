@@ -836,13 +836,15 @@ type walk struct {
 	logF    *os.File
 	framesF *os.File
 
-	tracker   *raidwalk.Tracker
-	inj       walkInjector
-	newNotes  []string // the RUN notes read since the last injector Tick (it drains them)
-	layout    raidwalk.LayoutSummary
-	notes     []string
-	fights    []raidwalk.FightSummary
-	decisions *raidwalk.DecisionsSummary
+	tracker  *raidwalk.Tracker
+	inj      walkInjector
+	newNotes []string // the RUN notes read since the last injector Tick (it drains them)
+	layout   raidwalk.LayoutSummary
+	notes    []string
+	// specFailed is the roster specs whose talent build did not take (applyTalents); the summary lists them.
+	specFailed []raidwalk.SpecFailure
+	fights     []raidwalk.FightSummary
+	decisions  *raidwalk.DecisionsSummary
 
 	seenFights map[string]bool
 	// fightIDsAtStart is the fight ids the dashboard listed when the walk first read its fights: the
@@ -2004,6 +2006,7 @@ func (w *walk) finish(code int) {
 		HireSettle: w.opts.hireSettle, SettleShort: w.opts.hireSettle < hireSettleWait,
 		WipeResumes:          w.wipeResumes,
 		GMInstanceDataUnsent: w.gmInstanceDataUnsent,
+		SpecFailed:           w.specFailed,
 		ReviveBrought:        len(w.reviveBrought), ReviveUnreached: len(w.reviveUnreached), ReviveGatherMissed: len(w.reviveGatherMissed),
 	}
 	if w.inj != nil {
@@ -2027,6 +2030,9 @@ func (w *walk) finish(code int) {
 	_ = w.writeOut("summary.txt", []byte(text))
 	line := strings.SplitN(text, "\n", 2)[0]
 	fmt.Fprintf(w.stdout, "%s; out %s\n", line, w.outDir)
+	if warn := raidwalk.SpecFailedLine(w.specFailed); warn != "" {
+		fmt.Fprintln(w.stdout, warn)
+	}
 }
 
 // pullJoinsOrEmpty is the walk's per-pull joiner record: never nil, so the

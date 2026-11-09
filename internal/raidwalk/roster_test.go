@@ -270,3 +270,41 @@ func TestRosterV2Specs(t *testing.T) {
 		}
 	}
 }
+
+// The roster's hunter spec: "sv" is the alias of survival, the talent build table names TB's premade paths, and the allow-list lets
+// exactly `.bot command <hire> talents [<path>]` through for a hire and a known path.
+func TestRosterHunterSpecAliasAndTalentBuilds(t *testing.T) {
+	r, err := ParseRoster([]byte(`{"format":"tb-raid-roster","version":2,
+ "batches":[{"role":"mt","hire":"1 warrior:tank"},{"role":"rest","hire":"1 hunter","spec":"sv"},{"role":"rest","hire":"1 hunter","spec":"bm"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Batches[1].Spec; got != "survival" {
+		t.Errorf("sv became %q, want survival", got)
+	}
+	for spec, want := range map[string]TalentBuild{"bm": {"beastmastery", 0}, "mm": {"marksmanship", 1}, "survival": {"survival", 2}} {
+		if got, ok := TalentFor("hunter", spec); !ok || got != want {
+			t.Errorf("TalentFor(hunter, %s) = %v %v, want %v", spec, got, ok, want)
+		}
+	}
+	if _, ok := TalentFor("warrior", "arms"); ok {
+		t.Error("no talent build is set for a warrior spec")
+	}
+	if _, err := ParseRoster([]byte(`{"format":"tb-raid-roster","version":2,
+ "batches":[{"role":"mt","hire":"1 warrior:tank"},{"role":"rest","hire":"1 mage","spec":"sv"}]}`)); err == nil {
+		t.Error("sv is a hunter alias only")
+	}
+	hires := map[string]bool{"Bot02": true}
+	for line, want := range map[string]bool{
+		".bot command Bot02 talents marksmanship": true,
+		".bot command Bot02 talents":              true,
+		".bot command Bot02 talents reset":        false,
+		".bot command Bot02 talents auto":         false,
+		".bot command Bot09 talents survival":     false,
+		".bot command Bot02 leave":                false,
+	} {
+		if got := AllowedLine(line, hires, 249); got != want {
+			t.Errorf("AllowedLine(%q) = %v, want %v", line, got, want)
+		}
+	}
+}

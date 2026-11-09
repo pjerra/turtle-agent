@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -65,6 +66,24 @@ func (n *nearGame) Appear(ctx context.Context, player string) error {
 		n.onAppear(n)
 	}
 	return nil
+}
+
+// clock is the fakeRemote's clock plus Settle, which holds virtual time until the walk goroutine agentWalk just started has delivered
+// its result or is blocked waiting for its context. Without it the fake's time ran ahead of a goroutine that had not had its turn
+// (the CI flake: 60 virtual seconds passed before the goroutine ran, or before it sent its result).
+func (n *nearGame) clock() Clock {
+	c := n.fakeRemote.clock()
+	c.Settle = func(delivered func() bool) {
+		deadline := time.Now().Add(30 * time.Second)
+		for !delivered() && !n.walking.Load() {
+			if !time.Now().Before(deadline) {
+				// Settle runs on the driver's goroutine, which is the test's.
+				n.t.Fatalf("the agent's walk goroutine neither delivered nor blocked in 30 s")
+			}
+			runtime.Gosched()
+		}
+	}
+	return c
 }
 
 func (n *nearGame) WalkSelf(ctx context.Context, to Point) (WalkResult, error) {

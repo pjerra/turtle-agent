@@ -62,6 +62,21 @@ func (c *fakeClock) sleep(ctx context.Context, d time.Duration) error {
 type queuedEvent struct {
 	raw  string
 	text string
+	// kind and source make the line a bot's chat or whisper (events.KindChat, "BotName") instead of a system line.
+	kind   string
+	source string
+}
+
+// event is the served form of a queued line.
+func (q queuedEvent) event(seq uint64) events.Event {
+	ev := events.Event{Seq: seq, Kind: events.KindSystem, Text: q.raw, Data: map[string]any{"raw": q.raw}}
+	if q.text != "" {
+		ev.Text = q.text
+	}
+	if q.kind != "" {
+		ev.Kind, ev.Source, ev.Data = q.kind, q.source, map[string]any{}
+	}
+	return ev
 }
 
 type timelineEntry struct {
@@ -82,17 +97,24 @@ type walkFakeAgent struct {
 	t          *testing.T
 	clock      *fakeClock
 
-	mu         sync.Mutex
-	calls      []string
-	gm         []string
-	gmUnits    []int
-	timeline   []timelineEntry
-	party      []string
-	nameSeq    int
-	startArgs  string
-	roleLines  []string // every `.bot role` line, in order
-	roleFail   bool     // the server refuses every `.bot role` ("does not use that spec")
-	roleSilent bool     // the server never answers `.bot role`
+	mu            sync.Mutex
+	calls         []string
+	gm            []string
+	gmUnits       []int
+	timeline      []timelineEntry
+	party         []string
+	nameSeq       int
+	startArgs     string
+	roleLines     []string // every `.bot role` line, in order
+	roleFail      bool     // the server refuses every `.bot role` ("does not use that spec")
+	roleSilentFor string   // the one bot whose `.bot role` is never answered
+	roleSilent    bool     // the server never answers `.bot role`
+	// talentMode is how the fake game answers `.bot command <bot> talents [<path>]`: "" applies the build and reads it back,
+	// "silent" never answers, "stuck" answers but leaves the build as it was (Survival), "multiple" lists several specs.
+	talentMode      string
+	talentReadExtra string            // a system line the game sends right behind the talent read-back (the answer to the next command)
+	talentLines     []string          // every `.bot command <bot> talents ...` line, in order
+	talentTrees     map[string][3]int // the build each hire has (default: the Survival premade)
 
 	entered  bool
 	status   session.StatusInfo
@@ -570,12 +592,14 @@ func (f *walkFakeAgent) gmSide(line string) {
 		f.push("TBM:HIRE_RAID|ok|"+strconv.Itoa(n)+"|"+strconv.Itoa(n)+"|0|0|0|3|0|", "")
 	case strings.HasPrefix(line, ".bot gear raid "):
 		f.push("TBM:GEAR|ok|39|39|3|60|-|-|-|0|-|0", "")
+	case strings.HasPrefix(line, ".bot command ") && strings.Contains(line, " talents"):
+		f.talentSide(line)
 	case strings.HasPrefix(line, ".bot role "):
 		fields := strings.Fields(line)
 		f.mu.Lock()
 		f.roleLines = append(f.roleLines, line)
 		fail := f.roleFail
-		silent := f.roleSilent
+		silent := f.roleSilent || (len(fields) > 2 && fields[2] == f.roleSilentFor)
 		f.mu.Unlock()
 		if len(fields) == 4 && !silent {
 			if fail {
@@ -851,6 +875,79 @@ func hireCount(hire string) int {
 	return n
 }
 
+// talentSide is the game side for `.bot command <bot> talents [<path>]` (ChangeTalentsAction): the apply says "Apply spec ..." and
+// the bare form reads the build back, both in the bot's own chat.
+func (f *walkFakeAgent) talentSide(line string) {
+	fields := strings.Fields(line)
+	if len(fields) < 4 {
+		return
+	}
+	name := fields[2]
+	queue := func(q queuedEvent) {
+		f.mu.Lock()
+		f.lines = append(f.lines, q)
+		f.mu.Unlock()
+	}
+	say := func(text string) { queue(queuedEvent{text: text, kind: events.KindChat, source: name}) }
+	f.mu.Lock()
+	f.talentLines = append(f.talentLines, line)
+	mode := f.talentMode
+	extra := f.talentReadExtra
+	if f.talentTrees == nil {
+		f.talentTrees = map[string][3]int{}
+	}
+	trees, ok := f.talentTrees[name]
+	if !ok {
+		trees = [3]int{8, 0, 43}
+	}
+	// The modes that leave the build alone: stuck (TB answers, nothing changes), silent, multiple, refused.
+	applies := mode == "" || mode == "tbtext" || mode == "otherbot" || mode == "systemonly"
+	if len(fields) == 5 && applies {
+		switch fields[4] {
+		case "beastmastery":
+			trees = [3]int{45, 6, 0}
+		case "marksmanship":
+			trees = [3]int{9, 42, 0}
+		case "survival":
+			trees = [3]int{8, 0, 43}
+		}
+		f.talentTrees[name] = trees
+	}
+	f.mu.Unlock()
+	// The forwarding command's own acknowledgement, a system line, as TB sends it.
+	queue(queuedEvent{raw: fmt.Sprintf("Forwarded command for %s: %s; action success is not guaranteed.", name, strings.Join(fields[3:], " ")), text: ""})
+	if mode == "silent" {
+		return
+	}
+	if len(fields) == 5 {
+		switch mode {
+		case "multiple":
+			say("Found multiple specs: marksmanship, survival")
+		case "refused":
+			say("Apply talents [" + fields[4] + "] talent link is invalid")
+		default:
+			say("Apply spec |h|cffffffff" + fields[4] + " 9/42/0")
+		}
+		return
+	}
+	text := fmt.Sprintf("My current talent spec is: |h|cffffffffHunter (%d/%d/%d) Link: http://x", trees[0], trees[1], trees[2])
+	switch mode {
+	case "tbtext":
+		// TB's own colouring (formatSpec): the numbers are coloured, the closing parenthesis carries a reset.
+		text = fmt.Sprintf("My current talent spec is: |h|cffffffffBM (|h|cff00ff00%d|h|cffffffff/|h|cff00ff00%d|h|cffffffff/%d|h|cffffffff)|r Hunter Link: http://x", trees[0], trees[1], trees[2])
+	case "otherbot":
+		queue(queuedEvent{text: text, kind: events.KindWhisper, source: "Bot03"})
+		return
+	case "systemonly":
+		queue(queuedEvent{raw: text})
+		return
+	}
+	say(text)
+	if extra != "" {
+		queue(queuedEvent{raw: extra})
+	}
+}
+
 func (f *walkFakeAgent) push(raw, text string) {
 	f.mu.Lock()
 	f.lines = append(f.lines, queuedEvent{raw: raw, text: text})
@@ -992,11 +1089,7 @@ func (f *walkFakeAgent) eventsPageSince(since uint64) events.Page {
 		batch := append([]queuedEvent{}, f.history[since:since+uint64(n)]...)
 		evs := make([]events.Event, 0, n)
 		for i, q := range batch {
-			ev := events.Event{Seq: since + uint64(i) + 1, Kind: events.KindSystem, Text: q.raw, Data: map[string]any{"raw": q.raw}}
-			if q.text != "" {
-				ev.Text = q.text
-			}
-			evs = append(evs, ev)
+			evs = append(evs, q.event(since+uint64(i)+1))
 		}
 		next := since + uint64(n)
 		// Next is the last served seq, not the high-water mark: the caller
@@ -1028,11 +1121,7 @@ func (f *walkFakeAgent) eventsPageSince(since uint64) events.Page {
 	evs := make([]events.Event, 0, n)
 	for _, q := range batch {
 		f.next++
-		ev := events.Event{Seq: f.next, Kind: events.KindSystem, Text: q.raw, Data: map[string]any{"raw": q.raw}}
-		if q.text != "" {
-			ev.Text = q.text
-		}
-		evs = append(evs, ev)
+		evs = append(evs, q.event(f.next))
 	}
 	next := f.next
 	hook := f.eventsHook

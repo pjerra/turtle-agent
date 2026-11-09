@@ -111,6 +111,10 @@ type WalkResult struct {
 type Clock struct {
 	Now   func() time.Time
 	Sleep func(ctx context.Context, d time.Duration) error
+	// Settle, when set, is called once after a background walk of the agent's character has started (agentWalk), with a function
+	// that says whether the walk's result is already delivered. A fake clock uses it to let that walk run before the next Sleep
+	// moves time: virtual time otherwise passes without the walk's goroutine getting a turn. The real clock leaves it nil.
+	Settle func(delivered func() bool)
 }
 
 // RealClock is the wall clock.
