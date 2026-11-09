@@ -40,6 +40,7 @@ func dist3(a, b [3]float32) float64 {
 func TestRaidWalkReviveSummonsOnlyAfterTheLanding(t *testing.T) {
 	f := newFixture(t)
 	f.agent.startReply = startAt("onyxias_lair", 30)
+	retirePack0Patrol(f)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	f.allDeadFromHires()
 	var resumeAt time.Time
@@ -624,6 +625,7 @@ func TestRaidWalkReviveWaitsForTheSettledLanding(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t)
 			f.agent.startReply = startAt("onyxias_lair", 30)
+			retirePack0Patrol(f)
 			f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 			f.allDeadFromHires()
 			var resumeAt time.Time
@@ -654,6 +656,7 @@ func TestRaidWalkReviveWaitsForTheSettledLanding(t *testing.T) {
 func TestRaidWalkEntranceFallbackWaitsForTheLanding(t *testing.T) {
 	f := newFixture(t)
 	f.agent.startReply = startAt("onyxias_lair", 30)
+	retirePack0Patrol(f)
 	var recoveryGos int
 	f.allDeadFromHires()
 	hire := f.agent.onGM
@@ -711,6 +714,7 @@ func TestRaidWalkEntranceFallbackWaitsForTheLanding(t *testing.T) {
 func TestRaidWalkReviveAppearsAtAHireFirst(t *testing.T) {
 	f := newFixture(t)
 	f.agent.startReply = startAt("onyxias_lair", 30)
+	retirePack0Patrol(f)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	f.allDeadFromHires()
 	var resumeAt time.Time
@@ -792,6 +796,7 @@ func TestRaidWalkReviveLandsAfterAFarTeleport(t *testing.T) {
 func TestRaidWalkReviveWaitsForTheFreshAppearLanding(t *testing.T) {
 	f := newFixture(t)
 	f.agent.startReply = startAt("onyxias_lair", 30)
+	retirePack0Patrol(f)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	f.allDeadFromHires()
 	var resumeAt time.Time
@@ -881,6 +886,7 @@ func armStatusFails(f *fixture, n int) {
 func ghostRevive(t *testing.T, statusFails int) (*fixture, int) {
 	f := newFixture(t)
 	f.agent.startReply = startAt("onyxias_lair", 30)
+	retirePack0Patrol(f)
 	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 	f.allDeadFromHires()
 	var resumeAt time.Time
@@ -947,6 +953,7 @@ func TestRaidWalkReviveRetriesThePreAppearRead(t *testing.T) {
 	}{{1, exitOK}, {2, exitRaidWalkIncident}} {
 		f := newFixture(t)
 		f.agent.startReply = startAt("onyxias_lair", 30)
+		retirePack0Patrol(f)
 		f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
 		f.allDeadFromHires()
 		var resumeAt time.Time

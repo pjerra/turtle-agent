@@ -45,11 +45,6 @@
             {"x": 49.8206, "y": -114.607, "z": -24.3112}
           ],
           "radius": 1,
-          "approach": [
-            {"x": 30.9, "y": -68.0, "z": -5.8}
-          ],
-          "stand_pull": true,
-          "clear_yd": 0,
           "patrol": {
             "entries": [12129],
             "path": [
@@ -65,7 +60,11 @@
             "period_s": 32,
             "period_estimate": true,
             "source": "creature_movement guid 52050"
-          }
+          },
+          "approach": [
+            {"x": 30.9, "y": -68, "z": -5.8}
+          ],
+          "stand_pull": true
         },
         {
           "entries": [12129],
