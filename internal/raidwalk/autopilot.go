@@ -107,6 +107,9 @@ type AutoTarget struct {
 	// Start is the target's own --from ("step N" or "leg L"), used for a goal's first placement; a restart inside the
 	// goal starts at the furthest step the run reached instead.
 	Start string
+	// BossWipeFresh is the --boss-wipe-fresh target flag (--boss-wipe-fresh takes no value): after an exit 19 whose
+	// last step is the boss row or the row before it, the next launch takes a fresh instance from the goal's own start.
+	BossWipeFresh bool
 	// BossWipeMax is the goal's boss-wipe budget from --boss-wipe-max: the wipes in a row without progress that stop
 	// the id (0: AutoBossWipeMax).
 	BossWipeMax int
@@ -312,7 +315,7 @@ func parseAutoTargetLine(n int, line string) (AutoTarget, error) {
 	if !hasAutoFlag(a.Args, "--sql") {
 		return AutoTarget{}, fmt.Errorf("line %d: --sql FILE is required: every goal may be re-placed, and raid-walk refuses --place without --sql", n)
 	}
-	t.Args, t.Start, t.BossWipeMax = a.Args, a.Start, a.BossWipeMax
+	t.Args, t.Start, t.BossWipeMax, t.BossWipeFresh = a.Args, a.Start, a.BossWipeMax, a.BossWipeFresh
 	return t, nil
 }
 
@@ -321,6 +324,8 @@ type autoArgs struct {
 	Args        []string
 	Start       string
 	BossWipeMax int // --boss-wipe-max, 0 when the line names none
+	// BossWipeFresh is the --boss-wipe-fresh target flag, consumed like --boss-wipe-max (never in raid-walk args).
+	BossWipeFresh bool
 }
 
 // parseAutoArgs drops the flags the autopilot manages: it returns the raid-walk arguments left, the target's --from
@@ -369,6 +374,12 @@ func parseAutoArgs(in []string) (autoArgs, error) {
 				return autoArgs{}, fmt.Errorf("--boss-wipe-max wants a number of 1 or more, not %q", val)
 			}
 			out.BossWipeMax = n
+			continue
+		case "--boss-wipe-fresh":
+			if hasEq {
+				return autoArgs{}, fmt.Errorf("--boss-wipe-fresh takes no value")
+			}
+			out.BossWipeFresh = true
 			continue
 		case "--place", "--reuse-instance":
 			continue

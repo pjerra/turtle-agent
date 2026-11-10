@@ -3125,7 +3125,81 @@ func TestAutoWipeAtBossWithoutGMInstanceDataKeepsTheInstance(t *testing.T) {
 	}
 }
 
-const bossWipeTarget = "a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --gm-instance-data hakkar:1 3;6 3;0 0"
+// A fresh instance throws away earlier kills; --boss-wipe-fresh extends the fresh-after-wipe rule to goals that
+// restart from their own start: a wipe at the boss row relaunches from the goal's own start in a fresh instance,
+// never "--from step N --reuse-instance".
+func TestBossWipeFreshRelaunchesFromGoalStart(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh --gm-instance-data hakkar:1 3;6 3;0 0")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	args := f.args()
+	if !strings.Contains(args[1], "--from leg tunnel --place") || strings.Contains(args[1], "--reuse-instance") {
+		t.Fatalf("the boss-wipe-fresh restart did not start from the goal's start fresh: %s\n%s", args[1], f.events())
+	}
+	if !strings.Contains(f.events(), "fresh instance after a boss wipe") {
+		t.Fatalf("no fresh-instance-after-a-boss-wipe resume event:\n%s", f.events())
+	}
+	if st := s.states[0]; st.goals[st.current].exit29Retries != 0 {
+		t.Fatalf("the boss wipe used the goal's exit-29 retry")
+	}
+}
+
+// --boss-wipe-fresh is consumed by the autopilot: it never reaches the raid-walk args.
+func TestBossWipeFreshFlagConsumed(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh --gm-instance-data hakkar:1 3;6 3;0 0")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	for _, a := range f.args() {
+		if strings.Contains(a, "--boss-wipe-fresh") {
+			t.Fatalf("--boss-wipe-fresh reached the raid-walk args: %s", a)
+		}
+	}
+}
+
+// --boss-wipe-fresh takes no value: the start refuses the line.
+func TestBossWipeFreshValueRejected(t *testing.T) {
+	if _, err := raidwalk.ParseAutoTargets(strings.NewReader("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --boss-wipe-fresh=1\n")); err == nil || !strings.Contains(err.Error(), "--boss-wipe-fresh takes no value") {
+		t.Fatalf("err %v, want the no-value error", err)
+	}
+}
+
+// A --gm-instance-data goal without --boss-wipe-fresh keeps today's step start after a boss wipe.
+func TestGMInstanceDataWithoutFlagKeepsStepStart(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --gm-instance-data hakkar:1 3;6 3;0 0")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	if a := f.args()[1]; !strings.Contains(a, "--from step 396 --place") || strings.Contains(a, "--reuse-instance") {
+		t.Fatalf("a --gm-instance-data goal without --boss-wipe-fresh did not keep the step start: %s", a)
+	}
+}
+
+// An exit 19 at a tunnel row is not a boss wipe: the same-instance step relaunch stays.
+func TestBossWipeFreshNotOnTunnelExit19(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh --gm-instance-data hakkar:1 3;6 3;0 0")
+	f.attempt("a-1", 19, 300, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	if a := f.args()[1]; !strings.Contains(a, "--reuse-instance") {
+		t.Fatalf("an exit 19 away from the boss took a fresh instance: %s\n%s", a, f.events())
+	}
+}
 
 // Round 1 (HIGH): every boss wipe took a fresh instance with no budget, so a raid that cannot beat the boss spent
 // ~6 instances an hour forever (the cap is 5 per account). The third boss wipe in a row without progress stops the id.

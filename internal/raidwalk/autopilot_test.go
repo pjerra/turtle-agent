@@ -635,3 +635,28 @@ func TestParseAutoTargetsBossWipeMax(t *testing.T) {
 		}
 	}
 }
+
+// --boss-wipe-fresh is a target flag: consumed like --boss-wipe-max, never in the raid-walk args, and a value is an error.
+func TestParseAutoTargetsBossWipeFresh(t *testing.T) {
+	text := "a srv 1 h boss:10184 -- onyxias_lair --sql /ony.sql --from leg tunnel --boss-wipe-fresh\n" +
+		"b srv 2 h boss:10184 -- onyxias_lair --sql /ony.sql\n"
+	ts, err := ParseAutoTargets(strings.NewReader(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ts[0].BossWipeFresh || ts[1].BossWipeFresh {
+		t.Fatalf("fresh %v and %v, want true and false", ts[0].BossWipeFresh, ts[1].BossWipeFresh)
+	}
+	for _, a := range ts[0].Args {
+		if strings.HasPrefix(a, "--boss-wipe-fresh") {
+			t.Fatalf("--boss-wipe-fresh reached the raid-walk args: %v", ts[0].Args)
+		}
+	}
+}
+
+// --boss-wipe-fresh takes no value: --boss-wipe-fresh=... is an error.
+func TestParseAutoTargetsBossWipeFreshValueRejected(t *testing.T) {
+	if _, err := ParseAutoTargets(strings.NewReader("a srv 1 h full -- zg --sql /zg.sql --boss-wipe-fresh=1\n")); err == nil || !strings.Contains(err.Error(), "--boss-wipe-fresh takes no value") {
+		t.Fatalf("err %v, want the no-value error", err)
+	}
+}
