@@ -63,8 +63,7 @@
           },
           "approach": [
             {"x": 30.9, "y": -68, "z": -5.8}
-          ],
-          "stand_pull": true
+          ]
         },
         {
           "entries": [12129],
