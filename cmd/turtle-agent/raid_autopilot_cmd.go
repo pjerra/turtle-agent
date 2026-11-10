@@ -136,19 +136,19 @@ type autoGoalState struct {
 
 // autoRun is one live or finished raid-walk attempt. Its fields are guarded by its state's mutex.
 type autoRun struct {
-	seq     int
-	out     string
-	slot    string
-	reuse   bool
+	seq   int
+	out   string
+	slot  string
+	reuse bool
 	// freshAfterWipe says the last decision was FreshAfterWipe: with --boss-wipe-fresh the next launch starts the
 	// goal again from its own start (a --gm-instance-data goal without the flag keeps today's step resume).
 	freshAfterWipe bool
-	goal    raidwalk.AutoGoal
-	cmd     *exec.Cmd
-	pidN    int
-	adopted bool
-	started time.Time
-	exited  bool
+	goal           raidwalk.AutoGoal
+	cmd            *exec.Cmd
+	pidN           int
+	adopted        bool
+	started        time.Time
+	exited         bool
 	// exitedAt is when the autopilot saw the exit (the summary may still be being written).
 	exitedAt time.Time
 	exitCode int
@@ -2542,12 +2542,12 @@ type autoSavedID struct {
 	Reuse     bool   `json:"reuse"`
 	// FreshAfterWipe says the last decision was a fresh-instance relaunch after a boss wipe (--boss-wipe-fresh): a
 	// restart resumes it from the goal's own start (a --gm-instance-data goal without the flag keeps the step resume).
-	FreshAfterWipe bool `json:"fresh_after_wipe,omitempty"`
-	Attempt   int    `json:"attempt"`
-	ChildPID  int    `json:"child_pid,omitempty"`
-	OutDir    string `json:"out_dir,omitempty"`
-	Done      bool   `json:"done,omitempty"`
-	Escalated bool   `json:"escalated,omitempty"`
+	FreshAfterWipe bool   `json:"fresh_after_wipe,omitempty"`
+	Attempt        int    `json:"attempt"`
+	ChildPID       int    `json:"child_pid,omitempty"`
+	OutDir         string `json:"out_dir,omitempty"`
+	Done           bool   `json:"done,omitempty"`
+	Escalated      bool   `json:"escalated,omitempty"`
 	// Stopped and StopWhy say a STOP file (or a removed targets line) ended this id: it is done, but not because its
 	// goals were met. The checkpoint keeps them so a restart still reports the id as stopped (not as a met goal).
 	Stopped bool   `json:"stopped,omitempty"`
