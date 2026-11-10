@@ -3125,6 +3125,8 @@ func TestAutoWipeAtBossWithoutGMInstanceDataKeepsTheInstance(t *testing.T) {
 	}
 }
 
+const bossWipeTarget = "a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --gm-instance-data hakkar:1 3;6 3;0 0"
+
 // A fresh instance throws away earlier kills; --boss-wipe-fresh extends the fresh-after-wipe rule to goals that
 // restart from their own start: a wipe at the boss row relaunches from the goal's own start in a fresh instance,
 // never "--from step N --reuse-instance".

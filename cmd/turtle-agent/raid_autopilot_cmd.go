@@ -1712,11 +1712,12 @@ func (s *autoSupervisor) finish(st *autoState) {
 		esc = fmt.Sprintf("restart: %s; next %s after %s", d.Reason, s.nextPlacement(d.Reuse), wait.Round(time.Second))
 	case raidwalk.AutoHirePoolWait:
 		st.last.reuse = true
-		if s.o.settle > wait {
-			wait = s.o.settle
+		hw := d.Backoff
+		if s.o.settle > hw {
+			hw = s.o.settle
 		}
-		st.nextAt = time.Now().Add(wait)
-		esc = fmt.Sprintf("hire-pool-wait: %s; next same instance after %s", d.Reason, wait.Round(time.Second))
+		st.nextAt = time.Now().Add(hw)
+		esc = fmt.Sprintf("hire-pool-wait: %s; next same instance after %s", d.Reason, hw.Round(time.Second))
 	case raidwalk.AutoCapWait:
 		// A fresh instance is what the cap refused, and the retry asks for one again at once: raid-walk waited out its
 		// own --instance-cap-wait before the exit, so a second wait here would double it (and with a 0 there would be
