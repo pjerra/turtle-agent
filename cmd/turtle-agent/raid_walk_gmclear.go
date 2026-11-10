@@ -30,7 +30,11 @@ const (
 	gmClearReadYd = 150
 	// gmClearReadLimit is the units RPC's row cap for that read (the default 100 would cut a crowded room).
 	gmClearReadLimit = 2000
-	// gmClearRounds is how many times a pack's stops are visited and read: both always run, so a first empty read ends nothing.
+	// gmClearRounds is how many times a pack's stops are visited and read: a first empty read ends nothing, so a pack
+	// with a member still alive or unseen gets the second round. A pack whose every member is dead (or has had its
+	// gmClearTries lines) after the first round is not walked again: the second round would read the same dead pack at
+	// every stop and kill nothing (walk 71: 52 packs, 57 stops, two rounds each, 114 .go xyz and ~230 s of the 322 s
+	// pre-clear; the kills it adds are only ever a member the first round did not see).
 	gmClearRounds = 2
 	// gmClearDeathWait and gmClearDeathPoll are how long a kill is given to show in the unit's frames, and how often it is read.
 	gmClearDeathWait = 5 * time.Second
@@ -215,13 +219,28 @@ type gmClearMember struct {
 	despawned bool        // the corridor clear or the quiet's extra round removed it before the tool ran
 }
 
-// placeGMClear is place step 6b. Every pack is cleared in gmClearRounds rounds; each round the commander visits every stop of the pack
+// gmClearAllSettled says every expected member of a pack has nothing left for this clear: its death is confirmed, or its
+// gmClearTries lines are used up (a member that would not die gets no more). A member never seen, or seen alive and still
+// to be tried, keeps the pack unsettled, so its next round still runs.
+func gmClearAllSettled(members map[uint64]*gmClearMember, guids []uint64) bool {
+	for _, g := range guids {
+		if m := members[g]; m != nil && !m.dead && !m.gaveUp {
+			return false
+		}
+	}
+	return true
+}
+
+// placeGMClear is place step 6b. Every pack is cleared in gmClearRounds rounds; each round the commander visits the pack's stops
 // (a member's spawn point, so a pack wider than the commander's view is seen whole), reads the units around it, and kills every live
-// member it sees. An empty read ends nothing: both rounds always run. A member the walk's own corridor clear already despawned is never
-// sent a line: the server no longer has it (walk 35), so it is recorded as despawned at once. Every expected member then gets one entry:
-// killed (a death confirmed from the frames), despawned, already dead, alive (seen, would not die) or not seen. Anything but the first
-// three leaves the clear PARTIAL, noted and in the summary; the walk goes on. gmClearBudget bounds the whole tool: past it no more lines
-// go out. The commander returns to the start point, on its floor, before the quiet check and the raid's move.
+// member it sees. A first empty read ends nothing: the second round still runs while a member is alive or unseen, and is skipped once
+// every member is dead (nothing there to kill: walk 71 paid 230 s of the 322 s pre-clear for those empty rounds). The commander's
+// instance is read once per pack, not once per stop: `.go xyz` never leaves the map, and the end of the clear reads it again. A member
+// the walk's own corridor clear already despawned is never sent a line: the server no longer has it (walk 35), so it is recorded as
+// despawned at once. Every expected member then gets one entry: killed (a death confirmed from the frames), despawned, already dead,
+// alive (seen, would not die) or not seen. Anything but the first three leaves the clear PARTIAL, noted and in the summary; the walk
+// goes on. gmClearBudget bounds the whole tool: past it no more lines go out. The commander returns to the start point, on its floor,
+// before the quiet check and the raid's move.
 func (w *walk) placeGMClear(ctx context.Context) error {
 	if len(w.gmClear) == 0 {
 		return nil
@@ -232,8 +251,9 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 	budgetHit := false
 	for _, pk := range w.gmClear {
 		label := raidwalk.GMClearLabel(pk.Leg, pk.Group)
+		guids := pk.SpawnGUIDs()
 		members := map[uint64]*gmClearMember{}
-		for _, g := range pk.SpawnGUIDs() {
+		for _, g := range guids {
 			m := &gmClearMember{}
 			if w.placeCleared[g] {
 				// The corridor clear or the quiet's extra round removed it in this instance: `.die` on its guid does nothing
@@ -243,7 +263,11 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 			members[g] = m
 		}
 		stops := pk.Stops()
-		for round := 0; round < gmClearRounds; round++ {
+		instRead := false
+		for round := range gmClearRounds {
+			if round > 0 && gmClearAllSettled(members, guids) {
+				break
+			}
 			for _, stop := range stops {
 				if err := w.goPlace(ctx, stop.X, stop.Y, stop.Z+2); err != nil {
 					return err
@@ -251,8 +275,11 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 				if err := w.placeSleep(ctx, 2*time.Second); err != nil {
 					return err
 				}
-				if err := w.placeInstanceIs(ctx, w.placeInst); err != nil {
-					return err
+				if !instRead {
+					if err := w.placeInstanceIs(ctx, w.placeInst); err != nil {
+						return err
+					}
+					instRead = true
 				}
 				units, err := w.gmClearUnits(ctx)
 				if err != nil {
@@ -283,6 +310,9 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 					} else {
 						w.logLine(w.env.now(), fmt.Sprintf("gm-clear: FAILED %d %s (%s) alive after %d tries", u.GUID.Entry(), u.GUID, label, m.tries))
 					}
+				}
+				if gmClearAllSettled(members, guids) {
+					break // nothing alive left to read this stop for; the next stop has no kill for it either
 				}
 			}
 		}
