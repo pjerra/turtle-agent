@@ -3132,7 +3132,7 @@ const bossWipeTarget = "a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-2
 // never "--from step N --reuse-instance".
 func TestBossWipeFreshRelaunchesFromGoalStart(t *testing.T) {
 	f := newAutoFixture(t)
-	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh --gm-instance-data hakkar:1 3;6 3;0 0")
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
 	f.attempt("a-1", 19, 397, "wipe: the raid died")
 	f.attempt("a-2", 2, 0, "bad --sql")
 	s := f.supervisor()
@@ -3154,7 +3154,7 @@ func TestBossWipeFreshRelaunchesFromGoalStart(t *testing.T) {
 // --boss-wipe-fresh is consumed by the autopilot: it never reaches the raid-walk args.
 func TestBossWipeFreshFlagConsumed(t *testing.T) {
 	f := newAutoFixture(t)
-	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh --gm-instance-data hakkar:1 3;6 3;0 0")
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
 	f.attempt("a-1", 19, 397, "wipe: the raid died")
 	f.attempt("a-2", 2, 0, "bad --sql")
 	s := f.supervisor()
@@ -3191,7 +3191,7 @@ func TestGMInstanceDataWithoutFlagKeepsStepStart(t *testing.T) {
 // An exit 19 at a tunnel row is not a boss wipe: the same-instance step relaunch stays.
 func TestBossWipeFreshNotOnTunnelExit19(t *testing.T) {
 	f := newAutoFixture(t)
-	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh --gm-instance-data hakkar:1 3;6 3;0 0")
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
 	f.attempt("a-1", 19, 300, "wipe: the raid died")
 	f.attempt("a-2", 2, 0, "bad --sql")
 	s := f.supervisor()
