@@ -134,8 +134,8 @@ type autoGoalState struct {
 	dead bool
 }
 
+// autoRun is one live or finished raid-walk attempt. Its fields are guarded by its state's mutex.
 type autoRun struct {
-	seq     int
 	out     string
 	slot    string
 	reuse   bool
