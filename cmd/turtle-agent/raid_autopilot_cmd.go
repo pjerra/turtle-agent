@@ -1859,10 +1859,11 @@ func (s *autoSupervisor) launch(st *autoState) {
 	if g.target.BossWipeFresh && st.last != nil && st.last.freshAfterWipe && g.target.Start != "" {
 		// A boss wipe with --boss-wipe-fresh: the goal starts again from its own start in a fresh instance, never a
 		// step resume into the old copy (a same-instance relaunch keeps the respawned tunnel trash that caused exit 19).
+		// bestStep survives: only a run past the OLD best counts as progress, so a fresh run that wipes at the same
+		// boss again does not reset the wipe budget.
 		from = g.target.Start
 		reuse = false
 		st.last.lastStep = 0
-		g.bestStep = 0
 		s.event(st.id, "resume", fmt.Sprintf("fresh instance after a boss wipe: from the goal's start %q", from))
 	}
 	resumeFrom := ""

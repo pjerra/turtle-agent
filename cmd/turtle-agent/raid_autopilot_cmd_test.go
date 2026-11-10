@@ -3203,6 +3203,63 @@ func TestBossWipeFreshNotOnTunnelExit19(t *testing.T) {
 	}
 }
 
+// A --boss-wipe-fresh goal counts its wipe budget across fresh relaunches: three boss wipes without progress
+// escalate at the third (default --boss-wipe-max 3), even though every relaunch starts from the goal's own start.
+func TestBossWipeFreshThreeWipesWithoutProgressEscalates(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	for i := 1; i <= 3; i++ {
+		f.attempt(fmt.Sprintf("a-%d", i), 19, 397, "wipe: the raid died")
+	}
+	f.attempt("a-4", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 3; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+	}
+	if n := len(f.args()); n != 3 {
+		t.Fatalf("%d launches, want 3 (the third boss wipe stops the id):\n%s", n, f.events())
+	}
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("three boss wipes without progress did not escalate:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "boss wipe x3 without progress") {
+		t.Fatalf("no ESCALATE line for the boss wipes:\n%s", f.events())
+	}
+}
+
+// The no-budget bug this round fixes: with --boss-wipe-fresh every relaunch starts from the goal's own start,
+// but the wipe budget must still count across those relaunches (a fresh run past the old best is progress and
+// resets the count). Mirrors TestAutoBossWipeProgressResetsTheCount: 396 (progress), 396 (none), 397 (progress:
+// count restarts), 397 (none), 397 (none: the third since progress escalates).
+func TestBossWipeFreshProgressPastOldBestResetsTheCount(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	for i, step := range []int{396, 396, 397, 397, 397} {
+		f.attempt(fmt.Sprintf("a-%d", i+1), 19, step, "wipe: the raid died")
+	}
+	f.attempt("a-6", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 5; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		if _, esc := runState(s.states[0]); esc {
+			t.Fatalf("escalated before launch %d:\n%s", i, f.events())
+		}
+		finishAttempt(t, s)
+	}
+	if n := len(f.args()); n != 5 {
+		t.Fatalf("%d launches, want 5:\n%s", n, f.events())
+	}
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("three wipes since the last progress did not escalate:\n%s", f.events())
+	}
+	for i, a := range f.args()[1:] {
+		if !strings.Contains(a, "--from leg tunnel --place") || strings.Contains(a, "--reuse-instance") {
+			t.Fatalf("launch %d did not start fresh from the goal's start: %s", i+2, a)
+		}
+	}
+}
+
 // Round 1 (HIGH): every boss wipe took a fresh instance with no budget, so a raid that cannot beat the boss spent
 // ~6 instances an hour forever (the cap is 5 per account). The third boss wipe in a row without progress stops the id.
 func TestAutoBossWipeThreeTimesWithoutProgressEscalates(t *testing.T) {
