@@ -481,9 +481,9 @@ func TestPlaceGMClearRetriesOnceAndReportsSurvivors(t *testing.T) {
 
 // A member that stands outside the commander's view of the rest (400 yd away, over the 150 yd read) is visited at its own spawn point,
 // killed, and the clear is not PARTIAL. The whole first round reads nothing here (nothing shows until the members have been "seen"
-// once): an empty round does not end the pack, so the second round runs and kills. The instance is read once for the pack, not once
-// per stop: two in all with the clear's final check (walk 71 counted 115 `q inst` for 52 packs).
-func TestPlaceGMClearVisitsMembersOutsideTheViewAndReadsTwice(t *testing.T) {
+// once): an empty round does not end the pack, so the second round runs and kills. The instance is re-read after every `.go xyz`
+// (the same map does not prove the same copy): one read per stop per round, plus the clear's final check.
+func TestPlaceGMClearVisitsMembersOutsideTheViewAndReadsPerStop(t *testing.T) {
 	_, guids := gmClearPack(t, gmClearZGSpawns)
 	far := guids[len(guids)-1]
 	dir := gmClearFarExport(t, raidwalk.SpawnGUID(far))
@@ -521,8 +521,10 @@ func TestPlaceGMClearVisitsMembersOutsideTheViewAndReadsTwice(t *testing.T) {
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
 	}
-	// One instance read for the pack and the clear's own final check, whatever the stop count, before the quiet check.
-	inst, started := 0, false
+	// One instance read per stop per round, then the clear's own final check, before the quiet check. Round 1 walks
+	// every stop (all read empty), round 2 ends at the far member once the pack is settled (the settled break leaves
+	// the round's later stops unread).
+	inst, goes, started := 0, 0, false
 	firstGo := "gm .go xyz " + num32(pack.Stops()[0].X) + " " + num32(pack.Stops()[0].Y) + " "
 	for _, l := range f.agentLog() {
 		if !started {
@@ -535,9 +537,13 @@ func TestPlaceGMClearVisitsMembersOutsideTheViewAndReadsTwice(t *testing.T) {
 		if l == "tt q inst" {
 			inst++
 		}
+		if strings.HasPrefix(l, "gm .go xyz ") {
+			goes++
+		}
 	}
-	if !started || inst != 2 {
-		t.Fatalf("%d `q inst` in the clear (started %v), want 2: one per pack + the final check", inst, started)
+	// The clear ran goes stops and read the instance once per stop, with one more read for its final check.
+	if !started || goes == 0 || inst != goes+1 {
+		t.Fatalf("%d `q inst` for %d clear `.go xyz` (started %v), want stops+1: one per stop + the final check", inst, goes, started)
 	}
 	sum := f.summary()
 	if sum.GMClearPartial || len(sum.GMClear) != len(guids) {
@@ -631,6 +637,93 @@ func TestPlaceGMClearSkipsTheSecondRoundOfADeadPack(t *testing.T) {
 		if !e.Killed || e.Entry == 0 {
 			t.Errorf("entry %+v", e)
 		}
+	}
+}
+
+// A later stop that lands in another copy stops the clear: the same map does not prove the same instance, so the
+// commander re-reads its instance after every `.go xyz` and before every units read or kill. Here the second stop's
+// read reports another instance: the clear stops on the existing error path with no second-stop read and no kill there.
+func TestPlaceGMClearSecondStopInstanceMismatchStopsTheClear(t *testing.T) {
+	_, guids := gmClearPack(t, gmClearZGSpawns)
+	far := guids[len(guids)-1]
+	dir := gmClearFarExport(t, raidwalk.SpawnGUID(far))
+	pack, guids := gmClearPack(t, dir)
+	stops := pack.Stops()
+	if len(stops) < 2 {
+		t.Fatalf("a pack wider than the view needs several stops, has %d", len(stops))
+	}
+	f, tk := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = dir
+	// The copy moves under the walk at the second stop's own `.go xyz`: every later `q inst` names another instance.
+	var armed atomic.Bool
+	started := false
+	firstGo := ".go xyz " + num32(stops[0].X) + " " + num32(stops[0].Y) + " "
+	prevOnGM := f.agent.onGM
+	f.agent.onGM = func(line string) {
+		if prevOnGM != nil {
+			prevOnGM(line)
+		}
+		if armed.Load() {
+			return
+		}
+		if !started {
+			started = strings.HasPrefix(line, firstGo)
+			return
+		}
+		if strings.HasPrefix(line, ".go xyz ") {
+			armed.Store(true) // this stop's check already sees the other copy
+		}
+	}
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if cmd == "q inst" && armed.Load() {
+			return ttReplyOf(t, map[string]any{"map": 309, "inst": 104}), nil
+		}
+		return tk.answer(cmd)
+	}
+	postFlipReads, postFlipKills := 0, 0
+	f.agent.unitsFn = func(int) []objects.Unit {
+		dead := func(g packet.GUID) bool { f.agent.mu.Lock(); defer f.agent.mu.Unlock(); return f.agent.killed[g] }
+		if armed.Load() {
+			postFlipReads++
+		}
+		return gmClearView(f, pack, guids, dead)
+	}
+	f.agent.killFn = func(g packet.GUID, tries int) bool {
+		if armed.Load() {
+			postFlipKills++
+		}
+		return true
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d: %s\n%s", code, exitRaidWalkFailed, f.stderr.String(), f.stdout.String())
+	}
+	if reason := f.summary().EndReason; !strings.Contains(reason, "not the raid's 103") {
+		t.Fatalf("end reason %q, want the second stop's instance mismatch", reason)
+	}
+	// The second stop was visited, and the first stop killed before the copy moved.
+	secondGo := "gm .go xyz " + num32(stops[1].X) + " " + num32(stops[1].Y) + " "
+	seen, kills, killedFar := false, 0, false
+	for _, l := range f.agentLog() {
+		seen = seen || strings.HasPrefix(l, secondGo)
+		if g, ok := strings.CutPrefix(l, "gm_kill "); ok {
+			kills++
+			killedFar = killedFar || g == far.String()
+		}
+	}
+	if !seen {
+		t.Fatalf("no %q in the log: the walk never reached the second stop", secondGo)
+	}
+	if kills == 0 {
+		t.Fatal("no kill went out: the first stop must clear before the copy moves")
+	}
+	if postFlipReads != 0 {
+		t.Fatalf("%d units reads after the second stop's .go, want none: no read without the instance check", postFlipReads)
+	}
+	if postFlipKills != 0 || killedFar {
+		t.Fatalf("%d post-move kills (far member killed: %v): no kill without the instance check", postFlipKills, killedFar)
 	}
 }
 

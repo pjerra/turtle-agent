@@ -234,8 +234,9 @@ func gmClearAllSettled(members map[uint64]*gmClearMember, guids []uint64) bool {
 // placeGMClear is place step 6b. Every pack is cleared in gmClearRounds rounds; each round the commander visits the pack's stops
 // (a member's spawn point, so a pack wider than the commander's view is seen whole), reads the units around it, and kills every live
 // member it sees. A first empty read ends nothing: the second round still runs while a member is alive or unseen, and is skipped once
-// every member is dead (nothing there to kill: walk 71 paid 230 s of the 322 s pre-clear for those empty rounds). The commander's
-// instance is read once per pack, not once per stop: `.go xyz` never leaves the map, and the end of the clear reads it again. A member
+// every member is dead (nothing there to kill: walk 71 paid 230 s of the 322 s pre-clear for those empty second rounds). After every
+// `.go xyz` the commander re-reads its instance before the units read or any kill: the same map does not prove the same copy, and a
+// stop that landed elsewhere stops the clear on the existing error path with no kill sent. The end of the clear reads it again. A member
 // the walk's own corridor clear already despawned is never sent a line: the server no longer has it (walk 35), so it is recorded as
 // despawned at once. Every expected member then gets one entry: killed (a death confirmed from the frames), despawned, already dead,
 // alive (seen, would not die) or not seen. Anything but the first three leaves the clear PARTIAL, noted and in the summary; the walk
@@ -263,7 +264,6 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 			members[g] = m
 		}
 		stops := pk.Stops()
-		instRead := false
 		for round := range gmClearRounds {
 			if round > 0 && gmClearAllSettled(members, guids) {
 				break
@@ -275,11 +275,8 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 				if err := w.placeSleep(ctx, 2*time.Second); err != nil {
 					return err
 				}
-				if !instRead {
-					if err := w.placeInstanceIs(ctx, w.placeInst); err != nil {
-						return err
-					}
-					instRead = true
+				if err := w.placeInstanceIs(ctx, w.placeInst); err != nil {
+					return err
 				}
 				units, err := w.gmClearUnits(ctx)
 				if err != nil {
