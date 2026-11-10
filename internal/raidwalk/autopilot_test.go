@@ -660,3 +660,11 @@ func TestParseAutoTargetsBossWipeFreshValueRejected(t *testing.T) {
 		t.Fatalf("err %v, want the no-value error", err)
 	}
 }
+
+// --boss-wipe-fresh without --from is refused: the fresh-after-wipe restart
+// starts from the goal's own start, so a line without one is invalid.
+func TestParseAutoTargetsBossWipeFreshNeedsFrom(t *testing.T) {
+	if _, err := ParseAutoTargets(strings.NewReader("a srv 1 h boss:10184 -- onyxias_lair --sql /ony.sql --boss-wipe-fresh\n")); err == nil || !strings.Contains(err.Error(), "--boss-wipe-fresh needs --from") {
+		t.Fatalf("err %v, want the needs---from error", err)
+	}
+}

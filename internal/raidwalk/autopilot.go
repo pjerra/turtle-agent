@@ -315,6 +315,9 @@ func parseAutoTargetLine(n int, line string) (AutoTarget, error) {
 	if !hasAutoFlag(a.Args, "--sql") {
 		return AutoTarget{}, fmt.Errorf("line %d: --sql FILE is required: every goal may be re-placed, and raid-walk refuses --place without --sql", n)
 	}
+	if a.BossWipeFresh && a.Start == "" {
+		return AutoTarget{}, fmt.Errorf("line %d: id %q: --boss-wipe-fresh needs --from: the fresh-after-wipe restart starts from the goal's own start", n, id)
+	}
 	t.Args, t.Start, t.BossWipeMax, t.BossWipeFresh = a.Args, a.Start, a.BossWipeMax, a.BossWipeFresh
 	return t, nil
 }
