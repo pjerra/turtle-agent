@@ -209,6 +209,9 @@ type ReportOptions struct {
 	// GMClear is the walk summary's gm_clear list; Assisted is its assisted flag. Either marks the report ASSISTED.
 	GMClear  []GMClearEntry
 	Assisted bool
+	// Practice is the walk summary's practice object (nil without --practice). A practice run prints a PRACTICE
+	// line instead of the ASSISTED gm-clear line: it never credits a boss kill.
+	Practice *PracticeSummary
 }
 
 // Report is the JSON of a walk report.
@@ -233,6 +236,8 @@ type Report struct {
 	GMClear  []GMClearEntry `json:"gm_clear,omitempty"`
 	// GMClearPartial is true when an expected pack member was left (not seen, or alive).
 	GMClearPartial bool `json:"gm_clear_partial,omitempty"`
+	// Practice is the walk's practice record (nil without --practice).
+	Practice *PracticeSummary `json:"practice,omitempty"`
 }
 
 // ReportTotals sums the table.
@@ -430,7 +435,8 @@ func BuildReport(fights []ReportFight, log []LogLine, opt ReportOptions) *Report
 	})
 	rep := &Report{Format: ReportFormat, Version: ReportVersion, ClockOffset: opt.ClockOffset.String(), HasRunLog: len(log) > 0,
 		Spells: opt.Spells, Pulls: []ReportPull{}, Control: []ControlEvent{},
-		Assisted: opt.Assisted || len(opt.GMClear) > 0, GMClear: opt.GMClear, GMClearPartial: GMClearPartial(opt.GMClear)}
+		Assisted: opt.Assisted || len(opt.GMClear) > 0 || opt.Practice != nil,
+		GMClear:  opt.GMClear, GMClearPartial: GMClearPartial(opt.GMClear), Practice: opt.Practice}
 	if len(opt.Spells) > 0 {
 		rep.WindowS = opt.Window.Seconds()
 	}

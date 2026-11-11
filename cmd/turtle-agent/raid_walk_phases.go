@@ -2655,10 +2655,10 @@ func (w *walk) saveFightsCtx(ctx context.Context, limit time.Duration) {
 	// a fight is an earlier walk's or instance's history. Built once, from the first successful read, and a live
 	// record is part of it (it may later finish as a kill that is still history). A read made before the first
 	// placement (saveFightsAtStart) lists history only, so every id in it counts. When no read succeeded before
-	// placement, a later first read may already hold this walk's own fights: only the records that started over
-	// 10 s before the walk began count then, by their start time (records without one, or nearer in time, count
-	// as history on the conservative side). liveAtStart holds the at-start ids whose row was Live in that first
-	// read: when such a fight later finishes (walk 41 tj-8: it started during the earlier raid and ended after
+	// placement, a later first read may already hold this walk's own fights: only the records that started at or
+	// before the walk start minus the leeway (fightHistoryLeeway: a record without a start, or one nearer in time,
+	// counts as history on the conservative side). liveAtStart holds the at-start ids whose row was Live in that
+	// first read: when such a fight later finishes (walk 41 tj-8: it started during the earlier raid and ended after
 	// its teardown), its detail file is still written, tagged History.
 	if w.fightIDsAtStart == nil {
 		w.fightIDsAtStart = make(map[string]bool, len(rows))
@@ -6287,16 +6287,23 @@ func (w *walk) teardownLiveFightID() string {
 
 // waitTeardownLiveFight re-reads the fight list while the last successful read holds a still-live row of this
 // walk: the kill fight may still be open when teardown's first saveFights runs (walk 52 hk13t-1). The wait is
-// bounded by a wall-clock deadline (the reads count, not only the sleeps); each read has its own timeout, a
-// failed read stops the wait at once, and a cancelled walk context stops it too. endWipe and handleBoss keep
+// bounded by a wall-clock deadline (the reads count, not only the sleeps); each read has its own timeout, one
+// failed read is retried once, and a cancelled walk context skips the wait entirely. endWipe and handleBoss keep
 // running, so their later polls save the fight; they get no such wait.
 func (w *walk) waitTeardownLiveFight(ctx context.Context) {
 	live := w.teardownLiveFightID()
 	if live == "" {
 		return
 	}
-	if ctx == nil || ctx.Err() != nil {
-		// The stop() path's context is already cancelled: wait on a fresh one bounded by the same deadline.
+	if ctx != nil && ctx.Err() != nil {
+		// A signal stopped the walk: its context is already cancelled, so no
+		// bounded replacement could observe anything but its own deadline.
+		// Skip the wait and leave the still-live fight for the next walk's
+		// history set instead of sleeping through the teardown.
+		w.note("fight records: the teardown live-fight wait is skipped: the walk stopped")
+		return
+	}
+	if ctx == nil {
 		ctx = context.Background()
 	}
 	start := w.env.now()
@@ -6304,6 +6311,7 @@ func (w *walk) waitTeardownLiveFight(ctx context.Context) {
 	waitCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	first := live
+	failed := 0
 	for {
 		if !w.env.now().Before(deadline) {
 			break
@@ -6324,9 +6332,15 @@ func (w *walk) waitTeardownLiveFight(ctx context.Context) {
 		}
 		w.saveFightsCtx(waitCtx, read)
 		if w.bossCheckErr != nil {
-			w.note("fight records: the teardown live-fight wait stopped: the dashboard fights read failed: %v", w.bossCheckErr)
-			return
+			failed++
+			if failed > 1 {
+				w.note("fight records: the teardown live-fight wait stopped: the dashboard fights read failed: %v", w.bossCheckErr)
+				return
+			}
+			w.note("fight records: the teardown live-fight wait retries after a failed dashboard fights read: %v", w.bossCheckErr)
+			continue
 		}
+		failed = 0
 		if live = w.teardownLiveFightID(); live == "" {
 			w.note("fight records: waited %d s at teardown for live fight %s to end", int(w.env.now().Sub(start)/time.Second), first)
 			return

@@ -204,9 +204,10 @@ func TestTeardownGivesUpAfter30s(t *testing.T) {
 	}
 }
 
-// TestTeardownUnreachableDashboardStopsWait: every Fights call times out during the wait. The wait stops at
-// once on the first failed read (total wait bounded by the const), teardown proceeds, and a note says why.
-func TestTeardownUnreachableDashboardStopsWait(t *testing.T) {
+// TestTeardownUnreachableDashboardRetriesOnceThenStops: every Fights call times out during the wait. The first
+// failed read is retried once, the second stops the wait (total bounded by the const), teardown proceeds, and
+// the notes name the retry and the stop.
+func TestTeardownUnreachableDashboardRetriesOnceThenStops(t *testing.T) {
 	goal := zgBossStepOf(t, 14517)
 	now := time.Now()
 	var slept time.Duration
@@ -226,17 +227,56 @@ func TestTeardownUnreachableDashboardStopsWait(t *testing.T) {
 	if slept > teardownLiveFightWait {
 		t.Fatalf("slept %v, want at most %s", slept, durWords(teardownLiveFightWait))
 	}
-	var stopped []string
+	var retried, stopped []string
 	for _, n := range w.notes {
+		if strings.Contains(n, "retries after a failed dashboard fights read") {
+			retried = append(retried, n)
+		}
 		if strings.Contains(n, "the teardown live-fight wait stopped") {
 			stopped = append(stopped, n)
 		}
+	}
+	if len(retried) != 1 {
+		t.Fatalf("retry notes %q, want exactly one", retried)
 	}
 	if len(stopped) != 1 {
 		t.Fatalf("stop notes %q, want exactly one naming the failed read", stopped)
 	}
 	if w.teardownWd.Failed {
 		t.Fatalf("teardown %+v: the wait's failed read must not fail teardown itself", w.teardownWd)
+	}
+}
+
+// TestTeardownLiveFightSkippedOnSignalStop: a cancelled walk context skips the wait entirely (no sleep, no retry),
+// and teardown proceeds with a note naming the skip.
+func TestTeardownLiveFightSkippedOnSignalStop(t *testing.T) {
+	goal := zgBossStepOf(t, 14517)
+	now := time.Now()
+	var slept time.Duration
+	w, d := teardownFightsWalk(t, now, &slept)
+	d.fights = nil
+	w.saveFightsAtStart()
+	live := jeklikKillRow("68-9", true, now.Unix()-600)
+	live.Step = uint32(goal)
+	d.fights = []walkFightRow{live}
+	w.saveFights()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the signal path: the walk context is already cancelled
+	w.phaseTeardown(ctx)
+	if slept != 0 {
+		t.Fatalf("slept %v: a signal stop must skip the live-fight wait", slept)
+	}
+	var skipped []string
+	for _, n := range w.notes {
+		if strings.Contains(n, "live-fight wait is skipped") {
+			skipped = append(skipped, n)
+		}
+	}
+	if len(skipped) != 1 {
+		t.Fatalf("skip notes %q, want exactly one", skipped)
+	}
+	if w.teardownWd.Failed {
+		t.Fatalf("teardown %+v: skipping the wait must not fail teardown itself", w.teardownWd)
 	}
 }
 
