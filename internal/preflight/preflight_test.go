@@ -529,6 +529,37 @@ zg1 m910q 2 zg1-b full -- zul_gurub --sql /x.sql --until none
 	}
 }
 
+// A practice goal is a targets.txt goal exactly as the autopilot reads it (practice:<ENTRY>:<CYCLES>): the live proof
+// on walk 74's dir was refused with "want full, leg:<L> or boss:<ENTRY>" (round 2). The goal also decides the
+// roster's fight scope: a practice run fights that boss, so a thin roster is warned about it like a boss goal.
+func TestTargetsFilePracticeGoal(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "targets.txt"), 0o644, `zg9 m910q 1 zg9-a practice:14834:10 -- zul_gurub --sql /x.sql
+zg9 m910q 2 zg9-b practice:14834 -- zul_gurub --sql /x.sql
+`)
+	ts, errs := readTargets(dir)
+	if len(ts) != 1 {
+		t.Fatalf("%d targets, want 1: %+v", len(ts), errs)
+	}
+	if ts[0].goalBoss != 14834 || ts[0].goalLeg != "" || ts[0].slot != "1" {
+		t.Fatalf("practice target: %+v", ts[0])
+	}
+	if len(errs) != 1 || !strings.Contains(errs[0].msg, "practice:<ENTRY>:<CYCLES>") {
+		t.Fatalf("the malformed practice goal: %+v", errs)
+	}
+
+	f := newFixture(t)
+	hire := filepath.Join(f.walk, "roster2.json")
+	roster(t, hire, `{"role":"mt","hire":"1 warrior:tank"},{"role":"rest","hire":"5h 12d"}`)
+	writeFile(t, filepath.Join(f.walk, "x.sql"), 0o644, "")
+	writeFile(t, filepath.Join(f.walk, "targets.txt"), 0o644,
+		"p m910q 2 p-h practice:14834:10 -- zul_gurub --sql "+filepath.Join(f.walk, "x.sql")+" --hires "+hire+"\n")
+	rep := f.run(t, Deps{})
+	if res := findSubject(rep, CheckRoster, hire); res == nil || res.Status != Warn || !strings.Contains(res.Detail, "Hakkar") {
+		t.Fatalf("2 tanks for a Hakkar practice: %+v", find(rep, CheckRoster))
+	}
+}
+
 func TestExitCodes(t *testing.T) {
 	f := newFixture(t)
 	f.cmd(t, "cmd-a.txt", f.cmdLine("--slot 1 --until none"))

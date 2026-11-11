@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/slots"
 )
 
@@ -36,7 +37,8 @@ type target struct {
 	capFlag int
 	capSet  bool
 
-	// goalBoss and goalLeg come from a targets.txt line's goal (boss:<entry>, leg:<name>); zero when absent.
+	// goalBoss and goalLeg come from a targets.txt line's goal, parsed by raidwalk.ParseAutoGoal: a boss or a
+	// practice goal names the boss the walk fights, a leg goal names where it stops. Zero when absent.
 	goalBoss uint32
 	goalLeg  string
 }
@@ -355,26 +357,20 @@ func parseTargetsFile(data, path string) ([]target, []fileError) {
 			continue
 		}
 		cmd.flags = append(cmd.flags, rawFlag{name: "server", value: server}, rawFlag{name: "slot", value: slot}, rawFlag{name: "holder", value: holder})
+		// The goal grammar is the autopilot's own (full, leg:<L>, boss:<ENTRY>, practice:<ENTRY>:<CYCLES>): a second
+		// parser here would drift from the one that launches the walk.
+		g, err := raidwalk.ParseAutoGoal(goal)
+		if err != nil {
+			errs = append(errs, fileError{file: path, msg: fmt.Sprintf("line %d: %v", n+1, err)})
+			continue
+		}
 		var boss uint32
 		leg := ""
-		switch {
-		case goal == "full":
-		case strings.HasPrefix(goal, "boss:"):
-			nb, err := strconv.ParseUint(strings.TrimPrefix(goal, "boss:"), 10, 32)
-			if err != nil {
-				errs = append(errs, fileError{file: path, msg: fmt.Sprintf("line %d: bad goal %q", n+1, goal)})
-				continue
-			}
-			boss = uint32(nb)
-		case strings.HasPrefix(goal, "leg:"):
-			leg = strings.TrimPrefix(goal, "leg:")
-			if leg == "" {
-				errs = append(errs, fileError{file: path, msg: fmt.Sprintf("line %d: bad goal %q", n+1, goal)})
-				continue
-			}
-		default:
-			errs = append(errs, fileError{file: path, msg: fmt.Sprintf("line %d: goal %q (want full, leg:<L> or boss:<ENTRY>)", n+1, goal)})
-			continue
+		switch g.Kind {
+		case "boss", "practice":
+			boss = g.Boss
+		case "leg":
+			leg = g.Leg
 		}
 		cmd.binary = "turtle-agent"
 		ts, err := expandCmd(cmd)
