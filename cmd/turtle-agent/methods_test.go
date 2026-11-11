@@ -684,6 +684,7 @@ func TestEquipmentMethod(t *testing.T) {
 		t.Fatalf("no enchant, no field: %v", row)
 	}
 }
+
 // gm_set_hp carries the guid only: the session restores the unit to its own MaxHealth, and an explicit hp is refused
 // before anything is selected or sent (Codex HIGH: no caller can lower a unit's max health).
 func TestGMSetHPRPCRefusesHPArgument(t *testing.T) {

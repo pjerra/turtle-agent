@@ -668,6 +668,7 @@ func TestParseAutoTargetsBossWipeFreshNeedsFrom(t *testing.T) {
 		t.Fatalf("err %v, want the needs---from error", err)
 	}
 }
+
 // The practice goal token round-trips, and every malformed form is refused rather than guessed at (a typo must not
 // silently launch a full clear).
 func TestPracticeGoalParse(t *testing.T) {
