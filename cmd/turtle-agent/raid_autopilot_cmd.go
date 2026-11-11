@@ -129,6 +129,10 @@ type autoGoalState struct {
 	// bossWipes counts the fresh-instance relaunches after a wipe at a boss since this goal last made progress (a
 	// step beyond bestStep); a goal advance starts a new goalState.
 	bossWipes int
+	// freshPending is the pending fresh-after-wipe mode (--boss-wipe-fresh): set when a FreshAfterWipe restart is
+	// decided and cleared only when a launch gets past placement. While set, every launch uses the goal's --from
+	// in a fresh instance, across exit-26 retries, other pre-placement failures and checkpoint save/restore.
+	freshPending bool
 	// dead says an attempt's summary reported this goal's boss dead: the goal is met and DONE, never placed again
 	// (walk 39: a re-added raid kept walking a boss another raid had already killed).
 	dead bool
@@ -136,19 +140,16 @@ type autoGoalState struct {
 
 // autoRun is one live or finished raid-walk attempt. Its fields are guarded by its state's mutex.
 type autoRun struct {
-	seq   int
-	out   string
-	slot  string
-	reuse bool
-	// freshAfterWipe says the last decision was FreshAfterWipe: with --boss-wipe-fresh the next launch starts the
-	// goal again from its own start (a --gm-instance-data goal without the flag keeps today's step resume).
-	freshAfterWipe bool
-	goal           raidwalk.AutoGoal
-	cmd            *exec.Cmd
-	pidN           int
-	adopted        bool
-	started        time.Time
-	exited         bool
+	seq     int
+	out     string
+	slot    string
+	reuse   bool
+	goal    raidwalk.AutoGoal
+	cmd     *exec.Cmd
+	pidN    int
+	adopted bool
+	started time.Time
+	exited  bool
 	// exitedAt is when the autopilot saw the exit (the summary may still be being written).
 	exitedAt time.Time
 	exitCode int
@@ -1656,6 +1657,16 @@ func (s *autoSupervisor) finish(st *autoState) {
 	}
 	if d.FreshAfterWipe {
 		g.bossWipes++
+		// The fresh-after-wipe mode stays pending across exit-26 retries, other pre-placement failures and
+		// checkpoint save/restore: every launch uses the goal's --from in a fresh instance until one gets past
+		// placement (round 4: an exit-26 retry used bestStep, the boss row, instead).
+		g.freshPending = true
+	} else {
+		// Placed runs clear it (a fresh copy is now the instance); hire-pool waits can arrive after a placement,
+		// and a hire-pool wait never clears it (no placement happened yet).
+		if r.placed && d.Action != raidwalk.AutoHirePoolWait {
+			g.freshPending = false
+		}
 	}
 	if r.exitCode == 15 {
 		g.leaseFails++
@@ -1704,7 +1715,6 @@ func (s *autoSupervisor) finish(st *autoState) {
 		}
 	case raidwalk.AutoRestart:
 		st.last.reuse = d.Reuse
-		st.last.freshAfterWipe = d.FreshAfterWipe
 		wait := s.o.settle
 		if d.Backoff > wait {
 			wait = d.Backoff
@@ -1856,14 +1866,15 @@ func (s *autoSupervisor) launch(st *autoState) {
 		from = fmt.Sprintf("step %d", step)
 		reuse = !fresh
 	}
-	if g.target.BossWipeFresh && st.last != nil && st.last.freshAfterWipe && g.target.Start != "" {
+	if g.target.BossWipeFresh && g.freshPending {
 		// A boss wipe with --boss-wipe-fresh: the goal starts again from its own start in a fresh instance, never a
 		// step resume into the old copy (a same-instance relaunch keeps the respawned tunnel trash that caused exit 19).
 		// bestStep survives: only a run past the OLD best counts as progress, so a fresh run that wipes at the same
-		// boss again does not reset the wipe budget.
+		// boss again does not reset the wipe budget. The mode stays pending until a launch gets past placement, so an
+		// exit-26 retry between the wipe and placement still starts from the goal's --from, never from bestStep.
 		from = g.target.Start
 		reuse = false
-		st.last.lastStep = 0
+		step = 0
 		s.event(st.id, "resume", fmt.Sprintf("fresh instance after a boss wipe: from the goal's start %q", from))
 	}
 	resumeFrom := ""
@@ -2541,8 +2552,9 @@ type autoSavedID struct {
 	GoalsDone int    `json:"goals_done"`
 	LastStep  int    `json:"last_step"`
 	Reuse     bool   `json:"reuse"`
-	// FreshAfterWipe says the last decision was a fresh-instance relaunch after a boss wipe (--boss-wipe-fresh): a
-	// restart resumes it from the goal's own start (a --gm-instance-data goal without the flag keeps the step resume).
+	// FreshAfterWipe is the stale fresh-after-wipe run marker from rounds 1-3 (carried on a finished st.last). It is
+	// unused now: the pending fresh-after-wipe mode lives on the goal and the checkpoint's fresh_pending entry. It
+	// stays on disk so an older checkpoint still reads back.
 	FreshAfterWipe bool   `json:"fresh_after_wipe,omitempty"`
 	Attempt        int    `json:"attempt"`
 	ChildPID       int    `json:"child_pid,omitempty"`
@@ -2568,6 +2580,9 @@ type autoSavedID struct {
 	// BossWipes is the current goal's fresh-instance relaunches after a boss wipe since its last progress, across a
 	// restart too (a checkpoint from before it reads 0).
 	BossWipes int `json:"boss_wipes,omitempty"`
+	// FreshPending is the current goal's pending fresh-after-wipe mode (--boss-wipe-fresh): while set, every launch
+	// uses the goal's --from in a fresh instance, across a supervisor restart too.
+	FreshPending bool `json:"fresh_pending,omitempty"`
 	// BossDead says the current goal's boss is dead in the instance: the goal is DONE at a start, never placed again.
 	BossDead bool `json:"boss_dead,omitempty"`
 	// CapWaits is the id's consecutive instance-cap refusals (exit 26): the fourth stops it for a person, across a
@@ -2602,9 +2617,10 @@ func (s *autoSupervisor) saveState() {
 			e.Attempt, e.LastStep, e.BossDead, e.HireWaits = g.attempt, g.bestStep, g.dead, g.hireWaits
 			e.Exit29Retries = g.exit29Retries
 			e.BossWipes = g.bossWipes
+			e.FreshPending = g.freshPending
 		}
 		if st.last != nil {
-			e.OutDir, e.Reuse, e.FreshAfterWipe = st.last.out, st.last.reuse, st.last.freshAfterWipe
+			e.OutDir, e.Reuse = st.last.out, st.last.reuse
 			if st.last.lastStep > e.LastStep {
 				e.LastStep = st.last.lastStep
 			}
@@ -2731,6 +2747,7 @@ func (s *autoSupervisor) reconcile() error {
 				st.goals[st.current].hireWaits = sv.HireWaits
 				st.goals[st.current].exit29Retries = sv.Exit29Retries
 				st.goals[st.current].bossWipes = sv.BossWipes
+				st.goals[st.current].freshPending = sv.FreshPending || sv.FreshAfterWipe
 			}
 			st.done, st.escalated = sv.Done, sv.Escalated
 			st.stopped, st.stopWhy = sv.Stopped, sv.StopWhy
@@ -2747,7 +2764,7 @@ func (s *autoSupervisor) reconcile() error {
 				// The last attempt, as the checkpoint saw it: its step is where a restart starts. It is torn
 				// down already (the checkpoint writes only after a verified teardown), so a YIELD must not tear
 				// the stale slot dir down again.
-				st.last = &autoRun{out: sv.OutDir, slot: t.Slot, reuse: sv.Reuse, freshAfterWipe: sv.FreshAfterWipe, lastStep: sv.LastStep, exited: true, adopted: true, pidN: sv.ChildPID, tornDown: true}
+				st.last = &autoRun{out: sv.OutDir, slot: t.Slot, reuse: sv.Reuse, lastStep: sv.LastStep, exited: true, adopted: true, pidN: sv.ChildPID, tornDown: true}
 			}
 		}
 		done := st.done || st.escalated || (st.current < len(st.goals) && st.goals[st.current].dead)
