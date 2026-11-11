@@ -727,6 +727,130 @@ func TestPlaceGMClearSecondStopInstanceMismatchStopsTheClear(t *testing.T) {
 	}
 }
 
+// Round 1 sees part of a pack and misses one member; the second round still runs and kills it. The far member hides
+// through round 1's reads (one read per stop) and shows from round 2 on: the pack is unsettled while a member is
+// unseen, so round 2 walks again and the far member's own stop kills it. The clear is whole.
+func TestPlaceGMClearSecondRoundKillsAMemberMissedInRoundOne(t *testing.T) {
+	_, guids := gmClearPack(t, gmClearZGSpawns)
+	far := guids[len(guids)-1]
+	dir := gmClearFarExport(t, raidwalk.SpawnGUID(far))
+	pack, guids := gmClearPack(t, dir)
+	stops := pack.Stops()
+	if len(stops) < 2 {
+		t.Fatalf("a pack wider than the view needs several stops, has %d", len(stops))
+	}
+	f, tk := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = dir
+	var quiet atomic.Bool
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if strings.HasPrefix(cmd, "quiet") {
+			quiet.Store(true)
+		}
+		return tk.answer(cmd)
+	}
+	reads := 0
+	f.agent.unitsFn = func(int) []objects.Unit {
+		dead := func(g packet.GUID) bool { f.agent.mu.Lock(); defer f.agent.mu.Unlock(); return f.agent.killed[g] }
+		if quiet.Load() { // the walk's quiet check, after the clear
+			return gmClearView(f, pack, guids, dead)
+		}
+		reads++
+		us := gmClearView(f, pack, guids, dead)
+		if reads <= len(stops) {
+			// Round 1's reads: the far member never shows, so the pack ends the round with a member unseen.
+			kept := us[:0]
+			for _, u := range us {
+				if u.GUID != far {
+					kept = append(kept, u)
+				}
+			}
+			us = kept
+		}
+		return us
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.GMClearPartial || len(sum.GMClear) != len(guids) {
+		t.Fatalf("partial %v, gm_clear %+v", sum.GMClearPartial, sum.GMClear)
+	}
+	// Round 1 read every stop and killed nothing far; round 2 ran and read again.
+	if reads <= len(stops) {
+		t.Fatalf("%d clear reads for %d stops, want more: the unseen member must run the second round", reads, len(stops))
+	}
+	killedFar := false
+	for _, l := range f.agentLog() {
+		if l == "gm_kill "+far.String() {
+			killedFar = true
+		}
+	}
+	if !killedFar {
+		t.Fatal("the member missed in round 1 was never killed in round 2")
+	}
+	for _, e := range sum.GMClear {
+		if !e.Killed {
+			t.Errorf("entry %+v", e)
+		}
+	}
+}
+
+// The clear's final instance check fails: after the packs are killed and the commander is back at the start point, a
+// `q inst` naming another copy fails the walk on the existing error path, and no kill goes out after that read.
+func TestPlaceGMClearFinalInstanceCheckFailureSendsNoKill(t *testing.T) {
+	f, tk := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
+	// The copy moves under the walk once every live member is killed: every later `q inst` is the clear's final
+	// check (kills, sleeps and unit reads send no `q inst` between the last kill and it).
+	allKilled := func() bool {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		for _, g := range guids {
+			if !f.agent.killed[g] {
+				return false
+			}
+		}
+		return true
+	}
+	var armed atomic.Bool
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if cmd == "q inst" && allKilled() {
+			armed.Store(true)
+			return ttReplyOf(t, map[string]any{"map": 309, "inst": 104}), nil
+		}
+		return tk.answer(cmd)
+	}
+	f.agent.unitsFn = func(int) []objects.Unit {
+		dead := func(g packet.GUID) bool { f.agent.mu.Lock(); defer f.agent.mu.Unlock(); return f.agent.killed[g] }
+		return gmClearView(f, pack, guids, dead)
+	}
+	postFlipKills := 0
+	f.agent.killFn = func(g packet.GUID, tries int) bool {
+		if armed.Load() {
+			postFlipKills++
+		}
+		return true
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d: %s\n%s", code, exitRaidWalkFailed, f.stderr.String(), f.stdout.String())
+	}
+	if reason := f.summary().EndReason; !strings.Contains(reason, "not the raid's 103") {
+		t.Fatalf("end reason %q, want the final instance check's mismatch", reason)
+	}
+	if !armed.Load() {
+		t.Fatal("the copy never moved: the run ended before the clear's final check")
+	}
+	if postFlipKills != 0 {
+		t.Fatalf("%d kills after the failed final check, want none", postFlipKills)
+	}
+}
+
 // With no pack member ever in view, every expected member is recorded as not seen, the clear is PARTIAL, and the walk still reads twice.
 func TestPlaceGMClearNothingInViewIsPartial(t *testing.T) {
 	f, _ := newPlaceFixture(t)
