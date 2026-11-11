@@ -682,7 +682,8 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 // beside the respawn pit (one fewer group and its three approach rows), 399; the Mandokir 440 fix makes group 0 a stand pull (no approach-path rows) and deletes group 1's first approach point, 398; walk 38 stages the Jin'do hall (two more approach rows on the lone mistresses, one fewer plain-pull approach) and splits Jeklik's patrol camps (two more rows), 402; the Arlokk re-route's authored approaches, its z 60 formation row and the split top pack, 420; the Arlokk route fix round 1 walks the mesh's loop and pulls each pack from a single stand (one approach row each) and authors the arena descent in the gong step's stand and the boss approach, 414; combined, both row sets are in one plan (walk 38's hall rows, review round 2's undo included, the Arlokk leg's loop and descent), 416), a placed
 // The Arlokk route fix round 2 and the later rounds bring it to 416 (t1105c). t1105e: 417, Hakkar's approach is two
 // plan points now (the ramp lip -11807.651 -1691.3049 52.111286 and the stand -11790 -1662 53.11; the exported rows are
-// 694, one fewer, because the lip replaces a path row the cutter used to add).
+// 694, one fewer, because the lip replaces a path row the cutter used to add). Walk 71 fast (t1106k): 416, leg 8's
+// entry drops its second via and `to` is the placement row the placed walk already starts on.
 // `--until none` run from Marli stops before the segment on leg 6 that passes Venoxis, and the shortened corridor
 // clears clean.
 
@@ -693,8 +694,8 @@ func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	if len(rows.Steps) != 417 {
-		t.Fatalf("the fixture has %d steps, want 417", len(rows.Steps))
+	if len(rows.Steps) != 416 {
+		t.Fatalf("the fixture has %d steps, want 416", len(rows.Steps))
 	}
 	start, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
 	if err != nil {
