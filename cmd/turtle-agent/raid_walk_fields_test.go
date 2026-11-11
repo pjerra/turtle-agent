@@ -62,3 +62,47 @@ func TestWalkFramePowerTypeNeedsAPool(t *testing.T) {
 		}
 	}
 }
+
+// TestSaveFrameKeepsReason (walk 2e N2): the module sends the cast-fail reason in the P record (internal/tbm/view.go),
+// but savedBot dropped it, so the frames could not say why an I/F verdict did not run. A ViewFrame member with
+// Result "I" and Reason "moving" must write "reason":"moving"; a member with no reason must write no reason key.
+func TestSaveFrameKeepsReason(t *testing.T) {
+	ff, err := os.Create(filepath.Join(t.TempDir(), "frames.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ff.Close()
+	w := &walk{framesF: ff, roster: &raidwalk.Roster{}}
+	w.saveFrame(time.Unix(1000, 0), &tbm.ViewFrame{Party: []tbm.PartyRec{
+		{Name: "Caster", Action: "shadow bolt", Result: "I", Reason: "moving"},
+		{Name: "Nuker", Action: "fireball", Result: "O"},
+	}})
+	raw, err := os.ReadFile(ff.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec struct {
+		Party []map[string]any `json:"party"`
+	}
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		t.Fatalf("frames.jsonl: %v: %s", err, raw)
+	}
+	if len(rec.Party) != 2 {
+		t.Fatalf("%d bots in the frame, want 2: %s", len(rec.Party), raw)
+	}
+	for _, p := range rec.Party {
+		reason, has := p["reason"]
+		switch p["name"] {
+		case "Caster":
+			if !has || reason != "moving" {
+				t.Fatalf("Caster reason %v (present %v), want moving: %s", reason, has, raw)
+			}
+		case "Nuker":
+			if has {
+				t.Fatalf("Nuker carries reason %v, want no key: %s", reason, raw)
+			}
+		default:
+			t.Fatalf("unexpected bot %v", p["name"])
+		}
+	}
+}
