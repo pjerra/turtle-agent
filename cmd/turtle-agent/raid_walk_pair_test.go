@@ -388,7 +388,7 @@ func TestRaidWalkPairTwoRealWalks(t *testing.T) {
 		if err := json.Unmarshal(raw, &s); err != nil {
 			t.Fatal(err)
 		}
-		if s.ExitCode != exitOK || s.EndReason != "until" || s.StepsReached != 28 {
+		if s.ExitCode != exitOK || s.EndReason != "until" || s.StepsReached != 20 {
 			t.Fatalf("%s summary %+v", sub, s)
 		}
 	}
@@ -419,7 +419,7 @@ func TestRaidWalkPairTwoRealWalks(t *testing.T) {
 		t.Fatalf("pair.json %+v", p)
 	}
 	for i, w := range p.Walks {
-		if w.Slot != fmt.Sprint(i+1) || w.Plan != "onyxias_lair" || w.ExitCode != exitOK || w.EndReason != "until" || w.StepsReached != 28 {
+		if w.Slot != fmt.Sprint(i+1) || w.Plan != "onyxias_lair" || w.ExitCode != exitOK || w.EndReason != "until" || w.StepsReached != 20 {
 			t.Fatalf("walk %d %+v", i, w)
 		}
 		if w.Tab != "#/commanders/Commander" {

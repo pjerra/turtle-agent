@@ -3127,6 +3127,213 @@ func TestAutoWipeAtBossWithoutGMInstanceDataKeepsTheInstance(t *testing.T) {
 
 const bossWipeTarget = "a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --gm-instance-data hakkar:1 3;6 3;0 0"
 
+// A fresh instance throws away earlier kills; --boss-wipe-fresh extends the fresh-after-wipe rule to goals that
+// restart from their own start: a wipe at the boss row relaunches from the goal's own start in a fresh instance,
+// never "--from step N --reuse-instance".
+func TestBossWipeFreshRelaunchesFromGoalStart(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	args := f.args()
+	if !strings.Contains(args[1], "--from leg tunnel --place") || strings.Contains(args[1], "--reuse-instance") {
+		t.Fatalf("the boss-wipe-fresh restart did not start from the goal's start fresh: %s\n%s", args[1], f.events())
+	}
+	if !strings.Contains(f.events(), "fresh instance after a boss wipe") {
+		t.Fatalf("no fresh-instance-after-a-boss-wipe resume event:\n%s", f.events())
+	}
+	if st := s.states[0]; st.goals[st.current].exit29Retries != 0 {
+		t.Fatalf("the boss wipe used the goal's exit-29 retry")
+	}
+}
+
+// --boss-wipe-fresh is consumed by the autopilot: it never reaches the raid-walk args.
+func TestBossWipeFreshFlagConsumed(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	for _, a := range f.args() {
+		if strings.Contains(a, "--boss-wipe-fresh") {
+			t.Fatalf("--boss-wipe-fresh reached the raid-walk args: %s", a)
+		}
+	}
+}
+
+// --boss-wipe-fresh takes no value: the start refuses the line.
+func TestBossWipeFreshValueRejected(t *testing.T) {
+	if _, err := raidwalk.ParseAutoTargets(strings.NewReader("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --boss-wipe-fresh=1\n")); err == nil || !strings.Contains(err.Error(), "--boss-wipe-fresh takes no value") {
+		t.Fatalf("err %v, want the no-value error", err)
+	}
+}
+
+// A --gm-instance-data goal without --boss-wipe-fresh keeps today's step start after a boss wipe.
+func TestGMInstanceDataWithoutFlagKeepsStepStart(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --gm-instance-data hakkar:1 3;6 3;0 0")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	if a := f.args()[1]; !strings.Contains(a, "--from step 396 --place") || strings.Contains(a, "--reuse-instance") {
+		t.Fatalf("a --gm-instance-data goal without --boss-wipe-fresh did not keep the step start: %s", a)
+	}
+}
+
+// An exit 19 at a tunnel row is not a boss wipe: the same-instance step relaunch stays.
+func TestBossWipeFreshNotOnTunnelExit19(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	f.attempt("a-1", 19, 300, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	if a := f.args()[1]; !strings.Contains(a, "--reuse-instance") {
+		t.Fatalf("an exit 19 away from the boss took a fresh instance: %s\n%s", a, f.events())
+	}
+}
+
+// A --boss-wipe-fresh goal counts its wipe budget across fresh relaunches: three boss wipes without progress
+// escalate at the third (default --boss-wipe-max 3), even though every relaunch starts from the goal's own start.
+func TestBossWipeFreshThreeWipesWithoutProgressEscalates(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	for i := 1; i <= 3; i++ {
+		f.attempt(fmt.Sprintf("a-%d", i), 19, 397, "wipe: the raid died")
+	}
+	f.attempt("a-4", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 3; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+	}
+	if n := len(f.args()); n != 3 {
+		t.Fatalf("%d launches, want 3 (the third boss wipe stops the id):\n%s", n, f.events())
+	}
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("three boss wipes without progress did not escalate:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "boss wipe x3 without progress") {
+		t.Fatalf("no ESCALATE line for the boss wipes:\n%s", f.events())
+	}
+}
+
+// The no-budget bug this round fixes: with --boss-wipe-fresh every relaunch starts from the goal's own start,
+// but the wipe budget must still count across those relaunches (a fresh run past the old best is progress and
+// resets the count). Mirrors TestAutoBossWipeProgressResetsTheCount: 396 (progress), 396 (none), 397 (progress:
+// count restarts), 397 (none), 397 (none: the third since progress escalates).
+func TestBossWipeFreshProgressPastOldBestResetsTheCount(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	for i, step := range []int{396, 396, 397, 397, 397} {
+		f.attempt(fmt.Sprintf("a-%d", i+1), 19, step, "wipe: the raid died")
+	}
+	f.attempt("a-6", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 5; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		if _, esc := runState(s.states[0]); esc {
+			t.Fatalf("escalated before launch %d:\n%s", i, f.events())
+		}
+		finishAttempt(t, s)
+	}
+	if n := len(f.args()); n != 5 {
+		t.Fatalf("%d launches, want 5:\n%s", n, f.events())
+	}
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("three wipes since the last progress did not escalate:\n%s", f.events())
+	}
+	for i, a := range f.args()[1:] {
+		if !strings.Contains(a, "--from leg tunnel --place") || strings.Contains(a, "--reuse-instance") {
+			t.Fatalf("launch %d did not start fresh from the goal's start: %s", i+2, a)
+		}
+	}
+}
+
+// Round 4 (Codex HIGH): an exit-26 retry between the boss wipe and placement loses the fresh start. The fresh-instance
+// relaunch after the wipe exits 26 before placement, and the cap retry must still start from the goal's --from in a
+// fresh instance, never from bestStep (the boss row). bestStep still survives: a later run past it counts as progress.
+func TestBossWipeFreshCapRetryKeepsGoalStart(t *testing.T) {
+	const capEnd = "instance cap: waited 20m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation"
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 26, 0, capEnd)
+	f.attempt("a-3", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the fresh relaunch", func() bool { return len(f.args()) >= 2 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the cap retry", func() bool { return len(f.args()) >= 3 })
+	for i, a := range f.args()[1:] {
+		if !strings.Contains(a, "--from leg tunnel --place") || strings.Contains(a, "--reuse-instance") {
+			t.Fatalf("launch %d did not start fresh from the goal's start: %s\n%s", i+2, a, f.events())
+		}
+	}
+	if st := s.states[0]; st.goals[st.current].bestStep != 397 {
+		t.Fatalf("bestStep %d after the wipe, want 397 (kept across the fresh relaunches)", st.goals[st.current].bestStep)
+	}
+	if !strings.Contains(f.events(), "instance-cap-wait") {
+		t.Fatalf("no instance-cap-wait event:\n%s", f.events())
+	}
+}
+
+// Round 4: the pending fresh-after-wipe mode survives a supervisor restart from the checkpoint. The wipe and the
+// exit-26 retry finish under one supervisor, a new supervisor reads the checkpoint, and its launch must still start
+// from the goal's --from in a fresh instance.
+func TestBossWipeFreshCapRetrySurvivesARestart(t *testing.T) {
+	const capEnd = "instance cap: waited 20m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation"
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 26, 0, capEnd)
+	f.attempt("a-3", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the fresh relaunch", func() bool { return len(f.args()) >= 2 })
+	finishAttempt(t, s)
+	s.saveState()
+	s2 := f.supervisor()
+	tickUntil(t, s2, "the launch after the restart", func() bool { return len(f.args()) >= 3 })
+	if a := f.args()[2]; !strings.Contains(a, "--from leg tunnel --place") || strings.Contains(a, "--reuse-instance") {
+		t.Fatalf("the post-restart launch did not start fresh from the goal's start: %s\n%s", a, f.events())
+	}
+}
+
+// Round 4: a launch that gets past placement clears the pending fresh-after-wipe mode. The fresh relaunch walks the
+// tunnel (step 12, not the boss), and the next restart resumes from the reached step in the same instance.
+func TestBossWipeFreshPlacementClearsTheMode(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 19, 12, "wipe: the raid died")
+	f.attempt("a-3", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the fresh relaunch", func() bool { return len(f.args()) >= 2 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the resume after placement", func() bool { return len(f.args()) >= 3 })
+	if a := f.args()[1]; !strings.Contains(a, "--from leg tunnel --place") || strings.Contains(a, "--reuse-instance") {
+		t.Fatalf("the fresh relaunch did not start from the goal's start: %s\n%s", a, f.events())
+	}
+	if a := f.args()[2]; !strings.Contains(a, "--reuse-instance") {
+		t.Fatalf("the restart after a placed run did not resume the same instance: %s\n%s", a, f.events())
+	}
+}
+
 // Round 1 (HIGH): every boss wipe took a fresh instance with no budget, so a raid that cannot beat the boss spent
 // ~6 instances an hour forever (the cap is 5 per account). The third boss wipe in a row without progress stops the id.
 func TestAutoBossWipeThreeTimesWithoutProgressEscalates(t *testing.T) {

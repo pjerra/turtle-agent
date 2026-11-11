@@ -2444,6 +2444,7 @@ type savedBot struct {
 	Spell     uint32  `json:"spell,omitempty"`  // the spell it casts or channels
 	Action    string  `json:"action,omitempty"` // the last action its AI ran
 	Result    string  `json:"result,omitempty"` // the verdict on that action (O ok, F failed, I impossible, U useless, P queued, V dropped)
+	Reason    string  `json:"reason,omitempty"` // why a refused cast did not run (oom, range, los, cd, moving, casting, no-item, no-target), TB P record field 20
 }
 
 type savedHostile struct {
@@ -2486,7 +2487,7 @@ func (w *walk) saveFrame(now time.Time, f *tbm.ViewFrame) {
 		bot := savedBot{GUID: p.GUID.String(), Name: p.Name, X: p.X, Y: p.Y, Z: p.Z, Map: p.Map,
 			HP: p.HP, MaxHP: p.MaxHP, Power: p.Power, MaxPower: p.MaxPower,
 			Dead: p.Dead || p.State == "d", State: p.State,
-			Spell: p.Spell, Action: p.Action, Result: p.Result}
+			Spell: p.Spell, Action: p.Action, Result: p.Result, Reason: p.Reason}
 		if p.MaxPower > 0 { // no power pool, no power_type: an absent key is not mana (0)
 			pt := p.PowerType
 			bot.PowerType = &pt

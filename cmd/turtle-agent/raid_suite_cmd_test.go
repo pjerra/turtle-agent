@@ -169,7 +169,7 @@ func TestRaidSuiteRegressionExit24(t *testing.T) {
 	suite := writeSuiteFile(t, raidSuiteEntry{Plan: "onyxias_lair", Dir: suiteDir})
 	hist := t.TempDir()
 	old := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
-	writeSuiteSummary(t, filepath.Join(hist, "onyxias_lair", "20250101-000000"), suiteSummary("boss", old, 301))
+	writeSuiteSummary(t, filepath.Join(hist, "onyxias_lair", "20250101-000000"), suiteSummary("leg onyxia", old, 301))
 	out := filepath.Join(t.TempDir(), "suite-out")
 	var stdout, stderr bytes.Buffer
 	code := raidSuiteCmd(context.Background(), []string{"--suite", suite, "--history", hist, "--out", out}, &stdout, &stderr)
@@ -290,7 +290,7 @@ func TestRaidSuiteDryRun(t *testing.T) {
 	}
 	stamp := regexp.MustCompile(`[0-9]{8}-[0-9]{6}`)
 	got := strings.ReplaceAll(stamp.ReplaceAllString(stdout.String(), "<stamp>"), hist, "<history>")
-	want := "onyxias_lair tier 2 (table) until boss out <history>/onyxias_lair/<stamp>\n" +
+	want := "onyxias_lair tier 2 (table) until leg onyxia out <history>/onyxias_lair/<stamp>\n" +
 		"molten_core: refused: raid molten_core has no minimum hire tier in internal/raidwalk/tiers.go: pass --tier N (1-3), the kit a player holds when the raid is next\n"
 	if got != want {
 		t.Fatalf("dry run stdout:\n%s\nwant:\n%s", got, want)
