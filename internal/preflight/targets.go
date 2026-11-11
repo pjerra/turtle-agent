@@ -69,8 +69,9 @@ var switchFlags = map[string]bool{
 	"instance-cap-fail": true, "instance-cap-unsafe": true, "instance-cap-reset": true,
 }
 
-// readTargets reads every cmd-*.txt and targets.txt of the walk directory.
-func readTargets(dir string) ([]target, []fileError) {
+// readTargets reads every cmd-*.txt and targets.txt of the walk directory. binary is the turtle-agent a target that
+// names none is checked as.
+func readTargets(dir, binary string) ([]target, []fileError) {
 	var targets []target
 	var errs []fileError
 	names, err := os.ReadDir(dir)
@@ -120,6 +121,13 @@ func readTargets(dir string) ([]target, []fileError) {
 		errs = append(errs, errs2...)
 	} else if !os.IsNotExist(err) {
 		errs = append(errs, fileError{file: tpath, msg: err.Error()})
+	}
+	for i := range targets {
+		// A command's own path stays (it is a literal invocation); the bare default name is --binary's, as the
+		// autopilot replaces its own launcher and nothing else.
+		if targets[i].binary == "" || targets[i].binary == "turtle-agent" {
+			targets[i].binary = binary
+		}
 	}
 	return targets, errs
 }

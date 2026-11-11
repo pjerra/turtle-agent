@@ -126,7 +126,11 @@ type Options struct {
 	SlotsPath string
 	// KeysPath is the required-keys file (default ~/.config/turtle-agent/preflight-keys.json).
 	KeysPath string
-	Deps     Deps
+	// Binary is the turtle-agent a target that names none is checked as (a targets.txt line, or a command whose
+	// binary is the bare `turtle-agent` name). Default: this executable, exactly what the autopilot launches without
+	// its own --binary.
+	Binary string
+	Deps   Deps
 }
 
 // DefaultKeysPath is the required server keys file.
@@ -182,6 +186,13 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 	if opts.KeysPath == "" {
 		opts.KeysPath = DefaultKeysPath()
 	}
+	if opts.Binary == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			return nil, fmt.Errorf("no --binary and this executable cannot be resolved: %w", err)
+		}
+		opts.Binary = exe
+	}
 	c := &check{
 		opts:       opts,
 		deps:       opts.Deps,
@@ -209,7 +220,7 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 		c.deps.Now = time.Now
 	}
 
-	targets, errs := readTargets(dir)
+	targets, errs := readTargets(dir, opts.Binary)
 	for _, e := range errs {
 		c.add(Fail, CheckBinary, filepath.Base(e.file), e.msg, "fix the command file")
 	}

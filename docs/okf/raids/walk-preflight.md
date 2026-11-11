@@ -29,7 +29,7 @@ skipped), and prints one `OK`/`WARN`/`FAIL` line per subject with a fix hint. It
 ledger and the slot table are only read, and the server checks are read-only ssh calls.
 
 ```
-turtle-agent walk-preflight [--server NAME]... [--json] <walk-dir>
+turtle-agent walk-preflight [--server NAME]... [--binary PATH] [--json] <walk-dir>
 ```
 
 ## Flags
@@ -37,6 +37,7 @@ turtle-agent walk-preflight [--server NAME]... [--json] <walk-dir>
 | Flag | Default | What it does | Example |
 |---|---|---|---|
 | `--server NAME` | every server | Keep only the commands of these servers (repeatable, or a comma list). A named server with no command is a failure, so a typo does not silently pass. | `--server m910q` |
+| `--binary PATH` | this executable | The turtle-agent to check for a command that names none: every `targets.txt` line, and a `cmd-*.txt` line whose binary is the bare name `turtle-agent`. A command that names its own path keeps it. Without the flag the preflight checks its own executable, exactly the binary `raid-autopilot` launches without its own `--binary`. | `--binary ~/ta-1111a-bin/turtle-agent` |
 | `--json` | off | Print the report as one JSON object (`dir`, `results[]` with `check`, `status`, `subject`, `detail`, `fix`). | `--json` |
 | `<walk-dir>` | required | The walk directory: the commands are resolved and read from here, and relative paths are resolved against it. | `~/walks/zg38` |
 
@@ -48,7 +49,7 @@ turtle-agent walk-preflight [--server NAME]... [--json] <walk-dir>
 
 | # | Check | Passes when |
 | --- | --- | --- |
-| 1 | binary | Every binary the commands name exists, runs `--help`, and prints a version; the report adds its Go build commit when the binary has one. One walk may not mix binaries (WARN). |
+| 1 | binary | Every binary the commands name (`--binary` for a target that names none) exists, runs `--help`, and prints a version; the subject line is the resolved path, so the report says which binary was checked, and it adds the binary's Go build commit when it has one. One walk may not mix binaries (WARN). |
 | 2 | slots schema | The binary parses `slots.json` (`lease list` on a private copy, so no lock or lease in the real folder); an unknown field is a FAIL. |
 | 3 | slots path | No command passes a `--slots` other than the default path: a split lease table also splits the instance-cap ledger (FAIL). |
 | 4 | instance cap | `instance-cap-per-account.json` beside the slot table (`{"<server>": 30}`) parses and the resolved cap is printed per binary and server. A binary that would use the stock 5 while the file says more is a FAIL; an explicit `--instance-cap-per-account` on a binary without that flag is a FAIL. The binary's support is read from the flag in its `raid-walk --help`. A missing file is a WARN (and 5 everywhere). |
@@ -67,9 +68,12 @@ checked for existence; `--place` alone is enough to demand it.
 
 ## `targets.txt`
 
-The same file `raid-autopilot` reads: one goal per line, `id server slot holder goal -- <plan> [raid-walk flags...]`,
-where the goal is `full`, `leg:<leg name>` or `boss:<entry>`. A line that starts with a turtle-agent binary and
-`raid-walk` is taken as a full command instead. The preflight adds `--server`, `--slot` and `--holder` from the header.
+The same file `raid-autopilot` reads, and it is read by the autopilot's own parser, so both accept exactly the same
+lines: one goal per line, `id server slot holder goal -- <plan> [raid-walk flags...]`, where the goal is `full`,
+`leg:<leg name>`, `boss:<entry>` or `practice:<entry>:<cycles>`. A two-word flag (`--from leg hakkar`) and a value that
+holds spaces (`--gm-instance-data hakkar:1 3;2 3`) read as they do in the launch path, with or without quotes. A line
+that starts with a turtle-agent binary and `raid-walk` is taken as a full command instead. The preflight adds
+`--server`, `--slot` and `--holder` from the header, and reads a line as placed, as the autopilot launches it.
 
 ## `preflight-keys.json`
 

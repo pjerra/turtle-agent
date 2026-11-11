@@ -127,7 +127,7 @@ func (f *fixture) run(t *testing.T, deps Deps) *Report {
 	if deps.Probe == nil {
 		deps.Probe = fakeProbe{}
 	}
-	rep, err := Run(context.Background(), Options{Dir: f.walk, SlotsPath: f.slots, KeysPath: f.keys, Deps: deps})
+	rep, err := Run(context.Background(), Options{Dir: f.walk, SlotsPath: f.slots, KeysPath: f.keys, Binary: f.bin, Deps: deps})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,7 +514,7 @@ func TestTargetsFile(t *testing.T) {
 zg1 m910q 1 zg1-a boss:14515 -- zul_gurub --sql /x.sql --until none
 zg1 m910q 2 zg1-b full -- zul_gurub --sql /x.sql --until none
 `)
-	ts, errs := readTargets(dir)
+	ts, errs := readTargets(dir, "turtle-agent")
 	if len(errs) != 0 {
 		t.Fatalf("errors: %+v", errs)
 	}
@@ -537,7 +537,7 @@ func TestTargetsFilePracticeGoal(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "targets.txt"), 0o644, `zg9 m910q 1 zg9-a practice:14834:10 -- zul_gurub --sql /x.sql
 zg8 m910q 2 zg8-b practice:14834 -- zul_gurub --sql /x.sql
 `)
-	ts, errs := readTargets(dir)
+	ts, errs := readTargets(dir, "turtle-agent")
 	if len(ts) != 1 {
 		t.Fatalf("%d targets, want 1: %+v", len(ts), errs)
 	}
@@ -568,7 +568,7 @@ func TestTargetsFileMultiWordValues(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "targets.txt"), 0o644,
 		"hk13mh-1 m910q 13 zg74-hk13mh-1 boss:14834 -- zul_gurub --dir /plans --sql /x.sql "+
 			"--place --from leg hakkar --gm-clear-spawns /spawns --gm-instance-data hakkar:1 3;2 3;3 3;4 3\n")
-	ts, errs := readTargets(dir)
+	ts, errs := readTargets(dir, "turtle-agent")
 	if len(errs) != 0 || len(ts) != 1 {
 		t.Fatalf("%d targets, %+v", len(ts), errs)
 	}
@@ -583,6 +583,35 @@ func TestTargetsFileMultiWordValues(t *testing.T) {
 	}
 	if len(cmd) != 1 || cmd[0].from != "leg hakkar" || cmd[0].plan != "zul_gurub" {
 		t.Fatalf("cmd form: %+v", cmd)
+	}
+}
+
+// A target that names no binary is checked as --binary, not as a name under the walk directory: the live proof
+// reported `<walk-dir>/turtle-agent: no such file` for every targets.txt line, and the fix hint named a --binary flag
+// that did not exist (round 2). A command's own path is a literal invocation and stays.
+func TestTargetsBinaryResolution(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "targets.txt"), 0o644, "zg1 m910q 1 zg1-a full -- zul_gurub --sql /x.sql\n")
+	writeFile(t, filepath.Join(dir, "cmd-a.txt"), 0o644, "/opt/ta/bin/turtle-agent raid-walk zul_gurub --server m910q --slot 2 --sql /x.sql\n")
+	ts, errs := readTargets(dir, "/opt/ta/default/turtle-agent")
+	if len(errs) != 0 || len(ts) != 2 {
+		t.Fatalf("%d targets, %+v", len(ts), errs)
+	}
+	if ts[0].binary != "/opt/ta/bin/turtle-agent" {
+		t.Fatalf("a command's own path was replaced: %q", ts[0].binary)
+	}
+	if ts[1].binary != "/opt/ta/default/turtle-agent" {
+		t.Fatalf("targets.txt binary: %q, want --binary's", ts[1].binary)
+	}
+
+	// Options.Binary reaches the check: the report names the binary it ran, not a walk-dir path.
+	f := newFixture(t)
+	writeFile(t, filepath.Join(f.walk, "x.sql"), 0o644, "")
+	writeFile(t, filepath.Join(f.walk, "targets.txt"), 0o644,
+		"p m910q 2 p-h full -- zul_gurub --sql "+filepath.Join(f.walk, "x.sql")+"\n")
+	rep := f.run(t, Deps{})
+	if res := findSubject(rep, CheckBinary, f.bin); res == nil || res.Status != OK {
+		t.Fatalf("the --binary binary was not checked: %+v", find(rep, CheckBinary))
 	}
 }
 

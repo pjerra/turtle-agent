@@ -3,6 +3,7 @@
 ## 2026-11-11
 
 - **Added**: `walk-preflight` checks a walk directory before any raid-walk starts: binaries, `slots.json` and its path, the per-account instance cap, the leases, `--place`/`--gm-clear`, the plan against its deployed export, the server config keys and the raid rosters, one OK/WARN/FAIL line per subject (exit 0/1/2). Read-only: nothing in the walk directory, the slot table or the server configs is written.
+- **Update**: `walk-preflight` reads `targets.txt` with the autopilot's own parser (practice goals, a two-word `--from leg L` and a `--gm-instance-data` value with spaces included), checks `--binary` for a target that names no binary, and defaults to its own executable as the autopilot does.
 - **Update**: a practice goal's stall counts against the same two-relaunch budget as its exits: a practice run that freezes without exiting relaunches like any stall but spends the budget, and the third end stops the id for a person instead of relaunching forever.
 
 ## 2026-11-08
