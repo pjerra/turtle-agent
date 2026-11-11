@@ -535,7 +535,7 @@ zg1 m910q 2 zg1-b full -- zul_gurub --sql /x.sql --until none
 func TestTargetsFilePracticeGoal(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "targets.txt"), 0o644, `zg9 m910q 1 zg9-a practice:14834:10 -- zul_gurub --sql /x.sql
-zg9 m910q 2 zg9-b practice:14834 -- zul_gurub --sql /x.sql
+zg8 m910q 2 zg8-b practice:14834 -- zul_gurub --sql /x.sql
 `)
 	ts, errs := readTargets(dir)
 	if len(ts) != 1 {
@@ -557,6 +557,32 @@ zg9 m910q 2 zg9-b practice:14834 -- zul_gurub --sql /x.sql
 	rep := f.run(t, Deps{})
 	if res := findSubject(rep, CheckRoster, hire); res == nil || res.Status != Warn || !strings.Contains(res.Detail, "Hakkar") {
 		t.Fatalf("2 tanks for a Hakkar practice: %+v", find(rep, CheckRoster))
+	}
+}
+
+// A flag value may be more than one word: `--from leg hakkar` is the autopilot's own two-word form, and
+// `--gm-instance-data hakkar:1 3;2 3;3 3` carries spaces inside one value. Read word by word they became phantom
+// plans ("2 plans for 1 slots", "8 plans for 1 slots"), so the live proof failed every line of walk 74's dir.
+func TestTargetsFileMultiWordValues(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "targets.txt"), 0o644,
+		"hk13mh-1 m910q 13 zg74-hk13mh-1 boss:14834 -- zul_gurub --dir /plans --sql /x.sql "+
+			"--place --from leg hakkar --gm-clear-spawns /spawns --gm-instance-data hakkar:1 3;2 3;3 3;4 3\n")
+	ts, errs := readTargets(dir)
+	if len(errs) != 0 || len(ts) != 1 {
+		t.Fatalf("%d targets, %+v", len(ts), errs)
+	}
+	if t0 := ts[0]; t0.plan != "zul_gurub" || t0.slot != "13" || t0.goalBoss != 14834 || !t0.place || t0.from != "leg hakkar" {
+		t.Fatalf("targets.txt line: %+v", t0)
+	}
+	// The cmd-*.txt form has the same two shapes, unquoted.
+	cmd, err := parseCommand("/bin/turtle-agent raid-walk zul_gurub --server m910q --slot 2 --from leg hakkar "+
+		"--gm-instance-data hakkar:1 3;2 3", "cmd-a.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cmd) != 1 || cmd[0].from != "leg hakkar" || cmd[0].plan != "zul_gurub" {
+		t.Fatalf("cmd form: %+v", cmd)
 	}
 }
 

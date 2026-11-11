@@ -163,15 +163,33 @@ func parseRawCmd(args []string, source string) (*rawCmd, error) {
 			name, val, has = name[:j], name[j+1:], true
 		}
 		if !has {
-			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
+			switch {
+			case name == "gm-instance-data":
+				// The value holds spaces: `<leg>:<a> <b>[;<a> <b>...]`. The autopilot reads it the same way (the words
+				// after the flag, up to the next flag) and hands the walk one argv, so a quoted or an unquoted line
+				// reads alike.
+				var words []string
+				for i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
+					i++
+					words = append(words, args[i])
+				}
+				if val = strings.Join(words, " "); val == "" {
+					return nil, fmt.Errorf("--%s needs a value", name)
+				}
+			case name == "from" && i+2 < len(args) && (args[i+1] == "step" || args[i+1] == "leg") && !strings.HasPrefix(args[i+2], "--"):
+				// raid-walk's --from takes two words (`leg L` or `step N`), as the autopilot parses it.
+				val = args[i+1] + " " + args[i+2]
+				i += 2
+			case i+1 >= len(args) || strings.HasPrefix(args[i+1], "--"):
 				if switchFlags[name] {
 					cmd.flags = append(cmd.flags, rawFlag{name: name, value: "on"})
 					continue
 				}
 				return nil, fmt.Errorf("--%s needs a value", name)
+			default:
+				i++
+				val = args[i]
 			}
-			i++
-			val, has = args[i], true
 		}
 		cmd.flags = append(cmd.flags, rawFlag{name: name, value: val})
 	}
@@ -307,7 +325,10 @@ func expandCmd(cmd *rawCmd) ([]target, error) {
 //
 //	id server slot holder goal -- <plan> [raid-walk args...]
 //
-// and also accepts a full "<binary> raid-walk ..." line. Blank lines and # lines are skipped.
+// The lines are parsed by raidwalk.ParseAutoTargetsLenient, the autopilot's own reader, so the preflight cannot drift
+// from the launch path: the goal grammar (practice:<ENTRY>:<CYCLES> included), the two-word `--from leg L`, an
+// unquoted `--gm-instance-data <value with spaces>` and the managed flags all read here exactly as they do there. A
+// full "<binary> raid-walk ..." line is taken as a command instead (cmd-*.txt form), so both files can name a walk.
 func parseTargetsFile(data, path string) ([]target, []fileError) {
 	var out []target
 	var errs []fileError
@@ -330,60 +351,58 @@ func parseTargetsFile(data, path string) ([]target, []fileError) {
 			out = append(out, ts...)
 			continue
 		}
-		sep := -1
-		for i, w := range words {
-			if w == "--" {
-				sep = i
-				break
-			}
-		}
-		if sep != 5 {
-			errs = append(errs, fileError{file: path, msg: fmt.Sprintf("line %d: want `id server slot holder goal -- <plan> [args]`", n+1)})
-			continue
-		}
-		id, server, slot, holder, goal := words[0], words[1], words[2], words[3], words[4]
-		if id == "" {
-			errs = append(errs, fileError{file: path, msg: fmt.Sprintf("line %d: no raid id", n+1)})
-			continue
-		}
-		if slot == "" {
-			errs = append(errs, fileError{file: path, msg: fmt.Sprintf("line %d: no slot", n+1)})
-			continue
-		}
-		args := words[sep+1:]
-		cmd, err := parseRawCmd(args, fmt.Sprintf("%s:%d", filepath.Base(path), n+1))
+	}
+	ats, issues, err := raidwalk.ParseAutoTargetsLenient(strings.NewReader(data), nil)
+	if err != nil && len(issues) == 0 {
+		// A file with no valid line left (or an unreadable stream): the issues, when there are any, carry the reason.
+		errs = append(errs, fileError{file: path, msg: err.Error()})
+	}
+	for _, is := range issues {
+		errs = append(errs, fileError{file: path, msg: is.Err.Error()})
+	}
+	for _, at := range ats {
+		ts, err := targetsFromAuto(at, fmt.Sprintf("%s:%d", filepath.Base(path), at.Line))
 		if err != nil {
-			errs = append(errs, fileError{file: path, msg: fmt.Sprintf("line %d: %v", n+1, err)})
+			errs = append(errs, fileError{file: path, msg: fmt.Sprintf("line %d: %v", at.Line, err)})
 			continue
-		}
-		cmd.flags = append(cmd.flags, rawFlag{name: "server", value: server}, rawFlag{name: "slot", value: slot}, rawFlag{name: "holder", value: holder})
-		// The goal grammar is the autopilot's own (full, leg:<L>, boss:<ENTRY>, practice:<ENTRY>:<CYCLES>): a second
-		// parser here would drift from the one that launches the walk.
-		g, err := raidwalk.ParseAutoGoal(goal)
-		if err != nil {
-			errs = append(errs, fileError{file: path, msg: fmt.Sprintf("line %d: %v", n+1, err)})
-			continue
-		}
-		var boss uint32
-		leg := ""
-		switch g.Kind {
-		case "boss", "practice":
-			boss = g.Boss
-		case "leg":
-			leg = g.Leg
-		}
-		cmd.binary = "turtle-agent"
-		ts, err := expandCmd(cmd)
-		if err != nil {
-			errs = append(errs, fileError{file: path, msg: fmt.Sprintf("line %d: %v", n+1, err)})
-			continue
-		}
-		for i := range ts {
-			ts[i].goalBoss, ts[i].goalLeg = boss, leg
 		}
 		out = append(out, ts...)
 	}
 	return out, errs
+}
+
+// targetsFromAuto turns one autopilot target into the preflight's targets: its raid-walk args are read the same way
+// as a command line's, with the fields the autopilot manages filled back in from the parsed target.
+func targetsFromAuto(at raidwalk.AutoTarget, source string) ([]target, error) {
+	cmd, err := parseRawCmd(at.Args, source)
+	if err != nil {
+		return nil, err
+	}
+	cmd.binary = "turtle-agent"
+	cmd.flags = append(cmd.flags,
+		rawFlag{name: "server", value: at.Server},
+		rawFlag{name: "slot", value: at.Slot},
+		rawFlag{name: "holder", value: at.Holder},
+		// The autopilot launches every target with --place (a restart asks for the goal's own start), so the
+		// placement check reads it as on.
+		rawFlag{name: "place", value: "on"})
+	var boss uint32
+	leg := ""
+	switch at.Goal.Kind {
+	case "boss", "practice":
+		boss = at.Goal.Boss
+	case "leg":
+		leg = at.Goal.Leg
+	}
+	ts, err := expandCmd(cmd)
+	if err != nil {
+		return nil, err
+	}
+	for i := range ts {
+		ts[i].from = at.Start
+		ts[i].goalBoss, ts[i].goalLeg = boss, leg
+	}
+	return ts, nil
 }
 
 // splitWords splits a command line into words: white space separates, single and double quotes group, a backslash
