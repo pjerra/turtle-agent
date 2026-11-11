@@ -221,7 +221,9 @@ func TestTeardownUnreachableDashboardRetriesOnceThenStops(t *testing.T) {
 	d.fightsStallFirst, d.fightsStall = 1000, time.Hour // every later Fights call blocks until its context ends
 	before := time.Now()
 	w.phaseTeardown(context.Background())
-	if took := time.Since(before); took > 30*time.Second {
+	// The wait spends its whole budget before it gives up (it sleeps up to the deadline and reads until the
+	// context's), so the wall clock lands on teardownLiveFightWait: allow the scheduler tick, not another poll.
+	if took := time.Since(before); took > teardownLiveFightWait+time.Second {
 		t.Fatalf("teardown took %v: an unreachable dashboard must not hold it past the wait", took)
 	}
 	if slept > teardownLiveFightWait {
