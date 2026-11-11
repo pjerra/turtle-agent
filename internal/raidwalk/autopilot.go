@@ -627,8 +627,9 @@ type AutoDecision struct {
 	// FreshAfterWipe marks the restart as the fresh-instance relaunch after a wipe at a boss. It is not the goal's
 	// exit-29 retry and not a failed placement: the caller counts neither.
 	FreshAfterWipe bool
-	// PracticeRelaunch marks the restart as the practice goal's exit-18 relaunch (the caller counts it in the goal's
-	// practice relaunches, kept in the checkpoint).
+	// PracticeRelaunch marks the restart as one of the practice goal's budgeted relaunches (exit 18, never engaged, a
+	// bounded non-zero end, or a stall): the caller counts it in the goal's practice relaunches, kept in the
+	// checkpoint.
 	PracticeRelaunch bool
 	// PracticeKilledRetry marks the practice goal's one fresh-instance relaunch after the boss died during the
 	// practice before the cycle target (the caller records it; the second death gives up).
@@ -668,12 +669,20 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 			}
 		}
 		if !progress.IsZero() && now.Sub(progress) >= stall {
-			return AutoDecision{
-				Action:  AutoRestart,
-				Reuse:   true,
-				Backoff: AutoBackoff(r.FastFailures),
-				Reason:  fmt.Sprintf("stalled: no step or boss-HP change for %s (step %d)", now.Sub(progress).Round(time.Second), o.StepsReached),
+			reason := fmt.Sprintf("stalled: no step or boss-HP change for %s (step %d)", now.Sub(progress).Round(time.Second), o.StepsReached)
+			d := AutoDecision{Action: AutoRestart, Reuse: true, Backoff: AutoBackoff(r.FastFailures), Reason: reason}
+			// A practice walk that keeps freezing without ever exiting is torn down and relaunched like any stall, and
+			// the relaunch spends the same persisted budget as an exit relaunch (finish counts it from
+			// PracticeRelaunch): without that, a frozen practice relaunches forever (Codex HIGH, round 1).
+			if r.Goal.Kind == "practice" {
+				if r.PracticeRelaunches >= AutoPracticeRelaunches {
+					return AutoDecision{Action: AutoStop, Escalate: true,
+						Reason: fmt.Sprintf("practice: gave up after %d relaunches (%s)", r.PracticeRelaunches, shortReason(reason))}
+				}
+				d.PracticeRelaunch = true
+				d.Reason = fmt.Sprintf("practice: %s: relaunch %d of %d", shortReason(reason), r.PracticeRelaunches+1, AutoPracticeRelaunches)
 			}
+			return d
 		}
 		return AutoDecision{Action: AutoContinue, Reason: fmt.Sprintf("running, step %d", o.StepsReached)}
 	}

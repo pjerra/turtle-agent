@@ -758,6 +758,33 @@ func TestPracticeRelaunchBudget(t *testing.T) {
 	}
 }
 
+// A practice walk that keeps freezing without ever exiting is torn down and relaunched like any stall; without a bound
+// that repeats forever (Codex HIGH, round 1). A stall counts against the same persisted relaunch budget as an exit
+// relaunch: the count comes back with the restarted supervisor's state, so two stalls relaunch and the third stops the
+// id for a person, exactly as the exit path does. A non-practice stall is unchanged.
+func TestPracticeStallCountsAgainstRelaunchBudget(t *testing.T) {
+	goal := AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}
+	frozen := AutoObservation{Exited: false, StepsReached: 3, StepsTotal: 40, LastProgress: autoNow.Add(-20 * time.Minute)}
+	for n := range AutoPracticeRelaunches {
+		d := DecideAutoAction(frozen, AutoRunState{Goal: goal, PracticeRelaunches: n}, autoNow, 15*time.Minute)
+		if d.Action != AutoRestart || !d.PracticeRelaunch || d.Escalate {
+			t.Fatalf("stall %d: %+v, want a counted practice relaunch", n+1, d)
+		}
+		if !d.Reuse {
+			t.Fatalf("stall %d asked for a fresh instance: a stalled practice resumes in the same copy", n+1)
+		}
+	}
+	d := DecideAutoAction(frozen, AutoRunState{Goal: goal, PracticeRelaunches: AutoPracticeRelaunches}, autoNow, 15*time.Minute)
+	if d.Action != AutoStop || !d.Escalate || !strings.Contains(d.Reason, "practice: gave up after 2 relaunches") {
+		t.Fatalf("%+v, want the practised-out stop", d)
+	}
+	// The same frozen run on a boss goal keeps today's stall restart and never spends a practice relaunch.
+	b := DecideAutoAction(frozen, AutoRunState{Goal: AutoGoal{Kind: "boss", Boss: 14515}}, autoNow, 15*time.Minute)
+	if b.Action != AutoRestart || b.PracticeRelaunch || b.Escalate {
+		t.Fatalf("boss stall %+v, want the unchanged stall restart", b)
+	}
+}
+
 // A practice goal's exit 18 whose summed cycles already meet the target is met: no relaunch.
 func TestPracticeRelaunchNotNeededWhenTheSumMetTheGoal(t *testing.T) {
 	goal := AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}
