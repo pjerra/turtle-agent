@@ -73,7 +73,6 @@ type practiceScenario struct {
 	goneAt    time.Time
 	evadeN    int
 	respawnN  int
-	reviveN   int
 	onEvade   func()
 	attemptAt time.Time
 }
@@ -810,6 +809,39 @@ func TestPracticePauseACKWithoutStatusRefused(t *testing.T) {
 		if n := countLog(f.agent.log, meth); n != 0 {
 			t.Fatalf("%d %s calls after an unconfirmed pause (log %v)", n, meth, f.agent.log)
 		}
+	}
+}
+
+// TestPracticePauseNotRunningProceeds: a reset whose pause answers "The run is not running" (the live practice 2/3
+// incident) proceeds with the reset instead of exiting 18: evade, revive, respawn go out, no resume follows (no run
+// slot is left), and the next attempt's re-engagement starts it again.
+func TestPracticePauseNotRunningProceeds(t *testing.T) {
+	sc := &practiceScenario{}
+	f, _, _ := practiceFixture(t, sc, 10)
+	sc.mu.Lock()
+	sc.dropAt = f.clock.now().Add(time.Hour)
+	sc.mu.Unlock()
+	fails := true
+	f.agent.pauseErr = &fails
+	f.agent.pauseErrMsg = "The run is not running"
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (notes %v): %s", code, exitRaidWalkFailed, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Attempts != 2 || sum.Practice.Cycles != 10 || sum.Practice.Ended != "cycles" {
+		t.Fatalf("practice %+v, want 2 attempts, 10 cycles, ended cycles (the reset proceeded)", sum.Practice)
+	}
+	if n := countLog(f.agent.log, "cmdr run pause"); n != 1 {
+		t.Fatalf("%d run pauses, want 1 (log %v)", n, f.agent.log)
+	}
+	if n := countLog(f.agent.runVerbs, "resume"); n != 0 {
+		t.Fatalf("%d run resumes, want 0 (no run slot left to resume into)", n)
+	}
+	if sc.evadeN != 1 {
+		t.Fatalf("%d evades, want 1", sc.evadeN)
+	}
+	if !hasNote(f.summary(), "the run already ended before the reset pause") {
+		t.Fatalf("notes %v, want the already-ended note", f.summary().Notes)
 	}
 }
 

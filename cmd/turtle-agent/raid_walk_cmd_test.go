@@ -184,13 +184,17 @@ type walkFakeAgent struct {
 	// runVerbs records every `run` commander request's verb, in order, and onSkip runs for one whose verb is skip
 	// (walk 24 B: the boss-not-found skip). skipErr makes that skip answer an error (a refusal). pauseErr, when
 	// non-nil, makes `run pause` fail while it points at true (a refused pause: the gm-instance-data resume test);
+	// pauseErrMsg overrides the refusal's message (the practice's already-gone run: "The run is not running").
 	// onPause runs after an accepted pause (the fake server's TBM:RUN paused line) and nil models an ACK with no
 	// status, which the practice reset must refuse.
 	runVerbs []string
 	onSkip   func()
 	skipErr  bool
 	pauseErr *bool
-	onPause  func()
+	// pauseErrMsg overrides the refused pause's message (the practice's already-gone run answers "The run is not
+	// running" instead of the default "the run is busy").
+	pauseErrMsg string
+	onPause     func()
 	// onStart runs after a `run start` was answered and its startQueue was pushed (a test that needs lines after a
 	// later start: the boss-not-found re-run). nil: nothing.
 	onStart func()
@@ -1501,11 +1505,15 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 		if p.Verb == "pause" {
 			f.mu.Lock()
 			fail := f.pauseErr != nil && *f.pauseErr
+			msg := f.pauseErrMsg
 			hook := f.onPause
 			f.mu.Unlock()
 			if fail {
+				if msg == "" {
+					msg = "the run is busy"
+				}
 				return commanderReply{Reply: tbm.Reply{Kind: "err", Err: &tbm.Err{Intent: "run pause", Code: "refused",
-					Message: "the run is busy"}}}
+					Message: msg}}}
 			}
 			if hook != nil {
 				hook()

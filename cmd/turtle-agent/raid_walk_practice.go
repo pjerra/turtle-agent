@@ -125,6 +125,9 @@ type practiceState struct {
 	// lastCast is the last cycle's cast time: a cast within EverySec/2 of it is the same cast (a spell_start and its
 	// spell_go, or the event of a cast the timer already counted), never a second cycle.
 	lastCast time.Time
+	// runGone means the reset's pause found no run (the server answered it is not running): the reset ran
+	// unheld and the resume is skipped (there is no run slot left to resume into).
+	runGone bool
 	// awaitingReengage says the next attempt follows a reset and its clock starts only when the boss re-engages.
 	awaitingReengage bool
 	// lastResetOK is the reset's own verdict (the boss showed home, 100 % and no target): only a reset that landed
@@ -976,6 +979,14 @@ func (w *walk) practiceSonsAlive() int {
 	return n
 }
 
+// practiceRunNotGoing reports a server answer that means the run is already gone: the wipe rule stopped it (the
+// practice saw this at ~10.5 min in), or it ended or was stopped from under the reset. The wording varies across
+// servers ("No run is going", "The run is not running"): match the stable core.
+func practiceRunNotGoing(msg string) bool {
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "run is not running") || strings.Contains(lower, "no run is going")
+}
+
 // practiceReset pauses the run, resets the boss and the Sons, rests, resends the instance data and resumes the run at
 // the boss row. ok is false when the boss did not show reset (home, 100 %, no target) in practiceResetWait.
 func (w *walk) practiceReset(ctx context.Context, p *practiceState, bossStep int) (bool, error) {
@@ -984,13 +995,20 @@ func (w *walk) practiceReset(ctx context.Context, p *practiceState, bossStep int
 		p.ended = "boss killed during practice"
 		return true, nil
 	}
-	// `run pause` holds the run with its binding kept. Never `.bot run stop`: a stop ENDS the run and erases its slot,
-	// so the resume after the reset would find no run going. A pause that did not land (a refusal, no ACK, no paused
-	// status in practicePauseWait) ends the practice HERE: a reset whose evade and GM hands run while the still-running
-	// party fights would reset the boss under the raid. Nothing below this line may happen unheld.
+	// `run pause` holds the run with its binding kept. Never `.bot run stop`: a stop ENDS the run and erases its
+	// slot, so the resume after the reset would find no run going. A pause that did not land (a refusal, no ACK,
+	// no paused status in practicePauseWait) ends the practice HERE, EXCEPT when the server says the run is
+	// already gone ("The run is not running" / "No run is going": the wipe rule stopped it, or it ended or was
+	// stopped from under the reset). Then there is nothing to hold: the reset proceeds without a held run, and the
+	// resume at the end is skipped too (there is no run slot left to resume into).
 	if err := w.pauseRun(ctx); err != nil {
-		p.ended = "run pause refused"
-		return false, stopf(exitRaidWalkFailed, "practice: the run pause before the reset failed: %v", err)
+		if !practiceRunNotGoing(err.Error()) {
+			p.ended = "run pause refused"
+			return false, stopf(exitRaidWalkFailed, "practice: the run pause before the reset failed: %v", err)
+		}
+		w.note("practice: the run already ended before the reset pause: continuing unheld")
+		w.logLine(w.env.now(), "practice: the run is not running, the reset proceeds without a pause")
+		p.runGone = true
 	}
 	if err := w.practiceGMEvade(ctx, p.bossGUID); err != nil {
 		return false, err
@@ -1034,6 +1052,12 @@ func (w *walk) practiceReset(ctx context.Context, p *practiceState, bossStep int
 		}
 	}
 	now := w.env.now()
+	// A run that was already gone at the pause has no slot left to resume into: the GM reset stands alone, and the
+	// next attempt re-engages the boss from the world state it finds.
+	if p.runGone {
+		w.logLine(now, "practice: reset done; no run to resume (it already ended)")
+		return resetOK, nil
+	}
 	if err := w.resumeRun(ctx, bossStep, now, w.opts.practiceRest); err != nil {
 		// resumeRun's absolute-deadline failure is a *recoveryTimeout, which the wipe paths turn into exit 19 ("wipe
 		// at step N"). During practice that is the wrong ending: the run did not come back after the reset, a practice
