@@ -979,11 +979,22 @@ func (w *walk) practiceSonsAlive() int {
 	return n
 }
 
-// practiceRunNotGoing reports a server answer that means the run is already gone: the wipe rule stopped it (the
-// practice saw this at ~10.5 min in), or it ended or was stopped from under the reset. The wording varies across
-// servers ("No run is going", "The run is not running"): match the stable core.
-func practiceRunNotGoing(msg string) bool {
-	lower := strings.ToLower(msg)
+// errRunNotRunning marks the reset pause's already-gone answer: the server's `run pause` reply says no run is
+// going. Only the reply carries it (see pauseRun); transport, poll and interrupt errors never match.
+var errRunNotRunning = errors.New("run is not running")
+
+// practiceRunNotGoing reports the server's already-gone answer to `run pause`: the wipe rule stopped it (the
+// practice saw this at ~10.5 min in), or it ended or was stopped from under the reset. Match the reply's own code
+// or message ("no-run", "No run is going", "The run is not running"): never the text of a transport, poll or
+// interrupt error.
+func practiceRunNotGoing(err *tbm.Err) bool {
+	if err == nil {
+		return false
+	}
+	if strings.EqualFold(err.Code, "no-run") || strings.EqualFold(err.Code, "not-running") {
+		return true
+	}
+	lower := strings.ToLower(err.Message)
 	return strings.Contains(lower, "run is not running") || strings.Contains(lower, "no run is going")
 }
 
@@ -1002,7 +1013,7 @@ func (w *walk) practiceReset(ctx context.Context, p *practiceState, bossStep int
 	// stopped from under the reset). Then there is nothing to hold: the reset proceeds without a held run, and the
 	// resume at the end is skipped too (there is no run slot left to resume into).
 	if err := w.pauseRun(ctx); err != nil {
-		if !practiceRunNotGoing(err.Error()) {
+		if !errors.Is(err, errRunNotRunning) {
 			p.ended = "run pause refused"
 			return false, stopf(exitRaidWalkFailed, "practice: the run pause before the reset failed: %v", err)
 		}
@@ -1084,6 +1095,9 @@ func (w *walk) pauseRun(ctx context.Context) error {
 		return err
 	}
 	if rep.Reply.Err != nil {
+		if practiceRunNotGoing(rep.Reply.Err) {
+			return fmt.Errorf("run pause refused (%s): %w", rep.Reply.Err.Message, errRunNotRunning)
+		}
 		return fmt.Errorf("run pause: %s", rep.Reply.Err.Message)
 	}
 	if !rep.Reply.OK && rep.Reply.Kind != tbm.KindAck {

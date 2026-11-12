@@ -171,6 +171,9 @@ type walkFakeAgent struct {
 	// startCallErr makes the `run start` RPC itself fail (a timed-out call: the server may still have accepted the
 	// start), after the fake recorded it and ran its startQueue and onStart hooks.
 	startCallErr error
+	// pauseCallErr makes the `run pause` RPC itself fail (a transport error, never the server's reply): even when
+	// its text mentions the run not running it must not read as the already-gone answer.
+	pauseCallErr error
 	bindLayout   string
 	enterReply   *commanderReply
 	enterBusy    int // the first enterBusy enter orders answer ERR busy
@@ -649,6 +652,9 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		v = f.commander(&p)
 		if p.Op == "run" && p.Verb == "start" && f.startCallErr != nil {
 			return f.startCallErr
+		}
+		if p.Op == "run" && p.Verb == "pause" && f.pauseCallErr != nil {
+			return f.pauseCallErr
 		}
 	case "tt":
 		var p ttParams
