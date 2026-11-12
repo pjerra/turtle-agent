@@ -100,6 +100,30 @@ func TestBodyPullFlaggedBeforeTargeting(t *testing.T) {
 	}
 }
 
+// The Gurubashi Champion (11356) in zul_gurub's export has wander 11356 (the entry in the wrong column, planlint's wanderCapYd
+// case), level 61 with detection 20, random movement. Against a level-60 party its reach is 21 yd + 3 spread: 20 yd off the
+// route it wakes, and the reported reach is 24 yd, not 11356 + 24.
+func TestChampionTypoWanderNotAggroReach(t *testing.T) {
+	champ := spawnAt(49794, 11356, "Gurubashi Champion", 1050, 20, 0)
+	champ.LevelMax = 61
+	champ.MovementType = 1
+	champ.Wander = 11356
+	w := worldOf(champ)
+	rep := Check(rowsOf(move(1000, 0, 0), move(1100, 0, 0), move(1200, 0, 0)), w, opts())
+
+	seg := segTo(t, rep, 2)
+	p := segPack(t, seg, 49794)
+	if len(p.Wakers) != 1 || p.Wakers[0].GUID != 49794 {
+		t.Fatalf("wakers %+v, want the champion at 20 yd", p.Wakers)
+	}
+	if got := p.Wakers[0].AggroYd; got < 23.9 || got > 24.1 {
+		t.Fatalf("champion aggro reach %.1f yd, want 24 (21 aggro + 3 spread, wander 11356 ignored as a typo)", got)
+	}
+	if strings.Contains(rep.Text(), "11380") || strings.Contains(rep.Text(), "11387") {
+		t.Errorf("text reports the typo wander as aggro:\n%s", rep.Text())
+	}
+}
+
 // The approach stand right before the pull is the intended clear too: walking to it is not a body pull.
 func TestOwnPullIsNotDanger(t *testing.T) {
 	w := worldOf(spawnAt(1, 100, "Trash", 1050, 21, 0))

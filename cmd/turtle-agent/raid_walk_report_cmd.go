@@ -95,17 +95,19 @@ func raidWalkReportCmd(args []string, stdout, stderr io.Writer) int {
 	// The walk's summary says whether --gm-clear assisted it (absent or unreadable: not assisted as far as this folder shows).
 	var gmClear []raidwalk.GMClearEntry
 	assisted := false
+	var practice *raidwalk.PracticeSummary
 	if raw, err := os.ReadFile(filepath.Join(dir, "summary.json")); err == nil {
 		var sum struct {
-			Assisted bool                    `json:"assisted"`
-			GMClear  []raidwalk.GMClearEntry `json:"gm_clear"`
+			Assisted bool                      `json:"assisted"`
+			GMClear  []raidwalk.GMClearEntry   `json:"gm_clear"`
+			Practice *raidwalk.PracticeSummary `json:"practice"`
 		}
 		if json.Unmarshal(raw, &sum) == nil {
-			assisted, gmClear = sum.Assisted, sum.GMClear
+			assisted, gmClear, practice = sum.Assisted, sum.GMClear, sum.Practice
 		}
 	}
 	rep := raidwalk.BuildReport(fights, lines, raidwalk.ReportOptions{Spells: ids, Window: *window, ClockOffset: *offset, PullJoins: pullJoins,
-		GMClear: gmClear, Assisted: assisted})
+		GMClear: gmClear, Assisted: assisted, Practice: practice})
 	rep.Source = dir
 	rep.Notes = append(rep.Notes, notes...)
 	if len(fights) == 0 {

@@ -70,10 +70,13 @@ type Summary struct {
 	// Place is the `place` object of a `--place` walk (spec 5.11): the start step the raid was put at, the instance, the
 	// cleared circles and the result. Absent without --place.
 	Place *PlaceSummary `json:"place,omitempty"`
-	// Assisted is true for a walk that used --gm-clear (a test server's GM killed units for it): the result is NOT a real clear.
-	// GMClear lists every unit the tool tried to kill. Both are absent without --gm-clear.
+	// Assisted is true for a walk that used --gm-clear (a test server's GM killed units for it) or --practice: the
+	// result is NOT a real clear. GMClear lists every unit the tool tried to kill. Both are absent without --gm-clear.
 	Assisted bool           `json:"assisted,omitempty"`
 	GMClear  []GMClearEntry `json:"gm_clear,omitempty"`
+	// Practice is the --practice run's cycle record (attempts, cycles, why it ended and the rows file). A practice walk
+	// never carries boss_kill or boss_kills: it does not credit a kill, and a boss death ends the practice.
+	Practice *PracticeSummary `json:"practice,omitempty"`
 	// GMClearPartial is true when an expected pack member was not confirmed dead (not seen, or still alive): the clear is PARTIAL.
 	GMClearPartial bool `json:"gm_clear_partial,omitempty"`
 	// ReviveRefusal is what kept the revive point from going quiet when the walk gave up on it (D-D, walk 25). Absent
@@ -152,6 +155,23 @@ func (r *ReviveRefusal) Line() string {
 	}
 	return fmt.Sprintf("revive refusal: wipe step %d, tried %s%s, waited %d:%02d, blockers %s",
 		r.WipeStep, strings.Join(steps, "/"), entrance, r.WaitedS/60, r.WaitedS%60, strings.Join(bs, "; "))
+}
+
+// PracticeSummary is the summary's `practice` object.
+type PracticeSummary struct {
+	Entry    uint32 `json:"entry"`
+	Attempts int    `json:"attempts"`
+	Cycles   int    `json:"cycles"`
+	// Ended is why the practice stopped: cycles, "max time", "boss killed during practice", "3 failed resets",
+	// "4 attempts", "stalled at step N", "boss not bound" (several units of the entry and no single engaged one),
+	// "resume timed out" (the run did not come back after a reset), or "never engaged" (a --practice walk whose loop
+	// never started: the boss never engaged).
+	Ended string `json:"ended"`
+	// Rows is the per-cycle JSONL file in the out dir (walk-report joins it to the server's siphon rows by time).
+	Rows string `json:"rows"`
+	// FightIDs are the dashboard fights that started at or after the practice start: the practice attempts, which the
+	// fight tools (zg-tally, reportcard, walk-report) skip. Always a list, never null.
+	FightIDs []string `json:"fight_ids"`
 }
 
 // PlaceSummary is the summary's `place` object (spec 5.11).
@@ -312,6 +332,10 @@ type FightSummary struct {
 	Warnings int `json:"warnings,omitempty"`
 	// Detail is the digest of the fight's detail file (fights.go); nil when it could not be read.
 	Detail *FightDetail `json:"detail,omitempty"`
+	// History is true when the dashboard already listed the fight before this walk filed one: an earlier
+	// walk's or instance's record. The walk keeps it for the kill credit and the summary but never copies
+	// its detail file into this walk's dir (fights-run.json names the at-start set).
+	History bool `json:"history,omitempty"`
 }
 
 // DecisionsFileSummary is one file of the decisions pull: its name, bytes and sha256 hex.
@@ -389,6 +413,9 @@ type SummaryMeta struct {
 	Teardown                                           TeardownSummary
 	// Place is the --place walk's place object (nil without --place).
 	Place *PlaceSummary
+	// Practice is the --practice run's record (nil without --practice). It makes the walk ASSISTED and replaces the
+	// boss kills: practice never credits one.
+	Practice *PracticeSummary
 	// GMClearUsed says the walk ran --gm-clear (also when no unit was found); GMClear is what it tried to kill and GMClearLegs the legs
 	// it came from.
 	GMClearUsed bool
@@ -435,7 +462,8 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		Dashboard:            m.Dashboard,
 		Teardown:             m.Teardown,
 		Place:                m.Place,
-		Assisted:             m.GMClearUsed,
+		Assisted:             m.GMClearUsed || m.Practice != nil,
+		Practice:             m.Practice,
 		GMClear:              m.GMClear,
 		GMClearPartial:       GMClearPartial(m.GMClear),
 		BossKill:             m.BossKill,
@@ -452,6 +480,11 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		Wipes:        []int{},
 		Pauses:       []PauseSummary{},
 		Deaths:       DeathSummary{ByStep: map[int]int{}, ByBot: map[string]int{}},
+	}
+	if s.Practice != nil {
+		// A practice run is not a kill: a boss death ends the practice and is never credited, and no boss goal may be
+		// met from these fields.
+		s.BossKill, s.BossKills = nil, nil
 	}
 	if s.Layout.Tanks == nil {
 		s.Layout.Tanks = []string{}
@@ -575,6 +608,9 @@ func (s *Summary) Text() string {
 	if s.Until == "none" {
 		b.WriteString(" (full clear: no until)")
 	}
+	if s.Practice != nil {
+		b.WriteString(" PRACTICE")
+	}
 	if s.Assisted {
 		b.WriteString(" ASSISTED")
 		if s.GMClearPartial {
@@ -616,6 +652,9 @@ func (s *Summary) Text() string {
 		s.Started.Format(time.RFC3339), s.Ended.Format(time.RFC3339), s.ExitCode)
 	if s.ReviveRefusal != nil {
 		b.WriteString(s.ReviveRefusal.Line() + "\n")
+	}
+	if s.Practice != nil {
+		fmt.Fprintf(&b, "practice: %d cycles in %d attempts, ended: %s\n", s.Practice.Cycles, s.Practice.Attempts, s.Practice.Ended)
 	}
 	fmt.Fprintf(&b, "wipes %d; boss engaged: %s\n", len(s.Wipes), bossLine(s.BossEngaged))
 	if s.GMInstanceDataUnsent > 0 {

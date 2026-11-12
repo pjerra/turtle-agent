@@ -3666,3 +3666,232 @@ func TestAutoBossWipeProgressReadsTheSummaryStepToo(t *testing.T) {
 		t.Fatalf("%d launches, want 4:\n%s", n, f.events())
 	}
 }
+
+// A practice goal launches raid-walk with the mechanic entry and its cycle budget, and its until is none.
+func TestAutoCommandArgsPracticeGoal(t *testing.T) {
+	target := raidwalk.AutoTarget{
+		ID: "p", Server: "tortoise-test2", Slot: "1", Holder: "zg-p",
+		Goal: raidwalk.AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10},
+		Args: []string{"zul_gurub", "--dir", "/plans", "--sql", "/zg.sql"},
+	}
+	got := strings.Join(autoCommandArgs("/bin/ta", target, "/walk/p-1", "", false, 0), " ")
+	want := "raid-walk zul_gurub --dir /plans --sql /zg.sql --server tortoise-test2 --slot 1 --holder zg-p --until none --out /walk/p-1 --practice 14834 --practice-cycles 10"
+	if got != want {
+		t.Fatalf("args:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// The autopilot reads the summary's practice cycles, and a practice goal is met only by them.
+func TestAutoObservationPracticeCycles(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/summary.json"
+	raw := `{"exit_code":0,"steps_reached":700,"steps_total":733,"end_reason":"practice: cycles",
+		"practice":{"entry":14834,"attempts":2,"cycles":10,"ended":"cycles","rows":"practice.jsonl"}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := autoReadSummary(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.PracticeCycles != 10 {
+		t.Fatalf("practice cycles %d, want 10", sum.PracticeCycles)
+	}
+	o := raidwalk.AutoObservation{Exited: true, PracticeCycles: sum.PracticeCycles}
+	if !raidwalk.GoalAchieved(raidwalk.AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}, o) {
+		t.Fatal("10 practice cycles did not meet the autopilot's goal")
+	}
+}
+
+// practiceAttempt plans one attempt of a practice goal: its exit code, the practice cycles it collected and why the
+// practice ended. The summary's practice object is what the autopilot reads.
+func (f *autoFixture) practiceAttempt(base string, exit, cycles int, ended string) {
+	f.t.Helper()
+	f.writeSpec(base+".exit", strconv.Itoa(exit))
+	sum, err := json.Marshal(map[string]any{
+		"exit_code": exit, "steps_reached": 700, "steps_total": 733, "end_reason": "practice: " + ended,
+		"practice": map[string]any{"entry": 14834, "attempts": 1, "cycles": cycles, "ended": ended, "rows": "practice.jsonl"},
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.writeSpec(base+".summary", string(sum))
+	f.writeSpec(base+".runlog", "19:46:05.696 TBM:RUN|zul_gurub|running|700/733|hakkar|boss|begin|fighting\n")
+}
+
+// practiceTarget is one practice goal of 10 Hakkar cycles.
+const practiceTarget = "p tortoise-test2 1 zg-p practice:14834:10 -- zul_gurub --dir /plans --sql /zg.sql"
+
+// TestAutoPracticeRelaunchBudget: an exit-18 practice relaunches twice and gives up on the third: the id escalates
+// with "practice: gave up after 2 relaunches", and the state keeps the relaunch count.
+func TestAutoPracticeRelaunchBudget(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(practiceTarget)
+	f.practiceAttempt("p-1", 18, 4, "max time")
+	f.practiceAttempt("p-2", 18, 4, "max time")
+	f.practiceAttempt("p-3", 18, 0, "3 failed resets")
+	f.practiceAttempt("p-4", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 2; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		if _, esc := runState(s.states[0]); esc {
+			t.Fatalf("escalated after exit 18 %d:\n%s", i, f.events())
+		}
+		finishAttempt(t, s)
+	}
+	tickUntil(t, s, "the third launch", func() bool { return len(f.args()) >= 3 })
+	finishAttempt(t, s)
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("no escalation after the third exit 18:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "practice: gave up after 2 relaunches") {
+		t.Fatalf("the escalation does not say the practice gave up:\n%s", f.events())
+	}
+	if n := len(f.args()); n != 3 {
+		t.Fatalf("%d launches, want 3:\n%s", n, f.events())
+	}
+	s.saveState()
+	raw, _ := os.ReadFile(filepath.Join(f.walk, autoStateFile))
+	var saved autoSavedState
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.IDs) != 1 || saved.IDs[0].PracticeRelaunches != 2 || saved.IDs[0].PracticeCycles != 8 {
+		t.Fatalf("checkpoint %s, want practice_relaunches 2 and practice_cycles 8", raw)
+	}
+}
+
+// TestAutoPracticeCyclesSumOverRel launches: the goal is met by the cycles SUMMED across relaunches: 6 + 4 is the 10
+// it wanted, so the second run's end advances the goal instead of relaunching.
+func TestAutoPracticeCyclesSumOverRelaunches(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(practiceTarget)
+	f.practiceAttempt("p-1", 18, 6, "max time")
+	f.practiceAttempt("p-2", 0, 4, "cycles")
+	s := f.supervisor()
+	for i := 1; i <= 2; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+	}
+	if done, esc := runState(s.states[0]); !done || esc {
+		t.Fatalf("done=%v escalated=%v after 6+4 cycles of a 10-cycle goal:\n%s", done, esc, f.events())
+	}
+	if n := len(f.args()); n != 2 {
+		t.Fatalf("%d launches, want 2 (the summed cycles met the goal):\n%s", n, f.events())
+	}
+	if !strings.Contains(f.events(), "goal met: practice:14834:10") {
+		t.Fatalf("the goal-met line is missing:\n%s", f.events())
+	}
+}
+
+// TestAutoPracticeBossDeathOneFreshRelaunch: exit 0 below the cycle target is a boss death during practice: ONE relaunch
+// in a fresh instance (not --reuse-instance), then the id escalates.
+func TestAutoPracticeBossDeathOneFreshRelaunch(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(practiceTarget)
+	f.practiceAttempt("p-1", 0, 3, "boss killed during practice")
+	f.practiceAttempt("p-2", 0, 3, "boss killed during practice")
+	f.practiceAttempt("p-3", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the fresh relaunch", func() bool { return len(f.args()) >= 2 })
+	if args := f.args()[1]; strings.Contains(args, "--reuse-instance") || !strings.Contains(args, "--place") {
+		t.Fatalf("the practice boss-death relaunch is not a fresh placement:\n%s", args)
+	}
+	finishAttempt(t, s)
+	if _, esc := runState(s.states[0]); !esc || !strings.Contains(f.events(), "practice: the boss died again in the fresh instance") {
+		t.Fatalf("no escalation after the boss died again:\n%s", f.events())
+	}
+	if n := len(f.args()); n != 2 {
+		t.Fatalf("%d launches, want 2 (one fresh relaunch after the death):\n%s", n, f.events())
+	}
+}
+
+// TestAutoPracticeStateSurvivesARestart: the practice relaunch count and the summed cycles are in the checkpoint: a
+// new supervisor continues the same budget and sum.
+func TestAutoPracticeStateSurvivesARestart(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(practiceTarget)
+	f.practiceAttempt("p-1", 18, 4, "max time")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	s.saveState()
+	f.practiceAttempt("p-2", 18, 4, "max time")
+	f.practiceAttempt("p-3", 18, 0, "max time")
+	f.practiceAttempt("p-4", 2, 0, "bad --sql")
+	s2 := f.supervisor()
+	tickUntil(t, s2, "the relaunch after the restart", func() bool { return len(f.args()) >= 2 })
+	finishAttempt(t, s2)
+	tickUntil(t, s2, "the third launch", func() bool { return len(f.args()) >= 3 })
+	finishAttempt(t, s2)
+	if _, esc := runState(s2.states[0]); !esc {
+		t.Fatalf("the restarted supervisor lost the practice relaunch count:\n%s", f.events())
+	}
+	if n := len(f.args()); n != 3 {
+		t.Fatalf("%d launches, want 3:\n%s", n, f.events())
+	}
+}
+
+// TestAutoPracticeRelaunchPassesRemainingCycles: a relaunch asks for what is LEFT of the goal (L3), not the full target
+// again: after four of ten cycles, the next walk is told six.
+func TestAutoPracticeRelaunchPassesRemainingCycles(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(practiceTarget)
+	f.practiceAttempt("p-1", 18, 4, "max time")
+	f.practiceAttempt("p-2", 18, 6, "max time")
+	f.practiceAttempt("p-3", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the relaunch", func() bool { return len(f.args()) >= 2 })
+	if args := f.args()[1]; !strings.Contains(args, "--practice-cycles 6") {
+		t.Fatalf("the relaunch asks for the full target again: %s", args)
+	}
+	finishAttempt(t, s)
+	if _, esc := runState(s.states[0]); esc {
+		t.Fatalf("escalated after the 4+6 cycles met the target:\n%s", f.events())
+	}
+}
+
+// TestAutoPracticeBossDeathRelaunchIsNoPlaceFailure: the fresh-instance relaunch after the boss died is no failed
+// placement (L4): placeFails stays as it was.
+func TestAutoPracticeBossDeathRelaunchIsNoPlaceFailure(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(practiceTarget)
+	f.practiceAttempt("p-1", 0, 4, "boss killed during practice")
+	f.practiceAttempt("p-2", 0, 6, "boss killed during practice")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the fresh relaunch", func() bool { return len(f.args()) >= 2 })
+	st := s.states[0]
+	st.mu.Lock()
+	got := st.placeFails
+	st.mu.Unlock()
+	if got != 0 {
+		t.Fatalf("placeFails %d after the boss-death fresh relaunch, want 0", got)
+	}
+}
+
+// TestAutoPracticeNeverEngagedRelaunches: the observation's practice ended reason reaches the rule: an exit 0 with
+// "never engaged" relaunches in the same instance (L4), never the one fresh-instance death retry.
+func TestAutoPracticeNeverEngagedRelaunches(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(practiceTarget)
+	f.practiceAttempt("p-1", 0, 0, "never engaged")
+	f.practiceAttempt("p-2", 18, 1, "max time")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the relaunch", func() bool { return len(f.args()) >= 2 })
+	args := f.args()[1]
+	if !strings.Contains(args, "--reuse-instance") || !strings.Contains(args, "--place") {
+		t.Fatalf("the never-engaged relaunch is not the same instance: %s", args)
+	}
+	if !strings.Contains(f.events(), "practice: never engaged") {
+		t.Fatalf("the event does not name the never-engaged relaunch:\n%s", f.events())
+	}
+	finishAttempt(t, s)
+}

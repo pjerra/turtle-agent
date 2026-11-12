@@ -79,6 +79,12 @@ func (q queuedEvent) event(seq uint64) events.Event {
 	return ev
 }
 
+// queuedSpell is one cast event the practice loop reads through the events RPC (kinds spell_start/spell_go).
+type queuedSpell struct {
+	at time.Time
+	ev events.Event
+}
+
 type timelineEntry struct {
 	Text     string
 	Targeted bool
@@ -153,16 +159,21 @@ type walkFakeAgent struct {
 	enterBusy    int // the first enterBusy enter orders answer ERR busy
 	enterCalls   int
 	onGM         func(line string)
-	// onResume runs when the walk sends `run resume` through the commander RPC (nil: ACK only).
+	// onResume runs when the walk sends `run resume` through the commander RPC (nil: ACK only). runEnded models the
+	// commander's run book: a `.bot run stop` ENDS the run and erases its slot, so a later `run resume` answers "No run
+	// is going" (the practice reset must pause, never stop).
 	onResume func()
+	runEnded bool
 	// runVerbs records every `run` commander request's verb, in order, and onSkip runs for one whose verb is skip
-	// (walk 24 B: the boss-not-found skip). skipErr makes that skip answer an error (a refusal).
 	// (walk 24 B: the boss-not-found skip). skipErr makes that skip answer an error (a refusal). pauseErr, when
-	// non-nil, makes `run pause` fail while it points at true (a refused pause: the gm-instance-data resume test).
+	// non-nil, makes `run pause` fail while it points at true (a refused pause: the gm-instance-data resume test);
+	// onPause runs after an accepted pause (the fake server's TBM:RUN paused line) and nil models an ACK with no
+	// status, which the practice reset must refuse.
 	runVerbs []string
 	onSkip   func()
 	skipErr  bool
 	pauseErr *bool
+	onPause  func()
 	// onStart runs after a `run start` was answered and its startQueue was pushed (a test that needs lines after a
 	// later start: the boss-not-found re-run). nil: nothing.
 	onStart func()
@@ -175,6 +186,18 @@ type walkFakeAgent struct {
 
 	// hireCap is the server's hire limit (0: raidwalk.HireCap, the 39 of onyxia-kill-plan C6).
 	hireCap int
+
+	// The practice hands' game side (raid-walk --practice): each hook models what the GM command does to the test
+	// scenario; nil leaves the world unchanged. spellQueue holds the cast events the practice loop's own events read
+	// (kinds spell_start/spell_go) delivers once the fake clock reaches their time.
+	onEvade func(g packet.GUID)
+	onSetHP func(g packet.GUID)
+	// setHPErr, when set, makes every gm_set_hp call answer it (a unit the client cannot find). It runs after the
+	// call is logged, so a test can count the attempts.
+	setHPErr   error
+	onRespawn  func(g packet.GUID)
+	onRevive   func(name string)
+	spellQueue []queuedSpell
 
 	// hireShort withholds hireShort[batch] bots on the batch's first reply (dps first, then healers,
 	// then tanks). The first answer is partial; the retry hires the rest.
@@ -434,12 +457,23 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 			f.gmOnKinds = append([]string{}, ep.Kinds...)
 		}
 		var sp struct {
-			Since uint64 `json:"since"`
+			Since uint64   `json:"since"`
+			Kinds []string `json:"kinds"`
 		}
 		_ = json.Unmarshal(raw, &sp)
 		f.since = sp.Since
+		spells := false
+		for _, k := range sp.Kinds {
+			if k == events.KindSpellStart || k == events.KindSpellGo {
+				spells = true
+			}
+		}
 		f.mu.Unlock()
-		v = f.eventsPage()
+		if spells {
+			v = f.spellPage(sp.Since)
+		} else {
+			v = f.eventsPage()
+		}
 	case "bot_view":
 		if f.viewHook != nil {
 			f.viewHook()
@@ -476,6 +510,60 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 			f.killed[g] = true
 		}
 		f.mu.Unlock()
+	case "gm_evade", "gm_respawn":
+		var p struct {
+			GUID string `json:"guid"`
+		}
+		_ = json.Unmarshal(raw, &p)
+		g, err := packet.ParseGUID(p.GUID)
+		if err != nil {
+			f.t.Errorf("%s %q: %v", method, p.GUID, err)
+		}
+		f.mu.Lock()
+		f.log = append(f.log, method+" "+g.String())
+		h := map[string]func(packet.GUID){"gm_evade": f.onEvade, "gm_respawn": f.onRespawn}[method]
+		f.mu.Unlock()
+		if h != nil {
+			h(g)
+		}
+	case "gm_set_hp":
+		var p struct {
+			GUID string  `json:"guid"`
+			HP   *uint32 `json:"hp"`
+		}
+		_ = json.Unmarshal(raw, &p)
+		if p.HP != nil {
+			// The RPC takes the guid only: any explicit hp is refused before the session reads the unit.
+			return fmt.Errorf("gm_set_hp: the hp argument is refused (the unit is restored to its own max health): got %d", *p.HP)
+		}
+		g, err := packet.ParseGUID(p.GUID)
+		if err != nil {
+			f.t.Errorf("gm_set_hp %q: %v", p.GUID, err)
+		}
+		f.mu.Lock()
+		f.log = append(f.log, "gm_set_hp "+g.String())
+		h := f.onSetHP
+		hpErr := f.setHPErr
+		f.mu.Unlock()
+		if hpErr != nil {
+			// The client cannot find the unit: no restore happens, so the world is not touched either.
+			return hpErr
+		}
+		if h != nil {
+			h(g)
+		}
+	case "gm_revive":
+		var p struct {
+			Name string `json:"name"`
+		}
+		_ = json.Unmarshal(raw, &p)
+		f.mu.Lock()
+		f.log = append(f.log, "gm_revive "+p.Name)
+		h := f.onRevive
+		f.mu.Unlock()
+		if h != nil {
+			h(p.Name)
+		}
 	case "unit":
 		var p struct {
 			GUID string `json:"guid"`
@@ -564,6 +652,12 @@ func (f *walkFakeAgent) goArrive(fromMap uint32) { // f.mu held
 
 // gmSide is what the game does for a GM line.
 func (f *walkFakeAgent) gmSide(line string) {
+	if strings.TrimSpace(line) == ".bot run stop" {
+		f.mu.Lock()
+		f.runEnded = true
+		f.mu.Unlock()
+		return
+	}
 	switch {
 	case strings.HasPrefix(line, ".bot hire raid ") && (len(f.hireShort) > 0 || len(f.hireReply) > 0):
 		f.hireSideShort(line)
@@ -1134,6 +1228,28 @@ func (f *walkFakeAgent) eventsPageSince(since uint64) events.Page {
 	return events.Page{Events: evs, Next: next}
 }
 
+// spellPage delivers the queued cast events whose time the fake clock reached. It shares f.next with the system
+// events, so both cursors move forward without ever re-reading a line.
+func (f *walkFakeAgent) spellPage(since uint64) events.Page {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	now := f.clock.now()
+	var evs []events.Event
+	for len(f.spellQueue) > 0 && !f.spellQueue[0].at.After(now) {
+		q := f.spellQueue[0]
+		f.spellQueue = f.spellQueue[1:]
+		f.next++
+		ev := q.ev
+		ev.Seq = f.next
+		evs = append(evs, ev)
+	}
+	next := f.next
+	if next < since {
+		next = since
+	}
+	return events.Page{Events: evs, Next: next}
+}
+
 type viewReply struct {
 	Have  bool           `json:"have"`
 	N     uint64         `json:"n"`
@@ -1289,10 +1405,14 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 		if p.Verb == "pause" {
 			f.mu.Lock()
 			fail := f.pauseErr != nil && *f.pauseErr
+			hook := f.onPause
 			f.mu.Unlock()
 			if fail {
 				return commanderReply{Reply: tbm.Reply{Kind: "err", Err: &tbm.Err{Intent: "run pause", Code: "refused",
 					Message: "the run is busy"}}}
+			}
+			if hook != nil {
+				hook()
 			}
 		}
 		if p.Verb == "skip" {
@@ -1310,6 +1430,7 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 		if p.Verb == "start" {
 			f.mu.Lock()
 			f.runStarted = true
+			f.runEnded = false
 			f.startArgs = strings.Join(p.Args, "|")
 			q := f.startQueue
 			f.startQueue = nil
@@ -1343,8 +1464,13 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 		}
 		if p.Verb == "resume" {
 			f.mu.Lock()
+			ended := f.runEnded
 			hook := f.onResume
 			f.mu.Unlock()
+			if ended {
+				return commanderReply{Reply: tbm.Reply{Kind: "err", Err: &tbm.Err{Intent: "run resume", Code: "no-run",
+					Message: "No run is going"}}}
+			}
 			if hook != nil {
 				hook()
 			}
@@ -1398,6 +1524,8 @@ type fakeDash struct {
 	fightsStallFirst int
 	fightsStall      time.Duration
 	fightsCalls      int
+	// fightsSeq are the /api/v1/combat/fights answers in order, the last one repeating (nil: d.fights).
+	fightsSeq [][]walkFightRow
 }
 
 func (d *fakeDash) Login(ctx context.Context) error { return nil }
@@ -1446,7 +1574,14 @@ func (d *fakeDash) Fights(ctx context.Context, commander string) (json.RawMessag
 	if d.fightsErr != nil {
 		return nil, d.fightsErr
 	}
-	raw, err := json.Marshal(d.fights)
+	fights := d.fights
+	if len(d.fightsSeq) > 1 {
+		fights = d.fightsSeq[0]
+		d.fightsSeq = d.fightsSeq[1:]
+	} else if len(d.fightsSeq) == 1 {
+		fights = d.fightsSeq[0]
+	}
+	raw, err := json.Marshal(fights)
 	return raw, err
 }
 
@@ -5829,7 +5964,8 @@ func TestRaidWalkDashboardOffStillWalks(t *testing.T) {
 func TestRaidWalkSavesFightsOncePerKey(t *testing.T) {
 	f := newFixture(t)
 	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
-	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "win", BossName: "Onyxia", Leg: "onyxia", Step: 3, Deaths: 1}}
+	// The dashboard starts empty (the pre-placement read), so the walk's own fight files mid-walk.
+	f.dash.fightsSeq = [][]walkFightRow{{}, {{ID: "4-5", Key: "Commander\x001793219890\x004-5", Dur: 1200, Outcome: "win", BossName: "Onyxia", Leg: "onyxia", Step: 3, Deaths: 1}}}
 	f.defaultRun("onyxias_lair")
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s", code, f.stderr.String())
@@ -5866,7 +6002,8 @@ func TestRaidWalkSkipsLiveFightRows(t *testing.T) {
 	}
 	f = newFixture(t)
 	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
-	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "k", Dur: 1200, Outcome: "win", Step: 3, Deaths: 1, Warnings: 2}}
+	// The pre-placement read is empty; the walk's own fight is live first, then finished.
+	f.dash.fightsSeq = [][]walkFightRow{{}, {{ID: "4-5", Key: "k", Live: true}}, {{ID: "4-5", Key: "k", Dur: 1200, Outcome: "win", Step: 3, Deaths: 1, Warnings: 2}}}
 	f.defaultRun("onyxias_lair")
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s", code, f.stderr.String())
@@ -5885,7 +6022,7 @@ func TestRaidWalkRetriesAFailedFightDetail(t *testing.T) {
 	f := newFixture(t)
 	f.opts.dashURL, f.opts.dashPassFile = "http://dash.test", "/tmp/pass"
 	f.dash.failFight = 1
-	f.dash.fights = []walkFightRow{{ID: "4-5", Key: "k", Dur: 1200, Outcome: "win", Step: 3, Deaths: 1}}
+	f.dash.fightsSeq = [][]walkFightRow{{}, {{ID: "4-5", Key: "k", Dur: 1200, Outcome: "win", Step: 3, Deaths: 1}}}
 	f.defaultRun("onyxias_lair")
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s", code, f.stderr.String())

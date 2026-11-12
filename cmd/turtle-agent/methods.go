@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"time"
 
@@ -76,6 +77,14 @@ type cancelCastParams struct {
 
 type guidParams struct {
 	GUID packet.GUID `json:"guid"`
+}
+
+// gmSetHPParams is gm_set_hp: the creature only. The session restores the unit to its own MaxHealth (it reads the unit
+// and sends `.modify hp <max> <max>`), so an explicit hp is refused: no caller can lower a unit's maximum.
+type gmSetHPParams struct {
+	GUID packet.GUID `json:"guid"`
+	// HP is refused when present, whatever its value: the parameter was removed from the RPC.
+	HP *uint32 `json:"hp,omitempty"`
 }
 
 type walkParams struct {
@@ -189,6 +198,23 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	// gm_kill is the test tool of `raid-walk --gm-clear`: select the creature by guid, wait for the server to show it, send ".die".
 	srv.Register("gm_kill", rpc.Typed(func(ctx context.Context, p guidParams) (empty, error) {
 		return empty{}, rpcErr(cur().GMKill(ctx, p.GUID))
+	}))
+	// The practice hands (raid-walk --practice): each is authorized like gm_kill (the agent's AllowGMKill, set at login
+	// from the dialled world_addr) and each sends only a line from session.PracticeGMLine's closed set.
+	srv.Register("gm_evade", rpc.Typed(func(ctx context.Context, p guidParams) (empty, error) {
+		return empty{}, rpcErr(cur().GMEvade(ctx, p.GUID))
+	}))
+	srv.Register("gm_set_hp", rpc.Typed(func(ctx context.Context, p gmSetHPParams) (empty, error) {
+		if p.HP != nil {
+			return empty{}, fmt.Errorf("gm_set_hp: the hp argument is refused (the unit is restored to its own max health): got %d", *p.HP)
+		}
+		return empty{}, rpcErr(cur().GMSetHP(ctx, p.GUID))
+	}))
+	srv.Register("gm_respawn", rpc.Typed(func(ctx context.Context, p guidParams) (empty, error) {
+		return empty{}, rpcErr(cur().GMRespawn(ctx, p.GUID))
+	}))
+	srv.Register("gm_revive", rpc.Typed(func(ctx context.Context, p nameParams) (empty, error) {
+		return empty{}, rpcErr(cur().GMRevive(ctx, p.Name))
 	}))
 	srv.Register("events", rpc.Typed(func(ctx context.Context, p eventsParams) (events.Page, error) {
 		q := events.Query{Since: p.Since, Kinds: p.Kinds, PartyOnly: p.PartyOnly, Limit: p.Limit}

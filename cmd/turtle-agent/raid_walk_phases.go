@@ -185,7 +185,7 @@ func (w *walk) phases(ctx context.Context) int {
 	}
 	_ = w.phaseHold(ctx)
 	w.ended = w.env.now()
-	w.phaseTeardown()
+	w.phaseTeardown(ctx)
 	if w.dash != nil {
 		w.pullDecisions(ctx)
 	}
@@ -206,7 +206,7 @@ func (w *walk) stop(err error, teardown bool) int {
 	}
 	_ = w.stopRun(context.Background(), "")
 	if teardown {
-		w.phaseTeardown()
+		w.phaseTeardown(context.Background())
 	}
 	if code == exitOK && len(w.hiresLeft) > 0 {
 		code = exitRaidWalkIncident
@@ -1146,6 +1146,11 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 					return err
 				}
 			case raidwalk.IncidentBossEngaged:
+				// --practice owns its boss: the loop keeps the fight alive and resets it, instead of the normal
+				// boss-stop rules (which would end the walk on the encounter).
+				if w.opts.practiceEntry != 0 && v.Entry == w.opts.practiceEntry && w.practice == nil {
+					return w.runPractice(ctx, v.Entry, v.Step)
+				}
 				ok, early, waitOut := w.runFightsBoss(ctx, v.Entry, true)
 				// The resume's wait drains the tracker's incidents while it polls: feed every drained
 				// incident to the normal handler exactly as phaseWatch would, in drain order, before
@@ -1198,6 +1203,11 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 				}
 				return w.handleBoss(ctx, v)
 			}
+		}
+		// --practice: an entry no plan boss row names (the window mode) has no IncidentBossEngaged: a fresh frame of
+		// the mechanic's entry starts the loop.
+		if w.opts.practiceEntry != 0 && w.practice == nil && w.practiceBossEngaged(w.opts.practiceEntry) {
+			return w.runPractice(ctx, w.opts.practiceEntry, 0)
 		}
 		now = w.env.now()
 		if w.inj != nil {
@@ -1366,6 +1376,7 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 	}
 	if n, frame, err := w.view(ctx, w.afterN, 2000); err == nil && frame != nil {
 		w.afterN = n
+		w.viewFrame, w.viewAt = frame, w.env.now()
 		w.trackFrame(now, frame)
 		w.tracker.Frame(now, *frame)
 		w.pullFramed(now, frame)
@@ -1937,6 +1948,14 @@ func bossRowEngaged(hppct int, target uint64) bool {
 
 // trackFrame keeps the per-bot and per-hostile state the enter, reset and wipe rules read.
 func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
+	// A frame's rows describe the world when the feed completed it (f.At), which can be seconds after the poll began:
+	// the poll reads the event page first, and that wait is not part of the frame's age. The practice's boss check
+	// reads the stamp as "when this unit was last seen", so it must not inflate it with the poll's own wait
+	// (zgP-hk5p-1-1: three 5 s polls read a boss every frame held at 94-99 % as gone).
+	at := now
+	if !f.At.IsZero() {
+		at = f.At
+	}
 	for _, p := range f.Party {
 		if p.GUID != 0 {
 			w.partyG[uint64(p.GUID)] = true
@@ -1944,7 +1963,7 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 		if p.Name == "" {
 			continue
 		}
-		w.botAt[p.Name] = botPos{guid: p.GUID, x: p.X, y: p.Y, z: p.Z, inCombat: p.InCombat(), mapID: p.Map, dead: p.Dead || p.State == "d", at: now}
+		w.botAt[p.Name] = botPos{guid: p.GUID, x: p.X, y: p.Y, z: p.Z, inCombat: p.InCombat(), mapID: p.Map, dead: p.Dead || p.State == "d", at: at}
 	}
 	for _, h := range f.Hostiles {
 		if h.GUID != 0 {
@@ -1954,7 +1973,7 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 				first = prev.first
 			}
 			w.hostiles[h.GUID.String()] = hostileState{entry: h.Entry, x: h.X, y: h.Y, z: h.Z, first: first, kind: h.Kind, reaction: h.Reaction, flags: h.Flags,
-				hppct: h.HPPct, target: uint64(h.Target), at: now}
+				hppct: h.HPPct, target: uint64(h.Target), at: at}
 		}
 		if w.bossRule.Counts(h.Entry, h.X, h.Y) {
 			w.bossSeenAt = now
@@ -2602,13 +2621,22 @@ func (w *walk) saveFightsAtStart() {
 }
 
 func (w *walk) saveFights() {
-	limit := 20 * time.Second
-	if w.fightsPrePlacement {
-		// The read before placement is optional (the fallback is the records' start times): a slow or unreachable
-		// dashboard must not hold the run start for the full 20 s.
-		limit = preplacementFightsTimeout
+	w.saveFightsCtx(context.Background(), 0)
+}
+
+// saveFightsCtx is saveFights with the caller's context and fight-list timeout: a non-positive limit keeps
+// today's default (20 s, or the short pre-placement deadline before the first placement). The teardown
+// live-fight wait passes its own bounded context and per-read timeout.
+func (w *walk) saveFightsCtx(ctx context.Context, limit time.Duration) {
+	if limit <= 0 {
+		limit = 20 * time.Second
+		if w.fightsPrePlacement {
+			// The read before placement is optional (the fallback is the records' start times): a slow or unreachable
+			// dashboard must not hold the run start for the full 20 s.
+			limit = preplacementFightsTimeout
+		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	raw, err := w.dash.Fights(ctx, w.manifest.Character)
 	if err != nil {
@@ -2636,17 +2664,24 @@ func (w *walk) saveFights() {
 	// a fight is an earlier walk's or instance's history. Built once, from the first successful read, and a live
 	// record is part of it (it may later finish as a kill that is still history). A read made before the first
 	// placement (saveFightsAtStart) lists history only, so every id in it counts. When no read succeeded before
-	// placement, a later first read may already hold this walk's own fights: only the records that started before the
-	// walk began count then, by their start time (a record without one counts, the conservative side).
+	// placement, a later first read may already hold this walk's own fights: only the records that started at or
+	// before the walk start minus the leeway (fightHistoryLeeway: a record without a start, or one nearer in time,
+	// counts as history on the conservative side). liveAtStart holds the at-start ids whose row was Live in that
+	// first read: when such a fight later finishes (walk 41 tj-8: it started during the earlier raid and ended after
+	// its teardown), its detail file is still written, tagged History.
 	if w.fightIDsAtStart == nil {
 		w.fightIDsAtStart = make(map[string]bool, len(rows))
+		w.liveAtStart = make(map[string]bool)
 		startUnix := w.started.Unix()
 		byTime := !w.fightsPrePlacement
 		for _, r := range rows {
 			if r.ID == "" {
 				continue
 			}
-			if byTime && r.Start != 0 && r.Start >= startUnix {
+			if r.Live {
+				w.liveAtStart[r.ID] = true
+			}
+			if byTime && r.Start != 0 && r.Start >= startUnix-fightHistoryLeeway {
 				continue
 			}
 			w.fightIDsAtStart[r.ID] = true
@@ -2655,6 +2690,10 @@ func (w *walk) saveFights() {
 			w.note("fight records: no dashboard read before the walk's placement, so the at-start set (%d of %d records) came from their start times", len(w.fightIDsAtStart), len(rows))
 		}
 	}
+	// fights-run.json names this walk's at-start set (Problem 1, item 3): an analyser can filter the raw
+	// combat-fights.json list without START.epoch. The stamp is the walk's start (the same clock the
+	// at-start set's start-time fallback reads), not the read time.
+	_ = w.writeOut("fights-run.json", fightsRunJSON(w.started, w.fightIDsAtStart, w.practice != nil))
 	for _, r := range rows {
 		if r.ID == "" || r.Live || w.seenFights[r.ID] {
 			continue
@@ -2662,6 +2701,46 @@ func (w *walk) saveFights() {
 		fs := raidwalk.FightSummary{ID: r.ID, Step: int(r.Step), Leg: r.Leg, DurMS: int64(r.Dur),
 			Deaths: r.Deaths, Outcome: r.Outcome, BossName: r.BossName, Warnings: r.Warnings,
 			BossPhase: r.BossPhase, BossPhaseEntry: r.BossPhaseEntry}
+		if w.fightIDsAtStart[r.ID] {
+			// History (an earlier walk's or instance's record): tag it and keep it for creditFightKills and
+			// summary.json. The detail file is still written when the fight was Live in the at-start read
+			// (walk 41 tj-8: it started during the earlier raid and finished after its teardown, so the
+			// earlier walk saved it nowhere) or when its end (start + dur) is at or after this walk's
+			// start; old finished fights get no file.
+			fs.History = true
+			// r.Dur is in ms (DurMS above); r.Start and w.started are unix seconds.
+			if w.liveAtStart[r.ID] || (r.Start != 0 && r.Start+int64(r.Dur)/1000 >= w.started.Unix()) {
+				// A qualifying history fight uses the same pending/retry handling as an ordinary
+				// fight below: seen only after its detail was fetched and parsed, otherwise kept in
+				// pendingFights (still History) for the next poll, including the teardown wait, so one
+				// dashboard timeout does not lose its file for good.
+				idx, pending := w.pendingFights[r.ID]
+				got := false
+				if detail, derr := w.dash.Fight(ctx, r.Key); derr == nil {
+					_ = w.writeOut("combat-fight-"+fightFileID(r.ID)+".json", detail)
+					if d, ok := raidwalk.FightDetailOf(detail); ok {
+						fs.Detail = &d
+						got = true
+					}
+				}
+				if pending {
+					w.fights[idx] = fs
+				} else {
+					w.fights = append(w.fights, fs)
+					idx = len(w.fights) - 1
+				}
+				if got {
+					w.seenFights[r.ID] = true
+					delete(w.pendingFights, r.ID)
+				} else {
+					w.pendingFights[r.ID] = idx
+				}
+				continue
+			}
+			w.fights = append(w.fights, fs)
+			w.seenFights[r.ID] = true
+			continue
+		}
 		idx, pending := w.pendingFights[r.ID] // the row's fields are read fresh on every poll
 		// A fight whose detail could not be loaded or read is kept without it and fetched again on the next poll (and at teardown),
 		// so one dashboard timeout does not lose its death recap for good.
@@ -2686,6 +2765,23 @@ func (w *walk) saveFights() {
 			w.pendingFights[r.ID] = idx
 		}
 	}
+}
+
+// fightsRunJSON is the fights-run.json body: the walk's start and the sorted at-start (history) ids, so an
+// analyser can filter combat-fights.json's raw list without START.epoch. practice is true for a --practice walk: its
+// fights are practice attempts, and the fight tools skip the whole run.
+func fightsRunJSON(now time.Time, atStart map[string]bool, practice bool) []byte {
+	ids := make([]string, 0, len(atStart))
+	for id := range atStart {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	raw, _ := json.Marshal(struct {
+		WalkStarted int64    `json:"walk_started"`
+		HistoryIDs  []string `json:"history_ids"`
+		Practice    bool     `json:"practice,omitempty"`
+	}{WalkStarted: now.Unix(), HistoryIDs: ids, Practice: practice})
+	return append(raw, '\n')
 }
 
 // fightFileID keeps a fight id safe for a file name.
@@ -6118,13 +6214,14 @@ func (w *walk) phaseHold(ctx context.Context) error {
 
 // phaseTeardown is phase 12: the commander status, then teardown --json; a hire the status did not list is
 // possibly left online.
-func (w *walk) phaseTeardown() {
+func (w *walk) phaseTeardown(ctx context.Context) {
 	if w.slotDir == "" {
 		return
 	}
 	if w.dash != nil {
 		w.saveCommanders("end")
 		w.saveFights()
+		w.waitTeardownLiveFight(ctx)
 	}
 	listedOK := false
 	if w.agent != nil {
@@ -6175,6 +6272,93 @@ func (w *walk) phaseTeardown() {
 	}
 }
 
+// teardownLiveFightWait is how long phaseTeardown waits for a still-live fight (the monitor ends a fight 3 s
+// after the group leaves combat, so the kill fight can still be open when the walk's last saveFights runs).
+const teardownLiveFightWait = 30 * time.Second
+
+// teardownLiveFightPoll is the gap between teardown's fight-list re-reads.
+const teardownLiveFightPoll = 3 * time.Second
+
+// teardownLiveFightReadTimeout bounds each fight-list read inside the teardown wait (or the time left, if less).
+const teardownLiveFightReadTimeout = 5 * time.Second
+
+// teardownLiveFightID is the first still-live row of this walk in the last successful read ("": none). History
+// rows belong to earlier walks and are skipped.
+func (w *walk) teardownLiveFightID() string {
+	for _, r := range w.fightRows {
+		if r.ID == "" || !r.Live || w.fightIDsAtStart[r.ID] {
+			continue
+		}
+		return r.ID
+	}
+	return ""
+}
+
+// waitTeardownLiveFight re-reads the fight list while the last successful read holds a still-live row of this
+// walk: the kill fight may still be open when teardown's first saveFights runs (walk 52 hk13t-1). The wait is
+// bounded by a wall-clock deadline (the reads count, not only the sleeps); each read has its own timeout, one
+// failed read is retried once, and a cancelled walk context skips the wait entirely. endWipe and handleBoss keep
+// running, so their later polls save the fight; they get no such wait.
+func (w *walk) waitTeardownLiveFight(ctx context.Context) {
+	live := w.teardownLiveFightID()
+	if live == "" {
+		return
+	}
+	if ctx != nil && ctx.Err() != nil {
+		// A signal stopped the walk: its context is already cancelled, so no
+		// bounded replacement could observe anything but its own deadline.
+		// Skip the wait and leave the still-live fight for the next walk's
+		// history set instead of sleeping through the teardown.
+		w.note("fight records: the teardown live-fight wait is skipped: the walk stopped")
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := w.env.now()
+	deadline := start.Add(teardownLiveFightWait)
+	waitCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	first := live
+	failed := 0
+	for {
+		if !w.env.now().Before(deadline) {
+			break
+		}
+		poll := teardownLiveFightPoll
+		if left := deadline.Sub(w.env.now()); poll > left {
+			poll = left
+		}
+		if err := w.env.sleep(waitCtx, poll); err != nil {
+			return
+		}
+		read := teardownLiveFightReadTimeout
+		if left := deadline.Sub(w.env.now()); read > left {
+			read = left
+		}
+		if read <= 0 {
+			break
+		}
+		w.saveFightsCtx(waitCtx, read)
+		if w.bossCheckErr != nil {
+			failed++
+			if failed > 1 {
+				w.note("fight records: the teardown live-fight wait stopped: the dashboard fights read failed: %v", w.bossCheckErr)
+				return
+			}
+			w.note("fight records: the teardown live-fight wait retries after a failed dashboard fights read: %v", w.bossCheckErr)
+			continue
+		}
+		failed = 0
+		if live = w.teardownLiveFightID(); live == "" {
+			w.note("fight records: waited %d s at teardown for live fight %s to end", int(w.env.now().Sub(start)/time.Second), first)
+			return
+		}
+		first = live
+	}
+	w.note("fight records: fight %s still live after %s at teardown: not saved", first, durWords(teardownLiveFightWait))
+}
+
 // firstLine is a report's first line, for an error text.
 func firstLine(s string) string {
 	s = strings.TrimSpace(s)
@@ -6198,3 +6382,7 @@ func durWords(d time.Duration) string {
 // preplacementFightsTimeout is the deadline of the fight-list read made before the walk's placement (a variable so a
 // test can shorten it).
 var preplacementFightsTimeout = 3 * time.Second
+
+// fightHistoryLeeway is the start-time fallback's leeway in seconds (item 3): when the pre-placement read failed,
+// a row counts as history only if it started over this long before the walk began.
+const fightHistoryLeeway = 10

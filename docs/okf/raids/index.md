@@ -22,6 +22,7 @@ Walk a raid plan with hired bots using `raid-walk`, keep many raids running with
 
 ## Reference
 - [`raid-walk` flags](raid-walk-reference.md) — every flag, default and example.
+- [`walk-preflight` reference](walk-preflight.md) — check a walk directory before any raid-walk starts.
 - [`raid-autopilot` reference](raid-autopilot-reference.md) — flags, `targets.txt`, `STOP`/`YIELD`, `status.txt`, checkpoint, exit codes.
 - [`raid-suite` reference](raid-suite-reference.md) — flags, suite file, verdicts, exit codes.
 - [`raid-walk report` reference](report-reference.md) — flags, inputs, the per-pull table and `report.json`.

@@ -413,6 +413,25 @@ func validateHire(s string) ([]hireToken, int, error) {
 	return out, total, nil
 }
 
+// TankSeats is the number of tank seats the roster hires: the mt batch plus every tank token of the ot and rest
+// batches (a class token's explicit :tank role counts; a class's default role is not a tank).
+func (r *Roster) TankSeats() int {
+	tanks := 0
+	for i := range r.Batches {
+		b := &r.Batches[i]
+		tokens := b.tokens
+		if tokens == nil {
+			tokens, _, _ = validateHire(b.Hire)
+		}
+		for _, t := range tokens {
+			if t.Role == "tank" {
+				tanks += t.Count
+			}
+		}
+	}
+	return tanks
+}
+
 // Total is the number of bots the batches hire.
 func (r *Roster) Total() int {
 	total := 0
