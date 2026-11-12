@@ -16,11 +16,12 @@
 //     hire is revived and a boss under the floor is restored to its own max. The floor is also checked on every poll,
 //     not only at the cycle rows, on the newest reading across every source (the tracked frames, the newest frame's
 //     hostile rows and bot targets, the commander's own client). A source reading the bound boss dead ends the
-//     practice with its kill ending; death is the unit's Dead flag or raw health 0, and a live unit with positive raw
-//     health clamps to at least 1 % (an integer percent that rounds to 0 is not a kill). The attempt ends with "the
-//     boss is gone" only when no source has shown it for practiceBossGoneGrace: one slow poll, one missing source or
-//     one unresolved GM hand is not a despawn. A commander unit read that fails is an unknown source, not a missing
-//     one: the gone timer holds while it fails, and 60 s of it ends the attempt as "commander unreadable".
+//     practice with its kill ending; death is ONLY the commander's unit saying Dead or at raw health 0, and a live
+//     unit with positive raw health clamps to at least 1 % (an integer percent that rounds to 0 is not a kill). A
+//     frame row at 0 % is "seen, health unknown", never dead. The attempt ends with "the boss is gone" only when no
+//     source has shown it for practiceBossGoneGrace: one slow poll, one missing source or one unresolved GM hand is
+//     not a despawn. A commander unit read that fails is an unknown source, not a missing one: the gone timer holds
+//     while it fails, and 60 s of it ends the attempt as "commander unreadable".
 //  4. Attempt end: CyclesPerAttempt cycles, BerserkS-60 s of attempt, every hire dead, or the boss dying (which ends
 //     the whole practice, without a respawn and without crediting a kill).
 //  5. Reset: pause the run with the commander's `run pause` (never `.bot run stop`: a stop ends the run and erases
@@ -570,9 +571,10 @@ func practiceHostileRow(m map[string]hostileState, g packet.GUID) (hostileState,
 //   - the commander's own client (units, hostiles only), read now: the commander sees the boss even when a frame
 //     drops it.
 //
-// hp is the newest source's health percent, -1 when that source names the unit without a reading (a bot's target);
-// at is when that source saw it; ok is false when no readable source names the guid at all. A sight of hp 0 is a dead
-// reading: the commander's own client is dead only when the unit says Dead or its raw health is 0, and a live unit
+// hp is the newest source's health percent, -1 when that source names the unit without a reading (a bot's target, or
+// a frame row at 0 %: frames round a live boss under 1 % to 0, so a frame's percent is never a death reading); at is
+// when that source saw it; ok is false when no readable source names the guid at all. A sight of hp 0 is a dead
+// reading, and ONLY the commander's own client can give one: the unit says Dead or its raw Health is 0. A live unit
 // with positive raw health clamps to at least 1 % (an integer percent that rounds to 0 is not a kill). commanderErr
 // is the commander source's own status: a failed units read is an unknown source, never evidence that the boss left.
 func (w *walk) practiceBossSight(ctx context.Context, p *practiceState) (hp int, at time.Time, ok bool, commanderErr error) {
@@ -580,12 +582,21 @@ func (w *walk) practiceBossSight(ctx context.Context, p *practiceState) (hp int,
 		return 0, time.Time{}, false, nil
 	}
 	consider := func(h int, t time.Time) {
-		if !ok || t.After(at) {
+		// On a tie the source considered later wins: the call order is the evidence order (tracker row, the frame it
+		// fed, then the commander's own client), so a same-poll frame never masks the commander's reading.
+		if !ok || !t.Before(at) {
 			hp, at, ok = h, t, true
 		}
 	}
+	// A frame names the unit and its percent: 0 is "seen, health unknown", never dead.
+	frameHP := func(pct int) int {
+		if pct <= 0 {
+			return -1
+		}
+		return pct
+	}
 	if h, found := practiceHostileRow(w.hostiles, p.bossGUID); found {
-		consider(h.hppct, h.at)
+		consider(frameHP(h.hppct), h.at)
 	}
 	if fr := w.viewFrame; fr != nil {
 		frameAt := w.viewAt
@@ -594,7 +605,7 @@ func (w *walk) practiceBossSight(ctx context.Context, p *practiceState) (hp int,
 		}
 		for _, h := range fr.Hostiles {
 			if h.GUID == p.bossGUID { // parsed guids: the frame's case and 0xF130 high part compare exactly
-				consider(h.HPPct, frameAt)
+				consider(frameHP(h.HPPct), frameAt)
 			}
 		}
 		for _, b := range fr.Party {
@@ -613,7 +624,7 @@ func (w *walk) practiceBossSight(ctx context.Context, p *practiceState) (hp int,
 			}
 			h := -1 // listed without a health pool: present, but no reading to restore on
 			switch {
-			case u.Dead || (u.MaxHealth > 0 && u.Health == 0):
+			case u.Dead || u.Health == 0:
 				// Death is the unit's own dead flag or raw health 0, never a percentage that rounded down.
 				h = 0
 			case u.MaxHealth > 0:
@@ -912,21 +923,19 @@ func (w *walk) practiceBossHP() int {
 	return 0
 }
 
-// practiceBossDead says the BOUND boss died: a 0 % frame row for its guid, or a unit the client shows dead under that
-// guid. A dead trash unit of the same entry is never the boss.
+// practiceBossDead says the BOUND boss died: a unit the commander's own client shows under that guid as Dead or at raw
+// health 0. A frame row at 0 % is "seen, health unknown" (frames round a live boss under 1 % to 0), never a death; a
+// dead trash unit of the same entry is never the boss.
 func (w *walk) practiceBossDead(ctx context.Context, p *practiceState) bool {
 	if p.bossGUID == 0 {
 		return false
-	}
-	if h, ok := w.hostiles[p.bossGUID.String()]; ok && h.hppct <= 0 {
-		return true
 	}
 	us, err := w.unitsAt(ctx, 0)
 	if err != nil {
 		return false
 	}
 	for _, u := range us {
-		if u.GUID == p.bossGUID && u.Dead {
+		if u.GUID == p.bossGUID && (u.Dead || u.Health == 0) {
 			return true
 		}
 	}

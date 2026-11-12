@@ -1006,23 +1006,77 @@ func TestPracticeAbsentBossGoneAfterGrace(t *testing.T) {
 	}
 }
 
-// TestPracticeDeadBossNotGone: a source reading the bound boss dead is the practice's kill ending, not a despawn: the
-// walk keeps the kill semantics (no exit 18, no respawn) even when the sustain sees the 0 first.
-func TestPracticeDeadBossNotGone(t *testing.T) {
+// TestPracticeCommanderDeadIsDead: the commander's unit under the bound guid saying Dead, or at raw health 0, is the
+// ONLY death signal. A same-poll frame row at 0 % ("seen, health unknown") never masks it.
+func TestPracticeCommanderDeadIsDead(t *testing.T) {
 	now := time.Date(2026, 11, 12, 0, 6, 8, 0, time.Local)
-	w := &walk{
-		env:      walkEnv{now: func() time.Time { return now }},
-		opts:     raidWalkOptions{server: "m910q", practiceSustain: true, practiceBossFloor: 40},
-		agent:    &practiceMissAgent{},
-		hostiles: map[string]hostileState{attempt1BossGUID().String(): {entry: 14834, hppct: 0, at: now}},
+	for _, tc := range []struct {
+		name string
+		unit objects.Unit
+	}{
+		{"dead flag", objects.Unit{GUID: attempt1BossGUID(), Entry: 14834, Health: 42000, MaxHealth: 42000, Dead: true}},
+		{"raw health 0", objects.Unit{GUID: attempt1BossGUID(), Entry: 14834, Health: 0, MaxHealth: 42000}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := &walk{
+				env:      walkEnv{now: func() time.Time { return now }},
+				opts:     raidWalkOptions{server: "m910q", practiceSustain: true, practiceBossFloor: 40},
+				agent:    &practiceUnitsAgent{units: []objects.Unit{tc.unit}},
+				hostiles: map[string]hostileState{attempt1BossGUID().String(): {entry: 14834, hppct: 0, at: now}},
+			}
+			p := &practiceState{bossGUID: attempt1BossGUID(), bossMax: 42000, bossSeenAt: now}
+			if !w.practiceBossDead(context.Background(), p) {
+				t.Fatal("the commander's dead unit was not read as the boss's death")
+			}
+			done, err := w.practiceSustainBoss(context.Background(), p)
+			if err != nil || !done {
+				t.Fatalf("done %v err %v, want the commander's dead reading to end the attempt", done, err)
+			}
+			if p.ended != "boss killed during practice" {
+				t.Fatalf("ended %q, want the practice's kill ending", p.ended)
+			}
+		})
 	}
-	p := &practiceState{bossGUID: attempt1BossGUID(), bossMax: 42000, bossSeenAt: now}
-	done, err := w.practiceSustainBoss(context.Background(), p)
-	if err != nil || !done {
-		t.Fatalf("done %v err %v, want the dead reading to end the attempt", done, err)
-	}
-	if p.ended != "boss killed during practice" {
-		t.Fatalf("ended %q, want the practice's kill ending", p.ended)
+}
+
+// TestPracticeFrameZeroIsNotDead: a frame row at 0 % is "seen, health unknown": frames round a live boss under 1 % to
+// 0, so neither practiceBossDead nor the sustain may read it as a kill. With a live commander unit the sight reports
+// its clamped 1 %; without one the frame is still a sighting, just with no health reading.
+func TestPracticeFrameZeroIsNotDead(t *testing.T) {
+	now := time.Date(2026, 11, 12, 0, 6, 8, 0, time.Local)
+	frame := &tbm.ViewFrame{Seq: 742, Hostiles: []tbm.HostileRec{
+		{GUID: attempt1BossGUID(), Entry: 14834, HPPct: 0, Flags: "-"},
+	}}
+	for _, tc := range []struct {
+		name   string
+		units  []objects.Unit
+		wantHP int
+	}{
+		{"live commander", []objects.Unit{{GUID: attempt1BossGUID(), Entry: 14834, Health: 1, MaxHealth: 200}}, 1},
+		{"no commander unit", nil, -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := &walk{
+				env:       walkEnv{now: func() time.Time { return now }},
+				opts:      raidWalkOptions{server: "m910q", practiceSustain: true, practiceBossFloor: 40},
+				agent:     &practiceUnitsAgent{units: tc.units},
+				hostiles:  map[string]hostileState{attempt1BossGUID().String(): {entry: 14834, hppct: 0, at: now.Add(-time.Second)}},
+				viewFrame: frame,
+				viewAt:    now.Add(-time.Second),
+			}
+			p := &practiceState{bossGUID: attempt1BossGUID(), bossMax: 200, bossSeenAt: now}
+			if w.practiceBossDead(context.Background(), p) {
+				t.Fatal("a 0 % frame row was read as the boss's death")
+			}
+			hp, _, ok, err := w.practiceBossSight(context.Background(), p)
+			if err != nil || !ok || hp != tc.wantHP {
+				t.Fatalf("sight hp %d ok %v err %v, want the 0 %% frame as a sighting (hp %d)", hp, ok, err, tc.wantHP)
+			}
+			done, err := w.practiceSustainBoss(context.Background(), p)
+			if err != nil || done || p.ended != "" {
+				t.Fatalf("sustain done %v err %v ended %q, want the 0 %% frame to keep the attempt alive", done, err, p.ended)
+			}
+		})
 	}
 }
 
