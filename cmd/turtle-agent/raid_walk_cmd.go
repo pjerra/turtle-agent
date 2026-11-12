@@ -76,7 +76,7 @@ const walkPIDFile = "walk.pid"
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
     [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--no-place-unfreeze] [--gm-instance-data LEG:"A B[;A B]"] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
-    [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-per-account N] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
+    [--reset-wait 5m] [--wipe-resume K] [--wipe-end fast] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-per-account N] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--practice ENTRY] [--practice-cycles N] [--practice-max 20m] [--practice-rest 30s] [--practice-boss-floor N] [--practice-sustain=on|off] [--practice-window 120s]
     [--decisions on|off] [--decisions-max-mib N]
     [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--reuse-instance] [--dry-run]
@@ -127,6 +127,7 @@ type raidWalkOptions struct {
 	resetWait         time.Duration
 	wipeResume        int
 	wipeRest          time.Duration
+	wipeEndFast       bool          // --wipe-end fast: a wipe is not reset or revived by the recipe here (the autopilot discards the copy); the dead hires get a bare revive
 	reviveAtRaid      bool          // --revive-at-raid (default on): a wipe recovery brings far hires to the revive point and waits for the raid to gather
 	hireSettle        time.Duration // --hire-settle: the wait after the last hire; 0 skips it (the #1367 live proof)
 	capPerAccount     int           // --instance-cap-per-account: the core's fresh instances per account and hour (stock 5)
@@ -261,6 +262,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.SetOutput(stderr)
 	fs.Usage = func() { fmt.Fprintln(stderr, raidWalkUsage) }
 	speed := "1.0"
+	wipeEnd := ""
 	fs.StringVar(&o.server, "server", "m910q", "the slot server")
 	fs.StringVar(&o.slot, "slot", "", "the slot id (default: any free slot)")
 	fs.StringVar(&o.holder, "holder", "", "the lease holder (default raid-walk-<plan>)")
@@ -282,9 +284,10 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.IntVar(&o.wipeResume, "wipe-resume", 0, "revive, rest and resume a wipe or near-wipe stop this many times per walk (0-3; 0 ends the walk as before)")
 	fs.IntVar(&o.autoResume, "auto-resume", 0, "resume a regroup pause this many times per step (0-3)")
 	fs.DurationVar(&o.resetWait, "reset-wait", 5*time.Minute, "how long a wipe may wait for the instance to reset")
+	fs.StringVar(&wipeEnd, "wipe-end", "", "\"fast\": a wipe that ends the walk at a boss row skips the reset wait and the revive recipe (the copy is discarded: the autopilot's fresh-instance relaunch) and revives only the dead hires; the default keeps the recipe")
 	fs.DurationVar(&o.wipeRest, "wipe-rest", 10*time.Minute, "how long a revived raid rests out of combat before the run resumes")
 	fs.BoolVar(&o.reviveAtRaid, "revive-at-raid", true, "a wipe recovery revives the raid AT the revive point: a hire revived more than 100 yd away is summoned to it, and the resume waits up to 60s for every hire to be in range and out of combat (false: the old revive in place)")
-	fs.DurationVar(&o.hireSettle, "hire-settle", hireSettleWait, "how long to wait after the last hire for its join summons before the refit and the bind (0 skips the wait)")
+	fs.DurationVar(&o.hireSettle, "hire-settle", hireSettleWait, "how long to wait at most after the last hire for its join summons before the refit and the bind (the wait ends when every hire has joined; 0 skips it)")
 	fs.IntVar(&o.capPerAccount, "instance-cap-per-account", raidwalk.InstanceCapPerAccount, "the core's limit of fresh instance ids one account may enter in an hour (stock 5; a patched test core may be 30). The server's entry in instance-cap-per-account.json is used when this flag is not given")
 	fs.DurationVar(&o.capWait, "instance-cap-wait", raidwalk.InstanceCapDefaultWait, "at the cap's raid count (one below --instance-cap-per-account) in the last hour on the server, wait up to this long for the oldest to age out, then exit 26 (0: no wait, exit 26 at that count)")
 	fs.BoolVar(&o.capFail, "instance-cap-fail", false, "at that count exit 26 instead of waiting")
@@ -404,6 +407,14 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	}
 	if o.wipeResume < 0 || o.wipeResume > 3 {
 		fmt.Fprintf(stderr, "raid-walk: --wipe-resume wants 0 to 3\n")
+		return o, exitUsage
+	}
+	switch wipeEnd {
+	case "":
+	case "fast":
+		o.wipeEndFast = true
+	default:
+		fmt.Fprintf(stderr, "raid-walk: --wipe-end wants \"fast\", not %q\n", wipeEnd)
 		return o, exitUsage
 	}
 	if o.wipeRest < 30*time.Second {

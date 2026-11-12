@@ -28,4 +28,4 @@ Three raids have sourced rows: `onyxias_lair` is 2, `zul_gurub` and `ruins_of_ah
 
 `--tier` and `--tier-override` together are refused. A roster file tier that differs from the table's row is refused too — use `--tier-override` to state the comparison. The summary records where the tier came from in `roster.tier_source`: `table`, `roster`, `--tier` or `--tier-override`.
 
-The walk waits `--hire-settle` (default 20s) after the last hire for its join summon, then refits with `.bot gear raid <commander> tier <N>`. Any `--hire-settle` below the default marks the summary `roster.settle_short: true`, and the suite's baseline pick skips that walk.
+The walk waits up to `--hire-settle` (default 20s, a poll of the group that ends as soon as every hire has joined) after the last hire for its join summons, then refits with `.bot gear raid <commander> tier <N>`. Any `--hire-settle` below the default marks the summary `roster.settle_short: true`, and the suite's baseline pick skips that walk.
