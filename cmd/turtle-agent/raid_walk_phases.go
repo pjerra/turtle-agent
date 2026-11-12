@@ -424,6 +424,13 @@ const hireRetryWait = 30 * time.Second
 
 // phaseHire is phase 6: the batches, the party diff and the gear preset.
 func (w *walk) phaseHire(ctx context.Context) error {
+	// 6a. a group member this walk did not hire is dismissed first. A failed attempt leaves its late joiners in the
+	// group (walk 80: attempt 1 timed out its join poll with 37 members), and the run start refuses while the whole
+	// party is not in the lead bot's instance (exit 18), which sent the next attempt into a bind resume that landed in
+	// Hakkar's altar patrols (#446).
+	if err := w.dismissStrayGroupMembers(ctx); err != nil {
+		return err
+	}
 	if f := w.roster.CommanderFaction; f != "" {
 		// TortoiseBots' hire fills the commander's own faction only, so a roster of the other side cannot be
 		// hired at all (a Horde commander gets no paladin, an Alliance one no shaman). Fail before the first
@@ -669,6 +676,29 @@ func hireShortfall(tanks, healers, dps int) string {
 		parts = append(parts, fmt.Sprintf("%dd", dps))
 	}
 	return strings.Join(parts, " ")
+}
+
+// dismissStrayGroupMembers uninvites every group member this walk did not hire (w.hires), so a failed attempt's late
+// joiners cannot block the next run start: the run starts only when the whole party stands in the lead bot's instance,
+// and walk 80's attempt 1 timed out its join poll with 37 members in the group (attempt 2's fresh placement refused
+// with exit 18, and attempt 3 resumed the bind into Hakkar's altar patrols). The module's `.bot uninvite` reaches an
+// owned bot of the commander's account only: a real player in the group gets its usage line, and no uninvite.
+func (w *walk) dismissStrayGroupMembers(ctx context.Context) error {
+	names, err := w.partyNames(ctx)
+	if err != nil {
+		return stopf(exitRaidWalkFailed, "party: %v", err)
+	}
+	for _, n := range names {
+		if w.hires[n] {
+			continue
+		}
+		if err := w.gm(ctx, ".bot uninvite "+n); err != nil {
+			return err
+		}
+		w.note("hire: dismissed %s, a group member this walk did not hire (it would keep the run from starting)", n)
+		w.logLine(w.env.now(), fmt.Sprintf("hire: dismissed %s (.bot uninvite)", n))
+	}
+	return nil
 }
 
 // partyNames is the party's bot names.

@@ -1574,6 +1574,13 @@ func (s *autoSupervisor) tickState(st *autoState) {
 				return
 			}
 			obs.WipeAtBoss = ok && raidwalk.PlaceStepAtBoss(rows, step)
+			if !obs.WipeAtBoss {
+				// Behind the boss-row check: a wipe at a step that is not a boss row still counts as one when the run
+				// engaged the goal's own boss (walk 80: the bind resume's landing fight at step 689 pulled Hakkar in,
+				// and the row check said no boss because the boss row is 691). The entry is the goal's, not a
+				// hard-coded one.
+				obs.WipeAtBoss = raidwalk.BossEngagedWipe(g.target.Goal, obs.EngagedBosses)
+			}
 		}
 		// A practice goal's cycles are summed over its runs: the goal test and the relaunch rules read the sum, so
 		// the prior runs' cycles are folded into this run's observation.
@@ -2041,7 +2048,7 @@ func (s *autoSupervisor) observe(st *autoState) raidwalk.AutoObservation {
 	r := st.run
 	o := raidwalk.AutoObservation{
 		Exited: r.exited, ExitCode: r.exitCode,
-		KilledBosses: map[uint32]bool{}, LastProgress: r.lastProgress,
+		KilledBosses: map[uint32]bool{}, EngagedBosses: map[uint32]bool{}, LastProgress: r.lastProgress,
 	}
 	if !r.exited {
 		o.StepsReached = r.lastStep
@@ -2070,9 +2077,11 @@ func (s *autoSupervisor) observe(st *autoState) raidwalk.AutoObservation {
 	o.InstanceCapWait = o.ExitCode == exitRaidWalkInstanceCap && !strings.Contains(sum.EndReason, "cannot be read")
 	for _, b := range sum.BossKills {
 		b.deadEntries(o.KilledBosses)
+		b.engagedEntries(o.EngagedBosses)
 	}
 	if sum.BossKill != nil {
 		sum.BossKill.deadEntries(o.KilledBosses)
+		sum.BossKill.engagedEntries(o.EngagedBosses)
 	}
 	return o
 }
@@ -2101,9 +2110,11 @@ type autoPractice struct {
 }
 
 // autoBossKill is one summary boss record. phase_entry is the entry the boss's guid read last (Thekal's row is
-// 14599, his reborn form 14509): a kill counts for a goal that names either entry.
+// 14599, his reborn form 14509): a kill counts for a goal that names either entry. Engaged says the run's frames saw
+// the boss fighting (a wipe at a place step can pull him in, walk 80).
 type autoBossKill struct {
 	Entry      uint32 `json:"entry"`
+	Engaged    bool   `json:"engaged,omitempty"`
 	Killed     bool   `json:"killed"`
 	PhaseEntry uint32 `json:"phase_entry,omitempty"`
 }
@@ -2111,6 +2122,18 @@ type autoBossKill struct {
 // deadEntries adds one summary record's entries to a kill map.
 func (b autoBossKill) deadEntries(m map[uint32]bool) {
 	if !b.Killed {
+		return
+	}
+	m[b.Entry] = true
+	if b.PhaseEntry != 0 && b.PhaseEntry != b.Entry {
+		m[b.PhaseEntry] = true
+	}
+}
+
+// engagedEntries adds one summary record's entries to an engagement map. A killed boss counts as engaged: the walk
+// engaged him, and the fresh-instance rule is already past that point when the goal is met.
+func (b autoBossKill) engagedEntries(m map[uint32]bool) {
+	if !b.Engaged && !b.Killed {
 		return
 	}
 	m[b.Entry] = true

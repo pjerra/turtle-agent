@@ -109,6 +109,12 @@ func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
 		case f[1] == "role":
 			// `.bot role <hire> <spec id>`: a version 2 roster's spec, set before the refit.
 			return len(f) == 4 && hires[f[2]] && ValidSpecID(f[3])
+		case f[1] == "uninvite":
+			// `.bot uninvite <name>`: phaseHire's dismissal of a group member this walk did not hire (a failed
+			// attempt's late joiner), which cannot be one of w.hires by definition. The name comes from the party
+			// list, so it is a bot name; the module only uninvites an owned bot (any other name gets its usage line
+			// and no uninvite).
+			return len(f) == 3 && gmNameRe.MatchString(f[2])
 		}
 	}
 	return false

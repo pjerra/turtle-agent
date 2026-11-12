@@ -658,6 +658,18 @@ func (f *walkFakeAgent) gmSide(line string) {
 		f.mu.Unlock()
 		return
 	}
+	if name, ok := strings.CutPrefix(line, ".bot uninvite "); ok {
+		// The module uninvites the bot from the commander's group (commands/Party.cpp: HandleUninvite).
+		f.mu.Lock()
+		for i, n := range f.party {
+			if n == name {
+				f.party = append(f.party[:i], f.party[i+1:]...)
+				break
+			}
+		}
+		f.mu.Unlock()
+		return
+	}
 	switch {
 	case strings.HasPrefix(line, ".bot hire raid ") && (len(f.hireShort) > 0 || len(f.hireReply) > 0):
 		f.hireSideShort(line)
@@ -9639,5 +9651,44 @@ func TestWaitTBMMatchKeepsThePageTail(t *testing.T) {
 	}
 	if len(lines) != 1 || !strings.Contains(lines[0], "done|418") {
 		t.Fatalf("next pump %q, want the page's done line", lines)
+	}
+}
+
+// Walk 80 (#446): a failed attempt's late joiners stay in the group, and the run start refuses while the whole party
+// is not in the lead bot's instance (exit 18: attempt 2's fresh placement), which sent attempt 3 into a bind resume.
+// phaseHire dismisses every group member this walk did not hire, before the batches: one `.bot uninvite` per stray,
+// none for a hire of this walk, and the dismissed names are gone from the party the hires join.
+func TestRaidWalkDismissesStrayGroupMembersBeforeHiring(t *testing.T) {
+	f := newFixture(t)
+	f.agent.mu.Lock()
+	f.agent.party = []string{"Straya", "Strayb"}
+	f.agent.mu.Unlock()
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.stderr.String())
+	}
+	var dismissed []string
+	for _, line := range f.agent.gmLines() {
+		if name, ok := strings.CutPrefix(line, ".bot uninvite "); ok {
+			dismissed = append(dismissed, name)
+		}
+	}
+	if len(dismissed) != 2 || dismissed[0] != "Straya" || dismissed[1] != "Strayb" {
+		t.Fatalf("dismissed %v, want the two strays in party order: %v", dismissed, f.agent.gmLines())
+	}
+	sum := f.summary()
+	if !hasNote(sum, "hire: dismissed Straya, a group member this walk did not hire") {
+		t.Fatalf("notes %q, want the dismissal of Straya", sum.Notes)
+	}
+	f.agent.mu.Lock()
+	party := append([]string{}, f.agent.party...)
+	f.agent.mu.Unlock()
+	if len(party) != raidwalk.HireCap {
+		t.Fatalf("party holds %d bots, want the full roster of %d after the strays were dismissed: %v", len(party), raidwalk.HireCap, party)
+	}
+	for _, n := range party {
+		if n == "Straya" || n == "Strayb" {
+			t.Fatalf("%s is still in the party after its dismissal: %v", n, party)
+		}
 	}
 }

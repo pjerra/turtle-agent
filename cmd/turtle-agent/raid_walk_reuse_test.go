@@ -8,7 +8,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"math"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -352,5 +355,114 @@ func TestReuseGatherIgnoresABossWithNoTarget(t *testing.T) {
 	}
 	if reason := f.summary().EndReason; strings.Contains(reason, "fresh instance needed") || !strings.Contains(reason, "4 tries in the same instance") {
 		t.Fatalf("end reason %q, want the ordinary 4-try failure: the boss has no target", reason)
+	}
+}
+
+// Walk 80 (#446): the bind resume was the only placement that never read the quiet. Attempt 3 resumed the Hakkar leg
+// at the point the deployed plan numbers step 689 (-11807.651 -1691.3049; the plan JSON's own export carries it as an
+// earlier step), 2.4 yd from waypoint 7 of the altar patrols (-11806 -1693, 11359), and the raid was wiped 27 s after
+// the summon. The quiet must go out after the GM-clear lines and before the first `.summon`; a not-quiet read is
+// answered by GM-killing the unit it named and reading again, and no `.summon` may go out while the area is not quiet.
+func TestReuseInstanceBindResumeReadsTheQuietBeforeSummoning(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.reuseInstance = true
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
+	f.agent.entered = false
+	f.agent.instanceBinds = []fakeBind{{inst: 107, ttr: "1h 0m"}}
+	p.inst = 107
+	res, err := planexport.Build(zgPlan(t), planexport.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := res.Rows
+	// The row the walk started at: the Hakkar leg's boss-approach point of walk 80 (the deployed plan's step 689).
+	at := 0
+	for i, r := range rows.Steps {
+		if math.Abs(float64(r.X)+11807.651) < 0.05 && math.Abs(float64(r.Y)+1691.3049) < 0.05 {
+			at = i + 1
+			break
+		}
+	}
+	if at == 0 {
+		t.Fatal("no row at the Hakkar boss-approach point (-11807.651 -1691.3049): the walk 80 start is gone from the plan")
+	}
+	start, leg, _, _, err := raidwalk.PlaceStart(rows, []string{"from", "step", strconv.Itoa(at)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.opts.from = fmt.Sprintf("step %d", at)
+	point, ok := raidwalk.PlacePoint(rows, start)
+	if !ok {
+		t.Fatal("the start step has no point")
+	}
+	// The patrols' waypoint 7 (movement.tsv, WHY-446): it must stand inside the landing reach of the placement point,
+	// or the read would not block.
+	if d := placeDist2(-11806, -1693, point.X, point.Y); d > placeReachYd {
+		t.Fatalf("the patrol stands %.1f yd from the start point (%v %v %v), outside the %d yd reach", d, point.X, point.Y, point.Z, placeReachYd)
+	}
+	patrol := packet.GUID(uint64(packet.HighUnit)<<48 | 11359<<24 | 0x11F382)
+	// The first quiet read sees the patrol; the retry's read is clean.
+	p.quiet = func(n int) bool { return n >= 2 }
+	p.quietNear = []any{map[string]any{"g": patrol.String(), "e": 11359, "n": "Hakkari Bloodkeeper",
+		"p": []float32{-11806, -1693, 52.1}, "w": 1.0, "d": 2.4}}
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
+	f.agent.unitsFn = func(int) []objects.Unit { return gmClearView(f, pack, guids, func(packet.GUID) bool { return false }) }
+	until, err := raidwalk.PlaceStop(rows, []string{"until", "boss"}, start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.agent.startReply = placeStartReplyLeg("zul_gurub", leg, start, len(rows.Steps), until)
+	// The run's own status lines: the placed start walks two steps and stops at its until, on the Hakkar leg.
+	f.agent.startQueue = []queuedEvent{
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|%s|move|walk|walking", start, len(rows.Steps), leg)},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/%d|%s|move|walk|walking", start+1, len(rows.Steps), leg)},
+		{raw: fmt.Sprintf("TBM:RUN|zul_gurub|done|%d/%d|%s|move|walk|stopped before step %d (until boss): the party stays where it stands", start+1, len(rows.Steps), leg, until)},
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	log := f.agentLog()
+	firstQuiet, lastQuiet, firstSummon, lastClear, patrolKill := -1, -1, -1, -1, -1
+	for i, l := range log {
+		switch {
+		case strings.HasPrefix(l, "tt quiet "):
+			if firstQuiet < 0 {
+				firstQuiet = i
+			}
+			lastQuiet = i
+		case strings.HasPrefix(l, "gm_kill "):
+			if firstQuiet < 0 {
+				lastClear = i
+			}
+			if l == "gm_kill "+patrol.String() {
+				patrolKill = i
+			}
+		case strings.HasPrefix(l, "gm .summon ") && firstSummon < 0:
+			firstSummon = i
+		}
+	}
+	if firstQuiet < 0 {
+		t.Fatalf("no .tt quiet went out on the bind resume (walk 80's landing fight)\n%s", strings.Join(log, "\n"))
+	}
+	if lastClear < 0 || lastClear > firstQuiet {
+		t.Fatalf("no GM-clear line before the first quiet (last at %d, quiet at %d)\n%s", lastClear, firstQuiet, strings.Join(log, "\n"))
+	}
+	if patrolKill < 0 || patrolKill < firstQuiet || patrolKill > lastQuiet {
+		t.Fatalf("the patrol %s was not GM-killed between the two quiet reads (kill %d, reads %d..%d)\n%s",
+			patrol, patrolKill, firstQuiet, lastQuiet, strings.Join(log, "\n"))
+	}
+	if firstSummon < 0 {
+		t.Fatalf("no .summon went out\n%s", strings.Join(log, "\n"))
+	}
+	if lastQuiet > firstSummon {
+		t.Fatalf("a .summon (line %d) went out before the quiet read that answered quiet (line %d): the raid would land in the patrols", firstSummon, lastQuiet)
+	}
+	sum := f.summary()
+	if !hasNote(sum, "GM-killing the units the quiet named and reading it again (try 2 of 4, no `.summon` went out)") {
+		t.Fatalf("notes %q, want the quiet retry", sum.Notes)
+	}
+	if sum.Place == nil || !sum.Place.Quiet {
+		t.Fatalf("place summary %+v, want quiet", sum.Place)
 	}
 }

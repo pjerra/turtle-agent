@@ -162,6 +162,23 @@ func (f *autoFixture) attempt(base string, exit, steps int, endReason string) {
 	}
 }
 
+// engagedWipe plans an exit-19 attempt whose summary says the run's frames engaged the goal boss at bossStep without
+// killing it (a wipe at a place step that pulled him in, walk 80): the step's own row is no boss row.
+func (f *autoFixture) engagedWipe(base string, step int, endReason string, entry uint32, bossStep int) {
+	f.t.Helper()
+	f.writeSpec(base+".exit", "19")
+	sum := map[string]any{
+		"exit_code": 19, "steps_reached": step, "steps_total": 761, "end_reason": endReason,
+		"boss_kills": []map[string]any{{"entry": entry, "step": bossStep, "engaged": true, "killed": false}},
+	}
+	raw, err := json.Marshal(sum)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.writeSpec(base+".summary", string(raw))
+	f.writeSpec(base+".runlog", fmt.Sprintf("19:46:05.696 TBM:RUN|zul_gurub|running|%d/761|hakkar|move|walk|walking\n", step))
+}
+
 // gateAttempt holds one attempt at the stub's gate until releaseAttempt runs: the supervisor's launch of it blocks
 // before recording or running anything, so the driver pairs every launch with its own finish whatever the tick
 // timing is. Attempts without a gate run at once, as before.
@@ -3894,4 +3911,44 @@ func TestAutoPracticeNeverEngagedRelaunches(t *testing.T) {
 		t.Fatalf("the event does not name the never-engaged relaunch:\n%s", f.events())
 	}
 	finishAttempt(t, s)
+}
+
+// Walk 80 (#446): the bind resume's landing fight at step 689 pulled Hakkar (14834) in and wiped the raid 27 s later.
+// Step 689 is a move row (the boss row is the leg's last), so the boss-row check said no boss and the next attempt
+// reused the copy the patrols own. A wipe (exit 19) whose summary says the goal's boss was engaged goes to a fresh
+// instance whatever the step; a wipe with no engagement still keeps it.
+func TestAutoWipeEngagingTheGoalBossAtAPlaceStepGoesFresh(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		engage bool
+	}{
+		{"the goal boss engaged", true},
+		{"no engagement", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newAutoFixture(t)
+			f.target("a srv 1 zg-a boss:14834 -- zul_gurub --sql testdata/zg-20261101093000.sql --gm-instance-data hakkar:1 3;6 3;0 0")
+			if c.engage {
+				f.engagedWipe("a-1", 689, "wipe at step 689", 14834, 691)
+			} else {
+				f.attempt("a-1", 19, 689, "wipe at step 689")
+			}
+			f.attempt("a-2", 2, 0, "bad --sql")
+			s := f.supervisor()
+			tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+			finishAttempt(t, s)
+			tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+			args := f.args()
+			reuse := strings.Contains(args[1], "--reuse-instance")
+			if c.engage && reuse {
+				t.Fatalf("a wipe that engaged the goal boss kept the instance: %s\n%s", args[1], f.events())
+			}
+			if !c.engage && !reuse {
+				t.Fatalf("a wipe that never engaged the boss took a fresh instance: %s\n%s", args[1], f.events())
+			}
+			if c.engage && !strings.Contains(f.events(), "fresh instance") {
+				t.Fatalf("no fresh-instance restart event:\n%s", f.events())
+			}
+		})
+	}
 }
