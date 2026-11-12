@@ -12,6 +12,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,6 +21,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/slots"
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
@@ -45,6 +47,12 @@ const (
 	// gmClearRetryGap is the pause between a kill line that did not show a death and the next one: a unit that is
 	// still falling, or a server still answering the selection, gets the time.
 	gmClearRetryGap = 3 * time.Second
+	// gmClearLandPoll and gmClearLandWait are a stop's landing wait: the commander's status is read this often after
+	// its `.go xyz`, up to this ceiling. Walk 74 paid a fixed 2 s at each of its 53 stops (~106 s of the 157 s clear);
+	// a server that has settled the position carries on at the first read, and a landing the status never settles (z
+	// stays a guess over a navmesh hole) waits the old 2 s, so the units read after it is never earlier than before.
+	gmClearLandPoll = 250 * time.Millisecond
+	gmClearLandWait = 2 * time.Second
 )
 
 // gmClearBudget bounds the whole --gm-clear: past it no more lines go out, the members left are listed as not tried and the walk goes
@@ -231,6 +239,45 @@ func gmClearAllSettled(members map[uint64]*gmClearMember, guids []uint64) bool {
 	return true
 }
 
+// gmClearLand sends a GM-clear stop's `.go xyz` and waits for the commander to be settled there: the plan's map, not
+// falling, z no longer the session's guess, and the position within the revive-landing slack of the stop (a landing
+// may drop the character to the floor, so z gets reviveLandingZYd of room). It reads the status every gmClearLandPoll
+// and carries on at the first read that says landed, so a stop the server settles at once costs 250 ms instead of the
+// fixed 2 s the tool used to pay at every visit (walk 74: 53 stops, 157 s for the clear). A landing the status never
+// settles waits out gmClearLandWait, never longer: the units read after it is then exactly as late as before.
+func (w *walk) gmClearLand(ctx context.Context, x, y, z float32) error {
+	if err := w.goPlace(ctx, x, y, z); err != nil {
+		return err
+	}
+	for waited := time.Duration(0); ; {
+		if st, err := w.status(ctx); err == nil && gmClearLanded(st, w.plan.Map, x, y, z) {
+			return nil
+		}
+		wait := gmClearLandWait - waited
+		if wait > gmClearLandPoll {
+			wait = gmClearLandPoll
+		}
+		if err := w.placeSleep(ctx, wait); err != nil {
+			return err
+		}
+		waited += wait
+		if waited >= gmClearLandWait {
+			return nil
+		}
+	}
+}
+
+// gmClearLanded says the commander's status is a settled landing at a GM-clear stop. ZUnknown is the session's guess
+// for z after a teleport until the server sends a position (the same flag reviveLanded reads); over a navmesh hole it
+// may never clear, which is why the wait has its 2 s ceiling.
+func gmClearLanded(st session.StatusInfo, mapID uint32, x, y, z float32) bool {
+	if st.Map != mapID || st.Falling || st.ZUnknown {
+		return false
+	}
+	dx, dy := float64(x-st.X), float64(y-st.Y)
+	return math.Hypot(dx, dy) <= reviveLandingYd && math.Abs(float64(z-st.Z)) <= reviveLandingZYd
+}
+
 // placeGMClear is place step 6b. Every pack is cleared in gmClearRounds rounds; each round the commander visits the pack's stops
 // (a member's spawn point, so a pack wider than the commander's view is seen whole), reads the units around it, and kills every live
 // member it sees. A first empty read ends nothing: the second round still runs while a member is alive or unseen, and is skipped once
@@ -272,10 +319,7 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 				break
 			}
 			for _, stop := range stops {
-				if err := w.goPlace(ctx, stop.X, stop.Y, stop.Z+2); err != nil {
-					return err
-				}
-				if err := w.placeSleep(ctx, 2*time.Second); err != nil {
+				if err := w.gmClearLand(ctx, stop.X, stop.Y, stop.Z+2); err != nil {
 					return err
 				}
 				if err := w.placeInstanceIs(ctx, w.placeInst); err != nil {
@@ -400,10 +444,7 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 	}
 	w.note("%s", raidwalk.GMClearSummaryLine(w.gmClearLog, raidwalk.GMClearLegs(w.gmClear)))
 	// Back to the start point, on its floor, as the corridor clear's last position was.
-	if err := w.goPlace(ctx, p.X, p.Y, p.Z+2); err != nil {
-		return err
-	}
-	if err := w.placeSleep(ctx, 2*time.Second); err != nil {
+	if err := w.gmClearLand(ctx, p.X, p.Y, p.Z+2); err != nil {
 		return err
 	}
 	if err := w.placeInstanceIs(ctx, w.placeInst); err != nil {

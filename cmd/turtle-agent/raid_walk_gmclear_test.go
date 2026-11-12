@@ -19,6 +19,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/slots"
 	"github.com/pjerra/turtle-agent/internal/trashcheck"
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
@@ -1282,6 +1283,90 @@ func TestPlaceGMClearSkipsAPackTheCorridorClearSettledWhole(t *testing.T) {
 	if !hasNote(sum, "already despawned by this walk's own clear") {
 		t.Errorf("notes %q do not explain the settled pack", sum.Notes)
 	}
+}
+
+// gmLandAgent answers the two RPCs gmClearLand sends: the `.go xyz` (recorded with the fake clock) and the status
+// polls. landAt is the status read that first reports a settled landing; never keeps z the session's guess for good
+// (a navmesh hole).
+type gmLandAgent struct {
+	clock  *fakeClock
+	goLine string
+	goAt   time.Time
+	reads  int
+	landAt int
+	never  bool
+	at     []time.Time
+}
+
+func (a *gmLandAgent) Call(ctx context.Context, method string, params, out any, timeout time.Duration) error {
+	switch method {
+	case "gm":
+		text := params.(map[string]string)["text"]
+		if strings.HasPrefix(text, ".go xyz ") {
+			a.goLine, a.goAt, a.reads = text, a.clock.now(), 0
+		}
+	case "status":
+		a.reads++
+		a.at = append(a.at, a.clock.now())
+		st := out.(*session.StatusInfo)
+		*st = session.StatusInfo{State: session.StatusInWorld, Map: 309, X: 10, Y: 20, Z: 30}
+		if a.never || a.reads < a.landAt {
+			st.ZUnknown = true // the destination is reported, the position is still the session's guess
+		}
+	}
+	return nil
+}
+
+// Walk 74's clear paid a fixed 2 s after every `.go xyz` (53 stops, 157 s for the phase). The landing is now polled
+// every gmClearLandPoll: a stop the server settles at the first read carries on at once (the mutation is the old fixed
+// 2 s sleep, which the elapsed time catches exactly), one that settles a poll later waits just that poll, and the
+// ceiling stays 2 s.
+func TestGMClearLandPollsTheLanding(t *testing.T) {
+	newWalk := func(t *testing.T, a *gmLandAgent) *walk {
+		return &walk{plan: &dungeon.Plan{Map: 309}, env: walkEnv{now: a.clock.now, sleep: a.clock.sleep}, agent: a}
+	}
+	t.Run("the first read lands", func(t *testing.T) {
+		a := &gmLandAgent{clock: newFakeClock(), landAt: 1}
+		start := a.clock.now()
+		if err := newWalk(t, a).gmClearLand(context.Background(), 10, 20, 30); err != nil {
+			t.Fatal(err)
+		}
+		if got := a.clock.now().Sub(start); got != 0 {
+			t.Fatalf("a landed stop took %s, want none", got)
+		}
+		if a.goLine != ".go xyz 10 20 30 309" {
+			t.Fatalf("go line %q, want the stop on the plan's map", a.goLine)
+		}
+		if a.reads != 1 {
+			t.Fatalf("%d status reads, want 1", a.reads)
+		}
+	})
+	t.Run("a later poll lands", func(t *testing.T) {
+		a := &gmLandAgent{clock: newFakeClock(), landAt: 3}
+		start := a.clock.now()
+		if err := newWalk(t, a).gmClearLand(context.Background(), 10, 20, 30); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := a.clock.now().Sub(start), 2*gmClearLandPoll; got != want {
+			t.Fatalf("a stop that settles on the 3rd read took %s, want %s", got, want)
+		}
+		if a.reads != 3 {
+			t.Fatalf("%d status reads, want 3", a.reads)
+		}
+	})
+	t.Run("no landing waits the ceiling", func(t *testing.T) {
+		a := &gmLandAgent{clock: newFakeClock(), never: true}
+		start := a.clock.now()
+		if err := newWalk(t, a).gmClearLand(context.Background(), 10, 20, 30); err != nil {
+			t.Fatal(err)
+		}
+		if got := a.clock.now().Sub(start); got != gmClearLandWait {
+			t.Fatalf("an unsettled landing took %s, want the full %s ceiling", got, gmClearLandWait)
+		}
+		if want := int(gmClearLandWait / gmClearLandPoll); a.reads != want {
+			t.Fatalf("%d status reads, want %d", a.reads, want)
+		}
+	})
 }
 
 // A member that cannot die costs gmClearTries * (gmClearDeathWait + gmClearRetryGap) = 32 s. The clear's budget stops the tool
