@@ -329,7 +329,7 @@ var routeAggroKnownFailing = map[string]int{
 	"hateforge_quarry":     754,                                                                       // newly hand-maintained (was a generated draft): the current route passes.
 	"maraudon_orange":      121, "maraudon_purple": 272, "blackrock_depths": 722, "scholomance": 2472, // newly hand-maintained (were generated): the current route's passes; the water fixes at the two Maraudon starts add two and nine segments.
 	"razorfen_kraul": 342, "dire_maul_north": 46, "windhorn_canyon": 436, "upper_blackrock_spire": 459,
-	"blackfathom_deeps": 311, "gnomeregan": 359, "lower_blackrock_spire": 818, "stormwind_vault": 421,
+	"blackfathom_deeps": 311, "gnomeregan": 182, "lower_blackrock_spire": 818, "stormwind_vault": 421, // gnomeregan 359 -> 182 (route order fix 2026-11-12): the short route enters each wing once and drops 89 packs, so fewer walked segments pass a later pack.
 	"frostmane_hollow": 149, "dire_maul_east": 97, "dire_maul_west": 189, "razorfen_downs": 379, "sunken_temple": 337, // dire_maul_west 199 -> 189: the revanchion to and the immol'thar stand move out of aggro, dropping their passes.
 	"scarlet_armory": 99, "scarlet_cathedral": 215, "scarlet_graveyard": 220, "scarlet_library": 154, "shadowfang_keep": 383,
 	"stormwind_stockade": 180, "stratholme_live": 135, "stratholme_undead": 294, // newly hand-maintained: straight-segment counts for the draft routes.
