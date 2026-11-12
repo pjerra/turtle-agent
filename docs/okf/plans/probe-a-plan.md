@@ -35,7 +35,7 @@ Put flags before the plan name here too (plain flag parsing). On/off flags (`--j
 turtle-agent plan-probe --mmaps <mmaps-dir> --sql <migration.sql> [--plan <name>]
 ```
 
-The migration holds the exact rows the server runs, so prefer it when one exists. `--plan` picks the plan when the file holds several. You can also name a `<path.json>` row file directly.
+The migration holds the exact rows the server runs, so prefer it when one exists. `--plan` picks the plan when the file holds several. You can also name a `<path.json>` row file directly. The reader stops at the first statement that is no INSERT (zulfarrak's hand-set `UPDATE ai_dungeon_plan` and `UPDATE ai_dungeon_step`) and says which line it stopped at: the rows above it are probed.
 
 ## 3. Save the report
 
