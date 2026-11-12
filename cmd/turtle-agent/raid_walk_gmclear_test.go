@@ -1238,6 +1238,52 @@ func TestPlaceGMClearSkipsMembersTheCorridorClearRemoved(t *testing.T) {
 	}
 }
 
+// Walk 74: 28 of the --gm-clear's 53 stops visited a pack the corridor sweep had already despawned whole (run.log:
+// `nothing to clear`, summary.txt: "1 of 1 members were already despawned by this walk's own clear"), 28 x ~2.1 s =
+// 59 s spent walking to packs with no unit left. The settled check ran only from round 2 on, so round 1 always visited;
+// a pack settled before its first visit must get no stop at all, exactly as the later rounds skip it.
+func TestPlaceGMClearSkipsAPackTheCorridorClearSettledWhole(t *testing.T) {
+	f, tk := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
+	tk.clearto = func(string) (int, error) { return len(guids), nil }
+	tk.cleartoRemoved = func(string) []any {
+		removed := make([]any, 0, len(guids))
+		for _, g := range guids {
+			removed = append(removed, map[string]any{"g": g.String(), "e": g.Entry(), "n": "despawned"})
+		}
+		return removed
+	}
+	// Nothing of the pack is left in the client's store either (the corridor clear despawned every member).
+	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	for _, stop := range pack.Stops() {
+		goLine := "gm .go xyz " + num32(stop.X) + " " + num32(stop.Y) + " "
+		if n := agentLinesPrefix(f, goLine); n != 0 {
+			t.Fatalf("%d visits to the settled pack's stop (%s), want none", n, strings.TrimSpace(goLine))
+		}
+	}
+	if n := agentLinesPrefix(f, "gm_kill "); n != 0 {
+		t.Fatalf("%d kill lines for a pack its own clear despawned, want none", n)
+	}
+	sum := f.summary()
+	if sum.GMClearPartial || len(sum.GMClear) != len(guids) {
+		t.Fatalf("partial %v, gm_clear %+v", sum.GMClearPartial, sum.GMClear)
+	}
+	for _, e := range sum.GMClear {
+		if !e.Killed || e.Reason != raidwalk.GMClearDespawned || e.Tries != 0 {
+			t.Errorf("entry %+v, want killed, despawned, no line", e)
+		}
+	}
+	if !hasNote(sum, "already despawned by this walk's own clear") {
+		t.Errorf("notes %q do not explain the settled pack", sum.Notes)
+	}
+}
+
 // A member that cannot die costs gmClearTries * (gmClearDeathWait + gmClearRetryGap) = 32 s. The clear's budget stops the tool
 // after five minutes instead of running for half an hour: the rest of the pack is recorded as not tried, a WARN names the budget,
 // and the placement still goes on.

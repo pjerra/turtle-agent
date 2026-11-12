@@ -264,8 +264,11 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 			members[g] = m
 		}
 		stops := pk.Stops()
-		for round := range gmClearRounds {
-			if round > 0 && gmClearAllSettled(members, guids) {
+		for range gmClearRounds {
+			if gmClearAllSettled(members, guids) {
+				// Nothing is left to read for: a pack the corridor sweep already despawned whole is marked settled
+				// before its first visit, so round 1 skips it exactly as the later rounds do (walk 74: 28 of 53
+				// stops went out only to print `nothing to clear`, 28 empty stops x ~2.1 s = 59 s).
 				break
 			}
 			for _, stop := range stops {
