@@ -466,3 +466,74 @@ func TestReuseInstanceBindResumeReadsTheQuietBeforeSummoning(t *testing.T) {
 		t.Fatalf("place summary %+v, want quiet", sum.Place)
 	}
 }
+
+// Round 1 (LOW): placeReuse (the raid is alive in map, `.appear` opens no copy) reads the quiet at the same point of
+// the sequence as placeResume: after the GM-clear lines and before the first `.summon`. A not-quiet read is answered
+// by GM-killing the unit it named and reading again; no `.summon` goes out while the area is not quiet.
+func TestReuseInstancePlaceReuseReadsTheQuietBeforeSummoning(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.reuseInstance = true
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
+	f.agent.entered = true // the raid is alive in map 309: the placement is the reused copy
+	_, plan := placePlanRows(t)
+	patrol := packet.GUID(uint64(packet.HighUnit)<<48 | 11359<<24 | 0x11F382)
+	// The first quiet read sees the patrol; the retry's read is clean.
+	p.quiet = func(n int) bool { return n >= 2 }
+	p.quietNear = []any{map[string]any{"g": patrol.String(), "e": 11359, "n": "Hakkari Bloodkeeper",
+		"p": []float32{plan.Point.X + 2, plan.Point.Y, plan.Point.Z}, "w": 1.0, "d": 2.0}}
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
+	f.agent.unitsFn = func(int) []objects.Unit { return gmClearView(f, pack, guids, func(packet.GUID) bool { return false }) }
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	log := f.agentLog()
+	firstQuiet, lastQuiet, firstSummon, lastClear, patrolKill, appear := -1, -1, -1, -1, -1, -1
+	for i, l := range log {
+		switch {
+		case strings.HasPrefix(l, "tt quiet "):
+			if firstQuiet < 0 {
+				firstQuiet = i
+			}
+			lastQuiet = i
+		case strings.HasPrefix(l, "gm_kill "):
+			if firstQuiet < 0 {
+				lastClear = i
+			}
+			if l == "gm_kill "+patrol.String() {
+				patrolKill = i
+			}
+		case strings.HasPrefix(l, "gm .summon ") && firstSummon < 0:
+			firstSummon = i
+		case strings.HasPrefix(l, "gm .appear ") && appear < 0:
+			appear = i
+		}
+	}
+	if appear < 0 {
+		t.Fatalf("no .appear went out: the reuse path was not taken\n%s", strings.Join(log, "\n"))
+	}
+	if firstQuiet < 0 {
+		t.Fatalf("no .tt quiet went out on the reuse placement\n%s", strings.Join(log, "\n"))
+	}
+	if lastClear < 0 || lastClear > firstQuiet {
+		t.Fatalf("no GM-clear line before the first quiet (last at %d, quiet at %d)\n%s", lastClear, firstQuiet, strings.Join(log, "\n"))
+	}
+	if patrolKill < 0 || patrolKill < firstQuiet || patrolKill > lastQuiet {
+		t.Fatalf("the patrol %s was not GM-killed between the two quiet reads (kill %d, reads %d..%d)\n%s",
+			patrol, patrolKill, firstQuiet, lastQuiet, strings.Join(log, "\n"))
+	}
+	if firstSummon < 0 {
+		t.Fatalf("no .summon went out\n%s", strings.Join(log, "\n"))
+	}
+	if lastQuiet > firstSummon {
+		t.Fatalf("a .summon (line %d) went out before the quiet read that answered quiet (line %d)", firstSummon, lastQuiet)
+	}
+	sum := f.summary()
+	if !hasNote(sum, "GM-killing the units the quiet named and reading it again (try 2 of 4, no `.summon` went out)") {
+		t.Fatalf("notes %q, want the quiet retry", sum.Notes)
+	}
+	if sum.Place == nil || !sum.Place.Quiet {
+		t.Fatalf("place summary %+v, want quiet", sum.Place)
+	}
+}

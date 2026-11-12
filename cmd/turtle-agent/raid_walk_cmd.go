@@ -936,9 +936,11 @@ type walk struct {
 	hostiles      map[string]hostileState
 	botAt         map[string]botPos
 	partyG        map[uint64]bool
-	resetSince    time.Time
-	afterN        uint64
-	eventsAt      uint64
+	// partySet is the names the last party read held (partyNames): `.bot uninvite` is allowed only for one of them.
+	partySet   map[string]bool
+	resetSince time.Time
+	afterN     uint64
+	eventsAt   uint64
 	// viewFrame is the newest perception frame the walk read and viewAt when it read it: the practice's boss check
 	// reads the exact frame a poll fetched, so a tracker row the same poll stamped before its slow event wait cannot
 	// call a boss the frame shows gone.
@@ -1722,7 +1724,7 @@ func dashboardWarning(err error) string {
 // gm sends one GM line, but only after raidwalk.AllowedLine passes it: a refusal is a programming
 // error that stops the walk and prints the line (spec 3.6).
 func (w *walk) gm(ctx context.Context, line string) error {
-	if !raidwalk.AllowedLine(line, w.hires, w.plan.Map) {
+	if !raidwalk.AllowedLine(line, w.hires, w.partySet, w.plan.Map) {
 		return stopf(exitRaidWalkFailed, "raid-walk refused to send a GM line outside the allow-list: %s", line)
 	}
 	w.logLine(w.env.now(), "> "+line)

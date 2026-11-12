@@ -422,6 +422,11 @@ const hireMaxRetries = 3
 // hireRetryWait is the rest between a short batch reply and its retry.
 const hireRetryWait = 30 * time.Second
 
+// dismissWait is how long phaseHire waits for the uninvited strays to leave the party: the module's `.bot uninvite`
+// reaches the group on the server's next update, and the `before` read (and so the join poll's want) must not still
+// count them.
+const dismissWait = 15 * time.Second
+
 // phaseHire is phase 6: the batches, the party diff and the gear preset.
 func (w *walk) phaseHire(ctx context.Context) error {
 	// 6a. a group member this walk did not hire is dismissed first. A failed attempt leaves its late joiners in the
@@ -683,11 +688,16 @@ func hireShortfall(tanks, healers, dps int) string {
 // and walk 80's attempt 1 timed out its join poll with 37 members in the group (attempt 2's fresh placement refused
 // with exit 18, and attempt 3 resumed the bind into Hakkar's altar patrols). The module's `.bot uninvite` reaches an
 // owned bot of the commander's account only: a real player in the group gets its usage line, and no uninvite.
+//
+// The uninvites are read back before phaseHire reads the party: the server updates the group on its next tick, and a
+// `before` that still holds the strays inflates the join poll's want by their count (the original walk 80 failure: a
+// timeout that named more hires than the batch had bought). A stray that outlives the wait stops the attempt instead.
 func (w *walk) dismissStrayGroupMembers(ctx context.Context) error {
 	names, err := w.partyNames(ctx)
 	if err != nil {
 		return stopf(exitRaidWalkFailed, "party: %v", err)
 	}
+	var sent []string
 	for _, n := range names {
 		if w.hires[n] {
 			continue
@@ -695,21 +705,71 @@ func (w *walk) dismissStrayGroupMembers(ctx context.Context) error {
 		if err := w.gm(ctx, ".bot uninvite "+n); err != nil {
 			return err
 		}
+		sent = append(sent, n)
+	}
+	if len(sent) == 0 {
+		return nil
+	}
+	left, err := w.waitStraysGone(ctx, dismissWait)
+	if err != nil {
+		return err
+	}
+	still := make(map[string]bool, len(left))
+	for _, n := range left {
+		still[n] = true
+	}
+	for _, n := range sent {
+		if still[n] {
+			continue
+		}
 		w.note("hire: dismissed %s, a group member this walk did not hire (it would keep the run from starting)", n)
 		w.logLine(w.env.now(), fmt.Sprintf("hire: dismissed %s (.bot uninvite)", n))
+	}
+	if len(left) > 0 {
+		return stopf(exitRaidWalkFailed, "stray group members not dismissed: %s", strings.Join(left, ", "))
 	}
 	return nil
 }
 
-// partyNames is the party's bot names.
+// waitStraysGone polls the party until it holds no member outside w.hires, at most timeout, and returns the non-hires
+// the last read still held (nil when the party is clean).
+func (w *walk) waitStraysGone(ctx context.Context, timeout time.Duration) ([]string, error) {
+	deadline := w.env.now().Add(timeout)
+	for {
+		names, err := w.partyNames(ctx)
+		if err != nil {
+			return nil, stopf(exitRaidWalkFailed, "party: %v", err)
+		}
+		var left []string
+		for _, n := range names {
+			if !w.hires[n] {
+				left = append(left, n)
+			}
+		}
+		if len(left) == 0 {
+			return nil, nil
+		}
+		if !w.env.now().Before(deadline) {
+			return left, nil
+		}
+		if err := w.env.sleep(ctx, time.Second); err != nil {
+			return nil, stopf(exitRaidWalkFailed, "interrupted")
+		}
+	}
+}
+
+// partyNames is the party's bot names. It also records the names as the members of the last read, which
+// `.bot uninvite` must match: the dismissal reads the party right before it sends its lines.
 func (w *walk) partyNames(ctx context.Context) ([]string, error) {
 	p, err := w.party(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]string, 0, len(p.Members))
+	w.partySet = make(map[string]bool, len(p.Members))
 	for _, m := range p.Members {
 		out = append(out, m.Name)
+		w.partySet[m.Name] = true
 	}
 	return out, nil
 }

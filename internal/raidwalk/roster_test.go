@@ -303,7 +303,7 @@ func TestRosterHunterSpecAliasAndTalentBuilds(t *testing.T) {
 		".bot command Bot09 talents survival":     false,
 		".bot command Bot02 leave":                false,
 	} {
-		if got := AllowedLine(line, hires, 249); got != want {
+		if got := AllowedLine(line, hires, nil, 249); got != want {
 			t.Errorf("AllowedLine(%q) = %v, want %v", line, got, want)
 		}
 	}

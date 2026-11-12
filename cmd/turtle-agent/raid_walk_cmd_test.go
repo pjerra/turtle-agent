@@ -103,18 +103,25 @@ type walkFakeAgent struct {
 	t          *testing.T
 	clock      *fakeClock
 
-	mu            sync.Mutex
-	calls         []string
-	gm            []string
-	gmUnits       []int
-	timeline      []timelineEntry
-	party         []string
-	nameSeq       int
-	startArgs     string
-	roleLines     []string // every `.bot role` line, in order
-	roleFail      bool     // the server refuses every `.bot role` ("does not use that spec")
-	roleSilentFor string   // the one bot whose `.bot role` is never answered
-	roleSilent    bool     // the server never answers `.bot role`
+	mu       sync.Mutex
+	calls    []string
+	gm       []string
+	gmUnits  []int
+	timeline []timelineEntry
+	party    []string
+	nameSeq  int
+	// uninviteLag delays the module's uninvite by that many party reads: the server answers the line on its next
+	// group update, so the first read after it still holds the bot (0: the bot is gone on the next read).
+	uninviteLag map[string]int
+	// uninvitePending is the group update in flight: name -> party reads that must still show it.
+	uninvitePending map[string]int
+	// uninviteRefused names the module cannot uninvite (a real player's: the usage line, no uninvite): the bot stays.
+	uninviteRefused map[string]bool
+	startArgs       string
+	roleLines       []string // every `.bot role` line, in order
+	roleFail        bool     // the server refuses every `.bot role` ("does not use that spec")
+	roleSilentFor   string   // the one bot whose `.bot role` is never answered
+	roleSilent      bool     // the server never answers `.bot role`
 	// talentMode is how the fake game answers `.bot command <bot> talents [<path>]`: "" applies the build and reads it back,
 	// "silent" never answers, "stuck" answers but leaves the build as it was (Survival), "multiple" lists several specs.
 	talentMode      string
@@ -408,6 +415,20 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		f.mu.Unlock()
 	case "party":
 		f.mu.Lock()
+		// The group update in flight: a delayed uninvite leaves the bot in the group for that many reads.
+		for name, n := range f.uninvitePending {
+			if n > 0 {
+				f.uninvitePending[name] = n - 1
+				continue
+			}
+			for i, m := range f.party {
+				if m == name {
+					f.party = append(f.party[:i], f.party[i+1:]...)
+					break
+				}
+			}
+			delete(f.uninvitePending, name)
+		}
 		members := make([]session.PartyMember, 0, len(f.party))
 		for i, n := range f.party {
 			members = append(members, session.PartyMember{Name: n, GUID: packet.GUID(1000 + i), Online: true})
@@ -659,15 +680,26 @@ func (f *walkFakeAgent) gmSide(line string) {
 		return
 	}
 	if name, ok := strings.CutPrefix(line, ".bot uninvite "); ok {
-		// The module uninvites the bot from the commander's group (commands/Party.cpp: HandleUninvite).
+		// The module uninvites the bot from the commander's group (commands/Party.cpp: HandleUninvite). A name it
+		// cannot uninvite (a real player's) answers its usage line and leaves the group as it was.
 		f.mu.Lock()
+		defer f.mu.Unlock()
+		if f.uninviteRefused[name] {
+			return
+		}
+		if n := f.uninviteLag[name]; n > 0 {
+			if f.uninvitePending == nil {
+				f.uninvitePending = map[string]int{}
+			}
+			f.uninvitePending[name] = n
+			return
+		}
 		for i, n := range f.party {
 			if n == name {
 				f.party = append(f.party[:i], f.party[i+1:]...)
 				break
 			}
 		}
-		f.mu.Unlock()
 		return
 	}
 	switch {
@@ -2111,7 +2143,7 @@ func TestRaidWalkHappyPathOnyxia(t *testing.T) {
 	}
 	f.agent.mu.Unlock()
 	for _, line := range gm {
-		if !raidwalk.AllowedLine(line, hires, 249) {
+		if !raidwalk.AllowedLine(line, hires, nil, 249) {
 			t.Fatalf("a GM line fails the allow-list: %q", line)
 		}
 	}
@@ -9689,6 +9721,79 @@ func TestRaidWalkDismissesStrayGroupMembersBeforeHiring(t *testing.T) {
 	for _, n := range party {
 		if n == "Straya" || n == "Strayb" {
 			t.Fatalf("%s is still in the party after its dismissal: %v", n, party)
+		}
+	}
+}
+
+// The module answers `.bot uninvite` on the server's next group update: the first party read after the lines still
+// holds the stray. phaseHire must wait that read out before it reads `before`, or the join poll's want counts a
+// member who is already leaving and times out with "N of M hires joined" (the walk 80 failure, round 1).
+func TestRaidWalkWaitsForTheDismissedStraysToLeave(t *testing.T) {
+	f := newFixture(t)
+	f.agent.mu.Lock()
+	f.agent.party = []string{"Straya", "Strayb"}
+	f.agent.uninviteLag = map[string]int{"Straya": 1, "Strayb": 1}
+	f.agent.mu.Unlock()
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	f.agent.mu.Lock()
+	var lastUninvite, firstHire time.Time
+	for i, l := range f.agent.gm {
+		if strings.HasPrefix(l, ".bot uninvite ") {
+			lastUninvite = f.agent.gmAt[i]
+		}
+		if strings.HasPrefix(l, ".bot hire raid ") && firstHire.IsZero() {
+			firstHire = f.agent.gmAt[i]
+		}
+	}
+	party := append([]string{}, f.agent.party...)
+	f.agent.mu.Unlock()
+	if lastUninvite.IsZero() || firstHire.IsZero() {
+		t.Fatalf("no uninvite or no hire line: %v", f.agent.gmLines())
+	}
+	if d := firstHire.Sub(lastUninvite); d < time.Second {
+		t.Fatalf("the first hire went out %s after the last uninvite, want the dismissal read back first", d)
+	}
+	if len(party) != raidwalk.HireCap {
+		t.Fatalf("party holds %d bots, want the full roster of %d: %v", len(party), raidwalk.HireCap, party)
+	}
+	for _, n := range party {
+		if n == "Straya" || n == "Strayb" {
+			t.Fatalf("%s is still in the party: %v", n, party)
+		}
+	}
+	if reason := f.summary().EndReason; strings.Contains(reason, "joined in") {
+		t.Fatalf("end reason %q, want no join timeout: the wait must read the strays out before the join poll", reason)
+	}
+}
+
+// A stray that outlives the 15 s wait (a name the module cannot uninvite, a real player's) stops phaseHire before a
+// single hire line, with the names still in the group: the join poll cannot count a party that holds them.
+func TestRaidWalkStopsWhenAStrayIsNotDismissed(t *testing.T) {
+	f := newFixture(t)
+	f.agent.mu.Lock()
+	f.agent.party = []string{"Straya", "Stranger"}
+	f.agent.uninviteRefused = map[string]bool{"Stranger": true}
+	f.agent.mu.Unlock()
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d: %s\n%s", code, exitRaidWalkFailed, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if want := "stray group members not dismissed: Stranger"; !strings.Contains(sum.EndReason, want) {
+		t.Fatalf("end reason %q, want %q", sum.EndReason, want)
+	}
+	if hasNote(sum, "dismissed Stranger") {
+		t.Fatalf("notes %q: the stray that stayed was logged as dismissed", sum.Notes)
+	}
+	if !hasNote(sum, "dismissed Straya") {
+		t.Fatalf("notes %q, want the dismissal of Straya, which did leave", sum.Notes)
+	}
+	for _, l := range f.agentLog() {
+		if strings.HasPrefix(l, "gm .bot hire raid ") {
+			t.Fatalf("a hire line went out while a stray was still in the party: %q", l)
 		}
 	}
 }

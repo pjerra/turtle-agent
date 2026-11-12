@@ -21,10 +21,11 @@ var (
 const GMVisibleOff = ".gm visible off"
 
 // AllowedLine says whether raid-walk may send line through the gm RPC (spec 3.6): every line must match one of
-// the forms, with its arguments checked, and a bot name must be one of the walk's hires. mapID is the walk's plan
-// map: `.instance unbind` may name that map and no other (spec 7). The command checks every gm line with it before
-// sending; there is no second copy of the rule.
-func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
+// the forms, with its arguments checked, and a bot name must be one of the walk's hires. party is the names the
+// last party read held: `.bot uninvite` may name one of those (a group member this walk did not hire) and nothing
+// else. mapID is the walk's plan map: `.instance unbind` may name that map and no other (spec 7). The command
+// checks every gm line with it before sending; there is no second copy of the rule.
+func AllowedLine(line string, hires, party map[string]bool, mapID uint32) bool {
 	if strings.ContainsAny(line, "\r\n") {
 		return false
 	}
@@ -111,10 +112,9 @@ func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
 			return len(f) == 4 && hires[f[2]] && ValidSpecID(f[3])
 		case f[1] == "uninvite":
 			// `.bot uninvite <name>`: phaseHire's dismissal of a group member this walk did not hire (a failed
-			// attempt's late joiner), which cannot be one of w.hires by definition. The name comes from the party
-			// list, so it is a bot name; the module only uninvites an owned bot (any other name gets its usage line
-			// and no uninvite).
-			return len(f) == 3 && gmNameRe.MatchString(f[2])
+			// attempt's late joiner). The name must be one the last party read held and not a hire of this walk; the
+			// module only uninvites an owned bot (any other name gets its usage line and no uninvite).
+			return len(f) == 3 && party[f[2]] && !hires[f[2]] && gmNameRe.MatchString(f[2])
 		}
 	}
 	return false

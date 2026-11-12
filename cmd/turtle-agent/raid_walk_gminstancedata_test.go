@@ -305,12 +305,12 @@ func TestGMInstanceDataSentOncePerInstance(t *testing.T) {
 // of losing the pull gate silently.
 func TestGMInstanceDataUsesTheWalksGMPath(t *testing.T) {
 	for _, line := range []string{".debug instancedata 1 3", ".debug instancedata 6 3", ".debug instancedata 0 0"} {
-		if !raidwalk.AllowedLine(line, map[string]bool{"Tankbot": true}, 309) {
+		if !raidwalk.AllowedLine(line, map[string]bool{"Tankbot": true}, nil, 309) {
 			t.Fatalf("the allow-list refuses the walk's own line %q", line)
 		}
 	}
 	for _, line := range []string{".debug instancedata 1", ".debug instancedata 1 2 3", ".debug foo 1 3", ".debug instancedata a b", ".debug instancedata 1 3 extra"} {
-		if raidwalk.AllowedLine(line, map[string]bool{"Tankbot": true}, 309) {
+		if raidwalk.AllowedLine(line, map[string]bool{"Tankbot": true}, nil, 309) {
 			t.Fatalf("the allow-list accepts a line the walk never sends %q", line)
 		}
 	}
