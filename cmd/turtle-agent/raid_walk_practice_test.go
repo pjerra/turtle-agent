@@ -835,7 +835,7 @@ func TestPracticePauseNotRunningProceeds(t *testing.T) {
 	if n := countLog(f.agent.log, "cmdr run pause"); n != 1 {
 		t.Fatalf("%d run pauses, want 1 (log %v)", n, f.agent.log)
 	}
-	if n := countLog(f.agent.runVerbs, "resume"); n != 0 {
+	if n := countPrefix(f.agent.runVerbs, "resume"); n != 0 {
 		t.Fatalf("%d run resumes, want 0 (no run slot left to resume into)", n)
 	}
 	if sc.evadeN != 1 {
