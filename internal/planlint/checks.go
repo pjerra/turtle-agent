@@ -236,12 +236,12 @@ func (c *checker) checkReach(i int, s planexport.StepRow) []Finding {
 	if !ok {
 		return nil
 	}
-	if noHop(s) {
-		return nil // the row's point is where the module does its work, not a hop: see noHop
-	}
 	prev := c.prev(i)
 	if prev < 0 {
 		return nil
+	}
+	if noHop(s, c.steps[prev]) {
+		return nil // the row's point is where the module does its work, not a hop: see noHop
 	}
 	from, to := v3(pointOf(c.steps[prev])), v3(pointOf(s))
 	sp, err := pn.ServerPath(c.opt.Map, from, to)
