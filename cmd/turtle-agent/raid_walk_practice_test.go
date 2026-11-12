@@ -813,9 +813,9 @@ func TestPracticePauseACKWithoutStatusRefused(t *testing.T) {
 	}
 }
 
-// TestPracticePauseNotRunningProceeds: a reset whose pause answers "The run is not running" (the live practice 2/3
-// incident) proceeds with the reset instead of exiting 18: evade, revive, respawn go out, no resume follows (no run
-// slot is left), and the next attempt's re-engagement starts it again.
+// TestPracticePauseNotRunningProceeds: a reset whose pause answers the module's `state` refusal "The run is not
+// running." (the live practice 2/3 incident) proceeds with the reset instead of exiting 18: evade, revive, respawn
+// go out, no resume follows (no run slot is left), and the next attempt's re-engagement starts it again.
 func TestPracticePauseNotRunningProceeds(t *testing.T) {
 	sc := &practiceScenario{}
 	f, _, _ := practiceFixture(t, sc, 10)
@@ -824,7 +824,8 @@ func TestPracticePauseNotRunningProceeds(t *testing.T) {
 	sc.mu.Unlock()
 	fails := true
 	f.agent.pauseErr = &fails
-	f.agent.pauseErrMsg = "The run is not running"
+	f.agent.pauseErrCode = "state"
+	f.agent.pauseErrMsg = "The run is not running."
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d, want 0 (notes %v): %s", code, f.summaryNotes(), f.stderr.String())
 	}
@@ -846,8 +847,8 @@ func TestPracticePauseNotRunningProceeds(t *testing.T) {
 	}
 }
 
-// TestPracticePauseNoRunCodeProceeds: the same already-gone answer under the server's no-run code proceeds with the
-// reset just like the message wording does.
+// TestPracticePauseNoRunCodeProceeds: the module's other already-gone answer, `no-run` with "No run is going (.bot
+// run start [plan])." (no run slot exists), proceeds just like the `state` refusal.
 func TestPracticePauseNoRunCodeProceeds(t *testing.T) {
 	sc := &practiceScenario{}
 	f, _, _ := practiceFixture(t, sc, 10)
@@ -856,7 +857,8 @@ func TestPracticePauseNoRunCodeProceeds(t *testing.T) {
 	sc.mu.Unlock()
 	fails := true
 	f.agent.pauseErr = &fails
-	f.agent.pauseErrMsg = "No run is going"
+	f.agent.pauseErrCode = "no-run"
+	f.agent.pauseErrMsg = "No run is going (.bot run start [plan])."
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d, want 0 (notes %v): %s", code, f.summaryNotes(), f.stderr.String())
 	}
@@ -866,6 +868,36 @@ func TestPracticePauseNoRunCodeProceeds(t *testing.T) {
 	}
 	if n := countPrefix(f.agent.runVerbs, "resume"); n != 0 {
 		t.Fatalf("%d run resumes, want 0 (no run slot left to resume into)", n)
+	}
+}
+
+// TestPracticePauseWrongCodeWithPhraseFails: a refusal under a different code whose message contains the phrase is
+// not the server's already-gone reply: only the two module codes (`no-run`, `state`) continue unheld, so the reset
+// is refused before any GM action.
+func TestPracticePauseWrongCodeWithPhraseFails(t *testing.T) {
+	sc := &practiceScenario{}
+	f, _, _ := practiceFixture(t, sc, 10)
+	sc.mu.Lock()
+	sc.dropAt = f.clock.now().Add(time.Hour)
+	sc.mu.Unlock()
+	fails := true
+	f.agent.pauseErr = &fails
+	f.agent.pauseErrCode = "busy"
+	f.agent.pauseErrMsg = "The run is not running elsewhere, wait your turn"
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d (notes %v): %s", code, exitRaidWalkFailed, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Ended != "run pause refused" || sum.Practice.Attempts != 1 {
+		t.Fatalf("practice %+v, want one attempt ended run pause refused", sum.Practice)
+	}
+	if !strings.Contains(sum.EndReason, "the run pause before the reset failed") {
+		t.Fatalf("end reason %q, want the pause failure", sum.EndReason)
+	}
+	for _, meth := range []string{"gm_evade ", "gm_set_hp ", "gm_respawn ", "gm_revive "} {
+		if n := countLog(f.agent.log, meth); n != 0 {
+			t.Fatalf("%d %s calls after a wrong-code refusal (log %v)", n, meth, f.agent.log)
+		}
 	}
 }
 

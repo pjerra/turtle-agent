@@ -979,23 +979,22 @@ func (w *walk) practiceSonsAlive() int {
 	return n
 }
 
-// errRunNotRunning marks the reset pause's already-gone answer: the server's `run pause` reply says no run is
-// going. Only the reply carries it (see pauseRun); transport, poll and interrupt errors never match.
+// errRunNotRunning marks the reset pause's already-gone answer: the server's `run pause` ACTION_ERR says no run
+// is running. Only the reply's code carries it (see practiceRunNotGoing): transport, poll and interrupt errors,
+// and refusals under any other code, never match.
 var errRunNotRunning = errors.New("run is not running")
 
-// practiceRunNotGoing reports the server's already-gone answer to `run pause`: the wipe rule stopped it (the
-// practice saw this at ~10.5 min in), or it ended or was stopped from under the reset. Match the reply's own code
-// or message ("no-run", "No run is going", "The run is not running"): never the text of a transport, poll or
-// interrupt error.
+// practiceRunNotGoing reports the server's already-gone answer to `run pause`: the wipe rule stopped the run (the
+// practice saw this at ~10.5 min in), or it ended or was stopped from under the reset. The module's two pause
+// refusals for no running run are both distinct ACTION_ERR codes (TortoiseBots commands/Commander.cpp RunVerbAs,
+// upstream/dev f7368050): `no-run` with "No run is going (.bot run start [plan])." when no run slot exists
+// (:15381), and `state` with "The run is not running." when the slot's state is not Running (:15466-15468, the
+// only `state` refusal the pause verb sends). The code is the whole signal: never the message text.
 func practiceRunNotGoing(err *tbm.Err) bool {
 	if err == nil {
 		return false
 	}
-	if strings.EqualFold(err.Code, "no-run") || strings.EqualFold(err.Code, "not-running") {
-		return true
-	}
-	lower := strings.ToLower(err.Message)
-	return strings.Contains(lower, "run is not running") || strings.Contains(lower, "no run is going")
+	return err.Code == "no-run" || err.Code == "state"
 }
 
 // practiceReset pauses the run, resets the boss and the Sons, rests, resends the instance data and resumes the run at

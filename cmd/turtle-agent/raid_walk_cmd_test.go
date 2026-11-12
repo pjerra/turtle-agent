@@ -186,8 +186,9 @@ type walkFakeAgent struct {
 	runEnded bool
 	// runVerbs records every `run` commander request's verb, in order, and onSkip runs for one whose verb is skip
 	// (walk 24 B: the boss-not-found skip). skipErr makes that skip answer an error (a refusal). pauseErr, when
-	// non-nil, makes `run pause` fail while it points at true (a refused pause: the gm-instance-data resume test);
-	// pauseErrMsg overrides the refusal's message (the practice's already-gone run: "The run is not running").
+	// non-nil, makes `run pause` fail while it points at true (a refused pause: the gm-instance-data resume test).
+	// The refusal's code and message come from pauseErrCode (default "refused") and pauseErrMsg (default "the run
+	// is busy"); the practice's already-gone answer sets both to the module's code and message.
 	// onPause runs after an accepted pause (the fake server's TBM:RUN paused line) and nil models an ACK with no
 	// status, which the practice reset must refuse.
 	runVerbs []string
@@ -197,7 +198,10 @@ type walkFakeAgent struct {
 	// pauseErrMsg overrides the refused pause's message (the practice's already-gone run answers "The run is not
 	// running" instead of the default "the run is busy").
 	pauseErrMsg string
-	onPause     func()
+	// pauseErrCode overrides the refused pause's ACTION_ERR code. Empty keeps the legacy "refused"; a not-going
+	// refusal answers the module's code ("no-run" or "state").
+	pauseErrCode string
+	onPause      func()
 	// onStart runs after a `run start` was answered and its startQueue was pushed (a test that needs lines after a
 	// later start: the boss-not-found re-run). nil: nothing.
 	onStart func()
@@ -1518,7 +1522,11 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 				if msg == "" {
 					msg = "the run is busy"
 				}
-				return commanderReply{Reply: tbm.Reply{Kind: "err", Err: &tbm.Err{Intent: "run pause", Code: "refused",
+				code := f.pauseErrCode
+				if code == "" {
+					code = "refused"
+				}
+				return commanderReply{Reply: tbm.Reply{Kind: "err", Err: &tbm.Err{Intent: "run pause", Code: code,
 					Message: msg}}}
 			}
 			if hook != nil {
