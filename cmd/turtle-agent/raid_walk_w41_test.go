@@ -653,7 +653,7 @@ func TestFightRecordKillAtWalkStartNeedsNoLiveSighting(t *testing.T) {
 			// The dashboard listed the goal boss's kill when the walk began (an earlier walk's or instance's).
 			w.fightIDsAtStart = map[string]bool{"68-1": true}
 			w.fights = []raidwalk.FightSummary{
-				{ID: "68-1", Step: goal, Leg: "high_priestess_jeklik", DurMS: 153656, Outcome: "kill", BossName: "High Priestess Jeklik", BossPhase: 1, BossPhaseEntry: 14517},
+				{ID: "68-1", Step: goal, Leg: "high_priestess_jeklik", DurMS: 153656, Outcome: "kill", BossName: "High Priestess Jeklik", BossPhase: 1, BossPhaseEntry: 14517, History: true},
 			}
 			w.finish(exitRaidWalkIncident)
 			raw, err := os.ReadFile(filepath.Join(w.outDir, "summary.json"))
@@ -668,6 +668,9 @@ func TestFightRecordKillAtWalkStartNeedsNoLiveSighting(t *testing.T) {
 			if tc.wantCredited {
 				if k == nil || k.Step != goal || k.Entry != 14517 || !k.Killed {
 					t.Fatalf("boss_kill %+v, want step %d entry 14517 killed by the pre-walk record (notes %q)", k, goal, sum.Notes)
+				}
+				if len(sum.Fights) != 1 || !sum.Fights[0].History {
+					t.Fatalf("fights %+v, want the credited pre-walk record tagged History=true", sum.Fights)
 				}
 				return
 			}

@@ -27,3 +27,27 @@ func TestLoadInstanceCaps(t *testing.T) {
 		t.Fatalf("zero cap: %v, want a refusal", err)
 	}
 }
+
+func TestEffectiveInstanceCap(t *testing.T) {
+	caps := map[string]int{"m910q": 30}
+	cases := []struct {
+		name     string
+		explicit int
+		server   string
+		want     int
+	}{
+		{"the flag wins", 12, "m910q", 12},
+		{"the file", 0, "m910q", 30},
+		{"the stock", 0, "other", StockInstanceCap},
+		{"no file", 0, "m910q", StockInstanceCap},
+	}
+	for _, c := range cases {
+		m := caps
+		if c.name == "no file" {
+			m = nil
+		}
+		if got := EffectiveInstanceCap(c.explicit, m, c.server); got != c.want {
+			t.Errorf("%s: got %d, want %d", c.name, got, c.want)
+		}
+	}
+}

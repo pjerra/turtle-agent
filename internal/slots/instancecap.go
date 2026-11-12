@@ -35,3 +35,19 @@ func LoadInstanceCaps(path string) (map[string]int, error) {
 	}
 	return caps, nil
 }
+
+// StockInstanceCap is the stock core's cap per pool account: the 6th distinct instance id in an hour is refused.
+const StockInstanceCap = 5
+
+// EffectiveInstanceCap resolves a server's cap from the sources in precedence order: an explicit flag, else the
+// server's entry in instance-cap-per-account.json, else the stock core's 5. walk-preflight calls it so its printed cap
+// follows the same rule as the raid commands.
+func EffectiveInstanceCap(explicit int, caps map[string]int, server string) int {
+	if explicit > 0 {
+		return explicit
+	}
+	if n, ok := caps[server]; ok && n > 0 {
+		return n
+	}
+	return StockInstanceCap
+}

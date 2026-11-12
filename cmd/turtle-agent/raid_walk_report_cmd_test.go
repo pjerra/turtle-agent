@@ -125,6 +125,32 @@ func TestRaidWalkReportWritesFiles(t *testing.T) {
 	}
 }
 
+// A practice run's report prints the PRACTICE line, not the gm-clear line.
+func TestRaidWalkReportPrintsPractice(t *testing.T) {
+	dir := reportDir(t)
+	sum := map[string]any{
+		"assisted": true,
+		"practice": map[string]any{
+			"entry": 14834, "attempts": 2, "cycles": 10,
+			"ended": "cycles", "rows": "practice.jsonl", "fight_ids": []string{"3-1"},
+		},
+	}
+	raw, _ := json.Marshal(sum)
+	if err := os.WriteFile(filepath.Join(dir, "summary.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs := runReport(t, dir)
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	if !strings.Contains(out, "PRACTICE: 10 cycles in 2 attempts, ended: cycles") {
+		t.Fatalf("no PRACTICE line in:\n%s", out)
+	}
+	if strings.Contains(out, "gm-clear killed") {
+		t.Fatalf("a practice report prints the gm-clear line:\n%s", out)
+	}
+}
+
 func TestRaidWalkReportReadsFightsFullAndRefuses(t *testing.T) {
 	dir := t.TempDir()
 	if code, _, errs := runReport(t, dir); code != exitRaidWalkFailed || !strings.Contains(errs, "no combat-fight-*.json") {
