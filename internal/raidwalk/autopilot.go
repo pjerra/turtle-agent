@@ -403,17 +403,6 @@ func parseAutoArgs(in []string) (autoArgs, error) {
 			}
 			out.BossWipeFresh = true
 			continue
-		case "--wipe-end":
-			// Managed: the autopilot passes it for a goal whose boss wipe takes a fresh instance (see
-			// autoCommandArgs), so a target line cannot ask for it on a goal that re-places the same copy.
-			if hasEq {
-				continue
-			}
-			if i+1 >= len(in) {
-				return autoArgs{}, fmt.Errorf("%s needs a value", a)
-			}
-			i++
-			continue
 		case "--place", "--reuse-instance":
 			continue
 		case "--gm-instance-data":
@@ -660,21 +649,13 @@ func AutoBackoff(fast int) time.Duration {
 	return steps[fast]
 }
 
-// AutoBossWipeBackoff is the wait before the fresh-instance relaunch after a wipe at a boss: flat, because a wiped
-// fight is the expected end of an attempt, not a broken setup. The growing backoff is for broken setups, and walk 74
-// measured the gaps it caused: 30 s x21, 70 s x8, 130 s x3 (the first wipe of a streak already paid 20 s, the second
-// 1 m, the third 2 m). A flat 20 s still separates the teardown and the fresh instance from the run that wiped, and a
-// run that reaches a further step resets the wipe count as before.
-const AutoBossWipeBackoff = 20 * time.Second
-
 // DecideAutoAction is the whole rule: any end, a used-up restart budget, or a stall tears down and re-places; a met
 // goal advances; a placement that failed on the old bind asks for a fresh instance next. A stall is no step and no
 // boss-HP change for stall, counted from the end of a legitimate instance-cap wait. Exit 2 stops the id for a
 // person, exit 29 retries once per goal in a fresh instance (a second one stops it), and so does the third consecutive exit 15
 // or the sixth consecutive hire-pool wait. Exit 26 (the instance cap refused a fresh place) relaunches at once, since
-// the walk waited its own cap wait already, and the fourth in a row stops the id. Every ordinary restart carries the backoff of
-// its no-progress count (a boss wipe's fresh relaunch uses the flat AutoBossWipeBackoff instead, since a wiped fight is
-// not a broken setup); a boss wipe escalates at the goal's boss-wipe budget.
+// the walk waited its own cap wait already, and the fourth in a row stops the id. Every restart carries the backoff of
+// its no-progress count; a boss wipe escalates at the goal's boss-wipe budget.
 func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall time.Duration) AutoDecision {
 	if !o.Exited {
 		// A run waiting on the instance cap is not stalled: its clock starts when the wait ends.
@@ -807,7 +788,7 @@ func DecideAutoAction(o AutoObservation, r AutoRunState, now time.Time, stall ti
 			return AutoDecision{Action: AutoStop, Escalate: true,
 				Reason: fmt.Sprintf("boss wipe x%d without progress (step %d): no further fresh instance (%s)", prior+1, o.StepsReached, shortReason(o.EndReason))}
 		}
-		return practiceRestart(AutoDecision{Action: AutoRestart, Reuse: false, FreshAfterWipe: true, Backoff: AutoBossWipeBackoff,
+		return practiceRestart(AutoDecision{Action: AutoRestart, Reuse: false, FreshAfterWipe: true, Backoff: backoff,
 			Reason: "fresh instance after a wipe at a boss (step " + fmt.Sprint(o.StepsReached) + ", wipe " + fmt.Sprint(prior+1) + " of " + fmt.Sprint(maxWipes-1) + " before escalation): the old copy still holds the boss and the dead bots (" + shortReason(o.EndReason) + ")"})
 	}
 	if o.PlacementFailed() {

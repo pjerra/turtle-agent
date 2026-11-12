@@ -7,7 +7,7 @@
 //
 // A walk with `--gm-instance-data "<leg>:<a> <b>[;<a> <b>...]"` (repeatable,
 // one leg per value) has the commander send each command as
-// `.debug instancedata <a> <b>`, in order, gmInstanceDataGap apart, on every launch: a
+// `.debug instancedata <a> <b>`, in order, 3 s apart, on every launch: a
 // placed start inside the leg fires on the placement's leg BEFORE the run
 // starts, and a walk that reaches the leg mid-run fires under a run pause
 // (the next pull waits). Without --place the entry's instance is read the
@@ -45,12 +45,9 @@ import (
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
-// gmInstanceDataGap is the pause between two instance-data lines. It was the shell loop's 3 s; walk 74 measured six
-// lines at 26 s (2 s reply window + 3 s gap each, phase 11 of its timing budget). The reply window is what guards the
-// next line (gmInstanceDataReply reads 2 s for the server's answer, and silence is the confirmed path): the old 3 s
-// gap only added ~15 s over the six lines. 0.5 s keeps a clear break between the chat lines. A var so the tests run it
-// at once.
-var gmInstanceDataGap = 500 * time.Millisecond
+// gmInstanceDataGap is the pause between two instance-data lines, 3 s like
+// the shell loop's. A var so the tests run it at once.
+var gmInstanceDataGap = 3 * time.Second
 
 // validateGMInstanceData parses the flag values and resolves the legs against
 // the rows: an unknown leg is a phase-1 refusal (exit 2), like --gm-clear's
@@ -276,8 +273,8 @@ func gmInstanceDataWriteConfirmed(marks raidwalk.InstanceMarks, key, leg string,
 // gmInstanceDataReplyWait is the server reply's window: up to 2 s after
 // each line. The reader polls one no-wait page at a time; each page keeps
 // the walk's event cursor moving, so the run's own status lines behind a
-// reply are never skipped unlogged. The gap before the next line is extra
-// window: a reply that lands within it is the next poll's own read.
+// reply are never skipped unlogged. The 3 s gap before the next line is
+// extra window: a reply that lands within it is the next poll's own read.
 const gmInstanceDataReplyWait = 2 * time.Second
 
 // gmInstanceDataRefusal says whether the system line refuses the command

@@ -570,32 +570,6 @@ func TestAutoBossWipeBudget(t *testing.T) {
 	}
 }
 
-// Walk 74: the boss-wipe relaunch waited the growing backoff (30 s / 70 s / 130 s measured gaps: 20 s, 1 m, 2 m, plus
-// the 10 s tick), because a wiped fight counted as no progress. A wipe is the expected end of an attempt, not a
-// broken setup: its fresh relaunch waits a flat 20 s whatever the no-progress count. Exit errors keep the growth.
-func TestAutoBossWipeBackoffIsFlat(t *testing.T) {
-	g := AutoGoal{Kind: "boss", Boss: 14834}
-	wipe := AutoObservation{Exited: true, ExitCode: 19, StepsReached: 694, EndReason: "wipe", WipeAtBoss: true}
-	for fast := range 4 {
-		d := DecideAutoAction(wipe, AutoRunState{Goal: g, Reuse: true, HasRun: true, FastFailures: fast}, autoNow, 15*time.Minute)
-		if d.Action != AutoRestart || !d.FreshAfterWipe || d.Backoff != AutoBossWipeBackoff {
-			t.Fatalf("boss wipe after %d no-progress attempts: %+v, want a fresh restart after %s", fast, d, AutoBossWipeBackoff)
-		}
-	}
-	// An ordinary exit error still grows: that backoff is for broken setups.
-	crash := AutoObservation{Exited: true, ExitCode: 5, EndReason: "server closed the connection"}
-	want := []time.Duration{AutoBackoff(0), AutoBackoff(1), AutoBackoff(2)}
-	for i, w := range want {
-		d := DecideAutoAction(crash, AutoRunState{Goal: g, Reuse: true, HasRun: true, FastFailures: i}, autoNow, 15*time.Minute)
-		if d.Action != AutoRestart || d.Backoff != w {
-			t.Fatalf("exit error after %d no-progress attempts: %+v, want the growing %s", i, d, w)
-		}
-	}
-	if AutoBossWipeBackoff != 20*time.Second {
-		t.Fatalf("AutoBossWipeBackoff = %s, want the measured 20 s", AutoBossWipeBackoff)
-	}
-}
-
 // A goal line may raise its own boss-wipe budget (--boss-wipe-max, the ZG Hakkar goals): 5 escalates on the fifth wipe,
 // and a goal without the setting keeps the stock 3.
 func TestAutoBossWipeBudgetPerGoal(t *testing.T) {
