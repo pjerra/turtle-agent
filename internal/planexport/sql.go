@@ -77,12 +77,14 @@ func WriteSQL(plans []Rows) string {
 var planTables = map[string]bool{"ai_dungeon_plan": true, "ai_dungeon_leg": true, "ai_dungeon_step": true}
 
 // ParseMigration reads a deployed migration like Parse, but skips whole the statements of tables other than the plan's three, each
-// skipped table named once in notes: the plan rows are what turtle-agent exports and what the server runs, while the hand edits
-// around them (an ai_dungeon_boss or ai_boss_tactic block) are not rows Parse can read and must not stop it.
+// skipped table named once in notes, and skips every other statement that is no INSERT up to its `;` (a hand edit such as an
+// UPDATE, or a START TRANSACTION wrapper), each named in notes with the warning that its hand edits are NOT applied: the plan rows
+// are what turtle-agent exports and what the server runs, while the hand edits around them (an ai_dungeon_boss or ai_boss_tactic
+// block, an UPDATE) are not rows Parse can read and must not stop it or hide the rows after them.
 func ParseMigration(sql string) ([]Rows, []string, error) { return parse(sql, true) }
 
-// parse is Parse, and with lenient also ParseMigration's skip of the other tables and its stop at the first statement that is
-// no INSERT.
+// parse is Parse, and with lenient also ParseMigration's skip of the other tables and of every statement that is no INSERT
+// (each named in notes).
 func parse(sql string, lenient bool) ([]Rows, []string, error) {
 	var notes []string
 	if lenient {
@@ -109,7 +111,7 @@ func skipOtherTables(sql string) (string, []string) {
 			}
 			if !seen[name] {
 				seen[name] = true
-				notes = append(notes, fmt.Sprintf("skipped %s: only ai_dungeon_plan, ai_dungeon_leg and ai_dungeon_step are read", name))
+				notes = append(notes, fmt.Sprintf("skipped %s: only ai_dungeon_plan, ai_dungeon_leg and ai_dungeon_step are read, so its hand edits are NOT applied", name))
 			}
 			skipping = true
 		}
@@ -188,6 +190,7 @@ func parseRows(sql string, lenient bool, notes *[]string) ([]Rows, error) {
 	sc := bufio.NewScanner(strings.NewReader(sql))
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	line := 0
+	skipping := false
 	cur := func(plan string) (*Rows, error) {
 		i, ok := byPlan[plan]
 		if !ok {
@@ -198,6 +201,12 @@ func parseRows(sql string, lenient bool, notes *[]string) ([]Rows, error) {
 	for sc.Scan() {
 		line++
 		t := strings.TrimSpace(sc.Text())
+		if skipping {
+			if endsStatement(t) {
+				skipping = false
+			}
+			continue
+		}
 		switch {
 		case t == "" || strings.HasPrefix(t, "--") || strings.HasPrefix(t, "DELETE FROM"):
 			continue
@@ -207,11 +216,12 @@ func parseRows(sql string, lenient bool, notes *[]string) ([]Rows, error) {
 			continue
 		case strings.HasPrefix(t, "("):
 		case lenient:
-			// The rows above were read; a migration may end in a hand edit the exporter cannot write (zulfarrak's
-			// UPDATE ai_dungeon_plan of 20261025002900 and 20261102190000). Stop at it and say so: everything after it is
-			// not a row.
-			*notes = append(*notes, fmt.Sprintf("stopped at line %d: %q is not an INSERT statement, so the rows above only were read", line, clip(t, 40)))
-			return out, nil
+			// A statement the exporter never writes (a hand edit like zulfarrak's UPDATE ai_dungeon_plan of 20261025002900
+			// and 20261102190000, or a START TRANSACTION wrapper): skip it to the line that ends it, say it was not
+			// applied, and read the rows after it.
+			*notes = append(*notes, fmt.Sprintf("skipped line %d: %q is not an INSERT statement, so its hand edits are NOT applied; the rows after it are still read", line, clip(t, 40)))
+			skipping = !endsStatement(t)
+			continue
 		default:
 			return nil, fmt.Errorf("line %d: unexpected %q", line, clip(t, 40))
 		}

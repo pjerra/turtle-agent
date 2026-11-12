@@ -82,27 +82,67 @@ func TestParseMigrationRoundTrip(t *testing.T) {
 	}
 }
 
-// A migration may end in hand edits the exporter cannot write (zulfarrak's 20261102190000: UPDATE ai_dungeon_plan,
-// UPDATE ai_dungeon_step). The lenient reader reads the rows above and stops at the first of them, saying where: it used to
-// call them an unexpected line and read nothing.
-func TestParseMigrationStopsAtATrailingHandEdit(t *testing.T) {
-	want := []Rows{build(t, parsePlan(t, small))}
-	sql := WriteSQL(want) + `
+// secondPlan is a copy of r under another plan name, so a migration can hold two plans.
+func secondPlan(r Rows, name string) Rows {
+	r.Plan.Plan = name
+	r.Legs = append([]LegRow(nil), r.Legs...)
+	r.Steps = append([]StepRow(nil), r.Steps...)
+	for i := range r.Legs {
+		r.Legs[i].Plan = name
+	}
+	for i := range r.Steps {
+		r.Steps[i].Plan = name
+	}
+	return r
+}
+
+// A migration may carry hand edits the exporter cannot write (zulfarrak's 20261102190000: UPDATE ai_dungeon_plan,
+// UPDATE ai_dungeon_step). The lenient reader skips each to its `;`, says the hand edits are NOT applied, and reads the rows
+// after it — an INSERT after an UPDATE included. It used to stop at the first and read nothing after.
+func TestParseMigrationSkipsHandEditsAndReadsOn(t *testing.T) {
+	a := build(t, parsePlan(t, small))
+	b := secondPlan(a, "Tiny_Cave_B")
+	want := []Rows{a, b}
+	sql := WriteSQL([]Rows{a}) + `
 -- hand-set after the export
 UPDATE ` + "`ai_dungeon_plan`" + ` SET ` + "`cc_priority`" + ` = '7246' WHERE ` + "`plan`" + ` = 'Tiny_Cave';
-UPDATE ` + "`ai_dungeon_step`" + ` SET ` + "`entry`" + ` = 962 WHERE ` + "`plan`" + ` = 'Tiny_Cave';
-`
+UPDATE ` + "`ai_dungeon_step`" + `
+   SET ` + "`entry`" + ` = 962
+ WHERE ` + "`plan`" + ` = 'Tiny_Cave';
+` + WriteSQL([]Rows{b})
 	got, notes, err := ParseMigration(sql)
 	if err != nil {
-		t.Fatalf("a trailing hand edit stopped the reader: %v", err)
+		t.Fatalf("a hand edit stopped the reader: %v", err)
+	}
+	if err := Equal(want, got); err != nil {
+		t.Fatalf("the rows after the hand edits were not read: %v", err)
+	}
+	var skipped int
+	for _, n := range notes {
+		if strings.Contains(n, "is not an INSERT statement") && strings.Contains(n, "hand edits are NOT applied") {
+			skipped++
+		}
+	}
+	if skipped != 2 {
+		t.Fatalf("notes %q, want one for each of the two skipped UPDATE statements", notes)
+	}
+	if _, err := Parse(sql); err == nil {
+		t.Fatal("strict Parse read a migration with an UPDATE")
+	}
+}
+
+// A migration wrapped in START TRANSACTION ... COMMIT reads the same: each wrapper statement is skipped and named, and the
+// plan rows between them are read.
+func TestParseMigrationSkipsATransactionWrapper(t *testing.T) {
+	want := []Rows{build(t, parsePlan(t, small))}
+	got, notes, err := ParseMigration("START TRANSACTION;\n" + WriteSQL(want) + "COMMIT;\n")
+	if err != nil {
+		t.Fatal(err)
 	}
 	if err := Equal(want, got); err != nil {
 		t.Fatal(err)
 	}
-	if len(notes) != 1 || !strings.Contains(notes[0], "stopped at line") || !strings.Contains(notes[0], "UPDATE `ai_dungeon_plan`") {
-		t.Fatalf("notes %q, want one note naming the statement the reader stopped at", notes)
-	}
-	if _, err := Parse(sql); err == nil {
-		t.Fatal("strict Parse read a migration with an UPDATE")
+	if len(notes) != 2 || !strings.Contains(notes[0], "START TRANSACTION") || !strings.Contains(notes[1], "COMMIT") {
+		t.Fatalf("notes %q, want START TRANSACTION and COMMIT named once each", notes)
 	}
 }
