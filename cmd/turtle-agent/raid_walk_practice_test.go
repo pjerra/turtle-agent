@@ -826,7 +826,7 @@ func TestPracticePauseNotRunningProceeds(t *testing.T) {
 	f.agent.pauseErr = &fails
 	f.agent.pauseErrMsg = "The run is not running"
 	if code := f.run(context.Background()); code != exitOK {
-		t.Fatalf("exit %d, want 0 (notes %v): %s", code, exitRaidWalkFailed, f.summaryNotes(), f.stderr.String())
+		t.Fatalf("exit %d, want 0 (notes %v): %s", code, f.summaryNotes(), f.stderr.String())
 	}
 	sum := f.summary()
 	if sum.Practice == nil || sum.Practice.Attempts != 2 || sum.Practice.Cycles != 10 || sum.Practice.Ended != "cycles" {
