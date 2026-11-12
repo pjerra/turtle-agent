@@ -764,6 +764,27 @@ func (w *walk) placeQuiet(ctx context.Context) error {
 	}
 }
 
+// placeQuietRetry runs the quiet for a placement that has no placeTry loop: the reuse and the bind resume. "Not quiet"
+// is the same refusal placeTry's caller retries: the units the last read named are GM-killed (placeKillBlockers, the
+// tool's own --gm-clear budget) and the area is read again, up to placeTryLimit reads. Walk 80: the bind resume
+// summoned the raid into Hakkar's altar patrols, whose waypoint 7 (-11806 -1693) stands in the landing reach of the
+// start point it resumes at, because it was the only placement that never read the quiet.
+func (w *walk) placeQuietRetry(ctx context.Context) error {
+	for try := 1; ; try++ {
+		err := w.placeQuiet(ctx)
+		if err == nil {
+			return nil
+		}
+		reason, retryable := placeRetryReason(err)
+		if !retryable || try >= placeTryLimit {
+			return err
+		}
+		w.note("place: %s; GM-killing the units the quiet named and reading it again (try %d of %d, no `.summon` went out)",
+			reason, try+1, placeTryLimit)
+		w.placeKillBlockers(ctx)
+	}
+}
+
 // placeLandingRead is the M1b net for BEHIND trash off the quiet's floor window (PLACE-W26): a `q units 45 <p> all`
 // after a clean quiet. For each unit: skip it when the quiet judged it (|Dz| <= placeClearDz), when it stands
 // farther than placeLandingDz off the floor, skip entries/critters/dead units and anything beyond 45 yd. Otherwise,
@@ -2005,7 +2026,9 @@ func (w *walk) reuseBind(ctx context.Context) (float64, string, bool) {
 
 // placeReuse is the --reuse-instance placement: bind the commander to the main tank's copy (`.appear` opens no copy of
 // its own), go to the start point in it, and teleport every hire there with the GM `.summon` (the line the revive and
-// placeVerify use). The area is not cleared or quiet-checked: the copy is the one the raid is already playing in.
+// placeVerify use). The corridor is not cleared (the copy is the one the raid is already playing in), but the quiet is
+// read like placeTry's, after the GM clear and before the first `.summon`: a patrol that respawned or walked in since
+// the last attempt must not meet the landing raid (walk 80).
 func (w *walk) placeReuse(ctx context.Context) error {
 	p := w.place.Point
 	if err := w.gm(ctx, ".appear "+w.mt); err != nil {
@@ -2042,6 +2065,11 @@ func (w *walk) placeReuse(ctx context.Context) error {
 	if err := w.placeFloor(ctx, p); err != nil {
 		return err
 	}
+	// The quiet, after the GM clear and before the first `.summon`: the copy is live, so a patrol may have walked into
+	// the landing reach since the last attempt.
+	if err := w.placeQuietRetry(ctx); err != nil {
+		return err
+	}
 	for _, name := range w.hireList() {
 		if err := w.gm(ctx, ".summon "+name); err != nil {
 			return err
@@ -2050,7 +2078,7 @@ func (w *walk) placeReuse(ctx context.Context) error {
 			return err
 		}
 	}
-	w.note("place: teleported %d hires to the start point with the GM path (.summon); the area was not cleared or quiet-checked (the raid's own instance)",
+	w.note("place: teleported %d hires to the start point with the GM path (.summon); the area was quiet-checked (the raid's own instance)",
 		len(w.hireList()))
 	if err := w.placeGather(ctx); err != nil {
 		return err
@@ -2101,6 +2129,11 @@ func (w *walk) placeResume(ctx context.Context) error {
 	}
 	w.note("place: --reuse-instance: resumed instance %.0f from the commander's existing bind (expires in %s); no fresh instance is entered or counted",
 		inst, w.reuseBindTTR)
+	// The quiet, after the GM clear and before the first `.summon`: the resumed copy keeps the patrols the last attempt
+	// left alive (walk 80: groups 3+4 walked into the start point and killed the landing raid 27 s after the resume).
+	if err := w.placeQuietRetry(ctx); err != nil {
+		return err
+	}
 	if err := w.placeGather(ctx); err != nil {
 		return err
 	}
