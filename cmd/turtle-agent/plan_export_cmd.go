@@ -267,25 +267,38 @@ type serverQuery interface {
 	ServerPath(mapID uint32, from, to navmesh.Vec3) (navmesh.ServerPath, error)
 }
 
+// floorNav is the navmesh's floor query, which the floor-aware z lookup asks: *navmesh.Planner does, and a test fake may.
+type floorNav interface {
+	Floors(mapID uint32, x, y, lo, hi float32) ([]navmesh.Floor, error)
+}
+
 // seamFix moves a cut point the server answers NOPATH for off the mmaps cell line it stands on (planexport.OnSeam): the
 // server refuses a hop whose goal is exactly on a cell line, and the 0.5 yd move toward the point the hop came from clears it
 // (route audit 2026-11-12, finding 3: plan-probe cleared 13 of the 14 listed rows; naxxramas step 637 stayed NOPATH, a steep
-// ledge). Only a point the server refuses is touched, and only when it accepts the moved one: a seam the server walks, a seam
-// the hop runs along, and one whose move it refuses too all stay as the cutter wrote them. The hop to a point starts at the
-// cut point before it, or at the point the cut began.
+// ledge). Only a point the server refuses is touched, and the moved point is kept only when it stands on plain floor: the
+// floor-aware z lookup (splitFloor) takes its z at the new XY, and the server then answers a normal path whose verdict is ok
+// and whose ActualEnd lies within the run leader's 1 yd arrival tolerance of that point. A seam the server walks, a seam the
+// hop runs along, one whose move it refuses too, one with no plain floor at the new XY, one the server paths only
+// incompletely or ends short of all stay as the cutter wrote them. The hop to a point starts at the cut point before it, or at
+// the point the cut began.
 func seamFix(pl pathPlanner, mapID uint32, from dungeon.Point, via []dungeon.Point, notes *[]planexport.CutNote) []dungeon.Point {
 	q, ok := pl.(serverQuery)
-	if !ok || len(via) == 0 {
+	floors, floorOK := pl.(floorNav)
+	if !ok || !floorOK || len(via) == 0 {
 		return via
 	}
 	prev := from
 	for i, v := range via {
 		if planexport.OnSeam(v.X) || planexport.OnSeam(v.Y) {
-			if n := planexport.OffSeam(prev, v); n != v && seamRefused(q, mapID, prev, v) && !seamRefused(q, mapID, prev, n) {
-				*notes = append(*notes, planexport.CutNote{Old: v, New: n,
-					Reason: fmt.Sprintf("the point stood on a mmaps cell line and the server answered the hop NOPATH: moved %g yd off it", planexport.SeamNudgeYd)})
-				via[i] = n
-				v = n
+			if n := planexport.OffSeam(prev, v); n != v && seamRefused(q, mapID, prev, v) {
+				f, onFloor, err := splitFloor(floors, mapID, n.X, n.Y, v.Z)
+				if err == nil && onFloor && seamReached(q, mapID, prev, dungeon.Point{X: n.X, Y: n.Y, Z: f.Z}) {
+					n.Z = f.Z
+					*notes = append(*notes, planexport.CutNote{Old: v, New: n,
+						Reason: fmt.Sprintf("the point stood on a mmaps cell line and the server answered the hop NOPATH: moved %g yd off it", planexport.SeamNudgeYd)})
+					via[i] = n
+					v = n
+				}
 			}
 		}
 		prev = v
@@ -297,6 +310,18 @@ func seamFix(pl pathPlanner, mapID uint32, from dungeon.Point, via []dungeon.Poi
 func seamRefused(q serverQuery, mapID uint32, from, to dungeon.Point) bool {
 	sp, err := q.ServerPath(mapID, navmesh.Vec3{from.X, from.Y, from.Z}, navmesh.Vec3{to.X, to.Y, to.Z})
 	return err == nil && sp.Type&navmesh.PathNoPath != 0
+}
+
+// seamReached says the server reaches the point: the query answers a normal path (not an incomplete one), its verdict is ok,
+// and the path's ActualEnd lies within the run leader's 1 yd arrival tolerance of the point. A failed query, an incomplete
+// path and an end off the point all say no, and the point is not moved.
+func seamReached(q serverQuery, mapID uint32, from, to dungeon.Point) bool {
+	f, t := navmesh.Vec3{from.X, from.Y, from.Z}, navmesh.Vec3{to.X, to.Y, to.Z}
+	sp, err := q.ServerPath(mapID, f, t)
+	if err != nil || sp.Type&navmesh.PathNormal == 0 || sp.Type&navmesh.PathIncomplete != 0 {
+		return false
+	}
+	return navmesh.ServerMoveVerdict(sp, f, t, 0) == "ok" && cutDist(sp.ActualEnd, t) <= float64(navmesh.AtLeadYd)
 }
 
 // dropWetCut drops the cut points that stand in or under a liquid: the plan's move rows are the points the party stops at, and a
@@ -418,8 +443,9 @@ func pushOffWall(pl *navmesh.Planner, mapID uint32, p navmesh.Vec3) (navmesh.Vec
 	return n, true, ""
 }
 
-// splitFloor is the floor a split point takes its z from: the highest plain ground within FloorAwareFloorYd of meanZ at (x, y).
-func splitFloor(pl *navmesh.Planner, mapID uint32, x, y, meanZ float32) (navmesh.Floor, bool, error) {
+// splitFloor is the floor a split point, or a seam nudge's moved point, takes its z from: the highest plain ground within
+// FloorAwareFloorYd of meanZ at (x, y).
+func splitFloor(pl floorNav, mapID uint32, x, y, meanZ float32) (navmesh.Floor, bool, error) {
 	fl, err := pl.Floors(mapID, x, y, meanZ-planexport.FloorAwareFloorYd, meanZ+planexport.FloorAwareFloorYd)
 	if err != nil {
 		return navmesh.Floor{}, false, err
