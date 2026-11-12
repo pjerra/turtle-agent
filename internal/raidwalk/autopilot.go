@@ -78,7 +78,7 @@ func ParseAutoGoal(s string) (AutoGoal, error) {
 		}
 		k, err := strconv.Atoi(cycles)
 		if err != nil || k < 1 {
-			return AutoGoal{}, fmt.Errorf("goal %q: practice wants 1 or more cycles after practice:<ENTRY>:", s)
+			return AutoGoal{}, fmt.Errorf("goal %q: practice wants 1 or more cycles after practice:<ENTRY>", s)
 		}
 		return AutoGoal{Kind: "practice", Boss: uint32(n), Cycles: k}, nil
 	}
