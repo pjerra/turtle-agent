@@ -16,8 +16,11 @@
 //     hire is revived and a boss under the floor is restored to its own max. The floor is also checked on every poll,
 //     not only at the cycle rows, on the newest reading across every source (the tracked frames, the newest frame's
 //     hostile rows and bot targets, the commander's own client). A source reading the bound boss dead ends the
-//     practice with its kill ending; the attempt ends with "the boss is gone" only when no source has shown it for
-//     practiceBossGoneGrace: one slow poll, one missing source or one unresolved GM hand is not a despawn.
+//     practice with its kill ending; death is the unit's Dead flag or raw health 0, and a live unit with positive raw
+//     health clamps to at least 1 % (an integer percent that rounds to 0 is not a kill). The attempt ends with "the
+//     boss is gone" only when no source has shown it for practiceBossGoneGrace: one slow poll, one missing source or
+//     one unresolved GM hand is not a despawn. A commander unit read that fails is an unknown source, not a missing
+//     one: the gone timer holds while it fails, and 60 s of it ends the attempt as "commander unreadable".
 //  4. Attempt end: CyclesPerAttempt cycles, BerserkS-60 s of attempt, every hire dead, or the boss dying (which ends
 //     the whole practice, without a respawn and without crediting a kill).
 //  5. Reset: pause the run with the commander's `run pause` (never `.bot run stop`: a stop ends the run and erases
@@ -77,6 +80,11 @@ const practiceFightIDBack = 15 * time.Second
 // polls while every frame in the same window held the boss at 94-99 %.
 const practiceBossGoneGrace = 30 * time.Second
 
+// practiceCommanderUnreadable is how long the commander's unit read may keep failing before the attempt ends: while
+// that source is unknown the gone timer holds (its silence is not absence), and 60 s of it is its own reason,
+// "commander unreadable", never "the boss is gone".
+const practiceCommanderUnreadable = 60 * time.Second
+
 // practiceReengageWait is how long an attempt that follows a reset waits for the pulled boss to fight again (below
 // 100 %, a party target, or the walk's IncidentBossEngaged) before its clock starts. No re-engagement in the wait is
 // a failed reset.
@@ -124,6 +132,10 @@ type practiceState struct {
 	// bossSeenAt is when the newest source last showed the bound boss (alive or dead): the attempt ends only when
 	// every source has missed it for practiceBossGoneGrace. It starts at the attempt's own clock.
 	bossSeenAt time.Time
+	// commanderUnknownSince is when the commander's unit read first failed and has failed ever since: zero while it
+	// reads. While it is set the gone timer holds (an unreadable source is not a missing one), and after
+	// practiceCommanderUnreadable the attempt ends with "commander unreadable".
+	commanderUnknownSince time.Time
 	// pending holds the tail of an events page the attempt did not consume (it stops at the first counted cast): the
 	// next read serves them before it asks for a new page, so no cast of the page is lost.
 	pending []events.Event
@@ -559,10 +571,13 @@ func practiceHostileRow(m map[string]hostileState, g packet.GUID) (hostileState,
 //     drops it.
 //
 // hp is the newest source's health percent, -1 when that source names the unit without a reading (a bot's target);
-// at is when that source saw it; ok is false when no source names the guid at all. A sight of hp 0 is a dead reading.
-func (w *walk) practiceBossSight(ctx context.Context, p *practiceState) (hp int, at time.Time, ok bool) {
+// at is when that source saw it; ok is false when no readable source names the guid at all. A sight of hp 0 is a dead
+// reading: the commander's own client is dead only when the unit says Dead or its raw health is 0, and a live unit
+// with positive raw health clamps to at least 1 % (an integer percent that rounds to 0 is not a kill). commanderErr
+// is the commander source's own status: a failed units read is an unknown source, never evidence that the boss left.
+func (w *walk) practiceBossSight(ctx context.Context, p *practiceState) (hp int, at time.Time, ok bool, commanderErr error) {
 	if p == nil || p.bossGUID == 0 {
-		return 0, time.Time{}, false
+		return 0, time.Time{}, false, nil
 	}
 	consider := func(h int, t time.Time) {
 		if !ok || t.After(at) {
@@ -588,22 +603,29 @@ func (w *walk) practiceBossSight(ctx context.Context, p *practiceState) (hp int,
 			}
 		}
 	}
-	if us, err := w.unitsAt(ctx, 0); err == nil {
+	us, err := w.unitsAt(ctx, 0)
+	if err != nil {
+		commanderErr = err
+	} else {
 		for _, u := range us {
 			if u.GUID != p.bossGUID {
 				continue
 			}
 			h := -1 // listed without a health pool: present, but no reading to restore on
-			if u.MaxHealth > 0 {
+			switch {
+			case u.Dead || (u.MaxHealth > 0 && u.Health == 0):
+				// Death is the unit's own dead flag or raw health 0, never a percentage that rounded down.
 				h = 0
-				if !u.Dead {
-					h = int(uint64(u.Health) * 100 / uint64(u.MaxHealth))
+			case u.MaxHealth > 0:
+				h = int(uint64(u.Health) * 100 / uint64(u.MaxHealth))
+				if h < 1 {
+					h = 1 // live with positive raw health: at least 1 %, never a dead reading
 				}
 			}
 			consider(h, w.env.now())
 		}
 	}
-	return hp, at, ok
+	return hp, at, ok, commanderErr
 }
 
 // practiceSustainBoss keeps the bound boss alive between cycle rows and decides when it is really gone: a fresh
@@ -611,6 +633,10 @@ func (w *walk) practiceBossSight(ctx context.Context, p *practiceState) (hp int,
 // (hp 0, the practice's kill ending) or NO source has shown it for practiceBossGoneGrace. One poll without a fresh
 // sample, one slow poll and one source dropping the unit are frame gaps, never a despawn: a gm_set_hp the client cannot
 // resolve is noted and the poll goes on (the frames still show the boss), it does not count toward gone.
+//
+// The commander's own unit read is a source of its own: while it fails the source is unknown, not absent, so the gone
+// timer holds (its last observation stays the attempt's last sighting) and only practiceCommanderUnreadable of
+// failures ends the attempt, with the distinct reason "commander unreadable".
 func (w *walk) practiceSustainBoss(ctx context.Context, p *practiceState) (bool, error) {
 	if !w.opts.practiceSustain || p == nil || p.bossGUID == 0 || p.bossMax == 0 {
 		return false, nil
@@ -619,7 +645,7 @@ func (w *walk) practiceSustainBoss(ctx context.Context, p *practiceState) (bool,
 	if p.bossSeenAt.IsZero() {
 		p.bossSeenAt = now
 	}
-	hp, at, seen := w.practiceBossSight(ctx, p)
+	hp, at, seen, commanderErr := w.practiceBossSight(ctx, p)
 	if seen && at.After(p.bossSeenAt) {
 		p.bossSeenAt = at
 	}
@@ -630,6 +656,20 @@ func (w *walk) practiceSustainBoss(ctx context.Context, p *practiceState) (bool,
 		w.note("practice: the bound boss reads dead in a source: ending the practice")
 		return true, nil
 	}
+	if commanderErr != nil {
+		if p.commanderUnknownSince.IsZero() {
+			p.commanderUnknownSince = now
+			w.note("practice: the commander's units are unreadable (%v): its view is unknown, not a miss, so the boss-gone timer holds", commanderErr)
+		}
+		if now.Sub(p.commanderUnknownSince) >= practiceCommanderUnreadable {
+			p.ended = "commander unreadable"
+			w.note("practice: the commander's units have been unreadable for %s (%v): ending the attempt without calling the boss gone",
+				durWords(now.Sub(p.commanderUnknownSince)), commanderErr)
+			return true, nil
+		}
+	} else {
+		p.commanderUnknownSince = time.Time{}
+	}
 	if seen && hp > 0 && hp < w.opts.practiceBossFloor && now.Sub(at) <= practiceSampleFresh {
 		if err := w.practiceGMSetHP(ctx, p.bossGUID); err != nil {
 			if !errors.Is(err, session.ErrUnitNotInView) {
@@ -639,6 +679,10 @@ func (w *walk) practiceSustainBoss(ctx context.Context, p *practiceState) (bool,
 		} else {
 			w.logLine(now, fmt.Sprintf("practice: boss at %d%% between rows: restored to its max %d", hp, p.bossMax))
 		}
+	}
+	if !p.commanderUnknownSince.IsZero() {
+		// One source cannot vouch for the boss: its silence is not every source missing it.
+		return false, nil
 	}
 	if now.Sub(p.bossSeenAt) < practiceBossGoneGrace {
 		return false, nil
@@ -708,7 +752,7 @@ func (w *walk) practiceCycleRow(ctx context.Context, p *practiceState, cast time
 			}
 			p.revived = append(p.revived, name)
 		}
-		if hp, at, ok := w.practiceBossSight(ctx, p); p.bossGUID != 0 && p.bossMax > 0 && ok && hp > 0 && hp < w.opts.practiceBossFloor && now.Sub(at) <= practiceSampleFresh {
+		if hp, at, ok, _ := w.practiceBossSight(ctx, p); p.bossGUID != 0 && p.bossMax > 0 && ok && hp > 0 && hp < w.opts.practiceBossFloor && now.Sub(at) <= practiceSampleFresh {
 			if err := w.practiceGMSetHP(ctx, p.bossGUID); err != nil {
 				return err
 			}

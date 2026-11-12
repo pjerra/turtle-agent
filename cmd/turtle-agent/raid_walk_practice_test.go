@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -969,7 +970,7 @@ func TestPracticeBossFrameSightNotGone(t *testing.T) {
 			t.Fatalf("poll %d: done %v ended %q, want the boss in the frame to keep the attempt alive", i, done, p.ended)
 		}
 	}
-	if hp, at, ok := w.practiceBossSight(context.Background(), p); !ok || hp != 94 || !at.Equal(now) {
+	if hp, at, ok, err := w.practiceBossSight(context.Background(), p); err != nil || !ok || hp != 94 || !at.Equal(now) {
 		t.Fatalf("sight hp %d at %s ok %v, want the 94 %% frame reading", hp, at, ok)
 	}
 }
@@ -1025,6 +1026,68 @@ func TestPracticeDeadBossNotGone(t *testing.T) {
 	}
 }
 
+// TestPracticeBossLiveUnderOnePercentIsNotDead: the commander's percent is integer division, so a live boss with 1 of
+// 200 hp reads 0 %. Death is the unit's Dead flag or raw health 0 only: a live unit with positive raw health is at
+// least 1 %, never the practice's kill ending.
+func TestPracticeBossLiveUnderOnePercentIsNotDead(t *testing.T) {
+	now := time.Date(2026, 11, 12, 0, 6, 8, 0, time.Local)
+	a := &practiceUnitsAgent{units: []objects.Unit{{
+		GUID: attempt1BossGUID(), Entry: 14834, Health: 1, MaxHealth: 200,
+	}}}
+	w := &walk{
+		env:      walkEnv{now: func() time.Time { return now }},
+		opts:     raidWalkOptions{server: "m910q", practiceSustain: true, practiceBossFloor: 40},
+		agent:    a,
+		hostiles: map[string]hostileState{},
+	}
+	p := &practiceState{bossGUID: attempt1BossGUID(), bossMax: 200, bossSeenAt: now}
+	hp, at, ok, err := w.practiceBossSight(context.Background(), p)
+	if err != nil || !ok || hp != 1 || !at.Equal(now) {
+		t.Fatalf("sight hp %d at %s ok %v err %v, want a 1 %% live reading", hp, at, ok, err)
+	}
+	done, err := w.practiceSustainBoss(context.Background(), p)
+	if err != nil || done || p.ended != "" {
+		t.Fatalf("sustain done %v err %v ended %q, want the under-1 %% boss alive", done, err, p.ended)
+	}
+}
+
+// TestPracticeCommanderUnreadableIsNotGone: frame evidence absent plus a failing commander units read is one unknown
+// source, never "the boss is gone": the gone timer holds while it fails, and practiceCommanderUnreadable of failures
+// ends the attempt with the distinct reason "commander unreadable".
+func TestPracticeCommanderUnreadableIsNotGone(t *testing.T) {
+	start := time.Date(2026, 11, 12, 0, 6, 8, 0, time.Local)
+	clock := start
+	w := &walk{
+		env:      walkEnv{now: func() time.Time { return clock }},
+		opts:     raidWalkOptions{server: "m910q", practiceSustain: true, practiceBossFloor: 40},
+		agent:    &practiceUnitsAgent{err: errors.New("commander units: no reply")},
+		hostiles: map[string]hostileState{},
+	}
+	p := &practiceState{bossGUID: attempt1BossGUID(), bossMax: 42000, bossSeenAt: start}
+	clock = start.Add(5 * time.Second)
+	if done, err := w.practiceSustainBoss(context.Background(), p); err != nil || done || p.ended != "" {
+		t.Fatalf("the first failed read: done %v err %v ended %q, want the attempt alive", done, err, p.ended)
+	}
+	unknownAt := clock
+	for _, step := range []time.Duration{practiceBossGoneGrace, practiceCommanderUnreadable / 2, practiceCommanderUnreadable - time.Second} {
+		clock = unknownAt.Add(step)
+		if done, err := w.practiceSustainBoss(context.Background(), p); err != nil || done || p.ended != "" {
+			t.Fatalf("commander unknown %s with no frame evidence: done %v err %v ended %q, want no gone", step, done, err, p.ended)
+		}
+	}
+	clock = unknownAt.Add(practiceCommanderUnreadable)
+	done, err := w.practiceSustainBoss(context.Background(), p)
+	if err != nil || !done {
+		t.Fatalf("commander unknown for %s: done %v err %v, want the distinct end", practiceCommanderUnreadable, done, err)
+	}
+	if p.ended != "commander unreadable" {
+		t.Fatalf("ended %q, want commander unreadable (gone would blame a source that was never readable)", p.ended)
+	}
+	if !strings.Contains(strings.Join(w.notes, "\n"), "unreadable") {
+		t.Fatalf("notes %v, want the commander-unreadable reason", w.notes)
+	}
+}
+
 // TestPracticeUnresolvedRestoreIsNotGone: a gm_set_hp the client cannot resolve is one source missing the unit while
 // the frames still show it: a note, not a despawn. The attempt goes on and the next restore still runs.
 func TestPracticeUnresolvedRestoreIsNotGone(t *testing.T) {
@@ -1067,6 +1130,26 @@ func (a *practiceMissAgent) Call(ctx context.Context, method string, params, out
 	defer a.mu.Unlock()
 	a.calls++
 	return a.err
+}
+
+// practiceUnitsAgent is the commander's own client with a fixed unit list: the units read answers units, or its error
+// when err is set (an unreadable source). Every other RPC answers nil, so no GM hand is faked.
+type practiceUnitsAgent struct {
+	units []objects.Unit
+	err   error
+}
+
+func (a *practiceUnitsAgent) Call(ctx context.Context, method string, params, out any, timeout time.Duration) error {
+	if method != "units" {
+		return nil
+	}
+	if a.err != nil {
+		return a.err
+	}
+	if us, ok := out.(*[]objects.Unit); ok {
+		*us = a.units
+	}
+	return nil
 }
 
 // TestPracticeBossStaysAliveAcrossSlowPolls is the live failing case (m910q, zgP-hk5p-1-1 attempt 1): the frames hold
