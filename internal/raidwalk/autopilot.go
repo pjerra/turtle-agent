@@ -384,6 +384,17 @@ func parseAutoArgs(in []string) (autoArgs, error) {
 			}
 			out.BossWipeFresh = true
 			continue
+		case "--wipe-end":
+			// Managed: the autopilot passes it for a goal whose boss wipe takes a fresh instance (see
+			// autoCommandArgs), so a target line cannot ask for it on a goal that re-places the same copy.
+			if hasEq {
+				continue
+			}
+			if i+1 >= len(in) {
+				return autoArgs{}, fmt.Errorf("%s needs a value", a)
+			}
+			i++
+			continue
 		case "--place", "--reuse-instance":
 			continue
 		case "--gm-instance-data":

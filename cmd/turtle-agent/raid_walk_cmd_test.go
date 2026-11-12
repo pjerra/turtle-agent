@@ -2893,6 +2893,82 @@ func TestRaidWalkWipeResumeZeroKeepsOldBehaviour(t *testing.T) {
 	}
 }
 
+// --wipe-end fast (the autopilot passes it for --gm-instance-data and --boss-wipe-fresh goals): a wipe at a boss row
+// (or the row before it, PlaceStepAtBoss) ends the walk with exit 19 at once. The copy is thrown away by the
+// autopilot's fresh-instance relaunch, so the reset wait (walk 74: 49 s median) and the revive (34 s median) are spent
+// on nothing. A wipe anywhere else keeps both, because the autopilot re-places that same copy.
+func TestRaidWalkWipeEndFastSkipsResetAndReviveAtABoss(t *testing.T) {
+	f := newFixture(t)
+	f.opts.wipeResume = 0
+	f.opts.wipeEndFast = true
+	f.agent.startReply = startAt("onyxias_lair", 20) // step 21 is the boss row
+	retirePack0Patrol(f)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.allDeadFromHires()
+	if code := f.run(context.Background()); code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	gm := f.agent.gmLines()
+	for _, line := range gm {
+		if strings.HasPrefix(line, ".gm visible off") || strings.HasPrefix(line, ".summon ") || strings.HasPrefix(line, ".revive ") {
+			t.Fatalf("a wipe the next launch discards still revived in this copy: %q", gm)
+		}
+	}
+	if n := countPrefix(gm, ".bot run stop"); n != 1 {
+		t.Fatalf("%d run stops, want exactly 1", n)
+	}
+	sum := f.summary()
+	if sum.WipeResumes != 0 || sum.EndReason != "wipe at step 20" {
+		t.Fatalf("wipe_resumes %d end %q, want 0 and the wipe ending", sum.WipeResumes, sum.EndReason)
+	}
+	if !hasNote(sum, "--wipe-end fast") || !hasNote(sum, "no reset wait and no revive in this copy") {
+		t.Fatalf("notes %q do not say the copy was discarded", sum.Notes)
+	}
+}
+
+// The same flag, but the wipe is away from the boss: the autopilot re-places this copy (--reuse-instance), so the
+// reset wait and the revive stay.
+func TestRaidWalkWipeEndFastKeepsTheReviveAwayFromABoss(t *testing.T) {
+	f := newFixture(t)
+	f.opts.wipeResume = 0
+	f.opts.wipeEndFast = true
+	f.agent.startReply = startAt("onyxias_lair", 13)
+	retirePack0Patrol(f)
+	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
+	f.allDeadFromHires()
+	if code := f.run(context.Background()); code != exitRaidWalkIncident {
+		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	gm := f.agent.gmLines()
+	var summons, revives int
+	for _, line := range gm {
+		if strings.HasPrefix(line, ".summon ") {
+			summons++
+		}
+		if strings.HasPrefix(line, ".revive ") {
+			revives++
+		}
+	}
+	if summons == 0 || revives == 0 {
+		t.Fatalf("a wipe away from the boss lost its revive: %q", gm)
+	}
+	if hasNote(f.summary(), "no reset wait and no revive") {
+		t.Fatalf("notes %q claim the copy was discarded", f.summary().Notes)
+	}
+}
+
+// A --wipe-end value other than "fast" is a usage refusal: the flag changes what a wipe does, so a typo must not fall
+// back to the reset-and-revive path silently.
+func TestParseWipeEndRefusesOtherValues(t *testing.T) {
+	if _, code := parseRaidWalkArgs([]string{"--wipe-end", "slow", "onyxias_lair"}, io.Discard); code != exitUsage {
+		t.Fatalf("--wipe-end slow: exit %d, want %d", code, exitUsage)
+	}
+	o, code := parseRaidWalkArgs([]string{"--wipe-end", "fast", "onyxias_lair"}, io.Discard)
+	if code != exitOK || !o.wipeEndFast {
+		t.Fatalf("--wipe-end fast: exit %d wipeEndFast %v", code, o.wipeEndFast)
+	}
+}
+
 // TestRaidWalkWipeResumesOnce: all hires die at step 10, then quiet. The walk revives every dead hire, rests at
 // least --wipe-rest with no `.bot run stop` before the end, resumes, and the run reaches until: exit 0,
 // wipe_resumes 1.

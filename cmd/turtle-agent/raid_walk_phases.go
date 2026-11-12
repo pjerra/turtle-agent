@@ -2835,12 +2835,22 @@ func (w *walk) bossEngagedNow() bool {
 }
 
 // endWipe is the walk-4 recipe's ending: stop, wait for a reset, revive only when quiet, exit 19.
+//
+// --wipe-end fast (the autopilot passes it for a goal that relaunches fresh after a boss wipe: --gm-instance-data or
+// --boss-wipe-fresh) skips the reset wait and the revive when the wipe is at a boss row (or the row before it, the
+// same PlaceStepAtBoss rule the autopilot uses for its fresh-instance decision): that copy is thrown away, so both
+// waits were spent on the instance the next launch replaces (walk 74: reset wait 49 s + revive 34 s median = 83 s per
+// wipe). A wipe anywhere else keeps both, because the autopilot re-places that copy (--reuse-instance).
 func (w *walk) endWipe(ctx context.Context, step int) error {
 	_ = w.stopRun(context.Background(), "")
 	w.note("wipe at step %d", step)
 	if w.dash != nil {
 		w.saveCommanders("wipe")
 		w.saveFights()
+	}
+	if w.opts.wipeEndFast && raidwalk.PlaceStepAtBoss(w.rows, step) {
+		w.note("wipe: --wipe-end fast: the autopilot takes a fresh instance next, so no reset wait and no revive in this copy")
+		return stopf(exitRaidWalkIncident, "wipe at step %d", step)
 	}
 	if err := w.waitReset(ctx, w.opts.resetWait); err != nil {
 		return err

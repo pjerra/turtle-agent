@@ -50,6 +50,7 @@ Usage: `turtle-agent raid-walk <plan> [--server <server>] [--slot N] ...` or `tu
 | Flag | Default | What it does | Example |
 |---|---|---|---|
 | `--wipe-resume` | `0` | Revive, rest and resume a wipe or near-wipe stop this many times per walk (0-3; 0 ends the walk). | `--wipe-resume 2` |
+| `--wipe-end` | reset and revive | `fast`: a wipe that ends the walk at a boss row (or the row before it) skips the reset wait and the revive, because the autopilot takes a fresh instance next and this copy is discarded. A wipe anywhere else keeps both (that copy is re-placed). The autopilot passes it for `--gm-instance-data` and `--boss-wipe-fresh` goals. | `--wipe-end fast` |
 | `--wipe-rest` | `10m` | How long a revived raid rests out of combat before the resume (30s or more). | `--wipe-rest 15m` |
 | `--auto-resume` | `0` | Resume a regroup pause this many times per step (0-3). | `--auto-resume 2` |
 | `--paused-wait` | `10m` | How long a pause that is not a regroup may last. | `--paused-wait 5m` |

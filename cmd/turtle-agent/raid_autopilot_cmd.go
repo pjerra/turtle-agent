@@ -501,6 +501,13 @@ func autoCommandArgs(binary string, t raidwalk.AutoTarget, out, from string, reu
 	if reuse && from != "" {
 		args = append(args, "--reuse-instance")
 	}
+	// A goal whose wipe at a boss takes a fresh instance (--gm-instance-data or --boss-wipe-fresh) discards the copy
+	// the wipe happened in: the walk's reset wait and revive would be spent on an instance the next launch replaces
+	// (walk 74: 49 s + 34 s median per wipe). --wipe-end fast skips them for a boss wipe; a wipe elsewhere keeps both,
+	// because that copy is re-placed.
+	if autoHasGMInstanceData(t.Args) || t.BossWipeFresh {
+		args = append(args, "--wipe-end", "fast")
+	}
 	if instanceCap > 0 {
 		args = append(args, "--instance-cap-per-account", strconv.Itoa(instanceCap))
 	}
