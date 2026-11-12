@@ -608,17 +608,27 @@ func (w *walk) phaseHire(ctx context.Context) error {
 // binary), and each attempt then waited out the whole line budget and ended with exit 18.
 const (
 	gearBusyTries = 5               // the sends of the refit line, the first one included
-	gearBusyWait  = 3 * time.Second // the wait before a re-send
+	gearBusyWait  = 3 * time.Second // the longest wait for the blocking job's verdict, and between re-sends
 	gearLineWait  = 60 * time.Second
 )
 
 // gearRaid sends the walk's refit line and returns when its `TBM:GEAR` verdict is read, all inside one gearLineWait
-// budget. A `gear|busy` refusal is waited out gearBusyWait and the line sent again, at most gearBusyTries sends; a
-// `TBM:GEAR` line read on the way is the verdict (the job that held the gear queue had finished), so a re-send's
-// wait never misses it.
+// budget. A `gear|busy` refusal means an earlier gear job holds the queue, and that job's own `TBM:GEAR` line answers
+// a send the module refused: it geared the roster before the spec was put on (the ordering the refit exists for), so it
+// is waited for with waitTBMMatch and dropped, never taken as this refit's verdict. The line is re-sent once that
+// verdict is read, or after gearBusyWait when it has not been, at most gearBusyTries sends; only a `TBM:GEAR` verdict
+// read after a send the module accepted (no busy reply came for it) counts. The budget is checked before every
+// re-send, so a busy line that lands at the deadline ends the refit without another send.
 func (w *walk) gearRaid(ctx context.Context, line string) error {
 	deadline := w.env.now().Add(gearLineWait)
+	busy := ""
 	for try := 1; ; try++ {
+		if try > 1 && !w.env.now().Before(deadline) {
+			if busy != "" {
+				return stopf(exitRaidWalkFailed, "gear: %s (the %s budget is spent)", busy, durWords(gearLineWait))
+			}
+			return stopf(exitRaidWalkFailed, "gear: the %s budget is spent", durWords(gearLineWait))
+		}
 		if err := w.gm(ctx, line); err != nil {
 			return err
 		}
@@ -639,19 +649,25 @@ func (w *walk) gearRaid(ctx context.Context, line string) error {
 			}
 			return nil
 		}
+		// The module refused this send, so the job it named is still running.
+		busy = gear
 		if try >= gearBusyTries {
 			return stopf(exitRaidWalkFailed, "gear: %s (after %d sends)", gear, try)
 		}
 		if try == 1 {
-			w.note("gear: a gear job is already running (%s); retrying every %s", gear, durWords(gearBusyWait))
+			w.note("gear: a gear job is already running (%s); re-sending after its verdict or %s", gear, durWords(gearBusyWait))
 		}
+		// Wait for that job's own verdict, if it comes inside the wait; it is read and dropped, so the re-send's
+		// result can only be a verdict of a send the module accepted.
 		wait := gearBusyWait
 		if rem := deadline.Sub(w.env.now()); wait > rem {
 			wait = rem
 		}
 		if wait > 0 {
-			if err := w.env.sleep(ctx, wait); err != nil {
-				return stopf(exitRaidWalkFailed, "interrupted")
+			if _, _, err := w.waitTBMMatch(ctx, wait, func(l string) bool {
+				return strings.HasPrefix(l, "TBM:GEAR|")
+			}); err != nil {
+				return err
 			}
 		}
 	}
