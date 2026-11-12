@@ -81,13 +81,14 @@ var planTables = map[string]bool{"ai_dungeon_plan": true, "ai_dungeon_leg": true
 // around them (an ai_dungeon_boss or ai_boss_tactic block) are not rows Parse can read and must not stop it.
 func ParseMigration(sql string) ([]Rows, []string, error) { return parse(sql, true) }
 
-// parse is Parse, and with lenient also ParseMigration's skip of the other tables.
+// parse is Parse, and with lenient also ParseMigration's skip of the other tables and its stop at the first statement that is
+// no INSERT.
 func parse(sql string, lenient bool) ([]Rows, []string, error) {
 	var notes []string
 	if lenient {
 		sql, notes = skipOtherTables(sql)
 	}
-	out, err := parseRows(sql)
+	out, err := parseRows(sql, lenient, &notes)
 	return out, notes, err
 }
 
@@ -180,7 +181,7 @@ func Parse(sql string) ([]Rows, error) {
 }
 
 // parseRows is the line reader of a migration's plan rows.
-func parseRows(sql string) ([]Rows, error) {
+func parseRows(sql string, lenient bool, notes *[]string) ([]Rows, error) {
 	var out []Rows
 	byPlan := map[string]int{}
 	table := ""
@@ -205,6 +206,12 @@ func parseRows(sql string) ([]Rows, error) {
 			table = name
 			continue
 		case strings.HasPrefix(t, "("):
+		case lenient:
+			// The rows above were read; a migration may end in a hand edit the exporter cannot write (zulfarrak's
+			// UPDATE ai_dungeon_plan of 20261025002900 and 20261102190000). Stop at it and say so: everything after it is
+			// not a row.
+			*notes = append(*notes, fmt.Sprintf("stopped at line %d: %q is not an INSERT statement, so the rows above only were read", line, clip(t, 40)))
+			return out, nil
 		default:
 			return nil, fmt.Errorf("line %d: unexpected %q", line, clip(t, 40))
 		}

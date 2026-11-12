@@ -81,3 +81,28 @@ func TestParseMigrationRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A migration may end in hand edits the exporter cannot write (zulfarrak's 20261102190000: UPDATE ai_dungeon_plan,
+// UPDATE ai_dungeon_step). The lenient reader reads the rows above and stops at the first of them, saying where: it used to
+// call them an unexpected line and read nothing.
+func TestParseMigrationStopsAtATrailingHandEdit(t *testing.T) {
+	want := []Rows{build(t, parsePlan(t, small))}
+	sql := WriteSQL(want) + `
+-- hand-set after the export
+UPDATE ` + "`ai_dungeon_plan`" + ` SET ` + "`cc_priority`" + ` = '7246' WHERE ` + "`plan`" + ` = 'Tiny_Cave';
+UPDATE ` + "`ai_dungeon_step`" + ` SET ` + "`entry`" + ` = 962 WHERE ` + "`plan`" + ` = 'Tiny_Cave';
+`
+	got, notes, err := ParseMigration(sql)
+	if err != nil {
+		t.Fatalf("a trailing hand edit stopped the reader: %v", err)
+	}
+	if err := Equal(want, got); err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "stopped at line") || !strings.Contains(notes[0], "UPDATE `ai_dungeon_plan`") {
+		t.Fatalf("notes %q, want one note naming the statement the reader stopped at", notes)
+	}
+	if _, err := Parse(sql); err == nil {
+		t.Fatal("strict Parse read a migration with an UPDATE")
+	}
+}
