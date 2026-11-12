@@ -1289,50 +1289,74 @@ func TestPlaceGMClearSkipsAPackTheCorridorClearSettledWhole(t *testing.T) {
 // polls. landAt is the status read that first reports a settled landing; never keeps z the session's guess for good
 // (a navmesh hole).
 type gmLandAgent struct {
-	clock  *fakeClock
-	goLine string
-	goAt   time.Time
-	reads  int
-	landAt int
-	never  bool
-	at     []time.Time
+	clock   *fakeClock
+	goLine  string
+	goAt    time.Time
+	reads   int  // status reads after the `.go` (the fake's landing reads)
+	landing bool // the `.go` went out, so the reads now describe the landing
+	landAt  int  // the first landing read at which the position is settled (0: every read)
+	seqAt   int  // the first landing read at which the server's teleport ack moves TeleportSeq (0: never)
+	bumped  bool
+	never   bool
+	seq     uint64
+	units   int
+	unitAt  int // the first units read that holds the pack's unit (0: never)
+	at      []time.Time
 }
+
+// gmLandUnit is the pack member the fake's units read reports: the guid the tests poll for. gmLandPack keys it by its
+// spawn guid, as a pack's SpawnGUIDs does.
+var (
+	gmLandUnit = packet.GUID(0xF13000012B000001)
+	gmLandPack = []uint64{raidwalk.SpawnGUID(gmLandUnit)}
+)
 
 func (a *gmLandAgent) Call(ctx context.Context, method string, params, out any, timeout time.Duration) error {
 	switch method {
 	case "gm":
 		text := params.(map[string]string)["text"]
 		if strings.HasPrefix(text, ".go xyz ") {
-			a.goLine, a.goAt, a.reads = text, a.clock.now(), 0
+			a.goLine, a.goAt, a.reads, a.units, a.landing = text, a.clock.now(), 0, 0, true
 		}
 	case "status":
 		a.reads++
 		a.at = append(a.at, a.clock.now())
+		if a.landing && a.seqAt > 0 && a.reads >= a.seqAt && !a.bumped {
+			a.bumped = true
+			a.seq++ // the server's teleport ack, counted by the session
+		}
 		st := out.(*session.StatusInfo)
-		*st = session.StatusInfo{State: session.StatusInWorld, Map: 309, X: 10, Y: 20, Z: 30}
-		if a.never || a.reads < a.landAt {
+		*st = session.StatusInfo{State: session.StatusInWorld, Map: 309, X: 10, Y: 20, Z: 30, TeleportSeq: a.seq}
+		if !a.never && a.landing && a.reads < a.landAt {
 			st.ZUnknown = true // the destination is reported, the position is still the session's guess
+		}
+	case "units":
+		a.units++
+		us := out.(*[]objects.Unit)
+		*us = nil
+		if a.unitAt > 0 && a.units >= a.unitAt {
+			*us = []objects.Unit{{GUID: gmLandUnit}}
 		}
 	}
 	return nil
 }
 
 // Walk 74's clear paid a fixed 2 s after every `.go xyz` (53 stops, 157 s for the phase). The landing is now polled
-// every gmClearLandPoll: a stop the server settles at the first read carries on at once (the mutation is the old fixed
-// 2 s sleep, which the elapsed time catches exactly), one that settles a poll later waits just that poll, and the
-// ceiling stays 2 s.
+// every gmClearLandPoll and needs the session's teleport count to move, so a stop the server settles at the first read
+// carries on after the gmClearSettle settle, one that settles a poll later waits just that poll, and a status that
+// never lands falls back to the old fixed 2 s.
 func TestGMClearLandPollsTheLanding(t *testing.T) {
 	newWalk := func(t *testing.T, a *gmLandAgent) *walk {
 		return &walk{plan: &dungeon.Plan{Map: 309}, env: walkEnv{now: a.clock.now, sleep: a.clock.sleep}, agent: a}
 	}
 	t.Run("the first read lands", func(t *testing.T) {
-		a := &gmLandAgent{clock: newFakeClock(), landAt: 1}
+		a := &gmLandAgent{clock: newFakeClock(), landAt: 1, seqAt: 1}
 		start := a.clock.now()
 		if err := newWalk(t, a).gmClearLand(context.Background(), 10, 20, 30); err != nil {
 			t.Fatal(err)
 		}
-		if got := a.clock.now().Sub(start); got != 0 {
-			t.Fatalf("a landed stop took %s, want none", got)
+		if got := a.clock.now().Sub(start); got != gmClearSettle {
+			t.Fatalf("a landed stop took %s, want the %s settle", got, gmClearSettle)
 		}
 		if a.goLine != ".go xyz 10 20 30 309" {
 			t.Fatalf("go line %q, want the stop on the plan's map", a.goLine)
@@ -1342,29 +1366,89 @@ func TestGMClearLandPollsTheLanding(t *testing.T) {
 		}
 	})
 	t.Run("a later poll lands", func(t *testing.T) {
-		a := &gmLandAgent{clock: newFakeClock(), landAt: 3}
+		a := &gmLandAgent{clock: newFakeClock(), landAt: 3, seqAt: 3}
 		start := a.clock.now()
 		if err := newWalk(t, a).gmClearLand(context.Background(), 10, 20, 30); err != nil {
 			t.Fatal(err)
 		}
-		if got, want := a.clock.now().Sub(start), 2*gmClearLandPoll; got != want {
+		if got, want := a.clock.now().Sub(start), 2*gmClearLandPoll+gmClearSettle; got != want {
 			t.Fatalf("a stop that settles on the 3rd read took %s, want %s", got, want)
 		}
 		if a.reads != 3 {
 			t.Fatalf("%d status reads, want 3", a.reads)
 		}
 	})
-	t.Run("no landing waits the ceiling", func(t *testing.T) {
+	t.Run("no landing falls back to the fixed wait", func(t *testing.T) {
 		a := &gmLandAgent{clock: newFakeClock(), never: true}
 		start := a.clock.now()
 		if err := newWalk(t, a).gmClearLand(context.Background(), 10, 20, 30); err != nil {
 			t.Fatal(err)
 		}
-		if got := a.clock.now().Sub(start); got != gmClearLandWait {
-			t.Fatalf("an unsettled landing took %s, want the full %s ceiling", got, gmClearLandWait)
+		if got, want := a.clock.now().Sub(start), gmClearLandWait+gmClearFallbackWait; got != want {
+			t.Fatalf("an unsettled landing took %s, want the ceiling and the old wait (%s)", got, want)
 		}
 		if want := int(gmClearLandWait / gmClearLandPoll); a.reads != want {
 			t.Fatalf("%d status reads, want %d", a.reads, want)
+		}
+	})
+	// Codex HIGH: the status of the stop before already matches the position, and no teleport has been acked yet: the
+	// first read must not pass, or the units are read before the go lands.
+	t.Run("a position match with the old teleport count is no landing", func(t *testing.T) {
+		a := &gmLandAgent{clock: newFakeClock(), landAt: 1, seqAt: 0}
+		start := a.clock.now()
+		if err := newWalk(t, a).gmClearLand(context.Background(), 10, 20, 30); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := a.clock.now().Sub(start), gmClearLandWait+gmClearFallbackWait; got != want {
+			t.Fatalf("a stale position match took %s, want the fallback (%s)", got, want)
+		}
+	})
+}
+
+// The stop's units read is a poll of the pack: the landing arrives before the object store holds it, so the read
+// carries on as soon as a pack member shows and otherwise ends at the old 2 s ceiling.
+func TestGMClearStopUnitsPollsThePack(t *testing.T) {
+	newWalk := func(t *testing.T, a *gmLandAgent) *walk {
+		return &walk{plan: &dungeon.Plan{Map: 309}, env: walkEnv{now: a.clock.now, sleep: a.clock.sleep}, agent: a}
+	}
+	t.Run("the first read shows the pack", func(t *testing.T) {
+		a := &gmLandAgent{clock: newFakeClock(), unitAt: 1}
+		start := a.clock.now()
+		units, err := newWalk(t, a).gmClearStopUnits(context.Background(), "2:2", gmLandPack)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := a.clock.now().Sub(start); got != 0 {
+			t.Fatalf("a visible pack took %s, want none", got)
+		}
+		if a.units != 1 || !gmClearUnitsShown(units, gmLandPack) {
+			t.Fatalf("%d units reads, shown %v, want 1 and the pack", a.units, gmClearUnitsShown(units, gmLandPack))
+		}
+	})
+	t.Run("a late pack is polled", func(t *testing.T) {
+		a := &gmLandAgent{clock: newFakeClock(), unitAt: 3}
+		start := a.clock.now()
+		if _, err := newWalk(t, a).gmClearStopUnits(context.Background(), "2:2", gmLandPack); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := a.clock.now().Sub(start), 2*gmClearUnitPoll; got != want {
+			t.Fatalf("a pack that shows on the 3rd read took %s, want %s", got, want)
+		}
+		if a.units != 3 {
+			t.Fatalf("%d units reads, want 3", a.units)
+		}
+	})
+	t.Run("no pack ends at the ceiling", func(t *testing.T) {
+		a := &gmLandAgent{clock: newFakeClock()}
+		start := a.clock.now()
+		if _, err := newWalk(t, a).gmClearStopUnits(context.Background(), "2:2", gmLandPack); err != nil {
+			t.Fatal(err)
+		}
+		if got := a.clock.now().Sub(start); got != gmClearUnitWait {
+			t.Fatalf("an empty read took %s, want the %s ceiling", got, gmClearUnitWait)
+		}
+		if want := int(gmClearUnitWait/gmClearUnitPoll) + 1; a.units != want {
+			t.Fatalf("%d units reads, want %d", a.units, want)
 		}
 	})
 }

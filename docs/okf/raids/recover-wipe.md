@@ -17,7 +17,7 @@ status: draft
 
 # Recover from wipes
 
-By default (`--wipe-resume 0`) a wipe ends the walk with exit 19. Raise `--wipe-resume` to revive and resume instead. With `--wipe-end fast` (the autopilot passes it for `--gm-instance-data` and `--boss-wipe-fresh` goals) a wipe at a boss row ends at once, with no reset wait and no revive: the next launch takes a fresh instance and this copy is discarded.
+By default (`--wipe-resume 0`) a wipe ends the walk with exit 19. Raise `--wipe-resume` to revive and resume instead. With `--wipe-end fast` (the autopilot passes it for `--gm-instance-data` and `--boss-wipe-fresh` goals) a wipe at a boss row ends at once, with no reset wait and no revive recipe (every dead hire still gets a bare `.revive <name>`): the next launch takes a fresh instance and this copy is discarded.
 
 ## 1. Allow recoveries
 

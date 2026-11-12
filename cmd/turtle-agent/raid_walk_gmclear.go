@@ -48,11 +48,21 @@ const (
 	// still falling, or a server still answering the selection, gets the time.
 	gmClearRetryGap = 3 * time.Second
 	// gmClearLandPoll and gmClearLandWait are a stop's landing wait: the commander's status is read this often after
-	// its `.go xyz`, up to this ceiling. Walk 74 paid a fixed 2 s at each of its 53 stops (~106 s of the 157 s clear);
-	// a server that has settled the position carries on at the first read, and a landing the status never settles (z
-	// stays a guess over a navmesh hole) waits the old 2 s, so the units read after it is never earlier than before.
-	gmClearLandPoll = 250 * time.Millisecond
-	gmClearLandWait = 2 * time.Second
+	// its `.go xyz`, up to this ceiling. Walk 74 paid a fixed 2 s at each of its 53 stops (~106 s of the 157 s clear).
+	// The landing needs a teleport the session has ACKED (TeleportSeq past the read before the go, reviveLanded's
+	// signal): the status reports the go's destination at once and a stop the commander already stands on is within
+	// the slack before any teleport lands, so the position alone would pass on the previous stop's status (Codex
+	// HIGH). A stop the status never settles within this ceiling falls back to the old fixed gmClearFallbackWait, so
+	// the units read after it is never earlier than before.
+	gmClearLandPoll     = 250 * time.Millisecond
+	gmClearLandWait     = 3 * time.Second
+	gmClearFallbackWait = 2 * time.Second
+	// gmClearSettle is the least time a landed stop settles before the units are read, and gmClearUnitPoll and
+	// gmClearUnitWait bound the poll of the pack in that read: the landing arrives before the client's object store
+	// holds the pack, so the read right after the landing can still be empty.
+	gmClearSettle   = 1 * time.Second
+	gmClearUnitPoll = 250 * time.Millisecond
+	gmClearUnitWait = 2 * time.Second
 )
 
 // gmClearBudget bounds the whole --gm-clear: past it no more lines go out, the members left are listed as not tried and the walk goes
@@ -239,19 +249,28 @@ func gmClearAllSettled(members map[uint64]*gmClearMember, guids []uint64) bool {
 	return true
 }
 
-// gmClearLand sends a GM-clear stop's `.go xyz` and waits for the commander to be settled there: the plan's map, not
-// falling, z no longer the session's guess, and the position within the revive-landing slack of the stop (a landing
-// may drop the character to the floor, so z gets reviveLandingZYd of room). It reads the status every gmClearLandPoll
-// and carries on at the first read that says landed, so a stop the server settles at once costs 250 ms instead of the
-// fixed 2 s the tool used to pay at every visit (walk 74: 53 stops, 157 s for the clear). A landing the status never
-// settles waits out gmClearLandWait, never longer: the units read after it is then exactly as late as before.
+// gmClearLand sends a GM-clear stop's `.go xyz` and waits for the commander to have LANDED there: the plan's map, not
+// falling, the position within the revive-landing slack of the stop (a landing may drop the character to the floor, so
+// z gets reviveLandingZYd of room), and a teleport the session counted since the read before the go (gmClearLanded).
+// A position match alone is no landing: the status reports the go's destination at once, and the previous stop's
+// status can already be within the slack, so the first read would carry on while the server is still processing the
+// teleport (Codex HIGH). A landed stop settles gmClearSettle before its units are read (gmClearStopUnits after the
+// instance check): the landing arrives before the client's object store holds the pack. A landing the status never
+// shows within gmClearLandWait falls back to the old fixed gmClearFallbackWait: the units read after it is then
+// exactly as late as before.
 func (w *walk) gmClearLand(ctx context.Context, x, y, z float32) error {
+	beforeSeq, haveSeq, err := w.gmClearSeq(ctx)
+	if err != nil {
+		return err
+	}
 	if err := w.goPlace(ctx, x, y, z); err != nil {
 		return err
 	}
+	landed := false
 	for waited := time.Duration(0); ; {
-		if st, err := w.status(ctx); err == nil && gmClearLanded(st, w.plan.Map, x, y, z) {
-			return nil
+		if st, err := w.status(ctx); err == nil && gmClearLanded(st, w.plan.Map, x, y, z, beforeSeq, haveSeq) {
+			landed = true
+			break
 		}
 		wait := gmClearLandWait - waited
 		if wait > gmClearLandPoll {
@@ -262,20 +281,84 @@ func (w *walk) gmClearLand(ctx context.Context, x, y, z float32) error {
 		}
 		waited += wait
 		if waited >= gmClearLandWait {
-			return nil
+			break
 		}
 	}
+	settle := gmClearSettle
+	if !landed {
+		settle = gmClearFallbackWait
+	}
+	return w.placeSleep(ctx, settle)
 }
 
-// gmClearLanded says the commander's status is a settled landing at a GM-clear stop. ZUnknown is the session's guess
-// for z after a teleport until the server sends a position (the same flag reviveLanded reads); over a navmesh hole it
-// may never clear, which is why the wait has its 2 s ceiling.
-func gmClearLanded(st session.StatusInfo, mapID uint32, x, y, z float32) bool {
-	if st.Map != mapID || st.Falling || st.ZUnknown {
+// gmClearSeq reads the session's acked-teleport count before a stop's `.go xyz`: the seq a landing must pass. One retry
+// a poll later; have is false when neither read answered, and no landing passes then (the wait falls back).
+func (w *walk) gmClearSeq(ctx context.Context) (seq uint64, have bool, err error) {
+	if st, serr := w.status(ctx); serr == nil {
+		return st.TeleportSeq, true, nil
+	}
+	if err := w.placeSleep(ctx, gmClearLandPoll); err != nil {
+		return 0, false, err
+	}
+	if st, serr := w.status(ctx); serr == nil {
+		return st.TeleportSeq, true, nil
+	}
+	return 0, false, nil
+}
+
+// gmClearLanded says the commander's status is a fresh landing at a GM-clear stop: on the plan's map, not falling, a
+// teleport the session counted since before the `.go` (TeleportSeq, the landing signal reviveLanded reads), and the
+// position within the revive-landing slack of the stop. The seq is required: it is the only term that ties the status
+// to THIS go (the session reports the go's destination itself at once, flagged ZUnknown or not). Over a navmesh hole
+// the z guess never settles, and the seq is the landing there, exactly as for a near revive teleport.
+func gmClearLanded(st session.StatusInfo, mapID uint32, x, y, z float32, beforeSeq uint64, haveSeq bool) bool {
+	if st.Map != mapID || st.Falling || !haveSeq || st.TeleportSeq <= beforeSeq {
 		return false
 	}
 	dx, dy := float64(x-st.X), float64(y-st.Y)
 	return math.Hypot(dx, dy) <= reviveLandingYd && math.Abs(float64(z-st.Z)) <= reviveLandingZYd
+}
+
+// gmClearStopUnits reads the units at a landed stop until at least one of the pack's spawn guids shows, up to
+// gmClearUnitWait, and returns the last read: the landing arrives before the client's object store holds the pack, so
+// the read right after it can still be empty and the members would be recorded not seen. The caller has re-read its
+// instance first, so this poll never runs on a stop that landed in another copy.
+func (w *walk) gmClearStopUnits(ctx context.Context, label string, guids []uint64) ([]objects.Unit, error) {
+	due := w.env.now().Add(gmClearUnitWait)
+	for {
+		units, err := w.gmClearUnits(ctx)
+		if err != nil {
+			return nil, stopf(exitRaidWalkFailed, "gm-clear: units read at %s: %v", label, err)
+		}
+		if gmClearUnitsShown(units, guids) {
+			return units, nil
+		}
+		left := due.Sub(w.env.now())
+		if left <= 0 {
+			return units, nil
+		}
+		if left > gmClearUnitPoll {
+			left = gmClearUnitPoll
+		}
+		if err := w.placeSleep(ctx, left); err != nil {
+			return nil, err
+		}
+	}
+}
+
+// gmClearUnitsShown says the units read holds at least one of the pack's spawn guids: the client's object store has the
+// pack the stop was walked to, so the read can name its members.
+func gmClearUnitsShown(units []objects.Unit, guids []uint64) bool {
+	want := make(map[uint64]bool, len(guids))
+	for _, g := range guids {
+		want[g] = true
+	}
+	for _, u := range units {
+		if want[raidwalk.SpawnGUID(u.GUID)] {
+			return true
+		}
+	}
+	return false
 }
 
 // placeGMClear is place step 6b. Every pack is cleared in gmClearRounds rounds; each round the commander visits the pack's stops
@@ -325,9 +408,9 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 				if err := w.placeInstanceIs(ctx, w.placeInst); err != nil {
 					return err
 				}
-				units, err := w.gmClearUnits(ctx)
+				units, err := w.gmClearStopUnits(ctx, label, guids)
 				if err != nil {
-					return stopf(exitRaidWalkFailed, "gm-clear: units read at %s: %v", label, err)
+					return err
 				}
 				for _, u := range pk.SeenMembers(units) {
 					m := members[raidwalk.SpawnGUID(u.GUID)]

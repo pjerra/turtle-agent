@@ -50,7 +50,7 @@ Usage: `turtle-agent raid-walk <plan> [--server <server>] [--slot N] ...` or `tu
 | Flag | Default | What it does | Example |
 |---|---|---|---|
 | `--wipe-resume` | `0` | Revive, rest and resume a wipe or near-wipe stop this many times per walk (0-3; 0 ends the walk). | `--wipe-resume 2` |
-| `--wipe-end` | reset and revive | `fast`: a wipe that ends the walk at a boss row (or the row before it) skips the reset wait and the revive, because the autopilot takes a fresh instance next and this copy is discarded. A wipe anywhere else keeps both (that copy is re-placed). The autopilot passes it for `--gm-instance-data` and `--boss-wipe-fresh` goals. | `--wipe-end fast` |
+| `--wipe-end` | reset and revive | `fast`: a wipe that ends the walk at a boss row (or the row before it) skips the reset wait and the revive recipe, because the autopilot takes a fresh instance next and this copy is discarded; every dead hire still gets a bare `.revive <name>`. A wipe anywhere else keeps the recipe (that copy is re-placed). The autopilot passes it for `--gm-instance-data` and `--boss-wipe-fresh` goals. | `--wipe-end fast` |
 | `--wipe-rest` | `10m` | How long a revived raid rests out of combat before the resume (30s or more). | `--wipe-rest 15m` |
 | `--auto-resume` | `0` | Resume a regroup pause this many times per step (0-3). | `--auto-resume 2` |
 | `--paused-wait` | `10m` | How long a pause that is not a regroup may last. | `--paused-wait 5m` |
@@ -65,7 +65,7 @@ Usage: `turtle-agent raid-walk <plan> [--server <server>] [--slot N] ...` or `tu
 | `--hires` | from the plan | The tb-raid-roster file (v1 or v2); without it the roster comes from the plan's `raid {size, tanks, healers, dps}` block. | `--hires <roster>` |
 | `--tier` | `0` | The hire gear tier (1-3) of a raid the committed table leaves unknown. | `--tier 1` |
 | `--tier-override` | `0` | The hire gear tier (1-3) in place of the raid's minimum: a comparison, not a tier proof. | `--tier-override 3` |
-| `--hire-settle` | `10s` | How long to wait after the last hire for its join summon before the refit and the bind; `0` skips the wait. Below the default marks the summary `settle_short`. Walk 12's last join came 4-8 s after the hire answer, so 10 s keeps a margin; walk 74 paid the old 20 s on every attempt. | `--hire-settle 20s` |
+| `--hire-settle` | `20s` | The ceiling of the wait after the last hire for its join summons before the refit and the bind; the wait is a poll of the group and ends as soon as every hire has joined (in the group list and online). `0` skips the wait. Below the default marks the summary `settle_short`. Walk 12's last join came 4-8 s after the hire answer, and 20 s covers a 15 s late join with margin; walk 74 paid the old flat 20 s on every attempt. | `--hire-settle 30s` |
 
 ## Instance cap
 
