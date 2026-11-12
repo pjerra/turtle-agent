@@ -57,8 +57,11 @@ const (
 	placeExtraRadius = 3
 	// placeClearDz is the vertical window of the clear, its pre-read and the quiet (the toolkit's dz=).
 	placeClearDz = 8
-	// placeQuietWaitS is the quiet's w=: the two reads are this many seconds apart (spec 5 step 7).
-	placeQuietWaitS = 20
+	// placeQuietWaitS is the quiet's w=: the two reads are this many seconds apart (spec 5 step 7). 15 s reads the
+	// circle twice over a window long enough for a patrol to cross it; walk 74 measured the old 20 s hold at a flat
+	// 20 s on every one of its 29 attempts (phase 9 of its timing budget), and 10 s was the other extreme: a patroller
+	// missed by the shorter window costs a setup retry, and the landing read after a clean quiet is the second net.
+	placeQuietWaitS = 15
 	// placeQuietR is the quiet's radius around the start point (spec 5 step 7).
 	placeQuietR = 50
 	// placeSpread is the `spread=` of the raid's `.tt place` (the ring the group is dropped on, in yards); the unfreeze check

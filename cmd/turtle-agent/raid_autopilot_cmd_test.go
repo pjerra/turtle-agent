@@ -418,6 +418,22 @@ func TestAutoCommandArgs(t *testing.T) {
 	if got = strings.Join(args, " "); !strings.Contains(got, "--instance-cap-per-account 30") {
 		t.Fatalf("the cap was not forwarded: %s", got)
 	}
+	// A goal whose boss wipe takes a FRESH instance (--gm-instance-data or --boss-wipe-fresh) gets --wipe-end fast:
+	// the walk's reset wait and revive would be spent on the copy the relaunch replaces (walk 74: 49 s + 34 s median).
+	fresh := target
+	fresh.Args = append(append([]string{}, target.Args...), "--gm-instance-data=hakkar:1 3")
+	if got = strings.Join(autoCommandArgs("/bin/ta", fresh, "/walk/a-1", "step 405", true, 0), " "); !strings.Contains(got, "--wipe-end fast") {
+		t.Fatalf("a --gm-instance-data goal's walk lacks --wipe-end fast: %s", got)
+	}
+	fresh = target
+	fresh.BossWipeFresh = true
+	if got = strings.Join(autoCommandArgs("/bin/ta", fresh, "/walk/a-1", "step 405", true, 0), " "); !strings.Contains(got, "--wipe-end fast") {
+		t.Fatalf("a --boss-wipe-fresh goal's walk lacks --wipe-end fast: %s", got)
+	}
+	// A goal that re-places the same instance after a wipe keeps the reset wait and the revive.
+	if got = strings.Join(autoCommandArgs("/bin/ta", target, "/walk/a-1", "step 405", true, 0), " "); strings.Contains(got, "--wipe-end") {
+		t.Fatalf("a same-instance goal's walk got --wipe-end: %s", got)
+	}
 }
 
 func TestAutoLastStepAndReason(t *testing.T) {
@@ -3170,6 +3186,20 @@ func TestBossWipeFreshFlagConsumed(t *testing.T) {
 func TestBossWipeFreshValueRejected(t *testing.T) {
 	if _, err := raidwalk.ParseAutoTargets(strings.NewReader("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --boss-wipe-fresh=1\n")); err == nil || !strings.Contains(err.Error(), "--boss-wipe-fresh takes no value") {
 		t.Fatalf("err %v, want the no-value error", err)
+	}
+}
+
+// --wipe-end is managed by the autopilot (it passes it for a goal whose boss wipe takes a fresh instance): a target
+// line's own value is dropped, never handed to raid-walk, so a same-instance goal cannot lose its reset wait.
+func TestWipeEndFlagConsumed(t *testing.T) {
+	ts, err := raidwalk.ParseAutoTargets(strings.NewReader("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --wipe-end slow\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range ts[0].Args {
+		if strings.Contains(a, "--wipe-end") {
+			t.Fatalf("--wipe-end reached the target's raid-walk args: %q", ts[0].Args)
+		}
 	}
 }
 
