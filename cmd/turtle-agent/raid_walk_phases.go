@@ -607,18 +607,17 @@ func (w *walk) phaseHire(ctx context.Context) error {
 // instead of a `TBM:GEAR` verdict. Speed3's Hakkar walks hit that 11 times in 101 attempts (2 in 74 on the old
 // binary), and each attempt then waited out the whole line budget and ended with exit 18.
 const (
-	gearBusyTries = 5               // the sends of the refit line, the first one included
-	gearBusyWait  = 3 * time.Second // the longest wait for the blocking job's verdict, and between re-sends
+	gearBusyTries = 5 // the sends of the refit line, the first one included
 	gearLineWait  = 60 * time.Second
 )
 
 // gearRaid sends the walk's refit line and returns when its `TBM:GEAR` verdict is read, all inside one gearLineWait
 // budget. A `gear|busy` refusal means an earlier gear job holds the queue, and that job's own `TBM:GEAR` line answers
 // a send the module refused: it geared the roster before the spec was put on (the ordering the refit exists for), so it
-// is waited for with waitTBMMatch and dropped, never taken as this refit's verdict. The line is re-sent once that
-// verdict is read, or after gearBusyWait when it has not been, at most gearBusyTries sends; only a `TBM:GEAR` verdict
-// read after a send the module accepted (no busy reply came for it) counts. The budget is checked before every
-// re-send, so a busy line that lands at the deadline ends the refit without another send.
+// is waited for with waitTBMMatch for the rest of the budget and dropped, never taken as this refit's verdict. Only
+// then is the line re-sent (at most gearBusyTries sends); if that job's verdict never arrives before the deadline the
+// refit fails without another send. The budget is checked before every re-send, and only a `TBM:GEAR` verdict read
+// after a send the module accepted (no busy reply came for it) counts.
 func (w *walk) gearRaid(ctx context.Context, line string) error {
 	deadline := w.env.now().Add(gearLineWait)
 	busy := ""
@@ -655,20 +654,22 @@ func (w *walk) gearRaid(ctx context.Context, line string) error {
 			return stopf(exitRaidWalkFailed, "gear: %s (after %d sends)", gear, try)
 		}
 		if try == 1 {
-			w.note("gear: a gear job is already running (%s); re-sending after its verdict or %s", gear, durWords(gearBusyWait))
+			w.note("gear: a gear job is already running (%s); re-sending once its verdict arrives", gear)
 		}
-		// Wait for that job's own verdict, if it comes inside the wait; it is read and dropped, so the re-send's
-		// result can only be a verdict of a send the module accepted.
-		wait := gearBusyWait
-		if rem := deadline.Sub(w.env.now()); wait > rem {
-			wait = rem
+		// Wait for that job's own verdict for the rest of the budget: it is read and dropped, so the re-send's
+		// result can only be a verdict of a send the module accepted. Without it nothing proves the queue is free,
+		// and a re-send could still be refused (or worse, its successor mistaken for this one) after the budget.
+		rem := deadline.Sub(w.env.now())
+		if rem < 0 {
+			rem = 0
 		}
-		if wait > 0 {
-			if _, _, err := w.waitTBMMatch(ctx, wait, func(l string) bool {
-				return strings.HasPrefix(l, "TBM:GEAR|")
-			}); err != nil {
-				return err
-			}
+		if _, ok, err := w.waitTBMMatch(ctx, rem, func(l string) bool {
+			return strings.HasPrefix(l, "TBM:GEAR|")
+		}); err != nil {
+			return err
+		} else if !ok {
+			return stopf(exitRaidWalkFailed, "gear: %s (the blocking job's TBM:GEAR line did not come in the %s budget)",
+				busy, durWords(gearLineWait))
 		}
 	}
 }

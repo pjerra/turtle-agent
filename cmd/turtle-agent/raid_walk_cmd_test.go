@@ -6103,12 +6103,13 @@ func TestRaidWalkWaitsForTheSpecReplyBeforeTheRefit(t *testing.T) {
 
 // The refit's busy retry (speed3's side finding: 11 of 101 Hakkar attempts): the hire batch's own gear job can still
 // be running when `.bot gear raid` fires, and the module answers ACTION_ERR|gear|busy instead of a verdict; the old
-// code then waited out its whole 60 s line budget and ended 18. Busy twice, the blocking job's verdict never coming,
-// then ok: each wait runs its full 3 s, both inside the one 60 s budget, and the walk carries on with the accepted
+// code then waited out its whole 60 s line budget and ended 18. Busy twice, with the blocking job's verdict 1 s after
+// each refusal, then ok: the walk drops both verdicts, re-sends once each is read, and carries on with the accepted
 // send's verdict.
 func TestRaidWalkRetriesTheRefitWhileAGearJobRuns(t *testing.T) {
 	f := newFixture(t)
 	f.agent.gearBusy = 2
+	f.agent.gearBlockerIn = time.Second
 	f.defaultRun("onyxias_lair")
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d, want 0: %s", code, f.stderr.String())
@@ -6123,22 +6124,22 @@ func TestRaidWalkRetriesTheRefitWhileAGearJobRuns(t *testing.T) {
 		t.Fatalf("the refit went out %d times, want 3 (busy, busy, ok)", len(at))
 	}
 	for i := 1; i < len(at); i++ {
-		if got := at[i].Sub(at[i-1]); got != gearBusyWait {
-			t.Fatalf("send %d came %s after send %d, want the %s busy wait", i+1, got, i, gearBusyWait)
+		if got := at[i].Sub(at[i-1]); got != time.Second {
+			t.Fatalf("send %d came %s after send %d, want 1s (the blocking job's verdict)", i+1, got, i)
 		}
 	}
-	if span := at[2].Sub(at[0]); span != 2*gearBusyWait {
-		t.Fatalf("the two busy waits span %s, want exactly %s", span, 2*gearBusyWait)
+	if span := at[2].Sub(at[0]); span != 2*time.Second {
+		t.Fatalf("the two blocking waits span %s, want exactly 2s", span)
 	}
 }
 
 // The blocking job's verdict is not the refit's: a job that ran before the send holds a kit the refit was never
-// ordered to change. The busy send is refused, the blocking job ends 1 s into the wait, the walk drops that verdict
-// and re-sends at once; success comes from the second send's own verdict.
+// ordered to change. It arrives 5 s in, after the old 3 s cap: the walk must still be waiting, drop it (never count
+// it), and re-send once; success comes from the second send's own verdict.
 func TestRaidWalkDropsTheBlockingGearsVerdict(t *testing.T) {
 	f := newFixture(t)
 	f.agent.gearBusy = 1
-	f.agent.gearBlockerIn = time.Second
+	f.agent.gearBlockerIn = 5 * time.Second
 	f.defaultRun("onyxias_lair")
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d, want 0: %s", code, f.stderr.String())
@@ -6150,19 +6151,46 @@ func TestRaidWalkDropsTheBlockingGearsVerdict(t *testing.T) {
 		}
 	}
 	if len(at) != 2 {
-		t.Fatalf("the refit went out %d times, want 2 (busy, then the accepted send)", len(at))
+		t.Fatalf("the refit went out %d times, want 2 (busy, then exactly one re-send)", len(at))
 	}
-	if got := at[1].Sub(at[0]); got != time.Second {
-		t.Fatalf("the re-send came %s after the refused send, want 1s: the blocking job's verdict ended the wait, "+
-			"not the full %s", got, gearBusyWait)
+	if got := at[1].Sub(at[0]); got != 5*time.Second {
+		t.Fatalf("the re-send came %s after the refused send, want 5s: the wait runs to the blocking verdict, "+
+			"not a 3 s cap", got)
 	}
 	if strings.Contains(f.stderr.String(), "no TBM:GEAR") {
 		t.Fatalf("the walk missed the accepted send's verdict: %s", f.stderr.String())
 	}
 }
 
-// A busy line that lands at the line budget's deadline ends the refit there: the deadline is checked before every
-// re-send, so no gear mutation is started after the window.
+// A busy reply whose blocking job never reports a verdict ends the refit at the deadline: the walk waits the rest of
+// the budget for the job's TBM:GEAR line and, without it, does not re-send (a re-send could be refused, or a later
+// verdict taken for its own).
+func TestRaidWalkFailsWhenTheBlockingJobNeverVerdicts(t *testing.T) {
+	f := newFixture(t)
+	f.agent.gearBusy = 1
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	var at []time.Time
+	for i, line := range f.agent.gm {
+		if strings.HasPrefix(line, ".bot gear raid ") {
+			at = append(at, f.agent.gmAt[i])
+		}
+	}
+	if len(at) != 1 {
+		t.Fatalf("the refit went out %d times, want 1 (no re-send without the blocking job's verdict)", len(at))
+	}
+	if reason := f.summary().EndReason; !strings.Contains(reason, "blocking job") {
+		t.Fatalf("end reason %q, want the missing blocking verdict", reason)
+	}
+	if waited := f.clock.now().Sub(at[0]); waited < gearLineWait {
+		t.Fatalf("the walk gave up %s after the refused send, want the full %s budget", waited, gearLineWait)
+	}
+}
+
+// A busy line that lands at the line budget's deadline ends the refit there: the wait for the blocking job's verdict
+// has no budget left, and no re-send follows.
 func TestRaidWalkStopsAtTheBudgetWhenBusyArrivesAtTheDeadline(t *testing.T) {
 	f := newFixture(t)
 	f.agent.gearBusy = 1
@@ -6180,16 +6208,17 @@ func TestRaidWalkStopsAtTheBudgetWhenBusyArrivesAtTheDeadline(t *testing.T) {
 	if len(at) != 1 {
 		t.Fatalf("the refit went out %d times, want 1 (no re-send after the deadline)", len(at))
 	}
-	if reason := f.summary().EndReason; !strings.Contains(reason, "budget is spent") {
-		t.Fatalf("end reason %q, want the spent budget", reason)
+	if reason := f.summary().EndReason; !strings.Contains(reason, "blocking job") {
+		t.Fatalf("end reason %q, want the missing blocking verdict", reason)
 	}
 }
 
-// A busy reply at every send ends the walk on the module's own line: at most gearBusyTries sends, their waits inside
-// the one 60 s line budget, exit 18.
+// A busy reply at every send, each followed by the blocking job's verdict, ends the walk on the module's own line:
+// at most gearBusyTries sends, their waits inside the one 60 s line budget, exit 18.
 func TestRaidWalkGivesUpTheRefitAfterFiveBusyReplies(t *testing.T) {
 	f := newFixture(t)
 	f.agent.gearBusy = gearBusyTries
+	f.agent.gearBlockerIn = time.Second
 	f.defaultRun("onyxias_lair")
 	if code := f.run(context.Background()); code != exitRaidWalkFailed {
 		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
@@ -6206,8 +6235,9 @@ func TestRaidWalkGivesUpTheRefitAfterFiveBusyReplies(t *testing.T) {
 	if len(at) != gearBusyTries {
 		t.Fatalf("the refit went out %d times, want the cap %d", len(at), gearBusyTries)
 	}
-	if span := at[len(at)-1].Sub(at[0]); span > gearLineWait {
-		t.Fatalf("the %d sends took %s, want them all inside the %s budget", len(at), span, gearLineWait)
+	if span := at[len(at)-1].Sub(at[0]); span != time.Duration(gearBusyTries-1)*time.Second {
+		t.Fatalf("the %d sends span %s, want exactly %s (one blocking verdict between each)",
+			len(at), span, time.Duration(gearBusyTries-1)*time.Second)
 	}
 }
 
