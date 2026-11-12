@@ -122,6 +122,9 @@ type walkFakeAgent struct {
 	roleFail        bool     // the server refuses every `.bot role` ("does not use that spec")
 	roleSilentFor   string   // the one bot whose `.bot role` is never answered
 	roleSilent      bool     // the server never answers `.bot role`
+	// gearBusy is how many `.bot gear raid` sends the module refuses with ACTION_ERR|gear|busy before it answers the
+	// verdict (an earlier gear job still running).
+	gearBusy int
 	// talentMode is how the fake game answers `.bot command <bot> talents [<path>]`: "" applies the build and reads it back,
 	// "silent" never answers, "stuck" answers but leaves the build as it was (Survival), "multiple" lists several specs.
 	talentMode      string
@@ -737,6 +740,16 @@ func (f *walkFakeAgent) gmSide(line string) {
 		f.mu.Unlock()
 		f.push("TBM:HIRE_RAID|ok|"+strconv.Itoa(n)+"|"+strconv.Itoa(n)+"|0|0|0|3|0|", "")
 	case strings.HasPrefix(line, ".bot gear raid "):
+		f.mu.Lock()
+		busy := f.gearBusy > 0
+		if busy {
+			f.gearBusy--
+		}
+		f.mu.Unlock()
+		if busy {
+			f.push("TBM:ACTION_ERR|gear|busy|A gear job is already running", "")
+			return
+		}
 		f.push("TBM:GEAR|ok|39|39|3|60|-|-|-|0|-|0", "")
 	case strings.HasPrefix(line, ".bot command ") && strings.Contains(line, " talents"):
 		f.talentSide(line)
@@ -6055,6 +6068,59 @@ func TestRaidWalkWaitsForTheSpecReplyBeforeTheRefit(t *testing.T) {
 		if strings.HasPrefix(line, ".bot gear raid ") {
 			t.Fatal("the refit went out without the spec applied")
 		}
+	}
+}
+
+// The refit's busy retry (speed3's side finding: 11 of 101 Hakkar attempts): the hire batch's own gear job can still
+// be running when `.bot gear raid` fires, and the module answers ACTION_ERR|gear|busy instead of a verdict; the old
+// code then waited out its whole 60 s line budget and ended 18. Busy twice, then ok: the walk re-sends after the 3 s
+// wait and carries on with the verdict.
+func TestRaidWalkRetriesTheRefitWhileAGearJobRuns(t *testing.T) {
+	f := newFixture(t)
+	f.agent.gearBusy = 2
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.stderr.String())
+	}
+	var at []time.Time
+	for i, line := range f.agent.gm {
+		if strings.HasPrefix(line, ".bot gear raid ") {
+			at = append(at, f.agent.gmAt[i])
+		}
+	}
+	if len(at) != 3 {
+		t.Fatalf("the refit went out %d times, want 3 (busy, busy, ok)", len(at))
+	}
+	for i := 1; i < len(at); i++ {
+		if got := at[i].Sub(at[i-1]); got != gearBusyWait {
+			t.Fatalf("send %d came %s after send %d, want the %s busy wait", i+1, got, i, gearBusyWait)
+		}
+	}
+}
+
+// A busy reply at every send ends the walk on the module's own line: at most gearBusyTries sends, their waits inside
+// the one 60 s line budget, exit 18.
+func TestRaidWalkGivesUpTheRefitAfterFiveBusyReplies(t *testing.T) {
+	f := newFixture(t)
+	f.agent.gearBusy = gearBusyTries
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want 18: %s", code, f.stderr.String())
+	}
+	if !strings.Contains(f.summary().EndReason, "gear|busy") {
+		t.Fatalf("end reason %q, want the module's busy line", f.summary().EndReason)
+	}
+	var at []time.Time
+	for i, line := range f.agent.gm {
+		if strings.HasPrefix(line, ".bot gear raid ") {
+			at = append(at, f.agent.gmAt[i])
+		}
+	}
+	if len(at) != gearBusyTries {
+		t.Fatalf("the refit went out %d times, want the cap %d", len(at), gearBusyTries)
+	}
+	if span := at[len(at)-1].Sub(at[0]); span > gearLineWait {
+		t.Fatalf("the %d sends took %s, want them all inside the %s budget", len(at), span, gearLineWait)
 	}
 }
 

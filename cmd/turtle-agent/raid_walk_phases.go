@@ -595,21 +595,71 @@ func (w *walk) phaseHire(ctx context.Context) error {
 	// The refit at the walk's tier (amendment G1): the hire wears the raid's minimum kit, and a comparison run its
 	// override. A failed refit is a failed walk: the tier is what the run is judged against.
 	line := fmt.Sprintf(".bot gear raid %s tier %d", w.manifest.Character, w.roster.Tier)
-	if err := w.gm(ctx, line); err != nil {
+	if err := w.gearRaid(ctx, line); err != nil {
 		return err
-	}
-	gear, ok, err := w.waitTBM(ctx, "TBM:GEAR|", 60*time.Second)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return stopf(exitRaidWalkFailed, "gear: no TBM:GEAR line in 60 s")
-	}
-	if !strings.HasPrefix(gear, "TBM:GEAR|ok|") {
-		return stopf(exitRaidWalkFailed, "gear: %s", gear)
 	}
 	w.tracker = raidwalk.NewTracker(w.plan, w.hireList())
 	return nil
+}
+
+// The refit's retry: the gear job a hire batch just started (or the module's own one) can still be running when the
+// walk fires `.bot gear raid`, and the module then answers `ACTION_ERR|gear|busy|A gear job is already running`
+// instead of a `TBM:GEAR` verdict. Speed3's Hakkar walks hit that 11 times in 101 attempts (2 in 74 on the old
+// binary), and each attempt then waited out the whole line budget and ended with exit 18.
+const (
+	gearBusyTries = 5               // the sends of the refit line, the first one included
+	gearBusyWait  = 3 * time.Second // the wait before a re-send
+	gearLineWait  = 60 * time.Second
+)
+
+// gearRaid sends the walk's refit line and returns when its `TBM:GEAR` verdict is read, all inside one gearLineWait
+// budget. A `gear|busy` refusal is waited out gearBusyWait and the line sent again, at most gearBusyTries sends; a
+// `TBM:GEAR` line read on the way is the verdict (the job that held the gear queue had finished), so a re-send's
+// wait never misses it.
+func (w *walk) gearRaid(ctx context.Context, line string) error {
+	deadline := w.env.now().Add(gearLineWait)
+	for try := 1; ; try++ {
+		if err := w.gm(ctx, line); err != nil {
+			return err
+		}
+		left := deadline.Sub(w.env.now())
+		if left < 0 {
+			left = 0
+		}
+		gear, ok, err := w.waitTBMMatch(ctx, left, gearVerdict)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return stopf(exitRaidWalkFailed, "gear: no TBM:GEAR line in 60 s")
+		}
+		if strings.HasPrefix(gear, "TBM:GEAR|") {
+			if !strings.HasPrefix(gear, "TBM:GEAR|ok|") {
+				return stopf(exitRaidWalkFailed, "gear: %s", gear)
+			}
+			return nil
+		}
+		if try >= gearBusyTries {
+			return stopf(exitRaidWalkFailed, "gear: %s (after %d sends)", gear, try)
+		}
+		if try == 1 {
+			w.note("gear: a gear job is already running (%s); retrying every %s", gear, durWords(gearBusyWait))
+		}
+		wait := gearBusyWait
+		if rem := deadline.Sub(w.env.now()); wait > rem {
+			wait = rem
+		}
+		if wait > 0 {
+			if err := w.env.sleep(ctx, wait); err != nil {
+				return stopf(exitRaidWalkFailed, "interrupted")
+			}
+		}
+	}
+}
+
+// gearVerdict matches the refit's own verdict or the module's refusal of a re-send while an earlier gear job runs.
+func gearVerdict(line string) bool {
+	return strings.HasPrefix(line, "TBM:GEAR|") || strings.HasPrefix(line, "TBM:ACTION_ERR|gear|busy|")
 }
 
 // hireSettleWait is the default of --hire-settle: the CEILING of the wait after the last hire batch for the hires'
