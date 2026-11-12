@@ -73,6 +73,7 @@ type practiceScenario struct {
 	goneAt    time.Time
 	evadeN    int
 	respawnN  int
+	reviveN   int
 	onEvade   func()
 	attemptAt time.Time
 }
