@@ -76,7 +76,7 @@ const walkPIDFile = "walk.pid"
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
     [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--no-place-unfreeze] [--gm-instance-data LEG:"A B[;A B]"] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
-    [--reset-wait 5m] [--wipe-resume K] [--wipe-end fast] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-per-account N] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
+    [--reset-wait 5m] [--wipe-resume K] [--wipe-end fast] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 10s] [--instance-cap-per-account N] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--decisions on|off] [--decisions-max-mib N]
     [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--reuse-instance] [--dry-run]
        turtle-agent raid-walk report <dir> [--spell ID] [--clock-offset 1h] [--md FILE] [--json FILE] [--out DIR]`

@@ -603,9 +603,11 @@ func (w *walk) phaseHire(ctx context.Context) error {
 // hireSettleWait follows the last hire batch before the refit and the bind. A big hire answers while its bots are
 // still on their join summon (about one a second), and a hire whose join lands after the bind is removed from the
 // group by the server. Walk 12 (ZG, 17-bot batches): the last join came 4-8 s after the answer. The party list is
-// no help: it names a hire before its join, and its zone there stays stale after it. This is the default of
+// no help: it names a hire before its join, and its zone there stays stale after it. 10 s keeps 2 s over that observed
+// 8 s, and walk 74 measured the wait at a flat 20 s on every one of its 29 attempts (phase 4 of its timing budget);
+// the join race is what the wait is for, so it is never dropped without --hire-settle. This is the default of
 // --hire-settle; 0 skips the wait, which is how a walk proves TortoiseBots#1367's bind keeps its late joiners.
-const hireSettleWait = 20 * time.Second
+const hireSettleWait = 10 * time.Second
 
 // hireReply is one TBM:HIRE_RAID line read field by field (TortoiseBots commands/Hire.cpp:124):
 // TBM:HIRE_RAID|<ok|partial|refused>|<hired>|<planned>|<tank>|<healer>|<dps>|<tier>|<feeCopper>|<reason>.
