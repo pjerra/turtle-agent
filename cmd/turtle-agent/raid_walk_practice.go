@@ -571,21 +571,43 @@ func practiceHostileRow(m map[string]hostileState, g packet.GUID) (hostileState,
 //   - the commander's own client (units, hostiles only), read now: the commander sees the boss even when a frame
 //     drops it.
 //
-// hp is the newest source's health percent, -1 when that source names the unit without a reading (a bot's target, or
-// a frame row at 0 %: frames round a live boss under 1 % to 0, so a frame's percent is never a death reading); at is
-// when that source saw it; ok is false when no readable source names the guid at all. A sight of hp 0 is a dead
-// reading, and ONLY the commander's own client can give one: the unit says Dead or its raw Health is 0. A live unit
-// with positive raw health clamps to at least 1 % (an integer percent that rounds to 0 is not a kill). commanderErr
-// is the commander source's own status: a failed units read is an unknown source, never evidence that the boss left.
+// hp is the health percent of the newest source that has one: sources are ranked commander > the frame's hostile row
+// > a party target, and at equal timestamps the higher rank wins. hp is -1 when the newest evidence names the unit
+// without a reading (a bot's target, or a frame row at 0 %: frames round a live boss under 1 % to 0, so a frame's
+// percent is never a death reading); an unknown health may refresh "seen" but never replaces a known one from the same
+// moment. at is when that evidence was seen; ok is false when no readable source names the guid at all. A sight of hp
+// 0 is a dead reading, and ONLY the commander's own client can give one: the unit says Dead or its raw Health is 0. A
+// live unit with positive raw health clamps to at least 1 % (an integer percent that rounds to 0 is not a kill).
+// commanderErr is the commander source's own status: a failed units read is an unknown source, never evidence that
+// the boss left.
 func (w *walk) practiceBossSight(ctx context.Context, p *practiceState) (hp int, at time.Time, ok bool, commanderErr error) {
 	if p == nil || p.bossGUID == 0 {
 		return 0, time.Time{}, false, nil
 	}
-	consider := func(h int, t time.Time) {
-		// On a tie the source considered later wins: the call order is the evidence order (tracker row, the frame it
-		// fed, then the commander's own client), so a same-poll frame never masks the commander's reading.
-		if !ok || !t.Before(at) {
-			hp, at, ok = h, t, true
+	// Source priority, for observations of the same moment: the commander's own client is the most direct, the
+	// frame's hostile row next, the tracker's copy of a frame row after it, and a party target (the unit is named,
+	// its health is not) last.
+	const (
+		sightPrioParty = iota
+		sightPrioTracked
+		sightPrioFrame
+		sightPrioCommander
+	)
+	bestPrio := 0
+	consider := func(h int, t time.Time, prio int) {
+		switch {
+		case !ok:
+			hp, at, ok, bestPrio = h, t, true, prio
+		case t.After(at):
+			// Newer evidence wins on time, even when it names the unit without a health reading.
+			hp, at, bestPrio = h, t, prio
+		case t.Equal(at) && prio > bestPrio:
+			// Same moment: the more direct source wins, but an unknown health (hp < 0) never replaces a known one
+			// from that same moment. A known reading includes hp 0, the commander's death.
+			bestPrio = prio
+			if h >= 0 || hp < 0 {
+				hp = h
+			}
 		}
 	}
 	// A frame names the unit and its percent: 0 is "seen, health unknown", never dead.
@@ -596,7 +618,7 @@ func (w *walk) practiceBossSight(ctx context.Context, p *practiceState) (hp int,
 		return pct
 	}
 	if h, found := practiceHostileRow(w.hostiles, p.bossGUID); found {
-		consider(frameHP(h.hppct), h.at)
+		consider(frameHP(h.hppct), h.at, sightPrioTracked)
 	}
 	if fr := w.viewFrame; fr != nil {
 		frameAt := w.viewAt
@@ -605,12 +627,12 @@ func (w *walk) practiceBossSight(ctx context.Context, p *practiceState) (hp int,
 		}
 		for _, h := range fr.Hostiles {
 			if h.GUID == p.bossGUID { // parsed guids: the frame's case and 0xF130 high part compare exactly
-				consider(frameHP(h.HPPct), frameAt)
+				consider(frameHP(h.HPPct), frameAt, sightPrioFrame)
 			}
 		}
 		for _, b := range fr.Party {
 			if b.Target == p.bossGUID {
-				consider(-1, frameAt)
+				consider(-1, frameAt, sightPrioParty)
 			}
 		}
 	}
@@ -633,7 +655,7 @@ func (w *walk) practiceBossSight(ctx context.Context, p *practiceState) (hp int,
 					h = 1 // live with positive raw health: at least 1 %, never a dead reading
 				}
 			}
-			consider(h, w.env.now())
+			consider(h, w.env.now(), sightPrioCommander)
 		}
 	}
 	return hp, at, ok, commanderErr

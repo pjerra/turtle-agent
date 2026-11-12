@@ -1080,6 +1080,33 @@ func TestPracticeFrameZeroIsNotDead(t *testing.T) {
 	}
 }
 
+// TestPracticeFrameHealthSurvivesPartyTargets: the newest frame names the boss twice, as a hostile row at 42 % and as
+// two party members' target. The party rows are hp-unknown evidence at the same frameAt; the known health outranks
+// them, so the sight keeps 42 % and the frame's time.
+func TestPracticeFrameHealthSurvivesPartyTargets(t *testing.T) {
+	now := time.Date(2026, 11, 12, 0, 6, 8, 0, time.Local)
+	frame := &tbm.ViewFrame{Seq: 743,
+		Hostiles: []tbm.HostileRec{{GUID: attempt1BossGUID(), Entry: 14834, HPPct: 42, Flags: "-"}},
+		Party: []tbm.PartyRec{
+			{Name: "one", Target: attempt1BossGUID()},
+			{Name: "two", Target: attempt1BossGUID()},
+		},
+	}
+	w := &walk{
+		env:       walkEnv{now: func() time.Time { return now }},
+		opts:      raidWalkOptions{server: "m910q", practiceSustain: true, practiceBossFloor: 40},
+		agent:     &practiceUnitsAgent{},
+		hostiles:  map[string]hostileState{},
+		viewFrame: frame,
+		viewAt:    now,
+	}
+	p := &practiceState{bossGUID: attempt1BossGUID(), bossMax: 42000, bossSeenAt: now}
+	hp, at, ok, err := w.practiceBossSight(context.Background(), p)
+	if err != nil || !ok || hp != 42 || !at.Equal(now) {
+		t.Fatalf("sight hp %d at %s ok %v err %v, want the frame's 42 %% at %s", hp, at, ok, err, now)
+	}
+}
+
 // TestPracticeBossLiveUnderOnePercentIsNotDead: the commander's percent is integer division, so a live boss with 1 of
 // 200 hp reads 0 %. Death is the unit's Dead flag or raw health 0 only: a live unit with positive raw health is at
 // least 1 %, never the practice's kill ending.
