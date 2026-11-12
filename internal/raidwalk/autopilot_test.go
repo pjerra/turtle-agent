@@ -845,27 +845,3 @@ func TestPracticeNeverEngagedIsNoBossDeath(t *testing.T) {
 		t.Fatalf("%+v, want the relaunch cap to stop it", d)
 	}
 }
-
-// BossEngagedWipe: a wipe that engaged the goal's own boss counts as a wipe at that boss although its step is no boss
-// row (walk 80: the bind resume's landing fight at step 689 pulled Hakkar 14834 in; the boss row is 691). The entry is
-// the goal's (GoalBossIDs), a leg or full goal never matches, and a killed boss is no wipe evidence.
-func TestBossEngagedWipe(t *testing.T) {
-	hakkar := AutoGoal{Kind: "boss", Boss: 14834}
-	for _, c := range []struct {
-		name    string
-		goal    AutoGoal
-		engaged map[uint32]bool
-		want    bool
-	}{
-		{"the goal's boss engaged at a place step", hakkar, map[uint32]bool{14834: true}, true},
-		{"another boss engaged", hakkar, map[uint32]bool{14515: true}, false},
-		{"nothing engaged", hakkar, nil, false},
-		{"the goal's boss's other entry", AutoGoal{Kind: "boss", Boss: 14509}, map[uint32]bool{14599: true}, true},
-		{"a leg goal", AutoGoal{Kind: "leg", Leg: "hakkar"}, map[uint32]bool{14834: true}, false},
-		{"no boss entry", AutoGoal{Kind: "boss"}, map[uint32]bool{14834: true}, false},
-	} {
-		if got := BossEngagedWipe(c.goal, c.engaged); got != c.want {
-			t.Errorf("%s: BossEngagedWipe(%+v, %v) = %v, want %v", c.name, c.goal, c.engaged, got, c.want)
-		}
-	}
-}

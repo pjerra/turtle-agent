@@ -453,9 +453,6 @@ type AutoObservation struct {
 	EndReason    string
 	// KilledBosses is the entries the run's summary says went down.
 	KilledBosses map[uint32]bool
-	// EngagedBosses is the entries of the bosses the run's summary says its frames engaged (killed or not): a wipe that
-	// engaged the goal's boss counts as a wipe at that boss for the fresh-instance rule (BossEngagedWipe).
-	EngagedBosses map[uint32]bool
 	// LastProgress is the last time the run's step or a boss's HP changed (the run's own start when neither has).
 	LastProgress time.Time
 	// ObserveErr is a read failure (no summary yet, a truncated file): it is never a restart reason by itself.
@@ -525,23 +522,6 @@ func GoalBossDead(g AutoGoal, o AutoObservation) bool {
 	}
 	for _, e := range GoalBossIDs(g.Boss) {
 		if o.KilledBosses[e] {
-			return true
-		}
-	}
-	return false
-}
-
-// BossEngagedWipe says the run engaged the goal's own boss without killing it: a wipe that dragged him into the fight
-// from a step that is not a boss row still counts as a wipe at that boss for the fresh-instance rule. Walk 80 (ZG
-// Hakkar): the bind resume landed in the altar patrols at step 689, the fight pulled Hakkar (14834) in, and the wipe
-// step's row is a move row, so PlaceStepAtBoss said no boss and the next attempt reused the copy the patrols own. The
-// entry is the goal's (GoalBossIDs), never a hard-coded one.
-func BossEngagedWipe(g AutoGoal, engaged map[uint32]bool) bool {
-	if g.Kind != "boss" || len(engaged) == 0 {
-		return false
-	}
-	for _, e := range GoalBossIDs(g.Boss) {
-		if engaged[e] {
 			return true
 		}
 	}
