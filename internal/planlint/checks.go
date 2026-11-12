@@ -236,6 +236,9 @@ func (c *checker) checkReach(i int, s planexport.StepRow) []Finding {
 	if !ok {
 		return nil
 	}
+	if noHop(s) {
+		return nil // the row's point is where the module does its work, not a hop: see noHop
+	}
 	prev := c.prev(i)
 	if prev < 0 {
 		return nil

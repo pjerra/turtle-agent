@@ -177,6 +177,17 @@ func moveKind(kind string) bool {
 	return false
 }
 
+// noHop says the row does its work where the party already stands, so a lint that asks the server to path to its point must
+// skip it: a loot, use_item, gossip, wait_object, wait_clear or hold row's point is for the module's own use, not a hop (route
+// audit 2026-11-12, finding 4: the 15 rows flagged NOPATH were exactly these kinds). Every other kind is still judged.
+func noHop(s planexport.StepRow) bool {
+	switch s.Kind {
+	case planexport.KindLoot, planexport.KindUseItem, planexport.KindGossip, planexport.KindWaitObject, planexport.KindWaitClear, planexport.KindHold:
+		return true
+	}
+	return false
+}
+
 // positioned says the row has a place on the map.
 func positioned(s planexport.StepRow) bool { return s.X != 0 || s.Y != 0 || s.Z != 0 }
 
