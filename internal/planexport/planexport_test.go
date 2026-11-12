@@ -2015,3 +2015,43 @@ func TestOffSeamNudgesOnlyASeamTheHopCrosses(t *testing.T) {
 		t.Fatalf("a point whose seam the hop runs along moved: %+v", got)
 	}
 }
+
+// The run leader hop warning is printed only for a hop that stays uncut: with --approach-hops the exporter's own rows bring
+// the party within the run leader's reach, so the plan's raw distance is no longer a hop the run leader walks itself (route
+// audit 2026-11-12, finding 8: 3,412 lines in one sweep).
+func TestRunLeaderHopWarningOnlyForHopsLeftUncut(t *testing.T) {
+	const js = `{"version":1,"name":"far","status":"live-checked (test)","map":43,"entrance":{"x":0,"y":0,"z":0},
+	 "legs":[{"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":100,"y":0,"z":0}]}]}]}`
+	p := parsePlan(t, js)
+	cut := func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return []dungeon.Point{{X: 40, Y: 0, Z: 0}, {X: 70, Y: 0, Z: 0}}, nil, nil
+	}
+	res, err := Build(p, Options{Source: "test", Cut: cut, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := strings.Join(res.Warnings, "\n"); strings.Contains(w, "run leader hop") {
+		t.Fatalf("a cut hop still warned: %q", w)
+	}
+	// Without --approach-hops the hop is not cut, and the warning stays.
+	res, err = Build(p, Options{Source: "test", Cut: cut})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "run leader hop") {
+		t.Fatalf("an uncut hop lost its warning: %q", w)
+	}
+	// A cut that ends beyond the reach (the floor-aware cutter keeps one corner, the water rule drops the rest, so no point
+	// on the path interpolates a nearer one) still warns.
+	far := func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return []dungeon.Point{{X: 30, Y: 0, Z: 0}},
+			[]CutNote{{Old: dungeon.Point{X: 50}, Dropped: true, Reason: "the point's own floor is NavWater: the water is crossed in one hop between dry points"}}, nil
+	}
+	res, err = Build(p, Options{Source: "test", Cut: far, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "run leader hop") {
+		t.Fatalf("a cut ending 70 yd out lost its warning: %q", w)
+	}
+}
