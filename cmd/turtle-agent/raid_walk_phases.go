@@ -2910,28 +2910,41 @@ func (w *walk) endWipe(ctx context.Context, step int) error {
 }
 
 // reviveFastWait is the --wipe-end fast path's bare revive window: the dead hires' `.revive` lines go out about
-// 100 ms apart and the rest of the window covers the server's revive.
+// reviveFastGap apart and the rest of the window covers the server's revive.
 const reviveFastWait = 3 * time.Second
+
+// reviveFastGap is the pause after one hire's revive line (and before a failed hire's one retry).
+const reviveFastGap = 100 * time.Millisecond
 
 // reviveDeadHires is the --wipe-end fast path's last act before the exit: a bare `.revive <name>` for every hire the
 // frames still show dead (fresh within 10 s, the same view the revive recipe judges), with none of that recipe's go,
-// quiet check or summons: the copy is discarded. About reviveFastWait in all, whatever the dead count. A failed line
-// is noted and the exit still goes on.
+// quiet check or summons: the copy is discarded. About reviveFastWait in all, whatever the dead count. The dead list
+// is read freshly right before the loop; every dead hire gets its line even when an earlier one fails, and a failed
+// line is retried once while the window has time left (Codex round 2: the old loop stopped at the first failure and
+// left the rest of the party dead). A hire still dead at the end is named in one `wipe-end: revive incomplete` note:
+// the next attempt's placeDead check finds it again, so this note only records the copy that was thrown away.
 func (w *walk) reviveDeadHires(ctx context.Context) {
 	due := w.env.now().Add(reviveFastWait)
-	now := w.env.now()
-	for _, name := range w.hireList() {
-		p, ok := w.botAt[name]
-		if !ok || !p.dead || now.Sub(p.at) > 10*time.Second {
-			continue
+	dead := w.placeDead(w.env.now())
+	var incomplete []string
+	for _, name := range dead {
+		err := w.gm(ctx, ".revive "+name)
+		if err != nil && ctx.Err() == nil && w.env.now().Before(due) {
+			if serr := w.env.sleep(ctx, reviveFastGap); serr != nil {
+				return
+			}
+			err = w.gm(ctx, ".revive "+name)
 		}
-		if err := w.gm(ctx, ".revive "+name); err != nil {
+		if err != nil {
 			w.note("wipe: fast revive of %s: %v", name, err)
+			incomplete = append(incomplete, name)
+		}
+		if serr := w.env.sleep(ctx, reviveFastGap); serr != nil {
 			return
 		}
-		if err := w.env.sleep(ctx, 100*time.Millisecond); err != nil {
-			return
-		}
+	}
+	if len(incomplete) > 0 {
+		w.note("wipe-end: revive incomplete %s", strings.Join(incomplete, ", "))
 	}
 	if left := due.Sub(w.env.now()); left > 0 {
 		if err := w.env.sleep(ctx, left); err != nil {

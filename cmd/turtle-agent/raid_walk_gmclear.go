@@ -255,9 +255,11 @@ func gmClearAllSettled(members map[uint64]*gmClearMember, guids []uint64) bool {
 // A position match alone is no landing: the status reports the go's destination at once, and the previous stop's
 // status can already be within the slack, so the first read would carry on while the server is still processing the
 // teleport (Codex HIGH). A landed stop settles gmClearSettle before its units are read (gmClearStopUnits after the
-// instance check): the landing arrives before the client's object store holds the pack. A landing the status never
-// shows within gmClearLandWait falls back to the old fixed gmClearFallbackWait: the units read after it is then
-// exactly as late as before.
+// instance check): the landing arrives before the client's object store holds the pack. The wait is an absolute
+// deadline (gmClearLandWait from here, on the walk's clock), not a sum of sleeps: each status RPC gets a context
+// capped at the time left and the deadline is checked after every read, so a slow RPC cannot stretch the ceiling
+// (Codex round 2). A landing the status never shows by the deadline falls back to the old fixed gmClearFallbackWait:
+// the units read after it is then exactly as late as before.
 func (w *walk) gmClearLand(ctx context.Context, x, y, z float32) error {
 	beforeSeq, haveSeq, err := w.gmClearSeq(ctx)
 	if err != nil {
@@ -267,21 +269,24 @@ func (w *walk) gmClearLand(ctx context.Context, x, y, z float32) error {
 		return err
 	}
 	landed := false
-	for waited := time.Duration(0); ; {
-		if st, err := w.status(ctx); err == nil && gmClearLanded(st, w.plan.Map, x, y, z, beforeSeq, haveSeq) {
+	due := w.env.now().Add(gmClearLandWait)
+	for w.env.now().Before(due) {
+		readCtx, cancel := context.WithTimeout(ctx, due.Sub(w.env.now()))
+		st, serr := w.status(readCtx)
+		cancel()
+		if serr == nil && gmClearLanded(st, w.plan.Map, x, y, z, beforeSeq, haveSeq) {
 			landed = true
 			break
 		}
-		wait := gmClearLandWait - waited
+		if !w.env.now().Before(due) {
+			break
+		}
+		wait := due.Sub(w.env.now())
 		if wait > gmClearLandPoll {
 			wait = gmClearLandPoll
 		}
 		if err := w.placeSleep(ctx, wait); err != nil {
 			return err
-		}
-		waited += wait
-		if waited >= gmClearLandWait {
-			break
 		}
 	}
 	settle := gmClearSettle
@@ -322,25 +327,39 @@ func gmClearLanded(st session.StatusInfo, mapID uint32, x, y, z float32, beforeS
 // gmClearStopUnits reads the units at a landed stop until at least one of the pack's spawn guids shows, up to
 // gmClearUnitWait, and returns the last read: the landing arrives before the client's object store holds the pack, so
 // the read right after it can still be empty and the members would be recorded not seen. The caller has re-read its
-// instance first, so this poll never runs on a stop that landed in another copy.
+// instance first, so this poll never runs on a stop that landed in another copy. The ceiling is an absolute deadline
+// on the walk's clock, and each units RPC gets a context capped at the time left (Codex round 2): a read that the cap
+// cuts ends the poll with the last units instead of stretching it, while a read that fails on its own still stops the
+// walk.
 func (w *walk) gmClearStopUnits(ctx context.Context, label string, guids []uint64) ([]objects.Unit, error) {
 	due := w.env.now().Add(gmClearUnitWait)
+	var last []objects.Unit
 	for {
-		units, err := w.gmClearUnits(ctx)
+		readCtx := ctx
+		cancel := func() {}
+		timed := false
+		if left := due.Sub(w.env.now()); left > 0 {
+			readCtx, cancel = context.WithTimeout(ctx, left)
+			timed = true
+		}
+		units, err := w.gmClearUnits(readCtx)
+		capped := timed && ctx.Err() == nil && readCtx.Err() != nil
+		cancel()
 		if err != nil {
+			if capped {
+				return last, nil
+			}
 			return nil, stopf(exitRaidWalkFailed, "gm-clear: units read at %s: %v", label, err)
 		}
-		if gmClearUnitsShown(units, guids) {
+		last = units
+		if gmClearUnitsShown(units, guids) || !w.env.now().Before(due) {
 			return units, nil
 		}
-		left := due.Sub(w.env.now())
-		if left <= 0 {
-			return units, nil
+		wait := due.Sub(w.env.now())
+		if wait > gmClearUnitPoll {
+			wait = gmClearUnitPoll
 		}
-		if left > gmClearUnitPoll {
-			left = gmClearUnitPoll
-		}
-		if err := w.placeSleep(ctx, left); err != nil {
+		if err := w.placeSleep(ctx, wait); err != nil {
 			return nil, err
 		}
 	}

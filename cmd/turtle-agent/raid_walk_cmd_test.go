@@ -2953,6 +2953,71 @@ func TestRaidWalkWipeEndFastSkipsResetAndReviveAtABoss(t *testing.T) {
 	}
 }
 
+// Codex round 2 MEDIUM: the fast wipe revive stopped at the first failed line, leaving the rest of the party dead in
+// the copy (and for the party view of the next launch). Every dead hire now gets its line, a failed one is retried
+// once inside the window, and the ones still dead are named in one `wipe-end: revive incomplete` note.
+func TestReviveDeadHiresKeepsGoingPastAFailure(t *testing.T) {
+	newWalk := func(t *testing.T, a *walkFakeAgent) *walk {
+		now := a.clock.now()
+		return &walk{
+			plan:  &dungeon.Plan{Map: 309},
+			env:   walkEnv{now: a.clock.now, sleep: a.clock.sleep},
+			agent: a,
+			mt:    "Tank",
+			ots:   []string{"Healer"},
+			hires: map[string]bool{"Tank": true, "Healer": true},
+			botAt: map[string]botPos{
+				"Tank":   {dead: true, at: now},
+				"Healer": {dead: true, at: now},
+			},
+		}
+	}
+	t.Run("the failed hire is named and the next is still revived", func(t *testing.T) {
+		a := newFakeAgent(t, newFakeClock())
+		a.gmFail = func(line string) error {
+			if line == ".revive Tank" {
+				return errors.New("revive refused")
+			}
+			return nil
+		}
+		w := newWalk(t, a)
+		w.reviveDeadHires(context.Background())
+		gm := a.gmLines()
+		if n := countPrefix(gm, ".revive Tank"); n != 2 {
+			t.Fatalf("%d Tank revive lines, want the line and its one retry: %q", n, gm)
+		}
+		if n := countPrefix(gm, ".revive Healer"); n != 1 {
+			t.Fatalf("%d Healer revive lines, want 1: a failed hire must not stop the loop: %q", n, gm)
+		}
+		notes := strings.Join(w.notesCopy(), "\n")
+		if !strings.Contains(notes, "wipe-end: revive incomplete Tank") {
+			t.Fatalf("notes %q do not name the hire left dead", notes)
+		}
+		if strings.Contains(notes, "incomplete Tank, Healer") {
+			t.Fatalf("notes %q name the revived hire as incomplete", notes)
+		}
+	})
+	t.Run("a retry that succeeds leaves nothing incomplete", func(t *testing.T) {
+		a := newFakeAgent(t, newFakeClock())
+		failed := false
+		a.gmFail = func(line string) error {
+			if line == ".revive Tank" && !failed {
+				failed = true
+				return errors.New("revive refused")
+			}
+			return nil
+		}
+		w := newWalk(t, a)
+		w.reviveDeadHires(context.Background())
+		if n := countPrefix(a.gmLines(), ".revive Tank"); n != 2 {
+			t.Fatalf("%d Tank revive lines, want the line and its retry", n)
+		}
+		if notes := strings.Join(w.notesCopy(), "\n"); strings.Contains(notes, "revive incomplete") {
+			t.Fatalf("notes %q call a retried revive incomplete", notes)
+		}
+	})
+}
+
 // The same flag, but the wipe is away from the boss: the autopilot re-places this copy (--reuse-instance), so the
 // reset wait and the revive stay.
 func TestRaidWalkWipeEndFastKeepsTheReviveAwayFromABoss(t *testing.T) {

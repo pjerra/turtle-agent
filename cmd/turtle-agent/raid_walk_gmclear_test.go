@@ -1302,6 +1302,16 @@ type gmLandAgent struct {
 	units   int
 	unitAt  int // the first units read that holds the pack's unit (0: never)
 	at      []time.Time
+	// statusCost is each status RPC's wall time (0: instant). The fake clock advances by the real time the call
+	// took, so the walk's absolute deadline sees the RPC's cost; a context deadline cuts the cost short.
+	statusCost time.Duration
+}
+
+// advance moves the fake clock by d: a fake RPC's simulated wall time.
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	c.t = c.t.Add(d)
+	c.mu.Unlock()
 }
 
 // gmLandUnit is the pack member the fake's units read reports: the guid the tests poll for. gmLandPack keys it by its
@@ -1319,6 +1329,19 @@ func (a *gmLandAgent) Call(ctx context.Context, method string, params, out any, 
 			a.goLine, a.goAt, a.reads, a.units, a.landing = text, a.clock.now(), 0, 0, true
 		}
 	case "status":
+		if a.statusCost > 0 {
+			t0 := time.Now()
+			timer := time.NewTimer(a.statusCost)
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				timer.Stop()
+			}
+			a.clock.advance(time.Since(t0))
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
 		a.reads++
 		a.at = append(a.at, a.clock.now())
 		if a.landing && a.seqAt > 0 && a.reads >= a.seqAt && !a.bumped {
@@ -1391,16 +1414,19 @@ func TestGMClearLandPollsTheLanding(t *testing.T) {
 			t.Fatalf("%d status reads, want %d", a.reads, want)
 		}
 	})
-	// Codex HIGH: the status of the stop before already matches the position, and no teleport has been acked yet: the
-	// first read must not pass, or the units are read before the go lands.
-	t.Run("a position match with the old teleport count is no landing", func(t *testing.T) {
-		a := &gmLandAgent{clock: newFakeClock(), landAt: 1, seqAt: 0}
-		start := a.clock.now()
+	// Codex round 2 HIGH: `waited` counted only the sleeps, so each status RPC (up to 10 s) stretched the 3 s
+	// ceiling. The ceiling is a deadline: a 2 s status read still gives up at gmClearLandWait and falls back.
+	t.Run("a slow status cannot stretch the ceiling", func(t *testing.T) {
+		a := &gmLandAgent{clock: newFakeClock(), never: true, statusCost: 2 * time.Second}
 		if err := newWalk(t, a).gmClearLand(context.Background(), 10, 20, 30); err != nil {
 			t.Fatal(err)
 		}
-		if got, want := a.clock.now().Sub(start), gmClearLandWait+gmClearFallbackWait; got != want {
-			t.Fatalf("a stale position match took %s, want the fallback (%s)", got, want)
+		if got := a.clock.now().Sub(a.goAt); got > gmClearLandWait+gmClearFallbackWait+500*time.Millisecond {
+			t.Fatalf("an unsettled landing with a 2 s status took %s, want the %s ceiling and the %s fallback",
+				got, gmClearLandWait, gmClearFallbackWait)
+		}
+		if a.reads > 2 {
+			t.Fatalf("%d status reads, want at most 2: the deadline stops the poll", a.reads)
 		}
 	})
 }
