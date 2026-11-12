@@ -211,10 +211,6 @@ type walkFakeAgent struct {
 	hireRetryReportsOrder bool
 	// hireReply answers batch hireReply[batch] with this line verbatim (test c); the server hires nothing.
 	hireReply map[int]string
-	// partyJoinAt holds the LAST hire out of the party list for that long after the last hire line: on the live
-	// server the join lands seconds after the reply (walk 12), so the settle poll has to wait for it.
-	partyJoinAt time.Duration
-	lastHireAt  time.Time
 
 	// The fault injector's fakes (raid_walk_inject_test.go): the server's selection (target/gps), the per-bot
 	ownGUID packet.GUID // the commander's GUID when a test sets one
@@ -414,9 +410,6 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		f.mu.Lock()
 		members := make([]session.PartyMember, 0, len(f.party))
 		for i, n := range f.party {
-			if f.partyJoinAt > 0 && i == len(f.party)-1 && f.clock.now().Sub(f.lastHireAt) < f.partyJoinAt {
-				continue // the last hire's join has not landed yet: the group list names it, its join does not
-			}
 			members = append(members, session.PartyMember{Name: n, GUID: packet.GUID(1000 + i), Online: true})
 		}
 		f.mu.Unlock()
@@ -689,7 +682,6 @@ func (f *walkFakeAgent) gmSide(line string) {
 			names = append(names, fmt.Sprintf("Bot%02d", f.nameSeq))
 		}
 		f.party = append(f.party, names...)
-		f.lastHireAt = f.clock.now()
 		f.mu.Unlock()
 		f.push("TBM:HIRE_RAID|ok|"+strconv.Itoa(n)+"|"+strconv.Itoa(n)+"|0|0|0|3|0|", "")
 	case strings.HasPrefix(line, ".bot gear raid "):
@@ -753,13 +745,12 @@ func (f *walkFakeAgent) gmSide(line string) {
 						f.x, f.y, f.z = float32(x), float32(y), float32(z)
 						f.ownPos = [3]float32{f.x, f.y, f.z}
 						f.status.X, f.status.Y, f.status.Z = f.x, f.y, f.z
-						// The destination is reported, and the server's near teleport has landed: the session acks
-						// it (TeleportSeq) whatever the run state, so a pre-start go (the GM clear's stops) acks
-						// too. While goUnsettled reports the destination for a few polls (the live Q3 window), the
-						// seq has not advanced yet.
-						if f.unsettledLeft == 0 {
+						if started && f.unsettledLeft == 0 {
+							// The destination is reported, and the server's teleport has landed: only then does the
+							// session ack it (TeleportSeq). While goUnsettled reports the destination for a few polls
+							// (the live Q3 window), the seq has not advanced yet.
 							f.goArrive(fromMap)
-						} else if uint32(m) != fromMap {
+						} else if started && uint32(m) != fromMap {
 							f.zStuck = true // a far teleport before the seq is acked still never settles z
 						}
 					}
@@ -3034,165 +3025,6 @@ func TestRaidWalkWipeResumeZeroKeepsOldBehaviour(t *testing.T) {
 	}
 	if sum.EndReason != "wipe at step 13" {
 		t.Fatalf("end %q, want the wipe ending", sum.EndReason)
-	}
-}
-
-// --wipe-end fast (the autopilot passes it for --gm-instance-data and --boss-wipe-fresh goals): a wipe at a boss row
-// (or the row before it, PlaceStepAtBoss) ends the walk with exit 19 at once. The copy is thrown away by the
-// autopilot's fresh-instance relaunch, so the reset wait (walk 74: 49 s median) and the revive recipe (34 s median)
-// are spent on nothing; the dead hires still get a bare `.revive <name>` each, so the party is not left dead.
-func TestRaidWalkWipeEndFastSkipsResetAndReviveAtABoss(t *testing.T) {
-	f := newFixture(t)
-	f.opts.wipeResume = 0
-	f.opts.wipeEndFast = true
-	f.agent.startReply = startAt("onyxias_lair", 20) // step 21 is the boss row
-	retirePack0Patrol(f)
-	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
-	f.allDeadFromHires()
-	if code := f.run(context.Background()); code != exitRaidWalkIncident {
-		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
-	}
-	gm := f.agent.gmLines()
-	for _, line := range gm {
-		if strings.HasPrefix(line, ".gm visible off") || strings.HasPrefix(line, ".summon ") {
-			t.Fatalf("a wipe the next launch discards still ran the revive recipe in this copy: %q", gm)
-		}
-	}
-	hires := map[string]bool{}
-	for _, n := range f.agent.party {
-		hires[n] = true
-	}
-	revived := map[string]bool{}
-	for _, line := range gm {
-		if !strings.HasPrefix(line, ".revive ") {
-			continue
-		}
-		name := strings.TrimPrefix(line, ".revive ")
-		if !hires[name] {
-			t.Fatalf("a fast revive named %q, not a hire: %q", name, gm)
-		}
-		revived[name] = true
-	}
-	if len(revived) != len(f.agent.party) {
-		t.Fatalf("%d of the %d dead hires were revived, want all: %q", len(revived), len(f.agent.party), gm)
-	}
-	if n := countPrefix(gm, ".bot run stop"); n != 1 {
-		t.Fatalf("%d run stops, want exactly 1", n)
-	}
-	sum := f.summary()
-	if sum.WipeResumes != 0 || sum.EndReason != "wipe at step 20" {
-		t.Fatalf("wipe_resumes %d end %q, want 0 and the wipe ending", sum.WipeResumes, sum.EndReason)
-	}
-	if !hasNote(sum, "--wipe-end fast") || !hasNote(sum, "the dead hires get a bare revive") {
-		t.Fatalf("notes %q do not say the copy was discarded and the dead hires revived", sum.Notes)
-	}
-}
-
-// Codex round 2 MEDIUM: the fast wipe revive stopped at the first failed line, leaving the rest of the party dead in
-// the copy (and for the party view of the next launch). Every dead hire now gets its line, a failed one is retried
-// once inside the window, and the ones still dead are named in one `wipe-end: revive incomplete` note.
-func TestReviveDeadHiresKeepsGoingPastAFailure(t *testing.T) {
-	newWalk := func(t *testing.T, a *walkFakeAgent) *walk {
-		now := a.clock.now()
-		return &walk{
-			plan:  &dungeon.Plan{Map: 309},
-			env:   walkEnv{now: a.clock.now, sleep: a.clock.sleep},
-			agent: a,
-			mt:    "Tank",
-			ots:   []string{"Healer"},
-			hires: map[string]bool{"Tank": true, "Healer": true},
-			botAt: map[string]botPos{
-				"Tank":   {dead: true, at: now},
-				"Healer": {dead: true, at: now},
-			},
-		}
-	}
-	t.Run("the failed hire is named and the next is still revived", func(t *testing.T) {
-		a := newFakeAgent(t, newFakeClock())
-		a.gmFail = func(line string) error {
-			if line == ".revive Tank" {
-				return errors.New("revive refused")
-			}
-			return nil
-		}
-		w := newWalk(t, a)
-		w.reviveDeadHires(context.Background())
-		gm := a.gmLines()
-		if n := countPrefix(gm, ".revive Tank"); n != 2 {
-			t.Fatalf("%d Tank revive lines, want the line and its one retry: %q", n, gm)
-		}
-		if n := countPrefix(gm, ".revive Healer"); n != 1 {
-			t.Fatalf("%d Healer revive lines, want 1: a failed hire must not stop the loop: %q", n, gm)
-		}
-		notes := strings.Join(w.notesCopy(), "\n")
-		if !strings.Contains(notes, "wipe-end: revive incomplete Tank") {
-			t.Fatalf("notes %q do not name the hire left dead", notes)
-		}
-		if strings.Contains(notes, "incomplete Tank, Healer") {
-			t.Fatalf("notes %q name the revived hire as incomplete", notes)
-		}
-	})
-	t.Run("a retry that succeeds leaves nothing incomplete", func(t *testing.T) {
-		a := newFakeAgent(t, newFakeClock())
-		failed := false
-		a.gmFail = func(line string) error {
-			if line == ".revive Tank" && !failed {
-				failed = true
-				return errors.New("revive refused")
-			}
-			return nil
-		}
-		w := newWalk(t, a)
-		w.reviveDeadHires(context.Background())
-		if n := countPrefix(a.gmLines(), ".revive Tank"); n != 2 {
-			t.Fatalf("%d Tank revive lines, want the line and its retry", n)
-		}
-		if notes := strings.Join(w.notesCopy(), "\n"); strings.Contains(notes, "revive incomplete") {
-			t.Fatalf("notes %q call a retried revive incomplete", notes)
-		}
-	})
-}
-
-// The same flag, but the wipe is away from the boss: the autopilot re-places this copy (--reuse-instance), so the
-// reset wait and the revive stay.
-func TestRaidWalkWipeEndFastKeepsTheReviveAwayFromABoss(t *testing.T) {
-	f := newFixture(t)
-	f.opts.wipeResume = 0
-	f.opts.wipeEndFast = true
-	f.agent.startReply = startAt("onyxias_lair", 13)
-	retirePack0Patrol(f)
-	f.agent.unitsFn = func(n int) []objects.Unit { return []objects.Unit{} }
-	f.allDeadFromHires()
-	if code := f.run(context.Background()); code != exitRaidWalkIncident {
-		t.Fatalf("exit %d, want 19: %s\n%s", code, f.stderr.String(), f.stdout.String())
-	}
-	gm := f.agent.gmLines()
-	var summons, revives int
-	for _, line := range gm {
-		if strings.HasPrefix(line, ".summon ") {
-			summons++
-		}
-		if strings.HasPrefix(line, ".revive ") {
-			revives++
-		}
-	}
-	if summons == 0 || revives == 0 {
-		t.Fatalf("a wipe away from the boss lost its revive: %q", gm)
-	}
-	if hasNote(f.summary(), "no reset wait and no revive") {
-		t.Fatalf("notes %q claim the copy was discarded", f.summary().Notes)
-	}
-}
-
-// A --wipe-end value other than "fast" is a usage refusal: the flag changes what a wipe does, so a typo must not fall
-// back to the reset-and-revive path silently.
-func TestParseWipeEndRefusesOtherValues(t *testing.T) {
-	if _, code := parseRaidWalkArgs([]string{"--wipe-end", "slow", "onyxias_lair"}, io.Discard); code != exitUsage {
-		t.Fatalf("--wipe-end slow: exit %d, want %d", code, exitUsage)
-	}
-	o, code := parseRaidWalkArgs([]string{"--wipe-end", "fast", "onyxias_lair"}, io.Discard)
-	if code != exitOK || !o.wipeEndFast {
-		t.Fatalf("--wipe-end fast: exit %d wipeEndFast %v", code, o.wipeEndFast)
 	}
 }
 
@@ -5706,8 +5538,7 @@ func TestRaidWalkEnterGivesUpOnAHireBusyTooLong(t *testing.T) {
 }
 
 // Walk 12: the walk bound the raid while the last hires were still on their join summon, and the server removed
-// every hire that joined after the bind. The refit (and the bind after it) waits, up to hireSettleWait, for every
-// hire to join (waitHiresJoined).
+// every hire that joined after the bind. The refit (and the bind after it) waits hireSettleWait after the last hire.
 
 // Walk 12 s4: the rest batch's first reply is partial (dps short by 8); the retry hires them and the walk
 // exits 0 with the full roster. The retry asks for exactly the shortfall ("8d").
@@ -6025,12 +5856,8 @@ func TestParseHireReplyWalk12(t *testing.T) {
 	}
 }
 
-// The settle is a poll of the group, not a fixed sleep: the refit waits for the last hire's join and carries on as
-// soon as every hire is in it. Walk 12's last join landed 4-8 s after the hire answer; a hire that joins at 15 s is
-// still waited for, up to the --hire-settle ceiling.
-func TestRaidWalkHireSettleWaitsForALateJoin(t *testing.T) {
+func TestRaidWalkWaitsForHiresToSettle(t *testing.T) {
 	f := newFixture(t)
-	f.agent.partyJoinAt = 15 * time.Second
 	f.defaultRun("onyxias_lair")
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s", code, f.stderr.String())
@@ -6044,57 +5871,9 @@ func TestRaidWalkHireSettleWaitsForALateJoin(t *testing.T) {
 			gear = f.agent.gmAt[i]
 		}
 	}
-	if gear.IsZero() || gear.Sub(lastHire) < 15*time.Second {
-		t.Fatalf("the refit went out %s after the last hire, want at least the 15 s late join", gear.Sub(lastHire))
+	if gear.IsZero() || gear.Sub(lastHire) < hireSettleWait {
+		t.Fatalf("the refit went out %s after the last hire, want at least %s", gear.Sub(lastHire), hireSettleWait)
 	}
-}
-
-// waitHiresJoined ends on the group, not on the clock: every hire joined carries on at once; a last hire that joins
-// 3 s later is waited for; one that never joins is left at the ceiling, and the refit after it reports the gap.
-func TestWaitHiresJoinedPollsTheGroup(t *testing.T) {
-	t.Run("every hire joined", func(t *testing.T) {
-		clock := newFakeClock()
-		a := newFakeAgent(t, clock)
-		a.party = []string{"Tank", "Bot01"}
-		w := &walk{env: walkEnv{now: clock.now, sleep: clock.sleep}, agent: a, mt: "Tank", rest: []string{"Bot01"}}
-		start := clock.now()
-		if err := w.waitHiresJoined(context.Background(), 20*time.Second); err != nil {
-			t.Fatal(err)
-		}
-		if got := clock.now().Sub(start); got != 0 {
-			t.Fatalf("a complete group took %s, want none", got)
-		}
-	})
-	t.Run("a late hire is waited for", func(t *testing.T) {
-		clock := newFakeClock()
-		a := newFakeAgent(t, clock)
-		a.party = []string{"Tank", "Bot01"}
-		a.lastHireAt = clock.now()
-		a.partyJoinAt = 3 * time.Second
-		w := &walk{env: walkEnv{now: clock.now, sleep: clock.sleep}, agent: a, mt: "Tank", rest: []string{"Bot01"}}
-		start := clock.now()
-		if err := w.waitHiresJoined(context.Background(), 20*time.Second); err != nil {
-			t.Fatal(err)
-		}
-		if got := clock.now().Sub(start); got != 3*time.Second {
-			t.Fatalf("a hire joining at 3 s was waited for %s, want 3 s", got)
-		}
-	})
-	t.Run("a hire that never joins ends at the ceiling", func(t *testing.T) {
-		clock := newFakeClock()
-		a := newFakeAgent(t, clock)
-		a.party = []string{"Tank", "Bot01"}
-		a.lastHireAt = clock.now()
-		a.partyJoinAt = time.Minute
-		w := &walk{env: walkEnv{now: clock.now, sleep: clock.sleep}, agent: a, mt: "Tank", rest: []string{"Bot01"}}
-		start := clock.now()
-		if err := w.waitHiresJoined(context.Background(), 20*time.Second); err != nil {
-			t.Fatal(err)
-		}
-		if got := clock.now().Sub(start); got != 20*time.Second {
-			t.Fatalf("a hire that never joins took %s, want the 20 s ceiling", got)
-		}
-	})
 }
 
 // TestRaidWalkHireSettleFlag (TortoiseBots#1367 proof): --hire-settle 0 sends the refit straight after the last

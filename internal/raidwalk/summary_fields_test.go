@@ -8,7 +8,7 @@ import (
 )
 
 // TestSummaryHireSettleAbsentIsNotZero: a summary written before hire_settle_s existed decodes the field as nil
-// (absent), never as 0; a run that writes the field keeps 0 for --hire-settle 0 and the seconds of the wait otherwise.
+// (absent), never as 0; a run that writes the field keeps 0 for --hire-settle 0 and 20 for the default.
 func TestSummaryHireSettleAbsentIsNotZero(t *testing.T) {
 	var old Summary
 	if err := json.Unmarshal([]byte(`{"roster":{"tier":3,"settle_short":false}}`), &old); err != nil {

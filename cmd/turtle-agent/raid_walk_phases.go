@@ -575,9 +575,9 @@ func (w *walk) phaseHire(ctx context.Context) error {
 	if w.opts.hireSettle == 0 {
 		w.logLine(w.env.now(), "no wait for the hires' join summons (--hire-settle 0)")
 	} else {
-		w.logLine(w.env.now(), fmt.Sprintf("waiting up to %s for the last hires' join summons", durWords(w.opts.hireSettle)))
-		if err := w.waitHiresJoined(ctx, w.opts.hireSettle); err != nil {
-			return err
+		w.logLine(w.env.now(), fmt.Sprintf("waiting %s for the last hires' join summons", durWords(w.opts.hireSettle)))
+		if err := w.env.sleep(ctx, w.opts.hireSettle); err != nil {
+			return stopf(exitRaidWalkFailed, "interrupted")
 		}
 	}
 	// The refit at the walk's tier (amendment G1): the hire wears the raid's minimum kit, and a comparison run its
@@ -600,60 +600,12 @@ func (w *walk) phaseHire(ctx context.Context) error {
 	return nil
 }
 
-// hireSettleWait is the default of --hire-settle: the CEILING of the wait after the last hire batch for the hires'
-// joins, before the refit and the bind. The wait is a poll of the group (waitHiresJoined), so it ends as soon as every
-// hired bot is listed in the group as online; a big hire answers while its bots are still joining (about one a
-// second), and a hire whose join lands after the bind is removed from the group by the server. Walk 12 (ZG, 17-bot
-// batches): the last join came 4-8 s after the answer; 20 s is the old flat wait and still covers a 15 s late join.
-// 0 skips the wait, which is how a walk proves TortoiseBots#1367's bind keeps its late joiners.
+// hireSettleWait follows the last hire batch before the refit and the bind. A big hire answers while its bots are
+// still on their join summon (about one a second), and a hire whose join lands after the bind is removed from the
+// group by the server. Walk 12 (ZG, 17-bot batches): the last join came 4-8 s after the answer. The party list is
+// no help: it names a hire before its join, and its zone there stays stale after it. This is the default of
+// --hire-settle; 0 skips the wait, which is how a walk proves TortoiseBots#1367's bind keeps its late joiners.
 const hireSettleWait = 20 * time.Second
-
-// hireSettlePoll is how often the settle poll reads the group.
-const hireSettlePoll = time.Second
-
-// waitHiresJoined waits until every hired bot has joined the group (in the group list and online), up to the ceiling
-// limit, and carries on at once once they all have. A read that fails is retried until the ceiling: this is a race
-// against the server's joins, not a failure of its own, and the refit after it reports what is still missing.
-func (w *walk) waitHiresJoined(ctx context.Context, limit time.Duration) error {
-	due := w.env.now().Add(limit)
-	for {
-		if w.hiresJoined(ctx) {
-			return nil
-		}
-		left := due.Sub(w.env.now())
-		if left <= 0 {
-			return nil
-		}
-		if left > hireSettlePoll {
-			left = hireSettlePoll
-		}
-		if err := w.env.sleep(ctx, left); err != nil {
-			return stopf(exitRaidWalkFailed, "interrupted")
-		}
-	}
-}
-
-// hiresJoined says every hire the walk hired is in the group list and online: the group list names a hire before its
-// join lands (walk 12), so its names alone are no proof; the member's ONLINE flag is the group's own state of it. A
-// failed read is not joined.
-func (w *walk) hiresJoined(ctx context.Context) bool {
-	p, err := w.party(ctx)
-	if err != nil {
-		return false
-	}
-	online := make(map[string]bool, len(p.Members))
-	for _, m := range p.Members {
-		if m.Online {
-			online[m.Name] = true
-		}
-	}
-	for _, name := range w.hireList() {
-		if !online[name] {
-			return false
-		}
-	}
-	return true
-}
 
 // hireReply is one TBM:HIRE_RAID line read field by field (TortoiseBots commands/Hire.cpp:124):
 // TBM:HIRE_RAID|<ok|partial|refused>|<hired>|<planned>|<tank>|<healer>|<dps>|<tier>|<feeCopper>|<reason>.
@@ -2979,14 +2931,6 @@ func (w *walk) bossEngagedNow() bool {
 }
 
 // endWipe is the walk-4 recipe's ending: stop, wait for a reset, revive only when quiet, exit 19.
-//
-// --wipe-end fast (the autopilot passes it for a goal that relaunches fresh after a boss wipe: --gm-instance-data or
-// --boss-wipe-fresh) skips the reset wait and the revive recipe when the wipe is at a boss row (or the row before it,
-// the same PlaceStepAtBoss rule the autopilot uses for its fresh-instance decision): that copy is thrown away, so both
-// waits were spent on the instance the next launch replaces (walk 74: reset wait 49 s + revive 34 s median = 83 s per
-// wipe). The dead hires still get a bare `.revive <name>` each before the exit: skipping the recipe must not leave the
-// party dead in the log and in the next launch's party view. A wipe anywhere else keeps the recipe, because the
-// autopilot re-places that copy (--reuse-instance).
 func (w *walk) endWipe(ctx context.Context, step int) error {
 	_ = w.stopRun(context.Background(), "")
 	w.note("wipe at step %d", step)
@@ -2994,59 +2938,10 @@ func (w *walk) endWipe(ctx context.Context, step int) error {
 		w.saveCommanders("wipe")
 		w.saveFights()
 	}
-	if w.opts.wipeEndFast && raidwalk.PlaceStepAtBoss(w.rows, step) {
-		w.note("wipe: --wipe-end fast: the autopilot takes a fresh instance next, so no reset wait and no revive recipe in this copy; the dead hires get a bare revive")
-		w.reviveDeadHires(ctx)
-		return stopf(exitRaidWalkIncident, "wipe at step %d", step)
-	}
 	if err := w.waitReset(ctx, w.opts.resetWait); err != nil {
 		return err
 	}
 	return w.revive(ctx, step)
-}
-
-// reviveFastWait is the --wipe-end fast path's bare revive window: the dead hires' `.revive` lines go out about
-// reviveFastGap apart and the rest of the window covers the server's revive.
-const reviveFastWait = 3 * time.Second
-
-// reviveFastGap is the pause after one hire's revive line (and before a failed hire's one retry).
-const reviveFastGap = 100 * time.Millisecond
-
-// reviveDeadHires is the --wipe-end fast path's last act before the exit: a bare `.revive <name>` for every hire the
-// frames still show dead (fresh within 10 s, the same view the revive recipe judges), with none of that recipe's go,
-// quiet check or summons: the copy is discarded. About reviveFastWait in all, whatever the dead count. The dead list
-// is read freshly right before the loop; every dead hire gets its line even when an earlier one fails, and a failed
-// line is retried once while the window has time left (Codex round 2: the old loop stopped at the first failure and
-// left the rest of the party dead). A hire still dead at the end is named in one `wipe-end: revive incomplete` note:
-// the next attempt's placeDead check finds it again, so this note only records the copy that was thrown away.
-func (w *walk) reviveDeadHires(ctx context.Context) {
-	due := w.env.now().Add(reviveFastWait)
-	dead := w.placeDead(w.env.now())
-	var incomplete []string
-	for _, name := range dead {
-		err := w.gm(ctx, ".revive "+name)
-		if err != nil && ctx.Err() == nil && w.env.now().Before(due) {
-			if serr := w.env.sleep(ctx, reviveFastGap); serr != nil {
-				return
-			}
-			err = w.gm(ctx, ".revive "+name)
-		}
-		if err != nil {
-			w.note("wipe: fast revive of %s: %v", name, err)
-			incomplete = append(incomplete, name)
-		}
-		if serr := w.env.sleep(ctx, reviveFastGap); serr != nil {
-			return
-		}
-	}
-	if len(incomplete) > 0 {
-		w.note("wipe-end: revive incomplete %s", strings.Join(incomplete, ", "))
-	}
-	if left := due.Sub(w.env.now()); left > 0 {
-		if err := w.env.sleep(ctx, left); err != nil {
-			return
-		}
-	}
 }
 
 // bossPhase is what the frames say about an engaged boss.
