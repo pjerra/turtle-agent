@@ -939,6 +939,11 @@ type walk struct {
 	resetSince    time.Time
 	afterN        uint64
 	eventsAt      uint64
+	// viewFrame is the newest perception frame the walk read and viewAt when it read it: the practice's boss check
+	// reads the exact frame a poll fetched, so a tracker row the same poll stamped before its slow event wait cannot
+	// call a boss the frame shows gone.
+	viewFrame *tbm.ViewFrame
+	viewAt    time.Time
 
 	bossSet map[uint32]bool
 	// bossRule decides which frame rows are boss evidence (raidwalk.BossRows: a `first`-only entry counts within

@@ -1376,6 +1376,7 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 	}
 	if n, frame, err := w.view(ctx, w.afterN, 2000); err == nil && frame != nil {
 		w.afterN = n
+		w.viewFrame, w.viewAt = frame, w.env.now()
 		w.trackFrame(now, frame)
 		w.tracker.Frame(now, *frame)
 		w.pullFramed(now, frame)
@@ -1947,6 +1948,14 @@ func bossRowEngaged(hppct int, target uint64) bool {
 
 // trackFrame keeps the per-bot and per-hostile state the enter, reset and wipe rules read.
 func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
+	// A frame's rows describe the world when the feed completed it (f.At), which can be seconds after the poll began:
+	// the poll reads the event page first, and that wait is not part of the frame's age. The practice's boss check
+	// reads the stamp as "when this unit was last seen", so it must not inflate it with the poll's own wait
+	// (zgP-hk5p-1-1: three 5 s polls read a boss every frame held at 94-99 % as gone).
+	at := now
+	if !f.At.IsZero() {
+		at = f.At
+	}
 	for _, p := range f.Party {
 		if p.GUID != 0 {
 			w.partyG[uint64(p.GUID)] = true
@@ -1954,7 +1963,7 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 		if p.Name == "" {
 			continue
 		}
-		w.botAt[p.Name] = botPos{guid: p.GUID, x: p.X, y: p.Y, z: p.Z, inCombat: p.InCombat(), mapID: p.Map, dead: p.Dead || p.State == "d", at: now}
+		w.botAt[p.Name] = botPos{guid: p.GUID, x: p.X, y: p.Y, z: p.Z, inCombat: p.InCombat(), mapID: p.Map, dead: p.Dead || p.State == "d", at: at}
 	}
 	for _, h := range f.Hostiles {
 		if h.GUID != 0 {
@@ -1964,7 +1973,7 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 				first = prev.first
 			}
 			w.hostiles[h.GUID.String()] = hostileState{entry: h.Entry, x: h.X, y: h.Y, z: h.Z, first: first, kind: h.Kind, reaction: h.Reaction, flags: h.Flags,
-				hppct: h.HPPct, target: uint64(h.Target), at: now}
+				hppct: h.HPPct, target: uint64(h.Target), at: at}
 		}
 		if w.bossRule.Counts(h.Entry, h.X, h.Y) {
 			w.bossSeenAt = now

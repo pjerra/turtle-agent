@@ -14,8 +14,10 @@
 //     detect=timer, but keeps reading events so a late cast is still detected.
 //  3. A cycle row is written EvalAfterS after the cast to <out>/practice.jsonl, then the sustain acts: every dead
 //     hire is revived and a boss under the floor is restored to its own max. The floor is also checked on every poll,
-//     not only at the cycle rows; a stale (> 3 s) or 0 sample is skipped, and a client that cannot find the unit for
-//     3 polls in a row ends the attempt instead of failing the walk.
+//     not only at the cycle rows, on the newest reading across every source (the tracked frames, the newest frame's
+//     hostile rows and bot targets, the commander's own client). A source reading the bound boss dead ends the
+//     practice with its kill ending; the attempt ends with "the boss is gone" only when no source has shown it for
+//     practiceBossGoneGrace: one slow poll, one missing source or one unresolved GM hand is not a despawn.
 //  4. Attempt end: CyclesPerAttempt cycles, BerserkS-60 s of attempt, every hire dead, or the boss dying (which ends
 //     the whole practice, without a respawn and without crediting a kill).
 //  5. Reset: pause the run with the commander's `run pause` (never `.bot run stop`: a stop ends the run and erases
@@ -68,10 +70,12 @@ const practiceSampleFresh = 3 * time.Second
 // when the boss engages, which is a few seconds before the bind (and the dashboard's record may round earlier).
 const practiceFightIDBack = 15 * time.Second
 
-// practiceHPMisses is how many consecutive polls the client may fail to show the bound boss before the attempt ends:
-// one missing sample is a frame gap, a run of them is the boss gone (a despawn, another instance). An absent or stale
-// sample and an unresolved gm_set_hp both count; any valid fresh sample clears the streak.
-const practiceHPMisses = 3
+// practiceBossGoneGrace is how long the bound boss must be absent from EVERY source the walk has before the attempt
+// ends with "the boss is gone": the frames the walk tracks (every bot's view), the newest frame's hostile rows and
+// bot targets, and the commander's own client. One slow poll (the event wait can run to 5 s before the frame is even
+// fetched) or one source dropping the unit is not a despawn. zgP-hk5p-1-1 ended a practice 23 s in on three such
+// polls while every frame in the same window held the boss at 94-99 %.
+const practiceBossGoneGrace = 30 * time.Second
 
 // practiceReengageWait is how long an attempt that follows a reset waits for the pulled boss to fight again (below
 // 100 %, a party target, or the walk's IncidentBossEngaged) before its clock starts. No re-engagement in the wait is
@@ -117,10 +121,9 @@ type practiceState struct {
 	// lastResetOK is the reset's own verdict (the boss showed home, 100 % and no target): only a reset that landed
 	// plus a pull that fights again clears the failed-reset streak.
 	lastResetOK bool
-	// hpMisses counts the consecutive polls that did not show the bound boss (an absent or stale sample, or a
-	// gm_set_hp the client could not resolve); a valid fresh sample clears it. The attempt ends after
-	// practiceHPMisses of them.
-	hpMisses int
+	// bossSeenAt is when the newest source last showed the bound boss (alive or dead): the attempt ends only when
+	// every source has missed it for practiceBossGoneGrace. It starts at the attempt's own clock.
+	bossSeenAt time.Time
 	// pending holds the tail of an events page the attempt did not consume (it stops at the first counted cast): the
 	// next read serves them before it asks for a new page, so no cast of the page is lost.
 	pending []events.Event
@@ -199,6 +202,7 @@ func (w *walk) runPractice(ctx context.Context, entry uint32, step int) error {
 	}
 	p.bossGUID, p.bossMax = guid, max
 	p.startedAt = w.env.now()
+	p.bossSeenAt = p.startedAt
 	deadline := p.startedAt.Add(w.opts.practiceMax)
 	w.logLine(p.startedAt, fmt.Sprintf("practice: %s (%d) guid %s, %d cycles wanted, max %s", mech.Name, mech.Entry, guid, w.opts.practiceCycles, durWords(w.opts.practiceMax)))
 	w.note("practice: %s (%d): %d cycles wanted over at most %d attempts, %s of wall time; sustain %s", mech.Name, mech.Entry,
@@ -274,7 +278,7 @@ func (w *walk) runPractice(ctx context.Context, entry uint32, step int) error {
 		return nil
 	}
 	if p.ended == "the boss is gone" {
-		// The bound boss left the client's frames for practiceHPMisses polls in a row: no attempt can go on.
+		// Every source missed the bound boss for practiceBossGoneGrace, or one read it dead: no attempt can go on.
 		return stopf(exitRaidWalkFailed, "practice: the boss is gone")
 	}
 	// The abnormal ends reuse the phase-failure code: the practice did not collect what it was asked to, and the
@@ -344,7 +348,7 @@ func (w *walk) practiceAttempt(ctx context.Context, p *practiceState, bossStep i
 	started := w.env.now()
 	cyclesAtStart := p.cycles
 	p.cycleInAttempt = 0
-	p.hpMisses = 0
+	p.bossSeenAt = started
 	p.deadAtLast = w.practiceDeadSet()
 	seenEvent := false
 	useTimer := p.mech.IsWindow()
@@ -528,59 +532,120 @@ func (w *walk) practiceCastCounted(p *practiceState, cast time.Time) bool {
 	return cast.Sub(p.lastCast) < half && cast.After(p.lastCast.Add(-half))
 }
 
-// practiceBossSample is the bound boss's health percent in the newest frame and whether that frame is fresh (within
-// practiceSampleFresh): a stale or absent frame says nothing about the boss now, and a 0 there is no reading at all.
-func (w *walk) practiceBossSample(p *practiceState) (int, bool) {
-	if p == nil || p.bossGUID == 0 {
-		return 0, false
+// practiceHostileRow finds one guid's row in the tracked hostiles. The frames key the map by GUID.String()
+// ("0x%016X", a creature's 0xF130/0xF140 high part included); a key written in another case is the same unit, so the
+// lookup falls back to a case-insensitive compare instead of reading it as absent.
+func practiceHostileRow(m map[string]hostileState, g packet.GUID) (hostileState, bool) {
+	key := g.String()
+	if h, ok := m[key]; ok {
+		return h, true
 	}
-	h, ok := w.hostiles[p.bossGUID.String()]
-	if !ok {
-		return 0, false
+	for k, h := range m {
+		if strings.EqualFold(k, key) {
+			return h, true
+		}
 	}
-	return h.hppct, w.env.now().Sub(h.at) <= practiceSampleFresh
+	return hostileState{}, false
 }
 
-// practiceSustainBoss restores the bound boss to its own max whenever a poll shows it under the floor: the cycle rows
-// do the same, but a boss that dips between rows must be restored before the next mechanic too. Every poll is
-// classified for the bound boss, and exactly one of the three readings counts:
-//   - an absent or stale sample (or an empty one) is a miss: the frames say nothing about the boss now;
-//   - a gm_set_hp the client cannot resolve (ErrUnitNotInView) is a miss: the unit is not in the client's view;
-//   - any valid fresh sample, restored or not, clears the streak.
+// practiceBossSight is the bound boss's newest reading across every source the walk already has:
 //
-// Only practiceHPMisses misses in a row end the attempt (done true, p.ended "the boss is gone"): one is a frame gap,
-// a run of them is the boss gone (a despawn, another instance). A poll that is not a miss never leaves the streak
-// standing, so two misses with a reading between them are not consecutive.
+//   - the tracked frames (w.hostiles): the bots' views as the module aggregates them, keyed by the frame guid. The map
+//     is never pruned, so a row's at is when it was last seen, and an old row is not a sighting now;
+//   - the newest frame itself (w.viewFrame) at w.viewAt or its own At: its hostile rows and every bot's target. The
+//     tracker can lag the very poll that read the frame (the poll reads events first), so the frame is its own
+//     evidence, not only the map it fed;
+//   - the commander's own client (units, hostiles only), read now: the commander sees the boss even when a frame
+//     drops it.
+//
+// hp is the newest source's health percent, -1 when that source names the unit without a reading (a bot's target);
+// at is when that source saw it; ok is false when no source names the guid at all. A sight of hp 0 is a dead reading.
+func (w *walk) practiceBossSight(ctx context.Context, p *practiceState) (hp int, at time.Time, ok bool) {
+	if p == nil || p.bossGUID == 0 {
+		return 0, time.Time{}, false
+	}
+	consider := func(h int, t time.Time) {
+		if !ok || t.After(at) {
+			hp, at, ok = h, t, true
+		}
+	}
+	if h, found := practiceHostileRow(w.hostiles, p.bossGUID); found {
+		consider(h.hppct, h.at)
+	}
+	if fr := w.viewFrame; fr != nil {
+		frameAt := w.viewAt
+		if !fr.At.IsZero() {
+			frameAt = fr.At
+		}
+		for _, h := range fr.Hostiles {
+			if h.GUID == p.bossGUID { // parsed guids: the frame's case and 0xF130 high part compare exactly
+				consider(h.HPPct, frameAt)
+			}
+		}
+		for _, b := range fr.Party {
+			if b.Target == p.bossGUID {
+				consider(-1, frameAt)
+			}
+		}
+	}
+	if us, err := w.unitsAt(ctx, 0); err == nil {
+		for _, u := range us {
+			if u.GUID != p.bossGUID {
+				continue
+			}
+			h := -1 // listed without a health pool: present, but no reading to restore on
+			if u.MaxHealth > 0 {
+				h = 0
+				if !u.Dead {
+					h = int(uint64(u.Health) * 100 / uint64(u.MaxHealth))
+				}
+			}
+			consider(h, w.env.now())
+		}
+	}
+	return hp, at, ok
+}
+
+// practiceSustainBoss keeps the bound boss alive between cycle rows and decides when it is really gone: a fresh
+// reading under the floor is restored to the boss's own max; the attempt ends only when a source reads the boss dead
+// (hp 0, the practice's kill ending) or NO source has shown it for practiceBossGoneGrace. One poll without a fresh
+// sample, one slow poll and one source dropping the unit are frame gaps, never a despawn: a gm_set_hp the client cannot
+// resolve is noted and the poll goes on (the frames still show the boss), it does not count toward gone.
 func (w *walk) practiceSustainBoss(ctx context.Context, p *practiceState) (bool, error) {
-	if !w.opts.practiceSustain || p.bossGUID == 0 || p.bossMax == 0 {
+	if !w.opts.practiceSustain || p == nil || p.bossGUID == 0 || p.bossMax == 0 {
 		return false, nil
 	}
-	hp, fresh := w.practiceBossSample(p)
-	if !fresh || hp <= 0 {
-		return w.practiceBossMiss(p, "the client's frames do not show the boss")
+	now := w.env.now()
+	if p.bossSeenAt.IsZero() {
+		p.bossSeenAt = now
 	}
-	if hp < w.opts.practiceBossFloor {
+	hp, at, seen := w.practiceBossSight(ctx, p)
+	if seen && at.After(p.bossSeenAt) {
+		p.bossSeenAt = at
+	}
+	if seen && hp == 0 && now.Sub(at) <= practiceBossGoneGrace {
+		// A source reads the bound boss dead: the practice's own kill ending (practiceBossDead's), never "gone": no
+		// respawn, no kill credit, exit 0, and the summary says the boss died.
+		p.ended = "boss killed during practice"
+		w.note("practice: the bound boss reads dead in a source: ending the practice")
+		return true, nil
+	}
+	if seen && hp > 0 && hp < w.opts.practiceBossFloor && now.Sub(at) <= practiceSampleFresh {
 		if err := w.practiceGMSetHP(ctx, p.bossGUID); err != nil {
 			if !errors.Is(err, session.ErrUnitNotInView) {
 				return false, err
 			}
-			return w.practiceBossMiss(p, fmt.Sprintf("the client does not hold the boss for the hp restore (%v)", err))
+			w.note("practice: the client does not hold the boss for the hp restore (%v): the frames still show it, so it is not gone", err)
+		} else {
+			w.logLine(now, fmt.Sprintf("practice: boss at %d%% between rows: restored to its max %d", hp, p.bossMax))
 		}
-		w.logLine(w.env.now(), fmt.Sprintf("practice: boss at %d%% between rows: restored to its max %d", hp, p.bossMax))
 	}
-	p.hpMisses = 0
-	return false, nil
-}
-
-// practiceBossMiss counts one poll without the bound boss and ends the attempt at practiceHPMisses in a row.
-func (w *walk) practiceBossMiss(p *practiceState, why string) (bool, error) {
-	p.hpMisses++
-	w.note("practice: %s: miss %d of %d", why, p.hpMisses, practiceHPMisses)
-	if p.hpMisses < practiceHPMisses {
+	if now.Sub(p.bossSeenAt) < practiceBossGoneGrace {
 		return false, nil
 	}
 	p.ended = "the boss is gone"
-	w.note("practice: the boss is gone: %d polls in a row did not show it: ending the attempt", p.hpMisses)
+	w.note("practice: the boss is gone: every source missed it for %s (last reading %s): ending the attempt",
+		durWords(practiceBossGoneGrace), durWords(now.Sub(p.bossSeenAt)))
 	return true, nil
 }
 
@@ -643,7 +708,7 @@ func (w *walk) practiceCycleRow(ctx context.Context, p *practiceState, cast time
 			}
 			p.revived = append(p.revived, name)
 		}
-		if hp, fresh := w.practiceBossSample(p); p.bossGUID != 0 && p.bossMax > 0 && fresh && hp > 0 && hp < w.opts.practiceBossFloor {
+		if hp, at, ok := w.practiceBossSight(ctx, p); p.bossGUID != 0 && p.bossMax > 0 && ok && hp > 0 && hp < w.opts.practiceBossFloor && now.Sub(at) <= practiceSampleFresh {
 			if err := w.practiceGMSetHP(ctx, p.bossGUID); err != nil {
 				return err
 			}
