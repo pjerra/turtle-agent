@@ -58,6 +58,8 @@ Usage: `turtle-agent raid-walk <plan> [--server <server>] [--slot N] ...` or `tu
 | `--revive-at-raid` | on | Revive the raid at the revive point: summon hires more than 100 yd away to it, and wait up to 60s for every hire to gather. `false` is the old revive in place. | `--revive-at-raid=false` |
 | `--patrols` | none | A tb-patrols file for the revive quiet check. | `--patrols <file>` |
 
+A recovery restart takes `--from leg <leg>`, not `--from step N` inside a pull corridor. The placement clears the corridor around the start row, and a cut row (an "approach path" row the exporter made, not a pull stand) stands inside the aggro of the pack its own leg pulls next, so a hire that lands there is attacked and the pool never lands: ZG route LR2 run `lr2-c-1` asked for `--from step 556`, the placement put the raid at row 552 (the nearest quiet move row), a hire stood at -11905.8 -1527.6 27.2 and the run had two fights at step 0 (31 s, one death to a Gurubashi Berserker; 98 s, 20 deaths to a Gurubashi Axe Thrower) and ended `not at the start: ... (dead: <all 19>)`. `--from leg` stages at the leg's own start, 30 yd clear of every creature row the leg pulls later.
+
 ## Hires and tier
 
 | Flag | Default | What it does | Example |
