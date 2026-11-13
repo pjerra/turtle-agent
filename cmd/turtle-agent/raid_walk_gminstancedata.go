@@ -456,6 +456,9 @@ func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus, 
 			w.gmInstanceDataBossSent = map[int]bool{}
 		}
 		w.gmInstanceDataBossSent[bossStep] = true
+		if !resend {
+			w.note("gm-instance-data: no out-of-combat rest before boss row %d; resend skipped", bossStep)
+		}
 		if len(pending) == 0 && resend {
 			pending = w.gmInstanceDataBossResend(inst, st)
 		}
@@ -487,9 +490,9 @@ func (w *walk) gmInstanceDataSendPending(ctx context.Context, st tbm.RunStatus, 
 	return true, nil
 }
 
-// gmInstanceDataFrameFresh is how old a bot_view frame may be and still count
+// prePullFrameFresh is how old a bot_view frame may be and still count
 // for the "party is out of combat" check of the boss-row resend.
-const gmInstanceDataFrameFresh = 15 * time.Second
+const prePullFrameFresh = 15 * time.Second
 
 // gmInstanceDataBossRow decides the pre-boss resend for a status. Walk 45
 // hk7m: the launch send went out at 14:27, but a GM `.die` does not stop the
@@ -507,7 +510,8 @@ const gmInstanceDataFrameFresh = 15 * time.Second
 // counts as handled: the walk never pauses at the boss.
 //
 // It returns the boss step to mark as handled (0: nothing to do) and whether
-// the lines go out now.
+// the lines go out now (false for a boss row that became current with no
+// pre-pull rest before it: the caller warns).
 func (w *walk) gmInstanceDataBossRow(inst string, st tbm.RunStatus, later bool) (int, bool) {
 	if len(w.gmInstanceData) == 0 || inst == "" {
 		return 0, false
@@ -524,32 +528,49 @@ func (w *walk) gmInstanceDataBossRow(inst string, st tbm.RunStatus, later bool) 
 	if !legSpec {
 		return 0, false
 	}
+	step, fire := w.preBossGate(st, later)
+	if step == 0 || w.gmInstanceDataBossSent[step] {
+		return 0, false
+	}
+	return step, fire
+}
+
+// preBossGate is the pre-pull gate the boss-row instance-data resend and the --prepull-aura lists both read: it
+// returns the boss step the status stands before (0: none) and whether the status is a rest or gather of the step
+// before the boss row that passes prePullOK (the run is idle there, so a pause costs nothing).
+//
+// The boss row's own status is never a place to fire: it becomes current about 1 s before the run's FightStep can
+// pull (DungeonRunPolicy.h:5661, Commander.cpp:6886) and a pause there lands mid-pull. A boss row that becomes
+// current with no pre-pull rest comes back as (step, false) for the caller to warn about.
+func (w *walk) preBossGate(st tbm.RunStatus, later bool) (int, bool) {
+	if st.State != tbm.RunRunning && st.State != tbm.RunPaused {
+		return 0, false
+	}
 	if st.Kind == planexport.KindBoss {
-		if _, ok := w.bossRowAt(st.Step); !ok || w.gmInstanceDataBossSent[st.Step] {
+		if _, ok := w.bossRowAt(st.Step); !ok {
 			return 0, false
 		}
-		w.note("gm-instance-data: no out-of-combat rest before boss row %d; resend skipped", st.Step)
 		return st.Step, false
 	}
 	// The step before a boss row, resting or gathering out of combat.
 	next := st.Step + 1
-	if _, ok := w.bossRowAt(next); !ok || w.gmInstanceDataBossSent[next] {
+	if _, ok := w.bossRowAt(next); !ok {
 		return 0, false
 	}
 	if p := strings.ToLower(st.Phase); p != "rest" && p != "gather" {
 		return 0, false
 	}
-	if !w.gmInstanceDataPrePull(st, later, w.env.now()) {
+	if !w.prePullOK(st, later, w.env.now()) {
 		return 0, false
 	}
 	return next, true
 }
 
-// gmInstanceDataPrePull says the status is still before the pull: phase begin,
+// prePullOK says the status is still before the pull: phase begin,
 // gather, walk or rest, no pulling or fighting note, no later line of the same
 // event page showing the pull (later), and no live bot of the party in combat in
 // a recent frame.
-func (w *walk) gmInstanceDataPrePull(st tbm.RunStatus, later bool, now time.Time) bool {
+func (w *walk) prePullOK(st tbm.RunStatus, later bool, now time.Time) bool {
 	if later {
 		return false
 	}
@@ -558,27 +579,27 @@ func (w *walk) gmInstanceDataPrePull(st tbm.RunStatus, later bool, now time.Time
 	default:
 		return false
 	}
-	if gmInstanceDataPullNote(st.Note) {
+	if runPullNote(st.Note) {
 		return false
 	}
 	for _, b := range w.botAt {
-		if b.inCombat && !b.dead && now.Sub(b.at) <= gmInstanceDataFrameFresh {
+		if b.inCombat && !b.dead && now.Sub(b.at) <= prePullFrameFresh {
 			return false
 		}
 	}
 	return true
 }
 
-// gmInstanceDataPullNote says a run note names a pull or a fight.
-func gmInstanceDataPullNote(note string) bool {
+// runPullNote says a run note names a pull or a fight.
+func runPullNote(note string) bool {
 	n := strings.ToLower(note)
 	return strings.Contains(n, "pulling") || strings.Contains(n, "fighting")
 }
 
-// gmInstanceDataLaterPull says a later line of the same event page shows the
+// laterPullLine says a later line of the same event page shows the
 // pull or the fight of the same step (a pull phase or a pulling/fighting note):
 // the status being handled is older than the pull.
-func (w *walk) gmInstanceDataLaterPull(rest []events.Event, step int) bool {
+func (w *walk) laterPullLine(rest []events.Event, step int) bool {
 	for _, e := range rest {
 		line, ok := tbm.Line(e)
 		if !ok {
@@ -588,7 +609,7 @@ func (w *walk) gmInstanceDataLaterPull(rest []events.Event, step int) bool {
 		if !ok || st.Plan != w.plan.Name || st.Step != step {
 			continue
 		}
-		if strings.EqualFold(st.Phase, "pull") || gmInstanceDataPullNote(st.Note) {
+		if strings.EqualFold(st.Phase, "pull") || runPullNote(st.Note) {
 			return true
 		}
 	}
@@ -624,7 +645,7 @@ func (w *walk) gmInstanceDataBossResend(inst string, st tbm.RunStatus) []raidwal
 // gmInstanceDataMayFire is the allowlist for every send after `run start`: the
 // lines may go out ONLY at a rest or gather status that passes the pre-pull gate
 // (no pulling or fighting note, no later pull line in the page, no bot of the
-// party in combat in a frame under gmInstanceDataFrameFresh old). The launch send
+// party in combat in a frame under prePullFrameFresh old). The launch send
 // before `run start` (phases) is the only other place. At any other status a
 // pending send is deferred and never fires: walking, begin, pull, fight, hold,
 // boss rows and phases the walk does not know a pause there could land
@@ -634,7 +655,7 @@ func (w *walk) gmInstanceDataBossResend(inst string, st tbm.RunStatus) []raidwal
 func (w *walk) gmInstanceDataMayFire(st tbm.RunStatus, later bool) bool {
 	switch strings.ToLower(st.Phase) {
 	case "rest", "gather":
-		return w.gmInstanceDataPrePull(st, later, w.env.now())
+		return w.prePullOK(st, later, w.env.now())
 	}
 	return false
 }

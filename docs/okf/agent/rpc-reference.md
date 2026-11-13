@@ -87,6 +87,7 @@ Error codes: `-32700` parse, `-32600` invalid request, `-32601` method not found
 | `gm_set_hp` | `guid*` (creature). No `hp`: an explicit one is refused. | `{}`: the session reads the unit's MaxHealth from the client and sends `.modify hp <max> <max>` (a full heal to its own max, never a lower maximum). A unit the client does not hold, or one with max 0, is refused with nothing sent. |
 | `gm_respawn` | `guid*` (creature) | `{}`: `.respawn` on the selected dead unit. Refused when the client shows the unit alive (the unselected form would respawn every dead creature in range). |
 | `gm_revive` | `name*` (a character name) | `{}`: `.revive <name>`, full health. No selection. |
+| `gm_aura` | `guid*` (a player), `spell_id*` (nonzero) | `{}`: select the player by guid, wait for the server to show that selection, and send `.aura <spell_id>` only while it stands (`.aura` acts on the selected unit, and below developer level the core puts it on the sender). Refused outside the agent's test setup; a creature guid or spell id 0 is refused with nothing sent. `raid-walk --prepull-aura` is its caller. |
 | `invite` | `name*` | `{}`. |
 | `accept_invite` | `{}` | `{}`. `no pending group invite` when none. |
 | `leave_group` | `{}` | `{}`. |

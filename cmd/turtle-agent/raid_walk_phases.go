@@ -1567,9 +1567,18 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 		// would re-feed the pre-fire statuses instead, regressing
 		// lastStatus; the rerunStale filter above re-applies to the
 		// re-read lines unchanged).
-		fired, err := w.gmInstanceDataSendPending(ctx, st, w.gmInstanceDataLaterPull(evs[i+1:], st.Step))
+		later := w.laterPullLine(evs[i+1:], st.Step)
+		fired, err := w.gmInstanceDataSendPending(ctx, st, later)
 		if err != nil {
 			return nil, err
+		}
+		if !fired {
+			// --prepull-aura reads the same pre-pull gate: a fire pauses the run, puts the lists on the party and
+			// resumes it, and breaks this poll's loop like the instance-data firing.
+			fired, err = w.prepullAuraSendPending(ctx, st, later)
+			if err != nil {
+				return nil, err
+			}
 		}
 		if fired {
 			w.eventsAt = e.Seq
@@ -3017,6 +3026,9 @@ var errWipeRecovered = errors.New("wipe recovered")
 // the leg resends the lines under their own pause and resume.
 func (w *walk) wipeRecovered() error {
 	w.gmInstanceDataClear()
+	// A recovery revives the raid, and a death strips every aura: the next out-of-combat rest before a boss row puts
+	// the --prepull-aura lists back on, for a boss row whose fire already went out too.
+	w.prepullAuraClear()
 	return errWipeRecovered
 }
 

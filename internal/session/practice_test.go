@@ -168,10 +168,29 @@ func TestPracticeHandsRefusedWithoutAuthorize(t *testing.T) {
 		"GMSetHP":   h.s.GMSetHP(ctx, g),
 		"GMRespawn": h.s.GMRespawn(ctx, g),
 		"GMRevive":  h.s.GMRevive(ctx, "Bottle"),
+		"GMAura":    h.s.GMAura(ctx, packet.GUID(0x1), 22888),
 	} {
 		if !errors.Is(err, ErrGMRefused) && !errors.Is(err, ErrGMKillRefused) {
 			t.Fatalf("%s: %v, want the authorization refusal", name, err)
 		}
+	}
+	noGMOut(t, h)
+}
+
+// GMAura takes a PLAYER guid and a nonzero spell id, and sends nothing before either is checked.
+func TestGMAuraShape(t *testing.T) {
+	ctx := context.Background()
+	h := start(t, Options{AllowGMKill: true})
+	h.enterWorld()
+	creature := practiceCreature()
+	if err := h.s.GMAura(ctx, creature, 22888); err == nil || !strings.Contains(err.Error(), "not a player guid") {
+		t.Fatalf("a creature guid: %v", err)
+	}
+	if err := h.s.GMAura(ctx, packet.GUID(0x1), 0); err == nil || !strings.Contains(err.Error(), "spell id 0") {
+		t.Fatalf("spell 0: %v", err)
+	}
+	if got := GMAuraLine(17626); got != ".aura 17626" {
+		t.Fatalf("line %q", got)
 	}
 	noGMOut(t, h)
 }
