@@ -1063,3 +1063,27 @@ type logTeamFake struct {
 }
 
 func (g *logTeamFake) Emit(kind, text string, data map[string]any) { g.kinds = append(g.kinds, kind) }
+
+// The team gate is not the only pre-start refusal: a from_leg outside the plan refuses the same way (nothing sent, state "refused",
+// the reason in the report's error and note, dungeon_refused emitted once). Both early returns skipped finish and left the report
+// "idle" with running true (SFK-NEVER-STARTS).
+func TestRemoteRefusesAFromLegOutsideThePlan(t *testing.T) {
+	plan := remotePlan(Leg{Name: "a", To: Point{10, 0, 0}})
+	g := &logTeamFake{teamFake: teamFake{fakeRemote: newFakeRemote(t), team: TeamAlliance}}
+	d := NewRemoteDriver(plan, g, DefaultConfig(), opts(), g.clock())
+	err := d.Run(context.Background(), 1)
+	if err == nil || !strings.Contains(err.Error(), "from_leg 1: the plan has legs 0-0") {
+		t.Fatalf("%v", err)
+	}
+	if len(g.orders) != 0 {
+		t.Fatalf("a refused start sent orders: %v", g.orders)
+	}
+	rep, ended := d.Status()
+	if !ended || rep.Ended == nil || rep.State != "refused" || !strings.Contains(rep.Error, "from_leg 1") ||
+		!strings.Contains(notesOf(rep), "run refused: from_leg 1") {
+		t.Fatalf("ended %v, report %+v", ended, rep)
+	}
+	if len(g.kinds) != 1 || g.kinds[0] != events.KindDungeonRefused {
+		t.Fatalf("events %v", g.kinds)
+	}
+}

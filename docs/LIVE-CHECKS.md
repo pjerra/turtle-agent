@@ -135,7 +135,7 @@ Still to check live with the new driver (a free slot, a GM leader and a hired pa
 1. Hire the party at the leader, log in, `invite`/`accept_invite`, walk or `.go` into Uldaman (map 70) next to the entrance
    (-228.9, 46.1, -46) and list the setup you did by hand in `dungeon_run`'s `setup`. Start `dungeon_run {"name":"uldaman","from_leg":"keystone",
    "setup":["go entrance","levelup -15"]}`, then `{"name":"uldaman","setup":[...]}` from the start. A teleport start is `"teleport": true` (flagged).
-2. Poll `dungeon_status` and `events` (`kinds`: `dungeon_leg`, `dungeon_step`, `dungeon_failed`, `dungeon_done`); keep the capture.
+2. Poll `dungeon_status` and `events` (`kinds`: `dungeon_leg`, `dungeon_step`, `dungeon_failed`, `dungeon_done`, `dungeon_refused`); keep the capture.
 3. Pass: the run reaches and kills Ironaya from the keystone leg in one run (Keystone, Seal, Ironaya), and from the start an Alliance leader loots Baelog's Chest
    (Baelog, Eric and Olaf are friendly to it and skipped) while a Horde leader kills the three (see the last section),
    and ends with a report (`state` done or a clear `error`), per-leg seconds, deaths, wipes, `gm_shortcuts` and `setup_shortcuts`.
