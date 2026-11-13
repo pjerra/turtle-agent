@@ -35,7 +35,7 @@
     "Needs: Explosive Charges (GO_EXPLOSIVE_CHARGE) to open the north and south cave-ins (GO_CAVE_IN_NORTH/SOUTH) on the way in",
     "Needs: Grubbis (7361) has no spawn row",
     "The Back Entrance (trigger 523) puts the party deep inside; this plan starts at the front.",
-    "Leg 3's lower-deck pack (leg 3 pull group 13, the 6212/6232 trio at -738.7 659.8 -323.4 r14.7) is a planned pull again, before the route to the old step 152 (-734.65 709.46 -317.98): the 2026-11-13 proof run (dr-proof-gnomer, slot 4) fought beside it for steps 152-154 and lost the tank first in all five fights there, and the same pack was a pull group of the deployed route (20261104160000 rows, pull group 15). Its entries, positions and radius are that old plan's (git show origin/dev:dungeons/gnomeregan.json, leg 3 pull group 15). The stand -732 671 -329 is the old plan's own lower-deck approach row ('pull group 18 approach'), 14.2 yd from the pack on the pack's floor; the navmesh walk down to it from step 151's point is 249.8 yd and the way back up to the step-152 pack 209.4 yd, so the plan check's detour warning for this group is the walk, as it was for the same group of the old plan."
+    "Leg 3's lower-deck 6212/6232 pack at -738.7 659.8 -323.4 (the pre-short-route rows' pull group 15) is no pull of this route: from leg 3's own walk the only way to it is the 265 yd lower-deck loop, which crosses the leg's -734.65 709.46 and -691.75 720.44 pulls and the packs at -724 698 and -706 693 this route drops, and the corridor above has no line to it (a navmesh ray hits 5 yd out, so the tank has no shot from there)."
   ],
   "legs": [
     {
@@ -694,18 +694,6 @@
             {"x": -754.458, "y": 657.834, "z": -308.977}
           ],
           "radius": 11.6
-        },
-        {
-          "entries": [6212, 6232, 6212],
-          "positions": [
-            {"x": -739.926, "y": 655.718, "z": -321.699},
-            {"x": -737.309, "y": 659.8, "z": -323.456},
-            {"x": -738.731, "y": 663.921, "z": -325.031}
-          ],
-          "radius": 14.7,
-          "approach": [
-            {"x": -732.04, "y": 671.15, "z": -328.66}
-          ]
         },
         {
           "entries": [6212, 6212, 6212, 6232],
