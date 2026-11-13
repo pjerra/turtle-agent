@@ -426,7 +426,7 @@ func TestPrepullAuraCombatMidBatchStopsTheAuras(t *testing.T) {
 	f := readPrepullAuraFile(t, w)
 	seen := false
 	for _, b := range f.Bots {
-		if b.Missing != nil && len(b.Missing) == 3 {
+		if len(b.Missing) == 3 {
 			seen = true
 		}
 	}
