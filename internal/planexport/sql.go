@@ -77,28 +77,36 @@ func WriteSQL(plans []Rows) string {
 var planTables = map[string]bool{"ai_dungeon_plan": true, "ai_dungeon_leg": true, "ai_dungeon_step": true}
 
 // ParseMigration reads a deployed migration like Parse, but skips whole the statements of tables other than the plan's three, each
-// skipped table named once in notes: the plan rows are what turtle-agent exports and what the server runs, while the hand edits
-// around them (an ai_dungeon_boss or ai_boss_tactic block) are not rows Parse can read and must not stop it.
+// skipped table named once in notes, and skips every other statement that is no INSERT up to its `;` (a hand edit such as an
+// UPDATE, or a START TRANSACTION wrapper), each named in notes with the warning that its hand edits are NOT applied: the plan rows
+// are what turtle-agent exports and what the server runs, while the hand edits around them (an ai_dungeon_boss or ai_boss_tactic
+// block, an UPDATE) are not rows Parse can read and must not stop it or hide the rows after them.
 func ParseMigration(sql string) ([]Rows, []string, error) { return parse(sql, true) }
 
-// parse is Parse, and with lenient also ParseMigration's skip of the other tables.
+// parse is Parse, and with lenient also ParseMigration's skip of the other tables and of every statement that is no INSERT
+// (each named in notes).
 func parse(sql string, lenient bool) ([]Rows, []string, error) {
 	var notes []string
 	if lenient {
-		sql, notes = skipOtherTables(sql)
+		var err error
+		if sql, notes, err = skipOtherTables(sql); err != nil {
+			return nil, notes, err
+		}
 	}
-	out, err := parseRows(sql)
+	out, err := parseRows(sql, lenient, &notes)
 	return out, notes, err
 }
 
 // skipOtherTables blanks the statements of the tables planTables does not hold, line for line so every error keeps the file's line
 // numbers, and names each skipped table once. A statement runs from its INSERT INTO / REPLACE INTO / DELETE FROM / UPDATE / SET
-// line to the line that ends it with a `;` outside quotes; a comment line inside it does not end it.
-func skipOtherTables(sql string) (string, []string) {
+// line to the line that ends it with a `;` outside quotes; a comment line inside it does not end it. A statement still open at
+// the end of the file is an error: blanking it would drop the rows after it without a word.
+func skipOtherTables(sql string) (string, []string, error) {
 	lines := strings.SplitAfter(sql, "\n")
 	var notes []string
 	seen := map[string]bool{}
 	skipping := false
+	startText, startLine := "", 0
 	for i, l := range lines {
 		t := strings.TrimSpace(l)
 		if !skipping {
@@ -108,9 +116,10 @@ func skipOtherTables(sql string) (string, []string) {
 			}
 			if !seen[name] {
 				seen[name] = true
-				notes = append(notes, fmt.Sprintf("skipped %s: only ai_dungeon_plan, ai_dungeon_leg and ai_dungeon_step are read", name))
+				notes = append(notes, fmt.Sprintf("skipped %s: only ai_dungeon_plan, ai_dungeon_leg and ai_dungeon_step are read, so its hand edits are NOT applied", name))
 			}
 			skipping = true
+			startText, startLine = t, i+1
 		}
 		if strings.HasPrefix(t, "--") {
 			continue
@@ -124,7 +133,10 @@ func skipOtherTables(sql string) (string, []string) {
 			skipping = false
 		}
 	}
-	return strings.Join(lines, ""), notes
+	if skipping {
+		return "", notes, fmt.Errorf("line %d: %q is not ended with a ';', so it and the rows after it were not read", startLine, clip(startText, 40))
+	}
+	return strings.Join(lines, ""), notes, nil
 }
 
 // statementTable names the table a statement's first line writes, for the statements a migration may hold around the rows; a SET
@@ -150,26 +162,61 @@ func statementTable(t string) (string, bool) {
 	return "", false
 }
 
-// endsStatement reports whether the line ends its statement: a `;` as its last byte outside a quoted string.
+// endsStatement reports whether the line ends its statement: its first `;` outside a quoted string, with only whitespace and
+// comments after it. A hand edit written as `UPDATE ...; -- why` or `UPDATE ...; /* why */` ends there, and a `;` inside a quoted
+// string does not.
 func endsStatement(t string) bool {
-	t = strings.TrimSpace(t)
-	if !strings.HasSuffix(t, ";") {
-		return false
-	}
-	in := false
 	for i := 0; i < len(t); i++ {
 		switch c := t[i]; {
-		case c == '\\' && in:
-			i++
-		case c == '\'':
-			if in && i+1 < len(t) && t[i+1] == '\'' {
-				i++
-			} else {
-				in = !in
+		case c == '\'' || c == '"' || c == '`':
+			for i++; i < len(t); i++ {
+				if t[i] == '\\' {
+					i++
+					continue
+				}
+				if t[i] != c {
+					continue
+				}
+				if i+1 < len(t) && t[i+1] == c {
+					i++
+					continue
+				}
+				break
 			}
+		case c == '-' && i+1 < len(t) && t[i+1] == '-':
+			// A line comment runs to the end of the line: no `;` follows it here.
+			return false
+		case c == '/' && i+1 < len(t) && t[i+1] == '*':
+			end := strings.Index(t[i+2:], "*/")
+			if end < 0 {
+				return false
+			}
+			i += end + 3
+		case c == ';':
+			return onlyComments(t[i+1:])
 		}
 	}
-	return !in
+	return false
+}
+
+// onlyComments reports whether s, what follows a statement's `;` on its line, holds only whitespace and comments.
+func onlyComments(s string) bool {
+	for {
+		s = strings.TrimSpace(s)
+		switch {
+		case s == "" || strings.HasPrefix(s, "--"):
+			return true
+		case strings.HasPrefix(s, "/*"):
+			end := strings.Index(s[2:], "*/")
+			if end < 0 {
+				// A block comment that runs past the line: whatever follows it ends the statement.
+				return true
+			}
+			s = s[end+4:]
+		default:
+			return false
+		}
+	}
 }
 
 // Parse reads a migration WriteSQL wrote back into rows, one Rows per plan in the order of the file. It is the round-trip check of
@@ -180,13 +227,15 @@ func Parse(sql string) ([]Rows, error) {
 }
 
 // parseRows is the line reader of a migration's plan rows.
-func parseRows(sql string) ([]Rows, error) {
+func parseRows(sql string, lenient bool, notes *[]string) ([]Rows, error) {
 	var out []Rows
 	byPlan := map[string]int{}
 	table := ""
 	sc := bufio.NewScanner(strings.NewReader(sql))
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	line := 0
+	skipping := false
+	skipText, skipLine := "", 0
 	cur := func(plan string) (*Rows, error) {
 		i, ok := byPlan[plan]
 		if !ok {
@@ -197,6 +246,12 @@ func parseRows(sql string) ([]Rows, error) {
 	for sc.Scan() {
 		line++
 		t := strings.TrimSpace(sc.Text())
+		if skipping {
+			if endsStatement(t) {
+				skipping = false
+			}
+			continue
+		}
 		switch {
 		case t == "" || strings.HasPrefix(t, "--") || strings.HasPrefix(t, "DELETE FROM"):
 			continue
@@ -205,6 +260,14 @@ func parseRows(sql string) ([]Rows, error) {
 			table = name
 			continue
 		case strings.HasPrefix(t, "("):
+		case lenient:
+			// A statement the exporter never writes (a hand edit like zulfarrak's UPDATE ai_dungeon_plan of 20261025002900
+			// and 20261102190000, or a START TRANSACTION wrapper): skip it to the line that ends it, say it was not
+			// applied, and read the rows after it.
+			*notes = append(*notes, fmt.Sprintf("skipped line %d: %q is not an INSERT statement, so its hand edits are NOT applied; the rows after it are still read", line, clip(t, 40)))
+			skipText, skipLine = t, line
+			skipping = !endsStatement(t)
+			continue
 		default:
 			return nil, fmt.Errorf("line %d: unexpected %q", line, clip(t, 40))
 		}
@@ -281,7 +344,13 @@ func parseRows(sql string) ([]Rows, error) {
 			return nil, fmt.Errorf("line %d: a row before any INSERT", line)
 		}
 	}
-	return out, sc.Err()
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	if skipping {
+		return nil, fmt.Errorf("line %d: %q is not ended with a ';', so it and the rows after it were not read", skipLine, clip(skipText, 40))
+	}
+	return out, nil
 }
 
 // parseEntries reads a comma list of creature entries back (” is none).

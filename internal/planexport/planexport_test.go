@@ -1985,3 +1985,73 @@ func TestApproachHopsDoesNotInterpolateACutGap(t *testing.T) {
 		t.Fatalf("the last approach row is at %.1f, want 20 (the cutter's point, 80 yd from the pack): %v", moves[len(moves)-1], moves)
 	}
 }
+
+// OffSeam is the rule the cutter's seam fix applies: a point whose x or y stands on an mmaps cell line moves SeamNudgeYd back
+// toward the point its hop came from, so the row stays on the walk it cuts. A point off the lines keeps its coordinates, and so
+// does one whose seam the hop runs along (the move would rewrite the row and leave the seam where it was).
+func TestOffSeamNudgesOnlyASeamTheHopCrosses(t *testing.T) {
+	seam := dungeon.Point{X: 106.66667, Y: 16, Z: 0}
+	if !OnSeam(seam.X) || !OnSeam(seam.Y) {
+		t.Fatalf("the fixture point %+v is not on a cell line", seam)
+	}
+	from := dungeon.Point{X: 20, Y: 0, Z: 0}
+	got := OffSeam(from, seam)
+	if OnSeam(got.X) || OnSeam(got.Y) {
+		t.Fatalf("the point %+.6f %.6f is still on a cell line", got.X, got.Y)
+	}
+	gx, gy := float64(got.X-seam.X), float64(got.Y-seam.Y)
+	if d := math.Hypot(gx, gy); math.Abs(d-SeamNudgeYd) > 1e-3 {
+		t.Fatalf("the point moved %.4f yd, want %g", d, SeamNudgeYd)
+	}
+	if gx*float64(from.X-seam.X)+gy*float64(from.Y-seam.Y) <= 0 {
+		t.Fatalf("the point moved away from the hop's start: %.4f %.4f", gx, gy)
+	}
+	if off := (dungeon.Point{X: 100, Y: 20, Z: 0}); OffSeam(from, off) != off {
+		t.Fatalf("a point off the cell lines moved: %+v", OffSeam(from, off))
+	}
+	// The hop from 10,0,0 to 50,0,0 runs along y=0: the move cannot clear it, so the point stays.
+	along := dungeon.Point{X: 50, Y: 0, Z: 0}
+	if got := OffSeam(dungeon.Point{X: 10, Y: 0, Z: 0}, along); got != along {
+		t.Fatalf("a point whose seam the hop runs along moved: %+v", got)
+	}
+}
+
+// The run leader hop warning is printed only for a hop that stays uncut: with --approach-hops the exporter's own rows bring
+// the party within the run leader's reach, so the plan's raw distance is no longer a hop the run leader walks itself (route
+// audit 2026-11-12, finding 8: 3,412 lines in one sweep).
+func TestRunLeaderHopWarningOnlyForHopsLeftUncut(t *testing.T) {
+	const js = `{"version":1,"name":"far","status":"live-checked (test)","map":43,"entrance":{"x":0,"y":0,"z":0},
+	 "legs":[{"name":"a","to":{"x":10,"y":0,"z":0},"pull_groups":[{"entries":[100],"positions":[{"x":100,"y":0,"z":0}]}]}]}`
+	p := parsePlan(t, js)
+	cut := func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return []dungeon.Point{{X: 40, Y: 0, Z: 0}, {X: 70, Y: 0, Z: 0}}, nil, nil
+	}
+	res, err := Build(p, Options{Source: "test", Cut: cut, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := strings.Join(res.Warnings, "\n"); strings.Contains(w, "run leader hop") {
+		t.Fatalf("a cut hop still warned: %q", w)
+	}
+	// Without --approach-hops the hop is not cut, and the warning stays.
+	res, err = Build(p, Options{Source: "test", Cut: cut})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "run leader hop") {
+		t.Fatalf("an uncut hop lost its warning: %q", w)
+	}
+	// A cut that ends beyond the reach (the floor-aware cutter keeps one corner, the water rule drops the rest, so no point
+	// on the path interpolates a nearer one) still warns.
+	far := func(_ uint32, from, to dungeon.Point) ([]dungeon.Point, []CutNote, error) {
+		return []dungeon.Point{{X: 30, Y: 0, Z: 0}},
+			[]CutNote{{Old: dungeon.Point{X: 50}, Dropped: true, Reason: "the point's own floor is NavWater: the water is crossed in one hop between dry points"}}, nil
+	}
+	res, err = Build(p, Options{Source: "test", Cut: far, ApproachHops: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := strings.Join(res.Warnings, "\n"); !strings.Contains(w, "run leader hop") {
+		t.Fatalf("a cut ending 70 yd out lost its warning: %q", w)
+	}
+}

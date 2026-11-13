@@ -403,9 +403,13 @@ func Build(p *dungeon.Plan, opt Options) (Result, error) {
 		return Result{}, err
 	}
 	for _, w := range p.RunLeaderReach(0) {
-		if w.Leg < cutLeg || cut == "" {
-			b.warnings = append(b.warnings, w.String())
+		if cut != "" && w.Leg >= cutLeg {
+			continue
 		}
+		if b.cutReach[reachKey{leg: w.Leg, group: w.PullGroup}] {
+			continue // --approach-hops cut the hop: the rows bring the party within the run leader's reach
+		}
+		b.warnings = append(b.warnings, w.String())
 	}
 	upto := len(p.Legs)
 	if cut != "" {
@@ -459,6 +463,15 @@ type builder struct {
 	haveLast    bool
 	origins     []RowOrigin // one per step row, in the same order
 	origin      RowOrigin   // the plan element the next add writes
+	// cutReach holds the packs and bosses whose hop --approach-hops cut into rows that bring the party within the run
+	// leader's reach: no run leader hop warning is printed for them (Build; route audit 2026-11-12, item 4).
+	cutReach map[reachKey]bool
+}
+
+// reachKey names one pack or boss of a plan leg a run leader hop warning is about: group 0 is the leg's boss, n is pull group n.
+type reachKey struct {
+	leg   int
+	group int
 }
 
 // cutNotes writes one warning per point a cut dropped or moved, with the step whose hop it cut.
@@ -1255,6 +1268,18 @@ func (b *builder) cutLongHops() error {
 				for _, v := range via {
 					out = append(out, StepRow{Plan: s.Plan, Leg: s.Leg, Kind: KindMove, X: v.X, Y: v.Y, Z: v.Z, Comment: "approach path"})
 					outOrigins = append(outOrigins, b.cutOrigin(origin))
+				}
+				// The party now stands on the last approach row: the run leader sees the pack or boss from there and needs
+				// no hop of its own (RunLeaderReach's warning is about the plan's own rows, which know nothing of these).
+				if len(via) > 0 && (s.Kind == KindPull || s.Kind == KindBoss) && dist3(via[len(via)-1], dungeon.Point{X: s.X, Y: s.Y, Z: s.Z}) <= dungeon.RunLeaderReachYd {
+					if b.cutReach == nil {
+						b.cutReach = map[reachKey]bool{}
+					}
+					if s.Kind == KindBoss {
+						b.cutReach[reachKey{leg: origin.Leg}] = true
+					} else {
+						b.cutReach[reachKey{leg: origin.Leg, group: origin.Group + 1}] = true
+					}
 				}
 			}
 		}
