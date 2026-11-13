@@ -88,9 +88,9 @@ All calls go through `turtle-agent rpc <dir> <method> '<json>'`. Every field is 
 
 ## dungeon_status, dungeon_stop, dungeon_pause, dungeon_resume, dungeon_skip
 
-No fields. `dungeon_status` answers `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), the `report`, and `last_progress_at`, `stalled_for_s`, `stall_level` (`none`, `warn`, `recover`, `fail`). `dungeon_stop` ends the run (and with no run going, unbinds a kept binding). `dungeon_pause` halts a commander run with its binding kept (group mode: refused; idle: no-op). `dungeon_resume` and `dungeon_skip` go to the run leader of an observe run; otherwise refused.
+No fields. `dungeon_status` answers `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`, `refused`), the `report`, and `last_progress_at`, `stalled_for_s`, `stall_level` (`none`, `warn`, `recover`, `fail`). `dungeon_stop` ends the run (and with no run going, unbinds a kept binding). `dungeon_pause` halts a commander run with its binding kept (group mode: refused; idle: no-op). `dungeon_resume` and `dungeon_skip` go to the run leader of an observe run; otherwise refused.
 
-`dungeon_status` is one snapshot. The end event (`dungeon_done` or `dungeon_failed`) is emitted before the report says `done`, `failed` or `stopped`: a final state is never read before its event. A non-final state always has `running: true`; `running` stays true for a moment after a final state while the run's goroutine lets go of the brain.
+`dungeon_status` is one snapshot. The end event (`dungeon_done`, `dungeon_failed` or `dungeon_refused`) is emitted before the report says `done`, `failed`, `stopped` or `refused`: a final state is never read before its event. `refused` is a run stopped before it started (a team gate, an item a skipped leg was to provide, a grave or GM cross check): nothing was sent, and `report.error` names the reason. A non-final state always has `running: true`; `running` stays true for a moment after a final state while the run's goroutine lets go of the brain.
 
 ## dungeon_stage
 

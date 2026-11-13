@@ -44,11 +44,11 @@ The agent hires a warrior tank, a priest healer, and three damage dealers at the
 turtle-agent rpc <dir> dungeon_status
 ```
 
-The answer carries `running`, `state` (`running`, later `done`, `failed`, or `stopped`), and the stall fields `last_progress_at`, `stalled_for_s`, `stall_level`. Poll every minute or so. A healthy run shows fresh `last_progress_at` and `stall_level: "none"`.
+The answer carries `running`, `state` (`running`, later `done`, `failed`, `stopped` or `refused`), and the stall fields `last_progress_at`, `stalled_for_s`, `stall_level`. Poll every minute or so. A healthy run shows fresh `last_progress_at` and `stall_level: "none"`.
 
 ## 3. End it or let it finish
 
-When `state` is `done`, `failed`, or `stopped`, the run has ended by itself. The full `report` in the status answer says what happened: legs cleared, bosses killed, loot taken, orders refused, and the trace file path. To stop a running run early:
+When `state` is `done`, `failed`, `stopped` or `refused`, the run has ended by itself (`refused`: it stopped before it started, nothing was sent, and `report.error` names the reason). The full `report` in the status answer says what happened: legs cleared, bosses killed, loot taken, orders refused, and the trace file path. To stop a running run early:
 
 ```sh
 turtle-agent rpc <dir> dungeon_stop

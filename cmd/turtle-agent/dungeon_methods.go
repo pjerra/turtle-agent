@@ -328,7 +328,7 @@ type dungeonRunResult struct {
 
 type dungeonStatusResult struct {
 	Running bool            `json:"running"`
-	State   string          `json:"state"` // idle, running, done, failed or stopped
+	State   string          `json:"state"` // idle, running, done, failed, stopped or refused
 	Report  *dungeon.Report `json:"report,omitempty"`
 	// The progress watchdog's view, lifted out of report.watchdog for a poller that wants to see at a glance whether a run hangs: when it
 	// last made progress, the seconds since then (0 while it waits on something with a limit of its own) and the stall level (none, warn,

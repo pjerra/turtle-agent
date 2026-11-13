@@ -721,16 +721,16 @@ func (d *RemoteDriver) remote(f func(*RemoteReport)) {
 // failed, stopped or a panic): the unbind is deferred. It returns nil when the plan is done.
 func (d *RemoteDriver) Run(ctx context.Context, fromLeg int) error {
 	if fromLeg < 0 || fromLeg >= len(d.plan.Legs) {
-		return fmt.Errorf("from_leg %d: the plan has legs 0-%d", fromLeg, len(d.plan.Legs)-1)
+		return d.refuse(fmt.Errorf("from_leg %d: the plan has legs 0-%d", fromLeg, len(d.plan.Legs)-1))
 	}
 	if err := d.checkStart(fromLeg); err != nil {
-		return err
+		return d.refuse(err)
 	}
 	if err := d.checkGravesOpenBy(ctx); err != nil {
-		return err
+		return d.refuse(err)
 	}
 	if err := d.checkGMCross(ctx, fromLeg); err != nil {
-		return err
+		return d.refuse(err)
 	}
 	d.markAvoid()
 	d.rep.start(fromLeg)
@@ -761,6 +761,27 @@ func (d *RemoteDriver) runRecovering(ctx context.Context, fromLeg int) (err erro
 		}
 	}()
 	return d.run(ctx, fromLeg)
+}
+
+// refuse ends a run that stopped before it started (Run's checks: the plan's legs, the team gate, a skipped leg's item, the
+// graves and GM cross checks). Nothing has been sent and no trace was begun, so it talks to no server and unbinds nothing;
+// the report ends "refused" with the reason, and the refusal event goes out before it, so that dungeon_status shows the
+// refusal instead of an idle run that goes on forever (SFK-NEVER-STARTS: an early return skipped finish and the report kept
+// state "idle" with running true).
+func (d *RemoteDriver) refuse(err error) error {
+	at := d.rep.now()
+	d.rep.update(func(r *Report) {
+		if r.Started.IsZero() {
+			r.Started = at
+		}
+		r.TraceFile = "" // traceBegin was never reached: this run has no trace
+	})
+	d.rep.note("run refused: " + err.Error())
+	data := d.rep.summaryEnded("refused", err.Error(), at)
+	data["error"] = err.Error()
+	d.emit(events.KindDungeonRefused, "dungeon "+d.plan.Name+" refused (remote): "+err.Error(), data)
+	d.rep.end("refused", err.Error(), at)
+	return err
 }
 
 func (d *RemoteDriver) finish(err error) {
