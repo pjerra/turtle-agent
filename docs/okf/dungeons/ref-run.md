@@ -48,7 +48,7 @@ All calls go through `turtle-agent rpc <dir> <method> '<json>'`. Every field is 
 | `teleport` | `false` | Group/leader: GM-teleport to the start and summon the party (in the report) | `{"teleport":true}` |
 | `no_shortcuts` | `false` | No GM revive of a dead companion at a rest gate | `{"no_shortcuts":true}` |
 | `setup` | none | GM commands you ran yourself, at most 40 of at most 400 chars; copied into the report, never sent | `{"setup":["go entrance"]}` |
-| `buffs` | none | Group/leader: preset `"world"`, a spell id, or a list; applied with `.aura` (developer GM) | `{"buffs":"world"}` |
+| `buffs` | none | Group/leader: preset `"world"` (the classic world buffs) or `"world-raid"` (the same list without Warchief's Blessing, which is Horde-only), a spell id, or a list; applied with `.aura` (developer GM) | `{"buffs":"world"}` |
 | `brain` | leader: class preset; else off | Preset or strategy name playing your character (group/leader) | `{"brain":"frost_mage"}` |
 | `rotation` | preset's own | Rotation file replacing the preset's class rotation (with a brain) | `{"rotation":"my_mage"}` |
 | `role` | preset's own (`dps` if none) | `dps`, `tank`, or `healer` (with a brain) | `{"role":"healer"}` |

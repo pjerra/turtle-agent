@@ -181,7 +181,7 @@ func TestResolveBuffs(t *testing.T) {
 	if err != nil || len(got) != 9 || got[7].ID != 1 || got[7].Name != spells.Name(1) || got[8].Name != "spell 999999999" {
 		t.Fatalf("%v %v", got, err)
 	}
-	if _, err := ResolveBuffs([]string{"worldly"}, nil); err == nil || !strings.Contains(err.Error(), `unknown preset "worldly" (presets: world)`) {
+	if _, err := ResolveBuffs([]string{"worldly"}, nil); err == nil || !strings.Contains(err.Error(), `unknown preset "worldly"`) {
 		t.Fatalf("%v", err)
 	}
 	if _, err := ResolveBuffs(nil, []uint32{0}); err == nil {

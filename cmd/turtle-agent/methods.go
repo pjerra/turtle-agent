@@ -87,6 +87,12 @@ type gmSetHPParams struct {
 	HP *uint32 `json:"hp,omitempty"`
 }
 
+// gmAuraParams is gm_aura: the player to put one aura on and the spell id of the aura.
+type gmAuraParams struct {
+	GUID    packet.GUID `json:"guid"`
+	SpellID uint32      `json:"spell_id"`
+}
+
 type walkParams struct {
 	X float32 `json:"x"`
 	Y float32 `json:"y"`
@@ -203,6 +209,11 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	// from the dialled world_addr) and each sends only a line from session.PracticeGMLine's closed set.
 	srv.Register("gm_evade", rpc.Typed(func(ctx context.Context, p guidParams) (empty, error) {
 		return empty{}, rpcErr(cur().GMEvade(ctx, p.GUID))
+	}))
+	// gm_aura is the select-then-".aura <id>" hand of `raid-walk --prepull-aura` (a party member's guid and the spell id
+	// only): the same test-server gate as gm_kill, and session.GMAura refuses a non-player guid or spell 0.
+	srv.Register("gm_aura", rpc.Typed(func(ctx context.Context, p gmAuraParams) (empty, error) {
+		return empty{}, rpcErr(cur().GMAura(ctx, p.GUID, p.SpellID))
 	}))
 	srv.Register("gm_set_hp", rpc.Typed(func(ctx context.Context, p gmSetHPParams) (empty, error) {
 		if p.HP != nil {

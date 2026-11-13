@@ -49,6 +49,11 @@ Raid-walk rosters (`tb-raid-roster` v2) may name a `spec` per batch; for a hunte
 points, not the premade's exact point spread, which depends on the hire's level; refusals in TB's answer are caught and a failed
 spec is listed in the walk's `spec_failed`.
 
+Raid-walk's `--prepull-aura role=<role>:<ids>` (`tank`, `melee`, `ranged`, `caster`, `healer` or `all`) puts a flask,
+elixir, food and world-buff list on the party as auras at the pre-pull rest before each boss row, and
+`prepull-auras.json` records what each bot carries (see [the raid-walk reference](docs/okf/raids/raid-walk-reference.md)).
+Its `gm_aura` RPC is the select-then-`.aura <id>` hand behind it (see [the RPC reference](docs/okf/agent/rpc-reference.md)).
+
 Log a character in and keep it online with the RPC server running:
 
 ```sh

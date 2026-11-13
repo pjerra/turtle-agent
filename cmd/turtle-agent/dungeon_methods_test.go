@@ -53,7 +53,7 @@ func TestDungeonRunRefusals(t *testing.T) {
 		{`{"name":"rig","from_leg":"third"}`, "from_leg: the plan has legs"},
 		{`{"name":"rig","from_leg":true}`, "from_leg must be a leg number"},
 		{`{"name":"rig","colour":1}`, "colour"},
-		{`{"name":"rig","buffs":"worldly"}`, `buffs: unknown preset "worldly" (presets: world)`},
+		{`{"name":"rig","buffs":"worldly"}`, `buffs: unknown preset "worldly"`},
 		{`{"name":"rig","buffs":true}`, "buffs must be a preset name"},
 		{`{"name":"rig","buffs":[0]}`, "buffs must be a preset name"},
 		{`{"name":"rig","buffs":[22888,{}]}`, "buffs must be a preset name"},

@@ -1047,10 +1047,10 @@ func bossRowDone(st func(string, int, string, string, string) queuedEvent, boss 
 	return st("done", boss, "boss", "pull", fmt.Sprintf("stopped before step %d (until boss): the party stays where it stands", n.until))
 }
 
-// gmInstanceDataPrePull is the boss-row resend's gate: the status is before
+// prePullOK is the boss-row resend's gate: the status is before
 // the pull (phase begin/gather/walk/rest, no pulling or fighting note), no later
 // line of the same page shows the pull, and no live bot of the party is in
-// combat in a frame no older than gmInstanceDataFrameFresh.
+// combat in a frame no older than prePullFrameFresh.
 func TestGMInstanceDataPrePullGate(t *testing.T) {
 	now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 	status := func(phase, note string) tbm.RunStatus {
@@ -1079,7 +1079,7 @@ func TestGMInstanceDataPrePullGate(t *testing.T) {
 	}
 	for _, c := range cases {
 		w := &walk{botAt: c.bots}
-		if got := w.gmInstanceDataPrePull(c.st, c.later, now); got != c.want {
+		if got := w.prePullOK(c.st, c.later, now); got != c.want {
 			t.Errorf("%s: pre-pull %v, want %v", c.name, got, c.want)
 		}
 	}
@@ -1092,16 +1092,16 @@ func TestGMInstanceDataLaterPullInPage(t *testing.T) {
 		return events.Event{Kind: events.KindSystem, Text: fmt.Sprintf("TBM:RUN|zul_gurub|running|%d/733|high_priest_thekal|boss|%s|%s", step, phase, note)}
 	}
 	w := &walk{plan: &dungeon.Plan{Name: "zul_gurub"}}
-	if w.gmInstanceDataLaterPull([]events.Event{line(700, "begin", "starting"), line(701, "pull", "pulling")}, 700) {
+	if w.laterPullLine([]events.Event{line(700, "begin", "starting"), line(701, "pull", "pulling")}, 700) {
 		t.Fatal("another step's pull must not block")
 	}
-	if !w.gmInstanceDataLaterPull([]events.Event{line(700, "begin", "starting"), line(700, "pull", "pulling")}, 700) {
+	if !w.laterPullLine([]events.Event{line(700, "begin", "starting"), line(700, "pull", "pulling")}, 700) {
 		t.Fatal("a later pull line of the same step must block")
 	}
-	if !w.gmInstanceDataLaterPull([]events.Event{line(700, "begin", "fighting")}, 700) {
+	if !w.laterPullLine([]events.Event{line(700, "begin", "fighting")}, 700) {
 		t.Fatal("a later fighting note of the same step must block")
 	}
-	if w.gmInstanceDataLaterPull([]events.Event{line(700, "begin", "starting")}, 700) {
+	if w.laterPullLine([]events.Event{line(700, "begin", "starting")}, 700) {
 		t.Fatal("a quiet later line must not block")
 	}
 }
