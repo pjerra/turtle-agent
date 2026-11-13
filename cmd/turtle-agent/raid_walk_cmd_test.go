@@ -129,6 +129,11 @@ type walkFakeAgent struct {
 	gearBusy int
 	// gearBusyDelay holds each busy reply back that long (the module's answer arrives late); 0 answers at once.
 	gearBusyDelay time.Duration
+	// gearBlockerIn schedules the verdict of the gear job that holds the slot when a busy reply comes, that long
+	// after the refusal (0 schedules none). The job is the same commander's, so its verdict reaches this walk's chat.
+	gearBlockerIn time.Duration
+	// gearBlockerLine is that scheduled verdict (empty: the earlier job's ok line).
+	gearBlockerLine string
 	// talentMode is how the fake game answers `.bot command <bot> talents [<path>]`: "" applies the build and reads it back,
 	// "silent" never answers, "stuck" answers but leaves the build as it was (Survival), "multiple" lists several specs.
 	talentMode      string
@@ -749,7 +754,7 @@ func (f *walkFakeAgent) gmSide(line string) {
 		if busy {
 			f.gearBusy--
 		}
-		delay := f.gearBusyDelay
+		delay, blocker, blockerLine := f.gearBusyDelay, f.gearBlockerIn, f.gearBlockerLine
 		f.mu.Unlock()
 		if busy {
 			reply := "TBM:ACTION_ERR|gear|busy|A gear job is already running"
@@ -757,6 +762,12 @@ func (f *walkFakeAgent) gmSide(line string) {
 				f.pushAt(reply, "", f.clock.now().Add(delay))
 			} else {
 				f.push(reply, "")
+			}
+			if blocker > 0 {
+				if blockerLine == "" {
+					blockerLine = "TBM:GEAR|ok|39|39|3|60|-|-|-|0|-|0"
+				}
+				f.pushAt(blockerLine, "", f.clock.now().Add(blocker))
 			}
 			return
 		}
@@ -6116,7 +6127,7 @@ func gearRaidSends(f *fixture) []time.Time {
 
 // The refit's busy retry (walk 98b: 11 exit-18 restarts, 7 in the first 7 min with 7 raids launched at once): the
 // module's gear queue has one slot for the whole server and the job holding it answers only its own requester, so a
-// refused walk can never read that job's TBM:GEAR line. Busy twice, then accepted: the walk re-sends after the
+// refused walk cannot wait for a job of another raid's. Busy twice, then accepted: the walk re-sends after the
 // backoff (2 s, then 4 s) and carries on with the accepted send's verdict, both retries noted.
 func TestRaidWalkRetriesTheRefitWhileAGearJobRuns(t *testing.T) {
 	noGearBusyJitter(t)
@@ -6144,6 +6155,41 @@ func TestRaidWalkRetriesTheRefitWhileAGearJobRuns(t *testing.T) {
 	}
 	if retries != 2 {
 		t.Fatalf("%d busy notes, want 2: %v", retries, f.summary().Notes)
+	}
+}
+
+// An earlier gear job by the same commander is still running when the walk's refit is refused, and its verdict
+// reaches the walk's chat 1.5 s into the backoff: r1 slept the backoff and then read that verdict as the re-send's
+// answer (the partial ended the walk 18). The walk must consume it inside the window, re-send, and take the accepted
+// send's own ok verdict.
+func TestRaidWalkDropsTheEarlierVerdictThatArrivesDuringTheBackoff(t *testing.T) {
+	noGearBusyJitter(t)
+	f := newFixture(t)
+	f.agent.gearBusy = 1
+	f.agent.gearBlockerIn = 1500 * time.Millisecond
+	f.agent.gearBlockerLine = "TBM:GEAR|partial|2|3|3|60|62.0|-|61.5|2|Bot07(offline)|0"
+	f.defaultRun("onyxias_lair")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0: %s", code, f.stderr.String())
+	}
+	at := gearRaidSends(f)
+	if len(at) != 2 {
+		t.Fatalf("the refit went out %d times, want 2 (busy, then the accepted re-send)", len(at))
+	}
+	if got := at[1].Sub(at[0]); got != gearBusyFirst {
+		t.Fatalf("the re-send came %s after the refused send, want %s (the drop spends the backoff)", got, gearBusyFirst)
+	}
+	var dropped string
+	for _, n := range f.summary().Notes {
+		if strings.Contains(n, "dropped an earlier gear job's verdict") {
+			dropped = n
+		}
+	}
+	if !strings.Contains(dropped, "TBM:GEAR|partial|2|3") {
+		t.Fatalf("the earlier verdict was not noted as dropped: notes %v", f.summary().Notes)
+	}
+	if strings.Contains(f.summary().EndReason, "partial") {
+		t.Fatalf("the walk ended on the earlier job's verdict: %q", f.summary().EndReason)
 	}
 }
 
