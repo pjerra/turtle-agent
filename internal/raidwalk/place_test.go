@@ -683,7 +683,9 @@ func TestPlaceBossGuardRefusesInStartLeg(t *testing.T) {
 // The Arlokk route fix round 2 and the later rounds bring it to 416 (t1105c). t1105e: 417, Hakkar's approach is two
 // plan points now (the ramp lip -11807.651 -1691.3049 52.111286 and the stand -11790 -1662 53.11; the exported rows are
 // 694, one fewer, because the lip replaces a path row the cutter used to add). Walk 71 fast (t1106k): 416, leg 8's
-// entry drops its second via and `to` is the placement row the placed walk already starts on.
+// entry drops its second via and `to` is the placement row the placed walk already starts on. Route B1 (2026-11-13): 421,
+// leg 7's four lake pulls take a ring stand and its ring groups 12, 16 and 20 a stand each (+7 rows) and the two shore
+// groups are dropped (-2 pull rows).
 // `--until none` run from Marli stops before the segment on leg 6 that passes Venoxis, and the shortened corridor
 // clears clean.
 
@@ -694,8 +696,8 @@ func TestPlaceBossGuardZGMarliUntilNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := res.Rows
-	if len(rows.Steps) != 416 {
-		t.Fatalf("the fixture has %d steps, want 416", len(rows.Steps))
+	if len(rows.Steps) != 421 {
+		t.Fatalf("the fixture has %d steps, want 421", len(rows.Steps))
 	}
 	start, _, _, _, err := PlaceStart(rows, []string{"from", "leg", "high_priestess_marli"})
 	if err != nil {

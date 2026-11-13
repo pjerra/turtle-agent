@@ -2312,69 +2312,6 @@
           "radius": 12.5
         },
         {
-          "entries": [15043, 15043, 15043, 15043, 15043],
-          "positions": [
-            {"x": -11874.6, "y": -1653.27, "z": 14.01},
-            {"x": -11872, "y": -1642.35, "z": 13.81},
-            {"x": -11873.2, "y": -1633.76, "z": 13.13},
-            {"x": -11872.4, "y": -1625.05, "z": 14.16},
-            {"x": -11872.8, "y": -1617.81, "z": 14.44}
-          ],
-          "radius": 19.4
-        },
-        {
-          "entries": [15043, 15043, 15043, 15043],
-          "positions": [
-            {"x": -11870.3, "y": -1708.36, "z": 10.61},
-            {"x": -11873.7, "y": -1695.64, "z": 12.99},
-            {"x": -11875.7, "y": -1689.96, "z": 14.29},
-            {"x": -11881.4, "y": -1685.63, "z": 14.57}
-          ],
-          "radius": 15.1
-        },
-        {
-          "entries": [15043, 15043, 15043, 15043, 15043],
-          "positions": [
-            {"x": -11901.3, "y": -1733.02, "z": 13.51},
-            {"x": -11896.4, "y": -1739.52, "z": 13.17},
-            {"x": -11906.2, "y": -1729.76, "z": 13.87},
-            {"x": -11900.7, "y": -1739.61, "z": 13.86},
-            {"x": -11908.1, "y": -1738.33, "z": 14.91}
-          ],
-          "radius": 7.8
-        },
-        {
-          "entries": [15043, 15043, 15043, 15043],
-          "positions": [
-            {"x": -11823.6, "y": -1764.53, "z": 11.71},
-            {"x": -11833.2, "y": -1762.04, "z": 12.71},
-            {"x": -11839.3, "y": -1760.3, "z": 13.22},
-            {"x": -11834.3, "y": -1768.71, "z": 13.91}
-          ],
-          "radius": 9.6
-        },
-        {
-          "entries": [15043, 15043, 15043, 15043],
-          "positions": [
-            {"x": -11712.2, "y": -1728.12, "z": 13.06},
-            {"x": -11723.1, "y": -1730.79, "z": 15.64},
-            {"x": -11726.1, "y": -1736.4, "z": 15.49},
-            {"x": -11730.4, "y": -1743.03, "z": 15.28}
-          ],
-          "radius": 13.2
-        },
-        {
-          "entries": [15043, 15043, 15043, 15043, 15043],
-          "positions": [
-            {"x": -11703, "y": -1667.77, "z": 14.75},
-            {"x": -11698.2, "y": -1664.22, "z": 14.15},
-            {"x": -11693.5, "y": -1656.15, "z": 14.55},
-            {"x": -11700.7, "y": -1655.62, "z": 15.96},
-            {"x": -11688.6, "y": -1644.38, "z": 14.13}
-          ],
-          "radius": 16.1
-        },
-        {
           "entries": [11352],
           "positions": [
             {"x": -11766.1, "y": -1580.68, "z": 21.15}
@@ -2411,13 +2348,43 @@
           ]
         },
         {
+          "entries": [15043, 15043, 15043, 15043, 15043],
+          "positions": [
+            {"x": -11703, "y": -1667.77, "z": 14.75},
+            {"x": -11698.2, "y": -1664.22, "z": 14.15},
+            {"x": -11693.5, "y": -1656.15, "z": 14.55},
+            {"x": -11700.7, "y": -1655.62, "z": 15.96},
+            {"x": -11688.6, "y": -1644.38, "z": 14.13}
+          ],
+          "radius": 16.1,
+          "approach": [
+            {"x": -11723.9, "y": -1665.4, "z": 21.2}
+          ]
+        },
+        {
           "entries": [11359, 11357, 11357],
           "positions": [
             {"x": -11718.7, "y": -1714.98, "z": 21.27},
             {"x": -11716.7, "y": -1712.84, "z": 21.24},
             {"x": -11716.6, "y": -1717.65, "z": 19.95}
           ],
-          "radius": 3.2
+          "radius": 3.2,
+          "approach": [
+            {"x": -11724, "y": -1682, "z": 21.2}
+          ]
+        },
+        {
+          "entries": [15043, 15043, 15043, 15043],
+          "positions": [
+            {"x": -11712.2, "y": -1728.12, "z": 13.06},
+            {"x": -11723.1, "y": -1730.79, "z": 15.64},
+            {"x": -11726.1, "y": -1736.4, "z": 15.49},
+            {"x": -11730.4, "y": -1743.03, "z": 15.28}
+          ],
+          "radius": 13.2,
+          "approach": [
+            {"x": -11728.7, "y": -1708.3, "z": 21.1}
+          ]
         },
         {
           "entries": [11352],
@@ -2446,12 +2413,28 @@
           "radius": 3.6
         },
         {
+          "entries": [15043, 15043, 15043, 15043],
+          "positions": [
+            {"x": -11870.3, "y": -1708.36, "z": 10.61},
+            {"x": -11873.7, "y": -1695.64, "z": 12.99},
+            {"x": -11875.7, "y": -1689.96, "z": 14.29},
+            {"x": -11881.4, "y": -1685.63, "z": 14.57}
+          ],
+          "radius": 15.1,
+          "approach": [
+            {"x": -11865, "y": -1695, "z": 19.7}
+          ]
+        },
+        {
           "entries": [11352, 11352],
           "positions": [
             {"x": -11842, "y": -1655.23, "z": 21.14},
             {"x": -11842.7, "y": -1640.89, "z": 21.12}
           ],
-          "radius": 7.7
+          "radius": 7.7,
+          "approach": [
+            {"x": -11860, "y": -1690, "z": 20}
+          ]
         },
         {
           "entries": [11830, 11357, 11340, 11830, 11389, 11390, 11357],
@@ -2494,13 +2477,30 @@
           ]
         },
         {
+          "entries": [15043, 15043, 15043, 15043, 15043],
+          "positions": [
+            {"x": -11874.6, "y": -1653.27, "z": 14.01},
+            {"x": -11872, "y": -1642.35, "z": 13.81},
+            {"x": -11873.2, "y": -1633.76, "z": 13.13},
+            {"x": -11872.4, "y": -1625.05, "z": 14.16},
+            {"x": -11872.8, "y": -1617.81, "z": 14.44}
+          ],
+          "radius": 19.4,
+          "approach": [
+            {"x": -11848, "y": -1634, "z": 21.1}
+          ]
+        },
+        {
           "entries": [11357, 11359, 11357],
           "positions": [
             {"x": -11859.7, "y": -1576.83, "z": 21.23},
             {"x": -11862.5, "y": -1578.67, "z": 20.73},
             {"x": -11865.3, "y": -1577.22, "z": 19.75}
           ],
-          "radius": 3.5
+          "radius": 3.5,
+          "approach": [
+            {"x": -11855.9, "y": -1606.8, "z": 20.8}
+          ]
         },
         {
           "entries": [11352],
@@ -2531,7 +2531,8 @@
       "notes": [
         "WALK 29 FIX 6 (2026-11-03, leg 7; research/zg-w29/WALK29-FIX-PLAN.md §5, lead decision): rows 620-637 walked the raid into the lake to pull single Hooktooth Frenzies (11374), which are fish: 14 of the leg's 38 groups were 11374-only (groups 3, 4, 5, 7, 8, 16, 17, 24, 25, 26, 30, 31, 33 and 37 at z -14.4 to +2.6) and all 30 spawns are in water. Runs e/e-r1..r3 had 0 deaths but stopped for good: the lead sat at -11855..-11858 -1506..-1508 z -13 at step 624 and -11885.5 -1488.1 z 7.8 at step 628, stuck 35.3-36.7 yd from the goal with its own move failing (lead in water: yes; cmd move path type 0x81). 11374 is in the leg's skip now and the 14 fish-only groups and their approach rows are gone; every remaining point of the leg is on land (z 2.2 and above in the lake basin). The leg's own route (vias z 78.7/65.3/51.0, to z 19.7) is unchanged.",
         "ROUTE-REGEN 0dec623+local (2026-11-03, audit §4.2): 8 points, minimum aggro margin 9.3 yd, minimum wall 4.0 yd; pull order regen from the navmesh path-length matrix (0 one-way pairs flagged); every point authored, no exporter cut",
-        "WALK 38 FIX 2 (2026-11-05, leg 7; TortoiseBots-audit tests/raid-zg-walk38 f2/f3): every Hakkar attempt paused at step 601 \"no walkable path toward -11752 -1741.9 14.3\". The row was not a plan point: the approach-hop cutter's last-approach interpolation took the straight line from the floor-aware cut's only kept point (the wet south-lake corners are dropped) to the group-6 pull and stood 4.1 yd under the floor there, off the navmesh. The cutter no longer interpolates when its kept list is a single point (internal/planexport, TestApproachHopsDoesNotInterpolateACutGap); the group-6 pull is 114 yd from the last row and the run leader walks its own complete 199.8 yd path around the lake (TestZgW38HakkarOuterRowsWalkable)."
+        "WALK 38 FIX 2 (2026-11-05, leg 7; TortoiseBots-audit tests/raid-zg-walk38 f2/f3): every Hakkar attempt paused at step 601 \"no walkable path toward -11752 -1741.9 14.3\". The row was not a plan point: the approach-hop cutter's last-approach interpolation took the straight line from the floor-aware cut's only kept point (the wet south-lake corners are dropped) to the group-6 pull and stood 4.1 yd under the floor there, off the navmesh. The cutter no longer interpolates when its kept list is a single point (internal/planexport, TestApproachHopsDoesNotInterpolateACutGap); the group-6 pull is 114 yd from the last row and the run leader walks its own complete 199.8 yd path around the lake (TestZgW38HakkarOuterRowsWalkable).",
+        "ROUTE B1 (2026-11-13, leg 7; TortoiseBots-audit tests/route-audit-1112/B1-zg-lr2-findings.md and briefs-omp/route-B1-zg-round2.md, design 1): the lake packs are pulled from the plateau ring, so after group 1 the party never descends to its pocket level again. New stands, all on the dry ring LR2 walked (lr2-e): pack 2 -11848 -1634 21.1 (the export's ring row 607, 25.0 yd from its centre), pack 3 -11865 -1695 19.7 (10.3 yd), pack 6 -11728.7 -1708.3 21.1 (lr2-e frame, 26.9 yd), pack 7 -11723.9 -1665.4 21.2 (lr2-e frame, 28.2 yd); the ring groups 12, 16 and 20 take a stand as well (-11720 -1685 21.2, -11865 -1670 20.5, -11855.9 -1606.8 20.8) so every hop after a lake pull is measured from the ring, not from the pack's own shelf. The old shore groups 4 and 5 (-11902.5 -1736.05 and -11832.6 -1763.9) are dropped: the nearest dry ring point is 48.9 and 50.2 yd from their centres (44.4 and 43.9 yd from their nearest unit), past the 30 yd rule and a tank's shot, and the navmesh path from the ring is 915 and 851 yd."
       ]
     },
     {
