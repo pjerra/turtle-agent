@@ -171,6 +171,9 @@ type walkFakeAgent struct {
 	// startCallErr makes the `run start` RPC itself fail (a timed-out call: the server may still have accepted the
 	// start), after the fake recorded it and ran its startQueue and onStart hooks.
 	startCallErr error
+	// pauseCallErr makes the `run pause` RPC itself fail (a transport error, never the server's reply): even when
+	// its text mentions the run not running it must not read as the already-gone answer.
+	pauseCallErr error
 	bindLayout   string
 	enterReply   *commanderReply
 	enterBusy    int // the first enterBusy enter orders answer ERR busy
@@ -183,20 +186,34 @@ type walkFakeAgent struct {
 	runEnded bool
 	// runVerbs records every `run` commander request's verb, in order, and onSkip runs for one whose verb is skip
 	// (walk 24 B: the boss-not-found skip). skipErr makes that skip answer an error (a refusal). pauseErr, when
-	// non-nil, makes `run pause` fail while it points at true (a refused pause: the gm-instance-data resume test);
+	// non-nil, makes `run pause` fail while it points at true (a refused pause: the gm-instance-data resume test).
+	// The refusal's code and message come from pauseErrCode (default "refused") and pauseErrMsg (default "the run
+	// is busy"); the practice's already-gone answer sets both to the module's code and message.
 	// onPause runs after an accepted pause (the fake server's TBM:RUN paused line) and nil models an ACK with no
 	// status, which the practice reset must refuse.
 	runVerbs []string
 	onSkip   func()
 	skipErr  bool
 	pauseErr *bool
-	onPause  func()
+	// pauseErrMsg overrides the refused pause's message (the practice's already-gone run answers "The run is not
+	// running" instead of the default "the run is busy").
+	pauseErrMsg string
+	// pauseErrCode overrides the refused pause's ACTION_ERR code. Empty keeps the legacy "refused"; a not-going
+	// refusal answers the module's code ("no-run" or "state").
+	pauseErrCode string
+	// pauseFails caps the `run pause` refusals: the first pauseFails pauses refuse, later ones land. 0 refuses
+	// everything while pauseErr points at true.
+	pauseFails int
+	onPause    func()
 	// onStart runs after a `run start` was answered and its startQueue was pushed (a test that needs lines after a
 	// later start: the boss-not-found re-run). nil: nothing.
 	onStart func()
 	// runStatusFn answers one `run status` RPC (the re-run's stop confirmation): nil keeps the party line's answer, and
 	// a nil result falls back to it. It runs on the walk's goroutine, so it must not take f.mu.
 	runStatusFn func() *commanderReply
+	// runStatusCallErr makes the `run status` RPC itself fail (a transport error, never the server's reply): the
+	// practice's status read after a `state` pause refusal has no answer then, so its reset must be refused.
+	runStatusCallErr error
 
 	// pos is where the commander's last .go put it; the quiet-check fakes place units around it.
 	x, y, z float32
@@ -645,6 +662,12 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		v = f.commander(&p)
 		if p.Op == "run" && p.Verb == "start" && f.startCallErr != nil {
 			return f.startCallErr
+		}
+		if p.Op == "run" && p.Verb == "pause" && f.pauseCallErr != nil {
+			return f.pauseCallErr
+		}
+		if p.Op == "run" && p.Verb == "status" && f.runStatusCallErr != nil {
+			return f.runStatusCallErr
 		}
 	case "tt":
 		var p ttParams
@@ -1501,11 +1524,29 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 		if p.Verb == "pause" {
 			f.mu.Lock()
 			fail := f.pauseErr != nil && *f.pauseErr
+			n := 0
+			for _, v := range f.runVerbs {
+				if v == "pause" {
+					n++
+				}
+			}
+			// runVerbs already holds this pause: the first pauseFails pauses refuse, later ones land.
+			if f.pauseFails > 0 && n > f.pauseFails {
+				fail = false
+			}
+			msg := f.pauseErrMsg
 			hook := f.onPause
 			f.mu.Unlock()
 			if fail {
-				return commanderReply{Reply: tbm.Reply{Kind: "err", Err: &tbm.Err{Intent: "run pause", Code: "refused",
-					Message: "the run is busy"}}}
+				if msg == "" {
+					msg = "the run is busy"
+				}
+				code := f.pauseErrCode
+				if code == "" {
+					code = "refused"
+				}
+				return commanderReply{Reply: tbm.Reply{Kind: "err", Err: &tbm.Err{Intent: "run pause", Code: code,
+					Message: msg}}}
 			}
 			if hook != nil {
 				hook()

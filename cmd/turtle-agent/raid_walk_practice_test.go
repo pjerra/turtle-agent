@@ -813,6 +813,290 @@ func TestPracticePauseACKWithoutStatusRefused(t *testing.T) {
 	}
 }
 
+// TestPracticePauseStatePausedResumes: the module's `state` refusal covers a slot that is not Running, including a
+// Paused run (door hold, system or player pause). The reset proceeds AND resumes afterwards: the status read finds
+// the run paused, so the slot is worth resuming into.
+func TestPracticePauseStatePausedResumes(t *testing.T) {
+	sc := &practiceScenario{}
+	f, _, _ := practiceFixture(t, sc, 10)
+	sc.mu.Lock()
+	sc.dropAt = f.clock.now().Add(time.Hour)
+	sc.mu.Unlock()
+	fails := true
+	f.agent.pauseErr = &fails
+	f.agent.pauseErrCode = "state"
+	f.agent.pauseErrMsg = "The run is not running."
+	// The stub helper is defined at the end of this file.
+	f.agent.runStatusFn = pausedRunStatus("zul_gurub", "paused for the practice status read")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (notes %v): %s", code, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Attempts != 2 || sum.Practice.Cycles != 10 || sum.Practice.Ended != "cycles" {
+		t.Fatalf("practice %+v, want 2 attempts, 10 cycles, ended cycles (the reset proceeded)", sum.Practice)
+	}
+	if n := countLog(f.agent.log, "cmdr run pause"); n != 1 {
+		t.Fatalf("%d run pauses, want 1 (log %v)", n, f.agent.log)
+	}
+	if n := countPrefix(f.agent.runVerbs, "resume"); n != 1 {
+		t.Fatalf("%d run resumes, want 1 (the paused run resumes after the reset)", n)
+	}
+	if sc.evadeN != 1 {
+		t.Fatalf("%d evades, want 1", sc.evadeN)
+	}
+	if !hasNote(f.summary(), "the run is not running (paused: TBM:RUN|zul_gurub|paused") {
+		t.Fatalf("notes %v, want the not-running paused note", f.summary().Notes)
+	}
+}
+
+// TestPracticePauseStateDoneSkipsResume: the same `state` refusal with a Done run proceeds with the reset but skips
+// the resume: the slot ended, so there is nothing to resume into.
+func TestPracticePauseStateDoneSkipsResume(t *testing.T) {
+	sc := &practiceScenario{}
+	f, _, _ := practiceFixture(t, sc, 10)
+	sc.mu.Lock()
+	sc.dropAt = f.clock.now().Add(time.Hour)
+	sc.mu.Unlock()
+	fails := true
+	f.agent.pauseErr = &fails
+	f.agent.pauseErrCode = "state"
+	f.agent.pauseErrMsg = "The run is not running."
+	f.agent.runStatusFn = doneRunStatus("zul_gurub")
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (notes %v): %s", code, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Attempts != 2 || sum.Practice.Cycles != 10 || sum.Practice.Ended != "cycles" {
+		t.Fatalf("practice %+v, want 2 attempts, 10 cycles, ended cycles (the reset proceeded)", sum.Practice)
+	}
+	if n := countPrefix(f.agent.runVerbs, "resume"); n != 0 {
+		t.Fatalf("%d run resumes, want 0 (the done run has nothing to resume)", n)
+	}
+	if sc.evadeN != 1 {
+		t.Fatalf("%d evades, want 1", sc.evadeN)
+	}
+}
+
+// TestPracticePauseStateRunningRefused: a `state` refusal means the server says the run is not running, so a status
+// read that answers Running contradicts it. That is no answer to proceed on: the practice ends with exit 18 and the
+// reset does no GM action (no evade, no revive, no respawn, no hp restore) and never resumes.
+func TestPracticePauseStateRunningRefused(t *testing.T) {
+	sc := &practiceScenario{}
+	f, _, _ := practiceFixture(t, sc, 10)
+	sc.mu.Lock()
+	sc.dropAt = f.clock.now().Add(time.Hour)
+	sc.mu.Unlock()
+	fails := true
+	f.agent.pauseErr = &fails
+	f.agent.pauseErrCode = "state"
+	f.agent.pauseErrMsg = "The run is not running."
+	f.agent.runStatusFn = runningRunStatus("zul_gurub")
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d (notes %v): %s", code, exitRaidWalkFailed, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Ended != "run pause refused" || sum.Practice.Attempts != 1 {
+		t.Fatalf("practice %+v, want one attempt ended run pause refused", sum.Practice)
+	}
+	if !strings.Contains(sum.EndReason, "the run pause before the reset failed") {
+		t.Fatalf("end reason %q, want the pause failure", sum.EndReason)
+	}
+	if !hasNote(sum, "the status read is unknown (TBM:RUN|zul_gurub|running") {
+		t.Fatalf("notes %v, want the unknown-state note", sum.Notes)
+	}
+	if n := countPrefix(f.agent.runVerbs, "resume"); n != 0 {
+		t.Fatalf("%d run resumes after an unknown run state, want 0", n)
+	}
+	for _, meth := range []string{"gm_evade ", "gm_set_hp ", "gm_respawn ", "gm_revive "} {
+		if n := countLog(f.agent.log, meth); n != 0 {
+			t.Fatalf("%d %s calls after a Running status contradicted the refusal (log %v)", n, meth, f.agent.log)
+		}
+	}
+}
+
+// TestPracticePauseStateReadErrorRefused: a status read that does not answer leaves the run's state unknown, and an
+// unknown state is never a reason to reset unheld. The practice ends with exit 18 and no GM action of the reset.
+func TestPracticePauseStateReadErrorRefused(t *testing.T) {
+	sc := &practiceScenario{}
+	f, _, _ := practiceFixture(t, sc, 10)
+	sc.mu.Lock()
+	sc.dropAt = f.clock.now().Add(time.Hour)
+	sc.mu.Unlock()
+	fails := true
+	f.agent.pauseErr = &fails
+	f.agent.pauseErrCode = "state"
+	f.agent.pauseErrMsg = "The run is not running."
+	f.agent.runStatusCallErr = errors.New("commander: the call timed out")
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d (notes %v): %s", code, exitRaidWalkFailed, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Ended != "run pause refused" || sum.Practice.Attempts != 1 {
+		t.Fatalf("practice %+v, want one attempt ended run pause refused", sum.Practice)
+	}
+	if !strings.Contains(sum.EndReason, "the run pause before the reset failed") {
+		t.Fatalf("end reason %q, want the pause failure", sum.EndReason)
+	}
+	if !hasNote(sum, "the status read is unknown (run status unreadable (commander: the call timed out))") {
+		t.Fatalf("notes %v, want the unreadable-status note", sum.Notes)
+	}
+	if n := countPrefix(f.agent.runVerbs, "resume"); n != 0 {
+		t.Fatalf("%d run resumes after an unreadable run state, want 0", n)
+	}
+	for _, meth := range []string{"gm_evade ", "gm_set_hp ", "gm_respawn ", "gm_revive "} {
+		if n := countLog(f.agent.log, meth); n != 0 {
+			t.Fatalf("%d %s calls after an unreadable status (log %v)", n, meth, f.agent.log)
+		}
+	}
+}
+
+// TestPracticePauseNoRunCodeProceeds: the `no-run` answer means no slot at all: the reset proceeds without a held
+// run and skips the resume, with no status read in between.
+func TestPracticePauseNoRunCodeProceeds(t *testing.T) {
+	sc := &practiceScenario{}
+	f, _, _ := practiceFixture(t, sc, 10)
+	sc.mu.Lock()
+	sc.dropAt = f.clock.now().Add(time.Hour)
+	sc.mu.Unlock()
+	fails := true
+	f.agent.pauseErr = &fails
+	f.agent.pauseErrCode = "no-run"
+	f.agent.pauseErrMsg = "No run is going (.bot run start [plan])."
+	// A status read here would be a bug: no-run skips it. Fail the walk if one goes out.
+	f.agent.runStatusFn = func() *commanderReply {
+		t.Error("run status read after a no-run pause refusal: no slot exists to read")
+		return nil
+	}
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (notes %v): %s", code, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Attempts != 2 || sum.Practice.Cycles != 10 || sum.Practice.Ended != "cycles" {
+		t.Fatalf("practice %+v, want 2 attempts, 10 cycles, ended cycles (the reset proceeded)", sum.Practice)
+	}
+	if n := countPrefix(f.agent.runVerbs, "resume"); n != 0 {
+		t.Fatalf("%d run resumes, want 0 (no run slot left to resume into)", n)
+	}
+	if n := countPrefix(f.agent.runVerbs, "status"); n != 0 {
+		t.Fatalf("%d run status reads, want 0 (no-run needs no status)", n)
+	}
+}
+
+// TestPracticePauseStickyFlagCleared: one `state` refusal on reset 1 (Done: no resume), then a successful pause on
+// reset 2, must resume on reset 2. The skip decision is per reset: reset 1 must not suppress reset 2's resume.
+func TestPracticePauseStickyFlagCleared(t *testing.T) {
+	sc := &practiceScenario{}
+	f, _, _ := practiceFixture(t, sc, 15)
+	// Three attempts at 90 s casts need more than the 20 m default: the fake clock makes it free.
+	f.opts.practiceMax = 40 * time.Minute
+	sc.mu.Lock()
+	sc.dropAt = f.clock.now().Add(time.Hour)
+	sc.mu.Unlock()
+	fails := true
+	f.agent.pauseErr = &fails
+	f.agent.pauseErrCode = "state"
+	f.agent.pauseErrMsg = "The run is not running."
+	f.agent.runStatusFn = doneRunStatus("zul_gurub")
+	// The first pause refuses (Done: no resume); the second lands (the fixture's default onPause hook pushes the
+	// paused line the pause wait needs). pauseFails counts the verbs, so no test hook races the walk.
+	f.agent.pauseFails = 1
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d, want 0 (notes %v): %s", code, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Ended != "cycles" {
+		t.Fatalf("practice %+v, want ended cycles", sum.Practice)
+	}
+	if n := countLog(f.agent.log, "cmdr run pause"); n != 2 {
+		t.Fatalf("%d run pauses, want 2 (log %v)", n, f.agent.log)
+	}
+	if n := countPrefix(f.agent.runVerbs, "resume"); n != 1 {
+		t.Fatalf("%d run resumes, want 1 (reset 2's pause landed, so it resumes)", n)
+	}
+}
+
+// TestPracticePauseWrongCodeWithPhraseFails: a refusal under a different code whose message contains the phrase is
+// not the server's already-gone reply: only the two module codes (`no-run`, `state`) continue unheld, so the reset
+// is refused before any GM action.
+func TestPracticePauseWrongCodeWithPhraseFails(t *testing.T) {
+	sc := &practiceScenario{}
+	f, _, _ := practiceFixture(t, sc, 10)
+	sc.mu.Lock()
+	sc.dropAt = f.clock.now().Add(time.Hour)
+	sc.mu.Unlock()
+	fails := true
+	f.agent.pauseErr = &fails
+	f.agent.pauseErrCode = "busy"
+	f.agent.pauseErrMsg = "The run is not running elsewhere, wait your turn"
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d (notes %v): %s", code, exitRaidWalkFailed, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Ended != "run pause refused" || sum.Practice.Attempts != 1 {
+		t.Fatalf("practice %+v, want one attempt ended run pause refused", sum.Practice)
+	}
+	if !strings.Contains(sum.EndReason, "the run pause before the reset failed") {
+		t.Fatalf("end reason %q, want the pause failure", sum.EndReason)
+	}
+	for _, meth := range []string{"gm_evade ", "gm_set_hp ", "gm_respawn ", "gm_revive "} {
+		if n := countLog(f.agent.log, meth); n != 0 {
+			t.Fatalf("%d %s calls after a wrong-code refusal (log %v)", n, meth, f.agent.log)
+		}
+	}
+}
+
+// TestPracticePauseTransportErrorFails: a `run pause` transport error whose text mentions the run not running is not
+// the server's already-gone reply: the practice refuses the reset before any GM action, with no retry of a phrase
+// that only matches inside pauseRun's reply classification.
+func TestPracticePauseTransportErrorFails(t *testing.T) {
+	sc := &practiceScenario{}
+	f, _, _ := practiceFixture(t, sc, 10)
+	sc.mu.Lock()
+	sc.dropAt = f.clock.now().Add(time.Hour)
+	sc.mu.Unlock()
+	f.agent.pauseCallErr = errors.New("commander: the call timed out: run is not running")
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d (notes %v): %s", code, exitRaidWalkFailed, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Ended != "run pause refused" || sum.Practice.Attempts != 1 {
+		t.Fatalf("practice %+v, want one attempt ended run pause refused", sum.Practice)
+	}
+	if !strings.Contains(sum.EndReason, "the run pause before the reset failed") {
+		t.Fatalf("end reason %q, want the pause failure", sum.EndReason)
+	}
+	for _, meth := range []string{"gm_evade ", "gm_set_hp ", "gm_respawn ", "gm_revive "} {
+		if n := countLog(f.agent.log, meth); n != 0 {
+			t.Fatalf("%d %s calls after a failed pause (log %v)", n, meth, f.agent.log)
+		}
+	}
+}
+
+// TestPracticePauseOtherRefusalFails: any other pause refusal ("the run is busy") still fails the reset before any
+// GM action: only the server's not-going reply continues unheld.
+func TestPracticePauseOtherRefusalFails(t *testing.T) {
+	sc := &practiceScenario{}
+	f, _, _ := practiceFixture(t, sc, 10)
+	sc.mu.Lock()
+	sc.dropAt = f.clock.now().Add(time.Hour)
+	sc.mu.Unlock()
+	fails := true
+	f.agent.pauseErr = &fails
+	f.agent.pauseErrMsg = "the run is busy"
+	if code := f.run(context.Background()); code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d (notes %v): %s", code, exitRaidWalkFailed, f.summaryNotes(), f.stderr.String())
+	}
+	sum := f.summary()
+	if sum.Practice == nil || sum.Practice.Ended != "run pause refused" || sum.Practice.Attempts != 1 {
+		t.Fatalf("practice %+v, want one attempt ended run pause refused", sum.Practice)
+	}
+	for _, meth := range []string{"gm_evade ", "gm_set_hp ", "gm_respawn ", "gm_revive "} {
+		if n := countLog(f.agent.log, meth); n != 0 {
+			t.Fatalf("%d %s calls after a refused pause (log %v)", n, meth, f.agent.log)
+		}
+	}
+}
+
 // TestPracticeFailedResetCountedOnce: a reset that did not land is counted once. The pull after it never re-engages,
 // and that adds nothing (M1): the practice needs three bad resets, so it makes three, not two.
 func TestPracticeFailedResetCountedOnce(t *testing.T) {
@@ -1297,5 +1581,40 @@ func TestPracticeFightIDsCoverThePull(t *testing.T) {
 	got := w.practiceFightIDs()
 	if len(got) != 2 || got[0] != "during" || got[1] != "the-pull" {
 		t.Fatalf("fight ids %v, want [during the-pull]", got)
+	}
+}
+
+// pausedRunStatus answers one `run status` with the run Paused: the practice's status read after a `state` pause
+// refusal finds a held slot worth resuming.
+func pausedRunStatus(plan, note string) func() *commanderReply {
+	return func() *commanderReply {
+		run := fmt.Sprintf("TBM:RUN|%s|paused|1/21|hakkar|boss|begin|%s", plan, note)
+		return &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+			Ack:   &tbm.Ack{Intent: "run status", Scope: "party", Count: 1, Executor: "-"},
+			Line:  run,
+			Lines: []string{run, "TBM:ACTION_ACK|run status|party|1|-"}}}
+	}
+}
+
+// runningRunStatus answers one `run status` with the run Running: an answer that contradicts the `state` pause
+// refusal, so the reset is refused.
+func runningRunStatus(plan string) func() *commanderReply {
+	return func() *commanderReply {
+		run := fmt.Sprintf("TBM:RUN|%s|running|3/21|hakkar|boss|begin|still going", plan)
+		return &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+			Ack:   &tbm.Ack{Intent: "run status", Scope: "party", Count: 1, Executor: "-"},
+			Line:  run,
+			Lines: []string{run, "TBM:ACTION_ACK|run status|party|1|-"}}}
+	}
+}
+
+// doneRunStatus answers one `run status` with the run Done: the slot ended, so the reset skips the resume.
+func doneRunStatus(plan string) func() *commanderReply {
+	return func() *commanderReply {
+		run := fmt.Sprintf("TBM:RUN|%s|done|21/21|hakkar|boss|begin|plan done", plan)
+		return &commanderReply{Reply: tbm.Reply{Kind: tbm.KindAck, OK: true,
+			Ack:   &tbm.Ack{Intent: "run status", Scope: "party", Count: 1, Executor: "-"},
+			Line:  run,
+			Lines: []string{run, "TBM:ACTION_ACK|run status|party|1|-"}}}
 	}
 }
