@@ -211,6 +211,9 @@ type walkFakeAgent struct {
 	// runStatusFn answers one `run status` RPC (the re-run's stop confirmation): nil keeps the party line's answer, and
 	// a nil result falls back to it. It runs on the walk's goroutine, so it must not take f.mu.
 	runStatusFn func() *commanderReply
+	// runStatusCallErr makes the `run status` RPC itself fail (a transport error, never the server's reply): the
+	// practice's status read after a `state` pause refusal has no answer then, so its reset must be refused.
+	runStatusCallErr error
 
 	// pos is where the commander's last .go put it; the quiet-check fakes place units around it.
 	x, y, z float32
@@ -662,6 +665,9 @@ func (f *walkFakeAgent) Call(ctx context.Context, method string, params, out any
 		}
 		if p.Op == "run" && p.Verb == "pause" && f.pauseCallErr != nil {
 			return f.pauseCallErr
+		}
+		if p.Op == "run" && p.Verb == "status" && f.runStatusCallErr != nil {
+			return f.runStatusCallErr
 		}
 	case "tt":
 		var p ttParams

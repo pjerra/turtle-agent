@@ -988,8 +988,35 @@ var errRunGone = errors.New("no run is going")
 // errRunNotRunning marks the reset pause's not-running-slot answer: the server's `run pause` ACTION_ERR has code
 // `state`, "The run is not running." (:15466-15468, the pause verb's only `state` refusal). That code means the
 // slot exists but is not Running: Paused (door hold, system or player pause) or Done. practiceReset reads the run
-// status to tell them apart: Paused resumes afterwards, Done or absent skips the resume.
+// status to tell them apart: a Paused run resumes afterwards, a Done (or no) slot skips the resume, and any other
+// answer refuses the reset.
 var errRunNotRunning = errors.New("run is not running")
+
+// runState is what the `run status` read after a `state` pause refusal says about the slot. Only the two continuous
+// answers go on unheld: one worth resuming into, and one with nothing left to resume. Everything else (Running after
+// the server called the run not running, an unrecognised state, a lineless answer, a refused or failed read) is
+// unknown, and the reset is refused rather than run unheld.
+type runSlotState int
+
+const (
+	// runStateEnded: Done or no slot. The reset proceeds and skips the resume.
+	runStateEnded runSlotState = iota
+	// runStatePaused: a paused slot the reset resumes afterwards.
+	runStatePaused
+	// runStateUnknown: Running, an unrecognised state, or a read that did not answer.
+	runStateUnknown
+)
+
+// String names the state for the notes.
+func (s runSlotState) String() string {
+	switch s {
+	case runStatePaused:
+		return "paused"
+	case runStateEnded:
+		return "ended"
+	}
+	return "unknown"
+}
 
 // practicePauseRefusal classifies the server's `run pause` ACTION_ERR for the reset: the code is the whole signal,
 // never the message text.
@@ -1019,8 +1046,10 @@ func (w *walk) practiceReset(ctx context.Context, p *practiceState, bossStep int
 	// no paused status in practicePauseWait) ends the practice HERE, EXCEPT when the server says the run is not
 	// running: `no-run` (no slot at all) or `state` (a slot that is not Running: Paused or Done). The wipe rule
 	// may have stopped it (the practice saw this at ~10.5 min in), or it ended or was stopped from under the
-	// reset. Then the reset proceeds without a held run; skipResume is decided per reset below and never leaks
-	// into the next one.
+	// reset. Then the reset proceeds without a held run, but only when the run status itself says Paused (the
+	// resume follows) or Done/no slot (the resume is skipped): a Running or unreadable status is no answer, so
+	// the reset is refused instead of run unheld. skipResume is decided per reset below and never leaks into the
+	// next one.
 	skipResume := false
 	if err := w.pauseRun(ctx); err != nil {
 		switch {
@@ -1030,12 +1059,23 @@ func (w *walk) practiceReset(ctx context.Context, p *practiceState, bossStep int
 			w.logLine(w.env.now(), "practice: no run is going, the reset proceeds without a pause")
 			skipResume = true
 		case errors.Is(err, errRunNotRunning):
-			// A slot that is not Running: Paused resumes afterwards, Done or absent skips the resume. The
-			// status read is the server's own answer through the commander RPC, not the push feed's newest line.
-			paused, why := w.practiceRunPaused(ctx)
-			w.note("practice: the run is not running (%s) before the reset pause: continuing unheld", why)
-			w.logLine(w.env.now(), "practice: the run is not running, the reset proceeds without a pause")
-			skipResume = !paused
+			// A slot that is not Running: Paused resumes afterwards, Done or no slot skips the resume, and any
+			// other answer refuses the reset. The status read is the server's own answer through the commander
+			// RPC, not the push feed's newest line.
+			state, why := w.practiceRunState(ctx)
+			switch state {
+			case runStatePaused:
+				w.note("practice: the run is not running (%s: %s) before the reset pause: continuing unheld", state, why)
+				w.logLine(w.env.now(), "practice: the run is paused, the reset proceeds and resumes it afterwards")
+			case runStateEnded:
+				skipResume = true
+				w.note("practice: the run is not running (%s: %s) before the reset pause: continuing unheld, no resume", state, why)
+				w.logLine(w.env.now(), "practice: the run has ended, the reset proceeds without a pause or a resume")
+			default:
+				w.note("practice: the run is not running but the status read is %s (%s): refusing the reset", state, why)
+				p.ended = "run pause refused"
+				return false, stopf(exitRaidWalkFailed, "practice: the run pause before the reset failed: %v", err)
+			}
 		default:
 			p.ended = "run pause refused"
 			return false, stopf(exitRaidWalkFailed, "practice: the run pause before the reset failed: %v", err)
@@ -1104,25 +1144,29 @@ func (w *walk) practiceReset(ctx context.Context, p *practiceState, bossStep int
 	return resetOK, nil
 }
 
-// practiceRunPaused reads one `run status` after a `state` pause refusal and reports whether the run still holds a
-// paused slot worth resuming. why names what the status showed, for the notes. Unreadable, refused, or lineless
-// answers are not a held run: the reset proceeds and the resume is skipped.
-func (w *walk) practiceRunPaused(ctx context.Context) (bool, string) {
+// practiceRunState reads one `run status` after a `state` pause refusal and classifies the slot. why names what the
+// answer showed, for the notes: the TBM:RUN line, or why there was none. A Paused slot is worth resuming; Done or no
+// slot has nothing to resume into; Running, an unrecognised state, and a refused, failed or lineless read are all
+// unknown, so the caller refuses the reset rather than run it unheld.
+func (w *walk) practiceRunState(ctx context.Context) (runSlotState, string) {
 	rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "status", WaitMS: 5000})
 	switch {
 	case err != nil:
-		return false, fmt.Sprintf("run status unreadable (%v)", err)
+		return runStateUnknown, fmt.Sprintf("run status unreadable (%v)", err)
 	case rep.Reply.Err != nil:
-		return false, fmt.Sprintf("run status refused (%s)", rep.Reply.Err.Message)
+		return runStateUnknown, fmt.Sprintf("run status refused (%s)", rep.Reply.Err.Message)
 	default:
 		st, line, ok := lastRunLine(rep.Reply.Lines)
 		if !ok {
-			return false, "run status answer has no TBM:RUN line"
+			return runStateUnknown, "run status answer has no TBM:RUN line"
 		}
-		if st.State == tbm.RunPaused {
-			return true, line
+		switch st.State {
+		case tbm.RunPaused:
+			return runStatePaused, line
+		case tbm.RunDone, tbm.RunNone:
+			return runStateEnded, line
 		}
-		return false, line
+		return runStateUnknown, line
 	}
 }
 
