@@ -26,11 +26,14 @@
 //     the whole practice, without a respawn and without crediting a kill).
 //  5. Reset: pause the run with the commander's `run pause` (never `.bot run stop`: a stop ends the run and erases
 //     its slot); a pause that does not land (a refusal, no ACK, no paused status on this plan within 10 s) ends the
-//     practice before any GM action. Then `.npc evade` the boss, wait up to 30 s for it at 100 % with no target,
-//     revive the dead hires and the commander, `.respawn` every dead Son the client still holds (a guid it no longer
-//     holds is skipped and noted), rest --practice-rest out of combat, re-check the lease, resend the
-//     --gm-instance-data lines, and resume the run at the boss row. The next attempt's clock starts at its
-//     re-engagement (up to 60 s); no re-engagement is a failed reset, counted once per reset.
+//     practice before any GM action, EXCEPT when the server says the run is not running (paused, done or gone):
+//     `no-run` (no slot at all) and `state` (a slot that is not Running) proceed unheld instead. The resume at the
+//     end is skipped when the pause found no resumable run; a Paused slot still resumes. Then `.npc evade` the boss,
+//     wait up to 30 s for it at 100 % with no target, revive the dead hires and the commander, `.respawn` every
+//     dead Son the client still holds (a guid it no longer holds is skipped and noted), rest --practice-rest out of
+//     combat, re-check the lease, resend the --gm-instance-data lines, and resume the run at the boss row. The next
+//     attempt's clock starts at its re-engagement (up to 60 s); no re-engagement is a failed reset, counted once
+//     per reset.
 //  6. End: the cycle budget, --practice-max, a boss death, 3 failed resets or 4 attempts; then the normal teardown.
 //
 // Safety: the loop runs only on a server in placeServers, re-checked before every GM action; the hands are the
@@ -125,9 +128,6 @@ type practiceState struct {
 	// lastCast is the last cycle's cast time: a cast within EverySec/2 of it is the same cast (a spell_start and its
 	// spell_go, or the event of a cast the timer already counted), never a second cycle.
 	lastCast time.Time
-	// runGone means the reset's pause found no run (the server answered it is not running): the reset ran
-	// unheld and the resume is skipped (there is no run slot left to resume into).
-	runGone bool
 	// awaitingReengage says the next attempt follows a reset and its clock starts only when the boss re-engages.
 	awaitingReengage bool
 	// lastResetOK is the reset's own verdict (the boss showed home, 100 % and no target): only a reset that landed
@@ -979,22 +979,31 @@ func (w *walk) practiceSonsAlive() int {
 	return n
 }
 
-// errRunNotRunning marks the reset pause's already-gone answer: the server's `run pause` ACTION_ERR says no run
-// is running. Only the reply's code carries it (see practiceRunNotGoing): transport, poll and interrupt errors,
-// and refusals under any other code, never match.
+// errRunGone marks the reset pause's no-slot answer: the server's `run pause` ACTION_ERR has code `no-run`, "No run
+// is going (.bot run start [plan])." (TortoiseBots commands/Commander.cpp RunVerbAs, upstream/dev f7368050
+// :15381). The run slot is gone: the reset proceeds without a held run and the resume is skipped. Transport, poll
+// and interrupt errors, and refusals under any other code, never match.
+var errRunGone = errors.New("no run is going")
+
+// errRunNotRunning marks the reset pause's not-running-slot answer: the server's `run pause` ACTION_ERR has code
+// `state`, "The run is not running." (:15466-15468, the pause verb's only `state` refusal). That code means the
+// slot exists but is not Running: Paused (door hold, system or player pause) or Done. practiceReset reads the run
+// status to tell them apart: Paused resumes afterwards, Done or absent skips the resume.
 var errRunNotRunning = errors.New("run is not running")
 
-// practiceRunNotGoing reports the server's already-gone answer to `run pause`: the wipe rule stopped the run (the
-// practice saw this at ~10.5 min in), or it ended or was stopped from under the reset. The module's two pause
-// refusals for no running run are both distinct ACTION_ERR codes (TortoiseBots commands/Commander.cpp RunVerbAs,
-// upstream/dev f7368050): `no-run` with "No run is going (.bot run start [plan])." when no run slot exists
-// (:15381), and `state` with "The run is not running." when the slot's state is not Running (:15466-15468, the
-// only `state` refusal the pause verb sends). The code is the whole signal: never the message text.
-func practiceRunNotGoing(err *tbm.Err) bool {
+// practicePauseRefusal classifies the server's `run pause` ACTION_ERR for the reset: the code is the whole signal,
+// never the message text.
+func practicePauseRefusal(err *tbm.Err) error {
 	if err == nil {
-		return false
+		return nil
 	}
-	return err.Code == "no-run" || err.Code == "state"
+	switch err.Code {
+	case "no-run":
+		return errRunGone
+	case "state":
+		return errRunNotRunning
+	}
+	return nil
 }
 
 // practiceReset pauses the run, resets the boss and the Sons, rests, resends the instance data and resumes the run at
@@ -1007,18 +1016,30 @@ func (w *walk) practiceReset(ctx context.Context, p *practiceState, bossStep int
 	}
 	// `run pause` holds the run with its binding kept. Never `.bot run stop`: a stop ENDS the run and erases its
 	// slot, so the resume after the reset would find no run going. A pause that did not land (a refusal, no ACK,
-	// no paused status in practicePauseWait) ends the practice HERE, EXCEPT when the server says the run is
-	// already gone ("The run is not running" / "No run is going": the wipe rule stopped it, or it ended or was
-	// stopped from under the reset). Then there is nothing to hold: the reset proceeds without a held run, and the
-	// resume at the end is skipped too (there is no run slot left to resume into).
+	// no paused status in practicePauseWait) ends the practice HERE, EXCEPT when the server says the run is not
+	// running: `no-run` (no slot at all) or `state` (a slot that is not Running: Paused or Done). The wipe rule
+	// may have stopped it (the practice saw this at ~10.5 min in), or it ended or was stopped from under the
+	// reset. Then the reset proceeds without a held run; skipResume is decided per reset below and never leaks
+	// into the next one.
+	skipResume := false
 	if err := w.pauseRun(ctx); err != nil {
-		if !errors.Is(err, errRunNotRunning) {
+		switch {
+		case errors.Is(err, errRunGone):
+			// No run slot: nothing to hold and nothing to resume into.
+			w.note("practice: the run is not running (no run going) before the reset pause: continuing unheld")
+			w.logLine(w.env.now(), "practice: no run is going, the reset proceeds without a pause")
+			skipResume = true
+		case errors.Is(err, errRunNotRunning):
+			// A slot that is not Running: Paused resumes afterwards, Done or absent skips the resume. The
+			// status read is the server's own answer through the commander RPC, not the push feed's newest line.
+			paused, why := w.practiceRunPaused(ctx)
+			w.note("practice: the run is not running (%s) before the reset pause: continuing unheld", why)
+			w.logLine(w.env.now(), "practice: the run is not running, the reset proceeds without a pause")
+			skipResume = !paused
+		default:
 			p.ended = "run pause refused"
 			return false, stopf(exitRaidWalkFailed, "practice: the run pause before the reset failed: %v", err)
 		}
-		w.note("practice: the run already ended before the reset pause: continuing unheld")
-		w.logLine(w.env.now(), "practice: the run is not running, the reset proceeds without a pause")
-		p.runGone = true
 	}
 	if err := w.practiceGMEvade(ctx, p.bossGUID); err != nil {
 		return false, err
@@ -1062,10 +1083,10 @@ func (w *walk) practiceReset(ctx context.Context, p *practiceState, bossStep int
 		}
 	}
 	now := w.env.now()
-	// A run that was already gone at the pause has no slot left to resume into: the GM reset stands alone, and the
-	// next attempt re-engages the boss from the world state it finds.
-	if p.runGone {
-		w.logLine(now, "practice: reset done; no run to resume (it already ended)")
+	// A pause that found no resumable run leaves no slot to resume into: the GM reset stands alone, and the next
+	// attempt re-engages the boss from the world state it finds.
+	if skipResume {
+		w.logLine(now, "practice: reset done; no run to resume (not running at the pause)")
 		return resetOK, nil
 	}
 	if err := w.resumeRun(ctx, bossStep, now, w.opts.practiceRest); err != nil {
@@ -1083,6 +1104,28 @@ func (w *walk) practiceReset(ctx context.Context, p *practiceState, bossStep int
 	return resetOK, nil
 }
 
+// practiceRunPaused reads one `run status` after a `state` pause refusal and reports whether the run still holds a
+// paused slot worth resuming. why names what the status showed, for the notes. Unreadable, refused, or lineless
+// answers are not a held run: the reset proceeds and the resume is skipped.
+func (w *walk) practiceRunPaused(ctx context.Context) (bool, string) {
+	rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "status", WaitMS: 5000})
+	switch {
+	case err != nil:
+		return false, fmt.Sprintf("run status unreadable (%v)", err)
+	case rep.Reply.Err != nil:
+		return false, fmt.Sprintf("run status refused (%s)", rep.Reply.Err.Message)
+	default:
+		st, line, ok := lastRunLine(rep.Reply.Lines)
+		if !ok {
+			return false, "run status answer has no TBM:RUN line"
+		}
+		if st.State == tbm.RunPaused {
+			return true, line
+		}
+		return false, line
+	}
+}
+
 // pauseRun holds the run with the commander's `run pause` (the binding is kept, and a later `run resume` finds it).
 // It is what the reset and the gm-instance-data firing use; `.bot run stop` is never a pause. The ACK is checked the
 // way resumeRun checks its own (an ERR or a non-ACK reply is a refusal), and only a status received AFTER the request
@@ -1094,8 +1137,8 @@ func (w *walk) pauseRun(ctx context.Context) error {
 		return err
 	}
 	if rep.Reply.Err != nil {
-		if practiceRunNotGoing(rep.Reply.Err) {
-			return fmt.Errorf("run pause refused (%s): %w", rep.Reply.Err.Message, errRunNotRunning)
+		if sentinel := practicePauseRefusal(rep.Reply.Err); sentinel != nil {
+			return fmt.Errorf("run pause refused (%s): %w", rep.Reply.Err.Message, sentinel)
 		}
 		return fmt.Errorf("run pause: %s", rep.Reply.Err.Message)
 	}

@@ -201,7 +201,10 @@ type walkFakeAgent struct {
 	// pauseErrCode overrides the refused pause's ACTION_ERR code. Empty keeps the legacy "refused"; a not-going
 	// refusal answers the module's code ("no-run" or "state").
 	pauseErrCode string
-	onPause      func()
+	// pauseFails caps the `run pause` refusals: the first pauseFails pauses refuse, later ones land. 0 refuses
+	// everything while pauseErr points at true.
+	pauseFails int
+	onPause    func()
 	// onStart runs after a `run start` was answered and its startQueue was pushed (a test that needs lines after a
 	// later start: the boss-not-found re-run). nil: nothing.
 	onStart func()
@@ -1515,6 +1518,16 @@ func (f *walkFakeAgent) commander(p *commanderReq) commanderReply {
 		if p.Verb == "pause" {
 			f.mu.Lock()
 			fail := f.pauseErr != nil && *f.pauseErr
+			n := 0
+			for _, v := range f.runVerbs {
+				if v == "pause" {
+					n++
+				}
+			}
+			// runVerbs already holds this pause: the first pauseFails pauses refuse, later ones land.
+			if f.pauseFails > 0 && n > f.pauseFails {
+				fail = false
+			}
 			msg := f.pauseErrMsg
 			hook := f.onPause
 			f.mu.Unlock()
