@@ -198,9 +198,12 @@ type ttUnit struct {
 	// Spawn is the spawn's guid low (`db`): the notes carry it so a live run can match a unit against the spawn export.
 	Spawn uint32
 	// Dead is the toolkit's `dead` field: a corpse (bossKilled's toolkit read asks for the dead units too).
-	Dead  bool
-	MaxHP float64
-	Rank  int
+	Dead bool
+	// InCombat is the toolkit's `cb` field (Unit:IsInCombat): the pre-placement guard of a resumed or reused instance
+	// reads it (walk 97 fight 9-1), the place decisions never did.
+	InCombat bool
+	MaxHP    float64
+	Rank     int
 }
 
 // ttUnitOf reduces one element of a reply's unit list.
@@ -222,6 +225,7 @@ func ttUnitOf(m map[string]json.RawMessage) ttUnit {
 		u.Rank = int(rk)
 	}
 	u.Dead = flagOf(m, "dead")
+	u.InCombat = flagOf(m, "cb")
 	if hpv := numList(m, "hpv"); len(hpv) >= 2 {
 		u.MaxHP = hpv[1]
 	}
@@ -2068,6 +2072,12 @@ func (w *walk) placeReuse(ctx context.Context) error {
 	if err := w.placeFloor(ctx, p); err != nil {
 		return err
 	}
+	// Walk 97 fight 9-1: the raid's copy may still hold a boss fight the dead attempt left running (exit 18 mid-fight).
+	// The boss's own combat state decides here, before the first `.summon`: the quiet cannot see it (his adds stand
+	// beyond the landing reach, BEHIND).
+	if err := w.placeBossCombat(ctx); err != nil {
+		return err
+	}
 	// The quiet, after the GM clear and before the first `.summon`: the copy is live, so a patrol may have walked into
 	// the landing reach since the last attempt.
 	if err := w.placeQuietRetry(ctx); err != nil {
@@ -2122,6 +2132,12 @@ func (w *walk) placeResume(ctx context.Context) error {
 		return stopf(exitRaidWalkFailed, "place: --reuse-instance: the existing bind named instance %.0f, but .go entered %.0f: the bind is gone; run without --reuse-instance", w.placeInst, inst)
 	}
 	if err := w.placeFloor(ctx, p); err != nil {
+		return err
+	}
+	// Walk 97 fight 9-1: the previous cmd's agent died mid-fight (exit 18) and the bound instance still holds the boss
+	// and his arena adds engaged. The quiet cannot see them (beyond the landing reach, BEHIND), so the summon would
+	// drop the raid into the live fight: the boss's own combat state decides here.
+	if err := w.placeBossCombat(ctx); err != nil {
 		return err
 	}
 	for _, warn := range w.gmClearWarn {
