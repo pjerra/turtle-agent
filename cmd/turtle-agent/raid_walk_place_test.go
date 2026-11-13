@@ -73,6 +73,8 @@ type placeToolkit struct {
 	f    *fixture
 	mu   sync.Mutex // guards fields a test sets while the walk runs (instAfterSignal)
 	inst float64    // the instance `q inst` and `q group` report
+	// planMap is the map `q group` members report (0: 309, the fixture plan's map).
+	planMap uint32
 	// cmdInst, when set, is what `q inst` reports instead (a commander in another copy).
 	cmdInst float64
 	// afterPlace, when set, makes `q inst` report movedInst once the place has happened.
@@ -217,8 +219,12 @@ func (p *placeToolkit) members() []any {
 	p.f.agent.mu.Lock()
 	defer p.f.agent.mu.Unlock()
 	out := make([]any, 0, len(p.f.agent.party))
+	m := p.planMap
+	if m == 0 {
+		m = 309
+	}
 	for i, n := range p.f.agent.party {
-		out = append(out, map[string]any{"g": fmt.Sprintf("0xF130%012d", i), "n": n, "map": 309, "inst": p.inst, "alive": true, "cb": false})
+		out = append(out, map[string]any{"g": fmt.Sprintf("0xF130%012d", i), "n": n, "map": m, "inst": p.inst, "alive": true, "cb": false})
 	}
 	return out
 }

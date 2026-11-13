@@ -2083,6 +2083,13 @@ func (w *walk) placeReuse(ctx context.Context) error {
 	if err := w.placeQuietRetry(ctx); err != nil {
 		return err
 	}
+	// The final gate, after all the clear and quiet work and immediately before the first `.summon`: the first guard's
+	// read is seconds old now, and the copy keeps live raid members that can start a fight in between (walk 97 fight
+	// 9-1). An engaged arena ends the placement here (exit 29, fresh instance): the gate does not wait, since a patrol
+	// can walk in during a wait.
+	if err := w.placeBossCombatFinal(ctx); err != nil {
+		return err
+	}
 	for _, name := range w.hireList() {
 		if err := w.gm(ctx, ".summon "+name); err != nil {
 			return err
@@ -2151,6 +2158,11 @@ func (w *walk) placeResume(ctx context.Context) error {
 	// The quiet, after the GM clear and before the first `.summon`: the resumed copy keeps the patrols the last attempt
 	// left alive (walk 80: groups 3+4 walked into the start point and killed the landing raid 27 s after the resume).
 	if err := w.placeQuietRetry(ctx); err != nil {
+		return err
+	}
+	// The final gate, after the GM clear and the quiet and immediately before placeGather's first `.summon`: a fight
+	// that began since the first read stops the placement here at once (exit 29, fresh instance; walk 97 fight 9-1).
+	if err := w.placeBossCombatFinal(ctx); err != nil {
 		return err
 	}
 	if err := w.placeGather(ctx); err != nil {
