@@ -146,3 +146,76 @@ func TestParseMigrationSkipsATransactionWrapper(t *testing.T) {
 		t.Fatalf("notes %q, want START TRANSACTION and COMMIT named once each", notes)
 	}
 }
+
+// endsStatement stops a skipped statement at its first `;` outside a quoted string and lets a trailing comment follow it, so a hand
+// edit written as `UPDATE ...; -- why` does not swallow the INSERT after it.
+func TestEndsStatement(t *testing.T) {
+	for _, c := range []struct {
+		line string
+		want bool
+	}{
+		{"UPDATE `ai_dungeon_plan` SET `cc_priority` = '7246';", true},
+		{"UPDATE `ai_dungeon_plan` SET `cc_priority` = '7246'; -- hand-set", true},
+		{"UPDATE `ai_dungeon_plan` SET `cc_priority` = '7246'; /* hand-set */", true},
+		{"UPDATE `ai_dungeon_plan` SET `cc_priority` = '7246'; \t", true},
+		{"UPDATE `ai_dungeon_step` SET `note` = 'do not; stop',", false},
+		{"   SET `note` = 'do not; stop'   ", false},
+		{"SET `note` = 'it''s; fine';", true},
+		{"(`Tiny_Cave', 'a; b', 1),", false},
+		{"-- a comment; with a semicolon", false},
+		{"UPDATE `ai_dungeon_plan` SET `cc_priority` = '7246' /* not yet */", false},
+	} {
+		if got := endsStatement(c.line); got != c.want {
+			t.Errorf("endsStatement(%q) = %v, want %v", c.line, got, c.want)
+		}
+	}
+}
+
+// A hand edit with a trailing comment on its `;` ends there: the plan INSERT that follows is read, whether the edit is a plan table
+// (the row reader skips it) or another table's (the table skipper blanks it).
+func TestParseMigrationReadsOnAfterASkippedStatementWithATrailingComment(t *testing.T) {
+	a := build(t, parsePlan(t, small))
+	b := secondPlan(a, "Tiny_Cave_B")
+	for _, c := range []struct {
+		name, stmt string
+	}{
+		{"plan table", "UPDATE `ai_dungeon_plan` SET `cc_priority` = '7246' WHERE `plan` = 'Tiny_Cave';"},
+		{"other table", "UPDATE `ai_dungeon_boss` SET `note` = 'hand-set' WHERE `name` = 'Onyxia';"},
+	} {
+		for _, tail := range []string{"-- hand-set", "/* hand-set */"} {
+			sql := WriteSQL([]Rows{a}) + c.stmt + " " + tail + "\n" + WriteSQL([]Rows{b})
+			got, notes, err := ParseMigration(sql)
+			if err != nil {
+				t.Fatalf("%s, %q: %v", c.name, tail, err)
+			}
+			if err := Equal([]Rows{a, b}, got); err != nil {
+				t.Fatalf("%s, %q: the INSERT after the comment was not read: %v", c.name, tail, err)
+			}
+			if len(notes) != 1 {
+				t.Fatalf("%s, %q: notes %q, want one for the skipped statement", c.name, tail, notes)
+			}
+		}
+	}
+}
+
+// A statement still open at the end of the file is an error, not a silent blanking of the rows after it: the skipper and the row
+// reader each say which line was left open.
+func TestParseMigrationRefusesAnUnterminatedSkippedStatement(t *testing.T) {
+	a := build(t, parsePlan(t, small))
+	for _, c := range []struct {
+		name, sql string
+	}{
+		{"other table", WriteSQL([]Rows{a}) + "UPDATE `ai_dungeon_boss`\n SET `note` = 'hand-set'\n"},
+		{"plan table", WriteSQL([]Rows{a}) + "UPDATE `ai_dungeon_plan` SET `cc_priority` = '7246'\n"},
+	} {
+		_, _, err := ParseMigration(c.sql)
+		if err == nil {
+			t.Fatalf("%s: an unterminated statement was skipped without an error", c.name)
+		}
+		for _, want := range []string{"is not ended with a ';'", "UPDATE"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("%s: error %q, want it to name %q", c.name, err, want)
+			}
+		}
+	}
+}
