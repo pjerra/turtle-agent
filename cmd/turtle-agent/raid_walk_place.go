@@ -198,9 +198,12 @@ type ttUnit struct {
 	// Spawn is the spawn's guid low (`db`): the notes carry it so a live run can match a unit against the spawn export.
 	Spawn uint32
 	// Dead is the toolkit's `dead` field: a corpse (bossKilled's toolkit read asks for the dead units too).
-	Dead  bool
-	MaxHP float64
-	Rank  int
+	Dead bool
+	// InCombat is the toolkit's `cb` field (Unit:IsInCombat): the pre-placement guard of a resumed or reused instance
+	// reads it (walk 97 fight 9-1), the place decisions never did.
+	InCombat bool
+	MaxHP    float64
+	Rank     int
 }
 
 // ttUnitOf reduces one element of a reply's unit list.
@@ -222,6 +225,7 @@ func ttUnitOf(m map[string]json.RawMessage) ttUnit {
 		u.Rank = int(rk)
 	}
 	u.Dead = flagOf(m, "dead")
+	u.InCombat = flagOf(m, "cb")
 	if hpv := numList(m, "hpv"); len(hpv) >= 2 {
 		u.MaxHP = hpv[1]
 	}
@@ -2068,9 +2072,22 @@ func (w *walk) placeReuse(ctx context.Context) error {
 	if err := w.placeFloor(ctx, p); err != nil {
 		return err
 	}
+	// Walk 97 fight 9-1: the raid's copy may still hold a boss fight the dead attempt left running (exit 18 mid-fight).
+	// The boss's own combat state decides here, before the first `.summon`: the quiet cannot see it (his adds stand
+	// beyond the landing reach, BEHIND).
+	if err := w.placeBossCombat(ctx); err != nil {
+		return err
+	}
 	// The quiet, after the GM clear and before the first `.summon`: the copy is live, so a patrol may have walked into
 	// the landing reach since the last attempt.
 	if err := w.placeQuietRetry(ctx); err != nil {
+		return err
+	}
+	// The final gate, after all the clear and quiet work and immediately before the first `.summon`: the first guard's
+	// read is seconds old now, and the copy keeps live raid members that can start a fight in between (walk 97 fight
+	// 9-1). An engaged arena ends the placement here (exit 29, fresh instance): the gate does not wait, since a patrol
+	// can walk in during a wait.
+	if err := w.placeBossCombatFinal(ctx); err != nil {
 		return err
 	}
 	for _, name := range w.hireList() {
@@ -2124,6 +2141,12 @@ func (w *walk) placeResume(ctx context.Context) error {
 	if err := w.placeFloor(ctx, p); err != nil {
 		return err
 	}
+	// Walk 97 fight 9-1: the previous cmd's agent died mid-fight (exit 18) and the bound instance still holds the boss
+	// and his arena adds engaged. The quiet cannot see them (beyond the landing reach, BEHIND), so the summon would
+	// drop the raid into the live fight: the boss's own combat state decides here.
+	if err := w.placeBossCombat(ctx); err != nil {
+		return err
+	}
 	for _, warn := range w.gmClearWarn {
 		w.logLine(w.env.now(), warn)
 	}
@@ -2135,6 +2158,11 @@ func (w *walk) placeResume(ctx context.Context) error {
 	// The quiet, after the GM clear and before the first `.summon`: the resumed copy keeps the patrols the last attempt
 	// left alive (walk 80: groups 3+4 walked into the start point and killed the landing raid 27 s after the resume).
 	if err := w.placeQuietRetry(ctx); err != nil {
+		return err
+	}
+	// The final gate, after the GM clear and the quiet and immediately before placeGather's first `.summon`: a fight
+	// that began since the first read stops the placement here at once (exit 29, fresh instance; walk 97 fight 9-1).
+	if err := w.placeBossCombatFinal(ctx); err != nil {
 		return err
 	}
 	if err := w.placeGather(ctx); err != nil {
