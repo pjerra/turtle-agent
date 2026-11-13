@@ -89,7 +89,7 @@ var pullSizeKnownCounts = map[string]int{
 	"emerald_sanctum": 8, "timbermaw_hold": 27, "hateforge_quarry": 120, // waypoint pass (was 7): the moved north_hall stands' estimates join one more neighbour pack. hateforge_quarry newly hand-maintained (was a generated draft): the current over-ceiling pulls.
 	"maraudon_orange": 57, "maraudon_purple": 75, "blackrock_depths": 228, "scholomance": 163, // newly hand-maintained (were generated): the moved stands' estimates; maraudon_purple's water fix moves its two starts.
 	"razorfen_kraul": 84, "dire_maul_north": 58, "windhorn_canyon": 84, "upper_blackrock_spire": 68,
-	"blackfathom_deeps": 58, "gnomeregan": 88, "lower_blackrock_spire": 106, "stormwind_vault": 55,
+	"blackfathom_deeps": 58, "gnomeregan": 36, "lower_blackrock_spire": 106, "stormwind_vault": 55, // gnomeregan 88 -> 36 (route order fix 2026-11-12): 79 packs instead of 168, so 52 fewer pulls stand over the ceiling. The round-2 re-add went back to 37 and is gone (issue #1542 round 3, 2026-11-13): the lower-deck 6212/6232 pack is no pull of this leg (its only walk is the 265 yd lower-deck loop across the packs the short route drops), so 36 stands.
 	"frostmane_hollow": 47, "dire_maul_east": 50, "dire_maul_west": 58, "razorfen_downs": 60, "sunken_temple": 65,
 	"scarlet_armory": 36, "scarlet_cathedral": 41, "scarlet_graveyard": 44, "scarlet_library": 42, "shadowfang_keep": 71,
 	"stormwind_stockade": 34, "stratholme_live": 51, "stratholme_undead": 74,
