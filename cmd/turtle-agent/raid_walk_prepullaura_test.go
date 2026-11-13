@@ -63,13 +63,16 @@ type prepullAgent struct {
 	applyToSelf bool
 	// drop is the ids a bot never shows after its ".aura" (an aura the server refuses, or a selection that did not hold).
 	drop map[packet.GUID]map[uint32]bool
+	// combatBots are the bots whose own row reports combat whatever `combat` says (a pull from a member the flag's
+	// lists do not cover).
+	combatBots map[packet.GUID]bool
 }
 
 func newPrepullAgent(t *testing.T) *prepullAgent {
 	t.Helper()
 	a := &prepullAgent{t: t, clock: time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC), answers: true, holdPause: true, statusStep: 4,
 		classes: map[packet.GUID]uint8{}, auras: map[packet.GUID]map[uint32]bool{}, caster: map[uint32]bool{},
-		drop: map[packet.GUID]map[uint32]bool{}}
+		drop: map[packet.GUID]map[uint32]bool{}, combatBots: map[packet.GUID]bool{}}
 	a.selfGUID, a.selfName = packet.GUID(0x0000000000000AAA), "Commander"
 	// Mtbot (warrior mt), Otbot (warrior ot), Rank (rogue), Flitz (hunter), Zap (mage), Holi (priest).
 	for i, b := range []struct {
@@ -128,7 +131,8 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 		if _, ok := a.auras[g]; !ok || !a.answers {
 			return errors.New("unit: no such unit")
 		}
-		v = objects.Unit{GUID: g, Type: "player", Name: a.nameOf(g), Class: a.classes[g], InCombat: a.combat, Auras: a.aurasOf(g)}
+		v = objects.Unit{GUID: g, Type: "player", Name: a.nameOf(g), Class: a.classes[g],
+			InCombat: a.combat || a.combatBots[g], Auras: a.aurasOf(g)}
 	case "gm_aura":
 		var p struct {
 			GUID    string `json:"guid"`
@@ -428,6 +432,78 @@ func TestPrepullAuraCombatMidBatchStopsTheAuras(t *testing.T) {
 	}
 	if !seen {
 		t.Fatalf("the missing list is not on disk: %+v", f.Bots)
+	}
+}
+
+// The combat recheck watches the whole living party, not only the members the flag gives a list: a pull from a member
+// the lists do not cover stops the batch before the first `.aura`. This is the r2 HIGH.
+func TestPrepullAuraCombatOnAMemberWithoutAListStopsTheBatch(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.combatBots[a.bots[3].GUID] = true // Flitz, a hunter: role=tank gives it no list
+	w := newPrepullWalk(t, a, "role=tank:17626")
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "combat") || !strings.Contains(reason, "Flitz") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("%d aura(s) went out with a party member in combat: %v", len(a.sent), a.sent)
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the boss row was recorded as done")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 0 || len(f.Attempts) != 1 || f.Attempts[0].BossRow != 5 {
+		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
+	}
+}
+
+// A unit read the walk cannot complete fails closed: the batch stops before any `.aura` and the row is an attempt,
+// not a boss row. The r2 code treated the unreadable rows as absent and reported a fire with nothing to send.
+func TestPrepullAuraUnreadableUnitStopsTheBatch(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.answers = false
+	w := newPrepullWalk(t, a, "role=tank:17626")
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "unit read") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("%d aura(s) went out on an unreadable party: %v", len(a.sent), a.sent)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the boss row was recorded as done on an unreadable party")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 0 || len(f.Attempts) != 1 || !strings.Contains(f.Attempts[0].Reason, "unit read") {
+		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
+	}
+}
+
+// A fire that misses beyond the tolerance is an attempt, not a boss row: boss_rows stays empty and the attempt
+// carries the reason. This is the r2 MEDIUM behind the row appended before verification.
+func TestPrepullAuraFailedAttemptIsNotABossRow(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.drop[a.bots[3].GUID] = map[uint32]bool{22888: true} // Flitz never shows the id
+	w := newPrepullWalk(t, a, "role=all:22888")
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "beyond the tolerance of 0") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the failed row was recorded as sent")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 0 {
+		t.Fatalf("a failed attempt is on disk as a boss row: %v", f.BossRows)
+	}
+	if len(f.Attempts) != 1 || f.Attempts[0].BossRow != 5 || !strings.Contains(f.Attempts[0].Reason, "22888") {
+		t.Fatalf("attempts %+v", f.Attempts)
 	}
 }
 

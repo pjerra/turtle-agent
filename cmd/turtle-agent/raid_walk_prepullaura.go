@@ -8,14 +8,16 @@
 //
 // The fire is the boss-row resend's gate (preBossGate): a rest or gather of the step before a boss row, out of combat,
 // once per boss row per walk, under a run pause that is always resumed. The pause is fail-closed: a refused or
-// unconfirmed pause sends no aura, and the party is re-read for combat right before the first `.aura` and before every
-// later one, so a pull that starts mid-batch stops the batch and fails the walk. A boss row that becomes current
-// without a verified fire fails the walk too: the preparation the run was started to test never happened. The auras a
-// bot already carries are not sent again, so a second boss row only tops up what a death or a buff strip took. Every
-// fire is read back into prepull-auras.json (bot, role, ids sent/seen/missing). By default every requested aura must
-// verify; --prepull-aura-tolerance N is the explicit opt-in that accepts up to N missing ids per bot. A missing aura
-// beyond that bound fails the walk (exit 18), because a preparation the walk cannot see is not the test the run was
-// started for.
+// unconfirmed pause sends no aura, and every living party member is re-read for combat right before the first `.aura`
+// and before every later one, so a pull that starts mid-batch stops the batch and fails the walk. A member the unit
+// RPC cannot read counts as combat too: the walk never assumes an unreadable party is out of combat. A boss row that
+// becomes current without a verified fire fails the walk too: the preparation the run was started to test never
+// happened. The auras a bot already carries are not sent again, so a second boss row only tops up what a death or a
+// buff strip took. Every fire is read back into prepull-auras.json (bot, role, ids sent/seen/missing). By default
+// every requested aura must verify; --prepull-aura-tolerance N is the explicit opt-in that accepts up to N missing ids
+// per bot. A missing aura beyond that bound fails the walk (exit 18), because a preparation the walk cannot see is not
+// the test the run was started for. A boss row is written to prepull-auras.json only after its auras verified within
+// the tolerance; a fire that failed is a separate `attempts` entry with its reason, never a boss row.
 package main
 
 import (
@@ -48,13 +50,22 @@ var (
 // prepullAuraFileName is the fire's evidence in the walk's out dir.
 const prepullAuraFileName = "prepull-auras.json"
 
-// prepullAuraFile is prepull-auras.json: the flag set, the tolerance, the merged lists and every bot's line.
+// prepullAuraFile is prepull-auras.json: the flag set, the tolerance, the merged lists, the boss rows whose fire
+// verified, the fires that failed and every bot's line.
 type prepullAuraFile struct {
-	Flag      []string            `json:"flag"`
-	Tolerance int                 `json:"tolerance"`
-	Lists     []prepullAuraList   `json:"lists"`
-	BossRows  []int               `json:"boss_rows"`
-	Bots      []prepullAuraRecord `json:"bots"`
+	Flag      []string             `json:"flag"`
+	Tolerance int                  `json:"tolerance"`
+	Lists     []prepullAuraList    `json:"lists"`
+	BossRows  []int                `json:"boss_rows"`
+	Attempts  []prepullAuraAttempt `json:"attempts"`
+	Bots      []prepullAuraRecord  `json:"bots"`
+}
+
+// prepullAuraAttempt is one fire that did not verify: the boss row it prepared and why it stopped. A fire that
+// succeeded is a boss row instead, so the two lists never overlap.
+type prepullAuraAttempt struct {
+	BossRow int    `json:"boss_row"`
+	Reason  string `json:"reason"`
 }
 
 // prepullAuraList is one role's merged list, as the walk resolved it.
@@ -178,13 +189,19 @@ func (w *walk) prepullAuraHold(ctx context.Context, step int, pause bool) error 
 	return nil
 }
 
-// prepullAuraCombatClear re-reads every aura target and refuses the batch while any living one is in combat: a pull
-// that starts after the pause must stop the auras, not receive them after the encounter began.
+// prepullAuraCombatClear re-reads every living party member and refuses the batch while any one of them is in combat:
+// a pull that starts after the pause must stop the auras, not receive them after the encounter began. It fails closed
+// on the read too: a member the unit RPC cannot read may be fighting, so the batch stops there as well. The caller
+// builds the watch from the whole living party, not only the members that carry an aura list.
 func (w *walk) prepullAuraCombatClear(ctx context.Context, step int) error {
 	port := walkAuras{w: w}
 	for _, t := range w.prepullAuraWatch {
 		u, seen := port.ViewUnit(ctx, t)
-		if !seen || u.Dead || u.Ghost {
+		if !seen {
+			return stopf(exitRaidWalkFailed,
+				"prepull-aura: boss row %d: the unit read of %s failed, so combat cannot be ruled out: no further auras were sent", step, t.Name)
+		}
+		if u.Dead || u.Ghost {
 			continue
 		}
 		if u.InCombat {
@@ -197,18 +214,29 @@ func (w *walk) prepullAuraCombatClear(ctx context.Context, step int) error {
 
 // prepullAuraFire puts the flag's lists on every living party member, reads them back, writes prepull-auras.json and
 // fails the walk when a bot misses more auras than --prepull-aura-tolerance (0 by default: every requested aura must
-// verify). The file is written whenever the fire reached the party read, failures included, so the missing list is
-// always on disk.
-func (w *walk) prepullAuraFire(ctx context.Context, step int) error {
+// verify). A failed fire is recorded as an attempt with its reason; only a fire whose auras verified within the
+// tolerance appends the boss row, so the file never reports a preparation that did not happen. The file is written on
+// every fire, failures included, so the attempt's reason and the missing list are always on disk.
+func (w *walk) prepullAuraFire(ctx context.Context, step int) (err error) {
+	defer func() {
+		if err != nil {
+			w.prepullAuraAttempts = append(w.prepullAuraAttempts, prepullAuraAttempt{BossRow: step, Reason: err.Error()})
+		}
+		w.prepullAuraWatch, w.prepullAuraRow = nil, 0
+		if werr := w.prepullAuraWrite(); werr != nil {
+			w.note("prepull-aura: WARN: %s could not be written (%v)", prepullAuraFileName, werr)
+		}
+	}()
 	party, err := w.party(ctx)
 	if err != nil {
 		return stopf(exitRaidWalkFailed, "prepull-aura: party: %v", err)
 	}
 	port := walkAuras{w: w}
 	cfg := dungeon.AuraCfg{Gap: prepullAuraGap, Settle: prepullAuraSettle, ViewWait: prepullAuraViewWait}
-	if w.prepullAuraRows == nil || !slices.Contains(w.prepullAuraRows, step) {
-		w.prepullAuraRows = append(w.prepullAuraRows, step)
-	}
+	// The combat watch is every living party member, list or no list: a pull may come from a member the flag does not
+	// cover. A member the unit read cannot confirm is living stays in the watch, and its unreadable row fails the
+	// recheck: an unproven party is not an out-of-combat party.
+	var watch []dungeon.AuraTarget
 	var targets []prepullAuraTarget
 	for _, m := range party.Members {
 		if !m.Online || m.Dead || m.GUID == 0 {
@@ -219,6 +247,7 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int) error {
 		if seen && (u.Dead || u.Ghost) {
 			continue
 		}
+		watch = append(watch, t)
 		role := w.prepullRole(m.Name, u.Class)
 		list := w.prepullAuras.For(role)
 		if len(list) == 0 {
@@ -235,16 +264,7 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int) error {
 		rec.Seen = subtractIDs(raidwalk.PrepullIDs(list), rec.Missing)
 		targets = append(targets, prepullAuraTarget{rec: rec, unit: t, want: list, missing: missing})
 	}
-	w.prepullAuraWatch, w.prepullAuraRow = make([]dungeon.AuraTarget, 0, len(targets)), step
-	for _, tg := range targets {
-		w.prepullAuraWatch = append(w.prepullAuraWatch, tg.unit)
-	}
-	defer func() {
-		w.prepullAuraWatch, w.prepullAuraRow = nil, 0
-		if err := w.prepullAuraWrite(); err != nil {
-			w.note("prepull-aura: WARN: %s could not be written (%v)", prepullAuraFileName, err)
-		}
-	}()
+	w.prepullAuraWatch, w.prepullAuraRow = watch, step
 	if err := w.prepullAuraCombatClear(ctx, step); err != nil {
 		return err
 	}
@@ -296,6 +316,11 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int) error {
 			step, len(targets)-len(within), len(within), tol, w.prepullAuraMissSummary(within)))
 	} else {
 		w.logLine(w.env.now(), fmt.Sprintf("prepull-aura: boss row %d: %d bot(s) carry their lists", step, len(targets)))
+	}
+	// The row is a verified preparation now, and only now: every failure above left it out (its attempt carries the
+	// reason), so a consumer of the file reads boss_rows as applications that happened.
+	if w.prepullAuraRows == nil || !slices.Contains(w.prepullAuraRows, step) {
+		w.prepullAuraRows = append(w.prepullAuraRows, step)
 	}
 	return nil
 }
@@ -357,7 +382,7 @@ func (w *walk) prepullAuraMissSummary(bots []string) string {
 // prepullAuraWrite rewrites prepull-auras.json with the walk's whole prepull state.
 func (w *walk) prepullAuraWrite() error {
 	f := prepullAuraFile{Flag: w.opts.prepullAura, Tolerance: w.opts.prepullAuraTolerance, BossRows: w.prepullAuraRows,
-		Lists: []prepullAuraList{}, Bots: []prepullAuraRecord{}}
+		Attempts: append([]prepullAuraAttempt{}, w.prepullAuraAttempts...), Lists: []prepullAuraList{}, Bots: []prepullAuraRecord{}}
 	for _, role := range raidwalk.PrepullRoles {
 		if ids := raidwalk.PrepullIDs(w.prepullAuras.For(role)); len(ids) > 0 {
 			f.Lists = append(f.Lists, prepullAuraList{Role: role, IDs: ids})
