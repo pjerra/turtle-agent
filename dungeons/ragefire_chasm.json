@@ -39,7 +39,13 @@
       "name": "lava basin of the trogg cave",
       "min": {"x": -226, "y": -64, "z": -72},
       "max": {"x": -142, "y": 6, "z": -64.2},
-      "why": "The floor of the trogg cave's basin (x -224 to -144, y -62 to 3, navmesh floor z -65.4) lies under the magma surface of lavadungeon.wmo group 1 (z -64.5, read from the client's wmo.MPQ; the liquid covers x -235 to -135, y -73 to 27, every tile magma). Runs rfc-live-1d and 1e died there: 11 bots within 2 s at full health with no damage in the feed (lava is environmental damage, 605-610 a tick in the core's EnvironmentalDamage.Min/Max, more than a level-16 bot's health; 1d's tank lost 456 of 901 in one second there, a lava tick with a partial fire resist). The tiles flag that floor NAV_GROUND: the mmap generator marks a liquid only where it is at least the agent's height deep (TileBuilder.cpp filterWalkableLowHeightSpansWith), and the lava is under a yard deep. The box is the floor band only (max z -64.2, just above the surface): the strip (z -61 to -62), the north ramp (z -59 to -40) and the south rim (z -60 to -63) stay walkable. The map's two other magma surfaces need no box yet: the tunnel's (group 0, z -30.1, x -102 to -73) has no navmesh floor under it (the tunnel floor is above it), and the Searing Blade wing's lake (group 4, z -28.2) is deeper than the walkable band except for a rim of about 180 one-yard cells (x -298 to -186, y 109 to 207) that no path of the plan touches and where no bot died."
+      "why": "The floor of the trogg cave's basin (x -224 to -144, y -62 to 3, navmesh floor z -65.4) lies under the magma surface of lavadungeon.wmo group 1 (z -64.5, read from the client's wmo.MPQ; the liquid covers x -235 to -135, y -73 to 27, every tile magma). Runs rfc-live-1d and 1e died there: 11 bots within 2 s at full health with no damage in the feed (lava is environmental damage, 605-610 a tick in the core's EnvironmentalDamage.Min/Max, more than a level-16 bot's health; 1d's tank lost 456 of 901 in one second there, a lava tick with a partial fire resist). The tiles flag that floor NAV_GROUND: the mmap generator marks a liquid only where it is at least the agent's height deep (TileBuilder.cpp filterWalkableLowHeightSpansWith), and the lava is under a yard deep. The box is the floor band only (max z -64.2, just above the surface): the strip (z -61 to -62), the north ramp (z -59 to -40) and the south rim (z -60 to -63) stay walkable. The map's other magma surface needs no box yet: the Searing Blade wing's lake (group 4, z -28.2) is deeper than the walkable band except for a rim of about 180 one-yard cells (x -298 to -186, y 109 to 207) that no path of the plan touches and where no bot died."
+    },
+    {
+      "name": "the tunnel's lava shelf under the deck",
+      "min": {"x": -104, "y": -28.5, "z": -32},
+      "max": {"x": -98, "y": -22, "z": -29.6},
+      "why": "The tunnel's lava (lavadungeon.wmo group 0, surface z -30.1, bed z -40, x -102 to -73) is not bare under the first bridge: a NAV_GROUND shelf at its north-west corner (x -103 to -99, y -27 to -23.5, floor z -30.5 to -29.7) is the only walkable cell below the surface (a BFS from the deck finds no other) and the deck links to it, so a follow slot or a chase spot put on the mesh there gets a normal path. The shelf lies 0.1 to 0.4 yd under the magma (605 damage a tick): the same defect as the trogg basin, and the earlier note that this magma had no navmesh floor under it was wrong. The box is the floor band only (max z -29.6, just above the shelf), so the deck at z -23 stays walkable; leg 1's approach point stands on the deck centre (-90 -36 -24.7, the mesh floor there), 15 yd from the shelf."
     }
   ],
   "legs": [
@@ -98,7 +104,7 @@
           ],
           "radius": 12,
           "approach": [
-            {"x": -96.36, "y": -36.33, "z": -28.11}
+            {"x": -90.0, "y": -36.0, "z": -24.7}
           ]
         },
         {
@@ -110,7 +116,7 @@
         }
       ],
       "notes": [
-        "The last two Earthborers of the tunnel (-106.3 -37.7 -30 and -129.1 -35.2 -33.3), the road dropping 8 yd between them. Split from the first tunnel leg because the plan check's look point for the pack at -106 is 22 yd away in 3-D from the previous pack's look point (the slope), outside the 21 yd view."
+        "The last two Earthborers of the tunnel (-106.3 -37.7 -30 and -129.1 -35.2 -33.3), the road dropping 8 yd between them. Split from the first tunnel leg because the plan check's look point for the pack at -106 is 22 yd away in 3-D from the previous pack's look point (the slope), outside the 21 yd view. Approach point moved from the deck's west end (-96.36 -36.33 -28.11, 11.8 yd from the lava shelf) to the deck centre (-90 -36 -24.7, the mesh floor there, 15 yd from it) after the bot-led run of 2026-11-13: the party held there and the shelf is the only walkable cell under the tunnel's lava, so a follower put on it by a core follow slot died in the magma."
       ]
     },
     {
