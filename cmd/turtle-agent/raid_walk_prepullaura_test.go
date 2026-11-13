@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -42,6 +43,18 @@ type prepullAgent struct {
 	verbs   []string // every `run <verb>` the commander asked for
 	answers bool     // the unit RPC answers for the party (set by newPrepullAgent)
 	pauses  int
+	// paused is the run's state as the fake's `run status` answers it; holdPause=false makes a pause ACK without
+	// the run going paused. statusStep is the step the status line names (the rest before the boss row).
+	paused     bool
+	holdPause  bool
+	statusLine string
+	statusStep int
+	// combat is what the party's unit rows report. combatOnPause starts it when the pause holds; combatAfter
+	// starts it after that many gm_aura calls (0: never).
+	combat        bool
+	combatOnPause bool
+	combatAfter   int
+	sends         int
 
 	// pauseErr and resumeErr are the commander's own refusals (the RPC itself failing).
 	pauseErr  error
@@ -54,7 +67,7 @@ type prepullAgent struct {
 
 func newPrepullAgent(t *testing.T) *prepullAgent {
 	t.Helper()
-	a := &prepullAgent{t: t, clock: time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC), answers: true,
+	a := &prepullAgent{t: t, clock: time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC), answers: true, holdPause: true, statusStep: 4,
 		classes: map[packet.GUID]uint8{}, auras: map[packet.GUID]map[uint32]bool{}, caster: map[uint32]bool{},
 		drop: map[packet.GUID]map[uint32]bool{}}
 	a.selfGUID, a.selfName = packet.GUID(0x0000000000000AAA), "Commander"
@@ -115,7 +128,7 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 		if _, ok := a.auras[g]; !ok || !a.answers {
 			return errors.New("unit: no such unit")
 		}
-		v = objects.Unit{GUID: g, Type: "player", Name: a.nameOf(g), Class: a.classes[g], Auras: a.aurasOf(g)}
+		v = objects.Unit{GUID: g, Type: "player", Name: a.nameOf(g), Class: a.classes[g], InCombat: a.combat, Auras: a.aurasOf(g)}
 	case "gm_aura":
 		var p struct {
 			GUID    string `json:"guid"`
@@ -127,6 +140,10 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			return err
 		}
 		a.sent = append(a.sent, a.nameOf(g)+" "+itoaU(uint32(p.SpellID)))
+		a.sends++
+		if a.combatAfter > 0 && a.sends >= a.combatAfter {
+			a.combat = true
+		}
 		if a.applyToSelf {
 			a.caster[p.SpellID] = true
 			break
@@ -155,12 +172,30 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			if a.pauseErr != nil {
 				return a.pauseErr
 			}
-			v = commanderReply{Sent: ".bot run pause"}
+			if a.holdPause {
+				a.paused = true
+				if a.combatOnPause {
+					a.combat = true
+				}
+			}
+			v = commanderReply{Sent: ".bot run pause", Reply: tbm.Reply{Kind: tbm.KindAck, OK: true, Line: "TBM:ACTION_ACK|run pause"}}
 		case "resume":
 			if a.resumeErr != nil {
 				return a.resumeErr
 			}
-			v = commanderReply{Sent: ".bot run resume"}
+			a.paused = false
+			v = commanderReply{Sent: ".bot run resume", Reply: tbm.Reply{Kind: tbm.KindAck, OK: true, Line: "TBM:ACTION_ACK|run resume"}}
+		case "status":
+			if a.statusLine != "" {
+				v = commanderReply{Sent: ".bot run status", Reply: tbm.Reply{OK: true, Kind: tbm.KindAck, Lines: []string{a.statusLine}}}
+				break
+			}
+			state := "running"
+			if a.paused {
+				state = "paused"
+			}
+			v = commanderReply{Sent: ".bot run status", Reply: tbm.Reply{OK: true, Kind: tbm.KindAck,
+				Lines: []string{fmt.Sprintf("TBM:RUN|zul_gurub|%s|%d/6|here|move|rest|paused by .bot run pause", state, a.statusStep)}}}
 		default:
 			a.t.Errorf("unexpected run verb %q", p.Verb)
 		}
@@ -186,6 +221,17 @@ func (a *prepullAgent) nameOf(g packet.GUID) string {
 		}
 	}
 	return g.String()
+}
+
+// prepullHoldVerbs is the run verbs minus the `status` confirmations: the pause/resume sequence the walk asked for.
+func prepullHoldVerbs(a *prepullAgent) []string {
+	out := make([]string, 0, len(a.verbs))
+	for _, v := range a.verbs {
+		if v != "status" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // itoaU is a small decimal formatter for the sent log.
@@ -266,7 +312,12 @@ func TestPrepullAuraNotAtPull(t *testing.T) {
 		a := newPrepullAgent(t)
 		w := newPrepullWalk(t, a, prepullRestAuras...)
 		fired, err := w.prepullAuraSendPending(context.Background(), tc.st, tc.later)
-		if err != nil || fired {
+		if tc.name == "boss row itself" {
+			// A boss row with no verified fire is a blocking failure, the other statuses are simply no-gate.
+			if code, _ := stopInfo(err); fired || code != exitRaidWalkFailed {
+				t.Errorf("%s: fired %v, err %v", tc.name, fired, err)
+			}
+		} else if err != nil || fired {
 			t.Errorf("%s: fired %v, err %v", tc.name, fired, err)
 		}
 		if len(a.sent) != 0 || a.pauses != 0 {
@@ -298,8 +349,8 @@ func TestPrepullAuraOncePerBossRow(t *testing.T) {
 	if first != 12 {
 		t.Fatalf("%d lines sent, want 12 (%v)", first, a.sent)
 	}
-	if got := a.verbs; len(got) != 2 || got[0] != "pause" || got[1] != "resume" {
-		t.Fatalf("verbs %v", got)
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
 	}
 	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(4), false); err != nil || fired {
 		t.Fatalf("same step again: %v %v", fired, err)
@@ -307,58 +358,106 @@ func TestPrepullAuraOncePerBossRow(t *testing.T) {
 	if len(a.sent) != first {
 		t.Fatalf("the same boss row sent again: %v", a.sent[first:])
 	}
-	// The next boss row's rest: the party still carries everything, so nothing is sent and no pause is needed.
+	// The next boss row's rest: the party still carries everything, so nothing is sent.
+	a.statusStep = 1
 	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(1), false); err != nil || !fired {
 		t.Fatalf("second boss row: %v %v", fired, err)
 	}
 	if len(a.sent) != first {
 		t.Fatalf("a top-up with nothing missing sent %v", a.sent[first:])
 	}
-	// A boss row that became current with no rest before it is handled with one note and never paused.
-	if fired, err := w.prepullAuraSendPending(ctx, tbm.RunStatus{State: tbm.RunRunning, Step: 2, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}, false); err != nil || fired {
-		t.Fatalf("boss row: %v %v", fired, err)
+}
+
+// A pause that does not hold is a blocking failure: no aura may go out on a run the walk cannot show paused. A
+// refused pause, an ACK without the paused state, and a pull during the pause all stop the batch before the first
+// `.aura`, and the resume still goes out. This is the r1 HIGH.
+func TestPrepullAuraDoesNotFireWithoutAHeldPause(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name   string
+		setup  func(*prepullAgent)
+		reason string
+	}{
+		{"pause refused", func(a *prepullAgent) { a.pauseErr = errors.New("the run is busy") }, "run pause"},
+		{"pause not held", func(a *prepullAgent) { a.holdPause = false }, "not paused"},
+		{"combat during the pause", func(a *prepullAgent) { a.combatOnPause = true }, "combat"},
+	} {
+		a := newPrepullAgent(t)
+		tc.setup(a)
+		w := newPrepullWalk(t, a, prepullRestAuras...)
+		fired, err := w.prepullAuraSendPending(ctx, prepullRest(4), false)
+		code, reason := stopInfo(err)
+		if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, tc.reason) {
+			t.Fatalf("%s: fired %v, code %d, reason %q", tc.name, fired, code, reason)
+		}
+		if len(a.sent) != 0 {
+			t.Fatalf("%s: %d aura(s) went out without a held pause: %v", tc.name, len(a.sent), a.sent)
+		}
+		if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+			t.Fatalf("%s: verbs %q, want pause then resume", tc.name, got)
+		}
+		if w.prepullAuraSent[5] {
+			t.Fatalf("%s: the boss row was recorded as done", tc.name)
+		}
 	}
 }
 
-// A pause that the commander refuses still gets its resume, and the auras still go out.
-func TestPrepullAuraResumesAfterAPauseError(t *testing.T) {
+// A pull that starts mid-batch stops the auras: the party is re-read before every send, so no `.aura` follows the
+// combat. The batch fails (exit 18) and the missing list is still on disk.
+func TestPrepullAuraCombatMidBatchStopsTheAuras(t *testing.T) {
 	a := newPrepullAgent(t)
-	a.pauseErr = errors.New("the run is busy")
-	w := newPrepullWalk(t, a, prepullRestAuras...)
+	a.combatAfter = 1 // the first gm_aura lands; every later send would follow a pull
+	w := newPrepullWalk(t, a, "role=all:22888,23768,15366")
 	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
-	if err != nil || !fired {
-		t.Fatalf("fired %v, err %v", fired, err)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "combat") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
 	}
-	if len(a.sent) == 0 {
-		t.Fatal("a refused pause must not skip the auras")
+	if len(a.sent) != 1 {
+		t.Fatalf("%d aura(s) went out, want 1 before the combat check stops the batch: %v", len(a.sent), a.sent)
 	}
-	if got := a.verbs; len(got) != 2 || got[0] != "pause" || got[1] != "resume" {
-		t.Fatalf("verbs %v, want pause then resume", got)
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
 	}
-	// A refused resume is a failed walk (the raid would stand paused).
-	a = newPrepullAgent(t)
-	w = newPrepullWalk(t, a, "role=all:22888")
+	f := readPrepullAuraFile(t, w)
+	seen := false
+	for _, b := range f.Bots {
+		if b.Missing != nil && len(b.Missing) == 3 {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Fatalf("the missing list is not on disk: %+v", f.Bots)
+	}
+}
+
+// A resume that fails after a successful fire still fails the walk (the raid would stand paused), and the fire's
+// error wins over the resume's when both fail.
+func TestPrepullAuraResumeFailures(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullWalk(t, a, "role=all:22888")
 	a.resumeErr = errors.New("no run is going")
-	fired, err = w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
 	code, reason := stopInfo(err)
 	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "run resume") {
 		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
 	}
-	// A status that was already paused sends no resume.
+	// Already paused (not by the walk): no resume, and the confirmation still passes.
 	a = newPrepullAgent(t)
 	w = newPrepullWalk(t, a, "role=all:22888")
 	st := prepullRest(4)
 	st.State = tbm.RunPaused
+	a.paused = true
 	if fired, err := w.prepullAuraSendPending(context.Background(), st, false); err != nil || !fired {
 		t.Fatalf("paused status: %v %v", fired, err)
 	}
-	if got := a.verbs; len(got) != 0 {
+	if got := prepullHoldVerbs(a); len(got) != 0 {
 		t.Fatalf("a paused status sent %v", got)
 	}
 }
 
-// An aura whose selection does not hold lands on the commander: it is a miss, and a bot missing more than two ids
-// fails the walk (exit 18).
+// An aura whose selection does not hold lands on the commander: it is a miss, and with the default tolerance of 0
+// even one missing bot fails the walk (exit 18).
 func TestPrepullAuraOnTheCommanderIsAMiss(t *testing.T) {
 	a := newPrepullAgent(t)
 	a.applyToSelf = true
@@ -368,12 +467,12 @@ func TestPrepullAuraOnTheCommanderIsAMiss(t *testing.T) {
 	if !fired || code != exitRaidWalkFailed {
 		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
 	}
-	if !strings.Contains(reason, "miss more than 2") || !strings.Contains(reason, "Mtbot") {
+	if !strings.Contains(reason, "beyond the tolerance of 0") || !strings.Contains(reason, "Mtbot") {
 		t.Fatalf("reason %q", reason)
 	}
 	// The resume still went out.
-	if got := a.verbs; len(got) != 2 || got[1] != "resume" {
-		t.Fatalf("verbs %v", got)
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
 	}
 	// The evidence is on disk, with the misses.
 	f := readPrepullAuraFile(t, w)
@@ -381,40 +480,121 @@ func TestPrepullAuraOnTheCommanderIsAMiss(t *testing.T) {
 		t.Fatal("prepull-auras.json holds no bot")
 	}
 	for _, b := range f.Bots {
-		if len(b.Missing) != 3 || len(b.Seen) != 0 || len(b.Sent) != 3 {
+		// Only the batch's first aura is ever sent before the miss is read back: the kernel stops that target there.
+		if len(b.Missing) != 3 || len(b.Seen) != 0 || len(b.Sent) != 1 || b.Sent[0] != 22888 {
 			t.Fatalf("%s: sent %v seen %v missing %v", b.Bot, b.Sent, b.Seen, b.Missing)
 		}
 	}
 }
 
-// Two missing ids are tolerated, three fail the walk: a bot's first aura is the one the batch checks, so a dropped
-// id behind it still shows up in the read-back.
-func TestPrepullAuraTwoMissesPassThreeFail(t *testing.T) {
+// By default every requested aura must verify: one missing id fails the walk, the file carries the missing list and
+// the log never claims the bot carries its list. --prepull-aura-tolerance N is the only way to accept a miss, and
+// the log then says so. A dropped id behind the batch's first aura still shows in the read-back.
+func TestPrepullAuraTolerance(t *testing.T) {
+	// One miss with the default tolerance of 0: the walk fails and names the id.
 	a := newPrepullAgent(t)
-	// Flitz (the hunter) never shows 23768 and 15366: two misses, tolerated.
-	flitz := a.bots[3].GUID
-	a.drop[flitz] = map[uint32]bool{23768: true, 15366: true}
+	a.drop[a.bots[3].GUID] = map[uint32]bool{15366: true}
 	w := newPrepullWalk(t, a, "role=all:22888,23768,15366")
 	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
-	if !fired || err != nil {
-		t.Fatalf("two misses: fired %v err %v", fired, err)
-	}
-	rec := w.prepullAuraBots["Flitz"]
-	if rec == nil || len(rec.Missing) != 2 || len(rec.Seen) != 1 || rec.Seen[0] != 22888 {
-		t.Fatalf("Flitz's record %+v", rec)
-	}
-	// Three: the batch's first aura never lands either, the batch stops and the walk fails naming the bot.
-	a = newPrepullAgent(t)
-	a.drop[a.bots[3].GUID] = map[uint32]bool{22888: true, 23768: true, 15366: true}
-	w = newPrepullWalk(t, a, "role=all:22888,23768,15366")
-	fired, err = w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
 	code, reason := stopInfo(err)
-	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "Flitz (missing") {
-		t.Fatalf("three misses: fired %v code %d reason %q", fired, code, reason)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "Flitz (missing 15366)") {
+		t.Fatalf("one miss: fired %v code %d reason %q", fired, code, reason)
 	}
-	// The other bots are intact: only Flitz is named.
-	if strings.Contains(reason, "Mtbot") {
-		t.Fatalf("a carrying bot was named: %q", reason)
+	f := readPrepullAuraFile(t, w)
+	byBot := map[string]prepullAuraRecord{}
+	for _, b := range f.Bots {
+		byBot[b.Bot] = b
+	}
+	if got := byBot["Flitz"]; len(got.Missing) != 1 || got.Missing[0] != 15366 || len(got.Seen) != 2 {
+		t.Fatalf("Flitz's record %+v", got)
+	}
+	if f.Tolerance != 0 {
+		t.Fatalf("tolerance %d in the file", f.Tolerance)
+	}
+
+	// The same miss with --prepull-aura-tolerance 1 passes; the missing list is still on disk and the log says the
+	// bot misses an aura within the tolerance (it never claims every bot carries its list).
+	a = newPrepullAgent(t)
+	a.drop[a.bots[3].GUID] = map[uint32]bool{15366: true}
+	w = newPrepullWalk(t, a, "role=all:22888,23768,15366")
+	w.opts.prepullAuraTolerance = 1
+	logFile, err := os.Create(filepath.Join(w.outDir, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.logF = logFile
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
+		t.Fatalf("tolerated miss: fired %v err %v", fired, err)
+	}
+	if err := logFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(w.outDir, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "miss auras within the tolerance of 1") || !strings.Contains(string(raw), "Flitz (missing 15366)") {
+		t.Fatalf("run.log %s", raw)
+	}
+	if strings.Contains(string(raw), "carry their lists\n") {
+		t.Fatalf("the log claims the lists while one is missing: %s", raw)
+	}
+	f = readPrepullAuraFile(t, w)
+	if f.Tolerance != 1 || len(f.Bots) == 0 {
+		t.Fatalf("file %+v", f)
+	}
+	for _, b := range f.Bots {
+		if b.Bot == "Flitz" && (len(b.Missing) != 1 || b.Missing[0] != 15366) {
+			t.Fatalf("Flitz's record %+v", b)
+		}
+	}
+
+	// Two misses with a tolerance of 1 still fail: the bound is per bot, not per batch.
+	a = newPrepullAgent(t)
+	a.drop[a.bots[3].GUID] = map[uint32]bool{23768: true, 15366: true}
+	w = newPrepullWalk(t, a, "role=all:22888,23768,15366")
+	w.opts.prepullAuraTolerance = 1
+	fired, err = w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	code, reason = stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "beyond the tolerance of 1") {
+		t.Fatalf("two misses over the tolerance: fired %v code %d reason %q", fired, code, reason)
+	}
+}
+
+// A boss row that becomes current without a verified fire fails the walk: the row is never recorded as done, no
+// pause or aura is attempted, and the walk exits 18. This is the r1 HIGH behind the premature `sent` mark.
+func TestPrepullAuraBossRowWithoutAFireFailsTheWalk(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullWalk(t, a, "role=all:22888")
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 2, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	fired, err := w.prepullAuraSendPending(context.Background(), boss, false)
+	code, reason := stopInfo(err)
+	if fired || code != exitRaidWalkFailed || !strings.Contains(reason, "boss row 2") || !strings.Contains(reason, "never sent") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 || len(a.verbs) != 0 {
+		t.Fatalf("the boss row sent %v / %v", a.sent, a.verbs)
+	}
+	if w.prepullAuraSent[2] {
+		t.Fatal("the boss row was recorded as done without a fire")
+	}
+	// A row that did fire at its rest is done: the boss status is no failure and sends nothing more.
+	a = newPrepullAgent(t)
+	w = newPrepullWalk(t, a, "role=all:22888")
+	a.statusStep = 1
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(1), false); err != nil || !fired {
+		t.Fatalf("rest before row 2: fired %v err %v", fired, err)
+	}
+	if !w.prepullAuraSent[2] {
+		t.Fatal("a verified row was not recorded as done")
+	}
+	before := len(a.sent)
+	fired, err = w.prepullAuraSendPending(context.Background(), boss, false)
+	if fired || err != nil {
+		t.Fatalf("fired row's boss status: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != before {
+		t.Fatalf("the boss status sent %v", a.sent[before:])
 	}
 }
 
@@ -428,6 +608,14 @@ func TestParsePrepullAuraFlags(t *testing.T) {
 	}
 	if len(o.prepullAura) != 2 || o.prepullAura[0] != "role=tank:17626,17538" || o.prepullAura[1] != "role=all:world,23768" {
 		t.Fatalf("options %v", o.prepullAura)
+	}
+	// The tolerance is an explicit opt-in, 0 by default.
+	if o.prepullAuraTolerance != 0 {
+		t.Fatalf("default tolerance %d", o.prepullAuraTolerance)
+	}
+	o, code = parseRaidWalkArgs([]string{"zul_gurub", "--prepull-aura", "role=tank:17626", "--prepull-aura-tolerance", "2"}, &stderr)
+	if code != exitOK || o.prepullAuraTolerance != 2 {
+		t.Fatalf("tolerance options %v exit %d: %s", o.prepullAuraTolerance, code, stderr.String())
 	}
 	// Off by default.
 	o, code = parseRaidWalkArgs([]string{"zul_gurub"}, &stderr)
@@ -445,6 +633,8 @@ func TestParsePrepullAuraFlags(t *testing.T) {
 		{"id 0", []string{"zul_gurub", "--prepull-aura", "role=tank:0"}, "spell id 0"},
 		{"twice", []string{"zul_gurub", "--prepull-aura", "role=tank:17626", "--prepull-aura", "role=tank:17538"}, "named twice"},
 		{"no role", []string{"zul_gurub", "--prepull-aura", "17626"}, `want "role=<role>:<ids>"`},
+		{"negative tolerance", []string{"zul_gurub", "--prepull-aura", "role=tank:17626", "--prepull-aura-tolerance", "-1"}, "0 or more"},
+		{"tolerance alone", []string{"zul_gurub", "--prepull-aura-tolerance", "1"}, "needs --prepull-aura"},
 	} {
 		var errBuf bytes.Buffer
 		_, code := parseRaidWalkArgs(tc.args, &errBuf)
