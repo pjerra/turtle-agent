@@ -74,9 +74,10 @@ var (
 const walkPIDFile = "walk.pid"
 
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
-    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--gm-instance-data LEG:"A B[;A B]"] [--speed X] [--hires FILE] [--tier N|--tier-override N]
+    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--no-place-unfreeze] [--gm-instance-data LEG:"A B[;A B]"] [--prepull-aura role=ROLE:ID,ID|PRESET] [--prepull-aura-tolerance N] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
-    [--reset-wait 5m] [--wipe-resume K] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-per-account N] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
+    [--reset-wait 5m] [--wipe-resume K] [--wipe-end fast] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-per-account N] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
+    [--practice ENTRY] [--practice-cycles N] [--practice-max 20m] [--practice-rest 30s] [--practice-boss-floor N] [--practice-sustain=on|off] [--practice-window 120s]
     [--decisions on|off] [--decisions-max-mib N]
     [--mmaps DIR] [--slots FILE] [--binary PATH] [--inject SPEC] [--reuse-instance] [--dry-run]
        turtle-agent raid-walk report <dir> [--spell ID] [--clock-offset 1h] [--md FILE] [--json FILE] [--out DIR]`
@@ -103,22 +104,40 @@ type raidWalkOptions struct {
 	gmClearBoss    stringList // --gm-clear-boss <leg>, repeatable: GM-kill the leg's boss and its pack
 	gmClearSpawns  string     // --gm-clear-spawns: the world export dir (default ~/.local/share/turtle-agent/world/map<N>, else the checkout's tools/dungeongen/testdata/map<N>)
 	gmInstanceData stringList // --gm-instance-data "<leg>:<a> <b>[;<a> <b>...]", repeatable: send each as .debug instancedata when the walk first starts the leg (test servers only)
-	speed          float64
-	hires          string
-	tier           int // --tier: the kit of a raid the committed table leaves unknown
-	tierOverride   int // --tier-override: a comparison, not a tier proof
-	enter          string
-	holdMinutes    int
-	maxRunMinutes  int
-	pausedWait     time.Duration
-	autoResume     int
-	resetWait      time.Duration
-	wipeResume     int
-	wipeRest       time.Duration
-	reviveAtRaid   bool          // --revive-at-raid (default on): a wipe recovery brings far hires to the revive point and waits for the raid to gather
-	hireSettle     time.Duration // --hire-settle: the wait after the last hire; 0 skips it (the #1367 live proof)
-	capPerAccount  int           // --instance-cap-per-account: the core's fresh instances per account and hour (stock 5)
-	capGiven       bool          // --instance-cap-per-account was given: it wins over instance-cap-per-account.json's value
+	// prepullAura is --prepull-aura, repeatable: "role=<tank|melee|ranged|caster|healer|all>:<id,id,...|preset>", the
+	// auras the commander puts on the living party at the pre-pull rest before each boss row (test servers only).
+	prepullAura stringList
+	// prepullAuraTolerance is --prepull-aura-tolerance: the most auras one bot may miss after a fire (0: every
+	// requested aura must verify). It is the explicit opt-in for a partial preparation.
+	prepullAuraTolerance int
+	// --practice: a boss-mechanic practice run on a test server (TEST SERVERS ONLY). practice is the boss entry as
+	// given; practiceEntry is its number, 0 when no practice runs.
+	practice          string
+	practiceGiven     bool
+	practiceEntry     uint32
+	practiceCycles    int           // --practice-cycles: the mechanic cycles the walk collects before it ends
+	practiceMax       time.Duration // --practice-max: the practice loop's wall time ceiling
+	practiceRest      time.Duration // --practice-rest: the out-of-combat rest between attempts
+	practiceBossFloor int           // --practice-boss-floor: the boss's HP percent below which sustain restores it
+	practiceSustain   bool          // --practice-sustain: revive dead hires and restore the boss's HP at each cycle
+	practiceWindow    time.Duration // --practice-window: the cycle window of an entry the mechanic table does not know
+	speed             float64
+	hires             string
+	tier              int // --tier: the kit of a raid the committed table leaves unknown
+	tierOverride      int // --tier-override: a comparison, not a tier proof
+	enter             string
+	holdMinutes       int
+	maxRunMinutes     int
+	pausedWait        time.Duration
+	autoResume        int
+	resetWait         time.Duration
+	wipeResume        int
+	wipeRest          time.Duration
+	wipeEndFast       bool          // --wipe-end fast: a wipe is not reset or revived by the recipe here (the autopilot discards the copy); the dead hires get a bare revive
+	reviveAtRaid      bool          // --revive-at-raid (default on): a wipe recovery brings far hires to the revive point and waits for the raid to gather
+	hireSettle        time.Duration // --hire-settle: the wait after the last hire; 0 skips it (the #1367 live proof)
+	capPerAccount     int           // --instance-cap-per-account: the core's fresh instances per account and hour (stock 5)
+	capGiven          bool          // --instance-cap-per-account was given: it wins over instance-cap-per-account.json's value
 	// allowSplitLedger lets a --slots file outside the default dir run although the default leases hold a live lease
 	// for the server (test sandboxes). Production keeps one ledger per server.
 	allowSplitLedger bool
@@ -138,6 +157,7 @@ type raidWalkOptions struct {
 	binary           string
 	injects          stringList // --inject, repeatable
 	dryRun           bool
+	noPlaceUnfreeze  bool // --no-place-unfreeze: with --place, do not re-place hires still frozen at the placement point
 	// noPlaceRetreat is a test seam: the unit tests that pin one placement attempt turn the same-instance retreat off
 	// (the walk's own TestPlaceQuietFailureRetreatsInTheSameInstance runs it).
 	noPlaceRetreat bool
@@ -248,6 +268,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.SetOutput(stderr)
 	fs.Usage = func() { fmt.Fprintln(stderr, raidWalkUsage) }
 	speed := "1.0"
+	wipeEnd := ""
 	fs.StringVar(&o.server, "server", "m910q", "the slot server")
 	fs.StringVar(&o.slot, "slot", "", "the slot id (default: any free slot)")
 	fs.StringVar(&o.holder, "holder", "", "the lease holder (default raid-walk-<plan>)")
@@ -255,7 +276,8 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.sql, "sql", "", "the deployed migration: step numbers and the first point come from it")
 	fs.StringVar(&o.until, "until", "boss", "boss (stops before it), boss-done (after the boss step), none, \"step N\" or \"leg L\"")
 	fs.StringVar(&o.from, "from", "", "\"leg L\" or \"step N\" for the run leader")
-	fs.Var(onOffFlag{v: &o.place, name: "--place"}, "place", "with --from: put the raid at that start inside the instance, clearing the legs it skips; a same-instance placement ends at once with exit 29 (`fresh instance needed`) when half the hires are dead or the start leg's boss is fighting the party (Eluna test toolkit: m910q or tortoise-test2 only)")
+	fs.Var(onOffFlag{v: &o.place, name: "--place"}, "place", "with --from: put the raid at that start inside the instance, clearing the legs it skips; a same-instance placement ends at once with exit 29 (`fresh instance needed`) when half the hires are dead or the start leg's boss is fighting the party (Eluna test toolkit: m910q, tortoise-test2 or tortoise-test3 only)")
+	fs.BoolVar(&o.noPlaceUnfreeze, "no-place-unfreeze", false, "with --place: turn off the unfreeze check. The `spread=5` place can drop two seats onto a small disconnected navmesh island beside the place point, where every move fails; by default, from the first watch poll after each placement move (the `.tt place`: an 11 yd ring, spread + 6; every GM summon wave of a retry, a retreat or the reuse/bind gather: a 6 yd ring at its own point) and for 120 s, sampled once per poll, a hire that is alive, not the main tank, has stood still (under 2 yd for 10 s) within the ring and more than 35 yd from the main tank while the main tank is more than 15 yd from the point is summoned onto the main tank once the commander's `.go` onto him has landed (5 s, 5 yd), at most twice per hire; a successful summon logs `placement: re-placed <hire> (frozen at x,y,z for <s>s)`, a failed one `placement: re-place failed <hire> (<reason>)` (at most 3 per hire, 5 s apart); three failed `.go` moves in a row, the main tank's death or a wipe stop it (`placement: unfreeze check stopped (<reason>)`), and it ends with `placement: frozen=<n> re-placed=<n>`")
 	fs.BoolVar(&o.reuseInstance, "reuse-instance", false, "with --place: keep the raid's CURRENT instance (no fresh instance is entered or counted, so the instance cap is untouched). A live raid is kept; a logged-out raid is resumed from the commander's live bind; with no bind the walk says so and falls back to a fresh entry. Combines with --gm-clear")
 	fs.StringVar(&speed, "speed", "1.0", "the run's test speed, 1.0 to 3.0")
 	fs.StringVar(&o.hires, "hires", "", "the tb-raid-roster v1 file (default: from the plan's raid block)")
@@ -268,9 +290,10 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.IntVar(&o.wipeResume, "wipe-resume", 0, "revive, rest and resume a wipe or near-wipe stop this many times per walk (0-3; 0 ends the walk as before)")
 	fs.IntVar(&o.autoResume, "auto-resume", 0, "resume a regroup pause this many times per step (0-3)")
 	fs.DurationVar(&o.resetWait, "reset-wait", 5*time.Minute, "how long a wipe may wait for the instance to reset")
+	fs.StringVar(&wipeEnd, "wipe-end", "", "\"fast\": a wipe that ends the walk at a boss row skips the reset wait and the revive recipe (the copy is discarded: the autopilot's fresh-instance relaunch) and revives only the dead hires; the default keeps the recipe")
 	fs.DurationVar(&o.wipeRest, "wipe-rest", 10*time.Minute, "how long a revived raid rests out of combat before the run resumes")
 	fs.BoolVar(&o.reviveAtRaid, "revive-at-raid", true, "a wipe recovery revives the raid AT the revive point: a hire revived more than 100 yd away is summoned to it, and the resume waits up to 60s for every hire to be in range and out of combat (false: the old revive in place)")
-	fs.DurationVar(&o.hireSettle, "hire-settle", hireSettleWait, "how long to wait after the last hire for its join summons before the refit and the bind (0 skips the wait)")
+	fs.DurationVar(&o.hireSettle, "hire-settle", hireSettleWait, "how long to wait at most after the last hire for its join summons before the refit and the bind (the wait ends when every hire has joined; 0 skips it)")
 	fs.IntVar(&o.capPerAccount, "instance-cap-per-account", raidwalk.InstanceCapPerAccount, "the core's limit of fresh instance ids one account may enter in an hour (stock 5; a patched test core may be 30). The server's entry in instance-cap-per-account.json is used when this flag is not given")
 	fs.DurationVar(&o.capWait, "instance-cap-wait", raidwalk.InstanceCapDefaultWait, "at the cap's raid count (one below --instance-cap-per-account) in the last hour on the server, wait up to this long for the oldest to age out, then exit 26 (0: no wait, exit 26 at that count)")
 	fs.BoolVar(&o.capFail, "instance-cap-fail", false, "at that count exit 26 instead of waiting")
@@ -279,7 +302,17 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.patrols, "patrols", "", "a tb-patrols file for the revive quiet check")
 	fs.Var(&o.gmClear, "gm-clear", "TEST SERVERS ONLY, needs --place: after the placement the commander GM-kills every live unit of these pull groups of a leg, \"<leg>:<group>[,<group>...]\" (whole packs, links included); repeatable; the walk is then ASSISTED, never a real clear")
 	fs.Var(&o.gmClearBoss, "gm-clear-boss", "TEST SERVERS ONLY, needs --place: like --gm-clear for the boss of a leg (and its pack); repeatable")
+	o.practiceSustain = true
+	fs.StringVar(&o.practice, "practice", "", "TEST SERVERS ONLY, needs --place and --from: keep one boss fight alive for mechanic practice, resetting the boss with GM tools between attempts; the value is the boss's creature entry (14834 = Hakkar). The walk is PRACTICE ASSISTED and never credits a boss kill")
+	fs.IntVar(&o.practiceCycles, "practice-cycles", 10, "the mechanic cycles --practice collects before it ends")
+	fs.DurationVar(&o.practiceMax, "practice-max", 20*time.Minute, "the --practice loop's wall time ceiling")
+	fs.DurationVar(&o.practiceRest, "practice-rest", 30*time.Second, "the out-of-combat rest between --practice attempts")
+	fs.IntVar(&o.practiceBossFloor, "practice-boss-floor", 40, "the boss HP percent below which --practice restores it to its max")
+	fs.Var(onOffFlag{v: &o.practiceSustain, name: "--practice-sustain"}, "practice-sustain", "revive dead hires and restore the boss's HP at each practice cycle (on or off)")
+	fs.DurationVar(&o.practiceWindow, "practice-window", 120*time.Second, "the cycle window of a --practice entry the mechanic table does not know (one cycle per window)")
 	fs.Var(&o.gmInstanceData, "gm-instance-data", "TEST SERVERS ONLY: when the walk first starts the named leg the commander sends each \".debug instancedata <a> <b>\" of \"<leg>:<a> <b>[;<a> <b>...]\", in order, 3 s apart, sent after placement on every launch, including same-instance --reuse-instance restarts (a boss Reset() can overwrite priest data on a wipe), and again after each recovered wipe; after run start a send goes out only at an out-of-combat rest or gather before the pull, and the lines are resent once per boss row at the rest of the step before it (a boss row without such a rest warns and skips); with --place it is the placement's copy, without it the entry's (read as q inst; unreadable: fires once per out dir with a WARN); repeatable")
+	fs.Var(&o.prepullAura, "prepull-aura", "TEST SERVERS ONLY, off by default: \"role=<tank|melee|ranged|caster|healer|all>:<id,id,...|preset>\", repeatable (one list per role). At the out-of-combat rest/gather before EACH boss row the commander puts the role's auras on every living party member that lacks them, with a GM select-then-\".aura\" under a confirmed run pause (resumed after; a pause that does not hold sends no aura, and before each `.aura` every living party member is re-read for combat: an in-combat member or an unreadable unit stops the batch); the tank/ot batches are \"tank\" and every other bot takes its class's role. \"world\" is the world-raid preset (the classic world buffs a Turtle raid keeps, Warchief's Blessing left out); every other preset is dungeon_run's buffs list. prepull-auras.json records the boss rows that verified, the failed attempts with their reason and each bot's ids sent and seen; by default every requested aura must verify, and a missing one fails the walk (exit 18)")
+	fs.IntVar(&o.prepullAuraTolerance, "prepull-aura-tolerance", 0, "TEST SERVERS ONLY, needs --prepull-aura: the most auras one bot may miss after a fire. 0 (the default) requires every requested aura to verify; any missing list is still written to prepull-auras.json")
 	fs.StringVar(&o.gmClearSpawns, "gm-clear-spawns", "", "the world export dir --gm-clear reads the packs from (default: ~/.local/share/turtle-agent/world/map<N>, else the checkout's <dir>/../tools/dungeongen/testdata/map<N>)")
 	fs.StringVar(&o.out, "out", "", "the output dir (default ./raid-walk-<plan>-<stamp>)")
 	fs.StringVar(&o.dashURL, "dash-url", "", "the dashboard URL (or TBDASH_URL)")
@@ -300,6 +333,9 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "instance-cap-per-account" {
 			o.capGiven = true
+		}
+		if f.Name == "practice" {
+			o.practiceGiven = true
 		}
 	})
 	if o.capPerAccount < 1 {
@@ -381,6 +417,14 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 		fmt.Fprintf(stderr, "raid-walk: --wipe-resume wants 0 to 3\n")
 		return o, exitUsage
 	}
+	switch wipeEnd {
+	case "":
+	case "fast":
+		o.wipeEndFast = true
+	default:
+		fmt.Fprintf(stderr, "raid-walk: --wipe-end wants \"fast\", not %q\n", wipeEnd)
+		return o, exitUsage
+	}
 	if o.wipeRest < 30*time.Second {
 		fmt.Fprintf(stderr, "raid-walk: --wipe-rest must be 30s or more\n")
 		return o, exitUsage
@@ -441,6 +485,44 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 			return o, exitUsage
 		}
 	}
+	// --practice (the owner-approved test tool, 2026-11-07): GM sustain and reset on the test servers only, and only
+	// where the walk already places a raid: it moves the boss and the party with GM lines.
+	if o.practice != "" || o.practiceGiven {
+		n, err := strconv.ParseUint(o.practice, 10, 32)
+		if err != nil || n == 0 {
+			fmt.Fprintf(stderr, "raid-walk: --practice wants a creature entry (14834 = Hakkar), not %q\n", o.practice)
+			return o, exitUsage
+		}
+		o.practiceEntry = uint32(n)
+		if !placeServers[o.server] {
+			fmt.Fprintf(stderr, "raid-walk: --practice sends GM commands: test servers only (%s)\n", strings.Join(placeServerList(), ", "))
+			return o, exitUsage
+		}
+		if !o.place || o.from == "" {
+			fmt.Fprintf(stderr, "raid-walk: --practice needs --place and --from (it starts the raid at its boss row)\n")
+			return o, exitUsage
+		}
+		if o.practiceCycles < 1 {
+			fmt.Fprintf(stderr, "raid-walk: --practice-cycles must be 1 or more, not %d\n", o.practiceCycles)
+			return o, exitUsage
+		}
+		if o.practiceMax <= 0 {
+			fmt.Fprintf(stderr, "raid-walk: --practice-max must be above 0\n")
+			return o, exitUsage
+		}
+		if o.practiceRest < 0 {
+			fmt.Fprintf(stderr, "raid-walk: --practice-rest must be 0 or more\n")
+			return o, exitUsage
+		}
+		if o.practiceBossFloor < 1 || o.practiceBossFloor > 100 {
+			fmt.Fprintf(stderr, "raid-walk: --practice-boss-floor wants 1 to 100 (%%), not %d\n", o.practiceBossFloor)
+			return o, exitUsage
+		}
+		if o.practiceWindow <= 0 {
+			fmt.Fprintf(stderr, "raid-walk: --practice-window must be above 0\n")
+			return o, exitUsage
+		}
+	}
 	if len(o.gmInstanceData) > 0 {
 		if !placeServers[o.server] {
 			fmt.Fprintf(stderr, "raid-walk: --gm-instance-data sends GM commands: test servers only (%s)\n", strings.Join(placeServerList(), ", "))
@@ -452,6 +534,24 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 				return o, exitUsage
 			}
 		}
+	}
+	if len(o.prepullAura) > 0 {
+		if !placeServers[o.server] {
+			fmt.Fprintf(stderr, "raid-walk: --prepull-aura sends GM commands: test servers only (%s)\n", strings.Join(placeServerList(), ", "))
+			return o, exitUsage
+		}
+		if _, err := raidwalk.PlanPrepullAuras(o.prepullAura); err != nil {
+			fmt.Fprintf(stderr, "raid-walk: %v\n", err)
+			return o, exitUsage
+		}
+	}
+	if o.prepullAuraTolerance < 0 {
+		fmt.Fprintf(stderr, "raid-walk: --prepull-aura-tolerance must be 0 or more\n")
+		return o, exitUsage
+	}
+	if o.prepullAuraTolerance > 0 && len(o.prepullAura) == 0 {
+		fmt.Fprintf(stderr, "raid-walk: --prepull-aura-tolerance needs --prepull-aura\n")
+		return o, exitUsage
 	}
 	return o, exitOK
 }
@@ -477,7 +577,7 @@ func parseGMClearSpecs(groups, bosses []string) ([]raidwalk.GMClearSpec, error) 
 }
 
 // placeServers are the servers whose Eluna test toolkit can move a raid (spec 3). --place refuses every other one.
-var placeServers = map[string]bool{"m910q": true, "tortoise-test2": true}
+var placeServers = map[string]bool{"m910q": true, "tortoise-test2": true, "tortoise-test3": true}
 
 // gmKillAuthorize is gmKillAllowed with the slots table read from its default path (the file slot setup and teardown read;
 // slots.Load holds it to mode 0600 in a folder no one else can write). Login and reconnect call it with the address the
@@ -582,12 +682,21 @@ func (f onOffFlag) IsBoolFlag() bool { return true }
 type walkStop struct {
 	code   int
 	reason string
+	// cause is the underlying error when the stop was decided on it: errors.Is/As reach it (the practice loop tells
+	// a missing unit from a real GM failure).
+	cause error
 }
 
 func (e *walkStop) Error() string { return e.reason }
+func (e *walkStop) Unwrap() error { return e.cause }
 
 func stopf(code int, format string, a ...any) error {
 	return &walkStop{code: code, reason: fmt.Sprintf(format, a...)}
+}
+
+// stopfCause is stopf with the underlying error kept for errors.Is/As.
+func stopfCause(code int, cause error, format string, a ...any) error {
+	return &walkStop{code: code, reason: fmt.Sprintf(format, a...), cause: cause}
 }
 
 // stopInfo reads a phase error: a *walkStop carries its own code and reason.
@@ -834,13 +943,15 @@ type walk struct {
 	logF    *os.File
 	framesF *os.File
 
-	tracker   *raidwalk.Tracker
-	inj       walkInjector
-	newNotes  []string // the RUN notes read since the last injector Tick (it drains them)
-	layout    raidwalk.LayoutSummary
-	notes     []string
-	fights    []raidwalk.FightSummary
-	decisions *raidwalk.DecisionsSummary
+	tracker  *raidwalk.Tracker
+	inj      walkInjector
+	newNotes []string // the RUN notes read since the last injector Tick (it drains them)
+	layout   raidwalk.LayoutSummary
+	notes    []string
+	// specFailed is the roster specs whose talent build did not take (applyTalents); the summary lists them.
+	specFailed []raidwalk.SpecFailure
+	fights     []raidwalk.FightSummary
+	decisions  *raidwalk.DecisionsSummary
 
 	seenFights map[string]bool
 	// fightIDsAtStart is the fight ids the dashboard listed when the walk first read its fights: the
@@ -849,6 +960,9 @@ type walk struct {
 	// (creditFightKills). A record that first appears during the walk is this walk's and credits freely.
 	// nil until the first successful read.
 	fightIDsAtStart map[string]bool
+	// liveAtStart is the at-start ids whose row was Live in the first successful read (built next to
+	// fightIDsAtStart): when such a fight later finishes, its detail file is still written, tagged History.
+	liveAtStart map[string]bool
 	// fightsPrePlacement is set while saveFightsAtStart reads the list before the walk's first placement.
 	fightsPrePlacement bool
 	// maxStatusStep is the highest step any run status showed (observeBossStatus): creditFightKills reads whether
@@ -859,9 +973,16 @@ type walk struct {
 	hostiles      map[string]hostileState
 	botAt         map[string]botPos
 	partyG        map[uint64]bool
-	resetSince    time.Time
-	afterN        uint64
-	eventsAt      uint64
+	// partySet is the names the last party read held (partyNames): `.bot uninvite` is allowed only for one of them.
+	partySet   map[string]bool
+	resetSince time.Time
+	afterN     uint64
+	eventsAt   uint64
+	// viewFrame is the newest perception frame the walk read and viewAt when it read it: the practice's boss check
+	// reads the exact frame a poll fetched, so a tracker row the same poll stamped before its slow event wait cannot
+	// call a boss the frame shows gone.
+	viewFrame *tbm.ViewFrame
+	viewAt    time.Time
 
 	bossSet map[uint32]bool
 	// bossRule decides which frame rows are boss evidence (raidwalk.BossRows: a `first`-only entry counts within
@@ -1030,6 +1151,8 @@ type walk struct {
 	reuseBindInst float64                // the instance the commander's existing bind names (reuseMode "bind")
 	reuseBindTTR  string                 // that bind's time to reset, from .instance listbinds
 	placeSummoned []string
+	unfreeze      placeUnfreeze // the place-unfreeze net's state (raid_walk_unfreeze.go)
+	pollAt        time.Time     // the time the last pollOnce read first: the stamp of that poll's frames
 
 	capOwner    string // the instance-cap reservation's owner (holder + pid)
 	capReserved bool   // a reservation is held and not yet confirmed or released
@@ -1040,6 +1163,9 @@ type walk struct {
 	gmClearWarn []string // groups the plan skipped (no hostile spawn near the row): a WARN note and run.log line
 	gmClearLog  []raidwalk.GMClearEntry
 	gmClearUsed bool
+	// practice is the --practice run's state (nil for every other walk): the mechanic, the cycles and attempts
+	// collected, the rows written and the closed GM actions taken.
+	practice *practiceState
 	// --gm-instance-data: the specs validate resolved against the rows, in flag order; the markers in the out dir
 	// say which legs already fired (and the ledger, which outlives the attempt, says it per instance).
 	gmInstanceData          []raidwalk.GMInstanceSpec
@@ -1058,6 +1184,18 @@ type walk struct {
 	// counts the legs reported as never sent.
 	gmInstanceDataDeferred map[string]string
 	gmInstanceDataUnsent   int
+	// --prepull-aura: the resolved lists, the boss rows whose fire verified, the fires that failed and their reason,
+	// the bots' records and the rows fired. A row lands in prepullAuraRows only after its fire verified.
+	prepullAuras        raidwalk.PrepullAuras
+	prepullAuraSent     map[int]bool
+	prepullAuraBots     map[string]*prepullAuraRecord
+	prepullAuraRows     []int
+	prepullAuraAttempts []prepullAuraAttempt
+	// prepullAuraWatch is the combat watch: every living party member of the fire, whether or not the flag gives it a
+	// list. Every aura send re-reads them, and an unreadable row stops the batch, so a pull mid-batch stops the auras.
+	// prepullAuraRow names the boss row for those errors.
+	prepullAuraWatch []dungeon.AuraTarget
+	prepullAuraRow   int
 	// gongReruns counts the run restarts at a leg's summoning open row (a boss that despawns after a wipe comes back with the
 	// object: Zul'Gurub's Arlokk). bossGongReruns bounds them. gongRerunAt/-Boss/-Open name the last one that went out: the
 	// next "boss not found" pause reads whether the frames saw the boss alive since, which tells the gong summoning him again
@@ -1460,6 +1598,11 @@ func (w *walk) validate() error {
 			return err
 		}
 	}
+	if len(w.opts.prepullAura) > 0 {
+		if err := w.validatePrepullAura(); err != nil {
+			return err
+		}
+	}
 	if len(w.opts.injects) > 0 {
 		if newWalkInjector == nil {
 			return stopf(exitUsage, "this build has no fault injection (--inject)")
@@ -1635,7 +1778,7 @@ func dashboardWarning(err error) string {
 // gm sends one GM line, but only after raidwalk.AllowedLine passes it: a refusal is a programming
 // error that stops the walk and prints the line (spec 3.6).
 func (w *walk) gm(ctx context.Context, line string) error {
-	if !raidwalk.AllowedLine(line, w.hires, w.plan.Map) {
+	if !raidwalk.AllowedLine(line, w.hires, w.partySet, w.plan.Map) {
 		return stopf(exitRaidWalkFailed, "raid-walk refused to send a GM line outside the allow-list: %s", line)
 	}
 	w.logLine(w.env.now(), "> "+line)
@@ -1838,6 +1981,9 @@ func (w *walk) printPlan(out io.Writer) {
 			raidwalk.HireCap, raidwalk.HireCap, w.roster.Total())
 	}
 	fmt.Fprintf(out, "  6 gm: .bot gear raid <commander> tier %d\n", w.roster.Tier)
+	for _, a := range w.prepullAuras {
+		fmt.Fprintf(out, "  6b prepull-aura %s: %s\n", a.Role, prepullNames(a.Buffs))
+	}
 	fmt.Fprintf(out, "  7 commander: bind <hire> raid\n")
 	fmt.Fprintf(out, "  7 commander: view on\n")
 	switch w.opts.enter {
@@ -1990,6 +2136,7 @@ func (w *walk) finish(code int) {
 		Started: w.started, Ended: w.ended, EndReason: w.endReason, Fights: w.fights, Decisions: w.decisions,
 		Dashboard: w.dashNote, ExitCode: code, Notes: w.notesCopy(),
 		Place:         w.placeSum,
+		Practice:      w.practiceSummary(),
 		GMClearUsed:   w.gmClearUsed,
 		GMClear:       w.gmClearLog,
 		GMClearLegs:   raidwalk.GMClearLegs(w.gmClear),
@@ -2000,6 +2147,7 @@ func (w *walk) finish(code int) {
 		HireSettle: w.opts.hireSettle, SettleShort: w.opts.hireSettle < hireSettleWait,
 		WipeResumes:          w.wipeResumes,
 		GMInstanceDataUnsent: w.gmInstanceDataUnsent,
+		SpecFailed:           w.specFailed,
 		ReviveBrought:        len(w.reviveBrought), ReviveUnreached: len(w.reviveUnreached), ReviveGatherMissed: len(w.reviveGatherMissed),
 	}
 	if w.inj != nil {
@@ -2023,6 +2171,9 @@ func (w *walk) finish(code int) {
 	_ = w.writeOut("summary.txt", []byte(text))
 	line := strings.SplitN(text, "\n", 2)[0]
 	fmt.Fprintf(w.stdout, "%s; out %s\n", line, w.outDir)
+	if warn := raidwalk.SpecFailedLine(w.specFailed); warn != "" {
+		fmt.Fprintln(w.stdout, warn)
+	}
 }
 
 // pullJoinsOrEmpty is the walk's per-pull joiner record: never nil, so the

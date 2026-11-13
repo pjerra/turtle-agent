@@ -1,0 +1,33 @@
+{
+ "format": "tb-prepull-auras",
+ "version": 1,
+ "note": "Sample --prepull-aura lists for a Zul'Gurub pre-raid walk (walk 100: tier 1 gear, full player prep). Every id was checked in the core's tw_world_spell_template.sql: each is an effect-6 (apply aura) spell that a GM '.aura <id>' puts on the selected player, not a Food-channel cast. The walk takes the ids directly, one value per role: --prepull-aura role=tank:17626,17538,11405,11348,25661. A bot whose role the walk cannot tell (an unknown class) gets only the 'all' lists.",
+ "roles": {
+  "tank": {
+   "ids": [17626, 17538, 11405, 11348, 25661],
+   "what": "Flask of the Titans 17626, Elixir of the Mongoose 17538, Elixir of the Giants 11405, Greater Armor 11348 (Elixir of Superior Defense), Dirge's Kickin' Chimaerok Chops 25661 (Well Fed, +25 stamina)"
+  },
+  "melee": {
+   "ids": [17626, 17538, 11405, 16329, 24799],
+   "what": "Flask of the Titans 17626, Elixir of the Mongoose 17538, Elixir of the Giants 11405, Juju Might 16329, Smoked Desert Dumplings 24799 (Well Fed)"
+  },
+  "ranged": {
+   "ids": [17626, 17538, 18192],
+   "what": "hunter: Flask of the Titans 17626, Elixir of the Mongoose 17538, Grilled Squid 18192 (Well Fed, +10 agility)"
+  },
+  "caster": {
+   "ids": [17628, 17539, 11474, 22730],
+   "what": "mage and warlock: Flask of Supreme Power 17628, Greater Arcane Elixir 17539, Elixir of Shadow Power 11474 (warlock; a mage carries it unused), Runn Tum Tuber Surprise 22730 (Well Fed, +10 intellect)"
+  },
+  "healer": {
+   "ids": [17627, 24363, 18194],
+   "what": "Flask of Distilled Wisdom 17627, Mageblood Potion 24363, Nightfin Soup 18194 (Well Fed, mana per 5 s)"
+  },
+  "all": {
+   "ids": [22888, 15366, 24425, 22817, 22818, 22820, 23768],
+   "what": "the world buffs and Sayge's fortune: Rallying Cry of the Dragonslayer 22888, Songflower Serenade 15366, Spirit of Zandalar 24425, Fengus' Ferocity 22817, Mol'dar's Moxie 22818, Slip'kik's Savvy 22820, Sayge's Dark Fortune of Damage 23768. The first six are the 'world' preset (world-raid), so --prepull-aura all:world,23768 is the same list. Warchief's Blessing 16609 is left out: Horde only."
+  }
+ },
+ "verified": "2026-11-13 against ~/tortoise-wow/sql/base/tw_world_spell_template.sql, every one an apply-aura effect (effect1 = 6): 17626 Flask of the Titans, 17538 Elixir of the Mongoose, 11405 Elixir of the Giants, 11348 Greater Armor, 25661 Increased Stamina, 16329 Juju Might, 24799 Well Fed, 18192 Increased Agility, 17628 Supreme Power, 17539 Greater Arcane Elixir, 11474 Shadow Power, 22730 Increased Intellect, 17627 Distilled Wisdom, 24363 Mana Regeneration, 18194 Mana Regeneration, 22888 Rallying Cry of the Dragonslayer, 15366 Songflower Serenade, 24425 Spirit of Zandalar, 22817 Fengus' Ferocity, 22818 Mol'dar's Moxie, 22820 Slip'kik's Savvy, 23768 Sayge's Dark Fortune of Damage.",
+ "raid_buff_strip": "Realism note, checked 2026-11-13: map 309 (Zul'Gurub) strips these world buffs (tw_world_instance_buff_removal.sql: 22888, 24425, 15366, 22817, 22818, 22820, 16609, 23768 and the other Sayge fortunes) through AuraRemovalMgr::PlayerEnterMap, called from Map::Add, so the strip happens on ENTERING the map (and for pets) and not to an aura applied inside the instance. The walk applies the lists at the pre-pull rest inside, so they hold for the fight; a wipe that leaves and re-enters the map loses them, and the recovery's refire puts them back. AiPlayerbot.WorldBuffsKeepInRaids (0 by default, aiplayerbot.conf.dist.in:459) governs only the module's own re-application to bots."
+}

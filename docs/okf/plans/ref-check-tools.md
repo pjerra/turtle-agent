@@ -30,7 +30,7 @@ Put flags before the plan names: these commands use plain flag parsing, which st
 | `--mmaps` | _(required)_ | Folder with the server's mmaps. Example: `--mmaps <mmaps-dir>`. |
 | `--from-leg` | `0` | Check from this leg on; earlier legs only place the party. Example: `--from-leg 3`. |
 | `--from-pull-group` | `-1` | With `--from-leg`: check from this 0-based pull group on. Example: `--from-leg 3 --from-pull-group 2`. |
-| `--sql` | _(empty)_ | Lint a world migration's rows instead of a plan file. Example: `--sql 20261020120000_world.sql`. |
+| `--sql` | _(empty)_ | Lint a world migration's rows instead of a plan file. The reader skips every statement that is no INSERT (a hand-set `UPDATE`, a `START TRANSACTION` wrapper) up to its `;` and names each in the output, warning that its hand edits are NOT applied; the rows around it are read. Example: `--sql 20261020120000_world.sql`. |
 | `--plan` | _(empty)_ | With `--sql`: the plan in the file when it holds several. Example: `--plan zulfarrak`. |
 | `--spawns` | _(empty)_ | The map's world export (default `<dir>/../tools/dungeongen/testdata/mapN`). Example: `--spawns tools/dungeongen/testdata/map209`. |
 | `--floor-aware` | `false` | Build the rows for the lints with the floor-aware cutter. |
@@ -49,7 +49,7 @@ Put flags before the plan name here too: this command also uses plain flag parsi
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--dir` | `dungeons` | Folder with the plan files. Example: `--dir dungeons`. |
-| `--sql` | _(empty)_ | A deployed migration (the rows the server runs); the recommended input. Example: `--sql 20261020120000_world.sql`. |
+| `--sql` | _(empty)_ | A deployed migration (the rows the server runs); the recommended input. The reader skips every statement that is no INSERT (a hand-set `UPDATE`, a `START TRANSACTION` wrapper) up to its `;` and names each in the output, warning that its hand edits are NOT applied; the rows around it are read. Example: `--sql 20261020120000_world.sql`. |
 | `--plan` | _(empty)_ | With `--sql`: the plan to report when the file holds several. |
 | `--spawns` | _(empty)_ | The world export of the plan's map (default `<dir>/../tools/dungeongen/testdata/mapN`). |
 | `--patrols` | _(repeatable)_ | A `tb-patrols` recording: replaces the DB patrol it matches, otherwise added. Example: `--patrols patrols-249-1.json`. |

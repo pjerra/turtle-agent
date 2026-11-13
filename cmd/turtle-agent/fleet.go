@@ -135,6 +135,8 @@ type fleetOpts struct {
 	stopOnFailure bool
 	// budget paces the children's logins under realmd's per-IP limit; nil: a new one.
 	budget *loginBudget
+	// now is the clock the start loop books logins with; nil: time.Now.
+	now func() time.Time
 }
 
 func fleetCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -238,6 +240,23 @@ func (goneChild) Stop()                   {}
 func (goneChild) Kill()                   {}
 func (c goneChild) Done() <-chan struct{} { return c.done }
 func (goneChild) Code() int               { return 1 }
+
+// bookFleetLogin books a member's login in the budget: no earlier than now, and when now is in or just before realmd's hour-start
+// window (login_hold.go), no earlier than the window's end plus a jitter sampled here, so the members that were held do not all
+// start at the same instant. The fleet starts the child at the booked time, outside the window, so the child adds no hold of its
+// own. It returns the booked time and the hold that was added (the window part, without the jitter).
+func bookFleetLogin(b *loginBudget, now time.Time) (time.Time, time.Duration) {
+	hold := loginHoldHorizon(now)
+	return b.reserveAdjusted(now, holdAdjuster()), hold
+}
+
+// clock is the options' clock.
+func (o fleetOpts) clock() time.Time {
+	if o.now != nil {
+		return o.now()
+	}
+	return time.Now()
+}
 
 // runFleet starts every member, waits until all are in world, prints the table, then
 // supervises until ctx ends (Ctrl-C: every child is stopped and logs out) or every child
@@ -370,9 +389,16 @@ func runFleet(ctx context.Context, members []fleetMember, deps fleetDeps, o flee
 		}
 		// One shared budget: realmd refuses the 15th account from an IP within 300 s, so
 		// a login that would be the 15th waits until the oldest has left the window.
-		if wait := time.Until(o.budget.reserve(time.Now())); wait > 0 && ctx.Err() == nil {
-			fmt.Fprintf(stderr, "fleet: waiting %s to log in %s: realmd allows %d logins per %s from one address and the fleet has used them\n",
-				wait.Round(time.Second), m.Character, o.budget.limit, o.budget.window.Round(time.Second))
+		// A login in realmd's hour-start window (login_hold.go) is booked at the window's end, where it really happens.
+		now := o.clock()
+		at, hold := bookFleetLogin(o.budget, now)
+		if wait := at.Sub(now); wait > 0 && ctx.Err() == nil {
+			if hold > 0 {
+				fmt.Fprintf(stderr, "fleet: waiting %s to log in %s: the realmd hour-start window\n", wait.Round(time.Second), m.Character)
+			} else {
+				fmt.Fprintf(stderr, "fleet: waiting %s to log in %s: realmd allows %d logins per %s from one address and the fleet has used them\n",
+					wait.Round(time.Second), m.Character, o.budget.limit, o.budget.window.Round(time.Second))
+			}
 			if f := pause(wait); f >= 0 {
 				report(f, true)
 				fmt.Fprintf(stderr, "fleet: %s failed; stopping the rest\n", members[f].Character)

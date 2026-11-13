@@ -396,7 +396,23 @@ func TestReportMarksAssisted(t *testing.T) {
 	}
 }
 
-// A pack wider than the commander's view gets one stop per cluster, at member spawns; a compact pack gets one.
+// A practice run prints a PRACTICE line instead of the ASSISTED gm-clear
+// line (before this fix it printed "ASSISTED: --gm-clear killed 0 units").
+func TestReportMarksPractice(t *testing.T) {
+	rep := BuildReport(nil, nil, ReportOptions{
+		Practice: &PracticeSummary{Entry: 14834, Attempts: 2, Cycles: 10, Ended: "cycles", Rows: "practice.jsonl"}})
+	md := rep.Markdown()
+	if !rep.Assisted || !strings.Contains(md, "PRACTICE: 10 cycles in 2 attempts, ended: cycles") {
+		t.Fatalf("report:\n%s", md)
+	}
+	if strings.Contains(md, "gm-clear killed") {
+		t.Fatalf("a practice report prints the gm-clear line:\n%s", md)
+	}
+	if rep.Practice == nil || rep.Practice.Entry != 14834 {
+		t.Fatalf("report lost the practice record: %+v", rep.Practice)
+	}
+}
+
 func TestGMClearStops(t *testing.T) {
 	pt := func(x float32) dungeon.Point { return dungeon.Point{X: x} }
 	compact := GMClearPack{Members: map[uint64]uint32{1: 1, 2: 1, 3: 1}, Positions: map[uint64]dungeon.Point{1: pt(0), 2: pt(60), 3: pt(-90)}}

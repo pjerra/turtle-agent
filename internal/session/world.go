@@ -14,6 +14,10 @@ import (
 	"github.com/pjerra/turtle-agent/internal/packet"
 )
 
+// ErrUnitNotInView is the unit store's missing-unit error: the client holds no object with that guid. A caller that
+// may retry (the practice loop's hp restore) tells a frame gap from a real failure with errors.Is.
+var ErrUnitNotInView = errors.New("not in view")
+
 // moveRelays are the movement packets the server relays for other units: packed guid +
 // MovementInfo (MovementHandler.cpp:414-418, MovementPacketSender.cpp:166-172).
 var moveRelays = []uint16{
@@ -109,7 +113,7 @@ func (s *Session) Unit(g packet.GUID, name string) (objects.Unit, error) {
 	x, y, z, o := s.selfPos()
 	u, ok := s.store.Get(g, x, y, z)
 	if !ok {
-		return objects.Unit{}, fmt.Errorf("unit %v is not in view", g)
+		return objects.Unit{}, fmt.Errorf("unit %v is %w", g, ErrUnitNotInView)
 	}
 	if g == self.GUID {
 		// The server never moves the player's own object after its create block; the

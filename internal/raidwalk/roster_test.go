@@ -270,3 +270,64 @@ func TestRosterV2Specs(t *testing.T) {
 		}
 	}
 }
+
+// The roster's hunter spec: "sv" is the alias of survival, the talent build table names TB's premade paths, and the allow-list lets
+// exactly `.bot command <hire> talents [<path>]` through for a hire and a known path.
+func TestRosterHunterSpecAliasAndTalentBuilds(t *testing.T) {
+	r, err := ParseRoster([]byte(`{"format":"tb-raid-roster","version":2,
+ "batches":[{"role":"mt","hire":"1 warrior:tank"},{"role":"rest","hire":"1 hunter","spec":"sv"},{"role":"rest","hire":"1 hunter","spec":"bm"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Batches[1].Spec; got != "survival" {
+		t.Errorf("sv became %q, want survival", got)
+	}
+	for spec, want := range map[string]TalentBuild{"bm": {"beastmastery", 0}, "mm": {"marksmanship", 1}, "survival": {"survival", 2}} {
+		if got, ok := TalentFor("hunter", spec); !ok || got != want {
+			t.Errorf("TalentFor(hunter, %s) = %v %v, want %v", spec, got, ok, want)
+		}
+	}
+	if _, ok := TalentFor("warrior", "arms"); ok {
+		t.Error("no talent build is set for a warrior spec")
+	}
+	if _, err := ParseRoster([]byte(`{"format":"tb-raid-roster","version":2,
+ "batches":[{"role":"mt","hire":"1 warrior:tank"},{"role":"rest","hire":"1 mage","spec":"sv"}]}`)); err == nil {
+		t.Error("sv is a hunter alias only")
+	}
+	hires := map[string]bool{"Bot02": true}
+	for line, want := range map[string]bool{
+		".bot command Bot02 talents marksmanship": true,
+		".bot command Bot02 talents":              true,
+		".bot command Bot02 talents reset":        false,
+		".bot command Bot02 talents auto":         false,
+		".bot command Bot09 talents survival":     false,
+		".bot command Bot02 leave":                false,
+	} {
+		if got := AllowedLine(line, hires, nil, 249); got != want {
+			t.Errorf("AllowedLine(%q) = %v, want %v", line, got, want)
+		}
+	}
+}
+func TestRosterTankSeats(t *testing.T) {
+	cases := []struct {
+		name string
+		json string
+		want int
+	}{
+		{"mt and ot", `{"format":"tb-raid-roster","version":1,"level":60,
+			"batches":[{"role":"mt","hire":"1 warrior:tank"},{"role":"ot","hire":"1t"},{"role":"rest","hire":"5h 13d"}]}`, 2},
+		{"class tokens", `{"format":"tb-raid-roster","version":1,"level":60,
+			"batches":[{"role":"mt","hire":"1 warrior:tank"},{"role":"ot","hire":"1 druid:tank 1 warrior:tank"},{"role":"rest","hire":"18d"}]}`, 3},
+		{"rest holds a tank", `{"format":"tb-raid-roster","version":1,"level":60,
+			"batches":[{"role":"mt","hire":"1 warrior:tank"},{"role":"rest","hire":"2t 18d"}]}`, 3},
+	}
+	for _, c := range cases {
+		r, err := ParseRoster([]byte(c.json))
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if got := r.TankSeats(); got != c.want {
+			t.Errorf("%s: TankSeats = %d, want %d", c.name, got, c.want)
+		}
+	}
+}

@@ -19,6 +19,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Setenv(tracesDirEnv, dir)
+	os.Setenv(loginHourHoldEnv, "0") // tests must not wait for realmd's hour-start window
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)

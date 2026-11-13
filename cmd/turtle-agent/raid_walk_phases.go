@@ -185,7 +185,7 @@ func (w *walk) phases(ctx context.Context) int {
 	}
 	_ = w.phaseHold(ctx)
 	w.ended = w.env.now()
-	w.phaseTeardown()
+	w.phaseTeardown(ctx)
 	if w.dash != nil {
 		w.pullDecisions(ctx)
 	}
@@ -206,7 +206,7 @@ func (w *walk) stop(err error, teardown bool) int {
 	}
 	_ = w.stopRun(context.Background(), "")
 	if teardown {
-		w.phaseTeardown()
+		w.phaseTeardown(context.Background())
 	}
 	if code == exitOK && len(w.hiresLeft) > 0 {
 		code = exitRaidWalkIncident
@@ -344,7 +344,10 @@ func (w *walk) phaseLogin(ctx context.Context) error {
 		return stopf(exitRaidWalkFailed, "login: %v", err)
 	}
 	w.logLine(w.env.now(), fmt.Sprintf("login started (pid %d)", pid))
-	deadline := w.env.now().Add(90 * time.Second)
+	// The child holds its realmd login out of the hour-start window (login_hold.go): the deadline grows by that hold.
+	started := w.env.now()
+	deadline := loginDeadline(started, 90*time.Second)
+	held := loginHoldExtra(started) > 0
 	for {
 		agent, m, err := w.deps.openAgent(w.slotDir)
 		if err == nil {
@@ -352,7 +355,7 @@ func (w *walk) phaseLogin(ctx context.Context) error {
 			break
 		}
 		if !w.env.now().Before(deadline) {
-			return stopf(exitRaidWalkFailed, "login: no agent in %s after 90 s (%v; see %s/agent.out)", w.slotDir, err, w.slotDir)
+			return stopf(exitRaidWalkFailed, "login: no agent in %s after %d s (%v; see %s/agent.out)", w.slotDir, elapsedSecs(w.env.now().Sub(started)), err, w.slotDir)
 		}
 		if err := w.env.sleep(ctx, time.Second); err != nil {
 			return stopf(exitRaidWalkFailed, "interrupted")
@@ -366,8 +369,12 @@ func (w *walk) phaseLogin(ctx context.Context) error {
 		if err == nil && st.State == session.StatusInWorld {
 			return nil
 		}
+		if held {
+			held = false
+			w.logLine(w.env.now(), "login: waiting for the realmd hour-start window")
+		}
 		if !w.env.now().Before(deadline) {
-			return stopf(exitRaidWalkFailed, "login: not in world after 90 s (state %q; see %s/agent.out)", stateWord(st), w.slotDir)
+			return stopf(exitRaidWalkFailed, "login: not in world after %d s (state %q; see %s/agent.out)", elapsedSecs(w.env.now().Sub(started)), stateWord(st), w.slotDir)
 		}
 		if err := w.env.sleep(ctx, 2*time.Second); err != nil {
 			return stopf(exitRaidWalkFailed, "interrupted")
@@ -415,8 +422,20 @@ const hireMaxRetries = 3
 // hireRetryWait is the rest between a short batch reply and its retry.
 const hireRetryWait = 30 * time.Second
 
+// dismissWait is how long phaseHire waits for the uninvited strays to leave the party: the module's `.bot uninvite`
+// reaches the group on the server's next update, and the `before` read (and so the join poll's want) must not still
+// count them.
+const dismissWait = 15 * time.Second
+
 // phaseHire is phase 6: the batches, the party diff and the gear preset.
 func (w *walk) phaseHire(ctx context.Context) error {
+	// 6a. a group member this walk did not hire is dismissed first. A failed attempt leaves its late joiners in the
+	// group (walk 80: attempt 1 timed out its join poll with 37 members), and the run start refuses while the whole
+	// party is not in the lead bot's instance (exit 18), which sent the next attempt into a bind resume that landed in
+	// Hakkar's altar patrols (#446).
+	if err := w.dismissStrayGroupMembers(ctx); err != nil {
+		return err
+	}
 	if f := w.roster.CommanderFaction; f != "" {
 		// TortoiseBots' hire fills the commander's own faction only, so a roster of the other side cannot be
 		// hired at all (a Horde commander gets no paladin, an Alliance one no shaman). Fail before the first
@@ -543,6 +562,11 @@ func (w *walk) phaseHire(ctx context.Context) error {
 			// bot's own spec, so the spec has to be in place first.
 			class := b.Class()
 			for _, n := range added {
+				// The talents first (a changed build rebuilds the bot's strategies), then `.bot role` puts the
+				// spec's strategies on top. A talent build that does not take is logged, never a failed walk.
+				if err := w.applyTalents(ctx, n, class, b.Spec); err != nil {
+					return err
+				}
 				if err := w.applySpec(ctx, n, b.Spec); err != nil {
 					return err
 				}
@@ -563,37 +587,152 @@ func (w *walk) phaseHire(ctx context.Context) error {
 	if w.opts.hireSettle == 0 {
 		w.logLine(w.env.now(), "no wait for the hires' join summons (--hire-settle 0)")
 	} else {
-		w.logLine(w.env.now(), fmt.Sprintf("waiting %s for the last hires' join summons", durWords(w.opts.hireSettle)))
-		if err := w.env.sleep(ctx, w.opts.hireSettle); err != nil {
-			return stopf(exitRaidWalkFailed, "interrupted")
+		w.logLine(w.env.now(), fmt.Sprintf("waiting up to %s for the last hires' join summons", durWords(w.opts.hireSettle)))
+		if err := w.waitHiresJoined(ctx, w.opts.hireSettle); err != nil {
+			return err
 		}
 	}
 	// The refit at the walk's tier (amendment G1): the hire wears the raid's minimum kit, and a comparison run its
 	// override. A failed refit is a failed walk: the tier is what the run is judged against.
 	line := fmt.Sprintf(".bot gear raid %s tier %d", w.manifest.Character, w.roster.Tier)
-	if err := w.gm(ctx, line); err != nil {
+	if err := w.gearRaid(ctx, line); err != nil {
 		return err
-	}
-	gear, ok, err := w.waitTBM(ctx, "TBM:GEAR|", 60*time.Second)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return stopf(exitRaidWalkFailed, "gear: no TBM:GEAR line in 60 s")
-	}
-	if !strings.HasPrefix(gear, "TBM:GEAR|ok|") {
-		return stopf(exitRaidWalkFailed, "gear: %s", gear)
 	}
 	w.tracker = raidwalk.NewTracker(w.plan, w.hireList())
 	return nil
 }
 
-// hireSettleWait follows the last hire batch before the refit and the bind. A big hire answers while its bots are
-// still on their join summon (about one a second), and a hire whose join lands after the bind is removed from the
-// group by the server. Walk 12 (ZG, 17-bot batches): the last join came 4-8 s after the answer. The party list is
-// no help: it names a hire before its join, and its zone there stays stale after it. This is the default of
-// --hire-settle; 0 skips the wait, which is how a walk proves TortoiseBots#1367's bind keeps its late joiners.
+// The refit's retry: the gear job a hire batch just started (or the module's own one) can still be running when the
+// walk fires `.bot gear raid`, and the module then answers `ACTION_ERR|gear|busy|A gear job is already running`
+// instead of a `TBM:GEAR` verdict. Speed3's Hakkar walks hit that 11 times in 101 attempts (2 in 74 on the old
+// binary), and each attempt then waited out the whole line budget and ended with exit 18.
+const (
+	gearBusyTries = 5 // the sends of the refit line, the first one included
+	gearLineWait  = 60 * time.Second
+)
+
+// gearRaid sends the walk's refit line and returns when its `TBM:GEAR` verdict is read, all inside one gearLineWait
+// budget. A `gear|busy` refusal means an earlier gear job holds the queue, and that job's own `TBM:GEAR` line answers
+// a send the module refused: it geared the roster before the spec was put on (the ordering the refit exists for), so it
+// is waited for with waitTBMMatch for the rest of the budget and dropped, never taken as this refit's verdict. Only
+// then is the line re-sent (at most gearBusyTries sends); if that job's verdict never arrives before the deadline the
+// refit fails without another send. The budget is checked before every re-send, and only a `TBM:GEAR` verdict read
+// after a send the module accepted (no busy reply came for it) counts.
+func (w *walk) gearRaid(ctx context.Context, line string) error {
+	deadline := w.env.now().Add(gearLineWait)
+	busy := ""
+	for try := 1; ; try++ {
+		if try > 1 && !w.env.now().Before(deadline) {
+			if busy != "" {
+				return stopf(exitRaidWalkFailed, "gear: %s (the %s budget is spent)", busy, durWords(gearLineWait))
+			}
+			return stopf(exitRaidWalkFailed, "gear: the %s budget is spent", durWords(gearLineWait))
+		}
+		if err := w.gm(ctx, line); err != nil {
+			return err
+		}
+		left := deadline.Sub(w.env.now())
+		if left < 0 {
+			left = 0
+		}
+		gear, ok, err := w.waitTBMMatch(ctx, left, gearVerdict)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return stopf(exitRaidWalkFailed, "gear: no TBM:GEAR line in 60 s")
+		}
+		if strings.HasPrefix(gear, "TBM:GEAR|") {
+			if !strings.HasPrefix(gear, "TBM:GEAR|ok|") {
+				return stopf(exitRaidWalkFailed, "gear: %s", gear)
+			}
+			return nil
+		}
+		// The module refused this send, so the job it named is still running.
+		busy = gear
+		if try >= gearBusyTries {
+			return stopf(exitRaidWalkFailed, "gear: %s (after %d sends)", gear, try)
+		}
+		if try == 1 {
+			w.note("gear: a gear job is already running (%s); re-sending once its verdict arrives", gear)
+		}
+		// Wait for that job's own verdict for the rest of the budget: it is read and dropped, so the re-send's
+		// result can only be a verdict of a send the module accepted. Without it nothing proves the queue is free,
+		// and a re-send could still be refused (or worse, its successor mistaken for this one) after the budget.
+		rem := deadline.Sub(w.env.now())
+		if rem < 0 {
+			rem = 0
+		}
+		if _, ok, err := w.waitTBMMatch(ctx, rem, func(l string) bool {
+			return strings.HasPrefix(l, "TBM:GEAR|")
+		}); err != nil {
+			return err
+		} else if !ok {
+			return stopf(exitRaidWalkFailed, "gear: %s (the blocking job's TBM:GEAR line did not come in the %s budget)",
+				busy, durWords(gearLineWait))
+		}
+	}
+}
+
+// gearVerdict matches the refit's own verdict or the module's refusal of a re-send while an earlier gear job runs.
+func gearVerdict(line string) bool {
+	return strings.HasPrefix(line, "TBM:GEAR|") || strings.HasPrefix(line, "TBM:ACTION_ERR|gear|busy|")
+}
+
+// hireSettleWait is the default of --hire-settle: the CEILING of the wait after the last hire batch for the hires'
+// joins, before the refit and the bind. The wait is a poll of the group (waitHiresJoined), so it ends as soon as every
+// hired bot is listed in the group as online; a big hire answers while its bots are still joining (about one a
+// second), and a hire whose join lands after the bind is removed from the group by the server. Walk 12 (ZG, 17-bot
+// batches): the last join came 4-8 s after the answer; 20 s is the old flat wait and still covers a 15 s late join.
+// 0 skips the wait, which is how a walk proves TortoiseBots#1367's bind keeps its late joiners.
 const hireSettleWait = 20 * time.Second
+
+// hireSettlePoll is how often the settle poll reads the group.
+const hireSettlePoll = time.Second
+
+// waitHiresJoined waits until every hired bot has joined the group (in the group list and online), up to the ceiling
+// limit, and carries on at once once they all have. A read that fails is retried until the ceiling: this is a race
+// against the server's joins, not a failure of its own, and the refit after it reports what is still missing.
+func (w *walk) waitHiresJoined(ctx context.Context, limit time.Duration) error {
+	due := w.env.now().Add(limit)
+	for {
+		if w.hiresJoined(ctx) {
+			return nil
+		}
+		left := due.Sub(w.env.now())
+		if left <= 0 {
+			return nil
+		}
+		if left > hireSettlePoll {
+			left = hireSettlePoll
+		}
+		if err := w.env.sleep(ctx, left); err != nil {
+			return stopf(exitRaidWalkFailed, "interrupted")
+		}
+	}
+}
+
+// hiresJoined says every hire the walk hired is in the group list and online: the group list names a hire before its
+// join lands (walk 12), so its names alone are no proof; the member's ONLINE flag is the group's own state of it. A
+// failed read is not joined.
+func (w *walk) hiresJoined(ctx context.Context) bool {
+	p, err := w.party(ctx)
+	if err != nil {
+		return false
+	}
+	online := make(map[string]bool, len(p.Members))
+	for _, m := range p.Members {
+		if m.Online {
+			online[m.Name] = true
+		}
+	}
+	for _, name := range w.hireList() {
+		if !online[name] {
+			return false
+		}
+	}
+	return true
+}
 
 // hireReply is one TBM:HIRE_RAID line read field by field (TortoiseBots commands/Hire.cpp:124):
 // TBM:HIRE_RAID|<ok|partial|refused>|<hired>|<planned>|<tank>|<healer>|<dps>|<tier>|<feeCopper>|<reason>.
@@ -659,15 +798,93 @@ func hireShortfall(tanks, healers, dps int) string {
 	return strings.Join(parts, " ")
 }
 
-// partyNames is the party's bot names.
+// dismissStrayGroupMembers uninvites every group member this walk did not hire (w.hires), so a failed attempt's late
+// joiners cannot block the next run start: the run starts only when the whole party stands in the lead bot's instance,
+// and walk 80's attempt 1 timed out its join poll with 37 members in the group (attempt 2's fresh placement refused
+// with exit 18, and attempt 3 resumed the bind into Hakkar's altar patrols). The module's `.bot uninvite` reaches an
+// owned bot of the commander's account only: a real player in the group gets its usage line, and no uninvite.
+//
+// The uninvites are read back before phaseHire reads the party: the server updates the group on its next tick, and a
+// `before` that still holds the strays inflates the join poll's want by their count (the original walk 80 failure: a
+// timeout that named more hires than the batch had bought). A stray that outlives the wait stops the attempt instead.
+func (w *walk) dismissStrayGroupMembers(ctx context.Context) error {
+	names, err := w.partyNames(ctx)
+	if err != nil {
+		return stopf(exitRaidWalkFailed, "party: %v", err)
+	}
+	var sent []string
+	for _, n := range names {
+		if w.hires[n] {
+			continue
+		}
+		if err := w.gm(ctx, ".bot uninvite "+n); err != nil {
+			return err
+		}
+		sent = append(sent, n)
+	}
+	if len(sent) == 0 {
+		return nil
+	}
+	left, err := w.waitStraysGone(ctx, dismissWait)
+	if err != nil {
+		return err
+	}
+	still := make(map[string]bool, len(left))
+	for _, n := range left {
+		still[n] = true
+	}
+	for _, n := range sent {
+		if still[n] {
+			continue
+		}
+		w.note("hire: dismissed %s, a group member this walk did not hire (it would keep the run from starting)", n)
+		w.logLine(w.env.now(), fmt.Sprintf("hire: dismissed %s (.bot uninvite)", n))
+	}
+	if len(left) > 0 {
+		return stopf(exitRaidWalkFailed, "stray group members not dismissed: %s", strings.Join(left, ", "))
+	}
+	return nil
+}
+
+// waitStraysGone polls the party until it holds no member outside w.hires, at most timeout, and returns the non-hires
+// the last read still held (nil when the party is clean).
+func (w *walk) waitStraysGone(ctx context.Context, timeout time.Duration) ([]string, error) {
+	deadline := w.env.now().Add(timeout)
+	for {
+		names, err := w.partyNames(ctx)
+		if err != nil {
+			return nil, stopf(exitRaidWalkFailed, "party: %v", err)
+		}
+		var left []string
+		for _, n := range names {
+			if !w.hires[n] {
+				left = append(left, n)
+			}
+		}
+		if len(left) == 0 {
+			return nil, nil
+		}
+		if !w.env.now().Before(deadline) {
+			return left, nil
+		}
+		if err := w.env.sleep(ctx, time.Second); err != nil {
+			return nil, stopf(exitRaidWalkFailed, "interrupted")
+		}
+	}
+}
+
+// partyNames is the party's bot names. It also records the names as the members of the last read, which
+// `.bot uninvite` must match: the dismissal reads the party right before it sends its lines.
 func (w *walk) partyNames(ctx context.Context) ([]string, error) {
 	p, err := w.party(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]string, 0, len(p.Members))
+	w.partySet = make(map[string]bool, len(p.Members))
 	for _, m := range p.Members {
 		out = append(out, m.Name)
+		w.partySet[m.Name] = true
 	}
 	return out, nil
 }
@@ -1105,6 +1322,7 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 	}
 	perStep := map[int]int{}
 	autoTotal := 0
+	defer w.placeUnfreezeFinish()
 	for {
 		if w.leaseLost.Load() {
 			return stopf(exitRaidWalkFailed, "lease lost")
@@ -1122,6 +1340,7 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		w.placeUnfreezeTick(ctx) // judges by w.pollAt, the poll's own time: the clock has moved on by its waits
 		for _, inc := range incs {
 			switch v := inc.(type) {
 			case raidwalk.IncidentStall:
@@ -1132,6 +1351,11 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 					return err
 				}
 			case raidwalk.IncidentBossEngaged:
+				// --practice owns its boss: the loop keeps the fight alive and resets it, instead of the normal
+				// boss-stop rules (which would end the walk on the encounter).
+				if w.opts.practiceEntry != 0 && v.Entry == w.opts.practiceEntry && w.practice == nil {
+					return w.runPractice(ctx, v.Entry, v.Step)
+				}
 				ok, early, waitOut := w.runFightsBoss(ctx, v.Entry, true)
 				// The resume's wait drains the tracker's incidents while it polls: feed every drained
 				// incident to the normal handler exactly as phaseWatch would, in drain order, before
@@ -1184,6 +1408,11 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 				}
 				return w.handleBoss(ctx, v)
 			}
+		}
+		// --practice: an entry no plan boss row names (the window mode) has no IncidentBossEngaged: a fresh frame of
+		// the mechanic's entry starts the loop.
+		if w.opts.practiceEntry != 0 && w.practice == nil && w.practiceBossEngaged(w.opts.practiceEntry) {
+			return w.runPractice(ctx, w.opts.practiceEntry, 0)
 		}
 		now = w.env.now()
 		if w.inj != nil {
@@ -1279,6 +1508,7 @@ func (w *walk) phaseWatch(ctx context.Context) error {
 // pollOnce reads one events page, one bot_view frame and (on request) the dashboard, feeding the tracker.
 func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, error) {
 	now := w.env.now()
+	w.pollAt = now
 	// The page's lines get sequence numbers above pollSeq0: handleWipe's self-regroup rule uses the
 	// watermark to tell a line of the wipe's own page from an older one (walk 19 r6).
 	w.pollSeq0 = w.statusSeq
@@ -1337,9 +1567,18 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 		// would re-feed the pre-fire statuses instead, regressing
 		// lastStatus; the rerunStale filter above re-applies to the
 		// re-read lines unchanged).
-		fired, err := w.gmInstanceDataSendPending(ctx, st, w.gmInstanceDataLaterPull(evs[i+1:], st.Step))
+		later := w.laterPullLine(evs[i+1:], st.Step)
+		fired, err := w.gmInstanceDataSendPending(ctx, st, later)
 		if err != nil {
 			return nil, err
+		}
+		if !fired {
+			// --prepull-aura reads the same pre-pull gate: a fire pauses the run, puts the lists on the party and
+			// resumes it, and breaks this poll's loop like the instance-data firing.
+			fired, err = w.prepullAuraSendPending(ctx, st, later)
+			if err != nil {
+				return nil, err
+			}
 		}
 		if fired {
 			w.eventsAt = e.Seq
@@ -1351,6 +1590,7 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 	}
 	if n, frame, err := w.view(ctx, w.afterN, 2000); err == nil && frame != nil {
 		w.afterN = n
+		w.viewFrame, w.viewAt = frame, w.env.now()
 		w.trackFrame(now, frame)
 		w.tracker.Frame(now, *frame)
 		w.pullFramed(now, frame)
@@ -1464,6 +1704,148 @@ func (w *walk) applySpec(ctx context.Context, name, spec string) error {
 		return stopf(exitRaidWalkFailed, "roster: %s", text)
 	}
 	return nil
+}
+
+// The waits of a roster spec's talent build: TortoiseBots answers `talents <path>` and a bare `talents` in the bot's own words.
+const (
+	talentApplyWait = 10 * time.Second
+	talentReadWait  = 15 * time.Second
+)
+
+// talentRefusals are the words of TB's answers that say a `talents` command did not take: the apply's own refusals
+// (ChangeTalentsAction) and the forwarding command's (`.bot command`).
+var talentRefusals = []string{"found multiple specs", "talents are invalid", "talent link is invalid", "you may only command", "has no ai yet"}
+
+func talentRefused(s string) bool {
+	l := strings.ToLower(s)
+	for _, w := range talentRefusals {
+		if strings.Contains(l, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// applyTalents sets the talent build a roster spec names (`.bot command <bot> talents <path>`, TortoiseBots'
+// ChangeTalentsAction) and verifies it the way TB reports it: a bare `talents` answers "My current talent spec is: ...
+// (a/b/c)" in the bot's own chat, and the tree with the most points must be the spec's. A class the walk has no build for is
+// skipped. A build that does not take (a refusal in the apply's answer, no read-back, the points in another tree) logs
+// `hire: spec <x> not applied to <bot> (<reason>)`, is listed in the summary's spec_failed and the walk carries on; only a
+// refused or failed GM line stops it.
+func (w *walk) applyTalents(ctx context.Context, name, class, spec string) error {
+	build, ok := raidwalk.TalentFor(class, spec)
+	if !ok {
+		return nil
+	}
+	notApplied := func(reason string) {
+		w.logLine(w.env.now(), fmt.Sprintf("hire: spec %s not applied to %s (%s)", spec, name, reason))
+		w.specFailed = append(w.specFailed, raidwalk.SpecFailure{Bot: name, Spec: spec, Reason: reason})
+	}
+	if err := w.gm(ctx, fmt.Sprintf(".bot command %s talents %s", name, build.Path)); err != nil {
+		return err
+	}
+	// The apply answers "Apply spec ..." or a refusal (several specs for the path, an invalid link, not your bot, no AI yet); a
+	// silent bot is not a failure yet: the read-back below is the proof.
+	reply, _, err := w.waitBotWords(ctx, name, talentApplyWait, false, func(s string) bool {
+		l := strings.ToLower(s)
+		return strings.Contains(l, "apply spec") || strings.Contains(l, "apply talents") || talentRefused(s)
+	})
+	if err != nil {
+		return err
+	}
+	if talentRefused(reply) {
+		notApplied("apply refused: " + reply)
+		return nil
+	}
+	if err := w.gm(ctx, fmt.Sprintf(".bot command %s talents", name)); err != nil {
+		return err
+	}
+	var got tbm.Talents
+	line, found, err := w.waitBotWords(ctx, name, talentReadWait, true, func(s string) bool {
+		if talentRefused(s) {
+			return true
+		}
+		t, ok := tbm.ParseTalents([]string{s})
+		if ok {
+			got = t
+		}
+		return ok
+	})
+	if err != nil {
+		return err
+	}
+	switch {
+	case !found:
+		notApplied("no talent read-back in " + durWords(talentReadWait))
+		return nil
+	case talentRefused(line):
+		notApplied("apply refused: " + line)
+		return nil
+	}
+	main := 0
+	for i, n := range got.Trees {
+		if n > got.Trees[main] {
+			main = i
+		}
+	}
+	if got.Total == 0 || main != build.Tree {
+		notApplied(fmt.Sprintf("talents read back %d/%d/%d, want tree %d on top", got.Trees[0], got.Trees[1], got.Trees[2], build.Tree+1))
+		return nil
+	}
+	w.logLine(w.env.now(), fmt.Sprintf("roster: %s %s %s talents %d/%d/%d", name, class, spec, got.Trees[0], got.Trees[1], got.Trees[2]))
+	return nil
+}
+
+// waitBotWords waits for a line the named bot said (whisper or chat), or, unless botOnly, a system or addon line, that match
+// accepts, logging every line it reads. ok is false when timeout ran out first. On a match the cursor goes back to just after
+// the matched event, so the next wait reads the rest of the page (the walk 37 b fix, as waitTBMMatch does).
+func (w *walk) waitBotWords(ctx context.Context, bot string, timeout time.Duration, botOnly bool, match func(string) bool) (string, bool, error) {
+	deadline := w.env.now().Add(timeout)
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", false, stopf(exitRaidWalkFailed, "interrupted")
+		}
+		var page events.Page
+		params := map[string]any{"since": w.eventsAt, "kinds": []string{"system", "addon", "whisper", "chat"}, "wait_ms": 1000}
+		if err := w.agent.Call(ctx, "events", params, &page, 15*time.Second); err != nil {
+			return "", false, stopf(exitRaidWalkFailed, "events: %v", err)
+		}
+		w.eventsAt = page.Next
+		for _, e := range page.Events {
+			var text string
+			switch e.Kind {
+			case events.KindWhisper, events.KindChat:
+				if !strings.EqualFold(e.Source, bot) || e.Data["type"] == "whisper_inform" {
+					continue
+				}
+				text = e.Text
+			default:
+				if botOnly {
+					continue
+				}
+				line, ok := tbm.LineOf(e)
+				if !ok {
+					continue
+				}
+				text = line
+			}
+			text = raidwalk.CleanLine(text)
+			if text == "" {
+				continue
+			}
+			w.logLine(w.env.now(), text)
+			if match(text) {
+				w.eventsAt = e.Seq
+				return text, true, nil
+			}
+		}
+		if !w.env.now().Before(deadline) {
+			return "", false, nil
+		}
+		if err := w.env.sleep(ctx, time.Second); err != nil {
+			return "", false, stopf(exitRaidWalkFailed, "interrupted")
+		}
+	}
 }
 
 // waitTBM waits for a line with prefix and logs the lines it reads on the way.
@@ -1780,6 +2162,14 @@ func bossRowEngaged(hppct int, target uint64) bool {
 
 // trackFrame keeps the per-bot and per-hostile state the enter, reset and wipe rules read.
 func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
+	// A frame's rows describe the world when the feed completed it (f.At), which can be seconds after the poll began:
+	// the poll reads the event page first, and that wait is not part of the frame's age. The practice's boss check
+	// reads the stamp as "when this unit was last seen", so it must not inflate it with the poll's own wait
+	// (zgP-hk5p-1-1: three 5 s polls read a boss every frame held at 94-99 % as gone).
+	at := now
+	if !f.At.IsZero() {
+		at = f.At
+	}
 	for _, p := range f.Party {
 		if p.GUID != 0 {
 			w.partyG[uint64(p.GUID)] = true
@@ -1787,7 +2177,7 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 		if p.Name == "" {
 			continue
 		}
-		w.botAt[p.Name] = botPos{guid: p.GUID, x: p.X, y: p.Y, z: p.Z, inCombat: p.InCombat(), mapID: p.Map, dead: p.Dead || p.State == "d", at: now}
+		w.botAt[p.Name] = botPos{guid: p.GUID, x: p.X, y: p.Y, z: p.Z, inCombat: p.InCombat(), mapID: p.Map, dead: p.Dead || p.State == "d", at: at}
 	}
 	for _, h := range f.Hostiles {
 		if h.GUID != 0 {
@@ -1797,7 +2187,7 @@ func (w *walk) trackFrame(now time.Time, f *tbm.ViewFrame) {
 				first = prev.first
 			}
 			w.hostiles[h.GUID.String()] = hostileState{entry: h.Entry, x: h.X, y: h.Y, z: h.Z, first: first, kind: h.Kind, reaction: h.Reaction, flags: h.Flags,
-				hppct: h.HPPct, target: uint64(h.Target), at: now}
+				hppct: h.HPPct, target: uint64(h.Target), at: at}
 		}
 		if w.bossRule.Counts(h.Entry, h.X, h.Y) {
 			w.bossSeenAt = now
@@ -2287,6 +2677,7 @@ type savedBot struct {
 	Spell     uint32  `json:"spell,omitempty"`  // the spell it casts or channels
 	Action    string  `json:"action,omitempty"` // the last action its AI ran
 	Result    string  `json:"result,omitempty"` // the verdict on that action (O ok, F failed, I impossible, U useless, P queued, V dropped)
+	Reason    string  `json:"reason,omitempty"` // why a refused cast did not run (oom, range, los, cd, moving, casting, no-item, no-target), TB P record field 20
 }
 
 type savedHostile struct {
@@ -2329,7 +2720,7 @@ func (w *walk) saveFrame(now time.Time, f *tbm.ViewFrame) {
 		bot := savedBot{GUID: p.GUID.String(), Name: p.Name, X: p.X, Y: p.Y, Z: p.Z, Map: p.Map,
 			HP: p.HP, MaxHP: p.MaxHP, Power: p.Power, MaxPower: p.MaxPower,
 			Dead: p.Dead || p.State == "d", State: p.State,
-			Spell: p.Spell, Action: p.Action, Result: p.Result}
+			Spell: p.Spell, Action: p.Action, Result: p.Result, Reason: p.Reason}
 		if p.MaxPower > 0 { // no power pool, no power_type: an absent key is not mana (0)
 			pt := p.PowerType
 			bot.PowerType = &pt
@@ -2444,13 +2835,22 @@ func (w *walk) saveFightsAtStart() {
 }
 
 func (w *walk) saveFights() {
-	limit := 20 * time.Second
-	if w.fightsPrePlacement {
-		// The read before placement is optional (the fallback is the records' start times): a slow or unreachable
-		// dashboard must not hold the run start for the full 20 s.
-		limit = preplacementFightsTimeout
+	w.saveFightsCtx(context.Background(), 0)
+}
+
+// saveFightsCtx is saveFights with the caller's context and fight-list timeout: a non-positive limit keeps
+// today's default (20 s, or the short pre-placement deadline before the first placement). The teardown
+// live-fight wait passes its own bounded context and per-read timeout.
+func (w *walk) saveFightsCtx(ctx context.Context, limit time.Duration) {
+	if limit <= 0 {
+		limit = 20 * time.Second
+		if w.fightsPrePlacement {
+			// The read before placement is optional (the fallback is the records' start times): a slow or unreachable
+			// dashboard must not hold the run start for the full 20 s.
+			limit = preplacementFightsTimeout
+		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	raw, err := w.dash.Fights(ctx, w.manifest.Character)
 	if err != nil {
@@ -2478,17 +2878,24 @@ func (w *walk) saveFights() {
 	// a fight is an earlier walk's or instance's history. Built once, from the first successful read, and a live
 	// record is part of it (it may later finish as a kill that is still history). A read made before the first
 	// placement (saveFightsAtStart) lists history only, so every id in it counts. When no read succeeded before
-	// placement, a later first read may already hold this walk's own fights: only the records that started before the
-	// walk began count then, by their start time (a record without one counts, the conservative side).
+	// placement, a later first read may already hold this walk's own fights: only the records that started at or
+	// before the walk start minus the leeway (fightHistoryLeeway: a record without a start, or one nearer in time,
+	// counts as history on the conservative side). liveAtStart holds the at-start ids whose row was Live in that
+	// first read: when such a fight later finishes (walk 41 tj-8: it started during the earlier raid and ended after
+	// its teardown), its detail file is still written, tagged History.
 	if w.fightIDsAtStart == nil {
 		w.fightIDsAtStart = make(map[string]bool, len(rows))
+		w.liveAtStart = make(map[string]bool)
 		startUnix := w.started.Unix()
 		byTime := !w.fightsPrePlacement
 		for _, r := range rows {
 			if r.ID == "" {
 				continue
 			}
-			if byTime && r.Start != 0 && r.Start >= startUnix {
+			if r.Live {
+				w.liveAtStart[r.ID] = true
+			}
+			if byTime && r.Start != 0 && r.Start >= startUnix-fightHistoryLeeway {
 				continue
 			}
 			w.fightIDsAtStart[r.ID] = true
@@ -2497,6 +2904,10 @@ func (w *walk) saveFights() {
 			w.note("fight records: no dashboard read before the walk's placement, so the at-start set (%d of %d records) came from their start times", len(w.fightIDsAtStart), len(rows))
 		}
 	}
+	// fights-run.json names this walk's at-start set (Problem 1, item 3): an analyser can filter the raw
+	// combat-fights.json list without START.epoch. The stamp is the walk's start (the same clock the
+	// at-start set's start-time fallback reads), not the read time.
+	_ = w.writeOut("fights-run.json", fightsRunJSON(w.started, w.fightIDsAtStart, w.practice != nil))
 	for _, r := range rows {
 		if r.ID == "" || r.Live || w.seenFights[r.ID] {
 			continue
@@ -2504,6 +2915,46 @@ func (w *walk) saveFights() {
 		fs := raidwalk.FightSummary{ID: r.ID, Step: int(r.Step), Leg: r.Leg, DurMS: int64(r.Dur),
 			Deaths: r.Deaths, Outcome: r.Outcome, BossName: r.BossName, Warnings: r.Warnings,
 			BossPhase: r.BossPhase, BossPhaseEntry: r.BossPhaseEntry}
+		if w.fightIDsAtStart[r.ID] {
+			// History (an earlier walk's or instance's record): tag it and keep it for creditFightKills and
+			// summary.json. The detail file is still written when the fight was Live in the at-start read
+			// (walk 41 tj-8: it started during the earlier raid and finished after its teardown, so the
+			// earlier walk saved it nowhere) or when its end (start + dur) is at or after this walk's
+			// start; old finished fights get no file.
+			fs.History = true
+			// r.Dur is in ms (DurMS above); r.Start and w.started are unix seconds.
+			if w.liveAtStart[r.ID] || (r.Start != 0 && r.Start+int64(r.Dur)/1000 >= w.started.Unix()) {
+				// A qualifying history fight uses the same pending/retry handling as an ordinary
+				// fight below: seen only after its detail was fetched and parsed, otherwise kept in
+				// pendingFights (still History) for the next poll, including the teardown wait, so one
+				// dashboard timeout does not lose its file for good.
+				idx, pending := w.pendingFights[r.ID]
+				got := false
+				if detail, derr := w.dash.Fight(ctx, r.Key); derr == nil {
+					_ = w.writeOut("combat-fight-"+fightFileID(r.ID)+".json", detail)
+					if d, ok := raidwalk.FightDetailOf(detail); ok {
+						fs.Detail = &d
+						got = true
+					}
+				}
+				if pending {
+					w.fights[idx] = fs
+				} else {
+					w.fights = append(w.fights, fs)
+					idx = len(w.fights) - 1
+				}
+				if got {
+					w.seenFights[r.ID] = true
+					delete(w.pendingFights, r.ID)
+				} else {
+					w.pendingFights[r.ID] = idx
+				}
+				continue
+			}
+			w.fights = append(w.fights, fs)
+			w.seenFights[r.ID] = true
+			continue
+		}
 		idx, pending := w.pendingFights[r.ID] // the row's fields are read fresh on every poll
 		// A fight whose detail could not be loaded or read is kept without it and fetched again on the next poll (and at teardown),
 		// so one dashboard timeout does not lose its death recap for good.
@@ -2528,6 +2979,23 @@ func (w *walk) saveFights() {
 			w.pendingFights[r.ID] = idx
 		}
 	}
+}
+
+// fightsRunJSON is the fights-run.json body: the walk's start and the sorted at-start (history) ids, so an
+// analyser can filter combat-fights.json's raw list without START.epoch. practice is true for a --practice walk: its
+// fights are practice attempts, and the fight tools skip the whole run.
+func fightsRunJSON(now time.Time, atStart map[string]bool, practice bool) []byte {
+	ids := make([]string, 0, len(atStart))
+	for id := range atStart {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	raw, _ := json.Marshal(struct {
+		WalkStarted int64    `json:"walk_started"`
+		HistoryIDs  []string `json:"history_ids"`
+		Practice    bool     `json:"practice,omitempty"`
+	}{WalkStarted: now.Unix(), HistoryIDs: ids, Practice: practice})
+	return append(raw, '\n')
 }
 
 // fightFileID keeps a fight id safe for a file name.
@@ -2558,6 +3026,9 @@ var errWipeRecovered = errors.New("wipe recovered")
 // the leg resends the lines under their own pause and resume.
 func (w *walk) wipeRecovered() error {
 	w.gmInstanceDataClear()
+	// A recovery revives the raid, and a death strips every aura: the next out-of-combat rest before a boss row puts
+	// the --prepull-aura lists back on, for a boss row whose fire already went out too.
+	w.prepullAuraClear()
 	return errWipeRecovered
 }
 
@@ -2580,6 +3051,7 @@ func (w *walk) handleWipe(ctx context.Context, step int) error {
 	// a paused or done last line is no self-regroup.
 	now := w.env.now()
 	w.wipeAt = now
+	w.placeUnfreezeStop("the raid wiped") // the revived raid stands at the start again: no frozen-seat judgement after a wipe
 	selfRegroup := false
 	w.regroupAt = time.Time{}
 	if w.haveStatus && w.lastStatus.State == tbm.RunRunning {
@@ -2676,6 +3148,14 @@ func (w *walk) bossEngagedNow() bool {
 }
 
 // endWipe is the walk-4 recipe's ending: stop, wait for a reset, revive only when quiet, exit 19.
+//
+// --wipe-end fast (the autopilot passes it for a goal that relaunches fresh after a boss wipe: --gm-instance-data or
+// --boss-wipe-fresh) skips the reset wait and the revive recipe when the wipe is at a boss row (or the row before it,
+// the same PlaceStepAtBoss rule the autopilot uses for its fresh-instance decision): that copy is thrown away, so both
+// waits were spent on the instance the next launch replaces (walk 74: reset wait 49 s + revive 34 s median = 83 s per
+// wipe). The dead hires still get a bare `.revive <name>` each before the exit: skipping the recipe must not leave the
+// party dead in the log and in the next launch's party view. A wipe anywhere else keeps the recipe, because the
+// autopilot re-places that copy (--reuse-instance).
 func (w *walk) endWipe(ctx context.Context, step int) error {
 	_ = w.stopRun(context.Background(), "")
 	w.note("wipe at step %d", step)
@@ -2683,10 +3163,59 @@ func (w *walk) endWipe(ctx context.Context, step int) error {
 		w.saveCommanders("wipe")
 		w.saveFights()
 	}
+	if w.opts.wipeEndFast && raidwalk.PlaceStepAtBoss(w.rows, step) {
+		w.note("wipe: --wipe-end fast: the autopilot takes a fresh instance next, so no reset wait and no revive recipe in this copy; the dead hires get a bare revive")
+		w.reviveDeadHires(ctx)
+		return stopf(exitRaidWalkIncident, "wipe at step %d", step)
+	}
 	if err := w.waitReset(ctx, w.opts.resetWait); err != nil {
 		return err
 	}
 	return w.revive(ctx, step)
+}
+
+// reviveFastWait is the --wipe-end fast path's bare revive window: the dead hires' `.revive` lines go out about
+// reviveFastGap apart and the rest of the window covers the server's revive.
+const reviveFastWait = 3 * time.Second
+
+// reviveFastGap is the pause after one hire's revive line (and before a failed hire's one retry).
+const reviveFastGap = 100 * time.Millisecond
+
+// reviveDeadHires is the --wipe-end fast path's last act before the exit: a bare `.revive <name>` for every hire the
+// frames still show dead (fresh within 10 s, the same view the revive recipe judges), with none of that recipe's go,
+// quiet check or summons: the copy is discarded. About reviveFastWait in all, whatever the dead count. The dead list
+// is read freshly right before the loop; every dead hire gets its line even when an earlier one fails, and a failed
+// line is retried once while the window has time left (Codex round 2: the old loop stopped at the first failure and
+// left the rest of the party dead). A hire still dead at the end is named in one `wipe-end: revive incomplete` note:
+// the next attempt's placeDead check finds it again, so this note only records the copy that was thrown away.
+func (w *walk) reviveDeadHires(ctx context.Context) {
+	due := w.env.now().Add(reviveFastWait)
+	dead := w.placeDead(w.env.now())
+	var incomplete []string
+	for _, name := range dead {
+		err := w.gm(ctx, ".revive "+name)
+		if err != nil && ctx.Err() == nil && w.env.now().Before(due) {
+			if serr := w.env.sleep(ctx, reviveFastGap); serr != nil {
+				return
+			}
+			err = w.gm(ctx, ".revive "+name)
+		}
+		if err != nil {
+			w.note("wipe: fast revive of %s: %v", name, err)
+			incomplete = append(incomplete, name)
+		}
+		if serr := w.env.sleep(ctx, reviveFastGap); serr != nil {
+			return
+		}
+	}
+	if len(incomplete) > 0 {
+		w.note("wipe-end: revive incomplete %s", strings.Join(incomplete, ", "))
+	}
+	if left := due.Sub(w.env.now()); left > 0 {
+		if err := w.env.sleep(ctx, left); err != nil {
+			return
+		}
+	}
 }
 
 // bossPhase is what the frames say about an engaged boss.
@@ -5959,13 +6488,14 @@ func (w *walk) phaseHold(ctx context.Context) error {
 
 // phaseTeardown is phase 12: the commander status, then teardown --json; a hire the status did not list is
 // possibly left online.
-func (w *walk) phaseTeardown() {
+func (w *walk) phaseTeardown(ctx context.Context) {
 	if w.slotDir == "" {
 		return
 	}
 	if w.dash != nil {
 		w.saveCommanders("end")
 		w.saveFights()
+		w.waitTeardownLiveFight(ctx)
 	}
 	listedOK := false
 	if w.agent != nil {
@@ -6016,6 +6546,93 @@ func (w *walk) phaseTeardown() {
 	}
 }
 
+// teardownLiveFightWait is how long phaseTeardown waits for a still-live fight (the monitor ends a fight 3 s
+// after the group leaves combat, so the kill fight can still be open when the walk's last saveFights runs).
+const teardownLiveFightWait = 30 * time.Second
+
+// teardownLiveFightPoll is the gap between teardown's fight-list re-reads.
+const teardownLiveFightPoll = 3 * time.Second
+
+// teardownLiveFightReadTimeout bounds each fight-list read inside the teardown wait (or the time left, if less).
+const teardownLiveFightReadTimeout = 5 * time.Second
+
+// teardownLiveFightID is the first still-live row of this walk in the last successful read ("": none). History
+// rows belong to earlier walks and are skipped.
+func (w *walk) teardownLiveFightID() string {
+	for _, r := range w.fightRows {
+		if r.ID == "" || !r.Live || w.fightIDsAtStart[r.ID] {
+			continue
+		}
+		return r.ID
+	}
+	return ""
+}
+
+// waitTeardownLiveFight re-reads the fight list while the last successful read holds a still-live row of this
+// walk: the kill fight may still be open when teardown's first saveFights runs (walk 52 hk13t-1). The wait is
+// bounded by a wall-clock deadline (the reads count, not only the sleeps); each read has its own timeout, one
+// failed read is retried once, and a cancelled walk context skips the wait entirely. endWipe and handleBoss keep
+// running, so their later polls save the fight; they get no such wait.
+func (w *walk) waitTeardownLiveFight(ctx context.Context) {
+	live := w.teardownLiveFightID()
+	if live == "" {
+		return
+	}
+	if ctx != nil && ctx.Err() != nil {
+		// A signal stopped the walk: its context is already cancelled, so no
+		// bounded replacement could observe anything but its own deadline.
+		// Skip the wait and leave the still-live fight for the next walk's
+		// history set instead of sleeping through the teardown.
+		w.note("fight records: the teardown live-fight wait is skipped: the walk stopped")
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	start := w.env.now()
+	deadline := start.Add(teardownLiveFightWait)
+	waitCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	first := live
+	failed := 0
+	for {
+		if !w.env.now().Before(deadline) {
+			break
+		}
+		poll := teardownLiveFightPoll
+		if left := deadline.Sub(w.env.now()); poll > left {
+			poll = left
+		}
+		if err := w.env.sleep(waitCtx, poll); err != nil {
+			return
+		}
+		read := teardownLiveFightReadTimeout
+		if left := deadline.Sub(w.env.now()); read > left {
+			read = left
+		}
+		if read <= 0 {
+			break
+		}
+		w.saveFightsCtx(waitCtx, read)
+		if w.bossCheckErr != nil {
+			failed++
+			if failed > 1 {
+				w.note("fight records: the teardown live-fight wait stopped: the dashboard fights read failed: %v", w.bossCheckErr)
+				return
+			}
+			w.note("fight records: the teardown live-fight wait retries after a failed dashboard fights read: %v", w.bossCheckErr)
+			continue
+		}
+		failed = 0
+		if live = w.teardownLiveFightID(); live == "" {
+			w.note("fight records: waited %d s at teardown for live fight %s to end", int(w.env.now().Sub(start)/time.Second), first)
+			return
+		}
+		first = live
+	}
+	w.note("fight records: fight %s still live after %s at teardown: not saved", first, durWords(teardownLiveFightWait))
+}
+
 // firstLine is a report's first line, for an error text.
 func firstLine(s string) string {
 	s = strings.TrimSpace(s)
@@ -6039,3 +6656,7 @@ func durWords(d time.Duration) string {
 // preplacementFightsTimeout is the deadline of the fight-list read made before the walk's placement (a variable so a
 // test can shorten it).
 var preplacementFightsTimeout = 3 * time.Second
+
+// fightHistoryLeeway is the start-time fallback's leeway in seconds (item 3): when the pre-placement read failed,
+// a row counts as history only if it started over this long before the walk began.
+const fightHistoryLeeway = 10

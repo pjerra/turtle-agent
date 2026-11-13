@@ -135,7 +135,7 @@ Still to check live with the new driver (a free slot, a GM leader and a hired pa
 1. Hire the party at the leader, log in, `invite`/`accept_invite`, walk or `.go` into Uldaman (map 70) next to the entrance
    (-228.9, 46.1, -46) and list the setup you did by hand in `dungeon_run`'s `setup`. Start `dungeon_run {"name":"uldaman","from_leg":"keystone",
    "setup":["go entrance","levelup -15"]}`, then `{"name":"uldaman","setup":[...]}` from the start. A teleport start is `"teleport": true` (flagged).
-2. Poll `dungeon_status` and `events` (`kinds`: `dungeon_leg`, `dungeon_step`, `dungeon_failed`, `dungeon_done`); keep the capture.
+2. Poll `dungeon_status` and `events` (`kinds`: `dungeon_leg`, `dungeon_step`, `dungeon_failed`, `dungeon_done`, `dungeon_refused`); keep the capture.
 3. Pass: the run reaches and kills Ironaya from the keystone leg in one run (Keystone, Seal, Ironaya), and from the start an Alliance leader loots Baelog's Chest
    (Baelog, Eric and Olaf are friendly to it and skipped) while a Horde leader kills the three (see the last section),
    and ends with a report (`state` done or a clear `error`), per-leg seconds, deaths, wipes, `gm_shortcuts` and `setup_shortcuts`.
@@ -671,6 +671,24 @@ with the remote commander, five owned alts in Uldaman, and `AiPlayerbot.OwnedBot
    with the agent far away (move it and see they do not follow). `on_end: "logout"`: the bots log out after the unbind (`logged_out`); check the
    module accepts `.bot logout` for a bot it was commanding a moment ago, and what happens to the party.
 
+## Trade steps (Eluna coverage)
+
+Passed live on 2026-11-08 against a vMaNGOS-based server (Eluna smoke round r6):
+
+- `trade_expect` on one agent and `trade_open` from the other: the window opened on both sides, `status open`.
+- `trade_set_item` with `trade_slot` 6 (the slot that is not traded): the partner's `trade_status` showed the item in slot 6.
+- `trade_status`: `their_spell` and `my_spell` both showed the enchant spell (7418) before the accept.
+- `cast` with `trade_slot` 6: the core applied the enchant to the slot 6 item.
+- `trade_accept` on both agents: both `completed`, `status complete`.
+- `equipment` on both agents: occupied slots only, slot names correct.
+
+Not yet live:
+
+- `trade_cancel`.
+- The `trade_expect` timeout and decline paths.
+- `trade_set_item` slots 0-5.
+- The create re-read: the create login worked, but the character list showed the new name on the first read, so the race did not happen.
+
 ## Trade (issue #80)
 
 `trade` is tested against the core's `TradeHandler.cpp` layouts and a scripted server only; nothing below has run live. Needs a bot that
@@ -1143,7 +1161,7 @@ probe found (2026-10-29, `tests/raid-inject-probe-20261029-042517/probe.md`). Wh
 
 ## raid-walk --place: a raid that starts partway into its instance (P1 2026-11-01: refused in the quiet step, exit 18; re-run open)
 
-[Run a raid walk](okf/raids/run-a-raid-walk.md), [Start partway into an instance](okf/raids/place-mid-raid.md). Needs a test server (m910q or tortoise-test2) whose image carries the Eluna test
+[Run a raid walk](okf/raids/run-a-raid-walk.md), [Start partway into an instance](okf/raids/place-mid-raid.md). Needs a test server (m910q, tortoise-test2 or tortoise-test3) whose image carries the Eluna test
 toolkit (`.tt place`, `clearto`, `quiet`, `q inst|group|units|floor`) and TortoiseBots with `feat/run-until`. The first
 live run (Zul'Gurub leg 3, slot 2, 2026-11-01) reached the quiet step and stopped there: the toolkit's own quiet rule
 counted units a door-to-end run has alive at this step too, so the walk now judges the quiet itself (item 4; the

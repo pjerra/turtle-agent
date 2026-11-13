@@ -95,6 +95,11 @@ func planProbeCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	rep.Source = source
 	rep.Mmaps = *mmaps
+	// What the input said about itself: a skipped block, a skipped hand-set statement, the rows rebuilt from a plan JSON. The
+	// report's own notes go to --out/--json with the rest.
+	for _, n := range notes {
+		fmt.Fprintf(stderr, "plan-probe: %s\n", n)
+	}
 	rep.Notes = append(append([]string{}, notes...), rep.Notes...)
 
 	if *out != "" {

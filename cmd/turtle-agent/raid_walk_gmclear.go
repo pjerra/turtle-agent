@@ -12,6 +12,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,6 +21,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/slots"
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
@@ -30,7 +32,11 @@ const (
 	gmClearReadYd = 150
 	// gmClearReadLimit is the units RPC's row cap for that read (the default 100 would cut a crowded room).
 	gmClearReadLimit = 2000
-	// gmClearRounds is how many times a pack's stops are visited and read: both always run, so a first empty read ends nothing.
+	// gmClearRounds is how many times a pack's stops are visited and read: a first empty read ends nothing, so a pack
+	// with a member still alive or unseen gets the second round. A pack whose every member is dead (or has had its
+	// gmClearTries lines) after the first round is not walked again: the second round would read the same dead pack at
+	// every stop and kill nothing (walk 71: 52 packs, 57 stops, two rounds each, 114 .go xyz and ~230 s of the 322 s
+	// pre-clear; the kills it adds are only ever a member the first round did not see).
 	gmClearRounds = 2
 	// gmClearDeathWait and gmClearDeathPoll are how long a kill is given to show in the unit's frames, and how often it is read.
 	gmClearDeathWait = 5 * time.Second
@@ -41,6 +47,22 @@ const (
 	// gmClearRetryGap is the pause between a kill line that did not show a death and the next one: a unit that is
 	// still falling, or a server still answering the selection, gets the time.
 	gmClearRetryGap = 3 * time.Second
+	// gmClearLandPoll and gmClearLandWait are a stop's landing wait: the commander's status is read this often after
+	// its `.go xyz`, up to this ceiling. Walk 74 paid a fixed 2 s at each of its 53 stops (~106 s of the 157 s clear).
+	// The landing needs a teleport the session has ACKED (TeleportSeq past the read before the go, reviveLanded's
+	// signal): the status reports the go's destination at once and a stop the commander already stands on is within
+	// the slack before any teleport lands, so the position alone would pass on the previous stop's status (Codex
+	// HIGH). A stop the status never settles within this ceiling falls back to the old fixed gmClearFallbackWait, so
+	// the units read after it is never earlier than before.
+	gmClearLandPoll     = 250 * time.Millisecond
+	gmClearLandWait     = 3 * time.Second
+	gmClearFallbackWait = 2 * time.Second
+	// gmClearSettle is the least time a landed stop settles before the units are read, and gmClearUnitPoll and
+	// gmClearUnitWait bound the poll of the pack in that read: the landing arrives before the client's object store
+	// holds the pack, so the read right after the landing can still be empty.
+	gmClearSettle   = 1 * time.Second
+	gmClearUnitPoll = 250 * time.Millisecond
+	gmClearUnitWait = 2 * time.Second
 )
 
 // gmClearBudget bounds the whole --gm-clear: past it no more lines go out, the members left are listed as not tried and the walk goes
@@ -215,13 +237,160 @@ type gmClearMember struct {
 	despawned bool        // the corridor clear or the quiet's extra round removed it before the tool ran
 }
 
-// placeGMClear is place step 6b. Every pack is cleared in gmClearRounds rounds; each round the commander visits every stop of the pack
+// gmClearAllSettled says every expected member of a pack has nothing left for this clear: its death is confirmed, or its
+// gmClearTries lines are used up (a member that would not die gets no more). A member never seen, or seen alive and still
+// to be tried, keeps the pack unsettled, so its next round still runs.
+func gmClearAllSettled(members map[uint64]*gmClearMember, guids []uint64) bool {
+	for _, g := range guids {
+		if m := members[g]; m != nil && !m.dead && !m.gaveUp {
+			return false
+		}
+	}
+	return true
+}
+
+// gmClearLand sends a GM-clear stop's `.go xyz` and waits for the commander to have LANDED there: the plan's map, not
+// falling, the position within the revive-landing slack of the stop (a landing may drop the character to the floor, so
+// z gets reviveLandingZYd of room), and a teleport the session counted since the read before the go (gmClearLanded).
+// A position match alone is no landing: the status reports the go's destination at once, and the previous stop's
+// status can already be within the slack, so the first read would carry on while the server is still processing the
+// teleport (Codex HIGH). A landed stop settles gmClearSettle before its units are read (gmClearStopUnits after the
+// instance check): the landing arrives before the client's object store holds the pack. The wait is an absolute
+// deadline (gmClearLandWait from here, on the walk's clock), not a sum of sleeps: each status RPC gets a context
+// capped at the time left and the deadline is checked after every read, so a slow RPC cannot stretch the ceiling
+// (Codex round 2). A landing the status never shows by the deadline falls back to the old fixed gmClearFallbackWait:
+// the units read after it is then exactly as late as before.
+func (w *walk) gmClearLand(ctx context.Context, x, y, z float32) error {
+	beforeSeq, haveSeq, err := w.gmClearSeq(ctx)
+	if err != nil {
+		return err
+	}
+	if err := w.goPlace(ctx, x, y, z); err != nil {
+		return err
+	}
+	landed := false
+	due := w.env.now().Add(gmClearLandWait)
+	for w.env.now().Before(due) {
+		readCtx, cancel := context.WithTimeout(ctx, due.Sub(w.env.now()))
+		st, serr := w.status(readCtx)
+		cancel()
+		if serr == nil && gmClearLanded(st, w.plan.Map, x, y, z, beforeSeq, haveSeq) {
+			landed = true
+			break
+		}
+		if !w.env.now().Before(due) {
+			break
+		}
+		wait := due.Sub(w.env.now())
+		if wait > gmClearLandPoll {
+			wait = gmClearLandPoll
+		}
+		if err := w.placeSleep(ctx, wait); err != nil {
+			return err
+		}
+	}
+	settle := gmClearSettle
+	if !landed {
+		settle = gmClearFallbackWait
+	}
+	return w.placeSleep(ctx, settle)
+}
+
+// gmClearSeq reads the session's acked-teleport count before a stop's `.go xyz`: the seq a landing must pass. One retry
+// a poll later; have is false when neither read answered, and no landing passes then (the wait falls back).
+func (w *walk) gmClearSeq(ctx context.Context) (seq uint64, have bool, err error) {
+	if st, serr := w.status(ctx); serr == nil {
+		return st.TeleportSeq, true, nil
+	}
+	if err := w.placeSleep(ctx, gmClearLandPoll); err != nil {
+		return 0, false, err
+	}
+	if st, serr := w.status(ctx); serr == nil {
+		return st.TeleportSeq, true, nil
+	}
+	return 0, false, nil
+}
+
+// gmClearLanded says the commander's status is a fresh landing at a GM-clear stop: on the plan's map, not falling, a
+// teleport the session counted since before the `.go` (TeleportSeq, the landing signal reviveLanded reads), and the
+// position within the revive-landing slack of the stop. The seq is required: it is the only term that ties the status
+// to THIS go (the session reports the go's destination itself at once, flagged ZUnknown or not). Over a navmesh hole
+// the z guess never settles, and the seq is the landing there, exactly as for a near revive teleport.
+func gmClearLanded(st session.StatusInfo, mapID uint32, x, y, z float32, beforeSeq uint64, haveSeq bool) bool {
+	if st.Map != mapID || st.Falling || !haveSeq || st.TeleportSeq <= beforeSeq {
+		return false
+	}
+	dx, dy := float64(x-st.X), float64(y-st.Y)
+	return math.Hypot(dx, dy) <= reviveLandingYd && math.Abs(float64(z-st.Z)) <= reviveLandingZYd
+}
+
+// gmClearStopUnits reads the units at a landed stop until at least one of the pack's spawn guids shows, up to
+// gmClearUnitWait, and returns the last read: the landing arrives before the client's object store holds the pack, so
+// the read right after it can still be empty and the members would be recorded not seen. The caller has re-read its
+// instance first, so this poll never runs on a stop that landed in another copy. The ceiling is an absolute deadline
+// on the walk's clock, and each units RPC gets a context capped at the time left (Codex round 2): a read that the cap
+// cuts ends the poll with the last units instead of stretching it, while a read that fails on its own still stops the
+// walk.
+func (w *walk) gmClearStopUnits(ctx context.Context, label string, guids []uint64) ([]objects.Unit, error) {
+	due := w.env.now().Add(gmClearUnitWait)
+	var last []objects.Unit
+	for {
+		readCtx := ctx
+		cancel := func() {}
+		timed := false
+		if left := due.Sub(w.env.now()); left > 0 {
+			readCtx, cancel = context.WithTimeout(ctx, left)
+			timed = true
+		}
+		units, err := w.gmClearUnits(readCtx)
+		capped := timed && ctx.Err() == nil && readCtx.Err() != nil
+		cancel()
+		if err != nil {
+			if capped {
+				return last, nil
+			}
+			return nil, stopf(exitRaidWalkFailed, "gm-clear: units read at %s: %v", label, err)
+		}
+		last = units
+		if gmClearUnitsShown(units, guids) || !w.env.now().Before(due) {
+			return units, nil
+		}
+		wait := due.Sub(w.env.now())
+		if wait > gmClearUnitPoll {
+			wait = gmClearUnitPoll
+		}
+		if err := w.placeSleep(ctx, wait); err != nil {
+			return nil, err
+		}
+	}
+}
+
+// gmClearUnitsShown says the units read holds at least one of the pack's spawn guids: the client's object store has the
+// pack the stop was walked to, so the read can name its members.
+func gmClearUnitsShown(units []objects.Unit, guids []uint64) bool {
+	want := make(map[uint64]bool, len(guids))
+	for _, g := range guids {
+		want[g] = true
+	}
+	for _, u := range units {
+		if want[raidwalk.SpawnGUID(u.GUID)] {
+			return true
+		}
+	}
+	return false
+}
+
+// placeGMClear is place step 6b. Every pack is cleared in gmClearRounds rounds; each round the commander visits the pack's stops
 // (a member's spawn point, so a pack wider than the commander's view is seen whole), reads the units around it, and kills every live
-// member it sees. An empty read ends nothing: both rounds always run. A member the walk's own corridor clear already despawned is never
-// sent a line: the server no longer has it (walk 35), so it is recorded as despawned at once. Every expected member then gets one entry:
-// killed (a death confirmed from the frames), despawned, already dead, alive (seen, would not die) or not seen. Anything but the first
-// three leaves the clear PARTIAL, noted and in the summary; the walk goes on. gmClearBudget bounds the whole tool: past it no more lines
-// go out. The commander returns to the start point, on its floor, before the quiet check and the raid's move.
+// member it sees. A first empty read ends nothing: the second round still runs while a member is alive or unseen, and is skipped once
+// every member is dead (nothing there to kill: walk 71 paid 230 s of the 322 s pre-clear for those empty second rounds). After every
+// `.go xyz` the commander re-reads its instance before the units read or any kill: the same map does not prove the same copy, and a
+// stop that landed elsewhere stops the clear on the existing error path with no kill sent. The end of the clear reads it again. A member
+// the walk's own corridor clear already despawned is never sent a line: the server no longer has it (walk 35), so it is recorded as
+// despawned at once. Every expected member then gets one entry: killed (a death confirmed from the frames), despawned, already dead,
+// alive (seen, would not die) or not seen. Anything but the first three leaves the clear PARTIAL, noted and in the summary; the walk
+// goes on. gmClearBudget bounds the whole tool: past it no more lines go out. The commander returns to the start point, on its floor,
+// before the quiet check and the raid's move.
 func (w *walk) placeGMClear(ctx context.Context) error {
 	if len(w.gmClear) == 0 {
 		return nil
@@ -232,8 +401,9 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 	budgetHit := false
 	for _, pk := range w.gmClear {
 		label := raidwalk.GMClearLabel(pk.Leg, pk.Group)
+		guids := pk.SpawnGUIDs()
 		members := map[uint64]*gmClearMember{}
-		for _, g := range pk.SpawnGUIDs() {
+		for _, g := range guids {
 			m := &gmClearMember{}
 			if w.placeCleared[g] {
 				// The corridor clear or the quiet's extra round removed it in this instance: `.die` on its guid does nothing
@@ -243,20 +413,23 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 			members[g] = m
 		}
 		stops := pk.Stops()
-		for round := 0; round < gmClearRounds; round++ {
+		for range gmClearRounds {
+			if gmClearAllSettled(members, guids) {
+				// Nothing is left to read for: a pack the corridor sweep already despawned whole is marked settled
+				// before its first visit, so round 1 skips it exactly as the later rounds do (walk 74: 28 of 53
+				// stops went out only to print `nothing to clear`, 28 empty stops x ~2.1 s = 59 s).
+				break
+			}
 			for _, stop := range stops {
-				if err := w.goPlace(ctx, stop.X, stop.Y, stop.Z+2); err != nil {
-					return err
-				}
-				if err := w.placeSleep(ctx, 2*time.Second); err != nil {
+				if err := w.gmClearLand(ctx, stop.X, stop.Y, stop.Z+2); err != nil {
 					return err
 				}
 				if err := w.placeInstanceIs(ctx, w.placeInst); err != nil {
 					return err
 				}
-				units, err := w.gmClearUnits(ctx)
+				units, err := w.gmClearStopUnits(ctx, label, guids)
 				if err != nil {
-					return stopf(exitRaidWalkFailed, "gm-clear: units read at %s: %v", label, err)
+					return err
 				}
 				for _, u := range pk.SeenMembers(units) {
 					m := members[raidwalk.SpawnGUID(u.GUID)]
@@ -283,6 +456,9 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 					} else {
 						w.logLine(w.env.now(), fmt.Sprintf("gm-clear: FAILED %d %s (%s) alive after %d tries", u.GUID.Entry(), u.GUID, label, m.tries))
 					}
+				}
+				if gmClearAllSettled(members, guids) {
+					break // nothing alive left to read this stop for; the next stop has no kill for it either
 				}
 			}
 		}
@@ -370,10 +546,7 @@ func (w *walk) placeGMClear(ctx context.Context) error {
 	}
 	w.note("%s", raidwalk.GMClearSummaryLine(w.gmClearLog, raidwalk.GMClearLegs(w.gmClear)))
 	// Back to the start point, on its floor, as the corridor clear's last position was.
-	if err := w.goPlace(ctx, p.X, p.Y, p.Z+2); err != nil {
-		return err
-	}
-	if err := w.placeSleep(ctx, 2*time.Second); err != nil {
+	if err := w.gmClearLand(ctx, p.X, p.Y, p.Z+2); err != nil {
 		return err
 	}
 	if err := w.placeInstanceIs(ctx, w.placeInst); err != nil {

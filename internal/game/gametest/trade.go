@@ -29,13 +29,18 @@ type TradeSide struct {
 // TradeExtended is WorldSession::SendUpdateTrade (TradeHandler.cpp:84-132): all seven slots,
 // the ones in items filled, the rest as the index and 15 zero words.
 func TradeExtended(theirs bool, gold uint32, items ...TradeSide) []byte {
+	return TradeExtendedSpell(theirs, gold, 0, items...)
+}
+
+// TradeExtendedSpell is TradeExtended with the packet's spell word set (the enchant a trade-slot cast has pending).
+func TradeExtendedSpell(theirs bool, gold, spell uint32, items ...TradeSide) []byte {
 	w := packet.NewWriter()
 	if theirs {
 		w.U8(1)
 	} else {
 		w.U8(0)
 	}
-	w.U32(game.TradeSlotCount).U32(game.TradeSlotCount).U32(gold).U32(0)
+	w.U32(game.TradeSlotCount).U32(game.TradeSlotCount).U32(gold).U32(spell)
 	for i := uint8(0); i < game.TradeSlotCount; i++ {
 		w.U8(i)
 		var it *TradeSide

@@ -178,3 +178,39 @@ func TestCapturedBackpack(t *testing.T) {
 		t.Fatalf("self %s backpack %+v", self, got)
 	}
 }
+
+// Equipment lists the worn slots 0-18 that hold an item, in slot order; the backpack and the bags are not part of it.
+func TestEquipmentListsWornSlots(t *testing.T) {
+	const (
+		me                  = packet.GUID(0x2A)
+		sword, shield, pack = packet.GUID(0x4000000000000011), packet.GUID(0x4000000000000012), packet.GUID(0x4000000000000013)
+		unseen              = packet.GUID(0x4000000000000014)
+	)
+	s := NewStore()
+	if got := s.Equipment(me); len(got) != 0 {
+		t.Fatalf("unknown player %+v", got)
+	}
+	vals := map[uint16]uint32{UnitHealth: 100}
+	invSlot(vals, 16, shield) // off hand, set before the main hand on purpose
+	invSlot(vals, 15, sword)  // main hand
+	invSlot(vals, 18, unseen) // tabard; its create block has not arrived
+	invSlot(vals, 23, pack)   // backpack, not worn
+	s.Apply([]Block{
+		itemCreate(sword, TypeItem, 2589, 1), itemCreate(shield, TypeItem, 1200, 1), itemCreate(pack, TypeItem, 118, 5),
+		createBlock(me, TypePlayer, 0, 0, vals),
+	})
+	want := []Item{
+		{Bag: BackpackBag, Slot: 15, GUID: sword, Entry: 2589, Count: 1},
+		{Bag: BackpackBag, Slot: 16, GUID: shield, Entry: 1200, Count: 1},
+		{Bag: BackpackBag, Slot: 18, GUID: unseen},
+	}
+	got := s.Equipment(me)
+	if len(got) != len(want) {
+		t.Fatalf("%+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("item %d: %+v want %+v", i, got[i], want[i])
+		}
+	}
+}

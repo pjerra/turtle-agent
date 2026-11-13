@@ -8,6 +8,7 @@ import (
 
 func TestAllowedLine(t *testing.T) {
 	hires := map[string]bool{"Tankbot": true, "Healbot": true}
+	party := map[string]bool{"Tankbot": true, "Healbot": true, "StrayBot": true}
 	ok := []string{
 		".go xyz 1 2 3 249",
 		".go xyz -4768.61 -3752.11 53.43 1",
@@ -19,6 +20,8 @@ func TestAllowedLine(t *testing.T) {
 		".bot role Tankbot protection",
 		".bot role Healbot holy",
 		".bot role Tankbot bear",
+		// phaseHire dismisses a group member this walk did not hire: the module's own uninvite line (walk 80).
+		".bot uninvite StrayBot",
 		".tele name Tankbot onyxia",
 		".summon Tankbot",
 		".revive Tankbot",
@@ -28,7 +31,7 @@ func TestAllowedLine(t *testing.T) {
 		".bot run resume",
 	}
 	for _, line := range ok {
-		if !AllowedLine(line, hires, 309) {
+		if !AllowedLine(line, hires, party, 309) {
 			t.Errorf("refused an allowed line %q", line)
 		}
 	}
@@ -59,6 +62,13 @@ func TestAllowedLine(t *testing.T) {
 		".bot role Tankbot tank",
 		".bot role Tankbot",
 		".bot role Tankbot protection extra",
+		".bot uninvite",
+		".bot uninvite StrayBot extra",
+		".bot uninvite 9lives",
+		".bot uninvite x",
+		// Only a current group member this walk did not hire: a hire of this walk and a name outside the party fail.
+		".bot uninvite Tankbot",
+		".bot uninvite Stranger",
 		".tele name NotAHire onyxia",
 		".tele name Tankbot bad word",
 		".summon Tankbot extra",
@@ -77,7 +87,7 @@ func TestAllowedLine(t *testing.T) {
 		".bot run resume x",
 	}
 	for _, line := range bad {
-		if AllowedLine(line, hires, 309) {
+		if AllowedLine(line, hires, party, 309) {
 			t.Errorf("accepted a forbidden line %q", line)
 		}
 	}
@@ -87,14 +97,14 @@ func TestAllowedLine(t *testing.T) {
 func TestAllowedLineAppearUnbind(t *testing.T) {
 	hires := map[string]bool{"Tankbot": true, "Healbot": true}
 	for _, line := range []string{".appear Tankbot", ".appear Healbot", ".instance unbind 309", ".gm on", ".instance listbinds"} {
-		if !AllowedLine(line, hires, 309) {
+		if !AllowedLine(line, hires, nil, 309) {
 			t.Errorf("refused an allowed line %q", line)
 		}
 	}
 	for _, line := range []string{".appear Stranger", ".appear", ".appear Tankbot extra", ".instance unbind all",
 		".instance unbind 409", ".instance unbind", ".instance listbinds 309", ".instance unbind 0309",
 		".gm", ".gm off", ".gm on extra", ".gm visible on"} { // `.gm visible off` is the revive's one exact line (TestAllowedLine)
-		if AllowedLine(line, hires, 309) {
+		if AllowedLine(line, hires, nil, 309) {
 			t.Errorf("accepted a forbidden line %q", line)
 		}
 	}
@@ -199,12 +209,12 @@ func TestAllowedTT(t *testing.T) {
 func TestAllowedPInfo(t *testing.T) {
 	hires := map[string]bool{"Tankbot": true, "Healbot": true}
 	for _, line := range []string{".pinfo", ".pinfo Tankbot", ".pinfo Healbot"} {
-		if !AllowedLine(line, hires, 309) {
+		if !AllowedLine(line, hires, nil, 309) {
 			t.Errorf("refused %q", line)
 		}
 	}
 	for _, line := range []string{".pinfo Stranger", ".pinfo Tankbot extra", ".pinfoo", ".pinfo Tankbot\\n.die"} {
-		if AllowedLine(line, hires, 309) {
+		if AllowedLine(line, hires, nil, 309) {
 			t.Errorf("allowed %q", line)
 		}
 	}

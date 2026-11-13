@@ -418,6 +418,22 @@ func TestAutoCommandArgs(t *testing.T) {
 	if got = strings.Join(args, " "); !strings.Contains(got, "--instance-cap-per-account 30") {
 		t.Fatalf("the cap was not forwarded: %s", got)
 	}
+	// A goal whose boss wipe takes a FRESH instance (--gm-instance-data or --boss-wipe-fresh) gets --wipe-end fast:
+	// the walk's reset wait and revive would be spent on the copy the relaunch replaces (walk 74: 49 s + 34 s median).
+	fresh := target
+	fresh.Args = append(append([]string{}, target.Args...), "--gm-instance-data=hakkar:1 3")
+	if got = strings.Join(autoCommandArgs("/bin/ta", fresh, "/walk/a-1", "step 405", true, 0), " "); !strings.Contains(got, "--wipe-end fast") {
+		t.Fatalf("a --gm-instance-data goal's walk lacks --wipe-end fast: %s", got)
+	}
+	fresh = target
+	fresh.BossWipeFresh = true
+	if got = strings.Join(autoCommandArgs("/bin/ta", fresh, "/walk/a-1", "step 405", true, 0), " "); !strings.Contains(got, "--wipe-end fast") {
+		t.Fatalf("a --boss-wipe-fresh goal's walk lacks --wipe-end fast: %s", got)
+	}
+	// A goal that re-places the same instance after a wipe keeps the reset wait and the revive.
+	if got = strings.Join(autoCommandArgs("/bin/ta", target, "/walk/a-1", "step 405", true, 0), " "); strings.Contains(got, "--wipe-end") {
+		t.Fatalf("a same-instance goal's walk got --wipe-end: %s", got)
+	}
 }
 
 func TestAutoLastStepAndReason(t *testing.T) {
@@ -3127,6 +3143,227 @@ func TestAutoWipeAtBossWithoutGMInstanceDataKeepsTheInstance(t *testing.T) {
 
 const bossWipeTarget = "a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --gm-instance-data hakkar:1 3;6 3;0 0"
 
+// A fresh instance throws away earlier kills; --boss-wipe-fresh extends the fresh-after-wipe rule to goals that
+// restart from their own start: a wipe at the boss row relaunches from the goal's own start in a fresh instance,
+// never "--from step N --reuse-instance".
+func TestBossWipeFreshRelaunchesFromGoalStart(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	args := f.args()
+	if !strings.Contains(args[1], "--from leg tunnel --place") || strings.Contains(args[1], "--reuse-instance") {
+		t.Fatalf("the boss-wipe-fresh restart did not start from the goal's start fresh: %s\n%s", args[1], f.events())
+	}
+	if !strings.Contains(f.events(), "fresh instance after a boss wipe") {
+		t.Fatalf("no fresh-instance-after-a-boss-wipe resume event:\n%s", f.events())
+	}
+	if st := s.states[0]; st.goals[st.current].exit29Retries != 0 {
+		t.Fatalf("the boss wipe used the goal's exit-29 retry")
+	}
+}
+
+// --boss-wipe-fresh is consumed by the autopilot: it never reaches the raid-walk args.
+func TestBossWipeFreshFlagConsumed(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	for _, a := range f.args() {
+		if strings.Contains(a, "--boss-wipe-fresh") {
+			t.Fatalf("--boss-wipe-fresh reached the raid-walk args: %s", a)
+		}
+	}
+}
+
+// --boss-wipe-fresh takes no value: the start refuses the line.
+func TestBossWipeFreshValueRejected(t *testing.T) {
+	if _, err := raidwalk.ParseAutoTargets(strings.NewReader("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --boss-wipe-fresh=1\n")); err == nil || !strings.Contains(err.Error(), "--boss-wipe-fresh takes no value") {
+		t.Fatalf("err %v, want the no-value error", err)
+	}
+}
+
+// --wipe-end is managed by the autopilot (it passes it for a goal whose boss wipe takes a fresh instance): a target
+// line's own value is dropped, never handed to raid-walk, so a same-instance goal cannot lose its reset wait.
+func TestWipeEndFlagConsumed(t *testing.T) {
+	ts, err := raidwalk.ParseAutoTargets(strings.NewReader("a srv 1 zg-a boss:14515 -- zul_gurub --sql /zg.sql --wipe-end slow\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range ts[0].Args {
+		if strings.Contains(a, "--wipe-end") {
+			t.Fatalf("--wipe-end reached the target's raid-walk args: %q", ts[0].Args)
+		}
+	}
+}
+
+// A --gm-instance-data goal without --boss-wipe-fresh keeps today's step start after a boss wipe.
+func TestGMInstanceDataWithoutFlagKeepsStepStart(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --gm-instance-data hakkar:1 3;6 3;0 0")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	if a := f.args()[1]; !strings.Contains(a, "--from step 396 --place") || strings.Contains(a, "--reuse-instance") {
+		t.Fatalf("a --gm-instance-data goal without --boss-wipe-fresh did not keep the step start: %s", a)
+	}
+}
+
+// An exit 19 at a tunnel row is not a boss wipe: the same-instance step relaunch stays.
+func TestBossWipeFreshNotOnTunnelExit19(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	f.attempt("a-1", 19, 300, "wipe: the raid died")
+	f.attempt("a-2", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the restart", func() bool { return len(f.args()) >= 2 })
+	if a := f.args()[1]; !strings.Contains(a, "--reuse-instance") {
+		t.Fatalf("an exit 19 away from the boss took a fresh instance: %s\n%s", a, f.events())
+	}
+}
+
+// A --boss-wipe-fresh goal counts its wipe budget across fresh relaunches: three boss wipes without progress
+// escalate at the third (default --boss-wipe-max 3), even though every relaunch starts from the goal's own start.
+func TestBossWipeFreshThreeWipesWithoutProgressEscalates(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	for i := 1; i <= 3; i++ {
+		f.attempt(fmt.Sprintf("a-%d", i), 19, 397, "wipe: the raid died")
+	}
+	f.attempt("a-4", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 3; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+	}
+	if n := len(f.args()); n != 3 {
+		t.Fatalf("%d launches, want 3 (the third boss wipe stops the id):\n%s", n, f.events())
+	}
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("three boss wipes without progress did not escalate:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "boss wipe x3 without progress") {
+		t.Fatalf("no ESCALATE line for the boss wipes:\n%s", f.events())
+	}
+}
+
+// The no-budget bug this round fixes: with --boss-wipe-fresh every relaunch starts from the goal's own start,
+// but the wipe budget must still count across those relaunches (a fresh run past the old best is progress and
+// resets the count). Mirrors TestAutoBossWipeProgressResetsTheCount: 396 (progress), 396 (none), 397 (progress:
+// count restarts), 397 (none), 397 (none: the third since progress escalates).
+func TestBossWipeFreshProgressPastOldBestResetsTheCount(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	for i, step := range []int{396, 396, 397, 397, 397} {
+		f.attempt(fmt.Sprintf("a-%d", i+1), 19, step, "wipe: the raid died")
+	}
+	f.attempt("a-6", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 5; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		if _, esc := runState(s.states[0]); esc {
+			t.Fatalf("escalated before launch %d:\n%s", i, f.events())
+		}
+		finishAttempt(t, s)
+	}
+	if n := len(f.args()); n != 5 {
+		t.Fatalf("%d launches, want 5:\n%s", n, f.events())
+	}
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("three wipes since the last progress did not escalate:\n%s", f.events())
+	}
+	for i, a := range f.args()[1:] {
+		if !strings.Contains(a, "--from leg tunnel --place") || strings.Contains(a, "--reuse-instance") {
+			t.Fatalf("launch %d did not start fresh from the goal's start: %s", i+2, a)
+		}
+	}
+}
+
+// Round 4 (Codex HIGH): an exit-26 retry between the boss wipe and placement loses the fresh start. The fresh-instance
+// relaunch after the wipe exits 26 before placement, and the cap retry must still start from the goal's --from in a
+// fresh instance, never from bestStep (the boss row). bestStep still survives: a later run past it counts as progress.
+func TestBossWipeFreshCapRetryKeepsGoalStart(t *testing.T) {
+	const capEnd = "instance cap: waited 20m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation"
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 26, 0, capEnd)
+	f.attempt("a-3", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the fresh relaunch", func() bool { return len(f.args()) >= 2 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the cap retry", func() bool { return len(f.args()) >= 3 })
+	for i, a := range f.args()[1:] {
+		if !strings.Contains(a, "--from leg tunnel --place") || strings.Contains(a, "--reuse-instance") {
+			t.Fatalf("launch %d did not start fresh from the goal's start: %s\n%s", i+2, a, f.events())
+		}
+	}
+	if st := s.states[0]; st.goals[st.current].bestStep != 397 {
+		t.Fatalf("bestStep %d after the wipe, want 397 (kept across the fresh relaunches)", st.goals[st.current].bestStep)
+	}
+	if !strings.Contains(f.events(), "instance-cap-wait") {
+		t.Fatalf("no instance-cap-wait event:\n%s", f.events())
+	}
+}
+
+// Round 4: the pending fresh-after-wipe mode survives a supervisor restart from the checkpoint. The wipe and the
+// exit-26 retry finish under one supervisor, a new supervisor reads the checkpoint, and its launch must still start
+// from the goal's --from in a fresh instance.
+func TestBossWipeFreshCapRetrySurvivesARestart(t *testing.T) {
+	const capEnd = "instance cap: waited 20m (--instance-cap-wait), still 3 on srv: no fresh instance is started without a reservation"
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 26, 0, capEnd)
+	f.attempt("a-3", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the fresh relaunch", func() bool { return len(f.args()) >= 2 })
+	finishAttempt(t, s)
+	s.saveState()
+	s2 := f.supervisor()
+	tickUntil(t, s2, "the launch after the restart", func() bool { return len(f.args()) >= 3 })
+	if a := f.args()[2]; !strings.Contains(a, "--from leg tunnel --place") || strings.Contains(a, "--reuse-instance") {
+		t.Fatalf("the post-restart launch did not start fresh from the goal's start: %s\n%s", a, f.events())
+	}
+}
+
+// Round 4: a launch that gets past placement clears the pending fresh-after-wipe mode. The fresh relaunch walks the
+// tunnel (step 12, not the boss), and the next restart resumes from the reached step in the same instance.
+func TestBossWipeFreshPlacementClearsTheMode(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target("a srv 1 zg-a boss:14515 -- zul_gurub --sql testdata/zg-20261101093000.sql --from leg tunnel --boss-wipe-fresh")
+	f.attempt("a-1", 19, 397, "wipe: the raid died")
+	f.attempt("a-2", 19, 12, "wipe: the raid died")
+	f.attempt("a-3", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the fresh relaunch", func() bool { return len(f.args()) >= 2 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the resume after placement", func() bool { return len(f.args()) >= 3 })
+	if a := f.args()[1]; !strings.Contains(a, "--from leg tunnel --place") || strings.Contains(a, "--reuse-instance") {
+		t.Fatalf("the fresh relaunch did not start from the goal's start: %s\n%s", a, f.events())
+	}
+	if a := f.args()[2]; !strings.Contains(a, "--reuse-instance") {
+		t.Fatalf("the restart after a placed run did not resume the same instance: %s\n%s", a, f.events())
+	}
+}
+
 // Round 1 (HIGH): every boss wipe took a fresh instance with no budget, so a raid that cannot beat the boss spent
 // ~6 instances an hour forever (the cap is 5 per account). The third boss wipe in a row without progress stops the id.
 func TestAutoBossWipeThreeTimesWithoutProgressEscalates(t *testing.T) {
@@ -3458,4 +3695,233 @@ func TestAutoBossWipeProgressReadsTheSummaryStepToo(t *testing.T) {
 	if n := len(f.args()); n != 4 {
 		t.Fatalf("%d launches, want 4:\n%s", n, f.events())
 	}
+}
+
+// A practice goal launches raid-walk with the mechanic entry and its cycle budget, and its until is none.
+func TestAutoCommandArgsPracticeGoal(t *testing.T) {
+	target := raidwalk.AutoTarget{
+		ID: "p", Server: "tortoise-test2", Slot: "1", Holder: "zg-p",
+		Goal: raidwalk.AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10},
+		Args: []string{"zul_gurub", "--dir", "/plans", "--sql", "/zg.sql"},
+	}
+	got := strings.Join(autoCommandArgs("/bin/ta", target, "/walk/p-1", "", false, 0), " ")
+	want := "raid-walk zul_gurub --dir /plans --sql /zg.sql --server tortoise-test2 --slot 1 --holder zg-p --until none --out /walk/p-1 --practice 14834 --practice-cycles 10"
+	if got != want {
+		t.Fatalf("args:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// The autopilot reads the summary's practice cycles, and a practice goal is met only by them.
+func TestAutoObservationPracticeCycles(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/summary.json"
+	raw := `{"exit_code":0,"steps_reached":700,"steps_total":733,"end_reason":"practice: cycles",
+		"practice":{"entry":14834,"attempts":2,"cycles":10,"ended":"cycles","rows":"practice.jsonl"}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := autoReadSummary(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.PracticeCycles != 10 {
+		t.Fatalf("practice cycles %d, want 10", sum.PracticeCycles)
+	}
+	o := raidwalk.AutoObservation{Exited: true, PracticeCycles: sum.PracticeCycles}
+	if !raidwalk.GoalAchieved(raidwalk.AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}, o) {
+		t.Fatal("10 practice cycles did not meet the autopilot's goal")
+	}
+}
+
+// practiceAttempt plans one attempt of a practice goal: its exit code, the practice cycles it collected and why the
+// practice ended. The summary's practice object is what the autopilot reads.
+func (f *autoFixture) practiceAttempt(base string, exit, cycles int, ended string) {
+	f.t.Helper()
+	f.writeSpec(base+".exit", strconv.Itoa(exit))
+	sum, err := json.Marshal(map[string]any{
+		"exit_code": exit, "steps_reached": 700, "steps_total": 733, "end_reason": "practice: " + ended,
+		"practice": map[string]any{"entry": 14834, "attempts": 1, "cycles": cycles, "ended": ended, "rows": "practice.jsonl"},
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.writeSpec(base+".summary", string(sum))
+	f.writeSpec(base+".runlog", "19:46:05.696 TBM:RUN|zul_gurub|running|700/733|hakkar|boss|begin|fighting\n")
+}
+
+// practiceTarget is one practice goal of 10 Hakkar cycles.
+const practiceTarget = "p tortoise-test2 1 zg-p practice:14834:10 -- zul_gurub --dir /plans --sql /zg.sql"
+
+// TestAutoPracticeRelaunchBudget: an exit-18 practice relaunches twice and gives up on the third: the id escalates
+// with "practice: gave up after 2 relaunches", and the state keeps the relaunch count.
+func TestAutoPracticeRelaunchBudget(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(practiceTarget)
+	f.practiceAttempt("p-1", 18, 4, "max time")
+	f.practiceAttempt("p-2", 18, 4, "max time")
+	f.practiceAttempt("p-3", 18, 0, "3 failed resets")
+	f.practiceAttempt("p-4", 2, 0, "bad --sql")
+	s := f.supervisor()
+	for i := 1; i <= 2; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		if _, esc := runState(s.states[0]); esc {
+			t.Fatalf("escalated after exit 18 %d:\n%s", i, f.events())
+		}
+		finishAttempt(t, s)
+	}
+	tickUntil(t, s, "the third launch", func() bool { return len(f.args()) >= 3 })
+	finishAttempt(t, s)
+	if _, esc := runState(s.states[0]); !esc {
+		t.Fatalf("no escalation after the third exit 18:\n%s", f.events())
+	}
+	if !strings.Contains(f.events(), "practice: gave up after 2 relaunches") {
+		t.Fatalf("the escalation does not say the practice gave up:\n%s", f.events())
+	}
+	if n := len(f.args()); n != 3 {
+		t.Fatalf("%d launches, want 3:\n%s", n, f.events())
+	}
+	s.saveState()
+	raw, _ := os.ReadFile(filepath.Join(f.walk, autoStateFile))
+	var saved autoSavedState
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.IDs) != 1 || saved.IDs[0].PracticeRelaunches != 2 || saved.IDs[0].PracticeCycles != 8 {
+		t.Fatalf("checkpoint %s, want practice_relaunches 2 and practice_cycles 8", raw)
+	}
+}
+
+// TestAutoPracticeCyclesSumOverRel launches: the goal is met by the cycles SUMMED across relaunches: 6 + 4 is the 10
+// it wanted, so the second run's end advances the goal instead of relaunching.
+func TestAutoPracticeCyclesSumOverRelaunches(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(practiceTarget)
+	f.practiceAttempt("p-1", 18, 6, "max time")
+	f.practiceAttempt("p-2", 0, 4, "cycles")
+	s := f.supervisor()
+	for i := 1; i <= 2; i++ {
+		tickUntil(t, s, fmt.Sprintf("launch %d", i), func() bool { return len(f.args()) >= i })
+		finishAttempt(t, s)
+	}
+	if done, esc := runState(s.states[0]); !done || esc {
+		t.Fatalf("done=%v escalated=%v after 6+4 cycles of a 10-cycle goal:\n%s", done, esc, f.events())
+	}
+	if n := len(f.args()); n != 2 {
+		t.Fatalf("%d launches, want 2 (the summed cycles met the goal):\n%s", n, f.events())
+	}
+	if !strings.Contains(f.events(), "goal met: practice:14834:10") {
+		t.Fatalf("the goal-met line is missing:\n%s", f.events())
+	}
+}
+
+// TestAutoPracticeBossDeathOneFreshRelaunch: exit 0 below the cycle target is a boss death during practice: ONE relaunch
+// in a fresh instance (not --reuse-instance), then the id escalates.
+func TestAutoPracticeBossDeathOneFreshRelaunch(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(practiceTarget)
+	f.practiceAttempt("p-1", 0, 3, "boss killed during practice")
+	f.practiceAttempt("p-2", 0, 3, "boss killed during practice")
+	f.practiceAttempt("p-3", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the fresh relaunch", func() bool { return len(f.args()) >= 2 })
+	if args := f.args()[1]; strings.Contains(args, "--reuse-instance") || !strings.Contains(args, "--place") {
+		t.Fatalf("the practice boss-death relaunch is not a fresh placement:\n%s", args)
+	}
+	finishAttempt(t, s)
+	if _, esc := runState(s.states[0]); !esc || !strings.Contains(f.events(), "practice: the boss died again in the fresh instance") {
+		t.Fatalf("no escalation after the boss died again:\n%s", f.events())
+	}
+	if n := len(f.args()); n != 2 {
+		t.Fatalf("%d launches, want 2 (one fresh relaunch after the death):\n%s", n, f.events())
+	}
+}
+
+// TestAutoPracticeStateSurvivesARestart: the practice relaunch count and the summed cycles are in the checkpoint: a
+// new supervisor continues the same budget and sum.
+func TestAutoPracticeStateSurvivesARestart(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(practiceTarget)
+	f.practiceAttempt("p-1", 18, 4, "max time")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	s.saveState()
+	f.practiceAttempt("p-2", 18, 4, "max time")
+	f.practiceAttempt("p-3", 18, 0, "max time")
+	f.practiceAttempt("p-4", 2, 0, "bad --sql")
+	s2 := f.supervisor()
+	tickUntil(t, s2, "the relaunch after the restart", func() bool { return len(f.args()) >= 2 })
+	finishAttempt(t, s2)
+	tickUntil(t, s2, "the third launch", func() bool { return len(f.args()) >= 3 })
+	finishAttempt(t, s2)
+	if _, esc := runState(s2.states[0]); !esc {
+		t.Fatalf("the restarted supervisor lost the practice relaunch count:\n%s", f.events())
+	}
+	if n := len(f.args()); n != 3 {
+		t.Fatalf("%d launches, want 3:\n%s", n, f.events())
+	}
+}
+
+// TestAutoPracticeRelaunchPassesRemainingCycles: a relaunch asks for what is LEFT of the goal (L3), not the full target
+// again: after four of ten cycles, the next walk is told six.
+func TestAutoPracticeRelaunchPassesRemainingCycles(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(practiceTarget)
+	f.practiceAttempt("p-1", 18, 4, "max time")
+	f.practiceAttempt("p-2", 18, 6, "max time")
+	f.practiceAttempt("p-3", 2, 0, "bad --sql")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the relaunch", func() bool { return len(f.args()) >= 2 })
+	if args := f.args()[1]; !strings.Contains(args, "--practice-cycles 6") {
+		t.Fatalf("the relaunch asks for the full target again: %s", args)
+	}
+	finishAttempt(t, s)
+	if _, esc := runState(s.states[0]); esc {
+		t.Fatalf("escalated after the 4+6 cycles met the target:\n%s", f.events())
+	}
+}
+
+// TestAutoPracticeBossDeathRelaunchIsNoPlaceFailure: the fresh-instance relaunch after the boss died is no failed
+// placement (L4): placeFails stays as it was.
+func TestAutoPracticeBossDeathRelaunchIsNoPlaceFailure(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(practiceTarget)
+	f.practiceAttempt("p-1", 0, 4, "boss killed during practice")
+	f.practiceAttempt("p-2", 0, 6, "boss killed during practice")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the fresh relaunch", func() bool { return len(f.args()) >= 2 })
+	st := s.states[0]
+	st.mu.Lock()
+	got := st.placeFails
+	st.mu.Unlock()
+	if got != 0 {
+		t.Fatalf("placeFails %d after the boss-death fresh relaunch, want 0", got)
+	}
+}
+
+// TestAutoPracticeNeverEngagedRelaunches: the observation's practice ended reason reaches the rule: an exit 0 with
+// "never engaged" relaunches in the same instance (L4), never the one fresh-instance death retry.
+func TestAutoPracticeNeverEngagedRelaunches(t *testing.T) {
+	f := newAutoFixture(t)
+	f.target(practiceTarget)
+	f.practiceAttempt("p-1", 0, 0, "never engaged")
+	f.practiceAttempt("p-2", 18, 1, "max time")
+	s := f.supervisor()
+	tickUntil(t, s, "the first launch", func() bool { return len(f.args()) >= 1 })
+	finishAttempt(t, s)
+	tickUntil(t, s, "the relaunch", func() bool { return len(f.args()) >= 2 })
+	args := f.args()[1]
+	if !strings.Contains(args, "--reuse-instance") || !strings.Contains(args, "--place") {
+		t.Fatalf("the never-engaged relaunch is not the same instance: %s", args)
+	}
+	if !strings.Contains(f.events(), "practice: never engaged") {
+		t.Fatalf("the event does not name the never-engaged relaunch:\n%s", f.events())
+	}
+	finishAttempt(t, s)
 }

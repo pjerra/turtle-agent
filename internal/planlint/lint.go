@@ -42,6 +42,10 @@ const (
 	ShortHopYd     = 8.0
 	AggroMarginYd  = 8.0
 	PatrolMarginYd = 5.0
+	// SameSpotYd is how near a hold or gossip row must stand to the point before it to count as working where the party
+	// already stands: within it the row is no hop (route audit 2026-11-12, finding 4: the 15 rows flagged NOPATH stood on
+	// the spot the previous row had reached).
+	SameSpotYd = 5.0
 	// RayDirs is the number of directions the clearance rays are cast in.
 	RayDirs = 16
 	// EdgeRayYd is how far the clearance rays reach: past the widest edge the check wants to see (StandEdgeYd).
@@ -173,6 +177,21 @@ func moveKind(kind string) bool {
 	switch kind {
 	case planexport.KindMove, planexport.KindMoveDirect, planexport.KindMoveHopExact:
 		return true
+	}
+	return false
+}
+
+// noHop says the row does its work where the party already stands, so a lint that asks the server to path to its point must
+// skip it: a loot, use_item, wait_object or wait_clear row's point is for the module's own use, not a hop (route audit
+// 2026-11-12, finding 4: the 15 rows flagged NOPATH were exactly these kinds). A hold or gossip row is skipped only when it
+// stands on the spot the row before it reached (within SameSpotYd): one the party must walk to is a hop, and the server's
+// answer to that hop still stands. Every other kind is still judged.
+func noHop(s, prev planexport.StepRow) bool {
+	switch s.Kind {
+	case planexport.KindLoot, planexport.KindUseItem, planexport.KindWaitObject, planexport.KindWaitClear:
+		return true
+	case planexport.KindHold, planexport.KindGossip:
+		return dist3(pointOf(prev), pointOf(s)) <= SameSpotYd
 	}
 	return false
 }

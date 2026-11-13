@@ -539,7 +539,9 @@ func (sl *scoutLive) loginPhase(ctx context.Context) error {
 		return scoutStopf(exitLivePhaseRefused, "login: %v", err)
 	}
 	sl.logLine(fmt.Sprintf("login started (pid %d)", pid))
-	deadline := sl.now().Add(scoutLoginWait)
+	started := sl.now()
+	deadline := loginDeadline(started, scoutLoginWait) // the child holds out the realmd hour-start window (login_hold.go)
+	held := loginHoldExtra(started) > 0
 	for {
 		agent, m, err := sl.deps.openAgent(sl.slotDir)
 		if err == nil {
@@ -547,7 +549,7 @@ func (sl *scoutLive) loginPhase(ctx context.Context) error {
 			break
 		}
 		if !sl.now().Before(deadline) {
-			return scoutStopf(exitLivePhaseRefused, "login: no agent in %s after 90 s (%v; see %s/agent.out)", sl.slotDir, err, sl.slotDir)
+			return scoutStopf(exitLivePhaseRefused, "login: no agent in %s after %d s (%v; see %s/agent.out)", sl.slotDir, elapsedSecs(sl.now().Sub(started)), err, sl.slotDir)
 		}
 		if err := sl.sleep(ctx, time.Second); err != nil {
 			return err
@@ -558,8 +560,12 @@ func (sl *scoutLive) loginPhase(ctx context.Context) error {
 		if err == nil && st.State == session.StatusInWorld {
 			break
 		}
+		if held {
+			held = false
+			sl.logLine("login: waiting for the realmd hour-start window")
+		}
 		if !sl.now().Before(deadline) {
-			return scoutStopf(exitLivePhaseRefused, "login: not in world after 90 s (state %q; see %s/agent.out)", stateWord(st), sl.slotDir)
+			return scoutStopf(exitLivePhaseRefused, "login: not in world after %d s (state %q; see %s/agent.out)", elapsedSecs(sl.now().Sub(started)), stateWord(st), sl.slotDir)
 		}
 		if err := sl.sleep(ctx, 2*time.Second); err != nil {
 			return err

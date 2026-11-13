@@ -414,7 +414,8 @@ func (g *fakeRemote) publish() {
 }
 
 // traceRecorder is the fake server's run trace recorder (TortoiseBots `.bot trace start|stop|status`): one trace at a time, the
-// stop takes no run id, the status ack names the running trace's run id.
+// stop takes the run id (`trace stop <run_id>`) and refuses another run's id with `other-run`, the status ack names the
+// running trace's run id.
 func (g *fakeRemote) traceRecorder(ctx context.Context, f []string) (tbm.Reply, error) {
 	intent := f[0] + " " + f[1]
 	apply := func() tbm.Reply {
@@ -429,6 +430,9 @@ func (g *fakeRemote) traceRecorder(ctx context.Context, f []string) (tbm.Reply, 
 		case "stop":
 			if g.traceRun == "" {
 				return errReply(intent, "not-running")
+			}
+			if len(f) > 2 && f[2] != g.traceRun {
+				return errReply(intent, "other-run")
 			}
 			a := tbm.Ack{Intent: intent, Scope: "stopped", Count: 1, Executor: g.traceRun}
 			g.traceRun = ""

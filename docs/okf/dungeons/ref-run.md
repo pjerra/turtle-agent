@@ -48,7 +48,7 @@ All calls go through `turtle-agent rpc <dir> <method> '<json>'`. Every field is 
 | `teleport` | `false` | Group/leader: GM-teleport to the start and summon the party (in the report) | `{"teleport":true}` |
 | `no_shortcuts` | `false` | No GM revive of a dead companion at a rest gate | `{"no_shortcuts":true}` |
 | `setup` | none | GM commands you ran yourself, at most 40 of at most 400 chars; copied into the report, never sent | `{"setup":["go entrance"]}` |
-| `buffs` | none | Group/leader: preset `"world"`, a spell id, or a list; applied with `.aura` (developer GM) | `{"buffs":"world"}` |
+| `buffs` | none | Group/leader: preset `"world"` (the classic world buffs) or `"world-raid"` (the same list without Warchief's Blessing, which is Horde-only), a spell id, or a list; applied with `.aura` (developer GM) | `{"buffs":"world"}` |
 | `brain` | leader: class preset; else off | Preset or strategy name playing your character (group/leader) | `{"brain":"frost_mage"}` |
 | `rotation` | preset's own | Rotation file replacing the preset's class rotation (with a brain) | `{"rotation":"my_mage"}` |
 | `role` | preset's own (`dps` if none) | `dps`, `tank`, or `healer` (with a brain) | `{"role":"healer"}` |
@@ -88,9 +88,9 @@ All calls go through `turtle-agent rpc <dir> <method> '<json>'`. Every field is 
 
 ## dungeon_status, dungeon_stop, dungeon_pause, dungeon_resume, dungeon_skip
 
-No fields. `dungeon_status` answers `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`), the `report`, and `last_progress_at`, `stalled_for_s`, `stall_level` (`none`, `warn`, `recover`, `fail`). `dungeon_stop` ends the run (and with no run going, unbinds a kept binding). `dungeon_pause` halts a commander run with its binding kept (group mode: refused; idle: no-op). `dungeon_resume` and `dungeon_skip` go to the run leader of an observe run; otherwise refused.
+No fields. `dungeon_status` answers `running`, `state` (`idle`, `running`, `done`, `failed`, `stopped`, `refused`), the `report`, and `last_progress_at`, `stalled_for_s`, `stall_level` (`none`, `warn`, `recover`, `fail`). `dungeon_stop` ends the run (and with no run going, unbinds a kept binding). `dungeon_pause` halts a commander run with its binding kept (group mode: refused; idle: no-op). `dungeon_resume` and `dungeon_skip` go to the run leader of an observe run; otherwise refused.
 
-`dungeon_status` is one snapshot. The end event (`dungeon_done` or `dungeon_failed`) is emitted before the report says `done`, `failed` or `stopped`: a final state is never read before its event. A non-final state always has `running: true`; `running` stays true for a moment after a final state while the run's goroutine lets go of the brain.
+`dungeon_status` is one snapshot. The end event (`dungeon_done`, `dungeon_failed` or `dungeon_refused`) is emitted before the report says `done`, `failed`, `stopped` or `refused`: a final state is never read before its event. `refused` is a run stopped before it started (a team gate, an item a skipped leg was to provide, a grave or GM cross check): nothing was sent, and `report.error` names the reason. A non-final state always has `running: true`; `running` stays true for a moment after a final state while the run's goroutine lets go of the brain.
 
 ## dungeon_stage
 

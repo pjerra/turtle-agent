@@ -37,6 +37,28 @@ other users can read) with your server and account in it — placeholders below,
 Only `realmd` and `accounts` are required. `rpc` must be a loopback address. See
 [the settings reference](docs/okf/getting-started/settings-reference.md) for every key.
 
+Every realmd login waits out the first minutes of each UTC hour: the core's login throttle
+(`AuthSocket.cpp:439-457`) wrongly counts every account seen from the IP between hh:00:00 and hh:03:00, so a login that
+starts from hh:59:57 (3 s early, for clock skew) to hh:03:05 is held until hh:03:05, plus a random 0-20 s so held logins
+do not all fire at once, and logs `login: waiting <s> s for the realmd hour-start window`. The callers that start a login
+child (raid-walk, plan-scout, fleet) allow for the hold in their own waits. The window assumes the database's `NOW()` uses a
+whole-hour time zone. Set `TA_LOGIN_HOUR_HOLD=0` to turn the hold off.
+
+Raid-walk rosters (`tb-raid-roster` v2) may name a `spec` per batch; for a hunter it also sets the talent build and reads it back
+(see [the roster format](docs/okf/raids/roster-format.md)). Known limit: the read-back checks that the spec's tree has the most
+points, not the premade's exact point spread, which depends on the hire's level; refusals in TB's answer are caught and a failed
+spec is listed in the walk's `spec_failed`.
+
+Raid-walk's `--prepull-aura role=<role>:<ids>` (`tank`, `melee`, `ranged`, `caster`, `healer` or `all`) puts a flask,
+elixir, food and world-buff list on the party as auras at the pre-pull rest before each boss row, and
+`prepull-auras.json` records what each bot carries. The batch is fail-closed: every living party member, list or no list,
+is re-read for combat before each `.aura` (an in-combat member or an unreadable `unit` row stops the batch), and a boss
+row lands in `boss_rows` only after its auras verified — a failed fire is an `attempts{row, reason}` entry instead.
+By default every requested aura must verify; a miss fails the walk,
+and `--prepull-aura-tolerance N` is the explicit opt-in that accepts up to N missing ids per bot
+(see [the raid-walk reference](docs/okf/raids/raid-walk-reference.md)).
+Its `gm_aura` RPC is the select-then-`.aura <id>` hand behind it (see [the RPC reference](docs/okf/agent/rpc-reference.md)).
+
 Log a character in and keep it online with the RPC server running:
 
 ```sh
@@ -54,7 +76,7 @@ It reads the slot's token file itself and prints only the call's `result`. See
 
 - Drive one character over RPC: [the agent and its RPC](docs/okf/agent/index.md).
 - Run a bot party through a dungeon: [dungeon runs](docs/okf/dungeons/index.md).
-- Walk raids, supervise many, regression-check plans: [raids](docs/okf/raids/index.md).
+- Walk raids (boss-mechanic practice runs included), supervise many, regression-check plans: [raids](docs/okf/raids/index.md).
 - Write, check and ship run plans: [plans](docs/okf/plans/index.md).
 - Walk the navmesh and draw the run as a map: [navigation](docs/okf/navigation/index.md).
 - Fight with data: rotations, tactics, the brain: [combat](docs/okf/combat/index.md).

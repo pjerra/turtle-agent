@@ -291,8 +291,12 @@ func loginCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		}
 	}
 
+	if err := holdLoginForHourStart(ctx, stderr); err != nil {
+		fmt.Fprintln(stderr, "login:", err)
+		return exitAuth
+	}
 	window := &loginWindow{}
-	window.note(time.Now())
+	window.note(time.Now()) // after the hold: the login starts now
 	actx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	ticket, err := authLogin(actx, st.Realmd, account, password)
 	cancel()

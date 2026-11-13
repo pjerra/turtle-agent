@@ -21,10 +21,11 @@ var (
 const GMVisibleOff = ".gm visible off"
 
 // AllowedLine says whether raid-walk may send line through the gm RPC (spec 3.6): every line must match one of
-// the forms, with its arguments checked, and a bot name must be one of the walk's hires. mapID is the walk's plan
-// map: `.instance unbind` may name that map and no other (spec 7). The command checks every gm line with it before
-// sending; there is no second copy of the rule.
-func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
+// the forms, with its arguments checked, and a bot name must be one of the walk's hires. party is the names the
+// last party read held: `.bot uninvite` may name one of those (a group member this walk did not hire) and nothing
+// else. mapID is the walk's plan map: `.instance unbind` may name that map and no other (spec 7). The command
+// checks every gm line with it before sending; there is no second copy of the rule.
+func AllowedLine(line string, hires, party map[string]bool, mapID uint32) bool {
 	if strings.ContainsAny(line, "\r\n") {
 		return false
 	}
@@ -99,9 +100,21 @@ func AllowedLine(line string, hires map[string]bool, mapID uint32) bool {
 			// `.bot gear raid <commander> tier <N>`, the refit after the hire (amendment G1); the speculative
 			// `preset <word>` form is gone.
 			return len(f) == 6 && gmNameRe.MatchString(f[3]) && f[4] == "tier" && gearTierRe.MatchString(f[5])
+		case f[1] == "command":
+			// `.bot command <hire> talents [<path>]`: a roster spec's talent build and its read-back (TortoiseBots'
+			// ChangeTalentsAction). The path is one of the premade builds the roster table names, nothing else.
+			if len(f) < 4 || len(f) > 5 || !hires[f[2]] || f[3] != "talents" {
+				return false
+			}
+			return len(f) == 4 || IsTalentPath(f[4])
 		case f[1] == "role":
 			// `.bot role <hire> <spec id>`: a version 2 roster's spec, set before the refit.
 			return len(f) == 4 && hires[f[2]] && ValidSpecID(f[3])
+		case f[1] == "uninvite":
+			// `.bot uninvite <name>`: phaseHire's dismissal of a group member this walk did not hire (a failed
+			// attempt's late joiner). The name must be one the last party read held and not a hire of this walk; the
+			// module only uninvites an owned bot (any other name gets its usage line and no uninvite).
+			return len(f) == 3 && party[f[2]] && !hires[f[2]] && gmNameRe.MatchString(f[2])
 		}
 	}
 	return false

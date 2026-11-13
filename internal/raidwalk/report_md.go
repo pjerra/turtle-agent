@@ -70,7 +70,10 @@ func (r *Report) Markdown() string {
 		fmt.Fprintf(&b, ", %d pulls with contact before the pull order, %d with a neighbour joining, %d pauses, %d resumes, %d stops", r.Totals.ContactBeforePull, r.Totals.FightsWithJoins, r.Totals.Pauses, r.Totals.Resumes, r.Totals.Stops)
 	}
 	b.WriteString(".\n\n")
-	if r.Assisted {
+	if r.Practice != nil {
+		fmt.Fprintf(&b, "**PRACTICE: %d cycles in %d attempts, ended: %s; this is not a real clear**\n\n",
+			r.Practice.Cycles, r.Practice.Attempts, r.Practice.Ended)
+	} else if r.Assisted {
 		legs := assistedLegs(&Summary{GMClear: r.GMClear})
 		fmt.Fprintf(&b, "**%s**\n\n", GMClearSummaryLine(r.GMClear, legs))
 		if len(r.GMClear) > 0 {

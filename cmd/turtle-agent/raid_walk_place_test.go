@@ -73,6 +73,8 @@ type placeToolkit struct {
 	f    *fixture
 	mu   sync.Mutex // guards fields a test sets while the walk runs (instAfterSignal)
 	inst float64    // the instance `q inst` and `q group` report
+	// planMap is the map `q group` members report (0: 309, the fixture plan's map).
+	planMap uint32
 	// cmdInst, when set, is what `q inst` reports instead (a commander in another copy).
 	cmdInst float64
 	// afterPlace, when set, makes `q inst` report movedInst once the place has happened.
@@ -217,8 +219,12 @@ func (p *placeToolkit) members() []any {
 	p.f.agent.mu.Lock()
 	defer p.f.agent.mu.Unlock()
 	out := make([]any, 0, len(p.f.agent.party))
+	m := p.planMap
+	if m == 0 {
+		m = 309
+	}
 	for i, n := range p.f.agent.party {
-		out = append(out, map[string]any{"g": fmt.Sprintf("0xF130%012d", i), "n": n, "map": 309, "inst": p.inst, "alive": true, "cb": false})
+		out = append(out, map[string]any{"g": fmt.Sprintf("0xF130%012d", i), "n": n, "map": m, "inst": p.inst, "alive": true, "cb": false})
 	}
 	return out
 }
@@ -456,16 +462,18 @@ func TestParsePlaceRefusesInject(t *testing.T) {
 
 func TestParsePlaceServerGuard(t *testing.T) {
 	var stderr bytes.Buffer
-	for _, server := range []string{"m910q", "tortoise-test2"} {
+	for _, server := range []string{"m910q", "tortoise-test2", "tortoise-test3"} {
 		stderr.Reset()
 		if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--server", server, "--place", "--from", "step 5", "--sql", "walk.sql"}, &stderr); code != exitOK {
 			t.Fatalf("%s: exit %d, stderr %q", server, code, stderr.String())
 		}
 	}
-	stderr.Reset()
-	if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--server", "tortoise", "--place", "--from", "step 5", "--sql", "walk.sql"}, &stderr); code != exitUsage ||
-		!strings.Contains(stderr.String(), "test servers only") {
-		t.Fatalf("exit %d, stderr %q", code, stderr.String())
+	for _, server := range []string{"tortoise", "prod-realm"} {
+		stderr.Reset()
+		if _, code := parseRaidWalkArgs([]string{"onyxias_lair", "--server", server, "--place", "--from", "step 5", "--sql", "walk.sql"}, &stderr); code != exitUsage ||
+			!strings.Contains(stderr.String(), "test servers only") {
+			t.Fatalf("%s: exit %d, stderr %q", server, code, stderr.String())
+		}
 	}
 }
 
@@ -889,6 +897,16 @@ func TestPlaceSamePointRetryCountsTheHiresAlreadyInside(t *testing.T) {
 	}
 	if sum.Place.Placed != sum.Place.Hires-1 {
 		t.Fatalf("place summary %+v, want every hire but the straggler placed", sum.Place)
+	}
+	// The `.tt place` armed the unfreeze check (11 yd ring); the retry's summon wave armed it again (6 yd ring).
+	var armed []string
+	for _, n := range sum.Notes {
+		if strings.Contains(n, "unfreeze check armed") {
+			armed = append(armed, n)
+		}
+	}
+	if len(armed) < 2 || !strings.HasSuffix(armed[0], "(ring 11 yd)") || !strings.HasSuffix(armed[len(armed)-1], "(ring 6 yd)") {
+		t.Fatalf("armed notes %q, want the place's 11 yd ring re-armed as the summon wave's 6 yd ring", armed)
 	}
 }
 
@@ -3695,6 +3713,12 @@ func TestPlaceQuietFailureRetreatsInTheSameInstance(t *testing.T) {
 	wantPoint := fmt.Sprintf("quiet 50 %v %v", rows.Steps[back-1].X, rows.Steps[back-1].Y)
 	if !strings.HasPrefix(p.quiets[1], wantPoint) {
 		t.Fatalf("second quiet %q, want the retreat point %q", p.quiets[1], wantPoint)
+	}
+	// The retreat's summon wave arms the unfreeze check at the retreat point, a 6 yd ring (spread 0).
+	pt := sum.Place.Point
+	armed := fmt.Sprintf("placement: unfreeze check armed at %s %s %s (ring 6 yd)", num32(pt[0]), num32(pt[1]), num32(pt[2]))
+	if !hasNote(sum, armed) || hasNote(sum, "(ring 11 yd)") {
+		t.Fatalf("notes %q, want only %q", sum.Notes, armed)
 	}
 }
 

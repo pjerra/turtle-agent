@@ -493,7 +493,7 @@ func floorFilter(spawns []worldspawn.Spawn, segs []seg, opt Options) ([]worldspa
 	kept := make([]worldspawn.Spawn, 0, len(spawns))
 	ignored := 0
 	for _, s := range spawns {
-		reach := worldspawn.AggroRadius(s, opt.Level, opt.AggroRate) + opt.Spread + s.Wander
+		reach := worldspawn.AggroRadius(s, opt.Level, opt.AggroRate) + opt.Spread + worldspawn.WanderYd(s)
 		reachable, sameFloor := false, false
 		for _, g := range segs {
 			for _, sample := range g.samples {
@@ -797,7 +797,7 @@ func (m *model) addSegment(rep *Report, s *seg, st stands) {
 
 // reach is a spawn's proximity wake reach: the aggro radius plus the party's spread plus its wander.
 func (m *model) reach(s worldspawn.Spawn) float32 {
-	return worldspawn.AggroRadius(s, m.opt.Level, m.opt.AggroRate) + m.opt.Spread + s.Wander
+	return worldspawn.AggroRadius(s, m.opt.Level, m.opt.AggroRate) + m.opt.Spread + worldspawn.WanderYd(s)
 }
 
 // alive says a pack is still there when the segment ending at step n is walked: it is cleared at n (the intended pull) or later,

@@ -53,7 +53,7 @@ turtle-agent rpc <walk-dir> dungeon_resume
 turtle-agent rpc <walk-dir> dungeon_skip
 ```
 
-`dungeon_status` answers `{running, state, report?, last_progress_at?, stalled_for_s, stall_level}` where `state` is `idle`, `running`, `done`, `failed` or `stopped`. Pause, resume and skip act on the active run by its mode; with no run:
+`dungeon_status` answers `{running, state, report?, last_progress_at?, stalled_for_s, stall_level}` where `state` is `idle`, `running`, `done`, `failed`, `stopped` or `refused` (stopped before it started: nothing was sent, and `report.error` names the reason). Pause, resume and skip act on the active run by its mode; with no run:
 
 `dungeon_pause: no dungeon run is going`
 

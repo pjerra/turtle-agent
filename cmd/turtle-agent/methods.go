@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"time"
 
@@ -66,6 +67,8 @@ type targetParams struct {
 type castParams struct {
 	SpellID uint32      `json:"spell_id"`
 	Target  packet.GUID `json:"target,omitempty"`
+	// TradeSlot casts at the trade partner's item in that trade slot (0-6; an enchant takes slot 6) instead of at a target.
+	TradeSlot *uint8 `json:"trade_slot,omitempty"`
 }
 
 type cancelCastParams struct {
@@ -74,6 +77,20 @@ type cancelCastParams struct {
 
 type guidParams struct {
 	GUID packet.GUID `json:"guid"`
+}
+
+// gmSetHPParams is gm_set_hp: the creature only. The session restores the unit to its own MaxHealth (it reads the unit
+// and sends `.modify hp <max> <max>`), so an explicit hp is refused: no caller can lower a unit's maximum.
+type gmSetHPParams struct {
+	GUID packet.GUID `json:"guid"`
+	// HP is refused when present, whatever its value: the parameter was removed from the RPC.
+	HP *uint32 `json:"hp,omitempty"`
+}
+
+// gmAuraParams is gm_aura: the player to put one aura on and the spell id of the aura.
+type gmAuraParams struct {
+	GUID    packet.GUID `json:"guid"`
+	SpellID uint32      `json:"spell_id"`
 }
 
 type walkParams struct {
@@ -104,6 +121,26 @@ type rollParams struct {
 
 type inventoryParams struct {
 	Bags bool `json:"bags,omitempty"` // the items in the four bags too
+}
+
+// equipmentRow is one worn item of the equipment method. ItemEntry is 0 until the item's create block arrives, as in inventory.
+type equipmentRow struct {
+	Slot        uint8       `json:"slot"`
+	SlotName    string      `json:"slot_name"`
+	GUID        packet.GUID `json:"guid"`
+	ItemEntry   uint32      `json:"item_entry"`
+	TempEnchant uint32      `json:"temp_enchant,omitempty"`
+}
+
+// equipmentSlotNames are the worn slots 0-18 in index order (EQUIPMENT_SLOT_HEAD to EQUIPMENT_SLOT_TABARD).
+var equipmentSlotNames = [...]string{"head", "neck", "shoulders", "body", "chest", "waist", "legs", "feet", "wrists", "hands",
+	"finger1", "finger2", "trinket1", "trinket2", "back", "main_hand", "off_hand", "ranged", "tabard"}
+
+func equipmentSlotName(slot uint8) string {
+	if int(slot) < len(equipmentSlotNames) {
+		return equipmentSlotNames[slot]
+	}
+	return ""
 }
 
 type equipParams struct {
@@ -168,6 +205,28 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	srv.Register("gm_kill", rpc.Typed(func(ctx context.Context, p guidParams) (empty, error) {
 		return empty{}, rpcErr(cur().GMKill(ctx, p.GUID))
 	}))
+	// The practice hands (raid-walk --practice): each is authorized like gm_kill (the agent's AllowGMKill, set at login
+	// from the dialled world_addr) and each sends only a line from session.PracticeGMLine's closed set.
+	srv.Register("gm_evade", rpc.Typed(func(ctx context.Context, p guidParams) (empty, error) {
+		return empty{}, rpcErr(cur().GMEvade(ctx, p.GUID))
+	}))
+	// gm_aura is the select-then-".aura <id>" hand of `raid-walk --prepull-aura` (a party member's guid and the spell id
+	// only): the same test-server gate as gm_kill, and session.GMAura refuses a non-player guid or spell 0.
+	srv.Register("gm_aura", rpc.Typed(func(ctx context.Context, p gmAuraParams) (empty, error) {
+		return empty{}, rpcErr(cur().GMAura(ctx, p.GUID, p.SpellID))
+	}))
+	srv.Register("gm_set_hp", rpc.Typed(func(ctx context.Context, p gmSetHPParams) (empty, error) {
+		if p.HP != nil {
+			return empty{}, fmt.Errorf("gm_set_hp: the hp argument is refused (the unit is restored to its own max health): got %d", *p.HP)
+		}
+		return empty{}, rpcErr(cur().GMSetHP(ctx, p.GUID))
+	}))
+	srv.Register("gm_respawn", rpc.Typed(func(ctx context.Context, p guidParams) (empty, error) {
+		return empty{}, rpcErr(cur().GMRespawn(ctx, p.GUID))
+	}))
+	srv.Register("gm_revive", rpc.Typed(func(ctx context.Context, p nameParams) (empty, error) {
+		return empty{}, rpcErr(cur().GMRevive(ctx, p.Name))
+	}))
 	srv.Register("events", rpc.Typed(func(ctx context.Context, p eventsParams) (events.Page, error) {
 		q := events.Query{Since: p.Since, Kinds: p.Kinds, PartyOnly: p.PartyOnly, Limit: p.Limit}
 		return readEvents(ctx, log, q, p.WaitMS), nil
@@ -224,6 +283,15 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 	srv.Register("attack", rpc.Typed(func(ctx context.Context, _ empty) (empty, error) { return empty{}, rpcErr(cur().Attack(ctx)) }))
 	srv.Register("stop_attack", rpc.Typed(func(ctx context.Context, _ empty) (empty, error) { return empty{}, rpcErr(cur().StopAttack(ctx)) }))
 	srv.Register("cast", rpc.Typed(func(ctx context.Context, p castParams) (empty, error) {
+		if p.TradeSlot != nil {
+			if p.Target != 0 {
+				return empty{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "invalid params: cast takes a target or a trade_slot, not both"}
+			}
+			if *p.TradeSlot > 6 {
+				return empty{}, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "invalid params: cast needs a trade_slot 0-6"}
+			}
+			return empty{}, rpcErr(cur().CastOnTradeSlot(ctx, p.SpellID, *p.TradeSlot))
+		}
 		return empty{}, rpcErr(cur().Cast(ctx, p.SpellID, p.Target))
 	}))
 	srv.Register("cancel_cast", rpc.Typed(func(ctx context.Context, p cancelCastParams) (empty, error) {
@@ -267,6 +335,13 @@ func registerMethodsFor(srv *rpc.Server, cur func() *session.Session, opts metho
 			inv = []objects.Item{}
 		}
 		return inv, nil
+	}))
+	srv.Register("equipment", rpc.Typed(func(ctx context.Context, _ empty) ([]equipmentRow, error) {
+		rows := []equipmentRow{}
+		for _, it := range cur().Equipment() {
+			rows = append(rows, equipmentRow{Slot: it.Slot, SlotName: equipmentSlotName(it.Slot), GUID: it.GUID, ItemEntry: it.Entry, TempEnchant: it.TempEnchant})
+		}
+		return rows, nil
 	}))
 	srv.Register("equip", rpc.Typed(func(ctx context.Context, p equipParams) (objects.Item, error) {
 		it, err := cur().Equip(ctx, session.EquipRef{Entry: p.ItemEntry, Bag: p.Bag, Slot: p.Slot})

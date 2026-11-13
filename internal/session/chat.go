@@ -172,7 +172,7 @@ func (s *Session) GMOn(ctx context.Context, g packet.GUID, text string) error {
 }
 
 // ErrGMKillRefused is GMKill's refusal on an agent not authorized for gm_kill (the dialled host:port is not a test server's configured world_addr).
-var ErrGMKillRefused = errors.New("gm kill: refused: this agent is not a slot of a test server (m910q, tortoise-test2)")
+var ErrGMKillRefused = errors.New("gm kill: refused: this agent is not a slot of a test server (m910q, tortoise-test2, tortoise-test3)")
 
 // GMKillLine is the one GM line GMKill sends: the core's ".die" (Chat.cpp:885 `{ "die", SEC_DEVELOPER, ... HandleDieCommand }`, from account
 // level 3), which kills the SELECTED unit (Commands.cpp:2795, HandleDieCommand: GetSelectedUnit, then DealDamage for its whole health).
@@ -189,6 +189,28 @@ func (s *Session) GMKill(ctx context.Context, g packet.GUID) error {
 		return fmt.Errorf("gm kill: %s is not a creature guid", g)
 	}
 	return s.GMOn(ctx, g, GMKillLine)
+}
+
+// GMAuraLine is the GM line GMAura sends: the core's ".aura <spell id>" (Chat.cpp:874, SEC_DEVELOPER, from account
+// level 3; Commands.cpp:3138 HandleAuraCommand), which applies the spell's aura to the SELECTED unit. Below developer
+// level the handler puts it on the sender instead, which is exactly the miss a caller can see in its own auras.
+func GMAuraLine(spell uint32) string { return fmt.Sprintf(".aura %d", spell) }
+
+// GMAura selects the PLAYER g, waits until the server shows that selection (SelectConfirmed) and sends ".aura <spell>"
+// while the confirmed selection still stands (GMOn). It exists for raid-walk's `--prepull-aura` test tool. Only a player
+// guid is accepted: the walk puts the auras on its own party, never on an encounter's unit. Like every GM hand it runs
+// only on an agent authorized for gm_kill (the dialled host:port is a test server's configured world_addr).
+func (s *Session) GMAura(ctx context.Context, g packet.GUID, spell uint32) error {
+	if err := s.gmRefuse(); err != nil {
+		return err
+	}
+	if !g.IsPlayer() {
+		return fmt.Errorf("gm aura: %s is not a player guid", g)
+	}
+	if spell == 0 {
+		return errors.New("gm aura: spell id 0")
+	}
+	return s.GMOn(ctx, g, GMAuraLine(spell))
 }
 
 // ErrSelectionChanged is GMOnConfirmed's refusal: the selection is not the unit the caller confirmed (another request changed it, or the

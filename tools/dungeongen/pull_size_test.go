@@ -95,6 +95,9 @@ var pullSizeKnownCounts = map[string]int{
 	"stormwind_stockade": 34, "stratholme_live": 51, "stratholme_undead": 74,
 	// newly hand-maintained (waypoint lint fixes): measured over-ceiling pulls of the four drafts.
 	"crescent_grove": 96, "dragonmaw_retreat": 85, "gilneas_city": 90, "black_morass": 35,
+	// fresh Onyxia plan for core 1181dev (two legs, seven packs, stand pulls): the stale map249 export holds only
+	// the five Warders, so packs 5 and 6 own no spawn of their entries (no target) until it is re-exported.
+	"onyxias_lair": 2,
 }
 
 func TestPullSizesUnderCeiling(t *testing.T) {

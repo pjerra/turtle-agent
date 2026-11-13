@@ -689,6 +689,24 @@ func (s *Store) Backpack(player packet.GUID) []Item {
 	return out
 }
 
+// Equipment lists the items player wears (inventory slots 0-18), occupied slots only, in slot order, from the player's own
+// inventory fields and each item's create block. An item whose create block has not arrived has no entry yet.
+func (s *Store) Equipment(player packet.GUID) []Item {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	p, ok := s.objs[player]
+	if !ok {
+		return nil
+	}
+	var out []Item
+	for slot := EquipmentFirst; slot < EquipmentEnd; slot++ {
+		if it, ok := s.item(BackpackBag, slot, guidAt(p.values, PlayerInvSlotHead+2*uint16(slot))); ok {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
 // Bags lists the items inside the player's four bags (inventory slots 19-22), bag by bag
 // in slot order, from each bag's CONTAINER_FIELD_SLOT_1 fields. A bag whose create block
 // has not arrived holds nothing yet.

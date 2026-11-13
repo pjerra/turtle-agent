@@ -57,10 +57,16 @@ const (
 	placeExtraRadius = 3
 	// placeClearDz is the vertical window of the clear, its pre-read and the quiet (the toolkit's dz=).
 	placeClearDz = 8
-	// placeQuietWaitS is the quiet's w=: the two reads are this many seconds apart (spec 5 step 7).
-	placeQuietWaitS = 20
+	// placeQuietWaitS is the quiet's w=: the two reads are this many seconds apart (spec 5 step 7). 15 s reads the
+	// circle twice over a window long enough for a patrol to cross it; walk 74 measured the old 20 s hold at a flat
+	// 20 s on every one of its 29 attempts (phase 9 of its timing budget), and 10 s was the other extreme: a patroller
+	// missed by the shorter window costs a setup retry, and the landing read after a clean quiet is the second net.
+	placeQuietWaitS = 15
 	// placeQuietR is the quiet's radius around the start point (spec 5 step 7).
 	placeQuietR = 50
+	// placeSpread is the `spread=` of the raid's `.tt place` (the ring the group is dropped on, in yards); the unfreeze check
+	// reads it for how far from the point a frozen hire can stand.
+	placeSpread = 5
 	// placeReachYd is how close to the start point any unit blocks the placement: the reach of `.tt place` with its
 	// spread-5 ring. Beyond it only a BEHIND-owned unit matters (item 3 of the proof findings).
 	placeReachYd = 25
@@ -192,9 +198,12 @@ type ttUnit struct {
 	// Spawn is the spawn's guid low (`db`): the notes carry it so a live run can match a unit against the spawn export.
 	Spawn uint32
 	// Dead is the toolkit's `dead` field: a corpse (bossKilled's toolkit read asks for the dead units too).
-	Dead  bool
-	MaxHP float64
-	Rank  int
+	Dead bool
+	// InCombat is the toolkit's `cb` field (Unit:IsInCombat): the pre-placement guard of a resumed or reused instance
+	// reads it (walk 97 fight 9-1), the place decisions never did.
+	InCombat bool
+	MaxHP    float64
+	Rank     int
 }
 
 // ttUnitOf reduces one element of a reply's unit list.
@@ -216,6 +225,7 @@ func ttUnitOf(m map[string]json.RawMessage) ttUnit {
 		u.Rank = int(rk)
 	}
 	u.Dead = flagOf(m, "dead")
+	u.InCombat = flagOf(m, "cb")
 	if hpv := numList(m, "hpv"); len(hpv) >= 2 {
 		u.MaxHP = hpv[1]
 	}
@@ -761,6 +771,27 @@ func (w *walk) placeQuiet(ctx context.Context) error {
 	}
 }
 
+// placeQuietRetry runs the quiet for a placement that has no placeTry loop: the reuse and the bind resume. "Not quiet"
+// is the same refusal placeTry's caller retries: the units the last read named are GM-killed (placeKillBlockers, the
+// tool's own --gm-clear budget) and the area is read again, up to placeTryLimit reads. Walk 80: the bind resume
+// summoned the raid into Hakkar's altar patrols, whose waypoint 7 (-11806 -1693) stands in the landing reach of the
+// start point it resumes at, because it was the only placement that never read the quiet.
+func (w *walk) placeQuietRetry(ctx context.Context) error {
+	for try := 1; ; try++ {
+		err := w.placeQuiet(ctx)
+		if err == nil {
+			return nil
+		}
+		reason, retryable := placeRetryReason(err)
+		if !retryable || try >= placeTryLimit {
+			return err
+		}
+		w.note("place: %s; GM-killing the units the quiet named and reading it again (try %d of %d, no `.summon` went out)",
+			reason, try+1, placeTryLimit)
+		w.placeKillBlockers(ctx)
+	}
+}
+
 // placeLandingRead is the M1b net for BEHIND trash off the quiet's floor window (PLACE-W26): a `q units 45 <p> all`
 // after a clean quiet. For each unit: skip it when the quiet judged it (|Dz| <= placeClearDz), when it stands
 // farther than placeLandingDz off the floor, skip entries/critters/dead units and anything beyond 45 yd. Otherwise,
@@ -1248,7 +1279,7 @@ func (w *walk) placeNearSkipped(u ttUnit) (raidwalk.ClearCircle, bool) {
 // placeMove is spec 5 step 8: the toolkit moves the raid's group onto the point.
 func (w *walk) placeMove(ctx context.Context) error {
 	p := w.place.Point
-	cmd := fmt.Sprintf("place %s %s %s spread=5 of=%s", num32(p.X), num32(p.Y), num32(p.Z), w.mt)
+	cmd := fmt.Sprintf("place %s %s %s spread=%d of=%s", num32(p.X), num32(p.Y), num32(p.Z), placeSpread, w.mt)
 	out, err := w.tt(ctx, cmd)
 	if err != nil {
 		if strings.Contains(err.Error(), "in_combat") {
@@ -1264,6 +1295,7 @@ func (w *walk) placeMove(ctx context.Context) error {
 			w.note("place: the toolkit's second read reports the party placed (%d members listed)", members)
 		}
 	}
+	w.placeUnfreezeStart(w.place.Point, placeSpread)
 	return nil
 }
 
@@ -1754,6 +1786,9 @@ func (w *walk) placeSummonParty(ctx context.Context) error {
 			w.placeSummonedOnce(name)
 		}
 	}
+	// The summon wave is a placement move of its own (a retry or a retreat sets a new point): the unfreeze check
+	// re-arms on it, a 6 yd ring around the point (the hires land on the commander, spread 0).
+	w.placeUnfreezeStart(w.place.Point, 0)
 	return w.placeVerify(ctx)
 }
 
@@ -1998,7 +2033,9 @@ func (w *walk) reuseBind(ctx context.Context) (float64, string, bool) {
 
 // placeReuse is the --reuse-instance placement: bind the commander to the main tank's copy (`.appear` opens no copy of
 // its own), go to the start point in it, and teleport every hire there with the GM `.summon` (the line the revive and
-// placeVerify use). The area is not cleared or quiet-checked: the copy is the one the raid is already playing in.
+// placeVerify use). The corridor is not cleared (the copy is the one the raid is already playing in), but the quiet is
+// read like placeTry's, after the GM clear and before the first `.summon`: a patrol that respawned or walked in since
+// the last attempt must not meet the landing raid (walk 80).
 func (w *walk) placeReuse(ctx context.Context) error {
 	p := w.place.Point
 	if err := w.gm(ctx, ".appear "+w.mt); err != nil {
@@ -2035,6 +2072,24 @@ func (w *walk) placeReuse(ctx context.Context) error {
 	if err := w.placeFloor(ctx, p); err != nil {
 		return err
 	}
+	// Walk 97 fight 9-1: the raid's copy may still hold a boss fight the dead attempt left running (exit 18 mid-fight).
+	// The boss's own combat state decides here, before the first `.summon`: the quiet cannot see it (his adds stand
+	// beyond the landing reach, BEHIND).
+	if err := w.placeBossCombat(ctx); err != nil {
+		return err
+	}
+	// The quiet, after the GM clear and before the first `.summon`: the copy is live, so a patrol may have walked into
+	// the landing reach since the last attempt.
+	if err := w.placeQuietRetry(ctx); err != nil {
+		return err
+	}
+	// The final gate, after all the clear and quiet work and immediately before the first `.summon`: the first guard's
+	// read is seconds old now, and the copy keeps live raid members that can start a fight in between (walk 97 fight
+	// 9-1). An engaged arena ends the placement here (exit 29, fresh instance): the gate does not wait, since a patrol
+	// can walk in during a wait.
+	if err := w.placeBossCombatFinal(ctx); err != nil {
+		return err
+	}
 	for _, name := range w.hireList() {
 		if err := w.gm(ctx, ".summon "+name); err != nil {
 			return err
@@ -2043,7 +2098,7 @@ func (w *walk) placeReuse(ctx context.Context) error {
 			return err
 		}
 	}
-	w.note("place: teleported %d hires to the start point with the GM path (.summon); the area was not cleared or quiet-checked (the raid's own instance)",
+	w.note("place: teleported %d hires to the start point with the GM path (.summon); the area was quiet-checked (the raid's own instance)",
 		len(w.hireList()))
 	if err := w.placeGather(ctx); err != nil {
 		return err
@@ -2086,6 +2141,12 @@ func (w *walk) placeResume(ctx context.Context) error {
 	if err := w.placeFloor(ctx, p); err != nil {
 		return err
 	}
+	// Walk 97 fight 9-1: the previous cmd's agent died mid-fight (exit 18) and the bound instance still holds the boss
+	// and his arena adds engaged. The quiet cannot see them (beyond the landing reach, BEHIND), so the summon would
+	// drop the raid into the live fight: the boss's own combat state decides here.
+	if err := w.placeBossCombat(ctx); err != nil {
+		return err
+	}
 	for _, warn := range w.gmClearWarn {
 		w.logLine(w.env.now(), warn)
 	}
@@ -2094,6 +2155,16 @@ func (w *walk) placeResume(ctx context.Context) error {
 	}
 	w.note("place: --reuse-instance: resumed instance %.0f from the commander's existing bind (expires in %s); no fresh instance is entered or counted",
 		inst, w.reuseBindTTR)
+	// The quiet, after the GM clear and before the first `.summon`: the resumed copy keeps the patrols the last attempt
+	// left alive (walk 80: groups 3+4 walked into the start point and killed the landing raid 27 s after the resume).
+	if err := w.placeQuietRetry(ctx); err != nil {
+		return err
+	}
+	// The final gate, after the GM clear and the quiet and immediately before placeGather's first `.summon`: a fight
+	// that began since the first read stops the placement here at once (exit 29, fresh instance; walk 97 fight 9-1).
+	if err := w.placeBossCombatFinal(ctx); err != nil {
+		return err
+	}
 	if err := w.placeGather(ctx); err != nil {
 		return err
 	}
@@ -2185,7 +2256,7 @@ func placeTTLines(p *raidwalk.PlacePlan, planMap uint32) []string {
 		fmt.Sprintf("q floor %s %s %s", px, py, pz),
 		fmt.Sprintf("quiet %d %s %s %s w=%d dz=%d%s", placeQuietR, px, py, pz, placeQuietWaitS, placeClearDz, tail),
 		fmt.Sprintf("q units %d %s %s %s all", placeLandingReadYd, px, py, pz), // M1b: the landing read after a clean quiet
-		fmt.Sprintf("place %s %s %s spread=5 of=%s", px, py, pz, mt),
+		fmt.Sprintf("place %s %s %s spread=%d of=%s", px, py, pz, placeSpread, mt),
 	}
 	if len(p.Circles) > 0 {
 		out = append(out,

@@ -657,3 +657,50 @@ func TestPathMethodsWithoutMmapsDir(t *testing.T) {
 		}
 	}
 }
+
+func TestEquipmentMethod(t *testing.T) {
+	r := newRig(t)
+	if out := r.call("equipment", "{}"); out["error"] != nil || out["result"] == nil || len(out["result"].([]any)) != 0 {
+		t.Fatalf("empty must be [], not null: %v", out)
+	}
+	const shield, pack packet.GUID = 0x4000000000000005, 0x4000000000000006
+	w := objtest.Header(3).U8(uint8(objects.BlockCreate2)).PackedGUID(shield).U8(objects.TypeItem).U8(0x10).U32(1)
+	objtest.Values(w, 0x30, map[uint16]uint32{objects.FieldEntry: 1200, objects.ItemStackCount: 1})
+	w.U8(uint8(objects.BlockCreate2)).PackedGUID(pack).U8(objects.TypeItem).U8(0x10).U32(1)
+	objtest.Values(w, 0x30, map[uint16]uint32{objects.FieldEntry: 118, objects.ItemStackCount: 5})
+	w.U8(uint8(objects.BlockCreate2)).PackedGUID(0x2A).U8(objects.TypePlayer)
+	objtest.Living(w, 0x21, game.MoveInfo{X: 1, Y: 2, Z: 3}, nil)
+	objtest.Values(w, 0x502, map[uint16]uint32{
+		objects.PlayerInvSlotHead + 32: uint32(shield & 0xFFFFFFFF), objects.PlayerInvSlotHead + 33: uint32(shield >> 32), // slot 16
+		objects.PlayerInvSlotHead + 46: uint32(pack & 0xFFFFFFFF), objects.PlayerInvSlotHead + 47: uint32(pack >> 32), // backpack 23
+	})
+	r.srv.Send(opcode.SMSGUpdateObject, w.Bytes())
+	out := r.eventually("equipment", "{}", func(m map[string]any) bool { return len(m["result"].([]any)) == 1 })
+	row := out["result"].([]any)[0].(map[string]any)
+	if row["slot"] != float64(16) || row["slot_name"] != "off_hand" || row["guid"] != "0x4000000000000005" || row["item_entry"] != float64(1200) {
+		t.Fatalf("%v", row)
+	}
+	if _, has := row["temp_enchant"]; has {
+		t.Fatalf("no enchant, no field: %v", row)
+	}
+}
+
+// gm_set_hp carries the guid only: the session restores the unit to its own MaxHealth, and an explicit hp is refused
+// before anything is selected or sent (Codex HIGH: no caller can lower a unit's max health).
+func TestGMSetHPRPCRefusesHPArgument(t *testing.T) {
+	r := newRig(t)
+	guid := packet.GUID(uint64(packet.HighUnit)<<48 | 14834<<24 | 0x77)
+	for _, params := range []string{
+		`{"guid":"` + guid.String() + `","hp":1}`,
+		`{"guid":"` + guid.String() + `","hp":0}`,
+		`{"guid":"` + guid.String() + `","hp":100}`,
+	} {
+		out := r.call("gm_set_hp", params)
+		if out["error"] == nil {
+			t.Fatalf("gm_set_hp accepted an hp argument: %s → %v", params, out)
+		}
+		if msg, _ := out["error"].(map[string]any)["message"].(string); !strings.Contains(msg, "hp argument is refused") {
+			t.Fatalf("gm_set_hp %s: %v, want the hp refusal", params, out)
+		}
+	}
+}

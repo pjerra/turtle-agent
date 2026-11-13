@@ -57,7 +57,7 @@ Empty `tank` means the bot that holds the first pulled mob. Empty `healer` means
 turtle-agent rpc <dir> dungeon_status
 ```
 
-`state` is `running`, then `done`, `failed`, or `stopped`. `stall_level` (`none`, `warn`, `recover`, `fail`) tells you at a glance whether the run hangs.
+`state` is `running`, then `done`, `failed`, `stopped`, or `refused` (stopped before it started: nothing was sent, and `report.error` names the reason). `stall_level` (`none`, `warn`, `recover`, `fail`) tells you at a glance whether the run hangs.
 
 ## 5. Stop or pause it
 

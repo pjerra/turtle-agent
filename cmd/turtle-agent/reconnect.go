@@ -114,7 +114,6 @@ func (r *reconnector) next(ctx context.Context) (*worldSession, bool) {
 			fmt.Fprintln(r.stderr, "reconnect: interrupted")
 			return nil, false
 		}
-		r.window.note(time.Now())
 		ws, err := r.login(ctx)
 		if err == nil {
 			r.log.Append(events.Event{Kind: events.KindSession, Data: map[string]any{"state": "reconnected", "attempt": r.used, "of": r.total}})
@@ -144,25 +143,42 @@ func (r *reconnector) next(ctx context.Context) (*worldSession, bool) {
 // asks on top. In a fleet the supervisor books the login against every child's logins; if
 // it cannot be reached this process's own window is used.
 func (r *reconnector) wait(ctx context.Context) time.Duration {
+	now := loginHoldNow()
 	wait := backoff(r.used)
 	if r.budget != nil {
+		// The supervisor books the login and applies realmd's hour-start hold and jitter inside the booking (reserveAdjusted), so the
+		// slot it stores is the time of the login itself and the reply is the final wait.
 		d, err := r.budget.reserve(ctx, wait)
 		if err == nil {
 			if d > wait {
-				fmt.Fprintf(r.stderr, "reconnect: waiting %s for the fleet's share of realmd's login limit (%d logins per %s for all characters)\n",
+				fmt.Fprintf(r.stderr, "reconnect: waiting %s for the fleet's share of realmd's login limit and the hour-start window (%d logins per %s for all characters)\n",
 					d.Round(time.Second), realmdThrottleLogins-1, realmdThrottleWindow.Round(time.Second))
 			}
 			return max(wait, d)
 		}
 		fmt.Fprintln(r.stderr, "reconnect: fleet login budget unavailable, using this process's own window:", err)
 	}
-	return max(wait, r.window.wait(time.Now()))
+	// Without the fleet's budget: this process's window, then the hold, once, on the final time.
+	return withLoginHold(now, max(wait, r.window.wait(now)))
+}
+
+// withLoginHold is wait, plus the rest of realmd's hour-start window and a jitter when a login that starts wait after now lands in
+// (or just before) the window.
+func withLoginHold(now time.Time, wait time.Duration) time.Duration {
+	if h := loginHoldHorizon(now.Add(wait)); h > 0 {
+		return wait + h + loginHoldJitter()
+	}
+	return wait
 }
 
 // login is one attempt: realmd, the world server, then in world. It has no capture tap
 // (--reconnect and --capture do not combine: the new session key is not in the capture's
 // redaction list).
 func (r *reconnector) login(ctx context.Context) (*worldSession, error) {
+	if err := holdLoginForHourStart(ctx, r.stderr); err != nil {
+		return nil, err
+	}
+	r.window.note(time.Now()) // booked after the hold: the login starts now, not when the attempt began
 	actx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	ticket, err := authLogin(actx, r.st.Realmd, r.account, r.password)
 	cancel()

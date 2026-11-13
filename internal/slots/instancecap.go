@@ -14,7 +14,7 @@ import (
 // InstanceCapPerAccountFile is the file name of the per-server caps in the slot table's folder.
 const InstanceCapPerAccountFile = "instance-cap-per-account.json"
 
-// LoadInstanceCaps reads the per-server caps: {"m910q": 30, "tortoise-test2": 30}. A missing file is no caps (nil).
+// LoadInstanceCaps reads the per-server caps: {"m910q": 30, "tortoise-test2": 30, "tortoise-test3": 30}. A missing file is no caps (nil).
 // A value below 1 is refused. An unreadable or invalid file is an error, never "no caps".
 func LoadInstanceCaps(path string) (map[string]int, error) {
 	raw, err := os.ReadFile(path)
@@ -34,4 +34,20 @@ func LoadInstanceCaps(path string) (map[string]int, error) {
 		}
 	}
 	return caps, nil
+}
+
+// StockInstanceCap is the stock core's cap per pool account: the 6th distinct instance id in an hour is refused.
+const StockInstanceCap = 5
+
+// EffectiveInstanceCap resolves a server's cap from the sources in precedence order: an explicit flag, else the
+// server's entry in instance-cap-per-account.json, else the stock core's 5. walk-preflight calls it so its printed cap
+// follows the same rule as the raid commands.
+func EffectiveInstanceCap(explicit int, caps map[string]int, server string) int {
+	if explicit > 0 {
+		return explicit
+	}
+	if n, ok := caps[server]; ok && n > 0 {
+		return n
+	}
+	return StockInstanceCap
 }

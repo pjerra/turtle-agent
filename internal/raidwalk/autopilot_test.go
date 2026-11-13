@@ -570,6 +570,32 @@ func TestAutoBossWipeBudget(t *testing.T) {
 	}
 }
 
+// Walk 74: the boss-wipe relaunch waited the growing backoff (30 s / 70 s / 130 s measured gaps: 20 s, 1 m, 2 m, plus
+// the 10 s tick), because a wiped fight counted as no progress. A wipe is the expected end of an attempt, not a
+// broken setup: its fresh relaunch waits a flat 20 s whatever the no-progress count. Exit errors keep the growth.
+func TestAutoBossWipeBackoffIsFlat(t *testing.T) {
+	g := AutoGoal{Kind: "boss", Boss: 14834}
+	wipe := AutoObservation{Exited: true, ExitCode: 19, StepsReached: 694, EndReason: "wipe", WipeAtBoss: true}
+	for fast := range 4 {
+		d := DecideAutoAction(wipe, AutoRunState{Goal: g, Reuse: true, HasRun: true, FastFailures: fast}, autoNow, 15*time.Minute)
+		if d.Action != AutoRestart || !d.FreshAfterWipe || d.Backoff != AutoBossWipeBackoff {
+			t.Fatalf("boss wipe after %d no-progress attempts: %+v, want a fresh restart after %s", fast, d, AutoBossWipeBackoff)
+		}
+	}
+	// An ordinary exit error still grows: that backoff is for broken setups.
+	crash := AutoObservation{Exited: true, ExitCode: 5, EndReason: "server closed the connection"}
+	want := []time.Duration{AutoBackoff(0), AutoBackoff(1), AutoBackoff(2)}
+	for i, w := range want {
+		d := DecideAutoAction(crash, AutoRunState{Goal: g, Reuse: true, HasRun: true, FastFailures: i}, autoNow, 15*time.Minute)
+		if d.Action != AutoRestart || d.Backoff != w {
+			t.Fatalf("exit error after %d no-progress attempts: %+v, want the growing %s", i, d, w)
+		}
+	}
+	if AutoBossWipeBackoff != 20*time.Second {
+		t.Fatalf("AutoBossWipeBackoff = %s, want the measured 20 s", AutoBossWipeBackoff)
+	}
+}
+
 // A goal line may raise its own boss-wipe budget (--boss-wipe-max, the ZG Hakkar goals): 5 escalates on the fifth wipe,
 // and a goal without the setting keeps the stock 3.
 func TestAutoBossWipeBudgetPerGoal(t *testing.T) {
@@ -633,5 +659,215 @@ func TestParseAutoTargetsBossWipeMax(t *testing.T) {
 		if _, err := ParseAutoTargets(strings.NewReader("a srv 1 h full -- zg --sql /zg.sql --boss-wipe-max " + bad + "\n")); err == nil || !strings.Contains(err.Error(), "line 1") {
 			t.Fatalf("--boss-wipe-max %s: err %v, want a line 1 error", bad, err)
 		}
+	}
+}
+
+// --boss-wipe-fresh is a target flag: consumed like --boss-wipe-max, never in the raid-walk args, and a value is an error.
+func TestParseAutoTargetsBossWipeFresh(t *testing.T) {
+	text := "a srv 1 h boss:10184 -- onyxias_lair --sql /ony.sql --from leg tunnel --boss-wipe-fresh\n" +
+		"b srv 2 h boss:10184 -- onyxias_lair --sql /ony.sql\n"
+	ts, err := ParseAutoTargets(strings.NewReader(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ts[0].BossWipeFresh || ts[1].BossWipeFresh {
+		t.Fatalf("fresh %v and %v, want true and false", ts[0].BossWipeFresh, ts[1].BossWipeFresh)
+	}
+	for _, a := range ts[0].Args {
+		if strings.HasPrefix(a, "--boss-wipe-fresh") {
+			t.Fatalf("--boss-wipe-fresh reached the raid-walk args: %v", ts[0].Args)
+		}
+	}
+}
+
+// --boss-wipe-fresh takes no value: --boss-wipe-fresh=... is an error.
+func TestParseAutoTargetsBossWipeFreshValueRejected(t *testing.T) {
+	if _, err := ParseAutoTargets(strings.NewReader("a srv 1 h full -- zg --sql /zg.sql --boss-wipe-fresh=1\n")); err == nil || !strings.Contains(err.Error(), "--boss-wipe-fresh takes no value") {
+		t.Fatalf("err %v, want the no-value error", err)
+	}
+}
+
+// --boss-wipe-fresh without --from is refused: the fresh-after-wipe restart
+// starts from the goal's own start, so a line without one is invalid.
+func TestParseAutoTargetsBossWipeFreshNeedsFrom(t *testing.T) {
+	if _, err := ParseAutoTargets(strings.NewReader("a srv 1 h boss:10184 -- onyxias_lair --sql /ony.sql --boss-wipe-fresh\n")); err == nil || !strings.Contains(err.Error(), "--boss-wipe-fresh needs --from") {
+		t.Fatalf("err %v, want the needs---from error", err)
+	}
+}
+
+// The practice goal token round-trips, and every malformed form is refused rather than guessed at (a typo must not
+// silently launch a full clear).
+func TestPracticeGoalParse(t *testing.T) {
+	for _, c := range []struct {
+		token  string
+		boss   uint32
+		cycles int
+	}{
+		{"practice:14834:10", 14834, 10},
+		{"practice:14509:1", 14509, 1},
+	} {
+		g, err := ParseAutoGoal(c.token)
+		if err != nil {
+			t.Fatalf("%q: %v", c.token, err)
+		}
+		if g.Kind != "practice" || g.Boss != c.boss || g.Cycles != c.cycles {
+			t.Fatalf("%q parsed as %+v", c.token, g)
+		}
+		if got := g.String(); got != c.token {
+			t.Fatalf("%q printed as %q", c.token, got)
+		}
+		if g.Until() != "none" {
+			t.Fatalf("%q until %q, want none (the practice loop ends the walk)", c.token, g.Until())
+		}
+	}
+	for _, bad := range []string{"practice", "practice:", "practice:14834", "practice::10", "practice:0:10",
+		"practice:14834:0", "practice:14834:-1", "practice:14834:x", "practice:14834:10:2"} {
+		if g, err := ParseAutoGoal(bad); err == nil {
+			t.Fatalf("%q parsed as %+v, want a refusal", bad, g)
+		}
+	}
+}
+
+// A practice goal is met by the summary's practice cycles, never by a boss kill: practice ends on a boss death without
+// crediting one.
+func TestPracticeGoalNotMetByKill(t *testing.T) {
+	o := AutoObservation{Exited: true, ExitCode: 0, KilledBosses: map[uint32]bool{14834: true}}
+	if GoalAchieved(AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}, o) {
+		t.Fatal("a boss kill met a practice goal")
+	}
+	o.PracticeCycles = 10
+	if !GoalAchieved(AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}, o) {
+		t.Fatal("10 practice cycles did not meet a 10-cycle goal")
+	}
+	o.PracticeCycles = 9
+	if GoalAchieved(AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}, o) {
+		t.Fatal("9 cycles met a 10-cycle goal")
+	}
+}
+
+// The practice mechanics' table is the core's own timing, cited in practice.go.
+func TestPracticeMechanicsTable(t *testing.T) {
+	m, ok := PracticeMechanicFor(14834)
+	if !ok {
+		t.Fatal("Hakkar 14834 is not in the table")
+	}
+	if m.SpellID != 24324 || m.FirstAtS != 90 || m.EverySec != 90 || m.BerserkS != 600 || m.CyclesPerAttempt != 5 ||
+		len(m.RespawnEntries) != 1 || m.RespawnEntries[0] != 11357 {
+		t.Fatalf("Hakkar mechanic %+v is not the sourced timing", m)
+	}
+	if m.IsWindow() {
+		t.Fatal("Hakkar is window mode")
+	}
+	w := PracticeWindowMechanic(99999, 120*time.Second)
+	if !w.IsWindow() || w.CyclesPerAttempt != 3 || w.EverySec != 120 || w.BerserkS != 0 {
+		t.Fatalf("window mechanic %+v", w)
+	}
+}
+
+// A practice goal's exit 18 relaunches at most AutoPracticeRelaunches times, then stops for a person: the cycles it
+// collected are already summed by the caller, so the count is the only budget left.
+func TestPracticeRelaunchBudget(t *testing.T) {
+	goal := AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}
+	o := AutoObservation{Exited: true, ExitCode: 18, EndReason: "practice: max time", PracticeCycles: 4}
+	for n := 0; n < AutoPracticeRelaunches; n++ {
+		d := DecideAutoAction(o, AutoRunState{Goal: goal, PracticeRelaunches: n}, time.Unix(0, 0), time.Minute)
+		if d.Action != AutoRestart || !d.PracticeRelaunch || d.Escalate {
+			t.Fatalf("relaunch %d: %+v, want a practice relaunch", n+1, d)
+		}
+		if d.Reuse != true {
+			t.Fatalf("relaunch %d asked for a fresh instance: the practice resumes in the same copy (its cycles count)", n+1)
+		}
+	}
+	d := DecideAutoAction(o, AutoRunState{Goal: goal, PracticeRelaunches: AutoPracticeRelaunches}, time.Unix(0, 0), time.Minute)
+	if d.Action != AutoStop || !d.Escalate || !strings.Contains(d.Reason, "practice: gave up after 2 relaunches") {
+		t.Fatalf("%+v, want the practiced-out stop", d)
+	}
+}
+
+// A practice walk that keeps freezing without ever exiting is torn down and relaunched like any stall; without a bound
+// that repeats forever (Codex HIGH, round 1). A stall counts against the same persisted relaunch budget as an exit
+// relaunch: the count comes back with the restarted supervisor's state, so two stalls relaunch and the third stops the
+// id for a person, exactly as the exit path does. A non-practice stall is unchanged.
+func TestPracticeStallCountsAgainstRelaunchBudget(t *testing.T) {
+	goal := AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}
+	frozen := AutoObservation{Exited: false, StepsReached: 3, StepsTotal: 40, LastProgress: autoNow.Add(-20 * time.Minute)}
+	for n := range AutoPracticeRelaunches {
+		d := DecideAutoAction(frozen, AutoRunState{Goal: goal, PracticeRelaunches: n}, autoNow, 15*time.Minute)
+		if d.Action != AutoRestart || !d.PracticeRelaunch || d.Escalate {
+			t.Fatalf("stall %d: %+v, want a counted practice relaunch", n+1, d)
+		}
+		if !d.Reuse {
+			t.Fatalf("stall %d asked for a fresh instance: a stalled practice resumes in the same copy", n+1)
+		}
+	}
+	d := DecideAutoAction(frozen, AutoRunState{Goal: goal, PracticeRelaunches: AutoPracticeRelaunches}, autoNow, 15*time.Minute)
+	if d.Action != AutoStop || !d.Escalate || !strings.Contains(d.Reason, "practice: gave up after 2 relaunches") {
+		t.Fatalf("%+v, want the practised-out stop", d)
+	}
+	// The same frozen run on a boss goal keeps today's stall restart and never spends a practice relaunch.
+	b := DecideAutoAction(frozen, AutoRunState{Goal: AutoGoal{Kind: "boss", Boss: 14515}}, autoNow, 15*time.Minute)
+	if b.Action != AutoRestart || b.PracticeRelaunch || b.Escalate {
+		t.Fatalf("boss stall %+v, want the unchanged stall restart", b)
+	}
+}
+
+// A practice goal's exit 18 whose summed cycles already meet the target is met: no relaunch.
+func TestPracticeRelaunchNotNeededWhenTheSumMetTheGoal(t *testing.T) {
+	goal := AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}
+	o := AutoObservation{Exited: true, ExitCode: 18, EndReason: "practice: max time", PracticeCycles: 10}
+	d := DecideAutoAction(o, AutoRunState{Goal: goal}, time.Unix(0, 0), time.Minute)
+	if d.Action != AutoAdvance {
+		t.Fatalf("%+v, want the goal met by the summed cycles", d)
+	}
+}
+
+// A boss death during practice (exit 0 below the cycle target) gets ONE fresh-instance relaunch, then a person.
+func TestPracticeBossDeathOneFreshRelaunch(t *testing.T) {
+	goal := AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}
+	o := AutoObservation{Exited: true, ExitCode: 0, EndReason: "practice: boss killed during practice", PracticeCycles: 3}
+	d := DecideAutoAction(o, AutoRunState{Goal: goal}, time.Unix(0, 0), time.Minute)
+	if d.Action != AutoRestart || d.Reuse || !d.PracticeKilledRetry || d.Escalate {
+		t.Fatalf("%+v, want one fresh-instance relaunch", d)
+	}
+	d = DecideAutoAction(o, AutoRunState{Goal: goal, PracticeKilledRetry: true}, time.Unix(0, 0), time.Minute)
+	if d.Action != AutoStop || !d.Escalate || !strings.Contains(d.Reason, "the boss died again") {
+		t.Fatalf("%+v, want the stop after the second death", d)
+	}
+}
+
+// Every other non-zero end of a practice run relaunches under the same 2-relaunch cap as exit 18 (L5): a practice
+// goal must not restart without a bound.
+func TestPracticeOtherExitsCountTowardRelaunchBudget(t *testing.T) {
+	goal := AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}
+	for _, code := range []int{3, 19, 20} {
+		o := AutoObservation{Exited: true, ExitCode: code, EndReason: "practice: something else", PracticeCycles: 2, StepsReached: 700}
+		for n := 0; n < AutoPracticeRelaunches; n++ {
+			d := DecideAutoAction(o, AutoRunState{Goal: goal, PracticeRelaunches: n}, time.Unix(0, 0), time.Minute)
+			if d.Action != AutoRestart || !d.PracticeRelaunch || d.Escalate {
+				t.Fatalf("exit %d relaunch %d: %+v, want a counted practice relaunch", code, n+1, d)
+			}
+		}
+		d := DecideAutoAction(o, AutoRunState{Goal: goal, PracticeRelaunches: AutoPracticeRelaunches}, time.Unix(0, 0), time.Minute)
+		if d.Action != AutoStop || !d.Escalate || !strings.Contains(d.Reason, "gave up after 2 relaunches") {
+			t.Fatalf("exit %d: %+v, want the practised-out stop", code, d)
+		}
+	}
+}
+
+// An exit 0 whose practice never engaged is no boss death (L4): the run never reached the mechanic, so it relaunches
+// like an exit 18, under the same 2-relaunch cap, and never takes the one fresh-instance death retry.
+func TestPracticeNeverEngagedIsNoBossDeath(t *testing.T) {
+	goal := AutoGoal{Kind: "practice", Boss: 14834, Cycles: 10}
+	o := AutoObservation{Exited: true, ExitCode: 0, EndReason: "practice: the run ended", PracticeCycles: 0, PracticeEnded: "never engaged"}
+	d := DecideAutoAction(o, AutoRunState{Goal: goal}, time.Unix(0, 0), time.Minute)
+	if d.Action != AutoRestart || !d.PracticeRelaunch || d.PracticeKilledRetry || !d.Reuse || d.Escalate {
+		t.Fatalf("%+v, want an exit-18 style relaunch (same instance, no fresh death retry)", d)
+	}
+	if !strings.Contains(d.Reason, "never engaged") {
+		t.Fatalf("reason %q, want it to say never engaged", d.Reason)
+	}
+	d = DecideAutoAction(o, AutoRunState{Goal: goal, PracticeRelaunches: AutoPracticeRelaunches}, time.Unix(0, 0), time.Minute)
+	if d.Action != AutoStop || !d.Escalate || !strings.Contains(d.Reason, "gave up after 2 relaunches") {
+		t.Fatalf("%+v, want the relaunch cap to stop it", d)
 	}
 }

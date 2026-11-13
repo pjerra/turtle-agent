@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
+	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/slots"
 	"github.com/pjerra/turtle-agent/internal/trashcheck"
 	"github.com/pjerra/turtle-agent/internal/worldspawn"
@@ -71,8 +73,8 @@ func TestParseGMClearRefusals(t *testing.T) {
 			t.Errorf("%s: exit %d, stderr %q (want %q)", tc.name, code, stderr.String(), tc.want)
 		}
 	}
-	// Both test servers pass.
-	for _, server := range []string{"m910q", "tortoise-test2"} {
+	// Every test server passes.
+	for _, server := range []string{"m910q", "tortoise-test2", "tortoise-test3"} {
 		var stderr bytes.Buffer
 		if _, code := parseRaidWalkArgs(gmClearArgs("--server", server, "--gm-clear", "2:1"), &stderr); code != exitOK {
 			t.Errorf("%s: exit %d, stderr %q", server, code, stderr.String())
@@ -453,7 +455,7 @@ func TestPlaceGMClearRetriesOnceAndReportsSurvivors(t *testing.T) {
 	if e := by[stubborn.String()]; e.Killed || e.Tries != gmClearTries || e.Reason != raidwalk.GMClearAlive {
 		t.Errorf("stubborn unit %+v", e)
 	}
-	// gmClearTries lines at most per unit, and the second round sends none to the stubborn one.
+	// gmClearTries lines at most per unit; the second round (skipped: every member is settled) sends none to the stubborn one.
 	n := 0
 	for _, l := range f.agentLog() {
 		if l == "gm_kill "+stubborn.String() {
@@ -479,9 +481,10 @@ func TestPlaceGMClearRetriesOnceAndReportsSurvivors(t *testing.T) {
 }
 
 // A member that stands outside the commander's view of the rest (400 yd away, over the 150 yd read) is visited at its own spawn point,
-// killed, and the clear is not PARTIAL. The first read of every stop is empty here (nothing shows until the members have been "seen"
-// once), and both rounds still run.
-func TestPlaceGMClearVisitsMembersOutsideTheViewAndReadsTwice(t *testing.T) {
+// killed, and the clear is not PARTIAL. The whole first round reads nothing here (nothing shows until the members have been "seen"
+// once): an empty round does not end the pack, so the second round runs and kills. The instance is re-read after every `.go xyz`
+// (the same map does not prove the same copy): one read per stop per round, plus the clear's final check.
+func TestPlaceGMClearVisitsMembersOutsideTheViewAndReadsPerStop(t *testing.T) {
 	_, guids := gmClearPack(t, gmClearZGSpawns)
 	far := guids[len(guids)-1]
 	dir := gmClearFarExport(t, raidwalk.SpawnGUID(far))
@@ -489,23 +492,59 @@ func TestPlaceGMClearVisitsMembersOutsideTheViewAndReadsTwice(t *testing.T) {
 	if pack.Radius <= 150 {
 		t.Fatalf("the moved export must make the pack wider than the view: radius %.0f", pack.Radius)
 	}
-	if n := len(pack.Stops()); n < 2 {
-		t.Fatalf("a pack wider than the view needs several stops, has %d", n)
+	stops := len(pack.Stops())
+	if stops < 2 {
+		t.Fatalf("a pack wider than the view needs several stops, has %d", stops)
 	}
-	f, _ := newPlaceFixture(t)
+	f, tk := newPlaceFixture(t)
 	f.opts.gmClear = stringList{"2:2"}
 	f.opts.gmClearSpawns = dir
+	var quiet atomic.Bool
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if strings.HasPrefix(cmd, "quiet") {
+			quiet.Store(true)
+		}
+		return tk.answer(cmd)
+	}
 	reads := 0
 	f.agent.unitsFn = func(int) []objects.Unit {
+		dead := func(g packet.GUID) bool { f.agent.mu.Lock(); defer f.agent.mu.Unlock(); return f.agent.killed[g] }
+		if quiet.Load() { // the walk's quiet check, after the clear
+			return gmClearView(f, pack, guids, dead)
+		}
 		reads++
-		if reads <= 1 { // the first read of the walk shows nothing
+		if reads <= stops { // every stop of the first round shows nothing
 			return []objects.Unit{}
 		}
-		return gmClearView(f, pack, guids, func(g packet.GUID) bool { f.agent.mu.Lock(); defer f.agent.mu.Unlock(); return f.agent.killed[g] })
+		return gmClearView(f, pack, guids, dead)
 	}
 	f.agent.startReply = zgPlaceReply(t)
 	if code := f.run(context.Background()); code != exitOK {
 		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	// One instance read per stop per round, then the clear's own final check, before the quiet check. Round 1 walks
+	// every stop (all read empty), round 2 ends at the far member once the pack is settled (the settled break leaves
+	// the round's later stops unread).
+	inst, goes, started := 0, 0, false
+	firstGo := "gm .go xyz " + num32(pack.Stops()[0].X) + " " + num32(pack.Stops()[0].Y) + " "
+	for _, l := range f.agentLog() {
+		if !started {
+			started = strings.HasPrefix(l, firstGo)
+			continue
+		}
+		if strings.HasPrefix(l, "tt quiet") {
+			break
+		}
+		if l == "tt q inst" {
+			inst++
+		}
+		if strings.HasPrefix(l, "gm .go xyz ") {
+			goes++
+		}
+	}
+	// The clear ran goes stops and read the instance once per stop, with one more read for its final check.
+	if !started || goes == 0 || inst != goes+1 {
+		t.Fatalf("%d `q inst` for %d clear `.go xyz` (started %v), want stops+1: one per stop + the final check", inst, goes, started)
 	}
 	sum := f.summary()
 	if sum.GMClearPartial || len(sum.GMClear) != len(guids) {
@@ -525,9 +564,9 @@ func TestPlaceGMClearVisitsMembersOutsideTheViewAndReadsTwice(t *testing.T) {
 	if !killedFar {
 		t.Fatal("the member outside the view was never killed")
 	}
-	// Both rounds ran at every stop: at least two reads per stop, the first of them empty.
-	if reads < 2*len(pack.Stops()) {
-		t.Fatalf("%d reads for %d stops", reads, len(pack.Stops()))
+	// An empty first round still runs: every stop of round 2 was read, and the skip waits for a member to appear at each.
+	if want := 2 * stops; reads < want {
+		t.Fatalf("%d clear reads for %d stops, want at least %d (round 1 empty, round 2 to the far member)", reads, stops, want)
 	}
 	// The commander went to the far member's own spawn.
 	pt := pack.Positions[raidwalk.SpawnGUID(far)]
@@ -538,6 +577,278 @@ func TestPlaceGMClearVisitsMembersOutsideTheViewAndReadsTwice(t *testing.T) {
 	}
 	if !seen {
 		t.Fatalf("no %q in the log", goLine)
+	}
+}
+
+// agentLinesPrefix counts the agent-log lines starting with prefix (the fake records toolkit and GM calls there).
+func agentLinesPrefix(f *fixture, prefix string) int {
+	n := 0
+	for _, l := range f.agentLog() {
+		if strings.HasPrefix(l, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+// A pack whose every member died in the first round is not visited again. Walk 71 paid the second .go xyz, 2 s sleep and
+// read of every pack (52 packs, 114 `go xyz`, ~230 s of a 322 s pre-clear) for no kill: the second round can only kill a
+// member the first round did not see. The first round's kill set is unchanged.
+func TestPlaceGMClearSkipsTheSecondRoundOfADeadPack(t *testing.T) {
+	f, tk := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
+	stops := pack.Stops()
+	if len(stops) != 1 {
+		t.Fatalf("the test pack has %d stops, want 1: the second visit must be what this test skips", len(stops))
+	}
+	var quiet atomic.Bool
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if strings.HasPrefix(cmd, "quiet") {
+			quiet.Store(true)
+		}
+		return tk.answer(cmd)
+	}
+	reads := 0
+	f.agent.unitsFn = func(int) []objects.Unit {
+		dead := func(g packet.GUID) bool { f.agent.mu.Lock(); defer f.agent.mu.Unlock(); return f.agent.killed[g] }
+		if !quiet.Load() {
+			reads++
+		}
+		return gmClearView(f, pack, guids, dead)
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	// The one round that killed every live member, and no second: the test fails at 2 before the skip.
+	if reads != 1 {
+		t.Fatalf("%d clear reads, want 1: the whole pack died in the first round", reads)
+	}
+	goLine := "gm .go xyz " + num32(stops[0].X) + " " + num32(stops[0].Y) + " "
+	if n := agentLinesPrefix(f, goLine); n != 1 {
+		t.Fatalf("%d visits to the pack's stop, want 1", n)
+	}
+	sum := f.summary()
+	if sum.GMClearPartial || len(sum.GMClear) != len(guids) {
+		t.Fatalf("partial %v, gm_clear %+v", sum.GMClearPartial, sum.GMClear)
+	}
+	for _, e := range sum.GMClear {
+		if !e.Killed || e.Entry == 0 {
+			t.Errorf("entry %+v", e)
+		}
+	}
+}
+
+// A later stop that lands in another copy stops the clear: the same map does not prove the same instance, so the
+// commander re-reads its instance after every `.go xyz` and before every units read or kill. Here the second stop's
+// read reports another instance: the clear stops on the existing error path with no second-stop read and no kill there.
+func TestPlaceGMClearSecondStopInstanceMismatchStopsTheClear(t *testing.T) {
+	_, guids := gmClearPack(t, gmClearZGSpawns)
+	far := guids[len(guids)-1]
+	dir := gmClearFarExport(t, raidwalk.SpawnGUID(far))
+	pack, guids := gmClearPack(t, dir)
+	stops := pack.Stops()
+	if len(stops) < 2 {
+		t.Fatalf("a pack wider than the view needs several stops, has %d", len(stops))
+	}
+	f, tk := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = dir
+	// The copy moves under the walk at the second stop's own `.go xyz`: every later `q inst` names another instance.
+	var armed atomic.Bool
+	started := false
+	firstGo := ".go xyz " + num32(stops[0].X) + " " + num32(stops[0].Y) + " "
+	prevOnGM := f.agent.onGM
+	f.agent.onGM = func(line string) {
+		if prevOnGM != nil {
+			prevOnGM(line)
+		}
+		if armed.Load() {
+			return
+		}
+		if !started {
+			started = strings.HasPrefix(line, firstGo)
+			return
+		}
+		if strings.HasPrefix(line, ".go xyz ") {
+			armed.Store(true) // this stop's check already sees the other copy
+		}
+	}
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if cmd == "q inst" && armed.Load() {
+			return ttReplyOf(t, map[string]any{"map": 309, "inst": 104}), nil
+		}
+		return tk.answer(cmd)
+	}
+	postFlipReads, postFlipKills := 0, 0
+	f.agent.unitsFn = func(int) []objects.Unit {
+		dead := func(g packet.GUID) bool { f.agent.mu.Lock(); defer f.agent.mu.Unlock(); return f.agent.killed[g] }
+		if armed.Load() {
+			postFlipReads++
+		}
+		return gmClearView(f, pack, guids, dead)
+	}
+	f.agent.killFn = func(g packet.GUID, tries int) bool {
+		if armed.Load() {
+			postFlipKills++
+		}
+		return true
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d: %s\n%s", code, exitRaidWalkFailed, f.stderr.String(), f.stdout.String())
+	}
+	if reason := f.summary().EndReason; !strings.Contains(reason, "not the raid's 103") {
+		t.Fatalf("end reason %q, want the second stop's instance mismatch", reason)
+	}
+	// The second stop was visited, and the first stop killed before the copy moved.
+	secondGo := "gm .go xyz " + num32(stops[1].X) + " " + num32(stops[1].Y) + " "
+	seen, kills, killedFar := false, 0, false
+	for _, l := range f.agentLog() {
+		seen = seen || strings.HasPrefix(l, secondGo)
+		if g, ok := strings.CutPrefix(l, "gm_kill "); ok {
+			kills++
+			killedFar = killedFar || g == far.String()
+		}
+	}
+	if !seen {
+		t.Fatalf("no %q in the log: the walk never reached the second stop", secondGo)
+	}
+	if kills == 0 {
+		t.Fatal("no kill went out: the first stop must clear before the copy moves")
+	}
+	if postFlipReads != 0 {
+		t.Fatalf("%d units reads after the second stop's .go, want none: no read without the instance check", postFlipReads)
+	}
+	if postFlipKills != 0 || killedFar {
+		t.Fatalf("%d post-move kills (far member killed: %v): no kill without the instance check", postFlipKills, killedFar)
+	}
+}
+
+// Round 1 sees part of a pack and misses one member; the second round still runs and kills it. The far member hides
+// through round 1's reads (one read per stop) and shows from round 2 on: the pack is unsettled while a member is
+// unseen, so round 2 walks again and the far member's own stop kills it. The clear is whole.
+func TestPlaceGMClearSecondRoundKillsAMemberMissedInRoundOne(t *testing.T) {
+	_, guids := gmClearPack(t, gmClearZGSpawns)
+	far := guids[len(guids)-1]
+	dir := gmClearFarExport(t, raidwalk.SpawnGUID(far))
+	pack, guids := gmClearPack(t, dir)
+	stops := pack.Stops()
+	if len(stops) < 2 {
+		t.Fatalf("a pack wider than the view needs several stops, has %d", len(stops))
+	}
+	f, tk := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = dir
+	var quiet atomic.Bool
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if strings.HasPrefix(cmd, "quiet") {
+			quiet.Store(true)
+		}
+		return tk.answer(cmd)
+	}
+	reads := 0
+	f.agent.unitsFn = func(int) []objects.Unit {
+		dead := func(g packet.GUID) bool { f.agent.mu.Lock(); defer f.agent.mu.Unlock(); return f.agent.killed[g] }
+		if quiet.Load() { // the walk's quiet check, after the clear
+			return gmClearView(f, pack, guids, dead)
+		}
+		reads++
+		us := gmClearView(f, pack, guids, dead)
+		if reads <= len(stops) {
+			// Round 1's reads: the far member never shows, so the pack ends the round with a member unseen.
+			kept := us[:0]
+			for _, u := range us {
+				if u.GUID != far {
+					kept = append(kept, u)
+				}
+			}
+			us = kept
+		}
+		return us
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	if sum.GMClearPartial || len(sum.GMClear) != len(guids) {
+		t.Fatalf("partial %v, gm_clear %+v", sum.GMClearPartial, sum.GMClear)
+	}
+	// Round 1 read every stop and killed nothing far; round 2 ran and read again.
+	if reads <= len(stops) {
+		t.Fatalf("%d clear reads for %d stops, want more: the unseen member must run the second round", reads, len(stops))
+	}
+	killedFar := false
+	for _, l := range f.agentLog() {
+		if l == "gm_kill "+far.String() {
+			killedFar = true
+		}
+	}
+	if !killedFar {
+		t.Fatal("the member missed in round 1 was never killed in round 2")
+	}
+	for _, e := range sum.GMClear {
+		if !e.Killed {
+			t.Errorf("entry %+v", e)
+		}
+	}
+}
+
+// The clear's final instance check fails: after the packs are killed and the commander is back at the start point, a
+// `q inst` naming another copy fails the walk on the existing error path, and no kill goes out after that read.
+func TestPlaceGMClearFinalInstanceCheckFailureSendsNoKill(t *testing.T) {
+	f, tk := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
+	// The copy moves under the walk once every live member is killed: every later `q inst` is the clear's final
+	// check (kills, sleeps and unit reads send no `q inst` between the last kill and it).
+	allKilled := func() bool {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		for _, g := range guids {
+			if !f.agent.killed[g] {
+				return false
+			}
+		}
+		return true
+	}
+	var armed atomic.Bool
+	f.agent.ttFn = func(cmd string) (ttResult, error) {
+		if cmd == "q inst" && allKilled() {
+			armed.Store(true)
+			return ttReplyOf(t, map[string]any{"map": 309, "inst": 104}), nil
+		}
+		return tk.answer(cmd)
+	}
+	f.agent.unitsFn = func(int) []objects.Unit {
+		dead := func(g packet.GUID) bool { f.agent.mu.Lock(); defer f.agent.mu.Unlock(); return f.agent.killed[g] }
+		return gmClearView(f, pack, guids, dead)
+	}
+	postFlipKills := 0
+	f.agent.killFn = func(g packet.GUID, tries int) bool {
+		if armed.Load() {
+			postFlipKills++
+		}
+		return true
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	code := f.run(context.Background())
+	if code != exitRaidWalkFailed {
+		t.Fatalf("exit %d, want %d: %s\n%s", code, exitRaidWalkFailed, f.stderr.String(), f.stdout.String())
+	}
+	if reason := f.summary().EndReason; !strings.Contains(reason, "not the raid's 103") {
+		t.Fatalf("end reason %q, want the final instance check's mismatch", reason)
+	}
+	if !armed.Load() {
+		t.Fatal("the copy never moved: the run ended before the clear's final check")
+	}
+	if postFlipKills != 0 {
+		t.Fatalf("%d kills after the failed final check, want none", postFlipKills)
 	}
 }
 
@@ -696,6 +1007,7 @@ func TestGMKillAllowedNeedsTheConfiguredAddress(t *testing.T) {
 	servers := []slots.Server{
 		{Name: "m910q", Realmd: "10.1.1.1:3724", WorldAddr: "10.1.1.1:8085"},
 		{Name: "tortoise-test2", Realmd: "10.2.2.2:3724", WorldAddr: "10.2.2.3:8085"},
+		{Name: "tortoise-test3", Realmd: "10.3.3.3:3724", WorldAddr: "10.3.3.4:8085"},
 	}
 	cases := []struct {
 		name, server, dialed string
@@ -704,15 +1016,18 @@ func TestGMKillAllowedNeedsTheConfiguredAddress(t *testing.T) {
 	}{
 		{"test2 dialled at its world_addr", "tortoise-test2", "10.2.2.3:8085", true, ""},
 		{"m910q dialled at its world_addr", "m910q", "10.1.1.1:8085", true, ""},
+		{"test3 dialled at its world_addr", "tortoise-test3", "10.3.3.4:8085", true, ""},
 		{"m910q same host, its realmd port", "m910q", "10.1.1.1:3724", false, "gm_kill refused"},
 		{"m910q same host, another port", "m910q", "10.1.1.1:9999", false, "gm_kill refused"},
 		{"test2 same host, another port", "tortoise-test2", "10.2.2.3:8086", false, "gm_kill refused"},
 		{"settings say tortoise-test2, session dialled a live host", "tortoise-test2", "203.0.113.9:8085", false, "gm_kill refused"},
 		{"settings say tortoise-test2, dialled its realmd host, not its world_addr", "tortoise-test2", "10.2.2.2:8085", false, "gm_kill refused"},
 		{"settings say m910q, dialled the other test server", "m910q", "10.2.2.3:8085", false, "gm_kill refused"},
+		{"settings say test3, dialled another test server", "tortoise-test3", "10.1.1.1:8085", false, "gm_kill refused"},
 		{"dialled address without a port", "m910q", "10.1.1.1", false, "gm_kill refused"},
 		{"ordinary agent", "tortoise", "10.1.1.1:8085", false, ""},
 		{"no server_name", "", "10.1.1.1:8085", false, ""},
+		{"unknown server", "prod-realm", "10.3.3.4:8085", false, ""},
 		{"server_name case differs", "M910Q", "10.1.1.1:8085", false, ""},
 		{"server_name has a trailing space", "m910q ", "10.1.1.1:8085", false, ""},
 	}
@@ -761,18 +1076,24 @@ func TestGMKillAuthorizeReadsTheSlotsTable(t *testing.T) {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	table := `{"version":1,"servers":[{"name":"tortoise-test2","realmd":"10.2.2.2:3724","world_addr":"10.2.2.3:8085","slots":[]}]}`
+	table := `{"version":1,"servers":[{"name":"tortoise-test2","realmd":"10.2.2.2:3724","world_addr":"10.2.2.3:8085","slots":[]},{"name":"tortoise-test3","realmd":"10.3.3.3:3724","world_addr":"10.3.3.4:8085","slots":[]}]}`
 	if err := os.WriteFile(filepath.Join(dir, "slots.json"), []byte(table), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if got, why := gmKillAuthorize(st, "10.2.2.3:8085"); !got || why != "" {
 		t.Fatalf("matching host: allowed %v, reason %q", got, why)
 	}
+	if got, why := gmKillAuthorize(config.Settings{ServerName: "tortoise-test3"}, "10.3.3.4:8085"); !got || why != "" {
+		t.Fatalf("test3 matching host: allowed %v, reason %q", got, why)
+	}
 	if got, why := gmKillAuthorize(st, "203.0.113.9:8085"); got || !strings.Contains(why, "gm_kill refused") {
 		t.Fatalf("live host under a test server_name: allowed %v, reason %q", got, why)
 	}
 	if got, why := gmKillAuthorize(config.Settings{ServerName: "tortoise"}, "203.0.113.9:8085"); got || why != "" {
 		t.Fatalf("ordinary agent: allowed %v, reason %q", got, why)
+	}
+	if got, why := gmKillAuthorize(config.Settings{ServerName: "prod-realm"}, "10.3.3.4:8085"); got || why != "" {
+		t.Fatalf("unknown server: allowed %v, reason %q", got, why)
 	}
 }
 
@@ -916,6 +1237,246 @@ func TestPlaceGMClearSkipsMembersTheCorridorClearRemoved(t *testing.T) {
 	if strings.Contains(string(text), "PARTIAL") {
 		t.Fatalf("summary.txt:\n%s", text)
 	}
+}
+
+// Walk 74: 28 of the --gm-clear's 53 stops visited a pack the corridor sweep had already despawned whole (run.log:
+// `nothing to clear`, summary.txt: "1 of 1 members were already despawned by this walk's own clear"), 28 x ~2.1 s =
+// 59 s spent walking to packs with no unit left. The settled check ran only from round 2 on, so round 1 always visited;
+// a pack settled before its first visit must get no stop at all, exactly as the later rounds skip it.
+func TestPlaceGMClearSkipsAPackTheCorridorClearSettledWhole(t *testing.T) {
+	f, tk := newPlaceFixture(t)
+	f.opts.gmClear = stringList{"2:2"}
+	f.opts.gmClearSpawns = gmClearZGSpawns
+	pack, guids := gmClearPack(t, gmClearZGSpawns)
+	tk.clearto = func(string) (int, error) { return len(guids), nil }
+	tk.cleartoRemoved = func(string) []any {
+		removed := make([]any, 0, len(guids))
+		for _, g := range guids {
+			removed = append(removed, map[string]any{"g": g.String(), "e": g.Entry(), "n": "despawned"})
+		}
+		return removed
+	}
+	// Nothing of the pack is left in the client's store either (the corridor clear despawned every member).
+	f.agent.unitsFn = func(int) []objects.Unit { return []objects.Unit{} }
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	for _, stop := range pack.Stops() {
+		goLine := "gm .go xyz " + num32(stop.X) + " " + num32(stop.Y) + " "
+		if n := agentLinesPrefix(f, goLine); n != 0 {
+			t.Fatalf("%d visits to the settled pack's stop (%s), want none", n, strings.TrimSpace(goLine))
+		}
+	}
+	if n := agentLinesPrefix(f, "gm_kill "); n != 0 {
+		t.Fatalf("%d kill lines for a pack its own clear despawned, want none", n)
+	}
+	sum := f.summary()
+	if sum.GMClearPartial || len(sum.GMClear) != len(guids) {
+		t.Fatalf("partial %v, gm_clear %+v", sum.GMClearPartial, sum.GMClear)
+	}
+	for _, e := range sum.GMClear {
+		if !e.Killed || e.Reason != raidwalk.GMClearDespawned || e.Tries != 0 {
+			t.Errorf("entry %+v, want killed, despawned, no line", e)
+		}
+	}
+	if !hasNote(sum, "already despawned by this walk's own clear") {
+		t.Errorf("notes %q do not explain the settled pack", sum.Notes)
+	}
+}
+
+// gmLandAgent answers the two RPCs gmClearLand sends: the `.go xyz` (recorded with the fake clock) and the status
+// polls. landAt is the status read that first reports a settled landing; never keeps z the session's guess for good
+// (a navmesh hole).
+type gmLandAgent struct {
+	clock   *fakeClock
+	goLine  string
+	goAt    time.Time
+	reads   int  // status reads after the `.go` (the fake's landing reads)
+	landing bool // the `.go` went out, so the reads now describe the landing
+	landAt  int  // the first landing read at which the position is settled (0: every read)
+	seqAt   int  // the first landing read at which the server's teleport ack moves TeleportSeq (0: never)
+	bumped  bool
+	never   bool
+	seq     uint64
+	units   int
+	unitAt  int // the first units read that holds the pack's unit (0: never)
+	at      []time.Time
+	// statusCost is each status RPC's wall time (0: instant). The fake clock advances by the real time the call
+	// took, so the walk's absolute deadline sees the RPC's cost; a context deadline cuts the cost short.
+	statusCost time.Duration
+}
+
+// advance moves the fake clock by d: a fake RPC's simulated wall time.
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	c.t = c.t.Add(d)
+	c.mu.Unlock()
+}
+
+// gmLandUnit is the pack member the fake's units read reports: the guid the tests poll for. gmLandPack keys it by its
+// spawn guid, as a pack's SpawnGUIDs does.
+var (
+	gmLandUnit = packet.GUID(0xF13000012B000001)
+	gmLandPack = []uint64{raidwalk.SpawnGUID(gmLandUnit)}
+)
+
+func (a *gmLandAgent) Call(ctx context.Context, method string, params, out any, timeout time.Duration) error {
+	switch method {
+	case "gm":
+		text := params.(map[string]string)["text"]
+		if strings.HasPrefix(text, ".go xyz ") {
+			a.goLine, a.goAt, a.reads, a.units, a.landing = text, a.clock.now(), 0, 0, true
+		}
+	case "status":
+		if a.statusCost > 0 {
+			t0 := time.Now()
+			timer := time.NewTimer(a.statusCost)
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				timer.Stop()
+			}
+			a.clock.advance(time.Since(t0))
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
+		a.reads++
+		a.at = append(a.at, a.clock.now())
+		if a.landing && a.seqAt > 0 && a.reads >= a.seqAt && !a.bumped {
+			a.bumped = true
+			a.seq++ // the server's teleport ack, counted by the session
+		}
+		st := out.(*session.StatusInfo)
+		*st = session.StatusInfo{State: session.StatusInWorld, Map: 309, X: 10, Y: 20, Z: 30, TeleportSeq: a.seq}
+		if !a.never && a.landing && a.reads < a.landAt {
+			st.ZUnknown = true // the destination is reported, the position is still the session's guess
+		}
+	case "units":
+		a.units++
+		us := out.(*[]objects.Unit)
+		*us = nil
+		if a.unitAt > 0 && a.units >= a.unitAt {
+			*us = []objects.Unit{{GUID: gmLandUnit}}
+		}
+	}
+	return nil
+}
+
+// Walk 74's clear paid a fixed 2 s after every `.go xyz` (53 stops, 157 s for the phase). The landing is now polled
+// every gmClearLandPoll and needs the session's teleport count to move, so a stop the server settles at the first read
+// carries on after the gmClearSettle settle, one that settles a poll later waits just that poll, and a status that
+// never lands falls back to the old fixed 2 s.
+func TestGMClearLandPollsTheLanding(t *testing.T) {
+	newWalk := func(t *testing.T, a *gmLandAgent) *walk {
+		return &walk{plan: &dungeon.Plan{Map: 309}, env: walkEnv{now: a.clock.now, sleep: a.clock.sleep}, agent: a}
+	}
+	t.Run("the first read lands", func(t *testing.T) {
+		a := &gmLandAgent{clock: newFakeClock(), landAt: 1, seqAt: 1}
+		start := a.clock.now()
+		if err := newWalk(t, a).gmClearLand(context.Background(), 10, 20, 30); err != nil {
+			t.Fatal(err)
+		}
+		if got := a.clock.now().Sub(start); got != gmClearSettle {
+			t.Fatalf("a landed stop took %s, want the %s settle", got, gmClearSettle)
+		}
+		if a.goLine != ".go xyz 10 20 30 309" {
+			t.Fatalf("go line %q, want the stop on the plan's map", a.goLine)
+		}
+		if a.reads != 1 {
+			t.Fatalf("%d status reads, want 1", a.reads)
+		}
+	})
+	t.Run("a later poll lands", func(t *testing.T) {
+		a := &gmLandAgent{clock: newFakeClock(), landAt: 3, seqAt: 3}
+		start := a.clock.now()
+		if err := newWalk(t, a).gmClearLand(context.Background(), 10, 20, 30); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := a.clock.now().Sub(start), 2*gmClearLandPoll+gmClearSettle; got != want {
+			t.Fatalf("a stop that settles on the 3rd read took %s, want %s", got, want)
+		}
+		if a.reads != 3 {
+			t.Fatalf("%d status reads, want 3", a.reads)
+		}
+	})
+	t.Run("no landing falls back to the fixed wait", func(t *testing.T) {
+		a := &gmLandAgent{clock: newFakeClock(), never: true}
+		start := a.clock.now()
+		if err := newWalk(t, a).gmClearLand(context.Background(), 10, 20, 30); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := a.clock.now().Sub(start), gmClearLandWait+gmClearFallbackWait; got != want {
+			t.Fatalf("an unsettled landing took %s, want the ceiling and the old wait (%s)", got, want)
+		}
+		if want := int(gmClearLandWait / gmClearLandPoll); a.reads != want {
+			t.Fatalf("%d status reads, want %d", a.reads, want)
+		}
+	})
+	// Codex round 2 HIGH: `waited` counted only the sleeps, so each status RPC (up to 10 s) stretched the 3 s
+	// ceiling. The ceiling is a deadline: a 2 s status read still gives up at gmClearLandWait and falls back.
+	t.Run("a slow status cannot stretch the ceiling", func(t *testing.T) {
+		a := &gmLandAgent{clock: newFakeClock(), never: true, statusCost: 2 * time.Second}
+		if err := newWalk(t, a).gmClearLand(context.Background(), 10, 20, 30); err != nil {
+			t.Fatal(err)
+		}
+		if got := a.clock.now().Sub(a.goAt); got > gmClearLandWait+gmClearFallbackWait+500*time.Millisecond {
+			t.Fatalf("an unsettled landing with a 2 s status took %s, want the %s ceiling and the %s fallback",
+				got, gmClearLandWait, gmClearFallbackWait)
+		}
+		if a.reads > 2 {
+			t.Fatalf("%d status reads, want at most 2: the deadline stops the poll", a.reads)
+		}
+	})
+}
+
+// The stop's units read is a poll of the pack: the landing arrives before the object store holds it, so the read
+// carries on as soon as a pack member shows and otherwise ends at the old 2 s ceiling.
+func TestGMClearStopUnitsPollsThePack(t *testing.T) {
+	newWalk := func(t *testing.T, a *gmLandAgent) *walk {
+		return &walk{plan: &dungeon.Plan{Map: 309}, env: walkEnv{now: a.clock.now, sleep: a.clock.sleep}, agent: a}
+	}
+	t.Run("the first read shows the pack", func(t *testing.T) {
+		a := &gmLandAgent{clock: newFakeClock(), unitAt: 1}
+		start := a.clock.now()
+		units, err := newWalk(t, a).gmClearStopUnits(context.Background(), "2:2", gmLandPack)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := a.clock.now().Sub(start); got != 0 {
+			t.Fatalf("a visible pack took %s, want none", got)
+		}
+		if a.units != 1 || !gmClearUnitsShown(units, gmLandPack) {
+			t.Fatalf("%d units reads, shown %v, want 1 and the pack", a.units, gmClearUnitsShown(units, gmLandPack))
+		}
+	})
+	t.Run("a late pack is polled", func(t *testing.T) {
+		a := &gmLandAgent{clock: newFakeClock(), unitAt: 3}
+		start := a.clock.now()
+		if _, err := newWalk(t, a).gmClearStopUnits(context.Background(), "2:2", gmLandPack); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := a.clock.now().Sub(start), 2*gmClearUnitPoll; got != want {
+			t.Fatalf("a pack that shows on the 3rd read took %s, want %s", got, want)
+		}
+		if a.units != 3 {
+			t.Fatalf("%d units reads, want 3", a.units)
+		}
+	})
+	t.Run("no pack ends at the ceiling", func(t *testing.T) {
+		a := &gmLandAgent{clock: newFakeClock()}
+		start := a.clock.now()
+		if _, err := newWalk(t, a).gmClearStopUnits(context.Background(), "2:2", gmLandPack); err != nil {
+			t.Fatal(err)
+		}
+		if got := a.clock.now().Sub(start); got != gmClearUnitWait {
+			t.Fatalf("an empty read took %s, want the %s ceiling", got, gmClearUnitWait)
+		}
+		if want := int(gmClearUnitWait/gmClearUnitPoll) + 1; a.units != want {
+			t.Fatalf("%d units reads, want %d", a.units, want)
+		}
+	})
 }
 
 // A member that cannot die costs gmClearTries * (gmClearDeathWait + gmClearRetryGap) = 32 s. The clear's budget stops the tool
