@@ -103,6 +103,9 @@ const (
 	KindDungeonStep   = "dungeon_step"   // an action of the plan finished (or a wait began): data.action, ok, seconds, error
 	KindDungeonFailed = "dungeon_failed" // the run ended without finishing: data.error ("wipe", a failed step, "stopped")
 	KindDungeonDone   = "dungeon_done"   // the plan is finished
+	// KindDungeonRefused is a run stopped before it started, nothing sent: data.error names the reason (a team gate, an item a
+	// skipped leg was to provide, a grave or GM cross check).
+	KindDungeonRefused = "dungeon_refused"
 	// KindDungeonLeader is the leader's death and its way back during a run: data.phase died, resurrected, released,
 	// corpse_run, reclaimed, back or gave_up (data.leg, seconds dead, how).
 	KindDungeonLeader = "dungeon_leader"

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/rpc"
@@ -288,7 +289,11 @@ func (r *dungeonRunner) startRemote(p dungeonRunParams, tcfg tracerun.Config, pl
 		defer close(done)
 		defer r.moves.release(moveOwnerRun) // the caller claimed it; released once the run has exited, just before done closes
 		defer cancel()
-		_ = r.runDriver(ctx, drv, from)
+		if err := r.runDriver(ctx, drv, from); err != nil {
+			// The driver records the error in the report and the events (refused, failed or stopped); the agent's log keeps it too,
+			// so a run that ends before it starts is never a silent one.
+			r.cur().Log().Append(events.Event{Kind: events.KindSystem, Text: "dungeon " + plan.Name + " (remote): " + err.Error()})
+		}
 		r.keptFrom(drv.Report()) // the outcome is in the report and the events; the unbind is deferred inside Run
 	}()
 	res := dungeonRunResult{Started: true, Plan: plan.Name, Map: plan.Map, FromLeg: from, FromPullGroup: opt.FromPullGroup, Legs: names, Buffs: []string{}, LeaderGM: "false", Mode: "remote", RunMode: modeCommander, LeadBot: p.LeadBot}

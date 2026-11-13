@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
@@ -1008,30 +1009,57 @@ func TestRemotePreflightTalentsZeroPointsWarnsInTheTogetherPath(t *testing.T) {
 
 // A plan that needs one team is refused for the other before anything is sent (round 35: the Shadowfang Keep run used an Alliance
 // commander, its tank's gossip with Deathstalker Adamant 3849 was refused npc-busy four times and stopped the run; the NPC is
-// Horde-friendly, faction template 68 = Undercity). An unknown team does not refuse.
+// Horde-friendly, faction template 68 = Undercity). An unknown team does not refuse. The refusal ends the report "refused" with the
+// reason (SFK-NEVER-STARTS: the early return skipped finish, so the report kept state "idle" and dungeon_status showed a run that
+// never ended).
 func TestRemoteRefusesAPlanWhoseTeamDiffers(t *testing.T) {
 	plan := remotePlan(Leg{Name: "a", To: Point{10, 0, 0}})
 	plan.Team = TeamHorde
-	g := teamFake{fakeRemote: newFakeRemote(t), team: TeamAlliance}
-	err := NewRemoteDriver(plan, g, DefaultConfig(), opts(), g.clock()).Run(context.Background(), 0)
+	g := &logTeamFake{teamFake: teamFake{fakeRemote: newFakeRemote(t), team: TeamAlliance}}
+	d := NewRemoteDriver(plan, g, DefaultConfig(), opts(), g.clock())
+	err := d.Run(context.Background(), 0)
 	if err == nil || !strings.Contains(err.Error(), "needs a horde party") || !strings.Contains(err.Error(), "the party is alliance") {
 		t.Fatalf("%v", err)
 	}
 	if len(g.orders) != 0 {
 		t.Fatalf("a refused start sent orders: %v", g.orders)
 	}
+	// dungeon_status reads the same Status: the run ended, refused, with the reason in the report, its note and its event.
+	rep, ended := d.Status()
+	if !ended || rep.Ended == nil || rep.State != "refused" || !strings.Contains(rep.Error, "needs a horde party") ||
+		!strings.Contains(strings.Join(rep.Notes, "\n"), "run refused: plan rt needs a horde party") {
+		t.Fatalf("ended %v, report %+v", ended, rep)
+	}
+	if len(g.kinds) != 1 || g.kinds[0] != events.KindDungeonRefused {
+		t.Fatalf("events %v", g.kinds)
+	}
 
 	plan = remotePlan(Leg{Name: "a", To: Point{10, 0, 0}})
 	plan.Team = TeamHorde
-	g = teamFake{fakeRemote: newFakeRemote(t), team: TeamHorde}
+	g = &logTeamFake{teamFake: teamFake{fakeRemote: newFakeRemote(t), team: TeamHorde}}
 	if rep, err := runRemote(t, g, plan, opts(), nil); err != nil || rep.State != "done" {
 		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
 	}
 
 	plan = remotePlan(Leg{Name: "a", To: Point{10, 0, 0}})
 	plan.Team = TeamHorde
-	g = teamFake{fakeRemote: newFakeRemote(t), team: ""}
+	g = &logTeamFake{teamFake: teamFake{fakeRemote: newFakeRemote(t), team: ""}}
+	if rep, err := runRemote(t, g, plan, opts(), nil); err != nil || rep.State != "done" {
+		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
+	}
+
+	// A plan that needs no team starts for either party: only the team gate refuses.
+	plan = remotePlan(Leg{Name: "a", To: Point{10, 0, 0}})
+	g = &logTeamFake{teamFake: teamFake{fakeRemote: newFakeRemote(t), team: TeamAlliance}}
 	if rep, err := runRemote(t, g, plan, opts(), nil); err != nil || rep.State != "done" {
 		t.Fatalf("%v %s\n%s", err, rep.State, notesOf(rep))
 	}
 }
+
+// logTeamFake is teamFake that records the kinds the driver emits, so a test can see the end event.
+type logTeamFake struct {
+	teamFake
+	kinds []string
+}
+
+func (g *logTeamFake) Emit(kind, text string, data map[string]any) { g.kinds = append(g.kinds, kind) }

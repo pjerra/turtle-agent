@@ -12,7 +12,7 @@ import (
 type Report struct {
 	Plan    string     `json:"plan"`
 	Map     uint32     `json:"map"`
-	State   string     `json:"state"` // running, done, failed or stopped
+	State   string     `json:"state"` // idle, running, done, failed, stopped or refused (stopped before it started, nothing sent)
 	FromLeg int        `json:"from_leg"`
 	Started time.Time  `json:"started"`
 	Ended   *time.Time `json:"ended,omitempty"`
