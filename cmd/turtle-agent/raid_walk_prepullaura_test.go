@@ -110,6 +110,18 @@ type prepullAgent struct {
 	// unseenUntil holds the moment the unit RPC starts answering for a bot: a store that has not received that one
 	// row yet (walk 105: the main tank, standing ahead of the commander, for a few seconds at a boss row).
 	unseenUntil map[string]time.Time
+	// The commander's own status and the frame's geometry, for the prepull join: status (the AGENT'S character) answers
+	// at selfMap/selfX/selfY, the frame's bots stand at botMap/botX/botY, and an accepted `.appear <hire>` moves the
+	// commander to the bots and bumps selfSeq (appearRefused refuses it). storeAfterAppear makes the unit RPC answer
+	// for the party only once that appear landed: the store is cleared on a map change and fills in the commander's
+	// visibility range, which is the root cause the join fixes (walk 105c: map 0 outside against map 309 inside).
+	selfMap, botMap  uint32
+	selfX, selfY     float32
+	botX, botY       float32
+	selfSeq          uint64
+	appearRefused    bool
+	appeared         bool
+	storeAfterAppear bool
 }
 
 func newPrepullAgent(t *testing.T) *prepullAgent {
@@ -119,7 +131,8 @@ func newPrepullAgent(t *testing.T) *prepullAgent {
 		drop: map[packet.GUID]map[uint32]bool{}, combatBots: map[packet.GUID]bool{},
 		hidden: map[string]bool{}, deadBots: map[string]bool{}, silent: map[string]bool{},
 		unseenUntil: map[string]time.Time{},
-		botStates:   map[string]string{}, botStateMissing: map[string]bool{}, botStateNoSpecs: map[string]bool{}}
+		botStates:   map[string]string{}, botStateMissing: map[string]bool{}, botStateNoSpecs: map[string]bool{},
+		botMap: 309}
 	a.selfGUID, a.selfName = packet.GUID(0x0000000000000AAA), "Commander"
 	// Mtbot (warrior mt), Otbot (warrior ot), Rank (rogue), Flitz (hunter), Zap (mage), Holi (priest).
 	for i, b := range []struct {
@@ -197,6 +210,15 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 		if p.Text == ".bot roster" {
 			a.queueBotStates()
 		}
+		if _, ok := strings.CutPrefix(p.Text, ".appear "); ok {
+			// An accepted appear lands the commander where the frame's bots stand and bumps the ack count; a refused
+			// one moves nobody (the landing wait then times out).
+			if !a.appearRefused {
+				a.selfMap, a.selfX, a.selfY = a.botMap, a.botX, a.botY
+				a.selfSeq++
+				a.appeared = true
+			}
+		}
 	case "events":
 		var p struct {
 			Since uint64 `json:"since"`
@@ -226,13 +248,15 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			if dead {
 				state = "d"
 			}
-			fr.Party = append(fr.Party, tbm.PartyRec{GUID: b.GUID, Name: b.Name, HP: 6000, MaxHP: 6000, Map: 309, State: state, Dead: dead})
+			fr.Party = append(fr.Party, tbm.PartyRec{GUID: b.GUID, Name: b.Name, HP: 6000, MaxHP: 6000,
+				X: a.botX, Y: a.botY, Map: a.botMap, State: state, Dead: dead})
 		}
 		fr.Party = append(fr.Party, a.extra...)
 		fr.Truncated = a.viewTruncated
 		v = botViewResult{Have: true, N: 1, Frame: &fr}
 	case "status":
-		v = session.StatusInfo{Character: a.selfName, GUID: a.selfGUID, State: session.StatusInWorld}
+		v = session.StatusInfo{Character: a.selfName, GUID: a.selfGUID, State: session.StatusInWorld,
+			Map: a.selfMap, X: a.selfX, Y: a.selfY, TeleportSeq: a.selfSeq}
 	case "unit":
 		var p struct {
 			GUID string `json:"guid"`
@@ -249,6 +273,11 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			}
 			v = u
 			break
+		}
+		if a.storeAfterAppear && !a.appeared {
+			// The commander's store only holds what its own character can see: from outside, or before the appear
+			// lands, it holds no party bot.
+			return errors.New("unit: no such unit")
 		}
 		if _, ok := a.auras[g]; !ok || !a.answers {
 			return errors.New("unit: no such unit")
@@ -1899,6 +1928,120 @@ func TestPrepullAuraStartWaitCoversTheUnitStore(t *testing.T) {
 	}
 	if len(a.sent) != 0 {
 		t.Fatalf("%d aura(s) went out without the store holding every hire: %v", len(a.sent), a.sent)
+	}
+}
+
+// The commander's unit store holds only what its own character can see, and the commander stays where the last
+// placement left it: walks 105/105b's Jeklik row 49 had the raid 350-364 yd away and the fire read no hire. The fire
+// moves the commander to the raid first (the revive path's `.appear`, at its MT), then reads roles from a filled store.
+func TestPrepullAuraBossRowJoinsFarCommander(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.selfMap, a.botMap = 309, 309
+	a.selfX, a.botX = 0, 350
+	a.storeAfterAppear = true // out of range the store holds no hire
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	w.plan.Map = 309
+	prepullRunLog(t, w)
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
+		t.Fatalf("fire: fired %v err %v", fired, err)
+	}
+	if !strings.Contains(strings.Join(a.gmLines, "\n"), ".appear Mtbot") {
+		t.Fatalf("the fire read the raid without appearing at the MT: %v", a.gmLines)
+	}
+	if len(a.sent) == 0 {
+		t.Fatal("no aura was sent after the join")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 1 || f.BossRows[0] != 5 || len(f.Attempts) != 0 || len(f.Bots) != 6 {
+		t.Fatalf("boss rows %v, attempts %+v, %d bot(s)", f.BossRows, f.Attempts, len(f.Bots))
+	}
+	log := prepullRunLogText(t, w)
+	if !strings.Contains(log, "prepull-aura: boss row 5: commander joined the raid at Mtbot (was 350 yd / map 309)") {
+		t.Fatalf("run.log does not name the join:\n%s", log)
+	}
+	if strings.Contains(log, "ran out after") {
+		t.Fatalf("the fire waited on a store the join fills at once:\n%s", log)
+	}
+}
+
+// Walk 105c: after `cmd enter near` the placement put the hires on map 309 while the commander still stood on map 0.
+// The start wait sees the whole raid in the frame, joins once, and only then reads the unit store: from outside it
+// holds no hire, so the order is what makes the start fire possible.
+func TestPrepullAuraStartJoinsAfterEnterNear(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.selfMap, a.botMap = 0, 309
+	a.botX = 100
+	a.storeAfterAppear = true // outside the instance the store holds no hire
+	w := prepullStartWalk(t, a)
+	w.plan.Map = 309
+	prepullRunLog(t, w)
+	if err := w.prepullAuraStart(context.Background()); err != nil {
+		t.Fatalf("start fire: %v", err)
+	}
+	if !strings.Contains(strings.Join(a.gmLines, "\n"), ".appear Mtbot") {
+		t.Fatalf("the start fire read the store without appearing at the MT: %v", a.gmLines)
+	}
+	f := readPrepullAuraFile(t, w)
+	if f.StartRow != 1 || len(f.Attempts) != 0 || len(f.Bots) != 6 || len(f.BossRows) != 0 {
+		t.Fatalf("start_row %d, attempts %+v, %d bot(s), boss rows %v", f.StartRow, f.Attempts, len(f.Bots), f.BossRows)
+	}
+	log := prepullRunLogText(t, w)
+	if !strings.Contains(log, "prepull-aura: start: commander joined the raid at Mtbot (was 100 yd / map 0)") {
+		t.Fatalf("run.log does not name the join:\n%s", log)
+	}
+	if strings.Contains(log, "ran out after") {
+		t.Fatalf("the start fire waited on a store the join fills at once:\n%s", log)
+	}
+}
+
+// An appear that cannot land stops the fire before any aura, with the appear's own reason: the fire never reads a
+// raid the commander did not reach.
+func TestPrepullAuraJoinRefusedStops(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.selfMap, a.botMap = 309, 309
+	a.botX = 350
+	a.appearRefused = true
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	w.plan.Map = 309
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "could not join the raid at Mtbot") ||
+		!strings.Contains(reason, "did not land") || !strings.Contains(reason, "no aura was sent") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("%d aura(s) went out after a refused join: %v", len(a.sent), a.sent)
+	}
+	if !strings.Contains(strings.Join(a.gmLines, "\n"), ".appear Mtbot") {
+		t.Fatalf("the fire did not try to join: %v", a.gmLines)
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 0 || len(f.Attempts) != 1 || !strings.Contains(f.Attempts[0].Reason, "could not join the raid") {
+		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
+	}
+}
+
+// A commander already with the raid (same map, 40 yd from the nearest hire) is left where it stands: the fire sends
+// no `.appear` at all, so the join costs a normal fire nothing.
+func TestPrepullAuraNearCommanderNoAppear(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.selfMap, a.botMap = 309, 309
+	a.selfX, a.botX = 0, 40
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	w.plan.Map = 309
+	prepullRunLog(t, w)
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
+		t.Fatalf("fire: fired %v err %v", fired, err)
+	}
+	if strings.Contains(strings.Join(a.gmLines, "\n"), ".appear ") {
+		t.Fatalf("the near commander was moved: %v", a.gmLines)
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 1 || f.BossRows[0] != 5 || len(f.Attempts) != 0 || len(f.Bots) != 6 {
+		t.Fatalf("boss rows %v, attempts %+v, %d bot(s)", f.BossRows, f.Attempts, len(f.Bots))
+	}
+	if log := prepullRunLogText(t, w); strings.Contains(log, "commander joined the raid") {
+		t.Fatalf("run.log reports a join that was not needed:\n%s", log)
 	}
 }
 
