@@ -1017,6 +1017,89 @@ func TestPrepullAuraUnitReadFallsBackToTheRosterRole(t *testing.T) {
 	}
 }
 
+// An unseen MT is no exception to the roster rule: without its unit row the walk's front-line assignment may not
+// turn the roster's kit into the tank list, so the row's `protection` strategy resolves without the class to the
+// tank's list. Walk 105's own case: the main tank stood ahead of the commander and the store had not received it.
+func TestPrepullAuraUnitReadUnseenMTTakesTheRosterTankRole(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.unseenUntil["Mtbot"] = a.clock.Add(32 * time.Second) // outlasts the role wait, the combat window catches it
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	prepullRunLog(t, w)
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
+		t.Fatalf("fire: fired %v err %v", fired, err)
+	}
+	g := a.bots[0].GUID // Mtbot, the walk's main tank
+	if !a.auras[g][17626] || !a.auras[g][22888] || a.auras[g][17538] {
+		t.Fatalf("Mtbot carries %v, want the tank list", a.auras[g])
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 1 || f.BossRows[0] != 5 || len(f.Attempts) != 0 {
+		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
+	}
+	for _, rec := range f.Bots {
+		if rec.Bot == "Mtbot" && (rec.Role != raidwalk.PrepullTank || len(rec.Seen) != 2) {
+			t.Fatalf("Mtbot %+v, want the tank role with both ids seen", rec)
+		}
+	}
+	log := prepullRunLogText(t, w)
+	if !strings.Contains(log, "prepull-aura: boss row 5: the unit read of Mtbot ran out after 30s") ||
+		!strings.Contains(log, "prepull-aura: boss row 5: Mtbot: role from roster (unit unseen): tank") {
+		t.Fatalf("run.log does not name the wait and the roster tank role:\n%s", log)
+	}
+}
+
+// The MT position may not override a roster row that names a non-tank kit either: an unseen MT whose row says it
+// fights fury gets the melee list, not the tank one. This is the r1 HIGH's silent wrong preparation.
+func TestPrepullAuraUnitReadUnseenMTObeysANonTankRosterRole(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	a.botStates["Mtbot"] = "fury"                          // the roster row names a non-tank kit for the MT
+	a.unseenUntil["Mtbot"] = a.clock.Add(32 * time.Second) // outlasts the role wait, the combat window catches it
+	prepullRunLog(t, w)
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
+		t.Fatalf("fire: fired %v err %v", fired, err)
+	}
+	g := a.bots[0].GUID // Mtbot
+	if !a.auras[g][17538] || !a.auras[g][22888] || a.auras[g][17626] {
+		t.Fatalf("Mtbot carries %v, want the melee list its roster row names", a.auras[g])
+	}
+	for _, rec := range readPrepullAuraFile(t, w).Bots {
+		if rec.Bot == "Mtbot" && (rec.Role != raidwalk.PrepullMelee || len(rec.Seen) != 2) {
+			t.Fatalf("Mtbot %+v, want the melee role with both ids seen", rec)
+		}
+	}
+	if log := prepullRunLogText(t, w); !strings.Contains(log, "prepull-aura: boss row 5: Mtbot: role from roster (unit unseen): melee") {
+		t.Fatalf("run.log does not name the roster melee role:\n%s", log)
+	}
+}
+
+// An unseen MT whose roster row names a strategy no class maps stops the fire: the MT position may not turn an
+// unreadable kit into the tank list (r1 sent the tank list instead of failing closed). No aura goes out and the row
+// is an attempt.
+func TestPrepullAuraUnitReadUnseenMTWithAnUnknownRosterStrategyStops(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	a.botStates["Mtbot"] = "tanky"                         // not a module strategy: no class maps it to a role
+	a.unseenUntil["Mtbot"] = a.clock.Add(32 * time.Second) // outlasts the role wait, the combat window catches it
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "unit read of Mtbot failed after 30s") ||
+		!strings.Contains(reason, "roster gives no role") || !strings.Contains(reason, `the strategy "tanky"`) ||
+		!strings.Contains(reason, "no aura was sent") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("%d aura(s) went out on an unseen MT whose roster names no role: %v", len(a.sent), a.sent)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the boss row was recorded as done")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 0 || len(f.Attempts) != 1 || !strings.Contains(f.Attempts[0].Reason, "failed after 30s") {
+		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
+	}
+}
+
 // A hire the wait never sees and the roster names no role for stops the fire, as before the wait existed and with the
 // wait named: the role is never guessed, and no aura goes out on it.
 func TestPrepullAuraUnitReadAndRosterBothFailStops(t *testing.T) {

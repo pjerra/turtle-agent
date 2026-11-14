@@ -21,9 +21,10 @@
 // failed on one miss: the hire's row is re-read every 2 s for up to 30 s (prepullAuraUnitWait), because walk 105
 // stopped a run 24 minutes in when the main tank, standing ahead of the commander, was unseen for two back-to-back
 // reads. A hire still unseen after that wait takes the role the module's own roster names for it, without the class
-// (prepullRosterRole, raidwalk.BotStateAuraRoleUnclassed), logged as "role from roster (unit unseen)"; with no roster
-// role either the fire fails closed with the hire and the wait named. The aura's own combat read and read-back still
-// decide: an unseen unit is never assumed alive, out of combat or carrying its list.
+// (prepullRosterRole, raidwalk.BotStateAuraRoleUnclassed), logged as "role from roster (unit unseen)"; the MT/OT
+// assignment does not override that row, so an unseen MT with a non-tank kit is not handed the tank list. With no
+// roster role either the fire fails closed with the hire and the wait named. The aura's own combat read and read-back
+// still decide: an unseen unit is never assumed alive, out of combat or carrying its list.
 //
 // The fire is the boss row's own gate (prepullGate): the step before a boss row in WHATEVER phase, as long as the run
 // is still before the pull (no pulling/fighting note, no later pull line of the page, no party bot in combat), or the
@@ -829,6 +830,7 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int, start bool) (err e
 		// comes from the unit row alone, so a seen row with no class is still a failure; a hire still unseen after the
 		// wait takes the role the module's own roster names for it (prepullRosterRole, logged as such), because the
 		// roster names a role without needing the class - walk 105's main tank was unseen for seconds at a boss row.
+		// The MT/OT assignment is no shortcut there: the unseen read trusts the roster row alone.
 		var role, why string
 		switch {
 		case seen && u.Class == 0:
@@ -968,10 +970,11 @@ func (w *walk) prepullAuraRecordFor(name, role string) *prepullAuraRecord {
 // roster batch is not the source: a mixed batch ("5h 13d") names no role for a priest, a paladin, a druid or a shaman,
 // and that batch is what walk 101b aborted on ("Whiteguard: the batch that hired it (rest) names no single role for a
 // priest"). The module installs each hire's kit from its own role and spec, so its row says which spec the bot fights
-// with; the walk maps that to the aura list. The walk's own MT and OT are tanks whatever their kit (they hold the
-// raid's front), but they still need a state row like every hire. role == "" comes with the reason the walk cannot
-// tell it (no state row for the bot, a class no aura role covers, or a kit naming no spec or specs of more than one
-// role); the fire fails closed on that reason, never as an "all"-only bot.
+// with; the walk maps that to the aura list. The walk's own MT and OT are tanks whatever their kit when their unit row
+// is readable (they hold the raid's front), but they still need a state row like every hire; unseen, the roster read
+// decides (prepullRosterRole). role == "" comes with the reason the walk cannot tell it (no state row for the bot, a
+// class no aura role covers, or a kit naming no spec or specs of more than one role); the fire fails closed on that
+// reason, never as an "all"-only bot.
 func (w *walk) prepullRole(name string, class uint8) (role, why string) {
 	specs, ok := w.prepullAuraSpecs[strings.ToLower(name)]
 	if !ok {
@@ -989,16 +992,15 @@ func (w *walk) prepullRole(name string, class uint8) (role, why string) {
 
 // prepullRosterRole is prepullRole for a hire whose unit row the agent's store does not hold, so no class is there to
 // key the module's per-class spec table: the role comes from the module's own spec strategies alone
-// (raidwalk.BotStateAuraRoleUnclassed, which fails closed on a strategy whose classes split on roles), the walk's own
-// MT and OT hold the raid's front whatever their kit, and a bot without a state row has no role. It is the fallback
-// of a fire whose unit read ran out (prepullAuraUnitWait), never a guess: every failure names its reason.
+// (raidwalk.BotStateAuraRoleUnclassed, which fails closed on a strategy whose classes split on roles), and a bot
+// without a state row has no role. The walk's own MT and OT are no exception: without the class, the roster's row is
+// the only role source, so an unseen MT whose row names a non-tank kit is not handed the tank list and one whose row
+// names no single role stops the fire like any other hire. It is the fallback of a fire whose unit read ran out
+// (prepullAuraUnitWait), never a guess: every failure names its reason.
 func (w *walk) prepullRosterRole(name string) (role, why string) {
 	specs, ok := w.prepullAuraSpecs[strings.ToLower(name)]
 	if !ok {
 		return "", "the module's `.bot roster` state names no row for it, so its role cannot be read"
-	}
-	if w.prepullHoldsFront(name) {
-		return raidwalk.PrepullTank, ""
 	}
 	return raidwalk.BotStateAuraRoleUnclassed(specs)
 }
