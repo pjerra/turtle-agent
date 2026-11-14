@@ -1,23 +1,28 @@
-// raid_walk_prepullaura.go: the `--prepull-aura` test tool of raid-walk (test servers only, off by default). At the
-// pre-pull rest before each boss row the commander puts the flag's aura lists on every living party member with the
-// same GM select-then-".aura" call dungeon_run's buff presets use (internal/dungeon's AuraPort and ApplyAuras), so a
-// walk tests the preparation a real raid carries into the instance: a flask, elixirs, food and the world buffs, all
-// as auras the walk can read back.
+// raid_walk_prepullaura.go: the `--prepull-aura` test tool of raid-walk (test servers only, off by default). Before
+// each boss row the commander puts the flag's aura lists on every living party member with the same GM
+// select-then-".aura" call dungeon_run's buff presets use (internal/dungeon's AuraPort and ApplyAuras), so a walk
+// tests the preparation a real raid carries into the instance: a flask, elixirs, food and the world buffs, all as
+// auras the walk can read back.
 //
 //	--prepull-aura role=tank:17626,17538 --prepull-aura role=healer:17627,24363 --prepull-aura all:world,23768
 //
-// The fire is the boss-row resend's gate (preBossGate): a rest or gather of the step before a boss row, out of combat,
-// once per boss row per walk, under a run pause that is always resumed. The pause is fail-closed: a refused or
-// unconfirmed pause sends no aura, and every living party member is re-read for combat right before the first `.aura`
-// and before every later one, so a pull that starts mid-batch stops the batch and fails the walk. A member the unit
-// RPC cannot read counts as combat too: the walk never assumes an unreadable party is out of combat. A boss row that
+// The fire is the boss row's own gate (prepullGate): the step before a boss row in WHATEVER phase, as long as the run
+// is still before the pull (no pulling/fighting note, no later pull line of the page, no party bot in combat), or the
+// boss row itself when the run passed that step too fast to pause, still before the pull (no member in combat and the
+// boss's arena read fresh out of combat). Walk 101b: the ZG Thekal plan's step before boss row 255 is a plain move, so
+// a rest/gather-only gate never fired and the walk stopped with exit 18. The fire is once per boss row per walk, under
+// a run pause that is always resumed. The pause is fail-closed: a refused or unconfirmed pause sends no aura, and the
+// commander and every living party member are re-read for combat right before the first `.aura` and before every
+// later one, so a pull that starts mid-batch stops the batch and fails the walk. PartyInfo.Members leaves the
+// commander out, so it is read through the walk's own status and holds a read of its own. A unit the unit RPC
+// cannot read counts as combat too: the walk never assumes an unreadable party is out of combat. A boss row that
 // becomes current without a verified fire fails the walk too: the preparation the run was started to test never
 // happened. The auras a bot already carries are not sent again, so a second boss row only tops up what a death or a
 // buff strip took. Every fire is read back into prepull-auras.json (bot, role, ids sent/seen/missing). By default
-// every requested aura must verify; --prepull-aura-tolerance N is the explicit opt-in that accepts up to N missing ids
-// per bot. A missing aura beyond that bound fails the walk (exit 18), because a preparation the walk cannot see is not
-// the test the run was started for. A boss row is written to prepull-auras.json only after its auras verified within
-// the tolerance; a fire that failed is a separate `attempts` entry with its reason, never a boss row.
+// every requested aura must verify; --prepull-aura-tolerance N is the explicit opt-in that accepts up to N missing
+// ids per bot. A missing aura beyond that bound fails the walk (exit 18), because a preparation the walk cannot see
+// is not the test the run was started for. A boss row is written to prepull-auras.json only after its auras verified
+// within the tolerance; a fire that failed is a separate `attempts` entry with its reason, never a boss row.
 package main
 
 import (
@@ -33,6 +38,7 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
@@ -102,18 +108,65 @@ func (w *walk) validatePrepullAura() error {
 	return nil
 }
 
-// prepullAuraSendPending is pollOnce's firing: at the pre-pull rest or gather before a boss row, once per boss row,
-// the auras go out under a run pause that must hold. A boss row that became current without a verified fire fails the
-// walk (a configured boss row the walk never prepared is not the test the run was started for). Whenever the status
-// was running before the pause attempt, the resume is attempted afterwards even when the hold or the fire failed: a
-// run left paused stops the raid silently. A status that was already paused sends no resume. A row is recorded as
-// done only after the auras verified within the tolerance. It reports whether a firing happened, so pollOnce breaks
-// its line loop (the next poll re-reads from the cursor), like the instance-data firing.
+// prepullGate is the --prepull-aura firing gate. It returns the boss row to prepare and whether a fire may go out
+// now (0: nothing to do, and no failure). The step before a boss row fires in whatever phase, as long as the status
+// is still before the pull (prePullOK: no pulling/fighting note, no later pull line of the same page, no party bot
+// in combat in a recent frame). A status that is not before the pull defers to the boss row's own status, exactly as
+// the rest/gather-only gate did. The boss row itself fires only while the pause can still land before the pull: the
+// same pre-pull check AND no engaged boss, read FRESH from the server (prepullBossEngaged) rather than from the
+// cached hostile frames bossEngagedNow reads: those can still show the boss unengaged while the pull has started and
+// the next view frame has not arrived. A boss row that becomes current otherwise is (step, false), the caller's
+// blocking failure: the preparation the run was started to test never happened. A failed boss read is an error too
+// (the gate never fires on a read it could not make); the caller stops the walk with it, and no aura goes out.
+func (w *walk) prepullGate(ctx context.Context, st tbm.RunStatus, later bool) (int, bool, error) {
+	if st.State != tbm.RunRunning && st.State != tbm.RunPaused {
+		return 0, false, nil
+	}
+	if st.Kind == planexport.KindBoss {
+		if _, ok := w.bossRowAt(st.Step); !ok {
+			return 0, false, nil
+		}
+		if w.prepullAuraSent[st.Step] {
+			// The row was prepared already: its own status is no failure and needs no read. The caller's sent check
+			// returns before it treats fire=false as one.
+			return st.Step, false, nil
+		}
+		if !w.prePullOK(st, later, w.env.now()) {
+			return st.Step, false, nil
+		}
+		engaged, err := w.prepullBossEngaged(ctx, st.Step)
+		if err != nil {
+			return 0, false, err
+		}
+		return st.Step, !engaged, nil
+	}
+	next := st.Step + 1
+	if _, ok := w.bossRowAt(next); !ok {
+		return 0, false, nil
+	}
+	if !w.prePullOK(st, later, w.env.now()) {
+		return 0, false, nil
+	}
+	return next, true, nil
+}
+
+// prepullAuraSendPending is pollOnce's firing: at the step before a boss row (whatever its phase) or at the boss row
+// itself when the run passed that step too fast to pause, once per boss row, the auras go out under a run pause that
+// must hold. A boss row that became current without a verified fire fails the walk (a configured boss row the walk
+// never prepared is not the test the run was started for). A boss row whose arena read fails is the gate's error and
+// stops the walk too. Whenever the status was running before the pause attempt, the resume is attempted afterwards
+// even when the hold or the fire failed: a run left paused stops the raid silently. A status that was already paused
+// sends no resume. A row is recorded as done only after the auras verified within the tolerance. It reports whether a
+// firing happened, so pollOnce breaks its line loop (the next poll re-reads from the cursor), like the instance-data
+// firing.
 func (w *walk) prepullAuraSendPending(ctx context.Context, st tbm.RunStatus, later bool) (bool, error) {
 	if len(w.prepullAuras) == 0 {
 		return false, nil
 	}
-	step, fire := w.preBossGate(st, later)
+	step, fire, err := w.prepullGate(ctx, st, later)
+	if err != nil {
+		return false, err
+	}
 	if step == 0 {
 		return false, nil
 	}
@@ -148,9 +201,12 @@ func (w *walk) prepullAuraSendPending(ctx context.Context, st tbm.RunStatus, lat
 }
 
 // prepullAuraHold puts the run on hold for the batch and confirms it. A refused, unacknowledged or unconfirmed pause
-// is a blocking failure: no aura goes out on a run the walk cannot show is paused on the rest step before the boss
-// row (a pause that lands at the boss row itself is a pause mid-pull). The confirmation is a fresh `run status`, the
-// run's own answer rather than the push feed's newest line.
+// is a blocking failure: no aura goes out on a run the walk cannot show is paused before the pull. The pause must
+// stand on the step before the boss row; the one exception is a run that passed that step too fast to pause: then it
+// may stand on the boss row itself, and only while the boss is not engaged — the boss's arena is read fresh from the
+// server after the pause is confirmed (prepullBossEngaged), never from the cached frames, and the fire's own combat
+// read still gates the commander and every member. A pause past the boss row is mid-pull and fails. The confirmation
+// is a fresh `run status`, the run's own answer rather than the push feed's newest line.
 func (w *walk) prepullAuraHold(ctx context.Context, step int, pause bool) error {
 	if pause {
 		rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "pause", WaitMS: 10000})
@@ -182,17 +238,82 @@ func (w *walk) prepullAuraHold(ctx context.Context, step int, pause bool) error 
 	if w.plan != nil && run.Plan != "" && run.Plan != w.plan.Name {
 		return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the paused run is %s, not %s, no auras were sent", step, run.Plan, w.plan.Name)
 	}
-	if run.Step != step-1 {
-		return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused at step %d, past the rest of step %d, no auras were sent",
+	if run.Step != step-1 && run.Step != step {
+		return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused at step %d, past the step before it (step %d), no auras were sent",
 			step, run.Step, step-1)
+	}
+	if run.Step == step {
+		// The run passed the step before the boss too fast for the pause. A pause on the boss row is still before the
+		// pull only while the boss is not engaged: the arena is read fresh here, after the pause was confirmed, because
+		// the cached hostile frames can lag the server by a frame and show a boss the commander already pulled. The fire
+		// re-reads the commander and every living member for combat before its first aura, so a pull that started anyway
+		// still stops the batch there.
+		engaged, err := w.prepullBossEngaged(ctx, step)
+		if err != nil {
+			return err
+		}
+		if engaged {
+			return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused on the boss row with the boss engaged, no auras were sent", step)
+		}
+		w.note("prepull-aura: boss row %d: the run reached the boss row before the pause; it paused there with the boss not engaged", step)
 	}
 	return nil
 }
 
-// prepullAuraCombatClear re-reads every living party member and refuses the batch while any one of them is in combat:
-// a pull that starts after the pause must stop the auras, not receive them after the encounter began. It fails closed
-// on the read too: a member the unit RPC cannot read may be fighting, so the batch stops there as well. The caller
-// builds the watch from the whole living party, not only the members that carry an aura list.
+// prepullBossEngaged reads the boss row's arena FRESH from the server and reports whether any unit there is in
+// combat: `q units 60 <anchor> all`, the same read the reuse-instance guard (`placeBossEngaged`) makes, with `cb`
+// the combat state. The walk's cached hostile frames (`bossEngagedNow`) are not used here: the push feed's statuses
+// are handled before the next view frame is fetched, so a cached frame can still show the boss unengaged after the
+// commander has pulled. It fails closed: a boss row without a point, a refused or unanswered read, a truncated reply,
+// and a unit row without a well-formed `cb` are all errors or counted as combat, never a clean read, and the caller
+// sends no aura on any of them (ttUnitOf's own InCombat stays tolerant for the other callers; the prepull read
+// demands the field).
+func (w *walk) prepullBossEngaged(ctx context.Context, step int) (bool, error) {
+	row, ok := w.bossRowAt(step)
+	if !ok {
+		return false, stopf(exitRaidWalkFailed, "prepull-aura: boss row %d is not one of the plan's rows", step)
+	}
+	if row.X == 0 && row.Y == 0 {
+		return false, stopf(exitRaidWalkFailed,
+			"prepull-aura: boss row %d has no point to read the boss's combat state at, so combat cannot be ruled out: no auras were sent", step)
+	}
+	cmd := fmt.Sprintf("q units %d %s %s %s all", placeBossArenaYd, num32(row.X), num32(row.Y), num32(row.Z))
+	out, err := w.tt(ctx, cmd)
+	if err != nil {
+		return false, stopf(exitRaidWalkFailed,
+			"prepull-aura: boss row %d: the arena read (%s) failed, so combat cannot be ruled out: no auras were sent: %v", step, cmd, err)
+	}
+	body, ok := ttLast(out)
+	if !ok {
+		return false, stopf(exitRaidWalkFailed,
+			"prepull-aura: boss row %d: the arena read (%s) gave no reply, so combat cannot be ruled out: no auras were sent", step, cmd)
+	}
+	if body.flag("trunc") {
+		return false, stopf(exitRaidWalkFailed,
+			"prepull-aura: boss row %d: the arena read (%s) lists more units than one reply carries, so combat cannot be ruled out: no auras were sent", step, cmd)
+	}
+	for _, m := range body.list("units") {
+		u := ttUnitOf(m)
+		if !u.CBKnown {
+			// The reply does not say whether this unit is fighting (a degraded or version-skewed toolkit answer still
+			// has a valid envelope and no trunc flag). An unproven unit is not an out-of-combat unit.
+			w.note("prepull-aura: boss row %d: %s (%d) carries no combat state in the arena read at %s: counted as in combat", step, u.Name, u.Entry, cmd)
+			return true, nil
+		}
+		if u.InCombat && !u.Dead {
+			w.note("prepull-aura: boss row %d: %s (%d) is in combat in the arena read at %s", step, u.Name, u.Entry, cmd)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// prepullAuraCombatClear re-reads the commander and every living party member and refuses the batch while any one of
+// them is in combat: a pull that starts after the pause must stop the auras, not receive them after the encounter
+// began. PartyInfo.Members leaves the commander out, so the watch carries it first; a pull the commander started is
+// the one a member-only check misses. It fails closed on the read too: a unit the RPC cannot read may be fighting, so
+// the batch stops there as well. The caller builds the watch from the commander and the whole living party, not only
+// the members that carry an aura list.
 func (w *walk) prepullAuraCombatClear(ctx context.Context, step int) error {
 	port := walkAuras{w: w}
 	for _, t := range w.prepullAuraWatch {
@@ -233,10 +354,18 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int) (err error) {
 	}
 	port := walkAuras{w: w}
 	cfg := dungeon.AuraCfg{Gap: prepullAuraGap, Settle: prepullAuraSettle, ViewWait: prepullAuraViewWait}
-	// The combat watch is every living party member, list or no list: a pull may come from a member the flag does not
-	// cover. A member the unit read cannot confirm is living stays in the watch, and its unreadable row fails the
-	// recheck: an unproven party is not an out-of-combat party.
-	var watch []dungeon.AuraTarget
+	// The combat watch is the commander and every living party member, list or no list: a pull may come from the
+	// commander (which PartyInfo.Members leaves out) or from a member the flag does not cover. A unit the unit read
+	// cannot confirm is living stays in the watch, and its unreadable row fails the recheck: an unproven party is not
+	// an out-of-combat party.
+	st, err := w.status(ctx)
+	if err != nil {
+		return stopf(exitRaidWalkFailed, "prepull-aura: the commander's status: %v", err)
+	}
+	if st.Character == "" || st.GUID == 0 {
+		return stopf(exitRaidWalkFailed, "prepull-aura: the status names no commander (character %q, guid %s), so its combat state cannot be read", st.Character, st.GUID)
+	}
+	watch := []dungeon.AuraTarget{{GUID: st.GUID, Name: st.Character}}
 	var targets []prepullAuraTarget
 	for _, m := range party.Members {
 		if !m.Online || m.Dead || m.GUID == 0 {

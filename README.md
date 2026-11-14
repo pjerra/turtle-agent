@@ -50,10 +50,14 @@ points, not the premade's exact point spread, which depends on the hire's level;
 spec is listed in the walk's `spec_failed`.
 
 Raid-walk's `--prepull-aura role=<role>:<ids>` (`tank`, `melee`, `ranged`, `caster`, `healer` or `all`) puts a flask,
-elixir, food and world-buff list on the party as auras at the pre-pull rest before each boss row, and
-`prepull-auras.json` records what each bot carries. The batch is fail-closed: every living party member, list or no list,
-is re-read for combat before each `.aura` (an in-combat member or an unreadable `unit` row stops the batch), and a boss
-row lands in `boss_rows` only after its auras verified — a failed fire is an `attempts{row, reason}` entry instead.
+elixir, food and world-buff list on the party as auras at the step before each boss row — whatever that step's phase,
+or on the boss row itself if the run passed that step too fast to pause, both only while the run is still before the
+pull — and
+`prepull-auras.json` records what each bot carries. The batch is fail-closed: the commander and every living party
+member, list or no list, are re-read for combat before each `.aura` (an in-combat unit or an unreadable `unit` row
+stops the batch), a boss row's arena is read fresh from the server (`q units` around the row: a boss already engaged,
+a read that cannot be made, or a unit row without its combat state, stops the walk), and a boss row lands in
+`boss_rows` only after its auras verified — a failed fire is an `attempts{row, reason}` entry instead.
 By default every requested aura must verify; a miss fails the walk,
 and `--prepull-aura-tolerance N` is the explicit opt-in that accepts up to N missing ids per bot
 (see [the raid-walk reference](docs/okf/raids/raid-walk-reference.md)).

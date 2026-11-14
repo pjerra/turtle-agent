@@ -1637,8 +1637,9 @@ func (w *walk) pollOnce(ctx context.Context, dash bool) ([]raidwalk.Incident, er
 			return nil, err
 		}
 		if !fired {
-			// --prepull-aura reads the same pre-pull gate: a fire pauses the run, puts the lists on the party and
-			// resumes it, and breaks this poll's loop like the instance-data firing.
+			// --prepull-aura has its own gate (the step before a boss row in any phase, or the boss row itself
+			// before the pull): a fire pauses the run, puts the lists on the party and resumes it, and breaks
+			// this poll's loop like the instance-data firing.
 			fired, err = w.prepullAuraSendPending(ctx, st, later)
 			if err != nil {
 				return nil, err
