@@ -275,3 +275,39 @@ func TestBotStateAuraRole(t *testing.T) {
 		}
 	}
 }
+
+// BotStateAuraRoleUnclassed is the same read for a hire whose unit row the store does not hold, so no class keys the
+// table: a strategy every class that names it agrees on gives that role ("protection" a tank, "holy" a healer), and
+// everything else fails closed - a strategy no class names, a kit naming none or two roles, and a strategy a future
+// table would split on roles.
+func TestBotStateAuraRoleUnclassed(t *testing.T) {
+	for _, tc := range []struct{ specs, want string }{
+		{"protection", PrepullTank},
+		{"holy", PrepullHealer},
+		{"protection+offdps", PrepullTank},
+		{"combat", PrepullMelee},
+		{"restoration", PrepullHealer},
+	} {
+		if got, why := BotStateAuraRoleUnclassed(tc.specs); got != tc.want {
+			t.Errorf("BotStateAuraRoleUnclassed(%q) = %q (%s), want %q", tc.specs, got, why, tc.want)
+		}
+	}
+	for _, tc := range []struct{ name, specs, want string }{
+		{"no kit", "", "no spec strategy"},
+		{"two roles", "holy+shadow", "more than one role"},
+		{"unknown strategy", "moonfire", "no aura role covers"},
+	} {
+		if got, why := BotStateAuraRoleUnclassed(tc.specs); got != "" || !strings.Contains(why, tc.want) {
+			t.Errorf("%s: got %q (%s), want no role and %q", tc.name, got, why, tc.want)
+		}
+	}
+	// A strategy two classes would split on roles is no role at all: the guard a future table edit meets.
+	moduleSpecRoles["test class"] = map[string]string{"combat": PrepullCaster}
+	defer delete(moduleSpecRoles, "test class")
+	if got, why := BotStateAuraRoleUnclassed("combat"); got != "" || !strings.Contains(why, "different roles") {
+		t.Errorf("a split strategy gave %q (%s), want no role", got, why)
+	}
+	if got, _ := BotStateAuraRoleUnclassed("protection"); got != PrepullTank {
+		t.Errorf("protection with a split table gave %q, want %q", got, PrepullTank)
+	}
+}
