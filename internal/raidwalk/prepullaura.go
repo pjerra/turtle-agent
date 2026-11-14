@@ -3,15 +3,20 @@
 // that a real raid brings into the instance.
 //
 //	--prepull-aura role=<role>:<id,id,...|preset,...>
+//	--prepull-aura <file.json>
 //
 // <role> is tank, melee, ranged, caster, healer or all (every living member), and <ids> is a comma list of spell ids
 // and dungeon.BuffPresets names; "world" is the world-raid preset (the classic world buffs a Turtle raid keeps,
-// Warchief's Blessing left out: it is Horde-only). A role named twice is refused, and so is a role whose list would
-// pass dungeon.MaxBuffs (the aura slots a bot has).
+// Warchief's Blessing left out: it is Horde-only). A value that is not a role= list is a `tb-prepull-auras` file
+// (dungeons/prepull/zg-preraid.json): one list per role under "roles", so a walk names the file instead of repeating
+// six values. A role named twice is refused (from two values or from a file and a value), and so is a role whose
+// list would pass dungeon.MaxBuffs (the aura slots a bot has).
 package raidwalk
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -84,26 +89,114 @@ func ParsePrepullAura(v string) (PrepullAura, error) {
 	return PrepullAura{Role: role, Buffs: buffs}, nil
 }
 
+// PrepullFileFormat is the format string a --prepull-aura file names ("tb-prepull-auras": dungeons/prepull/
+// zg-preraid.json).
+const PrepullFileFormat = "tb-prepull-auras"
+
+// prepullAuraFileDoc is the file form's JSON: the format, the version and one {ids} list per aura role. The sample
+// file's other keys ("what", "note", "verified", "raid_buff_strip") are documentation and are not read.
+type prepullAuraFileDoc struct {
+	Format  string                    `json:"format"`
+	Version int                       `json:"version"`
+	Roles   map[string]prepullAuraIDs `json:"roles"`
+}
+
+// prepullAuraIDs is one role's list in a --prepull-aura file.
+type prepullAuraIDs struct {
+	IDs []uint32 `json:"ids"`
+}
+
 // PlanPrepullAuras parses every flag value, refuses a role named twice (it would be ambiguous which list wins), and
-// checks that no role's merged list passes the aura slots a bot has.
+// checks that no role's merged list passes the aura slots a bot has. A value that is not a role= list names a
+// tb-prepull-auras file, whose roles join the set in PrepullRoles order.
 func PlanPrepullAuras(values []string) (PrepullAuras, error) {
 	var out PrepullAuras
 	named := map[string]bool{}
+	add := func(list []PrepullAura) error {
+		for _, a := range list {
+			if named[a.Role] {
+				return fmt.Errorf("prepull-aura: role %q is named twice: one list per role", a.Role)
+			}
+			named[a.Role] = true
+			out = append(out, a)
+		}
+		return nil
+	}
 	for _, v := range values {
-		a, err := ParsePrepullAura(v)
+		if isPrepullAuraValue(v) {
+			a, err := ParsePrepullAura(v)
+			if err != nil {
+				return nil, err
+			}
+			if err := add([]PrepullAura{a}); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		path := strings.TrimSpace(v)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("prepull-aura %q: %w (want \"role=<role>:<ids>\" or a %s file)", v, err, PrepullFileFormat)
+		}
+		list, err := ParsePrepullAuraFile(path, data)
 		if err != nil {
 			return nil, err
 		}
-		if named[a.Role] {
-			return nil, fmt.Errorf("prepull-aura: role %q is named twice: one list per role", a.Role)
+		if err := add(list); err != nil {
+			return nil, err
 		}
-		named[a.Role] = true
-		out = append(out, a)
 	}
 	for _, role := range PrepullRoles {
 		if n := len(out.For(role)); n > dungeon.MaxBuffs {
 			return nil, fmt.Errorf("prepull-aura: a %s bot would carry %d auras, at most %d (its aura slots)", role, n, dungeon.MaxBuffs)
 		}
+	}
+	return out, nil
+}
+
+// isPrepullAuraValue tells a role= list from a file path: only the role= form starts with "role=".
+func isPrepullAuraValue(v string) bool {
+	v = strings.TrimSpace(v)
+	return len(v) >= len("role=") && strings.EqualFold(v[:len("role=")], "role=")
+}
+
+// ParsePrepullAuraFile reads a tb-prepull-auras file's lists: one PrepullAura per role the file names, in
+// PrepullRoles order, so the same file always resolves to the same flag set. The format and version are checked, an
+// unknown role word, a role with no ids and an id ResolveBuffs refuses are errors: a file the walk cannot read whole
+// is no preparation.
+func ParsePrepullAuraFile(name string, data []byte) ([]PrepullAura, error) {
+	var doc prepullAuraFileDoc
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("prepull-aura %s: %v", name, err)
+	}
+	if doc.Format != PrepullFileFormat {
+		return nil, fmt.Errorf("prepull-aura %s: format %q, want %q", name, doc.Format, PrepullFileFormat)
+	}
+	if doc.Version != 1 {
+		return nil, fmt.Errorf("prepull-aura %s: version %d, want 1", name, doc.Version)
+	}
+	for role := range doc.Roles {
+		if !slices.Contains(PrepullRoles, role) {
+			return nil, fmt.Errorf("prepull-aura %s: role %q is not one of %s", name, role, strings.Join(PrepullRoles, ", "))
+		}
+	}
+	var out []PrepullAura
+	for _, role := range PrepullRoles {
+		r, ok := doc.Roles[role]
+		if !ok {
+			continue
+		}
+		if len(r.IDs) == 0 {
+			return nil, fmt.Errorf("prepull-aura %s: role %q names no id", name, role)
+		}
+		buffs, err := dungeon.ResolveBuffs(nil, r.IDs)
+		if err != nil {
+			return nil, fmt.Errorf("prepull-aura %s: role %q: %w", name, role, err)
+		}
+		out = append(out, PrepullAura{Role: role, Buffs: buffs})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("prepull-aura %s: the file names no role (want one of %s)", name, strings.Join(PrepullRoles, ", "))
 	}
 	return out, nil
 }

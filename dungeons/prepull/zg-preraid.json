@@ -1,7 +1,7 @@
 {
  "format": "tb-prepull-auras",
  "version": 1,
- "note": "Sample --prepull-aura lists for a Zul'Gurub pre-raid walk (walk 100: tier 1 gear, full player prep). Every id was checked in the core's tw_world_spell_template.sql: each is an effect-6 (apply aura) spell that a GM '.aura <id>' puts on the selected player, not a Food-channel cast. The walk takes the ids directly, one value per role: --prepull-aura role=tank:17626,17538,11405,11348,25661. A bot whose role the walk cannot tell (an unknown class) gets only the 'all' lists.",
+ "note": "Sample --prepull-aura lists for a Zul'Gurub pre-raid walk (walk 100: tier 1 gear, full player prep). Every id was checked in the core's tw_world_spell_template.sql: each is an effect-6 (apply aura) spell that a GM '.aura <id>' puts on the selected player, not a Food-channel cast. The walk names this file directly (--prepull-aura dungeons/prepull/zg-preraid.json, format tb-prepull-auras: one list per role under 'roles'), or takes the ids one value per role: --prepull-aura role=tank:17626,17538,11405,11348,25661. A bot whose role the walk cannot tell (an unknown class) gets only the 'all' lists, and every bot the walk hired must receive a list or the fire fails.",
  "roles": {
   "tank": {
    "ids": [17626, 17538, 11405, 11348, 25661],

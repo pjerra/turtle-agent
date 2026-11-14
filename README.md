@@ -50,13 +50,17 @@ points, not the premade's exact point spread, which depends on the hire's level;
 spec is listed in the walk's `spec_failed`.
 
 Raid-walk's `--prepull-aura role=<role>:<ids>` (`tank`, `melee`, `ranged`, `caster`, `healer` or `all`) puts a flask,
-elixir, food and world-buff list on the party as auras at the step before each boss row — whatever that step's phase,
+elixir, food and world-buff list on the raid as auras at the step before each boss row — whatever that step's phase,
 or on the boss row itself if the run passed that step too fast to pause, both only while the run is still before the
 pull — and
-`prepull-auras.json` records what each bot carries. The batch is fail-closed: the commander and every living party
-member, list or no list, are re-read for combat before each `.aura` (an in-combat unit or an unreadable `unit` row
-stops the batch), a boss row's arena is read fresh from the server (`q units` around the row: a boss already engaged,
-a read that cannot be made, or a unit row without its combat state, stops the walk), and a boss row lands in
+`prepull-auras.json` records what each bot carries. A value that is not a `role=` list is a `tb-prepull-auras` file, so
+`--prepull-aura dungeons/prepull/zg-preraid.json` names the six lists at once. The targets are the bots of the
+commander's raid, read from its view: the walk's player is not in the hired bots' raid. The batch is fail-closed: the
+commander and every living raid member, list or no list, are re-read for combat before each `.aura` (an in-combat unit
+or an unreadable `unit` row stops the batch), a boss row's arena is read fresh from the server (`q units` around the
+row: a boss already engaged, a read that cannot be made, or a unit row without its combat state, stops the walk), and
+every bot the walk hired must receive a list — a fire that reaches fewer of them, or none at all, fails with the bots
+and reasons named. A boss row lands in
 `boss_rows` only after its auras verified — a failed fire is an `attempts{row, reason}` entry instead.
 By default every requested aura must verify; a miss fails the walk,
 and `--prepull-aura-tolerance N` is the explicit opt-in that accepts up to N missing ids per bot

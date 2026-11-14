@@ -1,6 +1,9 @@
 package raidwalk
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -130,5 +133,95 @@ func TestClassAuraRole(t *testing.T) {
 		if got := ClassAuraRole(class); got != want {
 			t.Errorf("class %d: %q, want %q", class, got, want)
 		}
+	}
+}
+
+// A --prepull-aura value that is not a role= list names a tb-prepull-auras file (dungeons/prepull/zg-preraid.json):
+// one list per role under "roles", so a walk names the file instead of repeating six values. The file's roles join
+// the set in PrepullRoles order, and a role named by both a file and a value is refused.
+func TestPrepullAuraFile(t *testing.T) {
+	const sample = "../../dungeons/prepull/zg-preraid.json"
+	raw, err := os.ReadFile(sample)
+	if err != nil {
+		t.Fatalf("%s: %v", sample, err)
+	}
+	list, err := ParsePrepullAuraFile(sample, raw)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	if len(list) != len(PrepullRoles) {
+		t.Fatalf("%d roles, want %d: %+v", len(list), len(PrepullRoles), list)
+	}
+	for i, role := range PrepullRoles {
+		if list[i].Role != role {
+			t.Fatalf("role %d is %q, want %q (PrepullRoles order)", i, list[i].Role, role)
+		}
+	}
+	if got := PrepullIDs(list[0].Buffs); len(got) != 5 || got[0] != 17626 || got[4] != 25661 {
+		t.Fatalf("tank ids %v", got)
+	}
+	if got := PrepullIDs(list[len(list)-1].Buffs); len(got) != 7 || got[0] != 22888 || got[6] != 23768 {
+		t.Fatalf("all ids %v", got)
+	}
+
+	// The same file through the flag: its roles are the plan's lists, exactly as if each had been typed.
+	plan, err := PlanPrepullAuras([]string{sample})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if len(plan) != len(PrepullRoles) || PrepullIDs(plan.For(PrepullTank))[0] != 17626 {
+		t.Fatalf("plan %+v", plan)
+	}
+	// A file and a role= value for the same role are ambiguous.
+	if _, err := PlanPrepullAuras([]string{sample, "role=tank:17626"}); err == nil || !strings.Contains(err.Error(), "named twice") {
+		t.Fatalf("file plus its role: %v", err)
+	}
+	// A file and a value for a role the file does not name merge, with the file's lists first.
+	dir := t.TempDir()
+	tankOnly := filepath.Join(dir, "tank.json")
+	if err := os.WriteFile(tankOnly, []byte(`{"format":"tb-prepull-auras","version":1,"roles":{"tank":{"ids":[17626]}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan, err = PlanPrepullAuras([]string{"role=melee:10000", tankOnly})
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	if got := PrepullIDs(plan.For(PrepullMelee)); len(got) != 1 || got[0] != 10000 {
+		t.Fatalf("merged melee list %v", got)
+	}
+	if got := PrepullIDs(plan.For(PrepullTank)); len(got) != 1 || got[0] != 17626 {
+		t.Fatalf("merged tank list %v", got)
+	}
+
+	write := func(name, body string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	doc := func(format string, version int, roles string) string {
+		return fmt.Sprintf(`{"format":%q,"version":%d,"roles":%s}`, format, version, roles)
+	}
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{"bad format", doc("tb-raid-roster", 1, `{"tank":{"ids":[17626]}}`), "format"},
+		{"bad version", doc(PrepullFileFormat, 2, `{"tank":{"ids":[17626]}}`), "version"},
+		{"unknown role", doc(PrepullFileFormat, 1, `{"wizard":{"ids":[17626]}}`), "is not one of"},
+		{"no ids", doc(PrepullFileFormat, 1, `{"tank":{"ids":[]}}`), "names no id"},
+		{"id 0", doc(PrepullFileFormat, 1, `{"tank":{"ids":[0]}}`), "spell id 0"},
+		{"no roles", doc(PrepullFileFormat, 1, `{}`), "names no role"},
+		{"not json", `not json`, "prepull-aura"},
+	} {
+		path := write("f.json", tc.body)
+		if _, err := PlanPrepullAuras([]string{path}); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err %v (want %q)", tc.name, err, tc.want)
+		}
+	}
+	if _, err := PlanPrepullAuras([]string{filepath.Join(dir, "absent.json")}); err == nil || !strings.Contains(err.Error(), "no such file") {
+		t.Fatalf("absent file: %v", err)
 	}
 }
