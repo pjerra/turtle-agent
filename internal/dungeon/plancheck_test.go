@@ -547,7 +547,9 @@ func TestZulfarrakOldPlanFailsCheck(t *testing.T) {
 // follows them up one by one (most are drafts from the world export, whose points were never walked; blackfathom_deeps, razorfen_downs, scarlet_graveyard, stratholme_undead and temple_of_ahnqiraj fail only on their needs_walk points; Uldaman's two direct hops over the scorpid pit are exempt in the plan itself (check_skip)). Take a plan off the list when it is fixed;
 // Zul'Farrak is not on it. wailing_caverns-extra is the Naralex event draft (#276): the offline walk from the foot to the gossip stand is
 // complete and pinned (TestNaralexReturnHop), but the server's PathFinder stops 205 yd short on the lower mesh, and the draft is not
-// exported to the run leader.
+// exported to the run leader. lower_blackrock_spire comes off on 2026-11-14: the route order fix (issue #1542) put every pack in
+// the leg whose walk passes it and dropped the old order's far anchors, so its walk passes the check with 362 points and no issue
+// (the old order failed the look point of its leg 2 pull group 10).
 var planCheckKnownFailing = map[string]bool{
 	"temple_of_ahnqiraj":    true,
 	"scarlet_graveyard":     true,
@@ -558,7 +560,6 @@ var planCheckKnownFailing = map[string]bool{
 	"dire_maul_east":        true,
 	"hateforge_quarry":      true,
 	"karazhan_crypt":        true,
-	"lower_blackrock_spire": true,
 	"maraudon_orange":       true,
 	"maraudon_purple":       true,
 	"molten_core":           true,
