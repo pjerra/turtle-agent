@@ -228,49 +228,56 @@ var classNames = map[uint8]string{
 // ClassName is the class name of a class id, "" for an id no class has.
 func ClassName(class uint8) string { return classNames[class] }
 
-// hybridSpecRoles is the aura role a dps spec of a class that can be more than one of melee, caster and healer gives
-// it: a feral druid (cat, bear) and an enhancement shaman are melee, a balance or boomkin druid and an elemental shaman
-// are casters. A spec absent here (restoration, or none) gives no role: the fire fails closed rather than guess.
-var hybridSpecRoles = map[string]map[string]string{
-	"druid":  {"cat": PrepullMelee, "bear": PrepullMelee, "balance": PrepullCaster, "boomkin": PrepullCaster},
-	"shaman": {"enh": PrepullMelee, "ele": PrepullCaster},
+// moduleSpecRoles is the aura role each class's spec strategies name, as the module's `TBM:BOTSTATE` line reports them
+// (SendBotStateLine's SpecStrategies). The class is part of the key because a class shares strategy names with another
+// ("protection" is a warrior's and a paladin's, "restoration" a druid's and a shaman's).
+var moduleSpecRoles = map[string]map[string]string{
+	"warrior": {"protection": PrepullTank, "arms": PrepullMelee, "fury": PrepullMelee},
+	"paladin": {"protection": PrepullTank, "holy": PrepullHealer, "retribution": PrepullMelee},
+	"hunter":  {"beast mastery": PrepullRanged, "marksmanship": PrepullRanged, "survival": PrepullRanged},
+	"rogue":   {"combat": PrepullMelee, "assassination": PrepullMelee, "subtlety": PrepullMelee},
+	"priest":  {"holy": PrepullHealer, "discipline": PrepullHealer, "shadow": PrepullCaster},
+	"shaman":  {"restoration": PrepullHealer, "enhancement": PrepullMelee, "elemental": PrepullCaster, "tank shaman": PrepullTank},
+	"mage":    {"frost": PrepullCaster, "fire": PrepullCaster, "arcane": PrepullCaster},
+	"warlock": {"affliction": PrepullCaster, "demonology": PrepullCaster, "destruction": PrepullCaster},
+	"druid": {"restoration": PrepullHealer, "balance": PrepullCaster, "boomkin": PrepullCaster,
+		"tank feral": PrepullTank, "dps feral": PrepullMelee, "cat": PrepullMelee, "bear": PrepullTank},
 }
 
-// HireAuraRole is the aura role of one of the walk's own hires, from the hire data the walk holds rather than the
-// class id alone (walk 100's cold review: the class table put a ret paladin, a feral druid, an enhancement shaman and a
-// shadow priest on the HEALER list).
+// BotStateAuraRole is the aura role a hire plays, from the module's own per-bot state: the `specs=` field of its
+// `TBM:BOTSTATE` row, a '+' list of the combat spec strategies the bot fights with (a hire the module installed a kit
+// for, never a guess from its class). This is what tells one priest from another in a batch that only names role counts
+// ("5h 13d"): a holy priest is a healer and a shadow priest a caster, a holy paladin a healer and a retribution paladin
+// melee. The optional "offdps" strategy is a healer's off-spec damage switch, not a spec, and is skipped.
 //
-//	batchRole — the roster batch's role: mt and ot are tanks whatever the class.
-//	tokenRole — the role the batch's hire grammar asked of the class (Batch.TokenRole: tank, healer or dps).
-//	class     — the class name (ClassName), from the class id the fire reads.
-//	spec      — the class-spec id a version-2 roster set on the batch ("" when it names none).
-//
-// A tank is a tank and a healer is a healer whatever its class. A dps is melee (warrior, rogue, paladin), ranged
-// (hunter) or caster (mage, warlock, priest); a dps druid or shaman needs its spec, and "" comes back whenever the
-// walk cannot tell the role — an unknown token role or a hybrid spec that is not named. The caller fails closed on
-// "", never as an "all"-only bot.
-func HireAuraRole(batchRole, tokenRole, class, spec string) string {
-	if batchRole == RoleMT || batchRole == RoleOT {
-		return PrepullTank
+// "" comes with the reason the role cannot be read: no spec strategy at all, a strategy the class's table does not
+// name, or strategies that point at more than one role (the caller fails closed, never guesses).
+func BotStateAuraRole(class, specs string) (role, why string) {
+	byClass, ok := moduleSpecRoles[class]
+	if !ok {
+		return "", fmt.Sprintf("class %q has no spec table", class)
 	}
-	switch tokenRole {
-	case "tank":
-		return PrepullTank
-	case "healer":
-		return PrepullHealer
-	case "dps":
-	default:
-		return ""
+	var roles []string
+	for _, spec := range strings.Split(specs, "+") {
+		spec = strings.TrimSpace(spec)
+		if spec == "" || spec == "offdps" {
+			continue
+		}
+		r, ok := byClass[spec]
+		if !ok {
+			return "", fmt.Sprintf("its state names the strategy %q, which no aura role covers for a %s", spec, class)
+		}
+		if !slices.Contains(roles, r) {
+			roles = append(roles, r)
+		}
 	}
-	switch class {
-	case "warrior", "rogue", "paladin":
-		return PrepullMelee
-	case "hunter":
-		return PrepullRanged
-	case "mage", "warlock", "priest":
-		return PrepullCaster
+	switch len(roles) {
+	case 1:
+		return roles[0], ""
+	case 0:
+		return "", fmt.Sprintf("its state names no spec strategy (%q)", specs)
 	}
-	return hybridSpecRoles[class][spec]
+	return "", fmt.Sprintf("its state names specs of more than one role (%s: %q)", strings.Join(roles, ", "), specs)
 }
 
 // PrepullIDs is the ids of an aura list, in order (the report's form).

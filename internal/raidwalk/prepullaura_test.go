@@ -121,50 +121,6 @@ func TestPlanPrepullAuras(t *testing.T) {
 	}
 }
 
-// HireAuraRole reads the walk's own hire data, not the class alone: a class table puts a ret paladin, a feral druid, an
-// enhancement shaman and a shadow priest on the healer list, and a hire whose role the data cannot give is "" (the fire
-// fails closed on it, never an "all"-only bot). This is walk 100's cold review.
-func TestHireAuraRole(t *testing.T) {
-	for _, tc := range []struct {
-		name                string
-		batch, token, class string
-		spec                string
-		want                string
-	}{
-		// The tanks are tanks whatever their class, by batch or by hire token.
-		{"mt by batch", RoleMT, "tank", "warrior", "", PrepullTank},
-		{"ot by batch", RoleOT, "tank", "paladin", "", PrepullTank},
-		{"tank token on a rest batch", RoleRest, "tank", "druid", "bear", PrepullTank},
-		// Healer and dps by token, never by class.
-		{"holy paladin", RoleRest, "healer", "paladin", "holy", PrepullHealer},
-		{"healer druid", RoleRest, "healer", "druid", "restoration", PrepullHealer},
-		{"ret paladin", RoleRest, "dps", "paladin", "retribution", PrepullMelee},
-		{"shadow priest", RoleRest, "dps", "priest", "shadow", PrepullCaster},
-		{"warrior dps", RoleRest, "dps", "warrior", "fury", PrepullMelee},
-		{"rogue dps", RoleRest, "dps", "rogue", "combat", PrepullMelee},
-		{"hunter dps", RoleRest, "dps", "hunter", "mm", PrepullRanged},
-		{"mage dps", RoleRest, "dps", "mage", "fire", PrepullCaster},
-		{"warlock dps", RoleRest, "dps", "warlock", "affliction", PrepullCaster},
-		// The dps hybrids need their spec: feral is melee, balance and elemental are casters.
-		{"feral cat", RoleRest, "dps", "druid", "cat", PrepullMelee},
-		{"feral bear", RoleRest, "dps", "druid", "bear", PrepullMelee},
-		{"balance druid", RoleRest, "dps", "druid", "balance", PrepullCaster},
-		{"boomkin druid", RoleRest, "dps", "druid", "boomkin", PrepullCaster},
-		{"enhancement shaman", RoleRest, "dps", "shaman", "enh", PrepullMelee},
-		{"elemental shaman", RoleRest, "dps", "shaman", "ele", PrepullCaster},
-		// What the data does not say is not guessed.
-		{"druid dps without a spec", RoleRest, "dps", "druid", "", ""},
-		{"shaman dps without a spec", RoleRest, "dps", "shaman", "", ""},
-		{"druid dps with a healer spec", RoleRest, "dps", "druid", "restoration", ""},
-		{"no hire role", RoleRest, "", "paladin", "", ""},
-		{"unknown class", RoleRest, "dps", "deathknight", "", ""},
-	} {
-		if got := HireAuraRole(tc.batch, tc.token, tc.class, tc.spec); got != tc.want {
-			t.Errorf("%s: HireAuraRole(%q, %q, %q, %q) = %q, want %q", tc.name, tc.batch, tc.token, tc.class, tc.spec, got, tc.want)
-		}
-	}
-}
-
 // ClassName is the name the hire data and the fire agree on: "" for an id no class has.
 func TestClassName(t *testing.T) {
 	for class, want := range map[uint8]string{
@@ -265,5 +221,57 @@ func TestPrepullAuraFile(t *testing.T) {
 	}
 	if _, err := PlanPrepullAuras([]string{filepath.Join(dir, "absent.json")}); err == nil || !strings.Contains(err.Error(), "no such file") {
 		t.Fatalf("absent file: %v", err)
+	}
+}
+
+// BotStateAuraRole reads the module's own per-bot `specs=` list: a mixed batch says nothing about which priest heals,
+// but the module's kit does. A spec naming two roles or none fails closed, never a class guess.
+func TestBotStateAuraRole(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		class string
+		specs string
+		want  string
+	}{
+		{"holy priest", "priest", "holy", PrepullHealer},
+		{"shadow priest", "priest", "shadow", PrepullCaster},
+		{"discipline priest with offdps", "priest", "discipline+offdps", PrepullHealer},
+		{"holy paladin", "paladin", "holy", PrepullHealer},
+		{"ret paladin", "paladin", "retribution", PrepullMelee},
+		{"prot paladin", "paladin", "protection", PrepullTank},
+		{"resto druid", "druid", "restoration", PrepullHealer},
+		{"feral cat", "druid", "dps feral", PrepullMelee},
+		{"feral bear", "druid", "bear", PrepullTank},
+		{"balance druid", "druid", "balance+offdps", PrepullCaster},
+		{"enh shaman", "shaman", "enhancement", PrepullMelee},
+		{"ele shaman", "shaman", "elemental", PrepullCaster},
+		{"resto shaman", "shaman", "restoration", PrepullHealer},
+		{"tank shaman", "shaman", "tank shaman", PrepullTank},
+		{"prot warrior", "warrior", "protection", PrepullTank},
+		{"arms warrior", "warrior", "arms", PrepullMelee},
+		{"marks hunter", "hunter", "marksmanship", PrepullRanged},
+		{"combat rogue", "rogue", "combat", PrepullMelee},
+		{"frost mage", "mage", "frost", PrepullCaster},
+		{"demo warlock", "warlock", "demonology", PrepullCaster},
+	} {
+		if got, why := BotStateAuraRole(tc.class, tc.specs); got != tc.want {
+			t.Errorf("%s: BotStateAuraRole(%q, %q) = %q (%s), want %q", tc.name, tc.class, tc.specs, got, why, tc.want)
+		}
+	}
+	for _, tc := range []struct {
+		name  string
+		class string
+		specs string
+		want  string
+	}{
+		{"no kit", "priest", "", "no spec strategy"},
+		{"two roles", "priest", "holy+shadow", "more than one role"},
+		{"unknown strategy", "mage", "moonfire", "no aura role covers"},
+		{"unknown class", "death knight", "frost", "no spec table"},
+	} {
+		got, why := BotStateAuraRole(tc.class, tc.specs)
+		if got != "" || !strings.Contains(why, tc.want) {
+			t.Errorf("%s: got %q (%s), want no role and %q", tc.name, got, why, tc.want)
+		}
 	}
 }

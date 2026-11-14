@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/events"
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/planexport"
@@ -58,10 +59,23 @@ type prepullAgent struct {
 	pauses  int
 	// paused is the run's state as the fake's `run status` answers it; holdPause=false makes a pause ACK without
 	// the run going paused. statusStep is the step the status line names (the rest before the boss row).
-	paused     bool
-	holdPause  bool
-	statusLine string
-	statusStep int
+	paused      bool
+	holdPause   bool
+	statusLine  string
+	statusStep  int
+	statusErr   string // the run status is refused with this ACTION_ERR message
+	statusNoRun bool   // the run status answers without a TBM:RUN line
+
+	// botStates is each bot's `specs=` field as `.bot roster` reports it (the per-bot aura role source), keyed by the
+	// bot's name. botStateMissing leaves a bot out of the snapshot, botStateNoSpecs sends its row without `specs=`,
+	// botStateTrunc announces one row more than it sends, and botStateRefused answers TBM:ROSTER_ERROR instead.
+	botStates       map[string]string
+	botStateMissing map[string]bool
+	botStateNoSpecs map[string]bool
+	botStateTrunc   bool
+	botStateRefused bool
+	gmLines         []string
+	eventLines      []events.Event // the system lines `.bot roster` queued, served by the events RPC
 	// combat is what the party's unit rows report. combatOnPause starts it when the pause holds; combatAfter
 	// starts it after that many gm_aura calls (0: never).
 	combat        bool
@@ -86,6 +100,7 @@ type prepullAgent struct {
 	hidden        map[string]bool
 	deadBots      map[string]bool
 	viewTruncated bool
+	viewErr       error
 	extra         []tbm.PartyRec
 }
 
@@ -94,7 +109,8 @@ func newPrepullAgent(t *testing.T) *prepullAgent {
 	a := &prepullAgent{t: t, clock: time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC), answers: true, holdPause: true, statusStep: 4,
 		classes: map[packet.GUID]uint8{}, auras: map[packet.GUID]map[uint32]bool{}, caster: map[uint32]bool{},
 		drop: map[packet.GUID]map[uint32]bool{}, combatBots: map[packet.GUID]bool{},
-		hidden: map[string]bool{}, deadBots: map[string]bool{}}
+		hidden: map[string]bool{}, deadBots: map[string]bool{},
+		botStates: map[string]string{}, botStateMissing: map[string]bool{}, botStateNoSpecs: map[string]bool{}}
 	a.selfGUID, a.selfName = packet.GUID(0x0000000000000AAA), "Commander"
 	// Mtbot (warrior mt), Otbot (warrior ot), Rank (rogue), Flitz (hunter), Zap (mage), Holi (priest).
 	for i, b := range []struct {
@@ -110,6 +126,36 @@ func newPrepullAgent(t *testing.T) *prepullAgent {
 }
 
 func (a *prepullAgent) advance(d time.Duration) { a.clock = a.clock.Add(d) }
+
+// queueBotStates is the module's answer to `.bot roster`: a TBM:BOTSTATE snapshot of the bots it can control, one row
+// per bot with the spec strategies its AI fights with. The walk reads `specs=` as the per-bot aura role source.
+func (a *prepullAgent) queueBotStates() {
+	if a.botStateRefused {
+		a.eventLines = append(a.eventLines, events.Event{Kind: events.KindSystem, Text: "TBM:ROSTER_ERROR|not-in-game|You must be in-game."})
+		return
+	}
+	var rows []string
+	for _, b := range a.bots {
+		if a.botStateMissing[b.Name] {
+			continue
+		}
+		fields := "move=follow,loot=on,aoe=off"
+		if specs := a.botStates[b.Name]; specs != "" && !a.botStateNoSpecs[b.Name] {
+			fields += ",specs=" + specs
+		}
+		rows = append(rows, "TBM:BOTSTATE|"+b.Name+"|"+fields)
+	}
+	n := len(rows)
+	if a.botStateTrunc {
+		n++
+	}
+	lines := []string{fmt.Sprintf("TBM:BOTSTATE_BEGIN|%d", n)}
+	lines = append(lines, rows...)
+	lines = append(lines, "TBM:BOTSTATE_END")
+	for _, l := range lines {
+		a.eventLines = append(a.eventLines, events.Event{Kind: events.KindSystem, Text: l})
+	}
+}
 
 // aurasOf is the auras the unit RPC reports for a bot, in id order.
 func (a *prepullAgent) aurasOf(g packet.GUID) []objects.Aura {
@@ -133,7 +179,30 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 		// The player's own group: empty in every TurtleBots walk (the hired bots raid without the player), so a fire
 		// that reads it sees 0 bots. The tests below prove the walk does not.
 		v = session.PartyInfo{}
+	case "gm":
+		var p struct {
+			Text string `json:"text"`
+		}
+		_ = json.Unmarshal(raw, &p)
+		a.gmLines = append(a.gmLines, p.Text)
+		if p.Text == ".bot roster" {
+			a.queueBotStates()
+		}
+	case "events":
+		var p struct {
+			Since uint64 `json:"since"`
+		}
+		_ = json.Unmarshal(raw, &p)
+		n := uint64(len(a.eventLines))
+		if p.Since > n {
+			p.Since = n
+		}
+		page := events.Page{Events: append([]events.Event{}, a.eventLines[p.Since:]...), Next: n}
+		v = page
 	case "bot_view":
+		if a.viewErr != nil {
+			return a.viewErr
+		}
 		if a.noView {
 			v = botViewResult{Have: false}
 			break
@@ -251,6 +320,15 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			a.paused = false
 			v = commanderReply{Sent: ".bot run resume", Reply: tbm.Reply{Kind: tbm.KindAck, OK: true, Line: "TBM:ACTION_ACK|run resume"}}
 		case "status":
+			if a.statusErr != "" {
+				v = commanderReply{Sent: ".bot run status", Reply: tbm.Reply{Kind: tbm.KindErr,
+					Err: &tbm.Err{Intent: "run status", Code: "refused", Message: a.statusErr}}}
+				break
+			}
+			if a.statusNoRun {
+				v = commanderReply{Sent: ".bot run status", Reply: tbm.Reply{OK: true, Kind: tbm.KindAck}}
+				break
+			}
 			if a.statusLine != "" {
 				v = commanderReply{Sent: ".bot run status", Reply: tbm.Reply{OK: true, Kind: tbm.KindAck, Lines: []string{a.statusLine}}}
 				break
@@ -350,18 +428,19 @@ type prepullHire struct {
 	class uint8
 	batch string // mt, ot or rest
 	token string // tank, healer or dps
-	spec  string // "" when the roster names none
+	spec  string // the roster's spec word, "" when the roster names none
+	specs string // the module's TBM:BOTSTATE `specs=` value: the spec strategies the bot fights with
 }
 
 // prepullHires is the fake agent's six bots as the walk hired them: one mt, one ot and four rest bots.
 func prepullHires() []prepullHire {
 	return []prepullHire{
-		{"Mtbot", 1, "mt", "tank", ""},
-		{"Otbot", 1, "ot", "tank", ""},
-		{"Rank", 4, "rest", "dps", ""},
-		{"Flitz", 3, "rest", "dps", ""},
-		{"Zap", 8, "rest", "dps", ""},
-		{"Holi", 5, "rest", "healer", ""},
+		{"Mtbot", 1, "mt", "tank", "", "protection"},
+		{"Otbot", 1, "ot", "tank", "", "protection"},
+		{"Rank", 4, "rest", "dps", "", "combat"},
+		{"Flitz", 3, "rest", "dps", "", "marksmanship"},
+		{"Zap", 8, "rest", "dps", "", "frost"},
+		{"Holi", 5, "rest", "healer", "", "holy"},
 	}
 }
 
@@ -434,6 +513,7 @@ func newPrepullWalkHires(t *testing.T, a *prepullAgent, hs []prepullHire, flags 
 		}
 		w.hires[h.name] = true
 		w.hireBatch[strings.ToLower(h.name)] = &r.Batches[i]
+		a.botStates[h.name] = h.specs
 		switch h.batch {
 		case raidwalk.RoleMT:
 			w.mt = h.name
@@ -1067,6 +1147,14 @@ func TestParsePrepullAuraFlags(t *testing.T) {
 	if code != exitOK || len(o.prepullAura) != 0 {
 		t.Fatalf("default options %v exit %d", o.prepullAura, code)
 	}
+	// --prepull-aura-when defaults to boss (today's behaviour) and takes start.
+	if o.prepullAuraWhen != prepullAuraWhenBoss {
+		t.Fatalf("default --prepull-aura-when %q", o.prepullAuraWhen)
+	}
+	o, code = parseRaidWalkArgs([]string{"zul_gurub", "--prepull-aura", "role=tank:17626", "--prepull-aura-when", "start"}, &stderr)
+	if code != exitOK || o.prepullAuraWhen != prepullAuraWhenStart {
+		t.Fatalf("start mode %q exit %d: %s", o.prepullAuraWhen, code, stderr.String())
+	}
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -1083,6 +1171,8 @@ func TestParsePrepullAuraFlags(t *testing.T) {
 		{"file and its role", []string{"zul_gurub", "--prepull-aura", "../../dungeons/prepull/zg-preraid.json", "--prepull-aura", "role=tank:17626"}, "named twice"},
 		{"negative tolerance", []string{"zul_gurub", "--prepull-aura", "role=tank:17626", "--prepull-aura-tolerance", "-1"}, "0 or more"},
 		{"tolerance alone", []string{"zul_gurub", "--prepull-aura-tolerance", "1"}, "needs --prepull-aura"},
+		{"bad when", []string{"zul_gurub", "--prepull-aura", "role=tank:17626", "--prepull-aura-when", "mid"}, `"boss" or "start"`},
+		{"when alone", []string{"zul_gurub", "--prepull-aura-when", "start"}, "needs --prepull-aura"},
 	} {
 		var errBuf bytes.Buffer
 		_, code := parseRaidWalkArgs(tc.args, &errBuf)
@@ -1344,17 +1434,18 @@ func TestPrepullAuraRoleFromTheHireData(t *testing.T) {
 		class  uint8
 		token  string
 		spec   string
+		specs  string // the module's per-bot state: the role source
 		want   string
 		wantID uint32
 		notID  uint32 // the id the class table would have sent
 	}{
-		{"holy paladin", 2, "healer", "holy", raidwalk.PrepullHealer, 17627, 17538},
-		{"ret paladin", 2, "dps", "retribution", raidwalk.PrepullMelee, 17538, 17627},
-		{"shadow priest", 5, "dps", "shadow", raidwalk.PrepullCaster, 17628, 17627},
-		{"feral druid", 11, "dps", "cat", raidwalk.PrepullMelee, 17538, 17627},
-		{"enhancement shaman", 7, "dps", "enh", raidwalk.PrepullMelee, 17538, 17627},
+		{"holy paladin", 2, "healer", "holy", "holy", raidwalk.PrepullHealer, 17627, 17538},
+		{"ret paladin", 2, "dps", "retribution", "retribution", raidwalk.PrepullMelee, 17538, 17627},
+		{"shadow priest", 5, "dps", "shadow", "shadow", raidwalk.PrepullCaster, 17628, 17627},
+		{"feral druid", 11, "dps", "cat", "dps feral", raidwalk.PrepullMelee, 17538, 17627},
+		{"enhancement shaman", 7, "dps", "enh", "enhancement", raidwalk.PrepullMelee, 17538, 17627},
 	} {
-		hs := []prepullHire{{"Mtbot", 1, "mt", "tank", ""}, {"Tester", tc.class, "rest", tc.token, tc.spec}}
+		hs := []prepullHire{{"Mtbot", 1, "mt", "tank", "", "protection"}, {"Tester", tc.class, "rest", tc.token, tc.spec, tc.specs}}
 		a := prepullRoleAgent(t, hs)
 		w := newPrepullWalkHires(t, a, hs, prepullRestAuras...)
 		if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
@@ -1383,12 +1474,12 @@ func TestPrepullAuraRoleFromTheHireData(t *testing.T) {
 // A dps druid whose spec the roster does not name cannot be placed: the fire fails closed before any aura, names the bot
 // and records the attempt instead of a boss row. The class table would have put the healer list on a feral build.
 func TestPrepullAuraDruidWithoutASpecFails(t *testing.T) {
-	hs := []prepullHire{{"Mtbot", 1, "mt", "tank", ""}, {"Tester", 11, "rest", "dps", ""}}
+	hs := []prepullHire{{"Mtbot", 1, "mt", "tank", "", "protection"}, {"Tester", 11, "rest", "dps", "", ""}}
 	a := prepullRoleAgent(t, hs)
 	w := newPrepullWalkHires(t, a, hs, prepullRestAuras...)
 	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
 	code, reason := stopInfo(err)
-	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "Tester") || !strings.Contains(reason, "names no spec") {
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "Tester") || !strings.Contains(reason, "no spec") {
 		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
 	}
 	if len(a.sent) != 0 {
@@ -1520,4 +1611,373 @@ func readPrepullAuraFile(t *testing.T, w *walk) prepullAuraFile {
 		t.Fatalf("%v: %s", err, raw)
 	}
 	return f
+}
+
+// prepullNoRunStatus is the commander's own answer before `run start`: no run of the plan is going.
+const prepullNoRunStatus = "TBM:RUN|zul_gurub|none|0/6|here|move|rest|no run"
+
+// prepullStartWalk is the walk of a --prepull-aura-when start test: the fake agent's six bots, the usual role lists
+// and the start mode, with the commander's `run status` answering that no run is going yet.
+func prepullStartWalk(t *testing.T, a *prepullAgent) *walk {
+	t.Helper()
+	a.statusLine = prepullNoRunStatus
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	w.opts.prepullAuraWhen = prepullAuraWhenStart
+	return w
+}
+
+// Walk 101: at Hakkar's boss row 689 the boss-row fire's ~20 x 6 ".aura" sends took about a minute, and on 4 of 4
+// attempts a bot entered combat while they went out. --prepull-aura-when start fires ONCE, after the placement and
+// before the run's first move: no run is started or paused for it, the auras are already on the raid when `run start`
+// goes out, and the verified fire is recorded as start_row (never as a boss row). A second call sends nothing.
+func TestPrepullAuraStartFiresBeforeTheRunStartsOnce(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := prepullStartWalk(t, a)
+	ctx := context.Background()
+	if err := w.prepullAuraStart(ctx); err != nil {
+		t.Fatalf("start fire: %v", err)
+	}
+	if len(a.sent) == 0 {
+		t.Fatal("the start fire sent nothing")
+	}
+	// Nothing has moved: the only commander request is the status read, and the walk is not in a run it could pause.
+	for _, v := range a.verbs {
+		if v != "status" {
+			t.Fatalf("the start fire sent the run verb %q before the run's first move: %v", v, a.verbs)
+		}
+	}
+	if w.runStarted || w.runStopped {
+		t.Fatalf("the start fire ran inside a run (started %v stopped %v)", w.runStarted, w.runStopped)
+	}
+	f := readPrepullAuraFile(t, w)
+	if f.StartRow != 1 {
+		t.Fatalf("start_row %d, want the run's first row 1", f.StartRow)
+	}
+	if len(f.BossRows) != 0 {
+		t.Fatalf("the start fire recorded boss rows %v", f.BossRows)
+	}
+	// Every hire carries its list: the six role lists cover the fake's mt, ot and four rest bots.
+	if len(f.Bots) != 6 {
+		t.Fatalf("%d bot(s) in the file: %+v", len(f.Bots), f.Bots)
+	}
+	for _, b := range f.Bots {
+		if len(b.Missing) != 0 || len(b.Seen) == 0 {
+			t.Fatalf("%s: seen %v missing %v", b.Bot, b.Seen, b.Missing)
+		}
+	}
+	sent := len(a.sent)
+	if err := w.prepullAuraStart(ctx); err != nil {
+		t.Fatalf("second start fire: %v", err)
+	}
+	if len(a.sent) != sent {
+		t.Fatalf("the second start fire sent %v", a.sent[sent:])
+	}
+	if len(a.verbs) != 1 {
+		t.Fatalf("the second start fire asked the commander again: %v", a.verbs)
+	}
+}
+
+// In start mode a boss row is never a place to send again: the rest before boss row 5 and the boss row itself send
+// nothing (no pause, no aura) and the file keeps boss_rows empty.
+func TestPrepullAuraStartDoesNotFireAgainAtTheBossRow(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := prepullStartWalk(t, a)
+	ctx := context.Background()
+	if err := w.prepullAuraStart(ctx); err != nil {
+		t.Fatalf("start fire: %v", err)
+	}
+	sent, verbs := len(a.sent), append([]string{}, a.verbs...)
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "rest", Note: "resting"}
+	for _, st := range []tbm.RunStatus{prepullRest(4), boss} {
+		if fired, err := w.prepullAuraSendPending(ctx, st, false); err != nil || fired {
+			t.Fatalf("step %d (%s): fired %v err %v", st.Step, st.Kind, fired, err)
+		}
+	}
+	if len(a.sent) != sent {
+		t.Fatalf("a boss row sent auras again: %v", a.sent[sent:])
+	}
+	if len(a.verbs) != len(verbs) {
+		t.Fatalf("a boss row asked the run to pause/resume: %v (was %v)", a.verbs, verbs)
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 0 || f.StartRow != 1 {
+		t.Fatalf("boss rows %v, start_row %d", f.BossRows, f.StartRow)
+	}
+}
+
+// The start mode's boss row is a read: the walk logs which auras each hire still carries at the pull, with the missing
+// ids, and sends nothing (a read needs no pause and cannot pull).
+func TestPrepullAuraStartLogsTheCoverageAtThePull(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := prepullStartWalk(t, a)
+	logF, err := os.Create(filepath.Join(w.outDir, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.logF = logF
+	defer func() {
+		if w.logF != nil {
+			_ = w.logF.Close()
+			w.logF = nil
+		}
+	}()
+	ctx := context.Background()
+	if err := w.prepullAuraStart(ctx); err != nil {
+		t.Fatalf("start fire: %v", err)
+	}
+	// Mtbot loses its flask before the pull: the coverage line must say which ids are missing.
+	delete(a.auras[packet.GUID(0x100)], 17626)
+	sent := len(a.sent)
+	// The step BEFORE the boss row is not the pull: no read line, however long the walk takes to get there.
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(4), false); err != nil || fired {
+		t.Fatalf("the step before the boss row: fired %v err %v", fired, err)
+	}
+	// A boss row in another phase is not the pull either.
+	if fired, err := w.prepullAuraSendPending(ctx, tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "rest", Note: "resting"}, false); err != nil || fired {
+		t.Fatalf("the boss row at rest: fired %v err %v", fired, err)
+	}
+	// The boss row current in the pull phase IS the pull: the coverage is read there.
+	if fired, err := w.prepullAuraSendPending(ctx, tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "pull", Note: "pulling"}, false); err != nil || fired {
+		t.Fatalf("the pull: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != sent {
+		t.Fatalf("the coverage read sent auras: %v", a.sent[sent:])
+	}
+	// The read is once per boss row: a later qualifying status of the same row logs nothing more.
+	if fired, err := w.prepullAuraSendPending(ctx, tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "task", Note: "fighting"}, false); err != nil || fired {
+		t.Fatalf("the fight start: fired %v err %v", fired, err)
+	}
+	_ = w.logF.Sync()
+	raw, err := os.ReadFile(filepath.Join(w.outDir, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(raw)
+	for _, want := range []string{
+		"prepull-aura: boss row 5: 5 of 6 hire(s) carry every requested aura at the pull",
+		"Mtbot 1/2 (missing 17626)",
+		"Rank 2/2",
+		"Holi 2/2",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("run.log lacks %q:\n%s", want, log)
+		}
+	}
+	if n := strings.Count(log, "hire(s) carry every requested aura at the pull"); n != 2 {
+		t.Fatalf("%d coverage line(s), want the pull and the fight-start refresh: %d\n%s", n, n, log)
+	}
+	for _, want := range []string{"(phase pull)", "(phase task)"} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("run.log lacks the coverage phase %q:\n%s", want, log)
+		}
+	}
+}
+
+// A start fire under a run the commander already reports as RUNNING sends nothing: the batch would go out while the
+// raid walks into the boss, which is exactly walk 101's Hakkar failure. The walk fails with the run line named.
+func TestPrepullAuraStartRefusesARunningRun(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	w.opts.prepullAuraWhen = prepullAuraWhenStart
+	a.statusLine = "TBM:RUN|zul_gurub|running|688/689|hakkar|move|begin|arrived"
+	code, reason := stopInfo(w.prepullAuraStart(context.Background()))
+	if code != exitRaidWalkFailed || !strings.Contains(reason, "already running") {
+		t.Fatalf("exit %d: %s", code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the start fire sent auras under a running run: %v", a.sent)
+	}
+}
+
+// A refused `run status` proves nothing about the run, so the start fire fails closed: a batch sent while the raid
+// walks is the walk-101 hazard. r1 warned and fired anyway; this is codex r1's first HIGH.
+func TestPrepullAuraStartRefusedStatusFailsClosed(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := prepullStartWalk(t, a)
+	a.statusErr = "unknown command"
+	code, reason := stopInfo(w.prepullAuraStart(context.Background()))
+	if code != exitRaidWalkFailed || !strings.Contains(reason, "refused") || !strings.Contains(reason, "cannot be ruled out") {
+		t.Fatalf("exit %d: %s", code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the start fire sent auras on a refused status: %v", a.sent)
+	}
+}
+
+// A status answer without a TBM:RUN line cannot rule a run out either: the start fire fails closed, sends nothing.
+func TestPrepullAuraStartMissingStatusLineFailsClosed(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := prepullStartWalk(t, a)
+	a.statusNoRun = true
+	code, reason := stopInfo(w.prepullAuraStart(context.Background()))
+	if code != exitRaidWalkFailed || !strings.Contains(reason, "no TBM:RUN line") {
+		t.Fatalf("exit %d: %s", code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the start fire sent auras without a status line: %v", a.sent)
+	}
+}
+
+// A RUNNING run of another plan is still a run: bots may be moving in it, so the start fire fails closed. r1 fired
+// when the plan name differed; this is the same codex r1 HIGH.
+func TestPrepullAuraStartRunningOtherPlanFailsClosed(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := prepullStartWalk(t, a)
+	a.statusLine = "TBM:RUN|some_other_plan|running|12/40|here|move|pull|pulling"
+	code, reason := stopInfo(w.prepullAuraStart(context.Background()))
+	if code != exitRaidWalkFailed || !strings.Contains(reason, "already running") {
+		t.Fatalf("exit %d: %s", code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the start fire sent auras under another plan's run: %v", a.sent)
+	}
+}
+
+// A paused run is not a proven idle state for a start fire: the walk never paused one before it. The fire fails
+// closed rather than assume the pause is its own.
+func TestPrepullAuraStartPausedRunFailsClosed(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := prepullStartWalk(t, a)
+	a.statusLine = "TBM:RUN|zul_gurub|paused|4/6|here|move|rest|paused"
+	code, reason := stopInfo(w.prepullAuraStart(context.Background()))
+	if code != exitRaidWalkFailed || !strings.Contains(reason, "not a confirmed idle state") {
+		t.Fatalf("exit %d: %s", code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the start fire sent auras on a paused run: %v", a.sent)
+	}
+}
+
+// The coverage read is taken at the pull, and only a SUCCESSFUL read marks the row done: a refused read at the pull
+// leaves the row unread, so the next qualifying status retries it instead of the evidence vanishing. r1 marked the row
+// done before the I/O, so this retry never happened (codex r1's second HIGH).
+func TestPrepullAuraCoverageReadRetriesAfterAFailure(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := prepullStartWalk(t, a)
+	logF, err := os.Create(filepath.Join(w.outDir, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.logF = logF
+	defer func() {
+		if w.logF != nil {
+			_ = w.logF.Close()
+			w.logF = nil
+		}
+	}()
+	ctx := context.Background()
+	if err := w.prepullAuraStart(ctx); err != nil {
+		t.Fatalf("start fire: %v", err)
+	}
+	a.viewErr = errors.New("the commander view was refused")
+	pull := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "pull", Note: "pulling"}
+	if fired, err := w.prepullAuraSendPending(ctx, pull, false); err != nil || fired {
+		t.Fatalf("the failed read: fired %v err %v", fired, err)
+	}
+	if _, ok := w.prepullAuraRead[5]; ok {
+		t.Fatal("a failed coverage read marked the boss row done")
+	}
+	a.viewErr = nil
+	if fired, err := w.prepullAuraSendPending(ctx, pull, false); err != nil || fired {
+		t.Fatalf("the retried read: fired %v err %v", fired, err)
+	}
+	if w.prepullAuraRead[5] != "pull" {
+		t.Fatalf("a successful coverage read recorded phase %q, want pull", w.prepullAuraRead[5])
+	}
+	_ = w.logF.Sync()
+	raw, err := os.ReadFile(filepath.Join(w.outDir, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(raw)
+	if n := strings.Count(log, "the coverage read at the pull failed"); n != 1 {
+		t.Fatalf("%d failed-read line(s), want 1:\n%s", n, log)
+	}
+	if n := strings.Count(log, "hire(s) carry every requested aura at the pull"); n != 1 {
+		t.Fatalf("%d coverage line(s), want 1:\n%s", n, log)
+	}
+}
+
+// Walk 101b: the rosters hire the healers and the dps in ONE batch ("5h 13d"), so the batch names no single role for a
+// priest, paladin, druid or shaman and r1 aborted with "the batch that hired it (rest) names no single role". The
+// module's own state rows name each bot's spec, so every hire is mapped per bot; the mixed batch is irrelevant.
+func TestPrepullAuraMixedBatchRolesComeFromTheModule(t *testing.T) {
+	hs := []prepullHire{
+		{"Mtbot", 1, "mt", "tank", "", "protection"},
+		{"Pal", 2, "rest", "", "", "holy"},
+		{"Prst", 5, "rest", "", "", "holy"},
+		{"Dru", 11, "rest", "", "", "restoration"},
+		{"Sham", 7, "rest", "", "", "restoration"},
+	}
+	a := prepullRoleAgent(t, hs)
+	w := newPrepullWalkHires(t, a, hs, prepullRestAuras...)
+	// The batch that hired all four: role counts only, no class tokens, exactly walk 101b's "5h 13d".
+	mixed, err := raidwalk.ParseRoster([]byte(`{"format":"tb-raid-roster","version":1,"level":60,"batches":[{"role":"mt","hire":"1 warrior:tank"},{"role":"rest","hire":"5h 13d"}]}`))
+	if err != nil {
+		t.Fatalf("mixed roster: %v", err)
+	}
+	for _, n := range []string{"Pal", "Prst", "Dru", "Sham"} {
+		w.hireBatch[strings.ToLower(n)] = &mixed.Batches[1]
+	}
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
+		t.Fatalf("fire: fired %v err %v", fired, err)
+	}
+	for _, n := range []string{"Pal", "Prst", "Dru", "Sham"} {
+		i := 0
+		for j, b := range a.bots {
+			if b.Name == n {
+				i = j
+			}
+		}
+		if !a.auras[a.bots[i].GUID][17627] {
+			t.Errorf("%s did not receive the healer list: %v", n, a.auras[a.bots[i].GUID])
+		}
+	}
+	f := readPrepullAuraFile(t, w)
+	if f.RoleSource == "" {
+		t.Fatal("prepull-auras.json does not record the role source")
+	}
+	for _, b := range f.Bots {
+		if b.Bot == "Mtbot" {
+			continue
+		}
+		if b.Role != raidwalk.PrepullHealer || b.Specs == "" {
+			t.Fatalf("%s: role %q specs %q, want the module's healer kit", b.Bot, b.Role, b.Specs)
+		}
+	}
+}
+
+// A bot the module's state snapshot leaves out has no per-bot role, so the fire fails closed BY NAME before any aura,
+// even when the roster batch would have named its role. r1 read the batch and fired.
+func TestPrepullAuraMissingModuleStateRowFailsClosed(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	a.botStateMissing["Holi"] = true
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "Holi") || !strings.Contains(reason, "no row") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("%d aura(s) went out without a per-bot role for Holi: %v", len(a.sent), a.sent)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the boss row was recorded as done")
+	}
+}
+
+// An incomplete state snapshot (a BEGIN count the rows do not match) is no source at all: the fire fails closed, and
+// the attempt names the incomplete snapshot rather than inventing roles from classes.
+func TestPrepullAuraIncompleteModuleSnapshotFailsClosed(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	a.botStateTrunc = true
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "snapshot is incomplete") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("%d aura(s) went out on an incomplete snapshot: %v", len(a.sent), a.sent)
+	}
 }
