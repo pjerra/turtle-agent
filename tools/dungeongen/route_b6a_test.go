@@ -1,14 +1,25 @@
 // Route batch B6a (TortoiseBots-audit tests/route-audit-1112, BATCHES.md "## B6a"): the static point fixes of
-// crescent_grove, hateforge_quarry, black_morass and blackrock_depths. Each test pins one sample of the rows the
+// crescent_grove, hateforge_quarry, black_morass and blackrock_depths. Each plan test pins one sample of the rows the
 // batch moved, so a later edit that drops the fix fails here. The points are the audit's own floor and dry-mesh
-// answers (AUDIT.md, per-plan defect tables), checked here without mmaps: the coordinates are plan data.
+// answers (AUDIT.md, per-plan defect tables), checked here without mmaps: the coordinates are plan data. The last
+// test builds the deployed cut with the mmaps and lints it: no water, off-floor or boss_aggro finding may come back.
 package main
 
 import (
+	"errors"
+	"fmt"
 	"math"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
+	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/pjerra/turtle-agent/internal/plancut"
+	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/pjerra/turtle-agent/internal/planlint"
+	"github.com/pjerra/turtle-agent/internal/worldspawn"
 )
 
 // b6aLoad loads a plan file.
@@ -174,4 +185,78 @@ func TestBlackrockDepthsB6aStands(t *testing.T) {
 		t.Fatalf("leg 8 group 57: %d approach points, want 3", len(a57))
 	}
 	b6aNear(t, "leg 8 group 57 approach[1]", a57[1], 1396.6, -452.4, -93.0)
+}
+
+// b6aMmaps is the server's navmesh when it holds all four plans' maps ($TURTLE_AGENT_MMAPS or ~/turtle-agent-mmaps, as the other
+// dungeongen checks use); the test skips without it.
+func b6aMmaps(t *testing.T) *navmesh.Planner {
+	t.Helper()
+	home, _ := os.UserHomeDir()
+	maps := []uint32{802, 808, 269, 230}
+	for _, dir := range []string{os.Getenv("TURTLE_AGENT_MMAPS"), filepath.Join(home, "turtle-agent-mmaps")} {
+		if dir == "" {
+			continue
+		}
+		have := true
+		for _, m := range maps {
+			n := fmt.Sprintf("%03d", m)
+			if _, err := os.Stat(filepath.Join(dir, n+".mmap")); err != nil {
+				have = false
+				break
+			}
+			if tiles, _ := filepath.Glob(filepath.Join(dir, n+"*.mmtile")); len(tiles) == 0 {
+				have = false
+				break
+			}
+		}
+		if !have {
+			continue
+		}
+		pl := navmesh.NewPlanner(dir)
+		t.Cleanup(pl.Close)
+		return pl
+	}
+	t.Skip("no navmesh files for maps 802, 808, 269 and 230: set TURTLE_AGENT_MMAPS to a folder holding their .mmap and .mmtile files")
+	return nil
+}
+
+// The deployed cut of every B6a plan (plan-export --allow-draft --gm-cross-direct --floor-aware --approach-hops, this tree's
+// cutter) carries no water, off-floor or boss_aggro finding: the three classes the batch's point fixes remove. These are the
+// counts plan-check --floor-aware --approach-hops prints for the same tree; a plan edit or a cutter change that brings one back
+// fails here, which the coordinate pins above cannot see.
+func TestB6aDeployedCutLintCounts(t *testing.T) {
+	pl := b6aMmaps(t)
+	for _, name := range []string{"crescent_grove", "hateforge_quarry", "black_morass", "blackrock_depths"} {
+		p := b6aLoad(t, name)
+		world, _, err := worldspawn.Load(filepath.Join("testdata", fmt.Sprintf("map%d", p.Map)), p.Map)
+		if err != nil {
+			t.Fatalf("%s: the map %d world export: %v", name, p.Map, err)
+		}
+		res, err := planexport.Build(p, planexport.Options{Source: "plan-check", Cut: plancut.Cut(pl, true), ApproachHops: true,
+			Floor: plancut.FloorAt(pl), GMCrossDirect: true})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		fs, err := planlint.Lint(res.Rows, pl, planlint.Options{Map: p.Map, Level: 60, World: world,
+			Raid: p.IsRaid(), KillFirst: p.KillFirst, PullCeiling: p.PullCeiling})
+		if errors.Is(err, navmesh.ErrNoEngine) {
+			t.Skip("built without cgo: no navmesh engine")
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		counts := planlint.Counts(fs)
+		for _, lint := range []string{planlint.LintWater, planlint.LintOffFloor, planlint.LintBossAggro} {
+			if counts[lint] == 0 {
+				continue
+			}
+			var lines []string
+			for _, f := range fs {
+				if f.Lint == lint {
+					lines = append(lines, f.String())
+				}
+			}
+			t.Errorf("%s: %d %s findings on the deployed cut, want 0:\n%s", name, counts[lint], lint, strings.Join(lines, "\n"))
+		}
+	}
 }

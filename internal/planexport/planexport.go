@@ -225,6 +225,10 @@ func (n CutNote) Text() string {
 // CutFunc returns the via points of one hop (not including its two ends) and a note for every point it dropped or moved.
 type CutFunc func(mapID uint32, from, to dungeon.Point) (via []dungeon.Point, notes []CutNote, err error)
 
+// FloorFunc answers the floor under a point: its x and y with the z of the highest plain ground within the caller's tolerance of
+// p.Z (see Options.Floor). ok is false when there is none.
+type FloorFunc func(mapID uint32, p dungeon.Point) (dungeon.Point, bool)
+
 // Options are the exporter's choices.
 type Options struct {
 	// Source is the text of ai_dungeon_plan.source (where the rows came from); empty: "turtle-agent dungeons/<name>.json".
@@ -251,6 +255,11 @@ type Options struct {
 	// 25 yd short of the target. Without it such a hop is left to the run leader's own navmesh hops (at most 8 of 40 yd, stopping 30 yd
 	// short), which a plan of long corridors (Wailing Caverns: up to 363 yd) outruns.
 	ApproachHops bool
+	// Floor, with ApproachHops, gives the navmesh floor under the lead row (approachLeadYd past the standoff): that row's z is
+	// interpolated along the straight line from the cut's last point to the target, and that line can run 2-4 yd under a ramp or a
+	// ledge (route audit B6a: blackrock_depths step 717, 3.7 yd under its floor). With Floor the row takes the floor's z, and a
+	// lead point with no plain ground under it gets no row (the run leader paths that gap itself). Nil: the interpolated z stays.
+	Floor FloorFunc
 	// GMCrossDirect exports a gm_cross waypoint as a move_direct (a straight walk to the landing point) instead of refusing the plan: the
 	// run leader has no GM move. Only right where the gap is a drop the straight line crosses (Wailing Caverns' ramp to Lord Serpentis,
 	// 6 yd down over a 3.9 yd gap); the row's comment and a warning say it is not tried live.
@@ -1258,7 +1267,20 @@ func (b *builder) cutLongHops() error {
 				}
 				if len(via) > 0 && !waterGap && dist3(via[len(via)-1], c) > dungeon.RunLeaderReachYd {
 					if p, ok := pointBefore(full, c, approachStandoffYd+approachLeadYd); ok {
-						via = append(via, p)
+						// The lead point's z comes from the straight line between the cut's last point and the target, and that line
+						// can run under a ramp or a ledge: the row takes the floor's z instead (what the floor-aware cutter does
+						// for its split points), and a point with no plain ground under it gets no row.
+						switch {
+						case b.opt.Floor == nil:
+							via = append(via, p)
+						default:
+							if f, on := b.opt.Floor(b.plan.Map, p); on {
+								p.Z = f.Z
+								via = append(via, p)
+							} else {
+								b.warnings = append(b.warnings, fmt.Sprintf("leg %d step %d: the lead point %.1f %.1f %.1f stands off the floor (no plain ground under it): no row there, the run leader paths the gap itself", s.Leg, s.Seq, p.X, p.Y, p.Z))
+							}
+						}
 					}
 				}
 				if lv, near := b.firstLeaveConflict(b.legs, s.Leg, a, c, via); near {
