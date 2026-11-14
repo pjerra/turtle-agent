@@ -56,8 +56,8 @@ pull — and
 `prepull-auras.json` records what each bot carries. The batch is fail-closed: the commander and every living party
 member, list or no list, are re-read for combat before each `.aura` (an in-combat unit or an unreadable `unit` row
 stops the batch), a boss row's arena is read fresh from the server (`q units` around the row: a boss already engaged,
-or a read that cannot be made, stops the walk), and a boss row lands in `boss_rows` only after its auras verified — a
-failed fire is an `attempts{row, reason}` entry instead.
+a read that cannot be made, or a unit row without its combat state, stops the walk), and a boss row lands in
+`boss_rows` only after its auras verified — a failed fire is an `attempts{row, reason}` entry instead.
 By default every requested aura must verify; a miss fails the walk,
 and `--prepull-aura-tolerance N` is the explicit opt-in that accepts up to N missing ids per bot
 (see [the raid-walk reference](docs/okf/raids/raid-walk-reference.md)).

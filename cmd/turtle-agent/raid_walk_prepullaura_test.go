@@ -42,12 +42,14 @@ type prepullAgent struct {
 	// selfCombat is the commander's own combat state (the party's is `combat`): a pull the commander started alone.
 	selfCombat bool
 
-	// arenaCombat names the units the fresh `q units` read of a boss arena finds in combat, arenaTrunc makes that
-	// reply truncated, and arenaErr makes the `tt` call fail (the toolkit's refusal).
-	arenaCombat []string
-	arenaTrunc  bool
-	arenaErr    error
-	ttCmds      []string
+	// arenaCombat names the units the fresh `q units` read of a boss arena finds in combat, arenaCBUnknown names the
+	// units it lists without a `cb` field (a degraded reply), arenaTrunc makes that reply truncated, and arenaErr
+	// makes the `tt` call fail (the toolkit's refusal).
+	arenaCombat    []string
+	arenaCBUnknown []string
+	arenaTrunc     bool
+	arenaErr       error
+	ttCmds         []string
 
 	sent    []string // "<bot name> <id>" per gm_aura call, in order
 	verbs   []string // every `run <verb>` the commander asked for
@@ -181,6 +183,9 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 		var units []any
 		for i, name := range a.arenaCombat {
 			units = append(units, map[string]any{"g": fmt.Sprintf("0xF1300000000%03X", 0x200+i), "n": name, "e": 14834, "cb": true})
+		}
+		for i, name := range a.arenaCBUnknown {
+			units = append(units, map[string]any{"g": fmt.Sprintf("0xF1300000000%03X", 0x300+i), "n": name, "e": 14834})
 		}
 		v = ttReplyOf(a.t, map[string]any{"units": units, "n": len(units), "trunc": a.arenaTrunc})
 	case "commander":
@@ -498,6 +503,36 @@ func TestPrepullAuraBossRowFreshReadBeatsAStaleFrame(t *testing.T) {
 		if w.prepullAuraSent[5] {
 			t.Errorf("%s: the row was recorded as done", tc.name)
 		}
+	}
+}
+
+// A unit row without a combat-state field is no evidence of peace: a degraded or version-skewed toolkit reply still
+// carries a valid envelope and no trunc flag, so ttUnitOf's tolerant InCombat=false read made the arena look clean and
+// r2 fired the auras. The prepull arena read counts the unknown state as combat: no pause, no aura. This is the r2
+// HIGH.
+func TestPrepullAuraBossRowMissingCombatStateFails(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 5
+	a.arenaCBUnknown = []string{"Hakkar"} // the arena lists the boss, but its row has no `cb`
+	w := newPrepullWalk(t, a, "role=all:22888")
+	// The cached frames say unengaged too: the missing field is the only warning, and it must stop the fire.
+	w.bossSet = map[uint32]bool{14834: true}
+	w.bossRows = map[uint32]hostileState{14834: {entry: 14834, hppct: 100, at: a.clock}}
+	w.bossSeenAt = a.clock
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	fired, err := w.prepullAuraSendPending(context.Background(), boss, false)
+	code, reason := stopInfo(err)
+	if fired || code != exitRaidWalkFailed || !strings.Contains(reason, "boss row 5") || !strings.Contains(reason, "never sent") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.ttCmds) != 1 {
+		t.Fatalf("arena reads %v (want the gate's one, no pause)", a.ttCmds)
+	}
+	if len(a.sent) != 0 || len(a.verbs) != 0 {
+		t.Fatalf("an arena row without `cb` sent %v / %v", a.sent, a.verbs)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the row was recorded as done")
 	}
 }
 

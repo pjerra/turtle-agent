@@ -264,8 +264,10 @@ func (w *walk) prepullAuraHold(ctx context.Context, step int, pause bool) error 
 // combat: `q units 60 <anchor> all`, the same read the reuse-instance guard (`placeBossEngaged`) makes, with `cb`
 // the combat state. The walk's cached hostile frames (`bossEngagedNow`) are not used here: the push feed's statuses
 // are handled before the next view frame is fetched, so a cached frame can still show the boss unengaged after the
-// commander has pulled. It fails closed: a boss row without a point, a refused or unanswered read and a truncated
-// reply are all errors, never a clean read, and the caller sends no aura on any of them.
+// commander has pulled. It fails closed: a boss row without a point, a refused or unanswered read, a truncated reply,
+// and a unit row without a well-formed `cb` are all errors or counted as combat, never a clean read, and the caller
+// sends no aura on any of them (ttUnitOf's own InCombat stays tolerant for the other callers; the prepull read
+// demands the field).
 func (w *walk) prepullBossEngaged(ctx context.Context, step int) (bool, error) {
 	row, ok := w.bossRowAt(step)
 	if !ok {
@@ -292,6 +294,12 @@ func (w *walk) prepullBossEngaged(ctx context.Context, step int) (bool, error) {
 	}
 	for _, m := range body.list("units") {
 		u := ttUnitOf(m)
+		if !u.CBKnown {
+			// The reply does not say whether this unit is fighting (a degraded or version-skewed toolkit answer still
+			// has a valid envelope and no trunc flag). An unproven unit is not an out-of-combat unit.
+			w.note("prepull-aura: boss row %d: %s (%d) carries no combat state in the arena read at %s: counted as in combat", step, u.Name, u.Entry, cmd)
+			return true, nil
+		}
 		if u.InCombat && !u.Dead {
 			w.note("prepull-aura: boss row %d: %s (%d) is in combat in the arena read at %s", step, u.Name, u.Entry, cmd)
 			return true, nil

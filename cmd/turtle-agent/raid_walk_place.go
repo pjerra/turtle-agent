@@ -202,8 +202,12 @@ type ttUnit struct {
 	// InCombat is the toolkit's `cb` field (Unit:IsInCombat): the pre-placement guard of a resumed or reused instance
 	// reads it (walk 97 fight 9-1), the place decisions never did.
 	InCombat bool
-	MaxHP    float64
-	Rank     int
+	// CBKnown says the reply carried a well-formed `cb`. A missing or malformed field leaves InCombat false, which the
+	// other callers keep tolerating; the prepull-aura arena read counts an unknown state as combat (fail closed), so a
+	// version-skewed or degraded reply cannot report an engaged arena as clean.
+	CBKnown bool
+	MaxHP   float64
+	Rank    int
 }
 
 // ttUnitOf reduces one element of a reply's unit list.
@@ -225,7 +229,12 @@ func ttUnitOf(m map[string]json.RawMessage) ttUnit {
 		u.Rank = int(rk)
 	}
 	u.Dead = flagOf(m, "dead")
-	u.InCombat = flagOf(m, "cb")
+	if raw, found := m["cb"]; found {
+		var cb *bool // a null field is as unknown as a missing one; only true/false count
+		if err := json.Unmarshal(raw, &cb); err == nil && cb != nil {
+			u.InCombat, u.CBKnown = *cb, true
+		}
+	}
 	if hpv := numList(m, "hpv"); len(hpv) >= 2 {
 		u.MaxHP = hpv[1]
 	}
