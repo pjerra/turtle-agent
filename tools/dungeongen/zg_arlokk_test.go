@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
 	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/pjerra/turtle-agent/internal/raidwalk"
 )
 
 // zgArlokkLeg is the leg's index in dungeons/zul_gurub.json.
@@ -21,8 +23,18 @@ const zgArlokkLeg = 4
 // the sum of the navmesh path between consecutive move/pull/boss party points). The re-route must cut it.
 const zgArlokkDevWalkYd = 3582.2
 
-// zgArlokkMaxWalkYd caps the re-routed leg, so a later edit that adds a detour is a failure and not just a print.
-const zgArlokkMaxWalkYd = 2100.0
+// zgArlokkMaxWalkYd caps the re-routed leg, so a later edit that adds a detour is a failure and not just a print. It is
+// 2160 rather than the re-route's 2100 because the gong step's stand moved onto the gong's own floor (walk 100b, see
+// zgArlokkGongApproachYd): the party walks the arena descent once more, 2119.0 yd measured, and no shorter walk reaches
+// the gong from the temple's terrace (the leg's 2029.0 yd stand could not be rung).
+const zgArlokkMaxWalkYd = 2160.0
+
+// zgArlokkGongApproachYd caps the one hop of the leg that may exceed 1.5x its straight distance: the last pull to the
+// gong step's stand. The stand stands on the gong's own floor 3.0 yd from the goober (walk 100b: its old stand, 69.4 yd
+// away on the floor above, left every open order "stopped short of the object"), and the arena's only entrance is the
+// temple's east ramp: the party walks 167.7 yd of navmesh path over 50.6 yd straight to it (3.31x), and the run leader
+// walks it in its 40 yd approach hops (DungeonRunPolicy's ApproachHop) instead of one cut hop. Every other pair keeps 1.5x.
+const zgArlokkGongApproachYd = 175.0
 
 // zgArlokkPatrolShotYd is the tank's shot the stand-pull gate waits for a patroller in (TortoiseBots
 // DungeonRunPolicy.h's kStandPullShotYd): a stand must lie within it of a loop point for the gate to fire.
@@ -112,7 +124,8 @@ func zgArlokkPairs(t *testing.T, rows []planexport.StepRow, pl *navmesh.Planner)
 const p309 = 309
 
 // TestZulGurubArlokkLegRoute is the brief's rule: no consecutive pair of the leg's walk is a hop whose navmesh path is
-// missing or over 1.5x its straight distance, and the leg's walk drops against the dev leg.
+// missing or over 1.5x its straight distance (the last pull -> gong stand hop, the arena descent, is capped separately at
+// zgArlokkGongApproachYd), and the leg's walk drops against the dev leg.
 func TestZulGurubArlokkLegRoute(t *testing.T) {
 	p, _ := zgLoadPlanAndExport(t)
 	pl := zgPlannerOrNil(t)
@@ -123,8 +136,19 @@ func TestZulGurubArlokkLegRoute(t *testing.T) {
 	rows := zgArlokkRows(t, p, pl)
 	pairs := zgArlokkPairs(t, rows, pl)
 
-	// Every pair is checked, the last pull->stand hop and the arena descent included: the gong step's stand and the boss
-	// approach carry the descent's via points, so the run leader walks no uncut detour of its own.
+	// The gong step's stand, so the pair that ends on it is told apart from the leg's own hops.
+	var gongStand *dungeon.Point
+	for _, st := range p.Legs[zgArlokkLeg].Steps {
+		if st.UseObject != nil && st.UseObject.Stand != nil {
+			gongStand = st.UseObject.Stand
+		}
+	}
+	if gongStand == nil {
+		t.Fatal("the Arlokk leg has no use_object stand")
+	}
+
+	// Every pair is checked, the last pull->gong stand hop included: that one hop is the arena descent (capped at
+	// zgArlokkGongApproachYd), every other pair keeps 1.5x, so the run leader walks no uncut detour of its own.
 	total := 0.0
 	for _, pr := range pairs {
 		total += pr.length
@@ -133,6 +157,15 @@ func TestZulGurubArlokkLegRoute(t *testing.T) {
 			continue
 		}
 		sd := zgArlokkDist3(pr.a, pr.b)
+		if zgArlokkDist3(pr.b, *gongStand) < 1.0 {
+			if pr.length > zgArlokkGongApproachYd {
+				t.Errorf("%s -> %s: %.1f yd of path over %.1f yd straight (want <= %.0f yd: the arena descent to the gong)",
+					pr.from, pr.to, pr.length, sd, zgArlokkGongApproachYd)
+			}
+			fmt.Printf("gong approach: %.1f yd of path over %.1f yd straight (%.2fx, cap %.0f yd)\n", pr.length, sd,
+				pr.length/sd, zgArlokkGongApproachYd)
+			continue
+		}
 		if pr.length > 1.5*sd {
 			t.Errorf("%s -> %s: %.1f yd of path over %.1f yd straight (%.2fx, want <= 1.5x) at %.1f %.1f %.1f -> %.1f %.1f %.1f",
 				pr.from, pr.to, pr.length, sd, pr.length/sd, pr.a.X, pr.a.Y, pr.a.Z, pr.b.X, pr.b.Y, pr.b.Z)
@@ -353,5 +386,78 @@ func TestZulGurubArlokkRowsOnTheMesh(t *testing.T) {
 		if math.Abs(float64(near[2]-at.Z)) > 1.5 {
 			t.Errorf("row %d (%s %q) party point %.1f %.1f %.1f is %.1f yd above or below the polygon under it (%.1f): not on its own floor", i+1, r.Kind, r.Comment, at.X, at.Y, at.Z, math.Abs(float64(near[2]-at.Z)), near[2])
 		}
+	}
+}
+
+// zgCommanderUseRangeYd is the distance a commander open order needs to stand inside: TortoiseBots RemoteCommanderTasks
+// InUseRange is the core's INTERACTION_DISTANCE (5 yd) less kInteractMargin (0.5 yd). The run leader's task for the row
+// walks the lead bot to a point 1.5 yd short of the object and starts the act only inside it.
+const zgCommanderUseRangeYd = 4.5
+
+// TestZulGurubArlokkGongStandInReach: the gong step's stand must lie inside the commander's gameobject use range of the
+// goober, so the open order starts where the party stands instead of walking the leader to the object itself.
+// Walk 100b (2026-11-14): the stand was the ring's north-east bend -11502.9 -1609.1 49.625404, 69.4 yd from 180526 and
+// 8.3 yd above it on the floor above, and every attempt paused at "cmd open|unreachable|The bot stopped short of the
+// object and cannot get closer." with the lead bot on the arena floor 70 yd out. On dev this test fails by 64.9 yd.
+func TestZulGurubArlokkGongStandInReach(t *testing.T) {
+	p, err := dungeon.Load(filepath.Join(plansDirT, "zul_gurub.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var near, stand *dungeon.Point
+	for _, st := range p.Legs[zgArlokkLeg].Steps {
+		if st.UseObject != nil && st.UseObject.Entry == 180526 {
+			near, stand = st.UseObject.Near, st.UseObject.Stand
+		}
+	}
+	if near == nil || stand == nil {
+		t.Fatal("the Arlokk leg's gong step 180526 has no near and stand points")
+	}
+	if d := zgArlokkDist3(*stand, *near); d > zgCommanderUseRangeYd {
+		t.Errorf("the gong 180526 stand %.2f %.2f %.2f is %.2f yd from it (at %.2f %.2f %.2f), beyond the commander's %.1f yd use range: the open order would have to walk the leader to the object",
+			stand.X, stand.Y, stand.Z, d, near.X, near.Y, near.Z, zgCommanderUseRangeYd)
+	}
+}
+
+// TestZulGurubArlokkGongStepAfterIsAPlaceStart: the gong's open row is no place start (the placement accepts a move row
+// with a point or a pull row, TortoiseBots raidwalk PlaceStart), so walk 100b's autopilot resumed at the stand row before
+// it — `"step 346" is not a place start: resuming from "step 345"` — which is right only while that stand is on the
+// gong's own floor. The row after the open (the boss approach move) is a place start too, so a resume there works.
+func TestZulGurubArlokkGongStepAfterIsAPlaceStart(t *testing.T) {
+	p, _ := zgLoadPlanAndExport(t)
+	pl := zgPlannerOrNil(t)
+	if pl == nil {
+		t.Skip("no map 309 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its tiles")
+	}
+	defer pl.Close()
+	res, err := planexport.Build(p, planexport.Options{ApproachHops: true, Cut: zgW37ExportCut(pl), GMCrossDirect: true,
+		DropCompanionsLoot: true, CarrierChests: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := res.Rows
+	open := -1
+	for i, r := range rows.Steps {
+		if r.Kind == planexport.KindOpen && r.Entry == 180526 {
+			open = i
+		}
+	}
+	if open < 1 || open+1 >= len(rows.Steps) {
+		t.Fatalf("the gong open row is %d of %d rows", open+1, len(rows.Steps))
+	}
+	words := func(n int) []string { return []string{"from", "step", strconv.Itoa(n)} }
+	if _, _, _, _, err := raidwalk.PlaceStart(rows, words(open+1)); err == nil {
+		t.Errorf("step %d (the gong open row) is a place start: the placement would place the party on an open row", open+1)
+	}
+	resume, ok := raidwalk.PlaceResumeStart(rows, open+1)
+	if !ok || resume != fmt.Sprintf("step %d", open) {
+		t.Errorf("a resume at the gong open row %d starts at %q, want %q (the stand row before it)", open+1, resume,
+			fmt.Sprintf("step %d", open))
+	}
+	if step, _, _, _, err := raidwalk.PlaceStart(rows, words(open)); err != nil || step != open {
+		t.Errorf("step %d (the gong's stand move) is no place start: %v (%d)", open, err, step)
+	}
+	if step, _, _, _, err := raidwalk.PlaceStart(rows, words(open+2)); err != nil || step != open+2 {
+		t.Errorf("step %d (the row after the gong, a boss approach move) is no place start: %v (%d)", open+2, err, step)
 	}
 }
