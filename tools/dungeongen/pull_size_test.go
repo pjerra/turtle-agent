@@ -88,7 +88,7 @@ var pullSizeKnownCounts = map[string]int{
 	"lower_karazhan_halls": 78, "upper_karazhan_halls": 30, // waypoint pass (was 79): one moved stand pulls its pack from one body fewer.
 	"emerald_sanctum": 8, "timbermaw_hold": 27, "hateforge_quarry": 120, // waypoint pass (was 7): the moved north_hall stands' estimates join one more neighbour pack. hateforge_quarry newly hand-maintained (was a generated draft): the current over-ceiling pulls.
 	"maraudon_orange": 57, "maraudon_purple": 75, "blackrock_depths": 228, "scholomance": 163, // newly hand-maintained (were generated): the moved stands' estimates; maraudon_purple's water fix moves its two starts.
-	"razorfen_kraul": 84, "dire_maul_north": 58, "windhorn_canyon": 84, "upper_blackrock_spire": 68,
+	"razorfen_kraul": 73, "dire_maul_north": 58, "windhorn_canyon": 84, "upper_blackrock_spire": 68, // razorfen_kraul 84 -> 73 (route order fix 2026-11-14, Sagiroth/TortoiseBots#1542): the legs hold the packs their walks pass, so fewer pulls estimate over their ceiling.
 	"blackfathom_deeps": 58, "gnomeregan": 88, "lower_blackrock_spire": 106, "stormwind_vault": 55,
 	"frostmane_hollow": 47, "dire_maul_east": 50, "dire_maul_west": 58, "razorfen_downs": 60, "sunken_temple": 65,
 	"scarlet_armory": 36, "scarlet_cathedral": 41, "scarlet_graveyard": 44, "scarlet_library": 42, "shadowfang_keep": 71,
