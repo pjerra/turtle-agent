@@ -90,6 +90,11 @@ func AllowedLine(line string, hires, party map[string]bool, mapID uint32) bool {
 		// walk's own gm path. Two integers, nothing else: no other `.debug` form passes.
 		return isGMInstanceDataLine(line)
 	case ".bot":
+		if len(f) == 2 && f[1] == "roster" {
+			// `.bot roster`: the read-only per-bot state snapshot the --prepull-aura role reads (TBM:BOTSTATE rows,
+			// which name each controllable bot's spec strategy kit). It changes nothing in the world.
+			return true
+		}
 		if len(f) < 3 {
 			return false
 		}

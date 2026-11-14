@@ -219,3 +219,16 @@ func TestAllowedPInfo(t *testing.T) {
 		}
 	}
 }
+
+// TestAllowedBotRoster pins the --prepull-aura role source: `.bot roster` is read-only (the TBM:BOTSTATE snapshot) and
+// the only two-field `.bot` line the walk may send.
+func TestAllowedBotRoster(t *testing.T) {
+	if !AllowedLine(".bot roster", nil, nil, 309) {
+		t.Error("refused .bot roster")
+	}
+	for _, line := range []string{".bot roster extra", ".bot rosters", ".bot", ".bot roster\n.die"} {
+		if AllowedLine(line, nil, nil, 309) {
+			t.Errorf("allowed %q", line)
+		}
+	}
+}

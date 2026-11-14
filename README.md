@@ -57,10 +57,14 @@ pull — and
 `--prepull-aura dungeons/prepull/zg-preraid.json` names the six lists at once. The targets are the walk's own hires,
 matched by name in the commander's raid read from its view (the walk's player is not in the hired bots' raid); a frame
 member the walk never hired gets no aura but is still watched for combat as one of the raid, and a hire whose role the
-walk cannot tell fails the fire. The role comes from the walk's own hire data, never the class alone: the mt/ot batches
-are tank, an `h` hire is healer, a `d` hire is melee, ranged or caster by class, and a dps druid or shaman takes its
-roster spec (feral and enhancement melee, balance and elemental caster) — one whose spec the roster does not name fails
-closed. The batch is fail-closed: the commander and every living raid member, list or no list, are re-read for
+walk cannot tell fails the fire. The role comes PER BOT from the module's own state rows: the walk reads `.bot roster`
+and takes each bot's `TBM:BOTSTATE|name|...specs=<strategy>+<strategy>` field, the spec kit the module itself installed
+on that bot (holy/restoration/discipline healer, protection/tank feral/tank shaman tank, retribution/feral/enhancement
+melee, hunter ranged, shadow/balance/elemental/mage/warlock caster). Neither the class alone nor the roster batch is the
+source: a mixed batch like walk 101b's `5h 13d` names no role for a priest, paladin, druid or shaman, while the module's
+row names the bot's own spec. The walk's mt and ot are tanks whatever their kit. A bot the snapshot leaves out, an
+incomplete snapshot, and a kit naming no spec or specs of more than one role all fail closed before any aura;
+`prepull-auras.json` records the source as `role_source` and each bot's `specs`. The batch is fail-closed: the commander and every living raid member, list or no list, are re-read for
 combat before each `.aura` (an in-combat unit or an unreadable `unit` row stops the batch), a boss row's arena is read
 fresh from the server (`q units` around the row: a boss already engaged, a read that cannot be made, or a unit row
 without its combat state, stops the walk), and every bot the walk hired must receive a list — a fire that reaches
@@ -73,7 +77,12 @@ Its `gm_aura` RPC is the select-then-`.aura <id>` hand behind it (see [the RPC r
 `--prepull-aura-when start` fires the same lists ONCE instead, after the hire, the gear and the placement and before
 the run's first move (the run is not running, so nothing is paused), records the verified fire as `start_row`, and at
 each boss pull only reads and logs which auras every hire still carries — walk 101 lost Hakkar's row 689 four times
-out of four when a bot entered combat during the boss-row fire's ~120 GM sends.
+out of four when a bot entered combat during the boss-row fire's ~120 GM sends. The start fire goes out only on a
+positively confirmed idle run: `run status` must parse a `TBM:RUN` line in state `none` or `done`; a refused answer, an
+answer without that line, and any running state (whatever plan it names) send nothing and fail the walk. The coverage
+read is taken at the pull itself — the boss row current in the plan's `pull` or `task` (fight start) phase — never at
+the step before it; a row is read at the pull and refreshed once at the fight start, and a phase is recorded only after
+a successful read, so a failed read is retried at the next qualifying status.
 
 Log a character in and keep it online with the RPC server running:
 
