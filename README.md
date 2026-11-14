@@ -79,7 +79,11 @@ the run's first move (the run is not running, so nothing is paused), records the
 each boss pull only reads and logs which auras every hire still carries — walk 101 lost Hakkar's row 689 four times
 out of four when a bot entered combat during the boss-row fire's ~120 GM sends. The start fire goes out only on a
 positively confirmed idle run: `run status` must parse a `TBM:RUN` line in state `none` or `done`; a refused answer, an
-answer without that line, and any running state (whatever plan it names) send nothing and fail the walk. The coverage
+answer without that line, and any running state (whatever plan it names) send nothing and fail the walk. It waits first
+(up to 60 s, polling every 2 s) for every hire to be in the commander's view and alive and in the agent's unit store,
+because the fire goes out inside the placement's teleport wave (walk 101: the ZG Jeklik run at plan start row 1 stopped
+0.16 s after the last `.tele` with "the unit read of <MT> failed twice"); a hire still missing after the wait fails the
+walk, and `run.log` names how long the wait took. The coverage
 read is taken at the pull itself — the boss row current in the plan's `pull` or `task` (fight start) phase — never at
 the step before it; a row is read at the pull and refreshed once at the fight start, and a phase is recorded only after
 a successful read, so a failed read is retried at the next qualifying status.

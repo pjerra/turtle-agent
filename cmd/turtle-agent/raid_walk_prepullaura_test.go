@@ -102,6 +102,11 @@ type prepullAgent struct {
 	viewTruncated bool
 	viewErr       error
 	extra         []tbm.PartyRec
+	// readyAt is the moment the placement's teleport wave has landed: while the fake clock is before it, the view
+	// holds no party member and the unit RPC refuses every one of them (walk 101: the start fire ran inside the wave).
+	readyAt time.Time
+	// silent names the bots the unit RPC never answers for, however long the walk waits: a store that misses one bot.
+	silent map[string]bool
 }
 
 func newPrepullAgent(t *testing.T) *prepullAgent {
@@ -109,7 +114,7 @@ func newPrepullAgent(t *testing.T) *prepullAgent {
 	a := &prepullAgent{t: t, clock: time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC), answers: true, holdPause: true, statusStep: 4,
 		classes: map[packet.GUID]uint8{}, auras: map[packet.GUID]map[uint32]bool{}, caster: map[uint32]bool{},
 		drop: map[packet.GUID]map[uint32]bool{}, combatBots: map[packet.GUID]bool{},
-		hidden: map[string]bool{}, deadBots: map[string]bool{},
+		hidden: map[string]bool{}, deadBots: map[string]bool{}, silent: map[string]bool{},
 		botStates: map[string]string{}, botStateMissing: map[string]bool{}, botStateNoSpecs: map[string]bool{}}
 	a.selfGUID, a.selfName = packet.GUID(0x0000000000000AAA), "Commander"
 	// Mtbot (warrior mt), Otbot (warrior ot), Rank (rogue), Flitz (hunter), Zap (mage), Holi (priest).
@@ -209,7 +214,7 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 		}
 		fr := tbm.ViewFrame{Seq: 1, Lines: 1}
 		for _, b := range a.bots {
-			if a.hidden[b.Name] {
+			if a.hidden[b.Name] || (!a.readyAt.IsZero() && a.clock.Before(a.readyAt)) {
 				continue
 			}
 			dead := a.deadBots[b.Name]
@@ -242,6 +247,9 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			break
 		}
 		if _, ok := a.auras[g]; !ok || !a.answers {
+			return errors.New("unit: no such unit")
+		}
+		if a.silent[a.nameOf(g)] || (!a.readyAt.IsZero() && a.clock.Before(a.readyAt)) {
 			return errors.New("unit: no such unit")
 		}
 		v = objects.Unit{GUID: g, Type: "player", Name: a.nameOf(g), Class: a.classes[g],
@@ -1624,6 +1632,98 @@ func prepullStartWalk(t *testing.T, a *prepullAgent) *walk {
 	w := newPrepullWalk(t, a, prepullRestAuras...)
 	w.opts.prepullAuraWhen = prepullAuraWhenStart
 	return w
+}
+
+// prepullRunLog opens the walk's run.log, so a test can read the lines a phase wrote.
+func prepullRunLog(t *testing.T, w *walk) {
+	t.Helper()
+	f, err := os.Create(filepath.Join(w.outDir, "run.log"))
+	if err != nil {
+		t.Fatalf("run.log: %v", err)
+	}
+	w.logF = f
+	t.Cleanup(func() {
+		if w.logF != nil {
+			_ = w.logF.Close()
+			w.logF = nil
+		}
+	})
+}
+
+// prepullRunLogText is the walk's run.log as written so far.
+func prepullRunLogText(t *testing.T, w *walk) string {
+	t.Helper()
+	if w.logF != nil {
+		_ = w.logF.Sync()
+	}
+	raw, err := os.ReadFile(filepath.Join(w.outDir, "run.log"))
+	if err != nil {
+		t.Fatalf("run.log: %v", err)
+	}
+	return string(raw)
+}
+
+// Walk 101's ZG Jeklik run (plan start row 1): the start fire goes out INSIDE the placement's teleport wave, so for a
+// moment the raid is in neither the commander's view nor the agent's own unit store (the MT teleported 2 s earlier had
+// no unit row yet, and all four attempts stopped 0.16 s after the last `.tele`). The fire waits for the wave to land
+// instead of stopping on the two quick reads, and the run log says how long it waited.
+func TestPrepullAuraStartWaitsForTheTeleportWave(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.readyAt = a.clock.Add(10 * time.Second)
+	w := prepullStartWalk(t, a)
+	prepullRunLog(t, w)
+	if err := w.prepullAuraStart(context.Background()); err != nil {
+		t.Fatalf("start fire: %v", err)
+	}
+	if len(a.sent) == 0 {
+		t.Fatal("the start fire sent nothing after waiting for the raid to arrive")
+	}
+	f := readPrepullAuraFile(t, w)
+	if f.StartRow != 1 || len(f.Attempts) != 0 || len(f.Bots) != 6 {
+		t.Fatalf("start_row %d, attempts %+v, %d bot(s)", f.StartRow, f.Attempts, len(f.Bots))
+	}
+	if log := prepullRunLogText(t, w); !strings.Contains(log, "the raid's 6 hire(s) are in the commander's view and alive after 10s") {
+		t.Fatalf("run.log does not name the 10 s wait:\n%s", log)
+	}
+}
+
+// A hire that never joins the commander's view still fails the start fire, after the 60 s wait: the wait is a wait,
+// never a licence to fire on a raid the walk cannot see whole. The reason names the bot and the time spent.
+func TestPrepullAuraStartWaitFailsAfterSixtySeconds(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.hidden["Holi"] = true
+	w := prepullStartWalk(t, a)
+	code, reason := stopInfo(w.prepullAuraStart(context.Background()))
+	if code != exitRaidWalkFailed || !strings.Contains(reason, "after waiting 1m0s") ||
+		!strings.Contains(reason, "Holi is not in the commander's view") {
+		t.Fatalf("exit %d: %s", code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("%d aura(s) went out on a raid the walk never saw whole: %v", len(a.sent), a.sent)
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.Attempts) != 1 || !f.Attempts[0].Start || !strings.Contains(f.Attempts[0].Reason, "Holi") {
+		t.Fatalf("attempts %+v", f.Attempts)
+	}
+	if f.StartRow != 0 || len(f.BossRows) != 0 {
+		t.Fatalf("start_row %d, boss rows %v", f.StartRow, f.BossRows)
+	}
+}
+
+// The commander's view can name a hire the agent's own unit store still lacks: walk 101's failing read was exactly
+// that. The wait covers the unit store too, because it is the store the very next read (the class) goes to.
+func TestPrepullAuraStartWaitCoversTheUnitStore(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.silent["Zap"] = true
+	w := prepullStartWalk(t, a)
+	code, reason := stopInfo(w.prepullAuraStart(context.Background()))
+	if code != exitRaidWalkFailed || !strings.Contains(reason, "after waiting 1m0s") ||
+		!strings.Contains(reason, "Zap is not in the agent's unit store") {
+		t.Fatalf("exit %d: %s", code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("%d aura(s) went out without the store holding every hire: %v", len(a.sent), a.sent)
+	}
 }
 
 // Walk 101: at Hakkar's boss row 689 the boss-row fire's ~20 x 6 ".aura" sends took about a minute, and on 4 of 4
