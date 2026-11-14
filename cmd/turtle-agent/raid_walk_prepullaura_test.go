@@ -122,6 +122,14 @@ type prepullAgent struct {
 	appearRefused    bool
 	appeared         bool
 	storeAfterAppear bool
+	// frameStale makes the first frameStale bot_view answers report the party at staleX/staleY: a frame read before
+	// the placement's teleport wave landed (the later answers report botX/botY). frameName spells a bot's name
+	// differently in the frame than in the walk's roster (a name the fire must match case-insensitively).
+	frameStale int
+	staleX     float32
+	staleY     float32
+	frameName  map[string]string
+	frameReads int
 }
 
 func newPrepullAgent(t *testing.T) *prepullAgent {
@@ -132,7 +140,7 @@ func newPrepullAgent(t *testing.T) *prepullAgent {
 		hidden: map[string]bool{}, deadBots: map[string]bool{}, silent: map[string]bool{},
 		unseenUntil: map[string]time.Time{},
 		botStates:   map[string]string{}, botStateMissing: map[string]bool{}, botStateNoSpecs: map[string]bool{},
-		botMap: 309}
+		botMap: 309, frameName: map[string]string{}}
 	a.selfGUID, a.selfName = packet.GUID(0x0000000000000AAA), "Commander"
 	// Mtbot (warrior mt), Otbot (warrior ot), Rank (rogue), Flitz (hunter), Zap (mage), Holi (priest).
 	for i, b := range []struct {
@@ -238,6 +246,13 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			v = botViewResult{Have: false}
 			break
 		}
+		// A frame from before the teleport wave landed reports the party at the stale spot; later frames report the
+		// landed one. The name override keeps the GUID, so the unit rows and the roster still line up.
+		x, y := a.botX, a.botY
+		if a.frameReads < a.frameStale {
+			x, y = a.staleX, a.staleY
+		}
+		a.frameReads++
 		fr := tbm.ViewFrame{Seq: 1, Lines: 1}
 		for _, b := range a.bots {
 			if a.hidden[b.Name] || (!a.readyAt.IsZero() && a.clock.Before(a.readyAt)) {
@@ -248,8 +263,12 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			if dead {
 				state = "d"
 			}
-			fr.Party = append(fr.Party, tbm.PartyRec{GUID: b.GUID, Name: b.Name, HP: 6000, MaxHP: 6000,
-				X: a.botX, Y: a.botY, Map: a.botMap, State: state, Dead: dead})
+			name := b.Name
+			if n, ok := a.frameName[b.Name]; ok {
+				name = n
+			}
+			fr.Party = append(fr.Party, tbm.PartyRec{GUID: b.GUID, Name: name, HP: 6000, MaxHP: 6000,
+				X: x, Y: y, Map: a.botMap, State: state, Dead: dead})
 		}
 		fr.Party = append(fr.Party, a.extra...)
 		fr.Truncated = a.viewTruncated
@@ -1948,6 +1967,22 @@ func TestPrepullAuraBossRowJoinsFarCommander(t *testing.T) {
 	if !strings.Contains(strings.Join(a.gmLines, "\n"), ".appear Mtbot") {
 		t.Fatalf("the fire read the raid without appearing at the MT: %v", a.gmLines)
 	}
+	// The join hides the GM first (the revive's own line) and moves nobody but the commander: no hire is teleported.
+	visOff, appear := -1, -1
+	for i, line := range a.gmLines {
+		switch {
+		case line == raidwalk.GMVisibleOff:
+			visOff = i
+		case strings.HasPrefix(line, ".appear "):
+			appear = i
+		}
+		if strings.HasPrefix(line, ".tele ") || strings.HasPrefix(line, ".go ") || strings.HasPrefix(line, ".summon ") {
+			t.Fatalf("the join moved a hire (%q): only the commander's .appear may move anyone", line)
+		}
+	}
+	if visOff < 0 || appear < 0 || visOff > appear {
+		t.Fatalf("the join did not hide the GM before the appear: %v", a.gmLines)
+	}
 	if len(a.sent) == 0 {
 		t.Fatal("no aura was sent after the join")
 	}
@@ -1961,6 +1996,62 @@ func TestPrepullAuraBossRowJoinsFarCommander(t *testing.T) {
 	}
 	if strings.Contains(log, "ran out after") {
 		t.Fatalf("the fire waited on a store the join fills at once:\n%s", log)
+	}
+}
+
+// The start wait reads the frame while the placement's `--enter tele` wave is still landing, so the rows it holds can
+// be a read from before the hires moved. r4 joined from that stale read (10 yd, so no appear), the store (which only
+// fills after the appear) never answered, and the start fire failed after its 60 s store wait. The join re-reads the
+// frame: the landed row is 350 yd away and the appear lands there.
+func TestPrepullAuraStartJoinRefreshesAStaleFrame(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.selfMap, a.botMap = 309, 309
+	a.selfX = 0
+	a.staleX, a.botX = 10, 350 // the first frame predates the wave; the second is the landed row
+	a.frameStale = 1
+	a.storeAfterAppear = true
+	w := prepullStartWalk(t, a)
+	w.plan.Map = 309
+	prepullRunLog(t, w)
+	if err := w.prepullAuraStart(context.Background()); err != nil {
+		t.Fatalf("start fire: %v", err)
+	}
+	if !strings.Contains(strings.Join(a.gmLines, "\n"), ".appear Mtbot") {
+		t.Fatalf("the start fire joined from the stale frame: %v", a.gmLines)
+	}
+	f := readPrepullAuraFile(t, w)
+	if f.StartRow != 1 || len(f.Attempts) != 0 || len(f.Bots) != 6 {
+		t.Fatalf("start_row %d, attempts %+v, %d bot(s)", f.StartRow, f.Attempts, len(f.Bots))
+	}
+	log := prepullRunLogText(t, w)
+	if !strings.Contains(log, "prepull-aura: start: commander joined the raid at Mtbot (was 350 yd / map 309)") {
+		t.Fatalf("run.log does not name the join from the fresh frame:\n%s", log)
+	}
+}
+
+// The frame can spell a hire differently than the roster, and the join must still see it as one of the walk's (and as
+// its MT), sending the roster's spelling: a case-sensitive hire lookup skips MTBOT and appears at the next living bot.
+func TestPrepullAuraJoinTargetMatchesCaseInsensitively(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.selfMap, a.botMap = 309, 309
+	a.selfX, a.botX = 0, 350
+	a.frameName["Mtbot"] = "MTBOT"
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	w.plan.Map = 309
+	prepullRunLog(t, w)
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
+		t.Fatalf("fire: fired %v err %v", fired, err)
+	}
+	lines := strings.Join(a.gmLines, "\n")
+	if !strings.Contains(lines, ".appear Mtbot") {
+		t.Fatalf("the join did not see MTBOT as the MT hire: %v", a.gmLines)
+	}
+	if strings.Contains(lines, ".appear Otbot") {
+		t.Fatalf("the join skipped MTBOT and appeared at the next hire: %v", a.gmLines)
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 1 || f.BossRows[0] != 5 || len(f.Attempts) != 0 || len(f.Bots) != 6 {
+		t.Fatalf("boss rows %v, attempts %+v, %d bot(s)", f.BossRows, f.Attempts, len(f.Bots))
 	}
 }
 

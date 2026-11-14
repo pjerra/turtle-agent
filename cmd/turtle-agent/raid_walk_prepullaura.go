@@ -16,7 +16,8 @@
 // `.appear`): the agent's own unit store only holds units in the commander's visibility range and is cleared on a
 // map change, while its frame lists the whole raid on any map, so a commander left behind by the last placement read
 // no hire at all (walk 105c's start fire on map 0 against hires on 309; walks 105/105b's Jeklik row 49 at 350-364 yd;
-// walk 104's row 201 at 298-317 yd). No hire is ever moved and GM visibility is left as it stands. A hire whose aura
+// walk 104's row 201 at 298-317 yd). No hire is ever moved: the commander hides itself first (`.gm visible off`, the
+// revive's own line) so the appear lands unseen. A hire whose aura
 // role the walk cannot tell — a unit row with no class, a bot the module's state rows leave out, or a state naming no
 // single role's spec — is a failure too, never an "all"-only bot: the role
 // comes PER BOT from the module itself (prepullRole, raidwalk.BotStateAuraRole), not from the class alone and not
@@ -612,14 +613,22 @@ const prepullJoinWait = 30 * time.Second
 // hold, and row 49 at 146-155 yd worked. The commander's map alone is not enough: it may stand on the plan's map while
 // the hires stand on another (walk 105c's start fire), or on the plan's map in a copy of its own. The no-join path
 // therefore asks the TARGET hire's map and the distance to that hire, and a commander that fails either joins too.
-// The appear is the revive path's (appearAtHire: `.appear` binds the GM to the hire's copy, then a fresh landing is
-// proven); the walk joins at its own MT when the frame shows it alive, else at the living hire nearest the commander.
-// Only the GM commander moves, never a hire, and GM visibility is left as it stands. A join that cannot land stops
-// the fire before any aura.
+// The frame is re-read here, because the caller's can predate the placement's `--enter tele` wave and the landing
+// check uses the hire's frame position. The appear is the revive path's (appearAtHire: `.appear` binds the GM to the
+// hire's copy, then a fresh landing is proven), and the commander is hidden first with the revive's own `.gm visible
+// off`, so the appear lands unseen; the walk joins at its own MT when the frame shows it alive, else at the living
+// hire nearest the commander. Only the GM commander moves, never a hire. A join that cannot land stops the fire
+// before any aura.
 func (w *walk) prepullAuraJoinRaid(ctx context.Context, raid []tbm.PartyRec, where string) error {
 	st, err := w.status(ctx)
 	if err != nil {
 		return stopf(exitRaidWalkFailed, "prepull-aura: %s: the commander's status: %v: no aura was sent", where, err)
+	}
+	// The start fire polls the frame while the placement's teleport wave is still landing, so the rows the caller
+	// holds can be a read from before the hires moved: re-read right before the join, and keep the caller's rows only
+	// when the fresh read fails (the fire already validated them).
+	if fresh, rerr := w.prepullRaid(ctx); rerr == nil {
+		raid = fresh
 	}
 	target, dist, living := w.prepullJoinTarget(st, raid)
 	if !living {
@@ -631,6 +640,11 @@ func (w *walk) prepullAuraJoinRaid(ctx context.Context, raid []tbm.PartyRec, whe
 	// fire would join places the two together, so the no-join path asks that hire's map, not the plan's.
 	if st.Map == target.Map && dist <= prepullJoinRadius {
 		return nil
+	}
+	// The revive hides the commander before its own appear; a visible GM landing in the raid is a line nobody asked
+	// for, so the prepull join sends the same line first.
+	if err := w.gm(ctx, raidwalk.GMVisibleOff); err != nil {
+		return stopf(exitRaidWalkFailed, "prepull-aura: %s: %s before the join failed: %v: no aura was sent", where, raidwalk.GMVisibleOff, err)
 	}
 	// The landing check reads the hire's last frame position from botAt: this fire's own frame is the freshest one.
 	if w.botAt == nil {
@@ -652,22 +666,29 @@ func (w *walk) prepullAuraJoinRaid(ctx context.Context, raid []tbm.PartyRec, whe
 }
 
 // prepullJoinTarget is the hire the commander joins: its own MT when the frame shows it alive, else the living hire
-// nearest the commander (x/y; a cross-map distance is only the log's number). living is false when the frame holds no
-// living hire of the walk's.
+// nearest the commander (x/y; a cross-map distance is only the log's number). Names are matched case-insensitively,
+// like the rest of the fire: the frame's spelling may differ from the roster's. living is false when the frame holds
+// no living hire of the walk's.
 func (w *walk) prepullJoinTarget(st session.StatusInfo, raid []tbm.PartyRec) (target tbm.PartyRec, dist float64, living bool) {
 	var mt tbm.PartyRec
 	mtDist := math.Inf(1)
 	best := math.Inf(1)
 	for _, m := range raid {
-		if m.GUID == 0 || m.Name == "" || !w.hires[m.Name] || m.Dead || m.State == "d" {
+		if m.GUID == 0 || m.Name == "" || m.Dead || m.State == "d" {
 			continue
 		}
+		name, ok := w.hireName(m.Name)
+		if !ok {
+			continue
+		}
+		// The roster's spelling is what the GM line and the fire's records use (the allow-list matches it exactly).
+		m.Name = name
 		living = true
 		d := math.Hypot(float64(st.X-m.X), float64(st.Y-m.Y))
 		if d < best {
 			target, best = m, d
 		}
-		if w.mt != "" && strings.EqualFold(m.Name, w.mt) {
+		if w.mt != "" && strings.EqualFold(name, w.mt) {
 			mt, mtDist = m, d
 		}
 	}
@@ -675,6 +696,17 @@ func (w *walk) prepullJoinTarget(st session.StatusInfo, raid []tbm.PartyRec) (ta
 		return mt, mtDist, true
 	}
 	return target, best, living
+}
+
+// hireName returns the walk's own spelling of a hire name, matched case-insensitively: the commander's frame and the
+// roster can spell the same bot differently, and the fire's lookups lowercase both sides.
+func (w *walk) hireName(name string) (string, bool) {
+	for hire := range w.hires {
+		if strings.EqualFold(hire, name) {
+			return hire, true
+		}
+	}
+	return "", false
 }
 
 // prepullAuraStartWait waits for every hire to be in the commander's view and alive, joins the raid once, and only
