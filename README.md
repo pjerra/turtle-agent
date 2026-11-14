@@ -70,6 +70,10 @@ By default every requested aura must verify; a miss fails the walk,
 and `--prepull-aura-tolerance N` is the explicit opt-in that accepts up to N missing ids per bot
 (see [the raid-walk reference](docs/okf/raids/raid-walk-reference.md)).
 Its `gm_aura` RPC is the select-then-`.aura <id>` hand behind it (see [the RPC reference](docs/okf/agent/rpc-reference.md)).
+`--prepull-aura-when start` fires the same lists ONCE instead, after the hire, the gear and the placement and before
+the run's first move (the run is not running, so nothing is paused), records the verified fire as `start_row`, and at
+each boss pull only reads and logs which auras every hire still carries — walk 101 lost Hakkar's row 689 four times
+out of four when a bot entered combat during the boss-row fire's ~120 GM sends.
 
 Log a character in and keep it online with the RPC server running:
 

@@ -33,6 +33,14 @@
 // ids per bot. A missing aura beyond that bound fails the walk (exit 18), because a preparation the walk cannot see
 // is not the test the run was started for. A boss row is written to prepull-auras.json only after its auras verified
 // within the tolerance; a fire that failed is a separate `attempts` entry with its reason, never a boss row.
+//
+// --prepull-aura-when start (walk 101: the boss-row fire's ~120 sends gave a bot time to enter combat at Hakkar's row
+// 689, and 4 of 4 attempts lost the run there) fires the lists ONCE, after the hire, the gear and the placement and
+// before `run start`, so the run's first move already carries them; the flasks and world buffs last 2 h or more. The
+// fire is the same fail-closed one (every hire, roles from the hire data, a fresh combat watch, strict verification),
+// it needs no pause (nothing is running yet), and it is recorded as start_row instead of a boss row. No boss row is
+// fired in this mode: at each boss pull the walk only READS which auras are still up on each bot and logs them, so a
+// walk shows the coverage the fight started with.
 package main
 
 import (
@@ -53,10 +61,22 @@ import (
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
 
-// The walk's prepull-aura timings. The gap and the settle are dungeon_run's own buff timings, so one boss row's ~20
-// bots and ~10 auras cost about a minute of the run pause; the verify window covers the last auras' arrival.
+// The --prepull-aura-when modes: boss (the default) fires the lists before each boss row, start fires them once,
+// after the placement and before the run's first move (walk 101's Hakkar row 689 is out of this mode's way).
+const (
+	prepullAuraWhenBoss  = "boss"
+	prepullAuraWhenStart = "start"
+)
+
+// The walk's prepull-aura timings. The settle is dungeon_run's own; the gap is shorter than dungeon_run's 300 ms
+// because the GM command channel needs no flood margin: the core's anti-chat-flood counter returns at once for any
+// account above SEC_PLAYER (MasterPlayerChat.cpp, UpdateSpeakTime: "ignore chat spam protection for GMs in any mode"),
+// so `.aura` lines from the developer-level commander are not throttled there. Each send already waits on the
+// selection's own server echo (session.GMOn) and the world thread runs the lines one at a time, so 150 ms between two
+// auras of one list keeps a boss row's ~20 bots and ~10 auras near half a minute without piling lines up. The verify
+// window covers the last auras' arrival.
 var (
-	prepullAuraGap        = 300 * time.Millisecond
+	prepullAuraGap        = 150 * time.Millisecond
 	prepullAuraSettle     = 1500 * time.Millisecond
 	prepullAuraViewWait   = 10 * time.Second
 	prepullAuraVerifyWait = 5 * time.Second
@@ -73,14 +93,16 @@ type prepullAuraFile struct {
 	Tolerance int                  `json:"tolerance"`
 	Lists     []prepullAuraList    `json:"lists"`
 	BossRows  []int                `json:"boss_rows"`
+	StartRow  int                  `json:"start_row,omitempty"`
 	Attempts  []prepullAuraAttempt `json:"attempts"`
 	Bots      []prepullAuraRecord  `json:"bots"`
 }
 
-// prepullAuraAttempt is one fire that did not verify: the boss row it prepared and why it stopped. A fire that
-// succeeded is a boss row instead, so the two lists never overlap.
+// prepullAuraAttempt is one fire that did not verify: the boss row it prepared (or the start row, start=true) and why
+// it stopped. A fire that succeeded is a boss row, or start_row, instead, so the two never overlap.
 type prepullAuraAttempt struct {
 	BossRow int    `json:"boss_row"`
+	Start   bool   `json:"start,omitempty"`
 	Reason  string `json:"reason"`
 }
 
@@ -168,10 +190,17 @@ func (w *walk) prepullGate(ctx context.Context, st tbm.RunStatus, later bool) (i
 // even when the hold or the fire failed: a run left paused stops the raid silently. A status that was already paused
 // sends no resume. A row is recorded as done only after the auras verified within the tolerance. It reports whether a
 // firing happened, so pollOnce breaks its line loop (the next poll re-reads from the cursor), like the instance-data
-// firing.
+// firing. Under --prepull-aura-when start nothing is sent here: the fire already went out before the run's first move,
+// and each boss row only gets a read of the auras the raid still carries (prepullAuraPullRead).
 func (w *walk) prepullAuraSendPending(ctx context.Context, st tbm.RunStatus, later bool) (bool, error) {
 	if len(w.prepullAuras) == 0 {
 		return false, nil
+	}
+	if w.opts.prepullAuraWhen == prepullAuraWhenStart {
+		// --prepull-aura-when start fired once before the run's first move: a boss row is never a place to send
+		// again. The pull gets the coverage read instead (prepullAuraPullRead), which sends nothing and so never
+		// pauses the run, and the once-per-row guard keeps it to one line per boss.
+		return false, w.prepullAuraPullRead(ctx, st, later)
 	}
 	step, fire, err := w.prepullGate(ctx, st, later)
 	if err != nil {
@@ -190,7 +219,7 @@ func (w *walk) prepullAuraSendPending(ctx context.Context, st tbm.RunStatus, lat
 	pauseAttempted := st.State == tbm.RunRunning
 	fireErr := w.prepullAuraHold(ctx, step, pauseAttempted)
 	if fireErr == nil {
-		fireErr = w.prepullAuraFire(ctx, step)
+		fireErr = w.prepullAuraFire(ctx, step, false)
 		if fireErr == nil {
 			if w.prepullAuraSent == nil {
 				w.prepullAuraSent = map[int]bool{}
@@ -208,6 +237,137 @@ func (w *walk) prepullAuraSendPending(ctx context.Context, st tbm.RunStatus, lat
 		}
 	}
 	return true, fireErr
+}
+
+// prepullAuraStart is the --prepull-aura-when start fire: once per walk, right after the placement and before
+// `run start`, so the run's first move already carries the lists (a flask and the world buffs last 2 h or more, so a
+// fight that starts later keeps them). It sends nothing in the default boss mode, and never a second time. The run is
+// not started yet, so nothing moves and no pause is needed; a run the commander already reports as RUNNING is a
+// launch bug and gets no aura: a batch sent while the raid walks is not the preparation before the first move, and
+// walk 101's Hakkar row 689 is exactly the run that walked into combat while the auras were going out. Every
+// fail-closed rule of the boss-row fire stays (every hire, roles from the hire data, a fresh combat watch over the
+// whole raid, strict verification, zero or partial coverage fails), and a failed fire stops the walk: a run whose
+// start preparation did not verify is not the test the walk was started for. The verified fire lands in
+// prepull-auras.json as start_row.
+func (w *walk) prepullAuraStart(ctx context.Context) error {
+	if len(w.prepullAuras) == 0 || w.opts.prepullAuraWhen != prepullAuraWhenStart || w.prepullAuraStarted {
+		return nil
+	}
+	w.prepullAuraStarted = true
+	rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "status", WaitMS: 5000})
+	if err != nil {
+		return stopf(exitRaidWalkFailed, "prepull-aura: start: the run status: %v, so the run's state cannot be ruled out: no aura was sent", err)
+	}
+	if rep.Reply.Err == nil {
+		if run, line, ok := lastRunLine(rep.Reply.Lines); ok && run.State == tbm.RunRunning && (run.Plan == "" || run.Plan == w.plan.Name) {
+			return stopf(exitRaidWalkFailed,
+				"prepull-aura: start: the run is already running (%s), so the lists cannot go out before the first move: no aura was sent", line)
+		}
+	} else {
+		w.note("prepull-aura: WARN: start: the run status was refused (%s); `run start` is still a later phase, so the fire goes out before it", rep.Reply.Err.Message)
+	}
+	step := w.prepullAuraRunStartRow()
+	w.logLine(w.env.now(), fmt.Sprintf("prepull-aura: start: the lists go out before the run starts (row %d)", step))
+	return w.prepullAuraFire(ctx, step, true)
+}
+
+// prepullAuraRunStartRow is the row the run is about to start at: a --place walk's staged start (PlaceStart rewrote
+// --from to it), else the --from step, else the plan's first row. It is what start_row records, so the file names the
+// pull whose preparation the start fire is.
+func (w *walk) prepullAuraRunStartRow() int {
+	if n, err := raidwalk.FromStartStep(w.rows, w.fromWords); err == nil && n >= 1 && n <= len(w.rows.Steps) {
+		return n
+	}
+	if w.startStep >= 1 && w.startStep <= len(w.rows.Steps) {
+		return w.startStep
+	}
+	return 1
+}
+
+// prepullAuraPullRead is the --prepull-aura-when start read at a boss row: once per row, at the first status that
+// shows the step before the boss row or the boss row itself, it reads which auras every hire of the raid still
+// carries and logs them (prepullAuraCoverageRead). No aura is sent and the run is never paused: the fire went out
+// before the run's first move, and this only shows the coverage the pull starts with. A row is read at most once per
+// walk, and the read needs no pre-pull gate (a read mid-pull can do no harm, while a missed line would hide the
+// coverage). A read that fails is logged as a WARN: the auras are already on the raid, so a read cannot turn a good
+// run into a failed one.
+func (w *walk) prepullAuraPullRead(ctx context.Context, st tbm.RunStatus, later bool) error {
+	if st.State != tbm.RunRunning && st.State != tbm.RunPaused {
+		return nil
+	}
+	step := 0
+	if st.Kind == planexport.KindBoss {
+		if _, ok := w.bossRowAt(st.Step); ok {
+			step = st.Step
+		}
+	} else if _, ok := w.bossRowAt(st.Step + 1); ok {
+		step = st.Step + 1
+	}
+	if step == 0 || w.prepullAuraRead[step] {
+		return nil
+	}
+	if w.prepullAuraRead == nil {
+		w.prepullAuraRead = map[int]bool{}
+	}
+	w.prepullAuraRead[step] = true
+	if err := w.prepullAuraCoverageRead(ctx, step); err != nil {
+		w.note("prepull-aura: WARN: boss row %d: the coverage read at the pull failed: %v", step, err)
+		w.logLine(w.env.now(), fmt.Sprintf("prepull-aura: WARN: boss row %d: the coverage read at the pull failed: %v", step, err))
+	}
+	return nil
+}
+
+// prepullAuraCoverageRead reads every hire's auras and logs how many of its list it still carries, with the missing
+// ids: the evidence of what the raid brought into the fight under --prepull-aura-when start. The lists are the ones
+// the start fire resolved (each bot's record keeps its aura role), so the read names the same ids the fire sent. A
+// hire the commander's view no longer holds, one with no start record and one the unit read cannot see are named in
+// the line rather than dropped: a coverage line that silently skipped a bot would read as full coverage.
+func (w *walk) prepullAuraCoverageRead(ctx context.Context, step int) error {
+	raid, err := w.prepullRaid(ctx)
+	if err != nil {
+		return err
+	}
+	port := walkAuras{w: w}
+	inRaid := make(map[string]tbm.PartyRec, len(raid))
+	for _, m := range raid {
+		inRaid[strings.ToLower(m.Name)] = m
+	}
+	var parts []string
+	whole := 0
+	roster := w.hireList()
+	for _, name := range roster {
+		m, ok := inRaid[strings.ToLower(name)]
+		if !ok {
+			parts = append(parts, name+" not in the commander's raid")
+			continue
+		}
+		rec := w.prepullAuraBots[name]
+		if rec == nil || rec.Role == "" {
+			parts = append(parts, name+" has no start-fire record")
+			continue
+		}
+		want := w.prepullAuras.For(rec.Role)
+		if len(want) == 0 {
+			parts = append(parts, fmt.Sprintf("%s has no list (role %q)", name, rec.Role))
+			continue
+		}
+		missing, seen := dungeon.AurasMissing(ctx, port, dungeon.AuraTarget{GUID: m.GUID, Name: name}, want)
+		if !seen {
+			parts = append(parts, name+" unreadable")
+			continue
+		}
+		if len(missing) == 0 {
+			whole++
+			parts = append(parts, fmt.Sprintf("%s %d/%d", name, len(want), len(want)))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s %d/%d (missing %s)", name, len(want)-len(missing), len(want), idWords(raidwalk.PrepullIDs(missing))))
+	}
+	msg := fmt.Sprintf("prepull-aura: boss row %d: %d of %d hire(s) carry every requested aura at the pull: %s",
+		step, whole, len(roster), strings.Join(parts, "; "))
+	w.note("%s", msg)
+	w.logLine(w.env.now(), msg)
+	return nil
 }
 
 // prepullAuraHold puts the run on hold for the batch and confirms it. A refused, unacknowledged or unconfirmed pause
@@ -323,21 +483,22 @@ func (w *walk) prepullBossEngaged(ctx context.Context, step int) (bool, error) {
 // began. The commander's view leaves the player out, so the watch carries it first; a pull the commander started is
 // the one a member-only check misses. It fails closed on the read too: a unit the RPC cannot read may be fighting, so
 // the batch stops there as well. The caller builds the watch from the commander and the whole raid, not only
-// the members that carry an aura list: an unhired member can pull too.
-func (w *walk) prepullAuraCombatClear(ctx context.Context, step int) error {
+// the members that carry an aura list: an unhired member can pull too. where names the fire in its failure
+// ("boss row 5", or "start (row 1)"), so the walk-101 line reads as the start fire it was.
+func (w *walk) prepullAuraCombatClear(ctx context.Context, where string) error {
 	port := walkAuras{w: w}
 	for _, t := range w.prepullAuraWatch {
 		u, seen := port.ViewUnit(ctx, t)
 		if !seen {
 			return stopf(exitRaidWalkFailed,
-				"prepull-aura: boss row %d: the unit read of %s failed, so combat cannot be ruled out: no further auras were sent", step, t.Name)
+				"prepull-aura: %s: the unit read of %s failed, so combat cannot be ruled out: no further auras were sent", where, t.Name)
 		}
 		if u.Dead || u.Ghost {
 			continue
 		}
 		if u.InCombat {
 			return stopf(exitRaidWalkFailed,
-				"prepull-aura: boss row %d: combat started (%s is in combat): no further auras were sent", step, t.Name)
+				"prepull-aura: %s: combat started (%s is in combat): no further auras were sent", where, t.Name)
 		}
 	}
 	return nil
@@ -372,10 +533,11 @@ func (w *walk) prepullRaid(ctx context.Context) ([]tbm.PartyRec, error) {
 // a real raid carries in, so a hire the lists do not reach is a broken flag set (a role word the classes never
 // produce, or no "all" list) or a raid that lost bots, never a fire to record. Walk 101 wrote prepull-auras.json with
 // boss_rows [691] and 0 bots; a boss row is only ever recorded for a preparation that reached the walk's roster. The
-// names and the reasons go into the failure, so the file's attempt says which bot and why.
-func (w *walk) prepullAuraCoverage(step, bots int, targets []prepullAuraTarget, uncovered map[string]string) error {
+// names and the reasons go into the failure, so the file's attempt says which bot and why. where names the fire
+// ("boss row 5", or "start (row 1)"), so a start failure is never read as a boss row's.
+func (w *walk) prepullAuraCoverage(where string, bots int, targets []prepullAuraTarget, uncovered map[string]string) error {
 	if len(targets) == 0 {
-		return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the commander view shows %d bot(s) and not one of them received a list: no aura was sent and no boss row was recorded", step, bots)
+		return stopf(exitRaidWalkFailed, "prepull-aura: %s: the commander view shows %d bot(s) and not one of them received a list: no aura was sent and no row was recorded", where, bots)
 	}
 	covered := make(map[string]bool, len(targets))
 	for _, t := range targets {
@@ -396,8 +558,17 @@ func (w *walk) prepullAuraCoverage(step, bots int, targets []prepullAuraTarget, 
 	if len(short) == 0 {
 		return nil
 	}
-	return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: %d of the walk's %d hire(s) received no list (%s): the rest did not get a full preparation, so no boss row was recorded",
-		step, len(short), len(roster), strings.Join(short, "; "))
+	return stopf(exitRaidWalkFailed, "prepull-aura: %s: %d of the walk's %d hire(s) received no list (%s): the rest did not get a full preparation, so no row was recorded",
+		where, len(short), len(roster), strings.Join(short, "; "))
+}
+
+// prepullAuraWhere is the fire's own name for what it prepares: a boss row, or the run's start under
+// --prepull-aura-when start (start_row). Every failure line opens with it.
+func prepullAuraWhere(step int, start bool) string {
+	if start {
+		return fmt.Sprintf("start (row %d)", step)
+	}
+	return fmt.Sprintf("boss row %d", step)
 }
 
 // prepullAuraFire puts the flag's lists on every living hire of the commander's raid, reads them back, writes
@@ -408,15 +579,17 @@ func (w *walk) prepullAuraCoverage(step, bots int, targets []prepullAuraTarget, 
 // can neither receive GM auras nor pull unnoticed. A hire whose aura role the walk cannot tell fails the fire before
 // any aura (a class the unit read cannot give, no roster batch, or a dps druid/shaman whose spec the roster does not
 // name), because only the "all" lists would reach it while coverage still passed. A failed fire is recorded as an
-// attempt with its reason; only a fire whose auras verified within the tolerance appends the boss row, so the file
-// never reports a preparation that did not happen. The file is written on every fire, failures included, so the
-// attempt's reason and the missing list are always on disk.
-func (w *walk) prepullAuraFire(ctx context.Context, step int) (err error) {
+// attempt with its reason; only a fire whose auras verified within the tolerance appends the boss row (or start_row
+// under --prepull-aura-when start), so the file never reports a preparation that did not happen. The file is written
+// on every fire, failures included, so the attempt's reason and the missing list are always on disk. step is the boss
+// row the fire prepares, or the run's start row when start is true.
+func (w *walk) prepullAuraFire(ctx context.Context, step int, start bool) (err error) {
+	where := prepullAuraWhere(step, start)
 	defer func() {
 		if err != nil {
-			w.prepullAuraAttempts = append(w.prepullAuraAttempts, prepullAuraAttempt{BossRow: step, Reason: err.Error()})
+			w.prepullAuraAttempts = append(w.prepullAuraAttempts, prepullAuraAttempt{BossRow: step, Start: start, Reason: err.Error()})
 		}
-		w.prepullAuraWatch, w.prepullAuraRow = nil, 0
+		w.prepullAuraWatch, w.prepullAuraWhat = nil, ""
 		if werr := w.prepullAuraWrite(); werr != nil {
 			w.note("prepull-aura: WARN: %s could not be written (%v)", prepullAuraFileName, werr)
 		}
@@ -460,7 +633,7 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int) (err error) {
 			// auras. It is still a member of the raid the fire runs inside, so it goes into the combat watch like
 			// every other living member, and an unreadable row or combat there stops the batch before any aura.
 			watch = append(watch, dungeon.AuraTarget{GUID: m.GUID, Name: m.Name})
-			msg := fmt.Sprintf("prepull-aura: boss row %d: %s is in the commander's raid but not one of the walk's hires: watched, not targeted", step, m.Name)
+			msg := fmt.Sprintf("prepull-aura: %s: %s is in the commander's raid but not one of the walk's hires: watched, not targeted", where, m.Name)
 			w.note("%s", msg)
 			w.logLine(w.env.now(), msg)
 			continue
@@ -480,16 +653,16 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int) (err error) {
 		// so an unknown class fails the fire: a hire gets its role's list or the walk stops with it named.
 		if !seen {
 			return stopf(exitRaidWalkFailed,
-				"prepull-aura: boss row %d: the unit read of %s failed twice, so its class and aura role are unknown: no aura was sent", step, name)
+				"prepull-aura: %s: the unit read of %s failed twice, so its class and aura role are unknown: no aura was sent", where, name)
 		}
 		if u.Class == 0 {
 			return stopf(exitRaidWalkFailed,
-				"prepull-aura: boss row %d: %s is a hire whose unit row carries no class, so its aura role is unknown: no aura was sent", step, name)
+				"prepull-aura: %s: %s is a hire whose unit row carries no class, so its aura role is unknown: no aura was sent", where, name)
 		}
 		role, why := w.prepullRole(name, u.Class)
 		if role == "" {
 			return stopf(exitRaidWalkFailed,
-				"prepull-aura: boss row %d: %s: %s, so its aura role is unknown and only an \"all\" list would reach it: no aura was sent", step, name, why)
+				"prepull-aura: %s: %s: %s, so its aura role is unknown and only an \"all\" list would reach it: no aura was sent", where, name, why)
 		}
 		list := w.prepullAuras.For(role)
 		if len(list) == 0 {
@@ -507,11 +680,11 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int) (err error) {
 		rec.Seen = subtractIDs(raidwalk.PrepullIDs(list), rec.Missing)
 		targets = append(targets, prepullAuraTarget{rec: rec, unit: t, want: list, missing: missing})
 	}
-	w.prepullAuraWatch, w.prepullAuraRow = watch, step
-	if err := w.prepullAuraCombatClear(ctx, step); err != nil {
+	w.prepullAuraWatch, w.prepullAuraWhat = watch, where
+	if err := w.prepullAuraCombatClear(ctx, where); err != nil {
 		return err
 	}
-	if err := w.prepullAuraCoverage(step, len(raid), targets, uncovered); err != nil {
+	if err := w.prepullAuraCoverage(where, len(raid), targets, uncovered); err != nil {
 		return err
 	}
 	for i := range targets {
@@ -554,17 +727,21 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int) (err error) {
 		}
 	}
 	if len(over) > 0 {
-		return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: %d bot(s) miss auras beyond the tolerance of %d (%s): %s",
-			step, len(over), tol, w.prepullAuraMissSummary(over), prepullAuraFileName)
+		return stopf(exitRaidWalkFailed, "prepull-aura: %s: %d bot(s) miss auras beyond the tolerance of %d (%s): %s",
+			where, len(over), tol, w.prepullAuraMissSummary(over), prepullAuraFileName)
 	}
 	if len(within) > 0 {
-		w.logLine(w.env.now(), fmt.Sprintf("prepull-aura: boss row %d: %d bot(s) carry their lists; %d bot(s) miss auras within the tolerance of %d: %s",
-			step, len(targets)-len(within), len(within), tol, w.prepullAuraMissSummary(within)))
+		w.logLine(w.env.now(), fmt.Sprintf("prepull-aura: %s: %d bot(s) carry their lists; %d bot(s) miss auras within the tolerance of %d: %s",
+			where, len(targets)-len(within), len(within), tol, w.prepullAuraMissSummary(within)))
 	} else {
-		w.logLine(w.env.now(), fmt.Sprintf("prepull-aura: boss row %d: %d bot(s) carry their lists", step, len(targets)))
+		w.logLine(w.env.now(), fmt.Sprintf("prepull-aura: %s: %d bot(s) carry their lists", where, len(targets)))
 	}
-	// The row is a verified preparation now, and only now: every failure above left it out (its attempt carries the
-	// reason), so a consumer of the file reads boss_rows as applications that happened.
+	// The fire is a verified preparation now, and only now: every failure above left it out (its attempt carries the
+	// reason), so a consumer of the file reads boss_rows, and start_row, as applications that happened.
+	if start {
+		w.prepullAuraStartRow = step
+		return nil
+	}
 	if w.prepullAuraRows == nil || !slices.Contains(w.prepullAuraRows, step) {
 		w.prepullAuraRows = append(w.prepullAuraRows, step)
 	}
@@ -650,7 +827,8 @@ func (w *walk) prepullAuraMissSummary(bots []string) string {
 // prepullAuraWrite rewrites prepull-auras.json with the walk's whole prepull state.
 func (w *walk) prepullAuraWrite() error {
 	f := prepullAuraFile{Flag: w.opts.prepullAura, Tolerance: w.opts.prepullAuraTolerance, BossRows: w.prepullAuraRows,
-		Attempts: append([]prepullAuraAttempt{}, w.prepullAuraAttempts...), Lists: []prepullAuraList{}, Bots: []prepullAuraRecord{}}
+		StartRow: w.prepullAuraStartRow, Attempts: append([]prepullAuraAttempt{}, w.prepullAuraAttempts...),
+		Lists: []prepullAuraList{}, Bots: []prepullAuraRecord{}}
 	for _, role := range raidwalk.PrepullRoles {
 		if ids := raidwalk.PrepullIDs(w.prepullAuras.For(role)); len(ids) > 0 {
 			f.Lists = append(f.Lists, prepullAuraList{Role: role, IDs: ids})
@@ -710,7 +888,7 @@ type walkAuras struct{ w *walk }
 // preparation the walk could not send is not a preparation it may report.
 func (p walkAuras) SendAura(ctx context.Context, t dungeon.AuraTarget, b dungeon.Buff) error {
 	if len(p.w.prepullAuraWatch) > 0 {
-		if err := p.w.prepullAuraCombatClear(ctx, p.w.prepullAuraRow); err != nil {
+		if err := p.w.prepullAuraCombatClear(ctx, p.w.prepullAuraWhat); err != nil {
 			return err
 		}
 	}

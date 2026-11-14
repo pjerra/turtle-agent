@@ -168,6 +168,14 @@ func (w *walk) phases(ctx context.Context) int {
 			}
 		}
 	}
+	// --prepull-aura-when start fires ONCE here: after the placement and before `run start`, so the run's first move
+	// already carries the lists (walk 101: the boss-row fire's ~120 GM sends took about a minute, and on 4 of 4
+	// attempts a bot entered combat at Hakkar's row 689 while they went out). The default boss mode fires nothing
+	// here. A failed fire stops the walk: a run whose start preparation did not verify is not the test it was
+	// started for.
+	if err := w.prepullAuraStart(ctx); err != nil {
+		return w.stop(err, true)
+	}
 	if err := w.phaseStart(ctx); err != nil {
 		return w.stop(err, true)
 	}

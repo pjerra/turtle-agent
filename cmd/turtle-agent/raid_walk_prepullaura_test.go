@@ -1067,6 +1067,14 @@ func TestParsePrepullAuraFlags(t *testing.T) {
 	if code != exitOK || len(o.prepullAura) != 0 {
 		t.Fatalf("default options %v exit %d", o.prepullAura, code)
 	}
+	// --prepull-aura-when defaults to boss (today's behaviour) and takes start.
+	if o.prepullAuraWhen != prepullAuraWhenBoss {
+		t.Fatalf("default --prepull-aura-when %q", o.prepullAuraWhen)
+	}
+	o, code = parseRaidWalkArgs([]string{"zul_gurub", "--prepull-aura", "role=tank:17626", "--prepull-aura-when", "start"}, &stderr)
+	if code != exitOK || o.prepullAuraWhen != prepullAuraWhenStart {
+		t.Fatalf("start mode %q exit %d: %s", o.prepullAuraWhen, code, stderr.String())
+	}
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -1083,6 +1091,8 @@ func TestParsePrepullAuraFlags(t *testing.T) {
 		{"file and its role", []string{"zul_gurub", "--prepull-aura", "../../dungeons/prepull/zg-preraid.json", "--prepull-aura", "role=tank:17626"}, "named twice"},
 		{"negative tolerance", []string{"zul_gurub", "--prepull-aura", "role=tank:17626", "--prepull-aura-tolerance", "-1"}, "0 or more"},
 		{"tolerance alone", []string{"zul_gurub", "--prepull-aura-tolerance", "1"}, "needs --prepull-aura"},
+		{"bad when", []string{"zul_gurub", "--prepull-aura", "role=tank:17626", "--prepull-aura-when", "mid"}, `"boss" or "start"`},
+		{"when alone", []string{"zul_gurub", "--prepull-aura-when", "start"}, "needs --prepull-aura"},
 	} {
 		var errBuf bytes.Buffer
 		_, code := parseRaidWalkArgs(tc.args, &errBuf)
@@ -1520,4 +1530,166 @@ func readPrepullAuraFile(t *testing.T, w *walk) prepullAuraFile {
 		t.Fatalf("%v: %s", err, raw)
 	}
 	return f
+}
+
+// prepullNoRunStatus is the commander's own answer before `run start`: no run of the plan is going.
+const prepullNoRunStatus = "TBM:RUN|zul_gurub|none|0/6|here|move|rest|no run"
+
+// prepullStartWalk is the walk of a --prepull-aura-when start test: the fake agent's six bots, the usual role lists
+// and the start mode, with the commander's `run status` answering that no run is going yet.
+func prepullStartWalk(t *testing.T, a *prepullAgent) *walk {
+	t.Helper()
+	a.statusLine = prepullNoRunStatus
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	w.opts.prepullAuraWhen = prepullAuraWhenStart
+	return w
+}
+
+// Walk 101: at Hakkar's boss row 689 the boss-row fire's ~20 x 6 ".aura" sends took about a minute, and on 4 of 4
+// attempts a bot entered combat while they went out. --prepull-aura-when start fires ONCE, after the placement and
+// before the run's first move: no run is started or paused for it, the auras are already on the raid when `run start`
+// goes out, and the verified fire is recorded as start_row (never as a boss row). A second call sends nothing.
+func TestPrepullAuraStartFiresBeforeTheRunStartsOnce(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := prepullStartWalk(t, a)
+	ctx := context.Background()
+	if err := w.prepullAuraStart(ctx); err != nil {
+		t.Fatalf("start fire: %v", err)
+	}
+	if len(a.sent) == 0 {
+		t.Fatal("the start fire sent nothing")
+	}
+	// Nothing has moved: the only commander request is the status read, and the walk is not in a run it could pause.
+	for _, v := range a.verbs {
+		if v != "status" {
+			t.Fatalf("the start fire sent the run verb %q before the run's first move: %v", v, a.verbs)
+		}
+	}
+	if w.runStarted || w.runStopped {
+		t.Fatalf("the start fire ran inside a run (started %v stopped %v)", w.runStarted, w.runStopped)
+	}
+	f := readPrepullAuraFile(t, w)
+	if f.StartRow != 1 {
+		t.Fatalf("start_row %d, want the run's first row 1", f.StartRow)
+	}
+	if len(f.BossRows) != 0 {
+		t.Fatalf("the start fire recorded boss rows %v", f.BossRows)
+	}
+	// Every hire carries its list: the six role lists cover the fake's mt, ot and four rest bots.
+	if len(f.Bots) != 6 {
+		t.Fatalf("%d bot(s) in the file: %+v", len(f.Bots), f.Bots)
+	}
+	for _, b := range f.Bots {
+		if len(b.Missing) != 0 || len(b.Seen) == 0 {
+			t.Fatalf("%s: seen %v missing %v", b.Bot, b.Seen, b.Missing)
+		}
+	}
+	sent := len(a.sent)
+	if err := w.prepullAuraStart(ctx); err != nil {
+		t.Fatalf("second start fire: %v", err)
+	}
+	if len(a.sent) != sent {
+		t.Fatalf("the second start fire sent %v", a.sent[sent:])
+	}
+	if len(a.verbs) != 1 {
+		t.Fatalf("the second start fire asked the commander again: %v", a.verbs)
+	}
+}
+
+// In start mode a boss row is never a place to send again: the rest before boss row 5 and the boss row itself send
+// nothing (no pause, no aura) and the file keeps boss_rows empty.
+func TestPrepullAuraStartDoesNotFireAgainAtTheBossRow(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := prepullStartWalk(t, a)
+	ctx := context.Background()
+	if err := w.prepullAuraStart(ctx); err != nil {
+		t.Fatalf("start fire: %v", err)
+	}
+	sent, verbs := len(a.sent), append([]string{}, a.verbs...)
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "rest", Note: "resting"}
+	for _, st := range []tbm.RunStatus{prepullRest(4), boss} {
+		if fired, err := w.prepullAuraSendPending(ctx, st, false); err != nil || fired {
+			t.Fatalf("step %d (%s): fired %v err %v", st.Step, st.Kind, fired, err)
+		}
+	}
+	if len(a.sent) != sent {
+		t.Fatalf("a boss row sent auras again: %v", a.sent[sent:])
+	}
+	if len(a.verbs) != len(verbs) {
+		t.Fatalf("a boss row asked the run to pause/resume: %v (was %v)", a.verbs, verbs)
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 0 || f.StartRow != 1 {
+		t.Fatalf("boss rows %v, start_row %d", f.BossRows, f.StartRow)
+	}
+}
+
+// The start mode's boss row is a read: the walk logs which auras each hire still carries at the pull, with the missing
+// ids, and sends nothing (a read needs no pause and cannot pull).
+func TestPrepullAuraStartLogsTheCoverageAtThePull(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := prepullStartWalk(t, a)
+	logF, err := os.Create(filepath.Join(w.outDir, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.logF = logF
+	defer func() {
+		if w.logF != nil {
+			_ = w.logF.Close()
+			w.logF = nil
+		}
+	}()
+	ctx := context.Background()
+	if err := w.prepullAuraStart(ctx); err != nil {
+		t.Fatalf("start fire: %v", err)
+	}
+	// Mtbot loses its flask before the pull: the coverage line must say which ids are missing.
+	delete(a.auras[packet.GUID(0x100)], 17626)
+	sent := len(a.sent)
+	if fired, err := w.prepullAuraSendPending(ctx, prepullRest(4), false); err != nil || fired {
+		t.Fatalf("coverage read: fired %v err %v", fired, err)
+	}
+	if len(a.sent) != sent {
+		t.Fatalf("the coverage read sent auras: %v", a.sent[sent:])
+	}
+	// The read is once per boss row: the boss row's own status logs nothing more.
+	if fired, err := w.prepullAuraSendPending(ctx, tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "rest", Note: "resting"}, false); err != nil || fired {
+		t.Fatalf("the boss row itself: fired %v err %v", fired, err)
+	}
+	_ = w.logF.Sync()
+	raw, err := os.ReadFile(filepath.Join(w.outDir, "run.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(raw)
+	for _, want := range []string{
+		"prepull-aura: boss row 5: 5 of 6 hire(s) carry every requested aura at the pull",
+		"Mtbot 1/2 (missing 17626)",
+		"Rank 2/2",
+		"Holi 2/2",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("run.log lacks %q:\n%s", want, log)
+		}
+	}
+	if n := strings.Count(log, "hire(s) carry every requested aura at the pull"); n != 1 {
+		t.Fatalf("%d coverage line(s), want 1:\n%s", n, log)
+	}
+}
+
+// A start fire under a run the commander already reports as RUNNING sends nothing: the batch would go out while the
+// raid walks into the boss, which is exactly walk 101's Hakkar failure. The walk fails with the run line named.
+func TestPrepullAuraStartRefusesARunningRun(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	w.opts.prepullAuraWhen = prepullAuraWhenStart
+	a.statusLine = "TBM:RUN|zul_gurub|running|688/689|hakkar|move|begin|arrived"
+	code, reason := stopInfo(w.prepullAuraStart(context.Background()))
+	if code != exitRaidWalkFailed || !strings.Contains(reason, "already running") {
+		t.Fatalf("exit %d: %s", code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("the start fire sent auras under a running run: %v", a.sent)
+	}
 }
