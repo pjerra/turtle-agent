@@ -1370,23 +1370,14 @@ func (w *walk) placeFighting(now time.Time) []string {
 	return out
 }
 
-// placeView polls one frame into the walk's state (the same read waitEntered does), saves it, and returns the frame it
-// read. A nil frame is a failed read (the call errored or returned none): it says nothing about the party.
-func (w *walk) placeView(ctx context.Context) *tbm.ViewFrame {
-	n, frame, err := w.view(ctx, w.afterN, 2000)
-	if err != nil || frame == nil {
-		return nil
+// placeView polls one frame into the walk's state (the same read waitEntered does), and saves it, so frames.jsonl
+// holds the place phase (M2: walk 26's place frames were empty, and the summary could only guess the fight).
+func (w *walk) placeView(ctx context.Context) {
+	if n, frame, err := w.view(ctx, w.afterN, 2000); err == nil && frame != nil {
+		w.afterN = n
+		w.trackFrame(w.env.now(), frame)
+		w.saveFrame(w.env.now(), frame)
 	}
-	w.afterN = n
-	w.trackFrame(w.env.now(), frame)
-	w.saveFrame(w.env.now(), frame)
-	return frame
-}
-
-// placeFrameFresh says the frame's own stamp is inside placeFrameAge: an older frame (or one without a stamp, as the
-// tests build them) is not evidence of the party's current state.
-func placeFrameFresh(now time.Time, frame *tbm.ViewFrame) bool {
-	return frame != nil && (frame.At.IsZero() || now.Sub(frame.At) <= placeFrameAge)
 }
 
 // placeVerify is spec 5 step 9: the walk's own frames must show every hire inside the landing area. Each missing
@@ -1466,40 +1457,40 @@ func (w *walk) placeMissingWords(now time.Time, p dungeon.Point) string {
 	return strings.Join(missing, ", ")
 }
 
-// placeReviveDead revives the hires the freshest frames show dead before the raid is moved. Walk 101b's 33 exit-29
-// Mandokir placements all wiped at the ZG zone-in while the commander ran the corridor clear and the quiet: 19 hires
-// stayed corpses, and a `.summon` never moves a corpse, so the placement burned every try on hires that could not
-// arrive. The lines are the wipe-end fast path's own shape (reviveDeadHires): one `.revive <name>` per dead hire,
-// 100 ms apart, a failed line retried once. The frames are then read every placeRevivePoll for up to placeReviveWait
-// until a frame read after the revive shows every hire ALIVE: a failed, empty or stale read leaves a hire unknown,
-// and unknown is not revived (it can hide a corpse). The count the frames still show dead or unknown comes back for
-// the caller's fast fail. The run is marked ASSISTED: this is a GM assist, not a real clear.
+// placeLife is the freshest observation's verdict on one hire inside placeFrameAge: alive, dead, or unknown when no
+// frame inside the window showed it (it is absent from the frames or its last row aged out).
+func (w *walk) placeLife(name string, now time.Time) reviveSeen {
+	return w.reviveStateSince(name, now.Add(-placeFrameAge))
+}
+
+// placeReviveDead revives the hires the freshest frames do not show alive before the raid is moved. Walk 101b's 33
+// exit-29 Mandokir placements all wiped at the ZG zone-in while the commander ran the corridor clear and the quiet: 19
+// hires stayed corpses, and a `.summon` never moves a corpse, so the placement burned every try on hires that could not
+// arrive. The lines are the wipe-end fast path's own shape (reviveDeadHires): one `.revive <name>` per hire a frame
+// read from here on does not show alive, 100 ms apart, a failed line retried once. A hire no such frame shows at all is
+// unknown, and unknown is revived too: `.revive` on a living bot is harmless, and skipping it could leave a corpse
+// (Codex r2: a partial frame with one living row hid the other 19 hires). The frames are then read every placeRevivePoll
+// for up to placeReviveWait until a frame read after the revive shows every hire ALIVE: a failed, empty or stale read
+// leaves a hire unknown, and unknown at the deadline is not revived. The count still not alive (dead or unknown) comes
+// back for the caller's fast fail. The run is marked ASSISTED: this is a GM assist, not a real clear.
 func (w *walk) placeReviveDead(ctx context.Context) (int, error) {
-	hires := len(w.hireList())
-	// The first read names the dead. A failed, empty or stale frame says nothing about the party, so it is retried
-	// for the check's window; a roster still unknown at its end is not revived: the count comes back as every hire,
-	// which the caller's half rule turns into the fast fail.
-	deadline := w.env.now().Add(placeReviveWait)
-	var dead []string
-	for {
-		frame := w.placeView(ctx)
-		now := w.env.now()
-		if placeFrameFresh(now, frame) && len(frame.Party) > 0 {
-			dead = w.placeDead(now)
-			break
-		}
-		if !now.Before(deadline) {
-			return hires, nil
-		}
-		if err := w.placeSleep(ctx, placeRevivePoll); err != nil {
-			return hires, err
+	// Classify EVERY hire from a fresh observation: one inside placeFrameAge, the same window placeDead uses. A hire
+	// with neither a fresh alive nor a fresh dead row is unknown, which is not alive. One read is enough to try: a
+	// failed, empty or partial read leaves the hires it does not show unknown (their cached rows age out), and those
+	// are revived too rather than trusted.
+	w.placeView(ctx)
+	now := w.env.now()
+	var revive []string
+	for _, name := range w.hireList() {
+		if w.placeLife(name, now) != reviveSeenAlive {
+			revive = append(revive, name)
 		}
 	}
-	if len(dead) == 0 {
+	if len(revive) == 0 {
 		return 0, nil
 	}
 	var failed []string
-	for _, name := range dead {
+	for _, name := range revive {
 		err := w.gm(ctx, ".revive "+name)
 		if err != nil && ctx.Err() == nil {
 			if serr := w.placeSleep(ctx, placeReviveGap); serr != nil {
@@ -1514,15 +1505,15 @@ func (w *walk) placeReviveDead(ctx context.Context) (int, error) {
 			return 0, serr
 		}
 	}
-	w.placeRevivedOnce(dead)
-	w.note("place: revived %d hires dead before the placement: %s", len(dead), strings.Join(dead, ", "))
+	w.placeRevivedOnce(revive)
+	w.note("place: revived %d hires dead before the placement: %s", len(revive), strings.Join(revive, ", "))
 	if len(failed) > 0 {
 		w.note("place: the revive line failed for %s", strings.Join(failed, ", "))
 	}
 	// Only a positive observation counts: a frame read after the revive that shows the hire alive. A failed read, an
 	// empty frame or a hire the frames do not show leaves it unknown, and unknown is not revived.
 	since := w.env.now()
-	deadline = w.env.now().Add(placeReviveWait)
+	deadline := since.Add(placeReviveWait)
 	for {
 		w.placeView(ctx)
 		notAlive := 0

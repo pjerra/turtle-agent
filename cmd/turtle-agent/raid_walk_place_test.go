@@ -4021,6 +4021,56 @@ func TestPlaceReviveFailsClosedWhenPostReviveFramesFail(t *testing.T) {
 	}
 }
 
+// Codex HIGH on r2: a fresh frame with ONE living party row was accepted as proof that the other 19 hires needed no
+// revive. Their cached rows were stale, dead == 0, and r2 returned success without a positive observation of any other
+// hire, so the placement moved a party it could not see. Every hire must be classified from a fresh frame: the hires a
+// partial read omits are unknown, which is not alive, so they are revived too and then have to pass the all-alive
+// verification. Here the place frames stay partial, so the walk must revive the 19 it never sees and fail closed
+// instead of placing.
+func TestPlaceReviveVerifiesEveryHireAfterAPartialFrame(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.agent.onGM = func(line string) {
+		if line == ".gm on" {
+			// The hires' last full-frame rows age out before the place's revive check: the partial frames from here on
+			// show one hire, and the other 19 have no fresh row (the Codex r2 picture).
+			f.clock.advance(30 * time.Second)
+		}
+	}
+	f.agent.viewPartyFn = func(int) []string {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		if !f.agent.gmOnSeen || len(f.agent.party) == 0 {
+			return nil // the hire and enter phases see the whole party
+		}
+		return []string{f.agent.party[0]} // the place's frame: one living row, the other hires absent
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	code := f.run(context.Background())
+	if code != exitRaidWalkPlaceFailed {
+		t.Fatalf("exit %d, want 29 (exitRaidWalkPlaceFailed): %s", code, f.stderr.String())
+	}
+	hires := len(f.agent.party)
+	if hires != 20 {
+		t.Fatalf("%d hires, want the ZG raid's 20", hires)
+	}
+	gm := f.agent.gmLines()
+	if got := countPrefix(gm, ".revive "); got != hires-1 {
+		t.Fatalf("%d revive lines, want %d: the hires the partial frame never shows are unknown, not alive", got, hires-1)
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, fmt.Sprintf("party dead: %d of %d hires after a revive", hires-1, hires)) {
+		t.Fatalf("end reason %q, want the fast fail with the 19 unseen hires unknown", sum.EndReason)
+	}
+	if len(p.places) != 0 {
+		t.Fatalf("%d toolkit places, want none: no frame shows every hire alive", len(p.places))
+	}
+	f.agent.mu.Lock()
+	shown := f.agent.party[0]
+	f.agent.mu.Unlock()
+	if n := countExact(gm, ".revive "+shown); n != 0 {
+		t.Fatalf("%d revives of %s, want 0: the partial frame showed it alive", n, shown)
+	}
+}
+
 // --no-place-revive sends no `.revive` line; the fast fail stays, so the walk still stops at once instead of placing a
 // party of corpses.
 func TestPlaceNoReviveFlag(t *testing.T) {
