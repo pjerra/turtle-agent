@@ -11,7 +11,10 @@
 // PLAYER's group, and the walk's player never joins the hired bots' raid (walk 101 shipped a verified boss row for 0
 // bots that way). The view is matched against the walk's hires: a frame member the walk never hired is watched for
 // combat but never targeted, and a fire whose lists do not reach every hire the walk made fails instead
-// (prepullAuraCoverage). A hire whose class the unit read cannot give is a failure too, never an "all"-only bot.
+// (prepullAuraCoverage). A hire whose aura role the walk cannot tell — a unit row with no class, a hire it holds no
+// roster batch for, a dps hybrid (druid, shaman) whose spec the roster does not name — is a failure too, never an
+// "all"-only bot: the role comes from the walk's own hire data (prepullRole), not from the class alone, because a ret
+// paladin, a feral druid, an enhancement shaman and a shadow priest share a class with a healer.
 //
 // The fire is the boss row's own gate (prepullGate): the step before a boss row in WHATEVER phase, as long as the run
 // is still before the pull (no pulling/fighting note, no later pull line of the page, no party bot in combat), or the
@@ -402,8 +405,9 @@ func (w *walk) prepullAuraCoverage(step, bots int, targets []prepullAuraTarget, 
 // every requested aura must verify) or when the raid's lists do not reach every bot the walk hired (a fire that
 // covered fewer bots than the roster is no preparation either, and it is never recorded as one). A frame member the
 // walk never hired is not a target: it is watched for combat like a hire and logged, so a misbound or stale commander
-// can neither receive GM auras nor pull unnoticed. A hire whose class the unit read cannot give fails the fire before
-// any aura, because only the "all" lists would reach it while coverage still passed. A failed fire is recorded as an
+// can neither receive GM auras nor pull unnoticed. A hire whose aura role the walk cannot tell fails the fire before
+// any aura (a class the unit read cannot give, no roster batch, or a dps druid/shaman whose spec the roster does not
+// name), because only the "all" lists would reach it while coverage still passed. A failed fire is recorded as an
 // attempt with its reason; only a fire whose auras verified within the tolerance appends the boss row, so the file
 // never reports a preparation that did not happen. The file is written on every fire, failures included, so the
 // attempt's reason and the missing list are always on disk.
@@ -482,10 +486,10 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int) (err error) {
 			return stopf(exitRaidWalkFailed,
 				"prepull-aura: boss row %d: %s is a hire whose unit row carries no class, so its aura role is unknown: no aura was sent", step, name)
 		}
-		role := w.prepullRole(name, u.Class)
+		role, why := w.prepullRole(name, u.Class)
 		if role == "" {
 			return stopf(exitRaidWalkFailed,
-				"prepull-aura: boss row %d: %s is a hire with class %d, which no aura role covers, so only an \"all\" list would reach it: no aura was sent", step, name, u.Class)
+				"prepull-aura: boss row %d: %s: %s, so its aura role is unknown and only an \"all\" list would reach it: no aura was sent", step, name, why)
 		}
 		list := w.prepullAuras.For(role)
 		if len(list) == 0 {
@@ -593,19 +597,40 @@ func (w *walk) prepullAuraRecordFor(name, role string) *prepullAuraRecord {
 	return rec
 }
 
-// prepullRole is the aura role a bot plays: the walk's own tanks (mt and ot) are "tank", and every other bot takes its
-// class's role (raidwalk.ClassAuraRole). "" means the class has no aura role; the fire treats that as a failure, never
-// as an "all"-only bot, so a role the walk cannot prove is named in a failed attempt.
-func (w *walk) prepullRole(name string, class uint8) string {
+// prepullRole is the aura role a bot plays, from the walk's OWN hire data: the walk's tanks (mt and ot) are "tank", and
+// every other hire takes the role its roster batch gives it (raidwalk.HireAuraRole: the batch's role, the hire token's
+// role for the bot's class and the spec a version-2 roster set). A class id alone is not enough — a ret paladin, a
+// feral druid, an enhancement shaman and a shadow priest share a class with a healer. role == "" comes with the reason
+// the walk cannot tell it (a hire it holds no batch for, a batch that names the class no single role, a dps hybrid
+// whose spec the roster does not name); the fire fails closed on that reason, never as an "all"-only bot.
+func (w *walk) prepullRole(name string, class uint8) (role, why string) {
 	if w.mt != "" && strings.EqualFold(name, w.mt) {
-		return raidwalk.PrepullTank
+		return raidwalk.PrepullTank, ""
 	}
 	for _, ot := range w.ots {
 		if strings.EqualFold(name, ot) {
-			return raidwalk.PrepullTank
+			return raidwalk.PrepullTank, ""
 		}
 	}
-	return raidwalk.ClassAuraRole(class)
+	className := raidwalk.ClassName(class)
+	if className == "" {
+		return "", fmt.Sprintf("its unit row carries class %d, which no aura role covers", class)
+	}
+	b := w.hireBatch[strings.ToLower(name)]
+	if b == nil {
+		return "", "the walk holds no hire batch for it, so its role cannot be read"
+	}
+	token := b.TokenRole(className)
+	if role := raidwalk.HireAuraRole(b.Role, token, className, b.Spec); role != "" {
+		return role, ""
+	}
+	if token == "" {
+		return "", fmt.Sprintf("the batch that hired it (%s) names no single tank/healer/dps role for a %s", b.Role, className)
+	}
+	if b.Spec == "" {
+		return "", fmt.Sprintf("it is a %s dps and its roster names no spec", className)
+	}
+	return "", fmt.Sprintf("it is a %s dps and its roster spec %q gives no aura role", className, b.Spec)
 }
 
 // prepullAuraMissSummary names bots and what each of them lacks.

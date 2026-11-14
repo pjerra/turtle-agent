@@ -205,6 +205,57 @@ func (b *Batch) Class() string {
 	return class
 }
 
+// classHireRoles are the group roles a class can be hired as (a hybrid can tank, heal or dps; a pure class only dpses).
+// A role count names no class, so this is what reads its word against the class's own limits; a class that fits two of
+// the batch's counts stays unknown.
+var classHireRoles = map[string][]string{
+	"warrior": {"dps"}, "rogue": {"dps"}, "hunter": {"dps"}, "mage": {"dps"}, "warlock": {"dps"},
+	"paladin": {"tank", "healer", "dps"},
+	"priest":  {"healer", "dps"},
+	"shaman":  {"healer", "dps"},
+	"druid":   {"tank", "healer", "dps"},
+}
+
+// TokenRole is the role the batch's hire grammar asks of class: tank, healer or dps, with a class token that names no
+// role taking the class's default (a hybrid is hired as a healer, a pure class as dps). A class the batch names in no
+// class token is read through the batch's role counts, when the class can be hired as exactly one of them. "" is
+// everything the batch leaves ambiguous — the class in no token, tokens that disagree, or a role that two of the
+// batch's counts could fill ("5h 13d" says nothing about which of its priests healed): the walk fails closed rather
+// than guess.
+func (b *Batch) TokenRole(class string) string {
+	named, namedOK := "", false
+	counts := map[string]bool{}
+	for _, t := range b.tokens {
+		switch {
+		case t.Class == class:
+			r := t.Role
+			if r == "" {
+				r = classDefaultRole[t.Class]
+			}
+			if namedOK && named != r {
+				return ""
+			}
+			named, namedOK = r, true
+		case t.Class == "":
+			counts[t.Role] = true
+		}
+	}
+	if namedOK {
+		return named
+	}
+	role := ""
+	for _, r := range classHireRoles[class] {
+		if !counts[r] {
+			continue
+		}
+		if role != "" {
+			return "" // the class fits two of the batch's counts: which bot got which is not knowable
+		}
+		role = r
+	}
+	return role
+}
+
 // ParseRoster reads and checks a tb-raid-roster v1 or v2 file. It needs no plan: the raid-size bound
 // is checked by Validate, after the plan is loaded.
 func ParseRoster(data []byte) (*Roster, error) {

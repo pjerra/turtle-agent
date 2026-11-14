@@ -121,16 +121,58 @@ func TestPlanPrepullAuras(t *testing.T) {
 	}
 }
 
-// ClassAuraRole is the class's aura role: melee, ranged, caster or healer, "" for a class the table does not know.
-func TestClassAuraRole(t *testing.T) {
-	for class, want := range map[uint8]string{
-		1: PrepullMelee, 4: PrepullMelee, // warrior, rogue
-		3: PrepullRanged,                   // hunter
-		8: PrepullCaster, 9: PrepullCaster, // mage, warlock
-		2: PrepullHealer, 5: PrepullHealer, 7: PrepullHealer, 11: PrepullHealer, // paladin, priest, shaman, druid
-		6: "", 10: "", 0: "",
+// HireAuraRole reads the walk's own hire data, not the class alone: a class table puts a ret paladin, a feral druid, an
+// enhancement shaman and a shadow priest on the healer list, and a hire whose role the data cannot give is "" (the fire
+// fails closed on it, never an "all"-only bot). This is walk 100's cold review.
+func TestHireAuraRole(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		batch, token, class string
+		spec                string
+		want                string
+	}{
+		// The tanks are tanks whatever their class, by batch or by hire token.
+		{"mt by batch", RoleMT, "tank", "warrior", "", PrepullTank},
+		{"ot by batch", RoleOT, "tank", "paladin", "", PrepullTank},
+		{"tank token on a rest batch", RoleRest, "tank", "druid", "bear", PrepullTank},
+		// Healer and dps by token, never by class.
+		{"holy paladin", RoleRest, "healer", "paladin", "holy", PrepullHealer},
+		{"healer druid", RoleRest, "healer", "druid", "restoration", PrepullHealer},
+		{"ret paladin", RoleRest, "dps", "paladin", "retribution", PrepullMelee},
+		{"shadow priest", RoleRest, "dps", "priest", "shadow", PrepullCaster},
+		{"warrior dps", RoleRest, "dps", "warrior", "fury", PrepullMelee},
+		{"rogue dps", RoleRest, "dps", "rogue", "combat", PrepullMelee},
+		{"hunter dps", RoleRest, "dps", "hunter", "mm", PrepullRanged},
+		{"mage dps", RoleRest, "dps", "mage", "fire", PrepullCaster},
+		{"warlock dps", RoleRest, "dps", "warlock", "affliction", PrepullCaster},
+		// The dps hybrids need their spec: feral is melee, balance and elemental are casters.
+		{"feral cat", RoleRest, "dps", "druid", "cat", PrepullMelee},
+		{"feral bear", RoleRest, "dps", "druid", "bear", PrepullMelee},
+		{"balance druid", RoleRest, "dps", "druid", "balance", PrepullCaster},
+		{"boomkin druid", RoleRest, "dps", "druid", "boomkin", PrepullCaster},
+		{"enhancement shaman", RoleRest, "dps", "shaman", "enh", PrepullMelee},
+		{"elemental shaman", RoleRest, "dps", "shaman", "ele", PrepullCaster},
+		// What the data does not say is not guessed.
+		{"druid dps without a spec", RoleRest, "dps", "druid", "", ""},
+		{"shaman dps without a spec", RoleRest, "dps", "shaman", "", ""},
+		{"druid dps with a healer spec", RoleRest, "dps", "druid", "restoration", ""},
+		{"no hire role", RoleRest, "", "paladin", "", ""},
+		{"unknown class", RoleRest, "dps", "deathknight", "", ""},
 	} {
-		if got := ClassAuraRole(class); got != want {
+		if got := HireAuraRole(tc.batch, tc.token, tc.class, tc.spec); got != tc.want {
+			t.Errorf("%s: HireAuraRole(%q, %q, %q, %q) = %q, want %q", tc.name, tc.batch, tc.token, tc.class, tc.spec, got, tc.want)
+		}
+	}
+}
+
+// ClassName is the name the hire data and the fire agree on: "" for an id no class has.
+func TestClassName(t *testing.T) {
+	for class, want := range map[uint8]string{
+		1: "warrior", 2: "paladin", 3: "hunter", 4: "rogue", 5: "priest",
+		7: "shaman", 8: "mage", 9: "warlock", 11: "druid",
+		0: "", 6: "", 10: "",
+	} {
+		if got := ClassName(class); got != want {
 			t.Errorf("class %d: %q, want %q", class, got, want)
 		}
 	}

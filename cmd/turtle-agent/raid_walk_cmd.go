@@ -1122,6 +1122,11 @@ type walk struct {
 	mt    string
 	ots   []string
 	rest  []string
+	// hireBatch is each hire's own roster batch, keyed by its lowercased name: the --prepull-aura role reads it (the
+	// batch's role, the token role the hire grammar asked of the bot's class and the spec a version-2 roster set),
+	// because a class id alone cannot tell a ret paladin or a feral druid from a healer. A hire the walk holds no
+	// batch for fails closed there.
+	hireBatch map[string]*raidwalk.Batch
 	// capEntryAt is the At of the ledger entry recordFreshInstance made, so stampInstance can name its instance.
 	capEntryAt time.Time
 	// hireAccounts are the pool accounts behind the hires (read with `.pinfo` after the last batch, ids only): the
@@ -1301,6 +1306,7 @@ func raidWalkRun(ctx context.Context, o raidWalkOptions, env walkEnv, deps walkD
 	w := &walk{opts: o, env: env, deps: deps, stdout: stdout, stderr: stderr,
 		seenFights: map[string]bool{}, pendingFights: map[string]int{}, hostiles: map[string]hostileState{}, botAt: map[string]botPos{},
 		partyG: map[uint64]bool{}, bossSet: map[uint32]bool{}, bossRows: map[uint32]hostileState{}, hires: map[string]bool{},
+		hireBatch:     map[string]*raidwalk.Batch{},
 		bossAttemptAt: map[uint32]time.Time{}, bossAliveSeen: map[string]time.Time{}, bossCorpseSeen: map[string]time.Time{},
 		bossGUIDs: map[string]uint32{}, bossForms: map[string][]uint32{},
 		bossTracks: map[bossKey]*bossStepTrack{}}

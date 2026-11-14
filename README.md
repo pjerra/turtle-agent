@@ -56,13 +56,16 @@ pull — and
 `prepull-auras.json` records what each bot carries. A value that is not a `role=` list is a `tb-prepull-auras` file, so
 `--prepull-aura dungeons/prepull/zg-preraid.json` names the six lists at once. The targets are the walk's own hires,
 matched by name in the commander's raid read from its view (the walk's player is not in the hired bots' raid); a frame
-member the walk never hired gets no aura but is still watched for combat as one of the raid, and a hire whose class
-the unit read cannot give fails the fire. The batch is fail-closed: the commander and every living raid member, list
-or no list, are re-read for combat before each `.aura` (an in-combat unit or an unreadable `unit` row stops the
-batch), a boss row's arena is read fresh from the server (`q units` around the row: a boss already engaged, a read
-that cannot be made, or a unit row without its combat state, stops the walk), and every bot the walk hired must
-receive a list — a fire that reaches fewer of them, or none at all, fails with the bots and reasons named. A boss row
-lands in `boss_rows` only after its auras verified — a failed fire is an `attempts{row, reason}` entry instead.
+member the walk never hired gets no aura but is still watched for combat as one of the raid, and a hire whose role the
+walk cannot tell fails the fire. The role comes from the walk's own hire data, never the class alone: the mt/ot batches
+are tank, an `h` hire is healer, a `d` hire is melee, ranged or caster by class, and a dps druid or shaman takes its
+roster spec (feral and enhancement melee, balance and elemental caster) — one whose spec the roster does not name fails
+closed. The batch is fail-closed: the commander and every living raid member, list or no list, are re-read for
+combat before each `.aura` (an in-combat unit or an unreadable `unit` row stops the batch), a boss row's arena is read
+fresh from the server (`q units` around the row: a boss already engaged, a read that cannot be made, or a unit row
+without its combat state, stops the walk), and every bot the walk hired must receive a list — a fire that reaches
+fewer of them, or none at all, fails with the bots and reasons named. A boss row lands in `boss_rows` only after its
+auras verified — a failed fire is an `attempts{row, reason}` entry instead.
 By default every requested aura must verify; a miss fails the walk,
 and `--prepull-aura-tolerance N` is the explicit opt-in that accepts up to N missing ids per bot
 (see [the raid-walk reference](docs/okf/raids/raid-walk-reference.md)).

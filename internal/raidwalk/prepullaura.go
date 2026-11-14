@@ -218,21 +218,59 @@ func (a PrepullAuras) For(role string) []dungeon.Buff {
 	return out
 }
 
-// ClassAuraRole is the aura role of a class id (UNIT_FIELD_BYTES_0's class): melee, ranged, caster or healer, and ""
-// for a class the table does not know (6 the death knight, 10 unused). A walk's own tanks (mt and ot) are "tank"
-// whatever their class.
-func ClassAuraRole(class uint8) string {
-	switch class {
-	case 1, 4: // warrior, rogue
-		return PrepullMelee
-	case 3: // hunter
-		return PrepullRanged
-	case 8, 9: // mage, warlock
-		return PrepullCaster
-	case 2, 5, 7, 11: // paladin, priest, shaman, druid
-		return PrepullHealer
+// classNames is the class name of the class ids UNIT_FIELD_BYTES_0 carries (1 warrior ... 11 druid); 6 (the death
+// knight) and 10 (unused) have none, as in the aura role table below.
+var classNames = map[uint8]string{
+	1: "warrior", 2: "paladin", 3: "hunter", 4: "rogue", 5: "priest",
+	7: "shaman", 8: "mage", 9: "warlock", 11: "druid",
+}
+
+// ClassName is the class name of a class id, "" for an id no class has.
+func ClassName(class uint8) string { return classNames[class] }
+
+// hybridSpecRoles is the aura role a dps spec of a class that can be more than one of melee, caster and healer gives
+// it: a feral druid (cat, bear) and an enhancement shaman are melee, a balance or boomkin druid and an elemental shaman
+// are casters. A spec absent here (restoration, or none) gives no role: the fire fails closed rather than guess.
+var hybridSpecRoles = map[string]map[string]string{
+	"druid":  {"cat": PrepullMelee, "bear": PrepullMelee, "balance": PrepullCaster, "boomkin": PrepullCaster},
+	"shaman": {"enh": PrepullMelee, "ele": PrepullCaster},
+}
+
+// HireAuraRole is the aura role of one of the walk's own hires, from the hire data the walk holds rather than the
+// class id alone (walk 100's cold review: the class table put a ret paladin, a feral druid, an enhancement shaman and a
+// shadow priest on the HEALER list).
+//
+//	batchRole — the roster batch's role: mt and ot are tanks whatever the class.
+//	tokenRole — the role the batch's hire grammar asked of the class (Batch.TokenRole: tank, healer or dps).
+//	class     — the class name (ClassName), from the class id the fire reads.
+//	spec      — the class-spec id a version-2 roster set on the batch ("" when it names none).
+//
+// A tank is a tank and a healer is a healer whatever its class. A dps is melee (warrior, rogue, paladin), ranged
+// (hunter) or caster (mage, warlock, priest); a dps druid or shaman needs its spec, and "" comes back whenever the
+// walk cannot tell the role — an unknown token role or a hybrid spec that is not named. The caller fails closed on
+// "", never as an "all"-only bot.
+func HireAuraRole(batchRole, tokenRole, class, spec string) string {
+	if batchRole == RoleMT || batchRole == RoleOT {
+		return PrepullTank
 	}
-	return ""
+	switch tokenRole {
+	case "tank":
+		return PrepullTank
+	case "healer":
+		return PrepullHealer
+	case "dps":
+	default:
+		return ""
+	}
+	switch class {
+	case "warrior", "rogue", "paladin":
+		return PrepullMelee
+	case "hunter":
+		return PrepullRanged
+	case "mage", "warlock", "priest":
+		return PrepullCaster
+	}
+	return hybridSpecRoles[class][spec]
 }
 
 // PrepullIDs is the ids of an aura list, in order (the report's form).
