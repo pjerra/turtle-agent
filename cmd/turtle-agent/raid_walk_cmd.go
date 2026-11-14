@@ -74,7 +74,7 @@ var (
 const walkPIDFile = "walk.pid"
 
 const raidWalkUsage = `usage: turtle-agent raid-walk <plan> [--server m910q] [--slot N] [--holder NAME] [--dir DIR] [--sql FILE]
-    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--no-place-unfreeze] [--gm-instance-data LEG:"A B[;A B]"] [--prepull-aura role=ROLE:ID,ID|PRESET|FILE.json] [--prepull-aura-tolerance N] [--prepull-aura-when start|boss] [--speed X] [--hires FILE] [--tier N|--tier-override N]
+    [--until boss|boss-done|none|step N|leg L] [--from leg L|step N] [--place] [--gm-clear LEG:GROUP[,GROUP]] [--gm-clear-boss LEG] [--no-place-unfreeze] [--no-place-revive] [--gm-instance-data LEG:"A B[;A B]"] [--prepull-aura role=ROLE:ID,ID|PRESET|FILE.json] [--prepull-aura-tolerance N] [--prepull-aura-when start|boss] [--speed X] [--hires FILE] [--tier N|--tier-override N]
     [--enter auto|near|tele] [--hold-minutes M] [--max-run-minutes 90] [--paused-wait 10m] [--auto-resume K]
     [--reset-wait 5m] [--wipe-resume K] [--wipe-end fast] [--wipe-rest 10m] [--revive-at-raid=false] [--hire-settle 20s] [--instance-cap-per-account N] [--instance-cap-wait 20m] [--instance-cap-fail] [--instance-cap-reset] [--instance-cap-unsafe] [--patrols FILE] [--out DIR] [--dash-url URL] [--dash-user TADASH] [--dash-pass-file PATH]
     [--practice ENTRY] [--practice-cycles N] [--practice-max 20m] [--practice-rest 30s] [--practice-boss-floor N] [--practice-sustain=on|off] [--practice-window 120s]
@@ -163,6 +163,7 @@ type raidWalkOptions struct {
 	injects          stringList // --inject, repeatable
 	dryRun           bool
 	noPlaceUnfreeze  bool // --no-place-unfreeze: with --place, do not re-place hires still frozen at the placement point
+	noPlaceRevive    bool // --no-place-revive: with --place, do not revive hires dead before the placement (the fast fail stays)
 	// noPlaceRetreat is a test seam: the unit tests that pin one placement attempt turn the same-instance retreat off
 	// (the walk's own TestPlaceQuietFailureRetreatsInTheSameInstance runs it).
 	noPlaceRetreat bool
@@ -283,6 +284,7 @@ func parseRaidWalkArgs(args []string, stderr io.Writer) (raidWalkOptions, int) {
 	fs.StringVar(&o.from, "from", "", "\"leg L\" or \"step N\" for the run leader")
 	fs.Var(onOffFlag{v: &o.place, name: "--place"}, "place", "with --from: put the raid at that start inside the instance, clearing the legs it skips; a same-instance placement ends at once with exit 29 (`fresh instance needed`) when half the hires are dead or the start leg's boss is fighting the party (Eluna test toolkit: m910q, tortoise-test2 or tortoise-test3 only)")
 	fs.BoolVar(&o.noPlaceUnfreeze, "no-place-unfreeze", false, "with --place: turn off the unfreeze check. The `spread=5` place can drop two seats onto a small disconnected navmesh island beside the place point, where every move fails; by default, from the first watch poll after each placement move (the `.tt place`: an 11 yd ring, spread + 6; every GM summon wave of a retry, a retreat or the reuse/bind gather: a 6 yd ring at its own point) and for 120 s, sampled once per poll, a hire that is alive, not the main tank, has stood still (under 2 yd for 10 s) within the ring and more than 35 yd from the main tank while the main tank is more than 15 yd from the point is summoned onto the main tank once the commander's `.go` onto him has landed (5 s, 5 yd), at most twice per hire; a successful summon logs `placement: re-placed <hire> (frozen at x,y,z for <s>s)`, a failed one `placement: re-place failed <hire> (<reason>)` (at most 3 per hire, 5 s apart); three failed `.go` moves in a row, the main tank's death or a wipe stop it (`placement: unfreeze check stopped (<reason>)`), and it ends with `placement: frozen=<n> re-placed=<n>`")
+	fs.BoolVar(&o.noPlaceRevive, "no-place-revive", false, "with --place: turn off the revive of hires the frames show dead before the placement. By default, after the corridor clear, the GM clear and the quiet and before the raid's move (and before every retry's summon wave), one `.revive <name>` per dead hire goes out 100 ms apart (a failed line retried once) and the frames are read every 2 s for up to 10 s; a revive marks the walk ASSISTED. The fast fail stays either way: half or more of the hires still dead is exit 29, \"party dead\", which stops at once (a fresh instance is needed)")
 	fs.BoolVar(&o.reuseInstance, "reuse-instance", false, "with --place: keep the raid's CURRENT instance (no fresh instance is entered or counted, so the instance cap is untouched). A live raid is kept; a logged-out raid is resumed from the commander's live bind; with no bind the walk says so and falls back to a fresh entry. Combines with --gm-clear")
 	fs.StringVar(&speed, "speed", "1.0", "the run's test speed, 1.0 to 3.0")
 	fs.StringVar(&o.hires, "hires", "", "the tb-raid-roster v1 file (default: from the plan's raid block)")
@@ -1172,6 +1174,7 @@ type walk struct {
 	reuseBindInst float64                // the instance the commander's existing bind names (reuseMode "bind")
 	reuseBindTTR  string                 // that bind's time to reset, from .instance listbinds
 	placeSummoned []string
+	placeRevived  []string      // the hires the placement's revive brought back (the summary's ASSISTED line)
 	unfreeze      placeUnfreeze // the place-unfreeze net's state (raid_walk_unfreeze.go)
 	pollAt        time.Time     // the time the last pollOnce read first: the stamp of that poll's frames
 
@@ -2182,6 +2185,7 @@ func (w *walk) finish(code int) {
 		GMClearUsed:   w.gmClearUsed,
 		GMClear:       w.gmClearLog,
 		GMClearLegs:   raidwalk.GMClearLegs(w.gmClear),
+		PlaceRevived:  w.placeRevived,
 		BossKill:      w.bossKillSummary(),
 		BossKills:     w.bossKillSummaries(),
 		ReviveRefusal: w.reviveRefusal,

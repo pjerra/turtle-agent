@@ -74,6 +74,12 @@ type Summary struct {
 	// result is NOT a real clear. GMClear lists every unit the tool tried to kill. Both are absent without --gm-clear.
 	Assisted bool           `json:"assisted,omitempty"`
 	GMClear  []GMClearEntry `json:"gm_clear,omitempty"`
+	// GMClearUsed says the walk ran --gm-clear even when no unit was found (the flag alone marks it ASSISTED).
+	GMClearUsed bool `json:"gm_clear_used,omitempty"`
+	// PlaceRevived are the hires a `--place` walk's revive brought back before the placement (walk 101b: the raid
+	// wiped at the zone-in and 19 corpses never reached the start point). It marks the walk ASSISTED: the party was
+	// revived by GM command, so the run is not a real clear.
+	PlaceRevived []string `json:"place_revived,omitempty"`
 	// Practice is the --practice run's cycle record (attempts, cycles, why it ended and the rows file). A practice walk
 	// never carries boss_kill or boss_kills: it does not credit a kill, and a boss death ends the practice.
 	Practice *PracticeSummary `json:"practice,omitempty"`
@@ -421,6 +427,9 @@ type SummaryMeta struct {
 	GMClearUsed bool
 	GMClear     []GMClearEntry
 	GMClearLegs []string
+	// PlaceRevived are the hires the placement's revive brought back (PlaceSummary's walk side): the summary is
+	// ASSISTED and says so in one line.
+	PlaceRevived []string
 	// ReviveRefusal is the walk's revive_refusal (nil when no revive was refused).
 	ReviveRefusal *ReviveRefusal
 	// BossKill is the walk's boss_kill (nil when no boss was engaged).
@@ -462,9 +471,11 @@ func BuildSummary(t *Tracker, m SummaryMeta) *Summary {
 		Dashboard:            m.Dashboard,
 		Teardown:             m.Teardown,
 		Place:                m.Place,
-		Assisted:             m.GMClearUsed || m.Practice != nil,
+		Assisted:             m.GMClearUsed || m.Practice != nil || len(m.PlaceRevived) > 0,
 		Practice:             m.Practice,
 		GMClear:              m.GMClear,
+		GMClearUsed:          m.GMClearUsed,
+		PlaceRevived:         m.PlaceRevived,
 		GMClearPartial:       GMClearPartial(m.GMClear),
 		BossKill:             m.BossKill,
 		BossKills:            m.BossKills,
@@ -619,7 +630,12 @@ func (s *Summary) Text() string {
 	}
 	b.WriteString("\n")
 	if s.Assisted {
-		b.WriteString(GMClearSummaryLine(s.GMClear, assistedLegs(s)) + "\n")
+		if len(s.PlaceRevived) > 0 {
+			fmt.Fprintf(&b, "ASSISTED: revived %d hires before the placement\n", len(s.PlaceRevived))
+		}
+		if s.GMClearUsed || len(s.GMClear) > 0 {
+			b.WriteString(GMClearSummaryLine(s.GMClear, assistedLegs(s)) + "\n")
+		}
 	}
 	fmt.Fprintf(&b, "plan %s map %d; server %s slot %d as %s\n", s.Plan, s.Map, s.Server, s.Slot, s.Character)
 	// A --place walk whose route guard shortened the until shows both: what the user asked for and what the run

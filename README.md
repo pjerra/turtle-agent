@@ -88,6 +88,15 @@ read is taken at the pull itself — the boss row current in the plan's `pull` o
 the step before it; a row is read at the pull and refreshed once at the fight start, and a phase is recorded only after
 a successful read, so a failed read is retried at the next qualifying status.
 
+A `--place` walk revives the hires its own frames show dead before it moves the raid: the ZG Mandokir runs of walk 101b
+all wiped at the zone-in while the commander ran the corridor clear, and 19 corpses stayed dead through every placement
+try because `.summon` never moves a corpse. Each dead hire gets one `.revive <name>` (100 ms apart, a failed line
+retried once), the frames are read every 2 s for up to 10 s, and the run is then **ASSISTED** (a revive is a GM assist,
+`place_revived` in `summary.json`, `ASSISTED: revived N hires before the placement` in `summary.txt`). Half or more of
+the hires still dead after that ends the walk at once with exit 29 (`place: party dead ... fresh instance needed`)
+instead of spending its tries; `--no-place-revive` turns the revive off and keeps the fast fail. See
+[the raid-walk reference](docs/okf/raids/raid-walk-reference.md).
+
 Log a character in and keep it online with the RPC server running:
 
 ```sh
