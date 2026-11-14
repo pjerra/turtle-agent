@@ -2523,3 +2523,135 @@ func TestPrepullAuraIncompleteModuleSnapshotFailsClosed(t *testing.T) {
 		t.Fatalf("%d aura(s) went out on an incomplete snapshot: %v", len(a.sent), a.sent)
 	}
 }
+
+// prepullTriggerWalk is a walk of six rows whose kinds are given (1-based step), boss row 5 unless the kinds say
+// otherwise: the fixture for a boss row that a use_object or a gossip summons (walk 104's ZG gong 180526, an open
+// row three steps before Arlokk's boss row).
+func prepullTriggerWalk(t *testing.T, a *prepullAgent, kinds map[int]string) *walk {
+	t.Helper()
+	w := newPrepullWalk(t, a, "role=all:22888")
+	rows := prepullRows()
+	for step, kind := range kinds {
+		rows.Steps[step-1].Kind = kind
+	}
+	w.rows = rows
+	return w
+}
+
+// Walk 104: opening the gong row summons Arlokk, who engages at once, so her boss row 348 found the raid in combat
+// ("combat started (X is in combat): no further auras were sent", exit 18) although the step before the gong was
+// quiet. The boss row's fire stands in front of the trigger now: the walk fires on the status of the row before the
+// open row, names the moved fire in one line, and the boss row itself never fires (or pauses) a second time.
+// The failing case without the move: this test fires nothing at all on the step before the open row.
+func TestPrepullAuraFiresBeforeTheSummoningTrigger(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 2 // the row before the open row
+	w := prepullTriggerWalk(t, a, map[int]string{3: planexport.KindOpen, 5: planexport.KindBoss})
+	prepullRunLog(t, w)
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 2, Kind: planexport.KindMove, Phase: "walk", Note: "walking to the gong"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	if err != nil || !fired {
+		t.Fatalf("the row before the trigger: fired %v err %v, want a fire in front of step 3", fired, err)
+	}
+	if len(a.sent) == 0 {
+		t.Fatal("the moved fire sent nothing")
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the boss row the trigger summons was not recorded as prepared")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 1 || f.BossRows[0] != 5 {
+		t.Fatalf("boss rows %v, want the boss row 5 the trigger summons", f.BossRows)
+	}
+	log := prepullRunLogText(t, w)
+	if !strings.Contains(log, "prepull-aura: boss row 5: fired before trigger step 3 (open)") {
+		t.Fatalf("run.log does not name the moved fire:\n%s", log)
+	}
+	// The trigger row's own status is past the fire point: it fires nothing.
+	if fired, err := w.prepullAuraSendPending(context.Background(),
+		tbm.RunStatus{State: tbm.RunRunning, Step: 3, Kind: planexport.KindOpen, Phase: "task", Note: "open by Caerian"}, false); err != nil || fired {
+		t.Fatalf("the trigger row: fired %v err %v, want nothing", fired, err)
+	}
+	// The boss row itself, reached after the trigger: prepared already, so no second fire, no second pause and no
+	// blocking "never sent" failure (walk 104's exit 18).
+	reads := len(a.ttCmds)
+	if fired, err := w.prepullAuraSendPending(context.Background(),
+		tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}, false); err != nil || fired {
+		t.Fatalf("the boss row after the moved fire: fired %v err %v, want nothing", fired, err)
+	}
+	if a.pauses != 1 || len(a.ttCmds) != reads {
+		t.Fatalf("the boss row fired again: %d pause(s), arena reads %v", a.pauses, a.ttCmds)
+	}
+}
+
+// A plain boss row (no trigger behind it) keeps the fire at its own step, as before: the status of the row before it
+// fires it, and no moved-fire line is logged.
+func TestPrepullAuraPlainBossRowFiresAtItsOwnStep(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := prepullTriggerWalk(t, a, map[int]string{5: planexport.KindBoss})
+	prepullRunLog(t, w)
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
+		t.Fatalf("plain boss row: fired %v err %v", fired, err)
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the boss row was not recorded as prepared")
+	}
+	if log := prepullRunLogText(t, w); strings.Contains(log, "fired before trigger") || !strings.Contains(log, "> .bot run pause (prepull-aura, boss row 5)") {
+		t.Fatalf("run.log %s", log)
+	}
+}
+
+// A trigger with a pull between it and the boss row does not move the fire: the party fights the pack there, so the
+// fire stays on the boss row's own step. The trigger row's own status fires nothing, and the row before the boss row
+// fires it under the boss row's own name.
+func TestPrepullAuraTriggerBehindAPullFiresAtTheBossRow(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := prepullTriggerWalk(t, a, map[int]string{2: planexport.KindOpen, 3: planexport.KindPull, 5: planexport.KindBoss})
+	prepullRunLog(t, w)
+	if fired, err := w.prepullAuraSendPending(context.Background(),
+		tbm.RunStatus{State: tbm.RunRunning, Step: 2, Kind: planexport.KindOpen, Phase: "task", Note: "open by Caerian"}, false); err != nil || fired {
+		t.Fatalf("the trigger row before a pull: fired %v err %v, want nothing", fired, err)
+	}
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	if err != nil || !fired {
+		t.Fatalf("the row before the boss row: fired %v err %v", fired, err)
+	}
+	if !w.prepullAuraSent[5] || a.pauses != 1 {
+		t.Fatalf("sent %v, %d pause(s)", w.prepullAuraSent, a.pauses)
+	}
+	log := prepullRunLogText(t, w)
+	if strings.Contains(log, "fired before trigger") || !strings.Contains(log, "> .bot run pause (prepull-aura, boss row 5)") {
+		t.Fatalf("run.log %s", log)
+	}
+}
+
+// The real plan: ZG's Arlokk leg. Walk 104's boss row followed the gong's open row (180526) and the arena approach
+// move, and opening the gong summoned her into combat, so the fire stands before the gong. This pins the rule against
+// the plan itself: a row between the gong and her boss row that the fire cannot cross would move the fire back onto
+// her row, where walk 104 found the raid already fighting.
+func TestPrepullFirePointOnTheZulGurubArlokkLeg(t *testing.T) {
+	rows := zgRows(t)
+	open, boss := 0, 0
+	for i, s := range rows.Steps {
+		if s.Kind == planexport.KindOpen && s.Entry == 180526 {
+			open = i + 1
+		}
+		if s.Kind == planexport.KindBoss && s.Entry == 14515 {
+			boss = i + 1
+		}
+	}
+	if open == 0 || boss == 0 || open >= boss {
+		t.Fatalf("the gong row %d and Arlokk's boss row %d", open, boss)
+	}
+	if fire, trig, kind := raidwalk.PrepullFirePoint(rows, boss); fire != open || trig != open || kind != planexport.KindOpen {
+		t.Fatalf("her boss row %d fires at step %d (trigger %d %q), want the gong row %d", boss, fire, trig, kind, open)
+	}
+	for i := open; i < boss-1; i++ {
+		if s := rows.Steps[i]; s.Kind != planexport.KindMove {
+			t.Errorf("row %d (%s %q) stands between the gong and her boss row", i+1, s.Kind, s.Comment)
+		}
+	}
+}
