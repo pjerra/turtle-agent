@@ -43,9 +43,13 @@ const (
 	// 100 ms the wipe-end fast revive uses.
 	placeReviveGap = 100 * time.Millisecond
 	// placeRevivePoll and placeReviveWait are the dead check's window after the revive lines: the frames are read every
-	// placeRevivePoll for up to placeReviveWait until no hire is dead (the server's revive lands a moment after the line).
+	// placeRevivePoll for up to placeReviveWait until every hire is shown alive (the server's revive lands a moment
+	// after the line).
 	placeRevivePoll = 2 * time.Second
 	placeReviveWait = 10 * time.Second
+	// placeFrameAge is how old a hire's observation may be for the place's judgments: a frame's own stamp is when the
+	// unit was last seen, and an older one (or none) says nothing about where the hire stands or whether it lives.
+	placeFrameAge = 10 * time.Second
 	// placeSummonRounds is how many summon waves the verification may send to the hires its frames still miss. Walk
 	// 37: one wave of a 20-hire raid was still landing when its 10 s window closed, and eight placements failed with
 	// 13 to 18 hires "missing" that the next poll would have found at the point.
@@ -1323,7 +1327,7 @@ func (w *walk) placeMissing(now time.Time, p dungeon.Point) []string {
 	var out []string
 	for _, name := range w.hireList() {
 		b, ok := w.botAt[name]
-		if !ok || now.Sub(b.at) > 10*time.Second || b.mapID != w.plan.Map || b.dead {
+		if !ok || now.Sub(b.at) > placeFrameAge || b.mapID != w.plan.Map || b.dead {
 			out = append(out, name)
 			continue
 		}
@@ -1348,7 +1352,7 @@ func placeArrived(b botPos, p dungeon.Point) bool {
 func (w *walk) placeDead(now time.Time) []string {
 	var out []string
 	for _, name := range w.hireList() {
-		if b, ok := w.botAt[name]; ok && now.Sub(b.at) <= 10*time.Second && b.dead {
+		if b, ok := w.botAt[name]; ok && now.Sub(b.at) <= placeFrameAge && b.dead {
 			out = append(out, name)
 		}
 	}
@@ -1359,21 +1363,30 @@ func (w *walk) placeDead(now time.Time) []string {
 func (w *walk) placeFighting(now time.Time) []string {
 	var out []string
 	for _, name := range w.hireList() {
-		if b, ok := w.botAt[name]; ok && now.Sub(b.at) <= 10*time.Second && b.inCombat {
+		if b, ok := w.botAt[name]; ok && now.Sub(b.at) <= placeFrameAge && b.inCombat {
 			out = append(out, name)
 		}
 	}
 	return out
 }
 
-// placeView polls one frame into the walk's state (the same read waitEntered does), and saves it, so frames.jsonl
-// holds the place phase (M2: walk 26's place frames were empty, and the summary could only guess the fight).
-func (w *walk) placeView(ctx context.Context) {
-	if n, frame, err := w.view(ctx, w.afterN, 2000); err == nil && frame != nil {
-		w.afterN = n
-		w.trackFrame(w.env.now(), frame)
-		w.saveFrame(w.env.now(), frame)
+// placeView polls one frame into the walk's state (the same read waitEntered does), saves it, and returns the frame it
+// read. A nil frame is a failed read (the call errored or returned none): it says nothing about the party.
+func (w *walk) placeView(ctx context.Context) *tbm.ViewFrame {
+	n, frame, err := w.view(ctx, w.afterN, 2000)
+	if err != nil || frame == nil {
+		return nil
 	}
+	w.afterN = n
+	w.trackFrame(w.env.now(), frame)
+	w.saveFrame(w.env.now(), frame)
+	return frame
+}
+
+// placeFrameFresh says the frame's own stamp is inside placeFrameAge: an older frame (or one without a stamp, as the
+// tests build them) is not evidence of the party's current state.
+func placeFrameFresh(now time.Time, frame *tbm.ViewFrame) bool {
+	return frame != nil && (frame.At.IsZero() || now.Sub(frame.At) <= placeFrameAge)
 }
 
 // placeVerify is spec 5 step 9: the walk's own frames must show every hire inside the landing area. Each missing
@@ -1458,11 +1471,30 @@ func (w *walk) placeMissingWords(now time.Time, p dungeon.Point) string {
 // stayed corpses, and a `.summon` never moves a corpse, so the placement burned every try on hires that could not
 // arrive. The lines are the wipe-end fast path's own shape (reviveDeadHires): one `.revive <name>` per dead hire,
 // 100 ms apart, a failed line retried once. The frames are then read every placeRevivePoll for up to placeReviveWait
-// until none is dead, and the count the frames still show dead comes back for the caller's fast fail. The run is
-// marked ASSISTED: this is a GM assist, not a real clear.
+// until a frame read after the revive shows every hire ALIVE: a failed, empty or stale read leaves a hire unknown,
+// and unknown is not revived (it can hide a corpse). The count the frames still show dead or unknown comes back for
+// the caller's fast fail. The run is marked ASSISTED: this is a GM assist, not a real clear.
 func (w *walk) placeReviveDead(ctx context.Context) (int, error) {
-	w.placeView(ctx)
-	dead := w.placeDead(w.env.now())
+	hires := len(w.hireList())
+	// The first read names the dead. A failed, empty or stale frame says nothing about the party, so it is retried
+	// for the check's window; a roster still unknown at its end is not revived: the count comes back as every hire,
+	// which the caller's half rule turns into the fast fail.
+	deadline := w.env.now().Add(placeReviveWait)
+	var dead []string
+	for {
+		frame := w.placeView(ctx)
+		now := w.env.now()
+		if placeFrameFresh(now, frame) && len(frame.Party) > 0 {
+			dead = w.placeDead(now)
+			break
+		}
+		if !now.Before(deadline) {
+			return hires, nil
+		}
+		if err := w.placeSleep(ctx, placeRevivePoll); err != nil {
+			return hires, err
+		}
+	}
 	if len(dead) == 0 {
 		return 0, nil
 	}
@@ -1487,15 +1519,26 @@ func (w *walk) placeReviveDead(ctx context.Context) (int, error) {
 	if len(failed) > 0 {
 		w.note("place: the revive line failed for %s", strings.Join(failed, ", "))
 	}
-	deadline := w.env.now().Add(placeReviveWait)
+	// Only a positive observation counts: a frame read after the revive that shows the hire alive. A failed read, an
+	// empty frame or a hire the frames do not show leaves it unknown, and unknown is not revived.
+	since := w.env.now()
+	deadline = w.env.now().Add(placeReviveWait)
 	for {
 		w.placeView(ctx)
-		still := len(w.placeDead(w.env.now()))
-		if still == 0 || !w.env.now().Before(deadline) {
-			return still, nil
+		notAlive := 0
+		for _, name := range w.hireList() {
+			if w.reviveStateSince(name, since) != reviveSeenAlive {
+				notAlive++
+			}
+		}
+		if notAlive == 0 {
+			return 0, nil
+		}
+		if !w.env.now().Before(deadline) {
+			return notAlive, nil
 		}
 		if err := w.placeSleep(ctx, placeRevivePoll); err != nil {
-			return still, err
+			return notAlive, err
 		}
 	}
 }
@@ -1532,7 +1575,7 @@ func (w *walk) placeMedianPos(now time.Time) string {
 	var xs, ys, zs []float64
 	for _, name := range w.hireList() {
 		b, ok := w.botAt[name]
-		if !ok || now.Sub(b.at) > 10*time.Second {
+		if !ok || now.Sub(b.at) > placeFrameAge {
 			continue
 		}
 		xs, ys, zs = append(xs, float64(b.x)), append(ys, float64(b.y)), append(zs, float64(b.z))
@@ -1867,28 +1910,28 @@ func (w *walk) placeTry(ctx context.Context, retry bool) error {
 	}
 	// Walk 101b: the raid wipes at the zone-in while the commander runs the corridor clear and the quiet, so the
 	// placement meets a party of corpses no `.summon` can move. One revive here saves the whole placement; a party
-	// still dead by half after it needs a fresh instance, so the walk stops at once with exit 29 (not a
+	// still dead or unknown by half after it needs a fresh instance, so the walk stops at once with exit 29 (not a
 	// placeRetryReason: no try and no retreat feed the copy). --no-place-revive sends no line; the fast fail stays.
-	stillDead := 0
+	notAlive := 0
 	if w.opts.noPlaceRevive {
 		w.placeView(ctx)
-		stillDead = len(w.placeDead(w.env.now()))
+		notAlive = len(w.placeDead(w.env.now()))
 	} else {
 		n, err := w.placeReviveDead(ctx)
 		if err != nil {
 			return err
 		}
-		stillDead = n
+		notAlive = n
 	}
-	if hires := len(w.hireList()); hires > 0 && stillDead*2 >= hires {
+	if hires := len(w.hireList()); hires > 0 && notAlive*2 >= hires {
 		if w.opts.noPlaceRevive {
 			return stopf(exitRaidWalkPlaceFailed,
 				"place: party dead: %d of %d hires (the revive is off with --no-place-revive): fresh instance needed (start step %d)",
-				stillDead, hires, w.place.Start)
+				notAlive, hires, w.place.Start)
 		}
 		return stopf(exitRaidWalkPlaceFailed,
 			"place: party dead: %d of %d hires after a revive: fresh instance needed (start step %d)",
-			stillDead, hires, w.place.Start)
+			notAlive, hires, w.place.Start)
 	}
 	if retry {
 		return w.placeSummonParty(ctx)

@@ -3980,6 +3980,47 @@ func TestPlaceDeadPartyFailsFast(t *testing.T) {
 	}
 }
 
+// Codex HIGH on the r1 revive: every bot_view fails from the first `.revive` line. The hires' only observations then
+// age out inside the 10 s verification, and r1's dead-only count fell to zero and reported success: the placement
+// moved a party the walk could not see and then burned its tries on it (here it would place once and fail with "not
+// at the start"). A hire no frame read after the revive shows alive is unknown, not revived, so the party's
+// half-dead fast fail must fire instead of the move.
+func TestPlaceReviveFailsClosedWhenPostReviveFramesFail(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	placeDeadAtZoneIn(f, true)
+	prev := f.agent.onGM
+	var mu sync.Mutex
+	reviving := false
+	f.agent.onGM = func(line string) {
+		prev(line)
+		if strings.HasPrefix(line, ".revive ") {
+			mu.Lock()
+			reviving = true
+			mu.Unlock()
+		}
+	}
+	f.agent.viewFn = func(int) (bool, string) {
+		mu.Lock()
+		defer mu.Unlock()
+		return reviving, ""
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	code := f.run(context.Background())
+	if code != exitRaidWalkPlaceFailed {
+		t.Fatalf("exit %d, want 29 (exitRaidWalkPlaceFailed): %s", code, f.stderr.String())
+	}
+	hires := len(f.agent.party)
+	if got := countPrefix(f.agent.gmLines(), ".revive "); got != hires-1 {
+		t.Fatalf("%d revive lines, want %d (the failure is the verification, not the first read)", got, hires-1)
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, fmt.Sprintf("party dead: %d of %d hires after a revive", hires, hires)) {
+		t.Fatalf("end reason %q, want the fast fail with every hire unknown", sum.EndReason)
+	}
+	if len(p.places) != 0 {
+		t.Fatalf("%d toolkit places, want none: a party no frame shows alive is not moved", len(p.places))
+	}
+}
+
 // --no-place-revive sends no `.revive` line; the fast fail stays, so the walk still stops at once instead of placing a
 // party of corpses.
 func TestPlaceNoReviveFlag(t *testing.T) {
