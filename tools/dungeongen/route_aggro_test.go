@@ -326,8 +326,8 @@ var routeAggroKnownFailing = map[string]int{
 	"upper_karazhan_halls": 379,                                                                       // waypoint pass (was 383): the moved stands walk past fewer later packs.
 	"emerald_sanctum":      17,                                                                        // waypoint pass (was 15): the moved north_hall stands' segments pass two more later packs.
 	"timbermaw_hold":       195,                                                                       // waypoint pass (was 214): the reworked loktanag_lower vias walk past fewer later packs.
-	"hateforge_quarry":     754,                                                                       // newly hand-maintained (was a generated draft): the current route passes.
-	"maraudon_orange":      121, "maraudon_purple": 272, "blackrock_depths": 722, "scholomance": 2472, // newly hand-maintained (were generated): the current route's passes; the water fixes at the two Maraudon starts add two and nine segments.
+	"hateforge_quarry":     835,                                                                       // b6a (2026-11-14): 754 -> 835, the batch's approach rows add walk segments                                                                       // newly hand-maintained (was a generated draft): the current route passes.
+	"maraudon_orange":      121, "maraudon_purple": 272, "blackrock_depths": 739, "scholomance": 2472, // newly hand-maintained (were generated): the current route's passes; the water fixes at the two Maraudon starts add two and nine segments.
 	"razorfen_kraul": 342, "dire_maul_north": 46, "windhorn_canyon": 436, "upper_blackrock_spire": 459,
 	"blackfathom_deeps": 311, "gnomeregan": 359, "lower_blackrock_spire": 818, "stormwind_vault": 421,
 	"frostmane_hollow": 149, "dire_maul_east": 97, "dire_maul_west": 189, "razorfen_downs": 379, "sunken_temple": 337, // dire_maul_west 199 -> 189: the revanchion to and the immol'thar stand move out of aggro, dropping their passes.
@@ -339,7 +339,7 @@ var routeAggroKnownFailing = map[string]int{
 	// 398 -> 429 (the searistrasz_line split). dire_maul_west and shadowfang_keep keep the live plans' rows (the reconcile
 	// port is the same revanchion leg and the same door/courtyard legs, already in them); shadowfang_keep 382 -> 383 is the
 	// odo hop's launch point moved to -262.5 2150.3 (4.0 yd from the landing, outside kArriveYd 3).
-	"crescent_grove": 433, "dragonmaw_retreat": 382, "gilneas_city": 267, "black_morass": 385,
+	"crescent_grove": 436, "dragonmaw_retreat": 382, "gilneas_city": 267, "black_morass": 392,
 }
 
 // TestNoRouteSegmentPassesALaterPack: no straight segment between two consecutive rows passes within aggro of a spawn
