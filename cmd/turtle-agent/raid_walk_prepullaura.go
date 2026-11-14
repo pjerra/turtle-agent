@@ -1,23 +1,27 @@
-// raid_walk_prepullaura.go: the `--prepull-aura` test tool of raid-walk (test servers only, off by default). At the
-// pre-pull rest before each boss row the commander puts the flag's aura lists on every living party member with the
-// same GM select-then-".aura" call dungeon_run's buff presets use (internal/dungeon's AuraPort and ApplyAuras), so a
-// walk tests the preparation a real raid carries into the instance: a flask, elixirs, food and the world buffs, all
-// as auras the walk can read back.
+// raid_walk_prepullaura.go: the `--prepull-aura` test tool of raid-walk (test servers only, off by default). Before
+// each boss row the commander puts the flag's aura lists on every living party member with the same GM
+// select-then-".aura" call dungeon_run's buff presets use (internal/dungeon's AuraPort and ApplyAuras), so a walk
+// tests the preparation a real raid carries into the instance: a flask, elixirs, food and the world buffs, all as
+// auras the walk can read back.
 //
 //	--prepull-aura role=tank:17626,17538 --prepull-aura role=healer:17627,24363 --prepull-aura all:world,23768
 //
-// The fire is the boss-row resend's gate (preBossGate): a rest or gather of the step before a boss row, out of combat,
-// once per boss row per walk, under a run pause that is always resumed. The pause is fail-closed: a refused or
-// unconfirmed pause sends no aura, and every living party member is re-read for combat right before the first `.aura`
-// and before every later one, so a pull that starts mid-batch stops the batch and fails the walk. A member the unit
-// RPC cannot read counts as combat too: the walk never assumes an unreadable party is out of combat. A boss row that
-// becomes current without a verified fire fails the walk too: the preparation the run was started to test never
-// happened. The auras a bot already carries are not sent again, so a second boss row only tops up what a death or a
-// buff strip took. Every fire is read back into prepull-auras.json (bot, role, ids sent/seen/missing). By default
-// every requested aura must verify; --prepull-aura-tolerance N is the explicit opt-in that accepts up to N missing ids
-// per bot. A missing aura beyond that bound fails the walk (exit 18), because a preparation the walk cannot see is not
-// the test the run was started for. A boss row is written to prepull-auras.json only after its auras verified within
-// the tolerance; a fire that failed is a separate `attempts` entry with its reason, never a boss row.
+// The fire is the boss row's own gate (prepullGate): the step before a boss row in WHATEVER phase, as long as the run
+// is still before the pull (no pulling/fighting note, no later pull line of the page, no party bot in combat), or the
+// boss row itself when the run passed that step too fast to pause, still before the pull (no member in combat and the
+// boss not engaged). Walk 101b: the ZG Thekal plan's step before boss row 255 is a plain move, so a rest/gather-only
+// gate never fired and the walk stopped with exit 18. The fire is once per boss row per walk, under a run pause that
+// is always resumed. The pause is fail-closed: a refused or unconfirmed pause sends no aura, and every living party
+// member is re-read for combat right before the first `.aura` and before every later one, so a pull that starts
+// mid-batch stops the batch and fails the walk. A member the unit RPC cannot read counts as combat too: the walk
+// never assumes an unreadable party is out of combat. A boss row that becomes current without a verified fire fails
+// the walk too: the preparation the run was started to test never happened. The auras a bot already carries are not
+// sent again, so a second boss row only tops up what a death or a buff strip took. Every fire is read back into
+// prepull-auras.json (bot, role, ids sent/seen/missing). By default every requested aura must verify;
+// --prepull-aura-tolerance N is the explicit opt-in that accepts up to N missing ids per bot. A missing aura beyond
+// that bound fails the walk (exit 18), because a preparation the walk cannot see is not the test the run was started
+// for. A boss row is written to prepull-auras.json only after its auras verified within the tolerance; a fire that
+// failed is a separate `attempts` entry with its reason, never a boss row.
 package main
 
 import (
@@ -33,6 +37,7 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/objects"
+	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
@@ -102,18 +107,46 @@ func (w *walk) validatePrepullAura() error {
 	return nil
 }
 
-// prepullAuraSendPending is pollOnce's firing: at the pre-pull rest or gather before a boss row, once per boss row,
-// the auras go out under a run pause that must hold. A boss row that became current without a verified fire fails the
-// walk (a configured boss row the walk never prepared is not the test the run was started for). Whenever the status
-// was running before the pause attempt, the resume is attempted afterwards even when the hold or the fire failed: a
-// run left paused stops the raid silently. A status that was already paused sends no resume. A row is recorded as
-// done only after the auras verified within the tolerance. It reports whether a firing happened, so pollOnce breaks
-// its line loop (the next poll re-reads from the cursor), like the instance-data firing.
+// prepullGate is the --prepull-aura firing gate. It returns the boss row to prepare and whether a fire may go out
+// now (0: nothing to do, and no failure). The step before a boss row fires in whatever phase, as long as the status
+// is still before the pull (prePullOK: no pulling/fighting note, no later pull line of the same page, no party bot
+// in combat in a recent frame). A status that is not before the pull defers to the boss row's own status, exactly as
+// the rest/gather-only gate did. The boss row itself fires only while the pause can still land before the pull: the
+// same pre-pull check AND no engaged boss (bossEngagedNow). A boss row that becomes current otherwise is (step,
+// false), the caller's blocking failure: the preparation the run was started to test never happened.
+func (w *walk) prepullGate(st tbm.RunStatus, later bool) (int, bool) {
+	if st.State != tbm.RunRunning && st.State != tbm.RunPaused {
+		return 0, false
+	}
+	if st.Kind == planexport.KindBoss {
+		if _, ok := w.bossRowAt(st.Step); !ok {
+			return 0, false
+		}
+		return st.Step, w.prePullOK(st, later, w.env.now()) && !w.bossEngagedNow()
+	}
+	next := st.Step + 1
+	if _, ok := w.bossRowAt(next); !ok {
+		return 0, false
+	}
+	if !w.prePullOK(st, later, w.env.now()) {
+		return 0, false
+	}
+	return next, true
+}
+
+// prepullAuraSendPending is pollOnce's firing: at the step before a boss row (whatever its phase) or at the boss row
+// itself when the run passed that step too fast to pause, once per boss row, the auras go out under a run pause that
+// must hold. A boss row that became current without a verified fire fails the walk (a configured boss row the walk
+// never prepared is not the test the run was started for). Whenever the status was running before the pause attempt,
+// the resume is attempted afterwards even when the hold or the fire failed: a run left paused stops the raid
+// silently. A status that was already paused sends no resume. A row is recorded as done only after the auras verified
+// within the tolerance. It reports whether a firing happened, so pollOnce breaks its line loop (the next poll re-reads
+// from the cursor), like the instance-data firing.
 func (w *walk) prepullAuraSendPending(ctx context.Context, st tbm.RunStatus, later bool) (bool, error) {
 	if len(w.prepullAuras) == 0 {
 		return false, nil
 	}
-	step, fire := w.preBossGate(st, later)
+	step, fire := w.prepullGate(st, later)
 	if step == 0 {
 		return false, nil
 	}
@@ -148,9 +181,11 @@ func (w *walk) prepullAuraSendPending(ctx context.Context, st tbm.RunStatus, lat
 }
 
 // prepullAuraHold puts the run on hold for the batch and confirms it. A refused, unacknowledged or unconfirmed pause
-// is a blocking failure: no aura goes out on a run the walk cannot show is paused on the rest step before the boss
-// row (a pause that lands at the boss row itself is a pause mid-pull). The confirmation is a fresh `run status`, the
-// run's own answer rather than the push feed's newest line.
+// is a blocking failure: no aura goes out on a run the walk cannot show is paused before the pull. The pause must
+// stand on the step before the boss row; the one exception is a run that passed that step too fast to pause: then it
+// may stand on the boss row itself, and only while the boss is not engaged (the fire's own combat read still gates
+// every member). A pause past the boss row is mid-pull and fails. The confirmation is a fresh `run status`, the run's
+// own answer rather than the push feed's newest line.
 func (w *walk) prepullAuraHold(ctx context.Context, step int, pause bool) error {
 	if pause {
 		rep, err := w.commander(ctx, commanderReq{Op: "run", Verb: "pause", WaitMS: 10000})
@@ -182,9 +217,18 @@ func (w *walk) prepullAuraHold(ctx context.Context, step int, pause bool) error 
 	if w.plan != nil && run.Plan != "" && run.Plan != w.plan.Name {
 		return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the paused run is %s, not %s, no auras were sent", step, run.Plan, w.plan.Name)
 	}
-	if run.Step != step-1 {
-		return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused at step %d, past the rest of step %d, no auras were sent",
+	if run.Step != step-1 && run.Step != step {
+		return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused at step %d, past the step before it (step %d), no auras were sent",
 			step, run.Step, step-1)
+	}
+	if run.Step == step {
+		// The run passed the step before the boss too fast for the pause. A pause on the boss row is still before the
+		// pull only while the boss is not engaged; the fire re-reads every living member for combat before its first
+		// aura, so a pull that started anyway still stops the batch there.
+		if w.bossEngagedNow() {
+			return stopf(exitRaidWalkFailed, "prepull-aura: boss row %d: the run paused on the boss row with the boss engaged, no auras were sent", step)
+		}
+		w.note("prepull-aura: boss row %d: the run reached the boss row before the pause; it paused there with the boss not engaged", step)
 	}
 	return nil
 }

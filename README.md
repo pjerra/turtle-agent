@@ -50,7 +50,9 @@ points, not the premade's exact point spread, which depends on the hire's level;
 spec is listed in the walk's `spec_failed`.
 
 Raid-walk's `--prepull-aura role=<role>:<ids>` (`tank`, `melee`, `ranged`, `caster`, `healer` or `all`) puts a flask,
-elixir, food and world-buff list on the party as auras at the pre-pull rest before each boss row, and
+elixir, food and world-buff list on the party as auras at the step before each boss row — whatever that step's phase,
+or on the boss row itself if the run passed that step too fast to pause, both only while the run is still before the
+pull — and
 `prepull-auras.json` records what each bot carries. The batch is fail-closed: every living party member, list or no list,
 is re-read for combat before each `.aura` (an in-combat member or an unreadable `unit` row stops the batch), and a boss
 row lands in `boss_rows` only after its auras verified — a failed fire is an `attempts{row, reason}` entry instead.

@@ -1,9 +1,10 @@
 package main
 
-// The raid-walk --prepull-aura test tool: at the pre-pull rest or gather of the step before each boss row the walk
-// pauses the run, puts the flag's lists on the living party with the gm_aura RPC (a confirmed select then
-// ".aura <id>"), reads them back into prepull-auras.json and resumes. Once per boss row, never at a pull, a pause is
-// always resumed, and an aura on the commander is a miss like any other.
+// The raid-walk --prepull-aura test tool: at the step before each boss row (whatever its phase), or on the boss row
+// itself when the run passed that step too fast to pause, the walk pauses the run, puts the flag's lists on the
+// living party with the gm_aura RPC (a confirmed select then ".aura <id>"), reads them back into prepull-auras.json
+// and resumes. Once per boss row, never at or after the pull, a pause is always resumed, and an aura on the
+// commander is a miss like any other.
 import (
 	"bytes"
 	"context"
@@ -299,7 +300,7 @@ var prepullRestAuras = []string{
 	"role=all:22888",
 }
 
-// The gate: the auras go out at the rest before a boss row, and never at or after the pull. The named case is the
+// The gate: the auras go out before the pull, and never at or after it in the same page. The named case is the
 // spec's TestPrepullAuraNotAtPull.
 func TestPrepullAuraNotAtPull(t *testing.T) {
 	for _, tc := range []struct {
@@ -310,18 +311,11 @@ func TestPrepullAuraNotAtPull(t *testing.T) {
 		{"pull phase", tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "pull", Note: "pulling 11338"}, false},
 		{"pulling note at rest", tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "rest", Note: "pulling Hakkar"}, false},
 		{"later pull line", prepullRest(4), true},
-		{"boss row itself", tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}, false},
-		{"no rest phase", tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking"}, false},
+		{"move step, later pull line", tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking"}, true},
 	} {
 		a := newPrepullAgent(t)
 		w := newPrepullWalk(t, a, prepullRestAuras...)
-		fired, err := w.prepullAuraSendPending(context.Background(), tc.st, tc.later)
-		if tc.name == "boss row itself" {
-			// A boss row with no verified fire is a blocking failure, the other statuses are simply no-gate.
-			if code, _ := stopInfo(err); fired || code != exitRaidWalkFailed {
-				t.Errorf("%s: fired %v, err %v", tc.name, fired, err)
-			}
-		} else if err != nil || fired {
+		if fired, err := w.prepullAuraSendPending(context.Background(), tc.st, tc.later); err != nil || fired {
 			t.Errorf("%s: fired %v, err %v", tc.name, fired, err)
 		}
 		if len(a.sent) != 0 || a.pauses != 0 {
@@ -336,6 +330,106 @@ func TestPrepullAuraNotAtPull(t *testing.T) {
 	}
 	if len(a.sent) == 0 {
 		t.Fatal("the control sent nothing")
+	}
+}
+
+// Walk 101b: the ZG Thekal plan's step before boss row 255 is a plain move, so the rest/gather-only gate never fired.
+// A move step before a boss row now fires like a rest, pauses, verifies and resumes.
+func TestPrepullAuraFiresOnAPlainMoveStepBeforeTheBoss(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullWalk(t, a, "role=all:22888")
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	if err != nil || !fired {
+		t.Fatalf("move step: fired %v err %v", fired, err)
+	}
+	if len(a.sent) == 0 {
+		t.Fatal("the move step before the boss row sent nothing")
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the row the move step stands before was not recorded as done")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 1 || f.BossRows[0] != 5 {
+		t.Fatalf("boss rows %v", f.BossRows)
+	}
+}
+
+// The run passed the step before the boss too fast for the pause: the pause lands on the boss row itself, before the
+// pull, so the auras still go out and verify.
+func TestPrepullAuraAdvancedPauseAtTheBossRowFires(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 5 // the pause confirms the run already stands on boss row 5
+	w := newPrepullWalk(t, a, "role=all:22888")
+	st := tbm.RunStatus{State: tbm.RunRunning, Step: 4, Kind: planexport.KindMove, Phase: "walk", Note: "walking to Thekal"}
+	fired, err := w.prepullAuraSendPending(context.Background(), st, false)
+	if err != nil || !fired {
+		t.Fatalf("advanced pause: fired %v err %v", fired, err)
+	}
+	if len(a.sent) == 0 {
+		t.Fatal("the advanced pause sent nothing")
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the row was not recorded as done")
+	}
+}
+
+// The boss row became current before any fire: still before the pull (begin, no combat, the boss not engaged), so
+// the walk pauses on the row, fires, verifies and resumes.
+func TestPrepullAuraBossRowCurrentPausesFiresAndResumes(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 5
+	w := newPrepullWalk(t, a, "role=all:22888")
+	// The tracker holds the boss unengaged: alive at 100 %, no target, no live target.
+	w.bossSet = map[uint32]bool{14834: true}
+	w.bossRows = map[uint32]hostileState{14834: {entry: 14834, hppct: 100, at: a.clock}}
+	w.bossSeenAt = a.clock
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	fired, err := w.prepullAuraSendPending(context.Background(), boss, false)
+	if err != nil || !fired {
+		t.Fatalf("boss row current: fired %v err %v", fired, err)
+	}
+	if len(a.sent) == 0 {
+		t.Fatal("the boss row sent nothing")
+	}
+	if got := strings.Join(prepullHoldVerbs(a), " "); got != "pause resume" {
+		t.Fatalf("verbs %q", got)
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the row was not recorded as done")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 1 || f.BossRows[0] != 5 {
+		t.Fatalf("boss rows %v", f.BossRows)
+	}
+}
+
+// The boss row became current with the boss already engaged: the pull has started, so the walk fails as before with
+// no aura sent and no pause.
+func TestPrepullAuraBossRowEngagedFails(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.statusStep = 5
+	w := newPrepullWalk(t, a, "role=all:22888")
+	w.bossSet = map[uint32]bool{14834: true}
+	w.bossRows = map[uint32]hostileState{14834: {entry: 14834, hppct: 40, target: 0x103, at: a.clock}}
+	w.bossSeenAt = a.clock
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 5, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	fired, err := w.prepullAuraSendPending(context.Background(), boss, false)
+	code, reason := stopInfo(err)
+	if fired || code != exitRaidWalkFailed || !strings.Contains(reason, "boss row 5") || !strings.Contains(reason, "never sent") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 || len(a.verbs) != 0 {
+		t.Fatalf("the engaged boss row sent %v / %v", a.sent, a.verbs)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the engaged row was recorded as done")
 	}
 }
 
@@ -637,26 +731,11 @@ func TestPrepullAuraTolerance(t *testing.T) {
 	}
 }
 
-// A boss row that becomes current without a verified fire fails the walk: the row is never recorded as done, no
-// pause or aura is attempted, and the walk exits 18. This is the r1 HIGH behind the premature `sent` mark.
-func TestPrepullAuraBossRowWithoutAFireFailsTheWalk(t *testing.T) {
+// A row that did fire at the step before its boss row is done: the boss row's own status is no failure and sends
+// nothing more (the fire happened exactly once).
+func TestPrepullAuraBossRowFiredOnceIsNotRefired(t *testing.T) {
 	a := newPrepullAgent(t)
 	w := newPrepullWalk(t, a, "role=all:22888")
-	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 2, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
-	fired, err := w.prepullAuraSendPending(context.Background(), boss, false)
-	code, reason := stopInfo(err)
-	if fired || code != exitRaidWalkFailed || !strings.Contains(reason, "boss row 2") || !strings.Contains(reason, "never sent") {
-		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
-	}
-	if len(a.sent) != 0 || len(a.verbs) != 0 {
-		t.Fatalf("the boss row sent %v / %v", a.sent, a.verbs)
-	}
-	if w.prepullAuraSent[2] {
-		t.Fatal("the boss row was recorded as done without a fire")
-	}
-	// A row that did fire at its rest is done: the boss status is no failure and sends nothing more.
-	a = newPrepullAgent(t)
-	w = newPrepullWalk(t, a, "role=all:22888")
 	a.statusStep = 1
 	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(1), false); err != nil || !fired {
 		t.Fatalf("rest before row 2: fired %v err %v", fired, err)
@@ -665,7 +744,8 @@ func TestPrepullAuraBossRowWithoutAFireFailsTheWalk(t *testing.T) {
 		t.Fatal("a verified row was not recorded as done")
 	}
 	before := len(a.sent)
-	fired, err = w.prepullAuraSendPending(context.Background(), boss, false)
+	boss := tbm.RunStatus{State: tbm.RunRunning, Step: 2, Kind: planexport.KindBoss, Phase: "begin", Note: "starting"}
+	fired, err := w.prepullAuraSendPending(context.Background(), boss, false)
 	if fired || err != nil {
 		t.Fatalf("fired row's boss status: fired %v err %v", fired, err)
 	}

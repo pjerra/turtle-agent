@@ -535,9 +535,10 @@ func (w *walk) gmInstanceDataBossRow(inst string, st tbm.RunStatus, later bool) 
 	return step, fire
 }
 
-// preBossGate is the pre-pull gate the boss-row instance-data resend and the --prepull-aura lists both read: it
-// returns the boss step the status stands before (0: none) and whether the status is a rest or gather of the step
-// before the boss row that passes prePullOK (the run is idle there, so a pause costs nothing).
+// preBossGate is the pre-pull gate the boss-row instance-data resend reads: it returns the boss step the status
+// stands before (0: none) and whether the status is a rest or gather of the step before the boss row that passes
+// prePullOK (the run is idle there, so a pause costs nothing). --prepull-aura has its own gate (prepullGate): it
+// fires at the step before the boss row in any phase and can also pause on the boss row itself.
 //
 // The boss row's own status is never a place to fire: it becomes current about 1 s before the run's FightStep can
 // pull (DungeonRunPolicy.h:5661, Commander.cpp:6886) and a pause there lands mid-pull. A boss row that becomes
