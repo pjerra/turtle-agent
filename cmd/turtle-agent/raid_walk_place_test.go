@@ -3864,3 +3864,256 @@ func TestPlaceQuietNotesABossBeyondTheReach(t *testing.T) {
 		}
 	}
 }
+
+// placeDeadAtZoneIn is walk 101b's zone-in picture: once the roster is hired, every hire but the first (the main tank)
+// is dead, and the hits land at the `zg` teleport's landing. reviveTakes false makes the `.revive` lines fail to take
+// (the corpse is marked dead again right after its line), the copy the fast fail exists for.
+func placeDeadAtZoneIn(f *fixture, reviveTakes bool) {
+	var once sync.Once
+	f.agent.onGM = func(line string) {
+		if name, ok := strings.CutPrefix(line, ".revive "); ok {
+			if reviveTakes {
+				return
+			}
+			f.agent.mu.Lock()
+			f.agent.dead[name] = true
+			f.agent.mu.Unlock()
+			return
+		}
+		if !strings.HasPrefix(line, ".bot hire raid ") {
+			return
+		}
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		if len(f.agent.party) < 20 {
+			return
+		}
+		once.Do(func() {
+			for i, n := range f.agent.party {
+				if i == 0 {
+					continue // the main tank lands alive, as it did in every walk-101b run
+				}
+				f.agent.dead[n] = true
+			}
+		})
+	}
+}
+
+// Walk 101b: all 33 exit-29 Mandokir placements met the raid wiped at the zone-in, 19 hires as corpses the placement's
+// `.summon` could never move, so it burned every try. The revive brings them back before the move (the walk is
+// ASSISTED) and the placement passes in one try.
+func TestPlaceRevivesHiresDeadAtZoneIn(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	placeDeadAtZoneIn(f, true)
+	revivesAtPlace := -1
+	p.place = func(cmd string) error {
+		revivesAtPlace = countPrefix(f.agent.gmLines(), ".revive ")
+		x, y, z := ttPointOf(t, cmd)
+		placeHires(f, x, y, z)
+		return nil
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	hires := len(f.agent.party)
+	if hires != 20 {
+		t.Fatalf("%d hires, want the ZG raid's 20: the zone-in picture is not 19 of 20", hires)
+	}
+	if revivesAtPlace != hires-1 {
+		t.Fatalf("%d revive lines before the `.tt place`, want %d: %q", revivesAtPlace, hires-1, f.agent.gmLines())
+	}
+	if len(p.places) != 1 || len(p.quiets) != 1 {
+		t.Fatalf("%d places in %d quiet reads, want one try: %v", len(p.places), len(p.quiets), f.summary().Notes)
+	}
+	sum := f.summary()
+	if !hasNote(sum, "place: revived 19 hires dead before the placement") {
+		t.Fatalf("notes %q, want the revive count", sum.Notes)
+	}
+	if len(sum.PlaceRevived) != hires-1 {
+		t.Fatalf("place_revived %v, want the %d hires", sum.PlaceRevived, hires-1)
+	}
+	for _, n := range sum.PlaceRevived {
+		if n == sum.Roster.MT {
+			t.Fatalf("place_revived names the main tank %s: it was never dead", n)
+		}
+	}
+	text := f.summaryText()
+	if !strings.Contains(text, "ASSISTED: revived 19 hires before the placement") {
+		t.Fatalf("summary.txt:\n%s", text)
+	}
+	if first := strings.SplitN(text, "\n", 2)[0]; !strings.Contains(first, "ASSISTED") {
+		t.Fatalf("the result line does not say ASSISTED: %q", first)
+	}
+	if !sum.Assisted {
+		t.Fatal("a revived placement is not marked ASSISTED")
+	}
+}
+
+// Walk 101b: a party the revive cannot bring back needs a fresh instance. The walk says so at once (exit 29, "party
+// dead", not a placeRetryReason): no `.tt place`, no retreat, no second try.
+func TestPlaceDeadPartyFailsFast(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	placeDeadAtZoneIn(f, false)
+	f.opts.noPlaceRetreat = false
+	f.agent.startReply = zgPlaceReply(t)
+	code := f.run(context.Background())
+	if code != exitRaidWalkPlaceFailed {
+		t.Fatalf("exit %d, want 29 (exitRaidWalkPlaceFailed): %s", code, f.stderr.String())
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, "party dead: 19 of 20 hires after a revive: fresh instance needed") {
+		t.Fatalf("end reason %q, want the fast fail", sum.EndReason)
+	}
+	if len(p.places) != 0 {
+		t.Fatalf("%d toolkit places, want none after the fast fail", len(p.places))
+	}
+	if len(p.quiets) != 1 {
+		t.Fatalf("%d quiet reads, want one (no second try)", len(p.quiets))
+	}
+	for _, n := range f.summary().Notes {
+		if strings.Contains(n, "stepping back") {
+			t.Fatalf("note %q: a dead party is not a retreat", n)
+		}
+	}
+	if n := countPrefix(f.agent.gmLines(), ".revive "); n != 19 {
+		t.Fatalf("%d revives, want one per dead hire (19)", n)
+	}
+}
+
+// Codex HIGH on the r1 revive: every bot_view fails from the first `.revive` line. The hires' only observations then
+// age out inside the 10 s verification, and r1's dead-only count fell to zero and reported success: the placement
+// moved a party the walk could not see and then burned its tries on it (here it would place once and fail with "not
+// at the start"). A hire no frame read after the revive shows alive is unknown, not revived, so the party's
+// half-dead fast fail must fire instead of the move.
+func TestPlaceReviveFailsClosedWhenPostReviveFramesFail(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	placeDeadAtZoneIn(f, true)
+	prev := f.agent.onGM
+	var mu sync.Mutex
+	reviving := false
+	f.agent.onGM = func(line string) {
+		prev(line)
+		if strings.HasPrefix(line, ".revive ") {
+			mu.Lock()
+			reviving = true
+			mu.Unlock()
+		}
+	}
+	f.agent.viewFn = func(int) (bool, string) {
+		mu.Lock()
+		defer mu.Unlock()
+		return reviving, ""
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	code := f.run(context.Background())
+	if code != exitRaidWalkPlaceFailed {
+		t.Fatalf("exit %d, want 29 (exitRaidWalkPlaceFailed): %s", code, f.stderr.String())
+	}
+	hires := len(f.agent.party)
+	if got := countPrefix(f.agent.gmLines(), ".revive "); got != hires-1 {
+		t.Fatalf("%d revive lines, want %d (the failure is the verification, not the first read)", got, hires-1)
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, fmt.Sprintf("party dead: %d of %d hires after a revive", hires, hires)) {
+		t.Fatalf("end reason %q, want the fast fail with every hire unknown", sum.EndReason)
+	}
+	if len(p.places) != 0 {
+		t.Fatalf("%d toolkit places, want none: a party no frame shows alive is not moved", len(p.places))
+	}
+}
+
+// Codex HIGH on r2: a fresh frame with ONE living party row was accepted as proof that the other 19 hires needed no
+// revive. Their cached rows were stale, dead == 0, and r2 returned success without a positive observation of any other
+// hire, so the placement moved a party it could not see. Every hire must be classified from a fresh frame: the hires a
+// partial read omits are unknown, which is not alive, so they are revived too and then have to pass the all-alive
+// verification. Here the place frames stay partial, so the walk must revive the 19 it never sees and fail closed
+// instead of placing.
+func TestPlaceReviveVerifiesEveryHireAfterAPartialFrame(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.agent.onGM = func(line string) {
+		if line == ".gm on" {
+			// The hires' last full-frame rows age out before the place's revive check: the partial frames from here on
+			// show one hire, and the other 19 have no fresh row (the Codex r2 picture).
+			f.clock.advance(30 * time.Second)
+		}
+	}
+	f.agent.viewPartyFn = func(int) []string {
+		f.agent.mu.Lock()
+		defer f.agent.mu.Unlock()
+		if !f.agent.gmOnSeen || len(f.agent.party) == 0 {
+			return nil // the hire and enter phases see the whole party
+		}
+		return []string{f.agent.party[0]} // the place's frame: one living row, the other hires absent
+	}
+	f.agent.startReply = zgPlaceReply(t)
+	code := f.run(context.Background())
+	if code != exitRaidWalkPlaceFailed {
+		t.Fatalf("exit %d, want 29 (exitRaidWalkPlaceFailed): %s", code, f.stderr.String())
+	}
+	hires := len(f.agent.party)
+	if hires != 20 {
+		t.Fatalf("%d hires, want the ZG raid's 20", hires)
+	}
+	gm := f.agent.gmLines()
+	if got := countPrefix(gm, ".revive "); got != hires-1 {
+		t.Fatalf("%d revive lines, want %d: the hires the partial frame never shows are unknown, not alive", got, hires-1)
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, fmt.Sprintf("party dead: %d of %d hires after a revive", hires-1, hires)) {
+		t.Fatalf("end reason %q, want the fast fail with the 19 unseen hires unknown", sum.EndReason)
+	}
+	if len(p.places) != 0 {
+		t.Fatalf("%d toolkit places, want none: no frame shows every hire alive", len(p.places))
+	}
+	f.agent.mu.Lock()
+	shown := f.agent.party[0]
+	f.agent.mu.Unlock()
+	if n := countExact(gm, ".revive "+shown); n != 0 {
+		t.Fatalf("%d revives of %s, want 0: the partial frame showed it alive", n, shown)
+	}
+}
+
+// --no-place-revive sends no `.revive` line; the fast fail stays, so the walk still stops at once instead of placing a
+// party of corpses.
+func TestPlaceNoReviveFlag(t *testing.T) {
+	f, p := newPlaceFixture(t)
+	f.opts.noPlaceRevive = true
+	placeDeadAtZoneIn(f, true)
+	f.agent.startReply = zgPlaceReply(t)
+	code := f.run(context.Background())
+	if code != exitRaidWalkPlaceFailed {
+		t.Fatalf("exit %d, want 29 (exitRaidWalkPlaceFailed): %s", code, f.stderr.String())
+	}
+	if n := countPrefix(f.agent.gmLines(), ".revive "); n != 0 {
+		t.Fatalf("%d revive lines with --no-place-revive, want none: %q", n, f.agent.gmLines())
+	}
+	if sum := f.summary(); !strings.Contains(sum.EndReason, "party dead: 19 of 20") {
+		t.Fatalf("end reason %q, want the fast fail", sum.EndReason)
+	}
+	if len(p.places) != 0 {
+		t.Fatalf("%d toolkit places, want none", len(p.places))
+	}
+	if strings.Contains(f.summaryText(), "ASSISTED: revived") {
+		t.Fatalf("summary.txt claims a revive with --no-place-revive:\n%s", f.summaryText())
+	}
+}
+
+// The zone-in diagnostic names the party's state right after the GM clear: the line walk 101b needed to see the wipe
+// (dead and in-combat counts, and where the party stands).
+func TestPlaceZoneInNoteAfterTheGMClear(t *testing.T) {
+	f, _ := newPlaceFixture(t)
+	placeDeadAtZoneIn(f, true)
+	f.agent.startReply = zgPlaceReply(t)
+	if code := f.run(context.Background()); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, f.stderr.String(), f.stdout.String())
+	}
+	sum := f.summary()
+	found := false
+	for _, n := range sum.Notes {
+		if strings.HasPrefix(n, "place: after the gm-clear: ") && strings.Contains(n, "of 20 hires dead") &&
+			strings.Contains(n, "in combat (at ") && !strings.Contains(n, "(at -)") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("notes %q, want the zone-in diagnostic with the counts and the median position", sum.Notes)
+	}
+}

@@ -207,8 +207,12 @@ type ReportOptions struct {
 	// window holds the pull time.
 	PullJoins []PullJoiners
 	// GMClear is the walk summary's gm_clear list; Assisted is its assisted flag. Either marks the report ASSISTED.
-	GMClear  []GMClearEntry
-	Assisted bool
+	// GMClearUsed is the summary's own "the flag was given" fact (a clear that found nothing still says so), and
+	// PlaceRevived are the hires the placement revived: both print their own ASSISTED line.
+	GMClear      []GMClearEntry
+	GMClearUsed  bool
+	Assisted     bool
+	PlaceRevived []string
 	// Practice is the walk summary's practice object (nil without --practice). A practice run prints a PRACTICE
 	// line instead of the ASSISTED gm-clear line: it never credits a boss kill.
 	Practice *PracticeSummary
@@ -236,6 +240,10 @@ type Report struct {
 	GMClear  []GMClearEntry `json:"gm_clear,omitempty"`
 	// GMClearPartial is true when an expected pack member was left (not seen, or alive).
 	GMClearPartial bool `json:"gm_clear_partial,omitempty"`
+	// GMClearUsed says the walk ran --gm-clear even when nothing was found, and PlaceRevived are the hires its
+	// placement revive brought back (either marks the report ASSISTED).
+	GMClearUsed  bool     `json:"gm_clear_used,omitempty"`
+	PlaceRevived []string `json:"place_revived,omitempty"`
 	// Practice is the walk's practice record (nil without --practice).
 	Practice *PracticeSummary `json:"practice,omitempty"`
 }
@@ -435,8 +443,9 @@ func BuildReport(fights []ReportFight, log []LogLine, opt ReportOptions) *Report
 	})
 	rep := &Report{Format: ReportFormat, Version: ReportVersion, ClockOffset: opt.ClockOffset.String(), HasRunLog: len(log) > 0,
 		Spells: opt.Spells, Pulls: []ReportPull{}, Control: []ControlEvent{},
-		Assisted: opt.Assisted || len(opt.GMClear) > 0 || opt.Practice != nil,
-		GMClear:  opt.GMClear, GMClearPartial: GMClearPartial(opt.GMClear), Practice: opt.Practice}
+		Assisted: opt.Assisted || opt.GMClearUsed || len(opt.GMClear) > 0 || len(opt.PlaceRevived) > 0 || opt.Practice != nil,
+		GMClear:  opt.GMClear, GMClearPartial: GMClearPartial(opt.GMClear), Practice: opt.Practice,
+		GMClearUsed: opt.GMClearUsed, PlaceRevived: opt.PlaceRevived}
 	if len(opt.Spells) > 0 {
 		rep.WindowS = opt.Window.Seconds()
 	}

@@ -74,8 +74,13 @@ func (r *Report) Markdown() string {
 		fmt.Fprintf(&b, "**PRACTICE: %d cycles in %d attempts, ended: %s; this is not a real clear**\n\n",
 			r.Practice.Cycles, r.Practice.Attempts, r.Practice.Ended)
 	} else if r.Assisted {
-		legs := assistedLegs(&Summary{GMClear: r.GMClear})
-		fmt.Fprintf(&b, "**%s**\n\n", GMClearSummaryLine(r.GMClear, legs))
+		if len(r.PlaceRevived) > 0 {
+			fmt.Fprintf(&b, "**ASSISTED: revived %d hires before the placement**\n\n", len(r.PlaceRevived))
+		}
+		if r.GMClearUsed || len(r.GMClear) > 0 {
+			legs := assistedLegs(&Summary{GMClear: r.GMClear})
+			fmt.Fprintf(&b, "**%s**\n\n", GMClearSummaryLine(r.GMClear, legs))
+		}
 		if len(r.GMClear) > 0 {
 			b.WriteString("| leg | group | entry | guid | killed | tries | reason |\n| --- | --- | ---: | --- | --- | ---: | --- |\n")
 			for _, e := range r.GMClear {

@@ -342,7 +342,10 @@ type walkFakeAgent struct {
 	killAt               []time.Time // when each gm_kill call arrived (the retry gap's clock)
 	// Review-round-2 fault hooks: bot_view failure/omission (viewFn) and combat during the
 	// quiet rest (combatAllFn); the dashboard fights read fails through fakeDash.fightsErr.
-	viewFn      func(n int) (fail bool, omit string)
+	viewFn func(n int) (fail bool, omit string)
+	// viewPartyFn, when set, lists the party names frame n carries instead of the fake's own (a partial or degraded
+	// read); nil uses the fake's party.
+	viewPartyFn func(n int) []string
 	combatAllFn func(n int) bool // frame n shows every hire in combat
 	combatBots  map[string]bool  // these hires show in combat in every frame (--revive-at-raid: one fights away)
 	offMapBots  map[string]bool  // these hires show on map 0 in every frame (--revive-at-raid: the lead on another map)
@@ -1407,6 +1410,7 @@ func (f *walkFakeAgent) viewPage() any {
 	f.views++
 	m := uint32(1)
 	viewHook := f.viewFn
+	viewParty := f.viewPartyFn
 	combatAll := f.combatAllFn
 	combatBots := map[string]bool{}
 	for k, v := range f.combatBots {
@@ -1446,6 +1450,11 @@ func (f *walkFakeAgent) viewPage() any {
 	if viewHook != nil {
 		if fail, _ := viewHook(n); fail {
 			return viewReply{Have: false, N: uint64(n)}
+		}
+	}
+	if viewParty != nil {
+		if p := viewParty(n); p != nil {
+			party = p
 		}
 	}
 	frame := &tbm.ViewFrame{Seq: uint64(n)}
