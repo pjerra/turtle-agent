@@ -596,106 +596,149 @@ func (w *walk) phaseHire(ctx context.Context) error {
 	// The refit at the walk's tier (amendment G1): the hire wears the raid's minimum kit, and a comparison run its
 	// override. A failed refit is a failed walk: the tier is what the run is judged against.
 	line := fmt.Sprintf(".bot gear raid %s tier %d", w.manifest.Character, w.roster.Tier)
-	if err := w.gearRaid(ctx, line); err != nil {
+	if err := w.gearRaid(ctx, line, w.roster.Tier); err != nil {
 		return err
 	}
 	w.tracker = raidwalk.NewTracker(w.plan, w.hireList())
 	return nil
 }
 
-// The refit's busy retry. The module's gear queue is ONE slot for the whole server (`BotGearService::Queue` refuses
+// The refit's busy wait. The module's gear queue is ONE slot for the whole server (`BotGearService::Queue` refuses
 // while `m_running`), and a job's verdict goes only to the character that queued it (`SendLines` -> the requester's
-// chat handler). So a second walk that `.bot gear raid`s while another raid's job runs gets
-// `ACTION_ERR|gear|busy|A gear job is already running` and can never read that job's `TBM:GEAR` line: waiting for it
-// burns the whole budget and ends the walk 18 (walk 98b: 11 restarts of this kind, 7 in its first 7 min with 7 raids
-// launched at once). The walk therefore polls the slot instead, with a jittered backoff, and re-sends the same line
-// until the module accepts it or gearBusyBudget runs out.
+// chat handler; the server log when that character is offline). Neither the `TBM:GEAR` verdict nor the
+// `TBM:ACTION_ERR|gear|busy|...` refusal carries a job id or a requester id (`BotGear::SummaryLine`,
+// `SendActionError`): the verdict names only the request's status, bot counts, tier, cap, average item levels,
+// capped slots, skipped bots and purged items. So a busy reply cannot say whose job holds the slot, and a walk
+// restarted while its own earlier refit still ran (walk 98b: 11 exit-18 restarts, 7 in its first 7 min with 7 raids
+// launched at once) must not read that job's verdict as the re-send's.
+//
+// The walk therefore gives the job holding the slot the same bound it gives a gear job it started, gearLineWait: a
+// verdict from this commander's own job arrives inside it and is used, because delivery here proves the requester
+// (another requester's verdict never reaches this chat). A window that ends with no verdict means the job is
+// another requester's, and only then is the line re-sent. A slot busy through the whole gearBusyBudget ends the
+// walk on the module's own line.
 const (
-	gearBusyBudget = 120 * time.Second // the refit's whole wait for the server's gear slot
-	gearBusyFirst  = 2 * time.Second   // the first wait after a busy refusal
-	gearBusyMax    = 20 * time.Second  // the ceiling of that wait, doubled up to it
-	gearLineWait   = 60 * time.Second  // one send's wait for its own TBM:GEAR verdict or busy refusal
-	// gearBusyJitterMax is the most a backoff adds, so raids launched together do not re-send in lockstep.
+	// gearLineWait is one send's wait for its verdict or busy refusal, and the wait given the job that holds the
+	// slot.
+	gearLineWait = 60 * time.Second
+	// gearBusyBudget is the refit's whole wait for the server's gear slot: one wait for the job holding it and one
+	// for the re-send's own verdict.
+	gearBusyBudget = 2 * gearLineWait
+	// gearBusyJitterMax is the most the wait for the slot's job adds, so raids launched together do not re-send in
+	// lockstep.
 	gearBusyJitterMax = 3 * time.Second
 )
 
-// gearBusyJitter is one backoff's extra wait, 0..gearBusyJitterMax. Tests replace it.
+// gearBusyJitter is the wait's extra, 0..gearBusyJitterMax. Tests replace it.
 var gearBusyJitter = func() time.Duration { return rand.N(gearBusyJitterMax + 1) }
 
-// gearRaid sends the walk's refit line until the module accepts it, and returns its `TBM:GEAR` verdict. Each send is
-// answered (a verdict, a busy refusal, or gearLineWait running out) before the next one goes out, so two gear requests
-// never overlap; a busy refusal is retried after a jittered backoff and noted each time. A busy that leaves no room
-// for another send inside gearBusyBudget ends the walk with the module's own line.
+// gearRaid sends the walk's refit line at tier and returns its `TBM:GEAR` verdict. Each send is answered (a
+// verdict, a busy refusal, or gearLineWait running out) before anything else goes out, so two gear requests never
+// overlap. A busy refusal is waited out: the job holding the slot may be this commander's own earlier refit, so the
+// walk reads that job's verdict and uses it; with no verdict in the window the job is another requester's and the
+// line is re-sent. Only a verdict at the refit's own tier counts (the line echoes the tier it was asked for).
 //
-// The slot's job can be this commander's own (walk 98b restarted while a previous process's refit still ran, and a
-// `.bot gear raid` by that commander answers the same chat): the verdict line carries no job or requester id
-// (`BotGear::SummaryLine` is status, counts, tier, cap, averages, capped, skipped, purged), so that job's verdict,
-// read after the re-send, would pass for the re-send's. Before every retry the walk therefore drains the whole
-// backoff window for `TBM:GEAR` lines and drops them: the module frees the slot, and sends the blocking job's
-// verdict, before it can accept a send (`BotGearService::Finish` sends first, then clears `m_running`), so a line
-// that arrives before the retry send can only be that job's. Only a verdict read after the accepted send counts.
-func (w *walk) gearRaid(ctx context.Context, line string) error {
+// Remaining limit: the wait and the re-send are separate calls, so a verdict the slot's job writes after the
+// window's last poll but before the module handles the re-send can still be read as the re-send's. It is a
+// same-tier verdict of this commander's own job, so the walk ends on a refit it asked for, but the re-send may then
+// still be running. No client can close that window: the reply names neither the job nor the requester, so only the
+// module naming one makes ownership provable.
+func (w *walk) gearRaid(ctx context.Context, line string, tier int) error {
 	deadline := w.env.now().Add(gearBusyBudget)
-	backoff := gearBusyFirst
 	for try := 1; ; try++ {
 		if err := w.gm(ctx, line); err != nil {
 			return err
 		}
-		gear, ok, err := w.waitTBMMatch(ctx, gearLineWait, gearVerdict)
+		reply, ok, err := w.waitGearReply(ctx, gearLineWait, tier)
 		if err != nil {
 			return err
 		}
 		if !ok {
 			return stopf(exitRaidWalkFailed, "gear: no TBM:GEAR line in %s", durWords(gearLineWait))
 		}
-		if strings.HasPrefix(gear, "TBM:GEAR|") {
-			if !strings.HasPrefix(gear, "TBM:GEAR|ok|") {
-				return stopf(exitRaidWalkFailed, "gear: %s", gear)
-			}
-			return nil
+		if strings.HasPrefix(reply, "TBM:GEAR|") {
+			return gearRaidVerdict(reply)
 		}
 		// The module refused this send: a gear job holds the server's slot.
-		wait := backoff + gearBusyJitter()
-		if !w.env.now().Add(wait).Before(deadline) {
+		wait := gearLineWait + gearBusyJitter()
+		if left := deadline.Sub(w.env.now()); left < wait {
+			wait = left
+		}
+		if wait <= 0 {
 			return stopf(exitRaidWalkFailed,
 				"gear: %s (the server's gear slot stayed busy for the %s budget, %d sends)",
-				gear, durWords(gearBusyBudget), try)
+				reply, durWords(gearBusyBudget), try)
 		}
-		w.note("gear: a gear job is already running (%s); re-sending in %s (send %d)", gear, durWords(wait), try+1)
-		// The blocking job may be this commander's own: drain its verdict inside the backoff window, so the
-		// re-send's wait can only read a line the module produced after it accepted the re-send.
-		if err := w.drainGearVerdicts(ctx, w.env.now().Add(wait)); err != nil {
-			return err
-		}
-		if backoff *= 2; backoff > gearBusyMax {
-			backoff = gearBusyMax
-		}
-	}
-}
-
-// drainGearVerdicts reads and drops every `TBM:GEAR` line the module answers until the clock reaches until. It is
-// the backoff wait of a retry: the job that held the slot before the retry re-sends has freed it, so the walk reads
-// that job's verdict here and never mistakes it for the retry's own.
-func (w *walk) drainGearVerdicts(ctx context.Context, until time.Time) error {
-	for {
-		left := until.Sub(w.env.now())
-		if left <= 0 {
-			return nil
-		}
-		line, ok, err := w.waitTBMMatch(ctx, left, func(l string) bool {
-			return strings.HasPrefix(l, "TBM:GEAR|")
-		})
+		w.note("gear: a gear job is already running (%s); waiting up to %s for its verdict (send %d)",
+			reply, durWords(wait), try)
+		blocking, ok, err := w.waitGearReply(ctx, wait, tier)
 		if err != nil {
 			return err
 		}
-		if !ok {
-			return nil
+		if ok && strings.HasPrefix(blocking, "TBM:GEAR|") {
+			w.note("gear: the job holding the slot was this commander's own (%s); its verdict answers the refit",
+				blocking)
+			return gearRaidVerdict(blocking)
 		}
-		w.note("gear: dropped an earlier gear job's verdict (%s); it is not this refit's", line)
+		if !w.env.now().Before(deadline) {
+			return stopf(exitRaidWalkFailed,
+				"gear: %s (the server's gear slot stayed busy for the %s budget, %d sends)",
+				reply, durWords(gearBusyBudget), try)
+		}
+		w.note("gear: no verdict for this refit in %s; the slot is another requester's, re-sending", durWords(wait))
 	}
 }
 
-// gearVerdict matches the refit's own verdict or the module's refusal of a re-send while an earlier gear job runs.
+// waitGearReply waits for the module's answer to a send: its `ACTION_ERR|gear|busy` refusal, or a `TBM:GEAR`
+// verdict for the refit's tier. A verdict naming another tier answers another request: it is noted and dropped,
+// never read as this refit's. The module sends nothing when it takes a send, so a timeout means the job is still
+// running, or, after a refusal, that the slot's job belongs to another requester.
+func (w *walk) waitGearReply(ctx context.Context, limit time.Duration, tier int) (string, bool, error) {
+	deadline := w.env.now().Add(limit)
+	for {
+		left := deadline.Sub(w.env.now())
+		if left <= 0 {
+			return "", false, nil
+		}
+		line, ok, err := w.waitTBMMatch(ctx, left, gearVerdict)
+		if err != nil {
+			return "", false, err
+		}
+		if !ok {
+			return "", false, nil
+		}
+		if strings.HasPrefix(line, "TBM:GEAR|") {
+			if got := gearTierOf(line); got != tier {
+				w.note("gear: dropped a TBM:GEAR line for another request (%s); the refit asks tier %d", line, tier)
+				continue
+			}
+		}
+		return line, true, nil
+	}
+}
+
+// gearTierOf is the tier a `TBM:GEAR` line names (its fifth field), or -1 when the line does not carry one.
+func gearTierOf(line string) int {
+	f := strings.Split(line, "|")
+	if len(f) < 5 || f[0] != "TBM:GEAR" {
+		return -1
+	}
+	tier, err := strconv.Atoi(f[4])
+	if err != nil {
+		return -1
+	}
+	return tier
+}
+
+// gearRaidVerdict turns the refit's `TBM:GEAR` verdict into the walk's result: only an ok refit passes.
+func gearRaidVerdict(line string) error {
+	if !strings.HasPrefix(line, "TBM:GEAR|ok|") {
+		return stopf(exitRaidWalkFailed, "gear: %s", line)
+	}
+	return nil
+}
+
+// gearVerdict matches the refit's own verdict or the module's refusal of a send while an earlier gear job runs.
 func gearVerdict(line string) bool {
 	return strings.HasPrefix(line, "TBM:GEAR|") || strings.HasPrefix(line, "TBM:ACTION_ERR|gear|busy|")
 }
