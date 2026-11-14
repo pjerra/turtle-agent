@@ -54,8 +54,10 @@ elixir, food and world-buff list on the raid as auras at the step before each bo
 or on the boss row itself if the run passed that step too fast to pause, both only while the run is still before the
 pull — and
 `prepull-auras.json` records what each bot carries. A value that is not a `role=` list is a `tb-prepull-auras` file, so
-`--prepull-aura dungeons/prepull/zg-preraid.json` names the six lists at once. The targets are the bots of the
-commander's raid, read from its view: the walk's player is not in the hired bots' raid. The batch is fail-closed: the
+`--prepull-aura dungeons/prepull/zg-preraid.json` names the six lists at once. The targets are the walk's own hires,
+matched by name in the commander's raid read from its view (the walk's player is not in the hired bots' raid); a frame
+member the walk never hired gets no aura and is logged, and a hire whose class the unit read cannot give fails the fire.
+The batch is fail-closed: the
 commander and every living raid member, list or no list, are re-read for combat before each `.aura` (an in-combat unit
 or an unreadable `unit` row stops the batch), a boss row's arena is read fresh from the server (`q units` around the
 row: a boss already engaged, a read that cannot be made, or a unit row without its combat state, stops the walk), and

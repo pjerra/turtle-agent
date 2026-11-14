@@ -80,11 +80,12 @@ type prepullAgent struct {
 	combatBots map[packet.GUID]bool
 	// The commander's view (bot_view): noView answers with no frame, hidden leaves named bots out of the party,
 	// deadBots marks them dead (in the view and in their unit rows, as the server's would), viewTruncated sets the
-	// frame's truncation flag.
+	// frame's truncation flag, and extra appends members the walk never hired (another group's bot in the frame).
 	noView        bool
 	hidden        map[string]bool
 	deadBots      map[string]bool
 	viewTruncated bool
+	extra         []tbm.PartyRec
 }
 
 func newPrepullAgent(t *testing.T) *prepullAgent {
@@ -148,6 +149,7 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			}
 			fr.Party = append(fr.Party, tbm.PartyRec{GUID: b.GUID, Name: b.Name, HP: 6000, MaxHP: 6000, Map: 309, State: state, Dead: dead})
 		}
+		fr.Party = append(fr.Party, a.extra...)
 		fr.Truncated = a.viewTruncated
 		v = botViewResult{Have: true, N: 1, Frame: &fr}
 	case "status":
@@ -1186,6 +1188,65 @@ func TestPrepullAuraShortRaidFails(t *testing.T) {
 		if f := readPrepullAuraFile(t, w); len(f.BossRows) != 0 || len(f.Attempts) != 1 {
 			t.Fatalf("%s: boss rows %v, attempts %+v", tc.name, f.BossRows, f.Attempts)
 		}
+	}
+}
+
+// An unknown class is not an "all"-only bot: a hire whose unit row carries class 0 would receive only the "all"
+// lists while coverage still passed, so the fire fails before any aura, with the bot named. This is the r1 HIGH.
+func TestPrepullAuraUnknownClassFails(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.classes[a.bots[4].GUID] = 0 // Zap, the mage: its class is gone from the row
+	w := newPrepullWalk(t, a, "role=all:22888")
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "Zap") || !strings.Contains(reason, "no class") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("%d aura(s) went out to a raid with an unknown class: %v", len(a.sent), a.sent)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the row was recorded as done")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 0 || len(f.Attempts) != 1 || !strings.Contains(f.Attempts[0].Reason, "Zap") {
+		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
+	}
+}
+
+// The commander frame can hold a bot the walk never hired (a misbound commander, a stale frame, another group's
+// invite). It is not a target: the fire skips it, logs it, sends it no GM aura and still verifies the walk's own
+// roster. This is the r1 HIGH.
+func TestPrepullAuraSkipsAnUnhiredFrameMember(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.extra = []tbm.PartyRec{{GUID: packet.GUID(0x900), Name: "Stranger", HP: 6000, MaxHP: 6000, Map: 309, State: "n"}}
+	w := newPrepullWalk(t, a, "role=all:22888")
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
+		t.Fatalf("fire: fired %v err %v", fired, err)
+	}
+	for _, line := range a.sent {
+		if strings.HasPrefix(line, "Stranger ") {
+			t.Fatalf("an unhired frame member received a GM aura: %v", a.sent)
+		}
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the roster was complete, but the row was not recorded as done")
+	}
+	logged := false
+	for _, n := range w.notesCopy() {
+		if strings.Contains(n, "Stranger") && strings.Contains(n, "not one of the walk's hires") {
+			logged = true
+		}
+	}
+	if !logged {
+		t.Fatalf("the skipped member is not logged: %v", w.notesCopy())
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 1 || f.BossRows[0] != 5 || len(f.Attempts) != 0 {
+		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
+	}
+	if len(f.Bots) != 6 {
+		t.Fatalf("prepull-auras.json holds %d bot(s), want the walk's 6: %+v", len(f.Bots), f.Bots)
 	}
 }
 
