@@ -2148,6 +2148,9 @@ func (w *walk) joinHires(ctx context.Context, p dungeon.Point, deadline time.Tim
 }
 
 // appearAtHire is joinHires' appear half for a named hire: `.appear <name>` and the wait for a fresh landing.
+// The landing is on the HIRE's map, not the plan's: a revive's anchor is always on the plan's map, but the prepull
+// join may pick a hire the frame shows elsewhere (walk 105c's start fire), and the core lands the GM in the target's
+// own copy wherever that is.
 func (w *walk) appearAtHire(ctx context.Context, name string, deadline time.Time) (joined bool, why string, err error) {
 	hire := w.botAt[name]
 	before, serr := w.status(ctx)
@@ -2167,7 +2170,7 @@ func (w *walk) appearAtHire(ctx context.Context, name string, deadline time.Time
 		return false, fmt.Sprintf(".appear %s failed: %v", name, err), nil
 	}
 	werr := w.waitStatus(ctx, appearWait, deadline, "the appear did not land",
-		func(st session.StatusInfo) bool { return appearLanded(st, w.plan.Map, hire, before, beforeSeq) })
+		func(st session.StatusInfo) bool { return appearLanded(st, hire.mapID, hire, before, beforeSeq) })
 	if werr == nil {
 		return true, "", nil
 	}

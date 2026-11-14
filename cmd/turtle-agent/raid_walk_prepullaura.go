@@ -11,8 +11,8 @@
 // PLAYER's group, and the walk's player never joins the hired bots' raid (walk 101 shipped a verified boss row for 0
 // bots). The view is matched against the walk's hires: a frame member the walk never hired is watched for
 // combat but never targeted, and a fire whose lists do not reach every hire the walk made fails instead
-// (prepullAuraCoverage). Before the role reads the fire moves the COMMANDER to the raid when it stands on another map
-// or farther than prepullJoinRadius from the nearest living hire (prepullAuraJoinRaid, the revive path's
+// (prepullAuraCoverage). Before the role reads the fire moves the COMMANDER to the raid when it does not stand on the
+// target hire's map within prepullJoinRadius of it (prepullAuraJoinRaid, the revive path's
 // `.appear`): the agent's own unit store only holds units in the commander's visibility range and is cleared on a
 // map change, while its frame lists the whole raid on any map, so a commander left behind by the last placement read
 // no hire at all (walk 105c's start fire on map 0 against hires on 309; walks 105/105b's Jeklik row 49 at 350-364 yd;
@@ -596,7 +596,7 @@ func (w *walk) prepullRaid(ctx context.Context) ([]tbm.PartyRec, error) {
 	return append([]tbm.PartyRec{}, frame.Party...), nil
 }
 
-// prepullJoinRadius is how far the commander may stand from the nearest living hire before a fire moves it: the
+// prepullJoinRadius is how far the commander may stand from the hire it would join before a fire moves it: the
 // agent's own unit store holds only units in the visibility range of the commander's character, and the fires read
 // every hire through it.
 const prepullJoinRadius = 60
@@ -609,8 +609,9 @@ const prepullJoinWait = 30 * time.Second
 // on a map change (onNewWorld -> store.Clear()), while the commander's view (the TBM frame) lists the whole raid on
 // any map: walk 105c's start fire (commander on map 0 outside, hires on map 309 after `cmd enter near`), walks
 // 105/105b's Jeklik row 49 (raid 350-364 yd away) and walk 104's row 201 (298-317 yd) all read units the store did not
-// hold, and row 49 at 146-155 yd worked. The commander's map alone is not enough (it may stand on the plan's map in a
-// copy of its own), so a same-map commander farther than prepullJoinRadius from the nearest living hire joins too.
+// hold, and row 49 at 146-155 yd worked. The commander's map alone is not enough: it may stand on the plan's map while
+// the hires stand on another (walk 105c's start fire), or on the plan's map in a copy of its own. The no-join path
+// therefore asks the TARGET hire's map and the distance to that hire, and a commander that fails either joins too.
 // The appear is the revive path's (appearAtHire: `.appear` binds the GM to the hire's copy, then a fresh landing is
 // proven); the walk joins at its own MT when the frame shows it alive, else at the living hire nearest the commander.
 // Only the GM commander moves, never a hire, and GM visibility is left as it stands. A join that cannot land stops
@@ -621,12 +622,15 @@ func (w *walk) prepullAuraJoinRaid(ctx context.Context, raid []tbm.PartyRec, whe
 		return stopf(exitRaidWalkFailed, "prepull-aura: %s: the commander's status: %v: no aura was sent", where, err)
 	}
 	target, dist, living := w.prepullJoinTarget(st, raid)
-	if st.Map == w.plan.Map && (!living || dist <= prepullJoinRadius) {
-		return nil
-	}
 	if !living {
 		return stopf(exitRaidWalkFailed,
 			"prepull-aura: %s: the commander is on map %d with no living hire in its view to join: no aura was sent", where, st.Map)
+	}
+	// The commander's own map proves nothing: walk 105c's start fire had it on the plan's map and the target hire on
+	// 309, and a commander on the plan's map in a copy of its own is just as far from the target. Only the hire the
+	// fire would join places the two together, so the no-join path asks that hire's map, not the plan's.
+	if st.Map == target.Map && dist <= prepullJoinRadius {
+		return nil
 	}
 	// The landing check reads the hire's last frame position from botAt: this fire's own frame is the freshest one.
 	if w.botAt == nil {

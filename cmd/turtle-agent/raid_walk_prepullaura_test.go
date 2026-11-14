@@ -1994,6 +1994,38 @@ func TestPrepullAuraStartJoinsAfterEnterNear(t *testing.T) {
 	}
 }
 
+// A commander on the plan's map is not necessarily with the raid: the target hire may stand on another map while the
+// two are within prepullJoinRadius on x/y. r3 returned early on
+// `if st.Map == w.plan.Map && (!living || dist <= prepullJoinRadius)`, so no `.appear` went out, the store (cleared
+// on the map change) never held a hire, and the fire spent its unit wait on `unit: no such unit` before any role was
+// read. The no-join path must ask the TARGET hire's map: the appear lands before any role is read.
+func TestPrepullAuraPlanMapOtherTargetMapJoins(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.selfMap, a.botMap = 309, 0
+	a.selfX, a.botX = 0, 10 // within prepullJoinRadius, but on different maps
+	a.storeAfterAppear = true
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	w.plan.Map = 309 // the commander stands on the plan's map, the hire does not
+	prepullRunLog(t, w)
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
+		t.Fatalf("fire: fired %v err %v", fired, err)
+	}
+	if !strings.Contains(strings.Join(a.gmLines, "\n"), ".appear Mtbot") {
+		t.Fatalf("the fire read the role from the plan's map without appearing at the hire's map: %v", a.gmLines)
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 1 || f.BossRows[0] != 5 || len(f.Attempts) != 0 || len(f.Bots) != 6 {
+		t.Fatalf("boss rows %v, attempts %+v, %d bot(s)", f.BossRows, f.Attempts, len(f.Bots))
+	}
+	log := prepullRunLogText(t, w)
+	if !strings.Contains(log, "prepull-aura: boss row 5: commander joined the raid at Mtbot (was 10 yd / map 309)") {
+		t.Fatalf("run.log does not name the join:\n%s", log)
+	}
+	if strings.Contains(log, "ran out after") {
+		t.Fatalf("the fire waited on a store the join fills at once:\n%s", log)
+	}
+}
+
 // An appear that cannot land stops the fire before any aura, with the appear's own reason: the fire never reads a
 // raid the commander did not reach.
 func TestPrepullAuraJoinRefusedStops(t *testing.T) {
