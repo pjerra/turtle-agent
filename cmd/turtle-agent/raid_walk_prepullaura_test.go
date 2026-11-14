@@ -22,6 +22,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/objects"
 	"github.com/pjerra/turtle-agent/internal/packet"
 	"github.com/pjerra/turtle-agent/internal/planexport"
+	"github.com/pjerra/turtle-agent/internal/raidwalk"
 	"github.com/pjerra/turtle-agent/internal/session"
 	"github.com/pjerra/turtle-agent/internal/tbm"
 )
@@ -78,13 +79,22 @@ type prepullAgent struct {
 	// combatBots are the bots whose own row reports combat whatever `combat` says (a pull from a member the flag's
 	// lists do not cover).
 	combatBots map[packet.GUID]bool
+	// The commander's view (bot_view): noView answers with no frame, hidden leaves named bots out of the party,
+	// deadBots marks them dead (in the view and in their unit rows, as the server's would), viewTruncated sets the
+	// frame's truncation flag, and extra appends members the walk never hired (another group's bot in the frame).
+	noView        bool
+	hidden        map[string]bool
+	deadBots      map[string]bool
+	viewTruncated bool
+	extra         []tbm.PartyRec
 }
 
 func newPrepullAgent(t *testing.T) *prepullAgent {
 	t.Helper()
 	a := &prepullAgent{t: t, clock: time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC), answers: true, holdPause: true, statusStep: 4,
 		classes: map[packet.GUID]uint8{}, auras: map[packet.GUID]map[uint32]bool{}, caster: map[uint32]bool{},
-		drop: map[packet.GUID]map[uint32]bool{}, combatBots: map[packet.GUID]bool{}}
+		drop: map[packet.GUID]map[uint32]bool{}, combatBots: map[packet.GUID]bool{},
+		hidden: map[string]bool{}, deadBots: map[string]bool{}}
 	a.selfGUID, a.selfName = packet.GUID(0x0000000000000AAA), "Commander"
 	// Mtbot (warrior mt), Otbot (warrior ot), Rank (rogue), Flitz (hunter), Zap (mage), Holi (priest).
 	for i, b := range []struct {
@@ -120,7 +130,29 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 	var v any
 	switch method {
 	case "party":
-		v = session.PartyInfo{InGroup: true, Members: a.bots}
+		// The player's own group: empty in every TurtleBots walk (the hired bots raid without the player), so a fire
+		// that reads it sees 0 bots. The tests below prove the walk does not.
+		v = session.PartyInfo{}
+	case "bot_view":
+		if a.noView {
+			v = botViewResult{Have: false}
+			break
+		}
+		fr := tbm.ViewFrame{Seq: 1, Lines: 1}
+		for _, b := range a.bots {
+			if a.hidden[b.Name] {
+				continue
+			}
+			dead := a.deadBots[b.Name]
+			state := "n"
+			if dead {
+				state = "d"
+			}
+			fr.Party = append(fr.Party, tbm.PartyRec{GUID: b.GUID, Name: b.Name, HP: 6000, MaxHP: 6000, Map: 309, State: state, Dead: dead})
+		}
+		fr.Party = append(fr.Party, a.extra...)
+		fr.Truncated = a.viewTruncated
+		v = botViewResult{Have: true, N: 1, Frame: &fr}
 	case "status":
 		v = session.StatusInfo{Character: a.selfName, GUID: a.selfGUID, State: session.StatusInWorld}
 	case "unit":
@@ -144,7 +176,7 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			return errors.New("unit: no such unit")
 		}
 		v = objects.Unit{GUID: g, Type: "player", Name: a.nameOf(g), Class: a.classes[g],
-			InCombat: a.combat || a.combatBots[g], Auras: a.aurasOf(g)}
+			InCombat: a.combat || a.combatBots[g], Dead: a.deadBots[a.nameOf(g)], Auras: a.aurasOf(g)}
 	case "gm_aura":
 		var p struct {
 			GUID    string `json:"guid"`
@@ -253,7 +285,20 @@ func (a *prepullAgent) nameOf(g packet.GUID) string {
 			return b.Name
 		}
 	}
+	for _, m := range a.extra {
+		if m.GUID == g {
+			return m.Name
+		}
+	}
 	return g.String()
+}
+
+// stranger puts a member the walk never hired in the commander's frame, with a unit row the store answers (so the
+// fire's combat read can see it); inCombat is that row's combat state.
+func (a *prepullAgent) stranger(g packet.GUID, name string, inCombat bool) {
+	a.extra = append(a.extra, tbm.PartyRec{GUID: g, Name: name, HP: 6000, MaxHP: 6000, Map: 309, State: "n"})
+	a.auras[g] = map[uint32]bool{}
+	a.combatBots[g] = inCombat
 }
 
 // prepullHoldVerbs is the run verbs minus the `status` confirmations: the pause/resume sequence the walk asked for.
@@ -298,24 +343,133 @@ func prepullRows(bossAt ...int) planexport.Rows {
 	return rows
 }
 
-// newPrepullWalk is a walk with the flag set, a fake clock and the agent above. No phase runs: the tests call
-// prepullAuraSendPending and prepullAuraFire themselves.
-func newPrepullWalk(t *testing.T, a *prepullAgent, flags ...string) *walk {
+// prepullHire is one bot the walk hired, as the walk's own hire data holds it: the roster batch's role, the role the
+// batch's hire grammar asks of the bot's class (tank, healer or dps) and the spec a version-2 roster sets on the batch.
+type prepullHire struct {
+	name  string
+	class uint8
+	batch string // mt, ot or rest
+	token string // tank, healer or dps
+	spec  string // "" when the roster names none
+}
+
+// prepullHires is the fake agent's six bots as the walk hired them: one mt, one ot and four rest bots.
+func prepullHires() []prepullHire {
+	return []prepullHire{
+		{"Mtbot", 1, "mt", "tank", ""},
+		{"Otbot", 1, "ot", "tank", ""},
+		{"Rank", 4, "rest", "dps", ""},
+		{"Flitz", 3, "rest", "dps", ""},
+		{"Zap", 8, "rest", "dps", ""},
+		{"Holi", 5, "rest", "healer", ""},
+	}
+}
+
+// prepullClassWords are the class names the hire grammar takes, by the class id the fake gives a bot.
+var prepullClassWords = map[uint8]string{
+	1: "warrior", 2: "paladin", 3: "hunter", 4: "rogue", 5: "priest",
+	7: "shaman", 8: "mage", 9: "warlock", 11: "druid",
+}
+
+// prepullRoster is the tb-raid-roster the hire data comes from: one batch per bot, so the walk holds exactly the batch
+// each name was hired with. It goes through ParseRoster, never built by hand: the batch's hire tokens are what
+// Batch.TokenRole reads, and only the parser fills them.
+func prepullRoster(t *testing.T, hs []prepullHire) *raidwalk.Roster {
 	t.Helper()
+	type batch struct {
+		Role string `json:"role"`
+		Hire string `json:"hire"`
+		Spec string `json:"spec,omitempty"`
+	}
+	doc := struct {
+		Format  string  `json:"format"`
+		Version int     `json:"version"`
+		Level   int     `json:"level"`
+		Batches []batch `json:"batches"`
+	}{Format: "tb-raid-roster", Version: 1, Level: 60}
+	for _, h := range hs {
+		word, ok := prepullClassWords[h.class]
+		if !ok {
+			t.Fatalf("%s: no hire class word for class %d", h.name, h.class)
+		}
+		if h.spec != "" {
+			doc.Version = 2
+		}
+		doc.Batches = append(doc.Batches, batch{Role: h.batch, Hire: fmt.Sprintf("1 %s:%s", word, h.token), Spec: h.spec})
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("roster: %v", err)
+	}
+	r, err := raidwalk.ParseRoster(raw)
+	if err != nil {
+		t.Fatalf("roster %s: %v", raw, err)
+	}
+	return r
+}
+
+// newPrepullWalkHires is the walk over the agent's bots with the given hire data: every bot is a hire the fire's
+// coverage check expects a list for, and hireBatch is the batch each was hired with, as phaseHire records it.
+func newPrepullWalkHires(t *testing.T, a *prepullAgent, hs []prepullHire, flags ...string) *walk {
+	t.Helper()
+	if len(a.bots) != len(hs) {
+		t.Fatalf("the fake holds %d bot(s), the hire data %d", len(a.bots), len(hs))
+	}
+	r := prepullRoster(t, hs)
 	w := &walk{
-		opts:   raidWalkOptions{prepullAura: stringList(flags), server: "m910q"},
-		env:    walkEnv{now: func() time.Time { return a.clock }, sleep: func(_ context.Context, d time.Duration) error { a.advance(d); return nil }},
-		agent:  a,
-		outDir: t.TempDir(),
-		plan:   &dungeon.Plan{Name: "zul_gurub"},
-		rows:   prepullRows(2, 5),
-		mt:     "Mtbot",
-		ots:    []string{"Otbot"},
+		opts:      raidWalkOptions{prepullAura: stringList(flags), server: "m910q"},
+		env:       walkEnv{now: func() time.Time { return a.clock }, sleep: func(_ context.Context, d time.Duration) error { a.advance(d); return nil }},
+		agent:     a,
+		outDir:    t.TempDir(),
+		plan:      &dungeon.Plan{Name: "zul_gurub"},
+		rows:      prepullRows(2, 5),
+		hires:     map[string]bool{},
+		hireBatch: map[string]*raidwalk.Batch{},
+	}
+	for i, h := range hs {
+		// The class is the hire's, as the roster named it; a test may still take the class off the fake's unit row to
+		// prove the fire fails on it, so only the names must agree here.
+		if a.bots[i].Name != h.name {
+			t.Fatalf("bot %d: the fake has %s, the hire data %s", i, a.bots[i].Name, h.name)
+		}
+		w.hires[h.name] = true
+		w.hireBatch[strings.ToLower(h.name)] = &r.Batches[i]
+		switch h.batch {
+		case raidwalk.RoleMT:
+			w.mt = h.name
+		case raidwalk.RoleOT:
+			w.ots = append(w.ots, h.name)
+		default:
+			w.rest = append(w.rest, h.name)
+		}
 	}
 	if err := w.validatePrepullAura(); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
 	return w
+}
+
+// newPrepullWalk is a walk with the flag set, a fake clock and the agent above. No phase runs: the tests call
+// prepullAuraSendPending and prepullAuraFire themselves. Its hire data is the fake agent's six bots (mt, ot, rest), so
+// every one of them is a hire the fire's coverage check expects a list for.
+func newPrepullWalk(t *testing.T, a *prepullAgent, flags ...string) *walk {
+	t.Helper()
+	return newPrepullWalkHires(t, a, prepullHires(), flags...)
+}
+
+// prepullRoleAgent is a fake whose raid is exactly the given hires, in order: the fake's own six bots are dropped so a
+// test can put a paladin, a priest or a druid in the raid.
+func prepullRoleAgent(t *testing.T, hs []prepullHire) *prepullAgent {
+	t.Helper()
+	a := newPrepullAgent(t)
+	a.bots, a.classes, a.auras = nil, map[packet.GUID]uint8{}, map[packet.GUID]map[uint32]bool{}
+	for i, h := range hs {
+		g := packet.GUID(0x100 + i)
+		a.classes[g] = h.class
+		a.auras[g] = map[uint32]bool{}
+		a.bots = append(a.bots, session.PartyMember{Name: h.name, GUID: g, Online: true})
+	}
+	return a
 }
 
 // prepullRest is the out-of-combat rest of step step.
@@ -902,6 +1056,12 @@ func TestParsePrepullAuraFlags(t *testing.T) {
 	if code != exitOK || o.prepullAuraTolerance != 2 {
 		t.Fatalf("tolerance options %v exit %d: %s", o.prepullAuraTolerance, code, stderr.String())
 	}
+	// The flag takes the sample file itself (a value that is not a role= list is a tb-prepull-auras file), alone or
+	// beside the role= lists it does not name.
+	o, code = parseRaidWalkArgs([]string{"zul_gurub", "--prepull-aura", "../../dungeons/prepull/zg-preraid.json"}, &stderr)
+	if code != exitOK || len(o.prepullAura) != 1 || o.prepullAura[0] != "../../dungeons/prepull/zg-preraid.json" {
+		t.Fatalf("file option %v exit %d: %s", o.prepullAura, code, stderr.String())
+	}
 	// Off by default.
 	o, code = parseRaidWalkArgs([]string{"zul_gurub"}, &stderr)
 	if code != exitOK || len(o.prepullAura) != 0 {
@@ -917,7 +1077,10 @@ func TestParsePrepullAuraFlags(t *testing.T) {
 		{"unknown preset", []string{"zul_gurub", "--prepull-aura", "role=tank:nope"}, "unknown preset"},
 		{"id 0", []string{"zul_gurub", "--prepull-aura", "role=tank:0"}, "spell id 0"},
 		{"twice", []string{"zul_gurub", "--prepull-aura", "role=tank:17626", "--prepull-aura", "role=tank:17538"}, "named twice"},
-		{"no role", []string{"zul_gurub", "--prepull-aura", "17626"}, `want "role=<role>:<ids>"`},
+		{"no role", []string{"zul_gurub", "--prepull-aura", "17626"}, "no such file"},
+		{"missing file", []string{"zul_gurub", "--prepull-aura", "no-such-prepull.json"}, "no such file"},
+		{"the same file twice", []string{"zul_gurub", "--prepull-aura", "../../dungeons/prepull/zg-preraid.json", "--prepull-aura", "../../dungeons/prepull/zg-preraid.json"}, "named twice"},
+		{"file and its role", []string{"zul_gurub", "--prepull-aura", "../../dungeons/prepull/zg-preraid.json", "--prepull-aura", "role=tank:17626"}, "named twice"},
 		{"negative tolerance", []string{"zul_gurub", "--prepull-aura", "role=tank:17626", "--prepull-aura-tolerance", "-1"}, "0 or more"},
 		{"tolerance alone", []string{"zul_gurub", "--prepull-aura-tolerance", "1"}, "needs --prepull-aura"},
 	} {
@@ -986,6 +1149,363 @@ func TestPrepullAuraWritesTheFile(t *testing.T) {
 	}
 	if got := byBot["Flitz"]; got.Role != "ranged" || len(got.Seen) != 1 {
 		t.Fatalf("Flitz %+v", got)
+	}
+}
+
+// Walk 101's bug: the walk's own `party` RPC is the PLAYER's group, and the hired bots raid without the player
+// (in_group=false, 0 members), so the fire put nothing on anyone and still recorded boss row 691. The targets come
+// from the commander's view instead, and every bot of the sample's role names carries its own list.
+func TestPrepullAuraTargetsTheRaidsBotsNotThePlayersParty(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
+		t.Fatalf("fire: fired %v err %v", fired, err)
+	}
+	want := map[string][]string{
+		"Mtbot": {"Mtbot 17626", "Mtbot 22888"},
+		"Otbot": {"Otbot 17626", "Otbot 22888"},
+		"Rank":  {"Rank 17538", "Rank 22888"},
+		"Flitz": {"Flitz 18192", "Flitz 22888"},
+		"Zap":   {"Zap 17628", "Zap 22888"},
+		"Holi":  {"Holi 17627", "Holi 22888"},
+	}
+	for _, b := range a.bots {
+		var got []string
+		for _, line := range a.sent {
+			if strings.HasPrefix(line, b.Name+" ") {
+				got = append(got, line)
+			}
+		}
+		if strings.Join(got, ",") != strings.Join(want[b.Name], ",") {
+			t.Fatalf("%s: sent %v, want %v", b.Name, got, want[b.Name])
+		}
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.Bots) != 6 {
+		t.Fatalf("prepull-auras.json holds %d bot(s), want the raid's 6: %+v", len(f.Bots), f.Bots)
+	}
+	if len(f.BossRows) != 1 || f.BossRows[0] != 5 || len(f.Attempts) != 0 {
+		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
+	}
+	roles := map[string]string{}
+	for _, rec := range f.Bots {
+		roles[rec.Bot] = rec.Role
+	}
+	for name, role := range map[string]string{"Mtbot": "tank", "Otbot": "tank", "Rank": "melee", "Flitz": "ranged", "Zap": "caster", "Holi": "healer"} {
+		if roles[name] != role {
+			t.Fatalf("%s's role %q, want %q (%v)", name, roles[name], role, roles)
+		}
+	}
+}
+
+// The flag takes the sample file itself (--prepull-aura <file.json>): its role lists are the walk's lists, and every
+// bot of the raid carries its class's list plus the "all" list of the file, id for id.
+func TestPrepullAuraSampleFileCoversTheRaid(t *testing.T) {
+	const sample = "../../dungeons/prepull/zg-preraid.json"
+	raw, err := os.ReadFile(sample)
+	if err != nil {
+		t.Fatalf("%s: %v", sample, err)
+	}
+	var doc struct {
+		Roles map[string]struct {
+			IDs []uint32 `json:"ids"`
+		} `json:"roles"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("%s: %v", sample, err)
+	}
+	a := newPrepullAgent(t)
+	w := newPrepullWalk(t, a, sample)
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
+		t.Fatalf("fire: fired %v err %v", fired, err)
+	}
+	classes := map[string]string{"Mtbot": "tank", "Otbot": "tank", "Rank": "melee", "Flitz": "ranged", "Zap": "caster", "Holi": "healer"}
+	total := 0
+	for name, role := range classes {
+		var want, got []string
+		for _, id := range append(append([]uint32{}, doc.Roles[role].IDs...), doc.Roles["all"].IDs...) {
+			want = append(want, fmt.Sprintf("%s %d", name, id))
+		}
+		for _, line := range a.sent {
+			if strings.HasPrefix(line, name+" ") {
+				got = append(got, line)
+			}
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("%s (%s): sent %v, want the file's %s + all lists %v", name, role, got, role, want)
+		}
+		total += len(want)
+	}
+	if len(a.sent) != total {
+		t.Fatalf("%d lines sent, want %d: %v", len(a.sent), total, a.sent)
+	}
+	if f := readPrepullAuraFile(t, w); len(f.Bots) != 6 || len(f.BossRows) != 1 || len(f.Flag) != 1 || f.Flag[0] != sample {
+		t.Fatalf("file %+v", f)
+	}
+}
+
+// A fire whose lists are set but whose raid reads empty fails closed: exit 18 with the read named, no aura sent and no
+// boss row written (walk 101 wrote one for 0 bots).
+func TestPrepullAuraZeroTargetsFails(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		setup  func(*prepullAgent)
+		reason string
+	}{
+		{"no view frame", func(a *prepullAgent) { a.noView = true }, "holds no frame"},
+		{"no party bot", func(a *prepullAgent) {
+			for _, b := range a.bots {
+				a.hidden[b.Name] = true
+			}
+		}, "shows no party bot"},
+		{"truncated view", func(a *prepullAgent) { a.viewTruncated = true }, "truncated"},
+	} {
+		a := newPrepullAgent(t)
+		tc.setup(a)
+		w := newPrepullWalk(t, a, "role=all:22888")
+		fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+		code, reason := stopInfo(err)
+		if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, tc.reason) {
+			t.Fatalf("%s: fired %v, code %d, reason %q", tc.name, fired, code, reason)
+		}
+		if len(a.sent) != 0 {
+			t.Fatalf("%s: %d aura(s) went out: %v", tc.name, len(a.sent), a.sent)
+		}
+		if w.prepullAuraSent[5] {
+			t.Fatalf("%s: the boss row was recorded as done", tc.name)
+		}
+		f := readPrepullAuraFile(t, w)
+		if len(f.BossRows) != 0 || len(f.Attempts) != 1 || f.Attempts[0].BossRow != 5 || !strings.Contains(f.Attempts[0].Reason, tc.reason) {
+			t.Fatalf("%s: boss rows %v, attempts %+v", tc.name, f.BossRows, f.Attempts)
+		}
+	}
+}
+
+// Fewer bots than the walk hired must receive a list: a bot missing from the raid view and a dead bot both fail the
+// fire, named, with no aura sent and no boss row.
+func TestPrepullAuraShortRaidFails(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		setup  func(*prepullAgent)
+		reason string
+	}{
+		{"bot missing from the view", func(a *prepullAgent) { a.hidden["Flitz"] = true }, "Flitz is not in the commander view"},
+		{"dead bot", func(a *prepullAgent) { a.deadBots["Zap"] = true }, "Zap is dead"},
+	} {
+		a := newPrepullAgent(t)
+		tc.setup(a)
+		w := newPrepullWalk(t, a, "role=all:22888")
+		fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+		code, reason := stopInfo(err)
+		if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "1 of the walk's 6 hire(s)") || !strings.Contains(reason, tc.reason) {
+			t.Fatalf("%s: fired %v, code %d, reason %q", tc.name, fired, code, reason)
+		}
+		if len(a.sent) != 0 {
+			t.Fatalf("%s: %d aura(s) went out: %v", tc.name, len(a.sent), a.sent)
+		}
+		if w.prepullAuraSent[5] {
+			t.Fatalf("%s: the boss row was recorded as done", tc.name)
+		}
+		if f := readPrepullAuraFile(t, w); len(f.BossRows) != 0 || len(f.Attempts) != 1 {
+			t.Fatalf("%s: boss rows %v, attempts %+v", tc.name, f.BossRows, f.Attempts)
+		}
+	}
+}
+
+// An unknown class is not an "all"-only bot: a hire whose unit row carries class 0 would receive only the "all"
+// lists while coverage still passed, so the fire fails before any aura, with the bot named. This is the r1 HIGH.
+func TestPrepullAuraUnknownClassFails(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.classes[a.bots[4].GUID] = 0 // Zap, the mage: its class is gone from the row
+	w := newPrepullWalk(t, a, "role=all:22888")
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "Zap") || !strings.Contains(reason, "no class") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("%d aura(s) went out to a raid with an unknown class: %v", len(a.sent), a.sent)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the row was recorded as done")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 0 || len(f.Attempts) != 1 || !strings.Contains(f.Attempts[0].Reason, "Zap") {
+		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
+	}
+}
+
+// The aura role comes from the walk's own hire data, never the class alone (walk 100's cold review): a ret paladin is
+// melee where the class table said healer, a shadow priest is a caster, a feral druid is melee. The right role's id
+// lands on the bot, the class's old list does not, and prepull-auras.json records the role.
+func TestPrepullAuraRoleFromTheHireData(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		class  uint8
+		token  string
+		spec   string
+		want   string
+		wantID uint32
+		notID  uint32 // the id the class table would have sent
+	}{
+		{"holy paladin", 2, "healer", "holy", raidwalk.PrepullHealer, 17627, 17538},
+		{"ret paladin", 2, "dps", "retribution", raidwalk.PrepullMelee, 17538, 17627},
+		{"shadow priest", 5, "dps", "shadow", raidwalk.PrepullCaster, 17628, 17627},
+		{"feral druid", 11, "dps", "cat", raidwalk.PrepullMelee, 17538, 17627},
+		{"enhancement shaman", 7, "dps", "enh", raidwalk.PrepullMelee, 17538, 17627},
+	} {
+		hs := []prepullHire{{"Mtbot", 1, "mt", "tank", ""}, {"Tester", tc.class, "rest", tc.token, tc.spec}}
+		a := prepullRoleAgent(t, hs)
+		w := newPrepullWalkHires(t, a, hs, prepullRestAuras...)
+		if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
+			t.Fatalf("%s: fired %v err %v", tc.name, fired, err)
+		}
+		g := a.bots[1].GUID
+		if !a.auras[g][tc.wantID] {
+			t.Errorf("%s: the bot carries %v, want the %s id %d", tc.name, a.auras[g], tc.want, tc.wantID)
+		}
+		if a.auras[g][tc.notID] {
+			t.Errorf("%s: the bot carries the class table's id %d, so its role did not come from the hire data", tc.name, tc.notID)
+		}
+		f := readPrepullAuraFile(t, w)
+		var got *prepullAuraRecord
+		for i := range f.Bots {
+			if f.Bots[i].Bot == "Tester" {
+				got = &f.Bots[i]
+			}
+		}
+		if got == nil || got.Role != tc.want {
+			t.Fatalf("%s: prepull-auras.json holds %+v, want Tester with role %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A dps druid whose spec the roster does not name cannot be placed: the fire fails closed before any aura, names the bot
+// and records the attempt instead of a boss row. The class table would have put the healer list on a feral build.
+func TestPrepullAuraDruidWithoutASpecFails(t *testing.T) {
+	hs := []prepullHire{{"Mtbot", 1, "mt", "tank", ""}, {"Tester", 11, "rest", "dps", ""}}
+	a := prepullRoleAgent(t, hs)
+	w := newPrepullWalkHires(t, a, hs, prepullRestAuras...)
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "Tester") || !strings.Contains(reason, "names no spec") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("%d aura(s) went out to a raid with an unplaceable druid: %v", len(a.sent), a.sent)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the boss row was recorded as done")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 0 || len(f.Attempts) != 1 || f.Attempts[0].BossRow != 5 ||
+		!strings.Contains(f.Attempts[0].Reason, "Tester") {
+		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
+	}
+}
+
+// The commander frame can hold a bot the walk never hired (a misbound commander, a stale frame, another group's
+// invite). It is not a target: the fire logs it, sends it no GM aura and still verifies the walk's own roster. It is
+// a raid member all the same, so its combat state is watched. This is the r1 HIGH, widened by the r2 HIGH.
+func TestPrepullAuraSkipsAnUnhiredFrameMember(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.stranger(packet.GUID(0x900), "Stranger", false)
+	w := newPrepullWalk(t, a, "role=all:22888")
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
+		t.Fatalf("fire: fired %v err %v", fired, err)
+	}
+	for _, line := range a.sent {
+		if strings.HasPrefix(line, "Stranger ") {
+			t.Fatalf("an unhired frame member received a GM aura: %v", a.sent)
+		}
+	}
+	if !w.prepullAuraSent[5] {
+		t.Fatal("the roster was complete, but the row was not recorded as done")
+	}
+	logged := false
+	for _, n := range w.notesCopy() {
+		if strings.Contains(n, "Stranger") && strings.Contains(n, "not one of the walk's hires") &&
+			strings.Contains(n, "watched, not targeted") {
+			logged = true
+		}
+	}
+	if !logged {
+		t.Fatalf("the unhired member is not logged as watched but untargeted: %v", w.notesCopy())
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 1 || f.BossRows[0] != 5 || len(f.Attempts) != 0 {
+		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
+	}
+	if len(f.Bots) != 6 {
+		t.Fatalf("prepull-auras.json holds %d bot(s), want the walk's 6: %+v", len(f.Bots), f.Bots)
+	}
+}
+
+// An unhired member the commander's frame holds is watched like a hire: once it is in combat the batch stops before
+// the first `.aura`, so the walk never applies GM auras inside a pull someone else started. This is the r2 HIGH: an
+// unhired member that was only skipped went unchecked.
+func TestPrepullAuraUnhiredMemberInCombatStopsTheBatch(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.stranger(packet.GUID(0x900), "Stranger", true)
+	w := newPrepullWalk(t, a, "role=all:22888")
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "Stranger is in combat") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("%d aura(s) went out while an unhired raid member was fighting: %v", len(a.sent), a.sent)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the boss row was recorded as done")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 0 || len(f.Attempts) != 1 || f.Attempts[0].BossRow != 5 ||
+		!strings.Contains(f.Attempts[0].Reason, "Stranger is in combat") {
+		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
+	}
+}
+
+// An unhired member whose unit row the agent cannot read may be fighting, so it fails the batch like a hire's
+// unreadable row does: the fire never assumes a raid is out of combat because it could not look at one of its members.
+func TestPrepullAuraUnhiredMemberUnreadableStopsTheBatch(t *testing.T) {
+	a := newPrepullAgent(t)
+	// In the commander's frame but not in the agent's unit store: `unit` refuses it.
+	a.extra = []tbm.PartyRec{{GUID: packet.GUID(0x900), Name: "Stranger", HP: 6000, MaxHP: 6000, Map: 309, State: "n"}}
+	w := newPrepullWalk(t, a, "role=all:22888")
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "unit read of Stranger failed") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("%d aura(s) went out while an unhired raid member's row was unreadable: %v", len(a.sent), a.sent)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the boss row was recorded as done")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 0 || len(f.Attempts) != 1 || !strings.Contains(f.Attempts[0].Reason, "Stranger") {
+		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
+	}
+}
+
+// A role word the raid's classes never produce leaves those bots without a list (walk 101's first suspicion): the
+// fire fails naming them instead of recording a boss row the raid was not prepared for.
+func TestPrepullAuraRoleMismatchFails(t *testing.T) {
+	a := newPrepullAgent(t)
+	w := newPrepullWalk(t, a, "role=tank:17626")
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "4 of the walk's 6 hire(s)") ||
+		!strings.Contains(reason, `Rank has no list (role "melee"`) {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("%d aura(s) went out to a partly listed raid: %v", len(a.sent), a.sent)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the row was recorded as done")
 	}
 }
 

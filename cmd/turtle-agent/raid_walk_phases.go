@@ -545,6 +545,9 @@ func (w *walk) phaseHire(ctx context.Context) error {
 		}
 		for _, n := range added {
 			w.hires[n] = true
+			// The batch is the hire's own data for the aura role: its role, the token role the grammar asked of the
+			// bot's class and the spec it sets. The roster outlives the walk, so the pointer is stable.
+			w.hireBatch[strings.ToLower(n)] = &w.roster.Batches[i]
 		}
 		switch b.Role {
 		case raidwalk.RoleMT:

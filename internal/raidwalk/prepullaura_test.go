@@ -1,6 +1,9 @@
 package raidwalk
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -118,17 +121,149 @@ func TestPlanPrepullAuras(t *testing.T) {
 	}
 }
 
-// ClassAuraRole is the class's aura role: melee, ranged, caster or healer, "" for a class the table does not know.
-func TestClassAuraRole(t *testing.T) {
-	for class, want := range map[uint8]string{
-		1: PrepullMelee, 4: PrepullMelee, // warrior, rogue
-		3: PrepullRanged,                   // hunter
-		8: PrepullCaster, 9: PrepullCaster, // mage, warlock
-		2: PrepullHealer, 5: PrepullHealer, 7: PrepullHealer, 11: PrepullHealer, // paladin, priest, shaman, druid
-		6: "", 10: "", 0: "",
+// HireAuraRole reads the walk's own hire data, not the class alone: a class table puts a ret paladin, a feral druid, an
+// enhancement shaman and a shadow priest on the healer list, and a hire whose role the data cannot give is "" (the fire
+// fails closed on it, never an "all"-only bot). This is walk 100's cold review.
+func TestHireAuraRole(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		batch, token, class string
+		spec                string
+		want                string
+	}{
+		// The tanks are tanks whatever their class, by batch or by hire token.
+		{"mt by batch", RoleMT, "tank", "warrior", "", PrepullTank},
+		{"ot by batch", RoleOT, "tank", "paladin", "", PrepullTank},
+		{"tank token on a rest batch", RoleRest, "tank", "druid", "bear", PrepullTank},
+		// Healer and dps by token, never by class.
+		{"holy paladin", RoleRest, "healer", "paladin", "holy", PrepullHealer},
+		{"healer druid", RoleRest, "healer", "druid", "restoration", PrepullHealer},
+		{"ret paladin", RoleRest, "dps", "paladin", "retribution", PrepullMelee},
+		{"shadow priest", RoleRest, "dps", "priest", "shadow", PrepullCaster},
+		{"warrior dps", RoleRest, "dps", "warrior", "fury", PrepullMelee},
+		{"rogue dps", RoleRest, "dps", "rogue", "combat", PrepullMelee},
+		{"hunter dps", RoleRest, "dps", "hunter", "mm", PrepullRanged},
+		{"mage dps", RoleRest, "dps", "mage", "fire", PrepullCaster},
+		{"warlock dps", RoleRest, "dps", "warlock", "affliction", PrepullCaster},
+		// The dps hybrids need their spec: feral is melee, balance and elemental are casters.
+		{"feral cat", RoleRest, "dps", "druid", "cat", PrepullMelee},
+		{"feral bear", RoleRest, "dps", "druid", "bear", PrepullMelee},
+		{"balance druid", RoleRest, "dps", "druid", "balance", PrepullCaster},
+		{"boomkin druid", RoleRest, "dps", "druid", "boomkin", PrepullCaster},
+		{"enhancement shaman", RoleRest, "dps", "shaman", "enh", PrepullMelee},
+		{"elemental shaman", RoleRest, "dps", "shaman", "ele", PrepullCaster},
+		// What the data does not say is not guessed.
+		{"druid dps without a spec", RoleRest, "dps", "druid", "", ""},
+		{"shaman dps without a spec", RoleRest, "dps", "shaman", "", ""},
+		{"druid dps with a healer spec", RoleRest, "dps", "druid", "restoration", ""},
+		{"no hire role", RoleRest, "", "paladin", "", ""},
+		{"unknown class", RoleRest, "dps", "deathknight", "", ""},
 	} {
-		if got := ClassAuraRole(class); got != want {
+		if got := HireAuraRole(tc.batch, tc.token, tc.class, tc.spec); got != tc.want {
+			t.Errorf("%s: HireAuraRole(%q, %q, %q, %q) = %q, want %q", tc.name, tc.batch, tc.token, tc.class, tc.spec, got, tc.want)
+		}
+	}
+}
+
+// ClassName is the name the hire data and the fire agree on: "" for an id no class has.
+func TestClassName(t *testing.T) {
+	for class, want := range map[uint8]string{
+		1: "warrior", 2: "paladin", 3: "hunter", 4: "rogue", 5: "priest",
+		7: "shaman", 8: "mage", 9: "warlock", 11: "druid",
+		0: "", 6: "", 10: "",
+	} {
+		if got := ClassName(class); got != want {
 			t.Errorf("class %d: %q, want %q", class, got, want)
 		}
+	}
+}
+
+// A --prepull-aura value that is not a role= list names a tb-prepull-auras file (dungeons/prepull/zg-preraid.json):
+// one list per role under "roles", so a walk names the file instead of repeating six values. The file's roles join
+// the set in PrepullRoles order, and a role named by both a file and a value is refused.
+func TestPrepullAuraFile(t *testing.T) {
+	const sample = "../../dungeons/prepull/zg-preraid.json"
+	raw, err := os.ReadFile(sample)
+	if err != nil {
+		t.Fatalf("%s: %v", sample, err)
+	}
+	list, err := ParsePrepullAuraFile(sample, raw)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	if len(list) != len(PrepullRoles) {
+		t.Fatalf("%d roles, want %d: %+v", len(list), len(PrepullRoles), list)
+	}
+	for i, role := range PrepullRoles {
+		if list[i].Role != role {
+			t.Fatalf("role %d is %q, want %q (PrepullRoles order)", i, list[i].Role, role)
+		}
+	}
+	if got := PrepullIDs(list[0].Buffs); len(got) != 5 || got[0] != 17626 || got[4] != 25661 {
+		t.Fatalf("tank ids %v", got)
+	}
+	if got := PrepullIDs(list[len(list)-1].Buffs); len(got) != 7 || got[0] != 22888 || got[6] != 23768 {
+		t.Fatalf("all ids %v", got)
+	}
+
+	// The same file through the flag: its roles are the plan's lists, exactly as if each had been typed.
+	plan, err := PlanPrepullAuras([]string{sample})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if len(plan) != len(PrepullRoles) || PrepullIDs(plan.For(PrepullTank))[0] != 17626 {
+		t.Fatalf("plan %+v", plan)
+	}
+	// A file and a role= value for the same role are ambiguous.
+	if _, err := PlanPrepullAuras([]string{sample, "role=tank:17626"}); err == nil || !strings.Contains(err.Error(), "named twice") {
+		t.Fatalf("file plus its role: %v", err)
+	}
+	// A file and a value for a role the file does not name merge, with the file's lists first.
+	dir := t.TempDir()
+	tankOnly := filepath.Join(dir, "tank.json")
+	if err := os.WriteFile(tankOnly, []byte(`{"format":"tb-prepull-auras","version":1,"roles":{"tank":{"ids":[17626]}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan, err = PlanPrepullAuras([]string{"role=melee:10000", tankOnly})
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	if got := PrepullIDs(plan.For(PrepullMelee)); len(got) != 1 || got[0] != 10000 {
+		t.Fatalf("merged melee list %v", got)
+	}
+	if got := PrepullIDs(plan.For(PrepullTank)); len(got) != 1 || got[0] != 17626 {
+		t.Fatalf("merged tank list %v", got)
+	}
+
+	write := func(name, body string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	doc := func(format string, version int, roles string) string {
+		return fmt.Sprintf(`{"format":%q,"version":%d,"roles":%s}`, format, version, roles)
+	}
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{"bad format", doc("tb-raid-roster", 1, `{"tank":{"ids":[17626]}}`), "format"},
+		{"bad version", doc(PrepullFileFormat, 2, `{"tank":{"ids":[17626]}}`), "version"},
+		{"unknown role", doc(PrepullFileFormat, 1, `{"wizard":{"ids":[17626]}}`), "is not one of"},
+		{"no ids", doc(PrepullFileFormat, 1, `{"tank":{"ids":[]}}`), "names no id"},
+		{"id 0", doc(PrepullFileFormat, 1, `{"tank":{"ids":[0]}}`), "spell id 0"},
+		{"no roles", doc(PrepullFileFormat, 1, `{}`), "names no role"},
+		{"not json", `not json`, "prepull-aura"},
+	} {
+		path := write("f.json", tc.body)
+		if _, err := PlanPrepullAuras([]string{path}); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err %v (want %q)", tc.name, err, tc.want)
+		}
+	}
+	if _, err := PlanPrepullAuras([]string{filepath.Join(dir, "absent.json")}); err == nil || !strings.Contains(err.Error(), "no such file") {
+		t.Fatalf("absent file: %v", err)
 	}
 }

@@ -271,6 +271,63 @@ func TestRosterV2Specs(t *testing.T) {
 	}
 }
 
+// TokenRole is the role the hire grammar asks of one class: a class token's own role word, the class default when it
+// names none, and a role count's word for a class that can be hired as that one role. "" is what the batch leaves
+// ambiguous — the class in no token, tokens that disagree, or two counts that could have hired it.
+func TestBatchTokenRole(t *testing.T) {
+	r, err := ParseRoster([]byte(`{"format":"tb-raid-roster","version":1,
+ "batches":[{"role":"mt","hire":"1 warrior:tank"},
+            {"role":"rest","hire":"2 paladin:healer 2 paladin:dps 1 hunter 1 druid 2 shaman:dps"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rest := &r.Batches[1]
+	for class, want := range map[string]string{
+		"paladin": "",    // named as a healer and as a dps: no one role
+		"hunter":  "dps", // no role word: the class default
+		"druid":   "healer",
+		"shaman":  "dps",
+		"mage":    "", // the batch never names it
+	} {
+		if got := rest.TokenRole(class); got != want {
+			t.Errorf("rest batch, %s: TokenRole = %q, want %q", class, got, want)
+		}
+	}
+	if got := (&r.Batches[0]).TokenRole("warrior"); got != "tank" {
+		t.Errorf("mt batch, warrior: TokenRole = %q, want tank", got)
+	}
+	if got := (&r.Batches[0]).TokenRole("mage"); got != "" {
+		t.Errorf("mt batch, mage: TokenRole = %q, want none", got)
+	}
+	// A role count names no class: its word applies to a class the server could have picked for that role, and only
+	// when the class fits exactly one of the batch's counts.
+	roleCount, err := ParseRoster([]byte(`{"format":"tb-raid-roster","version":1,
+ "batches":[{"role":"mt","hire":"1t"},{"role":"ot","hire":"1t"},{"role":"rest","hire":"3d"},
+            {"role":"rest","hire":"2h"},{"role":"rest","hire":"2h 4d"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		batch int
+		class string
+		want  string
+	}{
+		{2, "mage", "dps"},
+		{2, "druid", "dps"},
+		{2, "priest", "dps"}, // hired from the dps count only: a shadow priest, not a healer
+		{3, "priest", "healer"},
+		{3, "druid", "healer"},
+		{3, "warrior", ""},
+		{4, "warrior", "dps"}, // a pure class can only dps, whatever else the counts say
+		{4, "priest", ""},     // h or d: the batch cannot say which of its priests this one is
+		{4, "druid", ""},
+	} {
+		if got := roleCount.Batches[tc.batch].TokenRole(tc.class); got != tc.want {
+			t.Errorf("batch %d, %s: TokenRole = %q, want %q", tc.batch, tc.class, got, tc.want)
+		}
+	}
+}
+
 // The roster's hunter spec: "sv" is the alias of survival, the talent build table names TB's premade paths, and the allow-list lets
 // exactly `.bot command <hire> talents [<path>]` through for a hire and a known path.
 func TestRosterHunterSpecAliasAndTalentBuilds(t *testing.T) {
