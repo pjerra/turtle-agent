@@ -187,12 +187,11 @@ func TestBlackrockDepthsB6aStands(t *testing.T) {
 	b6aNear(t, "leg 8 group 57 approach[1]", a57[1], 1396.6, -452.4, -93.0)
 }
 
-// b6aMmaps is the server's navmesh when it holds all four plans' maps ($TURTLE_AGENT_MMAPS or ~/turtle-agent-mmaps, as the other
-// dungeongen checks use); the test skips without it.
-func b6aMmaps(t *testing.T) *navmesh.Planner {
+// b6aMmaps is the server's navmesh when it holds every one of the plans' maps ($TURTLE_AGENT_MMAPS or
+// ~/turtle-agent-mmaps, as the other dungeongen checks use); the test skips without it.
+func b6aMmaps(t *testing.T, maps []uint32) *navmesh.Planner {
 	t.Helper()
 	home, _ := os.UserHomeDir()
-	maps := []uint32{802, 808, 269, 230}
 	for _, dir := range []string{os.Getenv("TURTLE_AGENT_MMAPS"), filepath.Join(home, "turtle-agent-mmaps")} {
 		if dir == "" {
 			continue
@@ -216,7 +215,7 @@ func b6aMmaps(t *testing.T) *navmesh.Planner {
 		t.Cleanup(pl.Close)
 		return pl
 	}
-	t.Skip("no navmesh files for maps 802, 808, 269 and 230: set TURTLE_AGENT_MMAPS to a folder holding their .mmap and .mmtile files")
+	t.Skipf("no navmesh files for maps %v: set TURTLE_AGENT_MMAPS to a folder holding their .mmap and .mmtile files", maps)
 	return nil
 }
 
@@ -225,9 +224,16 @@ func b6aMmaps(t *testing.T) *navmesh.Planner {
 // counts plan-check --floor-aware --approach-hops prints for the same tree; a plan edit or a cutter change that brings one back
 // fails here, which the coordinate pins above cannot see.
 func TestB6aDeployedCutLintCounts(t *testing.T) {
-	pl := b6aMmaps(t)
+	var plans []*dungeon.Plan
+	var maps []uint32
 	for _, name := range []string{"crescent_grove", "hateforge_quarry", "black_morass", "blackrock_depths"} {
 		p := b6aLoad(t, name)
+		plans = append(plans, p)
+		maps = append(maps, p.Map)
+	}
+	pl := b6aMmaps(t, maps)
+	for _, p := range plans {
+		name := p.Name
 		world, _, err := worldspawn.Load(filepath.Join("testdata", fmt.Sprintf("map%d", p.Map)), p.Map)
 		if err != nil {
 			t.Fatalf("%s: the map %d world export: %v", name, p.Map, err)
