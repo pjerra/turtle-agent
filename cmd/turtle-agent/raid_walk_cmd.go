@@ -1233,6 +1233,11 @@ type walk struct {
 	// ("boss row 5", "start (row 1)"), so the watch's failures carry the same name as the fire's own.
 	prepullAuraWatch []dungeon.AuraTarget
 	prepullAuraWhat  string
+	// prepullAuraUnitWaitEnd and prepullAuraCombatWaitEnd are one fire's shared unit-read budgets: its hires' role
+	// reads and its combat rechecks share each window (prepullUnitReadMax), so a fire whose unit store misses many
+	// hires never pauses the run for more than two of them, however many rows are missing.
+	prepullAuraUnitWaitEnd   time.Time
+	prepullAuraCombatWaitEnd time.Time
 	// gongReruns counts the run restarts at a leg's summoning open row (a boss that despawns after a wipe comes back with the
 	// object: Zul'Gurub's Arlokk). bossGongReruns bounds them. gongRerunAt/-Boss/-Open name the last one that went out: the
 	// next "boss not found" pause reads whether the frames saw the boss alive since, which tells the gong summoning him again

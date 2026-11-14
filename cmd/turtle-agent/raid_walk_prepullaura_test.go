@@ -107,6 +107,9 @@ type prepullAgent struct {
 	readyAt time.Time
 	// silent names the bots the unit RPC never answers for, however long the walk waits: a store that misses one bot.
 	silent map[string]bool
+	// unseenUntil holds the moment the unit RPC starts answering for a bot: a store that has not received that one
+	// row yet (walk 105: the main tank, standing ahead of the commander, for a few seconds at a boss row).
+	unseenUntil map[string]time.Time
 }
 
 func newPrepullAgent(t *testing.T) *prepullAgent {
@@ -115,7 +118,8 @@ func newPrepullAgent(t *testing.T) *prepullAgent {
 		classes: map[packet.GUID]uint8{}, auras: map[packet.GUID]map[uint32]bool{}, caster: map[uint32]bool{},
 		drop: map[packet.GUID]map[uint32]bool{}, combatBots: map[packet.GUID]bool{},
 		hidden: map[string]bool{}, deadBots: map[string]bool{}, silent: map[string]bool{},
-		botStates: map[string]string{}, botStateMissing: map[string]bool{}, botStateNoSpecs: map[string]bool{}}
+		unseenUntil: map[string]time.Time{},
+		botStates:   map[string]string{}, botStateMissing: map[string]bool{}, botStateNoSpecs: map[string]bool{}}
 	a.selfGUID, a.selfName = packet.GUID(0x0000000000000AAA), "Commander"
 	// Mtbot (warrior mt), Otbot (warrior ot), Rank (rogue), Flitz (hunter), Zap (mage), Holi (priest).
 	for i, b := range []struct {
@@ -250,6 +254,9 @@ func (a *prepullAgent) Call(ctx context.Context, method string, params, out any,
 			return errors.New("unit: no such unit")
 		}
 		if a.silent[a.nameOf(g)] || (!a.readyAt.IsZero() && a.clock.Before(a.readyAt)) {
+			return errors.New("unit: no such unit")
+		}
+		if until, ok := a.unseenUntil[a.nameOf(g)]; ok && a.clock.Before(until) {
 			return errors.New("unit: no such unit")
 		}
 		v = objects.Unit{GUID: g, Type: "player", Name: a.nameOf(g), Class: a.classes[g],
@@ -945,6 +952,92 @@ func TestPrepullAuraUnreadableUnitStopsTheBatch(t *testing.T) {
 	}
 	f := readPrepullAuraFile(t, w)
 	if len(f.BossRows) != 0 || len(f.Attempts) != 1 || !strings.Contains(f.Attempts[0].Reason, "unit read") {
+		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
+	}
+}
+
+// Walk 105's bug at the boss-row fire: a hire's unit row can lag the agent's own store for a few seconds (the ZG
+// Jeklik main tank stood ahead of the commander), and the two back-to-back reads that used to decide its role ended a
+// run 24 minutes in. The read waits instead - one re-read every 2 s for up to 30 s - so a store that misses three
+// reads and then has the bot still gives it its list. The failing case without the wait: this test.
+func TestPrepullAuraUnitReadWaitsOutAStoreMiss(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.unseenUntil["Rank"] = a.clock.Add(6 * time.Second) // three reads miss the rogue, the fourth has it
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	prepullRunLog(t, w)
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
+		t.Fatalf("fire: fired %v err %v", fired, err)
+	}
+	g := a.bots[2].GUID // Rank
+	if !a.auras[g][17538] || !a.auras[g][22888] {
+		t.Fatalf("Rank carries %v, want the melee list", a.auras[g])
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 1 || f.BossRows[0] != 5 || len(f.Attempts) != 0 || len(f.Bots) != 6 {
+		t.Fatalf("boss rows %v, attempts %+v, %d bot(s)", f.BossRows, f.Attempts, len(f.Bots))
+	}
+	for _, rec := range f.Bots {
+		if rec.Bot == "Rank" && (rec.Role != raidwalk.PrepullMelee || len(rec.Seen) != 2) {
+			t.Fatalf("Rank %+v, want the melee role with both ids seen", rec)
+		}
+	}
+	if log := prepullRunLogText(t, w); !strings.Contains(log, "prepull-aura: boss row 5: the unit read of Rank took 6s") {
+		t.Fatalf("run.log does not name the 6 s read:\n%s", log)
+	}
+}
+
+// A hire the unit store does not hold for the whole 30 s wait still gets its role from the module's roster, which needs
+// no class: the priest's `holy` kit is the healer's list even unseen, the fire logs that the role came from the roster,
+// and the aura's own read-back (the store answers by then) verifies it. No guessed role, no "all"-only bot.
+func TestPrepullAuraUnitReadFallsBackToTheRosterRole(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.unseenUntil["Holi"] = a.clock.Add(32 * time.Second) // outlasts the role wait, the combat window catches it
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	prepullRunLog(t, w)
+	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
+		t.Fatalf("fire: fired %v err %v", fired, err)
+	}
+	g := a.bots[5].GUID // Holi, a holy priest
+	if !a.auras[g][17627] || !a.auras[g][22888] || a.auras[g][17538] {
+		t.Fatalf("Holi carries %v, want the healer list", a.auras[g])
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 1 || f.BossRows[0] != 5 || len(f.Attempts) != 0 {
+		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
+	}
+	for _, rec := range f.Bots {
+		if rec.Bot == "Holi" && rec.Role != raidwalk.PrepullHealer {
+			t.Fatalf("Holi %+v, want the healer role from the roster", rec)
+		}
+	}
+	log := prepullRunLogText(t, w)
+	if !strings.Contains(log, "prepull-aura: boss row 5: the unit read of Holi ran out after 30s") ||
+		!strings.Contains(log, "prepull-aura: boss row 5: Holi: role from roster (unit unseen): healer") {
+		t.Fatalf("run.log does not name the wait and the roster role:\n%s", log)
+	}
+}
+
+// A hire the wait never sees and the roster names no role for stops the fire, as before the wait existed and with the
+// wait named: the role is never guessed, and no aura goes out on it.
+func TestPrepullAuraUnitReadAndRosterBothFailStops(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.silent["Holi"] = true          // the store never answers for it
+	a.botStateNoSpecs["Holi"] = true // its state row names no spec, so no role either
+	w := newPrepullWalk(t, a, prepullRestAuras...)
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "unit read of Holi failed after 30s") ||
+		!strings.Contains(reason, "roster gives no role") || !strings.Contains(reason, "no aura was sent") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("%d aura(s) went out with a hire of unknown role: %v", len(a.sent), a.sent)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the boss row was recorded as done")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 0 || len(f.Attempts) != 1 || !strings.Contains(f.Attempts[0].Reason, "failed after 30s") {
 		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
 	}
 }

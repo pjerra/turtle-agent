@@ -13,11 +13,17 @@
 // combat but never targeted, and a fire whose lists do not reach every hire the walk made fails instead
 // (prepullAuraCoverage). A hire whose aura role the walk cannot tell — a unit row with no class, a bot the module's
 // state rows leave out, or a state naming no single role's spec — is a failure too, never an "all"-only bot: the role
-// comes PER BOT from the module itself (prepullRole, raidwalk.BotStateAuraRole), not from the class alone and not from
-// the roster batch, because a batch like "5h 13d" names no role for a priest, paladin, druid or shaman and a ret
+// comes PER BOT from the module itself (prepullRole, raidwalk.BotStateAuraRole), not from the class alone and not
+// from the roster batch, because a batch like "5h 13d" names no role for a priest, paladin, druid or shaman and a ret
 // paladin, a feral druid, an enhancement shaman and a shadow priest share a class with a healer. The source is
 // `.bot roster`'s TBM:BOTSTATE rows, whose `specs=` field is the spec strategy kit the module installed on that bot
-// (walk 101b aborted on the "rest" batch before this source existed).
+// (walk 101b aborted on the "rest" batch before this source existed). A boss row's unit read is retried rather than
+// failed on one miss: the hire's row is re-read every 2 s for up to 30 s (prepullAuraUnitWait), because walk 105
+// stopped a run 24 minutes in when the main tank, standing ahead of the commander, was unseen for two back-to-back
+// reads. A hire still unseen after that wait takes the role the module's own roster names for it, without the class
+// (prepullRosterRole, raidwalk.BotStateAuraRoleUnclassed), logged as "role from roster (unit unseen)"; with no roster
+// role either the fire fails closed with the hire and the wait named. The aura's own combat read and read-back still
+// decide: an unseen unit is never assumed alive, out of combat or carrying its list.
 //
 // The fire is the boss row's own gate (prepullGate): the step before a boss row in WHATEVER phase, as long as the run
 // is still before the pull (no pulling/fighting note, no later pull line of the page, no party bot in combat), or the
@@ -94,6 +100,14 @@ var (
 	// twice"). A boss row never needs it: the raid has been in the view for minutes by then.
 	prepullStartWaitMax  = 60 * time.Second
 	prepullStartWaitPoll = 2 * time.Second
+	// The boss-row unit read wait (walk 105). A hire's unit row can be missing from the agent's own store for a few
+	// seconds: at ZG Jeklik boss row 49 the main tank stood ahead of the commander, the two back-to-back unit reads
+	// missed it and a run 24 minutes in stopped there, while the store held it seconds later. The role read re-tries
+	// every 2 s for up to 30 s; a hire still unseen then takes the role the module's own roster names for it
+	// (prepullRosterRole), never a guessed one. The run is paused while the fire waits, so the time is the walk's,
+	// not the raid's.
+	prepullUnitReadMax  = 30 * time.Second
+	prepullUnitReadPoll = 2 * time.Second
 )
 
 // prepullAuraFileName is the fire's evidence in the walk's out dir.
@@ -518,13 +532,18 @@ func (w *walk) prepullBossEngaged(ctx context.Context, step int) (bool, error) {
 // them is in combat: a pull that starts after the pause must stop the auras, not receive them after the encounter
 // began. The commander's view leaves the player out, so the watch carries it first; a pull the commander started is
 // the one a member-only check misses. It fails closed on the read too: a unit the RPC cannot read may be fighting, so
-// the batch stops there as well. The caller builds the watch from the commander and the whole raid, not only
-// the members that carry an aura list: an unhired member can pull too. where names the fire in its failure
-// ("boss row 5", or "start (row 1)"), so the walk-101 line reads as the start fire it was.
+// the batch stops there as well - but only after the unit store was given its window (prepullAuraUnitWait, one shared
+// prepullUnitReadMax per fire), because walk 105's main tank stood ahead of the commander with its row a few seconds
+// late. A member whose row never arrives still stops the batch. The caller builds the watch from the commander and the
+// whole raid, not only the members that carry an aura list: an unhired member can pull too. where names the fire in
+// its failure ("boss row 5", or "start (row 1)"), so the walk-101 line reads as the start fire it was.
 func (w *walk) prepullAuraCombatClear(ctx context.Context, where string) error {
 	port := walkAuras{w: w}
 	for _, t := range w.prepullAuraWatch {
-		u, seen := port.ViewUnit(ctx, t)
+		u, seen, _, err := w.prepullAuraUnitWait(ctx, port, where, t, w.prepullAuraCombatWaitEnd)
+		if err != nil {
+			return err
+		}
 		if !seen {
 			return stopf(exitRaidWalkFailed,
 				"prepull-aura: %s: the unit read of %s failed, so combat cannot be ruled out: no further auras were sent", where, t.Name)
@@ -633,6 +652,40 @@ func (w *walk) prepullAuraStartWait(ctx context.Context) ([]tbm.PartyRec, error)
 	}
 }
 
+// prepullAuraUnitWait reads one hire's unit row, waiting out an agent unit store that has not received it yet: the
+// first read is immediate, then one re-read every 2 s, for up to prepullUnitReadMax or the fire's shared budget for
+// this phase when that comes first. Walk 105 is why: at ZG Jeklik's boss row 49 the two back-to-back reads of the main
+// tank, standing ahead of the commander, both missed it and the fire stopped a run that was 24 minutes in, while the
+// store held the row a few seconds later. One run.log line records the wait - the time it took, or that it ran out -
+// and only when the first read missed, so a raid the store holds whole costs no line per bot per boss row. The read
+// stays fail-closed: the caller decides what an unseen unit means, and the wait is no licence to fire on a unit the
+// walk cannot read. waited is the time spent, for the caller's own failure line.
+func (w *walk) prepullAuraUnitWait(ctx context.Context, port walkAuras, where string, t dungeon.AuraTarget, shared time.Time) (u objects.Unit, seen bool, waited time.Duration, err error) {
+	begin := w.env.now()
+	if u, seen = port.ViewUnit(ctx, t); seen {
+		return u, true, 0, nil
+	}
+	deadline := begin.Add(prepullUnitReadMax)
+	if !shared.IsZero() && shared.Before(deadline) {
+		deadline = shared
+	}
+	for w.env.now().Before(deadline) {
+		if err := w.env.sleep(ctx, prepullUnitReadPoll); err != nil {
+			return objects.Unit{}, false, 0, err
+		}
+		if u, seen = port.ViewUnit(ctx, t); seen {
+			break
+		}
+	}
+	waited = w.env.now().Sub(begin).Round(time.Millisecond)
+	if seen {
+		w.logLine(w.env.now(), fmt.Sprintf("prepull-aura: %s: the unit read of %s took %s (the first read missed it)", where, t.Name, waited))
+	} else {
+		w.logLine(w.env.now(), fmt.Sprintf("prepull-aura: %s: the unit read of %s ran out after %s", where, t.Name, waited))
+	}
+	return u, seen, waited, nil
+}
+
 // prepullAuraCoverage fails the fire unless every bot the walk hired received a list: the walk tests the preparation
 // a real raid carries in, so a hire the lists do not reach is a broken flag set (a role word the classes never
 // produce, or no "all" list) or a raid that lost bots, never a fire to record. Walk 101 wrote prepull-auras.json with
@@ -683,7 +736,8 @@ func prepullAuraWhere(step int, start bool) string {
 // can neither receive GM auras nor pull unnoticed. A hire whose aura role the walk cannot tell fails the fire before
 // any aura (a class the unit read cannot give, no row for it in the module's TBM:BOTSTATE snapshot, or a row whose kit
 // names no spec or specs of more than one role), because only the "all" lists would reach it while coverage still
-// passed. A failed fire is recorded as an
+// passed; a hire the unit store misses is waited for first (prepullAuraUnitWait), and one still unseen after that wait
+// takes its roster role when the module's state names one (prepullRosterRole). A failed fire is recorded as an
 // attempt with its reason; only a fire whose auras verified within the tolerance appends the boss row (or start_row
 // under --prepull-aura-when start), so the file never reports a preparation that did not happen. The file is written
 // on every fire, failures included, so the attempt's reason and the missing list are always on disk. step is the boss
@@ -695,6 +749,7 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int, start bool) (err e
 			w.prepullAuraAttempts = append(w.prepullAuraAttempts, prepullAuraAttempt{BossRow: step, Start: start, Reason: err.Error()})
 		}
 		w.prepullAuraWatch, w.prepullAuraWhat = nil, ""
+		w.prepullAuraUnitWaitEnd, w.prepullAuraCombatWaitEnd = time.Time{}, time.Time{}
 		if werr := w.prepullAuraWrite(); werr != nil {
 			w.note("prepull-aura: WARN: %s could not be written (%v)", prepullAuraFileName, werr)
 		}
@@ -711,6 +766,9 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int, start bool) (err e
 	if err != nil {
 		return err
 	}
+	// The fire's own unit-read budgets: the role reads share one window, the combat rechecks another (a store that
+	// lags is waited for twice at most, whatever the raid's size).
+	w.prepullAuraUnitWaitEnd = w.env.now().Add(prepullUnitReadMax)
 	port := walkAuras{w: w}
 	cfg := dungeon.AuraCfg{Gap: prepullAuraGap, Settle: prepullAuraSettle, ViewWait: prepullAuraViewWait}
 	// The combat watch is the commander and every living member of its raid, list or no list: a pull may come from
@@ -757,10 +815,9 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int, start bool) (err e
 			continue
 		}
 		t := dungeon.AuraTarget{GUID: m.GUID, Name: name}
-		u, seen := port.ViewUnit(ctx, t)
-		if !seen {
-			// One retry: a unit store that missed the bot for one call must not decide its role from a zero class.
-			u, seen = port.ViewUnit(ctx, t)
+		u, seen, waited, err := w.prepullAuraUnitWait(ctx, port, where, t, w.prepullAuraUnitWaitEnd)
+		if err != nil {
+			return err
 		}
 		if (seen && (u.Dead || u.Ghost)) || (!seen && (m.Dead || m.State == "d")) {
 			uncovered[name] = "is dead, so it cannot carry a list"
@@ -768,17 +825,29 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int, start bool) (err e
 		}
 		watch = append(watch, t)
 		// A role guessed from an unreadable row would put only the "all" lists on the bot while coverage still passed,
-		// so an unknown class fails the fire: a hire gets its role's list or the walk stops with it named.
-		if !seen {
-			return stopf(exitRaidWalkFailed,
-				"prepull-aura: %s: the unit read of %s failed twice, so its class and aura role are unknown: no aura was sent", where, name)
-		}
-		if u.Class == 0 {
+		// so an unknown role fails the fire: a hire gets its role's list or the walk stops with it named. The class
+		// comes from the unit row alone, so a seen row with no class is still a failure; a hire still unseen after the
+		// wait takes the role the module's own roster names for it (prepullRosterRole, logged as such), because the
+		// roster names a role without needing the class - walk 105's main tank was unseen for seconds at a boss row.
+		var role, why string
+		switch {
+		case seen && u.Class == 0:
 			return stopf(exitRaidWalkFailed,
 				"prepull-aura: %s: %s is a hire whose unit row carries no class, so its aura role is unknown: no aura was sent", where, name)
+		case seen:
+			role, why = w.prepullRole(name, u.Class)
+		default:
+			role, why = w.prepullRosterRole(name)
+			if role != "" {
+				w.logLine(w.env.now(), fmt.Sprintf("prepull-aura: %s: %s: role from roster (unit unseen): %s", where, name, role))
+			}
 		}
-		role, why := w.prepullRole(name, u.Class)
 		if role == "" {
+			if !seen {
+				return stopf(exitRaidWalkFailed,
+					"prepull-aura: %s: the unit read of %s failed after %s and the roster gives no role either: %s, so its class and aura role are unknown: no aura was sent",
+					where, name, waited, why)
+			}
 			return stopf(exitRaidWalkFailed,
 				"prepull-aura: %s: %s: %s, so its aura role is unknown and only an \"all\" list would reach it: no aura was sent", where, name, why)
 		}
@@ -800,6 +869,7 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int, start bool) (err e
 		targets = append(targets, prepullAuraTarget{rec: rec, unit: t, want: list, missing: missing})
 	}
 	w.prepullAuraWatch, w.prepullAuraWhat = watch, where
+	w.prepullAuraCombatWaitEnd = w.env.now().Add(prepullUnitReadMax)
 	if err := w.prepullAuraCombatClear(ctx, where); err != nil {
 		return err
 	}
@@ -907,19 +977,44 @@ func (w *walk) prepullRole(name string, class uint8) (role, why string) {
 	if !ok {
 		return "", "the module's `.bot roster` state names no row for it, so its role cannot be read"
 	}
-	if w.mt != "" && strings.EqualFold(name, w.mt) {
+	if w.prepullHoldsFront(name) {
 		return raidwalk.PrepullTank, ""
-	}
-	for _, ot := range w.ots {
-		if strings.EqualFold(name, ot) {
-			return raidwalk.PrepullTank, ""
-		}
 	}
 	className := raidwalk.ClassName(class)
 	if className == "" {
 		return "", fmt.Sprintf("its unit row carries class %d, which no aura role covers", class)
 	}
 	return raidwalk.BotStateAuraRole(className, specs)
+}
+
+// prepullRosterRole is prepullRole for a hire whose unit row the agent's store does not hold, so no class is there to
+// key the module's per-class spec table: the role comes from the module's own spec strategies alone
+// (raidwalk.BotStateAuraRoleUnclassed, which fails closed on a strategy whose classes split on roles), the walk's own
+// MT and OT hold the raid's front whatever their kit, and a bot without a state row has no role. It is the fallback
+// of a fire whose unit read ran out (prepullAuraUnitWait), never a guess: every failure names its reason.
+func (w *walk) prepullRosterRole(name string) (role, why string) {
+	specs, ok := w.prepullAuraSpecs[strings.ToLower(name)]
+	if !ok {
+		return "", "the module's `.bot roster` state names no row for it, so its role cannot be read"
+	}
+	if w.prepullHoldsFront(name) {
+		return raidwalk.PrepullTank, ""
+	}
+	return raidwalk.BotStateAuraRoleUnclassed(specs)
+}
+
+// prepullHoldsFront says whether name is the walk's own main tank or one of its off tanks: they hold the raid's
+// front whatever their kit, so their aura role is the tank's.
+func (w *walk) prepullHoldsFront(name string) bool {
+	if w.mt != "" && strings.EqualFold(name, w.mt) {
+		return true
+	}
+	for _, ot := range w.ots {
+		if strings.EqualFold(name, ot) {
+			return true
+		}
+	}
+	return false
 }
 
 // prepullRoleSource names where prepullRole reads each bot's role, as prepull-auras.json records it.

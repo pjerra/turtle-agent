@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -269,6 +270,47 @@ func BotStateAuraRole(class, specs string) (role, why string) {
 		}
 		if !slices.Contains(roles, r) {
 			roles = append(roles, r)
+		}
+	}
+	switch len(roles) {
+	case 1:
+		return roles[0], ""
+	case 0:
+		return "", fmt.Sprintf("its state names no spec strategy (%q)", specs)
+	}
+	return "", fmt.Sprintf("its state names specs of more than one role (%s: %q)", strings.Join(roles, ", "), specs)
+}
+
+// BotStateAuraRoleUnclassed is BotStateAuraRole for a hire whose class cannot be read, so the per-class table cannot
+// key its strategies: an agent unit store that has not received the unit gives its name and no class (raid-walk walk
+// 105: the main tank, standing ahead of the commander, at a boss row). A strategy resolves only through the role
+// every class that names it agrees on ("protection" is a tank for a warrior and a paladin, "holy" a healer for a
+// paladin and a priest); a strategy no class names, or one whose classes would split on roles, and a specs field
+// naming none or several roles give "" with the reason, exactly like the classed read. It never guesses, so a caller
+// can use it where a wrong role would send the wrong list.
+func BotStateAuraRoleUnclassed(specs string) (role, why string) {
+	var roles []string
+	for _, spec := range strings.Split(specs, "+") {
+		spec = strings.TrimSpace(spec)
+		if spec == "" || spec == "offdps" {
+			continue
+		}
+		var found []string
+		for _, byClass := range moduleSpecRoles {
+			if r, ok := byClass[spec]; ok && !slices.Contains(found, r) {
+				found = append(found, r)
+			}
+		}
+		switch len(found) {
+		case 0:
+			return "", fmt.Sprintf("its state names the strategy %q, which no aura role covers", spec)
+		case 1:
+			if !slices.Contains(roles, found[0]) {
+				roles = append(roles, found[0])
+			}
+		default:
+			sort.Strings(found)
+			return "", fmt.Sprintf("its state names the strategy %q, which the classes map to different roles (%s)", spec, strings.Join(found, ", "))
 		}
 	}
 	switch len(roles) {
