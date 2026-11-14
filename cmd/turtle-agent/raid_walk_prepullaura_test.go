@@ -284,7 +284,20 @@ func (a *prepullAgent) nameOf(g packet.GUID) string {
 			return b.Name
 		}
 	}
+	for _, m := range a.extra {
+		if m.GUID == g {
+			return m.Name
+		}
+	}
 	return g.String()
+}
+
+// stranger puts a member the walk never hired in the commander's frame, with a unit row the store answers (so the
+// fire's combat read can see it); inCombat is that row's combat state.
+func (a *prepullAgent) stranger(g packet.GUID, name string, inCombat bool) {
+	a.extra = append(a.extra, tbm.PartyRec{GUID: g, Name: name, HP: 6000, MaxHP: 6000, Map: 309, State: "n"})
+	a.auras[g] = map[uint32]bool{}
+	a.combatBots[g] = inCombat
 }
 
 // prepullHoldVerbs is the run verbs minus the `status` confirmations: the pause/resume sequence the walk asked for.
@@ -1215,11 +1228,11 @@ func TestPrepullAuraUnknownClassFails(t *testing.T) {
 }
 
 // The commander frame can hold a bot the walk never hired (a misbound commander, a stale frame, another group's
-// invite). It is not a target: the fire skips it, logs it, sends it no GM aura and still verifies the walk's own
-// roster. This is the r1 HIGH.
+// invite). It is not a target: the fire logs it, sends it no GM aura and still verifies the walk's own roster. It is
+// a raid member all the same, so its combat state is watched. This is the r1 HIGH, widened by the r2 HIGH.
 func TestPrepullAuraSkipsAnUnhiredFrameMember(t *testing.T) {
 	a := newPrepullAgent(t)
-	a.extra = []tbm.PartyRec{{GUID: packet.GUID(0x900), Name: "Stranger", HP: 6000, MaxHP: 6000, Map: 309, State: "n"}}
+	a.stranger(packet.GUID(0x900), "Stranger", false)
 	w := newPrepullWalk(t, a, "role=all:22888")
 	if fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false); err != nil || !fired {
 		t.Fatalf("fire: fired %v err %v", fired, err)
@@ -1234,12 +1247,13 @@ func TestPrepullAuraSkipsAnUnhiredFrameMember(t *testing.T) {
 	}
 	logged := false
 	for _, n := range w.notesCopy() {
-		if strings.Contains(n, "Stranger") && strings.Contains(n, "not one of the walk's hires") {
+		if strings.Contains(n, "Stranger") && strings.Contains(n, "not one of the walk's hires") &&
+			strings.Contains(n, "watched, not targeted") {
 			logged = true
 		}
 	}
 	if !logged {
-		t.Fatalf("the skipped member is not logged: %v", w.notesCopy())
+		t.Fatalf("the unhired member is not logged as watched but untargeted: %v", w.notesCopy())
 	}
 	f := readPrepullAuraFile(t, w)
 	if len(f.BossRows) != 1 || f.BossRows[0] != 5 || len(f.Attempts) != 0 {
@@ -1247,6 +1261,55 @@ func TestPrepullAuraSkipsAnUnhiredFrameMember(t *testing.T) {
 	}
 	if len(f.Bots) != 6 {
 		t.Fatalf("prepull-auras.json holds %d bot(s), want the walk's 6: %+v", len(f.Bots), f.Bots)
+	}
+}
+
+// An unhired member the commander's frame holds is watched like a hire: once it is in combat the batch stops before
+// the first `.aura`, so the walk never applies GM auras inside a pull someone else started. This is the r2 HIGH: an
+// unhired member that was only skipped went unchecked.
+func TestPrepullAuraUnhiredMemberInCombatStopsTheBatch(t *testing.T) {
+	a := newPrepullAgent(t)
+	a.stranger(packet.GUID(0x900), "Stranger", true)
+	w := newPrepullWalk(t, a, "role=all:22888")
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "Stranger is in combat") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("%d aura(s) went out while an unhired raid member was fighting: %v", len(a.sent), a.sent)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the boss row was recorded as done")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 0 || len(f.Attempts) != 1 || f.Attempts[0].BossRow != 5 ||
+		!strings.Contains(f.Attempts[0].Reason, "Stranger is in combat") {
+		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
+	}
+}
+
+// An unhired member whose unit row the agent cannot read may be fighting, so it fails the batch like a hire's
+// unreadable row does: the fire never assumes a raid is out of combat because it could not look at one of its members.
+func TestPrepullAuraUnhiredMemberUnreadableStopsTheBatch(t *testing.T) {
+	a := newPrepullAgent(t)
+	// In the commander's frame but not in the agent's unit store: `unit` refuses it.
+	a.extra = []tbm.PartyRec{{GUID: packet.GUID(0x900), Name: "Stranger", HP: 6000, MaxHP: 6000, Map: 309, State: "n"}}
+	w := newPrepullWalk(t, a, "role=all:22888")
+	fired, err := w.prepullAuraSendPending(context.Background(), prepullRest(4), false)
+	code, reason := stopInfo(err)
+	if !fired || code != exitRaidWalkFailed || !strings.Contains(reason, "unit read of Stranger failed") {
+		t.Fatalf("fired %v, code %d, reason %q", fired, code, reason)
+	}
+	if len(a.sent) != 0 {
+		t.Fatalf("%d aura(s) went out while an unhired raid member's row was unreadable: %v", len(a.sent), a.sent)
+	}
+	if w.prepullAuraSent[5] {
+		t.Fatal("the boss row was recorded as done")
+	}
+	f := readPrepullAuraFile(t, w)
+	if len(f.BossRows) != 0 || len(f.Attempts) != 1 || !strings.Contains(f.Attempts[0].Reason, "Stranger") {
+		t.Fatalf("boss rows %v, attempts %+v", f.BossRows, f.Attempts)
 	}
 }
 

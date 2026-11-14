@@ -1193,7 +1193,7 @@ type walk struct {
 	prepullAuraBots     map[string]*prepullAuraRecord
 	prepullAuraRows     []int
 	prepullAuraAttempts []prepullAuraAttempt
-	// prepullAuraWatch is the combat watch: the commander and every living raid bot of the fire, whether or not
+	// prepullAuraWatch is the combat watch: the commander and every raid bot of the fire, hire or not, whether or not
 	// the flag gives it a list (the commander's view leaves the player out). Every aura send re-reads them, and an
 	// unreadable row stops the batch, so a pull mid-batch stops the auras.
 	// prepullAuraRow names the boss row for those errors.

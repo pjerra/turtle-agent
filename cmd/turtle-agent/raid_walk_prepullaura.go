@@ -9,9 +9,9 @@
 //
 // The raid is read from the commander's view (prepullRaid), never from the walk's own `party` RPC: that is the
 // PLAYER's group, and the walk's player never joins the hired bots' raid (walk 101 shipped a verified boss row for 0
-// bots that way). The view is matched against the walk's hires: a frame member the walk never hired is skipped and
-// logged, and a fire whose lists do not reach every hire the walk made fails instead (prepullAuraCoverage). A hire
-// whose class the unit read cannot give is a failure too, never an "all"-only bot.
+// bots that way). The view is matched against the walk's hires: a frame member the walk never hired is watched for
+// combat but never targeted, and a fire whose lists do not reach every hire the walk made fails instead
+// (prepullAuraCoverage). A hire whose class the unit read cannot give is a failure too, never an "all"-only bot.
 //
 // The fire is the boss row's own gate (prepullGate): the step before a boss row in WHATEVER phase, as long as the run
 // is still before the pull (no pulling/fighting note, no later pull line of the page, no party bot in combat), or the
@@ -319,8 +319,8 @@ func (w *walk) prepullBossEngaged(ctx context.Context, step int) (bool, error) {
 // them is in combat: a pull that starts after the pause must stop the auras, not receive them after the encounter
 // began. The commander's view leaves the player out, so the watch carries it first; a pull the commander started is
 // the one a member-only check misses. It fails closed on the read too: a unit the RPC cannot read may be fighting, so
-// the batch stops there as well. The caller builds the watch from the commander and the whole living raid, not only
-// the members that carry an aura list.
+// the batch stops there as well. The caller builds the watch from the commander and the whole raid, not only
+// the members that carry an aura list: an unhired member can pull too.
 func (w *walk) prepullAuraCombatClear(ctx context.Context, step int) error {
 	port := walkAuras{w: w}
 	for _, t := range w.prepullAuraWatch {
@@ -345,9 +345,9 @@ func (w *walk) prepullAuraCombatClear(ctx context.Context, step int) error {
 // it, so every raid seat is a hire (docs/okf/raids/roster-format.md). Walk 101: the slot answered `in_group:false`
 // with no members while the run leader's view held the 20 bots, so the fire saw 0 bots and still recorded the boss
 // row. The view's party records are the run leader's raid (guid, name, health, dead state, map), which is where the fire
-// looks for the walk's hires: a frame member the walk never hired is skipped and logged, and a hire the frame lacks
-// fails the coverage check. It fails closed: a failed read, no frame, a truncated frame and a frame without a party
-// bot are errors, never an empty fire.
+// looks for the walk's hires: a frame member the walk never hired is watched for combat but never targeted, and a hire
+// the frame lacks fails the coverage check. It fails closed: a failed read, no frame, a truncated frame and a frame
+// without a party bot are errors, never an empty fire.
 func (w *walk) prepullRaid(ctx context.Context) ([]tbm.PartyRec, error) {
 	_, frame, err := w.view(ctx, 0, 0)
 	if err != nil {
@@ -401,12 +401,12 @@ func (w *walk) prepullAuraCoverage(step, bots int, targets []prepullAuraTarget, 
 // prepull-auras.json and fails the walk when a bot misses more auras than --prepull-aura-tolerance (0 by default:
 // every requested aura must verify) or when the raid's lists do not reach every bot the walk hired (a fire that
 // covered fewer bots than the roster is no preparation either, and it is never recorded as one). A frame member the
-// walk never hired is not a target: it is skipped and logged, so a misbound or stale commander cannot receive GM
-// auras. A hire whose class the unit read cannot give fails the fire before any aura, because only the "all" lists
-// would reach it while coverage still passed. A failed fire is recorded as an attempt with its reason; only a fire
-// whose auras verified within the tolerance appends the boss row, so the file never reports a preparation that did
-// not happen. The file is written on every fire, failures included, so the attempt's reason and the missing list are
-// always on disk.
+// walk never hired is not a target: it is watched for combat like a hire and logged, so a misbound or stale commander
+// can neither receive GM auras nor pull unnoticed. A hire whose class the unit read cannot give fails the fire before
+// any aura, because only the "all" lists would reach it while coverage still passed. A failed fire is recorded as an
+// attempt with its reason; only a fire whose auras verified within the tolerance appends the boss row, so the file
+// never reports a preparation that did not happen. The file is written on every fire, failures included, so the
+// attempt's reason and the missing list are always on disk.
 func (w *walk) prepullAuraFire(ctx context.Context, step int) (err error) {
 	defer func() {
 		if err != nil {
@@ -452,7 +452,11 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int) (err error) {
 		}
 		name, ok := hired[strings.ToLower(m.Name)]
 		if !ok {
-			msg := fmt.Sprintf("prepull-aura: boss row %d: %s is in the commander's raid but not one of the walk's hires: not targeted", step, m.Name)
+			// A frame member the walk never hired is not a target: a misbound or stale commander must not receive GM
+			// auras. It is still a member of the raid the fire runs inside, so it goes into the combat watch like
+			// every other living member, and an unreadable row or combat there stops the batch before any aura.
+			watch = append(watch, dungeon.AuraTarget{GUID: m.GUID, Name: m.Name})
+			msg := fmt.Sprintf("prepull-aura: boss row %d: %s is in the commander's raid but not one of the walk's hires: watched, not targeted", step, m.Name)
 			w.note("%s", msg)
 			w.logLine(w.env.now(), msg)
 			continue
