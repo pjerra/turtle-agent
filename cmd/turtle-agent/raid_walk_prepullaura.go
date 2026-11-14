@@ -42,7 +42,10 @@
 // before `run start`, so the run's first move already carries them; the flasks and world buffs last 2 h or more. The
 // fire is the same fail-closed one (every hire, roles from the module's per-bot state, a fresh combat watch, strict
 // verification), it needs no pause because the run is positively confirmed idle (state none or done; anything else,
-// refusals included, sends nothing), and it is recorded as start_row instead of a boss row. No boss row is
+// refusals included, sends nothing), and it is recorded as start_row instead of a boss row. Because it goes out inside
+// the placement's teleport wave, it first waits (60 s, 2 s polls, prepullAuraStartWait) for every hire to be in the
+// commander's view and alive and in the agent's unit store: walk 101's ZG Jeklik attempt at plan start row 1 stopped
+// 0.16 s after the last `.tele`, on two unit reads of the MT that failed before the store had it. No boss row is
 // fired in this mode: at each boss pull the walk only READS which auras are still up on each bot and logs them, so a
 // walk shows the coverage the fight started with.
 package main
@@ -86,6 +89,11 @@ var (
 	prepullAuraViewWait   = 10 * time.Second
 	prepullAuraVerifyWait = 5 * time.Second
 	prepullAuraVerifyPoll = time.Second
+	// The --prepull-aura-when start fire waits for the placement's teleport wave to land (walk 101: four of four
+	// Jeklik attempts at row 1 stopped at the fire 0.16 s after the last `.tele`, with "the unit read of Darinn failed
+	// twice"). A boss row never needs it: the raid has been in the view for minutes by then.
+	prepullStartWaitMax  = 60 * time.Second
+	prepullStartWaitPoll = 2 * time.Second
 )
 
 // prepullAuraFileName is the fire's evidence in the walk's out dir.
@@ -557,6 +565,74 @@ func (w *walk) prepullRaid(ctx context.Context) ([]tbm.PartyRec, error) {
 	return append([]tbm.PartyRec{}, frame.Party...), nil
 }
 
+// prepullAuraStartWait waits for every hire to be in the commander's view and alive, and in the agent's own unit
+// store, before the start fire reads the raid's classes and roles. Walk 101's ZG Jeklik run (plan start row 1) is why:
+// the placement's `.tele` wave and the fire shared a second, the fire went out 0.16 s after the last `.tele`, and the
+// unit read of the MT failed twice before the walk spent a single GM line - the commander's frame already named the
+// raid, but the agent's unit store had not received the teleported bots yet. The boss rows never hit this: the raid
+// has been in both stores for minutes when the run reaches a boss. The wait polls every 2 s for up to 60 s and logs
+// how long it took, so a slow instance shows its own number. It stays fail-closed: a hire still missing after the
+// wait (or a view read that keeps failing) stops the fire with the hire named, never a fire on an unproven raid. The
+// unit store is part of the wait because it is the store the very next read (the class) goes to, and it filled later
+// than the frame in walk 101.
+func (w *walk) prepullAuraStartWait(ctx context.Context) ([]tbm.PartyRec, error) {
+	begin := w.env.now()
+	roster := w.hireList()
+	port := walkAuras{w: w}
+	var lastErr error
+	for {
+		raid, err := w.prepullRaid(ctx)
+		var missing []string
+		if err == nil {
+			inView := make(map[string]tbm.PartyRec, len(raid))
+			for _, m := range raid {
+				if m.GUID != 0 && m.Name != "" {
+					inView[strings.ToLower(m.Name)] = m
+				}
+			}
+			for _, name := range roster {
+				m, ok := inView[strings.ToLower(name)]
+				if !ok {
+					missing = append(missing, name+" is not in the commander's view")
+					continue
+				}
+				if m.Dead || m.State == "d" {
+					missing = append(missing, name+" is dead in the commander's view")
+					continue
+				}
+				u, seen := port.ViewUnit(ctx, dungeon.AuraTarget{GUID: m.GUID, Name: name})
+				switch {
+				case !seen:
+					missing = append(missing, name+" is not in the agent's unit store")
+				case u.Dead || u.Ghost:
+					missing = append(missing, name+" is dead in the agent's unit store")
+				}
+			}
+			if len(missing) == 0 {
+				w.logLine(w.env.now(), fmt.Sprintf("prepull-aura: start: the raid's %d hire(s) are in the commander's view and alive after %s",
+					len(roster), w.env.now().Sub(begin).Round(time.Millisecond)))
+				return raid, nil
+			}
+			lastErr = nil
+		} else {
+			lastErr = err
+		}
+		waited := w.env.now().Sub(begin).Round(time.Millisecond)
+		if !w.env.now().Before(begin.Add(prepullStartWaitMax)) {
+			if lastErr != nil {
+				return nil, stopf(exitRaidWalkFailed,
+					"prepull-aura: start: after waiting %s for the raid to appear, the commander view still cannot be read, so no aura was sent: %v", waited, lastErr)
+			}
+			return nil, stopf(exitRaidWalkFailed,
+				"prepull-aura: start: after waiting %s, %d of the walk's %d hire(s) never appeared in the commander's view and alive: %s: no aura was sent",
+				waited, len(missing), len(roster), strings.Join(missing, "; "))
+		}
+		if err := w.env.sleep(ctx, prepullStartWaitPoll); err != nil {
+			return nil, err
+		}
+	}
+}
+
 // prepullAuraCoverage fails the fire unless every bot the walk hired received a list: the walk tests the preparation
 // a real raid carries in, so a hire the lists do not reach is a broken flag set (a role word the classes never
 // produce, or no "all" list) or a raid that lost bots, never a fire to record. Walk 101 wrote prepull-auras.json with
@@ -623,7 +699,15 @@ func (w *walk) prepullAuraFire(ctx context.Context, step int, start bool) (err e
 			w.note("prepull-aura: WARN: %s could not be written (%v)", prepullAuraFileName, werr)
 		}
 	}()
-	raid, err := w.prepullRaid(ctx)
+	// The start fire is the one fire that runs inside the placement's own teleport wave, so it is the one that waits
+	// for the raid to arrive (prepullAuraStartWait): at every boss row the raid has been in the commander's view and
+	// the agent's unit store for a while already.
+	var raid []tbm.PartyRec
+	if start {
+		raid, err = w.prepullAuraStartWait(ctx)
+	} else {
+		raid, err = w.prepullRaid(ctx)
+	}
 	if err != nil {
 		return err
 	}
