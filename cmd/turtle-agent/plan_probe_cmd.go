@@ -13,6 +13,7 @@ import (
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/mapview"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/pjerra/turtle-agent/internal/plancut"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/planprobe"
 )
@@ -38,7 +39,7 @@ type planProbeNavmesh struct {
 // planProbeOpen opens the navmesh of one mmaps folder; the caller closes it. Tests replace it with a fake.
 var planProbeOpen = func(dir string) *planProbeNavmesh {
 	pl := navmesh.NewPlanner(dir)
-	return &planProbeNavmesh{nav: pl, polys: pl.Polygons, cut: cutWith(pl, false), close: pl.Close}
+	return &planProbeNavmesh{nav: pl, polys: pl.Polygons, cut: plancut.Cut(pl, false), close: pl.Close}
 }
 
 // planProbeCmd measures the run leader's rows of one plan on the navmesh and prints where its hops are bad or worth a look

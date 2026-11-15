@@ -1,6 +1,6 @@
 //go:build cgo
 
-package main
+package plancut
 
 import (
 	"strings"
@@ -25,7 +25,7 @@ func TestCutDropsWetPoints(t *testing.T) {
 	if liq, err := navmesh.LiquidAt(pl, 1, navmesh.Vec3{160, 100, 0}); err != nil || !liq.Wet {
 		t.Fatalf("the pond point is not liquid: %+v, %v", liq, err)
 	}
-	via, notes, err := cutWith(pl, false)(1, dungeon.Point{X: 20, Y: 100, Z: 0}, dungeon.Point{X: 300, Y: 100, Z: 0})
+	via, notes, err := Cut(pl, false)(1, dungeon.Point{X: 20, Y: 100, Z: 0}, dungeon.Point{X: 300, Y: 100, Z: 0})
 	if err != nil {
 		t.Fatal(err)
 	}

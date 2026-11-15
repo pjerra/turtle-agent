@@ -110,7 +110,7 @@ func TestZgJeklikBossApproachInPullRange(t *testing.T) {
 	// (3) On the floor, and the walk from the previous stand is complete.
 	pl := zgPlannerOrNil(t)
 	if pl == nil {
-		t.Skip("the mesh floor and the walk-in path need the map-309 mmaps")
+		skipMissingMmaps(t, "the mesh floor and the walk-in path need the map-309 mmaps")
 	}
 	defer pl.Close()
 	fl, err := pl.Floors(309, at.X, at.Y, at.Z-8, at.Z+8)

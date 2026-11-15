@@ -102,7 +102,7 @@ func TestZgW38JindosHallPullsStayUnderTheirCeilings(t *testing.T) {
 	p, cs := zgLoadPlanAndExport(t)
 	pl := zgPlannerOrNil(t)
 	if pl == nil {
-		t.Skip("needs the map-309 mmaps (the live-flag export and the stand shot)")
+		skipMissingMmaps(t, "needs the map-309 mmaps (the live-flag export and the stand shot)")
 	}
 	defer pl.Close()
 	w, _, err := worldspawn.Load("testdata/map309", 309)
@@ -384,7 +384,7 @@ func TestZgW38HakkarOuterRowsWalkable(t *testing.T) {
 	p, cs := zgLoadPlanAndExport(t)
 	pl := zgPlannerOrNil(t)
 	if pl == nil {
-		t.Skip("needs the map-309 mmaps")
+		skipMissingMmaps(t, "needs the map-309 mmaps")
 	}
 	defer pl.Close()
 	rows := zgW37BuildRows(t, p, cs, 7)
@@ -453,6 +453,8 @@ func TestZgW38JeklikPatrolStands(t *testing.T) {
 	pl := zgPlannerOrNil(t)
 	if pl != nil {
 		defer pl.Close()
+	} else {
+		missingMmapsFatal(t, "no map 309 navmesh files: the stand shot's line of sight cannot be checked")
 	}
 	leg, _ := zgW37LegByName(t, p, "high_priestess_jeklik")
 	movement, err := zgReadMovementPaths("testdata/map309/movement.tsv")

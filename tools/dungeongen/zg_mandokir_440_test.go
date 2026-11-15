@@ -208,7 +208,7 @@ func TestZulGurubMandokirLiveExportClearOfLaterPacks(t *testing.T) {
 	packs := zgPacks(t, *leg, cs)
 	pl := zgPlannerOrNil(t)
 	if pl == nil {
-		t.Skip("no map 309 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its tiles")
+		skipMissingMmaps(t, "no map 309 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its tiles")
 	}
 	defer pl.Close()
 	res, err := planexport.Build(p, planexport.Options{ApproachHops: true, Cut: zgMandokirExportCut(pl)})

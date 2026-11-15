@@ -898,6 +898,8 @@ func TestZulGurubMandokirSweepClearOfLaterPacks(t *testing.T) {
 	pl := zgPlannerOrNil(t)
 	if pl != nil {
 		defer pl.Close()
+	} else {
+		missingMmapsFatal(t, "no map 309 navmesh files: the walk's navmesh checks cannot run")
 	}
 	if *zgUpdateRoutes {
 		if pl == nil {
@@ -982,6 +984,8 @@ func TestZulGurubJindoCorridorClearOfLaterPacks(t *testing.T) {
 	pl := zgPlannerOrNil(t)
 	if pl != nil {
 		defer pl.Close()
+	} else {
+		missingMmapsFatal(t, "no map 309 navmesh files: the walk's navmesh checks cannot run")
 	}
 	if *zgUpdateRoutes {
 		if pl == nil {
@@ -1025,6 +1029,8 @@ func zgCheckHallRows(t *testing.T, leg dungeon.Leg, packs [][]creature) {
 	pl := zgPlannerOrNil(t)
 	if pl != nil {
 		defer pl.Close()
+	} else {
+		missingMmapsFatal(t, "no map 309 navmesh files: the walk's navmesh checks cannot run")
 	}
 	gmCleared := map[int]bool{8: true, 9: true, 10: true, 11: true}
 	for gi := 4; gi < len(leg.PullGroups); gi++ {

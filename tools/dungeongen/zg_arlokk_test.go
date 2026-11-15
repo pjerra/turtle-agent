@@ -130,7 +130,7 @@ func TestZulGurubArlokkLegRoute(t *testing.T) {
 	p, _ := zgLoadPlanAndExport(t)
 	pl := zgPlannerOrNil(t)
 	if pl == nil {
-		t.Skip("no map 309 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its tiles")
+		skipMissingMmaps(t, "no map 309 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its tiles")
 	}
 	defer pl.Close()
 	rows := zgArlokkRows(t, p, pl)
@@ -288,7 +288,7 @@ func TestZulGurubArlokkPatrolStandInShot(t *testing.T) {
 	p, _ := zgLoadPlanAndExport(t)
 	pl := zgPlannerOrNil(t)
 	if pl == nil {
-		t.Skip("no map 309 navmesh files")
+		skipMissingMmaps(t, "no map 309 navmesh files")
 	}
 	defer pl.Close()
 	leg := p.Legs[zgArlokkLeg]
@@ -363,7 +363,7 @@ func TestZulGurubArlokkRowsOnTheMesh(t *testing.T) {
 	p, _ := zgLoadPlanAndExport(t)
 	pl := zgPlannerOrNil(t)
 	if pl == nil {
-		t.Skip("no map 309 navmesh files")
+		skipMissingMmaps(t, "no map 309 navmesh files")
 	}
 	defer pl.Close()
 	rows := zgArlokkRows(t, p, pl)
@@ -427,7 +427,7 @@ func TestZulGurubArlokkGongStepAfterIsAPlaceStart(t *testing.T) {
 	p, _ := zgLoadPlanAndExport(t)
 	pl := zgPlannerOrNil(t)
 	if pl == nil {
-		t.Skip("no map 309 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its tiles")
+		skipMissingMmaps(t, "no map 309 navmesh files: set TURTLE_AGENT_MMAPS to a folder holding 309.mmap and its tiles")
 	}
 	defer pl.Close()
 	res, err := planexport.Build(p, planexport.Options{ApproachHops: true, Cut: zgW37ExportCut(pl), GMCrossDirect: true,

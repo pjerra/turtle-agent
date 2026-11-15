@@ -22,9 +22,12 @@ Runs on pushes to `dev`/`main`/`ci/**`, on non-draft PRs (`opened`, `synchronize
 It downloads the server's navmesh files from the **private** `pjerra/tb-server-data` repository, release tag
 `data-2026-10-29`, into `$RUNNER_TEMP/mmaps`, then:
 
-- runs `go test -count=1 ./internal/navmesh/ ./internal/dungeon/ ./internal/dashboard/` with `CGO_ENABLED=1`: the
-  `*_test.go` files of `internal/navmesh` and `internal/dungeon` that skip without `TURTLE_AGENT_MMAPS`, plus
-  `internal/dashboard` (its dashboards read the same plans and routes);
+- runs `go test -count=1 ./internal/navmesh/ ./internal/dungeon/ ./tools/dungeongen/ ./internal/dashboard/` with
+  `CGO_ENABLED=1` and `TURTLE_AGENT_MMAPS_REQUIRED=1`: the `*_test.go` files that skip without `TURTLE_AGENT_MMAPS`,
+  including the `tools/dungeongen` route tests (the B6a plan routes, the ZG route walks and the Mar'li/Arlokk export
+  checks), plus `internal/dashboard` (its dashboards read the same plans and routes). With the variable set, a
+  "no navmesh files" skip in those tests is a failure: the job provisions the whole server `mmaps` folder, so a skip
+  there means a map the tests need is missing. Locally the variable is unset and the tests still skip without maps;
 - builds `turtle-agent` with cgo and runs `tools/ci/plan-check-all.sh`, which checks every plan whose status starts with
   `live-checked` or `mapped` (“live or prep”: a `draft` has not had its mapping walk and is left out of the navmesh gate).
 

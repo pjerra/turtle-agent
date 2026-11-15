@@ -78,7 +78,7 @@ func TestZgW36JindoBossStandSeesHim(t *testing.T) {
 	}
 	pl := zgPlannerOrNil(t)
 	if pl == nil {
-		t.Skip("needs the map-309 mmaps (the stand line-of-sight check)")
+		skipMissingMmaps(t, "needs the map-309 mmaps (the stand line-of-sight check)")
 	}
 	defer pl.Close()
 	r, err := pl.Raycast(309, navmesh.Vec3{stand.X, stand.Y, stand.Z + 1.5}, navmesh.Vec3{boss.X, boss.Y, boss.Z + 1})
@@ -114,7 +114,7 @@ func TestZgW36WalkStrandsStayOffTheWater(t *testing.T) {
 	}
 	pl := zgPlannerOrNil(t)
 	if pl == nil {
-		t.Skip("needs the map-309 mmaps (the walk paths under test)")
+		skipMissingMmaps(t, "needs the map-309 mmaps (the walk paths under test)")
 	}
 	defer pl.Close()
 	spans := []struct {

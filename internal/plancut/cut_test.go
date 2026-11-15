@@ -1,4 +1,4 @@
-package main
+package plancut
 
 import (
 	"errors"
@@ -200,7 +200,7 @@ func TestCutPointsTheServerRefusesAreNudgedOffTheCellLine(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			c.pl.path = []navmesh.Vec3{from, seam, to}
 			c.pl.corner = seam
-			via, notes, err := cutWith(c.pl, false)(309, dungeon.Point{X: from[0], Y: from[1], Z: from[2]}, dungeon.Point{X: to[0], Y: to[1], Z: to[2]})
+			via, notes, err := Cut(c.pl, false)(309, dungeon.Point{X: from[0], Y: from[1], Z: from[2]}, dungeon.Point{X: to[0], Y: to[1], Z: to[2]})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -242,7 +242,7 @@ func TestSeamNudgeTakesItsZFromTheNewFloors(t *testing.T) {
 	seam := navmesh.Vec3{106.66667, 16, 0}
 	from, to := navmesh.Vec3{20, 0, 0}, navmesh.Vec3{120, 20, 0}
 	pl := &fakeSeamPlanner{path: []navmesh.Vec3{from, seam, to}, corner: seam, refuseOne: true, floorZ: 1}
-	via, _, err := cutWith(pl, false)(309, dungeon.Point{X: from[0], Y: from[1], Z: from[2]}, dungeon.Point{X: to[0], Y: to[1], Z: to[2]})
+	via, _, err := Cut(pl, false)(309, dungeon.Point{X: from[0], Y: from[1], Z: from[2]}, dungeon.Point{X: to[0], Y: to[1], Z: to[2]})
 	if err != nil {
 		t.Fatal(err)
 	}

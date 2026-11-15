@@ -16,6 +16,7 @@ import (
 
 	"github.com/pjerra/turtle-agent/internal/dungeon"
 	"github.com/pjerra/turtle-agent/internal/navmesh"
+	"github.com/pjerra/turtle-agent/internal/plancut"
 	"github.com/pjerra/turtle-agent/internal/planexport"
 	"github.com/pjerra/turtle-agent/internal/planscout"
 	"github.com/pjerra/turtle-agent/internal/raidwalk"
@@ -201,7 +202,7 @@ func planScoutCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		if p == nil {
 			return fail("%v", perr)
 		}
-		res, err := planexport.Build(p, planexport.Options{Source: "plan-scout", Cut: cutWith(planner, false)})
+		res, err := planexport.Build(p, planexport.Options{Source: "plan-scout", Cut: plancut.Cut(planner, false)})
 		if err != nil {
 			return fail("the exporter refused the plan: %v", err)
 		}
@@ -346,7 +347,7 @@ func planScoutCmd(ctx context.Context, args []string, stdout, stderr io.Writer) 
 			return fail("%s is inside a dungeons/ folder (or a slot's plan folder): the plan file is never written there", applyTo)
 		}
 		if o.sqlFile != "" {
-			exp, err := planexport.Build(in.Plan, planexport.Options{Source: "plan-scout", Cut: cutWith(planner, false)})
+			exp, err := planexport.Build(in.Plan, planexport.Options{Source: "plan-scout", Cut: plancut.Cut(planner, false)})
 			if err != nil {
 				return fail("%v", err)
 			}
